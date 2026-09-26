@@ -424,7 +424,7 @@ mod tests {
         }
     }
 
-    /// 属性が登録された RcRect 梁は 2 端部 × (使用限界・終局限界) = 4 行返し、
+    /// 属性が登録された RC梁は 2 端部 × (使用限界・終局限界) = 4 行返し、
     /// 使用限界の τxy は手計算（Q・Sy/(b・I)）と一致する。
     #[test]
     fn collect_pca_checks_returns_four_rows_and_service_matches_hand_calc() {
@@ -525,7 +525,7 @@ mod tests {
         assert!(collect_pca_checks(&model, &member_forces, false).is_empty());
     }
 
-    /// RcRect 以外の断面形状（例: SteelH）は属性が登録されていてもスキップする。
+    /// RC梁以外の断面形状（例: SteelH）は属性が登録されていてもスキップする。
     #[test]
     fn collect_pca_checks_skips_non_rc_rect_shape() {
         let steel_shape = SectionShape::SteelH {
@@ -536,7 +536,7 @@ mod tests {
         };
         let mut model = pca_beam_model(steel_shape, Some(default_pca_attr()));
         // 鋼材扱いにするため fc=None（steel_h では材料の fc は使わない想定だが、
-        // RcRect 判定でスキップされることが本テストの主眼）。
+        // RC梁判定でスキップされることが本テストの主眼）。
         model.materials[0].fc = None;
         let forces: Vec<(f64, [f64; 6])> = vec![
             (0.0, [0.0, 200_000.0, 0.0, 0.0, 0.0, -100.0e6]),

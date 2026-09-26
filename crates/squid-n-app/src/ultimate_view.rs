@@ -227,7 +227,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                 format!(
                     "{demand_note}。{shear_note}、{bond_note}。\
                      余裕度<1.0（赤）はせん断・付着が曲げ降伏に先行することを示す。\
-                     対象は RcRect の RC 矩形部材（強軸）。"
+                     対象は RC梁・RC矩形柱・RC円形柱。"
                 ),
             );
         }

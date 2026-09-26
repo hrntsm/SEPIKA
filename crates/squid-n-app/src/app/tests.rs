@@ -2618,7 +2618,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
 
     assert!(
         !result.member_ranks.is_empty(),
-        "RC 部材(RcRect+fc)のせん断余裕度からランクが算定されているはず"
+        "RC 部材(RC矩形+fc)のせん断余裕度からランクが算定されているはず"
     );
 
     // 告示の RC 部材種別（多変数表）を、プッシュオーバー終局時の応答（τu・σ0）から
@@ -7929,7 +7929,7 @@ fn test_time_history_and_pushover_run_preparation() {
 }
 
 /// SRC 耐震壁の判定（`wall_has_src_boundary_column`）: 壁と節点を共有する
-/// 鉛直線材が SRC 断面（SrcRect）のとき真、RC 断面のときは偽となる。
+/// 鉛直線材が SRC矩形柱断面のとき真、RC 断面のときは偽となる。
 #[test]
 fn test_wall_has_src_boundary_column() {
     use squid_n_core::model::{

@@ -371,7 +371,7 @@ fn summary_table(ui: &mut egui::Ui, cache: &MnCache) {
         });
 }
 
-/// 断面せい D [mm]（Lp 自動設定に用いる）。SteelPipe/RcCircle は径、
+/// 断面せい D [mm]（Lp 自動設定に用いる）。SteelPipe/RcColumnCircle は径、
 /// SteelAngle は leg_a を D とみなす。
 fn section_depth(shape: &SectionShape) -> f64 {
     match *shape {

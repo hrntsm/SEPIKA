@@ -403,7 +403,7 @@ mod tests {
         let p = rc_bar_props(&column_rect_shape(), RcDirection::Weak, true, false).unwrap();
         let a1 = one_bar_area(22.0);
         let a10 = one_bar_area(10.0);
-        // 旧 RcRect と同じく弱軸は b_dir=d, d_dir=b に入れ替える。
+        // 弱軸は b_dir=d, d_dir=b に入れ替える。
         assert!((p.b_dir - 700.0).abs() < 1e-9);
         assert!((p.d_dir - 600.0).abs() < 1e-9);
         assert!((p.at - 4.0 * a1).abs() < 1e-9);
