@@ -33,17 +33,6 @@ pub fn section_elastic_modulus(sec: &Section) -> f64 {
     }
 }
 
-/// 断面の弱軸側弾性断面係数 Ze [mm³]。
-pub fn section_elastic_modulus_weak(sec: &Section) -> f64 {
-    let depth = sec.depth.min(sec.width);
-    let i_gross = sec.iz.min(sec.iy);
-    if depth > 0.0 {
-        i_gross / (depth / 2.0)
-    } else {
-        0.0
-    }
-}
-
 /// 部材の曲げ降伏（終局）モーメント My [N·mm]。
 ///
 /// - RC 配筋形状: `0.9·at·σy·j`（[`rc_mu_simple`]）
@@ -85,31 +74,17 @@ pub fn member_flexural_yield_moment(
             my_bottom.min(my_top)
         }
         Some(SectionShape::RcColumnRect { b, d, rebar }) => {
-            let strong = rebar.edge_steel(crate::rc_rebar_geom::RectEdge::Top, *b, *d);
-            let weak = rebar.edge_steel(crate::rc_rebar_geom::RectEdge::Left, *b, *d);
-            let ze_strong = sec.map(section_elastic_modulus).unwrap_or(0.0);
-            let ze_weak = sec.map(section_elastic_modulus_weak).unwrap_or(0.0);
-            let my_strong = rc_flexural_yield_moment(
+            let side = rebar.edge_steel(crate::rc_rebar_geom::RectEdge::Top, *b, *d);
+            rc_flexural_yield_moment(
                 elem,
                 model,
                 mat,
-                strong.area_mm2,
-                strong.effective_depth_mm,
+                side.area_mm2,
+                side.effective_depth_mm,
                 *d,
-                ze_strong,
+                ze,
                 factors.rebar,
-            );
-            let my_weak = rc_flexural_yield_moment(
-                elem,
-                model,
-                mat,
-                weak.area_mm2,
-                weak.effective_depth_mm,
-                *b,
-                ze_weak,
-                factors.rebar,
-            );
-            my_strong.min(my_weak)
+            )
         }
         Some(SectionShape::RcColumnCircle { d, rebar }) => rc_flexural_yield_moment(
             elem,
@@ -254,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn rect_column_yield_uses_min_of_strong_and_weak_axes() {
+    fn rect_column_yield_uses_strong_axis() {
         use crate::rc_rebar_geom::RectEdge;
         use crate::section_shape::{one_bar_area, RcRectColumnRebar, RectColumnHoop};
         let mut model = Model::default();
@@ -335,8 +310,8 @@ mod tests {
         let my_weak = 0.9 * (2.0 * a1) * 345.0 * (b - k0);
         assert!(my_weak < my_strong);
         assert!(
-            (my - my_weak).abs() < 1e-6 * my_weak.max(1.0),
-            "My={my} 弱軸手計算={my_weak} 強軸手計算={my_strong}"
+            (my - my_strong).abs() < 1e-6 * my_strong.max(1.0),
+            "My={my} 強軸手計算={my_strong} 弱軸手計算={my_weak}"
         );
     }
 }
