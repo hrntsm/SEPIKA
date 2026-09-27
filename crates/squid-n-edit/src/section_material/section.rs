@@ -222,6 +222,15 @@ fn section_use_is_valid(
         .elements
         .iter()
         .filter(|element| element.section == Some(section_id))
+        .filter(|element| {
+            matches!(
+                element.kind,
+                squid_n_core::model::ElementKind::Beam
+                    | squid_n_core::model::ElementKind::Fiber
+                    | squid_n_core::model::ElementKind::MultiSpring
+                    | squid_n_core::model::ElementKind::Brace { .. }
+            )
+        })
         .all(|element| {
             matches!(
                 (element.kind, frame_use),

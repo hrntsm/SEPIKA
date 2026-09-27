@@ -680,6 +680,78 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
 }
 
 #[test]
+fn test_edit_rc_slab_section_shape_with_shell_reference() {
+    let old_shape = squid_n_section::shape::SectionShape::RcSlab { thickness: 150.0 };
+    let new_shape = squid_n_section::shape::SectionShape::RcSlab { thickness: 200.0 };
+    let mut model = empty_model();
+    model
+        .sections
+        .push(old_shape.to_section(SectionId(0), "S".into()));
+    model.elements.push(ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Shell,
+        nodes: smallvec![],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    });
+
+    assert!(!EditSectionShape {
+        section: SectionId(0),
+        new_shape: new_shape.clone(),
+        frame_use: None,
+    }
+    .apply(&mut model)
+    .is_noop());
+    assert_eq!(model.sections[0].shape, Some(new_shape));
+}
+
+#[test]
+fn test_edit_rc_wall_section_shape_with_wall_reference() {
+    let old_shape = squid_n_section::shape::SectionShape::RcWall {
+        thickness: 180.0,
+        ps: 0.0,
+    };
+    let new_shape = squid_n_section::shape::SectionShape::RcWall {
+        thickness: 220.0,
+        ps: 0.0,
+    };
+    let mut model = empty_model();
+    model
+        .sections
+        .push(old_shape.to_section(SectionId(0), "W".into()));
+    model.elements.push(ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Wall,
+        nodes: smallvec![],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    });
+
+    assert!(!EditSectionShape {
+        section: SectionId(0),
+        new_shape: new_shape.clone(),
+        frame_use: None,
+    }
+    .apply(&mut model)
+    .is_noop());
+    assert_eq!(model.sections[0].shape, Some(new_shape));
+}
+
+#[test]
 fn test_duplicate_section_for_member_roundtrip() {
     let mut model = empty_model();
     let mut stack = UndoStack::new();
