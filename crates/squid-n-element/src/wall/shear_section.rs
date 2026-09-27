@@ -3,7 +3,7 @@ use crate::transform::LocalFrame;
 use squid_n_core::geom::vec3::dot;
 use squid_n_core::model::{wall_element_geometry, ElementData, Model};
 use squid_n_core::section_shape::{
-    concrete_young_modulus_from_density, material_strip_section_properties, MaterialSectionStrip,
+    concrete_young_modulus_gamma, material_strip_section_properties, MaterialSectionStrip,
     MaterialStripSectionProperties, SectionShape,
 };
 
@@ -83,7 +83,12 @@ impl WallSection {
                             .fc
                             .filter(|f| f.is_finite() && *f > 0.0)
                             .ok_or("CFT側柱の充填コンクリート強度が未指定・不正です")?;
-                        let young = concrete_young_modulus_from_density(fc, mat.density);
+                        let gamma_c = squid_n_core::units::concrete_unit_weight_kn_m3(
+                            fc,
+                            mat.concrete_class,
+                            squid_n_core::units::ConcreteComposition::Plain,
+                        );
+                        let young = concrete_young_modulus_gamma(fc, gamma_c);
                         materials.push(Elasticity {
                             young,
                             shear: young / 2.4,

@@ -192,11 +192,17 @@ fn test_beam_new_src_cft_composite_props() {
 
     let cft_beam = BeamElement::new(&make_elem(1), &model);
     let pc = cft_shape
-        .cft_equivalent_props(205000.0, 0.3, 36.0, 7.85e-9)
+        .cft_equivalent_props(205000.0, 0.3, 36.0, 23.0)
         .unwrap();
     assert!((cft_beam.a - pc.area_ax).abs() < 1e-6);
     assert!((cft_beam.iz - pc.iy).abs() / pc.iy < 1e-12);
     assert!((cft_beam.j - pc.j).abs() / pc.j < 1e-12);
+
+    model.materials[1].density = 12.0e-9;
+    let cft_beam_with_changed_density = BeamElement::new(&make_elem(1), &model);
+    assert!((cft_beam_with_changed_density.a - cft_beam.a).abs() < 1e-6);
+    assert!((cft_beam_with_changed_density.iz - cft_beam.iz).abs() < 1e-6);
+    assert!((cft_beam_with_changed_density.j - cft_beam.j).abs() < 1e-6);
 
     use crate::behavior::{ElementBehavior, MassOption};
     for sec in [0, 1] {

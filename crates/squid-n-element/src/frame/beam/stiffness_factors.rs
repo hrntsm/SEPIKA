@@ -308,9 +308,14 @@ pub(super) fn composite_props_with(
             .is_some()
             .then(|| shape.src_equivalent_props(mat.young, mat.poisson))
             .flatten(),
-        SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => mat
-            .fc
-            .and_then(|fc| shape.cft_equivalent_props(mat.young, mat.poisson, fc, mat.density)),
+        SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => mat.fc.and_then(|fc| {
+            let gamma_c = squid_n_core::units::concrete_unit_weight_kn_m3(
+                fc,
+                mat.concrete_class,
+                squid_n_core::units::ConcreteComposition::Plain,
+            );
+            shape.cft_equivalent_props(mat.young, mat.poisson, fc, gamma_c)
+        }),
         _ => None,
     }
 }

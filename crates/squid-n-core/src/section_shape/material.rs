@@ -23,15 +23,14 @@ pub fn concrete_young_modulus_gamma(fc: f64, gamma_kn_m3: f64) -> f64 {
 
 /// コンクリート強度 Fc [N/mm²]・RC 材料の質量密度 [ton/mm³] から
 /// ヤング係数 Ec [N/mm²] を算定する。質量密度から γRC を復元し、γC = γRC - 1.0
-/// とする。不正な密度は既定の γC=23.0 kN/m³ にフォールバックする。
-pub fn concrete_young_modulus_from_density(fc: f64, density_ton_per_mm3: f64) -> f64 {
+/// とする。密度または換算後の γC が不正な場合は `None` を返す。
+pub fn concrete_young_modulus_from_density(fc: f64, density_ton_per_mm3: f64) -> Option<f64> {
+    if !density_ton_per_mm3.is_finite() || density_ton_per_mm3 <= 0.0 {
+        return None;
+    }
     let gamma_rc = unit_weight_kn_m3_from_mass_density(density_ton_per_mm3);
-    let gamma_c = if density_ton_per_mm3.is_finite() && gamma_rc.is_finite() && gamma_rc >= 18.0 {
-        gamma_rc - 1.0
-    } else {
-        GAMMA_CONCRETE
-    };
-    concrete_young_modulus_gamma(fc, gamma_c)
+    let gamma_c = gamma_rc - 1.0;
+    (gamma_c.is_finite() && gamma_c > 0.0).then(|| concrete_young_modulus_gamma(fc, gamma_c))
 }
 
 /// 平面I形断面のせん断形状係数を区分多項式の積分で求める。寸法は [mm]。
@@ -138,31 +137,22 @@ mod concrete_young_modulus_tests {
     fn rc_unit_weight_24_gives_concrete_unit_weight_23() {
         let density = mass_density_from_unit_weight_kn_m3(24.0);
         let expected = concrete_young_modulus_gamma(21.0, 23.0);
-        assert_eq!(concrete_young_modulus_from_density(21.0, density), expected);
+        assert_eq!(
+            concrete_young_modulus_from_density(21.0, density),
+            Some(expected)
+        );
     }
 
     #[test]
-    fn invalid_density_uses_existing_default() {
-        assert_eq!(
-            concrete_young_modulus_from_density(21.0, 0.0),
-            concrete_young_modulus(21.0)
-        );
-        assert_eq!(
-            concrete_young_modulus_from_density(21.0, f64::NAN),
-            concrete_young_modulus(21.0)
-        );
+    fn invalid_density_is_rejected() {
         for density in [
             0.0,
             -mass_density_from_unit_weight_kn_m3(18.0),
             f64::NEG_INFINITY,
             f64::INFINITY,
             f64::MIN_POSITIVE,
-            mass_density_from_unit_weight_kn_m3(17.0),
         ] {
-            assert_eq!(
-                concrete_young_modulus_from_density(21.0, density),
-                concrete_young_modulus(21.0)
-            );
+            assert_eq!(concrete_young_modulus_from_density(21.0, density), None);
         }
     }
 
@@ -172,11 +162,11 @@ mod concrete_young_modulus_tests {
         let normal = mass_density_from_unit_weight_kn_m3(24.0);
         assert_eq!(
             concrete_young_modulus_from_density(21.0, lightweight2),
-            concrete_young_modulus_gamma(21.0, 17.0)
+            Some(concrete_young_modulus_gamma(21.0, 17.0))
         );
         assert_eq!(
             concrete_young_modulus_from_density(21.0, normal),
-            concrete_young_modulus_gamma(21.0, 23.0)
+            Some(concrete_young_modulus_gamma(21.0, 23.0))
         );
     }
 }
