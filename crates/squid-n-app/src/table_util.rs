@@ -153,6 +153,11 @@ impl<'a> Col<'a> {
         self
     }
 
+    #[cfg(test)]
+    pub(crate) fn header(&self) -> &str {
+        self.header
+    }
+
     /// この列の初期幅 [pt]。トークンの幅と見出しの幅の大きい方を採る
     /// （見出しが切り詰められると列の意味が読めなくなるため）。
     fn width_pt(&self, ui: &egui::Ui) -> f32 {

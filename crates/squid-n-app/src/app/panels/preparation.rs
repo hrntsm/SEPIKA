@@ -14,6 +14,22 @@ fn standard_floor_load_to_internal(value_kn_per_m2: f64) -> f64 {
     to_internal::area_load_kn_per_m2(value_kn_per_m2)
 }
 
+fn story_table_columns() -> [Col<'static>; 8] {
+    [
+        Col::label("階名"),
+        Col::num("レベル [mm]"),
+        Col::num("節点数"),
+        Col::label("構造"),
+        Col::wide_num("標準床 [kN/m²]").hover("DL / 床 / 小梁 / 大梁 / 地震の順"),
+        Col::wide_num("W [kN]").hover(
+            "地震用重量。編集すると確定値として固定され、\
+             準備計算で再生成しても上書きされません（undo 可）",
+        ),
+        Col::wide_num("種別"),
+        Col::actions_n(2),
+    ]
+}
+
 impl App {
     /// 右ドック「① 準備計算」パネル：解析条件の入力・階の定義と、準備計算の実行。
     ///
@@ -398,19 +414,7 @@ impl App {
                 crate::table_util::standard_table(
                     ui,
                     "prep_story_def",
-                    &[
-                        Col::label("階名"),
-                        Col::num("レベル [mm]"),
-                        Col::num("節点数"),
-                        Col::label("構造"),
-                        Col::wide_num("標準床 [kN/m²]").hover("DL / 床 / 小梁 / 大梁 / 地震の順"),
-                        Col::wide_num("W [kN]").hover(
-                            "地震用重量。編集すると確定値として固定され、\
-                             準備計算で再生成しても上書きされません（undo 可）",
-                        ),
-                        Col::wide_num("種別"),
-                        Col::actions_n(2),
-                    ],
+                    &story_table_columns(),
                     story_rows.len(),
                     |row| {
                         let (
@@ -426,24 +430,6 @@ impl App {
                         let story = *story;
                         let is_base = story.index() == 0;
 
-                        row.col(|ui| {
-                            let load = self.core.model.stories[story.index()].standard_floor_load;
-                            let mut values = load.map(|v| [v.dead, v.floor, v.joist, v.frame, v.seismic]).unwrap_or([0.0; 5]);
-                            let mut changed = false;
-                            ui.horizontal(|ui| {
-                                for value in &mut values {
-                                     let mut display = standard_floor_load_to_display(*value);
-                                     let response = ui.add(egui::DragValue::new(&mut display).speed(0.1).range(0.0..=1.0e5));
-                                     if response.changed() { *value = standard_floor_load_to_internal(display); changed = true; }
-                                }
-                            });
-                            if changed {
-                                self.ui.scoped.pending_story_cmds.push_back(Box::new(squid_n_edit::SetStandardFloorLoad {
-                                    story,
-                                    load: Some(squid_n_core::model::StandardFloorLoad { dead: values[0], floor: values[1], joist: values[2], frame: values[3], seismic: values[4] }),
-                                }));
-                            }
-                        });
                         row.col(|ui| {
                             let cell_id = egui::Id::new(("story_name", story.0));
                             let mut buf = ui
@@ -495,6 +481,41 @@ impl App {
                         });
                         row.col(|ui| {
                             ui.label(crate::app::preparation::story_structure_label(*structure));
+                        });
+                        row.col(|ui| {
+                            let load = self.core.model.stories[story.index()].standard_floor_load;
+                            let mut values = load
+                                .map(|v| [v.dead, v.floor, v.joist, v.frame, v.seismic])
+                                .unwrap_or([0.0; 5]);
+                            let mut changed = false;
+                            ui.horizontal(|ui| {
+                                for value in &mut values {
+                                    let mut display = standard_floor_load_to_display(*value);
+                                    let response = ui.add(
+                                        egui::DragValue::new(&mut display)
+                                            .speed(0.1)
+                                            .range(0.0..=1.0e5),
+                                    );
+                                    if response.changed() {
+                                        *value = standard_floor_load_to_internal(display);
+                                        changed = true;
+                                    }
+                                }
+                            });
+                            if changed {
+                                self.ui.scoped.pending_story_cmds.push_back(Box::new(
+                                    squid_n_edit::SetStandardFloorLoad {
+                                        story,
+                                        load: Some(squid_n_core::model::StandardFloorLoad {
+                                            dead: values[0],
+                                            floor: values[1],
+                                            joist: values[2],
+                                            frame: values[3],
+                                            seismic: values[4],
+                                        }),
+                                    },
+                                ));
+                            }
                         });
                         row.col(|ui| {
                             let cell_id = egui::Id::new(("story_weight", story.0));
@@ -702,7 +723,28 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{standard_floor_load_to_display, standard_floor_load_to_internal};
+    use super::{
+        standard_floor_load_to_display, standard_floor_load_to_internal, story_table_columns,
+    };
+
+    #[test]
+    fn 階一覧の列定義は行セルの生成順に対応する() {
+        let columns = story_table_columns();
+        let headers: Vec<_> = columns.iter().map(|column| column.header()).collect();
+        assert_eq!(
+            headers,
+            [
+                "階名",
+                "レベル [mm]",
+                "節点数",
+                "構造",
+                "標準床 [kN/m²]",
+                "W [kN]",
+                "種別",
+                "",
+            ]
+        );
+    }
 
     #[test]
     fn 標準床荷重の表示入力変換は面荷重の単位に従う() {
