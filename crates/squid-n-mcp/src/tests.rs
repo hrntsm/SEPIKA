@@ -1,8 +1,8 @@
 use super::*;
 use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId};
 use squid_n_core::model::{
-    ElementData, ElementKind, Haunch, JointKind, LocalAxis, MaterialCategory, MemberDetailAttr,
-    MemberJoint, Node, Section,
+    ElementData, ElementKind, FrameSectionUse, Haunch, JointKind, LocalAxis, MaterialCategory,
+    MemberDetailAttr, MemberJoint, Node, Section,
 };
 
 fn sample_model() -> Model {
@@ -26,6 +26,7 @@ fn sample_model() -> Model {
             },
         ],
         sections: vec![Section {
+            frame_use: Some(FrameSectionUse::Column),
             id: SectionId(0),
             name: "H-400".to_string(),
             area: 100.0,
@@ -99,6 +100,27 @@ fn test_query_model_sections_expose_materials() {
     for key in ["floor", "shear_rebar_material", "steel_material"] {
         assert!(secs[0].get(key).is_some(), "{key} の欄がある");
     }
+}
+
+#[test]
+fn test_query_model_sections_expose_frame_use() {
+    let mut m = sample_model();
+    let mut beam = m.sections[0].clone();
+    beam.id = SectionId(1);
+    beam.frame_use = Some(FrameSectionUse::Beam);
+    let mut brace = beam.clone();
+    brace.id = SectionId(2);
+    brace.frame_use = Some(FrameSectionUse::Brace);
+    let mut unset = beam.clone();
+    unset.id = SectionId(3);
+    unset.frame_use = None;
+    m.sections.extend([beam, brace, unset]);
+
+    let sections = query_model(&m, "sections", None);
+    assert_eq!(sections[0]["frame_use"], "Column");
+    assert_eq!(sections[1]["frame_use"], "Beam");
+    assert_eq!(sections[2]["frame_use"], "Brace");
+    assert!(sections[3]["frame_use"].is_null());
 }
 
 #[test]
@@ -197,6 +219,7 @@ fn rc_column_model() -> Model {
             material: Some(MaterialId(0)),
             rebar_material: Some(MaterialId(1)),
             shear_rebar_material: Some(MaterialId(1)),
+            frame_use: Some(FrameSectionUse::Column),
             ..shape.to_section(SectionId(0), "C600".into())
         }],
         materials: vec![

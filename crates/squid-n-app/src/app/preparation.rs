@@ -227,7 +227,7 @@ pub struct PrepPanelRow {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PrepRigidZoneRow {
     pub elem: ElemId,
-    /// 部材種別（柱／梁／ブレース。部材軸の鉛直成分による幾何判定）。
+    /// 部材種別（柱／梁／ブレース。断面用途に基づく設計上の分類）。
     pub kind: squid_n_design_jp::MemberKind,
     pub node_i: NodeId,
     pub node_j: NodeId,
@@ -624,6 +624,12 @@ impl App {
         let mut rows = Vec::new();
         for e in &model.elements {
             if !matches!(e.kind, squid_n_core::model::ElementKind::Beam) || e.nodes.len() < 2 {
+                continue;
+            }
+            if e.section
+                .and_then(|sid| model.sections.get(sid.index()))
+                .is_none()
+            {
                 continue;
             }
             candidates += 1;

@@ -948,22 +948,22 @@
       </StbSlabs>
     </StbMembers>
     <StbSections>
-      <StbSecColumn_RC id="25" name="B1" strength_concrete="Fc21">
-        <StbSecFigureColumn_RC>
-          <StbSecColumn_RC_Rect width_X="400" width_Y="700"/>
-        </StbSecFigureColumn_RC>
-        <StbSecBarArrangementColumn_RC>
-          <StbSecBarColumn_RC_RectSame D_main="25" N_main_X_1st="4" N_main_Y_1st="4" D_band="13" pitch_band="200" N_band_direction_X="2" N_band_direction_Y="2" strength_band="SD345" strength_main="SD345"/>
-        </StbSecBarArrangementColumn_RC>
-      </StbSecColumn_RC>
-      <StbSecColumn_RC id="26" name="FB1" strength_concrete="Fc21">
-        <StbSecFigureColumn_RC>
-          <StbSecColumn_RC_Rect width_X="300" width_Y="1800"/>
-        </StbSecFigureColumn_RC>
-        <StbSecBarArrangementColumn_RC>
-          <StbSecBarColumn_RC_RectSame D_main="25" N_main_X_1st="4" N_main_Y_1st="4" D_band="13" pitch_band="200" N_band_direction_X="2" N_band_direction_Y="2" strength_band="SD345" strength_main="SD345"/>
-        </StbSecBarArrangementColumn_RC>
-      </StbSecColumn_RC>
+      <StbSecBeam_RC id="25" name="B1" strength_concrete="Fc21">
+        <StbSecFigureBeam_RC>
+          <StbSecBeam_RC_Straight width="400" depth="700"/>
+        </StbSecFigureBeam_RC>
+        <StbSecBarArrangementBeam_RC>
+          <StbSecBarBeam_RC_Same D_main="25" N_main_top_1st="4" N_main_bottom_1st="4" D_stirrup="13" pitch_stirrup="200" N_stirrup="2" strength_stirrup="SD345" strength_main="SD345"/>
+        </StbSecBarArrangementBeam_RC>
+      </StbSecBeam_RC>
+      <StbSecBeam_RC id="26" name="FB1" strength_concrete="Fc21">
+        <StbSecFigureBeam_RC>
+          <StbSecBeam_RC_Straight width="300" depth="1800"/>
+        </StbSecFigureBeam_RC>
+        <StbSecBarArrangementBeam_RC>
+          <StbSecBarBeam_RC_Same D_main="25" N_main_top_1st="4" N_main_bottom_1st="4" D_stirrup="13" pitch_stirrup="200" N_stirrup="2" strength_stirrup="SD345" strength_main="SD345"/>
+        </StbSecBarArrangementBeam_RC>
+      </StbSecBeam_RC>
       <StbSecColumn_S id="1" name="C2" floor="1" kind_column="COLUMN">
         <StbSecSteelFigureColumn_S>
           <StbSecSteelColumn_S_Same shape="BOX-300x300x12r42" strength_main="STKR400"/>
@@ -1004,21 +1004,21 @@
           <StbSecSteelColumn_S_Same shape="BOX-300x300x12r42" strength_main="STKR400"/>
         </StbSecSteelFigureColumn_S>
       </StbSecColumn_S>
-      <StbSecColumn_S id="22" name="b3" kind_column="COLUMN">
-        <StbSecSteelFigureColumn_S>
-          <StbSecSteelColumn_S_Same shape="H-300x150x6.5x9" strength_main="SS400"/>
-        </StbSecSteelFigureColumn_S>
-      </StbSecColumn_S>
-      <StbSecColumn_S id="23" name="b6" kind_column="COLUMN">
-        <StbSecSteelFigureColumn_S>
-          <StbSecSteelColumn_S_Same shape="H-450x200x9x14" strength_main="SS400"/>
-        </StbSecSteelFigureColumn_S>
-      </StbSecColumn_S>
-      <StbSecColumn_S id="24" name="b5" kind_column="COLUMN">
-        <StbSecSteelFigureColumn_S>
-          <StbSecSteelColumn_S_Same shape="H-400x200x8x13" strength_main="SS400"/>
-        </StbSecSteelFigureColumn_S>
-      </StbSecColumn_S>
+      <StbSecBeam_S id="22" name="b3" kind_beam="GIRDER">
+        <StbSecSteelFigureBeam_S>
+          <StbSecSteelBeam_S_Straight shape="H-300x150x6.5x9" strength_main="SS400"/>
+        </StbSecSteelFigureBeam_S>
+      </StbSecBeam_S>
+      <StbSecBeam_S id="23" name="b6" kind_beam="GIRDER">
+        <StbSecSteelFigureBeam_S>
+          <StbSecSteelBeam_S_Straight shape="H-450x200x9x14" strength_main="SS400"/>
+        </StbSecSteelFigureBeam_S>
+      </StbSecBeam_S>
+      <StbSecBeam_S id="24" name="b5" kind_beam="GIRDER">
+        <StbSecSteelFigureBeam_S>
+          <StbSecSteelBeam_S_Straight shape="H-400x200x8x13" strength_main="SS400"/>
+        </StbSecSteelFigureBeam_S>
+      </StbSecBeam_S>
       <StbSecBeam_RC id="9" name="FGY1" floor="1" strength_concrete="Fc21">
         <StbSecFigureBeam_RC>
           <StbSecBeam_RC_Straight width="500" depth="1800"/>

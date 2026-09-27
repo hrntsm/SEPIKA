@@ -367,6 +367,7 @@ mod tests {
             fy: None,
         });
         m.sections.push(Section {
+            frame_use: None,
             id: SectionId(0),
             name: "壁 t150".into(),
             area: 0.0,

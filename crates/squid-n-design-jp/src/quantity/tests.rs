@@ -6,8 +6,8 @@ use squid_n_core::model::{FloorRegion, Slab, SlabPlate, SlabShape};
 use squid_n_core::dof::Dof6Mask;
 use squid_n_core::ids::{ElemId, FloorRegionId, MaterialId, NodeId, SectionId, SlabId};
 use squid_n_core::model::{
-    DistributionMethod, ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material,
-    MaterialCategory, Model, Node, RigidZone, Section,
+    DistributionMethod, ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse,
+    LocalAxis, Material, MaterialCategory, Model, Node, RigidZone, Section,
 };
 use squid_n_core::section_shape::{
     BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar,
@@ -74,6 +74,16 @@ fn rc_girder_section(id: u32) -> Section {
 
 /// 材料は断面が持つ。RC 断面へ主材料（コンクリート 0）と鉄筋（1）を割り当てる。
 fn with_rc_materials(mut sec: Section) -> Section {
+    sec.frame_use = Some(
+        if matches!(
+            sec.shape,
+            Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. })
+        ) {
+            FrameSectionUse::Column
+        } else {
+            FrameSectionUse::Beam
+        },
+    );
     sec.material = Some(MaterialId(0));
     sec.rebar_material = Some(MaterialId(1));
     sec.shear_rebar_material = Some(MaterialId(1));
@@ -277,6 +287,25 @@ fn test_rc_portal_categories_and_concrete() {
 }
 
 #[test]
+fn test_unset_frame_use_is_not_counted_as_beam() {
+    let mut model = rc_portal_model();
+    model.sections[0].frame_use = None;
+
+    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    assert_eq!(
+        q.items
+            .iter()
+            .filter(|item| item.category == MemberCategory::Column)
+            .count(),
+        2
+    );
+    assert!(!q.items.iter().any(|item| matches!(
+        item.category,
+        MemberCategory::Girder | MemberCategory::FoundationGirder
+    )));
+}
+
+#[test]
 fn test_rc_girder_main_bars_and_stirrups() {
     let model = rc_portal_model();
     let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
@@ -417,6 +446,7 @@ fn test_steel_member_weight() {
     let a = shape.calc_area();
     // 材料は断面が持つ。
     let mut sec = shape.to_section(SectionId(2), "H-400x200x8x13".to_string());
+    sec.frame_use = Some(FrameSectionUse::Beam);
     sec.material = Some(MaterialId(2));
     model.sections.push(sec);
     model.materials.push(steel_material(2));

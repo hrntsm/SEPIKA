@@ -63,6 +63,7 @@ fn single_column_model(fy: f64, seismic_weight: f64) -> Model {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "col".to_string(),
             area: 10000.0,
@@ -654,6 +655,7 @@ fn test_pushover_ductility_method_selection_changes_reference() {
 /// elem0=1F柱(0-1), elem1=2F柱(1-2)。
 fn two_story_model() -> Model {
     let sec = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "c".to_string(),
         area: 10000.0,
@@ -897,6 +899,7 @@ fn test_compute_static_indeterminacy_indeterminate_portal() {
         nodes,
         elements: elems,
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "c".to_string(),
             area: 10000.0,
@@ -1142,6 +1145,7 @@ fn portal_frame_model(fy: f64, seismic_weight: f64) -> Model {
             },
         ],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "col".to_string(),
             area: 10000.0,
@@ -2495,6 +2499,7 @@ fn steel_hinge_model(name: &str, fy: f64, strength_factor: Option<f64>) -> Model
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "c".to_string(),
             area: 10000.0,
@@ -3097,6 +3102,7 @@ fn test_horizontal_force_sums_wall_bottom_nodes() {
 fn portal_frame_rigid_zone_model(fy: f64, seismic_weight: f64, rigid: f64) -> Model {
     let mut model = portal_frame_model(fy, seismic_weight);
     let strong = Section {
+        frame_use: None,
         id: SectionId(1),
         name: "girder".to_string(),
         area: 90000.0,

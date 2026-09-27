@@ -2,10 +2,36 @@ use super::*;
 use squid_n_core::dof::Dof6Mask;
 use squid_n_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, StoryId};
 use squid_n_core::model::{
-    ElementData, ElementKind, EndCondition, ForceRegime, JointKind, LoadCase, LocalAxis, Material,
-    MaterialCategory, MemberDetailAttr, MemberJoint, MemberLoad, MemberLoadKind, Model, NodalLoad,
-    Node, Section,
+    ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, JointKind, LoadCase,
+    LocalAxis, Material, MaterialCategory, MemberDetailAttr, MemberJoint, MemberLoad,
+    MemberLoadKind, Model, NodalLoad, Node, Section,
 };
+
+#[test]
+fn no_long_axial_column_targets_fiber_and_multispring_by_section_use() {
+    let mut model = Model::default();
+    let mut section = Section::zero(SectionId(0), "C1".into());
+    section.frame_use = Some(FrameSectionUse::Column);
+    model.sections.push(section);
+    model.stress_cfg.no_long_axial_column = true;
+    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+        let elem = ElementData {
+            id: ElemId(0),
+            kind,
+            nodes: smallvec::smallvec![],
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 1.0, 0.0],
+            },
+            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        };
+        assert!(is_axial_disabled_target(&elem, &model, &model.stress_cfg));
+    }
+}
 
 /// 単純梁（i:ピン, j:ローラ）に等分布荷重 → 中央曲げ wL²/8、端部 0 を検証。
 /// 曲げは静定なので EI に依らず厳密。組立（等価節点力）＋回復（重ね合わせ）の総合検証。
@@ -49,6 +75,7 @@ fn simply_supported_udl_midspan_moment() {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "s".into(),
             area: 1000.0,
@@ -169,6 +196,7 @@ fn ss_beam(l: f64, member: Vec<MemberLoad>) -> Model {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "s".into(),
             area: 1000.0,
@@ -352,6 +380,7 @@ fn make_axial_cantilever() -> Model {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "sec".to_string(),
             area: 100.0,
@@ -554,6 +583,7 @@ fn test_linear_static_vertical_cantilever_bending() {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "sec".to_string(),
             area: 100.0,
@@ -674,6 +704,7 @@ fn test_shell_rigid_floor_membrane_off() {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "shell".to_string(),
             area: 0.0,
@@ -818,6 +849,7 @@ fn make_ss_plate(n: usize, a: f64, t: f64, e: f64, nu: f64, q: f64, clamped: boo
         nodes,
         elements,
         sections: vec![Section {
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "plate".into(),
             area: 0.0,
@@ -924,6 +956,7 @@ fn braced_frame(kind: squid_n_core::model::LoadCaseKind) -> Model {
         support_spring: None,
     };
     let sec = Section {
+        frame_use: Some(FrameSectionUse::Column),
         id: SectionId(0),
         name: "steel".into(),
         area: 6000.0,
@@ -1065,6 +1098,7 @@ fn column_with_parallel_vertical_brace() -> Model {
 
     let h = 3000.0_f64;
     let sec = Section {
+        frame_use: Some(FrameSectionUse::Column),
         id: SectionId(0),
         name: "steel".into(),
         area: 6000.0,
@@ -1392,6 +1426,7 @@ fn tension_only_portal(fx: f64, tension_only: bool) -> Model {
         support_spring: None,
     };
     let sec = Section {
+        frame_use: Some(FrameSectionUse::Beam),
         id: SectionId(0),
         name: "steel".into(),
         area: 6000.0,
@@ -1598,6 +1633,7 @@ fn rigid_floor_portal(with_rigid_floor: bool) -> Model {
         ],
         elements: vec![],
         sections: vec![Section {
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "s".into(),
             area: 1.0e4,

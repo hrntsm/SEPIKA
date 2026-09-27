@@ -342,12 +342,16 @@ fn aligned_portal_frame() -> squid_n_core::model::Model {
         d: 400.0,
         rebar: beam_rebar,
     };
-    model
-        .sections
-        .push(col_shape.to_section(SectionId(0), "柱 RC-300x300".into()));
-    model
-        .sections
-        .push(beam_shape.to_section(SectionId(1), "梁 RC-200x400".into()));
+    model.sections.push({
+        let mut section = col_shape.to_section(SectionId(0), "柱 RC-300x300".into());
+        section.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+        section
+    });
+    model.sections.push({
+        let mut section = beam_shape.to_section(SectionId(1), "梁 RC-200x400".into());
+        section.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+        section
+    });
 
     model.materials.push(Material {
         strength_factor: None,
@@ -1129,6 +1133,7 @@ fn shear_model(n: usize) -> squid_n_core::model::Model {
         nodes,
         elements,
         sections: vec![Section {
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
             id: SectionId(0),
             name: "spring".into(),
             area: 1.0,
@@ -2492,12 +2497,14 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
         // 柱（0・1）と梁（2）で用途別の実配筋断面を使い分ける。
         sections: vec![
             squid_n_core::model::Section {
+                frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
                 material: Some(MaterialId(0)),
                 rebar_material: Some(MaterialId(1)),
                 shear_rebar_material: Some(MaterialId(1)),
                 ..rc_shape.to_section(SectionId(0), "RC-400x600".into())
             },
             squid_n_core::model::Section {
+                frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
                 material: Some(MaterialId(0)),
                 rebar_material: Some(MaterialId(1)),
                 shear_rebar_material: Some(MaterialId(1)),
@@ -2759,6 +2766,7 @@ fn test_rc_sigma_0_from_compression_axial_force() {
         ],
         // 材料は断面が持つ。RC 断面は主筋・せん断補強筋も要る。
         sections: vec![squid_n_core::model::Section {
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
             material: Some(MaterialId(0)),
             rebar_material: Some(MaterialId(1)),
             shear_rebar_material: Some(MaterialId(1)),
@@ -2916,6 +2924,7 @@ fn test_rc_sigma_0_prefers_gravity_load_case_over_last_static() {
         ],
         // 材料は断面が持つ。RC 断面は主筋・せん断補強筋も要る。
         sections: vec![squid_n_core::model::Section {
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
             material: Some(MaterialId(0)),
             rebar_material: Some(MaterialId(1)),
             shear_rebar_material: Some(MaterialId(1)),
@@ -3347,6 +3356,7 @@ fn test_floor_design_skips_materialized_joist() {
 
     let mut model = make_square_slab_test_model();
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "H".into(),
         area: 1.0,
@@ -3431,6 +3441,7 @@ fn test_floor_design_checks_secondary_member_joist() {
     let mut model = make_square_slab_test_model();
     model.slabs[0].plate.usage = Some(SlabUsage::Office);
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -3539,6 +3550,7 @@ fn test_floor_design_checks_joist_uses_joist_live_load() {
         .push(SectionShape::RcSlab { thickness: 150.0 }.to_section(slab_sid, "S15".into()));
     let joist_sid = SectionId(model.sections.len() as u32);
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: joist_sid,
         name: "H-400".into(),
         area: 10000.0,
@@ -3663,6 +3675,7 @@ fn test_floor_design_checks_cantilever_joist() {
     let mut model = make_square_slab_test_model();
     model.slabs[0].plate.usage = Some(SlabUsage::Office);
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -3849,6 +3862,7 @@ fn test_floor_design_checks_secondary_joist_uses_same_level_slab() {
 
     let mut model = make_square_slab_test_model();
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -3990,6 +4004,7 @@ fn test_floor_design_checks_secondary_joist_on_shared_edge_averages_width() {
 
     let mut model = make_square_slab_test_model();
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -4118,6 +4133,7 @@ fn test_floor_design_checks_secondary_joist_on_slab_edge() {
     let mut model = make_square_slab_test_model();
     model.slabs[0].plate.usage = Some(SlabUsage::Office);
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -5065,12 +5081,14 @@ fn test_compute_ultimate_checks_rc_frame() {
         // 材料は断面が持つ。RC 断面は主筋・せん断補強筋も要る。
         sections: vec![
             Section {
+                frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
                 material: Some(MaterialId(0)),
                 rebar_material: Some(MaterialId(1)),
                 shear_rebar_material: Some(MaterialId(1)),
                 ..col_shape.to_section(SectionId(0), "C600".into())
             },
             Section {
+                frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
                 material: Some(MaterialId(0)),
                 rebar_material: Some(MaterialId(1)),
                 shear_rebar_material: Some(MaterialId(1)),
@@ -5182,6 +5200,7 @@ fn test_compute_cft_ultimate_checks() {
         ],
         // 材料は断面が持つ。
         sections: vec![Section {
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
             material: Some(MaterialId(0)),
             ..cft_shape.to_section(SectionId(0), "CFT400".into())
         }],
@@ -5236,6 +5255,7 @@ fn test_sync_gravity_dl_includes_self_weight_and_slab() {
     let mut model = make_square_slab_test_model();
     // 全梁に断面・材料（密度あり）を与え、自重を発生させる。
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "RC400x600".into(),
         area: 400.0 * 600.0,
@@ -5599,8 +5619,14 @@ fn test_import_stbridge_then_run_dl_succeeds() {
     };
     // 材料は断面が持つ。
     model.sections.push(squid_n_core::model::Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         material: Some(MaterialId(0)),
         ..col_shape.to_section(SectionId(0), "柱".into())
+    });
+    model.sections.push(squid_n_core::model::Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        material: Some(MaterialId(0)),
+        ..col_shape.to_section(SectionId(1), "梁".into())
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -5632,7 +5658,7 @@ fn test_import_stbridge_then_run_dl_succeeds() {
             id: ElemId(i as u32),
             kind: ElementKind::Beam,
             nodes: [NodeId(*a), NodeId(*b)].into_iter().collect(),
-            section: Some(SectionId(0)),
+            section: Some(SectionId(if vertical { 0 } else { 1 })),
             local_axis: LocalAxis {
                 ref_vector: if vertical {
                     [1.0, 0.0, 0.0]
@@ -5748,7 +5774,7 @@ fn test_secondary_joist_subdivided_slab_dl_cmq_and_solve() {
         id: ElemId(id),
         kind: ElementKind::Beam,
         nodes: [NodeId(i), NodeId(j)].into_iter().collect(),
-        section: Some(SectionId(0)),
+        section: Some(SectionId(if i + 4 == j { 0 } else { 2 })),
         local_axis: LocalAxis {
             ref_vector: if i + 4 == j {
                 [1.0, 0.0, 0.0]
@@ -5789,6 +5815,7 @@ fn test_secondary_joist_subdivided_slab_dl_cmq_and_solve() {
         elements,
         sections: vec![
             Section {
+                frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
                 id: SectionId(0),
                 name: "RC400x600".into(),
                 area: 400.0 * 600.0,
@@ -5815,6 +5842,20 @@ fn test_secondary_joist_subdivided_slab_dl_cmq_and_solve() {
                 let mut sec =
                     squid_n_core::section_shape::SectionShape::RcSlab { thickness: 150.0 }
                         .to_section(SectionId(1), "S15".into());
+                sec.material = Some(MaterialId(0));
+                sec
+            },
+            {
+                let mut sec = Section::zero(SectionId(2), "RC400x600梁".into());
+                sec.area = 400.0 * 600.0;
+                sec.iy = 1.0e9;
+                sec.iz = 1.0e9;
+                sec.j = 1.0e9;
+                sec.depth = 600.0;
+                sec.width = 400.0;
+                sec.as_y = 400.0 * 600.0 / 1.2;
+                sec.as_z = 400.0 * 600.0 / 1.2;
+                sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
                 sec.material = Some(MaterialId(0));
                 sec
             },
@@ -5847,7 +5888,7 @@ fn test_secondary_joist_subdivided_slab_dl_cmq_and_solve() {
                     position: 0.5,
                 },
             ]),
-            section: Some(SectionId(0)),
+            section: Some(SectionId(2)),
             name: "B1".into(),
         }],
         // 床領域は大梁の 1 区画（8000×6000）。小梁で区切られた 2 枚の床板を持つ。
@@ -7267,6 +7308,7 @@ fn test_preparation_member_stiffness_reports_composite_props() {
     // 材料は断面が持つ。差し替えた断面へ元の材料を引き継ぐ。
     model.sections[0] = squid_n_core::model::Section {
         material: Some(squid_n_core::ids::MaterialId(0)),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         ..cft.to_section(SectionId(0), "CFT-□400x400x16".into())
     };
     model.materials[0].fc = Some(36.0);
@@ -7336,6 +7378,7 @@ fn test_preparation_member_stiffness_reports_src_fallback_without_fc() {
     let mut model = crate::sample::portal_frame();
     // 柱を SRC に差し替える。主材料は割り当て済みだが Fc が無い。
     model.sections[0] = squid_n_core::model::Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         material: Some(squid_n_core::ids::MaterialId(0)),
         ..src.to_section(SectionId(0), "SRC-600".into())
     };
@@ -7372,6 +7415,7 @@ fn test_preparation_member_stiffness_reports_cft_fallback_without_fc() {
     };
     let mut model = crate::sample::portal_frame();
     model.sections[0] = squid_n_core::model::Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         material: Some(squid_n_core::ids::MaterialId(0)),
         ..cft.to_section(SectionId(0), "CFT-□400x400x16".into())
     };
@@ -7409,6 +7453,7 @@ fn test_preparation_member_stiffness_reports_cft_fallback_for_zero_core() {
     };
     let mut model = crate::sample::portal_frame();
     model.sections[0] = squid_n_core::model::Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         material: Some(squid_n_core::ids::MaterialId(0)),
         ..cft.to_section(SectionId(0), "CFT-□400x400x200".into())
     };

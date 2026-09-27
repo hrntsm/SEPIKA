@@ -123,9 +123,8 @@ fn clear_length(elem: &ElementData, len: f64) -> f64 {
 
 /// 節点 `node_idx`（`elem.nodes` の 0/1）まわりの剛度比 G を求める（インデックス版）。
 ///
-/// `G = Σ(E・I/L)_柱 / Σ(E・I/L)_梁`。部材種別は部材軸の鉛直成分による
-/// 幾何判定（|ez| ≥ 0.8 柱、|ez| ≤ 0.2 梁。それ以外＝斜材は無視）で、
-/// 判定規則の実体は [`crate::MemberKind::from_ez`]（全クレート共通の単一規約）。
+/// `G = Σ(E・I/L)_柱 / Σ(E・I/L)_梁`。部材種別は断面用途に基づく
+/// [`crate::MemberKind::try_of_element`] で判定し、ブレースは剛度比から除外する。
 ///
 /// - 当該柱端の `EndCondition` が `Pinned` の場合は G=10（本実装の既定値）。
 /// - 節点に接する梁がない場合（Σ梁 = 0）は G=10（同上）。
@@ -145,13 +144,16 @@ fn g_ratio_at_with_index(
     let mut sum_col = 0.0_f64;
     let mut sum_beam = 0.0_f64;
     for other in index.elements_at(model, *node_id) {
-        let Some((len, ez)) = line_geometry(model, other) else {
+        let Some((len, _)) = line_geometry(model, other) else {
             continue;
         };
         let Some(ei_l) = flexural_stiffness(model, other, len) else {
             continue;
         };
-        match crate::MemberKind::from_ez(ez) {
+        let Ok(kind) = crate::MemberKind::try_of_element(other, model) else {
+            continue;
+        };
+        match kind {
             crate::MemberKind::Column => sum_col += ei_l,
             crate::MemberKind::Beam => sum_beam += ei_l,
             crate::MemberKind::Brace => {}
@@ -167,7 +169,7 @@ fn g_ratio_at_with_index(
 /// 柱 `elem` の座屈長さ係数 K（水平移動が拘束されない場合、方向を考慮しない
 /// 簡略版・互換用）を、モデルの節点まわり剛度比から算定する（インデックス版）。
 ///
-/// 柱でない（幾何判定で |ez| < 0.8）、または線材でない場合は None。
+/// 断面用途に基づく設計上の部材種別が柱でない、または線材でない場合は None。
 /// 呼び出し側は `lk = K・L` を [`crate::DesignCtx::lk_y`]/[`crate::DesignCtx::lk_z`]
 /// （両軸同値）に渡すことを想定する。強軸・弱軸を個別に評価する場合は
 /// [`steel_column_k_axes_with_index`] を使うこと。
@@ -182,8 +184,8 @@ pub fn steel_column_k_with_index(
     if elem.kind != ElementKind::Beam {
         return None;
     }
-    let (_, ez) = line_geometry(model, elem)?;
-    if crate::MemberKind::from_ez(ez) != crate::MemberKind::Column {
+    line_geometry(model, elem)?;
+    if crate::MemberKind::try_of_element(elem, model).ok()? != crate::MemberKind::Column {
         return None;
     }
     let ga = g_ratio_at_with_index(model, index, elem, 0);
@@ -194,7 +196,7 @@ pub fn steel_column_k_with_index(
 /// 柱 `elem` の座屈長さ係数 K（水平移動が拘束されない場合、方向を考慮しない
 /// 簡略版・互換用）を、モデルの節点まわり剛度比から算定する。
 ///
-/// 柱でない（幾何判定で |ez| < 0.8）、または線材でない場合は None。
+/// 断面用途に基づく設計上の部材種別が柱でない、または線材でない場合は None。
 /// 呼び出し側は `lk = K・L` を [`crate::DesignCtx::lk_y`]/[`crate::DesignCtx::lk_z`]
 /// （両軸同値）に渡すことを想定する。
 ///
@@ -210,19 +212,21 @@ pub fn steel_column_k(model: &Model, elem: &ElementData) -> Option<f64> {
 /// 重み付け版）。
 ///
 /// `d_a` は評価対象のたわみ方向（対象柱自身の `ey`（強軸）または `ez`（弱軸）の
-/// 水平投影単位ベクトル）。`G_a = Σ(E・I_eff/L')_柱 / Σ(E・iy・cos²θ/L')_梁`
+/// 水平投影単位ベクトル）。部材種別は断面用途に基づく
+/// [`crate::MemberKind::try_of_element`] で判定し、幾何量は軸の水平投影とその内積の
+/// 計算に限る。`G_a = Σ(E・I_eff/L')_柱 / Σ(E・iy・cos²θ/L')_梁`
 /// （`L'` は剛域控除後の内法長。[`clear_length`]）:
 ///
-/// - 柱（対象柱自身を含む。|ez| ≥ 0.8）: その柱自身の強軸たわみ方向の水平投影
+/// - 柱（対象柱自身を含む）: その柱自身の強軸たわみ方向の水平投影
 ///   `d_c` を求め、`cos²β = (d_c・d_a)²` により `I_eff = iy・cos²β + iz・(1−cos²β)`
 ///   を負担剛度とする。`d_c` が縮退（求まらない）場合は `cos²β=1`（`iy` を採用）。
-/// - 梁（|ez| ≤ 0.2）: 梁材軸の水平投影単位ベクトル `e_h` と `d_a` のなす角の
+/// - 梁: 梁材軸の水平投影単位ベクトル `e_h` と `d_a` のなす角の
 ///   余弦の 2 乗 `cos²θ = (e_h・d_a)²` を重みとして `E・iy/L'` に乗じる（面内
 ///   （鉛直面）曲げは強軸 `iy` とする）。`e_h` が縮退する場合は
 ///   寄与 0（水平方向を定義できない部材は回転拘束に寄与しないとみなす）。
 ///   当該節点側の端が `Pinned` の梁は、その梁端が節点回転を拘束しないため
 ///   Σ梁 に算入しない（`SemiRigid` は剛接合とみなす）。
-/// - 斜材（0.2 < |ez| < 0.8）は無視する。
+/// - ブレースは剛度比から除外する。
 ///
 /// 当該柱端が `Pinned`、または節点に接する梁がない（Σ梁 ≤ 0）場合は G=10。
 fn g_ratio_axis_at(
@@ -242,11 +246,13 @@ fn g_ratio_axis_at(
     let mut sum_col = 0.0_f64;
     let mut sum_beam = 0.0_f64;
     for other in index.elements_at(model, *node_id) {
-        let Some((raw_len, ez)) = line_geometry(model, other) else {
+        let Some((raw_len, _)) = line_geometry(model, other) else {
             continue;
         };
         let len = clear_length(other, raw_len);
-        let other_kind = crate::MemberKind::from_ez(ez);
+        let Ok(other_kind) = crate::MemberKind::try_of_element(other, model) else {
+            continue;
+        };
         if other_kind == crate::MemberKind::Column {
             let Some((sec, mat)) = section_material(model, other) else {
                 continue;
@@ -300,7 +306,7 @@ fn g_ratio_axis_at(
 /// 方向を区別しない集計（[`g_ratio_at_with_index`]、
 /// [`steel_column_k_with_index`] と同じ値）にフォールバックする。
 ///
-/// 柱でない（幾何判定で |ez| < 0.8）、または線材でない場合は None。
+/// 断面用途に基づく設計上の部材種別が柱でない、または線材でない場合は None。
 /// 呼び出し側は `lk_y = K_y・L`・`lk_z = K_z・L` を
 /// [`crate::DesignCtx::lk_y`]/[`crate::DesignCtx::lk_z`] に渡すことを想定する。
 ///
@@ -315,8 +321,8 @@ pub fn steel_column_k_axes_with_index(
         return None;
     }
     let (p0, p1) = node_coords(model, elem)?;
-    let (_, ez_comp) = line_geometry(model, elem)?;
-    if crate::MemberKind::from_ez(ez_comp) != crate::MemberKind::Column {
+    line_geometry(model, elem)?;
+    if crate::MemberKind::try_of_element(elem, model).ok()? != crate::MemberKind::Column {
         return None;
     }
     let frame = LocalFrame::from_nodes(p0, p1, elem.local_axis.ref_vector);
@@ -346,8 +352,8 @@ mod tests {
     use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId};
     use squid_n_core::model::MaterialCategory;
     use squid_n_core::model::{
-        ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material, Model, Node,
-        RigidZone, Section,
+        ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material,
+        Model, Node, RigidZone, Section,
     };
 
     // ------------------------------------------------------------------
@@ -428,7 +434,7 @@ mod tests {
                 v.push(NodeId(n1));
                 v
             },
-            section: Some(SectionId(0)),
+            section: Some(SectionId(if id == 0 { 0 } else { 1 })),
             local_axis: LocalAxis {
                 ref_vector: [0.0, 0.0, 1.0],
             },
@@ -442,6 +448,7 @@ mod tests {
 
     fn section(iy: f64) -> Section {
         Section {
+            frame_use: Some(FrameSectionUse::Column),
             id: SectionId(0),
             name: "H-400x200x8x13".to_string(),
             area: 8_000.0,
@@ -461,6 +468,14 @@ mod tests {
             shear_rebar_material: None,
             steel_material: None,
         }
+    }
+
+    fn frame_sections(iy: f64) -> Vec<Section> {
+        let column = section(iy);
+        let mut beam = column.clone();
+        beam.id = SectionId(1);
+        beam.frame_use = Some(FrameSectionUse::Beam);
+        vec![column, beam]
     }
 
     fn steel_material() -> Material {
@@ -496,7 +511,7 @@ mod tests {
         Model {
             nodes,
             elements,
-            sections: vec![section(2.0e8)],
+            sections: frame_sections(2.0e8),
             materials: vec![steel_material()],
             ..Default::default()
         }
@@ -551,8 +566,9 @@ mod tests {
         // 材料は断面が持つ。梁用に RC の断面を足して差し替える。
         let mut rc_sec = model.sections[0].clone();
         rc_sec.id = SectionId(1);
+        rc_sec.frame_use = Some(FrameSectionUse::Beam);
         rc_sec.material = Some(MaterialId(1));
-        model.sections.push(rc_sec);
+        model.sections[1] = rc_sec;
         for e in &mut model.elements[1..] {
             e.section = Some(SectionId(1));
         }
@@ -618,7 +634,7 @@ mod tests {
         let model = Model {
             nodes,
             elements,
-            sections: vec![section(2.0e8)],
+            sections: frame_sections(2.0e8),
             materials: vec![steel_material()],
             ..Default::default()
         };
@@ -655,7 +671,7 @@ mod tests {
         let model = Model {
             nodes,
             elements,
-            sections: vec![section(2.0e8)],
+            sections: frame_sections(2.0e8),
             materials: vec![steel_material()],
             ..Default::default()
         };
@@ -684,6 +700,7 @@ mod tests {
             node(3, 6000.0, 0.0, 0.0),  // X 方向梁の遠端
         ];
         let mut other_col = line_elem(1, 2, 0);
+        other_col.section = Some(SectionId(0));
         // 強軸たわみ方向を Y に回転（垂直材は ey=ref_vector の水平成分）。
         other_col.local_axis.ref_vector = [0.0, 1.0, 0.0];
         let elements = vec![
@@ -694,7 +711,7 @@ mod tests {
         let model = Model {
             nodes,
             elements,
-            sections: vec![section(2.0e8)],
+            sections: frame_sections(2.0e8),
             materials: vec![steel_material()],
             ..Default::default()
         };

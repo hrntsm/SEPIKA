@@ -874,6 +874,7 @@ fn test_requires_section_and_material_excludes_property_driven_elements() {
 
 fn named_section(id: u32, name: &str, floor: Option<&str>) -> Section {
     Section {
+        frame_use: None,
         id: crate::ids::SectionId(id),
         name: name.to_string(),
         floor: floor.map(str::to_string),

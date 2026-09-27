@@ -50,6 +50,7 @@ fn make_1dof_spring_model() -> Model {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "spring".into(),
             area: 1.0,
@@ -123,6 +124,7 @@ fn make_shear_2dof_model() -> Model {
         ],
         elements: vec![beam(1, 0, 1), beam(2, 1, 2)],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "spring".into(),
             area: 1.0,
@@ -190,6 +192,7 @@ fn make_portal_frame_like_model(top_mass: f64) -> Model {
         })
         .collect();
     let col_section = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "col".into(),
         area: 11980.0,
@@ -210,6 +213,7 @@ fn make_portal_frame_like_model(top_mass: f64) -> Model {
         steel_material: None,
     };
     let beam_section = Section {
+        frame_use: None,
         id: SectionId(1),
         name: "beam".into(),
         area: 8337.0,
@@ -575,6 +579,7 @@ fn test_eigen_deterministic() {
 /// マスターには並進(Ux,Uy)と回転(Rz)の集中質量を与える（質量ランクは3）。
 fn make_diaphragm_columns_model(top_mass: f64, rot_mass: f64) -> Model {
     let col_section = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "col".into(),
         area: 11980.0,
@@ -786,6 +791,7 @@ fn test_eigen_node_shapes_rigid_diaphragm_kinematics() {
 /// 柱4本＋剛床の1層モデル。柱頭4節点をスレーブとし、床重心の浮遊マスター節点に集中質量を与える（質量ランクは3）。
 fn make_four_column_diaphragm_model(top_mass: f64, rot_mass: f64) -> Model {
     let col_section = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "col".into(),
         area: 11980.0,
@@ -952,6 +958,7 @@ fn test_2dof_shear_unequal_mass_matches_analytic() {
         ],
         elements: vec![beam(1, 0, 1), beam(2, 1, 2)],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "spring".into(),
             area: 1.0,
@@ -1052,6 +1059,7 @@ fn make_mass_chain_model(n_masses: usize) -> Model {
         nodes,
         elements,
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "spring".into(),
             area: 1.0,
@@ -1206,6 +1214,7 @@ fn test_eigen_consistent_mass_orientation_invariant() {
             },
         ];
         let section = Section {
+            frame_use: None,
             id: SectionId(0),
             name: "sym".into(),
             area: 10000.0,

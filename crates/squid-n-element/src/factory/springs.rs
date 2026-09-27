@@ -9,7 +9,7 @@ use squid_n_core::model::{
 use squid_n_material::uniaxial::{Bilinear, UniaxialMaterial};
 use squid_n_material::{HysteresisMaterial, HysteresisRule, SteelBuckling, TsujiYamada};
 
-use super::regime::is_vertical_member;
+use super::regime::is_column_member;
 use super::StrengthBasis;
 use crate::frame::concentrated::MnInteraction;
 
@@ -195,7 +195,7 @@ fn crack_moment(data: &ElementData, model: &Model, my: f64) -> f64 {
 pub(super) fn flexural_alpha_y(data: &ElementData, model: &Model) -> f64 {
     use squid_n_core::section_shape::SectionShape;
     const DEFAULT_ALPHA_Y: f64 = 0.3;
-    if is_vertical_member(data, model) {
+    if is_column_member(data, model) {
         return DEFAULT_ALPHA_Y;
     }
     let sec = data.section.and_then(|sid| model.sections.get(sid.index()));

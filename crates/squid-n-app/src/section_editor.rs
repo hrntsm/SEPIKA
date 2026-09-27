@@ -7,6 +7,7 @@
 
 use crate::app::App;
 use squid_n_core::ids::SectionId;
+use squid_n_core::model::FrameSectionUse;
 use squid_n_edit::{
     AddCatalogSection, AddSectionShape, EditSectionShape, SectionField, SetSectionField,
     SetSectionName,
@@ -21,6 +22,7 @@ use squid_n_section::shape::{
 #[derive(Debug, Clone)]
 pub struct SectionEditorDraft {
     pub kind: ShapeKind,
+    pub frame_use: FrameSectionUse,
     /// 断面符号。階と組で断面の同一性キーになる。
     pub name: String,
     /// 階（空欄は「階の指定なし」）。ST-Bridge 由来の断面は階を持つため、
@@ -67,6 +69,7 @@ impl Default for SectionEditorDraft {
     fn default() -> Self {
         Self {
             kind: ShapeKind::SteelH,
+            frame_use: FrameSectionUse::Beam,
             name: "断面1".to_string(),
             floor: String::new(),
             synced_focus: None,
@@ -269,7 +272,8 @@ pub fn catalog_section_panel(ui: &mut egui::Ui, app: &mut App) {
         ));
 
         let new_id = SectionId(app.core.model.sections.len() as u32);
-        let sec = squid_n_section::catalog::to_section(entry, new_id);
+        let mut sec = squid_n_section::catalog::to_section(entry, new_id);
+        sec.frame_use = Some(app.ui.scoped.section_draft.frame_use);
         let taken =
             squid_n_core::model::section_key_taken(&app.core.model.sections, sec.key(), None);
         let add_resp = ui.add_enabled(!taken, egui::Button::new("+ 追加"));
@@ -298,6 +302,9 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
         if app.ui.scoped.section_draft.synced_focus != Some(sec.id) {
             app.ui.scoped.section_draft.name = sec.name.clone();
             app.ui.scoped.section_draft.floor = sec.floor.clone().unwrap_or_default();
+            if let Some(frame_use) = sec.frame_use {
+                app.ui.scoped.section_draft.frame_use = frame_use;
+            }
             app.ui.scoped.section_draft.synced_focus = Some(sec.id);
         }
     } else {
@@ -416,6 +423,20 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
             None => draft.name.clone(),
         };
 
+        if !matches!(draft.kind, ShapeKind::RcSlab) {
+            egui::ComboBox::from_label("主架構用途")
+                .selected_text(match draft.frame_use {
+                    FrameSectionUse::Beam => "梁",
+                    FrameSectionUse::Column => "柱",
+                    FrameSectionUse::Brace => "ブレース",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Beam, "梁");
+                    ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Column, "柱");
+                    ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Brace, "ブレース");
+                });
+        }
+
         ui.horizontal(|ui| {
             let can_add = key_free_for_add && !draft.name.trim().is_empty() && rebar_validation.is_ok();
             let add_resp = ui.add_enabled(can_add, egui::Button::new("+ 追加"));
@@ -434,6 +455,8 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                         new_id: predicted_id,
                         name: draft.name.clone(),
                         floor: draft_floor.clone(),
+                        frame_use: (!matches!(draft.kind, ShapeKind::RcSlab))
+                            .then_some(draft.frame_use),
                     }),
                 );
                 app.core.scoped.staleness.mark_edited();
@@ -463,6 +486,8 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                             Box::new(EditSectionShape {
                                 section: sid,
                                 new_shape: shape.clone(),
+                                frame_use: (!matches!(draft.kind, ShapeKind::RcSlab))
+                                    .then_some(draft.frame_use),
                             }),
                         );
                         app.core.scoped.staleness.mark_edited();
@@ -1116,6 +1141,7 @@ mod tests {
             Box::new(EditSectionShape {
                 section: sid,
                 new_shape,
+                frame_use: Some(new_draft.frame_use),
             }),
         );
 

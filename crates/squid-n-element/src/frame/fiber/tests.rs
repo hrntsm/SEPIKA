@@ -668,6 +668,7 @@ fn build_test_model(shear_mod: Option<f64>) -> Model {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "test".to_string(),
             area: 20000.0,
@@ -740,6 +741,7 @@ fn make_oriented_fiber(p0: [f64; 3], p1: [f64; 3], ref_vec: [f64; 3]) -> FiberBe
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "s".to_string(),
             area: 20000.0,
@@ -818,6 +820,7 @@ fn make_steel_fiber_with_fy(fy: Option<f64>) -> FiberBeam {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "s".to_string(),
             area: 20000.0,
@@ -1149,6 +1152,7 @@ fn test_yield_progression() {
                 spring: None,
             }],
             sections: vec![Section {
+                frame_use: None,
                 id: SectionId(0),
                 name: "yield_test".to_string(),
                 area: 20000.0,
@@ -1507,6 +1511,7 @@ fn test_vertical_column_rz_nonsingular() {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "col".to_string(),
             area: 10000.0,

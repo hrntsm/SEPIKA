@@ -32,6 +32,7 @@ fn rc_beam_rect_section(
         },
     };
     Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(id),
         name: format!("RC{id}"),
         area: b * d,
@@ -77,6 +78,7 @@ fn rc_column_rect_section(
         },
     };
     Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         id: SectionId(id),
         name: format!("RC{id}"),
         area: b * d,
@@ -642,6 +644,7 @@ fn test_collect_cft_ultimate_checks() {
         thick: 12.0,
     };
     let sec = Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "CFT400".into(),
         area: cft_shape.calc_area(),
@@ -697,6 +700,7 @@ fn test_collect_cft_ultimate_checks() {
 /// 実配筋モデルの断面から 1 部材のモデルを作る（部材軸は `horizontal` で切替）。
 fn single_shape_model(shape: SectionShape, b: f64, d: f64, horizontal: bool) -> Model {
     let sec = Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         id: SectionId(0),
         name: "NEW0".to_string(),
         area: shape.calc_area(),

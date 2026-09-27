@@ -19,7 +19,8 @@ use super::section_std::standard_sections;
 use super::{StbError, STB_VERSION};
 use squid_n_core::ids::{NodeId, SectionId, SlabId};
 use squid_n_core::model::{
-    AxisGroup, AxisGroupKind, ElementKind, EndCondition, Model, StoryLevelKind, WallPlateShape,
+    AxisGroup, AxisGroupKind, ElementKind, EndCondition, FrameSectionUse, Model,
+    SecondaryMemberKind, StoryLevelKind, WallPlateShape,
 };
 
 /// ST-Bridge の id は `positiveInteger`（1 以上）。内部 0 始まり id に +1 して出力する。
@@ -45,6 +46,37 @@ fn secondary_end_nodes(
     Some([find(a)?, find(b)?])
 }
 
+fn validate_secondary_section_uses(model: &Model) -> Result<(), StbError> {
+    for secondary in model.joists().chain(model.posts()) {
+        let Some(section_id) = secondary.section else {
+            continue;
+        };
+        let Some(section) = model.sections.get(section_id.index()) else {
+            return Err(StbError::FrameSectionUseMissing(format!(
+                "二次部材 {} ({:?}) が参照する断面 {}",
+                secondary.id.0, secondary.kind, section_id.0
+            )));
+        };
+        let Some(frame_use) = section.frame_use else {
+            return Err(StbError::FrameSectionUseMissing(format!(
+                "二次部材 {} ({:?}) が参照する断面 {}",
+                secondary.id.0, secondary.kind, section_id.0
+            )));
+        };
+        let expected = match secondary.kind {
+            SecondaryMemberKind::Joist => FrameSectionUse::Beam,
+            SecondaryMemberKind::Post => FrameSectionUse::Column,
+        };
+        if frame_use != expected {
+            return Err(StbError::FrameSectionUseMismatch(format!(
+                "二次部材 {} ({:?}) の断面 {} の用途 {:?} は {:?} と不整合です",
+                secondary.id.0, secondary.kind, section_id.0, frame_use, expected
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// 内部モデルを標準 ST-Bridge 2.0.2 XML 文字列へ出力する（警告は破棄する）。
 pub fn export_stbridge(model: &Model) -> Result<String, StbError> {
     export_stbridge_with_report(model).map(|(xml, _)| xml)
@@ -55,10 +87,15 @@ pub fn export_stbridge(model: &Model) -> Result<String, StbError> {
 /// 標準スキーマの表現限界による近似・切り捨て（主筋の 4 段目以降、円形 RC 梁の
 /// `StbSecRaw` フォールバックなど）は警告として報告する。
 pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportReport), StbError> {
-    let std = standard_sections(model);
+    let std = standard_sections(model)?;
     let warnings = std.warnings;
-    let (sections_body, steel_lib, col_map, beam_map) =
-        (std.sections_xml, std.steel_lib, std.col_map, std.beam_map);
+    let (sections_body, steel_lib, col_map, beam_map, brace_map) = (
+        std.sections_xml,
+        std.steel_lib,
+        std.col_map,
+        std.beam_map,
+        std.brace_map,
+    );
 
     let mut s = String::new();
     s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
@@ -120,7 +157,7 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     s.push_str("    </StbStories>\n");
 
     s.push_str("    <StbMembers>\n");
-    s.push_str(&members_body(model, &col_map, &beam_map)?);
+    s.push_str(&members_body(model, &col_map, &beam_map, &brace_map)?);
     s.push_str("    </StbMembers>\n");
 
     let slab_sec_base = slab_section_id_base(model, &col_map, &beam_map);
@@ -177,7 +214,9 @@ fn members_body(
     model: &Model,
     col_map: &std::collections::HashMap<u32, u32>,
     beam_map: &std::collections::HashMap<u32, u32>,
+    brace_map: &std::collections::HashMap<u32, u32>,
 ) -> Result<String, StbError> {
+    validate_secondary_section_uses(model)?;
     let mut columns = String::new();
     let mut girders = String::new();
     let mut unexported_secondary_ids: Vec<u32> = Vec::new();
@@ -188,7 +227,10 @@ fn members_body(
             ElementKind::Beam if e.nodes.len() == 2 => {
                 let n0 = &model.nodes[e.nodes[0].index()];
                 let n1 = &model.nodes[e.nodes[1].index()];
-                let is_col = squid_n_core::geom::is_vertical_axis(n0.coord, n1.coord);
+                let is_col = model
+                    .element_section(e)
+                    .and_then(|section| section.frame_use)
+                    == Some(squid_n_core::model::FrameSectionUse::Column);
                 let role_map = if is_col { col_map } else { beam_map };
                 let sec = e
                     .section
@@ -227,13 +269,7 @@ fn members_body(
             ElementKind::Brace { tension_only } if e.nodes.len() == 2 => {
                 let sec = e
                     .section
-                    .map(|s| {
-                        col_map
-                            .get(&s.0)
-                            .or_else(|| beam_map.get(&s.0))
-                            .copied()
-                            .unwrap_or(s.0) as i64
-                    })
+                    .map(|s| brace_map.get(&s.0).copied().unwrap_or(s.0) as i64)
                     .unwrap_or(-1);
                 let feature = if tension_only {
                     "TENSION"

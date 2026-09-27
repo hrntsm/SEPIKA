@@ -234,6 +234,7 @@ mod tests {
                 spring: None,
             }],
             sections: vec![Section {
+                frame_use: None,
                 id: SectionId(0),
                 name: "spring".into(),
                 area: 1.0,
@@ -365,6 +366,7 @@ mod tests {
                     spring: None,
                 }],
                 sections: vec![Section {
+                    frame_use: None,
                     id: SectionId(0),
                     name: "spring".into(),
                     area: 1.0,

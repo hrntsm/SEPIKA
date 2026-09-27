@@ -565,10 +565,15 @@ fn test_add_section_shape_roundtrip() {
         new_id: SectionId(0),
         name: "H-300x300x10x15".into(),
         floor: None,
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
     };
     stack.run(&mut model, Box::new(cmd));
     assert_eq!(model.sections.len(), 1);
     assert_eq!(model.sections[0].id, SectionId(0));
+    assert_eq!(
+        model.sections[0].frame_use,
+        Some(squid_n_core::model::FrameSectionUse::Beam)
+    );
 
     stack.undo(&mut model);
     assert_eq!(model.sections.len(), 0);
@@ -602,6 +607,7 @@ fn test_edit_section_shape_roundtrip() {
     let cmd = EditSectionShape {
         section: SectionId(0),
         new_shape: shape2,
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
     };
     stack.run(&mut model, Box::new(cmd));
     assert!((model.sections[0].area - 9024.0).abs() < 1.0);
@@ -611,6 +617,138 @@ fn test_edit_section_shape_roundtrip() {
 
     stack.redo(&mut model);
     assert!((model.sections[0].area - 9024.0).abs() < 1.0);
+}
+
+#[test]
+fn test_edit_section_shape_rejects_use_change_for_references() {
+    let shape = squid_n_section::shape::SectionShape::SteelBox {
+        height: 200.0,
+        width: 200.0,
+        thick: 12.0,
+        corner_r: 0.0,
+    };
+    let mut model = empty_model();
+    let mut section = shape.to_section(SectionId(0), "S".into());
+    section.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    model.sections.push(section);
+    model.elements.push(ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Beam,
+        nodes: smallvec![NodeId(0), NodeId(1)],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    });
+    let old = model.sections[0].clone();
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(
+        &mut model,
+        Box::new(EditSectionShape {
+            section: SectionId(0),
+            new_shape: shape.clone(),
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Brace),
+        }),
+    ));
+    assert_eq!(model.sections[0], old);
+
+    model.elements.clear();
+    model
+        .unassigned_joists
+        .push(squid_n_core::model::SecondaryMember {
+            id: squid_n_core::ids::SecondaryMemberId(0),
+            gravity_end_shares: None,
+            kind: squid_n_core::model::SecondaryMemberKind::Joist,
+            ends: squid_n_core::model::SecondaryMemberEnds::Detached([[0.0; 3], [1.0, 0.0, 0.0]]),
+            section: Some(SectionId(0)),
+            name: "B1".into(),
+        });
+    assert!(!stack.run(
+        &mut model,
+        Box::new(EditSectionShape {
+            section: SectionId(0),
+            new_shape: shape,
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
+        }),
+    ));
+    assert_eq!(model.sections[0], old);
+}
+
+#[test]
+fn test_edit_rc_slab_section_shape_with_shell_reference() {
+    let old_shape = squid_n_section::shape::SectionShape::RcSlab { thickness: 150.0 };
+    let new_shape = squid_n_section::shape::SectionShape::RcSlab { thickness: 200.0 };
+    let mut model = empty_model();
+    model
+        .sections
+        .push(old_shape.to_section(SectionId(0), "S".into()));
+    model.elements.push(ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Shell,
+        nodes: smallvec![],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    });
+
+    assert!(!EditSectionShape {
+        section: SectionId(0),
+        new_shape: new_shape.clone(),
+        frame_use: None,
+    }
+    .apply(&mut model)
+    .is_noop());
+    assert_eq!(model.sections[0].shape, Some(new_shape));
+}
+
+#[test]
+fn test_edit_rc_wall_section_shape_with_wall_reference() {
+    let old_shape = squid_n_section::shape::SectionShape::RcWall {
+        thickness: 180.0,
+        ps: 0.0,
+    };
+    let new_shape = squid_n_section::shape::SectionShape::RcWall {
+        thickness: 220.0,
+        ps: 0.0,
+    };
+    let mut model = empty_model();
+    model
+        .sections
+        .push(old_shape.to_section(SectionId(0), "W".into()));
+    model.elements.push(ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Wall,
+        nodes: smallvec![],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    });
+
+    assert!(!EditSectionShape {
+        section: SectionId(0),
+        new_shape: new_shape.clone(),
+        frame_use: None,
+    }
+    .apply(&mut model)
+    .is_noop());
+    assert_eq!(model.sections[0].shape, Some(new_shape));
 }
 
 #[test]
@@ -686,6 +824,7 @@ fn test_edit_section_shape_invalid_id_noop() {
     let cmd = EditSectionShape {
         section: SectionId(99),
         new_shape: shape,
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
     };
     stack.run(&mut model, Box::new(cmd));
     // 失敗したコマンド（Noop）は undo 履歴に積まれない。
@@ -796,6 +935,7 @@ fn two_member_model() -> Model {
 /// 形状を持たない最小の断面（材料参照の検証用）。
 fn bare_section(id: SectionId, material: Option<MaterialId>) -> squid_n_core::model::Section {
     squid_n_core::model::Section {
+        frame_use: None,
         id,
         name: format!("S{}", id.0),
         area: 100.0,
@@ -865,6 +1005,7 @@ fn test_delete_section_in_use_is_noop_and_renumbers() {
     let mut model = two_member_model();
     for i in 0..2u32 {
         model.sections.push(Section {
+            frame_use: (i == 1).then_some(squid_n_core::model::FrameSectionUse::Beam),
             id: SectionId(i),
             name: format!("S{}", i),
             area: 100.0,
@@ -924,6 +1065,7 @@ fn test_delete_section_referenced_by_joist() {
     }
     for i in 0..2u32 {
         model.sections.push(Section {
+            frame_use: (i == 1).then_some(squid_n_core::model::FrameSectionUse::Beam),
             id: SectionId(i),
             name: format!("S{}", i),
             area: 100.0,
@@ -2414,6 +2556,7 @@ fn model_with_enclosed_wall_plate() -> Model {
         });
     }
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "壁 t150".into(),
         area: 150.0 * 3000.0,
@@ -3667,6 +3810,7 @@ fn test_delete_section_material_shift_and_guard_secondary_refs() {
             support_spring: None,
         });
         model.sections.push(Section {
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
             id: SectionId(i),
             name: format!("S{}", i),
             area: 100.0,
@@ -3808,6 +3952,7 @@ fn test_add_section_shape_rejects_duplicate_key() {
         new_id: SectionId(id),
         name: name.into(),
         floor: floor.map(str::to_string),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
     };
 
     stack.run(&mut model, Box::new(add("C1", Some("1"), 0)));
@@ -3842,6 +3987,7 @@ fn test_set_section_name_rejects_duplicate_key() {
                 new_id: SectionId(i as u32),
                 name: "C1".into(),
                 floor: Some((*floor).to_string()),
+                frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
             }),
         );
     }
@@ -3896,6 +4042,7 @@ fn test_edit_section_shape_keeps_name_and_floor() {
             new_id: SectionId(0),
             name: "C1".into(),
             floor: Some("1".into()),
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         }),
     );
     stack.run(
@@ -3908,6 +4055,7 @@ fn test_edit_section_shape_keeps_name_and_floor() {
                 thick: 12.0,
                 corner_r: 0.0,
             },
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         }),
     );
     assert_eq!(model.sections[0].name, "C1");
@@ -4229,6 +4377,7 @@ fn test_copy_story_assigns_sections_with_target_floor_name() {
     let sec_id = SectionId(model.sections.len() as u32);
     let mut c1 = bare_section(sec_id, None);
     c1.name = "C1".into();
+    c1.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
     c1.floor = Some("2F".into());
     model.sections.push(c1);
     let targets_2f: Vec<squid_n_core::ids::ElemId> = model
@@ -4525,6 +4674,7 @@ fn test_copy_story_overwrite_mirrors_absence() {
     let sec_id = SectionId(model.sections.len() as u32);
     let mut c1 = bare_section(sec_id, None);
     c1.name = "C1".into();
+    c1.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
     c1.floor = Some("3F".into());
     model.sections.push(c1);
     let members_3f: Vec<squid_n_core::ids::ElemId> = model
@@ -5183,6 +5333,7 @@ fn push_cft_section(model: &mut Model) -> SectionId {
 fn push_steel_section(model: &mut Model) -> SectionId {
     let id = SectionId(model.sections.len() as u32);
     model.sections.push(squid_n_core::model::Section {
+        frame_use: None,
         id,
         name: "S".into(),
         area: 100.0,
@@ -5432,6 +5583,7 @@ fn set_floor_region_joist_section() {
     use squid_n_core::model::{SecondaryMemberKind, Section};
     let mut model = sm_base_model();
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "S0".into(),
         area: 100.0,
@@ -5543,6 +5695,7 @@ fn set_wall_region_post_section_accepts_steel() {
     use squid_n_core::model::{SecondaryMemberKind, Section, WallRegion};
     let mut model = sm_base_model();
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "S0".into(),
         area: 100.0,

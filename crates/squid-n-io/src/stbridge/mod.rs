@@ -64,6 +64,10 @@ pub enum StbError {
     WallWithoutRegion(String),
     #[error("両端の節点を持たない二次部材: {0}")]
     SecondaryWithoutNode(String),
+    #[error("主架構断面の用途が未設定: {0}")]
+    FrameSectionUseMissing(String),
+    #[error("部材種別と主架構断面の用途が不整合: {0}")]
+    FrameSectionUseMismatch(String),
 }
 
 const STB_VERSION: &str = "2.0.2";

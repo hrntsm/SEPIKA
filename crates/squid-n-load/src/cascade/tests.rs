@@ -82,6 +82,7 @@ fn base_model() -> Model {
         strength_factor: None,
     });
     m.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "H".into(),
         floor: None,

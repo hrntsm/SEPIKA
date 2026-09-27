@@ -110,6 +110,7 @@ pub fn entries_in(shape: CatalogShape, family: &str) -> Vec<&'static CatalogEntr
 /// `shape` は寸法参照用に `entry.name` から復元するもので、数値プロパティには影響しない。
 pub fn to_section(entry: &CatalogEntry, id: SectionId) -> Section {
     Section {
+        frame_use: None,
         id,
         name: entry.name.clone(),
         area: entry.area,

@@ -2,10 +2,9 @@
 //!
 //! 層間変位・偏心率など、当該層の柱を数える処理の判定ロジックの単一情報源。
 
-use squid_n_core::geom::is_vertical_axis;
 use squid_n_core::ids::{ElemId, NodeId, StoryId};
 use squid_n_core::model::DIAPHRAGM_LEVEL_TOL_MM;
-use squid_n_core::model::{ElementKind, Model};
+use squid_n_core::model::{ElementKind, FrameSectionUse, Model};
 use std::collections::{HashMap, HashSet};
 
 /// 層に帰属する 1 本の柱（中間節点で分割された鉛直材の連なりを束ねたもの）。
@@ -70,13 +69,14 @@ fn vertical_beam_adjacency(model: &Model) -> HashMap<NodeId, Vec<(NodeId, ElemId
         if elem.kind != ElementKind::Beam || elem.nodes.len() != 2 {
             continue;
         }
-        let n0_id = elem.nodes[0];
-        let n1_id = elem.nodes[1];
-        let n0 = &model.nodes[n0_id.index()];
-        let n1 = &model.nodes[n1_id.index()];
-        if !is_vertical_axis(n0.coord, n1.coord) {
+        let Some(section) = model.element_section(elem) else {
+            continue;
+        };
+        if section.frame_use != Some(FrameSectionUse::Column) {
             continue;
         }
+        let n0_id = elem.nodes[0];
+        let n1_id = elem.nodes[1];
         adj.entry(n0_id).or_default().push((n1_id, elem.id));
         adj.entry(n1_id).or_default().push((n0_id, elem.id));
     }
@@ -133,6 +133,7 @@ mod tests {
     use smallvec::SmallVec;
     use squid_n_core::dof::Dof6Mask;
     use squid_n_core::ids::{ElemId, NodeId, SectionId};
+    use squid_n_core::model::Section;
     use squid_n_core::model::{
         ElementData, EndCondition, ForceRegime, LocalAxis, Node, RigidZone, Story,
     };
@@ -190,6 +191,11 @@ mod tests {
         let model = Model {
             nodes,
             elements,
+            sections: vec![{
+                let mut section = Section::zero(squid_n_core::ids::SectionId(0), "C".into());
+                section.frame_use = Some(FrameSectionUse::Column);
+                section
+            }],
             stories: vec![
                 Story {
                     id: base,
@@ -229,5 +235,17 @@ mod tests {
         assert_eq!(cols[0].top, NodeId(2));
         assert_eq!(cols[0].bottom, NodeId(0));
         assert_eq!(cols[0].top_elem, ElemId(0), "代表 ID は最上側セグメント");
+    }
+
+    #[test]
+    fn test_story_columns_includes_sloped_column_use() {
+        let (mut model, top) = build_split_column_model();
+        model.nodes[1].coord = [500.0, 0.0, 2000.0];
+        model.nodes[2].coord = [1000.0, 0.0, 4000.0];
+
+        let cols = story_columns(&model, top);
+        assert_eq!(cols.len(), 1, "傾斜していても柱用途の連なりを数える");
+        assert_eq!(cols[0].top, NodeId(2));
+        assert_eq!(cols[0].bottom, NodeId(0));
     }
 }

@@ -261,6 +261,7 @@ mod tests {
 
     fn section(id: u32) -> Section {
         Section {
+            frame_use: None,
             id: SectionId(id),
             name: format!("Wall t150 #{id}"),
             area: 0.0,

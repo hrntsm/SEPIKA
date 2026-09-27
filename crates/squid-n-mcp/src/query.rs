@@ -71,6 +71,7 @@ pub fn query_model(model: &Model, kind: &str, filter: Option<&str>) -> Vec<serde
                 json!({
                     "id": s.id.0,
                     "name": s.name,
+                    "frame_use": s.frame_use,
                     "floor": s.floor,
                     "area": s.area,
                     "iy": s.iy,

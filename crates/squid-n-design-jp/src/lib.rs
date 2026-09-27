@@ -270,54 +270,45 @@ pub enum MemberKind {
     Brace,
 }
 
-/// 部材種別を柱とみなす部材軸の鉛直成分 |ez| の下限。
-/// 定義の情報源は [`squid_n_core::geom::MEMBER_COLUMN_EZ_MIN`]。
-#[doc(inline)]
-pub use squid_n_core::geom::MEMBER_COLUMN_EZ_MIN;
-
-/// 部材種別を梁とみなす部材軸の鉛直成分 |ez| の上限。
-/// 定義の情報源は [`squid_n_core::geom::MEMBER_BEAM_EZ_MAX`]。
-#[doc(inline)]
-pub use squid_n_core::geom::MEMBER_BEAM_EZ_MAX;
-
 impl MemberKind {
-    /// 部材軸の鉛直成分 |ez| から部材種別を判定する。
-    ///
-    /// |ez| ≥ [`MEMBER_COLUMN_EZ_MIN`] を柱、|ez| ≤ [`MEMBER_BEAM_EZ_MAX`] を梁、
-    /// その中間（斜材）をブレースとする。長さ 0 に縮退した部材軸は梁とみなす。
-    ///
-    /// 断面検定・接合部検定・終局検定・MCP ジョブ・GUI の部材種別表示が
-    /// **共通で用いる単一の規約**（判定の情報源を 1 つに保つ）。
-    pub fn from_axis(p0: [f64; 3], p1: [f64; 3]) -> Self {
-        let Some(d) = squid_n_core::geom::vec3::unit_from(p0, p1) else {
-            return MemberKind::Beam;
+    /// 断面用途から設計上の部材種別を解決する。
+    pub fn try_of_element(
+        elem: &squid_n_core::model::ElementData,
+        model: &squid_n_core::model::Model,
+    ) -> Result<Self, String> {
+        let section = elem
+            .section
+            .and_then(|id| model.sections.get(id.index()))
+            .ok_or_else(|| format!("要素 {} の断面を解決できません", elem.id.0))?;
+        let usage = section.frame_use.ok_or_else(|| {
+            format!(
+                "要素 {} ({:?}) の断面用途が未設定です",
+                elem.id.0, elem.kind
+            )
+        })?;
+        let kind = match usage {
+            squid_n_core::model::FrameSectionUse::Beam => MemberKind::Beam,
+            squid_n_core::model::FrameSectionUse::Column => MemberKind::Column,
+            squid_n_core::model::FrameSectionUse::Brace => MemberKind::Brace,
         };
-        Self::from_ez(d[2].abs())
-    }
-
-    /// 部材軸の鉛直成分 |ez| から部材種別を判定する（|ez| を既に持つ場合）。
-    /// 判定境界は [`MemberKind::from_axis`] と同一。
-    pub fn from_ez(ez: f64) -> Self {
-        match squid_n_core::geom::classify_member_ez(ez) {
-            squid_n_core::geom::MemberAxisClass::Column => MemberKind::Column,
-            squid_n_core::geom::MemberAxisClass::Beam => MemberKind::Beam,
-            squid_n_core::geom::MemberAxisClass::Diagonal => MemberKind::Brace,
+        match (elem.kind, kind) {
+            (squid_n_core::model::ElementKind::Brace { .. }, MemberKind::Brace)
+            | (squid_n_core::model::ElementKind::Beam, MemberKind::Beam | MemberKind::Column)
+            | (squid_n_core::model::ElementKind::Fiber, MemberKind::Beam | MemberKind::Column)
+            | (
+                squid_n_core::model::ElementKind::MultiSpring,
+                MemberKind::Beam | MemberKind::Column,
+            ) => Ok(kind),
+            _ => Err(format!("要素 {} と断面用途が不整合です", elem.id.0)),
         }
     }
 
-    /// モデル上の線材（材端 2 節点）の部材種別。2 節点に満たない要素・
-    /// 節点参照が範囲外の要素は梁とみなす。判定規則は [`MemberKind::from_axis`]。
+    /// 断面用途を解決できないモデルは設計計算へ進めない。
     pub fn of_element(
         elem: &squid_n_core::model::ElementData,
         model: &squid_n_core::model::Model,
     ) -> Self {
-        let (Some(i), Some(j)) = (
-            elem.nodes.first().and_then(|n| model.nodes.get(n.index())),
-            elem.nodes.get(1).and_then(|n| model.nodes.get(n.index())),
-        ) else {
-            return MemberKind::Beam;
-        };
-        Self::from_axis(i.coord, j.coord)
+        Self::try_of_element(elem, model).unwrap_or_else(|message| panic!("{message}"))
     }
 }
 

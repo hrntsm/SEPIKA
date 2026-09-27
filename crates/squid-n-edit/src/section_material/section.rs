@@ -139,10 +139,19 @@ pub struct AddSectionShape {
     pub new_id: SectionId,
     pub name: String,
     pub floor: Option<String>,
+    pub frame_use: Option<squid_n_core::model::FrameSectionUse>,
 }
 
 impl EditCommand for AddSectionShape {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let non_frame = matches!(
+            &self.shape,
+            squid_n_section::shape::SectionShape::RcWall { .. }
+                | squid_n_section::shape::SectionShape::RcSlab { .. }
+        );
+        if (!non_frame && self.frame_use.is_none()) || (non_frame && self.frame_use.is_some()) {
+            return Box::new(Noop);
+        }
         if squid_n_core::model::section_key_taken(
             &model.sections,
             (self.name.as_str(), self.floor.as_deref()),
@@ -152,6 +161,7 @@ impl EditCommand for AddSectionShape {
         }
         let mut sec = self.shape.to_section(self.new_id, self.name.clone());
         sec.floor = self.floor.clone();
+        sec.frame_use = self.frame_use;
         model.sections.push(sec);
         Box::new(DeleteSection { id: self.new_id })
     }
@@ -168,17 +178,32 @@ impl EditCommand for AddSectionShape {
 pub struct EditSectionShape {
     pub section: SectionId,
     pub new_shape: squid_n_section::shape::SectionShape,
+    pub frame_use: Option<squid_n_core::model::FrameSectionUse>,
 }
 
 impl EditCommand for EditSectionShape {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let non_frame = matches!(
+            &self.new_shape,
+            squid_n_section::shape::SectionShape::RcWall { .. }
+                | squid_n_section::shape::SectionShape::RcSlab { .. }
+        );
+        if !non_frame && self.frame_use.is_none() {
+            return Box::new(Noop);
+        }
         let idx = self.section.index();
         if idx >= model.sections.len() || model.sections[idx].id != self.section {
+            return Box::new(Noop);
+        }
+        if (non_frame && self.frame_use.is_some())
+            || !section_use_is_valid(model, self.section, self.frame_use)
+        {
             return Box::new(Noop);
         }
         let old = model.sections[idx].clone();
         let mut new_sec = self.new_shape.to_section(self.section, old.name.clone());
         new_sec.floor = old.floor.clone();
+        new_sec.frame_use = self.frame_use;
         model.sections[idx] = new_sec;
         Box::new(RestoreSection { old })
     }
@@ -186,6 +211,60 @@ impl EditCommand for EditSectionShape {
     fn label(&self) -> &str {
         "断面形状変更"
     }
+}
+
+fn section_use_is_valid(
+    model: &Model,
+    section_id: SectionId,
+    frame_use: Option<squid_n_core::model::FrameSectionUse>,
+) -> bool {
+    let element_valid = model
+        .elements
+        .iter()
+        .filter(|element| element.section == Some(section_id))
+        .filter(|element| {
+            matches!(
+                element.kind,
+                squid_n_core::model::ElementKind::Beam
+                    | squid_n_core::model::ElementKind::Fiber
+                    | squid_n_core::model::ElementKind::MultiSpring
+                    | squid_n_core::model::ElementKind::Brace { .. }
+            )
+        })
+        .all(|element| {
+            matches!(
+                (element.kind, frame_use),
+                (
+                    squid_n_core::model::ElementKind::Brace { .. },
+                    Some(squid_n_core::model::FrameSectionUse::Brace),
+                ) | (
+                    squid_n_core::model::ElementKind::Beam
+                        | squid_n_core::model::ElementKind::Fiber
+                        | squid_n_core::model::ElementKind::MultiSpring,
+                    Some(
+                        squid_n_core::model::FrameSectionUse::Beam
+                            | squid_n_core::model::FrameSectionUse::Column,
+                    ),
+                )
+            )
+        });
+    let secondary_valid = model
+        .joists()
+        .chain(model.posts())
+        .filter(|member| member.section == Some(section_id))
+        .all(|member| {
+            matches!(
+                (member.kind, frame_use),
+                (
+                    squid_n_core::model::SecondaryMemberKind::Joist,
+                    Some(squid_n_core::model::FrameSectionUse::Beam),
+                ) | (
+                    squid_n_core::model::SecondaryMemberKind::Post,
+                    Some(squid_n_core::model::FrameSectionUse::Column),
+                )
+            )
+        });
+    element_valid && secondary_valid
 }
 
 /// 断面データを指定した Section で復元する（EditSectionShape の逆操作）。

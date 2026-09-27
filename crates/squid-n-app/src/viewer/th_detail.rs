@@ -240,8 +240,7 @@ fn design_member_kind(elem: &ElementData, model: &Model) -> Option<MemberKind> {
         ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
             Some(MemberKind::of_element(elem, model))
         }
-        ElementKind::Wall => super::member_axis_endpoints(elem, model)
-            .map(|ep| MemberKind::from_axis(ep.p_i, ep.p_j)),
+        ElementKind::Wall => None,
         _ => None,
     }
 }

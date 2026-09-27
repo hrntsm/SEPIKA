@@ -256,6 +256,7 @@ mod tests {
 
     fn section(id: u32, name: &str, floor: Option<&str>) -> Section {
         Section {
+            frame_use: None,
             id: SectionId(id),
             name: name.to_string(),
             floor: floor.map(str::to_string),

@@ -254,6 +254,46 @@ impl Model {
                     )));
                 }
             }
+            if matches!(
+                elem.kind,
+                ElementKind::Beam
+                    | ElementKind::Fiber
+                    | ElementKind::MultiSpring
+                    | ElementKind::Brace { .. }
+            ) {
+                let Some(section_id) = elem.section else {
+                    continue;
+                };
+                let section = self.sections.get(section_id.index());
+                let Some(usage) = section.and_then(|section| section.frame_use) else {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Elem {} の主架構断面用途が未設定です",
+                        elem.id.0
+                    )));
+                };
+                let valid = matches!(
+                    (elem.kind, usage),
+                    (ElementKind::Brace { .. }, FrameSectionUse::Brace)
+                        | (
+                            ElementKind::Beam,
+                            FrameSectionUse::Beam | FrameSectionUse::Column
+                        )
+                        | (
+                            ElementKind::Fiber,
+                            FrameSectionUse::Beam | FrameSectionUse::Column
+                        )
+                        | (
+                            ElementKind::MultiSpring,
+                            FrameSectionUse::Beam | FrameSectionUse::Column
+                        )
+                );
+                if !valid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Elem {} と断面用途が不整合です",
+                        elem.id.0
+                    )));
+                }
+            }
         }
 
         for sec in &self.sections {
@@ -1447,6 +1487,16 @@ impl Model {
                 return Err(CoreError::DanglingRef(format!(
                     "{label} -> Section {}",
                     sid.0
+                )));
+            }
+            let usage = sections[sid.index()].frame_use;
+            let valid = match sm.kind {
+                SecondaryMemberKind::Joist => usage == Some(FrameSectionUse::Beam),
+                SecondaryMemberKind::Post => usage == Some(FrameSectionUse::Column),
+            };
+            if !valid {
+                return Err(CoreError::DanglingRef(format!(
+                    "{label} と断面用途が不整合です"
                 )));
             }
         }

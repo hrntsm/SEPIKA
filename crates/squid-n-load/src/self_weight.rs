@@ -136,6 +136,7 @@ mod tests {
 
     fn rc_section(area: f64, width: f64, depth: f64) -> Section {
         Section {
+            frame_use: None,
             id: SectionId(0),
             name: "RC".into(),
             area,
@@ -341,6 +342,7 @@ mod tests {
         let beam_nodes = [NodeId(2), NodeId(3)];
         for (k, &depth) in depths.iter().enumerate() {
             sections.push(Section {
+                frame_use: None,
                 id: SectionId((k + 1) as u32),
                 name: format!("Beam{depth}"),
                 area: 0.0,
@@ -688,6 +690,7 @@ mod tests {
         let beam_nodes = [NodeId(2), NodeId(3)];
         for (k, &depth) in depths.iter().enumerate() {
             sections.push(Section {
+                frame_use: None,
                 id: SectionId((k + 1) as u32),
                 name: format!("Beam{depth}"),
                 area: 0.0,

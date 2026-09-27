@@ -6,11 +6,21 @@ pub fn rect_shear_area(area: f64) -> f64 {
     area * 5.0 / 6.0
 }
 
+/// 主架構線材の設計上の断面用途。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum FrameSectionUse {
+    Beam,
+    Column,
+    Brace,
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Section {
     pub id: SectionId,
     /// 断面符号。単独では断面を一意に定めない。
     pub name: String,
+    /// 主架構線材として使用するときの断面用途。床・壁用断面では `None`。
+    pub frame_use: Option<FrameSectionUse>,
     /// 階。[`Story`](crate::model::Story) への参照ではない。
     ///
     /// 断面の同一性は符号＋階で決まる。階を持たない断面は `None` とし、
@@ -61,6 +71,7 @@ impl Section {
         Self {
             id,
             name,
+            frame_use: None,
             floor: None,
             area: 0.0,
             iy: 0.0,
@@ -110,6 +121,7 @@ impl Section {
             && self.rebar_material == other.rebar_material
             && self.shear_rebar_material == other.shear_rebar_material
             && self.steel_material == other.steel_material
+            && self.frame_use == other.frame_use
     }
 }
 

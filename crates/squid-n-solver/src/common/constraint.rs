@@ -432,6 +432,7 @@ mod tests {
                 })
                 .collect(),
             sections: vec![Section {
+                frame_use: None,
                 id: SectionId(0),
                 name: "sec".to_string(),
                 area: 100.0,

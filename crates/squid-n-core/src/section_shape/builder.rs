@@ -161,6 +161,7 @@ impl SectionShape {
         Section {
             id,
             name,
+            frame_use: None,
             floor: None,
             area,
             iy,

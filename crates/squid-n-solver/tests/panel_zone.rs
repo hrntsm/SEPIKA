@@ -15,8 +15,8 @@
 use squid_n_core::dof::{Dof6Mask, DofMap};
 use squid_n_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
 use squid_n_core::model::{
-    ElementData, ElementKind, EndCondition, ForceRegime, LoadCase, LocalAxis, Material,
-    MaterialCategory, Model, NodalLoad, Node, RigidZone, Section,
+    ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LoadCase, LocalAxis,
+    Material, MaterialCategory, Model, NodalLoad, Node, RigidZone, Section,
 };
 use squid_n_core::panel_zone::{beam_panel_depth, PanelGeometry};
 use squid_n_core::section_shape::SectionShape;
@@ -45,6 +45,11 @@ fn node(id: u32, coord: [f64; 3], restraint: Dof6Mask) -> Node {
 
 fn steel_section(id: u32, shape: SectionShape, depth: f64, width: f64, area: f64) -> Section {
     Section {
+        frame_use: Some(if id == 0 {
+            FrameSectionUse::Beam
+        } else {
+            FrameSectionUse::Column
+        }),
         id: SectionId(id),
         name: String::new(),
         area,

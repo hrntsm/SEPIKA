@@ -1242,6 +1242,7 @@ mod tests {
         model.sections.push(Section {
             id: SectionId(0),
             name: "壁 t150".into(),
+            frame_use: None,
             area: 150.0 * 3000.0,
             iy: 1.0,
             iz: 1.0,

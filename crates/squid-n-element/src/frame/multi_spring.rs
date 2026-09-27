@@ -125,6 +125,7 @@ mod tests {
                 spring: None,
             }],
             sections: vec![Section {
+                frame_use: None,
                 id: SectionId(0),
                 name: "ms-test".to_string(),
                 area: 250000.0,

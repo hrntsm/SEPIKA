@@ -586,6 +586,7 @@ mod tests {
                 },
             ],
             sections: vec![Section {
+                frame_use: None,
                 id: SectionId(0),
                 name: "col".into(),
                 area: 10000.0,

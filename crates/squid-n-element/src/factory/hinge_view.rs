@@ -304,6 +304,7 @@ mod tests {
                 vec![NodeId(1)],
             )],
             sections: vec![Section {
+                frame_use: None,
                 id: SectionId(0),
                 name: "sec".into(),
                 area: 8000.0,

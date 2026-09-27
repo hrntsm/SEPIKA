@@ -1,6 +1,9 @@
 //! 仕口パネル（柱梁接合部パネル）の諸元解決。
 //!
-//! 柱・梁の断面形状からパネルの寸法（柱せい `dc`・板厚 `tp`・梁せい `db`）と、
+//! 断面用途が柱・梁である線材だけを S/CFT 等の仕口パネル候補として扱い、
+//! Wall/Shell および斜材は対象外とする。断面用途（柱・梁という意味論）による判定と、
+//! 部材軸が水平・鉛直など既存パネル式の幾何適用条件は分離する。
+//! 候補の断面形状からパネルの寸法（柱せい `dc`・板厚 `tp`・梁せい `db`）と、
 //! そこから定まる形状係数 κ・実効体積 `Ve` を解決する。
 //!
 //! # 単一の出所とする理由
@@ -25,16 +28,12 @@
 //! 節点に次のすべてが揃うとき、その接合部を仕口パネルの対象とする
 //! （[`resolve_panel_joint`]）。モデル化と断面検定は同じ判定を通る。
 //!
-//! - 柱（鉛直材）が 1 本以上・はり（水平材）が 1 本以上取り付く
-//! - 取り付く**柱・はりがすべて S/CFT 系**（`StructureKind::is_steel_like`）
+//! - 用途が柱の部材が 1 本以上・用途が梁の部材が 1 本以上取り付く
+//! - 取り付く部材がすべて S/CFT 系（`StructureKind::is_steel_like`）
 //! - 諸元を解決できる柱が 1 本以上あり、実効体積 `Ve` が正
 //!
 //! 斜材（ブレース等）は資料が接合位置と係数 ζ を定めておらずパネル自由度と
 //! 連成しないため、種別判定の対象にもしない。
-//!
-//! RC/SRC が 1 本でも混じる接合部を除くのは、コンクリートが接合部全体を拘束し、
-//! 鋼部材だけの実効体積による弾性せん断パネルでは挙動を表せないためである。
-//! これらの接合部は剛域と、RC 柱梁接合部・SRC パネルゾーンの断面検定が扱う。
 //!
 //! # 柱が複数取り付く場合
 //!
@@ -61,9 +60,9 @@
 //! 通しダイアフラムがせん断挙動に関与し、鋼管のみの実効体積による弾性せん断パネル
 //! `G・Ve` では剛性を表せないため、接合部を剛節点として扱う。
 
-use crate::geom::{self, MemberAxisClass};
+use crate::geom;
 use crate::ids::{ElemId, NodeId};
-use crate::model::{ElementData, ElementKind, Model, Section};
+use crate::model::{ElementData, ElementKind, FrameSectionUse, Model, Section};
 use crate::section_shape::SectionShape;
 use crate::structure_kind::member_structure_kind;
 
@@ -73,9 +72,9 @@ use crate::structure_kind::member_structure_kind;
 /// ため、いずれにも分類しない（`None`）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MemberOrientation {
-    /// 柱（鉛直材）。パネルの上下面で接合する。
+    /// 用途が柱。パネルの上下面で接合する。
     Column,
-    /// はり（水平材）。パネルの左右面（柱フェース）で接合する。
+    /// 用途が梁。パネルの左右面（柱フェース）で接合する。
     Beam,
 }
 
@@ -89,13 +88,24 @@ pub fn member_unit_axis(model: &Model, elem: &ElementData) -> Option<[f64; 3]> {
     geom::vec3::unit_from(p0, p1)
 }
 
-/// 要素の材軸の鉛直成分から柱・はりを判定する。線材以外・退化長さは `None`。
+/// 既存の仕口パネル式を適用できる水平・鉛直材かを判定する。
+pub fn is_horizontal_or_vertical_member(model: &Model, elem: &ElementData) -> bool {
+    let Some(axis) = member_unit_axis(model, elem) else {
+        return false;
+    };
+    !(0.2..0.8).contains(&axis[2].abs())
+}
+
+/// 断面用途から柱・はりを判定する。用途未設定・ブレース・線材以外は `None`。
 pub fn member_orientation(model: &Model, elem: &ElementData) -> Option<MemberOrientation> {
-    let ez = member_unit_axis(model, elem)?[2].abs();
-    match geom::classify_member_ez(ez) {
-        MemberAxisClass::Column => Some(MemberOrientation::Column),
-        MemberAxisClass::Beam => Some(MemberOrientation::Beam),
-        MemberAxisClass::Diagonal => None,
+    if !matches!(elem.kind, ElementKind::Beam) || elem.nodes.len() < 2 {
+        return None;
+    }
+    let section = elem.section.and_then(|id| model.sections.get(id.index()))?;
+    match section.frame_use? {
+        FrameSectionUse::Column => Some(MemberOrientation::Column),
+        FrameSectionUse::Beam => Some(MemberOrientation::Beam),
+        FrameSectionUse::Brace => None,
     }
 }
 
@@ -147,6 +157,9 @@ pub fn panel_half_extent<'a>(
     let mut extent = PanelHalfExtent::default();
     for e in members {
         if !e.nodes.iter().take(2).any(|n| *n == node) {
+            continue;
+        }
+        if !is_horizontal_or_vertical_member(model, e) {
             continue;
         }
         let Some(orientation) = member_orientation(model, e) else {
@@ -328,6 +341,9 @@ pub fn resolve_panel_joint<'a>(
         if !e.nodes.iter().take(2).any(|n| *n == node) {
             continue;
         }
+        if !is_horizontal_or_vertical_member(model, e) {
+            continue;
+        }
         match member_orientation(model, e) {
             Some(MemberOrientation::Column) => columns.push(e),
             Some(MemberOrientation::Beam) => beams.push(e),
@@ -395,6 +411,7 @@ mod tests {
 
     fn sec(shape: SectionShape, depth: f64, panel_thickness: Option<f64>) -> Section {
         Section {
+            frame_use: None,
             id: SectionId(0),
             name: String::new(),
             floor: None,
@@ -717,6 +734,10 @@ mod tests {
         beam_mat: u32,
         col_mat: u32,
     ) -> Model {
+        let mut beam_sec = sec_with_mat(beam, beam_depth, None, 0, beam_mat);
+        beam_sec.frame_use = Some(FrameSectionUse::Beam);
+        let mut col_sec = sec_with_mat(col, 400.0, None, 1, col_mat);
+        col_sec.frame_use = Some(FrameSectionUse::Column);
         Model {
             nodes: vec![
                 node(0, [0.0, 0.0, 3000.0]),
@@ -724,10 +745,7 @@ mod tests {
                 node(2, [0.0, 0.0, 0.0]),
             ],
             // 材料は断面が持つ。断面 0（梁）・断面 1（柱）へそれぞれ割り当てる。
-            sections: vec![
-                sec_with_mat(beam, beam_depth, None, 0, beam_mat),
-                sec_with_mat(col, 400.0, None, 1, col_mat),
-            ],
+            sections: vec![beam_sec, col_sec],
             materials: vec![
                 mat(0, MaterialCategory::Steel),
                 mat(1, MaterialCategory::Concrete),
@@ -799,7 +817,9 @@ mod tests {
         let build = |upper_first: bool| {
             let mut m = joint_model(h_beam(), 600.0, h_col());
             m.nodes.push(node(3, [0.0, 0.0, 6000.0]));
-            m.sections.push(sec(thin.clone(), 400.0, None));
+            let mut thin_sec = sec(thin.clone(), 400.0, None);
+            thin_sec.frame_use = Some(FrameSectionUse::Column);
+            m.sections.push(thin_sec);
             let upper = member(2, 0, 3, 2);
             if upper_first {
                 m.elements.insert(0, upper);
@@ -850,12 +870,49 @@ mod tests {
         assert!((extent.offset_for(MemberOrientation::Column) - 300.0).abs() < 1e-9);
     }
 
-    /// 斜材は柱にもはりにも分類しない（オフセット・ζ が資料で定義されないため）。
     #[test]
-    fn test_diagonal_member_has_no_orientation() {
+    fn test_diagonal_member_depth_is_excluded_from_panel_dimensions() {
+        let mut m = joint_model(h_beam(), 600.0, h_col());
+        m.nodes.push(node(3, [4000.0, 0.0, 6000.0]));
+        let mut diagonal_section = m.sections[0].clone();
+        diagonal_section.id = SectionId(2);
+        diagonal_section.depth = 2000.0;
+        m.sections.push(diagonal_section);
+        m.elements.push(member(2, 0, 3, 2));
+
+        let joint = resolve_panel_joint(&m, NodeId(0), &m.elements).expect("接合部");
+        assert!((joint.db - (600.0 - 17.0)).abs() < 1e-9);
+        let extent = panel_half_extent(&m, NodeId(0), &m.elements);
+        assert!((extent.beam_half - 300.0).abs() < 1e-9);
+    }
+
+    /// 用途が梁の傾斜部材は梁として扱い、幾何による再分類を行わない。
+    #[test]
+    fn test_diagonal_beam_uses_section_use() {
         let mut m = joint_model(h_beam(), 600.0, h_col());
         m.nodes[1].coord = [4000.0, 0.0, 6000.0];
-        assert!(member_orientation(&m, &m.elements[0]).is_none());
+        assert_eq!(
+            member_orientation(&m, &m.elements[0]),
+            Some(MemberOrientation::Beam)
+        );
+    }
+
+    #[test]
+    fn test_diagonal_column_uses_section_use() {
+        let mut m = joint_model(h_beam(), 600.0, h_col());
+        m.nodes[2].coord = [1000.0, 0.0, 0.0];
+        assert_eq!(
+            member_orientation(&m, &m.elements[1]),
+            Some(MemberOrientation::Column)
+        );
+    }
+
+    #[test]
+    fn test_non_line_element_is_not_classified_by_section_use() {
+        let mut m = joint_model(h_beam(), 600.0, h_col());
+        m.elements[0].kind = ElementKind::Wall;
+        assert_eq!(member_orientation(&m, &m.elements[0]), None);
+        assert!(resolve_panel_joint(&m, NodeId(0), &m.elements).is_none());
     }
 
     /// 梁の db: H 形はせい − フランジ厚、それ以外は 0.9・せい。

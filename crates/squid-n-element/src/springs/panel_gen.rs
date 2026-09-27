@@ -38,7 +38,8 @@ use squid_n_core::model::{
     ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Model, PanelZoneMode,
 };
 use squid_n_core::panel_zone::{
-    member_orientation, panel_half_extent, resolve_panel_joint, PanelHalfExtent,
+    is_horizontal_or_vertical_member, member_orientation, panel_half_extent, resolve_panel_joint,
+    PanelHalfExtent,
 };
 
 /// 1 つの接合部に生成するパネルの諸元。
@@ -164,7 +165,7 @@ fn apply_panel_offsets(model: &mut Model, adjacency: &NodeAdjacency, panels: &[G
         .iter()
         .enumerate()
         .map(|(ei, e)| {
-            let ends = match (e.nodes.len() >= 2)
+            let ends = match (e.nodes.len() >= 2 && is_horizontal_or_vertical_member(model, e))
                 .then(|| member_orientation(model, e))
                 .flatten()
             {
@@ -249,7 +250,7 @@ mod tests {
     use squid_n_core::dof::Dof6Mask;
     use squid_n_core::ids::{MaterialId, SectionId};
     use squid_n_core::model::MaterialCategory;
-    use squid_n_core::model::{Material, Node, Section};
+    use squid_n_core::model::{FrameSectionUse, Material, Node, Section};
     use squid_n_core::panel_zone::PanelGeometry;
     use squid_n_core::section_shape::SectionShape;
 
@@ -270,6 +271,7 @@ mod tests {
     /// 主材料を指定して断面を作る。
     fn section_with_mat(id: u32, shape: SectionShape, depth: f64, mat: u32) -> Section {
         Section {
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(id),
             material: Some(MaterialId(mat)),
             name: String::new(),
@@ -351,8 +353,16 @@ mod tests {
                 node(2, [0.0, 0.0, 0.0]),
             ],
             sections: vec![
-                section(0, beam_shape, beam_depth),
-                section(1, col_shape, 400.0),
+                {
+                    let mut section = section(0, beam_shape, beam_depth);
+                    section.frame_use = Some(FrameSectionUse::Beam);
+                    section
+                },
+                {
+                    let mut section = section(1, col_shape, 400.0);
+                    section.frame_use = Some(FrameSectionUse::Column);
+                    section
+                },
             ],
             materials: vec![
                 test_material(0, MaterialCategory::Steel),
@@ -581,6 +591,39 @@ mod tests {
         assert!((col.rigid_length_j() - 300.0).abs() < 1e-9);
     }
 
+    /// 斜材はパネルの接合面を持たないため、剛域長へパネルオフセットを加えない。
+    #[test]
+    fn test_diagonal_member_does_not_get_panel_offset() {
+        let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
+        model.nodes.push(Node {
+            id: NodeId(3),
+            coord: [3000.0, 0.0, 6000.0],
+            restraint: Dof6Mask::FREE,
+            mass: None,
+            story: None,
+            support_spring: None,
+        });
+        model.elements.push(member(2, 0, 3, 0));
+
+        apply_auto_panel_zones(&mut model);
+
+        let diagonal = model
+            .elements
+            .iter()
+            .find(|e| e.nodes.as_slice() == [NodeId(0), NodeId(3)])
+            .expect("斜材");
+        assert_eq!(
+            diagonal.rigid_zone.panel_offset_i, 0.0,
+            "斜材の i 端へパネルオフセットを設定しない"
+        );
+        assert_eq!(
+            diagonal.rigid_zone.panel_offset_j, 0.0,
+            "斜材の j 端へパネルオフセットを設定しない"
+        );
+        assert_eq!(diagonal.rigid_zone.rigid_length_i(), 0.0);
+        assert_eq!(diagonal.rigid_zone.rigid_length_j(), 0.0);
+    }
+
     /// 剛体アーム長は `max(剛域長, オフセット)`。手動指定が大きければそちらが効き、
     /// 小さくてもオフセットの分は確保される（接合位置は幾何的事実のため）。
     #[test]
@@ -681,7 +724,9 @@ mod tests {
                 story: None,
                 support_spring: None,
             });
-            model.sections.push(section(2, thin.clone(), 400.0));
+            let mut thin_section = section(2, thin.clone(), 400.0);
+            thin_section.frame_use = Some(FrameSectionUse::Column);
+            model.sections.push(thin_section);
             let upper = member(2, 0, 3, 2);
             if upper_first {
                 model.elements.insert(0, upper);

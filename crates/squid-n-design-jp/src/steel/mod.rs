@@ -223,6 +223,7 @@ pub(crate) mod test_support {
 
     pub(crate) fn rect_section(b: f64, d: f64, name: &str) -> Section {
         Section {
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
             id: SectionId(0),
             name: name.to_string(),
             area: b * d,

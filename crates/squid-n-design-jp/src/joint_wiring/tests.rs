@@ -40,6 +40,7 @@ fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>)
         });
     }
     let sections = vec![Section {
+        frame_use: None,
         id: SectionId(0),
         name: "wall".to_string(),
         area: 0.0,
@@ -572,6 +573,7 @@ fn wall_with_side_columns_emits_nonlinear_shear_trilinear() {
     };
     // 材料は断面が持つ。
     let mut col_sec = col_shape.to_section(SectionId(1), "C600".into());
+    col_sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
     col_sec.material = Some(MaterialId(0));
     model.sections.push(col_sec);
     for e in model
@@ -687,6 +689,14 @@ fn rc_cross_joint_emits_ultimate_check() {
     }
     // 材料は断面が持つ。主材料 = コンクリート、主筋・せん断補強筋 = SD345。
     let with_mats = |mut sec: Section| {
+        sec.frame_use = Some(match &sec.shape {
+            Some(
+                SectionShape::RcColumnRect { .. }
+                | SectionShape::RcColumnCircle { .. }
+                | SectionShape::SrcColumnRect { .. },
+            ) => squid_n_core::model::FrameSectionUse::Column,
+            _ => squid_n_core::model::FrameSectionUse::Beam,
+        });
         sec.material = Some(MaterialId(0));
         sec.rebar_material = Some(MaterialId(1));
         sec.shear_rebar_material = Some(MaterialId(1));
@@ -812,6 +822,14 @@ fn cross_joint_model(col_shape: SectionShape, beam_shape: SectionShape) -> Model
         });
     }
     let with_mats = |mut sec: Section| {
+        sec.frame_use = Some(match &sec.shape {
+            Some(
+                SectionShape::RcColumnRect { .. }
+                | SectionShape::RcColumnCircle { .. }
+                | SectionShape::SrcColumnRect { .. },
+            ) => squid_n_core::model::FrameSectionUse::Column,
+            _ => squid_n_core::model::FrameSectionUse::Beam,
+        });
         sec.material = Some(MaterialId(0));
         sec.rebar_material = Some(MaterialId(1));
         sec.shear_rebar_material = Some(MaterialId(1));

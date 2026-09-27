@@ -140,7 +140,8 @@ mod tests {
     use squid_n_core::dof::Dof6Mask;
     use squid_n_core::ids::{ElemId, NodeId, SectionId};
     use squid_n_core::model::{
-        ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Node, RigidZone, Story,
+        ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Node,
+        RigidZone, Section, Story,
     };
 
     /// 1 層 3 本柱（2 本鉛直・1 本斜め）のテストモデル。
@@ -224,6 +225,11 @@ mod tests {
         let model = Model {
             nodes,
             elements,
+            sections: vec![{
+                let mut section = Section::zero(SectionId(0), "C".into());
+                section.frame_use = Some(FrameSectionUse::Column);
+                section
+            }],
             stories: vec![base_story, story],
             ..Default::default()
         };
@@ -351,6 +357,11 @@ mod tests {
         let model = Model {
             nodes,
             elements,
+            sections: vec![{
+                let mut section = Section::zero(SectionId(0), "C".into());
+                section.frame_use = Some(FrameSectionUse::Column);
+                section
+            }],
             stories: vec![base_story, top],
             ..Default::default()
         };

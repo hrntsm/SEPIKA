@@ -1847,6 +1847,14 @@ pub(crate) fn steel_member_use_of(
     model: &squid_n_core::model::Model,
 ) -> squid_n_design_jp::secondary::width_thickness::SteelMemberUse {
     use squid_n_design_jp::secondary::width_thickness::SteelMemberUse;
+    if matches!(
+        elem.kind,
+        squid_n_core::model::ElementKind::Wall
+            | squid_n_core::model::ElementKind::Shell
+            | squid_n_core::model::ElementKind::PanelZone
+    ) {
+        return SteelMemberUse::Beam;
+    }
     match squid_n_design_jp::MemberKind::of_element(elem, model) {
         squid_n_design_jp::MemberKind::Column => SteelMemberUse::Column,
         _ => SteelMemberUse::Beam,
