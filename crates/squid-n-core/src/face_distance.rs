@@ -81,6 +81,7 @@ mod tests {
         Section {
             id: SectionId(id),
             name: String::new(),
+            frame_use: None,
             area: 0.0,
             iy: 0.0,
             iz: 0.0,

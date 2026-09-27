@@ -7,6 +7,7 @@ use squid_n_section::fiber::rect_fiber_section;
 
 fn make_section(w: f64, d: f64) -> Section {
     Section {
+        frame_use: None,
         id: SectionId(0),
         name: "test".into(),
         area: w * d,

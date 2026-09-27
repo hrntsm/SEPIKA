@@ -13,9 +13,9 @@ use squid_n_core::ids::{
     StoryId, WallPlateId,
 };
 use squid_n_core::model::{
-    AreaLoad, DistributionMethod, ElementData, ElementKind, EndCondition, ForceRegime, LoadCase,
-    LocalAxis, Material, MaterialCategory, Model, NodalLoad, Node, OneWayDir, Section, Slab,
-    SlabPlate, SlabShape, SlabUsage, Story, WallPlate, WallPlateShape,
+    AreaLoad, DistributionMethod, ElementData, ElementKind, EndCondition, ForceRegime,
+    FrameSectionUse, LoadCase, LocalAxis, Material, MaterialCategory, Model, NodalLoad, Node,
+    OneWayDir, Section, Slab, SlabPlate, SlabShape, SlabUsage, Story, WallPlate, WallPlateShape,
 };
 use squid_n_core::region_rebuild::rebuild_floor_regions;
 use squid_n_core::section_shape::SectionShape;
@@ -76,6 +76,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
 
     let mut notes: Vec<String> = Vec::new();
 
+    let section_uses = section_uses(&pending_members, &pending_secondaries);
     let section_index = build_sections(
         &mut model,
         pending_secs,
@@ -83,6 +84,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &material_index,
         &mut warnings,
         &mut notes,
+        &section_uses,
     );
 
     let mut stats = LinkStats::default();
@@ -1380,6 +1382,44 @@ fn build_index(ids: impl Iterator<Item = u32>) -> HashMap<u32, u32> {
         .collect()
 }
 
+fn section_uses(
+    members: &[PendingMember],
+    secondaries: &[PendingSecondary],
+) -> HashMap<u32, Option<FrameSectionUse>> {
+    let mut uses = HashMap::new();
+    let mut add = |section: Option<u32>, usage: FrameSectionUse| {
+        let Some(section) = section else { return };
+        match uses.get(&section).copied() {
+            None => {
+                uses.insert(section, Some(usage));
+            }
+            Some(Some(previous)) if previous == usage => {}
+            Some(_) => {
+                uses.insert(section, None);
+            }
+        }
+    };
+    for member in members {
+        add(
+            member.section,
+            match member.kind {
+                PendingMemberKind::Beam => FrameSectionUse::Beam,
+                PendingMemberKind::Brace { .. } => FrameSectionUse::Brace,
+            },
+        );
+    }
+    for member in secondaries {
+        add(
+            member.section,
+            match member.kind {
+                squid_n_core::model::SecondaryMemberKind::Joist => FrameSectionUse::Beam,
+                squid_n_core::model::SecondaryMemberKind::Post => FrameSectionUse::Column,
+            },
+        );
+    }
+    uses
+}
+
 /// 保留していた断面を id 昇順に整列・連番へ再割当てし、形鋼名を解決して
 /// `model.sections` を構築する。返り値は 元の file id → 再割当て後 index のマップ。
 ///
@@ -1397,6 +1437,7 @@ fn build_sections(
     material_index: &HashMap<u32, u32>,
     warnings: &mut Vec<String>,
     notes: &mut Vec<String>,
+    section_uses: &HashMap<u32, Option<FrameSectionUse>>,
 ) -> HashMap<u32, u32> {
     pending.sort_by_key(|s| s.file_id);
 
@@ -1419,6 +1460,7 @@ fn build_sections(
             } => Section {
                 id: new_id,
                 name: ps.name,
+                frame_use: section_uses.get(&file_id).copied().flatten(),
                 area,
                 iy,
                 iz,
@@ -1436,16 +1478,26 @@ fn build_sections(
                 shear_rebar_material: None,
                 steel_material: None,
             },
-            PendingSecKind::Shape(shape) => shape.to_section(new_id, ps.name),
+            PendingSecKind::Shape(shape) => {
+                let mut section = shape.to_section(new_id, ps.name);
+                section.frame_use = section_uses.get(&file_id).copied().flatten();
+                section
+            }
             PendingSecKind::SteelRef(shape_name) => {
                 match shape_name.and_then(|nm| steel_lib.get(&nm).cloned()) {
-                    Some(shape) => shape.to_section(new_id, ps.name),
+                    Some(shape) => {
+                        let mut section = shape.to_section(new_id, ps.name);
+                        section.frame_use = section_uses.get(&file_id).copied().flatten();
+                        section
+                    }
                     None => {
                         warnings.push(format!(
                             "鋼断面 (name=\"{}\") の形鋼参照を解決できず物性ゼロで取り込みました",
                             ps.name
                         ));
-                        Section::zero(new_id, ps.name)
+                        let mut section = Section::zero(new_id, ps.name);
+                        section.frame_use = section_uses.get(&file_id).copied().flatten();
+                        section
                     }
                 }
             }
@@ -1528,6 +1580,7 @@ fn build_sections(
             }
         };
         let mut section = section;
+        section.frame_use = section_uses.get(&file_id).copied().flatten();
         section.floor = floor;
         section.material = ps
             .mat

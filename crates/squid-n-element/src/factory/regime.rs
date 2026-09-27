@@ -5,7 +5,7 @@
 //! - [`is_vertical_member`] — 鉛直材（柱）かどうか
 //! - [`is_on_rigid_diaphragm`] — 剛床に所属するか
 
-use squid_n_core::model::{ElementData, ForceRegime, Model};
+use squid_n_core::model::{ElementData, ForceRegime, FrameSectionUse, Model};
 
 /// ForceRegime の自動選択結果
 pub enum ResolvedRegime {
@@ -24,26 +24,21 @@ pub fn resolve_force_regime(data: &ElementData, model: &Model) -> ResolvedRegime
         };
     }
 
-    let is_vertical = is_vertical_member(data, model);
+    let is_column = is_column_member(data, model);
     let on_rigid_diaphragm = is_on_rigid_diaphragm(data, model);
 
-    if on_rigid_diaphragm && !is_vertical {
+    if on_rigid_diaphragm && !is_column {
         ResolvedRegime::ConcentratedSpring
     } else {
         ResolvedRegime::Fiber
     }
 }
 
-pub(super) fn is_vertical_member(data: &ElementData, model: &Model) -> bool {
-    if data.nodes.len() < 2 {
-        return false;
-    }
-    let n0 = &model.nodes.get(data.nodes[0].index());
-    let n1 = &model.nodes.get(data.nodes[1].index());
-    match (n0, n1) {
-        (Some(n0), Some(n1)) => squid_n_core::geom::is_vertical_axis(n0.coord, n1.coord),
-        _ => false,
-    }
+pub(super) fn is_column_member(data: &ElementData, model: &Model) -> bool {
+    data.section
+        .and_then(|id| model.sections.get(id.index()))
+        .and_then(|section| section.frame_use)
+        == Some(FrameSectionUse::Column)
 }
 
 fn is_on_rigid_diaphragm(data: &ElementData, model: &Model) -> bool {

@@ -179,6 +179,7 @@ impl EditCommand for EditSectionShape {
         let old = model.sections[idx].clone();
         let mut new_sec = self.new_shape.to_section(self.section, old.name.clone());
         new_sec.floor = old.floor.clone();
+        new_sec.frame_use = old.frame_use;
         model.sections[idx] = new_sec;
         Box::new(RestoreSection { old })
     }

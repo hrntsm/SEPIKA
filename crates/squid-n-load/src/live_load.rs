@@ -121,6 +121,7 @@ mod tests {
             });
         }
         model.sections.push(Section {
+            frame_use: None,
             id: SectionId(0),
             name: "Col".into(),
             area: 90000.0,

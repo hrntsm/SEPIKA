@@ -191,6 +191,7 @@ mod tests {
 
     fn section(shape: Option<SectionShape>) -> Section {
         Section {
+            frame_use: None,
             id: SectionId(0),
             name: String::new(),
             area: 1.0e4,

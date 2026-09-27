@@ -22,19 +22,18 @@ pub(super) struct MemberInfo<'a> {
     pub(super) forces: ForcesAt<'a>,
     /// 部材の構造種別（断面と材料から解決済み。`squid_n_core::structure_kind`）。
     pub(super) kind: StructureKind,
-    /// 部材軸の鉛直成分（|ez|）。
-    pub(super) ez: f64,
+    pub(super) member_kind: MemberKind,
     pub(super) length: f64,
 }
 
 impl MemberInfo<'_> {
     /// 柱系の部材か（部材種別の判定は [`MemberKind`] の単一規約に従う）。
     pub(super) fn is_column(&self) -> bool {
-        MemberKind::from_ez(self.ez) == MemberKind::Column
+        self.member_kind == MemberKind::Column
     }
     /// 水平な梁系の部材か（同上）。
     pub(super) fn is_beam_horiz(&self) -> bool {
-        MemberKind::from_ez(self.ez) == MemberKind::Beam
+        self.member_kind == MemberKind::Beam
     }
     /// 節点 `nid` 側の端部内力行（pos 0/1 のうち近い方）。
     pub(super) fn end_forces(&self, nid: NodeId) -> Option<&[f64; 6]> {

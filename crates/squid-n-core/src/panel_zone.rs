@@ -61,9 +61,9 @@
 //! 通しダイアフラムがせん断挙動に関与し、鋼管のみの実効体積による弾性せん断パネル
 //! `G・Ve` では剛性を表せないため、接合部を剛節点として扱う。
 
-use crate::geom::{self, MemberAxisClass};
+use crate::geom;
 use crate::ids::{ElemId, NodeId};
-use crate::model::{ElementData, ElementKind, Model, Section};
+use crate::model::{ElementData, ElementKind, FrameSectionUse, Model, Section};
 use crate::section_shape::SectionShape;
 use crate::structure_kind::member_structure_kind;
 
@@ -91,11 +91,11 @@ pub fn member_unit_axis(model: &Model, elem: &ElementData) -> Option<[f64; 3]> {
 
 /// 要素の材軸の鉛直成分から柱・はりを判定する。線材以外・退化長さは `None`。
 pub fn member_orientation(model: &Model, elem: &ElementData) -> Option<MemberOrientation> {
-    let ez = member_unit_axis(model, elem)?[2].abs();
-    match geom::classify_member_ez(ez) {
-        MemberAxisClass::Column => Some(MemberOrientation::Column),
-        MemberAxisClass::Beam => Some(MemberOrientation::Beam),
-        MemberAxisClass::Diagonal => None,
+    let section = elem.section.and_then(|id| model.sections.get(id.index()))?;
+    match section.frame_use? {
+        FrameSectionUse::Column => Some(MemberOrientation::Column),
+        FrameSectionUse::Beam => Some(MemberOrientation::Beam),
+        FrameSectionUse::Brace => None,
     }
 }
 
@@ -395,6 +395,7 @@ mod tests {
 
     fn sec(shape: SectionShape, depth: f64, panel_thickness: Option<f64>) -> Section {
         Section {
+            frame_use: None,
             id: SectionId(0),
             name: String::new(),
             floor: None,

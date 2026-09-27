@@ -330,7 +330,7 @@ use squid_n_core::geom::vec3::dist as dist3;
 
 /// 鉛直材（柱）判定。判定規則の情報源は `squid-n-core` に置く
 /// （仕上げ周長式・柱脚梁せい付加・通り芯の自動生成と同一規則）。
-use squid_n_core::geom::is_vertical_pair;
+use squid_n_core::model::FrameSectionUse;
 
 /// 平面多角形（3D 座標）の面積 [mm²]。算定の情報源は `squid-n-core` に置く。
 use squid_n_core::geom::polygon::area_3d as polygon_area_3d;
@@ -481,7 +481,11 @@ pub fn compute_quantity_takeoff(model: &Model, cfg: &QuantityCfg) -> QuantityTak
         };
         let (ca, cb) = (a.coord, b.coord);
         min_z = min_z.min(ca[2]).min(cb[2]);
-        if is_vertical_pair(ca, cb) {
+        if model
+            .element_section(e)
+            .and_then(|section| section.frame_use)
+            == Some(FrameSectionUse::Column)
+        {
             column_nodes.insert(ni);
             column_nodes.insert(nj);
         } else {
@@ -693,7 +697,7 @@ fn line_member_quantity(ctx: &Ctx, elem_idx: usize, elem: &ElementData) -> Optio
     if len <= 0.0 {
         return None;
     }
-    let vertical = is_vertical_pair(ci, cj);
+    let vertical = sec.frame_use == Some(FrameSectionUse::Column);
     let structure = squid_n_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category));
 
     if vertical {

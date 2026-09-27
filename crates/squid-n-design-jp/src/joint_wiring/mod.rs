@@ -20,7 +20,7 @@ pub(crate) use crate::wall_opening::equivalent_opening;
 #[cfg(test)]
 pub(crate) use squid_n_core::model::ElementKind;
 
-use crate::{CheckOutcome, LoadTerm};
+use crate::{CheckOutcome, LoadTerm, MemberKind};
 use squid_n_core::ids::{ElemId, NodeId};
 use squid_n_core::model::Model;
 
@@ -80,10 +80,7 @@ pub fn collect_joint_checks_with_long(
         if length < 1e-9 {
             continue;
         }
-        let (Some(p0), Some(p1)) = (
-            model.nodes.get(elem.nodes[0].index()).map(|n| n.coord),
-            model.nodes.get(elem.nodes[1].index()).map(|n| n.coord),
-        ) else {
+        let Ok(member_kind) = MemberKind::try_of_element(elem, model) else {
             continue;
         };
         members.push(MemberInfo {
@@ -95,7 +92,7 @@ pub fn collect_joint_checks_with_long(
             steel_mat,
             forces,
             kind: squid_n_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category)),
-            ez: ((p1[2] - p0[2]) / length).abs(),
+            member_kind,
             length,
         });
     }

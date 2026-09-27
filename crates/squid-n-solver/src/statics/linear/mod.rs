@@ -3,7 +3,7 @@ use crate::common::constraint::Reducer;
 use crate::common::csc_cache::CscCache;
 use squid_n_core::dof::DofMap;
 use squid_n_core::ids::{ElemId, LoadCaseId};
-use squid_n_core::model::{ElementData, ElementKind, MemberLoad, Model};
+use squid_n_core::model::{ElementData, ElementKind, FrameSectionUse, MemberLoad, Model};
 use squid_n_element::behavior::{Ctx, ElementBehavior};
 use squid_n_element::factory::build_behavior_with_axial_factor;
 use squid_n_element::frame::beam::MemberForces;
@@ -18,16 +18,12 @@ const AXIAL_DISABLE_FACTOR: f64 = 1.0e-6;
 /// 判定規則は全クレート共通の 45° 余弦基準
 /// （[`squid_n_core::geom::is_vertical_axis`]: |ez| > 0.707）。
 fn is_vertical_column(elem: &ElementData, model: &Model) -> bool {
-    if !matches!(elem.kind, ElementKind::Beam) || elem.nodes.len() < 2 {
-        return false;
-    }
-    let (Some(n0), Some(n1)) = (
-        model.nodes.get(elem.nodes[0].index()),
-        model.nodes.get(elem.nodes[1].index()),
-    ) else {
-        return false;
-    };
-    squid_n_core::geom::is_vertical_axis(n0.coord, n1.coord)
+    matches!(elem.kind, ElementKind::Beam)
+        && elem
+            .section
+            .and_then(|id| model.sections.get(id.index()))
+            .and_then(|section| section.frame_use)
+            == Some(FrameSectionUse::Column)
 }
 
 /// 長期応力解析で軸力を負担させない部材（対象: ブレース／柱）かどうかを、

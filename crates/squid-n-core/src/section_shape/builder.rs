@@ -158,9 +158,20 @@ impl SectionShape {
             }
             _ => None,
         };
+        let frame_use = match self {
+            SectionShape::RcColumnRect { .. }
+            | SectionShape::RcColumnCircle { .. }
+            | SectionShape::SrcColumnRect { .. } => Some(crate::model::FrameSectionUse::Column),
+            SectionShape::RcBeamRect { .. } | SectionShape::SrcBeamRect { .. } => {
+                Some(crate::model::FrameSectionUse::Beam)
+            }
+            SectionShape::RcSlab { .. } | SectionShape::RcWall { .. } => None,
+            _ => Some(crate::model::FrameSectionUse::Beam),
+        };
         Section {
             id,
             name,
+            frame_use,
             floor: None,
             area,
             iy,

@@ -145,13 +145,16 @@ fn g_ratio_at_with_index(
     let mut sum_col = 0.0_f64;
     let mut sum_beam = 0.0_f64;
     for other in index.elements_at(model, *node_id) {
-        let Some((len, ez)) = line_geometry(model, other) else {
+        let Some((len, _)) = line_geometry(model, other) else {
             continue;
         };
         let Some(ei_l) = flexural_stiffness(model, other, len) else {
             continue;
         };
-        match crate::MemberKind::from_ez(ez) {
+        let Ok(kind) = crate::MemberKind::try_of_element(other, model) else {
+            continue;
+        };
+        match kind {
             crate::MemberKind::Column => sum_col += ei_l,
             crate::MemberKind::Beam => sum_beam += ei_l,
             crate::MemberKind::Brace => {}
@@ -182,8 +185,8 @@ pub fn steel_column_k_with_index(
     if elem.kind != ElementKind::Beam {
         return None;
     }
-    let (_, ez) = line_geometry(model, elem)?;
-    if crate::MemberKind::from_ez(ez) != crate::MemberKind::Column {
+    line_geometry(model, elem)?;
+    if crate::MemberKind::try_of_element(elem, model).ok()? != crate::MemberKind::Column {
         return None;
     }
     let ga = g_ratio_at_with_index(model, index, elem, 0);
@@ -242,11 +245,13 @@ fn g_ratio_axis_at(
     let mut sum_col = 0.0_f64;
     let mut sum_beam = 0.0_f64;
     for other in index.elements_at(model, *node_id) {
-        let Some((raw_len, ez)) = line_geometry(model, other) else {
+        let Some((raw_len, _)) = line_geometry(model, other) else {
             continue;
         };
         let len = clear_length(other, raw_len);
-        let other_kind = crate::MemberKind::from_ez(ez);
+        let Ok(other_kind) = crate::MemberKind::try_of_element(other, model) else {
+            continue;
+        };
         if other_kind == crate::MemberKind::Column {
             let Some((sec, mat)) = section_material(model, other) else {
                 continue;
@@ -315,8 +320,8 @@ pub fn steel_column_k_axes_with_index(
         return None;
     }
     let (p0, p1) = node_coords(model, elem)?;
-    let (_, ez_comp) = line_geometry(model, elem)?;
-    if crate::MemberKind::from_ez(ez_comp) != crate::MemberKind::Column {
+    line_geometry(model, elem)?;
+    if crate::MemberKind::try_of_element(elem, model).ok()? != crate::MemberKind::Column {
         return None;
     }
     let frame = LocalFrame::from_nodes(p0, p1, elem.local_axis.ref_vector);
