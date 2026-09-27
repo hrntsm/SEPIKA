@@ -3246,6 +3246,12 @@ fn test_export_secondary_post_uses_column_section_map() {
             && xml.contains("<StbBeam id=\"2\" name=\"B2\" id_node_start=\"1\" id_node_end=\"2\" rotate=\"0\" id_section=\"2\""),
         "二次部材の種別ごとに断面用途を選ぶ: {xml}"
     );
+    let back = import_stbridge(&xml).expect("主架構と二次部材で共有した断面を再取り込み");
+    assert_eq!(back.sections.len(), 1, "分割された断面定義を1件へ統合する");
+    assert_eq!(
+        back.sections[0].frame_use,
+        Some(squid_n_core::model::FrameSectionUse::Column)
+    );
 }
 
 #[test]

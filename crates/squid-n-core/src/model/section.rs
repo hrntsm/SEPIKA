@@ -121,7 +121,6 @@ impl Section {
             && self.rebar_material == other.rebar_material
             && self.shear_rebar_material == other.shear_rebar_material
             && self.steel_material == other.steel_material
-            && self.frame_use == other.frame_use
     }
 }
 

@@ -1595,7 +1595,12 @@ fn build_sections(
             });
 
         let idx = match by_key.get(&(section.name.clone(), section.floor.clone())) {
-            Some(&existing) if model.sections[existing].frame_use != section.frame_use => {
+            Some(&existing)
+                if matches!(
+                    (model.sections[existing].frame_use, section.frame_use),
+                    (Some(previous), Some(current)) if previous != current
+                ) =>
+            {
                 return Err(StbError::Unmappable(format!(
                     "符号＋階が同じ断面定義の用途が競合: {} ({:?} と {:?})",
                     section.display_name(),
@@ -1604,6 +1609,9 @@ fn build_sections(
                 )));
             }
             Some(&existing) if model.sections[existing].properties_eq(&section) => {
+                if model.sections[existing].frame_use.is_none() {
+                    model.sections[existing].frame_use = section.frame_use;
+                }
                 merged += 1;
                 existing
             }
