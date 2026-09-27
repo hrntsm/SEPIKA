@@ -57,25 +57,8 @@ fn apply_src_toggle(name: &str, fc: f64) -> (String, f64) {
     (format!("{name}(SRC)"), rho)
 }
 
-fn is_standard_concrete(
-    name: &str,
-    category: MaterialCategory,
-    fc: Option<f64>,
-    density: f64,
-    concrete_class: ConcreteClass,
-) -> bool {
-    let _ = (name, fc, density);
-    category == MaterialCategory::Concrete && concrete_class == ConcreteClass::Normal
-}
-
-fn young_editable(
-    name: &str,
-    category: MaterialCategory,
-    fc: Option<f64>,
-    density: f64,
-    concrete_class: ConcreteClass,
-) -> bool {
-    !is_standard_concrete(name, category, fc, density, concrete_class)
+fn young_editable(category: MaterialCategory, concrete_class: ConcreteClass) -> bool {
+    !(category == MaterialCategory::Concrete && concrete_class == ConcreteClass::Normal)
 }
 
 /// 材料タブ：プリセット追加・カスタム追加・一覧編集・削除。
@@ -324,13 +307,7 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                 (
                     MaterialField::Young,
                     format!("{}", mat.young),
-                    young_editable(
-                        &mat.name,
-                        mat.category,
-                        mat.fc,
-                        mat.density,
-                        mat.concrete_class,
-                    ),
+                    young_editable(mat.category, mat.concrete_class),
                 ),
                 (MaterialField::Poisson, format!("{}", mat.poisson), true),
                 (MaterialField::Density, format!("{:.3e}", mat.density), true),
@@ -355,13 +332,7 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
             for (field, current, required) in cells {
                 row.col(|ui| {
                     let editable = field != MaterialField::Young
-                        || young_editable(
-                            &mat.name,
-                            mat.category,
-                            mat.fc,
-                            mat.density,
-                            mat.concrete_class,
-                        );
+                        || young_editable(mat.category, mat.concrete_class);
                     let cell_id = egui::Id::new(("mat_cell", mat_id.0, field as u8));
                     let mut buf = ui
                         .data(|d| d.get_temp::<String>(cell_id))
@@ -497,24 +468,15 @@ mod tests {
     #[test]
     fn standard_concrete_young_is_not_editable_but_direct_input_is() {
         assert!(!young_editable(
-            "Fc24",
             MaterialCategory::Concrete,
-            Some(24.0),
-            0.0,
             ConcreteClass::Normal
         ));
         assert!(young_editable(
-            "任意",
             MaterialCategory::Concrete,
-            Some(24.0),
-            0.0,
             ConcreteClass::UserDefined
         ));
         assert!(young_editable(
-            "SS400",
             MaterialCategory::Steel,
-            None,
-            0.0,
             ConcreteClass::Normal
         ));
     }
@@ -525,18 +487,9 @@ mod tests {
             .into_iter()
             .find(|p| p.name == "Fc24")
             .unwrap();
-        assert!(!young_editable(
-            preset.name,
-            preset.category,
-            preset.fc,
-            preset.density,
-            ConcreteClass::Normal,
-        ));
+        assert!(!young_editable(preset.category, ConcreteClass::Normal));
         assert!(young_editable(
-            "Fc24の直接入力",
             MaterialCategory::Concrete,
-            preset.fc,
-            preset.density,
             ConcreteClass::UserDefined,
         ));
     }

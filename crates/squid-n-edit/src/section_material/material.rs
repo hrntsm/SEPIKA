@@ -104,6 +104,9 @@ impl EditCommand for SetMaterialField {
         if idx >= model.materials.len() || model.materials[idx].id != self.id {
             return Box::new(Noop);
         }
+        if self.field == MaterialField::Young && model.materials[idx].is_standard_concrete() {
+            return Box::new(Noop);
+        }
         let mat = &mut model.materials[idx];
         let old = match self.field {
             MaterialField::Young => {

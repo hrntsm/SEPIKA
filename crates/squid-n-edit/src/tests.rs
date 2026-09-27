@@ -1449,6 +1449,96 @@ fn test_set_material_field_roundtrip() {
 }
 
 #[test]
+fn standard_concrete_young_cannot_be_changed_but_direct_material_can() {
+    let mut model = empty_model();
+    let mut stack = UndoStack::new();
+    stack.run(
+        &mut model,
+        Box::new(AddMaterial {
+            name: "Fc24".into(),
+            category: MaterialCategory::Concrete,
+            young: 22000.0,
+            poisson: 0.2,
+            density: 2.3e-9,
+            fc: Some(24.0),
+            fy: None,
+            strength_factor: None,
+            concrete_class: squid_n_core::units::ConcreteClass::Normal,
+        }),
+    );
+    stack.run(
+        &mut model,
+        Box::new(SetMaterialField {
+            id: MaterialId(0),
+            field: MaterialField::Young,
+            value: Some(24000.0),
+        }),
+    );
+    assert_eq!(model.materials[0].young, 22000.0);
+
+    stack.run(
+        &mut model,
+        Box::new(AddMaterial {
+            name: "Raw Fc24".into(),
+            category: MaterialCategory::Concrete,
+            young: 22000.0,
+            poisson: 0.2,
+            density: 2.3e-9,
+            fc: Some(24.0),
+            fy: None,
+            strength_factor: None,
+            concrete_class: squid_n_core::units::ConcreteClass::UserDefined,
+        }),
+    );
+    stack.run(
+        &mut model,
+        Box::new(SetMaterialField {
+            id: MaterialId(1),
+            field: MaterialField::Young,
+            value: Some(24000.0),
+        }),
+    );
+    assert_eq!(model.materials[1].young, 24000.0);
+}
+
+#[test]
+fn steel_and_rebar_young_remain_editable() {
+    let mut model = empty_model();
+    let mut stack = UndoStack::new();
+    for (category, name) in [
+        (MaterialCategory::Steel, "SS400"),
+        (MaterialCategory::Rebar, "SD345"),
+    ] {
+        stack.run(
+            &mut model,
+            Box::new(AddMaterial {
+                name: name.into(),
+                category,
+                young: 205000.0,
+                poisson: 0.3,
+                density: 7.85e-9,
+                fc: None,
+                fy: Some(400.0),
+                strength_factor: None,
+                concrete_class: Default::default(),
+            }),
+        );
+    }
+    for id in [0, 1] {
+        stack.run(
+            &mut model,
+            Box::new(SetMaterialField {
+                id: MaterialId(id),
+                field: MaterialField::Young,
+                value: Some(200000.0),
+            }),
+        );
+    }
+    assert_eq!(model.materials[0].young, 200000.0);
+    assert_eq!(model.materials[1].young, 200000.0);
+}
+
+#[test]
 fn test_set_material_strength_factor_roundtrip() {
     let mut model = empty_model();
     let mut stack = UndoStack::new();
