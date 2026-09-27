@@ -549,7 +549,7 @@ mod tests {
     use squid_n_core::ids::{ElemId, MaterialId, SectionId};
     use squid_n_core::model::MaterialCategory;
     use squid_n_core::model::{
-        ElementKind, EndCondition, ForceRegime, LocalAxis, Material, Node, Section,
+        ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material, Node, Section,
     };
     use squid_n_core::section_shape::SectionShape;
 
@@ -692,7 +692,11 @@ mod tests {
             support_spring: None,
         };
         let section = |id: u32, shape: SectionShape, depth: f64, area: f64| Section {
-            frame_use: None,
+            frame_use: Some(if id == 0 {
+                FrameSectionUse::Beam
+            } else {
+                FrameSectionUse::Column
+            }),
             id: SectionId(id),
             name: String::new(),
             area,

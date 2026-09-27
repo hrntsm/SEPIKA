@@ -6,8 +6,8 @@ use squid_n_core::model::{FloorRegion, Slab, SlabPlate, SlabShape};
 use squid_n_core::dof::Dof6Mask;
 use squid_n_core::ids::{ElemId, FloorRegionId, MaterialId, NodeId, SectionId, SlabId};
 use squid_n_core::model::{
-    DistributionMethod, ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material,
-    FrameSectionUse, MaterialCategory, Model, Node, RigidZone, Section,
+    DistributionMethod, ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse,
+    LocalAxis, Material, MaterialCategory, Model, Node, RigidZone, Section,
 };
 use squid_n_core::section_shape::{
     BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar,
@@ -74,11 +74,16 @@ fn rc_girder_section(id: u32) -> Section {
 
 /// 材料は断面が持つ。RC 断面へ主材料（コンクリート 0）と鉄筋（1）を割り当てる。
 fn with_rc_materials(mut sec: Section) -> Section {
-    sec.frame_use = Some(if matches!(sec.shape, Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. })) {
-        FrameSectionUse::Column
-    } else {
-        FrameSectionUse::Beam
-    });
+    sec.frame_use = Some(
+        if matches!(
+            sec.shape,
+            Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. })
+        ) {
+            FrameSectionUse::Column
+        } else {
+            FrameSectionUse::Beam
+        },
+    );
     sec.material = Some(MaterialId(0));
     sec.rebar_material = Some(MaterialId(1));
     sec.shear_rebar_material = Some(MaterialId(1));

@@ -2,10 +2,12 @@ use super::*;
 use squid_n_core::dof::Dof6Mask;
 use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId};
 use squid_n_core::model::AnalysisKind;
-use squid_n_core::model::{EndCondition, LocalAxis, Material, MaterialCategory, Node, Section};
+use squid_n_core::model::{
+    EndCondition, FrameSectionUse, LocalAxis, Material, MaterialCategory, Node, Section,
+};
 
 fn make_diaphragm_model() -> Model {
-    Model {
+    let mut model = Model {
         nodes: vec![
             Node {
                 id: NodeId(0),
@@ -38,7 +40,7 @@ fn make_diaphragm_model() -> Model {
             vec![NodeId(1)],
         )],
         sections: vec![Section {
-            frame_use: None,
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "sec".into(),
             area: 100.0,
@@ -72,7 +74,12 @@ fn make_diaphragm_model() -> Model {
             fy: Some(1e20),
         }],
         ..Default::default()
-    }
+    };
+    let mut column_section = model.sections[0].clone();
+    column_section.id = SectionId(1);
+    column_section.frame_use = Some(FrameSectionUse::Column);
+    model.sections.push(column_section);
+    model
 }
 
 /// フォースレジームの解決: 明示指定はそのまま、Auto はトポロジ
@@ -84,7 +91,11 @@ fn test_resolve_force_regime_explicit_and_auto() {
         id: ElemId(id),
         kind: ElementKind::Beam,
         nodes: smallvec::smallvec![nodes[0], nodes[1]],
-        section: Some(SectionId(0)),
+        section: Some(if nodes[0] == NodeId(0) && nodes[1] == NodeId(2) {
+            SectionId(1)
+        } else {
+            SectionId(0)
+        }),
         local_axis: LocalAxis {
             ref_vector: [0.0, 1.0, 0.0],
         },
@@ -835,6 +846,7 @@ fn test_flexural_alpha_y_sugano_for_rc_beam() {
 
     let mut column = beam.clone();
     column.nodes = smallvec::smallvec![NodeId(0), NodeId(2)];
+    column.section = Some(SectionId(1));
     assert!((flexural_alpha_y(&column, &model) - 0.3).abs() < 1e-12);
 }
 

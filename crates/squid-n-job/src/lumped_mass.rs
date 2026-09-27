@@ -468,7 +468,8 @@ mod tests {
         use squid_n_core::dof::Dof6Mask;
         use squid_n_core::ids::{ElemId, NodeId, StoryId};
         use squid_n_core::model::{
-            Constraint, ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Node, Story,
+            Constraint, ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse,
+            LocalAxis, Node, Section, Story,
         };
         let mut model = Model::default();
         let coords = [[0.0, 0.0, 0.0], [0.0, 0.0, 3000.0], [0.0, 0.0, 6000.0]];
@@ -507,12 +508,33 @@ mod tests {
                 }),
             });
         }
+        model.sections.push(Section {
+            frame_use: Some(FrameSectionUse::Column),
+            id: squid_n_core::ids::SectionId(0),
+            name: "column".into(),
+            area: 1.0,
+            iy: 1.0,
+            iz: 1.0,
+            j: 1.0,
+            depth: 1.0,
+            width: 1.0,
+            as_y: 1.0,
+            as_z: 1.0,
+            floor: None,
+            panel_thickness: None,
+            thickness: None,
+            shape: None,
+            material: None,
+            rebar_material: None,
+            shear_rebar_material: None,
+            steel_material: None,
+        });
         for i in 0..2u32 {
             model.elements.push(ElementData {
                 id: ElemId(i),
                 kind: ElementKind::Beam,
                 nodes: [NodeId(i), NodeId(i + 1)].into_iter().collect(),
-                section: None,
+                section: Some(squid_n_core::ids::SectionId(0)),
                 local_axis: LocalAxis {
                     ref_vector: [0.0, 1.0, 0.0],
                 },

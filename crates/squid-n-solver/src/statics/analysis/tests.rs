@@ -5,9 +5,9 @@ use super::*;
 use squid_n_core::dof::Dof6Mask;
 use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId, StoryId};
 use squid_n_core::model::{
-    Constraint, ElementData, ElementKind, EndCondition, ForceRegime, LoadCase, LoadCombination,
-    LocalAxis, Material, MaterialCategory, MemberLoad, MemberLoadKind, NodalLoad, Node, Section,
-    Story, StoryLevelKind, StoryStructure,
+    Constraint, ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LoadCase,
+    LoadCombination, LocalAxis, Material, MaterialCategory, MemberLoad, MemberLoadKind, NodalLoad,
+    Node, Section, Story, StoryLevelKind, StoryStructure,
 };
 use squid_n_core::model::{FloorRegion, SlabPlate};
 
@@ -46,7 +46,7 @@ fn make_cantilever_model() -> Model {
             spring: None,
         }],
         sections: vec![Section {
-            frame_use: None,
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "beam".into(),
             area: 100.0,
@@ -283,6 +283,9 @@ fn test_model_issues_detects_rc_shape_purpose_mismatch() {
     // 柱用断面を水平材（梁）へ割り当てる。
     let mut model = make_cantilever_model();
     model.sections[0].shape = Some(column_shape());
+    model.sections[0].rebar_material = Some(MaterialId(0));
+    model.sections[0].shear_rebar_material = Some(MaterialId(0));
+    model.sections[0].frame_use = Some(FrameSectionUse::Column);
     let issues = model_issues(&model);
     assert!(
         issues
@@ -322,6 +325,7 @@ fn test_model_issues_errors_on_invalid_rebar_geometry() {
     .to_section(SectionId(0), "RCC".into());
     sec.rebar_material = Some(MaterialId(0));
     sec.shear_rebar_material = Some(MaterialId(0));
+    sec.frame_use = Some(FrameSectionUse::Column);
     model.sections[0] = sec;
 
     let issues = model_issues(&model);
@@ -361,6 +365,8 @@ fn test_model_issues_detects_new_rc_column_material_missing() {
         },
     }
     .to_section(SectionId(0), "RCC".into());
+    let mut sec = sec;
+    sec.frame_use = Some(FrameSectionUse::Column);
     model.sections[0] = sec;
 
     let issues = model_issues(&model);
@@ -415,6 +421,7 @@ fn test_model_issues_detects_new_src_column_purpose_mismatch() {
     sec.rebar_material = Some(MaterialId(0));
     sec.shear_rebar_material = Some(MaterialId(0));
     sec.steel_material = Some(MaterialId(0));
+    sec.frame_use = Some(FrameSectionUse::Column);
     model.sections[0] = sec;
 
     let issues = model_issues(&model);
@@ -449,6 +456,7 @@ fn test_model_issues_detects_new_src_column_steel_missing() {
     sec.rebar_material = Some(MaterialId(0));
     sec.shear_rebar_material = Some(MaterialId(0));
     sec.steel_material = None;
+    sec.frame_use = Some(FrameSectionUse::Column);
     model.sections[0] = sec;
 
     let issues = model_issues(&model);
@@ -850,7 +858,7 @@ fn make_two_story_diaphragm_model(
             spring: None,
         }],
         sections: vec![Section {
-            frame_use: None,
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "col".into(),
             area: 100.0,
@@ -1407,7 +1415,7 @@ fn ss_beam_udl(l: f64, w: f64) -> Model {
             spring: None,
         }],
         sections: vec![Section {
-            frame_use: None,
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "s".into(),
             area: 1000.0,
@@ -2597,9 +2605,19 @@ fn test_model_issues_warns_wall_plates_not_expanded() {
     // 割当領域の仮の支持部材（断面なし）が「断面未割当の部材」エラーに
     // 引っかからないよう、既存断面を割り当ててから解析前チェックする。
     let fallback_section = model.sections[0].id;
+    let mut column_section = model.sections[0].clone();
+    column_section.id = SectionId(1);
+    column_section.frame_use = Some(FrameSectionUse::Column);
+    model.sections.push(column_section);
     for e in &mut model.elements {
         if e.section.is_none() {
-            e.section = Some(fallback_section);
+            e.section = Some(if (1..=4).contains(&e.id.index()) {
+                SectionId(1)
+            } else {
+                fallback_section
+            });
+        } else if e.id != ElemId(0) {
+            e.section = Some(SectionId(1));
         }
     }
     assert!(

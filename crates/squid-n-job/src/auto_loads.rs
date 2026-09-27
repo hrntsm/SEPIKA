@@ -657,7 +657,7 @@ mod tests {
     use squid_n_core::model::SlabPlate;
     use squid_n_core::model::{
         AreaLoad, DistributionMethod, ElementData, ElementKind, EndCondition, FloorRegion,
-        ForceRegime, LocalAxis, Node,
+        ForceRegime, FrameSectionUse, LocalAxis, Node,
     };
 
     fn make_square_slab_model() -> Model {
@@ -781,7 +781,7 @@ mod tests {
             fy: Some(235.0),
         });
         model.sections.push(Section {
-            frame_use: None,
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "H".into(),
             floor: None,
@@ -884,7 +884,7 @@ mod tests {
             fy: None,
         });
         model.sections.push(Section {
-            frame_use: None,
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "壁 t150".into(),
             area: 0.0,
@@ -994,7 +994,7 @@ mod tests {
             fy: None,
         });
         model.sections.push(Section {
-            frame_use: None,
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "壁 t150".into(),
             area: 0.0,
@@ -1101,7 +1101,7 @@ mod tests {
             fy: None,
         });
         model.sections.push(Section {
-            frame_use: None,
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "壁 t150".into(),
             area: 0.0,
@@ -1705,7 +1705,7 @@ mod cascade_tests {
     use squid_n_core::ids::{FloorRegionId, MaterialId, NodeId, SectionId};
     use squid_n_core::model::{
         AreaLoad, DistributionMethod, ElementData, ElementKind, EndCondition, FloorRegion,
-        ForceRegime, LocalAxis, Material, MaterialCategory, Node, SecondaryMember,
+        ForceRegime, FrameSectionUse, LocalAxis, Material, MaterialCategory, Node, SecondaryMember,
         SecondaryMemberKind, Section, SlabPlate,
     };
 
@@ -1839,7 +1839,7 @@ mod cascade_tests {
             strength_factor: None,
         }];
         let sections = vec![Section {
-            frame_use: None,
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: "H".into(),
             floor: None,

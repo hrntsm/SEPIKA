@@ -249,7 +249,7 @@ mod tests {
     use squid_n_core::dof::Dof6Mask;
     use squid_n_core::ids::{MaterialId, SectionId};
     use squid_n_core::model::MaterialCategory;
-    use squid_n_core::model::{Material, Node, Section};
+    use squid_n_core::model::{FrameSectionUse, Material, Node, Section};
     use squid_n_core::panel_zone::PanelGeometry;
     use squid_n_core::section_shape::SectionShape;
 
@@ -270,7 +270,7 @@ mod tests {
     /// 主材料を指定して断面を作る。
     fn section_with_mat(id: u32, shape: SectionShape, depth: f64, mat: u32) -> Section {
         Section {
-            frame_use: None,
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(id),
             material: Some(MaterialId(mat)),
             name: String::new(),
@@ -352,8 +352,16 @@ mod tests {
                 node(2, [0.0, 0.0, 0.0]),
             ],
             sections: vec![
-                section(0, beam_shape, beam_depth),
-                section(1, col_shape, 400.0),
+                {
+                    let mut section = section(0, beam_shape, beam_depth);
+                    section.frame_use = Some(FrameSectionUse::Beam);
+                    section
+                },
+                {
+                    let mut section = section(1, col_shape, 400.0);
+                    section.frame_use = Some(FrameSectionUse::Column);
+                    section
+                },
             ],
             materials: vec![
                 test_material(0, MaterialCategory::Steel),
@@ -682,7 +690,9 @@ mod tests {
                 story: None,
                 support_spring: None,
             });
-            model.sections.push(section(2, thin.clone(), 400.0));
+            let mut thin_section = section(2, thin.clone(), 400.0);
+            thin_section.frame_use = Some(FrameSectionUse::Column);
+            model.sections.push(thin_section);
             let upper = member(2, 0, 3, 2);
             if upper_first {
                 model.elements.insert(0, upper);

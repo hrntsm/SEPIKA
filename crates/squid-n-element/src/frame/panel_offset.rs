@@ -213,7 +213,7 @@ mod tests {
     use squid_n_core::ids::{ElemId, MaterialId, SectionId};
     use squid_n_core::model::MaterialCategory;
     use squid_n_core::model::{
-        EndCondition, ForceRegime, LocalAxis, Material, Node, RigidZone, Section,
+        EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material, Node, RigidZone, Section,
     };
     use squid_n_core::section_shape::SectionShape;
 
@@ -228,7 +228,7 @@ mod tests {
             support_spring: None,
         };
         let sec = Section {
-            frame_use: None,
+            frame_use: Some(FrameSectionUse::Beam),
             id: SectionId(0),
             name: String::new(),
             area: 1.0e4,
@@ -257,7 +257,11 @@ mod tests {
             id: ElemId(id),
             kind: ElementKind::Beam,
             nodes: smallvec::smallvec![NodeId(n0), NodeId(n1)],
-            section: Some(SectionId(0)),
+            section: Some(if n0 == 2 || n1 == 2 {
+                SectionId(1)
+            } else {
+                SectionId(0)
+            }),
             local_axis: LocalAxis {
                 ref_vector: [0.0, 1.0, 0.0],
             },
@@ -280,7 +284,14 @@ mod tests {
                 node(1, [6000.0, 0.0, 3000.0]),
                 node(2, [0.0, 0.0, 0.0]),
             ],
-            sections: vec![sec],
+            sections: vec![
+                sec.clone(),
+                Section {
+                    frame_use: Some(FrameSectionUse::Column),
+                    id: SectionId(1),
+                    ..sec
+                },
+            ],
             materials: vec![Material {
                 strength_factor: None,
                 concrete_class: Default::default(),

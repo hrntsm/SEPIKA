@@ -353,8 +353,8 @@ mod tests {
         use smallvec::smallvec;
         use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId};
         use squid_n_core::model::{
-            ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material,
-            MaterialCategory, Node, RigidZone,
+            ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis,
+            Material, MaterialCategory, Node, RigidZone,
         };
         use squid_n_core::section_shape::{
             BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop,
@@ -426,9 +426,11 @@ mod tests {
             },
         ];
         let mut col_sec = col_shape.to_section(SectionId(0), "C".into());
+        col_sec.frame_use = Some(FrameSectionUse::Column);
         col_sec.material = Some(MaterialId(0));
         col_sec.rebar_material = Some(MaterialId(1));
         let mut beam_sec = beam_shape.to_section(SectionId(1), "B-SRC".into());
+        beam_sec.frame_use = Some(FrameSectionUse::Beam);
         beam_sec.material = Some(MaterialId(0));
         beam_sec.rebar_material = Some(MaterialId(1));
 
@@ -511,8 +513,8 @@ mod tests {
         use smallvec::smallvec;
         use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId};
         use squid_n_core::model::{
-            ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material,
-            MaterialCategory, Node, RigidZone,
+            ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis,
+            Material, MaterialCategory, Node, RigidZone,
         };
         use squid_n_core::Dof6Mask;
 
@@ -545,6 +547,7 @@ mod tests {
             },
         ];
         let mut sec = shape.to_section(SectionId(0), "C".into());
+        sec.frame_use = Some(FrameSectionUse::Column);
         sec.material = Some(MaterialId(0));
         sec.rebar_material = Some(MaterialId(1));
         let node = |id: u32, z: f64| Node {
@@ -589,8 +592,8 @@ mod tests {
         use smallvec::smallvec;
         use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId};
         use squid_n_core::model::{
-            ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material,
-            MaterialCategory, Node, RigidZone,
+            ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis,
+            Material, MaterialCategory, Node, RigidZone,
         };
         use squid_n_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
         use squid_n_core::Dof6Mask;
@@ -640,9 +643,11 @@ mod tests {
             },
         };
         let mut col_sec = col_shape.to_section(SectionId(0), "C".into());
+        col_sec.frame_use = Some(FrameSectionUse::Column);
         col_sec.material = Some(MaterialId(0));
         col_sec.rebar_material = Some(MaterialId(1));
         let mut beam_sec = beam_shape.to_section(SectionId(1), "B".into());
+        beam_sec.frame_use = Some(FrameSectionUse::Beam);
         beam_sec.material = Some(MaterialId(0));
         beam_sec.rebar_material = Some(MaterialId(1));
 

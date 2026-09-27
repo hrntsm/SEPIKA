@@ -308,7 +308,8 @@ mod tests {
         use squid_n_core::dof::Dof6Mask;
         use squid_n_core::ids::{NodeId, SectionId};
         use squid_n_core::model::{
-            ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Node, RigidZone, Story,
+            ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Node,
+            RigidZone, Section, Story,
         };
 
         let base = StoryId(0);
@@ -361,6 +362,11 @@ mod tests {
         let model = Model {
             nodes,
             elements: vec![mk_elem(0, 1, 2), mk_elem(1, 0, 1)],
+            sections: vec![{
+                let mut section = Section::zero(SectionId(0), "C".into());
+                section.frame_use = Some(FrameSectionUse::Column);
+                section
+            }],
             stories: vec![
                 Story {
                     id: base,

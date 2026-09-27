@@ -139,6 +139,7 @@ mod tests {
     use smallvec::SmallVec;
     use squid_n_core::dof::Dof6Mask;
     use squid_n_core::ids::{ElemId, NodeId, SectionId};
+    use squid_n_core::model::Section;
     use squid_n_core::model::{
         ElementData, EndCondition, ForceRegime, LocalAxis, Node, RigidZone, Story,
     };
@@ -196,6 +197,11 @@ mod tests {
         let model = Model {
             nodes,
             elements,
+            sections: vec![{
+                let mut section = Section::zero(squid_n_core::ids::SectionId(0), "C".into());
+                section.frame_use = Some(FrameSectionUse::Column);
+                section
+            }],
             stories: vec![
                 Story {
                     id: base,

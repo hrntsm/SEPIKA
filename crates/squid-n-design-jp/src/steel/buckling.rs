@@ -5,9 +5,7 @@
 
 use squid_n_core::adjacency::NodeAdjacency;
 use squid_n_core::ids::NodeId;
-use squid_n_core::model::{
-    ElementData, ElementKind, EndCondition, FrameSectionUse, Material, Model, Section,
-};
+use squid_n_core::model::{ElementData, ElementKind, EndCondition, Material, Model, Section};
 use squid_n_element::transform::LocalFrame;
 
 /// ピン端・梁無し節点に用いる剛度比 G の規定値（本実装の既定値）。
@@ -353,8 +351,8 @@ mod tests {
     use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId};
     use squid_n_core::model::MaterialCategory;
     use squid_n_core::model::{
-        ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material, Model, Node,
-        RigidZone, Section,
+        ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material,
+        Model, Node, RigidZone, Section,
     };
 
     // ------------------------------------------------------------------
@@ -435,7 +433,7 @@ mod tests {
                 v.push(NodeId(n1));
                 v
             },
-            section: Some(SectionId(0)),
+            section: Some(SectionId(if id == 0 { 0 } else { 1 })),
             local_axis: LocalAxis {
                 ref_vector: [0.0, 0.0, 1.0],
             },
@@ -471,6 +469,14 @@ mod tests {
         }
     }
 
+    fn frame_sections(iy: f64) -> Vec<Section> {
+        let column = section(iy);
+        let mut beam = column.clone();
+        beam.id = SectionId(1);
+        beam.frame_use = Some(FrameSectionUse::Beam);
+        vec![column, beam]
+    }
+
     fn steel_material() -> Material {
         Material {
             strength_factor: None,
@@ -504,7 +510,7 @@ mod tests {
         Model {
             nodes,
             elements,
-            sections: vec![section(2.0e8)],
+            sections: frame_sections(2.0e8),
             materials: vec![steel_material()],
             ..Default::default()
         }
@@ -559,8 +565,9 @@ mod tests {
         // 材料は断面が持つ。梁用に RC の断面を足して差し替える。
         let mut rc_sec = model.sections[0].clone();
         rc_sec.id = SectionId(1);
+        rc_sec.frame_use = Some(FrameSectionUse::Beam);
         rc_sec.material = Some(MaterialId(1));
-        model.sections.push(rc_sec);
+        model.sections[1] = rc_sec;
         for e in &mut model.elements[1..] {
             e.section = Some(SectionId(1));
         }
@@ -626,7 +633,7 @@ mod tests {
         let model = Model {
             nodes,
             elements,
-            sections: vec![section(2.0e8)],
+            sections: frame_sections(2.0e8),
             materials: vec![steel_material()],
             ..Default::default()
         };
@@ -663,7 +670,7 @@ mod tests {
         let model = Model {
             nodes,
             elements,
-            sections: vec![section(2.0e8)],
+            sections: frame_sections(2.0e8),
             materials: vec![steel_material()],
             ..Default::default()
         };
@@ -692,6 +699,7 @@ mod tests {
             node(3, 6000.0, 0.0, 0.0),  // X 方向梁の遠端
         ];
         let mut other_col = line_elem(1, 2, 0);
+        other_col.section = Some(SectionId(0));
         // 強軸たわみ方向を Y に回転（垂直材は ey=ref_vector の水平成分）。
         other_col.local_axis.ref_vector = [0.0, 1.0, 0.0];
         let elements = vec![
@@ -702,7 +710,7 @@ mod tests {
         let model = Model {
             nodes,
             elements,
-            sections: vec![section(2.0e8)],
+            sections: frame_sections(2.0e8),
             materials: vec![steel_material()],
             ..Default::default()
         };
