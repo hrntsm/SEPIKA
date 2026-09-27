@@ -100,7 +100,7 @@ GUI の「ST-Bridge 読込」では、扱いの全量を下ドックの「ログ
 ST-Bridge は境界条件（支点）を持たないため、支点が 1 つもないモデルを取り込んだ
 ときは、そのままでは解析できません。そこで取り込み時に、**最下レベル（Z 最小、
 許容差 1 mm）で柱脚が取り付く節点**をピン支点（並進 3 自由度を拘束・回転自由）に
-自動設定します（柱脚ピンの仮定。基礎の回転拘束を期待しない安全側の既定）。柱の判定は鉛直な 2 節点線材（部材軸の鉛直成分が大きい部材）で行い、
+自動設定します（柱脚ピンの仮定。基礎の回転拘束を期待しない安全側の既定）。この支点自動設定に限り、柱脚候補を鉛直な 2 節点線材（部材軸の鉛直成分が大きい部材）で判定し、
 柱が取り付かず梁だけが取り付く最下レベル節点（地中梁の中間節点など）は支点にしません。
 最下レベルに柱脚が特定できない場合に限り、解析可能性を優先して最下レベルの全節点を
 ピン支点にフォールバックします。設定した内容は `ImportReport` の通知（notes）で知らせ、
@@ -109,6 +109,22 @@ ST-Bridge は境界条件（支点）を持たないため、支点が 1 つも�
 <div class="impl-ref">
 
 **実装参照**：`squid_n_io::stbridge::import::assemble::auto_assign_supports`（`crates/squid-n-io/src/stbridge/import/assemble.rs`）が判定・設定し、通知は `squid_n_io::stbridge::ImportReport` の notes に積みます。
+
+</div>
+
+## 断面用途の取り込み
+
+主架構線材の設計用途は、断面に保持する `FrameSectionUse`（`Beam`・`Column`・`Brace`）を正とします。
+ST-Bridge の `StbColumn`・`StbGirder`・`StbBrace` の部材コンテナから用途を割り当て、部材の角度・鉛直性・断面符号から柱・梁・ブレースを推定しません。
+したがって、傾斜した `Column` は柱、勾配のある `Beam` は梁として扱います。
+
+`ElementKind` は解析定式化、`FrameSectionUse` は設計用途を表します。主架構の `ElementKind::Beam` には `Beam` または `Column`、
+`ElementKind::Brace` には `Brace` を割り当てます。不整合または用途不明の断面は、角度で補正せず取り込みをエラーにします。
+二次部材は `SecondaryMemberKind`（小梁 `Joist`・間柱 `Post`）を正とし、小梁は `Beam`、間柱は `Column` の用途を使います。
+
+<div class="impl-ref">
+
+**実装参照**：ST-Bridge の部材コンテナから用途を解決する処理は `squid_n_io::stbridge::import::assemble::section_uses`（`crates/squid-n-io/src/stbridge/import/assemble.rs`）が担い、要素種別と断面用途の整合性は `squid_n_core::model::Model::validate`（`crates/squid-n-core/src/model/aggregate.rs`）が検証します。
 
 </div>
 
