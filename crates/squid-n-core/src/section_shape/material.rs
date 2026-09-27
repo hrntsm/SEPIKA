@@ -4,9 +4,10 @@
 //! - [`wall_shear_shape_factor_isection`] — 耐震壁のせん断形状係数
 
 use super::constants::{GAMMA_CONCRETE, KAPPA_RC};
+use crate::units::to_internal::unit_weight_kn_m3_from_mass_density;
 
 /// コンクリート強度 Fc [N/mm²] からヤング係数 Ec [N/mm²] を算定する
-/// （RC 規準の Ec=3.35·10⁴·(γ/24)²·(Fc/60)^(1/3)、γ=23 固定）。
+/// （RC 規準の Ec=3.35·10⁴·(γC/24)²·(Fc/60)^(1/3)。密度を持たない経路は γC=23 を用いる）。
 pub fn concrete_young_modulus(fc: f64) -> f64 {
     concrete_young_modulus_gamma(fc, GAMMA_CONCRETE)
 }
@@ -18,6 +19,19 @@ pub fn concrete_young_modulus_gamma(fc: f64, gamma_kn_m3: f64) -> f64 {
         return 0.0;
     }
     3.35e4 * (gamma_kn_m3 / 24.0).powi(2) * (fc / 60.0).powf(1.0 / 3.0)
+}
+
+/// コンクリート強度 Fc [N/mm²]・RC 材料の質量密度 [ton/mm³] から
+/// ヤング係数 Ec [N/mm²] を算定する。質量密度から γRC を復元し、γC = γRC - 1.0
+/// とする。不正な密度は既定の γC=23.0 kN/m³ にフォールバックする。
+pub fn concrete_young_modulus_from_density(fc: f64, density_ton_per_mm3: f64) -> f64 {
+    let gamma_rc = unit_weight_kn_m3_from_mass_density(density_ton_per_mm3);
+    let gamma_c = if density_ton_per_mm3.is_finite() && gamma_rc.is_finite() && gamma_rc > 1.0 {
+        gamma_rc - 1.0
+    } else {
+        GAMMA_CONCRETE
+    };
+    concrete_young_modulus_gamma(fc, gamma_c)
 }
 
 /// 平面I形断面のせん断形状係数を区分多項式の積分で求める。寸法は [mm]。
@@ -112,5 +126,30 @@ mod isection_kappa_tests {
     fn test_kappa_degenerate_inputs() {
         assert!((wall_shear_shape_factor_isection(0.0, 100.0, 300.0, 150.0) - 1.2).abs() < 1e-12);
         assert!((wall_shear_shape_factor_isection(4000.0, 100.0, 300.0, 0.0) - 1.2).abs() < 1e-12);
+    }
+}
+
+#[cfg(test)]
+mod concrete_young_modulus_tests {
+    use super::*;
+    use crate::units::to_internal::mass_density_from_unit_weight_kn_m3;
+
+    #[test]
+    fn rc_unit_weight_24_gives_concrete_unit_weight_23() {
+        let density = mass_density_from_unit_weight_kn_m3(24.0);
+        let expected = concrete_young_modulus_gamma(21.0, 23.0);
+        assert_eq!(concrete_young_modulus_from_density(21.0, density), expected);
+    }
+
+    #[test]
+    fn invalid_density_uses_existing_default() {
+        assert_eq!(
+            concrete_young_modulus_from_density(21.0, 0.0),
+            concrete_young_modulus(21.0)
+        );
+        assert_eq!(
+            concrete_young_modulus_from_density(21.0, f64::NAN),
+            concrete_young_modulus(21.0)
+        );
     }
 }

@@ -116,6 +116,10 @@ pub mod to_internal {
     pub fn mass_density_from_unit_weight_kn_m3(v: f64) -> f64 {
         unit_weight_kn_per_m3(v) / super::GRAVITY_MM_S2
     }
+    /// 質量密度 [ton/mm³] → 単位体積重量 [kN/m³]。
+    pub fn unit_weight_kn_m3_from_mass_density(v: f64) -> f64 {
+        v * super::GRAVITY_MM_S2 * 1.0e6
+    }
 }
 
 /// 内部単位系（N-mm）から表示用の単位への換算と、その単位ラベル。
@@ -269,6 +273,11 @@ mod tests {
         assert_relative_eq!(
             to_internal::unit_weight_kn_per_m3(24.0),
             2.4e-5,
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(
+            to_internal::unit_weight_kn_m3_from_mass_density(24.0e-6 / GRAVITY_MM_S2),
+            24.0,
             max_relative = 1e-12
         );
         assert_relative_eq!(

@@ -84,7 +84,7 @@ impl SectionShape {
     ///
     /// `es`/`nu_s`: 要素材料（鋼管）のヤング係数・ポアソン比、
     /// `fc`: 充填コンクリート強度（`Material.fc`）。
-    /// Ec は `concrete_young_modulus`（γ=23）・νc=0.2 とする。
+    /// Ec は密度を持たない CFT 合成断面経路の既定 γC=23・νc=0.2 とする。
     /// CftBox/CftPipe 以外、または Ec≤0 では None（鋼管のみの既定値へ
     /// フォールバック）。
     pub fn cft_equivalent_props(&self, es: f64, nu_s: f64, fc: f64) -> Option<CompositeProps> {
