@@ -191,7 +191,9 @@ fn test_beam_new_src_cft_composite_props() {
     assert!((src_beam.a_mass - 360_000.0).abs() < 1e-9);
 
     let cft_beam = BeamElement::new(&make_elem(1), &model);
-    let pc = cft_shape.cft_equivalent_props(205000.0, 0.3, 36.0).unwrap();
+    let pc = cft_shape
+        .cft_equivalent_props(205000.0, 0.3, 36.0, 7.85e-9)
+        .unwrap();
     assert!((cft_beam.a - pc.area_ax).abs() < 1e-6);
     assert!((cft_beam.iz - pc.iy).abs() / pc.iy < 1e-12);
     assert!((cft_beam.j - pc.j).abs() / pc.j < 1e-12);

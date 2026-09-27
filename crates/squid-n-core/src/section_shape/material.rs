@@ -26,7 +26,7 @@ pub fn concrete_young_modulus_gamma(fc: f64, gamma_kn_m3: f64) -> f64 {
 /// とする。不正な密度は既定の γC=23.0 kN/m³ にフォールバックする。
 pub fn concrete_young_modulus_from_density(fc: f64, density_ton_per_mm3: f64) -> f64 {
     let gamma_rc = unit_weight_kn_m3_from_mass_density(density_ton_per_mm3);
-    let gamma_c = if density_ton_per_mm3.is_finite() && gamma_rc.is_finite() && gamma_rc > 1.0 {
+    let gamma_c = if density_ton_per_mm3.is_finite() && gamma_rc.is_finite() && gamma_rc >= 18.0 {
         gamma_rc - 1.0
     } else {
         GAMMA_CONCRETE
@@ -150,6 +150,33 @@ mod concrete_young_modulus_tests {
         assert_eq!(
             concrete_young_modulus_from_density(21.0, f64::NAN),
             concrete_young_modulus(21.0)
+        );
+        for density in [
+            0.0,
+            -mass_density_from_unit_weight_kn_m3(18.0),
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::MIN_POSITIVE,
+            mass_density_from_unit_weight_kn_m3(17.0),
+        ] {
+            assert_eq!(
+                concrete_young_modulus_from_density(21.0, density),
+                concrete_young_modulus(21.0)
+            );
+        }
+    }
+
+    #[test]
+    fn lightweight2_and_normal_density_are_accepted() {
+        let lightweight2 = mass_density_from_unit_weight_kn_m3(18.0);
+        let normal = mass_density_from_unit_weight_kn_m3(24.0);
+        assert_eq!(
+            concrete_young_modulus_from_density(21.0, lightweight2),
+            concrete_young_modulus_gamma(21.0, 17.0)
+        );
+        assert_eq!(
+            concrete_young_modulus_from_density(21.0, normal),
+            concrete_young_modulus_gamma(21.0, 23.0)
         );
     }
 }

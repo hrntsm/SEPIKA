@@ -310,7 +310,7 @@ pub(super) fn composite_props_with(
             .flatten(),
         SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => mat
             .fc
-            .and_then(|fc| shape.cft_equivalent_props(mat.young, mat.poisson, fc)),
+            .and_then(|fc| shape.cft_equivalent_props(mat.young, mat.poisson, fc, mat.density)),
         _ => None,
     }
 }

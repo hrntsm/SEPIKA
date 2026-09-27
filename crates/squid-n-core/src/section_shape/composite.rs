@@ -6,7 +6,7 @@
 
 use super::constants::{E_STEEL, KAPPA_RC, NU_CONCRETE, NU_STEEL};
 use super::geometry::{h_web_shear_area, rect_torsion_j};
-use super::material::concrete_young_modulus;
+use super::material::concrete_young_modulus_from_density;
 use super::types::SectionShape;
 
 /// SRC/CFT の複合換算断面性能（要素剛性用。各種合成構造設計指針）。
@@ -83,12 +83,18 @@ impl SectionShape {
     /// 1/n 換算で適用。J は S 柱の J=(sG/cG)·sJ+cJ を鋼基準 J=sJ+cJ/ngs に換算）。
     ///
     /// `es`/`nu_s`: 要素材料（鋼管）のヤング係数・ポアソン比、
-    /// `fc`: 充填コンクリート強度（`Material.fc`）。
-    /// Ec は密度を持たない CFT 合成断面経路の既定 γC=23・νc=0.2 とする。
+    /// `fc`: 充填コンクリート強度（`Material.fc`）、`density`: 要素材料の質量密度。
+    /// νc=0.2 とする。
     /// CftBox/CftPipe 以外、または Ec≤0 では None（鋼管のみの既定値へ
     /// フォールバック）。
-    pub fn cft_equivalent_props(&self, es: f64, nu_s: f64, fc: f64) -> Option<CompositeProps> {
-        let ec = concrete_young_modulus(fc);
+    pub fn cft_equivalent_props(
+        &self,
+        es: f64,
+        nu_s: f64,
+        fc: f64,
+        density: f64,
+    ) -> Option<CompositeProps> {
+        let ec = concrete_young_modulus_from_density(fc, density);
         if ec <= 0.0 || es <= 0.0 {
             return None;
         }

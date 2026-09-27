@@ -9,9 +9,12 @@
 //! 本モジュールはそれを利用する（鉄筋・鋼材・コンクリートの表を独自に持たない）。
 
 use squid_n_core::material_grade::{parse_concrete_fc, rebar_f_value, steel_f_value_prefix};
-use squid_n_core::section_shape::{concrete_young_modulus, E_STEEL};
-use squid_n_core::units::to_internal::mass_density_from_unit_weight_kn_m3;
+use squid_n_core::section_shape::{concrete_young_modulus_gamma, E_STEEL};
 use squid_n_core::units::STEEL_MASS_DENSITY_TON_MM3;
+use squid_n_core::units::{
+    concrete_unit_weight_kn_m3, to_internal::mass_density_from_unit_weight_kn_m3, ConcreteClass,
+    ConcreteComposition,
+};
 
 /// グレード名から解決した標準材料物性（内部単位系 N-mm-s。密度は ton/mm³）。
 pub(super) struct StdMat {
@@ -21,9 +24,6 @@ pub(super) struct StdMat {
     pub fc: Option<f64>,
     pub fy: Option<f64>,
 }
-
-/// 鉄筋コンクリートの単位体積重量 γrc = 24 kN/m³（固定荷重）。
-const RC_UNIT_WEIGHT_KN_M3: f64 = 24.0;
 
 /// グレード名から標準材料物性を解決する。認識できない名前は `None`。
 ///
@@ -40,10 +40,12 @@ pub(super) fn resolve_grade(name: &str) -> Option<StdMat> {
         return None;
     }
     if let Some(fc) = parse_concrete_fc(n) {
+        let gamma_rc =
+            concrete_unit_weight_kn_m3(fc, ConcreteClass::Normal, ConcreteComposition::Rc);
         return Some(StdMat {
-            young: concrete_young_modulus(fc),
+            young: concrete_young_modulus_gamma(fc, gamma_rc - 1.0),
             poisson: 0.2,
-            density: mass_density_from_unit_weight_kn_m3(RC_UNIT_WEIGHT_KN_M3),
+            density: mass_density_from_unit_weight_kn_m3(gamma_rc),
             fc: Some(fc),
             fy: None,
         });
@@ -95,6 +97,23 @@ mod tests {
         assert_eq!(resolve_grade("Fc24").unwrap().fc, Some(24.0));
         assert!(resolve_grade("UNKNOWN999").is_none());
         assert!(resolve_grade("").is_none());
+    }
+
+    #[test]
+    fn test_resolve_grade_concrete_uses_fc_dependent_unit_weight() {
+        for fc in [36.0, 40.0, 50.0, 60.0] {
+            let material = resolve_grade(&format!("Fc{fc:.0}")).unwrap();
+            let gamma_rc =
+                concrete_unit_weight_kn_m3(fc, ConcreteClass::Normal, ConcreteComposition::Rc);
+            assert_eq!(
+                material.young,
+                concrete_young_modulus_gamma(fc, gamma_rc - 1.0)
+            );
+            assert_eq!(
+                material.density,
+                mass_density_from_unit_weight_kn_m3(gamma_rc)
+            );
+        }
     }
 
     /// 鋼材・鉄筋の質量密度は物理密度 7.85 t/m³（= 7.85e-9 t/mm³）。
