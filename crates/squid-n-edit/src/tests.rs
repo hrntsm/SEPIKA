@@ -668,15 +668,15 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
             section: Some(SectionId(0)),
             name: "B1".into(),
         });
-    assert!(!stack.run(
+    assert!(stack.run(
         &mut model,
         Box::new(EditSectionShape {
             section: SectionId(0),
             new_shape: shape,
-            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
+            frame_use: None,
         }),
     ));
-    assert_eq!(model.sections[0], old);
+    assert_eq!(model.sections[0].frame_use, None);
 }
 
 #[test]

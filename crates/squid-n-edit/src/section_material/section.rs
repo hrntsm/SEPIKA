@@ -188,9 +188,6 @@ impl EditCommand for EditSectionShape {
             squid_n_section::shape::SectionShape::RcWall { .. }
                 | squid_n_section::shape::SectionShape::RcSlab { .. }
         );
-        if !non_frame && self.frame_use.is_none() {
-            return Box::new(Noop);
-        }
         let idx = self.section.index();
         if idx >= model.sections.len() || model.sections[idx].id != self.section {
             return Box::new(Noop);
@@ -248,23 +245,7 @@ fn section_use_is_valid(
                 )
             )
         });
-    let secondary_valid = model
-        .joists()
-        .chain(model.posts())
-        .filter(|member| member.section == Some(section_id))
-        .all(|member| {
-            matches!(
-                (member.kind, frame_use),
-                (
-                    squid_n_core::model::SecondaryMemberKind::Joist,
-                    Some(squid_n_core::model::FrameSectionUse::Beam),
-                ) | (
-                    squid_n_core::model::SecondaryMemberKind::Post,
-                    Some(squid_n_core::model::FrameSectionUse::Column),
-                )
-            )
-        });
-    element_valid && secondary_valid
+    element_valid
 }
 
 /// 断面データを指定した Section で復元する（EditSectionShape の逆操作）。

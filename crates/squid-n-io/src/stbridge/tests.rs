@@ -3094,6 +3094,26 @@ fn test_import_stbbeam_as_secondary_member() {
     assert!(m.validate().is_ok());
 }
 
+#[test]
+fn test_import_rejects_section_definition_usage_mismatch() {
+    let definitions = [
+        r#"<StbSecColumn_RC id="0" name="C"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="500" width_Y="500"/></StbSecFigureColumn_RC></StbSecColumn_RC>"#,
+        r#"<StbSecRaw id="0" name="C" kind="COLUMN" area="1" iy="1" iz="1" j="1"/>"#,
+    ];
+    for definition in definitions {
+        let xml = format!(
+            r#"<?xml version="1.0"?>
+<ST_BRIDGE version="2.0.0"><StbModel>
+  <StbNodes><StbNode id="0" X="0" Y="0" Z="0"/><StbNode id="1" X="0" Y="0" Z="3000"/></StbNodes>
+  <StbSections>{definition}</StbSections>
+  <StbMembers><StbGirders><StbGirder id="0" id_node_start="0" id_node_end="1" id_section="0"/></StbGirders></StbMembers>
+</StbModel></ST_BRIDGE>"#
+        );
+        let error = import_stbridge(&xml).expect_err("柱用断面を大梁へ参照した入力を拒否する");
+        assert!(matches!(error, StbError::Unmappable(_)), "{error}");
+    }
+}
+
 /// 二次部材（小梁・間柱）が ST-Bridge 書き出し（StbBeam/StbPost）→再取り込みで
 /// 保存されること（往復）。
 #[test]

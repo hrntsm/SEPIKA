@@ -371,30 +371,23 @@ impl StbParser {
     /// 開始要素を処理する。担当タグなら true。
     fn start_section(&mut self, tag: &str, a: &Attrs) -> Result<bool, StbError> {
         if let Some(usage) = section_usage(tag) {
-            let id = get_u32(a, "id")?;
-            if let Some((previous, previous_tag)) = self.section_usages.get(&id) {
-                if *previous != usage {
-                    return Err(StbError::Unmappable(format!(
-                        "断面 file ID {id} の定義タグが競合: {previous_tag} と {tag}"
-                    )));
-                }
-            } else {
-                self.section_usages.insert(id, (usage, tag.to_string()));
-            }
+            self.record_section_usage(get_u32(a, "id")?, usage, tag)?;
         }
         match tag {
             "StbSecRaw" => {
                 if let Some(kind) = a.get("kind") {
                     let usage = match kind.as_str() {
-                        "COLUMN" => Some(FrameSectionUse::Column),
-                        "BEAM" => Some(FrameSectionUse::Beam),
-                        "BRACE" => Some(FrameSectionUse::Brace),
-                        _ => None,
+                        "COLUMN" => FrameSectionUse::Column,
+                        "BEAM" => FrameSectionUse::Beam,
+                        "BRACE" => FrameSectionUse::Brace,
+                        _ => {
+                            return Err(StbError::Unmappable(format!(
+                                "StbSecRaw id={} の kind 属性が不正です: {kind}",
+                                get_u32(a, "id")?
+                            )))
+                        }
                     };
-                    if let Some(usage) = usage {
-                        self.section_usages
-                            .insert(get_u32(a, "id")?, (usage, tag.to_string()));
-                    }
+                    self.record_section_usage(get_u32(a, "id")?, usage, tag)?;
                 }
                 self.pending_secs.push(PendingSec {
                     file_id: get_u32(a, "id")?,
@@ -692,6 +685,24 @@ impl StbParser {
             _ => return Ok(false),
         }
         Ok(true)
+    }
+
+    fn record_section_usage(
+        &mut self,
+        id: u32,
+        usage: FrameSectionUse,
+        tag: &str,
+    ) -> Result<(), StbError> {
+        if let Some((previous, previous_tag)) = self.section_usages.get(&id) {
+            if *previous != usage {
+                return Err(StbError::Unmappable(format!(
+                    "断面 file ID {id} の定義タグが競合: {previous_tag} と {tag}"
+                )));
+            }
+        } else {
+            self.section_usages.insert(id, (usage, tag.to_string()));
+        }
+        Ok(())
     }
 
     /// 部材（柱・大梁・小梁・間柱・ブレース）の開始要素を処理する。担当タグなら true。
