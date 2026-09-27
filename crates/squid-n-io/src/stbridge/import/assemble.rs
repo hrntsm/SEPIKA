@@ -384,7 +384,7 @@ fn build_materials(
     raw_materials.sort_by_key(|m| m.file_id);
     for m in raw_materials {
         let category = resolve_material_category(&m.name, m.fc, m.fy, guessed_categories);
-        let young = if category == MaterialCategory::Concrete {
+        if category == MaterialCategory::Concrete {
             let fc =
                 m.fc.filter(|fc| fc.is_finite() && *fc > 0.0)
                     .ok_or_else(|| {
@@ -399,17 +399,15 @@ fn build_materials(
                         "invalid concrete material density: id={}, name={}",
                         m.file_id, m.name
                     ))
-                })?
-        } else {
-            m.young
-        };
+                })?;
+        }
         model.materials.push(Material {
             strength_factor: None,
             concrete_class: Default::default(),
             id: MaterialId(material_index[&m.file_id]),
             name: m.name,
             category,
-            young,
+            young: m.young,
             poisson: m.poisson,
             density: m.density,
             shear: m.shear,
@@ -475,7 +473,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_concrete_uses_density_for_young_modulus() {
+    fn direct_concrete_preserves_explicit_young() {
         let density = squid_n_core::units::to_internal::mass_density_from_unit_weight_kn_m3(25.0);
         let mut model = Model::default();
         let mut guessed = Vec::new();
@@ -488,8 +486,7 @@ mod tests {
         )
         .expect("valid concrete material");
 
-        let expected = squid_n_core::section_shape::concrete_young_modulus_gamma(24.0, 24.0);
-        assert!((model.materials[0].young - expected).abs() < 1e-9 * expected);
+        assert_eq!(model.materials[0].young, 1.0);
     }
 
     #[test]
