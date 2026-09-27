@@ -372,6 +372,16 @@ fn srcファイバーは内蔵鋼材のstrength_factorを使う() {
         .1;
     assert_relative_eq!(concrete_e, 25000.0, max_relative = 1e-10);
     assert_relative_eq!(steel_e, 205000.0, max_relative = 1e-10);
+
+    model.sections[0].steel_material = None;
+    let (_, steel_e) = fiber_young_moduli(&model.elements[0], &model);
+    assert_eq!(steel_e, 0.0);
+    assert!(crate::factory::ensure_nonlinear_input(&model).is_err());
+
+    model.sections[0].steel_material = Some(MaterialId(99));
+    let (_, steel_e) = fiber_young_moduli(&model.elements[0], &model);
+    assert_eq!(steel_e, 0.0);
+    assert!(crate::factory::ensure_nonlinear_input(&model).is_err());
 }
 
 #[test]

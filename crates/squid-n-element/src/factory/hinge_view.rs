@@ -1018,8 +1018,7 @@ mod tests {
         assert!(view.mn_surface.is_none());
     }
 
-    /// SRC 矩形で内蔵鉄骨材料が未割当のとき、入力チェックは要素材料 fy で
-    /// 不備なしと判定するが、ファイバ生成の鋼材領域は降伏点を解決できない。
+    /// SRC 矩形で内蔵鉄骨材料が未割当のとき、入力チェックで不備を検出する。
     /// 表示 API は panic せず曲面を返さない。
     #[test]
     fn src_shape_without_steel_material_returns_no_surface() {
@@ -1042,8 +1041,8 @@ mod tests {
         let col = elem(ElementKind::Fiber, [NodeId(0), NodeId(2)]);
 
         assert!(
-            crate::factory::input_check::member_strength_issue(&col, &model).is_none(),
-            "内蔵鉄骨材料が未割当でも要素材料 fy で入力不備なしと判定される"
+            crate::factory::input_check::member_strength_issue(&col, &model).is_some(),
+            "内蔵鉄骨材料が未割当なら入力不備として扱う"
         );
         assert!(
             resolve_fiber_yield(&model, &col).steel.is_none(),
