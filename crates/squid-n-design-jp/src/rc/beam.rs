@@ -795,7 +795,7 @@ mod tests {
                 .clone()
         };
         assert!(detail("SD345").contains("fa=2.315"));
-        assert!(detail("SR235").contains("fa=0.640"));
+        assert!(detail("SR235").contains("fa=1.350"));
         assert!(detail("任意名称").contains("fa=2.315"));
     }
 

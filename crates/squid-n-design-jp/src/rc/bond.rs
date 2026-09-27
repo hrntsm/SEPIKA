@@ -342,6 +342,33 @@ mod tests {
     }
 
     #[test]
+    fn test_bond_fb_round_bar_uses_1999_formula() {
+        let info = bond_test_info();
+        let run = |top_bar: bool, long_term: bool| {
+            rc_beam_bond_check_with_rebar(
+                0.1,
+                3000.0,
+                300.0,
+                539.0,
+                471.625,
+                1140.4,
+                30_000_000.0,
+                &info,
+                24.0,
+                long_term,
+                top_bar,
+                false,
+            )
+            .unwrap()
+            .fb
+        };
+        assert!((run(true, true) - 0.96).abs() < 1e-9);
+        assert!((run(false, true) - 1.2).abs() < 1e-9);
+        assert!((run(true, false) - 1.44).abs() < 1e-9);
+        assert!((run(false, false) - 1.8).abs() < 1e-9);
+    }
+
+    #[test]
     fn test_bond_c_selects_minimum_of_spacing_cover_5db() {
         let info = bond_test_info();
         let b = 300.0;

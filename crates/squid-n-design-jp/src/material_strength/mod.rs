@@ -97,7 +97,16 @@ mod tests {
         // 低強度側の分岐: Fc=15 上端筋 min(1.0, 1.3) = 1.0（Fc/15 側が支配）。
         assert!((concrete_allowable_bond(15.0, true, true) - 1.0).abs() < 1e-9);
         assert!((concrete_allowable_bond(48.0, false, true) - 2.795).abs() < 1e-9);
-        assert!((concrete_allowable_bond_for_rebar(24.0, false, true, false) - 0.64).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_round_rebar_allowable_bond_fc24() {
+        assert!((concrete_allowable_bond_for_rebar(24.0, true, true, false) - 0.9).abs() < 1e-9);
+        assert!((concrete_allowable_bond_for_rebar(24.0, false, true, false) - 1.35).abs() < 1e-9);
+        assert!((concrete_allowable_bond_for_rebar(24.0, true, false, false) - 1.35).abs() < 1e-9);
+        assert!(
+            (concrete_allowable_bond_for_rebar(24.0, false, false, false) - 2.025).abs() < 1e-9
+        );
     }
 
     #[test]

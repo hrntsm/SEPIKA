@@ -88,13 +88,13 @@ pub(crate) fn concrete_allowable_bond_for_rebar(
         if deformed {
             (fc / 15.0).min(0.9 + 2.0 / 75.0 * fc)
         } else {
-            (fc / 30.0).min(0.4 + fc / 100.0)
+            (4.0 * fc / 100.0).min(0.9)
         }
     } else {
         if deformed {
             (fc / 10.0).min(1.355 + fc / 25.0)
         } else {
-            (fc / 30.0).min(0.4 + fc / 100.0)
+            (6.0 * fc / 100.0).min(1.35)
         }
     };
     if long_term {
