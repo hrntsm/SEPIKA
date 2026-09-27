@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     #[allow(clippy::field_reassign_with_default)]
-    fn uses_average_of_both_column_orthogonal_dimensions() {
+    fn uses_average_of_different_column_orthogonal_dimensions() {
         let mut model = Model::default();
         model.nodes = vec![
             node(0, [0.0, 0.0, 3000.0]),
@@ -368,14 +368,21 @@ mod tests {
                 id: SectionId(1),
                 name: "C".into(),
                 depth: 400.0,
-                width: 600.0,
+                width: 400.0,
                 ..Section::zero(SectionId(1), "C".into())
+            },
+            Section {
+                id: SectionId(2),
+                name: "C2".into(),
+                depth: 400.0,
+                width: 800.0,
+                ..Section::zero(SectionId(2), "C2".into())
             },
         ];
         model.elements = vec![
             element(0, [0, 1], SectionId(0), [0.0, 0.0, 1.0]),
             element(1, [0, 4], SectionId(1), [1.0, 0.0, 0.0]),
-            element(2, [1, 5], SectionId(1), [1.0, 0.0, 0.0]),
+            element(2, [1, 5], SectionId(2), [1.0, 0.0, 0.0]),
         ];
         let mut region = FloorRegion::new(
             FloorRegionId(0),
@@ -418,6 +425,7 @@ mod tests {
         });
         let slabs = perimeter_slabs(&model).unwrap();
         assert_eq!(slabs.len(), 1);
+        assert_eq!((400.0 + 800.0) / 4.0, 300.0);
         assert_eq!(slabs[0].extent_mm, 300.0);
         let standard = model.stories[1].standard_floor_load.unwrap();
         assert_eq!(standard.intensity(None), 0.005);
