@@ -72,7 +72,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &material_index,
         &pending_secs,
         &mut guessed_categories,
-    );
+    )?;
 
     let mut notes: Vec<String> = Vec::new();
 
@@ -380,17 +380,36 @@ fn build_materials(
     material_index: &HashMap<u32, u32>,
     pending_secs: &[PendingSec],
     guessed_categories: &mut Vec<String>,
-) {
+) -> Result<(), StbError> {
     raw_materials.sort_by_key(|m| m.file_id);
     for m in raw_materials {
         let category = resolve_material_category(&m.name, m.fc, m.fy, guessed_categories);
+        let young = if category == MaterialCategory::Concrete {
+            let fc =
+                m.fc.filter(|fc| fc.is_finite() && *fc > 0.0)
+                    .ok_or_else(|| {
+                        StbError::Parse(format!(
+                            "invalid concrete material fc: id={}, name={}",
+                            m.file_id, m.name
+                        ))
+                    })?;
+            squid_n_core::section_shape::concrete_young_modulus_from_density(fc, m.density)
+                .ok_or_else(|| {
+                    StbError::Parse(format!(
+                        "invalid concrete material density: id={}, name={}",
+                        m.file_id, m.name
+                    ))
+                })?
+        } else {
+            m.young
+        };
         model.materials.push(Material {
             strength_factor: None,
             concrete_class: Default::default(),
             id: MaterialId(material_index[&m.file_id]),
             name: m.name,
             category,
-            young: m.young,
+            young,
             poisson: m.poisson,
             density: m.density,
             shear: m.shear,
@@ -433,6 +452,80 @@ fn build_materials(
                 });
                 existing.insert(name.to_string());
             }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn raw_concrete(density: f64, fc: Option<f64>) -> RawMaterial {
+        RawMaterial {
+            file_id: 1,
+            name: "Fc24".to_string(),
+            young: 1.0,
+            poisson: 0.2,
+            density,
+            shear: None,
+            fc,
+            fy: None,
+        }
+    }
+
+    #[test]
+    fn direct_concrete_uses_density_for_young_modulus() {
+        let density = squid_n_core::units::to_internal::mass_density_from_unit_weight_kn_m3(25.0);
+        let mut model = Model::default();
+        let mut guessed = Vec::new();
+        build_materials(
+            &mut model,
+            vec![raw_concrete(density, Some(24.0))],
+            &HashMap::from([(1, 0)]),
+            &[],
+            &mut guessed,
+        )
+        .expect("valid concrete material");
+
+        let expected = squid_n_core::section_shape::concrete_young_modulus_gamma(24.0, 24.0);
+        assert!((model.materials[0].young - expected).abs() < 1e-9 * expected);
+    }
+
+    #[test]
+    fn direct_concrete_rejects_invalid_density_or_strength() {
+        let invalid = [
+            (0.0, Some(24.0)),
+            (f64::NAN, Some(24.0)),
+            (
+                squid_n_core::units::to_internal::mass_density_from_unit_weight_kn_m3(1.0),
+                Some(24.0),
+            ),
+            (
+                squid_n_core::units::to_internal::mass_density_from_unit_weight_kn_m3(25.0),
+                None,
+            ),
+            (
+                squid_n_core::units::to_internal::mass_density_from_unit_weight_kn_m3(25.0),
+                Some(0.0),
+            ),
+            (
+                squid_n_core::units::to_internal::mass_density_from_unit_weight_kn_m3(25.0),
+                Some(f64::NAN),
+            ),
+        ];
+
+        for (density, fc) in invalid {
+            let mut model = Model::default();
+            let mut guessed = Vec::new();
+            assert!(build_materials(
+                &mut model,
+                vec![raw_concrete(density, fc)],
+                &HashMap::from([(1, 0)]),
+                &[],
+                &mut guessed,
+            )
+            .is_err());
         }
     }
 }
