@@ -3,43 +3,14 @@ use crate::transform::LocalFrame;
 use squid_n_core::geom::vec3::dot;
 use squid_n_core::model::{wall_element_geometry, ElementData, Model};
 use squid_n_core::section_shape::{
-    concrete_young_modulus_from_density, concrete_young_modulus_gamma,
-    material_strip_section_properties, MaterialSectionStrip, MaterialStripSectionProperties,
-    SectionShape,
+    concrete_young_modulus_gamma, material_strip_section_properties, MaterialSectionStrip,
+    MaterialStripSectionProperties, SectionShape,
 };
 
 #[derive(Clone, Copy, PartialEq)]
 struct Elasticity {
     young: f64,
     shear: f64,
-}
-
-pub(super) fn concrete_young_for_wall(
-    material: &squid_n_core::model::Material,
-    composition: squid_n_core::units::ConcreteComposition,
-) -> Result<f64, String> {
-    let fc = material
-        .fc
-        .filter(|fc| fc.is_finite() && *fc > 0.0)
-        .ok_or("コンクリート Fc が未設定・不正です")?;
-    let young = match composition {
-        squid_n_core::units::ConcreteComposition::Plain => concrete_young_modulus_gamma(
-            fc,
-            squid_n_core::units::concrete_unit_weight_kn_m3(
-                fc,
-                material.concrete_class,
-                composition,
-            ),
-        ),
-        squid_n_core::units::ConcreteComposition::Rc
-        | squid_n_core::units::ConcreteComposition::Src => {
-            concrete_young_modulus_from_density(fc, material.density)
-                .ok_or("コンクリート密度またはγCが不正です")?
-        }
-    };
-    (young.is_finite() && young > 0.0)
-        .then_some(young)
-        .ok_or_else(|| "コンクリート Ec が不正です".into())
 }
 
 pub(super) struct ColumnSection {
@@ -67,12 +38,7 @@ impl WallSection {
             Some(SectionShape::RcWall { thickness, .. }) => thickness,
             _ => section.thickness.unwrap_or(section.width),
         };
-        let wall_young = match section.shape {
-            Some(SectionShape::RcWall { .. }) => {
-                concrete_young_for_wall(material, squid_n_core::units::ConcreteComposition::Rc)?
-            }
-            _ => material.young,
-        };
+        let wall_young = material.young;
         let shear = material
             .shear
             .filter(|shear| shear.is_finite() && *shear > 0.0)
@@ -113,10 +79,7 @@ impl WallSection {
                     | SectionShape::RcColumnCircle { .. }
                     | SectionShape::SrcBeamRect { .. }
                     | SectionShape::SrcColumnRect { .. } => {
-                        let young = concrete_young_for_wall(
-                            mat,
-                            squid_n_core::units::ConcreteComposition::Rc,
-                        )?;
+                        let young = mat.young;
                         materials[0] = Elasticity {
                             young,
                             shear: mat

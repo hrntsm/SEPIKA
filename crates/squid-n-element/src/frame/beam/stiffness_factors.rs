@@ -315,22 +315,6 @@ pub(super) fn validate_composite_material(
     {
         return Err("RC/SRC/CFT 断面のコンクリート Fc が未設定または不正です".into());
     }
-    if matches!(
-        shape,
-        SectionShape::RcBeamRect { .. }
-            | SectionShape::RcColumnRect { .. }
-            | SectionShape::RcColumnCircle { .. }
-            | SectionShape::SrcBeamRect { .. }
-            | SectionShape::SrcColumnRect { .. }
-    ) && mat
-        .fc
-        .and_then(|fc| {
-            squid_n_core::section_shape::concrete_young_modulus_from_density(fc, mat.density)
-        })
-        .is_none()
-    {
-        return Err("RC/SRC 断面のコンクリート密度またはγCが不正です".into());
-    }
     Ok(())
 }
 
@@ -342,10 +326,8 @@ pub(super) fn composite_props_with(
     match shape {
         SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. } => mat
             .fc
-            .and_then(|fc| {
-                squid_n_core::section_shape::concrete_young_modulus_from_density(fc, mat.density)
-            })
-            .and_then(|ec| shape.src_equivalent_props(ec, mat.poisson)),
+            .filter(|fc| fc.is_finite() && *fc > 0.0)
+            .and_then(|_| shape.src_equivalent_props(mat.young, mat.poisson)),
         SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => mat.fc.and_then(|fc| {
             if !fc.is_finite() || fc <= 0.0 {
                 return None;

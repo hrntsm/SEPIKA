@@ -435,48 +435,6 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         ));
     }
 
-    let invalid_rc_src_density: Vec<ElemId> = model
-        .elements
-        .iter()
-        .filter(|e| {
-            matches!(
-                e.kind,
-                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-            )
-        })
-        .filter_map(|e| {
-            let shape = model.element_section(e)?.shape.as_ref()?;
-            if !matches!(
-                shape,
-                SectionShape::RcBeamRect { .. }
-                    | SectionShape::RcColumnRect { .. }
-                    | SectionShape::RcColumnCircle { .. }
-                    | SectionShape::SrcBeamRect { .. }
-                    | SectionShape::SrcColumnRect { .. }
-            ) {
-                return None;
-            }
-            let material = model.element_material(e)?;
-            let fc = material.fc?;
-            (!fc.is_finite()
-                || squid_n_core::section_shape::concrete_young_modulus_from_density(
-                    fc,
-                    material.density,
-                )
-                .is_none())
-            .then_some(e.id)
-        })
-        .collect();
-    if !invalid_rc_src_density.is_empty() {
-        issues.push(ModelIssue::members(
-            "RC/SRC 断面のコンクリート密度またはγCが不正です",
-            "ID ",
-            invalid_rc_src_density,
-            "コンクリート密度またはγCが不正です",
-            "材料タブで正の有限密度と、Fc に対応する有効な γC を設定してください。",
-        ));
-    }
-
     let composite_fallback: Vec<ElemId> = model
         .elements
         .iter()

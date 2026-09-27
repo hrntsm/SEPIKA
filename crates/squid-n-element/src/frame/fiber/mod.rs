@@ -44,6 +44,7 @@ pub(crate) fn steel_fiber_material(e: f64, fy: Option<f64>) -> Box<dyn UniaxialM
 /// 曲げバネ用履歴則の混入で panic する。
 pub(crate) fn concrete_fiber_material(
     fc: Option<f64>,
+    young: f64,
     rule: HysteresisModel,
 ) -> Box<dyn UniaxialMaterial> {
     let Some(fc) = fc.filter(|fc| *fc > 0.0) else {
@@ -55,32 +56,40 @@ pub(crate) fn concrete_fiber_material(
     match rule {
         HysteresisModel::KarsanJirsa => {
             if fc <= 60.0 {
-                let ec = squid_n_material::newrc::NewRcEnvelope::new(fc).ec;
-                Box::new(squid_n_material::ConcreteCyclic::newrc(
+                let material = squid_n_material::ConcreteCyclic::newrc_with_initial_tangent(
                     fc,
                     0.01,
                     2.0,
-                    ec / 10.0,
-                ))
+                    young / 10.0,
+                    young,
+                );
+                Box::new(material)
             } else {
-                let e0 = 2.0 * fc / 0.002;
-                Box::new(squid_n_material::ConcreteCyclic::kent_park(
+                Box::new(squid_n_material::ConcreteCyclic::mander(
                     fc,
                     0.002,
-                    0.0,
+                    young,
                     0.0035,
                     2.0,
-                    e0 / 10.0,
+                    young / 10.0,
                 ))
             }
         }
         HysteresisModel::Retrograde | HysteresisModel::OriginOriented => {
             if fc <= 60.0 {
                 let mut m = squid_n_material::ConcreteNewRc::new(fc, 2.0);
+                m.set_initial_tangent(young);
                 m.set_concrete_hysteresis(rule == HysteresisModel::OriginOriented);
                 Box::new(m)
             } else {
-                Box::new(squid_n_material::uniaxial::Concrete::new(fc, 2.0))
+                Box::new(squid_n_material::ConcreteCyclic::mander(
+                    fc,
+                    0.002,
+                    young,
+                    0.0035,
+                    2.0,
+                    young / 10.0,
+                ))
             }
         }
         other => panic!(
@@ -299,7 +308,7 @@ pub(crate) fn build_gauss_fibers(
         Some(r) => r,
         None => {
             let base: Box<dyn UniaxialMaterial> = if fc.is_some() {
-                concrete_fiber_material(fc, concrete_rule)
+                concrete_fiber_material(fc, e, concrete_rule)
             } else {
                 steel_fiber_material(e, yield_.main.map(|fy| fy * steel_factor))
             };
@@ -355,7 +364,7 @@ fn build_shape_fibers(
         let (tag, mat) = match f.region {
             FiberRegion::Concrete => {
                 let template =
-                    concrete.get_or_insert_with(|| concrete_fiber_material(fc, concrete_rule));
+                    concrete.get_or_insert_with(|| concrete_fiber_material(fc, e, concrete_rule));
                 (0usize, template.clone_box())
             }
             FiberRegion::Rebar => {

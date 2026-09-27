@@ -148,6 +148,13 @@ impl ConcreteNewRc {
         }
     }
 
+    pub fn set_initial_tangent(&mut self, ec: f64) {
+        self.ec = ec;
+        self.envelope.ec = ec;
+        self.committed.tangent = ec;
+        self.trial.tangent = ec;
+    }
+
     /// 圧縮包絡線。
     fn envelope_compression(&self, strain: f64) -> (f64, f64) {
         let (smag, tmag) = self.envelope.compression(-strain);

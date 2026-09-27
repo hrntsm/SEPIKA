@@ -384,23 +384,6 @@ fn build_materials(
     raw_materials.sort_by_key(|m| m.file_id);
     for m in raw_materials {
         let category = resolve_material_category(&m.name, m.fc, m.fy, guessed_categories);
-        if category == MaterialCategory::Concrete {
-            let fc =
-                m.fc.filter(|fc| fc.is_finite() && *fc > 0.0)
-                    .ok_or_else(|| {
-                        StbError::Parse(format!(
-                            "invalid concrete material fc: id={}, name={}",
-                            m.file_id, m.name
-                        ))
-                    })?;
-            squid_n_core::section_shape::concrete_young_modulus_from_density(fc, m.density)
-                .ok_or_else(|| {
-                    StbError::Parse(format!(
-                        "invalid concrete material density: id={}, name={}",
-                        m.file_id, m.name
-                    ))
-                })?;
-        }
         model.materials.push(Material {
             strength_factor: None,
             concrete_class: Default::default(),
@@ -489,42 +472,6 @@ mod tests {
         assert_eq!(model.materials[0].young, 1.0);
     }
 
-    #[test]
-    fn direct_concrete_rejects_invalid_density_or_strength() {
-        let invalid = [
-            (0.0, Some(24.0)),
-            (f64::NAN, Some(24.0)),
-            (
-                squid_n_core::units::to_internal::mass_density_from_unit_weight_kn_m3(1.0),
-                Some(24.0),
-            ),
-            (
-                squid_n_core::units::to_internal::mass_density_from_unit_weight_kn_m3(25.0),
-                None,
-            ),
-            (
-                squid_n_core::units::to_internal::mass_density_from_unit_weight_kn_m3(25.0),
-                Some(0.0),
-            ),
-            (
-                squid_n_core::units::to_internal::mass_density_from_unit_weight_kn_m3(25.0),
-                Some(f64::NAN),
-            ),
-        ];
-
-        for (density, fc) in invalid {
-            let mut model = Model::default();
-            let mut guessed = Vec::new();
-            assert!(build_materials(
-                &mut model,
-                vec![raw_concrete(density, fc)],
-                &HashMap::from([(1, 0)]),
-                &[],
-                &mut guessed,
-            )
-            .is_err());
-        }
-    }
 }
 
 /// 断面側の材料参照を、部材への伝播用に解決する。

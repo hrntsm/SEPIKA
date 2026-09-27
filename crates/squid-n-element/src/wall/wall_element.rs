@@ -178,15 +178,10 @@ impl WallElement {
             return None;
         }
         let is_rc_wall = matches!(&sec.shape, Some(SectionShape::RcWall { .. }));
-        let young = if is_rc_wall {
-            super::shear_section::concrete_young_for_wall(
-                mat,
-                squid_n_core::units::ConcreteComposition::Rc,
-            )
-            .ok()?
-        } else {
-            mat.young
-        };
+        if is_rc_wall && !mat.fc.is_some_and(|fc| fc.is_finite() && fc > 0.0) {
+            return None;
+        }
+        let young = mat.young;
         let r = crate::factory::wall_opening_reduction(data, model).max(1e-6);
 
         let ps = match &sec.shape {
@@ -1588,11 +1583,10 @@ mod tests {
     }
 
     #[test]
-    fn test_rc_wall_stiffness_uses_density_derived_ec() {
+    fn test_rc_wall_stiffness_uses_material_young() {
         let (model, data) = make_wall_model();
         let wall = WallElement::try_new(&data, &model).unwrap();
-        let expected =
-            squid_n_core::section_shape::concrete_young_modulus_from_density(24.0, 2.4e-9).unwrap();
+        let expected = model.materials[0].young;
         assert!((wall.column.e - expected).abs() < 1e-9);
     }
 
@@ -1845,8 +1839,7 @@ mod tests {
     fn test_wall_element_rebar_factor() {
         let (model, data) = make_wall_model();
         let wall = WallElement::try_new(&data, &model).unwrap();
-        let ec =
-            squid_n_core::section_shape::concrete_young_modulus_from_density(24.0, 2.4e-9).unwrap();
+        let ec = model.materials[0].young;
         let n = squid_n_core::section_shape::E_STEEL / ec;
         let expected = 150.0 * 4000.0 * (1.0 + (n - 1.0) * 0.0025);
         assert!((wall.column.a - expected).abs() < 1e-6);

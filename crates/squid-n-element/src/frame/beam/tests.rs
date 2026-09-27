@@ -181,11 +181,7 @@ fn test_beam_new_src_cft_composite_props() {
     };
 
     let src_beam = BeamElement::new(&make_elem(0), &model);
-    let ec = squid_n_core::section_shape::concrete_young_modulus_from_density(
-        24.0,
-        model.materials[0].density,
-    )
-    .unwrap();
+    let ec = model.materials[0].young;
     let p = src_shape.src_equivalent_props(ec, 0.2).unwrap();
     assert!((src_beam.e - ec).abs() < 1e-9);
     assert!((src_beam.g - ec / (2.0 * (1.0 + 0.2))).abs() < 1e-9);
@@ -205,7 +201,7 @@ fn test_beam_new_src_cft_composite_props() {
                 .unwrap()
                 .area_ax)
             .abs()
-            > 1.0
+            < 1e-6
     );
     assert!((src_beam.a_mass - 360_000.0).abs() < 1e-9);
 
@@ -288,16 +284,12 @@ fn test_beam_new_src_cft_composite_props() {
 
     model.materials[0].fc = Some(24.0);
     model.materials[0].density = 0.0;
-    let error = BeamElement::try_new(&make_elem(0), &model)
-        .err()
-        .expect("不正な密度は要素構築に失敗する");
-    assert!(error.contains("密度またはγCが不正"));
+    let beam = BeamElement::try_new(&make_elem(0), &model).expect("明示 E は密度によらず使う");
+    assert_eq!(beam.e, model.materials[0].young);
 
     model.materials[0].density = f64::NAN;
-    let error = BeamElement::try_new(&make_elem(0), &model)
-        .err()
-        .expect("非有限な密度は要素構築に失敗する");
-    assert!(error.contains("密度またはγCが不正"));
+    let beam = BeamElement::try_new(&make_elem(0), &model).expect("明示 E は密度によらず使う");
+    assert_eq!(beam.e, model.materials[0].young);
 
     model.sections[0] = SectionShape::RcColumnRect {
         b: 600.0,
@@ -314,10 +306,8 @@ fn test_beam_new_src_cft_composite_props() {
 
     model.materials[0].fc = Some(24.0);
     model.materials[0].density = 0.0;
-    let error = BeamElement::try_new(&make_elem(0), &model)
-        .err()
-        .expect("不正な RC 密度は要素構築に失敗する");
-    assert!(error.contains("密度またはγCが不正"));
+    let beam = BeamElement::try_new(&make_elem(0), &model).expect("明示 E は密度によらず使う");
+    assert_eq!(beam.e, model.materials[0].young);
 }
 
 /// スラブ協力幅による強軸剛性増大。

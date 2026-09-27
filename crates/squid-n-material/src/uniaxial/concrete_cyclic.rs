@@ -171,6 +171,16 @@ impl ConcreteCyclic {
         Self::with_envelope(ConcreteEnvelope::NewRc { envelope, eps_cu }, ft, ets)
     }
 
+    pub fn newrc_with_initial_tangent(fc: f64, eps_cu: f64, ft: f64, ets: f64, ec: f64) -> Self {
+        let mut material = Self::newrc(fc, eps_cu, ft, ets);
+        if let ConcreteEnvelope::NewRc { envelope, .. } = &mut material.envelope {
+            envelope.ec = ec;
+        }
+        material.committed.tangent = ec;
+        material.trial.tangent = ec;
+        material
+    }
+
     /// Mander 骨格（拘束後パラメータを算定）。
     #[allow(clippy::too_many_arguments)]
     pub fn mander_confined(

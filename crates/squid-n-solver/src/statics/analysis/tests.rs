@@ -541,22 +541,6 @@ fn test_model_issues_errors_on_invalid_cft_fc() {
 }
 
 #[test]
-fn test_model_issues_errors_on_invalid_src_density() {
-    use super::precheck::{model_issues, IssueSeverity, IssueTargets};
-
-    let mut model = make_cantilever_model();
-    model.sections[0].shape = Some(src_shape());
-    model.materials[0].fc = Some(24.0);
-
-    let issue = model_issues(&model)
-        .into_iter()
-        .find(|i| i.short == "コンクリート密度またはγCが不正です")
-        .expect("不正な SRC 密度は入力不備になるはず");
-    assert_eq!(issue.severity, IssueSeverity::Error);
-    assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
-}
-
-#[test]
 fn test_model_issues_errors_on_invalid_rc_material() {
     use super::precheck::{model_issues, IssueSeverity, IssueTargets};
     use squid_n_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
@@ -588,31 +572,6 @@ fn test_model_issues_errors_on_invalid_rc_material() {
         assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
     }
 
-    let mut model = make_cantilever_model();
-    model.sections[0].shape = Some(SectionShape::RcColumnRect {
-        b: 600.0,
-        d: 600.0,
-        rebar: RcRectColumnRebar {
-            main_dia: 22.0,
-            x: vec![8],
-            y: vec![8],
-            cover: 50.0,
-            hoop: RectColumnHoop {
-                dia: 10.0,
-                pitch: 100.0,
-                legs_x: 2,
-                legs_y: 2,
-            },
-        },
-    });
-    model.materials[0].fc = Some(24.0);
-    model.materials[0].density = 0.0;
-    let issue = model_issues(&model)
-        .into_iter()
-        .find(|i| i.short == "コンクリート密度またはγCが不正です")
-        .expect("不正な RC 密度は入力不備になるはず");
-    assert_eq!(issue.severity, IssueSeverity::Error);
-    assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
 }
 
 /// CFT では Fc とヤング係数が揃っていても、鋼管の板厚が過大で充填部の内法が 0 に

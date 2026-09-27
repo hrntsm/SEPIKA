@@ -218,16 +218,15 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
                 material.density = 2.4e-9;
             }
         }
-        let ec =
-            squid_n_core::section_shape::concrete_young_modulus_from_density(24.0, 2.4e-9).unwrap();
         model.materials[1].young = if matches!(
             model.sections[0].shape.as_ref(),
             Some(squid_n_core::section_shape::SectionShape::RcColumnRect { .. })
         ) {
             12345.0
         } else {
-            ec
+            model.materials[1].young
         };
+        let expected_young = model.materials[1].young;
 
         let beam = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
         let fiber = FiberBeam::new(
@@ -240,10 +239,10 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
             model.sections[0].shape.as_ref(),
             Some(squid_n_core::section_shape::SectionShape::RcColumnRect { .. })
         ) {
-            assert_relative_eq!(beam.e, ec, epsilon = 1.0e-9);
+            assert_relative_eq!(beam.e, expected_young, epsilon = 1.0e-9);
             assert_relative_eq!(
                 fiber.phi_y,
-                12.0 * ec * beam.iz / (beam.g * beam.as_y * fiber.flex_length.powi(2)),
+                12.0 * expected_young * beam.iz / (beam.g * beam.as_y * fiber.flex_length.powi(2)),
                 epsilon = 1.0e-12
             );
         }
@@ -2231,12 +2230,8 @@ fn test_all_fiber_materials_return_initial_tangent_at_zero_strain() {
         HysteresisModel::KarsanJirsa,
     ] {
         for fc in [21.0, 60.0, 80.0] {
-            let expected = if fc <= 60.0 {
-                squid_n_material::newrc::NewRcEnvelope::new(fc).ec
-            } else {
-                2.0 * fc / 0.002
-            };
-            let mut m = concrete_fiber_material(Some(fc), rule);
+            let expected = 30000.0;
+            let mut m = concrete_fiber_material(Some(fc), 30000.0, rule);
             let (s, t) = m.trial(0.0);
             assert_eq!(s, 0.0, "rule={rule:?} fc={fc}: ひずみ 0 で応力が 0 でない");
             assert_relative_eq!(t, expected, max_relative = 1e-9);
@@ -2252,7 +2247,7 @@ fn test_all_fiber_materials_return_initial_tangent_at_zero_strain() {
 #[test]
 #[should_panic(expected = "設計基準強度 Fc が未設定です")]
 fn concrete_fiber_material_rejects_missing_fc() {
-    concrete_fiber_material(None, HysteresisModel::Retrograde);
+    concrete_fiber_material(None, 30000.0, HysteresisModel::Retrograde);
 }
 
 /// 塑性化域考慮ファイバー梁（RC 断面）は、**弾性域では接線剛性が正定値**である。

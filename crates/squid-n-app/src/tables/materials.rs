@@ -420,6 +420,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn standard_rc_and_src_have_same_concrete_young_modulus() {
+        let preset = material_presets()
+            .into_iter()
+            .find(|preset| preset.name == "Fc36")
+            .unwrap();
+        let fc = preset.fc.unwrap();
+        let rc_gamma =
+            concrete_unit_weight_kn_m3(fc, ConcreteClass::Normal, ConcreteComposition::Rc);
+        let src_gamma =
+            concrete_unit_weight_kn_m3(fc, ConcreteClass::Normal, ConcreteComposition::Src);
+        let rc = squid_n_core::section_shape::concrete_young_modulus_gamma(fc, rc_gamma - 1.0);
+        let src = squid_n_core::section_shape::concrete_young_modulus_gamma(fc, src_gamma - 2.0);
+        assert_eq!(rc, src);
+        assert_eq!(preset.young, rc);
+    }
+
     /// 直接入力の既定密度は鋼材の物理質量密度 7.85 t/m³（= 7.85e-9 t/mm³）由来。
     /// 設計用単位体積重量 78.5 kN/m³ からは導出しない。
     #[test]

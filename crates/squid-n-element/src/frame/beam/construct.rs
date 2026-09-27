@@ -72,18 +72,7 @@ impl BeamElement {
                 | SectionShape::RcColumnCircle { .. }
                 | SectionShape::SrcBeamRect { .. }
                 | SectionShape::SrcColumnRect { .. },
-            ) => {
-                let ec = mat
-                    .fc
-                    .and_then(|fc| {
-                        squid_n_core::section_shape::concrete_young_modulus_from_density(
-                            fc,
-                            mat.density,
-                        )
-                    })
-                    .ok_or_else(|| "RC/SRC 断面のコンクリート密度またはγCが不正です".to_string())?;
-                (ec, ec / (2.0 * (1.0 + mat.poisson)))
-            }
+            ) => (mat.young, mat.shear_modulus()),
             _ => (mat.young, mat.shear_modulus()),
         };
         let composite = sec
