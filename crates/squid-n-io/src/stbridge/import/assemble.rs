@@ -386,7 +386,11 @@ fn build_materials(
         let category = resolve_material_category(&m.name, m.fc, m.fy, guessed_categories);
         model.materials.push(Material {
             strength_factor: None,
-            concrete_class: Default::default(),
+            concrete_class: if category == MaterialCategory::Concrete {
+                squid_n_core::units::ConcreteClass::UserDefined
+            } else {
+                Default::default()
+            },
             id: MaterialId(material_index[&m.file_id]),
             name: m.name,
             category,
@@ -470,6 +474,10 @@ mod tests {
         .expect("valid concrete material");
 
         assert_eq!(model.materials[0].young, 1.0);
+        assert_eq!(
+            model.materials[0].concrete_class,
+            squid_n_core::units::ConcreteClass::UserDefined
+        );
     }
 }
 

@@ -146,7 +146,6 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                 (preset.name.to_string(), preset.density)
             };
             if ui.button("+ 追加").clicked() {
-                let new_id = squid_n_core::ids::MaterialId(app.core.model.materials.len() as u32);
                 app.core.scoped.undo.run(
                     &mut app.core.model,
                     Box::new(AddMaterial {
@@ -161,9 +160,6 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                         concrete_class: Default::default(),
                     }),
                 );
-                if draft.category == MaterialCategory::Concrete {
-                    app.ui.scoped.preset_material_ids.insert(new_id);
-                }
                 app.core.scoped.staleness.mark_edited();
             }
         }
@@ -436,23 +432,6 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
         edited = true;
     }
     if let Some(id) = pending_delete {
-        app.ui
-            .scoped
-            .preset_material_ids
-            .remove(&squid_n_core::ids::MaterialId(id));
-        app.ui.scoped.preset_material_ids = app
-            .ui
-            .scoped
-            .preset_material_ids
-            .iter()
-            .map(|preset_id| {
-                squid_n_core::ids::MaterialId(if preset_id.0 > id {
-                    preset_id.0 - 1
-                } else {
-                    preset_id.0
-                })
-            })
-            .collect();
         app.core.scoped.undo.run(
             &mut app.core.model,
             Box::new(DeleteMaterial {

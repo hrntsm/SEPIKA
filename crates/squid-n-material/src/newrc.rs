@@ -155,7 +155,7 @@ impl ConcreteNewRc {
 
     pub fn set_initial_tangent(&mut self, ec: f64) {
         self.ec = ec;
-        self.envelope.ec = ec;
+        self.envelope.set_initial_tangent(ec);
         self.committed.tangent = ec;
         self.trial.tangent = ec;
     }
@@ -376,6 +376,17 @@ mod tests {
         env.set_initial_tangent(18_000.0);
         let (_, tangent) = env.compression(1e-9);
         assert_relative_eq!(tangent, 18_000.0, max_relative = 1e-3);
+    }
+
+    #[test]
+    fn test_newrc_explicit_initial_tangent_applies_to_compression_envelope() {
+        for dynamic in [false, true] {
+            let mut concrete = ConcreteNewRc::new(30.0, 2.0);
+            concrete.set_concrete_hysteresis(dynamic);
+            concrete.set_initial_tangent(18_000.0);
+            let (_, tangent) = concrete.trial(-1e-9);
+            assert_relative_eq!(tangent, 18_000.0, max_relative = 1e-3);
+        }
     }
 
     #[test]
