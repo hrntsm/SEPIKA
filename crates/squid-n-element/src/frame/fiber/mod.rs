@@ -56,34 +56,32 @@ pub(crate) fn concrete_fiber_material(
     match rule {
         HysteresisModel::KarsanJirsa => {
             if fc <= 60.0 {
-                let material = squid_n_material::ConcreteCyclic::newrc_with_initial_tangent(
+                Box::new(
+                    squid_n_material::ConcreteCyclic::newrc_with_initial_tangent(
+                        fc,
+                        0.01,
+                        2.0,
+                        young / 10.0,
+                        young,
+                    ),
+                )
+            } else {
+                let ec = squid_n_material::newrc::NewRcEnvelope::new(fc).ec;
+                Box::new(squid_n_material::ConcreteCyclic::newrc(
                     fc,
                     0.01,
                     2.0,
-                    young / 10.0,
-                    young,
-                );
-                Box::new(material)
-            } else {
-                Box::new(squid_n_material::ConcreteCyclic::kent_park(
-                    fc,
-                    0.002,
-                    0.0,
-                    0.0035,
-                    2.0,
-                    2.0 * fc / 0.002 / 10.0,
+                    ec / 10.0,
                 ))
             }
         }
         HysteresisModel::Retrograde | HysteresisModel::OriginOriented => {
+            let mut m = squid_n_material::ConcreteNewRc::new(fc, 2.0);
             if fc <= 60.0 {
-                let mut m = squid_n_material::ConcreteNewRc::new(fc, 2.0);
                 m.set_initial_tangent(young);
-                m.set_concrete_hysteresis(rule == HysteresisModel::OriginOriented);
-                Box::new(m)
-            } else {
-                Box::new(squid_n_material::uniaxial::Concrete::new(fc, 2.0))
             }
+            m.set_concrete_hysteresis(rule == HysteresisModel::OriginOriented);
+            Box::new(m)
         }
         other => panic!(
             "コンクリートのファイバ材料の除荷則として解釈できません: {other:?}\
