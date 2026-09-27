@@ -95,7 +95,7 @@ impl SectionShape {
         gamma_c: f64,
     ) -> Option<CompositeProps> {
         let ec = concrete_young_modulus_gamma(fc, gamma_c);
-        if ec <= 0.0 || es <= 0.0 {
+        if !ec.is_finite() || ec <= 0.0 || !es.is_finite() || es <= 0.0 || !nu_s.is_finite() {
             return None;
         }
         let core = self.cft_core_props()?;
@@ -104,6 +104,9 @@ impl SectionShape {
         }
         let n = es / ec;
         let ngs = n * (1.0 + NU_CONCRETE) / (1.0 + nu_s);
+        if !n.is_finite() || !ngs.is_finite() || ngs <= 0.0 {
+            return None;
+        }
         let (s_as_y, s_as_z) = match *self {
             SectionShape::CftBox { thick: t, .. } => {
                 (2.0 * t * core.inner_width, 2.0 * t * core.inner_height)

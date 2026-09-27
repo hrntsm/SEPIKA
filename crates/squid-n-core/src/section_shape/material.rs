@@ -15,7 +15,7 @@ pub fn concrete_young_modulus(fc: f64) -> f64 {
 /// コンクリート強度 Fc [N/mm²]・気乾単位体積重量 γ [kN/m³] から
 /// ヤング係数 Ec [N/mm²] を算定する（RC 規準の Ec=3.35·10⁴·(γ/24)²·(Fc/60)^(1/3)）。
 pub fn concrete_young_modulus_gamma(fc: f64, gamma_kn_m3: f64) -> f64 {
-    if fc <= 0.0 {
+    if !fc.is_finite() || fc <= 0.0 || !gamma_kn_m3.is_finite() {
         return 0.0;
     }
     3.35e4 * (gamma_kn_m3 / 24.0).powi(2) * (fc / 60.0).powf(1.0 / 3.0)
@@ -168,5 +168,11 @@ mod concrete_young_modulus_tests {
             concrete_young_modulus_from_density(21.0, normal),
             Some(concrete_young_modulus_gamma(21.0, 23.0))
         );
+    }
+
+    #[test]
+    fn non_finite_inputs_do_not_produce_young_modulus() {
+        assert_eq!(concrete_young_modulus_gamma(f64::NAN, 23.0), 0.0);
+        assert_eq!(concrete_young_modulus_gamma(21.0, f64::NAN), 0.0);
     }
 }

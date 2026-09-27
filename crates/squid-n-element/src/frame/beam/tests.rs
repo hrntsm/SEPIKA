@@ -198,6 +198,12 @@ fn test_beam_new_src_cft_composite_props() {
     assert!((cft_beam.iz - pc.iy).abs() / pc.iy < 1e-12);
     assert!((cft_beam.j - pc.j).abs() / pc.j < 1e-12);
 
+    let mut invalid_cft_material = model.materials[1].clone();
+    invalid_cft_material.fc = Some(f64::NAN);
+    assert!(
+        super::stiffness_factors::composite_props_with(&cft_shape, &invalid_cft_material).is_none()
+    );
+
     model.materials[1].density = 12.0e-9;
     let cft_beam_with_changed_density = BeamElement::new(&make_elem(1), &model);
     assert!((cft_beam_with_changed_density.a - cft_beam.a).abs() < 1e-6);
