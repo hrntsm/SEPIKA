@@ -174,7 +174,7 @@ impl ConcreteCyclic {
     pub fn newrc_with_initial_tangent(fc: f64, eps_cu: f64, ft: f64, ets: f64, ec: f64) -> Self {
         let mut material = Self::newrc(fc, eps_cu, ft, ets);
         if let ConcreteEnvelope::NewRc { envelope, .. } = &mut material.envelope {
-            envelope.ec = ec;
+            envelope.set_initial_tangent(ec);
         }
         material.committed.tangent = ec;
         material.trial.tangent = ec;

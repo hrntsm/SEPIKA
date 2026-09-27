@@ -57,6 +57,31 @@ fn apply_src_toggle(name: &str, fc: f64) -> (String, f64) {
     (format!("{name}(SRC)"), rho)
 }
 
+fn is_standard_concrete(
+    name: &str,
+    category: MaterialCategory,
+    fc: Option<f64>,
+    density: f64,
+) -> bool {
+    category == MaterialCategory::Concrete
+        && material_presets().into_iter().any(|preset| {
+            preset.category == MaterialCategory::Concrete
+                && preset.name == name
+                && preset.fc == fc
+                && preset.density == density
+        })
+}
+
+fn young_editable(
+    name: &str,
+    category: MaterialCategory,
+    fc: Option<f64>,
+    density: f64,
+    is_preset: bool,
+) -> bool {
+    !(is_preset || is_standard_concrete(name, category, fc, density))
+}
+
 /// 材料タブ：プリセット追加・カスタム追加・一覧編集・削除。
 pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
     use crate::table_util::{self, Col};
@@ -125,6 +150,7 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                 (preset.name.to_string(), preset.density)
             };
             if ui.button("+ 追加").clicked() {
+                let new_id = squid_n_core::ids::MaterialId(app.core.model.materials.len() as u32);
                 app.core.scoped.undo.run(
                     &mut app.core.model,
                     Box::new(AddMaterial {
@@ -138,6 +164,9 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                         strength_factor: None,
                     }),
                 );
+                if draft.category == MaterialCategory::Concrete {
+                    app.ui.scoped.preset_material_ids.insert(new_id);
+                }
                 app.core.scoped.staleness.mark_edited();
             }
         }
@@ -294,7 +323,17 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                 }
             });
             let cells: [(MaterialField, String, bool); 6] = [
-                (MaterialField::Young, format!("{}", mat.young), true),
+                (
+                    MaterialField::Young,
+                    format!("{}", mat.young),
+                    young_editable(
+                        &mat.name,
+                        mat.category,
+                        mat.fc,
+                        mat.density,
+                        app.ui.scoped.preset_material_ids.contains(&mat_id),
+                    ),
+                ),
                 (MaterialField::Poisson, format!("{}", mat.poisson), true),
                 (MaterialField::Density, format!("{:.3e}", mat.density), true),
                 (
@@ -317,11 +356,21 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
             ];
             for (field, current, required) in cells {
                 row.col(|ui| {
+                    let editable = field != MaterialField::Young
+                        || young_editable(
+                            &mat.name,
+                            mat.category,
+                            mat.fc,
+                            mat.density,
+                            app.ui.scoped.preset_material_ids.contains(&mat_id),
+                        );
                     let cell_id = egui::Id::new(("mat_cell", mat_id.0, field as u8));
                     let mut buf = ui
                         .data(|d| d.get_temp::<String>(cell_id))
                         .unwrap_or_else(|| current.clone());
-                    let resp = table_util::cell_text_edit(ui, &mut buf);
+                    let resp = ui
+                        .add_enabled_ui(editable, |ui| table_util::cell_text_edit(ui, &mut buf))
+                        .inner;
                     if resp.lost_focus() {
                         let parsed = buf.trim().parse::<f64>().ok();
                         let changed = buf.trim() != current.trim();
@@ -385,6 +434,23 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
         edited = true;
     }
     if let Some(id) = pending_delete {
+        app.ui
+            .scoped
+            .preset_material_ids
+            .remove(&squid_n_core::ids::MaterialId(id));
+        app.ui.scoped.preset_material_ids = app
+            .ui
+            .scoped
+            .preset_material_ids
+            .iter()
+            .map(|preset_id| {
+                squid_n_core::ids::MaterialId(if preset_id.0 > id {
+                    preset_id.0 - 1
+                } else {
+                    preset_id.0
+                })
+            })
+            .collect();
         app.core.scoped.undo.run(
             &mut app.core.model,
             Box::new(DeleteMaterial {
@@ -445,5 +511,52 @@ mod tests {
             format!("{:.4e}", squid_n_core::units::STEEL_MASS_DENSITY_TON_MM3),
             "7.8500e-9"
         );
+    }
+
+    #[test]
+    fn standard_concrete_young_is_not_editable_but_direct_input_is() {
+        assert!(!young_editable(
+            "Fc24",
+            MaterialCategory::Concrete,
+            Some(24.0),
+            0.0,
+            true
+        ));
+        assert!(young_editable(
+            "任意",
+            MaterialCategory::Concrete,
+            Some(24.0),
+            0.0,
+            false
+        ));
+        assert!(young_editable(
+            "SS400",
+            MaterialCategory::Steel,
+            None,
+            0.0,
+            true
+        ));
+    }
+
+    #[test]
+    fn imported_standard_concrete_young_is_not_editable() {
+        let preset = material_presets()
+            .into_iter()
+            .find(|p| p.name == "Fc24")
+            .unwrap();
+        assert!(!young_editable(
+            preset.name,
+            preset.category,
+            preset.fc,
+            preset.density,
+            false,
+        ));
+        assert!(young_editable(
+            "Fc24の直接入力",
+            MaterialCategory::Concrete,
+            preset.fc,
+            preset.density,
+            false,
+        ));
     }
 }

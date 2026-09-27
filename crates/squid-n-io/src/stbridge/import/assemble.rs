@@ -471,7 +471,6 @@ mod tests {
 
         assert_eq!(model.materials[0].young, 1.0);
     }
-
 }
 
 /// 断面側の材料参照を、部材への伝播用に解決する。

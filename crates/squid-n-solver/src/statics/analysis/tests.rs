@@ -571,7 +571,6 @@ fn test_model_issues_errors_on_invalid_rc_material() {
         assert_eq!(issue.severity, IssueSeverity::Error);
         assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
     }
-
 }
 
 /// CFT では Fc とヤング係数が揃っていても、鋼管の板厚が過大で充填部の内法が 0 に

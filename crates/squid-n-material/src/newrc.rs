@@ -44,6 +44,11 @@ impl NewRcEnvelope {
         }
     }
 
+    pub fn set_initial_tangent(&mut self, ec: f64) {
+        self.ec = ec;
+        self.a = ec * self.eps_c0 / self.fc;
+    }
+
     /// NewRC 圧縮包絡線の応力比とその微分（正規化ひずみ X に対して）。
     fn ratio(&self, capital_x: f64) -> (f64, f64) {
         let a = self.a;
@@ -363,6 +368,14 @@ mod tests {
         assert_relative_eq!(tangent, env.ec, max_relative = 1e-3);
         // Ec は常識的な範囲（普通コンクリート 2〜3×10⁴ N/mm² 程度）。
         assert!(env.ec > 2.0e4 && env.ec < 3.5e4, "Ec={}", env.ec);
+    }
+
+    #[test]
+    fn test_newrc_explicit_initial_tangent_changes_envelope_coefficients() {
+        let mut env = NewRcEnvelope::new(30.0);
+        env.set_initial_tangent(18_000.0);
+        let (_, tangent) = env.compression(1e-9);
+        assert_relative_eq!(tangent, 18_000.0, max_relative = 1e-3);
     }
 
     #[test]

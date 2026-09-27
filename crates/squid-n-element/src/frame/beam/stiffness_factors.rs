@@ -315,6 +315,17 @@ pub(super) fn validate_composite_material(
     {
         return Err("RC/SRC/CFT 断面のコンクリート Fc が未設定または不正です".into());
     }
+    if matches!(
+        shape,
+        SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
+    ) {
+        if !mat.young.is_finite() || mat.young <= 0.0 {
+            return Err("CFT 断面の鋼管ヤング係数 E が未設定または不正です".into());
+        }
+        if !mat.poisson.is_finite() {
+            return Err("CFT 断面の鋼管ポアソン比 ν が不正です".into());
+        }
+    }
     Ok(())
 }
 

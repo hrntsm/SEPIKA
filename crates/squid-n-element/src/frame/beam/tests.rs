@@ -222,6 +222,20 @@ fn test_beam_new_src_cft_composite_props() {
     assert!(
         super::stiffness_factors::composite_props_with(&cft_shape, &invalid_cft_material).is_none()
     );
+    invalid_cft_material.fc = Some(36.0);
+    invalid_cft_material.young = 0.0;
+    assert!(super::stiffness_factors::validate_composite_material(
+        &cft_shape,
+        &invalid_cft_material
+    )
+    .is_err());
+    invalid_cft_material.young = 205000.0;
+    invalid_cft_material.poisson = f64::NAN;
+    assert!(super::stiffness_factors::validate_composite_material(
+        &cft_shape,
+        &invalid_cft_material
+    )
+    .is_err());
 
     model.materials[1].density = 12.0e-9;
     let cft_beam_with_changed_density = BeamElement::new(&make_elem(1), &model);

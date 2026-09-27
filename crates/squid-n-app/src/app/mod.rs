@@ -992,6 +992,8 @@ pub struct UiModelScoped {
     pub pending_duplicate_node_coord: Option<[f64; 3]>,
     /// ナビゲータ（左ペイン）状態
     pub nav: Navigator,
+    /// プリセットから追加した材料の ID。材料モデルに由来情報がないため UI で保持する。
+    pub preset_material_ids: std::collections::HashSet<squid_n_core::ids::MaterialId>,
     /// MN 相関曲面ビューの状態（断面選択・材料強度・表示切替・カメラ等）
     #[cfg(feature = "gui")]
     pub mn_view: crate::mn_view::MnViewState,
@@ -1152,6 +1154,7 @@ impl Default for UiModelScoped {
             node_draft: ["0".to_string(), "0".to_string(), "0".to_string()],
             pending_duplicate_node_coord: None,
             nav: Navigator::default(),
+            preset_material_ids: std::collections::HashSet::new(),
             #[cfg(feature = "gui")]
             mn_view: crate::mn_view::MnViewState::default(),
             #[cfg(feature = "gui")]
