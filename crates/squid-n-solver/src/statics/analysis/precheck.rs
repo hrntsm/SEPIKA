@@ -394,7 +394,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         ));
     }
 
-    let invalid_cft_fc: Vec<ElemId> = model
+    let invalid_composite_fc: Vec<ElemId> = model
         .elements
         .iter()
         .filter(|e| {
@@ -407,22 +407,66 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             let shape = model.element_section(e)?.shape.as_ref()?;
             if !matches!(
                 shape,
-                SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
+                SectionShape::SrcBeamRect { .. }
+                    | SectionShape::SrcColumnRect { .. }
+                    | SectionShape::CftBox { .. }
+                    | SectionShape::CftPipe { .. }
             ) {
                 return None;
             }
-            let fc = model.element_material(e)?.fc?;
-            (!fc.is_finite() || fc <= 0.0).then_some(e.id)
+            (!model
+                .element_material(e)?
+                .fc
+                .is_some_and(|fc| fc.is_finite() && fc > 0.0))
+            .then_some(e.id)
         })
         .collect();
-    if !invalid_cft_fc.is_empty() {
+    if !invalid_composite_fc.is_empty() {
         issues.push(ModelIssue::members(
-            "CFT 断面の充填コンクリート Fc が不正です",
+            "SRC/CFT 断面のコンクリート Fc が不正です",
             "ID ",
-            invalid_cft_fc,
-            "充填コンクリート Fc が 0 以下または非有限値です",
-            "材料タブで充填コンクリートの Fc に正の有限値を設定してください。\
-             不正な Fc のまま鋼管のみへ切り替えて解析することはできません。",
+            invalid_composite_fc,
+            "コンクリート Fc が未設定、0 以下、または非有限値です",
+            "材料タブで SRC/CFT のコンクリート Fc に正の有限値を設定してください。\
+             不正な Fc のまま既定の等価断面性能へ切り替えて解析することはできません。",
+        ));
+    }
+
+    let invalid_src_density: Vec<ElemId> = model
+        .elements
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.kind,
+                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+            )
+        })
+        .filter_map(|e| {
+            let shape = model.element_section(e)?.shape.as_ref()?;
+            if !matches!(
+                shape,
+                SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
+            ) {
+                return None;
+            }
+            let material = model.element_material(e)?;
+            let fc = material.fc?;
+            (!fc.is_finite()
+                || squid_n_core::section_shape::concrete_young_modulus_from_density(
+                    fc,
+                    material.density,
+                )
+                .is_none())
+            .then_some(e.id)
+        })
+        .collect();
+    if !invalid_src_density.is_empty() {
+        issues.push(ModelIssue::members(
+            "SRC 断面のコンクリート密度またはγCが不正です",
+            "ID ",
+            invalid_src_density,
+            "コンクリート密度またはγCが不正です",
+            "材料タブで正の有限密度と、Fc に対応する有効な γC を設定してください。",
         ));
     }
 
@@ -444,10 +488,10 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         })
         .filter(|e| model.element_material(e).is_some())
         .filter(|e| {
-            !model
+            model
                 .element_material(e)
                 .and_then(|m| m.fc)
-                .is_some_and(|fc| !fc.is_finite() || fc <= 0.0)
+                .is_some_and(|fc| fc.is_finite() && fc > 0.0)
         })
         .filter(|e| squid_n_element::frame::beam::composite_props_of(model, e).is_none())
         .map(|e| e.id)
@@ -461,7 +505,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 "等価断面性能を算定できません",
                 "断面タブで主材料のコンクリート Fc とヤング係数を設定してください。\
                  CFT では鋼管の板厚・外径（充填部の内法が正の値か）も確認してください。\
-                 未設定・不成立の間は、SRC は N_S_EQ=15、CFT は Fc 未設定または充填部の内法が退化した場合に限り鋼管のみで剛性を評価します。",
+                 Fc が有効な場合に限り、SRC は N_S_EQ=15、CFT は充填部の内法が退化した場合に鋼管のみで剛性を評価します。",
             )
             .warn(),
         );

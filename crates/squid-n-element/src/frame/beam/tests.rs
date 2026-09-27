@@ -181,13 +181,27 @@ fn test_beam_new_src_cft_composite_props() {
     };
 
     let src_beam = BeamElement::new(&make_elem(0), &model);
-    let p = src_shape.src_equivalent_props(23000.0, 0.2).unwrap();
+    let ec = squid_n_core::section_shape::concrete_young_modulus_from_density(
+        24.0,
+        model.materials[0].density,
+    )
+    .unwrap();
+    let p = src_shape.src_equivalent_props(ec, 0.2).unwrap();
     assert!((src_beam.a - p.area_ax).abs() < 1e-6);
     assert!((src_beam.iz - p.iy).abs() / p.iy < 1e-12);
     assert!((src_beam.j - p.j).abs() / p.j < 1e-12);
     assert!((src_beam.as_y - p.as_z).abs() < 1e-6);
-    let ns = E_STEEL / 23000.0;
+    let ns = E_STEEL / ec;
     assert!((ns - N_S_EQ).abs() > 1.0);
+    assert!(
+        (src_beam.a
+            - src_shape
+                .src_equivalent_props(23000.0, 0.2)
+                .unwrap()
+                .area_ax)
+            .abs()
+            > 1.0
+    );
     assert!((src_beam.a_mass - 360_000.0).abs() < 1e-9);
 
     let cft_beam = BeamElement::new(&make_elem(1), &model);
@@ -244,11 +258,10 @@ fn test_beam_new_src_cft_composite_props() {
         ..src_shape.to_section(SectionId(0), "SRC-600".into())
     };
     model.materials[0].fc = None;
-    let beam = BeamElement::try_new(&make_elem(0), &model).unwrap();
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        beam.mass_matrix(MassOption::Consistent)
-    }));
-    assert!(result.is_err());
+    let error = BeamElement::try_new(&make_elem(0), &model)
+        .err()
+        .expect("不正な Fc は要素構築に失敗する");
+    assert!(error.contains("Fc が未設定または不正"));
 }
 
 /// スラブ協力幅による強軸剛性増大。

@@ -63,6 +63,9 @@ impl BeamElement {
         };
 
         use squid_n_core::section_shape::SectionShape;
+        if let Some(shape) = sec.shape.as_ref() {
+            super::stiffness_factors::validate_composite_material(shape, &mat)?;
+        }
         let composite = sec
             .shape
             .as_ref()

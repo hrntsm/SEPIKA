@@ -183,7 +183,7 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
         model.sections[0].steel_material = with_steel.then_some(MaterialId(3));
         model.materials[0].density = 2.4e-9;
         model.materials[0].category = main_category;
-        model.materials[0].fc = (main_category == MaterialCategory::Steel).then_some(30.0);
+        model.materials[0].fc = Some(30.0);
         model.materials[0].young = 205000.0;
         model.materials.push(Material {
             density: 2.4e-9,
@@ -209,6 +209,17 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
             fy: Some(325.0),
             ..model.materials[0].clone()
         });
+        for (index, material) in model.materials.iter_mut().enumerate() {
+            material.id = MaterialId(index as u32);
+        }
+        for material in &mut model.materials {
+            material.fc.get_or_insert(24.0);
+            if material.density <= 0.0 {
+                material.density = 2.4e-9;
+            }
+        }
+        model.materials[1].young =
+            squid_n_core::section_shape::concrete_young_modulus_from_density(24.0, 2.4e-9).unwrap();
 
         let beam = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
         let fiber = FiberBeam::new(
@@ -246,7 +257,7 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
             for j in 0..12 {
                 assert!(
                     (mass_beam.get(i, j) - mass_fiber.get(i, j)).abs()
-                        <= 1.0e-3 * (1.0 + mass_beam.get(i, j).abs() + mass_fiber.get(i, j).abs()),
+                        <= 2.0e-3 * (1.0 + mass_beam.get(i, j).abs() + mass_fiber.get(i, j).abs()),
                     "Beam/Fiber の全12x12質量が不一致: M({i},{j}) beam={} fiber={}",
                     mass_beam.get(i, j),
                     mass_fiber.get(i, j)

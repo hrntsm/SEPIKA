@@ -1,7 +1,7 @@
 //! 断面の分布質量特性。
 
 use super::{ElementData, Material, Model, Section};
-use crate::section_shape::SectionShape;
+use crate::section_shape::{concrete_young_modulus_from_density, SectionShape};
 use crate::units::{
     concrete_unit_weight_kn_m3, to_internal::mass_density_from_unit_weight_kn_m3,
     ConcreteComposition,
@@ -180,6 +180,24 @@ pub fn validate_section_materials(
     {
         return Err(format!(
             "RC/SRC断面{}のコンクリート材料のFcが未設定または不正です",
+            section.name
+        ));
+    }
+
+    let src_shape = matches!(
+        shape,
+        SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
+    );
+    if (concrete_shape || src_shape)
+        && main.is_some_and(|material| {
+            material
+                .fc
+                .and_then(|fc| concrete_young_modulus_from_density(fc, material.density))
+                .is_none()
+        })
+    {
+        return Err(format!(
+            "断面{}のコンクリート系主材料の密度またはγCが不正です",
             section.name
         ));
     }
@@ -1569,5 +1587,20 @@ mod tests {
             )
             .is_ok());
         }
+    }
+
+    #[test]
+    fn コンクリート系断面は密度ゼロを拒否する() {
+        let shape = SectionShape::RcBeamRect {
+            b: 400.0,
+            d: 600.0,
+            rebar: new_beam_rebar(),
+        };
+        let section = shape.to_section(SectionId(0), "RC".into());
+        let concrete = material(0, MaterialCategory::Concrete, 0.0, Some(24.0));
+        let error =
+            SectionMassProperties::try_from_section(&section, Some(&concrete), None, None, None)
+                .unwrap_err();
+        assert!(error.contains("密度またはγCが不正"));
     }
 }
