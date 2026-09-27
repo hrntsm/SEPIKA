@@ -287,6 +287,25 @@ fn test_rc_portal_categories_and_concrete() {
 }
 
 #[test]
+fn test_unset_frame_use_is_not_counted_as_beam() {
+    let mut model = rc_portal_model();
+    model.sections[0].frame_use = None;
+
+    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    assert_eq!(
+        q.items
+            .iter()
+            .filter(|item| item.category == MemberCategory::Column)
+            .count(),
+        2
+    );
+    assert!(!q.items.iter().any(|item| matches!(
+        item.category,
+        MemberCategory::Girder | MemberCategory::FoundationGirder
+    )));
+}
+
+#[test]
 fn test_rc_girder_main_bars_and_stirrups() {
     let model = rc_portal_model();
     let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
@@ -427,6 +446,7 @@ fn test_steel_member_weight() {
     let a = shape.calc_area();
     // 材料は断面が持つ。
     let mut sec = shape.to_section(SectionId(2), "H-400x200x8x13".to_string());
+    sec.frame_use = Some(FrameSectionUse::Beam);
     sec.material = Some(MaterialId(2));
     model.sections.push(sec);
     model.materials.push(steel_material(2));

@@ -89,30 +89,13 @@ pub fn member_unit_axis(model: &Model, elem: &ElementData) -> Option<[f64; 3]> {
     geom::vec3::unit_from(p0, p1)
 }
 
-/// 要素の材軸の鉛直成分から柱・はりを判定する。線材以外・退化長さは `None`。
+/// 断面用途から柱・はりを判定する。用途未設定・ブレース・線材以外は `None`。
 pub fn member_orientation(model: &Model, elem: &ElementData) -> Option<MemberOrientation> {
     let section = elem.section.and_then(|id| model.sections.get(id.index()))?;
-    let axis = member_unit_axis(model, elem)?;
     match section.frame_use? {
-        FrameSectionUse::Column
-            if geom::is_vertical_axis(
-                model.nodes[elem.nodes[0].index()].coord,
-                model.nodes[elem.nodes[1].index()].coord,
-            ) =>
-        {
-            Some(MemberOrientation::Column)
-        }
-        FrameSectionUse::Beam
-            if !geom::is_vertical_axis(
-                model.nodes[elem.nodes[0].index()].coord,
-                model.nodes[elem.nodes[1].index()].coord,
-            ) && axis[2].abs() < 1e-9
-                && (geom::axis_dominates(axis, 0) || geom::axis_dominates(axis, 1)) =>
-        {
-            Some(MemberOrientation::Beam)
-        }
+        FrameSectionUse::Column => Some(MemberOrientation::Column),
+        FrameSectionUse::Beam => Some(MemberOrientation::Beam),
         FrameSectionUse::Brace => None,
-        _ => None,
     }
 }
 
@@ -871,12 +854,25 @@ mod tests {
         assert!((extent.offset_for(MemberOrientation::Column) - 300.0).abs() < 1e-9);
     }
 
-    /// 斜材は柱にもはりにも分類しない（オフセット・ζ が資料で定義されないため）。
+    /// 用途が梁の傾斜部材は梁として扱い、幾何による再分類を行わない。
     #[test]
-    fn test_diagonal_member_has_no_orientation() {
+    fn test_diagonal_beam_uses_section_use() {
         let mut m = joint_model(h_beam(), 600.0, h_col());
         m.nodes[1].coord = [4000.0, 0.0, 6000.0];
-        assert!(member_orientation(&m, &m.elements[0]).is_none());
+        assert_eq!(
+            member_orientation(&m, &m.elements[0]),
+            Some(MemberOrientation::Beam)
+        );
+    }
+
+    #[test]
+    fn test_diagonal_column_uses_section_use() {
+        let mut m = joint_model(h_beam(), 600.0, h_col());
+        m.nodes[2].coord = [1000.0, 0.0, 0.0];
+        assert_eq!(
+            member_orientation(&m, &m.elements[1]),
+            Some(MemberOrientation::Column)
+        );
     }
 
     /// 梁の db: H 形はせい − フランジ厚、それ以外は 0.9・せい。

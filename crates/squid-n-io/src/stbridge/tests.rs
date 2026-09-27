@@ -1027,6 +1027,15 @@ fn test_standard_import_recovers_split_shared_section() {
     );
 }
 
+#[test]
+fn test_export_rejects_beam_section_with_brace_use() {
+    let mut model = representative_model();
+    model.sections[1].frame_use = Some(squid_n_core::model::FrameSectionUse::Brace);
+
+    let err = export_stbridge(&model).expect_err("部材種別と断面用途の不整合を拒否");
+    assert!(matches!(err, StbError::FrameSectionUseMismatch(_)), "{err}");
+}
+
 /// 符号＋階が同じでも**材料が違えば統合しない**。
 ///
 /// 材料は断面が持つため、材料だけが違う定義を 1 断面へまとめると片方の材料が

@@ -957,10 +957,23 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
         let Some(section) = model.element_section(element) else {
             continue;
         };
-        if section.frame_use.is_none() {
+        let Some(frame_use) = section.frame_use else {
             return Err(super::StbError::FrameSectionUseMissing(format!(
                 "部材 {} が参照する断面 {}",
                 element.id.0, section_id.0
+            )));
+        };
+        let allowed = match element.kind {
+            ElementKind::Beam => {
+                matches!(frame_use, FrameSectionUse::Column | FrameSectionUse::Beam)
+            }
+            ElementKind::Brace { .. } => frame_use == FrameSectionUse::Brace,
+            _ => true,
+        };
+        if !allowed {
+            return Err(super::StbError::FrameSectionUseMismatch(format!(
+                "部材 {} ({:?}) が参照する断面 {} の用途 {:?}",
+                element.id.0, element.kind, section_id.0, frame_use
             )));
         }
     }

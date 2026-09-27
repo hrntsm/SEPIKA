@@ -481,25 +481,28 @@ pub fn compute_quantity_takeoff(model: &Model, cfg: &QuantityCfg) -> QuantityTak
         };
         let (ca, cb) = (a.coord, b.coord);
         min_z = min_z.min(ca[2]).min(cb[2]);
-        if model
-            .element_section(e)
-            .and_then(|section| section.frame_use)
-            == Some(FrameSectionUse::Column)
-        {
-            column_nodes.insert(ni);
-            column_nodes.insert(nj);
-        } else {
-            let dx = cb[0] - ca[0];
-            let dy = cb[1] - ca[1];
-            let len = (dx * dx + dy * dy).sqrt();
-            if len > 0.0 {
-                let dir = [dx / len, dy / len];
-                beams_at_node.entry(ni).or_default().push((idx, dir));
-                beams_at_node
-                    .entry(nj)
-                    .or_default()
-                    .push((idx, [-dir[0], -dir[1]]));
+        let Some(section) = model.element_section(e) else {
+            continue;
+        };
+        match section.frame_use {
+            Some(FrameSectionUse::Column) => {
+                column_nodes.insert(ni);
+                column_nodes.insert(nj);
             }
+            Some(FrameSectionUse::Beam) => {
+                let dx = cb[0] - ca[0];
+                let dy = cb[1] - ca[1];
+                let len = (dx * dx + dy * dy).sqrt();
+                if len > 0.0 {
+                    let dir = [dx / len, dy / len];
+                    beams_at_node.entry(ni).or_default().push((idx, dir));
+                    beams_at_node
+                        .entry(nj)
+                        .or_default()
+                        .push((idx, [-dir[0], -dir[1]]));
+                }
+            }
+            None | Some(FrameSectionUse::Brace) => {}
         }
     }
 
@@ -697,7 +700,11 @@ fn line_member_quantity(ctx: &Ctx, elem_idx: usize, elem: &ElementData) -> Optio
     if len <= 0.0 {
         return None;
     }
-    let vertical = sec.frame_use == Some(FrameSectionUse::Column);
+    let vertical = match sec.frame_use {
+        Some(FrameSectionUse::Column) => true,
+        Some(FrameSectionUse::Beam) => false,
+        None | Some(FrameSectionUse::Brace) => return None,
+    };
     let structure = squid_n_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category));
 
     if vertical {
