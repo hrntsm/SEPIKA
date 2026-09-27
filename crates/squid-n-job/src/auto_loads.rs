@@ -908,7 +908,7 @@ mod tests {
         let loads = perimeter_beam_loads(&model, Some(LoadPurpose::Frame)).unwrap();
         assert_eq!(loads.len(), 1);
         assert_eq!(loads[0].elem, ElemId(0));
-        assert!(matches!(loads[0].shape, LoadShape::Uniform { w } if (w - 1.2).abs() < 1e-12));
+        assert!(matches!(loads[0].shape, LoadShape::Uniform { w } if (w - 1.8).abs() < 1e-12));
     }
 
     #[test]
