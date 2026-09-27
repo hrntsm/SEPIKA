@@ -685,9 +685,9 @@ impl WallElement {
                     data.id.0, mat.name
                 ));
             }
-            Some(fc) if fc <= 0.0 => {
+            Some(fc) if !fc.is_finite() || fc <= 0.0 => {
                 return Some(format!(
-                    "耐震壁 ID {} の材料「{}」のコンクリート強度 Fc が {} で 0 以下です。\
+                    "耐震壁 ID {} の材料「{}」のコンクリート強度 Fc が {} で 0 以下または非有限値です。\
                      保有水平耐力計算では耐震壁の終局せん断強度が必要です。材料タブで Fc を設定してください。",
                     data.id.0, mat.name, fc
                 ));
@@ -2622,7 +2622,7 @@ mod capacity_issue_tests {
         assert_eq!(WallElement::shear_capacity_of(&wall, &model), 0.0);
     }
 
-    /// Fc が 0 以下でも Qu を算定できないため不備とする（未設定と同じ扱い）。
+    /// Fc が 0 以下または非有限値でも Qu を算定できないため不備とする（未設定と同じ扱い）。
     #[test]
     fn test_issue_when_fc_not_positive() {
         let (mut model, wall) = model_with(None, 0.0025);

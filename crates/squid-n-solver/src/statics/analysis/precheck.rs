@@ -394,6 +394,38 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         ));
     }
 
+    let invalid_cft_fc: Vec<ElemId> = model
+        .elements
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.kind,
+                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+            )
+        })
+        .filter_map(|e| {
+            let shape = model.element_section(e)?.shape.as_ref()?;
+            if !matches!(
+                shape,
+                SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
+            ) {
+                return None;
+            }
+            let fc = model.element_material(e)?.fc?;
+            (!fc.is_finite() || fc <= 0.0).then_some(e.id)
+        })
+        .collect();
+    if !invalid_cft_fc.is_empty() {
+        issues.push(ModelIssue::members(
+            "CFT 断面の充填コンクリート Fc が不正です",
+            "ID ",
+            invalid_cft_fc,
+            "充填コンクリート Fc が 0 以下または非有限値です",
+            "材料タブで充填コンクリートの Fc に正の有限値を設定してください。\
+             不正な Fc のまま鋼管のみへ切り替えて解析することはできません。",
+        ));
+    }
+
     let composite_fallback: Vec<ElemId> = model
         .elements
         .iter()
@@ -411,6 +443,12 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 .is_some()
         })
         .filter(|e| model.element_material(e).is_some())
+        .filter(|e| {
+            !model
+                .element_material(e)
+                .and_then(|m| m.fc)
+                .is_some_and(|fc| !fc.is_finite() || fc <= 0.0)
+        })
         .filter(|e| squid_n_element::frame::beam::composite_props_of(model, e).is_none())
         .map(|e| e.id)
         .collect();
@@ -423,7 +461,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 "等価断面性能を算定できません",
                 "断面タブで主材料のコンクリート Fc とヤング係数を設定してください。\
                  CFT では鋼管の板厚・外径（充填部の内法が正の値か）も確認してください。\
-                 未設定・不成立の間は、SRC は N_S_EQ=15、CFT は鋼管のみで剛性を評価します。",
+                 未設定・不成立の間は、SRC は N_S_EQ=15、CFT は Fc 未設定または充填部の内法が退化した場合に限り鋼管のみで剛性を評価します。",
             )
             .warn(),
         );

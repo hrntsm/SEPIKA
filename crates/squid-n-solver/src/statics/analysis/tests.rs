@@ -542,6 +542,27 @@ fn test_model_issues_warns_cft_composite_fallback() {
     assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
 }
 
+#[test]
+fn test_model_issues_errors_on_invalid_cft_fc() {
+    use super::precheck::{model_issues, IssueSeverity, IssueTargets};
+
+    for fc in [0.0, f64::NAN] {
+        let mut model = make_cantilever_model();
+        model.sections[0].shape = Some(cft_shape());
+        model.materials[0].fc = Some(fc);
+
+        let issue = model_issues(&model)
+            .into_iter()
+            .find(|i| i.short == "充填コンクリート Fc が 0 以下または非有限値です")
+            .expect("不正な CFT の Fc は入力不備になるはず");
+        assert_eq!(issue.severity, IssueSeverity::Error);
+        assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
+        assert!(!model_issues(&model).iter().any(|i| {
+            i.short == "等価断面性能を算定できません" && i.severity == IssueSeverity::Warning
+        }));
+    }
+}
+
 /// CFT では Fc とヤング係数が揃っていても、鋼管の板厚が過大で充填部の内法が 0 に
 /// なる形状では等価断面性能を算定できず、鋼管のみへフォールバックする。材料条件が
 /// 原因ではないため、警告の是正文が形状条件にも触れていることを確認する。

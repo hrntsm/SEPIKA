@@ -309,6 +309,9 @@ pub(super) fn composite_props_with(
             .then(|| shape.src_equivalent_props(mat.young, mat.poisson))
             .flatten(),
         SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => mat.fc.and_then(|fc| {
+            if !fc.is_finite() || fc <= 0.0 {
+                return None;
+            }
             let gamma_c = squid_n_core::units::concrete_unit_weight_kn_m3(
                 fc,
                 mat.concrete_class,
