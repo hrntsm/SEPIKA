@@ -2330,32 +2330,63 @@ fn test_all_fiber_materials_return_initial_tangent_at_zero_strain() {
 
 #[test]
 fn fc_over_60_fiber_materials_use_newrc_envelope_and_history() {
-    use squid_n_material::uniaxial::{ConcreteCyclic, UniaxialMaterial};
-
-    for rule in [
-        HysteresisModel::Retrograde,
-        HysteresisModel::OriginOriented,
-        HysteresisModel::KarsanJirsa,
-    ] {
+    let (ec, eps_c0, a, d) = newrc_reference_parameters(80.0);
+    for rule in [HysteresisModel::Retrograde, HysteresisModel::OriginOriented] {
         let mut actual = concrete_fiber_material(Some(80.0), 30000.0, rule);
-        if rule != HysteresisModel::KarsanJirsa {
-            let mut expected_new = squid_n_material::ConcreteNewRc::new(80.0, 2.0);
-            expected_new.set_concrete_hysteresis(rule == HysteresisModel::OriginOriented);
-            for strain in [0.00001, -0.001, 0.0005, -0.0025] {
-                assert_eq!(actual.trial(strain), expected_new.trial(strain));
-                actual.commit();
-                expected_new.commit();
+        let (stress, tangent) = actual.trial(0.0);
+        assert_relative_eq!(stress, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(tangent, ec, max_relative = 1e-12);
+
+        let max_strain = -1.2 * eps_c0;
+        let (max_stress, _) = actual.trial(max_strain);
+        actual.commit();
+        let unload_strain = -0.5 * eps_c0;
+        let (unload_stress, unload_tangent) = actual.trial(unload_strain);
+        let (envelope_stress, envelope_tangent) = newrc_reference_response(0.5, 80.0, eps_c0, a, d);
+        let origin_tangent = max_stress / max_strain;
+        let (expected_stress, expected_tangent) = match rule {
+            HysteresisModel::Retrograde => (-envelope_stress, envelope_tangent),
+            HysteresisModel::OriginOriented => {
+                (origin_tangent * unload_strain, origin_tangent)
             }
-        } else {
-            let ec = squid_n_material::newrc::NewRcEnvelope::new(80.0).ec;
-            let mut expected = ConcreteCyclic::newrc(80.0, 0.01, 2.0, ec / 10.0);
-            for strain in [-0.0005, -0.0025, -0.004] {
-                assert_eq!(actual.trial(strain), expected.trial(strain));
-                actual.commit();
-                expected.commit();
-            }
-        }
+            _ => unreachable!(),
+        };
+        assert_relative_eq!(unload_stress, expected_stress, max_relative = 1e-9);
+        assert_relative_eq!(unload_tangent, expected_tangent, max_relative = 1e-9);
+        actual.commit();
+
+        let (zero_stress, zero_tangent) = actual.trial(0.0);
+        assert_relative_eq!(zero_stress, 0.0, epsilon = 1e-12);
+        let expected_zero_tangent = match rule {
+            HysteresisModel::Retrograde => ec,
+            HysteresisModel::OriginOriented => origin_tangent,
+            _ => unreachable!(),
+        };
+        assert_relative_eq!(zero_tangent, expected_zero_tangent, max_relative = 1e-9);
+
+        let reload_strain = -0.8 * eps_c0;
+        let (reload_stress, _) = actual.trial(reload_strain);
+        let (reload_envelope, _) = newrc_reference_response(0.8, 80.0, eps_c0, a, d);
+        let expected_reload = match rule {
+            HysteresisModel::Retrograde => -reload_envelope,
+            HysteresisModel::OriginOriented => origin_tangent * reload_strain,
+            _ => unreachable!(),
+        };
+        assert_relative_eq!(reload_stress, expected_reload, max_relative = 1e-9);
     }
+
+    let mut karsan = concrete_fiber_material(Some(80.0), 30000.0, HysteresisModel::KarsanJirsa);
+    let (stress, tangent) = karsan.trial(0.0);
+    assert_relative_eq!(stress, 0.0, epsilon = 1e-12);
+    assert_relative_eq!(tangent, ec, max_relative = 1e-12);
+    let max_strain = -1.5 * eps_c0;
+    let (max_stress, _) = karsan.trial(max_strain);
+    karsan.commit();
+    let plastic_strain = -(0.145 * 1.5_f64.powi(2) + 0.13 * 1.5) * eps_c0;
+    let (plastic_stress, plastic_tangent) = karsan.trial(plastic_strain);
+    let expected_tangent = max_stress / (max_strain - plastic_strain);
+    assert_relative_eq!(plastic_stress, 0.0, epsilon = 1e-9);
+    assert_relative_eq!(plastic_tangent, expected_tangent, max_relative = 1e-9);
 }
 
 #[test]
@@ -2365,42 +2396,34 @@ fn fc_60_and_fc_80_are_both_newrc_materials() {
         HysteresisModel::OriginOriented,
         HysteresisModel::KarsanJirsa,
     ] {
-        let mut fc60 = concrete_fiber_material(Some(60.0), 30000.0, rule);
-        let mut fc80 = concrete_fiber_material(Some(80.0), 30000.0, rule);
-        let mut expected60 = expected_newrc_material(60.0, rule);
-        let mut expected80 = expected_newrc_material(80.0, rule);
-        for strain in [-0.0001, -0.001, 0.0001] {
-            assert_eq!(fc60.trial(strain), expected60.trial(strain));
-            assert_eq!(fc80.trial(strain), expected80.trial(strain));
-            fc60.commit();
-            fc80.commit();
-            expected60.commit();
-            expected80.commit();
+        for fc in [60.0, 80.0] {
+            let (_, eps_c0, _, _) = newrc_reference_parameters(fc);
+            let mut material = concrete_fiber_material(Some(fc), 30000.0, rule);
+            assert_relative_eq!(material.reference_stress(), fc, max_relative = 1e-12);
+            let (stress, _) = material.trial(-eps_c0);
+            assert_relative_eq!(stress, -fc, max_relative = 1e-9);
         }
     }
 }
 
-fn expected_newrc_material(
-    fc: f64,
-    rule: HysteresisModel,
-) -> Box<dyn squid_n_material::uniaxial::UniaxialMaterial> {
-    match rule {
-        HysteresisModel::KarsanJirsa => {
-            let ec = squid_n_material::newrc::NewRcEnvelope::new(fc).ec;
-            Box::new(squid_n_material::ConcreteCyclic::newrc(
-                fc,
-                0.01,
-                2.0,
-                ec / 10.0,
-            ))
-        }
-        HysteresisModel::Retrograde | HysteresisModel::OriginOriented => {
-            let mut material = squid_n_material::ConcreteNewRc::new(fc, 2.0);
-            material.set_concrete_hysteresis(rule == HysteresisModel::OriginOriented);
-            Box::new(material)
-        }
-        _ => unreachable!(),
-    }
+fn newrc_reference_parameters(fc: f64) -> (f64, f64, f64, f64) {
+    let sigma_b = fc / 0.0980665;
+    let eps_c0 = 0.5243 * sigma_b.powf(0.25) * 1e-3;
+    let ec = 4.0 * (sigma_b / 1000.0).powf(1.0 / 3.0) * 1e5 * 0.0980665;
+    let a = ec * eps_c0 / fc;
+    let d = 1.50 + 1.68e-3 * sigma_b;
+    (ec, eps_c0, a, d)
+}
+
+fn newrc_reference_response(x: f64, fc: f64, eps_c0: f64, a: f64, d: f64) -> (f64, f64) {
+    let numerator = a * x + (d - 1.0) * x * x;
+    let denominator = 1.0 + (a - 2.0) * x + d * x * x;
+    let ratio = numerator / denominator;
+    let numerator_derivative = a + 2.0 * (d - 1.0) * x;
+    let denominator_derivative = (a - 2.0) + 2.0 * d * x;
+    let derivative = (numerator_derivative * denominator - numerator * denominator_derivative)
+        / denominator.powi(2);
+    (ratio * fc, fc / eps_c0 * derivative)
 }
 
 #[test]
