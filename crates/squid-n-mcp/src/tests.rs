@@ -103,6 +103,27 @@ fn test_query_model_sections_expose_materials() {
 }
 
 #[test]
+fn test_query_model_sections_expose_frame_use() {
+    let mut m = sample_model();
+    let mut beam = m.sections[0].clone();
+    beam.id = SectionId(1);
+    beam.frame_use = Some(FrameSectionUse::Beam);
+    let mut brace = beam.clone();
+    brace.id = SectionId(2);
+    brace.frame_use = Some(FrameSectionUse::Brace);
+    let mut unset = beam.clone();
+    unset.id = SectionId(3);
+    unset.frame_use = None;
+    m.sections.extend([beam, brace, unset]);
+
+    let sections = query_model(&m, "sections", None);
+    assert_eq!(sections[0]["frame_use"], "Column");
+    assert_eq!(sections[1]["frame_use"], "Beam");
+    assert_eq!(sections[2]["frame_use"], "Brace");
+    assert!(sections[3]["frame_use"].is_null());
+}
+
+#[test]
 fn test_query_model_filter() {
     let m = sample_model();
     // 名前で絞り込み（断面名 H-400 を含むものだけ）。

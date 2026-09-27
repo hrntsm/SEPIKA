@@ -8,7 +8,9 @@ use smallvec::SmallVec;
 use squid_n_core::dof::DofMap;
 use squid_n_core::ids::NodeId;
 use squid_n_core::model::{ElementData, ElementKind, Model};
-use squid_n_core::panel_zone::{member_orientation, member_unit_axis, MemberOrientation};
+use squid_n_core::panel_zone::{
+    is_horizontal_or_vertical_member, member_orientation, MemberOrientation,
+};
 
 /// 水平材（はり）が仕口パネルへ接合するときの ζ。
 const ZETA_BEAM: f64 = -0.5;
@@ -31,8 +33,7 @@ pub fn resolve(data: &ElementData, model: &Model) -> Option<[Option<PanelEnd>; 2
     if !matches!(data.kind, ElementKind::Beam) || data.nodes.len() < 2 {
         return None;
     }
-    let axis = member_unit_axis(model, data)?;
-    if (0.2..0.8).contains(&axis[2].abs()) {
+    if !is_horizontal_or_vertical_member(model, data) {
         return None;
     }
     let zeta = match member_orientation(model, data)? {

@@ -89,6 +89,14 @@ pub fn member_unit_axis(model: &Model, elem: &ElementData) -> Option<[f64; 3]> {
     geom::vec3::unit_from(p0, p1)
 }
 
+/// 既存の仕口パネル式を適用できる水平・鉛直材かを判定する。
+pub fn is_horizontal_or_vertical_member(model: &Model, elem: &ElementData) -> bool {
+    let Some(axis) = member_unit_axis(model, elem) else {
+        return false;
+    };
+    !(0.2..0.8).contains(&axis[2].abs())
+}
+
 /// 断面用途から柱・はりを判定する。用途未設定・ブレース・線材以外は `None`。
 pub fn member_orientation(model: &Model, elem: &ElementData) -> Option<MemberOrientation> {
     if !matches!(elem.kind, ElementKind::Beam) || elem.nodes.len() < 2 {
@@ -150,6 +158,9 @@ pub fn panel_half_extent<'a>(
     let mut extent = PanelHalfExtent::default();
     for e in members {
         if !e.nodes.iter().take(2).any(|n| *n == node) {
+            continue;
+        }
+        if !is_horizontal_or_vertical_member(model, e) {
             continue;
         }
         let Some(orientation) = member_orientation(model, e) else {
@@ -329,6 +340,9 @@ pub fn resolve_panel_joint<'a>(
     let mut beams: Vec<&ElementData> = Vec::new();
     for e in members {
         if !e.nodes.iter().take(2).any(|n| *n == node) {
+            continue;
+        }
+        if !is_horizontal_or_vertical_member(model, e) {
             continue;
         }
         match member_orientation(model, e) {
@@ -855,6 +869,22 @@ mod tests {
         assert!((extent.beam_half - 300.0).abs() < 1e-9);
         assert!((extent.offset_for(MemberOrientation::Beam) - 200.0).abs() < 1e-9);
         assert!((extent.offset_for(MemberOrientation::Column) - 300.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_diagonal_member_depth_is_excluded_from_panel_dimensions() {
+        let mut m = joint_model(h_beam(), 600.0, h_col());
+        m.nodes.push(node(3, [4000.0, 0.0, 6000.0]));
+        let mut diagonal_section = m.sections[0].clone();
+        diagonal_section.id = SectionId(2);
+        diagonal_section.depth = 2000.0;
+        m.sections.push(diagonal_section);
+        m.elements.push(member(2, 0, 3, 2));
+
+        let joint = resolve_panel_joint(&m, NodeId(0), &m.elements).expect("接合部");
+        assert!((joint.db - (600.0 - 17.0)).abs() < 1e-9);
+        let extent = panel_half_extent(&m, NodeId(0), &m.elements);
+        assert!((extent.beam_half - 300.0).abs() < 1e-9);
     }
 
     /// 用途が梁の傾斜部材は梁として扱い、幾何による再分類を行わない。
