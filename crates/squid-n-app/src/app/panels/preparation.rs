@@ -6,6 +6,14 @@ use super::*;
 use crate::table_util::Col;
 use squid_n_core::units::{to_display, to_internal};
 
+fn standard_floor_load_to_display(value_n_per_mm2: f64) -> f64 {
+    to_display::area_load_kn_per_m2(value_n_per_mm2)
+}
+
+fn standard_floor_load_to_internal(value_kn_per_m2: f64) -> f64 {
+    to_internal::area_load_kn_per_m2(value_kn_per_m2)
+}
+
 impl App {
     /// 右ドック「① 準備計算」パネル：解析条件の入力・階の定義と、準備計算の実行。
     ///
@@ -424,9 +432,9 @@ impl App {
                             let mut changed = false;
                             ui.horizontal(|ui| {
                                 for value in &mut values {
-                                    let mut display = *value * 1.0e6;
-                                    let response = ui.add(egui::DragValue::new(&mut display).speed(0.1).range(0.0..=1.0e5));
-                                    if response.changed() { *value = display * 1.0e-6; changed = true; }
+                                     let mut display = standard_floor_load_to_display(*value);
+                                     let response = ui.add(egui::DragValue::new(&mut display).speed(0.1).range(0.0..=1.0e5));
+                                     if response.changed() { *value = standard_floor_load_to_internal(display); changed = true; }
                                 }
                             });
                             if changed {
@@ -689,5 +697,17 @@ impl App {
                     crate::story_copy_view::open(self, story);
                 }
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{standard_floor_load_to_display, standard_floor_load_to_internal};
+
+    #[test]
+    fn 標準床荷重の表示入力変換は面荷重の単位に従う() {
+        let display = standard_floor_load_to_display(0.005);
+        assert_eq!(display, 5.0);
+        assert_eq!(standard_floor_load_to_internal(display), 0.005);
     }
 }

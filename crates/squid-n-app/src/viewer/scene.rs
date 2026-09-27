@@ -171,8 +171,17 @@ pub(super) fn draw_slabs(
     }
     if let Ok(perimeters) = squid_n_core::model::perimeter_slabs(&app.core.model) {
         for perimeter in perimeters {
-            let coords = perimeter.boundary.map(|p| proj.project(p));
-            let closed = coords.to_vec();
+            if !perimeter_visible_on_frame(&perimeter, filter) {
+                continue;
+            }
+            let Some(boundary) =
+                perimeter_boundary_with_coords(&app.core.model, &perimeter, coords3)
+            else {
+                continue;
+            };
+            let coords = boundary.map(|p| proj.project(p));
+            let mut closed = coords.to_vec();
+            closed.push(closed[0]);
             painter.add(egui::Shape::convex_polygon(
                 closed.clone(),
                 theme::translucent(theme::DATA_BLUE, 45),
@@ -184,6 +193,50 @@ pub(super) fn draw_slabs(
             ));
         }
     }
+}
+
+fn perimeter_visible_on_frame(
+    perimeter: &squid_n_core::model::PerimeterSlab,
+    filter: FrameFilter,
+) -> bool {
+    filter.shows(perimeter.beam)
+}
+
+fn perimeter_boundary_with_coords(
+    model: &squid_n_core::Model,
+    perimeter: &squid_n_core::model::PerimeterSlab,
+    coords3: &[[f64; 3]],
+) -> Option<[[f64; 3]; 4]> {
+    let beam = model.element(perimeter.beam)?;
+    let [n0, n1] = beam.nodes.as_slice() else {
+        return None;
+    };
+    let p0 = *coords3.get(n0.index())?;
+    let p1 = *coords3.get(n1.index())?;
+    let d0 = [
+        p0[0] - perimeter.boundary[0][0],
+        p0[1] - perimeter.boundary[0][1],
+        p0[2] - perimeter.boundary[0][2],
+    ];
+    let d1 = [
+        p1[0] - perimeter.boundary[1][0],
+        p1[1] - perimeter.boundary[1][1],
+        p1[2] - perimeter.boundary[1][2],
+    ];
+    Some([
+        p0,
+        p1,
+        [
+            perimeter.boundary[2][0] + d1[0],
+            perimeter.boundary[2][1] + d1[1],
+            perimeter.boundary[2][2] + d1[2],
+        ],
+        [
+            perimeter.boundary[3][0] + d0[0],
+            perimeter.boundary[3][1] + d0[1],
+            perimeter.boundary[3][2] + d0[2],
+        ],
+    ])
 }
 
 /// 要素にならない壁版の輪郭・塗り。
@@ -803,6 +856,77 @@ mod tests {
             extent: Some([900.0, 900.0]),
         };
         assert!(!wall_plate_visible_on_frame(&empty, &plate, filter));
+    }
+
+    #[test]
+    fn 外周スラブは大梁フィルタと変形後座標を使い輪郭を閉じる() {
+        use squid_n_core::ids::{ElemId, NodeId};
+        use squid_n_core::model::PerimeterSlab;
+        let perimeter = PerimeterSlab {
+            beam: ElemId(0),
+            story: squid_n_core::ids::StoryId(0),
+            boundary: [
+                [0.0, 0.0, 0.0],
+                [1000.0, 0.0, 0.0],
+                [1000.0, 500.0, 0.0],
+                [0.0, 500.0, 0.0],
+            ],
+            extent_mm: 500.0,
+        };
+        let all = FrameFilter::default();
+        assert!(perimeter_visible_on_frame(&perimeter, all));
+        let off = [false, false, false, true];
+        assert!(!perimeter_visible_on_frame(
+            &perimeter,
+            FrameFilter {
+                elem_on: Some(&off),
+                node_on: None
+            }
+        ));
+
+        let mut model = squid_n_core::Model::default();
+        model.nodes.extend([
+            squid_n_core::model::Node {
+                id: NodeId(0),
+                coord: [0.0; 3],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            squid_n_core::model::Node {
+                id: NodeId(1),
+                coord: [1000.0, 0.0, 0.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+        ]);
+        model.elements.push(squid_n_core::model::ElementData {
+            id: ElemId(0),
+            kind: ElementKind::Beam,
+            nodes: vec![NodeId(0), NodeId(1)].into(),
+            section: None,
+            local_axis: squid_n_core::model::LocalAxis {
+                ref_vector: [0.0, 1.0, 0.0],
+            },
+            end_cond: [squid_n_core::model::EndCondition::Fixed; 2],
+            force_regime: squid_n_core::model::ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        });
+        let moved = [[10.0, 0.0, 20.0], [1020.0, 0.0, 30.0]];
+        let coords = perimeter_boundary_with_coords(&model, &perimeter, &moved).unwrap();
+        assert_eq!(coords[0], moved[0]);
+        assert_eq!(coords[1], moved[1]);
+        assert_eq!(coords[2], [1020.0, 500.0, 30.0]);
+        assert_eq!(coords[3], [10.0, 500.0, 20.0]);
+        let projected = coords.to_vec();
+        let mut closed = projected.clone();
+        closed.push(closed[0]);
+        assert_eq!(closed.first(), closed.last());
     }
 
     #[test]

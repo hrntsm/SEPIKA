@@ -348,20 +348,30 @@ mod tests {
             level_kind: StoryLevelKind::default(),
             dynamic_mass: None,
             standard_floor_load: Some(StandardFloorLoad {
+                dead: 0.005,
+                floor: 0.004,
+                joist: 0.003,
                 frame: 0.006,
+                seismic: 0.002,
                 ..Default::default()
             }),
         });
         let slabs = perimeter_slabs(&model).unwrap();
         assert_eq!(slabs.len(), 1);
         assert_eq!(slabs[0].extent_mm, 300.0);
+        let standard = model.stories[0].standard_floor_load.unwrap();
+        assert_eq!(standard.intensity(None), 0.005);
+        assert_eq!(standard.intensity(Some(LoadPurpose::Floor)), 0.004);
+        assert_eq!(standard.intensity(Some(LoadPurpose::Joist)), 0.003);
+        assert_eq!(standard.intensity(Some(LoadPurpose::Frame)), 0.006);
+        assert_eq!(standard.intensity(Some(LoadPurpose::Seismic)), 0.002);
         assert_eq!(
-            model.stories[0]
-                .standard_floor_load
-                .unwrap()
-                .intensity(Some(LoadPurpose::Frame))
-                * slabs[0].extent_mm,
+            standard.intensity(Some(LoadPurpose::Frame)) * slabs[0].extent_mm,
             1.8
+        );
+        assert_eq!(
+            standard.intensity(Some(LoadPurpose::Seismic)) * slabs[0].extent_mm,
+            0.6
         );
     }
 }
