@@ -281,7 +281,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             };
             let vertical = squid_n_core::geom::is_vertical_axis(n0.coord, n1.coord);
             match section.frame_use {
-                Some(squid_n_core::model::FrameSectionUse::Beam) if vertical => {
+                Some(squid_n_core::model::FrameSectionUse::Girder) if vertical => {
                     beam_shape_on_column.push(e.id)
                 }
                 Some(squid_n_core::model::FrameSectionUse::Column) if !vertical => {
@@ -573,7 +573,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
 
     {
         let cft_secondary = model
-            .joists()
+            .beams()
             .chain(model.posts())
             .filter(|sm| {
                 sm.section
@@ -594,7 +594,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                  断面を鋼材または RC に変更してください。"
             )));
         }
-        let n = squid_n_core::region_rebuild::unassigned_joist_count(model);
+        let n = squid_n_core::region_rebuild::unassigned_beam_count(model);
         if n != 0 {
             issues.push(ModelIssue::model(format!(
                 "どの床領域にも所属しない小梁が {n} 本あります。\
@@ -608,7 +608,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                  間柱の配置または壁領域の境界を確認してください。"
             )));
         }
-        let gaps = match squid_n_load::floor::secondary_joist_distribution_gaps(model) {
+        let gaps = match squid_n_load::floor::secondary_beam_distribution_gaps(model) {
             Ok(gaps) => gaps,
             Err(error) => {
                 issues.push(ModelIssue::model(error.to_string()));
@@ -639,8 +639,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         }
         {
             use squid_n_core::model::LoadPurpose;
-            let w_of =
-                |sl: &squid_n_core::model::Slab| model.slab_intensity(sl, LoadPurpose::Joist);
+            let w_of = |sl: &squid_n_core::model::Slab| model.slab_intensity(sl, LoadPurpose::Beam);
             let transfer = match squid_n_load::cascade::solve(model, w_of, true) {
                 Ok(transfer) => transfer,
                 Err(error) => {
@@ -684,7 +683,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             };
 
             let detached = model
-                .joists()
+                .beams()
                 .chain(model.posts())
                 .filter(|sm| sm.is_detached())
                 .count();
@@ -696,7 +695,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 )));
             }
             let free_on_support = model
-                .joists()
+                .beams()
                 .chain(model.posts())
                 .filter(|sm| {
                     !model.secondary_member_materialized(sm)
@@ -719,7 +718,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 );
             }
             let free_end_tie = model
-                .joists()
+                .beams()
                 .chain(model.posts())
                 .filter(|sm| {
                     !model.secondary_member_materialized(sm)
@@ -727,7 +726,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                         && model
                             .secondary_member_end_points(sm)
                             .is_some_and(|(_, free)| {
-                                model.joists().chain(model.posts()).any(|other| {
+                                model.beams().chain(model.posts()).any(|other| {
                                     !same_secondary(other, sm)
                                         && other.is_cantilever()
                                         && model.secondary_member_end_points(other).is_some_and(

@@ -709,7 +709,7 @@ fn test_cantilever_conservation() {
 
 /// 側辺に小梁がある取り付く床板は、取付き辺と小梁の辺へ最近接負担面積で分配する。
 #[test]
-fn test_cantilever_with_side_joist_uses_support_edges() {
+fn test_cantilever_with_side_beam_uses_support_edges() {
     use squid_n_core::ids::{NodeId, SlabId};
     use squid_n_core::model::{AreaLoad, SecondaryMember, SecondaryMemberKind};
     let (l, depth) = (4000.0_f64, 1500.0_f64);
@@ -722,10 +722,10 @@ fn test_cantilever_with_side_joist_uses_support_edges() {
         ],
         ..Default::default()
     };
-    model.unassigned_joists.push(SecondaryMember {
+    model.unassigned_beams.push(SecondaryMember {
         id: squid_n_core::ids::SecondaryMemberId(0),
         gravity_end_shares: None,
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Detached([
             [0.0, 0.0, 0.0],
             [0.0, depth, 0.0],
@@ -759,21 +759,21 @@ fn test_cantilever_with_side_joist_uses_support_edges() {
     assert!((total - expected).abs() / expected < 1e-9, "総和 {total}");
 
     // 小梁の辺（左辺）は (0,0) から対角 y=x より左の三角形 = d²/2。
-    let joist_area = depth * depth / 2.0;
-    let joist = loads
+    let beam_area = depth * depth / 2.0;
+    let beam = loads
         .iter()
         .find(|bl| matches!(bl.target, LoadTarget::Secondary { .. }))
         .expect("小梁への分配");
-    match joist.target {
+    match beam.target {
         LoadTarget::Secondary { member, .. } => {
             assert_eq!(member, squid_n_core::ids::SecondaryMemberId(0))
         }
         other => panic!("Secondary ではない: {other:?}"),
     }
-    let joist_total = joist.cmq.q_i + joist.cmq.q_j;
+    let beam_total = beam.cmq.q_i + beam.cmq.q_j;
     assert!(
-        (joist_total - w * joist_area).abs() / (w * joist_area) < 0.02,
-        "小梁 {joist_total}"
+        (beam_total - w * beam_area).abs() / (w * beam_area) < 0.02,
+        "小梁 {beam_total}"
     );
 
     let edge0 = loads
@@ -781,7 +781,7 @@ fn test_cantilever_with_side_joist_uses_support_edges() {
         .find(|bl| matches!(bl.target, LoadTarget::Edge(0)))
         .expect("取付き辺");
     let edge0_total = edge0.cmq.q_i + edge0.cmq.q_j;
-    let rest = w * (l * depth - joist_area);
+    let rest = w * (l * depth - beam_area);
     assert!(
         (edge0_total - rest).abs() / rest < 0.02,
         "取付き辺 {edge0_total}"
@@ -872,7 +872,7 @@ fn test_cantilever_real_beam_inside_slab_after_rebuild() {
     use squid_n_core::region_rebuild::rebuild_floor_regions;
     let (l, depth) = (4000.0_f64, 1500.0_f64);
     let w = 0.003_f64;
-    let mk_beam = |id: u32, i: u32, j: u32| ElementData {
+    let mk_element_beam = |id: u32, i: u32, j: u32| ElementData {
         id: ElemId(id),
         kind: ElementKind::Beam,
         nodes: [NodeId(i), NodeId(j)].into_iter().collect(),
@@ -897,15 +897,15 @@ fn test_cantilever_real_beam_inside_slab_after_rebuild() {
             ],
             ..Default::default()
         };
-        model.elements.push(mk_beam(0, 0, 1));
+        model.elements.push(mk_element_beam(0, 0, 1));
         if spliced {
             model.nodes.push(mk_node(5, 2000.0, depth / 2.0));
             model.nodes.push(mk_node(6, 2000.0, depth));
-            model.elements.push(mk_beam(1, 4, 5));
-            model.elements.push(mk_beam(2, 5, 6));
+            model.elements.push(mk_element_beam(1, 4, 5));
+            model.elements.push(mk_element_beam(2, 5, 6));
         } else {
             model.nodes.push(mk_node(5, 2000.0, depth));
-            model.elements.push(mk_beam(1, 4, 5));
+            model.elements.push(mk_element_beam(1, 4, 5));
         }
         model.slabs.push(Slab {
             id: SlabId(0),
@@ -971,7 +971,7 @@ fn test_cantilever_support_edge_prefers_full_real_beam() {
     };
     let (l, depth) = (4000.0_f64, 1500.0_f64);
     let w = 0.003_f64;
-    let mk_beam = |id: u32, i: u32, j: u32| ElementData {
+    let mk_element_beam = |id: u32, i: u32, j: u32| ElementData {
         id: ElemId(id),
         kind: ElementKind::Beam,
         nodes: [NodeId(i), NodeId(j)].into_iter().collect(),
@@ -1003,10 +1003,10 @@ fn test_cantilever_support_edge_prefers_full_real_beam() {
             ..Default::default()
         },
     };
-    let mk_joist = || SecondaryMember {
+    let mk_secondary_beam = || SecondaryMember {
         id: squid_n_core::ids::SecondaryMemberId(2),
         gravity_end_shares: None,
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Detached([
             [0.0, depth, 0.0],
             [l, depth, 0.0],
@@ -1027,8 +1027,8 @@ fn test_cantilever_support_edge_prefers_full_real_beam() {
         ],
         ..Default::default()
     };
-    full.elements.push(mk_beam(0, 4, 5));
-    full.unassigned_joists.push(mk_joist());
+    full.elements.push(mk_element_beam(0, 4, 5));
+    full.unassigned_beams.push(mk_secondary_beam());
     let loads = distribute_slab(&full, &mk_slab()).unwrap();
     let span = loads
         .iter()
@@ -1051,8 +1051,8 @@ fn test_cantilever_support_edge_prefers_full_real_beam() {
         ],
         ..Default::default()
     };
-    partial.elements.push(mk_beam(0, 4, 5));
-    partial.unassigned_joists.push(mk_joist());
+    partial.elements.push(mk_element_beam(0, 4, 5));
+    partial.unassigned_beams.push(mk_secondary_beam());
     let loads = distribute_slab(&partial, &mk_slab()).unwrap();
     let span = loads
         .iter()
@@ -1122,7 +1122,7 @@ fn test_distribute_region_conserves_total_over_multiple_slabs() {
 /// `SupportBoundary` から解決され、脱落しない（総和保存）。小梁支持の辺荷重は
 /// `LoadTarget::Secondary` で小梁を指す（Blocker 1 の回帰）。
 #[test]
-fn test_midspan_joist_edge_loads_resolve_from_support_boundary() {
+fn test_midspan_beam_edge_loads_resolve_from_support_boundary() {
     use squid_n_core::ids::{ElemId, NodeId, SecondaryMemberId, SlabId};
     use squid_n_core::model::{
         ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, PlateAssignment,
@@ -1162,9 +1162,9 @@ fn test_midspan_joist_edge_loads_resolve_from_support_boundary() {
     };
     // 中央小梁は上下の大梁（e0: 0-1、e2: 3-2）の中間にアンカーする。
     // アンカー位置にはモデル節点が無い。
-    model.unassigned_joists.push(SecondaryMember {
+    model.unassigned_beams.push(SecondaryMember {
         id: SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: SecondaryMemberEnds::Supported([
             SecondaryMemberAnchor {
                 support: SupportMemberId::Primary(ElemId(0)),

@@ -36,7 +36,7 @@ pub struct FloorRegionRebuildReport {
     /// どの床領域にも収まらなかった床板の数（警告対象。削除しない）。
     pub unassigned_slabs: usize,
     /// 中点がちょうど 1 つの床領域に厳密内包されなかった小梁の本数。
-    pub unassigned_joists: usize,
+    pub unassigned_beams: usize,
 }
 
 /// 床領域を大梁の区画から作り直し、名前を引き継ぎ、床板の帰属を
@@ -49,7 +49,7 @@ pub struct FloorRegionRebuildReport {
 pub fn rebuild_floor_regions(model: &mut Model) -> FloorRegionRebuildReport {
     let scan = scan_region_boundaries(model);
     for r in &mut model.floor_regions {
-        model.unassigned_joists.append(&mut r.secondary_joists);
+        model.unassigned_beams.append(&mut r.secondary_beams);
     }
     let old_regions = std::mem::take(&mut model.floor_regions);
     let mut report = FloorRegionRebuildReport::default();
@@ -125,7 +125,7 @@ pub fn rebuild_floor_regions(model: &mut Model) -> FloorRegionRebuildReport {
     }
     model.floor_regions = new_regions;
 
-    report.unassigned_joists = assign_joists(model);
+    report.unassigned_beams = assign_beams(model);
 
     merge_attached_slabs(model);
     split_attached_slabs_between_members(model);
@@ -325,7 +325,7 @@ fn split_attached_slabs_between_members(model: &mut Model) {
 /// 同一直線で連結した 2 節点 `Beam`（途中節点の分割を 1 本へ束ねる）。
 fn attachment_split_axes(model: &Model) -> Vec<([f64; 3], [f64; 3])> {
     let mut axes: Vec<([f64; 3], [f64; 3])> = model
-        .secondary_joist_axes()
+        .secondary_beam_axes()
         .into_iter()
         .map(|a| (a.a, a.b))
         .collect();
@@ -530,9 +530,9 @@ fn split_attached_shape(
 
 /// 現状の床領域で、中点がちょうど 1 領域に厳密内包されない小梁の本数
 /// （片持ち小梁と実部材化済みの小梁は支持辺・実要素として扱うため除く）。
-pub fn unassigned_joist_count(model: &Model) -> usize {
+pub fn unassigned_beam_count(model: &Model) -> usize {
     model
-        .unassigned_joists
+        .unassigned_beams
         .iter()
         .filter(|sm| !sm.is_cantilever() && !model.secondary_member_materialized(sm))
         .count()
@@ -679,7 +679,7 @@ pub(crate) fn edge_fully_covered(a: [f64; 2], b: [f64; 2], z: f64, beams: &[Gird
     covered >= len - MEMBER_AXIS_TOL_MM
 }
 
-fn joist_midpoint(model: &Model, sm: &SecondaryMember) -> Option<([f64; 2], f64)> {
+fn beam_midpoint(model: &Model, sm: &SecondaryMember) -> Option<([f64; 2], f64)> {
     let (a, b) = model.secondary_member_end_points(sm)?;
     Some((
         [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5],
@@ -700,34 +700,34 @@ fn regions_containing(model: &Model, regions: &[FloorRegion], xy: [f64; 2], z: f
     hits
 }
 
-fn assign_joists(model: &mut Model) -> usize {
-    let joists: Vec<_> = model
+fn assign_beams(model: &mut Model) -> usize {
+    let beams: Vec<_> = model
         .floor_regions
         .iter_mut()
-        .flat_map(|r| r.secondary_joists.drain(..))
-        .chain(model.unassigned_joists.drain(..))
+        .flat_map(|r| r.secondary_beams.drain(..))
+        .chain(model.unassigned_beams.drain(..))
         .collect();
     for r in &mut model.floor_regions {
-        r.secondary_joists.clear();
+        r.secondary_beams.clear();
     }
     let mut unassigned = 0;
-    for sm in joists {
+    for sm in beams {
         let counted = !sm.is_cantilever() && !model.secondary_member_materialized(&sm);
-        let Some((xy, z)) = joist_midpoint(model, &sm) else {
+        let Some((xy, z)) = beam_midpoint(model, &sm) else {
             if counted {
                 unassigned += 1;
             }
-            model.unassigned_joists.push(sm);
+            model.unassigned_beams.push(sm);
             continue;
         };
         let hits = regions_containing(model, &model.floor_regions, xy, z);
         if hits.len() == 1 {
-            model.floor_regions[hits[0]].secondary_joists.push(sm);
+            model.floor_regions[hits[0]].secondary_beams.push(sm);
         } else {
             if counted {
                 unassigned += 1;
             }
-            model.unassigned_joists.push(sm);
+            model.unassigned_beams.push(sm);
         }
     }
     unassigned
@@ -843,7 +843,7 @@ mod tests {
         }
     }
 
-    fn beam(id: u32, i: u32, j: u32) -> ElementData {
+    fn element_beam(id: u32, i: u32, j: u32) -> ElementData {
         ElementData {
             id: ElemId(id),
             kind: ElementKind::Beam,
@@ -884,10 +884,10 @@ mod tests {
         id
     }
 
-    fn joist(id: u32, coords: [[f64; 3]; 2]) -> SecondaryMember {
+    fn secondary_beam(id: u32, coords: [[f64; 3]; 2]) -> SecondaryMember {
         SecondaryMember {
             gravity_end_shares: None,
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: crate::model::SecondaryMemberEnds::Detached(coords),
             section: None,
             name: format!("J{id}"),
@@ -895,8 +895,8 @@ mod tests {
         }
     }
 
-    fn joist_of(model: &Model, id: u32, i: u32, j: u32) -> SecondaryMember {
-        joist(
+    fn beam_of(model: &Model, id: u32, i: u32, j: u32) -> SecondaryMember {
+        secondary_beam(
             id,
             [model.nodes[i as usize].coord, model.nodes[j as usize].coord],
         )
@@ -919,17 +919,17 @@ mod tests {
             model.nodes.push(node(i as u32, x, y, 0.0));
         }
         model.elements.extend([
-            beam(0, 0, 1),
-            beam(1, 1, 2),
-            beam(2, 2, 3),
-            beam(3, 3, 4),
-            beam(4, 4, 5),
-            beam(5, 5, 0),
+            element_beam(0, 0, 1),
+            element_beam(1, 1, 2),
+            element_beam(2, 2, 3),
+            element_beam(3, 3, 4),
+            element_beam(4, 4, 5),
+            element_beam(5, 5, 0),
         ]);
         let sid = push_slab_section(&mut model, 150.0);
         // 中央小梁は割当領域の境界支持部材になるため、両端を大梁へアンカーした
         // `Supported` で持つ（`Detached` は境界支持部材にしない）。
-        let mut central = joist(0, [[2000.0, 0.0, 0.0], [2000.0, 4000.0, 0.0]]);
+        let mut central = secondary_beam(0, [[2000.0, 0.0, 0.0], [2000.0, 4000.0, 0.0]]);
         central.ends = crate::model::SecondaryMemberEnds::Supported([
             crate::model::SecondaryMemberAnchor {
                 support: crate::model::SupportMemberId::Primary(ElemId(0)),
@@ -940,7 +940,7 @@ mod tests {
                 position: 1.0,
             },
         ]);
-        model.unassigned_joists.push(central);
+        model.unassigned_beams.push(central);
         push_enclosed(&mut model, &[0, 1, 4, 5], plate(Some(sid), Vec::new()));
         push_enclosed(&mut model, &[1, 2, 3, 4], plate(Some(sid), Vec::new()));
         model
@@ -952,7 +952,7 @@ mod tests {
         model.nodes.push(node(1, 4000.0, 0.0, 0.0));
         model.nodes.push(node(2, 4000.0, 1500.0, 0.0));
         model.nodes.push(node(3, 0.0, 1500.0, 0.0));
-        model.elements.push(beam(0, 0, 1));
+        model.elements.push(element_beam(0, 0, 1));
         let sid = push_slab_section(&mut model, 150.0);
         model.slabs.push(Slab {
             id: SlabId(0),
@@ -982,12 +982,12 @@ mod tests {
             "2 枚とも同じ床領域へ帰属"
         );
         assert_eq!(
-            model.floor_regions[0].secondary_joists.len(),
+            model.floor_regions[0].secondary_beams.len(),
             1,
             "中央小梁が属する"
         );
         assert_eq!(
-            model.floor_regions[0].secondary_joists[0].id,
+            model.floor_regions[0].secondary_beams[0].id,
             crate::ids::SecondaryMemberId(0)
         );
         assert_eq!(report.regions, 1);
@@ -1008,21 +1008,21 @@ mod tests {
     }
 
     #[test]
-    fn test_rebuild_preserves_secondary_joists_across_runs() {
+    fn test_rebuild_preserves_secondary_beams_across_runs() {
         let mut model = two_piece_square();
         rebuild_floor_regions(&mut model);
-        assert_eq!(model.joists().count(), 1);
+        assert_eq!(model.beams().count(), 1);
         let first = model
             .floor_regions
             .iter()
-            .flat_map(|r| r.secondary_joists.clone())
+            .flat_map(|r| r.secondary_beams.clone())
             .collect::<Vec<_>>();
         rebuild_floor_regions(&mut model);
-        assert_eq!(model.joists().count(), 1);
+        assert_eq!(model.beams().count(), 1);
         let second = model
             .floor_regions
             .iter()
-            .flat_map(|r| r.secondary_joists.clone())
+            .flat_map(|r| r.secondary_beams.clone())
             .collect::<Vec<_>>();
         assert_eq!(first, second);
     }
@@ -1044,14 +1044,14 @@ mod tests {
             model.nodes.push(node(4 + i as u32, x, y, 0.0));
         }
         model.elements.extend([
-            beam(0, 0, 1),
-            beam(1, 1, 2),
-            beam(2, 2, 3),
-            beam(3, 3, 0),
-            beam(4, 4, 5),
-            beam(5, 5, 6),
-            beam(6, 6, 7),
-            beam(7, 7, 4),
+            element_beam(0, 0, 1),
+            element_beam(1, 1, 2),
+            element_beam(2, 2, 3),
+            element_beam(3, 3, 0),
+            element_beam(4, 4, 5),
+            element_beam(5, 5, 6),
+            element_beam(6, 6, 7),
+            element_beam(7, 7, 4),
         ]);
         let regions = generate_region_boundaries(&model);
         assert_eq!(regions.len(), 2, "内部面は外周と中庭の 2 つ");
@@ -1095,11 +1095,11 @@ mod tests {
 
     /// 取り付く床板は、直交して先端まで届く小梁の位置で支持部材の間の床板ごとに分割される。
     #[test]
-    fn test_cantilever_splits_at_perpendicular_joists() {
+    fn test_cantilever_splits_at_perpendicular_beams() {
         let mut model = cantilever_rect();
         model.nodes.push(node(4, 2000.0, 0.0, 0.0));
         model.nodes.push(node(5, 2000.0, 1500.0, 0.0));
-        model.unassigned_joists.push(joist_of(&model, 0, 4, 5));
+        model.unassigned_beams.push(beam_of(&model, 0, 4, 5));
         rebuild_floor_regions(&mut model);
         assert_eq!(model.slabs.len(), 2);
         for (i, expected) in [[0.0, 0.5], [0.5, 1.0]].iter().enumerate() {
@@ -1127,7 +1127,7 @@ mod tests {
         let mut model = cantilever_rect();
         model.nodes.push(node(4, 2000.0, 0.0, 0.0));
         model.nodes.push(node(5, 2000.0, 1500.0, 0.0));
-        model.elements.push(beam(1, 4, 5));
+        model.elements.push(element_beam(1, 4, 5));
         rebuild_floor_regions(&mut model);
         assert_eq!(
             model.slabs.len(),
@@ -1160,8 +1160,8 @@ mod tests {
         model.nodes.push(node(4, 2000.0, 0.0, 0.0));
         model.nodes.push(node(5, 2000.0, 800.0, 0.0));
         model.nodes.push(node(6, 2000.0, 1500.0, 0.0));
-        model.elements.push(beam(1, 4, 5));
-        model.elements.push(beam(2, 5, 6));
+        model.elements.push(element_beam(1, 4, 5));
+        model.elements.push(element_beam(2, 5, 6));
         rebuild_floor_regions(&mut model);
         assert_eq!(model.slabs.len(), 2, "2 要素の実梁でも分割");
         for (i, expected) in [[0.0, 0.5], [0.5, 1.0]].iter().enumerate() {
@@ -1185,15 +1185,15 @@ mod tests {
 
     /// 小梁を消すと、同じ版仕様の隣り合う床板は 1 枚に統合される。
     #[test]
-    fn test_cantilever_slabs_merge_when_joist_is_removed() {
+    fn test_cantilever_slabs_merge_when_beam_is_removed() {
         let mut model = cantilever_rect();
         model.nodes.push(node(4, 2000.0, 0.0, 0.0));
         model.nodes.push(node(5, 2000.0, 1500.0, 0.0));
-        model.unassigned_joists.push(joist_of(&model, 0, 4, 5));
+        model.unassigned_beams.push(beam_of(&model, 0, 4, 5));
         rebuild_floor_regions(&mut model);
         assert_eq!(model.slabs.len(), 2);
 
-        model.unassigned_joists.clear();
+        model.unassigned_beams.clear();
         rebuild_floor_regions(&mut model);
         assert_eq!(model.slabs.len(), 1, "小梁を消すと統合");
         match &model.slabs[0].shape {
@@ -1220,8 +1220,8 @@ mod tests {
             model.nodes.push(node(base, x, 0.0, 0.0));
             model.nodes.push(node(tip, x, 1500.0, 0.0));
             model
-                .unassigned_joists
-                .push(joist_of(&model, i as u32, base, tip));
+                .unassigned_beams
+                .push(beam_of(&model, i as u32, base, tip));
         }
         rebuild_floor_regions(&mut model);
         assert_eq!(model.slabs.len(), 3);
@@ -1252,8 +1252,8 @@ mod tests {
         model.nodes.push(node(1, 4000.0, 0.0, 0.0));
         model.nodes.push(node(2, 2000.0, 0.0, 0.0));
         model.nodes.push(node(3, 2000.0, 1500.0, 0.0));
-        model.elements.push(beam(0, 0, 1));
-        model.unassigned_joists.push(joist_of(&model, 0, 2, 3));
+        model.elements.push(element_beam(0, 0, 1));
+        model.unassigned_beams.push(beam_of(&model, 0, 2, 3));
         let sid = push_slab_section(&mut model, 150.0);
         model.slabs.push(Slab {
             id: SlabId(0),
@@ -1321,7 +1321,7 @@ mod tests {
         let mut with_beam = pair([0.0, 0.5], [1000.0, 2000.0], [0.5, 1.0], [2000.0, 3000.0]);
         with_beam.nodes.push(node(2, 2000.0, 0.0, 0.0));
         with_beam.nodes.push(node(3, 2000.0, 2000.0, 0.0));
-        with_beam.elements.push(beam(0, 2, 3));
+        with_beam.elements.push(element_beam(0, 2, 3));
         rebuild_floor_regions(&mut with_beam);
         assert_eq!(with_beam.slabs.len(), 2, "境界に実部材があれば統合しない");
 
@@ -1330,8 +1330,8 @@ mod tests {
         spliced.nodes.push(node(2, 2000.0, 0.0, 0.0));
         spliced.nodes.push(node(3, 2000.0, 1000.0, 0.0));
         spliced.nodes.push(node(4, 2000.0, 2000.0, 0.0));
-        spliced.elements.push(beam(0, 2, 3));
-        spliced.elements.push(beam(1, 3, 4));
+        spliced.elements.push(element_beam(0, 2, 3));
+        spliced.elements.push(element_beam(1, 3, 4));
         rebuild_floor_regions(&mut spliced);
         assert_eq!(
             spliced.slabs.len(),
@@ -1342,24 +1342,24 @@ mod tests {
 
     /// 取付き線に直交しない小梁、先端まで届かない小梁は分割境界にしない。
     #[test]
-    fn test_cantilever_does_not_split_at_skewed_or_partial_joists() {
+    fn test_cantilever_does_not_split_at_skewed_or_partial_beams() {
         let mut skewed = cantilever_rect();
         skewed.nodes.push(node(4, 1000.0, 0.0, 0.0));
         skewed.nodes.push(node(5, 2000.0, 1500.0, 0.0));
-        skewed.unassigned_joists.push(joist_of(&skewed, 0, 4, 5));
+        skewed.unassigned_beams.push(beam_of(&skewed, 0, 4, 5));
         rebuild_floor_regions(&mut skewed);
         assert_eq!(skewed.slabs.len(), 1, "斜めは分割しない");
 
         let mut partial = cantilever_rect();
         partial.nodes.push(node(4, 2000.0, 0.0, 0.0));
         partial.nodes.push(node(5, 2000.0, 800.0, 0.0));
-        partial.unassigned_joists.push(joist_of(&partial, 0, 4, 5));
+        partial.unassigned_beams.push(beam_of(&partial, 0, 4, 5));
         rebuild_floor_regions(&mut partial);
         assert_eq!(partial.slabs.len(), 1, "先端まで届かない");
     }
 
     #[test]
-    fn test_inherits_name_and_joists_when_boundary_nodes_change() {
+    fn test_inherits_name_and_beams_when_boundary_nodes_change() {
         let mut model = Model::default();
         for (i, (x, y)) in [(0.0, 0.0), (4000.0, 0.0), (4000.0, 4000.0), (0.0, 4000.0)]
             .into_iter()
@@ -1367,9 +1367,12 @@ mod tests {
         {
             model.nodes.push(node(i as u32, x, y, 0.0));
         }
-        model
-            .elements
-            .extend([beam(0, 0, 1), beam(1, 1, 2), beam(2, 2, 3), beam(3, 3, 0)]);
+        model.elements.extend([
+            element_beam(0, 0, 1),
+            element_beam(1, 1, 2),
+            element_beam(2, 2, 3),
+            element_beam(3, 3, 0),
+        ]);
         let sid = push_slab_section(&mut model, 150.0);
         push_enclosed(
             &mut model,
@@ -1390,8 +1393,8 @@ mod tests {
         model.floor_regions.push(r);
 
         model.nodes.push(node(4, 2000.0, 0.0, 0.0));
-        model.elements[0] = beam(0, 0, 4);
-        model.elements.push(beam(4, 4, 1));
+        model.elements[0] = element_beam(0, 0, 4);
+        model.elements.push(element_beam(4, 4, 1));
 
         rebuild_floor_regions(&mut model);
         assert_eq!(model.floor_regions.len(), 1);
@@ -1407,23 +1410,23 @@ mod tests {
     }
 
     #[test]
-    fn test_joist_outside_building_is_unassigned() {
+    fn test_beam_outside_building_is_unassigned() {
         let mut model = two_piece_square();
         model.nodes.push(node(6, 10000.0, 0.0, 0.0));
         model.nodes.push(node(7, 10000.0, 4000.0, 0.0));
-        model.unassigned_joists.push(joist_of(&model, 1, 6, 7));
+        model.unassigned_beams.push(beam_of(&model, 1, 6, 7));
         let report = rebuild_floor_regions(&mut model);
         assert_eq!(
-            model.floor_regions[0].secondary_joists.len(),
+            model.floor_regions[0].secondary_beams.len(),
             1,
             "領域内小梁"
         );
         assert_eq!(
-            model.unassigned_joists.len(),
+            model.unassigned_beams.len(),
             1,
             "所属なし小梁は unassigned へ"
         );
-        assert_eq!(report.unassigned_joists, 1);
+        assert_eq!(report.unassigned_beams, 1);
     }
 
     #[test]
@@ -1455,8 +1458,8 @@ mod tests {
         model.nodes.push(node(1, 4000.0, 0.0, 0.0));
         model.nodes.push(node(2, 4000.0, 4000.0, 0.0));
         model.nodes.push(node(3, 0.0, 4000.0, 0.0));
-        model.elements.push(beam(0, 0, 1));
-        model.elements.push(beam(1, 0, 3));
+        model.elements.push(element_beam(0, 0, 1));
+        model.elements.push(element_beam(1, 0, 3));
         let sid = push_slab_section(&mut model, 150.0);
         model.slabs.push(Slab {
             id: SlabId(0),

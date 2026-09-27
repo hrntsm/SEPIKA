@@ -34,7 +34,7 @@ fn node(id: u32, x: f64, y: f64, z: f64) -> Node {
     }
 }
 
-fn beam(id: u32, i: u32, j: u32) -> ElementData {
+fn element_beam(id: u32, i: u32, j: u32) -> ElementData {
     ElementData {
         id: ElemId(id),
         kind: ElementKind::Beam,
@@ -51,11 +51,11 @@ fn beam(id: u32, i: u32, j: u32) -> ElementData {
     }
 }
 
-fn joist(model: &Model, a: u32, b: u32, name: &str) -> SecondaryMember {
+fn secondary_beam(model: &Model, a: u32, b: u32, name: &str) -> SecondaryMember {
     SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(a),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Detached([
             model.nodes[a as usize].coord,
             model.nodes[b as usize].coord,
@@ -106,14 +106,14 @@ fn base_model() -> Model {
 }
 
 fn solved(model: &mut Model) -> SecondaryTransfer {
-    // 鉄骨重量割増は `load_cfg` 未設定なら 1.0（`joist_self_weight_udl`）。
+    // 鉄骨重量割増は `load_cfg` 未設定なら 1.0（`beam_self_weight_udl`）。
     model.anchorize_secondary_members();
     solve(model, |_| 0.0, true).unwrap()
 }
 
 /// 両端が大梁に載る小梁は、自重の半分ずつを主架構へ渡して終端する。
 #[test]
-fn joist_on_girders_terminates_at_primary() {
+fn beam_on_girders_terminates_at_primary() {
     let mut m = base_model();
     // 大梁 0-1（X 方向、y=0）と 2-3（X 方向、y=4000）。小梁は 4-5（Y 方向、x=3000）。
     for (i, c) in [
@@ -129,9 +129,9 @@ fn joist_on_girders_terminates_at_primary() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.elements.push(beam(0, 0, 1));
-    m.elements.push(beam(1, 2, 3));
-    m.unassigned_joists.push(joist(&m, 4, 5, "SB1"));
+    m.elements.push(element_beam(0, 0, 1));
+    m.elements.push(element_beam(1, 2, 3));
+    m.unassigned_beams.push(secondary_beam(&m, 4, 5, "SB1"));
 
     let t = solved(&mut m);
     let key = squid_n_core::ids::SecondaryMemberId(4);
@@ -149,7 +149,7 @@ fn joist_on_girders_terminates_at_primary() {
 /// 物理質量基準（[`SelfWeightBasis::MassEquiv`]）でも、二次部材（鋼）の自重に
 /// 設計重量と同じ鉄骨重量割増が掛かる（主架構線材と同じ規則）。
 #[test]
-fn joist_mass_equiv_applies_steel_weight_factor() {
+fn beam_mass_equiv_applies_steel_weight_factor() {
     let mut m = base_model();
     m.load_cfg = Some(LoadCfg {
         steel_weight_factor: 1.3,
@@ -168,9 +168,9 @@ fn joist_mass_equiv_applies_steel_weight_factor() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.elements.push(beam(0, 0, 1));
-    m.elements.push(beam(1, 2, 3));
-    m.unassigned_joists.push(joist(&m, 4, 5, "SB1"));
+    m.elements.push(element_beam(0, 0, 1));
+    m.elements.push(element_beam(1, 2, 3));
+    m.unassigned_beams.push(secondary_beam(&m, 4, 5, "SB1"));
     m.anchorize_secondary_members();
 
     let design = solve_with_basis(&m, |_| 0.0, true, SelfWeightBasis::Design).unwrap();
@@ -196,7 +196,7 @@ fn joist_mass_equiv_applies_steel_weight_factor() {
 /// 小梁 B の端点が小梁 A の内部に載るとき、B の反力は A の集中荷重として渡り、
 /// 主架構へ渡る総和は 2 本の自重の合計に一致する（荷重が消えない）。
 #[test]
-fn joist_on_joist_cascades_to_primary() {
+fn beam_on_beam_cascades_to_primary() {
     let mut m = base_model();
     for (i, c) in [
         [0.0, 0.0, 0.0],       // 0 大梁端
@@ -213,11 +213,11 @@ fn joist_on_joist_cascades_to_primary() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.elements.push(beam(0, 0, 1));
-    m.elements.push(beam(1, 2, 3));
-    m.elements.push(beam(2, 1, 3)); // 右側の大梁（節点 7 がこのスパン上に載る）
-    m.unassigned_joists.push(joist(&m, 4, 5, "A"));
-    m.unassigned_joists.push(joist(&m, 6, 7, "B"));
+    m.elements.push(element_beam(0, 0, 1));
+    m.elements.push(element_beam(1, 2, 3));
+    m.elements.push(element_beam(2, 1, 3)); // 右側の大梁（節点 7 がこのスパン上に載る）
+    m.unassigned_beams.push(secondary_beam(&m, 4, 5, "A"));
+    m.unassigned_beams.push(secondary_beam(&m, 6, 7, "B"));
 
     let t = solved(&mut m);
     let ka = squid_n_core::ids::SecondaryMemberId(4);
@@ -253,7 +253,7 @@ fn joist_on_joist_cascades_to_primary() {
 /// 大梁の材軸中間（座標が一致するモデル節点が無い位置）へ載る小梁の反力は、
 /// その大梁の中間集中荷重として渡る（節点が無いことを理由に荷重を捨てない）。
 #[test]
-fn joist_anchored_to_girder_midspan_becomes_point_load() {
+fn beam_anchored_to_girder_midspan_becomes_point_load() {
     let mut m = base_model();
     for (i, c) in [
         [0.0, 0.0, 0.0],       // 0 大梁 A 端
@@ -266,13 +266,13 @@ fn joist_anchored_to_girder_midspan_becomes_point_load() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.elements.push(beam(0, 0, 1));
-    m.elements.push(beam(1, 2, 3));
+    m.elements.push(element_beam(0, 0, 1));
+    m.elements.push(element_beam(1, 2, 3));
     // 両端が大梁 A・B の材軸中間（節点の無い位置）に載る小梁。
-    m.unassigned_joists.push(SecondaryMember {
+    m.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Detached([
             [3000.0, 0.0, 0.0],
             [3000.0, 4000.0, 0.0],
@@ -340,8 +340,8 @@ fn vertical_post_splits_load_by_explicit_shares() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.elements.push(beam(0, 0, 1)); // 下の梁
-    m.elements.push(beam(1, 2, 3)); // 上の梁
+    m.elements.push(element_beam(0, 0, 1)); // 下の梁
+    m.elements.push(element_beam(1, 2, 3)); // 上の梁
     m.unassigned_posts.push(SecondaryMember {
         gravity_end_shares: Some([0.5, 0.5]),
         id: squid_n_core::ids::SecondaryMemberId(4),
@@ -407,7 +407,7 @@ fn vertical_post_splits_load_by_explicit_shares() {
 /// 誤り、載荷側の反力を過小評価する（受け側にとって危険側）。実フィクスチャの小梁は
 /// すべて水平なのでこの誤りを検出できない。ここで固定する。
 #[test]
-fn inclined_joist_reactions_match_simple_beam() {
+fn inclined_beam_reactions_match_simple_beam() {
     let mut m = base_model();
     // 水平投影 4000・鉛直 3000（L=5000）の傾斜小梁。両端は大梁に載せて終端させる。
     for (i, c) in [
@@ -423,9 +423,9 @@ fn inclined_joist_reactions_match_simple_beam() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.elements.push(beam(0, 0, 1));
-    m.elements.push(beam(1, 2, 3));
-    m.unassigned_joists.push(joist(&m, 4, 5, "SB"));
+    m.elements.push(element_beam(0, 0, 1));
+    m.elements.push(element_beam(1, 2, 3));
+    m.unassigned_beams.push(secondary_beam(&m, 4, 5, "SB"));
 
     let t = solved(&mut m);
     let key = squid_n_core::ids::SecondaryMemberId(4);
@@ -459,11 +459,11 @@ fn inclined_joist_reactions_match_simple_beam() {
 
 /// 端部がどの主架構にも二次部材にも載らない二次部材は `unresolved` に入る。
 #[test]
-fn floating_joist_is_unresolved() {
+fn floating_beam_is_unresolved() {
     let mut m = base_model();
     m.nodes.push(node(0, 0.0, 0.0, 0.0));
     m.nodes.push(node(1, 4000.0, 0.0, 0.0));
-    m.unassigned_joists.push(joist(&m, 0, 1, "SB"));
+    m.unassigned_beams.push(secondary_beam(&m, 0, 1, "SB"));
 
     let t = solved(&mut m);
     assert_eq!(t.unresolved, vec![squid_n_core::ids::SecondaryMemberId(0)]);
@@ -490,9 +490,9 @@ fn cyclic_support_is_reported() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.unassigned_joists.push(joist(&m, 0, 1, "A"));
-    m.unassigned_joists.push(joist(&m, 2, 3, "B"));
-    m.unassigned_joists.push(joist(&m, 4, 5, "C"));
+    m.unassigned_beams.push(secondary_beam(&m, 0, 1, "A"));
+    m.unassigned_beams.push(secondary_beam(&m, 2, 3, "B"));
+    m.unassigned_beams.push(secondary_beam(&m, 4, 5, "C"));
 
     // 循環はアンカー解決できない（支持を辿ると自分へ戻る）ため、生座標のまま解く。
     let t = solve(&m, |_| 0.0, true).unwrap();
@@ -529,8 +529,8 @@ fn crossing_without_shared_node_is_reported() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.unassigned_joists.push(joist(&m, 0, 1, "A"));
-    m.unassigned_joists.push(joist(&m, 2, 3, "B"));
+    m.unassigned_beams.push(secondary_beam(&m, 0, 1, "A"));
+    m.unassigned_beams.push(secondary_beam(&m, 2, 3, "B"));
 
     let crossings = super::secondary_crossings(&m);
     assert_eq!(crossings.len(), 1, "交差 1 組: {crossings:?}");
@@ -541,14 +541,14 @@ fn crossing_without_shared_node_is_reported() {
 /// 断面が未割当なら自重も床分配も載らず、失う荷重がない。形だけ置かれた支持点で
 /// 解析前チェックのエラーを出さないための扱いである（`solve` 末尾の判定）。
 #[test]
-fn floating_joist_without_load_is_not_reported() {
+fn floating_beam_without_load_is_not_reported() {
     let mut m = base_model();
     m.nodes.push(node(0, 0.0, 0.0, 0.0));
     m.nodes.push(node(1, 4000.0, 0.0, 0.0));
-    m.unassigned_joists.push(SecondaryMember {
+    m.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Detached([
             m.nodes[0].coord,
             m.nodes[1].coord,
@@ -567,12 +567,12 @@ fn floating_joist_without_load_is_not_reported() {
 
 /// 実部材化された二次部材（両端を持つ実 `Beam` がある）は逐次伝達の対象外。
 #[test]
-fn materialized_joist_is_skipped() {
+fn materialized_beam_is_skipped() {
     let mut m = base_model();
     m.nodes.push(node(0, 0.0, 0.0, 0.0));
     m.nodes.push(node(1, 4000.0, 0.0, 0.0));
-    m.elements.push(beam(0, 0, 1));
-    m.unassigned_joists.push(joist(&m, 0, 1, "SB"));
+    m.elements.push(element_beam(0, 0, 1));
+    m.unassigned_beams.push(secondary_beam(&m, 0, 1, "SB"));
 
     let t = solved(&mut m);
     assert!(t.members.is_empty(), "実部材化済みは対象外");
@@ -581,12 +581,12 @@ fn materialized_joist_is_skipped() {
 /// 片持ち小梁を作る（`free_at` は自由端の位置。幾何から自由端を推定するため
 /// `_free_at` は使わない。自由端が幾何的に支持されるテストは配置を調整する）。
 fn cantilever(model: &Model, a: u32, b: u32, _free_at: usize, name: &str) -> SecondaryMember {
-    joist(model, a, b, name)
+    secondary_beam(model, a, b, name)
 }
 
 /// 大梁 0-1 に載る片持ち小梁の自重は、基端の反力だけになって主架構へ渡る。
 #[test]
-fn cantilever_joist_transfers_to_base_only() {
+fn cantilever_beam_transfers_to_base_only() {
     let mut m = base_model();
     for (i, c) in [
         [0.0, 0.0, 0.0],       // 0 大梁端
@@ -599,8 +599,8 @@ fn cantilever_joist_transfers_to_base_only() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.elements.push(beam(0, 0, 1));
-    m.unassigned_joists.push(cantilever(&m, 2, 3, 1, "SB"));
+    m.elements.push(element_beam(0, 0, 1));
+    m.unassigned_beams.push(cantilever(&m, 2, 3, 1, "SB"));
 
     let t = solved(&mut m);
     let key = squid_n_core::ids::SecondaryMemberId(2);
@@ -619,7 +619,7 @@ fn cantilever_joist_transfers_to_base_only() {
 
 /// 基端が nodes[1] の片持ち小梁も、全反力が基端へ渡る。
 #[test]
-fn cantilever_joist_base_at_second_node() {
+fn cantilever_beam_base_at_second_node() {
     let mut m = base_model();
     for (i, c) in [
         [0.0, 4000.0, 0.0],    // 0 大梁端
@@ -632,8 +632,8 @@ fn cantilever_joist_base_at_second_node() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.elements.push(beam(0, 0, 1));
-    m.unassigned_joists.push(cantilever(&m, 2, 3, 0, "SB"));
+    m.elements.push(element_beam(0, 0, 1));
+    m.unassigned_beams.push(cantilever(&m, 2, 3, 0, "SB"));
 
     let t = solved(&mut m);
     let key = squid_n_core::ids::SecondaryMemberId(2);
@@ -663,10 +663,10 @@ fn tip_rib_on_cantilever_free_ends_cascades_to_bases() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.elements.push(beam(0, 0, 1));
-    m.unassigned_joists.push(cantilever(&m, 2, 3, 1, "CA"));
-    m.unassigned_joists.push(cantilever(&m, 4, 5, 1, "CB"));
-    m.unassigned_joists.push(joist(&m, 3, 5, "RIB"));
+    m.elements.push(element_beam(0, 0, 1));
+    m.unassigned_beams.push(cantilever(&m, 2, 3, 1, "CA"));
+    m.unassigned_beams.push(cantilever(&m, 4, 5, 1, "CB"));
+    m.unassigned_beams.push(secondary_beam(&m, 3, 5, "RIB"));
 
     let t = solved(&mut m);
     let ca = t
@@ -682,10 +682,10 @@ fn tip_rib_on_cantilever_free_ends_cascades_to_bases() {
         .get(&squid_n_core::ids::SecondaryMemberId(3))
         .expect("先端リブ");
 
-    for (joist, base) in [(&ca, 2u32), (&cb, 4)] {
-        assert_eq!(joist.supports[1], SupportAt::Free);
-        assert_eq!(joist.reactions[1], 0.0, "自由端の反力は 0");
-        assert_eq!(joist.end_points[0], m.nodes[base as usize].coord);
+    for (beam, base) in [(&ca, 2u32), (&cb, 4)] {
+        assert_eq!(beam.supports[1], SupportAt::Free);
+        assert_eq!(beam.reactions[1], 0.0, "自由端の反力は 0");
+        assert_eq!(beam.end_points[0], m.nodes[base as usize].coord);
     }
     assert!(matches!(rib.supports[0], SupportAt::Secondary { .. }));
     assert!(matches!(rib.supports[1], SupportAt::Secondary { .. }));
@@ -703,7 +703,7 @@ fn tip_rib_on_cantilever_free_ends_cascades_to_bases() {
 /// 取り付く床板の辺荷重は、境界の片持ち小梁（二次部材）へ渡り、反力として
 /// 基端の主架構へ流れる。取付き辺の残りは主架構への辺荷重として残る。
 #[test]
-fn attached_slab_load_reaches_side_joist() {
+fn attached_slab_load_reaches_side_beam() {
     use squid_n_core::ids::SlabId;
     use squid_n_core::model::{AreaLoad, LoadTransfer, RegionAnchor, Slab, SlabPlate, SlabShape};
     let w = 0.005_f64;
@@ -718,8 +718,8 @@ fn attached_slab_load_reaches_side_joist() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.elements.push(beam(0, 0, 1));
-    m.unassigned_joists.push(cantilever(&m, 0, 2, 1, "J"));
+    m.elements.push(element_beam(0, 0, 1));
+    m.unassigned_beams.push(cantilever(&m, 0, 2, 1, "J"));
     m.slabs.push(Slab {
         id: SlabId(0),
         shape: SlabShape::Attached {
@@ -741,19 +741,19 @@ fn attached_slab_load_reaches_side_joist() {
 
     m.anchorize_secondary_members();
     let t = solve(&m, |_| w, true).unwrap();
-    let joist = t
+    let beam = t
         .members
         .get(&squid_n_core::ids::SecondaryMemberId(0))
         .expect("小梁");
     // 左辺の小梁は最寄り負担面積 d²/2 を受ける。
-    let joist_slab = w * (1500.0 * 1500.0 / 2.0);
-    let expected = joist_slab + w_self() * 1500.0;
+    let beam_slab = w * (1500.0 * 1500.0 / 2.0);
+    let expected = beam_slab + w_self() * 1500.0;
     assert!(
-        (joist.reactions[0] - expected).abs() / expected < 0.02,
+        (beam.reactions[0] - expected).abs() / expected < 0.02,
         "基端反力={} expected={expected}",
-        joist.reactions[0]
+        beam.reactions[0]
     );
-    assert_eq!(joist.reactions[1], 0.0, "自由端の反力は 0");
+    assert_eq!(beam.reactions[1], 0.0, "自由端の反力は 0");
     assert!(t.unresolved.is_empty(), "{:?}", t.unresolved);
 
     let leftover_total: f64 = t
@@ -776,7 +776,7 @@ fn attached_slab_load_reaches_side_joist() {
 /// の総和と、カスケード後の主架構への総和の両方を確かめ、取り落とし・二重計上が
 /// 無いことを固定する。
 #[test]
-fn midspan_joist_floor_conserves_total_through_cascade() {
+fn midspan_beam_floor_conserves_total_through_cascade() {
     use crate::floor::{distribute_slab_resolved, LoadTarget};
     use squid_n_core::ids::SlabId;
     use squid_n_core::model::{
@@ -797,17 +797,17 @@ fn midspan_joist_floor_conserves_total_through_cascade() {
     {
         m.nodes.push(node(i as u32, c[0], c[1], c[2]));
     }
-    m.elements.push(beam(0, 0, 1));
-    m.elements.push(beam(1, 1, 2));
-    m.elements.push(beam(2, 2, 3));
-    m.elements.push(beam(3, 3, 0));
+    m.elements.push(element_beam(0, 0, 1));
+    m.elements.push(element_beam(1, 1, 2));
+    m.elements.push(element_beam(2, 2, 3));
+    m.elements.push(element_beam(3, 3, 0));
     // 中央小梁は下辺大梁（0-1）と上辺大梁（2-3）の材軸中間にアンカーする。
     // アンカー位置にはモデル節点が無い。
-    let joist_key = squid_n_core::ids::SecondaryMemberId(0);
-    m.unassigned_joists.push(SecondaryMember {
+    let beam_key = squid_n_core::ids::SecondaryMemberId(0);
+    m.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
-        id: joist_key,
-        kind: SecondaryMemberKind::Joist,
+        id: beam_key,
+        kind: SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Supported([
             squid_n_core::model::SecondaryMemberAnchor {
                 support: SupportMemberId::Primary(ElemId(0)),
@@ -864,7 +864,7 @@ fn midspan_joist_floor_conserves_total_through_cascade() {
     );
     assert!(
         resolved.iter().any(
-            |bl| matches!(bl.target, LoadTarget::Secondary { member, .. } if member == joist_key)
+            |bl| matches!(bl.target, LoadTarget::Secondary { member, .. } if member == beam_key)
         ),
         "小梁境界の辺荷重は Secondary で小梁を指す: {resolved:?}"
     );
@@ -884,18 +884,18 @@ fn midspan_joist_floor_conserves_total_through_cascade() {
         .map(|bl| bl.cmq.q_i + bl.cmq.q_j)
         .sum();
     let primary_total: f64 = member.iter().map(|bl| bl.cmq.q_i + bl.cmq.q_j).sum();
-    let joist = transfer
+    let beam = transfer
         .members
-        .get(&joist_key)
+        .get(&beam_key)
         .expect("小梁がカスケードの対象になっている");
     assert!(
-        !joist.member_loads.is_empty(),
-        "小梁が受け持つ荷重が空でない: {joist:?}"
+        !beam.member_loads.is_empty(),
+        "小梁が受け持つ荷重が空でない: {beam:?}"
     );
     assert!(
-        joist.reactions[0].abs() + joist.reactions[1].abs() > 0.0,
+        beam.reactions[0].abs() + beam.reactions[1].abs() > 0.0,
         "小梁の反力が主架構へ渡る: {:?}",
-        joist.reactions
+        beam.reactions
     );
     assert!(
         primary_total > 0.0,

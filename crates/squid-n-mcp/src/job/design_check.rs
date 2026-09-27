@@ -79,7 +79,7 @@ pub(crate) fn compute_design_check_job(
             qd_method: QdMethod::default(),
             long_member_forces: long_member_forces.as_deref(),
             q_simple_by_elem: Some(&q0_by_elem),
-            beam_group_overrides: None,
+            girder_group_overrides: None,
             steel_fb_basis: SteelFbBasis::default(),
         },
     );

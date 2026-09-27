@@ -63,7 +63,7 @@ pub struct PreparationResult {
     /// ねじり解放（i 端ねじれピン）の対象外となり、ねじり剛性が残る部材。
     /// 部材 ID 昇順。設定が OFF（全部材で保持）のときは空。
     pub torsion_skipped: Vec<PrepTorsionSkipRow>,
-    /// ねじり解放の設定が有効か（`Model::beam_torsion == ReleaseIEnd`）。
+    /// ねじり解放の設定が有効か（`Model::girder_torsion == ReleaseIEnd`）。
     /// false のときは全部材でねじり剛性を保持している。
     pub torsion_release_enabled: bool,
     /// 生成した仕口パネル（節点 index の昇順）。設定が OFF のときは空。
@@ -470,8 +470,8 @@ impl App {
             member_stiffness,
             member_stiffness_candidates,
             torsion_skipped,
-            torsion_release_enabled: self.core.model.beam_torsion
-                == squid_n_core::model::BeamTorsionMode::ReleaseIEnd,
+            torsion_release_enabled: self.core.model.girder_torsion
+                == squid_n_core::model::GirderTorsionMode::ReleaseIEnd,
             panels: self
                 .core
                 .scoped
@@ -1096,7 +1096,7 @@ pub fn member_kind_label(k: squid_n_design_jp::MemberKind) -> &'static str {
     use squid_n_design_jp::MemberKind;
     match k {
         MemberKind::Column => "柱",
-        MemberKind::Beam => "梁",
+        MemberKind::Girder => "梁",
         MemberKind::Brace => "ブレース",
     }
 }

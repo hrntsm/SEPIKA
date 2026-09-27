@@ -20,7 +20,7 @@
 | `StbNode` の座標 | 小文字 `x`/`y`/`z` も受ける | 大文字 `X`/`Y`/`Z` のみ |
 | 階の所属節点 | 書き出しは `StbNode@story`（方言）で表す | `StbStory/StbNodeIdList/StbNodeId` で書き出す（方言は廃止） |
 | `StbMaterial` | 取り込み・書き出しとも対応 | 取り込みのみ。書き出しは断面のグレード名だけで表す |
-| `StbBeam`（小梁） | `StbGirder` と同じ行で大梁として扱う | 二次部材（`SecondaryMemberKind::Joist`）として取り込み、`StbBeam` として書き出す |
+| `StbBeam`（小梁） | `StbGirder` と同じ行で大梁として扱う | 二次部材（`SecondaryMemberKind::Beam`）として取り込み、`StbBeam` として書き出す |
 | `StbPost`（間柱） | 梁部材として取り込む（情報一部欠落） | 二次部材（`SecondaryMemberKind::Post`）として往復する |
 | `StbSlab` | 断面を持たず板厚のみ | 符号・階・板厚・`strength_concrete` を断面として取り込み、床へ割り当てる |
 | `StbLoadCase`・`StbNodalLoad` | 取り込み・書き出しとも非対応 | 取り込みは対応（ケース名＋節点荷重 6 成分）。書き出しは非対応 |

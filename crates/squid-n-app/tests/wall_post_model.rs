@@ -99,7 +99,7 @@ fn wall_post_model() -> Model {
         flange_thick: 13.0,
     }
     .to_section(SectionId(1), "梁 H-400x200".into());
-    beam_section.frame_use = Some(FrameSectionUse::Beam);
+    beam_section.frame_use = Some(FrameSectionUse::Girder);
     model.sections.push(beam_section);
     let mut wall_sec = SectionShape::RcWall {
         thickness: WALL_T,
@@ -346,12 +346,12 @@ fn test_post_appears_as_unchecked_row() {
     app.run_design_check();
     let results = app.core.scoped.results.as_ref().expect("解析結果");
     let post_rows: Vec<_> = results
-        .joist_checks
+        .beam_checks
         .iter()
         .filter(|(_, target, _)| {
             matches!(
                 target,
-                squid_n_app::app::JoistCheckTarget::SecondaryPost { .. }
+                squid_n_app::app::BeamCheckTarget::SecondaryPost { .. }
             )
         })
         .collect();

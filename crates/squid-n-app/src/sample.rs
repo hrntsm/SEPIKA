@@ -54,7 +54,7 @@ pub fn portal_frame() -> Model {
     col_section.frame_use = Some(FrameSectionUse::Column);
     model.sections.push(col_section);
     let mut beam_section = beam_shape.to_section(SectionId(1), "梁 H-400x200x8x13".into());
-    beam_section.frame_use = Some(FrameSectionUse::Beam);
+    beam_section.frame_use = Some(FrameSectionUse::Girder);
     model.sections.push(beam_section);
 
     model.materials.push(Material {

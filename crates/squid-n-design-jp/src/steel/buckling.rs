@@ -155,7 +155,7 @@ fn g_ratio_at_with_index(
         };
         match kind {
             crate::MemberKind::Column => sum_col += ei_l,
-            crate::MemberKind::Beam => sum_beam += ei_l,
+            crate::MemberKind::Girder => sum_beam += ei_l,
             crate::MemberKind::Brace => {}
         }
     }
@@ -270,7 +270,7 @@ fn g_ratio_axis_at(
             };
             let i_eff = iy * cos2 + iz * (1.0 - cos2);
             sum_col += mat.young * i_eff / len;
-        } else if other_kind == crate::MemberKind::Beam {
+        } else if other_kind == crate::MemberKind::Girder {
             if let Some(end_idx) = end_index_at(other, *node_id) {
                 if matches!(other.end_cond.get(end_idx), Some(EndCondition::Pinned)) {
                     continue;
@@ -474,7 +474,7 @@ mod tests {
         let column = section(iy);
         let mut beam = column.clone();
         beam.id = SectionId(1);
-        beam.frame_use = Some(FrameSectionUse::Beam);
+        beam.frame_use = Some(FrameSectionUse::Girder);
         vec![column, beam]
     }
 
@@ -566,7 +566,7 @@ mod tests {
         // 材料は断面が持つ。梁用に RC の断面を足して差し替える。
         let mut rc_sec = model.sections[0].clone();
         rc_sec.id = SectionId(1);
-        rc_sec.frame_use = Some(FrameSectionUse::Beam);
+        rc_sec.frame_use = Some(FrameSectionUse::Girder);
         rc_sec.material = Some(MaterialId(1));
         model.sections[1] = rc_sec;
         for e in &mut model.elements[1..] {

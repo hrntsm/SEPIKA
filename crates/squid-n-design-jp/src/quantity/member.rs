@@ -10,7 +10,7 @@
 //! - [`stirrup_set_length`] / [`shear_bar_count`] — スターラップ
 //! - [`beam_joint_count`] / [`column_joint_count`] — 鉄筋継手個所数
 //! - [`column_concrete_volume`] / [`column_formwork_area`] / [`hoop_set_length`] — 柱
-//! - [`joist_concrete_volume`] / [`joist_formwork_area`] — 小梁
+//! - [`beam_concrete_volume`] / [`beam_formwork_area`] — 小梁
 //! - [`wall_bar_length`] — 壁筋（横筋・縦筋）総長さ
 
 /// 梁端ハンチの寸法（ハンチ端の全幅 Bi・全せい Di とハンチ長さ Li）[mm]。
@@ -184,12 +184,12 @@ pub fn hoop_set_length(dx: f64, dy: f64, nx: u32, ny: u32) -> f64 {
 }
 
 /// 小梁のコンクリート体積 [mm³]: `B×D×L`。
-pub fn joist_concrete_volume(b: f64, d: f64, l: f64) -> f64 {
+pub fn beam_concrete_volume(b: f64, d: f64, l: f64) -> f64 {
     b * d * l
 }
 
 /// 小梁の型枠面積 [mm²]: `(B+2×D)×L`。
-pub fn joist_formwork_area(b: f64, d: f64, l: f64) -> f64 {
+pub fn beam_formwork_area(b: f64, d: f64, l: f64) -> f64 {
     (b + 2.0 * d) * l
 }
 

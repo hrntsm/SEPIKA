@@ -123,7 +123,7 @@ impl DesignCheck for RcDesign {
         if matches!(
             shape,
             SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. }
-        ) && matches!(ctx.kind, MemberKind::Beam | MemberKind::Brace)
+        ) && matches!(ctx.kind, MemberKind::Girder | MemberKind::Brace)
         {
             return CheckOutcome::Skipped {
                 reason: "RC 検定: 柱用断面を梁部材に割り当てています（用途不一致）".to_string(),
@@ -151,7 +151,7 @@ impl DesignCheck for RcDesign {
             column::column_check(forces, sec, mat, ctx, shape, fc_raw)
         } else {
             match ctx.kind {
-                MemberKind::Beam | MemberKind::Brace => {
+                MemberKind::Girder | MemberKind::Brace => {
                     beam::beam_check(forces, sec, mat, ctx, shape, fc_raw)
                 }
                 MemberKind::Column => column::column_check(forces, sec, mat, ctx, shape, fc_raw),

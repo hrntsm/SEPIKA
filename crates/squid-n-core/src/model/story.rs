@@ -177,7 +177,7 @@ pub struct StoryDynamicMass {
 pub struct StandardFloorLoad {
     pub dead: f64,
     pub floor: f64,
-    pub joist: f64,
+    pub beam: f64,
     pub frame: f64,
     pub seismic: f64,
 }
@@ -187,7 +187,7 @@ impl StandardFloorLoad {
         match purpose {
             None => self.dead,
             Some(LoadPurpose::Floor) => self.floor,
-            Some(LoadPurpose::Joist) => self.joist,
+            Some(LoadPurpose::Beam) => self.beam,
             Some(LoadPurpose::Frame) => self.frame,
             Some(LoadPurpose::Seismic) => self.seismic,
         }

@@ -32,7 +32,7 @@ fn rc_beam_rect_section(
         },
     };
     Section {
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
         id: SectionId(id),
         name: format!("RC{id}"),
         area: b * d,
@@ -185,7 +185,7 @@ fn test_collect_rc_ultimate_checks_column_and_beam() {
     let beam = checks.iter().find(|c| c.elem == ElemId(1)).unwrap();
 
     assert_eq!(col.kind, MemberKind::Column);
-    assert_eq!(beam.kind, MemberKind::Beam);
+    assert_eq!(beam.kind, MemberKind::Girder);
 
     // 各耐力が正。
     assert!(col.mu > 0.0 && col.qmu > 0.0 && col.qsu > 0.0 && col.qbu > 0.0);
@@ -644,7 +644,7 @@ fn test_collect_cft_ultimate_checks() {
         thick: 12.0,
     };
     let sec = Section {
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
         id: SectionId(0),
         name: "CFT400".into(),
         area: cft_shape.calc_area(),
@@ -797,7 +797,7 @@ fn test_ultimate_check_new_rc_shapes_supported() {
     let beam = single_shape_model(beam_rect_shape(), 400.0, 600.0, true);
     let checks = collect_rc_ultimate_checks(&beam, &[], &opts).unwrap();
     assert_eq!(checks.len(), 1);
-    assert_eq!(checks[0].kind, MemberKind::Beam);
+    assert_eq!(checks[0].kind, MemberKind::Girder);
     assert!(checks[0].mu > 0.0 && checks[0].qsu > 0.0 && checks[0].qmu > 0.0);
     assert!(checks[0].axial.is_none());
 

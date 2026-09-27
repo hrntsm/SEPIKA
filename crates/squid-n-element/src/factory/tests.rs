@@ -40,7 +40,7 @@ fn make_diaphragm_model() -> Model {
             vec![NodeId(1)],
         )],
         sections: vec![Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "sec".into(),
             area: 100.0,

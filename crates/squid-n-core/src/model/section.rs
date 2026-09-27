@@ -9,7 +9,7 @@ pub fn rect_shear_area(area: f64) -> f64 {
 /// 主架構線材の設計上の断面用途。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FrameSectionUse {
-    Beam,
+    Girder,
     Column,
     Brace,
 }
@@ -121,7 +121,6 @@ impl Section {
             && self.rebar_material == other.rebar_material
             && self.shear_rebar_material == other.shear_rebar_material
             && self.steel_material == other.steel_material
-            && self.frame_use == other.frame_use
     }
 }
 

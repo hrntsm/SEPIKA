@@ -762,12 +762,12 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         );
     }
 
-    if app.ui.scoped.joist_place_mode || app.ui.scoped.post_place_mode {
+    if app.ui.scoped.beam_place_mode || app.ui.scoped.post_place_mode {
         draw_work_scope(
             &painter,
             app,
             &proj,
-            app.ui.scoped.joist_place_mode,
+            app.ui.scoped.beam_place_mode,
             app.ui.scoped.post_place_mode,
         );
         if let Some(first) = app.ui.scoped.member_place_first {
@@ -899,7 +899,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
             } else {
                 egui::Stroke::new(1.5_f32, theme::SECONDARY_AMBER)
             };
-            for sm in app.core.model.joists().chain(app.core.model.posts()) {
+            for sm in app.core.model.beams().chain(app.core.model.posts()) {
                 let Some([n0, n1]) = secondary_end_node_indices(&app.core.model, sm) else {
                     continue;
                 };

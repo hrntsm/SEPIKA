@@ -163,7 +163,7 @@ pub fn query_model(model: &Model, kind: &str, filter: Option<&str>) -> Vec<serde
                     "name": r.name,
                     "boundary": r.boundary.iter().map(|n| n.0).collect::<Vec<_>>(),
                     "slab_ids": r.slab_ids.iter().map(|s| s.0).collect::<Vec<_>>(),
-                    "secondary_joists": r.secondary_joists,
+                    "secondary_beams": r.secondary_beams,
                 })
             })
             .collect(),
@@ -193,12 +193,12 @@ pub fn query_model(model: &Model, kind: &str, filter: Option<&str>) -> Vec<serde
                 .unwrap_or_default()
         }
         "secondary_member_end" | "secondary_member_ends" => model
-            .joists()
+            .beams()
             .chain(model.posts())
             .filter(|sm| !sm.is_detached())
             .map(|sm| serde_json::to_value(sm).unwrap_or(json!(null)))
             .collect(),
-        "unassigned_joist" | "unassigned_joists" => serde_json::to_value(&model.unassigned_joists)
+        "unassigned_beam" | "unassigned_beams" => serde_json::to_value(&model.unassigned_beams)
             .ok()
             .and_then(|v| v.as_array().cloned())
             .unwrap_or_default(),
@@ -206,8 +206,8 @@ pub fn query_model(model: &Model, kind: &str, filter: Option<&str>) -> Vec<serde
             .ok()
             .and_then(|v| v.as_array().cloned())
             .unwrap_or_default(),
-        "secondary_joist" | "secondary_joists" => model
-            .joists()
+        "secondary_beam" | "secondary_beams" => model
+            .beams()
             .map(|sm| serde_json::to_value(sm).unwrap_or(json!(null)))
             .collect(),
         _ => vec![],

@@ -102,7 +102,7 @@ fn build_grid_model(nx: usize, ny: usize, n_stories: usize, with_slabs: bool) ->
         steel_material: None,
     });
     model.sections.push(Section {
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
         id: SectionId(1),
         name: "BEAM 400x700".into(),
         area: 400.0 * 700.0,

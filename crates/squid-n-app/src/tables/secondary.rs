@@ -105,7 +105,7 @@ pub(crate) fn support_label(model: &Model, support: SupportMemberId) -> String {
             let kind = model
                 .secondary_member(id)
                 .map(|sm| match sm.kind {
-                    SecondaryMemberKind::Joist => "小梁",
+                    SecondaryMemberKind::Beam => "小梁",
                     SecondaryMemberKind::Post => "間柱",
                 })
                 .unwrap_or("二次部材");
@@ -128,8 +128,8 @@ fn support_candidates(
         }
     }
     match kind {
-        SecondaryMemberKind::Joist => {
-            out.extend(model.joists().map(|sm| SupportMemberId::Secondary(sm.id)));
+        SecondaryMemberKind::Beam => {
+            out.extend(model.beams().map(|sm| SupportMemberId::Secondary(sm.id)));
         }
         SecondaryMemberKind::Post => {
             out.extend(model.posts().map(|sm| SupportMemberId::Secondary(sm.id)));
@@ -194,7 +194,7 @@ fn build_ends(draft: &SecondaryMemberDraft) -> Option<SecondaryMemberEnds> {
 
 fn parent_exists(model: &Model, kind: SecondaryMemberKind, raw: u32) -> bool {
     match kind {
-        SecondaryMemberKind::Joist => model
+        SecondaryMemberKind::Beam => model
             .floor_regions
             .get(raw as usize)
             .is_some_and(|r| r.id == FloorRegionId(raw)),
@@ -207,7 +207,7 @@ fn parent_exists(model: &Model, kind: SecondaryMemberKind, raw: u32) -> bool {
 
 fn parent_options(app: &App, kind: SecondaryMemberKind) -> Vec<(u32, String)> {
     match kind {
-        SecondaryMemberKind::Joist => app
+        SecondaryMemberKind::Beam => app
             .core
             .model
             .floor_regions
@@ -272,7 +272,7 @@ pub(crate) fn secondary_member_placement_form(
     kind: SecondaryMemberKind,
 ) {
     let title = match kind {
-        SecondaryMemberKind::Joist => "小梁を配置",
+        SecondaryMemberKind::Beam => "小梁を配置",
         SecondaryMemberKind::Post => "間柱を配置",
     };
     ui.strong(title);
@@ -299,7 +299,7 @@ pub(crate) fn secondary_member_placement_form(
             SecondaryParent::Unassigned
         } else {
             match (kind, draft.parent) {
-                (SecondaryMemberKind::Joist, Some(id)) => SecondaryParent::Floor(FloorRegionId(id)),
+                (SecondaryMemberKind::Beam, Some(id)) => SecondaryParent::Floor(FloorRegionId(id)),
                 (SecondaryMemberKind::Post, Some(id)) => SecondaryParent::Wall(WallRegionId(id)),
                 _ => SecondaryParent::Unassigned,
             }
@@ -408,7 +408,7 @@ pub(crate) fn secondary_member_placement_form(
         );
         if app.ui.scoped.secondary_draft.free_end {
             let hint = match kind {
-                SecondaryMemberKind::Joist => "ベクトル [dx, dy] [mm]",
+                SecondaryMemberKind::Beam => "ベクトル [dx, dy] [mm]",
                 SecondaryMemberKind::Post => "ベクトル [構面内 s, z] [mm]",
             };
             ui.label(hint);
@@ -459,7 +459,7 @@ pub(crate) fn secondary_member_placement_form(
             SecondaryParent::Unassigned
         } else {
             match kind {
-                SecondaryMemberKind::Joist => {
+                SecondaryMemberKind::Beam => {
                     SecondaryParent::Floor(FloorRegionId(draft.parent.expect("確認済み")))
                 }
                 SecondaryMemberKind::Post => {
@@ -492,10 +492,10 @@ pub(crate) fn secondary_member_placement_form(
 /// 二次部材の一覧。所属・ID・断面・支持条件の変更・削除。
 pub(crate) fn secondary_member_list(app: &mut App, ui: &mut egui::Ui, kind: SecondaryMemberKind) {
     let members: Vec<SecondaryMember> = match kind {
-        SecondaryMemberKind::Joist => app
+        SecondaryMemberKind::Beam => app
             .core
             .model
-            .joists()
+            .beams()
             .filter(|sm| !app.core.model.secondary_member_materialized(sm))
             .cloned()
             .collect(),
@@ -511,12 +511,12 @@ pub(crate) fn secondary_member_list(app: &mut App, ui: &mut egui::Ui, kind: Seco
     let mut pending_delete: Vec<SecondaryMemberId> = Vec::new();
     let owner_of = |app: &App, id: SecondaryMemberId| -> Option<String> {
         match kind {
-            SecondaryMemberKind::Joist => app
+            SecondaryMemberKind::Beam => app
                 .core
                 .model
                 .floor_regions
                 .iter()
-                .find(|r| r.secondary_joists.iter().any(|j| j.id == id))
+                .find(|r| r.secondary_beams.iter().any(|j| j.id == id))
                 .map(|r| {
                     if r.name.is_empty() {
                         format!("#{}", r.id.0)
@@ -540,7 +540,7 @@ pub(crate) fn secondary_member_list(app: &mut App, ui: &mut egui::Ui, kind: Seco
         }
     };
     let table_id = match kind {
-        SecondaryMemberKind::Joist => "secondary_joists_tbl",
+        SecondaryMemberKind::Beam => "secondary_beams_tbl",
         SecondaryMemberKind::Post => "secondary_posts_tbl",
     };
     table_util::standard_table(
@@ -751,7 +751,7 @@ mod tests {
         ));
 
         let parent = SecondaryParent::Floor(FloorRegionId(0));
-        let candidates = support_candidates(&model, SecondaryMemberKind::Joist, parent);
+        let candidates = support_candidates(&model, SecondaryMemberKind::Beam, parent);
         assert!(candidates.contains(&SupportMemberId::Primary(ElemId(0))));
         assert!(
             !candidates.contains(&SupportMemberId::Primary(ElemId(4))),

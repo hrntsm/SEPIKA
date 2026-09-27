@@ -695,7 +695,7 @@ fn rc_cross_joint_emits_ultimate_check() {
                 | SectionShape::RcColumnCircle { .. }
                 | SectionShape::SrcColumnRect { .. },
             ) => squid_n_core::model::FrameSectionUse::Column,
-            _ => squid_n_core::model::FrameSectionUse::Beam,
+            _ => squid_n_core::model::FrameSectionUse::Girder,
         });
         sec.material = Some(MaterialId(0));
         sec.rebar_material = Some(MaterialId(1));
@@ -828,7 +828,7 @@ fn cross_joint_model(col_shape: SectionShape, beam_shape: SectionShape) -> Model
                 | SectionShape::RcColumnCircle { .. }
                 | SectionShape::SrcColumnRect { .. },
             ) => squid_n_core::model::FrameSectionUse::Column,
-            _ => squid_n_core::model::FrameSectionUse::Beam,
+            _ => squid_n_core::model::FrameSectionUse::Girder,
         });
         sec.material = Some(MaterialId(0));
         sec.rebar_material = Some(MaterialId(1));

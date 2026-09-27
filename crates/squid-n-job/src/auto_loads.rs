@@ -1013,7 +1013,7 @@ mod tests {
             fy: Some(235.0),
         });
         model.sections.push(Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "H".into(),
             floor: None,
@@ -1033,10 +1033,10 @@ mod tests {
             shear_rebar_material: None,
             steel_material: None,
         });
-        model.unassigned_joists.push(SecondaryMember {
+        model.unassigned_beams.push(SecondaryMember {
             gravity_end_shares: None,
             id: SecondaryMemberId(0),
-            kind: squid_n_core::model::SecondaryMemberKind::Joist,
+            kind: squid_n_core::model::SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Detached([[3000.0, 0.0, 0.0], [3000.0, 4000.0, 0.0]]),
             section: Some(SectionId(0)),
             name: "SB".into(),
@@ -1116,7 +1116,7 @@ mod tests {
             fy: None,
         });
         model.sections.push(Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "壁 t150".into(),
             area: 0.0,
@@ -1226,7 +1226,7 @@ mod tests {
             fy: None,
         });
         model.sections.push(Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "壁 t150".into(),
             area: 0.0,
@@ -1333,7 +1333,7 @@ mod tests {
             fy: None,
         });
         model.sections.push(Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "壁 t150".into(),
             area: 0.0,
@@ -1954,7 +1954,7 @@ mod cascade_tests {
     ///
     /// B の端点（A の中央）はどの大梁の材軸上にもないため、逐次伝達がないと B の
     /// 反力は非構造節点で捨てられる（申し送り §3.4 F10）。
-    fn joist_on_joist_model() -> Model {
+    fn beam_on_beam_model() -> Model {
         let mk_node = |id: u32, x: f64, y: f64| Node {
             id: NodeId(id),
             coord: [x, y, 0.0],
@@ -2003,10 +2003,10 @@ mod cascade_tests {
             method: DistributionMethod::TriTrapezoid,
             one_way: None,
         };
-        let joist_a = SecondaryMember {
+        let beam_a = SecondaryMember {
             gravity_end_shares: None,
             id: squid_n_core::ids::SecondaryMemberId(4),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: squid_n_core::model::SecondaryMemberEnds::Supported([
                 squid_n_core::model::SecondaryMemberAnchor {
                     support: squid_n_core::model::SupportMemberId::Primary(ElemId(0)),
@@ -2020,10 +2020,10 @@ mod cascade_tests {
             section: Some(SectionId(0)),
             name: "A".into(),
         };
-        let joist_b = SecondaryMember {
+        let beam_b = SecondaryMember {
             gravity_end_shares: None,
             id: squid_n_core::ids::SecondaryMemberId(6),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: squid_n_core::model::SecondaryMemberEnds::Supported([
                 squid_n_core::model::SecondaryMemberAnchor {
                     support: squid_n_core::model::SupportMemberId::Secondary(
@@ -2043,7 +2043,7 @@ mod cascade_tests {
         let mut model = Model {
             nodes,
             elements,
-            unassigned_joists: vec![joist_a.clone()],
+            unassigned_beams: vec![beam_a.clone()],
             ..Default::default()
         };
         model.rebuild_floor_assignment_regions();
@@ -2064,7 +2064,7 @@ mod cascade_tests {
             vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         );
         region.slab_ids = vec![first, second];
-        region.secondary_joists = vec![joist_a, joist_b];
+        region.secondary_beams = vec![beam_a, beam_b];
         let materials = vec![Material {
             id: MaterialId(0),
             name: "SN400".into(),
@@ -2079,7 +2079,7 @@ mod cascade_tests {
             strength_factor: None,
         }];
         let sections = vec![Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "H".into(),
             floor: None,
@@ -2099,7 +2099,7 @@ mod cascade_tests {
             shear_rebar_material: None,
             steel_material: None,
         }];
-        model.unassigned_joists.clear();
+        model.unassigned_beams.clear();
         model.floor_regions.push(region);
         model.materials = materials;
         model.sections = sections;
@@ -2111,8 +2111,8 @@ mod cascade_tests {
     /// 逐次伝達が無いと、小梁 B の反力は大梁の材軸上に無い節点 6 へ載り、
     /// `DofMap::build` が非構造節点として黙って捨てる（§3.4 F10）。
     #[test]
-    fn joist_on_joist_delivers_all_floor_load_to_primary() {
-        let model = joist_on_joist_model();
+    fn beam_on_beam_delivers_all_floor_load_to_primary() {
+        let model = beam_on_beam_model();
         model.validate().expect("valid model");
 
         let beam_map = beam_elem_map(&model);
@@ -2160,10 +2160,10 @@ mod cascade_tests {
 
     /// 架け側（B）の反力は受け側（A）の集中荷重として渡り、A の反力に含まれる。
     #[test]
-    fn reaction_of_supported_joist_lands_on_supporting_joist() {
+    fn reaction_of_supported_beam_lands_on_supporting_beam() {
         use squid_n_load::cascade::{self as cascade, SupportAt};
 
-        let model = joist_on_joist_model();
+        let model = beam_on_beam_model();
         let transfer = cascade::solve(&model, |s| model.slab_dead_intensity(s), false).unwrap();
 
         let ka = squid_n_core::ids::SecondaryMemberId(4);

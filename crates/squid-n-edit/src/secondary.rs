@@ -28,10 +28,8 @@ fn cft_section(model: &Model, id: Option<SectionId>) -> bool {
         })
 }
 
-fn joists_ok(joists: &[SecondaryMember]) -> bool {
-    joists
-        .iter()
-        .all(|sm| sm.kind == SecondaryMemberKind::Joist)
+fn beams_ok(beams: &[SecondaryMember]) -> bool {
+    beams.iter().all(|sm| sm.kind == SecondaryMemberKind::Beam)
 }
 
 fn posts_ok(posts: &[SecondaryMember]) -> bool {
@@ -43,11 +41,11 @@ fn unique_ids(sms: &[SecondaryMember]) -> bool {
     sms.iter().all(|sm| seen.insert(sm.id))
 }
 
-fn joist_id_in_other_regions(model: &Model, id: SecondaryMemberId, skip: FloorRegionId) -> bool {
+fn beam_id_in_other_regions(model: &Model, id: SecondaryMemberId, skip: FloorRegionId) -> bool {
     model
         .floor_regions
         .iter()
-        .any(|r| r.id != skip && r.secondary_joists.iter().any(|sm| sm.id == id))
+        .any(|r| r.id != skip && r.secondary_beams.iter().any(|sm| sm.id == id))
 }
 
 fn post_id_in_other_regions(model: &Model, id: SecondaryMemberId, skip: WallRegionId) -> bool {
@@ -80,22 +78,22 @@ fn take_from_unassigned(
     unassigned.retain(|sm| !new_ids.contains(&sm.id));
 }
 
-/// 未割当小梁を末尾へ追加する。逆操作は [`DeleteUnassignedJoist`]。
-pub struct AddUnassignedJoist {
+/// 未割当小梁を末尾へ追加する。逆操作は [`DeleteUnassignedBeam`]。
+pub struct AddUnassignedBeam {
     pub sm: SecondaryMember,
 }
 
-impl EditCommand for AddUnassignedJoist {
+impl EditCommand for AddUnassignedBeam {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        if self.sm.kind != SecondaryMemberKind::Joist || !secondary_member_ok(model, &self.sm) {
+        if self.sm.kind != SecondaryMemberKind::Beam || !secondary_member_ok(model, &self.sm) {
             return Box::new(Noop);
         }
-        if model.joists().any(|sm| sm.id == self.sm.id) {
+        if model.beams().any(|sm| sm.id == self.sm.id) {
             return Box::new(Noop);
         }
-        let index = model.unassigned_joists.len();
-        model.unassigned_joists.push(self.sm.clone());
-        Box::new(DeleteUnassignedJoist { index })
+        let index = model.unassigned_beams.len();
+        model.unassigned_beams.push(self.sm.clone());
+        Box::new(DeleteUnassignedBeam { index })
     }
 
     fn label(&self) -> &str {
@@ -103,18 +101,18 @@ impl EditCommand for AddUnassignedJoist {
     }
 }
 
-/// 未割当小梁を削除する。逆操作は [`InsertUnassignedJoist`]。
-pub struct DeleteUnassignedJoist {
+/// 未割当小梁を削除する。逆操作は [`InsertUnassignedBeam`]。
+pub struct DeleteUnassignedBeam {
     pub index: usize,
 }
 
-impl EditCommand for DeleteUnassignedJoist {
+impl EditCommand for DeleteUnassignedBeam {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        if self.index >= model.unassigned_joists.len() {
+        if self.index >= model.unassigned_beams.len() {
             return Box::new(Noop);
         }
-        let removed = model.unassigned_joists.remove(self.index);
-        Box::new(InsertUnassignedJoist {
+        let removed = model.unassigned_beams.remove(self.index);
+        Box::new(InsertUnassignedBeam {
             index: self.index,
             sm: removed,
         })
@@ -125,19 +123,19 @@ impl EditCommand for DeleteUnassignedJoist {
     }
 }
 
-/// [`DeleteUnassignedJoist`] の逆操作。
-pub struct InsertUnassignedJoist {
+/// [`DeleteUnassignedBeam`] の逆操作。
+pub struct InsertUnassignedBeam {
     pub index: usize,
     pub sm: SecondaryMember,
 }
 
-impl EditCommand for InsertUnassignedJoist {
+impl EditCommand for InsertUnassignedBeam {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        if self.index > model.unassigned_joists.len() {
+        if self.index > model.unassigned_beams.len() {
             return Box::new(Noop);
         }
-        model.unassigned_joists.insert(self.index, self.sm.clone());
-        Box::new(DeleteUnassignedJoist { index: self.index })
+        model.unassigned_beams.insert(self.index, self.sm.clone());
+        Box::new(DeleteUnassignedBeam { index: self.index })
     }
 
     fn label(&self) -> &str {
@@ -210,37 +208,37 @@ impl EditCommand for InsertUnassignedPost {
     }
 }
 
-/// 床領域の小梁リスト（`secondary_joists`）を全置換する。
+/// 床領域の小梁リスト（`secondary_beams`）を全置換する。
 ///
 /// 新しいリストに無い旧所属は未割当へ移す（実体を消さない）。
 /// 未割当にあった同じ端点は領域側へ移す。他領域との端点重複は Noop。
 /// 次回の準備計算（`rebuild_floor_regions`）で D7 により幾何から入れ直される。
-pub struct SetFloorRegionSecondaryJoists {
+pub struct SetFloorRegionSecondaryBeams {
     pub region: FloorRegionId,
-    pub joists: Vec<SecondaryMember>,
+    pub beams: Vec<SecondaryMember>,
 }
 
-struct RestoreFloorRegionSecondaryJoists {
+struct RestoreFloorRegionSecondaryBeams {
     region: FloorRegionId,
-    joists: Vec<SecondaryMember>,
+    beams: Vec<SecondaryMember>,
     unassigned: Vec<SecondaryMember>,
 }
 
-impl EditCommand for RestoreFloorRegionSecondaryJoists {
+impl EditCommand for RestoreFloorRegionSecondaryBeams {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let idx = self.region.index();
         if idx >= model.floor_regions.len() || model.floor_regions[idx].id != self.region {
             return Box::new(Noop);
         }
-        let old_joists = std::mem::replace(
-            &mut model.floor_regions[idx].secondary_joists,
-            self.joists.clone(),
+        let old_beams = std::mem::replace(
+            &mut model.floor_regions[idx].secondary_beams,
+            self.beams.clone(),
         );
         let old_unassigned =
-            std::mem::replace(&mut model.unassigned_joists, self.unassigned.clone());
-        Box::new(RestoreFloorRegionSecondaryJoists {
+            std::mem::replace(&mut model.unassigned_beams, self.unassigned.clone());
+        Box::new(RestoreFloorRegionSecondaryBeams {
             region: self.region,
-            joists: old_joists,
+            beams: old_beams,
             unassigned: old_unassigned,
         })
     }
@@ -250,37 +248,37 @@ impl EditCommand for RestoreFloorRegionSecondaryJoists {
     }
 }
 
-impl EditCommand for SetFloorRegionSecondaryJoists {
+impl EditCommand for SetFloorRegionSecondaryBeams {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let idx = self.region.index();
         if idx >= model.floor_regions.len() || model.floor_regions[idx].id != self.region {
             return Box::new(Noop);
         }
-        if !joists_ok(&self.joists)
-            || !self.joists.iter().all(|sm| secondary_member_ok(model, sm))
-            || !self.joists.iter().all(|sm| !cft_section(model, sm.section))
-            || !unique_ids(&self.joists)
+        if !beams_ok(&self.beams)
+            || !self.beams.iter().all(|sm| secondary_member_ok(model, sm))
+            || !self.beams.iter().all(|sm| !cft_section(model, sm.section))
+            || !unique_ids(&self.beams)
         {
             return Box::new(Noop);
         }
         if self
-            .joists
+            .beams
             .iter()
-            .any(|sm| joist_id_in_other_regions(model, sm.id, self.region))
+            .any(|sm| beam_id_in_other_regions(model, sm.id, self.region))
         {
             return Box::new(Noop);
         }
-        let new_keys: HashSet<_> = self.joists.iter().map(|sm| sm.id).collect();
-        let old_joists = std::mem::replace(
-            &mut model.floor_regions[idx].secondary_joists,
-            self.joists.clone(),
+        let new_keys: HashSet<_> = self.beams.iter().map(|sm| sm.id).collect();
+        let old_beams = std::mem::replace(
+            &mut model.floor_regions[idx].secondary_beams,
+            self.beams.clone(),
         );
-        let old_unassigned = model.unassigned_joists.clone();
-        take_from_unassigned(&mut model.unassigned_joists, &new_keys);
-        relocate_removed(&old_joists, &new_keys, &mut model.unassigned_joists);
-        Box::new(RestoreFloorRegionSecondaryJoists {
+        let old_unassigned = model.unassigned_beams.clone();
+        take_from_unassigned(&mut model.unassigned_beams, &new_keys);
+        relocate_removed(&old_beams, &new_keys, &mut model.unassigned_beams);
+        Box::new(RestoreFloorRegionSecondaryBeams {
             region: self.region,
-            joists: old_joists,
+            beams: old_beams,
             unassigned: old_unassigned,
         })
     }
@@ -291,27 +289,27 @@ impl EditCommand for SetFloorRegionSecondaryJoists {
 }
 
 /// 床領域内小梁の断面を変更する。
-pub struct SetFloorRegionJoistSection {
+pub struct SetFloorRegionBeamSection {
     pub region: FloorRegionId,
     pub index: usize,
     pub section: Option<SectionId>,
 }
 
-impl EditCommand for SetFloorRegionJoistSection {
+impl EditCommand for SetFloorRegionBeamSection {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let ri = self.region.index();
         if ri >= model.floor_regions.len() || model.floor_regions[ri].id != self.region {
             return Box::new(Noop);
         }
-        if self.index >= model.floor_regions[ri].secondary_joists.len() {
+        if self.index >= model.floor_regions[ri].secondary_beams.len() {
             return Box::new(Noop);
         }
         if !crate::refs::section_ref_ok(model, self.section) || cft_section(model, self.section) {
             return Box::new(Noop);
         }
-        let old = model.floor_regions[ri].secondary_joists[self.index].section;
-        model.floor_regions[ri].secondary_joists[self.index].section = self.section;
-        Box::new(SetFloorRegionJoistSection {
+        let old = model.floor_regions[ri].secondary_beams[self.index].section;
+        model.floor_regions[ri].secondary_beams[self.index].section = self.section;
+        Box::new(SetFloorRegionBeamSection {
             region: self.region,
             index: self.index,
             section: old,
@@ -490,14 +488,14 @@ pub struct SetSecondaryMemberEndSupport {
 }
 
 fn find_secondary_mut(model: &mut Model, id: SecondaryMemberId) -> Option<&mut SecondaryMember> {
-    if let Some(sm) = model.unassigned_joists.iter_mut().find(|sm| sm.id == id) {
+    if let Some(sm) = model.unassigned_beams.iter_mut().find(|sm| sm.id == id) {
         return Some(sm);
     }
     if let Some(sm) = model.unassigned_posts.iter_mut().find(|sm| sm.id == id) {
         return Some(sm);
     }
     for region in &mut model.floor_regions {
-        if let Some(sm) = region.secondary_joists.iter_mut().find(|sm| sm.id == id) {
+        if let Some(sm) = region.secondary_beams.iter_mut().find(|sm| sm.id == id) {
             return Some(sm);
         }
     }
@@ -576,7 +574,7 @@ pub enum SecondaryParent {
 impl SecondaryParent {
     fn accepts(self, kind: SecondaryMemberKind) -> bool {
         match self {
-            SecondaryParent::Floor(_) => kind == SecondaryMemberKind::Joist,
+            SecondaryParent::Floor(_) => kind == SecondaryMemberKind::Beam,
             SecondaryParent::Wall(_) => kind == SecondaryMemberKind::Post,
             SecondaryParent::Unassigned => true,
         }
@@ -626,7 +624,7 @@ fn support_ends_in_parent(
 /// 安定 ID で二次部材が属する親領域。どの領域にも属さなければ
 /// [`SecondaryParent::Unassigned`]。
 fn secondary_parent_of(model: &Model, id: SecondaryMemberId) -> SecondaryParent {
-    if let Some(region) = model.floor_region_of_joist(id) {
+    if let Some(region) = model.floor_region_of_beam(id) {
         return SecondaryParent::Floor(region.id);
     }
     if let Some(region) = model
@@ -649,7 +647,7 @@ fn secondary_ends_ok(model: &Model, candidate: &SecondaryMember) -> bool {
         return false;
     }
     let mut all: Vec<&SecondaryMember> = model
-        .joists()
+        .beams()
         .chain(model.posts())
         .filter(|sm| sm.id != candidate.id)
         .collect();
@@ -815,7 +813,7 @@ enum SecondaryAction {
 struct SecondarySnapshot {
     floor_regions: Vec<squid_n_core::model::FloorRegion>,
     wall_regions: Vec<squid_n_core::model::WallRegion>,
-    unassigned_joists: Vec<SecondaryMember>,
+    unassigned_beams: Vec<SecondaryMember>,
     unassigned_posts: Vec<SecondaryMember>,
     floor_assignment_regions: squid_n_core::model::FloorPlateAssignmentRegions,
     wall_assignment_regions: squid_n_core::model::WallPlateAssignmentRegions,
@@ -828,7 +826,7 @@ fn snapshot_secondary(model: &Model) -> SecondarySnapshot {
     SecondarySnapshot {
         floor_regions: model.floor_regions.clone(),
         wall_regions: model.wall_regions.clone(),
-        unassigned_joists: model.unassigned_joists.clone(),
+        unassigned_beams: model.unassigned_beams.clone(),
         unassigned_posts: model.unassigned_posts.clone(),
         floor_assignment_regions: model.floor_assignment_regions.clone(),
         wall_assignment_regions: model.wall_assignment_regions.clone(),
@@ -841,7 +839,7 @@ fn snapshot_secondary(model: &Model) -> SecondarySnapshot {
 fn restore_secondary(model: &mut Model, snapshot: SecondarySnapshot) {
     model.floor_regions = snapshot.floor_regions;
     model.wall_regions = snapshot.wall_regions;
-    model.unassigned_joists = snapshot.unassigned_joists;
+    model.unassigned_beams = snapshot.unassigned_beams;
     model.unassigned_posts = snapshot.unassigned_posts;
     model.floor_assignment_regions = snapshot.floor_assignment_regions;
     model.wall_assignment_regions = snapshot.wall_assignment_regions;
@@ -851,8 +849,8 @@ fn restore_secondary(model: &mut Model, snapshot: SecondarySnapshot) {
 }
 
 fn remove_secondary(model: &mut Model, id: SecondaryMemberId) -> bool {
-    if let Some(pos) = model.unassigned_joists.iter().position(|sm| sm.id == id) {
-        model.unassigned_joists.remove(pos);
+    if let Some(pos) = model.unassigned_beams.iter().position(|sm| sm.id == id) {
+        model.unassigned_beams.remove(pos);
         return true;
     }
     if let Some(pos) = model.unassigned_posts.iter().position(|sm| sm.id == id) {
@@ -860,8 +858,8 @@ fn remove_secondary(model: &mut Model, id: SecondaryMemberId) -> bool {
         return true;
     }
     for region in &mut model.floor_regions {
-        if let Some(pos) = region.secondary_joists.iter().position(|sm| sm.id == id) {
-            region.secondary_joists.remove(pos);
+        if let Some(pos) = region.secondary_beams.iter().position(|sm| sm.id == id) {
+            region.secondary_beams.remove(pos);
             return true;
         }
     }
@@ -900,7 +898,7 @@ fn apply_secondary_action(model: &mut Model, action: &SecondaryAction) -> bool {
                     let idx = region.index();
                     match model.floor_regions.get_mut(idx) {
                         Some(r) if r.id == *region => {
-                            r.secondary_joists.push(member);
+                            r.secondary_beams.push(member);
                             true
                         }
                         _ => false,
@@ -917,8 +915,8 @@ fn apply_secondary_action(model: &mut Model, action: &SecondaryAction) -> bool {
                     }
                 }
                 SecondaryParent::Unassigned => {
-                    if member.kind == SecondaryMemberKind::Joist {
-                        model.unassigned_joists.push(member);
+                    if member.kind == SecondaryMemberKind::Beam {
+                        model.unassigned_beams.push(member);
                     } else {
                         model.unassigned_posts.push(member);
                     }
@@ -1068,12 +1066,12 @@ mod tests {
         model
     }
 
-    fn place_joist(model: &mut Model, undo: &mut crate::UndoStack) -> bool {
+    fn place_beam(model: &mut Model, undo: &mut crate::UndoStack) -> bool {
         undo.run(
             model,
             Box::new(PlaceSecondaryMember {
                 parent: SecondaryParent::Floor(FloorRegionId(0)),
-                kind: SecondaryMemberKind::Joist,
+                kind: SecondaryMemberKind::Beam,
                 ends: SecondaryMemberEnds::Supported([anchor(0, 0.5), anchor(2, 0.5)]),
                 section: None,
                 name: "J0".into(),
@@ -1087,9 +1085,9 @@ mod tests {
         let mut undo = crate::UndoStack::new();
         assert_eq!(model.floor_assignment_regions.regions.len(), 1);
 
-        assert!(place_joist(&mut model, &mut undo));
-        assert_eq!(model.joists().count(), 1);
-        assert_eq!(model.joists().next().unwrap().id, SecondaryMemberId(0));
+        assert!(place_beam(&mut model, &mut undo));
+        assert_eq!(model.beams().count(), 1);
+        assert_eq!(model.beams().next().unwrap().id, SecondaryMemberId(0));
         assert_eq!(
             model.floor_assignment_regions.regions.len(),
             2,
@@ -1103,14 +1101,14 @@ mod tests {
         assert!(model.validate().is_ok(), "{:?}", model.validate());
 
         undo.undo(&mut model);
-        assert_eq!(model.joists().count(), 0);
+        assert_eq!(model.beams().count(), 0);
         assert_eq!(model.floor_assignment_regions.regions.len(), 1);
         assert!(model.validate().is_ok());
 
         undo.redo(&mut model);
-        assert_eq!(model.joists().count(), 1);
+        assert_eq!(model.beams().count(), 1);
         assert_eq!(
-            model.joists().next().unwrap().id,
+            model.beams().next().unwrap().id,
             SecondaryMemberId(0),
             "redo でも同じ安定 ID"
         );
@@ -1125,14 +1123,14 @@ mod tests {
             &mut model,
             Box::new(PlaceSecondaryMember {
                 parent: SecondaryParent::Floor(FloorRegionId(0)),
-                kind: SecondaryMemberKind::Joist,
+                kind: SecondaryMemberKind::Beam,
                 ends: SecondaryMemberEnds::Detached([[0.0, 0.0, 0.0], [4000.0, 4000.0, 0.0]]),
                 section: None,
                 name: String::new(),
             }),
         );
         assert!(!applied, "Detached への読み替えはしない");
-        assert_eq!(model.joists().count(), 0);
+        assert_eq!(model.beams().count(), 0);
     }
 
     #[test]
@@ -1143,14 +1141,14 @@ mod tests {
             &mut model,
             Box::new(PlaceSecondaryMember {
                 parent: SecondaryParent::Floor(FloorRegionId(0)),
-                kind: SecondaryMemberKind::Joist,
+                kind: SecondaryMemberKind::Beam,
                 ends: SecondaryMemberEnds::Supported([anchor(99, 0.5), anchor(2, 0.5)]),
                 section: None,
                 name: String::new(),
             }),
         );
         assert!(!applied);
-        assert_eq!(model.joists().count(), 0);
+        assert_eq!(model.beams().count(), 0);
     }
 
     #[test]
@@ -1165,7 +1163,7 @@ mod tests {
         assert_eq!(model.slabs.len(), 1);
 
         let mut undo = crate::UndoStack::new();
-        assert!(place_joist(&mut model, &mut undo));
+        assert!(place_beam(&mut model, &mut undo));
         assert_eq!(model.slabs.len(), 0, "参照先を失った囲まれた床板は取り除く");
         assert!(model
             .floor_assignment_regions
@@ -1178,7 +1176,7 @@ mod tests {
         undo.undo(&mut model);
         assert_eq!(model.slabs.len(), 1, "undo で版が戻る");
         assert!(model.slab_assignment_region(slab).is_some());
-        assert!(model.joists().count() == 0);
+        assert!(model.beams().count() == 0);
         assert!(model.validate().is_ok());
     }
 
@@ -1186,11 +1184,11 @@ mod tests {
     fn 二次部材の削除で領域が統合される() {
         let mut model = square_model();
         let mut undo = crate::UndoStack::new();
-        assert!(place_joist(&mut model, &mut undo));
-        let id = model.joists().next().unwrap().id;
+        assert!(place_beam(&mut model, &mut undo));
+        let id = model.beams().next().unwrap().id;
 
         assert!(undo.run(&mut model, Box::new(DeleteSecondaryMember { member: id })));
-        assert_eq!(model.joists().count(), 0);
+        assert_eq!(model.beams().count(), 0);
         assert_eq!(model.floor_assignment_regions.regions.len(), 1);
         assert!(model.validate().is_ok(), "{:?}", model.validate());
     }
@@ -1199,15 +1197,15 @@ mod tests {
     fn 二次部材の端部を移動すると割当領域が再構築される() {
         let mut model = square_model();
         let mut undo = crate::UndoStack::new();
-        assert!(place_joist(&mut model, &mut undo));
-        let id = model.joists().next().unwrap().id;
+        assert!(place_beam(&mut model, &mut undo));
+        let id = model.beams().next().unwrap().id;
 
         let ends = SecondaryMemberEnds::Supported([anchor(0, 0.25), anchor(2, 0.5)]);
         assert!(undo.run(
             &mut model,
             Box::new(SetSecondaryMemberEnds { member: id, ends })
         ));
-        assert_eq!(model.joists().next().unwrap().ends, ends);
+        assert_eq!(model.beams().next().unwrap().ends, ends);
         assert_eq!(model.floor_assignment_regions.regions.len(), 2);
         assert!(model.validate().is_ok(), "{:?}", model.validate());
     }
@@ -1229,28 +1227,28 @@ mod tests {
             &mut model,
             Box::new(PlaceSecondaryMember {
                 parent: SecondaryParent::Floor(FloorRegionId(0)),
-                kind: SecondaryMemberKind::Joist,
+                kind: SecondaryMemberKind::Beam,
                 ends: SecondaryMemberEnds::Supported([anchor(4, 0.5), anchor(0, 0.5)]),
                 section: None,
                 name: "J-out".into(),
             }),
         );
         assert!(!applied, "支持端が親領域の外にある配置は拒否する");
-        assert_eq!(model.joists().count(), 0);
+        assert_eq!(model.beams().count(), 0);
     }
 
     #[test]
     fn 親領域内の支持部材へアンカーした配置は成功する() {
         let mut model = square_model();
         let mut undo = crate::UndoStack::new();
-        assert!(place_joist(&mut model, &mut undo));
-        let j0 = model.joists().next().unwrap().id;
+        assert!(place_beam(&mut model, &mut undo));
+        let j0 = model.beams().next().unwrap().id;
 
         let applied = undo.run(
             &mut model,
             Box::new(PlaceSecondaryMember {
                 parent: SecondaryParent::Floor(FloorRegionId(0)),
-                kind: SecondaryMemberKind::Joist,
+                kind: SecondaryMemberKind::Beam,
                 ends: SecondaryMemberEnds::Supported([
                     SecondaryMemberAnchor {
                         support: SupportMemberId::Secondary(j0),
@@ -1263,7 +1261,7 @@ mod tests {
             }),
         );
         assert!(applied, "支持端が親領域の内側にある配置は成功する");
-        assert_eq!(model.joists().count(), 2);
+        assert_eq!(model.beams().count(), 2);
         assert!(model.validate().is_ok(), "{:?}", model.validate());
     }
 
@@ -1271,9 +1269,9 @@ mod tests {
     fn 親領域外へ支持端を動かす端部移動は拒否する() {
         let mut model = square_model();
         let mut undo = crate::UndoStack::new();
-        assert!(place_joist(&mut model, &mut undo));
-        let id = model.joists().next().unwrap().id;
-        let before = model.joists().next().unwrap().ends;
+        assert!(place_beam(&mut model, &mut undo));
+        let id = model.beams().next().unwrap().id;
+        let before = model.beams().next().unwrap().ends;
 
         add_outside_floor_beam(&mut model);
         let moved = SecondaryMemberEnds::Supported([anchor(4, 0.5), anchor(2, 0.5)]);
@@ -1285,7 +1283,7 @@ mod tests {
             }),
         );
         assert!(!applied, "所属床領域の外へ支持端を動かす端部移動は拒否する");
-        assert_eq!(model.joists().next().unwrap().ends, before);
+        assert_eq!(model.beams().next().unwrap().ends, before);
         assert!(model.validate().is_ok(), "{:?}", model.validate());
     }
 

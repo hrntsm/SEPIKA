@@ -413,7 +413,7 @@ pub(super) fn draw_section_solids(
     }
 
     if show_secondary {
-        for sm in model.joists().chain(model.posts()) {
+        for sm in model.beams().chain(model.posts()) {
             let Some([n0, n1]) = super::secondary_end_node_indices(model, sm) else {
                 continue;
             };

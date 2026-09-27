@@ -10,7 +10,7 @@
 
 /// 小梁（単純梁・片持ち梁）の設計結果。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct JoistDesignResult {
+pub struct BeamDesignResult {
     /// スパン（支持間距離）[mm]。
     pub span: f64,
     /// 代表等分布荷重 w [N/mm]（合計荷重 / スパン。表示用であり検定には使わない）。
@@ -48,7 +48,7 @@ pub struct JoistDesignResult {
 /// `section_modulus`・`sigma_allow`・`defl_limit_denom` が 0 以下の場合は該当検定比を
 /// 0 とする（断面情報が不足する場合の安全なフォールバック）。
 #[allow(clippy::too_many_arguments)]
-pub fn design_joist_from_forces(
+pub fn design_beam_from_forces(
     span: f64,
     w: f64,
     m_max: f64,
@@ -57,8 +57,8 @@ pub fn design_joist_from_forces(
     section_modulus: f64,
     sigma_allow: f64,
     defl_limit_denom: f64,
-) -> JoistDesignResult {
-    judge_joist(
+) -> BeamDesignResult {
+    judge_beam(
         span,
         w,
         m_max.abs(),
@@ -72,7 +72,7 @@ pub fn design_joist_from_forces(
 
 /// 共通の検定判定（曲げ応力度・たわみ制限）。
 #[allow(clippy::too_many_arguments)]
-fn judge_joist(
+fn judge_beam(
     span: f64,
     w: f64,
     m_max: f64,
@@ -81,7 +81,7 @@ fn judge_joist(
     section_modulus: f64,
     sigma_allow: f64,
     defl_limit_denom: f64,
-) -> JoistDesignResult {
+) -> BeamDesignResult {
     let sigma = if section_modulus > 0.0 {
         m_max / section_modulus
     } else {
@@ -99,7 +99,7 @@ fn judge_joist(
         0.0
     };
     let ratio = bending_ratio.max(deflection_ratio);
-    JoistDesignResult {
+    BeamDesignResult {
         span,
         w,
         m_max,
@@ -117,8 +117,8 @@ fn judge_joist(
 }
 
 /// 分配結果が無く断面検定できない小梁の表行（判定は「未」。OK と誤認しない）。
-pub fn joist_unchecked(span: f64) -> JoistDesignResult {
-    JoistDesignResult {
+pub fn beam_unchecked(span: f64) -> BeamDesignResult {
+    BeamDesignResult {
         span,
         w: 0.0,
         m_max: 0.0,
@@ -210,7 +210,7 @@ pub const REBAR_FT_LONG_SD295: f64 = 195.0;
 /// - 材料なし: 既定鋼（`STEEL_YOUNG`・`STEEL_F_DEFAULT`）
 /// - 鋼材: 材料の `young` と `fy`（無ければ `STEEL_F_DEFAULT`）から `ft`
 /// - コンクリート・鉄筋: `None`（RC 小梁の許容曲げはこの略算では扱わない → 表は「未」）
-pub fn joist_steel_e_and_ft(mat: Option<&squid_n_core::model::Material>) -> Option<(f64, f64)> {
+pub fn beam_steel_e_and_ft(mat: Option<&squid_n_core::model::Material>) -> Option<(f64, f64)> {
     use squid_n_core::model::MaterialCategory;
     match mat {
         None => Some((STEEL_YOUNG, STEEL_F_DEFAULT / 1.5)),
@@ -228,10 +228,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_joist_bending_and_deflection_ratio() {
+    fn test_beam_bending_and_deflection_ratio() {
         // 等分布 w=10 N/mm・L=4000mm 相当の部材力（M=wL²/8、Q=wL/2、δ=5wL⁴/(384EI)）。
         let defl = 5.0 * 10.0 * 4000.0_f64.powi(4) / (384.0 * STEEL_YOUNG * 1.0e8);
-        let r = design_joist_from_forces(4000.0, 10.0, 2.0e7, 2.0e4, defl, 1.0e6, 156.0, 250.0);
+        let r = design_beam_from_forces(4000.0, 10.0, 2.0e7, 2.0e4, defl, 1.0e6, 156.0, 250.0);
         assert!((r.m_max - 2.0e7).abs() < 1.0, "M={}", r.m_max);
         assert!((r.q_max - 2.0e4).abs() < 1.0, "Q={}", r.q_max);
         // σ = M/Z = 2e7/1e6 = 20。
@@ -243,9 +243,9 @@ mod tests {
     }
 
     #[test]
-    fn test_joist_zero_section_is_safe() {
+    fn test_beam_zero_section_is_safe() {
         // 断面情報ゼロでもパニックせず、検定比 0。
-        let r = design_joist_from_forces(4000.0, 10.0, 2.0e7, 2.0e4, 10.0, 0.0, 0.0, 0.0);
+        let r = design_beam_from_forces(4000.0, 10.0, 2.0e7, 2.0e4, 10.0, 0.0, 0.0, 0.0);
         assert_eq!(r.bending_ratio, 0.0);
         assert_eq!(r.deflection_ratio, 0.0);
         assert!(r.ok);

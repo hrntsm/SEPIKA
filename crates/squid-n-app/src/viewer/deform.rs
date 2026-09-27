@@ -194,7 +194,7 @@ fn interpolate_unreferenced_disp(
     }
 
     let mut sec_adj: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for sm in model.joists().chain(model.posts()) {
+    for sm in model.beams().chain(model.posts()) {
         let Some([a, b]) = super::secondary_end_node_indices(model, sm) else {
             continue;
         };
@@ -577,7 +577,7 @@ mod tests {
         SecondaryMember {
             id: squid_n_core::ids::SecondaryMemberId(i),
             gravity_end_shares: None,
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: squid_n_core::model::SecondaryMemberEnds::Detached([
                 model.nodes[i as usize].coord,
                 model.nodes[j as usize].coord,
@@ -868,7 +868,7 @@ mod tests {
         model.nodes.push(test_node(5, [8000.0, 5000.0, 0.0])); // G2 端
         model.elements.push(test_beam(0, 0, 1)); // G1
         model.elements.push(test_beam(1, 4, 5)); // G2
-        model.unassigned_joists.push(test_secondary(&model, 2, 3)); // 二次部材 2-3
+        model.unassigned_beams.push(test_secondary(&model, 2, 3)); // 二次部材 2-3
 
         // G1 は大きく水平移動、G2 は変位ゼロ。
         let disp = vec![
@@ -900,8 +900,8 @@ mod tests {
         model.nodes.push(test_node(5, [8000.0, 5000.0, 0.0])); // G2 端
         model.elements.push(test_beam(0, 0, 1)); // G1
         model.elements.push(test_beam(1, 4, 5)); // G2（変位ゼロ）
-        model.unassigned_joists.push(test_secondary(&model, 1, 2));
-        model.unassigned_joists.push(test_secondary(&model, 2, 3));
+        model.unassigned_beams.push(test_secondary(&model, 1, 2));
+        model.unassigned_beams.push(test_secondary(&model, 2, 3));
 
         let disp = vec![
             [8.0, 0.0, 0.0, 0.0, 0.0, 0.0], // 0

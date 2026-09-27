@@ -107,7 +107,7 @@ fn test_query_model_sections_expose_frame_use() {
     let mut m = sample_model();
     let mut beam = m.sections[0].clone();
     beam.id = SectionId(1);
-    beam.frame_use = Some(FrameSectionUse::Beam);
+    beam.frame_use = Some(FrameSectionUse::Girder);
     let mut brace = beam.clone();
     brace.id = SectionId(2);
     brace.frame_use = Some(FrameSectionUse::Brace);
@@ -118,7 +118,7 @@ fn test_query_model_sections_expose_frame_use() {
 
     let sections = query_model(&m, "sections", None);
     assert_eq!(sections[0]["frame_use"], "Column");
-    assert_eq!(sections[1]["frame_use"], "Beam");
+    assert_eq!(sections[1]["frame_use"], "Girder");
     assert_eq!(sections[2]["frame_use"], "Brace");
     assert!(sections[3]["frame_use"].is_null());
 }
@@ -614,7 +614,7 @@ fn test_query_model_slabs_and_floor_regions() {
         id: FloorRegionId(0),
         name: "R1".into(),
         boundary: vec![NodeId(0), NodeId(1)],
-        secondary_joists: Vec::new(),
+        secondary_beams: Vec::new(),
         slab_ids: vec![SlabId(0)],
     });
     assert_eq!(query_model(&m, "slab", None).len(), 1);
@@ -846,7 +846,7 @@ fn test_apply_edit_set_floor_region_name() {
             id: FloorRegionId(0),
             name: "old".into(),
             boundary: vec![NodeId(0), NodeId(1)],
-            secondary_joists: Vec::new(),
+            secondary_beams: Vec::new(),
             slab_ids: vec![SlabId(0)],
         });
     let body = serde_json::json!({
@@ -867,30 +867,30 @@ fn expect_parse_err(value: serde_json::Value) -> String {
 }
 
 #[test]
-fn test_parse_rejects_obsolete_set_slab_secondary_joist_ids() {
+fn test_parse_rejects_obsolete_set_slab_secondary_beam_ids() {
     let err = expect_parse_err(serde_json::json!({
-        "command": "SetSlabSecondaryJoistIds",
+        "command": "SetSlabSecondaryBeamIds",
         "floor_region": 0,
-        "secondary_joist_ids": [1, 2]
+        "secondary_beam_ids": [1, 2]
     }));
     assert!(err.contains("廃止"), "{err}");
 }
 
 #[test]
-fn test_parse_requires_secondary_joists_array() {
+fn test_parse_requires_secondary_beams_array() {
     let err = expect_parse_err(serde_json::json!({
-        "command": "SetFloorRegionSecondaryJoists",
+        "command": "SetFloorRegionSecondaryBeams",
         "floor_region": 0
     }));
-    assert!(err.contains("secondary_joists"), "{err}");
+    assert!(err.contains("secondary_beams"), "{err}");
 }
 
 #[test]
-fn test_parse_rejects_legacy_secondary_joist_ids_key() {
+fn test_parse_rejects_legacy_secondary_beam_ids_key() {
     let err = expect_parse_err(serde_json::json!({
-        "command": "SetFloorRegionSecondaryJoists",
+        "command": "SetFloorRegionSecondaryBeams",
         "floor_region": 0,
-        "secondary_joist_ids": [1, 2]
+        "secondary_beam_ids": [1, 2]
     }));
     assert!(err.contains("廃止"), "{err}");
 }
@@ -926,21 +926,21 @@ fn test_parse_requires_end_support() {
 
 /// 廃止した手入力小梁ラインのコマンドは、黙って無視せず明示エラーにする（§3.4 F1）。
 #[test]
-fn test_parse_rejects_obsolete_set_floor_region_joists() {
+fn test_parse_rejects_obsolete_set_floor_region_beams() {
     let err = expect_parse_err(serde_json::json!({
-        "command": "SetFloorRegionJoists",
+        "command": "SetFloorRegionBeams",
         "id": 0,
-        "joists": []
+        "beams": []
     }));
     assert!(err.contains("廃止"), "{err}");
 }
 
 #[test]
-fn test_parse_requires_unassigned_joist_body() {
+fn test_parse_requires_unassigned_beam_body() {
     let err = expect_parse_err(serde_json::json!({
-        "command": "AddUnassignedJoist"
+        "command": "AddUnassignedBeam"
     }));
-    assert!(err.contains("joist"), "{err}");
+    assert!(err.contains("beam"), "{err}");
 }
 
 #[test]
@@ -949,7 +949,7 @@ fn test_parse_place_secondary_member() {
         "command": "PlaceSecondaryMember",
         "parent": "floor",
         "region": 0,
-        "kind": "Joist",
+        "kind": "Beam",
         "ends": {"Supported": [
             {"support": {"Primary": 0}, "position": 0.5},
             {"support": {"Primary": 2}, "position": 0.5}
@@ -964,7 +964,7 @@ fn test_parse_place_secondary_member() {
 fn test_parse_requires_place_secondary_member_parent() {
     let err = expect_parse_err(serde_json::json!({
         "command": "PlaceSecondaryMember",
-        "kind": "Joist",
+        "kind": "Beam",
         "ends": {"Detached": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]}
     }));
     assert!(err.contains("parent"), "{err}");
@@ -1033,7 +1033,7 @@ fn test_apply_edit_place_secondary_member() {
         id: FloorRegionId(0),
         name: String::new(),
         boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-        secondary_joists: Vec::new(),
+        secondary_beams: Vec::new(),
         slab_ids: Vec::new(),
     });
     model.rebuild_floor_assignment_regions();
@@ -1043,7 +1043,7 @@ fn test_apply_edit_place_secondary_member() {
         "command": "PlaceSecondaryMember",
         "parent": "floor",
         "region": 0,
-        "kind": "Joist",
+        "kind": "Beam",
         "ends": {"Supported": [
             {"support": {"Primary": 0}, "position": 0.5},
             {"support": {"Primary": 2}, "position": 0.5}
@@ -1052,7 +1052,7 @@ fn test_apply_edit_place_secondary_member() {
     });
     let result = apply_edit(&mut state, &body).expect("apply");
     assert!(result.applied);
-    assert_eq!(state.model.joists().count(), 1);
+    assert_eq!(state.model.beams().count(), 1);
     assert_eq!(state.model.floor_assignment_regions.regions.len(), 2);
     assert!(
         state.model.validate().is_ok(),

@@ -302,7 +302,7 @@ mod tests {
             mz: 1.0e8,
         };
         let ctx = DesignCtx {
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 4000.0,
             ..Default::default()
         };
@@ -341,7 +341,7 @@ mod tests {
             mz: 1.0e8,
         };
         let ctx_base = DesignCtx {
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 4000.0,
             ..Default::default()
         };
@@ -349,7 +349,7 @@ mod tests {
             .check(&forces, &sec, &m, &ctx_base)
             .unwrap_checked();
         let ctx_loss = DesignCtx {
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 4000.0,
             steel_attr: Some(SteelDesignAttr {
                 elem: ElemId(0),
@@ -392,7 +392,7 @@ mod tests {
             mz: 1.0e8,
         };
         let ctx_no_brace = DesignCtx {
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 12_000.0,
             ..Default::default()
         };
@@ -400,7 +400,7 @@ mod tests {
             .check(&forces, &sec, &m, &ctx_no_brace)
             .unwrap_checked();
         let ctx_braced = DesignCtx {
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 12_000.0,
             steel_attr: Some(SteelDesignAttr {
                 elem: ElemId(0),
@@ -448,7 +448,7 @@ mod tests {
         // 異符号の端部モーメント→自動算定なら C=2.3（上限）。
         let ctx_auto = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 6000.0,
             end_moments_z: Some((1.0, -1.0)),
             steel_fb_basis: SteelFbBasis::Standard1973,
@@ -460,7 +460,7 @@ mod tests {
 
         let ctx_direct = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 6000.0,
             end_moments_z: Some((1.0, -1.0)),
             steel_fb_basis: SteelFbBasis::Standard1973,
@@ -519,7 +519,7 @@ mod tests {
         // 横補剛 n=1 → lb=6000/2=3000 < length=6000（部分区間）。
         let ctx_no_direct = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 6000.0,
             steel_fb_basis: SteelFbBasis::Standard1973,
             steel_attr: Some(SteelDesignAttr {
@@ -550,7 +550,7 @@ mod tests {
 
         let ctx_direct = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 6000.0,
             steel_fb_basis: SteelFbBasis::Standard1973,
             steel_attr: Some(SteelDesignAttr {
@@ -596,7 +596,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 6000.0,
             steel_fb_basis: SteelFbBasis::Standard1973,
             steel_attr: Some(SteelDesignAttr {
@@ -644,7 +644,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 0.0,
             ..Default::default()
         };
@@ -691,7 +691,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 3000.0,
             ..Default::default()
         };
@@ -730,7 +730,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 0.0,
             ..Default::default()
         };
@@ -765,7 +765,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 0.0,
             ..Default::default()
         };
@@ -797,7 +797,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 4000.0,
             steel_fb_basis: SteelFbBasis::Standard1973,
             ..Default::default()
@@ -847,7 +847,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 4000.0,
             ..Default::default()
         };
@@ -901,7 +901,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 3000.0,
             ..Default::default()
         };
@@ -936,7 +936,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 0.0,
             ..Default::default()
         };
@@ -980,7 +980,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 0.0,
             ..Default::default()
         };
@@ -1021,7 +1021,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 0.0,
             ..Default::default()
         };
@@ -1060,7 +1060,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 6000.0,
             ..Default::default()
         };
@@ -1133,7 +1133,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 300.0, // 十分短い横座屈長さ→全塑性域
             steel_fb_basis: SteelFbBasis::Asd2019,
             ..Default::default()
@@ -1213,7 +1213,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 6000.0,
             end_moments_z: Some((100.0, -100.0)),
             steel_attr: Some(SteelDesignAttr {
@@ -1267,7 +1267,7 @@ mod tests {
         let g = mat_v.young / (2.0 * (1.0 + mat_v.poisson));
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 20_000.0, // 十分長い横座屈長さ→弾性域
             steel_fb_basis: SteelFbBasis::Asd2019,
             ..Default::default()
@@ -1397,7 +1397,7 @@ mod tests {
     #[test]
     fn test_required_lateral_bracing_count_hand_calc() {
         let sec = Section {
-            frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
             id: SectionId(0),
             name: "H-dummy".to_string(),
             area: 100.0,
@@ -1430,7 +1430,7 @@ mod tests {
     #[test]
     fn test_required_lateral_bracing_count_skipped_when_length_zero() {
         let sec = Section {
-            frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
             id: SectionId(0),
             name: "H-dummy".to_string(),
             area: 100.0,
@@ -1468,7 +1468,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 9000.0,
             ..Default::default()
         };
@@ -1495,7 +1495,7 @@ mod tests {
         let mc = w * l * l / 8.0;
 
         let sec = Section {
-            frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
             id: SectionId(0),
             name: "dummy".to_string(),
             area: 1.0,
@@ -1523,7 +1523,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: l,
             end_moments_z: Some((0.0, 0.0)),
             mid_moment_z: Some(mc),
@@ -1543,7 +1543,7 @@ mod tests {
     #[test]
     fn test_deflection_none_for_short_term() {
         let sec = Section {
-            frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
             id: SectionId(0),
             name: "dummy".to_string(),
             area: 1.0,
@@ -1566,7 +1566,7 @@ mod tests {
         let material = mat("SN400");
         let ctx = DesignCtx {
             term: LoadTerm::Short,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 6000.0,
             end_moments_z: Some((1e6, 1e6)),
             mid_moment_z: Some(2e6),
@@ -1591,7 +1591,7 @@ mod tests {
         };
         let ctx_long = DesignCtx {
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 6000.0,
             end_moments_z: Some((5e6, 5e6)),
             mid_moment_z: Some(1e7),
@@ -1608,7 +1608,7 @@ mod tests {
 
         let ctx_short = DesignCtx {
             term: LoadTerm::Short,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 6000.0,
             end_moments_z: Some((5e6, 5e6)),
             mid_moment_z: Some(1e7),

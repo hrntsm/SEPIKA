@@ -402,7 +402,7 @@ mod tests {
                 as_y: 83.33,
                 as_z: 83.33,
                 floor: None,
-                frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+                frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
                 panel_thickness: None,
                 thickness: None,
                 shape: None,

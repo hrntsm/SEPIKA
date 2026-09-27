@@ -90,7 +90,7 @@ enum PendingSecKind {
 
 /// 取り込み途中の部材の種別。
 enum PendingMemberKind {
-    Beam,
+    Girder,
     Brace { tension_only: bool },
 }
 

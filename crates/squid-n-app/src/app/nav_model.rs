@@ -137,7 +137,7 @@ impl App {
         let secondary: Vec<_> = self
             .core
             .model
-            .joists()
+            .beams()
             .chain(self.core.model.posts())
             .cloned()
             .collect();
@@ -282,7 +282,7 @@ mod tests {
         SecondaryMember {
             id: squid_n_core::ids::SecondaryMemberId(id),
             gravity_end_shares: None,
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: squid_n_core::model::SecondaryMemberEnds::Detached([
                 [0.0, 0.0, 0.0],
                 [1000.0, 0.0, 0.0],
@@ -391,7 +391,7 @@ mod tests {
         assert_eq!(groups[0].1, vec![SectionId(0)]);
     }
 
-    /// 二次部材（Joist/Post）・床板が参照する階なし断面は、参照元の種別によらず
+    /// 二次部材（Beam/Post）・床板が参照する階なし断面は、参照元の種別によらず
     /// 同一の「Secondary」グループへまとまる。
     #[test]
     fn secondary_referenced_sections_go_to_secondary_group() {

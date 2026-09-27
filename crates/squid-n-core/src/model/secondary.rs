@@ -6,7 +6,7 @@ use super::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SecondaryMemberKind {
     /// 小梁。
-    Joist,
+    Beam,
     /// 間柱。
     Post,
 }
@@ -25,9 +25,9 @@ pub enum EndSupport {
 
 /// 二次部材（小梁・間柱）。全体解析の対象外。
 ///
-/// 実体は床領域（[`super::FloorRegion::secondary_joists`]）または壁領域
+/// 実体は床領域（[`super::FloorRegion::secondary_beams`]）または壁領域
 /// （[`super::WallRegion::posts`]）が保持する。所属未割当の小梁・間柱だけ
-/// [`super::Model::unassigned_joists`] / [`super::Model::unassigned_posts`] に置く。
+/// [`super::Model::unassigned_beams`] / [`super::Model::unassigned_posts`] に置く。
 ///
 /// 両端は [`SecondaryMemberEnds`] の支持部材アンカーで表し、モデル節点を持たない。
 /// 既定の `ends` は生座標が原点の退化した [`SecondaryMemberEnds::Detached`]。
@@ -52,7 +52,7 @@ impl Default for SecondaryMember {
         Self {
             id: SecondaryMemberId(0),
             gravity_end_shares: None,
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Detached([[0.0; 3]; 2]),
             section: None,
             name: String::new(),
@@ -132,7 +132,7 @@ fn point_on_axis_interior(p: [f64; 3], a: [f64; 3], b: [f64; 3], tol: f64) -> Op
 
 /// 実部材化していない二次部材小梁の材軸。
 #[derive(Clone, Copy, Debug)]
-pub struct SecondaryJoistAxis {
+pub struct SecondaryBeamAxis {
     /// 対応する二次部材の安定 ID。
     pub member: SecondaryMemberId,
     /// 材軸始端の座標 [mm]。
@@ -183,10 +183,10 @@ impl Model {
 
     /// 実部材化していない二次部材小梁の材軸を集める（両端に実 `Beam` 要素がある小梁は
     /// 実部材として扱うため除く）。
-    pub fn secondary_joist_axes(&self) -> Vec<SecondaryJoistAxis> {
+    pub fn secondary_beam_axes(&self) -> Vec<SecondaryBeamAxis> {
         let mut out = Vec::new();
-        for sm in self.joists() {
-            if sm.kind != SecondaryMemberKind::Joist {
+        for sm in self.beams() {
+            if sm.kind != SecondaryMemberKind::Beam {
                 continue;
             }
             if self.secondary_member_materialized(sm) {
@@ -195,7 +195,7 @@ impl Model {
             let Some((a, b, len)) = self.secondary_member_axis(sm) else {
                 continue;
             };
-            out.push(SecondaryJoistAxis {
+            out.push(SecondaryBeamAxis {
                 member: sm.id,
                 a,
                 b,
@@ -241,7 +241,7 @@ impl Model {
         vector: [f64; 2],
     ) -> Option<[f64; 3]> {
         match kind {
-            SecondaryMemberKind::Joist => {
+            SecondaryMemberKind::Beam => {
                 Some([support[0] + vector[0], support[1] + vector[1], support[2]])
             }
             SecondaryMemberKind::Post => {
@@ -336,7 +336,7 @@ impl Model {
             return false;
         };
         let members: Vec<_> = self
-            .joists()
+            .beams()
             .chain(self.posts())
             .filter_map(|sm| {
                 let (a, b) = self.secondary_member_end_points(sm)?;
@@ -428,7 +428,7 @@ impl Model {
             return Some(anchor);
         }
         let mut secondary: Option<(f64, SecondaryMemberAnchor)> = None;
-        for sm in self.joists().chain(self.posts()) {
+        for sm in self.beams().chain(self.posts()) {
             if Some(sm.id) == exclude {
                 continue;
             }
@@ -501,7 +501,7 @@ impl Model {
     ) -> Option<[f64; 2]> {
         let ds = [free[0] - support[0], free[1] - support[1]];
         match kind {
-            SecondaryMemberKind::Joist => Some(ds),
+            SecondaryMemberKind::Beam => Some(ds),
             SecondaryMemberKind::Post => {
                 let horiz = (ds[0] * ds[0] + ds[1] * ds[1]).sqrt();
                 if horiz <= crate::geom::MEMBER_AXIS_TOL_MM {
@@ -523,7 +523,7 @@ impl Model {
     /// 避けつつ解析前チェックでエラーにする（片持ちへの読み替えはしない）。
     pub fn anchorize_secondary_members(&mut self) -> SecondaryAnchorizeReport {
         let members: Vec<(SecondaryMemberId, SecondaryMemberKind, [f64; 3], [f64; 3])> = self
-            .joists()
+            .beams()
             .chain(self.posts())
             .filter_map(|sm| {
                 let (a, b) = self.secondary_member_end_points(sm)?;
@@ -554,14 +554,14 @@ impl Model {
                 sm.ends = *ends;
             }
         };
-        for sm in &mut self.unassigned_joists {
+        for sm in &mut self.unassigned_beams {
             apply(sm);
         }
         for sm in &mut self.unassigned_posts {
             apply(sm);
         }
         for region in &mut self.floor_regions {
-            for sm in &mut region.secondary_joists {
+            for sm in &mut region.secondary_beams {
                 apply(sm);
             }
         }
@@ -773,7 +773,7 @@ mod tests {
         }
     }
 
-    fn beam(id: u32, a: u32, b: u32) -> ElementData {
+    fn element_beam(id: u32, a: u32, b: u32) -> ElementData {
         ElementData {
             id: ElemId(id),
             kind: ElementKind::Beam,
@@ -800,16 +800,16 @@ mod tests {
                 node(4, [2000.0, 0.0, 0.0]),
                 node(5, [2000.0, 4000.0, 0.0]),
             ],
-            elements: vec![beam(0, 0, 1), beam(1, 2, 3)],
+            elements: vec![element_beam(0, 0, 1), element_beam(1, 2, 3)],
             ..Default::default()
         }
     }
 
-    fn joist(id: u32, coords: [[f64; 3]; 2]) -> SecondaryMember {
+    fn secondary_beam(id: u32, coords: [[f64; 3]; 2]) -> SecondaryMember {
         SecondaryMember {
             gravity_end_shares: None,
             id: SecondaryMemberId(id),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Detached(coords),
             section: None,
             name: format!("J{id}"),
@@ -833,14 +833,15 @@ mod tests {
     #[test]
     fn 両端節点から両端アンカーを得る() {
         let mut model = two_girder_model();
-        model
-            .unassigned_joists
-            .push(joist(0, [[2000.0, 0.0, 0.0], [2000.0, 4000.0, 0.0]]));
+        model.unassigned_beams.push(secondary_beam(
+            0,
+            [[2000.0, 0.0, 0.0], [2000.0, 4000.0, 0.0]],
+        ));
 
         let report = model.anchorize_secondary_members();
         assert_eq!((report.resolved, report.unresolved.len()), (1, 0));
         assert_eq!(
-            model.unassigned_joists[0].ends,
+            model.unassigned_beams[0].ends,
             SecondaryMemberEnds::Supported([
                 SecondaryMemberAnchor {
                     support: SupportMemberId::Primary(ElemId(0)),
@@ -858,14 +859,15 @@ mod tests {
     #[test]
     fn 自由端は支持端基準のベクトルになる() {
         let mut model = two_girder_model();
-        model
-            .unassigned_joists
-            .push(joist(0, [[2000.0, 0.0, 0.0], [2000.0, 1000.0, 0.0]]));
+        model.unassigned_beams.push(secondary_beam(
+            0,
+            [[2000.0, 0.0, 0.0], [2000.0, 1000.0, 0.0]],
+        ));
 
         let report = model.anchorize_secondary_members();
         assert_eq!((report.resolved, report.unresolved.len()), (1, 0));
         assert_eq!(
-            model.unassigned_joists[0].ends,
+            model.unassigned_beams[0].ends,
             SecondaryMemberEnds::Cantilever {
                 support: SecondaryMemberAnchor {
                     support: SupportMemberId::Primary(ElemId(0)),

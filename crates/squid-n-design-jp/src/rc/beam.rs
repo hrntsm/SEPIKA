@@ -326,14 +326,14 @@ mod tests {
         };
         let ctx_plain = DesignCtx {
             term: LoadTerm::Short,
-            kind: crate::MemberKind::Beam,
+            kind: crate::MemberKind::Girder,
             length: 6000.0,
             ..Default::default()
         };
         let base = beam_check(&forces, &sec, &mat, &ctx_plain, &shape, 24.0);
         let ctx_qd = DesignCtx {
             term: LoadTerm::Short,
-            kind: crate::MemberKind::Beam,
+            kind: crate::MemberKind::Girder,
             length: 6000.0,
             seismic_qd: Some(SeismicQd {
                 long_at: vec![(0.0, [0.0, 20_000.0, 0.0, 0.0, 0.0, 0.0])],
@@ -412,14 +412,14 @@ mod tests {
         };
         let ctx_plain = DesignCtx {
             term: LoadTerm::Long,
-            kind: crate::MemberKind::Beam,
+            kind: crate::MemberKind::Girder,
             length: 6000.0,
             beam_has_slab: false,
             ..Default::default()
         };
         let ctx_slab = DesignCtx {
             term: LoadTerm::Long,
-            kind: crate::MemberKind::Beam,
+            kind: crate::MemberKind::Girder,
             length: 6000.0,
             beam_has_slab: true,
             ..Default::default()
@@ -593,14 +593,14 @@ mod tests {
         };
         let ctx_plain = DesignCtx {
             term: LoadTerm::Long,
-            kind: crate::MemberKind::Beam,
+            kind: crate::MemberKind::Girder,
             length: 6000.0,
             beam_has_slab: false,
             ..Default::default()
         };
         let ctx_slab = DesignCtx {
             term: LoadTerm::Long,
-            kind: crate::MemberKind::Beam,
+            kind: crate::MemberKind::Girder,
             length: 6000.0,
             beam_has_slab: true,
             ..Default::default()

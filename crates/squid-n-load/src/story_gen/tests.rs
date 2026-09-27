@@ -243,10 +243,10 @@ fn test_base_master_ignores_non_structural_slaves() {
         model.nodes[0].coord,
         model.nodes[free_id.index()].coord,
     ]);
-    model.unassigned_joists.push(SecondaryMember {
+    model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends,
         section: Some(SectionId(0)),
         name: "B1".into(),
@@ -1139,7 +1139,7 @@ fn test_both_mass_methods_equal_for_rc_beam_with_slab_deduction() {
 /// 両方式の総動的質量が一致する。
 #[test]
 fn test_both_mass_methods_equal_with_secondary_member_and_damper() {
-    assert_mass_methods_consistent(&secondary_joist_model());
+    assert_mass_methods_consistent(&secondary_beam_model());
 
     let damper = DamperSpec {
         elem: ElemId(0),
@@ -1639,7 +1639,7 @@ fn test_wall_mass_consistent_between_density_and_case_paths() {
 
 /// 二次部材（小梁）1 本のみを持つ 1 層モデル（主架構要素なし）。
 /// 二次部材の自重は解析の質量行列（部材密度質量）に算入されないことの確認用。
-fn secondary_joist_model() -> Model {
+fn secondary_beam_model() -> Model {
     let mut model = Model::default();
     model.nodes.push(Node {
         id: NodeId(0),
@@ -1703,10 +1703,10 @@ fn secondary_joist_model() -> Model {
         model.nodes[1].coord,
         model.nodes[2].coord,
     ]);
-    model.unassigned_joists.push(SecondaryMember {
+    model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(1),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends,
         section: Some(SectionId(0)),
         name: "G1".into(),
@@ -1722,7 +1722,7 @@ fn secondary_joist_model() -> Model {
 
 #[test]
 fn test_master_mass_corrected_lumped_does_not_deduct_secondary_member_self_weight() {
-    let model = secondary_joist_model();
+    let model = secondary_beam_model();
     let gen = generate_stories_with_opts(&model, &[], true, MassMethod::CorrectedLumped).unwrap();
     assert_eq!(gen.rep_nodes.len(), 2, "基部の床の分を含む");
 
@@ -1748,7 +1748,7 @@ fn test_master_mass_corrected_lumped_does_not_deduct_secondary_member_self_weigh
 ///
 /// 小梁の自重だけを見るため、支持柱は断面積 0（自重ゼロ）とする。
 #[test]
-fn test_secondary_joist_steel_weight_factor_applies_to_design_and_mass() {
+fn test_secondary_beam_steel_weight_factor_applies_to_design_and_mass() {
     let mut model = Model::default();
     for (i, c) in [[0.0, 0.0, 0.0], [0.0, 0.0, 3000.0], [2000.0, 0.0, 3000.0]]
         .iter()
@@ -1821,10 +1821,10 @@ fn test_secondary_joist_steel_weight_factor_applies_to_design_and_mass() {
             spring: None,
         });
     }
-    model.unassigned_joists.push(SecondaryMember {
+    model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(1),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Detached([
             model.nodes[1].coord,
             model.nodes[2].coord,
@@ -1838,9 +1838,9 @@ fn test_secondary_joist_steel_weight_factor_applies_to_design_and_mass() {
     });
 
     let (area, span, factor) = (5000.0, 2000.0, 1.3);
-    let sm = &model.unassigned_joists[0];
-    let design_udl = crate::floor::joist_self_weight_udl(&model, sm).expect("設計自重");
-    let mass_udl = crate::floor::joist_mass_equiv_udl(&model, sm).expect("物理質量相当");
+    let sm = &model.unassigned_beams[0];
+    let design_udl = crate::floor::beam_self_weight_udl(&model, sm).expect("設計自重");
+    let mass_udl = crate::floor::beam_mass_equiv_udl(&model, sm).expect("物理質量相当");
     assert!((design_udl - 78.5e-6 * area * factor).abs() < 1e-9 * design_udl);
     assert!((mass_udl - 7.85e-9 * area * GRAVITY_MM_S2 * factor).abs() < 1e-9 * mass_udl);
 
@@ -1862,7 +1862,7 @@ fn test_secondary_joist_steel_weight_factor_applies_to_design_and_mass() {
 
 /// 2 本の並行大梁（いずれも材軸中間に節点を持たない 1 部材）を持ち、
 /// その材軸位置 0.5 に小梁がアンカーするモデル。小梁の両端に一致する節点は無い。
-fn secondary_joist_on_girder_midspan_model(with_joist: bool) -> Model {
+fn secondary_beam_on_girder_midspan_model(with_beam: bool) -> Model {
     let mut model = Model::default();
     for (i, (x, y, z)) in [
         (0.0, 0.0, 0.0),
@@ -1963,11 +1963,11 @@ fn secondary_joist_on_girder_midspan_model(with_joist: bool) -> Model {
             spring: None,
         });
     }
-    if with_joist {
-        model.unassigned_joists.push(SecondaryMember {
+    if with_beam {
+        model.unassigned_beams.push(SecondaryMember {
             gravity_end_shares: None,
             id: squid_n_core::ids::SecondaryMemberId(0),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: squid_n_core::model::SecondaryMemberEnds::Supported([
                 squid_n_core::model::SecondaryMemberAnchor {
                     support: squid_n_core::model::SupportMemberId::Primary(ElemId(0)),
@@ -1989,8 +1989,8 @@ fn secondary_joist_on_girder_midspan_model(with_joist: bool) -> Model {
 /// 無く密度から直接算入する経路でも階の地震用重量へ含まれること（欠落させない）。
 #[test]
 fn test_secondary_member_on_midspan_is_seismic_weight_in_density_path() {
-    let with = secondary_joist_on_girder_midspan_model(true);
-    let without = secondary_joist_on_girder_midspan_model(false);
+    let with = secondary_beam_on_girder_midspan_model(true);
+    let without = secondary_beam_on_girder_midspan_model(false);
 
     let sw = 78.5e-6 * 5000.0 * 4000.0;
     let gen_with = generate_stories_with_opts(&with, &[], true, MassMethod::default()).unwrap();
@@ -4458,7 +4458,7 @@ fn test_regeneration_keeps_user_defined_story_fields() {
     model.stories[0].standard_floor_load = Some(StandardFloorLoad {
         dead: 0.001,
         floor: 0.002,
-        joist: 0.003,
+        beam: 0.003,
         frame: 0.004,
         seismic: 0.005,
     });

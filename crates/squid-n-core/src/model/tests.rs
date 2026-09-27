@@ -87,7 +87,7 @@ fn test_validate_dangling_slab_boundary() {
             name: String::new(),
             // 存在しない節点 5 を境界に含む（陳腐化した参照）。
             boundary: vec![NodeId(0), NodeId(5)],
-            secondary_joists: vec![],
+            secondary_beams: vec![],
             slab_ids: vec![],
         }],
         ..Default::default()
@@ -99,13 +99,13 @@ fn test_validate_dangling_slab_boundary() {
 }
 
 #[test]
-fn test_validate_rejects_post_in_floor_region_secondary_joists() {
+fn test_validate_rejects_post_in_floor_region_secondary_beams() {
     let model = Model {
         floor_regions: vec![FloorRegion {
             id: FloorRegionId(0),
             name: String::new(),
             boundary: vec![],
-            secondary_joists: vec![test_secondary(SecondaryMemberKind::Post, 0, "P0")],
+            secondary_beams: vec![test_secondary(SecondaryMemberKind::Post, 0, "P0")],
             slab_ids: vec![],
         }],
         nodes: vec![
@@ -132,22 +132,22 @@ fn test_validate_rejects_post_in_floor_region_secondary_joists() {
 }
 
 #[test]
-fn test_validate_rejects_duplicate_joist_endpoints() {
-    let sm = test_secondary(SecondaryMemberKind::Joist, 0, "J");
+fn test_validate_rejects_duplicate_beam_endpoints() {
+    let sm = test_secondary(SecondaryMemberKind::Beam, 0, "J");
     let model = Model {
         floor_regions: vec![
             FloorRegion {
                 id: FloorRegionId(0),
                 name: String::new(),
                 boundary: vec![],
-                secondary_joists: vec![sm.clone()],
+                secondary_beams: vec![sm.clone()],
                 slab_ids: vec![],
             },
             FloorRegion {
                 id: FloorRegionId(1),
                 name: String::new(),
                 boundary: vec![],
-                secondary_joists: vec![sm],
+                secondary_beams: vec![sm],
                 slab_ids: vec![],
             },
         ],
@@ -175,14 +175,14 @@ fn test_validate_rejects_duplicate_joist_endpoints() {
 }
 
 #[test]
-fn test_validate_rejects_joist_in_wall_region_posts() {
+fn test_validate_rejects_beam_in_wall_region_posts() {
     let model = Model {
         wall_regions: vec![crate::model::WallRegion {
             id: WallRegionId(0),
             name: String::new(),
             boundary: vec![],
             wall_plate_ids: vec![],
-            posts: vec![test_secondary(SecondaryMemberKind::Joist, 0, "J0")],
+            posts: vec![test_secondary(SecondaryMemberKind::Beam, 0, "J0")],
         }],
         nodes: vec![
             Node {
@@ -205,6 +205,37 @@ fn test_validate_rejects_joist_in_wall_region_posts() {
         ..Default::default()
     };
     assert!(model.validate().is_err());
+}
+
+#[test]
+fn test_validate_allows_secondary_sections_with_any_frame_use() {
+    let frame_uses = [
+        None,
+        Some(FrameSectionUse::Girder),
+        Some(FrameSectionUse::Column),
+        Some(FrameSectionUse::Brace),
+    ];
+    let mut model = Model::default();
+    for (index, frame_use) in frame_uses.into_iter().enumerate() {
+        let section_id = SectionId(index as u32);
+        let mut section = Section::zero(section_id, format!("S{index}"));
+        section.frame_use = frame_use;
+        model.sections.push(section);
+
+        let mut beam = test_secondary(SecondaryMemberKind::Beam, index as u32, "B");
+        beam.section = Some(section_id);
+        model.unassigned_beams.push(beam);
+
+        let post_id = (index + frame_uses.len()) as u32;
+        let mut post = test_secondary(SecondaryMemberKind::Post, post_id, "P");
+        post.section = Some(section_id);
+        model.unassigned_posts.push(post);
+    }
+
+    assert!(
+        model.validate().is_ok(),
+        "二次部材の断面用途だけでは拒否しない"
+    );
 }
 
 #[test]
@@ -1586,7 +1617,7 @@ fn test_validate_wall_plate_shared_by_two_wall_regions() {
 
 /// 取り込み用の二次部材の自由端推定: 大梁に載る片持ち小梁の自由端だけが Free になる。
 #[test]
-fn infer_free_end_for_cantilever_joist() {
+fn infer_free_end_for_cantilever_beam() {
     let mut model = Model::default();
     for (i, c) in [
         [0.0, 0.0, 0.0],
@@ -1620,10 +1651,10 @@ fn infer_free_end_for_cantilever_joist() {
         plastic_zone: None,
         spring: None,
     });
-    model.unassigned_joists.push(SecondaryMember {
+    model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: SecondaryMemberEnds::Detached([[3000.0, 0.0, 0.0], [3000.0, 3000.0, 0.0]]),
         section: None,
         name: "CA".into(),
@@ -1631,7 +1662,7 @@ fn infer_free_end_for_cantilever_joist() {
 
     let report = model.anchorize_secondary_members();
     assert_eq!(report.inferred_free_ends.len(), 1);
-    assert!(model.unassigned_joists[0].is_cantilever());
+    assert!(model.unassigned_beams[0].is_cantilever());
 }
 
 /// 先端リブは片持ち小梁の自由端に載る。リブの端は Supported のまま、
@@ -1674,13 +1705,13 @@ fn infer_free_end_for_tip_rib_on_cantilevers() {
         spring: None,
     });
     for (nodes, name) in [([2u32, 3u32], "CA"), ([4, 5], "CB"), ([3, 5], "RIB")] {
-        push_joist(&mut model, nodes, name);
+        push_secondary_beam(&mut model, nodes, name);
     }
 
     let report = model.anchorize_secondary_members();
     let by_name = |name: &str| {
         model
-            .unassigned_joists
+            .unassigned_beams
             .iter()
             .find(|sm| sm.name == name)
             .expect("小梁")
@@ -1710,7 +1741,7 @@ fn two_node_model(coords: &[[f64; 3]]) -> Model {
     model
 }
 
-fn push_beam(model: &mut Model, id: u32, i: u32, j: u32) {
+fn push_element_beam(model: &mut Model, id: u32, i: u32, j: u32) {
     model.elements.push(ElementData {
         id: ElemId(id),
         kind: ElementKind::Beam,
@@ -1727,14 +1758,14 @@ fn push_beam(model: &mut Model, id: u32, i: u32, j: u32) {
     });
 }
 
-fn push_joist(model: &mut Model, nodes: [u32; 2], name: &str) {
+fn push_secondary_beam(model: &mut Model, nodes: [u32; 2], name: &str) {
     let coord = |i: u32| model.node(NodeId(i)).map(|n| n.coord).unwrap_or([0.0; 3]);
     let (a, b) = (coord(nodes[0]), coord(nodes[1]));
     let id = model.alloc_secondary_member_id();
-    model.unassigned_joists.push(SecondaryMember {
+    model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id,
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: SecondaryMemberEnds::Detached([a, b]),
         section: None,
         name: name.into(),
@@ -1743,7 +1774,7 @@ fn push_joist(model: &mut Model, nodes: [u32; 2], name: &str) {
 
 /// 材軸が連続する小梁（分割された小梁）の継ぎ目は自由端にしない。
 #[test]
-fn infer_does_not_free_collinear_spliced_joists() {
+fn infer_does_not_free_collinear_spliced_beams() {
     // 継ぎ目はどの大梁の材軸上にもない（幾何支持なし）。両端の大梁だけで支持される。
     let mut model = two_node_model(&[
         [-1000.0, 0.0, 0.0],
@@ -1752,10 +1783,10 @@ fn infer_does_not_free_collinear_spliced_joists() {
         [7000.0, 0.0, 0.0],
         [3000.0, 0.0, 0.0],
     ]);
-    push_beam(&mut model, 0, 0, 1);
-    push_beam(&mut model, 1, 2, 3);
-    push_joist(&mut model, [1, 4], "A");
-    push_joist(&mut model, [4, 2], "B");
+    push_element_beam(&mut model, 0, 0, 1);
+    push_element_beam(&mut model, 1, 2, 3);
+    push_secondary_beam(&mut model, [1, 4], "A");
+    push_secondary_beam(&mut model, [4, 2], "B");
 
     let report = model.anchorize_secondary_members();
     assert!(
@@ -1763,7 +1794,7 @@ fn infer_does_not_free_collinear_spliced_joists() {
         "継ぎ目は自由端にしない: {:?}",
         report.inferred_free_ends
     );
-    for sm in &model.unassigned_joists {
+    for sm in &model.unassigned_beams {
         assert!(sm.is_detached(), "継ぎ目側はアンカーへ解決できない");
     }
 }
@@ -1778,10 +1809,10 @@ fn infer_treats_small_offset_splice_as_continuous() {
         [7000.0, 3.0, 0.0],
         [3000.0, 0.0, 0.0],
     ]);
-    push_beam(&mut model, 0, 0, 1);
-    push_beam(&mut model, 1, 2, 3);
-    push_joist(&mut model, [1, 4], "A");
-    push_joist(&mut model, [4, 2], "B");
+    push_element_beam(&mut model, 0, 0, 1);
+    push_element_beam(&mut model, 1, 2, 3);
+    push_secondary_beam(&mut model, [1, 4], "A");
+    push_secondary_beam(&mut model, [4, 2], "B");
 
     let report = model.anchorize_secondary_members();
     assert!(
@@ -1801,14 +1832,14 @@ fn infer_frees_cantilever_tip_with_oblique_rib() {
         [3000.0, 3000.0, 0.0],
         [3776.5, 5897.8, 0.0],
     ]);
-    push_beam(&mut model, 0, 0, 1);
-    push_joist(&mut model, [2, 3], "CA");
-    push_joist(&mut model, [3, 4], "RIB");
+    push_element_beam(&mut model, 0, 0, 1);
+    push_secondary_beam(&mut model, [2, 3], "CA");
+    push_secondary_beam(&mut model, [3, 4], "RIB");
 
     let report = model.anchorize_secondary_members();
     let by_name = |name: &str| {
         model
-            .unassigned_joists
+            .unassigned_beams
             .iter()
             .find(|sm| sm.name == name)
             .expect("小梁")
@@ -1825,9 +1856,9 @@ fn infer_frees_cantilever_tip_with_oblique_rib() {
 
 /// どの部材にも載らない小梁（浮き）は自由端にしない（両端自由を作らない）。
 #[test]
-fn infer_does_not_free_floating_joist() {
+fn infer_does_not_free_floating_beam() {
     let mut model = two_node_model(&[[0.0, 0.0, 0.0], [3000.0, 0.0, 0.0]]);
-    push_joist(&mut model, [0, 1], "FL");
+    push_secondary_beam(&mut model, [0, 1], "FL");
 
     let report = model.anchorize_secondary_members();
     assert!(
@@ -1835,14 +1866,14 @@ fn infer_does_not_free_floating_joist() {
         "{:?}",
         report.inferred_free_ends
     );
-    assert!(model.unassigned_joists[0].is_detached());
+    assert!(model.unassigned_beams[0].is_detached());
 }
 
 /// 片持ちの間柱（基端が大梁、上端が自由）も自由端として推定する。
 #[test]
 fn infer_free_end_for_cantilever_post() {
     let mut model = two_node_model(&[[0.0, 0.0, 0.0], [6000.0, 0.0, 0.0], [0.0, 0.0, 3000.0]]);
-    push_beam(&mut model, 0, 0, 1);
+    push_element_beam(&mut model, 0, 0, 1);
     model.unassigned_posts.push(SecondaryMember {
         gravity_end_shares: None,
         id: SecondaryMemberId(0),

@@ -28,10 +28,10 @@ use crate::{
 
 /// 一本部材グループ合成値（断面検定の採用応力上書き用）。
 ///
-/// `Model.beam_groups` から合成した部材長・端部/中央モーメント等を、
-/// 所属する分割梁要素の検定文脈へ上書きする。合成ロジックは [`crate::beam_group::beam_group_overrides`]。
+/// `Model.girder_groups` から合成した部材長・端部/中央モーメント等を、
+/// 所属する分割梁要素の検定文脈へ上書きする。合成ロジックは [`crate::girder_group::girder_group_overrides`]。
 #[derive(Clone, Debug, PartialEq)]
-pub struct BeamGroupContextOverride {
+pub struct GirderGroupContextOverride {
     /// 一本部材の全長 L [mm]（分割部材長の総和）。
     pub length: f64,
     /// 一本部材両端の強軸曲げ `(M_i端, M_j端)` [N·mm]。
@@ -60,7 +60,7 @@ pub struct MemberDesignCheckOptions<'a> {
     /// 梁 QD1 用の単純梁せん断 Q0 [N]（部材 ID → 絶対値）。None なら QL で代替。
     pub q_simple_by_elem: Option<&'a HashMap<ElemId, f64>>,
     /// 一本部材グループの検定文脈上書き（梁のみ適用）。None なら部材単体の値を用いる。
-    pub beam_group_overrides: Option<&'a HashMap<ElemId, BeamGroupContextOverride>>,
+    pub girder_group_overrides: Option<&'a HashMap<ElemId, GirderGroupContextOverride>>,
     /// 鋼材の許容曲げ応力度 fb の算定基準（既定は Asd2019）。
     pub steel_fb_basis: SteelFbBasis,
 }
@@ -173,8 +173,8 @@ pub fn run_member_design_checks(
             .and_then(|a| a.lk_z_direct)
             .or(lk_z_auto);
 
-        let group = if kind == MemberKind::Beam {
-            options.beam_group_overrides.and_then(|m| m.get(elem_id))
+        let group = if kind == MemberKind::Girder {
+            options.girder_group_overrides.and_then(|m| m.get(elem_id))
         } else {
             None
         };
@@ -252,7 +252,7 @@ pub fn run_member_design_checks(
             mid_moment_z,
             seismic_qd,
             column_sum_my,
-            beam_has_slab: kind == MemberKind::Beam && beam_has_attached_slab(model, elem),
+            beam_has_slab: kind == MemberKind::Girder && beam_has_attached_slab(model, elem),
             steel_attr,
             steel_fb_basis: options.steel_fb_basis,
         };

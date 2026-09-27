@@ -191,17 +191,17 @@ pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickC
                 app.ui.scoped.region_assign_dialog =
                     Some(crate::app::RegionAssignTarget::Floor(id));
             }
-        } else if app.ui.scoped.joist_place_mode || app.ui.scoped.post_place_mode {
+        } else if app.ui.scoped.beam_place_mode || app.ui.scoped.post_place_mode {
             use crate::app::WorkScope;
             use squid_n_core::model::{SecondaryMemberEnds, SecondaryMemberKind};
             use squid_n_edit::{PlaceSecondaryMember, SecondaryParent};
-            let kind = if app.ui.scoped.joist_place_mode {
-                SecondaryMemberKind::Joist
+            let kind = if app.ui.scoped.beam_place_mode {
+                SecondaryMemberKind::Beam
             } else {
                 SecondaryMemberKind::Post
             };
             if app.ui.scoped.work_scope.is_none() {
-                let include_floor = kind == SecondaryMemberKind::Joist;
+                let include_floor = kind == SecondaryMemberKind::Beam;
                 let include_wall = kind == SecondaryMemberKind::Post;
                 if let Some(pick) = pick_parent_region(
                     &app.core.model,

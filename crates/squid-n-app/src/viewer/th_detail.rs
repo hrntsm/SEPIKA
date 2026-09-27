@@ -785,7 +785,7 @@ fn draw_peak_check(
         rebar_material: app.core.model.element_rebar_material(elem).cloned(),
         shear_rebar_material: app.core.model.element_shear_rebar_material(elem).cloned(),
         steel_material: app.core.model.element_steel_material(elem).cloned(),
-        beam_has_slab: kind == MemberKind::Beam
+        beam_has_slab: kind == MemberKind::Girder
             && squid_n_design_jp::beam_has_attached_slab(&app.core.model, elem),
         seismic_qd,
         column_sum_my,

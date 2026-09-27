@@ -237,7 +237,7 @@ pub fn perimeter_slabs(model: &Model) -> Result<Vec<PerimeterSlab>, PerimeterSla
             .floor_regions
             .iter()
             .filter_map(|r| {
-                if r.slab_ids.is_empty() && r.secondary_joists.is_empty() {
+                if r.slab_ids.is_empty() && r.secondary_beams.is_empty() {
                     return None;
                 }
                 let pos = r
@@ -418,7 +418,7 @@ mod tests {
             standard_floor_load: Some(StandardFloorLoad {
                 dead: 0.005,
                 floor: 0.004,
-                joist: 0.003,
+                beam: 0.003,
                 frame: 0.006,
                 seismic: 0.002,
             }),
@@ -430,7 +430,7 @@ mod tests {
         let standard = model.stories[1].standard_floor_load.unwrap();
         assert_eq!(standard.intensity(None), 0.005);
         assert_eq!(standard.intensity(Some(LoadPurpose::Floor)), 0.004);
-        assert_eq!(standard.intensity(Some(LoadPurpose::Joist)), 0.003);
+        assert_eq!(standard.intensity(Some(LoadPurpose::Beam)), 0.003);
         assert_eq!(standard.intensity(Some(LoadPurpose::Frame)), 0.006);
         assert_eq!(standard.intensity(Some(LoadPurpose::Seismic)), 0.002);
         assert_eq!(

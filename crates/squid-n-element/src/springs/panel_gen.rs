@@ -271,7 +271,7 @@ mod tests {
     /// 主材料を指定して断面を作る。
     fn section_with_mat(id: u32, shape: SectionShape, depth: f64, mat: u32) -> Section {
         Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(id),
             material: Some(MaterialId(mat)),
             name: String::new(),
@@ -355,7 +355,7 @@ mod tests {
             sections: vec![
                 {
                     let mut section = section(0, beam_shape, beam_depth);
-                    section.frame_use = Some(FrameSectionUse::Beam);
+                    section.frame_use = Some(FrameSectionUse::Girder);
                     section
                 },
                 {
@@ -443,7 +443,7 @@ mod tests {
         let mut added = member(3, 1, 2, 0);
         added.id = ElemId(3);
         model.elements.push(added);
-        model.beam_groups = vec![vec![ElemId(3)]];
+        model.girder_groups = vec![vec![ElemId(3)]];
 
         apply_auto_panel_zones(&mut model);
         model.validate().expect("配列添字 == ElemId が保たれる");
@@ -454,7 +454,7 @@ mod tests {
             .position(|e| e.nodes.as_slice() == [NodeId(1), NodeId(2)])
             .expect("追加した部材");
         assert_eq!(model.elements[added_idx].id.index(), added_idx);
-        assert_eq!(model.beam_groups[0][0], model.elements[added_idx].id);
+        assert_eq!(model.girder_groups[0][0], model.elements[added_idx].id);
     }
 
     /// RC 矩形柱断面。

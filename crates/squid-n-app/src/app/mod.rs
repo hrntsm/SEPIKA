@@ -302,9 +302,9 @@ pub struct Selection {
 
 /// 小梁設計結果の対象（二次部材の安定 ID）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum JoistCheckTarget {
+pub enum BeamCheckTarget {
     /// 二次部材小梁。安定 ID で識別する（リビルドで走査順が変わっても安定）。
-    SecondaryJoist {
+    SecondaryBeam {
         member: squid_n_core::ids::SecondaryMemberId,
     },
     /// 二次部材間柱。現状は常に「未」（軸力・面外曲げの検定が未対応）。
@@ -317,10 +317,10 @@ pub enum JoistCheckTarget {
 /// 床の中での小梁設計結果1件（`(代表床板 id, 対象, 設計結果)`）。
 ///
 /// 所属領域も分配代表も無いときは `None`。
-pub type JoistCheck = (
+pub type BeamCheck = (
     Option<squid_n_core::ids::SlabId>,
-    JoistCheckTarget,
-    squid_n_design_jp::floor::JoistDesignResult,
+    BeamCheckTarget,
+    squid_n_design_jp::floor::BeamDesignResult,
 );
 /// スラブ（床板）設計結果1件（`(床板 id, 設計結果)`）。
 pub type SlabCheck = (
@@ -438,7 +438,7 @@ pub struct ResultsBundle {
     pub joint_checks: Vec<JointCheck>,
     /// 床の中での小梁設計（単純梁・片持ち梁）。実部材化された小梁は全体 FEM で検定する
     /// ためここには含めない。
-    pub joist_checks: Vec<JoistCheck>,
+    pub beam_checks: Vec<BeamCheck>,
     /// スラブ（床）の設計（一方向曲げ）。
     pub slab_checks: Vec<SlabCheck>,
     /// 表示中の増分解析結果（互換・既存参照の窓口）。
@@ -1101,7 +1101,7 @@ pub struct UiModelScoped {
     pub work_scope: Option<WorkScope>,
     /// ビューアの小梁配置モード（ON 中は床領域を選び、支持部材を 2 点クリック）
     #[cfg(feature = "gui")]
-    pub joist_place_mode: bool,
+    pub beam_place_mode: bool,
     /// ビューアの間柱配置モード（ON 中は壁領域を選び、支持部材を 2 点クリック）
     #[cfg(feature = "gui")]
     pub post_place_mode: bool,
@@ -1211,7 +1211,7 @@ impl Default for UiModelScoped {
             #[cfg(feature = "gui")]
             work_scope: None,
             #[cfg(feature = "gui")]
-            joist_place_mode: false,
+            beam_place_mode: false,
             #[cfg(feature = "gui")]
             post_place_mode: false,
             #[cfg(feature = "gui")]

@@ -35,7 +35,6 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         pending_secs,
         pending_members,
         pending_secondaries,
-        section_usages,
         steel_lib,
         raw_slabs,
         slab_secs,
@@ -77,8 +76,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
 
     let mut notes: Vec<String> = Vec::new();
 
-    reject_symbol_usage_conflicts(&pending_secs, &section_usages)?;
-    let section_uses = section_uses(&pending_members, &pending_secondaries, &section_usages)?;
+    let section_uses = section_uses(&pending_members)?;
     let section_index = build_sections(
         &mut model,
         pending_secs,
@@ -87,7 +85,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &mut warnings,
         &mut notes,
         &section_uses,
-    );
+    )?;
 
     let mut stats = LinkStats::default();
     build_members(
@@ -98,7 +96,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &material_index,
         &mut stats,
     );
-    let (n_joists, n_posts) = build_secondaries(
+    let (n_beams, n_posts) = build_secondaries(
         &mut model,
         pending_secondaries,
         &node_index,
@@ -137,10 +135,10 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
             rebuild.unassigned_slabs
         ));
     }
-    if rebuild.unassigned_joists != 0 {
+    if rebuild.unassigned_beams != 0 {
         warnings.push(format!(
             "床領域の作り直しで小梁 {} 本が領域に割り当てられなかった",
-            rebuild.unassigned_joists
+            rebuild.unassigned_beams
         ));
     }
     if rebuild.unmatched_old_regions != 0 {
@@ -232,7 +230,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
     push_import_notes(
         &mut notes,
         guessed_categories,
-        n_joists,
+        n_beams,
         n_posts,
         slab_section_count,
     );
@@ -570,7 +568,7 @@ fn build_members(
         }
         let id = ElemId(model.elements.len() as u32);
         let (kind, end_cond) = match m.kind {
-            PendingMemberKind::Beam => (ElementKind::Beam, m.end_cond),
+            PendingMemberKind::Girder => (ElementKind::Beam, m.end_cond),
             PendingMemberKind::Brace { tension_only } => (
                 ElementKind::Brace { tension_only },
                 [EndCondition::Pinned, EndCondition::Pinned],
@@ -605,7 +603,7 @@ fn build_secondaries(
     material_index: &HashMap<u32, u32>,
     stats: &mut LinkStats,
 ) -> (usize, usize) {
-    let mut n_joists = 0usize;
+    let mut n_beams = 0usize;
     let mut n_posts = 0usize;
     for s in pending_secondaries {
         let (Some(&ni), Some(&nj)) = (node_index.get(&s.n_i), node_index.get(&s.n_j)) else {
@@ -647,9 +645,9 @@ fn build_secondaries(
             name: s.name,
         };
         match s.kind {
-            squid_n_core::model::SecondaryMemberKind::Joist => {
-                n_joists += 1;
-                model.unassigned_joists.push(sm);
+            squid_n_core::model::SecondaryMemberKind::Beam => {
+                n_beams += 1;
+                model.unassigned_beams.push(sm);
             }
             squid_n_core::model::SecondaryMemberKind::Post => {
                 n_posts += 1;
@@ -657,7 +655,7 @@ fn build_secondaries(
             }
         }
     }
-    (n_joists, n_posts)
+    (n_beams, n_posts)
 }
 
 /// 割当領域へ結びつける前のスラブ（境界節点と版仕様）。
@@ -1288,7 +1286,7 @@ fn warn_unsupported(unsupported: &HashMap<String, u32>, warnings: &mut Vec<Strin
 fn push_import_notes(
     notes: &mut Vec<String>,
     mut guessed_categories: Vec<String>,
-    n_joists: usize,
+    n_beams: usize,
     n_posts: usize,
     slab_section_count: usize,
 ) {
@@ -1301,9 +1299,9 @@ fn push_import_notes(
             guessed_categories.join("・")
         ));
     }
-    if n_joists + n_posts > 0 {
+    if n_beams + n_posts > 0 {
         notes.push(format!(
-            "小梁 {n_joists} 本・間柱 {n_posts} 本を二次部材として取り込みました\
+            "小梁 {n_beams} 本・間柱 {n_posts} 本を二次部材として取り込みました\
             （全体解析の対象外。床荷重・自重は大梁への集中荷重（CMQ）として伝達します）"
         ));
     }
@@ -1429,11 +1427,7 @@ fn build_index(ids: impl Iterator<Item = u32>) -> HashMap<u32, u32> {
         .collect()
 }
 
-fn section_uses(
-    members: &[PendingMember],
-    secondaries: &[PendingSecondary],
-    definitions: &HashMap<u32, (FrameSectionUse, String)>,
-) -> Result<HashMap<u32, FrameSectionUse>, StbError> {
+fn section_uses(members: &[PendingMember]) -> Result<HashMap<u32, FrameSectionUse>, StbError> {
     let mut uses = HashMap::new();
     let mut add = |section: Option<u32>,
                    usage: FrameSectionUse,
@@ -1442,17 +1436,6 @@ fn section_uses(
         let Some(section) = section else {
             return Ok(());
         };
-        if let Some((defined, tag)) = definitions.get(&section) {
-            if *defined != usage {
-                return Err(StbError::Unmappable(format!(
-                    "断面 file ID {section} の用途不整合: 定義タグ {tag} は {defined:?}、{detail} は {usage:?}"
-                )));
-            }
-        } else {
-            return Err(StbError::Unmappable(format!(
-                "断面 file ID {section} の用途を確定できません: {detail} は {usage:?}"
-            )));
-        }
         match uses.get(&section).copied() {
             None => {
                 uses.insert(section, usage);
@@ -1473,51 +1456,7 @@ fn section_uses(
             format!("{} id={:?}", member.source_tag, member.source_id),
         )?;
     }
-    for member in secondaries {
-        add(
-            member.section,
-            match member.kind {
-                squid_n_core::model::SecondaryMemberKind::Joist => FrameSectionUse::Beam,
-                squid_n_core::model::SecondaryMemberKind::Post => FrameSectionUse::Column,
-            },
-            format!("二次部材 {:?}", member.kind),
-        )?;
-    }
-    for (section, (usage, _)) in definitions {
-        uses.entry(*section).or_insert(*usage);
-    }
     Ok(uses)
-}
-
-fn reject_symbol_usage_conflicts(
-    sections: &[PendingSec],
-    definitions: &HashMap<u32, (FrameSectionUse, String)>,
-) -> Result<(), StbError> {
-    let mut uses: HashMap<(&str, Option<&str>), (FrameSectionUse, u32, &str)> = HashMap::new();
-    for section in sections {
-        let Some((usage, tag)) = definitions.get(&section.file_id) else {
-            continue;
-        };
-        let key = (section.name.as_str(), section.floor.as_deref());
-        if let Some((previous, previous_id, previous_tag)) = uses.get(&key) {
-            if *previous != *usage {
-                return Err(StbError::Unmappable(format!(
-                    "断面符号 {} / 階 {:?} の用途が競合: file ID {} ({}) は {:?}、file ID {} ({}) は {:?}",
-                    section.name,
-                    section.floor,
-                    previous_id,
-                    previous_tag,
-                    previous,
-                    section.file_id,
-                    tag,
-                    usage,
-                )));
-            }
-        } else {
-            uses.insert(key, (*usage, section.file_id, tag.as_str()));
-        }
-    }
-    Ok(())
 }
 
 /// 保留していた断面を id 昇順に整列・連番へ再割当てし、形鋼名を解決して
@@ -1538,7 +1477,7 @@ fn build_sections(
     warnings: &mut Vec<String>,
     notes: &mut Vec<String>,
     section_uses: &HashMap<u32, FrameSectionUse>,
-) -> HashMap<u32, u32> {
+) -> Result<HashMap<u32, u32>, StbError> {
     pending.sort_by_key(|s| s.file_id);
 
     let mut index_map: HashMap<u32, u32> = HashMap::new();
@@ -1700,7 +1639,23 @@ fn build_sections(
             });
 
         let idx = match by_key.get(&(section.name.clone(), section.floor.clone())) {
+            Some(&existing)
+                if matches!(
+                    (model.sections[existing].frame_use, section.frame_use),
+                    (Some(previous), Some(current)) if previous != current
+                ) =>
+            {
+                return Err(StbError::Unmappable(format!(
+                    "符号＋階が同じ断面定義の用途が競合: {} ({:?} と {:?})",
+                    section.display_name(),
+                    model.sections[existing].frame_use,
+                    section.frame_use
+                )));
+            }
             Some(&existing) if model.sections[existing].properties_eq(&section) => {
+                if model.sections[existing].frame_use.is_none() {
+                    model.sections[existing].frame_use = section.frame_use;
+                }
                 merged += 1;
                 existing
             }
@@ -1742,7 +1697,7 @@ fn build_sections(
             renamed.len()
         ));
     }
-    index_map
+    Ok(index_map)
 }
 
 /// 断面を末尾へ追加し、`id`（＝配列添字）を確定して符号＋階の索引へ登録する。

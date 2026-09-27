@@ -13,7 +13,7 @@ pub struct ElemAttrs {
     pub wall: Option<WallAttr>,
     pub steel_design: Option<SteelDesignAttr>,
     pub brb: Option<BrbAttr>,
-    pub pca: Option<PcaBeamAttr>,
+    pub pca: Option<PcaGirderAttr>,
     pub isolator: Option<IsolatorAttr>,
     pub hysteresis: Option<MemberHysteresisAttr>,
     pub damper: Option<DamperAttr>,
@@ -76,7 +76,7 @@ pub struct Model {
     pub brb_attrs: Vec<BrbAttr>,
     /// PCa（プレキャスト）梁の水平接合面検定用属性（水平接合面のせん断摩擦検定）。
     #[serde(default)]
-    pub pca_attrs: Vec<PcaBeamAttr>,
+    pub pca_attrs: Vec<PcaGirderAttr>,
     /// 免震支承材の非線形特性（`ElementKind::Isolator` 要素、各免震部材指針）。
     #[serde(default)]
     pub isolator_attrs: Vec<IsolatorAttr>,
@@ -94,7 +94,7 @@ pub struct Model {
     pub member_detail_attrs: Vec<MemberDetailAttr>,
     /// 所属未割当の小梁（`rebuild_floor_regions` でどの床領域にも入らなかったもの）。
     #[serde(default)]
-    pub unassigned_joists: Vec<SecondaryMember>,
+    pub unassigned_beams: Vec<SecondaryMember>,
     /// 所属未割当の間柱（`rebuild_wall_regions` でどの壁領域にも入らなかったもの）。
     #[serde(default)]
     pub unassigned_posts: Vec<SecondaryMember>,
@@ -104,7 +104,7 @@ pub struct Model {
     /// 代表値）をグループ 1 本の部材として評価する。要素の解析（剛性・内力）は
     /// 分割部材のまま行い、検定の文脈だけを合成する。
     #[serde(default)]
-    pub beam_groups: Vec<Vec<ElemId>>,
+    pub girder_groups: Vec<Vec<ElemId>>,
     /// 名前付き制振ダンパー定義（プリセットライブラリ）。`ElemId` への参照を
     /// 持たないため、要素の追加・削除に伴う ID 繰上げ／繰下げ（`shift_elem_attr_refs`・
     /// `take_elem_attrs`・`restore_elem_attrs`）の対象外。部材への割当は
@@ -119,7 +119,7 @@ pub struct Model {
     /// 梁（水平材）のねじり剛性の扱い（建物一律。既定は i 端ねじれ解放）。
     /// フィールド無しは既定＝`ReleaseIEnd` で補完される。
     #[serde(default)]
-    pub beam_torsion: BeamTorsionMode,
+    pub girder_torsion: GirderTorsionMode,
     /// 仕口パネル（柱梁接合部パネル）のモデル化（建物一律。既定はモデル化する）。
     /// フィールド無しは既定＝`Model` で補完される。
     #[serde(default)]
@@ -276,15 +276,15 @@ impl Model {
                     (ElementKind::Brace { .. }, FrameSectionUse::Brace)
                         | (
                             ElementKind::Beam,
-                            FrameSectionUse::Beam | FrameSectionUse::Column
+                            FrameSectionUse::Girder | FrameSectionUse::Column
                         )
                         | (
                             ElementKind::Fiber,
-                            FrameSectionUse::Beam | FrameSectionUse::Column
+                            FrameSectionUse::Girder | FrameSectionUse::Column
                         )
                         | (
                             ElementKind::MultiSpring,
-                            FrameSectionUse::Beam | FrameSectionUse::Column
+                            FrameSectionUse::Girder | FrameSectionUse::Column
                         )
                 );
                 if !valid {
@@ -533,29 +533,25 @@ impl Model {
         )?;
 
         for (ri, region) in self.floor_regions.iter().enumerate() {
-            for (ji, sm) in region.secondary_joists.iter().enumerate() {
+            for (ji, sm) in region.secondary_beams.iter().enumerate() {
                 Self::validate_secondary_member(
                     sm,
-                    &format!("FloorRegion {ri} secondary_joists[{ji}]"),
+                    &format!("FloorRegion {ri} secondary_beams[{ji}]"),
                     &self.sections,
                 )?;
-                if sm.kind != SecondaryMemberKind::Joist {
+                if sm.kind != SecondaryMemberKind::Beam {
                     return Err(CoreError::DanglingRef(format!(
-                        "FloorRegion {} secondary_joists[{ji}] は Joist でない",
+                        "FloorRegion {} secondary_beams[{ji}] は Beam でない",
                         region.id.0
                     )));
                 }
             }
         }
-        for (i, sm) in self.unassigned_joists.iter().enumerate() {
-            Self::validate_secondary_member(
-                sm,
-                &format!("unassigned_joists[{i}]"),
-                &self.sections,
-            )?;
-            if sm.kind != SecondaryMemberKind::Joist {
+        for (i, sm) in self.unassigned_beams.iter().enumerate() {
+            Self::validate_secondary_member(sm, &format!("unassigned_beams[{i}]"), &self.sections)?;
+            if sm.kind != SecondaryMemberKind::Beam {
                 return Err(CoreError::DanglingRef(format!(
-                    "unassigned_joists[{i}] は Joist でない"
+                    "unassigned_beams[{i}] は Beam でない"
                 )));
             }
         }
@@ -586,7 +582,7 @@ impl Model {
         {
             use std::collections::HashSet;
             let mut seen_ids = HashSet::new();
-            for sm in self.joists().chain(self.posts()) {
+            for sm in self.beams().chain(self.posts()) {
                 if !seen_ids.insert(sm.id) {
                     return Err(CoreError::DanglingRef(format!(
                         "二次部材の安定 ID が重複しています（{:?}）",
@@ -702,11 +698,11 @@ impl Model {
             }
         }
 
-        for (gi, group) in self.beam_groups.iter().enumerate() {
+        for (gi, group) in self.girder_groups.iter().enumerate() {
             for &eid in group {
                 if eid.index() >= self.elements.len() || self.elements[eid.index()].id != eid {
                     return Err(CoreError::DanglingRef(format!(
-                        "BeamGroup {} -> Elem {}",
+                        "GirderGroup {} -> Elem {}",
                         gi, eid.0
                     )));
                 }
@@ -756,7 +752,7 @@ impl Model {
 
     /// 二次部材を安定 ID から引く。**ID は配列添字と一致しない**。
     pub fn secondary_member(&self, id: SecondaryMemberId) -> Option<&SecondaryMember> {
-        self.joists().chain(self.posts()).find(|m| m.id == id)
+        self.beams().chain(self.posts()).find(|m| m.id == id)
     }
 
     /// 既存の二次部材 ID と衝突しない安定 ID を 1 つ払い出す。
@@ -764,7 +760,7 @@ impl Model {
     /// 全二次部材の最大 ID + 1 以上を返し、[`Model::next_secondary_member_id`] を進める。
     pub fn alloc_secondary_member_id(&mut self) -> SecondaryMemberId {
         let next = self
-            .joists()
+            .beams()
             .chain(self.posts())
             .map(|m| m.id.0.saturating_add(1))
             .max()
@@ -795,7 +791,7 @@ impl Model {
     /// 片持ち自由端を [`validate_secondary_members`] で、主架構アンカーの実在を
     /// 要素参照で検証する。
     fn validate_secondary_member_anchor_ends(&self) -> Result<(), crate::error::CoreError> {
-        let members: Vec<&SecondaryMember> = self.joists().chain(self.posts()).collect();
+        let members: Vec<&SecondaryMember> = self.beams().chain(self.posts()).collect();
         crate::model::validate_secondary_members(&members)?;
         for sm in &members {
             let ends = sm.ends;
@@ -1041,16 +1037,16 @@ impl Model {
             && self.steel_design_attrs == other.steel_design_attrs
             && self.brb_attrs == other.brb_attrs
             && self.pca_attrs == other.pca_attrs
-            && self.unassigned_joists == other.unassigned_joists
+            && self.unassigned_beams == other.unassigned_beams
             && self.unassigned_posts == other.unassigned_posts
             && self.axes == other.axes
-            && self.beam_groups == other.beam_groups
+            && self.girder_groups == other.girder_groups
             && self.isolator_attrs == other.isolator_attrs
             && self.member_hysteresis_attrs == other.member_hysteresis_attrs
             && self.damper_attrs == other.damper_attrs
             && self.damper_defs == other.damper_defs
             && self.member_detail_attrs == other.member_detail_attrs
-            && self.beam_torsion == other.beam_torsion
+            && self.girder_torsion == other.girder_torsion
             && self.panel_zone == other.panel_zone
             && self.wall_regions == other.wall_regions
             && self.floor_assignment_regions == other.floor_assignment_regions
@@ -1208,7 +1204,7 @@ impl Model {
             }
         }
         for region in &mut self.floor_regions {
-            for sm in &mut region.secondary_joists {
+            for sm in &mut region.secondary_beams {
                 if let Some(sid) = &mut sm.section {
                     f(sid);
                 }
@@ -1225,7 +1221,7 @@ impl Model {
             }
         }
         for sm in self
-            .unassigned_joists
+            .unassigned_beams
             .iter_mut()
             .chain(self.unassigned_posts.iter_mut())
         {
@@ -1280,7 +1276,7 @@ impl Model {
     }
 
     /// 要素に紐づく全ての側テーブル属性（壁・鉄骨・BRB・PCa・免震・履歴則・ダンパー）と
-    /// 一本部材指定（`beam_groups`）の `elem` 参照に `f` を適用する。
+    /// 一本部材指定（`girder_groups`）の `elem` 参照に `f` を適用する。
     /// 要素の追加・削除に伴う ID 繰上げ／繰下げで、参照整合を保つために用いる
     /// （要素自身の ID・部材荷重も含めた全参照は [`Model::visit_elem_ids`]）。
     pub fn shift_elem_attr_refs(&mut self, mut f: impl FnMut(&mut ElemId)) {
@@ -1308,7 +1304,7 @@ impl Model {
         for a in &mut self.member_detail_attrs {
             f(&mut a.elem);
         }
-        for group in &mut self.beam_groups {
+        for group in &mut self.girder_groups {
             for e in group.iter_mut() {
                 f(e);
             }
@@ -1489,26 +1485,16 @@ impl Model {
                     sid.0
                 )));
             }
-            let usage = sections[sid.index()].frame_use;
-            let valid = match sm.kind {
-                SecondaryMemberKind::Joist => usage == Some(FrameSectionUse::Beam),
-                SecondaryMemberKind::Post => usage == Some(FrameSectionUse::Column),
-            };
-            if !valid {
-                return Err(CoreError::DanglingRef(format!(
-                    "{label} と断面用途が不整合です"
-                )));
-            }
         }
         Ok(())
     }
 
     /// 全小梁（床領域内 + 未割当）を走査する。
-    pub fn joists(&self) -> impl Iterator<Item = &SecondaryMember> {
-        self.unassigned_joists.iter().chain(
+    pub fn beams(&self) -> impl Iterator<Item = &SecondaryMember> {
+        self.unassigned_beams.iter().chain(
             self.floor_regions
                 .iter()
-                .flat_map(|r| r.secondary_joists.iter()),
+                .flat_map(|r| r.secondary_beams.iter()),
         )
     }
 
@@ -1788,10 +1774,10 @@ mod node_reference_tests {
         // 1: 床領域の境界。2: 二次部材小梁は節点ではなく支持部材アンカーを参照する
         // （節点 2 はもう参照されない）。
         let mut region = FloorRegion::new(FloorRegionId(0), vec![NodeId(1)]);
-        region.secondary_joists.push(SecondaryMember {
+        region.secondary_beams.push(SecondaryMember {
             id: SecondaryMemberId(0),
             gravity_end_shares: None,
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Detached([[0.0; 3]; 2]),
             section: None,
             name: String::new(),
@@ -1856,10 +1842,10 @@ mod node_reference_tests {
         });
 
         // 8: 二次部材（未割当小梁）。節点ではなく支持部材アンカーを参照する。
-        model.unassigned_joists.push(SecondaryMember {
+        model.unassigned_beams.push(SecondaryMember {
             id: SecondaryMemberId(1),
             gravity_end_shares: None,
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Detached([[0.0; 3]; 2]),
             section: None,
             name: String::new(),

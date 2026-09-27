@@ -270,7 +270,7 @@ fn test_load_model_keeps_view_settings() {
     assert_eq!(app.core.analysis_cfg.push_steps, 37);
 }
 
-/// 一本部材指定（beam_groups）: 2 分割梁のグループ合成値
+/// 一本部材指定（girder_groups）: 2 分割梁のグループ合成値
 /// 剛域自動算定・危険断面フィルタのテスト用モデル。
 /// `sample::portal_frame`（対角材を含む変則的な接続）と異なり、
 /// 柱(node0-node1)・梁(node1-node2)・柱(node2-node3)が各節点で厳密に直交する
@@ -349,7 +349,7 @@ fn aligned_portal_frame() -> squid_n_core::model::Model {
     });
     model.sections.push({
         let mut section = beam_shape.to_section(SectionId(1), "梁 RC-200x400".into());
-        section.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+        section.frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
         section
     });
 
@@ -1133,7 +1133,7 @@ fn shear_model(n: usize) -> squid_n_core::model::Model {
         nodes,
         elements,
         sections: vec![Section {
-            frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
             id: SectionId(0),
             name: "spring".into(),
             area: 1.0,
@@ -2504,7 +2504,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
                 ..rc_shape.to_section(SectionId(0), "RC-400x600".into())
             },
             squid_n_core::model::Section {
-                frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+                frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
                 material: Some(MaterialId(0)),
                 rebar_material: Some(MaterialId(1)),
                 shear_rebar_material: Some(MaterialId(1)),
@@ -3311,7 +3311,7 @@ fn test_sync_gravity_load_cases_action_separates_dead_and_live() {
 
 /// 床 Phase E: 矩形床板が一方向版として設計され、設計曲げ・必要鉄筋量が算定される。
 ///
-/// 小梁の検定は分配 Span 経路（`test_floor_design_checks_secondary_member_joist` 以降）が
+/// 小梁の検定は分配 Span 経路（`test_floor_design_checks_secondary_member_beam` 以降）が
 /// 受け持つため、本テストは床板だけを見る。
 #[test]
 fn test_floor_design_checks_slab() {
@@ -3337,7 +3337,7 @@ fn test_floor_design_checks_slab() {
         ..App::default()
     };
 
-    let (_joists, slabs) = app.floor_design_checks();
+    let (_beams, slabs) = app.floor_design_checks();
     assert_eq!(slabs.len(), 1, "矩形スラブが1件設計される");
     let (_sid, sr) = &slabs[0];
     assert!((sr.span - 4000.0).abs() < 1e-6, "短辺スパン");
@@ -3347,7 +3347,7 @@ fn test_floor_design_checks_slab() {
 
 /// 実部材化された小梁は全体 FEM で検定するため、床設計（小梁）の対象外になる。
 #[test]
-fn test_floor_design_skips_materialized_joist() {
+fn test_floor_design_skips_materialized_beam() {
     use squid_n_core::ids::SectionId;
     use squid_n_core::model::{
         ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, SecondaryMember,
@@ -3356,7 +3356,7 @@ fn test_floor_design_skips_materialized_joist() {
 
     let mut model = make_square_slab_test_model();
     model.sections.push(Section {
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
         id: SectionId(0),
         name: "H".into(),
         area: 1.0,
@@ -3388,11 +3388,11 @@ fn test_floor_design_skips_materialized_joist() {
     model.nodes.push(mk_mid(4, 2000.0, 0.0));
     model.nodes.push(mk_mid(5, 2000.0, 4000.0));
     model.floor_regions[0]
-        .secondary_joists
+        .secondary_beams
         .push(SecondaryMember {
             gravity_end_shares: None,
             id: squid_n_core::ids::SecondaryMemberId(0),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: squid_n_core::model::SecondaryMemberEnds::Detached([
                 [2000.0, 0.0, 0.0],
                 [2000.0, 4000.0, 0.0],
@@ -3425,23 +3425,23 @@ fn test_floor_design_skips_materialized_joist() {
         ..App::default()
     };
 
-    let (joists, _slabs) = app.floor_design_checks();
+    let (beams, _slabs) = app.floor_design_checks();
     assert!(
-        joists.is_empty(),
+        beams.is_empty(),
         "実部材化された小梁は床設計の対象外（全体 FEM で検定）"
     );
 }
 
-/// 二次部材（小梁）1 本が `Slab::joists` なしで床設計の対象になる。
+/// 二次部材（小梁）1 本が `Slab::beams` なしで床設計の対象になる。
 #[test]
-fn test_floor_design_checks_secondary_member_joist() {
+fn test_floor_design_checks_secondary_member_beam() {
     use squid_n_core::ids::SectionId;
     use squid_n_core::model::{SecondaryMember, SecondaryMemberKind, Section, SlabUsage};
 
     let mut model = make_square_slab_test_model();
     model.slabs[0].plate.usage = Some(SlabUsage::Office);
     model.sections.push(Section {
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -3475,11 +3475,11 @@ fn test_floor_design_checks_secondary_member_joist() {
     model.slabs.clear();
     model.floor_assignment_regions = Default::default();
     model.floor_regions[0]
-        .secondary_joists
+        .secondary_beams
         .push(SecondaryMember {
             gravity_end_shares: None,
             id: squid_n_core::ids::SecondaryMemberId(0),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: squid_n_core::model::SecondaryMemberEnds::Supported([
                 squid_n_core::model::SecondaryMemberAnchor {
                     support: squid_n_core::model::SupportMemberId::Primary(ElemId(0)),
@@ -3516,12 +3516,12 @@ fn test_floor_design_checks_secondary_member_joist() {
         ..App::default()
     };
 
-    let (joists, _slabs) = app.floor_design_checks();
-    assert_eq!(joists.len(), 1, "二次部材小梁が1件設計される");
-    let (_sid, target, jr) = &joists[0];
+    let (beams, _slabs) = app.floor_design_checks();
+    assert_eq!(beams.len(), 1, "二次部材小梁が1件設計される");
+    let (_sid, target, jr) = &beams[0];
     assert!(matches!(
         target,
-        crate::app::JoistCheckTarget::SecondaryJoist {
+        crate::app::BeamCheckTarget::SecondaryBeam {
             member: squid_n_core::ids::SecondaryMemberId(0)
         }
     ));
@@ -3533,10 +3533,10 @@ fn test_floor_design_checks_secondary_member_joist() {
     assert!(jr.m_max > 0.0);
 }
 
-/// 小梁検定は小梁用（`LoadPurpose::Joist`）、床スラブ検定は床用（`LoadPurpose::Floor`）を
+/// 小梁検定は小梁用（`LoadPurpose::Beam`）、床スラブ検定は床用（`LoadPurpose::Floor`）を
 /// 使い分ける。任意入力（`Custom`）で床用≠小梁用にして、両者がそれぞれの値を使うことを見る。
 #[test]
-fn test_floor_design_checks_joist_uses_joist_live_load() {
+fn test_floor_design_checks_beam_uses_beam_live_load() {
     use squid_n_core::ids::SectionId;
     use squid_n_core::model::{
         LoadPurpose, SecondaryMember, SecondaryMemberKind, Section, SlabUsage,
@@ -3548,10 +3548,10 @@ fn test_floor_design_checks_joist_uses_joist_live_load() {
     model
         .sections
         .push(SectionShape::RcSlab { thickness: 150.0 }.to_section(slab_sid, "S15".into()));
-    let joist_sid = SectionId(model.sections.len() as u32);
+    let beam_sid = SectionId(model.sections.len() as u32);
     model.sections.push(Section {
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
-        id: joist_sid,
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
+        id: beam_sid,
         name: "H-400".into(),
         area: 10000.0,
         iy: 1.0e8,
@@ -3585,18 +3585,18 @@ fn test_floor_design_checks_joist_uses_joist_live_load() {
     // 固定 DL 5.0、床用 3.0、小梁用 2.5、大梁用 1.8、地震用 0.8 kN/m²。
     plate.usage = Some(SlabUsage::Custom {
         floor: 3.0e-3,
-        joist: 2.5e-3,
+        beam: 2.5e-3,
         frame: 1.8e-3,
         seismic: 0.8e-3,
     });
     model.slabs.clear();
     model.floor_assignment_regions = Default::default();
     model.floor_regions[0]
-        .secondary_joists
+        .secondary_beams
         .push(SecondaryMember {
             gravity_end_shares: None,
             id: squid_n_core::ids::SecondaryMemberId(0),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: squid_n_core::model::SecondaryMemberEnds::Supported([
                 squid_n_core::model::SecondaryMemberAnchor {
                     support: squid_n_core::model::SupportMemberId::Primary(ElemId(0)),
@@ -3607,7 +3607,7 @@ fn test_floor_design_checks_joist_uses_joist_live_load() {
                     position: 0.5,
                 },
             ]),
-            section: Some(joist_sid),
+            section: Some(beam_sid),
             name: "J1".into(),
         });
     model.rebuild_floor_assignment_regions();
@@ -3633,11 +3633,11 @@ fn test_floor_design_checks_joist_uses_joist_live_load() {
         ..App::default()
     };
 
-    let (joists, slabs) = app.floor_design_checks();
+    let (beams, slabs) = app.floor_design_checks();
 
     // 小梁検定: 固定 DL 5.0 + 小梁用 2.5 = 7.5e-3 N/mm²。45° 分配の共有辺（4000 スパン）は
     // w_equiv = 1500 × 面荷重 なので 11.25。床用（8.0e-3 → 12.0）ではない。
-    let (_sid, _target, jr) = &joists[0];
+    let (_sid, _target, jr) = &beams[0];
     assert!(
         (jr.w - 11.25).abs() < 0.2,
         "小梁検定は小梁用（7.5e-3）を使う: w={}",
@@ -3668,14 +3668,14 @@ fn test_floor_design_checks_joist_uses_joist_live_load() {
 
 /// 片持ちの未割当小梁（端部支持条件 Free）も片持ち梁として検定する。
 #[test]
-fn test_floor_design_checks_cantilever_joist() {
+fn test_floor_design_checks_cantilever_beam() {
     use squid_n_core::ids::SectionId;
     use squid_n_core::model::{SecondaryMember, SecondaryMemberKind, Section, SlabUsage};
 
     let mut model = make_square_slab_test_model();
     model.slabs[0].plate.usage = Some(SlabUsage::Office);
     model.sections.push(Section {
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -3722,10 +3722,10 @@ fn test_floor_design_checks_cantilever_joist() {
         plate,
     );
     model.floor_regions[0].slab_ids = vec![first, second];
-    model.unassigned_joists.push(SecondaryMember {
+    model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Cantilever {
             support: squid_n_core::model::SecondaryMemberAnchor {
                 support: squid_n_core::model::SupportMemberId::Primary(ElemId(0)),
@@ -3745,9 +3745,9 @@ fn test_floor_design_checks_cantilever_joist() {
         ..App::default()
     };
 
-    let (joists, _slabs) = app.floor_design_checks();
-    assert_eq!(joists.len(), 1, "片持ち小梁が1件設計される");
-    let (_sid, _target, jr) = &joists[0];
+    let (beams, _slabs) = app.floor_design_checks();
+    assert_eq!(beams.len(), 1, "片持ち小梁が1件設計される");
+    let (_sid, _target, jr) = &beams[0];
     let simple = 11.85 * 4000.0_f64.powi(2) / 8.0;
     assert!(
         jr.m_max > simple * 3.0,
@@ -3757,7 +3757,7 @@ fn test_floor_design_checks_cantilever_joist() {
 
     // 非片持ちの未割当小梁は検定対象外（表に「未」として残る）。
     let mut model2 = app.core.model.clone();
-    model2.unassigned_joists[0].ends = squid_n_core::model::SecondaryMemberEnds::Detached([
+    model2.unassigned_beams[0].ends = squid_n_core::model::SecondaryMemberEnds::Detached([
         [2000.0, 0.0, 0.0],
         [2000.0, 4000.0, 0.0],
     ]);
@@ -3768,14 +3768,14 @@ fn test_floor_design_checks_cantilever_joist() {
         },
         ..App::default()
     };
-    let (joists2, _) = app2.floor_design_checks();
-    assert_eq!(joists2.len(), 1);
-    assert!(joists2[0].2.unchecked, "未割当の非片持ち小梁は検定しない");
+    let (beams2, _) = app2.floor_design_checks();
+    assert_eq!(beams2.len(), 1);
+    assert!(beams2[0].2.unchecked, "未割当の非片持ち小梁は検定しない");
 }
 
 /// 断面未割当の二次部材小梁は表から消さず判定「未」になる。
 #[test]
-fn test_floor_design_checks_secondary_joist_without_section_is_unchecked() {
+fn test_floor_design_checks_secondary_beam_without_section_is_unchecked() {
     use squid_n_core::model::{SecondaryMember, SecondaryMemberKind};
 
     let mut model = make_square_slab_test_model();
@@ -3800,11 +3800,11 @@ fn test_floor_design_checks_secondary_joist_without_section_is_unchecked() {
     model.slabs.clear();
     model.floor_assignment_regions = Default::default();
     model.floor_regions[0]
-        .secondary_joists
+        .secondary_beams
         .push(SecondaryMember {
             gravity_end_shares: None,
             id: squid_n_core::ids::SecondaryMemberId(0),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: squid_n_core::model::SecondaryMemberEnds::Supported([
                 squid_n_core::model::SecondaryMemberAnchor {
                     support: squid_n_core::model::SupportMemberId::Primary(ElemId(0)),
@@ -3840,10 +3840,10 @@ fn test_floor_design_checks_secondary_joist_without_section_is_unchecked() {
         },
         ..App::default()
     };
-    let (joists, _) = app.floor_design_checks();
-    assert_eq!(joists.len(), 1);
-    assert!(joists[0].2.unchecked, "断面なしは未検定");
-    assert!(!joists[0].2.ok);
+    let (beams, _) = app.floor_design_checks();
+    assert_eq!(beams.len(), 1);
+    assert!(beams[0].2.unchecked, "断面なしは未検定");
+    assert!(!beams[0].2.ok);
 }
 
 /// 二次部材小梁は、平面が重なる上下階のスラブのうち**同じレベル**のスラブで検定される。
@@ -3851,7 +3851,7 @@ fn test_floor_design_checks_secondary_joist_without_section_is_unchecked() {
 /// スラブの内包判定は XY 平面へ投影して行うため、レベルを見ないと下階のスラブが先に
 /// 該当し、下階の板厚・室用途で検定されてしまう（エラーは出ずに結果だけが誤る）。
 #[test]
-fn test_floor_design_checks_secondary_joist_uses_same_level_slab() {
+fn test_floor_design_checks_secondary_beam_uses_same_level_slab() {
     use squid_n_core::ids::{FloorRegionId, SectionId, SlabId};
     use squid_n_core::model::{
         ElementData, ElementKind, EndCondition, FloorRegion, ForceRegime, LocalAxis, Node,
@@ -3862,7 +3862,7 @@ fn test_floor_design_checks_secondary_joist_uses_same_level_slab() {
 
     let mut model = make_square_slab_test_model();
     model.sections.push(Section {
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -3919,10 +3919,10 @@ fn test_floor_design_checks_secondary_joist_uses_same_level_slab() {
             spring: None,
         });
     }
-    let joist = SecondaryMember {
+    let beam = SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Supported([
             squid_n_core::model::SecondaryMemberAnchor {
                 support: squid_n_core::model::SupportMemberId::Primary(ElemId(4)),
@@ -3936,7 +3936,7 @@ fn test_floor_design_checks_secondary_joist_uses_same_level_slab() {
         section: Some(SectionId(0)),
         name: "J1".into(),
     };
-    model.unassigned_joists.push(joist.clone());
+    model.unassigned_beams.push(beam.clone());
     model.rebuild_floor_assignment_regions();
     let first = model
         .assign_enclosed_slab_to_matching_region(
@@ -3950,14 +3950,14 @@ fn test_floor_design_checks_secondary_joist_uses_same_level_slab() {
             plate,
         )
         .expect("上階右半分");
-    model.unassigned_joists.clear();
+    model.unassigned_beams.clear();
     model.floor_regions.push({
         let mut r = FloorRegion::new(
             FloorRegionId(1),
             vec![NodeId(4), NodeId(5), NodeId(6), NodeId(7)],
         );
         r.slab_ids = vec![first, second];
-        r.secondary_joists.push(joist);
+        r.secondary_beams.push(beam);
         r
     });
     // 上階床領域にも剛床を置く（小梁の分配 Span 検定の前提）。
@@ -3979,9 +3979,9 @@ fn test_floor_design_checks_secondary_joist_uses_same_level_slab() {
         ..App::default()
     };
 
-    let (joists, _slabs) = app.floor_design_checks();
-    assert_eq!(joists.len(), 1, "二次部材小梁が1件設計される");
-    let (sid, _target, jr) = &joists[0];
+    let (beams, _slabs) = app.floor_design_checks();
+    assert_eq!(beams.len(), 1, "二次部材小梁が1件設計される");
+    let (sid, _target, jr) = &beams[0];
     assert_eq!(*sid, Some(SlabId(1)), "上階床領域の代表床板で検定される");
     assert!(
         (jr.w - 11.85).abs() < 0.2,
@@ -3995,7 +3995,7 @@ fn test_floor_design_checks_secondary_joist_uses_same_level_slab() {
 /// どちらか 1 枚の幅をそのまま採ると、スラブの並び順しだいで負担幅が過大にも過小にもなる。
 /// 境界辺に載る小梁の負担幅は「両隣の半分ずつの和」＝2 枚の幅の平均である。
 #[test]
-fn test_floor_design_checks_secondary_joist_on_shared_edge_averages_width() {
+fn test_floor_design_checks_secondary_beam_on_shared_edge_averages_width() {
     use squid_n_core::ids::{FloorRegionId, SectionId};
     use squid_n_core::model::{
         ElementData, ElementKind, EndCondition, FloorRegion, ForceRegime, LocalAxis, Node,
@@ -4004,7 +4004,7 @@ fn test_floor_design_checks_secondary_joist_on_shared_edge_averages_width() {
 
     let mut model = make_square_slab_test_model();
     model.sections.push(Section {
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -4056,10 +4056,10 @@ fn test_floor_design_checks_secondary_joist_on_shared_edge_averages_width() {
             spring: None,
         });
     }
-    let joist = SecondaryMember {
+    let beam = SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Supported([
             squid_n_core::model::SecondaryMemberAnchor {
                 support: squid_n_core::model::SupportMemberId::Primary(ElemId(0)),
@@ -4073,7 +4073,7 @@ fn test_floor_design_checks_secondary_joist_on_shared_edge_averages_width() {
         section: Some(SectionId(0)),
         name: "J1".into(),
     };
-    model.unassigned_joists.push(joist.clone());
+    model.unassigned_beams.push(beam.clone());
     model.rebuild_floor_assignment_regions();
     let first = model
         .assign_enclosed_slab_to_matching_region(
@@ -4087,14 +4087,14 @@ fn test_floor_design_checks_secondary_joist_on_shared_edge_averages_width() {
             plate,
         )
         .expect("右帯");
-    model.unassigned_joists.clear();
+    model.unassigned_beams.clear();
     model.floor_regions = vec![{
         let mut r = FloorRegion::new(
             FloorRegionId(0),
             vec![NodeId(0), NodeId(6), NodeId(7), NodeId(3)],
         );
         r.slab_ids = vec![first, second];
-        r.secondary_joists.push(joist);
+        r.secondary_beams.push(beam);
         r
     }];
     // 床領域の境界を変えたので、剛床のスレーブも新しい境界節点へ揃える。
@@ -4114,26 +4114,26 @@ fn test_floor_design_checks_secondary_joist_on_shared_edge_averages_width() {
         ..App::default()
     };
 
-    let (joists, _slabs) = app.floor_design_checks();
-    assert_eq!(joists.len(), 1, "境界辺の小梁が1件設計される");
+    let (beams, _slabs) = app.floor_design_checks();
+    assert_eq!(beams.len(), 1, "境界辺の小梁が1件設計される");
     // 2000 幅 + 4000 幅の 2 枚。三角/台形分配の重ね合わせ（8.75 N/mm）。
     assert!(
-        (joists[0].2.w - 8.75).abs() < 0.1,
+        (beams[0].2.w - 8.75).abs() < 0.1,
         "分配結果からの等価 w が想定外: w={}",
-        joists[0].2.w
+        beams[0].2.w
     );
 }
 
 /// 中点がスラブ辺上にある二次部材小梁も床設計の対象になる。
 #[test]
-fn test_floor_design_checks_secondary_joist_on_slab_edge() {
+fn test_floor_design_checks_secondary_beam_on_slab_edge() {
     use squid_n_core::ids::SectionId;
     use squid_n_core::model::{SecondaryMember, SecondaryMemberKind, Section, SlabUsage};
 
     let mut model = make_square_slab_test_model();
     model.slabs[0].plate.usage = Some(SlabUsage::Office);
     model.sections.push(Section {
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -4168,11 +4168,11 @@ fn test_floor_design_checks_secondary_joist_on_slab_edge() {
     model.slabs.clear();
     model.floor_assignment_regions = Default::default();
     model.floor_regions[0]
-        .secondary_joists
+        .secondary_beams
         .push(SecondaryMember {
             gravity_end_shares: None,
             id: squid_n_core::ids::SecondaryMemberId(0),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: squid_n_core::model::SecondaryMemberEnds::Supported([
                 squid_n_core::model::SecondaryMemberAnchor {
                     support: squid_n_core::model::SupportMemberId::Primary(ElemId(0)),
@@ -4209,8 +4209,8 @@ fn test_floor_design_checks_secondary_joist_on_slab_edge() {
         ..App::default()
     };
 
-    let (joists, _slabs) = app.floor_design_checks();
-    assert_eq!(joists.len(), 1, "床板境界上の二次部材小梁が1件設計される");
+    let (beams, _slabs) = app.floor_design_checks();
+    assert_eq!(beams.len(), 1, "床板境界上の二次部材小梁が1件設計される");
 }
 
 /// スラブ設計のスパンは一方向指定に一致する
@@ -5154,7 +5154,7 @@ fn test_compute_ultimate_checks_rc_frame() {
     let col = checks.iter().find(|c| c.elem == ElemId(0)).unwrap();
     let beam = checks.iter().find(|c| c.elem == ElemId(1)).unwrap();
     assert_eq!(col.kind, MemberKind::Column);
-    assert_eq!(beam.kind, MemberKind::Beam);
+    assert_eq!(beam.kind, MemberKind::Girder);
     // 各耐力・余裕度が正常に算定される。
     assert!(col.qsu > 0.0 && col.qmu > 0.0 && col.shear_margin > 0.0);
     assert!(col.axial.is_some(), "柱は軸終局耐力を持つ");
@@ -5255,7 +5255,7 @@ fn test_sync_gravity_dl_includes_self_weight_and_slab() {
     let mut model = make_square_slab_test_model();
     // 全梁に断面・材料（密度あり）を与え、自重を発生させる。
     model.sections.push(Section {
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
         id: SectionId(0),
         name: "RC400x600".into(),
         area: 400.0 * 600.0,
@@ -5624,7 +5624,7 @@ fn test_import_stbridge_then_run_dl_succeeds() {
         ..col_shape.to_section(SectionId(0), "柱".into())
     });
     model.sections.push(squid_n_core::model::Section {
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
         material: Some(MaterialId(0)),
         ..col_shape.to_section(SectionId(1), "梁".into())
     });
@@ -5738,7 +5738,7 @@ fn test_import_stbridge_then_run_dl_succeeds() {
 ///   主架構へ伝達され、鉛直荷重の総和が保存される。
 /// - そのまま線形静的解析が成功する（小梁支持節点は解析自由度から除外）。
 #[test]
-fn test_secondary_joist_subdivided_slab_dl_cmq_and_solve() {
+fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
     use squid_n_core::ids::{FloorRegionId, MaterialId, SectionId};
     use squid_n_core::model::{
         AreaLoad, DistributionMethod, ElementData, ElementKind, EndCondition, ForceRegime,
@@ -5855,7 +5855,7 @@ fn test_secondary_joist_subdivided_slab_dl_cmq_and_solve() {
                 sec.width = 400.0;
                 sec.as_y = 400.0 * 600.0 / 1.2;
                 sec.as_z = 400.0 * 600.0 / 1.2;
-                sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+                sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
                 sec.material = Some(MaterialId(0));
                 sec
             },
@@ -5874,10 +5874,10 @@ fn test_secondary_joist_subdivided_slab_dl_cmq_and_solve() {
             fy: None,
         }],
         // 小梁: 大梁 y=0 の中間 (4000,0) と大梁 y=6000 の中間 (4000,6000) を結ぶ。
-        unassigned_joists: vec![SecondaryMember {
+        unassigned_beams: vec![SecondaryMember {
             gravity_end_shares: None,
             id: squid_n_core::ids::SecondaryMemberId(0),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: squid_n_core::model::SecondaryMemberEnds::Supported([
                 squid_n_core::model::SecondaryMemberAnchor {
                     support: squid_n_core::model::SupportMemberId::Primary(ElemId(4)),
@@ -5957,8 +5957,8 @@ fn test_secondary_joist_subdivided_slab_dl_cmq_and_solve() {
         + sw_nodal.iter().map(|nl| -nl.values[2]).sum::<f64>();
     // 二次部材の自重は `self_weight_case_content` ではなく逐次伝達が運ぶ
     // 期待値には別途足す。
-    for sm in app.core.model.joists().chain(app.core.model.posts()) {
-        if let Some(w) = squid_n_load::floor::joist_self_weight_udl(&app.core.model, sm) {
+    for sm in app.core.model.beams().chain(app.core.model.posts()) {
+        if let Some(w) = squid_n_load::floor::beam_self_weight_udl(&app.core.model, sm) {
             let Some((na, nb)) = app.core.model.secondary_member_end_points(sm) else {
                 continue;
             };
@@ -7730,12 +7730,12 @@ fn test_needs_recording_confirm_threshold() {
 /// 門型ラーメン（柱脚固定・柱頭に梁）は全部材が解放され、対象外は 0 本になる。
 #[test]
 fn test_preparation_lists_no_torsion_skip_for_portal_frame() {
-    use squid_n_core::model::BeamTorsionMode;
+    use squid_n_core::model::GirderTorsionMode;
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
     assert_eq!(
-        app.core.model.beam_torsion,
-        BeamTorsionMode::ReleaseIEnd,
+        app.core.model.girder_torsion,
+        GirderTorsionMode::ReleaseIEnd,
         "既定は i 端ねじれ解放"
     );
     app.run_preparation();
@@ -7782,21 +7782,24 @@ fn test_preparation_lists_torsion_skip_for_unrestrained_column_base() {
 /// （「対象外」という概念自体がなくなるため）。
 #[test]
 fn test_preparation_torsion_disabled_reports_no_rows() {
-    use squid_n_core::model::BeamTorsionMode;
+    use squid_n_core::model::GirderTorsionMode;
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
     app.core.scoped.undo.run(
         &mut app.core.model,
-        Box::new(squid_n_edit::SetBeamTorsion {
-            mode: BeamTorsionMode::Keep,
+        Box::new(squid_n_edit::SetGirderTorsion {
+            mode: GirderTorsionMode::Keep,
         }),
     );
-    assert_eq!(app.core.model.beam_torsion, BeamTorsionMode::Keep);
+    assert_eq!(app.core.model.girder_torsion, GirderTorsionMode::Keep);
     // undo で既定へ戻る（準備計算が別のコマンドを積む前に確認する）。
     app.core.scoped.undo.undo(&mut app.core.model);
-    assert_eq!(app.core.model.beam_torsion, BeamTorsionMode::ReleaseIEnd);
+    assert_eq!(
+        app.core.model.girder_torsion,
+        GirderTorsionMode::ReleaseIEnd
+    );
     app.core.scoped.undo.redo(&mut app.core.model);
-    assert_eq!(app.core.model.beam_torsion, BeamTorsionMode::Keep);
+    assert_eq!(app.core.model.girder_torsion, GirderTorsionMode::Keep);
 
     app.run_preparation();
     let prep = app

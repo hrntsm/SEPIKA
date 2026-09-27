@@ -216,7 +216,6 @@ pub(super) struct StbParser {
     pub(super) pending_secs: Vec<PendingSec>,
     pub(super) pending_members: Vec<PendingMember>,
     pub(super) pending_secondaries: Vec<PendingSecondary>,
-    pub(super) section_usages: HashMap<u32, (FrameSectionUse, String)>,
     /// 形鋼ライブラリ（形鋼名 → 断面形状）。
     pub(super) steel_lib: HashMap<String, SectionShape>,
     /// 現在パース中の標準断面要素。
@@ -370,32 +369,8 @@ impl StbParser {
     /// 断面（Raw・鋼・RC・CFT・SRC・スラブ・壁・配筋・形鋼ライブラリ）の
     /// 開始要素を処理する。担当タグなら true。
     fn start_section(&mut self, tag: &str, a: &Attrs) -> Result<bool, StbError> {
-        if let Some(usage) = section_usage(tag) {
-            let id = get_u32(a, "id")?;
-            if let Some((previous, previous_tag)) = self.section_usages.get(&id) {
-                if *previous != usage {
-                    return Err(StbError::Unmappable(format!(
-                        "断面 file ID {id} の定義タグが競合: {previous_tag} と {tag}"
-                    )));
-                }
-            } else {
-                self.section_usages.insert(id, (usage, tag.to_string()));
-            }
-        }
         match tag {
             "StbSecRaw" => {
-                if let Some(kind) = a.get("kind") {
-                    let usage = match kind.as_str() {
-                        "COLUMN" => Some(FrameSectionUse::Column),
-                        "BEAM" => Some(FrameSectionUse::Beam),
-                        "BRACE" => Some(FrameSectionUse::Brace),
-                        _ => None,
-                    };
-                    if let Some(usage) = usage {
-                        self.section_usages
-                            .insert(get_u32(a, "id")?, (usage, tag.to_string()));
-                    }
-                }
                 self.pending_secs.push(PendingSec {
                     file_id: get_u32(a, "id")?,
                     name: a.get("name").cloned().unwrap_or_default(),
@@ -700,7 +675,7 @@ impl StbParser {
             "StbColumn" => {
                 let bot = get_u32(a, "id_node_bottom")?;
                 let top = get_u32(a, "id_node_top")?;
-                let mut member = make_member(a, bot, top, PendingMemberKind::Beam)?;
+                let mut member = make_member(a, bot, top, PendingMemberKind::Girder)?;
                 member.source_usage = FrameSectionUse::Column;
                 member.source_tag = tag.to_string();
                 member.source_id = a.get("id").and_then(|v| v.parse().ok());
@@ -709,8 +684,8 @@ impl StbParser {
             "StbGirder" => {
                 let st = get_u32(a, "id_node_start")?;
                 let en = get_u32(a, "id_node_end")?;
-                let mut member = make_member(a, st, en, PendingMemberKind::Beam)?;
-                member.source_usage = FrameSectionUse::Beam;
+                let mut member = make_member(a, st, en, PendingMemberKind::Girder)?;
+                member.source_usage = FrameSectionUse::Girder;
                 member.source_tag = tag.to_string();
                 member.source_id = a.get("id").and_then(|v| v.parse().ok());
                 self.pending_members.push(member);
@@ -722,7 +697,7 @@ impl StbParser {
                     a,
                     st,
                     en,
-                    squid_n_core::model::SecondaryMemberKind::Joist,
+                    squid_n_core::model::SecondaryMemberKind::Beam,
                 ));
             }
             "StbPost" => {
@@ -1187,21 +1162,10 @@ fn make_member(
         material,
         rotate,
         end_cond,
-        source_usage: FrameSectionUse::Beam,
+        source_usage: FrameSectionUse::Girder,
         source_tag: String::new(),
         source_id: None,
     })
-}
-
-fn section_usage(tag: &str) -> Option<FrameSectionUse> {
-    match tag {
-        "StbSecColumn_S" | "StbSecColumn_RC" | "StbSecColumn_CFT" | "StbSecColumn_SRC" => {
-            Some(FrameSectionUse::Column)
-        }
-        "StbSecBeam_S" | "StbSecBeam_RC" | "StbSecBeam_SRC" => Some(FrameSectionUse::Beam),
-        "StbSecBrace_S" => Some(FrameSectionUse::Brace),
-        _ => None,
-    }
 }
 
 /// 二次部材（小梁 `StbBeam`・間柱 `StbPost`）の中間表現を作る

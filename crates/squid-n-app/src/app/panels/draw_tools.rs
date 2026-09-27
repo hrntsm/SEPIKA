@@ -84,7 +84,7 @@ impl App {
             if self.ui.scoped.slab_draw_mode && !slab_was_on {
                 self.ui.scoped.beam_draw_mode = false;
                 self.ui.scoped.wall_draw_mode = false;
-                self.ui.scoped.joist_place_mode = false;
+                self.ui.scoped.beam_place_mode = false;
                 self.ui.scoped.post_place_mode = false;
                 self.ui.scoped.work_scope = None;
                 self.ui.scoped.member_place_first = None;
@@ -97,9 +97,9 @@ impl App {
         });
 
         ui.horizontal(|ui| {
-            let joist_was_on = self.ui.scoped.joist_place_mode;
-            ui.toggle_value(&mut self.ui.scoped.joist_place_mode, "小梁配置モード");
-            if self.ui.scoped.joist_place_mode && !joist_was_on {
+            let beam_was_on = self.ui.scoped.beam_place_mode;
+            ui.toggle_value(&mut self.ui.scoped.beam_place_mode, "小梁配置モード");
+            if self.ui.scoped.beam_place_mode && !beam_was_on {
                 self.ui.scoped.beam_draw_mode = false;
                 self.ui.scoped.wall_draw_mode = false;
                 self.ui.scoped.slab_draw_mode = false;
@@ -107,7 +107,7 @@ impl App {
                 self.ui.scoped.work_scope = None;
                 self.ui.scoped.member_place_first = None;
             }
-            if self.ui.scoped.joist_place_mode {
+            if self.ui.scoped.beam_place_mode {
                 match self.ui.scoped.work_scope {
                     None => {
                         ui.label("3D で床領域（作業範囲）をクリック");
@@ -130,7 +130,7 @@ impl App {
                 self.ui.scoped.beam_draw_mode = false;
                 self.ui.scoped.wall_draw_mode = false;
                 self.ui.scoped.slab_draw_mode = false;
-                self.ui.scoped.joist_place_mode = false;
+                self.ui.scoped.beam_place_mode = false;
                 self.ui.scoped.work_scope = None;
                 self.ui.scoped.member_place_first = None;
             }
