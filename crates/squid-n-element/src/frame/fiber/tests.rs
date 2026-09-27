@@ -2338,12 +2338,13 @@ fn fc_over_60_fiber_materials_use_newrc_envelope_and_history() {
         assert_relative_eq!(tangent, ec, max_relative = 1e-12);
 
         let max_strain = -1.2 * eps_c0;
-        let (max_stress, _) = actual.trial(max_strain);
+        actual.trial(max_strain);
         actual.commit();
         let unload_strain = -0.5 * eps_c0;
         let (unload_stress, unload_tangent) = actual.trial(unload_strain);
+        let (max_envelope_stress, _) = newrc_reference_response(1.2, 80.0, eps_c0, a, d);
         let (envelope_stress, envelope_tangent) = newrc_reference_response(0.5, 80.0, eps_c0, a, d);
-        let origin_tangent = max_stress / max_strain;
+        let origin_tangent = -max_envelope_stress / max_strain;
         let (expected_stress, expected_tangent) = match rule {
             HysteresisModel::Retrograde => (-envelope_stress, envelope_tangent),
             HysteresisModel::OriginOriented => (origin_tangent * unload_strain, origin_tangent),
@@ -2378,11 +2379,12 @@ fn fc_over_60_fiber_materials_use_newrc_envelope_and_history() {
     assert_relative_eq!(stress, 0.0, epsilon = 1e-12);
     assert_relative_eq!(tangent, ec, max_relative = 1e-12);
     let max_strain = -1.5 * eps_c0;
-    let (max_stress, _) = karsan.trial(max_strain);
+    karsan.trial(max_strain);
     karsan.commit();
     let plastic_strain = -(0.145 * 1.5_f64.powi(2) + 0.13 * 1.5) * eps_c0;
     let (plastic_stress, plastic_tangent) = karsan.trial(plastic_strain);
-    let expected_tangent = max_stress / (max_strain - plastic_strain);
+    let (max_envelope_stress, _) = newrc_reference_response(1.5, 80.0, eps_c0, a, d);
+    let expected_tangent = -max_envelope_stress / (max_strain - plastic_strain);
     assert_relative_eq!(plastic_stress, 0.0, epsilon = 1e-9);
     assert_relative_eq!(plastic_tangent, expected_tangent, max_relative = 1e-9);
 }
