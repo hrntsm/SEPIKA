@@ -91,6 +91,9 @@ pub fn member_unit_axis(model: &Model, elem: &ElementData) -> Option<[f64; 3]> {
 
 /// 断面用途から柱・はりを判定する。用途未設定・ブレース・線材以外は `None`。
 pub fn member_orientation(model: &Model, elem: &ElementData) -> Option<MemberOrientation> {
+    if !matches!(elem.kind, ElementKind::Beam) || elem.nodes.len() < 2 {
+        return None;
+    }
     let section = elem.section.and_then(|id| model.sections.get(id.index()))?;
     match section.frame_use? {
         FrameSectionUse::Column => Some(MemberOrientation::Column),
@@ -873,6 +876,14 @@ mod tests {
             member_orientation(&m, &m.elements[1]),
             Some(MemberOrientation::Column)
         );
+    }
+
+    #[test]
+    fn test_non_line_element_is_not_classified_by_section_use() {
+        let mut m = joint_model(h_beam(), 600.0, h_col());
+        m.elements[0].kind = ElementKind::Wall;
+        assert_eq!(member_orientation(&m, &m.elements[0]), None);
+        assert!(resolve_panel_joint(&m, NodeId(0), &m.elements).is_none());
     }
 
     /// 梁の db: H 形はせい − フランジ厚、それ以外は 0.9・せい。

@@ -3138,6 +3138,25 @@ fn test_secondary_members_roundtrip() {
     assert!(xml.contains("<StbBeams>"), "小梁を書き出す: {xml}");
     assert!(xml.contains("<StbPosts>"), "間柱を書き出す: {xml}");
 
+    m.unassigned_joists[0].section = Some(SectionId(1));
+    let err = export_stbridge(&m).expect_err("柱用途の断面を小梁へ暗黙変換しない");
+    assert!(matches!(err, StbError::FrameSectionUseMismatch(_)), "{err}");
+
+    m.unassigned_joists[0].section = Some(SectionId(0));
+    m.sections[0].frame_use = Some(squid_n_core::model::FrameSectionUse::Brace);
+    let err = export_stbridge(&m).expect_err("ブレース用途の断面を小梁へ暗黙変換しない");
+    assert!(matches!(err, StbError::FrameSectionUseMismatch(_)), "{err}");
+
+    m.sections[0].frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    m.unassigned_posts[0].section = Some(SectionId(0));
+    let err = export_stbridge(&m).expect_err("梁用途の断面を間柱へ暗黙変換しない");
+    assert!(matches!(err, StbError::FrameSectionUseMismatch(_)), "{err}");
+
+    m.unassigned_posts[0].section = Some(SectionId(1));
+    m.sections[1].frame_use = Some(squid_n_core::model::FrameSectionUse::Brace);
+    let err = export_stbridge(&m).expect_err("ブレース用途の断面を間柱へ暗黙変換しない");
+    assert!(matches!(err, StbError::FrameSectionUseMismatch(_)), "{err}");
+
     let (back, _report) = import_stbridge_with_report(&xml).expect("re-import");
     assert_eq!(back.joists().count() + back.posts().count(), 2);
     let kinds: Vec<SecondaryMemberKind> =

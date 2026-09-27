@@ -19,7 +19,8 @@ use super::section_std::standard_sections;
 use super::{StbError, STB_VERSION};
 use squid_n_core::ids::{NodeId, SectionId, SlabId};
 use squid_n_core::model::{
-    AxisGroup, AxisGroupKind, ElementKind, EndCondition, Model, StoryLevelKind, WallPlateShape,
+    AxisGroup, AxisGroupKind, ElementKind, EndCondition, FrameSectionUse, Model,
+    SecondaryMemberKind, StoryLevelKind, WallPlateShape,
 };
 
 /// ST-Bridge の id は `positiveInteger`（1 以上）。内部 0 始まり id に +1 して出力する。
@@ -43,6 +44,32 @@ fn secondary_end_nodes(
             .map(|n| n.id)
     };
     Some([find(a)?, find(b)?])
+}
+
+fn validate_secondary_section_uses(model: &Model) -> Result<(), StbError> {
+    for secondary in model.joists().chain(model.posts()) {
+        let Some(section_id) = secondary.section else {
+            continue;
+        };
+        let Some(frame_use) = model
+            .sections
+            .get(section_id.index())
+            .and_then(|section| section.frame_use)
+        else {
+            continue;
+        };
+        let expected = match secondary.kind {
+            SecondaryMemberKind::Joist => FrameSectionUse::Beam,
+            SecondaryMemberKind::Post => FrameSectionUse::Column,
+        };
+        if frame_use != expected {
+            return Err(StbError::FrameSectionUseMismatch(format!(
+                "二次部材 {} ({:?}) の断面 {} の用途 {:?} は {:?} と不整合です",
+                secondary.id.0, secondary.kind, section_id.0, frame_use, expected
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// 内部モデルを標準 ST-Bridge 2.0.2 XML 文字列へ出力する（警告は破棄する）。
@@ -184,6 +211,7 @@ fn members_body(
     beam_map: &std::collections::HashMap<u32, u32>,
     brace_map: &std::collections::HashMap<u32, u32>,
 ) -> Result<String, StbError> {
+    validate_secondary_section_uses(model)?;
     let mut columns = String::new();
     let mut girders = String::new();
     let mut unexported_secondary_ids: Vec<u32> = Vec::new();

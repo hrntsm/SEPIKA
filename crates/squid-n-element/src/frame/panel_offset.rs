@@ -8,7 +8,7 @@ use smallvec::SmallVec;
 use squid_n_core::dof::DofMap;
 use squid_n_core::ids::NodeId;
 use squid_n_core::model::{ElementData, ElementKind, Model};
-use squid_n_core::panel_zone::{member_orientation, MemberOrientation};
+use squid_n_core::panel_zone::{member_orientation, member_unit_axis, MemberOrientation};
 
 /// 水平材（はり）が仕口パネルへ接合するときの ζ。
 const ZETA_BEAM: f64 = -0.5;
@@ -29,6 +29,10 @@ pub struct PanelEnd {
 /// どちらの端もパネルへ接合しない場合は `None`。
 pub fn resolve(data: &ElementData, model: &Model) -> Option<[Option<PanelEnd>; 2]> {
     if !matches!(data.kind, ElementKind::Beam) || data.nodes.len() < 2 {
+        return None;
+    }
+    let axis = member_unit_axis(model, data)?;
+    if (0.2..0.8).contains(&axis[2].abs()) {
         return None;
     }
     let zeta = match member_orientation(model, data)? {
