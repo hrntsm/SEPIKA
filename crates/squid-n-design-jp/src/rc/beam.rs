@@ -2,15 +2,16 @@
 //! 強軸曲げ（`mz`）とそれに対のせん断（`qy`）のみを検定する。
 
 use super::{
-    axis_props_from_shape, main_rebar_grade, rc_allow, rc_beam_bond_check, rc_beam_bond_check_1991,
-    rebar_allowable_tension, rebar_info_from_shape, rebar_sigma_y_of, seismic_design_shear,
-    shear_alpha, shear_capacity_for, shear_rebar_grade, AxisProps,
+    axis_props_from_shape, main_rebar_grade, rc_allow, rc_beam_bond_check_1991_with_rebar,
+    rc_beam_bond_check_with_rebar, rebar_allowable_tension, rebar_info_from_shape,
+    rebar_sigma_y_of, seismic_design_shear, shear_alpha, shear_capacity_for, shear_rebar_grade,
+    AxisProps,
 };
 use crate::ultimate::rc_props::RcDirection;
 use crate::{
     BondMethod, CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm, MemberForcesAt,
 };
-use squid_n_core::model::{Material, Section};
+use squid_n_core::model::{Material, MaterialCategory, Section};
 use squid_n_core::section_shape::SectionShape;
 
 pub(crate) struct BeamMoment {
@@ -78,6 +79,9 @@ pub(crate) fn beam_check(
 ) -> CheckResult {
     let long_term = ctx.term == LoadTerm::Long;
     let grade = main_rebar_grade(ctx.rebar_material.as_ref());
+    let deformed_rebar = ctx.rebar_material.as_ref().is_some_and(|m| {
+        m.category == MaterialCategory::Rebar && !matches!(m.name.trim(), "SR235" | "SR295")
+    });
     let allow = rc_allow(
         fc_raw,
         mat.concrete_class,
@@ -134,25 +138,29 @@ pub(crate) fn beam_check(
     };
     let ratio_q = if qa > 0.0 { q_design / qa } else { 0.0 };
 
-    let (ratio_bond, bond_detail) = match ctx.bond_method {
-        BondMethod::Rc1999 => {
-            let bond = rc_beam_bond_check(
-                forces.pos,
-                ctx.length,
-                props.b,
-                props.d,
-                props.j,
-                props.at,
-                forces.mz.abs(),
-                &info,
-                fc_raw,
-                long_term,
-            );
-            let ratio = bond.as_ref().map(|b| b.ratio).unwrap_or(0.0);
-            let detail = bond.as_ref().map(|b| {
-                format!(
+    let (ratio_bond, bond_detail) =
+        match ctx.bond_method {
+            BondMethod::Rc1999 => {
+                let bond = rc_beam_bond_check_with_rebar(
+                    forces.pos,
+                    ctx.length,
+                    props.b,
+                    props.d,
+                    props.j,
+                    props.at,
+                    forces.mz.abs(),
+                    &info,
+                    fc_raw,
+                    long_term,
+                    tension_is_top,
+                    deformed_rebar,
+                );
+                let ratio = bond.as_ref().map(|b| b.ratio).unwrap_or(0.0);
+                let detail =
+                    bond.as_ref().map(|b| {
+                        format!(
                     "1999: ld={:.1} mm, ldb={:.1} mm, K={:.3}, W={:.3} mm, fb={:.3} N/mm², \
-                     σt={:.1} N/mm², 付着検定比={:.3}（{}）",
+                     σt={:.1} N/mm², 付着検定比={:.3}（{}・{}）",
                     b.ld,
                     b.ldb,
                     b.k,
@@ -160,40 +168,46 @@ pub(crate) fn beam_check(
                     b.fb,
                     b.sigma_t,
                     b.ratio,
-                    if b.is_end {
-                        "端部・上端筋"
-                    } else {
-                        "中央・下端筋"
-                    }
+                    if b.is_end { "端部" } else { "中央" },
+                    if tension_is_top { "上端筋" } else { "下端筋" }
                 )
-            });
-            (ratio, detail)
-        }
-        BondMethod::Rc1991 => {
-            let n_t = info.tension_count_1991;
-            let phi = n_t * std::f64::consts::PI * info.main_dia;
-            let is_end = !(0.25 < forces.pos && forces.pos < 0.75);
-            let bond = rc_beam_bond_check_1991(q_design, props.j, phi, fc_raw, is_end, long_term);
-            let ratio = bond.as_ref().map(|b| b.ratio).unwrap_or(0.0);
-            let detail = bond.as_ref().map(|b| {
-                format!(
-                    "1991: τa={:.3} N/mm², fa={:.3} N/mm², ψ={:.1} mm, \
-                     Q={:.1} N, 付着検定比={:.3}（{}）",
-                    b.tau,
-                    b.fa,
-                    phi,
+                    });
+                (ratio, detail)
+            }
+            BondMethod::Rc1991 => {
+                let n_t = info.tension_count_1991;
+                let phi = n_t * std::f64::consts::PI * info.main_dia;
+                let is_end = !(0.25 < forces.pos && forces.pos < 0.75);
+                let bond = rc_beam_bond_check_1991_with_rebar(
                     q_design,
-                    b.ratio,
-                    if is_end {
-                        "端部・上端筋"
-                    } else {
-                        "中央・下端筋"
-                    }
-                )
-            });
-            (ratio, detail)
-        }
-    };
+                    props.j,
+                    phi,
+                    fc_raw,
+                    tension_is_top,
+                    long_term,
+                    deformed_rebar,
+                );
+                let ratio = bond.as_ref().map(|b| b.ratio).unwrap_or(0.0);
+                let detail = bond.as_ref().map(|b| {
+                    format!(
+                        "1991: τa={:.3} N/mm², fa={:.3} N/mm², ψ={:.1} mm, \
+                     Q={:.1} N, 付着検定比={:.3}（{}・{}）",
+                        b.tau,
+                        b.fa,
+                        phi,
+                        q_design,
+                        b.ratio,
+                        if is_end { "端部" } else { "中央" },
+                        if tension_is_top {
+                            "上端筋"
+                        } else {
+                            "下端筋"
+                        }
+                    )
+                });
+                (ratio, detail)
+            }
+        };
 
     let basis = "RC 規準13条（梁の曲げ・せん断・付着）".to_string();
     let mid_slab_note = if use_t_flange {
@@ -715,6 +729,74 @@ mod tests {
         let design = crate::rc::RcDesign;
         let result = design.check(&forces, &sec, &mat, &ctx).unwrap_checked();
         assert!(crate::full_detail(&result).contains("省略"));
+    }
+
+    #[test]
+    fn test_beam_bond_detail_uses_bending_sign_and_position_independently() {
+        let shape = rc_beam_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
+        let sec = make_section(shape);
+        let mat = make_material(24.0, "SD345");
+        let mut ctx = ctx_beam(LoadTerm::Long);
+        ctx.length = 3000.0;
+        ctx.bond_method = BondMethod::Rc1991;
+        for (pos, mz, expected) in [
+            (0.0, -30.0e6, "端部・上端筋"),
+            (0.5, -30.0e6, "中央・上端筋"),
+            (0.0, 30.0e6, "端部・下端筋"),
+            (0.5, 30.0e6, "中央・下端筋"),
+        ] {
+            let forces = MemberForcesAt {
+                pos,
+                n: 0.0,
+                qy: 20_000.0,
+                qz: 0.0,
+                my: 0.0,
+                mz,
+            };
+            let result = crate::RcDesign
+                .check(&forces, &sec, &mat, &ctx)
+                .unwrap_checked();
+            let detail = result
+                .components
+                .iter()
+                .find(|c| c.kind == CheckKind::Bond)
+                .expect("Bond component")
+                .detail
+                .clone();
+            assert!(detail.contains(expected), "{detail}");
+        }
+    }
+
+    #[test]
+    fn test_beam_bond_selects_rebar_category_and_grade() {
+        let shape = rc_beam_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
+        let sec = make_section(shape);
+        let mut ctx = ctx_beam(LoadTerm::Long);
+        ctx.length = 3000.0;
+        ctx.bond_method = BondMethod::Rc1991;
+        let forces = MemberForcesAt {
+            pos: 0.5,
+            n: 0.0,
+            qy: 20_000.0,
+            qz: 0.0,
+            my: 0.0,
+            mz: 30.0e6,
+        };
+        let mut detail = |grade: &str| {
+            ctx.rebar_material = Some(crate::rc::tests::make_rebar_material(grade, 235.0));
+            crate::RcDesign
+                .check(&forces, &sec, &make_material(24.0, grade), &ctx)
+                .unwrap_checked()
+                .components
+                .iter()
+                .find(|c| c.kind == CheckKind::Bond)
+                .expect("Bond component")
+                .detail
+                .clone()
+        };
+        assert!(detail("SD345").contains("fa=2.315"));
+        assert!(detail("SR235").contains("fa=0.640"));
+        assert!(detail("任意名称").contains("fa=2.315"));
     }
 
     /// 断片が意図した component に配置されていることの確認

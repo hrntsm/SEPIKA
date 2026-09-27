@@ -2,7 +2,7 @@
 //! 既定の検定経路は RC 規準1999 方式。
 
 use super::section_props::RcRebarInfo;
-use super::{concrete_allowable_bond, one_bar_area};
+use super::{concrete_allowable_bond_for_rebar, one_bar_area};
 
 /// RC 規準 1991 方式の付着検定結果。
 pub struct Bond1991Result {
@@ -25,11 +25,23 @@ pub fn rc_beam_bond_check_1991(
     top_bar: bool,
     long_term: bool,
 ) -> Option<Bond1991Result> {
+    rc_beam_bond_check_1991_with_rebar(q_abs, j, phi, fc_raw, top_bar, long_term, true)
+}
+
+pub(crate) fn rc_beam_bond_check_1991_with_rebar(
+    q_abs: f64,
+    j: f64,
+    phi: f64,
+    fc_raw: f64,
+    top_bar: bool,
+    long_term: bool,
+    deformed: bool,
+) -> Option<Bond1991Result> {
     if q_abs < 0.0 || j <= 0.0 || phi <= 0.0 || fc_raw <= 0.0 {
         return None;
     }
     let tau = q_abs / (phi * j);
-    let fa = concrete_allowable_bond(fc_raw, top_bar, long_term);
+    let fa = concrete_allowable_bond_for_rebar(fc_raw, top_bar, long_term, deformed);
     if fa <= 0.0 {
         return None;
     }
@@ -69,6 +81,7 @@ fn one_bar_perimeter(dia: f64) -> f64 {
 /// `pos`: 検定断面の部材内位置（0.0〜1.0）。
 /// `lo`: 柱面間距離 Lo [mm]。`lo<=0` の場合は `None` を返す（検定省略）。
 /// `fc_raw`: コンクリート設計基準強度 Fc [N/mm²]。
+#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rc_beam_bond_check(
     pos: f64,
@@ -81,6 +94,37 @@ pub(crate) fn rc_beam_bond_check(
     info: &RcRebarInfo,
     fc_raw: f64,
     long_term: bool,
+) -> Option<BondCheckResult> {
+    rc_beam_bond_check_with_rebar(
+        pos,
+        lo,
+        b,
+        d_eff,
+        j,
+        at,
+        mz_abs,
+        info,
+        fc_raw,
+        long_term,
+        !(0.25 < pos && pos < 0.75),
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn rc_beam_bond_check_with_rebar(
+    pos: f64,
+    lo: f64,
+    b: f64,
+    d_eff: f64,
+    j: f64,
+    at: f64,
+    mz_abs: f64,
+    info: &RcRebarInfo,
+    fc_raw: f64,
+    long_term: bool,
+    top_bar: bool,
+    deformed: bool,
 ) -> Option<BondCheckResult> {
     if lo <= 0.0 || info.tension_count == 0 || info.main_dia <= 0.0 || at <= 0.0 || j <= 0.0 {
         return None;
@@ -120,8 +164,12 @@ pub(crate) fn rc_beam_bond_check(
         return None;
     }
 
-    let fb_other = fc_raw / 60.0 + 0.6;
-    let fb_long = if is_end { 0.8 * fb_other } else { fb_other };
+    let fb_other = if deformed {
+        fc_raw / 60.0 + 0.6
+    } else {
+        fc_raw / 30.0 + 0.4
+    };
+    let fb_long = if top_bar { 0.8 * fb_other } else { fb_other };
     let fb_row1 = if long_term { fb_long } else { fb_long * 1.5 };
     let fb = if info.tension_layers >= 2 {
         0.6 * fb_row1
