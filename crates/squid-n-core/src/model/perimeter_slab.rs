@@ -156,10 +156,7 @@ fn column_dimension(
     }
     let normal = [-dy / len, dx / len];
     let cross = [-u[1], u[0]];
-    Ok(section.width
-        * normal[0]
-            .abs()
-            .mul_add(u[0].abs(), normal[1].abs() * u[1].abs())
+    Ok(section.width * (normal[0] * u[0] + normal[1] * u[1]).abs()
         + section.depth * (normal[0] * cross[0] + normal[1] * cross[1]).abs())
 }
 
@@ -410,5 +407,6 @@ mod tests {
         assert_eq!(dimensions([6000.0, 0.0, 0.0], [1.0, 0.0, 0.0]), 400.0);
         assert_eq!(dimensions([0.0, 6000.0, 0.0], [0.0, 1.0, 0.0]), 400.0);
         assert_eq!(dimensions([0.0, 6000.0, 0.0], [1.0, 0.0, 0.0]), 600.0);
+        assert_eq!(dimensions([6000.0, 6000.0, 0.0], [1.0, 1.0, 0.0]), 400.0);
     }
 }
