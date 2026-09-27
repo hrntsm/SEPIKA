@@ -304,17 +304,24 @@ pub(super) fn validate_composite_material(
     use squid_n_core::section_shape::SectionShape;
     if matches!(
         shape,
-        SectionShape::SrcBeamRect { .. }
+        SectionShape::RcBeamRect { .. }
+            | SectionShape::RcColumnRect { .. }
+            | SectionShape::RcColumnCircle { .. }
+            | SectionShape::SrcBeamRect { .. }
             | SectionShape::SrcColumnRect { .. }
             | SectionShape::CftBox { .. }
             | SectionShape::CftPipe { .. }
     ) && !mat.fc.is_some_and(|fc| fc.is_finite() && fc > 0.0)
     {
-        return Err("SRC/CFT 断面のコンクリート Fc が未設定または不正です".into());
+        return Err("RC/SRC/CFT 断面のコンクリート Fc が未設定または不正です".into());
     }
     if matches!(
         shape,
-        SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
+        SectionShape::RcBeamRect { .. }
+            | SectionShape::RcColumnRect { .. }
+            | SectionShape::RcColumnCircle { .. }
+            | SectionShape::SrcBeamRect { .. }
+            | SectionShape::SrcColumnRect { .. }
     ) && mat
         .fc
         .and_then(|fc| {
@@ -322,7 +329,7 @@ pub(super) fn validate_composite_material(
         })
         .is_none()
     {
-        return Err("SRC 断面のコンクリート密度またはγCが不正です".into());
+        return Err("RC/SRC 断面のコンクリート密度またはγCが不正です".into());
     }
     Ok(())
 }

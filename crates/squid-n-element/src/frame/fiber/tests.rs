@@ -218,8 +218,16 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
                 material.density = 2.4e-9;
             }
         }
-        model.materials[1].young =
+        let ec =
             squid_n_core::section_shape::concrete_young_modulus_from_density(24.0, 2.4e-9).unwrap();
+        model.materials[1].young = if matches!(
+            model.sections[0].shape.as_ref(),
+            Some(squid_n_core::section_shape::SectionShape::RcColumnRect { .. })
+        ) {
+            12345.0
+        } else {
+            ec
+        };
 
         let beam = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
         let fiber = FiberBeam::new(
@@ -228,6 +236,17 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
         );
+        if matches!(
+            model.sections[0].shape.as_ref(),
+            Some(squid_n_core::section_shape::SectionShape::RcColumnRect { .. })
+        ) {
+            assert_relative_eq!(beam.e, ec, epsilon = 1.0e-9);
+            assert_relative_eq!(
+                fiber.phi_y,
+                12.0 * ec * beam.iz / (beam.g * beam.as_y * fiber.flex_length.powi(2)),
+                epsilon = 1.0e-12
+            );
+        }
         let mass_beam = beam.mass_matrix(crate::behavior::MassOption::Consistent);
         let mass_fiber = fiber.mass_matrix(crate::behavior::MassOption::Consistent);
         let lumped_fiber = fiber.mass_matrix(crate::behavior::MassOption::Lumped);
@@ -1409,6 +1428,7 @@ fn test_torsional_stiffness_and_internal_force() {
 #[test]
 fn 不正な質量特性でもfiberはlumpedで生成できconsistentで失敗する() {
     let mut model = build_test_model(Some(78846.15));
+    model.materials[0].density = 2.4e-9;
     model.sections[0].shape = Some(squid_n_core::section_shape::SectionShape::RcColumnRect {
         b: 400.0,
         d: 400.0,
@@ -2140,7 +2160,7 @@ fn rc_fiber_model() -> Model {
                 category: MaterialCategory::Concrete,
                 young: 25000.0,
                 poisson: 0.2,
-                density: 0.0,
+                density: 2.4e-9,
                 shear: Some(0.0),
                 fc: Some(30.0),
                 fy: None,

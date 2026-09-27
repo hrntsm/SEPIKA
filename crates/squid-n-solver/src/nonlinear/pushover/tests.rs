@@ -293,6 +293,7 @@ fn test_pushover_stops_when_concrete_strength_unset() {
         },
     });
     model.materials[0].category = squid_n_core::model::MaterialCategory::Concrete;
+    model.materials[0].density = 2.4e-9;
     model.materials[0].name = "conc".into();
     model.materials[0].fy = None;
     model.materials[0].fc = None;

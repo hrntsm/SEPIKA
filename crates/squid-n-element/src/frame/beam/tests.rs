@@ -247,15 +247,33 @@ fn test_beam_new_src_cft_composite_props() {
     model.sections[0] = SectionShape::RcColumnRect {
         b: 600.0,
         d: 600.0,
-        rebar: rc_rebar,
+        rebar: rc_rebar.clone(),
     }
     .to_section(SectionId(0), "RC-600".into());
     model.sections[0].material = Some(MaterialId(0));
     let beam = BeamElement::new(&make_elem(0), &model);
+    assert!((beam.e - ec).abs() < 1e-9);
     let mass = beam.mass_matrix(MassOption::Lumped);
     assert!(
         (mass.get(0, 0) + mass.get(6, 6) - beam.density * beam.a_mass * beam.length).abs() < 1e-9
     );
+
+    model.sections[0] = SectionShape::RcColumnCircle {
+        d: 600.0,
+        rebar: squid_n_core::section_shape::RcCircleColumnRebar {
+            main_dia: 22.0,
+            count: 16,
+            cover: 50.0,
+            hoop: squid_n_core::section_shape::CircleColumnHoop {
+                dia: 10.0,
+                pitch: 100.0,
+            },
+        },
+    }
+    .to_section(SectionId(0), "RC-circle-600".into());
+    model.sections[0].material = Some(MaterialId(0));
+    let circle_beam = BeamElement::new(&make_elem(0), &model);
+    assert!((circle_beam.e - ec).abs() < 1e-9);
 
     model.sections[0] = Section {
         material: Some(MaterialId(0)),
@@ -279,6 +297,26 @@ fn test_beam_new_src_cft_composite_props() {
     let error = BeamElement::try_new(&make_elem(0), &model)
         .err()
         .expect("非有限な密度は要素構築に失敗する");
+    assert!(error.contains("密度またはγCが不正"));
+
+    model.sections[0] = SectionShape::RcColumnRect {
+        b: 600.0,
+        d: 600.0,
+        rebar: rc_rebar,
+    }
+    .to_section(SectionId(0), "RC-600-invalid".into());
+    model.sections[0].material = Some(MaterialId(0));
+    model.materials[0].fc = None;
+    let error = BeamElement::try_new(&make_elem(0), &model)
+        .err()
+        .expect("不正な RC の Fc は要素構築に失敗する");
+    assert!(error.contains("Fc が未設定または不正"));
+
+    model.materials[0].fc = Some(24.0);
+    model.materials[0].density = 0.0;
+    let error = BeamElement::try_new(&make_elem(0), &model)
+        .err()
+        .expect("不正な RC 密度は要素構築に失敗する");
     assert!(error.contains("密度またはγCが不正"));
 }
 

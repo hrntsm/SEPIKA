@@ -66,7 +66,13 @@ impl BeamElement {
             super::stiffness_factors::validate_composite_material(shape, &mat)?;
         }
         let (e, g) = match sec.shape.as_ref() {
-            Some(SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }) => {
+            Some(
+                SectionShape::RcBeamRect { .. }
+                | SectionShape::RcColumnRect { .. }
+                | SectionShape::RcColumnCircle { .. }
+                | SectionShape::SrcBeamRect { .. }
+                | SectionShape::SrcColumnRect { .. },
+            ) => {
                 let ec = mat
                     .fc
                     .and_then(|fc| {
@@ -75,7 +81,7 @@ impl BeamElement {
                             mat.density,
                         )
                     })
-                    .ok_or_else(|| "SRC 断面のコンクリート密度またはγCが不正です".to_string())?;
+                    .ok_or_else(|| "RC/SRC 断面のコンクリート密度またはγCが不正です".to_string())?;
                 (ec, ec / (2.0 * (1.0 + mat.poisson)))
             }
             _ => (mat.young, mat.shear_modulus()),

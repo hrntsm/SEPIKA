@@ -407,7 +407,10 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             let shape = model.element_section(e)?.shape.as_ref()?;
             if !matches!(
                 shape,
-                SectionShape::SrcBeamRect { .. }
+                SectionShape::RcBeamRect { .. }
+                    | SectionShape::RcColumnRect { .. }
+                    | SectionShape::RcColumnCircle { .. }
+                    | SectionShape::SrcBeamRect { .. }
                     | SectionShape::SrcColumnRect { .. }
                     | SectionShape::CftBox { .. }
                     | SectionShape::CftPipe { .. }
@@ -423,16 +426,16 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         .collect();
     if !invalid_composite_fc.is_empty() {
         issues.push(ModelIssue::members(
-            "SRC/CFT 断面のコンクリート Fc が不正です",
+            "RC/SRC/CFT 断面のコンクリート Fc が不正です",
             "ID ",
             invalid_composite_fc,
             "コンクリート Fc が未設定、0 以下、または非有限値です",
-            "材料タブで SRC/CFT のコンクリート Fc に正の有限値を設定してください。\
+            "材料タブで RC/SRC/CFT のコンクリート Fc に正の有限値を設定してください。\
              不正な Fc のまま既定の等価断面性能へ切り替えて解析することはできません。",
         ));
     }
 
-    let invalid_src_density: Vec<ElemId> = model
+    let invalid_rc_src_density: Vec<ElemId> = model
         .elements
         .iter()
         .filter(|e| {
@@ -445,7 +448,11 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             let shape = model.element_section(e)?.shape.as_ref()?;
             if !matches!(
                 shape,
-                SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
+                SectionShape::RcBeamRect { .. }
+                    | SectionShape::RcColumnRect { .. }
+                    | SectionShape::RcColumnCircle { .. }
+                    | SectionShape::SrcBeamRect { .. }
+                    | SectionShape::SrcColumnRect { .. }
             ) {
                 return None;
             }
@@ -460,11 +467,11 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             .then_some(e.id)
         })
         .collect();
-    if !invalid_src_density.is_empty() {
+    if !invalid_rc_src_density.is_empty() {
         issues.push(ModelIssue::members(
-            "SRC 断面のコンクリート密度またはγCが不正です",
+            "RC/SRC 断面のコンクリート密度またはγCが不正です",
             "ID ",
-            invalid_src_density,
+            invalid_rc_src_density,
             "コンクリート密度またはγCが不正です",
             "材料タブで正の有限密度と、Fc に対応する有効な γC を設定してください。",
         ));
