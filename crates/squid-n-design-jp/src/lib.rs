@@ -51,7 +51,7 @@ use squid_n_core::model::{Material, Section, SteelDesignAttr};
 ///
 /// - `Standard1973`: 鋼構造設計規準 1973 年版。
 /// - `Asd2019`: 鋼構造許容応力度設計規準 2019 年版。既定値。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum SteelFbBasis {
     #[default]
     Asd2019,

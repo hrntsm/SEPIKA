@@ -91,6 +91,7 @@ impl App {
                 long_member_forces,
                 q_simple_by_elem: Some(&q0_by_elem),
                 beam_group_overrides: Some(&group_overrides),
+                steel_fb_basis: squid_n_design_jp::SteelFbBasis::default(),
             },
         );
         let joint_checks = report

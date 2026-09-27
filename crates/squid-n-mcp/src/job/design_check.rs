@@ -7,7 +7,7 @@ use super::{
     resolve_load_case, JobOutcome, JobParams,
 };
 use squid_n_core::model::{LoadCaseKind, Model};
-use squid_n_design_jp::{BondMethod, LoadTerm, MemberDesignCheckOptions, QdMethod};
+use squid_n_design_jp::{BondMethod, LoadTerm, MemberDesignCheckOptions, QdMethod, SteelFbBasis};
 use squid_n_job::JobError;
 
 /// DesignCheck ジョブの純粋計算部分。
@@ -80,6 +80,7 @@ pub(crate) fn compute_design_check_job(
             long_member_forces: long_member_forces.as_deref(),
             q_simple_by_elem: Some(&q0_by_elem),
             beam_group_overrides: None,
+            steel_fb_basis: SteelFbBasis::default(),
         },
     );
 
