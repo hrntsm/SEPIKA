@@ -257,9 +257,14 @@ pub fn steel_fb_h_asd2019(
 ///
 /// - 座屈区間中央部（[`DesignCtx::mid_moment_z`]）の絶対値が両端部より
 ///   大きい場合は、区間内の最大曲げが端部にないため安全側の `pλb=0.3` とする。
+/// - `lb_is_partial=true`（横補剛により座屈区間が部材の部分区間）の場合は
+///   `pλb=0.3` とする。
 /// - [`DesignCtx::end_moments_z`] が `None` の場合も同様に安全側の `pλb=0.3`。
 /// - `M1≈0`（両端とも曲げがほぼない）のときは `M2/M1=0` 扱いで `pλb=0.6`。
-pub(crate) fn steel_p_lambda_b(ctx: &DesignCtx) -> f64 {
+pub(crate) fn steel_p_lambda_b(ctx: &DesignCtx, lb_is_partial: bool) -> f64 {
+    if lb_is_partial {
+        return 0.3;
+    }
     let Some(m2_over_m1) = end_moment_ratio_m2_m1(ctx) else {
         return 0.3;
     };

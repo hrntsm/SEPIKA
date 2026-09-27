@@ -80,7 +80,8 @@ pub(crate) fn check_beam(
                     .map(|a| resolve_lb(forces.pos, ctx.length, a.lb_direct, a.lateral_brace_count))
                     .unwrap_or(ctx.length)
             });
-            let c = steel_c_factor(ctx, lb < ctx.length - 1e-9);
+            let lb_is_partial = lb < ctx.length - 1e-9;
+            let c = steel_c_factor(ctx, lb_is_partial);
             match ctx.steel_fb_basis {
                 SteelFbBasis::Standard1973 => {
                     let (i_t, af) = steel_lateral_buckling_i_af(sec, tf, tw);
@@ -92,7 +93,7 @@ pub(crate) fn check_beam(
                     let j = sec.j;
                     let e = mat.young;
                     let g = mat.shear.unwrap_or(e / (2.0 * (1.0 + mat.poisson)));
-                    let p_lambda_b = steel_p_lambda_b(ctx);
+                    let p_lambda_b = steel_p_lambda_b(ctx, lb_is_partial);
                     steel_fb_h_asd2019(f, term, lb, iz, iw, j, e, g, z_strong, c, p_lambda_b)
                 }
             }
@@ -1083,7 +1084,7 @@ mod tests {
             g,
             sec.iy / (sec.depth / 2.0),
             1.0,
-            steel_p_lambda_b(&ctx),
+            steel_p_lambda_b(&ctx, false),
         );
         assert!(
             crate::full_detail(&result).contains(&format!("fb={:.4}", fb_expected)),
@@ -1146,7 +1147,7 @@ mod tests {
         let iw = steel_warping_constant(&sec, 13.0);
         let e = mat_v.young;
         let g = e / (2.0 * (1.0 + mat_v.poisson));
-        let p_lambda_b = steel_p_lambda_b(&ctx);
+        let p_lambda_b = steel_p_lambda_b(&ctx, false);
         let lb = 300.0_f64;
 
         // My, Me, λb を独立に計算し、λb ≤ pλb（全塑性域）であることを確認したうえで
@@ -1194,6 +1195,67 @@ mod tests {
         );
     }
 
+    /// 梁の Asd2019 経路でも、部分補剛区間の pλb=0.3 を fb に反映する。
+    #[test]
+    fn test_beam_check_fb_basis_asd2019_partial_lb_uses_p_lambda_b_0_3() {
+        use squid_n_core::ids::ElemId;
+        use squid_n_core::model::SteelDesignAttr;
+
+        let sec = h_section(400.0, 200.0, 8.0, 13.0);
+        let mat_v = mat("SN400B");
+        let forces = MemberForcesAt {
+            pos: 0.5,
+            n: 0.0,
+            qy: 0.0,
+            qz: 0.0,
+            my: 0.0,
+            mz: 5e7,
+        };
+        let ctx = DesignCtx {
+            term: LoadTerm::Long,
+            kind: MemberKind::Beam,
+            length: 6000.0,
+            end_moments_z: Some((100.0, -100.0)),
+            steel_attr: Some(SteelDesignAttr {
+                elem: ElemId(0),
+                joint_flange_loss: 0.0,
+                joint_web_loss: 0.0,
+                scallop_web_loss: 0.0,
+                lb_direct: None,
+                lateral_brace_count: Some(1),
+                lk_y_direct: None,
+                lk_z_direct: None,
+                c_direct: None,
+            }),
+            steel_fb_basis: SteelFbBasis::Asd2019,
+            ..Default::default()
+        };
+        let result = SteelDesign
+            .check(&forces, &sec, &mat_v, &ctx)
+            .unwrap_checked();
+        let iw = steel_warping_constant(&sec, 13.0);
+        let e = mat_v.young;
+        let g = e / (2.0 * (1.0 + mat_v.poisson));
+        let fb_expected = steel_fb_h_asd2019(
+            235.0,
+            LoadTerm::Long,
+            3000.0,
+            sec.iz,
+            iw,
+            sec.j,
+            e,
+            g,
+            sec.iy / (sec.depth / 2.0),
+            1.0,
+            0.3,
+        );
+        assert!(
+            crate::full_detail(&result).contains(&format!("fb={fb_expected:.4}")),
+            "detail={}",
+            crate::full_detail(&result)
+        );
+    }
+
     /// AIJ-ASD19 fb: eλb < λb（横座屈長さが長い）では弾性域式 fb=F/(2.17λb²)。
     #[test]
     fn test_beam_check_fb_basis_asd2019_elastic_region() {
@@ -1210,7 +1272,7 @@ mod tests {
             steel_fb_basis: SteelFbBasis::Asd2019,
             ..Default::default()
         };
-        let p_lambda_b = steel_p_lambda_b(&ctx);
+        let p_lambda_b = steel_p_lambda_b(&ctx, false);
         let lb = 20_000.0;
         let fb = steel_fb_h_asd2019(
             f,
@@ -1277,7 +1339,7 @@ mod tests {
             mid_moment_z: Some(200.0),
             ..Default::default()
         };
-        let p = steel_p_lambda_b(&ctx);
+        let p = steel_p_lambda_b(&ctx, false);
         assert!((p - 0.3).abs() < 1e-9, "p={}", p);
     }
 
@@ -1288,7 +1350,7 @@ mod tests {
             end_moments_z: Some((100.0, 100.0)),
             ..Default::default()
         };
-        let p = steel_p_lambda_b(&ctx);
+        let p = steel_p_lambda_b(&ctx, false);
         assert!((p - 0.3).abs() < 1e-9, "p={}", p);
     }
 
@@ -1299,7 +1361,7 @@ mod tests {
             end_moments_z: Some((100.0, -100.0)),
             ..Default::default()
         };
-        let p = steel_p_lambda_b(&ctx);
+        let p = steel_p_lambda_b(&ctx, false);
         assert!((p - 0.9).abs() < 1e-9, "p={}", p);
     }
 
@@ -1310,8 +1372,22 @@ mod tests {
             end_moments_z: None,
             ..Default::default()
         };
-        let p = steel_p_lambda_b(&ctx);
+        let p = steel_p_lambda_b(&ctx, false);
         assert!((p - 0.3).abs() < 1e-9, "p={}", p);
+    }
+
+    /// 部分補剛区間では、全長区間と同じ端部モーメントを与えても pλb=0.3 とする。
+    #[test]
+    fn test_p_lambda_b_partial_lb_is_0_3_independent_of_end_moments() {
+        let ctx = DesignCtx {
+            end_moments_z: Some((100.0, -50.0)),
+            ..Default::default()
+        };
+        let full = steel_p_lambda_b(&ctx, false);
+        let partial = steel_p_lambda_b(&ctx, true);
+        assert!((full - 0.75).abs() < 1e-9, "full={}", full);
+        assert!((partial - 0.3).abs() < 1e-9, "partial={}", partial);
+        assert_eq!(steel_c_factor(&ctx, true), 1.0);
     }
 
     // 大梁必要横補剛数

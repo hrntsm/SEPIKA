@@ -62,7 +62,7 @@ pub(crate) fn check_column(
                 let j = sec.j;
                 let e = mat.young;
                 let g = mat.shear.unwrap_or(e / (2.0 * (1.0 + mat.poisson)));
-                let p_lambda_b = steel_p_lambda_b(ctx);
+                let p_lambda_b = steel_p_lambda_b(ctx, false);
                 steel_fb_h_asd2019(
                     f, term, ctx.length, iz, iw, j, e, g, z_strong, c, p_lambda_b,
                 )
@@ -534,7 +534,7 @@ mod tests {
         let iw = steel_warping_constant(&sec, 13.0);
         let e = mat_v.young;
         let g = e / (2.0 * (1.0 + mat_v.poisson));
-        let p_lambda_b = steel_p_lambda_b(&ctx);
+        let p_lambda_b = steel_p_lambda_b(&ctx, false);
         let c = steel_c_factor(&ctx, false);
         let fb_expected = steel_fb_h_asd2019(
             f,
