@@ -2,7 +2,6 @@
 //!
 //! 層間変位・偏心率など、当該層の柱を数える処理の判定ロジックの単一情報源。
 
-use squid_n_core::geom::is_vertical_axis;
 use squid_n_core::ids::{ElemId, NodeId, StoryId};
 use squid_n_core::model::DIAPHRAGM_LEVEL_TOL_MM;
 use squid_n_core::model::{ElementKind, FrameSectionUse, Model};
@@ -78,11 +77,6 @@ fn vertical_beam_adjacency(model: &Model) -> HashMap<NodeId, Vec<(NodeId, ElemId
         }
         let n0_id = elem.nodes[0];
         let n1_id = elem.nodes[1];
-        let n0 = &model.nodes[n0_id.index()];
-        let n1 = &model.nodes[n1_id.index()];
-        if !is_vertical_axis(n0.coord, n1.coord) {
-            continue;
-        }
         adj.entry(n0_id).or_default().push((n1_id, elem.id));
         adj.entry(n1_id).or_default().push((n0_id, elem.id));
     }
@@ -239,5 +233,17 @@ mod tests {
         assert_eq!(cols[0].top, NodeId(2));
         assert_eq!(cols[0].bottom, NodeId(0));
         assert_eq!(cols[0].top_elem, ElemId(0), "代表 ID は最上側セグメント");
+    }
+
+    #[test]
+    fn test_story_columns_includes_sloped_column_use() {
+        let (mut model, top) = build_split_column_model();
+        model.nodes[1].coord = [500.0, 0.0, 2000.0];
+        model.nodes[2].coord = [1000.0, 0.0, 4000.0];
+
+        let cols = story_columns(&model, top);
+        assert_eq!(cols.len(), 1, "傾斜していても柱用途の連なりを数える");
+        assert_eq!(cols[0].top, NodeId(2));
+        assert_eq!(cols[0].bottom, NodeId(0));
     }
 }
