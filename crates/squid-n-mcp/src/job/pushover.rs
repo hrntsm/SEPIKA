@@ -18,7 +18,7 @@ pub(crate) fn compute_pushover_job(
         &mut work,
         &prepare_settings,
         params.design_period,
-    );
+    )?;
     let target = params.pushover_target();
     let cfg = squid_n_job::AnalysisSettings {
         push_dir: match params.dir {

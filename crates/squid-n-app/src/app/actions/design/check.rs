@@ -13,6 +13,10 @@ impl App {
     /// - 検定器は構造種別（`squid_n_core::structure_kind`）で選択する。
     pub fn run_design_check(&mut self) {
         self.apply_rigid_zones_for_analysis();
+        if let Err(error) = squid_n_load::floor::validate_one_way_directions(&self.core.model) {
+            self.report_error(error.to_string());
+            return;
+        }
         let Some(results) = &self.core.scoped.results else {
             return;
         };
@@ -153,6 +157,8 @@ impl App {
                 let span = match slab.one_way() {
                     Some(OneWayDir::X) => lx,
                     Some(OneWayDir::Y) => ly,
+                    Some(OneWayDir::Short) if (lx - ly).abs() >= 1e-6 => lx.min(ly),
+                    Some(OneWayDir::Short) => continue,
                     None => lx.min(ly),
                 };
                 if span > 1e-9 {
@@ -207,7 +213,10 @@ impl App {
 
         let w_of =
             |s: &squid_n_core::model::Slab| self.core.model.slab_intensity(s, LoadPurpose::Joist);
-        let transfer = squid_n_load::cascade::solve(&self.core.model, w_of, true);
+        let transfer = match squid_n_load::cascade::solve(&self.core.model, w_of, true) {
+            Ok(transfer) => transfer,
+            Err(_) => return,
+        };
 
         for sm in self.core.model.posts() {
             let Some((_, _, span)) = self.core.model.secondary_member_axis(sm) else {

@@ -12,10 +12,10 @@ use squid_n_core::ids::{NodeId, SecondaryMemberId, SlabId};
 use squid_n_core::model::{ElementKind, MemberLoadKind, Model, Slab};
 use squid_n_core::units::GRAVITY_MM_S2;
 
-use super::distribute_slab_resolved;
 use super::fem::{simple_beam_moment_at, simple_reactions};
 use super::geometry::dist3;
 use super::types::{BeamLoad, LoadShape, LoadTarget};
+use super::{distribute_slab_resolved, FloorDistributionError};
 use crate::secondary::project_on_segment;
 use squid_n_core::model::SecondaryJoistAxis;
 
@@ -610,8 +610,8 @@ pub fn joist_mass_equiv_udl(
 pub fn secondary_joist_distribution_loads(
     model: &Model,
     w_of: impl Fn(&Slab) -> f64,
-) -> HashMap<SecondaryMemberId, SecondaryJoistLoads> {
-    secondary_joist_distribution_split(model, w_of).0
+) -> Result<HashMap<SecondaryMemberId, SecondaryJoistLoads>, FloorDistributionError> {
+    Ok(secondary_joist_distribution_split(model, w_of)?.0)
 }
 
 /// [`secondary_joist_distribution_loads`] に加えて、**どの二次部材にも載らなかった**
@@ -625,12 +625,15 @@ pub fn secondary_joist_distribution_loads(
 pub fn secondary_joist_distribution_split(
     model: &Model,
     w_of: impl Fn(&Slab) -> f64,
-) -> (
-    HashMap<SecondaryMemberId, SecondaryJoistLoads>,
-    Vec<BeamLoad>,
-) {
+) -> Result<
+    (
+        HashMap<SecondaryMemberId, SecondaryJoistLoads>,
+        Vec<BeamLoad>,
+    ),
+    FloorDistributionError,
+> {
     let axes = model.secondary_joist_axes();
-    let tagged = tagged_span_loads(model, &w_of);
+    let tagged = tagged_span_loads(model, &w_of)?;
     let mut expected: HashMap<SecondaryMemberId, HashSet<SlabId>> = HashMap::new();
     for (slab_id, bl) in &tagged {
         let Some((p0, p1, loaded_len)) = span_points(model, bl) else {
@@ -741,7 +744,7 @@ pub fn secondary_joist_distribution_split(
             entry.rep_slab_id = Some(*slab_id);
         }
     }
-    (map, leftover)
+    Ok((map, leftover))
 }
 
 fn span_points(model: &Model, bl: &BeamLoad) -> Option<([f64; 3], [f64; 3], f64)> {
@@ -776,14 +779,17 @@ fn span_belongs_to_axis(
     beam_d + 1e-9 >= joist_d
 }
 
-fn tagged_span_loads(model: &Model, w_of: &impl Fn(&Slab) -> f64) -> Vec<(SlabId, BeamLoad)> {
+fn tagged_span_loads(
+    model: &Model,
+    w_of: &impl Fn(&Slab) -> f64,
+) -> Result<Vec<(SlabId, BeamLoad)>, FloorDistributionError> {
     let mut out = Vec::new();
     for slab in &model.slabs {
-        for bl in distribute_slab_resolved(model, slab, w_of(slab)) {
+        for bl in distribute_slab_resolved(model, slab, w_of(slab))? {
             out.push((slab.id, bl));
         }
     }
-    out
+    Ok(out)
 }
 
 fn slab_in_joist_scope(model: &Model, joist_id: SecondaryMemberId, slab_id: SlabId) -> bool {
@@ -817,8 +823,10 @@ pub fn orient_member_loads(
 /// 床板分配から荷重が得られず、断面検定対象から外れる二次部材小梁の本数。
 ///
 /// 実部材化済み・断面未割当・退化は数えない。
-pub fn secondary_joists_missing_distribution(model: &Model) -> usize {
-    secondary_joist_distribution_gaps(model).total()
+pub fn secondary_joists_missing_distribution(
+    model: &Model,
+) -> Result<usize, FloorDistributionError> {
+    Ok(secondary_joist_distribution_gaps(model)?.total())
 }
 
 /// 二次部材小梁の分配欠落を理由別に数える（診断用。1 本は最も具体的な理由へ排他集計）。
@@ -840,11 +848,13 @@ impl SecondaryJoistDistributionGaps {
 }
 
 /// [`secondary_joists_missing_distribution`] の内訳。
-pub fn secondary_joist_distribution_gaps(model: &Model) -> SecondaryJoistDistributionGaps {
+pub fn secondary_joist_distribution_gaps(
+    model: &Model,
+) -> Result<SecondaryJoistDistributionGaps, FloorDistributionError> {
     use squid_n_core::model::{LoadPurpose, SecondaryMemberKind};
 
     let w_of = |s: &Slab| model.slab_intensity(s, LoadPurpose::Joist);
-    let distribution = secondary_joist_distribution_loads(model, w_of);
+    let distribution = secondary_joist_distribution_loads(model, w_of)?;
 
     let mut gaps = SecondaryJoistDistributionGaps::default();
     for sm in model.joists() {
@@ -876,7 +886,7 @@ pub fn secondary_joist_distribution_gaps(model: &Model) -> SecondaryJoistDistrib
             }
         }
     }
-    gaps
+    Ok(gaps)
 }
 
 #[cfg(test)]
@@ -985,7 +995,7 @@ mod tests {
     fn distribution_loads_on_shared_joist_match_average_width() {
         let model = square_model_with_shared_joist();
         let w_of = |_: &Slab| 0.005_f64;
-        let map = secondary_joist_distribution_loads(&model, w_of);
+        let map = secondary_joist_distribution_loads(&model, w_of).unwrap();
         let key = squid_n_core::ids::SecondaryMemberId(4);
         let entry = map.get(&key).expect("共有辺小梁に Span 荷重がある");
         let ex = simple_beam_extremes(&entry.member_loads, 4000.0, 205_000.0, 1.0e8);
@@ -1139,7 +1149,7 @@ mod tests {
             .add_enclosed_slab_from_nodes(&[NodeId(4), NodeId(1), NodeId(2), NodeId(5)], plate);
         model.floor_regions[0].slab_ids = vec![SlabId(0), SlabId(1), third];
         let w_of = |_: &Slab| 0.005_f64;
-        let map = secondary_joist_distribution_loads(&model, w_of);
+        let map = secondary_joist_distribution_loads(&model, w_of).unwrap();
         let key = squid_n_core::ids::SecondaryMemberId(4);
         let entry = map.get(&key).expect("分割辺も全長小梁へ合成される");
         let total: f64 = entry
@@ -1151,7 +1161,7 @@ mod tests {
             })
             .sum();
         let unsplit = square_model_with_shared_joist();
-        let unsplit_map = secondary_joist_distribution_loads(&unsplit, w_of);
+        let unsplit_map = secondary_joist_distribution_loads(&unsplit, w_of).unwrap();
         let unsplit_total: f64 = unsplit_map[&key]
             .member_loads
             .iter()
@@ -1232,7 +1242,7 @@ mod tests {
         // 旧略算の代表として spacing=3000 → w=15 を使う。テストコメントと一致。）
         let model = square_model_with_shared_joist();
         let w_of = |_: &Slab| 0.005_f64;
-        let map = secondary_joist_distribution_loads(&model, w_of);
+        let map = secondary_joist_distribution_loads(&model, w_of).unwrap();
         let key = squid_n_core::ids::SecondaryMemberId(4);
         let entry = map.get(&key).expect("共有辺");
         let l = 4000.0_f64;
@@ -1302,7 +1312,7 @@ mod tests {
                 name: "J2".into(),
             });
         let w_of = |_: &Slab| 0.005_f64;
-        let map = secondary_joist_distribution_loads(&model, w_of);
+        let map = secondary_joist_distribution_loads(&model, w_of).unwrap();
         let k1 = squid_n_core::ids::SecondaryMemberId(4);
         let k2 = squid_n_core::ids::SecondaryMemberId(6);
         let t1 = map
@@ -1426,7 +1436,7 @@ mod tests {
                 name: "parallel".into(),
             });
         let w_of = |_: &Slab| 0.005_f64;
-        let map = secondary_joist_distribution_loads(&model, w_of);
+        let map = secondary_joist_distribution_loads(&model, w_of).unwrap();
         let k_shared = squid_n_core::ids::SecondaryMemberId(4);
         let k_par = squid_n_core::ids::SecondaryMemberId(8);
         let t_shared = map
@@ -1449,7 +1459,7 @@ mod tests {
     fn shared_joist_expects_both_slabs() {
         let model = square_model_with_shared_joist();
         let w_of = |_: &Slab| 0.005_f64;
-        let map = secondary_joist_distribution_loads(&model, w_of);
+        let map = secondary_joist_distribution_loads(&model, w_of).unwrap();
         let key = squid_n_core::ids::SecondaryMemberId(4);
         let entry = map.get(&key).expect("共有辺");
         assert_eq!(entry.expected_slab_ids.len(), 2);
@@ -1463,7 +1473,7 @@ mod tests {
         model.slabs.pop();
         model.floor_regions[0].slab_ids = vec![SlabId(0)];
         let w_of = |_: &Slab| 0.005_f64;
-        let map = secondary_joist_distribution_loads(&model, w_of);
+        let map = secondary_joist_distribution_loads(&model, w_of).unwrap();
         let key = squid_n_core::ids::SecondaryMemberId(4);
         let entry = map.get(&key).expect("片側でも期待床板があれば載る");
         assert_eq!(entry.expected_slab_ids.len(), 1);
@@ -1522,7 +1532,7 @@ mod tests {
             name: "far".into(),
         });
         let w_of = |_: &Slab| 0.005_f64;
-        let map = secondary_joist_distribution_loads(&model, w_of);
+        let map = secondary_joist_distribution_loads(&model, w_of).unwrap();
         let k_far = squid_n_core::ids::SecondaryMemberId(10);
         let k_shared = squid_n_core::ids::SecondaryMemberId(4);
         assert!(

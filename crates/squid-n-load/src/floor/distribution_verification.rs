@@ -369,7 +369,7 @@ fn case1_square_6000_tritrapezoid_vs_reference() {
     let w = 0.005_f64;
     let side = 6000.0_f64;
     let (model, slab) = make_square_slab_model(side, DistributionMethod::TriTrapezoid, w);
-    let loads = distribute_slab(&model, &slab);
+    let loads = distribute_slab(&model, &slab).unwrap();
     let current = edge_totals(&loads, 4);
     let coords = slab.boundary_coords(&model).expect("境界座標");
     let (baseline_areas, _) = manual_quadrilateral_edge_areas(&coords);
@@ -401,7 +401,7 @@ fn case2_rect_6000x4000_tritrapezoid_vs_reference() {
     let w = 0.005_f64;
     let (lx, ly) = (6000.0_f64, 4000.0_f64);
     let (model, slab) = make_rect_slab_model(lx, ly, DistributionMethod::TriTrapezoid, w);
-    let loads = distribute_slab(&model, &slab);
+    let loads = distribute_slab(&model, &slab).unwrap();
     let current = edge_totals(&loads, 4);
     let coords = slab.boundary_coords(&model).expect("境界座標");
     let (baseline_areas, _) = manual_quadrilateral_edge_areas(&coords);
@@ -457,7 +457,7 @@ fn case3_large_floor_polygon200_vs_reference() {
     );
 
     let (model, slab) = make_rect_slab_model(lx, ly, DistributionMethod::TriTrapezoid, w);
-    let tri = edge_totals(&distribute_slab(&model, &slab), 4);
+    let tri = edge_totals(&distribute_slab(&model, &slab).unwrap(), 4);
     println!("参考 TriTrapezoid(現行矩形経路)[N]: {tri:?}");
 
     assert_total("現行polygon200", &current, w * lx * ly);
@@ -469,7 +469,7 @@ fn case3_large_floor_polygon200_vs_reference() {
 /// 非矩形床の現行 polygon と有限線分拡張方式を比較して出力する。
 fn run_nonrect_case(label: &str, pts: &[(f64, f64)], w: f64) {
     let (model, slab) = polygon_slab_model(pts, DistributionMethod::TriTrapezoid, w);
-    let loads = distribute_slab(&model, &slab);
+    let loads = distribute_slab(&model, &slab).unwrap();
     let n = pts.len();
     let current = edge_totals(&loads, n);
     let coords: Vec<[f64; 3]> = pts.iter().map(|(x, y)| [*x, *y, 0.0]).collect();
@@ -748,16 +748,16 @@ fn case5_joist_floor_primary_reactions_current_vs_reference() {
     let area = 6000.0 * 4000.0;
     let (model, left, right) = joist_floor_model(w);
 
-    let region_loads = distribute_region(&model, &model.floor_regions[0], |_| w);
+    let region_loads = distribute_region(&model, &model.floor_regions[0], |_| w).unwrap();
     assert_total("distribute_region", &[total_load(&region_loads)], w * area);
-    let (joist_map, _) = secondary_joist_distribution_split(&model, |_| w);
+    let (joist_map, _) = secondary_joist_distribution_split(&model, |_| w).unwrap();
     let joist_load_count = joist_map
         .get(&SecondaryMemberId(4))
         .map(|e| e.member_loads.len())
         .unwrap_or(0);
     assert!(joist_load_count > 0, "小梁に分配荷重がある");
 
-    let transfer = crate::cascade::solve(&model, |_| w, false);
+    let transfer = crate::cascade::solve(&model, |_| w, false).unwrap();
     assert!(transfer.unresolved.is_empty(), "{:?}", transfer.unresolved);
     let current = current_primary_by_girder(&model, &transfer);
     let baseline = segment_extension_primary_by_girder(&model, &[left, right], w);

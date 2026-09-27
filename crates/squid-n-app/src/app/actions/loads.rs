@@ -47,7 +47,14 @@ impl App {
     /// 解析実行系（`sync_auto_load_cases_action` 経由）・`generate_stories_action`
     /// の入口で毎回呼ぶことを想定した冪等な同期アクション。
     pub fn sync_gravity_load_cases_action(&mut self) {
-        let result = squid_n_job::auto_loads::compute_gravity_auto_load_cases(&self.core.model);
+        let result =
+            match squid_n_job::auto_loads::compute_gravity_auto_load_cases(&self.core.model) {
+                Ok(result) => result,
+                Err(error) => {
+                    self.report_error(error.to_string());
+                    return;
+                }
+            };
         for case in result.cases {
             self.sync_one_auto_case(case.name, case.kind, case.nodal, case.member);
         }
@@ -156,11 +163,17 @@ impl App {
         } else {
             None
         };
-        let result = squid_n_job::auto_loads::compute_auto_load_cases(
+        let result = match squid_n_job::auto_loads::compute_auto_load_cases(
             &self.core.model,
             &self.core.analysis_cfg,
             design_period,
-        );
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                self.report_error(error.to_string());
+                return;
+            }
+        };
         for notice in result.notices {
             self.report_notice(notice);
         }

@@ -1933,7 +1933,7 @@ fn slab_floor_load_reaches_primary_frame() {
     }
 
     // 実際に主架構へ届く鉛直荷重（非構造節点で捨てられるぶんを除く）。
-    let beam_loads = squid_n_job::auto_loads::compute_dl_beam_loads(model);
+    let beam_loads = squid_n_job::auto_loads::compute_dl_beam_loads(model).expect("DL 分配");
     let (nodal, mut member) = squid_n_job::auto_loads::slab_load_case_content(model, &beam_loads);
     let (nodal, extra_member) = resolve_nodal_to_primary(model, nodal, SPAN_TOL_MM);
     member.extend(extra_member);

@@ -8,6 +8,7 @@ use squid_n_core::model::{DistributionMethod, OneWayDir, Slab};
 use super::fem::{fem_trapezoid, fem_triangle, fem_uniform};
 use super::geometry::edge_len;
 use super::types::{push_edge, BeamLoad, LoadShape};
+use super::FloorDistributionError;
 
 fn edge_dir2(coords: &[[f64; 3]], i: usize) -> [f64; 2] {
     let n = coords.len();
@@ -39,7 +40,7 @@ pub(crate) fn distribute_rect(
     ly: f64,
     w: f64,
     loads: &mut Vec<BeamLoad>,
-) {
+) -> Result<(), FloorDistributionError> {
     match slab.method() {
         DistributionMethod::TriTrapezoid => {
             let is_square = (lx - ly).abs() < 1e-6;
@@ -74,7 +75,7 @@ pub(crate) fn distribute_rect(
         }
         DistributionMethod::OneWay => {
             if let Some(dir) = slab.one_way() {
-                distribute_one_way_dir(coords, dir, w, loads);
+                distribute_one_way_dir(slab.id, coords, dir, w, loads)?;
             } else {
                 let w_line = w * ly / 2.0;
                 for i in 0..4 {
@@ -110,6 +111,7 @@ pub(crate) fn distribute_rect(
             }
         }
     }
+    Ok(())
 }
 
 /// 一方向スラブの荷重伝達方向指定（`region.one_way() = Some(dir)`）に基づく分配（レビュー §1.13）。
@@ -119,14 +121,23 @@ pub(crate) fn distribute_rect(
 /// `w×(スパン長/2)`（スパン長＝伝達方向に平行な辺の長さ）。総和は
 /// `2×w×(スパン長/2)×負担辺長 = w×面積` で保存される。
 pub(crate) fn distribute_one_way_dir(
+    slab_id: squid_n_core::ids::SlabId,
     coords: &[[f64; 3]],
     dir: OneWayDir,
     w: f64,
     loads: &mut Vec<BeamLoad>,
-) {
+) -> Result<(), FloorDistributionError> {
     let axis = match dir {
         OneWayDir::X => [1.0, 0.0],
         OneWayDir::Y => [0.0, 1.0],
+        OneWayDir::Short => {
+            let len0 = edge_len(coords, 0);
+            let len1 = edge_len(coords, 1);
+            if (len0 - len1).abs() < 1e-6 {
+                return Err(FloorDistributionError::ShortDirectionOnSquare { slab_id });
+            }
+            edge_dir2(coords, if len0 < len1 { 0 } else { 1 })
+        }
     };
     let (parallel, bearing) = classify_rect_edges_by_axis(coords, axis);
     let span_len = edge_len(coords, parallel[0]);
@@ -140,4 +151,5 @@ pub(crate) fn distribute_one_way_dir(
             fem_uniform(w_line, l_e),
         );
     }
+    Ok(())
 }

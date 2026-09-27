@@ -21,6 +21,8 @@ pub struct SlabDraft {
     /// 荷重値の入力文字列。**UI 表示は kN/m²**（内部は `to_internal::area_load_kn_per_m2`）。
     pub load_value: String,
     pub method: DistributionMethod,
+    /// 一方向スラブの伝達方向。
+    pub one_way: Option<OneWayDir>,
     /// スラブ用途（積載荷重プリセット。`None` は積載寄与なし）。
     pub usage: Option<SlabUsage>,
     /// 任意入力の積載荷重 [kN/m²]（床用・小梁用・大梁用・地震用の順）。
@@ -46,6 +48,7 @@ impl Default for SlabDraft {
             load_kind: "DL".to_string(),
             load_value: "0".to_string(),
             method: DistributionMethod::TriTrapezoid,
+            one_way: None,
             usage: None,
             custom_live_kn_m2: std::array::from_fn(|_| "0".to_string()),
             section: None,
@@ -178,6 +181,7 @@ fn one_way_label(o: Option<OneWayDir>) -> &'static str {
         None => "なし",
         Some(OneWayDir::X) => "X",
         Some(OneWayDir::Y) => "Y",
+        Some(OneWayDir::Short) => "短辺",
     }
 }
 
@@ -357,7 +361,12 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
                     ("slab_one_way", slab.id.0),
                     one_way_label(slab.one_way()),
                     |ui| {
-                        for ow in [None, Some(OneWayDir::X), Some(OneWayDir::Y)] {
+                        for ow in [
+                            None,
+                            Some(OneWayDir::X),
+                            Some(OneWayDir::Y),
+                            Some(OneWayDir::Short),
+                        ] {
                             if ui
                                 .selectable_label(slab.one_way() == ow, one_way_label(ow))
                                 .clicked()
@@ -719,6 +728,23 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
             DistributionMethod::TributaryArea,
             "負担面積",
         );
+        ui.label("一方向:");
+        egui::ComboBox::from_id_salt("slab_draft_one_way")
+            .selected_text(one_way_label(app.ui.scoped.slab_draft.one_way))
+            .show_ui(ui, |ui| {
+                for one_way in [
+                    None,
+                    Some(OneWayDir::X),
+                    Some(OneWayDir::Y),
+                    Some(OneWayDir::Short),
+                ] {
+                    ui.selectable_value(
+                        &mut app.ui.scoped.slab_draft.one_way,
+                        one_way,
+                        one_way_label(one_way),
+                    );
+                }
+            });
     });
 
     let value_kn_m2 = app
@@ -737,7 +763,7 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
         loads: vec![AreaLoad { kind, value }],
         usage: app.ui.scoped.slab_draft.usage,
         method: app.ui.scoped.slab_draft.method,
-        one_way: None,
+        one_way: app.ui.scoped.slab_draft.one_way,
     };
 
     let mut pending_assign: Vec<FloorPlateAssignmentRegionId> = Vec::new();

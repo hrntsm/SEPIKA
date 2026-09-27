@@ -144,6 +144,10 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             "節点がありません。モデルタブで節点を追加してください。",
         ));
     }
+    if let Err(error) = squid_n_load::floor::validate_one_way_directions(model) {
+        issues.push(ModelIssue::model(error.to_string()));
+        return issues;
+    }
     if model.elements.is_empty() {
         issues.push(ModelIssue::model(
             "部材がありません。モデルタブで部材を追加してください。",
@@ -561,7 +565,13 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                  間柱の配置または壁領域の境界を確認してください。"
             )));
         }
-        let gaps = squid_n_load::floor::secondary_joist_distribution_gaps(model);
+        let gaps = match squid_n_load::floor::secondary_joist_distribution_gaps(model) {
+            Ok(gaps) => gaps,
+            Err(error) => {
+                issues.push(ModelIssue::model(error.to_string()));
+                return issues;
+            }
+        };
         if gaps.missing_expected_slabs != 0 {
             issues.push(
                 ModelIssue::model(format!(
@@ -588,7 +598,13 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             use squid_n_core::model::LoadPurpose;
             let w_of =
                 |sl: &squid_n_core::model::Slab| model.slab_intensity(sl, LoadPurpose::Joist);
-            let transfer = squid_n_load::cascade::solve(model, w_of, true);
+            let transfer = match squid_n_load::cascade::solve(model, w_of, true) {
+                Ok(transfer) => transfer,
+                Err(error) => {
+                    issues.push(ModelIssue::model(error.to_string()));
+                    return issues;
+                }
+            };
             if !transfer.invalid_end_shares.is_empty() {
                 issues.push(ModelIssue::model(format!(
                     "鉛直な二次部材の端部負担率が未指定または不正です（{} 本）。間柱の両端への負担率を非負・合計100%で指定し、自由端の負担率は0%にしてください。",

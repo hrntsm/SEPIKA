@@ -107,7 +107,7 @@ fn base_model() -> Model {
 fn solved(model: &mut Model) -> SecondaryTransfer {
     // 鉄骨重量割増は `load_cfg` 未設定なら 1.0（`joist_self_weight_udl`）。
     model.anchorize_secondary_members();
-    solve(model, |_| 0.0, true)
+    solve(model, |_| 0.0, true).unwrap()
 }
 
 /// 両端が大梁に載る小梁は、自重の半分ずつを主架構へ渡して終端する。
@@ -172,8 +172,8 @@ fn joist_mass_equiv_applies_steel_weight_factor() {
     m.unassigned_joists.push(joist(&m, 4, 5, "SB1"));
     m.anchorize_secondary_members();
 
-    let design = solve_with_basis(&m, |_| 0.0, true, SelfWeightBasis::Design);
-    let mass = solve_with_basis(&m, |_| 0.0, true, SelfWeightBasis::MassEquiv);
+    let design = solve_with_basis(&m, |_| 0.0, true, SelfWeightBasis::Design).unwrap();
+    let mass = solve_with_basis(&m, |_| 0.0, true, SelfWeightBasis::MassEquiv).unwrap();
     let key = squid_n_core::ids::SecondaryMemberId(4);
     let rd = design.members.get(&key).expect("設計の小梁").reactions;
     let rm = mass.members.get(&key).expect("物理質量の小梁").reactions;
@@ -494,7 +494,7 @@ fn cyclic_support_is_reported() {
     m.unassigned_joists.push(joist(&m, 4, 5, "C"));
 
     // 循環はアンカー解決できない（支持を辿ると自分へ戻る）ため、生座標のまま解く。
-    let t = solve(&m, |_| 0.0, true);
+    let t = solve(&m, |_| 0.0, true).unwrap();
     let keys = [
         squid_n_core::ids::SecondaryMemberId(0),
         squid_n_core::ids::SecondaryMemberId(2),
@@ -739,7 +739,7 @@ fn attached_slab_load_reaches_side_joist() {
     });
 
     m.anchorize_secondary_members();
-    let t = solve(&m, |_| w, true);
+    let t = solve(&m, |_| w, true).unwrap();
     let joist = t
         .members
         .get(&squid_n_core::ids::SecondaryMemberId(0))
@@ -853,7 +853,7 @@ fn midspan_joist_floor_conserves_total_through_cascade() {
     let resolved: Vec<BeamLoad> = m
         .slabs
         .iter()
-        .flat_map(|slab| distribute_slab_resolved(&m, slab, w))
+        .flat_map(|slab| distribute_slab_resolved(&m, slab, w).unwrap())
         .collect();
     let resolved_total: f64 = resolved.iter().map(|bl| bl.cmq.q_i + bl.cmq.q_j).sum();
     assert!(
@@ -869,7 +869,7 @@ fn midspan_joist_floor_conserves_total_through_cascade() {
     );
 
     // ② カスケードを経て主架構へ渡る荷重（残りの辺荷重 + 小梁の反力）の総和。
-    let transfer = solve(&m, |_| w, false);
+    let transfer = solve(&m, |_| w, false).unwrap();
     assert!(transfer.unresolved.is_empty(), "{:?}", transfer.unresolved);
     assert!(transfer.cyclic.is_empty());
     let (nodal, member) = transfer.primary_loads(&m);

@@ -12,7 +12,7 @@ pub(crate) fn compute_time_history_job(
     model: &Model,
     params: &JobParams,
 ) -> Result<JobOutcome, JobError> {
-    let (work, notices) = model_prepared_for_analysis(model, params);
+    let (work, notices) = model_prepared_for_analysis(model, params)?;
 
     let cfg = squid_n_job::AnalysisSettings {
         th_dt: params.dt,
