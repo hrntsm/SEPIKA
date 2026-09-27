@@ -630,6 +630,7 @@ mod tests {
                     seismic_weight: None,
                     weight_override: None,
                     dynamic_mass: None,
+                    standard_floor_load: None,
                 },
                 Story {
                     level_kind: Default::default(),
@@ -641,6 +642,7 @@ mod tests {
                     seismic_weight: Some(1000.0),
                     weight_override: None,
                     dynamic_mass: None,
+                    standard_floor_load: None,
                 },
                 Story {
                     level_kind: Default::default(),
@@ -652,6 +654,7 @@ mod tests {
                     seismic_weight: Some(1000.0),
                     weight_override: None,
                     dynamic_mass: None,
+                    standard_floor_load: None,
                 },
             ],
             ..Default::default()

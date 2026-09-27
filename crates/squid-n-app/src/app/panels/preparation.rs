@@ -395,6 +395,7 @@ impl App {
                         Col::num("レベル [mm]"),
                         Col::num("節点数"),
                         Col::label("構造"),
+                        Col::wide_num("標準床 [kN/m²]").hover("DL / 床 / 小梁 / 大梁 / 地震の順"),
                         Col::wide_num("W [kN]").hover(
                             "地震用重量。編集すると確定値として固定され、\
                              準備計算で再生成しても上書きされません（undo 可）",
@@ -417,6 +418,24 @@ impl App {
                         let story = *story;
                         let is_base = story.index() == 0;
 
+                        row.col(|ui| {
+                            let load = self.core.model.stories[story.index()].standard_floor_load;
+                            let mut values = load.map(|v| [v.dead, v.floor, v.joist, v.frame, v.seismic]).unwrap_or([0.0; 5]);
+                            let mut changed = false;
+                            ui.horizontal(|ui| {
+                                for value in &mut values {
+                                    let mut display = *value * 1.0e6;
+                                    let response = ui.add(egui::DragValue::new(&mut display).speed(0.1).range(0.0..=1.0e5));
+                                    if response.changed() { *value = display * 1.0e-6; changed = true; }
+                                }
+                            });
+                            if changed {
+                                self.ui.scoped.pending_story_cmds.push_back(Box::new(squid_n_edit::SetStandardFloorLoad {
+                                    story,
+                                    load: Some(squid_n_core::model::StandardFloorLoad { dead: values[0], floor: values[1], joist: values[2], frame: values[3], seismic: values[4] }),
+                                }));
+                            }
+                        });
                         row.col(|ui| {
                             let cell_id = egui::Id::new(("story_name", story.0));
                             let mut buf = ui

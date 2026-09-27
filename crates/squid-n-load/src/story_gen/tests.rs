@@ -4484,6 +4484,7 @@ fn split_column_model() -> Model {
         structure: Default::default(),
         level_kind: Default::default(),
         dynamic_mass: None,
+        standard_floor_load: None,
     });
     model
 }
@@ -4531,6 +4532,7 @@ fn test_predefined_stories_drive_the_assignment() {
         structure: Default::default(),
         level_kind: Default::default(),
         dynamic_mass: None,
+        standard_floor_load: None,
     });
 
     let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
@@ -4561,6 +4563,7 @@ fn test_story_without_floor_nodes_gets_no_diaphragm() {
         structure: Default::default(),
         level_kind: Default::default(),
         dynamic_mass: None,
+        standard_floor_load: None,
     });
     // レベル 10500 には節点がない（区間 (3500, 10500] には z=7000 の節点が入る）。
     model.stories.push(Story {
@@ -4573,6 +4576,7 @@ fn test_story_without_floor_nodes_gets_no_diaphragm() {
         structure: Default::default(),
         level_kind: Default::default(),
         dynamic_mass: None,
+        standard_floor_load: None,
     });
 
     let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
@@ -4617,6 +4621,7 @@ fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
             structure: Default::default(),
             level_kind: Default::default(),
             dynamic_mass: None,
+            standard_floor_load: None,
         },
         Story {
             id: StoryId(1),
@@ -4628,6 +4633,7 @@ fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
             structure: Default::default(),
             level_kind: Default::default(),
             dynamic_mass: None,
+            standard_floor_load: None,
         },
     ];
 
@@ -4644,6 +4650,7 @@ fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
             structure: Default::default(),
             level_kind: Default::default(),
             dynamic_mass: None,
+            standard_floor_load: None,
         },
         legacy.stories[0].clone(),
         legacy.stories[1].clone(),

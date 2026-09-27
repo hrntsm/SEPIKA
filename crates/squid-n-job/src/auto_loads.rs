@@ -128,6 +128,50 @@ fn slab_beam_loads_with_checked(
     Ok(beam_loads)
 }
 
+fn perimeter_beam_loads(
+    model: &Model,
+    purpose: Option<LoadPurpose>,
+) -> Result<Vec<BeamLoad>, crate::error::JobError> {
+    let mut loads = Vec::new();
+    for slab in squid_n_core::model::perimeter_slabs(model)
+        .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?
+    {
+        let Some(story) = model.stories.iter().find(|s| s.id == slab.story) else {
+            return Err(crate::error::JobError::InvalidInput(format!(
+                "外周スラブの階 {} が未解決です",
+                slab.story.0
+            )));
+        };
+        let Some(standard) = story.standard_floor_load else {
+            continue;
+        };
+        let q = standard.intensity(purpose);
+        if q == 0.0 {
+            continue;
+        }
+        loads.push(BeamLoad {
+            elem: slab.beam,
+            target: LoadTarget::Span {
+                nodes: [
+                    model.element(slab.beam).unwrap().nodes[0],
+                    model.element(slab.beam).unwrap().nodes[1],
+                ],
+                t: [0.0, 1.0],
+            },
+            shape: LoadShape::Uniform {
+                w: q * slab.extent_mm,
+            },
+            cmq: floor::Cmq {
+                c_i: 0.0,
+                c_j: 0.0,
+                q_i: 0.0,
+                q_j: 0.0,
+            },
+        });
+    }
+    Ok(loads)
+}
+
 /// `BeamLoad` 列を荷重ケースへ書き込める `NodalLoad`/`MemberLoad` へ変換する。
 pub fn slab_load_case_content(
     model: &Model,
@@ -505,8 +549,9 @@ pub fn compute_gravity_auto_load_cases(
     squid_n_load::floor::validate_one_way_directions(model)
         .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
     let beam_map = beam_elem_map(model);
-    let dl_beam_loads = compute_dl_beam_loads_checked(model)
+    let mut dl_beam_loads = compute_dl_beam_loads_checked(model)
         .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
+    dl_beam_loads.extend(perimeter_beam_loads(model, None)?);
 
     let (mut dl_nodal, mut dl_member) = slab_load_case_content(model, &dl_beam_loads);
     let load_cfg = model.load_cfg.clone().unwrap_or_default();
@@ -526,22 +571,24 @@ pub fn compute_gravity_auto_load_cases(
     let (dl_nodal, extra_member) = resolve_nodal_to_primary(model, dl_nodal, SPAN_TOL_MM);
     dl_member.extend(extra_member);
 
-    let ll_beam_loads = slab_beam_loads_with_checked(
+    let mut ll_beam_loads = slab_beam_loads_with_checked(
         model,
         |slab| slab.live_intensity(LoadPurpose::Frame),
         false,
         &beam_map,
     )
     .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
+    ll_beam_loads.extend(perimeter_beam_loads(model, Some(LoadPurpose::Frame))?);
     let (ll_nodal, ll_member) = slab_load_case_content(model, &ll_beam_loads);
 
-    let ls_beam_loads = slab_beam_loads_with_checked(
+    let mut ls_beam_loads = slab_beam_loads_with_checked(
         model,
         |slab| slab.live_intensity(LoadPurpose::Seismic),
         false,
         &beam_map,
     )
     .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
+    ls_beam_loads.extend(perimeter_beam_loads(model, Some(LoadPurpose::Seismic))?);
     let (ls_nodal, ls_member) = slab_load_case_content(model, &ls_beam_loads);
 
     Ok(AutoLoadComputeResult {
@@ -1261,6 +1308,7 @@ mod tests {
             structure: Default::default(),
             level_kind: Default::default(),
             dynamic_mass: None,
+            standard_floor_load: None,
         });
         let settings = AnalysisSettings {
             ai_mode: AiMode::SemiPrecise,

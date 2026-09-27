@@ -169,6 +169,21 @@ pub(super) fn draw_slabs(
         };
         draw_load_plate_polygon(painter, &coords, proj, theme::BEST_YELLOW, true);
     }
+    if let Ok(perimeters) = squid_n_core::model::perimeter_slabs(&app.core.model) {
+        for perimeter in perimeters {
+            let coords = perimeter.boundary.map(|p| proj.project(p));
+            let closed = coords.to_vec();
+            painter.add(egui::Shape::convex_polygon(
+                closed.clone(),
+                theme::translucent(theme::DATA_BLUE, 45),
+                egui::Stroke::new(1.5_f32, theme::DATA_BLUE),
+            ));
+            painter.add(egui::Shape::line(
+                closed,
+                egui::Stroke::new(1.5_f32, theme::DATA_BLUE),
+            ));
+        }
+    }
 }
 
 /// 要素にならない壁版の輪郭・塗り。

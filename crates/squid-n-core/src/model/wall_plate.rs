@@ -1147,6 +1147,7 @@ mod tests {
                 structure: Default::default(),
                 level_kind: Default::default(),
                 dynamic_mass: None,
+                standard_floor_load: None,
             });
         }
         let p = WallPlate {

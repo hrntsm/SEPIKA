@@ -308,6 +308,7 @@ fn build_nodes_and_stories(
             seismic_weight: None,
             weight_override: None,
             dynamic_mass: None,
+            standard_floor_load: None,
         });
     }
 

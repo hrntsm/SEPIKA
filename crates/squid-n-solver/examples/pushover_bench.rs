@@ -103,6 +103,7 @@ fn make_frame(nx: usize, ny: usize, nz: usize) -> Model {
             seismic_weight: Some(seismic_weight),
             weight_override: None,
             dynamic_mass: None,
+            standard_floor_load: None,
         });
     }
 

@@ -21,6 +21,7 @@ fn base_story(node_ids: Vec<NodeId>) -> Story {
         seismic_weight: None,
         weight_override: None,
         dynamic_mass: None,
+        standard_floor_load: None,
     }
 }
 
@@ -106,6 +107,7 @@ fn single_column_model(fy: f64, seismic_weight: f64) -> Model {
                 seismic_weight: Some(seismic_weight),
                 weight_override: None,
                 dynamic_mass: None,
+                standard_floor_load: None,
             },
         ],
         ..Default::default()
@@ -419,6 +421,7 @@ fn spring_column_model(kx: f64, support_kx: Option<f64>, seismic_weight: f64) ->
                 seismic_weight: Some(seismic_weight),
                 weight_override: None,
                 dynamic_mass: None,
+                standard_floor_load: None,
             },
         ],
         ..Default::default()
@@ -754,6 +757,7 @@ fn two_story_model() -> Model {
                 seismic_weight: None,
                 weight_override: None,
                 dynamic_mass: None,
+                standard_floor_load: None,
             },
             Story {
                 level_kind: Default::default(),
@@ -765,6 +769,7 @@ fn two_story_model() -> Model {
                 seismic_weight: None,
                 weight_override: None,
                 dynamic_mass: None,
+                standard_floor_load: None,
             },
         ],
         ..Default::default()
@@ -936,6 +941,7 @@ fn test_compute_static_indeterminacy_indeterminate_portal() {
                 seismic_weight: None,
                 weight_override: None,
                 dynamic_mass: None,
+                standard_floor_load: None,
             },
         ],
         ..Default::default()
@@ -1180,6 +1186,7 @@ fn portal_frame_model(fy: f64, seismic_weight: f64) -> Model {
                 seismic_weight: Some(seismic_weight),
                 weight_override: None,
                 dynamic_mass: None,
+                standard_floor_load: None,
             },
         ],
         constraints: vec![Constraint::rigid_diaphragm(
@@ -3551,6 +3558,7 @@ fn wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
                 seismic_weight: Some(seismic_weight),
                 weight_override: None,
                 dynamic_mass: None,
+                standard_floor_load: None,
             },
         ],
         constraints: vec![Constraint::rigid_diaphragm(

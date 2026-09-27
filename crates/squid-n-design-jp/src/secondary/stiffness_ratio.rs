@@ -207,6 +207,7 @@ mod tests {
             structure: Default::default(),
             level_kind: Default::default(),
             dynamic_mass: None,
+            standard_floor_load: None,
         };
         let story = Story {
             id: s0,
@@ -218,6 +219,7 @@ mod tests {
             structure: Default::default(),
             level_kind: Default::default(),
             dynamic_mass: None,
+            standard_floor_load: None,
         };
         let model = Model {
             nodes,
@@ -332,6 +334,7 @@ mod tests {
             structure: Default::default(),
             level_kind: Default::default(),
             dynamic_mass: None,
+            standard_floor_load: None,
         };
         let top = Story {
             id: top_story,
@@ -343,6 +346,7 @@ mod tests {
             structure: Default::default(),
             level_kind: Default::default(),
             dynamic_mass: None,
+            standard_floor_load: None,
         };
         let model = Model {
             nodes,

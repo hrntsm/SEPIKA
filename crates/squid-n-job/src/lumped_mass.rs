@@ -505,6 +505,7 @@ mod tests {
                     center_xy_mm: [f64::from(i), 0.0],
                     inertia_t_mm2: 1000.0,
                 }),
+                standard_floor_load: None,
             });
         }
         for i in 0..2u32 {
