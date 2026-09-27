@@ -6,7 +6,7 @@
 
 use super::constants::{E_STEEL, KAPPA_RC, NU_CONCRETE, NU_STEEL};
 use super::geometry::{h_web_shear_area, rect_torsion_j};
-use super::material::concrete_young_modulus;
+use super::material::concrete_young_modulus_gamma;
 use super::types::SectionShape;
 
 /// SRC/CFT の複合換算断面性能（要素剛性用。各種合成構造設計指針）。
@@ -83,13 +83,19 @@ impl SectionShape {
     /// 1/n 換算で適用。J は S 柱の J=(sG/cG)·sJ+cJ を鋼基準 J=sJ+cJ/ngs に換算）。
     ///
     /// `es`/`nu_s`: 要素材料（鋼管）のヤング係数・ポアソン比、
-    /// `fc`: 充填コンクリート強度（`Material.fc`）。
-    /// Ec は `concrete_young_modulus`（γ=23）・νc=0.2 とする。
+    /// `fc`: 充填コンクリート強度（`Material.fc`）、`gamma_c`: 無筋コンクリートの気乾単位体積重量。
+    /// νc=0.2 とする。
     /// CftBox/CftPipe 以外、または Ec≤0 では None（鋼管のみの既定値へ
     /// フォールバック）。
-    pub fn cft_equivalent_props(&self, es: f64, nu_s: f64, fc: f64) -> Option<CompositeProps> {
-        let ec = concrete_young_modulus(fc);
-        if ec <= 0.0 || es <= 0.0 {
+    pub fn cft_equivalent_props(
+        &self,
+        es: f64,
+        nu_s: f64,
+        fc: f64,
+        gamma_c: f64,
+    ) -> Option<CompositeProps> {
+        let ec = concrete_young_modulus_gamma(fc, gamma_c);
+        if !ec.is_finite() || ec <= 0.0 || !es.is_finite() || es <= 0.0 || !nu_s.is_finite() {
             return None;
         }
         let core = self.cft_core_props()?;
@@ -98,6 +104,9 @@ impl SectionShape {
         }
         let n = es / ec;
         let ngs = n * (1.0 + NU_CONCRETE) / (1.0 + nu_s);
+        if !n.is_finite() || !ngs.is_finite() || ngs <= 0.0 {
+            return None;
+        }
         let (s_as_y, s_as_z) = match *self {
             SectionShape::CftBox { thick: t, .. } => {
                 (2.0 * t * core.inner_width, 2.0 * t * core.inner_height)

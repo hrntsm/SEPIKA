@@ -340,9 +340,8 @@ const PRESET_CONCRETE_NAMES: &[&str] = &[
 ///   78.5 kN/m³ とは別で、固定荷重側は材料区分から解決する）。
 ///   `fy` は基準強度 F（板厚 40mm 以下）。設計計算では名称から
 ///   [`steel_f_value_prefix`] で板厚区分込みの F を再解決する。
-/// - コンクリート: ν=0.2。E は Ec=3.35·10⁴·(γ/24)²·(Fc/60)^(1/3)
-///   （γ は Fc 帯に応じた普通コンクリートの気乾単位体積重量）。
-///   密度は単位体積重量表の γRC（鉄筋込み）から導出する。
+/// - コンクリート: ν=0.2。E は Ec=3.35·10⁴·(γC/24)²·(Fc/60)^(1/3)
+///   （γC = γRC - 1.0）。密度は単位体積重量表の γRC（鉄筋込み）から導出する。
 pub fn material_presets() -> Vec<MaterialPreset> {
     let steel_density = STEEL_MASS_DENSITY_TON_MM3;
     let mut out = Vec::new();
@@ -369,10 +368,9 @@ pub fn material_presets() -> Vec<MaterialPreset> {
         });
     }
     for (&fc, &name) in PRESET_CONCRETE_FC.iter().zip(PRESET_CONCRETE_NAMES) {
-        let gamma_c =
-            concrete_unit_weight_kn_m3(fc, ConcreteClass::Normal, ConcreteComposition::Plain);
         let gamma_rc =
             concrete_unit_weight_kn_m3(fc, ConcreteClass::Normal, ConcreteComposition::Rc);
+        let gamma_c = gamma_rc - 1.0;
         out.push(MaterialPreset {
             name,
             category: MaterialCategory::Concrete,

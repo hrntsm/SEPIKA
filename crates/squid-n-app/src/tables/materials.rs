@@ -57,6 +57,10 @@ fn apply_src_toggle(name: &str, fc: f64) -> (String, f64) {
     (format!("{name}(SRC)"), rho)
 }
 
+fn young_editable(category: MaterialCategory, concrete_class: ConcreteClass) -> bool {
+    !(category == MaterialCategory::Concrete && concrete_class == ConcreteClass::Normal)
+}
+
 /// 材料タブ：プリセット追加・カスタム追加・一覧編集・削除。
 pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
     use crate::table_util::{self, Col};
@@ -136,6 +140,7 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                         fc: preset.fc,
                         fy: preset.fy,
                         strength_factor: None,
+                        concrete_class: Default::default(),
                     }),
                 );
                 app.core.scoped.staleness.mark_edited();
@@ -223,6 +228,11 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                     fc,
                     fy,
                     strength_factor,
+                    concrete_class: if custom_category == MaterialCategory::Concrete {
+                        ConcreteClass::UserDefined
+                    } else {
+                        Default::default()
+                    },
                 }),
             );
             app.core.scoped.staleness.mark_edited();
@@ -294,7 +304,11 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                 }
             });
             let cells: [(MaterialField, String, bool); 6] = [
-                (MaterialField::Young, format!("{}", mat.young), true),
+                (
+                    MaterialField::Young,
+                    format!("{}", mat.young),
+                    young_editable(mat.category, mat.concrete_class),
+                ),
                 (MaterialField::Poisson, format!("{}", mat.poisson), true),
                 (MaterialField::Density, format!("{:.3e}", mat.density), true),
                 (
@@ -317,11 +331,15 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
             ];
             for (field, current, required) in cells {
                 row.col(|ui| {
+                    let editable = field != MaterialField::Young
+                        || young_editable(mat.category, mat.concrete_class);
                     let cell_id = egui::Id::new(("mat_cell", mat_id.0, field as u8));
                     let mut buf = ui
                         .data(|d| d.get_temp::<String>(cell_id))
                         .unwrap_or_else(|| current.clone());
-                    let resp = table_util::cell_text_edit(ui, &mut buf);
+                    let resp = ui
+                        .add_enabled_ui(editable, |ui| table_util::cell_text_edit(ui, &mut buf))
+                        .inner;
                     if resp.lost_focus() {
                         let parsed = buf.trim().parse::<f64>().ok();
                         let changed = buf.trim() != current.trim();
@@ -420,6 +438,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn standard_rc_and_src_have_same_concrete_young_modulus() {
+        let preset = material_presets()
+            .into_iter()
+            .find(|preset| preset.name == "Fc36")
+            .unwrap();
+        let fc = preset.fc.unwrap();
+        let rc_gamma =
+            concrete_unit_weight_kn_m3(fc, ConcreteClass::Normal, ConcreteComposition::Rc);
+        let src_gamma =
+            concrete_unit_weight_kn_m3(fc, ConcreteClass::Normal, ConcreteComposition::Src);
+        let rc = squid_n_core::section_shape::concrete_young_modulus_gamma(fc, rc_gamma - 1.0);
+        let src = squid_n_core::section_shape::concrete_young_modulus_gamma(fc, src_gamma - 2.0);
+        assert_eq!(rc, src);
+        assert_eq!(preset.young, rc);
+    }
+
     /// 直接入力の既定密度は鋼材の物理質量密度 7.85 t/m³（= 7.85e-9 t/mm³）由来。
     /// 設計用単位体積重量 78.5 kN/m³ からは導出しない。
     #[test]
@@ -428,5 +463,34 @@ mod tests {
             format!("{:.4e}", squid_n_core::units::STEEL_MASS_DENSITY_TON_MM3),
             "7.8500e-9"
         );
+    }
+
+    #[test]
+    fn standard_concrete_young_is_not_editable_but_direct_input_is() {
+        assert!(!young_editable(
+            MaterialCategory::Concrete,
+            ConcreteClass::Normal
+        ));
+        assert!(young_editable(
+            MaterialCategory::Concrete,
+            ConcreteClass::UserDefined
+        ));
+        assert!(young_editable(
+            MaterialCategory::Steel,
+            ConcreteClass::Normal
+        ));
+    }
+
+    #[test]
+    fn imported_standard_concrete_young_is_not_editable() {
+        let preset = material_presets()
+            .into_iter()
+            .find(|p| p.name == "Fc24")
+            .unwrap();
+        assert!(!young_editable(preset.category, ConcreteClass::Normal));
+        assert!(young_editable(
+            MaterialCategory::Concrete,
+            ConcreteClass::UserDefined,
+        ));
     }
 }

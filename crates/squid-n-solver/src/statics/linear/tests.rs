@@ -1344,6 +1344,7 @@ fn test_axial_cut_applies_to_composite_src_column() {
         steel_flange_thick: 12.0,
     });
     model.materials[0].fc = Some(24.0);
+    model.materials[0].density = 2.4e-9;
     model.materials[0].young = 2.27e4;
 
     let elem = &model.elements[0];

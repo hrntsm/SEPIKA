@@ -73,7 +73,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &material_index,
         &pending_secs,
         &mut guessed_categories,
-    );
+    )?;
 
     let mut notes: Vec<String> = Vec::new();
 
@@ -385,13 +385,17 @@ fn build_materials(
     material_index: &HashMap<u32, u32>,
     pending_secs: &[PendingSec],
     guessed_categories: &mut Vec<String>,
-) {
+) -> Result<(), StbError> {
     raw_materials.sort_by_key(|m| m.file_id);
     for m in raw_materials {
         let category = resolve_material_category(&m.name, m.fc, m.fy, guessed_categories);
         model.materials.push(Material {
             strength_factor: None,
-            concrete_class: Default::default(),
+            concrete_class: if category == MaterialCategory::Concrete {
+                squid_n_core::units::ConcreteClass::UserDefined
+            } else {
+                Default::default()
+            },
             id: MaterialId(material_index[&m.file_id]),
             name: m.name,
             category,
@@ -439,6 +443,46 @@ fn build_materials(
                 existing.insert(name.to_string());
             }
         }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn raw_concrete(density: f64, fc: Option<f64>) -> RawMaterial {
+        RawMaterial {
+            file_id: 1,
+            name: "Fc24".to_string(),
+            young: 1.0,
+            poisson: 0.2,
+            density,
+            shear: None,
+            fc,
+            fy: None,
+        }
+    }
+
+    #[test]
+    fn direct_concrete_preserves_explicit_young() {
+        let density = squid_n_core::units::to_internal::mass_density_from_unit_weight_kn_m3(25.0);
+        let mut model = Model::default();
+        let mut guessed = Vec::new();
+        build_materials(
+            &mut model,
+            vec![raw_concrete(density, Some(24.0))],
+            &HashMap::from([(1, 0)]),
+            &[],
+            &mut guessed,
+        )
+        .expect("valid concrete material");
+
+        assert_eq!(model.materials[0].young, 1.0);
+        assert_eq!(
+            model.materials[0].concrete_class,
+            squid_n_core::units::ConcreteClass::UserDefined
+        );
     }
 }
 

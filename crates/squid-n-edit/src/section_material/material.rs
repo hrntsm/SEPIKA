@@ -17,6 +17,7 @@ pub struct AddMaterial {
     pub fc: Option<f64>,
     pub fy: Option<f64>,
     pub strength_factor: Option<f64>,
+    pub concrete_class: squid_n_core::units::ConcreteClass,
 }
 
 impl EditCommand for AddMaterial {
@@ -24,7 +25,7 @@ impl EditCommand for AddMaterial {
         let new_id = MaterialId(model.materials.len() as u32);
         model.materials.push(squid_n_core::model::Material {
             strength_factor: self.strength_factor,
-            concrete_class: Default::default(),
+            concrete_class: self.concrete_class,
             id: new_id,
             name: self.name.clone(),
             category: self.category,
@@ -101,6 +102,9 @@ impl EditCommand for SetMaterialField {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let idx = self.id.index();
         if idx >= model.materials.len() || model.materials[idx].id != self.id {
+            return Box::new(Noop);
+        }
+        if self.field == MaterialField::Young && model.materials[idx].is_standard_concrete() {
             return Box::new(Noop);
         }
         let mat = &mut model.materials[idx];

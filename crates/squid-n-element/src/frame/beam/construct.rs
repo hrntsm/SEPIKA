@@ -47,7 +47,6 @@ impl BeamElement {
         let axis = geom.local_frame(data.local_axis.ref_vector);
         let sec = get_section(model, data.section);
         let mat = get_material(model, sec_material(model, data));
-        let g = mat.shear_modulus();
 
         let eval_sections = eval_sections_of(data, model, len);
 
@@ -63,6 +62,19 @@ impl BeamElement {
         };
 
         use squid_n_core::section_shape::SectionShape;
+        if let Some(shape) = sec.shape.as_ref() {
+            super::stiffness_factors::validate_composite_material(shape, &mat)?;
+        }
+        let (e, g) = match sec.shape.as_ref() {
+            Some(
+                SectionShape::RcBeamRect { .. }
+                | SectionShape::RcColumnRect { .. }
+                | SectionShape::RcColumnCircle { .. }
+                | SectionShape::SrcBeamRect { .. }
+                | SectionShape::SrcColumnRect { .. },
+            ) => (mat.young, mat.shear_modulus()),
+            _ => (mat.young, mat.shear_modulus()),
+        };
         let composite = sec
             .shape
             .as_ref()
@@ -85,7 +97,7 @@ impl BeamElement {
 
         let lp = ((p1[0] - p0[0]).powi(2) + (p1[1] - p0[1]).powi(2)).sqrt();
         let is_horizontal = lp > 1e-9 && (p1[2] - p0[2]).abs() <= 0.05 * lp;
-        let factors = breakdown_with(model, data, &sec, mat.young, is_horizontal);
+        let factors = breakdown_with(model, data, &sec, e, is_horizontal);
         let iz = iz * factors.slab;
 
         let wall_girder_factor = factors.wall_girder;
@@ -220,7 +232,7 @@ impl BeamElement {
 
         Ok(Self {
             id: data.id,
-            e: mat.young,
+            e,
             g,
             a: a_stiff,
             a_mass: sec.area,

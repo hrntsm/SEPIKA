@@ -156,7 +156,7 @@ pub(crate) fn column_provisions_info(
     if d_min > 0.0 && length > 0.0 {
         let ratio = d_min / length;
         let lim = match concrete_class {
-            ConcreteClass::Normal => 1.0 / 15.0,
+            ConcreteClass::Normal | ConcreteClass::UserDefined => 1.0 / 15.0,
             ConcreteClass::Lightweight1 | ConcreteClass::Lightweight2 => 1.0 / 10.0,
         };
         if ratio + 1e-12 < lim {

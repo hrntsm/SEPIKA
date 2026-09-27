@@ -296,6 +296,7 @@ fn test_pushover_stops_when_concrete_strength_unset() {
         },
     });
     model.materials[0].category = squid_n_core::model::MaterialCategory::Concrete;
+    model.materials[0].density = 2.4e-9;
     model.materials[0].name = "conc".into();
     model.materials[0].fy = None;
     model.materials[0].fc = None;
@@ -3533,7 +3534,7 @@ fn wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
                 category: MaterialCategory::Concrete,
                 young: 23000.0,
                 poisson: 0.2,
-                density: 0.0,
+                density: 2.4e-9,
                 shear: None,
                 fc: Some(24.0),
                 fy: None,

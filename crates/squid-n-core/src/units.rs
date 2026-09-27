@@ -9,6 +9,8 @@ pub enum ConcreteClass {
     Normal,
     Lightweight1,
     Lightweight2,
+    /// 直接入力されたコンクリート。計算上は普通コンクリートとして扱う。
+    UserDefined,
 }
 
 /// コンクリート系構造の区分（γC/γRC/γSRC の列に対応）。
@@ -47,6 +49,17 @@ pub fn concrete_unit_weight_kn_m3(fc: f64, class: ConcreteClass, comp: ConcreteC
             }
         }
         ConcreteClass::Lightweight2 => 17.0,
+        ConcreteClass::UserDefined => {
+            if fc <= 36.0 {
+                23.0
+            } else if fc <= 48.0 {
+                23.5
+            } else if fc <= 120.0 {
+                24.0
+            } else {
+                24.5
+            }
+        }
     };
     match (class, comp) {
         (ConcreteClass::Lightweight1, ConcreteComposition::Rc) if fc > 27.0 => 22.0,
@@ -115,6 +128,10 @@ pub mod to_internal {
     /// 例: γRC=24.0 kN/m³ → 2.4473e-9 ton/mm³。
     pub fn mass_density_from_unit_weight_kn_m3(v: f64) -> f64 {
         unit_weight_kn_per_m3(v) / super::GRAVITY_MM_S2
+    }
+    /// 質量密度 [ton/mm³] → 単位体積重量 [kN/m³]。
+    pub fn unit_weight_kn_m3_from_mass_density(v: f64) -> f64 {
+        v * super::GRAVITY_MM_S2 * 1.0e6
     }
 }
 
@@ -269,6 +286,11 @@ mod tests {
         assert_relative_eq!(
             to_internal::unit_weight_kn_per_m3(24.0),
             2.4e-5,
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(
+            to_internal::unit_weight_kn_m3_from_mass_density(24.0e-6 / GRAVITY_MM_S2),
+            24.0,
             max_relative = 1e-12
         );
         assert_relative_eq!(

@@ -184,12 +184,33 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
                 data.id.0
             ));
         }
+        let fiber_shape = sec.and_then(|s| s.shape.as_ref());
+        let is_src = matches!(
+            fiber_shape,
+            Some(SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. })
+        );
+        if is_src {
+            let Some(steel_mat) = model.element_steel_material(data) else {
+                return Some(format!(
+                    "部材 ID {} の SRC 断面に内蔵鉄骨の材料が設定されていません。\
+                     断面タブで内蔵鉄骨の材料を割り当ててください。\
+                     ファイバー断面は内蔵鉄骨の材料からヤング係数 E と降伏強度を算定します.",
+                    data.id.0
+                ));
+            };
+            if !steel_mat.young.is_finite() || steel_mat.young <= 0.0 {
+                return Some(format!(
+                    "部材 ID {} の SRC 断面に割り当てた内蔵鉄骨材料「{}」のヤング係数 E が未設定または不正です。\
+                     材料タブで正のヤング係数 E を設定してください。",
+                    data.id.0, steel_mat.name
+                ));
+            }
+        }
         if let Some(msg) = squid_n_core::material_grade::shear_rebar_material_issue(
             model.element_shear_rebar_material(data),
         ) {
             return Some(format!("部材 ID {} の{}", data.id.0, msg));
         }
-        let fiber_shape = sec.and_then(|s| s.shape.as_ref());
         if fiber_shape.is_some_and(shape_has_steel_fiber_region)
             && !crate::frame::fiber::resolve_steel_fiber_fy(
                 fiber_shape,

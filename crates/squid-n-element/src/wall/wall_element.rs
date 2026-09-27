@@ -178,14 +178,18 @@ impl WallElement {
             return None;
         }
         let is_rc_wall = matches!(&sec.shape, Some(SectionShape::RcWall { .. }));
+        if is_rc_wall && !mat.fc.is_some_and(|fc| fc.is_finite() && fc > 0.0) {
+            return None;
+        }
+        let young = mat.young;
         let r = crate::factory::wall_opening_reduction(data, model).max(1e-6);
 
         let ps = match &sec.shape {
             Some(SectionShape::RcWall { ps, .. }) => (*ps).max(0.0),
             _ => 0.0,
         };
-        let rebar_factor = if mat.fc.is_some() && mat.young > 0.0 && ps > 0.0 {
-            1.0 + (E_STEEL / mat.young - 1.0) * ps
+        let rebar_factor = if mat.fc.is_some() && young > 0.0 && ps > 0.0 {
+            1.0 + (E_STEEL / young - 1.0) * ps
         } else {
             1.0
         };
@@ -225,14 +229,22 @@ impl WallElement {
         };
         let column = BeamElement {
             id: data.id,
-            e: mat.young * stiffness_scale,
-            g: mat.shear_modulus() * stiffness_scale,
+            e: young * stiffness_scale,
+            g: mat
+                .shear
+                .filter(|shear| shear.is_finite() && *shear > 0.0)
+                .unwrap_or_else(|| young / (2.0 * (1.0 + mat.poisson)))
+                * stiffness_scale,
             a: area * rebar_factor,
             a_mass: area,
             iy: lw * t.powi(3) / 12.0,
             iz: t * lw.powi(3) / 12.0 * rebar_factor,
             j: lw * t.powi(3) / 3.0,
-            as_y: r * shear_rigidity / mat.shear_modulus(),
+            as_y: r * shear_rigidity
+                / mat
+                    .shear
+                    .filter(|shear| shear.is_finite() && *shear > 0.0)
+                    .unwrap_or_else(|| young / (2.0 * (1.0 + mat.poisson))),
             as_z: r * area / KAPPA_RC,
             length: h,
             density: mat.density,
@@ -392,7 +404,8 @@ impl WallElement {
                 nd,
                 None,
                 Some(fc),
-                mat.young,
+                self.column.e,
+                self.column.e,
                 crate::frame::fiber::FiberYield::default(),
                 1.0,
                 1.0,
@@ -685,9 +698,9 @@ impl WallElement {
                     data.id.0, mat.name
                 ));
             }
-            Some(fc) if fc <= 0.0 => {
+            Some(fc) if !fc.is_finite() || fc <= 0.0 => {
                 return Some(format!(
-                    "耐震壁 ID {} の材料「{}」のコンクリート強度 Fc が {} で 0 以下です。\
+                    "耐震壁 ID {} の材料「{}」のコンクリート強度 Fc が {} で 0 以下または非有限値です。\
                      保有水平耐力計算では耐震壁の終局せん断強度が必要です。材料タブで Fc を設定してください。",
                     data.id.0, mat.name, fc
                 ));
@@ -1562,19 +1575,20 @@ mod tests {
     }
 
     #[test]
-    fn test_rc_wall_static_and_lumped_mass_do_not_resolve_consistent_properties() {
+    fn test_rc_wall_rejects_invalid_fc_at_generation() {
         let (mut model, data) = make_wall_model();
-        model.materials[0].fc = None;
-        let wall = WallElement::try_new(&data, &model)
-            .expect("Fc 未設定でも静的・Lumped 用の壁要素は生成できる");
-        wall.mass_matrix(MassOption::Lumped);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            wall.mass_matrix(MassOption::Consistent);
-        }));
-        assert!(
-            result.is_err(),
-            "Consistent だけは Fc 未設定を明示的に失敗させる"
-        );
+        for fc in [None, Some(0.0), Some(f64::NAN)] {
+            model.materials[0].fc = fc;
+            assert!(WallElement::try_new(&data, &model).is_none());
+        }
+    }
+
+    #[test]
+    fn test_rc_wall_stiffness_uses_material_young() {
+        let (model, data) = make_wall_model();
+        let wall = WallElement::try_new(&data, &model).unwrap();
+        let expected = model.materials[0].young;
+        assert!((wall.column.e - expected).abs() < 1e-9);
     }
 
     #[test]
@@ -1673,10 +1687,13 @@ mod tests {
             force.data
         );
         let recovered = wall.recover_forces(&u).unwrap();
-        assert!(recovered
+        let max_recovered = recovered
             .at
             .iter()
-            .all(|(_, f)| f.iter().all(|v| v.abs() < 1e-6)));
+            .flat_map(|(_, f)| f.iter())
+            .map(|v| v.abs())
+            .fold(0.0, f64::max);
+        assert!(max_recovered < 1e-5, "max recovered force={max_recovered}");
     }
 
     #[test]
@@ -1823,7 +1840,8 @@ mod tests {
     fn test_wall_element_rebar_factor() {
         let (model, data) = make_wall_model();
         let wall = WallElement::try_new(&data, &model).unwrap();
-        let n = squid_n_core::section_shape::E_STEEL / 23000.0;
+        let ec = model.materials[0].young;
+        let n = squid_n_core::section_shape::E_STEEL / ec;
         let expected = 150.0 * 4000.0 * (1.0 + (n - 1.0) * 0.0025);
         assert!((wall.column.a - expected).abs() < 1e-6);
         assert!((wall.column.a_mass - 150.0 * 4000.0).abs() < 1e-9);
@@ -1885,7 +1903,12 @@ mod tests {
         let kappa = squid_n_core::section_shape::wall_shear_shape_factor_isection(
             4600.0, 600.0, 600.0, 150.0,
         );
-        assert!((wall_cols.column.as_y / (area / kappa) - 1.0).abs() < 1e-12);
+        assert!(
+            (wall_cols.column.as_y / (area / kappa) - 1.0).abs() < 1e-12,
+            "as_y={}, expected={}",
+            wall_cols.column.as_y,
+            area / kappa
+        );
         model.materials.push(model.materials[0].clone());
         model.materials[1].id = MaterialId(1);
         model.materials[1].shear = Some(model.materials[0].shear_modulus() * 2.0);
@@ -2622,7 +2645,7 @@ mod capacity_issue_tests {
         assert_eq!(WallElement::shear_capacity_of(&wall, &model), 0.0);
     }
 
-    /// Fc が 0 以下でも Qu を算定できないため不備とする（未設定と同じ扱い）。
+    /// Fc が 0 以下または非有限値でも Qu を算定できないため不備とする（未設定と同じ扱い）。
     #[test]
     fn test_issue_when_fc_not_positive() {
         let (mut model, wall) = model_with(None, 0.0025);

@@ -505,50 +505,81 @@ fn cft_shape() -> squid_n_core::section_shape::SectionShape {
     }
 }
 
-/// SRC 断面は主材料の Fc から等価断面性能を算定できるが、材料由来の値を使えない
-/// ときは既定値 N_S_EQ=15 へフォールバックする。このとき診断は解析を止めず、
-/// 警告として利用者へ照合を促す。
 #[test]
-fn test_model_issues_warns_src_composite_fallback() {
+fn test_model_issues_errors_on_invalid_src_fc() {
     use super::precheck::{model_issues, IssueSeverity, IssueTargets};
 
-    let mut model = make_cantilever_model();
-    model.sections[0].shape = Some(src_shape());
-    model.materials[0].fc = None;
+    for fc in [None, Some(0.0), Some(f64::NAN)] {
+        let mut model = make_cantilever_model();
+        model.sections[0].shape = Some(src_shape());
+        model.materials[0].fc = fc;
 
-    let issue = model_issues(&model)
-        .into_iter()
-        .find(|i| i.short == "等価断面性能を算定できません")
-        .expect("SRC のフォールバック警告が出るはず");
-    assert_eq!(issue.severity, IssueSeverity::Warning);
-    assert!(issue
-        .message
-        .contains("材料由来の等価断面性能を算定できない"));
-    assert!(issue.message.contains("N_S_EQ=15"));
-    assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
+        let issues = model_issues(&model);
+        let issue = issues
+            .iter()
+            .find(|i| i.short == "コンクリート Fc が未設定、0 以下、または非有限値です")
+            .expect("不正な SRC の Fc は入力不備になるはず");
+        assert_eq!(issue.severity, IssueSeverity::Error);
+        assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
+        assert!(!issues
+            .iter()
+            .any(|i| i.short == "等価断面性能を算定できません"));
+    }
 }
 
-/// CFT 断面は主材料の Fc から等価断面性能を算定できるが、材料由来の値を使えない
-/// ときは鋼管のみへフォールバックする。このとき診断は解析を止めず、警告として
-/// 利用者へ照合を促す。
 #[test]
-fn test_model_issues_warns_cft_composite_fallback() {
+fn test_model_issues_errors_on_invalid_cft_fc() {
     use super::precheck::{model_issues, IssueSeverity, IssueTargets};
 
-    let mut model = make_cantilever_model();
-    model.sections[0].shape = Some(cft_shape());
-    model.materials[0].fc = None;
+    for fc in [None, Some(0.0), Some(f64::NAN)] {
+        let mut model = make_cantilever_model();
+        model.sections[0].shape = Some(cft_shape());
+        model.materials[0].fc = fc;
 
-    let issue = model_issues(&model)
-        .into_iter()
-        .find(|i| i.short == "等価断面性能を算定できません")
-        .expect("CFT のフォールバック警告が出るはず");
-    assert_eq!(issue.severity, IssueSeverity::Warning);
-    assert!(issue
-        .message
-        .contains("材料由来の等価断面性能を算定できない"));
-    assert!(issue.message.contains("鋼管のみ"));
-    assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
+        let issues = model_issues(&model);
+        let issue = issues
+            .iter()
+            .find(|i| i.short == "コンクリート Fc が未設定、0 以下、または非有限値です")
+            .expect("不正な CFT の Fc は入力不備になるはず");
+        assert_eq!(issue.severity, IssueSeverity::Error);
+        assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
+        assert!(!issues
+            .iter()
+            .any(|i| i.short == "等価断面性能を算定できません"));
+    }
+}
+
+#[test]
+fn test_model_issues_errors_on_invalid_rc_material() {
+    use super::precheck::{model_issues, IssueSeverity, IssueTargets};
+    use squid_n_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+
+    for fc in [None, Some(0.0), Some(f64::NAN)] {
+        let mut model = make_cantilever_model();
+        model.sections[0].shape = Some(SectionShape::RcColumnRect {
+            b: 600.0,
+            d: 600.0,
+            rebar: RcRectColumnRebar {
+                main_dia: 22.0,
+                x: vec![8],
+                y: vec![8],
+                cover: 50.0,
+                hoop: RectColumnHoop {
+                    dia: 10.0,
+                    pitch: 100.0,
+                    legs_x: 2,
+                    legs_y: 2,
+                },
+            },
+        });
+        model.materials[0].fc = fc;
+        let issue = model_issues(&model)
+            .into_iter()
+            .find(|i| i.short == "コンクリート Fc が未設定、0 以下、または非有限値です")
+            .expect("不正な RC の Fc は入力不備になるはず");
+        assert_eq!(issue.severity, IssueSeverity::Error);
+        assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
+    }
 }
 
 /// CFT では Fc とヤング係数が揃っていても、鋼管の板厚が過大で充填部の内法が 0 に
@@ -585,6 +616,7 @@ fn test_model_issues_no_composite_fallback_warning_with_fc() {
     let mut src = make_cantilever_model();
     src.sections[0].shape = Some(src_shape());
     src.materials[0].fc = Some(24.0);
+    src.materials[0].density = 2.4e-9;
     assert!(
         !model_issues(&src)
             .iter()

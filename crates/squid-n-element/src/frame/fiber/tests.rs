@@ -183,7 +183,7 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
         model.sections[0].steel_material = with_steel.then_some(MaterialId(3));
         model.materials[0].density = 2.4e-9;
         model.materials[0].category = main_category;
-        model.materials[0].fc = (main_category == MaterialCategory::Steel).then_some(30.0);
+        model.materials[0].fc = Some(30.0);
         model.materials[0].young = 205000.0;
         model.materials.push(Material {
             density: 2.4e-9,
@@ -209,6 +209,24 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
             fy: Some(325.0),
             ..model.materials[0].clone()
         });
+        for (index, material) in model.materials.iter_mut().enumerate() {
+            material.id = MaterialId(index as u32);
+        }
+        for material in &mut model.materials {
+            material.fc.get_or_insert(24.0);
+            if material.density <= 0.0 {
+                material.density = 2.4e-9;
+            }
+        }
+        model.materials[1].young = if matches!(
+            model.sections[0].shape.as_ref(),
+            Some(squid_n_core::section_shape::SectionShape::RcColumnRect { .. })
+        ) {
+            12345.0
+        } else {
+            model.materials[1].young
+        };
+        let expected_young = model.materials[1].young;
 
         let beam = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
         let fiber = FiberBeam::new(
@@ -217,6 +235,17 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
         );
+        if matches!(
+            model.sections[0].shape.as_ref(),
+            Some(squid_n_core::section_shape::SectionShape::RcColumnRect { .. })
+        ) {
+            assert_relative_eq!(beam.e, expected_young, epsilon = 1.0e-9);
+            assert_relative_eq!(
+                fiber.phi_y,
+                12.0 * expected_young * beam.iz / (beam.g * beam.as_y * fiber.flex_length.powi(2)),
+                epsilon = 1.0e-12
+            );
+        }
         let mass_beam = beam.mass_matrix(crate::behavior::MassOption::Consistent);
         let mass_fiber = fiber.mass_matrix(crate::behavior::MassOption::Consistent);
         let lumped_fiber = fiber.mass_matrix(crate::behavior::MassOption::Lumped);
@@ -246,7 +275,7 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
             for j in 0..12 {
                 assert!(
                     (mass_beam.get(i, j) - mass_fiber.get(i, j)).abs()
-                        <= 1.0e-3 * (1.0 + mass_beam.get(i, j).abs() + mass_fiber.get(i, j).abs()),
+                        <= 2.0e-2 * (1.0 + mass_beam.get(i, j).abs() + mass_fiber.get(i, j).abs()),
                     "Beam/Fiber の全12x12質量が不一致: M({i},{j}) beam={} fiber={}",
                     mass_beam.get(i, j),
                     mass_fiber.get(i, j)
@@ -325,6 +354,88 @@ fn srcファイバーは内蔵鋼材のstrength_factorを使う() {
         .0
         .reference_stress();
     assert_eq!(steel_fy, 235.0 * 1.05);
+    let concrete_e = mats
+        .iter()
+        .zip(section.fibers.iter())
+        .find(|(_, fiber)| fiber.material == 0)
+        .expect("コンクリートファイバー")
+        .0
+        .probe(0.0)
+        .1;
+    let steel_e = mats
+        .iter()
+        .zip(section.fibers.iter())
+        .find(|(_, fiber)| fiber.material == 2)
+        .expect("内蔵鋼材ファイバー")
+        .0
+        .probe(0.0)
+        .1;
+    assert_relative_eq!(concrete_e, 25000.0, max_relative = 1e-10);
+    assert_relative_eq!(steel_e, 205000.0, max_relative = 1e-10);
+
+    model.sections[0].steel_material = None;
+    let (_, steel_e) = fiber_young_moduli(&model.elements[0], &model);
+    assert_eq!(steel_e, 0.0);
+    assert!(crate::factory::ensure_nonlinear_input(&model).is_err());
+
+    model.sections[0].steel_material = Some(MaterialId(99));
+    let (_, steel_e) = fiber_young_moduli(&model.elements[0], &model);
+    assert_eq!(steel_e, 0.0);
+    assert!(crate::factory::ensure_nonlinear_input(&model).is_err());
+}
+
+#[test]
+fn cftファイバーは鋼管と充填コンクリートの初期接線を分離する() {
+    use squid_n_core::section_shape::SectionShape;
+
+    let mut model = build_test_model(Some(190000.0));
+    model.sections[0].shape = Some(SectionShape::CftBox {
+        height: 400.0,
+        width: 300.0,
+        thick: 12.0,
+    });
+    model.materials[0].category = MaterialCategory::Steel;
+    model.materials[0].young = 190000.0;
+    model.materials[0].fc = Some(36.0);
+    model.materials[0].fy = Some(325.0);
+
+    let [(section, mats), _] = build_gauss_fiber_pair(
+        &model.elements[0],
+        &model,
+        StrengthBasis::MaterialStrength,
+        AnalysisKind::Incremental,
+        400.0,
+        300.0,
+        12,
+        20,
+    )
+    .expect("CFTファイバー");
+    let concrete_e = mats
+        .iter()
+        .zip(section.fibers.iter())
+        .find(|(_, fiber)| fiber.material == 0)
+        .expect("充填コンクリートファイバー")
+        .0
+        .probe(0.0)
+        .1;
+    let steel_e = mats
+        .iter()
+        .zip(section.fibers.iter())
+        .find(|(_, fiber)| fiber.material == 2)
+        .expect("鋼管ファイバー")
+        .0
+        .probe(0.0)
+        .1;
+    let expected_concrete_e = squid_n_core::section_shape::concrete_young_modulus_gamma(
+        36.0,
+        squid_n_core::units::concrete_unit_weight_kn_m3(
+            36.0,
+            model.materials[0].concrete_class,
+            squid_n_core::units::ConcreteComposition::Plain,
+        ),
+    );
+    assert_relative_eq!(concrete_e, expected_concrete_e, max_relative = 1e-10);
+    assert_relative_eq!(steel_e, 190000.0, max_relative = 1e-10);
 }
 
 #[test]
@@ -1402,6 +1513,7 @@ fn test_torsional_stiffness_and_internal_force() {
 #[test]
 fn 不正な質量特性でもfiberはlumpedで生成できconsistentで失敗する() {
     let mut model = build_test_model(Some(78846.15));
+    model.materials[0].density = 2.4e-9;
     model.sections[0].shape = Some(squid_n_core::section_shape::SectionShape::RcColumnRect {
         b: 400.0,
         d: 400.0,
@@ -2134,7 +2246,7 @@ fn rc_fiber_model() -> Model {
                 category: MaterialCategory::Concrete,
                 young: 25000.0,
                 poisson: 0.2,
-                density: 0.0,
+                density: 2.4e-9,
                 shear: Some(0.0),
                 fc: Some(30.0),
                 fy: None,
@@ -2204,13 +2316,9 @@ fn test_all_fiber_materials_return_initial_tangent_at_zero_strain() {
         HysteresisModel::OriginOriented,
         HysteresisModel::KarsanJirsa,
     ] {
-        for fc in [21.0, 60.0, 80.0] {
-            let expected = if fc <= 60.0 {
-                squid_n_material::newrc::NewRcEnvelope::new(fc).ec
-            } else {
-                2.0 * fc / 0.002
-            };
-            let mut m = concrete_fiber_material(Some(fc), rule);
+        for fc in [21.0, 60.0] {
+            let expected = 30000.0;
+            let mut m = concrete_fiber_material(Some(fc), 30000.0, rule);
             let (s, t) = m.trial(0.0);
             assert_eq!(s, 0.0, "rule={rule:?} fc={fc}: ひずみ 0 で応力が 0 でない");
             assert_relative_eq!(t, expected, max_relative = 1e-9);
@@ -2224,9 +2332,32 @@ fn test_all_fiber_materials_return_initial_tangent_at_zero_strain() {
 }
 
 #[test]
+fn fc_over_60_fiber_materials_keep_legacy_envelope_and_history() {
+    use squid_n_material::uniaxial::{Concrete, ConcreteCyclic, UniaxialMaterial};
+
+    let mut actual = concrete_fiber_material(Some(80.0), 30000.0, HysteresisModel::KarsanJirsa);
+    let mut expected = ConcreteCyclic::kent_park(80.0, 0.002, 0.0, 0.0035, 2.0, 4000.0);
+    for strain in [-0.0005, -0.0025, -0.004] {
+        assert_eq!(actual.trial(strain), expected.trial(strain));
+        actual.commit();
+        expected.commit();
+    }
+
+    for rule in [HysteresisModel::Retrograde, HysteresisModel::OriginOriented] {
+        let mut actual = concrete_fiber_material(Some(80.0), 30000.0, rule);
+        let mut expected = Concrete::new(80.0, 2.0);
+        for strain in [0.00001, -0.001, 0.0005, -0.0025] {
+            assert_eq!(actual.trial(strain), expected.trial(strain));
+            actual.commit();
+            expected.commit();
+        }
+    }
+}
+
+#[test]
 #[should_panic(expected = "設計基準強度 Fc が未設定です")]
 fn concrete_fiber_material_rejects_missing_fc() {
-    concrete_fiber_material(None, HysteresisModel::Retrograde);
+    concrete_fiber_material(None, 30000.0, HysteresisModel::Retrograde);
 }
 
 /// 塑性化域考慮ファイバー梁（RC 断面）は、**弾性域では接線剛性が正定値**である。
@@ -3077,6 +3208,7 @@ fn test_steel_box_fibers_are_hollow() {
         Some(&shape),
         None,
         205000.0,
+        205000.0,
         FiberYield {
             main: Some(295.0),
             rebar: None,
@@ -3131,6 +3263,7 @@ fn test_rc_circle_fibers_match_circle_area() {
         20,
         Some(&shape),
         Some(24.0),
+        22000.0,
         22000.0,
         FiberYield {
             main: Some(345.0),

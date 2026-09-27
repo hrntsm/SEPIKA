@@ -54,6 +54,12 @@ pub struct Material {
 }
 
 impl Material {
+    /// 標準生成経路のコンクリートで、ヤング係数を標準式から得る材料か。
+    pub fn is_standard_concrete(&self) -> bool {
+        self.category == MaterialCategory::Concrete
+            && self.concrete_class == crate::units::ConcreteClass::Normal
+    }
+
     pub fn shear_modulus(&self) -> f64 {
         self.shear
             .unwrap_or_else(|| self.young / (2.0 * (1.0 + self.poisson)))

@@ -3,7 +3,7 @@ use crate::transform::LocalFrame;
 use squid_n_core::geom::vec3::dot;
 use squid_n_core::model::{wall_element_geometry, ElementData, Model};
 use squid_n_core::section_shape::{
-    concrete_young_modulus, material_strip_section_properties, MaterialSectionStrip,
+    concrete_young_modulus_gamma, material_strip_section_properties, MaterialSectionStrip,
     MaterialStripSectionProperties, SectionShape,
 };
 
@@ -38,13 +38,18 @@ impl WallSection {
             Some(SectionShape::RcWall { thickness, .. }) => thickness,
             _ => section.thickness.unwrap_or(section.width),
         };
+        let wall_young = material.young;
+        let shear = material
+            .shear
+            .filter(|shear| shear.is_finite() && *shear > 0.0)
+            .unwrap_or_else(|| wall_young / (2.0 * (1.0 + material.poisson)));
         let mut result = Self {
             columns: [None, None],
             length: geometry.lw,
             thickness,
             material: Elasticity {
-                young: material.young,
-                shear: material.shear_modulus(),
+                young: wall_young,
+                shear,
             },
         };
         if super::misc_wall::wall_is_seismic(data, model) {
@@ -69,21 +74,43 @@ impl WallSection {
                     shear: mat.shear_modulus(),
                 }];
                 match shape {
-                    SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. } => {
-                        let steel = model
-                            .element_steel_material(e)
-                            .ok_or("SRC側柱の内蔵鉄骨材料が未指定です")?;
-                        materials.push(Elasticity {
-                            young: steel.young,
-                            shear: steel.shear_modulus(),
-                        });
+                    SectionShape::RcBeamRect { .. }
+                    | SectionShape::RcColumnRect { .. }
+                    | SectionShape::RcColumnCircle { .. }
+                    | SectionShape::SrcBeamRect { .. }
+                    | SectionShape::SrcColumnRect { .. } => {
+                        let young = mat.young;
+                        materials[0] = Elasticity {
+                            young,
+                            shear: mat
+                                .shear
+                                .filter(|shear| shear.is_finite() && *shear > 0.0)
+                                .unwrap_or_else(|| young / (2.0 * (1.0 + mat.poisson))),
+                        };
+                        if matches!(
+                            shape,
+                            SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
+                        ) {
+                            let steel = model
+                                .element_steel_material(e)
+                                .ok_or("SRC側柱の内蔵鉄骨材料が未指定です")?;
+                            materials.push(Elasticity {
+                                young: steel.young,
+                                shear: steel.shear_modulus(),
+                            });
+                        }
                     }
                     SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => {
                         let fc = mat
                             .fc
                             .filter(|f| f.is_finite() && *f > 0.0)
                             .ok_or("CFT側柱の充填コンクリート強度が未指定・不正です")?;
-                        let young = concrete_young_modulus(fc);
+                        let gamma_c = squid_n_core::units::concrete_unit_weight_kn_m3(
+                            fc,
+                            mat.concrete_class,
+                            squid_n_core::units::ConcreteComposition::Plain,
+                        );
+                        let young = concrete_young_modulus_gamma(fc, gamma_c);
                         materials.push(Elasticity {
                             young,
                             shear: young / 2.4,

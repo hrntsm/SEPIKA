@@ -181,20 +181,67 @@ fn test_beam_new_src_cft_composite_props() {
     };
 
     let src_beam = BeamElement::new(&make_elem(0), &model);
-    let p = src_shape.src_equivalent_props(23000.0, 0.2).unwrap();
+    let ec = model.materials[0].young;
+    let p = src_shape.src_equivalent_props(ec, 0.2).unwrap();
+    assert!((src_beam.e - ec).abs() < 1e-9);
+    assert!((src_beam.g - ec / (2.0 * (1.0 + 0.2))).abs() < 1e-9);
+    assert!(
+        (src_beam.local_stiffness_raw().get(0, 0) - ec * src_beam.a / src_beam.length).abs() < 1e-6
+    );
     assert!((src_beam.a - p.area_ax).abs() < 1e-6);
     assert!((src_beam.iz - p.iy).abs() / p.iy < 1e-12);
     assert!((src_beam.j - p.j).abs() / p.j < 1e-12);
     assert!((src_beam.as_y - p.as_z).abs() < 1e-6);
-    let ns = E_STEEL / 23000.0;
+    let ns = E_STEEL / ec;
     assert!((ns - N_S_EQ).abs() > 1.0);
+    assert!(
+        (src_beam.a
+            - src_shape
+                .src_equivalent_props(23000.0, 0.2)
+                .unwrap()
+                .area_ax)
+            .abs()
+            < 1e-6
+    );
     assert!((src_beam.a_mass - 360_000.0).abs() < 1e-9);
 
     let cft_beam = BeamElement::new(&make_elem(1), &model);
-    let pc = cft_shape.cft_equivalent_props(205000.0, 0.3, 36.0).unwrap();
+    let pc = cft_shape
+        .cft_equivalent_props(205000.0, 0.3, 36.0, 23.0)
+        .unwrap();
     assert!((cft_beam.a - pc.area_ax).abs() < 1e-6);
     assert!((cft_beam.iz - pc.iy).abs() / pc.iy < 1e-12);
     assert!((cft_beam.j - pc.j).abs() / pc.j < 1e-12);
+
+    let mut invalid_cft_material = model.materials[1].clone();
+    invalid_cft_material.fc = Some(f64::NAN);
+    assert!(
+        super::stiffness_factors::composite_props_with(&cft_shape, &invalid_cft_material).is_none()
+    );
+    invalid_cft_material.fc = Some(0.0);
+    assert!(
+        super::stiffness_factors::composite_props_with(&cft_shape, &invalid_cft_material).is_none()
+    );
+    invalid_cft_material.fc = Some(36.0);
+    invalid_cft_material.young = 0.0;
+    assert!(super::stiffness_factors::validate_composite_material(
+        &cft_shape,
+        &invalid_cft_material
+    )
+    .is_err());
+    invalid_cft_material.young = 205000.0;
+    invalid_cft_material.poisson = f64::NAN;
+    assert!(super::stiffness_factors::validate_composite_material(
+        &cft_shape,
+        &invalid_cft_material
+    )
+    .is_err());
+
+    model.materials[1].density = 12.0e-9;
+    let cft_beam_with_changed_density = BeamElement::new(&make_elem(1), &model);
+    assert!((cft_beam_with_changed_density.a - cft_beam.a).abs() < 1e-6);
+    assert!((cft_beam_with_changed_density.iz - cft_beam.iz).abs() < 1e-6);
+    assert!((cft_beam_with_changed_density.j - cft_beam.j).abs() < 1e-6);
 
     use crate::behavior::{ElementBehavior, MassOption};
     for sec in [0, 1] {
@@ -210,15 +257,33 @@ fn test_beam_new_src_cft_composite_props() {
     model.sections[0] = SectionShape::RcColumnRect {
         b: 600.0,
         d: 600.0,
-        rebar: rc_rebar,
+        rebar: rc_rebar.clone(),
     }
     .to_section(SectionId(0), "RC-600".into());
     model.sections[0].material = Some(MaterialId(0));
     let beam = BeamElement::new(&make_elem(0), &model);
+    assert!((beam.e - ec).abs() < 1e-9);
     let mass = beam.mass_matrix(MassOption::Lumped);
     assert!(
         (mass.get(0, 0) + mass.get(6, 6) - beam.density * beam.a_mass * beam.length).abs() < 1e-9
     );
+
+    model.sections[0] = SectionShape::RcColumnCircle {
+        d: 600.0,
+        rebar: squid_n_core::section_shape::RcCircleColumnRebar {
+            main_dia: 22.0,
+            count: 16,
+            cover: 50.0,
+            hoop: squid_n_core::section_shape::CircleColumnHoop {
+                dia: 10.0,
+                pitch: 100.0,
+            },
+        },
+    }
+    .to_section(SectionId(0), "RC-circle-600".into());
+    model.sections[0].material = Some(MaterialId(0));
+    let circle_beam = BeamElement::new(&make_elem(0), &model);
+    assert!((circle_beam.e - ec).abs() < 1e-9);
 
     model.sections[0] = Section {
         material: Some(MaterialId(0)),
@@ -226,11 +291,37 @@ fn test_beam_new_src_cft_composite_props() {
         ..src_shape.to_section(SectionId(0), "SRC-600".into())
     };
     model.materials[0].fc = None;
-    let beam = BeamElement::try_new(&make_elem(0), &model).unwrap();
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        beam.mass_matrix(MassOption::Consistent)
-    }));
-    assert!(result.is_err());
+    let error = BeamElement::try_new(&make_elem(0), &model)
+        .err()
+        .expect("不正な Fc は要素構築に失敗する");
+    assert!(error.contains("Fc が未設定または不正"));
+
+    model.materials[0].fc = Some(24.0);
+    model.materials[0].density = 0.0;
+    let beam = BeamElement::try_new(&make_elem(0), &model).expect("明示 E は密度によらず使う");
+    assert_eq!(beam.e, model.materials[0].young);
+
+    model.materials[0].density = f64::NAN;
+    let beam = BeamElement::try_new(&make_elem(0), &model).expect("明示 E は密度によらず使う");
+    assert_eq!(beam.e, model.materials[0].young);
+
+    model.sections[0] = SectionShape::RcColumnRect {
+        b: 600.0,
+        d: 600.0,
+        rebar: rc_rebar,
+    }
+    .to_section(SectionId(0), "RC-600-invalid".into());
+    model.sections[0].material = Some(MaterialId(0));
+    model.materials[0].fc = None;
+    let error = BeamElement::try_new(&make_elem(0), &model)
+        .err()
+        .expect("不正な RC の Fc は要素構築に失敗する");
+    assert!(error.contains("Fc が未設定または不正"));
+
+    model.materials[0].fc = Some(24.0);
+    model.materials[0].density = 0.0;
+    let beam = BeamElement::try_new(&make_elem(0), &model).expect("明示 E は密度によらず使う");
+    assert_eq!(beam.e, model.materials[0].young);
 }
 
 /// スラブ協力幅による強軸剛性増大。

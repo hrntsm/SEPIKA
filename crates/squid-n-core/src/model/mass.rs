@@ -183,6 +183,18 @@ pub fn validate_section_materials(
             section.name
         ));
     }
+    if (concrete_shape
+        || matches!(
+            shape,
+            SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
+        ))
+        && main.is_some_and(|material| !material.density.is_finite() || material.density <= 0.0)
+    {
+        return Err(format!(
+            "断面{}のコンクリート系主材料の密度が不正です",
+            section.name
+        ));
+    }
 
     let steel_shape = matches!(
         shape,
@@ -1569,5 +1581,20 @@ mod tests {
             )
             .is_ok());
         }
+    }
+
+    #[test]
+    fn コンクリート系断面は密度ゼロを拒否する() {
+        let shape = SectionShape::RcBeamRect {
+            b: 400.0,
+            d: 600.0,
+            rebar: new_beam_rebar(),
+        };
+        let section = shape.to_section(SectionId(0), "RC".into());
+        let concrete = material(0, MaterialCategory::Concrete, 0.0, Some(24.0));
+        let error =
+            SectionMassProperties::try_from_section(&section, Some(&concrete), None, None, None)
+                .unwrap_err();
+        assert!(error.contains("密度が不正"));
     }
 }

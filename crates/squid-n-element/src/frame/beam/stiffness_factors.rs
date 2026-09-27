@@ -297,6 +297,38 @@ pub fn composite_props_of(
     composite_props_with(sec.shape.as_ref()?, mat)
 }
 
+pub(super) fn validate_composite_material(
+    shape: &squid_n_core::section_shape::SectionShape,
+    mat: &squid_n_core::model::Material,
+) -> Result<(), String> {
+    use squid_n_core::section_shape::SectionShape;
+    if matches!(
+        shape,
+        SectionShape::RcBeamRect { .. }
+            | SectionShape::RcColumnRect { .. }
+            | SectionShape::RcColumnCircle { .. }
+            | SectionShape::SrcBeamRect { .. }
+            | SectionShape::SrcColumnRect { .. }
+            | SectionShape::CftBox { .. }
+            | SectionShape::CftPipe { .. }
+    ) && !mat.fc.is_some_and(|fc| fc.is_finite() && fc > 0.0)
+    {
+        return Err("RC/SRC/CFT 断面のコンクリート Fc が未設定または不正です".into());
+    }
+    if matches!(
+        shape,
+        SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
+    ) {
+        if !mat.young.is_finite() || mat.young <= 0.0 {
+            return Err("CFT 断面の鋼管ヤング係数 E が未設定または不正です".into());
+        }
+        if !mat.poisson.is_finite() {
+            return Err("CFT 断面の鋼管ポアソン比 ν が不正です".into());
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn composite_props_with(
     shape: &squid_n_core::section_shape::SectionShape,
     mat: &squid_n_core::model::Material,
@@ -305,12 +337,19 @@ pub(super) fn composite_props_with(
     match shape {
         SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. } => mat
             .fc
-            .is_some()
-            .then(|| shape.src_equivalent_props(mat.young, mat.poisson))
-            .flatten(),
-        SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => mat
-            .fc
-            .and_then(|fc| shape.cft_equivalent_props(mat.young, mat.poisson, fc)),
+            .filter(|fc| fc.is_finite() && *fc > 0.0)
+            .and_then(|_| shape.src_equivalent_props(mat.young, mat.poisson)),
+        SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => mat.fc.and_then(|fc| {
+            if !fc.is_finite() || fc <= 0.0 {
+                return None;
+            }
+            let gamma_c = squid_n_core::units::concrete_unit_weight_kn_m3(
+                fc,
+                mat.concrete_class,
+                squid_n_core::units::ConcreteComposition::Plain,
+            );
+            shape.cft_equivalent_props(mat.young, mat.poisson, fc, gamma_c)
+        }),
         _ => None,
     }
 }

@@ -2157,7 +2157,7 @@ fn test_import_propagates_rc_material_to_member() {
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
   </StbNodes>
-  <StbMaterials><StbMaterial id="5" name="Fc24" young="21000" poisson="0.2" density="0"/></StbMaterials>
+  <StbMaterials><StbMaterial id="5" name="Fc24" young="21000" poisson="0.2" density="2.549696072817442e-9" fc="24"/></StbMaterials>
   <StbSections>
     <StbSecColumn_RC id="0" name="C" id_material="5"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="500" width_Y="500"/></StbSecFigureColumn_RC></StbSecColumn_RC>
   </StbSections>
