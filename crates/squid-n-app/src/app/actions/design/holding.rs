@@ -297,7 +297,7 @@ impl App {
                     }
                 } else if let Some(SectionShape::RcBeamRect { b, d, rebar }) = sec.shape.as_ref() {
                     if squid_n_design_jp::MemberKind::of_element(elem, model)
-                        != squid_n_design_jp::MemberKind::Beam
+                        != squid_n_design_jp::MemberKind::Girder
                     {
                         return Err(format!(
                             "部材 {:?}・断面 {:?}: 新型RC梁断面の用途が梁ではありません",

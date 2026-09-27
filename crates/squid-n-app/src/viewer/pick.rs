@@ -314,7 +314,7 @@ pub(super) fn pick_support_anchor(
         );
     }
     let members = match kind {
-        SecondaryMemberKind::Joist => model.joists().collect::<Vec<_>>(),
+        SecondaryMemberKind::Beam => model.beams().collect::<Vec<_>>(),
         SecondaryMemberKind::Post => model.posts().collect::<Vec<_>>(),
     };
     for sm in members {
@@ -439,7 +439,7 @@ mod tests {
         assert!(pick_parent_region(&model, &proj, outside, true, false).is_none());
 
         let on_axis = proj.project([2000.0, 0.0, 0.0]);
-        let anchor = pick_support_anchor(&model, &proj, on_axis, SecondaryMemberKind::Joist, 12.0)
+        let anchor = pick_support_anchor(&model, &proj, on_axis, SecondaryMemberKind::Beam, 12.0)
             .expect("大梁の材軸上");
         assert_eq!(anchor.support, SupportMemberId::Primary(ElemId(0)));
         assert!((anchor.position - 0.5).abs() < 0.2, "{anchor:?}");

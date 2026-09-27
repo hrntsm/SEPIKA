@@ -233,7 +233,7 @@ mod tests {
             support_spring: None,
         };
         let sec = Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: String::new(),
             area: 1.0e4,

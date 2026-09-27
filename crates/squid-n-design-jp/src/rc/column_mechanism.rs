@@ -189,7 +189,7 @@ fn sum_beam_my_at_node(
         if other.kind != ElementKind::Beam || other.nodes.len() < 2 {
             continue;
         }
-        if MemberKind::of_element(other, model) != MemberKind::Beam {
+        if MemberKind::of_element(other, model) != MemberKind::Girder {
             continue;
         }
         let (Some(n0), Some(n1)) = (
@@ -430,7 +430,7 @@ mod tests {
         col_sec.material = Some(MaterialId(0));
         col_sec.rebar_material = Some(MaterialId(1));
         let mut beam_sec = beam_shape.to_section(SectionId(1), "B-SRC".into());
-        beam_sec.frame_use = Some(FrameSectionUse::Beam);
+        beam_sec.frame_use = Some(FrameSectionUse::Girder);
         beam_sec.material = Some(MaterialId(0));
         beam_sec.rebar_material = Some(MaterialId(1));
 
@@ -647,7 +647,7 @@ mod tests {
         col_sec.material = Some(MaterialId(0));
         col_sec.rebar_material = Some(MaterialId(1));
         let mut beam_sec = beam_shape.to_section(SectionId(1), "B".into());
-        beam_sec.frame_use = Some(FrameSectionUse::Beam);
+        beam_sec.frame_use = Some(FrameSectionUse::Girder);
         beam_sec.material = Some(MaterialId(0));
         beam_sec.rebar_material = Some(MaterialId(1));
 

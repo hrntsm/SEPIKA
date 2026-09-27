@@ -5,8 +5,8 @@ use smallvec::smallvec;
 use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId, StoryId};
 use squid_n_core::model::SlabPlate;
 use squid_n_core::model::{
-    AxisGroupKind, AxisSource, ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis,
-    Material, MaterialCategory, Model, Node, Section, Story,
+    AxisGroupKind, AxisSource, ElementData, ElementKind, EndCondition, ForceRegime,
+    FrameSectionUse, LocalAxis, Material, MaterialCategory, Model, Node, Section, Story,
 };
 use squid_n_core::section_shape::SectionShape;
 
@@ -80,7 +80,7 @@ fn representative_model() -> Model {
     col.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
     push_section(&mut m, col);
     let mut beam = beam_h.to_section(SectionId(1), "G1".into());
-    beam.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    beam.frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
     push_section(&mut m, beam);
     // 柱2本（鉛直, section 0）＋大梁1本（水平, section 1）。
     let mk = |id: u32, ni: u32, nj: u32, sec: u32, refv: [f64; 3]| ElementData {
@@ -342,7 +342,7 @@ fn push_section(m: &mut Model, mut sec: Section) {
                 | SectionShape::SrcColumnRect { .. },
             ) => Some(squid_n_core::model::FrameSectionUse::Column),
             Some(SectionShape::RcWall { .. } | SectionShape::RcSlab { .. }) => None,
-            _ => Some(squid_n_core::model::FrameSectionUse::Beam),
+            _ => Some(squid_n_core::model::FrameSectionUse::Girder),
         };
     }
     sec.material = Some(MaterialId(0));
@@ -531,7 +531,7 @@ fn test_standard_import_roundtrip_steel_and_rc() {
         rebar: beam_rebar(),
     };
     let mut sec = rc.to_section(SectionId(1), "G1".into());
-    sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
     push_section(&mut m, sec);
     m.elements.push(member(0, true, 0)); // 柱 → 鋼断面
     m.elements.push(member(1, false, 1)); // 梁 → RC 断面
@@ -853,7 +853,7 @@ fn test_standard_export_warns_circle_beam_raw() {
         rebar: circle_rebar_distinct(8),
     };
     let mut sec = shape.to_section(SectionId(0), "RCB".into());
-    sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
     push_section(&mut m, sec);
     m.elements.push(member(0, false, 0)); // 梁
 
@@ -1064,8 +1064,10 @@ fn test_import_does_not_merge_sections_with_different_materials() {
     <StbGirder id="1" id_node_start="1" id_node_end="2" id_section="1"/>
   </StbMembers>
 </StbModel></ST_BRIDGE>"#;
-    let err = import_stbridge_with_report(xml).expect_err("用途競合を拒否");
-    assert!(err.to_string().contains("用途が競合"), "{err}");
+    let (model, _) = import_stbridge_with_report(xml).expect("主架構用途から断面用途を設定");
+    assert_eq!(model.sections.len(), 2);
+    assert_eq!(model.sections[0].frame_use, Some(FrameSectionUse::Column));
+    assert_eq!(model.sections[1].frame_use, Some(FrameSectionUse::Girder));
 }
 
 /// 同じ断面を指す部材が別々の `id_material` を持つファイルは、先に解決した材料を
@@ -1132,8 +1134,10 @@ fn test_standard_roundtrip_shared_rc_rect_rebar() {
     m.elements.push(member(1, false, 1)); // 梁
 
     let xml = export_stbridge(&m).unwrap();
-    let err = import_stbridge(&xml).expect_err("同一符号・階の用途競合を拒否");
-    assert!(err.to_string().contains("用途が競合"), "{err}");
+    let model = import_stbridge(&xml).expect("主架構用途が異なる断面を分離");
+    assert_eq!(model.sections.len(), 2);
+    assert_eq!(model.sections[0].frame_use, Some(FrameSectionUse::Column));
+    assert_eq!(model.sections[1].frame_use, Some(FrameSectionUse::Girder));
 }
 
 /// せん断補強筋の材料が未割当でも配筋は完全一致で往復する
@@ -1916,14 +1920,14 @@ fn test_standard_unsupported_beam_shapes_fall_back_to_raw() {
         thick: 12.0,
     };
     let mut cft_sec = cft.to_section(SectionId(0), "CB".into());
-    cft_sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    cft_sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
     push_section(&mut m, cft_sec);
     let rc_circle = SectionShape::RcColumnCircle {
         d: 700.0,
         rebar: circle_rebar_distinct(8),
     };
     let mut rc_sec = rc_circle.to_section(SectionId(1), "RCB".into());
-    rc_sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    rc_sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
     push_section(&mut m, rc_sec);
     m.elements.push(member(0, false, 0)); // CFT 梁
     m.elements.push(member(1, false, 1)); // 円形 RC 梁
@@ -2090,7 +2094,7 @@ fn test_standard_writes_section_material() {
     col_sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
     let mut beam_sec = h.to_section(SectionId(1), "G".into());
     beam_sec.material = Some(MaterialId(1));
-    beam_sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    beam_sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
     m.sections.push(col_sec);
     m.sections.push(beam_sec);
     m.elements.push(member(0, true, 0));
@@ -2867,8 +2871,8 @@ fn test_import_report_warns_dangling_section_ref() {
   </StbNodes>
   <StbMembers><StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="99"/></StbMembers>
 </StbModel></ST_BRIDGE>"#;
-    let err = import_stbridge_with_report(xml).expect_err("用途を確定できない主架構参照は拒否");
-    assert!(err.to_string().contains("用途を確定できません"), "{err}");
+    let (_, report) = import_stbridge_with_report(xml).expect("断面リンクを外して取り込む");
+    assert!(report.warnings.iter().any(|w| w.contains("存在しない断面")));
 }
 
 /// [低] 鋼ブレース断面 StbSecBrace_S を取り込み、ブレースが断面を持つ。
@@ -3069,9 +3073,9 @@ fn test_import_stbbeam_as_secondary_member() {
 </StbModel></ST_BRIDGE>"#;
     let (m, report) = import_stbridge_with_report(xml).expect("import");
     assert_eq!(m.elements.len(), 1, "大梁のみ解析要素");
-    assert_eq!(m.joists().count(), 1);
-    let sm = m.joists().next().expect("小梁 1 本");
-    assert_eq!(sm.kind, SecondaryMemberKind::Joist);
+    assert_eq!(m.beams().count(), 1);
+    let sm = m.beams().next().expect("小梁 1 本");
+    assert_eq!(sm.kind, SecondaryMemberKind::Beam);
     assert!(
         sm.is_cantilever(),
         "大梁に載る端は支持、自由端は片持ちとして取り込む"
@@ -3082,6 +3086,11 @@ fn test_import_stbbeam_as_secondary_member() {
         report.notes
     );
     assert!(sm.section.is_some(), "断面参照が解決されるはず");
+    assert_eq!(
+        m.sections[sm.section.unwrap().index()].frame_use,
+        Some(squid_n_core::model::FrameSectionUse::Girder),
+        "共有断面の用途は主架構部材から決まる"
+    );
     assert!(
         m.sections[sm.section.unwrap().index()].material.is_some(),
         "断面にグレード材料が設定されるはず"
@@ -3095,7 +3104,7 @@ fn test_import_stbbeam_as_secondary_member() {
 }
 
 #[test]
-fn test_import_rejects_section_definition_usage_mismatch() {
+fn test_import_uses_member_context_for_section_usage() {
     let definitions = [
         r#"<StbSecColumn_RC id="0" name="C"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="500" width_Y="500"/></StbSecFigureColumn_RC></StbSecColumn_RC>"#,
         r#"<StbSecRaw id="0" name="C" kind="COLUMN" area="1" iy="1" iz="1" j="1"/>"#,
@@ -3109,8 +3118,11 @@ fn test_import_rejects_section_definition_usage_mismatch() {
   <StbMembers><StbGirders><StbGirder id="0" id_node_start="0" id_node_end="1" id_section="0"/></StbGirders></StbMembers>
 </StbModel></ST_BRIDGE>"#
         );
-        let error = import_stbridge(&xml).expect_err("柱用断面を大梁へ参照した入力を拒否する");
-        assert!(matches!(error, StbError::Unmappable(_)), "{error}");
+        let model = import_stbridge(&xml).expect("断面定義タグではなく部材文脈で用途を決める");
+        assert_eq!(
+            model.sections[0].frame_use,
+            Some(squid_n_core::model::FrameSectionUse::Girder)
+        );
     }
 }
 
@@ -3133,13 +3145,13 @@ fn test_secondary_members_roundtrip() {
     push_section(&mut m, post_section);
     m.elements.push(member(0, false, 0));
     // 小梁と間柱を 1 本ずつ（節点は既存節点を使う）。
-    let joist_ends =
+    let beam_ends =
         squid_n_core::model::SecondaryMemberEnds::Detached([m.nodes[0].coord, m.nodes[1].coord]);
-    m.unassigned_joists.push(SecondaryMember {
+    m.unassigned_beams.push(SecondaryMember {
         id: squid_n_core::ids::SecondaryMemberId(0),
         gravity_end_shares: None,
-        kind: SecondaryMemberKind::Joist,
-        ends: joist_ends,
+        kind: SecondaryMemberKind::Beam,
+        ends: beam_ends,
         section: Some(SectionId(0)),
         name: "B1".into(),
     });
@@ -3160,38 +3172,33 @@ fn test_secondary_members_roundtrip() {
     assert!(xml.contains("<StbPosts>"), "間柱を書き出す: {xml}");
 
     m.sections[0].frame_use = None;
-    let err = export_stbridge(&m).expect_err("用途不明の小梁断面を出力しない");
-    assert!(matches!(err, StbError::FrameSectionUseMissing(_)), "{err}");
-    m.sections[0].frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    m.elements[0].section = None;
+    export_stbridge(&m).expect("用途未設定の小梁断面を出力");
+    m.sections[0].frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
     m.sections[1].frame_use = None;
-    let err = export_stbridge(&m).expect_err("用途不明の間柱断面を出力しない");
-    assert!(matches!(err, StbError::FrameSectionUseMissing(_)), "{err}");
+    export_stbridge(&m).expect("用途未設定の間柱断面を出力");
     m.sections[1].frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
 
-    m.unassigned_joists[0].section = Some(SectionId(1));
-    let err = export_stbridge(&m).expect_err("柱用途の断面を小梁へ暗黙変換しない");
-    assert!(matches!(err, StbError::FrameSectionUseMismatch(_)), "{err}");
+    m.unassigned_beams[0].section = Some(SectionId(1));
+    export_stbridge(&m).expect("小梁と柱で断面を共有");
 
-    m.unassigned_joists[0].section = Some(SectionId(0));
+    m.unassigned_beams[0].section = Some(SectionId(0));
     m.sections[0].frame_use = Some(squid_n_core::model::FrameSectionUse::Brace);
-    let err = export_stbridge(&m).expect_err("ブレース用途の断面を小梁へ暗黙変換しない");
-    assert!(matches!(err, StbError::FrameSectionUseMismatch(_)), "{err}");
+    export_stbridge(&m).expect("二次部材は主架構用途によらず出力");
 
-    m.sections[0].frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    m.sections[0].frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
     m.unassigned_posts[0].section = Some(SectionId(0));
-    let err = export_stbridge(&m).expect_err("梁用途の断面を間柱へ暗黙変換しない");
-    assert!(matches!(err, StbError::FrameSectionUseMismatch(_)), "{err}");
+    export_stbridge(&m).expect("間柱と大梁で断面を共有");
 
     m.unassigned_posts[0].section = Some(SectionId(1));
     m.sections[1].frame_use = Some(squid_n_core::model::FrameSectionUse::Brace);
-    let err = export_stbridge(&m).expect_err("ブレース用途の断面を間柱へ暗黙変換しない");
-    assert!(matches!(err, StbError::FrameSectionUseMismatch(_)), "{err}");
+    export_stbridge(&m).expect("間柱は主架構用途によらず出力");
 
     let (back, _report) = import_stbridge_with_report(&xml).expect("re-import");
-    assert_eq!(back.joists().count() + back.posts().count(), 2);
+    assert_eq!(back.beams().count() + back.posts().count(), 2);
     let kinds: Vec<SecondaryMemberKind> =
-        back.joists().chain(back.posts()).map(|s| s.kind).collect();
-    assert!(kinds.contains(&SecondaryMemberKind::Joist));
+        back.beams().chain(back.posts()).map(|s| s.kind).collect();
+    assert!(kinds.contains(&SecondaryMemberKind::Beam));
     assert!(kinds.contains(&SecondaryMemberKind::Post));
     assert_eq!(back.elements.len(), 1, "大梁は解析要素のまま");
     assert!(back.validate().is_ok());
@@ -3219,15 +3226,15 @@ fn test_export_errors_when_secondary_has_no_end_node() {
         support: SupportMemberId::Primary(ElemId(0)),
         position,
     };
-    m.unassigned_joists.push(SecondaryMember {
+    m.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: SecondaryMemberEnds::Supported([anchor(0.25), anchor(0.75)]),
         section: Some(SectionId(0)),
         name: "J-mid".into(),
     });
-    let sm = &m.unassigned_joists[0];
+    let sm = &m.unassigned_beams[0];
     let (a, b) = m.secondary_member_end_points(sm).expect("材軸");
     let tol = squid_n_core::geom::MEMBER_AXIS_TOL_MM;
     assert!(
@@ -3628,14 +3635,6 @@ fn test_import_keeps_section_floor() {
     assert_eq!(m.sections[0].floor.as_deref(), Some("1"));
     assert_eq!(m.sections[1].name, "C1");
     assert_eq!(m.sections[1].floor.as_deref(), Some("2"));
-    // 階は書き出しでも保持する（往復で同一性キーが崩れない）。
-    let out = export_stbridge(&m).expect("export");
-    assert!(out.contains(r#"floor="1""#), "{out}");
-    assert!(out.contains(r#"floor="2""#), "{out}");
-    let back = import_stbridge(&out).expect("re-import");
-    assert_eq!(back.sections.len(), 2);
-    assert_eq!(back.sections[0].floor.as_deref(), Some("1"));
-    assert_eq!(back.sections[1].floor.as_deref(), Some("2"));
 }
 
 /// 符号＋階が同じで内容も同じ断面定義は 1 件へ統合し、参照していた部材は
@@ -3913,10 +3912,10 @@ fn test_import_enclosed_frame_with_slab_folds_to_one_region() {
     assert!(!m.slabs[0].is_attached(), "囲まれ床板");
     assert_eq!(
         m.unassigned_posts.len()
-            + m.unassigned_joists.len()
+            + m.unassigned_beams.len()
             + m.floor_regions
                 .iter()
-                .map(|r| r.secondary_joists.len())
+                .map(|r| r.secondary_beams.len())
                 .sum::<usize>()
             + m.wall_regions.iter().map(|r| r.posts.len()).sum::<usize>(),
         0,

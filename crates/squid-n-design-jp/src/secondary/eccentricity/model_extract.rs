@@ -103,7 +103,7 @@ pub fn column_stiffnesses(model: &Model, story: StoryId) -> Vec<ColumnStiffness>
                 let Some(other_section) = model.element_section(other) else {
                     continue;
                 };
-                if other_section.frame_use != Some(FrameSectionUse::Beam) {
+                if other_section.frame_use != Some(FrameSectionUse::Girder) {
                     continue;
                 }
                 let has_top = other.nodes.contains(&n_top.id);

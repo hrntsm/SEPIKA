@@ -129,7 +129,7 @@ fn test_beam_has_attached_slab_t_shape_and_plateless() {
 /// 個々の床板の境界だけで判定すると、大梁の両端が別々の床板にまたがり、
 /// どちらの床板にも「両端を含む」が成立しなくなる回帰が起きる）。
 #[test]
-fn test_beam_has_attached_slab_survives_joist_subdivided_region() {
+fn test_beam_has_attached_slab_survives_beam_subdivided_region() {
     use squid_n_core::ids::FloorRegionId;
     use squid_n_core::model::{DistributionMethod, FloorRegion};
 

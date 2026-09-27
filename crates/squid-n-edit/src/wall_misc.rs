@@ -236,20 +236,20 @@ impl EditCommand for SetMultiOpeningMode {
     }
 }
 
-/// 部材のねじり剛性の扱い（`Model::beam_torsion`）を建物一律に変更する。
+/// 部材のねじり剛性の扱い（`Model::girder_torsion`）を建物一律に変更する。
 ///
 /// 既定は「線材（梁・柱）の i 端ねじれをピン（解放）」で、`Keep` にすると
 /// 全部材でねじり剛性 GJ/L を保持する。剛性そのものが変わるため、呼び出し側は
 /// 実行後に結果を陳腐化させること（UI は `staleness.mark_edited`）。
 /// 逆操作は変更前のモードへの再実行（[`SetMultiOpeningMode`] と同じ対称パターン）。
-pub struct SetBeamTorsion {
-    pub mode: squid_n_core::model::BeamTorsionMode,
+pub struct SetGirderTorsion {
+    pub mode: squid_n_core::model::GirderTorsionMode,
 }
 
-impl EditCommand for SetBeamTorsion {
+impl EditCommand for SetGirderTorsion {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        let old = std::mem::replace(&mut model.beam_torsion, self.mode);
-        Box::new(SetBeamTorsion { mode: old })
+        let old = std::mem::replace(&mut model.girder_torsion, self.mode);
+        Box::new(SetGirderTorsion { mode: old })
     }
 
     fn label(&self) -> &str {
@@ -262,7 +262,7 @@ impl EditCommand for SetBeamTorsion {
 /// 既定は「モデル化する」で、`None` にすると接合部を剛節点として扱う従来の
 /// モデル化へ戻る。パネル要素の生成有無と接合部の剛性が変わるため、呼び出し側は
 /// 実行後に結果を陳腐化させること（UI は `staleness.mark_edited`）。
-/// 逆操作は変更前のモードへの再実行（[`SetBeamTorsion`] と同じ対称パターン）。
+/// 逆操作は変更前のモードへの再実行（[`SetGirderTorsion`] と同じ対称パターン）。
 pub struct SetPanelZoneMode {
     pub mode: squid_n_core::model::PanelZoneMode,
 }

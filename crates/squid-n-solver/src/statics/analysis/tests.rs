@@ -46,7 +46,7 @@ fn make_cantilever_model() -> Model {
             spring: None,
         }],
         sections: vec![Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "beam".into(),
             area: 100.0,
@@ -862,7 +862,7 @@ fn make_two_story_diaphragm_model(
             spring: None,
         }],
         sections: vec![Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "col".into(),
             area: 100.0,
@@ -1423,7 +1423,7 @@ fn ss_beam_udl(l: f64, w: f64) -> Model {
             spring: None,
         }],
         sections: vec![Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "s".into(),
             area: 1000.0,
@@ -1701,7 +1701,7 @@ fn test_crossing_beams_reported_as_warning() {
 
 /// どの床領域にも属さない小梁は警告し、解析は止めない。
 #[test]
-fn test_model_issues_warns_unassigned_joist() {
+fn test_model_issues_warns_unassigned_beam() {
     use super::precheck::{model_issues, precheck_model, IssueSeverity};
     use squid_n_core::model::{SecondaryMember, SecondaryMemberKind};
 
@@ -1723,15 +1723,15 @@ fn test_model_issues_warns_unassigned_joist() {
         story: None,
         support_spring: None,
     });
-    let joist_ends = squid_n_core::model::SecondaryMemberEnds::Detached([
+    let beam_ends = squid_n_core::model::SecondaryMemberEnds::Detached([
         model.nodes[n as usize].coord,
         model.nodes[(n + 1) as usize].coord,
     ]);
-    model.unassigned_joists.push(SecondaryMember {
+    model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
-        ends: joist_ends,
+        kind: SecondaryMemberKind::Beam,
+        ends: beam_ends,
         section: Some(SectionId(0)),
         name: "孤立小梁".into(),
     });
@@ -1756,7 +1756,7 @@ fn test_model_issues_warns_unassigned_joist() {
     assert!(precheck_model(&model).is_err(), "解析を止める");
 
     // 片持ち小梁は所属がなくても取付き線の支持辺から荷重を受けるためエラーにしない。
-    model.unassigned_joists[0].ends = squid_n_core::model::SecondaryMemberEnds::Cantilever {
+    model.unassigned_beams[0].ends = squid_n_core::model::SecondaryMemberEnds::Cantilever {
         support: squid_n_core::model::SecondaryMemberAnchor {
             support: squid_n_core::model::SupportMemberId::Primary(ElemId(0)),
             position: 0.5,
@@ -1790,7 +1790,7 @@ fn test_model_issues_warns_unassigned_joist() {
         plastic_zone: None,
         spring: None,
     });
-    model.unassigned_joists[0].ends = joist_ends;
+    model.unassigned_beams[0].ends = beam_ends;
     let issues = model_issues(&model);
     assert!(
         !issues
@@ -1813,10 +1813,10 @@ fn test_model_issues_errors_cft_secondary_section() {
     let mut model = make_cantilever_model();
     model.sections[0].shape = Some(cft_shape());
     model.materials[0].fc = Some(24.0);
-    model.unassigned_joists.push(SecondaryMember {
+    model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: SecondaryMemberEnds::Cantilever {
             support: SecondaryMemberAnchor {
                 support: SupportMemberId::Primary(ElemId(0)),
@@ -1845,10 +1845,10 @@ fn test_model_issues_allows_steel_secondary_section() {
     };
 
     let mut model = make_cantilever_model();
-    model.unassigned_joists.push(SecondaryMember {
+    model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: SecondaryMemberEnds::Cantilever {
             support: SecondaryMemberAnchor {
                 support: SupportMemberId::Primary(ElemId(0)),
@@ -1874,10 +1874,10 @@ fn test_model_issues_errors_unresolved_secondary() {
     use squid_n_core::model::{SecondaryMember, SecondaryMemberKind};
 
     let mut model = make_cantilever_model();
-    model.unassigned_joists.push(SecondaryMember {
+    model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Detached([
             [500.0, 1000.0, 0.0],
             [800.0, 1000.0, 0.0],
@@ -1907,10 +1907,10 @@ fn test_model_issues_warns_free_end_on_support() {
     };
 
     let mut model = make_cantilever_model();
-    model.unassigned_joists.push(SecondaryMember {
+    model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: SecondaryMemberEnds::Cantilever {
             support: SecondaryMemberAnchor {
                 support: SupportMemberId::Primary(ElemId(0)),
@@ -1944,10 +1944,10 @@ fn test_model_issues_warns_free_end_on_free_tip() {
 
     let mut model = make_cantilever_model();
     for (id, name) in [(0u32, "CA"), (1, "CB")] {
-        model.unassigned_joists.push(SecondaryMember {
+        model.unassigned_beams.push(SecondaryMember {
             gravity_end_shares: None,
             id: squid_n_core::ids::SecondaryMemberId(id),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Cantilever {
                 support: SecondaryMemberAnchor {
                     support: SupportMemberId::Primary(ElemId(0)),

@@ -154,7 +154,7 @@ fn wall_bay_model() -> Model {
     col_section.frame_use = Some(FrameSectionUse::Column);
     model.sections.push(col_section);
     let mut beam_section = beam_shape.to_section(SectionId(1), "梁 H-400x200x8x13".into());
-    beam_section.frame_use = Some(FrameSectionUse::Beam);
+    beam_section.frame_use = Some(FrameSectionUse::Girder);
     model.sections.push(beam_section);
     // 断面: 耐震壁（RC t=150）。
     // `shape` に `SectionShape::RcWall` を持たせる（dig 2026-08-26 Q2=A）。
@@ -245,7 +245,7 @@ fn wall_bay_model() -> Model {
         rebar: wall_girder_rebar,
     }
     .to_section(SectionId(4), "壁上下大梁 RC 300x400".into());
-    wall_girder_section.frame_use = Some(FrameSectionUse::Beam);
+    wall_girder_section.frame_use = Some(FrameSectionUse::Girder);
     wall_girder_section.material = Some(MaterialId(1));
     wall_girder_section.rebar_material = Some(MaterialId(2));
     wall_girder_section.shear_rebar_material = Some(MaterialId(2));

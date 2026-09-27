@@ -104,7 +104,7 @@ pub fn member_orientation(model: &Model, elem: &ElementData) -> Option<MemberOri
     let section = elem.section.and_then(|id| model.sections.get(id.index()))?;
     match section.frame_use? {
         FrameSectionUse::Column => Some(MemberOrientation::Column),
-        FrameSectionUse::Beam => Some(MemberOrientation::Beam),
+        FrameSectionUse::Girder => Some(MemberOrientation::Beam),
         FrameSectionUse::Brace => None,
     }
 }
@@ -735,7 +735,7 @@ mod tests {
         col_mat: u32,
     ) -> Model {
         let mut beam_sec = sec_with_mat(beam, beam_depth, None, 0, beam_mat);
-        beam_sec.frame_use = Some(FrameSectionUse::Beam);
+        beam_sec.frame_use = Some(FrameSectionUse::Girder);
         let mut col_sec = sec_with_mat(col, 400.0, None, 1, col_mat);
         col_sec.frame_use = Some(FrameSectionUse::Column);
         Model {

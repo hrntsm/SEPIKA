@@ -1,4 +1,4 @@
-//! 一本部材グループ（`Model.beam_groups`）の検定文脈合成。
+//! 一本部材グループ（`Model.girder_groups`）の検定文脈合成。
 
 use std::collections::HashMap;
 
@@ -6,22 +6,22 @@ use squid_n_core::ids::ElemId;
 use squid_n_core::model::Model;
 use squid_n_element::frame::beam::MemberForces;
 
-use crate::BeamGroupContextOverride;
+use crate::GirderGroupContextOverride;
 
-/// `Model.beam_groups` の各グループについて検定文脈の合成値を求め、
+/// `Model.girder_groups` の各グループについて検定文脈の合成値を求め、
 /// 所属要素 ID → 合成値の対応表を返す。
 ///
 /// グループは軸方向に連続する梁要素の ID を**並び順**で持つ前提
 /// （幾何学的な連続性・共線性の検証は行わない）。
 /// 要素または内力が欠けるグループ・要素数 2 未満のグループは無視する。
 /// 中央モーメントは A 式・B 式の絶対値の大きい方（符号は B 式に合わせる）。
-pub fn beam_group_overrides(
+pub fn girder_group_overrides(
     model: &Model,
     member_forces: &[(ElemId, MemberForces)],
-) -> HashMap<ElemId, BeamGroupContextOverride> {
-    let mut out: HashMap<ElemId, BeamGroupContextOverride> = HashMap::new();
+) -> HashMap<ElemId, GirderGroupContextOverride> {
+    let mut out: HashMap<ElemId, GirderGroupContextOverride> = HashMap::new();
 
-    for group in &model.beam_groups {
+    for group in &model.girder_groups {
         if group.len() < 2 {
             continue;
         }
@@ -114,7 +114,7 @@ pub fn beam_group_overrides(
             total
         };
 
-        let ov = BeamGroupContextOverride {
+        let ov = GirderGroupContextOverride {
             length: total,
             end_moments_z,
             mid_moment_z,
@@ -140,7 +140,7 @@ mod tests {
 
     /// 一本部材グループの合成値（全長・端部/中央モーメント・せん断スパン代表値）の手計算照合。
     #[test]
-    fn beam_group_overrides_combines_members() {
+    fn girder_group_overrides_combines_members() {
         let node = |id: u32, x: f64| Node {
             id: NodeId(id),
             coord: [x, 0.0, 0.0],
@@ -171,7 +171,7 @@ mod tests {
         let model = Model {
             nodes: vec![node(0, 0.0), node(1, 3000.0), node(2, 6000.0)],
             elements: vec![beam(0, 0, 1), beam(1, 1, 2)],
-            beam_groups: vec![vec![ElemId(0), ElemId(1)]],
+            girder_groups: vec![vec![ElemId(0), ElemId(1)]],
             ..Default::default()
         };
         let mf = |rows: Vec<(f64, f64, f64)>| MemberForces {
@@ -199,7 +199,7 @@ mod tests {
             ),
         ];
 
-        let overrides = beam_group_overrides(&model, &member_forces);
+        let overrides = girder_group_overrides(&model, &member_forces);
         let ov = overrides.get(&ElemId(0)).expect("グループ所属");
         // 両要素が同じ合成値を共有する。
         assert_eq!(ov, overrides.get(&ElemId(1)).unwrap());
@@ -220,7 +220,7 @@ mod tests {
 
         // グループ未指定なら空。
         let mut model2 = model;
-        model2.beam_groups.clear();
-        assert!(beam_group_overrides(&model2, &member_forces).is_empty());
+        model2.girder_groups.clear();
+        assert!(girder_group_overrides(&model2, &member_forces).is_empty());
     }
 }

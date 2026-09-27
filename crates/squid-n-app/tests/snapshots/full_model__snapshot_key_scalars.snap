@@ -4,7 +4,7 @@ expression: out
 ---
 model.nodes = 171
 model.elements = 157
-model.joists() = 56
+model.beams() = 56
 model.floor_regions = 26
 model.stories = 5
 prep.total_seismic_weight = 3.201e6
@@ -36,12 +36,12 @@ static.EX.story[RFL].max_ux = 1.482e1
 static.EX.story[PHRFL].max_ux = 1.752e1
 design.member_checks = 115
 design.joint_checks = 42
-design.joist_checks = 56
+design.beam_checks = 56
 design.slab_checks = 81
 design.max_ratio = 3.896e-1
 design.checked_positions = 345
 design.skipped_positions = 0
-design.joist_max_ratio = 3.130e-1
+design.beam_max_ratio = 3.130e-1
 metrics[1FL].drift_angle = 1.366e-3
 metrics[1FL].Rs = 7.575e-1
 metrics[1FL].Re = 2.731e-2

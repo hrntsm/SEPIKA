@@ -403,7 +403,7 @@ impl DesignCheck for SrcDesign {
                 steel_web_thick,
                 steel_flange_thick,
             } => {
-                if matches!(ctx.kind, MemberKind::Beam | MemberKind::Brace) {
+                if matches!(ctx.kind, MemberKind::Girder | MemberKind::Brace) {
                     return CheckOutcome::Skipped {
                         reason: "SRC検定: 柱用断面を梁部材に割り当てています（用途不一致）"
                             .to_string(),

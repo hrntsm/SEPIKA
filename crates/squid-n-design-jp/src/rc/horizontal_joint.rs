@@ -237,7 +237,7 @@ mod tests {
     use squid_n_core::ids::{MaterialId, NodeId, SectionId};
     use squid_n_core::model::{
         ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material, MaterialCategory,
-        Node, PcaBeamAttr, RigidZone,
+        Node, PcaGirderAttr, RigidZone,
     };
     use squid_n_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
 
@@ -314,7 +314,7 @@ mod tests {
 
     /// 矩形 RC 梁 1 本（b=400, D=700, L=6000mm, X 軸方向）のモデル。
     /// `pca_attr` を指定すると `model.pca_attrs` に登録する。
-    fn pca_beam_model(shape: SectionShape, pca_attr: Option<PcaBeamAttr>) -> Model {
+    fn pca_beam_model(shape: SectionShape, pca_attr: Option<PcaGirderAttr>) -> Model {
         let nodes = vec![
             Node {
                 id: NodeId(0),
@@ -414,8 +414,8 @@ mod tests {
         }
     }
 
-    fn default_pca_attr() -> PcaBeamAttr {
-        PcaBeamAttr {
+    fn default_pca_attr() -> PcaGirderAttr {
+        PcaGirderAttr {
             elem: ElemId(0),
             mu: 0.6,
             pw_joint: 0.008,

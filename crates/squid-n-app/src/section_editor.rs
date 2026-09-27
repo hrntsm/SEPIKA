@@ -69,7 +69,7 @@ impl Default for SectionEditorDraft {
     fn default() -> Self {
         Self {
             kind: ShapeKind::SteelH,
-            frame_use: FrameSectionUse::Beam,
+            frame_use: FrameSectionUse::Girder,
             name: "断面1".to_string(),
             floor: String::new(),
             synced_focus: None,
@@ -426,12 +426,12 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
         if !matches!(draft.kind, ShapeKind::RcSlab) {
             egui::ComboBox::from_label("主架構用途")
                 .selected_text(match draft.frame_use {
-                    FrameSectionUse::Beam => "梁",
+                    FrameSectionUse::Girder => "梁",
                     FrameSectionUse::Column => "柱",
                     FrameSectionUse::Brace => "ブレース",
                 })
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Beam, "梁");
+                    ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Girder, "梁");
                     ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Column, "柱");
                     ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Brace, "ブレース");
                 });

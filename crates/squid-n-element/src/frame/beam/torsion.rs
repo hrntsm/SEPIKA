@@ -4,12 +4,12 @@
 
 use squid_n_core::dof::Dof;
 use squid_n_core::ids::{ElemId, NodeId};
-use squid_n_core::model::{BeamTorsionMode, ElementData, ElementKind, Model};
+use squid_n_core::model::{ElementData, ElementKind, GirderTorsionMode, Model};
 
 /// i 端ねじれを解放しない理由。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TorsionReleaseSkip {
-    /// 建物一律の設定が `BeamTorsionMode::Keep`。
+    /// 建物一律の設定が `GirderTorsionMode::Keep`。
     ModeKeep,
     /// 線材ではない。
     NotLineMember,
@@ -93,7 +93,7 @@ fn rotation_restrained_elsewhere(
 
 /// 部材 `data` の i 端ねじれを解放しない理由（解放してよければ `None`）。
 pub fn i_end_torsion_release_skip(data: &ElementData, model: &Model) -> Option<TorsionReleaseSkip> {
-    if model.beam_torsion != BeamTorsionMode::ReleaseIEnd {
+    if model.girder_torsion != GirderTorsionMode::ReleaseIEnd {
         return Some(TorsionReleaseSkip::ModeKeep);
     }
     if !is_line_member(data.kind) {

@@ -362,7 +362,7 @@ fn test_beam_new_slab_cooperation_width_amplifies_iy() {
 /// にまたがり、どちらの床板にも「両端を含む境界」が無くなって増大が消える
 /// 回帰が起きる）。
 #[test]
-fn test_beam_new_slab_cooperation_width_survives_joist_subdivided_region() {
+fn test_beam_new_slab_cooperation_width_survives_beam_subdivided_region() {
     use squid_n_core::dof::Dof6Mask;
     use squid_n_core::ids::{FloorRegionId, MaterialId, SectionId, SlabId};
     use squid_n_core::model::{
@@ -2979,12 +2979,12 @@ fn test_i_end_torsion_release_skipped_at_collinear_beam_node() {
     assert!(!seg_a.torsion_release[0]);
 }
 
-/// `BeamTorsionMode::Keep` ではねじり剛性を保持する（ねじりで釣り合わせる
+/// `GirderTorsionMode::Keep` ではねじり剛性を保持する（ねじりで釣り合わせる
 /// モデル化のための切替）。
 #[test]
-fn test_beam_torsion_mode_keep_retains_torsion() {
+fn test_girder_torsion_mode_keep_retains_torsion() {
     let mut model = torsion_test_model(false);
-    model.beam_torsion = squid_n_core::model::BeamTorsionMode::Keep;
+    model.girder_torsion = squid_n_core::model::GirderTorsionMode::Keep;
     let beam = BeamElement::new(&model.elements[2], &model);
     assert!(!beam.torsion_release[0]);
     let k = beam.local_stiffness();

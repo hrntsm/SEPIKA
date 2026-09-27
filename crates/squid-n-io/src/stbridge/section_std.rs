@@ -77,8 +77,16 @@ fn section_roles(model: &Model) -> HashMap<u32, (bool, bool, bool)> {
         let ent = roles.entry(sec.0).or_insert((false, false, false));
         match usage {
             FrameSectionUse::Column => ent.0 = true,
-            FrameSectionUse::Beam => ent.1 = true,
+            FrameSectionUse::Girder => ent.1 = true,
             FrameSectionUse::Brace => ent.2 = true,
+        }
+    }
+    for sm in model.beams().chain(model.posts()) {
+        let Some(sec) = sm.section else { continue };
+        let ent = roles.entry(sec.0).or_insert((false, false, false));
+        match sm.kind {
+            squid_n_core::model::SecondaryMemberKind::Beam => ent.1 = true,
+            squid_n_core::model::SecondaryMemberKind::Post => ent.0 = true,
         }
     }
     roles
@@ -921,7 +929,7 @@ fn raw(id: u32, sec: &Section) -> String {
     let id = sid(id);
     let kind = match sec.frame_use {
         Some(FrameSectionUse::Column) => "COLUMN",
-        Some(FrameSectionUse::Beam) => "BEAM",
+        Some(FrameSectionUse::Girder) => "BEAM",
         Some(FrameSectionUse::Brace) => "BRACE",
         None => "",
     };
@@ -965,7 +973,7 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
         };
         let allowed = match element.kind {
             ElementKind::Beam => {
-                matches!(frame_use, FrameSectionUse::Column | FrameSectionUse::Beam)
+                matches!(frame_use, FrameSectionUse::Column | FrameSectionUse::Girder)
             }
             ElementKind::Brace { .. } => frame_use == FrameSectionUse::Brace,
             _ => true,
@@ -1027,7 +1035,7 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                 used_by_wall.insert(sid.0);
             }
         }
-        for sm in model.joists().chain(model.posts()) {
+        for sm in model.beams().chain(model.posts()) {
             if let Some(sid) = sm.section {
                 used_by_other.insert(sid.0);
             }
@@ -1048,7 +1056,7 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                 used_by_other.insert(sid.0);
             }
         }
-        for sm in model.joists().chain(model.posts()) {
+        for sm in model.beams().chain(model.posts()) {
             if let Some(sid) = sm.section {
                 used_by_other.insert(sid.0);
             }
@@ -1071,7 +1079,7 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
         if !used_col && !used_beam && !used_brace {
             match sec.frame_use {
                 Some(FrameSectionUse::Column) => used_col = true,
-                Some(FrameSectionUse::Beam) => used_beam = true,
+                Some(FrameSectionUse::Girder) => used_beam = true,
                 Some(FrameSectionUse::Brace) => used_brace = true,
                 None => {}
             }

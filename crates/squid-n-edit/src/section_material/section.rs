@@ -239,13 +239,31 @@ fn section_use_is_valid(
                         | squid_n_core::model::ElementKind::Fiber
                         | squid_n_core::model::ElementKind::MultiSpring,
                     Some(
-                        squid_n_core::model::FrameSectionUse::Beam
+                        squid_n_core::model::FrameSectionUse::Girder
                             | squid_n_core::model::FrameSectionUse::Column,
                     ),
                 )
             )
         });
-    element_valid
+    let secondary_valid = model
+        .beams()
+        .chain(model.posts())
+        .filter(|member| member.section == Some(section_id))
+        .all(|member| {
+            matches!(
+                (member.kind, frame_use),
+                (_, None)
+                    | (
+                        squid_n_core::model::SecondaryMemberKind::Beam,
+                        Some(squid_n_core::model::FrameSectionUse::Girder),
+                    )
+                    | (
+                        squid_n_core::model::SecondaryMemberKind::Post,
+                        Some(squid_n_core::model::FrameSectionUse::Column),
+                    )
+            )
+        });
+    element_valid && secondary_valid
 }
 
 /// 断面データを指定した Section で復元する（EditSectionShape の逆操作）。
@@ -416,7 +434,7 @@ fn section_in_use(model: &Model, id: SectionId) -> bool {
     model.elements.iter().any(|e| e.section == Some(id))
         || model.slabs.iter().any(|s| s.section() == Some(id))
         || model
-            .joists()
+            .beams()
             .chain(model.posts())
             .any(|sm| sm.section == Some(id))
 }

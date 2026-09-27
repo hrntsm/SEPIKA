@@ -87,7 +87,7 @@ fn check_member(
         return Ok(None);
     };
     let (b, d, kind) = match shape {
-        SectionShape::RcBeamRect { b, d, .. } => (*b, *d, MemberKind::Beam),
+        SectionShape::RcBeamRect { b, d, .. } => (*b, *d, MemberKind::Girder),
         SectionShape::RcColumnRect { b, d, .. } => (*b, *d, MemberKind::Column),
         SectionShape::RcColumnCircle { d, .. } => (*d, *d, MemberKind::Column),
         _ => return Ok(None),

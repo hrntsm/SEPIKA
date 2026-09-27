@@ -565,14 +565,14 @@ fn test_add_section_shape_roundtrip() {
         new_id: SectionId(0),
         name: "H-300x300x10x15".into(),
         floor: None,
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
     };
     stack.run(&mut model, Box::new(cmd));
     assert_eq!(model.sections.len(), 1);
     assert_eq!(model.sections[0].id, SectionId(0));
     assert_eq!(
         model.sections[0].frame_use,
-        Some(squid_n_core::model::FrameSectionUse::Beam)
+        Some(squid_n_core::model::FrameSectionUse::Girder)
     );
 
     stack.undo(&mut model);
@@ -607,7 +607,7 @@ fn test_edit_section_shape_roundtrip() {
     let cmd = EditSectionShape {
         section: SectionId(0),
         new_shape: shape2,
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
     };
     stack.run(&mut model, Box::new(cmd));
     assert!((model.sections[0].area - 9024.0).abs() < 1.0);
@@ -629,7 +629,7 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
     };
     let mut model = empty_model();
     let mut section = shape.to_section(SectionId(0), "S".into());
-    section.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    section.frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
     model.sections.push(section);
     model.elements.push(ElementData {
         id: ElemId(0),
@@ -659,11 +659,11 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
 
     model.elements.clear();
     model
-        .unassigned_joists
+        .unassigned_beams
         .push(squid_n_core::model::SecondaryMember {
             id: squid_n_core::ids::SecondaryMemberId(0),
             gravity_end_shares: None,
-            kind: squid_n_core::model::SecondaryMemberKind::Joist,
+            kind: squid_n_core::model::SecondaryMemberKind::Beam,
             ends: squid_n_core::model::SecondaryMemberEnds::Detached([[0.0; 3], [1.0, 0.0, 0.0]]),
             section: Some(SectionId(0)),
             name: "B1".into(),
@@ -824,7 +824,7 @@ fn test_edit_section_shape_invalid_id_noop() {
     let cmd = EditSectionShape {
         section: SectionId(99),
         new_shape: shape,
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
     };
     stack.run(&mut model, Box::new(cmd));
     // 失敗したコマンド（Noop）は undo 履歴に積まれない。
@@ -1005,7 +1005,7 @@ fn test_delete_section_in_use_is_noop_and_renumbers() {
     let mut model = two_member_model();
     for i in 0..2u32 {
         model.sections.push(Section {
-            frame_use: (i == 1).then_some(squid_n_core::model::FrameSectionUse::Beam),
+            frame_use: (i == 1).then_some(squid_n_core::model::FrameSectionUse::Girder),
             id: SectionId(i),
             name: format!("S{}", i),
             area: 100.0,
@@ -1050,7 +1050,7 @@ fn test_delete_section_in_use_is_noop_and_renumbers() {
 /// 二次部材小梁（`SecondaryMember::section`）が参照する断面は削除ガードで守られ、
 /// 別断面の削除では参照が繰り上がって追随する（断面参照が陳腐化しない）。
 #[test]
-fn test_delete_section_referenced_by_joist() {
+fn test_delete_section_referenced_by_beam() {
     use squid_n_core::model::{Node, SecondaryMember, SecondaryMemberKind, Section};
     let mut model = empty_model();
     for i in 0..4u32 {
@@ -1065,7 +1065,7 @@ fn test_delete_section_referenced_by_joist() {
     }
     for i in 0..2u32 {
         model.sections.push(Section {
-            frame_use: (i == 1).then_some(squid_n_core::model::FrameSectionUse::Beam),
+            frame_use: (i == 1).then_some(squid_n_core::model::FrameSectionUse::Girder),
             id: SectionId(i),
             name: format!("S{}", i),
             area: 100.0,
@@ -1092,10 +1092,10 @@ fn test_delete_section_referenced_by_joist() {
         FloorRegionId(0),
         vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
     );
-    region.secondary_joists = vec![SecondaryMember {
+    region.secondary_beams = vec![SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Detached([
             [0.0, 0.0, 0.0],
             [1000.0, 0.0, 0.0],
@@ -1114,7 +1114,7 @@ fn test_delete_section_referenced_by_joist() {
     stack.run(&mut model, Box::new(DeleteSection { id: SectionId(0) }));
     assert_eq!(model.sections.len(), 1);
     assert_eq!(
-        model.floor_regions[0].secondary_joists[0].section,
+        model.floor_regions[0].secondary_beams[0].section,
         Some(SectionId(0)),
         "小梁の断面参照が繰り上がりに追随"
     );
@@ -3749,14 +3749,14 @@ fn test_composite_delete_nodes_descending_roundtrip() {
 }
 
 // ============================================================================
-// 二次部材（小梁・間柱）・一本部材指定（beam_groups）の参照整合
+// 二次部材（小梁・間柱）・一本部材指定（girder_groups）の参照整合
 // ============================================================================
 
 fn sample_secondary(n0: u32, n1: u32) -> squid_n_core::model::SecondaryMember {
     squid_n_core::model::SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(n0),
-        kind: squid_n_core::model::SecondaryMemberKind::Joist,
+        kind: squid_n_core::model::SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Detached([
             [f64::from(n0) * 1000.0, 0.0, 0.0],
             [f64::from(n1) * 1000.0, 0.0, 0.0],
@@ -3810,7 +3810,7 @@ fn test_delete_section_material_shift_and_guard_secondary_refs() {
             support_spring: None,
         });
         model.sections.push(Section {
-            frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
             id: SectionId(i),
             name: format!("S{}", i),
             area: 100.0,
@@ -3847,14 +3847,14 @@ fn test_delete_section_material_shift_and_guard_secondary_refs() {
     }
     let mut sm = sample_secondary(0, 1);
     sm.section = Some(SectionId(1));
-    model.unassigned_joists.push(sm);
+    model.unassigned_beams.push(sm);
     let mut stack = UndoStack::new();
 
     // 未使用の断面 0・材料 0 を削除 → 二次部材の断面参照と、その断面が持つ
     // 材料参照がどちらも 1→0 へ繰り上がる。
     stack.run(&mut model, Box::new(DeleteSection { id: SectionId(0) }));
     stack.run(&mut model, Box::new(DeleteMaterial { id: MaterialId(0) }));
-    assert_eq!(model.unassigned_joists[0].section, Some(SectionId(0)));
+    assert_eq!(model.unassigned_beams[0].section, Some(SectionId(0)));
     assert_eq!(model.sections[0].material, Some(MaterialId(0)));
     assert!(model.validate().is_ok());
 
@@ -3869,20 +3869,20 @@ fn test_delete_section_material_shift_and_guard_secondary_refs() {
     assert_eq!(model.materials.len(), 1, "断面が参照する材料は削除できない");
 }
 
-/// 部材削除が一本部材指定（beam_groups）から当該部材を連動削除し、
+/// 部材削除が一本部材指定（girder_groups）から当該部材を連動削除し、
 /// 残る参照は ID 繰り上げに追従し、undo で完全復元されること。
-/// 従来は beam_groups が繰り上げの対象外で、部材削除後にグループが
+/// 従来は girder_groups が繰り上げの対象外で、部材削除後にグループが
 /// 無関係な部材のモーメントを検定に合成していた。
 #[test]
-fn test_delete_member_cascades_beam_groups_and_restores() {
+fn test_delete_member_cascades_girder_groups_and_restores() {
     let mut model = two_member_model();
-    model.beam_groups = vec![vec![ElemId(0), ElemId(1)]];
+    model.girder_groups = vec![vec![ElemId(0), ElemId(1)]];
     let before = model.clone();
     let mut stack = UndoStack::new();
 
     stack.run(&mut model, Box::new(DeleteMember { id: ElemId(0) }));
     // グループから削除部材が外れ、旧 ElemId(1) は新 ElemId(0) へ繰り上がる。
-    assert_eq!(model.beam_groups, vec![vec![ElemId(0)]]);
+    assert_eq!(model.girder_groups, vec![vec![ElemId(0)]]);
     assert!(model.validate().is_ok());
 
     stack.undo(&mut model);
@@ -3890,11 +3890,11 @@ fn test_delete_member_cascades_beam_groups_and_restores() {
     assert!(model.validate().is_ok());
 }
 
-/// `Model::validate` が beam_groups のダングリング参照を検出すること。
+/// `Model::validate` が girder_groups のダングリング参照を検出すること。
 #[test]
-fn test_validate_detects_dangling_beam_group() {
+fn test_validate_detects_dangling_girder_group() {
     let mut model = two_member_model();
-    model.beam_groups = vec![vec![ElemId(5)]];
+    model.girder_groups = vec![vec![ElemId(5)]];
     assert!(model.validate().is_err());
 }
 
@@ -4377,7 +4377,7 @@ fn test_copy_story_assigns_sections_with_target_floor_name() {
     let sec_id = SectionId(model.sections.len() as u32);
     let mut c1 = bare_section(sec_id, None);
     c1.name = "C1".into();
-    c1.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    c1.frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
     c1.floor = Some("2F".into());
     model.sections.push(c1);
     let targets_2f: Vec<squid_n_core::ids::ElemId> = model
@@ -4674,7 +4674,7 @@ fn test_copy_story_overwrite_mirrors_absence() {
     let sec_id = SectionId(model.sections.len() as u32);
     let mut c1 = bare_section(sec_id, None);
     c1.name = "C1".into();
-    c1.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    c1.frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
     c1.floor = Some("3F".into());
     model.sections.push(c1);
     let members_3f: Vec<squid_n_core::ids::ElemId> = model
@@ -5358,93 +5358,93 @@ fn push_steel_section(model: &mut Model) -> SectionId {
 
 /// 未割当小梁の追加・削除を確認する（D6）。
 #[test]
-fn add_delete_unassigned_joist() {
+fn add_delete_unassigned_beam() {
     use squid_n_core::model::SecondaryMemberKind;
     let mut model = sm_base_model();
     let mut stack = UndoStack::new();
 
     stack.run(
         &mut model,
-        Box::new(AddUnassignedJoist {
-            sm: make_sm(0, SecondaryMemberKind::Joist),
+        Box::new(AddUnassignedBeam {
+            sm: make_sm(0, SecondaryMemberKind::Beam),
         }),
     );
     stack.run(
         &mut model,
-        Box::new(AddUnassignedJoist {
-            sm: make_sm(1, SecondaryMemberKind::Joist),
+        Box::new(AddUnassignedBeam {
+            sm: make_sm(1, SecondaryMemberKind::Beam),
         }),
     );
-    assert_eq!(model.unassigned_joists.len(), 2);
+    assert_eq!(model.unassigned_beams.len(), 2);
 
-    stack.run(&mut model, Box::new(DeleteUnassignedJoist { index: 0 }));
-    assert_eq!(model.unassigned_joists.len(), 1);
-    assert_eq!(model.unassigned_joists[0].name, "SM1");
+    stack.run(&mut model, Box::new(DeleteUnassignedBeam { index: 0 }));
+    assert_eq!(model.unassigned_beams.len(), 1);
+    assert_eq!(model.unassigned_beams[0].name, "SM1");
 
     stack.undo(&mut model);
-    assert_eq!(model.unassigned_joists.len(), 2);
+    assert_eq!(model.unassigned_beams.len(), 2);
     assert!(model.validate().is_ok());
 }
 
 /// 床領域小梁リストの全置換と undo。
 #[test]
-fn set_floor_region_secondary_joists_roundtrip() {
+fn set_floor_region_secondary_beams_roundtrip() {
     use squid_n_core::model::SecondaryMemberKind;
     let mut model = sm_base_model();
     model.floor_regions.push(FloorRegion::new(
         FloorRegionId(0),
         vec![NodeId(0), NodeId(1)],
     ));
-    let joist = make_sm(0, SecondaryMemberKind::Joist);
+    let beam = make_sm(0, SecondaryMemberKind::Beam);
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
-        Box::new(SetFloorRegionSecondaryJoists {
+        Box::new(SetFloorRegionSecondaryBeams {
             region: FloorRegionId(0),
-            joists: vec![joist.clone()],
+            beams: vec![beam.clone()],
         }),
     );
-    assert_eq!(model.floor_regions[0].secondary_joists, vec![joist]);
+    assert_eq!(model.floor_regions[0].secondary_beams, vec![beam]);
     stack.undo(&mut model);
-    assert!(model.floor_regions[0].secondary_joists.is_empty());
+    assert!(model.floor_regions[0].secondary_beams.is_empty());
 }
 
 /// 領域リストを空にすると実体は未割当へ移る（削除しない）。
 #[test]
-fn set_floor_region_secondary_joists_empty_moves_to_unassigned() {
+fn set_floor_region_secondary_beams_empty_moves_to_unassigned() {
     use squid_n_core::model::SecondaryMemberKind;
     let mut model = sm_base_model();
     model.floor_regions.push(FloorRegion::new(
         FloorRegionId(0),
         vec![NodeId(0), NodeId(1)],
     ));
-    let joist = make_sm(0, SecondaryMemberKind::Joist);
-    model.floor_regions[0].secondary_joists.push(joist.clone());
+    let beam = make_sm(0, SecondaryMemberKind::Beam);
+    model.floor_regions[0].secondary_beams.push(beam.clone());
     let mut stack = UndoStack::new();
     assert!(stack.run(
         &mut model,
-        Box::new(SetFloorRegionSecondaryJoists {
+        Box::new(SetFloorRegionSecondaryBeams {
             region: FloorRegionId(0),
-            joists: vec![],
+            beams: vec![],
         }),
     ));
-    assert!(model.floor_regions[0].secondary_joists.is_empty());
-    assert_eq!(model.unassigned_joists, vec![joist.clone()]);
+    assert!(model.floor_regions[0].secondary_beams.is_empty());
+    assert_eq!(model.unassigned_beams, vec![beam.clone()]);
     stack.undo(&mut model);
-    assert_eq!(model.floor_regions[0].secondary_joists, vec![joist]);
-    assert!(model.unassigned_joists.is_empty());
+    assert_eq!(model.floor_regions[0].secondary_beams, vec![beam]);
+    assert!(model.unassigned_beams.is_empty());
 }
 
 /// 同じ端点の小梁を未割当へ重ねると Noop。
 #[test]
-fn add_unassigned_joist_rejects_duplicate_endpoints() {
+fn add_unassigned_beam_rejects_duplicate_endpoints() {
     use squid_n_core::model::SecondaryMemberKind;
     let mut model = sm_base_model();
-    let sm = make_sm(0, SecondaryMemberKind::Joist);
-    model.unassigned_joists.push(sm.clone());
+    let sm = make_sm(0, SecondaryMemberKind::Beam);
+    model.unassigned_beams.push(sm.clone());
     let mut stack = UndoStack::new();
-    assert!(!stack.run(&mut model, Box::new(AddUnassignedJoist { sm }),));
-    assert_eq!(model.unassigned_joists.len(), 1);
+    assert!(!stack.run(&mut model, Box::new(AddUnassignedBeam { sm }),));
+    assert_eq!(model.unassigned_beams.len(), 1);
 }
 
 /// 壁領域間柱リストの全置換と undo。
@@ -5478,8 +5478,8 @@ fn set_secondary_member_end_support_applies_and_undoes() {
     use squid_n_core::model::SecondaryMemberKind;
     let mut model = sm_base_model();
     model
-        .unassigned_joists
-        .push(make_sm(0, SecondaryMemberKind::Joist));
+        .unassigned_beams
+        .push(make_sm(0, SecondaryMemberKind::Beam));
     let mut stack = UndoStack::new();
     let applied = stack.run(
         &mut model,
@@ -5493,12 +5493,12 @@ fn set_secondary_member_end_support_applies_and_undoes() {
     );
     assert!(applied);
     assert!(
-        model.unassigned_joists[0].is_cantilever(),
+        model.unassigned_beams[0].is_cantilever(),
         "自由端を指定すると片持ちへ再解決する"
     );
 
     stack.undo(&mut model);
-    assert!(!model.unassigned_joists[0].is_cantilever());
+    assert!(!model.unassigned_beams[0].is_cantilever());
 }
 
 /// 支持未解決（`Detached`）の二次部材でも「支持-支持」を指定するとアンカーを
@@ -5508,10 +5508,10 @@ fn set_secondary_member_end_support_recovers_detached() {
     use squid_n_core::model::{EndSupport, SecondaryMemberEnds, SecondaryMemberKind};
     let mut model = sm_base_model();
     model
-        .unassigned_joists
-        .push(make_sm(0, SecondaryMemberKind::Joist));
+        .unassigned_beams
+        .push(make_sm(0, SecondaryMemberKind::Beam));
     assert!(
-        model.unassigned_joists[0].is_detached(),
+        model.unassigned_beams[0].is_detached(),
         "前提: 支持未解決の部材"
     );
 
@@ -5526,17 +5526,17 @@ fn set_secondary_member_end_support_recovers_detached() {
     assert!(applied, "Detached を同条件扱いせず再解決する");
     assert!(
         matches!(
-            model.unassigned_joists[0].ends,
+            model.unassigned_beams[0].ends,
             SecondaryMemberEnds::Supported(_)
         ),
         "支持部材アンカーへ再解決される: {:?}",
-        model.unassigned_joists[0].ends
+        model.unassigned_beams[0].ends
     );
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
     stack.undo(&mut model);
     assert!(
-        model.unassigned_joists[0].is_detached(),
+        model.unassigned_beams[0].is_detached(),
         "undo で Detached へ戻る"
     );
 }
@@ -5559,7 +5559,7 @@ fn set_secondary_member_end_support_is_noop_for_unknown_member() {
 
 /// Post を床領域小梁リストへ入れると Noop。
 #[test]
-fn set_floor_region_secondary_joists_rejects_post() {
+fn set_floor_region_secondary_beams_rejects_post() {
     use squid_n_core::model::SecondaryMemberKind;
     let mut model = sm_base_model();
     model.floor_regions.push(FloorRegion::new(
@@ -5569,17 +5569,17 @@ fn set_floor_region_secondary_joists_rejects_post() {
     let mut stack = UndoStack::new();
     assert!(!stack.run(
         &mut model,
-        Box::new(SetFloorRegionSecondaryJoists {
+        Box::new(SetFloorRegionSecondaryBeams {
             region: FloorRegionId(0),
-            joists: vec![make_sm(0, SecondaryMemberKind::Post)],
+            beams: vec![make_sm(0, SecondaryMemberKind::Post)],
         }),
     ));
-    assert!(model.floor_regions[0].secondary_joists.is_empty());
+    assert!(model.floor_regions[0].secondary_beams.is_empty());
 }
 
 /// 床領域内小梁の断面変更。
 #[test]
-fn set_floor_region_joist_section() {
+fn set_floor_region_beam_section() {
     use squid_n_core::model::{SecondaryMemberKind, Section};
     let mut model = sm_base_model();
     model.sections.push(Section {
@@ -5608,26 +5608,26 @@ fn set_floor_region_joist_section() {
         vec![NodeId(0), NodeId(1)],
     ));
     model.floor_regions[0]
-        .secondary_joists
-        .push(make_sm(0, SecondaryMemberKind::Joist));
+        .secondary_beams
+        .push(make_sm(0, SecondaryMemberKind::Beam));
     let mut stack = UndoStack::new();
     stack.run(
         &mut model,
-        Box::new(SetFloorRegionJoistSection {
+        Box::new(SetFloorRegionBeamSection {
             region: FloorRegionId(0),
             index: 0,
             section: Some(SectionId(0)),
         }),
     );
     assert_eq!(
-        model.floor_regions[0].secondary_joists[0].section,
+        model.floor_regions[0].secondary_beams[0].section,
         Some(SectionId(0))
     );
 }
 
 /// CFT 断面の小梁への断面変更は Noop で、断面は変わらない。
 #[test]
-fn set_floor_region_joist_section_rejects_cft() {
+fn set_floor_region_beam_section_rejects_cft() {
     use squid_n_core::model::SecondaryMemberKind;
     let mut model = sm_base_model();
     model.sections.push(
@@ -5643,19 +5643,19 @@ fn set_floor_region_joist_section_rejects_cft() {
         vec![NodeId(0), NodeId(1)],
     ));
     model.floor_regions[0]
-        .secondary_joists
-        .push(make_sm(0, SecondaryMemberKind::Joist));
+        .secondary_beams
+        .push(make_sm(0, SecondaryMemberKind::Beam));
     let mut stack = UndoStack::new();
     let applied = stack.run(
         &mut model,
-        Box::new(SetFloorRegionJoistSection {
+        Box::new(SetFloorRegionBeamSection {
             region: FloorRegionId(0),
             index: 0,
             section: Some(SectionId(0)),
         }),
     );
     assert!(!applied, "CFT 断面は小梁へ設定しない");
-    assert_eq!(model.floor_regions[0].secondary_joists[0].section, None);
+    assert_eq!(model.floor_regions[0].secondary_beams[0].section, None);
 }
 
 /// CFT 断面の間柱への断面変更は Noop で、断面は変わらない。
@@ -5736,15 +5736,15 @@ fn set_wall_region_post_section_accepts_steel() {
 
 /// CFT 断面の未割当小梁は追加できない（Noop）。
 #[test]
-fn add_unassigned_joist_rejects_cft_section() {
+fn add_unassigned_beam_rejects_cft_section() {
     use squid_n_core::model::SecondaryMemberKind;
     let mut model = sm_base_model();
     let cft = push_cft_section(&mut model);
-    let mut sm = make_sm(0, SecondaryMemberKind::Joist);
+    let mut sm = make_sm(0, SecondaryMemberKind::Beam);
     sm.section = Some(cft);
     let mut stack = UndoStack::new();
-    assert!(!stack.run(&mut model, Box::new(AddUnassignedJoist { sm })));
-    assert!(model.unassigned_joists.is_empty());
+    assert!(!stack.run(&mut model, Box::new(AddUnassignedBeam { sm })));
+    assert!(model.unassigned_beams.is_empty());
 }
 
 /// CFT 断面の未割当間柱は追加できない（Noop）。
@@ -5762,20 +5762,20 @@ fn add_unassigned_post_rejects_cft_section() {
 
 /// 鋼材断面の未割当小梁は従来どおり追加できる（CFT 判定で有効な入力を弾かない）。
 #[test]
-fn add_unassigned_joist_accepts_steel_section() {
+fn add_unassigned_beam_accepts_steel_section() {
     use squid_n_core::model::SecondaryMemberKind;
     let mut model = sm_base_model();
     let steel = push_steel_section(&mut model);
-    let mut sm = make_sm(0, SecondaryMemberKind::Joist);
+    let mut sm = make_sm(0, SecondaryMemberKind::Beam);
     sm.section = Some(steel);
     let mut stack = UndoStack::new();
-    assert!(stack.run(&mut model, Box::new(AddUnassignedJoist { sm })));
-    assert_eq!(model.unassigned_joists.len(), 1);
+    assert!(stack.run(&mut model, Box::new(AddUnassignedBeam { sm })));
+    assert_eq!(model.unassigned_beams.len(), 1);
 }
 
 /// CFT 断面を含む床領域小梁リストは置換できない（Noop）。
 #[test]
-fn set_floor_region_secondary_joists_rejects_cft_section() {
+fn set_floor_region_secondary_beams_rejects_cft_section() {
     use squid_n_core::model::SecondaryMemberKind;
     let mut model = sm_base_model();
     let cft = push_cft_section(&mut model);
@@ -5783,18 +5783,18 @@ fn set_floor_region_secondary_joists_rejects_cft_section() {
         FloorRegionId(0),
         vec![NodeId(0), NodeId(1)],
     ));
-    let mut joist = make_sm(0, SecondaryMemberKind::Joist);
-    joist.section = Some(cft);
+    let mut beam = make_sm(0, SecondaryMemberKind::Beam);
+    beam.section = Some(cft);
     let mut stack = UndoStack::new();
     let applied = stack.run(
         &mut model,
-        Box::new(SetFloorRegionSecondaryJoists {
+        Box::new(SetFloorRegionSecondaryBeams {
             region: FloorRegionId(0),
-            joists: vec![joist],
+            beams: vec![beam],
         }),
     );
     assert!(!applied, "CFT 断面を含む小梁リストは置換しない");
-    assert!(model.floor_regions[0].secondary_joists.is_empty());
+    assert!(model.floor_regions[0].secondary_beams.is_empty());
 }
 
 /// CFT 断面を含む壁領域間柱リストは置換できない（Noop）。
@@ -5842,14 +5842,14 @@ fn place_secondary_member_rejects_cft_section() {
         &mut model,
         Box::new(PlaceSecondaryMember {
             parent: SecondaryParent::Floor(FloorRegionId(0)),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Supported([anchor(0, 0.5), anchor(2, 0.5)]),
             section: Some(cft),
             name: "CFT小梁".into(),
         }),
     );
     assert!(!applied, "CFT 断面の二次部材は配置しない");
-    assert_eq!(model.joists().count(), 0);
+    assert_eq!(model.beams().count(), 0);
 }
 
 /// 鋼材断面の二次部材は従来どおり配置できる。
@@ -5874,19 +5874,19 @@ fn place_secondary_member_accepts_steel_section() {
         &mut model,
         Box::new(PlaceSecondaryMember {
             parent: SecondaryParent::Floor(FloorRegionId(0)),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Supported([anchor(0, 0.5), anchor(2, 0.5)]),
             section: Some(steel),
             name: "S小梁".into(),
         }),
     );
     assert!(applied, "鋼材断面の二次部材は配置できる");
-    assert_eq!(model.joists().count(), 1);
+    assert_eq!(model.beams().count(), 1);
 }
 
 /// 階への複製で未割当小梁が増えること（D6）。
 #[test]
-fn test_copy_story_secondary_creates_unassigned_joist() {
+fn test_copy_story_secondary_creates_unassigned_beam() {
     use crate::{CopyStory, CopyTargets};
     use squid_n_core::frame_gen::{frame_model, FrameSpec};
     use squid_n_core::ids::StoryId;
@@ -5904,11 +5904,11 @@ fn test_copy_story_secondary_creates_unassigned_joist() {
         model.nodes[n2f[1].index()].coord,
     ]);
     model
-        .unassigned_joists
+        .unassigned_beams
         .push(squid_n_core::model::SecondaryMember {
             gravity_end_shares: None,
             id: squid_n_core::ids::SecondaryMemberId(0),
-            kind: squid_n_core::model::SecondaryMemberKind::Joist,
+            kind: squid_n_core::model::SecondaryMemberKind::Beam,
             ends,
             section: None,
             name: "J1".into(),
@@ -5928,11 +5928,11 @@ fn test_copy_story_secondary_creates_unassigned_joist() {
             overwrite: true,
         }),
     ));
-    assert_eq!(model.unassigned_joists.len(), 2, "3F へ 1 本複製される");
+    assert_eq!(model.unassigned_beams.len(), 2, "3F へ 1 本複製される");
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
     stack.undo(&mut model);
-    assert_eq!(model.unassigned_joists.len(), 1);
+    assert_eq!(model.unassigned_beams.len(), 1);
     assert!(model.validate().is_ok());
 }
 
@@ -5992,11 +5992,11 @@ fn test_copy_story_counts_midspan_secondary_as_skipped() {
     assert_eq!(mids.len(), 2, "前提: 材軸中間アンカーを 2 つ採れること");
     assert_ne!(mids[0].support, mids[1].support, "別々の大梁に載る");
     model
-        .unassigned_joists
+        .unassigned_beams
         .push(squid_n_core::model::SecondaryMember {
             gravity_end_shares: None,
             id: squid_n_core::ids::SecondaryMemberId(0),
-            kind: squid_n_core::model::SecondaryMemberKind::Joist,
+            kind: squid_n_core::model::SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Supported([mids[0], mids[1]]),
             section: None,
             name: "JM".into(),
@@ -6040,10 +6040,10 @@ fn test_copy_story_slab_copy_does_not_touch_floor_regions() {
         .filter(|n| n.story == Some(StoryId(1)))
         .map(|n| n.id)
         .collect();
-    let joist = squid_n_core::model::SecondaryMember {
+    let beam = squid_n_core::model::SecondaryMember {
         gravity_end_shares: None,
         id: squid_n_core::ids::SecondaryMemberId(0),
-        kind: squid_n_core::model::SecondaryMemberKind::Joist,
+        kind: squid_n_core::model::SecondaryMemberKind::Beam,
         ends: squid_n_core::model::SecondaryMemberEnds::Detached([
             model.nodes[n2f[0].index()].coord,
             model.nodes[n2f[1].index()].coord,
@@ -6056,7 +6056,7 @@ fn test_copy_story_slab_copy_does_not_touch_floor_regions() {
         .iter()
         .position(|fr| fr.boundary.iter().all(|n| n2f.contains(n)))
         .expect("2F に床領域がある");
-    model.floor_regions[src].secondary_joists = vec![joist];
+    model.floor_regions[src].secondary_beams = vec![beam];
     // 3F の床板を消して、複製で「新規作成」が起きる状況にする
     // （`retain_slabs` で床領域の `slab_ids` からの参照も一緒に落とす）。
     let n3f: Vec<NodeId> = model

@@ -13,12 +13,12 @@ use squid_n_core::model::{
 use squid_n_core::model::{SecondaryMemberEnds, SecondaryMemberKind};
 use squid_n_edit::EditCommand;
 use squid_n_edit::{
-    AddAttachedSlab, AddAttachedWallPlate, AddUnassignedJoist, AddUnassignedPost,
+    AddAttachedSlab, AddAttachedWallPlate, AddUnassignedBeam, AddUnassignedPost,
     AssignSlabToFloorPlateRegion, AssignWallPlateToRegion, DeleteSecondaryMember, DeleteSlab,
-    DeleteUnassignedJoist, DeleteUnassignedPost, DeleteWallPlate, PlaceSecondaryMember,
+    DeleteUnassignedBeam, DeleteUnassignedPost, DeleteWallPlate, PlaceSecondaryMember,
     SecondaryParent, SetAttachedAnchor, SetAttachedExtent, SetAttachedWallPlateAnchor,
     SetAttachedWallPlateExtent, SetFloorPlateRegionNoPlate, SetFloorRegionName,
-    SetFloorRegionSecondaryJoists, SetSecondaryMemberEndSupport, SetSecondaryMemberEnds,
+    SetFloorRegionSecondaryBeams, SetSecondaryMemberEndSupport, SetSecondaryMemberEnds,
     SetSlabOneWay, SetSlabSection, SetSlabUsage, SetWallPlateAttrs, SetWallPlateRegionNoPlate,
     SetWallPlateSection, SetWallRegionPosts, UnsetFloorPlateRegion, UnsetWallPlateRegion,
 };
@@ -233,39 +233,39 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
                 .ok_or("name が必要です")?
                 .to_string(),
         })),
-        "SetFloorRegionJoists" => Err(
-            "SetFloorRegionJoists は廃止しました。小梁は二次部材へ一本化したため、\
-             SetFloorRegionSecondaryJoists（SecondaryMember の配列）を使ってください"
+        "SetFloorRegionBeams" => Err(
+            "SetFloorRegionBeams は廃止しました。小梁は二次部材へ一本化したため、\
+             SetFloorRegionSecondaryBeams（SecondaryMember の配列）を使ってください"
                 .into(),
         ),
-        "SetFloorRegionSecondaryJoists" => {
-            if value.get("secondary_joist_ids").is_some() || value.get("ids").is_some() {
+        "SetFloorRegionSecondaryBeams" => {
+            if value.get("secondary_beam_ids").is_some() || value.get("ids").is_some() {
                 return Err(
-                    "SetFloorRegionSecondaryJoists は secondary_joists（SecondaryMember の配列）が必須です。\
-                     旧コマンド SetSlabSecondaryJoistIds / キー secondary_joist_ids は廃止しました"
+                    "SetFloorRegionSecondaryBeams は secondary_beams（SecondaryMember の配列）が必須です。\
+                     旧コマンド SetSlabSecondaryBeamIds / キー secondary_beam_ids は廃止しました"
                         .into(),
                 );
             }
-            let joists: Vec<SecondaryMember> = match value.get("secondary_joists") {
+            let beams: Vec<SecondaryMember> = match value.get("secondary_beams") {
                 None | Some(serde_json::Value::Null) => {
-                    return Err("secondary_joists が必要です（空にする場合は [] を渡す）".into());
+                    return Err("secondary_beams が必要です（空にする場合は [] を渡す）".into());
                 }
                 Some(v) => serde_json::from_value(v.clone())
-                    .map_err(|e| format!("secondary_joists の解析に失敗: {e}"))?,
+                    .map_err(|e| format!("secondary_beams の解析に失敗: {e}"))?,
             };
-            Ok(Box::new(SetFloorRegionSecondaryJoists {
+            Ok(Box::new(SetFloorRegionSecondaryBeams {
                 region: parse_floor_region_id(
                     value
                         .get("floor_region")
                         .or(value.get("id"))
                         .ok_or("floor_region が必要です")?,
                 )?,
-                joists,
+                beams,
             }))
         }
-        "SetSlabSecondaryJoistIds" => Err(
-            "SetSlabSecondaryJoistIds は廃止しました。SetFloorRegionSecondaryJoists と \
-             secondary_joists を使ってください"
+        "SetSlabSecondaryBeamIds" => Err(
+            "SetSlabSecondaryBeamIds は廃止しました。SetFloorRegionSecondaryBeams と \
+             secondary_beams を使ってください"
                 .into(),
         ),
         "SetWallRegionPosts" => {
@@ -286,22 +286,22 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
                 posts,
             }))
         }
-        "AddUnassignedJoist" => {
+        "AddUnassignedBeam" => {
             let sm: SecondaryMember = serde_json::from_value(
                 value
-                    .get("joist")
+                    .get("beam")
                     .cloned()
-                    .ok_or("joist が必要です（SecondaryMember）")?,
+                    .ok_or("beam が必要です（SecondaryMember）")?,
             )
-            .map_err(|e| format!("joist の解析に失敗: {e}"))?;
-            Ok(Box::new(AddUnassignedJoist { sm }))
+            .map_err(|e| format!("beam の解析に失敗: {e}"))?;
+            Ok(Box::new(AddUnassignedBeam { sm }))
         }
-        "DeleteUnassignedJoist" => {
+        "DeleteUnassignedBeam" => {
             let index = value
                 .get("index")
                 .and_then(|v| v.as_u64())
                 .ok_or("index が必要です")? as usize;
-            Ok(Box::new(DeleteUnassignedJoist { index }))
+            Ok(Box::new(DeleteUnassignedBeam { index }))
         }
         "SetSecondaryMemberEndSupport" => {
             let member = value
@@ -324,7 +324,7 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
             let kind: SecondaryMemberKind = parse_optional_enum::<SecondaryMemberKind>(
                 value.get("kind"),
             )?
-            .ok_or("kind が必要です（Joist/Post）")?;
+            .ok_or("kind が必要です（Beam/Post）")?;
             let ends: SecondaryMemberEnds = serde_json::from_value(
                 value.get("ends").cloned().ok_or("ends が必要です")?,
             )
@@ -402,11 +402,11 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
              床板: AssignSlabToFloorPlateRegion, SetFloorPlateRegionNoPlate, UnsetFloorPlateRegion, \
              AddAttachedSlab, DeleteSlab, SetSlabSection, SetSlabUsage, \
              SetSlabOneWay, SetAttachedExtent, SetAttachedAnchor / \
-             床領域: SetFloorRegionName, SetFloorRegionSecondaryJoists / \
+             床領域: SetFloorRegionName, SetFloorRegionSecondaryBeams / \
              二次部材: PlaceSecondaryMember, DeleteSecondaryMember, SetSecondaryMemberEnds, \
              SetSecondaryMemberEndSupport, SetPostGravityEndShares / \
              壁領域: SetWallRegionPosts / \
-             未割当: AddUnassignedJoist, DeleteUnassignedJoist, AddUnassignedPost, DeleteUnassignedPost）"
+             未割当: AddUnassignedBeam, DeleteUnassignedBeam, AddUnassignedPost, DeleteUnassignedPost）"
         )),
     }
 }

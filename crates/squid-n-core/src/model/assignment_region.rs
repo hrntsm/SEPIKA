@@ -191,9 +191,9 @@ impl FloorPlateAssignmentRegions {
     pub fn rebuild(
         &mut self,
         girders: &[SupportMemberSegment],
-        joists: &[SupportMemberSegment],
+        beams: &[SupportMemberSegment],
     ) -> PlateAssignmentRegionRebuildReport {
-        let (boundaries, unclosed) = scan_bounded_regions(girders.iter().chain(joists));
+        let (boundaries, unclosed) = scan_bounded_regions(girders.iter().chain(beams));
         self.replace_boundaries(boundaries, unclosed)
     }
 
@@ -404,8 +404,8 @@ fn floor_support_is_valid(model: &Model, support: SupportMemberId) -> bool {
             .element(elem)
             .is_some_and(|element| element.kind == ElementKind::Beam),
         SupportMemberId::Secondary(id) => model
-            .joists()
-            .any(|joist| joist.id == id && matches!(joist.ends, SecondaryMemberEnds::Supported(_))),
+            .beams()
+            .any(|beam| beam.id == id && matches!(beam.ends, SecondaryMemberEnds::Supported(_))),
     }
 }
 
@@ -856,8 +856,8 @@ fn floor_support_segments_at_level(
             end: [b.coord[0], b.coord[1]],
         });
     }
-    let mut joists = Vec::new();
-    for sm in model.joists() {
+    let mut beams = Vec::new();
+    for sm in model.beams() {
         let id = sm.id;
         if !matches!(sm.ends, SecondaryMemberEnds::Supported(_)) {
             continue;
@@ -870,14 +870,14 @@ fn floor_support_segments_at_level(
         {
             continue;
         }
-        joists.push(SupportMemberSegment {
+        beams.push(SupportMemberSegment {
             support: SupportMemberId::Secondary(id),
             axis_span: [0.0, 1.0],
             start: [a[0], a[1]],
             end: [b[0], b[1]],
         });
     }
-    (girders, joists)
+    (girders, beams)
 }
 
 /// 壁構面 `(origin, direction)` の面走査へ入れる主架構（梁・柱）と間柱（両端支持）の線分。
@@ -1000,9 +1000,9 @@ impl Model {
     pub fn same_kind_support_overlaps(&self) -> Vec<SameKindSupportOverlap> {
         let mut overlaps: Vec<SameKindSupportOverlap> = Vec::new();
         for level in self.horizontal_beam_levels() {
-            let (girders, joists) = floor_support_segments_at_level(self, level);
+            let (girders, beams) = floor_support_segments_at_level(self, level);
             push_same_kind_overlaps(self, &girders, &mut overlaps);
-            push_same_kind_overlaps(self, &joists, &mut overlaps);
+            push_same_kind_overlaps(self, &beams, &mut overlaps);
         }
         for (origin, direction) in crate::region_gen::wall::wall_planes(self) {
             let (primaries, secondaries) = wall_support_segments_on_plane(self, origin, direction);
@@ -1036,9 +1036,9 @@ impl Model {
         let mut boundaries: Vec<Vec<SupportBoundary>> = Vec::new();
         let mut unclosed = 0usize;
         for level in self.horizontal_beam_levels() {
-            let (girders, joists) = floor_support_segments_at_level(self, level);
+            let (girders, beams) = floor_support_segments_at_level(self, level);
             let (mut level_boundaries, level_unclosed) =
-                scan_bounded_regions(girders.iter().chain(joists.iter()));
+                scan_bounded_regions(girders.iter().chain(beams.iter()));
             boundaries.append(&mut level_boundaries);
             unclosed += level_unclosed;
         }
@@ -1355,14 +1355,14 @@ mod tests {
         regions.rebuild(&square(), &[]);
         regions.regions[0].assignment = PlateAssignment::Plate(SlabId(0));
         let old_id = regions.regions[0].id;
-        let joist = SupportMemberSegment {
+        let beam = SupportMemberSegment {
             support: SupportMemberId::Secondary(SecondaryMemberId(10)),
             axis_span: [0.0, 1.0],
             start: [2.0, 0.0],
             end: [2.0, 4.0],
         };
 
-        let report = regions.rebuild(&square(), &[joist]);
+        let report = regions.rebuild(&square(), &[beam]);
         assert_eq!(report.regions, 2);
         assert_eq!(report.removed, 1);
         assert!(regions
@@ -1433,15 +1433,15 @@ mod tests {
 
     #[test]
     fn 割当領域は存在しない版と版の重複割当を拒否する() {
-        let mut model = square_model_with_joist();
+        let mut model = square_model_with_beam();
         let mut regions = FloorPlateAssignmentRegions::default();
-        let joist = SupportMemberSegment {
+        let beam = SupportMemberSegment {
             support: SupportMemberId::Secondary(SecondaryMemberId(0)),
             axis_span: [0.0, 1.0],
             start: [2.0, 0.0],
             end: [2.0, 4.0],
         };
-        regions.rebuild(&square(), &[joist]);
+        regions.rebuild(&square(), &[beam]);
         regions.regions[0].assignment = PlateAssignment::Plate(SlabId(0));
         assert!(
             matches!(regions.validate(&model), Err(CoreError::DanglingRef(_))),
@@ -1462,7 +1462,7 @@ mod tests {
 
     #[test]
     fn 自動生成した割当領域は支持部材の検証を通る() {
-        let mut floor = square_model_with_joist();
+        let mut floor = square_model_with_beam();
         floor.rebuild_floor_assignment_regions();
         assert_eq!(floor.floor_assignment_regions.validate(&floor), Ok(()));
         assert_eq!(floor.validate(), Ok(()));
@@ -1475,7 +1475,7 @@ mod tests {
 
     #[test]
     fn 割当領域は3節点以上の支持部材を拒否する() {
-        let mut model = square_model_with_joist();
+        let mut model = square_model_with_beam();
         model.rebuild_floor_assignment_regions();
         assert_eq!(model.validate(), Ok(()));
 
@@ -1508,7 +1508,7 @@ mod tests {
 
     #[test]
     fn 割当領域は存在しない支持部材を拒否する() {
-        let mut model = square_model_with_joist();
+        let mut model = square_model_with_beam();
         model.rebuild_floor_assignment_regions();
         assert_eq!(model.floor_assignment_regions.validate(&model), Ok(()));
 
@@ -1525,9 +1525,9 @@ mod tests {
 
     #[test]
     fn 割当領域は種別の合わない支持部材を拒否する() {
-        let mut model = square_model_with_joist();
+        let mut model = square_model_with_beam();
         model.rebuild_floor_assignment_regions();
-        // 床の境界に間柱（Joist でない二次部材）を指す。
+        // 床の境界に間柱（Beam でない二次部材）を指す。
         model.unassigned_posts.push(SecondaryMember {
             id: SecondaryMemberId(7),
             kind: SecondaryMemberKind::Post,
@@ -1556,27 +1556,27 @@ mod tests {
 
     #[test]
     fn 割当領域は荷重伝達の無いdetached二次部材を支持部材にしない() {
-        let mut model = square_model_with_joist();
-        model.unassigned_joists[0].ends =
+        let mut model = square_model_with_beam();
+        model.unassigned_beams[0].ends =
             SecondaryMemberEnds::Detached([[2.0, 0.0, 0.0], [2.0, 4.0, 0.0]]);
         let mut regions = FloorPlateAssignmentRegions::default();
-        let joist = SupportMemberSegment {
+        let beam = SupportMemberSegment {
             support: SupportMemberId::Secondary(SecondaryMemberId(0)),
             axis_span: [0.0, 1.0],
             start: [2.0, 0.0],
             end: [2.0, 4.0],
         };
-        regions.rebuild(&square(), &[joist]);
+        regions.rebuild(&square(), &[beam]);
         assert!(
             matches!(regions.validate(&model), Err(CoreError::DanglingRef(_))),
             "Detached は荷重を伝達できないため支持部材にしない"
         );
     }
 
-    /// `square_model_with_joist` と同じ構成を実寸の mm スケール（4000 mm 角）で作る。
+    /// `square_model_with_beam` と同じ構成を実寸の mm スケール（4000 mm 角）で作る。
     /// 重なりの許容差 [`crate::geom::MEMBER_AXIS_TOL_MM`]（10 mm）が効く座標系で
     /// 検出を確かめるため、テスト用の小さい座標系とは分ける。
-    fn mm_square_model_with_joist() -> Model {
+    fn mm_square_model_with_beam() -> Model {
         let mut model = Model::default();
         for (i, (x, y)) in [(0.0, 0.0), (4000.0, 0.0), (4000.0, 4000.0), (0.0, 4000.0)]
             .into_iter()
@@ -1597,7 +1597,7 @@ mod tests {
         {
             model.elements.push(beam_element(i as u32, a, b));
         }
-        model.unassigned_joists.push(member(
+        model.unassigned_beams.push(member(
             0,
             SecondaryMemberEnds::Supported([
                 SecondaryMemberAnchor {
@@ -1616,7 +1616,7 @@ mod tests {
     /// 同じ材軸に重なった同種の大梁は検出する。平行に並ぶだけの部材は対象外。
     #[test]
     fn 同じ材軸に重なった同種の支持部材を検出する() {
-        let mut model = mm_square_model_with_joist();
+        let mut model = mm_square_model_with_beam();
         model.elements.push(beam_element(4, 0, 1));
         let overlaps = model.same_kind_support_overlaps();
         assert_eq!(overlaps.len(), 1, "{overlaps:?}");
@@ -1650,7 +1650,7 @@ mod tests {
     /// 同種の重なり検出は、要素を追加した順・配列順に依存しない。
     #[test]
     fn 同種の支持部材の重なり検出は要素順に依存しない() {
-        let mut model = mm_square_model_with_joist();
+        let mut model = mm_square_model_with_beam();
         model.elements.push(beam_element(4, 0, 1));
         model.elements.rotate_left(2);
         let overlaps = model.same_kind_support_overlaps();
@@ -1662,8 +1662,8 @@ mod tests {
     /// 同じ材軸に重なった同種の小梁も検出する。
     #[test]
     fn 同じ材軸に重なった同種の小梁を検出する() {
-        let mut model = mm_square_model_with_joist();
-        model.unassigned_joists.push(member(
+        let mut model = mm_square_model_with_beam();
+        model.unassigned_beams.push(member(
             1,
             SecondaryMemberEnds::Supported([
                 SecondaryMemberAnchor {
@@ -1692,9 +1692,9 @@ mod tests {
     /// 同種の重なりとしては報告しない（異種は主架構優先）。
     #[test]
     fn 主架構と小梁が重なるときは主架構を支持部材に選ぶ() {
-        let mut model = mm_square_model_with_joist();
+        let mut model = mm_square_model_with_beam();
         // 大梁 0（節点 0-1）と同じ材軸に、大梁へ両端アンカーした小梁 1 を重ねる。
-        model.unassigned_joists.push(member(
+        model.unassigned_beams.push(member(
             1,
             SecondaryMemberEnds::Supported([
                 SecondaryMemberAnchor {
@@ -1756,13 +1756,13 @@ mod tests {
     fn member(id: u32, ends: SecondaryMemberEnds) -> SecondaryMember {
         SecondaryMember {
             id: SecondaryMemberId(id),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends,
             ..Default::default()
         }
     }
 
-    fn square_model_with_joist() -> Model {
+    fn square_model_with_beam() -> Model {
         let mut model = Model::default();
         for (i, (x, y)) in [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
             .into_iter()
@@ -1796,7 +1796,7 @@ mod tests {
                 spring: None,
             });
         }
-        model.unassigned_joists.push(member(
+        model.unassigned_beams.push(member(
             0,
             SecondaryMemberEnds::Supported([
                 SecondaryMemberAnchor {
@@ -1814,7 +1814,7 @@ mod tests {
 
     #[test]
     fn モデルは大梁と小梁から床板割当領域を作り直す() {
-        let mut model = square_model_with_joist();
+        let mut model = square_model_with_beam();
         let first = model.rebuild_floor_assignment_regions();
         assert_eq!(first.created_unset, 2, "中央小梁で 2 面");
         let ids: Vec<_> = model
@@ -1898,7 +1898,7 @@ mod tests {
 
     #[test]
     fn 支持部材境界を座標へ解決する() {
-        let model = square_model_with_joist();
+        let model = square_model_with_beam();
         let axis = model
             .support_member_axis(SupportMemberId::Secondary(SecondaryMemberId(0)))
             .expect("小梁の材軸");
@@ -1917,7 +1917,7 @@ mod tests {
 
     #[test]
     fn 床板から割当領域を逆引きし境界座標を解決する() {
-        let mut model = square_model_with_joist();
+        let mut model = square_model_with_beam();
         model.rebuild_floor_assignment_regions();
         let region_id = model.floor_assignment_regions.regions[0].id;
         model.floor_assignment_regions.regions[0].assignment = PlateAssignment::Plate(SlabId(0));
@@ -1942,7 +1942,7 @@ mod tests {
 
     #[test]
     fn 未設定の割当領域だけを警告する() {
-        let mut model = square_model_with_joist();
+        let mut model = square_model_with_beam();
         model.rebuild_floor_assignment_regions();
         model.rebuild_wall_assignment_regions();
         // 未設定が 2 面。版なしは警告に含めない。
@@ -1973,7 +1973,7 @@ mod tests {
             },
             plate: crate::model::SlabPlate::default(),
         };
-        let mut model = square_model_with_joist();
+        let mut model = square_model_with_beam();
         model.slabs.push(attached);
         let mut regions = FloorPlateAssignmentRegions::default();
         regions.rebuild(&square(), &[]);
@@ -1986,7 +1986,7 @@ mod tests {
 
     #[test]
     fn 二次部材idは既存idと衝突しないよう払い出す() {
-        let mut model = square_model_with_joist();
+        let mut model = square_model_with_beam();
         assert_eq!(model.alloc_secondary_member_id(), SecondaryMemberId(1));
         assert_eq!(model.alloc_secondary_member_id(), SecondaryMemberId(2));
         model.next_secondary_member_id = 10;
@@ -1996,10 +1996,10 @@ mod tests {
 
     #[test]
     fn 取付き位置表現の二次部材を検証する() {
-        let mut model = square_model_with_joist();
+        let mut model = square_model_with_beam();
         let sm = SecondaryMember {
             id: SecondaryMemberId(100),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Supported([
                 SecondaryMemberAnchor {
                     support: SupportMemberId::Primary(ElemId(0)),
@@ -2012,10 +2012,10 @@ mod tests {
             ]),
             ..Default::default()
         };
-        model.unassigned_joists.push(sm);
+        model.unassigned_beams.push(sm);
         assert_eq!(model.validate(), Ok(()));
 
-        model.unassigned_joists[0].ends = SecondaryMemberEnds::Supported([
+        model.unassigned_beams[0].ends = SecondaryMemberEnds::Supported([
             SecondaryMemberAnchor {
                 support: SupportMemberId::Primary(ElemId(99)),
                 position: 0.25,
@@ -2030,10 +2030,10 @@ mod tests {
 
     #[test]
     fn 取付き位置表現から材軸と材軸長を解決する() {
-        let mut model = square_model_with_joist();
+        let mut model = square_model_with_beam();
         let sm = SecondaryMember {
             id: SecondaryMemberId(100),
-            kind: SecondaryMemberKind::Joist,
+            kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Supported([
                 SecondaryMemberAnchor {
                     support: SupportMemberId::Primary(ElemId(0)),
@@ -2051,11 +2051,11 @@ mod tests {
         assert!((b[0] - 2.0).abs() < 1e-9 && (b[1] - 4.0).abs() < 1e-9);
         assert!((len - 4.0).abs() < 1e-9);
 
-        model.unassigned_joists.push(sm);
+        model.unassigned_beams.push(sm);
         assert!(model
-            .secondary_member_axis(&model.unassigned_joists[0])
+            .secondary_member_axis(&model.unassigned_beams[0])
             .is_some());
-        assert_eq!(model.secondary_joist_axes().len(), 2);
+        assert_eq!(model.secondary_beam_axes().len(), 2);
     }
 
     /// 柱2本・梁2本で閉じた 4m×3m の壁構面（Y=0）を持つ最小モデル。

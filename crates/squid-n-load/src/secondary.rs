@@ -249,7 +249,7 @@ pub(crate) fn beams_along_segment_with(
 /// **二次部材小梁の本番検定では使わない**（分配 `Span` 経路が正。§5.39 以降）。
 /// §5.5 当時の幾何負担幅の回帰テスト専用。
 #[cfg(test)]
-fn joist_edge_tributary_width(model: &Model, a: NodeId, b: NodeId) -> Option<f64> {
+fn beam_edge_tributary_width(model: &Model, a: NodeId, b: NodeId) -> Option<f64> {
     let na = model.nodes.get(a.index())?;
     let nb = model.nodes.get(b.index())?;
     let dx = nb.coord[0] - na.coord[0];
@@ -464,10 +464,10 @@ mod tests {
                 node(2, 2000.0, 0.0, 0.0),
             ],
             elements: vec![beam(0, 0, 1)],
-            unassigned_joists: vec![SecondaryMember {
+            unassigned_beams: vec![SecondaryMember {
                 id: squid_n_core::ids::SecondaryMemberId(0),
                 gravity_end_shares: None,
-                kind: SecondaryMemberKind::Joist,
+                kind: SecondaryMemberKind::Beam,
                 ends: squid_n_core::model::SecondaryMemberEnds::Detached([
                     [2000.0, 0.0, 0.0],
                     [2000.0, 0.0, 0.0],
@@ -627,7 +627,7 @@ mod segment_tests {
 }
 
 #[cfg(test)]
-mod joist_tributary_tests {
+mod beam_tributary_tests {
     use super::*;
     use squid_n_core::model::{DistributionMethod, Node, SlabPlate};
 
@@ -655,8 +655,8 @@ mod joist_tributary_tests {
         );
     }
 
-    /// 4000×3000 と 4000×3000 の 2 枚が joist（節点 3-2）を挟んで隣り合う。
-    /// 負担幅は両側の半分の和＝(3000/2)+(3000/2)=3000（joist 1 本だけで
+    /// 4000×3000 と 4000×3000 の 2 枚が beam（節点 3-2）を挟んで隣り合う。
+    /// 負担幅は両側の半分の和＝(3000/2)+(3000/2)=3000（beam 1 本だけで
     /// 6000 幅の間を分け合う、単純梁の負担幅と同じ値）。
     #[test]
     fn test_two_sided_pieces_split_evenly() {
@@ -674,16 +674,16 @@ mod joist_tributary_tests {
         add_rect_slab(&mut model, [0, 1, 2, 3]);
         add_rect_slab(&mut model, [3, 2, 4, 5]);
 
-        let w = joist_edge_tributary_width(&model, NodeId(3), NodeId(2));
+        let w = beam_edge_tributary_width(&model, NodeId(3), NodeId(2));
         assert!(matches!(w, Some(x) if (x - 3000.0).abs() < 1e-6), "{w:?}");
         // 端点の順序を入れ替えても同じ結果（辺の向きに依存しない）。
-        let w_rev = joist_edge_tributary_width(&model, NodeId(2), NodeId(3));
+        let w_rev = beam_edge_tributary_width(&model, NodeId(2), NodeId(3));
         assert_eq!(w, w_rev);
     }
 
-    /// 建物の外周に載る joist（片側にしか床板がない）は、その片側の幅の半分。
+    /// 建物の外周に載る beam（片側にしか床板がない）は、その片側の幅の半分。
     #[test]
-    fn test_perimeter_joist_uses_single_side_half_width() {
+    fn test_perimeter_beam_uses_single_side_half_width() {
         let mut model = Model {
             nodes: vec![
                 node(0, 0.0, 0.0),
@@ -695,7 +695,7 @@ mod joist_tributary_tests {
         };
         add_rect_slab(&mut model, [0, 1, 2, 3]);
 
-        let w = joist_edge_tributary_width(&model, NodeId(0), NodeId(1));
+        let w = beam_edge_tributary_width(&model, NodeId(0), NodeId(1));
         assert!(matches!(w, Some(x) if (x - 1500.0).abs() < 1e-6), "{w:?}");
     }
 
@@ -713,7 +713,7 @@ mod joist_tributary_tests {
                 node(3, 0.0, 3000.0),
                 node(4, 4000.0, 6000.0),
                 node(5, 0.0, 6000.0),
-                node(6, 2000.0, 3000.0), // 反対側を割る、joist 辺の途中の節点
+                node(6, 2000.0, 3000.0), // 反対側を割る、beam 辺の途中の節点
                 node(7, 2000.0, 6000.0),
             ],
             ..Default::default()
@@ -722,14 +722,14 @@ mod joist_tributary_tests {
         add_rect_slab(&mut model, [3, 6, 7, 5]); // 割れた側・左半分
         add_rect_slab(&mut model, [6, 2, 4, 7]); // 割れた側・右半分
 
-        let w = joist_edge_tributary_width(&model, NodeId(3), NodeId(2));
+        let w = beam_edge_tributary_width(&model, NodeId(3), NodeId(2));
         assert!(matches!(w, Some(x) if (x - 4500.0).abs() < 1e-6), "{w:?}");
     }
 
     /// どの床板の境界辺にも載らない（床板の内部を貫く）小梁は None。
     /// 呼び出し側はここで別の幾何近似へフォールバックすること。
     #[test]
-    fn test_interior_joist_returns_none() {
+    fn test_interior_beam_returns_none() {
         let mut model = Model {
             nodes: vec![
                 node(0, 0.0, 0.0),
@@ -743,7 +743,7 @@ mod joist_tributary_tests {
         };
         add_rect_slab(&mut model, [0, 1, 2, 3]);
 
-        let w = joist_edge_tributary_width(&model, NodeId(4), NodeId(5));
+        let w = beam_edge_tributary_width(&model, NodeId(4), NodeId(5));
         assert_eq!(w, None);
     }
 
@@ -770,7 +770,7 @@ mod joist_tributary_tests {
 
         // 片側にしか床板がない小梁として、正しい答え（1500）だけが返ることを確認する。
         add_rect_slab(&mut model, [0, 1, 2, 3]);
-        let w = joist_edge_tributary_width(&model, NodeId(0), NodeId(1));
+        let w = beam_edge_tributary_width(&model, NodeId(0), NodeId(1));
         assert!(matches!(w, Some(x) if (x - 1500.0).abs() < 1e-6), "{w:?}");
     }
 }

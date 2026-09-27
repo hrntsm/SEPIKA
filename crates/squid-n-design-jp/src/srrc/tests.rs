@@ -227,7 +227,7 @@ fn ctx_materials(ctx: DesignCtx) -> DesignCtx {
 pub(crate) fn ctx_beam(term: LoadTerm) -> DesignCtx {
     ctx_materials(DesignCtx {
         term,
-        kind: MemberKind::Beam,
+        kind: MemberKind::Girder,
         ..Default::default()
     })
 }

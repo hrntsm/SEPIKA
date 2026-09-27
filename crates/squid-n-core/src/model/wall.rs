@@ -445,7 +445,7 @@ pub struct DamperDef {
 
 /// PCa（プレキャスト）梁の水平接合面検定用属性（水平接合面のせん断摩擦検定）。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct PcaBeamAttr {
+pub struct PcaGirderAttr {
     pub elem: ElemId,
     /// 水平接合面の摩擦係数 μ
     pub mu: f64,

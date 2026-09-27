@@ -21,8 +21,8 @@ use squid_n_core::model::{
 use squid_n_core::ids::SlabId;
 
 use crate::floor::{
-    joist_distribution_is_ready, joist_mass_equiv_udl, joist_self_weight_udl,
-    secondary_joist_distribution_split, simple_reactions, BeamLoad, Cmq, LoadShape, LoadTarget,
+    beam_distribution_is_ready, beam_mass_equiv_udl, beam_self_weight_udl,
+    secondary_beam_distribution_split, simple_reactions, BeamLoad, Cmq, LoadShape, LoadTarget,
 };
 use crate::secondary::project_on_segment;
 
@@ -63,7 +63,7 @@ pub struct TransferredMember {
     /// 各端の支持相手。`end_points` と同じ並び。
     pub supports: [SupportAt; 2],
     /// 床分配が断面検定に足りているか（期待床板が揃い、載荷長さがスパンの半分以上。
-    /// `crate::floor::joist_distribution_is_ready`）。分配を持たない二次部材
+    /// `crate::floor::beam_distribution_is_ready`）。分配を持たない二次部材
     /// （間柱・床板の境界に載らない小梁）は偽。
     pub distribution_ready: bool,
     /// 分配の代表床板（検定結果の帰属先。分配が無ければ `None`）。
@@ -187,7 +187,7 @@ fn end_support_of(sm: &SecondaryMember) -> [EndSupport; 2] {
 /// 対象外（解析要素として直接扱われる、または荷重を持てない）。
 fn axes(model: &Model) -> Vec<Axis> {
     let mut out: Vec<Axis> = model
-        .secondary_joist_axes()
+        .secondary_beam_axes()
         .into_iter()
         .map(|ax| Axis {
             key: ax.member,
@@ -223,7 +223,7 @@ fn axes(model: &Model) -> Vec<Axis> {
 ///
 /// **主架構を優先する。** 端部が要素の接続する節点、または大梁のスパン上にあるなら、
 /// その大梁が直接支持しているのだから、そこで終端する。10 mm 以内に並走する二次部材が
-/// 大梁の荷重を奪わないようにするためでもある（`joist_design` の並走大梁優先と同じ考え）。
+/// 大梁の荷重を奪わないようにするためでもある（`beam_design` の並走大梁優先と同じ考え）。
 ///
 /// 主架構へ届かないときだけ、別の二次部材の**内部**に載っているかを見る。載っていれば
 /// その二次部材が受け側である（§3.4 F4）。端点どうしが一致するだけの取り付き
@@ -393,12 +393,12 @@ pub fn solve_with_basis(
     basis: SelfWeightBasis,
 ) -> Result<SecondaryTransfer, crate::floor::FloorDistributionError> {
     let self_weight_udl = |sm: &SecondaryMember| match basis {
-        SelfWeightBasis::Design => joist_self_weight_udl(model, sm),
-        SelfWeightBasis::MassEquiv => joist_mass_equiv_udl(model, sm),
+        SelfWeightBasis::Design => beam_self_weight_udl(model, sm),
+        SelfWeightBasis::MassEquiv => beam_mass_equiv_udl(model, sm),
     };
     let axes = axes(model);
     if axes.is_empty() {
-        let (_, leftover) = secondary_joist_distribution_split(model, w_of)?;
+        let (_, leftover) = secondary_beam_distribution_split(model, w_of)?;
         return Ok(SecondaryTransfer {
             leftover_region_loads: leftover,
             ..SecondaryTransfer::default()
@@ -408,7 +408,7 @@ pub fn solve_with_basis(
     let beams = crate::secondary::beam_span_candidates(model);
 
     let by_key: HashMap<SecondaryKey, &SecondaryMember> = model
-        .joists()
+        .beams()
         .chain(model.posts())
         .map(|sm| (sm.id, sm))
         .collect();
@@ -459,7 +459,7 @@ pub fn solve_with_basis(
         supports.insert(ax.key, ends);
     }
 
-    let (distribution, leftover_region_loads) = secondary_joist_distribution_split(model, w_of)?;
+    let (distribution, leftover_region_loads) = secondary_beam_distribution_split(model, w_of)?;
     let wall_loads = if include_self_weight {
         crate::wall_plate_load::distribute_enclosed_wall_plates_with_basis(model, basis).posts
     } else {
@@ -474,10 +474,7 @@ pub fn solve_with_basis(
             loads.extend(entry.member_loads.iter().cloned());
             ready.insert(
                 ax.key,
-                (
-                    joist_distribution_is_ready(entry, ax.len),
-                    entry.rep_slab_id,
-                ),
+                (beam_distribution_is_ready(entry, ax.len), entry.rep_slab_id),
             );
         }
         if let Some(wall) = wall_loads.get(&ax.key) {

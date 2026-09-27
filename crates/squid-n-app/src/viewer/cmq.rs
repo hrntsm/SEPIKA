@@ -62,12 +62,12 @@ fn is_primary_beam_for_cmq(model: &Model, elem: &squid_n_core::model::ElementDat
     };
     let tol = squid_n_core::geom::MEMBER_AXIS_TOL_MM;
     let near = |p: [f64; 3], q: [f64; 3]| squid_n_core::geom::vec3::dist(p, q) <= tol;
-    let is_materialized_joist = model.joists().any(|sm| {
+    let is_materialized_beam = model.beams().any(|sm| {
         model
             .secondary_member_end_points(sm)
             .is_some_and(|(a, b)| (near(a, c0) && near(b, c1)) || (near(a, c1) && near(b, c0)))
     });
-    !is_materialized_joist
+    !is_materialized_beam
 }
 
 /// 一つの主架構の大梁（`ElemId`）に載る、表示中荷重ケースの全 `MemberLoad` を束ねた

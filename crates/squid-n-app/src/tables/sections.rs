@@ -210,7 +210,7 @@ pub fn sections_table(ui: &mut egui::Ui, app: &mut App) {
     for s in &app.core.model.slabs {
         count(s.section(), &mut n_elements);
     }
-    for sm in app.core.model.joists().chain(app.core.model.posts()) {
+    for sm in app.core.model.beams().chain(app.core.model.posts()) {
         count(sm.section, &mut n_elements);
     }
 

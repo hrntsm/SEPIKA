@@ -19,8 +19,7 @@ use super::section_std::standard_sections;
 use super::{StbError, STB_VERSION};
 use squid_n_core::ids::{NodeId, SectionId, SlabId};
 use squid_n_core::model::{
-    AxisGroup, AxisGroupKind, ElementKind, EndCondition, FrameSectionUse, Model,
-    SecondaryMemberKind, StoryLevelKind, WallPlateShape,
+    AxisGroup, AxisGroupKind, ElementKind, EndCondition, Model, StoryLevelKind, WallPlateShape,
 };
 
 /// ST-Bridge の id は `positiveInteger`（1 以上）。内部 0 始まり id に +1 して出力する。
@@ -44,37 +43,6 @@ fn secondary_end_nodes(
             .map(|n| n.id)
     };
     Some([find(a)?, find(b)?])
-}
-
-fn validate_secondary_section_uses(model: &Model) -> Result<(), StbError> {
-    for secondary in model.joists().chain(model.posts()) {
-        let Some(section_id) = secondary.section else {
-            continue;
-        };
-        let Some(section) = model.sections.get(section_id.index()) else {
-            return Err(StbError::FrameSectionUseMissing(format!(
-                "二次部材 {} ({:?}) が参照する断面 {}",
-                secondary.id.0, secondary.kind, section_id.0
-            )));
-        };
-        let Some(frame_use) = section.frame_use else {
-            return Err(StbError::FrameSectionUseMissing(format!(
-                "二次部材 {} ({:?}) が参照する断面 {}",
-                secondary.id.0, secondary.kind, section_id.0
-            )));
-        };
-        let expected = match secondary.kind {
-            SecondaryMemberKind::Joist => FrameSectionUse::Beam,
-            SecondaryMemberKind::Post => FrameSectionUse::Column,
-        };
-        if frame_use != expected {
-            return Err(StbError::FrameSectionUseMismatch(format!(
-                "二次部材 {} ({:?}) の断面 {} の用途 {:?} は {:?} と不整合です",
-                secondary.id.0, secondary.kind, section_id.0, frame_use, expected
-            )));
-        }
-    }
-    Ok(())
 }
 
 /// 内部モデルを標準 ST-Bridge 2.0.2 XML 文字列へ出力する（警告は破棄する）。
@@ -216,7 +184,6 @@ fn members_body(
     beam_map: &std::collections::HashMap<u32, u32>,
     brace_map: &std::collections::HashMap<u32, u32>,
 ) -> Result<String, StbError> {
-    validate_secondary_section_uses(model)?;
     let mut columns = String::new();
     let mut girders = String::new();
     let mut unexported_secondary_ids: Vec<u32> = Vec::new();
@@ -291,7 +258,7 @@ fn members_body(
     let secondary_member_base = model.elements.len() as u32;
     let mut sec_beams = String::new();
     let mut posts = String::new();
-    let all_secondaries: Vec<_> = model.joists().chain(model.posts()).collect();
+    let all_secondaries: Vec<_> = model.beams().chain(model.posts()).collect();
     for (i, sm) in all_secondaries.iter().enumerate() {
         let mid = secondary_member_base + i as u32;
         let sec = sm
@@ -319,7 +286,7 @@ fn members_body(
             continue;
         };
         match sm.kind {
-            squid_n_core::model::SecondaryMemberKind::Joist => {
+            squid_n_core::model::SecondaryMemberKind::Beam => {
                 sec_beams.push_str(&format!(
                     "        <StbBeam id=\"{}\" name=\"B{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
                      rotate=\"0\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\"/>\n",

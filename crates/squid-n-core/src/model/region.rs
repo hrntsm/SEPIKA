@@ -60,7 +60,7 @@ pub struct FloorRegion {
     pub boundary: Vec<NodeId>,
     /// この床領域に属する小梁の実体。順序は任意。
     #[serde(default)]
-    pub secondary_joists: Vec<SecondaryMember>,
+    pub secondary_beams: Vec<SecondaryMember>,
     /// この床領域に属する床板の ID リスト。順序は任意。重複・他領域との共有は許さない。
     #[serde(default)]
     pub slab_ids: Vec<SlabId>,
@@ -82,10 +82,10 @@ impl Model {
     }
 
     /// 二次部材（安定 ID）が属する床領域。どこにも属さなければ `None`。
-    pub fn floor_region_of_joist(&self, id: SecondaryMemberId) -> Option<&FloorRegion> {
+    pub fn floor_region_of_beam(&self, id: SecondaryMemberId) -> Option<&FloorRegion> {
         self.floor_regions
             .iter()
-            .find(|r| r.secondary_joists.iter().any(|j| j.id == id))
+            .find(|r| r.secondary_beams.iter().any(|j| j.id == id))
     }
 
     /// 床領域の境界多角形の内側（境界を除く）に点 `p` [mm] があるか。
@@ -139,7 +139,7 @@ impl FloorRegion {
             id,
             name: String::new(),
             boundary,
-            secondary_joists: Vec::new(),
+            secondary_beams: Vec::new(),
             slab_ids: Vec::new(),
         }
     }

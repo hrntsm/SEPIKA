@@ -33,7 +33,7 @@ impl MemberInfo<'_> {
     }
     /// 水平な梁系の部材か（同上）。
     pub(super) fn is_beam_horiz(&self) -> bool {
-        self.member_kind == MemberKind::Beam
+        self.member_kind == MemberKind::Girder
     }
     /// 節点 `nid` 側の端部内力行（pos 0/1 のうち近い方）。
     pub(super) fn end_forces(&self, nid: NodeId) -> Option<&[f64; 6]> {

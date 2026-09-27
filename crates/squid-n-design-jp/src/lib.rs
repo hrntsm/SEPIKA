@@ -7,12 +7,12 @@
 //!
 //! 二次設計（保有水平耐力計算）は [`secondary`] モジュール
 //! （部材ランク・層 Ds・保有水平耐力・剛性率・偏心率・主軸）に分離する。
-pub mod beam_group;
 pub mod brb;
 pub mod cft;
 /// 危険断面位置（断面検定を行う部材軸上の位置）。GUI と MCP が共通で用いる。
 pub mod design_position;
 pub mod floor;
+pub mod girder_group;
 /// 免震支承材のマルチシアスプリング低減率・摩擦力（各免震部材指針）。
 pub mod isolator;
 pub mod joint_wiring;
@@ -34,11 +34,11 @@ pub mod wall_opening;
 
 pub mod secondary;
 
-pub use beam_group::beam_group_overrides;
 pub use cft::CftDesign;
+pub use girder_group::girder_group_overrides;
 pub use material_strength::{steel_f_value, steel_f_value_prefix};
 pub use member_design_check::{
-    run_member_design_checks, BeamGroupContextOverride, MemberDesignCheckOptions,
+    run_member_design_checks, GirderGroupContextOverride, MemberDesignCheckOptions,
     MemberDesignCheckReport,
 };
 pub use rc::RcDesign;
@@ -260,12 +260,12 @@ pub enum LoadTerm {
 
 /// 部材種別。検定式の選択に用いる（RC規準・鋼構造設計規準の断面検定）。
 ///
-/// - `Beam`: 梁（強軸曲げ＋せん断。鋼は横座屈を考慮した fb）
+/// - `Girder`: 大梁（強軸曲げ＋せん断。鋼は横座屈を考慮した fb）
 /// - `Column`: 柱（軸力＋二軸曲げの複合検定＋せん断）
 /// - `Brace`: ブレース（軸力のみ。圧縮は座屈を考慮した fc）
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum MemberKind {
-    Beam,
+    Girder,
     Column,
     Brace,
 }
@@ -287,17 +287,17 @@ impl MemberKind {
             )
         })?;
         let kind = match usage {
-            squid_n_core::model::FrameSectionUse::Beam => MemberKind::Beam,
+            squid_n_core::model::FrameSectionUse::Girder => MemberKind::Girder,
             squid_n_core::model::FrameSectionUse::Column => MemberKind::Column,
             squid_n_core::model::FrameSectionUse::Brace => MemberKind::Brace,
         };
         match (elem.kind, kind) {
             (squid_n_core::model::ElementKind::Brace { .. }, MemberKind::Brace)
-            | (squid_n_core::model::ElementKind::Beam, MemberKind::Beam | MemberKind::Column)
-            | (squid_n_core::model::ElementKind::Fiber, MemberKind::Beam | MemberKind::Column)
+            | (squid_n_core::model::ElementKind::Beam, MemberKind::Girder | MemberKind::Column)
+            | (squid_n_core::model::ElementKind::Fiber, MemberKind::Girder | MemberKind::Column)
             | (
                 squid_n_core::model::ElementKind::MultiSpring,
-                MemberKind::Beam | MemberKind::Column,
+                MemberKind::Girder | MemberKind::Column,
             ) => Ok(kind),
             _ => Err(format!("要素 {} と断面用途が不整合です", elem.id.0)),
         }
@@ -385,7 +385,7 @@ impl Default for DesignCtx {
             shear_rebar_material: None,
             steel_material: None,
             term: LoadTerm::Long,
-            kind: MemberKind::Beam,
+            kind: MemberKind::Girder,
             length: 0.0,
             clear_length: None,
             lb: None,

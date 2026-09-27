@@ -563,7 +563,7 @@ pub(super) fn draw_mode_rest_ghost(
             if show_sections { 1.0_f32 } else { 1.5_f32 },
             theme::translucent(theme::SECONDARY_AMBER, LINE_A),
         );
-        for sm in app.core.model.joists().chain(app.core.model.posts()) {
+        for sm in app.core.model.beams().chain(app.core.model.posts()) {
             let Some([n0, n1]) = super::secondary_end_node_indices(&app.core.model, sm) else {
                 continue;
             };

@@ -566,7 +566,7 @@ const JOIST_B: [f64; 2] = [2500.0, 4000.0];
 /// ケース5の小梁が境界として載る辺の分類。
 enum EdgeClass {
     Girder(usize),
-    Joist,
+    Beam,
 }
 
 /// 点がどの大梁（`GIRDER_ENDS` の順）の材軸上にあるかを返す。
@@ -588,13 +588,13 @@ fn classify_edge(coords: &[[f64; 3]], e: usize, model: &Model) -> Option<EdgeCla
     let b = coords[(e + 1) % coords.len()];
     let mid = [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])];
     if geom_polygon::point_segment_dist(mid, JOIST_A, JOIST_B) <= 1.0 {
-        return Some(EdgeClass::Joist);
+        return Some(EdgeClass::Beam);
     }
     girder_of_point(model, mid).map(EdgeClass::Girder)
 }
 
 /// ケース5のモデル（6000×4000 の床領域と X=2500 の中央小梁）を作る。
-fn joist_floor_model(w: f64) -> (Model, SlabId, SlabId) {
+fn beam_floor_model(w: f64) -> (Model, SlabId, SlabId) {
     let mk_node = |id: u32, x: f64, y: f64| Node {
         id: NodeId(id),
         coord: [x, y, 0.0],
@@ -643,10 +643,10 @@ fn joist_floor_model(w: f64) -> (Model, SlabId, SlabId) {
         FloorRegionId(0),
         vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
     );
-    region.secondary_joists = vec![SecondaryMember {
+    region.secondary_beams = vec![SecondaryMember {
         id: SecondaryMemberId(4),
         gravity_end_shares: None,
-        kind: SecondaryMemberKind::Joist,
+        kind: SecondaryMemberKind::Beam,
         ends: SecondaryMemberEnds::Supported([
             SecondaryMemberAnchor {
                 support: SupportMemberId::Primary(ElemId(0)),
@@ -717,7 +717,7 @@ fn add_to_girder(out: &mut [f64; 4], elem: ElemId, total: f64) {
 /// 有限線分拡張方式の辺負担を小梁の単純梁反力（両端等分）に換算して主架構ごとに集計する。
 fn segment_extension_primary_by_girder(model: &Model, slabs: &[SlabId], w: f64) -> [f64; 4] {
     let mut out = [0.0_f64; 4];
-    let mut joist_total = 0.0_f64;
+    let mut beam_total = 0.0_f64;
     for &sid in slabs {
         let Some(slab) = model.slab(sid) else {
             continue;
@@ -731,31 +731,31 @@ fn segment_extension_primary_by_girder(model: &Model, slabs: &[SlabId], w: f64) 
         {
             match classify_edge(&coords, e, model) {
                 Some(EdgeClass::Girder(i)) => out[i] += load,
-                Some(EdgeClass::Joist) => joist_total += load,
+                Some(EdgeClass::Beam) => beam_total += load,
                 None => {}
             }
         }
     }
-    out[0] += 0.5 * joist_total;
-    out[2] += 0.5 * joist_total;
+    out[0] += 0.5 * beam_total;
+    out[2] += 0.5 * beam_total;
     out
 }
 
 /// ケース5: 小梁を含む床の最終主架構反力を、現行カスケードと有限線分拡張方式で比較する。
 #[test]
-fn case5_joist_floor_primary_reactions_current_vs_reference() {
+fn case5_beam_floor_primary_reactions_current_vs_reference() {
     let w = 0.005_f64;
     let area = 6000.0 * 4000.0;
-    let (model, left, right) = joist_floor_model(w);
+    let (model, left, right) = beam_floor_model(w);
 
     let region_loads = distribute_region(&model, &model.floor_regions[0], |_| w).unwrap();
     assert_total("distribute_region", &[total_load(&region_loads)], w * area);
-    let (joist_map, _) = secondary_joist_distribution_split(&model, |_| w).unwrap();
-    let joist_load_count = joist_map
+    let (beam_map, _) = secondary_beam_distribution_split(&model, |_| w).unwrap();
+    let beam_load_count = beam_map
         .get(&SecondaryMemberId(4))
         .map(|e| e.member_loads.len())
         .unwrap_or(0);
-    assert!(joist_load_count > 0, "小梁に分配荷重がある");
+    assert!(beam_load_count > 0, "小梁に分配荷重がある");
 
     let transfer = crate::cascade::solve(&model, |_| w, false).unwrap();
     assert!(transfer.unresolved.is_empty(), "{:?}", transfer.unresolved);

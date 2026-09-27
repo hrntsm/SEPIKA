@@ -1435,7 +1435,7 @@ mod tests {
 
     /// せいだけを与えた断面（見付き寸法の算定に必要なのはせいのみ）。
     fn depth_section(id: u32, depth: f64) -> squid_n_core::model::Section {
-        depth_section_with_use(id, depth, FrameSectionUse::Beam)
+        depth_section_with_use(id, depth, FrameSectionUse::Girder)
     }
 
     fn depth_section_with_use(

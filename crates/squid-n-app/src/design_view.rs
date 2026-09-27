@@ -802,7 +802,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
     floor_design_section(ui, app);
 }
 
-/// 床の中での小梁・スラブ設計の表示（`ResultsBundle.joist_checks`/`slab_checks`）。
+/// 床の中での小梁・スラブ設計の表示（`ResultsBundle.beam_checks`/`slab_checks`）。
 /// 小梁は単純梁または片持ち梁として曲げ・たわみを検定し、スラブは一方向版として設計曲げ
 /// モーメント・必要鉄筋量を表示する（いずれも全体 FEM から独立）。
 fn floor_design_section(ui: &mut egui::Ui, app: &App) {
@@ -810,7 +810,7 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
     let Some(r) = app.core.scoped.results.as_ref() else {
         return;
     };
-    if r.joist_checks.is_empty() && r.slab_checks.is_empty() {
+    if r.beam_checks.is_empty() && r.slab_checks.is_empty() {
         return;
     }
 
@@ -823,11 +823,11 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
          鋼小梁の E・長期 ft は断面材料（未設定時 E=205000・F=235）。鉄筋は SD295（長期 ft=195）です。",
     );
 
-    if !r.joist_checks.is_empty() {
+    if !r.beam_checks.is_empty() {
         ui.label("小梁（単純梁・片持ち梁）:");
         crate::table_util::standard_table(
             ui,
-            "joist_design_table",
+            "beam_design_table",
             &[
                 Col::id_named("スラブ"),
                 Col::id_named("二次部材"),
@@ -838,9 +838,9 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
                 Col::num("検定比"),
                 Col::label("判定"),
             ],
-            r.joist_checks.len(),
+            r.beam_checks.len(),
             |row| {
-                let (sid, ji, jr) = &r.joist_checks[row.index()];
+                let (sid, ji, jr) = &r.beam_checks[row.index()];
                 row.col(|ui| {
                     ui.label(match sid {
                         Some(id) => format!("#{}", id.0),
@@ -849,10 +849,10 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
                 });
                 row.col(|ui| {
                     let label = match ji {
-                        crate::app::JoistCheckTarget::SecondaryJoist { member } => {
-                            secondary_label(app.core.model.joists(), *member)
+                        crate::app::BeamCheckTarget::SecondaryBeam { member } => {
+                            secondary_label(app.core.model.beams(), *member)
                         }
-                        crate::app::JoistCheckTarget::SecondaryPost { member } => {
+                        crate::app::BeamCheckTarget::SecondaryPost { member } => {
                             format!(
                                 "（間柱）{}",
                                 secondary_label(app.core.model.posts(), *member)

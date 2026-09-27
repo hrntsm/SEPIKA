@@ -693,7 +693,7 @@ mod tests {
         };
         let section = |id: u32, shape: SectionShape, depth: f64, area: f64| Section {
             frame_use: Some(if id == 0 {
-                FrameSectionUse::Beam
+                FrameSectionUse::Girder
             } else {
                 FrameSectionUse::Column
             }),

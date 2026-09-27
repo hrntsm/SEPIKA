@@ -258,8 +258,8 @@ impl Slab {
 /// 境界辺から二次部材の支持部材を選ぶときの期待種別。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BoundarySecondaryKind {
-    /// 床領域の境界辺。両端支持の小梁（[`Model::joists`]）だけを選ぶ。
-    Joist,
+    /// 床領域の境界辺。両端支持の小梁（[`Model::beams`]）だけを選ぶ。
+    Beam,
     /// 壁領域の境界辺。両端支持の間柱（[`Model::posts`]）だけを選ぶ。
     Post,
 }
@@ -314,7 +314,7 @@ impl Model {
     }
 
     /// 用途に応じた合成面荷重強度 [N/mm²]（固定 DL ＋ 積載 LL(purpose)）。
-    /// 床スラブは `Floor`、小梁は `Joist`、長期骨組は `Frame`、地震用重量は `Seismic`。
+    /// 床スラブは `Floor`、小梁は `Beam`、長期骨組は `Frame`、地震用重量は `Seismic`。
     pub fn slab_intensity(&self, slab: &Slab, purpose: LoadPurpose) -> f64 {
         self.slab_dead_intensity(slab) + slab.plate.live_intensity(purpose)
     }
@@ -339,7 +339,7 @@ impl Model {
         for i in 0..boundary.len() {
             let a = boundary[i];
             let b = boundary[(i + 1) % boundary.len()];
-            let support = self.resolve_boundary_support(a, b, BoundarySecondaryKind::Joist);
+            let support = self.resolve_boundary_support(a, b, BoundarySecondaryKind::Beam);
             let span = match self.support_member_nodes(support) {
                 Some([n0, n1]) if n0 == b && n1 == a => [1.0, 0.0],
                 _ => [0.0, 1.0],
@@ -436,7 +436,7 @@ impl Model {
                         })
                 };
                 match kind {
-                    BoundarySecondaryKind::Joist => self.joists().find(|m| supported_near(m)),
+                    BoundarySecondaryKind::Beam => self.beams().find(|m| supported_near(m)),
                     BoundarySecondaryKind::Post => self.posts().find(|m| supported_near(m)),
                 }
                 .map(|m| m.id)
@@ -485,13 +485,13 @@ pub enum DistributionMethod {
     TributaryArea,
 }
 
-/// 積載荷重の用途（令85条1項・令別表第1）。`Floor`（床用）と `Joist`（小梁用）は (い) 欄「床の構造計算を
+/// 積載荷重の用途（令85条1項・令別表第1）。`Floor`（床用）と `Beam`（小梁用）は (い) 欄「床の構造計算を
 /// する場合」に、`Frame`（大梁・柱・基礎用）は (ろ) 欄、`Seismic`（地震力用）は (は) 欄に対応する。床スラブ
 /// 検定・小梁検定・長期骨組解析・地震用重量の算定に用い、官庁営繕「建築構造設計基準」等は (い) 欄を「床版又は小梁計算用」と整理する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LoadPurpose {
     Floor,
-    Joist,
+    Beam,
     Frame,
     Seismic,
 }
@@ -553,7 +553,7 @@ pub enum SlabUsage {
     /// 任意入力（床用／小梁用／大梁・柱・基礎用／地震力用、いずれも N/mm²）。
     Custom {
         floor: f64,
-        joist: f64,
+        beam: f64,
         frame: f64,
         seismic: f64,
     },
@@ -587,20 +587,20 @@ impl SlabUsage {
             SlabUsage::RoofSteelGym => (980.0, 0.0, 0.0),
             SlabUsage::Custom {
                 floor,
-                joist,
+                beam,
                 frame,
                 seismic,
             } => {
                 return match purpose {
                     LoadPurpose::Floor => floor,
-                    LoadPurpose::Joist => joist,
+                    LoadPurpose::Beam => beam,
                     LoadPurpose::Frame => frame,
                     LoadPurpose::Seismic => seismic,
                 };
             }
         };
         let v_n_per_m2 = match purpose {
-            LoadPurpose::Floor | LoadPurpose::Joist => floor,
+            LoadPurpose::Floor | LoadPurpose::Beam => floor,
             LoadPurpose::Frame => frame,
             LoadPurpose::Seismic => seismic,
         };
@@ -634,7 +634,7 @@ mod tests {
         let o = SlabUsage::Office;
         assert!((o.live_load(LoadPurpose::Floor) - 2900e-6).abs() < 1e-12);
         assert_eq!(
-            o.live_load(LoadPurpose::Joist),
+            o.live_load(LoadPurpose::Beam),
             o.live_load(LoadPurpose::Floor)
         );
         assert!((o.live_load(LoadPurpose::Frame) - 1800e-6).abs() < 1e-12);
@@ -643,7 +643,7 @@ mod tests {
         let r = SlabUsage::Residential;
         assert!((r.live_load(LoadPurpose::Floor) - 1800e-6).abs() < 1e-12);
         assert_eq!(
-            r.live_load(LoadPurpose::Joist),
+            r.live_load(LoadPurpose::Beam),
             r.live_load(LoadPurpose::Floor)
         );
         assert!((r.live_load(LoadPurpose::Frame) - 1300e-6).abs() < 1e-12);
@@ -666,7 +666,7 @@ mod tests {
         for &(u, floor, frame, seismic) in cases {
             assert!((u.live_load(LoadPurpose::Floor) - floor * 1e-6).abs() < 1e-12);
             assert_eq!(
-                u.live_load(LoadPurpose::Joist),
+                u.live_load(LoadPurpose::Beam),
                 u.live_load(LoadPurpose::Floor)
             );
             assert!((u.live_load(LoadPurpose::Frame) - frame * 1e-6).abs() < 1e-12);
@@ -699,7 +699,7 @@ mod tests {
             SlabUsage::RoofSteelGym,
         ] {
             let f = u.live_load(LoadPurpose::Floor);
-            let j = u.live_load(LoadPurpose::Joist);
+            let j = u.live_load(LoadPurpose::Beam);
             let g = u.live_load(LoadPurpose::Frame);
             let s = u.live_load(LoadPurpose::Seismic);
             assert!(
@@ -714,12 +714,12 @@ mod tests {
         // Custom は内部単位 N/mm² をそのまま返す（換算しない）。
         let c = SlabUsage::Custom {
             floor: 3.0e-3,
-            joist: 2.5e-3,
+            beam: 2.5e-3,
             frame: 2.0e-3,
             seismic: 1.0e-3,
         };
         assert_eq!(c.live_load(LoadPurpose::Floor), 3.0e-3);
-        assert_eq!(c.live_load(LoadPurpose::Joist), 2.5e-3);
+        assert_eq!(c.live_load(LoadPurpose::Beam), 2.5e-3);
         assert_eq!(c.live_load(LoadPurpose::Frame), 2.0e-3);
         assert_eq!(c.live_load(LoadPurpose::Seismic), 1.0e-3);
     }
@@ -740,7 +740,7 @@ mod tests {
                 }],
                 usage: Some(SlabUsage::Custom {
                     floor: 3.0e-3,
-                    joist: 2.5e-3,
+                    beam: 2.5e-3,
                     frame: 1.8e-3,
                     seismic: 0.8e-3,
                 }),
@@ -749,11 +749,11 @@ mod tests {
             },
         };
         assert!((model.slab_intensity(&slab, LoadPurpose::Floor) - 8.0e-3).abs() < 1e-12);
-        assert!((model.slab_intensity(&slab, LoadPurpose::Joist) - 7.5e-3).abs() < 1e-12);
+        assert!((model.slab_intensity(&slab, LoadPurpose::Beam) - 7.5e-3).abs() < 1e-12);
         assert!((model.slab_intensity(&slab, LoadPurpose::Frame) - 6.8e-3).abs() < 1e-12);
         assert!((model.slab_intensity(&slab, LoadPurpose::Seismic) - 5.8e-3).abs() < 1e-12);
         assert!(
-            (model.slab_intensity(&slab, LoadPurpose::Joist) - 8.0e-3).abs() > 1e-12,
+            (model.slab_intensity(&slab, LoadPurpose::Beam) - 8.0e-3).abs() > 1e-12,
             "小梁設計用は床用（8.0e-3）とは異なる"
         );
     }

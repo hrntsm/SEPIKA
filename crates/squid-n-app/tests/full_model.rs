@@ -263,7 +263,7 @@ fn import_builds_expected_model() {
 
     assert_eq!(m.nodes.len(), 166, "節点数");
     assert_eq!(m.elements.len(), 115, "解析要素数（柱 40・大梁 75）");
-    assert_eq!(m.joists().count(), 56, "二次部材（小梁）");
+    assert_eq!(m.beams().count(), 56, "二次部材（小梁）");
     assert_eq!(m.floor_regions.len(), 26, "床領域（大梁1床領域単位）");
     assert_eq!(m.stories.len(), 5, "階（1FL/2FL/3FL/RFL/PHRFL）");
 
@@ -276,7 +276,7 @@ fn import_builds_expected_model() {
     );
     let boundaries = generate_region_boundaries(m);
     for r in &m.floor_regions {
-        for sm in &r.secondary_joists {
+        for sm in &r.secondary_beams {
             let coords = r.boundary_coords(m).expect("領域境界");
             let n = coords.len() as f64;
             let centroid = [
@@ -332,9 +332,9 @@ fn import_builds_expected_model() {
 fn import_anchorizes_secondary_members() {
     let app = imported();
     let m = &app.core.model;
-    let total = m.joists().count() + m.posts().count();
+    let total = m.beams().count() + m.posts().count();
     let anchored = m
-        .joists()
+        .beams()
         .chain(m.posts())
         .filter(|sm| !sm.is_detached())
         .count();
@@ -1228,8 +1228,8 @@ fn scz_roundtrip_preserves_model_and_results() {
         "要素数"
     );
     assert_eq!(
-        reopened.core.model.joists().count(),
-        app.core.model.joists().count(),
+        reopened.core.model.beams().count(),
+        app.core.model.beams().count(),
         "二次部材数"
     );
     assert_eq!(
@@ -1310,8 +1310,8 @@ fn stbridge_roundtrip_is_reanalyzable() {
         "往復で要素数が変わる"
     );
     assert_eq!(
-        reimported.core.model.joists().count(),
-        app.core.model.joists().count(),
+        reimported.core.model.beams().count(),
+        app.core.model.beams().count(),
         "往復で二次部材数が変わる"
     );
     assert_eq!(
@@ -1346,21 +1346,21 @@ fn stbridge_roundtrip_is_reanalyzable() {
 /// スラブの内包判定は XY 平面へ投影して行うため、レベルを見ないと上下階のスラブが
 /// すべて該当し、別階の板厚・室用途・境界寸法で検定されてしまう（エラーは出ない）。
 #[test]
-fn joist_design_checks_cover_imported_secondary_members() {
+fn beam_design_checks_cover_imported_secondary_members() {
     let mut app = analyzed();
     app.run_design_check();
     assert_no_error(&app, "断面検定");
 
     let results = app.core.scoped.results.as_ref().expect("解析結果");
-    let n_joists = app.core.model.joists().count();
+    let n_beams = app.core.model.beams().count();
     assert!(
-        !results.joist_checks.is_empty(),
-        "小梁 {n_joists} 本が 1 件も検定されていない"
+        !results.beam_checks.is_empty(),
+        "小梁 {n_beams} 本が 1 件も検定されていない"
     );
 
     let mut checked = 0;
-    for (slab_id, target, jr) in &results.joist_checks {
-        let squid_n_app::app::JoistCheckTarget::SecondaryJoist { member } = target else {
+    for (slab_id, target, jr) in &results.beam_checks {
+        let squid_n_app::app::BeamCheckTarget::SecondaryBeam { member } = target else {
             continue; // 間柱は検定対象外（軸力・面外曲げが未対応）。
         };
         checked += 1;
@@ -1368,7 +1368,7 @@ fn joist_design_checks_cover_imported_secondary_members() {
             continue;
         }
         let sm = app.core.model.secondary_member(*member).expect("小梁");
-        let z_joist = app
+        let z_beam = app
             .core
             .model
             .secondary_member_end_points(sm)
@@ -1386,15 +1386,15 @@ fn joist_design_checks_cover_imported_secondary_members() {
             .expect("検定結果の床板が実在する");
         let z_slab = slab.level(&app.core.model).expect("床板のレベル");
         assert!(
-            (z_slab - z_joist).abs() <= 1.0,
-            "小梁 {}（Z={z_joist}）が別レベルのスラブ {:?}（Z={z_slab}）で検定されている",
+            (z_slab - z_beam).abs() <= 1.0,
+            "小梁 {}（Z={z_beam}）が別レベルのスラブ {:?}（Z={z_slab}）で検定されている",
             member.0,
             slab_id
         );
     }
     assert_eq!(
-        checked, n_joists,
-        "取り込んだ小梁がすべて検定されていない（{checked}/{n_joists}）"
+        checked, n_beams,
+        "取り込んだ小梁がすべて検定されていない（{checked}/{n_beams}）"
     );
 }
 
@@ -1647,10 +1647,7 @@ fn snapshot_key_scalars() {
     // --- モデル構成 ---
     line("model.nodes", app.core.model.nodes.len().to_string());
     line("model.elements", app.core.model.elements.len().to_string());
-    line(
-        "model.joists()",
-        app.core.model.joists().count().to_string(),
-    );
+    line("model.beams()", app.core.model.beams().count().to_string());
     line(
         "model.floor_regions",
         app.core.model.floor_regions.len().to_string(),
@@ -1729,10 +1726,7 @@ fn snapshot_key_scalars() {
         "design.joint_checks",
         results.joint_checks.len().to_string(),
     );
-    line(
-        "design.joist_checks",
-        results.joist_checks.len().to_string(),
-    );
+    line("design.beam_checks", results.beam_checks.len().to_string());
     line("design.slab_checks", results.slab_checks.len().to_string());
     let max_ratio = results
         .member_checks
@@ -1768,13 +1762,13 @@ fn snapshot_key_scalars() {
     line("design.skipped_positions", skipped_positions.to_string());
     // 小梁の最大検定比。件数だけでは「どのスラブで検定したか」の変化を捉えられないため、
     // 値そのものも固定する（負担幅・床荷重強度の取り違えはここに現れる）。
-    let joist_max_ratio = results
-        .joist_checks
+    let beam_max_ratio = results
+        .beam_checks
         .iter()
         .filter(|(_, _, r)| !r.unchecked)
         .map(|(_, _, r)| r.ratio)
         .fold(0.0_f64, f64::max);
-    line("design.joist_max_ratio", sig4(joist_max_ratio));
+    line("design.beam_max_ratio", sig4(beam_max_ratio));
 
     // --- 層指標 ---
     let ctx = squid_n_app::summary::metrics_ctx_from_results(Some(results));
@@ -1913,7 +1907,7 @@ fn slab_floor_load_reaches_primary_frame() {
         .as_ref()
         .map(|c| c.effective_steel_factor())
         .unwrap_or(1.0);
-    for sm in model.joists().chain(model.posts()) {
+    for sm in model.beams().chain(model.posts()) {
         if model.secondary_member_materialized(sm) {
             continue;
         }

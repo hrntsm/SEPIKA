@@ -504,18 +504,18 @@ fn slabs_by_plan(model: &Model, ctx: &Ctx, story: StoryId) -> PlanIndex<PlanKey,
 /// 二次部材の格納位置。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum SecondarySlot {
-    UnassignedJoist(usize),
+    UnassignedBeam(usize),
     UnassignedPost(usize),
-    FloorJoist { region: usize, index: usize },
+    FloorBeam { region: usize, index: usize },
     WallPost { region: usize, index: usize },
 }
 
 fn secondary_at(model: &Model, slot: SecondarySlot) -> Option<&SecondaryMember> {
     match slot {
-        SecondarySlot::UnassignedJoist(i) => model.unassigned_joists.get(i),
+        SecondarySlot::UnassignedBeam(i) => model.unassigned_beams.get(i),
         SecondarySlot::UnassignedPost(i) => model.unassigned_posts.get(i),
-        SecondarySlot::FloorJoist { region, index } => {
-            model.floor_regions.get(region)?.secondary_joists.get(index)
+        SecondarySlot::FloorBeam { region, index } => {
+            model.floor_regions.get(region)?.secondary_beams.get(index)
         }
         SecondarySlot::WallPost { region, index } => {
             model.wall_regions.get(region)?.posts.get(index)
@@ -525,12 +525,12 @@ fn secondary_at(model: &Model, slot: SecondarySlot) -> Option<&SecondaryMember> 
 
 fn secondary_at_mut(model: &mut Model, slot: SecondarySlot) -> Option<&mut SecondaryMember> {
     match slot {
-        SecondarySlot::UnassignedJoist(i) => model.unassigned_joists.get_mut(i),
+        SecondarySlot::UnassignedBeam(i) => model.unassigned_beams.get_mut(i),
         SecondarySlot::UnassignedPost(i) => model.unassigned_posts.get_mut(i),
-        SecondarySlot::FloorJoist { region, index } => model
+        SecondarySlot::FloorBeam { region, index } => model
             .floor_regions
             .get_mut(region)?
-            .secondary_joists
+            .secondary_beams
             .get_mut(index),
         SecondarySlot::WallPost { region, index } => {
             model.wall_regions.get_mut(region)?.posts.get_mut(index)
@@ -540,15 +540,15 @@ fn secondary_at_mut(model: &mut Model, slot: SecondarySlot) -> Option<&mut Secon
 
 fn all_secondary_slots(model: &Model) -> Vec<SecondarySlot> {
     let mut out = Vec::new();
-    for i in 0..model.unassigned_joists.len() {
-        out.push(SecondarySlot::UnassignedJoist(i));
+    for i in 0..model.unassigned_beams.len() {
+        out.push(SecondarySlot::UnassignedBeam(i));
     }
     for i in 0..model.unassigned_posts.len() {
         out.push(SecondarySlot::UnassignedPost(i));
     }
     for (ri, region) in model.floor_regions.iter().enumerate() {
-        for ji in 0..region.secondary_joists.len() {
-            out.push(SecondarySlot::FloorJoist {
+        for ji in 0..region.secondary_beams.len() {
+            out.push(SecondarySlot::FloorBeam {
                 region: ri,
                 index: ji,
             });
@@ -566,12 +566,12 @@ fn all_secondary_slots(model: &Model) -> Vec<SecondarySlot> {
 }
 
 fn secondary_count(model: &Model) -> usize {
-    model.unassigned_joists.len()
+    model.unassigned_beams.len()
         + model.unassigned_posts.len()
         + model
             .floor_regions
             .iter()
-            .map(|r| r.secondary_joists.len())
+            .map(|r| r.secondary_beams.len())
             .sum::<usize>()
         + model
             .wall_regions
@@ -1037,14 +1037,14 @@ fn copy_secondary(
 
     if cmd.overwrite {
         let before = secondary_count(model);
-        let delete_joists: Vec<bool> = model
-            .unassigned_joists
+        let delete_beams: Vec<bool> = model
+            .unassigned_beams
             .iter()
             .map(|sm| should_delete_copied_secondary(model, ctx, cmd, to, dz, sm, &src_keys))
             .collect();
         let mut ji = 0usize;
-        model.unassigned_joists.retain(|_| {
-            let keep = !delete_joists[ji];
+        model.unassigned_beams.retain(|_| {
+            let keep = !delete_beams[ji];
             ji += 1;
             keep
         });
@@ -1059,12 +1059,12 @@ fn copy_secondary(
             pi += 1;
             keep
         });
-        let region_joist_deletes: Vec<Vec<bool>> = model
+        let region_beam_deletes: Vec<Vec<bool>> = model
             .floor_regions
             .iter()
             .map(|region| {
                 region
-                    .secondary_joists
+                    .secondary_beams
                     .iter()
                     .map(|sm| {
                         should_delete_copied_secondary(model, ctx, cmd, to, dz, sm, &src_keys)
@@ -1072,9 +1072,9 @@ fn copy_secondary(
                     .collect()
             })
             .collect();
-        for (region, delete) in model.floor_regions.iter_mut().zip(region_joist_deletes) {
+        for (region, delete) in model.floor_regions.iter_mut().zip(region_beam_deletes) {
             let mut k = 0usize;
-            region.secondary_joists.retain(|_| {
+            region.secondary_beams.retain(|_| {
                 let keep = !delete[k];
                 k += 1;
                 keep
@@ -1165,7 +1165,7 @@ fn copy_secondary(
             name: sm.name.clone(),
         };
         match sm.kind {
-            SecondaryMemberKind::Joist => model.unassigned_joists.push(new_sm),
+            SecondaryMemberKind::Beam => model.unassigned_beams.push(new_sm),
             SecondaryMemberKind::Post => model.unassigned_posts.push(new_sm),
         }
         report.secondary_created += 1;

@@ -58,9 +58,9 @@ pub struct QuantityCfg {
     /// ため、定着長さ S=35d の算定に用いる仮定径。既定 D10）。
     pub assumed_wall_bar_dia: f64,
     /// 小梁主筋の鉄筋比（コンクリート体積比。既定 0.8%）。
-    pub joist_main_ratio: f64,
+    pub beam_main_ratio: f64,
     /// 小梁スターラップの鉄筋比（既定 0.1%）。
-    pub joist_stirrup_ratio: f64,
+    pub beam_stirrup_ratio: f64,
     /// 床・片持ち床の鉄筋比（既定 1.0%）。
     pub slab_rebar_ratio: f64,
 }
@@ -70,8 +70,8 @@ impl Default for QuantityCfg {
         Self {
             anchorage_dia_factor: 35.0,
             assumed_wall_bar_dia: 10.0,
-            joist_main_ratio: 0.008,
-            joist_stirrup_ratio: 0.001,
+            beam_main_ratio: 0.008,
+            beam_stirrup_ratio: 0.001,
             slab_rebar_ratio: 0.01,
         }
     }
@@ -87,7 +87,7 @@ pub enum MemberCategory {
     /// 大梁（柱に取り付く水平梁）。
     Girder,
     /// 小梁（柱に取り付かない水平梁）。
-    Joist,
+    Beam,
     /// 床（一般スラブ）。
     Slab,
     /// 片持ち床・出隅。
@@ -107,7 +107,7 @@ impl MemberCategory {
             MemberCategory::FoundationGirder => "基礎梁",
             MemberCategory::Column => "柱",
             MemberCategory::Girder => "大梁",
-            MemberCategory::Joist => "小梁",
+            MemberCategory::Beam => "小梁",
             MemberCategory::Slab => "床",
             MemberCategory::CantileverSlab => "片持ち床",
             MemberCategory::Wall => "壁",
@@ -135,9 +135,9 @@ pub enum RebarUsage {
     /// 床筋（鉄筋比による概算）。
     SlabBar,
     /// 小梁主筋（鉄筋比による概算）。
-    JoistMain,
+    BeamMain,
     /// 小梁スターラップ（鉄筋比による概算）。
-    JoistStirrup,
+    BeamStirrup,
 }
 
 impl RebarUsage {
@@ -150,8 +150,8 @@ impl RebarUsage {
             RebarUsage::WallHorizontal => "壁横筋",
             RebarUsage::WallVertical => "壁縦筋",
             RebarUsage::SlabBar => "床筋",
-            RebarUsage::JoistMain => "小梁主筋",
-            RebarUsage::JoistStirrup => "小梁スターラップ",
+            RebarUsage::BeamMain => "小梁主筋",
+            RebarUsage::BeamStirrup => "小梁スターラップ",
         }
     }
 }
@@ -489,7 +489,7 @@ pub fn compute_quantity_takeoff(model: &Model, cfg: &QuantityCfg) -> QuantityTak
                 column_nodes.insert(ni);
                 column_nodes.insert(nj);
             }
-            Some(FrameSectionUse::Beam) => {
+            Some(FrameSectionUse::Girder) => {
                 let dx = cb[0] - ca[0];
                 let dy = cb[1] - ca[1];
                 let len = (dx * dx + dy * dy).sqrt();
@@ -580,7 +580,7 @@ pub fn compute_quantity_takeoff(model: &Model, cfg: &QuantityCfg) -> QuantityTak
         }
     }
 
-    for sm in model.joists().chain(model.posts()) {
+    for sm in model.beams().chain(model.posts()) {
         if let Some(item) = secondary_member_quantity(&ctx, sm) {
             out.items.push(item);
         }
@@ -617,7 +617,7 @@ fn build_notes(model: &Model) -> Vec<String> {
 /// 解析要素ではない二次部材（小梁・間柱）の数量。実部材化済み小梁は線材側で数える。
 fn secondary_member_quantity(ctx: &Ctx, sm: &SecondaryMember) -> Option<MemberQuantity> {
     let model = ctx.model;
-    if sm.kind == SecondaryMemberKind::Joist && model.secondary_member_materialized(sm) {
+    if sm.kind == SecondaryMemberKind::Beam && model.secondary_member_materialized(sm) {
         return None;
     }
     let sec = model.sections.get(sm.section?.index())?;
@@ -636,7 +636,7 @@ fn secondary_member_quantity(ctx: &Ctx, sm: &SecondaryMember) -> Option<MemberQu
     let category = if sm.kind == SecondaryMemberKind::Post {
         MemberCategory::Column
     } else {
-        MemberCategory::Joist
+        MemberCategory::Beam
     };
     let story = ctx.story_name(if ci[2] <= cj[2] { ni } else { nj });
     let mut item = MemberQuantity {
@@ -682,8 +682,8 @@ fn secondary_member_quantity(ctx: &Ctx, sm: &SecondaryMember) -> Option<MemberQu
         item.concrete_m3 = member::column_concrete_volume(width, depth, len) * 1e-9;
         item.formwork_m2 = member::column_formwork_area(width, depth, len) * 1e-6;
     } else {
-        item.concrete_m3 = member::joist_concrete_volume(width, depth, len) * 1e-9;
-        item.formwork_m2 = member::joist_formwork_area(width, depth, len) * 1e-6;
+        item.concrete_m3 = member::beam_concrete_volume(width, depth, len) * 1e-9;
+        item.formwork_m2 = member::beam_formwork_area(width, depth, len) * 1e-6;
     }
     Some(item)
 }
@@ -702,7 +702,7 @@ fn line_member_quantity(ctx: &Ctx, elem_idx: usize, elem: &ElementData) -> Optio
     }
     let vertical = match sec.frame_use {
         Some(FrameSectionUse::Column) => true,
-        Some(FrameSectionUse::Beam) => false,
+        Some(FrameSectionUse::Girder) => false,
         None | Some(FrameSectionUse::Brace) => return None,
     };
     let structure = squid_n_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category));
@@ -943,7 +943,7 @@ fn beam_quantity(
     } else if touches_column {
         MemberCategory::Girder
     } else {
-        MemberCategory::Joist
+        MemberCategory::Beam
     };
 
     let mut item = MemberQuantity {
@@ -983,22 +983,22 @@ fn beam_quantity(
         _ => (sec.width, sec.depth, None),
     };
 
-    if category == MemberCategory::Joist {
-        let vol = member::joist_concrete_volume(b, d, lo);
+    if category == MemberCategory::Beam {
+        let vol = member::beam_concrete_volume(b, d, lo);
         item.concrete_m3 = vol * 1e-9;
-        item.formwork_m2 = member::joist_formwork_area(b, d, lo) * 1e-6;
+        item.formwork_m2 = member::beam_formwork_area(b, d, lo) * 1e-6;
         let vol_m3 = vol * 1e-9;
         item.rebar.push(RebarItem {
-            usage: RebarUsage::JoistMain,
+            usage: RebarUsage::BeamMain,
             dia: None,
             total_length_m: 0.0,
-            weight_t: vol_m3 * ctx.cfg.joist_main_ratio * STEEL_UNIT_WEIGHT_T_PER_M3,
+            weight_t: vol_m3 * ctx.cfg.beam_main_ratio * STEEL_UNIT_WEIGHT_T_PER_M3,
         });
         item.rebar.push(RebarItem {
-            usage: RebarUsage::JoistStirrup,
+            usage: RebarUsage::BeamStirrup,
             dia: None,
             total_length_m: 0.0,
-            weight_t: vol_m3 * ctx.cfg.joist_stirrup_ratio * STEEL_UNIT_WEIGHT_T_PER_M3,
+            weight_t: vol_m3 * ctx.cfg.beam_stirrup_ratio * STEEL_UNIT_WEIGHT_T_PER_M3,
         });
     } else {
         let to_haunch = |h: &squid_n_core::model::Haunch| Haunch {

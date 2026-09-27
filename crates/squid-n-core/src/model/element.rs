@@ -114,7 +114,7 @@ pub enum EndCondition {
 /// 判定と例外（解放すると材軸まわり回転が浮く節点がある部材は解放しない）は
 /// `squid_n_element::frame::beam::i_end_torsion_release` を参照。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum BeamTorsionMode {
+pub enum GirderTorsionMode {
     /// 水平材の i 端ねじれをピン（解放）とし、梁のねじり剛性を期待しない（既定）。
     #[default]
     ReleaseIEnd,

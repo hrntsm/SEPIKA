@@ -124,13 +124,13 @@ fn usage_custom_values(u: Option<SlabUsage>) -> [f64; 4] {
     match u {
         Some(SlabUsage::Custom {
             floor,
-            joist,
+            beam,
             frame,
             seismic,
-        }) => [floor, joist, frame, seismic],
+        }) => [floor, beam, frame, seismic],
         Some(u) => [
             u.live_load(LoadPurpose::Floor),
-            u.live_load(LoadPurpose::Joist),
+            u.live_load(LoadPurpose::Beam),
             u.live_load(LoadPurpose::Frame),
             u.live_load(LoadPurpose::Seismic),
         ],
@@ -142,7 +142,7 @@ fn usage_custom_values(u: Option<SlabUsage>) -> [f64; 4] {
 fn custom_usage(values: [f64; 4]) -> SlabUsage {
     SlabUsage::Custom {
         floor: values[0],
-        joist: values[1],
+        beam: values[1],
         frame: values[2],
         seismic: values[3],
     }
@@ -150,11 +150,11 @@ fn custom_usage(values: [f64; 4]) -> SlabUsage {
 
 /// 用途の 4 値を kN/m² で並べた 1 行。
 fn usage_values_text(u: SlabUsage) -> String {
-    let [floor, joist, frame, seismic] = usage_custom_values(Some(u));
+    let [floor, beam, frame, seismic] = usage_custom_values(Some(u));
     format!(
         "床 {:.2} / 小梁 {:.2} / 大梁 {:.2} / 地震 {:.2} kN/m²",
         area_load_kn_per_m2(floor),
-        area_load_kn_per_m2(joist),
+        area_load_kn_per_m2(beam),
         area_load_kn_per_m2(frame),
         area_load_kn_per_m2(seismic),
     )
@@ -241,7 +241,7 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
                 }
             });
             row.col(|ui| {
-                let cnt = region.secondary_joists.len();
+                let cnt = region.secondary_beams.len();
                 if cnt == 0 {
                     table_util::muted_cell(ui, "―", "小梁が配置されていません");
                 } else {
@@ -406,11 +406,11 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
                     match slab.usage() {
                         Some(SlabUsage::Custom {
                             floor,
-                            joist,
+                            beam,
                             frame,
                             seismic,
                         }) => {
-                            let mut values = [floor, joist, frame, seismic];
+                            let mut values = [floor, beam, frame, seismic];
                             let mut changed = false;
                             ui.horizontal_wrapped(|ui| {
                                 for (label, value) in
@@ -529,13 +529,13 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
     crate::tables::secondary::secondary_member_placement_form(
         app,
         ui,
-        squid_n_core::model::SecondaryMemberKind::Joist,
+        squid_n_core::model::SecondaryMemberKind::Beam,
     );
     ui.add_space(4.0);
     crate::tables::secondary::secondary_member_list(
         app,
         ui,
-        squid_n_core::model::SecondaryMemberKind::Joist,
+        squid_n_core::model::SecondaryMemberKind::Beam,
     );
 
     ui.separator();

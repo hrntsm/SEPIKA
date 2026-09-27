@@ -15,7 +15,7 @@ use super::geometry::{dist3, edge_len};
 use super::polygon::polygon_edge_areas;
 use super::types::{push_edge, BeamLoad, Cmq, LoadShape, LoadTarget};
 use crate::secondary::project_on_segment;
-use squid_n_core::model::SecondaryJoistAxis;
+use squid_n_core::model::SecondaryBeamAxis;
 
 /// 取り付く床板の荷重を節点（柱）へ集中させる分配。
 ///
@@ -72,7 +72,7 @@ enum EdgeSupport {
     /// 辺の全長を覆う実部材（複数要素に分かれうる）。
     Beams(Vec<crate::secondary::SegmentCoverage>),
     /// 辺の全長に材軸が載る二次部材小梁。
-    Joist {
+    Beam {
         member: SecondaryMemberId,
         t: [f64; 2],
     },
@@ -100,8 +100,8 @@ fn covering_beams(
 }
 
 /// 辺の全長に材軸が載る二次部材小梁を探す。無ければ `None`。
-fn covering_joist(
-    axes: &[SecondaryJoistAxis],
+fn covering_beam(
+    axes: &[SecondaryBeamAxis],
     p0: [f64; 3],
     p1: [f64; 3],
 ) -> Option<(SecondaryMemberId, [f64; 2])> {
@@ -122,15 +122,15 @@ fn covering_joist(
 }
 
 fn edge_support(
-    beams: &[crate::secondary::BeamSpanCandidate],
-    joists: &[SecondaryJoistAxis],
+    candidates: &[crate::secondary::BeamSpanCandidate],
+    axes: &[SecondaryBeamAxis],
     p0: [f64; 3],
     p1: [f64; 3],
 ) -> Option<EdgeSupport> {
-    if let Some(cover) = covering_beams(beams, p0, p1) {
+    if let Some(cover) = covering_beams(candidates, p0, p1) {
         return Some(EdgeSupport::Beams(cover));
     }
-    covering_joist(joists, p0, p1).map(|(member, t)| EdgeSupport::Joist { member, t })
+    covering_beam(axes, p0, p1).map(|(member, t)| EdgeSupport::Beam { member, t })
 }
 
 /// 支持辺の等分布荷重を、その辺を受ける部材へ分配結果として積む。
@@ -170,7 +170,7 @@ fn emit_support_load(
                 });
             }
         }
-        EdgeSupport::Joist { member, t } => {
+        EdgeSupport::Beam { member, t } => {
             loads.push(BeamLoad {
                 elem: ElemId(u32::MAX),
                 target: LoadTarget::Secondary {
@@ -210,11 +210,11 @@ pub(crate) fn distribute_cantilever(
     }
 
     let beam_candidates = crate::secondary::beam_span_candidates(model);
-    let joists = model.secondary_joist_axes();
+    let beams = model.secondary_beam_axes();
     let mut supports: Vec<(usize, EdgeSupport)> = Vec::new();
     for k in 1..coords.len() {
         let (p0, p1) = edge_coords(coords, k);
-        if let Some(sup) = edge_support(&beam_candidates, &joists, p0, p1) {
+        if let Some(sup) = edge_support(&beam_candidates, &beams, p0, p1) {
             supports.push((k, sup));
         }
     }

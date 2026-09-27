@@ -143,11 +143,11 @@ mod tests {
             .sections
             .push(SectionShape::RcSlab { thickness: 150.0 }.to_section(sid, "S150".into()));
         model
-            .unassigned_joists
+            .unassigned_beams
             .push(squid_n_core::model::SecondaryMember {
                 gravity_end_shares: None,
                 id: squid_n_core::ids::SecondaryMemberId(0),
-                kind: squid_n_core::model::SecondaryMemberKind::Joist,
+                kind: squid_n_core::model::SecondaryMemberKind::Beam,
                 ends: squid_n_core::model::SecondaryMemberEnds::Supported([
                     squid_n_core::model::SecondaryMemberAnchor {
                         support: squid_n_core::model::SupportMemberId::Primary(ElemId(0)),

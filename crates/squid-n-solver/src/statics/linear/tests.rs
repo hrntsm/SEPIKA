@@ -75,7 +75,7 @@ fn simply_supported_udl_midspan_moment() {
             spring: None,
         }],
         sections: vec![Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "s".into(),
             area: 1000.0,
@@ -196,7 +196,7 @@ fn ss_beam(l: f64, member: Vec<MemberLoad>) -> Model {
             spring: None,
         }],
         sections: vec![Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "s".into(),
             area: 1000.0,
@@ -380,7 +380,7 @@ fn make_axial_cantilever() -> Model {
             spring: None,
         }],
         sections: vec![Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "sec".to_string(),
             area: 100.0,
@@ -583,7 +583,7 @@ fn test_linear_static_vertical_cantilever_bending() {
             spring: None,
         }],
         sections: vec![Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "sec".to_string(),
             area: 100.0,
@@ -704,7 +704,7 @@ fn test_shell_rigid_floor_membrane_off() {
             spring: None,
         }],
         sections: vec![Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "shell".to_string(),
             area: 0.0,
@@ -849,7 +849,7 @@ fn make_ss_plate(n: usize, a: f64, t: f64, e: f64, nu: f64, q: f64, clamped: boo
         nodes,
         elements,
         sections: vec![Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "plate".into(),
             area: 0.0,
@@ -1426,7 +1426,7 @@ fn tension_only_portal(fx: f64, tension_only: bool) -> Model {
         support_spring: None,
     };
     let sec = Section {
-        frame_use: Some(FrameSectionUse::Beam),
+        frame_use: Some(FrameSectionUse::Girder),
         id: SectionId(0),
         name: "steel".into(),
         area: 6000.0,
@@ -1633,7 +1633,7 @@ fn rigid_floor_portal(with_rigid_floor: bool) -> Model {
         ],
         elements: vec![],
         sections: vec![Section {
-            frame_use: Some(FrameSectionUse::Beam),
+            frame_use: Some(FrameSectionUse::Girder),
             id: SectionId(0),
             name: "s".into(),
             area: 1.0e4,

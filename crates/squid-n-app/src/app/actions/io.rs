@@ -46,7 +46,7 @@ impl App {
         self.ui.scoped.beam_draw_first = None;
         self.ui.scoped.wall_draw_mode = false;
         self.ui.scoped.slab_draw_mode = false;
-        self.ui.scoped.joist_place_mode = false;
+        self.ui.scoped.beam_place_mode = false;
         self.ui.scoped.post_place_mode = false;
         self.ui.scoped.work_scope = None;
         self.ui.scoped.member_place_first = None;

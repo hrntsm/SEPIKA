@@ -114,13 +114,13 @@ ST-Bridge は境界条件（支点）を持たないため、支点が 1 つも�
 
 ## 断面用途の取り込み
 
-主架構線材の設計用途は、断面に保持する `FrameSectionUse`（`Beam`・`Column`・`Brace`）を正とします。
+主架構線材の設計用途は、断面に保持する `FrameSectionUse`（`Girder`・`Column`・`Brace`）を正とします。
 ST-Bridge の `StbColumn`・`StbGirder`・`StbBrace` の部材コンテナから用途を割り当て、部材の角度・鉛直性・断面符号から柱・梁・ブレースを推定しません。
-したがって、傾斜した `Column` は柱、勾配のある `Beam` は梁として扱います。
+したがって、部材の角度にかかわらず `StbGirder` は大梁として扱います。
 
-`ElementKind` は解析定式化、`FrameSectionUse` は設計用途を表します。主架構の `ElementKind::Beam` には `Beam` または `Column`、
+`ElementKind` は解析定式化、`FrameSectionUse` は設計用途を表します。主架構の `ElementKind::Beam` には `Girder` または `Column`、
 `ElementKind::Brace` には `Brace` を割り当てます。不整合または用途不明の断面は、角度で補正せず取り込みをエラーにします。
-二次部材は `SecondaryMemberKind`（小梁 `Joist`・間柱 `Post`）を正とし、小梁は `Beam`、間柱は `Column` の用途を使います。
+二次部材は `SecondaryMemberKind`（小梁 `Beam`・間柱 `Post`）を正とし、二次部材から `FrameSectionUse` は決めません。小梁・間柱が参照する断面は `frame_use=None` でも構いません。
 
 <div class="impl-ref">
 

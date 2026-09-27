@@ -613,7 +613,7 @@ impl EditCommand for DeleteMember {
         }
         let removed_attrs = model.take_elem_attrs(self.id);
         let mut removed_group_refs = Vec::new();
-        for (gi, group) in model.beam_groups.iter_mut().enumerate() {
+        for (gi, group) in model.girder_groups.iter_mut().enumerate() {
             let mut pos = 0;
             while pos < group.len() {
                 if group[pos] == self.id {
@@ -638,7 +638,7 @@ impl EditCommand for DeleteMember {
                 elem: removed,
                 member_loads: removed_loads,
                 elem_attrs: removed_attrs,
-                beam_group_refs: removed_group_refs,
+                girder_group_refs: removed_group_refs,
             }),
         })
     }
@@ -657,7 +657,7 @@ pub struct InsertMember {
     /// 削除時に退避した側テーブル属性。
     pub elem_attrs: squid_n_core::model::ElemAttrs,
     /// 削除時に一本部材指定から外した参照の (グループ index, グループ内位置)。
-    pub beam_group_refs: Vec<(usize, usize)>,
+    pub girder_group_refs: Vec<(usize, usize)>,
 }
 
 impl EditCommand for InsertMember {
@@ -681,8 +681,8 @@ impl EditCommand for InsertMember {
             }
         }
         model.restore_elem_attrs(id, self.elem_attrs.clone());
-        for &(gi, pos) in self.beam_group_refs.iter().rev() {
-            if let Some(group) = model.beam_groups.get_mut(gi) {
+        for &(gi, pos) in self.girder_group_refs.iter().rev() {
+            if let Some(group) = model.girder_groups.get_mut(gi) {
                 group.insert(pos.min(group.len()), id);
             }
         }

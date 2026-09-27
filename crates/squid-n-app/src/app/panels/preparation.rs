@@ -115,8 +115,8 @@ impl App {
             .default_open(false)
             .id_salt("as_member_modeling")
             .show(ui, |ui| {
-                use squid_n_core::model::BeamTorsionMode;
-                let mut release = self.core.model.beam_torsion == BeamTorsionMode::ReleaseIEnd;
+                use squid_n_core::model::GirderTorsionMode;
+                let mut release = self.core.model.girder_torsion == GirderTorsionMode::ReleaseIEnd;
                 let resp = ui
                     .checkbox(&mut release, "部材 i 端のねじりをピン（梁・柱）")
                     .on_hover_text(
@@ -130,13 +130,13 @@ impl App {
                     );
                 if resp.changed() {
                     let mode = if release {
-                        BeamTorsionMode::ReleaseIEnd
+                        GirderTorsionMode::ReleaseIEnd
                     } else {
-                        BeamTorsionMode::Keep
+                        GirderTorsionMode::Keep
                     };
                     self.core.scoped.undo.run(
                         &mut self.core.model,
-                        Box::new(squid_n_edit::SetBeamTorsion { mode }),
+                        Box::new(squid_n_edit::SetGirderTorsion { mode }),
                     );
                     self.core.scoped.staleness.mark_edited();
                 }
@@ -485,7 +485,7 @@ impl App {
                         row.col(|ui| {
                             let load = self.core.model.stories[story.index()].standard_floor_load;
                             let mut values = load
-                                .map(|v| [v.dead, v.floor, v.joist, v.frame, v.seismic])
+                                .map(|v| [v.dead, v.floor, v.beam, v.frame, v.seismic])
                                 .unwrap_or([0.0; 5]);
                             let mut changed = false;
                             ui.horizontal(|ui| {
@@ -509,7 +509,7 @@ impl App {
                                         load: Some(squid_n_core::model::StandardFloorLoad {
                                             dead: values[0],
                                             floor: values[1],
-                                            joist: values[2],
+                                            beam: values[2],
                                             frame: values[3],
                                             seismic: values[4],
                                         }),

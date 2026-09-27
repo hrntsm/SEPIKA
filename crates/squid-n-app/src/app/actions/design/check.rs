@@ -73,7 +73,7 @@ impl App {
                 .as_deref()
                 .or(long_from_combo.map(|v| v.as_slice()));
         let group_overrides =
-            squid_n_design_jp::beam_group_overrides(&self.core.model, &results.member_forces);
+            squid_n_design_jp::girder_group_overrides(&self.core.model, &results.member_forces);
         let q0_by_elem = if long_member_forces.is_some() {
             squid_n_job::simple_beam_q0_by_gravity_cases(&self.core.model)
         } else {
@@ -90,7 +90,7 @@ impl App {
                 qd_method: self.core.analysis_cfg.qd_method,
                 long_member_forces,
                 q_simple_by_elem: Some(&q0_by_elem),
-                beam_group_overrides: Some(&group_overrides),
+                girder_group_overrides: Some(&group_overrides),
                 steel_fb_basis: squid_n_design_jp::SteelFbBasis::default(),
             },
         );
@@ -103,14 +103,14 @@ impl App {
                 outcome,
             })
             .collect();
-        let (joist_checks, slab_checks) = self.floor_design_checks();
+        let (beam_checks, slab_checks) = self.floor_design_checks();
 
         let member_checks = group_member_checks(report.member_checks);
 
         if let Some(bundle) = self.core.scoped.results.as_mut() {
             bundle.member_checks = member_checks;
             bundle.joint_checks = joint_checks;
-            bundle.joist_checks = joist_checks;
+            bundle.beam_checks = beam_checks;
             bundle.slab_checks = slab_checks;
         }
     }
@@ -126,11 +126,11 @@ impl App {
     ///   必要鉄筋量を算定する（鋼小梁・SD295 鉄筋の既定値を用いる）。
     pub(crate) fn floor_design_checks(
         &self,
-    ) -> (Vec<crate::app::JoistCheck>, Vec<crate::app::SlabCheck>) {
+    ) -> (Vec<crate::app::BeamCheck>, Vec<crate::app::SlabCheck>) {
         use squid_n_core::model::LoadPurpose;
         use squid_n_design_jp::floor as fd;
 
-        let mut joist_checks = Vec::new();
+        let mut beam_checks = Vec::new();
         let mut slab_checks = Vec::new();
 
         for slab in &self.core.model.slabs {
@@ -177,9 +177,9 @@ impl App {
             }
         }
 
-        self.design_secondary_joist_checks(&mut joist_checks);
+        self.design_secondary_beam_checks(&mut beam_checks);
 
-        (joist_checks, slab_checks)
+        (beam_checks, slab_checks)
     }
 
     /// 領域内小梁および未割当の片持ち小梁を、二次部材の反力の逐次伝達
@@ -190,7 +190,7 @@ impl App {
     /// （判定が 2 か所に分かれると解析と検定で荷重が食い違うため）。
     ///
     /// ただし**荷重の値そのものは一致しない**。共有するのは支持関係の判定と伝達の
-    /// 手順であって、面荷重強度は用途ごとに違う。小梁検定は小梁用（`LoadPurpose::Joist`。
+    /// 手順であって、面荷重強度は用途ごとに違う。小梁検定は小梁用（`LoadPurpose::Beam`。
     /// 固定＋小梁用積載）、荷重同期は固定荷重ケースと積載荷重ケースへ分けて解く。
     ///
     /// 断面未割当・鋼以外の材料・分配が足りないものは表に「未」として残す。
@@ -207,13 +207,13 @@ impl App {
     ///   ため前提が成り立たない（`Model::floor_region_on_single_diaphragm`）。
     ///
     /// 表から消すと検定されていないことに気づけないため、行は残す。
-    fn design_secondary_joist_checks(&self, joist_checks: &mut Vec<crate::app::JoistCheck>) {
+    fn design_secondary_beam_checks(&self, beam_checks: &mut Vec<crate::app::BeamCheck>) {
         use squid_n_core::model::{LoadPurpose, SecondaryMemberKind};
         use squid_n_design_jp::floor as fd;
         use squid_n_load::floor::{cantilever_extremes, simple_beam_extremes};
 
         let w_of =
-            |s: &squid_n_core::model::Slab| self.core.model.slab_intensity(s, LoadPurpose::Joist);
+            |s: &squid_n_core::model::Slab| self.core.model.slab_intensity(s, LoadPurpose::Beam);
         let transfer = match squid_n_load::cascade::solve(&self.core.model, w_of, true) {
             Ok(transfer) => transfer,
             Err(_) => return,
@@ -223,15 +223,15 @@ impl App {
             let Some((_, _, span)) = self.core.model.secondary_member_axis(sm) else {
                 continue;
             };
-            joist_checks.push((
+            beam_checks.push((
                 None,
-                crate::app::JoistCheckTarget::SecondaryPost { member: sm.id },
-                fd::joist_unchecked(span),
+                crate::app::BeamCheckTarget::SecondaryPost { member: sm.id },
+                fd::beam_unchecked(span),
             ));
         }
 
-        for sm in self.core.model.joists() {
-            if sm.kind != SecondaryMemberKind::Joist {
+        for sm in self.core.model.beams() {
+            if sm.kind != SecondaryMemberKind::Beam {
                 continue;
             }
             if self.core.model.secondary_member_materialized(sm) {
@@ -241,9 +241,9 @@ impl App {
                 continue;
             };
 
-            let target = crate::app::JoistCheckTarget::SecondaryJoist { member: sm.id };
+            let target = crate::app::BeamCheckTarget::SecondaryBeam { member: sm.id };
             let entry = transfer.members.get(&sm.id);
-            let region = self.core.model.floor_region_of_joist(sm.id);
+            let region = self.core.model.floor_region_of_beam(sm.id);
             let region_slab = region.and_then(|r| r.slab_ids.first().copied());
             let slab_id = region_slab.or_else(|| entry.and_then(|e| e.rep_slab_id));
 
@@ -252,16 +252,16 @@ impl App {
                 None => sm.is_cantilever(),
             };
             if !on_single_diaphragm {
-                joist_checks.push((slab_id, target, fd::joist_unchecked(span)));
+                beam_checks.push((slab_id, target, fd::beam_unchecked(span)));
                 continue;
             }
 
             let Some(sid) = sm.section else {
-                joist_checks.push((slab_id, target, fd::joist_unchecked(span)));
+                beam_checks.push((slab_id, target, fd::beam_unchecked(span)));
                 continue;
             };
             let Some(sec) = self.core.model.sections.get(sid.index()) else {
-                joist_checks.push((slab_id, target, fd::joist_unchecked(span)));
+                beam_checks.push((slab_id, target, fd::beam_unchecked(span)));
                 continue;
             };
             let z = if sec.depth > 0.0 {
@@ -270,13 +270,13 @@ impl App {
                 0.0
             };
             let mat = self.core.model.secondary_material(sm);
-            let Some((e, ft)) = fd::joist_steel_e_and_ft(mat) else {
-                joist_checks.push((slab_id, target, fd::joist_unchecked(span)));
+            let Some((e, ft)) = fd::beam_steel_e_and_ft(mat) else {
+                beam_checks.push((slab_id, target, fd::beam_unchecked(span)));
                 continue;
             };
 
             let Some(entry) = entry.filter(|e| e.distribution_ready) else {
-                joist_checks.push((slab_id, target, fd::joist_unchecked(span)));
+                beam_checks.push((slab_id, target, fd::beam_unchecked(span)));
                 continue;
             };
             let ex = if sm.is_cantilever() {
@@ -285,11 +285,11 @@ impl App {
                 simple_beam_extremes(&entry.member_loads, span, e, sec.iy)
             };
             if ex.w_equiv <= 1e-9 && ex.m_max <= 1e-9 {
-                joist_checks.push((slab_id, target, fd::joist_unchecked(span)));
+                beam_checks.push((slab_id, target, fd::beam_unchecked(span)));
                 continue;
             }
 
-            let r = fd::design_joist_from_forces(
+            let r = fd::design_beam_from_forces(
                 span,
                 ex.w_equiv,
                 ex.m_max,
@@ -299,7 +299,7 @@ impl App {
                 ft,
                 fd::DEFLECTION_LIMIT_DENOM,
             );
-            joist_checks.push((slab_id, target, r));
+            beam_checks.push((slab_id, target, r));
         }
     }
 }

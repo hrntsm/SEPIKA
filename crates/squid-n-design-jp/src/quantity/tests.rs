@@ -81,7 +81,7 @@ fn with_rc_materials(mut sec: Section) -> Section {
         ) {
             FrameSectionUse::Column
         } else {
-            FrameSectionUse::Beam
+            FrameSectionUse::Girder
         },
     );
     sec.material = Some(MaterialId(0));
@@ -408,7 +408,7 @@ fn test_girder_formwork_slab_deduction() {
 }
 
 #[test]
-fn test_joist_by_ratio() {
+fn test_beam_by_ratio() {
     // 柱に取り付かない水平梁は小梁として鉄筋比で概算する。
     let mut model = rc_portal_model();
     model.nodes.push(node(4, 2_000.0, 0.0, 3_500.0));
@@ -416,19 +416,19 @@ fn test_joist_by_ratio() {
     model.elements.push(line_elem(4, 4, 5, 0));
 
     let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
-    let joist = q
+    let beam = q
         .items
         .iter()
-        .find(|i| i.category == MemberCategory::Joist)
+        .find(|i| i.category == MemberCategory::Beam)
         .unwrap();
     // 0.4×0.8×3.0 = 0.96 m³、型枠 (0.4+1.6)×3.0 = 6.0 m²
-    assert!((joist.concrete_m3 - 0.96).abs() < 1e-9);
-    assert!((joist.formwork_m2 - 6.0).abs() < 1e-9);
+    assert!((beam.concrete_m3 - 0.96).abs() < 1e-9);
+    assert!((beam.formwork_m2 - 6.0).abs() < 1e-9);
     // 主筋 0.8% → 0.96×0.008×7.85 t
-    let main = joist
+    let main = beam
         .rebar
         .iter()
-        .find(|r| r.usage == RebarUsage::JoistMain)
+        .find(|r| r.usage == RebarUsage::BeamMain)
         .unwrap();
     assert!((main.weight_t - 0.96 * 0.008 * 7.85).abs() < 1e-9);
 }
@@ -446,7 +446,7 @@ fn test_steel_member_weight() {
     let a = shape.calc_area();
     // 材料は断面が持つ。
     let mut sec = shape.to_section(SectionId(2), "H-400x200x8x13".to_string());
-    sec.frame_use = Some(FrameSectionUse::Beam);
+    sec.frame_use = Some(FrameSectionUse::Girder);
     sec.material = Some(MaterialId(2));
     model.sections.push(sec);
     model.materials.push(steel_material(2));
