@@ -169,6 +169,7 @@ fn column_dimension(
             .ref_vector
             .iter()
             .any(|value| !value.is_finite())
+        || !norm.is_finite()
         || norm <= f64::EPSILON
     {
         return Err(PerimeterSlabError::InvalidColumnDimension {
@@ -543,6 +544,7 @@ mod tests {
             (400.0, -1.0, [1.0, 0.0, 0.0]),
             (400.0, 600.0, [f64::NAN, 0.0, 0.0]),
             (400.0, 600.0, [f64::INFINITY, 0.0, 0.0]),
+            (400.0, 600.0, [1.0e308, 0.0, 0.0]),
         ] {
             assert_eq!(
                 dimensions([6000.0, 0.0, 0.0], ref_vector, depth, width),
