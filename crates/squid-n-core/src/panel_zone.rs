@@ -92,10 +92,27 @@ pub fn member_unit_axis(model: &Model, elem: &ElementData) -> Option<[f64; 3]> {
 /// 要素の材軸の鉛直成分から柱・はりを判定する。線材以外・退化長さは `None`。
 pub fn member_orientation(model: &Model, elem: &ElementData) -> Option<MemberOrientation> {
     let section = elem.section.and_then(|id| model.sections.get(id.index()))?;
+    let axis = member_unit_axis(model, elem)?;
     match section.frame_use? {
-        FrameSectionUse::Column => Some(MemberOrientation::Column),
-        FrameSectionUse::Beam => Some(MemberOrientation::Beam),
+        FrameSectionUse::Column
+            if geom::is_vertical_axis(
+                model.nodes[elem.nodes[0].index()].coord,
+                model.nodes[elem.nodes[1].index()].coord,
+            ) =>
+        {
+            Some(MemberOrientation::Column)
+        }
+        FrameSectionUse::Beam
+            if !geom::is_vertical_axis(
+                model.nodes[elem.nodes[0].index()].coord,
+                model.nodes[elem.nodes[1].index()].coord,
+            ) && axis[2].abs() < 1e-9
+                && (geom::axis_dominates(axis, 0) || geom::axis_dominates(axis, 1)) =>
+        {
+            Some(MemberOrientation::Beam)
+        }
         FrameSectionUse::Brace => None,
+        _ => None,
     }
 }
 

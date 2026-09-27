@@ -565,10 +565,15 @@ fn test_add_section_shape_roundtrip() {
         new_id: SectionId(0),
         name: "H-300x300x10x15".into(),
         floor: None,
+        frame_use: squid_n_core::model::FrameSectionUse::Beam,
     };
     stack.run(&mut model, Box::new(cmd));
     assert_eq!(model.sections.len(), 1);
     assert_eq!(model.sections[0].id, SectionId(0));
+    assert_eq!(
+        model.sections[0].frame_use,
+        Some(squid_n_core::model::FrameSectionUse::Beam)
+    );
 
     stack.undo(&mut model);
     assert_eq!(model.sections.len(), 0);
@@ -602,6 +607,7 @@ fn test_edit_section_shape_roundtrip() {
     let cmd = EditSectionShape {
         section: SectionId(0),
         new_shape: shape2,
+        frame_use: squid_n_core::model::FrameSectionUse::Beam,
     };
     stack.run(&mut model, Box::new(cmd));
     assert!((model.sections[0].area - 9024.0).abs() < 1.0);
@@ -686,6 +692,7 @@ fn test_edit_section_shape_invalid_id_noop() {
     let cmd = EditSectionShape {
         section: SectionId(99),
         new_shape: shape,
+        frame_use: squid_n_core::model::FrameSectionUse::Beam,
     };
     stack.run(&mut model, Box::new(cmd));
     // 失敗したコマンド（Noop）は undo 履歴に積まれない。
@@ -3811,6 +3818,7 @@ fn test_add_section_shape_rejects_duplicate_key() {
         new_id: SectionId(id),
         name: name.into(),
         floor: floor.map(str::to_string),
+        frame_use: squid_n_core::model::FrameSectionUse::Column,
     };
 
     stack.run(&mut model, Box::new(add("C1", Some("1"), 0)));
@@ -3845,6 +3853,7 @@ fn test_set_section_name_rejects_duplicate_key() {
                 new_id: SectionId(i as u32),
                 name: "C1".into(),
                 floor: Some((*floor).to_string()),
+                frame_use: squid_n_core::model::FrameSectionUse::Column,
             }),
         );
     }
@@ -3899,6 +3908,7 @@ fn test_edit_section_shape_keeps_name_and_floor() {
             new_id: SectionId(0),
             name: "C1".into(),
             floor: Some("1".into()),
+            frame_use: squid_n_core::model::FrameSectionUse::Column,
         }),
     );
     stack.run(
@@ -3911,6 +3921,7 @@ fn test_edit_section_shape_keeps_name_and_floor() {
                 thick: 12.0,
                 corner_r: 0.0,
             },
+            frame_use: squid_n_core::model::FrameSectionUse::Column,
         }),
     );
     assert_eq!(model.sections[0].name, "C1");

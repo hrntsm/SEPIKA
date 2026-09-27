@@ -14,16 +14,16 @@ use std::collections::HashMap;
 /// 長期軸力無効化（一貫構造計算プログラムの実務慣行）で断面積に乗じる縮小係数。
 const AXIAL_DISABLE_FACTOR: f64 = 1.0e-6;
 
-/// 部材が「柱」（鉛直な `ElementKind::Beam`）かどうかを判定する。
-/// 判定規則は全クレート共通の 45° 余弦基準
-/// （[`squid_n_core::geom::is_vertical_axis`]: |ez| > 0.707）。
+/// 部材が柱用途かどうかを断面用途で判定する。
 fn is_vertical_column(elem: &ElementData, model: &Model) -> bool {
-    matches!(elem.kind, ElementKind::Beam)
-        && elem
-            .section
-            .and_then(|id| model.sections.get(id.index()))
-            .and_then(|section| section.frame_use)
-            == Some(FrameSectionUse::Column)
+    matches!(
+        elem.kind,
+        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+    ) && elem
+        .section
+        .and_then(|id| model.sections.get(id.index()))
+        .and_then(|section| section.frame_use)
+        == Some(FrameSectionUse::Column)
 }
 
 /// 長期応力解析で軸力を負担させない部材（対象: ブレース／柱）かどうかを、
@@ -35,7 +35,9 @@ fn is_axial_disabled_target(
 ) -> bool {
     match elem.kind {
         ElementKind::Brace { .. } => cfg.no_long_axial_brace,
-        ElementKind::Beam => cfg.no_long_axial_column && is_vertical_column(elem, model),
+        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
+            cfg.no_long_axial_column && is_vertical_column(elem, model)
+        }
         _ => false,
     }
 }

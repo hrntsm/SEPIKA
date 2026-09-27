@@ -453,6 +453,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                         new_id: predicted_id,
                         name: draft.name.clone(),
                         floor: draft_floor.clone(),
+                        frame_use: draft.frame_use,
                     }),
                 );
                 app.core.scoped.staleness.mark_edited();
@@ -482,6 +483,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                             Box::new(EditSectionShape {
                                 section: sid,
                                 new_shape: shape.clone(),
+                                frame_use: draft.frame_use,
                             }),
                         );
                         app.core.scoped.staleness.mark_edited();
@@ -494,8 +496,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                             "符号を入力してください".to_string()
                         } else {
                             format!("符号＋階「{key_label}」の断面が既にあります")
-                });
-                app.core.model.sections[predicted_id.index()].frame_use = Some(draft.frame_use);
+                        });
                     } else if rename_resp
                         .on_hover_text(format!(
                             "選択中の断面 {name} の符号・階をフォームの内容（{key_label}）へ変更します"
@@ -1136,6 +1137,7 @@ mod tests {
             Box::new(EditSectionShape {
                 section: sid,
                 new_shape,
+                frame_use: new_draft.frame_use,
             }),
         );
 

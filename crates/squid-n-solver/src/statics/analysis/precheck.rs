@@ -265,7 +265,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             .iter()
             .filter(|e| e.kind.requires_section_and_material())
         {
-            let Some(shape) = model.element_section(e).and_then(|s| s.shape.as_ref()) else {
+            let Some(section) = model.element_section(e) else {
                 continue;
             };
             let (Some(n0), Some(n1)) = (e.nodes.first(), e.nodes.get(1)) else {
@@ -276,15 +276,11 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 continue;
             };
             let vertical = squid_n_core::geom::is_vertical_axis(n0.coord, n1.coord);
-            match shape {
-                SectionShape::RcBeamRect { .. } | SectionShape::SrcBeamRect { .. } if vertical => {
+            match section.frame_use {
+                Some(squid_n_core::model::FrameSectionUse::Beam) if vertical => {
                     beam_shape_on_column.push(e.id)
                 }
-                SectionShape::RcColumnRect { .. }
-                | SectionShape::RcColumnCircle { .. }
-                | SectionShape::SrcColumnRect { .. }
-                    if !vertical =>
-                {
+                Some(squid_n_core::model::FrameSectionUse::Column) if !vertical => {
                     column_shape_on_beam.push(e.id)
                 }
                 _ => {}

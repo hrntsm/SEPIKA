@@ -2,10 +2,36 @@ use super::*;
 use squid_n_core::dof::Dof6Mask;
 use squid_n_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, StoryId};
 use squid_n_core::model::{
-    ElementData, ElementKind, EndCondition, ForceRegime, JointKind, LoadCase, LocalAxis, Material,
-    MaterialCategory, MemberDetailAttr, MemberJoint, MemberLoad, MemberLoadKind, Model, NodalLoad,
-    Node, Section,
+    ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, JointKind, LoadCase,
+    LocalAxis, Material, MaterialCategory, MemberDetailAttr, MemberJoint, MemberLoad,
+    MemberLoadKind, Model, NodalLoad, Node, Section,
 };
+
+#[test]
+fn no_long_axial_column_targets_fiber_and_multispring_by_section_use() {
+    let mut model = Model::default();
+    let mut section = Section::zero(SectionId(0), "C1".into());
+    section.frame_use = Some(FrameSectionUse::Column);
+    model.sections.push(section);
+    model.stress_cfg.no_long_axial_column = true;
+    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+        let elem = ElementData {
+            id: ElemId(0),
+            kind,
+            nodes: smallvec::smallvec![],
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 1.0, 0.0],
+            },
+            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        };
+        assert!(is_axial_disabled_target(&elem, &model, &model.stress_cfg));
+    }
+}
 
 /// 単純梁（i:ピン, j:ローラ）に等分布荷重 → 中央曲げ wL²/8、端部 0 を検証。
 /// 曲げは静定なので EI に依らず厳密。組立（等価節点力）＋回復（重ね合わせ）の総合検証。

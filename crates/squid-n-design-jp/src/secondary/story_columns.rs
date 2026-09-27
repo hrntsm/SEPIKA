@@ -5,7 +5,7 @@
 use squid_n_core::geom::is_vertical_axis;
 use squid_n_core::ids::{ElemId, NodeId, StoryId};
 use squid_n_core::model::DIAPHRAGM_LEVEL_TOL_MM;
-use squid_n_core::model::{ElementKind, Model};
+use squid_n_core::model::{ElementKind, FrameSectionUse, Model};
 use std::collections::{HashMap, HashSet};
 
 /// 層に帰属する 1 本の柱（中間節点で分割された鉛直材の連なりを束ねたもの）。
@@ -68,6 +68,12 @@ fn vertical_beam_adjacency(model: &Model) -> HashMap<NodeId, Vec<(NodeId, ElemId
     let mut adj: HashMap<NodeId, Vec<(NodeId, ElemId)>> = HashMap::new();
     for elem in &model.elements {
         if elem.kind != ElementKind::Beam || elem.nodes.len() != 2 {
+            continue;
+        }
+        let Some(section) = model.element_section(elem) else {
+            continue;
+        };
+        if section.frame_use != Some(FrameSectionUse::Column) {
             continue;
         }
         let n0_id = elem.nodes[0];

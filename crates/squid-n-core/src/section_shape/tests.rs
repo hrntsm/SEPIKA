@@ -18,12 +18,9 @@ fn rc_beam_shape_has_section_properties() {
         },
     };
     assert_eq!(shape.calc_area(), 150_000.0);
-    assert!(
-        shape
-            .to_section(crate::ids::SectionId(0), "RCB".into())
-            .area
-            > 0.0
-    );
+    let section = shape.to_section(crate::ids::SectionId(0), "RCB".into());
+    assert!(section.area > 0.0);
+    assert_eq!(section.frame_use, None);
 }
 
 #[test]

@@ -1772,6 +1772,7 @@ mod tests {
         Section {
             id: SectionId(1),
             name: "BOX-300x200x9".into(),
+            frame_use: None,
             area: 1.0,
             iy: 1.0,
             iz: 1.0,
@@ -1877,6 +1878,7 @@ mod tests {
         let sec = Section {
             id: SectionId(2),
             name: "C-200x80x7.5x11".into(),
+            frame_use: None,
             area: 1.0,
             iy: 1.0,
             iz: 1.0,
@@ -1960,6 +1962,7 @@ mod tests {
         let section = Section {
             id: SectionId(0),
             name: "sec".into(),
+            frame_use: None,
             floor: None,
             area: 8000.0,
             iy: 1.0e8,

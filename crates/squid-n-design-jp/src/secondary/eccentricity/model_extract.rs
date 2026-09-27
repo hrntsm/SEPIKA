@@ -7,7 +7,7 @@
 //! - [`story_eccentricity`] — 当該層の偏心率（雑壁寄与込み）。
 
 use squid_n_core::ids::StoryId;
-use squid_n_core::model::{ElementKind, Model};
+use squid_n_core::model::{ElementKind, FrameSectionUse, Model};
 use squid_n_element::transform::LocalFrame;
 
 use super::core::{center_of_rigidity, d_value, eccentricity, ColumnStiffness, Eccentricity};
@@ -98,6 +98,12 @@ pub fn column_stiffnesses(model: &Model, story: StoryId) -> Vec<ColumnStiffness>
                     continue;
                 }
                 if other.kind != ElementKind::Beam || other.nodes.len() != 2 {
+                    continue;
+                }
+                let Some(other_section) = model.element_section(other) else {
+                    continue;
+                };
+                if other_section.frame_use != Some(FrameSectionUse::Beam) {
                     continue;
                 }
                 let has_top = other.nodes.contains(&n_top.id);

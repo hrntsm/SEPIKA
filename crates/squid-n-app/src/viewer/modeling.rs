@@ -1435,6 +1435,7 @@ mod tests {
         squid_n_core::model::Section {
             id: SectionId(id),
             name: String::new(),
+            frame_use: None,
             area: 1.0e4,
             iy: 1.0e8,
             iz: 1.0e8,
