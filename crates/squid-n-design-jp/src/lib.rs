@@ -47,16 +47,15 @@ pub use steel::SteelDesign;
 
 use squid_n_core::model::{Material, Section, SteelDesignAttr};
 
-/// 鋼梁の許容曲げ応力度 fb の算定式（旧基準 1973 / 新基準 AIJ-ASD19）。
+/// 鋼材の許容曲げ応力度 fb の算定基準。
 ///
-/// - `Old`: 鋼構造設計規準 1973（`steel_fb_h`）。既定値。
-/// - `New`: AIJ 鋼構造許容応力度設計規準 2019（`steel_fb_h_new` 相当。
-///   限界細長比 λb による全塑性・非弾性・弾性の 3 領域式）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum SteelFbRule {
+/// - `Standard1973`: 鋼構造設計規準 1973 年版。
+/// - `Asd2019`: 鋼構造許容応力度設計規準 2019 年版。既定値。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum SteelFbBasis {
     #[default]
-    Old,
-    New,
+    Asd2019,
+    Standard1973,
 }
 
 /// RC 梁付着検定の方式。
@@ -384,8 +383,8 @@ pub struct DesignCtx {
     /// S 造部材の断面検定属性（継手・スカラップ欠損率、横座屈長さ入力）。
     /// `Model::steel_design_attrs` 由来。None は欠損なし・lb 自動。
     pub steel_attr: Option<SteelDesignAttr>,
-    /// 鋼梁の許容曲げ応力度 fb の算定式（旧基準 / 新基準）。既定は `Old`。
-    pub steel_fb_rule: SteelFbRule,
+    /// 鋼材の許容曲げ応力度 fb の算定基準。既定は `Asd2019`。
+    pub steel_fb_basis: SteelFbBasis,
 }
 
 impl Default for DesignCtx {
@@ -411,7 +410,7 @@ impl Default for DesignCtx {
             column_sum_my: None,
             beam_has_slab: false,
             steel_attr: None,
-            steel_fb_rule: SteelFbRule::default(),
+            steel_fb_basis: SteelFbBasis::default(),
         }
     }
 }

@@ -198,13 +198,13 @@ pub(crate) fn steel_c_factor(ctx: &DesignCtx, lb_is_partial: bool) -> f64 {
     steel_lateral_buckling_c(ctx)
 }
 
-/// H 形鋼強軸の許容曲げ応力度 fb [N/mm²]（新基準）。
+/// H 形鋼強軸の許容曲げ応力度 fb [N/mm²]（鋼構造許容応力度設計規準 2019 年版）。
 /// 降伏モーメント My と弾性横座屈モーメント Me から求めた限界細長比
 /// λb により、全塑性域・非弾性域・弾性域の 3 領域で式を切り替える。
 /// 上限は長期 F/1.5（短期は 1.5 倍・上限 F）。`lb ≤ 0` の場合は
 /// 横座屈を考慮しない `fb = ft` を返す。
 #[allow(clippy::too_many_arguments)]
-pub fn steel_fb_h_new(
+pub fn steel_fb_h_asd2019(
     f: f64,
     term: LoadTerm,
     lb: f64,
@@ -229,7 +229,7 @@ pub fn steel_fb_h_new(
     let me = (c * me_sq.max(0.0).sqrt()).max(1e-9);
 
     let lambda_b = (my / me).max(0.0).sqrt();
-    let e_lambda_b = 1.0 / 0.6_f64.sqrt();
+    let e_lambda_b = 1.29;
     let nu = 1.5 + (2.0 / 3.0) * (lambda_b / e_lambda_b).powi(2);
 
     let fb_long = if lambda_b <= p_lambda_b {
@@ -249,7 +249,7 @@ pub fn steel_fb_h_new(
     }
 }
 
-/// 塑性限界細長比 pλb（新基準・AIJ 鋼構造許容応力度設計規準 2019）。
+/// 塑性限界細長比 pλb（鋼構造許容応力度設計規準 2019 年版）。
 ///
 /// `pλb = 0.6 + 0.3・(M2/M1)`。`M2/M1` の符号規約は [`steel_lateral_buckling_c`]
 /// と同じ（`M1`: 座屈区間端部モーメントの絶対値が大きい方、`M2`: 小さい方。
@@ -257,16 +257,21 @@ pub fn steel_fb_h_new(
 ///
 /// - 座屈区間中央部（[`DesignCtx::mid_moment_z`]）の絶対値が両端部より
 ///   大きい場合は、区間内の最大曲げが端部にないため安全側の `pλb=0.3` とする。
+/// - `lb_is_partial=true`（横補剛により座屈区間が部材の部分区間）の場合は
+///   `pλb=0.3` とする。
 /// - [`DesignCtx::end_moments_z`] が `None` の場合も同様に安全側の `pλb=0.3`。
 /// - `M1≈0`（両端とも曲げがほぼない）のときは `M2/M1=0` 扱いで `pλb=0.6`。
-pub(crate) fn steel_p_lambda_b(ctx: &DesignCtx) -> f64 {
+pub(crate) fn steel_p_lambda_b(ctx: &DesignCtx, lb_is_partial: bool) -> f64 {
+    if lb_is_partial {
+        return 0.3;
+    }
     let Some(m2_over_m1) = end_moment_ratio_m2_m1(ctx) else {
         return 0.3;
     };
     0.6 + 0.3 * m2_over_m1
 }
 
-/// 曲げねじり定数 Iw [mm⁶]（新基準 fb 用。beam.rs・column.rs で共用）。
+/// 曲げねじり定数 Iw [mm⁶]（2019 年版 fb 用。beam.rs・column.rs で共用）。
 ///
 /// - `SteelBuiltH`（非対称組立 H）: 上下フランジの寸法から個別に
 ///   `I_u=t_u・b_u³/12`、`I_l=t_l・b_l³/12` を求め、`hf=H−(t_u+t_l)/2`
@@ -434,6 +439,106 @@ mod tests {
         let i = steel_i_t(200.0, 20.0, 100.0, 10.0);
         let expected = 200.0 / 12.0_f64.sqrt();
         assert!((i - expected).abs() < 1e-9, "i={} expected={}", i, expected);
+    }
+
+    #[test]
+    fn test_asd2019_e_lambda_b_and_short_term_factor() {
+        let f = 235.0;
+        let long = steel_fb_h_asd2019(
+            f,
+            LoadTerm::Long,
+            20_000.0,
+            1.0e7,
+            1.0e12,
+            1.0e5,
+            205_000.0,
+            79_000.0,
+            1.0e6,
+            1.0,
+            0.3,
+        );
+        let short = steel_fb_h_asd2019(
+            f,
+            LoadTerm::Short,
+            20_000.0,
+            1.0e7,
+            1.0e12,
+            1.0e5,
+            205_000.0,
+            79_000.0,
+            1.0e6,
+            1.0,
+            0.3,
+        );
+        assert!((short - (long * 1.5).min(f)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_asd2019_fixed_values_cover_elastic_inelastic_and_caps() {
+        let f = 235.0;
+        let iz = 1.0e7;
+        let iw = 1.0e12;
+        let j = 1.0e5;
+        let e = 205_000.0;
+        let g = 79_000.0;
+        let z = 1.0e6;
+        let c = 1.0;
+        let p_lambda_b = 0.3;
+        let my = f * z;
+        let pi = std::f64::consts::PI;
+
+        let me_elastic = (pi.powi(4) * e * iz * e * iw / 20_000.0_f64.powi(4)
+            + pi.powi(2) * e * iz * g * j / 20_000.0_f64.powi(2))
+        .sqrt();
+        let lambda_elastic = (my / me_elastic).sqrt();
+        let nu_elastic = 1.5 + (2.0 / 3.0) * (lambda_elastic / 1.29).powi(2);
+        assert!((me_elastic - 25_601_692.792823333).abs() < 1e-6);
+        assert!((lambda_elastic - 3.0296997435179636).abs() < 1e-12);
+        assert!((nu_elastic - 5.177295249032635).abs() < 1e-12);
+        let fb_elastic = steel_fb_h_asd2019(
+            f,
+            LoadTerm::Long,
+            20_000.0,
+            iz,
+            iw,
+            j,
+            e,
+            g,
+            z,
+            c,
+            p_lambda_b,
+        );
+        assert!((fb_elastic - 11.798015111900156).abs() < 1e-12);
+
+        let me_inelastic = (pi.powi(4) * e * iz * e * iw / 5_000.0_f64.powi(4)
+            + pi.powi(2) * e * iz * g * j / 5_000.0_f64.powi(2))
+        .sqrt();
+        let lambda_inelastic = (my / me_inelastic).sqrt();
+        let nu_inelastic = 1.5 + (2.0 / 3.0) * (lambda_inelastic / 1.29).powi(2);
+        assert!((me_inelastic - 268_125_721.52311108).abs() < 1e-6);
+        assert!((lambda_inelastic - 0.9361914963947816).abs() < 1e-12);
+        assert!((nu_inelastic - 1.8511225358740062).abs() < 1e-12);
+        let fb_inelastic = steel_fb_h_asd2019(
+            f,
+            LoadTerm::Long,
+            5_000.0,
+            iz,
+            iw,
+            j,
+            e,
+            g,
+            z,
+            c,
+            p_lambda_b,
+        );
+        assert!((fb_inelastic - 94.31787217895743).abs() < 1e-12);
+
+        let fb_cap_long =
+            steel_fb_h_asd2019(f, LoadTerm::Long, 0.0, iz, iw, j, e, g, z, c, p_lambda_b);
+        let fb_cap_short =
+            steel_fb_h_asd2019(f, LoadTerm::Short, 0.0, iz, iw, j, e, g, z, c, p_lambda_b);
+        assert!((fb_cap_long - 156.66666666666666).abs() < 1e-9);
+        assert!((fb_cap_short - 235.0).abs() < 1e-9);
     }
 
     // -------------------------------------------------------------

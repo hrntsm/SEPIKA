@@ -22,7 +22,7 @@ mod column;
 pub mod panel_zone;
 mod section;
 
-pub use section::{resolve_lb, steel_fb_h, steel_fb_h_new, steel_h_z_with_loss, steel_i_t};
+pub use section::{resolve_lb, steel_fb_h, steel_fb_h_asd2019, steel_h_z_with_loss, steel_i_t};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShapeCategory {

@@ -23,7 +23,7 @@ use squid_n_element::frame::beam::MemberForces;
 use crate::design_position::{design_positions, is_near_design_position};
 use crate::{
     beam_has_attached_slab, checker_for, BondMethod, CheckOutcome, DesignCheck, DesignCtx,
-    LoadTerm, MemberForcesAt, MemberKind, QdMethod, SeismicQd,
+    LoadTerm, MemberForcesAt, MemberKind, QdMethod, SeismicQd, SteelFbBasis,
 };
 
 /// 一本部材グループ合成値（断面検定の採用応力上書き用）。
@@ -61,6 +61,8 @@ pub struct MemberDesignCheckOptions<'a> {
     pub q_simple_by_elem: Option<&'a HashMap<ElemId, f64>>,
     /// 一本部材グループの検定文脈上書き（梁のみ適用）。None なら部材単体の値を用いる。
     pub beam_group_overrides: Option<&'a HashMap<ElemId, BeamGroupContextOverride>>,
+    /// 鋼材の許容曲げ応力度 fb の算定基準（既定は Asd2019）。
+    pub steel_fb_basis: SteelFbBasis,
 }
 
 /// 部材断面検定オーケストレーションの結果。
@@ -243,7 +245,7 @@ pub fn run_member_design_checks(
             column_sum_my,
             beam_has_slab: kind == MemberKind::Beam && beam_has_attached_slab(model, elem),
             steel_attr,
-            steel_fb_rule: Default::default(),
+            steel_fb_basis: options.steel_fb_basis,
         };
 
         let checker: Box<dyn DesignCheck> = checker_for(

@@ -11,12 +11,12 @@
 use crate::material_strength::{steel_fc, steel_fs, steel_ft};
 use crate::{
     effective_slenderness, CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm,
-    MemberForcesAt, SteelFbRule,
+    MemberForcesAt, SteelFbBasis,
 };
 use squid_n_core::model::{Material, Section};
 
 use super::section::{
-    resolve_lb, steel_c_factor, steel_fb_h, steel_fb_h_new, steel_h_z_with_loss,
+    resolve_lb, steel_c_factor, steel_fb_h, steel_fb_h_asd2019, steel_h_z_with_loss,
     steel_lateral_buckling_i_af, steel_p_lambda_b, steel_warping_constant,
 };
 use super::{nonzero, safe_denom, section_modulus, shape_of, shear_area_2d, ShapeCategory};
@@ -80,20 +80,21 @@ pub(crate) fn check_beam(
                     .map(|a| resolve_lb(forces.pos, ctx.length, a.lb_direct, a.lateral_brace_count))
                     .unwrap_or(ctx.length)
             });
-            let c = steel_c_factor(ctx, lb < ctx.length - 1e-9);
-            match ctx.steel_fb_rule {
-                SteelFbRule::Old => {
+            let lb_is_partial = lb < ctx.length - 1e-9;
+            let c = steel_c_factor(ctx, lb_is_partial);
+            match ctx.steel_fb_basis {
+                SteelFbBasis::Standard1973 => {
                     let (i_t, af) = steel_lateral_buckling_i_af(sec, tf, tw);
                     steel_fb_h(f, term, lb, i_t, h, af, c)
                 }
-                SteelFbRule::New => {
+                SteelFbBasis::Asd2019 => {
                     let iz = sec.iz;
                     let iw = steel_warping_constant(sec, tf);
                     let j = sec.j;
                     let e = mat.young;
                     let g = mat.shear.unwrap_or(e / (2.0 * (1.0 + mat.poisson)));
-                    let p_lambda_b = steel_p_lambda_b(ctx);
-                    steel_fb_h_new(f, term, lb, iz, iw, j, e, g, z_strong, c, p_lambda_b)
+                    let p_lambda_b = steel_p_lambda_b(ctx, lb_is_partial);
+                    steel_fb_h_asd2019(f, term, lb, iz, iw, j, e, g, z_strong, c, p_lambda_b)
                 }
             }
         }
@@ -155,13 +156,13 @@ pub(crate) fn check_beam(
         LoadTerm::Long => "長期",
         LoadTerm::Short => "短期",
     };
-    let fb_rule_label = match ctx.steel_fb_rule {
-        SteelFbRule::Old => "旧基準",
-        SteelFbRule::New => "新基準",
+    let fb_basis_label = match ctx.steel_fb_basis {
+        SteelFbBasis::Standard1973 => "鋼構造設計規準1973年版",
+        SteelFbBasis::Asd2019 => "鋼構造許容応力度設計規準2019年版",
     };
     let basis = format!(
-        "鋼構造設計規準 {} 梁: 軸力+二軸曲げ・せん断・von Mises ({}, fb={})",
-        term_label, axial_basis, fb_rule_label
+        "鋼構造 梁: 軸力+二軸曲げ・せん断・von Mises ({}, {}, fb={})",
+        term_label, axial_basis, fb_basis_label
     );
     let bending_detail = format!(
         "σax={:.4} N/mm², σby={:.4} N/mm², σbz={:.4} N/mm², fc={:.4} N/mm², fb={:.4} N/mm², \
@@ -450,6 +451,7 @@ mod tests {
             kind: MemberKind::Beam,
             length: 6000.0,
             end_moments_z: Some((1.0, -1.0)),
+            steel_fb_basis: SteelFbBasis::Standard1973,
             ..Default::default()
         };
         let auto = SteelDesign
@@ -461,6 +463,7 @@ mod tests {
             kind: MemberKind::Beam,
             length: 6000.0,
             end_moments_z: Some((1.0, -1.0)),
+            steel_fb_basis: SteelFbBasis::Standard1973,
             steel_attr: Some(SteelDesignAttr {
                 elem: ElemId(0),
                 joint_flange_loss: 0.0,
@@ -518,6 +521,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Beam,
             length: 6000.0,
+            steel_fb_basis: SteelFbBasis::Standard1973,
             steel_attr: Some(SteelDesignAttr {
                 elem: ElemId(0),
                 joint_flange_loss: 0.0,
@@ -548,6 +552,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Beam,
             length: 6000.0,
+            steel_fb_basis: SteelFbBasis::Standard1973,
             steel_attr: Some(SteelDesignAttr {
                 elem: ElemId(0),
                 joint_flange_loss: 0.0,
@@ -593,6 +598,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Beam,
             length: 6000.0,
+            steel_fb_basis: SteelFbBasis::Standard1973,
             steel_attr: Some(SteelDesignAttr {
                 elem: ElemId(0),
                 joint_flange_loss: 0.0,
@@ -693,7 +699,7 @@ mod tests {
             .check(&forces, &sec, &mat_v, &ctx)
             .unwrap_checked();
         // 名前推定フォールバックは tf=tw=15 の単一板厚近似のため
-        // Ay=tw・(H−2tf)=15・(300−30)=4050（新式・H形）。
+        // Ay=tw・(H−2tf)=15・(300−30)=4050（H形）。
         let ay = 15.0 * (300.0 - 2.0 * 15.0);
         let tau = 200_000.0 / ay;
         let fs = 235.0 / (1.5 * 3.0_f64.sqrt());
@@ -793,6 +799,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Beam,
             length: 4000.0,
+            steel_fb_basis: SteelFbBasis::Standard1973,
             ..Default::default()
         };
         let result = SteelDesign
@@ -1036,11 +1043,11 @@ mod tests {
         );
     }
 
-    // 新基準 fb（AIJ-ASD19）
+    // AIJ-ASD19 fb（テスト区分）
 
-    /// steel_fb_rule 未指定（既定 Old）では steel_fb_h と一致する。
+    /// steel_fb_basis 未指定（既定 Asd2019）では AIJ-ASD19 の式を用いる。
     #[test]
-    fn test_beam_check_fb_rule_default_matches_old() {
+    fn test_beam_check_fb_basis_default_matches_asd2019() {
         let sec = h_section(400.0, 200.0, 8.0, 13.0);
         let mat_v = mat("SN400B");
         let forces = MemberForcesAt {
@@ -1057,14 +1064,28 @@ mod tests {
             length: 6000.0,
             ..Default::default()
         };
-        assert_eq!(ctx.steel_fb_rule, SteelFbRule::Old);
+        assert_eq!(ctx.steel_fb_basis, SteelFbBasis::Asd2019);
         let result = SteelDesign
             .check(&forces, &sec, &mat_v, &ctx)
             .unwrap_checked();
 
         let f = 235.0;
-        let (i_t, af) = steel_lateral_buckling_i_af(&sec, 13.0, 8.0);
-        let fb_expected = steel_fb_h(f, LoadTerm::Long, 6000.0, i_t, 400.0, af, 1.0);
+        let iz = sec.iz;
+        let iw = steel_warping_constant(&sec, 13.0);
+        let g = mat_v.young / (2.0 * (1.0 + mat_v.poisson));
+        let fb_expected = steel_fb_h_asd2019(
+            f,
+            LoadTerm::Long,
+            6000.0,
+            iz,
+            iw,
+            sec.j,
+            mat_v.young,
+            g,
+            sec.iy / (sec.depth / 2.0),
+            1.0,
+            steel_p_lambda_b(&ctx, false),
+        );
         assert!(
             crate::full_detail(&result).contains(&format!("fb={:.4}", fb_expected)),
             "detail={}",
@@ -1072,9 +1093,34 @@ mod tests {
         );
     }
 
-    /// 新基準 fb: λb ≤ pλb（横座屈長さが短い）では fb=F/ν（全塑性域）。
     #[test]
-    fn test_beam_check_fb_rule_new_plastic_region() {
+    fn test_beam_check_standard1973_basis_uses_1973_formula() {
+        let sec = h_section(400.0, 200.0, 8.0, 13.0);
+        let mat_v = mat("SN400B");
+        let forces = MemberForcesAt {
+            pos: 0.5,
+            n: 0.0,
+            qy: 0.0,
+            qz: 0.0,
+            my: 0.0,
+            mz: 5e7,
+        };
+        let ctx = DesignCtx {
+            length: 6000.0,
+            steel_fb_basis: SteelFbBasis::Standard1973,
+            ..Default::default()
+        };
+        let result = SteelDesign
+            .check(&forces, &sec, &mat_v, &ctx)
+            .unwrap_checked();
+        let (i_t, af) = steel_lateral_buckling_i_af(&sec, 13.0, 8.0);
+        let expected = steel_fb_h(235.0, LoadTerm::Long, 6000.0, i_t, 400.0, af, 1.0);
+        assert!(crate::full_detail(&result).contains(&format!("fb={expected:.4}")));
+    }
+
+    /// AIJ-ASD19 fb: λb ≤ pλb（横座屈長さが短い）では fb=F/ν（全塑性域）。
+    #[test]
+    fn test_beam_check_fb_basis_asd2019_plastic_region() {
         let sec = h_section(400.0, 200.0, 8.0, 13.0);
         let mat_v = mat("SN400B");
         let forces = MemberForcesAt {
@@ -1089,7 +1135,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Beam,
             length: 300.0, // 十分短い横座屈長さ→全塑性域
-            steel_fb_rule: SteelFbRule::New,
+            steel_fb_basis: SteelFbBasis::Asd2019,
             ..Default::default()
         };
         let result = SteelDesign
@@ -1101,7 +1147,7 @@ mod tests {
         let iw = steel_warping_constant(&sec, 13.0);
         let e = mat_v.young;
         let g = e / (2.0 * (1.0 + mat_v.poisson));
-        let p_lambda_b = steel_p_lambda_b(&ctx);
+        let p_lambda_b = steel_p_lambda_b(&ctx, false);
         let lb = 300.0_f64;
 
         // My, Me, λb を独立に計算し、λb ≤ pλb（全塑性域）であることを確認したうえで
@@ -1119,11 +1165,11 @@ mod tests {
             lambda_b,
             p_lambda_b
         );
-        let e_lambda_b = 1.0 / 0.6_f64.sqrt();
+        let e_lambda_b = 1.29;
         let nu = 1.5 + (2.0 / 3.0) * (lambda_b / e_lambda_b).powi(2);
         let expected = f / nu;
 
-        let fb_expected = steel_fb_h_new(
+        let fb_expected = steel_fb_h_asd2019(
             f,
             LoadTerm::Long,
             lb,
@@ -1149,9 +1195,70 @@ mod tests {
         );
     }
 
-    /// 新基準 fb: eλb < λb（横座屈長さが長い）では弾性域式 fb=F/(2.17λb²)。
+    /// 梁の Asd2019 経路でも、部分補剛区間の pλb=0.3 を fb に反映する。
     #[test]
-    fn test_beam_check_fb_rule_new_elastic_region() {
+    fn test_beam_check_fb_basis_asd2019_partial_lb_uses_p_lambda_b_0_3() {
+        use squid_n_core::ids::ElemId;
+        use squid_n_core::model::SteelDesignAttr;
+
+        let sec = h_section(400.0, 200.0, 8.0, 13.0);
+        let mat_v = mat("SN400B");
+        let forces = MemberForcesAt {
+            pos: 0.5,
+            n: 0.0,
+            qy: 0.0,
+            qz: 0.0,
+            my: 0.0,
+            mz: 5e7,
+        };
+        let ctx = DesignCtx {
+            term: LoadTerm::Long,
+            kind: MemberKind::Beam,
+            length: 6000.0,
+            end_moments_z: Some((100.0, -100.0)),
+            steel_attr: Some(SteelDesignAttr {
+                elem: ElemId(0),
+                joint_flange_loss: 0.0,
+                joint_web_loss: 0.0,
+                scallop_web_loss: 0.0,
+                lb_direct: None,
+                lateral_brace_count: Some(1),
+                lk_y_direct: None,
+                lk_z_direct: None,
+                c_direct: None,
+            }),
+            steel_fb_basis: SteelFbBasis::Asd2019,
+            ..Default::default()
+        };
+        let result = SteelDesign
+            .check(&forces, &sec, &mat_v, &ctx)
+            .unwrap_checked();
+        let iw = steel_warping_constant(&sec, 13.0);
+        let e = mat_v.young;
+        let g = e / (2.0 * (1.0 + mat_v.poisson));
+        let fb_expected = steel_fb_h_asd2019(
+            235.0,
+            LoadTerm::Long,
+            3000.0,
+            sec.iz,
+            iw,
+            sec.j,
+            e,
+            g,
+            sec.iy / (sec.depth / 2.0),
+            1.0,
+            0.3,
+        );
+        assert!(
+            crate::full_detail(&result).contains(&format!("fb={fb_expected:.4}")),
+            "detail={}",
+            crate::full_detail(&result)
+        );
+    }
+
+    /// AIJ-ASD19 fb: eλb < λb（横座屈長さが長い）では弾性域式 fb=F/(2.17λb²)。
+    #[test]
+    fn test_beam_check_fb_basis_asd2019_elastic_region() {
         let f = 235.0;
         let sec = h_section(400.0, 200.0, 8.0, 13.0);
         let mat_v = mat("SN400B");
@@ -1162,12 +1269,12 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Beam,
             length: 20_000.0, // 十分長い横座屈長さ→弾性域
-            steel_fb_rule: SteelFbRule::New,
+            steel_fb_basis: SteelFbBasis::Asd2019,
             ..Default::default()
         };
-        let p_lambda_b = steel_p_lambda_b(&ctx);
+        let p_lambda_b = steel_p_lambda_b(&ctx, false);
         let lb = 20_000.0;
-        let fb = steel_fb_h_new(
+        let fb = steel_fb_h_asd2019(
             f,
             LoadTerm::Long,
             lb,
@@ -1189,7 +1296,7 @@ mod tests {
             + pi2 * e * sec.iz * g * sec.j / lb.powi(2))
         .sqrt();
         let lambda_b = (my / me).sqrt();
-        let e_lambda_b = 1.0 / 0.6_f64.sqrt();
+        let e_lambda_b = 1.29;
         assert!(lambda_b > e_lambda_b, "lambda_b={} 弾性域前提", lambda_b);
         let expected = f / (2.17 * lambda_b * lambda_b);
         assert!(
@@ -1200,12 +1307,12 @@ mod tests {
         );
     }
 
-    /// 新基準 fb: lb=0 では横座屈を考慮しない fb=ft。
+    /// AIJ-ASD19 fb: lb=0 では横座屈を考慮しない fb=ft。
     #[test]
-    fn test_beam_check_fb_rule_new_lb_zero_equals_ft() {
+    fn test_beam_check_fb_basis_asd2019_lb_zero_equals_ft() {
         let f = 235.0;
         let z_strong = 1.0e6;
-        let fb = steel_fb_h_new(
+        let fb = steel_fb_h_asd2019(
             f,
             LoadTerm::Long,
             0.0,
@@ -1232,7 +1339,7 @@ mod tests {
             mid_moment_z: Some(200.0),
             ..Default::default()
         };
-        let p = steel_p_lambda_b(&ctx);
+        let p = steel_p_lambda_b(&ctx, false);
         assert!((p - 0.3).abs() < 1e-9, "p={}", p);
     }
 
@@ -1243,7 +1350,7 @@ mod tests {
             end_moments_z: Some((100.0, 100.0)),
             ..Default::default()
         };
-        let p = steel_p_lambda_b(&ctx);
+        let p = steel_p_lambda_b(&ctx, false);
         assert!((p - 0.3).abs() < 1e-9, "p={}", p);
     }
 
@@ -1254,7 +1361,7 @@ mod tests {
             end_moments_z: Some((100.0, -100.0)),
             ..Default::default()
         };
-        let p = steel_p_lambda_b(&ctx);
+        let p = steel_p_lambda_b(&ctx, false);
         assert!((p - 0.9).abs() < 1e-9, "p={}", p);
     }
 
@@ -1265,8 +1372,22 @@ mod tests {
             end_moments_z: None,
             ..Default::default()
         };
-        let p = steel_p_lambda_b(&ctx);
+        let p = steel_p_lambda_b(&ctx, false);
         assert!((p - 0.3).abs() < 1e-9, "p={}", p);
+    }
+
+    /// 部分補剛区間では、全長区間と同じ端部モーメントを与えても pλb=0.3 とする。
+    #[test]
+    fn test_p_lambda_b_partial_lb_is_0_3_independent_of_end_moments() {
+        let ctx = DesignCtx {
+            end_moments_z: Some((100.0, -50.0)),
+            ..Default::default()
+        };
+        let full = steel_p_lambda_b(&ctx, false);
+        let partial = steel_p_lambda_b(&ctx, true);
+        assert!((full - 0.75).abs() < 1e-9, "full={}", full);
+        assert!((partial - 0.3).abs() < 1e-9, "partial={}", partial);
+        assert_eq!(steel_c_factor(&ctx, true), 1.0);
     }
 
     // 大梁必要横補剛数

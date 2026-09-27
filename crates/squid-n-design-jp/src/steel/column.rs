@@ -4,12 +4,13 @@
 use crate::material_strength::{steel_fc, steel_fs, steel_ft};
 use crate::{
     effective_slenderness, CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm,
-    MemberForcesAt, SteelFbRule,
+    MemberForcesAt, SteelFbBasis,
 };
 use squid_n_core::model::{Material, Section};
 
 use super::section::{
-    steel_c_factor, steel_fb_h, steel_fb_h_new, steel_i_t, steel_p_lambda_b, steel_warping_constant,
+    steel_c_factor, steel_fb_h, steel_fb_h_asd2019, steel_i_t, steel_p_lambda_b,
+    steel_warping_constant,
 };
 use super::{nonzero, safe_denom, section_modulus, shape_of, shear_area_2d, ShapeCategory};
 
@@ -49,20 +50,20 @@ pub(crate) fn check_column(
 
     let c = steel_c_factor(ctx, false);
     let fb_strong = match shape {
-        ShapeCategory::H => match ctx.steel_fb_rule {
-            SteelFbRule::Old => {
+        ShapeCategory::H => match ctx.steel_fb_basis {
+            SteelFbBasis::Standard1973 => {
                 let af = b * tf;
                 let i_t = steel_i_t(b, tf, h, tw);
                 steel_fb_h(f, term, ctx.length, i_t, h, af, c)
             }
-            SteelFbRule::New => {
+            SteelFbBasis::Asd2019 => {
                 let iz = sec.iz;
                 let iw = steel_warping_constant(sec, tf);
                 let j = sec.j;
                 let e = mat.young;
                 let g = mat.shear.unwrap_or(e / (2.0 * (1.0 + mat.poisson)));
-                let p_lambda_b = steel_p_lambda_b(ctx);
-                steel_fb_h_new(
+                let p_lambda_b = steel_p_lambda_b(ctx, false);
+                steel_fb_h_asd2019(
                     f, term, ctx.length, iz, iw, j, e, g, z_strong, c, p_lambda_b,
                 )
             }
@@ -464,13 +465,11 @@ mod tests {
     }
 
     // -------------------------------------------------------------
-    // 新基準 fb（AIJ-ASD19）の柱への配線
     // -------------------------------------------------------------
 
-    /// steel_fb_rule 未指定（既定 Old）では steel_fb_h・
-    /// steel_i_t 直接利用と一致する（柱の Old 分岐は無変更）。
+    /// `Standard1973` を指定すると 1973 年版の式を用いる。
     #[test]
-    fn test_column_check_fb_rule_default_matches_old() {
+    fn test_column_check_standard1973_basis_matches_1973_formula() {
         let sec = h_section(400.0, 200.0, 8.0, 13.0);
         let mat_v = mat("SN400B");
         let forces = MemberForcesAt {
@@ -485,9 +484,9 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Column,
             length: 3500.0,
+            steel_fb_basis: SteelFbBasis::Standard1973,
             ..Default::default()
         };
-        assert_eq!(ctx.steel_fb_rule, SteelFbRule::Old);
         let result = SteelDesign
             .check(&forces, &sec, &mat_v, &ctx)
             .unwrap_checked();
@@ -504,11 +503,11 @@ mod tests {
         );
     }
 
-    /// 新基準 fb（`SteelFbRule::New`）: H形柱の fbX が `steel_fb_h_new` の
+    /// AIJ-ASD19 fb（`SteelFbBasis::Asd2019`）: H形柱の fbX がその式の
     /// 手計算と一致することを確認する（柱の階高 `ctx.length` を lb として
     /// 用いる）。
     #[test]
-    fn test_column_check_fb_rule_new_matches_hand_calc() {
+    fn test_column_check_fb_basis_asd2019_matches_hand_calc() {
         let sec = h_section(400.0, 200.0, 8.0, 13.0);
         let mat_v = mat("SN400B");
         let forces = MemberForcesAt {
@@ -523,7 +522,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Column,
             length: 3500.0,
-            steel_fb_rule: SteelFbRule::New,
+            steel_fb_basis: SteelFbBasis::Asd2019,
             ..Default::default()
         };
         let result = SteelDesign
@@ -535,9 +534,9 @@ mod tests {
         let iw = steel_warping_constant(&sec, 13.0);
         let e = mat_v.young;
         let g = e / (2.0 * (1.0 + mat_v.poisson));
-        let p_lambda_b = steel_p_lambda_b(&ctx);
+        let p_lambda_b = steel_p_lambda_b(&ctx, false);
         let c = steel_c_factor(&ctx, false);
-        let fb_expected = steel_fb_h_new(
+        let fb_expected = steel_fb_h_asd2019(
             f,
             LoadTerm::Long,
             3500.0,
