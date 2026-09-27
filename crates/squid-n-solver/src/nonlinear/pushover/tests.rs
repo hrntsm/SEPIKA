@@ -3520,7 +3520,7 @@ fn wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
                 category: MaterialCategory::Concrete,
                 young: 23000.0,
                 poisson: 0.2,
-                density: 0.0,
+                density: 2.4e-9,
                 shear: None,
                 fc: Some(24.0),
                 fy: None,

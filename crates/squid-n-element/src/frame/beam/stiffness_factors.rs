@@ -312,6 +312,18 @@ pub(super) fn validate_composite_material(
     {
         return Err("SRC/CFT 断面のコンクリート Fc が未設定または不正です".into());
     }
+    if matches!(
+        shape,
+        SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
+    ) && mat
+        .fc
+        .and_then(|fc| {
+            squid_n_core::section_shape::concrete_young_modulus_from_density(fc, mat.density)
+        })
+        .is_none()
+    {
+        return Err("SRC 断面のコンクリート密度またはγCが不正です".into());
+    }
     Ok(())
 }
 

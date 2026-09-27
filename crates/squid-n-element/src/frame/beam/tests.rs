@@ -187,6 +187,11 @@ fn test_beam_new_src_cft_composite_props() {
     )
     .unwrap();
     let p = src_shape.src_equivalent_props(ec, 0.2).unwrap();
+    assert!((src_beam.e - ec).abs() < 1e-9);
+    assert!((src_beam.g - ec / (2.0 * (1.0 + 0.2))).abs() < 1e-9);
+    assert!(
+        (src_beam.local_stiffness_raw().get(0, 0) - ec * src_beam.a / src_beam.length).abs() < 1e-6
+    );
     assert!((src_beam.a - p.area_ax).abs() < 1e-6);
     assert!((src_beam.iz - p.iy).abs() / p.iy < 1e-12);
     assert!((src_beam.j - p.j).abs() / p.j < 1e-12);
@@ -262,6 +267,19 @@ fn test_beam_new_src_cft_composite_props() {
         .err()
         .expect("不正な Fc は要素構築に失敗する");
     assert!(error.contains("Fc が未設定または不正"));
+
+    model.materials[0].fc = Some(24.0);
+    model.materials[0].density = 0.0;
+    let error = BeamElement::try_new(&make_elem(0), &model)
+        .err()
+        .expect("不正な密度は要素構築に失敗する");
+    assert!(error.contains("密度またはγCが不正"));
+
+    model.materials[0].density = f64::NAN;
+    let error = BeamElement::try_new(&make_elem(0), &model)
+        .err()
+        .expect("非有限な密度は要素構築に失敗する");
+    assert!(error.contains("密度またはγCが不正"));
 }
 
 /// スラブ協力幅による強軸剛性増大。

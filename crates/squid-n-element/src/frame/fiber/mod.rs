@@ -605,13 +605,13 @@ impl FiberBeam {
         let sec = data.section.and_then(|sid| model.sections.get(sid.index()));
         let mat_ref = model.element_material(data);
         let density = mat_ref.map(|m| m.density).unwrap_or(0.0);
-        let e = mat_ref.map(|m| m.young).unwrap_or(0.0);
-        let g = mat_ref.map(|m| m.shear_modulus()).unwrap_or(0.0);
         let width = sec.map(|s| s.width).unwrap_or(0.0);
         let depth = sec.map(|s| s.depth).unwrap_or(0.0);
         let torsion_j = sec.map(|s| s.j).unwrap_or(0.0);
 
         let beam_props = crate::frame::beam::BeamElement::try_new(data, model)?;
+        let e = beam_props.e;
+        let g = beam_props.g;
         let sec_iy = beam_props.iz;
         let sec_iz = beam_props.iy;
         let sec_as_y = beam_props.as_z;
