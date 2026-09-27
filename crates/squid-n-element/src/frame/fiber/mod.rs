@@ -44,7 +44,7 @@ pub(crate) fn steel_fiber_material(e: f64, fy: Option<f64>) -> Box<dyn UniaxialM
 /// 曲げバネ用履歴則の混入で panic する。
 pub(crate) fn concrete_fiber_material(
     fc: Option<f64>,
-    _young: f64,
+    young: f64,
     rule: HysteresisModel,
 ) -> Box<dyn UniaxialMaterial> {
     let Some(fc) = fc.filter(|fc| *fc > 0.0) else {
@@ -55,16 +55,31 @@ pub(crate) fn concrete_fiber_material(
     };
     match rule {
         HysteresisModel::KarsanJirsa => {
-            let ec = squid_n_material::newrc::NewRcEnvelope::new(fc).ec;
-            Box::new(squid_n_material::ConcreteCyclic::newrc(
-                fc,
-                0.01,
-                2.0,
-                ec / 10.0,
-            ))
+            if fc <= 60.0 {
+                Box::new(
+                    squid_n_material::ConcreteCyclic::newrc_with_initial_tangent(
+                        fc,
+                        0.01,
+                        2.0,
+                        young / 10.0,
+                        young,
+                    ),
+                )
+            } else {
+                let ec = squid_n_material::newrc::NewRcEnvelope::new(fc).ec;
+                Box::new(squid_n_material::ConcreteCyclic::newrc(
+                    fc,
+                    0.01,
+                    2.0,
+                    ec / 10.0,
+                ))
+            }
         }
         HysteresisModel::Retrograde | HysteresisModel::OriginOriented => {
             let mut m = squid_n_material::ConcreteNewRc::new(fc, 2.0);
+            if fc <= 60.0 {
+                m.set_initial_tangent(young);
+            }
             m.set_concrete_hysteresis(rule == HysteresisModel::OriginOriented);
             Box::new(m)
         }

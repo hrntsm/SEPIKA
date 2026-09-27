@@ -760,7 +760,7 @@ mod tests {
             )
             .find(|(_, (fiber, _))| fiber.material == 0)
             .expect("コンクリートファイバー");
-        let expected_concrete_e = squid_n_material::newrc::NewRcEnvelope::new(24.0).ec;
+        let expected_concrete_e = 12_345.0;
         assert_eq!(p.young, expected_concrete_e);
         assert_eq!(mat.probe(0.0).1, expected_concrete_e);
         assert_eq!(p.young, mat.probe(0.0).1);

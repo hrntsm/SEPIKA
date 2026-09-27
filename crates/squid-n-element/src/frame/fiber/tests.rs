@@ -370,11 +370,7 @@ fn srcファイバーは内蔵鋼材のstrength_factorを使う() {
         .0
         .probe(0.0)
         .1;
-    assert_relative_eq!(
-        concrete_e,
-        squid_n_material::newrc::NewRcEnvelope::new(24.0).ec,
-        max_relative = 1e-10
-    );
+    assert_relative_eq!(concrete_e, 25_000.0, max_relative = 1e-10);
     assert_relative_eq!(steel_e, 205000.0, max_relative = 1e-10);
 
     model.sections[0].steel_material = None;
@@ -430,7 +426,7 @@ fn cftファイバーは鋼管と充填コンクリートの初期接線を分�
         .0
         .probe(0.0)
         .1;
-    let expected_concrete_e = squid_n_material::newrc::NewRcEnvelope::new(36.0).ec;
+    let expected_concrete_e = fiber_young_moduli(&model.elements[0], &model).0;
     assert_relative_eq!(concrete_e, expected_concrete_e, max_relative = 1e-10);
     assert_relative_eq!(steel_e, 190000.0, max_relative = 1e-10);
 }
@@ -2314,8 +2310,13 @@ fn test_all_fiber_materials_return_initial_tangent_at_zero_strain() {
         HysteresisModel::KarsanJirsa,
     ] {
         for fc in [21.0, 60.0, 80.0] {
-            let expected = squid_n_material::newrc::NewRcEnvelope::new(fc).ec;
-            let mut m = concrete_fiber_material(Some(fc), 30000.0, rule);
+            let young = 30000.0;
+            let expected = if fc <= 60.0 {
+                young
+            } else {
+                squid_n_material::newrc::NewRcEnvelope::new(fc).ec
+            };
+            let mut m = concrete_fiber_material(Some(fc), young, rule);
             let (s, t) = m.trial(0.0);
             assert_eq!(s, 0.0, "rule={rule:?} fc={fc}: ひずみ 0 で応力が 0 でない");
             assert_relative_eq!(t, expected, max_relative = 1e-9);
@@ -2326,6 +2327,39 @@ fn test_all_fiber_materials_return_initial_tangent_at_zero_strain() {
     let (s, t) = steel.trial(0.0);
     assert_eq!(s, 0.0);
     assert_relative_eq!(t, 205000.0, max_relative = 1e-9);
+}
+
+#[test]
+fn fc_at_or_below_60_uses_material_young_in_concrete_materials() {
+    for fc in [21.0, 60.0] {
+        for rule in [
+            HysteresisModel::Retrograde,
+            HysteresisModel::OriginOriented,
+            HysteresisModel::KarsanJirsa,
+        ] {
+            let young = 30000.0;
+            let mut material = concrete_fiber_material(Some(fc), young, rule);
+            assert_relative_eq!(material.trial(0.0).1, young, max_relative = 1e-12);
+
+            let (_, eps_c0, _, _) = newrc_reference_parameters(fc);
+            let (compression_stress, _) = material.trial(-0.5 * eps_c0);
+            let mut reference = squid_n_material::ConcreteNewRc::new(fc, 2.0);
+            reference.set_initial_tangent(young);
+            reference.set_concrete_hysteresis(rule == HysteresisModel::OriginOriented);
+            assert_relative_eq!(
+                compression_stress,
+                reference.trial(-0.5 * eps_c0).0,
+                max_relative = 1e-12
+            );
+
+            let crack_strain = 2.0 / young;
+            assert_relative_eq!(material.trial(crack_strain).0, 2.0, max_relative = 1e-12);
+            if rule == HysteresisModel::KarsanJirsa {
+                let (_, tension_tangent) = material.trial(crack_strain + 0.0001);
+                assert_relative_eq!(tension_tangent, -young / 10.0, max_relative = 1e-12);
+            }
+        }
+    }
 }
 
 #[test]
@@ -2387,6 +2421,10 @@ fn fc_over_60_fiber_materials_use_newrc_envelope_and_history() {
     let expected_tangent = -max_envelope_stress / (max_strain - plastic_strain);
     assert_relative_eq!(plastic_stress, 0.0, epsilon = 1e-9);
     assert_relative_eq!(plastic_tangent, expected_tangent, max_relative = 1e-9);
+
+    let mut other_young =
+        concrete_fiber_material(Some(80.0), 45000.0, HysteresisModel::KarsanJirsa);
+    assert_relative_eq!(other_young.trial(0.0).1, ec, max_relative = 1e-12);
 }
 
 #[test]
