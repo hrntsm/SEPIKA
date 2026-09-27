@@ -204,7 +204,7 @@ pub(crate) fn resolve_load_case(
 pub(crate) fn model_prepared_for_analysis(
     model: &Model,
     params: &JobParams,
-) -> (Model, Vec<String>) {
+) -> Result<(Model, Vec<String>), squid_n_job::JobError> {
     let mut model = model.clone();
     let settings = params.analysis_settings_for_prepare();
     let report = squid_n_job::prepare::prepare_model_for_analysis(
@@ -212,7 +212,7 @@ pub(crate) fn model_prepared_for_analysis(
         &settings,
         params.design_period,
     );
-    (model, report.notices)
+    Ok((model, report?.notices))
 }
 
 /// サマリ JSON へ前処理の注意事項を載せる（空なら何もしない）。

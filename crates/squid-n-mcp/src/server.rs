@@ -832,7 +832,8 @@ mod tests {
             design_period: None,
             ..Default::default()
         };
-        let (_model, notices) = crate::job::model_prepared_for_analysis(&pushover_model(), &params);
+        let (_model, notices) =
+            crate::job::model_prepared_for_analysis(&pushover_model(), &params).unwrap();
         assert!(
             notices.iter().any(|s| s.contains("EX/EY")),
             "精算周期未指定時は EX/EY 未同期の注意が出ること: {notices:?}"

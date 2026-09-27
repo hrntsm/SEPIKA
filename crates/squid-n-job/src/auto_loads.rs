@@ -90,10 +90,19 @@ pub fn slab_beam_loads_with(
     w_of: impl Fn(&Slab) -> f64,
     include_secondary_self_weight: bool,
     beam_map: &HashMap<(NodeId, NodeId), ElemId>,
-) -> Vec<BeamLoad> {
+) -> Result<Vec<BeamLoad>, squid_n_load::floor::FloorDistributionError> {
+    slab_beam_loads_with_checked(model, w_of, include_secondary_self_weight, beam_map)
+}
+
+fn slab_beam_loads_with_checked(
+    model: &Model,
+    w_of: impl Fn(&Slab) -> f64,
+    include_secondary_self_weight: bool,
+    beam_map: &HashMap<(NodeId, NodeId), ElemId>,
+) -> Result<Vec<BeamLoad>, squid_n_load::floor::FloorDistributionError> {
     let mut beam_loads = Vec::new();
 
-    let mut transfer = squid_n_load::cascade::solve(model, &w_of, include_secondary_self_weight);
+    let mut transfer = squid_n_load::cascade::solve(model, &w_of, include_secondary_self_weight)?;
     push_resolved_loads(
         std::mem::take(&mut transfer.leftover_region_loads),
         beam_map,
@@ -116,7 +125,7 @@ pub fn slab_beam_loads_with(
     }
     beam_loads.extend(member_reactions);
 
-    beam_loads
+    Ok(beam_loads)
 }
 
 /// `BeamLoad` 列を荷重ケースへ書き込める `NodalLoad`/`MemberLoad` へ変換する。
@@ -468,10 +477,18 @@ pub fn slab_load_case_content(
 
 /// 床の DL 分配 `BeamLoad` 列（スラブ固定荷重＋自立壁の等価面荷重）。
 /// 荷重ケースの全部材荷重ではない（梁自重・取り付く壁版の線アンカーを含まない）。
-pub fn compute_dl_beam_loads(model: &Model) -> Vec<BeamLoad> {
+pub fn compute_dl_beam_loads(
+    model: &Model,
+) -> Result<Vec<BeamLoad>, squid_n_load::floor::FloorDistributionError> {
+    compute_dl_beam_loads_checked(model)
+}
+
+fn compute_dl_beam_loads_checked(
+    model: &Model,
+) -> Result<Vec<BeamLoad>, squid_n_load::floor::FloorDistributionError> {
     let beam_map = beam_elem_map(model);
     let extra_intensity = squid_n_load::wall_attached::floor_region_wall_extra_intensity(model);
-    slab_beam_loads_with(
+    slab_beam_loads_with_checked(
         model,
         |slab| {
             model.slab_dead_intensity(slab) + extra_intensity.get(&slab.id).copied().unwrap_or(0.0)
@@ -482,9 +499,14 @@ pub fn compute_dl_beam_loads(model: &Model) -> Vec<BeamLoad> {
 }
 
 /// 重力系（DL・LL(架構用)・LL(地震用)）の自動生成内容を計算する。
-pub fn compute_gravity_auto_load_cases(model: &Model) -> AutoLoadComputeResult {
+pub fn compute_gravity_auto_load_cases(
+    model: &Model,
+) -> Result<AutoLoadComputeResult, crate::error::JobError> {
+    squid_n_load::floor::validate_one_way_directions(model)
+        .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
     let beam_map = beam_elem_map(model);
-    let dl_beam_loads = compute_dl_beam_loads(model);
+    let dl_beam_loads = compute_dl_beam_loads_checked(model)
+        .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
 
     let (mut dl_nodal, mut dl_member) = slab_load_case_content(model, &dl_beam_loads);
     let load_cfg = model.load_cfg.clone().unwrap_or_default();
@@ -504,23 +526,25 @@ pub fn compute_gravity_auto_load_cases(model: &Model) -> AutoLoadComputeResult {
     let (dl_nodal, extra_member) = resolve_nodal_to_primary(model, dl_nodal, SPAN_TOL_MM);
     dl_member.extend(extra_member);
 
-    let ll_beam_loads = slab_beam_loads_with(
+    let ll_beam_loads = slab_beam_loads_with_checked(
         model,
         |slab| slab.live_intensity(LoadPurpose::Frame),
         false,
         &beam_map,
-    );
+    )
+    .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
     let (ll_nodal, ll_member) = slab_load_case_content(model, &ll_beam_loads);
 
-    let ls_beam_loads = slab_beam_loads_with(
+    let ls_beam_loads = slab_beam_loads_with_checked(
         model,
         |slab| slab.live_intensity(LoadPurpose::Seismic),
         false,
         &beam_map,
-    );
+    )
+    .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
     let (ls_nodal, ls_member) = slab_load_case_content(model, &ls_beam_loads);
 
-    AutoLoadComputeResult {
+    Ok(AutoLoadComputeResult {
         cases: vec![
             AutoLoadCaseContent {
                 name: DL_CASE_NAME,
@@ -542,7 +566,7 @@ pub fn compute_gravity_auto_load_cases(model: &Model) -> AutoLoadComputeResult {
             },
         ],
         notices: Vec::new(),
-    }
+    })
 }
 
 /// 地震系（EX・EY）の自動生成内容を計算する。
@@ -603,13 +627,15 @@ pub fn compute_auto_load_cases(
     model: &Model,
     settings: &AnalysisSettings,
     design_period: Option<f64>,
-) -> AutoLoadComputeResult {
-    let gravity = compute_gravity_auto_load_cases(model);
+) -> Result<AutoLoadComputeResult, crate::error::JobError> {
+    squid_n_load::floor::validate_one_way_directions(model)
+        .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
+    let gravity = compute_gravity_auto_load_cases(model)?;
     let seismic = compute_seismic_auto_load_cases(model, settings, design_period);
-    AutoLoadComputeResult {
+    Ok(AutoLoadComputeResult {
         cases: gravity.cases.into_iter().chain(seismic.cases).collect(),
         notices: seismic.notices,
-    }
+    })
 }
 
 fn node_exists(model: &Model, id: NodeId) -> bool {
@@ -722,6 +748,37 @@ mod tests {
         model
     }
 
+    #[test]
+    fn square_short_direction_stops_gravity_computation() {
+        let mut model = make_square_slab_model();
+        model.slabs[0].plate.method = DistributionMethod::OneWay;
+        model.slabs[0].plate.one_way = Some(squid_n_core::model::OneWayDir::Short);
+        let error = match compute_gravity_auto_load_cases(&model) {
+            Ok(_) => panic!("正方形の短辺方向を受け入れた"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("正方形"));
+        let error = match compute_auto_load_cases(&model, &AnalysisSettings::default(), None) {
+            Ok(_) => panic!("正方形の短辺方向を受け入れた"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("正方形"));
+    }
+
+    #[test]
+    fn non_rectangular_short_direction_stops_gravity_computation() {
+        let mut model = make_square_slab_model();
+        model.nodes[2].coord = [3000.0, 4000.0, 0.0];
+        model.slabs[0].plate.method = DistributionMethod::OneWay;
+        model.slabs[0].plate.one_way = Some(squid_n_core::model::OneWayDir::Short);
+
+        let error = match compute_gravity_auto_load_cases(&model) {
+            Ok(_) => panic!("非矩形床の短辺方向を受け入れた"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("矩形床"));
+    }
+
     /// 大梁の材軸中間（座標一致する節点が無い位置）へアンカーした小梁の反力が、
     /// 大梁の中間集中荷重として荷重ケース内容に載る（節点が無いことを理由に捨てない）。
     #[test]
@@ -810,7 +867,7 @@ mod tests {
         });
 
         let beam_map = beam_elem_map(&model);
-        let beam_loads = slab_beam_loads_with(&model, |_| 0.0, true, &beam_map);
+        let beam_loads = slab_beam_loads_with(&model, |_| 0.0, true, &beam_map).unwrap();
         let (nodal, member) = slab_load_case_content(&model, &beam_loads);
         assert!(nodal.is_empty(), "{nodal:?}");
         let points: Vec<_> = member
@@ -832,7 +889,7 @@ mod tests {
     fn compute_gravity_creates_dl_with_slab_loads() {
         let model = make_square_slab_model();
         model.validate().expect("valid model");
-        let result = compute_gravity_auto_load_cases(&model);
+        let result = compute_gravity_auto_load_cases(&model).unwrap();
         assert_eq!(result.cases.len(), 3);
         let dl = result
             .cases
@@ -847,7 +904,7 @@ mod tests {
     fn apply_auto_load_cases_creates_dl_case() {
         let mut model = make_square_slab_model();
         model.validate().expect("valid model");
-        let computed = compute_gravity_auto_load_cases(&model);
+        let computed = compute_gravity_auto_load_cases(&model).unwrap();
         apply_auto_load_cases(&mut model, &computed.cases);
         let dl = model
             .load_cases
@@ -927,14 +984,14 @@ mod tests {
         model.wall_plates.push(plate);
         model.validate().expect("valid model");
 
-        let baseline = compute_gravity_auto_load_cases(&make_square_slab_model());
+        let baseline = compute_gravity_auto_load_cases(&make_square_slab_model()).unwrap();
         let baseline_dl = baseline
             .cases
             .iter()
             .find(|c| c.name == DL_CASE_NAME)
             .unwrap();
 
-        let result = compute_gravity_auto_load_cases(&model);
+        let result = compute_gravity_auto_load_cases(&model).unwrap();
         let dl = result
             .cases
             .iter()
@@ -1035,7 +1092,7 @@ mod tests {
         model.wall_plates.push(plate);
         model.validate().expect("valid model");
 
-        let result = compute_gravity_auto_load_cases(&model);
+        let result = compute_gravity_auto_load_cases(&model).unwrap();
         let dl = result
             .cases
             .iter()
@@ -1167,13 +1224,13 @@ mod tests {
             nodal.iter().map(|nl| -nl.values[2]).sum()
         };
 
-        let baseline = compute_gravity_auto_load_cases(&make_square_slab_model());
+        let baseline = compute_gravity_auto_load_cases(&make_square_slab_model()).unwrap();
         let baseline_dl = baseline
             .cases
             .iter()
             .find(|c| c.name == DL_CASE_NAME)
             .unwrap();
-        let result = compute_gravity_auto_load_cases(&model);
+        let result = compute_gravity_auto_load_cases(&model).unwrap();
         let dl = result
             .cases
             .iter()
@@ -1288,7 +1345,8 @@ mod attached_anchor_tests {
 
         let beam_map = beam_elem_map(&model);
         let beam_loads =
-            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map);
+            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
+                .unwrap();
         let (nodal, member) = slab_load_case_content(&model, &beam_loads);
 
         assert!(nodal.is_empty(), "節点荷重へ落ちない: {nodal:?}");
@@ -1344,7 +1402,8 @@ mod attached_anchor_tests {
 
         let beam_map = beam_elem_map(&model);
         let beam_loads =
-            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map);
+            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
+                .unwrap();
         let (nodal, member) = slab_load_case_content(&model, &beam_loads);
 
         assert!(nodal.is_empty(), "節点荷重へ落ちない: {nodal:?}");
@@ -1404,7 +1463,8 @@ mod attached_anchor_tests {
 
         let beam_map = beam_elem_map(&model);
         let beam_loads =
-            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map);
+            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
+                .unwrap();
         let (nodal, member) = slab_load_case_content(&model, &beam_loads);
 
         assert!(nodal.is_empty(), "節点荷重へ落ちない: {nodal:?}");
@@ -1462,7 +1522,8 @@ mod attached_anchor_tests {
 
         let beam_map = beam_elem_map(&model);
         let beam_loads =
-            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map);
+            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
+                .unwrap();
         let (nodal, member) = slab_load_case_content(&model, &beam_loads);
 
         assert!(nodal.is_empty(), "節点荷重へ落ちない: {nodal:?}");
@@ -1521,7 +1582,8 @@ mod attached_anchor_tests {
 
         let beam_map = beam_elem_map(&model);
         let beam_loads =
-            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map);
+            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
+                .unwrap();
         let (nodal, member) = slab_load_case_content(&model, &beam_loads);
 
         assert!(
@@ -1590,7 +1652,8 @@ mod attached_anchor_tests {
 
         let beam_map = beam_elem_map(&model);
         let beam_loads =
-            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map);
+            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
+                .unwrap();
         let (nodal, member) = slab_load_case_content(&model, &beam_loads);
 
         assert!(nodal.is_empty(), "節点荷重へ落ちない: {nodal:?}");
@@ -1649,7 +1712,8 @@ mod attached_anchor_tests {
 
         let beam_map = beam_elem_map(&model);
         let beam_loads =
-            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map);
+            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
+                .unwrap();
         let (nodal, member) = slab_load_case_content(&model, &beam_loads);
         assert!(
             member.is_empty(),
@@ -1873,7 +1937,8 @@ mod cascade_tests {
         let beam_map = beam_elem_map(&model);
         // 自重は入れず、床の面荷重だけで総和を見る。
         let beam_loads =
-            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map);
+            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
+                .unwrap();
         let (nodal, mut member) = slab_load_case_content(&model, &beam_loads);
         let (nodal, extra) = squid_n_load::secondary::resolve_nodal_to_primary(
             &model,
@@ -1918,7 +1983,7 @@ mod cascade_tests {
         use squid_n_load::cascade::{self as cascade, SupportAt};
 
         let model = joist_on_joist_model();
-        let transfer = cascade::solve(&model, |s| model.slab_dead_intensity(s), false);
+        let transfer = cascade::solve(&model, |s| model.slab_dead_intensity(s), false).unwrap();
 
         let ka = squid_n_core::ids::SecondaryMemberId(4);
         let kb = squid_n_core::ids::SecondaryMemberId(6);
@@ -1938,7 +2003,7 @@ mod cascade_tests {
         );
         // A が受けた集中荷重に B の反力が含まれる。
         let has_point = a.member_loads.iter().any(
-            |l| matches!(l, MemberLoadKind::Point { p, .. } if (*p - b.reactions[i6]).abs() < 1e-9),
+            |l| matches!(l, MemberLoadKind::Point { p, .. } if (p - b.reactions[i6]).abs() < 1e-9),
         );
         assert!(
             has_point || b.reactions[i6].abs() < 1e-9,

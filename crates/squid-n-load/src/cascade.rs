@@ -380,7 +380,7 @@ pub fn solve(
     model: &Model,
     w_of: impl Fn(&Slab) -> f64,
     include_self_weight: bool,
-) -> SecondaryTransfer {
+) -> Result<SecondaryTransfer, crate::floor::FloorDistributionError> {
     solve_with_basis(model, w_of, include_self_weight, SelfWeightBasis::Design)
 }
 
@@ -391,18 +391,18 @@ pub fn solve_with_basis(
     w_of: impl Fn(&Slab) -> f64,
     include_self_weight: bool,
     basis: SelfWeightBasis,
-) -> SecondaryTransfer {
+) -> Result<SecondaryTransfer, crate::floor::FloorDistributionError> {
     let self_weight_udl = |sm: &SecondaryMember| match basis {
         SelfWeightBasis::Design => joist_self_weight_udl(model, sm),
         SelfWeightBasis::MassEquiv => joist_mass_equiv_udl(model, sm),
     };
     let axes = axes(model);
     if axes.is_empty() {
-        let (_, leftover) = secondary_joist_distribution_split(model, w_of);
-        return SecondaryTransfer {
+        let (_, leftover) = secondary_joist_distribution_split(model, w_of)?;
+        return Ok(SecondaryTransfer {
             leftover_region_loads: leftover,
             ..SecondaryTransfer::default()
-        };
+        });
     }
     let connected = crate::secondary::node_connected_flags(model);
     let beams = crate::secondary::beam_span_candidates(model);
@@ -459,7 +459,7 @@ pub fn solve_with_basis(
         supports.insert(ax.key, ends);
     }
 
-    let (distribution, leftover_region_loads) = secondary_joist_distribution_split(model, w_of);
+    let (distribution, leftover_region_loads) = secondary_joist_distribution_split(model, w_of)?;
     let wall_loads = if include_self_weight {
         crate::wall_plate_load::distribute_enclosed_wall_plates_with_basis(model, basis).posts
     } else {
@@ -571,13 +571,13 @@ pub fn solve_with_basis(
     unresolved.sort();
 
     invalid_end_shares.sort();
-    SecondaryTransfer {
+    Ok(SecondaryTransfer {
         invalid_end_shares,
         members,
         unresolved,
         cyclic,
         leftover_region_loads,
-    }
+    })
 }
 
 /// 節点を共有せず交差している二次部材の組（診断専用。§3.4 F5）。

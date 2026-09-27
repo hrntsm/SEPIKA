@@ -8,6 +8,7 @@ use squid_n_core::region_rebuild::rebuild_floor_regions;
 use squid_n_core::wall_region_rebuild::rebuild_wall_regions;
 
 use crate::auto_loads::{apply_auto_load_cases, compute_auto_load_cases};
+use crate::error::JobError;
 use crate::settings::AnalysisSettings;
 
 /// 解析前処理（剛域・仕口パネル・荷重自動同期）の報告。
@@ -56,7 +57,7 @@ pub fn prepare_model_for_analysis(
     model: &mut Model,
     settings: &AnalysisSettings,
     design_period: Option<f64>,
-) -> PrepareReport {
+) -> Result<PrepareReport, JobError> {
     let _ = model.anchorize_secondary_members();
     model.rebuild_floor_assignment_regions();
     model.rebuild_wall_assignment_regions();
@@ -64,12 +65,13 @@ pub fn prepare_model_for_analysis(
     rebuild_wall_regions(model);
     let panels = apply_rigid_zones_and_panels(model);
     let computed = compute_auto_load_cases(model, settings, design_period);
+    let computed = computed?;
     apply_auto_load_cases(model, &computed.cases);
     let mut notices = computed.notices;
     if let Some(warning) = model.unset_plate_assignment_warning() {
         notices.push(warning);
     }
-    PrepareReport { panels, notices }
+    Ok(PrepareReport { panels, notices })
 }
 
 #[cfg(test)]
@@ -180,7 +182,7 @@ mod tests {
             )
             .expect("右半分");
         assert_eq!(model.slabs.len(), 2);
-        prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None);
+        let _ = prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None);
         assert_eq!(model.slabs.len(), 2, "床板は畳まずそのまま残る");
         assert_eq!(
             model.floor_regions.len(),
@@ -196,11 +198,38 @@ mod tests {
         // 2 回連続で実行しても結果が変わらない（割当領域を先に再構築してから
         // 旧床領域・壁領域を再構築する順序が、実行回数に依存しないことの回帰）。
         let after_first = model.clone();
-        prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None);
+        let _ = prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None);
         assert!(
             after_first.eq_ignoring_dofmap(&model),
             "前処理が 2 回目で結果を変えている"
         );
+    }
+
+    #[test]
+    fn prepare_rejects_square_short_direction() {
+        let mut model = Model {
+            nodes: vec![
+                node(0, 0.0, 0.0),
+                node(1, 4000.0, 0.0),
+                node(2, 4000.0, 4000.0),
+                node(3, 0.0, 4000.0),
+            ],
+            ..Default::default()
+        };
+        model.add_enclosed_slab_from_nodes(
+            &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+            SlabPlate {
+                method: DistributionMethod::OneWay,
+                one_way: Some(squid_n_core::model::OneWayDir::Short),
+                ..SlabPlate::default()
+            },
+        );
+        let error = match prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
+        {
+            Ok(_) => panic!("正方形の短辺方向を受け入れた"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("正方形"));
     }
 
     /// 剛域算定（`apply_rigid_zones_and_panels`）が壁展開モデルを見ていることの

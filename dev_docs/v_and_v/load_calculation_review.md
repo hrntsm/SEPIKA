@@ -257,7 +257,7 @@ test result: ok. 15 passed; 0 failed
 | 1.10 組合せの欠落 | `standard_combinations`: ±地震・±風・多雪区域(長期 0.7S、短期 0.35S) |
 | 1.11 重力加速度 2 系統 | `squid_n_core::units::GRAVITY_MM_S2`(9806.65) に統一 |
 | 1.12 Pi 負値の黙殺 | `AiDistribution.clamped_negative_pi` で検知可能に |
-| 1.13 矩形前提・伝達方向 | 平行四辺形閉合検証+非矩形の多角形経路、`Slab.one_way`(X/Y)で伝達方向指定 |
+| 1.13 矩形前提・伝達方向 | `slab_dimensions_of` で平行四辺形を判定したうえで、Short の検証箇所では隣接辺の直交性も確認し、`Slab.one_way`（X/Y/Short）で伝達方向を指定。Short は直交する矩形床のみ対応し、斜めの平行四辺形と正方形は入力エラー |
 
 ### §3 ギャップ — 対応済み
 
@@ -266,7 +266,7 @@ test result: ok. 15 passed; 0 failed
 - **多剛床の重量比分配**: 1.6 と同一機構(副剛床の Ci 直接入力は残課題)
 - **小梁 2 段階伝達**: `Slab.joists` を負担幅=spacing の簡易モデルで小梁反力→支持節点へ
 - **片持ちスラブ**: `SlabKind::Cantilever`(片持ち梁なしの全量取付き辺伝達)
-- **多角形床組**: 凸多角形(三角形・台形・五角形)を最近接辺の負担面積法で分配
+- **多角形床組**: 凸多角形(三角形・台形・五角形)を最近接辺の負担面積法で分配。X/Y 指定は従来どおり、多角形への Short 指定は入力エラー
 - **剛域考慮 CMQ**: `cmq_with_rigid_zone`(CMQ 加算/柱伝達/無視の 3 モード)
 - **仕上げ・耐火被覆・鉄骨割増率**: `Model.load_cfg`(steel_weight_factor・extra_line_weight [N/mm])による簡易対応
 - **Fc 依存γ**: 1.9 と同一

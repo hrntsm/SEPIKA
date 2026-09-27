@@ -615,11 +615,12 @@ pub struct AreaLoad {
 }
 
 /// 一方向スラブの荷重伝達方向（床ごとに指定。床荷重の分配における伝達方向〔X〕〔Y〕）。
-/// `X` は全体座標 X 方向へ伝達（＝X 方向両側の辺が負担）、`Y` は Y 方向へ伝達。
+/// `Short` は矩形床の短辺方向へ伝達し、X・Y スパンが同じ場合は入力不備とする。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum OneWayDir {
     X,
     Y,
+    Short,
 }
 
 #[cfg(test)]

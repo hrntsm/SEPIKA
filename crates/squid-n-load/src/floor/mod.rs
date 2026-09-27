@@ -56,6 +56,71 @@ use squid_n_core::model::{
     FloorRegion, LoadTransfer, Model, RegionAnchor, Slab, SlabShape, SupportMemberId,
 };
 
+fn short_direction_dimensions(coords: &[[f64; 3]]) -> Option<(f64, f64)> {
+    let dimensions = slab_dimensions_of(coords)?;
+    let edge_x = [
+        coords[1][0] - coords[0][0],
+        coords[1][1] - coords[0][1],
+        coords[1][2] - coords[0][2],
+    ];
+    let edge_y = [
+        coords[3][0] - coords[0][0],
+        coords[3][1] - coords[0][1],
+        coords[3][2] - coords[0][2],
+    ];
+    let dot = squid_n_core::geom::vec3::dot(edge_x, edge_y);
+    if dot.abs() / (dimensions.0 * dimensions.1) > 1e-6 {
+        return None;
+    }
+    Some(dimensions)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FloorDistributionError {
+    ShortDirectionOnSquare { slab_id: squid_n_core::ids::SlabId },
+    ShortDirectionRequiresRectangle { slab_id: squid_n_core::ids::SlabId },
+}
+
+impl std::fmt::Display for FloorDistributionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ShortDirectionOnSquare { slab_id } => write!(
+                f,
+                "床板 {} は X・Y スパンが同寸の正方形のため、短辺方向を決められません。X または Y を指定してください。",
+                slab_id.0
+            ),
+            Self::ShortDirectionRequiresRectangle { slab_id } => write!(
+                f,
+                "床板 {} の短辺方向指定は矩形床にのみ対応しています。X または Y を指定してください。",
+                slab_id.0
+            ),
+        }
+    }
+}
+
+impl std::error::Error for FloorDistributionError {}
+
+pub fn validate_one_way_directions(model: &Model) -> Result<(), FloorDistributionError> {
+    for slab in &model.slabs {
+        if !matches!(&slab.shape, SlabShape::Enclosed)
+            || slab.method() != squid_n_core::model::DistributionMethod::OneWay
+            || slab.one_way() != Some(squid_n_core::model::OneWayDir::Short)
+        {
+            continue;
+        }
+        let coords = boundary_coords(model, slab).unwrap_or_default();
+        let Some((lx, ly)) = short_direction_dimensions(&coords) else {
+            return Err(FloorDistributionError::ShortDirectionRequiresRectangle {
+                slab_id: slab.id,
+            });
+        };
+        if (lx - ly).abs() < 1e-6 {
+            return Err(FloorDistributionError::ShortDirectionOnSquare { slab_id: slab.id });
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 use fem::{fem_trapezoid, fem_triangle};
 
@@ -77,12 +142,15 @@ use fem::{fem_trapezoid, fem_triangle};
 ///      （[`distribute_rect`]）。一方向の指定があればその方向（全体座標 X/Y）へ、
 ///      なければ境界辺 0・2 が負担する。
 ///    - それ以外（三角形・台形・五角形などの多角形）→ 多角形の負担面積法
-///      （[`distribute_polygon`]）。一方向の指定があってもこの経路へ落ちる。
+///      （[`distribute_polygon`]）。ただし短辺方向指定は入力エラーとする。
 ///
 /// いずれの経路も総和保存（Σ大梁荷重 (+Σ小梁反力・Σ柱集中荷重) = w×面積）を満たすよう
 /// 設計している（床は全体座標 XY 平面内（Z一定）にあることを仮定する）。
 /// L 形の取り付く床板は取付き線ごとの複数の床板で表す。
-pub fn distribute_slab(model: &Model, slab: &Slab) -> Vec<BeamLoad> {
+pub fn distribute_slab(
+    model: &Model,
+    slab: &Slab,
+) -> Result<Vec<BeamLoad>, FloorDistributionError> {
     // 固定荷重 DL（版の自重＋仕上げ等）の総和を分配する。自重は断面の板厚と
     // 材料から算定する（`Model::slab_dead_intensity`）。
     distribute_slab_w(model, slab, model.slab_dead_intensity(slab))
@@ -93,33 +161,60 @@ pub fn distribute_slab(model: &Model, slab: &Slab) -> Vec<BeamLoad> {
 /// 分岐ロジックは [`distribute_slab`] と同一で、荷重源だけを引数 `w` に差し替える。
 /// これにより DL（固定荷重）と LL（積載荷重）を別々の荷重ケースへ分配できる
 /// （用途別（床用/小梁用/大梁・柱・基礎用/地震力用）の積載荷重の使い分けや、荷重組合せでの DL/LL 係数分けに用いる）。
-/// `w == 0.0` の場合は空の分配結果を返す。
-pub fn distribute_slab_w(model: &Model, slab: &Slab, w: f64) -> Vec<BeamLoad> {
+/// `w == 0.0` の場合は、短辺方向指定の正方形・非矩形を除き空の分配結果を返す。
+pub fn distribute_slab_w(
+    model: &Model,
+    slab: &Slab,
+    w: f64,
+) -> Result<Vec<BeamLoad>, FloorDistributionError> {
+    distribute_slab_w_checked(model, slab, w)
+}
+
+pub fn distribute_slab_w_checked(
+    model: &Model,
+    slab: &Slab,
+    w: f64,
+) -> Result<Vec<BeamLoad>, FloorDistributionError> {
     let mut loads = Vec::new();
-    if w == 0.0 {
-        return loads;
-    }
     let Some(coords) = boundary_coords(model, slab) else {
-        return loads;
+        return Ok(loads);
     };
     if coords.len() < 3 {
-        return loads;
+        return Ok(loads);
+    }
+
+    if matches!(&slab.shape, SlabShape::Enclosed)
+        && slab.method() == squid_n_core::model::DistributionMethod::OneWay
+        && slab.one_way() == Some(squid_n_core::model::OneWayDir::Short)
+    {
+        let Some((lx, ly)) = short_direction_dimensions(&coords) else {
+            return Err(FloorDistributionError::ShortDirectionRequiresRectangle {
+                slab_id: slab.id,
+            });
+        };
+        if (lx - ly).abs() < 1e-6 {
+            return Err(FloorDistributionError::ShortDirectionOnSquare { slab_id: slab.id });
+        }
+    }
+
+    if w == 0.0 {
+        return Ok(loads);
     }
 
     match &slab.shape {
         SlabShape::Attached { anchor, .. } => {
             distribute_attached(model, &coords, w, *anchor, &mut loads);
-            return loads;
+            return Ok(loads);
         }
         SlabShape::Enclosed => {}
     }
 
     match slab_dimensions_of(&coords) {
-        Some((lx, ly)) => distribute_rect(slab, &coords, lx, ly, w, &mut loads),
+        Some((lx, ly)) => distribute_rect(slab, &coords, lx, ly, w, &mut loads)?,
         None => distribute_polygon(&coords, w, &mut loads),
     }
 
-    loads
+    Ok(loads)
 }
 
 /// 取り付く床板（片持ちスラブ・バルコニー・出隅）の分配。
@@ -239,8 +334,24 @@ fn resolve_edges_to_span(model: &Model, slab: &Slab, loads: Vec<BeamLoad>) -> Ve
 /// 見つからない浮き床板）を、床領域とは独立に分配する用途に使う
 /// （`squid-n-job::auto_loads` 参照）。戻り値の `LoadTarget` は `Node`/`Span`/
 /// `Secondary` と、支持先を解決できなかった辺の `Edge`。
-pub fn distribute_slab_resolved(model: &Model, slab: &Slab, w: f64) -> Vec<BeamLoad> {
-    resolve_edges_to_span(model, slab, distribute_slab_w(model, slab, w))
+pub fn distribute_slab_resolved(
+    model: &Model,
+    slab: &Slab,
+    w: f64,
+) -> Result<Vec<BeamLoad>, FloorDistributionError> {
+    distribute_slab_resolved_checked(model, slab, w)
+}
+
+pub fn distribute_slab_resolved_checked(
+    model: &Model,
+    slab: &Slab,
+    w: f64,
+) -> Result<Vec<BeamLoad>, FloorDistributionError> {
+    Ok(resolve_edges_to_span(
+        model,
+        slab,
+        distribute_slab_w_checked(model, slab, w)?,
+    ))
 }
 
 /// 床領域（大梁の 1 スパン区画）の面荷重を、床領域内の床板へ束ねて分配する。
@@ -254,16 +365,16 @@ pub fn distribute_region(
     model: &Model,
     region: &FloorRegion,
     w_of: impl Fn(&Slab) -> f64,
-) -> Vec<BeamLoad> {
+) -> Result<Vec<BeamLoad>, FloorDistributionError> {
     let mut loads = Vec::new();
     for &sid in &region.slab_ids {
         let Some(slab) = model.slab(sid) else {
             continue;
         };
-        let slab_loads = distribute_slab_w(model, slab, w_of(slab));
+        let slab_loads = distribute_slab_w(model, slab, w_of(slab))?;
         loads.extend(resolve_edges_to_span(model, slab, slab_loads));
     }
-    loads
+    Ok(loads)
 }
 
 #[cfg(test)]

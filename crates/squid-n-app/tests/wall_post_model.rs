@@ -541,6 +541,7 @@ fn 明示負担率で密度直接集計とdl集計の階重量が一致する() 
         }
         let direct = generate_stories_with_opts(&model, &[], true, MassMethod::LumpedOnly).unwrap();
         let dl = squid_n_job::auto_loads::compute_gravity_auto_load_cases(&model)
+            .expect("重力荷重の計算")
             .cases
             .into_iter()
             .find(|lc| lc.kind == LoadCaseKind::Dead)

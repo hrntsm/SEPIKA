@@ -352,7 +352,7 @@ fn test_slab_conservation_square_triangle() {
     let w = 0.005_f64;
     let a = 4000.0_f64;
     let (model, slab) = make_square_slab_model(a, DistributionMethod::TriTrapezoid, w);
-    let loads = distribute_slab(&model, &slab);
+    let loads = distribute_slab(&model, &slab).unwrap();
     let expected = w * a * a;
     assert!(
         (total_load(&loads) - expected).abs() < 1e-6,
@@ -381,7 +381,7 @@ fn test_slab_conservation_rect_all_methods() {
         DistributionMethod::TributaryArea,
     ] {
         let (model, slab) = make_rect_slab_model(lx, ly, method, w);
-        let loads = distribute_slab(&model, &slab);
+        let loads = distribute_slab(&model, &slab).unwrap();
         assert!(
             (total_load(&loads) - expected).abs() / expected < 1e-9,
             "method={:?} 総和={} expected={}",
@@ -406,7 +406,7 @@ fn test_one_way_direction_x_and_y() {
     // one_way=Y: 伝達方向Yに直交する辺0・2（X方向の辺、長さlx）が負担。従来互換と同じ結果。
     let (model, mut slab) = make_rect_slab_model(lx, ly, DistributionMethod::OneWay, w);
     slab.plate.one_way = Some(OneWayDir::Y);
-    let loads_y = distribute_slab(&model, &slab);
+    let loads_y = distribute_slab(&model, &slab).unwrap();
     assert!((total_load(&loads_y) - expected).abs() / expected < 1e-9);
     for l in &loads_y {
         assert!(matches!(
@@ -420,7 +420,7 @@ fn test_one_way_direction_x_and_y() {
 
     // one_way=X: 伝達方向Xに直交する辺1・3（Y方向の辺、長さly）が負担。
     slab.plate.one_way = Some(OneWayDir::X);
-    let loads_x = distribute_slab(&model, &slab);
+    let loads_x = distribute_slab(&model, &slab).unwrap();
     assert!((total_load(&loads_x) - expected).abs() / expected < 1e-9);
     for l in &loads_x {
         assert!(matches!(
@@ -431,6 +431,86 @@ fn test_one_way_direction_x_and_y() {
             assert!((wl - w * lx / 2.0).abs() / (w * lx / 2.0) < 1e-9);
         }
     }
+}
+
+#[test]
+fn test_one_way_short_direction_follows_short_span() {
+    use squid_n_core::model::OneWayDir;
+    let w = 0.004_f64;
+    let (model, mut slab) = make_rect_slab_model(5000.0, 3000.0, DistributionMethod::OneWay, w);
+    slab.plate.one_way = Some(OneWayDir::Short);
+    let loads = distribute_slab(&model, &slab).unwrap();
+    assert!(
+        loads
+            .iter()
+            .all(|load| matches!(load.target, LoadTarget::Edge(0 | 2))),
+        "{loads:?}"
+    );
+    assert!((total_load(&loads) - w * 5000.0 * 3000.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_one_way_short_direction_uses_short_edge_axis() {
+    use squid_n_core::model::OneWayDir;
+    let w = 0.004_f64;
+    let pts = [(0.0, 0.0), (0.0, 3000.0), (5000.0, 3000.0), (5000.0, 0.0)];
+    let (model, mut slab) = polygon_slab_model(&pts, DistributionMethod::OneWay, w);
+    slab.plate.one_way = Some(OneWayDir::Short);
+    let loads = super::distribute_slab_w_checked(&model, &slab, w).unwrap();
+    assert!(
+        loads
+            .iter()
+            .all(|load| matches!(load.target, LoadTarget::Edge(1 | 3))),
+        "{loads:?}"
+    );
+}
+
+#[test]
+fn test_one_way_short_direction_rejects_skewed_parallelogram() {
+    use squid_n_core::model::OneWayDir;
+    let w = 0.004_f64;
+    let pts = [
+        (0.0, 0.0),
+        (4000.0, 0.0),
+        (5000.0, 3000.0),
+        (1000.0, 3000.0),
+    ];
+    let (mut model, mut slab) = polygon_slab_model(&pts, DistributionMethod::OneWay, w);
+    slab.plate.one_way = Some(OneWayDir::Short);
+    model.slabs[slab.id.index()].plate.one_way = Some(OneWayDir::Short);
+
+    assert!(matches!(
+        super::validate_one_way_directions(&model),
+        Err(FloorDistributionError::ShortDirectionRequiresRectangle { .. })
+    ));
+    assert!(matches!(
+        super::distribute_slab_w_checked(&model, &slab, w),
+        Err(FloorDistributionError::ShortDirectionRequiresRectangle { .. })
+    ));
+}
+
+#[test]
+fn test_one_way_short_direction_rejects_square() {
+    use squid_n_core::model::OneWayDir;
+    let (mut model, slab) = make_square_slab_model(4000.0, DistributionMethod::OneWay, 0.004);
+    model.slabs[slab.id.index()].plate.one_way = Some(OneWayDir::Short);
+    let err = super::validate_one_way_directions(&model).unwrap_err();
+    assert!(err.to_string().contains("X または Y"));
+    assert!(super::distribute_slab(&model, &model.slabs[slab.id.index()]).is_err());
+}
+
+#[test]
+fn test_one_way_short_direction_rejects_square_with_zero_load() {
+    use squid_n_core::model::OneWayDir;
+    let (mut model, slab) = make_square_slab_model(4000.0, DistributionMethod::OneWay, 0.0);
+    model.slabs[slab.id.index()].plate.one_way = Some(OneWayDir::Short);
+
+    let err =
+        super::distribute_slab_w_checked(&model, &model.slabs[slab.id.index()], 0.0).unwrap_err();
+    assert!(matches!(
+        err,
+        FloorDistributionError::ShortDirectionOnSquare { .. }
+    ));
 }
 
 // ------------------------------------------------------------------
@@ -496,7 +576,7 @@ fn test_polygon_trapezoid_conservation() {
     let (model, slab) = polygon_slab_model(&pts, DistributionMethod::TriTrapezoid, w);
     // slab_dimensions が None（多角形経路）になることを確認
     assert!(slab_dimensions(&model, &slab).is_none());
-    let loads = distribute_slab(&model, &slab);
+    let loads = distribute_slab(&model, &slab).unwrap();
     assert!(!loads.is_empty());
 
     let coords: Vec<[f64; 3]> = pts.iter().map(|(x, y)| [*x, *y, 0.0]).collect();
@@ -509,16 +589,28 @@ fn test_polygon_trapezoid_conservation() {
         true_area
     );
 
-    // one_way 指定でも非矩形なら多角形経路へ落ちる。
+    // X/Y 指定は非矩形でも従来どおり多角形経路へ進む。
     use squid_n_core::model::OneWayDir;
     let (model, mut slab) = polygon_slab_model(&pts, DistributionMethod::OneWay, w);
     slab.plate.one_way = Some(OneWayDir::X);
-    let one_way_loads = distribute_slab(&model, &slab);
+    let one_way_loads = distribute_slab(&model, &slab).unwrap();
     let one_way_area = total_load(&one_way_loads) / w;
     assert!(
         (one_way_area - true_area).abs() / true_area < 0.01,
         "one_way 指定でも多角形経路: sampled={one_way_area} true={true_area}"
     );
+
+    let (mut model, mut slab) = polygon_slab_model(&pts, DistributionMethod::OneWay, w);
+    slab.plate.one_way = Some(OneWayDir::Short);
+    model.slabs[slab.id.index()].plate.one_way = Some(OneWayDir::Short);
+    assert!(matches!(
+        super::validate_one_way_directions(&model),
+        Err(FloorDistributionError::ShortDirectionRequiresRectangle { .. })
+    ));
+    assert!(matches!(
+        super::distribute_slab_w_checked(&model, &slab, w),
+        Err(FloorDistributionError::ShortDirectionRequiresRectangle { .. })
+    ));
 }
 
 #[test]
@@ -533,7 +625,7 @@ fn test_polygon_pentagon_conservation() {
     ];
     let w = 0.0025_f64;
     let (model, slab) = polygon_slab_model(&pts, DistributionMethod::TributaryArea, w);
-    let loads = distribute_slab(&model, &slab);
+    let loads = distribute_slab(&model, &slab).unwrap();
     assert!(!loads.is_empty());
     // 辺インデックスが 0..5 の範囲内。
     for l in &loads {
@@ -597,7 +689,7 @@ fn test_cantilever_conservation() {
             ..Default::default()
         },
     };
-    let loads = distribute_slab(&model, &slab);
+    let loads = distribute_slab(&model, &slab).unwrap();
     assert_eq!(loads.len(), 1);
     let l = &loads[0];
     assert!(matches!(l.target, LoadTarget::Edge(0)));
@@ -659,7 +751,7 @@ fn test_cantilever_with_side_joist_uses_support_edges() {
             ..Default::default()
         },
     };
-    let loads = distribute_slab(&model, &slab);
+    let loads = distribute_slab(&model, &slab).unwrap();
     assert_eq!(loads.len(), 2, "{loads:?}");
 
     let total = total_load(&loads);
@@ -746,7 +838,7 @@ fn test_cantilever_with_real_beam_edge_uses_beam() {
             ..Default::default()
         },
     };
-    let loads = distribute_slab(&model, &slab);
+    let loads = distribute_slab(&model, &slab).unwrap();
     assert_eq!(loads.len(), 2, "{loads:?}");
     let total = total_load(&loads);
     let expected = w * l * depth;
@@ -840,7 +932,7 @@ fn test_cantilever_real_beam_inside_slab_after_rebuild() {
         let loads: Vec<_> = model
             .slabs
             .iter()
-            .flat_map(|s| distribute_slab(&model, s))
+            .flat_map(|s| distribute_slab(&model, s).unwrap())
             .collect();
         let expected = w * l * depth;
         let total = total_load(&loads);
@@ -937,7 +1029,7 @@ fn test_cantilever_support_edge_prefers_full_real_beam() {
     };
     full.elements.push(mk_beam(0, 4, 5));
     full.unassigned_joists.push(mk_joist());
-    let loads = distribute_slab(&full, &mk_slab());
+    let loads = distribute_slab(&full, &mk_slab()).unwrap();
     let span = loads
         .iter()
         .find(|bl| matches!(bl.target, LoadTarget::Span { .. }))
@@ -961,7 +1053,7 @@ fn test_cantilever_support_edge_prefers_full_real_beam() {
     };
     partial.elements.push(mk_beam(0, 4, 5));
     partial.unassigned_joists.push(mk_joist());
-    let loads = distribute_slab(&partial, &mk_slab());
+    let loads = distribute_slab(&partial, &mk_slab()).unwrap();
     let span = loads
         .iter()
         .find(|bl| matches!(bl.target, LoadTarget::Secondary { .. }))
@@ -1017,7 +1109,7 @@ fn test_distribute_region_conserves_total_over_multiple_slabs() {
     );
     region.slab_ids = vec![first, second];
 
-    let loads = super::distribute_region(&model, &region, |_| 1.0e-3);
+    let loads = super::distribute_region(&model, &region, |_| 1.0e-3).unwrap();
     let total: f64 = loads.iter().map(|bl| bl.cmq.q_i + bl.cmq.q_j).sum();
     let expected = 1.0e-3 * 6000.0 * 5000.0;
     assert!(
@@ -1118,7 +1210,7 @@ fn test_midspan_joist_edge_loads_resolve_from_support_boundary() {
     let loads: Vec<BeamLoad> = model
         .slabs
         .iter()
-        .flat_map(|slab| distribute_slab_resolved(&model, slab, w))
+        .flat_map(|slab| distribute_slab_resolved(&model, slab, w).unwrap())
         .collect();
     let total: f64 = loads.iter().map(|bl| bl.cmq.q_i + bl.cmq.q_j).sum();
     let expected = w * 6000.0 * 4000.0;

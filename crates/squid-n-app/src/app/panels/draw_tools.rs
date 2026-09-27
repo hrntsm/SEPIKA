@@ -331,6 +331,19 @@ impl App {
                 "負担面積",
             );
         });
+        if self.ui.scoped.slab_draft.method == DistributionMethod::OneWay {
+            ui.horizontal(|ui| {
+                ui.label("伝達方向:");
+                for (dir, label) in [
+                    (None, "既定"),
+                    (Some(squid_n_core::model::OneWayDir::X), "X"),
+                    (Some(squid_n_core::model::OneWayDir::Y), "Y"),
+                    (Some(squid_n_core::model::OneWayDir::Short), "短辺"),
+                ] {
+                    ui.selectable_value(&mut self.ui.scoped.slab_draft.one_way, dir, label);
+                }
+            });
+        }
 
         let section = self.ui.scoped.slab_draft.section;
         let value_kn_m2 = self
@@ -349,7 +362,7 @@ impl App {
             loads: vec![AreaLoad { kind, value }],
             usage: self.ui.scoped.slab_draft.usage,
             method: self.ui.scoped.slab_draft.method,
-            one_way: None,
+            one_way: self.ui.scoped.slab_draft.one_way,
         };
 
         let mut close = false;

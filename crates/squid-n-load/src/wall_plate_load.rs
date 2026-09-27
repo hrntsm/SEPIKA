@@ -375,7 +375,8 @@ fn accumulate_wall_and_secondary_with_basis(
     if !wall_plates_without_load_path(model).is_empty() {
         return Err("壁版の自重支持辺が未指定・不正、または支持先へ荷重を伝えられません".into());
     }
-    let transfer = crate::cascade::solve_with_basis(model, |_| 0.0, true, basis);
+    let transfer =
+        crate::cascade::solve_with_basis(model, |_| 0.0, true, basis).map_err(|e| e.to_string())?;
     if !transfer.invalid_end_shares.is_empty()
         || !transfer.unresolved.is_empty()
         || !transfer.cyclic.is_empty()

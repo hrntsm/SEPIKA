@@ -17,7 +17,7 @@ pub(crate) fn compute_design_check_job(
     model: &Model,
     params: &JobParams,
 ) -> Result<JobOutcome, JobError> {
-    let (work, notices) = model_prepared_for_analysis(model, params);
+    let (work, notices) = model_prepared_for_analysis(model, params)?;
     let lc = resolve_load_case(&work, params.load_case)?;
     let lc_id = lc.id;
     let result = squid_n_job::compute::compute_linear_static(work.clone(), lc_id)?;

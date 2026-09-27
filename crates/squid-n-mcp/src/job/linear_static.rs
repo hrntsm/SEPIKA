@@ -14,7 +14,7 @@ pub(crate) fn compute_linear_static_job(
     model: &Model,
     params: &JobParams,
 ) -> Result<JobOutcome, JobError> {
-    let (work, notices) = model_prepared_for_analysis(model, params);
+    let (work, notices) = model_prepared_for_analysis(model, params)?;
     let lc_id = resolve_load_case(&work, params.load_case)?.id;
     let result = squid_n_job::compute::compute_linear_static(work.clone(), lc_id)?;
     let model = &work;
