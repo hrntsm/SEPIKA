@@ -85,7 +85,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &mut warnings,
         &mut notes,
         &section_uses,
-    );
+    )?;
 
     let mut stats = LinkStats::default();
     build_members(
@@ -1433,7 +1433,7 @@ fn build_sections(
     warnings: &mut Vec<String>,
     notes: &mut Vec<String>,
     section_uses: &HashMap<u32, FrameSectionUse>,
-) -> HashMap<u32, u32> {
+) -> Result<HashMap<u32, u32>, StbError> {
     pending.sort_by_key(|s| s.file_id);
 
     let mut index_map: HashMap<u32, u32> = HashMap::new();
@@ -1595,6 +1595,14 @@ fn build_sections(
             });
 
         let idx = match by_key.get(&(section.name.clone(), section.floor.clone())) {
+            Some(&existing) if model.sections[existing].frame_use != section.frame_use => {
+                return Err(StbError::Unmappable(format!(
+                    "符号＋階が同じ断面定義の用途が競合: {} ({:?} と {:?})",
+                    section.display_name(),
+                    model.sections[existing].frame_use,
+                    section.frame_use
+                )));
+            }
             Some(&existing) if model.sections[existing].properties_eq(&section) => {
                 merged += 1;
                 existing
@@ -1637,7 +1645,7 @@ fn build_sections(
             renamed.len()
         ));
     }
-    index_map
+    Ok(index_map)
 }
 
 /// 断面を末尾へ追加し、`id`（＝配列添字）を確定して符号＋階の索引へ登録する。

@@ -264,11 +264,11 @@ fn members_body(
         let sec = sm
             .section
             .map(|s| {
-                beam_map
-                    .get(&s.0)
-                    .or_else(|| col_map.get(&s.0))
-                    .copied()
-                    .unwrap_or(s.0) as i64
+                let role_map = match sm.kind {
+                    squid_n_core::model::SecondaryMemberKind::Beam => beam_map,
+                    squid_n_core::model::SecondaryMemberKind::Post => col_map,
+                };
+                role_map.get(&s.0).copied().unwrap_or(s.0) as i64
             })
             .unwrap_or(-1);
         let ks = model

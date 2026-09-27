@@ -5,8 +5,8 @@ use smallvec::smallvec;
 use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId, StoryId};
 use squid_n_core::model::SlabPlate;
 use squid_n_core::model::{
-    AxisGroupKind, AxisSource, ElementData, ElementKind, EndCondition, ForceRegime,
-    FrameSectionUse, LocalAxis, Material, MaterialCategory, Model, Node, Section, Story,
+    AxisGroupKind, AxisSource, ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis,
+    Material, MaterialCategory, Model, Node, Section, Story,
 };
 use squid_n_core::section_shape::SectionShape;
 
@@ -1037,10 +1037,7 @@ fn test_export_rejects_beam_section_with_brace_use() {
     assert!(matches!(err, StbError::FrameSectionUseMismatch(_)), "{err}");
 }
 
-/// 符号＋階が同じでも**材料が違えば統合しない**。
-///
-/// 材料は断面が持つため、材料だけが違う定義を 1 断面へまとめると片方の材料が
-/// 無言で捨てられる。符号へ連番を付けて両方の定義を残す。
+/// 符号＋階が同じでも材料が違えば統合しない。
 #[test]
 fn test_import_does_not_merge_sections_with_different_materials() {
     let xml = r#"<?xml version="1.0"?>
@@ -1056,18 +1053,24 @@ fn test_import_does_not_merge_sections_with_different_materials() {
   </StbMaterials>
   <StbSections>
     <StbSecColumn_S id="0" name="C1"><StbSecSteelFigureColumn_S><StbSecSteelColumn_S_Same shape="H1" strength_main="SN400B"/></StbSecSteelFigureColumn_S></StbSecColumn_S>
-    <StbSecBeam_S id="1" name="C1"><StbSecSteelFigureBeam_S><StbSecSteelBeam_S_Straight shape="H1" strength_main="SN490B"/></StbSecSteelFigureBeam_S></StbSecBeam_S>
+    <StbSecColumn_S id="1" name="C1"><StbSecSteelFigureColumn_S><StbSecSteelColumn_S_Same shape="H1" strength_main="SN490B"/></StbSecSteelFigureColumn_S></StbSecColumn_S>
     <StbSecSteel><StbSecRoll-H name="H1" type="H" A="300" B="150" t1="6.5" t2="9" r="0"/></StbSecSteel>
   </StbSections>
   <StbMembers>
     <StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0"/>
-    <StbGirder id="1" id_node_start="1" id_node_end="2" id_section="1"/>
+    <StbColumn id="1" id_node_bottom="1" id_node_top="2" id_section="1"/>
   </StbMembers>
 </StbModel></ST_BRIDGE>"#;
-    let (model, _) = import_stbridge_with_report(xml).expect("主架構用途から断面用途を設定");
+    let (model, _) = import_stbridge_with_report(xml).expect("材料が違う断面は統合しない");
     assert_eq!(model.sections.len(), 2);
-    assert_eq!(model.sections[0].frame_use, Some(FrameSectionUse::Column));
-    assert_eq!(model.sections[1].frame_use, Some(FrameSectionUse::Girder));
+    assert_eq!(
+        model.sections[0].frame_use,
+        Some(squid_n_core::model::FrameSectionUse::Column)
+    );
+    assert_eq!(
+        model.sections[1].frame_use,
+        Some(squid_n_core::model::FrameSectionUse::Column)
+    );
 }
 
 /// 同じ断面を指す部材が別々の `id_material` を持つファイルは、先に解決した材料を
@@ -1112,9 +1115,8 @@ fn test_import_warns_when_members_conflict_on_section_material() {
     );
 }
 
-/// 標準モード: 柱・梁で同名の RC 矩形断面は用途別に書き分けられ、
-/// 取り込みでは用途別の実配筋モデル（`RcColumnRect` / `RcBeamRect`）として
-/// 別断面になる（用途で配筋の意味が異なるため統合しない）。
+/// 標準モード: 柱・梁で同名の RC 矩形断面は用途別に書き分けられるが、
+/// 取り込みでは同一符号・階の用途競合として fail-loud にする。
 #[test]
 fn test_standard_roundtrip_shared_rc_rect_rebar() {
     let mut m = frame_nodes();
@@ -1134,10 +1136,8 @@ fn test_standard_roundtrip_shared_rc_rect_rebar() {
     m.elements.push(member(1, false, 1)); // 梁
 
     let xml = export_stbridge(&m).unwrap();
-    let model = import_stbridge(&xml).expect("主架構用途が異なる断面を分離");
-    assert_eq!(model.sections.len(), 2);
-    assert_eq!(model.sections[0].frame_use, Some(FrameSectionUse::Column));
-    assert_eq!(model.sections[1].frame_use, Some(FrameSectionUse::Girder));
+    let error = import_stbridge(&xml).expect_err("主架構用途の競合は改番せず失敗する");
+    assert!(matches!(error, StbError::Unmappable(message) if message.contains("用途が競合")));
 }
 
 /// せん断補強筋の材料が未割当でも配筋は完全一致で往復する
@@ -3204,6 +3204,83 @@ fn test_secondary_members_roundtrip() {
     assert!(back.validate().is_ok());
 }
 
+#[test]
+fn test_export_secondary_post_uses_column_section_map() {
+    use squid_n_core::model::{SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind};
+
+    let mut m = frame_nodes();
+    let h = SectionShape::SteelH {
+        height: 300.0,
+        width: 150.0,
+        web_thick: 6.5,
+        flange_thick: 9.0,
+    };
+    let mut section = h.to_section(SectionId(0), "共有".into());
+    section.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+    push_section(&mut m, section);
+    m.elements.push(member(0, true, 0));
+    let ends = SecondaryMemberEnds::Detached([m.nodes[0].coord, m.nodes[1].coord]);
+    for (id, kind) in [
+        (0, SecondaryMemberKind::Beam),
+        (1, SecondaryMemberKind::Post),
+    ] {
+        let target = match kind {
+            SecondaryMemberKind::Beam => &mut m.unassigned_beams,
+            SecondaryMemberKind::Post => &mut m.unassigned_posts,
+        };
+        target.push(SecondaryMember {
+            id: squid_n_core::ids::SecondaryMemberId(id),
+            gravity_end_shares: None,
+            kind,
+            ends,
+            section: Some(SectionId(0)),
+            name: format!("二次{id}"),
+        });
+    }
+
+    let xml = export_stbridge(&m).expect("export");
+    assert!(xml.contains("<StbSecColumn_S id=\"1\""), "{xml}");
+    assert!(xml.contains("<StbSecBeam_S id=\"2\""), "{xml}");
+    assert!(
+        xml.contains("<StbPost id=\"3\" name=\"P3\" id_node_bottom=\"1\" id_node_top=\"2\" rotate=\"0\" id_section=\"1\"")
+            && xml.contains("<StbBeam id=\"2\" name=\"B2\" id_node_start=\"1\" id_node_end=\"2\" rotate=\"0\" id_section=\"2\""),
+        "二次部材の種別ごとに断面用途を選ぶ: {xml}"
+    );
+}
+
+#[test]
+fn test_export_post_only_uses_column_section() {
+    use squid_n_core::model::{SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind};
+
+    let mut m = frame_nodes();
+    let mut section = SectionShape::SteelH {
+        height: 300.0,
+        width: 150.0,
+        web_thick: 6.5,
+        flange_thick: 9.0,
+    }
+    .to_section(SectionId(0), "間柱".into());
+    section.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+    push_section(&mut m, section);
+    m.unassigned_posts.push(SecondaryMember {
+        id: squid_n_core::ids::SecondaryMemberId(0),
+        gravity_end_shares: None,
+        kind: SecondaryMemberKind::Post,
+        ends: SecondaryMemberEnds::Detached([m.nodes[0].coord, m.nodes[2].coord]),
+        section: Some(SectionId(0)),
+        name: "間柱".into(),
+    });
+
+    let xml = export_stbridge(&m).expect("export");
+    assert!(xml.contains("<StbSecColumn_S id=\"1\""), "{xml}");
+    assert!(xml.contains("<StbPost id=\"1\" name=\"P1\""), "{xml}");
+    assert!(xml.contains("id_section=\"1\""), "{xml}");
+    assert!(
+        !xml.contains("<StbSecBeam_"),
+        "間柱のみで梁断面を出さない: {xml}"
+    );
+}
+
 /// 材軸中間へアンカーした（両端に節点を持たない）二次部材は、ST-Bridge が材端を
 /// 節点 ID で表すため書き出せない。黙って落とさず、件数と ID を示すエラーにする。
 #[test]
@@ -3719,6 +3796,27 @@ fn test_import_renames_conflicting_duplicate_sections() {
         report.warnings.iter().any(|w| w.contains("b3#2")),
         "warnings: {:?}",
         report.warnings
+    );
+}
+
+#[test]
+fn test_import_fails_on_duplicate_section_frame_use_conflict() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ST_BRIDGE version="2.0.2"><StbModel>
+  <StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/></StbNodes>
+  <StbSections>
+    <StbSecBeam_S id="1" name="共有"><StbSecSteelFigureBeam_S><StbSecSteelBeam_S_Straight shape="H"/></StbSecSteelFigureBeam_S></StbSecBeam_S>
+    <StbSecColumn_S id="2" name="共有"><StbSecSteelFigureColumn_S><StbSecSteelColumn_S_Same shape="H"/></StbSecSteelFigureColumn_S></StbSecColumn_S>
+    <StbSecSteel><StbSecRoll-H name="H" type="H" A="300" B="150" t1="6.5" t2="9"/></StbSecSteel>
+  </StbSections>
+  <StbMembers>
+    <StbGirders><StbGirder id="1" id_node_start="1" id_node_end="2" id_section="1"/></StbGirders>
+    <StbColumns><StbColumn id="2" id_node_bottom="1" id_node_top="2" id_section="2"/></StbColumns>
+  </StbMembers>
+</StbModel></ST_BRIDGE>"#;
+    let error = import_stbridge(xml).expect_err("用途競合は改番せず失敗する");
+    assert!(
+        matches!(error, super::StbError::Unmappable(message) if message.contains("用途が競合"))
     );
 }
 
