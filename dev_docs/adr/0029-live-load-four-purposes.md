@@ -4,7 +4,7 @@ Status: accepted
 
 ## 決定
 
-積載荷重の用途 `LoadPurpose` に小梁用 `Joist` を追加し、床用（床スラブ）・小梁用（小梁）・
+積載荷重の用途 `LoadPurpose` に小梁用 `Beam` を追加し、床用（床スラブ）・小梁用（小梁）・
 大梁用（大梁・柱・基礎の長期骨組）・地震用（地震力）の 4 区分とする。
 
 用途プリセット（`SlabUsage`）の小梁用は床用と同じ値を返す。令 85 条 1 項の別表の (い) 欄は
@@ -24,11 +24,17 @@ Status: accepted
 
 ## 影響
 
-- 小梁の断面検定は小梁用（`LoadPurpose::Joist`）、床スラブの検定は床用（`LoadPurpose::Floor`）
+- 小梁の断面検定は小梁用（`LoadPurpose::Beam`）、床スラブの検定は床用（`LoadPurpose::Floor`）
   を使う。荷重同期（`squid-n-job::auto_loads`）は従来どおり大梁用（`Frame`）と地震用（`Seismic`）
   を使う。
 - スキーマ互換は [ADR 0014](0014-schema-compatibility.md) により維持しない。`SlabUsage::Custom`
-  に `joist` を追加するが、スキーマ版は 1 のままでマイグレーションは行わない。
+  に `beam` を追加するが、スキーマ版は 1 のままでマイグレーションは行わない。
+
+## Amendment
+
+現行実装との整合のため、小梁用の用途名を `Joist` から `Beam` へ修正した。これは名称の修正であり、
+列挙値の ordinal およびスキーマ上の並び順は変更していない。過去の決定履歴を改変するものではなく、
+現行 ADR の記述を実装へ合わせる amendment である。
 
 Legacy source:
 - Issue #347
