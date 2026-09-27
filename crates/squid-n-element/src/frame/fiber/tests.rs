@@ -2346,9 +2346,7 @@ fn fc_over_60_fiber_materials_use_newrc_envelope_and_history() {
         let origin_tangent = max_stress / max_strain;
         let (expected_stress, expected_tangent) = match rule {
             HysteresisModel::Retrograde => (-envelope_stress, envelope_tangent),
-            HysteresisModel::OriginOriented => {
-                (origin_tangent * unload_strain, origin_tangent)
-            }
+            HysteresisModel::OriginOriented => (origin_tangent * unload_strain, origin_tangent),
             _ => unreachable!(),
         };
         assert_relative_eq!(unload_stress, expected_stress, max_relative = 1e-9);
