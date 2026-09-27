@@ -4413,7 +4413,7 @@ fn test_generate_story_structure_defaults_to_rc_without_section_and_material() {
 /// 既存の階定義からそのまま引き継ぐ。所属節点・算定重量だけが更新される。
 #[test]
 fn test_regeneration_keeps_user_defined_story_fields() {
-    use squid_n_core::model::StoryLevelKind;
+    use squid_n_core::model::{StandardFloorLoad, StoryLevelKind};
     let mut model = two_story_model();
     // 1 回目の生成結果をモデルへ適用し、利用者の入力を加える。
     let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
@@ -4421,6 +4421,13 @@ fn test_regeneration_keeps_user_defined_story_fields() {
     model.stories[0].name = "1FL".into();
     model.stories[0].weight_override = Some(12345.0);
     model.stories[0].seismic_weight = Some(12345.0);
+    model.stories[0].standard_floor_load = Some(StandardFloorLoad {
+        dead: 0.001,
+        floor: 0.002,
+        joist: 0.003,
+        frame: 0.004,
+        seismic: 0.005,
+    });
     model.stories[1].name = "PH".into();
     model.stories[1].level_kind = StoryLevelKind::Penthouse { k: 0.7 };
 
@@ -4444,6 +4451,31 @@ fn test_regeneration_keeps_user_defined_story_fields() {
     assert!(
         fresh[1].seismic_weight.unwrap() > 50000.0,
         "手入力のない階は自動算定値"
+    );
+    assert_eq!(fresh[0].standard_floor_load.unwrap().dead, 0.001);
+
+    let mut with_inserted_floor = model.clone();
+    with_inserted_floor.stories.insert(
+        1,
+        Story {
+            id: StoryId(99),
+            name: "中間階".into(),
+            elevation: 5250.0,
+            ..model.stories[0].clone()
+        },
+    );
+    let regenerated = generate_stories(&with_inserted_floor, Some(LoadCaseId(0)))
+        .unwrap()
+        .stories;
+    assert_eq!(
+        regenerated
+            .iter()
+            .find(|s| s.elevation == 0.0)
+            .and_then(|s| s.standard_floor_load)
+            .unwrap()
+            .dead,
+        0.001,
+        "階の挿入後も標高で標準床荷重を引き継ぐ"
     );
 }
 

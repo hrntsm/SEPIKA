@@ -84,28 +84,70 @@ fn column_dimension(
     model: &Model,
     beam: &ElementData,
     node: NodeId,
+    story: StoryId,
 ) -> Result<f64, PerimeterSlabError> {
-    let candidates = model.elements.iter().filter(|e| {
-        e.kind == ElementKind::Beam
-            && e.nodes.len() == 2
-            && e.nodes.contains(&node)
-            && model
-                .nodes
-                .get(e.nodes[0].index())
-                .zip(model.nodes.get(e.nodes[1].index()))
-                .is_some_and(|(a, b)| (a.coord[2] - b.coord[2]).abs() > 1.0)
-    });
-    let column = candidates
-        .filter(|e| e.section.is_some())
-        .find(|e| {
-            e.section
-                .and_then(|id| model.sections.get(id.index()))
-                .is_some_and(|s| s.width > 0.0 && s.depth > 0.0)
-        })
+    let bottom = model
+        .layers()
+        .into_iter()
+        .find(|layer| layer.top == story)
+        .map(|layer| layer.bottom_elevation)
         .ok_or(PerimeterSlabError::MissingColumn {
             beam: beam.id,
             node,
         })?;
+    let mut current = node;
+    let mut visited = std::collections::HashSet::from([node]);
+    let mut column_index = None;
+    loop {
+        let current_z = model
+            .nodes
+            .get(current.index())
+            .ok_or(PerimeterSlabError::MissingColumn {
+                beam: beam.id,
+                node,
+            })?
+            .coord[2];
+        if current != node && (current_z - bottom).abs() <= crate::model::DIAPHRAGM_LEVEL_TOL_MM {
+            break;
+        }
+        let lower: Vec<_> = model
+            .elements
+            .iter()
+            .enumerate()
+            .filter_map(|(index, element)| {
+                if element.kind != ElementKind::Beam || element.nodes.len() != 2 {
+                    return None;
+                }
+                let other = if element.nodes[0] == current {
+                    element.nodes[1]
+                } else if element.nodes[1] == current {
+                    element.nodes[0]
+                } else {
+                    return None;
+                };
+                let (a, b) = (
+                    model.nodes.get(current.index())?,
+                    model.nodes.get(other.index())?,
+                );
+                (crate::geom::is_vertical_axis(a.coord, b.coord) && b.coord[2] < current_z - 1e-9)
+                    .then_some((index, other))
+            })
+            .collect();
+        if lower.len() != 1 || !visited.insert(lower[0].1) {
+            return Err(PerimeterSlabError::MissingColumn {
+                beam: beam.id,
+                node,
+            });
+        }
+        if column_index.is_none() {
+            column_index = Some(lower[0].0);
+        }
+        current = lower[0].1;
+    }
+    let column = &model.elements[column_index.ok_or(PerimeterSlabError::MissingColumn {
+        beam: beam.id,
+        node,
+    })?];
     let section =
         model
             .element_section(column)
@@ -219,8 +261,8 @@ pub fn perimeter_slabs(model: &Model) -> Result<Vec<PerimeterSlab>, PerimeterSla
         if model.element_section(beam).is_none() {
             return Err(PerimeterSlabError::MissingBeamSection(beam.id));
         }
-        let extent = (column_dimension(model, beam, beam.nodes[0])?
-            + column_dimension(model, beam, beam.nodes[1])?)
+        let extent = (column_dimension(model, beam, beam.nodes[0], story.id)?
+            + column_dimension(model, beam, beam.nodes[1], story.id)?)
             / 4.0;
         let edge = edges[0].1;
         let p0 = model
@@ -330,8 +372,23 @@ mod tests {
         );
         region.slab_ids.push(SlabId(0));
         model.floor_regions.push(region);
+        model.stories.insert(
+            0,
+            Story {
+                id: StoryId(1),
+                name: "基部".into(),
+                elevation: 0.0,
+                node_ids: Vec::new(),
+                seismic_weight: None,
+                weight_override: None,
+                structure: StoryStructure::default(),
+                level_kind: StoryLevelKind::default(),
+                dynamic_mass: None,
+                standard_floor_load: None,
+            },
+        );
         model.stories.push(Story {
-            id: StoryId(0),
+            id: StoryId(2),
             name: "1F".into(),
             elevation: 3000.0,
             node_ids: Vec::new(),
@@ -351,7 +408,7 @@ mod tests {
         let slabs = perimeter_slabs(&model).unwrap();
         assert_eq!(slabs.len(), 1);
         assert_eq!(slabs[0].extent_mm, 300.0);
-        let standard = model.stories[0].standard_floor_load.unwrap();
+        let standard = model.stories[1].standard_floor_load.unwrap();
         assert_eq!(standard.intensity(None), 0.005);
         assert_eq!(standard.intensity(Some(LoadPurpose::Floor)), 0.004);
         assert_eq!(standard.intensity(Some(LoadPurpose::Joist)), 0.003);
@@ -389,7 +446,7 @@ mod tests {
             model.nodes = vec![
                 node(0, [0.0, 0.0, 0.0]),
                 node(1, beam_end),
-                node(2, [0.0, 0.0, 3000.0]),
+                node(2, [0.0, 0.0, -3000.0]),
             ];
             model.sections = vec![
                 Section {
@@ -411,7 +468,33 @@ mod tests {
                 element(0, [0, 1], SectionId(0), [0.0, 0.0, 1.0]),
                 element(1, [0, 2], SectionId(1), ref_vector),
             ];
-            column_dimension(&model, &model.elements[0], NodeId(0)).unwrap()
+            model.stories = vec![
+                Story {
+                    id: StoryId(0),
+                    name: "1F".into(),
+                    elevation: -3000.0,
+                    node_ids: Vec::new(),
+                    seismic_weight: None,
+                    weight_override: None,
+                    structure: StoryStructure::default(),
+                    level_kind: StoryLevelKind::default(),
+                    dynamic_mass: None,
+                    standard_floor_load: None,
+                },
+                Story {
+                    id: StoryId(1),
+                    name: "2F".into(),
+                    elevation: 0.0,
+                    node_ids: Vec::new(),
+                    seismic_weight: None,
+                    weight_override: None,
+                    structure: StoryStructure::default(),
+                    level_kind: StoryLevelKind::default(),
+                    dynamic_mass: None,
+                    standard_floor_load: None,
+                },
+            ];
+            column_dimension(&model, &model.elements[0], NodeId(0), StoryId(1)).unwrap()
         };
 
         assert_eq!(dimensions([6000.0, 0.0, 0.0], [1.0, 0.0, 0.0]), 600.0);
@@ -421,5 +504,87 @@ mod tests {
         assert_eq!(dimensions([6000.0, 6000.0, 0.0], [1.0, -1.0, 0.0]), 400.0);
         assert_eq!(dimensions([6000.0, -6000.0, 0.0], [1.0, -1.0, 0.0]), 600.0);
         assert_eq!(dimensions([6000.0, -6000.0, 0.0], [-1.0, 1.0, 0.0]), 600.0);
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn selects_the_column_segment_below_the_target_floor_independent_of_order() {
+        let mut model = Model::default();
+        model.nodes = vec![
+            node(0, [0.0, 0.0, 3000.0]),
+            node(1, [6000.0, 0.0, 3000.0]),
+            node(2, [0.0, 0.0, 0.0]),
+            node(3, [0.0, 0.0, 6000.0]),
+            node(4, [3000.0, 3000.0, 0.0]),
+        ];
+        model.sections = vec![
+            Section {
+                id: SectionId(0),
+                name: "梁".into(),
+                depth: 300.0,
+                width: 300.0,
+                ..Section::zero(SectionId(0), "梁".into())
+            },
+            Section {
+                id: SectionId(1),
+                name: "下階柱".into(),
+                depth: 400.0,
+                width: 400.0,
+                ..Section::zero(SectionId(1), "下階柱".into())
+            },
+            Section {
+                id: SectionId(2),
+                name: "上階柱".into(),
+                depth: 800.0,
+                width: 800.0,
+                ..Section::zero(SectionId(2), "上階柱".into())
+            },
+            Section {
+                id: SectionId(3),
+                name: "斜材".into(),
+                depth: 1200.0,
+                width: 1200.0,
+                ..Section::zero(SectionId(3), "斜材".into())
+            },
+        ];
+        model.elements = vec![
+            element(0, [0, 1], SectionId(0), [0.0, 0.0, 1.0]),
+            element(1, [0, 3], SectionId(2), [1.0, 0.0, 0.0]),
+            element(2, [0, 4], SectionId(3), [1.0, 0.0, 0.0]),
+            element(3, [0, 2], SectionId(1), [1.0, 0.0, 0.0]),
+        ];
+        model.stories = vec![
+            Story {
+                id: StoryId(0),
+                name: "1F".into(),
+                elevation: 0.0,
+                node_ids: Vec::new(),
+                seismic_weight: None,
+                weight_override: None,
+                structure: StoryStructure::default(),
+                level_kind: StoryLevelKind::default(),
+                dynamic_mass: None,
+                standard_floor_load: None,
+            },
+            Story {
+                id: StoryId(1),
+                name: "2F".into(),
+                elevation: 3000.0,
+                node_ids: Vec::new(),
+                seismic_weight: None,
+                weight_override: None,
+                structure: StoryStructure::default(),
+                level_kind: StoryLevelKind::default(),
+                dynamic_mass: None,
+                standard_floor_load: None,
+            },
+        ];
+        let expected = column_dimension(&model, &model.elements[0], NodeId(0), StoryId(1));
+        model.elements.swap(1, 3);
+        assert_eq!(
+            column_dimension(&model, &model.elements[0], NodeId(0), StoryId(1)),
+            expected
+        );
+        assert_eq!(expected.unwrap(), 400.0);
     }
 }
