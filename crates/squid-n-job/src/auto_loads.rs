@@ -890,6 +890,18 @@ mod tests {
         region.slab_ids.push(squid_n_core::ids::SlabId(0));
         model.floor_regions.push(region);
         model.stories.push(Story {
+            id: StoryId(1),
+            name: "基部".into(),
+            elevation: 0.0,
+            node_ids: Vec::new(),
+            seismic_weight: None,
+            weight_override: None,
+            structure: Default::default(),
+            level_kind: Default::default(),
+            dynamic_mass: None,
+            standard_floor_load: None,
+        });
+        model.stories.push(Story {
             id: StoryId(0),
             name: "1F".into(),
             elevation: 3000.0,
