@@ -51,12 +51,17 @@ fn validate_secondary_section_uses(model: &Model) -> Result<(), StbError> {
         let Some(section_id) = secondary.section else {
             continue;
         };
-        let Some(frame_use) = model
-            .sections
-            .get(section_id.index())
-            .and_then(|section| section.frame_use)
-        else {
-            continue;
+        let Some(section) = model.sections.get(section_id.index()) else {
+            return Err(StbError::FrameSectionUseMissing(format!(
+                "二次部材 {} ({:?}) が参照する断面 {}",
+                secondary.id.0, secondary.kind, section_id.0
+            )));
+        };
+        let Some(frame_use) = section.frame_use else {
+            return Err(StbError::FrameSectionUseMissing(format!(
+                "二次部材 {} ({:?}) が参照する断面 {}",
+                secondary.id.0, secondary.kind, section_id.0
+            )));
         };
         let expected = match secondary.kind {
             SecondaryMemberKind::Joist => FrameSectionUse::Beam,

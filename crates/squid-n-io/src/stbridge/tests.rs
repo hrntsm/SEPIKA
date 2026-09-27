@@ -3138,6 +3138,15 @@ fn test_secondary_members_roundtrip() {
     assert!(xml.contains("<StbBeams>"), "小梁を書き出す: {xml}");
     assert!(xml.contains("<StbPosts>"), "間柱を書き出す: {xml}");
 
+    m.sections[0].frame_use = None;
+    let err = export_stbridge(&m).expect_err("用途不明の小梁断面を出力しない");
+    assert!(matches!(err, StbError::FrameSectionUseMissing(_)), "{err}");
+    m.sections[0].frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    m.sections[1].frame_use = None;
+    let err = export_stbridge(&m).expect_err("用途不明の間柱断面を出力しない");
+    assert!(matches!(err, StbError::FrameSectionUseMissing(_)), "{err}");
+    m.sections[1].frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+
     m.unassigned_joists[0].section = Some(SectionId(1));
     let err = export_stbridge(&m).expect_err("柱用途の断面を小梁へ暗黙変換しない");
     assert!(matches!(err, StbError::FrameSectionUseMismatch(_)), "{err}");

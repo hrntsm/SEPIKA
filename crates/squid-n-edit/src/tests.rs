@@ -620,6 +620,66 @@ fn test_edit_section_shape_roundtrip() {
 }
 
 #[test]
+fn test_edit_section_shape_rejects_use_change_for_references() {
+    let shape = squid_n_section::shape::SectionShape::SteelBox {
+        height: 200.0,
+        width: 200.0,
+        thick: 12.0,
+        corner_r: 0.0,
+    };
+    let mut model = empty_model();
+    let mut section = shape.to_section(SectionId(0), "S".into());
+    section.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
+    model.sections.push(section);
+    model.elements.push(ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Beam,
+        nodes: smallvec![NodeId(0), NodeId(1)],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    });
+    let old = model.sections[0].clone();
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(
+        &mut model,
+        Box::new(EditSectionShape {
+            section: SectionId(0),
+            new_shape: shape.clone(),
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Brace),
+        }),
+    ));
+    assert_eq!(model.sections[0], old);
+
+    model.elements.clear();
+    model
+        .unassigned_joists
+        .push(squid_n_core::model::SecondaryMember {
+            id: squid_n_core::ids::SecondaryMemberId(0),
+            gravity_end_shares: None,
+            kind: squid_n_core::model::SecondaryMemberKind::Joist,
+            ends: squid_n_core::model::SecondaryMemberEnds::Detached([[0.0; 3], [1.0, 0.0, 0.0]]),
+            section: Some(SectionId(0)),
+            name: "B1".into(),
+        });
+    assert!(!stack.run(
+        &mut model,
+        Box::new(EditSectionShape {
+            section: SectionId(0),
+            new_shape: shape,
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
+        }),
+    ));
+    assert_eq!(model.sections[0], old);
+}
+
+#[test]
 fn test_duplicate_section_for_member_roundtrip() {
     let mut model = empty_model();
     let mut stack = UndoStack::new();
