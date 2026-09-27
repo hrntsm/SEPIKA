@@ -423,17 +423,19 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
             None => draft.name.clone(),
         };
 
-        egui::ComboBox::from_label("主架構用途")
-            .selected_text(match draft.frame_use {
-                FrameSectionUse::Beam => "梁",
-                FrameSectionUse::Column => "柱",
-                FrameSectionUse::Brace => "ブレース",
-            })
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Beam, "梁");
-                ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Column, "柱");
-                ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Brace, "ブレース");
-            });
+        if !matches!(draft.kind, ShapeKind::RcSlab) {
+            egui::ComboBox::from_label("主架構用途")
+                .selected_text(match draft.frame_use {
+                    FrameSectionUse::Beam => "梁",
+                    FrameSectionUse::Column => "柱",
+                    FrameSectionUse::Brace => "ブレース",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Beam, "梁");
+                    ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Column, "柱");
+                    ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Brace, "ブレース");
+                });
+        }
 
         ui.horizontal(|ui| {
             let can_add = key_free_for_add && !draft.name.trim().is_empty() && rebar_validation.is_ok();
@@ -453,7 +455,8 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                         new_id: predicted_id,
                         name: draft.name.clone(),
                         floor: draft_floor.clone(),
-                        frame_use: draft.frame_use,
+                        frame_use: (!matches!(draft.kind, ShapeKind::RcSlab))
+                            .then_some(draft.frame_use),
                     }),
                 );
                 app.core.scoped.staleness.mark_edited();
@@ -483,7 +486,8 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                             Box::new(EditSectionShape {
                                 section: sid,
                                 new_shape: shape.clone(),
-                                frame_use: draft.frame_use,
+                                frame_use: (!matches!(draft.kind, ShapeKind::RcSlab))
+                                    .then_some(draft.frame_use),
                             }),
                         );
                         app.core.scoped.staleness.mark_edited();
@@ -1137,7 +1141,7 @@ mod tests {
             Box::new(EditSectionShape {
                 section: sid,
                 new_shape,
-                frame_use: new_draft.frame_use,
+                frame_use: Some(new_draft.frame_use),
             }),
         );
 

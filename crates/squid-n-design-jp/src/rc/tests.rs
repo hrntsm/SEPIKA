@@ -414,7 +414,7 @@ fn test_fc_missing_fallback() {
 fn test_shape_missing_fallback() {
     // shape を持たない Section（数値直入力等）。
     let sec = Section {
-        frame_use: None,
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         id: SectionId(0),
         name: "no-shape".to_string(),
         area: 300.0 * 600.0,

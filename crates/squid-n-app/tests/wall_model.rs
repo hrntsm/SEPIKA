@@ -234,6 +234,7 @@ fn wall_bay_model() -> Model {
         rebar: side_column_rebar,
     }
     .to_section(SectionId(3), "側柱 RC 300x300".into());
+    side_column_section.frame_use = Some(FrameSectionUse::Column);
     side_column_section.material = Some(MaterialId(1));
     side_column_section.rebar_material = Some(MaterialId(2));
     side_column_section.shear_rebar_material = Some(MaterialId(2));
@@ -244,6 +245,7 @@ fn wall_bay_model() -> Model {
         rebar: wall_girder_rebar,
     }
     .to_section(SectionId(4), "壁上下大梁 RC 300x400".into());
+    wall_girder_section.frame_use = Some(FrameSectionUse::Beam);
     wall_girder_section.material = Some(MaterialId(1));
     wall_girder_section.rebar_material = Some(MaterialId(2));
     wall_girder_section.shear_rebar_material = Some(MaterialId(2));

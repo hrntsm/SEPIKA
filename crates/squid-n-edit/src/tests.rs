@@ -565,7 +565,7 @@ fn test_add_section_shape_roundtrip() {
         new_id: SectionId(0),
         name: "H-300x300x10x15".into(),
         floor: None,
-        frame_use: squid_n_core::model::FrameSectionUse::Beam,
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
     };
     stack.run(&mut model, Box::new(cmd));
     assert_eq!(model.sections.len(), 1);
@@ -607,7 +607,7 @@ fn test_edit_section_shape_roundtrip() {
     let cmd = EditSectionShape {
         section: SectionId(0),
         new_shape: shape2,
-        frame_use: squid_n_core::model::FrameSectionUse::Beam,
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
     };
     stack.run(&mut model, Box::new(cmd));
     assert!((model.sections[0].area - 9024.0).abs() < 1.0);
@@ -692,7 +692,7 @@ fn test_edit_section_shape_invalid_id_noop() {
     let cmd = EditSectionShape {
         section: SectionId(99),
         new_shape: shape,
-        frame_use: squid_n_core::model::FrameSectionUse::Beam,
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
     };
     stack.run(&mut model, Box::new(cmd));
     // 失敗したコマンド（Noop）は undo 履歴に積まれない。
@@ -873,7 +873,7 @@ fn test_delete_section_in_use_is_noop_and_renumbers() {
     let mut model = two_member_model();
     for i in 0..2u32 {
         model.sections.push(Section {
-            frame_use: None,
+            frame_use: (i == 1).then_some(squid_n_core::model::FrameSectionUse::Beam),
             id: SectionId(i),
             name: format!("S{}", i),
             area: 100.0,
@@ -933,7 +933,7 @@ fn test_delete_section_referenced_by_joist() {
     }
     for i in 0..2u32 {
         model.sections.push(Section {
-            frame_use: None,
+            frame_use: (i == 1).then_some(squid_n_core::model::FrameSectionUse::Beam),
             id: SectionId(i),
             name: format!("S{}", i),
             area: 100.0,
@@ -3676,7 +3676,7 @@ fn test_delete_section_material_shift_and_guard_secondary_refs() {
             support_spring: None,
         });
         model.sections.push(Section {
-            frame_use: None,
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
             id: SectionId(i),
             name: format!("S{}", i),
             area: 100.0,
@@ -3818,7 +3818,7 @@ fn test_add_section_shape_rejects_duplicate_key() {
         new_id: SectionId(id),
         name: name.into(),
         floor: floor.map(str::to_string),
-        frame_use: squid_n_core::model::FrameSectionUse::Column,
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
     };
 
     stack.run(&mut model, Box::new(add("C1", Some("1"), 0)));
@@ -3853,7 +3853,7 @@ fn test_set_section_name_rejects_duplicate_key() {
                 new_id: SectionId(i as u32),
                 name: "C1".into(),
                 floor: Some((*floor).to_string()),
-                frame_use: squid_n_core::model::FrameSectionUse::Column,
+                frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
             }),
         );
     }
@@ -3908,7 +3908,7 @@ fn test_edit_section_shape_keeps_name_and_floor() {
             new_id: SectionId(0),
             name: "C1".into(),
             floor: Some("1".into()),
-            frame_use: squid_n_core::model::FrameSectionUse::Column,
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         }),
     );
     stack.run(
@@ -3921,7 +3921,7 @@ fn test_edit_section_shape_keeps_name_and_floor() {
                 thick: 12.0,
                 corner_r: 0.0,
             },
-            frame_use: squid_n_core::model::FrameSectionUse::Column,
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         }),
     );
     assert_eq!(model.sections[0].name, "C1");
@@ -4242,6 +4242,7 @@ fn test_copy_story_assigns_sections_with_target_floor_name() {
     let sec_id = SectionId(model.sections.len() as u32);
     let mut c1 = bare_section(sec_id, None);
     c1.name = "C1".into();
+    c1.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
     c1.floor = Some("2F".into());
     model.sections.push(c1);
     let targets_2f: Vec<squid_n_core::ids::ElemId> = model
@@ -4538,6 +4539,7 @@ fn test_copy_story_overwrite_mirrors_absence() {
     let sec_id = SectionId(model.sections.len() as u32);
     let mut c1 = bare_section(sec_id, None);
     c1.name = "C1".into();
+    c1.frame_use = Some(squid_n_core::model::FrameSectionUse::Beam);
     c1.floor = Some("3F".into());
     model.sections.push(c1);
     let members_3f: Vec<squid_n_core::ids::ElemId> = model

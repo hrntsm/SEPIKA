@@ -946,7 +946,24 @@ fn raw(id: u32, sec: &Section) -> String {
 }
 
 /// 標準モードの `<StbSections>` 本体と、部材参照の張り替え用 id マップを生成する。
-pub(super) fn standard_sections(model: &Model) -> StandardSections {
+pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super::StbError> {
+    for element in &model.elements {
+        if !matches!(element.kind, ElementKind::Beam | ElementKind::Brace { .. }) {
+            continue;
+        }
+        let Some(section_id) = element.section else {
+            continue;
+        };
+        let Some(section) = model.element_section(element) else {
+            continue;
+        };
+        if section.frame_use.is_none() {
+            return Err(super::StbError::FrameSectionUseMissing(format!(
+                "部材 {} が参照する断面 {}",
+                element.id.0, section_id.0
+            )));
+        }
+    }
     let roles = section_roles(model);
     let mut next_id = model.sections.iter().map(|s| s.id.0).max().unwrap_or(0) + 1;
     let mut alloc = || {
@@ -1213,12 +1230,12 @@ pub(super) fn standard_sections(model: &Model) -> StandardSections {
     for (_, xml) in &parts {
         sections_xml.push_str(xml);
     }
-    StandardSections {
+    Ok(StandardSections {
         sections_xml,
         steel_lib: steel.render(),
         col_map,
         beam_map,
         brace_map,
         warnings,
-    }
+    })
 }

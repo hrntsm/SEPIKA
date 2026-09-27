@@ -55,7 +55,7 @@ pub fn export_stbridge(model: &Model) -> Result<String, StbError> {
 /// 標準スキーマの表現限界による近似・切り捨て（主筋の 4 段目以降、円形 RC 梁の
 /// `StbSecRaw` フォールバックなど）は警告として報告する。
 pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportReport), StbError> {
-    let std = standard_sections(model);
+    let std = standard_sections(model)?;
     let warnings = std.warnings;
     let (sections_body, steel_lib, col_map, beam_map, brace_map) = (
         std.sections_xml,

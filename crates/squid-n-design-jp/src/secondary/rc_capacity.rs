@@ -65,7 +65,7 @@ mod tests {
         let fc = inp.fc;
 
         let sec = Section {
-            frame_use: None,
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
             id: SectionId(0),
             name: "test".into(),
             area: b * d_total,

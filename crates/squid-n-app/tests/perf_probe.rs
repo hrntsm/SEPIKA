@@ -81,7 +81,7 @@ fn build_grid_model(nx: usize, ny: usize, n_stories: usize, with_slabs: bool) ->
     }
 
     model.sections.push(Section {
-        frame_use: None,
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         id: SectionId(0),
         name: "COL 500x500".into(),
         area: 500.0 * 500.0,
@@ -102,7 +102,7 @@ fn build_grid_model(nx: usize, ny: usize, n_stories: usize, with_slabs: bool) ->
         steel_material: None,
     });
     model.sections.push(Section {
-        frame_use: None,
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(1),
         name: "BEAM 400x700".into(),
         area: 400.0 * 700.0,

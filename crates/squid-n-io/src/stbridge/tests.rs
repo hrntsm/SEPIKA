@@ -333,6 +333,17 @@ fn frame_nodes() -> Model {
 /// 主材料は [`frame_nodes`] の材料 0（SN400B）。配筋を持つ断面には主筋・せん断補強筋
 /// （SD345）を、SRC 断面にはさらに内蔵鉄骨（SN490B）を、モデルへ足して割り当てる。
 fn push_section(m: &mut Model, mut sec: Section) {
+    if sec.frame_use.is_none() {
+        sec.frame_use = match &sec.shape {
+            Some(
+                SectionShape::RcColumnRect { .. }
+                | SectionShape::RcColumnCircle { .. }
+                | SectionShape::SrcColumnRect { .. },
+            ) => Some(squid_n_core::model::FrameSectionUse::Column),
+            Some(SectionShape::RcWall { .. } | SectionShape::RcSlab { .. }) => None,
+            _ => Some(squid_n_core::model::FrameSectionUse::Beam),
+        };
+    }
     sec.material = Some(MaterialId(0));
     let has_rebar = matches!(
         sec.shape,
@@ -469,7 +480,7 @@ fn test_standard_mode_shared_section_split() {
 fn test_standard_mode_fallback_raw_for_shapeless() {
     let mut m = frame_nodes();
     m.sections.push(Section {
-        frame_use: None,
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         id: SectionId(0),
         name: "X1".into(),
         area: 1.0e4,
@@ -1126,6 +1137,7 @@ fn test_standard_roundtrip_rc_rebar_without_shear_material() {
         rebar: column_rebar_distinct(),
     };
     let mut sec = shape.to_section(SectionId(0), "C1".into());
+    sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
     sec.shear_rebar_material = None;
     m.sections.push(sec);
     m.elements.push(member(0, true, 0));
@@ -1225,6 +1237,7 @@ fn test_standard_roundtrip_shear_rebar_material_with_control_chars() {
         rebar: column_rebar_distinct(),
     };
     let mut sec = shape.to_section(SectionId(0), "C1".into());
+    sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
     sec.shear_rebar_material = Some(shear_mat);
     m.sections.push(sec);
     m.elements.push(member(0, true, 0));
@@ -2003,6 +2016,7 @@ fn test_roundtrip_brace() {
         thick: 5.0,
     };
     push_section(&mut m, pipe.to_section(SectionId(0), "BR".into()));
+    m.sections[0].frame_use = Some(squid_n_core::model::FrameSectionUse::Brace);
     // 節点0→3 の斜材（引張専用）。
     m.elements.push(ElementData {
         id: ElemId(0),
@@ -2891,6 +2905,7 @@ fn test_export_strips_illegal_control_chars() {
         flange_thick: 9.0,
     }
     .to_section(SectionId(0), "S".into());
+    sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
     sec.name = "A\u{0C}B".into(); // form feed を含む名前
     m.sections.push(sec);
     m.elements.push(member(0, true, 0));

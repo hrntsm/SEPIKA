@@ -5,7 +5,9 @@
 
 use squid_n_core::adjacency::NodeAdjacency;
 use squid_n_core::ids::NodeId;
-use squid_n_core::model::{ElementData, ElementKind, EndCondition, Material, Model, Section};
+use squid_n_core::model::{
+    ElementData, ElementKind, EndCondition, FrameSectionUse, Material, Model, Section,
+};
 use squid_n_element::transform::LocalFrame;
 
 /// ピン端・梁無し節点に用いる剛度比 G の規定値（本実装の既定値）。
@@ -447,7 +449,7 @@ mod tests {
 
     fn section(iy: f64) -> Section {
         Section {
-            frame_use: None,
+            frame_use: Some(FrameSectionUse::Column),
             id: SectionId(0),
             name: "H-400x200x8x13".to_string(),
             area: 8_000.0,

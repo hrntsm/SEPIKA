@@ -1305,7 +1305,7 @@ mod tests {
     use super::*;
     use smallvec::smallvec;
     use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId};
-    use squid_n_core::model::{ForceRegime, LocalAxis, RigidZone};
+    use squid_n_core::model::{ForceRegime, FrameSectionUse, LocalAxis, RigidZone};
     use squid_n_core::section_shape::SectionShape;
 
     /// 指定した種別・フォースレジームの 2 節点部材を作る（テスト用の最小構成）。
@@ -1400,7 +1400,10 @@ mod tests {
                 node(2, [0.0, 6000.0, 3000.0]),
                 node(3, [0.0, 0.0, 0.0]),
             ],
-            sections: vec![depth_section(0, 600.0), depth_section(1, 400.0)],
+            sections: vec![
+                depth_section(0, 600.0),
+                depth_section_with_use(1, 400.0, FrameSectionUse::Column),
+            ],
             elements: vec![
                 joint_member(0, 0, 1, 0), // X 方向の梁
                 joint_member(1, 0, 2, 0), // Y 方向の梁
@@ -1432,10 +1435,18 @@ mod tests {
 
     /// せいだけを与えた断面（見付き寸法の算定に必要なのはせいのみ）。
     fn depth_section(id: u32, depth: f64) -> squid_n_core::model::Section {
+        depth_section_with_use(id, depth, FrameSectionUse::Beam)
+    }
+
+    fn depth_section_with_use(
+        id: u32,
+        depth: f64,
+        frame_use: FrameSectionUse,
+    ) -> squid_n_core::model::Section {
         squid_n_core::model::Section {
             id: SectionId(id),
             name: String::new(),
-            frame_use: None,
+            frame_use: Some(frame_use),
             area: 1.0e4,
             iy: 1.0e8,
             iz: 1.0e8,
@@ -1490,7 +1501,10 @@ mod tests {
                 node(3, [0.0, 0.0, 0.0]),
                 node(4, [0.0, 0.0, 6000.0]),
             ],
-            sections: vec![depth_section(0, 600.0), depth_section(1, 400.0)],
+            sections: vec![
+                depth_section(0, 600.0),
+                depth_section_with_use(1, 400.0, FrameSectionUse::Column),
+            ],
             elements: vec![
                 joint_member(0, 1, 0, 0), // 左梁: j 端が接合部
                 joint_member(1, 0, 2, 0), // 右梁: i 端が接合部

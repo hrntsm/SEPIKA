@@ -51,7 +51,7 @@ pub(crate) mod test_support {
 
         // 断面（共通: iy=iz=1.0e6）
         let sec_base = Section {
-            frame_use: None,
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
             id: SectionId(0),
             name: "col".to_string(),
             area: 100.0,
@@ -81,7 +81,7 @@ pub(crate) mod test_support {
         // 梁用 section: iz を非常に大きくして全柱で a ≈ 1（kbar→∞）にする。
         // これにより D ≈ Kc0 = 12EI/h³ ∝ iz となり「Dy 比 = iz 比」が精度良く成立。
         let sec_beam = Section {
-            frame_use: None,
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
             id: SectionId(2),
             name: "beam".to_string(),
             area: 100.0,
