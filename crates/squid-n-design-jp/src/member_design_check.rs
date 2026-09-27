@@ -243,7 +243,7 @@ pub fn run_member_design_checks(
             column_sum_my,
             beam_has_slab: kind == MemberKind::Beam && beam_has_attached_slab(model, elem),
             steel_attr,
-            steel_fb_rule: Default::default(),
+            steel_fb_basis: Default::default(),
         };
 
         let checker: Box<dyn DesignCheck> = checker_for(

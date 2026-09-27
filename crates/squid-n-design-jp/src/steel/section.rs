@@ -198,13 +198,13 @@ pub(crate) fn steel_c_factor(ctx: &DesignCtx, lb_is_partial: bool) -> f64 {
     steel_lateral_buckling_c(ctx)
 }
 
-/// H 形鋼強軸の許容曲げ応力度 fb [N/mm²]（新基準）。
+/// H 形鋼強軸の許容曲げ応力度 fb [N/mm²]（鋼構造許容応力度設計規準 2019 年版）。
 /// 降伏モーメント My と弾性横座屈モーメント Me から求めた限界細長比
 /// λb により、全塑性域・非弾性域・弾性域の 3 領域で式を切り替える。
 /// 上限は長期 F/1.5（短期は 1.5 倍・上限 F）。`lb ≤ 0` の場合は
 /// 横座屈を考慮しない `fb = ft` を返す。
 #[allow(clippy::too_many_arguments)]
-pub fn steel_fb_h_new(
+pub fn steel_fb_h_asd2019(
     f: f64,
     term: LoadTerm,
     lb: f64,
@@ -229,7 +229,7 @@ pub fn steel_fb_h_new(
     let me = (c * me_sq.max(0.0).sqrt()).max(1e-9);
 
     let lambda_b = (my / me).max(0.0).sqrt();
-    let e_lambda_b = 1.0 / 0.6_f64.sqrt();
+    let e_lambda_b = 1.29;
     let nu = 1.5 + (2.0 / 3.0) * (lambda_b / e_lambda_b).powi(2);
 
     let fb_long = if lambda_b <= p_lambda_b {
@@ -249,7 +249,7 @@ pub fn steel_fb_h_new(
     }
 }
 
-/// 塑性限界細長比 pλb（新基準・AIJ 鋼構造許容応力度設計規準 2019）。
+/// 塑性限界細長比 pλb（鋼構造許容応力度設計規準 2019 年版）。
 ///
 /// `pλb = 0.6 + 0.3・(M2/M1)`。`M2/M1` の符号規約は [`steel_lateral_buckling_c`]
 /// と同じ（`M1`: 座屈区間端部モーメントの絶対値が大きい方、`M2`: 小さい方。
@@ -266,7 +266,7 @@ pub(crate) fn steel_p_lambda_b(ctx: &DesignCtx) -> f64 {
     0.6 + 0.3 * m2_over_m1
 }
 
-/// 曲げねじり定数 Iw [mm⁶]（新基準 fb 用。beam.rs・column.rs で共用）。
+/// 曲げねじり定数 Iw [mm⁶]（2019 年版 fb 用。beam.rs・column.rs で共用）。
 ///
 /// - `SteelBuiltH`（非対称組立 H）: 上下フランジの寸法から個別に
 ///   `I_u=t_u・b_u³/12`、`I_l=t_l・b_l³/12` を求め、`hf=H−(t_u+t_l)/2`
@@ -434,6 +434,38 @@ mod tests {
         let i = steel_i_t(200.0, 20.0, 100.0, 10.0);
         let expected = 200.0 / 12.0_f64.sqrt();
         assert!((i - expected).abs() < 1e-9, "i={} expected={}", i, expected);
+    }
+
+    #[test]
+    fn test_asd2019_e_lambda_b_and_short_term_factor() {
+        let f = 235.0;
+        let long = steel_fb_h_asd2019(
+            f,
+            LoadTerm::Long,
+            20_000.0,
+            1.0e7,
+            1.0e12,
+            1.0e5,
+            205_000.0,
+            79_000.0,
+            1.0e6,
+            1.0,
+            0.3,
+        );
+        let short = steel_fb_h_asd2019(
+            f,
+            LoadTerm::Short,
+            20_000.0,
+            1.0e7,
+            1.0e12,
+            1.0e5,
+            205_000.0,
+            79_000.0,
+            1.0e6,
+            1.0,
+            0.3,
+        );
+        assert!((short - (long * 1.5).min(f)).abs() < 1e-9);
     }
 
     // -------------------------------------------------------------
