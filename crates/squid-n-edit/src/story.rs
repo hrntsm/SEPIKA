@@ -117,6 +117,7 @@ impl EditCommand for AddStory {
             structure: Default::default(),
             level_kind: StoryLevelKind::default(),
             dynamic_mass: None,
+            standard_floor_load: None,
         });
         resort_and_renumber(model);
         Box::new(before)

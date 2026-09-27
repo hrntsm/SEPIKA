@@ -3,6 +3,29 @@
 use super::*;
 use squid_n_core::ids::*;
 
+pub struct SetStandardFloorLoad {
+    pub story: StoryId,
+    pub load: Option<squid_n_core::model::StandardFloorLoad>,
+}
+
+impl EditCommand for SetStandardFloorLoad {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let Some(story) = model.stories.iter_mut().find(|s| s.id == self.story) else {
+            return Box::new(Noop);
+        };
+        let old = story.standard_floor_load;
+        story.standard_floor_load = self.load;
+        Box::new(SetStandardFloorLoad {
+            story: self.story,
+            load: old,
+        })
+    }
+
+    fn label(&self) -> &str {
+        "標準床荷重変更"
+    }
+}
+
 /// 階の地震用重量の手入力（`weight_override`）変更。設定値は実効値
 /// （`seismic_weight`）へも反映するため、解析・設計側は `seismic_weight` だけを
 /// 読めばよい。`weight` に `None` を渡すと手入力を解除する（`seismic_weight` は

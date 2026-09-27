@@ -6500,6 +6500,7 @@ fn test_rigid_floor_beam_has_forces_and_checks() {
         seismic_weight: None,
         weight_override: None,
         dynamic_mass: None,
+        standard_floor_load: None,
     });
 
     let mut app = App::default();

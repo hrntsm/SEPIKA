@@ -172,6 +172,28 @@ pub struct StoryDynamicMass {
     pub inertia_t_mm2: f64,
 }
 
+/// 階の外周スラブ算定に使う標準床荷重。値の単位は内部単位 [N/mm²]。
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StandardFloorLoad {
+    pub dead: f64,
+    pub floor: f64,
+    pub joist: f64,
+    pub frame: f64,
+    pub seismic: f64,
+}
+
+impl StandardFloorLoad {
+    pub fn intensity(self, purpose: Option<LoadPurpose>) -> f64 {
+        match purpose {
+            None => self.dead,
+            Some(LoadPurpose::Floor) => self.floor,
+            Some(LoadPurpose::Joist) => self.joist,
+            Some(LoadPurpose::Frame) => self.frame,
+            Some(LoadPurpose::Seismic) => self.seismic,
+        }
+    }
+}
+
 /// 階（床）の定義。法規上の「層」は [`Layer`] である。
 ///
 /// フィールドは**誰が決めるか**で 2 系統に分かれる。
@@ -216,6 +238,9 @@ pub struct Story {
     /// 未算定は `None`。フィールド無しは `None`。
     #[serde(default)]
     pub dynamic_mass: Option<StoryDynamicMass>,
+    /// 外周スラブに用いる標準床荷重（未設定なら外周スラブを生成しない）。
+    #[serde(default)]
+    pub standard_floor_load: Option<StandardFloorLoad>,
 }
 
 /// 層（隣り合う 2 つの階の間）。法規上の「i 階」はこれを指す。

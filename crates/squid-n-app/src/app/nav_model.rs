@@ -250,6 +250,7 @@ mod tests {
             structure: squid_n_core::model::StoryStructure::default(),
             level_kind: squid_n_core::model::StoryLevelKind::default(),
             dynamic_mass: None,
+            standard_floor_load: None,
         }
     }
 

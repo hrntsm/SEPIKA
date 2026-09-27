@@ -128,6 +128,7 @@ fn portal_frame(rigid: f64, seismic_weight: f64) -> Model {
                 seismic_weight: None,
                 weight_override: None,
                 dynamic_mass: None,
+                standard_floor_load: None,
             },
             Story {
                 level_kind: Default::default(),
@@ -139,6 +140,7 @@ fn portal_frame(rigid: f64, seismic_weight: f64) -> Model {
                 seismic_weight: Some(seismic_weight),
                 weight_override: None,
                 dynamic_mass: None,
+                standard_floor_load: None,
             },
         ],
         constraints: vec![Constraint::rigid_diaphragm(

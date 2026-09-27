@@ -128,6 +128,50 @@ fn slab_beam_loads_with_checked(
     Ok(beam_loads)
 }
 
+fn perimeter_beam_loads(
+    model: &Model,
+    purpose: Option<LoadPurpose>,
+) -> Result<Vec<BeamLoad>, crate::error::JobError> {
+    let mut loads = Vec::new();
+    for slab in squid_n_core::model::perimeter_slabs(model)
+        .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?
+    {
+        let Some(story) = model.stories.iter().find(|s| s.id == slab.story) else {
+            return Err(crate::error::JobError::InvalidInput(format!(
+                "外周スラブの階 {} が未解決です",
+                slab.story.0
+            )));
+        };
+        let Some(standard) = story.standard_floor_load else {
+            continue;
+        };
+        let q = standard.intensity(purpose);
+        if q == 0.0 {
+            continue;
+        }
+        loads.push(BeamLoad {
+            elem: slab.beam,
+            target: LoadTarget::Span {
+                nodes: [
+                    model.element(slab.beam).unwrap().nodes[0],
+                    model.element(slab.beam).unwrap().nodes[1],
+                ],
+                t: [0.0, 1.0],
+            },
+            shape: LoadShape::Uniform {
+                w: q * slab.extent_mm,
+            },
+            cmq: floor::Cmq {
+                c_i: 0.0,
+                c_j: 0.0,
+                q_i: 0.0,
+                q_j: 0.0,
+            },
+        });
+    }
+    Ok(loads)
+}
+
 /// `BeamLoad` 列を荷重ケースへ書き込める `NodalLoad`/`MemberLoad` へ変換する。
 pub fn slab_load_case_content(
     model: &Model,
@@ -505,8 +549,9 @@ pub fn compute_gravity_auto_load_cases(
     squid_n_load::floor::validate_one_way_directions(model)
         .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
     let beam_map = beam_elem_map(model);
-    let dl_beam_loads = compute_dl_beam_loads_checked(model)
+    let mut dl_beam_loads = compute_dl_beam_loads_checked(model)
         .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
+    dl_beam_loads.extend(perimeter_beam_loads(model, None)?);
 
     let (mut dl_nodal, mut dl_member) = slab_load_case_content(model, &dl_beam_loads);
     let load_cfg = model.load_cfg.clone().unwrap_or_default();
@@ -526,22 +571,24 @@ pub fn compute_gravity_auto_load_cases(
     let (dl_nodal, extra_member) = resolve_nodal_to_primary(model, dl_nodal, SPAN_TOL_MM);
     dl_member.extend(extra_member);
 
-    let ll_beam_loads = slab_beam_loads_with_checked(
+    let mut ll_beam_loads = slab_beam_loads_with_checked(
         model,
         |slab| slab.live_intensity(LoadPurpose::Frame),
         false,
         &beam_map,
     )
     .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
+    ll_beam_loads.extend(perimeter_beam_loads(model, Some(LoadPurpose::Frame))?);
     let (ll_nodal, ll_member) = slab_load_case_content(model, &ll_beam_loads);
 
-    let ls_beam_loads = slab_beam_loads_with_checked(
+    let mut ls_beam_loads = slab_beam_loads_with_checked(
         model,
         |slab| slab.live_intensity(LoadPurpose::Seismic),
         false,
         &beam_map,
     )
     .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
+    ls_beam_loads.extend(perimeter_beam_loads(model, Some(LoadPurpose::Seismic))?);
     let (ls_nodal, ls_member) = slab_load_case_content(model, &ls_beam_loads);
 
     Ok(AutoLoadComputeResult {
@@ -679,12 +726,13 @@ pub fn apply_auto_load_cases(model: &mut Model, cases: &[AutoLoadCaseContent]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use squid_n_core::ids::{FloorRegionId, NodeId};
+    use squid_n_core::ids::{FloorRegionId, NodeId, SectionId, StoryId};
     use squid_n_core::model::SlabPlate;
     use squid_n_core::model::{
         AreaLoad, DistributionMethod, ElementData, ElementKind, EndCondition, FloorRegion,
         ForceRegime, LocalAxis, Node,
     };
+    use squid_n_core::model::{Section, StandardFloorLoad, Story};
 
     fn make_square_slab_model() -> Model {
         let mk_node = |id: u32, x: f64, y: f64| Node {
@@ -746,6 +794,133 @@ mod tests {
         region.slab_ids.push(slab_id);
         model.floor_regions.push(region);
         model
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn perimeter_slab_overhang_and_line_load_use_projected_column_dimension() {
+        let mut model = Model::default();
+        model.nodes = vec![
+            Node {
+                id: NodeId(0),
+                coord: [0.0, 0.0, 3000.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            Node {
+                id: NodeId(1),
+                coord: [6000.0, 0.0, 3000.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            Node {
+                id: NodeId(2),
+                coord: [6000.0, 4000.0, 3000.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            Node {
+                id: NodeId(3),
+                coord: [0.0, 4000.0, 3000.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            Node {
+                id: NodeId(4),
+                coord: [0.0, 0.0, 0.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            Node {
+                id: NodeId(5),
+                coord: [6000.0, 0.0, 0.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+        ];
+        let element = |id: u32, nodes: [u32; 2], section: u32, ref_vector: [f64; 3]| ElementData {
+            id: ElemId(id),
+            kind: ElementKind::Beam,
+            nodes: nodes.into_iter().map(NodeId).collect(),
+            section: Some(SectionId(section)),
+            local_axis: LocalAxis { ref_vector },
+            end_cond: [EndCondition::Fixed; 2],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        };
+        model.elements = vec![
+            element(0, [0, 1], 0, [0.0, 0.0, 1.0]),
+            element(1, [0, 4], 1, [1.0, 0.0, 0.0]),
+            element(2, [1, 5], 1, [1.0, 0.0, 0.0]),
+        ];
+        model.sections = vec![
+            Section {
+                id: SectionId(0),
+                name: "B".into(),
+                depth: 400.0,
+                width: 200.0,
+                ..Section::zero(SectionId(0), "B".into())
+            },
+            Section {
+                id: SectionId(1),
+                name: "C".into(),
+                depth: 400.0,
+                width: 600.0,
+                ..Section::zero(SectionId(1), "C".into())
+            },
+        ];
+        let mut region = FloorRegion::new(
+            FloorRegionId(0),
+            vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+        );
+        region.slab_ids.push(squid_n_core::ids::SlabId(0));
+        model.floor_regions.push(region);
+        model.stories.push(Story {
+            id: StoryId(1),
+            name: "基部".into(),
+            elevation: 0.0,
+            node_ids: Vec::new(),
+            seismic_weight: None,
+            weight_override: None,
+            structure: Default::default(),
+            level_kind: Default::default(),
+            dynamic_mass: None,
+            standard_floor_load: None,
+        });
+        model.stories.push(Story {
+            id: StoryId(0),
+            name: "1F".into(),
+            elevation: 3000.0,
+            node_ids: Vec::new(),
+            seismic_weight: None,
+            weight_override: None,
+            structure: Default::default(),
+            level_kind: Default::default(),
+            dynamic_mass: None,
+            standard_floor_load: Some(StandardFloorLoad {
+                frame: 0.006,
+                ..Default::default()
+            }),
+        });
+
+        let loads = perimeter_beam_loads(&model, Some(LoadPurpose::Frame)).unwrap();
+        assert_eq!(loads.len(), 1);
+        assert_eq!(loads[0].elem, ElemId(0));
+        assert!(matches!(loads[0].shape, LoadShape::Uniform { w } if (w - 1.8).abs() < 1e-12));
     }
 
     #[test]
@@ -1261,6 +1436,7 @@ mod tests {
             structure: Default::default(),
             level_kind: Default::default(),
             dynamic_mass: None,
+            standard_floor_load: None,
         });
         let settings = AnalysisSettings {
             ai_mode: AiMode::SemiPrecise,

@@ -628,6 +628,7 @@ fn generate_stories_impl(
             structure: Default::default(),
             level_kind,
             dynamic_mass: Some(dynamic_mass),
+            standard_floor_load: prev.and_then(|s| s.standard_floor_load),
         });
     }
 

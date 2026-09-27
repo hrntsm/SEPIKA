@@ -1006,6 +1006,7 @@ fn make_story_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
             structure: Default::default(),
             level_kind: Default::default(),
             dynamic_mass: None,
+            standard_floor_load: None,
         })
         .collect();
     Model {
