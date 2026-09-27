@@ -65,13 +65,13 @@ pub(crate) fn concrete_fiber_material(
                 );
                 Box::new(material)
             } else {
-                Box::new(squid_n_material::ConcreteCyclic::mander(
+                Box::new(squid_n_material::ConcreteCyclic::kent_park(
                     fc,
                     0.002,
-                    young,
+                    0.0,
                     0.0035,
                     2.0,
-                    young / 10.0,
+                    2.0 * fc / 0.002 / 10.0,
                 ))
             }
         }
@@ -82,14 +82,7 @@ pub(crate) fn concrete_fiber_material(
                 m.set_concrete_hysteresis(rule == HysteresisModel::OriginOriented);
                 Box::new(m)
             } else {
-                Box::new(squid_n_material::ConcreteCyclic::mander(
-                    fc,
-                    0.002,
-                    young,
-                    0.0035,
-                    2.0,
-                    young / 10.0,
-                ))
+                Box::new(squid_n_material::uniaxial::Concrete::new(fc, 2.0))
             }
         }
         other => panic!(

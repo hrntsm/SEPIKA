@@ -2311,7 +2311,7 @@ fn test_all_fiber_materials_return_initial_tangent_at_zero_strain() {
         HysteresisModel::OriginOriented,
         HysteresisModel::KarsanJirsa,
     ] {
-        for fc in [21.0, 60.0, 80.0] {
+        for fc in [21.0, 60.0] {
             let expected = 30000.0;
             let mut m = concrete_fiber_material(Some(fc), 30000.0, rule);
             let (s, t) = m.trial(0.0);
@@ -2324,6 +2324,29 @@ fn test_all_fiber_materials_return_initial_tangent_at_zero_strain() {
     let (s, t) = steel.trial(0.0);
     assert_eq!(s, 0.0);
     assert_relative_eq!(t, 205000.0, max_relative = 1e-9);
+}
+
+#[test]
+fn fc_over_60_fiber_materials_keep_legacy_envelope_and_history() {
+    use squid_n_material::uniaxial::{Concrete, ConcreteCyclic, UniaxialMaterial};
+
+    let mut actual = concrete_fiber_material(Some(80.0), 30000.0, HysteresisModel::KarsanJirsa);
+    let mut expected = ConcreteCyclic::kent_park(80.0, 0.002, 0.0, 0.0035, 2.0, 4000.0);
+    for strain in [-0.0005, -0.0025, -0.004] {
+        assert_eq!(actual.trial(strain), expected.trial(strain));
+        actual.commit();
+        expected.commit();
+    }
+
+    for rule in [HysteresisModel::Retrograde, HysteresisModel::OriginOriented] {
+        let mut actual = concrete_fiber_material(Some(80.0), 30000.0, rule);
+        let mut expected = Concrete::new(80.0, 2.0);
+        for strain in [0.00001, -0.001, 0.0005, -0.0025] {
+            assert_eq!(actual.trial(strain), expected.trial(strain));
+            actual.commit();
+            expected.commit();
+        }
+    }
 }
 
 #[test]

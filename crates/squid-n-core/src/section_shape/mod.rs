@@ -27,8 +27,7 @@ mod tests;
 pub use composite::{CftCoreProps, CompositeProps};
 pub use constants::{E_STEEL, KAPPA_RC, N_S_EQ};
 pub use material::{
-    concrete_young_modulus, concrete_young_modulus_from_density, concrete_young_modulus_gamma,
-    wall_shear_shape_factor_isection,
+    concrete_young_modulus, concrete_young_modulus_gamma, wall_shear_shape_factor_isection,
 };
 pub use shear::{
     material_strip_section_properties, strip_section_properties,
