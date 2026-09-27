@@ -16,8 +16,8 @@ use super::springs::{build_flexural_springs, yield_moment_and_axial};
 use super::{resolve_member_hysteresis, StrengthBasis};
 use crate::frame::concentrated::MnInteraction;
 use crate::frame::fiber::{
-    build_gauss_fiber_pair, fiber_strength_params, fiber_yield_covers_shape, fiber_young_moduli,
-    resolve_fiber_yield, FIBER_ND, FIBER_NW,
+    build_gauss_fiber_pair, fiber_strength_params, fiber_yield_covers_shape, resolve_fiber_yield,
+    FIBER_ND, FIBER_NW,
 };
 use crate::frame::multi_spring::{MS_ND, MS_NW};
 
@@ -207,14 +207,14 @@ pub(crate) fn analysis_plastic_fibers(
         return Ok(None);
     }
     let strength = fiber_strength_params(data, model, basis);
-    let (concrete_e, _) = fiber_young_moduli(data, model);
-    let [(section, _mats), _] =
+    let [(section, mats), _] =
         build_gauss_fiber_pair(data, model, basis, kind, sec.width, sec.depth, nw, nd)?;
     Ok(Some(
         section
             .fibers
             .iter()
-            .map(|f| to_plastic_fiber(f, &strength, concrete_e))
+            .zip(mats.iter())
+            .map(|(f, mat)| to_plastic_fiber(f, &strength, mat.probe(0.0).1))
             .collect(),
     ))
 }
@@ -761,8 +761,9 @@ mod tests {
             .find(|(_, (fiber, _))| fiber.material == 0)
             .expect("コンクリートファイバー");
         let expected_concrete_e = squid_n_material::newrc::NewRcEnvelope::new(24.0).ec;
-        assert_eq!(p.young, 12_345.0);
+        assert_eq!(p.young, expected_concrete_e);
         assert_eq!(mat.probe(0.0).1, expected_concrete_e);
+        assert_eq!(p.young, mat.probe(0.0).1);
 
         let mut src_model = model;
         src_model.sections[0].shape = Some(src_shape());
