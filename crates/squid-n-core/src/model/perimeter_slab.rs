@@ -72,12 +72,8 @@ fn has_outer_attached(model: &Model, beam_nodes: [NodeId; 2], floor_edge: [NodeI
             continue;
         };
         let along = (b[0] - a[0]) * fd[0] + (b[1] - a[1]) * fd[1];
-        let outward_extent = if along >= 0.0 {
-            -(extent[0] + extent[1]) / 2.0
-        } else {
-            (extent[0] + extent[1]) / 2.0
-        };
-        if outward_extent > 0.0 {
+        let outward_sign = if along >= 0.0 { -1.0 } else { 1.0 };
+        if extent.iter().any(|value| value * outward_sign > 0.0) {
             return true;
         }
     }
@@ -369,6 +365,20 @@ mod tests {
             standard.intensity(Some(LoadPurpose::Seismic)) * slabs[0].extent_mm,
             0.4
         );
+
+        model.slabs.push(Slab {
+            id: SlabId(0),
+            shape: SlabShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(0), NodeId(1)],
+                    span: [0.0, 1.0],
+                    transfer: LoadTransfer::default(),
+                },
+                extent: [1000.0, -1000.0],
+            },
+            plate: SlabPlate::default(),
+        });
+        assert!(perimeter_slabs(&model).unwrap().is_empty());
     }
 
     #[test]
