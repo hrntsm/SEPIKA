@@ -74,10 +74,28 @@ pub fn concrete_young_modulus(fc: f64, gamma_kn_m3: Option<f64>) -> f64 {
 ///
 /// 長期は上端筋・その他で 2 分岐、短期は長期の 1.5 倍。
 pub fn concrete_allowable_bond(fc: f64, top_bar: bool, long_term: bool) -> f64 {
+    concrete_allowable_bond_for_rebar(fc, top_bar, long_term, true)
+}
+
+pub(crate) fn concrete_allowable_bond_for_rebar(
+    fc: f64,
+    top_bar: bool,
+    long_term: bool,
+    deformed: bool,
+) -> f64 {
+    let fc = fc.min(36.0);
     let long = if top_bar {
-        (fc / 15.0).min(0.9 + 2.0 / 75.0 * fc)
+        if deformed {
+            (fc / 15.0).min(0.9 + 2.0 / 75.0 * fc)
+        } else {
+            (4.0 * fc / 100.0).min(0.9)
+        }
     } else {
-        (fc / 10.0).min(1.35 + fc / 25.0)
+        if deformed {
+            (fc / 10.0).min(1.355 + fc / 25.0)
+        } else {
+            (6.0 * fc / 100.0).min(1.35)
+        }
     };
     if long_term {
         long

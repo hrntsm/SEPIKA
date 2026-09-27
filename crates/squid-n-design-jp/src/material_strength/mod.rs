@@ -5,6 +5,7 @@ mod concrete;
 mod rebar;
 mod steel;
 
+pub(crate) use concrete::concrete_allowable_bond_for_rebar;
 pub use concrete::{
     concrete_allowable_bond, concrete_allowable_compression, concrete_allowable_shear,
     concrete_allowable_shear_class, concrete_young_modulus, young_ratio_n,
@@ -85,8 +86,8 @@ mod tests {
     fn test_concrete_allowable_bond_table() {
         // Fc=24 上端筋: min(24/15, 0.9+2/75×24) = min(1.6, 1.54) = 1.54
         assert!((concrete_allowable_bond(24.0, true, true) - 1.54).abs() < 1e-9);
-        // Fc=24 その他: min(24/10, 1.35+24/25) = min(2.4, 2.31) = 2.31
-        assert!((concrete_allowable_bond(24.0, false, true) - 2.31).abs() < 1e-9);
+        // Fc=24 その他: min(24/10, 1.355+24/25) = min(2.4, 2.315) = 2.315
+        assert!((concrete_allowable_bond(24.0, false, true) - 2.315).abs() < 1e-9);
         assert!(
             (concrete_allowable_bond(24.0, true, false)
                 - concrete_allowable_bond(24.0, true, true) * 1.5)
@@ -95,6 +96,17 @@ mod tests {
         );
         // 低強度側の分岐: Fc=15 上端筋 min(1.0, 1.3) = 1.0（Fc/15 側が支配）。
         assert!((concrete_allowable_bond(15.0, true, true) - 1.0).abs() < 1e-9);
+        assert!((concrete_allowable_bond(48.0, false, true) - 2.795).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_round_rebar_allowable_bond_fc24() {
+        assert!((concrete_allowable_bond_for_rebar(24.0, true, true, false) - 0.9).abs() < 1e-9);
+        assert!((concrete_allowable_bond_for_rebar(24.0, false, true, false) - 1.35).abs() < 1e-9);
+        assert!((concrete_allowable_bond_for_rebar(24.0, true, false, false) - 1.35).abs() < 1e-9);
+        assert!(
+            (concrete_allowable_bond_for_rebar(24.0, false, false, false) - 2.025).abs() < 1e-9
+        );
     }
 
     #[test]
