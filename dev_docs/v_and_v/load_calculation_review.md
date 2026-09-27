@@ -257,7 +257,7 @@ test result: ok. 15 passed; 0 failed
 | 1.10 組合せの欠落 | `standard_combinations`: ±地震・±風・多雪区域(長期 0.7S、短期 0.35S) |
 | 1.11 重力加速度 2 系統 | `squid_n_core::units::GRAVITY_MM_S2`(9806.65) に統一 |
 | 1.12 Pi 負値の黙殺 | `AiDistribution.clamped_negative_pi` で検知可能に |
-| 1.13 矩形前提・伝達方向 | `slab_dimensions_of` で矩形経路を判定し、`Slab.one_way`（X/Y/Short）で伝達方向を指定。Short は矩形床のみ対応し、正方形は入力エラー |
+| 1.13 矩形前提・伝達方向 | `slab_dimensions_of` で平行四辺形を判定したうえで、Short の検証箇所では隣接辺の直交性も確認し、`Slab.one_way`（X/Y/Short）で伝達方向を指定。Short は直交する矩形床のみ対応し、斜めの平行四辺形と正方形は入力エラー |
 
 ### §3 ギャップ — 対応済み
 

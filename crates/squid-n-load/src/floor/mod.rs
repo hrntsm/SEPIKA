@@ -56,6 +56,25 @@ use squid_n_core::model::{
     FloorRegion, LoadTransfer, Model, RegionAnchor, Slab, SlabShape, SupportMemberId,
 };
 
+fn short_direction_dimensions(coords: &[[f64; 3]]) -> Option<(f64, f64)> {
+    let dimensions = slab_dimensions_of(coords)?;
+    let edge_x = [
+        coords[1][0] - coords[0][0],
+        coords[1][1] - coords[0][1],
+        coords[1][2] - coords[0][2],
+    ];
+    let edge_y = [
+        coords[3][0] - coords[0][0],
+        coords[3][1] - coords[0][1],
+        coords[3][2] - coords[0][2],
+    ];
+    let dot = squid_n_core::geom::vec3::dot(edge_x, edge_y);
+    if dot.abs() / (dimensions.0 * dimensions.1) > 1e-6 {
+        return None;
+    }
+    Some(dimensions)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FloorDistributionError {
     ShortDirectionOnSquare { slab_id: squid_n_core::ids::SlabId },
@@ -90,7 +109,7 @@ pub fn validate_one_way_directions(model: &Model) -> Result<(), FloorDistributio
             continue;
         }
         let coords = boundary_coords(model, slab).unwrap_or_default();
-        let Some((lx, ly)) = slab_dimensions_of(&coords) else {
+        let Some((lx, ly)) = short_direction_dimensions(&coords) else {
             return Err(FloorDistributionError::ShortDirectionRequiresRectangle {
                 slab_id: slab.id,
             });
@@ -168,7 +187,7 @@ pub fn distribute_slab_w_checked(
         && slab.method() == squid_n_core::model::DistributionMethod::OneWay
         && slab.one_way() == Some(squid_n_core::model::OneWayDir::Short)
     {
-        let Some((lx, ly)) = slab_dimensions_of(&coords) else {
+        let Some((lx, ly)) = short_direction_dimensions(&coords) else {
             return Err(FloorDistributionError::ShortDirectionRequiresRectangle {
                 slab_id: slab.id,
             });

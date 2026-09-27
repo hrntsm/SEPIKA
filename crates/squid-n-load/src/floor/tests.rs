@@ -466,6 +466,30 @@ fn test_one_way_short_direction_uses_short_edge_axis() {
 }
 
 #[test]
+fn test_one_way_short_direction_rejects_skewed_parallelogram() {
+    use squid_n_core::model::OneWayDir;
+    let w = 0.004_f64;
+    let pts = [
+        (0.0, 0.0),
+        (4000.0, 0.0),
+        (5000.0, 3000.0),
+        (1000.0, 3000.0),
+    ];
+    let (mut model, mut slab) = polygon_slab_model(&pts, DistributionMethod::OneWay, w);
+    slab.plate.one_way = Some(OneWayDir::Short);
+    model.slabs[slab.id.index()].plate.one_way = Some(OneWayDir::Short);
+
+    assert!(matches!(
+        super::validate_one_way_directions(&model),
+        Err(FloorDistributionError::ShortDirectionRequiresRectangle { .. })
+    ));
+    assert!(matches!(
+        super::distribute_slab_w_checked(&model, &slab, w),
+        Err(FloorDistributionError::ShortDirectionRequiresRectangle { .. })
+    ));
+}
+
+#[test]
 fn test_one_way_short_direction_rejects_square() {
     use squid_n_core::model::OneWayDir;
     let (mut model, slab) = make_square_slab_model(4000.0, DistributionMethod::OneWay, 0.004);
