@@ -726,12 +726,13 @@ pub fn apply_auto_load_cases(model: &mut Model, cases: &[AutoLoadCaseContent]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use squid_n_core::ids::{FloorRegionId, NodeId};
+    use squid_n_core::ids::{FloorRegionId, NodeId, SectionId, StoryId};
     use squid_n_core::model::SlabPlate;
     use squid_n_core::model::{
         AreaLoad, DistributionMethod, ElementData, ElementKind, EndCondition, FloorRegion,
         ForceRegime, LocalAxis, Node,
     };
+    use squid_n_core::model::{Section, StandardFloorLoad, Story};
 
     fn make_square_slab_model() -> Model {
         let mk_node = |id: u32, x: f64, y: f64| Node {
@@ -793,6 +794,121 @@ mod tests {
         region.slab_ids.push(slab_id);
         model.floor_regions.push(region);
         model
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn perimeter_slab_overhang_and_line_load_use_projected_column_dimension() {
+        let mut model = Model::default();
+        model.nodes = vec![
+            Node {
+                id: NodeId(0),
+                coord: [0.0, 0.0, 3000.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            Node {
+                id: NodeId(1),
+                coord: [6000.0, 0.0, 3000.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            Node {
+                id: NodeId(2),
+                coord: [6000.0, 4000.0, 3000.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            Node {
+                id: NodeId(3),
+                coord: [0.0, 4000.0, 3000.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            Node {
+                id: NodeId(4),
+                coord: [0.0, 0.0, 0.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            Node {
+                id: NodeId(5),
+                coord: [6000.0, 0.0, 0.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+        ];
+        let element = |id: u32, nodes: [u32; 2], section: u32, ref_vector: [f64; 3]| ElementData {
+            id: ElemId(id),
+            kind: ElementKind::Beam,
+            nodes: nodes.into_iter().map(NodeId).collect(),
+            section: Some(SectionId(section)),
+            local_axis: LocalAxis { ref_vector },
+            end_cond: [EndCondition::Fixed; 2],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        };
+        model.elements = vec![
+            element(0, [0, 1], 0, [0.0, 0.0, 1.0]),
+            element(1, [0, 4], 1, [1.0, 0.0, 0.0]),
+            element(2, [1, 5], 1, [1.0, 0.0, 0.0]),
+        ];
+        model.sections = vec![
+            Section {
+                id: SectionId(0),
+                name: "B".into(),
+                depth: 400.0,
+                width: 200.0,
+                ..Section::zero(SectionId(0), "B".into())
+            },
+            Section {
+                id: SectionId(1),
+                name: "C".into(),
+                depth: 400.0,
+                width: 600.0,
+                ..Section::zero(SectionId(1), "C".into())
+            },
+        ];
+        let mut region = FloorRegion::new(
+            FloorRegionId(0),
+            vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+        );
+        region.slab_ids.push(squid_n_core::ids::SlabId(0));
+        model.floor_regions.push(region);
+        model.stories.push(Story {
+            id: StoryId(0),
+            name: "1F".into(),
+            elevation: 3000.0,
+            node_ids: Vec::new(),
+            seismic_weight: None,
+            weight_override: None,
+            structure: Default::default(),
+            level_kind: Default::default(),
+            dynamic_mass: None,
+            standard_floor_load: Some(StandardFloorLoad {
+                frame: 0.006,
+                ..Default::default()
+            }),
+        });
+
+        let loads = perimeter_beam_loads(&model, Some(LoadPurpose::Frame)).unwrap();
+        assert_eq!(loads.len(), 1);
+        assert_eq!(loads[0].elem, ElemId(0));
+        assert!(matches!(loads[0].shape, LoadShape::Uniform { w } if (w - 1.2).abs() < 1e-12));
     }
 
     #[test]

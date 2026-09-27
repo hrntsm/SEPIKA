@@ -156,11 +156,11 @@ fn column_dimension(
     }
     let normal = [-dy / len, dx / len];
     let cross = [-u[1], u[0]];
-    Ok(section.depth
+    Ok(section.width
         * normal[0]
             .abs()
             .mul_add(u[0].abs(), normal[1].abs() * u[1].abs())
-        + section.width * (normal[0] * cross[0] + normal[1] * cross[1]).abs())
+        + section.depth * (normal[0] * cross[0] + normal[1] * cross[1]).abs())
 }
 
 /// 標準床荷重が設定された階の外周スラブ形状を算定する。
@@ -353,12 +353,11 @@ mod tests {
                 joist: 0.003,
                 frame: 0.006,
                 seismic: 0.002,
-                ..Default::default()
             }),
         });
         let slabs = perimeter_slabs(&model).unwrap();
         assert_eq!(slabs.len(), 1);
-        assert_eq!(slabs[0].extent_mm, 300.0);
+        assert_eq!(slabs[0].extent_mm, 200.0);
         let standard = model.stories[0].standard_floor_load.unwrap();
         assert_eq!(standard.intensity(None), 0.005);
         assert_eq!(standard.intensity(Some(LoadPurpose::Floor)), 0.004);
@@ -367,11 +366,49 @@ mod tests {
         assert_eq!(standard.intensity(Some(LoadPurpose::Seismic)), 0.002);
         assert_eq!(
             standard.intensity(Some(LoadPurpose::Frame)) * slabs[0].extent_mm,
-            1.8
+            1.2
         );
         assert_eq!(
             standard.intensity(Some(LoadPurpose::Seismic)) * slabs[0].extent_mm,
-            0.6
+            0.4
         );
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn projects_column_section_dimensions_onto_beam_normal() {
+        let dimensions = |beam_end: [f64; 3], ref_vector: [f64; 3]| {
+            let mut model = Model::default();
+            model.nodes = vec![
+                node(0, [0.0, 0.0, 0.0]),
+                node(1, beam_end),
+                node(2, [0.0, 0.0, 3000.0]),
+            ];
+            model.sections = vec![
+                Section {
+                    id: SectionId(0),
+                    name: "B".into(),
+                    depth: 400.0,
+                    width: 200.0,
+                    ..Section::zero(SectionId(0), "B".into())
+                },
+                Section {
+                    id: SectionId(1),
+                    name: "C".into(),
+                    depth: 400.0,
+                    width: 600.0,
+                    ..Section::zero(SectionId(1), "C".into())
+                },
+            ];
+            model.elements = vec![
+                element(0, [0, 1], SectionId(0), [0.0, 0.0, 1.0]),
+                element(1, [0, 2], SectionId(1), ref_vector),
+            ];
+            column_dimension(&model, &model.elements[0], NodeId(0)).unwrap()
+        };
+
+        assert_eq!(dimensions([6000.0, 0.0, 0.0], [1.0, 0.0, 0.0]), 400.0);
+        assert_eq!(dimensions([0.0, 6000.0, 0.0], [0.0, 1.0, 0.0]), 400.0);
+        assert_eq!(dimensions([0.0, 6000.0, 0.0], [1.0, 0.0, 0.0]), 600.0);
     }
 }
