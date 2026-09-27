@@ -67,6 +67,7 @@
 | [壁版の支持範囲判定_2026-09.md](壁版の支持範囲判定_2026-09.md) | 壁の支持辺・間柱端部の負担率の明示入力、部分支持・支持梁重複の診断 | 🔶 |
 | [整合質量_2026-09.md](整合質量_2026-09.md) | Beam/Fiber の整合質量、材料領域質量、回転慣性、剛域質量、端部解放の質量縮約 | 🔶 |
 | [SRC_CFT等価断面のnsフォールバック_2026-09.md](SRC_CFT等価断面のnsフォールバック_2026-09.md) | SRC/CFT の等価断面 ns の材料由来経路と、算定不能時の N_S_EQ=15／鋼管のみへのフォールバック通知 | 🔶 |
+| [NewRC高強度コンクリート外挿_2026-09.md](NewRC高強度コンクリート外挿_2026-09.md) | Issue #385: Fc>60 のコンクリートを NewRC 式で外挿する現行仕様 | 🔶 |
 
 ### 参照実装マニュアル照合
 
@@ -173,6 +174,7 @@
 | 28 | 二次部材小梁の分配 Span 検定 | squid-n-load / squid-n-app | floor/joist_design.rs, check.rs | `distribution_loads_on_shared_joist_match_average_width` / `split_slab_edges_compose_onto_full_joist` / `span_attaches_to_nearest_joist_only` / `perimeter_parallel_joist_does_not_steal_beam_span` / `joist_distribution_cover_rejects_half_span` / `shared_joist_expects_both_slabs` / `missing_expected_slab_is_not_ready` / `zero_expected_axis_does_not_receive_spans` / `joist_design_checks_cover_imported_secondary_members` | 横断 | ☑ |
 | 29 | 耐震スリット（辺ごとの縁切り。袖壁・腰壁垂壁・剛域・耐震壁判定・自重） | squid-n-element / squid-n-load | wall/misc_wall.rs, frame/beam/{construct,rigid_zone}.rs, story_gen/self_weight_calc.rs | `test_column_face_slit_drops_wing_wall_but_keeps_girder_strip` / `test_strip_height_follows_beam_face_slit` / `test_any_slit_breaks_seismic_wall` / `柱際スリットのある側は剛域の袖壁張り出しを持たない` / `test_column_face_slit_wall_is_collected_as_misc_wall` / `test_column_face_slit_is_per_side` / `test_column_face_slit_does_not_change_self_weight_destination` / `test_bottom_beam_face_slit_sends_self_weight_to_top` / `test_top_beam_face_slit_sends_self_weight_to_bottom`（柱際は行き先不変、梁際の切れ側で全量移動） | 横断 | 🔶 |
 | 30 | 壁版の要素生成判定と可視化 | squid-n-core / squid-n-load / squid-n-app | model/wall_plate.rs, wall_expand.rs, viewer/scene.rs | `test_becomes_element_agrees_with_generated_elements` / `test_becomes_element_requires_section` / `test_boundary_coords_with_uses_supplied_coords` / `囲まれた壁版は境界節点が全て構面上にあるときだけ描く` / `取り付く壁版は取付き先の節点で構面を判定する` | 横断 | ☑ |
+| 31 | Fc>60 の NewRC 外挿 | squid-n-material / squid-n-element | newrc.rs, uniaxial/concrete_cyclic.rs, frame/fiber/mod.rs | Fc=60 と Fc>60 の構成則選択・初期接線・圧縮包絡線・ファイバー生成、および3履歴則の既知応答をコードテストで照合済み。実験・原典適用範囲外の妥当性確認は未実施（詳細は [NewRC高強度コンクリート外挿_2026-09.md](NewRC高強度コンクリート外挿_2026-09.md)） | 横断 | 🔶 |
 
 凡例: ✅ 実装済み・🔶 一部実装（要拡張）・❌ 未実装・対象外（採用しない）。
 #16 壁（TVLEM）は採用しない（[ADR 0013](../adr/0013-adopt-wall-element-model.md)）。耐震壁は壁エレメント置換モデルとして検証する（下表 #29・#30 と[未検証一覧 §3](未検証一覧.md)）。
