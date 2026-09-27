@@ -370,7 +370,11 @@ fn srcファイバーは内蔵鋼材のstrength_factorを使う() {
         .0
         .probe(0.0)
         .1;
-    assert_relative_eq!(concrete_e, 25000.0, max_relative = 1e-10);
+    assert_relative_eq!(
+        concrete_e,
+        squid_n_material::newrc::NewRcEnvelope::new(24.0).ec,
+        max_relative = 1e-10
+    );
     assert_relative_eq!(steel_e, 205000.0, max_relative = 1e-10);
 
     model.sections[0].steel_material = None;
@@ -426,14 +430,7 @@ fn cftファイバーは鋼管と充填コンクリートの初期接線を分�
         .0
         .probe(0.0)
         .1;
-    let expected_concrete_e = squid_n_core::section_shape::concrete_young_modulus_gamma(
-        36.0,
-        squid_n_core::units::concrete_unit_weight_kn_m3(
-            36.0,
-            model.materials[0].concrete_class,
-            squid_n_core::units::ConcreteComposition::Plain,
-        ),
-    );
+    let expected_concrete_e = squid_n_material::newrc::NewRcEnvelope::new(36.0).ec;
     assert_relative_eq!(concrete_e, expected_concrete_e, max_relative = 1e-10);
     assert_relative_eq!(steel_e, 190000.0, max_relative = 1e-10);
 }
@@ -2316,8 +2313,8 @@ fn test_all_fiber_materials_return_initial_tangent_at_zero_strain() {
         HysteresisModel::OriginOriented,
         HysteresisModel::KarsanJirsa,
     ] {
-        for fc in [21.0, 60.0] {
-            let expected = 30000.0;
+        for fc in [21.0, 60.0, 80.0] {
+            let expected = squid_n_material::newrc::NewRcEnvelope::new(fc).ec;
             let mut m = concrete_fiber_material(Some(fc), 30000.0, rule);
             let (s, t) = m.trial(0.0);
             assert_eq!(s, 0.0, "rule={rule:?} fc={fc}: ひずみ 0 で応力が 0 でない");
@@ -2332,25 +2329,77 @@ fn test_all_fiber_materials_return_initial_tangent_at_zero_strain() {
 }
 
 #[test]
-fn fc_over_60_fiber_materials_keep_legacy_envelope_and_history() {
-    use squid_n_material::uniaxial::{Concrete, ConcreteCyclic, UniaxialMaterial};
+fn fc_over_60_fiber_materials_use_newrc_envelope_and_history() {
+    use squid_n_material::uniaxial::{ConcreteCyclic, UniaxialMaterial};
 
-    let mut actual = concrete_fiber_material(Some(80.0), 30000.0, HysteresisModel::KarsanJirsa);
-    let mut expected = ConcreteCyclic::kent_park(80.0, 0.002, 0.0, 0.0035, 2.0, 4000.0);
-    for strain in [-0.0005, -0.0025, -0.004] {
-        assert_eq!(actual.trial(strain), expected.trial(strain));
-        actual.commit();
-        expected.commit();
-    }
-
-    for rule in [HysteresisModel::Retrograde, HysteresisModel::OriginOriented] {
+    for rule in [
+        HysteresisModel::Retrograde,
+        HysteresisModel::OriginOriented,
+        HysteresisModel::KarsanJirsa,
+    ] {
         let mut actual = concrete_fiber_material(Some(80.0), 30000.0, rule);
-        let mut expected = Concrete::new(80.0, 2.0);
-        for strain in [0.00001, -0.001, 0.0005, -0.0025] {
-            assert_eq!(actual.trial(strain), expected.trial(strain));
-            actual.commit();
-            expected.commit();
+        if rule != HysteresisModel::KarsanJirsa {
+            let mut expected_new = squid_n_material::ConcreteNewRc::new(80.0, 2.0);
+            expected_new.set_concrete_hysteresis(rule == HysteresisModel::OriginOriented);
+            for strain in [0.00001, -0.001, 0.0005, -0.0025] {
+                assert_eq!(actual.trial(strain), expected_new.trial(strain));
+                actual.commit();
+                expected_new.commit();
+            }
+        } else {
+            let ec = squid_n_material::newrc::NewRcEnvelope::new(80.0).ec;
+            let mut expected = ConcreteCyclic::newrc(80.0, 0.01, 2.0, ec / 10.0);
+            for strain in [-0.0005, -0.0025, -0.004] {
+                assert_eq!(actual.trial(strain), expected.trial(strain));
+                actual.commit();
+                expected.commit();
+            }
         }
+    }
+}
+
+#[test]
+fn fc_60_and_fc_80_are_both_newrc_materials() {
+    for rule in [
+        HysteresisModel::Retrograde,
+        HysteresisModel::OriginOriented,
+        HysteresisModel::KarsanJirsa,
+    ] {
+        let mut fc60 = concrete_fiber_material(Some(60.0), 30000.0, rule);
+        let mut fc80 = concrete_fiber_material(Some(80.0), 30000.0, rule);
+        let mut expected60 = expected_newrc_material(60.0, rule);
+        let mut expected80 = expected_newrc_material(80.0, rule);
+        for strain in [-0.0001, -0.001, 0.0001] {
+            assert_eq!(fc60.trial(strain), expected60.trial(strain));
+            assert_eq!(fc80.trial(strain), expected80.trial(strain));
+            fc60.commit();
+            fc80.commit();
+            expected60.commit();
+            expected80.commit();
+        }
+    }
+}
+
+fn expected_newrc_material(
+    fc: f64,
+    rule: HysteresisModel,
+) -> Box<dyn squid_n_material::uniaxial::UniaxialMaterial> {
+    match rule {
+        HysteresisModel::KarsanJirsa => {
+            let ec = squid_n_material::newrc::NewRcEnvelope::new(fc).ec;
+            Box::new(squid_n_material::ConcreteCyclic::newrc(
+                fc,
+                0.01,
+                2.0,
+                ec / 10.0,
+            ))
+        }
+        HysteresisModel::Retrograde | HysteresisModel::OriginOriented => {
+            let mut material = squid_n_material::ConcreteNewRc::new(fc, 2.0);
+            material.set_concrete_hysteresis(rule == HysteresisModel::OriginOriented);
+            Box::new(material)
+        }
+        _ => unreachable!(),
     }
 }
 
