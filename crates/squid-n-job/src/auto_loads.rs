@@ -765,6 +765,20 @@ mod tests {
         assert!(error.to_string().contains("正方形"));
     }
 
+    #[test]
+    fn non_rectangular_short_direction_stops_gravity_computation() {
+        let mut model = make_square_slab_model();
+        model.nodes[2].coord = [3000.0, 4000.0, 0.0];
+        model.slabs[0].plate.method = DistributionMethod::OneWay;
+        model.slabs[0].plate.one_way = Some(squid_n_core::model::OneWayDir::Short);
+
+        let error = match compute_gravity_auto_load_cases(&model) {
+            Ok(_) => panic!("非矩形床の短辺方向を受け入れた"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("矩形床"));
+    }
+
     /// 大梁の材軸中間（座標一致する節点が無い位置）へアンカーした小梁の反力が、
     /// 大梁の中間集中荷重として荷重ケース内容に載る（節点が無いことを理由に捨てない）。
     #[test]

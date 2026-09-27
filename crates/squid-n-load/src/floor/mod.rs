@@ -59,6 +59,7 @@ use squid_n_core::model::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FloorDistributionError {
     ShortDirectionOnSquare { slab_id: squid_n_core::ids::SlabId },
+    ShortDirectionRequiresRectangle { slab_id: squid_n_core::ids::SlabId },
 }
 
 impl std::fmt::Display for FloorDistributionError {
@@ -69,6 +70,11 @@ impl std::fmt::Display for FloorDistributionError {
                 "床板 {} は X・Y スパンが同寸の正方形のため、短辺方向を決められません。X または Y を指定してください。",
                 slab_id.0
             ),
+            Self::ShortDirectionRequiresRectangle { slab_id } => write!(
+                f,
+                "床板 {} の短辺方向指定は矩形床にのみ対応しています。X または Y を指定してください。",
+                slab_id.0
+            ),
         }
     }
 }
@@ -77,16 +83,20 @@ impl std::error::Error for FloorDistributionError {}
 
 pub fn validate_one_way_directions(model: &Model) -> Result<(), FloorDistributionError> {
     for slab in &model.slabs {
-        if slab.method() != squid_n_core::model::DistributionMethod::OneWay
+        if !matches!(&slab.shape, SlabShape::Enclosed)
+            || slab.method() != squid_n_core::model::DistributionMethod::OneWay
             || slab.one_way() != Some(squid_n_core::model::OneWayDir::Short)
         {
             continue;
         }
         let coords = boundary_coords(model, slab).unwrap_or_default();
-        if let Some((lx, ly)) = slab_dimensions_of(&coords) {
-            if (lx - ly).abs() < 1e-6 {
-                return Err(FloorDistributionError::ShortDirectionOnSquare { slab_id: slab.id });
-            }
+        let Some((lx, ly)) = slab_dimensions_of(&coords) else {
+            return Err(FloorDistributionError::ShortDirectionRequiresRectangle {
+                slab_id: slab.id,
+            });
+        };
+        if (lx - ly).abs() < 1e-6 {
+            return Err(FloorDistributionError::ShortDirectionOnSquare { slab_id: slab.id });
         }
     }
     Ok(())
@@ -113,7 +123,7 @@ use fem::{fem_trapezoid, fem_triangle};
 ///      （[`distribute_rect`]）。一方向の指定があればその方向（全体座標 X/Y）へ、
 ///      なければ境界辺 0・2 が負担する。
 ///    - それ以外（三角形・台形・五角形などの多角形）→ 多角形の負担面積法
-///      （[`distribute_polygon`]）。一方向の指定があってもこの経路へ落ちる。
+///      （[`distribute_polygon`]）。ただし短辺方向指定は入力エラーとする。
 ///
 /// いずれの経路も総和保存（Σ大梁荷重 (+Σ小梁反力・Σ柱集中荷重) = w×面積）を満たすよう
 /// 設計している（床は全体座標 XY 平面内（Z一定）にあることを仮定する）。
@@ -132,7 +142,7 @@ pub fn distribute_slab(
 /// 分岐ロジックは [`distribute_slab`] と同一で、荷重源だけを引数 `w` に差し替える。
 /// これにより DL（固定荷重）と LL（積載荷重）を別々の荷重ケースへ分配できる
 /// （用途別（床用/小梁用/大梁・柱・基礎用/地震力用）の積載荷重の使い分けや、荷重組合せでの DL/LL 係数分けに用いる）。
-/// `w == 0.0` の場合は、短辺指定の正方形を除き空の分配結果を返す。
+/// `w == 0.0` の場合は、短辺方向指定の正方形・非矩形を除き空の分配結果を返す。
 pub fn distribute_slab_w(
     model: &Model,
     slab: &Slab,
@@ -157,9 +167,15 @@ pub fn distribute_slab_w_checked(
     if matches!(&slab.shape, SlabShape::Enclosed)
         && slab.method() == squid_n_core::model::DistributionMethod::OneWay
         && slab.one_way() == Some(squid_n_core::model::OneWayDir::Short)
-        && slab_dimensions_of(&coords).is_some_and(|(lx, ly)| (lx - ly).abs() < 1e-6)
     {
-        return Err(FloorDistributionError::ShortDirectionOnSquare { slab_id: slab.id });
+        let Some((lx, ly)) = slab_dimensions_of(&coords) else {
+            return Err(FloorDistributionError::ShortDirectionRequiresRectangle {
+                slab_id: slab.id,
+            });
+        };
+        if (lx - ly).abs() < 1e-6 {
+            return Err(FloorDistributionError::ShortDirectionOnSquare { slab_id: slab.id });
+        }
     }
 
     if w == 0.0 {

@@ -565,7 +565,7 @@ fn test_polygon_trapezoid_conservation() {
         true_area
     );
 
-    // one_way 指定でも非矩形なら多角形経路へ落ちる。
+    // X/Y 指定は非矩形でも従来どおり多角形経路へ進む。
     use squid_n_core::model::OneWayDir;
     let (model, mut slab) = polygon_slab_model(&pts, DistributionMethod::OneWay, w);
     slab.plate.one_way = Some(OneWayDir::X);
@@ -575,6 +575,18 @@ fn test_polygon_trapezoid_conservation() {
         (one_way_area - true_area).abs() / true_area < 0.01,
         "one_way 指定でも多角形経路: sampled={one_way_area} true={true_area}"
     );
+
+    let (mut model, mut slab) = polygon_slab_model(&pts, DistributionMethod::OneWay, w);
+    slab.plate.one_way = Some(OneWayDir::Short);
+    model.slabs[slab.id.index()].plate.one_way = Some(OneWayDir::Short);
+    assert!(matches!(
+        super::validate_one_way_directions(&model),
+        Err(FloorDistributionError::ShortDirectionRequiresRectangle { .. })
+    ));
+    assert!(matches!(
+        super::distribute_slab_w_checked(&model, &slab, w),
+        Err(FloorDistributionError::ShortDirectionRequiresRectangle { .. })
+    ));
 }
 
 #[test]

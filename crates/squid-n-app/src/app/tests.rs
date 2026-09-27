@@ -4212,13 +4212,13 @@ fn test_slab_design_span_respects_one_way() {
         story: None,
         support_spring: None,
     };
-    let mk_model = |one_way: Option<OneWayDir>| -> squid_n_core::model::Model {
+    let mk_model = |lx: f64, ly: f64, one_way: Option<OneWayDir>| -> squid_n_core::model::Model {
         let mut m = squid_n_core::model::Model {
             nodes: vec![
                 mk_node(0, 0.0, 0.0),
-                mk_node(1, 6000.0, 0.0),
-                mk_node(2, 6000.0, 3000.0),
-                mk_node(3, 0.0, 3000.0),
+                mk_node(1, lx, 0.0),
+                mk_node(2, lx, ly),
+                mk_node(3, 0.0, ly),
             ],
             sections: vec![
                 squid_n_core::section_shape::SectionShape::RcSlab { thickness: 150.0 }
@@ -4246,7 +4246,7 @@ fn test_slab_design_span_respects_one_way() {
     // 一方向 X → スパン = lx = 6000（長辺）。
     let app_x = App {
         core: AppCore {
-            model: mk_model(Some(OneWayDir::X)),
+            model: mk_model(6000.0, 3000.0, Some(OneWayDir::X)),
             ..Default::default()
         },
         ..App::default()
@@ -4260,7 +4260,7 @@ fn test_slab_design_span_respects_one_way() {
     // 一方向 Y → スパン = ly = 3000（短辺）。
     let app_y = App {
         core: AppCore {
-            model: mk_model(Some(OneWayDir::Y)),
+            model: mk_model(6000.0, 3000.0, Some(OneWayDir::Y)),
             ..Default::default()
         },
         ..App::default()
@@ -4274,7 +4274,7 @@ fn test_slab_design_span_respects_one_way() {
     // 指定なし → 短辺 min(6000,3000)=3000（安全側）。
     let app_n = App {
         core: AppCore {
-            model: mk_model(None),
+            model: mk_model(6000.0, 3000.0, None),
             ..Default::default()
         },
         ..App::default()
@@ -4284,6 +4284,44 @@ fn test_slab_design_span_respects_one_way() {
         (slabs_n[0].1.span - 3000.0).abs() < 1e-6,
         "両方向は短辺3000で設計"
     );
+
+    let mut short_model = mk_model(6000.0, 4000.0, Some(OneWayDir::Short));
+    let app = App {
+        core: AppCore {
+            model: short_model.clone(),
+            ..Default::default()
+        },
+        ..App::default()
+    };
+    let (_j, slabs) = app.floor_design_checks();
+    assert!((slabs[0].1.span - 4000.0).abs() < 1e-6);
+    assert_eq!(short_model.slabs[0].one_way(), Some(OneWayDir::Short));
+
+    short_model.nodes[1].coord = [3500.0, 0.0, 0.0];
+    short_model.nodes[2].coord = [3500.0, 5000.0, 0.0];
+    short_model.nodes[3].coord = [0.0, 5000.0, 0.0];
+    let app = App {
+        core: AppCore {
+            model: short_model.clone(),
+            ..Default::default()
+        },
+        ..App::default()
+    };
+    let (_j, slabs) = app.floor_design_checks();
+    assert!((slabs[0].1.span - 3500.0).abs() < 1e-6);
+    assert_eq!(short_model.slabs[0].one_way(), Some(OneWayDir::Short));
+
+    let w = short_model.slabs[0].plate.loads[0].value;
+    let loads =
+        squid_n_load::floor::distribute_slab_w_checked(&short_model, &short_model.slabs[0], w)
+            .expect("寸法変更後の短辺方向分配");
+    assert!(!loads.is_empty());
+    assert!(loads
+        .iter()
+        .all(|load| matches!(load.target, squid_n_load::floor::LoadTarget::Edge(1 | 3))));
+    let total_load: f64 = loads.iter().map(|load| load.cmq.q_i + load.cmq.q_j).sum();
+    let expected_load = w * 3500.0 * 5000.0;
+    assert!((total_load - expected_load).abs() / expected_load < 1e-9);
 }
 
 fn rc_slab_plate(section: squid_n_core::ids::SectionId) -> SlabPlate {
