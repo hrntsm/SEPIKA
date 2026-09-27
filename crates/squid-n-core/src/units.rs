@@ -9,6 +9,8 @@ pub enum ConcreteClass {
     Normal,
     Lightweight1,
     Lightweight2,
+    /// 直接入力されたコンクリート。計算上は普通コンクリートとして扱う。
+    UserDefined,
 }
 
 /// コンクリート系構造の区分（γC/γRC/γSRC の列に対応）。
@@ -47,6 +49,17 @@ pub fn concrete_unit_weight_kn_m3(fc: f64, class: ConcreteClass, comp: ConcreteC
             }
         }
         ConcreteClass::Lightweight2 => 17.0,
+        ConcreteClass::UserDefined => {
+            if fc <= 36.0 {
+                23.0
+            } else if fc <= 48.0 {
+                23.5
+            } else if fc <= 120.0 {
+                24.0
+            } else {
+                24.5
+            }
+        }
     };
     match (class, comp) {
         (ConcreteClass::Lightweight1, ConcreteComposition::Rc) if fc > 27.0 => 22.0,

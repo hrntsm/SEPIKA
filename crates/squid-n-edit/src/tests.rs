@@ -994,6 +994,7 @@ fn test_add_delete_material_roundtrip() {
             fc: None,
             fy: Some(235.0),
             strength_factor: None,
+            concrete_class: Default::default(),
         }),
     );
     assert_eq!(model.materials.len(), 1);
@@ -1021,6 +1022,7 @@ fn test_delete_material_in_use_is_noop() {
             fc: None,
             fy: Some(235.0),
             strength_factor: None,
+            concrete_class: Default::default(),
         }),
     );
     // 材料は断面が持つ。参照元となる断面を 1 つ足して割り当てる。
@@ -1047,6 +1049,7 @@ fn test_delete_material_middle_renumbers() {
                 fc: None,
                 fy: None,
                 strength_factor: None,
+                concrete_class: Default::default(),
             }),
         );
     }
@@ -1429,6 +1432,7 @@ fn test_set_material_field_roundtrip() {
             fc: Some(21.0),
             fy: None,
             strength_factor: None,
+            concrete_class: Default::default(),
         }),
     );
     stack.run(
@@ -1459,6 +1463,7 @@ fn test_set_material_strength_factor_roundtrip() {
             fc: None,
             fy: Some(440.0),
             strength_factor: None,
+            concrete_class: Default::default(),
         }),
     );
     assert_eq!(model.materials[0].strength_factor, None, "既定は自動判定");

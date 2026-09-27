@@ -405,6 +405,7 @@ impl WallElement {
                 None,
                 Some(fc),
                 self.column.e,
+                self.column.e,
                 crate::frame::fiber::FiberYield::default(),
                 1.0,
                 1.0,

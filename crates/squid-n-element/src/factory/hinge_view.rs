@@ -8,8 +8,7 @@ use squid_n_core::error::RebarGeometryError;
 use squid_n_core::model::{AnalysisKind, ElementData, ElementKind, Model};
 use squid_n_section::fiber::Fiber;
 use squid_n_section::mn_surface::{
-    build_surface, concrete_young, FiberRegion, MnSurface, PlasticFiber, StrengthParams,
-    YieldModelKind,
+    build_surface, FiberRegion, MnSurface, PlasticFiber, StrengthParams, YieldModelKind,
 };
 
 use super::regime::{resolve_force_regime, ResolvedRegime};
@@ -17,8 +16,8 @@ use super::springs::{build_flexural_springs, yield_moment_and_axial};
 use super::{resolve_member_hysteresis, StrengthBasis};
 use crate::frame::concentrated::MnInteraction;
 use crate::frame::fiber::{
-    build_gauss_fiber_pair, fiber_strength_params, fiber_yield_covers_shape, resolve_fiber_yield,
-    FIBER_ND, FIBER_NW,
+    build_gauss_fiber_pair, fiber_strength_params, fiber_yield_covers_shape, fiber_young_moduli,
+    resolve_fiber_yield, FIBER_ND, FIBER_NW,
 };
 use crate::frame::multi_spring::{MS_ND, MS_NW};
 
@@ -208,20 +207,21 @@ pub(crate) fn analysis_plastic_fibers(
         return Ok(None);
     }
     let strength = fiber_strength_params(data, model, basis);
+    let (concrete_e, _) = fiber_young_moduli(data, model);
     let [(section, _mats), _] =
         build_gauss_fiber_pair(data, model, basis, kind, sec.width, sec.depth, nw, nd)?;
     Ok(Some(
         section
             .fibers
             .iter()
-            .map(|f| to_plastic_fiber(f, &strength))
+            .map(|f| to_plastic_fiber(f, &strength, concrete_e))
             .collect(),
     ))
 }
 
 /// ファイバの材料区分タグ（0=コンクリート／1=主筋／2=鋼材）から全塑性計算用の
 /// 限界応力・弾性係数・領域区分を決める。
-fn to_plastic_fiber(f: &Fiber, strength: &StrengthParams) -> PlasticFiber {
+fn to_plastic_fiber(f: &Fiber, strength: &StrengthParams, concrete_e: f64) -> PlasticFiber {
     match f.material {
         1 => PlasticFiber {
             y: f.y,
@@ -247,7 +247,7 @@ fn to_plastic_fiber(f: &Fiber, strength: &StrengthParams) -> PlasticFiber {
             area: f.area,
             sigma_t: 0.0,
             sigma_c: -strength.concrete_fc,
-            young: concrete_young(strength.concrete_fc),
+            young: concrete_e,
             region: FiberRegion::Concrete,
         },
     }
@@ -714,6 +714,95 @@ mod tests {
         let nt: f64 = plastic.iter().map(|p| p.sigma_t * p.area).sum();
         assert!((surface.n_comp - nc).abs() < 1e-9 * nc.abs().max(1.0));
         assert!((surface.n_tens - nt).abs() < 1e-9 * nt.abs().max(1.0));
+    }
+
+    #[test]
+    fn fiber_surface_uses_analysis_material_young_moduli() {
+        let mut model = make_model(Some(rc_column_shape()), Some(24.0));
+        model.materials[0].category = MaterialCategory::Concrete;
+        model.materials[0].young = 12_345.0;
+        model.materials.push(Material {
+            strength_factor: None,
+            concrete_class: Default::default(),
+            id: MaterialId(1),
+            name: "SD345".into(),
+            category: MaterialCategory::Rebar,
+            young: 205_000.0,
+            poisson: 0.3,
+            density: 0.0,
+            shear: None,
+            fc: None,
+            fy: Some(345.0),
+        });
+        model.sections[0].rebar_material = Some(MaterialId(1));
+        let col = elem(ElementKind::Fiber, [NodeId(0), NodeId(2)]);
+        let basis = StrengthBasis::Nominal;
+        let kind = AnalysisKind::Incremental;
+        let beam = crate::frame::fiber::FiberBeam::with_plastic_zone(
+            &col,
+            &model,
+            crate::factory::plastic_zone_length(&col, &model),
+            basis,
+            kind,
+        );
+        let plastic = analysis_plastic_fibers(&col, &model, basis, kind, FIBER_NW, FIBER_ND)
+            .expect("配筋は妥当")
+            .expect("断面ありはファイバを返す");
+        let (p, (_, mat)) = plastic
+            .iter()
+            .zip(
+                beam.gauss_points[0]
+                    .section
+                    .fibers
+                    .iter()
+                    .zip(beam.gauss_points[0].mats.iter()),
+            )
+            .find(|(_, (fiber, _))| fiber.material == 0)
+            .expect("コンクリートファイバー");
+        assert_eq!(p.young, 12_345.0);
+        assert_eq!(mat.probe(0.0).1, p.young);
+
+        let mut src_model = model;
+        src_model.sections[0].shape = Some(src_shape());
+        src_model.sections[0].steel_material = Some(MaterialId(2));
+        src_model.materials.push(Material {
+            strength_factor: None,
+            concrete_class: Default::default(),
+            id: MaterialId(2),
+            name: "SN490".into(),
+            category: MaterialCategory::Steel,
+            young: 198_000.0,
+            poisson: 0.3,
+            density: 0.0,
+            shear: None,
+            fc: None,
+            fy: Some(325.0),
+        });
+        let src_col = elem(ElementKind::Fiber, [NodeId(0), NodeId(2)]);
+        let src_beam = crate::frame::fiber::FiberBeam::with_plastic_zone(
+            &src_col,
+            &src_model,
+            crate::factory::plastic_zone_length(&src_col, &src_model),
+            basis,
+            kind,
+        );
+        let src_plastic =
+            analysis_plastic_fibers(&src_col, &src_model, basis, kind, FIBER_NW, FIBER_ND)
+                .expect("配筋は妥当")
+                .expect("SRC はファイバを返す");
+        let (p, (_, mat)) = src_plastic
+            .iter()
+            .zip(
+                src_beam.gauss_points[0]
+                    .section
+                    .fibers
+                    .iter()
+                    .zip(src_beam.gauss_points[0].mats.iter()),
+            )
+            .find(|(_, (fiber, _))| fiber.material == 2)
+            .expect("内蔵鉄骨ファイバー");
+        assert_eq!(p.young, 198_000.0);
+        assert_eq!(mat.probe(0.0).1, p.young);
     }
 
     /// MS の N-M 曲面は解析の `MS_NW × MS_ND` 格子を単一情報源とする。

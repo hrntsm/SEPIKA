@@ -32,7 +32,7 @@ pub fn concrete_allowable_shear(fc: f64, long_term: bool) -> f64 {
 /// 軽量コンクリート1種・2種の許容せん断応力度は普通コンクリートの `0.9 倍`。
 fn concrete_class_factor(class: ConcreteClass) -> f64 {
     match class {
-        ConcreteClass::Normal => 1.0,
+        ConcreteClass::Normal | ConcreteClass::UserDefined => 1.0,
         ConcreteClass::Lightweight1 | ConcreteClass::Lightweight2 => 0.9,
     }
 }

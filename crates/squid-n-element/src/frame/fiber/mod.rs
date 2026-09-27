@@ -180,6 +180,38 @@ fn fiber_steel_material<'a>(
     }
 }
 
+pub(crate) fn fiber_young_moduli(
+    data: &squid_n_core::model::ElementData,
+    model: &squid_n_core::model::Model,
+) -> (f64, f64) {
+    let mat_ref = model.element_material(data);
+    let shape = model.element_section(data).and_then(|s| s.shape.as_ref());
+    let concrete_e = match (shape, mat_ref) {
+        (Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }), Some(m)) => {
+            m.fc.filter(|fc| *fc > 0.0)
+                .map(|fc| {
+                    let gamma = squid_n_core::units::concrete_unit_weight_kn_m3(
+                        fc,
+                        m.concrete_class,
+                        squid_n_core::units::ConcreteComposition::Plain,
+                    );
+                    squid_n_core::section_shape::concrete_young_modulus_gamma(fc, gamma)
+                })
+                .unwrap_or(0.0)
+        }
+        (_, Some(m)) => m.young,
+        _ => 0.0,
+    };
+    let steel_e = match shape {
+        Some(SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }) => model
+            .element_steel_material(data)
+            .map(|m| m.young)
+            .unwrap_or(0.0),
+        _ => mat_ref.map(|m| m.young).unwrap_or(0.0),
+    };
+    (concrete_e, steel_e)
+}
+
 /// 解決済みの [`FiberYield`] を渡す内部版。呼び出し元が [`resolve_fiber_yield`] を
 /// 再実行せずに [`fiber_strength_params`] と同じ値を得るために用いる。
 fn fiber_strength_params_from_yield(
@@ -190,7 +222,7 @@ fn fiber_strength_params_from_yield(
 ) -> StrengthParams {
     let mat_ref = model.element_material(data);
     let steel_mat_ref = fiber_steel_material(data, model);
-    let e = mat_ref.map(|m| m.young).unwrap_or(0.0);
+    let (_, steel_e) = fiber_young_moduli(data, model);
     let fc = mat_ref.and_then(|m| m.fc);
     let rebar_fy = yield_.rebar.or(yield_.main);
     let steel_fy = yield_.steel;
@@ -198,7 +230,7 @@ fn fiber_strength_params_from_yield(
         steel_fy: steel_fy.unwrap_or(235.0) * basis.steel_factor(steel_mat_ref),
         rebar_fy: rebar_fy.unwrap_or(345.0) * basis.rebar_factor(mat_ref),
         concrete_fc: fc.unwrap_or(24.0),
-        steel_e: e,
+        steel_e,
     }
 }
 
@@ -239,11 +271,10 @@ pub(crate) fn build_gauss_fiber_pair(
     nw: usize,
     nd: usize,
 ) -> Result<[(FiberSection, Vec<Box<dyn UniaxialMaterial>>); 2], RebarGeometryError> {
-    let sec = model.element_section(data);
     let mat_ref = model.element_material(data);
-    let e = mat_ref.map(|m| m.young).unwrap_or(0.0);
-    let shape = sec.and_then(|s| s.shape.as_ref());
+    let shape = model.element_section(data).and_then(|s| s.shape.as_ref());
     let fc = mat_ref.and_then(|m| m.fc);
+    let (concrete_e, steel_e) = fiber_young_moduli(data, model);
     let yield_ = resolve_fiber_yield(model, data);
     let strength = fiber_strength_params_from_yield(data, model, basis, yield_);
     let steel_factor = basis.steel_factor(fiber_steel_material(data, model));
@@ -257,7 +288,8 @@ pub(crate) fn build_gauss_fiber_pair(
             nd,
             shape,
             fc,
-            e,
+            concrete_e,
+            steel_e,
             yield_,
             steel_factor,
             rebar_factor,
@@ -281,7 +313,8 @@ pub(crate) fn build_gauss_fibers(
     nd: usize,
     shape: Option<&SectionShape>,
     fc: Option<f64>,
-    e: f64,
+    concrete_e: f64,
+    steel_e: f64,
     yield_: FiberYield,
     steel_factor: f64,
     rebar_factor: f64,
@@ -294,7 +327,8 @@ pub(crate) fn build_gauss_fibers(
             build_shape_fibers(
                 s,
                 fc,
-                e,
+                concrete_e,
+                steel_e,
                 yield_,
                 steel_factor,
                 rebar_factor,
@@ -308,9 +342,9 @@ pub(crate) fn build_gauss_fibers(
         Some(r) => r,
         None => {
             let base: Box<dyn UniaxialMaterial> = if fc.is_some() {
-                concrete_fiber_material(fc, e, concrete_rule)
+                concrete_fiber_material(fc, concrete_e, concrete_rule)
             } else {
-                steel_fiber_material(e, yield_.main.map(|fy| fy * steel_factor))
+                steel_fiber_material(steel_e, yield_.main.map(|fy| fy * steel_factor))
             };
             let tag = if fc.is_some() { 0 } else { 2 };
             let grid = squid_n_section::fiber::rect_fiber_section(width, depth, nw, nd, tag);
@@ -335,7 +369,8 @@ pub(crate) fn build_gauss_fibers(
 fn build_shape_fibers(
     shape: &SectionShape,
     fc: Option<f64>,
-    e: f64,
+    concrete_e: f64,
+    steel_e: f64,
     yield_: FiberYield,
     steel_factor: f64,
     rebar_factor: f64,
@@ -363,8 +398,8 @@ fn build_shape_fibers(
     for f in &placed {
         let (tag, mat) = match f.region {
             FiberRegion::Concrete => {
-                let template =
-                    concrete.get_or_insert_with(|| concrete_fiber_material(fc, e, concrete_rule));
+                let template = concrete
+                    .get_or_insert_with(|| concrete_fiber_material(fc, concrete_e, concrete_rule));
                 (0usize, template.clone_box())
             }
             FiberRegion::Rebar => {
@@ -375,7 +410,7 @@ fn build_shape_fibers(
             }
             FiberRegion::Steel => {
                 let template = steel.get_or_insert_with(|| {
-                    steel_fiber_material(e, steel_fy.map(|fy| fy * steel_factor))
+                    steel_fiber_material(steel_e, steel_fy.map(|fy| fy * steel_factor))
                 });
                 (2usize, template.clone_box())
             }

@@ -62,14 +62,10 @@ fn is_standard_concrete(
     category: MaterialCategory,
     fc: Option<f64>,
     density: f64,
+    concrete_class: ConcreteClass,
 ) -> bool {
-    category == MaterialCategory::Concrete
-        && material_presets().into_iter().any(|preset| {
-            preset.category == MaterialCategory::Concrete
-                && preset.name == name
-                && preset.fc == fc
-                && preset.density == density
-        })
+    let _ = (name, fc, density);
+    category == MaterialCategory::Concrete && concrete_class == ConcreteClass::Normal
 }
 
 fn young_editable(
@@ -77,9 +73,9 @@ fn young_editable(
     category: MaterialCategory,
     fc: Option<f64>,
     density: f64,
-    is_preset: bool,
+    concrete_class: ConcreteClass,
 ) -> bool {
-    !(is_preset || is_standard_concrete(name, category, fc, density))
+    !is_standard_concrete(name, category, fc, density, concrete_class)
 }
 
 /// 材料タブ：プリセット追加・カスタム追加・一覧編集・削除。
@@ -162,6 +158,7 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                         fc: preset.fc,
                         fy: preset.fy,
                         strength_factor: None,
+                        concrete_class: Default::default(),
                     }),
                 );
                 if draft.category == MaterialCategory::Concrete {
@@ -252,6 +249,11 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                     fc,
                     fy,
                     strength_factor,
+                    concrete_class: if custom_category == MaterialCategory::Concrete {
+                        ConcreteClass::UserDefined
+                    } else {
+                        Default::default()
+                    },
                 }),
             );
             app.core.scoped.staleness.mark_edited();
@@ -331,7 +333,7 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                         mat.category,
                         mat.fc,
                         mat.density,
-                        app.ui.scoped.preset_material_ids.contains(&mat_id),
+                        mat.concrete_class,
                     ),
                 ),
                 (MaterialField::Poisson, format!("{}", mat.poisson), true),
@@ -362,7 +364,7 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                             mat.category,
                             mat.fc,
                             mat.density,
-                            app.ui.scoped.preset_material_ids.contains(&mat_id),
+                            mat.concrete_class,
                         );
                     let cell_id = egui::Id::new(("mat_cell", mat_id.0, field as u8));
                     let mut buf = ui
@@ -520,21 +522,21 @@ mod tests {
             MaterialCategory::Concrete,
             Some(24.0),
             0.0,
-            true
+            ConcreteClass::Normal
         ));
         assert!(young_editable(
             "任意",
             MaterialCategory::Concrete,
             Some(24.0),
             0.0,
-            false
+            ConcreteClass::UserDefined
         ));
         assert!(young_editable(
             "SS400",
             MaterialCategory::Steel,
             None,
             0.0,
-            true
+            ConcreteClass::Normal
         ));
     }
 
@@ -549,14 +551,14 @@ mod tests {
             preset.category,
             preset.fc,
             preset.density,
-            false,
+            ConcreteClass::Normal,
         ));
         assert!(young_editable(
             "Fc24の直接入力",
             MaterialCategory::Concrete,
             preset.fc,
             preset.density,
-            false,
+            ConcreteClass::UserDefined,
         ));
     }
 }

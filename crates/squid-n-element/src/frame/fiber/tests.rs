@@ -354,6 +354,78 @@ fn srcファイバーは内蔵鋼材のstrength_factorを使う() {
         .0
         .reference_stress();
     assert_eq!(steel_fy, 235.0 * 1.05);
+    let concrete_e = mats
+        .iter()
+        .zip(section.fibers.iter())
+        .find(|(_, fiber)| fiber.material == 0)
+        .expect("コンクリートファイバー")
+        .0
+        .probe(0.0)
+        .1;
+    let steel_e = mats
+        .iter()
+        .zip(section.fibers.iter())
+        .find(|(_, fiber)| fiber.material == 2)
+        .expect("内蔵鋼材ファイバー")
+        .0
+        .probe(0.0)
+        .1;
+    assert_relative_eq!(concrete_e, 25000.0, max_relative = 1e-10);
+    assert_relative_eq!(steel_e, 205000.0, max_relative = 1e-10);
+}
+
+#[test]
+fn cftファイバーは鋼管と充填コンクリートの初期接線を分離する() {
+    use squid_n_core::section_shape::SectionShape;
+
+    let mut model = build_test_model(Some(190000.0));
+    model.sections[0].shape = Some(SectionShape::CftBox {
+        height: 400.0,
+        width: 300.0,
+        thick: 12.0,
+    });
+    model.materials[0].category = MaterialCategory::Steel;
+    model.materials[0].young = 190000.0;
+    model.materials[0].fc = Some(36.0);
+    model.materials[0].fy = Some(325.0);
+
+    let [(section, mats), _] = build_gauss_fiber_pair(
+        &model.elements[0],
+        &model,
+        StrengthBasis::MaterialStrength,
+        AnalysisKind::Incremental,
+        400.0,
+        300.0,
+        12,
+        20,
+    )
+    .expect("CFTファイバー");
+    let concrete_e = mats
+        .iter()
+        .zip(section.fibers.iter())
+        .find(|(_, fiber)| fiber.material == 0)
+        .expect("充填コンクリートファイバー")
+        .0
+        .probe(0.0)
+        .1;
+    let steel_e = mats
+        .iter()
+        .zip(section.fibers.iter())
+        .find(|(_, fiber)| fiber.material == 2)
+        .expect("鋼管ファイバー")
+        .0
+        .probe(0.0)
+        .1;
+    let expected_concrete_e = squid_n_core::section_shape::concrete_young_modulus_gamma(
+        36.0,
+        squid_n_core::units::concrete_unit_weight_kn_m3(
+            36.0,
+            model.materials[0].concrete_class,
+            squid_n_core::units::ConcreteComposition::Plain,
+        ),
+    );
+    assert_relative_eq!(concrete_e, expected_concrete_e, max_relative = 1e-10);
+    assert_relative_eq!(steel_e, 190000.0, max_relative = 1e-10);
 }
 
 #[test]
@@ -3098,6 +3170,7 @@ fn test_steel_box_fibers_are_hollow() {
         Some(&shape),
         None,
         205000.0,
+        205000.0,
         FiberYield {
             main: Some(295.0),
             rebar: None,
@@ -3152,6 +3225,7 @@ fn test_rc_circle_fibers_match_circle_area() {
         20,
         Some(&shape),
         Some(24.0),
+        22000.0,
         22000.0,
         FiberYield {
             main: Some(345.0),
