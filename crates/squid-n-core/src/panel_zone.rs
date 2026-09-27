@@ -718,6 +718,10 @@ mod tests {
         beam_mat: u32,
         col_mat: u32,
     ) -> Model {
+        let mut beam_sec = sec_with_mat(beam, beam_depth, None, 0, beam_mat);
+        beam_sec.frame_use = Some(FrameSectionUse::Beam);
+        let mut col_sec = sec_with_mat(col, 400.0, None, 1, col_mat);
+        col_sec.frame_use = Some(FrameSectionUse::Column);
         Model {
             nodes: vec![
                 node(0, [0.0, 0.0, 3000.0]),
@@ -725,10 +729,7 @@ mod tests {
                 node(2, [0.0, 0.0, 0.0]),
             ],
             // 材料は断面が持つ。断面 0（梁）・断面 1（柱）へそれぞれ割り当てる。
-            sections: vec![
-                sec_with_mat(beam, beam_depth, None, 0, beam_mat),
-                sec_with_mat(col, 400.0, None, 1, col_mat),
-            ],
+            sections: vec![beam_sec, col_sec],
             materials: vec![
                 mat(0, MaterialCategory::Steel),
                 mat(1, MaterialCategory::Concrete),
@@ -800,7 +801,9 @@ mod tests {
         let build = |upper_first: bool| {
             let mut m = joint_model(h_beam(), 600.0, h_col());
             m.nodes.push(node(3, [0.0, 0.0, 6000.0]));
-            m.sections.push(sec(thin.clone(), 400.0, None));
+            let mut thin_sec = sec(thin.clone(), 400.0, None);
+            thin_sec.frame_use = Some(FrameSectionUse::Column);
+            m.sections.push(thin_sec);
             let upper = member(2, 0, 3, 2);
             if upper_first {
                 m.elements.insert(0, upper);

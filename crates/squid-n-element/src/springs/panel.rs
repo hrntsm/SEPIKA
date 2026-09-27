@@ -692,6 +692,7 @@ mod tests {
             support_spring: None,
         };
         let section = |id: u32, shape: SectionShape, depth: f64, area: f64| Section {
+            frame_use: None,
             id: SectionId(id),
             name: String::new(),
             area,

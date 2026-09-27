@@ -18,7 +18,7 @@
 //! id 正規化・参照解決を行ってモデルを構築する。
 
 use super::StbError;
-use squid_n_core::model::{EndCondition, Model};
+use squid_n_core::model::{EndCondition, FrameSectionUse, Model};
 use squid_n_core::section_shape::SectionShape;
 
 mod assemble;
@@ -106,6 +106,9 @@ struct PendingMember {
     rotate: f64,
     /// 部材端の接合条件 [i, j]（`condition_bottom`/`top`・`condition_start`/`end`）。
     end_cond: [EndCondition; 2],
+    source_usage: FrameSectionUse,
+    source_tag: String,
+    source_id: Option<u32>,
 }
 
 /// 取り込み途中の二次部材（小梁 `StbBeam`・間柱 `StbPost`。id 正規化前）。

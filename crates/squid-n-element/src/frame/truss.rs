@@ -152,6 +152,7 @@ mod tests {
                 },
             ],
             sections: vec![Section {
+                frame_use: None,
                 id: SectionId(0),
                 name: "brace".to_string(),
                 area: 2000.0,

@@ -35,6 +35,7 @@ fn two_story_model() -> Model {
         });
     }
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "S".into(),
         area: 10000.0,
@@ -459,6 +460,7 @@ fn two_columns_with_dl_model() -> Model {
         });
     }
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "COL".into(),
         area: 10000.0,
@@ -586,6 +588,7 @@ fn rc_base_column_with_base_beam_model() -> Model {
         });
     }
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "Col".into(),
         area: 90000.0,
@@ -606,6 +609,7 @@ fn rc_base_column_with_base_beam_model() -> Model {
         steel_material: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(1),
         name: "Beam".into(),
         area: 0.0,
@@ -1043,6 +1047,7 @@ fn rc_beam_with_slab_model() -> Model {
     }
     // 梁断面（b=400, D=700, A=280000）。スラブ厚 150 の控除で設計重量の断面積は 220000。
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "RC梁".into(),
         area: 400.0 * 700.0,
@@ -1064,6 +1069,7 @@ fn rc_beam_with_slab_model() -> Model {
     });
     // 自重ゼロ（A=0）の柱断面。せい 800 で水平梁のフェイス控除 400×2 を作る。
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(1),
         name: "RC柱(重量なし)".into(),
         area: 0.0,
@@ -1401,6 +1407,7 @@ fn horizontal_cft_beam_model() -> Model {
     beam.material = Some(MaterialId(0));
     model.sections.push(beam);
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(1),
         name: "柱(重量なし)".into(),
         area: 0.0,
@@ -1659,6 +1666,7 @@ fn secondary_joist_model() -> Model {
         support_spring: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "JOIST".into(),
         area: 5000.0,
@@ -1760,6 +1768,7 @@ fn test_secondary_joist_steel_weight_factor_applies_to_design_and_mass() {
         });
     }
     let mk_section = |id: SectionId, name: &str, area: f64| Section {
+        frame_use: None,
         id,
         name: name.into(),
         area,
@@ -1879,6 +1888,7 @@ fn secondary_joist_on_girder_midspan_model(with_joist: bool) -> Model {
         });
     }
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "G".into(),
         area: 8000.0,
@@ -1899,6 +1909,7 @@ fn secondary_joist_on_girder_midspan_model(with_joist: bool) -> Model {
         steel_material: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(1),
         name: "J".into(),
         area: 5000.0,
@@ -2022,6 +2033,7 @@ fn single_beam_model(
         support_spring: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "S".into(),
         area,
@@ -2256,6 +2268,7 @@ fn test_face_reduction_applies_to_horizontal_concrete_beam() {
         });
     }
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "RC".into(),
         area,
@@ -2292,6 +2305,7 @@ fn test_face_reduction_applies_to_horizontal_concrete_beam() {
     // 柱を両端に立ててフェイス控除 400 を作る。柱の断面積は 0 にして自重を
     // 生じさせず、水平梁の自重だけを検証対象にする。
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(1),
         name: "柱(重量なし)".into(),
         area: 0.0,
@@ -2448,6 +2462,7 @@ fn wall_model() -> Model {
         });
     }
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "Wall".into(),
         area: 0.0,
@@ -2625,6 +2640,7 @@ fn test_wall_self_weight_uses_clear_dimensions_of_boundary_members() {
     let mut model = wall_model();
     // 側柱・上下梁用の断面（線材）。
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(1),
         name: "C500".into(),
         area: 0.0, // 自重 0（壁重量のみを観測するため）
@@ -2645,6 +2661,7 @@ fn test_wall_self_weight_uses_clear_dimensions_of_boundary_members() {
         steel_material: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(2),
         name: "G400x700".into(),
         area: 0.0,
@@ -2943,6 +2960,7 @@ fn test_density_seismic_weight_includes_attached_wall_plate() {
     let baseline = generate_stories(&model, None).unwrap();
 
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(1),
         name: "壁 t150".into(),
         area: 0.0,
@@ -3107,6 +3125,7 @@ fn single_column_with_attached_wall(transfer: LoadTransfer) -> (Model, f64) {
         support_spring: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "Col".into(),
         area: 0.0,
@@ -3327,6 +3346,7 @@ fn test_finish_area_weight_beam_perimeter_three_side() {
         support_spring: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "Beam".into(),
         area: 90000.0,
@@ -3422,6 +3442,7 @@ fn test_base_column_without_lower_column_adds_max_beam_depth() {
         support_spring: None,
     }); // 梁の他端(基部)
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "Col".into(),
         area: 90000.0,
@@ -3442,6 +3463,7 @@ fn test_base_column_without_lower_column_adds_max_beam_depth() {
         steel_material: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(1),
         name: "Beam".into(),
         area: 0.0, // 自重寄与ゼロにして柱脚梁せい付加のみを検証する
@@ -3562,6 +3584,7 @@ fn test_base_column_with_lower_brace_still_adds_max_beam_depth() {
         support_spring: None,
     }); // 下階のブレース下端
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "Col".into(),
         area: 90000.0,
@@ -3582,6 +3605,7 @@ fn test_base_column_with_lower_brace_still_adds_max_beam_depth() {
         steel_material: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(1),
         name: "Beam".into(),
         area: 0.0, // 自重寄与ゼロにして柱脚梁せい付加のみを検証する
@@ -3602,6 +3626,7 @@ fn test_base_column_with_lower_brace_still_adds_max_beam_depth() {
         steel_material: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(2),
         name: "Brace".into(),
         area: 0.0, // 自重は寄与させず、下階柱判定だけに効かせる
@@ -3752,6 +3777,7 @@ fn test_base_column_with_lower_three_node_vertical_beam_still_adds_max_beam_dept
         support_spring: None,
     }); // 3節点鉛直Beamの3番目(下階の階を増やさない標高)
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "Col".into(),
         area: 90000.0,
@@ -3772,6 +3798,7 @@ fn test_base_column_with_lower_three_node_vertical_beam_still_adds_max_beam_dept
         steel_material: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(1),
         name: "Beam".into(),
         area: 0.0, // 自重寄与ゼロにして柱脚梁せい付加のみを検証する
@@ -3792,6 +3819,7 @@ fn test_base_column_with_lower_three_node_vertical_beam_still_adds_max_beam_dept
         steel_material: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(2),
         name: "VBeam3".into(),
         area: 0.0, // 自重は寄与させず、下階柱判定だけに効かせる
@@ -3925,6 +3953,7 @@ fn test_base_column_with_lower_column_does_not_add_beam_depth() {
         support_spring: None,
     }); // 1F 位置に取付く梁の他端
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "Col".into(),
         area: 90000.0,
@@ -3945,6 +3974,7 @@ fn test_base_column_with_lower_column_does_not_add_beam_depth() {
         steel_material: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(1),
         name: "ColLower".into(),
         area: 0.0,
@@ -3965,6 +3995,7 @@ fn test_base_column_with_lower_column_does_not_add_beam_depth() {
         steel_material: None,
     });
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(2),
         name: "Beam".into(),
         area: 0.0,
@@ -4085,6 +4116,7 @@ fn k_brace_model(rule: KBraceWeightRule) -> Model {
     }
     // 柱(自重ゼロ、node2/node3 を「基準節点」化するために存在)
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "Col".into(),
         area: 0.0,
@@ -4106,6 +4138,7 @@ fn k_brace_model(rule: KBraceWeightRule) -> Model {
     });
     // ブレース1(node2-node4)
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(1),
         name: "Brace1".into(),
         area: 10000.0,
@@ -4127,6 +4160,7 @@ fn k_brace_model(rule: KBraceWeightRule) -> Model {
     });
     // ブレース2(node3-node4): 面積を2倍にして非対称にする
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(2),
         name: "Brace2".into(),
         area: 20000.0,

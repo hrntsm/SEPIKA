@@ -1129,6 +1129,7 @@ fn shear_model(n: usize) -> squid_n_core::model::Model {
         nodes,
         elements,
         sections: vec![Section {
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
             id: SectionId(0),
             name: "spring".into(),
             area: 1.0,
@@ -3347,6 +3348,7 @@ fn test_floor_design_skips_materialized_joist() {
 
     let mut model = make_square_slab_test_model();
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "H".into(),
         area: 1.0,
@@ -3431,6 +3433,7 @@ fn test_floor_design_checks_secondary_member_joist() {
     let mut model = make_square_slab_test_model();
     model.slabs[0].plate.usage = Some(SlabUsage::Office);
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -3539,6 +3542,7 @@ fn test_floor_design_checks_joist_uses_joist_live_load() {
         .push(SectionShape::RcSlab { thickness: 150.0 }.to_section(slab_sid, "S15".into()));
     let joist_sid = SectionId(model.sections.len() as u32);
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: joist_sid,
         name: "H-400".into(),
         area: 10000.0,
@@ -3663,6 +3667,7 @@ fn test_floor_design_checks_cantilever_joist() {
     let mut model = make_square_slab_test_model();
     model.slabs[0].plate.usage = Some(SlabUsage::Office);
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -3849,6 +3854,7 @@ fn test_floor_design_checks_secondary_joist_uses_same_level_slab() {
 
     let mut model = make_square_slab_test_model();
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -3990,6 +3996,7 @@ fn test_floor_design_checks_secondary_joist_on_shared_edge_averages_width() {
 
     let mut model = make_square_slab_test_model();
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -4118,6 +4125,7 @@ fn test_floor_design_checks_secondary_joist_on_slab_edge() {
     let mut model = make_square_slab_test_model();
     model.slabs[0].plate.usage = Some(SlabUsage::Office);
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "H-400".into(),
         area: 10000.0,
@@ -5198,6 +5206,7 @@ fn test_sync_gravity_dl_includes_self_weight_and_slab() {
     let mut model = make_square_slab_test_model();
     // 全梁に断面・材料（密度あり）を与え、自重を発生させる。
     model.sections.push(Section {
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
         id: SectionId(0),
         name: "RC400x600".into(),
         area: 400.0 * 600.0,
@@ -5751,6 +5760,7 @@ fn test_secondary_joist_subdivided_slab_dl_cmq_and_solve() {
         elements,
         sections: vec![
             Section {
+                frame_use: Some(squid_n_core::model::FrameSectionUse::Beam),
                 id: SectionId(0),
                 name: "RC400x600".into(),
                 area: 400.0 * 600.0,
@@ -7228,6 +7238,7 @@ fn test_preparation_member_stiffness_reports_composite_props() {
     // 材料は断面が持つ。差し替えた断面へ元の材料を引き継ぐ。
     model.sections[0] = squid_n_core::model::Section {
         material: Some(squid_n_core::ids::MaterialId(0)),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         ..cft.to_section(SectionId(0), "CFT-□400x400x16".into())
     };
     model.materials[0].fc = Some(36.0);

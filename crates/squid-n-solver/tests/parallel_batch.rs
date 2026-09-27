@@ -65,6 +65,7 @@ fn make_model(n_cases: usize) -> Model {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "beam".into(),
             area: 100.0,

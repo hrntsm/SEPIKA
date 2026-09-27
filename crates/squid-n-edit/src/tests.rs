@@ -796,6 +796,7 @@ fn two_member_model() -> Model {
 /// 形状を持たない最小の断面（材料参照の検証用）。
 fn bare_section(id: SectionId, material: Option<MaterialId>) -> squid_n_core::model::Section {
     squid_n_core::model::Section {
+        frame_use: None,
         id,
         name: format!("S{}", id.0),
         area: 100.0,
@@ -865,6 +866,7 @@ fn test_delete_section_in_use_is_noop_and_renumbers() {
     let mut model = two_member_model();
     for i in 0..2u32 {
         model.sections.push(Section {
+            frame_use: None,
             id: SectionId(i),
             name: format!("S{}", i),
             area: 100.0,
@@ -924,6 +926,7 @@ fn test_delete_section_referenced_by_joist() {
     }
     for i in 0..2u32 {
         model.sections.push(Section {
+            frame_use: None,
             id: SectionId(i),
             name: format!("S{}", i),
             area: 100.0,
@@ -2412,6 +2415,7 @@ fn model_with_enclosed_wall_plate() -> Model {
         });
     }
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "壁 t150".into(),
         area: 150.0 * 3000.0,
@@ -3665,6 +3669,7 @@ fn test_delete_section_material_shift_and_guard_secondary_refs() {
             support_spring: None,
         });
         model.sections.push(Section {
+            frame_use: None,
             id: SectionId(i),
             name: format!("S{}", i),
             area: 100.0,
@@ -5180,6 +5185,7 @@ fn push_cft_section(model: &mut Model) -> SectionId {
 fn push_steel_section(model: &mut Model) -> SectionId {
     let id = SectionId(model.sections.len() as u32);
     model.sections.push(squid_n_core::model::Section {
+        frame_use: None,
         id,
         name: "S".into(),
         area: 100.0,
@@ -5429,6 +5435,7 @@ fn set_floor_region_joist_section() {
     use squid_n_core::model::{SecondaryMemberKind, Section};
     let mut model = sm_base_model();
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "S0".into(),
         area: 100.0,
@@ -5540,6 +5547,7 @@ fn set_wall_region_post_section_accepts_steel() {
     use squid_n_core::model::{SecondaryMemberKind, Section, WallRegion};
     let mut model = sm_base_model();
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(0),
         name: "S0".into(),
         area: 100.0,

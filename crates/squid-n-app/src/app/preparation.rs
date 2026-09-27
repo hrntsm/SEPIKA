@@ -626,6 +626,12 @@ impl App {
             if !matches!(e.kind, squid_n_core::model::ElementKind::Beam) || e.nodes.len() < 2 {
                 continue;
             }
+            if e.section
+                .and_then(|sid| model.sections.get(sid.index()))
+                .is_none()
+            {
+                continue;
+            }
             candidates += 1;
             let rz = e.rigid_zone;
             if rz.length_i <= 0.0

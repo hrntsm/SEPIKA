@@ -1276,6 +1276,7 @@ mod tests {
     #[test]
     fn test_required_lateral_bracing_count_hand_calc() {
         let sec = Section {
+            frame_use: None,
             id: SectionId(0),
             name: "H-dummy".to_string(),
             area: 100.0,
@@ -1308,6 +1309,7 @@ mod tests {
     #[test]
     fn test_required_lateral_bracing_count_skipped_when_length_zero() {
         let sec = Section {
+            frame_use: None,
             id: SectionId(0),
             name: "H-dummy".to_string(),
             area: 100.0,
@@ -1372,6 +1374,7 @@ mod tests {
         let mc = w * l * l / 8.0;
 
         let sec = Section {
+            frame_use: None,
             id: SectionId(0),
             name: "dummy".to_string(),
             area: 1.0,
@@ -1419,6 +1422,7 @@ mod tests {
     #[test]
     fn test_deflection_none_for_short_term() {
         let sec = Section {
+            frame_use: None,
             id: SectionId(0),
             name: "dummy".to_string(),
             area: 1.0,

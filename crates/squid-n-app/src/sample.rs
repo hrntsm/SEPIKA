@@ -4,8 +4,8 @@
 use squid_n_core::dof::Dof6Mask;
 use squid_n_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
 use squid_n_core::model::{
-    ElementData, ElementKind, EndCondition, ForceRegime, LoadCase, LocalAxis, Material,
-    MaterialCategory, MemberLoad, MemberLoadKind, Model, NodalLoad,
+    ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LoadCase, LocalAxis,
+    Material, MaterialCategory, MemberLoad, MemberLoadKind, Model, NodalLoad,
 };
 use squid_n_section::shape::SectionShape;
 
@@ -50,12 +50,12 @@ pub fn portal_frame() -> Model {
         web_thick: 8.0,
         flange_thick: 13.0,
     };
-    model
-        .sections
-        .push(col_shape.to_section(SectionId(0), "柱 H-300x300x10x15".into()));
-    model
-        .sections
-        .push(beam_shape.to_section(SectionId(1), "梁 H-400x200x8x13".into()));
+    let mut col_section = col_shape.to_section(SectionId(0), "柱 H-300x300x10x15".into());
+    col_section.frame_use = Some(FrameSectionUse::Column);
+    model.sections.push(col_section);
+    let mut beam_section = beam_shape.to_section(SectionId(1), "梁 H-400x200x8x13".into());
+    beam_section.frame_use = Some(FrameSectionUse::Beam);
+    model.sections.push(beam_section);
 
     model.materials.push(Material {
         strength_factor: None,

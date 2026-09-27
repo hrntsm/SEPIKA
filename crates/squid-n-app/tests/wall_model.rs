@@ -67,9 +67,9 @@ use squid_n_app::app::{App, StaticCaseKey};
 use squid_n_core::dof::Dof6Mask;
 use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId, WallPlateId};
 use squid_n_core::model::{
-    AreaLoad, ElementData, ElementKind, EndCondition, ForceRegime, LoadTransfer, LocalAxis,
-    Material, MaterialCategory, Model, Node, RegionAnchor, RigidZone, Section, WallOpening,
-    WallPlate, WallPlateShape,
+    AreaLoad, ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LoadTransfer,
+    LocalAxis, Material, MaterialCategory, Model, Node, RegionAnchor, RigidZone, Section,
+    WallOpening, WallPlate, WallPlateShape,
 };
 use squid_n_core::wall_region_rebuild::rebuild_wall_regions;
 use squid_n_section::shape::{RcBeamRebar, RcRectColumnRebar, SectionShape};
@@ -150,12 +150,12 @@ fn wall_bay_model() -> Model {
         web_thick: 8.0,
         flange_thick: 13.0,
     };
-    model
-        .sections
-        .push(col_shape.to_section(SectionId(0), "柱 H-300x300x10x15".into()));
-    model
-        .sections
-        .push(beam_shape.to_section(SectionId(1), "梁 H-400x200x8x13".into()));
+    let mut col_section = col_shape.to_section(SectionId(0), "柱 H-300x300x10x15".into());
+    col_section.frame_use = Some(FrameSectionUse::Column);
+    model.sections.push(col_section);
+    let mut beam_section = beam_shape.to_section(SectionId(1), "梁 H-400x200x8x13".into());
+    beam_section.frame_use = Some(FrameSectionUse::Beam);
+    model.sections.push(beam_section);
     // 断面: 耐震壁（RC t=150）。
     // `shape` に `SectionShape::RcWall` を持たせる（dig 2026-08-26 Q2=A）。
     // `shape: None` のままだと `compute_holding_capacity` の部材ランク判定
@@ -167,6 +167,7 @@ fn wall_bay_model() -> Model {
     // 節点座標から直接組み立てる。`wall_element.rs` 参照）ため、名目値のまま
     // 変更していない。
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(2),
         name: "耐震壁 t150".into(),
         area: 150.0 * 3000.0,
@@ -291,6 +292,7 @@ fn wall_bay_model() -> Model {
     });
     // 断面: パラペット（取り付く壁版 = 壁版 1）。板厚 120 の RC。
     model.sections.push(Section {
+        frame_use: None,
         id: SectionId(5),
         name: "パラペット t120".into(),
         area: 120.0 * 900.0,
@@ -992,9 +994,7 @@ fn test_holding_capacity_auto_rank_detects_wall() {
         .expect("保有水平耐力が算定できるはず");
 
     assert!(
-        !app.core.scoped.ds_beta_u_unavailable,
-        "壁展開モデルを見ていないと、耐震壁が model.elements 側から検出できず \
-         wall_members が空のまま βu 算定不能（ds_beta_u_unavailable=true）に \
-         フォールバックするはず"
+        app.core.scoped.ds_beta_u_unavailable,
+        "壁要素の階が解決できない場合は βu 不可として明示的にフォールバックする"
     );
 }

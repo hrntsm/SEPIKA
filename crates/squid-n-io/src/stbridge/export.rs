@@ -57,8 +57,13 @@ pub fn export_stbridge(model: &Model) -> Result<String, StbError> {
 pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportReport), StbError> {
     let std = standard_sections(model);
     let warnings = std.warnings;
-    let (sections_body, steel_lib, col_map, beam_map) =
-        (std.sections_xml, std.steel_lib, std.col_map, std.beam_map);
+    let (sections_body, steel_lib, col_map, beam_map, brace_map) = (
+        std.sections_xml,
+        std.steel_lib,
+        std.col_map,
+        std.beam_map,
+        std.brace_map,
+    );
 
     let mut s = String::new();
     s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
@@ -120,7 +125,7 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     s.push_str("    </StbStories>\n");
 
     s.push_str("    <StbMembers>\n");
-    s.push_str(&members_body(model, &col_map, &beam_map)?);
+    s.push_str(&members_body(model, &col_map, &beam_map, &brace_map)?);
     s.push_str("    </StbMembers>\n");
 
     let slab_sec_base = slab_section_id_base(model, &col_map, &beam_map);
@@ -177,6 +182,7 @@ fn members_body(
     model: &Model,
     col_map: &std::collections::HashMap<u32, u32>,
     beam_map: &std::collections::HashMap<u32, u32>,
+    brace_map: &std::collections::HashMap<u32, u32>,
 ) -> Result<String, StbError> {
     let mut columns = String::new();
     let mut girders = String::new();
@@ -230,13 +236,7 @@ fn members_body(
             ElementKind::Brace { tension_only } if e.nodes.len() == 2 => {
                 let sec = e
                     .section
-                    .map(|s| {
-                        col_map
-                            .get(&s.0)
-                            .or_else(|| beam_map.get(&s.0))
-                            .copied()
-                            .unwrap_or(s.0) as i64
-                    })
+                    .map(|s| brace_map.get(&s.0).copied().unwrap_or(s.0) as i64)
                     .unwrap_or(-1);
                 let feature = if tension_only {
                     "TENSION"

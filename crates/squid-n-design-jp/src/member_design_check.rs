@@ -105,6 +105,15 @@ pub fn run_member_design_checks(
         let Some(elem) = elem_by_id.get(elem_id).copied() else {
             continue;
         };
+        if !matches!(
+            elem.kind,
+            squid_n_core::model::ElementKind::Beam
+                | squid_n_core::model::ElementKind::Fiber
+                | squid_n_core::model::ElementKind::MultiSpring
+                | squid_n_core::model::ElementKind::Brace { .. }
+        ) {
+            continue;
+        }
         let sec = elem
             .section
             .and_then(|sid| model.sections.get(sid.index()))

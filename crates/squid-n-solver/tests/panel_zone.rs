@@ -45,6 +45,7 @@ fn node(id: u32, coord: [f64; 3], restraint: Dof6Mask) -> Node {
 
 fn steel_section(id: u32, shape: SectionShape, depth: f64, width: f64, area: f64) -> Section {
     Section {
+        frame_use: None,
         id: SectionId(id),
         name: String::new(),
         area,

@@ -20,7 +20,7 @@
 //! id は ST-Bridge の `positiveInteger`（1 始まり）に合わせ、内部 0 始まり id に +1 する。
 
 use super::export::{esc, fmt as num};
-use squid_n_core::model::{ElementKind, Model, Section};
+use squid_n_core::model::{ElementKind, FrameSectionUse, Model, Section};
 use squid_n_core::section_shape::{
     RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar, SectionShape,
 };
@@ -54,49 +54,34 @@ pub(super) struct StandardSections {
     pub col_map: HashMap<u32, u32>,
     /// 内部断面 id → 梁部材が参照すべき ST-Bridge 断面 id。
     pub beam_map: HashMap<u32, u32>,
+    pub brace_map: HashMap<u32, u32>,
     /// 書き出し時に生じた近似・切り捨ての警告（段数超過など）。
     pub warnings: Vec<String>,
 }
 
 /// 各断面が柱／梁のどちらに使われているかを集計する。
 /// 返り値は 内部断面 id → (柱で使用, 梁で使用)。
-fn section_roles(model: &Model) -> HashMap<u32, (bool, bool)> {
-    let mut roles: HashMap<u32, (bool, bool)> = HashMap::new();
+fn section_roles(model: &Model) -> HashMap<u32, (bool, bool, bool)> {
+    let mut roles: HashMap<u32, (bool, bool, bool)> = HashMap::new();
     for e in &model.elements {
         if e.nodes.len() != 2 {
             continue;
         }
-        let is_col = match e.kind {
-            ElementKind::Beam => {
-                let n0 = &model.nodes[e.nodes[0].index()];
-                let n1 = &model.nodes[e.nodes[1].index()];
-                squid_n_core::geom::is_vertical_axis(n0.coord, n1.coord)
-            }
-            ElementKind::Brace { .. } => false,
-            _ => continue,
+        let usage = match e.kind {
+            ElementKind::Beam => model.element_section(e).and_then(|s| s.frame_use),
+            ElementKind::Brace { .. } => Some(FrameSectionUse::Brace),
+            _ => None,
         };
+        let Some(usage) = usage else { continue };
         let Some(sec) = e.section else { continue };
-        let ent = roles.entry(sec.0).or_insert((false, false));
-        if is_col {
-            ent.0 = true;
-        } else {
-            ent.1 = true;
+        let ent = roles.entry(sec.0).or_insert((false, false, false));
+        match usage {
+            FrameSectionUse::Column => ent.0 = true,
+            FrameSectionUse::Beam => ent.1 = true,
+            FrameSectionUse::Brace => ent.2 = true,
         }
     }
     roles
-}
-
-/// 実配筋型（`RcBeamRect`・`RcColumnRect`・`RcColumnCircle`・`SrcBeamRect`・
-/// `SrcColumnRect`）が持つ用途。`Some(true)` は梁用、`Some(false)` は柱用。
-/// 配筋なし形状は `None` を返し、部材使用状況から柱／梁を判定する。
-fn rebar_purpose(shape: &SectionShape) -> Option<bool> {
-    match shape {
-        SectionShape::RcBeamRect { .. } | SectionShape::SrcBeamRect { .. } => Some(true),
-        SectionShape::RcColumnRect { .. }
-        | SectionShape::RcColumnCircle { .. }
-        | SectionShape::SrcColumnRect { .. } => Some(false),
-        _ => None,
-    }
 }
 
 /// 断面が持つ鉄筋・内蔵鉄骨の材質名（ST-Bridge はグレード名で書く）。
@@ -416,6 +401,22 @@ fn steel_beam(id: u32, sec: &Section, figure: &str, strength: &str) -> String {
          \x20         <StbSecSteelBeam_S_Straight shape=\"{}\"{}/>\n\
          \x20       </StbSecSteelFigureBeam_S>\n\
          \x20     </StbSecBeam_S>\n",
+        id,
+        esc(&sec.name),
+        floor_attr(sec),
+        esc(figure),
+        strength
+    )
+}
+
+fn steel_brace(id: u32, sec: &Section, figure: &str, strength: &str) -> String {
+    let id = sid(id);
+    format!(
+        "      <StbSecBrace_S id=\"{}\" name=\"{}\"{}>\n\\
+         \x20       <StbSecSteelFigureBrace_S>\n\\
+         \x20         <StbSecSteelBrace_S_Same shape=\"{}\"{}/>\n\\
+         \x20       </StbSecSteelFigureBrace_S>\n\\
+         \x20     </StbSecBrace_S>\n",
         id,
         esc(&sec.name),
         floor_attr(sec),
@@ -918,11 +919,23 @@ fn rebar_arrangement_generic(
 /// `StbSecRaw` で残す（他ソフトは解釈できないが、参照部材の断面リンクは保たれる）。
 fn raw(id: u32, sec: &Section) -> String {
     let id = sid(id);
+    let kind = match sec.frame_use {
+        Some(FrameSectionUse::Column) => "COLUMN",
+        Some(FrameSectionUse::Beam) => "BEAM",
+        Some(FrameSectionUse::Brace) => "BRACE",
+        None => "",
+    };
+    let kind_attr = if kind.is_empty() {
+        String::new()
+    } else {
+        format!(" kind=\"{kind}\"")
+    };
     format!(
-        "      <StbSecRaw id=\"{}\" name=\"{}\"{} area=\"{}\" iy=\"{}\" iz=\"{}\" j=\"{}\" depth=\"{}\" width=\"{}\"/>\n",
+        "      <StbSecRaw id=\"{}\" name=\"{}\"{}{} area=\"{}\" iy=\"{}\" iz=\"{}\" j=\"{}\" depth=\"{}\" width=\"{}\"/>\n",
         id,
         esc(&sec.name),
         floor_attr(sec),
+        kind_attr,
         num(sec.area),
         num(sec.iy),
         num(sec.iz),
@@ -964,6 +977,7 @@ pub(super) fn standard_sections(model: &Model) -> StandardSections {
     let mut parts: Vec<(u8, String)> = Vec::new();
     let mut col_map: HashMap<u32, u32> = HashMap::new();
     let mut beam_map: HashMap<u32, u32> = HashMap::new();
+    let mut brace_map: HashMap<u32, u32> = HashMap::new();
     let mut warnings: Vec<String> = Vec::new();
 
     let wall_only_sections: std::collections::HashSet<u32> = {
@@ -1022,13 +1036,19 @@ pub(super) fn standard_sections(model: &Model) -> StandardSections {
         {
             continue;
         }
-        let (used_col, used_beam) = roles.get(&base).copied().unwrap_or((false, false));
-        let unused = !used_col && !used_beam;
-        let (need_col, need_beam) = match sec.shape.as_ref().and_then(rebar_purpose) {
-            Some(true) => (used_col, used_beam || unused),
-            Some(false) => (used_col || unused, used_beam),
-            None => (used_col || !used_beam, used_beam),
-        };
+        let (mut used_col, mut used_beam, mut used_brace) =
+            roles.get(&base).copied().unwrap_or((false, false, false));
+        if !used_col && !used_beam && !used_brace {
+            match sec.frame_use {
+                Some(FrameSectionUse::Column) => used_col = true,
+                Some(FrameSectionUse::Beam) => used_beam = true,
+                Some(FrameSectionUse::Brace) => used_brace = true,
+                None => {}
+            }
+        }
+        let need_col = used_col;
+        let need_beam = used_beam;
+        let need_brace = used_brace;
 
         let steel_fig = sec.shape.as_ref().and_then(steel_figure);
         if let Some((fig_name, fig_body)) = steel_fig {
@@ -1041,6 +1061,11 @@ pub(super) fn standard_sections(model: &Model) -> StandardSections {
                 let bid = if need_col { alloc() } else { base };
                 parts.push((5, steel_beam(bid, sec, &fig_name, &strength_attr(base))));
                 beam_map.insert(base, bid);
+            }
+            if need_brace {
+                let bid = if need_col || need_beam { alloc() } else { base };
+                parts.push((7, steel_brace(bid, sec, &fig_name, &strength_attr(base))));
+                brace_map.insert(base, bid);
             }
             continue;
         }
@@ -1193,6 +1218,7 @@ pub(super) fn standard_sections(model: &Model) -> StandardSections {
         steel_lib: steel.render(),
         col_map,
         beam_map,
+        brace_map,
         warnings,
     }
 }

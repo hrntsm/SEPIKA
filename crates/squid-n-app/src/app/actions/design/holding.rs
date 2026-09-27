@@ -121,6 +121,15 @@ impl App {
                     &self.core.model
                 };
             for elem in &model.elements {
+                if !matches!(
+                    elem.kind,
+                    squid_n_core::model::ElementKind::Beam
+                        | squid_n_core::model::ElementKind::Fiber
+                        | squid_n_core::model::ElementKind::MultiSpring
+                        | squid_n_core::model::ElementKind::Brace { .. }
+                ) {
+                    continue;
+                }
                 let Some(sec) = elem.section.and_then(|sid| model.sections.get(sid.index())) else {
                     continue;
                 };

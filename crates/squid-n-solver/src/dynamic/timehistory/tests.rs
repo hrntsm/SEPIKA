@@ -59,6 +59,7 @@ fn sdof_model() -> Model {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "spring".into(),
             area: 1.0,
@@ -135,6 +136,7 @@ fn sdof_model_y() -> Model {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "spring".into(),
             area: 1.0,
@@ -285,6 +287,7 @@ fn test_2dof_mode_superposition_consistency() {
         ],
         elements: vec![beam(1, 0, 1), beam(2, 1, 2)],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "spring".into(),
             area: 1.0,
@@ -766,6 +769,7 @@ fn fiber_column_model(fy: f64) -> Model {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "col".to_string(),
             area: 10000.0,

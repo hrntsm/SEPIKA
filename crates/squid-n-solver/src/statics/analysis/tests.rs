@@ -46,6 +46,7 @@ fn make_cantilever_model() -> Model {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "beam".into(),
             area: 100.0,
@@ -849,6 +850,7 @@ fn make_two_story_diaphragm_model(
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "col".into(),
             area: 100.0,
@@ -1405,6 +1407,7 @@ fn ss_beam_udl(l: f64, w: f64) -> Model {
             spring: None,
         }],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "s".into(),
             area: 1000.0,

@@ -513,6 +513,7 @@ fn test_src_fc_missing_skip() {
 #[test]
 fn test_src_shape_mismatch_skip() {
     let sec = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "no-shape".to_string(),
         area: 1.0,

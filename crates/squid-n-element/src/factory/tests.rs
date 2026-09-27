@@ -38,6 +38,7 @@ fn make_diaphragm_model() -> Model {
             vec![NodeId(1)],
         )],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "sec".into(),
             area: 100.0,
@@ -263,6 +264,7 @@ fn make_brace_model(tension_only: bool) -> (Model, ElementData) {
             },
         ],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "brace".into(),
             area: 2000.0,
@@ -369,6 +371,7 @@ fn test_build_behavior_wall_opening_reduces_shear_stiffness() {
             make_node(3, [0.0, 0.0, 3000.0]),
         ],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "wall".into(),
             area: 150.0 * 1000.0,

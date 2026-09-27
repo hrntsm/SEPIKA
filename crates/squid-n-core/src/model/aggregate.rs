@@ -261,7 +261,10 @@ impl Model {
                     | ElementKind::MultiSpring
                     | ElementKind::Brace { .. }
             ) {
-                let section = elem.section.and_then(|sid| self.sections.get(sid.index()));
+                let Some(section_id) = elem.section else {
+                    continue;
+                };
+                let section = self.sections.get(section_id.index());
                 let Some(usage) = section.and_then(|section| section.frame_use) else {
                     return Err(CoreError::DanglingRef(format!(
                         "Elem {} の主架構断面用途が未設定です",

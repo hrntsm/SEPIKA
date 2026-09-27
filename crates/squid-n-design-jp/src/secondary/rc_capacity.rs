@@ -65,6 +65,7 @@ mod tests {
         let fc = inp.fc;
 
         let sec = Section {
+            frame_use: None,
             id: SectionId(0),
             name: "test".into(),
             area: b * d_total,

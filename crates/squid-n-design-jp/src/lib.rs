@@ -281,9 +281,12 @@ impl MemberKind {
             .section
             .and_then(|id| model.sections.get(id.index()))
             .ok_or_else(|| format!("要素 {} の断面を解決できません", elem.id.0))?;
-        let usage = section
-            .frame_use
-            .ok_or_else(|| format!("要素 {} の断面用途が未設定です", elem.id.0))?;
+        let usage = section.frame_use.ok_or_else(|| {
+            format!(
+                "要素 {} ({:?}) の断面用途が未設定です",
+                elem.id.0, elem.kind
+            )
+        })?;
         let kind = match usage {
             squid_n_core::model::FrameSectionUse::Beam => MemberKind::Beam,
             squid_n_core::model::FrameSectionUse::Column => MemberKind::Column,

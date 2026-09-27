@@ -1022,6 +1022,7 @@ fn test_apply_auto_rigid_zones_and_manual_protection() {
     use squid_n_core::model::{ElementKind, ZoneSource};
 
     let mk_sec = |id: u32, depth: f64| Section {
+        frame_use: None,
         id: SectionId(id),
         name: String::new(),
         area: 0.0,
@@ -1120,6 +1121,7 @@ fn test_eval_sections_from_face_distance() {
     use squid_n_core::model::{ElementKind, RigidZone};
 
     let sec = Section {
+        frame_use: None,
         id: SectionId(0),
         name: String::new(),
         area: 100.0,
@@ -1251,6 +1253,7 @@ fn test_eval_sections_from_face_distance() {
 fn test_auto_rigid_zone_wall_does_not_affect_orthogonal_search() {
     use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId};
     let col_sec = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "col".to_string(),
         area: 0.0,
@@ -1271,6 +1274,7 @@ fn test_auto_rigid_zone_wall_does_not_affect_orthogonal_search() {
         steel_material: None,
     };
     let beam_sec = Section {
+        frame_use: None,
         id: SectionId(1),
         name: "beam".to_string(),
         area: 0.0,
@@ -1291,6 +1295,7 @@ fn test_auto_rigid_zone_wall_does_not_affect_orthogonal_search() {
         steel_material: None,
     };
     let wall_sec = Section {
+        frame_use: None,
         id: SectionId(2),
         name: "wall".to_string(),
         area: 0.0,
@@ -1429,6 +1434,7 @@ fn test_beam_new_wall_girder_bottom_edge_scales_stiffness() {
     use squid_n_core::model::{ElementData, ElementKind, ForceRegime, LocalAxis, Model};
 
     let sec = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "beam".to_string(),
         area: 60000.0,
@@ -1570,6 +1576,7 @@ fn test_beam_new_wall_girder_factor_not_applied_to_partial_shared_or_vertical() 
     use squid_n_core::model::{ElementData, ElementKind, ForceRegime, LocalAxis, Model};
 
     let sec = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "beam".to_string(),
         area: 60000.0,
@@ -1701,6 +1708,7 @@ fn test_beam_new_misc_wall_wing_augments_column_inplane_stiffness() {
         support_spring: None,
     };
     let col_sec = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "col".into(),
         area: 90_000.0,
@@ -1864,6 +1872,7 @@ fn test_beam_new_misc_wall_strip_augments_girder_iy_without_100x() {
         support_spring: None,
     };
     let beam_sec = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "beam".into(),
         area: 200_000.0,
@@ -2033,6 +2042,7 @@ fn test_column_face_slit_drops_wing_wall_but_keeps_girder_strip() {
         support_spring: None,
     };
     let col_sec = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "C300x300".into(),
         area: 90000.0,
@@ -2053,6 +2063,7 @@ fn test_column_face_slit_drops_wing_wall_but_keeps_girder_strip() {
         steel_material: None,
     };
     let beam_sec = Section {
+        frame_use: None,
         id: SectionId(2),
         name: "G400x600".into(),
         area: 240000.0,
@@ -2256,6 +2267,7 @@ fn test_beam_new_seismic_wall_no_misc_wall_augmentation() {
         support_spring: None,
     };
     let col_sec = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "col".into(),
         area: 90_000.0,
@@ -2276,6 +2288,7 @@ fn test_beam_new_seismic_wall_no_misc_wall_augmentation() {
         steel_material: None,
     };
     let beam_sec = Section {
+        frame_use: None,
         id: SectionId(1),
         name: "beam".into(),
         area: 200_000.0,
@@ -2440,6 +2453,7 @@ fn test_vertical_bending_stiffness_uses_section_strong_axis() {
         support_spring: None,
     };
     let sec = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "H-400x200".into(),
         area: 8_412.0,
@@ -2656,6 +2670,7 @@ fn test_misc_wall_wing_eccentricity_is_independent_of_wall_node_order() {
         support_spring: None,
     };
     let col_sec = Section {
+        frame_use: None,
         id: SectionId(0),
         name: "col".into(),
         area: 90_000.0,
@@ -2831,6 +2846,7 @@ fn torsion_test_model(split_x: bool) -> Model {
         nodes,
         elements,
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "H".into(),
             area: 8000.0,
@@ -3039,6 +3055,7 @@ fn t_joint_model(
         fy: None,
     };
     let mk_sec = |id: u32, depth: f64, mat: u32| Section {
+        frame_use: None,
         id: SectionId(id),
         name: String::new(),
         area: 0.0,
@@ -3171,6 +3188,7 @@ fn portal_with_wing_wall(col_depth: f64, beam_depth: f64, wall_thickness: f64) -
         fy: None,
     };
     let mk_sec = |id: u32, depth: f64, thickness: Option<f64>| Section {
+        frame_use: None,
         id: SectionId(id),
         name: String::new(),
         area: 0.0,

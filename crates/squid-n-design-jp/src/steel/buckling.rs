@@ -447,6 +447,7 @@ mod tests {
 
     fn section(iy: f64) -> Section {
         Section {
+            frame_use: None,
             id: SectionId(0),
             name: "H-400x200x8x13".to_string(),
             area: 8_000.0,

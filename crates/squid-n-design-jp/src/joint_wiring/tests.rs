@@ -40,6 +40,7 @@ fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>)
         });
     }
     let sections = vec![Section {
+        frame_use: None,
         id: SectionId(0),
         name: "wall".to_string(),
         area: 0.0,

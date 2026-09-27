@@ -64,6 +64,7 @@ fn fiber_elem(id: u32, i: u32, j: u32, section: u32, rigid: f64) -> ElementData 
 fn portal_frame(rigid: f64, seismic_weight: f64) -> Model {
     let sec = |id: u32, b: f64, d: f64| -> Section {
         Section {
+            frame_use: None,
             id: SectionId(id),
             name: format!("s{id}"),
             area: b * d,

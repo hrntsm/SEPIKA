@@ -35,6 +35,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         pending_secs,
         pending_members,
         pending_secondaries,
+        section_usages,
         steel_lib,
         raw_slabs,
         slab_secs,
@@ -76,7 +77,8 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
 
     let mut notes: Vec<String> = Vec::new();
 
-    let section_uses = section_uses(&pending_members, &pending_secondaries);
+    reject_symbol_usage_conflicts(&pending_secs, &section_usages)?;
+    let section_uses = section_uses(&pending_members, &pending_secondaries, &section_usages)?;
     let section_index = build_sections(
         &mut model,
         pending_secs,
@@ -1385,28 +1387,46 @@ fn build_index(ids: impl Iterator<Item = u32>) -> HashMap<u32, u32> {
 fn section_uses(
     members: &[PendingMember],
     secondaries: &[PendingSecondary],
-) -> HashMap<u32, Option<FrameSectionUse>> {
+    definitions: &HashMap<u32, (FrameSectionUse, String)>,
+) -> Result<HashMap<u32, FrameSectionUse>, StbError> {
     let mut uses = HashMap::new();
-    let mut add = |section: Option<u32>, usage: FrameSectionUse| {
-        let Some(section) = section else { return };
+    let mut add = |section: Option<u32>,
+                   usage: FrameSectionUse,
+                   detail: String|
+     -> Result<(), StbError> {
+        let Some(section) = section else {
+            return Ok(());
+        };
+        if let Some((defined, tag)) = definitions.get(&section) {
+            if *defined != usage {
+                return Err(StbError::Unmappable(format!(
+                    "断面 file ID {section} の用途不整合: 定義タグ {tag} は {defined:?}、{detail} は {usage:?}"
+                )));
+            }
+        } else {
+            return Err(StbError::Unmappable(format!(
+                "断面 file ID {section} の用途を確定できません: {detail} は {usage:?}"
+            )));
+        }
         match uses.get(&section).copied() {
             None => {
-                uses.insert(section, Some(usage));
+                uses.insert(section, usage);
             }
-            Some(Some(previous)) if previous == usage => {}
-            Some(_) => {
-                uses.insert(section, None);
+            Some(previous) if previous == usage => {}
+            Some(previous) => {
+                return Err(StbError::Unmappable(format!(
+                    "断面 file ID {section} の参照用途が競合: 既存 {previous:?}、{detail} は {usage:?}"
+                )));
             }
         }
+        Ok(())
     };
     for member in members {
         add(
             member.section,
-            match member.kind {
-                PendingMemberKind::Beam => FrameSectionUse::Beam,
-                PendingMemberKind::Brace { .. } => FrameSectionUse::Brace,
-            },
-        );
+            member.source_usage,
+            format!("{} id={:?}", member.source_tag, member.source_id),
+        )?;
     }
     for member in secondaries {
         add(
@@ -1415,9 +1435,44 @@ fn section_uses(
                 squid_n_core::model::SecondaryMemberKind::Joist => FrameSectionUse::Beam,
                 squid_n_core::model::SecondaryMemberKind::Post => FrameSectionUse::Column,
             },
-        );
+            format!("二次部材 {:?}", member.kind),
+        )?;
     }
-    uses
+    for (section, (usage, _)) in definitions {
+        uses.entry(*section).or_insert(*usage);
+    }
+    Ok(uses)
+}
+
+fn reject_symbol_usage_conflicts(
+    sections: &[PendingSec],
+    definitions: &HashMap<u32, (FrameSectionUse, String)>,
+) -> Result<(), StbError> {
+    let mut uses: HashMap<(&str, Option<&str>), (FrameSectionUse, u32, &str)> = HashMap::new();
+    for section in sections {
+        let Some((usage, tag)) = definitions.get(&section.file_id) else {
+            continue;
+        };
+        let key = (section.name.as_str(), section.floor.as_deref());
+        if let Some((previous, previous_id, previous_tag)) = uses.get(&key) {
+            if *previous != *usage {
+                return Err(StbError::Unmappable(format!(
+                    "断面符号 {} / 階 {:?} の用途が競合: file ID {} ({}) は {:?}、file ID {} ({}) は {:?}",
+                    section.name,
+                    section.floor,
+                    previous_id,
+                    previous_tag,
+                    previous,
+                    section.file_id,
+                    tag,
+                    usage,
+                )));
+            }
+        } else {
+            uses.insert(key, (*usage, section.file_id, tag.as_str()));
+        }
+    }
+    Ok(())
 }
 
 /// 保留していた断面を id 昇順に整列・連番へ再割当てし、形鋼名を解決して
@@ -1437,7 +1492,7 @@ fn build_sections(
     material_index: &HashMap<u32, u32>,
     warnings: &mut Vec<String>,
     notes: &mut Vec<String>,
-    section_uses: &HashMap<u32, Option<FrameSectionUse>>,
+    section_uses: &HashMap<u32, FrameSectionUse>,
 ) -> HashMap<u32, u32> {
     pending.sort_by_key(|s| s.file_id);
 
@@ -1460,7 +1515,7 @@ fn build_sections(
             } => Section {
                 id: new_id,
                 name: ps.name,
-                frame_use: section_uses.get(&file_id).copied().flatten(),
+                frame_use: section_uses.get(&file_id).copied(),
                 area,
                 iy,
                 iz,
@@ -1480,14 +1535,14 @@ fn build_sections(
             },
             PendingSecKind::Shape(shape) => {
                 let mut section = shape.to_section(new_id, ps.name);
-                section.frame_use = section_uses.get(&file_id).copied().flatten();
+                section.frame_use = section_uses.get(&file_id).copied();
                 section
             }
             PendingSecKind::SteelRef(shape_name) => {
                 match shape_name.and_then(|nm| steel_lib.get(&nm).cloned()) {
                     Some(shape) => {
                         let mut section = shape.to_section(new_id, ps.name);
-                        section.frame_use = section_uses.get(&file_id).copied().flatten();
+                        section.frame_use = section_uses.get(&file_id).copied();
                         section
                     }
                     None => {
@@ -1496,7 +1551,7 @@ fn build_sections(
                             ps.name
                         ));
                         let mut section = Section::zero(new_id, ps.name);
-                        section.frame_use = section_uses.get(&file_id).copied().flatten();
+                        section.frame_use = section_uses.get(&file_id).copied();
                         section
                     }
                 }
@@ -1580,7 +1635,7 @@ fn build_sections(
             }
         };
         let mut section = section;
-        section.frame_use = section_uses.get(&file_id).copied().flatten();
+        section.frame_use = section_uses.get(&file_id).copied();
         section.floor = floor;
         section.material = ps
             .mat

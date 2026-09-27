@@ -781,6 +781,7 @@ mod tests {
             fy: Some(235.0),
         });
         model.sections.push(Section {
+            frame_use: None,
             id: SectionId(0),
             name: "H".into(),
             floor: None,
@@ -883,6 +884,7 @@ mod tests {
             fy: None,
         });
         model.sections.push(Section {
+            frame_use: None,
             id: SectionId(0),
             name: "壁 t150".into(),
             area: 0.0,
@@ -992,6 +994,7 @@ mod tests {
             fy: None,
         });
         model.sections.push(Section {
+            frame_use: None,
             id: SectionId(0),
             name: "壁 t150".into(),
             area: 0.0,
@@ -1098,6 +1101,7 @@ mod tests {
             fy: None,
         });
         model.sections.push(Section {
+            frame_use: None,
             id: SectionId(0),
             name: "壁 t150".into(),
             area: 0.0,
@@ -1835,6 +1839,7 @@ mod cascade_tests {
             strength_factor: None,
         }];
         let sections = vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "H".into(),
             floor: None,

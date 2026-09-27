@@ -31,9 +31,9 @@ use squid_n_core::ids::{
     ElemId, LoadCaseId, MaterialId, NodeId, SecondaryMemberId, SectionId, WallPlateId,
 };
 use squid_n_core::model::{
-    ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material, MaterialCategory,
-    Model, Node, RigidZone, SecondaryMember, SecondaryMemberAnchor, SecondaryMemberEnds,
-    SecondaryMemberKind, SupportMemberId, WallPlate, WallPlateShape,
+    ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material,
+    MaterialCategory, Model, Node, RigidZone, SecondaryMember, SecondaryMemberAnchor,
+    SecondaryMemberEnds, SecondaryMemberKind, SupportMemberId, WallPlate, WallPlateShape,
 };
 use squid_n_core::section_shape::SectionShape;
 use squid_n_core::wall_region_rebuild::rebuild_wall_regions;
@@ -83,24 +83,24 @@ fn wall_post_model() -> Model {
     }
 
     // 断面: 柱 H-300x300、梁 H-400x200（鋼）、壁 RC t=150、間柱 H-200x100。
-    model.sections.push(
-        SectionShape::SteelH {
-            height: 300.0,
-            width: 300.0,
-            web_thick: 10.0,
-            flange_thick: 15.0,
-        }
-        .to_section(SectionId(0), "柱 H-300x300".into()),
-    );
-    model.sections.push(
-        SectionShape::SteelH {
-            height: 400.0,
-            width: 200.0,
-            web_thick: 8.0,
-            flange_thick: 13.0,
-        }
-        .to_section(SectionId(1), "梁 H-400x200".into()),
-    );
+    let mut col_section = SectionShape::SteelH {
+        height: 300.0,
+        width: 300.0,
+        web_thick: 10.0,
+        flange_thick: 15.0,
+    }
+    .to_section(SectionId(0), "柱 H-300x300".into());
+    col_section.frame_use = Some(FrameSectionUse::Column);
+    model.sections.push(col_section);
+    let mut beam_section = SectionShape::SteelH {
+        height: 400.0,
+        width: 200.0,
+        web_thick: 8.0,
+        flange_thick: 13.0,
+    }
+    .to_section(SectionId(1), "梁 H-400x200".into());
+    beam_section.frame_use = Some(FrameSectionUse::Beam);
+    model.sections.push(beam_section);
     let mut wall_sec = SectionShape::RcWall {
         thickness: WALL_T,
         ps: 0.0025,
@@ -108,15 +108,15 @@ fn wall_post_model() -> Model {
     .to_section(SectionId(2), "壁 t150".into());
     wall_sec.material = Some(MaterialId(1));
     model.sections.push(wall_sec);
-    model.sections.push(
-        SectionShape::SteelH {
-            height: 200.0,
-            width: 100.0,
-            web_thick: 6.0,
-            flange_thick: 8.0,
-        }
-        .to_section(SectionId(3), "間柱 H-200x100".into()),
-    );
+    let mut post_section = SectionShape::SteelH {
+        height: 200.0,
+        width: 100.0,
+        web_thick: 6.0,
+        flange_thick: 8.0,
+    }
+    .to_section(SectionId(3), "間柱 H-200x100".into());
+    post_section.frame_use = Some(FrameSectionUse::Column);
+    model.sections.push(post_section);
     model.materials.push(Material {
         strength_factor: None,
         concrete_class: Default::default(),

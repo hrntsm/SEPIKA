@@ -26,6 +26,7 @@ fn sample_model() -> Model {
             },
         ],
         sections: vec![Section {
+            frame_use: None,
             id: SectionId(0),
             name: "H-400".to_string(),
             area: 100.0,

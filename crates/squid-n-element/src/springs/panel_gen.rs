@@ -270,6 +270,7 @@ mod tests {
     /// 主材料を指定して断面を作る。
     fn section_with_mat(id: u32, shape: SectionShape, depth: f64, mat: u32) -> Section {
         Section {
+            frame_use: None,
             id: SectionId(id),
             material: Some(MaterialId(mat)),
             name: String::new(),
