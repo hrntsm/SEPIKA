@@ -160,7 +160,17 @@ fn column_dimension(
         column.local_axis.ref_vector[1],
     ];
     let norm = (ref_vec[0] * ref_vec[0] + ref_vec[1] * ref_vec[1]).sqrt();
-    if norm <= f64::EPSILON || !section.width.is_finite() || !section.depth.is_finite() {
+    if section.width <= 0.0
+        || section.depth <= 0.0
+        || !section.width.is_finite()
+        || !section.depth.is_finite()
+        || column
+            .local_axis
+            .ref_vector
+            .iter()
+            .any(|value| !value.is_finite())
+        || norm <= f64::EPSILON
+    {
         return Err(PerimeterSlabError::InvalidColumnDimension {
             beam: beam.id,
             node,
@@ -441,7 +451,7 @@ mod tests {
     #[test]
     #[allow(clippy::field_reassign_with_default)]
     fn projects_column_section_dimensions_onto_beam_normal() {
-        let dimensions = |beam_end: [f64; 3], ref_vector: [f64; 3]| {
+        let dimensions = |beam_end: [f64; 3], ref_vector: [f64; 3], depth: f64, width: f64| {
             let mut model = Model::default();
             model.nodes = vec![
                 node(0, [0.0, 0.0, 0.0]),
@@ -459,8 +469,8 @@ mod tests {
                 Section {
                     id: SectionId(1),
                     name: "C".into(),
-                    depth: 400.0,
-                    width: 600.0,
+                    depth,
+                    width,
                     ..Section::zero(SectionId(1), "C".into())
                 },
             ];
@@ -494,16 +504,54 @@ mod tests {
                     standard_floor_load: None,
                 },
             ];
-            column_dimension(&model, &model.elements[0], NodeId(0), StoryId(1)).unwrap()
+            column_dimension(&model, &model.elements[0], NodeId(0), StoryId(1))
         };
 
-        assert_eq!(dimensions([6000.0, 0.0, 0.0], [1.0, 0.0, 0.0]), 600.0);
-        assert_eq!(dimensions([0.0, 6000.0, 0.0], [0.0, 1.0, 0.0]), 600.0);
-        assert_eq!(dimensions([0.0, 6000.0, 0.0], [1.0, 0.0, 0.0]), 400.0);
-        assert_eq!(dimensions([6000.0, 6000.0, 0.0], [1.0, 1.0, 0.0]), 600.0);
-        assert_eq!(dimensions([6000.0, 6000.0, 0.0], [1.0, -1.0, 0.0]), 400.0);
-        assert_eq!(dimensions([6000.0, -6000.0, 0.0], [1.0, -1.0, 0.0]), 600.0);
-        assert_eq!(dimensions([6000.0, -6000.0, 0.0], [-1.0, 1.0, 0.0]), 600.0);
+        assert_eq!(
+            dimensions([6000.0, 0.0, 0.0], [1.0, 0.0, 0.0], 400.0, 600.0).unwrap(),
+            600.0
+        );
+        assert_eq!(
+            dimensions([0.0, 6000.0, 0.0], [0.0, 1.0, 0.0], 400.0, 600.0).unwrap(),
+            600.0
+        );
+        assert_eq!(
+            dimensions([0.0, 6000.0, 0.0], [1.0, 0.0, 0.0], 400.0, 600.0).unwrap(),
+            400.0
+        );
+        assert_eq!(
+            dimensions([6000.0, 6000.0, 0.0], [1.0, 1.0, 0.0], 400.0, 600.0).unwrap(),
+            600.0
+        );
+        assert_eq!(
+            dimensions([6000.0, 6000.0, 0.0], [1.0, -1.0, 0.0], 400.0, 600.0).unwrap(),
+            400.0
+        );
+        assert_eq!(
+            dimensions([6000.0, -6000.0, 0.0], [1.0, -1.0, 0.0], 400.0, 600.0).unwrap(),
+            600.0
+        );
+        assert_eq!(
+            dimensions([6000.0, -6000.0, 0.0], [-1.0, 1.0, 0.0], 400.0, 600.0).unwrap(),
+            600.0
+        );
+
+        for (depth, width, ref_vector) in [
+            (0.0, 600.0, [1.0, 0.0, 0.0]),
+            (-1.0, 600.0, [1.0, 0.0, 0.0]),
+            (400.0, 0.0, [1.0, 0.0, 0.0]),
+            (400.0, -1.0, [1.0, 0.0, 0.0]),
+            (400.0, 600.0, [f64::NAN, 0.0, 0.0]),
+            (400.0, 600.0, [f64::INFINITY, 0.0, 0.0]),
+        ] {
+            assert_eq!(
+                dimensions([6000.0, 0.0, 0.0], ref_vector, depth, width),
+                Err(PerimeterSlabError::InvalidColumnDimension {
+                    beam: ElemId(0),
+                    node: NodeId(0),
+                })
+            );
+        }
     }
 
     #[test]
