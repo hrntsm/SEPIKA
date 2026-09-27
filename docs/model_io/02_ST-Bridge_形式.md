@@ -120,7 +120,7 @@ ST-Bridge の `StbColumn`・`StbGirder`・`StbBrace` の部材コンテナから
 
 `ElementKind` は解析定式化、`FrameSectionUse` は設計用途を表します。主架構の `ElementKind::Beam` には `Girder` または `Column`、
 `ElementKind::Brace` には `Brace` を割り当てます。不整合または用途不明の断面は、角度で補正せず取り込みをエラーにします。
-二次部材は `SecondaryMemberKind`（小梁 `Beam`・間柱 `Post`）を正とし、二次部材から `FrameSectionUse` は決めません。小梁・間柱が参照する断面は `frame_use=None` でも構いません。
+二次部材は `SecondaryMemberKind`（小梁 `Beam`・間柱 `Post`）を正とし、二次部材から `FrameSectionUse` は決めません。小梁・間柱が参照する断面は `frame_use=None` でも構わず、同一断面を主架構と共有する場合を含め、`frame_use` の値だけを理由に二次部材を拒否しません。
 
 <div class="impl-ref">
 

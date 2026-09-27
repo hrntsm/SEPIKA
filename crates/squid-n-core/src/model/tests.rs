@@ -208,6 +208,37 @@ fn test_validate_rejects_beam_in_wall_region_posts() {
 }
 
 #[test]
+fn test_validate_allows_secondary_sections_with_any_frame_use() {
+    let frame_uses = [
+        None,
+        Some(FrameSectionUse::Girder),
+        Some(FrameSectionUse::Column),
+        Some(FrameSectionUse::Brace),
+    ];
+    let mut model = Model::default();
+    for (index, frame_use) in frame_uses.into_iter().enumerate() {
+        let section_id = SectionId(index as u32);
+        let mut section = Section::zero(section_id, format!("S{index}"));
+        section.frame_use = frame_use;
+        model.sections.push(section);
+
+        let mut beam = test_secondary(SecondaryMemberKind::Beam, index as u32, "B");
+        beam.section = Some(section_id);
+        model.unassigned_beams.push(beam);
+
+        let post_id = (index + frame_uses.len()) as u32;
+        let mut post = test_secondary(SecondaryMemberKind::Post, post_id, "P");
+        post.section = Some(section_id);
+        model.unassigned_posts.push(post);
+    }
+
+    assert!(
+        model.validate().is_ok(),
+        "二次部材の断面用途だけでは拒否しない"
+    );
+}
+
+#[test]
 fn test_shear_modulus_explicit() {
     let mat = Material {
         concrete_class: Default::default(),
