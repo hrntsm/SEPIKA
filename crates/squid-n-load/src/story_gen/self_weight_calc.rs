@@ -341,7 +341,7 @@ pub(crate) fn enumerate_self_weight(model: &Model, load_cfg: &LoadCfg) -> Vec<Se
                     .as_ref()
                     .and_then(|s| s.cft_core_props())
                     .map_or(0.0, |c| c.area);
-                let steel_area = self_weight_area;
+                let steel_area = sec.area;
                 let mut extras_per_length = 0.0;
                 if let Some(&(_, lw)) = load_cfg
                     .extra_line_weight
@@ -360,7 +360,7 @@ pub(crate) fn enumerate_self_weight(model: &Model, load_cfg: &LoadCfg) -> Vec<Se
                 }
                 let design_per_length = steel_mat.map_or(mat.design_unit_weight_n_per_mm3(), |m| {
                     m.design_unit_weight_n_per_mm3()
-                }) * if is_cft { steel_area } else { self_weight_area }
+                }) * self_weight_area
                     * factor
                     + mat.cft_core_design_unit_weight_n_per_mm3() * core_area
                     + extras_per_length;
