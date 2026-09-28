@@ -5451,6 +5451,29 @@ fn add_section_shape_rejects_cft_non_column_use() {
 }
 
 #[test]
+fn edit_section_shape_rejects_cft_non_column_use() {
+    use squid_n_core::model::FrameSectionUse;
+
+    let mut model = Model::default();
+    let sid = push_cft_section(&mut model);
+    let before = model.sections[0].clone();
+    let mut stack = UndoStack::new();
+    let applied = stack.run(
+        &mut model,
+        Box::new(EditSectionShape {
+            section: sid,
+            new_shape: squid_n_core::section_shape::SectionShape::CftPipe {
+                outer_dia: 400.0,
+                thick: 12.0,
+            },
+            frame_use: Some(FrameSectionUse::Girder),
+        }),
+    );
+    assert!(!applied, "CFT の用途を Girder へ変更しない");
+    assert_eq!(model.sections[0], before);
+}
+
+#[test]
 fn set_element_section_rejects_cft_non_column_use() {
     use squid_n_core::model::FrameSectionUse;
 
@@ -5483,6 +5506,7 @@ fn set_element_section_allows_cft_column_use_independent_of_angle() {
     );
     assert!(applied, "CFT Column は水平な材軸でも用途どおり割り当てる");
     assert_eq!(model.elements[0].section, Some(sid));
+    assert!(model.validate().is_ok(), "{:?}", model.validate());
 }
 
 /// 形状を持たない鋼材断面を末尾へ追加し、その ID を返す（テスト用ヘルパー）。
