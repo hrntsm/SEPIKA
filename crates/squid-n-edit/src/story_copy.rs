@@ -1192,8 +1192,7 @@ fn copy_secondary(
             continue;
         };
         let key = (sm.kind, plan);
-        let existing_slot = existing.get(&key).copied();
-        if existing_slot.is_some() && !cmd.overwrite {
+        if existing.get(&key).is_some() {
             continue;
         }
         if existing.is_ambiguous(&key) {
@@ -1244,21 +1243,11 @@ fn copy_secondary(
             section,
             name: sm.name.clone(),
         };
-        if let Some(slot) = existing_slot {
-            if let Some(existing) = secondary_at_mut(model, slot) {
-                *existing = SecondaryMember {
-                    id: existing.id,
-                    ..new_sm
-                };
-                report.secondary_updated += 1;
-            }
-        } else {
-            match sm.kind {
-                SecondaryMemberKind::Beam => model.unassigned_beams.push(new_sm),
-                SecondaryMemberKind::Post => model.unassigned_posts.push(new_sm),
-            }
-            report.secondary_created += 1;
+        match sm.kind {
+            SecondaryMemberKind::Beam => model.unassigned_beams.push(new_sm),
+            SecondaryMemberKind::Post => model.unassigned_posts.push(new_sm),
         }
+        report.secondary_created += 1;
     }
 }
 
