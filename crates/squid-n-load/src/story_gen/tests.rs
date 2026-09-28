@@ -7,6 +7,7 @@ use squid_n_core::model::{
     RigidZone, SecondaryMember, SecondaryMemberKind, Section, WallPlate, WallPlateShape,
     WallRegion,
 };
+use squid_n_core::section_shape::concrete_young_modulus;
 use squid_n_core::section_shape::SectionShape;
 
 /// 2 層 × 1 スパンの平面ラーメン（各レベル 2 節点）。
@@ -1238,6 +1239,7 @@ fn cft_column_model() -> Model {
     };
     let mut section = shape.to_section(SectionId(0), "CFT".into());
     section.material = Some(MaterialId(0));
+    section.steel_material = Some(MaterialId(1));
     let mut model = Model::default();
     for (id, z, restraint) in [(0u32, 0.0, Dof6Mask::FIXED), (1, 3000.0, Dof6Mask::FREE)] {
         model.nodes.push(Node {
@@ -1255,13 +1257,26 @@ fn cft_column_model() -> Model {
         concrete_class: Default::default(),
         id: MaterialId(0),
         name: "CFT".into(),
-        category: MaterialCategory::Steel,
-        young: 205000.0,
+        category: MaterialCategory::Concrete,
+        young: concrete_young_modulus(36.0),
         poisson: 0.3,
         density: 7.85e-9,
         shear: None,
         fc: Some(36.0),
         fy: None,
+    });
+    model.materials.push(Material {
+        strength_factor: None,
+        concrete_class: Default::default(),
+        id: MaterialId(1),
+        name: "SN490B".into(),
+        category: MaterialCategory::Steel,
+        young: 205000.0,
+        poisson: 0.3,
+        density: 7.85e-9,
+        shear: None,
+        fc: None,
+        fy: Some(325.0),
     });
     model.elements.push(ElementData {
         id: ElemId(0),
@@ -1405,6 +1420,7 @@ fn horizontal_cft_beam_model() -> Model {
     }
     .to_section(SectionId(0), "CFT梁".into());
     beam.material = Some(MaterialId(0));
+    beam.steel_material = Some(MaterialId(1));
     model.sections.push(beam);
     model.sections.push(Section {
         frame_use: None,
@@ -1432,13 +1448,26 @@ fn horizontal_cft_beam_model() -> Model {
         concrete_class: Default::default(),
         id: MaterialId(0),
         name: "CFT".into(),
-        category: MaterialCategory::Steel,
-        young: 205000.0,
+        category: MaterialCategory::Concrete,
+        young: concrete_young_modulus(36.0),
         poisson: 0.3,
         density: 7.85e-9,
         shear: None,
         fc: Some(36.0),
         fy: None,
+    });
+    model.materials.push(Material {
+        strength_factor: None,
+        concrete_class: Default::default(),
+        id: MaterialId(1),
+        name: "SN490B".into(),
+        category: MaterialCategory::Steel,
+        young: 205000.0,
+        poisson: 0.3,
+        density: 7.85e-9,
+        shear: None,
+        fc: None,
+        fy: Some(325.0),
     });
     model.elements.push(ElementData {
         id: ElemId(0),

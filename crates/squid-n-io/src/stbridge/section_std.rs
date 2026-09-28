@@ -750,10 +750,10 @@ fn cft_figure(shape: &SectionShape, steel: &mut SteelLibrary) -> Option<String> 
 }
 
 /// CFT 柱断面 `StbSecColumn_CFT`（充填鋼管の形鋼参照）。`id_mat` は充填コンクリートの
-/// `id_material` 属性（空可）。
-fn cft_column(id: u32, sec: &Section, figure: &str, id_mat: &str) -> String {
+/// `strength_concrete` 属性、`steel_mat` は鋼管の `strength` 属性（いずれも空可）。
+fn cft_column(id: u32, sec: &Section, figure: &str, id_mat: &str, steel_mat: &str) -> String {
     let id = sid(id);
-    format!(
+    let xml = format!(
         "      <StbSecColumn_CFT id=\"{}\" name=\"{}\"{}{}>\n\
          \x20       <StbSecSteelFigureColumn_CFT>\n\
          \x20         <StbSecSteelColumn_CFT_Same shape=\"{}\"/>\n\
@@ -764,6 +764,10 @@ fn cft_column(id: u32, sec: &Section, figure: &str, id_mat: &str) -> String {
         floor_attr(sec),
         id_mat,
         esc(figure)
+    );
+    xml.replace(
+        &format!("shape=\"{}\"", esc(figure)),
+        &format!("shape=\"{}\"{}", esc(figure), steel_mat),
     )
 }
 
@@ -1010,6 +1014,19 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
             None => String::new(),
         }
     };
+    let cft_steel_strength_attr = |base: u32| -> String {
+        match model
+            .sections
+            .get(base as usize)
+            .and_then(|sec| sec.steel_material)
+            .and_then(|mid| model.materials.get(mid.index()))
+            .map(|mat| mat.name.as_str())
+            .filter(|name| !name.is_empty())
+        {
+            Some(name) => format!(" strength=\"{}\"", esc(name)),
+            None => String::new(),
+        }
+    };
 
     let mut steel = SteelLibrary::default();
     let mut parts: Vec<(u8, String)> = Vec::new();
@@ -1115,7 +1132,16 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
             let shape = sec.shape.as_ref().unwrap();
             if need_col {
                 let fig = cft_figure(shape, &mut steel).expect("CFT 図形");
-                parts.push((3, cft_column(base, sec, &fig, &id_mat_attr(base))));
+                parts.push((
+                    3,
+                    cft_column(
+                        base,
+                        sec,
+                        &fig,
+                        &id_mat_attr(base),
+                        &cft_steel_strength_attr(base),
+                    ),
+                ));
                 col_map.insert(base, base);
             }
             if need_beam {

@@ -7308,6 +7308,7 @@ fn test_preparation_member_stiffness_reports_composite_props() {
     // 材料は断面が持つ。差し替えた断面へ元の材料を引き継ぐ。
     model.sections[0] = squid_n_core::model::Section {
         material: Some(squid_n_core::ids::MaterialId(0)),
+        steel_material: Some(squid_n_core::ids::MaterialId(0)),
         frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         ..cft.to_section(SectionId(0), "CFT-□400x400x16".into())
     };
@@ -7417,6 +7418,7 @@ fn test_preparation_member_stiffness_reports_cft_fallback_without_fc() {
     model.sections[0] = squid_n_core::model::Section {
         frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         material: Some(squid_n_core::ids::MaterialId(0)),
+        steel_material: Some(squid_n_core::ids::MaterialId(0)),
         ..cft.to_section(SectionId(0), "CFT-□400x400x16".into())
     };
     model.materials[0].fc = None;
@@ -7455,6 +7457,7 @@ fn test_preparation_member_stiffness_reports_cft_fallback_for_zero_core() {
     model.sections[0] = squid_n_core::model::Section {
         frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         material: Some(squid_n_core::ids::MaterialId(0)),
+        steel_material: Some(squid_n_core::ids::MaterialId(0)),
         ..cft.to_section(SectionId(0), "CFT-□400x400x200".into())
     };
     model.materials[0].fc = Some(36.0);

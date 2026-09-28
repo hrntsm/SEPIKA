@@ -626,6 +626,7 @@ fn test_model_issues_no_composite_fallback_warning_with_fc() {
 
     let mut cft = make_cantilever_model();
     cft.sections[0].shape = Some(cft_shape());
+    cft.sections[0].steel_material = Some(squid_n_core::ids::MaterialId(0));
     cft.materials[0].fc = Some(24.0);
     assert!(
         !model_issues(&cft)
