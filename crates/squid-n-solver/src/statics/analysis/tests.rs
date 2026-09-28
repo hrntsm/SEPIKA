@@ -222,79 +222,63 @@ fn test_model_issues_collects_every_issue() {
     assert!(model_issues(&make_cantilever_model()).is_empty());
 }
 
-/// 梁用断面を柱部材へ、柱用断面を梁部材へ割り当てた誤りを解析前チェックが止める。
+/// 断面用途は部材角度から推定しない。鉛直な Girder でも、水平な Column でも
+/// 用途そのものを変更・拒否しない。
 #[test]
-fn test_model_issues_detects_rc_shape_purpose_mismatch() {
-    use super::precheck::{model_issues, precheck_model, IssueSeverity};
-    use squid_n_core::section_shape::{
-        BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
-    };
+fn test_model_issues_does_not_infer_frame_use_from_angle() {
+    use super::precheck::model_issues;
 
-    fn beam_shape() -> SectionShape {
-        SectionShape::RcBeamRect {
-            b: 400.0,
-            d: 600.0,
-            rebar: RcBeamRebar {
-                main_dia: 22.0,
-                top: vec![4],
-                bottom: vec![4],
-                cover: 40.0,
-                stirrup: BeamStirrup {
-                    dia: 10.0,
-                    pitch: 100.0,
-                    legs: 2,
-                },
-            },
-        }
-    }
-    fn column_shape() -> SectionShape {
-        SectionShape::RcColumnRect {
-            b: 600.0,
-            d: 600.0,
-            rebar: RcRectColumnRebar {
-                main_dia: 22.0,
-                x: vec![4],
-                y: vec![4],
-                cover: 40.0,
-                hoop: RectColumnHoop {
-                    dia: 10.0,
-                    pitch: 100.0,
-                    legs_x: 2,
-                    legs_y: 2,
-                },
-            },
-        }
-    }
-
-    // 梁用断面を鉛直材（柱）へ割り当てる。
-    let mut model = make_cantilever_model();
-    model.nodes[1].coord = [0.0, 0.0, 3000.0];
-    model.sections[0].shape = Some(beam_shape());
-    let issues = model_issues(&model);
+    let mut vertical_girder = make_cantilever_model();
+    vertical_girder.nodes[1].coord = [0.0, 0.0, 3000.0];
+    let issues = model_issues(&vertical_girder);
     assert!(
-        issues
-            .iter()
-            .any(|i| i.severity == IssueSeverity::Error && i.message.contains("梁用断面を柱部材")),
+        !issues.iter().any(|i| i.message.contains("梁用断面を柱部材")),
         "{:?}",
         issues.iter().map(|i| &i.message).collect::<Vec<_>>()
     );
-    assert!(precheck_model(&model).is_err());
 
-    // 柱用断面を水平材（梁）へ割り当てる。
+    let mut horizontal_column = make_cantilever_model();
+    horizontal_column.sections[0].frame_use = Some(FrameSectionUse::Column);
+    let issues = model_issues(&horizontal_column);
+    assert!(
+        !issues.iter().any(|i| i.message.contains("柱用断面を梁部材")),
+        "{:?}",
+        issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_model_issues_rejects_cft_non_column_use() {
+    use super::precheck::{model_issues, IssueSeverity, IssueTargets};
+
     let mut model = make_cantilever_model();
-    model.sections[0].shape = Some(column_shape());
-    model.sections[0].rebar_material = Some(MaterialId(0));
-    model.sections[0].shear_rebar_material = Some(MaterialId(0));
+    model.sections[0].shape = Some(cft_shape());
+    model.sections[0].frame_use = Some(FrameSectionUse::Girder);
+    model.materials[0].fc = Some(24.0);
+
+    let issue = model_issues(&model)
+        .into_iter()
+        .find(|i| i.short == "CFT 断面は柱専用です")
+        .expect("Girder 用途の CFT は入力不備になるはず");
+    assert_eq!(issue.severity, IssueSeverity::Error);
+    assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
+}
+
+#[test]
+fn test_model_issues_allows_cft_column_use_independent_of_angle() {
+    use super::precheck::model_issues;
+
+    let mut model = make_cantilever_model();
+    model.sections[0].shape = Some(cft_shape());
     model.sections[0].frame_use = Some(FrameSectionUse::Column);
-    let issues = model_issues(&model);
+    model.materials[0].fc = Some(24.0);
+
     assert!(
-        issues
+        !model_issues(&model)
             .iter()
-            .any(|i| i.severity == IssueSeverity::Error && i.message.contains("柱用断面を梁部材")),
-        "{:?}",
-        issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+            .any(|i| i.short == "CFT 断面は柱専用です"),
+        "CFT Column は部材角度に依存せず許可する"
     );
-    assert!(precheck_model(&model).is_err());
 }
 
 /// 実配筋型（`RcColumnRect`）の幾何が不整合な断面を使う部材は、
