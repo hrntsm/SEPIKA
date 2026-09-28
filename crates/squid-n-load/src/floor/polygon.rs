@@ -42,8 +42,7 @@ pub(crate) fn distribute_polygon(coords: &[[f64; 3]], w: f64, loads: &mut Vec<Be
 /// `candidate_edges` の中で最も近い辺（線分）へセル面積を加算する。最近接辺が等距離の
 /// ときは、最小距離に並ぶ辺へセル面積を均等に配分する。
 /// `candidate_edges` に全辺（`0..n`）を渡せば [`distribute_polygon`] と同じ挙動になり、
-/// 部分集合を渡せば非候補の辺には荷重が帰属しなくなる（取り付く床板の支持辺分配
-/// [`super::cantilever::distribute_cantilever`] が使う）。
+/// 部分集合を渡せば非候補の辺には荷重が帰属しなくなる。
 pub(crate) fn polygon_edge_areas(coords: &[[f64; 3]], candidate_edges: &[usize]) -> Vec<f64> {
     let n = coords.len();
     let mut edge_area = vec![0.0_f64; n];

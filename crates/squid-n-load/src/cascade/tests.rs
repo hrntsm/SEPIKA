@@ -700,10 +700,9 @@ fn tip_rib_on_cantilever_free_ends_cascades_to_bases() {
     assert!(t.cyclic.is_empty());
 }
 
-/// 取り付く床板の辺荷重は、境界の片持ち小梁（二次部材）へ渡り、反力として
-/// 基端の主架構へ流れる。取付き辺の残りは主架構への辺荷重として残る。
+/// 取り付く床板の荷重は、境界の片持ち小梁（二次部材）へ渡らず、取付き大梁へ残る。
 #[test]
-fn attached_slab_load_reaches_side_beam() {
+fn attached_slab_load_ignores_side_beam() {
     use squid_n_core::ids::SlabId;
     use squid_n_core::model::{AreaLoad, LoadTransfer, RegionAnchor, Slab, SlabPlate, SlabShape};
     let w = 0.005_f64;
@@ -745,9 +744,7 @@ fn attached_slab_load_reaches_side_beam() {
         .members
         .get(&squid_n_core::ids::SecondaryMemberId(0))
         .expect("小梁");
-    // 左辺の小梁は最寄り負担面積 d²/2 を受ける。
-    let beam_slab = w * (1500.0 * 1500.0 / 2.0);
-    let expected = beam_slab + w_self() * 1500.0;
+    let expected = w_self() * 1500.0;
     assert!(
         (beam.reactions[0] - expected).abs() / expected < 0.02,
         "基端反力={} expected={expected}",
@@ -761,7 +758,7 @@ fn attached_slab_load_reaches_side_beam() {
         .iter()
         .map(|bl| bl.cmq.q_i + bl.cmq.q_j)
         .sum();
-    let rest = w * (6000.0 * 1500.0 - 1500.0 * 1500.0 / 2.0);
+    let rest = w * (6000.0 * 1500.0);
     assert!(
         (leftover_total - rest).abs() / rest < 0.02,
         "取付き辺 {leftover_total} expected={rest}"
