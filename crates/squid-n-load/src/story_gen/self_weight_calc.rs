@@ -347,10 +347,14 @@ pub(crate) fn enumerate_self_weight(model: &Model, load_cfg: &LoadCfg) -> Vec<Se
                     let phi = finish_perimeter(sec.width, sec.depth, is_vertical);
                     extras_per_length += wf * phi;
                 }
-                let design_per_length =
-                    mat.design_unit_weight_n_per_mm3() * self_weight_area * factor
+                let design_per_length = if is_cft {
+                    steel_design_unit_weight_n_per_mm3() * self_weight_area * factor
                         + mat.cft_core_design_unit_weight_n_per_mm3() * core_area
-                        + extras_per_length;
+                        + extras_per_length
+                } else {
+                    mat.design_unit_weight_n_per_mm3() * self_weight_area * factor
+                        + extras_per_length
+                };
                 let load = design_per_length * eff_len;
                 let matrix_mass_per_length = analysis_mass_per_length(model, elem);
                 let matrix_mass_equiv = matrix_mass_per_length * len * GRAVITY_MM_S2;
