@@ -39,11 +39,11 @@ const DIR_DOWN: [f64; 3] = [0.0, 0.0, -1.0];
 pub fn self_weight_case_content(
     model: &Model,
     load_cfg: &LoadCfg,
-) -> (Vec<NodalLoad>, Vec<MemberLoad>) {
+) -> Result<(Vec<NodalLoad>, Vec<MemberLoad>), String> {
     let mut node_force = vec![0.0_f64; model.nodes.len()];
     let mut member: Vec<MemberLoad> = Vec::new();
 
-    for item in enumerate_self_weight(model, load_cfg) {
+    for item in enumerate_self_weight(model, load_cfg)? {
         match item {
             SelfWeightItem::Line {
                 elem_idx,
@@ -107,7 +107,7 @@ pub fn self_weight_case_content(
         })
         .collect();
 
-    (nodal, member)
+    Ok((nodal, member))
 }
 
 #[cfg(test)]
@@ -208,7 +208,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default());
+        let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
 
         // 柱は節点荷重（上下 1/2 ずつ、追加なし）。梁は等分布部材荷重。
         assert_eq!(nodal.len(), 2, "柱の上下端に節点荷重が生じる");
@@ -284,7 +284,7 @@ mod tests {
         };
 
         let cfg = LoadCfg::default();
-        let (nodal, member) = self_weight_case_content(&model, &cfg);
+        let (nodal, member) = self_weight_case_content(&model, &cfg).unwrap();
         let load_total: f64 = nodal.iter().map(|nl| -nl.values[2]).sum::<f64>()
             + member
                 .iter()
@@ -295,6 +295,7 @@ mod tests {
                 .sum::<f64>();
 
         let weight_total: f64 = crate::story_gen::enumerate_self_weight(&model, &cfg)
+            .unwrap()
             .iter()
             .map(|item| match item {
                 crate::story_gen::SelfWeightItem::Line {
@@ -398,7 +399,7 @@ mod tests {
     #[test]
     fn test_rc_column_self_weight_is_nodal_half_half() {
         let model = base_column_with_base_beams(true, &[]);
-        let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default());
+        let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
         assert!(member.is_empty(), "梁が無いので部材荷重は出ない");
         let per_mm = 2.4e-9 * 90000.0 * GRAVITY_MM_S2;
         let w_col = per_mm * 3000.0;
@@ -431,7 +432,7 @@ mod tests {
     #[test]
     fn test_rc_base_column_extra_bottom_uses_max_beam_depth() {
         let model = base_column_with_base_beams(true, &[600.0, 800.0]);
-        let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default());
+        let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
         assert!(member.is_empty(), "梁は area=0 なので部材荷重は出ない");
         let per_mm = 2.4e-9 * 90000.0 * GRAVITY_MM_S2;
         let w_col = per_mm * 3000.0;
@@ -472,7 +473,7 @@ mod tests {
     #[test]
     fn test_steel_base_column_has_no_extra_bottom() {
         let model = base_column_with_base_beams(false, &[600.0, 800.0]);
-        let (nodal, _member) = self_weight_case_content(&model, &LoadCfg::default());
+        let (nodal, _member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
         let per_mm = model.materials[0].design_unit_weight_n_per_mm3() * 90000.0;
         let w_col = per_mm * 3000.0;
         assert!(
@@ -553,7 +554,7 @@ mod tests {
             width: 400.0,
             thick: 16.0,
         });
-        let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default());
+        let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
         assert!(member.is_empty(), "柱のみなので部材荷重は出ない");
 
         let as_area: f64 = 400.0 * 400.0 - 368.0 * 368.0;
@@ -583,7 +584,7 @@ mod tests {
             outer_dia: d,
             thick: t,
         });
-        let (nodal, _member) = self_weight_case_content(&model, &LoadCfg::default());
+        let (nodal, _member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
 
         let as_area = std::f64::consts::PI * (d * d - di * di) / 4.0;
         let ac_area = std::f64::consts::PI * di * di / 4.0;
@@ -604,7 +605,7 @@ mod tests {
             width: 400.0,
             thick: 16.0,
         });
-        let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default());
+        let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
         let total = node_force(&nodal, 0)
             + node_force(&nodal, 1)
             + member
@@ -670,7 +671,7 @@ mod tests {
         let (as_area, ac_area) = (24576.0, 135424.0);
 
         // 設計重量: 鋼管部のみ factor、充填部は γC のまま。
-        let (nodal, _) = self_weight_case_content(&model, &cfg);
+        let (nodal, _) = self_weight_case_content(&model, &cfg).unwrap();
         let total = node_force(&nodal, 0) + node_force(&nodal, 1);
         let expected_design = (78.5e-6 * as_area * 1.3 + 23.0e-6 * ac_area) * 3000.0;
         assert!(
@@ -791,7 +792,7 @@ mod tests {
         let mut model = cft_base_column_with_base_beams(&[600.0, 800.0]);
         model.load_cfg = Some(cfg.clone());
 
-        let items = crate::story_gen::enumerate_self_weight(&model, &cfg);
+        let items = crate::story_gen::enumerate_self_weight(&model, &cfg).unwrap();
         let (extra_bottom_load, extra_bottom_mass_equiv) = items
             .iter()
             .find_map(|item| match item {

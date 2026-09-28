@@ -662,25 +662,38 @@ fn test_collect_cft_ultimate_checks() {
         material: Some(MaterialId(0)),
         rebar_material: None,
         shear_rebar_material: None,
-        steel_material: None,
+        steel_material: Some(MaterialId(1)),
     };
     let mat = Material {
         strength_factor: None,
         concrete_class: Default::default(),
         id: MaterialId(0),
         name: "BCR295".to_string(),
+        category: MaterialCategory::Concrete,
+        young: 205000.0,
+        poisson: 0.3,
+        density: 2.4e-9,
+        shear: None,
+        fc: Some(30.0),
+        fy: None,
+    };
+    let steel = Material {
+        id: MaterialId(1),
+        name: "BCR295".to_string(),
         category: MaterialCategory::Steel,
         young: 205000.0,
         poisson: 0.3,
         density: 7.85e-9,
         shear: None,
-        fc: Some(30.0),
+        fc: None,
         fy: None,
+        concrete_class: Default::default(),
+        strength_factor: None,
     };
     let model = Model {
         nodes: vec![node(0, [0.0, 0.0, 0.0]), node(1, [0.0, 0.0, 3000.0])],
         sections: vec![sec],
-        materials: vec![mat],
+        materials: vec![mat, steel],
         elements: vec![frame_element(0, 0, 0, 1)],
         ..Default::default()
     };

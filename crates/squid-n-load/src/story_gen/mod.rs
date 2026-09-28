@@ -69,6 +69,7 @@ pub use generate::{
     generate_stories, generate_stories_multi, generate_stories_with_opts,
     generate_stories_with_synced_self_weight, StoryGenResult,
 };
+pub use self_weight_calc::validate_cft_steel_materials;
 pub(crate) use self_weight_calc::{enumerate_self_weight, SelfWeightItem};
 
 #[cfg(test)]

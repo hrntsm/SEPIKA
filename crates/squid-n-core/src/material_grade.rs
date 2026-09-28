@@ -86,6 +86,19 @@ pub fn steel_f_value_prefix(name: &str, thickness: f64) -> Option<f64> {
         .and_then(|g| steel_f_value(g, thickness))
 }
 
+/// CFT 鋼管材料の F 値を解決する。鋼材区分でない材料、または直接入力した
+/// `fy` が正の有限値でない材料は解決不能とする。`fy` が未指定の場合は
+/// 材料名と実板厚の鋼種表から解決する。
+pub fn cft_steel_f_value(mat: &crate::model::Material, thickness: f64) -> Option<f64> {
+    if mat.category != crate::model::MaterialCategory::Steel {
+        return None;
+    }
+    if mat.fy.is_some_and(|fy| !fy.is_finite() || fy <= 0.0) {
+        return None;
+    }
+    steel_f_value_prefix(&mat.name, thickness).or(mat.fy)
+}
+
 /// 保有水平耐力計算（プッシュオーバー）用の材料強度割増係数。
 ///
 /// 材料強度の基準強度は表の数値の 1.1 倍以下（JIS 規格品・大臣認定品）、

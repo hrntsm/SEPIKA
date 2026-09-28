@@ -461,6 +461,43 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         ));
     }
 
+    let invalid_cft_steel: Vec<ElemId> = model
+        .elements
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.kind,
+                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+            )
+        })
+        .filter_map(|e| {
+            let section = model.element_section(e)?;
+            if section.frame_use != Some(squid_n_core::model::FrameSectionUse::Column) {
+                return None;
+            }
+            let thickness = match section.shape.as_ref()? {
+                SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. } => *thick,
+                _ => return None,
+            };
+            (!section
+                .steel_material
+                .and_then(|id| model.materials.get(id.index()))
+                .is_some_and(|mat| {
+                    squid_n_core::material_grade::cft_steel_f_value(mat, thickness).is_some()
+                }))
+            .then_some(e.id)
+        })
+        .collect();
+    if !invalid_cft_steel.is_empty() {
+        issues.push(ModelIssue::members(
+            "CFT 断面の鋼管材料が不正です",
+            "ID ",
+            invalid_cft_steel,
+            "鋼管材料が未設定、鋼種名・板厚から F 値を解決できない、または fy が不正です",
+            "Section.steel_material に鋼材材料を設定し、鋼種名と実板厚または正の有限値 fy を指定してください。",
+        ));
+    }
+
     let composite_fallback: Vec<ElemId> = model
         .elements
         .iter()

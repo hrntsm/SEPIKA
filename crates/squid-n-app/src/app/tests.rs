@@ -5202,21 +5202,37 @@ fn test_compute_cft_ultimate_checks() {
         sections: vec![Section {
             frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
             material: Some(MaterialId(0)),
+            steel_material: Some(MaterialId(1)),
             ..cft_shape.to_section(SectionId(0), "CFT400".into())
         }],
-        materials: vec![Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(0),
-            name: "BCR295".into(),
-            category: MaterialCategory::Steel,
-            young: 205000.0,
-            poisson: 0.3,
-            density: 7.85e-9,
-            shear: None,
-            fc: Some(30.0),
-            fy: None,
-        }],
+        materials: vec![
+            Material {
+                strength_factor: None,
+                concrete_class: Default::default(),
+                id: MaterialId(0),
+                name: "BCR295".into(),
+                category: MaterialCategory::Concrete,
+                young: 25000.0,
+                poisson: 0.3,
+                density: 2.4e-9,
+                shear: None,
+                fc: Some(30.0),
+                fy: None,
+            },
+            Material {
+                strength_factor: None,
+                concrete_class: Default::default(),
+                id: MaterialId(1),
+                name: "BCR295".into(),
+                category: MaterialCategory::Steel,
+                young: 205000.0,
+                poisson: 0.3,
+                density: 7.85e-9,
+                shear: None,
+                fc: None,
+                fy: None,
+            },
+        ],
         ..Default::default()
     };
     model.elements.push(ElementData {
@@ -5325,7 +5341,8 @@ fn test_sync_gravity_dl_includes_self_weight_and_slab() {
     let (sw_nodal, sw_member) = squid_n_load::self_weight::self_weight_case_content(
         &app.core.model,
         &squid_n_core::model::LoadCfg::default(),
-    );
+    )
+    .unwrap();
     let self_weight: f64 = sw_member
         .iter()
         .map(|m| match m.kind {
@@ -5370,7 +5387,8 @@ fn test_generate_stories_seismic_weight_no_double_count() {
     let (sw_nodal, sw_member) = squid_n_load::self_weight::self_weight_case_content(
         &app.core.model,
         &squid_n_core::model::LoadCfg::default(),
-    );
+    )
+    .unwrap();
     let mut node_share = vec![0.0_f64; app.core.model.nodes.len()];
     for nl in &sw_nodal {
         node_share[nl.node.index()] += -nl.values[2];
@@ -5946,7 +5964,8 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
     let (sw_nodal, sw_member) = squid_n_load::self_weight::self_weight_case_content(
         &app.core.model,
         &squid_n_core::model::LoadCfg::default(),
-    );
+    )
+    .unwrap();
     let mut sw_total: f64 = sw_member
         .iter()
         .map(|m| match m.kind {

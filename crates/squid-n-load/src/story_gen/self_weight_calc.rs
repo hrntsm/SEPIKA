@@ -209,7 +209,11 @@ pub(crate) enum SelfWeightItem {
 /// 添字としてもそのまま有効。壁の開口は、壁展開モデルに合成される
 /// `wall_attrs`（[`crate::wall_expand::expand_wall_elements`] が壁版から複製する。
 /// モジュール doc 参照）から今までどおり読む。
-pub(crate) fn enumerate_self_weight(model: &Model, load_cfg: &LoadCfg) -> Vec<SelfWeightItem> {
+pub(crate) fn enumerate_self_weight(
+    model: &Model,
+    load_cfg: &LoadCfg,
+) -> Result<Vec<SelfWeightItem>, String> {
+    validate_cft_steel_materials(model)?;
     let (expanded, _wall_index, _wall_expand_report) =
         crate::wall_expand::expand_wall_elements(model);
     let model = &expanded;
@@ -260,12 +264,9 @@ pub(crate) fn enumerate_self_weight(model: &Model, load_cfg: &LoadCfg) -> Vec<Se
                     Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. })
                 );
                 let steel_mat = if is_cft {
-                    Some(model.element_steel_material(elem).unwrap_or_else(|| {
-                        panic!(
-                            "CFT要素 {} の鋼管材料（Section.steel_material）が未設定です",
-                            elem.id.0
-                        )
-                    }))
+                    Some(model.element_steel_material(elem).ok_or_else(|| {
+                        format!("CFT要素 {} の鋼管材料を解決できません", elem.id.0)
+                    })?)
                 } else {
                     None
                 };
@@ -369,14 +370,15 @@ pub(crate) fn enumerate_self_weight(model: &Model, load_cfg: &LoadCfg) -> Vec<Se
                 let matrix_mass_equiv = matrix_mass_per_length * len * GRAVITY_MM_S2;
                 let (mass_equiv, physical_per_length) = if is_cft {
                     let core_mass_per_length = mat.cft_core_mass_density() * core_area;
-                    let steel_mass_per_length =
-                        steel_mat.expect("CFT鋼管材料").density * steel_area;
+                    let steel_mass_per_length = steel_mat
+                        .ok_or_else(|| format!("CFT要素 {} の鋼管材料を解決できません", elem.id.0))?
+                        .density
+                        * steel_area;
                     let mass = (steel_mass_per_length * factor + core_mass_per_length)
                         * len
                         * GRAVITY_MM_S2
                         + extras_per_length * eff_len;
-                    let physical = (steel_mat.expect("CFT鋼管材料").density * steel_area * factor
-                        + core_mass_per_length)
+                    let physical = (steel_mass_per_length * factor + core_mass_per_length)
                         * GRAVITY_MM_S2
                         + extras_per_length;
                     (mass, physical)
@@ -438,7 +440,35 @@ pub(crate) fn enumerate_self_weight(model: &Model, load_cfg: &LoadCfg) -> Vec<Se
         }
     }
 
-    items
+    Ok(items)
+}
+
+pub fn validate_cft_steel_materials(model: &Model) -> Result<(), String> {
+    for elem in &model.elements {
+        let Some(section) = model.element_section(elem) else {
+            continue;
+        };
+        let Some(shape) = section.shape.as_ref() else {
+            continue;
+        };
+        let thickness = match shape {
+            SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. } => *thick,
+            _ => continue,
+        };
+        let Some(material) = model.element_steel_material(elem) else {
+            return Err(format!(
+                "CFT要素 {} の鋼管材料（Section.steel_material）が未設定です",
+                elem.id.0
+            ));
+        };
+        if squid_n_core::material_grade::cft_steel_f_value(material, thickness).is_none() {
+            return Err(format!(
+                "CFT要素 {} の鋼管材料から F 値を解決できません",
+                elem.id.0
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// 耐震壁の自重面積算定用の**内法係数**（芯々面積に乗じる係数、(0,1]）。

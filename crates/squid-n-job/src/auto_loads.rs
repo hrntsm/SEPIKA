@@ -546,6 +546,8 @@ fn compute_dl_beam_loads_checked(
 pub fn compute_gravity_auto_load_cases(
     model: &Model,
 ) -> Result<AutoLoadComputeResult, crate::error::JobError> {
+    squid_n_load::story_gen::validate_cft_steel_materials(model)
+        .map_err(crate::error::JobError::InvalidInput)?;
     squid_n_load::floor::validate_one_way_directions(model)
         .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
     let beam_map = beam_elem_map(model);
@@ -556,7 +558,8 @@ pub fn compute_gravity_auto_load_cases(
     let (mut dl_nodal, mut dl_member) = slab_load_case_content(model, &dl_beam_loads);
     let load_cfg = model.load_cfg.clone().unwrap_or_default();
     let (sw_nodal, sw_member) =
-        squid_n_load::self_weight::self_weight_case_content(model, &load_cfg);
+        squid_n_load::self_weight::self_weight_case_content(model, &load_cfg)
+            .map_err(crate::error::JobError::InvalidInput)?;
     dl_nodal.extend(sw_nodal);
     dl_member.extend(sw_member);
     let attached_wall_loads = squid_n_load::wall_attached::attached_wall_beam_loads(model);
