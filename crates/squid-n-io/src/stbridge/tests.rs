@@ -1814,10 +1814,12 @@ fn test_standard_roundtrip_cft_box() {
         "充填コンクリート材料: {xml}"
     );
     assert!(
-        xml.contains(
-            "StbSecSteelColumn_CFT_Same shape=\"BOX-400x400x16\" strength_main=\"SN400B\""
-        ),
+        xml.contains("StbSecSteelColumn_CFT_Same shape=\"BOX-400x400x16\" strength=\"SN400B\""),
         "鋼管材料: {xml}"
+    );
+    assert!(
+        !xml.contains("StbSecSteelColumn_CFT_Same shape=\"BOX-400x400x16\" strength_main="),
+        "CFT 鋼管に非標準属性を出力しない: {xml}"
     );
     let back = import_stbridge(&xml).expect("import");
     assert!(back.validate().is_ok(), "{:?}", back.validate());
@@ -1842,7 +1844,7 @@ fn test_import_cft_separates_concrete_and_steel_materials() {
   <StbNodes><StbNode id="0" X="0" Y="0" Z="0"/><StbNode id="1" X="0" Y="0" Z="3000"/></StbNodes>
   <StbSections>
     <StbSecColumn_CFT id="0" name="CFT" strength_concrete="Fc24">
-      <StbSecSteelFigureColumn_CFT><StbSecSteelColumn_CFT_Same shape="BOX-400" strength_main="SN400B"/></StbSecSteelFigureColumn_CFT>
+      <StbSecSteelFigureColumn_CFT><StbSecSteelColumn_CFT_Same shape="BOX-400" strength="SN400B"/></StbSecSteelFigureColumn_CFT>
     </StbSecColumn_CFT>
     <StbSecSteel><StbSecRoll-BOX name="BOX-400" type="ELSE" A="400" B="400" t="12"/></StbSecSteel>
   </StbSections>
@@ -1865,7 +1867,7 @@ fn test_import_cft_separates_concrete_and_steel_materials() {
 }
 
 #[test]
-fn test_import_cft_without_strength_main_keeps_section_unresolved() {
+fn test_import_cft_without_strength_keeps_section_unresolved() {
     let xml = r#"<?xml version="1.0"?>
 <ST_BRIDGE version="2.0.0"><StbModel>
   <StbSections>

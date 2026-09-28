@@ -407,7 +407,11 @@ impl StbParser {
                     .or_else(|| a.get("shape_center"))
                     .or_else(|| a.get("shape_main"))
                     .cloned();
-                let gr = a.get("strength_main").cloned();
+                let gr = if matches!(&self.cur, CurSec::Cft { .. }) {
+                    a.get("strength").cloned()
+                } else {
+                    a.get("strength_main").cloned()
+                };
                 match &mut self.cur {
                     CurSec::Steel {
                         shape_name, grade, ..
@@ -488,7 +492,7 @@ impl StbParser {
                     name: a.get("name").cloned().unwrap_or_default(),
                     floor: floor_of(a),
                     steel_name: None,
-                    steel_grade: a.get("strength_main").cloned(),
+                    steel_grade: None,
                     mat: sec_mat_ref_of(a),
                 };
             }

@@ -750,7 +750,7 @@ fn cft_figure(shape: &SectionShape, steel: &mut SteelLibrary) -> Option<String> 
 }
 
 /// CFT 柱断面 `StbSecColumn_CFT`（充填鋼管の形鋼参照）。`id_mat` は充填コンクリートの
-/// `strength_concrete` 属性、`steel_mat` は鋼管の `strength_main` 属性（いずれも空可）。
+/// `strength_concrete` 属性、`steel_mat` は鋼管の `strength` 属性（いずれも空可）。
 fn cft_column(id: u32, sec: &Section, figure: &str, id_mat: &str, steel_mat: &str) -> String {
     let id = sid(id);
     let xml = format!(
@@ -1014,7 +1014,7 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
             None => String::new(),
         }
     };
-    let steel_strength_attr = |base: u32| -> String {
+    let cft_steel_strength_attr = |base: u32| -> String {
         match model
             .sections
             .get(base as usize)
@@ -1023,7 +1023,7 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
             .map(|mat| mat.name.as_str())
             .filter(|name| !name.is_empty())
         {
-            Some(name) => format!(" strength_main=\"{}\"", esc(name)),
+            Some(name) => format!(" strength=\"{}\"", esc(name)),
             None => String::new(),
         }
     };
@@ -1139,7 +1139,7 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                         sec,
                         &fig,
                         &id_mat_attr(base),
-                        &steel_strength_attr(base),
+                        &cft_steel_strength_attr(base),
                     ),
                 ));
                 col_map.insert(base, base);

@@ -8,11 +8,11 @@ CFT の `Section.material` は充填コンクリート、`Section.steel_material
 
 ## 背景と理由
 
-CFT はコンクリートと鋼管の複合断面であり、単一の主材料では両領域の物性を表せない。ST-Bridge 取り込みでは `strength_concrete` を主材料、`strength_main` を鋼管材料へ分離して解決する。
+CFT はコンクリートと鋼管の複合断面であり、単一の主材料では両領域の物性を表せない。ST-Bridge 取り込みでは `strength_concrete` を主材料、`StbSecSteelColumn_CFT_Same` の `strength` を鋼管材料へ分離して解決する。
 
 ## 影響
 
-- `strength_main` がない入力は取り込みを継続するが、鋼管材料未設定のまま質量特性・自重の解決時にエラーとする。
+- `strength` がない入力は取り込みを継続するが、鋼管材料未設定のまま質量特性・自重の解決時にエラーとする。
 - 質量特性は鋼管領域へ鋼管材料の密度、充填部へ主材料の Fc・コンクリート種類から求めた無筋コンクリート密度を適用する。
 
 ## 関連
