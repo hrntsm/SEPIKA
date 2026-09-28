@@ -286,7 +286,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 "ID ",
                 invalid_cft_use,
                 "CFT 断面は柱専用です",
-                "CFT 断面の主架構用途を Column にしてください。                 部材の角度から柱・梁用途を推定しません。",
+                "CFT 断面の主架構用途を Column にしてください。部材の角度から柱・梁用途を推定しません。",
             ));
         }
     }
