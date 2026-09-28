@@ -42,6 +42,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0034](0034-rc-section-purpose-types-and-real-rebar.md) | accepted | RC 断面を用途別に型分離し、実配筋モデルへ移行する |
 | [0035](0035-lumped-mass-physical-mass.md) | accepted | 質点系の層質量を物理質量相当へ統一する |
 | [0037](0037-cantilever-slab-load-to-attachment-girder.md) | accepted | 線アンカーの取り付く床板は取付き大梁だけへ等分布伝達する |
+| [0038](0038-cantilever-slab-tip-load-transfer.md) | accepted | 片持ちスラブの先端荷重は取付き梁へ力のみ等分布伝達する |
 
 ## 規約
 
