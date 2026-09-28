@@ -123,6 +123,11 @@ pub(crate) fn resolve_fiber_yield(
                 squid_n_core::material_grade::steel_f_value_prefix(&m.name, thick).or(m.fy)
             })
         }
+        Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }) => {
+            model.element_steel_material(data).and_then(|m| {
+                squid_n_core::material_grade::steel_f_value_prefix(&m.name, 40.0).or(m.fy)
+            })
+        }
         _ => main,
     };
     FiberYield { main, rebar, steel }
@@ -167,6 +172,9 @@ fn fiber_steel_material<'a>(
         Some(SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }) => {
             model.element_steel_material(data).or(main)
         }
+        Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }) => {
+            model.element_steel_material(data)
+        }
         _ => main,
     }
 }
@@ -195,6 +203,10 @@ pub(crate) fn fiber_young_moduli(
     };
     let steel_e = match shape {
         Some(SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }) => model
+            .element_steel_material(data)
+            .map(|m| m.young)
+            .unwrap_or(0.0),
+        Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }) => model
             .element_steel_material(data)
             .map(|m| m.young)
             .unwrap_or(0.0),

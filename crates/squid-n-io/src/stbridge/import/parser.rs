@@ -84,6 +84,7 @@ pub(super) enum CurSec {
         /// 断面の階（`floor` 属性）。符号と併せて断面の同一性キーになる。
         floor: Option<String>,
         steel_name: Option<String>,
+        steel_grade: Option<String>,
         mat: Option<SecMatRef>,
     },
     Src {
@@ -418,7 +419,18 @@ impl StbParser {
                             *grade = gr;
                         }
                     }
-                    CurSec::Cft { steel_name, .. } if steel_name.is_none() => *steel_name = sname,
+                    CurSec::Cft {
+                        steel_name,
+                        steel_grade,
+                        ..
+                    } => {
+                        if steel_name.is_none() {
+                            *steel_name = sname;
+                        }
+                        if steel_grade.is_none() {
+                            *steel_grade = gr;
+                        }
+                    }
                     CurSec::Src { steel_name, .. } if steel_name.is_none() => *steel_name = sname,
                     _ => {}
                 }
@@ -476,6 +488,7 @@ impl StbParser {
                     name: a.get("name").cloned().unwrap_or_default(),
                     floor: floor_of(a),
                     steel_name: None,
+                    steel_grade: a.get("strength_main").cloned(),
                     mat: sec_mat_ref_of(a),
                 };
             }
@@ -1025,6 +1038,7 @@ impl StbParser {
                     name,
                     floor,
                     steel_name,
+                    steel_grade,
                     mat,
                 } = std::mem::replace(&mut self.cur, CurSec::None)
                 {
@@ -1034,7 +1048,10 @@ impl StbParser {
                         floor,
                         kind: PendingSecKind::CftRef(steel_name),
                         mat,
-                        grades: Default::default(),
+                        grades: super::SecGrades {
+                            steel: steel_grade,
+                            ..Default::default()
+                        },
                     });
                 }
             }

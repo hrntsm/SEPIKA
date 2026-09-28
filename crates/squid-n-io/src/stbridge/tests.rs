@@ -1802,6 +1802,35 @@ fn test_standard_roundtrip_cft_box() {
     );
 }
 
+#[test]
+fn test_import_cft_separates_concrete_and_steel_materials() {
+    let xml = r#"<?xml version="1.0"?>
+<ST_BRIDGE version="2.0.0"><StbModel>
+  <StbNodes><StbNode id="0" X="0" Y="0" Z="0"/><StbNode id="1" X="0" Y="0" Z="3000"/></StbNodes>
+  <StbSections>
+    <StbSecColumn_CFT id="0" name="CFT" strength_concrete="Fc24">
+      <StbSecSteelFigureColumn_CFT><StbSecSteelColumn_CFT_Same shape="BOX-400" strength_main="SN400B"/></StbSecSteelFigureColumn_CFT>
+    </StbSecColumn_CFT>
+    <StbSecSteel><StbSecRoll-BOX name="BOX-400" type="ELSE" A="400" B="400" t="12"/></StbSecSteel>
+  </StbSections>
+  <StbMembers><StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0"/></StbMembers>
+</StbModel></ST_BRIDGE>"#;
+    let model = import_stbridge(xml).expect("import");
+    let section = &model.sections[0];
+    let concrete = model.materials[section.material.unwrap().index()].category;
+    let steel = model.materials[section.steel_material.unwrap().index()].category;
+    assert_eq!(concrete, MaterialCategory::Concrete);
+    assert_eq!(steel, MaterialCategory::Steel);
+    assert_eq!(
+        model.materials[section.material.unwrap().index()].fc,
+        Some(24.0)
+    );
+    assert_eq!(
+        model.materials[section.steel_material.unwrap().index()].name,
+        "SN400B"
+    );
+}
+
 /// 標準モード: CFT 円形柱が往復する。
 #[test]
 fn test_standard_roundtrip_cft_pipe() {

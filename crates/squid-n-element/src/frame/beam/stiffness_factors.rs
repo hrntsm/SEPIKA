@@ -294,12 +294,13 @@ pub fn composite_props_of(
         .section
         .and_then(|sid| model.sections.get(sid.index()))?;
     let mat = model.element_material(data)?;
-    composite_props_with(sec.shape.as_ref()?, mat)
+    composite_props_with(sec.shape.as_ref()?, mat, model.element_steel_material(data))
 }
 
 pub(super) fn validate_composite_material(
     shape: &squid_n_core::section_shape::SectionShape,
     mat: &squid_n_core::model::Material,
+    steel: Option<&squid_n_core::model::Material>,
 ) -> Result<(), String> {
     use squid_n_core::section_shape::SectionShape;
     if matches!(
@@ -319,10 +320,16 @@ pub(super) fn validate_composite_material(
         shape,
         SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
     ) {
-        if !mat.young.is_finite() || mat.young <= 0.0 {
+        let Some(steel) = steel else {
+            return Err("CFT 断面の鋼管材料が未設定です".into());
+        };
+        if steel.category != squid_n_core::model::MaterialCategory::Steel {
+            return Err("CFT 断面の鋼管材料が鋼材ではありません".into());
+        }
+        if !steel.young.is_finite() || steel.young <= 0.0 {
             return Err("CFT 断面の鋼管ヤング係数 E が未設定または不正です".into());
         }
-        if !mat.poisson.is_finite() {
+        if !steel.poisson.is_finite() {
             return Err("CFT 断面の鋼管ポアソン比 ν が不正です".into());
         }
     }
@@ -332,6 +339,7 @@ pub(super) fn validate_composite_material(
 pub(super) fn composite_props_with(
     shape: &squid_n_core::section_shape::SectionShape,
     mat: &squid_n_core::model::Material,
+    steel: Option<&squid_n_core::model::Material>,
 ) -> Option<squid_n_core::section_shape::CompositeProps> {
     use squid_n_core::section_shape::SectionShape;
     match shape {
@@ -348,7 +356,8 @@ pub(super) fn composite_props_with(
                 mat.concrete_class,
                 squid_n_core::units::ConcreteComposition::Plain,
             );
-            shape.cft_equivalent_props(mat.young, mat.poisson, fc, gamma_c)
+            let steel = steel?;
+            shape.cft_equivalent_props(steel.young, steel.poisson, fc, gamma_c)
         }),
         _ => None,
     }

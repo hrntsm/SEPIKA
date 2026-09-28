@@ -57,7 +57,7 @@ pub struct Section {
     /// せん断補強筋の材料（RC・SRC 断面のみ意味を持つ）。`None` は未設定。
     #[serde(default)]
     pub shear_rebar_material: Option<MaterialId>,
-    /// SRC 断面の内蔵鉄骨の材料（SRC 断面のみ意味を持つ）。
+    /// SRC 断面の内蔵鉄骨、CFT 断面の鋼管の材料。
     #[serde(default)]
     pub steel_material: Option<MaterialId>,
 }
@@ -164,7 +164,7 @@ impl Model {
             .get(self.element_section(elem)?.shear_rebar_material?.index())
     }
 
-    /// 要素の内蔵鉄骨材料（SRC 断面のみ）。
+    /// 要素の内蔵鉄骨・鋼管材料。
     pub fn element_steel_material(&self, elem: &ElementData) -> Option<&Material> {
         self.materials
             .get(self.element_section(elem)?.steel_material?.index())

@@ -130,7 +130,8 @@ fn test_beam_new_src_cft_composite_props() {
                 ..src_shape.to_section(SectionId(0), "SRC-600".into())
             },
             Section {
-                material: Some(MaterialId(1)),
+                material: Some(MaterialId(0)),
+                steel_material: Some(MaterialId(1)),
                 ..cft_shape.to_section(SectionId(1), "CFT-400".into())
             },
         ],
@@ -207,33 +208,49 @@ fn test_beam_new_src_cft_composite_props() {
 
     let cft_beam = BeamElement::new(&make_elem(1), &model);
     let pc = cft_shape
-        .cft_equivalent_props(205000.0, 0.3, 36.0, 23.0)
+        .cft_equivalent_props(205000.0, 0.3, 24.0, 23.0)
         .unwrap();
     assert!((cft_beam.a - pc.area_ax).abs() < 1e-6);
     assert!((cft_beam.iz - pc.iy).abs() / pc.iy < 1e-12);
     assert!((cft_beam.j - pc.j).abs() / pc.j < 1e-12);
 
-    let mut invalid_cft_material = model.materials[1].clone();
+    let mut invalid_cft_material = model.materials[0].clone();
     invalid_cft_material.fc = Some(f64::NAN);
-    assert!(
-        super::stiffness_factors::composite_props_with(&cft_shape, &invalid_cft_material).is_none()
-    );
+    assert!(super::stiffness_factors::composite_props_with(
+        &cft_shape,
+        &invalid_cft_material,
+        Some(&model.materials[1]),
+    )
+    .is_none());
     invalid_cft_material.fc = Some(0.0);
-    assert!(
-        super::stiffness_factors::composite_props_with(&cft_shape, &invalid_cft_material).is_none()
-    );
+    assert!(super::stiffness_factors::composite_props_with(
+        &cft_shape,
+        &invalid_cft_material,
+        Some(&model.materials[1]),
+    )
+    .is_none());
     invalid_cft_material.fc = Some(36.0);
     invalid_cft_material.young = 0.0;
     assert!(super::stiffness_factors::validate_composite_material(
         &cft_shape,
-        &invalid_cft_material
+        &invalid_cft_material,
+        Some(&{
+            let mut steel = model.materials[1].clone();
+            steel.young = 0.0;
+            steel
+        })
     )
     .is_err());
     invalid_cft_material.young = 205000.0;
     invalid_cft_material.poisson = f64::NAN;
     assert!(super::stiffness_factors::validate_composite_material(
         &cft_shape,
-        &invalid_cft_material
+        &invalid_cft_material,
+        Some(&{
+            let mut steel = model.materials[1].clone();
+            steel.poisson = f64::NAN;
+            steel
+        })
     )
     .is_err());
 
