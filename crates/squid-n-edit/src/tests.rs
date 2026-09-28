@@ -668,6 +668,25 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
             section: Some(SectionId(0)),
             name: "B1".into(),
         });
+    for new_shape in [
+        squid_n_section::shape::SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 16.0,
+        },
+        squid_n_section::shape::SectionShape::CftPipe {
+            outer_dia: 400.0,
+            thick: 16.0,
+        },
+    ] {
+        assert!(EditSectionShape {
+            section: SectionId(0),
+            new_shape,
+            frame_use: None,
+        }
+        .apply(&mut model)
+        .is_noop());
+    }
     assert!(stack.run(
         &mut model,
         Box::new(EditSectionShape {
@@ -6219,7 +6238,7 @@ fn test_copy_story_rejects_secondary_cft() {
         overwrite: true,
     };
     let report = cmd.preview(&model);
-    assert_eq!(report.sections_rejected, 1);
+    assert_eq!(report.sections_rejected, 2);
     assert_eq!(report.secondary_created, 1);
     let mut stack = UndoStack::new();
     assert!(stack.run(&mut model, Box::new(cmd)));

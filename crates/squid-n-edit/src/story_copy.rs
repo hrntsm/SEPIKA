@@ -1183,7 +1183,7 @@ fn copy_secondary(
             continue;
         };
         let rejected_section = cft_section(model, sm.section);
-        if rejected_section && !cmd.targets.sections {
+        if rejected_section {
             report.sections_rejected += 1;
         }
         let section = (!rejected_section)

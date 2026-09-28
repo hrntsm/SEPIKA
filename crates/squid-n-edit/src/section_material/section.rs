@@ -194,6 +194,14 @@ impl EditCommand for EditSectionShape {
         }
         if (non_frame && self.frame_use.is_some())
             || !section_use_is_valid(model, self.section, self.frame_use)
+            || matches!(
+                &self.new_shape,
+                squid_n_section::shape::SectionShape::CftBox { .. }
+                    | squid_n_section::shape::SectionShape::CftPipe { .. }
+            ) && model
+                .beams()
+                .chain(model.posts())
+                .any(|member| member.section == Some(self.section))
             || model.elements.iter().any(|element| {
                 element.section == Some(self.section)
                     && super::horizontal_primary_cft(
