@@ -225,6 +225,18 @@ impl EditCommand for EditSectionShape {
                     .wall_plates
                     .iter()
                     .any(|plate| plate.section == Some(self.section))))
+            || (matches!(
+                &self.new_shape,
+                squid_n_section::shape::SectionShape::CftBox { .. }
+                    | squid_n_section::shape::SectionShape::CftPipe { .. }
+            ) && model.elements.iter().any(|element| {
+                element.section == Some(self.section)
+                    && matches!(
+                        element.kind,
+                        squid_n_core::model::ElementKind::Shell
+                            | squid_n_core::model::ElementKind::Wall
+                    )
+            }))
         {
             return Box::new(Noop);
         }

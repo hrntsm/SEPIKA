@@ -771,6 +771,50 @@ fn test_edit_rc_wall_section_shape_with_wall_reference() {
 }
 
 #[test]
+fn test_edit_section_shape_rejects_cft_for_shell_or_wall_reference() {
+    for kind in [ElementKind::Shell, ElementKind::Wall] {
+        let old_shape = squid_n_section::shape::SectionShape::SteelBox {
+            height: 200.0,
+            width: 200.0,
+            thick: 12.0,
+            corner_r: 0.0,
+        };
+        let new_shape = squid_n_section::shape::SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 16.0,
+        };
+        let mut model = empty_model();
+        let mut section = old_shape.to_section(SectionId(0), "S".into());
+        section.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+        model.sections.push(section);
+        model.elements.push(ElementData {
+            id: ElemId(0),
+            kind,
+            nodes: smallvec![],
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 0.0, 1.0],
+            },
+            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        });
+
+        assert!(EditSectionShape {
+            section: SectionId(0),
+            new_shape,
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
+        }
+        .apply(&mut model)
+        .is_noop());
+        assert_eq!(model.sections[0].shape, Some(old_shape));
+    }
+}
+
+#[test]
 fn test_duplicate_section_for_member_roundtrip() {
     let mut model = empty_model();
     let mut stack = UndoStack::new();
