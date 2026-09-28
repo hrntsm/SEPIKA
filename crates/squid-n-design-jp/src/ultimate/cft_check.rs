@@ -6,6 +6,7 @@
 
 use squid_n_core::ids::ElemId;
 use squid_n_core::model::Model;
+use squid_n_core::model::{FrameSectionUse, MaterialCategory};
 use squid_n_core::section_shape::SectionShape;
 
 use super::cft::{
@@ -62,9 +63,8 @@ fn cft_section_props(shape: &SectionShape) -> Option<(bool, f64, f64, f64, f64, 
 /// （CFT指針）。
 ///
 /// - `axial_by_elem`: 設計軸力 [N]（**圧縮正**）。なければ軸力 0（安全側）。
-/// - 座屈長さ lk は部材の幾何長（K=1 相当）を用いる。鋼管の降伏強さ Fy は
-///   材料名の板厚区分から解決した F 値（解決できなければ 235）、ヤング係数は
-///   205000 N/mm²（鋼）を用いる。Fc は材料の `fc`（未設定はスキップ）。
+/// - 座屈長さ lk は部材の幾何長（K=1 相当）を用いる。鋼管の材料は
+///   `Section.steel_material`、充填コンクリートの材料は `Section.material` を用いる。
 pub fn collect_cft_ultimate_checks(
     model: &Model,
     axial_by_elem: &[(ElemId, f64)],
@@ -74,9 +74,24 @@ pub fn collect_cft_ultimate_checks(
         let Some(sec) = elem.section.and_then(|sid| model.sections.get(sid.index())) else {
             continue;
         };
+        if sec.frame_use != Some(FrameSectionUse::Column) {
+            continue;
+        }
         let Some(mat) = model.element_material(elem) else {
             continue;
         };
+        if mat.category != MaterialCategory::Concrete {
+            continue;
+        }
+        let Some(steel_mat) = model.element_steel_material(elem) else {
+            continue;
+        };
+        if steel_mat.category != MaterialCategory::Steel
+            || !steel_mat.young.is_finite()
+            || steel_mat.young <= 0.0
+        {
+            continue;
+        }
         let Some(shape) = sec.shape.as_ref() else {
             continue;
         };
@@ -92,9 +107,12 @@ pub fn collect_cft_ultimate_checks(
             SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. } => thick,
             _ => 0.0,
         };
-        let fy = crate::material_strength::steel_f_value_prefix(&mat.name, thick)
-            .or(mat.fy)
+        let fy = crate::material_strength::steel_f_value_prefix(&steel_mat.name, thick)
+            .or(steel_mat.fy)
             .unwrap_or(235.0);
+        if !fy.is_finite() || fy <= 0.0 {
+            continue;
+        }
         let lk = model.member_length(elem);
 
         let inp = cft::CftAxialInput {
@@ -106,7 +124,7 @@ pub fn collect_cft_ultimate_checks(
             s_inertia,
             fc,
             fy,
-            s_young: 205000.0,
+            s_young: steel_mat.young,
             lk,
         };
         let r = cft_axial_ultimate(&inp);
@@ -116,7 +134,8 @@ pub fn collect_cft_ultimate_checks(
             .map(|(_, n)| *n)
             .unwrap_or(0.0);
 
-        let mu_nm = cft_mu_nm(shape, fc, fy, n_design, lk, false).unwrap_or(0.0);
+        let mu_nm = cft_mu_nm_with_young(shape, fc, fy, steel_mat.young, n_design, lk, false)
+            .unwrap_or(0.0);
 
         let axial_margin = if n_design > 0.0 {
             if r.ncu > 0.0 {
@@ -176,6 +195,18 @@ pub fn cft_mu_nm(
     lk: f64,
     weak_axis: bool,
 ) -> Option<f64> {
+    cft_mu_nm_with_young(shape, fc, fy, 205000.0, n_design, lk, weak_axis)
+}
+
+fn cft_mu_nm_with_young(
+    shape: &SectionShape,
+    fc: f64,
+    fy: f64,
+    s_young: f64,
+    n_design: f64,
+    lk: f64,
+    weak_axis: bool,
+) -> Option<f64> {
     if fc <= 0.0 || fy <= 0.0 {
         return None;
     }
@@ -204,7 +235,7 @@ pub fn cft_mu_nm(
         s_inertia,
         fc,
         fy,
-        s_young: 205000.0,
+        s_young,
         lk,
     };
     let r = cft_axial_ultimate(&inp);
@@ -226,7 +257,7 @@ pub fn cft_mu_nm(
                 is_long: r.class == CftColumnClass::Long,
                 c_ncr: cft_concrete_buckling_axial(c_inertia, c_area, fc, lk),
                 c_lambda1: cft_concrete_slenderness(c_inertia, c_area, fc, lk),
-                nk: cft_nk(c_inertia, s_inertia, 205000.0, fc, lk),
+                nk: cft_nk(c_inertia, s_inertia, s_young, fc, lk),
                 ncu_axial: r.ncu,
                 ntu: r.ntu,
             },

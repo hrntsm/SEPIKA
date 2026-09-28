@@ -644,7 +644,7 @@ fn test_collect_cft_ultimate_checks() {
         thick: 12.0,
     };
     let sec = Section {
-        frame_use: Some(squid_n_core::model::FrameSectionUse::Girder),
+        frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
         id: SectionId(0),
         name: "CFT400".into(),
         area: cft_shape.calc_area(),
@@ -662,25 +662,38 @@ fn test_collect_cft_ultimate_checks() {
         material: Some(MaterialId(0)),
         rebar_material: None,
         shear_rebar_material: None,
-        steel_material: None,
+        steel_material: Some(MaterialId(1)),
     };
     let mat = Material {
         strength_factor: None,
         concrete_class: Default::default(),
         id: MaterialId(0),
-        name: "BCR295".to_string(),
-        category: MaterialCategory::Steel,
-        young: 205000.0,
+        name: "Fc30".to_string(),
+        category: MaterialCategory::Concrete,
+        young: 25000.0,
         poisson: 0.3,
         density: 7.85e-9,
         shear: None,
         fc: Some(30.0),
         fy: None,
     };
+    let steel = Material {
+        id: MaterialId(1),
+        name: "BCR295".to_string(),
+        category: MaterialCategory::Steel,
+        young: 205000.0,
+        poisson: 0.3,
+        density: 7.85e-9,
+        shear: None,
+        fc: None,
+        fy: None,
+        concrete_class: Default::default(),
+        strength_factor: None,
+    };
     let model = Model {
         nodes: vec![node(0, [0.0, 0.0, 0.0]), node(1, [0.0, 0.0, 3000.0])],
         sections: vec![sec],
-        materials: vec![mat],
+        materials: vec![mat, steel],
         elements: vec![frame_element(0, 0, 0, 1)],
         ..Default::default()
     };
@@ -695,6 +708,78 @@ fn test_collect_cft_ultimate_checks() {
     assert_eq!(c.class, CftColumnClass::Medium);
     // 短柱 N-M 曲げ耐力 Mu(N) が正（圧縮軸力 3000kN 時）。
     assert!(c.mu_nm > 0.0, "mu_nm={}", c.mu_nm);
+
+    let mut horizontal = model.clone();
+    horizontal.nodes[1].coord = [4000.0, 0.0, 0.0];
+    assert_eq!(
+        collect_cft_ultimate_checks(&horizontal, &axial).len(),
+        1,
+        "水平でも用途がColumnなら検定対象"
+    );
+}
+
+#[test]
+fn test_collect_cft_uses_steel_material_and_column_use_only() {
+    let shape = SectionShape::CftBox {
+        height: 400.0,
+        width: 400.0,
+        thick: 12.0,
+    };
+    let mut sec = shape.to_section(SectionId(0), "CFT".to_string());
+    sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+    sec.material = Some(MaterialId(0));
+    sec.steel_material = Some(MaterialId(1));
+    let concrete = Material {
+        id: MaterialId(0),
+        name: "Fc30".to_string(),
+        category: MaterialCategory::Concrete,
+        young: 25000.0,
+        poisson: 0.2,
+        density: 2.4e-9,
+        shear: None,
+        fc: Some(30.0),
+        fy: None,
+        concrete_class: Default::default(),
+        strength_factor: None,
+    };
+    let steel = Material {
+        id: MaterialId(1),
+        name: "test-steel".to_string(),
+        category: MaterialCategory::Steel,
+        young: 180000.0,
+        poisson: 0.3,
+        density: 7.85e-9,
+        shear: None,
+        fc: None,
+        fy: Some(300.0),
+        concrete_class: Default::default(),
+        strength_factor: None,
+    };
+    let model = Model {
+        nodes: vec![node(0, [0.0, 0.0, 0.0]), node(1, [4000.0, 3000.0, 0.0])],
+        sections: vec![sec.clone()],
+        materials: vec![concrete, steel],
+        elements: vec![frame_element(0, 0, 0, 1)],
+        ..Default::default()
+    };
+    let base = collect_cft_ultimate_checks(&model, &[(ElemId(0), 3_000_000.0)]);
+    assert_eq!(base.len(), 1);
+
+    let mut stronger = model.clone();
+    stronger.materials[1].fy = Some(490.0);
+    stronger.materials[1].young = 205000.0;
+    let changed = collect_cft_ultimate_checks(&stronger, &[(ElemId(0), 3_000_000.0)]);
+    assert_ne!(base[0].ncu, changed[0].ncu);
+
+    for frame_use in [Some(squid_n_core::model::FrameSectionUse::Girder), None] {
+        let mut excluded = model.clone();
+        excluded.sections[0].frame_use = frame_use;
+        assert!(collect_cft_ultimate_checks(&excluded, &[]).is_empty());
+    }
+
+    let mut invalid_steel = model;
+    invalid_steel.materials[1].category = MaterialCategory::Concrete;
+    assert!(collect_cft_ultimate_checks(&invalid_steel, &[]).is_empty());
 }
 
 /// 実配筋モデルの断面から 1 部材のモデルを作る（部材軸は `horizontal` で切替）。
