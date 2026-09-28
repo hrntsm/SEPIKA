@@ -297,6 +297,13 @@ impl EditCommand for AddMember {
         if !crate::refs::new_elem_ok(model, &self.elem) {
             return Box::new(Noop);
         }
+        if self.elem.section.is_some_and(|section| {
+            model.sections.get(section.index()).is_some_and(|section| {
+                crate::section_material::horizontal_primary_cft(&self.elem, section)
+            })
+        }) {
+            return Box::new(Noop);
+        }
         let snapshot = AssignmentTopology::capture(model);
         model.elements.push(self.elem.clone());
         model.rebuild_assignment_regions_dropping_orphan_plates();

@@ -8,22 +8,18 @@
 
 use super::*;
 
-fn horizontal_primary_cft(
-    model: &Model,
+pub(crate) fn horizontal_primary_cft(
     elem: &squid_n_core::model::ElementData,
-    shape: &squid_n_section::shape::SectionShape,
+    section: &squid_n_core::model::Section,
 ) -> bool {
     elem.kind == squid_n_core::model::ElementKind::Beam
-        && elem
-            .nodes
-            .first()
-            .and_then(|a| elem.nodes.get(1).map(|b| (a, b)))
-            .and_then(|(a, b)| Some((model.nodes.get(a.index())?, model.nodes.get(b.index())?)))
-            .is_some_and(|(a, b)| !squid_n_core::geom::is_vertical_axis(a.coord, b.coord))
+        && section.frame_use == Some(squid_n_core::model::FrameSectionUse::Girder)
         && matches!(
-            shape,
-            squid_n_section::shape::SectionShape::CftBox { .. }
-                | squid_n_section::shape::SectionShape::CftPipe { .. }
+            section.shape,
+            Some(
+                squid_n_section::shape::SectionShape::CftBox { .. }
+                    | squid_n_section::shape::SectionShape::CftPipe { .. }
+            )
         )
 }
 

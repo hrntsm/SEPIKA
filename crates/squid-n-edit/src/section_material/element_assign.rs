@@ -24,10 +24,7 @@ impl EditCommand for SetElementSection {
             model
                 .sections
                 .get(section.index())
-                .and_then(|section| section.shape.as_ref())
-                .is_some_and(|shape| {
-                    super::horizontal_primary_cft(model, &model.elements[idx], shape)
-                })
+                .is_some_and(|section| super::horizontal_primary_cft(&model.elements[idx], section))
         }) {
             return Box::new(Noop);
         }

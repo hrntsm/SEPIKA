@@ -881,13 +881,12 @@ fn horizontal_primary_cft(
     section: Option<SectionId>,
 ) -> bool {
     elem.kind == squid_n_core::model::ElementKind::Beam
-        && elem
-            .nodes
-            .first()
-            .and_then(|a| elem.nodes.get(1).map(|b| (a, b)))
-            .and_then(|(a, b)| Some((model.nodes.get(a.index())?, model.nodes.get(b.index())?)))
-            .is_some_and(|(a, b)| !squid_n_core::geom::is_vertical_axis(a.coord, b.coord))
-        && cft_section(model, section)
+        && section
+            .and_then(|sid| model.sections.get(sid.index()))
+            .is_some_and(|section| {
+                section.frame_use == Some(squid_n_core::model::FrameSectionUse::Girder)
+                    && cft_section(model, Some(section.id))
+            })
 }
 
 /// 床板（境界の形）を配る。新しく作った床板の ID を返す。

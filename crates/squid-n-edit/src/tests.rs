@@ -5763,6 +5763,7 @@ fn test_copy_story_rejects_horizontal_primary_cft() {
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     assign_node_stories(&mut model);
     let cft = push_cft_section(&mut model);
+    model.sections[cft.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
     model.sections[cft.index()].floor = Some("2F".into());
     let source = model
         .elements
@@ -5819,6 +5820,7 @@ fn test_copy_story_rejects_horizontal_primary_cft() {
 fn set_element_section_rejects_horizontal_cft() {
     let mut model = seeded_model(2, 1);
     let cft = push_cft_section(&mut model);
+    model.sections[cft.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
     let before = model.elements[0].section;
     let mut stack = UndoStack::new();
     assert!(!stack.run(
@@ -5829,6 +5831,75 @@ fn set_element_section_rejects_horizontal_cft() {
         }),
     ));
     assert_eq!(model.elements[0].section, before);
+}
+
+#[test]
+fn add_member_rejects_horizontal_cft_but_allows_column_and_unassigned() {
+    let mut model = seeded_model(2, 1);
+    model.nodes.push(Node {
+        id: NodeId(2),
+        coord: [0.0, 0.0, 3000.0],
+        restraint: Dof6Mask::FREE,
+        mass: None,
+        story: None,
+        support_spring: None,
+    });
+    let cft = push_cft_section(&mut model);
+    model.sections[cft.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
+    let pipe = SectionId(model.sections.len() as u32);
+    model.sections.push(
+        squid_n_core::section_shape::SectionShape::CftPipe {
+            outer_dia: 400.0,
+            thick: 16.0,
+        }
+        .to_section(pipe, "CFTP".into()),
+    );
+    let member = |id: u32, nodes: (NodeId, NodeId), section: Option<SectionId>| ElementData {
+        id: ElemId(id),
+        kind: ElementKind::Beam,
+        nodes: smallvec![nodes.0, nodes.1],
+        section,
+        local_axis: LocalAxis {
+            ref_vector: [1.0, 0.0, 0.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    };
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(
+        &mut model,
+        Box::new(AddMember {
+            elem: member(1, (NodeId(0), NodeId(1)), Some(cft)),
+        }),
+    ));
+    assert_eq!(model.elements.len(), 1);
+
+    model.sections[cft.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+    model.sections[pipe.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+    assert!(stack.run(
+        &mut model,
+        Box::new(AddMember {
+            elem: member(1, (NodeId(0), NodeId(2)), Some(pipe)),
+        }),
+    ));
+    let steel = push_steel_section(&mut model);
+    assert!(stack.run(
+        &mut model,
+        Box::new(AddMember {
+            elem: member(2, (NodeId(0), NodeId(1)), Some(steel)),
+        }),
+    ));
+    assert!(stack.run(
+        &mut model,
+        Box::new(AddMember {
+            elem: member(3, (NodeId(0), NodeId(1)), None),
+        }),
+    ));
+    assert_eq!(model.elements[2].section, Some(steel));
+    assert_eq!(model.elements[3].section, None);
 }
 
 /// CFT 断面の間柱への断面変更は Noop で、断面は変わらない。

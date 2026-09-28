@@ -281,7 +281,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 continue;
             };
             let vertical = squid_n_core::geom::is_vertical_axis(n0.coord, n1.coord);
-            if !vertical
+            if section.frame_use == Some(squid_n_core::model::FrameSectionUse::Girder)
                 && matches!(
                     section.shape,
                     Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. })
