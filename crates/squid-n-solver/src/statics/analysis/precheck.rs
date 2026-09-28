@@ -271,7 +271,13 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             let Some(section) = model.element_section(e) else {
                 continue;
             };
-            if section.is_cft() && !section.cft_frame_use_allowed() {
+            if section.is_cft()
+                && (!section.cft_frame_use_allowed()
+                    || !matches!(
+                        e.kind,
+                        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+                    ))
+            {
                 cft_on_invalid_use.push(e.id);
             }
         }

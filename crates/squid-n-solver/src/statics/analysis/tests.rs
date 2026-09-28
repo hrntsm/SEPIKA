@@ -1870,6 +1870,22 @@ fn test_model_issues_errors_cft_horizontal_primary() {
 }
 
 #[test]
+fn test_model_issues_errors_cft_shell_and_wall_references() {
+    use super::precheck::precheck_model;
+
+    for kind in [ElementKind::Shell, ElementKind::Wall] {
+        let mut model = make_cantilever_model();
+        model.elements[0].kind = kind;
+        model.sections[0].shape = Some(cft_shape());
+        model.sections[0].frame_use = Some(FrameSectionUse::Column);
+        model.materials[0].fc = Some(24.0);
+
+        let err = precheck_model(&model).expect_err("CFT の Shell/Wall 参照はエラーにする");
+        assert!(err.to_string().contains("CFT"), "{err}");
+    }
+}
+
+#[test]
 fn test_model_issues_does_not_use_axis_angle_for_cft_column() {
     use super::precheck::model_issues;
     use squid_n_core::model::FrameSectionUse;
