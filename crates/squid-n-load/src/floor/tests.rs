@@ -1,8 +1,8 @@
 use super::*;
 use squid_n_core::geom::polygon::area_xy;
 use squid_n_core::model::{
-    DistributionMethod, FloorRegion, LoadTransfer, MemberLoadKind, RegionAnchor, Slab, SlabPlate,
-    SlabShape,
+    DistributionMethod, FloorRegion, LoadTransfer, MemberLoadKind, OneWayDir, RegionAnchor, Slab,
+    SlabPlate, SlabShape,
 };
 
 #[test]
@@ -707,9 +707,9 @@ fn test_cantilever_conservation() {
     }
 }
 
-/// 側辺に小梁がある取り付く床板は、取付き辺と小梁の辺へ最近接負担面積で分配する。
+/// 側辺に小梁があっても、取付き大梁へ全荷重を等分布で伝達する。
 #[test]
-fn test_cantilever_with_side_beam_uses_support_edges() {
+fn test_cantilever_with_side_beam_loads_attachment_only() {
     use squid_n_core::ids::{NodeId, SlabId};
     use squid_n_core::model::{AreaLoad, SecondaryMember, SecondaryMemberKind};
     let (l, depth) = (4000.0_f64, 1500.0_f64);
@@ -752,45 +752,75 @@ fn test_cantilever_with_side_beam_uses_support_edges() {
         },
     };
     let loads = distribute_slab(&model, &slab).unwrap();
-    assert_eq!(loads.len(), 2, "{loads:?}");
+    assert_eq!(loads.len(), 1, "{loads:?}");
 
     let total = total_load(&loads);
     let expected = w * l * depth;
     assert!((total - expected).abs() / expected < 1e-9, "総和 {total}");
 
-    // 小梁の辺（左辺）は (0,0) から対角 y=x より左の三角形 = d²/2。
-    let beam_area = depth * depth / 2.0;
-    let beam = loads
-        .iter()
-        .find(|bl| matches!(bl.target, LoadTarget::Secondary { .. }))
-        .expect("小梁への分配");
-    match beam.target {
-        LoadTarget::Secondary { member, .. } => {
-            assert_eq!(member, squid_n_core::ids::SecondaryMemberId(0))
-        }
-        other => panic!("Secondary ではない: {other:?}"),
-    }
-    let beam_total = beam.cmq.q_i + beam.cmq.q_j;
-    assert!(
-        (beam_total - w * beam_area).abs() / (w * beam_area) < 0.02,
-        "小梁 {beam_total}"
-    );
-
-    let edge0 = loads
-        .iter()
-        .find(|bl| matches!(bl.target, LoadTarget::Edge(0)))
-        .expect("取付き辺");
+    assert!(loads.iter().all(|bl| {
+        !matches!(
+            bl.target,
+            LoadTarget::Secondary { .. } | LoadTarget::Span { .. }
+        )
+    }));
+    let edge0 = loads.first().expect("取付き辺");
+    assert!(matches!(edge0.target, LoadTarget::Edge(0)));
     let edge0_total = edge0.cmq.q_i + edge0.cmq.q_j;
-    let rest = w * (l * depth - beam_area);
     assert!(
-        (edge0_total - rest).abs() / rest < 0.02,
+        (edge0_total - expected).abs() / expected < 1e-9,
         "取付き辺 {edge0_total}"
     );
+    assert!(matches!(edge0.shape, LoadShape::Uniform { w: line } if (line - 4.5).abs() < 1e-9));
 }
 
-/// 先端辺が実部材（梁要素）で全長覆われていれば、実部材へ分配する。
 #[test]
-fn test_cantilever_with_real_beam_edge_uses_beam() {
+fn test_cantilever_ignores_load_transfer_direction() {
+    use squid_n_core::ids::{NodeId, SlabId};
+    use squid_n_core::model::AreaLoad;
+    let (l, depth, w) = (4000.0_f64, 1500.0_f64, 0.003_f64);
+    let model = Model {
+        nodes: vec![
+            mk_node(0, 0.0, 0.0),
+            mk_node(1, l, 0.0),
+            mk_node(2, l, depth),
+            mk_node(3, 0.0, depth),
+        ],
+        ..Default::default()
+    };
+    for direction in [OneWayDir::X, OneWayDir::Y, OneWayDir::Short] {
+        let slab = Slab {
+            id: SlabId(0),
+            shape: SlabShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(0), NodeId(1)],
+                    span: [0.0, 1.0],
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: [depth, depth],
+            },
+            plate: SlabPlate {
+                method: DistributionMethod::OneWay,
+                one_way: Some(direction),
+                loads: vec![AreaLoad {
+                    kind: "DL".into(),
+                    value: w,
+                }],
+                ..Default::default()
+            },
+        };
+        let loads = distribute_slab(&model, &slab).unwrap();
+        assert_eq!(loads.len(), 1);
+        assert!(matches!(loads[0].target, LoadTarget::Edge(0)));
+        assert!(
+            matches!(loads[0].shape, LoadShape::Uniform { w: line } if (line - 4.5).abs() < 1e-9)
+        );
+    }
+}
+
+/// 先端辺に実部材（梁要素）があっても、取付き大梁へ全荷重を伝達する。
+#[test]
+fn test_cantilever_with_real_beam_edge_loads_attachment_only() {
     use squid_n_core::ids::{ElemId, NodeId, SlabId};
     use squid_n_core::model::{
         AreaLoad, ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis,
@@ -839,30 +869,22 @@ fn test_cantilever_with_real_beam_edge_uses_beam() {
         },
     };
     let loads = distribute_slab(&model, &slab).unwrap();
-    assert_eq!(loads.len(), 2, "{loads:?}");
+    assert_eq!(loads.len(), 1, "{loads:?}");
     let total = total_load(&loads);
     let expected = w * l * depth;
     assert!((total - expected).abs() / expected < 1e-9, "総和 {total}");
 
-    let beam_load = loads
-        .iter()
-        .find(|bl| matches!(bl.target, LoadTarget::Span { .. }))
-        .expect("実部材への分配");
-    match beam_load.target {
-        LoadTarget::Span { nodes, .. } => assert_eq!(nodes, [NodeId(2), NodeId(3)]),
-        other => panic!("Span ではない: {other:?}"),
-    }
-    // 先端辺（y=depth）と取付き辺（y=0）を中央で二分する。
-    let beam_total = beam_load.cmq.q_i + beam_load.cmq.q_j;
-    assert!(
-        (beam_total - w * l * depth / 2.0).abs() / (w * l * depth / 2.0) < 0.02,
-        "先端梁 {beam_total}"
-    );
+    assert!(loads.iter().all(|bl| {
+        !matches!(
+            bl.target,
+            LoadTarget::Secondary { .. } | LoadTarget::Span { .. }
+        )
+    }));
+    assert!(matches!(loads[0].target, LoadTarget::Edge(0)));
+    assert!(matches!(loads[0].shape, LoadShape::Uniform { w: line } if (line - 4.5).abs() < 1e-9));
 }
 
-/// 1 枚の取り付く床板の内部を通る実片持ち梁も、支持部材の間の床板ごとに分割された後は
-/// 支持辺として荷重を受ける。実梁が途中節点で 2 要素に分かれていても連結して全長を覆い、
-/// 両要素へ分配される。
+/// 1 枚の取り付く床板の内部を通る実片持ち梁があっても、取付き大梁だけへ分配する。
 #[test]
 fn test_cantilever_real_beam_inside_slab_after_rebuild() {
     use squid_n_core::ids::{ElemId, NodeId, SlabId};
@@ -938,32 +960,27 @@ fn test_cantilever_real_beam_inside_slab_after_rebuild() {
         let total = total_load(&loads);
         assert!((total - expected).abs() / expected < 1e-9, "総和 {total}");
 
-        let beam_total: f64 = loads
+        let attachment_total: f64 = loads
             .iter()
-            .filter(|bl| matches!(&bl.target, LoadTarget::Span { .. }))
+            .filter(|bl| matches!(&bl.target, LoadTarget::Edge(0)))
             .map(|bl| bl.cmq.q_i + bl.cmq.q_j)
             .sum();
-        let expected_beam = w * depth * depth;
         assert!(
-            (beam_total - expected_beam).abs() / expected_beam < 0.02,
-            "内部実梁への分配 {beam_total} expected {expected_beam} (spliced={spliced})"
+            (attachment_total - expected).abs() / expected < 1e-9,
+            "取付き大梁への分配 {attachment_total} expected {expected} (spliced={spliced})"
         );
-        if spliced {
-            for id in [1u32, 2] {
-                let elem_total: f64 = loads
-                    .iter()
-                    .filter(|bl| bl.elem == ElemId(id))
-                    .map(|bl| bl.cmq.q_i + bl.cmq.q_j)
-                    .sum();
-                assert!(elem_total > 0.0, "分割要素 {id} にも載る");
-            }
-        }
+        assert!(loads.iter().all(|bl| {
+            !matches!(
+                bl.target,
+                LoadTarget::Secondary { .. } | LoadTarget::Span { .. }
+            )
+        }));
     }
 }
 
-/// 同じ辺に実部材と小梁がある場合は実部材を優先し、全長を覆わない実部材は支持辺にしない。
+/// 先端辺に実部材と小梁があっても、取付き大梁だけへ分配する。
 #[test]
-fn test_cantilever_support_edge_prefers_full_real_beam() {
+fn test_cantilever_support_edges_do_not_receive_load() {
     use squid_n_core::ids::{ElemId, NodeId, SlabId};
     use squid_n_core::model::{
         AreaLoad, ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, SecondaryMember,
@@ -1015,7 +1032,7 @@ fn test_cantilever_support_edge_prefers_full_real_beam() {
         name: "J".into(),
     };
 
-    // 全長を覆う実部材（辺から 1mm ずれ）＋小梁 → 実部材へ分配。
+    // 全長を覆う実部材（辺から 1mm ずれ）＋小梁があっても取付き辺だけへ分配。
     let mut full = Model {
         nodes: vec![
             mk_node(0, 0.0, 0.0),
@@ -1030,16 +1047,10 @@ fn test_cantilever_support_edge_prefers_full_real_beam() {
     full.elements.push(mk_element_beam(0, 4, 5));
     full.unassigned_beams.push(mk_secondary_beam());
     let loads = distribute_slab(&full, &mk_slab()).unwrap();
-    let span = loads
-        .iter()
-        .find(|bl| matches!(bl.target, LoadTarget::Span { .. }))
-        .expect("実部材への分配");
-    match span.target {
-        LoadTarget::Span { nodes, .. } => assert_eq!(nodes, [NodeId(4), NodeId(5)]),
-        other => panic!("Span ではない: {other:?}"),
-    }
+    assert_eq!(loads.len(), 1);
+    assert!(matches!(loads[0].target, LoadTarget::Edge(0)));
 
-    // 辺の半分だけ覆う実部材＋全長の小梁 → 小梁へ分配。
+    // 辺の半分だけ覆う実部材＋全長の小梁があっても取付き辺だけへ分配。
     let mut partial = Model {
         nodes: vec![
             mk_node(0, 0.0, 0.0),
@@ -1054,16 +1065,14 @@ fn test_cantilever_support_edge_prefers_full_real_beam() {
     partial.elements.push(mk_element_beam(0, 4, 5));
     partial.unassigned_beams.push(mk_secondary_beam());
     let loads = distribute_slab(&partial, &mk_slab()).unwrap();
-    let span = loads
-        .iter()
-        .find(|bl| matches!(bl.target, LoadTarget::Secondary { .. }))
-        .expect("小梁への分配");
-    match span.target {
-        LoadTarget::Secondary { member, .. } => {
-            assert_eq!(member, squid_n_core::ids::SecondaryMemberId(2))
-        }
-        other => panic!("Secondary ではない: {other:?}"),
-    }
+    assert_eq!(loads.len(), 1);
+    assert!(matches!(loads[0].target, LoadTarget::Edge(0)));
+    assert!(loads.iter().all(|bl| {
+        !matches!(
+            bl.target,
+            LoadTarget::Secondary { .. } | LoadTarget::Span { .. }
+        )
+    }));
 }
 
 /// 床領域が複数の床板を持つとき、`distribute_region` は各床板を独立に分配し、
