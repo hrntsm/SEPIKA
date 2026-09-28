@@ -837,7 +837,8 @@ fn test_dynamic_mass_is_independent_of_mass_method() {
 fn test_dynamic_mass_matches_between_density_and_synced_paths() {
     let mut model = two_story_model();
     model.load_cases.clear();
-    let (nodal, member) = crate::self_weight::self_weight_case_content(&model, &LoadCfg::default());
+    let (nodal, member) =
+        crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap();
     model.load_cases.push(LoadCase {
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),
@@ -1360,7 +1361,7 @@ fn test_synced_self_weight_cft_column_mass_excludes_core_from_factor() {
     };
     let mut model = cft_column_model();
     model.load_cfg = Some(cfg.clone());
-    let (nodal, member) = crate::self_weight::self_weight_case_content(&model, &cfg);
+    let (nodal, member) = crate::self_weight::self_weight_case_content(&model, &cfg).unwrap();
     model.load_cases.clear();
     model.load_cases.push(LoadCase {
         kind: LoadCaseKind::Dead,
@@ -1586,7 +1587,8 @@ fn test_damper_device_weight_is_common_and_support_is_separated() {
 fn test_self_weight_via_case_matches_density_for_mass() {
     let mut model = two_story_model();
     model.load_cases.clear();
-    let (nodal, member) = crate::self_weight::self_weight_case_content(&model, &LoadCfg::default());
+    let (nodal, member) =
+        crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap();
     model.load_cases.push(LoadCase {
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),
@@ -1632,7 +1634,8 @@ fn test_wall_mass_consistent_between_density_and_case_paths() {
 
     let by_density = generate_stories_with_opts(&model, &[], true, MassMethod::LumpedOnly).unwrap();
 
-    let (nodal, member) = crate::self_weight::self_weight_case_content(&model, &LoadCfg::default());
+    let (nodal, member) =
+        crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap();
     model.load_cases.clear();
     model.load_cases.push(LoadCase {
         kind: LoadCaseKind::Dead,
@@ -2783,7 +2786,8 @@ fn test_generate_stories_with_opts_self_weight_via_case_matches_density() {
     // 自重をケース内容として与え、密度算入は無効化。
     // （two_story_model 組み込みの荷重ケースは重量比較の邪魔になるので除去）
     model.load_cases.clear();
-    let (nodal, member) = crate::self_weight::self_weight_case_content(&model, &LoadCfg::default());
+    let (nodal, member) =
+        crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap();
     model.load_cases.push(LoadCase {
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),
@@ -2884,7 +2888,8 @@ fn test_gravity_cases_only_does_not_replace_manual_dl_named_case() {
 fn test_synced_self_weight_mass_methods_agree() {
     let mut model = two_story_model();
     model.load_cases.clear();
-    let (nodal, member) = crate::self_weight::self_weight_case_content(&model, &LoadCfg::default());
+    let (nodal, member) =
+        crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap();
     model.load_cases.push(LoadCase {
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),
@@ -2924,7 +2929,8 @@ fn test_synced_self_weight_mass_methods_agree() {
 fn test_synced_self_weight_steel_mass_is_physical() {
     let (len, area) = (4000.0, 90000.0);
     let mut model = single_beam_model(len, 7.85e-9, area, None, RigidZone::default(), None);
-    let (nodal, member) = crate::self_weight::self_weight_case_content(&model, &LoadCfg::default());
+    let (nodal, member) =
+        crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap();
     model.load_cases.push(LoadCase {
         kind: LoadCaseKind::Dead,
         id: LoadCaseId(0),

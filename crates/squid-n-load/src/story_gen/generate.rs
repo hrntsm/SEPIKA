@@ -248,7 +248,7 @@ fn generate_stories_impl(
     let self_weight_items = if mode == SelfWeightMode::GravityCasesOnly {
         Vec::new()
     } else {
-        enumerate_self_weight(model, &load_cfg)
+        enumerate_self_weight(model, &load_cfg)?
     };
 
     #[derive(Clone, Copy, PartialEq, Eq)]

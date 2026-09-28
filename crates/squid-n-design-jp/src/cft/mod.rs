@@ -10,7 +10,7 @@
 //! （断面形状・N-M 相関の算定方法が SRC 矩形断面と異なるため）。
 
 use crate::rc::concrete_allowable_compression;
-use crate::steel::{steel_f_value_prefix, steel_fc, steel_fs, steel_ft};
+use crate::steel::{steel_fc, steel_fs, steel_ft};
 use crate::{
     effective_slenderness, CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCheck,
     DesignCtx, LoadTerm, MemberForcesAt,
@@ -212,9 +212,8 @@ fn cft_box_check(
     let long_term = ctx.term == LoadTerm::Long;
     let fc_allow = concrete_allowable_compression(fc_raw, long_term);
 
-    let f_value = steel_f_value_prefix(&mat.name, thick)
-        .or(mat.fy)
-        .unwrap_or(235.0);
+    let f_value = squid_n_core::material_grade::cft_steel_f_value(mat, thick)
+        .expect("CFT 鋼管材料は解析前に検証済み");
     let (sa, sz_z, sz_y) = cft_box_steel_props(height, width, thick);
     let shape = SectionShape::CftBox {
         height,
@@ -339,9 +338,8 @@ fn cft_pipe_check(
     let long_term = ctx.term == LoadTerm::Long;
     let fc_allow = concrete_allowable_compression(fc_raw, long_term);
 
-    let f_value = steel_f_value_prefix(&mat.name, thick)
-        .or(mat.fy)
-        .unwrap_or(235.0);
+    let f_value = squid_n_core::material_grade::cft_steel_f_value(mat, thick)
+        .expect("CFT 鋼管材料は解析前に検証済み");
     let (sa, sz) = cft_pipe_steel_props(outer_dia, thick);
     let shape = SectionShape::CftPipe { outer_dia, thick };
     let iy = shape.calc_iy();
@@ -447,6 +445,17 @@ impl DesignCheck for CftDesign {
                     .to_string(),
             };
         };
+        let thick = match &sec.shape {
+            Some(SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. }) => {
+                *thick
+            }
+            _ => 0.0,
+        };
+        if squid_n_core::material_grade::cft_steel_f_value(steel_mat, thick).is_none() {
+            return CheckOutcome::Skipped {
+                reason: "CFT検定: 鋼管材料の鋼種名・板厚または fy が不正です".to_string(),
+            };
+        }
 
         let cr = match &sec.shape {
             Some(SectionShape::CftBox {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::steel::steel_f_value_prefix;
 use squid_n_core::ids::{MaterialId, SectionId};
 use squid_n_core::model::MaterialCategory;
 use squid_n_core::section_shape::concrete_young_modulus;
@@ -202,6 +203,33 @@ fn test_cft_without_steel_material_is_unverifiable() {
     assert!(matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("鋼管材料")));
 }
 
+#[test]
+fn test_cft_steel_f_requires_valid_direct_fy_or_known_grade() {
+    let sec = cft_box_section(400.0, 300.0, 16.0);
+    let concrete = make_material(24.0, "Fc24");
+    let forces = zero_forces();
+
+    for fy in [Some(0.0), Some(f64::NAN)] {
+        let mut steel = make_material_no_fc("未知鋼種");
+        steel.fy = fy;
+        let mut ctx = ctx_column(LoadTerm::Long);
+        ctx.steel_material = Some(steel);
+        assert!(matches!(
+            CftDesign.check(&forces, &sec, &concrete, &ctx),
+            CheckOutcome::Skipped { reason } if reason.contains("鋼管材料")
+        ));
+    }
+
+    let mut unknown = make_material_no_fc("未知鋼種");
+    unknown.fy = Some(325.0);
+    let mut ctx = ctx_column(LoadTerm::Long);
+    ctx.steel_material = Some(unknown);
+    assert!(matches!(
+        CftDesign.check(&forces, &sec, &concrete, &ctx),
+        CheckOutcome::Checked(_)
+    ));
+}
+
 /// 断片が意図した component に配置されていることの確認
 /// （AxialBending の detail に "cNc=" が含まれ、Shear の detail には
 /// 含まれない。逆に Shear 固有の "sQAy=" は AxialBending に含まれない）。
@@ -320,9 +348,11 @@ fn test_cft_box_steel_fc_uses_fixed_e_steel() {
         ctx.lk_y,
         ctx.lk_z,
     );
-    let f_value = steel_f_value_prefix(&mat.name, thick)
-        .or(mat.fy)
-        .unwrap_or(235.0);
+    let f_value = squid_n_core::material_grade::cft_steel_f_value(
+        ctx.steel_material.as_ref().unwrap(),
+        thick,
+    )
+    .unwrap();
     let fc_allow = concrete_allowable_compression(24.0, true);
     let cnc = (width - 2.0 * thick) * (height - 2.0 * thick) * fc_allow;
     let s_fc = steel_fc(f_value, E_STEEL, lambda, LoadTerm::Long);

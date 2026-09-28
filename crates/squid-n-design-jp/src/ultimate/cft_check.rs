@@ -63,7 +63,7 @@ fn cft_section_props(shape: &SectionShape) -> Option<(bool, f64, f64, f64, f64, 
 ///
 /// - `axial_by_elem`: 設計軸力 [N]（**圧縮正**）。なければ軸力 0（安全側）。
 /// - 座屈長さ lk は部材の幾何長（K=1 相当）を用いる。鋼管の降伏強さ Fy は
-///   材料名の板厚区分から解決した F 値（解決できなければ 235）、ヤング係数は
+///   `Section.steel_material` の材料名・板厚または有効な fy から解決し、ヤング係数は
 ///   205000 N/mm²（鋼）を用いる。Fc は材料の `fc`（未設定はスキップ）。
 pub fn collect_cft_ultimate_checks(
     model: &Model,
@@ -75,6 +75,9 @@ pub fn collect_cft_ultimate_checks(
             continue;
         };
         let Some(mat) = model.element_material(elem) else {
+            continue;
+        };
+        let Some(steel_mat) = model.element_steel_material(elem) else {
             continue;
         };
         let Some(shape) = sec.shape.as_ref() else {
@@ -92,9 +95,9 @@ pub fn collect_cft_ultimate_checks(
             SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. } => thick,
             _ => 0.0,
         };
-        let fy = crate::material_strength::steel_f_value_prefix(&mat.name, thick)
-            .or(mat.fy)
-            .unwrap_or(235.0);
+        let Some(fy) = squid_n_core::material_grade::cft_steel_f_value(steel_mat, thick) else {
+            continue;
+        };
         let lk = model.member_length(elem);
 
         let inp = cft::CftAxialInput {
