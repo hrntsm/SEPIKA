@@ -261,6 +261,79 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         ));
     }
 
+    let no_cft_steel: Vec<ElemId> = model
+        .elements
+        .iter()
+        .filter(needs_input)
+        .filter(|e| {
+            model
+                .element_section(e)
+                .is_some_and(|section| section.is_cft() && section.steel_material.is_none())
+        })
+        .map(|e| e.id)
+        .collect();
+    if !no_cft_steel.is_empty() {
+        issues.push(ModelIssue::members(
+            "鋼管の材料が未割当の CFT 断面を使う部材があります",
+            "ID ",
+            no_cft_steel,
+            "CFT 断面に鋼管の材料が未割当です",
+            "断面タブで CFT 断面に鋼管の材料を割り当ててください。",
+        ));
+    }
+
+    {
+        let mut beam_shape_on_column: Vec<ElemId> = Vec::new();
+        let mut column_shape_on_beam: Vec<ElemId> = Vec::new();
+        for e in model
+            .elements
+            .iter()
+            .filter(|e| e.kind.requires_section_and_material())
+        {
+            let Some(section) = model.element_section(e) else {
+                continue;
+            };
+            if section.is_cft() {
+                continue;
+            }
+            let (Some(n0), Some(n1)) = (e.nodes.first(), e.nodes.get(1)) else {
+                continue;
+            };
+            let (Some(n0), Some(n1)) = (model.nodes.get(n0.index()), model.nodes.get(n1.index()))
+            else {
+                continue;
+            };
+            let vertical = squid_n_core::geom::is_vertical_axis(n0.coord, n1.coord);
+            match section.frame_use {
+                Some(squid_n_core::model::FrameSectionUse::Girder) if vertical => {
+                    beam_shape_on_column.push(e.id)
+                }
+                Some(squid_n_core::model::FrameSectionUse::Column) if !vertical => {
+                    column_shape_on_beam.push(e.id)
+                }
+                _ => {}
+            }
+        }
+        if !beam_shape_on_column.is_empty() {
+            issues.push(ModelIssue::members(
+                "梁用断面を柱部材に割り当てています",
+                "ID ",
+                beam_shape_on_column,
+                "梁用断面が柱部材に割り当てられています",
+                "断面タブで柱用断面を割り当てるか、部材の用途を確認してください。",
+            ));
+        }
+        if !column_shape_on_beam.is_empty() {
+            issues.push(ModelIssue::members(
+                "柱用断面を梁部材に割り当てています",
+                "ID ",
+                column_shape_on_beam,
+                "柱用断面が梁部材に割り当てられています",
+                "断面タブで梁用断面を割り当てるか、部材の用途を確認してください。",
+            ));
+        }
+    }
+
     {
         let mut cft_on_invalid_use: Vec<ElemId> = Vec::new();
         for e in model.elements.iter() {
