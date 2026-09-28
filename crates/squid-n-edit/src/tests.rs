@@ -5897,7 +5897,7 @@ fn test_copy_story_rejects_horizontal_primary_cft() {
 fn set_element_section_rejects_horizontal_cft() {
     let mut model = seeded_model(2, 1);
     let cft = push_cft_section(&mut model);
-    model.sections[cft.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
+    model.sections[cft.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
     let before = model.elements[0].section;
     let mut stack = UndoStack::new();
     assert!(!stack.run(

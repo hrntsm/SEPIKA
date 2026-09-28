@@ -21,7 +21,7 @@
 //! **書き込む値の側**の確認である。
 
 use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId};
-use squid_n_core::model::{ElementKind, FrameSectionUse, Model};
+use squid_n_core::model::{ElementData, ElementKind, FrameSectionUse, Model};
 
 /// 節点が実在するか（ID ＝配列添字の規約込み）。
 pub(crate) fn node_exists(model: &Model, id: NodeId) -> bool {
@@ -50,19 +50,34 @@ pub(crate) fn section_ref_ok(model: &Model, id: Option<SectionId>) -> bool {
 
 pub(crate) fn frame_element_section_ref_ok(
     model: &Model,
-    kind: ElementKind,
+    element: &ElementData,
     id: Option<SectionId>,
 ) -> bool {
     section_ref_ok(model, id)
         && id
             .and_then(|sid| model.sections.get(sid.index()))
             .is_none_or(|section| {
-                !section.is_cft()
-                    || (section.frame_use == Some(FrameSectionUse::Column)
-                        && matches!(
-                            kind,
-                            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-                        ))
+                if !section.is_cft() {
+                    return true;
+                }
+                if section.frame_use != Some(FrameSectionUse::Column) {
+                    return false;
+                }
+                if !matches!(
+                    element.kind,
+                    ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+                ) {
+                    return true;
+                }
+                let (Some(n0), Some(n1)) = (element.nodes.first(), element.nodes.get(1)) else {
+                    return false;
+                };
+                let (Some(n0), Some(n1)) =
+                    (model.nodes.get(n0.index()), model.nodes.get(n1.index()))
+                else {
+                    return false;
+                };
+                squid_n_core::geom::is_vertical_axis(n0.coord, n1.coord)
             })
 }
 

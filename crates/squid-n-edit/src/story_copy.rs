@@ -686,7 +686,7 @@ fn copy_sections(
         let current = model.elements.get(elem.index()).and_then(|e| e.section);
         if (cmd.overwrite || current.is_none())
             && model.elements.get(elem.index()).is_some_and(|target| {
-                !crate::refs::frame_element_section_ref_ok(model, target.kind, src_sec)
+                !crate::refs::frame_element_section_ref_ok(model, target, src_sec)
             })
         {
             report.sections_rejected += 1;

@@ -295,7 +295,7 @@ pub struct AddMember {
 impl EditCommand for AddMember {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         if !crate::refs::new_elem_ok(model, &self.elem)
-            || !crate::refs::frame_element_section_ref_ok(model, self.elem.kind, self.elem.section)
+            || !crate::refs::frame_element_section_ref_ok(model, &self.elem, self.elem.section)
         {
             return Box::new(Noop);
         }
@@ -366,7 +366,7 @@ pub struct AddDamper {
 impl EditCommand for AddDamper {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         if !crate::refs::new_elem_ok(model, &self.elem)
-            || !crate::refs::frame_element_section_ref_ok(model, self.elem.kind, self.elem.section)
+            || !crate::refs::frame_element_section_ref_ok(model, &self.elem, self.elem.section)
         {
             return Box::new(Noop);
         }
@@ -394,7 +394,7 @@ pub struct AddIsolator {
 impl EditCommand for AddIsolator {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         if !crate::refs::new_elem_ok(model, &self.elem)
-            || !crate::refs::frame_element_section_ref_ok(model, self.elem.kind, self.elem.section)
+            || !crate::refs::frame_element_section_ref_ok(model, &self.elem, self.elem.section)
         {
             return Box::new(Noop);
         }

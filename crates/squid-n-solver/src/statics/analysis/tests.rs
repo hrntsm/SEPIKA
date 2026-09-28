@@ -271,7 +271,7 @@ fn test_model_issues_detects_rc_shape_purpose_mismatch() {
     model.nodes[1].coord = [0.0, 0.0, 3000.0];
     model.sections[0].shape = Some(beam_shape());
     let issues = model_issues(&model);
-    assert!(!issues
+    assert!(issues
         .iter()
         .any(|i| i.message.contains("梁用断面を柱部材")));
 
@@ -282,10 +282,17 @@ fn test_model_issues_detects_rc_shape_purpose_mismatch() {
     model.sections[0].shear_rebar_material = Some(MaterialId(0));
     model.sections[0].frame_use = Some(FrameSectionUse::Column);
     let issues = model_issues(&model);
-    assert!(!issues
+    assert!(issues
         .iter()
         .any(|i| i.message.contains("柱用断面を梁部材")));
     assert!(precheck_model(&model).is_err());
+
+    let mut model = make_cantilever_model();
+    model.sections[0].frame_use = Some(FrameSectionUse::Column);
+    let issues = model_issues(&model);
+    assert!(issues
+        .iter()
+        .any(|i| i.message.contains("柱用断面を梁部材")));
 }
 
 /// 実配筋型（`RcColumnRect`）の幾何が不整合な断面を使う部材は、
@@ -416,7 +423,7 @@ fn test_model_issues_detects_new_src_column_purpose_mismatch() {
     model.sections[0] = sec;
 
     let issues = model_issues(&model);
-    assert!(!issues
+    assert!(issues
         .iter()
         .any(|i| i.message.contains("柱用断面を梁部材")));
     assert!(precheck_model(&model).is_err());
@@ -1863,6 +1870,7 @@ fn test_model_issues_errors_cft_horizontal_primary() {
 
     let mut model = make_cantilever_model();
     model.sections[0].shape = Some(cft_shape());
+    model.sections[0].frame_use = Some(FrameSectionUse::Column);
     model.materials[0].fc = Some(24.0);
 
     let err = precheck_model(&model).expect_err("水平 CFT 梁はエラーにする");

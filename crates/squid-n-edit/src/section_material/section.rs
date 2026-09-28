@@ -399,11 +399,7 @@ impl EditCommand for DuplicateSectionForMember {
             return Box::new(Noop);
         }
         let orig = &model.sections[sec_idx];
-        if !crate::refs::frame_element_section_ref_ok(
-            model,
-            model.elements[elem_idx].kind,
-            Some(sid),
-        ) {
+        if !crate::refs::frame_element_section_ref_ok(model, &model.elements[elem_idx], Some(sid)) {
             return Box::new(Noop);
         }
         let new_id = SectionId(model.sections.len() as u32);

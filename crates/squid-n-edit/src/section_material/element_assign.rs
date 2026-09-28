@@ -17,8 +17,7 @@ impl EditCommand for SetElementSection {
         if idx >= model.elements.len() || model.elements[idx].id != self.elem {
             return Box::new(Noop);
         }
-        if !crate::refs::frame_element_section_ref_ok(model, model.elements[idx].kind, self.section)
-        {
+        if !crate::refs::frame_element_section_ref_ok(model, &model.elements[idx], self.section) {
             return Box::new(Noop);
         }
         let old = model.elements[idx].section;
