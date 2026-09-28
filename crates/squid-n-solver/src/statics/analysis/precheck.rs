@@ -274,10 +274,8 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                         SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
                     )
                 });
-                (is_cft
-                    && section.frame_use
-                        != Some(squid_n_core::model::FrameSectionUse::Column))
-                .then_some(e.id)
+                (is_cft && section.frame_use != Some(squid_n_core::model::FrameSectionUse::Column))
+                    .then_some(e.id)
             })
             .collect();
         if !invalid_cft_use.is_empty() {
