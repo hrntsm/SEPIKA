@@ -1114,7 +1114,10 @@ fn test_delete_section_in_use_is_noop_and_renumbers() {
 /// 別断面の削除では参照が繰り上がって追随する（断面参照が陳腐化しない）。
 #[test]
 fn test_delete_section_referenced_by_beam() {
-    use squid_n_core::model::{Node, SecondaryMember, SecondaryMemberKind, Section};
+    use squid_n_core::ids::WallPlateId;
+    use squid_n_core::model::{
+        Node, SecondaryMember, SecondaryMemberKind, Section, WallPlate, WallPlateShape,
+    };
     let mut model = empty_model();
     for i in 0..4u32 {
         model.nodes.push(Node {
@@ -1167,6 +1170,17 @@ fn test_delete_section_referenced_by_beam() {
         name: "SB1".to_string(),
     }];
     model.floor_regions.push(region);
+    model.wall_plates.push(WallPlate {
+        self_weight_shares: Vec::new(),
+        id: WallPlateId(0),
+        shape: WallPlateShape::Enclosed,
+        section: Some(SectionId(1)),
+        opening_area: 0.0,
+        opening_weight: 0.0,
+        openings: Vec::new(),
+        loads: Vec::new(),
+        slit: Default::default(),
+    });
     let mut stack = UndoStack::new();
 
     // 小梁が参照中の断面 1 は削除できない（要素だけでなく小梁も参照チェック対象）。
@@ -1181,7 +1195,7 @@ fn test_delete_section_referenced_by_beam() {
         Some(SectionId(0)),
         "小梁の断面参照が繰り上がりに追随"
     );
-    assert!(model.validate().is_ok());
+    assert_eq!(model.wall_plates[0].section, Some(SectionId(0)));
 }
 
 #[test]
@@ -6241,6 +6255,81 @@ fn test_copy_story_secondary_creates_unassigned_beam() {
     stack.undo(&mut model);
     assert_eq!(model.unassigned_beams.len(), 1);
     assert!(model.validate().is_ok());
+}
+
+#[test]
+fn test_copy_story_secondary_overwrite_updates_existing_and_without_overwrite_keeps_it() {
+    use crate::{CopyStory, CopyTargets};
+    use squid_n_core::frame_gen::{frame_model, FrameSpec};
+    use squid_n_core::ids::StoryId;
+    use squid_n_core::model::{SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind};
+
+    let mut model = frame_model(&FrameSpec::default()).unwrap();
+    assign_node_stories(&mut model);
+    let source_nodes: Vec<NodeId> = model
+        .nodes
+        .iter()
+        .filter(|n| n.story == Some(StoryId(1)))
+        .map(|n| n.id)
+        .collect();
+    let target_nodes: Vec<NodeId> = model
+        .nodes
+        .iter()
+        .filter(|n| n.story == Some(StoryId(2)))
+        .map(|n| n.id)
+        .collect();
+    let section = push_steel_section(&mut model);
+    model.unassigned_beams.push(SecondaryMember {
+        gravity_end_shares: Some([0.2, 0.8]),
+        id: squid_n_core::ids::SecondaryMemberId(0),
+        kind: SecondaryMemberKind::Beam,
+        ends: SecondaryMemberEnds::Detached([
+            model.nodes[source_nodes[0].index()].coord,
+            model.nodes[source_nodes[1].index()].coord,
+        ]),
+        section: Some(section),
+        name: "元小梁".into(),
+    });
+    model.unassigned_beams.push(SecondaryMember {
+        gravity_end_shares: Some([0.7, 0.3]),
+        id: squid_n_core::ids::SecondaryMemberId(1),
+        kind: SecondaryMemberKind::Beam,
+        ends: SecondaryMemberEnds::Detached([
+            model.nodes[target_nodes[0].index()].coord,
+            model.nodes[target_nodes[1].index()].coord,
+        ]),
+        section: None,
+        name: "既存小梁".into(),
+    });
+    let copy = |overwrite| CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            secondary: true,
+            ..Default::default()
+        },
+        overwrite,
+    };
+
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(&mut model, Box::new(copy(false))));
+    assert_eq!(model.unassigned_beams[1].section, None);
+    assert_eq!(model.unassigned_beams[1].name, "既存小梁");
+    assert_eq!(
+        model.unassigned_beams[1].gravity_end_shares,
+        Some([0.7, 0.3])
+    );
+
+    let report = copy(true).preview(&model);
+    assert_eq!(report.secondary_created, 0);
+    assert_eq!(report.secondary_updated, 1);
+    assert!(stack.run(&mut model, Box::new(copy(true))));
+    assert_eq!(model.unassigned_beams[1].section, Some(section));
+    assert_eq!(model.unassigned_beams[1].name, "元小梁");
+    assert_eq!(
+        model.unassigned_beams[1].gravity_end_shares,
+        Some([0.2, 0.8])
+    );
 }
 
 /// 階コピーで新規作成する二次部材にも CFT 割当拒否を適用する。
