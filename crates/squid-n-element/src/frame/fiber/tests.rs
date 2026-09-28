@@ -90,6 +90,32 @@ fn beamとfiberは同じ断面なら整合質量が一致する() {
 }
 
 #[test]
+fn cftの鋼管fyはsteel_materialの板厚区分を使う() {
+    let shape = SectionShape::CftBox {
+        height: 400.0,
+        width: 400.0,
+        thick: 16.0,
+    };
+    let steel = Material {
+        strength_factor: None,
+        concrete_class: Default::default(),
+        id: MaterialId(0),
+        name: "SN490B".into(),
+        category: MaterialCategory::Steel,
+        young: 205000.0,
+        poisson: 0.3,
+        density: 7.85e-9,
+        shear: None,
+        fy: Some(235.0),
+        fc: None,
+    };
+    assert_eq!(
+        resolve_steel_fiber_fy(Some(&shape), Some(&steel), Some(235.0)),
+        Some(325.0)
+    );
+}
+
+#[test]
 fn 有効断面性能を使うbeamとfiberのphiと整合質量が一致する() {
     use squid_n_core::section_shape::SectionShape;
 

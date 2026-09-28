@@ -55,6 +55,7 @@ fn ctx_column(term: LoadTerm) -> DesignCtx {
     DesignCtx {
         term,
         kind: crate::MemberKind::Column,
+        steel_material: Some(make_material_no_fc("SN400B")),
         ..Default::default()
     }
 }
@@ -161,6 +162,44 @@ fn test_cft_box_n0_ma_equals_sm0() {
         (ma_z - s_mo).abs() / s_mo < 1e-6,
         "ma_z={ma_z}, s_mo={s_mo}"
     );
+}
+
+#[test]
+fn test_cft_uses_steel_material_grade_for_f_value() {
+    let sec = cft_box_section(400.0, 300.0, 16.0);
+    let concrete = make_material(24.0, "Fc24");
+    let mut ctx = ctx_column(LoadTerm::Long);
+    ctx.steel_material = Some(make_material_no_fc("SN490B"));
+    let result = CftDesign
+        .check(
+            &MemberForcesAt {
+                mz: 1.0,
+                ..zero_forces()
+            },
+            &sec,
+            &concrete,
+            &ctx,
+        )
+        .unwrap_checked();
+    let (_, sz, _) = cft_box_steel_props(400.0, 300.0, 16.0);
+    let expected = sz
+        * steel_ft(
+            steel_f_value_prefix("SN490B", 16.0).unwrap(),
+            LoadTerm::Long,
+        );
+    assert!((1.0 / result.ratio() - expected).abs() / expected < 1e-9);
+}
+
+#[test]
+fn test_cft_without_steel_material_is_unverifiable() {
+    let sec = cft_box_section(400.0, 300.0, 9.0);
+    let outcome = CftDesign.check(
+        &zero_forces(),
+        &sec,
+        &make_material(24.0, "Fc24"),
+        &DesignCtx::default(),
+    );
+    assert!(matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("鋼管材料")));
 }
 
 /// 断片が意図した component に配置されていることの確認
@@ -394,6 +433,7 @@ fn test_cft_box_seismic_qd2_scales_shear_ratio_by_n() {
     let ctx_qd = DesignCtx {
         term: LoadTerm::Short,
         kind: crate::MemberKind::Column,
+        steel_material: Some(make_material_no_fc("SN400B")),
         seismic_qd: Some(SeismicQd {
             long_at: vec![(0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])], // QL=0
             n_factor,
@@ -444,6 +484,7 @@ fn test_cft_box_seismic_qd1_governs_when_smaller() {
     let ctx_qd = DesignCtx {
         term: LoadTerm::Short,
         kind: crate::MemberKind::Column,
+        steel_material: Some(make_material_no_fc("SN400B")),
         length,
         seismic_qd: Some(SeismicQd {
             long_at: vec![(0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])], // QL=0

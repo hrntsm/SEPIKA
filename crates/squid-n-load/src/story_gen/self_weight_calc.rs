@@ -259,6 +259,16 @@ pub(crate) fn enumerate_self_weight(model: &Model, load_cfg: &LoadCfg) -> Vec<Se
                     sec.shape.as_ref(),
                     Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. })
                 );
+                let steel_mat = if is_cft {
+                    Some(model.element_steel_material(elem).unwrap_or_else(|| {
+                        panic!(
+                            "CFT要素 {} の鋼管材料（Section.steel_material）が未設定です",
+                            elem.id.0
+                        )
+                    }))
+                } else {
+                    None
+                };
                 let eff_len = if is_concrete && !is_vertical {
                     let [fi, fj] = faces[elem_idx];
                     (len - fi - fj).max(0.0)
@@ -331,6 +341,7 @@ pub(crate) fn enumerate_self_weight(model: &Model, load_cfg: &LoadCfg) -> Vec<Se
                     .as_ref()
                     .and_then(|s| s.cft_core_props())
                     .map_or(0.0, |c| c.area);
+                let steel_area = self_weight_area;
                 let mut extras_per_length = 0.0;
                 if let Some(&(_, lw)) = load_cfg
                     .extra_line_weight
@@ -347,22 +358,25 @@ pub(crate) fn enumerate_self_weight(model: &Model, load_cfg: &LoadCfg) -> Vec<Se
                     let phi = finish_perimeter(sec.width, sec.depth, is_vertical);
                     extras_per_length += wf * phi;
                 }
-                let design_per_length =
-                    mat.design_unit_weight_n_per_mm3() * self_weight_area * factor
-                        + mat.cft_core_design_unit_weight_n_per_mm3() * core_area
-                        + extras_per_length;
+                let design_per_length = steel_mat.map_or(mat.design_unit_weight_n_per_mm3(), |m| {
+                    m.design_unit_weight_n_per_mm3()
+                }) * if is_cft { steel_area } else { self_weight_area }
+                    * factor
+                    + mat.cft_core_design_unit_weight_n_per_mm3() * core_area
+                    + extras_per_length;
                 let load = design_per_length * eff_len;
                 let matrix_mass_per_length = analysis_mass_per_length(model, elem);
                 let matrix_mass_equiv = matrix_mass_per_length * len * GRAVITY_MM_S2;
                 let (mass_equiv, physical_per_length) = if is_cft {
                     let core_mass_per_length = mat.cft_core_mass_density() * core_area;
                     let steel_mass_per_length =
-                        (matrix_mass_per_length - core_mass_per_length).max(0.0);
+                        steel_mat.expect("CFT鋼管材料").density * steel_area;
                     let mass = (steel_mass_per_length * factor + core_mass_per_length)
                         * len
                         * GRAVITY_MM_S2
                         + extras_per_length * eff_len;
-                    let physical = (mat.density * self_weight_area * factor + core_mass_per_length)
+                    let physical = (steel_mat.expect("CFT鋼管材料").density * steel_area * factor
+                        + core_mass_per_length)
                         * GRAVITY_MM_S2
                         + extras_per_length;
                     (mass, physical)

@@ -1831,6 +1831,21 @@ fn test_import_cft_separates_concrete_and_steel_materials() {
     );
 }
 
+#[test]
+fn test_import_cft_without_strength_main_keeps_section_unresolved() {
+    let xml = r#"<?xml version="1.0"?>
+<ST_BRIDGE version="2.0.0"><StbModel>
+  <StbSections>
+    <StbSecColumn_CFT id="0" name="CFT" strength_concrete="Fc24">
+      <StbSecSteelFigureColumn_CFT><StbSecSteelColumn_CFT_Same shape="BOX-400"/></StbSecSteelFigureColumn_CFT>
+    </StbSecColumn_CFT>
+    <StbSecSteel><StbSecRoll-BOX name="BOX-400" type="ELSE" A="400" B="400" t="12"/></StbSecSteel>
+  </StbSections>
+</StbModel></ST_BRIDGE>"#;
+    let model = import_stbridge(xml).expect("鋼管鋼種欠落でも取込を継続する");
+    assert!(model.sections[0].steel_material.is_none());
+}
+
 /// 標準モード: CFT 円形柱が往復する。
 #[test]
 fn test_standard_roundtrip_cft_pipe() {

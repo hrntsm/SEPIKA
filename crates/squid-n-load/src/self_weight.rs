@@ -503,25 +503,41 @@ mod tests {
     fn cft_column_model(shape: SectionShape) -> Model {
         let mut section = shape.to_section(SectionId(0), "CFT".into());
         section.material = Some(MaterialId(0));
+        section.steel_material = Some(MaterialId(1));
         Model {
             nodes: vec![
                 simple_node(0, [0.0, 0.0, 0.0]),
                 simple_node(1, [0.0, 0.0, 3000.0]),
             ],
             sections: vec![section],
-            materials: vec![Material {
-                strength_factor: None,
-                concrete_class: Default::default(),
-                id: MaterialId(0),
-                name: "CFT".into(),
-                category: MaterialCategory::Steel,
-                young: 205000.0,
-                poisson: 0.3,
-                density: 7.85e-9,
-                shear: None,
-                fc: Some(36.0),
-                fy: None,
-            }],
+            materials: vec![
+                Material {
+                    strength_factor: None,
+                    concrete_class: Default::default(),
+                    id: MaterialId(0),
+                    name: "CFT".into(),
+                    category: MaterialCategory::Concrete,
+                    young: squid_n_core::section_shape::concrete_young_modulus(36.0),
+                    poisson: 0.3,
+                    density: 7.85e-9,
+                    shear: None,
+                    fc: Some(36.0),
+                    fy: None,
+                },
+                Material {
+                    strength_factor: None,
+                    concrete_class: Default::default(),
+                    id: MaterialId(1),
+                    name: "SN490B".into(),
+                    category: MaterialCategory::Steel,
+                    young: 205000.0,
+                    poisson: 0.3,
+                    density: 7.85e-9,
+                    shear: None,
+                    fc: None,
+                    fy: Some(325.0),
+                },
+            ],
             elements: vec![beam_elem(0, 0, 1)],
             ..Default::default()
         }
@@ -686,6 +702,7 @@ mod tests {
         }
         .to_section(SectionId(0), "CFT".into());
         column.material = Some(MaterialId(0));
+        column.steel_material = Some(MaterialId(1));
         let mut sections = vec![column];
         let beam_nodes = [NodeId(2), NodeId(3)];
         for (k, &depth) in depths.iter().enumerate() {
@@ -728,19 +745,34 @@ mod tests {
                 simple_node(3, [0.0, 4000.0, 0.0]),
             ],
             sections,
-            materials: vec![Material {
-                strength_factor: None,
-                concrete_class: Default::default(),
-                id: MaterialId(0),
-                name: "CFT".into(),
-                category: MaterialCategory::Steel,
-                young: 205000.0,
-                poisson: 0.3,
-                density: 7.85e-9,
-                shear: None,
-                fc: Some(36.0),
-                fy: None,
-            }],
+            materials: vec![
+                Material {
+                    strength_factor: None,
+                    concrete_class: Default::default(),
+                    id: MaterialId(0),
+                    name: "CFT".into(),
+                    category: MaterialCategory::Concrete,
+                    young: squid_n_core::section_shape::concrete_young_modulus(36.0),
+                    poisson: 0.3,
+                    density: 7.85e-9,
+                    shear: None,
+                    fc: Some(36.0),
+                    fy: None,
+                },
+                Material {
+                    strength_factor: None,
+                    concrete_class: Default::default(),
+                    id: MaterialId(1),
+                    name: "SN490B".into(),
+                    category: MaterialCategory::Steel,
+                    young: 205000.0,
+                    poisson: 0.3,
+                    density: 7.85e-9,
+                    shear: None,
+                    fc: None,
+                    fy: Some(325.0),
+                },
+            ],
             elements,
             ..Default::default()
         }

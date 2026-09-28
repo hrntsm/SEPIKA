@@ -123,9 +123,9 @@ pub(crate) fn resolve_fiber_yield(
                 squid_n_core::material_grade::steel_f_value_prefix(&m.name, thick).or(m.fy)
             })
         }
-        Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }) => {
+        Some(SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. }) => {
             model.element_steel_material(data).and_then(|m| {
-                squid_n_core::material_grade::steel_f_value_prefix(&m.name, 40.0).or(m.fy)
+                squid_n_core::material_grade::steel_f_value_prefix(&m.name, *thick).or(m.fy)
             })
         }
         _ => main,
@@ -254,6 +254,11 @@ pub(crate) fn resolve_steel_fiber_fy(
             .and_then(|m| {
                 squid_n_core::material_grade::steel_f_value_prefix(&m.name, *steel_flange_thick)
                     .or(m.fy)
+            })
+            .or(mat_fy),
+        Some(SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. }) => steel_mat
+            .and_then(|m| {
+                squid_n_core::material_grade::steel_f_value_prefix(&m.name, *thick).or(m.fy)
             })
             .or(mat_fy),
         _ => mat_fy,
