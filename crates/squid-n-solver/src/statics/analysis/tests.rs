@@ -232,7 +232,9 @@ fn test_model_issues_does_not_infer_frame_use_from_angle() {
     vertical_girder.nodes[1].coord = [0.0, 0.0, 3000.0];
     let issues = model_issues(&vertical_girder);
     assert!(
-        !issues.iter().any(|i| i.message.contains("梁用断面を柱部材")),
+        !issues
+            .iter()
+            .any(|i| i.message.contains("梁用断面を柱部材")),
         "{:?}",
         issues.iter().map(|i| &i.message).collect::<Vec<_>>()
     );
@@ -241,7 +243,9 @@ fn test_model_issues_does_not_infer_frame_use_from_angle() {
     horizontal_column.sections[0].frame_use = Some(FrameSectionUse::Column);
     let issues = model_issues(&horizontal_column);
     assert!(
-        !issues.iter().any(|i| i.message.contains("柱用断面を梁部材")),
+        !issues
+            .iter()
+            .any(|i| i.message.contains("柱用断面を梁部材")),
         "{:?}",
         issues.iter().map(|i| &i.message).collect::<Vec<_>>()
     );
