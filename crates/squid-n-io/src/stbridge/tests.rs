@@ -2409,6 +2409,54 @@ fn test_import_wall_with_node_order_and_thickness() {
     assert!(report.warnings.is_empty(), "{:?}", report.warnings);
 }
 
+/// 壁版がない ST-Bridge でも、壁版割当領域と床板割当を生成する。
+#[test]
+fn test_import_without_walls_rebuilds_wall_assignment_regions() {
+    let xml = r#"<?xml version="1.0"?>
+<ST_BRIDGE version="2.0.0"><StbModel>
+  <StbNodes>
+    <StbNode id="0" X="0" Y="0" Z="0"/>
+    <StbNode id="1" X="4000" Y="0" Z="0"/>
+    <StbNode id="2" X="4000" Y="3000" Z="0"/>
+    <StbNode id="3" X="0" Y="3000" Z="0"/>
+    <StbNode id="4" X="0" Y="0" Z="3000"/>
+    <StbNode id="5" X="4000" Y="0" Z="3000"/>
+    <StbNode id="6" X="4000" Y="3000" Z="3000"/>
+    <StbNode id="7" X="0" Y="3000" Z="3000"/>
+  </StbNodes>
+  <StbMembers>
+    <StbColumn id="0" id_node_bottom="0" id_node_top="4"/>
+    <StbColumn id="1" id_node_bottom="1" id_node_top="5"/>
+    <StbColumn id="2" id_node_bottom="2" id_node_top="6"/>
+    <StbColumn id="3" id_node_bottom="3" id_node_top="7"/>
+    <StbGirder id="4" id_node_start="0" id_node_end="1"/>
+    <StbGirder id="5" id_node_start="1" id_node_end="2"/>
+    <StbGirder id="6" id_node_start="2" id_node_end="3"/>
+    <StbGirder id="7" id_node_start="3" id_node_end="0"/>
+    <StbGirder id="8" id_node_start="4" id_node_end="5"/>
+    <StbGirder id="9" id_node_start="5" id_node_end="6"/>
+    <StbGirder id="10" id_node_start="6" id_node_end="7"/>
+    <StbGirder id="11" id_node_start="7" id_node_end="4"/>
+    <StbSlab id="0" name="S1" kind_structure="RC">
+      <StbNodeIdOrder>4 5 6 7</StbNodeIdOrder>
+    </StbSlab>
+  </StbMembers>
+</StbModel></ST_BRIDGE>"#;
+    let (model, report) = import_stbridge_with_report(xml).expect("壁版なしモデルを取り込む");
+
+    assert!(model.validate().is_ok(), "{:?}", model.validate());
+    assert!(!model.wall_assignment_regions.regions.is_empty());
+    assert_eq!(model.floor_assignment_regions.regions.len(), 2);
+    assert_eq!(model.slabs.len(), 1);
+    assert_eq!(model.floor_regions.len(), 2);
+    assert!(model
+        .floor_assignment_regions
+        .regions
+        .iter()
+        .any(|region| region.assignment.plate().is_some()));
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+}
+
 /// 頂部梁の上に立つパラペット（StbWall）は、どの壁領域にも収まらないが
 /// 下辺が頂部梁に全長覆われているため、取り込み後に取り付く壁版へ自動変換される
 /// （床側 D20 に相当。`wall_region_rebuild::rebuild_wall_regions` 参照）。
