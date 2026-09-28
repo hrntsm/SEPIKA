@@ -131,9 +131,8 @@ use fem::{fem_trapezoid, fem_triangle};
 /// 1. **取り付く床板**（[`SlabShape::Attached`]）→ [`distribute_attached`]。
 ///    - 取付き先が点（出隅）: 全荷重をその節点（柱）へ集中する。荷重伝達方向にも
 ///      片持ち梁の取付きにも依らない（出隅の片持ちスラブの床荷重分配）。
-///    - 取付き先が線 ＋ [`LoadTransfer::Anchor`]: 全長を覆う支持部材（大梁・片持ち梁・
-///      小梁）がある境界辺を支持辺とし、最近接支持辺の負担面積で分配する
-///      （[`distribute_cantilever`]）。支持辺が取付き線だけなら取付き辺へ等分布する。
+///    - 取付き先が線 ＋ [`LoadTransfer::Anchor`]: 取付き大梁へ `w × 出し幅` の等分布を
+///      載せる（[`distribute_cantilever`]）。側辺・先端辺の支持部材へは分配しない。
 ///    - 取付き先が線 ＋ [`LoadTransfer::Columns`]: 取付き線の区間中点（無次元位置
 ///      `t_mid = (t_i+t_j)/2`）に集中したとみなし、単純梁の反力公式で両端の柱へ按分する
 ///      （全長 `[0, 1]` なら `t_mid = 0.5` で半分ずつ）。
@@ -203,7 +202,7 @@ pub fn distribute_slab_w_checked(
 
     match &slab.shape {
         SlabShape::Attached { anchor, .. } => {
-            distribute_attached(model, &coords, w, *anchor, &mut loads);
+            distribute_attached(&coords, w, *anchor, &mut loads);
             return Ok(loads);
         }
         SlabShape::Enclosed => {}
@@ -220,9 +219,8 @@ pub fn distribute_slab_w_checked(
 /// 取り付く床板（片持ちスラブ・バルコニー・出隅）の分配。
 ///
 /// - 取付き先が点（出隅）: 全荷重をその節点（柱）へ集中する。
-/// - 取付き先が線 ＋ [`LoadTransfer::Anchor`]: 全長を覆う支持部材がある辺（取付き線を
-///   含む）を支持辺として最近接支持辺の負担面積で分配する。支持部材の辺がなければ
-///   取付き辺へ等分布する（[`distribute_cantilever`]）。
+/// - 取付き先が線 ＋ [`LoadTransfer::Anchor`]: 取付き大梁へ `w × 出し幅` の等分布を
+///   載せる。側辺・先端辺の支持部材へは分配しない（[`distribute_cantilever`]）。
 /// - 取付き先が線 ＋ [`LoadTransfer::Columns`]: 取付き線の区間中点（無次元位置
 ///   `t_mid = (t_i+t_j)/2`）に集中したとみなし、単純梁の集中荷重反力公式
 ///   （`R0 = W(1-t_mid)`、`R1 = W・t_mid`）で両端の柱へ按分する。全長
@@ -231,7 +229,6 @@ pub fn distribute_slab_w_checked(
 ///   厳密である。** 張り出し量が異なる場合、真の面積重心は区間中点から張り出しの
 ///   大きい側へずれるが、その差は見ていない。
 fn distribute_attached(
-    model: &Model,
     coords: &[[f64; 3]],
     w: f64,
     anchor: RegionAnchor,
@@ -244,7 +241,7 @@ fn distribute_attached(
             span,
             transfer,
         } => match transfer {
-            LoadTransfer::Anchor => distribute_cantilever(model, coords, w, loads),
+            LoadTransfer::Anchor => distribute_cantilever(coords, w, loads),
             LoadTransfer::Columns => {
                 // 部分区間（span != [0, 1]）では、総荷重の作用点は取付き線上の区間中点
                 // （無次元位置 t_mid）にある。単純梁の集中荷重の反力公式

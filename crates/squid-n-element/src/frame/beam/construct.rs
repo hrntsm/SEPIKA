@@ -47,6 +47,7 @@ impl BeamElement {
         let axis = geom.local_frame(data.local_axis.ref_vector);
         let sec = get_section(model, data.section);
         let mat = get_material(model, sec_material(model, data));
+        let steel_mat = model.element_steel_material(data);
 
         let eval_sections = eval_sections_of(data, model, len);
 
@@ -63,7 +64,7 @@ impl BeamElement {
 
         use squid_n_core::section_shape::SectionShape;
         if let Some(shape) = sec.shape.as_ref() {
-            super::stiffness_factors::validate_composite_material(shape, &mat)?;
+            super::stiffness_factors::validate_composite_material(shape, &mat, steel_mat)?;
         }
         let (e, g) = match sec.shape.as_ref() {
             Some(
@@ -73,12 +74,17 @@ impl BeamElement {
                 | SectionShape::SrcBeamRect { .. }
                 | SectionShape::SrcColumnRect { .. },
             ) => (mat.young, mat.shear_modulus()),
+            Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }) => {
+                let steel =
+                    steel_mat.ok_or_else(|| "CFT 断面の鋼管材料が未設定です".to_string())?;
+                (steel.young, steel.shear_modulus())
+            }
             _ => (mat.young, mat.shear_modulus()),
         };
         let composite = sec
             .shape
             .as_ref()
-            .and_then(|shape| composite_props_with(shape, &mat));
+            .and_then(|shape| composite_props_with(shape, &mat, steel_mat));
 
         let a_stiff = match (&composite, &sec.shape) {
             (Some(p), _) => p.area_ax,

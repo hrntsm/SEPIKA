@@ -22,7 +22,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0014](0014-schema-compatibility.md) | accepted | スキーマ互換は初回リリースまで維持しない |
 | [0015](0015-cantilever-secondary-members.md) | accepted | 片持ち小梁は支持条件で表し、基端モーメントは伝達しない |
 | [0016](0016-attached-slabs-between-members.md) | accepted | 取り付く床板は支持部材の間ごとに表す |
-| [0017](0017-attached-slab-support-edges.md) | accepted | 取り付く床板の荷重は、全長を覆う支持部材の辺へ最近接負担面積で分配する |
+| [0017](0017-attached-slab-support-edges.md) | superseded by ADR-0037 | 取り付く床板の荷重は、全長を覆う支持部材の辺へ最近接負担面積で分配する |
 | [0018](0018-explicit-gravity-supports.md) | accepted | 壁自重の支持辺と鉛直二次部材の端部負担率を明示する |
 | [0019](0019-material-wall-section-and-directional-strength.md) | accepted | 壁の材料別実断面と正負別せん断耐力を採用する |
 | [0020](0020-assign-plates-to-member-bounded-regions.md) | accepted | 囲まれた床板・壁版は支持部材で分割された領域へ割り当てる |
@@ -41,6 +41,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0033](0033-steel-design-weight-vs-physical-mass.md) | accepted | 鋼材の設計重量（78.5 kN/m³）と物理質量（7.85 t/m³）を分離する |
 | [0034](0034-rc-section-purpose-types-and-real-rebar.md) | accepted | RC 断面を用途別に型分離し、実配筋モデルへ移行する |
 | [0035](0035-lumped-mass-physical-mass.md) | accepted | 質点系の層質量を物理質量相当へ統一する |
+| [0037](0037-cantilever-slab-load-to-attachment-girder.md) | accepted | 線アンカーの取り付く床板は取付き大梁だけへ等分布伝達する |
 
 ## 規約
 

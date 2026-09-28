@@ -2,8 +2,7 @@
 //! CFT 柱（コンクリート充填鋼管）に準用する（相互拘束効果による
 //! コンクリート強度割増しは考慮しない）。
 //!
-//! コンクリート強度未設定の断面は検定をスキップし、内蔵鉄骨の鋼種を
-//! 解決できない場合は SS400 相当（F=235）で検定する。
+//! コンクリート強度未設定または鋼管材料未設定の断面は検定不能とする。
 //!
 //! # モジュール構成
 //! CFT はトップレベルの単一モジュール（`crate::cft`、本ファイル）とし、
@@ -442,15 +441,21 @@ impl DesignCheck for CftDesign {
                 reason: "CFT検定: Fc未設定（Material.fc が None/0 です）".to_string(),
             };
         }
+        let Some(steel_mat) = ctx.steel_material.as_ref() else {
+            return CheckOutcome::Skipped {
+                reason: "CFT検定: 鋼管材料未設定（Section.steel_material が None です）"
+                    .to_string(),
+            };
+        };
 
         let cr = match &sec.shape {
             Some(SectionShape::CftBox {
                 height,
                 width,
                 thick,
-            }) => cft_box_check(forces, mat, ctx, *height, *width, *thick, fc_raw),
+            }) => cft_box_check(forces, steel_mat, ctx, *height, *width, *thick, fc_raw),
             Some(SectionShape::CftPipe { outer_dia, thick }) => {
-                cft_pipe_check(forces, mat, ctx, *outer_dia, *thick, fc_raw)
+                cft_pipe_check(forces, steel_mat, ctx, *outer_dia, *thick, fc_raw)
             }
             _ => {
                 return CheckOutcome::Skipped {

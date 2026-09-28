@@ -90,6 +90,32 @@ fn beamとfiberは同じ断面なら整合質量が一致する() {
 }
 
 #[test]
+fn cftの鋼管fyはsteel_materialの板厚区分を使う() {
+    let shape = SectionShape::CftBox {
+        height: 400.0,
+        width: 400.0,
+        thick: 16.0,
+    };
+    let steel = Material {
+        strength_factor: None,
+        concrete_class: Default::default(),
+        id: MaterialId(0),
+        name: "SN490B".into(),
+        category: MaterialCategory::Steel,
+        young: 205000.0,
+        poisson: 0.3,
+        density: 7.85e-9,
+        shear: None,
+        fy: Some(235.0),
+        fc: None,
+    };
+    assert_eq!(
+        resolve_steel_fiber_fy(Some(&shape), Some(&steel), Some(235.0)),
+        Some(325.0)
+    );
+}
+
+#[test]
 fn 有効断面性能を使うbeamとfiberのphiと整合質量が一致する() {
     use squid_n_core::section_shape::SectionShape;
 
@@ -99,6 +125,18 @@ fn 有効断面性能を使うbeamとfiberのphiと整合質量が一致する()
         width: 180.0,
         thick: 12.0,
     });
+    model.sections[0].material = Some(MaterialId(1));
+    model.sections[0].steel_material = Some(MaterialId(0));
+    model.materials.push(Material {
+        category: MaterialCategory::Concrete,
+        density: 2.4e-9,
+        young: 25000.0,
+        poisson: 0.2,
+        fc: Some(24.0),
+        ..model.materials[0].clone()
+    });
+    model.materials[1].id = MaterialId(1);
+    model.materials[0].density = 7.85e-9;
     model.materials[0].fc = Some(24.0);
     let beam = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
     let fiber = FiberBeam::new(
@@ -165,9 +203,9 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
                 width: 400.0,
                 thick: 16.0,
             },
-            MaterialCategory::Steel,
+            MaterialCategory::Concrete,
             false,
-            false,
+            true,
         ),
     ] {
         let mut model = build_test_model(Some(78846.15));
@@ -394,6 +432,18 @@ fn cftファイバーは鋼管と充填コンクリートの初期接線を分�
         width: 300.0,
         thick: 12.0,
     });
+    model.sections[0].material = Some(MaterialId(1));
+    model.sections[0].steel_material = Some(MaterialId(0));
+    model.materials.push(Material {
+        category: MaterialCategory::Concrete,
+        density: 2.4e-9,
+        young: 25000.0,
+        poisson: 0.2,
+        fc: Some(36.0),
+        ..model.materials[0].clone()
+    });
+    model.materials[1].id = MaterialId(1);
+    model.materials[0].density = 7.85e-9;
     model.materials[0].category = MaterialCategory::Steel;
     model.materials[0].young = 190000.0;
     model.materials[0].fc = Some(36.0);
