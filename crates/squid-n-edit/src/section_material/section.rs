@@ -134,6 +134,17 @@ impl EditCommand for SetSectionName {
 /// 断面形状を新規追加（UI-3 の新規断面作成）。
 ///
 /// 符号＋階が既存の断面と衝突する追加は [`Noop`] として拒否する。
+fn shape_use_is_valid(
+    shape: &squid_n_section::shape::SectionShape,
+    frame_use: Option<squid_n_core::model::FrameSectionUse>,
+) -> bool {
+    !matches!(
+        shape,
+        squid_n_section::shape::SectionShape::CftBox { .. }
+            | squid_n_section::shape::SectionShape::CftPipe { .. }
+    ) || frame_use == Some(squid_n_core::model::FrameSectionUse::Column)
+}
+
 pub struct AddSectionShape {
     pub shape: squid_n_section::shape::SectionShape,
     pub new_id: SectionId,
@@ -149,7 +160,10 @@ impl EditCommand for AddSectionShape {
             squid_n_section::shape::SectionShape::RcWall { .. }
                 | squid_n_section::shape::SectionShape::RcSlab { .. }
         );
-        if (!non_frame && self.frame_use.is_none()) || (non_frame && self.frame_use.is_some()) {
+        if (!non_frame && self.frame_use.is_none())
+            || (non_frame && self.frame_use.is_some())
+            || !shape_use_is_valid(&self.shape, self.frame_use)
+        {
             return Box::new(Noop);
         }
         if squid_n_core::model::section_key_taken(
@@ -193,6 +207,7 @@ impl EditCommand for EditSectionShape {
             return Box::new(Noop);
         }
         if (non_frame && self.frame_use.is_some())
+            || !shape_use_is_valid(&self.new_shape, self.frame_use)
             || !section_use_is_valid(model, self.section, self.frame_use)
         {
             return Box::new(Noop);
