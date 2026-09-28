@@ -1781,6 +1781,19 @@ fn test_import_box_without_r_attr_is_corner_r_zero() {
 #[test]
 fn test_standard_roundtrip_cft_box() {
     let mut m = frame_nodes();
+    m.materials.push(Material {
+        strength_factor: None,
+        concrete_class: Default::default(),
+        id: MaterialId(1),
+        name: "Fc24".into(),
+        category: MaterialCategory::Concrete,
+        young: 25000.0,
+        poisson: 0.2,
+        density: 2.4e-9,
+        shear: None,
+        fc: Some(24.0),
+        fy: None,
+    });
     let shape = SectionShape::CftBox {
         height: 400.0,
         width: 400.0,
@@ -1788,17 +1801,37 @@ fn test_standard_roundtrip_cft_box() {
     };
     let mut sec = shape.to_section(SectionId(0), "CFT1".into());
     sec.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
-    push_section(&mut m, sec);
+    sec.material = Some(MaterialId(1));
+    sec.steel_material = Some(MaterialId(0));
+    m.sections.push(sec);
     m.elements.push(member(0, true, 0)); // 柱
 
     let xml = export_stbridge(&m).unwrap();
     assert!(xml.contains("<StbSecColumn_CFT "), "CFT 柱要素: {xml}");
     assert!(xml.contains("<StbSecRoll-BOX "), "充填鋼管の形鋼ライブラリ");
+    assert!(
+        xml.contains("strength_concrete=\"Fc24\""),
+        "充填コンクリート材料: {xml}"
+    );
+    assert!(
+        xml.contains(
+            "StbSecSteelColumn_CFT_Same shape=\"BOX-400x400x16\" strength_main=\"SN400B\""
+        ),
+        "鋼管材料: {xml}"
+    );
     let back = import_stbridge(&xml).expect("import");
     assert!(back.validate().is_ok(), "{:?}", back.validate());
     assert_eq!(
         back.sections[0].shape, m.sections[0].shape,
         "CFT 角形が往復"
+    );
+    assert_eq!(
+        back.materials[back.sections[0].material.unwrap().index()].name,
+        "Fc24"
+    );
+    assert_eq!(
+        back.materials[back.sections[0].steel_material.unwrap().index()].name,
+        "SN400B"
     );
 }
 
