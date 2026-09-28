@@ -5753,6 +5753,67 @@ fn set_floor_region_beam_section_rejects_cft() {
     assert_eq!(model.floor_regions[0].secondary_beams[0].section, None);
 }
 
+/// 階コピーでも水平な主架構 Beam へ CFT 断面を割り当てない。
+#[test]
+fn test_copy_story_rejects_horizontal_primary_cft() {
+    use crate::{CopyStory, CopyTargets};
+    use squid_n_core::frame_gen::{frame_model, FrameSpec};
+    use squid_n_core::ids::StoryId;
+
+    let mut model = frame_model(&FrameSpec::default()).unwrap();
+    assign_node_stories(&mut model);
+    let cft = push_cft_section(&mut model);
+    model.sections[cft.index()].floor = Some("2F".into());
+    let source = model
+        .elements
+        .iter()
+        .find(|e| {
+            model.member_story(e) == Some(StoryId(1))
+                && e.kind == ElementKind::Beam
+                && !squid_n_core::geom::is_vertical_axis(
+                    model.nodes[e.nodes[0].index()].coord,
+                    model.nodes[e.nodes[1].index()].coord,
+                )
+        })
+        .expect("2F の水平 Beam がある")
+        .id;
+    model.elements[source.index()].section = Some(cft);
+    let cmd = CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            sections: true,
+            ..Default::default()
+        },
+        overwrite: true,
+    };
+    let report = cmd.preview(&model);
+    assert_eq!(report.sections_rejected, 1);
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(&mut model, Box::new(cmd)));
+    assert!(model
+        .elements
+        .iter()
+        .find(|e| {
+            model.member_story(e) == Some(StoryId(2))
+                && e.kind == ElementKind::Beam
+                && !squid_n_core::geom::is_vertical_axis(
+                    model.nodes[e.nodes[0].index()].coord,
+                    model.nodes[e.nodes[1].index()].coord,
+                )
+                && e.section.is_some_and(|id| {
+                    matches!(
+                        model.sections[id.index()].shape,
+                        Some(
+                            squid_n_core::section_shape::SectionShape::CftBox { .. }
+                                | squid_n_core::section_shape::SectionShape::CftPipe { .. }
+                        )
+                    )
+                })
+        })
+        .is_none());
+}
+
 /// 水平な主架構の Beam には CFT 断面を割り当てない。
 #[test]
 fn set_element_section_rejects_horizontal_cft() {
@@ -6046,6 +6107,69 @@ fn test_copy_story_secondary_creates_unassigned_beam() {
     stack.undo(&mut model);
     assert_eq!(model.unassigned_beams.len(), 1);
     assert!(model.validate().is_ok());
+}
+
+/// 階コピーで新規作成する二次部材にも CFT 割当拒否を適用する。
+#[test]
+fn test_copy_story_rejects_secondary_cft() {
+    use crate::{CopyStory, CopyTargets};
+    use squid_n_core::frame_gen::{frame_model, FrameSpec};
+    use squid_n_core::ids::StoryId;
+    use squid_n_core::model::{SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind};
+
+    let mut model = frame_model(&FrameSpec::default()).unwrap();
+    assign_node_stories(&mut model);
+    let n2f: Vec<NodeId> = model
+        .nodes
+        .iter()
+        .filter(|n| n.story == Some(StoryId(1)))
+        .map(|n| n.id)
+        .collect();
+    let cft = push_cft_section(&mut model);
+    model.unassigned_beams.push(SecondaryMember {
+        gravity_end_shares: None,
+        id: squid_n_core::ids::SecondaryMemberId(0),
+        kind: SecondaryMemberKind::Beam,
+        ends: SecondaryMemberEnds::Detached([
+            model.nodes[n2f[0].index()].coord,
+            model.nodes[n2f[1].index()].coord,
+        ]),
+        section: Some(cft),
+        name: "CFT小梁".into(),
+    });
+    let cmd = CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            secondary: true,
+            sections: true,
+            ..Default::default()
+        },
+        overwrite: true,
+    };
+    let report = cmd.preview(&model);
+    assert_eq!(report.sections_rejected, 1);
+    assert_eq!(report.secondary_created, 1);
+    let mut stack = UndoStack::new();
+    assert!(stack.run(&mut model, Box::new(cmd)));
+    assert_eq!(
+        model
+            .unassigned_beams
+            .iter()
+            .filter(|sm| sm.name == "CFT小梁")
+            .count(),
+        2,
+        "3F の小梁が作られる"
+    );
+    assert_eq!(
+        model
+            .unassigned_beams
+            .iter()
+            .filter(|sm| sm.name == "CFT小梁")
+            .filter(|sm| sm.section.is_none())
+            .count(),
+        1
+    );
 }
 
 /// 大梁の材軸中間へアンカーした（端に節点を持たない）二次部材は複製できない。

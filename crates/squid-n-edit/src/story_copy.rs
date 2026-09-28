@@ -46,6 +46,7 @@ use squid_n_core::ids::{ElemId, NodeId, SectionId, SlabId, StoryId};
 use squid_n_core::model::{
     SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind, Section, Slab, SlabPlate, SlabUsage,
 };
+use squid_n_core::section_shape::SectionShape;
 use std::collections::{HashMap, HashSet};
 
 /// 同じ平面位置とみなす座標差 [mm]。
@@ -109,6 +110,8 @@ pub struct CopyStoryReport {
     pub secondary_deleted: usize,
     /// 複製先に相手が見つからず飛ばした数（部材・床・二次部材の合計）。
     pub skipped: usize,
+    /// CFT のため断面を割り当てなかった数。
+    pub sections_rejected: usize,
 }
 
 impl CopyStoryReport {
@@ -188,6 +191,12 @@ impl CopyStoryReport {
             s.push_str(&format!(
                 "。相手が見つからず {} 件を飛ばしました",
                 self.skipped
+            ));
+        }
+        if self.sections_rejected > 0 {
+            s.push_str(&format!(
+                "。制約により断面を割り当てなかった {} 件",
+                self.sections_rejected
             ));
         }
         s
@@ -673,6 +682,15 @@ fn copy_sections(
             continue;
         };
         let current = model.elements.get(elem.index()).and_then(|e| e.section);
+        if (cmd.overwrite || current.is_none())
+            && model
+                .elements
+                .get(elem.index())
+                .is_some_and(|e| horizontal_primary_cft(model, e, src_sec))
+        {
+            report.sections_rejected += 1;
+            continue;
+        }
         let Some(next) = resolve_section(
             model,
             cmd,
@@ -743,6 +761,10 @@ fn copy_sections(
             continue;
         };
         let current = secondary_at(model, slot).and_then(|sm| sm.section);
+        if (cmd.overwrite || current.is_none()) && cft_section(model, src_sec) {
+            report.sections_rejected += 1;
+            continue;
+        }
         let Some(next) = resolve_section(
             model,
             cmd,
@@ -840,6 +862,32 @@ fn section_for_story(
     model.sections.push(created);
     report.sections_created += 1;
     id
+}
+
+fn cft_section(model: &Model, id: Option<SectionId>) -> bool {
+    id.and_then(|sid| model.sections.get(sid.index()))
+        .and_then(|s| s.shape.as_ref())
+        .is_some_and(|shape| {
+            matches!(
+                shape,
+                SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
+            )
+        })
+}
+
+fn horizontal_primary_cft(
+    model: &Model,
+    elem: &squid_n_core::model::ElementData,
+    section: Option<SectionId>,
+) -> bool {
+    elem.kind == squid_n_core::model::ElementKind::Beam
+        && elem
+            .nodes
+            .first()
+            .and_then(|a| elem.nodes.get(1).map(|b| (a, b)))
+            .and_then(|(a, b)| Some((model.nodes.get(a.index())?, model.nodes.get(b.index())?)))
+            .is_some_and(|(a, b)| !squid_n_core::geom::is_vertical_axis(a.coord, b.coord))
+        && cft_section(model, section)
 }
 
 /// 床板（境界の形）を配る。新しく作った床板の ID を返す。
@@ -1135,14 +1183,22 @@ fn copy_secondary(
             report.skipped += 1;
             continue;
         };
-        let section = sm.section.map(|s| match mapped.get(&s) {
-            Some(&d) => d,
-            None => {
-                let d = section_for_story(model, s, dst_story_name, report);
-                mapped.insert(s, d);
-                d
-            }
-        });
+        let rejected_section = cft_section(model, sm.section);
+        if rejected_section && !cmd.targets.sections {
+            report.sections_rejected += 1;
+        }
+        let section = (!rejected_section)
+            .then(|| {
+                sm.section.map(|s| match mapped.get(&s) {
+                    Some(&d) => d,
+                    None => {
+                        let d = section_for_story(model, s, dst_story_name, report);
+                        mapped.insert(s, d);
+                        d
+                    }
+                })
+            })
+            .flatten();
         let (Some(ca), Some(cb)) = (
             model.nodes.get(a.index()).map(|n| n.coord),
             model.nodes.get(b.index()).map(|n| n.coord),
