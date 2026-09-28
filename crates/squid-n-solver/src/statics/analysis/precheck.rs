@@ -262,50 +262,31 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     }
 
     {
-        let mut beam_shape_on_column: Vec<ElemId> = Vec::new();
-        let mut column_shape_on_beam: Vec<ElemId> = Vec::new();
-        for e in model
+        let invalid_cft_use: Vec<ElemId> = model
             .elements
             .iter()
             .filter(|e| e.kind.requires_section_and_material())
-        {
-            let Some(section) = model.element_section(e) else {
-                continue;
-            };
-            let (Some(n0), Some(n1)) = (e.nodes.first(), e.nodes.get(1)) else {
-                continue;
-            };
-            let (Some(n0), Some(n1)) = (model.nodes.get(n0.index()), model.nodes.get(n1.index()))
-            else {
-                continue;
-            };
-            let vertical = squid_n_core::geom::is_vertical_axis(n0.coord, n1.coord);
-            match section.frame_use {
-                Some(squid_n_core::model::FrameSectionUse::Girder) if vertical => {
-                    beam_shape_on_column.push(e.id)
-                }
-                Some(squid_n_core::model::FrameSectionUse::Column) if !vertical => {
-                    column_shape_on_beam.push(e.id)
-                }
-                _ => {}
-            }
-        }
-        if !beam_shape_on_column.is_empty() {
+            .filter_map(|e| {
+                let section = model.element_section(e)?;
+                let is_cft = section.shape.as_ref().is_some_and(|shape| {
+                    matches!(
+                        shape,
+                        SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
+                    )
+                });
+                (is_cft
+                    && section.frame_use
+                        != Some(squid_n_core::model::FrameSectionUse::Column))
+                .then_some(e.id)
+            })
+            .collect();
+        if !invalid_cft_use.is_empty() {
             issues.push(ModelIssue::members(
-                "梁用断面を柱部材に割り当てています",
+                "CFT 断面の用途が Column ではない部材があります",
                 "ID ",
-                beam_shape_on_column,
-                "梁用断面が柱部材に割り当てられています",
-                "断面タブで柱用断面を割り当てるか、部材の用途を確認してください。",
-            ));
-        }
-        if !column_shape_on_beam.is_empty() {
-            issues.push(ModelIssue::members(
-                "柱用断面を梁部材に割り当てています",
-                "ID ",
-                column_shape_on_beam,
-                "柱用断面が梁部材に割り当てられています",
-                "断面タブで梁用断面を割り当てるか、部材の用途を確認してください。",
+                invalid_cft_use,
+                "CFT 断面は柱専用です",
+                "CFT 断面の主架構用途を Column にしてください。                 部材の角度から柱・梁用途を推定しません。",
             ));
         }
     }
