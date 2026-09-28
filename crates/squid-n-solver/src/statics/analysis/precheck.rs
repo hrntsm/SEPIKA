@@ -580,6 +580,8 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                     .chain(model.posts())
                     .filter_map(|member| member.section),
             )
+            .chain(model.slabs.iter().filter_map(|slab| slab.section()))
+            .chain(model.wall_plates.iter().filter_map(|plate| plate.section))
             .collect();
         let invalid_cft_sections: Vec<String> = model
             .sections

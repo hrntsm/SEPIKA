@@ -213,6 +213,18 @@ impl EditCommand for EditSectionShape {
                 .beams()
                 .chain(model.posts())
                 .any(|member| member.section == Some(self.section)))
+            || (matches!(
+                &self.new_shape,
+                squid_n_section::shape::SectionShape::CftBox { .. }
+                    | squid_n_section::shape::SectionShape::CftPipe { .. }
+            ) && (model
+                .slabs
+                .iter()
+                .any(|slab| slab.section() == Some(self.section))
+                || model
+                    .wall_plates
+                    .iter()
+                    .any(|plate| plate.section == Some(self.section))))
         {
             return Box::new(Noop);
         }
@@ -375,7 +387,11 @@ impl EditCommand for DuplicateSectionForMember {
             return Box::new(Noop);
         }
         let orig = &model.sections[sec_idx];
-        if orig.is_cft() && orig.frame_use != Some(squid_n_core::model::FrameSectionUse::Column) {
+        if !crate::refs::frame_element_section_ref_ok(
+            model,
+            model.elements[elem_idx].kind,
+            Some(sid),
+        ) {
             return Box::new(Noop);
         }
         let new_id = SectionId(model.sections.len() as u32);

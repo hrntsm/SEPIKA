@@ -294,19 +294,9 @@ pub struct AddMember {
 
 impl EditCommand for AddMember {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        if !crate::refs::new_elem_ok(model, &self.elem) {
-            return Box::new(Noop);
-        }
-        if self.elem.section.is_some_and(|section| {
-            model.sections.get(section.index()).is_some_and(|section| {
-                section.is_cft()
-                    && section.frame_use != Some(squid_n_core::model::FrameSectionUse::Column)
-                    || matches!(
-                        self.elem.kind,
-                        squid_n_core::model::ElementKind::Brace { .. }
-                    ) && section.is_cft()
-            })
-        }) {
+        if !crate::refs::new_elem_ok(model, &self.elem)
+            || !crate::refs::frame_element_section_ref_ok(model, self.elem.kind, self.elem.section)
+        {
             return Box::new(Noop);
         }
         let snapshot = AssignmentTopology::capture(model);
@@ -375,7 +365,9 @@ pub struct AddDamper {
 
 impl EditCommand for AddDamper {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        if !crate::refs::new_elem_ok(model, &self.elem) {
+        if !crate::refs::new_elem_ok(model, &self.elem)
+            || !crate::refs::frame_element_section_ref_ok(model, self.elem.kind, self.elem.section)
+        {
             return Box::new(Noop);
         }
         let id = self.elem.id;
@@ -401,7 +393,9 @@ pub struct AddIsolator {
 
 impl EditCommand for AddIsolator {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        if !crate::refs::new_elem_ok(model, &self.elem) {
+        if !crate::refs::new_elem_ok(model, &self.elem)
+            || !crate::refs::frame_element_section_ref_ok(model, self.elem.kind, self.elem.section)
+        {
             return Box::new(Noop);
         }
         let id = self.elem.id;

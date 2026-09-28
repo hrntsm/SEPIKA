@@ -44,8 +44,7 @@
 use super::*;
 use squid_n_core::ids::{ElemId, NodeId, SectionId, SlabId, StoryId};
 use squid_n_core::model::{
-    FrameSectionUse, SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind, Section, Slab,
-    SlabPlate, SlabUsage,
+    SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind, Section, Slab, SlabPlate, SlabUsage,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -684,15 +683,7 @@ fn copy_sections(
         let current = model.elements.get(elem.index()).and_then(|e| e.section);
         if (cmd.overwrite || current.is_none())
             && model.elements.get(elem.index()).is_some_and(|target| {
-                src_sec
-                    .and_then(|id| model.sections.get(id.index()))
-                    .is_some_and(|section| {
-                        (section.is_cft() && section.frame_use != Some(FrameSectionUse::Column))
-                            || (matches!(
-                                target.kind,
-                                squid_n_core::model::ElementKind::Brace { .. }
-                            ) && section.is_cft())
-                    })
+                !crate::refs::frame_element_section_ref_ok(model, target.kind, src_sec)
             })
         {
             report.sections_rejected += 1;
@@ -952,6 +943,10 @@ fn copy_slabs(
             report.skipped += 1;
             continue;
         };
+        if !crate::refs::plate_section_ref_ok(model, sl.section()) {
+            report.sections_rejected += 1;
+            continue;
+        }
         let section = sl.section().map(|s| match mapped.get(&s) {
             Some(&d) => d,
             None => {

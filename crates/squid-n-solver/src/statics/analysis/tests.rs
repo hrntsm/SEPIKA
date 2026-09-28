@@ -1894,8 +1894,28 @@ fn test_model_issues_errors_on_unreferenced_invalid_cft_section() {
     let mut section = cft_shape().to_section(SectionId(1), "未参照CFT".into());
     section.frame_use = Some(FrameSectionUse::Girder);
     model.sections.push(section);
+    let mut unreferenced = cft_shape().to_section(SectionId(2), "未参照CFT".into());
+    unreferenced.frame_use = Some(FrameSectionUse::Girder);
+    model.sections.push(unreferenced);
 
-    assert!(model_issues(&model)
+    model.slabs.push(squid_n_core::model::Slab {
+        id: squid_n_core::ids::SlabId(0),
+        shape: squid_n_core::model::SlabShape::Enclosed,
+        plate: squid_n_core::model::SlabPlate {
+            section: Some(SectionId(1)),
+            ..Default::default()
+        },
+    });
+
+    assert!(!model_issues(&model)
+        .iter()
+        .any(|issue| issue.message.contains("未参照") && issue.message.contains("CFT")));
+
+    let mut unreferenced_model = make_cantilever_model();
+    let mut unreferenced = cft_shape().to_section(SectionId(1), "未参照CFT".into());
+    unreferenced.frame_use = Some(FrameSectionUse::Girder);
+    unreferenced_model.sections.push(unreferenced);
+    assert!(model_issues(&unreferenced_model)
         .iter()
         .any(|issue| issue.message.contains("未参照") && issue.message.contains("CFT")));
 }

@@ -389,7 +389,7 @@ impl EditCommand for AddAttachedSlab {
         if !self.extent[0].is_finite() || !self.extent[1].is_finite() {
             return Box::new(Noop);
         }
-        if !crate::refs::section_ref_ok(model, self.plate.section) {
+        if !crate::refs::plate_section_ref_ok(model, self.plate.section) {
             return Box::new(Noop);
         }
         let id = SlabId(model.slabs.len() as u32);
@@ -647,7 +647,7 @@ impl EditCommand for AddAttachedWallPlate {
         if !wall_extent_ok(&self.anchor, self.extent) {
             return Box::new(Noop);
         }
-        if !crate::refs::section_ref_ok(model, self.section) {
+        if !crate::refs::plate_section_ref_ok(model, self.section) {
             return Box::new(Noop);
         }
         let id = WallPlateId(model.wall_plates.len() as u32);
@@ -690,7 +690,7 @@ impl EditCommand for AssignWallPlateToRegion {
         if region.assignment.plate().is_some() {
             return Box::new(Noop);
         }
-        if !crate::refs::section_ref_ok(model, self.section) {
+        if !crate::refs::plate_section_ref_ok(model, self.section) {
             return Box::new(Noop);
         }
         if model.wall_assignment_region_nodes(self.region).is_none() {
@@ -958,7 +958,7 @@ impl EditCommand for SetWallPlateSection {
         if idx >= model.wall_plates.len() || model.wall_plates[idx].id != self.id {
             return Box::new(Noop);
         }
-        if !crate::refs::section_ref_ok(model, self.section) {
+        if !crate::refs::plate_section_ref_ok(model, self.section) {
             return Box::new(Noop);
         }
         let old = model.wall_plates[idx].section;
@@ -1072,7 +1072,7 @@ impl EditCommand for SetSlabSection {
         if idx >= model.slabs.len() || model.slabs[idx].id != self.id {
             return Box::new(Noop);
         }
-        if !crate::refs::section_ref_ok(model, self.section) {
+        if !crate::refs::plate_section_ref_ok(model, self.section) {
             return Box::new(Noop);
         }
         let old = model.slabs[idx].plate.section;

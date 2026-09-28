@@ -17,19 +17,8 @@ impl EditCommand for SetElementSection {
         if idx >= model.elements.len() || model.elements[idx].id != self.elem {
             return Box::new(Noop);
         }
-        if !crate::refs::section_ref_ok(model, self.section) {
-            return Box::new(Noop);
-        }
-        if self.section.is_some_and(|section| {
-            model.sections.get(section.index()).is_some_and(|section| {
-                section.is_cft()
-                    && section.frame_use != Some(squid_n_core::model::FrameSectionUse::Column)
-                    || matches!(
-                        model.elements[idx].kind,
-                        squid_n_core::model::ElementKind::Brace { .. }
-                    ) && section.is_cft()
-            })
-        }) {
+        if !crate::refs::frame_element_section_ref_ok(model, model.elements[idx].kind, self.section)
+        {
             return Box::new(Noop);
         }
         let old = model.elements[idx].section;

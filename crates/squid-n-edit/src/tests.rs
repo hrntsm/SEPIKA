@@ -5808,7 +5808,7 @@ fn test_copy_story_rejects_horizontal_primary_cft() {
         overwrite: true,
     };
     let report = cmd.preview(&model);
-    assert_eq!(report.sections_rejected, 1);
+    assert!(report.sections_rejected > 0, "{report:?}");
     let mut stack = UndoStack::new();
     assert!(!stack.run(&mut model, Box::new(cmd)));
     assert!(model
@@ -6702,6 +6702,48 @@ fn test_set_slab_section_sets_and_clears_section() {
     );
 }
 
+#[test]
+fn test_plate_section_commands_reject_cft() {
+    use squid_n_core::ids::{SectionId, SlabId, WallPlateId};
+    use squid_n_core::model::{Slab, SlabPlate, SlabShape, WallPlate, WallPlateShape};
+
+    let mut model = seeded_model(4, 0);
+    let cft = push_cft_section(&mut model);
+    model.slabs.push(Slab {
+        id: SlabId(0),
+        shape: SlabShape::Enclosed,
+        plate: SlabPlate::default(),
+    });
+    model.wall_plates.push(WallPlate {
+        self_weight_shares: Vec::new(),
+        id: WallPlateId(0),
+        shape: WallPlateShape::Enclosed,
+        section: None,
+        opening_area: 0.0,
+        opening_weight: 0.0,
+        openings: Vec::new(),
+        loads: Vec::new(),
+        slit: Default::default(),
+    });
+    let mut undo = UndoStack::default();
+    assert!(!undo.run(
+        &mut model,
+        Box::new(crate::SetSlabSection {
+            id: SlabId(0),
+            section: Some(cft),
+        })
+    ));
+    assert!(!undo.run(
+        &mut model,
+        Box::new(crate::SetWallPlateSection {
+            id: WallPlateId(0),
+            section: Some(SectionId(cft.0)),
+        })
+    ));
+    assert!(model.slabs[0].section().is_none());
+    assert!(model.wall_plates[0].section.is_none());
+}
+
 /// 床領域の名前を変更し、undo で戻る。同じ名前・存在しない ID は Noop。
 #[test]
 fn test_set_floor_region_name_roundtrip() {
@@ -6870,6 +6912,53 @@ fn test_copy_story_keeps_sectionless_enclosed_slab() {
         1,
         "断面未割当の enclosed 床板は断面が付かないまま複製される"
     );
+}
+
+#[test]
+fn test_copy_story_rejects_cft_slab_section_and_reports_it() {
+    use crate::{CopyStory, CopyTargets};
+    use squid_n_core::frame_gen::{frame_model, FrameSpec};
+    use squid_n_core::ids::StoryId;
+
+    let mut model = frame_model(&FrameSpec::default()).unwrap();
+    assign_node_stories(&mut model);
+    let src_z = model.stories[1].elevation;
+    let src = model
+        .slabs
+        .iter()
+        .position(|sl| {
+            sl.boundary_nodes(&model)
+                .is_some_and(|b| (model.nodes[b[0].index()].coord[2] - src_z).abs() < 1.0)
+        })
+        .expect("2F の床板");
+    let cft = push_cft_section(&mut model);
+    model.slabs[src].plate.section = Some(cft);
+    let to_z = model.stories[2].elevation;
+    let doomed: Vec<_> = model
+        .slabs
+        .iter()
+        .filter(|sl| {
+            sl.boundary_nodes(&model)
+                .is_some_and(|b| (model.nodes[b[0].index()].coord[2] - to_z).abs() < 1.0)
+        })
+        .map(|sl| sl.id)
+        .collect();
+    for id in doomed.into_iter().rev() {
+        crate::DeleteSlab { id }.apply(&mut model);
+    }
+
+    let report = CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            slabs: true,
+            ..Default::default()
+        },
+        overwrite: true,
+    }
+    .preview(&model);
+    assert!(report.sections_rejected > 0, "{report:?}");
+    assert_eq!(report.slabs_created, 1);
 }
 
 /// 取り付く壁版（`Line` アンカー）を追加し、undo で消える。

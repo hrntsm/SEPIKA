@@ -8,11 +8,7 @@ use squid_n_core::model::{
 use std::collections::HashSet;
 
 fn secondary_member_ok(model: &Model, sm: &SecondaryMember) -> bool {
-    crate::refs::section_ref_ok(model, sm.section)
-        && !sm
-            .section
-            .and_then(|id| model.sections.get(id.index()))
-            .is_some_and(|section| section.is_cft())
+    crate::refs::plate_section_ref_ok(model, sm.section)
         && model
             .secondary_member_axis(sm)
             .is_some_and(|(_, _, len)| len > 1e-9)
@@ -299,7 +295,7 @@ impl EditCommand for SetFloorRegionBeamSection {
         if self.index >= model.floor_regions[ri].secondary_beams.len() {
             return Box::new(Noop);
         }
-        if !crate::refs::section_ref_ok(model, self.section) || cft_section(model, self.section) {
+        if !crate::refs::plate_section_ref_ok(model, self.section) {
             return Box::new(Noop);
         }
         let old = model.floor_regions[ri].secondary_beams[self.index].section;
@@ -431,7 +427,7 @@ impl EditCommand for SetWallRegionPostSection {
         if self.index >= model.wall_regions[ri].posts.len() {
             return Box::new(Noop);
         }
-        if !crate::refs::section_ref_ok(model, self.section) || cft_section(model, self.section) {
+        if !crate::refs::plate_section_ref_ok(model, self.section) {
             return Box::new(Noop);
         }
         let old = model.wall_regions[ri].posts[self.index].section;
@@ -668,8 +664,7 @@ pub struct PlaceSecondaryMember {
 impl EditCommand for PlaceSecondaryMember {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         if !self.parent.accepts(self.kind)
-            || !crate::refs::section_ref_ok(model, self.section)
-            || cft_section(model, self.section)
+            || !crate::refs::plate_section_ref_ok(model, self.section)
         {
             return Box::new(Noop);
         }
