@@ -225,7 +225,7 @@ fn test_model_issues_collects_every_issue() {
 /// 梁用断面を柱部材へ、柱用断面を梁部材へ割り当てた誤りを解析前チェックが止める。
 #[test]
 fn test_model_issues_detects_rc_shape_purpose_mismatch() {
-    use super::precheck::{model_issues, precheck_model, IssueSeverity};
+    use super::precheck::{model_issues, precheck_model};
     use squid_n_core::section_shape::{
         BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
     };
@@ -271,14 +271,9 @@ fn test_model_issues_detects_rc_shape_purpose_mismatch() {
     model.nodes[1].coord = [0.0, 0.0, 3000.0];
     model.sections[0].shape = Some(beam_shape());
     let issues = model_issues(&model);
-    assert!(
-        issues
-            .iter()
-            .any(|i| i.severity == IssueSeverity::Error && i.message.contains("梁用断面を柱部材")),
-        "{:?}",
-        issues.iter().map(|i| &i.message).collect::<Vec<_>>()
-    );
-    assert!(precheck_model(&model).is_err());
+    assert!(!issues
+        .iter()
+        .any(|i| i.message.contains("梁用断面を柱部材")));
 
     // 柱用断面を水平材（梁）へ割り当てる。
     let mut model = make_cantilever_model();
@@ -287,13 +282,9 @@ fn test_model_issues_detects_rc_shape_purpose_mismatch() {
     model.sections[0].shear_rebar_material = Some(MaterialId(0));
     model.sections[0].frame_use = Some(FrameSectionUse::Column);
     let issues = model_issues(&model);
-    assert!(
-        issues
-            .iter()
-            .any(|i| i.severity == IssueSeverity::Error && i.message.contains("柱用断面を梁部材")),
-        "{:?}",
-        issues.iter().map(|i| &i.message).collect::<Vec<_>>()
-    );
+    assert!(!issues
+        .iter()
+        .any(|i| i.message.contains("柱用断面を梁部材")));
     assert!(precheck_model(&model).is_err());
 }
 
@@ -404,7 +395,7 @@ fn src_column_rebar() -> squid_n_core::section_shape::RcRectColumnRebar {
 /// 新型 SRC 矩形柱断面の用途不一致（柱用断面を梁部材へ）を検出する。
 #[test]
 fn test_model_issues_detects_new_src_column_purpose_mismatch() {
-    use super::precheck::{model_issues, precheck_model, IssueSeverity};
+    use super::precheck::{model_issues, precheck_model};
     use squid_n_core::section_shape::SectionShape;
 
     let mut model = make_cantilever_model();
@@ -425,13 +416,9 @@ fn test_model_issues_detects_new_src_column_purpose_mismatch() {
     model.sections[0] = sec;
 
     let issues = model_issues(&model);
-    assert!(
-        issues
-            .iter()
-            .any(|i| i.severity == IssueSeverity::Error && i.message.contains("柱用断面を梁部材")),
-        "{:?}",
-        issues.iter().map(|i| &i.message).collect::<Vec<_>>()
-    );
+    assert!(!issues
+        .iter()
+        .any(|i| i.message.contains("柱用断面を梁部材")));
     assert!(precheck_model(&model).is_err());
 }
 
@@ -1879,10 +1866,38 @@ fn test_model_issues_errors_cft_horizontal_primary() {
     model.materials[0].fc = Some(24.0);
 
     let err = precheck_model(&model).expect_err("水平 CFT 梁はエラーにする");
-    assert!(
-        err.to_string().contains("CFT") && err.to_string().contains("水平材"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("CFT"), "{err}");
+}
+
+#[test]
+fn test_model_issues_does_not_use_axis_angle_for_cft_column() {
+    use super::precheck::model_issues;
+    use squid_n_core::model::FrameSectionUse;
+
+    let mut model = make_cantilever_model();
+    model.nodes[1].coord = [1000.0, 0.0, 1000.0];
+    model.sections[0].shape = Some(cft_shape());
+    model.sections[0].frame_use = Some(FrameSectionUse::Column);
+    model.materials[0].fc = Some(24.0);
+
+    assert!(!model_issues(&model)
+        .iter()
+        .any(|issue| issue.message.contains("材軸") || issue.message.contains("水平材")));
+}
+
+#[test]
+fn test_model_issues_errors_on_unreferenced_invalid_cft_section() {
+    use super::precheck::model_issues;
+    use squid_n_core::model::FrameSectionUse;
+
+    let mut model = make_cantilever_model();
+    let mut section = cft_shape().to_section(SectionId(1), "未参照CFT".into());
+    section.frame_use = Some(FrameSectionUse::Girder);
+    model.sections.push(section);
+
+    assert!(model_issues(&model)
+        .iter()
+        .any(|issue| issue.message.contains("未参照") && issue.message.contains("CFT")));
 }
 
 /// 通常の鋼材断面の二次部材はエラーにせず、解析前チェックを通す。

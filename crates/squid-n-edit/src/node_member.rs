@@ -299,7 +299,12 @@ impl EditCommand for AddMember {
         }
         if self.elem.section.is_some_and(|section| {
             model.sections.get(section.index()).is_some_and(|section| {
-                crate::section_material::horizontal_primary_cft(&self.elem, section)
+                section.is_cft()
+                    && section.frame_use != Some(squid_n_core::model::FrameSectionUse::Column)
+                    || matches!(
+                        self.elem.kind,
+                        squid_n_core::model::ElementKind::Brace { .. }
+                    ) && section.is_cft()
             })
         }) {
             return Box::new(Noop);

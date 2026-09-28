@@ -152,6 +152,11 @@ impl EditCommand for AddSectionShape {
         if (!non_frame && self.frame_use.is_none()) || (non_frame && self.frame_use.is_some()) {
             return Box::new(Noop);
         }
+        let mut candidate = self.shape.to_section(self.new_id, self.name.clone());
+        candidate.frame_use = self.frame_use;
+        if !candidate.cft_frame_use_allowed() {
+            return Box::new(Noop);
+        }
         if squid_n_core::model::section_key_taken(
             &model.sections,
             (self.name.as_str(), self.floor.as_deref()),
@@ -194,25 +199,20 @@ impl EditCommand for EditSectionShape {
         }
         if (non_frame && self.frame_use.is_some())
             || !section_use_is_valid(model, self.section, self.frame_use)
-            || matches!(
+            || !(squid_n_core::model::Section {
+                shape: Some(self.new_shape.clone()),
+                frame_use: self.frame_use,
+                ..model.sections[idx].clone()
+            })
+            .cft_frame_use_allowed()
+            || (matches!(
                 &self.new_shape,
                 squid_n_section::shape::SectionShape::CftBox { .. }
                     | squid_n_section::shape::SectionShape::CftPipe { .. }
             ) && model
                 .beams()
                 .chain(model.posts())
-                .any(|member| member.section == Some(self.section))
-            || model.elements.iter().any(|element| {
-                element.section == Some(self.section)
-                    && super::horizontal_primary_cft(
-                        element,
-                        &squid_n_core::model::Section {
-                            shape: Some(self.new_shape.clone()),
-                            frame_use: self.frame_use,
-                            ..model.sections[idx].clone()
-                        },
-                    )
-            })
+                .any(|member| member.section == Some(self.section)))
         {
             return Box::new(Noop);
         }
@@ -318,7 +318,9 @@ pub struct AddCatalogSection {
 impl EditCommand for AddCatalogSection {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let mut sec = self.section.clone();
-        if squid_n_core::model::section_key_taken(&model.sections, sec.key(), None) {
+        if !sec.cft_frame_use_allowed()
+            || squid_n_core::model::section_key_taken(&model.sections, sec.key(), None)
+        {
             return Box::new(Noop);
         }
         let new_id = SectionId(model.sections.len() as u32);
@@ -373,7 +375,7 @@ impl EditCommand for DuplicateSectionForMember {
             return Box::new(Noop);
         }
         let orig = &model.sections[sec_idx];
-        if super::horizontal_primary_cft(&model.elements[elem_idx], orig) {
+        if orig.is_cft() && orig.frame_use != Some(squid_n_core::model::FrameSectionUse::Column) {
             return Box::new(Noop);
         }
         let new_id = SectionId(model.sections.len() as u32);

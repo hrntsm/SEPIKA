@@ -44,9 +44,9 @@
 use super::*;
 use squid_n_core::ids::{ElemId, NodeId, SectionId, SlabId, StoryId};
 use squid_n_core::model::{
-    SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind, Section, Slab, SlabPlate, SlabUsage,
+    FrameSectionUse, SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind, Section, Slab,
+    SlabPlate, SlabUsage,
 };
-use squid_n_core::section_shape::SectionShape;
 use std::collections::{HashMap, HashSet};
 
 /// 同じ平面位置とみなす座標差 [mm]。
@@ -683,10 +683,17 @@ fn copy_sections(
         };
         let current = model.elements.get(elem.index()).and_then(|e| e.section);
         if (cmd.overwrite || current.is_none())
-            && model
-                .elements
-                .get(elem.index())
-                .is_some_and(|e| horizontal_primary_cft(model, e, src_sec))
+            && model.elements.get(elem.index()).is_some_and(|target| {
+                src_sec
+                    .and_then(|id| model.sections.get(id.index()))
+                    .is_some_and(|section| {
+                        (section.is_cft() && section.frame_use != Some(FrameSectionUse::Column))
+                            || (matches!(
+                                target.kind,
+                                squid_n_core::model::ElementKind::Brace { .. }
+                            ) && section.is_cft())
+                    })
+            })
         {
             report.sections_rejected += 1;
             continue;
@@ -866,27 +873,7 @@ fn section_for_story(
 
 fn cft_section(model: &Model, id: Option<SectionId>) -> bool {
     id.and_then(|sid| model.sections.get(sid.index()))
-        .and_then(|s| s.shape.as_ref())
-        .is_some_and(|shape| {
-            matches!(
-                shape,
-                SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
-            )
-        })
-}
-
-fn horizontal_primary_cft(
-    model: &Model,
-    elem: &squid_n_core::model::ElementData,
-    section: Option<SectionId>,
-) -> bool {
-    elem.kind == squid_n_core::model::ElementKind::Beam
-        && section
-            .and_then(|sid| model.sections.get(sid.index()))
-            .is_some_and(|section| {
-                section.frame_use == Some(squid_n_core::model::FrameSectionUse::Girder)
-                    && cft_section(model, Some(section.id))
-            })
+        .is_some_and(|section| section.is_cft())
 }
 
 /// 床板（境界の形）を配る。新しく作った床板の ID を返す。

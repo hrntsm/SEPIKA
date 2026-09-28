@@ -21,10 +21,14 @@ impl EditCommand for SetElementSection {
             return Box::new(Noop);
         }
         if self.section.is_some_and(|section| {
-            model
-                .sections
-                .get(section.index())
-                .is_some_and(|section| super::horizontal_primary_cft(&model.elements[idx], section))
+            model.sections.get(section.index()).is_some_and(|section| {
+                section.is_cft()
+                    && section.frame_use != Some(squid_n_core::model::FrameSectionUse::Column)
+                    || matches!(
+                        model.elements[idx].kind,
+                        squid_n_core::model::ElementKind::Brace { .. }
+                    ) && section.is_cft()
+            })
         }) {
             return Box::new(Noop);
         }

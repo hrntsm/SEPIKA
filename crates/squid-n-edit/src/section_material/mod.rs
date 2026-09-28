@@ -8,21 +8,6 @@
 
 use super::*;
 
-pub(crate) fn horizontal_primary_cft(
-    elem: &squid_n_core::model::ElementData,
-    section: &squid_n_core::model::Section,
-) -> bool {
-    elem.kind == squid_n_core::model::ElementKind::Beam
-        && section.frame_use == Some(squid_n_core::model::FrameSectionUse::Girder)
-        && matches!(
-            section.shape,
-            Some(
-                squid_n_section::shape::SectionShape::CftBox { .. }
-                    | squid_n_section::shape::SectionShape::CftPipe { .. }
-            )
-        )
-}
-
 mod damper_def;
 mod element_assign;
 mod loads;

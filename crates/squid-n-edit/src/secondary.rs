@@ -5,27 +5,22 @@ use squid_n_core::ids::*;
 use squid_n_core::model::{
     EndSupport, SecondaryMember, SecondaryMemberAnchor, SecondaryMemberEnds, SecondaryMemberKind,
 };
-use squid_n_core::section_shape::SectionShape;
 use std::collections::HashSet;
 
 fn secondary_member_ok(model: &Model, sm: &SecondaryMember) -> bool {
     crate::refs::section_ref_ok(model, sm.section)
-        && !cft_section(model, sm.section)
+        && !sm
+            .section
+            .and_then(|id| model.sections.get(id.index()))
+            .is_some_and(|section| section.is_cft())
         && model
             .secondary_member_axis(sm)
             .is_some_and(|(_, _, len)| len > 1e-9)
 }
 
-/// 指定断面が CFT（角形・円形）か。CFT は柱専用のため二次部材には割り当てない。
 fn cft_section(model: &Model, id: Option<SectionId>) -> bool {
     id.and_then(|sid| model.sections.get(sid.index()))
-        .and_then(|s| s.shape.as_ref())
-        .is_some_and(|sh| {
-            matches!(
-                sh,
-                SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
-            )
-        })
+        .is_some_and(|section| section.is_cft())
 }
 
 fn beams_ok(beams: &[SecondaryMember]) -> bool {
