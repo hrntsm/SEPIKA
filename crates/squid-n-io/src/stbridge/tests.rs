@@ -1777,6 +1777,49 @@ fn test_import_box_without_r_attr_is_corner_r_zero() {
     );
 }
 
+/// 外部 ST-Bridge の CFT は `strength_concrete` を主材料として取り込み、
+/// そのまま質量特性を解決できる。
+#[test]
+fn test_import_external_cft_uses_concrete_main_material_for_mass() {
+    let xml = r#"<?xml version="1.0"?>
+<ST_BRIDGE version="2.0.0"><StbModel>
+  <StbNodes>
+    <StbNode id="0" X="0" Y="0" Z="0"/>
+    <StbNode id="1" X="0" Y="0" Z="3000"/>
+  </StbNodes>
+  <StbSections>
+    <StbSecColumn_CFT id="0" name="CFT1" strength_concrete="Fc36">
+      <StbSecSteelFigureColumn_CFT>
+        <StbSecSteelColumn_CFT_Same shape="CFT-400"/>
+      </StbSecSteelFigureColumn_CFT>
+    </StbSecColumn_CFT>
+    <StbSecSteel>
+      <StbSecRoll-BOX name="CFT-400" type="ELSE" A="400" B="400" t="16"/>
+    </StbSecSteel>
+  </StbSections>
+  <StbMembers>
+    <StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0"/>
+  </StbMembers>
+</StbModel></ST_BRIDGE>"#;
+
+    let model = import_stbridge(xml).expect("external CFT import");
+    let section = &model.sections[0];
+    let material = section
+        .material
+        .and_then(|id| model.materials.get(id.index()))
+        .expect("CFT filling concrete material");
+    assert_eq!(
+        material.category,
+        squid_n_core::model::MaterialCategory::Concrete
+    );
+    assert_eq!(material.fc, Some(36.0));
+
+    let properties = model
+        .element_mass_properties(&model.elements[0])
+        .expect("imported CFT mass properties");
+    assert!(properties.mass_per_length > 0.0);
+}
+
 /// 標準モード: CFT 角形柱が `StbSecColumn_CFT`＋形鋼ライブラリとして往復する。
 #[test]
 fn test_standard_roundtrip_cft_box() {
