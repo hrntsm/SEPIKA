@@ -5830,7 +5830,7 @@ fn set_floor_region_beam_section_rejects_cft() {
     assert_eq!(model.floor_regions[0].secondary_beams[0].section, None);
 }
 
-/// 階コピーでも水平な主架構 Beam へ CFT 断面を割り当てない。
+/// 階コピーでも Column 用途に一致しない主架構線材へ CFT 断面を割り当てない。
 #[test]
 fn test_copy_story_rejects_horizontal_primary_cft() {
     use crate::{CopyStory, CopyTargets};
@@ -5892,22 +5892,71 @@ fn test_copy_story_rejects_horizontal_primary_cft() {
         .is_none());
 }
 
-/// 水平な主架構の Beam には CFT 断面を割り当てない。
+/// Column 用途の主架構 Beam には、水平・傾斜を問わず CFT 断面を割り当てる。
 #[test]
-fn set_element_section_rejects_horizontal_cft() {
+fn set_element_section_allows_column_cft_for_horizontal_and_inclined_beam() {
     let mut model = seeded_model(2, 1);
     let cft = push_cft_section(&mut model);
     model.sections[cft.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
-    let before = model.elements[0].section;
     let mut stack = UndoStack::new();
-    assert!(!stack.run(
+    assert!(stack.run(
         &mut model,
         Box::new(SetElementSection {
             elem: ElemId(0),
             section: Some(cft),
         }),
     ));
-    assert_eq!(model.elements[0].section, before);
+    model.elements[0].section = None;
+    model.nodes[1].coord = [1000.0, 0.0, 1000.0];
+    assert!(stack.run(
+        &mut model,
+        Box::new(SetElementSection {
+            elem: ElemId(0),
+            section: Some(cft),
+        }),
+    ));
+}
+
+#[test]
+fn set_element_section_rejects_cft_for_non_column_use_or_kind() {
+    for frame_use in [
+        None,
+        Some(squid_n_core::model::FrameSectionUse::Girder),
+        Some(squid_n_core::model::FrameSectionUse::Brace),
+    ] {
+        let mut model = seeded_model(2, 1);
+        let cft = push_cft_section(&mut model);
+        model.sections[cft.index()].frame_use = frame_use;
+        let mut stack = UndoStack::new();
+        assert!(!stack.run(
+            &mut model,
+            Box::new(SetElementSection {
+                elem: ElemId(0),
+                section: Some(cft),
+            }),
+        ));
+    }
+
+    for kind in [
+        ElementKind::Brace {
+            tension_only: false,
+        },
+        ElementKind::Shell,
+        ElementKind::Wall,
+    ] {
+        let mut model = seeded_model(2, 1);
+        model.elements[0].kind = kind;
+        let cft = push_cft_section(&mut model);
+        model.sections[cft.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+        let mut stack = UndoStack::new();
+        assert!(!stack.run(
+            &mut model,
+            Box::new(SetElementSection {
+                elem: ElemId(0),
+                section: Some(cft),
+            }),
+        ));
+    }
 }
 
 #[test]

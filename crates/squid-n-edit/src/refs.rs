@@ -67,17 +67,9 @@ pub(crate) fn frame_element_section_ref_ok(
                     element.kind,
                     ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
                 ) {
-                    return true;
+                    return false;
                 }
-                let (Some(n0), Some(n1)) = (element.nodes.first(), element.nodes.get(1)) else {
-                    return false;
-                };
-                let (Some(n0), Some(n1)) =
-                    (model.nodes.get(n0.index()), model.nodes.get(n1.index()))
-                else {
-                    return false;
-                };
-                squid_n_core::geom::is_vertical_axis(n0.coord, n1.coord)
+                true
             })
 }
 

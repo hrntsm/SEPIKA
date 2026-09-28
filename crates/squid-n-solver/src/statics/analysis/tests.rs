@@ -1863,9 +1863,9 @@ fn test_model_issues_errors_cft_secondary_section() {
     );
 }
 
-/// 水平な主架構の Beam に CFT 断面が割り当てられていると、解析前チェックでエラーにする。
+/// Column 用途の水平な主架構 Beam への CFT 割当は解析前チェックを通す。
 #[test]
-fn test_model_issues_errors_cft_horizontal_primary() {
+fn test_model_issues_allows_cft_horizontal_primary_column() {
     use super::precheck::precheck_model;
 
     let mut model = make_cantilever_model();
@@ -1873,8 +1873,7 @@ fn test_model_issues_errors_cft_horizontal_primary() {
     model.sections[0].frame_use = Some(FrameSectionUse::Column);
     model.materials[0].fc = Some(24.0);
 
-    let err = precheck_model(&model).expect_err("水平 CFT 梁はエラーにする");
-    assert!(err.to_string().contains("CFT"), "{err}");
+    precheck_model(&model).expect("Column 用途の水平 CFT 線材は許可する");
 }
 
 #[test]
@@ -1894,6 +1893,35 @@ fn test_model_issues_errors_cft_shell_and_wall_references() {
 }
 
 #[test]
+fn test_model_issues_errors_cft_non_column_primary_references() {
+    use super::precheck::model_issues;
+
+    for frame_use in [
+        None,
+        Some(FrameSectionUse::Girder),
+        Some(FrameSectionUse::Brace),
+    ] {
+        let mut model = make_cantilever_model();
+        model.sections[0].shape = Some(cft_shape());
+        model.sections[0].frame_use = frame_use;
+        model.materials[0].fc = Some(24.0);
+
+        let issues = model_issues(&model);
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.message.contains("CFT") || issue.message.contains("用途")),
+            "CFT の {:?} 用途参照はエラーにする: {:?}",
+            frame_use,
+            issues
+                .iter()
+                .map(|issue| &issue.message)
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
 fn test_model_issues_does_not_use_axis_angle_for_cft_column() {
     use super::precheck::model_issues;
     use squid_n_core::model::FrameSectionUse;
@@ -1906,7 +1934,7 @@ fn test_model_issues_does_not_use_axis_angle_for_cft_column() {
 
     assert!(!model_issues(&model)
         .iter()
-        .any(|issue| issue.message.contains("材軸") || issue.message.contains("水平材")));
+        .any(|issue| issue.message.contains("用途が不正な CFT")));
 }
 
 #[test]

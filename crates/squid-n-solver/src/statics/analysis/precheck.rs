@@ -324,20 +324,12 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             let Some(section) = model.element_section(e) else {
                 continue;
             };
-            let vertical = e
-                .nodes
-                .first()
-                .and_then(|n| model.nodes.get(n.index()))
-                .zip(e.nodes.get(1).and_then(|n| model.nodes.get(n.index())))
-                .is_some_and(|(n0, n1)| squid_n_core::geom::is_vertical_axis(n0.coord, n1.coord));
             if section.is_cft()
                 && (!section.cft_frame_use_allowed()
                     || !matches!(
                         e.kind,
                         ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-                    )
-                    || (section.frame_use == Some(squid_n_core::model::FrameSectionUse::Column)
-                        && !vertical))
+                    ))
             {
                 cft_on_invalid_use.push(e.id);
             }
