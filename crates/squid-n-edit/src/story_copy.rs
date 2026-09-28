@@ -703,6 +703,14 @@ fn copy_sections(
         ) else {
             continue;
         };
+        if model
+            .elements
+            .get(elem.index())
+            .is_some_and(|target| !crate::refs::frame_element_section_ref_ok(model, target, next))
+        {
+            report.sections_rejected += 1;
+            continue;
+        }
         if let Some(e) = model.elements.get_mut(elem.index()) {
             if e.section != next {
                 count_section_change(e.section, next, report);
@@ -749,6 +757,18 @@ fn copy_sections(
         ) else {
             continue;
         };
+        if !crate::refs::plate_section_ref_ok(model, next) {
+            report.sections_rejected += 1;
+            if cmd.overwrite {
+                if let Some(sl) = model.slabs.get_mut(sid.index()) {
+                    if sl.plate.section.is_some() {
+                        count_section_change(sl.plate.section, None, report);
+                        sl.plate.section = None;
+                    }
+                }
+            }
+            continue;
+        }
         if let Some(sl) = model.slabs.get_mut(sid.index()) {
             if sl.plate.section != next {
                 count_section_change(sl.plate.section, next, report);
@@ -789,6 +809,10 @@ fn copy_sections(
         ) else {
             continue;
         };
+        if !crate::refs::plate_section_ref_ok(model, next) {
+            report.sections_rejected += 1;
+            continue;
+        }
         let Some(sm) = secondary_at_mut(model, slot) else {
             continue;
         };

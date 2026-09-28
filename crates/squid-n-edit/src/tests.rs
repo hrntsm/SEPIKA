@@ -5899,6 +5899,77 @@ fn test_copy_story_rejects_horizontal_primary_cft() {
         .is_none());
 }
 
+#[test]
+fn test_copy_story_rejects_resolved_cft_for_primary_target() {
+    use crate::{CopyStory, CopyTargets};
+    use squid_n_core::frame_gen::{frame_model, FrameSpec};
+    use squid_n_core::ids::StoryId;
+
+    let mut model = frame_model(&FrameSpec::default()).unwrap();
+    assign_node_stories(&mut model);
+    let source = model
+        .elements
+        .iter()
+        .find(|e| {
+            model.member_story(e) == Some(StoryId(1))
+                && e.kind == ElementKind::Beam
+                && !squid_n_core::geom::is_vertical_axis(
+                    model.nodes[e.nodes[0].index()].coord,
+                    model.nodes[e.nodes[1].index()].coord,
+                )
+        })
+        .expect("2F の水平 Beam がある")
+        .clone();
+    let plan = |model: &Model, element: &ElementData| {
+        let mut points: Vec<[f64; 2]> = element
+            .nodes
+            .iter()
+            .map(|&id| {
+                let coord = model.nodes[id.index()].coord;
+                [coord[0], coord[1]]
+            })
+            .collect();
+        points.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+        points
+    };
+    let target = model
+        .elements
+        .iter()
+        .find(|e| {
+            model.member_story(e) == Some(StoryId(2)) && plan(&model, e) == plan(&model, &source)
+        })
+        .expect("3F の対応する Beam がある")
+        .id;
+
+    let source_section = push_steel_section(&mut model);
+    model.sections[source_section.index()].name = "階コピー検証".into();
+    model.sections[source_section.index()].floor = Some(model.stories[1].name.clone());
+    let target_section = push_cft_section(&mut model);
+    model.sections[target_section.index()].name = "階コピー検証".into();
+    model.sections[target_section.index()].floor = Some(model.stories[2].name.clone());
+    model.sections[target_section.index()].frame_use =
+        Some(squid_n_core::model::FrameSectionUse::Girder);
+    model.elements[source.id.index()].section = Some(source_section);
+    model.elements[target.index()].section = Some(target_section);
+
+    let cmd = CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            sections: true,
+            ..Default::default()
+        },
+        overwrite: true,
+    };
+    let report = cmd.preview(&model);
+    assert!(report.sections_rejected > 0, "{report:?}");
+    assert_eq!(model.elements[target.index()].section, Some(target_section));
+
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(&mut model, Box::new(cmd)));
+    assert_eq!(model.elements[target.index()].section, Some(target_section));
+}
+
 /// Column 用途の主架構 Beam には、水平・傾斜を問わず CFT 断面を割り当てる。
 #[test]
 fn set_element_section_allows_column_cft_for_horizontal_and_inclined_beam() {
