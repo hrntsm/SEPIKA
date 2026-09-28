@@ -6395,6 +6395,79 @@ fn test_copy_story_rejects_secondary_cft() {
     );
 }
 
+/// CFT 床板を上書きすると、既存床板の断面も解除し、preview と実行結果を一致させる。
+#[test]
+fn test_copy_story_overwrite_cft_slab_clears_existing_section_idempotently() {
+    use crate::{CopyStory, CopyTargets};
+    use squid_n_core::frame_gen::{frame_model, FrameSpec};
+    use squid_n_core::ids::StoryId;
+
+    let mut model = frame_model(&FrameSpec::default()).unwrap();
+    assign_node_stories(&mut model);
+    let cft = push_cft_section(&mut model);
+    let target_section = push_steel_section(&mut model);
+    let source_slab = model
+        .slabs
+        .iter()
+        .find(|slab| {
+            slab.boundary_nodes(&model).is_some_and(|nodes| {
+                nodes
+                    .iter()
+                    .all(|node| model.nodes[node.index()].story == Some(StoryId(1)))
+            })
+        })
+        .expect("2F の床板がある")
+        .id;
+    let target_slab = model
+        .slabs
+        .iter()
+        .find(|slab| {
+            slab.boundary_nodes(&model).is_some_and(|nodes| {
+                nodes
+                    .iter()
+                    .all(|node| model.nodes[node.index()].story == Some(StoryId(2)))
+            })
+        })
+        .expect("3F の床板がある")
+        .id;
+    model.slabs[source_slab.index()].plate.section = Some(cft);
+    model.slabs[target_slab.index()].plate.section = Some(target_section);
+
+    let cmd = CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            sections: true,
+            ..Default::default()
+        },
+        overwrite: true,
+    };
+    let preview = cmd.preview(&model);
+    assert_eq!(preview.sections_rejected, 1);
+    assert_eq!(preview.sections_cleared, 1);
+    assert_eq!(
+        model.slabs[target_slab.index()].plate.section,
+        Some(target_section)
+    );
+
+    let mut stack = UndoStack::new();
+    assert!(stack.run(&mut model, Box::new(cmd)));
+    assert_eq!(model.slabs[target_slab.index()].plate.section, None);
+
+    let second = CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            sections: true,
+            ..Default::default()
+        },
+        overwrite: true,
+    };
+    let second_preview = second.preview(&model);
+    assert_eq!(second_preview.sections_cleared, 0);
+    assert!(!stack.run(&mut model, Box::new(second)));
+}
+
 /// 大梁の材軸中間へアンカーした（端に節点を持たない）二次部材は複製できない。
 /// 黙って消さず、見送り件数へ計上して理由を見せる。
 #[test]

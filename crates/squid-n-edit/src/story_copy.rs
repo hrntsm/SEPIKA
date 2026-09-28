@@ -9,6 +9,8 @@
 //! [`CopyStory::overwrite`] が真なら複製先の余分（複製元で断面が未割当・床が無い・
 //! 荷重が無い相手）は解除・削除される。偽なら複製先が空いているところにだけ入れ、
 //! 既存には触れない。どちらでも 2 回実行した結果は 1 回と同じになる（冪等）。
+//! 床板の複製元が CFT 断面の場合は床板へ割り当てず、上書き時は複製先の床板断面も
+//! 未割当にする。上書きしない場合は既存の複製先断面を保持する。
 //!
 //! # 何を対象にするか
 //!
@@ -78,7 +80,8 @@ impl CopyTargets {
 pub struct CopyStoryReport {
     /// 断面を割り当てた部材の数。
     pub sections_assigned: usize,
-    /// 断面の割当を解除した部材の数（複製元が未割当のため）。
+    /// 断面の割当を解除した部材・床板の数（複製元が未割当、または床板へ CFT 断面を
+    /// 複製できないため）。
     pub sections_cleared: usize,
     /// 新しく作った断面の数。
     pub sections_created: usize,
@@ -725,6 +728,14 @@ fn copy_sections(
         let current = model.slabs.get(sid.index()).and_then(|sl| sl.section());
         if cft_section(model, src_sec) {
             report.sections_rejected += 1;
+            if cmd.overwrite {
+                if let Some(sl) = model.slabs.get_mut(sid.index()) {
+                    if sl.plate.section.is_some() {
+                        count_section_change(sl.plate.section, None, report);
+                        sl.plate.section = None;
+                    }
+                }
+            }
             continue;
         }
         let Some(next) = resolve_section(
