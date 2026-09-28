@@ -316,11 +316,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
 
     {
         let mut cft_on_invalid_use: Vec<ElemId> = Vec::new();
-        for e in model
-            .elements
-            .iter()
-            .filter(|e| e.kind.requires_section_and_material())
-        {
+        for e in model.elements.iter() {
             let Some(section) = model.element_section(e) else {
                 continue;
             };

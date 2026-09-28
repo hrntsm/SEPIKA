@@ -1880,7 +1880,14 @@ fn test_model_issues_allows_cft_horizontal_primary_column() {
 fn test_model_issues_errors_cft_shell_and_wall_references() {
     use super::precheck::precheck_model;
 
-    for kind in [ElementKind::Shell, ElementKind::Wall] {
+    for kind in [
+        ElementKind::Shell,
+        ElementKind::Wall,
+        ElementKind::PanelZone,
+        ElementKind::NodalSpring,
+        ElementKind::Damper,
+        ElementKind::Isolator,
+    ] {
         let mut model = make_cantilever_model();
         model.elements[0].kind = kind;
         model.sections[0].shape = Some(cft_shape());

@@ -209,34 +209,7 @@ impl EditCommand for EditSectionShape {
                 &self.new_shape,
                 squid_n_section::shape::SectionShape::CftBox { .. }
                     | squid_n_section::shape::SectionShape::CftPipe { .. }
-            ) && model
-                .beams()
-                .chain(model.posts())
-                .any(|member| member.section == Some(self.section)))
-            || (matches!(
-                &self.new_shape,
-                squid_n_section::shape::SectionShape::CftBox { .. }
-                    | squid_n_section::shape::SectionShape::CftPipe { .. }
-            ) && (model
-                .slabs
-                .iter()
-                .any(|slab| slab.section() == Some(self.section))
-                || model
-                    .wall_plates
-                    .iter()
-                    .any(|plate| plate.section == Some(self.section))))
-            || (matches!(
-                &self.new_shape,
-                squid_n_section::shape::SectionShape::CftBox { .. }
-                    | squid_n_section::shape::SectionShape::CftPipe { .. }
-            ) && model.elements.iter().any(|element| {
-                element.section == Some(self.section)
-                    && matches!(
-                        element.kind,
-                        squid_n_core::model::ElementKind::Shell
-                            | squid_n_core::model::ElementKind::Wall
-                    )
-            }))
+            ) && !cft_section_references_are_valid(model, self.section))
         {
             return Box::new(Noop);
         }
@@ -251,6 +224,33 @@ impl EditCommand for EditSectionShape {
     fn label(&self) -> &str {
         "断面形状変更"
     }
+}
+
+fn cft_section_references_are_valid(model: &Model, section_id: SectionId) -> bool {
+    model
+        .elements
+        .iter()
+        .filter(|element| element.section == Some(section_id))
+        .all(|element| {
+            matches!(
+                element.kind,
+                squid_n_core::model::ElementKind::Beam
+                    | squid_n_core::model::ElementKind::Fiber
+                    | squid_n_core::model::ElementKind::MultiSpring
+            )
+        })
+        && model
+            .beams()
+            .chain(model.posts())
+            .all(|member| member.section != Some(section_id))
+        && !model
+            .slabs
+            .iter()
+            .any(|slab| slab.section() == Some(section_id))
+        && !model
+            .wall_plates
+            .iter()
+            .any(|plate| plate.section == Some(section_id))
 }
 
 fn section_use_is_valid(

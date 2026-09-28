@@ -771,8 +771,15 @@ fn test_edit_rc_wall_section_shape_with_wall_reference() {
 }
 
 #[test]
-fn test_edit_section_shape_rejects_cft_for_shell_or_wall_reference() {
-    for kind in [ElementKind::Shell, ElementKind::Wall] {
+fn test_edit_section_shape_rejects_cft_for_non_target_element_reference() {
+    for kind in [
+        ElementKind::Shell,
+        ElementKind::Wall,
+        ElementKind::PanelZone,
+        ElementKind::NodalSpring,
+        ElementKind::Damper,
+        ElementKind::Isolator,
+    ] {
         let old_shape = squid_n_section::shape::SectionShape::SteelBox {
             height: 200.0,
             width: 200.0,
