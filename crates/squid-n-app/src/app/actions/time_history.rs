@@ -36,7 +36,9 @@ impl App {
     /// 線形時刻歴応答解析を実行する。減衰モデル・積分法は `analysis_cfg` に従う
     /// （剛性比例／Rayleigh、Newmark-β）。
     pub fn run_time_history(&mut self, wave: squid_n_solver::dynamic::timehistory::GroundMotion) {
-        self.begin_analysis();
+        if !self.begin_analysis() {
+            return;
+        }
         let res = squid_n_job::compute::compute_time_history(
             self.core.model.clone(),
             self.core.analysis_cfg,

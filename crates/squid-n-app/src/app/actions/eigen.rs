@@ -7,7 +7,9 @@ use super::*;
 impl App {
     /// 固有値解析を実行し、結果を `self.core.scoped.results` に格納する（同期）。
     pub fn run_eigen(&mut self, n_modes: usize) {
-        self.begin_analysis();
+        if !self.begin_analysis() {
+            return;
+        }
         let res = squid_n_job::compute::compute_eigen(self.core.model.clone(), n_modes)
             .map_err(|e| e.to_string());
         self.apply_eigen_result(res);

@@ -13,16 +13,19 @@ impl App {
     /// 地震荷重を「EX」「EY」ケースへ同期する（モデル・関連設定が前回同期時から
     /// 変わっていなければ荷重の再計算は丸ごとスキップする）。
     pub fn run_linear_static(&mut self, lc: LoadCaseId) {
-        self.begin_analysis();
+        let ready = self.begin_analysis();
+        self.invalidate_missing_tip_seismic(&[lc]);
+        if !ready {
+            return;
+        }
         let res = squid_n_job::compute::compute_linear_static(self.core.model.clone(), lc)
             .map_err(|e| e.to_string());
         self.apply_static_case_result(StaticCaseKey::User(lc), res);
     }
 
-    /// `compute_linear_static`/`compute_seismic`/`compute_wind` に共通の結果適用
-    /// （`StaticCaseKey` で区別される単一荷重ケースの静的解析結果）。
+    /// `StaticCaseKey` で区別される単一荷重ケースの静的解析結果の共通適用。
     /// bundle への格納・last_static 設定・staleness.mark_fresh・design_check の
-    /// 実行はいずれも `run_linear_static`/`run_seismic`/`run_wind` で同一のため、
+    /// 実行はいずれも `run_linear_static`/`run_seismic` で同一のため、
     /// ここへ集約し同期版・バックグラウンドジョブ双方から使う。
     pub(super) fn apply_static_case_result(
         &mut self,
@@ -65,8 +68,7 @@ impl App {
     /// 荷重ケース 1 つの静的解析をバックグラウンドで実行する（解析パネルの
     /// 「荷重ケース」実行ボタンの入口）。
     ///
-    /// 標準の水平力ケース（EX/EY）は、Ai 分布の算定諸元
-    /// （`analysis_cfg`）から水平力を組み立て直して解き、結果を方向別の
+    /// 標準の水平力ケース（EX/EY）は、同期済み荷重ケースを解き、結果を方向別の
     /// `StaticCaseKey::Seismic` へ格納する（剛心の精算・保有水平耐力の
     /// 判定がこのキーを参照するため）。それ以外は線形静的解析として
     /// `StaticCaseKey::User` へ格納する。
@@ -81,7 +83,11 @@ impl App {
     /// UI スレッドをブロックしないよう重い解析を逃がす。
     /// 既にジョブが実行中の場合は何もしない（last_error に案内文を設定）。
     pub fn start_linear_static_job(&mut self, lc: LoadCaseId) {
-        if !self.begin_analysis_job() {
+        let ready = self.begin_analysis_job();
+        if self.core.scoped.job.is_none() {
+            self.invalidate_missing_tip_seismic(&[lc]);
+        }
+        if !ready {
             return;
         }
         let model = self.core.model.clone();
@@ -131,14 +137,21 @@ impl App {
     /// 組合せが空の地震荷重ケースを参照している場合は解かずにエラーで案内する
     /// （地震項が黙って 0 になるのを防ぐ）。
     pub fn run_combination(&mut self, index: usize) {
-        self.begin_analysis();
+        let ready = self.begin_analysis();
+        if let Some(combo) = self.core.model.combinations.get(index) {
+            let ids: Vec<_> = combo.terms.iter().map(|(id, _)| *id).collect();
+            self.invalidate_missing_tip_seismic(&ids);
+        }
+        if !ready {
+            return;
+        }
         let Some(combo) = self.core.model.combinations.get(index).cloned() else {
             self.report_error(format!("荷重組合せ #{} が存在しません", index));
             return;
         };
         if let Some(name) = self.empty_lateral_case_in_combo(&combo) {
             self.report_error(format!(
-                "荷重組合せ「{}」が参照する水平力の荷重ケース「{}」が空です。解析タブの「準備計算 実行」を行って地震力・風圧力を生成してください。",
+                "荷重組合せ「{}」が参照する水平力の荷重ケース「{}」が空です（地震水平力がありません）。解析タブの「準備計算 実行」を行うか水平力を手入力してください。",
                 combo.name, name
             ));
             return;
@@ -210,7 +223,14 @@ impl App {
     /// UI スレッドをブロックしないよう重い解析を逃がす。
     /// 既にジョブが実行中の場合は何もしない（last_error に案内文を設定）。
     pub fn start_combination_job(&mut self, index: usize) {
-        if !self.begin_analysis_job() {
+        let ready = self.begin_analysis_job();
+        if self.core.scoped.job.is_none() {
+            if let Some(combo) = self.core.model.combinations.get(index) {
+                let ids: Vec<_> = combo.terms.iter().map(|(id, _)| *id).collect();
+                self.invalidate_missing_tip_seismic(&ids);
+            }
+        }
+        if !ready {
             return;
         }
         let Some(combo) = self.core.model.combinations.get(index).cloned() else {
@@ -219,7 +239,7 @@ impl App {
         };
         if let Some(name) = self.empty_lateral_case_in_combo(&combo) {
             self.report_error(format!(
-                "荷重組合せ「{}」が参照する水平力の荷重ケース「{}」が空です。解析タブの「準備計算 実行」を行って地震力・風圧力を生成してください。",
+                "荷重組合せ「{}」が参照する水平力の荷重ケース「{}」が空です（地震水平力がありません）。解析タブの「準備計算 実行」を行うか水平力を手入力してください。",
                 combo.name, name
             ));
             return;
@@ -246,14 +266,16 @@ impl App {
     /// 解けなかった場合は既存の結果を変更せず、案内メッセージを `last_error` に
     /// 設定して return する。
     pub fn run_static_all(&mut self) {
-        self.begin_analysis();
+        if !self.begin_analysis() {
+            return;
+        }
         if self.core.model.load_cases.is_empty() {
             self.report_error("荷重ケースがありません。荷重タブで作成してください。");
             return;
         }
-        let (case_keys, combos, errors) = self.static_all_inputs();
+        let (case_keys, combos, errors, excluded) = self.static_all_inputs();
         let computed = Self::compute_static_all(self.core.model.clone(), case_keys, combos);
-        self.apply_static_all_result(computed, errors);
+        self.apply_static_all_result(computed, errors, excluded);
     }
 
     /// `run_static_all`/`start_static_all_job` 共通の事前準備。UI スレッド側の
@@ -275,16 +297,21 @@ impl App {
         Vec<(LoadCaseId, StaticCaseKey)>,
         Vec<squid_n_core::model::LoadCombination>,
         Vec<String>,
+        (Vec<StaticCaseKey>, Vec<String>),
     ) {
         let mut errors: Vec<String> = Vec::new();
+        let mut excluded_ids = Vec::new();
         let case_keys = self
             .core.model
             .load_cases
             .iter()
             .filter(|lc| {
                 if is_empty_lateral_case(lc) {
+                    if self.tip_seismic_case(lc) {
+                        excluded_ids.push(lc.id);
+                    }
                     errors.push(format!(
-                        "[{}] 水平力の荷重ケースが空です。「準備計算 実行」を行って地震力・風圧力を生成してください。",
+                        "[{}] 水平力がありません。「準備計算 実行」を行うか水平力を手入力してください。",
                         lc.name
                     ));
                     return false;
@@ -298,23 +325,83 @@ impl App {
                 (lc.id, key)
             })
             .collect();
+        let excluded_keys = excluded_ids
+            .iter()
+            .flat_map(|id| {
+                [
+                    self.standard_lateral_case(*id)
+                        .unwrap_or(StaticCaseKey::User(*id)),
+                    StaticCaseKey::User(*id),
+                ]
+            })
+            .collect();
+        let mut excluded_combos = Vec::new();
         let combos = self
             .core.model
             .combinations
             .iter()
-            .filter(|combo| match self.empty_lateral_case_in_combo(combo) {
-                Some(name) => {
-                    errors.push(format!(
-                        "[{}] 水平力の荷重ケース「{}」が空です。「準備計算 実行」を行ってください。",
-                        combo.name, name
-                    ));
-                    false
+            .filter(|combo| {
+                if combo.terms.iter().any(|(id, _)| excluded_ids.contains(id)) {
+                    excluded_combos.push(combo.name.clone());
                 }
-                None => true,
+                match self.empty_lateral_case_in_combo(combo) {
+                    Some(name) => {
+                        errors.push(format!(
+                            "[{}] 荷重ケース「{}」に水平力がありません。「準備計算 実行」を行うか水平力を手入力してください。",
+                            combo.name, name
+                        ));
+                        false
+                    }
+                    None => true,
+                }
             })
             .cloned()
             .collect();
-        (case_keys, combos, errors)
+        (case_keys, combos, errors, (excluded_keys, excluded_combos))
+    }
+
+    fn tip_seismic_case(&self, case: &squid_n_core::model::LoadCase) -> bool {
+        self.standard_lateral_case(case.id).is_some()
+            && self
+                .core
+                .model
+                .slabs
+                .iter()
+                .any(|slab| slab.tip_loads.iter().any(|tip| tip.case == case.id))
+    }
+
+    fn invalidate_missing_tip_seismic(&mut self, ids: &[LoadCaseId]) {
+        let affected: Vec<_> = self
+            .core
+            .model
+            .load_cases
+            .iter()
+            .filter(|case| {
+                ids.contains(&case.id) && self.tip_seismic_case(case) && is_empty_lateral_case(case)
+            })
+            .map(|case| case.id)
+            .collect();
+        if affected.is_empty() {
+            return;
+        }
+        let keys = affected
+            .iter()
+            .flat_map(|id| {
+                [
+                    self.standard_lateral_case(*id).unwrap(),
+                    StaticCaseKey::User(*id),
+                ]
+            })
+            .collect();
+        let combos = self
+            .core
+            .model
+            .combinations
+            .iter()
+            .filter(|combo| combo.terms.iter().any(|(id, _)| affected.contains(id)))
+            .map(|combo| combo.name.clone())
+            .collect();
+        self.remove_excluded_tip_results(&(keys, combos));
     }
 
     /// 一括解析の純粋計算部分。所有権を取り `&self` を使わないため、
@@ -376,7 +463,9 @@ impl App {
         &mut self,
         computed: Result<StaticAllComputed, String>,
         mut errors: Vec<String>,
+        excluded: (Vec<StaticCaseKey>, Vec<String>),
     ) {
+        self.remove_excluded_tip_results(&excluded);
         let items = match computed {
             Ok(items) => items,
             Err(e) => {
@@ -466,6 +555,45 @@ impl App {
         }
     }
 
+    fn remove_excluded_tip_results(&mut self, excluded: &(Vec<StaticCaseKey>, Vec<String>)) {
+        if excluded.0.is_empty() && excluded.1.is_empty() {
+            return;
+        }
+        let Some(bundle) = self.core.scoped.results.as_mut() else {
+            return;
+        };
+        let old_names: Vec<_> = bundle.combos.iter().map(|(name, _)| name.clone()).collect();
+        let remap = |key: Option<StaticKey>| match key {
+            Some(StaticKey::Case(key)) if excluded.0.contains(&key) => None,
+            Some(StaticKey::Combo(index)) => old_names.get(index).and_then(|name| {
+                (!excluded.1.contains(name)).then(|| {
+                    let removed_before = old_names[..index]
+                        .iter()
+                        .filter(|name| excluded.1.contains(name))
+                        .count();
+                    StaticKey::Combo(index - removed_before)
+                })
+            }),
+            other => other,
+        };
+        let invalid_display = self.core.scoped.last_static.is_some()
+            && remap(self.core.scoped.last_static).is_none()
+            || self.ui.scoped.nav.focus_result.is_some()
+                && remap(self.ui.scoped.nav.focus_result).is_none();
+        self.core.scoped.last_static = remap(self.core.scoped.last_static);
+        self.ui.scoped.nav.focus_result = remap(self.ui.scoped.nav.focus_result);
+        bundle.statics.retain(|(key, _)| !excluded.0.contains(key));
+        bundle.combos.retain(|(name, _)| !excluded.1.contains(name));
+        if invalid_display {
+            bundle.member_forces.clear();
+            bundle.panel_moments.clear();
+            bundle.member_checks.clear();
+            bundle.joint_checks.clear();
+            bundle.beam_checks.clear();
+            bundle.slab_checks.clear();
+        }
+    }
+
     /// 一括解析をバックグラウンドスレッドで実行する。
     /// UI スレッドをブロックしないよう重い解析を逃がす。
     /// 既にジョブが実行中の場合は何もしない（last_error に案内文を設定）。
@@ -477,11 +605,12 @@ impl App {
             self.report_error("荷重ケースがありません。荷重タブで作成してください。");
             return;
         }
-        let (case_keys, combos, pre_errors) = self.static_all_inputs();
+        let (case_keys, combos, pre_errors, excluded) = self.static_all_inputs();
         let model = self.core.model.clone();
         self.spawn_analysis_job("一括解析", move || JobResult::StaticAll {
             computed: Self::run_compute(|| Self::compute_static_all(model, case_keys, combos)),
             pre_errors,
+            excluded,
         });
     }
 
@@ -553,34 +682,27 @@ impl App {
         self.run_design_check();
     }
 
-    /// 地震静的解析（Ai一気通貫）を実行し、結果を `self.core.scoped.results` に格納する。
-    /// 方向・Ai算定法・Z・地盤種別・C0 は `analysis_cfg` を用いる。
+    /// 同期済みの EX/EY ケースを線形静的解析し、結果を格納する。
     /// 結果は `StaticCaseKey::Seismic(dir)` に格納するため、X/Y 双方の地震静的結果
     /// および任意のユーザー荷重ケースの結果と衝突せず共存できる。
-    /// あわせて同じ水平力を「EX」「EY」ケースへ同期する（荷重組合せ用。
-    /// 準備計算 `ensure_preparation` が行う）。
-    ///
-    /// 設計用固有周期 T は `design_seismic_period` で暗黙の解析なしに決定する
-    /// （内部で固有値解析を実行しない `Analysis::seismic_static_with_period` を
-    /// 使う）。SemiPrecise で固有値解析が未実行の場合は解析せず、実行を促す
-    /// メッセージを `last_error` に設定して return する。
+    /// 準備計算 `ensure_preparation` が Ai 荷重を同期する。
     pub fn run_seismic(&mut self, dir: SeismicDir) {
-        self.begin_analysis();
-        let t = match self.design_seismic_period() {
-            Ok(t) => t,
-            Err(msg) => {
-                self.report_error(msg);
-                return;
-            }
+        let ready = self.begin_analysis();
+        if let Some(id) = self.seismic_case_id(dir) {
+            self.invalidate_missing_tip_seismic(&[id]);
+        }
+        if !ready {
+            return;
+        }
+        let Some(lc) = self.seismic_case_id(dir) else {
+            self.report_error("地震荷重ケースがありません");
+            return;
         };
-        let cfg = squid_n_solver::statics::analysis::SeismicCfg {
-            dir,
-            mode: self.core.analysis_cfg.ai_mode,
-            z: self.core.analysis_cfg.z,
-            soil: self.core.analysis_cfg.soil,
-            c0: self.core.analysis_cfg.c0,
-        };
-        let res = squid_n_job::compute::compute_seismic(self.core.model.clone(), cfg, t)
+        if let Err(msg) = self.check_seismic_period_for_synced_case(lc) {
+            self.report_error(msg);
+            return;
+        }
+        let res = squid_n_job::compute::compute_linear_static(self.core.model.clone(), lc)
             .map_err(|e| e.to_string());
         self.apply_static_case_result(StaticCaseKey::Seismic(dir), res);
     }
@@ -589,29 +711,98 @@ impl App {
     /// UI スレッドをブロックしないよう重い解析を逃がす。
     /// 既にジョブが実行中の場合は何もしない（last_error に案内文を設定）。
     pub fn start_seismic_job(&mut self, dir: SeismicDir) {
-        if !self.begin_analysis_job() {
+        let ready = self.begin_analysis_job();
+        if self.core.scoped.job.is_none() {
+            if let Some(id) = self.seismic_case_id(dir) {
+                self.invalidate_missing_tip_seismic(&[id]);
+            }
+        }
+        if !ready {
             return;
         }
-        let t = match self.design_seismic_period() {
-            Ok(t) => t,
-            Err(msg) => {
-                self.report_error(msg);
-                return;
-            }
+        let Some(lc) = self.seismic_case_id(dir) else {
+            self.report_error("地震荷重ケースがありません");
+            return;
         };
-        let cfg = squid_n_solver::statics::analysis::SeismicCfg {
-            dir,
-            mode: self.core.analysis_cfg.ai_mode,
-            z: self.core.analysis_cfg.z,
-            soil: self.core.analysis_cfg.soil,
-            c0: self.core.analysis_cfg.c0,
-        };
+        if let Err(msg) = self.check_seismic_period_for_synced_case(lc) {
+            self.report_error(msg);
+            return;
+        }
         let model = self.core.model.clone();
         self.spawn_analysis_job("地震静的解析", move || JobResult::StaticCase {
             key: StaticCaseKey::Seismic(dir),
             res: Self::run_compute(|| {
-                squid_n_job::compute::compute_seismic(model, cfg, t).map_err(|e| e.to_string())
+                squid_n_job::compute::compute_linear_static(model, lc).map_err(|e| e.to_string())
             }),
         });
+    }
+
+    fn seismic_case_id(&self, dir: SeismicDir) -> Option<LoadCaseId> {
+        let name = match dir {
+            SeismicDir::X => squid_n_core::model::EX_CASE_NAME,
+            SeismicDir::Y => squid_n_core::model::EY_CASE_NAME,
+        };
+        self.core
+            .model
+            .load_cases
+            .iter()
+            .find(|case| {
+                case.name == name && case.kind == squid_n_core::model::LoadCaseKind::Seismic
+            })
+            .map(|case| case.id)
+    }
+
+    fn check_seismic_period_for_synced_case(&self, id: LoadCaseId) -> Result<(), String> {
+        if self.core.analysis_cfg.ai_mode == AiMode::SemiPrecise
+            && self.core.model.load_cases[id.index()]
+                .nodal
+                .iter()
+                .any(|load| load.source == squid_n_core::model::LoadSource::Auto)
+        {
+            self.design_seismic_period()?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn excluded_tip_results_clear_selected_cache_even_without_new_success() {
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        for name in ["除外対象", "保持対象"] {
+            app.core
+                .model
+                .combinations
+                .push(squid_n_core::model::LoadCombination {
+                    name: name.into(),
+                    terms: vec![(LoadCaseId(0), 1.0)],
+                });
+        }
+        app.run_static_all();
+        app.select_displayed_result(StaticKey::Combo(0));
+        assert!(!app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .member_forces
+            .is_empty());
+        app.apply_static_all_result(
+            Ok(StaticAllComputed::default()),
+            vec!["水平力がありません".into()],
+            (Vec::new(), vec!["除外対象".into()]),
+        );
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert_eq!(bundle.combos.len(), 1);
+        assert_eq!(bundle.combos[0].0, "保持対象");
+        assert!(bundle.member_forces.is_empty());
+        assert!(bundle.member_checks.is_empty());
+        assert!(app.core.scoped.last_static.is_none());
+        assert!(app.ui.scoped.nav.focus_result.is_none());
     }
 }

@@ -609,6 +609,26 @@ impl Model {
                     )));
                 }
             }
+            if !slab.tip_loads.is_empty() && !slab.supports_tip_loads() {
+                return Err(CoreError::DanglingRef(format!(
+                    "Slab {} の先端荷重は取付き線分布の片持ち床板にのみ指定できます",
+                    slab.id.0
+                )));
+            }
+            for load in &slab.tip_loads {
+                if !load.intensity.is_finite() || load.intensity < 0.0 {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Slab {} の先端荷重強度が不正です",
+                        slab.id.0
+                    )));
+                }
+                if self.load_cases.get(load.case.index()).map(|c| c.id) != Some(load.case) {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Slab {} の先端荷重ケース {} が存在しません",
+                        slab.id.0, load.case.0
+                    )));
+                }
+            }
         }
         for plate in &self.wall_plates {
             if let WallPlateShape::Attached {
@@ -1722,6 +1742,16 @@ impl Model {
                         }
                     }
                 }
+                for slab in &mut self.slabs {
+                    for load in &mut slab.tip_loads {
+                        if load.case == sw_id {
+                            load.case = dl_id;
+                        }
+                        if load.case.0 > sw_id.0 {
+                            load.case.0 -= 1;
+                        }
+                    }
+                }
             }
         }
     }
@@ -1790,6 +1820,7 @@ mod node_reference_tests {
             id: SlabId(0),
             shape: SlabShape::Enclosed,
             plate: SlabPlate::default(),
+            tip_loads: Vec::new(),
         });
         model.slabs.push(Slab {
             id: SlabId(1),
@@ -1802,6 +1833,7 @@ mod node_reference_tests {
                 extent: [0.0, 0.0],
             },
             plate: SlabPlate::default(),
+            tip_loads: Vec::new(),
         });
 
         // 5: 壁領域の境界。

@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use squid_n_core::ids::{ElemId, NodeId};
+use squid_n_core::ids::{ElemId, LoadCaseId, NodeId};
 use squid_n_core::model::{
     ElementKind, LoadCase, LoadCaseKind, LoadPurpose, MemberLoad, MemberLoadKind, Model, NodalLoad,
     Slab, DL_CASE_NAME, EX_CASE_NAME, EY_CASE_NAME, LL_FRAME_CASE_NAME, LL_SEISMIC_CASE_NAME,
@@ -16,6 +16,101 @@ use squid_n_load::secondary::{beam_span_position, resolve_nodal_to_primary, SPAN
 use squid_n_solver::statics::analysis::{self, AiMode, SeismicDir};
 
 use crate::settings::AnalysisSettings;
+
+/// 片持ちスラブ先端辺の荷重を、ケース ID ごとの取付き実梁の部分等分布荷重に変換する。
+pub fn compute_tip_loads(
+    model: &Model,
+) -> Result<Vec<(LoadCaseId, Vec<MemberLoad>)>, crate::error::JobError> {
+    let mut cases: Vec<_> = model
+        .load_cases
+        .iter()
+        .map(|case| (case.id, Vec::new()))
+        .collect();
+    for slab in &model.slabs {
+        if slab.tip_loads.is_empty() {
+            continue;
+        }
+        if !slab.supports_tip_loads() {
+            return Err(crate::error::JobError::InvalidInput(format!(
+                "床板 {} は先端荷重の対象ではありません",
+                slab.id.0
+            )));
+        }
+        let Some(coords) = slab.boundary_coords(model) else {
+            return Err(crate::error::JobError::InvalidInput(format!(
+                "床板 {} の先端辺を解決できません",
+                slab.id.0
+            )));
+        };
+        let length = squid_n_core::geom::vec3::dist(coords[0], coords[1]);
+        let tip_length = squid_n_core::geom::vec3::dist(coords[2], coords[3]);
+        if length <= 0.0 || !length.is_finite() || !tip_length.is_finite() {
+            return Err(crate::error::JobError::InvalidInput(format!(
+                "床板 {} の辺の長さが不正です",
+                slab.id.0
+            )));
+        }
+        let cover =
+            squid_n_load::secondary::beams_along_segment(model, coords[0], coords[1], SPAN_TOL_MM);
+        if !squid_n_load::secondary::coverage_covers_full(&cover, length, 1e-6) {
+            return Err(crate::error::JobError::InvalidInput(format!(
+                "床板 {} の先端荷重の取付き区間を実梁で覆えません",
+                slab.id.0
+            )));
+        }
+        for tip in &slab.tip_loads {
+            if !tip.intensity.is_finite() || tip.intensity < 0.0 {
+                return Err(crate::error::JobError::InvalidInput(format!(
+                    "床板 {} の先端荷重強度が不正です",
+                    slab.id.0
+                )));
+            }
+            let Some((_, loads)) = cases
+                .get_mut(tip.case.index())
+                .filter(|(id, _)| *id == tip.case)
+            else {
+                return Err(crate::error::JobError::InvalidInput(format!(
+                    "床板 {} の先端荷重ケースが存在しません",
+                    slab.id.0
+                )));
+            };
+            let w = tip.intensity * tip_length / length;
+            if !w.is_finite() {
+                return Err(crate::error::JobError::InvalidInput(format!(
+                    "床板 {} の先端荷重が有限値を超えました",
+                    slab.id.0
+                )));
+            }
+            if w == 0.0 {
+                continue;
+            }
+            for part in &cover {
+                loads.push(MemberLoad {
+                    source: squid_n_core::model::LoadSource::SlabTip,
+                    ..MemberLoad::auto(
+                        part.elem,
+                        tip.direction.vector(),
+                        MemberLoadKind::Distributed {
+                            a: part.elem_pos[0].min(part.elem_pos[1]),
+                            b: part.elem_pos[0].max(part.elem_pos[1]),
+                            w1: w,
+                            w2: w,
+                        },
+                    )
+                });
+            }
+        }
+    }
+    Ok(cases)
+}
+
+pub fn apply_tip_loads(model: &mut Model, cases: Vec<(LoadCaseId, Vec<MemberLoad>)>) {
+    for (id, loads) in cases {
+        if let Some(case) = model.load_cases.get_mut(id.index()) {
+            case.replace_tip_loads(loads);
+        }
+    }
+}
 
 /// 自動同期対象の 1 荷重ケース分の内容（書き込み前）。
 pub struct AutoLoadCaseContent {
@@ -672,6 +767,33 @@ pub fn compute_seismic_auto_load_cases(
     AutoLoadComputeResult { cases, notices }
 }
 
+/// 先端荷重を持つ EX/EY の Ai 再生成失敗時に限り、旧 Auto 水平力を除去する同期内容を補う。
+pub fn clear_failed_tip_seismic_cases(model: &Model, result: &mut AutoLoadComputeResult) {
+    for name in [EX_CASE_NAME, EY_CASE_NAME] {
+        let Some(case) = model
+            .load_cases
+            .iter()
+            .find(|case| case.name == name && case.kind == LoadCaseKind::Seismic)
+        else {
+            continue;
+        };
+        if result.cases.iter().any(|generated| generated.name == name)
+            || !model
+                .slabs
+                .iter()
+                .any(|slab| slab.tip_loads.iter().any(|tip| tip.case == case.id))
+        {
+            continue;
+        }
+        result.cases.push(AutoLoadCaseContent {
+            name,
+            kind: LoadCaseKind::Seismic,
+            nodal: Vec::new(),
+            member: Vec::new(),
+        });
+    }
+}
+
 /// 重力(DL/LL/LL地震用)＋地震(EX/EY)の自動生成内容を計算する（モデルは書き換えない）。
 pub fn compute_auto_load_cases(
     model: &Model,
@@ -681,7 +803,8 @@ pub fn compute_auto_load_cases(
     squid_n_load::floor::validate_one_way_directions(model)
         .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
     let gravity = compute_gravity_auto_load_cases(model)?;
-    let seismic = compute_seismic_auto_load_cases(model, settings, design_period);
+    let mut seismic = compute_seismic_auto_load_cases(model, settings, design_period);
+    clear_failed_tip_seismic_cases(model, &mut seismic);
     Ok(AutoLoadComputeResult {
         cases: gravity.cases.into_iter().chain(seismic.cases).collect(),
         notices: seismic.notices,
@@ -734,6 +857,9 @@ mod tests {
     use squid_n_core::model::{
         AreaLoad, DistributionMethod, ElementData, ElementKind, EndCondition, FloorRegion,
         ForceRegime, FrameSectionUse, LocalAxis, Node,
+    };
+    use squid_n_core::model::{
+        LoadSource, LoadTransfer, RegionAnchor, Slab, SlabShape, SlabTipLoad, TipLoadDirection,
     };
     use squid_n_core::model::{Section, StandardFloorLoad, Story};
 
@@ -797,6 +923,285 @@ mod tests {
         region.slab_ids.push(slab_id);
         model.floor_regions.push(region);
         model
+    }
+
+    fn tip_model() -> Model {
+        let node = |id, x| Node {
+            id: NodeId(id),
+            coord: [x, 0.0, 0.0],
+            restraint: Default::default(),
+            mass: None,
+            story: None,
+            support_spring: None,
+        };
+        let mut model = Model {
+            nodes: vec![node(0, 0.0), node(1, 8000.0)],
+            elements: vec![ElementData {
+                id: ElemId(0),
+                kind: ElementKind::Beam,
+                nodes: [NodeId(0), NodeId(1)].into_iter().collect(),
+                section: None,
+                local_axis: LocalAxis {
+                    ref_vector: [0.0, 0.0, 1.0],
+                },
+                end_cond: [EndCondition::Fixed; 2],
+                force_regime: ForceRegime::Auto,
+                rigid_zone: Default::default(),
+                plastic_zone: None,
+                spring: None,
+            }],
+            load_cases: squid_n_core::model::default_load_cases(),
+            ..Default::default()
+        };
+        model.load_cases.push(LoadCase {
+            id: LoadCaseId(5),
+            name: "独自".into(),
+            kind: LoadCaseKind::Other,
+            nodal: Vec::new(),
+            member: Vec::new(),
+        });
+        model.slabs.push(Slab {
+            id: squid_n_core::ids::SlabId(0),
+            shape: SlabShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(0), NodeId(1)],
+                    span: [0.25, 0.75],
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: [1500.0, 1500.0],
+            },
+            plate: SlabPlate {
+                loads: vec![AreaLoad {
+                    kind: "DL".into(),
+                    value: 0.005,
+                }],
+                ..Default::default()
+            },
+            tip_loads: vec![SlabTipLoad {
+                case: LoadCaseId(0),
+                intensity: 2.0,
+                direction: TipLoadDirection::NegZ,
+            }],
+        });
+        model
+    }
+
+    #[test]
+    fn failed_ai_clears_only_tip_seismic_auto_and_keeps_manual() {
+        let mut model = tip_model();
+        model.slabs[0].tip_loads[0].case = LoadCaseId(3);
+        model.load_cases[3]
+            .nodal
+            .push(NodalLoad::auto(NodeId(0), [100.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
+        model.load_cases[4]
+            .nodal
+            .push(NodalLoad::auto(NodeId(0), [0.0, 200.0, 0.0, 0.0, 0.0, 0.0]));
+        let mut result =
+            compute_seismic_auto_load_cases(&model, &AnalysisSettings::default(), None);
+        clear_failed_tip_seismic_cases(&model, &mut result);
+        assert_eq!(result.cases.len(), 1);
+        assert_eq!(result.cases[0].name, EX_CASE_NAME);
+        apply_auto_load_cases(&mut model, &result.cases);
+        let tip_loads = compute_tip_loads(&model).unwrap();
+        apply_tip_loads(&mut model, tip_loads);
+        assert!(crate::compute::missing_seismic_horizontal_load(
+            &model.load_cases[3]
+        ));
+        assert_eq!(model.load_cases[4].nodal.len(), 1);
+
+        model.load_cases[3].nodal.push(NodalLoad::manual(
+            NodeId(0),
+            [50.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        ));
+        assert!(!crate::compute::missing_seismic_horizontal_load(
+            &model.load_cases[3]
+        ));
+
+        model.slabs[0].tip_loads.push(SlabTipLoad {
+            case: LoadCaseId(4),
+            intensity: 1.0,
+            direction: TipLoadDirection::PosY,
+        });
+        let mut partial = AutoLoadComputeResult {
+            cases: vec![AutoLoadCaseContent {
+                name: EX_CASE_NAME,
+                kind: LoadCaseKind::Seismic,
+                nodal: vec![NodalLoad::auto(NodeId(0), [20.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+                member: Vec::new(),
+            }],
+            notices: Vec::new(),
+        };
+        clear_failed_tip_seismic_cases(&model, &mut partial);
+        assert_eq!(partial.cases[1].name, EY_CASE_NAME);
+        apply_auto_load_cases(&mut model, &partial.cases);
+        assert!(model.load_cases[3]
+            .nodal
+            .iter()
+            .any(|load| load.source == LoadSource::Auto));
+        assert!(model.load_cases[3]
+            .nodal
+            .iter()
+            .any(|load| load.source == LoadSource::Manual));
+        assert!(model.load_cases[4].nodal.is_empty());
+    }
+
+    #[test]
+    fn prepare_does_not_keep_old_ai_when_tip_ex_has_no_stories() {
+        let mut model = tip_model();
+        model.slabs[0].tip_loads[0].case = LoadCaseId(3);
+        model.load_cases[3]
+            .nodal
+            .push(NodalLoad::auto(NodeId(0), [100.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
+        crate::prepare::prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
+            .unwrap();
+        assert!(crate::compute::missing_seismic_horizontal_load(
+            &model.load_cases[3]
+        ));
+        assert!(model.load_cases[3]
+            .member
+            .iter()
+            .any(|load| load.source == LoadSource::SlabTip));
+    }
+
+    #[test]
+    fn tip_load_partial_span_adds_to_surface_once() {
+        let mut model = tip_model();
+        let (surface_nodal, surface) = slab_load_case_content(
+            &model,
+            &slab_beam_loads_with(&model, |_| 0.005, false, &beam_elem_map(&model)).unwrap(),
+        );
+        assert!(surface_nodal.is_empty());
+        let (_, surface_w) = surface
+            .iter()
+            .find_map(|l| match l.kind {
+                MemberLoadKind::Distributed { w1, .. } => Some((l.elem, w1)),
+                _ => None,
+            })
+            .unwrap();
+        assert!((surface_w - 7.5).abs() < 1e-9);
+        let loads = compute_tip_loads(&model).unwrap();
+        let tip = &loads[0].1[0];
+        assert_eq!(tip.dir, [0.0, 0.0, -1.0]);
+        assert!(
+            matches!(tip.kind, MemberLoadKind::Distributed { a, b, w1, w2 }
+            if (a - 2000.0).abs() < 1e-9 && (b - 6000.0).abs() < 1e-9
+            && w1 == 2.0 && w2 == 2.0)
+        );
+        model.load_cases[0].replace_auto_loads(Vec::new(), surface);
+        apply_tip_loads(&mut model, loads);
+        let total: f64 = model.load_cases[0]
+            .member
+            .iter()
+            .map(|load| match load.kind {
+                MemberLoadKind::Distributed { w1, .. } => w1,
+                _ => 0.0,
+            })
+            .sum();
+        assert!((total - 9.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn tip_load_six_directions_cases_and_resync_preserve_other_loads() {
+        let mut model = tip_model();
+        let directions = [
+            TipLoadDirection::PosX,
+            TipLoadDirection::NegX,
+            TipLoadDirection::PosY,
+            TipLoadDirection::NegY,
+            TipLoadDirection::PosZ,
+            TipLoadDirection::NegZ,
+        ];
+        model.slabs[0].tip_loads = directions
+            .iter()
+            .enumerate()
+            .map(|(i, direction)| SlabTipLoad {
+                case: if i % 2 == 0 {
+                    LoadCaseId(3)
+                } else {
+                    LoadCaseId(5)
+                },
+                intensity: 1.0,
+                direction: *direction,
+            })
+            .collect();
+        model.load_cases[3].member.push(MemberLoad::manual(
+            ElemId(0),
+            [1.0, 0.0, 0.0],
+            MemberLoadKind::Point { a: 100.0, p: 1.0 },
+        ));
+        model.load_cases[3].replace_auto_loads(
+            vec![NodalLoad::auto(NodeId(0), [100.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+            Vec::new(),
+        );
+        let loads = compute_tip_loads(&model).unwrap();
+        assert_eq!(loads[3].1.len(), 3);
+        assert_eq!(loads[5].1.len(), 3);
+        assert_eq!(loads[3].1[0].dir, [1.0, 0.0, 0.0]);
+        assert_eq!(loads[5].1[2].dir, [0.0, 0.0, -1.0]);
+        apply_tip_loads(&mut model, loads);
+        model.slabs[0].tip_loads.clear();
+        let cleared = compute_tip_loads(&model).unwrap();
+        apply_tip_loads(&mut model, cleared);
+        assert_eq!(model.load_cases[3].member.len(), 1);
+        assert_eq!(model.load_cases[3].member[0].source, LoadSource::Manual);
+        assert_eq!(model.load_cases[3].nodal[0].values[0], 100.0);
+        assert!(model.load_cases[5].member.is_empty());
+    }
+
+    #[test]
+    fn tip_load_requires_real_beam_and_uses_oblique_tip_length() {
+        let mut model = tip_model();
+        if let SlabShape::Attached { extent, .. } = &mut model.slabs[0].shape {
+            *extent = [0.0, 3000.0];
+        }
+        let loads = compute_tip_loads(&model).unwrap();
+        let expected = 2.0 * (4000.0_f64.powi(2) + 3000.0_f64.powi(2)).sqrt() / 4000.0;
+        assert!(
+            matches!(loads[0].1[0].kind, MemberLoadKind::Distributed { w1, .. } if (w1 - expected).abs() < 1e-9)
+        );
+        model.elements.clear();
+        assert!(compute_tip_loads(&model).is_err());
+
+        let mut gap = tip_model();
+        gap.nodes.push(Node {
+            id: NodeId(2),
+            coord: [4000.0, 0.0, 0.0],
+            ..gap.nodes[0].clone()
+        });
+        gap.nodes.push(Node {
+            id: NodeId(3),
+            coord: [4005.0, 0.0, 0.0],
+            ..gap.nodes[0].clone()
+        });
+        gap.elements[0].nodes = [NodeId(0), NodeId(2)].into_iter().collect();
+        let mut second = gap.elements[0].clone();
+        second.id = ElemId(1);
+        second.nodes = [NodeId(3), NodeId(1)].into_iter().collect();
+        gap.elements.push(second);
+        assert!(compute_tip_loads(&gap).is_err(), "5 mm の未覆いも認めない");
+
+        let mut split = tip_model();
+        split.nodes.push(Node {
+            id: NodeId(2),
+            coord: [4000.0, 0.0, 0.0],
+            ..split.nodes[0].clone()
+        });
+        split.elements[0].nodes = [NodeId(2), NodeId(0)].into_iter().collect();
+        let mut second = split.elements[0].clone();
+        second.id = ElemId(1);
+        second.nodes = [NodeId(2), NodeId(1)].into_iter().collect();
+        split.elements.push(second);
+        let segments = compute_tip_loads(&split).unwrap();
+        assert_eq!(segments[0].1.len(), 2);
+        let total: f64 = segments[0]
+            .1
+            .iter()
+            .map(|load| match load.kind {
+                MemberLoadKind::Distributed { a, b, w1, .. } => (b - a) * w1,
+                _ => 0.0,
+            })
+            .sum();
+        assert!((total - 8000.0).abs() < 1e-9);
     }
 
     #[test]
@@ -1524,6 +1929,7 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            tip_loads: Vec::new(),
         }];
 
         let beam_map = beam_elem_map(&model);
@@ -1581,6 +1987,7 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            tip_loads: Vec::new(),
         }];
 
         let beam_map = beam_elem_map(&model);
@@ -1642,6 +2049,7 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            tip_loads: Vec::new(),
         }];
 
         let beam_map = beam_elem_map(&model);
@@ -1701,6 +2109,7 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            tip_loads: Vec::new(),
         }];
 
         let beam_map = beam_elem_map(&model);
@@ -1761,6 +2170,7 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            tip_loads: Vec::new(),
         }];
 
         let beam_map = beam_elem_map(&model);
@@ -1831,6 +2241,7 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            tip_loads: Vec::new(),
         }];
 
         let beam_map = beam_elem_map(&model);
@@ -1891,6 +2302,7 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            tip_loads: Vec::new(),
         }];
 
         let beam_map = beam_elem_map(&model);

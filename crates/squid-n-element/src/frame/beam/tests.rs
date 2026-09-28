@@ -416,6 +416,7 @@ fn test_beam_new_slab_cooperation_width_amplifies_iy() {
                 method: DistributionMethod::TriTrapezoid,
                 one_way: None,
             },
+            tip_loads: Vec::new(),
         }],
         slab_thickness: 150.0,
         ..Default::default()
@@ -546,6 +547,7 @@ fn test_beam_new_slab_cooperation_width_survives_beam_subdivided_region() {
                     method: DistributionMethod::TriTrapezoid,
                     one_way: None,
                 },
+                tip_loads: Vec::new(),
             },
             Slab {
                 id: SlabId(1),
@@ -557,6 +559,7 @@ fn test_beam_new_slab_cooperation_width_survives_beam_subdivided_region() {
                     method: DistributionMethod::TriTrapezoid,
                     one_way: None,
                 },
+                tip_loads: Vec::new(),
             },
         ],
         slab_thickness: 150.0,
@@ -627,6 +630,7 @@ fn rc_beam_for_slab_factor(plate: Option<squid_n_core::model::SlabPlate>) -> (Mo
             id: SlabId(0),
             shape: SlabShape::Enclosed,
             plate,
+            tip_loads: Vec::new(),
         }],
         None => vec![],
     };
@@ -725,6 +729,7 @@ fn test_slab_stiffness_factor_only_for_enclosed_plated_slabs() {
             section: Some(squid_n_core::ids::SectionId(1)),
             ..Default::default()
         },
+        tip_loads: Vec::new(),
     }];
     let b_attached = stiffness_breakdown(&m_attached, &e);
     assert!(
@@ -836,6 +841,7 @@ fn test_beam_new_composite_steel_beam_averages_stiffness() {
                 method: DistributionMethod::TriTrapezoid,
                 one_way: None,
             },
+            tip_loads: Vec::new(),
         }],
         slab_thickness: 150.0,
         ..Default::default()

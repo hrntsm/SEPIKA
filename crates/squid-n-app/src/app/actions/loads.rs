@@ -58,6 +58,7 @@ impl App {
         for case in result.cases {
             self.sync_one_auto_case(case.name, case.kind, case.nodal, case.member);
         }
+        self.sync_tip_load_cases_action();
     }
 
     /// 地震荷重の標準ケース（EX・EY、kind=Seismic）へ Ai 分布の水平力を同期する。
@@ -72,11 +73,8 @@ impl App {
     /// 本関数自体は剛性行列組立や固有値解析を一切行わない）。X・Y 双方向で T を
     /// 共有するため `design_seismic_period` の呼び出しは 1 回のみ。
     ///
-    /// 階が未定義・地震荷重が構築できない場合は何もしない（既存の EX/EY
-    /// ケースは変更しない。組合せ実行時に空の地震ケースを参照していれば
-    /// エラーで案内する）。SemiPrecise で固有値解析が未実行の場合も同様に
-    /// 何もせず、代わりに `last_notice` へ実行を促すメッセージを設定する
-    /// （`last_error` とは別枠。解析自体は継続してよい注意事項のため）。
+    /// 再生成できない場合、先端荷重を持つ EX/EY だけは旧 Auto 荷重を除去する。
+    /// SemiPrecise で固有値解析が未実行の場合は `last_notice` に案内する。
     /// 冪等な同期アクション（`sync_gravity_load_cases_action` と同じ規約）。
     pub fn sync_seismic_load_cases_action(&mut self) {
         let design_period = match self.core.analysis_cfg.ai_mode {
@@ -84,22 +82,36 @@ impl App {
                 Ok(t) => Some(t),
                 Err(msg) => {
                     self.report_notice(msg);
+                    let mut result = squid_n_job::auto_loads::AutoLoadComputeResult {
+                        cases: Vec::new(),
+                        notices: Vec::new(),
+                    };
+                    squid_n_job::auto_loads::clear_failed_tip_seismic_cases(
+                        &self.core.model,
+                        &mut result,
+                    );
+                    for case in result.cases {
+                        self.sync_one_auto_case(case.name, case.kind, case.nodal, case.member);
+                    }
+                    self.sync_tip_load_cases_action();
                     return;
                 }
             },
             AiMode::Approx => None,
         };
-        let result = squid_n_job::auto_loads::compute_seismic_auto_load_cases(
+        let mut result = squid_n_job::auto_loads::compute_seismic_auto_load_cases(
             &self.core.model,
             &self.core.analysis_cfg,
             design_period,
         );
+        squid_n_job::auto_loads::clear_failed_tip_seismic_cases(&self.core.model, &mut result);
         for notice in result.notices {
             self.report_notice(notice);
         }
         for case in result.cases {
             self.sync_one_auto_case(case.name, case.kind, case.nodal, case.member);
         }
+        self.sync_tip_load_cases_action();
     }
 
     /// `sync_auto_load_cases_action` が同期の要否判定に使うハッシュを計算する。
@@ -174,13 +186,48 @@ impl App {
                 return;
             }
         };
+        let tip_cases = match squid_n_job::auto_loads::compute_tip_loads(&self.core.model) {
+            Ok(cases) => cases,
+            Err(error) => {
+                self.report_error(error.to_string());
+                return;
+            }
+        };
         for notice in result.notices {
             self.report_notice(notice);
         }
         for case in result.cases {
             self.sync_one_auto_case(case.name, case.kind, case.nodal, case.member);
         }
+        self.apply_tip_load_cases(tip_cases);
         self.core.scoped.auto_load_sync_hash = Some(self.compute_auto_load_sync_hash());
+    }
+
+    fn sync_tip_load_cases_action(&mut self) {
+        let cases = match squid_n_job::auto_loads::compute_tip_loads(&self.core.model) {
+            Ok(cases) => cases,
+            Err(error) => {
+                self.report_error(error.to_string());
+                return;
+            }
+        };
+        self.apply_tip_load_cases(cases);
+    }
+
+    fn apply_tip_load_cases(
+        &mut self,
+        cases: Vec<(LoadCaseId, Vec<squid_n_core::model::MemberLoad>)>,
+    ) {
+        for (id, member) in cases {
+            if self.core.model.load_cases[id.index()].tip_loads_match(&member) {
+                continue;
+            }
+            self.core.scoped.undo.run(
+                &mut self.core.model,
+                Box::new(squid_n_edit::SyncTipLoadsToCase { id, member }),
+            );
+            self.core.scoped.staleness.mark_edited();
+        }
     }
 
     /// 名前付き荷重ケースを指定の `kind`・内容へ冪等に同期する
@@ -218,7 +265,7 @@ impl App {
         self.core.scoped.staleness.mark_edited();
     }
 
-    /// 組合せが参照する空の水平力ケース（kind=Seismic／Wind・内容なし）の名前を返す。
+    /// 組合せが参照する水平力欠損ケースの名前を返す。
     /// 空の地震・風ケースを含む組合せをそのまま解くと水平力の項が黙って 0 になり、
     /// 長期と同じ結果を短期の検定に用いてしまうため、実行前のガードに使う
     /// （`run_combination`/`run_static_all`）。いずれも準備計算が

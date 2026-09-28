@@ -1972,6 +1972,7 @@ fn test_model_issues_errors_on_unreferenced_invalid_cft_section() {
             section: Some(SectionId(1)),
             ..Default::default()
         },
+        tip_loads: Vec::new(),
     });
 
     assert!(!model_issues(&model)
@@ -2174,6 +2175,7 @@ fn test_model_issues_warns_partial_beam_on_attached_edge() {
             extent: [1500.0, 1500.0],
         },
         plate: SlabPlate::default(),
+        tip_loads: Vec::new(),
     });
 
     let issues = model_issues(&model);
@@ -2227,6 +2229,7 @@ fn test_model_issues_warns_floating_plate() {
             method: DistributionMethod::TriTrapezoid,
             one_way: None,
         },
+        tip_loads: Vec::new(),
     });
     model
         .floor_assignment_regions

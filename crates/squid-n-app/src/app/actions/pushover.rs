@@ -112,7 +112,9 @@ impl App {
     }
 
     pub fn run_pushover(&mut self) {
-        self.begin_analysis();
+        if !self.begin_analysis() {
+            return;
+        }
         self.notice_steel_seismic_walls();
         let res =
             squid_n_job::compute::compute_pushover(self.core.model.clone(), self.core.analysis_cfg)

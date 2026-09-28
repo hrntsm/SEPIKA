@@ -821,6 +821,7 @@ fn test_formwork_plateless_no_deduction_attached_deducts() {
             section: Some(SectionId(2)),
             ..Default::default()
         },
+        tip_loads: Vec::new(),
     });
     let form_att = girder_formwork(&attached);
     assert!(

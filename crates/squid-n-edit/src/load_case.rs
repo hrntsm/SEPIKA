@@ -26,21 +26,76 @@ impl EditCommand for AddLoadCase {
     }
 }
 
-id_indexed_delete_insert!(
-    /// 荷重ケース削除（中身の節点荷重・部材荷重ごと削除し、undo で復元する）。
-    /// 荷重組合せから参照中のケースは Noop。
-    /// ID＝配列インデックスの不変条件を保つため、後続のケース ID と組合せからの参照を繰り上げる。
-    DeleteLoadCase,
-    /// 指定インデックスへ荷重ケースを再挿入する（[`DeleteLoadCase`] の逆操作専用）。
-    InsertLoadCase,
-    id = LoadCaseId,
-    entity = squid_n_core::model::LoadCase,
-    vec = load_cases,
-    shift = shift_load_case_ids,
-    guard = load_case_in_use,
-    del_label = "荷重ケース削除",
-    ins_label = "荷重ケース削除の取り消し",
-);
+/// 荷重ケース削除。先端荷重の参照を取り除き、残るケース ID を詰める。
+pub struct DeleteLoadCase {
+    pub id: LoadCaseId,
+}
+
+impl EditCommand for DeleteLoadCase {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let idx = self.id.index();
+        if model.load_cases.get(idx).map(|case| case.id) != Some(self.id)
+            || load_case_in_use(model, self.id)
+        {
+            return Box::new(Noop);
+        }
+        let tip_loads: Vec<_> = model
+            .slabs
+            .iter()
+            .map(|slab| slab.tip_loads.clone())
+            .collect();
+        for slab in &mut model.slabs {
+            slab.tip_loads.retain(|load| load.case != self.id);
+        }
+        let old = model.load_cases.remove(idx);
+        shift_load_case_ids(model, |id| {
+            if id.0 > self.id.0 {
+                id.0 -= 1;
+            }
+        });
+        Box::new(InsertLoadCase {
+            index: idx,
+            old,
+            tip_loads,
+        })
+    }
+
+    fn label(&self) -> &str {
+        "荷重ケース削除"
+    }
+}
+
+/// 荷重ケース削除の Undo。先端荷重の設定も元に戻す。
+pub struct InsertLoadCase {
+    pub index: usize,
+    pub old: squid_n_core::model::LoadCase,
+    pub tip_loads: Vec<Vec<squid_n_core::model::SlabTipLoad>>,
+}
+
+impl EditCommand for InsertLoadCase {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if self.index > model.load_cases.len() || self.tip_loads.len() != model.slabs.len() {
+            return Box::new(Noop);
+        }
+        let id = LoadCaseId(self.index as u32);
+        shift_load_case_ids(model, |case| {
+            if case.0 >= id.0 {
+                case.0 += 1;
+            }
+        });
+        for (slab, loads) in model.slabs.iter_mut().zip(&self.tip_loads) {
+            slab.tip_loads = loads.clone();
+        }
+        let mut old = self.old.clone();
+        old.id = id;
+        model.load_cases.insert(self.index, old);
+        Box::new(DeleteLoadCase { id })
+    }
+
+    fn label(&self) -> &str {
+        "荷重ケース削除の取り消し"
+    }
+}
 
 /// 指定荷重ケースを参照している荷重組合せが存在するか（削除ガード用）。
 fn load_case_in_use(model: &Model, id: LoadCaseId) -> bool {
@@ -58,6 +113,11 @@ fn shift_load_case_ids(model: &mut Model, mut f: impl FnMut(&mut LoadCaseId)) {
     for combo in &mut model.combinations {
         for (lcid, _) in &mut combo.terms {
             f(lcid);
+        }
+    }
+    for slab in &mut model.slabs {
+        for load in &mut slab.tip_loads {
+            f(&mut load.case);
         }
     }
 }
@@ -222,6 +282,7 @@ impl EditCommand for AssignSlabToFloorPlateRegion {
                 id: new_id,
                 shape: squid_n_core::model::SlabShape::Enclosed,
                 plate: self.plate.clone(),
+                tip_loads: Vec::new(),
             }),
             region_refs: Vec::new(),
         }

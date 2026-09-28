@@ -2048,6 +2048,7 @@ fn test_delete_slab_middle_renumbers_and_roundtrips() {
                 method: DistributionMethod::TributaryArea,
                 ..Default::default()
             },
+            tip_loads: Vec::new(),
         });
     }
     assert_eq!(model.slabs.len(), 3);
@@ -6808,6 +6809,7 @@ fn test_set_attached_extent_and_anchor_noop() {
         id: SlabId(0),
         shape: SlabShape::Enclosed,
         plate: SlabPlate::default(),
+        tip_loads: Vec::new(),
     });
     model
         .floor_assignment_regions
@@ -6933,6 +6935,7 @@ fn test_set_slab_section_sets_and_clears_section() {
         id: SlabId(0),
         shape: SlabShape::Enclosed,
         plate: SlabPlate::default(),
+        tip_loads: Vec::new(),
     });
     assert!(model.slabs[0].plate.section.is_none());
     let mut undo = UndoStack::default();
@@ -6971,6 +6974,7 @@ fn test_plate_section_commands_reject_cft() {
         id: SlabId(0),
         shape: SlabShape::Enclosed,
         plate: SlabPlate::default(),
+        tip_loads: Vec::new(),
     });
     model.wall_plates.push(WallPlate {
         self_weight_shares: Vec::new(),
@@ -7689,4 +7693,120 @@ fn 間柱端部負担率を設定し取り消せる() {
     );
     undo.apply(&mut model);
     assert_eq!(model.unassigned_posts[0].gravity_end_shares, None);
+}
+
+#[test]
+fn 先端荷重の編集検証と取り消し() {
+    use squid_n_core::ids::LoadCaseId;
+    use squid_n_core::model::{LoadTransfer, RegionAnchor, SlabTipLoad, TipLoadDirection};
+
+    let mut model = seeded_model(2, 1);
+    model.load_cases = squid_n_core::model::default_load_cases();
+    crate::AddAttachedSlab {
+        anchor: RegionAnchor::Line {
+            nodes: [NodeId(0), NodeId(1)],
+            span: [0.0, 1.0],
+            transfer: LoadTransfer::Anchor,
+        },
+        extent: [1000.0; 2],
+        plate: Default::default(),
+    }
+    .apply(&mut model);
+    let id = SlabId(0);
+    let load = SlabTipLoad {
+        case: LoadCaseId(3),
+        intensity: 2.0,
+        direction: TipLoadDirection::NegY,
+    };
+    let mut undo = UndoStack::default();
+    assert!(undo.run(
+        &mut model,
+        Box::new(crate::SetSlabTipLoads {
+            id,
+            loads: vec![load.clone()]
+        })
+    ));
+    undo.undo(&mut model);
+    assert!(model.slabs[0].tip_loads.is_empty());
+    undo.redo(&mut model);
+    for invalid in [f64::NAN, f64::INFINITY, -1.0] {
+        assert!(!undo.run(
+            &mut model,
+            Box::new(crate::SetSlabTipLoads {
+                id,
+                loads: vec![SlabTipLoad {
+                    intensity: invalid,
+                    ..load.clone()
+                }],
+            })
+        ));
+        assert_eq!(model.slabs[0].tip_loads, vec![load.clone()]);
+    }
+    assert!(!undo.run(
+        &mut model,
+        Box::new(crate::SetSlabTipLoads {
+            id,
+            loads: vec![SlabTipLoad {
+                case: LoadCaseId(999),
+                ..load.clone()
+            }],
+        })
+    ));
+    assert!(!undo.run(
+        &mut model,
+        Box::new(crate::SetAttachedAnchor {
+            id,
+            anchor: RegionAnchor::Point(NodeId(0)),
+        })
+    ));
+    assert!(model.validate().is_ok(), "{:?}", model.validate());
+    model.slabs[0].tip_loads[0].intensity = -1.0;
+    assert!(model.validate().is_err());
+    model.slabs[0].tip_loads[0] = load;
+    model.slabs[0].shape = squid_n_core::model::SlabShape::Enclosed;
+    assert!(model.validate().is_err());
+}
+
+#[test]
+fn 荷重ケース削除は先端荷重参照を取り消し可能な形で更新する() {
+    use squid_n_core::ids::LoadCaseId;
+    use squid_n_core::model::{LoadTransfer, RegionAnchor, SlabTipLoad, TipLoadDirection};
+
+    let mut model = seeded_model(2, 1);
+    model.load_cases = squid_n_core::model::default_load_cases();
+    model.combinations.clear();
+    crate::AddAttachedSlab {
+        anchor: RegionAnchor::Line {
+            nodes: [NodeId(0), NodeId(1)],
+            span: [0.0, 1.0],
+            transfer: LoadTransfer::Anchor,
+        },
+        extent: [1000.0; 2],
+        plate: Default::default(),
+    }
+    .apply(&mut model);
+    model.slabs[0].tip_loads = vec![
+        SlabTipLoad {
+            case: LoadCaseId(2),
+            intensity: 1.0,
+            direction: TipLoadDirection::NegX,
+        },
+        SlabTipLoad {
+            case: LoadCaseId(4),
+            intensity: 2.0,
+            direction: TipLoadDirection::NegZ,
+        },
+    ];
+    let mut undo = UndoStack::default();
+    assert!(undo.run(
+        &mut model,
+        Box::new(crate::DeleteLoadCase { id: LoadCaseId(2) })
+    ));
+    assert_eq!(model.slabs[0].tip_loads.len(), 1);
+    assert_eq!(model.slabs[0].tip_loads[0].case, LoadCaseId(3));
+    undo.undo(&mut model);
+    assert_eq!(model.slabs[0].tip_loads.len(), 2);
+    assert_eq!(model.slabs[0].tip_loads[1].case, LoadCaseId(4));
+    undo.redo(&mut model);
+    assert_eq!(model.slabs[0].tip_loads[0].case, LoadCaseId(3));
 }

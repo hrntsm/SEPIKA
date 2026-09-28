@@ -24,17 +24,14 @@ mod wave_library;
 #[cfg(test)]
 pub(crate) use io::{needs_recording_confirm, SAVE_RECORDING_CONFIRM_BYTES};
 
-/// 水平力の荷重ケース（種別が地震・風）なのに荷重が入っていないか。
+/// 水平力ケースが空、または EX/EY に地震水平力が欠けているか。
 ///
-/// 準備計算が EX/EY・WX/WY へ水平力を生成するため、空のまま残っているのは
-/// 「準備計算が未実行、または階が未定義で算定できなかった」ことの合図になる。
-/// これを解くと水平力の項が黙って 0 になり、長期と同じ応力を短期の検定に
-/// 使ってしまうため、解析の実行前ガードに使う。
 fn is_empty_lateral_case(lc: &squid_n_core::model::LoadCase) -> bool {
     use squid_n_core::model::LoadCaseKind;
-    matches!(lc.kind, LoadCaseKind::Seismic | LoadCaseKind::Wind)
+    (matches!(lc.kind, LoadCaseKind::Seismic | LoadCaseKind::Wind)
         && lc.nodal.is_empty()
-        && lc.member.is_empty()
+        && lc.member.is_empty())
+        || squid_n_job::compute::missing_seismic_horizontal_load(lc)
 }
 
 /// 解析スレッドの panic（`catch_unwind` の戻り値）を利用者向けエラーメッセージへ
@@ -184,11 +181,12 @@ impl App {
     /// 荷重同期。冪等・ハッシュ判定でスキップされる）。
     ///
     /// 解析の入口は必ず本メソッドを通ること。
-    fn begin_analysis(&mut self) {
+    fn begin_analysis(&mut self) -> bool {
         self.apply_parallelism_setting();
         self.core.scoped.last_error = None;
         self.core.scoped.last_notice = None;
         self.ensure_preparation();
+        self.core.scoped.last_error.is_none()
     }
 
     /// バックグラウンドジョブ共通の入口ガード＋前処理。
@@ -198,8 +196,7 @@ impl App {
             self.report_error("解析実行中です");
             return false;
         }
-        self.begin_analysis();
-        true
+        self.begin_analysis()
     }
     /// パニックを解析エラーへ変換して計算を実行する（ジョブスレッド用）。
     fn run_compute<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
@@ -269,6 +266,9 @@ impl App {
         // 依存し階の生成結果には依存しないため、先に呼んで差し支えない。
         self.apply_rigid_zones_for_analysis();
         self.sync_gravity_load_cases_action();
+        if self.core.scoped.last_error.is_some() {
+            return;
+        }
         let gravity_lcs = gravity_cases_for_seismic_weight(&self.core.model);
         let include_density = density_self_weight_for_stories(&self.core.model);
         let mass_method = self.core.analysis_cfg.mass_method;
@@ -295,6 +295,9 @@ impl App {
                     // 階は既に最新。荷重の同期だけ冪等に確認して終える。
                     self.apply_rigid_zones_for_analysis();
                     self.sync_seismic_load_cases_action();
+                    if self.core.scoped.last_error.is_some() {
+                        return;
+                    }
                     self.core.scoped.auto_load_sync_hash = Some(self.compute_auto_load_sync_hash());
                     return;
                 }
@@ -314,6 +317,9 @@ impl App {
                 // 剛域込みの剛性を用いるようにするため）。
                 self.apply_rigid_zones_for_analysis();
                 self.sync_seismic_load_cases_action();
+                if self.core.scoped.last_error.is_some() {
+                    return;
+                }
                 // 直後に run_linear_static 等（`sync_auto_load_cases_action`）が
                 // 呼ばれても、いま行った DL/LL/EX/EY の同期を無駄に繰り返さない
                 // よう、同期後の状態のハッシュを記録しておく。
@@ -430,7 +436,8 @@ impl App {
                     JobResult::StaticAll {
                         computed,
                         pre_errors,
-                    } => self.apply_static_all_result(computed, pre_errors),
+                        excluded,
+                    } => self.apply_static_all_result(computed, pre_errors, excluded),
                 }
                 // 失敗時は各 apply_* が report_error 経由で last_error とログの両方
                 // へ反映済みのため、ここでは成功時のみ完了ログを追加する
@@ -538,7 +545,7 @@ impl App {
                 diags.push(Diagnostic {
                     severity: DiagSeverity::Warning,
                     message: format!(
-                        "荷重組合せ「{}」が参照する水平力の荷重ケース「{}」が空です\
+                        "荷重組合せ「{}」が参照する荷重ケース「{}」に水平力がありません\
                          （解析タブの「準備計算 実行」で生成できます）",
                         combo.name, name
                     ),
@@ -591,7 +598,11 @@ impl App {
 impl App {
     /// 解析パネルの実行入口。未設定の割当領域があれば確認待ちにして戻る。
     pub fn request_analysis(&mut self, pending: PendingAnalysis) {
+        self.core.scoped.last_error = None;
         self.ensure_preparation();
+        if self.core.scoped.last_error.is_some() {
+            return;
+        }
         if self.unset_regions_confirm_required() {
             self.core.scoped.pending_unset_analysis = Some(pending);
             return;

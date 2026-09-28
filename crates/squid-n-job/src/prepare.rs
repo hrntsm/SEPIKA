@@ -7,7 +7,9 @@ use squid_n_core::model::Model;
 use squid_n_core::region_rebuild::rebuild_floor_regions;
 use squid_n_core::wall_region_rebuild::rebuild_wall_regions;
 
-use crate::auto_loads::{apply_auto_load_cases, compute_auto_load_cases};
+use crate::auto_loads::{
+    apply_auto_load_cases, apply_tip_loads, compute_auto_load_cases, compute_tip_loads,
+};
 use crate::error::JobError;
 use crate::settings::AnalysisSettings;
 
@@ -66,7 +68,9 @@ pub fn prepare_model_for_analysis(
     let panels = apply_rigid_zones_and_panels(model);
     let computed = compute_auto_load_cases(model, settings, design_period);
     let computed = computed?;
+    let tip_loads = compute_tip_loads(model)?;
     apply_auto_load_cases(model, &computed.cases);
+    apply_tip_loads(model, tip_loads);
     let mut notices = computed.notices;
     if let Some(warning) = model.unset_plate_assignment_warning() {
         notices.push(warning);

@@ -1452,6 +1452,7 @@ mod tests {
             id: SlabId(0),
             shape: crate::model::SlabShape::Enclosed,
             plate: crate::model::SlabPlate::default(),
+            tip_loads: Vec::new(),
         });
         regions.regions[1].assignment = PlateAssignment::Plate(SlabId(0));
         assert!(
@@ -1972,6 +1973,7 @@ mod tests {
                 extent: [1000.0, 1000.0],
             },
             plate: crate::model::SlabPlate::default(),
+            tip_loads: Vec::new(),
         };
         let mut model = square_model_with_beam();
         model.slabs.push(attached);

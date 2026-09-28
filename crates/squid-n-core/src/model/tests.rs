@@ -1289,6 +1289,7 @@ fn test_validate_duplicate_floor_assignment_region_boundary() {
         id: SlabId(1),
         shape: SlabShape::Enclosed,
         plate: SlabPlate::default(),
+        tip_loads: Vec::new(),
     });
     assert!(
         model.validate().is_err(),
@@ -1372,6 +1373,7 @@ fn test_validate_checks_anchor_span_bounds() {
             extent: [1000.0, 1000.0],
         },
         plate: SlabPlate::default(),
+        tip_loads: Vec::new(),
     };
     model.slabs = vec![mk([0.0, 1.0])];
     assert!(model.validate().is_ok(), "全長の取り付きは通る");
