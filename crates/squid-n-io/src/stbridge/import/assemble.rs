@@ -124,8 +124,8 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
     let anchorize = model.anchorize_secondary_members();
     model.rebuild_floor_assignment_regions();
     assign_imported_slabs(&mut model, pending_slabs)?;
+    model.rebuild_wall_assignment_regions();
     if !pending_walls.is_empty() {
-        model.rebuild_wall_assignment_regions();
         assign_imported_walls(&mut model, pending_walls)?;
     }
     let rebuild = rebuild_floor_regions(&mut model);
