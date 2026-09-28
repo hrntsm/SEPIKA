@@ -4,7 +4,7 @@ use super::{ElementData, Material, Model, Section};
 use crate::section_shape::SectionShape;
 use crate::units::{
     concrete_unit_weight_kn_m3, to_internal::mass_density_from_unit_weight_kn_m3,
-    ConcreteComposition,
+    ConcreteComposition, STEEL_MASS_DENSITY_TON_MM3,
 };
 
 /// 線材断面の単位長さ当たり質量と断面回転慣性。
@@ -226,11 +226,11 @@ pub fn validate_section_materials(
         SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
     ) {
         let Some(main) = main else {
-            return Err(format!("CFT断面{}の鋼管主材料が未設定です", section.name));
+            return Err(format!("CFT断面{}の充填コンクリート材料が未設定です", section.name));
         };
-        if main.category != super::MaterialCategory::Steel {
+        if main.category != super::MaterialCategory::Concrete {
             return Err(format!(
-                "CFT断面{}の鋼管主材料が鋼材ではありません",
+                "CFT断面{}の主材料がコンクリートではありません",
                 section.name
             ));
         }
@@ -515,10 +515,10 @@ fn shaped_mass(
                     iy: core.iy,
                     iz: core.iz,
                 };
-                result.add(main_density, steel);
+                result.add(STEEL_MASS_DENSITY_TON_MM3, steel);
                 result.add(cft_core_density(main), concrete);
             } else {
-                result.add(main_density, steel);
+                result.add(STEEL_MASS_DENSITY_TON_MM3, steel);
             }
         }
         SectionShape::RcWall { thickness, .. } => {
@@ -849,19 +849,20 @@ mod tests {
     }
 
     #[test]
-    fn cftは主材料のfcからコア密度を導く() {
+    fn cftは充填コンクリート主材料のfcからコア密度を導く() {
         let shape = SectionShape::CftBox {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
         };
         let section = shape.to_section(SectionId(0), "CFT".into());
-        let steel = material(0, MaterialCategory::Steel, 8.0, Some(24.0));
+        let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
         let properties =
-            SectionMassProperties::from_section(&section, Some(&steel), None, None, None);
+            SectionMassProperties::from_section(&section, Some(&concrete), None, None, None);
         let core = shape.cft_core_props().unwrap();
-        let rho_core = cft_core_density(Some(&steel));
-        let expected = 8.0 * shape.calc_area() + rho_core * core.area;
+        let rho_core = cft_core_density(Some(&concrete));
+        let expected =
+            STEEL_MASS_DENSITY_TON_MM3 * shape.calc_area() + rho_core * core.area;
         assert!((properties.mass_per_length - expected).abs() < 1e-9);
         assert!((rho_core - 23.0e-6 / crate::units::GRAVITY_MM_S2).abs() < 1e-18);
     }
@@ -874,44 +875,44 @@ mod tests {
             thick: 12.0,
         };
         let section = shape.to_section(SectionId(0), "CFT".into());
-        let steel = material(0, MaterialCategory::Steel, 8.0, None);
+        let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, None);
         let error =
-            SectionMassProperties::try_from_section(&section, Some(&steel), None, None, None)
+            SectionMassProperties::try_from_section(&section, Some(&concrete), None, None, None)
                 .expect_err("Fc未設定のCFTは質量を計算してはならない");
         assert!(error.contains("CFT"));
     }
 
     #[test]
-    fn cftは鋼管主材料の密度と充填コンクリートの密度を分離する() {
+    fn cftの鋼管密度は主材料密度に依存しない() {
         let shape = SectionShape::CftBox {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
         };
         let section = shape.to_section(SectionId(0), "CFT".into());
-        let steel = material(0, MaterialCategory::Steel, 8.0, Some(24.0));
+        let concrete = material(0, MaterialCategory::Concrete, 9.9e-9, Some(24.0));
         let properties =
-            SectionMassProperties::try_from_section(&section, Some(&steel), None, None, None)
+            SectionMassProperties::try_from_section(&section, Some(&concrete), None, None, None)
                 .unwrap();
         let core = shape.cft_core_props().unwrap();
-        let expected =
-            steel.density * shape.calc_area() + cft_core_density(Some(&steel)) * core.area;
+        let expected = STEEL_MASS_DENSITY_TON_MM3 * shape.calc_area()
+            + cft_core_density(Some(&concrete)) * core.area;
         assert!((properties.mass_per_length - expected).abs() < 1e-9);
     }
 
     #[test]
-    fn cftの主材料がコンクリートならエラーになる() {
+    fn cftの主材料が鋼材ならエラーになる() {
         let shape = SectionShape::CftBox {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
         };
         let section = shape.to_section(SectionId(0), "CFT".into());
-        let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
+        let steel = material(0, MaterialCategory::Steel, 8.0e-9, Some(24.0));
         let error =
-            SectionMassProperties::try_from_section(&section, Some(&concrete), None, None, None)
-                .expect_err("CFTの主材料にコンクリートを使ってはならない");
-        assert!(error.contains("鋼材"));
+            SectionMassProperties::try_from_section(&section, Some(&steel), None, None, None)
+                .expect_err("CFTの主材料は充填コンクリートである必要がある");
+        assert!(error.contains("コンクリート"));
     }
 
     #[test]
@@ -923,10 +924,10 @@ mod tests {
         };
         let section = shape.to_section(SectionId(0), "CFT".into());
         for fc in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let steel = material(0, MaterialCategory::Steel, 8.0, Some(fc));
+            let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, Some(fc));
             assert!(SectionMassProperties::try_from_section(
                 &section,
-                Some(&steel),
+                Some(&concrete),
                 None,
                 None,
                 None,
