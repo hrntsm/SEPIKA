@@ -131,9 +131,6 @@ impl EditCommand for SetSectionName {
     }
 }
 
-/// 断面形状を新規追加（UI-3 の新規断面作成）。
-///
-/// 符号＋階が既存の断面と衝突する追加は [`Noop`] として拒否する。
 fn shape_use_is_valid(
     shape: &squid_n_section::shape::SectionShape,
     frame_use: Option<squid_n_core::model::FrameSectionUse>,
@@ -145,6 +142,9 @@ fn shape_use_is_valid(
     ) || frame_use == Some(squid_n_core::model::FrameSectionUse::Column)
 }
 
+/// 断面形状を新規追加（UI-3 の新規断面作成）。
+///
+/// 符号＋階が既存の断面と衝突する追加は [`Noop`] として拒否する。
 pub struct AddSectionShape {
     pub shape: squid_n_section::shape::SectionShape,
     pub new_id: SectionId,
