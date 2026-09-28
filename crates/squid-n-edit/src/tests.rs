@@ -6958,7 +6958,10 @@ fn test_copy_story_rejects_cft_slab_section_and_reports_it() {
     }
     .preview(&model);
     assert!(report.sections_rejected > 0, "{report:?}");
-    assert_eq!(report.slabs_created, 1);
+    assert!(
+        report.slabs_created > 0,
+        "CFT 床板も形状は複製する: {report:?}"
+    );
 }
 
 /// 取り付く壁版（`Line` アンカー）を追加し、undo で消える。

@@ -564,10 +564,58 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             })
             .count();
         if cft_secondary != 0 {
-            issues.push(ModelIssue::model(format!(
-                "二次部材（小梁・間柱）に CFT 断面が割り当てられています（{cft_secondary} 本）。\
-                 CFT は柱専用で二次部材には使用できません。\
-                 断面を鋼材または RC に変更してください。"
+            let ids: Vec<u32> = model
+                .beams()
+                .chain(model.posts())
+                .filter(|sm| {
+                    sm.section
+                        .and_then(|sid| model.sections.get(sid.index()))
+                        .is_some_and(|section| section.is_cft())
+                })
+                .map(|sm| sm.id.0)
+                .collect();
+            issues.push(ModelIssue::model(id_list_message(
+                "二次部材（小梁・間柱）に CFT 断面が割り当てられています",
+                "ID ",
+                &ids,
+                "CFT は柱専用です。断面を鋼材または RC に変更してください。",
+            )));
+        }
+        let cft_slabs: Vec<u32> = model
+            .slabs
+            .iter()
+            .filter(|slab| {
+                slab.section()
+                    .and_then(|sid| model.sections.get(sid.index()))
+                    .is_some_and(|section| section.is_cft())
+            })
+            .map(|slab| slab.id.0)
+            .collect();
+        if !cft_slabs.is_empty() {
+            issues.push(ModelIssue::model(id_list_message(
+                "床板に CFT 断面が割り当てられています",
+                "ID ",
+                &cft_slabs,
+                "CFT は柱専用です。床板の断面を RC または鋼材に変更してください。",
+            )));
+        }
+        let cft_walls: Vec<u32> = model
+            .wall_plates
+            .iter()
+            .filter(|plate| {
+                plate
+                    .section
+                    .and_then(|sid| model.sections.get(sid.index()))
+                    .is_some_and(|section| section.is_cft())
+            })
+            .map(|plate| plate.id.0)
+            .collect();
+        if !cft_walls.is_empty() {
+            issues.push(ModelIssue::model(id_list_message(
+                "壁版に CFT 断面が割り当てられています",
+                "ID ",
+                &cft_walls,
+                "CFT は柱専用です。壁版の断面を RC または鋼材に変更してください。",
             )));
         }
         let referenced: std::collections::HashSet<_> = model

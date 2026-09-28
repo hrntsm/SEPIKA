@@ -132,7 +132,7 @@ Post（間柱）が `StbSecColumn_*`、Brace（ブレース）が `StbSecBrace_*
 | `StbSecColumn_RC`（`_Rect` / `_Circle`） | ✅ | ✅ | RC 矩形柱・円形柱（`RcColumnRect`/`RcColumnCircle`）＋配筋 |
 | `StbSecBeam_RC`（`_Straight`） | ✅ | ✅ | RC 矩形梁（`RcBeamRect`）＋配筋。円形梁は ST-Bridge に図形がなく `StbSecRaw` へフォールバック（警告を出す） |
 | `StbSecBarArrangement*`（配筋） | ⚠️ | ✅ | 主筋（本数・径・段数）・帯筋・あばら筋・かぶりを best-effort で取り込む。詳細は下記 |
-| `StbSecColumn_CFT`（＋充填鋼管） | ✅ | ⚠️ | CFT 角形・円形（`CftBox`/`CftPipe`）。**`FrameSectionUse::Column` のみ**。用途不一致の既存参照や未参照断面は解析前チェックでエラーにする。書き出しで不正用途の部材が参照する場合は `StbSecRaw` へ |
+| `StbSecColumn_CFT`（＋充填鋼管） | ✅ | ⚠️ | CFT 角形・円形（`CftBox`/`CftPipe`）。**`FrameSectionUse::Column` の主架構柱だけ**に使用でき、床板・壁版・`StbBeam` 等の二次部材には使用しない。用途不一致の既存参照や未参照断面は解析前チェックで ID・件数を示してエラーにする。書き出しで不正用途の部材が参照する場合は `StbSecRaw` へ |
 | `StbSecColumn_SRC` / `StbSecBeam_SRC` | ✅ | ✅ | SRC 矩形（`SrcColumnRect`/`SrcBeamRect`）＋内蔵鉄骨（H 形鋼）＋配筋＋鋼種 `strength_steel` |
 | `StbSecRaw`（物性直持ちの拡張要素） | ✅ | ✅ | 標準要素で表せない断面のフォールバック。他ソフトは解釈できないが、参照する部材の断面リンクは保たれる |
 | RC・SRC のテーパ・ハンチ等（矩形・円形以外の図形） | ❌ | ❌ | 図形を認識できず、断面を取り込めなかったものとして警告する |

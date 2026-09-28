@@ -723,6 +723,10 @@ fn copy_sections(
             continue;
         };
         let current = model.slabs.get(sid.index()).and_then(|sl| sl.section());
+        if cft_section(model, src_sec) {
+            report.sections_rejected += 1;
+            continue;
+        }
         let Some(next) = resolve_section(
             model,
             cmd,
@@ -943,18 +947,21 @@ fn copy_slabs(
             report.skipped += 1;
             continue;
         };
-        if !crate::refs::plate_section_ref_ok(model, sl.section()) {
+        let rejected_section = cft_section(model, sl.section());
+        if rejected_section {
             report.sections_rejected += 1;
-            continue;
         }
-        let section = sl.section().map(|s| match mapped.get(&s) {
-            Some(&d) => d,
-            None => {
-                let d = section_for_story(model, s, dst_story_name, report);
-                mapped.insert(s, d);
-                d
-            }
-        });
+        let section = (!rejected_section)
+            .then(|| sl.section())
+            .flatten()
+            .map(|s| match mapped.get(&s) {
+                Some(&d) => d,
+                None => {
+                    let d = section_for_story(model, s, dst_story_name, report);
+                    mapped.insert(s, d);
+                    d
+                }
+            });
         let plate = SlabPlate {
             section,
             method: sl.method(),
