@@ -400,6 +400,7 @@ impl EditCommand for AddAttachedSlab {
                 extent: self.extent,
             },
             plate: self.plate.clone(),
+            tip_loads: Vec::new(),
         });
         Box::new(crate::DeleteSlab { id })
     }
@@ -475,6 +476,17 @@ impl EditCommand for SetAttachedAnchor {
         if !nodes_ok {
             return Box::new(Noop);
         }
+        if !model.slabs[idx].tip_loads.is_empty()
+            && !matches!(
+                self.anchor,
+                RegionAnchor::Line {
+                    transfer: squid_n_core::model::LoadTransfer::Anchor,
+                    ..
+                }
+            )
+        {
+            return Box::new(Noop);
+        }
         let SlabShape::Attached { anchor, .. } = &mut model.slabs[idx].shape else {
             return Box::new(Noop);
         };
@@ -488,6 +500,82 @@ impl EditCommand for SetAttachedAnchor {
 
     fn label(&self) -> &str {
         "取り付き先変更"
+    }
+}
+
+/// 既存ケースの片持ちスラブ先端由来の荷重だけを同期する。
+pub struct SyncTipLoadsToCase {
+    pub id: LoadCaseId,
+    pub member: Vec<squid_n_core::model::MemberLoad>,
+}
+
+impl EditCommand for SyncTipLoadsToCase {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if !self
+            .member
+            .iter()
+            .all(|load| crate::refs::elem_exists(model, load.elem))
+        {
+            return Box::new(Noop);
+        }
+        let Some(case) = model
+            .load_cases
+            .get_mut(self.id.index())
+            .filter(|case| case.id == self.id)
+        else {
+            return Box::new(Noop);
+        };
+        let old: Vec<_> = case
+            .member
+            .iter()
+            .filter(|load| load.source == squid_n_core::model::LoadSource::SlabTip)
+            .cloned()
+            .collect();
+        case.replace_tip_loads(self.member.clone());
+        Box::new(Self {
+            id: self.id,
+            member: old,
+        })
+    }
+
+    fn label(&self) -> &str {
+        "片持ちスラブ先端荷重の同期"
+    }
+}
+
+/// 片持ちスラブの先端荷重を一括置換する（追加・編集・削除を一つの Undo 単位とする）。
+pub struct SetSlabTipLoads {
+    pub id: SlabId,
+    pub loads: Vec<squid_n_core::model::SlabTipLoad>,
+}
+
+impl EditCommand for SetSlabTipLoads {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let Some(slab) = model.slab(self.id) else {
+            return Box::new(Noop);
+        };
+        if !self.loads.is_empty() && !slab.supports_tip_loads() {
+            return Box::new(Noop);
+        }
+        if self.loads.iter().any(|load| {
+            !load.intensity.is_finite()
+                || load.intensity < 0.0
+                || model.load_cases.get(load.case.index()).map(|case| case.id) != Some(load.case)
+        }) {
+            return Box::new(Noop);
+        }
+        let old = std::mem::replace(
+            &mut model.slabs[self.id.index()].tip_loads,
+            self.loads.clone(),
+        );
+        Box::new(Self {
+            id: self.id,
+            loads: old,
+        })
+    }
+
+    fn label(&self) -> &str {
+        "片持ちスラブの先端荷重変更"
     }
 }
 

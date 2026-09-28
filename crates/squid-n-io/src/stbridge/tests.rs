@@ -4092,6 +4092,7 @@ fn test_export_skips_plateless_and_attached_orphan_sections() {
             section: Some(SectionId(0)),
             ..Default::default()
         },
+        tip_loads: Vec::new(),
     });
     let xml = export_stbridge(&m).expect("export");
     let n_slab = xml.matches("<StbSlab ").count();

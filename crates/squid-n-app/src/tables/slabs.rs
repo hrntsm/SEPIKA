@@ -520,6 +520,8 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
         app.core.scoped.staleness.mark_edited();
     }
 
+    tip_load_section(ui, app);
+
     ui.add_space(8.0);
     ui.strong("小梁（二次部材）");
     ui.label(
@@ -825,6 +827,117 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
     attached_section(ui, app);
 }
 
+fn tip_direction_label(direction: squid_n_core::model::TipLoadDirection) -> &'static str {
+    use squid_n_core::model::TipLoadDirection::*;
+    match direction {
+        PosX => "+X",
+        NegX => "-X",
+        PosY => "+Y",
+        NegY => "-Y",
+        PosZ => "+Z",
+        NegZ => "-Z",
+    }
+}
+
+fn tip_load_section(ui: &mut egui::Ui, app: &mut App) {
+    use squid_n_core::model::{SlabTipLoad, TipLoadDirection};
+
+    let mut pending = Vec::new();
+    for slab in app
+        .core
+        .model
+        .slabs
+        .iter()
+        .filter(|slab| slab.supports_tip_loads())
+    {
+        ui.group(|ui| {
+            ui.label(format!(
+                "床板 #{} の先端荷重（先端辺の実長あたり kN/m）",
+                slab.id.0
+            ));
+            for (index, load) in slab.tip_loads.iter().enumerate() {
+                let mut edited = load.clone();
+                let mut delete = false;
+                ui.horizontal(|ui| {
+                    let name = app
+                        .core
+                        .model
+                        .load_cases
+                        .get(edited.case.index())
+                        .map(|c| c.name.as_str())
+                        .unwrap_or("未定義");
+                    egui::ComboBox::from_id_salt(("tip_case", slab.id.0, index))
+                        .selected_text(name)
+                        .show_ui(ui, |ui| {
+                            for case in &app.core.model.load_cases {
+                                ui.selectable_value(&mut edited.case, case.id, &case.name);
+                            }
+                        });
+                    egui::ComboBox::from_id_salt(("tip_direction", slab.id.0, index))
+                        .selected_text(tip_direction_label(edited.direction))
+                        .show_ui(ui, |ui| {
+                            for direction in [
+                                TipLoadDirection::PosX,
+                                TipLoadDirection::NegX,
+                                TipLoadDirection::PosY,
+                                TipLoadDirection::NegY,
+                                TipLoadDirection::PosZ,
+                                TipLoadDirection::NegZ,
+                            ] {
+                                ui.selectable_value(
+                                    &mut edited.direction,
+                                    direction,
+                                    tip_direction_label(direction),
+                                );
+                            }
+                        });
+                    let mut kn_per_m = edited.intensity;
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut kn_per_m)
+                                .speed(0.1)
+                                .range(0.0..=f64::MAX)
+                                .suffix(" kN/m"),
+                        )
+                        .changed()
+                    {
+                        edited.intensity = kn_per_m;
+                    }
+                    delete = ui.button("削除").clicked();
+                });
+                if delete || edited != *load {
+                    let mut loads = slab.tip_loads.clone();
+                    if delete {
+                        loads.remove(index);
+                    } else {
+                        loads[index] = edited;
+                    }
+                    pending.push((slab.id, loads));
+                }
+            }
+            if let Some(case) = app.core.model.load_cases.first() {
+                if ui.button("先端荷重を追加").clicked() {
+                    let mut loads = slab.tip_loads.clone();
+                    loads.push(SlabTipLoad {
+                        case: case.id,
+                        intensity: 0.0,
+                        direction: TipLoadDirection::NegZ,
+                    });
+                    pending.push((slab.id, loads));
+                }
+            }
+        });
+    }
+    for (id, loads) in pending {
+        if app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(squid_n_edit::SetSlabTipLoads { id, loads }),
+        ) {
+            app.core.scoped.staleness.mark_edited();
+        }
+    }
+}
+
 /// 取り付き領域（片持ちスラブ・バルコニー・出隅）の入力セクション。
 ///
 /// 主架構に囲まれていない床板は、囲まれた床板と違って境界を節点で描けない。
@@ -1062,4 +1175,61 @@ fn attached_boundary_cell(
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tip_load_tests {
+    use super::*;
+    use squid_n_core::model::{LoadTransfer, Slab, SlabPlate, TipLoadDirection};
+
+    #[test]
+    fn gui_shows_tip_controls_only_for_line_anchor_transfer() {
+        let mut app = App::default();
+        app.core.model.load_cases = squid_n_core::model::default_load_cases();
+        let shape = SlabShape::Attached {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(0), NodeId(1)],
+                span: [0.0, 1.0],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: [1000.0; 2],
+        };
+        let slab = Slab {
+            id: SlabId(0),
+            shape: shape.clone(),
+            plate: SlabPlate::default(),
+            tip_loads: Vec::new(),
+        };
+        let visible = |app: &App| {
+            app.core
+                .model
+                .slabs
+                .iter()
+                .filter(|slab| slab.supports_tip_loads())
+                .count()
+        };
+        app.core.model.slabs.push(slab);
+        assert_eq!(visible(&app), 1);
+        let context = egui::Context::default();
+        let _ = context.run_ui(egui::RawInput::default(), |ui| {
+            tip_load_section(ui, &mut app);
+        });
+        app.core.model.slabs[0].shape = SlabShape::Attached {
+            anchor: RegionAnchor::Point(NodeId(0)),
+            extent: [1000.0; 2],
+        };
+        assert_eq!(visible(&app), 0);
+        app.core.model.slabs[0].shape = SlabShape::Enclosed;
+        assert_eq!(visible(&app), 0);
+        app.core.model.slabs[0].shape = shape;
+        if let SlabShape::Attached { anchor, .. } = &mut app.core.model.slabs[0].shape {
+            *anchor = RegionAnchor::Line {
+                nodes: [NodeId(0), NodeId(1)],
+                span: [0.0, 1.0],
+                transfer: LoadTransfer::Columns,
+            };
+        }
+        assert_eq!(visible(&app), 0);
+        assert_eq!(tip_direction_label(TipLoadDirection::NegY), "-Y");
+    }
 }

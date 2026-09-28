@@ -140,6 +140,7 @@ fn merge_attached_slabs(model: &mut Model) {
     struct Group {
         nodes: [NodeId; 2],
         plate: crate::model::SlabPlate,
+        tip_loads: Vec<crate::model::SlabTipLoad>,
         members: Vec<(usize, [f64; 2], [f64; 2])>,
     }
     let mut groups: Vec<Group> = Vec::new();
@@ -158,12 +159,13 @@ fn merge_attached_slabs(model: &mut Model) {
         };
         match groups
             .iter_mut()
-            .find(|g| g.nodes == *nodes && g.plate == slab.plate)
+            .find(|g| g.nodes == *nodes && g.plate == slab.plate && g.tip_loads == slab.tip_loads)
         {
             Some(g) => g.members.push((i, *span, *extent)),
             None => groups.push(Group {
                 nodes: *nodes,
                 plate: slab.plate.clone(),
+                tip_loads: slab.tip_loads.clone(),
                 members: vec![(i, *span, *extent)],
             }),
         }
@@ -307,6 +309,7 @@ fn split_attached_slabs_between_members(model: &mut Model) {
             continue;
         };
         let plate = model.slabs[si].plate.clone();
+        let tip_loads = model.slabs[si].tip_loads.clone();
         let (first, rest) = split.split_first().expect("2 枚以上");
         model.slabs[si].shape = first.clone();
         for shape in rest {
@@ -315,6 +318,7 @@ fn split_attached_slabs_between_members(model: &mut Model) {
                 id,
                 shape: shape.clone(),
                 plate: plate.clone(),
+                tip_loads: tip_loads.clone(),
             });
         }
         si += 1;
@@ -965,6 +969,7 @@ mod tests {
                 extent: [1500.0, 1500.0],
             },
             plate: plate(Some(sid), Vec::new()),
+            tip_loads: Vec::new(),
         });
         model
     }
@@ -1211,6 +1216,55 @@ mod tests {
         assert!(model.validate().is_ok(), "{:?}", model.validate().err());
     }
 
+    #[test]
+    fn tip_loads_survive_split_and_merge_only_when_equal() {
+        use crate::model::{SlabTipLoad, TipLoadDirection};
+        let mut model = cantilever_rect();
+        model.load_cases = crate::model::default_load_cases();
+        let load = SlabTipLoad {
+            case: crate::ids::LoadCaseId(3),
+            intensity: 2.0,
+            direction: TipLoadDirection::NegZ,
+        };
+        model.slabs[0].tip_loads.push(load.clone());
+        model.nodes.push(node(4, 2000.0, 0.0, 0.0));
+        model.nodes.push(node(5, 2000.0, 1500.0, 0.0));
+        model.unassigned_beams.push(beam_of(&model, 0, 4, 5));
+        rebuild_floor_regions(&mut model);
+        assert_eq!(model.slabs.len(), 2);
+        assert!(model
+            .slabs
+            .iter()
+            .all(|s| s.tip_loads == vec![load.clone()]));
+        model.unassigned_beams.clear();
+        rebuild_floor_regions(&mut model);
+        assert_eq!(model.slabs.len(), 1);
+        assert_eq!(model.slabs[0].tip_loads, vec![load.clone()]);
+
+        model.slabs[0].shape = SlabShape::Attached {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(0), NodeId(1)],
+                span: [0.0, 0.5],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: [1500.0; 2],
+        };
+        let mut other = model.slabs[0].clone();
+        other.id = SlabId(1);
+        other.tip_loads[0].intensity = 3.0;
+        other.shape = SlabShape::Attached {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(0), NodeId(1)],
+                span: [0.5, 1.0],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: [1500.0; 2],
+        };
+        model.slabs.push(other);
+        rebuild_floor_regions(&mut model);
+        assert_eq!(model.slabs.len(), 2, "異なる荷重設定を持つ床板は統合しない");
+    }
+
     /// 小梁が 2 本あれば支持部材の間の床板 3 枚に分割される。
     #[test]
     fn test_cantilever_splits_into_three_slabs() {
@@ -1266,6 +1320,7 @@ mod tests {
                 extent: [1500.0, 1500.0],
             },
             plate: plate(Some(sid), Vec::new()),
+            tip_loads: Vec::new(),
         });
         rebuild_floor_regions(&mut model);
         assert_eq!(model.slabs.len(), 1, "Columns は分割しない");
@@ -1291,6 +1346,7 @@ mod tests {
                         extent,
                     },
                     plate: plate(Some(sid), Vec::new()),
+                    tip_loads: Vec::new(),
                 });
             }
             model
@@ -1443,6 +1499,7 @@ mod tests {
             id: SlabId(0),
             shape: SlabShape::Enclosed,
             plate: plate(Some(sid), Vec::new()),
+            tip_loads: Vec::new(),
         });
         let report = rebuild_floor_regions(&mut model);
         assert_eq!(model.floor_regions.len(), 0, "囲む大梁がないため床領域は 0");
@@ -1465,6 +1522,7 @@ mod tests {
             id: SlabId(0),
             shape: SlabShape::Enclosed,
             plate: plate(Some(sid), Vec::new()),
+            tip_loads: Vec::new(),
         });
         let report = rebuild_floor_regions(&mut model);
         assert_eq!(model.slabs.len(), 1);

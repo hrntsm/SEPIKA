@@ -24,14 +24,15 @@ pub enum LoadSource {
     #[default]
     Manual,
     /// 準備計算（床荷重の分配・自重の集計・Ai 分布の水平力）が生成した荷重。
-    /// 同期のたびに全件が作り直される。
     Auto,
+    /// 片持ちスラブの先端荷重から同期された部材荷重。
+    SlabTip,
 }
 
 impl LoadSource {
     /// 準備計算が生成した荷重か。
     pub fn is_auto(self) -> bool {
-        matches!(self, LoadSource::Auto)
+        matches!(self, LoadSource::Auto | LoadSource::SlabTip)
     }
 }
 
@@ -166,36 +167,51 @@ impl LoadCase {
             .filter(|(_, ml)| !ml.source.is_auto())
     }
 
-    /// 準備計算が生成した荷重だけを `auto_nodal` / `auto_member` の内容へ入れ替える。
+    /// 通常の自動生成分だけを `auto_nodal` / `auto_member` へ入れ替える。
     /// 手入力の荷重は順序を保ったまま残す。
     ///
     /// 渡された荷重の `source` は [`LoadSource::Auto`] に揃える。手入力扱いのまま
     /// 積むと次回の入れ替えで残ってしまい、同期のたびに荷重が増え続けるため。
     pub fn replace_auto_loads(&mut self, auto_nodal: Vec<NodalLoad>, auto_member: Vec<MemberLoad>) {
-        self.nodal.retain(|nl| !nl.source.is_auto());
+        self.nodal.retain(|nl| nl.source != LoadSource::Auto);
         self.nodal.extend(auto_nodal.into_iter().map(|mut nl| {
             nl.source = LoadSource::Auto;
             nl
         }));
-        self.member.retain(|ml| !ml.source.is_auto());
+        self.member.retain(|ml| ml.source != LoadSource::Auto);
         self.member.extend(auto_member.into_iter().map(|mut ml| {
             ml.source = LoadSource::Auto;
             ml
         }));
     }
 
-    /// 自動生成分が `auto_nodal` / `auto_member` と一致するか（同期の要否判定）。
+    /// 通常の自動生成分が `auto_nodal` / `auto_member` と一致するか（同期の要否判定）。
     /// 手入力分は比較に含めない。
     pub fn auto_loads_match(&self, auto_nodal: &[NodalLoad], auto_member: &[MemberLoad]) -> bool {
         self.nodal
             .iter()
-            .filter(|nl| nl.source.is_auto())
+            .filter(|nl| nl.source == LoadSource::Auto)
             .eq(auto_nodal.iter())
             && self
                 .member
                 .iter()
-                .filter(|ml| ml.source.is_auto())
+                .filter(|ml| ml.source == LoadSource::Auto)
                 .eq(auto_member.iter())
+    }
+
+    pub fn replace_tip_loads(&mut self, mut loads: Vec<MemberLoad>) {
+        self.member.retain(|ml| ml.source != LoadSource::SlabTip);
+        for load in &mut loads {
+            load.source = LoadSource::SlabTip;
+        }
+        self.member.extend(loads);
+    }
+
+    pub fn tip_loads_match(&self, loads: &[MemberLoad]) -> bool {
+        self.member
+            .iter()
+            .filter(|ml| ml.source == LoadSource::SlabTip)
+            .eq(loads.iter())
     }
 }
 

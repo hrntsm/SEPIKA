@@ -571,6 +571,7 @@ pub enum JobResult {
     StaticAll {
         computed: Result<StaticAllComputed, String>,
         pre_errors: Vec<String>,
+        excluded: (Vec<StaticCaseKey>, Vec<String>),
     },
 }
 

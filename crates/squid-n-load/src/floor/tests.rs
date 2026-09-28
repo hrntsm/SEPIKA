@@ -688,6 +688,7 @@ fn test_cantilever_conservation() {
             }],
             ..Default::default()
         },
+        tip_loads: Vec::new(),
     };
     let loads = distribute_slab(&model, &slab).unwrap();
     assert_eq!(loads.len(), 1);
@@ -750,6 +751,7 @@ fn test_cantilever_with_side_beam_loads_attachment_only() {
             }],
             ..Default::default()
         },
+        tip_loads: Vec::new(),
     };
     let loads = distribute_slab(&model, &slab).unwrap();
     assert_eq!(loads.len(), 1, "{loads:?}");
@@ -808,6 +810,7 @@ fn test_cantilever_ignores_load_transfer_direction() {
                 }],
                 ..Default::default()
             },
+            tip_loads: Vec::new(),
         };
         let loads = distribute_slab(&model, &slab).unwrap();
         assert_eq!(loads.len(), 1);
@@ -867,6 +870,7 @@ fn test_cantilever_with_real_beam_edge_loads_attachment_only() {
             }],
             ..Default::default()
         },
+        tip_loads: Vec::new(),
     };
     let loads = distribute_slab(&model, &slab).unwrap();
     assert_eq!(loads.len(), 1, "{loads:?}");
@@ -946,6 +950,7 @@ fn test_cantilever_real_beam_inside_slab_after_rebuild() {
                 }],
                 ..Default::default()
             },
+            tip_loads: Vec::new(),
         });
 
         rebuild_floor_regions(&mut model);
@@ -1019,6 +1024,7 @@ fn test_cantilever_support_edges_do_not_receive_load() {
             }],
             ..Default::default()
         },
+        tip_loads: Vec::new(),
     };
     let mk_secondary_beam = || SecondaryMember {
         id: squid_n_core::ids::SecondaryMemberId(2),
@@ -1208,6 +1214,7 @@ fn test_midspan_beam_edge_loads_resolve_from_support_boundary() {
                 method: DistributionMethod::TriTrapezoid,
                 ..Default::default()
             },
+            tip_loads: Vec::new(),
         });
         model
             .floor_assignment_regions

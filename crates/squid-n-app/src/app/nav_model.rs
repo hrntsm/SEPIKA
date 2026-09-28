@@ -301,6 +301,7 @@ mod tests {
                 method: squid_n_core::model::DistributionMethod::OneWay,
                 ..Default::default()
             },
+            tip_loads: Vec::new(),
         }
     }
 

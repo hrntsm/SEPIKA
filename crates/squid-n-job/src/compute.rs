@@ -9,6 +9,7 @@
 use crate::error::{JobError, JobResult};
 use crate::settings::{AnalysisSettings, ThDampingModel};
 use squid_n_core::ids::LoadCaseId;
+use squid_n_core::model::{LoadCase, LoadCaseKind, LoadSource, EX_CASE_NAME, EY_CASE_NAME};
 use squid_n_solver::statics::analysis::Analysis;
 
 /// 壁展開モデルを組み立てる（本モジュール共通のエントリポイント）。
@@ -16,11 +17,47 @@ fn expand_walls(model: squid_n_core::model::Model) -> squid_n_core::model::Model
     squid_n_load::wall_expand::expand_wall_elements_owned(model).0
 }
 
+/// 先端荷重付き EX/EY で対応する方向の自動 Ai・手入力水平力が欠けているか。
+pub fn missing_seismic_horizontal_load(case: &LoadCase) -> bool {
+    let axis = match (case.name.as_str(), case.kind) {
+        (EX_CASE_NAME, LoadCaseKind::Seismic) => 0,
+        (EY_CASE_NAME, LoadCaseKind::Seismic) => 1,
+        _ => return false,
+    };
+    if !case
+        .member
+        .iter()
+        .any(|load| load.source == LoadSource::SlabTip)
+    {
+        return false;
+    }
+    !case.nodal.iter().any(|load| {
+        matches!(load.source, LoadSource::Auto | LoadSource::Manual) && load.values[axis] != 0.0
+    }) && !case.member.iter().any(|load| {
+        matches!(load.source, LoadSource::Auto | LoadSource::Manual)
+            && load.dir[axis] != 0.0
+            && match load.kind {
+                squid_n_core::model::MemberLoadKind::Point { p, .. } => p != 0.0,
+                squid_n_core::model::MemberLoadKind::Distributed { w1, w2, .. } => {
+                    w1 != 0.0 || w2 != 0.0
+                }
+            }
+    })
+}
+
 /// 線形静的解析。前処理を通したモデルを渡すこと。
 pub fn compute_linear_static(
     model: squid_n_core::model::Model,
     lc: LoadCaseId,
 ) -> JobResult<squid_n_solver::statics::linear::StaticOnce> {
+    if let Some(case) = model.load_cases.iter().find(|case| case.id == lc) {
+        if missing_seismic_horizontal_load(case) {
+            return Err(JobError::InvalidInput(format!(
+                "荷重ケース「{}」に地震水平力がありません。Ai 地震力を生成するか水平力を手入力してください。",
+                case.name
+            )));
+        }
+    }
     let model = expand_walls(model);
     match Analysis::prepare(&model) {
         Ok(analysis) => analysis
@@ -321,4 +358,122 @@ pub fn compute_lumped_mass(
         modal,
         response,
     })
+}
+
+#[cfg(test)]
+mod seismic_guard_tests {
+    use super::*;
+    use squid_n_core::ids::{ElemId, NodeId};
+    use squid_n_core::model::{MemberLoad, MemberLoadKind, Model, NodalLoad};
+
+    #[test]
+    fn tip_ex_ey_require_their_own_horizontal_axis() {
+        let mut model = Model::default();
+        model.load_cases = squid_n_core::model::default_load_cases();
+        for (index, axis, other) in [(3, 0, 1), (4, 1, 0)] {
+            let case = &mut model.load_cases[index];
+            case.member.push(MemberLoad {
+                source: LoadSource::SlabTip,
+                ..MemberLoad::manual(
+                    ElemId(0),
+                    if axis == 0 {
+                        [1.0, 0.0, 0.0]
+                    } else {
+                        [0.0, 1.0, 0.0]
+                    },
+                    MemberLoadKind::Point { a: 100.0, p: 100.0 },
+                )
+            });
+            assert!(missing_seismic_horizontal_load(case));
+            let mut work = Model {
+                load_cases: squid_n_core::model::default_load_cases(),
+                ..Default::default()
+            };
+            work.load_cases[index] = case.clone();
+            let error = compute_linear_static(work, case.id).unwrap_err();
+            assert!(error.to_string().contains("地震水平力"));
+
+            let mut values = [0.0; 6];
+            values[other] = 1.0;
+            case.nodal.push(NodalLoad::manual(NodeId(0), values));
+            assert!(missing_seismic_horizontal_load(case));
+            case.member.push(MemberLoad::manual(
+                ElemId(0),
+                if other == 0 {
+                    [1.0, 0.0, 0.0]
+                } else {
+                    [0.0, 1.0, 0.0]
+                },
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: 100.0,
+                    w1: 1.0,
+                    w2: 1.0,
+                },
+            ));
+            assert!(missing_seismic_horizontal_load(case));
+            values[other] = 0.0;
+            values[axis] = 1.0;
+            case.nodal.push(NodalLoad::manual(NodeId(0), values));
+            assert!(!missing_seismic_horizontal_load(case));
+            case.nodal.pop();
+            case.member.push(MemberLoad::manual(
+                ElemId(0),
+                if axis == 0 {
+                    [1.0, 0.0, 0.0]
+                } else {
+                    [0.0, 1.0, 0.0]
+                },
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: 100.0,
+                    w1: 1.0,
+                    w2: 1.0,
+                },
+            ));
+            assert!(!missing_seismic_horizontal_load(case));
+        }
+    }
+
+    #[test]
+    fn tip_and_wrong_axis_manual_are_rejected_but_ai_and_other_cases_are_unchanged() {
+        let mut cases = squid_n_core::model::default_load_cases();
+        for (index, axis, other) in [(3, 0, 1), (4, 1, 0)] {
+            let case = &mut cases[index];
+            assert!(!missing_seismic_horizontal_load(case));
+            case.member.push(MemberLoad {
+                source: LoadSource::SlabTip,
+                ..MemberLoad::manual(
+                    ElemId(0),
+                    [1.0, 0.0, 0.0],
+                    MemberLoadKind::Point { a: 1.0, p: 1.0 },
+                )
+            });
+            let mut values = [0.0; 6];
+            values[other] = 10.0;
+            case.nodal.push(NodalLoad::manual(NodeId(0), values));
+            assert!(missing_seismic_horizontal_load(case));
+            let mut model = Model {
+                load_cases: squid_n_core::model::default_load_cases(),
+                ..Default::default()
+            };
+            model.load_cases[index] = case.clone();
+            let error = compute_linear_static(model.clone(), case.id).unwrap_err();
+            assert!(error.to_string().contains("地震水平力"));
+            values[axis] = 20.0;
+            values[other] = 0.0;
+            case.nodal.push(NodalLoad::auto(NodeId(0), values));
+            assert!(!missing_seismic_horizontal_load(case));
+            model.load_cases[index] = case.clone();
+            assert!(!matches!(
+                compute_linear_static(model, case.id),
+                Err(JobError::InvalidInput(_))
+            ));
+            case.nodal.clear();
+            case.member.clear();
+        }
+        assert!(!missing_seismic_horizontal_load(&cases[0]));
+        cases[3].kind = LoadCaseKind::Other;
+        assert!(!missing_seismic_horizontal_load(&cases[3]));
+    }
 }

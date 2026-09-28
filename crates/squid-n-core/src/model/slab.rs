@@ -18,6 +18,37 @@
 
 use super::*;
 
+/// 片持ちスラブ先端辺の実長あたりの線荷重。強度は N/mm、方向は全体座標。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SlabTipLoad {
+    pub case: crate::ids::LoadCaseId,
+    pub intensity: f64,
+    pub direction: TipLoadDirection,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum TipLoadDirection {
+    PosX,
+    NegX,
+    PosY,
+    NegY,
+    PosZ,
+    NegZ,
+}
+
+impl TipLoadDirection {
+    pub fn vector(self) -> [f64; 3] {
+        match self {
+            Self::PosX => [1.0, 0.0, 0.0],
+            Self::NegX => [-1.0, 0.0, 0.0],
+            Self::PosY => [0.0, 1.0, 0.0],
+            Self::NegY => [0.0, -1.0, 0.0],
+            Self::PosZ => [0.0, 0.0, 1.0],
+            Self::NegZ => [0.0, 0.0, -1.0],
+        }
+    }
+}
+
 /// 床板の版（仕様）。
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SlabPlate {
@@ -83,9 +114,23 @@ pub struct Slab {
     pub id: SlabId,
     pub shape: SlabShape,
     pub plate: SlabPlate,
+    #[serde(default)]
+    pub tip_loads: Vec<SlabTipLoad>,
 }
 
 impl Slab {
+    pub fn supports_tip_loads(&self) -> bool {
+        matches!(
+            self.shape,
+            SlabShape::Attached {
+                anchor: RegionAnchor::Line {
+                    transfer: LoadTransfer::Anchor,
+                    ..
+                },
+                ..
+            }
+        )
+    }
     /// 取り付く床板か。
     pub fn is_attached(&self) -> bool {
         matches!(self.shape, SlabShape::Attached { .. })
@@ -351,6 +396,7 @@ impl Model {
             id: slab_id,
             shape: SlabShape::Enclosed,
             plate,
+            tip_loads: Vec::new(),
         });
         let region_id = FloorPlateAssignmentRegionId(self.floor_assignment_regions.next_free_id());
         self.floor_assignment_regions
@@ -396,6 +442,7 @@ impl Model {
             id: slab_id,
             shape: SlabShape::Enclosed,
             plate,
+            tip_loads: Vec::new(),
         });
         self.floor_assignment_regions
             .get_mut(region_id)
@@ -747,6 +794,7 @@ mod tests {
                 method: DistributionMethod::default(),
                 one_way: None,
             },
+            tip_loads: Vec::new(),
         };
         assert!((model.slab_intensity(&slab, LoadPurpose::Floor) - 8.0e-3).abs() < 1e-12);
         assert!((model.slab_intensity(&slab, LoadPurpose::Beam) - 7.5e-3).abs() < 1e-12);
@@ -774,6 +822,7 @@ mod tests {
                 extent: [0.0, 0.0],
             },
             plate: SlabPlate::default(),
+            tip_loads: Vec::new(),
         };
         assert_eq!(slab.boundary_coords(&model), None);
         assert_eq!(slab.reference_node(&model), None);

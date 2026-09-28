@@ -68,6 +68,56 @@ fn sample_model() -> Model {
 }
 
 #[test]
+fn linear_static_job_rejects_ex_without_seismic_horizontal_load() {
+    use squid_n_core::ids::LoadCaseId;
+    use squid_n_core::model::{
+        LoadCase, LoadCaseKind, LoadTransfer, RegionAnchor, Slab, SlabPlate, SlabShape,
+        SlabTipLoad, TipLoadDirection,
+    };
+
+    let mut model = rc_column_model();
+    model.load_cases.clear();
+    model.nodes[1].coord = [3000.0, 0.0, 0.0];
+    model.sections[0].frame_use = Some(FrameSectionUse::Girder);
+    model.load_cases.push(LoadCase {
+        id: LoadCaseId(0),
+        name: squid_n_core::model::EX_CASE_NAME.into(),
+        kind: LoadCaseKind::Seismic,
+        nodal: Vec::new(),
+        member: Vec::new(),
+    });
+    model.slabs.push(Slab {
+        id: squid_n_core::ids::SlabId(0),
+        shape: SlabShape::Attached {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(0), NodeId(1)],
+                span: [0.0, 1.0],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: [1500.0, 1500.0],
+        },
+        plate: SlabPlate::default(),
+        tip_loads: vec![SlabTipLoad {
+            case: LoadCaseId(0),
+            intensity: 2.0,
+            direction: TipLoadDirection::PosX,
+        }],
+    });
+    model.validate().expect("有効な先端荷重モデル");
+    let error = job::compute_job(
+        &model,
+        JobKind::LinearStatic,
+        &job::JobParams {
+            ai_mode: squid_n_solver::statics::analysis::AiMode::SemiPrecise,
+            ..Default::default()
+        },
+    )
+    .err()
+    .expect("水平力欠損で停止する");
+    assert!(error.to_string().contains("地震水平力"), "{error}");
+}
+
+#[test]
 fn test_query_model_nodes() {
     let m = sample_model();
     let items = query_model(&m, "node", None);
@@ -609,6 +659,7 @@ fn test_query_model_slabs_and_floor_regions() {
             method: DistributionMethod::TriTrapezoid,
             ..Default::default()
         },
+        tip_loads: Vec::new(),
     });
     m.floor_regions.push(squid_n_core::model::FloorRegion {
         id: FloorRegionId(0),

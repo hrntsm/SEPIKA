@@ -805,6 +805,286 @@ fn test_sync_seismic_approx_mode_syncs_ex_ey_without_eigen() {
     assert!(!ey.nodal.is_empty(), "EYには水平力が入っているはず");
 }
 
+#[test]
+fn tip_load_sync_merges_into_ex_and_custom_case_without_losing_manual() {
+    use squid_n_core::ids::{LoadCaseId, SlabId};
+    use squid_n_core::model::{
+        LoadCase, LoadCaseKind, LoadSource, LoadTransfer, RegionAnchor, SlabTipLoad,
+        TipLoadDirection,
+    };
+
+    let mut app = App::default();
+    app.load_model(crate::sample::portal_frame());
+    app.generate_stories_action();
+    let ex = app
+        .core
+        .model
+        .load_cases
+        .iter()
+        .find(|c| c.name == EX_CASE_NAME)
+        .unwrap()
+        .id;
+    let ex_horizontal = app.core.model.load_cases[ex.index()].nodal.clone();
+    assert!(!ex_horizontal.is_empty());
+    let custom = LoadCaseId(app.core.model.load_cases.len() as u32);
+    app.core.model.load_cases.push(LoadCase {
+        id: custom,
+        name: "独自のケース".into(),
+        kind: LoadCaseKind::Other,
+        nodal: Vec::new(),
+        member: Vec::new(),
+    });
+    app.core.model.load_cases[ex.index()]
+        .member
+        .push(squid_n_core::model::MemberLoad::manual(
+            squid_n_core::ids::ElemId(2),
+            [0.0, 0.0, -1.0],
+            squid_n_core::model::MemberLoadKind::Point {
+                a: 3000.0,
+                p: 100.0,
+            },
+        ));
+    app.core.model.slabs.push(Slab {
+        id: SlabId(0),
+        shape: SlabShape::Attached {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(2), NodeId(3)],
+                span: [0.0, 1.0],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: [1000.0; 2],
+        },
+        plate: SlabPlate::default(),
+        tip_loads: vec![
+            SlabTipLoad {
+                case: ex,
+                intensity: 2.0,
+                direction: TipLoadDirection::PosX,
+            },
+            SlabTipLoad {
+                case: custom,
+                intensity: 3.0,
+                direction: TipLoadDirection::NegZ,
+            },
+        ],
+    });
+    app.sync_auto_load_cases_action();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let ex_case = &app.core.model.load_cases[ex.index()];
+    assert_eq!(ex_case.nodal, ex_horizontal);
+    assert!(ex_case
+        .member
+        .iter()
+        .any(|load| load.source == LoadSource::Manual));
+    assert!(ex_case
+        .member
+        .iter()
+        .any(|load| load.source == LoadSource::SlabTip && load.dir == [1.0, 0.0, 0.0]));
+    assert_eq!(
+        app.core.model.load_cases[custom.index()].name,
+        "独自のケース"
+    );
+    assert_eq!(
+        app.core.model.load_cases[custom.index()].kind,
+        LoadCaseKind::Other
+    );
+    assert_eq!(app.core.model.load_cases[custom.index()].member.len(), 1);
+    app.core.model.load_cases[custom.index()].name = "変更後".into();
+    app.sync_auto_load_cases_action();
+    assert_eq!(app.core.model.load_cases[custom.index()].name, "変更後");
+    assert_eq!(app.core.model.load_cases[custom.index()].member.len(), 1);
+    app.core.model.slabs[0].tip_loads.clear();
+    app.sync_auto_load_cases_action();
+    assert!(app.core.model.load_cases[ex.index()]
+        .member
+        .iter()
+        .all(|load| load.source != LoadSource::SlabTip));
+    assert!(app.core.model.load_cases[ex.index()]
+        .member
+        .iter()
+        .any(|load| load.source == LoadSource::Manual));
+    assert!(app.core.model.load_cases[custom.index()].member.is_empty());
+}
+
+#[test]
+fn tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results() {
+    use squid_n_core::ids::{SectionId, SlabId};
+    use squid_n_core::model::{
+        LoadSource, LoadTransfer, RegionAnchor, SlabTipLoad, TipLoadDirection,
+    };
+
+    let mut app = App::default();
+    app.load_model(crate::sample::portal_frame());
+    app.generate_stories_action();
+    let ex = app
+        .core
+        .model
+        .load_cases
+        .iter()
+        .find(|c| c.name == EX_CASE_NAME)
+        .unwrap()
+        .id;
+    let section = SectionId(app.core.model.sections.len() as u32);
+    let mut slab_section = squid_n_core::section_shape::SectionShape::RcSlab { thickness: 150.0 }
+        .to_section(section, "床".into());
+    slab_section.material = Some(app.core.model.materials[0].id);
+    app.core.model.sections.push(slab_section);
+    app.core.model.slabs.push(Slab {
+        id: SlabId(0),
+        shape: SlabShape::Attached {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(2), NodeId(3)],
+                span: [0.0, 1.0],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: [1000.0; 2],
+        },
+        plate: SlabPlate {
+            section: Some(section),
+            ..Default::default()
+        },
+        tip_loads: vec![SlabTipLoad {
+            case: ex,
+            intensity: 2.0,
+            direction: TipLoadDirection::PosX,
+        }],
+    });
+    app.core
+        .model
+        .combinations
+        .push(squid_n_core::model::LoadCombination {
+            name: "G+EX".into(),
+            terms: vec![(LoadCaseId(0), 1.0), (ex, 1.0)],
+        });
+    app.core
+        .model
+        .combinations
+        .push(squid_n_core::model::LoadCombination {
+            name: "G".into(),
+            terms: vec![(LoadCaseId(0), 1.0)],
+        });
+    app.run_static_all();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .seismic(SeismicDir::X)
+        .is_some());
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .combos
+        .iter()
+        .any(|(n, _)| n == "G+EX"));
+
+    app.core.analysis_cfg.ai_mode = AiMode::SemiPrecise;
+    app.run_seismic(SeismicDir::X);
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .unwrap()
+        .contains("地震水平力"));
+    assert!(app.core.model.load_cases[ex.index()]
+        .nodal
+        .iter()
+        .all(|l| l.source != LoadSource::Auto));
+    app.core.analysis_cfg.ai_mode = AiMode::Approx;
+    app.run_seismic(SeismicDir::X);
+    assert!(app.core.scoped.last_error.is_none());
+
+    app.core.model.stories.clear();
+    app.run_seismic(SeismicDir::X);
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .unwrap()
+        .contains("地震水平力"));
+    assert!(app.core.model.load_cases[ex.index()]
+        .nodal
+        .iter()
+        .all(|l| l.source != LoadSource::Auto));
+    app.run_combination(0);
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .unwrap()
+        .contains("水平力"));
+    app.core.scoped.last_static = Some(StaticKey::Case(StaticCaseKey::Seismic(SeismicDir::X)));
+    app.ui.scoped.nav.focus_result = app.core.scoped.last_static;
+    app.run_static_all();
+    let bundle = app.core.scoped.results.as_ref().unwrap();
+    assert!(bundle.seismic(SeismicDir::X).is_none());
+    assert!(bundle.combos.iter().all(|(n, _)| n != "G+EX"));
+    assert!(bundle.combos.iter().any(|(n, _)| n == "G"));
+    assert_ne!(
+        app.core.scoped.last_static,
+        Some(StaticKey::Case(StaticCaseKey::Seismic(SeismicDir::X)))
+    );
+
+    app.core.model.load_cases[ex.index()]
+        .nodal
+        .push(squid_n_core::model::NodalLoad::manual(
+            NodeId(2),
+            [100.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        ));
+    app.run_seismic(SeismicDir::X);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.run_combination(0);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.generate_stories_action();
+    app.sync_auto_load_cases_action();
+    assert!(app.core.model.load_cases[ex.index()]
+        .nodal
+        .iter()
+        .any(|l| l.source == LoadSource::Auto));
+    app.run_static_all();
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .seismic(SeismicDir::X)
+        .is_some());
+    app.core.model.stories.clear();
+    app.core.model.load_cases[ex.index()]
+        .nodal
+        .retain(|l| l.source != LoadSource::Manual);
+    app.start_static_all_job();
+    wait_for_job(&mut app);
+    let bundle = app.core.scoped.results.as_ref().unwrap();
+    assert!(bundle.seismic(SeismicDir::X).is_none());
+    assert!(bundle.combos.iter().all(|(n, _)| n != "G+EX"));
+}
+
 /// 性能修正: 精算周期（`AiMode::SemiPrecise`）を選択したが固有値解析が
 /// 未実行の場合、`sync_seismic_load_cases_action` は EX/EY を更新せず、
 /// `last_notice` に実行を促すメッセージを設定する（`last_error` は使わない。
@@ -4379,6 +4659,7 @@ fn test_attached_cantilever_slab_check_coef_2() {
             extent: [1500.0, 1500.0],
         },
         plate: rc_slab_plate(sid),
+        tip_loads: Vec::new(),
     });
     model.validate().expect("validate");
     let app = App {
@@ -4450,6 +4731,7 @@ fn test_attached_trapezoid_slab_check_survives_none_dimensions() {
             extent: [1000.0, 2000.0],
         },
         plate: rc_slab_plate(sid),
+        tip_loads: Vec::new(),
     });
     let dims = squid_n_load::floor::slab_dimensions(&model, &model.slabs[0]);
     assert!(dims.is_none(), "台形は矩形寸法を持たない: {dims:?}");
@@ -4498,6 +4780,7 @@ fn test_attached_point_slab_check_coef_2() {
             extent: [800.0, 1500.0],
         },
         plate: rc_slab_plate(sid),
+        tip_loads: Vec::new(),
     });
     model.validate().expect("validate");
     let app = App {
@@ -4953,6 +5236,424 @@ fn test_load_case_job_routes_standard_lateral_cases() {
         app.core.scoped.last_static,
         Some(StaticKey::Case(StaticCaseKey::User(dl)))
     );
+}
+
+fn tip_seismic_app() -> App {
+    use squid_n_core::ids::{NodeId, SectionId, SlabId};
+    use squid_n_core::model::{
+        LoadCase, LoadCaseKind, LoadTransfer, RegionAnchor, SlabTipLoad, TipLoadDirection,
+    };
+    let mut model = crate::sample::portal_frame();
+    model.sections.push(
+        squid_n_core::section_shape::SectionShape::RcSlab { thickness: 150.0 }
+            .to_section(SectionId(2), "床".into()),
+    );
+    model.sections[2].material = Some(model.materials[0].id);
+    model.load_cases.push(LoadCase {
+        id: LoadCaseId(2),
+        name: EX_CASE_NAME.into(),
+        kind: LoadCaseKind::Seismic,
+        nodal: Vec::new(),
+        member: Vec::new(),
+    });
+    model.slabs.push(Slab {
+        id: SlabId(0),
+        shape: SlabShape::Attached {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(2), NodeId(3)],
+                span: [0.25, 0.75],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: [1500.0, 1500.0],
+        },
+        plate: SlabPlate {
+            section: Some(SectionId(2)),
+            ..Default::default()
+        },
+        tip_loads: vec![SlabTipLoad {
+            case: LoadCaseId(2),
+            intensity: 2.0,
+            direction: TipLoadDirection::PosX,
+        }],
+    });
+    let mut app = App::default();
+    app.load_model(model);
+    app
+}
+
+#[test]
+fn tip_ex_ey_failure_invalidates_previous_case_combo_and_display() {
+    use squid_n_core::ids::NodeId;
+    use squid_n_core::model::{LoadCombination, NodalLoad};
+
+    for path in 0..8 {
+        let mut app = tip_seismic_app();
+        let dir = if path < 4 {
+            SeismicDir::X
+        } else {
+            SeismicDir::Y
+        };
+        if dir == SeismicDir::Y {
+            app.core.model.load_cases[2].name = EY_CASE_NAME.into();
+        }
+        app.core.model.combinations.push(LoadCombination {
+            name: "G+EX".into(),
+            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(2), 1.0)],
+        });
+        app.core.model.combinations.push(LoadCombination {
+            name: "G".into(),
+            terms: vec![(LoadCaseId(0), 1.0)],
+        });
+        app.core.model.load_cases[2].nodal.push(NodalLoad::manual(
+            NodeId(2),
+            if dir == SeismicDir::X {
+                [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            } else {
+                [0.0, 1000.0, 0.0, 0.0, 0.0, 0.0]
+            },
+        ));
+        app.run_static_all();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app.select_displayed_result(StaticKey::Combo(0));
+        assert!(!app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .member_forces
+            .is_empty());
+        app.core.model.load_cases[2].nodal.clear();
+        match path % 4 {
+            0 => app.run_static_target(StaticTarget::Case(LoadCaseId(2))),
+            1 => {
+                app.start_load_case_job(LoadCaseId(2));
+                if app.core.scoped.job.is_some() {
+                    wait_for_job(&mut app);
+                }
+            }
+            2 => app.run_combination(0),
+            _ => {
+                app.start_combination_job(0);
+                if app.core.scoped.job.is_some() {
+                    wait_for_job(&mut app);
+                }
+            }
+        }
+        assert!(app.core.scoped.last_error.is_some(), "経路 {path}");
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert!(bundle.seismic(dir).is_none(), "経路 {path}");
+        assert!(
+            bundle.combos.iter().all(|(name, _)| name != "G+EX"),
+            "経路 {path}"
+        );
+        assert!(bundle.combos.iter().any(|(name, _)| name == "G"));
+        assert!(bundle.member_forces.is_empty());
+        assert!(bundle.panel_moments.is_empty());
+        assert!(bundle.member_checks.is_empty());
+        assert!(bundle.joint_checks.is_empty());
+        assert!(bundle.beam_checks.is_empty());
+        assert!(bundle.slab_checks.is_empty());
+        assert!(app.core.scoped.last_static.is_none());
+        assert!(app.ui.scoped.nav.focus_result.is_none());
+        assert!(app.current_static().is_none());
+        app.run_combination(1);
+        assert!(app.core.scoped.last_error.is_none());
+        assert!(app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .seismic(dir)
+            .is_none());
+    }
+}
+
+#[test]
+fn test_tip_only_seismic_rejected_in_single_combo_and_batch() {
+    use squid_n_core::ids::NodeId;
+    use squid_n_core::model::{LoadCombination, NodalLoad};
+    let mut app = tip_seismic_app();
+    app.core.model.combinations.push(LoadCombination {
+        name: "EX組合せ".into(),
+        terms: vec![(LoadCaseId(2), 1.0)],
+    });
+    app.run_static_target(StaticTarget::Case(LoadCaseId(2)));
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("地震水平力"));
+    app.run_combination(0);
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("水平力"));
+    app.start_combination_job(0);
+    assert!(app.core.scoped.job.is_none());
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("水平力"));
+    app.start_load_case_job(LoadCaseId(2));
+    wait_for_job(&mut app);
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("地震水平力"));
+    app.run_static_all();
+    assert!(
+        app.core
+            .scoped
+            .last_error
+            .as_ref()
+            .unwrap()
+            .contains("水平力"),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert!(!app.core.scoped.results.as_ref().is_some_and(|r| r
+        .statics
+        .iter()
+        .any(|(key, _)| *key == StaticCaseKey::Seismic(SeismicDir::X))));
+    app.start_static_all_job();
+    wait_for_job(&mut app);
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("水平力"));
+    assert!(!app.core.scoped.results.as_ref().is_some_and(|r| r
+        .statics
+        .iter()
+        .any(|(key, _)| *key == StaticCaseKey::Seismic(SeismicDir::X))));
+    app.core.model.load_cases[2].nodal.push(NodalLoad::manual(
+        NodeId(2),
+        [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    ));
+    app.run_static_target(StaticTarget::Case(LoadCaseId(2)));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert_eq!(
+        app.core.scoped.last_static,
+        Some(StaticKey::Case(StaticCaseKey::Seismic(SeismicDir::X)))
+    );
+    assert_eq!(
+        app.core.model.load_cases[2].nodal[0].source,
+        squid_n_core::model::LoadSource::Manual
+    );
+    assert!(app.core.model.load_cases[2]
+        .member
+        .iter()
+        .any(|m| m.source == squid_n_core::model::LoadSource::SlabTip));
+}
+
+#[test]
+fn test_batch_removes_old_combo_when_tip_ex_fails_after_empty_ey() {
+    use squid_n_core::ids::NodeId;
+    use squid_n_core::model::{LoadCase, LoadCaseKind, LoadCombination, NodalLoad};
+
+    let mut app = tip_seismic_app();
+    app.core.model.load_cases.push(LoadCase {
+        id: LoadCaseId(3),
+        name: EY_CASE_NAME.into(),
+        kind: LoadCaseKind::Seismic,
+        nodal: vec![NodalLoad::manual(
+            NodeId(2),
+            [0.0, 1000.0, 0.0, 0.0, 0.0, 0.0],
+        )],
+        member: Vec::new(),
+    });
+    app.core.model.load_cases[2].nodal.push(NodalLoad::manual(
+        NodeId(2),
+        [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    ));
+    app.core.model.combinations.push(LoadCombination {
+        name: "EY+EX".into(),
+        terms: vec![(LoadCaseId(3), 1.0), (LoadCaseId(2), 1.0)],
+    });
+    app.core.model.combinations.push(LoadCombination {
+        name: "保持対象".into(),
+        terms: vec![(LoadCaseId(0), 1.0)],
+    });
+    app.run_static_all();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .combos
+        .iter()
+        .any(|(name, _)| name == "EY+EX"));
+
+    app.core.model.load_cases[2].nodal.clear();
+    app.core.model.load_cases[3].nodal.clear();
+    app.run_static_all();
+    let bundle = app.core.scoped.results.as_ref().unwrap();
+    assert!(app.core.model.load_cases[2].nodal.is_empty());
+    assert!(app.core.model.load_cases[2]
+        .member
+        .iter()
+        .any(|load| load.source == squid_n_core::model::LoadSource::SlabTip));
+    assert_eq!(
+        app.empty_lateral_case_in_combo(&app.core.model.combinations[0]),
+        Some(EY_CASE_NAME.into())
+    );
+    assert!(app.core.scoped.last_error.is_some());
+    assert_eq!(bundle.combos.len(), 1);
+    assert_eq!(bundle.combos[0].0, "保持対象");
+}
+
+#[test]
+fn test_tip_seismic_sync_and_job_use_same_load_case() {
+    use squid_n_core::ids::NodeId;
+    use squid_n_core::model::NodalLoad;
+    let mut app = tip_seismic_app();
+    app.core.model.load_cases[2].nodal.push(NodalLoad::manual(
+        NodeId(2),
+        [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    ));
+    app.run_static_target(StaticTarget::Case(LoadCaseId(2)));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let sync = app.current_static().unwrap().disp.clone();
+    let expected =
+        squid_n_job::compute::compute_linear_static(app.core.model.clone(), LoadCaseId(2))
+            .unwrap()
+            .disp;
+    assert_eq!(sync, expected);
+    app.start_load_case_job(LoadCaseId(2));
+    wait_for_job(&mut app);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert_eq!(app.current_static().unwrap().disp, expected);
+    assert_eq!(
+        app.core.scoped.last_static,
+        Some(StaticKey::Case(StaticCaseKey::Seismic(SeismicDir::X)))
+    );
+}
+
+#[test]
+fn test_generated_ai_and_tip_load_are_both_used_by_single_ex_analysis() {
+    let mut app = tip_seismic_app();
+    app.generate_stories_action();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let ex = app
+        .core
+        .model
+        .load_cases
+        .iter()
+        .find(|case| case.name == EX_CASE_NAME)
+        .unwrap()
+        .id;
+    app.run_static_target(StaticTarget::Case(ex));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let expected = squid_n_job::compute::compute_linear_static(app.core.model.clone(), ex).unwrap();
+    assert_eq!(app.current_static().unwrap().disp, expected.disp);
+    assert!(app.core.model.load_cases[ex.index()]
+        .nodal
+        .iter()
+        .any(|load| load.source == squid_n_core::model::LoadSource::Auto));
+    assert!(app.core.model.load_cases[ex.index()]
+        .member
+        .iter()
+        .any(|load| load.source == squid_n_core::model::LoadSource::SlabTip));
+}
+
+#[test]
+fn test_missing_tip_beam_stops_reanalysis_without_replacing_result() {
+    use squid_n_core::ids::NodeId;
+    use squid_n_core::model::{LoadCombination, NodalLoad};
+    let mut app = tip_seismic_app();
+    app.core.model.combinations.push(LoadCombination {
+        name: "EX組合せ".into(),
+        terms: vec![(LoadCaseId(2), 1.0)],
+    });
+    app.core.model.load_cases[2].nodal.push(NodalLoad::manual(
+        NodeId(2),
+        [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    ));
+    app.run_static_target(StaticTarget::Case(LoadCaseId(2)));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let before = app.current_static().unwrap().disp.clone();
+    assert_eq!(app.core.model.slabs.len(), 1);
+    app.core
+        .model
+        .elements
+        .retain(|element| element.id != squid_n_core::ids::ElemId(2));
+    assert!(squid_n_job::auto_loads::compute_tip_loads(&app.core.model).is_err());
+    app.run_static_target(StaticTarget::Case(LoadCaseId(2)));
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("実梁"));
+    assert_eq!(app.current_static().unwrap().disp, before);
+    app.start_static_all_job();
+    assert!(app.core.scoped.job.is_none());
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("実梁"));
+    app.run_combination(0);
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("実梁"));
+    assert_eq!(app.current_static().unwrap().disp, before);
 }
 
 /// 種別からの標準組合せ自動生成は、準備計算が生成する標準ケース名で方向を判別し、

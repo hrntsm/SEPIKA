@@ -848,6 +848,7 @@ fn assign_imported_slabs(model: &mut Model, pending: Vec<PendingSlab>) -> Result
             id: slab_id,
             shape,
             plate,
+            tip_loads: Vec::new(),
         });
     }
     for (i, entry) in accum.into_iter().enumerate() {
@@ -877,6 +878,7 @@ fn assign_imported_slabs(model: &mut Model, pending: Vec<PendingSlab>) -> Result
             id: slab_id,
             shape: SlabShape::Enclosed,
             plate,
+            tip_loads: Vec::new(),
         });
         model
             .floor_assignment_regions

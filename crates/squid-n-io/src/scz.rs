@@ -453,6 +453,34 @@ mod tests {
     }
 
     #[test]
+    fn tip_load_roundtrip() {
+        let mut model = make_3node_model();
+        model.load_cases = default_load_cases();
+        model.slabs.push(Slab {
+            id: SlabId(0),
+            shape: SlabShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(0), NodeId(1)],
+                    span: [0.2, 0.8],
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: [1000.0, 2000.0],
+            },
+            plate: SlabPlate::default(),
+            tip_loads: vec![SlabTipLoad {
+                case: LoadCaseId(3),
+                intensity: 2.0,
+                direction: TipLoadDirection::PosY,
+            }],
+        });
+        let path = crate::test_util::test_tmp().join("tip_load_roundtrip.scz");
+        save_scz(&path, &model, SczExtras::default()).unwrap();
+        let loaded = load_scz(&path).unwrap().model;
+        assert_eq!(loaded.slabs[0].tip_loads, model.slabs[0].tip_loads);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn test_hash_mismatch() {
         let model = make_3node_model();
         let dir = crate::test_util::test_tmp();

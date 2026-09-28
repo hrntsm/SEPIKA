@@ -107,6 +107,7 @@ fn test_beam_has_attached_slab_t_shape_and_plateless() {
             section: Some(SectionId(1)),
             ..Default::default()
         },
+        tip_loads: Vec::new(),
     }]);
     assert!(
         beam_has_attached_slab(&attached, &attached.elements[0]),
@@ -149,11 +150,13 @@ fn test_beam_has_attached_slab_survives_beam_subdivided_region() {
             id: SlabId(0),
             shape: SlabShape::Enclosed,
             plate: plate.clone(),
+            tip_loads: Vec::new(),
         },
         Slab {
             id: SlabId(1),
             shape: SlabShape::Enclosed,
             plate,
+            tip_loads: Vec::new(),
         },
     ];
     model.floor_regions = vec![FloorRegion {
