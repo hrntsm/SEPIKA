@@ -347,10 +347,10 @@ fn src_column_rebar() -> squid_n_core::section_shape::RcRectColumnRebar {
     }
 }
 
-/// 新型 SRC 矩形柱断面の用途不一致（柱用断面を梁部材へ）を検出する。
+/// 新型 SRC 矩形柱断面の用途は、水平な部材でも `Column` として扱う。
 #[test]
-fn test_model_issues_detects_new_src_column_purpose_mismatch() {
-    use super::precheck::{model_issues, precheck_model};
+fn test_model_issues_allows_horizontal_src_column() {
+    use super::precheck::model_issues;
     use squid_n_core::section_shape::SectionShape;
 
     let mut model = make_cantilever_model();
@@ -370,11 +370,9 @@ fn test_model_issues_detects_new_src_column_purpose_mismatch() {
     sec.frame_use = Some(FrameSectionUse::Column);
     model.sections[0] = sec;
 
-    let issues = model_issues(&model);
-    assert!(issues
+    assert!(!model_issues(&model)
         .iter()
-        .any(|i| i.message.contains("柱用断面を梁部材")));
-    assert!(precheck_model(&model).is_err());
+        .any(|issue| issue.message.contains("柱用断面を梁部材")));
 }
 
 /// 新型 SRC 矩形柱の内蔵鉄骨材料が未割当のとき、エラーとして検出する。
