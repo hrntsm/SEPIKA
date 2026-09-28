@@ -222,52 +222,25 @@ fn test_model_issues_collects_every_issue() {
     assert!(model_issues(&make_cantilever_model()).is_empty());
 }
 
-/// CFT の主架構線材の用途は部材角度ではなく `FrameSectionUse` で決まる。
+/// 主架構線材の用途は部材角度ではなく `FrameSectionUse` で決まり、
+/// 非鉛直の Column と鉛直の Girder を解析前チェックで拒否しない。
 #[test]
 fn test_model_issues_uses_frame_section_use_without_angle_mismatch() {
-    use super::precheck::{model_issues, precheck_model};
+    use super::precheck::precheck_model;
 
     let mut horizontal_column = make_cantilever_model();
-    horizontal_column.sections[0].shape = Some(cft_shape());
-    horizontal_column.sections[0].steel_material = Some(MaterialId(0));
     horizontal_column.sections[0].frame_use = Some(FrameSectionUse::Column);
-    horizontal_column.materials[0].fc = Some(24.0);
     assert!(precheck_model(&horizontal_column).is_ok());
 
     let mut inclined_column = make_cantilever_model();
     inclined_column.nodes[1].coord = [1000.0, 0.0, 2000.0];
-    inclined_column.sections[0].shape = Some(cft_shape());
-    inclined_column.sections[0].steel_material = Some(MaterialId(0));
     inclined_column.sections[0].frame_use = Some(FrameSectionUse::Column);
-    inclined_column.materials[0].fc = Some(24.0);
     assert!(precheck_model(&inclined_column).is_ok());
 
     let mut vertical_girder = make_cantilever_model();
     vertical_girder.nodes[1].coord = [0.0, 0.0, 1000.0];
-    vertical_girder.sections[0].shape = Some(cft_shape());
-    vertical_girder.sections[0].steel_material = Some(MaterialId(0));
-    vertical_girder.sections[0].frame_use = Some(FrameSectionUse::Column);
-    vertical_girder.materials[0].fc = Some(24.0);
-    assert!(model_issues(&vertical_girder)
-        .iter()
-        .all(|issue| !issue.message.contains("用途が不正な CFT")));
-}
-
-#[test]
-fn test_model_issues_detects_non_cft_frame_use_angle_mismatch() {
-    use super::precheck::model_issues;
-
-    let mut horizontal_column = make_cantilever_model();
-    horizontal_column.sections[0].frame_use = Some(FrameSectionUse::Column);
-    assert!(model_issues(&horizontal_column)
-        .iter()
-        .any(|issue| issue.message.contains("柱用断面を梁部材")));
-
-    let mut vertical_girder = make_cantilever_model();
-    vertical_girder.nodes[1].coord = [0.0, 0.0, 1000.0];
-    assert!(model_issues(&vertical_girder)
-        .iter()
-        .any(|issue| issue.message.contains("梁用断面を柱部材")));
+    vertical_girder.sections[0].frame_use = Some(FrameSectionUse::Girder);
+    assert!(precheck_model(&vertical_girder).is_ok());
 }
 
 /// 実配筋型（`RcColumnRect`）の幾何が不整合な断面を使う部材は、
@@ -374,10 +347,10 @@ fn src_column_rebar() -> squid_n_core::section_shape::RcRectColumnRebar {
     }
 }
 
-/// 新型 SRC 矩形柱断面でも、部材方向と用途が不一致ならエラーにする。
+/// 新型 SRC 矩形柱断面の用途不一致（柱用断面を梁部材へ）を検出する。
 #[test]
-fn test_model_issues_allows_horizontal_src_column() {
-    use super::precheck::model_issues;
+fn test_model_issues_detects_new_src_column_purpose_mismatch() {
+    use super::precheck::{model_issues, precheck_model};
     use squid_n_core::section_shape::SectionShape;
 
     let mut model = make_cantilever_model();
@@ -397,9 +370,11 @@ fn test_model_issues_allows_horizontal_src_column() {
     sec.frame_use = Some(FrameSectionUse::Column);
     model.sections[0] = sec;
 
-    assert!(model_issues(&model)
+    let issues = model_issues(&model);
+    assert!(issues
         .iter()
-        .any(|issue| issue.message.contains("柱用断面を梁部材")));
+        .any(|i| i.message.contains("柱用断面を梁部材")));
+    assert!(precheck_model(&model).is_err());
 }
 
 /// 新型 SRC 矩形柱の内蔵鉄骨材料が未割当のとき、エラーとして検出する。
@@ -514,23 +489,6 @@ fn test_model_issues_errors_on_invalid_cft_fc() {
             .iter()
             .any(|i| i.short == "等価断面性能を算定できません"));
     }
-}
-
-#[test]
-fn test_model_issues_errors_on_cft_steel_material_missing() {
-    use super::precheck::{model_issues, IssueSeverity, IssueTargets};
-
-    let mut model = make_cantilever_model();
-    model.sections[0].shape = Some(cft_shape());
-    model.sections[0].frame_use = Some(FrameSectionUse::Column);
-    model.materials[0].fc = Some(24.0);
-
-    let issue = model_issues(&model)
-        .into_iter()
-        .find(|issue| issue.short == "CFT 断面に鋼管の材料が未割当です")
-        .expect("CFT の鋼管材料未設定は入力エラーになるはず");
-    assert_eq!(issue.severity, IssueSeverity::Error);
-    assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
 }
 
 #[test]
@@ -1862,7 +1820,6 @@ fn test_model_issues_allows_cft_horizontal_primary_column() {
     let mut model = make_cantilever_model();
     model.sections[0].shape = Some(cft_shape());
     model.sections[0].frame_use = Some(FrameSectionUse::Column);
-    model.sections[0].steel_material = Some(MaterialId(0));
     model.materials[0].fc = Some(24.0);
 
     precheck_model(&model).expect("Column 用途の水平 CFT 線材は許可する");

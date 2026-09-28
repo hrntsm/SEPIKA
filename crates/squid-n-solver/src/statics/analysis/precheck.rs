@@ -261,27 +261,6 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         ));
     }
 
-    let no_cft_steel: Vec<ElemId> = model
-        .elements
-        .iter()
-        .filter(needs_input)
-        .filter(|e| {
-            model
-                .element_section(e)
-                .is_some_and(|section| section.is_cft() && section.steel_material.is_none())
-        })
-        .map(|e| e.id)
-        .collect();
-    if !no_cft_steel.is_empty() {
-        issues.push(ModelIssue::members(
-            "鋼管の材料が未割当の CFT 断面を使う部材があります",
-            "ID ",
-            no_cft_steel,
-            "CFT 断面に鋼管の材料が未割当です",
-            "断面タブで CFT 断面に鋼管の材料を割り当ててください。",
-        ));
-    }
-
     {
         let mut beam_shape_on_column: Vec<ElemId> = Vec::new();
         let mut column_shape_on_beam: Vec<ElemId> = Vec::new();
