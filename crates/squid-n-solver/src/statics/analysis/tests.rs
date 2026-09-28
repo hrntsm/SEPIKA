@@ -1864,7 +1864,22 @@ fn test_model_issues_allows_cft_horizontal_primary_column() {
     let mut model = make_cantilever_model();
     model.sections[0].shape = Some(cft_shape());
     model.sections[0].frame_use = Some(FrameSectionUse::Column);
+    model.sections[0].steel_material = Some(MaterialId(1));
+    model.materials[0].category = MaterialCategory::Concrete;
     model.materials[0].fc = Some(24.0);
+    model.materials.push(Material {
+        id: MaterialId(1),
+        name: "SN490".into(),
+        category: MaterialCategory::Steel,
+        young: 205000.0,
+        poisson: 0.3,
+        density: 7.85e-9,
+        shear: None,
+        fc: None,
+        fy: Some(325.0),
+        concrete_class: Default::default(),
+        strength_factor: None,
+    });
 
     precheck_model(&model).expect("Column 用途の水平 CFT 線材は許可する");
 }
