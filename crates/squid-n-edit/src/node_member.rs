@@ -294,7 +294,9 @@ pub struct AddMember {
 
 impl EditCommand for AddMember {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        if !crate::refs::new_elem_ok(model, &self.elem) {
+        if !crate::refs::new_elem_ok(model, &self.elem)
+            || !crate::refs::frame_element_section_ref_ok(model, &self.elem, self.elem.section)
+        {
             return Box::new(Noop);
         }
         let snapshot = AssignmentTopology::capture(model);
@@ -363,7 +365,9 @@ pub struct AddDamper {
 
 impl EditCommand for AddDamper {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        if !crate::refs::new_elem_ok(model, &self.elem) {
+        if !crate::refs::new_elem_ok(model, &self.elem)
+            || !crate::refs::frame_element_section_ref_ok(model, &self.elem, self.elem.section)
+        {
             return Box::new(Noop);
         }
         let id = self.elem.id;
@@ -389,7 +393,9 @@ pub struct AddIsolator {
 
 impl EditCommand for AddIsolator {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        if !crate::refs::new_elem_ok(model, &self.elem) {
+        if !crate::refs::new_elem_ok(model, &self.elem)
+            || !crate::refs::frame_element_section_ref_ok(model, &self.elem, self.elem.section)
+        {
             return Box::new(Noop);
         }
         let id = self.elem.id;

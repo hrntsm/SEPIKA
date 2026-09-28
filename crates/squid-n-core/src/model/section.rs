@@ -66,6 +66,20 @@ pub struct Section {
 pub type SectionKey<'a> = (&'a str, Option<&'a str>);
 
 impl Section {
+    pub fn is_cft(&self) -> bool {
+        matches!(
+            self.shape,
+            Some(
+                crate::section_shape::SectionShape::CftBox { .. }
+                    | crate::section_shape::SectionShape::CftPipe { .. }
+            )
+        )
+    }
+
+    pub fn cft_frame_use_allowed(&self) -> bool {
+        !self.is_cft() || self.frame_use == Some(FrameSectionUse::Column)
+    }
+
     /// 物性がすべてゼロ・形状も材料も持たない断面。
     pub fn zero(id: SectionId, name: String) -> Self {
         Self {

@@ -668,6 +668,25 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
             section: Some(SectionId(0)),
             name: "B1".into(),
         });
+    for new_shape in [
+        squid_n_section::shape::SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 16.0,
+        },
+        squid_n_section::shape::SectionShape::CftPipe {
+            outer_dia: 400.0,
+            thick: 16.0,
+        },
+    ] {
+        assert!(EditSectionShape {
+            section: SectionId(0),
+            new_shape,
+            frame_use: None,
+        }
+        .apply(&mut model)
+        .is_noop());
+    }
     assert!(stack.run(
         &mut model,
         Box::new(EditSectionShape {
@@ -749,6 +768,57 @@ fn test_edit_rc_wall_section_shape_with_wall_reference() {
     .apply(&mut model)
     .is_noop());
     assert_eq!(model.sections[0].shape, Some(new_shape));
+}
+
+#[test]
+fn test_edit_section_shape_rejects_cft_for_non_target_element_reference() {
+    for kind in [
+        ElementKind::Shell,
+        ElementKind::Wall,
+        ElementKind::PanelZone,
+        ElementKind::NodalSpring,
+        ElementKind::Damper,
+        ElementKind::Isolator,
+    ] {
+        let old_shape = squid_n_section::shape::SectionShape::SteelBox {
+            height: 200.0,
+            width: 200.0,
+            thick: 12.0,
+            corner_r: 0.0,
+        };
+        let new_shape = squid_n_section::shape::SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 16.0,
+        };
+        let mut model = empty_model();
+        let mut section = old_shape.to_section(SectionId(0), "S".into());
+        section.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+        model.sections.push(section);
+        model.elements.push(ElementData {
+            id: ElemId(0),
+            kind,
+            nodes: smallvec![],
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 0.0, 1.0],
+            },
+            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        });
+
+        assert!(EditSectionShape {
+            section: SectionId(0),
+            new_shape,
+            frame_use: Some(squid_n_core::model::FrameSectionUse::Column),
+        }
+        .apply(&mut model)
+        .is_noop());
+        assert_eq!(model.sections[0].shape, Some(old_shape));
+    }
 }
 
 #[test]
@@ -1051,7 +1121,10 @@ fn test_delete_section_in_use_is_noop_and_renumbers() {
 /// 別断面の削除では参照が繰り上がって追随する（断面参照が陳腐化しない）。
 #[test]
 fn test_delete_section_referenced_by_beam() {
-    use squid_n_core::model::{Node, SecondaryMember, SecondaryMemberKind, Section};
+    use squid_n_core::ids::WallPlateId;
+    use squid_n_core::model::{
+        Node, SecondaryMember, SecondaryMemberKind, Section, WallPlate, WallPlateShape,
+    };
     let mut model = empty_model();
     for i in 0..4u32 {
         model.nodes.push(Node {
@@ -1104,6 +1177,17 @@ fn test_delete_section_referenced_by_beam() {
         name: "SB1".to_string(),
     }];
     model.floor_regions.push(region);
+    model.wall_plates.push(WallPlate {
+        self_weight_shares: Vec::new(),
+        id: WallPlateId(0),
+        shape: WallPlateShape::Enclosed,
+        section: Some(SectionId(1)),
+        opening_area: 0.0,
+        opening_weight: 0.0,
+        openings: Vec::new(),
+        loads: Vec::new(),
+        slit: Default::default(),
+    });
     let mut stack = UndoStack::new();
 
     // 小梁が参照中の断面 1 は削除できない（要素だけでなく小梁も参照チェック対象）。
@@ -1118,7 +1202,7 @@ fn test_delete_section_referenced_by_beam() {
         Some(SectionId(0)),
         "小梁の断面参照が繰り上がりに追随"
     );
-    assert!(model.validate().is_ok());
+    assert_eq!(model.wall_plates[0].section, Some(SectionId(0)));
 }
 
 #[test]
@@ -5753,6 +5837,275 @@ fn set_floor_region_beam_section_rejects_cft() {
     assert_eq!(model.floor_regions[0].secondary_beams[0].section, None);
 }
 
+/// 階コピーでも Column 用途に一致しない主架構線材へ CFT 断面を割り当てない。
+#[test]
+fn test_copy_story_rejects_horizontal_primary_cft() {
+    use crate::{CopyStory, CopyTargets};
+    use squid_n_core::frame_gen::{frame_model, FrameSpec};
+    use squid_n_core::ids::StoryId;
+
+    let mut model = frame_model(&FrameSpec::default()).unwrap();
+    assign_node_stories(&mut model);
+    let cft = push_cft_section(&mut model);
+    model.sections[cft.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
+    model.sections[cft.index()].floor = Some("2F".into());
+    let source = model
+        .elements
+        .iter()
+        .find(|e| {
+            model.member_story(e) == Some(StoryId(1))
+                && e.kind == ElementKind::Beam
+                && !squid_n_core::geom::is_vertical_axis(
+                    model.nodes[e.nodes[0].index()].coord,
+                    model.nodes[e.nodes[1].index()].coord,
+                )
+        })
+        .expect("2F の水平 Beam がある")
+        .id;
+    model.elements[source.index()].section = Some(cft);
+    let cmd = CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            sections: true,
+            ..Default::default()
+        },
+        overwrite: true,
+    };
+    let report = cmd.preview(&model);
+    assert!(report.sections_rejected > 0, "{report:?}");
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(&mut model, Box::new(cmd)));
+    assert!(model
+        .elements
+        .iter()
+        .find(|e| {
+            model.member_story(e) == Some(StoryId(2))
+                && e.kind == ElementKind::Beam
+                && !squid_n_core::geom::is_vertical_axis(
+                    model.nodes[e.nodes[0].index()].coord,
+                    model.nodes[e.nodes[1].index()].coord,
+                )
+                && e.section.is_some_and(|id| {
+                    matches!(
+                        model.sections[id.index()].shape,
+                        Some(
+                            squid_n_core::section_shape::SectionShape::CftBox { .. }
+                                | squid_n_core::section_shape::SectionShape::CftPipe { .. }
+                        )
+                    )
+                })
+        })
+        .is_none());
+}
+
+#[test]
+fn test_copy_story_rejects_resolved_cft_for_primary_target() {
+    use crate::{CopyStory, CopyTargets};
+    use squid_n_core::frame_gen::{frame_model, FrameSpec};
+    use squid_n_core::ids::StoryId;
+
+    let mut model = frame_model(&FrameSpec::default()).unwrap();
+    assign_node_stories(&mut model);
+    let source = model
+        .elements
+        .iter()
+        .find(|e| {
+            model.member_story(e) == Some(StoryId(1))
+                && e.kind == ElementKind::Beam
+                && !squid_n_core::geom::is_vertical_axis(
+                    model.nodes[e.nodes[0].index()].coord,
+                    model.nodes[e.nodes[1].index()].coord,
+                )
+        })
+        .expect("2F の水平 Beam がある")
+        .clone();
+    let plan = |model: &Model, element: &ElementData| {
+        let mut points: Vec<[f64; 2]> = element
+            .nodes
+            .iter()
+            .map(|&id| {
+                let coord = model.nodes[id.index()].coord;
+                [coord[0], coord[1]]
+            })
+            .collect();
+        points.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+        points
+    };
+    let target = model
+        .elements
+        .iter()
+        .find(|e| {
+            model.member_story(e) == Some(StoryId(2)) && plan(&model, e) == plan(&model, &source)
+        })
+        .expect("3F の対応する Beam がある")
+        .id;
+
+    let source_section = push_steel_section(&mut model);
+    model.sections[source_section.index()].name = "階コピー検証".into();
+    model.sections[source_section.index()].floor = Some(model.stories[1].name.clone());
+    let target_section = push_cft_section(&mut model);
+    model.sections[target_section.index()].name = "階コピー検証".into();
+    model.sections[target_section.index()].floor = Some(model.stories[2].name.clone());
+    model.sections[target_section.index()].frame_use =
+        Some(squid_n_core::model::FrameSectionUse::Girder);
+    model.elements[source.id.index()].section = Some(source_section);
+    model.elements[target.index()].section = Some(target_section);
+
+    let cmd = CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            sections: true,
+            ..Default::default()
+        },
+        overwrite: true,
+    };
+    let report = cmd.preview(&model);
+    assert!(report.sections_rejected > 0, "{report:?}");
+    assert_eq!(model.elements[target.index()].section, Some(target_section));
+
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(&mut model, Box::new(cmd)));
+    assert_eq!(model.elements[target.index()].section, Some(target_section));
+}
+
+/// Column 用途の主架構 Beam には、水平・傾斜を問わず CFT 断面を割り当てる。
+#[test]
+fn set_element_section_allows_column_cft_for_horizontal_and_inclined_beam() {
+    let mut model = seeded_model(2, 1);
+    let cft = push_cft_section(&mut model);
+    model.sections[cft.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+    let mut stack = UndoStack::new();
+    assert!(stack.run(
+        &mut model,
+        Box::new(SetElementSection {
+            elem: ElemId(0),
+            section: Some(cft),
+        }),
+    ));
+    model.elements[0].section = None;
+    model.nodes[1].coord = [1000.0, 0.0, 1000.0];
+    assert!(stack.run(
+        &mut model,
+        Box::new(SetElementSection {
+            elem: ElemId(0),
+            section: Some(cft),
+        }),
+    ));
+}
+
+#[test]
+fn set_element_section_rejects_cft_for_non_column_use_or_kind() {
+    for frame_use in [
+        None,
+        Some(squid_n_core::model::FrameSectionUse::Girder),
+        Some(squid_n_core::model::FrameSectionUse::Brace),
+    ] {
+        let mut model = seeded_model(2, 1);
+        let cft = push_cft_section(&mut model);
+        model.sections[cft.index()].frame_use = frame_use;
+        let mut stack = UndoStack::new();
+        assert!(!stack.run(
+            &mut model,
+            Box::new(SetElementSection {
+                elem: ElemId(0),
+                section: Some(cft),
+            }),
+        ));
+    }
+
+    for kind in [
+        ElementKind::Brace {
+            tension_only: false,
+        },
+        ElementKind::Shell,
+        ElementKind::Wall,
+    ] {
+        let mut model = seeded_model(2, 1);
+        model.elements[0].kind = kind;
+        let cft = push_cft_section(&mut model);
+        model.sections[cft.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+        let mut stack = UndoStack::new();
+        assert!(!stack.run(
+            &mut model,
+            Box::new(SetElementSection {
+                elem: ElemId(0),
+                section: Some(cft),
+            }),
+        ));
+    }
+}
+
+#[test]
+fn add_member_rejects_horizontal_cft_but_allows_column_and_unassigned() {
+    let mut model = seeded_model(2, 1);
+    model.nodes.push(Node {
+        id: NodeId(2),
+        coord: [0.0, 0.0, 3000.0],
+        restraint: Dof6Mask::FREE,
+        mass: None,
+        story: None,
+        support_spring: None,
+    });
+    let cft = push_cft_section(&mut model);
+    model.sections[cft.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Girder);
+    let pipe = SectionId(model.sections.len() as u32);
+    model.sections.push(
+        squid_n_core::section_shape::SectionShape::CftPipe {
+            outer_dia: 400.0,
+            thick: 16.0,
+        }
+        .to_section(pipe, "CFTP".into()),
+    );
+    let member = |id: u32, nodes: (NodeId, NodeId), section: Option<SectionId>| ElementData {
+        id: ElemId(id),
+        kind: ElementKind::Beam,
+        nodes: smallvec![nodes.0, nodes.1],
+        section,
+        local_axis: LocalAxis {
+            ref_vector: [1.0, 0.0, 0.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    };
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(
+        &mut model,
+        Box::new(AddMember {
+            elem: member(1, (NodeId(0), NodeId(1)), Some(cft)),
+        }),
+    ));
+    assert_eq!(model.elements.len(), 1);
+
+    model.sections[cft.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+    model.sections[pipe.index()].frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+    assert!(stack.run(
+        &mut model,
+        Box::new(AddMember {
+            elem: member(1, (NodeId(0), NodeId(2)), Some(pipe)),
+        }),
+    ));
+    let steel = push_steel_section(&mut model);
+    assert!(stack.run(
+        &mut model,
+        Box::new(AddMember {
+            elem: member(2, (NodeId(0), NodeId(1)), Some(steel)),
+        }),
+    ));
+    assert!(stack.run(
+        &mut model,
+        Box::new(AddMember {
+            elem: member(3, (NodeId(0), NodeId(1)), None),
+        }),
+    ));
+    assert_eq!(model.elements[2].section, Some(steel));
+    assert_eq!(model.elements[3].section, None);
+}
+
 /// CFT 断面の間柱への断面変更は Noop で、断面は変わらない。
 #[test]
 fn set_wall_region_post_section_rejects_cft() {
@@ -6029,6 +6382,142 @@ fn test_copy_story_secondary_creates_unassigned_beam() {
     stack.undo(&mut model);
     assert_eq!(model.unassigned_beams.len(), 1);
     assert!(model.validate().is_ok());
+}
+
+/// 階コピーで新規作成する二次部材にも CFT 割当拒否を適用する。
+#[test]
+fn test_copy_story_rejects_secondary_cft() {
+    use crate::{CopyStory, CopyTargets};
+    use squid_n_core::frame_gen::{frame_model, FrameSpec};
+    use squid_n_core::ids::StoryId;
+    use squid_n_core::model::{SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind};
+
+    let mut model = frame_model(&FrameSpec::default()).unwrap();
+    assign_node_stories(&mut model);
+    let n2f: Vec<NodeId> = model
+        .nodes
+        .iter()
+        .filter(|n| n.story == Some(StoryId(1)))
+        .map(|n| n.id)
+        .collect();
+    let cft = push_cft_section(&mut model);
+    model.unassigned_beams.push(SecondaryMember {
+        gravity_end_shares: None,
+        id: squid_n_core::ids::SecondaryMemberId(0),
+        kind: SecondaryMemberKind::Beam,
+        ends: SecondaryMemberEnds::Detached([
+            model.nodes[n2f[0].index()].coord,
+            model.nodes[n2f[1].index()].coord,
+        ]),
+        section: Some(cft),
+        name: "CFT小梁".into(),
+    });
+    let cmd = CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            secondary: true,
+            sections: true,
+            ..Default::default()
+        },
+        overwrite: true,
+    };
+    let report = cmd.preview(&model);
+    assert_eq!(report.sections_rejected, 2);
+    assert_eq!(report.secondary_created, 1);
+    let mut stack = UndoStack::new();
+    assert!(stack.run(&mut model, Box::new(cmd)));
+    assert_eq!(
+        model
+            .unassigned_beams
+            .iter()
+            .filter(|sm| sm.name == "CFT小梁")
+            .count(),
+        2,
+        "3F の小梁が作られる"
+    );
+    assert_eq!(
+        model
+            .unassigned_beams
+            .iter()
+            .filter(|sm| sm.name == "CFT小梁")
+            .filter(|sm| sm.section.is_none())
+            .count(),
+        1
+    );
+}
+
+/// CFT 床板を上書きすると、既存床板の断面も解除し、preview と実行結果を一致させる。
+#[test]
+fn test_copy_story_overwrite_cft_slab_clears_existing_section_idempotently() {
+    use crate::{CopyStory, CopyTargets};
+    use squid_n_core::frame_gen::{frame_model, FrameSpec};
+    use squid_n_core::ids::StoryId;
+
+    let mut model = frame_model(&FrameSpec::default()).unwrap();
+    assign_node_stories(&mut model);
+    let cft = push_cft_section(&mut model);
+    let target_section = push_steel_section(&mut model);
+    let source_slab = model
+        .slabs
+        .iter()
+        .find(|slab| {
+            slab.boundary_nodes(&model).is_some_and(|nodes| {
+                nodes
+                    .iter()
+                    .all(|node| model.nodes[node.index()].story == Some(StoryId(1)))
+            })
+        })
+        .expect("2F の床板がある")
+        .id;
+    let target_slab = model
+        .slabs
+        .iter()
+        .find(|slab| {
+            slab.boundary_nodes(&model).is_some_and(|nodes| {
+                nodes
+                    .iter()
+                    .all(|node| model.nodes[node.index()].story == Some(StoryId(2)))
+            })
+        })
+        .expect("3F の床板がある")
+        .id;
+    model.slabs[source_slab.index()].plate.section = Some(cft);
+    model.slabs[target_slab.index()].plate.section = Some(target_section);
+
+    let cmd = CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            sections: true,
+            ..Default::default()
+        },
+        overwrite: true,
+    };
+    let preview = cmd.preview(&model);
+    assert_eq!(preview.sections_rejected, 1);
+    assert_eq!(preview.sections_cleared, 1);
+    assert_eq!(
+        model.slabs[target_slab.index()].plate.section,
+        Some(target_section)
+    );
+
+    let mut stack = UndoStack::new();
+    assert!(stack.run(&mut model, Box::new(cmd)));
+    assert_eq!(model.slabs[target_slab.index()].plate.section, None);
+
+    let second = CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            sections: true,
+            ..Default::default()
+        },
+        overwrite: true,
+    };
+    let second_preview = second.preview(&model);
+    assert_eq!(second_preview.sections_cleared, 0);
+    assert!(!stack.run(&mut model, Box::new(second)));
 }
 
 /// 大梁の材軸中間へアンカーした（端に節点を持たない）二次部材は複製できない。
@@ -6471,6 +6960,48 @@ fn test_set_slab_section_sets_and_clears_section() {
     );
 }
 
+#[test]
+fn test_plate_section_commands_reject_cft() {
+    use squid_n_core::ids::{SectionId, SlabId, WallPlateId};
+    use squid_n_core::model::{Slab, SlabPlate, SlabShape, WallPlate, WallPlateShape};
+
+    let mut model = seeded_model(4, 0);
+    let cft = push_cft_section(&mut model);
+    model.slabs.push(Slab {
+        id: SlabId(0),
+        shape: SlabShape::Enclosed,
+        plate: SlabPlate::default(),
+    });
+    model.wall_plates.push(WallPlate {
+        self_weight_shares: Vec::new(),
+        id: WallPlateId(0),
+        shape: WallPlateShape::Enclosed,
+        section: None,
+        opening_area: 0.0,
+        opening_weight: 0.0,
+        openings: Vec::new(),
+        loads: Vec::new(),
+        slit: Default::default(),
+    });
+    let mut undo = UndoStack::default();
+    assert!(!undo.run(
+        &mut model,
+        Box::new(crate::SetSlabSection {
+            id: SlabId(0),
+            section: Some(cft),
+        })
+    ));
+    assert!(!undo.run(
+        &mut model,
+        Box::new(crate::SetWallPlateSection {
+            id: WallPlateId(0),
+            section: Some(SectionId(cft.0)),
+        })
+    ));
+    assert!(model.slabs[0].section().is_none());
+    assert!(model.wall_plates[0].section.is_none());
+}
+
 /// 床領域の名前を変更し、undo で戻る。同じ名前・存在しない ID は Noop。
 #[test]
 fn test_set_floor_region_name_roundtrip() {
@@ -6638,6 +7169,56 @@ fn test_copy_story_keeps_sectionless_enclosed_slab() {
             .count(),
         1,
         "断面未割当の enclosed 床板は断面が付かないまま複製される"
+    );
+}
+
+#[test]
+fn test_copy_story_rejects_cft_slab_section_and_reports_it() {
+    use crate::{CopyStory, CopyTargets};
+    use squid_n_core::frame_gen::{frame_model, FrameSpec};
+    use squid_n_core::ids::StoryId;
+
+    let mut model = frame_model(&FrameSpec::default()).unwrap();
+    assign_node_stories(&mut model);
+    let src_z = model.stories[1].elevation;
+    let src = model
+        .slabs
+        .iter()
+        .position(|sl| {
+            sl.boundary_nodes(&model)
+                .is_some_and(|b| (model.nodes[b[0].index()].coord[2] - src_z).abs() < 1.0)
+        })
+        .expect("2F の床板");
+    let cft = push_cft_section(&mut model);
+    model.slabs[src].plate.section = Some(cft);
+    let to_z = model.stories[2].elevation;
+    let doomed: Vec<_> = model
+        .slabs
+        .iter()
+        .filter(|sl| {
+            sl.boundary_nodes(&model)
+                .is_some_and(|b| (model.nodes[b[0].index()].coord[2] - to_z).abs() < 1.0)
+        })
+        .map(|sl| sl.id)
+        .collect();
+    for id in doomed.into_iter().rev() {
+        crate::DeleteSlab { id }.apply(&mut model);
+    }
+
+    let report = CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            slabs: true,
+            ..Default::default()
+        },
+        overwrite: true,
+    }
+    .preview(&model);
+    assert!(report.sections_rejected > 0, "{report:?}");
+    assert!(
+        report.slabs_created > 0,
+        "CFT 床板も形状は複製する: {report:?}"
     );
 }
 

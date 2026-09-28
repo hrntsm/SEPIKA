@@ -266,34 +266,24 @@ fn test_model_issues_detects_rc_shape_purpose_mismatch() {
         }
     }
 
-    // 梁用断面を鉛直材（柱）へ割り当てる。
     let mut model = make_cantilever_model();
     model.nodes[1].coord = [0.0, 0.0, 3000.0];
     model.sections[0].shape = Some(beam_shape());
     let issues = model_issues(&model);
-    assert!(
-        issues
-            .iter()
-            .any(|i| i.severity == IssueSeverity::Error && i.message.contains("梁用断面を柱部材")),
-        "{:?}",
-        issues.iter().map(|i| &i.message).collect::<Vec<_>>()
-    );
+    assert!(issues.iter().any(|i| {
+        i.severity == IssueSeverity::Error && i.message.contains("梁用断面を柱部材")
+    }));
     assert!(precheck_model(&model).is_err());
 
-    // 柱用断面を水平材（梁）へ割り当てる。
     let mut model = make_cantilever_model();
     model.sections[0].shape = Some(column_shape());
     model.sections[0].rebar_material = Some(MaterialId(0));
     model.sections[0].shear_rebar_material = Some(MaterialId(0));
     model.sections[0].frame_use = Some(FrameSectionUse::Column);
     let issues = model_issues(&model);
-    assert!(
-        issues
-            .iter()
-            .any(|i| i.severity == IssueSeverity::Error && i.message.contains("柱用断面を梁部材")),
-        "{:?}",
-        issues.iter().map(|i| &i.message).collect::<Vec<_>>()
-    );
+    assert!(issues.iter().any(|i| {
+        i.severity == IssueSeverity::Error && i.message.contains("柱用断面を梁部材")
+    }));
     assert!(precheck_model(&model).is_err());
 }
 
@@ -425,13 +415,9 @@ fn test_model_issues_detects_new_src_column_purpose_mismatch() {
     model.sections[0] = sec;
 
     let issues = model_issues(&model);
-    assert!(
-        issues
-            .iter()
-            .any(|i| i.severity == IssueSeverity::Error && i.message.contains("柱用断面を梁部材")),
-        "{:?}",
-        issues.iter().map(|i| &i.message).collect::<Vec<_>>()
-    );
+    assert!(issues.iter().any(|i| {
+        i.severity == IssueSeverity::Error && i.message.contains("柱用断面を梁部材")
+    }));
     assert!(precheck_model(&model).is_err());
 }
 
@@ -1844,7 +1830,9 @@ fn test_model_issues_errors_cft_secondary_section() {
     };
 
     let mut model = make_cantilever_model();
-    model.sections[0].shape = Some(cft_shape());
+    model
+        .sections
+        .push(cft_shape().to_section(SectionId(1), "CFT小梁".into()));
     model.materials[0].fc = Some(24.0);
     model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
@@ -1857,7 +1845,7 @@ fn test_model_issues_errors_cft_secondary_section() {
             },
             free_end_vector: [0.0, 1000.0],
         },
-        section: Some(SectionId(0)),
+        section: Some(SectionId(1)),
         name: "CFT小梁".into(),
     });
 
@@ -1866,6 +1854,137 @@ fn test_model_issues_errors_cft_secondary_section() {
         err.to_string().contains("CFT") && err.to_string().contains("二次部材"),
         "{err}"
     );
+}
+
+/// Column 用途の水平な主架構 Beam への CFT 割当は解析前チェックを通す。
+#[test]
+fn test_model_issues_allows_cft_horizontal_primary_column() {
+    use super::precheck::precheck_model;
+
+    let mut model = make_cantilever_model();
+    model.sections[0].shape = Some(cft_shape());
+    model.sections[0].frame_use = Some(FrameSectionUse::Column);
+    model.sections[0].steel_material = Some(MaterialId(1));
+    model.materials[0].category = MaterialCategory::Concrete;
+    model.materials[0].fc = Some(24.0);
+    model.materials.push(Material {
+        id: MaterialId(1),
+        name: "SN490".into(),
+        category: MaterialCategory::Steel,
+        young: 205000.0,
+        poisson: 0.3,
+        density: 7.85e-9,
+        shear: None,
+        fc: None,
+        fy: Some(325.0),
+        concrete_class: Default::default(),
+        strength_factor: None,
+    });
+
+    precheck_model(&model).expect("Column 用途の水平 CFT 線材は許可する");
+}
+
+#[test]
+fn test_model_issues_errors_cft_shell_and_wall_references() {
+    use super::precheck::precheck_model;
+
+    for kind in [
+        ElementKind::Shell,
+        ElementKind::Wall,
+        ElementKind::PanelZone,
+        ElementKind::NodalSpring,
+        ElementKind::Damper,
+        ElementKind::Isolator,
+    ] {
+        let mut model = make_cantilever_model();
+        model.elements[0].kind = kind;
+        model.sections[0].shape = Some(cft_shape());
+        model.sections[0].frame_use = Some(FrameSectionUse::Column);
+        model.materials[0].fc = Some(24.0);
+
+        let err = precheck_model(&model).expect_err("CFT の Shell/Wall 参照はエラーにする");
+        assert!(err.to_string().contains("CFT"), "{err}");
+    }
+}
+
+#[test]
+fn test_model_issues_errors_cft_non_column_primary_references() {
+    use super::precheck::model_issues;
+
+    for frame_use in [
+        None,
+        Some(FrameSectionUse::Girder),
+        Some(FrameSectionUse::Brace),
+    ] {
+        let mut model = make_cantilever_model();
+        model.sections[0].shape = Some(cft_shape());
+        model.sections[0].frame_use = frame_use;
+        model.materials[0].fc = Some(24.0);
+
+        let issues = model_issues(&model);
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.message.contains("CFT") || issue.message.contains("用途")),
+            "CFT の {:?} 用途参照はエラーにする: {:?}",
+            frame_use,
+            issues
+                .iter()
+                .map(|issue| &issue.message)
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn test_model_issues_does_not_use_axis_angle_for_cft_column() {
+    use super::precheck::model_issues;
+    use squid_n_core::model::FrameSectionUse;
+
+    let mut model = make_cantilever_model();
+    model.nodes[1].coord = [1000.0, 0.0, 1000.0];
+    model.sections[0].shape = Some(cft_shape());
+    model.sections[0].frame_use = Some(FrameSectionUse::Column);
+    model.materials[0].fc = Some(24.0);
+
+    assert!(!model_issues(&model)
+        .iter()
+        .any(|issue| issue.message.contains("用途が不正な CFT")));
+}
+
+#[test]
+fn test_model_issues_errors_on_unreferenced_invalid_cft_section() {
+    use super::precheck::model_issues;
+    use squid_n_core::model::FrameSectionUse;
+
+    let mut model = make_cantilever_model();
+    let mut section = cft_shape().to_section(SectionId(1), "未参照CFT".into());
+    section.frame_use = Some(FrameSectionUse::Girder);
+    model.sections.push(section);
+    let mut unreferenced = cft_shape().to_section(SectionId(2), "未参照CFT".into());
+    unreferenced.frame_use = Some(FrameSectionUse::Girder);
+    model.sections.push(unreferenced);
+
+    model.slabs.push(squid_n_core::model::Slab {
+        id: squid_n_core::ids::SlabId(0),
+        shape: squid_n_core::model::SlabShape::Enclosed,
+        plate: squid_n_core::model::SlabPlate {
+            section: Some(SectionId(1)),
+            ..Default::default()
+        },
+    });
+
+    assert!(!model_issues(&model)
+        .iter()
+        .any(|issue| issue.message.contains("未参照") && issue.message.contains("CFT")));
+
+    let mut unreferenced_model = make_cantilever_model();
+    let mut unreferenced = cft_shape().to_section(SectionId(1), "未参照CFT".into());
+    unreferenced.frame_use = Some(FrameSectionUse::Girder);
+    unreferenced_model.sections.push(unreferenced);
+    assert!(model_issues(&unreferenced_model)
+        .iter()
+        .any(|issue| issue.message.contains("未参照") && issue.message.contains("CFT")));
 }
 
 /// 通常の鋼材断面の二次部材はエラーにせず、解析前チェックを通す。

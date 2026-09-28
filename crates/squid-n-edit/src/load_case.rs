@@ -208,7 +208,7 @@ impl EditCommand for AssignSlabToFloorPlateRegion {
         if region.assignment.plate().is_some() {
             return Box::new(Noop);
         }
-        if !crate::refs::section_ref_ok(model, self.plate.section) {
+        if !crate::refs::plate_section_ref_ok(model, self.plate.section) {
             return Box::new(Noop);
         }
         if model.floor_assignment_region_nodes(self.region).is_none() {

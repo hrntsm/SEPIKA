@@ -9,6 +9,8 @@
 //! [`CopyStory::overwrite`] が真なら複製先の余分（複製元で断面が未割当・床が無い・
 //! 荷重が無い相手）は解除・削除される。偽なら複製先が空いているところにだけ入れ、
 //! 既存には触れない。どちらでも 2 回実行した結果は 1 回と同じになる（冪等）。
+//! 床板の複製元が CFT 断面の場合は床板へ割り当てず、上書き時は複製先の床板断面も
+//! 未割当にする。上書きしない場合は既存の複製先断面を保持する。
 //!
 //! # 何を対象にするか
 //!
@@ -78,7 +80,8 @@ impl CopyTargets {
 pub struct CopyStoryReport {
     /// 断面を割り当てた部材の数。
     pub sections_assigned: usize,
-    /// 断面の割当を解除した部材の数（複製元が未割当のため）。
+    /// 断面の割当を解除した部材・床板の数（複製元が未割当、または床板へ CFT 断面を
+    /// 複製できないため）。
     pub sections_cleared: usize,
     /// 新しく作った断面の数。
     pub sections_created: usize,
@@ -109,6 +112,8 @@ pub struct CopyStoryReport {
     pub secondary_deleted: usize,
     /// 複製先に相手が見つからず飛ばした数（部材・床・二次部材の合計）。
     pub skipped: usize,
+    /// CFT のため断面を割り当てなかった数。
+    pub sections_rejected: usize,
 }
 
 impl CopyStoryReport {
@@ -188,6 +193,12 @@ impl CopyStoryReport {
             s.push_str(&format!(
                 "。相手が見つからず {} 件を飛ばしました",
                 self.skipped
+            ));
+        }
+        if self.sections_rejected > 0 {
+            s.push_str(&format!(
+                "。制約により断面を割り当てなかった {} 件",
+                self.sections_rejected
             ));
         }
         s
@@ -673,6 +684,14 @@ fn copy_sections(
             continue;
         };
         let current = model.elements.get(elem.index()).and_then(|e| e.section);
+        if (cmd.overwrite || current.is_none())
+            && model.elements.get(elem.index()).is_some_and(|target| {
+                !crate::refs::frame_element_section_ref_ok(model, target, src_sec)
+            })
+        {
+            report.sections_rejected += 1;
+            continue;
+        }
         let Some(next) = resolve_section(
             model,
             cmd,
@@ -684,6 +703,14 @@ fn copy_sections(
         ) else {
             continue;
         };
+        if model
+            .elements
+            .get(elem.index())
+            .is_some_and(|target| !crate::refs::frame_element_section_ref_ok(model, target, next))
+        {
+            report.sections_rejected += 1;
+            continue;
+        }
         if let Some(e) = model.elements.get_mut(elem.index()) {
             if e.section != next {
                 count_section_change(e.section, next, report);
@@ -707,6 +734,18 @@ fn copy_sections(
             continue;
         };
         let current = model.slabs.get(sid.index()).and_then(|sl| sl.section());
+        if cft_section(model, src_sec) {
+            report.sections_rejected += 1;
+            if cmd.overwrite {
+                if let Some(sl) = model.slabs.get_mut(sid.index()) {
+                    if sl.plate.section.is_some() {
+                        count_section_change(sl.plate.section, None, report);
+                        sl.plate.section = None;
+                    }
+                }
+            }
+            continue;
+        }
         let Some(next) = resolve_section(
             model,
             cmd,
@@ -718,6 +757,18 @@ fn copy_sections(
         ) else {
             continue;
         };
+        if !crate::refs::plate_section_ref_ok(model, next) {
+            report.sections_rejected += 1;
+            if cmd.overwrite {
+                if let Some(sl) = model.slabs.get_mut(sid.index()) {
+                    if sl.plate.section.is_some() {
+                        count_section_change(sl.plate.section, None, report);
+                        sl.plate.section = None;
+                    }
+                }
+            }
+            continue;
+        }
         if let Some(sl) = model.slabs.get_mut(sid.index()) {
             if sl.plate.section != next {
                 count_section_change(sl.plate.section, next, report);
@@ -743,6 +794,10 @@ fn copy_sections(
             continue;
         };
         let current = secondary_at(model, slot).and_then(|sm| sm.section);
+        if (cmd.overwrite || current.is_none()) && cft_section(model, src_sec) {
+            report.sections_rejected += 1;
+            continue;
+        }
         let Some(next) = resolve_section(
             model,
             cmd,
@@ -754,6 +809,10 @@ fn copy_sections(
         ) else {
             continue;
         };
+        if !crate::refs::plate_section_ref_ok(model, next) {
+            report.sections_rejected += 1;
+            continue;
+        }
         let Some(sm) = secondary_at_mut(model, slot) else {
             continue;
         };
@@ -842,6 +901,11 @@ fn section_for_story(
     id
 }
 
+fn cft_section(model: &Model, id: Option<SectionId>) -> bool {
+    id.and_then(|sid| model.sections.get(sid.index()))
+        .is_some_and(|section| section.is_cft())
+}
+
 /// 床板（境界の形）を配る。新しく作った床板の ID を返す。
 fn copy_slabs(
     model: &mut Model,
@@ -918,14 +982,21 @@ fn copy_slabs(
             report.skipped += 1;
             continue;
         };
-        let section = sl.section().map(|s| match mapped.get(&s) {
-            Some(&d) => d,
-            None => {
-                let d = section_for_story(model, s, dst_story_name, report);
-                mapped.insert(s, d);
-                d
-            }
-        });
+        let rejected_section = cft_section(model, sl.section());
+        if rejected_section {
+            report.sections_rejected += 1;
+        }
+        let section = (!rejected_section)
+            .then(|| sl.section())
+            .flatten()
+            .map(|s| match mapped.get(&s) {
+                Some(&d) => d,
+                None => {
+                    let d = section_for_story(model, s, dst_story_name, report);
+                    mapped.insert(s, d);
+                    d
+                }
+            });
         let plate = SlabPlate {
             section,
             method: sl.method(),
@@ -1135,14 +1206,22 @@ fn copy_secondary(
             report.skipped += 1;
             continue;
         };
-        let section = sm.section.map(|s| match mapped.get(&s) {
-            Some(&d) => d,
-            None => {
-                let d = section_for_story(model, s, dst_story_name, report);
-                mapped.insert(s, d);
-                d
-            }
-        });
+        let rejected_section = cft_section(model, sm.section);
+        if rejected_section {
+            report.sections_rejected += 1;
+        }
+        let section = (!rejected_section)
+            .then(|| {
+                sm.section.map(|s| match mapped.get(&s) {
+                    Some(&d) => d,
+                    None => {
+                        let d = section_for_story(model, s, dst_story_name, report);
+                        mapped.insert(s, d);
+                        d
+                    }
+                })
+            })
+            .flatten();
         let (Some(ca), Some(cb)) = (
             model.nodes.get(a.index()).map(|n| n.coord),
             model.nodes.get(b.index()).map(|n| n.coord),

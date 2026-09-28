@@ -21,7 +21,7 @@
 //! **書き込む値の側**の確認である。
 
 use squid_n_core::ids::{ElemId, MaterialId, NodeId, SectionId};
-use squid_n_core::model::Model;
+use squid_n_core::model::{ElementData, ElementKind, FrameSectionUse, Model};
 
 /// 節点が実在するか（ID ＝配列添字の規約込み）。
 pub(crate) fn node_exists(model: &Model, id: NodeId) -> bool {
@@ -46,6 +46,38 @@ pub(crate) fn material_exists(model: &Model, id: MaterialId) -> bool {
 /// 未割当（`None`）も可の断面参照が妥当か。
 pub(crate) fn section_ref_ok(model: &Model, id: Option<SectionId>) -> bool {
     id.is_none_or(|s| section_exists(model, s))
+}
+
+pub(crate) fn frame_element_section_ref_ok(
+    model: &Model,
+    element: &ElementData,
+    id: Option<SectionId>,
+) -> bool {
+    section_ref_ok(model, id)
+        && id
+            .and_then(|sid| model.sections.get(sid.index()))
+            .is_none_or(|section| {
+                if !section.is_cft() {
+                    return true;
+                }
+                if section.frame_use != Some(FrameSectionUse::Column) {
+                    return false;
+                }
+                if !matches!(
+                    element.kind,
+                    ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+                ) {
+                    return false;
+                }
+                true
+            })
+}
+
+pub(crate) fn plate_section_ref_ok(model: &Model, id: Option<SectionId>) -> bool {
+    section_ref_ok(model, id)
+        && id
+            .and_then(|sid| model.sections.get(sid.index()))
+            .is_none_or(|section| !section.is_cft())
 }
 
 /// 未割当（`None`）も可の材料参照が妥当か。

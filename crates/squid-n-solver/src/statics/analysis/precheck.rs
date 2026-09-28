@@ -272,6 +272,9 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             let Some(section) = model.element_section(e) else {
                 continue;
             };
+            if section.is_cft() {
+                continue;
+            }
             let (Some(n0), Some(n1)) = (e.nodes.first(), e.nodes.get(1)) else {
                 continue;
             };
@@ -306,6 +309,33 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 column_shape_on_beam,
                 "柱用断面が梁部材に割り当てられています",
                 "断面タブで梁用断面を割り当てるか、部材の用途を確認してください。",
+            ));
+        }
+    }
+
+    {
+        let mut cft_on_invalid_use: Vec<ElemId> = Vec::new();
+        for e in model.elements.iter() {
+            let Some(section) = model.element_section(e) else {
+                continue;
+            };
+            if section.is_cft()
+                && (!section.cft_frame_use_allowed()
+                    || !matches!(
+                        e.kind,
+                        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+                    ))
+            {
+                cft_on_invalid_use.push(e.id);
+            }
+        }
+        if !cft_on_invalid_use.is_empty() {
+            issues.push(ModelIssue::members(
+                "用途が不正な CFT 断面を主架構部材に割り当てています",
+                "ID ",
+                cft_on_invalid_use,
+                "用途が不正な CFT 断面が割り当てられています",
+                "CFT は柱専用です。断面用途を柱に変更してください。",
             ));
         }
     }
@@ -625,10 +655,84 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             })
             .count();
         if cft_secondary != 0 {
+            let ids: Vec<u32> = model
+                .beams()
+                .chain(model.posts())
+                .filter(|sm| {
+                    sm.section
+                        .and_then(|sid| model.sections.get(sid.index()))
+                        .is_some_and(|section| section.is_cft())
+                })
+                .map(|sm| sm.id.0)
+                .collect();
+            issues.push(ModelIssue::model(id_list_message(
+                "二次部材（小梁・間柱）に CFT 断面が割り当てられています",
+                "ID ",
+                &ids,
+                "CFT は柱専用です。断面を鋼材または RC に変更してください。",
+            )));
+        }
+        let cft_slabs: Vec<u32> = model
+            .slabs
+            .iter()
+            .filter(|slab| {
+                slab.section()
+                    .and_then(|sid| model.sections.get(sid.index()))
+                    .is_some_and(|section| section.is_cft())
+            })
+            .map(|slab| slab.id.0)
+            .collect();
+        if !cft_slabs.is_empty() {
+            issues.push(ModelIssue::model(id_list_message(
+                "床板に CFT 断面が割り当てられています",
+                "ID ",
+                &cft_slabs,
+                "CFT は柱専用です。床板の断面を RC または鋼材に変更してください。",
+            )));
+        }
+        let cft_walls: Vec<u32> = model
+            .wall_plates
+            .iter()
+            .filter(|plate| {
+                plate
+                    .section
+                    .and_then(|sid| model.sections.get(sid.index()))
+                    .is_some_and(|section| section.is_cft())
+            })
+            .map(|plate| plate.id.0)
+            .collect();
+        if !cft_walls.is_empty() {
+            issues.push(ModelIssue::model(id_list_message(
+                "壁版に CFT 断面が割り当てられています",
+                "ID ",
+                &cft_walls,
+                "CFT は柱専用です。壁版の断面を RC または鋼材に変更してください。",
+            )));
+        }
+        let referenced: std::collections::HashSet<_> = model
+            .elements
+            .iter()
+            .filter_map(|element| element.section)
+            .chain(
+                model
+                    .beams()
+                    .chain(model.posts())
+                    .filter_map(|member| member.section),
+            )
+            .chain(model.slabs.iter().filter_map(|slab| slab.section()))
+            .chain(model.wall_plates.iter().filter_map(|plate| plate.section))
+            .collect();
+        let invalid_cft_sections: Vec<String> = model
+            .sections
+            .iter()
+            .filter(|section| !referenced.contains(&section.id))
+            .filter(|section| !section.cft_frame_use_allowed())
+            .map(|section| section.display_name())
+            .collect();
+        if !invalid_cft_sections.is_empty() {
             issues.push(ModelIssue::model(format!(
-                "二次部材（小梁・間柱）に CFT 断面が割り当てられています（{cft_secondary} 本）。\
-                 CFT は柱専用で二次部材には使用できません。\
-                 断面を鋼材または RC に変更してください。"
+                "未参照の CFT 断面の用途が不正です（{}）。CFT は柱専用です。断面用途を柱に変更してください。",
+                invalid_cft_sections.join("、")
             )));
         }
         let n = squid_n_core::region_rebuild::unassigned_beam_count(model);
