@@ -5753,6 +5753,23 @@ fn set_floor_region_beam_section_rejects_cft() {
     assert_eq!(model.floor_regions[0].secondary_beams[0].section, None);
 }
 
+/// 水平な主架構の Beam には CFT 断面を割り当てない。
+#[test]
+fn set_element_section_rejects_horizontal_cft() {
+    let mut model = seeded_model(2, 1);
+    let cft = push_cft_section(&mut model);
+    let before = model.elements[0].section;
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(
+        &mut model,
+        Box::new(SetElementSection {
+            elem: ElemId(0),
+            section: Some(cft),
+        }),
+    ));
+    assert_eq!(model.elements[0].section, before);
+}
+
 /// CFT 断面の間柱への断面変更は Noop で、断面は変わらない。
 #[test]
 fn set_wall_region_post_section_rejects_cft() {

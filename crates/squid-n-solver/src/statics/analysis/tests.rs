@@ -1843,7 +1843,9 @@ fn test_model_issues_errors_cft_secondary_section() {
     };
 
     let mut model = make_cantilever_model();
-    model.sections[0].shape = Some(cft_shape());
+    model
+        .sections
+        .push(cft_shape().to_section(SectionId(1), "CFT小梁".into()));
     model.materials[0].fc = Some(24.0);
     model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
@@ -1856,13 +1858,29 @@ fn test_model_issues_errors_cft_secondary_section() {
             },
             free_end_vector: [0.0, 1000.0],
         },
-        section: Some(SectionId(0)),
+        section: Some(SectionId(1)),
         name: "CFT小梁".into(),
     });
 
     let err = precheck_model(&model).expect_err("CFT 断面の二次部材はエラーにする");
     assert!(
         err.to_string().contains("CFT") && err.to_string().contains("二次部材"),
+        "{err}"
+    );
+}
+
+/// 水平な主架構の Beam に CFT 断面が割り当てられていると、解析前チェックでエラーにする。
+#[test]
+fn test_model_issues_errors_cft_horizontal_primary() {
+    use super::precheck::precheck_model;
+
+    let mut model = make_cantilever_model();
+    model.sections[0].shape = Some(cft_shape());
+    model.materials[0].fc = Some(24.0);
+
+    let err = precheck_model(&model).expect_err("水平 CFT 梁はエラーにする");
+    assert!(
+        err.to_string().contains("CFT") && err.to_string().contains("水平材"),
         "{err}"
     );
 }

@@ -264,6 +264,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     {
         let mut beam_shape_on_column: Vec<ElemId> = Vec::new();
         let mut column_shape_on_beam: Vec<ElemId> = Vec::new();
+        let mut cft_on_beam: Vec<ElemId> = Vec::new();
         for e in model
             .elements
             .iter()
@@ -280,6 +281,14 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 continue;
             };
             let vertical = squid_n_core::geom::is_vertical_axis(n0.coord, n1.coord);
+            if !vertical
+                && matches!(
+                    section.shape,
+                    Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. })
+                )
+            {
+                cft_on_beam.push(e.id);
+            }
             match section.frame_use {
                 Some(squid_n_core::model::FrameSectionUse::Girder) if vertical => {
                     beam_shape_on_column.push(e.id)
@@ -306,6 +315,15 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 column_shape_on_beam,
                 "柱用断面が梁部材に割り当てられています",
                 "断面タブで梁用断面を割り当てるか、部材の用途を確認してください。",
+            ));
+        }
+        if !cft_on_beam.is_empty() {
+            issues.push(ModelIssue::members(
+                "水平材に CFT 断面を割り当てています",
+                "ID ",
+                cft_on_beam,
+                "水平材に CFT 断面が割り当てられています",
+                "CFT は柱専用です。断面を鋼材、RC、または SRC に変更してください。",
             ));
         }
     }

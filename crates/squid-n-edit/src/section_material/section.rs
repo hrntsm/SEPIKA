@@ -194,6 +194,10 @@ impl EditCommand for EditSectionShape {
         }
         if (non_frame && self.frame_use.is_some())
             || !section_use_is_valid(model, self.section, self.frame_use)
+            || model.elements.iter().any(|element| {
+                super::horizontal_primary_cft(model, element, &self.new_shape)
+                    && element.section == Some(self.section)
+            })
         {
             return Box::new(Noop);
         }
@@ -354,6 +358,11 @@ impl EditCommand for DuplicateSectionForMember {
             return Box::new(Noop);
         }
         let orig = &model.sections[sec_idx];
+        if orig.shape.as_ref().is_some_and(|shape| {
+            super::horizontal_primary_cft(model, &model.elements[elem_idx], shape)
+        }) {
+            return Box::new(Noop);
+        }
         let new_id = SectionId(model.sections.len() as u32);
         let mut new_sec = orig.clone();
         new_sec.id = new_id;

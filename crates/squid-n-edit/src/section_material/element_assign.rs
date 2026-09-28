@@ -20,6 +20,17 @@ impl EditCommand for SetElementSection {
         if !crate::refs::section_ref_ok(model, self.section) {
             return Box::new(Noop);
         }
+        if self.section.is_some_and(|section| {
+            model
+                .sections
+                .get(section.index())
+                .and_then(|section| section.shape.as_ref())
+                .is_some_and(|shape| {
+                    super::horizontal_primary_cft(model, &model.elements[idx], shape)
+                })
+        }) {
+            return Box::new(Noop);
+        }
         let old = model.elements[idx].section;
         model.elements[idx].section = self.section;
         Box::new(SetElementSection {

@@ -8,6 +8,25 @@
 
 use super::*;
 
+fn horizontal_primary_cft(
+    model: &Model,
+    elem: &squid_n_core::model::ElementData,
+    shape: &squid_n_section::shape::SectionShape,
+) -> bool {
+    elem.kind == squid_n_core::model::ElementKind::Beam
+        && elem
+            .nodes
+            .first()
+            .and_then(|a| elem.nodes.get(1).map(|b| (a, b)))
+            .and_then(|(a, b)| Some((model.nodes.get(a.index())?, model.nodes.get(b.index())?)))
+            .is_some_and(|(a, b)| !squid_n_core::geom::is_vertical_axis(a.coord, b.coord))
+        && matches!(
+            shape,
+            squid_n_section::shape::SectionShape::CftBox { .. }
+                | squid_n_section::shape::SectionShape::CftPipe { .. }
+        )
+}
+
 mod damper_def;
 mod element_assign;
 mod loads;
