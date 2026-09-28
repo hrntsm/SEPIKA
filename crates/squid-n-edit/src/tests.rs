@@ -5413,15 +5413,76 @@ fn make_sm(
 /// CFT 角形断面を末尾へ追加し、その ID を返す（テスト用ヘルパー）。
 fn push_cft_section(model: &mut Model) -> SectionId {
     let id = SectionId(model.sections.len() as u32);
-    model.sections.push(
-        squid_n_core::section_shape::SectionShape::CftBox {
-            height: 400.0,
-            width: 400.0,
-            thick: 16.0,
-        }
-        .to_section(id, "CFT".into()),
-    );
+    let mut section = squid_n_core::section_shape::SectionShape::CftBox {
+        height: 400.0,
+        width: 400.0,
+        thick: 16.0,
+    }
+    .to_section(id, "CFT".into());
+    section.frame_use = Some(squid_n_core::model::FrameSectionUse::Column);
+    model.sections.push(section);
     id
+}
+
+#[test]
+fn add_section_shape_rejects_cft_non_column_use() {
+    use squid_n_core::model::FrameSectionUse;
+
+    for frame_use in [FrameSectionUse::Girder, FrameSectionUse::Brace] {
+        let mut model = Model::default();
+        let mut stack = UndoStack::new();
+        let applied = stack.run(
+            &mut model,
+            Box::new(AddSectionShape {
+                shape: squid_n_core::section_shape::SectionShape::CftBox {
+                    height: 400.0,
+                    width: 400.0,
+                    thick: 16.0,
+                },
+                new_id: SectionId(0),
+                name: "CFT".into(),
+                floor: None,
+                frame_use: Some(frame_use),
+            }),
+        );
+        assert!(!applied, "CFT の {frame_use:?} 用途は追加しない");
+        assert!(model.sections.is_empty());
+    }
+}
+
+#[test]
+fn set_element_section_rejects_cft_non_column_use() {
+    use squid_n_core::model::FrameSectionUse;
+
+    let mut model = seeded_model(2, 1);
+    let sid = push_cft_section(&mut model);
+    model.sections[sid.index()].frame_use = Some(FrameSectionUse::Girder);
+    let mut stack = UndoStack::new();
+    let applied = stack.run(
+        &mut model,
+        Box::new(SetElementSection {
+            elem: ElemId(0),
+            section: Some(sid),
+        }),
+    );
+    assert!(!applied, "Column 以外の CFT 断面は主架構へ割り当てない");
+    assert_eq!(model.elements[0].section, None);
+}
+
+#[test]
+fn set_element_section_allows_cft_column_use_independent_of_angle() {
+    let mut model = seeded_model(2, 1);
+    let sid = push_cft_section(&mut model);
+    let mut stack = UndoStack::new();
+    let applied = stack.run(
+        &mut model,
+        Box::new(SetElementSection {
+            elem: ElemId(0),
+            section: Some(sid),
+        }),
+    );
+    assert!(applied, "CFT Column は水平な材軸でも用途どおり割り当てる");
+    assert_eq!(model.elements[0].section, Some(sid));
 }
 
 /// 形状を持たない鋼材断面を末尾へ追加し、その ID を返す（テスト用ヘルパー）。
