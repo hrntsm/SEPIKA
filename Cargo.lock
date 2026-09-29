@@ -4650,6 +4650,212 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
+name = "sepika-app"
+version = "0.0.1"
+dependencies = [
+ "bincode",
+ "eframe",
+ "egui",
+ "egui_extras",
+ "egui_plot",
+ "insta",
+ "rfd",
+ "rmp-serde",
+ "sepika-core",
+ "sepika-design-jp",
+ "sepika-edit",
+ "sepika-element",
+ "sepika-io",
+ "sepika-job",
+ "sepika-load",
+ "sepika-math",
+ "sepika-section",
+ "sepika-solver",
+ "serde",
+ "smallvec",
+]
+
+[[package]]
+name = "sepika-core"
+version = "0.0.1"
+dependencies = [
+ "approx",
+ "i_overlay",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "sepika-design-jp"
+version = "0.0.1"
+dependencies = [
+ "approx",
+ "sepika-core",
+ "sepika-element",
+ "sepika-load",
+ "sepika-material",
+ "sepika-skeleton",
+ "sepika-solver",
+ "serde",
+ "smallvec",
+]
+
+[[package]]
+name = "sepika-edit"
+version = "0.0.1"
+dependencies = [
+ "schemars 0.8.22",
+ "sepika-core",
+ "sepika-section",
+ "serde",
+ "smallvec",
+]
+
+[[package]]
+name = "sepika-element"
+version = "0.0.1"
+dependencies = [
+ "approx",
+ "bincode",
+ "sepika-core",
+ "sepika-material",
+ "sepika-math",
+ "sepika-section",
+ "serde",
+ "smallvec",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "sepika-io"
+version = "0.0.1"
+dependencies = [
+ "arrow",
+ "bincode",
+ "dirs",
+ "encoding_rs",
+ "parquet",
+ "quick-xml 0.41.0",
+ "rmp-serde",
+ "sepika-core",
+ "sepika-element",
+ "serde",
+ "serde_json",
+ "sha2",
+ "smallvec",
+ "thiserror 1.0.69",
+ "zip",
+]
+
+[[package]]
+name = "sepika-job"
+version = "0.0.1"
+dependencies = [
+ "sepika-core",
+ "sepika-design-jp",
+ "sepika-element",
+ "sepika-load",
+ "sepika-math",
+ "sepika-solver",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "sepika-load"
+version = "0.0.1"
+dependencies = [
+ "approx",
+ "sepika-core",
+ "serde",
+]
+
+[[package]]
+name = "sepika-material"
+version = "0.0.1"
+dependencies = [
+ "approx",
+ "bincode",
+ "insta",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "sepika-math"
+version = "0.0.1"
+dependencies = [
+ "approx",
+ "faer",
+ "rayon",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "sepika-mcp"
+version = "0.0.1"
+dependencies = [
+ "arrow",
+ "rmcp",
+ "schemars 1.2.1",
+ "sepika-core",
+ "sepika-design-jp",
+ "sepika-edit",
+ "sepika-element",
+ "sepika-io",
+ "sepika-job",
+ "sepika-load",
+ "sepika-solver",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "tokio",
+]
+
+[[package]]
+name = "sepika-section"
+version = "0.0.1"
+dependencies = [
+ "approx",
+ "sepika-core",
+ "sepika-material",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "sepika-skeleton"
+version = "0.0.1"
+dependencies = [
+ "approx",
+ "sepika-core",
+ "sepika-material",
+ "sepika-section",
+]
+
+[[package]]
+name = "sepika-solver"
+version = "0.0.1"
+dependencies = [
+ "approx",
+ "bincode",
+ "faer",
+ "rayon",
+ "sepika-core",
+ "sepika-element",
+ "sepika-load",
+ "sepika-material",
+ "sepika-math",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "seq-macro"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4951,212 +5157,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9571ea910ebd84c86af4b3ed27f9dbdc6ad06f17c5f96146b2b671e2976744f"
 dependencies = [
  "bitflags 2.13.0",
-]
-
-[[package]]
-name = "squid-n-app"
-version = "0.0.1"
-dependencies = [
- "bincode",
- "eframe",
- "egui",
- "egui_extras",
- "egui_plot",
- "insta",
- "rfd",
- "rmp-serde",
- "serde",
- "smallvec",
- "squid-n-core",
- "squid-n-design-jp",
- "squid-n-edit",
- "squid-n-element",
- "squid-n-io",
- "squid-n-job",
- "squid-n-load",
- "squid-n-math",
- "squid-n-section",
- "squid-n-solver",
-]
-
-[[package]]
-name = "squid-n-core"
-version = "0.0.1"
-dependencies = [
- "approx",
- "i_overlay",
- "rmp-serde",
- "serde",
- "serde_json",
- "smallvec",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "squid-n-design-jp"
-version = "0.0.1"
-dependencies = [
- "approx",
- "serde",
- "smallvec",
- "squid-n-core",
- "squid-n-element",
- "squid-n-load",
- "squid-n-material",
- "squid-n-skeleton",
- "squid-n-solver",
-]
-
-[[package]]
-name = "squid-n-edit"
-version = "0.0.1"
-dependencies = [
- "schemars 0.8.22",
- "serde",
- "smallvec",
- "squid-n-core",
- "squid-n-section",
-]
-
-[[package]]
-name = "squid-n-element"
-version = "0.0.1"
-dependencies = [
- "approx",
- "bincode",
- "serde",
- "smallvec",
- "squid-n-core",
- "squid-n-material",
- "squid-n-math",
- "squid-n-section",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "squid-n-io"
-version = "0.0.1"
-dependencies = [
- "arrow",
- "bincode",
- "dirs",
- "encoding_rs",
- "parquet",
- "quick-xml 0.41.0",
- "rmp-serde",
- "serde",
- "serde_json",
- "sha2",
- "smallvec",
- "squid-n-core",
- "squid-n-element",
- "thiserror 1.0.69",
- "zip",
-]
-
-[[package]]
-name = "squid-n-job"
-version = "0.0.1"
-dependencies = [
- "serde",
- "squid-n-core",
- "squid-n-design-jp",
- "squid-n-element",
- "squid-n-load",
- "squid-n-math",
- "squid-n-solver",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "squid-n-load"
-version = "0.0.1"
-dependencies = [
- "approx",
- "serde",
- "squid-n-core",
-]
-
-[[package]]
-name = "squid-n-material"
-version = "0.0.1"
-dependencies = [
- "approx",
- "bincode",
- "insta",
- "serde",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "squid-n-math"
-version = "0.0.1"
-dependencies = [
- "approx",
- "faer",
- "rayon",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "squid-n-mcp"
-version = "0.0.1"
-dependencies = [
- "arrow",
- "rmcp",
- "schemars 1.2.1",
- "serde",
- "serde_json",
- "smallvec",
- "squid-n-core",
- "squid-n-design-jp",
- "squid-n-edit",
- "squid-n-element",
- "squid-n-io",
- "squid-n-job",
- "squid-n-load",
- "squid-n-solver",
- "tokio",
-]
-
-[[package]]
-name = "squid-n-section"
-version = "0.0.1"
-dependencies = [
- "approx",
- "serde",
- "serde_json",
- "squid-n-core",
- "squid-n-material",
-]
-
-[[package]]
-name = "squid-n-skeleton"
-version = "0.0.1"
-dependencies = [
- "approx",
- "squid-n-core",
- "squid-n-material",
- "squid-n-section",
-]
-
-[[package]]
-name = "squid-n-solver"
-version = "0.0.1"
-dependencies = [
- "approx",
- "bincode",
- "faer",
- "rayon",
- "serde",
- "serde_json",
- "smallvec",
- "squid-n-core",
- "squid-n-element",
- "squid-n-load",
- "squid-n-material",
- "squid-n-math",
- "thiserror 1.0.69",
 ]
 
 [[package]]

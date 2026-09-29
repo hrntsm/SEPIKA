@@ -4,7 +4,7 @@
 
 <div class="impl-ref">
 
-**実装参照**：`squid_n_io::stbridge::{import_stbridge_with_report, export_stbridge}`（`crates/squid-n-io/src/stbridge/`）が取り込み・書き出しの入口です。
+**実装参照**：`sepika_io::stbridge::{import_stbridge_with_report, export_stbridge}`（`crates/sepika-io/src/stbridge/`）が取り込み・書き出しの入口です。
 
 </div>
 
@@ -16,12 +16,12 @@
 | 📤 **ST-Bridge 書出…** | 標準 ST-Bridge 2.0.2（`StbSecColumn_S` 等＋形鋼ライブラリ）で書き出す。BIM・他ソフト向け |
 
 - ファイル選択ダイアログの拡張子フィルタは `.stb` / `.xml`。
-- ST-Bridge 読込は `.scz` プロジェクトとは別系統であり、読み込んでもプロジェクトの保存先パスは設定されません（新規モデルとして開く扱い）。上書き保存するとネイティブの `.scz` として保存されます。
-- 書き出しは **ST-Bridge 2.0.2 標準スキーマ準拠**の 1 形式のみです（他ソフトとの相互運用が目的のため独自方言は用いません）。完全一致の保存にはネイティブの `.scz` を使います。
+- ST-Bridge 読込は `.ovika` プロジェクトとは別系統であり、読み込んでもプロジェクトの保存先パスは設定されません（新規モデルとして開く扱い）。保存するとネイティブの `.ovika` として保存されます。
+- 書き出しは **ST-Bridge 2.0.2 標準スキーマ準拠**の 1 形式のみです（他ソフトとの相互運用が目的のため独自方言は用いません）。完全一致の保存にはネイティブの `.ovika` を使います。
 
 <div class="impl-ref">
 
-**実装参照**：メニューは `squid_n_app`（`crates/squid-n-app/src/app/mod.rs`）が表示し、取り込みは `squid_n_app::app::App::import_stbridge_from`、書き出しは `squid_n_app::app::App::export_stbridge_to`（`crates/squid-n-app/src/app/actions/io.rs`）が担います。
+**実装参照**：メニューは `sepika_app`（`crates/sepika-app/src/app/mod.rs`）が表示し、取り込みは `sepika_app::app::App::import_stbridge_from`、書き出しは `sepika_app::app::App::export_stbridge_to`（`crates/sepika-app/src/app/actions/io.rs`）が担います。
 
 </div>
 
@@ -33,7 +33,7 @@
 
 <div class="impl-ref">
 
-**実装参照**：文字コードは `squid_n_io::stbridge::read_stbridge_file`（`crates/squid-n-io/src/stbridge/import/mod.rs`）が判定し、`version` 属性の検証は `squid_n_io::stbridge::import::parser::parse`（`crates/squid-n-io/src/stbridge/import/parser.rs`）が行います。
+**実装参照**：文字コードは `sepika_io::stbridge::read_stbridge_file`（`crates/sepika-io/src/stbridge/import/mod.rs`）が判定し、`version` 属性の検証は `sepika_io::stbridge::import::parser::parse`（`crates/sepika-io/src/stbridge/import/parser.rs`）が行います。
 
 </div>
 
@@ -46,7 +46,7 @@
 
 <div class="impl-ref">
 
-**実装参照**：取り込みと書き出しは `squid_n_io::stbridge::{import, export}`（`crates/squid-n-io/src/stbridge/`）が担い、床板・壁版の床領域／壁領域への付け直しは `squid_n_core::{region_rebuild, wall_region_rebuild}` が行います。
+**実装参照**：取り込みと書き出しは `sepika_io::stbridge::{import, export}`（`crates/sepika-io/src/stbridge/`）が担い、床板・壁版の床領域／壁領域への付け直しは `sepika_core::{region_rebuild, wall_region_rebuild}` が行います。
 
 </div>
 
@@ -55,7 +55,7 @@
 非対応項目は入出力の対象外です。取り込み時の扱いは、[ST-Bridge 要素別変換状況一覧](./03_ST-Bridge_要素別変換状況.md)を参照してください。
 
 - 剛域・製作情報などの詳細属性。
-- 解析結果・Squid-n 独自の解析／設計属性。ST-Bridge の対象外で、保持には [`.scz`](./01_プロジェクト形式_scz.md) を使います。
+- 解析結果・SEPIKA 独自の解析／設計属性。ST-Bridge の対象外で、保持には [`.ovika`](./01_プロジェクト形式_ovika.md) を使います。
 
 未対応の要素（`StbFooting`・`StbPile` など）を含む、取り込み時にデータを欠落させる要素は、取りこぼしを無言で捨てず `ImportReport` の `warnings`
 （Rust API では `report.warnings`）として通知します。手動リストにない新要素・ベンダー拡張も、部材グループ・
@@ -63,7 +63,7 @@
 
 <div class="impl-ref">
 
-**実装参照**：未対応要素の収集と警告への変換は `squid_n_io::stbridge::import`（`crates/squid-n-io/src/stbridge/import/{parser.rs, assemble.rs}`）が担い、`squid_n_io::stbridge::ImportReport` として返ります。
+**実装参照**：未対応要素の収集と警告への変換は `sepika_io::stbridge::import`（`crates/sepika-io/src/stbridge/import/{parser.rs, assemble.rs}`）が担い、`sepika_io::stbridge::ImportReport` として返ります。
 
 </div>
 
@@ -91,7 +91,7 @@ GUI の「ST-Bridge 読込」では、扱いの全量を下ドックの「ログ
 
 <div class="impl-ref">
 
-**実装参照**：属性の出現・取り込み件数は `squid_n_io::stbridge::AttrDisposition` として集計し（`crates/squid-n-io/src/stbridge/import/{parser.rs, assemble.rs}`）、GUI のログ出力は `squid_n_app::app::App::log_attribute_dispositions`（`crates/squid-n-app/src/app/actions/io.rs`）が担います。
+**実装参照**：属性の出現・取り込み件数は `sepika_io::stbridge::AttrDisposition` として集計し（`crates/sepika-io/src/stbridge/import/{parser.rs, assemble.rs}`）、GUI のログ出力は `sepika_app::app::App::log_attribute_dispositions`（`crates/sepika-app/src/app/actions/io.rs`）が担います。
 
 </div>
 
@@ -108,7 +108,7 @@ ST-Bridge は境界条件（支点）を持たないため、支点が 1 つも�
 
 <div class="impl-ref">
 
-**実装参照**：`squid_n_io::stbridge::import::assemble::auto_assign_supports`（`crates/squid-n-io/src/stbridge/import/assemble.rs`）が判定・設定し、通知は `squid_n_io::stbridge::ImportReport` の notes に積みます。
+**実装参照**：`sepika_io::stbridge::import::assemble::auto_assign_supports`（`crates/sepika-io/src/stbridge/import/assemble.rs`）が判定・設定し、通知は `sepika_io::stbridge::ImportReport` の notes に積みます。
 
 </div>
 
@@ -124,7 +124,7 @@ ST-Bridge の `StbColumn`・`StbGirder`・`StbBrace` の部材コンテナから
 
 <div class="impl-ref">
 
-**実装参照**：ST-Bridge の部材コンテナから用途を解決する処理は `squid_n_io::stbridge::import::assemble::section_uses`（`crates/squid-n-io/src/stbridge/import/assemble.rs`）が担い、要素種別と断面用途の整合性は `squid_n_core::model::Model::validate`（`crates/squid-n-core/src/model/aggregate.rs`）が検証します。
+**実装参照**：ST-Bridge の部材コンテナから用途を解決する処理は `sepika_io::stbridge::import::assemble::section_uses`（`crates/sepika-io/src/stbridge/import/assemble.rs`）が担い、要素種別と断面用途の整合性は `sepika_core::model::Model::validate`（`crates/sepika-core/src/model/aggregate.rs`）が検証します。
 
 </div>
 
@@ -134,7 +134,7 @@ ST-Bridge は断面を `guid` で識別しており、**同じ符号の断面を
 そのため 1 つのファイルに `name="C1"` の `StbSecColumn_S` が、`floor="1"`・`floor="2"`・`floor="3"`
 と 3 つ並ぶことは正常な状態です。
 
-Squid-n の断面は[符号と階の組](../model_edit/02_断面の符号と階.md)で識別するため、この構造を
+SEPIKA の断面は[符号と階の組](../model_edit/02_断面の符号と階.md)で識別するため、この構造を
 そのまま取り込めます。
 断面の `floor` 属性は文字列としてそのまま保持し、階（`StbStory`）への参照としては扱いません。
 ST-Bridge の `floor` は自由文字列で、階への id 参照を持たないためです。
@@ -160,7 +160,7 @@ ST-Bridge の `floor` は自由文字列で、階への id 参照を持たない
 
 <div class="impl-ref">
 
-**実装参照**：重複の統合・連番付与・材料を含む一致判定は `squid_n_io::stbridge::import::assemble::build_sections`（`crates/squid-n-io/src/stbridge/import/assemble.rs`）が担います。
+**実装参照**：重複の統合・連番付与・材料を含む一致判定は `sepika_io::stbridge::import::assemble::build_sections`（`crates/sepika-io/src/stbridge/import/assemble.rs`）が担います。
 
 </div>
 
@@ -172,11 +172,11 @@ ST-Bridge の `floor` は自由文字列で、階への id 参照を持たない
 断面ごとの書き出し先と、取り込み・書き出し・往復の詳細は、[ST-Bridge 要素別 変換状況一覧](./03_ST-Bridge_要素別変換状況.md)を参照してください。
 
 材料の物性値まで含めた完全一致での往復が必要な場合は
-[`.scz`](./01_プロジェクト形式_scz.md) を使います。
+[`.ovika`](./01_プロジェクト形式_ovika.md) を使います。
 
 <div class="impl-ref">
 
-**実装参照**：断面の写像は `squid_n_io::stbridge::section_std`（`crates/squid-n-io/src/stbridge/section_std.rs`）が、XML 全体の組み立ては `squid_n_io::stbridge::export`（`crates/squid-n-io/src/stbridge/export.rs`）が担います。
+**実装参照**：断面の写像は `sepika_io::stbridge::section_std`（`crates/sepika-io/src/stbridge/section_std.rs`）が、XML 全体の組み立ては `sepika_io::stbridge::export`（`crates/sepika-io/src/stbridge/export.rs`）が担います。
 
 </div>
 
@@ -186,7 +186,7 @@ ST-Bridge の `floor` は自由文字列で、階への id 参照を持たない
 <summary>Rust コード例（開発者向け）</summary>
 
 ```rust
-use squid_n_io::stbridge::{import_stbridge, import_stbridge_with_report, export_stbridge};
+use sepika_io::stbridge::{import_stbridge, import_stbridge_with_report, export_stbridge};
 
 // 読み込み: ST-Bridge XML 文字列 → 内部モデル
 let xml = std::fs::read_to_string("model.stb")?;

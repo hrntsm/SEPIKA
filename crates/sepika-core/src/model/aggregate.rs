@@ -1,0 +1,1930 @@
+//! モデル全体を束ねる集約型。
+//!
+//! - [`ElemAttrs`] — 要素の側テーブル属性スナップショット（undo 用）。
+//! - [`Model`] — 構造モデル全体（節点・要素・断面・材料・階・荷重等）。
+
+use super::*;
+
+/// 1 つの要素に紐づく側テーブル属性のスナップショット。要素の削除・挿入
+/// （[`Model::take_elem_attrs`] / [`Model::restore_elem_attrs`]）で属性の
+/// 退避・復元に用いる（undo 用の一時保持。直列化はしない）。
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ElemAttrs {
+    pub wall: Option<WallAttr>,
+    pub steel_design: Option<SteelDesignAttr>,
+    pub brb: Option<BrbAttr>,
+    pub pca: Option<PcaGirderAttr>,
+    pub isolator: Option<IsolatorAttr>,
+    pub hysteresis: Option<MemberHysteresisAttr>,
+    pub damper: Option<DamperAttr>,
+    pub detail: Option<MemberDetailAttr>,
+}
+
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct Model {
+    pub nodes: Vec<Node>,
+    pub elements: Vec<ElementData>,
+    pub sections: Vec<Section>,
+    pub materials: Vec<Material>,
+    pub stories: Vec<Story>,
+    /// 通り芯（各通りを識別するための呼称。[`AxisGroup`]）。**構造計算には
+    /// 用いない**表示・識別専用のデータで、解析結果・設計結果には影響しない。
+    #[serde(default)]
+    pub axes: Vec<AxisGroup>,
+    pub floor_regions: Vec<FloorRegion>,
+    pub constraints: Vec<Constraint>,
+    pub load_cases: Vec<LoadCase>,
+    pub combinations: Vec<LoadCombination>,
+    /// 立体時刻歴応答解析の振動ケース（実行時に upsert。静的荷重ケースとは別）。
+    #[serde(default)]
+    pub vibration_cases: Vec<VibrationCase>,
+    /// 質点系時刻歴応答解析の振動ケース。
+    #[serde(default)]
+    pub lumped_vibration_cases: Vec<LumpedVibrationCase>,
+    /// 階の自動生成が作る剛床代表節点（慣性力重心に置く仮想節点）の ID。
+    /// 構造節点と区別するために保持し、再生成時に再利用する。
+    #[serde(default)]
+    pub generated_masters: Vec<NodeId>,
+    /// 動的解析の質量モデルの方式（[`MassMethod`]）。
+    #[serde(default)]
+    pub mass_method: MassMethod,
+    /// 剛性計算用の床スラブ厚 [mm]（建物全体で一律。スラブ協力幅による梁剛性
+    /// 増大の算定に用いる。RC 規準）。0 以下でスラブ協力幅による梁剛性増大を無効化（既定）。
+    #[serde(default)]
+    pub slab_thickness: f64,
+    /// 自重算定の付加設定（鉄骨重量割増率・部材付加線重量）。`None` は既定値。
+    #[serde(default)]
+    pub load_cfg: Option<LoadCfg>,
+    /// 壁要素の付帯属性（開口・柱際スリット）。
+    #[serde(default)]
+    pub wall_attrs: Vec<WallAttr>,
+    /// 複数開口の取り扱い（建物一律。耐震壁の開口。RC 規準）。
+    /// 剛性の開口低減・耐震壁判定・検定への開口供給に適用する
+    /// （自重控除は常に生の開口面積和）。既定は「等価開口とする」。
+    #[serde(default)]
+    pub multi_opening_mode: MultiOpeningMode,
+    /// 応力解析の計算条件（令82条の応力解析。長期軸力を負担させない部材の指定）。
+    #[serde(default)]
+    pub stress_cfg: StressAnalysisCfg,
+    /// S 造部材の断面検定用属性（継手部・スカラップ欠損、横座屈長さ指定。
+    /// 鋼構造設計規準）。
+    #[serde(default)]
+    pub steel_design_attrs: Vec<SteelDesignAttr>,
+    /// 座屈補剛ブレース（BRB）の断面検定用属性（メーカー許容値。
+    /// 各メーカーの製品技術資料）。
+    #[serde(default)]
+    pub brb_attrs: Vec<BrbAttr>,
+    /// PCa（プレキャスト）梁の水平接合面検定用属性（水平接合面のせん断摩擦検定）。
+    #[serde(default)]
+    pub pca_attrs: Vec<PcaGirderAttr>,
+    /// 免震支承材の非線形特性（`ElementKind::Isolator` 要素、各免震部材指針）。
+    #[serde(default)]
+    pub isolator_attrs: Vec<IsolatorAttr>,
+    /// 部材の履歴則の個別指定（各履歴則の原典）。
+    /// 未指定の部材は構造種別ごとの既定（[`default_member_hysteresis`]）に従う。
+    #[serde(default)]
+    pub member_hysteresis_attrs: Vec<MemberHysteresisAttr>,
+    /// 制振ダンパー要素（`ElementKind::Damper`）の特性（各制振部材の力学モデル）。
+    #[serde(default)]
+    pub damper_attrs: Vec<DamperAttr>,
+    /// 部材の付帯情報（端部ハンチ・継手位置）。剛性・応力解析には影響しない
+    /// （剛性は基準断面のまま）。断面算定の検定位置の追加
+    /// （ハンチ端・継手位置）と数量拾いに用いる。
+    #[serde(default)]
+    pub member_detail_attrs: Vec<MemberDetailAttr>,
+    /// 所属未割当の小梁（`rebuild_floor_regions` でどの床領域にも入らなかったもの）。
+    #[serde(default)]
+    pub unassigned_beams: Vec<SecondaryMember>,
+    /// 所属未割当の間柱（`rebuild_wall_regions` でどの壁領域にも入らなかったもの）。
+    #[serde(default)]
+    pub unassigned_posts: Vec<SecondaryMember>,
+    /// 一本部材の指定（断面検定の採用応力。一本部材指定時の採用応力の扱い）。
+    /// 各エントリは**軸方向に連続する梁要素の ID を並び順**で持ち、
+    /// 断面検定の採用応力（端部・中央モーメント、部材長、内法長、せん断スパン比
+    /// 代表値）をグループ 1 本の部材として評価する。要素の解析（剛性・内力）は
+    /// 分割部材のまま行い、検定の文脈だけを合成する。
+    #[serde(default)]
+    pub girder_groups: Vec<Vec<ElemId>>,
+    /// 名前付き制振ダンパー定義（プリセットライブラリ）。`ElemId` への参照を
+    /// 持たないため、要素の追加・削除に伴う ID 繰上げ／繰下げ（`shift_elem_attr_refs`・
+    /// `take_elem_attrs`・`restore_elem_attrs`）の対象外。部材への割当は
+    /// `DamperDef::props` の値コピー（`Model::damper_attrs` へ追加）で行う。
+    ///
+    /// **msgpack（.ovika）は位置ベース配列で直列化されるため、新しいフィールドは
+    /// 必ずこの構造体の末尾（`dof_map` の手前）へ追加すること**。中間に挿入すると
+    /// 旧バージョンで保存された .ovika の後続フィールドの値がずれて読み込まれ、
+    /// `#[serde(default)]` があっても救済されない（default 補完は末尾欠損のみ有効）。
+    #[serde(default)]
+    pub damper_defs: Vec<DamperDef>,
+    /// 梁（水平材）のねじり剛性の扱い（建物一律。既定は i 端ねじれ解放）。
+    /// フィールド無しは既定＝`ReleaseIEnd` で補完される。
+    #[serde(default)]
+    pub girder_torsion: GirderTorsionMode,
+    /// 仕口パネル（柱梁接合部パネル）のモデル化（建物一律。既定はモデル化する）。
+    /// フィールド無しは既定＝`Model` で補完される。
+    #[serde(default)]
+    pub panel_zone: PanelZoneMode,
+    /// 壁領域（壁版と付属間柱のグループ）。フィールド無しは空として補完。
+    #[serde(default)]
+    pub wall_regions: Vec<WallRegion>,
+    /// 床板（版）。大梁または小梁で囲まれた版、または主架構に取り付く版
+    /// （片持ち・バルコニー・出隅）ごとに 1 つ。`floor_regions` が「大梁の1スパン区画」
+    /// であるのに対し、こちらが版の仕様（厚さ・材料・仕上げ荷重・室用途）を持つ
+    /// （[`Slab`]）。取り付く床板はどの `FloorRegion` からも参照されないことがある。
+    /// フィールド無しは空として補完。
+    #[serde(default)]
+    pub slabs: Vec<Slab>,
+    /// 壁版（版仕様。断面・開口。[`WallPlate`]）。柱・梁が囲む鉛直構面内の版、
+    /// または主架構・床領域に取り付く版（パラペット・腰壁・垂れ壁・自立壁）ごとに 1 つ。
+    /// `wall_regions` が「柱・梁が囲む鉛直構面内の閉領域」であるのに対し、こちらが
+    /// 版の仕様を持つ（床の `floor_regions`/`slabs` と同じ関係）。取り付く壁版は
+    /// どの `WallRegion` からも参照されないことがある。フィールド無しは空として補完。
+    #[serde(default)]
+    pub wall_plates: Vec<WallPlate>,
+    /// 床板割当領域。床領域を大梁・小梁で分割した閉領域で、床板 ID を参照する。
+    /// フィールド無しは空として補完。
+    #[serde(default)]
+    pub floor_assignment_regions: FloorPlateAssignmentRegions,
+    /// 壁版割当領域。壁領域を柱・梁・間柱で分割した閉領域で、壁版 ID を参照する。
+    /// フィールド無しは空として補完。
+    #[serde(default)]
+    pub wall_assignment_regions: WallPlateAssignmentRegions,
+    /// 新規二次部材へ割り当てる次の安定 ID。[`Model::alloc_secondary_member_id`] が
+    /// 単調増加で払い出す。既存 ID の最大 + 1 以上を保つ。フィールド無しは 0。
+    #[serde(default)]
+    pub next_secondary_member_id: u32,
+    #[serde(skip)]
+    pub dof_map: crate::dof::DofMap,
+}
+
+/// コレクション内の id が「配列添字 == id.index()」かつ重複しないことを検証する。
+/// `coll` は配列名（例 "nodes"）、`id_name` は id 型名（例 "NodeId"）。
+fn check_id_consistency<T>(
+    items: &[T],
+    coll: &str,
+    id_name: &str,
+    index_of: impl Fn(&T) -> usize,
+    raw_of: impl Fn(&T) -> u32,
+) -> Result<(), crate::error::CoreError> {
+    use crate::error::CoreError;
+    for (i, item) in items.iter().enumerate() {
+        if index_of(item) != i {
+            return Err(CoreError::IndexMismatch(format!(
+                "{coll}[{i}] has {id_name}({})",
+                raw_of(item)
+            )));
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    for item in items {
+        if !seen.insert(index_of(item)) {
+            return Err(CoreError::DuplicateId(format!(
+                "{id_name}({})",
+                raw_of(item)
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// 床板が参照する節点（境界節点、または取付き先の節点）。
+///
+/// 取り付く床板は自由端に節点を持たないため、取付き先の節点だけを返す。
+/// 囲まれた床板の境界節点は割当領域の支持部材材軸から解決する。
+fn slab_node_refs(model: &Model, slab: &Slab) -> Vec<NodeId> {
+    match &slab.shape {
+        SlabShape::Enclosed => slab.boundary_nodes(model).unwrap_or_default(),
+        SlabShape::Attached { anchor, .. } => match anchor {
+            RegionAnchor::Line { nodes, .. } => nodes.to_vec(),
+            RegionAnchor::Point(n) => vec![*n],
+            RegionAnchor::FloorRegion { .. } => Vec::new(),
+        },
+    }
+}
+
+/// 壁版が参照する節点（境界節点、または取付き先の節点）。
+///
+/// 取り付く壁版は自由端に節点を持たないため、取付き先の節点だけを返す
+/// （`slab_node_refs` と同じ考え方）。`RegionAnchor::Point` は壁の取付き先としては
+/// 使わない（`WallPlate::boundary_coords` のドキュメント参照）。
+fn wall_plate_node_refs(model: &Model, plate: &WallPlate) -> Vec<NodeId> {
+    match &plate.shape {
+        WallPlateShape::Enclosed => plate.boundary_nodes(model).unwrap_or_default(),
+        WallPlateShape::Attached { anchor, .. } => match anchor {
+            RegionAnchor::Line { nodes, .. } => nodes.to_vec(),
+            RegionAnchor::FloorRegion { nodes, .. } => nodes.to_vec(),
+            RegionAnchor::Point(_) => Vec::new(),
+        },
+    }
+}
+
+impl Model {
+    pub fn validate(&self) -> Result<(), crate::error::CoreError> {
+        use crate::error::CoreError;
+
+        check_id_consistency(&self.nodes, "nodes", "NodeId", |n| n.id.index(), |n| n.id.0)?;
+
+        for (i, elem) in self.elements.iter().enumerate() {
+            if elem.id.index() != i {
+                return Err(CoreError::IndexMismatch(format!(
+                    "elements[{}] has ElemId({})",
+                    i, elem.id.0
+                )));
+            }
+        }
+
+        let mut seen_elems = std::collections::HashSet::new();
+        for elem in &self.elements {
+            if !seen_elems.insert(elem.id) {
+                return Err(CoreError::DuplicateId(format!("ElemId({})", elem.id.0)));
+            }
+            for &nid in &elem.nodes {
+                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Elem {} -> Node {}",
+                        elem.id.0, nid.0
+                    )));
+                }
+            }
+            if let Some(sid) = elem.section {
+                if sid.index() >= self.sections.len() || self.sections[sid.index()].id != sid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Elem {} -> Section {}",
+                        elem.id.0, sid.0
+                    )));
+                }
+            }
+            if matches!(
+                elem.kind,
+                ElementKind::Beam
+                    | ElementKind::Fiber
+                    | ElementKind::MultiSpring
+                    | ElementKind::Brace { .. }
+            ) {
+                let Some(section_id) = elem.section else {
+                    continue;
+                };
+                let section = self.sections.get(section_id.index());
+                let Some(usage) = section.and_then(|section| section.frame_use) else {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Elem {} の主架構断面用途が未設定です",
+                        elem.id.0
+                    )));
+                };
+                let valid = matches!(
+                    (elem.kind, usage),
+                    (ElementKind::Brace { .. }, FrameSectionUse::Brace)
+                        | (
+                            ElementKind::Beam,
+                            FrameSectionUse::Girder | FrameSectionUse::Column
+                        )
+                        | (
+                            ElementKind::Fiber,
+                            FrameSectionUse::Girder | FrameSectionUse::Column
+                        )
+                        | (
+                            ElementKind::MultiSpring,
+                            FrameSectionUse::Girder | FrameSectionUse::Column
+                        )
+                );
+                if !valid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Elem {} と断面用途が不整合です",
+                        elem.id.0
+                    )));
+                }
+            }
+        }
+
+        for sec in &self.sections {
+            for (role, mid) in [
+                ("Material", sec.material),
+                ("RebarMaterial", sec.rebar_material),
+                ("ShearRebarMaterial", sec.shear_rebar_material),
+                ("SteelMaterial", sec.steel_material),
+            ] {
+                if let Some(mid) = mid {
+                    if mid.index() >= self.materials.len() || self.materials[mid.index()].id != mid
+                    {
+                        return Err(CoreError::DanglingRef(format!(
+                            "Section {} -> {role} {}",
+                            sec.id.0, mid.0
+                        )));
+                    }
+                }
+            }
+        }
+
+        check_id_consistency(
+            &self.stories,
+            "stories",
+            "StoryId",
+            |s| s.id.index(),
+            |s| s.id.0,
+        )?;
+        for pair in self.stories.windows(2) {
+            if pair[1].elevation < pair[0].elevation {
+                return Err(CoreError::DanglingRef(format!(
+                    "Story {} ({}) の標高 {} が直下の Story {} ({}) の標高 {} より低い（階は標高の昇順に並べる）",
+                    pair[1].id.0, pair[1].name, pair[1].elevation,
+                    pair[0].id.0, pair[0].name, pair[0].elevation,
+                )));
+            }
+        }
+        for group in &self.axes {
+            for axis in &group.axes {
+                for &nid in &axis.nodes {
+                    if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
+                        return Err(CoreError::DanglingRef(format!(
+                            "Axis {}/{} -> Node {}",
+                            group.name, axis.name, nid.0
+                        )));
+                    }
+                }
+            }
+        }
+        check_id_consistency(
+            &self.floor_regions,
+            "floor_regions",
+            "FloorRegionId",
+            |s| s.id.index(),
+            |s| s.id.0,
+        )?;
+        for region in &self.floor_regions {
+            for &nid in &region.boundary {
+                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "FloorRegion {} -> Node {}",
+                        region.id.0, nid.0
+                    )));
+                }
+            }
+            for &sid in &region.slab_ids {
+                if sid.index() >= self.slabs.len() || self.slabs[sid.index()].id != sid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "FloorRegion {} -> Slab {}",
+                        region.id.0, sid.0
+                    )));
+                }
+            }
+        }
+        {
+            let mut seen: std::collections::HashSet<Vec<u32>> = std::collections::HashSet::new();
+            for region in &self.floor_regions {
+                if region.boundary.is_empty() {
+                    continue;
+                }
+                let mut key: Vec<u32> = region.boundary.iter().map(|n| n.0).collect();
+                key.sort_unstable();
+                key.dedup();
+                if !seen.insert(key) {
+                    return Err(CoreError::DuplicateId(format!(
+                        "FloorRegion {} は他の領域と同じ境界を持つ",
+                        region.id.0
+                    )));
+                }
+            }
+        }
+        check_id_consistency(&self.slabs, "slabs", "SlabId", |s| s.id.index(), |s| s.id.0)?;
+        check_id_consistency(
+            &self.wall_plates,
+            "wall_plates",
+            "WallPlateId",
+            |p| p.id.index(),
+            |p| p.id.0,
+        )?;
+        check_id_consistency(
+            &self.wall_regions,
+            "wall_regions",
+            "WallRegionId",
+            |r| r.id.index(),
+            |r| r.id.0,
+        )?;
+        {
+            let mut owner: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+            for region in &self.wall_regions {
+                let mut seen_here = std::collections::HashSet::new();
+                for &pid in &region.wall_plate_ids {
+                    if !seen_here.insert(pid) {
+                        return Err(CoreError::DuplicateId(format!(
+                            "WallRegion {} wall_plate_ids has WallPlateId({})",
+                            region.id.0, pid.0
+                        )));
+                    }
+                    if pid.index() >= self.wall_plates.len()
+                        || self.wall_plates[pid.index()].id != pid
+                    {
+                        return Err(CoreError::DanglingRef(format!(
+                            "WallRegion {} -> WallPlate {}",
+                            region.id.0, pid.0
+                        )));
+                    }
+                    if let Some(&other) = owner.get(&pid.0) {
+                        if other != region.id.0 {
+                            return Err(CoreError::DuplicateId(format!(
+                                "WallPlate {} は複数の WallRegion（{}・{}）から参照されている",
+                                pid.0, other, region.id.0
+                            )));
+                        }
+                    }
+                    owner.insert(pid.0, region.id.0);
+                }
+            }
+        }
+        for region in &self.wall_regions {
+            for &nid in &region.boundary {
+                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "WallRegion {} -> Node {}",
+                        region.id.0, nid.0
+                    )));
+                }
+            }
+        }
+        {
+            let mut seen: std::collections::HashSet<Vec<u32>> = std::collections::HashSet::new();
+            for region in &self.wall_regions {
+                if region.boundary.is_empty() {
+                    continue;
+                }
+                let mut key: Vec<u32> = region.boundary.iter().map(|n| n.0).collect();
+                key.sort_unstable();
+                key.dedup();
+                if !seen.insert(key) {
+                    return Err(CoreError::DuplicateId(format!(
+                        "WallRegion {} は他の領域と同じ境界を持つ",
+                        region.id.0
+                    )));
+                }
+            }
+        }
+        {
+            let mut owner: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+            for region in &self.floor_regions {
+                let mut seen_here = std::collections::HashSet::new();
+                for &sid in &region.slab_ids {
+                    if !seen_here.insert(sid) {
+                        return Err(CoreError::DuplicateId(format!(
+                            "FloorRegion {} slab_ids has SlabId({})",
+                            region.id.0, sid.0
+                        )));
+                    }
+                    if let Some(&other) = owner.get(&sid.0) {
+                        if other != region.id.0 {
+                            return Err(CoreError::DuplicateId(format!(
+                                "Slab {} は複数の FloorRegion（{}・{}）から参照されている",
+                                sid.0, other, region.id.0
+                            )));
+                        }
+                    }
+                    owner.insert(sid.0, region.id.0);
+                }
+            }
+        }
+        for slab in &self.slabs {
+            for nid in slab_node_refs(self, slab) {
+                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Slab {} -> Node {}",
+                        slab.id.0, nid.0
+                    )));
+                }
+            }
+            if let Some(sid) = slab.section() {
+                if sid.index() >= self.sections.len() || self.sections[sid.index()].id != sid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Slab {} -> Section {}",
+                        slab.id.0, sid.0
+                    )));
+                }
+            }
+        }
+        for plate in &self.wall_plates {
+            for nid in wall_plate_node_refs(self, plate) {
+                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "WallPlate {} -> Node {}",
+                        plate.id.0, nid.0
+                    )));
+                }
+            }
+            if let Some(sid) = plate.section {
+                if sid.index() >= self.sections.len() || self.sections[sid.index()].id != sid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "WallPlate {} -> Section {}",
+                        plate.id.0, sid.0
+                    )));
+                }
+            }
+        }
+        check_id_consistency(
+            &self.sections,
+            "sections",
+            "SectionId",
+            |s| s.id.index(),
+            |s| s.id.0,
+        )?;
+        check_id_consistency(
+            &self.materials,
+            "materials",
+            "MaterialId",
+            |m| m.id.index(),
+            |m| m.id.0,
+        )?;
+
+        for (ri, region) in self.floor_regions.iter().enumerate() {
+            for (ji, sm) in region.secondary_beams.iter().enumerate() {
+                Self::validate_secondary_member(
+                    sm,
+                    &format!("FloorRegion {ri} secondary_beams[{ji}]"),
+                    &self.sections,
+                )?;
+                if sm.kind != SecondaryMemberKind::Beam {
+                    return Err(CoreError::DanglingRef(format!(
+                        "FloorRegion {} secondary_beams[{ji}] は Beam でない",
+                        region.id.0
+                    )));
+                }
+            }
+        }
+        for (i, sm) in self.unassigned_beams.iter().enumerate() {
+            Self::validate_secondary_member(sm, &format!("unassigned_beams[{i}]"), &self.sections)?;
+            if sm.kind != SecondaryMemberKind::Beam {
+                return Err(CoreError::DanglingRef(format!(
+                    "unassigned_beams[{i}] は Beam でない"
+                )));
+            }
+        }
+        for (ri, region) in self.wall_regions.iter().enumerate() {
+            for (pi, sm) in region.posts.iter().enumerate() {
+                Self::validate_secondary_member(
+                    sm,
+                    &format!("WallRegion {ri} posts[{pi}]"),
+                    &self.sections,
+                )?;
+                if sm.kind != SecondaryMemberKind::Post {
+                    return Err(CoreError::DanglingRef(format!(
+                        "WallRegion {} posts[{pi}] は Post でない",
+                        region.id.0
+                    )));
+                }
+            }
+        }
+        for (i, sm) in self.unassigned_posts.iter().enumerate() {
+            Self::validate_secondary_member(sm, &format!("unassigned_posts[{i}]"), &self.sections)?;
+            if sm.kind != SecondaryMemberKind::Post {
+                return Err(CoreError::DanglingRef(format!(
+                    "unassigned_posts[{i}] は Post でない"
+                )));
+            }
+        }
+
+        {
+            use std::collections::HashSet;
+            let mut seen_ids = HashSet::new();
+            for sm in self.beams().chain(self.posts()) {
+                if !seen_ids.insert(sm.id) {
+                    return Err(CoreError::DanglingRef(format!(
+                        "二次部材の安定 ID が重複しています（{:?}）",
+                        sm.id
+                    )));
+                }
+            }
+        }
+
+        self.validate_secondary_member_anchor_ends()?;
+        self.floor_assignment_regions.validate(self)?;
+        self.wall_assignment_regions.validate(self)?;
+
+        for slab in &self.slabs {
+            if let SlabShape::Attached {
+                anchor: RegionAnchor::Line { span, .. },
+                ..
+            } = &slab.shape
+            {
+                if !crate::model::span_is_valid(*span) {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Slab {} の取付き線の区間 span が不正（0.0 <= t_i < t_j <= 1.0 であること）",
+                        slab.id.0
+                    )));
+                }
+            }
+            if !slab.tip_loads.is_empty() && !slab.supports_tip_loads() {
+                return Err(CoreError::DanglingRef(format!(
+                    "Slab {} の先端荷重は取付き線分布の片持ち床板にのみ指定できます",
+                    slab.id.0
+                )));
+            }
+            for load in &slab.tip_loads {
+                if !load.intensity.is_finite() || load.intensity < 0.0 {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Slab {} の先端荷重強度が不正です",
+                        slab.id.0
+                    )));
+                }
+                if self.load_cases.get(load.case.index()).map(|c| c.id) != Some(load.case) {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Slab {} の先端荷重ケース {} が存在しません",
+                        slab.id.0, load.case.0
+                    )));
+                }
+            }
+        }
+        for plate in &self.wall_plates {
+            if let WallPlateShape::Attached {
+                anchor: RegionAnchor::Line { span, .. },
+                ..
+            } = &plate.shape
+            {
+                if !crate::model::span_is_valid(*span) {
+                    return Err(CoreError::DanglingRef(format!(
+                        "WallPlate {} の取付き線の区間 span が不正（0.0 <= t_i < t_j <= 1.0 であること）",
+                        plate.id.0
+                    )));
+                }
+            }
+        }
+        for plate in &self.wall_plates {
+            if let WallPlateShape::Attached {
+                anchor,
+                extent: None,
+            } = &plate.shape
+            {
+                if !matches!(anchor, RegionAnchor::FloorRegion { .. }) {
+                    return Err(CoreError::DanglingRef(format!(
+                        "WallPlate {} は立ち上がり高さが未指定（階高いっぱい）だが、\
+                         取付き先が床領域ではない。未指定を許すのは自立壁だけで、\
+                         取付き線に取り付く全高の壁は囲まれた壁版として入力する",
+                        plate.id.0
+                    )));
+                }
+            }
+        }
+
+        {
+            let assigned: std::collections::HashSet<_> = self
+                .floor_assignment_regions
+                .regions
+                .iter()
+                .filter_map(|region| region.assignment.plate())
+                .collect();
+            for slab in &self.slabs {
+                if matches!(slab.shape, SlabShape::Enclosed) && !assigned.contains(&slab.id) {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Slab {} はどの床板割当領域にも割り当てられていない",
+                        slab.id.0
+                    )));
+                }
+            }
+        }
+        {
+            let mut seen: std::collections::HashSet<Vec<u32>> = std::collections::HashSet::new();
+            for plate in &self.wall_plates {
+                let WallPlateShape::Enclosed = plate.shape else {
+                    continue;
+                };
+                let Some(boundary) = plate.boundary_nodes(self) else {
+                    continue;
+                };
+                if boundary.is_empty() {
+                    continue;
+                }
+                let mut key: Vec<u32> = boundary.iter().map(|n| n.0).collect();
+                key.sort_unstable();
+                key.dedup();
+                if !seen.insert(key) {
+                    return Err(CoreError::DuplicateId(format!(
+                        "WallPlate {} は他の壁版と同じ境界を持つ",
+                        plate.id.0
+                    )));
+                }
+            }
+        }
+        {
+            let assigned: std::collections::HashSet<_> = self
+                .wall_assignment_regions
+                .regions
+                .iter()
+                .filter_map(|region| region.assignment.plate())
+                .collect();
+            for plate in &self.wall_plates {
+                if matches!(plate.shape, WallPlateShape::Enclosed) && !assigned.contains(&plate.id)
+                {
+                    return Err(CoreError::DanglingRef(format!(
+                        "WallPlate {} はどの壁版割当領域にも割り当てられていない",
+                        plate.id.0
+                    )));
+                }
+            }
+        }
+
+        for (gi, group) in self.girder_groups.iter().enumerate() {
+            for &eid in group {
+                if eid.index() >= self.elements.len() || self.elements[eid.index()].id != eid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "GirderGroup {} -> Elem {}",
+                        gi, eid.0
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 節点 ID から節点を引く。存在しなければ `None`。
+    ///
+    /// `nodes[i].id == NodeId(i)`（節点の削除・挿入で `sepika-edit` が維持する
+    /// 不変条件）を利用して添字で引くため O(1)。不変条件が崩れたモデルでも
+    /// 正しく引けるよう、添字の ID が一致しない場合のみ線形探索へ落とす。
+    ///
+    /// **ID から実体を引くところは常にこのメソッドを使う**（各所での線形探索は、
+    /// 不変条件が成り立つのに O(n) を払ううえ、探索規則が散らばる）。
+    pub fn node(&self, id: NodeId) -> Option<&Node> {
+        match self.nodes.get(id.index()) {
+            Some(n) if n.id == id => Some(n),
+            _ => self.nodes.iter().find(|n| n.id == id),
+        }
+    }
+
+    /// 要素 ID から要素を引く。存在しなければ `None`。
+    /// 引き方は [`Model::node`] と同じ（`elements[i].id == ElemId(i)`）。
+    pub fn element(&self, id: ElemId) -> Option<&ElementData> {
+        match self.elements.get(id.index()) {
+            Some(e) if e.id == id => Some(e),
+            _ => self.elements.iter().find(|e| e.id == id),
+        }
+    }
+
+    /// 断面 ID から断面を引く。存在しなければ `None`。
+    /// 引き方は [`Model::node`] と同じ（`sections[i].id == SectionId(i)`）。
+    ///
+    /// この不変条件は [`Model::validate`] が要素・二次部材からの参照ごとに
+    /// 検証しており（`sections[sid.index()].id != sid` をダングリング参照として弾く）、
+    /// [`Model::element_section`] も添字で引いている。ID から断面を引くところは
+    /// 常にこのメソッドを使う。
+    pub fn section(&self, id: SectionId) -> Option<&Section> {
+        match self.sections.get(id.index()) {
+            Some(s) if s.id == id => Some(s),
+            _ => self.sections.iter().find(|s| s.id == id),
+        }
+    }
+
+    /// 二次部材を安定 ID から引く。**ID は配列添字と一致しない**。
+    pub fn secondary_member(&self, id: SecondaryMemberId) -> Option<&SecondaryMember> {
+        self.beams().chain(self.posts()).find(|m| m.id == id)
+    }
+
+    /// 既存の二次部材 ID と衝突しない安定 ID を 1 つ払い出す。
+    ///
+    /// 全二次部材の最大 ID + 1 以上を返し、[`Model::next_secondary_member_id`] を進める。
+    pub fn alloc_secondary_member_id(&mut self) -> SecondaryMemberId {
+        let next = self
+            .beams()
+            .chain(self.posts())
+            .map(|m| m.id.0.saturating_add(1))
+            .max()
+            .unwrap_or(0);
+        self.next_secondary_member_id = self.next_secondary_member_id.max(next);
+        let id = SecondaryMemberId(self.next_secondary_member_id);
+        self.next_secondary_member_id = self.next_secondary_member_id.saturating_add(1);
+        id
+    }
+
+    /// 床板割当領域を安定 ID から引く。ID は配列添字と一致しない。
+    pub fn floor_assignment_region(
+        &self,
+        id: FloorPlateAssignmentRegionId,
+    ) -> Option<&FloorPlateAssignmentRegion> {
+        self.floor_assignment_regions.get(id)
+    }
+
+    /// 壁版割当領域を安定 ID から引く。ID は配列添字と一致しない。
+    pub fn wall_assignment_region(
+        &self,
+        id: WallPlateAssignmentRegionId,
+    ) -> Option<&WallPlateAssignmentRegion> {
+        self.wall_assignment_regions.get(id)
+    }
+
+    /// 二次部材の検証。安定 ID 重複・アンカー参照・材軸位置範囲・支持グラフ循環・
+    /// 片持ち自由端を [`validate_secondary_members`] で、主架構アンカーの実在を
+    /// 要素参照で検証する。
+    fn validate_secondary_member_anchor_ends(&self) -> Result<(), crate::error::CoreError> {
+        let members: Vec<&SecondaryMember> = self.beams().chain(self.posts()).collect();
+        crate::model::validate_secondary_members(&members)?;
+        for sm in &members {
+            let ends = sm.ends;
+            for anchor in ends.anchors() {
+                if let SupportMemberId::Primary(elem) = anchor.support {
+                    if self.element(elem).is_none() {
+                        return Err(crate::error::CoreError::DanglingRef(format!(
+                            "SecondaryMember {} のアンカーが存在しない要素 ElemId({}) を参照している",
+                            sm.id.0, elem.0
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 支持部材の材軸を `(始端座標, 終端座標)` [mm] で返す。引けない場合は `None`。
+    ///
+    /// 主架構は 2 節点要素の両端節点、二次部材は支持端アンカーを再帰的に解決する。
+    /// 片持ち二次部材の自由端は親構面内ベクトルで表され、構面の基底をモデルが
+    /// 持たないため解決できない（`None`）。
+    pub fn support_member_axis(&self, id: SupportMemberId) -> Option<([f64; 3], [f64; 3])> {
+        let mut visiting = std::collections::HashSet::new();
+        self.support_member_axis_inner(id, &mut visiting)
+    }
+
+    /// アンカーが指す支持部材材軸上の点 [mm] を返す。支持部材が引けない場合は `None`。
+    pub fn anchor_point(&self, anchor: SecondaryMemberAnchor) -> Option<[f64; 3]> {
+        let mut visiting = std::collections::HashSet::new();
+        self.anchor_point_inner(anchor, &mut visiting)
+    }
+
+    /// 支持部材の両端に一致するモデル節点を返す。対応する節点が無ければ `None`。
+    pub fn support_member_nodes(&self, id: SupportMemberId) -> Option<[NodeId; 2]> {
+        let (a, b) = self.support_member_axis(id)?;
+        let tol = crate::geom::MEMBER_AXIS_TOL_MM;
+        let find = |p: [f64; 3]| {
+            self.nodes
+                .iter()
+                .find(|n| crate::geom::vec3::dist(n.coord, p) <= tol)
+                .map(|n| n.id)
+        };
+        Some([find(a)?, find(b)?])
+    }
+
+    fn support_member_axis_inner(
+        &self,
+        id: SupportMemberId,
+        visiting: &mut std::collections::HashSet<SecondaryMemberId>,
+    ) -> Option<([f64; 3], [f64; 3])> {
+        match id {
+            SupportMemberId::Primary(elem) => {
+                let e = self.element(elem)?;
+                if e.nodes.len() < 2 {
+                    return None;
+                }
+                let a = self.node(*e.nodes.first()?)?.coord;
+                let b = self.node(*e.nodes.last()?)?.coord;
+                Some((a, b))
+            }
+            SupportMemberId::Secondary(sm) => {
+                if !visiting.insert(sm) {
+                    return None;
+                }
+                let member = self.secondary_member(sm)?;
+                let axis = match member.ends {
+                    SecondaryMemberEnds::Supported([a, b]) => Some((
+                        self.anchor_point_inner(a, visiting)?,
+                        self.anchor_point_inner(b, visiting)?,
+                    )),
+                    SecondaryMemberEnds::Cantilever {
+                        support,
+                        free_end_vector,
+                    } => {
+                        let p = self.anchor_point_inner(support, visiting)?;
+                        let q = self.cantilever_free_point(member.kind, p, free_end_vector)?;
+                        Some((p, q))
+                    }
+                    SecondaryMemberEnds::Detached([p0, p1]) => Some((p0, p1)),
+                };
+                visiting.remove(&sm);
+                axis
+            }
+        }
+    }
+
+    fn anchor_point_inner(
+        &self,
+        anchor: SecondaryMemberAnchor,
+        visiting: &mut std::collections::HashSet<SecondaryMemberId>,
+    ) -> Option<[f64; 3]> {
+        let (a, b) = self.support_member_axis_inner(anchor.support, visiting)?;
+        let t = anchor.position;
+        Some([
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+        ])
+    }
+
+    /// 支持部材境界（支持部材 ID ＋材軸区間）の座標を、境界の辺順に返す。
+    /// 各辺は `(始点, 終点)`、辺 i の終点は辺 i+1 の始点と一致する。
+    /// 支持部材が引けない辺があれば `None`。
+    pub fn support_boundary_segments(
+        &self,
+        boundary: &[SupportBoundary],
+    ) -> Option<Vec<([f64; 3], [f64; 3])>> {
+        boundary
+            .iter()
+            .map(|edge| {
+                let (a, b) = self.support_member_axis(edge.support)?;
+                let at = |t: f64| {
+                    [
+                        a[0] + (b[0] - a[0]) * t,
+                        a[1] + (b[1] - a[1]) * t,
+                        a[2] + (b[2] - a[2]) * t,
+                    ]
+                };
+                Some((at(edge.span[0]), at(edge.span[1])))
+            })
+            .collect()
+    }
+
+    /// 指定した節点が部材・節点荷重・階・床・拘束のいずれかから参照されているかを判定する。
+    /// 参照中の節点を削除すると参照が壊れる（ダングリング）ため、削除前にこれで確認する。
+    pub fn node_in_use(&self, id: NodeId) -> bool {
+        self.elements.iter().any(|e| e.nodes.contains(&id))
+            || self.node_referenced_outside_elements(id)
+    }
+
+    /// [`Model::node_in_use`] と同様だが、要素からの参照は `excl` を除いて判定する
+    /// （支点免震要素の接地節点が「この要素以外から孤立しているか」の判定に使う。
+    /// `excl` 要素自身が `id` を参照していても、それだけでは「使用中」とみなさない）。
+    pub fn node_in_use_excluding_elem(&self, id: NodeId, excl: ElemId) -> bool {
+        self.elements
+            .iter()
+            .any(|e| e.id != excl && e.nodes.contains(&id))
+            || self.node_referenced_outside_elements(id)
+    }
+
+    /// 要素以外（節点荷重・階・床領域・床板・壁領域・壁版・二次部材・拘束）からの
+    /// 参照有無。[`Model::node_in_use`]・[`Model::node_in_use_excluding_elem`] の共通部分。
+    ///
+    /// 大半は [`Model::node_referenced_by_regions_or_plates`] へ委譲し、ここでは
+    /// それに含まれない `stories`（利用者の節点削除を防ぐ目的では見る必要があるが、
+    /// `region_rebuild::node_has_structural_ref` は準備計算のたびに
+    /// 埋め直されるため意図的に除外している）だけを追加で見る。
+    fn node_referenced_outside_elements(&self, id: NodeId) -> bool {
+        self.stories.iter().any(|s| s.node_ids.contains(&id))
+            || self.node_referenced_by_regions_or_plates(id)
+    }
+
+    /// 節点 `id` が床領域・床板・壁領域・壁版・二次部材・拘束・節点荷重の
+    /// いずれかから参照されているか。
+    ///
+    /// [`Model::node_referenced_outside_elements`]（sepika-edit の節点削除ガード）と
+    /// [`crate::region_rebuild::node_has_structural_ref`]（節点削除判定）が
+    /// この判定を共有する。両者が異なるのは、前者が追加で見る `stories`
+    /// （利用者の節点削除を防ぐ）と、後者が追加で見る節点自身の支点・質量・
+    /// 剛床マスター（`stories`/`axes` は意図的に除外）だけである。
+    ///
+    /// **`NodeId` を持つフィールドを `Model` へ新設したら、まず [`Model::visit_node_ids`]
+    /// を更新し、次に該当フィールドがここでも参照有無を判定できることを確認すること**。
+    pub(crate) fn node_referenced_by_regions_or_plates(&self, id: NodeId) -> bool {
+        self.load_cases
+            .iter()
+            .any(|lc| lc.nodal.iter().any(|nl| nl.node == id))
+            || self.floor_regions.iter().any(|r| r.boundary.contains(&id))
+            || self
+                .slabs
+                .iter()
+                .any(|sl| slab_node_refs(self, sl).contains(&id))
+            || self.wall_regions.iter().any(|r| r.boundary.contains(&id))
+            || self
+                .wall_plates
+                .iter()
+                .any(|p| wall_plate_node_refs(self, p).contains(&id))
+            || self.constraints.iter().any(|c| match c {
+                Constraint::RigidDiaphragm { master, slaves, .. } => {
+                    *master == id || slaves.contains(&id)
+                }
+                Constraint::Mpc { master, terms } => {
+                    *master == id || terms.iter().any(|(n, _, _)| *n == id)
+                }
+                Constraint::RigidLink { master, slaves, .. } => {
+                    *master == id || slaves.contains(&id)
+                }
+            })
+    }
+
+    /// 要素が「支点免震要素」（sepika-edit の `PlaceSupportIsolator` が生成する配置形。
+    /// 対象節点と同一座標の接地節点との間に設置する零長 Isolator 要素）であるかを判定する。
+    /// 該当すれば `(上部節点, 接地節点)` を返す（上部節点＝支点として振る舞う対象節点、
+    /// 接地節点＝自動生成された `restraint=FIXED` の孤立節点）。
+    ///
+    /// 条件: `ElementKind::Isolator` の2節点要素で、両端が同一座標（零長）かつ、
+    /// 一方の節点が `restraint=FIXED` でこの要素以外から参照されていない（孤立）こと。
+    /// 通常の（支点ではない）免震要素はこの条件を満たさず `None` を返す。
+    pub fn support_isolator_ends(&self, elem: ElemId) -> Option<(NodeId, NodeId)> {
+        let e = self.elements.get(elem.index()).filter(|e| e.id == elem)?;
+        if e.kind != ElementKind::Isolator || e.nodes.len() != 2 {
+            return None;
+        }
+        let (n0, n1) = (e.nodes[0], e.nodes[1]);
+        let node0 = self.node(n0)?;
+        let node1 = self.node(n1)?;
+        if node0.coord != node1.coord {
+            return None;
+        }
+        let is_isolated_ground = |id: NodeId, restraint: crate::dof::Dof6Mask| {
+            restraint == crate::dof::Dof6Mask::FIXED && !self.node_in_use_excluding_elem(id, elem)
+        };
+        if is_isolated_ground(n0, node0.restraint) {
+            Some((n1, n0))
+        } else if is_isolated_ground(n1, node1.restraint) {
+            Some((n0, n1))
+        } else {
+            None
+        }
+    }
+
+    pub fn eq_ignoring_dofmap(&self, other: &Self) -> bool {
+        self.nodes == other.nodes
+            && self.elements == other.elements
+            && self.sections == other.sections
+            && self.materials == other.materials
+            && self.stories == other.stories
+            && self.floor_regions == other.floor_regions
+            && self.slabs == other.slabs
+            && self.constraints == other.constraints
+            && self.load_cases == other.load_cases
+            && self.combinations == other.combinations
+            && self.vibration_cases == other.vibration_cases
+            && self.lumped_vibration_cases == other.lumped_vibration_cases
+            && self.generated_masters == other.generated_masters
+            && self.mass_method == other.mass_method
+            && self.slab_thickness == other.slab_thickness
+            && self.load_cfg == other.load_cfg
+            && self.wall_attrs == other.wall_attrs
+            && self.wall_plates == other.wall_plates
+            && self.stress_cfg == other.stress_cfg
+            && self.steel_design_attrs == other.steel_design_attrs
+            && self.brb_attrs == other.brb_attrs
+            && self.pca_attrs == other.pca_attrs
+            && self.unassigned_beams == other.unassigned_beams
+            && self.unassigned_posts == other.unassigned_posts
+            && self.axes == other.axes
+            && self.girder_groups == other.girder_groups
+            && self.isolator_attrs == other.isolator_attrs
+            && self.member_hysteresis_attrs == other.member_hysteresis_attrs
+            && self.damper_attrs == other.damper_attrs
+            && self.damper_defs == other.damper_defs
+            && self.member_detail_attrs == other.member_detail_attrs
+            && self.girder_torsion == other.girder_torsion
+            && self.panel_zone == other.panel_zone
+            && self.wall_regions == other.wall_regions
+            && self.floor_assignment_regions == other.floor_assignment_regions
+            && self.wall_assignment_regions == other.wall_assignment_regions
+            && self.next_secondary_member_id == other.next_secondary_member_id
+    }
+
+    /// ダンパー要素の特性を返す（`Model::damper_attrs` から要素 ID で検索）。
+    pub fn damper_props(&self, elem: ElemId) -> Option<DamperProps> {
+        self.damper_attrs
+            .iter()
+            .find(|a| a.elem == elem)
+            .map(|a| a.props)
+    }
+
+    /// ダンパー要素の特性を設定／解除する。`None` を渡すと指定を解除する。
+    /// 戻り値は変更前の指定（undo 用）。
+    pub fn set_damper_props(
+        &mut self,
+        elem: ElemId,
+        props: Option<DamperProps>,
+    ) -> Option<DamperProps> {
+        let old = self.damper_props(elem);
+        self.damper_attrs.retain(|a| a.elem != elem);
+        if let Some(p) = props {
+            self.damper_attrs.push(DamperAttr { elem, props: p });
+        }
+        old
+    }
+
+    /// モデル内の全ての `NodeId` 参照（節点自身の ID を含む）へ `f` を適用する。
+    /// 節点の削除・挿入に伴う ID 繰り上げ／繰り下げ（sepika-edit）で用いる。
+    ///
+    /// **`NodeId` を持つフィールドを `Model` へ追加したら必ずここへ追随すること**
+    /// （`validate`・`eq_ignoring_dofmap` と同様）。
+    pub fn visit_node_ids(&mut self, mut f: impl FnMut(&mut NodeId)) {
+        for node in &mut self.nodes {
+            f(&mut node.id);
+        }
+        for id in &mut self.generated_masters {
+            f(id);
+        }
+        for elem in &mut self.elements {
+            for n in &mut elem.nodes {
+                f(n);
+            }
+        }
+        for story in &mut self.stories {
+            for n in &mut story.node_ids {
+                f(n);
+            }
+        }
+        for group in &mut self.axes {
+            for axis in &mut group.axes {
+                for n in &mut axis.nodes {
+                    f(n);
+                }
+            }
+        }
+        for region in &mut self.floor_regions {
+            for n in &mut region.boundary {
+                f(n);
+            }
+        }
+        for slab in &mut self.slabs {
+            if let SlabShape::Attached { anchor, .. } = &mut slab.shape {
+                match anchor {
+                    RegionAnchor::Line { nodes, .. } => {
+                        for n in nodes {
+                            f(n);
+                        }
+                    }
+                    RegionAnchor::Point(n) => f(n),
+                    RegionAnchor::FloorRegion { .. } => {}
+                }
+            }
+        }
+        for plate in &mut self.wall_plates {
+            match &mut plate.shape {
+                WallPlateShape::Enclosed => {}
+                WallPlateShape::Attached { anchor, .. } => match anchor {
+                    RegionAnchor::Line { nodes, .. } => {
+                        for n in nodes {
+                            f(n);
+                        }
+                    }
+                    RegionAnchor::FloorRegion { nodes, .. } => {
+                        for n in nodes {
+                            f(n);
+                        }
+                    }
+                    RegionAnchor::Point(_) => {}
+                },
+            }
+        }
+        for region in &mut self.wall_regions {
+            for n in &mut region.boundary {
+                f(n);
+            }
+        }
+        for c in &mut self.constraints {
+            match c {
+                Constraint::RigidDiaphragm { master, slaves, .. }
+                | Constraint::RigidLink { master, slaves, .. } => {
+                    f(master);
+                    for s in slaves {
+                        f(s);
+                    }
+                }
+                Constraint::Mpc { master, terms } => {
+                    f(master);
+                    for (n, _, _) in terms {
+                        f(n);
+                    }
+                }
+            }
+        }
+        for lc in &mut self.load_cases {
+            for nl in &mut lc.nodal {
+                f(&mut nl.node);
+            }
+        }
+    }
+
+    /// モデル内の全ての `StoryId` 参照（階自身の ID を含む）へ `f` を適用する
+    /// （[`Model::visit_node_ids`] と同じ規約）。
+    ///
+    /// 階の追加・削除では「ID＝配列位置」の不変条件を保つために ID の繰り上げが
+    /// 必要になる。参照箇所を呼び出し側へ散らさないよう、走査はここに集約する。
+    pub fn visit_story_ids(&mut self, mut f: impl FnMut(&mut StoryId)) {
+        for story in &mut self.stories {
+            f(&mut story.id);
+        }
+        for node in &mut self.nodes {
+            if let Some(sid) = &mut node.story {
+                f(sid);
+            }
+        }
+        for c in &mut self.constraints {
+            if let Constraint::RigidDiaphragm { story, .. } = c {
+                f(story);
+            }
+        }
+    }
+
+    /// モデル内の全ての `SectionId` 参照（断面自身の ID を含む）へ `f` を適用する
+    /// （[`Model::visit_node_ids`] と同じ規約）。
+    pub fn visit_section_ids(&mut self, mut f: impl FnMut(&mut crate::ids::SectionId)) {
+        for sec in &mut self.sections {
+            f(&mut sec.id);
+        }
+        for elem in &mut self.elements {
+            if let Some(sid) = &mut elem.section {
+                f(sid);
+            }
+        }
+        for region in &mut self.floor_regions {
+            for sm in &mut region.secondary_beams {
+                if let Some(sid) = &mut sm.section {
+                    f(sid);
+                }
+            }
+        }
+        for slab in &mut self.slabs {
+            if let Some(sid) = &mut slab.plate.section {
+                f(sid);
+            }
+        }
+        for plate in &mut self.wall_plates {
+            if let Some(sid) = &mut plate.section {
+                f(sid);
+            }
+        }
+        for sm in self
+            .unassigned_beams
+            .iter_mut()
+            .chain(self.unassigned_posts.iter_mut())
+        {
+            if let Some(sid) = &mut sm.section {
+                f(sid);
+            }
+        }
+        for region in &mut self.wall_regions {
+            for sm in &mut region.posts {
+                if let Some(sid) = &mut sm.section {
+                    f(sid);
+                }
+            }
+        }
+    }
+
+    /// モデル内の全ての `MaterialId` 参照（材料自身の ID を含む）へ `f` を適用する
+    /// （[`Model::visit_node_ids`] と同じ規約）。
+    pub fn visit_material_ids(&mut self, mut f: impl FnMut(&mut crate::ids::MaterialId)) {
+        for mat in &mut self.materials {
+            f(&mut mat.id);
+        }
+        for sec in &mut self.sections {
+            for mid in [
+                &mut sec.material,
+                &mut sec.rebar_material,
+                &mut sec.shear_rebar_material,
+                &mut sec.steel_material,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                f(mid);
+            }
+        }
+    }
+
+    /// モデル内の全ての `ElemId` 参照（要素自身の ID・部材荷重・側テーブル属性・
+    /// 一本部材指定）へ `f` を適用する（[`Model::visit_node_ids`] と同じ規約）。
+    pub fn visit_elem_ids(&mut self, mut f: impl FnMut(&mut ElemId)) {
+        for elem in &mut self.elements {
+            f(&mut elem.id);
+        }
+        for lc in &mut self.load_cases {
+            for ml in &mut lc.member {
+                f(&mut ml.elem);
+            }
+        }
+        self.floor_assignment_regions.visit_primary_supports(&mut f);
+        self.wall_assignment_regions.visit_primary_supports(&mut f);
+        self.shift_elem_attr_refs(&mut f);
+    }
+
+    /// 要素に紐づく全ての側テーブル属性（壁・鉄骨・BRB・PCa・免震・履歴則・ダンパー）と
+    /// 一本部材指定（`girder_groups`）の `elem` 参照に `f` を適用する。
+    /// 要素の追加・削除に伴う ID 繰上げ／繰下げで、参照整合を保つために用いる
+    /// （要素自身の ID・部材荷重も含めた全参照は [`Model::visit_elem_ids`]）。
+    pub fn shift_elem_attr_refs(&mut self, mut f: impl FnMut(&mut ElemId)) {
+        for a in &mut self.wall_attrs {
+            f(&mut a.elem);
+        }
+        for a in &mut self.steel_design_attrs {
+            f(&mut a.elem);
+        }
+        for a in &mut self.brb_attrs {
+            f(&mut a.elem);
+        }
+        for a in &mut self.pca_attrs {
+            f(&mut a.elem);
+        }
+        for a in &mut self.isolator_attrs {
+            f(&mut a.elem);
+        }
+        for a in &mut self.member_hysteresis_attrs {
+            f(&mut a.elem);
+        }
+        for a in &mut self.damper_attrs {
+            f(&mut a.elem);
+        }
+        for a in &mut self.member_detail_attrs {
+            f(&mut a.elem);
+        }
+        for group in &mut self.girder_groups {
+            for e in group.iter_mut() {
+                f(e);
+            }
+        }
+    }
+
+    /// 指定要素に紐づく全ての側テーブル属性を取り外して返す（要素削除時の退避用）。
+    pub fn take_elem_attrs(&mut self, elem: ElemId) -> ElemAttrs {
+        /// `elem` フィールドが一致する最初の要素を取り外して返す。
+        fn take_first<T>(v: &mut Vec<T>, get: impl Fn(&T) -> ElemId, elem: ElemId) -> Option<T> {
+            v.iter()
+                .position(|a| get(a) == elem)
+                .map(|pos| v.remove(pos))
+        }
+        ElemAttrs {
+            wall: take_first(&mut self.wall_attrs, |a| a.elem, elem),
+            steel_design: take_first(&mut self.steel_design_attrs, |a| a.elem, elem),
+            brb: take_first(&mut self.brb_attrs, |a| a.elem, elem),
+            pca: take_first(&mut self.pca_attrs, |a| a.elem, elem),
+            isolator: take_first(&mut self.isolator_attrs, |a| a.elem, elem),
+            hysteresis: take_first(&mut self.member_hysteresis_attrs, |a| a.elem, elem),
+            damper: take_first(&mut self.damper_attrs, |a| a.elem, elem),
+            detail: take_first(&mut self.member_detail_attrs, |a| a.elem, elem),
+        }
+    }
+
+    /// 取り外した側テーブル属性を、指定要素 ID へ紐づけ直して復元する
+    /// （要素削除の undo 用）。各属性の `elem` は `elem` へ上書きする。
+    pub fn restore_elem_attrs(&mut self, elem: ElemId, attrs: ElemAttrs) {
+        if let Some(mut a) = attrs.wall {
+            a.elem = elem;
+            self.wall_attrs.push(a);
+        }
+        if let Some(mut a) = attrs.steel_design {
+            a.elem = elem;
+            self.steel_design_attrs.push(a);
+        }
+        if let Some(mut a) = attrs.brb {
+            a.elem = elem;
+            self.brb_attrs.push(a);
+        }
+        if let Some(mut a) = attrs.pca {
+            a.elem = elem;
+            self.pca_attrs.push(a);
+        }
+        if let Some(mut a) = attrs.isolator {
+            a.elem = elem;
+            self.isolator_attrs.push(a);
+        }
+        if let Some(mut a) = attrs.hysteresis {
+            a.elem = elem;
+            self.member_hysteresis_attrs.push(a);
+        }
+        if let Some(mut a) = attrs.damper {
+            a.elem = elem;
+            self.damper_attrs.push(a);
+        }
+        if let Some(mut a) = attrs.detail {
+            a.elem = elem;
+            self.member_detail_attrs.push(a);
+        }
+    }
+
+    /// 部材の付帯情報（ハンチ・継手位置）を返す（未指定は `None`）。
+    pub fn member_detail(&self, elem: ElemId) -> Option<&MemberDetailAttr> {
+        self.member_detail_attrs.iter().find(|a| a.elem == elem)
+    }
+
+    /// 部材に指定された履歴則（増分解析用）を返す（未指定は `None`＝既定に従う）。
+    pub fn member_hysteresis(&self, elem: ElemId) -> Option<HysteresisModel> {
+        self.member_hysteresis_attrs
+            .iter()
+            .find(|a| a.elem == elem)
+            .map(|a| a.rule)
+    }
+
+    /// 部材に指定された履歴則（時刻歴応答解析用）を返す。
+    /// 時刻歴用スロットが未指定（`None`）の部材は増分用の指定に従う。
+    /// どちらも未指定は `None`＝既定に従う。
+    pub fn member_hysteresis_th(&self, elem: ElemId) -> Option<HysteresisModel> {
+        self.member_hysteresis_attrs
+            .iter()
+            .find(|a| a.elem == elem)
+            .map(|a| a.rule_th.unwrap_or(a.rule))
+    }
+
+    /// 部材に指定された時刻歴用スロットの生値を返す（`None`=増分用と同じ）。
+    /// UI の「増分と同じ」表示の判定に用いる（[`Self::member_hysteresis_th`] は
+    /// 増分用へフォールバックした解決後の値を返す）。
+    pub fn member_hysteresis_th_raw(&self, elem: ElemId) -> Option<HysteresisModel> {
+        self.member_hysteresis_attrs
+            .iter()
+            .find(|a| a.elem == elem)
+            .and_then(|a| a.rule_th)
+    }
+
+    /// 属性が既定（増分=Auto・時刻歴=増分と同じ）と等価なら側テーブルから除去する。
+    fn prune_default_hysteresis(&mut self, elem: ElemId) {
+        self.member_hysteresis_attrs.retain(|a| {
+            !(a.elem == elem && a.rule == HysteresisModel::Auto && a.rule_th.is_none())
+        });
+    }
+
+    /// 部材の履歴則（増分解析用）を設定する。`HysteresisModel::Auto` を指定した
+    /// 場合は増分用の指定を解除（既定に従う）。時刻歴用スロットは変更しない。
+    /// 戻り値は変更前の指定（undo 用）。
+    pub fn set_member_hysteresis(
+        &mut self,
+        elem: ElemId,
+        rule: HysteresisModel,
+    ) -> Option<HysteresisModel> {
+        let old = self.member_hysteresis(elem);
+        if let Some(a) = self
+            .member_hysteresis_attrs
+            .iter_mut()
+            .find(|a| a.elem == elem)
+        {
+            a.rule = rule;
+        } else if rule != HysteresisModel::Auto {
+            self.member_hysteresis_attrs.push(MemberHysteresisAttr {
+                elem,
+                rule,
+                rule_th: None,
+            });
+        }
+        self.prune_default_hysteresis(elem);
+        old
+    }
+
+    /// 部材の履歴則（時刻歴応答解析用スロット）を設定する。`None` は
+    /// 「増分用と同じ」に戻す。増分用の指定は変更しない。
+    /// 戻り値は変更前のスロット生値（undo 用）。
+    pub fn set_member_hysteresis_th(
+        &mut self,
+        elem: ElemId,
+        rule_th: Option<HysteresisModel>,
+    ) -> Option<HysteresisModel> {
+        let old = self.member_hysteresis_th_raw(elem);
+        if let Some(a) = self
+            .member_hysteresis_attrs
+            .iter_mut()
+            .find(|a| a.elem == elem)
+        {
+            a.rule_th = rule_th;
+        } else if rule_th.is_some() {
+            self.member_hysteresis_attrs.push(MemberHysteresisAttr {
+                elem,
+                rule: HysteresisModel::Auto,
+                rule_th,
+            });
+        }
+        self.prune_default_hysteresis(elem);
+        old
+    }
+
+    /// 標準荷重ケース一式（DL・LL(架構用)・LL(地震用)・EX・EY）と標準荷重組合せ
+    /// （長期 DL+LL、短期地震 DL+LL±EX・DL+LL±EY）を持つ空モデルを作る
+    /// （新規作成の既定。[`default_load_cases`]・[`default_combinations`] 参照）。
+    pub fn with_default_load_cases() -> Self {
+        Model {
+            load_cases: default_load_cases(),
+            combinations: default_combinations(),
+            ..Model::default()
+        }
+    }
+
+    /// 二次部材 1 件の断面参照が実在することを検証する。
+    pub fn validate_secondary_member(
+        sm: &SecondaryMember,
+        label: &str,
+        sections: &[Section],
+    ) -> Result<(), crate::error::CoreError> {
+        use crate::error::CoreError;
+        if let Some(sid) = sm.section {
+            if sid.index() >= sections.len() || sections[sid.index()].id != sid {
+                return Err(CoreError::DanglingRef(format!(
+                    "{label} -> Section {}",
+                    sid.0
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// 全小梁（床領域内 + 未割当）を走査する。
+    pub fn beams(&self) -> impl Iterator<Item = &SecondaryMember> {
+        self.unassigned_beams.iter().chain(
+            self.floor_regions
+                .iter()
+                .flat_map(|r| r.secondary_beams.iter()),
+        )
+    }
+
+    /// 全間柱（壁領域内 + 未割当）を走査する。
+    pub fn posts(&self) -> impl Iterator<Item = &SecondaryMember> {
+        self.unassigned_posts
+            .iter()
+            .chain(self.wall_regions.iter().flat_map(|r| r.posts.iter()))
+    }
+
+    /// モデル内の全ての `SlabId` 参照（床板自身の ID・床領域の `slab_ids`）へ
+    /// `f` を適用する（[`Model::visit_node_ids`] と同じ規約）。
+    ///
+    /// **`SlabId` を持つフィールドを `Model` へ追加したら必ずここへ追随すること**。
+    pub fn visit_slab_ids(&mut self, mut f: impl FnMut(&mut SlabId)) {
+        for slab in &mut self.slabs {
+            f(&mut slab.id);
+        }
+        for region in &mut self.floor_regions {
+            for sid in &mut region.slab_ids {
+                f(sid);
+            }
+        }
+        for region in &mut self.floor_assignment_regions.regions {
+            if let crate::model::PlateAssignment::Plate(id) = &mut region.assignment {
+                f(id);
+            }
+        }
+    }
+
+    /// モデル内の全ての `WallPlateId` 参照（壁版自身の ID・壁領域の `wall_plate_ids`）へ
+    /// `f` を適用する（[`Model::visit_slab_ids`] と同じ規約の壁側版）。
+    ///
+    /// **`WallPlateId` を持つフィールドを `Model` へ追加したら必ずここへ追随すること**。
+    pub fn visit_wall_plate_ids(&mut self, mut f: impl FnMut(&mut WallPlateId)) {
+        for plate in &mut self.wall_plates {
+            f(&mut plate.id);
+        }
+        for region in &mut self.wall_regions {
+            for pid in &mut region.wall_plate_ids {
+                f(pid);
+            }
+        }
+        for region in &mut self.wall_assignment_regions.regions {
+            if let crate::model::PlateAssignment::Plate(id) = &mut region.assignment {
+                f(id);
+            }
+        }
+    }
+
+    /// `keep` が `false` を返す床板を取り除き、`id == index` の不変条件を
+    /// 復元したうえで、`FloorRegion.slab_ids` の参照を新しい ID へ張り替える
+    /// （取り除かれた床板への参照は削除する）。
+    ///
+    /// 床板をまとめて間引く処理は必ずこれを通すこと。
+    pub fn retain_slabs(&mut self, mut keep: impl FnMut(&Slab) -> bool) {
+        let mut remap: Vec<Option<SlabId>> = Vec::with_capacity(self.slabs.len());
+        let mut next = 0u32;
+        for slab in &self.slabs {
+            if keep(slab) {
+                remap.push(Some(SlabId(next)));
+                next += 1;
+            } else {
+                remap.push(None);
+            }
+        }
+        if remap.iter().all(|r| r.is_some()) {
+            return;
+        }
+
+        let mut i = 0usize;
+        self.slabs.retain(|_| {
+            let k = remap[i].is_some();
+            i += 1;
+            k
+        });
+        for (i, slab) in self.slabs.iter_mut().enumerate() {
+            slab.id = SlabId(i as u32);
+        }
+
+        for region in &mut self.floor_regions {
+            region
+                .slab_ids
+                .retain_mut(|id| match remap.get(id.index()).copied().flatten() {
+                    Some(new_id) => {
+                        *id = new_id;
+                        true
+                    }
+                    None => false,
+                });
+        }
+        for region in &mut self.floor_assignment_regions.regions {
+            if let crate::model::PlateAssignment::Plate(id) = region.assignment {
+                region.assignment = match remap.get(id.index()).copied().flatten() {
+                    Some(new_id) => crate::model::PlateAssignment::Plate(new_id),
+                    None => crate::model::PlateAssignment::Unset,
+                };
+            }
+        }
+    }
+
+    /// `keep` が `false` を返す壁版を取り除き、`id == index` の不変条件を
+    /// 復元したうえで、`WallRegion.wall_plate_ids` と壁版割当領域の参照を
+    /// 新しい ID へ張り替える（取り除かれた壁版への参照は削除・未設定化する）。
+    ///
+    /// 壁版をまとめて間引く処理は必ずこれを通すこと（[`Model::retain_slabs`] の壁側版）。
+    pub fn retain_wall_plates(&mut self, mut keep: impl FnMut(&WallPlate) -> bool) {
+        let mut remap: Vec<Option<WallPlateId>> = Vec::with_capacity(self.wall_plates.len());
+        let mut next = 0u32;
+        for plate in &self.wall_plates {
+            if keep(plate) {
+                remap.push(Some(WallPlateId(next)));
+                next += 1;
+            } else {
+                remap.push(None);
+            }
+        }
+        if remap.iter().all(|r| r.is_some()) {
+            return;
+        }
+
+        let mut i = 0usize;
+        self.wall_plates.retain(|_| {
+            let k = remap[i].is_some();
+            i += 1;
+            k
+        });
+        for (i, plate) in self.wall_plates.iter_mut().enumerate() {
+            plate.id = WallPlateId(i as u32);
+        }
+
+        for region in &mut self.wall_regions {
+            region
+                .wall_plate_ids
+                .retain_mut(|id| match remap.get(id.index()).copied().flatten() {
+                    Some(new_id) => {
+                        *id = new_id;
+                        true
+                    }
+                    None => false,
+                });
+        }
+        for region in &mut self.wall_assignment_regions.regions {
+            if let crate::model::PlateAssignment::Plate(id) = region.assignment {
+                region.assignment = match remap.get(id.index()).copied().flatten() {
+                    Some(new_id) => crate::model::PlateAssignment::Plate(new_id),
+                    None => crate::model::PlateAssignment::Unset,
+                };
+            }
+        }
+    }
+
+    /// 自動生成荷重ケース名を標準ケース名へ移行する。
+    ///
+    /// - 「床荷重(自動)」→「DL」、「床積載(自動)」→「LL(架構用)」、
+    ///   「床地震用積載(自動)」→「LL(地震用)」に改名する
+    ///   （移行先の名前が既に使われている場合は改名しない）。
+    /// - 「自重(自動)」は DL へ統合する（自重は DL の同期内容に含まれるように
+    ///   なったため）。DL ケースが存在する場合は「自重(自動)」を削除し、
+    ///   荷重組合せの参照は DL へ付け替える（同一組合せが既に DL を参照して
+    ///   いる場合は項を除去して二重計上を防ぐ）。DL がない場合は
+    ///   「自重(自動)」自体を「DL」へ改名する。
+    ///
+    /// ケースの内容は改名/削除のみで書き換えない（自動生成ケースの内容は
+    /// 解析実行前の同期アクションが毎回再計算して全置換する）。
+    /// 削除時は `LoadCaseId` の「id == 添字」規約を保つよう後続ケースの ID と
+    /// 組合せの参照を詰め直す。
+    pub fn migrate_legacy_auto_load_cases(&mut self) {
+        const LEGACY_SELF_WEIGHT: &str = "自重(自動)";
+        let renames = [
+            ("床荷重(自動)", DL_CASE_NAME),
+            ("床積載(自動)", LL_FRAME_CASE_NAME),
+            ("床地震用積載(自動)", LL_SEISMIC_CASE_NAME),
+        ];
+        for (old, new) in renames {
+            if self.load_cases.iter().any(|lc| lc.name == new) {
+                continue;
+            }
+            if let Some(lc) = self.load_cases.iter_mut().find(|lc| lc.name == old) {
+                lc.name = new.to_string();
+            }
+        }
+
+        let Some(sw_idx) = self
+            .load_cases
+            .iter()
+            .position(|lc| lc.name == LEGACY_SELF_WEIGHT)
+        else {
+            return;
+        };
+        let sw_id = self.load_cases[sw_idx].id;
+        match self
+            .load_cases
+            .iter()
+            .find(|lc| lc.name == DL_CASE_NAME)
+            .map(|lc| lc.id)
+        {
+            None => {
+                self.load_cases[sw_idx].name = DL_CASE_NAME.to_string();
+                self.load_cases[sw_idx].kind = LoadCaseKind::Dead;
+            }
+            Some(dl_id) => {
+                for combo in &mut self.combinations {
+                    let has_dl = combo.terms.iter().any(|(id, _)| *id == dl_id);
+                    if has_dl {
+                        combo.terms.retain(|(id, _)| *id != sw_id);
+                    } else {
+                        for (id, _) in &mut combo.terms {
+                            if *id == sw_id {
+                                *id = dl_id;
+                            }
+                        }
+                    }
+                }
+                self.load_cases.remove(sw_idx);
+                for lc in &mut self.load_cases {
+                    if lc.id.0 > sw_id.0 {
+                        lc.id.0 -= 1;
+                    }
+                }
+                for combo in &mut self.combinations {
+                    for (id, _) in &mut combo.terms {
+                        if id.0 > sw_id.0 {
+                            id.0 -= 1;
+                        }
+                    }
+                }
+                for slab in &mut self.slabs {
+                    for load in &mut slab.tip_loads {
+                        if load.case == sw_id {
+                            load.case = dl_id;
+                        }
+                        if load.case.0 > sw_id.0 {
+                            load.case.0 -= 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod node_reference_tests {
+    use super::*;
+
+    fn node(id: u32) -> Node {
+        Node {
+            id: NodeId(id),
+            coord: [f64::from(id) * 1000.0, 0.0, 0.0],
+            restraint: Dof6Mask::FREE,
+            mass: None,
+            story: None,
+            support_spring: None,
+        }
+    }
+
+    /// `Model::node_referenced_by_regions_or_plates` が、フィールド追加のたびに
+    /// `visit_node_ids`・`node_referenced_outside_elements`・
+    /// `region_rebuild::node_has_structural_ref` へ手作業で追随する運用（敵対的
+    /// レビューで `wall_regions` の抜けが見つかった原因）を集約先1箇所へ寄せた
+    /// ことを、対象フィールドそれぞれについて固定する。ここに載る全種別が
+    /// 「参照あり」と判定されることを確認すれば、`Model::node_in_use`
+    /// （sepika-edit の削除ガード）と `region_rebuild::node_has_structural_ref`
+    /// （D21 の削除判定）の両方がその種別を保護できることになる。
+    #[test]
+    fn test_node_referenced_by_regions_or_plates_covers_every_field_kind() {
+        let mut model = Model::default();
+        for i in 0..12u32 {
+            model.nodes.push(node(i));
+        }
+
+        // 0: 節点荷重。
+        model.load_cases.push(LoadCase {
+            id: LoadCaseId(0),
+            name: "L".into(),
+            nodal: vec![NodalLoad {
+                node: NodeId(0),
+                values: [0.0; 6],
+                name: String::new(),
+                source: LoadSource::Manual,
+            }],
+            member: Vec::new(),
+            kind: LoadCaseKind::default(),
+        });
+
+        // 1: 床領域の境界。2: 二次部材小梁は節点ではなく支持部材アンカーを参照する
+        // （節点 2 はもう参照されない）。
+        let mut region = FloorRegion::new(FloorRegionId(0), vec![NodeId(1)]);
+        region.secondary_beams.push(SecondaryMember {
+            id: SecondaryMemberId(0),
+            gravity_end_shares: None,
+            kind: SecondaryMemberKind::Beam,
+            ends: SecondaryMemberEnds::Detached([[0.0; 3]; 2]),
+            section: None,
+            name: String::new(),
+        });
+        model.floor_regions.push(region);
+
+        // 3: 囲まれた床板（Enclosed）は節点ではなく割当領域（支持部材）を参照する。
+        // 4: 床板（Attached／Line）。
+        model.slabs.push(Slab {
+            id: SlabId(0),
+            shape: SlabShape::Enclosed,
+            plate: SlabPlate::default(),
+            tip_loads: Vec::new(),
+        });
+        model.slabs.push(Slab {
+            id: SlabId(1),
+            shape: SlabShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(4), NodeId(4)],
+                    span: [0.0, 1.0],
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: [0.0, 0.0],
+            },
+            plate: SlabPlate::default(),
+            tip_loads: Vec::new(),
+        });
+
+        // 5: 壁領域の境界。
+        model
+            .wall_regions
+            .push(WallRegion::new(WallRegionId(0), vec![NodeId(5)]));
+
+        // 6: 壁版（Enclosed）。7: 壁版（Attached／Line）。
+        // 囲まれた壁版は節点ではなく割当領域（支持部材）を参照する。
+        model.wall_plates.push(WallPlate {
+            self_weight_shares: Vec::new(),
+            id: WallPlateId(0),
+            shape: WallPlateShape::Enclosed,
+            section: None,
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: Vec::new(),
+            loads: vec![],
+            slit: Default::default(),
+        });
+        model.wall_plates.push(WallPlate {
+            self_weight_shares: Vec::new(),
+            id: WallPlateId(1),
+            shape: WallPlateShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(7), NodeId(7)],
+                    span: [0.0, 1.0],
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: Some([0.0, 0.0]),
+            },
+            section: None,
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: Vec::new(),
+            loads: vec![],
+            slit: Default::default(),
+        });
+
+        // 8: 二次部材（未割当小梁）。節点ではなく支持部材アンカーを参照する。
+        model.unassigned_beams.push(SecondaryMember {
+            id: SecondaryMemberId(1),
+            gravity_end_shares: None,
+            kind: SecondaryMemberKind::Beam,
+            ends: SecondaryMemberEnds::Detached([[0.0; 3]; 2]),
+            section: None,
+            name: String::new(),
+        });
+
+        // 9: 拘束（剛床マスター）。
+        model.constraints.push(Constraint::RigidDiaphragm {
+            story: StoryId(0),
+            master: NodeId(9),
+            slaves: Vec::new(),
+            weight: None,
+            ci_override: None,
+        });
+
+        // 10: 壁版（Attached／FloorRegion。自立壁）。
+        model.wall_plates.push(WallPlate {
+            self_weight_shares: Vec::new(),
+            id: WallPlateId(2),
+            shape: WallPlateShape::Attached {
+                anchor: RegionAnchor::FloorRegion {
+                    nodes: [NodeId(10), NodeId(10)],
+                },
+                extent: Some([0.0, 0.0]),
+            },
+            section: None,
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: Vec::new(),
+            loads: vec![],
+            slit: Default::default(),
+        });
+
+        for i in (0..=10u32).filter(|i| *i != 2 && *i != 3 && *i != 6 && *i != 8) {
+            assert!(
+                model.node_referenced_by_regions_or_plates(NodeId(i)),
+                "node {i} は参照されているはず"
+            );
+        }
+        // 2 は二次部材小梁の端点だった節点。二次部材は節点ではなくアンカーを参照する。
+        assert!(!model.node_referenced_by_regions_or_plates(NodeId(2)));
+        // 8 も未割当小梁の端点だった節点（同じ理由）。
+        assert!(!model.node_referenced_by_regions_or_plates(NodeId(8)));
+        // 3 は囲まれた床板の境界だった節点。囲まれた床板は節点を参照しない。
+        assert!(!model.node_referenced_by_regions_or_plates(NodeId(3)));
+        // 6 は囲まれた壁版の境界だった節点。囲まれた壁版は節点を参照しない。
+        assert!(!model.node_referenced_by_regions_or_plates(NodeId(6)));
+        // 11 はどこからも参照されない対照節点。
+        assert!(!model.node_referenced_by_regions_or_plates(NodeId(11)));
+    }
+}

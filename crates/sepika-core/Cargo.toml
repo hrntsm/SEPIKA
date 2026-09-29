@@ -1,0 +1,16 @@
+[package]
+name = "sepika-core"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+serde     = { workspace = true }
+smallvec  = { workspace = true }
+thiserror = { workspace = true }
+i_overlay = { workspace = true }
+
+[dev-dependencies]
+approx      = { workspace = true }
+serde_json  = { workspace = true }
+rmp-serde   = { workspace = true }

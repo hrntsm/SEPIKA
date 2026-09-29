@@ -8,10 +8,10 @@
 構造計算モデルを唯一の入力とする**概算数量**であり、施工数量（鉄筋のフック・余長・
 継手長さ、開口補強筋、接合部プレート等の詳細）は対象外とします。
 
-実装は `squid_n_design_jp::quantity` に置いており、
-GUI は設計タブ「数量積算」（`squid_n_app::quantity_view`）、
-CSV 出力は `squid_n_app::summary::build_quantity_csv`、
-MCP ツールは `quantity_takeoff`（`squid_n_mcp`）から利用できます。
+実装は `sepika_design_jp::quantity` に置いており、
+GUI は設計タブ「数量積算」（`sepika_app::quantity_view`）、
+CSV 出力は `sepika_app::summary::build_quantity_csv`、
+MCP ツールは `quantity_takeoff`（`sepika_mcp`）から利用できます。
 
 数量積算は**解析結果に依存しない**ため、応力解析の前後を問わず参照でき、モデルを編集する
 たびに再集計されます（準備計算・応力解析の要再計算とは別に扱います）。GUI では

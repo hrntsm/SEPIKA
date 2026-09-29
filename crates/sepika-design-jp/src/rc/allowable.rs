@@ -1,0 +1,28 @@
+//! RC 検定に用いる許容応力度のまとめ（部材単位で term 依存の値を 1 回だけ計算する）。
+
+use crate::material_strength::{
+    concrete_allowable_compression, concrete_allowable_shear_class, rebar_allowable_shear,
+    young_ratio_n,
+};
+pub(crate) use sepika_core::units::ConcreteClass;
+
+/// 検定に用いる許容応力度一式。
+pub(crate) struct RcAllow {
+    /// コンクリート許容圧縮応力度 fc [N/mm²]（長期/短期は算定済み）。
+    pub(crate) fc: f64,
+    /// コンクリート許容せん断応力度 fs [N/mm²]。
+    pub(crate) fs: f64,
+    /// せん断補強筋許容引張応力度 w_ft [N/mm²]。
+    pub(crate) w_ft: f64,
+    /// ヤング係数比 n。
+    pub(crate) n_ratio: f64,
+}
+
+pub(crate) fn rc_allow(fc_raw: f64, class: ConcreteClass, grade: &str, long_term: bool) -> RcAllow {
+    RcAllow {
+        fc: concrete_allowable_compression(fc_raw, long_term),
+        fs: concrete_allowable_shear_class(fc_raw, class, long_term),
+        w_ft: rebar_allowable_shear(grade, long_term),
+        n_ratio: young_ratio_n(fc_raw),
+    }
+}

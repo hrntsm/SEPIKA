@@ -1,6 +1,6 @@
 # MCP サーバ
 
-`squid-n-mcp` は Squid-n の構造モデルを [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 経由で AI エージェントに公開するサーバです。標準入出力（stdio）をトランスポートとして動作し、接続したクライアント（Claude Code、Claude Desktop など）から次のことができます。
+`sepika-mcp` は SEPIKA の構造モデルを [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 経由で AI エージェントに公開するサーバです。標準入出力（stdio）をトランスポートとして動作し、接続したクライアント（Claude Code、Claude Desktop など）から次のことができます。
 
 - 構造モデル（節点・部材・断面・壁版・床板・床領域・壁領域・二次部材）の照会
 - 壁版・床板・床領域・壁領域（間柱）・二次部材（未割当を含む）の編集（`model_edit`。Undo 可能）

@@ -1,0 +1,22 @@
+[package]
+name = "sepika-solver"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+sepika-core   = { path = "../sepika-core" }
+sepika-math   = { path = "../sepika-math" }
+sepika-material = { path = "../sepika-material" }
+sepika-element = { path = "../sepika-element" }
+sepika-load   = { path = "../sepika-load" }
+faer      = { workspace = true }
+rayon     = { workspace = true }
+smallvec  = { workspace = true }
+thiserror = { workspace = true }
+serde     = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }
+bincode = { workspace = true }
+serde_json = { workspace = true }

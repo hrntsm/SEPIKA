@@ -12,7 +12,7 @@
 令第82条の3は必要保有水平耐力を \\( Q\_{un} = D\_s \times F\_{es} \times Q\_{ud} \\) として規定し、昭55建告第1792号は Ds / Fes の算出方法を定めます。
 このため、条文が規定する保有水平耐力の判定と、告示が定める係数の算出方法を分けて記載します。
 
-実装は `squid_n_design_jp::secondary` に置いており、監査結果は[P7 監査](https://github.com/hrntsm/squid-n/blob/main/dev_docs/v_and_v/p7_review.md)と[終局検定_参照実装照合](https://github.com/hrntsm/squid-n/blob/main/dev_docs/v_and_v/終局検定_参照実装照合.md)を参照してください。
+実装は `sepika_design_jp::secondary` に置いており、監査結果は[P7 監査](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/p7_review.md)と[終局検定_参照実装照合](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/終局検定_参照実装照合.md)を参照してください。
 
 ## この章の内容
 

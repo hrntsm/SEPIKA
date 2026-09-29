@@ -1,0 +1,653 @@
+//! 二次部材の反力の逐次伝達（申し送り「床領域・壁領域の再設計」§3.4）。
+//!
+//! 二次部材（小梁・間柱）は解析要素ではないため、受け持った荷重は単純梁の両端反力に
+//! 変えて支持相手へ渡す。支持相手が主架構（大梁）なら、そこで終端して梁の中間集中荷重
+//! （CMQ）になる。**支持相手が別の二次部材のときは、その相手の集中荷重として渡し、
+//! 相手が主架構へ行き着くまで同じ操作を繰り返す。**
+//!
+//! 交点は常にピン受け・架けとする（剛接十字は扱わない）。受け側・架け側は幾何で決まる。
+//! 反力の分配則は支点まわりのモーメントつり合いによる。鉛直な間柱はつり合いが退化する
+//! ため、利用者が指定した端部負担率で配分する。未指定の場合は解析前エラーとなる。
+
+use std::collections::{HashMap, HashSet};
+
+use sepika_core::geom::vec3::dist as dist3;
+use sepika_core::geom::MEMBER_AXIS_TOL_MM;
+use sepika_core::ids::{NodeId, SecondaryMemberId};
+use sepika_core::model::{
+    EndSupport, MemberLoadKind, Model, SecondaryMember, SecondaryMemberKind, Slab,
+};
+
+use sepika_core::ids::SlabId;
+
+use crate::floor::{
+    beam_distribution_is_ready, beam_mass_equiv_udl, beam_self_weight_udl,
+    secondary_beam_distribution_split, simple_reactions, BeamLoad, Cmq, LoadShape, LoadTarget,
+};
+use crate::secondary::project_on_segment;
+
+/// 二次部材 1 本の識別キー（安定 ID）。
+///
+/// 二次部材はモデル節点を持たないため、安定 [`SecondaryMemberId`] で識別する
+/// （`Model::validate` が ID の重複を拒否する）。
+pub type SecondaryKey = SecondaryMemberId;
+
+/// 二次部材の端部が載る先。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SupportAt {
+    /// 主架構（要素が接続する節点、または大梁のスパン上）。逐次伝達の終端。
+    Primary,
+    /// 別の二次部材の内部。逐次伝達を 1 段進める。`a` は受け側の材軸上の位置 [mm]
+    /// （受け側の材軸始端からの距離）。
+    Secondary { key: SecondaryKey, a: f64 },
+    /// 自由端（片持ちの自由端）。荷重はこの端から出ていかない。
+    Free,
+    /// どこにも載っていない。荷重の行き先がない（診断のエラー対象）。
+    Unresolved,
+}
+
+/// 逐次伝達を解いた二次部材 1 本。
+#[derive(Clone, Debug)]
+pub struct TransferredMember {
+    /// 二次部材の安定 ID。
+    pub member: SecondaryMemberId,
+    /// 両端座標 [mm]（端番号順。片持ちは支持端 0・自由端 1）。
+    pub end_points: [[f64; 3]; 2],
+    /// 支持間距離 [mm]。
+    pub span: f64,
+    /// この部材が受け持つ全荷重（材軸局所。端 0 を原点とする）。
+    /// 床分配の辺荷重・自重・架け側から渡された集中荷重の重ね合わせ。
+    pub member_loads: Vec<MemberLoadKind>,
+    /// 両端反力 [N]（下向きの荷重に対して正）。`end_points` と同じ並び。
+    pub reactions: [f64; 2],
+    /// 各端の支持相手。`end_points` と同じ並び。
+    pub supports: [SupportAt; 2],
+    /// 床分配が断面検定に足りているか（期待床板が揃い、載荷長さがスパンの半分以上。
+    /// `crate::floor::beam_distribution_is_ready`）。分配を持たない二次部材
+    /// （間柱・床板の境界に載らない小梁）は偽。
+    pub distribution_ready: bool,
+    /// 分配の代表床板（検定結果の帰属先。分配が無ければ `None`）。
+    pub rep_slab_id: Option<SlabId>,
+}
+
+/// 逐次伝達の結果。
+#[derive(Clone, Debug, Default)]
+pub struct SecondaryTransfer {
+    /// 鉛直材の端部負担率が未指定または不正な二次部材。
+    pub invalid_end_shares: Vec<SecondaryKey>,
+    /// 二次部材ごとの結果。
+    pub members: HashMap<SecondaryKey, TransferredMember>,
+    /// 端部の行き先が決まらなかった二次部材（どの主架構にも二次部材にも載らない）。
+    pub unresolved: Vec<SecondaryKey>,
+    /// 支持関係が循環している二次部材（互いに載せ合う）。荷重を流せない。
+    pub cyclic: Vec<SecondaryKey>,
+    /// どの二次部材にも載らなかった床板分配の辺荷重。呼び出し側はこれだけを主架構へ
+    /// 解決する（二次部材が受け持ったぶんは反力として渡るため、そのまま載せると
+    /// 二重計上になる）。
+    pub leftover_region_loads: Vec<BeamLoad>,
+}
+
+impl SecondaryTransfer {
+    /// 主架構へ渡す荷重（節点荷重と、大梁材軸へ載せる中間集中荷重）を返す。
+    ///
+    /// 終端（[`SupportAt::Primary`]）の端部だけを返す。端部座標に一致するモデル節点が
+    /// あれば節点荷重として積む（[`crate::secondary::resolve_nodal_to_primary`] が
+    /// 必要に応じて大梁の中間集中荷重へ変換する）。一致する節点が無い場合は、
+    /// 端部が載る大梁を特定して、その材軸位置への中間集中荷重（[`LoadShape::Point`]、
+    /// 支持大梁の全長 `t = [0, 1]`）として返す。ここで捨てると、大梁の材軸中間へ
+    /// アンカーした二次部材の反力が失われ、応力・変形を過小評価する（危険側）。
+    pub fn primary_loads(&self, model: &Model) -> (Vec<(NodeId, f64)>, Vec<BeamLoad>) {
+        let candidates = crate::secondary::beam_span_candidates(model);
+        let mut nodal = Vec::new();
+        let mut member = Vec::new();
+        for m in self.members.values() {
+            for k in 0..2 {
+                if m.supports[k] != SupportAt::Primary || m.reactions[k].abs() <= 1e-9 {
+                    continue;
+                }
+                if let Some(node) = model
+                    .nodes
+                    .iter()
+                    .find(|n| points_equal(n.coord, m.end_points[k]))
+                    .map(|n| n.id)
+                {
+                    nodal.push((node, m.reactions[k]));
+                    continue;
+                }
+                let Some((elem, a)) = crate::secondary::best_span_position(
+                    &candidates,
+                    m.end_points[k],
+                    MEMBER_AXIS_TOL_MM,
+                ) else {
+                    continue;
+                };
+                let Some(e) = model.element(elem) else {
+                    continue;
+                };
+                if e.nodes.len() != 2 {
+                    continue;
+                }
+                member.push(BeamLoad {
+                    elem,
+                    target: LoadTarget::Span {
+                        nodes: [e.nodes[0], e.nodes[1]],
+                        t: [0.0, 1.0],
+                    },
+                    shape: LoadShape::Point {
+                        p: m.reactions[k],
+                        x: a,
+                    },
+                    cmq: Cmq {
+                        c_i: 0.0,
+                        c_j: 0.0,
+                        q_i: m.reactions[k],
+                        q_j: 0.0,
+                    },
+                });
+            }
+        }
+        nodal.sort_by(|a, b| a.0 .0.cmp(&b.0 .0).then(a.1.total_cmp(&b.1)));
+        member.sort_by(|a, b| {
+            a.elem
+                .0
+                .cmp(&b.elem.0)
+                .then(a.cmq.q_i.total_cmp(&b.cmq.q_i))
+        });
+        (nodal, member)
+    }
+}
+
+/// 端点座標が一致するか（[`MEMBER_AXIS_TOL_MM`] 以内）。
+fn points_equal(a: [f64; 3], b: [f64; 3]) -> bool {
+    let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= MEMBER_AXIS_TOL_MM * MEMBER_AXIS_TOL_MM
+}
+
+/// 二次部材の幾何（逐次伝達の作業用）。
+struct Axis {
+    key: SecondaryKey,
+    a: [f64; 3],
+    b: [f64; 3],
+    len: f64,
+    end_support: [EndSupport; 2],
+}
+
+/// 端部支持条件を返す（片持ちの自由端は常に端番号 1）。
+fn end_support_of(sm: &SecondaryMember) -> [EndSupport; 2] {
+    if sm.is_cantilever() {
+        [EndSupport::Supported, EndSupport::Free]
+    } else {
+        [EndSupport::Supported; 2]
+    }
+}
+
+/// 逐次伝達の対象となる二次部材の材軸を集める。
+///
+/// 実部材化済み（両端を持つ実 `Beam` がある）・退化（長さ 0）・材軸が引けないものは
+/// 対象外（解析要素として直接扱われる、または荷重を持てない）。
+fn axes(model: &Model) -> Vec<Axis> {
+    let mut out: Vec<Axis> = model
+        .secondary_beam_axes()
+        .into_iter()
+        .map(|ax| Axis {
+            key: ax.member,
+            a: ax.a,
+            b: ax.b,
+            len: ax.len,
+            end_support: ax.end_support,
+        })
+        .collect();
+    for sm in model.posts() {
+        if model.secondary_member_materialized(sm) {
+            continue;
+        }
+        let Some((a, b)) = model.secondary_member_end_points(sm) else {
+            continue;
+        };
+        let len = dist3(a, b);
+        if len <= 1e-9 {
+            continue;
+        }
+        out.push(Axis {
+            key: sm.id,
+            a,
+            b,
+            len,
+            end_support: end_support_of(sm),
+        });
+    }
+    out
+}
+
+/// 端部（座標 `p`）の支持相手を幾何から決める。
+///
+/// **主架構を優先する。** 端部が要素の接続する節点、または大梁のスパン上にあるなら、
+/// その大梁が直接支持しているのだから、そこで終端する。10 mm 以内に並走する二次部材が
+/// 大梁の荷重を奪わないようにするためでもある（`beam_design` の並走大梁優先と同じ考え）。
+///
+/// 主架構へ届かないときだけ、別の二次部材の**内部**に載っているかを見る。載っていれば
+/// その二次部材が受け側である（§3.4 F4）。端点どうしが一致するだけの取り付き
+/// （L 字・端部で集まる形）は、どちらも相手を支持しないため受け側にしない。
+/// ただし相手の端が自由端（片持ちの自由端）の場合は、その自由端が受け側になる
+/// （片持ち小梁の先端に載る先端リブなど）。
+///
+/// `self_end_is_free` が真なら、この端は自由端であり支持を探さない。
+/// どちらでもなければ行き先無しとする。
+fn support_of(
+    self_key: SecondaryKey,
+    p: [f64; 3],
+    self_end_is_free: bool,
+    axes: &[Axis],
+    connected: &[bool],
+    beams: &[crate::secondary::BeamSpanCandidate],
+    model: &Model,
+) -> SupportAt {
+    if self_end_is_free {
+        return SupportAt::Free;
+    }
+    let connected_at_p = model
+        .nodes
+        .iter()
+        .any(|n| points_equal(n.coord, p) && connected.get(n.id.index()).copied().unwrap_or(false));
+    if connected_at_p
+        || crate::secondary::best_span_position(beams, p, MEMBER_AXIS_TOL_MM).is_some()
+    {
+        return SupportAt::Primary;
+    }
+    let mut best: Option<(SecondaryKey, f64, f64)> = None;
+    for other in axes {
+        if other.key == self_key {
+            continue;
+        }
+        if points_equal(other.a, p) || points_equal(other.b, p) {
+            let end = if points_equal(other.a, p) { 0 } else { 1 };
+            if other.end_support[end] == EndSupport::Free {
+                let a = if end == 0 { 0.0 } else { other.len };
+                return SupportAt::Secondary { key: other.key, a };
+            }
+            continue;
+        }
+        let Some(a) = project_on_segment(p, other.a, other.b, MEMBER_AXIS_TOL_MM) else {
+            continue;
+        };
+        if a <= MEMBER_AXIS_TOL_MM || a >= other.len - MEMBER_AXIS_TOL_MM {
+            continue;
+        }
+        let d = {
+            let t = a / other.len;
+            let proj = [
+                other.a[0] + (other.b[0] - other.a[0]) * t,
+                other.a[1] + (other.b[1] - other.a[1]) * t,
+                other.a[2] + (other.b[2] - other.a[2]) * t,
+            ];
+            dist3(proj, p)
+        };
+        if best.map(|(_, _, bd)| d < bd).unwrap_or(true) {
+            best = Some((other.key, a, d));
+        }
+    }
+    match best {
+        Some((key, a, _)) => SupportAt::Secondary { key, a },
+        None => SupportAt::Unresolved,
+    }
+}
+
+/// 節点を共有せず交差している二次部材の組を返す。
+fn crossings(axes: &[Axis]) -> Vec<(SecondaryKey, SecondaryKey)> {
+    let mut out = Vec::new();
+    for (i, p) in axes.iter().enumerate() {
+        for q in axes.iter().skip(i + 1) {
+            if [p.a, p.b]
+                .iter()
+                .any(|np| points_equal(*np, q.a) || points_equal(*np, q.b))
+            {
+                continue;
+            }
+            let touches = [
+                (p.a, q.a, q.b, q.len),
+                (p.b, q.a, q.b, q.len),
+                (q.a, p.a, p.b, p.len),
+                (q.b, p.a, p.b, p.len),
+            ]
+            .iter()
+            .any(|(pt, a, b, _)| project_on_segment(*pt, *a, *b, MEMBER_AXIS_TOL_MM).is_some());
+            if touches {
+                continue;
+            }
+            if segments_cross(p, q) {
+                out.push((p.key, q.key));
+            }
+        }
+    }
+    out
+}
+
+/// 2 本の材軸が、どちらの端点でもない位置で交わるか（3 次元。ねじれの位置は交差としない）。
+fn segments_cross(p: &Axis, q: &Axis) -> bool {
+    let u = [
+        (p.b[0] - p.a[0]) / p.len,
+        (p.b[1] - p.a[1]) / p.len,
+        (p.b[2] - p.a[2]) / p.len,
+    ];
+    let v = [
+        (q.b[0] - q.a[0]) / q.len,
+        (q.b[1] - q.a[1]) / q.len,
+        (q.b[2] - q.a[2]) / q.len,
+    ];
+    let w = [q.a[0] - p.a[0], q.a[1] - p.a[1], q.a[2] - p.a[2]];
+    let uv = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    let den = 1.0 - uv * uv;
+    if den.abs() < 1e-9 {
+        return false;
+    }
+    let wu = w[0] * u[0] + w[1] * u[1] + w[2] * u[2];
+    let wv = w[0] * v[0] + w[1] * v[1] + w[2] * v[2];
+    let s = (wu - uv * wv) / den;
+    let t = (uv * wu - wv) / den;
+    let tol = MEMBER_AXIS_TOL_MM;
+    if s <= tol || s >= p.len - tol || t <= tol || t >= q.len - tol {
+        return false;
+    }
+    let cp = [p.a[0] + s * u[0], p.a[1] + s * u[1], p.a[2] + s * u[2]];
+    let cq = [q.a[0] + t * v[0], q.a[1] + t * v[1], q.a[2] + t * v[2]];
+    dist3(cp, cq) <= tol
+}
+
+/// 荷重 1 件の両端反力 [N]。鉛直材は指定した負担率、その他は単純梁の釣合いを使う。
+fn reactions_of(load: &MemberLoadKind, span: f64, end_shares: Option<[f64; 2]>) -> (f64, f64) {
+    let (r_i, r_j) = simple_reactions(load, span);
+    match end_shares {
+        Some(r) => ((r_i + r_j) * r[0], (r_i + r_j) * r[1]),
+        None => (r_i, r_j),
+    }
+}
+
+/// 二次部材の自重を設計重量で扱うか物理質量相当で扱うか。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelfWeightBasis {
+    /// 設計重量（DL・地震用重量）。鋼材は 78.5 kN/m³、鉄骨割増を掛ける。
+    Design,
+    /// 物理質量相当（質量行列・動的解析）。物理密度に鉄骨割増を掛ける。
+    MassEquiv,
+}
+
+/// 二次部材の反力の逐次伝達を解く（設計重量基準）。
+///
+/// `w_of` は床板ごとの面荷重強度 [N/mm²]（DL・LL を分けるため床板単位で渡す）。
+/// `include_self_weight` が真のとき、二次部材自身の自重を等分布として重ねる
+/// （積載荷重のケースでは偽にする）。
+pub fn solve(
+    model: &Model,
+    w_of: impl Fn(&Slab) -> f64,
+    include_self_weight: bool,
+) -> Result<SecondaryTransfer, crate::floor::FloorDistributionError> {
+    solve_with_basis(model, w_of, include_self_weight, SelfWeightBasis::Design)
+}
+
+/// [`solve`] の自重基準（[`SelfWeightBasis`]）を選べる版。支持経路・端部負担率は
+/// 基準によらず同じで、重ねる自重の値だけが変わる。
+pub fn solve_with_basis(
+    model: &Model,
+    w_of: impl Fn(&Slab) -> f64,
+    include_self_weight: bool,
+    basis: SelfWeightBasis,
+) -> Result<SecondaryTransfer, crate::floor::FloorDistributionError> {
+    let self_weight_udl = |sm: &SecondaryMember| match basis {
+        SelfWeightBasis::Design => beam_self_weight_udl(model, sm),
+        SelfWeightBasis::MassEquiv => beam_mass_equiv_udl(model, sm),
+    };
+    let axes = axes(model);
+    if axes.is_empty() {
+        let (_, leftover) = secondary_beam_distribution_split(model, w_of)?;
+        return Ok(SecondaryTransfer {
+            leftover_region_loads: leftover,
+            ..SecondaryTransfer::default()
+        });
+    }
+    let connected = crate::secondary::node_connected_flags(model);
+    let beams = crate::secondary::beam_span_candidates(model);
+
+    let by_key: HashMap<SecondaryKey, &SecondaryMember> = model
+        .beams()
+        .chain(model.posts())
+        .map(|sm| (sm.id, sm))
+        .collect();
+
+    let mut invalid_end_shares = Vec::new();
+    let mut end_shares_by_key = HashMap::new();
+    for ax in &axes {
+        let horizontal_mm = (ax.b[0] - ax.a[0]).hypot(ax.b[1] - ax.a[1]);
+        if horizontal_mm <= MEMBER_AXIS_TOL_MM {
+            if let Some(shares) = by_key
+                .get(&ax.key)
+                .and_then(|sm| sm.valid_gravity_end_shares())
+            {
+                end_shares_by_key.insert(ax.key, shares);
+            } else {
+                invalid_end_shares.push(ax.key);
+            }
+        }
+    }
+    let mut supports: HashMap<SecondaryKey, [SupportAt; 2]> = HashMap::new();
+    for ax in &axes {
+        let s0 = support_of(
+            ax.key,
+            ax.a,
+            ax.end_support[0] == EndSupport::Free,
+            &axes,
+            &connected,
+            &beams,
+            model,
+        );
+        let s1 = support_of(
+            ax.key,
+            ax.b,
+            ax.end_support[1] == EndSupport::Free,
+            &axes,
+            &connected,
+            &beams,
+            model,
+        );
+        let mut ends = [s0, s1];
+        if let Some(r) = end_shares_by_key.get(&ax.key) {
+            for k in 0..2 {
+                if r[k] == 0.0 {
+                    ends[k] = SupportAt::Unresolved;
+                }
+            }
+        }
+        supports.insert(ax.key, ends);
+    }
+
+    let (distribution, leftover_region_loads) = secondary_beam_distribution_split(model, w_of)?;
+    let wall_loads = if include_self_weight {
+        crate::wall_plate_load::distribute_enclosed_wall_plates_with_basis(model, basis).posts
+    } else {
+        HashMap::new()
+    };
+
+    let mut ready: HashMap<SecondaryKey, (bool, Option<SlabId>)> = HashMap::new();
+    let mut base: HashMap<SecondaryKey, Vec<MemberLoadKind>> = HashMap::new();
+    for ax in &axes {
+        let mut loads = Vec::new();
+        if let Some(entry) = distribution.get(&ax.key) {
+            loads.extend(entry.member_loads.iter().cloned());
+            ready.insert(
+                ax.key,
+                (beam_distribution_is_ready(entry, ax.len), entry.rep_slab_id),
+            );
+        }
+        if let Some(wall) = wall_loads.get(&ax.key) {
+            loads.extend(wall.member_loads.iter().cloned());
+        }
+        if include_self_weight {
+            if let Some(sm) = by_key.get(&ax.key) {
+                if let Some(w) = self_weight_udl(sm) {
+                    loads.push(MemberLoadKind::Distributed {
+                        a: 0.0,
+                        b: ax.len,
+                        w1: w,
+                        w2: w,
+                    });
+                }
+            }
+        }
+        base.insert(ax.key, loads);
+    }
+
+    let (order, cyclic) = transfer_order(&axes, &supports);
+
+    let mut members: HashMap<SecondaryKey, TransferredMember> = HashMap::new();
+    let index: HashMap<SecondaryKey, &Axis> = axes.iter().map(|a| (a.key, a)).collect();
+    let mut extra: HashMap<SecondaryKey, Vec<MemberLoadKind>> = HashMap::new();
+
+    for key in &order {
+        let Some(ax) = index.get(key) else { continue };
+        if invalid_end_shares.contains(key) {
+            continue;
+        }
+        let mut loads = base.remove(key).unwrap_or_default();
+        loads.extend(extra.remove(key).unwrap_or_default());
+
+        let mut r = [0.0_f64; 2];
+        for l in &loads {
+            let (ri, rj) = reactions_of(l, ax.len, end_shares_by_key.get(key).copied());
+            r[0] += ri;
+            r[1] += rj;
+        }
+        match ax.end_support {
+            [EndSupport::Free, EndSupport::Supported] => {
+                r[1] += r[0];
+                r[0] = 0.0;
+            }
+            [EndSupport::Supported, EndSupport::Free] => {
+                r[0] += r[1];
+                r[1] = 0.0;
+            }
+            _ => {}
+        }
+
+        let sup = supports
+            .get(key)
+            .copied()
+            .unwrap_or([SupportAt::Unresolved; 2]);
+        for k in 0..2 {
+            if let SupportAt::Secondary { key: onto, a } = sup[k] {
+                if r[k].abs() > 1e-9 {
+                    extra
+                        .entry(onto)
+                        .or_default()
+                        .push(MemberLoadKind::Point { a, p: r[k] });
+                }
+            }
+        }
+
+        let (distribution_ready, rep_slab_id) = ready.get(key).copied().unwrap_or((false, None));
+        members.insert(
+            *key,
+            TransferredMember {
+                member: *key,
+                end_points: [ax.a, ax.b],
+                span: ax.len,
+                member_loads: loads,
+                reactions: r,
+                supports: sup,
+                distribution_ready,
+                rep_slab_id,
+            },
+        );
+    }
+
+    let mut unresolved: Vec<SecondaryKey> = members
+        .values()
+        .filter(|m| {
+            (0..2).any(|k| m.supports[k] == SupportAt::Unresolved && m.reactions[k].abs() > 1e-9)
+        })
+        .map(|m| m.member)
+        .collect();
+    unresolved.sort();
+
+    invalid_end_shares.sort();
+    Ok(SecondaryTransfer {
+        invalid_end_shares,
+        members,
+        unresolved,
+        cyclic,
+        leftover_region_loads,
+    })
+}
+
+/// 節点を共有せず交差している二次部材の組（診断専用。§3.4 F5）。
+///
+/// 荷重の同期では使わないため [`solve`] からは外してある。`solve` は荷重ケースごとに
+/// 呼ばれる（DL・LL 架構用・LL 地震用）のに対し、この走査は二次部材の本数の 2 乗を
+/// 要するため、診断が要るときだけ払う。
+pub fn secondary_crossings(model: &Model) -> Vec<(SecondaryKey, SecondaryKey)> {
+    crossings(&axes(model))
+}
+
+/// キーから二次部材の実体を引く。
+fn secondary_of(model: &Model, key: SecondaryKey) -> Option<&SecondaryMember> {
+    model.secondary_member(key)
+}
+
+/// 逐次伝達の順序（架け側 → 受け側）と、循環に含まれる二次部材を返す。
+///
+/// 受け側は架け側の反力を受け取ってから解く必要があるため、支持グラフ
+/// （架け側 → 受け側）のトポロジカル順に解く。循環（互いに載せ合う）は
+/// 荷重を流せないため順序から外し、診断へ回す。
+fn transfer_order(
+    axes: &[Axis],
+    supports: &HashMap<SecondaryKey, [SupportAt; 2]>,
+) -> (Vec<SecondaryKey>, Vec<SecondaryKey>) {
+    let mut pending: HashMap<SecondaryKey, usize> = axes.iter().map(|a| (a.key, 0)).collect();
+    let mut onto: HashMap<SecondaryKey, Vec<SecondaryKey>> = HashMap::new();
+    for ax in axes {
+        let Some(s) = supports.get(&ax.key) else {
+            continue;
+        };
+        for e in s {
+            if let SupportAt::Secondary { key, .. } = e {
+                if pending.contains_key(key) {
+                    *pending.get_mut(key).expect("入次数") += 1;
+                    onto.entry(ax.key).or_default().push(*key);
+                }
+            }
+        }
+    }
+    let mut keys: Vec<SecondaryKey> = axes.iter().map(|a| a.key).collect();
+    keys.sort();
+    let mut ready: Vec<SecondaryKey> = keys
+        .iter()
+        .copied()
+        .filter(|k| pending.get(k).copied().unwrap_or(0) == 0)
+        .collect();
+    let mut order = Vec::new();
+    let mut done: HashSet<SecondaryKey> = HashSet::new();
+    while let Some(k) = ready.pop() {
+        if !done.insert(k) {
+            continue;
+        }
+        order.push(k);
+        let mut next: Vec<SecondaryKey> = Vec::new();
+        for r in onto.get(&k).cloned().unwrap_or_default() {
+            let slot = pending.get_mut(&r).expect("入次数");
+            *slot -= 1;
+            if *slot == 0 {
+                next.push(r);
+            }
+        }
+        next.sort();
+        ready.extend(next);
+    }
+    let cyclic: Vec<SecondaryKey> = keys.into_iter().filter(|k| !done.contains(k)).collect();
+    (order, cyclic)
+}
+
+/// 種別を問わず二次部材を数える（診断のメッセージ用）。
+pub fn secondary_kind_of(model: &Model, key: SecondaryKey) -> Option<SecondaryMemberKind> {
+    secondary_of(model, key).map(|sm| sm.kind)
+}
+
+#[cfg(test)]
+mod tests;

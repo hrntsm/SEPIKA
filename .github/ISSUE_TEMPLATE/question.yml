@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        質問ありがとうございます。まずは [docs/](https://github.com/hrntsm/Squid-n/tree/main/docs) をご確認ください。
+        質問ありがとうございます。まずは [docs/](https://github.com/hrntsm/SEPIKA/tree/main/docs) をご確認ください。
         どの部分が分からなかったかも教えていただけると、ドキュメントの改善に役立ちます。
   - type: textarea
     id: question

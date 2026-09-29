@@ -16,12 +16,12 @@
 
 <div class="impl-ref">
 
-**実装参照**：荷重継続性区分は `squid_n_load::combo::is_short_term_combo`（実体は `squid_n_core::load_combo::is_short_term_combo`、`crates/squid-n-core/src/load_combo.rs`）が荷重組合せ名から判定し、`squid_n_app::app::actions::linear_static`（`crates/squid-n-app/src/app/actions/linear_static.rs`）が結果表示の対象として選んだ荷重組合せの区分を `design_term` に設定して断面検定を再実行します。
+**実装参照**：荷重継続性区分は `sepika_load::combo::is_short_term_combo`（実体は `sepika_core::load_combo::is_short_term_combo`、`crates/sepika-core/src/load_combo.rs`）が荷重組合せ名から判定し、`sepika_app::app::actions::linear_static`（`crates/sepika-app/src/app/actions/linear_static.rs`）が結果表示の対象として選んだ荷重組合せの区分を `design_term` に設定して断面検定を再実行します。
 
 </div>
 
-本章の断面検定は `squid_n_design_jp` にあり、材料強度は `squid_n_design_jp::material_strength`（`concrete`・`rebar`・`steel`）が担います。
-突合の全体は[断面検定_参照実装照合](https://github.com/hrntsm/squid-n/blob/main/dev_docs/v_and_v/断面検定_参照実装照合.md)を参照してください。
+本章の断面検定は `sepika_design_jp` にあり、材料強度は `sepika_design_jp::material_strength`（`concrete`・`rebar`・`steel`）が担います。
+突合の全体は[断面検定_参照実装照合](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/断面検定_参照実装照合.md)を参照してください。
 
 ## この章の内容
 

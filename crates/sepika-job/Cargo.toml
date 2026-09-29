@@ -1,0 +1,15 @@
+[package]
+name = "sepika-job"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+sepika-core = { path = "../sepika-core" }
+sepika-element = { path = "../sepika-element" }
+sepika-load = { path = "../sepika-load" }
+sepika-solver = { path = "../sepika-solver" }
+sepika-design-jp = { path = "../sepika-design-jp" }
+sepika-math = { path = "../sepika-math" }
+serde = { workspace = true }
+thiserror = { workspace = true }

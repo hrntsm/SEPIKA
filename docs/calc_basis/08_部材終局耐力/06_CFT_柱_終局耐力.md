@@ -30,6 +30,6 @@ CFT 柱の終局耐力は、日本建築学会『コンクリート充填鋼管�
 
 <div class="impl-ref">
 
-**実装参照**：`squid_n_design_jp::ultimate::{cft, cft_nm}`、統括は `squid_n_design_jp::ultimate::collect_cft_ultimate_checks`。
+**実装参照**：`sepika_design_jp::ultimate::{cft, cft_nm}`、統括は `sepika_design_jp::ultimate::collect_cft_ultimate_checks`。
 
 </div>

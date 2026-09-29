@@ -59,7 +59,7 @@ CFT（充填コンクリートを鋼基準へ換算）:
 
 <div class="impl-ref">
 
-**実装参照**：`squid_n_core::section_shape::SectionShape::{src_equivalent_props, cft_equivalent_props}`（`crates/squid-n-core/src/section_shape/composite.rs`）が算定します。
+**実装参照**：`sepika_core::section_shape::SectionShape::{src_equivalent_props, cft_equivalent_props}`（`crates/sepika-core/src/section_shape/composite.rs`）が算定します。
 
 通常経路は SRC では `Fc` と主材料の密度から γRC・γC を求めて Ec を算定し、CFT では充填コンクリートの Fc と種類から γC を求めて Ec を算定して、\\( n\_s = E\_{\text{steel}}/E\_c \\) を求めます。SRC/CFT の Fc が未設定・0 以下・非有限値のときは入力エラーとし、Fc が有効で形状条件だけで材料由来の値を使えない場合に限り、`N_S_EQ = 15`（SRC）または鋼管のみ（CFT）へフォールバックします。形状自体が等価換算の対象外（非複合形状）のときはフォールバックせず、形状レベルの値をそのまま用います。
 

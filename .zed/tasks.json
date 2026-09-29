@@ -2,7 +2,7 @@
   {
     "label": "アプリ実行",
     "command": "cargo",
-    "args": ["run", "-p", "squid-n-app", "--features", "gui"],
+    "args": ["run", "-p", "sepika-app", "--features", "gui"],
     "save": "all",
     "use_new_terminal": true
   },

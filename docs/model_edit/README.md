@@ -26,7 +26,7 @@
 
 <div class="impl-ref">
 
-**実装参照**：通り芯の編集では `squid_n_app::app::Staleness::mark_non_calc_edited`（`crates/squid-n-app/src/app/mod.rs`）だけが呼ばれ、解析・設計・準備計算を陳腐化させません。節点・部材・断面形状・荷重を変える編集は `squid_n_app::app::Staleness::mark_edited` が下流をまとめて陳腐化させます。
+**実装参照**：通り芯の編集では `sepika_app::app::Staleness::mark_non_calc_edited`（`crates/sepika-app/src/app/mod.rs`）だけが呼ばれ、解析・設計・準備計算を陳腐化させません。節点・部材・断面形状・荷重を変える編集は `sepika_app::app::Staleness::mark_edited` が下流をまとめて陳腐化させます。
 
 </div>
 

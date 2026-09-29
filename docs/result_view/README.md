@@ -61,6 +61,6 @@ CMQ図は空（部材荷重なし）のまま表示されることがありま�
 
 <div class="impl-ref">
 
-**実装参照**：CMQ 図は `squid_n_app::viewer::cmq::draw_cmq_diagram`（`crates/squid-n-app/src/viewer/cmq.rs`）が選択中の荷重ケース（`nav.focus_load_case`）の部材荷重から C・M・Q を求めて描き、表示モードは `squid_n_app::viewer::ViewMode::Cmq`（`crates/squid-n-app/src/viewer/mod.rs`）で、成分と軸（既定は強軸のみ）を切り替えます。`ViewMode::Cmq` では床・二次部材の変形追従メッシュを描きません（同ファイル）。
+**実装参照**：CMQ 図は `sepika_app::viewer::cmq::draw_cmq_diagram`（`crates/sepika-app/src/viewer/cmq.rs`）が選択中の荷重ケース（`nav.focus_load_case`）の部材荷重から C・M・Q を求めて描き、表示モードは `sepika_app::viewer::ViewMode::Cmq`（`crates/sepika-app/src/viewer/mod.rs`）で、成分と軸（既定は強軸のみ）を切り替えます。`ViewMode::Cmq` では床・二次部材の変形追従メッシュを描きません（同ファイル）。
 
 </div>

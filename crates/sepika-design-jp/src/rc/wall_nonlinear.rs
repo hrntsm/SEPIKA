@@ -1,0 +1,310 @@
+//! RC 造耐震壁の**せん断非線形特性（トリリニア）**。
+//!
+//! 非線形解析で用いるせん断ばねの骨格曲線（トリリニア）を算定する。
+//! ひび割れ・降伏（剛性低下）・終局の3点を求める。入力は SI 系で受け取り、
+//! Qc の評価は内部で工学単位系へ換算する。
+
+/// 単位換算: 1 kgf/cm² = 0.0980665 N/mm²。N/mm² → kgf/cm² は逆数を乗じる。
+const NMM2_TO_KGFCM2: f64 = 1.0 / 0.0980665;
+/// 単位換算: 1 kgf = 1 kg × 標準重力加速度 g [m/s²] = 9.80665 N。
+/// g の情報源は `sepika_core::units`（内部単位系の mm/s² から m/s² へ換算）。
+const KGF_TO_N: f64 = sepika_core::units::GRAVITY_MM_S2 / 1000.0;
+
+/// RC 造耐震壁のせん断トリリニア算定の入力。
+///
+/// 単位は SI 系（長さ [mm]・面積 [mm²]・応力 [N/mm²]・軸力 [N]）で統一する。
+#[derive(Clone, Copy, Debug)]
+pub struct WallShearTrilinearInput {
+    /// コンクリート設計基準強度 Fc [N/mm²]。
+    pub fc: f64,
+    /// 壁体断面積 Aw [mm²]（側柱＋壁板の軸断面積。Qc・σ0 の基準面積）。
+    pub aw: f64,
+    /// 引張側最端の柱 1 本の主筋量 [mm²]（pg = 100·この値/Aw [%]）。
+    pub tension_column_main_area: f64,
+    /// 壁の縦筋比 pw（小数。βu 用）。
+    pub pw_vertical: f64,
+    /// 壁筋（縦筋）の降伏強度 σy [N/mm²]（βu 用）。
+    pub sigma_y_wall: f64,
+    /// 等価壁厚 te [mm]（I 形断面を等価長方形に置換した幅。壁厚 t の 1.5 倍以下）。
+    pub te: f64,
+    /// 壁厚 t [mm]（pwh = Pwh·t/te の換算に用いる）。
+    pub t: f64,
+    /// 付帯柱を含めた耐震壁の全長 D [mm]。
+    pub d_wall: f64,
+    /// 圧縮側柱のせい Dc [mm]（有効せい d = D − Dc/2）。
+    pub dc_compression: f64,
+    /// 引張側柱の主筋断面積 at [mm²]（pte = 100·at/(te·d) の分子）。
+    pub tension_column_at: f64,
+    /// 水平せん断補強筋（横筋）の材料強度 σwh [N/mm²]。
+    pub sigma_wh: f64,
+    /// 横筋比 Pwh（小数。pwh = Pwh·t/te、1.2% 上限）。
+    pub pwh_ratio: f64,
+    /// 全断面積に対する平均軸方向応力度 σ0 = N/A [N/mm²]（圧縮正）。
+    pub sigma_0: f64,
+    /// せん断スパン比 M/(Q·D)（適用範囲 1.0〜3.0 にクランプ）。
+    pub shear_span_ratio: f64,
+    /// 開口（`(l0, h0, h, lw)`。l0・h0: 開口幅・高さ、h: 壁の上下梁中心間高さ、
+    /// lw: 付帯柱中心間距離）。`None` は無開口（r=1）。
+    pub opening: Option<(f64, f64, f64, f64)>,
+}
+
+/// RC 造耐震壁のせん断トリリニア骨格（3 点の耐力・剛性低下率）。
+#[derive(Clone, Copy, Debug)]
+pub struct WallShearTrilinear {
+    /// せん断ひび割れ強度 Qc [N]。
+    pub qc: f64,
+    /// 終局せん断強度 Qu [N]（開口低減 r 適用後）。
+    pub qu: f64,
+    /// せん断降伏時剛性低下率 βu（無次元。終局点の割線剛性/初期剛性）。
+    pub beta_u: f64,
+    /// 開口低減率 r（無次元、Qu に乗算済み）。
+    pub r_opening: f64,
+}
+
+impl WallShearTrilinear {
+    /// せん断トリリニアの (せん断変形角 γ, せん断力 Q) 折れ点を返す。
+    ///
+    /// `k_elastic` は初期弾性せん断剛性 K1 [N]（Q = K1·γ）。
+    /// 原点・ひび割れ点・終局点の 3 点を返し、単調増加を保つ。
+    ///
+    /// `k_elastic <= 0` の場合は変形を 0 とした縮退点列を返す。
+    pub fn skeleton_points(&self, k_elastic: f64) -> [(f64, f64); 3] {
+        if k_elastic <= 0.0 {
+            return [(0.0, 0.0), (0.0, self.qc), (0.0, self.qu)];
+        }
+        let gamma_c = self.qc / k_elastic;
+        let gamma_u = if self.beta_u > 0.0 {
+            self.qu / (self.beta_u * k_elastic)
+        } else {
+            gamma_c
+        };
+        let gamma_u = gamma_u.max(gamma_c);
+        [(0.0, 0.0), (gamma_c, self.qc), (gamma_u, self.qu)]
+    }
+}
+
+/// せん断ひび割れ強度 Qc [N]（耐震壁）。
+///
+/// `Qc = (0.043·pg + 0.051)·Fc·Aw`（Fc [kgf/cm²]・Aw [cm²]・pg [%] → Qc [kgf]）。
+/// `pg = 100·(引張側最端の柱1本の主筋量)/Aw` [%]。Fc は 1 乗で用いる。
+///
+/// 入力は SI 系で受け取り、内部で工学単位系へ換算して評価し N へ戻す。
+/// 不正入力（Fc・Aw のいずれかが 0 以下）は 0.0 を返す。
+pub fn wall_shear_crack(inp: &WallShearTrilinearInput) -> f64 {
+    if inp.fc <= 0.0 || inp.aw <= 0.0 {
+        return 0.0;
+    }
+    let fc_kgf = inp.fc * NMM2_TO_KGFCM2;
+    let aw_cm2 = inp.aw / 100.0;
+    let pg_pct = 100.0 * inp.tension_column_main_area.max(0.0) / inp.aw;
+    let qc_kgf = (0.043 * pg_pct + 0.051) * fc_kgf * aw_cm2;
+    qc_kgf * KGF_TO_N
+}
+
+/// せん断降伏時剛性低下率 βu（無次元、技術基準解説書 P.635-637・耐震壁）。
+///
+/// `βu = 0.46·pw·σy/Fc + 0.14`。σy/Fc は比のため単位に依存しない（N/mm² のまま）。
+/// 不正入力（Fc が 0 以下）は 0.14（軸項ゼロの下限）を返す。
+pub fn wall_shear_beta_u(inp: &WallShearTrilinearInput) -> f64 {
+    if inp.fc <= 0.0 {
+        return 0.14;
+    }
+    0.46 * inp.pw_vertical.max(0.0) * inp.sigma_y_wall.max(0.0) / inp.fc + 0.14
+}
+
+/// 開口低減率 r（無次元、耐震壁。RC 終局強度設計資料）。
+///
+/// `r = 1 − max(r0, l0/lw, h0/h)`、`r0 = √(h0·l0/(h·lw))`。
+/// 無開口（`opening == None`）は 1.0。極端な開口で負になる場合は 0 にクランプする。
+pub fn wall_shear_opening_reduction(opening: Option<(f64, f64, f64, f64)>) -> f64 {
+    sepika_core::rc_wall_capacity::wall_opening_reduction_strength(opening)
+}
+
+/// 終局せん断強度 Qu [N]（荒川mean式系・耐震壁、技術基準解説書 P.638-639）。
+///
+/// ```text
+/// Qu = { 0.053·pte^0.23·(Fc+18)/(M/(Q·D)+0.12) + 0.85·√(σwh·pwh) + 0.1·σ0 }·te·j·r
+/// ```
+/// - `k = 0.053`（技術基準解説書 P.638-639 の式で、せん断スパン比の分母は 1 乗）
+/// - `pte = 100·at/(te·d)` [%]（等価引張鉄筋比）
+/// - `d = D − Dc/2`、`j = 7/8·d`
+/// - `M/(Q·D)` は適用範囲 1.0〜3.0 にクランプ
+/// - `pwh = Pwh·t/te`（1.2% 上限）
+/// - `σ0` は 0〜0.4Fc にクランプ（引張は 0 とみなす。荒川式の適用範囲）
+///
+/// 開口低減 r を乗じた値を返す。不正入力（Fc・te・D・at のいずれかが 0 以下、
+/// または d ≤ 0）は 0.0 を返す。
+pub fn wall_shear_ultimate(inp: &WallShearTrilinearInput) -> f64 {
+    sepika_core::rc_wall_capacity::wall_shear_ultimate(
+        &sepika_core::rc_wall_capacity::RcWallShearInput {
+            fc: inp.fc,
+            te: inp.te,
+            t: inp.t,
+            d_wall: inp.d_wall,
+            dc_compression: inp.dc_compression,
+            tension_column_at: inp.tension_column_at,
+            sigma_wh: inp.sigma_wh,
+            pwh_ratio: inp.pwh_ratio,
+            sigma_0: inp.sigma_0,
+            shear_span_ratio: inp.shear_span_ratio,
+            opening: inp.opening,
+        },
+    )
+}
+
+/// RC 造耐震壁のせん断トリリニア骨格（Qc・βu・Qu・r）を一括算定する。
+///
+/// 壁筋・付帯柱主筋が少ない壁では式上 Qc > Qu となり得る（ひび割れと同時に
+/// 終局に至る挙動）。トリリニア骨格として単調増加を保つため、その場合は
+/// ひび割れ点を Qu で頭打ちにする（バイリニア相当に縮退）。
+pub fn wall_shear_trilinear(inp: &WallShearTrilinearInput) -> WallShearTrilinear {
+    let qu = wall_shear_ultimate(inp);
+    let qc_raw = wall_shear_crack(inp);
+    let qc = if qu > 0.0 { qc_raw.min(qu) } else { qc_raw };
+    WallShearTrilinear {
+        qc,
+        qu,
+        beta_u: wall_shear_beta_u(inp),
+        r_opening: wall_shear_opening_reduction(inp.opening),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 代表壁: t=180, lw=4000 → Aw≈側柱含み(360000×2)+壁板(720000)=1,440,000mm²、
+    /// Fc=24, 側柱主筋 1 本分 3097mm²(8-D22 の半分相当は別途)。
+    fn base_input() -> WallShearTrilinearInput {
+        WallShearTrilinearInput {
+            fc: 24.0,
+            aw: 1_440_000.0,
+            tension_column_main_area: 3097.0,
+            pw_vertical: 0.006,
+            sigma_y_wall: 345.0,
+            te: 180.0,
+            t: 180.0,
+            d_wall: 4600.0,
+            dc_compression: 600.0,
+            tension_column_at: 3097.0,
+            sigma_wh: 295.0,
+            pwh_ratio: 0.004,
+            sigma_0: 1.0,
+            shear_span_ratio: 1.5,
+            opening: None,
+        }
+    }
+
+    #[test]
+    fn test_wall_shear_crack_matches_handcalc() {
+        let inp = base_input();
+        let qc = wall_shear_crack(&inp);
+        // 手計算（工学単位換算。Fc は 1 乗。技術基準解説書 P.635-637）:
+        let fc_kgf: f64 = 24.0 * (1.0 / 0.0980665);
+        let aw_cm2: f64 = 1_440_000.0 / 100.0;
+        let pg_pct = 100.0 * 3097.0 / 1_440_000.0;
+        let qc_kgf = (0.043 * pg_pct + 0.051) * fc_kgf * aw_cm2;
+        let qc_hand = qc_kgf * 9.80665;
+        assert!((qc - qc_hand).abs() < 1e-3, "Qc={qc} vs handcalc={qc_hand}");
+        assert!(qc > 0.0);
+    }
+
+    #[test]
+    fn test_wall_shear_beta_u_matches_handcalc() {
+        let inp = base_input();
+        let beta = wall_shear_beta_u(&inp);
+        let hand = 0.46 * 0.006 * 345.0 / 24.0 + 0.14;
+        assert!((beta - hand).abs() < 1e-9, "βu={beta} vs {hand}");
+        // 代表値は 0.15〜0.25 程度に収まる。
+        assert!(beta > 0.14 && beta < 0.5);
+    }
+
+    /// 開口低減率 r の配線 smoke。(l0, h0, h, lw) = (2000, 300, 3000, 4000) で
+    /// max(l0/lw, h0/h, r0) = max(0.5, 0.1, √0.05) = 0.5 → r = 0.5。無開口は 1.0。
+    #[test]
+    fn test_wall_shear_opening_reduction_smoke() {
+        let r = wall_shear_opening_reduction(Some((2000.0, 300.0, 3000.0, 4000.0)));
+        assert!((r - 0.5).abs() < 1e-12, "r={r}");
+        assert_eq!(wall_shear_opening_reduction(None), 1.0);
+    }
+
+    #[test]
+    fn test_wall_shear_ultimate_opening_reduces() {
+        let mut inp = base_input();
+        inp.opening = Some((2000.0, 300.0, 3000.0, 4000.0)); // r=0.5
+        let qu_open = wall_shear_ultimate(&inp);
+        let qu_solid = wall_shear_ultimate(&base_input());
+        assert!(
+            (qu_open - 0.5 * qu_solid).abs() < 1e-3,
+            "Qu_open={qu_open} should be 0.5·Qu_solid={}",
+            0.5 * qu_solid
+        );
+    }
+
+    /// `wall_shear_ultimate` が全フィールドを Core の `RcWallShearInput` へ
+    /// 正しく配線していること。式そのものの所有テストは core 側にある。
+    #[test]
+    fn test_wall_shear_ultimate_wires_all_fields_to_core() {
+        let inp = WallShearTrilinearInput {
+            fc: 27.0,
+            aw: 1_200_000.0,
+            tension_column_main_area: 0.0,
+            pw_vertical: 0.0,
+            sigma_y_wall: 0.0,
+            te: 200.0,
+            t: 180.0,
+            d_wall: 5_000.0,
+            dc_compression: 700.0,
+            tension_column_at: 3_200.0,
+            sigma_wh: 345.0,
+            pwh_ratio: 0.005,
+            sigma_0: 2.5,
+            shear_span_ratio: 2.0,
+            opening: Some((2_000.0, 300.0, 3_000.0, 4_000.0)),
+        };
+        let expected = sepika_core::rc_wall_capacity::wall_shear_ultimate(
+            &sepika_core::rc_wall_capacity::RcWallShearInput {
+                fc: 27.0,
+                te: 200.0,
+                t: 180.0,
+                d_wall: 5_000.0,
+                dc_compression: 700.0,
+                tension_column_at: 3_200.0,
+                sigma_wh: 345.0,
+                pwh_ratio: 0.005,
+                sigma_0: 2.5,
+                shear_span_ratio: 2.0,
+                opening: Some((2_000.0, 300.0, 3_000.0, 4_000.0)),
+            },
+        );
+        assert!(expected > 0.0);
+        assert_eq!(wall_shear_ultimate(&inp), expected);
+    }
+
+    #[test]
+    fn test_trilinear_skeleton_points_monotonic() {
+        let tri = wall_shear_trilinear(&base_input());
+        let k1 = 8000.0 * 1_440_000.0; // G·Aw 相当
+        let pts = tri.skeleton_points(k1);
+        assert_eq!(pts[0], (0.0, 0.0));
+        // 変形・耐力とも単調非減少、終局点は割線剛性 βu·K1 上。
+        // （軽配筋の壁では Qc が Qu で頭打ちされバイリニア相当に縮退する）
+        assert!(pts[1].0 > 0.0 && pts[2].0 >= pts[1].0);
+        assert!(pts[1].1 > 0.0 && pts[2].1 >= pts[1].1);
+        assert!(tri.qc <= tri.qu, "Qc={} Qu={}", tri.qc, tri.qu);
+        let gamma_u = tri.qu / (tri.beta_u * k1);
+        assert!((pts[2].0 - gamma_u).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_invalid_inputs_return_zero() {
+        let mut fc0 = base_input();
+        fc0.fc = 0.0;
+        assert_eq!(wall_shear_crack(&fc0), 0.0);
+        assert_eq!(wall_shear_ultimate(&fc0), 0.0);
+
+        let mut te0 = base_input();
+        te0.te = 0.0;
+        assert_eq!(wall_shear_ultimate(&te0), 0.0);
+    }
+}

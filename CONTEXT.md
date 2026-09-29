@@ -1,8 +1,10 @@
-# Squid-n
+# SEPIKA（セピカ）
 
 日本の建築構造計算一貫プログラム。モデル作成から荷重・解析（線形静的・固有値・増分・時刻歴）・検定設計までを単一モデルで扱う。
 
 本書はドメイン語彙の正本（設計判断の正本は `dev_docs/adr/`、文書の配置は `dev_docs/README.md`）。
+
+**OVIKA（SEPIKA Project File）**: SEPIKA のネイティブプロジェクト形式。拡張子は `.ovika`（オヴィカ）。
 
 ## Language
 

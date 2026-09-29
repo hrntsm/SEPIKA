@@ -32,6 +32,6 @@ SRC/SRRC 梁のせん断終局耐力は、技術基準解説書（SRC 梁せん�
 
 <div class="impl-ref">
 
-**実装参照**：`squid_n_design_jp::srrc::beam_nonlinear`（`beam_nonlinear.rs`）。
+**実装参照**：`sepika_design_jp::srrc::beam_nonlinear`（`beam_nonlinear.rs`）。
 
 </div>

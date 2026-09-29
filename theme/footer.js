@@ -23,14 +23,14 @@
     notice.className = "site-footer-notice";
 
     var licenseLink = document.createElement("a");
-    licenseLink.href = "https://github.com/hrntsm/squid-n/blob/main/LICENSE";
+    licenseLink.href = "https://github.com/hrntsm/SEPIKA/blob/main/LICENSE";
     licenseLink.textContent = "MIT License";
 
     var disclaimerLink = document.createElement("a");
     disclaimerLink.href = root + "introduction.html#ライセンスと免責事項";
     disclaimerLink.textContent = "ライセンスと免責事項";
 
-    notice.appendChild(document.createTextNode("Squid-n は "));
+    notice.appendChild(document.createTextNode("SEPIKA は "));
     notice.appendChild(licenseLink);
     notice.appendChild(
         document.createTextNode(

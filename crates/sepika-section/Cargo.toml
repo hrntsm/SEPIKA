@@ -1,0 +1,14 @@
+[package]
+name = "sepika-section"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+sepika-core = { path = "../sepika-core" }
+sepika-material = { path = "../sepika-material" }
+serde = { workspace = true }
+approx = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
