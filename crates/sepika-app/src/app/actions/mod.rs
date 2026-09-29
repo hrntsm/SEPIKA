@@ -20,6 +20,8 @@ mod loads;
 mod lumped_mass;
 mod pushover;
 mod time_history;
+#[cfg(feature = "gui")]
+mod view;
 mod wave_library;
 #[cfg(test)]
 pub(crate) use io::{needs_recording_confirm, SAVE_RECORDING_CONFIRM_BYTES};

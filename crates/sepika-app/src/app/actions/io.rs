@@ -182,6 +182,16 @@ impl App {
         self.save_project_to_opts(path, Some(false));
     }
 
+    /// 保存サイズの確認待ちを解消する。`None` は保存せず取り消す。
+    #[cfg(feature = "gui")]
+    pub(crate) fn resolve_pending_save_recording(&mut self, include: Option<bool>) {
+        if let Some((path, _)) = self.core.scoped.pending_save_recording.take() {
+            if let Some(include) = include {
+                self.save_project_to_opts(path, Some(include));
+            }
+        }
+    }
+
     /// 保存用の派生データの直列化結果を受け取り、失敗していれば注意を報告する。
     ///
     /// 準備計算・解析結果はいずれもモデルから再計算できる派生データなので、

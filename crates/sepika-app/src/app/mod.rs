@@ -1922,10 +1922,7 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if let Some(cmd) = self.ui.scoped.pending_story_cmds.pop_front() {
-            self.core.scoped.undo.run(&mut self.core.model, cmd);
-            self.core.scoped.staleness.mark_edited();
-        }
+        self.apply_pending_story_command();
         if self.core.scoped.job.is_some() {
             self.poll_job();
             ui.ctx()
@@ -1981,12 +1978,9 @@ impl eframe::App for App {
                     });
                 });
             if !open || do_cancel {
-                self.core.scoped.pending_save_recording = None;
-            }
-            if let Some(include) = choice {
-                if let Some((path, _)) = self.core.scoped.pending_save_recording.take() {
-                    self.save_project_to_opts(path, Some(include));
-                }
+                self.resolve_pending_save_recording(None);
+            } else if choice.is_some() {
+                self.resolve_pending_save_recording(choice);
             }
         }
 
@@ -2177,15 +2171,13 @@ impl eframe::App for App {
                     .add_enabled(can_undo, egui::Button::new("↶ Undo"))
                     .clicked()
                 {
-                    self.core.scoped.undo.undo(&mut self.core.model);
-                    self.core.scoped.staleness.mark_edited();
+                    self.undo_action();
                 }
                 if ui
                     .add_enabled(can_redo, egui::Button::new("↷ Redo"))
                     .clicked()
                 {
-                    self.core.scoped.undo.redo(&mut self.core.model);
-                    self.core.scoped.staleness.mark_edited();
+                    self.redo_action();
                 }
             });
         });
@@ -2319,7 +2311,7 @@ impl eframe::App for App {
                             if self.ui.view.bottom_tab == BottomTab::Log
                                 && ui.button("クリア").clicked()
                             {
-                                self.core.log.entries.clear();
+                                self.clear_log_action();
                             }
                             if self.ui.view.bottom_tab == BottomTab::Diagnostics
                                 && ui.button("再チェック").clicked()
@@ -2392,26 +2384,7 @@ impl eframe::App for App {
                                                     .selectable_label(false, text)
                                                     .on_hover_text("クリックで 3D 選択");
                                                 if resp.clicked() {
-                                                    match target {
-                                                        DiagTarget::Member(id) => {
-                                                            self.ui.scoped.selection.members =
-                                                                vec![id];
-                                                            self.ui.scoped.selection.nodes.clear();
-                                                            self.ui.scoped.nav.focus_member =
-                                                                Some(id);
-                                                        }
-                                                        DiagTarget::Node(id) => {
-                                                            self.ui.scoped.selection.nodes =
-                                                                vec![id];
-                                                            self.ui
-                                                                .scoped
-                                                                .selection
-                                                                .members
-                                                                .clear();
-                                                            self.ui.scoped.nav.focus_node =
-                                                                Some(id);
-                                                        }
-                                                    }
+                                                    self.select_diagnostic_target(target);
                                                 }
                                             } else {
                                                 ui.label(text);
