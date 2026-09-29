@@ -1,0 +1,291 @@
+//! 履歴型（弾塑性バイリニア）ダンパー要素の要素本体（鋼材系ダンパー）。
+//!
+//! 弾塑性バイリニア軸ばねの `ElementBehavior` 実装。変位依存のため静的・動的
+//! いずれの解析でも作用する（`dt` 不要）。
+
+use crate::behavior::{Ctx, ElementBehavior, LocalMat, LocalVec, MassOption};
+use crate::transform::LocalFrame;
+use sepika_core::dof::DofMap;
+use sepika_core::ids::NodeId;
+use sepika_core::model::{ElementData, Model};
+use smallvec::SmallVec;
+use std::any::Any;
+
+/// 履歴型（弾塑性バイリニア）ダンパー要素（2 節点・軸方向）。
+/// 初期軸剛性 `k1`・降伏軸力 `qy`・第2剛性 `k2` の弾塑性軸ばね。
+/// 変位依存のため静的・動的いずれの解析でも作用する（`dt` 不要）。
+#[derive(Clone)]
+pub struct HystereticDamperElement {
+    pub nodes: [NodeId; 2],
+    pub axis: LocalFrame,
+    /// 軸力–伸び関係の弾塑性材料（Bilinear を力–変位として流用）。
+    mat: sepika_material::Bilinear,
+    committed_elong: f64,
+    trial_elong: f64,
+}
+
+impl HystereticDamperElement {
+    pub fn new(data: &ElementData, model: &Model) -> Self {
+        let geom = crate::transform::EndGeometry::of_element(data, model);
+        let [n0, n1] = geom.nodes;
+        let axis = geom.local_frame(data.local_axis.ref_vector);
+        let props = model.damper_props(data.id).unwrap_or_default();
+        let k1 = props.kd.max(1e-9);
+        let qy = props.qy.max(1e-9);
+        let hardening = props.k2_ratio.clamp(0.0, 0.999);
+        Self {
+            nodes: [n0, n1],
+            axis,
+            mat: sepika_material::Bilinear::new(k1, qy, hardening),
+            committed_elong: 0.0,
+            trial_elong: 0.0,
+        }
+    }
+
+    fn axial(&mut self, elong: f64) -> (f64, f64) {
+        use sepika_material::UniaxialMaterial;
+        self.mat.trial(elong)
+    }
+
+    fn local_stiffness(&self, ka: f64) -> LocalMat {
+        let mut k = LocalMat::zeros(12);
+        k.set(0, 0, ka);
+        k.set(6, 6, ka);
+        k.set(0, 6, -ka);
+        k.set(6, 0, -ka);
+        k
+    }
+}
+
+impl ElementBehavior for HystereticDamperElement {
+    fn n_dof(&self) -> usize {
+        12
+    }
+
+    fn global_dofs(&self, dof: &DofMap) -> SmallVec<[usize; 24]> {
+        crate::behavior::node_global_dofs(&self.nodes, dof)
+    }
+
+    fn tangent_stiffness(&self, _ctx: &Ctx) -> LocalMat {
+        use sepika_material::UniaxialMaterial;
+        let mut m = self.mat.clone();
+        let (_f, k) = m.trial(self.trial_elong);
+        self.axis.to_global(&self.local_stiffness(k))
+    }
+
+    fn internal_force(&self, _ctx: &Ctx) -> LocalVec {
+        use sepika_material::UniaxialMaterial;
+        let mut f = LocalVec {
+            data: SmallVec::from_elem(0.0, 12),
+        };
+        let mut m = self.mat.clone();
+        let (n, _k) = m.trial(self.trial_elong);
+        let t = self.axis.rot[0];
+        for k in 0..3 {
+            f.data[k] = -n * t[k];
+            f.data[6 + k] = n * t[k];
+        }
+        f
+    }
+
+    fn update_state(&mut self, du: &LocalVec, commit: bool, _ctx: &Ctx) {
+        let du_global: [f64; 12] = std::array::from_fn(|i| du.data[i]);
+        let du_local = self.axis.rotate_to_local(&du_global);
+        let delong = du_local[6] - du_local[0];
+        self.trial_elong = self.committed_elong + delong;
+        let _ = self.axial(self.trial_elong);
+        if commit {
+            use sepika_material::UniaxialMaterial;
+            self.mat.commit();
+            self.committed_elong = self.trial_elong;
+        }
+    }
+
+    fn mass_matrix(&self, _opt: MassOption) -> LocalMat {
+        LocalMat::zeros(12)
+    }
+
+    fn state_member_forces(&self, _ctx: &Ctx) -> Option<crate::frame::beam::MemberForces> {
+        use sepika_material::UniaxialMaterial;
+        let mut m = self.mat.clone();
+        let (n, _k) = m.trial(self.trial_elong);
+        let v = [n, 0.0, 0.0, 0.0, 0.0, 0.0];
+        Some(crate::frame::beam::MemberForces {
+            at: vec![(0.0, v), (1.0, v)],
+        })
+    }
+
+    fn commit_state(&mut self) {
+        use sepika_material::UniaxialMaterial;
+        let _ = self.axial(self.trial_elong);
+        self.mat.commit();
+        self.committed_elong = self.trial_elong;
+    }
+
+    fn revert_state(&mut self) {
+        use sepika_material::UniaxialMaterial;
+        self.mat.revert();
+        self.trial_elong = self.committed_elong;
+    }
+
+    fn snapshot_state(&self) -> Box<dyn Any> {
+        use sepika_material::UniaxialMaterial;
+        Box::new((
+            self.committed_elong,
+            self.trial_elong,
+            self.mat.serialize_state(),
+        ))
+    }
+
+    fn restore_state(&mut self, state: &dyn Any) {
+        use sepika_material::UniaxialMaterial;
+        let (ce, te, ms) = crate::behavior::downcast_snapshot::<(f64, f64, Vec<u8>)>(
+            "HystereticDamperElement",
+            state,
+        );
+        self.committed_elong = *ce;
+        self.trial_elong = *te;
+        self.mat
+            .deserialize_state(ms)
+            .expect("HystereticDamperElement::restore_state: 材料状態の復元");
+    }
+
+    fn serialize_checkpoint(&self) -> Vec<u8> {
+        use sepika_material::UniaxialMaterial;
+        bincode::serialize(&(
+            self.committed_elong,
+            self.trial_elong,
+            self.mat.serialize_state(),
+        ))
+        .expect("serialize checkpoint")
+    }
+
+    fn deserialize_checkpoint(
+        &mut self,
+        data: &[u8],
+    ) -> Result<(), crate::behavior::CheckpointError> {
+        use sepika_material::UniaxialMaterial;
+        if data.is_empty() {
+            return Ok(());
+        }
+        let (ce, te, ms): (f64, f64, Vec<u8>) = bincode::deserialize(data)
+            .map_err(|e| crate::behavior::CheckpointError::Decode(e.to_string()))?;
+        self.committed_elong = ce;
+        self.trial_elong = te;
+        self.mat
+            .deserialize_state(&ms)
+            .map_err(|e| crate::behavior::CheckpointError::Decode(e.to_string()))?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hyst_damper(k1: f64, qy: f64, k2ratio: f64) -> HystereticDamperElement {
+        HystereticDamperElement {
+            nodes: [NodeId(0), NodeId(1)],
+            axis: LocalFrame::from_nodes([0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            mat: sepika_material::Bilinear::new(k1, qy, k2ratio),
+            committed_elong: 0.0,
+            trial_elong: 0.0,
+        }
+    }
+
+    /// 節点1 の軸方向（グローバル X）へ伸び elong を与えて commit。
+    fn drive(d: &mut HystereticDamperElement, elong: f64, model: &Model) {
+        let prev = d.committed_elong;
+        let mut du = LocalVec {
+            data: SmallVec::from_elem(0.0, 12),
+        };
+        du.data[6] = elong - prev;
+        let ctx = Ctx { model };
+        d.update_state(&du, true, &ctx);
+    }
+
+    #[test]
+    fn test_hysteretic_bilinear_elastic_then_yield() {
+        let k1 = 1000.0;
+        let qy = 100.0;
+        let mut d = hyst_damper(k1, qy, 0.02);
+        let model = Model::default();
+        let dy = qy / k1;
+        drive(&mut d, 0.5 * dy, &model);
+        let ctx = Ctx { model: &model };
+        let f_el = d.internal_force(&ctx).data[6];
+        assert!((f_el - k1 * 0.5 * dy).abs() < 1e-6, "elastic: {f_el}");
+        drive(&mut d, 5.0 * dy, &model);
+        let f_pl = d.internal_force(&ctx).data[6];
+        let expect = qy + 0.02 * k1 * (5.0 * dy - dy);
+        assert!(
+            (f_pl - expect).abs() < 1.0,
+            "plastic: {f_pl}, expect={expect}"
+        );
+    }
+
+    #[test]
+    fn test_hysteretic_active_in_static_no_dt() {
+        let mut d = hyst_damper(1000.0, 100.0, 0.02);
+        let model = Model::default();
+        let ctx = Ctx { model: &model };
+        drive(&mut d, 0.05, &model);
+        let n = d.internal_force(&ctx).data[6];
+        assert!(n > 0.0, "hysteretic damper must be active in static: {n}");
+        let kt = d.tangent_stiffness(&ctx).get(6, 6);
+        assert!(kt > 0.0);
+    }
+
+    #[test]
+    fn test_hysteretic_dissipates_energy() {
+        let k1 = 1000.0;
+        let qy = 100.0;
+        let mut d = hyst_damper(k1, qy, 0.02);
+        let model = Model::default();
+        let ctx = Ctx { model: &model };
+        let dy = qy / k1;
+        let amp = 4.0 * dy;
+        let mut energy = 0.0;
+        let mut prev = (0.0, 0.0);
+        for i in 0..=80 {
+            let phase = i as f64 / 20.0 * std::f64::consts::PI;
+            let elong = amp * phase.sin();
+            drive(&mut d, elong, &model);
+            let n = d.internal_force(&ctx).data[6];
+            energy += 0.5 * (prev.1 + n) * (elong - prev.0);
+            prev = (elong, n);
+        }
+        assert!(
+            energy > 0.0,
+            "hysteretic loop must dissipate energy: {energy}"
+        );
+    }
+
+    /// チェックポイントの往復で履歴（塑性変位）と伸びが完全復元されること。
+    #[test]
+    fn test_checkpoint_roundtrip_restores_hysteresis() {
+        let k1 = 1000.0;
+        let qy = 100.0;
+        let mut d = hyst_damper(k1, qy, 0.02);
+        let model = Model::default();
+        let ctx = Ctx { model: &model };
+        drive(&mut d, 3.0 * qy / k1, &model);
+        let f_before = d.internal_force(&ctx).data[6];
+
+        let cp = d.serialize_checkpoint();
+        assert!(!cp.is_empty(), "チェックポイントに状態が直列化されるべき");
+
+        let mut restored = hyst_damper(k1, qy, 0.02);
+        restored
+            .deserialize_checkpoint(&cp)
+            .expect("チェックポイント復元は成功するはず");
+        let f_after = restored.internal_force(&ctx).data[6];
+        assert!(
+            (f_before - f_after).abs() < 1e-9,
+            "復元後の内力が一致すべき: {f_before} vs {f_after}"
+        );
+
+        let mut fresh = hyst_damper(k1, qy, 0.02);
+        assert!(fresh.deserialize_checkpoint(&[]).is_ok());
+    }
+}

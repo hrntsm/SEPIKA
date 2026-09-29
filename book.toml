@@ -1,7 +1,7 @@
 [book]
-title = "Squid-n ドキュメント"
-description = "日本の建築構造計算一貫プログラム Squid-n の利用者向けドキュメント（計算根拠・理論・出典）"
-authors = ["Squid-n contributors"]
+title = "SEPIKA ドキュメント"
+description = "日本の建築構造計算一貫プログラム SEPIKA の利用者向けドキュメント（計算根拠・理論・出典）"
+authors = ["SEPIKA contributors"]
 language = "ja"
 src = "docs"
 
@@ -12,8 +12,8 @@ create-missing = false
 [output.html]
 default-theme = "rust"
 preferred-dark-theme = "ayu"
-git-repository-url = "https://github.com/hrntsm/squid-n"
-edit-url-template = "https://github.com/hrntsm/squid-n/edit/main/docs/{path}"
+git-repository-url = "https://github.com/hrntsm/SEPIKA"
+edit-url-template = "https://github.com/hrntsm/SEPIKA/edit/main/docs/{path}"
 mathjax-support = true
 # 全ページ末尾に MIT License と無保証の注意書き（`docs/introduction.md` へのリンク）を出す。
 additional-css = ["theme/footer.css", "theme/impl-ref.css"]

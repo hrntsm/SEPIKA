@@ -1,10 +1,17 @@
-# はじめに
+# SEPIKA
+Integrated Structural Analysis
 
-**Squid-n** は、Rust で実装された日本の建築構造計算一貫プログラムです。
+SEPIKAは、日本語の「一貫計算（IKKAN）」から生まれた構造設計ソフトウェアです。名前はイカに由来し、コウイカを意味するSepiaと日本語のIKAを組み合わせています。
 
-このサイトは、Squid-n を利用する方に向けたドキュメントです。
+SEPIKA takes its name from Sepia (cuttlefish) and IKA, inspired by the Japanese phrase "Ikkan Keisan" (integrated structural calculation).
 
-- **[モデル入出力（ファイル形式）](./model_io/README.md)**：ネイティブの `.scz` 形式と
+## はじめに
+
+**SEPIKA** は、Rust で実装された日本の建築構造計算一貫プログラムです。
+
+このサイトは、SEPIKA を利用する方に向けたドキュメントです。
+
+- **[モデル入出力（ファイル形式）](./model_io/README.md)**：ネイティブの `.ovika` 形式と
   ST-Bridge（`.stb`）形式でモデルを保存・読込・書出する入出力経路と、その対応範囲
 - **[モデルの編集](./model_edit/README.md)**：通り芯・断面の符号と階・架構作成ウィザード・
   立体グリッドとスナップ・階への複製
@@ -21,8 +28,8 @@
 
 ## ライセンスと免責事項
 
-Squid-n は MIT License のもとで公開しているソフトウェアです。
-ライセンスの全文はリポジトリの [LICENSE](https://github.com/hrntsm/squid-n/blob/main/LICENSE) にあります。
+SEPIKA は MIT License のもとで公開しているソフトウェアです。
+ライセンスの全文はリポジトリの [LICENSE](https://github.com/hrntsm/SEPIKA/blob/main/LICENSE) にあります。
 
 ```
 MIT License
@@ -38,16 +45,16 @@ MIT License は、ソフトウェアを「現状のまま（AS IS）」提供し
 > IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 > FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
 
-この無保証は、Squid-n が出力する応力、変形、検定比、保有水平耐力などの計算結果にもそのまま及びます。
-つまり Squid-n は、計算結果の正確性、妥当性、および特定の目的への適合性を、いずれも保証しません。
-また、Squid-n の使用または使用不能によって生じたいかなる損害についても、著作権者および貢献者は責任を負いません。
+この無保証は、SEPIKA が出力する応力、変形、検定比、保有水平耐力などの計算結果にもそのまま及びます。
+つまり SEPIKA は、計算結果の正確性、妥当性、および特定の目的への適合性を、いずれも保証しません。
+また、SEPIKA の使用または使用不能によって生じたいかなる損害についても、著作権者および貢献者は責任を負いません。
 
 本ドキュメントについても同じです。
 このサイトは、各計算がどの法令・規準のどの式に基づいて算定されているかを説明するものであり、個々の建築物についてその結果が正しいことや、適法であることを保証するものではありません。
 
 ### 利用にあたって
 
-Squid-n は、国土交通大臣の認定を受けた構造計算プログラム（いわゆる大臣認定プログラム）ではありません。
+SEPIKA は、国土交通大臣の認定を受けた構造計算プログラム（いわゆる大臣認定プログラム）ではありません。
 そのため、確認申請における認定プログラムとしての取扱い（大臣認定プログラムを用いた場合の審査の特例）は受けられません。
 
 入力データの妥当性、モデル化の適否、そして出力された結果の検証は、いずれも利用者の責任に属します。
@@ -57,14 +64,14 @@ Squid-n は、国土交通大臣の認定を受けた構造計算プログラム
 ## 開発者向け資料
 
 設計判断・検証記録・開発運用ドキュメントは開発者向けのため本サイトには含めていません。
-これらは [dev_docs/](https://github.com/hrntsm/squid-n/tree/main/dev_docs) に集約しており、リポジトリの以下を参照してください。
+これらは [dev_docs/](https://github.com/hrntsm/SEPIKA/tree/main/dev_docs) に集約しており、リポジトリの以下を参照してください。
 
-- [dev_docs/architecture.md](https://github.com/hrntsm/squid-n/blob/main/dev_docs/architecture.md)：クレート階層と依存方向
-- [dev_docs/v_and_v/](https://github.com/hrntsm/squid-n/tree/main/dev_docs/v_and_v)：各要素・各設計式の Verification & Validation レポート（[未検証一覧](https://github.com/hrntsm/squid-n/blob/main/dev_docs/v_and_v/未検証一覧.md)）。法令・規準の埋め込み値の照合チェックリスト [原典照合リスト](https://github.com/hrntsm/squid-n/blob/main/dev_docs/v_and_v/原典照合リスト.md) も同ディレクトリにあります
-- [dev_docs/handoff/](https://github.com/hrntsm/squid-n/tree/main/dev_docs/handoff)：申し送り目録（[残課題一覧](https://github.com/hrntsm/squid-n/blob/main/dev_docs/handoff/残課題一覧.md)）。[ROADMAP.md](https://github.com/hrntsm/squid-n/blob/main/dev_docs/handoff/ROADMAP.md) は 2026-07 完了済みの歴史的記録
+- [dev_docs/architecture.md](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/architecture.md)：クレート階層と依存方向
+- [dev_docs/v_and_v/](https://github.com/hrntsm/SEPIKA/tree/main/dev_docs/v_and_v)：各要素・各設計式の Verification & Validation レポート（[未検証一覧](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/未検証一覧.md)）。法令・規準の埋め込み値の照合チェックリスト [原典照合リスト](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/原典照合リスト.md) も同ディレクトリにあります
+- [dev_docs/handoff/](https://github.com/hrntsm/SEPIKA/tree/main/dev_docs/handoff)：申し送り目録（[残課題一覧](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/handoff/残課題一覧.md)）。[ROADMAP.md](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/handoff/ROADMAP.md) は 2026-07 完了済みの歴史的記録
 
 ## リポジトリ
 
-ソースコードは [github.com/hrntsm/squid-n](https://github.com/hrntsm/squid-n) にあります。
+ソースコードは [github.com/hrntsm/SEPIKA](https://github.com/hrntsm/SEPIKA) にあります。
 
 ビルド・テスト・静的解析の手順はリポジトリの `README.md` を参照してください。

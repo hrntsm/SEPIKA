@@ -31,7 +31,7 @@
 
 <div class="impl-ref">
 
-**実装参照**：`squid_n_element::shell::ShellElement::{local_stiffness, add_drilling}`（`crates/squid-n-element/src/shell/stiffness.rs`）と `squid_n_element::shell::ShellElement::shear_b_mitc4`（`crates/squid-n-element/src/shell/bmatrix.rs`）が算定します。
+**実装参照**：`sepika_element::shell::ShellElement::{local_stiffness, add_drilling}`（`crates/sepika-element/src/shell/stiffness.rs`）と `sepika_element::shell::ShellElement::shear_b_mitc4`（`crates/sepika-element/src/shell/bmatrix.rs`）が算定します。
 剛床時は面内成分（Ux/Uy/Rz）を無効化します。
 
 </div>

@@ -1,0 +1,12 @@
+[package]
+name = "sepika-load"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+sepika-core = { path = "../sepika-core" }
+serde = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }

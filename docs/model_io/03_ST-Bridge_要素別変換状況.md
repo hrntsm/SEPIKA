@@ -2,7 +2,7 @@
 
 ST-Bridge の主要要素ごとの変換状況です。
 凡例: **✅ 対応** ／ **⚠️ 一部・近似** ／ **❌ 非対応**。
-「取り込み」は他社ファイルを読めるか、「書き出し」は Squid-n が出力するか、「往復・備考」は
+「取り込み」は他社ファイルを読めるか、「書き出し」は SEPIKA が出力するか、「往復・備考」は
 `import→export→再import` での保存性と注意点を示します。
 
 対応範囲の考え方と非対応項目の扱いは [ST-Bridge 形式（.stb / .xml）](./02_ST-Bridge_形式.md)を参照してください。
@@ -16,7 +16,7 @@ ST-Bridge の ID は `positiveInteger`（1 始まり）に合わせて出力し�
 
 <div class="impl-ref">
 
-**実装参照**：書き出しは `squid_n_io::stbridge::export_stbridge`（`crates/squid-n-io/src/stbridge/export.rs`）が担います。表現限界による近似・切り捨ての警告は `export_stbridge_with_report` が返します。取り込みは節ごとに入口を示します。
+**実装参照**：書き出しは `sepika_io::stbridge::export_stbridge`（`crates/sepika-io/src/stbridge/export.rs`）が担います。表現限界による近似・切り捨ての警告は `export_stbridge_with_report` が返します。取り込みは節ごとに入口を示します。
 
 </div>
 
@@ -33,7 +33,7 @@ ST-Bridge の ID は `positiveInteger`（1 始まり）に合わせて出力し�
 
 <div class="impl-ref">
 
-**実装参照**：取り込みは `squid_n_io::stbridge::import::assemble::{build_nodes_and_stories, build_materials}`（`crates/squid-n-io/src/stbridge/import/assemble.rs`）が担います。
+**実装参照**：取り込みは `sepika_io::stbridge::import::assemble::{build_nodes_and_stories, build_materials}`（`crates/sepika-io/src/stbridge/import/assemble.rs`）が担います。
 
 </div>
 
@@ -56,7 +56,7 @@ ST-Bridge の ID は `positiveInteger`（1 始まり）に合わせて出力し�
 取り込んだ間柱の端部負担率は未指定になるため、鉛直な間柱では解析前チェックでエラーになり得ます。
 ST-Bridge 取込後は、モデルタブの「壁版」一覧で、解析要素にならない壁版の自重支持辺の負担率と、
 「間柱の自重・重力荷重の伝達先」の端部負担率を画面から指定してください
-（[壁の断面と自重](../calc_basis/01_荷重/09_壁の断面と自重.md)、[自重の長期応力解析への接続](../calc_basis/01_荷重/06_自重の長期応力解析への接続.md)）。値の保持には `.scz` を使用します。
+（[壁の断面と自重](../calc_basis/01_荷重/09_壁の断面と自重.md)、[自重の長期応力解析への接続](../calc_basis/01_荷重/06_自重の長期応力解析への接続.md)）。値の保持には `.ovika` を使用します。
 
 境界節点が解決できないスラブ・壁と、頂点が 3 つに満たないスラブ・壁は、取り込まずに件数を警告へ出します。
 割当領域に収まらず、取り付く床板へも変換できず、未帰属の面積が残るスラブは、境界節点と面積を含むエラーにして取り込み全体を失敗させます（面積を欠落させないため）。
@@ -69,7 +69,7 @@ ST-Bridge 取込後は、モデルタブの「壁版」一覧で、解析要素�
 
 <div class="impl-ref">
 
-**実装参照**：取り込みは `squid_n_io::stbridge::import::assemble::{build_members, build_secondaries}`（`crates/squid-n-io/src/stbridge/import/assemble.rs`）が担います。二次部材の両端は `Model::anchorize_secondary_members`（`crates/squid-n-core/src/model/secondary.rs`）が支持部材アンカー（どの支持部材の材軸上のどこに載るか）へ一括で解決し、幾何的に支持のない端は自由端と推定します。支持端のアンカーを解決できない二次部材は件数を notes に出し、端点座標のまま保持します（重量・材軸長は欠落させず、解析前チェックでエラーにして解析を止めます）。
+**実装参照**：取り込みは `sepika_io::stbridge::import::assemble::{build_members, build_secondaries}`（`crates/sepika-io/src/stbridge/import/assemble.rs`）が担います。二次部材の両端は `Model::anchorize_secondary_members`（`crates/sepika-core/src/model/secondary.rs`）が支持部材アンカー（どの支持部材の材軸上のどこに載るか）へ一括で解決し、幾何的に支持のない端は自由端と推定します。支持端のアンカーを解決できない二次部材は件数を notes に出し、端点座標のまま保持します（重量・材軸長は欠落させず、解析前チェックでエラーにして解析を止めます）。
 
 </div>
 
@@ -121,7 +121,7 @@ Post（間柱）が `StbSecColumn_*`、Brace（ブレース）が `StbSecBrace_*
 
 <div class="impl-ref">
 
-**実装参照**：取り込みは `squid_n_io::stbridge::import::steel::steel_shape_from`（`crates/squid-n-io/src/stbridge/import/steel.rs`）が形鋼を復元し、`squid_n_io::stbridge::import::assemble::build_sections`（`crates/squid-n-io/src/stbridge/import/assemble.rs`）が断面を組み立てます。
+**実装参照**：取り込みは `sepika_io::stbridge::import::steel::steel_shape_from`（`crates/sepika-io/src/stbridge/import/steel.rs`）が形鋼を復元し、`sepika_io::stbridge::import::assemble::build_sections`（`crates/sepika-io/src/stbridge/import/assemble.rs`）が断面を組み立てます。
 
 </div>
 
@@ -154,7 +154,7 @@ ST-Bridge の主筋径は `D_main` の 1 種類だけなので、X 方向と Y �
 
 <div class="impl-ref">
 
-**実装参照**：取り込みは `squid_n_io::stbridge::import::rebar::parse_rebar`（`crates/squid-n-io/src/stbridge/import/rebar.rs`）が配筋を読み、`squid_n_io::stbridge::import::assemble::build_sections`（`crates/squid-n-io/src/stbridge/import/assemble.rs`）が断面を組み立てます。
+**実装参照**：取り込みは `sepika_io::stbridge::import::rebar::parse_rebar`（`crates/sepika-io/src/stbridge/import/rebar.rs`）が配筋を読み、`sepika_io::stbridge::import::assemble::build_sections`（`crates/sepika-io/src/stbridge/import/assemble.rs`）が断面を組み立てます。
 
 </div>
 
@@ -177,7 +177,7 @@ ST-Bridge の主筋径は `D_main` の 1 種類だけなので、X 方向と Y �
 
 <div class="impl-ref">
 
-**実装参照**：取り込みは `squid_n_io::stbridge::import::assemble::{build_slabs, push_slab_section, build_walls}`（`crates/squid-n-io/src/stbridge/import/assemble.rs`）が担います。
+**実装参照**：取り込みは `sepika_io::stbridge::import::assemble::{build_slabs, push_slab_section, build_walls}`（`crates/sepika-io/src/stbridge/import/assemble.rs`）が担います。
 
 </div>
 
@@ -191,12 +191,12 @@ ST-Bridge の主筋径は `D_main` の 1 種類だけなので、X 方向と Y �
 | `StbAxes` > 円弧芯・放射芯・作図芯 | ⚠️ | ❌ | 通り名と所属節点のみ取り込む（幾何は保持しない）。書き出しは平行芯のみで、除いた旨を通知 |
 | 拘束条件（支点） | ❌ | ❌ | ST-Bridge の幾何スコープ外。支点を持たないモデルは取り込み時に自動設定する（下記） |
 | 質量 | ❌ | ❌ | ST-Bridge の幾何スコープ外 |
-| `StbCommon` | ❌ | ✅ | 書き出しのみ。プロジェクト名・アプリ名は `Squid-n` 固定 |
+| `StbCommon` | ❌ | ✅ | 書き出しのみ。プロジェクト名・アプリ名は `SEPIKA` 固定 |
 | `StbJoints` | ❌ | ✅ | 接合部は扱わないため、書き出しでは空要素だけを出す |
 
 <div class="impl-ref">
 
-**実装参照**：取り込みは `squid_n_io::stbridge::import::assemble::{build_load_cases, build_axes}`（`crates/squid-n-io/src/stbridge/import/assemble.rs`）が担います。
+**実装参照**：取り込みは `sepika_io::stbridge::import::assemble::{build_load_cases, build_axes}`（`crates/sepika-io/src/stbridge/import/assemble.rs`）が担います。
 
 </div>
 
@@ -216,6 +216,6 @@ ST-Bridge の主筋径は `D_main` の 1 種類だけなので、X 方向と Y �
 
 <div class="impl-ref">
 
-**実装参照**：既定値の適用は `squid_n_io::stbridge::import`（`crates/squid-n-io/src/stbridge/import/{parser.rs, assemble.rs}`）が担い、支点の自動設定は `squid_n_io::stbridge::import::assemble::auto_assign_supports` が行います。
+**実装参照**：既定値の適用は `sepika_io::stbridge::import`（`crates/sepika-io/src/stbridge/import/{parser.rs, assemble.rs}`）が担い、支点の自動設定は `sepika_io::stbridge::import::assemble::auto_assign_supports` が行います。
 
 </div>

@@ -28,12 +28,12 @@
 <!-- 実行したコマンドと結果を記載してください。 -->
 
 - [ ] `cargo clippy --workspace --all-targets --locked -- -D warnings`
-- [ ] `cargo clippy -p squid-n-app -p squid-n-mcp -p squid-n-io --all-targets --features squid-n-app/gui,squid-n-mcp/mcp,squid-n-io/parquet --locked -- -D warnings`
+- [ ] `cargo clippy -p sepika-app -p sepika-mcp -p sepika-io --all-targets --features sepika-app/gui,sepika-mcp/mcp,sepika-io/parquet --locked -- -D warnings`
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo test --workspace --locked`
-- [ ] `cargo test -p squid-n-app -p squid-n-mcp -p squid-n-io --features squid-n-app/gui,squid-n-mcp/mcp,squid-n-io/parquet --locked`
-- [ ] `cargo test -p squid-n-io --locked`
-- [ ] `cargo check -p squid-n-app --features squid-n-app/gui --locked`
+- [ ] `cargo test -p sepika-app -p sepika-mcp -p sepika-io --features sepika-app/gui,sepika-mcp/mcp,sepika-io/parquet --locked`
+- [ ] `cargo test -p sepika-io --locked`
+- [ ] `cargo check -p sepika-app --features sepika-app/gui --locked`
 - [ ] `cargo run -p xtask -- check-deps`
 - [ ] `mdbook build`
 
@@ -41,7 +41,7 @@
 
 ### 検証結果
 
-<!-- 例: cargo test -p squid-n-app --features gui: 475 passed / 0 failed -->
+<!-- 例: cargo test -p sepika-app --features gui: 475 passed / 0 failed -->
 
 ## ドキュメント
 

@@ -1,0 +1,38 @@
+[package]
+name = "sepika-app"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[features]
+default = []
+gui = ["egui", "eframe", "egui_extras", "egui_plot", "dep:rfd"]
+
+[[bin]]
+name = "sepika"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[dependencies]
+sepika-core = { path = "../sepika-core" }
+sepika-element = { path = "../sepika-element" }
+sepika-solver = { path = "../sepika-solver" }
+sepika-design-jp = { path = "../sepika-design-jp" }
+sepika-edit = { path = "../sepika-edit" }
+sepika-section = { path = "../sepika-section" }
+sepika-load = { path = "../sepika-load" }
+sepika-io = { path = "../sepika-io" }
+sepika-job = { path = "../sepika-job" }
+egui = { workspace = true, optional = true }
+eframe = { workspace = true, optional = true }
+egui_extras = { workspace = true, optional = true, features = ["svg"] }
+egui_plot = { workspace = true, optional = true }
+smallvec = { workspace = true }
+rfd = { version = "0.17", optional = true }
+sepika-math = { version = "0.0.1", path = "../sepika-math" }
+bincode = { workspace = true }
+serde = { workspace = true }
+rmp-serde = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

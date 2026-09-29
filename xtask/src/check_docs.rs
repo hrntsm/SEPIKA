@@ -448,7 +448,7 @@ mod tests {
     fn temp_root(name: &str) -> PathBuf {
         let mut path = std::env::temp_dir();
         path.push(format!(
-            "squid_n_xtask_check_docs_{}_{}",
+            "sepika_xtask_check_docs_{}_{}",
             name,
             std::process::id()
         ));

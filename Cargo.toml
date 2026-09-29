@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/squid-n-core", "crates/squid-n-math", "crates/squid-n-io",
-    "crates/squid-n-material", "crates/squid-n-section", "crates/squid-n-element",
-    "crates/squid-n-skeleton", "crates/squid-n-load", "crates/squid-n-solver",
-    "crates/squid-n-design-jp", "crates/squid-n-edit", "crates/squid-n-job",
-    "crates/squid-n-mcp", "crates/squid-n-app",
+    "crates/sepika-core", "crates/sepika-math", "crates/sepika-io",
+    "crates/sepika-material", "crates/sepika-section", "crates/sepika-element",
+    "crates/sepika-skeleton", "crates/sepika-load", "crates/sepika-solver",
+    "crates/sepika-design-jp", "crates/sepika-edit", "crates/sepika-job",
+    "crates/sepika-mcp", "crates/sepika-app",
     "xtask",
 ]
 

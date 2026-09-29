@@ -1,0 +1,459 @@
+//! 断面表示: 線材（梁・柱・ブレース）を断面形状の押し出しソリッドで描画する。
+//!
+//! 各部材の断面輪郭（局所 y-z 平面の多角形）を材軸に沿って押し出し、
+//! 側面を四角形フェイスに分解してカメラ空間の奥行きでソートし（画家の
+//! アルゴリズム）、面法線に応じた簡易シェーディングで塗る。egui の
+//! ペインタには Z バッファがないため、フェイス単位の奥行きソートで
+//! 前後関係を近似する（凹型断面同士の貫入など厳密でないケースは許容）。
+//!
+//! 断面の向きは解析と同じ局所座標系（[`LocalFrame`]: ex=材軸,
+//! ey=ref_vector 直交化, ez=ex×ey）を用い、輪郭の y がせい方向（ey）、
+//! z が幅方向（ez）に対応する。
+
+use crate::theme;
+use sepika_core::model::{ElementKind, Model, Section};
+use sepika_core::section_shape::SectionShape;
+use sepika_element::transform::LocalFrame;
+
+use super::Projector;
+
+/// 円形断面（鋼管・RC 円柱等）の輪郭分割数。
+const CIRCLE_SEGMENTS: usize = 20;
+
+/// 奥行きソート対象の描画要素。
+enum SolidPrim {
+    /// 側面の四角形フェイス（塗り＋縁線）
+    Quad {
+        pts: [egui::Pos2; 4],
+        fill: egui::Color32,
+        stroke: egui::Color32,
+    },
+    /// 端面の輪郭線（凹型断面があるため塗らずに線のみ）
+    Outline {
+        pts: Vec<egui::Pos2>,
+        color: egui::Color32,
+    },
+}
+
+/// RGB を `shade`（0–1）倍して明度を落とす（アルファは保持）。
+fn shaded(c: egui::Color32, shade: f32) -> egui::Color32 {
+    let s = shade.clamp(0.0, 1.0);
+    egui::Color32::from_rgb(
+        (c.r() as f32 * s) as u8,
+        (c.g() as f32 * s) as u8,
+        (c.b() as f32 * s) as u8,
+    )
+}
+
+/// フェイス（カメラ空間の四角形）の簡易シェーディング係数。
+/// 法線の視線方向成分が大きい（正面向き）ほど明るくする。
+fn face_shade(quad: &[[f32; 3]; 4]) -> f32 {
+    let e1 = [
+        quad[1][0] - quad[0][0],
+        quad[1][1] - quad[0][1],
+        quad[1][2] - quad[0][2],
+    ];
+    let e2 = [
+        quad[3][0] - quad[0][0],
+        quad[3][1] - quad[0][1],
+        quad[3][2] - quad[0][2],
+    ];
+    let n = [
+        e1[1] * e2[2] - e1[2] * e2[1],
+        e1[2] * e2[0] - e1[0] * e2[2],
+        e1[0] * e2[1] - e1[1] * e2[0],
+    ];
+    let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    if len < 1e-9 {
+        return 1.0;
+    }
+    0.45 + 0.55 * (n[2].abs() / len)
+}
+
+/// 断面の基本色。RC/SRC 系はコンクリートのグレー、鋼・CFT 系はスチールブルー。
+fn base_color(shape: Option<&SectionShape>) -> egui::Color32 {
+    match shape {
+        Some(
+            SectionShape::RcBeamRect { .. }
+            | SectionShape::RcColumnRect { .. }
+            | SectionShape::RcColumnCircle { .. }
+            | SectionShape::SrcBeamRect { .. }
+            | SectionShape::SrcColumnRect { .. }
+            | SectionShape::RcWall { .. }
+            | SectionShape::RcSlab { .. },
+        ) => theme::GRAY_300,
+        Some(_) => theme::BLUE_300,
+        None => theme::GRAY_300,
+    }
+}
+
+/// 中心 (0,0)・全せい `d`（y 方向）× 全幅 `b`（z 方向）の矩形輪郭。
+fn rect_outline(d: f64, b: f64) -> Vec<[f64; 2]> {
+    let hy = d * 0.5;
+    let hz = b * 0.5;
+    vec![[hy, -hz], [hy, hz], [-hy, hz], [-hy, -hz]]
+}
+
+/// 直径 `dia` の円形輪郭（多角形近似）。
+fn circle_outline(dia: f64) -> Vec<[f64; 2]> {
+    let r = dia * 0.5;
+    (0..CIRCLE_SEGMENTS)
+        .map(|i| {
+            let t = i as f64 / CIRCLE_SEGMENTS as f64 * std::f64::consts::TAU;
+            [r * t.cos(), r * t.sin()]
+        })
+        .collect()
+}
+
+/// 断面輪郭を局所 (y, z) 座標 [mm] の閉多角形として返す（末尾は先頭に接続）。
+/// y=せい方向（局所 ey）、z=幅方向（局所 ez）。形状定義がない場合は
+/// `depth`×`width` の矩形にフォールバックし、それもなければ None。
+///
+/// ヒンジ詳細ウィンドウのファイバー塑性化マップへの断面外形線の重ね描き
+/// （`viewer::hinge`）でも再利用するため `pub(super)`（[`section_inner_outline`]
+/// と合わせて本ファイル外からの唯一の公開窓口）。
+pub(super) fn section_outline(sec: &Section) -> Option<Vec<[f64; 2]>> {
+    let Some(shape) = &sec.shape else {
+        return (sec.depth > 0.0 && sec.width > 0.0).then(|| rect_outline(sec.depth, sec.width));
+    };
+    let outline = match shape {
+        SectionShape::SteelH {
+            height,
+            width,
+            web_thick,
+            flange_thick,
+        } => {
+            let (h, b, tw, tf) = (height * 0.5, width * 0.5, web_thick * 0.5, *flange_thick);
+            vec![
+                [h, -b],
+                [h, b],
+                [h - tf, b],
+                [h - tf, tw],
+                [-h + tf, tw],
+                [-h + tf, b],
+                [-h, b],
+                [-h, -b],
+                [-h + tf, -b],
+                [-h + tf, -tw],
+                [h - tf, -tw],
+                [h - tf, -b],
+            ]
+        }
+        SectionShape::SteelBox { height, width, .. } => rect_outline(*height, *width),
+        SectionShape::SteelAngle {
+            leg_a,
+            leg_b,
+            thick,
+        } => {
+            let (a, b, t) = (*leg_a, *leg_b, *thick);
+            let (cy, cz) = (a * 0.5, b * 0.5);
+            vec![
+                [-cy, -cz],
+                [-cy, b - cz],
+                [t - cy, b - cz],
+                [t - cy, t - cz],
+                [a - cy, t - cz],
+                [a - cy, -cz],
+            ]
+        }
+        SectionShape::SteelChannel {
+            height,
+            width,
+            web_thick,
+            flange_thick,
+        } => {
+            let (h, b, tw, tf) = (height * 0.5, width * 0.5, *web_thick, *flange_thick);
+            vec![
+                [h, -b],
+                [h, b],
+                [h - tf, b],
+                [h - tf, -b + tw],
+                [-h + tf, -b + tw],
+                [-h + tf, b],
+                [-h, b],
+                [-h, -b],
+            ]
+        }
+        SectionShape::SteelTee {
+            height,
+            width,
+            web_thick,
+            flange_thick,
+        } => {
+            let (h, b, tw, tf) = (height * 0.5, width * 0.5, web_thick * 0.5, *flange_thick);
+            vec![
+                [h, -b],
+                [h, b],
+                [h - tf, b],
+                [h - tf, tw],
+                [-h, tw],
+                [-h, -tw],
+                [h - tf, -tw],
+                [h - tf, -b],
+            ]
+        }
+        SectionShape::SteelPipe { outer_dia, .. } | SectionShape::CftPipe { outer_dia, .. } => {
+            circle_outline(*outer_dia)
+        }
+        SectionShape::SteelFlatBar { width, thick } => rect_outline(*thick, *width),
+        SectionShape::SteelRoundBar { dia } => circle_outline(*dia),
+        SectionShape::SteelBuiltH {
+            height,
+            upper_width,
+            upper_thick,
+            lower_width,
+            lower_thick,
+            web_thick,
+        } => {
+            let h = height * 0.5;
+            let (ub, ut) = (upper_width * 0.5, *upper_thick);
+            let (lb, lt) = (lower_width * 0.5, *lower_thick);
+            let tw = web_thick * 0.5;
+            vec![
+                [h, -ub],
+                [h, ub],
+                [h - ut, ub],
+                [h - ut, tw],
+                [-h + lt, tw],
+                [-h + lt, lb],
+                [-h, lb],
+                [-h, -lb],
+                [-h + lt, -lb],
+                [-h + lt, -tw],
+                [h - ut, -tw],
+                [h - ut, -ub],
+            ]
+        }
+        SectionShape::SteelLipChannel {
+            height,
+            width,
+            lip,
+            thick,
+        } => {
+            let (h, b, c, t) = (height * 0.5, width * 0.5, *lip, *thick);
+            vec![
+                [h, -b],
+                [h, b],
+                [h - c, b],
+                [h - c, b - t],
+                [h - t, b - t],
+                [h - t, -b + t],
+                [-h + t, -b + t],
+                [-h + t, b - t],
+                [-h + c, b - t],
+                [-h + c, b],
+                [-h, b],
+                [-h, -b],
+            ]
+        }
+        SectionShape::RcBeamRect { b, d, .. }
+        | SectionShape::RcColumnRect { b, d, .. }
+        | SectionShape::SrcBeamRect { b, d, .. }
+        | SectionShape::SrcColumnRect { b, d, .. } => rect_outline(*d, *b),
+        SectionShape::RcColumnCircle { d, .. } => circle_outline(*d),
+        SectionShape::CftBox { height, width, .. } => rect_outline(*height, *width),
+        SectionShape::RcWall { .. } | SectionShape::RcSlab { .. } => return None,
+    };
+    Some(outline)
+}
+
+/// 中空断面（SteelBox・SteelPipe・CftBox・CftPipe）の内側輪郭（局所 (y, z)
+/// 座標 [mm] の閉多角形。中心は外形と共通）。断面押し出しソリッド（本ファイル
+/// の他の描画）は外形の面のみで十分なため未使用だが、ヒンジ詳細ウィンドウの
+/// ファイバー塑性化マップでは外形だけでは中空判定ができないため
+/// `viewer::hinge` から利用する。中空でない断面・板厚が全せい／全幅以上で
+/// 内側が潰れる不正値は None。
+pub(super) fn section_inner_outline(sec: &Section) -> Option<Vec<[f64; 2]>> {
+    let shape = sec.shape.as_ref()?;
+    match shape {
+        SectionShape::SteelBox {
+            height,
+            width,
+            thick,
+            ..
+        }
+        | SectionShape::CftBox {
+            height,
+            width,
+            thick,
+        } => {
+            let (hi, wi) = (height - 2.0 * thick, width - 2.0 * thick);
+            (hi > 0.0 && wi > 0.0).then(|| rect_outline(hi, wi))
+        }
+        SectionShape::SteelPipe { outer_dia, thick }
+        | SectionShape::CftPipe { outer_dia, thick } => {
+            let di = outer_dia - 2.0 * thick;
+            (di > 0.0).then(|| circle_outline(di))
+        }
+        _ => None,
+    }
+}
+
+/// 部材の断面押し出しソリッドを描画する。
+///
+/// `coords` は表示用の節点座標（変形図では変位を加味済み）で、
+/// `model.nodes` と同順であること。断面を描けなかった線材
+/// （断面未割当・形状情報なし）の本数を返す。
+///
+/// `show_secondary` は二次部材（小梁・間柱）を描くか。呼び出し側の
+/// 「床壁・二次部材」トグル（と、主架構の図である CMQ 図での常時非表示）に
+/// 追従させるための引数で、false のときは二次部材を一切描かず、
+/// 断面未定義の注記（戻り値）にも数えない（非表示の部材について
+/// 「断面未定義」と注記するのは誤解を招くため）。
+pub(super) fn draw_section_solids(
+    painter: &egui::Painter,
+    model: &Model,
+    coords: &[[f64; 3]],
+    proj: &Projector,
+    show_secondary: bool,
+    frame_filter: super::FrameFilter,
+) -> usize {
+    let mut prims: Vec<(f32, SolidPrim)> = Vec::new();
+    let mut skipped = 0usize;
+
+    let mut extrude = |p_i: [f64; 3],
+                       p_j: [f64; 3],
+                       ref_vector: [f64; 3],
+                       sec: &Section,
+                       base: egui::Color32|
+     -> bool {
+        let Some(outline) = section_outline(sec) else {
+            return false;
+        };
+        let d = sepika_core::geom::vec3::sub(p_j, p_i);
+        if sepika_core::geom::vec3::dot(d, d) < 1e-6 {
+            return true;
+        }
+        let frame = LocalFrame::from_nodes(p_i, p_j, ref_vector);
+        let ey = frame.rot[1];
+        let ez = frame.rot[2];
+        let ring = |p: [f64; 3]| -> Vec<[f32; 3]> {
+            outline
+                .iter()
+                .map(|&[y, z]| {
+                    let w = [
+                        p[0] + ey[0] * y + ez[0] * z,
+                        p[1] + ey[1] * y + ez[1] * z,
+                        p[2] + ey[2] * y + ez[2] * z,
+                    ];
+                    proj.cam_space(w)
+                })
+                .collect()
+        };
+        let ring_i = ring(p_i);
+        let ring_j = ring(p_j);
+
+        let n = outline.len();
+        for k in 0..n {
+            let k1 = (k + 1) % n;
+            let quad = [ring_i[k], ring_i[k1], ring_j[k1], ring_j[k]];
+            let depth = (quad[0][2] + quad[1][2] + quad[2][2] + quad[3][2]) * 0.25;
+            let shade = face_shade(&quad);
+            let fill = shaded(base, shade);
+            prims.push((
+                depth,
+                SolidPrim::Quad {
+                    pts: [
+                        proj.cam_to_screen(quad[0]),
+                        proj.cam_to_screen(quad[1]),
+                        proj.cam_to_screen(quad[2]),
+                        proj.cam_to_screen(quad[3]),
+                    ],
+                    fill,
+                    stroke: shaded(base, shade * 0.6),
+                },
+            ));
+        }
+        for ring in [&ring_i, &ring_j] {
+            let depth = ring.iter().map(|r| r[2]).sum::<f32>() / n as f32;
+            prims.push((
+                depth,
+                SolidPrim::Outline {
+                    pts: ring.iter().map(|&r| proj.cam_to_screen(r)).collect(),
+                    color: shaded(base, 0.5),
+                },
+            ));
+        }
+        true
+    };
+
+    for elem in &model.elements {
+        if !frame_filter.shows(elem.id) {
+            continue;
+        }
+        let is_line_member = matches!(
+            elem.kind,
+            ElementKind::Beam
+                | ElementKind::Fiber
+                | ElementKind::MultiSpring
+                | ElementKind::Brace { .. }
+        );
+        if !is_line_member || elem.nodes.len() < 2 {
+            continue;
+        }
+        let n0 = elem.nodes[0].index();
+        let n1 = elem.nodes[1].index();
+        if n0 >= coords.len() || n1 >= coords.len() {
+            continue;
+        }
+        let Some(sec) = model.element_section(elem) else {
+            skipped += 1;
+            continue;
+        };
+        let base = base_color(sec.shape.as_ref());
+        if !extrude(
+            coords[n0],
+            coords[n1],
+            elem.local_axis.ref_vector,
+            sec,
+            base,
+        ) {
+            skipped += 1;
+        }
+    }
+
+    if show_secondary {
+        for sm in model.beams().chain(model.posts()) {
+            let Some([n0, n1]) = super::secondary_end_node_indices(model, sm) else {
+                continue;
+            };
+            if n0 >= coords.len() || n1 >= coords.len() {
+                continue;
+            }
+            let Some(sec) = sm.section.and_then(|sid| model.section(sid)) else {
+                skipped += 1;
+                continue;
+            };
+            let (p_i, p_j) = (coords[n0], coords[n1]);
+            let dxy = ((p_j[0] - p_i[0]).powi(2) + (p_j[1] - p_i[1]).powi(2)).sqrt();
+            let ref_vector = if dxy < 1.0 {
+                [1.0, 0.0, 0.0]
+            } else {
+                [0.0, 0.0, 1.0]
+            };
+            if !extrude(p_i, p_j, ref_vector, sec, theme::BEST_YELLOW) {
+                skipped += 1;
+            }
+        }
+    }
+
+    prims.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    for (_, prim) in prims {
+        match prim {
+            SolidPrim::Quad { pts, fill, stroke } => {
+                painter.add(egui::Shape::convex_polygon(
+                    pts.to_vec(),
+                    fill,
+                    egui::Stroke::new(0.5_f32, stroke),
+                ));
+            }
+            SolidPrim::Outline { pts, color } => {
+                painter.add(egui::Shape::closed_line(
+                    pts,
+                    egui::Stroke::new(1.0_f32, color),
+                ));
+            }
+        }
+    }
+    skipped
+}

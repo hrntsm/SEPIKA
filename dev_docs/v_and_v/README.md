@@ -1,6 +1,6 @@
 # V&V レポート（検証・妥当性確認）
 
-本ディレクトリは、Squid-n の各要素・各設計式に対する V&V（Verification & Validation）レポートを格納する。
+本ディレクトリは、SEPIKA の各要素・各設計式に対する V&V（Verification & Validation）レポートを格納する。
 
 ## クイックリンク
 
@@ -141,40 +141,40 @@
 
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
-| 1 | ティモシェンコ梁 | squid-n-element | beam.rs | `test_phi_zero_converges_to_bernoulli`（Bernoulli 極限。軸 EA/L・ねじり GJ/L を含む 12×12 成分。テスト再編により旧 `test_beam_axial_stiffness`・`test_beam_torsion_stiffness` を統合）, `test_torsion_not_stiffened_by_rigid_zone`（剛域ありでもねじりは GJ/L のまま） | P1 | ✅ |
-| 1a | 線材の整合質量 | squid-n-core / squid-n-element / squid-n-solver | model/mass.rs, frame/prismatic.rs, frame/rigid_arm.rs, beam/behavior.rs, fiber/mod.rs, dynamic/eigen/tests.rs | 材料領域入口・共通実装・`rigid_zone_mass`・`transform_mass`・Beam/Fiber 質量入口・座標変換。Fiber の非線形 factory 生成は確認済みだが、solver の固有値組立は線形 `BeamElement` 経路であり、Fiber 固有値は未検証。対応テストと条件は [整合質量_2026-09.md](整合質量_2026-09.md) の追跡表を正とする | P1/P2 | 🔶（Kbb 特異時の失敗経路・Fiber 固有値未検証を含む） |
-| 2 | 剛域あり梁 | squid-n-element | beam.rs | `test_apply_auto_rigid_zones_and_manual_protection`, `test_auto_rigid_zone_only_when_all_members_are_rc`（自動剛域の適用と手動端の保護・適用条件。テスト再編により旧 `test_auto_rigid_zone_standard_formula` を統合） | P1 | 🔶 |
-| 3 | 端部ばね（ピン・半剛） | squid-n-element | beam.rs | `test_pinned_end_rotation_stiffness_exactly_zero`（テスト再編により旧 `test_pinned_end_releases_moment` を統合） | P1 | 🔶 |
-| 4 | MITC4 シェル（膜） | squid-n-element | shell.rs | `test_patch_membrane_distorted`（歪みメッシュ・機械精度） | P1.5 | ✅ |
-| 5 | MITC4 シェル（曲げ） | squid-n-element | shell.rs | `test_patch_bending_distorted`（歪みメッシュ定曲率・機械精度） | P1.5 | ✅ |
-| 6 | MITC4 シェル（せん断/収束） | squid-n-solver | linear.rs | `test_plate_convergence`（単純支持・四辺固定の板たわみ ±2% 収束＝ロッキングなし。テスト再編により旧 2 テストを統合） | P1.5 | ✅ |
-| 7 | パネルゾーンのフェイスモーメント | squid-n-element | panel.rs | `test_face_moments_reference_case1`（pQc=851.135kN 等）, `test_face_moments_reference_case2_t_joint`（ト型） | P1 | ✅ |
-| 7a | 仕口パネル（せん断変形角の追加自由度） | squid-n-solver | tests/panel_zone.rs | `test_panel_shear_angle_matches_closed_form`（M=K·γ）, `test_panel_dof_equilibrium_residual_is_zero`（資料 2.10.3-3）。定式化と残課題は [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | P1 | ✅ |
-| 8 | 線形静的解析 | squid-n-solver | linear.rs | `test_*`（座標変換回帰 `test_beam_to_global_transverse_uses_correct_inertia` 含む） | P2 | ✅ |
-| 9 | 固有値解析 | squid-n-solver | eigen.rs | `test_1dof_period` | P2 | ✅ |
-| 10 | Ai分布 | squid-n-load | ai.rs | `test_*` | P2 | ✅ |
-| 11 | 床荷重分割 | squid-n-load | floor.rs | `test_*` | P2 | ✅ |
-| 11a | 壁・間柱の自重支持先 | squid-n-load / squid-n-app | wall_plate_load.rs / cascade.rs | `wall_plate_load::tests`・`vertical_post_uses_explicit_end_shares`・`明示負担率で密度直接集計とdl集計の階重量が一致する` | [検証記録](壁版の支持範囲判定_2026-09.md) | 🔶（実測照合は未実施） |
-| 12 | 荷重組合せ | squid-n-load | combo.rs | `test_combinations` | P2 | ✅ |
-| 13 | 許容応力度設計 | squid-n-design-jp | allowable_stress.rs | `test_beam_check_bending_rect_section_hand_calc` 他 | P3 | ✅ |
-| 14 | 保有耐力 | squid-n-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
-| 15 | プッシュオーバー | squid-n-solver | pushover.rs | — | P5 | 🔶 |
-| 16 | 壁（TVLEM） | squid-n-element | — | — | P5.5 | 対象外 |
-| 17 | 時刻歴 | squid-n-solver | timehistory.rs | — | P6 | ❌ |
-| 18 | 一軸履歴則（Concrete/Bilinear/MP） | squid-n-material | uniaxial.rs | `test_concrete_*`/`test_bilinear_*`/`test_menegotto_pinto_*` | P4 | ✅ |
-| 19 | 部材履歴則（武田・原点指向・スリップ） | squid-n-material | hysteresis.rs | `tests/hysteresis_snapshots.rs`/`tests/uniaxial_snapshots.rs` | P4 | ✅ |
-| 20 | ファイバ断面（M–φ 積分） | squid-n-section | fiber.rs | `test_section_*` | P4 | ✅ |
-| 21 | スケルトン自動算定（M–φ→M–θ） | squid-n-skeleton | lib.rs | `test_rc_skeleton_*` | P4 | ✅ |
-| 22 | MCP サーバ（rmcp） | squid-n-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 🔶 |
-| 23 | ST-Bridge 入出力 | squid-n-io | stbridge.rs | `test_roundtrip_*` | P8 | 🔶 |
-| 24 | 編集トランザクション（EditCommand/Undo） | squid-n-edit | lib.rs | `test_*`（MCP `model_edit` は壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |
-| 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | squid-n-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*` | P7 | 🔶 |
-| 26 | 数量積算（部位別のコンクリート・型枠・鉄筋・鉄骨・継手個所） | squid-n-design-jp | quantity/{mod,member,rebar}.rs | `quantity::member::tests::*`（手計算照合）/`quantity::tests::*`（走査・分類）/`summary::tests::test_quantity_csv_from_sample_model`（CSV 一気通貫）/`test_quantity_takeoff_json_column`（MCP） | 横断 | 🔶 |
-| 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | squid-n-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
-| 28 | 二次部材小梁の分配 Span 検定 | squid-n-load / squid-n-app | floor/joist_design.rs, check.rs | `distribution_loads_on_shared_joist_match_average_width` / `split_slab_edges_compose_onto_full_joist` / `span_attaches_to_nearest_joist_only` / `perimeter_parallel_joist_does_not_steal_beam_span` / `joist_distribution_cover_rejects_half_span` / `shared_joist_expects_both_slabs` / `missing_expected_slab_is_not_ready` / `zero_expected_axis_does_not_receive_spans` / `joist_design_checks_cover_imported_secondary_members` | 横断 | ☑ |
-| 29 | 耐震スリット（辺ごとの縁切り。袖壁・腰壁垂壁・剛域・耐震壁判定・自重） | squid-n-element / squid-n-load | wall/misc_wall.rs, frame/beam/{construct,rigid_zone}.rs, story_gen/self_weight_calc.rs | `test_column_face_slit_drops_wing_wall_but_keeps_girder_strip` / `test_strip_height_follows_beam_face_slit` / `test_any_slit_breaks_seismic_wall` / `柱際スリットのある側は剛域の袖壁張り出しを持たない` / `test_column_face_slit_wall_is_collected_as_misc_wall` / `test_column_face_slit_is_per_side` / `test_column_face_slit_does_not_change_self_weight_destination` / `test_bottom_beam_face_slit_sends_self_weight_to_top` / `test_top_beam_face_slit_sends_self_weight_to_bottom`（柱際は行き先不変、梁際の切れ側で全量移動） | 横断 | 🔶 |
-| 30 | 壁版の要素生成判定と可視化 | squid-n-core / squid-n-load / squid-n-app | model/wall_plate.rs, wall_expand.rs, viewer/scene.rs | `test_becomes_element_agrees_with_generated_elements` / `test_becomes_element_requires_section` / `test_boundary_coords_with_uses_supplied_coords` / `囲まれた壁版は境界節点が全て構面上にあるときだけ描く` / `取り付く壁版は取付き先の節点で構面を判定する` | 横断 | ☑ |
-| 31 | Fc>60 の NewRC 外挿 | squid-n-material / squid-n-element | newrc.rs, uniaxial/concrete_cyclic.rs, frame/fiber/mod.rs | Fc≤60 の材料 E 反映を維持し、Fc>60 の NewRC 固有 Ec 外挿、構成則選択・圧縮包絡線・ファイバー生成・3履歴則の応答をコードテストで照合済み。実験・原典適用範囲外の妥当性確認は未実施（詳細は [NewRC高強度コンクリート外挿_2026-09.md](NewRC高強度コンクリート外挿_2026-09.md)） | 横断 | 🔶 |
+| 1 | ティモシェンコ梁 | sepika-element | beam.rs | `test_phi_zero_converges_to_bernoulli`（Bernoulli 極限。軸 EA/L・ねじり GJ/L を含む 12×12 成分。テスト再編により旧 `test_beam_axial_stiffness`・`test_beam_torsion_stiffness` を統合）, `test_torsion_not_stiffened_by_rigid_zone`（剛域ありでもねじりは GJ/L のまま） | P1 | ✅ |
+| 1a | 線材の整合質量 | sepika-core / sepika-element / sepika-solver | model/mass.rs, frame/prismatic.rs, frame/rigid_arm.rs, beam/behavior.rs, fiber/mod.rs, dynamic/eigen/tests.rs | 材料領域入口・共通実装・`rigid_zone_mass`・`transform_mass`・Beam/Fiber 質量入口・座標変換。Fiber の非線形 factory 生成は確認済みだが、solver の固有値組立は線形 `BeamElement` 経路であり、Fiber 固有値は未検証。対応テストと条件は [整合質量_2026-09.md](整合質量_2026-09.md) の追跡表を正とする | P1/P2 | 🔶（Kbb 特異時の失敗経路・Fiber 固有値未検証を含む） |
+| 2 | 剛域あり梁 | sepika-element | beam.rs | `test_apply_auto_rigid_zones_and_manual_protection`, `test_auto_rigid_zone_only_when_all_members_are_rc`（自動剛域の適用と手動端の保護・適用条件。テスト再編により旧 `test_auto_rigid_zone_standard_formula` を統合） | P1 | 🔶 |
+| 3 | 端部ばね（ピン・半剛） | sepika-element | beam.rs | `test_pinned_end_rotation_stiffness_exactly_zero`（テスト再編により旧 `test_pinned_end_releases_moment` を統合） | P1 | 🔶 |
+| 4 | MITC4 シェル（膜） | sepika-element | shell.rs | `test_patch_membrane_distorted`（歪みメッシュ・機械精度） | P1.5 | ✅ |
+| 5 | MITC4 シェル（曲げ） | sepika-element | shell.rs | `test_patch_bending_distorted`（歪みメッシュ定曲率・機械精度） | P1.5 | ✅ |
+| 6 | MITC4 シェル（せん断/収束） | sepika-solver | linear.rs | `test_plate_convergence`（単純支持・四辺固定の板たわみ ±2% 収束＝ロッキングなし。テスト再編により旧 2 テストを統合） | P1.5 | ✅ |
+| 7 | パネルゾーンのフェイスモーメント | sepika-element | panel.rs | `test_face_moments_reference_case1`（pQc=851.135kN 等）, `test_face_moments_reference_case2_t_joint`（ト型） | P1 | ✅ |
+| 7a | 仕口パネル（せん断変形角の追加自由度） | sepika-solver | tests/panel_zone.rs | `test_panel_shear_angle_matches_closed_form`（M=K·γ）, `test_panel_dof_equilibrium_residual_is_zero`（資料 2.10.3-3）。定式化と残課題は [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | P1 | ✅ |
+| 8 | 線形静的解析 | sepika-solver | linear.rs | `test_*`（座標変換回帰 `test_beam_to_global_transverse_uses_correct_inertia` 含む） | P2 | ✅ |
+| 9 | 固有値解析 | sepika-solver | eigen.rs | `test_1dof_period` | P2 | ✅ |
+| 10 | Ai分布 | sepika-load | ai.rs | `test_*` | P2 | ✅ |
+| 11 | 床荷重分割 | sepika-load | floor.rs | `test_*` | P2 | ✅ |
+| 11a | 壁・間柱の自重支持先 | sepika-load / sepika-app | wall_plate_load.rs / cascade.rs | `wall_plate_load::tests`・`vertical_post_uses_explicit_end_shares`・`明示負担率で密度直接集計とdl集計の階重量が一致する` | [検証記録](壁版の支持範囲判定_2026-09.md) | 🔶（実測照合は未実施） |
+| 12 | 荷重組合せ | sepika-load | combo.rs | `test_combinations` | P2 | ✅ |
+| 13 | 許容応力度設計 | sepika-design-jp | allowable_stress.rs | `test_beam_check_bending_rect_section_hand_calc` 他 | P3 | ✅ |
+| 14 | 保有耐力 | sepika-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
+| 15 | プッシュオーバー | sepika-solver | pushover.rs | — | P5 | 🔶 |
+| 16 | 壁（TVLEM） | sepika-element | — | — | P5.5 | 対象外 |
+| 17 | 時刻歴 | sepika-solver | timehistory.rs | — | P6 | ❌ |
+| 18 | 一軸履歴則（Concrete/Bilinear/MP） | sepika-material | uniaxial.rs | `test_concrete_*`/`test_bilinear_*`/`test_menegotto_pinto_*` | P4 | ✅ |
+| 19 | 部材履歴則（武田・原点指向・スリップ） | sepika-material | hysteresis.rs | `tests/hysteresis_snapshots.rs`/`tests/uniaxial_snapshots.rs` | P4 | ✅ |
+| 20 | ファイバ断面（M–φ 積分） | sepika-section | fiber.rs | `test_section_*` | P4 | ✅ |
+| 21 | スケルトン自動算定（M–φ→M–θ） | sepika-skeleton | lib.rs | `test_rc_skeleton_*` | P4 | ✅ |
+| 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 🔶 |
+| 23 | ST-Bridge 入出力 | sepika-io | stbridge.rs | `test_roundtrip_*` | P8 | 🔶 |
+| 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*`（MCP `model_edit` は壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |
+| 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*` | P7 | 🔶 |
+| 26 | 数量積算（部位別のコンクリート・型枠・鉄筋・鉄骨・継手個所） | sepika-design-jp | quantity/{mod,member,rebar}.rs | `quantity::member::tests::*`（手計算照合）/`quantity::tests::*`（走査・分類）/`summary::tests::test_quantity_csv_from_sample_model`（CSV 一気通貫）/`test_quantity_takeoff_json_column`（MCP） | 横断 | 🔶 |
+| 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
+| 28 | 二次部材小梁の分配 Span 検定 | sepika-load / sepika-app | floor/joist_design.rs, check.rs | `distribution_loads_on_shared_joist_match_average_width` / `split_slab_edges_compose_onto_full_joist` / `span_attaches_to_nearest_joist_only` / `perimeter_parallel_joist_does_not_steal_beam_span` / `joist_distribution_cover_rejects_half_span` / `shared_joist_expects_both_slabs` / `missing_expected_slab_is_not_ready` / `zero_expected_axis_does_not_receive_spans` / `joist_design_checks_cover_imported_secondary_members` | 横断 | ☑ |
+| 29 | 耐震スリット（辺ごとの縁切り。袖壁・腰壁垂壁・剛域・耐震壁判定・自重） | sepika-element / sepika-load | wall/misc_wall.rs, frame/beam/{construct,rigid_zone}.rs, story_gen/self_weight_calc.rs | `test_column_face_slit_drops_wing_wall_but_keeps_girder_strip` / `test_strip_height_follows_beam_face_slit` / `test_any_slit_breaks_seismic_wall` / `柱際スリットのある側は剛域の袖壁張り出しを持たない` / `test_column_face_slit_wall_is_collected_as_misc_wall` / `test_column_face_slit_is_per_side` / `test_column_face_slit_does_not_change_self_weight_destination` / `test_bottom_beam_face_slit_sends_self_weight_to_top` / `test_top_beam_face_slit_sends_self_weight_to_bottom`（柱際は行き先不変、梁際の切れ側で全量移動） | 横断 | 🔶 |
+| 30 | 壁版の要素生成判定と可視化 | sepika-core / sepika-load / sepika-app | model/wall_plate.rs, wall_expand.rs, viewer/scene.rs | `test_becomes_element_agrees_with_generated_elements` / `test_becomes_element_requires_section` / `test_boundary_coords_with_uses_supplied_coords` / `囲まれた壁版は境界節点が全て構面上にあるときだけ描く` / `取り付く壁版は取付き先の節点で構面を判定する` | 横断 | ☑ |
+| 31 | Fc>60 の NewRC 外挿 | sepika-material / sepika-element | newrc.rs, uniaxial/concrete_cyclic.rs, frame/fiber/mod.rs | Fc≤60 の材料 E 反映を維持し、Fc>60 の NewRC 固有 Ec 外挿、構成則選択・圧縮包絡線・ファイバー生成・3履歴則の応答をコードテストで照合済み。実験・原典適用範囲外の妥当性確認は未実施（詳細は [NewRC高強度コンクリート外挿_2026-09.md](NewRC高強度コンクリート外挿_2026-09.md)） | 横断 | 🔶 |
 
 凡例: ✅ 実装済み・🔶 一部実装（要拡張）・❌ 未実装・対象外（採用しない）。
 #16 壁（TVLEM）は採用しない（[ADR 0013](../adr/0013-adopt-wall-element-model.md)）。耐震壁は壁エレメント置換モデルとして検証する（下表 #29・#30 と[未検証一覧 §3](未検証一覧.md)）。
@@ -212,12 +212,12 @@
 | 固有値 | ✅ | eigen.rs |
 | 時刻歴 | 🔶 | timehistory.rs（時刻歴の実装後に本格化） |
 | プッシュオーバー | 🔶 | pushover.rs（増分解析の実装後に本格化） |
-| 並列バッチ（値一致） | ✅ | squid-n-solver/tests/parallel_batch.rs（並列時のケース並列バッチが個別解と一致） |
+| 並列バッチ（値一致） | ✅ | sepika-solver/tests/parallel_batch.rs（並列時のケース並列バッチが個別解と一致） |
 
 ## 性能ベンチマーク
 
 `criterion` による性能ベンチマーク（線形静的・固有値・プッシュオーバー1ステップ・時刻歴1ステップ）の計測は CI 導入時に整備予定。
 
 並列計算（ケース並列バッチ・faer 内部並列）の速度比は
-`cargo run -p squid-n-solver --example parallel_bench --release` で計測できる
+`cargo run -p sepika-solver --example parallel_bench --release` で計測できる
 （ドキュメントサイト 5.10 並列計算に参考値を記載）。

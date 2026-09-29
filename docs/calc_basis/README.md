@@ -1,6 +1,6 @@
 # 計算根拠
 
-このセクションは、Squid-n が行う各計算について、どの基準や法令のどの式で算定しているかを体系的に示します。
+このセクションは、SEPIKA が行う各計算について、どの基準や法令のどの式で算定しているかを体系的に示します。
 
 構造計算一貫プログラムは、応力や変形、検定比、保有水平耐力といった出力を、法令や規準に定められた根拠に基づいて算定したものだと説明できなければなりません。
 このセクションは「なぜその値になるのか」、すなわち法令、規準、力学の根拠を扱います。
@@ -31,7 +31,7 @@
 
 ### 法的根拠の全体像
 
-日本の建築構造計算は次の階層で規定されるため、Squid-n はこの体系に沿って計算を構成しています。
+日本の建築構造計算は次の階層で規定されるため、SEPIKA はこの体系に沿って計算を構成しています。
 
 ```
 建築基準法 20条（構造耐力）
@@ -118,7 +118,7 @@
 
 <div class="impl-ref">
 
-**実装参照**：画面表示の単位換算（上表）と単位ラベルは `squid_n_core::units::to_display`（`crates/squid-n-core/src/units.rs`）に量ごとに一元化しています。
+**実装参照**：画面表示の単位換算（上表）と単位ラベルは `sepika_core::units::to_display`（`crates/sepika-core/src/units.rs`）に量ごとに一元化しています。
 
 </div>
 
@@ -144,7 +144,7 @@
 このセクションの各ページには、その説明に対応する実装箇所を示す `<div class="impl-ref">` の表示が入ります。中には、次のように関数・モジュール名とソースファイルを書きます。
 
 ```
-**実装参照**：`squid_n_xxx::module::item`（`crates/...`）が…します。
+**実装参照**：`sepika_xxx::module::item`（`crates/...`）が…します。
 ```
 
 この表示は警告やエラーではありません。計算を実装しているコードへたどるための入口を示すものです。
@@ -155,8 +155,8 @@
 <details>
 <summary>開発者向け: 設計判断・検証記録</summary>
 
-- [設計判断・検証記録（dev_docs/）](https://github.com/hrntsm/squid-n/blob/main/dev_docs/README.md)：開発者向け文書の配置。出典の分類 A/B の根拠となる[原典照合リスト](https://github.com/hrntsm/squid-n/blob/main/dev_docs/v_and_v/原典照合リスト.md)は Verification & Validation として `dev_docs/v_and_v/` にあります。
-- [検証記録（dev_docs/v_and_v/）](https://github.com/hrntsm/squid-n/blob/main/dev_docs/v_and_v/README.md)：各要素・各設計式の Verification & Validation レポート。
+- [設計判断・検証記録（dev_docs/）](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/README.md)：開発者向け文書の配置。出典の分類 A/B の根拠となる[原典照合リスト](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/原典照合リスト.md)は Verification & Validation として `dev_docs/v_and_v/` にあります。
+- [検証記録（dev_docs/v_and_v/）](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/README.md)：各要素・各設計式の Verification & Validation レポート。
 - 規準・指針が式を直接与えない実務的取扱い（床荷重の分配、壁エレメント置換、剛床への荷重按分など）は、市販の一貫構造計算プログラムとの突合による検証記録を V&V に置いています。
 - 力学の閉形式（ティモシェンコ梁剛性、CMQ、Newmark 更新式など）は、理論解と一致するかどうかの数値 DoD で自己検証し、その記録を V&V に置いています。
 

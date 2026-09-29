@@ -1,12 +1,12 @@
 # セキュリティポリシー
 
-Squid-n は現在プレリリース段階のソフトウェアです。
+SEPIKA は現在プレリリース段階のソフトウェアです。
 
 ## 脆弱性の報告
 
 セキュリティ上の問題を発見した場合は、公開 Issue では報告せず、以下のいずれかの方法でご連絡ください。
 
-- [GitHub Security Advisory](https://github.com/hrntsm/Squid-n/security/advisories)
+- [GitHub Security Advisory](https://github.com/hrntsm/SEPIKA/security/advisories)
 - [contact@hrntsm.com](mailto:contact@hrntsm.com)
 
 可能であれば、以下の情報を添えてください。
@@ -31,6 +31,6 @@ Squid-n は現在プレリリース段階のソフトウェアです。
 
 ## 注意事項
 
-Squid-n は構造計算ソフトウェアであり、計算結果の利用には十分な確認が必要です。
+SEPIKA は構造計算ソフトウェアであり、計算結果の利用には十分な確認が必要です。
 
-計算結果を実際の設計等に利用する場合は、[docs の「ライセンスと免責事項」](https://hiron.dev/Squid-n/introduction.html) を確認してください。
+計算結果を実際の設計等に利用する場合は、[docs の「ライセンスと免責事項」](https://hrntsm.github.io/SEPIKA/introduction.html#ライセンスと免責事項) を確認してください。

@@ -1,0 +1,58 @@
+//! プッシュオーバー解析。責務ごとにサブモジュールへ分割する。
+//!
+//! - [`types`] — 解析結果・イベントの型定義
+//! - [`diagnosis`] — 接線剛性が特異・非正定値になったときの診断メッセージ
+//! - [`response`] — ベースシア・層せん断・層間変位・屋根変位の算定
+//! - [`driver`] — 荷重制御・変位制御・弧長法を統括する司令塔
+//! - [`hinge`] — 曲げヒンジの閾値算定と発生追跡
+//! - [`ductility`] — 部材塑性率の追跡
+//! - [`shear_yield`] — せん断降伏耐力 Qy の算定と降伏イベント追跡
+//! - [`member_response`] — 終局時の部材別応答の算定
+//! - [`mechanism`] — 崩壊機構の判定
+//! - [`step_record`] — 確定ステップの記録（性能曲線・ヒンジ・部材履歴）
+//! - [`geom`] — 幾何ヘルパ（内積・軸圧縮力）
+
+mod diagnosis;
+mod driver;
+mod ductility;
+mod geom;
+mod hinge;
+mod mechanism;
+pub(crate) mod member_response;
+mod response;
+mod shear_yield;
+mod step_record;
+mod types;
+
+pub use driver::{pushover_analysis, pushover_analysis_recording};
+pub use response::story_reference_node;
+pub use types::{
+    CapacityPoint, DuctilityMethod, HingeEvent, HingeLevel, MechanismType, MemberHistory,
+    MemberStepState, PushoverControl, PushoverMemberResponse, PushoverResult, PushoverStep,
+    PushoverTarget, PushoverTermination, ShearYieldEvent,
+};
+
+#[cfg(test)]
+use crate::statics::analysis::SeismicDir;
+#[cfg(test)]
+use geom::{axial_compression, axial_force_signed};
+#[cfg(test)]
+use hinge::compute_hinge_thresholds;
+#[cfg(test)]
+use mechanism::{compute_static_indeterminacy, determine_mechanism};
+#[cfg(test)]
+use sepika_core::model::{Model, RigidZone};
+#[cfg(test)]
+use sepika_core::rc_capacity::{rc_mu_simple, rc_qsu_simple, RcCapacityInput};
+#[cfg(test)]
+use sepika_element::behavior::{Ctx, ElementBehavior, LocalVec};
+#[cfg(test)]
+use shear_yield::{
+    compute_shear_yield_qy, compute_shear_yield_thresholds, effective_clear_span,
+    track_shear_yield, DirThreshold, SecMaterials, ShearDir,
+};
+#[cfg(test)]
+use smallvec::SmallVec;
+
+#[cfg(test)]
+mod tests;

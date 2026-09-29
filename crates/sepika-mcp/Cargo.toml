@@ -1,0 +1,43 @@
+[package]
+name = "sepika-mcp"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[features]
+default = []
+mcp = ["dep:rmcp", "dep:tokio"]
+
+# MCP サーバ起動用バイナリ。ライブラリは feature なしでもビルドできるが、
+# stdio サーバの実体（rmcp/tokio）は mcp feature が要るため bin だけを
+# required-features でゲートする（feature なしのビルド対象から自動で外れる）。
+[[bin]]
+name = "sepika-mcp"
+path = "src/main.rs"
+required-features = ["mcp"]
+
+[dependencies]
+sepika-core = { path = "../sepika-core" }
+sepika-element = { path = "../sepika-element" }
+sepika-solver = { path = "../sepika-solver" }
+sepika-io = { path = "../sepika-io", features = ["parquet"] }
+sepika-edit = { path = "../sepika-edit" }
+# DesignCheck ジョブ（鋼/RC 許容応力度検定）用。
+sepika-design-jp = { path = "../sepika-design-jp" }
+sepika-job = { path = "../sepika-job" }
+sepika-load = { path = "../sepika-load" }
+rmcp = { workspace = true, optional = true }
+serde_json = { workspace = true }
+# result_get ツールで RecordBatch を JSON 行配列へ変換するために使う
+# （既知の4スキーマの列を手動で downcast する。arrow::json は使わない）。
+arrow = { workspace = true }
+# ワークスペース既定は schemars "0.8" だが、rmcp 1.x は内部で schemars "1" 系を使用しており、
+# ツール引数（Parameters<T>）はそちらの JsonSchema を満たす必要がある。
+# 本クレートの schemars::JsonSchema 派生は外部から要求されていないため、
+# ワークスペース共通版に合わせず本クレートだけ "1" 系に固定して衝突を避ける。
+schemars = "1"
+tokio = { workspace = true, optional = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+smallvec = { workspace = true }

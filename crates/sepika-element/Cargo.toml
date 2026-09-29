@@ -1,0 +1,18 @@
+[package]
+name = "sepika-element"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+bincode = { workspace = true }
+sepika-core   = { path = "../sepika-core" }
+sepika-math   = { path = "../sepika-math" }
+sepika-material = { path = "../sepika-material" }
+sepika-section = { path = "../sepika-section" }
+serde     = { workspace = true }
+smallvec  = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }

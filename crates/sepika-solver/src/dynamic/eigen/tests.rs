@@ -1,0 +1,1287 @@
+use super::*;
+use crate::common::constraint::Reducer;
+use sepika_core::dof::{Dof, Dof6Mask, DofMap};
+use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId, StoryId};
+use sepika_core::model::{
+    Constraint, ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Material,
+    MaterialCategory, Model, Node, Section,
+};
+
+/// Ux のみ自由（並進1方向）にするマスク。
+const FREE_UX: Dof6Mask = Dof6Mask(0b111110);
+
+/// 軸ばね 1 本（剛性 k=EA/L）＋先端質量 m の 1 自由度モデル。
+/// node0 固定、node1 は Ux のみ自由で質量 m を持つ。
+/// 理論固有周期 T = 2π√(m/k)。
+fn make_1dof_spring_model() -> Model {
+    let k = 1000.0_f64;
+    let m = 1.0_f64;
+    Model {
+        nodes: vec![
+            Node {
+                id: NodeId(0),
+                coord: [0.0, 0.0, 0.0],
+                restraint: Dof6Mask::FIXED,
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            Node {
+                id: NodeId(1),
+                coord: [1000.0, 0.0, 0.0],
+                restraint: FREE_UX,
+                mass: Some([m, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                story: None,
+                support_spring: None,
+            },
+        ],
+        elements: vec![ElementData {
+            id: ElemId(1),
+            kind: ElementKind::Beam,
+            nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 0.0, 1.0],
+            },
+            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        }],
+        sections: vec![Section {
+            frame_use: None,
+            id: SectionId(0),
+            name: "spring".into(),
+            area: 1.0,
+            iy: 1.0,
+            iz: 1.0,
+            j: 1.0,
+            depth: 1.0,
+            width: 1.0,
+            as_y: 1.0,
+            as_z: 1.0,
+            floor: None,
+            panel_thickness: None,
+            thickness: None,
+            shape: None,
+            material: Some(MaterialId(0)),
+            rebar_material: None,
+            shear_rebar_material: None,
+            steel_material: None,
+        }],
+        materials: vec![Material {
+            strength_factor: None,
+            concrete_class: Default::default(),
+            id: MaterialId(0),
+            name: "mat".into(),
+            category: MaterialCategory::Steel,
+            young: k * 1000.0 / 1.0,
+            poisson: 0.0,
+            density: 0.0,
+            shear: None,
+            fc: None,
+            fy: None,
+        }],
+        ..Default::default()
+    }
+}
+
+/// 2層等質量等剛性せん断モデル（軸ばね2本の直列）。
+/// node0 固定、node1/node2 は Ux のみ自由で各質量 m。
+/// K=[[2k,-k],[-k,k]], M=mI。λ=(k/m)(3∓√5)/2。
+fn make_shear_2dof_model() -> Model {
+    let k = 1000.0_f64;
+    let m = 1.0_f64;
+    let young = k * 1000.0;
+    let node = |id: u32, x: f64, restraint: Dof6Mask, mass: Option<[f64; 6]>| Node {
+        id: NodeId(id),
+        coord: [x, 0.0, 0.0],
+        restraint,
+        mass,
+        story: None,
+        support_spring: None,
+    };
+    let beam = |id: u32, a: u32, b: u32| ElementData {
+        id: ElemId(id),
+        kind: ElementKind::Beam,
+        nodes: smallvec::smallvec![NodeId(a), NodeId(b)],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    };
+    Model {
+        nodes: vec![
+            node(0, 0.0, Dof6Mask::FIXED, None),
+            node(1, 1000.0, FREE_UX, Some([m, 0.0, 0.0, 0.0, 0.0, 0.0])),
+            node(2, 2000.0, FREE_UX, Some([m, 0.0, 0.0, 0.0, 0.0, 0.0])),
+        ],
+        elements: vec![beam(1, 0, 1), beam(2, 1, 2)],
+        sections: vec![Section {
+            frame_use: None,
+            id: SectionId(0),
+            name: "spring".into(),
+            area: 1.0,
+            iy: 1.0,
+            iz: 1.0,
+            j: 1.0,
+            depth: 1.0,
+            width: 1.0,
+            as_y: 1.0,
+            as_z: 1.0,
+            floor: None,
+            panel_thickness: None,
+            thickness: None,
+            shape: None,
+            material: Some(MaterialId(0)),
+            rebar_material: None,
+            shear_rebar_material: None,
+            steel_material: None,
+        }],
+        materials: vec![Material {
+            strength_factor: None,
+            concrete_class: Default::default(),
+            id: MaterialId(0),
+            name: "mat".into(),
+            category: MaterialCategory::Steel,
+            young,
+            poisson: 0.0,
+            density: 0.0,
+            shear: None,
+            fc: None,
+            fy: None,
+        }],
+        ..Default::default()
+    }
+}
+
+/// 門型ラーメン相当モデル（柱2本＋梁1本、柱脚固定）。
+/// 質量は柱頭2節点の水平(Ux)自由度のみに集中質量として与える（水平質点系）。
+/// 縮約後質量行列 M_red のランクは 2 になる。
+fn make_portal_frame_like_model(top_mass: f64) -> Model {
+    let coords = [
+        [0.0, 0.0, 0.0],
+        [6000.0, 0.0, 0.0],
+        [0.0, 0.0, 3500.0],
+        [6000.0, 0.0, 3500.0],
+    ];
+    let nodes = coords
+        .iter()
+        .enumerate()
+        .map(|(i, c)| Node {
+            id: NodeId(i as u32),
+            coord: *c,
+            restraint: if i < 2 {
+                Dof6Mask::FIXED
+            } else {
+                Dof6Mask::FREE
+            },
+            mass: if i >= 2 && top_mass > 0.0 {
+                Some([top_mass, 0.0, 0.0, 0.0, 0.0, 0.0])
+            } else {
+                None
+            },
+            story: None,
+            support_spring: None,
+        })
+        .collect();
+    let col_section = Section {
+        frame_use: None,
+        id: SectionId(0),
+        name: "col".into(),
+        area: 11980.0,
+        iy: 2.04e8,
+        iz: 6.75e7,
+        j: 3.54e6,
+        depth: 300.0,
+        width: 300.0,
+        as_y: 6000.0,
+        as_z: 6000.0,
+        floor: None,
+        panel_thickness: None,
+        thickness: None,
+        shape: None,
+        material: Some(MaterialId(0)),
+        rebar_material: None,
+        shear_rebar_material: None,
+        steel_material: None,
+    };
+    let beam_section = Section {
+        frame_use: None,
+        id: SectionId(1),
+        name: "beam".into(),
+        area: 8337.0,
+        iy: 2.37e8,
+        iz: 2.62e7,
+        j: 1.0e6,
+        depth: 400.0,
+        width: 200.0,
+        as_y: 4000.0,
+        as_z: 4000.0,
+        floor: None,
+        panel_thickness: None,
+        thickness: None,
+        shape: None,
+        material: Some(MaterialId(0)),
+        rebar_material: None,
+        shear_rebar_material: None,
+        steel_material: None,
+    };
+    let members = [(0u32, 1u32, 2u32, 0u32), (1, 1, 3, 0), (2, 2, 3, 1)];
+    let elements = members
+        .iter()
+        .map(|&(id, i, j, sec)| ElementData {
+            id: ElemId(id),
+            kind: ElementKind::Beam,
+            nodes: smallvec::smallvec![NodeId(i), NodeId(j)],
+            section: Some(SectionId(sec)),
+            local_axis: LocalAxis {
+                ref_vector: if sec == 0 {
+                    [1.0, 0.0, 0.0]
+                } else {
+                    [0.0, 0.0, 1.0]
+                },
+            },
+            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        })
+        .collect();
+    Model {
+        nodes,
+        elements,
+        sections: vec![col_section, beam_section],
+        materials: vec![Material {
+            strength_factor: None,
+            concrete_class: Default::default(),
+            id: MaterialId(0),
+            name: "SN400B".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 0.0,
+            shear: None,
+            fc: None,
+            fy: Some(235.0),
+        }],
+        ..Default::default()
+    }
+}
+
+/// 質量ランク(=2)が要求モード数(2)ちょうどでも2つの有限な固有値が得られること。
+#[test]
+fn test_eigen_portal_frame_like_mass_rank_equals_n_modes() {
+    let model = make_portal_frame_like_model(1.0e-3);
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = solve_eigen(&model, &dofmap, &reducer, 2)
+        .expect("質量ランクが要求モード数以上なら解けるべき");
+
+    assert_eq!(result.omega2.len(), 2);
+    for (i, &w2) in result.omega2.iter().enumerate() {
+        assert!(
+            w2.is_finite() && w2 > 0.0,
+            "mode{}: omega2={} は有限な正値であるべき(f64::MAX 混入は禁止)",
+            i,
+            w2
+        );
+    }
+    for (i, &t) in result.period.iter().enumerate() {
+        assert!(
+            t.is_finite() && t > 0.0,
+            "mode{}: period={} は有限な正値であるべき",
+            i,
+            t
+        );
+    }
+    // 周期は昇順のモードで降順（1次が最長周期）。
+    assert!(
+        result.period[0] > result.period[1],
+        "T1={} T2={} は T1>T2 であるべき",
+        result.period[0],
+        result.period[1]
+    );
+}
+
+/// 質量ランク不足(ランク1)で2モードを要求した場合は、f64::MAX を混ぜて返さず、
+/// 日本語の明示エラーを返すことを確認する。
+#[test]
+fn test_eigen_mass_rank_deficient_returns_explicit_error() {
+    let mut model = make_portal_frame_like_model(1.0e-3);
+    // node3(柱頭2つ目)の質量を落とし、質量ランクを 1 にする。
+    model.nodes[3].mass = None;
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = solve_eigen(&model, &dofmap, &reducer, 2);
+    let err = match result {
+        Err(e) => e,
+        Ok(r) => panic!(
+            "質量ランク(1) < 要求モード数(2) はエラーになるべきだが omega2={:?} が返った",
+            r.omega2
+        ),
+    };
+    let msg = err.to_string();
+    assert!(
+        msg.contains("質量"),
+        "エラーメッセージは質量ランク不足を説明すべき: {}",
+        msg
+    );
+}
+
+/// 負の節点質量（符号誤りなどの入力不備）は、M の半正定値性が崩れて一般化
+/// Jacobi の前提が破れ誤った固有値が「正常終了」で返るため、明示エラーになること。
+#[test]
+fn test_eigen_negative_mass_returns_explicit_error() {
+    let mut model = make_portal_frame_like_model(1.0e-3);
+    // 合計質量（トレース）は正のまま、対角に負が混じる状態を作る
+    // （トレースまで非正だと既存の「質量ゼロ」検出が先に発火する）。
+    model.nodes[2].mass = Some([-0.5e-3, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = solve_eigen(&model, &dofmap, &reducer, 1);
+    let err = match result {
+        Err(e) => e,
+        Ok(r) => panic!(
+            "負質量はエラーになるべきだが omega2={:?} が返った",
+            r.omega2
+        ),
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("負"), "エラーは負質量を説明すべき: {}", msg);
+}
+
+/// `gevd_jacobi` は M=I（単位行列）を渡すと標準固有値問題 K z = θ z に一致する。
+#[test]
+fn test_gevd_jacobi_2x2_identity_mass() {
+    let k = vec![2.0, 1.0, 1.0, 3.0];
+    let m = vec![1.0, 0.0, 0.0, 1.0];
+    let (vals, vecs) = gevd_jacobi(&k, &m, 2);
+    let expected_1 = (5.0 - 5.0_f64.sqrt()) / 2.0;
+    let expected_2 = (5.0 + 5.0_f64.sqrt()) / 2.0;
+    assert!((vals[0] - expected_1).abs() < 1e-10, "val0={}", vals[0]);
+    assert!((vals[1] - expected_2).abs() < 1e-10, "val1={}", vals[1]);
+    // M=I 正規直交（zᵀz=1）であることを確認する。
+    for j in 0..2 {
+        let mut norm = 0.0;
+        for i in 0..2 {
+            norm += vecs[i * 2 + j] * vecs[i * 2 + j];
+        }
+        assert!((norm - 1.0).abs() < 1e-10, "vec{} not normalized", j);
+    }
+}
+
+#[test]
+fn test_1dof_period() {
+    let k = 1000.0_f64;
+    let m = 1.0_f64;
+    let expected_omega2 = k / m;
+    let expected_t = 2.0 * std::f64::consts::PI / expected_omega2.sqrt();
+
+    let model = make_1dof_spring_model();
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = solve_eigen(&model, &dofmap, &reducer, 1).unwrap();
+
+    // 質量・自由度が正しく組まれていれば 1 モードが得られる。
+    assert_eq!(result.omega2.len(), 1, "1 モードが解けていない");
+    assert!(result.omega2[0] > 0.0, "omega2={}", result.omega2[0]);
+    // 反復解法だが SPD 1 自由度なので高精度に収束する（理論一致・許容差）。
+    assert!(
+        (result.omega2[0] - expected_omega2).abs() / expected_omega2 < 1e-8,
+        "omega2={} expected={}",
+        result.omega2[0],
+        expected_omega2
+    );
+    // T = 0.198692 s の例と一致。
+    assert!(
+        (result.period[0] - expected_t).abs() / expected_t < 1e-8,
+        "T={} expected={}",
+        result.period[0],
+        expected_t
+    );
+    assert!(
+        (result.period[0] - 0.198692).abs() < 1e-5,
+        "T={} 参照値 0.198692 と不一致",
+        result.period[0]
+    );
+}
+
+/// 固定端−自由端の軸振動で、整合質量の自由端側質量 `m/3` と理論固有値を照合する。
+#[test]
+fn test_1dof_beam_consistent_axial_mass_matches_theory() {
+    let mut model = make_1dof_spring_model();
+    model.nodes[1].mass = None;
+    model.materials[0].density = 1.0e-3;
+
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = solve_eigen(&model, &dofmap, &reducer, 1).unwrap();
+    let total_mass = model.materials[0].density * model.sections[0].area * 1000.0;
+    let stiffness = model.materials[0].young * model.sections[0].area / 1000.0;
+    let expected_omega2 = 3.0 * stiffness / total_mass;
+
+    assert!((result.omega2[0] - expected_omega2).abs() / expected_omega2 < 1e-8);
+}
+
+/// H形鋼相当の開断面で、ねじり剛性 GJ と質量極二次モーメント ρ(Iy+Iz)
+/// を分離して固有値へ反映することを、Beam 要素から固有値解析まで確認する。
+#[test]
+fn test_eigen_pure_torsion_uses_mass_polar_inertia_not_j() {
+    let mut model = make_1dof_spring_model();
+    let mut free_rx = Dof6Mask::FIXED;
+    free_rx.set_free(Dof::Rx);
+    model.nodes[1].restraint = free_rx;
+    model.nodes[1].mass = None;
+    let length = 1000.0;
+    let j = 1.0e6;
+    let iy = 2.0e8;
+    let iz = 5.0e7;
+    let density = 7.85e-9;
+    model.nodes[1].coord = [length, 0.0, 0.0];
+    model.sections[0].area = 10000.0;
+    model.sections[0].iy = iy;
+    model.sections[0].iz = iz;
+    model.sections[0].j = j;
+    model.materials[0].young = 205000.0;
+    model.materials[0].poisson = 0.3;
+    model.materials[0].density = density;
+
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = solve_eigen(&model, &dofmap, &reducer, 1).unwrap();
+    let shear = model.materials[0].shear_modulus();
+    let expected_omega2 = 3.0 * shear * j / (density * (iy + iz) * length.powi(2));
+    assert!(
+        (result.omega2[0] - expected_omega2).abs() / expected_omega2 < 1e-8,
+        "ω²={} 理論値={}（J と Iy+Iz の取り違え）",
+        result.omega2[0],
+        expected_omega2
+    );
+}
+
+/// 2層せん断モデル: T1=0.32150、T2=0.12280 へ収束し、2モードで有効質量比合計が約100%になること。
+#[test]
+fn test_2dof_shear_period_and_mass() {
+    let model = make_shear_2dof_model();
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = solve_eigen(&model, &dofmap, &reducer, 2).unwrap();
+
+    assert_eq!(result.omega2.len(), 2);
+    let k = 1000.0_f64;
+    let m = 1.0_f64;
+    let lam1 = (k / m) * (3.0 - 5.0_f64.sqrt()) / 2.0;
+    let lam2 = (k / m) * (3.0 + 5.0_f64.sqrt()) / 2.0;
+
+    assert!(
+        (result.omega2[0] - lam1).abs() / lam1 < 1e-6,
+        "λ1={} expected={}",
+        result.omega2[0],
+        lam1
+    );
+    assert!(
+        (result.omega2[1] - lam2).abs() / lam2 < 1e-6,
+        "λ2={} expected={}",
+        result.omega2[1],
+        lam2
+    );
+
+    let t1 = 2.0 * std::f64::consts::PI / result.omega2[0].sqrt();
+    let t2 = 2.0 * std::f64::consts::PI / result.omega2[1].sqrt();
+    assert!((t1 - 0.32150).abs() < 1e-4, "T1={}", t1);
+    assert!((t2 - 0.12280).abs() < 1e-4, "T2={}", t2);
+
+    // X 方向有効質量の合計が全質量 2m に一致（有効質量比合計 ≈100%）。
+    let total_mass = 2.0 * m;
+    let eff_sum: f64 = result.effective_mass.iter().map(|e| e[0]).sum();
+    assert!(
+        (eff_sum - total_mass).abs() / total_mass < 1e-6,
+        "有効質量合計={} 全質量={}",
+        eff_sum,
+        total_mass
+    );
+    // モード1 が支配的。理論値は閉形式から求める（このKでは ≈94.7%）。
+    // 1次モード形 φ=[1, k/(k−λ1)] より Meff1 = (Σφ)²/(Σφ²)。
+    let s = k / (k - lam1);
+    let meff1_theory = (1.0 + s).powi(2) / (1.0 + s * s);
+    let ratio1 = result.effective_mass[0][0] / total_mass;
+    assert!(
+        (ratio1 - meff1_theory / total_mass).abs() < 1e-6,
+        "mode1 有効質量比={} 理論={}",
+        ratio1,
+        meff1_theory / total_mass
+    );
+}
+
+/// 質量方式 LumpedOnly では部材密度による要素質量を質量行列に算入しないこと。
+#[test]
+fn test_eigen_mass_method_lumped_only_skips_element_mass() {
+    let mut model = make_1dof_spring_model();
+    // 密度を与えて要素質量を発生させる（値は節点質量と同程度のオーダー）。
+    model.materials[0].density = 1.0e-3;
+
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let t_default = solve_eigen(&model, &dofmap, &reducer, 1).unwrap().period[0];
+
+    model.mass_method = sepika_core::model::MassMethod::LumpedOnly;
+    let t_lumped = solve_eigen(&model, &dofmap, &reducer, 1).unwrap().period[0];
+
+    let k = 1000.0_f64;
+    let m = 1.0;
+    let t_theory = 2.0 * std::f64::consts::PI * (m / k).sqrt();
+    assert!(
+        (t_lumped - t_theory).abs() < 1e-9 * t_theory,
+        "LumpedOnly の周期 {} が節点質量のみの理論値 {} と不一致",
+        t_lumped,
+        t_theory
+    );
+    assert!(
+        t_default > t_theory * 1.01,
+        "既定方式の周期 {} は要素質量の分だけ理論値 {} より長くなるはず",
+        t_default,
+        t_theory
+    );
+}
+
+/// 決定性テスト: 固有値解析を2回実行しビット一致を確認
+#[test]
+fn test_eigen_deterministic() {
+    let model = make_1dof_spring_model();
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let first = solve_eigen(&model, &dofmap, &reducer, 1).unwrap();
+    let cur = solve_eigen(&model, &dofmap, &reducer, 1).unwrap();
+    assert_eq!(first.omega2.len(), cur.omega2.len());
+    for (a, b) in first.omega2.iter().zip(cur.omega2.iter()) {
+        assert_eq!(a.to_bits(), b.to_bits());
+    }
+    for (a, b) in first.period.iter().zip(cur.period.iter()) {
+        assert_eq!(a.to_bits(), b.to_bits());
+    }
+    for (s_a, s_b) in first.shapes.iter().zip(cur.shapes.iter()) {
+        assert_eq!(s_a.len(), s_b.len());
+        for (va, vb) in s_a.iter().zip(s_b.iter()) {
+            assert_eq!(va.to_bits(), vb.to_bits());
+        }
+    }
+}
+
+/// 柱2本＋剛床モデル。柱頭2節点を浮遊マスター節点へ RigidDiaphragm で従属させる。
+/// マスターには並進(Ux,Uy)と回転(Rz)の集中質量を与える（質量ランクは3）。
+fn make_diaphragm_columns_model(top_mass: f64, rot_mass: f64) -> Model {
+    let col_section = Section {
+        frame_use: None,
+        id: SectionId(0),
+        name: "col".into(),
+        area: 11980.0,
+        iy: 2.04e8,
+        iz: 6.75e7,
+        j: 3.54e6,
+        depth: 300.0,
+        width: 300.0,
+        as_y: 6000.0,
+        as_z: 6000.0,
+        floor: None,
+        panel_thickness: None,
+        thickness: None,
+        shape: None,
+        material: Some(MaterialId(0)),
+        rebar_material: None,
+        shear_rebar_material: None,
+        steel_material: None,
+    };
+    let mut master_restraint = Dof6Mask::FREE;
+    master_restraint.set_fixed(Dof::Uz);
+    master_restraint.set_fixed(Dof::Rx);
+    master_restraint.set_fixed(Dof::Ry);
+
+    Model {
+        nodes: vec![
+            Node {
+                id: NodeId(0),
+                coord: [0.0, 0.0, 0.0],
+                restraint: Dof6Mask::FIXED,
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            // 柱頭(スレーブ1): X方向にオフセット
+            Node {
+                id: NodeId(1),
+                coord: [0.0, 0.0, 3500.0],
+                restraint: Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            // マスター(剛床代表節点): 面内(Ux,Uy,Rz)のみ自由
+            Node {
+                id: NodeId(2),
+                coord: [1000.0, 0.0, 3500.0],
+                restraint: master_restraint,
+                mass: Some([top_mass, top_mass, 0.0, 0.0, 0.0, rot_mass]),
+                story: None,
+                support_spring: None,
+            },
+            // 柱頭(スレーブ2): Y方向にオフセット（マスターから見て非対称な配置）
+            Node {
+                id: NodeId(3),
+                coord: [0.0, 1000.0, 3500.0],
+                restraint: Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+        ],
+        elements: vec![
+            ElementData {
+                id: ElemId(0),
+                kind: ElementKind::Beam,
+                nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
+                section: Some(SectionId(0)),
+                local_axis: LocalAxis {
+                    ref_vector: [1.0, 0.0, 0.0],
+                },
+                end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+                force_regime: ForceRegime::Auto,
+                rigid_zone: Default::default(),
+                plastic_zone: None,
+                spring: None,
+            },
+            ElementData {
+                id: ElemId(1),
+                kind: ElementKind::Beam,
+                nodes: smallvec::smallvec![NodeId(0), NodeId(3)],
+                section: Some(SectionId(0)),
+                local_axis: LocalAxis {
+                    ref_vector: [1.0, 0.0, 0.0],
+                },
+                end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+                force_regime: ForceRegime::Auto,
+                rigid_zone: Default::default(),
+                plastic_zone: None,
+                spring: None,
+            },
+        ],
+        sections: vec![col_section],
+        materials: vec![Material {
+            strength_factor: None,
+            concrete_class: Default::default(),
+            id: MaterialId(0),
+            name: "SN400B".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 0.0,
+            shear: None,
+            fc: None,
+            fy: Some(235.0),
+        }],
+        constraints: vec![Constraint::rigid_diaphragm(
+            StoryId(0),
+            NodeId(2),
+            vec![NodeId(1), NodeId(3)],
+        )],
+        ..Default::default()
+    }
+}
+
+/// `ModalResult::node_shapes` が剛床の剛体変位の運動学を満たすこと。
+/// 固定節点の成分が0であること、モード数・節点数が整合すること。
+#[test]
+fn test_eigen_node_shapes_rigid_diaphragm_kinematics() {
+    let top_mass = 1.0e-3;
+    let rot_mass = 5.0e4;
+    let model = make_diaphragm_columns_model(top_mass, rot_mass);
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let n_modes = 3;
+    let result = solve_eigen(&model, &dofmap, &reducer, n_modes)
+        .expect("質量ランク(Ux,Uy,Rz=3)ちょうどの要求モード数(3)は解けるべき");
+
+    // (a) モード数・節点数の整合
+    assert_eq!(
+        result.node_shapes.len(),
+        result.shapes.len(),
+        "node_shapes のモード数が shapes と不一致"
+    );
+    assert_eq!(result.node_shapes.len(), n_modes);
+    for ns in &result.node_shapes {
+        assert_eq!(ns.len(), model.nodes.len(), "node_shapes の節点数が不一致");
+    }
+
+    let master = 2usize;
+    let master_coord = model.nodes[master].coord;
+    let slaves = [1usize, 3];
+
+    // (c) 全モードで水平成分が自明にゼロにならないことの確認用
+    let mut max_horizontal: f64 = 0.0;
+    // 回転成分についても同様に確認する（θz が全モードでゼロなら、
+    // 剛床の回転項(θz·dx, θz·dy)を実質的に検証していないことになるため）。
+    let mut max_rotation: f64 = 0.0;
+
+    for ns in &result.node_shapes {
+        let ux_m = ns[master][0];
+        let uy_m = ns[master][1];
+        let theta_z = ns[master][5];
+        max_horizontal = max_horizontal.max(ux_m.abs()).max(uy_m.abs());
+        max_rotation = max_rotation.max(theta_z.abs());
+
+        // (b) 剛床スレーブの水平成分が剛体条件と整合すること。
+        // 許容誤差は「相対1e-9」を基本としつつ、期待値がモード内の代表的な
+        // 変位スケールに対してほぼ0になる場合でも誤って厳しくなりすぎない
+        // よう、モード内の最大変位スケールに対する絶対誤差1e-9も許容する
+        // （相対誤差1e-9 と 絶対誤差1e-9・(モード内最大スケール) の緩い方）。
+        let mode_scale = ux_m
+            .abs()
+            .max(uy_m.abs())
+            .max((theta_z * 1000.0_f64).abs())
+            .max(1.0);
+        for &s in &slaves {
+            let dx = model.nodes[s].coord[0] - master_coord[0];
+            let dy = model.nodes[s].coord[1] - master_coord[1];
+            let expected_ux = ux_m - theta_z * dy;
+            let expected_uy = uy_m + theta_z * dx;
+
+            let tol_ux = 1e-9 * expected_ux.abs().max(mode_scale);
+            let tol_uy = 1e-9 * expected_uy.abs().max(mode_scale);
+            assert!(
+                (ns[s][0] - expected_ux).abs() < tol_ux,
+                "slave{} ux: got={} want={}",
+                s,
+                ns[s][0],
+                expected_ux
+            );
+            assert!(
+                (ns[s][1] - expected_uy).abs() < tol_uy,
+                "slave{} uy: got={} want={}",
+                s,
+                ns[s][1],
+                expected_uy
+            );
+        }
+
+        // (d) 固定(柱脚)節点は全成分0
+        for (comp, &v) in ns[0].iter().enumerate() {
+            assert_eq!(v, 0.0, "固定節点0 成分{} は0であるべき: {}", comp, v);
+        }
+    }
+
+    assert!(
+        max_horizontal > 1e-6,
+        "全モードで水平成分がほぼ0（自明に成立するだけの検証になっている）: max={}",
+        max_horizontal
+    );
+    assert!(
+        max_rotation > 1e-9,
+        "全モードで回転成分θzがほぼ0（剛床の回転項を実質検証できていない）: max={}",
+        max_rotation
+    );
+}
+
+/// 柱4本＋剛床の1層モデル。柱頭4節点をスレーブとし、床重心の浮遊マスター節点に集中質量を与える（質量ランクは3）。
+fn make_four_column_diaphragm_model(top_mass: f64, rot_mass: f64) -> Model {
+    let col_section = Section {
+        frame_use: None,
+        id: SectionId(0),
+        name: "col".into(),
+        area: 11980.0,
+        iy: 2.04e8,
+        iz: 6.75e7,
+        j: 3.54e6,
+        depth: 300.0,
+        width: 300.0,
+        as_y: 6000.0,
+        as_z: 6000.0,
+        floor: None,
+        panel_thickness: None,
+        thickness: None,
+        shape: None,
+        material: Some(MaterialId(0)),
+        rebar_material: None,
+        shear_rebar_material: None,
+        steel_material: None,
+    };
+    let mut master_restraint = Dof6Mask::FREE;
+    master_restraint.set_fixed(Dof::Uz);
+    master_restraint.set_fixed(Dof::Rx);
+    master_restraint.set_fixed(Dof::Ry);
+
+    let bases = [[0.0, 0.0], [6000.0, 0.0], [0.0, 6000.0], [6000.0, 6000.0]];
+    let mut nodes = Vec::new();
+    let mut elements = Vec::new();
+    let mut slaves = Vec::new();
+    for (i, [x, y]) in bases.iter().enumerate() {
+        let base_id = NodeId((i * 2) as u32);
+        let top_id = NodeId((i * 2 + 1) as u32);
+        nodes.push(Node {
+            id: base_id,
+            coord: [*x, *y, 0.0],
+            restraint: Dof6Mask::FIXED,
+            mass: None,
+            story: None,
+            support_spring: None,
+        });
+        nodes.push(Node {
+            id: top_id,
+            coord: [*x, *y, 3500.0],
+            restraint: Dof6Mask::FREE,
+            mass: None,
+            story: None,
+            support_spring: None,
+        });
+        elements.push(ElementData {
+            id: ElemId(i as u32),
+            kind: ElementKind::Beam,
+            nodes: smallvec::smallvec![base_id, top_id],
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis {
+                ref_vector: [1.0, 0.0, 0.0],
+            },
+            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        });
+        slaves.push(top_id);
+    }
+    let master_id = NodeId(8);
+    nodes.push(Node {
+        id: master_id,
+        coord: [3000.0, 3000.0, 3500.0],
+        restraint: master_restraint,
+        mass: Some([top_mass, top_mass, 0.0, 0.0, 0.0, rot_mass]),
+        story: None,
+        support_spring: None,
+    });
+
+    Model {
+        nodes,
+        elements,
+        sections: vec![col_section],
+        materials: vec![Material {
+            strength_factor: None,
+            concrete_class: Default::default(),
+            id: MaterialId(0),
+            name: "SN400B".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 0.0,
+            shear: None,
+            fc: None,
+            fy: Some(235.0),
+        }],
+        constraints: vec![Constraint::rigid_diaphragm(StoryId(0), master_id, slaves)],
+        ..Default::default()
+    }
+}
+
+/// 並進質量と回転慣性のスケール差があっても質量ランク判定が過少検出されないこと。
+#[test]
+fn test_eigen_mass_rank_translation_rotation_scale_mix() {
+    let top_mass = 1.0e-3;
+    let rot_mass = 5.0e4;
+    let model = make_four_column_diaphragm_model(top_mass, rot_mass);
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = solve_eigen(&model, &dofmap, &reducer, 3)
+        .expect("質量ランク3（マスターのUx,Uy,Rz）に対し3モードの要求は解けるべき");
+
+    assert_eq!(result.period.len(), 3);
+    for (i, &t) in result.period.iter().enumerate() {
+        assert!(
+            t.is_finite() && t > 0.0,
+            "モード{}の周期が正の有限値でない: {}",
+            i + 1,
+            t
+        );
+    }
+
+    // 正方形対称配置なので X/Y 並進は同一周期の縮退モード、回転(Rz)モードが
+    // 別周期で現れる。有効質量は X・Y 各方向とも全質量（top_mass）が
+    // 並進モードに現れるはず（合計で相対誤差1e-6以内）。
+    for dir in 0..2 {
+        let sum: f64 = result.effective_mass.iter().map(|em| em[dir]).sum();
+        assert!(
+            (sum - top_mass).abs() < 1e-6 * top_mass,
+            "方向{}の有効質量合計 {} が全質量 {} と不一致",
+            dir,
+            sum,
+            top_mass
+        );
+    }
+}
+
+/// 質量が非対称な2層軸ばねモデルの解析解と比較して質量重み付けが正しく効いていること。
+#[test]
+fn test_2dof_shear_unequal_mass_matches_analytic() {
+    let k = 1000.0_f64;
+    let young = k * 1000.0;
+    let node = |id: u32, x: f64, restraint: Dof6Mask, mass: Option<[f64; 6]>| Node {
+        id: NodeId(id),
+        coord: [x, 0.0, 0.0],
+        restraint,
+        mass,
+        story: None,
+        support_spring: None,
+    };
+    let beam = |id: u32, a: u32, b: u32| ElementData {
+        id: ElemId(id),
+        kind: ElementKind::Beam,
+        nodes: smallvec::smallvec![NodeId(a), NodeId(b)],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    };
+    let model = Model {
+        nodes: vec![
+            node(0, 0.0, Dof6Mask::FIXED, None),
+            node(1, 1000.0, FREE_UX, Some([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])),
+            node(2, 2000.0, FREE_UX, Some([2.0, 0.0, 0.0, 0.0, 0.0, 0.0])),
+        ],
+        elements: vec![beam(1, 0, 1), beam(2, 1, 2)],
+        sections: vec![Section {
+            frame_use: None,
+            id: SectionId(0),
+            name: "spring".into(),
+            area: 1.0,
+            iy: 1.0,
+            iz: 1.0,
+            j: 1.0,
+            depth: 1.0,
+            width: 1.0,
+            as_y: 1.0,
+            as_z: 1.0,
+            floor: None,
+            panel_thickness: None,
+            thickness: None,
+            shape: None,
+            material: Some(MaterialId(0)),
+            rebar_material: None,
+            shear_rebar_material: None,
+            steel_material: None,
+        }],
+        materials: vec![Material {
+            strength_factor: None,
+            concrete_class: Default::default(),
+            id: MaterialId(0),
+            name: "mat".into(),
+            category: MaterialCategory::Steel,
+            young,
+            poisson: 0.0,
+            density: 0.0,
+            shear: None,
+            fc: None,
+            fy: None,
+        }],
+        ..Default::default()
+    };
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = solve_eigen(&model, &dofmap, &reducer, 2).unwrap();
+
+    // 2λ² - 5000λ + 1e6 = 0 の根（K=[[2000,-1000],[-1000,1000]], M=diag(1,2)）
+    let disc = (5000.0_f64.powi(2) - 4.0 * 2.0 * 1.0e6).sqrt();
+    let lam1 = (5000.0 - disc) / 4.0;
+    let lam2 = (5000.0 + disc) / 4.0;
+    assert!(
+        (result.omega2[0] - lam1).abs() / lam1 < 1e-6,
+        "λ1計算値={} 理論値={}",
+        result.omega2[0],
+        lam1
+    );
+    assert!(
+        (result.omega2[1] - lam2).abs() / lam2 < 1e-6,
+        "λ2計算値={} 理論値={}",
+        result.omega2[1],
+        lam2
+    );
+}
+
+/// 固定端＋直列質点 `n_masses` 個の1次元モデル。
+/// 質量を大小交互（奇数番目 1.0、偶数番目 50.0）にして質量分布を強く非一様にする。
+fn make_mass_chain_model(n_masses: usize) -> Model {
+    let k = 1000.0_f64;
+    let young = k * 1000.0;
+    let mut nodes = vec![Node {
+        id: NodeId(0),
+        coord: [0.0, 0.0, 0.0],
+        restraint: Dof6Mask::FIXED,
+        mass: None,
+        story: None,
+        support_spring: None,
+    }];
+    for i in 1..=n_masses {
+        let m = if i % 2 == 1 { 1.0 } else { 50.0 };
+        nodes.push(Node {
+            id: NodeId(i as u32),
+            coord: [1000.0 * i as f64, 0.0, 0.0],
+            restraint: FREE_UX,
+            mass: Some([m, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            story: None,
+            support_spring: None,
+        });
+    }
+    let elements = (0..n_masses)
+        .map(|i| ElementData {
+            id: ElemId(i as u32 + 1),
+            kind: ElementKind::Beam,
+            nodes: smallvec::smallvec![NodeId(i as u32), NodeId(i as u32 + 1)],
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 0.0, 1.0],
+            },
+            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        })
+        .collect();
+    Model {
+        nodes,
+        elements,
+        sections: vec![Section {
+            frame_use: None,
+            id: SectionId(0),
+            name: "spring".into(),
+            area: 1.0,
+            iy: 1.0,
+            iz: 1.0,
+            j: 1.0,
+            depth: 1.0,
+            width: 1.0,
+            as_y: 1.0,
+            as_z: 1.0,
+            floor: None,
+            panel_thickness: None,
+            thickness: None,
+            shape: None,
+            material: Some(MaterialId(0)),
+            rebar_material: None,
+            shear_rebar_material: None,
+            steel_material: None,
+        }],
+        materials: vec![Material {
+            strength_factor: None,
+            concrete_class: Default::default(),
+            id: MaterialId(0),
+            name: "mat".into(),
+            category: MaterialCategory::Steel,
+            young,
+            poisson: 0.0,
+            density: 0.0,
+            shear: None,
+            fc: None,
+            fy: None,
+        }],
+        ..Default::default()
+    }
+}
+
+/// `subspace_size` が Bathe 2013 式(19) の q = min(n, max(2p, p+8)) を
+/// （p = min(p_req, n)）満たすこと。
+#[test]
+fn test_subspace_size_table() {
+    let cases: [(usize, usize, usize); 10] = [
+        (100, 1, 9),
+        (100, 2, 10),
+        (100, 3, 11),
+        (100, 6, 14),
+        (100, 8, 16),
+        (100, 9, 18),
+        (10, 6, 10),
+        (3, 10, 3),
+        (0, 1, 0),
+        (5, 0, 0),
+    ];
+    for (n, requested, expected) in cases {
+        assert_eq!(
+            subspace_size(n, requested),
+            expected,
+            "n={n} requested={requested}"
+        );
+    }
+}
+
+/// 部分空間サイズ q < n のとき、部分空間反復の結果が同じ K_red/M_red の
+/// dense 厳密解と一致することの回帰テスト。
+#[test]
+fn test_eigen_subspace_matches_dense_ground_truth_q_lt_n() {
+    // n_modes=1・n=12 で q=min(12, max(2, 9))=9 < n となる。質量分布を強く
+    // 非一様にしても、部分空間が n を張れない条件で最低次モードへ正しく
+    // 収束することを、同じ K_red/M_red を dense 化して gevd_jacobi に直接
+    // 渡した「厳密解（反復なし）」と比較して確認する。
+    let n_masses = 12usize;
+    let model = make_mass_chain_model(n_masses);
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+
+    let result = solve_eigen(&model, &dofmap, &reducer, 1).unwrap();
+
+    // 同じ K_red/M_red を dense 化し、gevd_jacobi へ直接渡す（反復なしの厳密解）。
+    let k_free = assemble_global_k(&model, &dofmap);
+    let k_red = reducer.reduce_k(&k_free);
+    let m_free = assemble_global_m(
+        &model,
+        &dofmap,
+        sepika_element::behavior::MassOption::Consistent,
+    );
+    let m_red = reducer.reduce_k(&m_free);
+    let n = k_red.nrows();
+    let mut k_dense = vec![0.0; n * n];
+    let mut m_dense = vec![0.0; n * n];
+    for i in 0..n {
+        for j in 0..n {
+            k_dense[i * n + j] = k_red.get(i, j).copied().unwrap_or(0.0);
+            m_dense[i * n + j] = m_red.get(i, j).copied().unwrap_or(0.0);
+        }
+    }
+    let (exact_vals, _) = gevd_jacobi(&k_dense, &m_dense, n);
+
+    assert!(
+        (result.omega2[0] - exact_vals[0]).abs() / exact_vals[0] < 1e-6,
+        "部分空間反復の結果 {} が厳密解 {} と不一致（q<n での収束先ずれの疑い）",
+        result.omega2[0],
+        exact_vals[0]
+    );
+}
+
+/// 要求モード数が縮約後自由度数を超える場合は、自由度数まで切り詰めて正常終了すること。
+#[test]
+fn test_eigen_requested_modes_above_n_is_truncated() {
+    let n_masses = 12usize;
+    let model = make_mass_chain_model(n_masses);
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = solve_eigen(&model, &dofmap, &reducer, n_masses + 8)
+        .expect("要求モード数が自由度数を超えても自由度数まで切り詰めて解けるべき");
+
+    assert_eq!(
+        result.omega2.len(),
+        n_masses,
+        "返るモード数は縮約後自由度数まで切り詰められるべき"
+    );
+    for (i, &w2) in result.omega2.iter().enumerate() {
+        assert!(
+            w2.is_finite() && w2 > 0.0,
+            "mode{}: omega2={} は有限な正値であるべき",
+            i,
+            w2
+        );
+    }
+}
+
+/// 同一断面・同一長さの片持ち梁をX方向とZ方向に置いたとき、固有周期が一致すること。
+#[test]
+fn test_eigen_consistent_mass_orientation_invariant() {
+    // iy=iz・as_y=as_z の対称断面とし、部材の向きだけが異なるモデルを作る。
+    let make_cantilever = |dir: [f64; 3], ref_vector: [f64; 3]| -> Model {
+        let l = 3000.0;
+        let nodes = vec![
+            Node {
+                id: NodeId(0),
+                coord: [0.0, 0.0, 0.0],
+                restraint: Dof6Mask::FIXED,
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+            Node {
+                id: NodeId(1),
+                coord: [dir[0] * l, dir[1] * l, dir[2] * l],
+                restraint: Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            },
+        ];
+        let section = Section {
+            frame_use: None,
+            id: SectionId(0),
+            name: "sym".into(),
+            area: 10000.0,
+            iy: 1.0e8,
+            iz: 1.0e8,
+            j: 2.0e8,
+            depth: 300.0,
+            width: 300.0,
+            as_y: 5000.0,
+            as_z: 5000.0,
+            floor: None,
+            panel_thickness: None,
+            thickness: None,
+            shape: None,
+            material: Some(MaterialId(0)),
+            rebar_material: None,
+            shear_rebar_material: None,
+            steel_material: None,
+        };
+        let elements = vec![ElementData {
+            id: ElemId(0),
+            kind: ElementKind::Beam,
+            nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis { ref_vector },
+            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        }];
+        Model {
+            nodes,
+            elements,
+            sections: vec![section],
+            materials: vec![Material {
+                id: MaterialId(0),
+                name: "SN400B".into(),
+                category: MaterialCategory::Steel,
+                young: 205000.0,
+                poisson: 0.3,
+                density: 7.85e-9,
+                shear: None,
+                fc: None,
+                fy: Some(235.0),
+                concrete_class: Default::default(),
+                strength_factor: None,
+            }],
+            ..Default::default()
+        }
+    };
+
+    let solve_first = |model: &Model| -> f64 {
+        let dofmap = DofMap::build(model);
+        let reducer = Reducer::build(model, &dofmap);
+        solve_eigen(model, &dofmap, &reducer, 1)
+            .expect("片持ち梁の eigen(1) は解けるべき")
+            .period[0]
+    };
+
+    let t_horizontal = solve_first(&make_cantilever([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]));
+    let t_vertical = solve_first(&make_cantilever([0.0, 0.0, 1.0], [1.0, 0.0, 0.0]));
+
+    assert!(
+        ((t_horizontal - t_vertical) / t_horizontal).abs() < 1e-6,
+        "水平材 T={} と鉛直材 T={} の固有周期は一致すべき（整合質量の座標系）",
+        t_horizontal,
+        t_vertical
+    );
+}

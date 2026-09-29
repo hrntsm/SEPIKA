@@ -24,7 +24,7 @@
 
 <div class="impl-ref">
 
-**実装参照**：`squid_n_design_jp::secondary::holding_capacity::{stiffness_ratios, fs}` が算定し、δg は `squid_n_design_jp::secondary::stiffness_ratio::cog_story_drifts` です。
+**実装参照**：`sepika_design_jp::secondary::holding_capacity::{stiffness_ratios, fs}` が算定し、δg は `sepika_design_jp::secondary::stiffness_ratio::cog_story_drifts` です。
 剛性率に使う層間変位は、柱の最大変位ではなく、重心位置の水平変位 δg です。
 各層の δg は、上端の床レベル上の節点と下端の床レベル上の節点について、重心位置の水平変位の差として求めます。
 δg は柱の層間変位とは別の量であり、中間節点は床レベルにないため平均には入れません。
@@ -86,14 +86,14 @@ D 値（一般階）:
 
 <div class="impl-ref">
 
-**実装参照**：`squid_n_design_jp::secondary::holding_capacity::fe` が Fe を算定します。
+**実装参照**：`sepika_design_jp::secondary::holding_capacity::fe` が Fe を算定します。
 地震時の応力解析結果があるときは、柱の水平剛性を \\( k\_i = Q\_i/\delta\_i \\) として剛心を求めます。
 ここでの \\( \delta\_i \\) は、層間変形角と同じく上下端床の変位差です。
 中間節点で柱を分割するとセグメント単体の変位差は層高より短くなるため、連なりを 1 本の柱とみなします。
 重心は、鉛直荷重を支持する柱の長期軸力を重みにして求めます。
 引張の柱は鉛直荷重を支持しないため、重みに入れません。
-この精算は `squid_n_design_jp::secondary::eccentricity_analysis`（`crates/squid-n-design-jp/src/secondary/eccentricity_analysis.rs`）です。
-応力解析結果がないときは、武藤 D 値法の略算（`squid_n_design_jp::secondary::eccentricity`）を使います。
+この精算は `sepika_design_jp::secondary::eccentricity_analysis`（`crates/sepika-design-jp/src/secondary/eccentricity_analysis.rs`）です。
+応力解析結果がないときは、武藤 D 値法の略算（`sepika_design_jp::secondary::eccentricity`）を使います。
 略算でも中間節点で分割された鉛直材は連なりを 1 本の柱とみなし、層の上下端の高さを \\( h \\) として D 値を求めます。
 セグメントの材長を \\( h \\) にすると \\( 12EI/h^3 \\) が過大になるためです。
 
@@ -141,7 +141,7 @@ D 値（一般階）:
 
 <div class="impl-ref">
 
-**実装参照**：`squid_n_design_jp::secondary::eccentricity::{misc_wall_stiffness, append_misc_wall_stiffnesses}`（`crates/squid-n-design-jp/src/secondary/eccentricity/misc_wall.rs`）が算定します。
+**実装参照**：`sepika_design_jp::secondary::eccentricity::{misc_wall_stiffness, append_misc_wall_stiffnesses}`（`crates/sepika-design-jp/src/secondary/eccentricity/misc_wall.rs`）が算定します。
 
 </div>
 
@@ -155,6 +155,6 @@ D 値（一般階）:
 
 <div class="impl-ref">
 
-**実装参照**：`squid_n_design_jp::secondary::holding_capacity::fes` が算定します。
+**実装参照**：`sepika_design_jp::secondary::holding_capacity::fes` が算定します。
 
 </div>

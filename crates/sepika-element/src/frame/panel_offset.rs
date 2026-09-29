@@ -1,0 +1,464 @@
+//! 仕口パネルへ接合する部材の適合。
+//!
+//! 節点の回転自由度へ `ζ・γ` を加える変換 `T = [I | C]` を内側の要素へ被せる。
+//! 水平材は `ζ = −0.5`、鉛直材は `ζ = +0.5`。水平材と鉛直材のみを対象とする。
+
+use crate::behavior::{Ctx, ElementBehavior, LocalMat, LocalVec, MassOption};
+use sepika_core::dof::DofMap;
+use sepika_core::ids::NodeId;
+use sepika_core::model::{ElementData, ElementKind, Model};
+use sepika_core::panel_zone::{
+    is_horizontal_or_vertical_member, member_orientation, MemberOrientation,
+};
+use smallvec::SmallVec;
+
+/// 水平材（はり）が仕口パネルへ接合するときの ζ。
+const ZETA_BEAM: f64 = -0.5;
+/// 鉛直材（柱）が仕口パネルへ接合するときの ζ。
+const ZETA_COLUMN: f64 = 0.5;
+
+/// 部材の一方の端が仕口パネルへ接合することを表す。
+#[derive(Clone, Copy, Debug)]
+pub struct PanelEnd {
+    /// パネルが設けられた節点（追加自由度 `γX`・`γY` の持ち主）。
+    pub node: NodeId,
+    /// 接合面で決まる係数 ζ（はり `−0.5`・柱 `+0.5`）。
+    pub zeta: f64,
+}
+
+/// 部材 `data` の各端が仕口パネルへ接合するかを調べ、接合面の係数 ζ を返す。
+///
+/// どちらの端もパネルへ接合しない場合は `None`。
+pub fn resolve(data: &ElementData, model: &Model) -> Option<[Option<PanelEnd>; 2]> {
+    if !matches!(data.kind, ElementKind::Beam) || data.nodes.len() < 2 {
+        return None;
+    }
+    if !is_horizontal_or_vertical_member(model, data) {
+        return None;
+    }
+    let zeta = match member_orientation(model, data)? {
+        MemberOrientation::Column => ZETA_COLUMN,
+        MemberOrientation::Beam => ZETA_BEAM,
+    };
+
+    let is_panel_node = |nid: NodeId| {
+        model
+            .elements
+            .iter()
+            .any(|e| matches!(e.kind, ElementKind::PanelZone) && e.nodes.first() == Some(&nid))
+    };
+
+    let ends = [
+        is_panel_node(data.nodes[0]).then(|| PanelEnd {
+            node: data.nodes[0],
+            zeta,
+        }),
+        is_panel_node(data.nodes[1]).then(|| PanelEnd {
+            node: data.nodes[1],
+            zeta,
+        }),
+    ];
+    if ends[0].is_none() && ends[1].is_none() {
+        return None;
+    }
+    Some(ends)
+}
+
+/// 仕口パネルへ接合する部材。
+///
+/// 自由度の並びは `[内側の 12 自由度, (γX, γY)_i?, (γX, γY)_j?]`。
+pub struct PanelOffsetMember {
+    inner: Box<dyn ElementBehavior>,
+    ends: [Option<PanelEnd>; 2],
+}
+
+impl PanelOffsetMember {
+    /// `inner` は 12 自由度（節点 2 × 6）の部材要素であること。
+    pub fn new(inner: Box<dyn ElementBehavior>, ends: [Option<PanelEnd>; 2]) -> Self {
+        debug_assert_eq!(inner.n_dof(), 12, "仕口パネルを被せる要素は 12 自由度");
+        Self { inner, ends }
+    }
+
+    /// パネル自由度の個数（0・2・4）。
+    fn n_panel_dof(&self) -> usize {
+        self.ends.iter().filter(|e| e.is_some()).count() * 2
+    }
+
+    /// `C`（12 × パネル自由度数）の非零成分を `(内側自由度, パネル自由度, 係数)` で列挙する。
+    fn coupling(&self) -> SmallVec<[(usize, usize, f64); 4]> {
+        let mut out = SmallVec::new();
+        let mut col = 12;
+        for (side, end) in self.ends.iter().enumerate() {
+            let Some(end) = end else { continue };
+            let rot0 = if side == 0 { 3 } else { 9 };
+            out.push((rot0, col, end.zeta));
+            out.push((rot0 + 1, col + 1, end.zeta));
+            col += 2;
+        }
+        out
+    }
+
+    /// 要素自由度の変位を内側 12 自由度の変位へ写す（`u_inner = T · u_elem`）。
+    fn to_inner(&self, u: &[f64]) -> [f64; 12] {
+        let mut inner = [0.0; 12];
+        for (i, slot) in inner.iter_mut().enumerate() {
+            *slot = u.get(i).copied().unwrap_or(0.0);
+        }
+        for (r, c, z) in self.coupling() {
+            inner[r] += z * u.get(c).copied().unwrap_or(0.0);
+        }
+        inner
+    }
+
+    /// 内側 12×12 の行列を要素自由度へ写す（`K_elem = Tᵀ · K_inner · T`）。
+    fn transform_matrix(&self, k: &LocalMat) -> LocalMat {
+        let n = self.n_dof();
+        let mut out = LocalMat::zeros(n);
+        for i in 0..12 {
+            for j in 0..12 {
+                out.set(i, j, k.get(i, j));
+            }
+        }
+        let cpl = self.coupling();
+        for &(r, c, z) in &cpl {
+            for i in 0..12 {
+                let v = out.get(i, c) + k.get(i, r) * z;
+                out.set(i, c, v);
+                let v = out.get(c, i) + z * k.get(r, i);
+                out.set(c, i, v);
+            }
+        }
+        for &(r1, c1, z1) in &cpl {
+            for &(r2, c2, z2) in &cpl {
+                let v = out.get(c1, c2) + z1 * k.get(r1, r2) * z2;
+                out.set(c1, c2, v);
+            }
+        }
+        out
+    }
+}
+
+crate::behavior::forward_element_behavior!(PanelOffsetMember, inner, {
+    n_dof: custom,
+    global_dofs: custom,
+    tangent_stiffness: custom,
+    internal_force: custom,
+    update_state: custom,
+    mass_matrix: custom,
+    recover_forces: custom,
+    state_member_forces: forward,
+    geometric_stiffness: custom,
+    snapshot_state: forward,
+    restore_state: forward,
+    commit_state: forward,
+    revert_state: forward,
+    serialize_checkpoint: forward,
+    deserialize_checkpoint: forward,
+    panel_moments_from: forward,
+    ductility_probe: forward,
+    fiber_section_states: forward,
+    end_spring_rotations: forward,
+    set_time_step: forward,
+}, custom {
+    fn n_dof(&self) -> usize {
+        12 + self.n_panel_dof()
+    }
+
+    fn global_dofs(&self, dof: &DofMap) -> SmallVec<[usize; 24]> {
+        let mut gdofs = self.inner.global_dofs(dof);
+        for end in self.ends.iter().flatten() {
+            crate::behavior::push_panel_global_dofs(&mut gdofs, end.node.index(), dof);
+        }
+        gdofs
+    }
+
+    fn tangent_stiffness(&self, ctx: &Ctx) -> LocalMat {
+        self.transform_matrix(&self.inner.tangent_stiffness(ctx))
+    }
+
+    fn geometric_stiffness(&self, n: f64) -> LocalMat {
+        self.transform_matrix(&self.inner.geometric_stiffness(n))
+    }
+
+    fn mass_matrix(&self, opt: MassOption) -> LocalMat {
+        self.transform_matrix(&self.inner.mass_matrix(opt))
+    }
+
+    fn internal_force(&self, ctx: &Ctx) -> LocalVec {
+        let f_inner = self.inner.internal_force(ctx);
+        let mut f = LocalVec {
+            data: SmallVec::from_elem(0.0, self.n_dof()),
+        };
+        for (i, v) in f_inner.data.iter().take(12).enumerate() {
+            f.data[i] = *v;
+        }
+        for (r, c, z) in self.coupling() {
+            f.data[c] += z * f_inner.data.get(r).copied().unwrap_or(0.0);
+        }
+        f
+    }
+
+    fn update_state(&mut self, du: &LocalVec, commit: bool, ctx: &Ctx) {
+        let inner = self.to_inner(&du.data);
+        let du_inner = LocalVec {
+            data: SmallVec::from_slice(&inner),
+        };
+        self.inner.update_state(&du_inner, commit, ctx);
+    }
+
+    fn recover_forces(&self, u_elem: &[f64]) -> Option<crate::frame::beam::MemberForces> {
+        self.inner.recover_forces(&self.to_inner(u_elem))
+    }
+});
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sepika_core::dof::Dof6Mask;
+    use sepika_core::ids::{ElemId, MaterialId, SectionId};
+    use sepika_core::model::MaterialCategory;
+    use sepika_core::model::{
+        EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material, Node, RigidZone, Section,
+    };
+    use sepika_core::section_shape::SectionShape;
+
+    /// 柱 1 本＋梁 1 本、接合部（節点 0）に仕口パネルを持つモデル。
+    fn model_with_panel(offset: f64) -> Model {
+        let node = |id: u32, coord: [f64; 3]| Node {
+            id: NodeId(id),
+            coord,
+            restraint: Dof6Mask::FREE,
+            mass: None,
+            story: None,
+            support_spring: None,
+        };
+        let sec = Section {
+            frame_use: Some(FrameSectionUse::Girder),
+            id: SectionId(0),
+            name: String::new(),
+            area: 1.0e4,
+            iy: 1.0e8,
+            iz: 1.0e8,
+            j: 1.0e8,
+            depth: 400.0,
+            width: 400.0,
+            as_y: 5.0e3,
+            as_z: 5.0e3,
+            floor: None,
+            panel_thickness: None,
+            thickness: None,
+            shape: Some(SectionShape::SteelH {
+                height: 400.0,
+                width: 400.0,
+                web_thick: 13.0,
+                flange_thick: 21.0,
+            }),
+            material: Some(MaterialId(0)),
+            rebar_material: None,
+            shear_rebar_material: None,
+            steel_material: None,
+        };
+        let member = |id: u32, n0: u32, n1: u32, rigid: RigidZone| ElementData {
+            id: ElemId(id),
+            kind: ElementKind::Beam,
+            nodes: smallvec::smallvec![NodeId(n0), NodeId(n1)],
+            section: Some(if n0 == 2 || n1 == 2 {
+                SectionId(1)
+            } else {
+                SectionId(0)
+            }),
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 1.0, 0.0],
+            },
+            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: rigid,
+            plastic_zone: None,
+            spring: None,
+        };
+        let rigid = RigidZone {
+            length_i: offset,
+            length_j: offset,
+            face_i: Some(offset * 2.0),
+            face_j: Some(offset * 2.0),
+            ..Default::default()
+        };
+        Model {
+            nodes: vec![
+                node(0, [0.0, 0.0, 3000.0]),
+                node(1, [6000.0, 0.0, 3000.0]),
+                node(2, [0.0, 0.0, 0.0]),
+            ],
+            sections: vec![
+                sec.clone(),
+                Section {
+                    frame_use: Some(FrameSectionUse::Column),
+                    id: SectionId(1),
+                    ..sec
+                },
+            ],
+            materials: vec![Material {
+                strength_factor: None,
+                concrete_class: Default::default(),
+                id: MaterialId(0),
+                name: "SN400B".into(),
+                category: MaterialCategory::Steel,
+                young: 205_000.0,
+                poisson: 0.3,
+                density: 0.0,
+                shear: None,
+                fc: None,
+                fy: None,
+            }],
+            elements: vec![
+                member(0, 0, 1, rigid),
+                member(1, 2, 0, rigid),
+                ElementData {
+                    id: ElemId(2),
+                    kind: ElementKind::PanelZone,
+                    nodes: smallvec::smallvec![NodeId(0), NodeId(1), NodeId(2)],
+                    section: None,
+                    local_axis: LocalAxis {
+                        ref_vector: [0.0, 1.0, 0.0],
+                    },
+                    end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+                    force_regime: ForceRegime::Auto,
+                    rigid_zone: Default::default(),
+                    plastic_zone: None,
+                    spring: None,
+                },
+            ],
+            ..Default::default()
+        }
+    }
+
+    /// 水平材は ζ = −0.5、鉛直材は ζ = +0.5。パネルが付く端だけが対象になる。
+    #[test]
+    fn test_resolve_assigns_zeta_by_member_direction() {
+        let model = model_with_panel(200.0);
+        let beam_ends = resolve(&model.elements[0], &model).expect("梁の i 端がパネル");
+        assert_eq!(beam_ends[0].map(|e| e.zeta), Some(ZETA_BEAM));
+        assert!(beam_ends[1].is_none(), "j 端（節点 1）にパネルはない");
+
+        let col_ends = resolve(&model.elements[1], &model).expect("柱の j 端がパネル");
+        assert!(col_ends[0].is_none(), "i 端（節点 2）にパネルはない");
+        assert_eq!(col_ends[1].map(|e| e.zeta), Some(ZETA_COLUMN));
+    }
+
+    /// `resolve` は危険断面位置（`face_i`/`face_j`）を一切参照しない。
+    /// 危険断面位置は将来任意位置を取りうるため、パネルの接合位置とは独立させる。
+    #[test]
+    fn test_resolve_is_independent_of_face_distance() {
+        let base = model_with_panel(200.0);
+        let ends = resolve(&base.elements[0], &base).expect("梁");
+
+        let mut moved = base.clone();
+        for e in &mut moved.elements {
+            e.rigid_zone.face_i = Some(9999.0);
+            e.rigid_zone.face_j = Some(0.0);
+        }
+        let moved_ends = resolve(&moved.elements[0], &moved).expect("梁");
+        assert_eq!(
+            ends[0].map(|e| e.zeta),
+            moved_ends[0].map(|e| e.zeta),
+            "危険断面位置を動かしても接合面の ζ は変わらない"
+        );
+        assert!(moved_ends[1].is_none());
+    }
+
+    /// パネルが 1 つもないモデルでは `None` を返す。
+    #[test]
+    fn test_resolve_returns_none_without_panel() {
+        let mut model = model_with_panel(200.0);
+        model
+            .elements
+            .retain(|e| !matches!(e.kind, ElementKind::PanelZone));
+        assert!(resolve(&model.elements[0], &model).is_none());
+    }
+
+    /// 斜材はオフセット・ζ が資料で定義されないため対象外とする。
+    #[test]
+    fn test_resolve_skips_diagonal_member() {
+        let mut model = model_with_panel(200.0);
+        model.nodes[1].coord = [4000.0, 0.0, 6000.0];
+        assert!(resolve(&model.elements[0], &model).is_none());
+    }
+
+    /// 変換 `T = [I | C]` の性質:
+    /// - パネル自由度を 0 に固定すれば、剛性・内力は内側 12 自由度と完全に一致する
+    /// - 対称性が保たれる（合同変換 Tᵀ K T）
+    #[test]
+    fn test_transform_preserves_inner_block_and_symmetry() {
+        let model = model_with_panel(200.0);
+        let ctx = Ctx { model: &model };
+        let ends = resolve(&model.elements[0], &model).expect("梁");
+        let inner = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
+        let k_inner = inner.tangent_stiffness(&ctx);
+        let wrapped = PanelOffsetMember::new(Box::new(inner), ends);
+
+        assert_eq!(wrapped.n_dof(), 14, "12 ＋ パネル 2");
+        let k = wrapped.tangent_stiffness(&ctx);
+
+        for i in 0..12 {
+            for j in 0..12 {
+                assert!(
+                    (k.get(i, j) - k_inner.get(i, j)).abs()
+                        <= 1e-6 * k_inner.get(i, j).abs().max(1.0),
+                    "({i},{j}) が内側と一致しない"
+                );
+            }
+        }
+        for i in 0..14 {
+            for j in 0..14 {
+                let (a, b) = (k.get(i, j), k.get(j, i));
+                assert!(
+                    (a - b).abs() <= 1e-6 * a.abs().max(1.0),
+                    "非対称 ({i},{j}): {a} vs {b}"
+                );
+            }
+        }
+    }
+
+    /// パネル自由度 γ に単位変形を与えると、内側の部材は節点回転 ζ·γ を受ける
+    /// （`{φ} = {Φ} + [Bp]{S}`）。梁は −0.5·γ、柱は +0.5·γ。
+    #[test]
+    fn test_panel_rotation_enters_member_end_rotation() {
+        let model = model_with_panel(200.0);
+        let ends = resolve(&model.elements[0], &model).expect("梁");
+        let inner = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
+        let wrapped = PanelOffsetMember::new(Box::new(inner), ends);
+
+        let mut u = vec![0.0; wrapped.n_dof()];
+        u[12] = 1.0;
+        let inner_u = wrapped.to_inner(&u);
+        assert!((inner_u[3] - ZETA_BEAM).abs() < 1e-12, "ΘX へ ζ·γX");
+        assert_eq!(inner_u[4], 0.0);
+
+        let mut v = vec![0.0; wrapped.n_dof()];
+        v[13] = 1.0;
+        let inner_v = wrapped.to_inner(&v);
+        assert!((inner_v[4] - ZETA_BEAM).abs() < 1e-12, "ΘY へ ζ·γY");
+        assert_eq!(inner_v[3], 0.0);
+    }
+
+    /// 内力は `f_elem = Tᵀ · f_inner`。パネル自由度には ζ×（節点モーメント）が集まる。
+    /// これがパネル要素の内力と釣り合うことで資料 (2.10.3-3) が満たされる。
+    #[test]
+    fn test_internal_force_collects_panel_moment() {
+        let model = model_with_panel(200.0);
+        let ctx = Ctx { model: &model };
+        let ends = resolve(&model.elements[0], &model).expect("梁");
+        let inner = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
+        let mut wrapped = PanelOffsetMember::new(Box::new(inner), ends);
+
+        let mut du = LocalVec {
+            data: SmallVec::from_elem(0.0, wrapped.n_dof()),
+        };
+        du.data[11] = 1.0e-4;
+        wrapped.update_state(&du, true, &ctx);
+
+        let f = wrapped.internal_force(&ctx);
+        assert!((f.data[12] - ZETA_BEAM * f.data[3]).abs() <= 1e-6 * f.data[3].abs().max(1.0));
+        assert!((f.data[13] - ZETA_BEAM * f.data[4]).abs() <= 1e-6 * f.data[4].abs().max(1.0));
+    }
+}

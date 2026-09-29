@@ -97,7 +97,7 @@ MCP 経由で解析した場合は、前処理の注意事項（`notices`）に�
 
 <div class="impl-ref">
 
-**実装参照**：準備計算タブの実行は `squid_n_app::app::App::run_preparation`（`crates/squid-n-app/src/app/preparation.rs`）が担い、床領域・壁領域の作り直しと剛域・荷重の同期は `squid_n_app::app::App::sync_auto_load_cases_action`（`crates/squid-n-app/src/app/actions/loads.rs`）が行います。床板・壁版割当領域の作り直しは同 `refresh_preparation` が行います。GUI の解析実行時は `squid_n_app::app::App::ensure_preparation`（`crates/squid-n-app/src/app/preparation.rs`）が階の生成を除く前処理を通し、MCP の解析では `squid_n_job::prepare::prepare_model_for_analysis`（`crates/squid-n-job/src/prepare.rs`）が一括で通します。
+**実装参照**：準備計算タブの実行は `sepika_app::app::App::run_preparation`（`crates/sepika-app/src/app/preparation.rs`）が担い、床領域・壁領域の作り直しと剛域・荷重の同期は `sepika_app::app::App::sync_auto_load_cases_action`（`crates/sepika-app/src/app/actions/loads.rs`）が行います。床板・壁版割当領域の作り直しは同 `refresh_preparation` が行います。GUI の解析実行時は `sepika_app::app::App::ensure_preparation`（`crates/sepika-app/src/app/preparation.rs`）が階の生成を除く前処理を通し、MCP の解析では `sepika_job::prepare::prepare_model_for_analysis`（`crates/sepika-job/src/prepare.rs`）が一括で通します。
 
 </div>
 
@@ -185,7 +185,7 @@ MCP 経由で解析した場合は、前処理の注意事項（`notices`）に�
 
 <div class="impl-ref">
 
-**実装参照**：検査の本体は `squid_n_solver::statics::analysis::precheck::model_issues`（`crates/squid-n-solver/src/statics/analysis/precheck.rs`）にあり、解析前チェックと GUI の診断（`squid_n_app::app::App::run_diagnostics`、`crates/squid-n-app/src/app/actions/mod.rs`）が同じ判定を共有します。GUI は壁展開モデル（`squid_n_load::wall_expand::expand_wall_elements`）へ `model_issues` を適用し、対象のクリック選択は `ModelIssue` が持つ `IssueTargets` で 3D ビューと結び付けます。
+**実装参照**：検査の本体は `sepika_solver::statics::analysis::precheck::model_issues`（`crates/sepika-solver/src/statics/analysis/precheck.rs`）にあり、解析前チェックと GUI の診断（`sepika_app::app::App::run_diagnostics`、`crates/sepika-app/src/app/actions/mod.rs`）が同じ判定を共有します。GUI は壁展開モデル（`sepika_load::wall_expand::expand_wall_elements`）へ `model_issues` を適用し、対象のクリック選択は `ModelIssue` が持つ `IssueTargets` で 3D ビューと結び付けます。
 
 </div>
 

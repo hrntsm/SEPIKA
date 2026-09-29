@@ -1,6 +1,6 @@
 # コントリビューションガイド
 
-Squid-n の開発に参加いただきありがとうございます。本書はビルド・テスト・静的解析・
+SEPIKA の開発に参加いただきありがとうございます。本書はビルド・テスト・静的解析・
 ドキュメントの手順と、開発上の約束事をまとめたものです。
 
 日本での利用を想定したプロジェクトです。**コミットメッセージ・コード中のコメント・
@@ -27,22 +27,22 @@ cargo build --workspace --release
 
 | フラグ | 対象クレート | 内容 |
 |--------|-------------|------|
-| `gui` | squid-n-app | GUI（egui/eframe） |
-| `mcp` | squid-n-mcp | MCP サーバ |
-| `parquet` | squid-n-io | 結果 I/O（Arrow / Parquet）。squid-n-mcp は常に有効化して利用し、squid-n-app の通常開発では無効のまま軽量に保つ |
+| `gui` | sepika-app | GUI（egui/eframe） |
+| `mcp` | sepika-mcp | MCP サーバ |
+| `parquet` | sepika-io | 結果 I/O（Arrow / Parquet）。sepika-mcp は常に有効化して利用し、sepika-app の通常開発では無効のまま軽量に保つ |
 
 非デフォルトの機能フラグは `--workspace` ビルドでは検証されないため、
 対象クレートを `-p` で指定して有効化する（ワークスペースルートで
-`cargo build -p squid-n-app --features mcp` のように**フラグを持たない
+`cargo build -p sepika-app --features mcp` のように**フラグを持たない
 クレートを指定するとエラーになる**ことに注意）。
 
 ```bash
 # MCP サーバのビルド・テスト（bin ターゲット含む）
-cargo build -p squid-n-mcp --features mcp
-cargo test  -p squid-n-mcp --features mcp
+cargo build -p sepika-mcp --features mcp
+cargo test  -p sepika-mcp --features mcp
 
 # MCP サーバの起動（stdio。使い方は docs/mcp_server/ を参照）
-cargo run -p squid-n-mcp --features mcp
+cargo run -p sepika-mcp --features mcp
 ```
 
 ## 開発時の検証
@@ -62,11 +62,11 @@ cargo run -p squid-n-mcp --features mcp
 cargo test -p <changed-crate>
 
 # GUI / MCP 領域を変更したときだけ feature 付きで確認する
-cargo test -p squid-n-app --features gui
-cargo test -p squid-n-mcp --features mcp
+cargo test -p sepika-app --features gui
+cargo test -p sepika-mcp --features mcp
 
-# squid-n-io の結果 I/O（parquet feature 配下）を変更したときだけ feature 付きで確認する
-cargo test -p squid-n-io --features parquet
+# sepika-io の結果 I/O（parquet feature 配下）を変更したときだけ feature 付きで確認する
+cargo test -p sepika-io --features parquet
 ```
 
 PR 前のフル検証は以下です（テスト系コマンドの正本はこの節）。
@@ -78,13 +78,13 @@ cargo test --workspace --locked
 
 # GUI / MCP / Parquet の非デフォルト feature（3 クレートまとめて 1 回の呼び出し。
 # `クレート名/機能名` 形式で指定する。default 構成は上の実行で別に検証する）
-cargo test -p squid-n-app -p squid-n-mcp -p squid-n-io --features squid-n-app/gui,squid-n-mcp/mcp,squid-n-io/parquet --locked
+cargo test -p sepika-app -p sepika-mcp -p sepika-io --features sepika-app/gui,sepika-mcp/mcp,sepika-io/parquet --locked
 
-# Parquet 無効構成の独立検証。squid-n-mcp が squid-n-io/parquet を常時有効化しているため、
-# --workspace では feature 統一により squid-n-io の default（parquet 無効）構成が
+# Parquet 無効構成の独立検証。sepika-mcp が sepika-io/parquet を常時有効化しているため、
+# --workspace では feature 統一により sepika-io の default（parquet 無効）構成が
 # 独立には検証されない。以下で直接保証する
-cargo test -p squid-n-io --locked
-cargo check -p squid-n-app --features squid-n-app/gui --locked
+cargo test -p sepika-io --locked
+cargo check -p sepika-app --features sepika-app/gui --locked
 ```
 
 特定のテストだけ再実行したいときは、名前で絞り込めます。
@@ -106,18 +106,18 @@ cargo run -p xtask -- check-deps
 
 ### 実モデルの統合テスト
 
-`crates/squid-n-app/tests/full_model.rs` は、実建物の ST-Bridge
-（`crates/squid-n-app/tests/fixtures/model.stb`。4 層＋PH の S 造・一部 RC、
+`crates/sepika-app/tests/full_model.rs` は、実建物の ST-Bridge
+（`crates/sepika-app/tests/fixtures/model.stb`。4 層＋PH の S 造・一部 RC、
 節点 166・解析要素 115・小梁 56。ST-Bridge 上のスラブ片 82 枚は取り込み時に大梁の区画（床領域）26 へ帰属を割り当てる）を読み込み、GUI のボタンが呼ぶのと
 同じ入口（`App` の `run_*` / `compute_*`）で全解析を通します。手組みの小規模
 モデルでは現れない、実建物特有の構成（剛床・二次部材・多数のスラブ）に起因する
 退行を検出することが目的です。
 
 ```bash
-cargo test -p squid-n-app --test full_model
+cargo test -p sepika-app --test full_model
 
 # 既知の不具合として #[ignore] にしているテストを実行する
-cargo test -p squid-n-app --test full_model -- --ignored
+cargo test -p sepika-app --test full_model -- --ignored
 
 # スナップショット（代表スカラ）の差分を承認する
 cargo insta review
@@ -132,13 +132,13 @@ cargo insta review
 [dev_docs/handoff/実モデル統合テスト_申し送り.md](dev_docs/handoff/実モデル統合テスト_申し送り.md)
 にまとめています。
 
-`crates/squid-n-app/tests/wall_model.rs` は、`full_model.rs` のフィクスチャに壁要素が
+`crates/sepika-app/tests/wall_model.rs` は、`full_model.rs` のフィクスチャに壁要素が
 含まれていないことを補う、壁（耐震壁・フレーム外雑壁）専用の最小フィクスチャです。
 `full_model.rs` の床領域（26 件）を巻き込まずに壁関連の代表スカラを独立してスナップショット
 します。壁の型（`WallAttr`・`MiscWall` 等）を変更したときはこちらも実行してください。
 
 ```bash
-cargo test -p squid-n-app --test wall_model
+cargo test -p sepika-app --test wall_model
 ```
 
 ## 静的解析
@@ -155,10 +155,10 @@ cargo clippy -p <changed-crate> --all-targets --locked -- -D warnings
 # PR 前のフル検証（clippy / fmt 系の正本はこの節）。
 # GUI / MCP / Parquet の feature 付き検証は、同じ依存グラフを
 # 何度も構築しないよう 3 クレートまとめて 1 回の呼び出しにしている
-# （`squid-n-app/gui` のような `クレート名/機能名` 形式で指定する）。
+# （`sepika-app/gui` のような `クレート名/機能名` 形式で指定する）。
 # default 構成の検証は別に維持するため、`--all-features` にはまとめない。
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo clippy -p squid-n-app -p squid-n-mcp -p squid-n-io --all-targets --features squid-n-app/gui,squid-n-mcp/mcp,squid-n-io/parquet --locked -- -D warnings
+cargo clippy -p sepika-app -p sepika-mcp -p sepika-io --all-targets --features sepika-app/gui,sepika-mcp/mcp,sepika-io/parquet --locked -- -D warnings
 cargo fmt --all -- --check
 ```
 
@@ -168,8 +168,8 @@ cargo fmt --all -- --check
 フィーチャフラグのため、1 行目のワークスペース全体の実行だけでは
 `cfg(feature = "gui")` 配下のコード（GUI のビュー・テーブル・3D 表示のほぼ全体）が
 コンパイルすらされません。フラグ付きでしか現れないビルドエラー・警告があります。
-`squid-n-io` の `results`（Parquet 結果 I/O）も `parquet` feature 配下のため、
-`-p squid-n-io` 単体では既定で検証されません（workspace 解決では mcp 経由で
+`sepika-io` の `results`（Parquet 結果 I/O）も `parquet` feature 配下のため、
+`-p sepika-io` 単体では既定で検証されません（workspace 解決では mcp 経由で
 有効化されますが、明示指定で io 単体の検証も保証します）。
 
 テストも同様に、フラグ付きの実行が必要です。テスト系のフル検証コマンドは
@@ -231,7 +231,7 @@ mdbook build
   ```html
   <div class="impl-ref">
 
-  **実装参照**：`squid_n_xxx::module::item`（`crates/...`）が…します。
+  **実装参照**：`sepika_xxx::module::item`（`crates/...`）が…します。
 
   </div>
   ```
@@ -259,7 +259,7 @@ mdbook build
 ## UI 実装の約束事
 
 配色・寸法・角丸・フォントサイズなどの値の単一情報源は
-[`crates/squid-n-app/src/theme.rs`](crates/squid-n-app/src/theme.rs) です。値を変えるときは
+[`crates/sepika-app/src/theme.rs`](crates/sepika-app/src/theme.rs) です。値を変えるときは
 `theme.rs` を直し、同じ値を文書やほかのコードへ写さないでください。
 
 - 文字サイズは `TextStyle`（Heading / Body / Button / Monospace / Small）で指定し、

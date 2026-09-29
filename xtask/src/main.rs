@@ -37,14 +37,14 @@ fn run_check_docs() -> anyhow::Result<()> {
 
 fn run_check_deps() -> anyhow::Result<()> {
     let layers: &[&[&str]] = &[
-        &["squid-n-core", "squid-n-math", "squid-n-material"],
-        &["squid-n-section", "squid-n-load"],
-        &["squid-n-edit", "squid-n-skeleton"],
-        &["squid-n-element"],
-        &["squid-n-solver", "squid-n-io"],
-        &["squid-n-design-jp"],
-        &["squid-n-job"],
-        &["squid-n-mcp", "squid-n-app"],
+        &["sepika-core", "sepika-math", "sepika-material"],
+        &["sepika-section", "sepika-load"],
+        &["sepika-edit", "sepika-skeleton"],
+        &["sepika-element"],
+        &["sepika-solver", "sepika-io"],
+        &["sepika-design-jp"],
+        &["sepika-job"],
+        &["sepika-mcp", "sepika-app"],
     ];
 
     let layer_map: BTreeMap<&str, usize> = layers
