@@ -111,6 +111,109 @@ fn test_event_log_caps_entries() {
     assert_eq!(log.entries.last().unwrap().message, "msg1000");
 }
 
+#[cfg(feature = "gui")]
+#[test]
+fn test_pending_story_command_one_per_frame_and_undo_redo() {
+    let mut app = App::default();
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::AddStory {
+            name: "1F".into(),
+            elevation: 0.0,
+        }));
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::AddStory {
+            name: "2F".into(),
+            elevation: 3000.0,
+        }));
+    app.apply_pending_story_command();
+    assert_eq!(app.core.model.stories.len(), 1);
+    assert_eq!(app.ui.scoped.pending_story_cmds.len(), 1);
+    assert!(app.core.scoped.staleness.unsaved_changes);
+    assert!(app.core.scoped.staleness.results_stale);
+    assert!(app.core.scoped.staleness.diagnostics_stale);
+    app.apply_pending_story_command();
+    assert_eq!(app.core.model.stories.len(), 2);
+    app.undo_action();
+    assert_eq!(app.core.model.stories.len(), 1);
+    app.redo_action();
+    assert_eq!(app.core.model.stories.len(), 2);
+
+    app.load_model(sepika_core::Model::default());
+    assert!(app.ui.scoped.pending_story_cmds.is_empty());
+    assert!(!app.core.scoped.undo.can_undo());
+    app.undo_action();
+    app.redo_action();
+    assert!(!app.core.scoped.staleness.unsaved_changes);
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn test_diagnostic_target_selection_keeps_other_focus() {
+    use sepika_core::ids::{ElemId, NodeId};
+    let mut app = App::default();
+    app.select_diagnostic_target(DiagTarget::Node(NodeId(1)));
+    assert_eq!(app.ui.scoped.selection.nodes, vec![NodeId(1)]);
+    assert!(app.ui.scoped.selection.members.is_empty());
+    assert_eq!(app.ui.scoped.nav.focus_node, Some(NodeId(1)));
+    app.select_diagnostic_target(DiagTarget::Member(ElemId(2)));
+    assert!(app.ui.scoped.selection.nodes.is_empty());
+    assert_eq!(app.ui.scoped.selection.members, vec![ElemId(2)]);
+    assert_eq!(app.ui.scoped.nav.focus_member, Some(ElemId(2)));
+    assert_eq!(app.ui.scoped.nav.focus_node, Some(NodeId(1)));
+    app.load_model(sepika_core::Model::default());
+    assert!(app.ui.scoped.selection.members.is_empty());
+    assert!(app.ui.scoped.nav.focus_member.is_none());
+    assert!(app.ui.scoped.nav.focus_node.is_none());
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn test_save_recording_confirmation_cancel_and_error() {
+    let mut app = App::default();
+    let path = test_tmp().join("not-existing-directory").join("save.ovika");
+    app.core.scoped.pending_save_recording = Some((path.clone(), 513));
+    app.resolve_pending_save_recording(None);
+    assert!(app.core.scoped.pending_save_recording.is_none());
+    assert!(app.core.scoped.project_path.is_none());
+    assert!(app.core.scoped.last_error.is_none());
+
+    app.core.scoped.pending_save_recording = Some((path, 513));
+    app.resolve_pending_save_recording(Some(true));
+    assert!(app.core.scoped.pending_save_recording.is_none());
+    assert!(app.core.scoped.project_path.is_none());
+    assert!(app.core.scoped.last_error.is_some());
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn test_log_clear_and_diagnostics_recheck() {
+    let mut app = App::default();
+    app.report_info("記録");
+    app.clear_log_action();
+    assert!(app.core.log.entries.is_empty());
+    assert!(app.core.scoped.staleness.diagnostics_stale);
+    app.run_diagnostics();
+    assert!(!app.core.scoped.staleness.diagnostics_stale);
+    app.core.scoped.staleness.mark_edited();
+    app.run_diagnostics();
+    assert!(!app.core.scoped.staleness.diagnostics_stale);
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn test_cancel_pending_analysis_does_not_acknowledge() {
+    let mut app = App::default();
+    app.core.scoped.pending_unset_analysis = Some(PendingAnalysis::StaticAll);
+    app.cancel_pending_analysis();
+    assert!(app.core.scoped.pending_unset_analysis.is_none());
+    assert!(app.core.scoped.unset_regions_ack.is_none());
+    assert!(app.core.scoped.job.is_none());
+}
+
 /// `report_error` が `last_error` とログの両方へ反映されることを確認する。
 /// GUI では下ドックを開くだけでなく、診断・テーブル表示中でもエラー本文が
 /// 見えるようにログタブへ切り替える。
@@ -8332,6 +8435,45 @@ fn test_time_history_recording_saved_and_optional_exclusion() {
         app.core.scoped.last_error
     );
     assert!(!app.core.scoped.staleness.results_stale);
+
+    #[cfg(feature = "gui")]
+    for (include, filename) in [
+        (true, "sepika_th_confirm_include_test.ovika"),
+        (false, "sepika_th_confirm_exclude_test.ovika"),
+    ] {
+        let confirmed_path = dir.join(filename);
+        let _ = std::fs::remove_file(&confirmed_path);
+        // 512 MiB の結果を生成せず、確認待ちになった時点からの保存経路を検証する。
+        app.core.scoped.pending_save_recording = Some((confirmed_path.clone(), 513));
+        app.core.scoped.staleness.unsaved_changes = true;
+        app.resolve_pending_save_recording(Some(include));
+        assert!(app.core.scoped.pending_save_recording.is_none());
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        assert_eq!(app.core.scoped.project_path.as_ref(), Some(&confirmed_path));
+        assert!(!app.core.scoped.staleness.unsaved_changes);
+        assert!(app.core.scoped.results.as_ref().unwrap().has_th_recording());
+
+        let mut confirmed = App::default();
+        confirmed.open_project_from(confirmed_path.clone());
+        assert!(
+            confirmed.core.scoped.last_error.is_none(),
+            "{:?}",
+            confirmed.core.scoped.last_error
+        );
+        let saved_results = confirmed
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .expect("解析結果が保存されるはず");
+        assert_eq!(saved_results.has_th_recording(), include);
+        assert!(saved_results.time_history.is_some());
+        let _ = std::fs::remove_file(&confirmed_path);
+    }
 
     // 既定保存: 小規模モデルは閾値未満なので確認なしで保存され、recording を含む。
     app.save_project_to(path.clone());
