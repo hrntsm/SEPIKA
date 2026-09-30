@@ -28,6 +28,8 @@ pub struct GridWidget {
     /// 🗑 ボタンで削除要求された行。描画中の行数変化を避けるため
     /// テーブル描画後に処理する
     pending_row_delete: Option<usize>,
+    row_selection: Option<(usize, usize)>,
+    rows_deleted: bool,
     edit_buf: String,
     edit_needs_focus: bool,
     /// セル起点のドラッグ選択が進行中か（スクロールバー等のドラッグと区別する。）
@@ -59,6 +61,8 @@ impl Default for GridWidget {
             grid: GridState::new(0, 0),
             delete_buttons: false,
             pending_row_delete: None,
+            row_selection: None,
+            rows_deleted: false,
             edit_buf: String::new(),
             edit_needs_focus: false,
             drag_selecting: false,
@@ -83,6 +87,14 @@ impl GridWidget {
     /// 呼び出し元がアプリのイベントログへ転記する（エラー行は赤字で。）
     pub fn take_log(&mut self) -> Vec<(String, bool)> {
         std::mem::take(&mut self.log)
+    }
+
+    pub fn take_row_selection(&mut self) -> Option<(usize, usize)> {
+        self.row_selection.take()
+    }
+
+    pub fn take_rows_deleted(&mut self) -> bool {
+        std::mem::take(&mut self.rows_deleted)
     }
 
     fn push_log(&mut self, s: impl Into<String>) {
@@ -403,6 +415,7 @@ impl GridWidget {
         }
         let targets: Vec<usize> = (r0..=r1).collect();
         adapter.delete_rows(&targets);
+        self.rows_deleted = true;
         self.push_log(format!(
             "{} 行を削除（{}〜{} 行目）",
             r1 - r0 + 1,
@@ -512,6 +525,7 @@ impl GridWidget {
                 let sel = self.grid.rect();
                 if !self.grid.active || !(sel.r0..=sel.r1).contains(&row) {
                     self.grid.select_row(row, false);
+                    self.row_selection = Some((row, row));
                 }
             }
             let label = self.delete_menu_label(adapter);
@@ -573,8 +587,14 @@ impl GridWidget {
             self.drag_selecting = true;
             self.drag_rows = true;
             self.drag_cols = false;
+            if self.grid.anchor.row.min(self.grid.cursor.row) < adapter.rows() {
+                self.row_selection = Some((self.grid.anchor.row, self.grid.cursor.row));
+            }
         } else if primary_down && self.drag_selecting && self.drag_rows && contains_pointer {
             self.grid.select_row(row, true);
+            if self.grid.anchor.row.min(self.grid.cursor.row) < adapter.rows() {
+                self.row_selection = Some((self.grid.anchor.row, self.grid.cursor.row));
+            }
         }
     }
 
@@ -936,6 +956,7 @@ impl GridWidget {
         if let Some(r) = self.pending_row_delete.take() {
             if adapter.validate_row_deletion(r).is_ok() {
                 adapter.delete_rows(&[r]);
+                self.rows_deleted = true;
                 self.push_log(format!("{} 行目を削除", r + 1));
                 self.sync_rows(adapter);
                 self.grid.select_row(r, false);
@@ -951,6 +972,195 @@ impl GridWidget {
             && self.grid.active
         {
             self.grid.deactivate();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::node_grid::NodeGridAdapter;
+    use sepika_core::model::Model;
+    use sepika_edit::UndoStack;
+
+    fn header_pos(row: usize) -> egui::Pos2 {
+        egui::pos2(40.0, 40.0 + row as f32 * 30.0)
+    }
+
+    fn header_frame(
+        ctx: &egui::Context,
+        widget: &mut GridWidget,
+        model: &mut Model,
+        events: Vec<egui::Event>,
+        shift: bool,
+    ) -> Option<(usize, usize)> {
+        let mut undo = UndoStack::new();
+        let mut adapter = NodeGridAdapter {
+            model,
+            undo: &mut undo,
+            edited: false,
+        };
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                events,
+                modifiers: egui::Modifiers {
+                    shift,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            |ui| {
+                widget.sync_rows(&adapter);
+                if !ui.input(|i| i.pointer.primary_down()) {
+                    widget.drag_selecting = false;
+                }
+                for row in 0..widget.grid.rows {
+                    let rect =
+                        egui::Rect::from_center_size(header_pos(row), egui::vec2(40.0, 24.0));
+                    let mut child =
+                        ui.new_child(egui::UiBuilder::new().id_salt(row).max_rect(rect));
+                    widget.row_header_cell(&mut child, &mut adapter, row);
+                }
+            },
+        );
+        widget.take_row_selection()
+    }
+
+    fn button(row: usize, pressed: bool, shift: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: header_pos(row),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers {
+                shift,
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn row_header_shift_click_to_placeholder_notifies_range() {
+        let ctx = egui::Context::default();
+        let mut widget = GridWidget::new();
+        let mut model = crate::sample::portal_frame();
+        let end = model.nodes.len();
+        header_frame(&ctx, &mut widget, &mut model, vec![], false);
+        assert_eq!(
+            header_frame(
+                &ctx,
+                &mut widget,
+                &mut model,
+                vec![button(0, true, false)],
+                false
+            ),
+            Some((0, 0))
+        );
+        header_frame(
+            &ctx,
+            &mut widget,
+            &mut model,
+            vec![button(0, false, false)],
+            false,
+        );
+        header_frame(
+            &ctx,
+            &mut widget,
+            &mut model,
+            vec![egui::Event::PointerMoved(header_pos(end))],
+            true,
+        );
+        assert_eq!(
+            header_frame(
+                &ctx,
+                &mut widget,
+                &mut model,
+                vec![button(end, true, true)],
+                true
+            ),
+            Some((0, end))
+        );
+        assert_eq!((widget.grid.rect().r0, widget.grid.rect().r1), (0, end));
+    }
+
+    #[test]
+    fn row_header_drag_to_placeholder_notifies_range() {
+        let ctx = egui::Context::default();
+        let mut widget = GridWidget::new();
+        let mut model = crate::sample::portal_frame();
+        let end = model.nodes.len();
+        header_frame(&ctx, &mut widget, &mut model, vec![], false);
+        assert_eq!(
+            header_frame(
+                &ctx,
+                &mut widget,
+                &mut model,
+                vec![button(0, true, false)],
+                false
+            ),
+            Some((0, 0))
+        );
+        assert_eq!(
+            header_frame(
+                &ctx,
+                &mut widget,
+                &mut model,
+                vec![egui::Event::PointerMoved(header_pos(end))],
+                false
+            ),
+            Some((0, end))
+        );
+        assert_eq!((widget.grid.rect().r0, widget.grid.rect().r1), (0, end));
+    }
+
+    #[test]
+    fn row_header_placeholder_alone_is_independent_but_can_anchor_real_range() {
+        for empty in [false, true] {
+            let ctx = egui::Context::default();
+            let mut widget = GridWidget::new();
+            let mut model = if empty {
+                Model::default()
+            } else {
+                crate::sample::portal_frame()
+            };
+            let end = model.nodes.len();
+            header_frame(&ctx, &mut widget, &mut model, vec![], false);
+            assert_eq!(
+                header_frame(
+                    &ctx,
+                    &mut widget,
+                    &mut model,
+                    vec![button(end, true, false)],
+                    false
+                ),
+                None
+            );
+            assert_eq!(widget.grid.anchor.row, end);
+            header_frame(
+                &ctx,
+                &mut widget,
+                &mut model,
+                vec![button(end, false, false)],
+                false,
+            );
+            if !empty {
+                header_frame(
+                    &ctx,
+                    &mut widget,
+                    &mut model,
+                    vec![egui::Event::PointerMoved(header_pos(0))],
+                    true,
+                );
+                assert_eq!(
+                    header_frame(
+                        &ctx,
+                        &mut widget,
+                        &mut model,
+                        vec![button(0, true, true)],
+                        true
+                    ),
+                    Some((end, 0))
+                );
+            }
         }
     }
 }

@@ -484,7 +484,7 @@ use support::{
 /// `sepika_job::prepare::apply_rigid_zones_and_panels` と同じ性能ガード）。
 /// 壁版を持つモデルでは毎フレーム展開し直す（展開処理自体は壁版数に比例し
 /// 軽いため許容する。境界検出（`rebuild_wall_regions`）は都度実行しない）。
-pub(super) fn wall_expanded_view_model(
+pub(crate) fn wall_expanded_view_model(
     model: &sepika_core::model::Model,
 ) -> std::borrow::Cow<'_, sepika_core::model::Model> {
     if sepika_load::wall_expand::model_has_wall_plates_to_expand(model) {
@@ -815,7 +815,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
             let node_id = app.core.model.nodes[i].id;
             let is_first =
                 app.ui.scoped.beam_draw_first == Some(space_grid::SnapPoint::Node(node_id));
-            let is_selected = app.ui.scoped.selection.nodes.contains(&node_id);
+            let is_selected = app.ui.scoped.selection.nodes().contains(&node_id);
             let (radius, color) = if is_first {
                 (5.0, theme::PARETO_RED)
             } else if is_selected {
@@ -1049,7 +1049,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         );
     }
 
-    for &elem_id in &app.ui.scoped.selection.members {
+    for &elem_id in app.ui.scoped.selection.members() {
         let Some(elem) = display_model.element(elem_id) else {
             continue;
         };
@@ -1506,6 +1506,21 @@ mod wall_expanded_view_model_tests {
         );
         // 入力の正（`model`）は変更されない（D5。壁の解析要素はモデルに残さない）。
         assert!(model.elements.iter().all(|e| e.kind != ElementKind::Wall));
+        let wall_id = view
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Wall)
+            .unwrap()
+            .id;
+        let mut app = App::default();
+        app.load_model(model);
+        app.select_member(wall_id);
+        assert!(app.core.model.element(wall_id).is_none());
+        assert!(wall_expanded_view_model(&app.core.model)
+            .element(app.ui.scoped.selection.active_member().unwrap())
+            .is_some());
+        app.clear_generated_member_selection();
+        assert!(app.ui.scoped.selection.members().is_empty());
     }
 
     /// 展開された耐震壁の材軸端点は上下辺中点（壁柱）になる。

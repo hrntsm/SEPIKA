@@ -186,16 +186,12 @@ impl App {
         match group {
             LoadGroup::Nodal => {
                 if let Some(nl) = self.core.model.load_cases[case_index].nodal.get(index) {
-                    self.ui.scoped.nav.focus_node = Some(nl.node);
-                    self.ui.scoped.selection.nodes = vec![nl.node];
-                    self.ui.scoped.selection.members.clear();
+                    self.select_node(nl.node);
                 }
             }
             LoadGroup::Member => {
                 if let Some(ml) = self.core.model.load_cases[case_index].member.get(index) {
-                    self.ui.scoped.nav.focus_member = Some(ml.elem);
-                    self.ui.scoped.selection.members = vec![ml.elem];
-                    self.ui.scoped.selection.nodes.clear();
+                    self.select_member(ml.elem);
                 }
             }
         }
@@ -224,10 +220,16 @@ impl App {
                 self.core.scoped.staleness.mark_edited();
             }
             LoadTreeAction::AddNodal(lc) => {
-                self.open_load_editor(LoadEditor::new_nodal(lc, self.ui.scoped.nav.focus_node));
+                self.open_load_editor(LoadEditor::new_nodal(
+                    lc,
+                    self.ui.scoped.selection.active_node(),
+                ));
             }
             LoadTreeAction::AddMember(lc) => {
-                self.open_load_editor(LoadEditor::new_member(lc, self.ui.scoped.nav.focus_member));
+                self.open_load_editor(LoadEditor::new_member(
+                    lc,
+                    self.ui.scoped.selection.active_member(),
+                ));
             }
             LoadTreeAction::EditNodal(lc, index) => {
                 let Some(load) = self

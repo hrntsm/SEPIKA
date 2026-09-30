@@ -478,6 +478,7 @@ pub(crate) fn secondary_member_placement_form(
             }),
         );
         if applied {
+            app.clear_generated_member_selection();
             app.core.scoped.staleness.mark_edited();
         } else {
             app.core.scoped.last_notice = Some(
@@ -621,6 +622,7 @@ pub(crate) fn secondary_member_list(app: &mut App, ui: &mut egui::Ui, kind: Seco
         );
     }
     if edited {
+        app.clear_generated_member_selection();
         app.core.scoped.staleness.mark_edited();
     }
 }

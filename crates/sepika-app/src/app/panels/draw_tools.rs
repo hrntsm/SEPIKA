@@ -150,7 +150,7 @@ impl App {
             }
         });
 
-        let focus_id: Option<sepika_core::ids::ElemId> = self.ui.scoped.nav.focus_member;
+        let focus_id: Option<sepika_core::ids::ElemId> = self.ui.scoped.selection.active_member();
         let elem_info: Option<(sepika_core::ids::ElemId, Option<SectionId>)> =
             focus_id.and_then(|eid| self.core.model.element(eid).map(|e| (e.id, e.section)));
 
@@ -495,8 +495,8 @@ impl App {
                 .on_hover_text("断面を選ぶと割り当てられます")
                 .clicked()
             {
-                self.core.scoped.undo.run(
-                    &mut self.core.model,
+                crate::tables::wall_plates::run_wall_region_command(
+                    self,
                     Box::new(sepika_edit::AssignWallPlateToRegion {
                         region: region_id,
                         section,
@@ -504,23 +504,20 @@ impl App {
                         opening_weight: 0.0,
                     }),
                 );
-                self.core.scoped.staleness.mark_edited();
                 close = true;
             }
             if !state.is_no_plate() && ui.button("版なしにする").clicked() {
-                self.core.scoped.undo.run(
-                    &mut self.core.model,
+                crate::tables::wall_plates::run_wall_region_command(
+                    self,
                     Box::new(sepika_edit::SetWallPlateRegionNoPlate { region: region_id }),
                 );
-                self.core.scoped.staleness.mark_edited();
                 close = true;
             }
             if !state.is_unset() && ui.button("未設定へ戻す").clicked() {
-                self.core.scoped.undo.run(
-                    &mut self.core.model,
+                crate::tables::wall_plates::run_wall_region_command(
+                    self,
                     Box::new(sepika_edit::UnsetWallPlateRegion { region: region_id }),
                 );
-                self.core.scoped.staleness.mark_edited();
                 close = true;
             }
         });

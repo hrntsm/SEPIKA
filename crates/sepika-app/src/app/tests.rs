@@ -152,22 +152,259 @@ fn test_pending_story_command_one_per_frame_and_undo_redo() {
 
 #[cfg(feature = "gui")]
 #[test]
-fn test_diagnostic_target_selection_keeps_other_focus() {
+fn test_geometry_selection_transitions_and_model_reset() {
     use sepika_core::ids::{ElemId, NodeId};
     let mut app = App::default();
     app.select_diagnostic_target(DiagTarget::Node(NodeId(1)));
-    assert_eq!(app.ui.scoped.selection.nodes, vec![NodeId(1)]);
-    assert!(app.ui.scoped.selection.members.is_empty());
-    assert_eq!(app.ui.scoped.nav.focus_node, Some(NodeId(1)));
+    assert_eq!(app.ui.scoped.selection.nodes(), &[NodeId(1)]);
+    assert_eq!(app.ui.scoped.selection.active_node(), Some(NodeId(1)));
     app.select_diagnostic_target(DiagTarget::Member(ElemId(2)));
-    assert!(app.ui.scoped.selection.nodes.is_empty());
-    assert_eq!(app.ui.scoped.selection.members, vec![ElemId(2)]);
-    assert_eq!(app.ui.scoped.nav.focus_member, Some(ElemId(2)));
-    assert_eq!(app.ui.scoped.nav.focus_node, Some(NodeId(1)));
+    assert!(app.ui.scoped.selection.nodes().is_empty());
+    assert_eq!(app.ui.scoped.selection.members(), &[ElemId(2)]);
+    assert_eq!(app.ui.scoped.selection.active_member(), Some(ElemId(2)));
+    assert_eq!(app.ui.scoped.selection.active_node(), None);
+    app.select_members(vec![ElemId(3), ElemId(2), ElemId(3)], Some(ElemId(9)));
+    assert_eq!(app.ui.scoped.selection.members(), &[ElemId(2), ElemId(3)]);
+    assert_eq!(app.ui.scoped.selection.active_member(), None);
+    app.select_nodes(vec![NodeId(3), NodeId(1)], Some(NodeId(3)));
+    assert_eq!(app.ui.scoped.selection.active_node(), Some(NodeId(3)));
+    assert_eq!(app.ui.scoped.selection.active_member(), None);
+    app.select_members(vec![], Some(ElemId(2)));
+    assert_eq!(app.ui.scoped.selection, GeometrySelection::None);
+    app.select_member(ElemId(2));
     app.load_model(sepika_core::Model::default());
-    assert!(app.ui.scoped.selection.members.is_empty());
-    assert!(app.ui.scoped.nav.focus_member.is_none());
-    assert!(app.ui.scoped.nav.focus_node.is_none());
+    assert_eq!(app.ui.scoped.selection, GeometrySelection::None);
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn test_geometry_undo_redo_and_context() {
+    let mut app = App::default();
+    app.ui.scoped.nav.focus_section = Some(sepika_core::ids::SectionId(4));
+    app.ui.scoped.boundary_node = Some(sepika_core::ids::NodeId(0));
+    app.select_node(sepika_core::ids::NodeId(0));
+    app.core.scoped.undo.run(
+        &mut app.core.model,
+        Box::new(sepika_edit::AddNode {
+            coord: [0.0; 3],
+            restraint: sepika_core::dof::Dof6Mask::FREE,
+        }),
+    );
+    app.undo_action();
+    assert_eq!(app.ui.scoped.selection, GeometrySelection::None);
+    assert_eq!(app.ui.scoped.boundary_node, None);
+    assert_eq!(
+        app.ui.scoped.nav.focus_section,
+        Some(sepika_core::ids::SectionId(4))
+    );
+    app.select_node(sepika_core::ids::NodeId(0));
+    app.ui.scoped.boundary_node = Some(sepika_core::ids::NodeId(0));
+    app.redo_action();
+    assert_eq!(app.ui.scoped.selection, GeometrySelection::None);
+    assert_eq!(app.ui.scoped.boundary_node, None);
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn ordinary_node_edits_and_preparation_keep_geometry_selection() {
+    use sepika_core::dof::Dof6Mask;
+    use sepika_core::ids::NodeId;
+
+    let mut app = App::default();
+    app.load_model(crate::sample::portal_frame());
+    app.select_node(NodeId(0));
+    let mut coord = app.core.model.node(NodeId(0)).unwrap().coord;
+    coord[0] += 100.0;
+    assert!(app.core.scoped.undo.run(
+        &mut app.core.model,
+        Box::new(sepika_edit::SetNodeCoord {
+            node: NodeId(0),
+            coord,
+        }),
+    ));
+    assert!(app.core.scoped.undo.run(
+        &mut app.core.model,
+        Box::new(sepika_edit::SetNodeRestraint {
+            node: NodeId(0),
+            restraint: Dof6Mask::FREE,
+        }),
+    ));
+    app.core.scoped.staleness.mark_edited();
+    app.sync_auto_load_cases_action();
+    assert_eq!(app.core.model.node(NodeId(0)).unwrap().coord, coord);
+    assert_eq!(app.ui.scoped.selection.nodes(), &[NodeId(0)]);
+    assert_eq!(app.ui.scoped.selection.active_node(), Some(NodeId(0)));
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn preparation_rebuild_clears_generated_wall_selection_only() {
+    use sepika_core::ids::{NodeId, SectionId, WallPlateId, WallRegionId};
+    use sepika_core::model::{Node, WallPlate, WallPlateShape, WallRegion};
+    use sepika_core::section_shape::SectionShape;
+
+    let mut app = App::default();
+    for (i, coord) in [
+        [0.0, 0.0, 0.0],
+        [4000.0, 0.0, 0.0],
+        [4000.0, 0.0, 3000.0],
+        [0.0, 0.0, 3000.0],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        app.core.model.nodes.push(Node {
+            id: NodeId(i as u32),
+            coord,
+            restraint: Default::default(),
+            mass: None,
+            story: None,
+            support_spring: None,
+        });
+    }
+    app.core.model.sections.push(
+        SectionShape::RcWall {
+            thickness: 180.0,
+            ps: 0.0025,
+        }
+        .to_section(SectionId(0), "壁".into()),
+    );
+    let boundary = (0..4).map(NodeId).collect::<Vec<_>>();
+    app.core.model.add_enclosed_wall_plate_from_nodes(
+        &boundary,
+        WallPlate {
+            id: WallPlateId(0),
+            shape: WallPlateShape::Enclosed,
+            section: Some(SectionId(0)),
+            self_weight_shares: Vec::new(),
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: Vec::new(),
+            loads: Vec::new(),
+            slit: Default::default(),
+        },
+    );
+    app.core.model.wall_regions.push(WallRegion {
+        id: WallRegionId(0),
+        name: String::new(),
+        boundary,
+        wall_plate_ids: vec![WallPlateId(0)],
+        posts: Vec::new(),
+    });
+    let (_, index, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let generated = index.generated_elem_ids().next().expect("生成壁要素");
+    assert!(app.core.model.element(generated).is_none());
+    app.select_member(generated);
+
+    app.run_preparation();
+    assert_eq!(app.ui.scoped.selection, GeometrySelection::None);
+
+    app.select_node(NodeId(0));
+    app.ensure_preparation();
+    assert_eq!(app.ui.scoped.selection.active_node(), Some(NodeId(0)));
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn preparation_wall_rebuild_clears_renumbered_node_selection() {
+    use sepika_core::ids::{
+        ElemId, NodeId, SecondaryMemberId, WallPlateAssignmentRegionId, WallPlateId,
+    };
+    use sepika_core::model::{
+        ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Node, PlateAssignment,
+        SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind, SupportBoundary,
+        SupportMemberId, WallPlate, WallPlateAssignmentRegion, WallPlateShape,
+    };
+
+    let mut app = App::default();
+    for (i, coord) in [
+        [0.0, 0.0, 0.0],
+        [4000.0, 0.0, 0.0],
+        [4000.0, 0.0, 1500.0],
+        [0.0, 0.0, 1500.0],
+        [8000.0, 0.0, 0.0],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        app.core.model.nodes.push(Node {
+            id: NodeId(i as u32),
+            coord,
+            restraint: Default::default(),
+            mass: None,
+            story: None,
+            support_spring: None,
+        });
+    }
+    app.core.model.elements.push(ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Beam,
+        nodes: vec![NodeId(0), NodeId(1)].into(),
+        section: None,
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    });
+    for (i, ends) in [
+        [[4000.0, 0.0, 0.0], [4000.0, 0.0, 1500.0]],
+        [[4000.0, 0.0, 1500.0], [0.0, 0.0, 1500.0]],
+        [[0.0, 0.0, 1500.0], [0.0, 0.0, 0.0]],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        app.core.model.unassigned_posts.push(SecondaryMember {
+            id: SecondaryMemberId(i as u32),
+            gravity_end_shares: None,
+            kind: SecondaryMemberKind::Post,
+            ends: SecondaryMemberEnds::Detached(ends),
+            section: None,
+            name: String::new(),
+        });
+    }
+    app.core
+        .model
+        .wall_assignment_regions
+        .regions
+        .push(WallPlateAssignmentRegion {
+            id: WallPlateAssignmentRegionId(0),
+            boundary: std::iter::once(SupportMemberId::Primary(ElemId(0)))
+                .chain((0..3).map(|i| SupportMemberId::Secondary(SecondaryMemberId(i))))
+                .map(|support| SupportBoundary {
+                    support,
+                    span: [0.0, 1.0],
+                })
+                .collect(),
+            assignment: PlateAssignment::Plate(WallPlateId(0)),
+        });
+    app.core.model.wall_plates.push(WallPlate {
+        id: WallPlateId(0),
+        shape: WallPlateShape::Enclosed,
+        section: None,
+        self_weight_shares: Vec::new(),
+        opening_area: 0.0,
+        opening_weight: 0.0,
+        openings: Vec::new(),
+        loads: Vec::new(),
+        slit: Default::default(),
+    });
+    app.select_node(NodeId(2));
+    app.ui.scoped.boundary_node = Some(NodeId(4));
+
+    app.rebuild_wall_regions_for_preparation();
+
+    assert_eq!(app.core.model.nodes.len(), 3);
+    assert_eq!(
+        app.core.model.node(NodeId(2)).unwrap().coord,
+        [8000.0, 0.0, 0.0]
+    );
+    assert_eq!(app.ui.scoped.selection, GeometrySelection::None);
+    assert_eq!(app.ui.scoped.boundary_node, None);
 }
 
 #[cfg(feature = "gui")]

@@ -161,10 +161,12 @@ impl App {
     ///    計算して保存する（同期前のハッシュを保存すると、次回呼び出しで
     ///    「同期していないのに一致」と誤判定するため、必ず同期後の状態で保存する）。
     pub fn sync_auto_load_cases_action(&mut self) {
+        #[cfg(feature = "gui")]
+        self.clear_generated_member_selection();
         self.core.model.rebuild_floor_assignment_regions();
         self.core.model.rebuild_wall_assignment_regions();
         sepika_core::region_rebuild::rebuild_floor_regions(&mut self.core.model);
-        sepika_core::wall_region_rebuild::rebuild_wall_regions(&mut self.core.model);
+        self.rebuild_wall_regions_for_preparation();
         self.apply_rigid_zones_for_analysis();
         let current = self.compute_auto_load_sync_hash();
         if self.core.scoped.auto_load_sync_hash == Some(current) {
@@ -201,6 +203,18 @@ impl App {
         }
         self.apply_tip_load_cases(tip_cases);
         self.core.scoped.auto_load_sync_hash = Some(self.compute_auto_load_sync_hash());
+    }
+
+    pub(crate) fn rebuild_wall_regions_for_preparation(&mut self) {
+        let wall_report =
+            sepika_core::wall_region_rebuild::rebuild_wall_regions(&mut self.core.model);
+        #[cfg(feature = "gui")]
+        if wall_report.deleted_nodes > 0 {
+            self.clear_geometry_selection();
+            self.ui.scoped.boundary_node = None;
+        }
+        #[cfg(not(feature = "gui"))]
+        let _ = wall_report;
     }
 
     fn sync_tip_load_cases_action(&mut self) {
