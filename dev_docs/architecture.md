@@ -17,7 +17,7 @@ Layer 7: sepika-mcp（MCP サーバ）、sepika-app（GUI アプリケーショ�
 `sepika-job` は GUI と MCP サーバの共通下層です。
 両者は同じ解析を別々の入口から実行するため、前処理（剛域・仕口パネル要素）と解析条件をここに集約し、**同じモデルに対して同じ結果を返す**ことを保証しています。
 
-`sepika-app` は `App { core: AppCore, ui: UiState }` を持ちます。`AppCore` はモデル・解析状態、`UiState` は選択や表示状態を保持し、モデル差し替え時は `ModelScoped` と `UiModelScoped` を破棄します。egui View は表示と入力取得を担当し、保留編集・Undo/Redo・保存確認・ログ・診断行の選択同期は `app/actions/` の App 操作へ渡します。計算とモデルのドメイン処理は Core/Job に置き、View へ複製しません。
+`sepika-app` は `App { core: AppCore, ui: UiState }` を持ちます。`AppCore` はモデル・解析状態、`UiState` は選択や表示状態を保持し、モデル差し替え時は `ModelScoped` と `UiModelScoped` を破棄します。幾何選択と個別の注目対象は `UiModelScoped::selection` にまとめ、グリッドの編集範囲や Navigator のケース・断面などの表示文脈とは分けます。egui View は表示と入力取得を担当し、保留編集・Undo/Redo・保存確認・ログ・幾何選択同期は `app/actions/` の App 操作へ渡します。計算とモデルのドメイン処理は Core/Job に置き、View へ複製しません。
 
 依存方向は上層から下層のみと定めているため、循環依存が生じていないかを次のコマンドで検出します。
 

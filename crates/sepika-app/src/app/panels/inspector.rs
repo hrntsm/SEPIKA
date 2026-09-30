@@ -6,19 +6,37 @@ use super::*;
 use crate::table_util::fmt_section_prop;
 use sepika_core::units::to_display::{area_cm2, inertia_cm4};
 
+pub(crate) fn section_member_ids(
+    model: &sepika_core::model::Model,
+    sec_id: SectionId,
+) -> Vec<ElemId> {
+    model
+        .elements
+        .iter()
+        .filter(|e| e.section == Some(sec_id))
+        .map(|e| e.id)
+        .collect()
+}
+
 impl App {
     /// 右ペイン：選択要素のインスペクタ。
-    /// 3D/ナビゲータ/テーブルの選択（現時点では focus_*）を表示。断面編集は UI-4 で拡充。
     pub(crate) fn inspector_panel(&mut self, ui: &mut egui::Ui) {
         let mut duplicate_member = None;
         let mut highlight_section_members: Option<Vec<ElemId>> = None;
+        let display_model = if self.ui.scoped.selection.active_member().is_some()
+            || self.ui.scoped.nav.focus_section.is_some()
+        {
+            crate::viewer::wall_expanded_view_model(&self.core.model)
+        } else {
+            std::borrow::Cow::Borrowed(&self.core.model)
+        };
         ui.group(|ui| {
             ui.strong("インスペクタ");
             ui.separator();
 
             if let Some(id) = self.ui.scoped.nav.focus_vibration_case {
                 if let Some(case) = self.core.model.vibration_cases.iter().find(|c| c.id == id) {
-                    ui.strong("立体振動ケース（選択中）");
+                    ui.strong("表示中の立体振動ケース");
                     ui.label(format!("名称: {}", case.name));
                     ui.label(format!("波形: {}", case.wave_name));
                     ui.label(format!(
@@ -47,7 +65,7 @@ impl App {
                     .iter()
                     .find(|c| c.id == id)
                 {
-                    ui.strong("質点系振動ケース（選択中）");
+                    ui.strong("表示中の質点系振動ケース");
                     ui.label(format!("名称: {}", case.name));
                     ui.label(format!("波形: {}", case.wave_name));
                     ui.label(format!(
@@ -73,8 +91,24 @@ impl App {
                 }
             }
 
-            if let Some(elem_id) = self.ui.scoped.nav.focus_member {
-                if let Some(e) = self.core.model.element(elem_id) {
+            let count = self
+                .ui
+                .scoped
+                .selection
+                .members()
+                .len()
+                .max(self.ui.scoped.selection.nodes().len());
+            if count > 0 {
+                ui.label(format!("幾何選択: {count} 件"));
+            }
+            if count > 1
+                && self.ui.scoped.selection.active_member().is_none()
+                && self.ui.scoped.selection.active_node().is_none()
+            {
+                ui.label("複数選択中（個別の注目対象なし）");
+            }
+            if let Some(elem_id) = self.ui.scoped.selection.active_member() {
+                if let Some(e) = display_model.element(elem_id) {
                     ui.label(format!("部材 ID: {}", e.id.0));
                     let n0 = e.nodes.first().map(|n| n.0).unwrap_or(0);
                     let n1 = e.nodes.get(1).map(|n| n.0).unwrap_or(0);
@@ -100,18 +134,13 @@ impl App {
                                 "  Iz= {} cm⁴",
                                 fmt_section_prop(inertia_cm4(sec.iz))
                             ));
-                            let n_used = self
-                                .core
-                                .model
-                                .elements
-                                .iter()
-                                .filter(|o| o.section == Some(sec_id))
-                                .count();
+                            let n_used = section_member_ids(&display_model, sec_id).len();
                             ui.colored_label(
                                 crate::theme::BLUE_500,
                                 format!("この断面を使う {} 部材に影響", n_used),
                             );
-                            if ui.button("📋 複製してこの部材だけ別断面に").clicked()
+                            if self.core.model.element(elem_id).is_some()
+                                && ui.button("📋 複製してこの部材だけ別断面に").clicked()
                             {
                                 duplicate_member = Some(elem_id);
                             }
@@ -170,7 +199,7 @@ impl App {
             if let Some(sec_id) = self.ui.scoped.nav.focus_section {
                 if let Some(sec) = self.core.model.section(sec_id) {
                     ui.separator();
-                    ui.strong("断面（選択中）");
+                    ui.strong("表示中の断面");
                     ui.label(format!("名前: {} ({})", sec.name, sec_id.0));
                     ui.label(format!(
                         "  A = {} cm²",
@@ -184,14 +213,7 @@ impl App {
                         "  Iz= {} cm⁴",
                         fmt_section_prop(inertia_cm4(sec.iz))
                     ));
-                    let used: Vec<ElemId> = self
-                        .core
-                        .model
-                        .elements
-                        .iter()
-                        .filter(|e| e.section == Some(sec_id))
-                        .map(|e| e.id)
-                        .collect();
+                    let used = section_member_ids(&display_model, sec_id);
                     ui.label(format!("使用部材数: {}", used.len()));
                     if ui.button("🔍 使用部材を3Dハイライト").clicked() {
                         highlight_section_members = Some(used);
@@ -200,7 +222,7 @@ impl App {
             }
 
             ui.separator();
-            if let Some(node_id) = self.ui.scoped.nav.focus_node {
+            if let Some(node_id) = self.ui.scoped.selection.active_node() {
                 if let Some(node) = self.core.model.node(node_id) {
                     ui.label(format!("節点 ID: {}", node.id.0));
                     ui.label(format!(
@@ -225,7 +247,7 @@ impl App {
             self.core.scoped.staleness.mark_edited();
         }
         if let Some(members) = highlight_section_members {
-            self.ui.scoped.selection.members = members;
+            self.select_members(members, None);
         }
     }
 }

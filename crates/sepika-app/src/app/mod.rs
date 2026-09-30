@@ -121,8 +121,6 @@ pub struct Navigator {
     pub expanded_groups: bool,
     pub expanded_load_cases: bool,
     pub expanded_result_cases: bool,
-    pub focus_node: Option<NodeId>,
-    pub focus_member: Option<ElemId>,
     pub focus_section: Option<SectionId>,
     pub focus_material: Option<MaterialId>,
     pub focus_load_case: Option<LoadCaseId>,
@@ -294,10 +292,74 @@ pub struct Diagnostic {
     pub target: Option<DiagTarget>,
 }
 
-#[derive(Default)]
-pub struct Selection {
-    pub nodes: Vec<sepika_core::ids::NodeId>,
-    pub members: Vec<sepika_core::ids::ElemId>,
+#[derive(Default, Debug, PartialEq, Eq)]
+pub enum GeometrySelection {
+    #[default]
+    None,
+    Nodes {
+        ids: Vec<NodeId>,
+        active: Option<NodeId>,
+    },
+    Members {
+        ids: Vec<ElemId>,
+        active: Option<ElemId>,
+    },
+}
+
+impl GeometrySelection {
+    pub fn nodes(&self) -> &[NodeId] {
+        match self {
+            Self::Nodes { ids, .. } => ids,
+            _ => &[],
+        }
+    }
+
+    pub fn members(&self) -> &[ElemId] {
+        match self {
+            Self::Members { ids, .. } => ids,
+            _ => &[],
+        }
+    }
+
+    pub fn active_node(&self) -> Option<NodeId> {
+        match self {
+            Self::Nodes { active, .. } => *active,
+            _ => None,
+        }
+    }
+
+    pub fn active_member(&self) -> Option<ElemId> {
+        match self {
+            Self::Members { active, .. } => *active,
+            _ => None,
+        }
+    }
+
+    pub fn select_nodes(&mut self, mut ids: Vec<NodeId>, active: Option<NodeId>) {
+        ids.sort_unstable();
+        ids.dedup();
+        *self = if ids.is_empty() {
+            Self::None
+        } else {
+            Self::Nodes {
+                active: active.filter(|id| ids.contains(id)),
+                ids,
+            }
+        };
+    }
+
+    pub fn select_members(&mut self, mut ids: Vec<ElemId>, active: Option<ElemId>) {
+        ids.sort_unstable();
+        ids.dedup();
+        *self = if ids.is_empty() {
+            Self::None
+        } else {
+            Self::Members {
+                active: active.filter(|id| ids.contains(id)),
+                ids,
+            }
+        };
+    }
 }
 
 /// 小梁設計結果の対象（二次部材の安定 ID）。
@@ -980,12 +1042,14 @@ pub struct UiState {
 /// ドラフト・詳細ウィンドウの選択部材とそのキャッシュ・作成モードの選択節点）を
 /// ここへ置く。[`App::load_model`] が `Default::default()` の代入で丸ごと破棄する。
 pub struct UiModelScoped {
-    pub selection: Selection,
+    pub selection: GeometrySelection,
     /// 節点座標の編集バッファ（model.nodes に同期）
     pub node_edit: Vec<[String; 3]>,
     /// 節点テーブルのグリッド操作ウィジェット状態（選択・編集モード・フラッシュ等）
     #[cfg(feature = "gui")]
     pub node_grid: crate::grid::GridWidget,
+    #[cfg(feature = "gui")]
+    pub boundary_node: Option<NodeId>,
     /// 節点追加フォームの入力中座標（境界条件の編集とは別の独立 UI）
     pub node_draft: [String; 3],
     /// 節点追加時に既存節点と同一座標だった場合の追加保留座標。
@@ -1146,10 +1210,12 @@ pub struct UiModelScoped {
 impl Default for UiModelScoped {
     fn default() -> Self {
         Self {
-            selection: Selection::default(),
+            selection: GeometrySelection::default(),
             node_edit: Vec::new(),
             #[cfg(feature = "gui")]
             node_grid: crate::grid::GridWidget::new(),
+            #[cfg(feature = "gui")]
+            boundary_node: None,
             node_draft: ["0".to_string(), "0".to_string(), "0".to_string()],
             pending_duplicate_node_coord: None,
             nav: Navigator::default(),
@@ -1900,7 +1966,7 @@ mod nav_results;
 #[cfg(feature = "gui")]
 mod nav_vibration;
 #[cfg(feature = "gui")]
-mod panels;
+pub(crate) mod panels;
 mod vibration;
 
 /// 保存（Windows/Linux: Ctrl+S、macOS: ⌘S）。

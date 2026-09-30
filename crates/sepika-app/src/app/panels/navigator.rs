@@ -17,35 +17,21 @@ impl App {
                 .id_salt("nav_groups");
             header.show(ui, |ui| {
                 let (steel_ids, rc_ids) = member_material_groups(&self.core.model);
-                let is_steel_sel = self
-                    .ui
-                    .scoped
-                    .selection
-                    .members
-                    .first()
-                    .map(|id| steel_ids.contains(id))
-                    .unwrap_or(false);
+                let is_steel_sel = member_group_selected(&self.ui.scoped.selection, &steel_ids);
                 if ui
                     .selectable_label(is_steel_sel, format!("鋼材部材 ({})", steel_ids.len()))
                     .on_hover_text("クリックで3Dビューにハイライト")
                     .clicked()
                 {
-                    self.ui.scoped.selection.members = steel_ids.clone();
+                    self.select_members(steel_ids.clone(), None);
                 }
-                let is_rc_sel = self
-                    .ui
-                    .scoped
-                    .selection
-                    .members
-                    .first()
-                    .map(|id| rc_ids.contains(id))
-                    .unwrap_or(false);
+                let is_rc_sel = member_group_selected(&self.ui.scoped.selection, &rc_ids);
                 if ui
                     .selectable_label(is_rc_sel, format!("RC部材 ({})", rc_ids.len()))
                     .on_hover_text("クリックで3Dビューにハイライト")
                     .clicked()
                 {
-                    self.ui.scoped.selection.members = rc_ids.clone();
+                    self.select_members(rc_ids.clone(), None);
                 }
             });
 
@@ -67,11 +53,11 @@ impl App {
                     |row| {
                         let idx = row.index();
                         let elem = self.core.model.elements[idx].clone();
-                        let is_focus = self.ui.scoped.nav.focus_member == Some(elem.id);
+                        let is_focus = self.ui.scoped.selection.active_member() == Some(elem.id);
                         row.col(|ui| {
                             if table_util::id_cell(ui, is_focus, elem.id.0, "クリックで部材を選択")
                             {
-                                self.ui.scoped.nav.focus_member = Some(elem.id);
+                                self.select_member(elem.id);
                             }
                         });
                         row.col(|ui| {
@@ -104,5 +90,31 @@ impl App {
                 }
             });
         });
+    }
+}
+
+fn member_group_selected(selection: &GeometrySelection, group: &[ElemId]) -> bool {
+    let mut ids = group.to_vec();
+    ids.sort_unstable();
+    ids.dedup();
+    !ids.is_empty() && selection.members() == ids
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn group_selection_requires_whole_nonempty_set() {
+        let mut selection = GeometrySelection::None;
+        selection.select_members(vec![ElemId(2)], Some(ElemId(2)));
+        assert!(!member_group_selected(&selection, &[ElemId(2), ElemId(3)]));
+        assert!(!member_group_selected(&selection, &[]));
+        selection.select_members(vec![ElemId(3), ElemId(2), ElemId(2)], None);
+        assert!(member_group_selected(
+            &selection,
+            &[ElemId(3), ElemId(2), ElemId(3)]
+        ));
+        assert!(!member_group_selected(&selection, &[ElemId(2)]));
     }
 }

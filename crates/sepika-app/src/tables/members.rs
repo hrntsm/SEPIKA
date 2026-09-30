@@ -10,7 +10,7 @@ use sepika_core::units::to_internal;
 use sepika_edit::{
     AddDamper, AddIsolator, AddMember, DeleteMember, DeleteWallPlate, EditCommand,
     RemoveSupportIsolator, SetDamperProps, SetElementSection, SetMemberHysteresis,
-    SetMemberHysteresisTh, SetWallPlateSection,
+    SetMemberHysteresisTh,
 };
 use sepika_load::wall_expand::{self, WallExpansionIndex};
 use std::borrow::Cow;
@@ -285,6 +285,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                     plastic_zone: None,
                     spring: None,
                 };
+                app.clear_generated_member_selection();
                 app.core
                     .scoped
                     .undo
@@ -317,7 +318,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                         props: app.ui.scoped.isolator_member_draft.props,
                     }),
                 );
-                app.ui.scoped.nav.focus_member = Some(new_id);
+                app.select_member(new_id);
                 app.core.scoped.staleness.mark_edited();
             }
         }
@@ -347,14 +348,21 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                     .scoped
                     .undo
                     .run(&mut app.core.model, Box::new(AddDamper { elem, props }));
-                app.ui.scoped.nav.focus_member = Some(new_id);
+                app.select_member(new_id);
                 app.core.scoped.staleness.mark_edited();
             }
         }
     }
     ui.separator();
 
-    let (wall_index, pending_section, pending_hysteresis, pending_hysteresis_th, pending_delete) = {
+    let (
+        wall_index,
+        pending_section,
+        pending_hysteresis,
+        pending_hysteresis_th,
+        pending_delete,
+        selected_member,
+    ) = {
         let view = members_table_view(&app.core.model);
         if view
             .wall_index
@@ -395,6 +403,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
         let mut pending_hysteresis: Vec<(ElemId, HysteresisModel)> = Vec::new();
         let mut pending_hysteresis_th: Vec<(ElemId, Option<HysteresisModel>)> = Vec::new();
         let mut pending_delete: Option<ElemId> = None;
+        let mut selected_member: Option<ElemId> = None;
 
         table_util::standard_table(
             ui,
@@ -417,11 +426,11 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                     .wall_index
                     .as_ref()
                     .and_then(|index| index.plate_of(elem.id));
-                let is_focus = app.ui.scoped.nav.focus_member == Some(elem.id);
+                let is_focus = app.ui.scoped.selection.active_member() == Some(elem.id);
                 row.col(|ui| {
                     if table_util::id_cell(ui, is_focus, elem.id.0, "クリックで部材を選択")
                     {
-                        app.ui.scoped.nav.focus_member = Some(elem.id);
+                        selected_member = Some(elem.id);
                     }
                 });
                 row.col(|ui| {
@@ -606,8 +615,13 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
             pending_hysteresis,
             pending_hysteresis_th,
             pending_delete,
+            selected_member,
         )
     };
+
+    if let Some(id) = selected_member {
+        app.select_member(id);
+    }
 
     let had_pending = !pending_section.is_empty()
         || !pending_hysteresis.is_empty()
@@ -628,13 +642,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
             .as_ref()
             .and_then(|index| index.plate_of(elem_id))
         {
-            app.core.scoped.undo.run(
-                &mut app.core.model,
-                Box::new(SetWallPlateSection {
-                    id: plate_id,
-                    section,
-                }),
-            );
+            super::wall_plates::set_wall_plate_section(app, plate_id, section);
         } else {
             app.core.scoped.undo.run(
                 &mut app.core.model,
@@ -678,9 +686,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                 .undo
                 .run(&mut app.core.model, Box::new(DeleteMember { id: elem_id }));
         }
-        if app.ui.scoped.nav.focus_member == Some(elem_id) {
-            app.ui.scoped.nav.focus_member = None;
-        }
+        app.clear_geometry_selection();
     }
 
     if had_pending {
@@ -903,9 +909,7 @@ fn dampers_table(ui: &mut egui::Ui, app: &mut App) {
             .scoped
             .undo
             .run(&mut app.core.model, Box::new(DeleteMember { id: elem_id }));
-        if app.ui.scoped.nav.focus_member == Some(elem_id) {
-            app.ui.scoped.nav.focus_member = None;
-        }
+        app.clear_geometry_selection();
         changed = true;
     }
     if changed {
@@ -1095,6 +1099,7 @@ fn isolators_table(ui: &mut egui::Ui, app: &mut App) {
                     &mut app.core.model,
                     Box::new(RemoveSupportIsolator { node: upper }),
                 );
+                app.ui.scoped.boundary_node = None;
             }
             None => {
                 app.core
@@ -1103,9 +1108,7 @@ fn isolators_table(ui: &mut egui::Ui, app: &mut App) {
                     .run(&mut app.core.model, Box::new(DeleteMember { id: elem_id }));
             }
         }
-        if app.ui.scoped.nav.focus_member == Some(elem_id) {
-            app.ui.scoped.nav.focus_member = None;
-        }
+        app.clear_geometry_selection();
         changed = true;
     }
     if changed {
@@ -1168,6 +1171,96 @@ impl EditCommand for SetIsolatorPropsLocal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn isolators_table_remove_clears_boundary_target_after_node_ids_shift() {
+        use sepika_core::dof::Dof6Mask;
+        use sepika_edit::{AddNode, PlaceSupportIsolator};
+
+        let mut app = App::default();
+        app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(AddNode {
+                coord: [0.0; 3],
+                restraint: Dof6Mask::FIXED,
+            }),
+        );
+        app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(PlaceSupportIsolator {
+                node: NodeId(0),
+                props: IsolatorProps::default(),
+            }),
+        );
+        let elem_id = app.core.model.elements[0].id;
+        assert_eq!(
+            app.core.model.support_isolator_ends(elem_id),
+            Some((NodeId(0), NodeId(1)))
+        );
+        let b_coord = [1000.0, 0.0, 0.0];
+        let c_coord = [2000.0, 0.0, 0.0];
+        for coord in [b_coord, c_coord] {
+            app.core.scoped.undo.run(
+                &mut app.core.model,
+                Box::new(AddNode {
+                    coord,
+                    restraint: Dof6Mask::FREE,
+                }),
+            );
+        }
+        app.ui.scoped.boundary_node = Some(NodeId(2));
+        app.select_member(elem_id);
+
+        let ctx = egui::Context::default();
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1600.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input(), |ui| isolators_table(ui, &mut app));
+        let output = ctx.run_ui(input(), |ui| isolators_table(ui, &mut app));
+        let delete_pos = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.job.text == "🗑" => {
+                    Some(text.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .expect("免震支承材表の削除ボタン");
+        for pressed in [true, false] {
+            let mut raw = input();
+            raw.events = vec![
+                egui::Event::PointerMoved(delete_pos),
+                egui::Event::PointerButton {
+                    pos: delete_pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ];
+            let _ = ctx.run_ui(raw, |ui| isolators_table(ui, &mut app));
+        }
+
+        assert!(app.core.model.elements.is_empty());
+        assert_eq!(app.core.model.nodes.len(), 3);
+        assert_eq!(app.core.model.node(NodeId(1)).unwrap().coord, b_coord);
+        assert_eq!(app.core.model.node(NodeId(2)).unwrap().coord, c_coord);
+        assert_eq!(app.ui.scoped.selection, crate::app::GeometrySelection::None);
+        assert_eq!(app.ui.scoped.boundary_node, None);
+
+        let _ = ctx.run_ui(input(), |ui| {
+            crate::tables::nodes::boundary_condition_panel(ui, &mut app);
+        });
+        assert_eq!(app.ui.scoped.boundary_node, None);
+        assert_eq!(app.ui.scoped.selection, crate::app::GeometrySelection::None);
+        for id in [NodeId(1), NodeId(2)] {
+            assert_eq!(app.core.model.node(id).unwrap().restraint, Dof6Mask::FREE);
+        }
+    }
 
     fn def(name: &str) -> DamperDef {
         DamperDef {
