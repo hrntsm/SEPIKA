@@ -261,14 +261,15 @@ pub fn nodes_table(ui: &mut egui::Ui, app: &mut App) {
         );
     }
     if edited {
+        app.clear_generated_member_selection();
         app.core.scoped.staleness.mark_edited();
         app.sync_node_edit();
     }
-    if app.ui.scoped.node_grid.grid.active {
-        let r = app.ui.scoped.node_grid.grid.anchor.row;
-        if let Some(node) = app.core.model.nodes.get(r) {
-            app.ui.scoped.nav.focus_node = Some(node.id);
-        }
+    let row_selection = app.ui.scoped.node_grid.take_row_selection();
+    if app.ui.scoped.node_grid.take_rows_deleted() {
+        clear_deleted_node_selection(app);
+    } else if let Some((anchor, cursor)) = row_selection {
+        select_node_rows(app, anchor, cursor);
     }
 
     if app.ui.scoped.pending_duplicate_node_coord.is_some() {
@@ -317,6 +318,40 @@ pub fn nodes_table(ui: &mut egui::Ui, app: &mut App) {
     }
 }
 
+fn row_geometry_selection(
+    model: &sepika_core::model::Model,
+    anchor: usize,
+    cursor: usize,
+) -> (Vec<NodeId>, Option<NodeId>) {
+    let ids = (anchor.min(cursor)..=anchor.max(cursor))
+        .filter_map(|r| model.nodes.get(r).map(|n| n.id))
+        .collect();
+    let active = model.nodes.get(anchor).map(|n| n.id);
+    (ids, active)
+}
+
+fn select_node_rows(app: &mut App, anchor: usize, cursor: usize) {
+    let (ids, active) = row_geometry_selection(&app.core.model, anchor, cursor);
+    app.ui.scoped.boundary_node = None;
+    app.select_nodes(ids, active);
+}
+
+fn boundary_edit_node(
+    model: &sepika_core::model::Model,
+    boundary_node: Option<NodeId>,
+    active_node: Option<NodeId>,
+) -> Option<NodeId> {
+    active_node
+        .filter(|id| model.node(*id).is_some())
+        .or_else(|| boundary_node.filter(|id| model.node(*id).is_some()))
+        .or_else(|| model.nodes.first().map(|node| node.id))
+}
+
+fn clear_deleted_node_selection(app: &mut App) {
+    app.clear_geometry_selection();
+    app.ui.scoped.boundary_node = None;
+}
+
 /// 境界条件（拘束）タブ：節点一覧・追加フォームとは別の独立したサブタブ。
 /// 節点を選んでから 自由／ピン／固定 やチェックボックスで拘束成分を設定する。
 pub fn boundary_condition_panel(ui: &mut egui::Ui, app: &mut App) {
@@ -326,14 +361,12 @@ pub fn boundary_condition_panel(ui: &mut egui::Ui, app: &mut App) {
     }
 
     let node_ids: Vec<NodeId> = app.core.model.nodes.iter().map(|n| n.id).collect();
-    let selected = app
-        .ui
-        .scoped
-        .nav
-        .focus_node
-        .filter(|id| node_ids.contains(id))
-        .unwrap_or(node_ids[0]);
-    app.ui.scoped.nav.focus_node = Some(selected);
+    let mut selected = boundary_edit_node(
+        &app.core.model,
+        app.ui.scoped.boundary_node,
+        app.ui.scoped.selection.active_node(),
+    )
+    .unwrap_or(node_ids[0]);
 
     let node_label = |id: NodeId| -> String {
         let has_spring = app
@@ -348,6 +381,7 @@ pub fn boundary_condition_panel(ui: &mut egui::Ui, app: &mut App) {
         }
     };
 
+    let mut explicit_node = None;
     ui.horizontal(|ui| {
         ui.label("対象節点:");
         egui::ComboBox::from_id_salt("bc_node_select")
@@ -358,14 +392,18 @@ pub fn boundary_condition_panel(ui: &mut egui::Ui, app: &mut App) {
                         .selectable_label(selected == *id, node_label(*id))
                         .clicked()
                     {
-                        app.ui.scoped.nav.focus_node = Some(*id);
+                        explicit_node = Some(*id);
                     }
                 }
             });
     });
+    if let Some(id) = explicit_node {
+        app.ui.scoped.boundary_node = Some(id);
+        app.select_node(id);
+        selected = id;
+    }
     ui.separator();
 
-    let selected = app.ui.scoped.nav.focus_node.unwrap_or(selected);
     let Some(node) = app.core.model.node(selected) else {
         return;
     };
@@ -543,6 +581,7 @@ fn isolator_support_section(ui: &mut egui::Ui, app: &mut App, node_id: NodeId) {
                                 Box::new(RemoveSupportIsolator { node: node_id }),
                             );
                             app.core.scoped.staleness.mark_edited();
+                            clear_deleted_node_selection(app);
                         }
                     }
                     None => {
@@ -569,6 +608,7 @@ fn isolator_support_section(ui: &mut egui::Ui, app: &mut App, node_id: NodeId) {
                 )
                 .clicked()
             {
+                app.clear_generated_member_selection();
                 app.core.scoped.undo.run(
                     &mut app.core.model,
                     Box::new(PlaceSupportIsolator {
@@ -608,6 +648,186 @@ mod tests {
     use sepika_core::dof::Dof6Mask;
     use sepika_core::model::Model;
     use sepika_edit::UndoStack;
+
+    #[test]
+    fn grid_cell_and_boundary_default_render_do_not_override_geometry_selection() {
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            boundary_condition_panel(ui, &mut app);
+        });
+        assert_eq!(app.ui.scoped.selection, crate::app::GeometrySelection::None);
+        assert_eq!(app.ui.scoped.boundary_node, None);
+
+        let selected = app.core.model.elements[0].id;
+        app.select_member(selected);
+        app.ui.scoped.node_grid.grid =
+            crate::grid::GridState::new(app.core.model.nodes.len() + 1, 3);
+        app.ui
+            .scoped
+            .node_grid
+            .grid
+            .click(crate::grid::CellRef { row: 1, col: 0 }, false);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            nodes_table(ui, &mut app);
+        });
+        assert_eq!(app.ui.scoped.selection.members(), &[selected]);
+        assert_eq!(app.ui.scoped.selection.active_member(), Some(selected));
+        assert_eq!(app.ui.scoped.node_grid.take_row_selection(), None);
+        for key in [egui::Key::A, egui::Key::F2] {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers {
+                            command: true,
+                            ctrl: true,
+                            ..Default::default()
+                        },
+                    }],
+                    ..Default::default()
+                },
+                |ui| nodes_table(ui, &mut app),
+            );
+            assert_eq!(app.ui.scoped.selection.members(), &[selected]);
+            assert_eq!(app.ui.scoped.selection.active_member(), Some(selected));
+            assert_eq!(app.ui.scoped.node_grid.take_row_selection(), None);
+        }
+        assert!(app.ui.scoped.node_grid.grid.editing.is_some());
+    }
+
+    #[test]
+    fn row_header_range_uses_real_node_ids_and_anchor() {
+        let mut model = Model::default();
+        for id in 0..3 {
+            model.nodes.push(sepika_core::model::Node {
+                id: NodeId(id),
+                coord: [0.0; 3],
+                restraint: Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            });
+        }
+        assert_eq!(
+            row_geometry_selection(&model, 2, 0),
+            (vec![NodeId(0), NodeId(1), NodeId(2)], Some(NodeId(2)))
+        );
+        assert_eq!(
+            row_geometry_selection(&model, 2, 5),
+            (vec![NodeId(2)], Some(NodeId(2)))
+        );
+        assert_eq!(row_geometry_selection(&model, 3, 4), (vec![], None));
+        model.nodes[1].id = NodeId(7);
+        assert_eq!(
+            row_geometry_selection(&model, 0, 3),
+            (vec![NodeId(0), NodeId(7), NodeId(2)], Some(NodeId(0)))
+        );
+        assert_eq!(
+            row_geometry_selection(&model, 3, 0),
+            (vec![NodeId(0), NodeId(7), NodeId(2)], None)
+        );
+        for (anchor, cursor) in [(0, 3), (3, 0), (3, 3)] {
+            let mut app = App::default();
+            app.core.model = model.clone();
+            select_node_rows(&mut app, anchor, cursor);
+            assert!(app.ui.scoped.selection.active_node().is_none_or(|id| app
+                .ui
+                .scoped
+                .selection
+                .nodes()
+                .contains(&id)));
+        }
+        assert_eq!(
+            row_geometry_selection(&Model::default(), 0, 0),
+            (vec![], None)
+        );
+    }
+
+    #[test]
+    fn boundary_edit_tracks_external_node_without_selecting_default_or_cell() {
+        let mut model = Model::default();
+        for id in 0..2 {
+            model.nodes.push(sepika_core::model::Node {
+                id: NodeId(id),
+                coord: [0.0; 3],
+                restraint: Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            });
+        }
+        assert_eq!(
+            boundary_edit_node(&model, Some(NodeId(9)), Some(NodeId(1))),
+            Some(NodeId(1))
+        );
+        let mut app = App::default();
+        app.core.model = model.clone();
+        assert_eq!(boundary_edit_node(&model, None, None), Some(NodeId(0)));
+        assert!(app.ui.scoped.selection.nodes().is_empty());
+        app.ui.scoped.boundary_node = Some(NodeId(0));
+        app.select_node(NodeId(1));
+        assert_eq!(
+            boundary_edit_node(
+                &app.core.model,
+                app.ui.scoped.boundary_node,
+                app.ui.scoped.selection.active_node(),
+            ),
+            Some(NodeId(1))
+        );
+        assert_eq!(app.ui.scoped.selection.active_node(), Some(NodeId(1)));
+        app.clear_geometry_selection();
+        assert_eq!(
+            boundary_edit_node(&model, Some(NodeId(0)), None),
+            Some(NodeId(0))
+        );
+        model.nodes.remove(1);
+        assert_eq!(
+            boundary_edit_node(&model, Some(NodeId(1)), Some(NodeId(0))),
+            Some(NodeId(0))
+        );
+    }
+
+    #[test]
+    fn row_header_selection_replaces_boundary_edit_target() {
+        let mut app = App::default();
+        for id in 0..2 {
+            app.core.model.nodes.push(sepika_core::model::Node {
+                id: NodeId(id),
+                coord: [0.0; 3],
+                restraint: Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            });
+        }
+        app.ui.scoped.boundary_node = Some(NodeId(0));
+        app.select_node(NodeId(0));
+        select_node_rows(&mut app, 1, 1);
+        assert_eq!(app.ui.scoped.boundary_node, None);
+        assert_eq!(
+            boundary_edit_node(
+                &app.core.model,
+                app.ui.scoped.boundary_node,
+                app.ui.scoped.selection.active_node(),
+            ),
+            Some(NodeId(1))
+        );
+    }
+
+    #[test]
+    fn node_deletion_invalidates_local_boundary_target() {
+        let mut app = App::default();
+        app.ui.scoped.boundary_node = Some(NodeId(1));
+        app.select_node(NodeId(1));
+        clear_deleted_node_selection(&mut app);
+        assert_eq!(app.ui.scoped.boundary_node, None);
+        assert_eq!(app.ui.scoped.selection, crate::app::GeometrySelection::None);
+    }
 
     /// `find_support_isolator`: 未設置の節点では `None` を返す。
     #[test]

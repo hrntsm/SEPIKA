@@ -189,7 +189,7 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
                         let it = &takeoff.items[row.index()];
                         row.col(|ui| match it.elem {
                             Some(id) => {
-                                let is_focus = app.ui.scoped.nav.focus_member == Some(id);
+                                let is_focus = app.ui.scoped.selection.active_member() == Some(id);
                                 if crate::table_util::id_cell(
                                     ui,
                                     is_focus,
@@ -250,7 +250,7 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
     });
 
     if let Some(id) = focus {
-        app.ui.scoped.nav.focus_member = Some(id);
+        app.select_member(id);
     }
 }
 

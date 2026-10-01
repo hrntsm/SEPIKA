@@ -263,6 +263,29 @@ fn opening_summary(plate: &WallPlate) -> String {
     }
 }
 
+pub(crate) fn set_wall_plate_section(app: &mut App, id: WallPlateId, section: Option<SectionId>) {
+    let becomes_element = |model: &sepika_core::model::Model| {
+        model
+            .wall_plate(id)
+            .is_some_and(|plate| !plate.is_attached() && model.wall_plate_becomes_element(plate))
+    };
+    let before = becomes_element(&app.core.model);
+    app.core.scoped.undo.run(
+        &mut app.core.model,
+        Box::new(SetWallPlateSection { id, section }),
+    );
+    if before != becomes_element(&app.core.model) {
+        app.clear_generated_member_selection();
+    }
+}
+
+pub(crate) fn run_wall_region_command(app: &mut App, command: Box<dyn sepika_edit::EditCommand>) {
+    if app.core.scoped.undo.run(&mut app.core.model, command) {
+        app.clear_geometry_selection();
+        app.core.scoped.staleness.mark_edited();
+    }
+}
+
 pub fn wall_plates_table(ui: &mut egui::Ui, app: &mut App) {
     ui.collapsing("間柱の自重・重力荷重の伝達先", |ui| {
         let posts: Vec<_> = app.core.model.posts().cloned().collect();
@@ -573,10 +596,7 @@ fn wall_plates_list(ui: &mut egui::Ui, app: &mut App) {
         || !pending_anchor.is_empty()
         || pending_delete.is_some();
     for (id, section) in pending_section {
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(SetWallPlateSection { id, section }),
-        );
+        set_wall_plate_section(app, id, section);
     }
     for (id, extent) in pending_extent {
         app.core.scoped.undo.run(
@@ -595,6 +615,7 @@ fn wall_plates_list(ui: &mut egui::Ui, app: &mut App) {
             .scoped
             .undo
             .run(&mut app.core.model, Box::new(DeleteWallPlate { id }));
+        app.clear_geometry_selection();
         app.ui.scoped.wall_plate_draft.target = None;
         app.ui.scoped.wall_plate_draft.synced_for = None;
     }
@@ -1207,8 +1228,7 @@ fn add_enclosed_form(ui: &mut egui::Ui, app: &mut App) {
             }
         });
     if let Some(command) = action {
-        app.core.scoped.undo.run(&mut app.core.model, command);
-        app.core.scoped.staleness.mark_edited();
+        run_wall_region_command(app, command);
     }
 }
 
@@ -1485,6 +1505,206 @@ mod tests {
             loads: vec![],
             slit: Default::default(),
         }
+    }
+
+    #[test]
+    fn section_change_preserves_selected_wall_and_active() {
+        assert_section_change_preserves_selection(WallPlateId(0));
+    }
+
+    #[test]
+    fn section_change_preserves_other_wall_and_active() {
+        assert_section_change_preserves_selection(WallPlateId(1));
+    }
+
+    fn assert_section_change_preserves_selection(selected_plate: WallPlateId) {
+        let (mut model, ids) = plate_model();
+        let mut section = crate::sample::portal_frame().sections[0].clone();
+        section.thickness = Some(180.0);
+        model.sections.push(section.clone());
+        section.id = SectionId(1);
+        section.thickness = Some(200.0);
+        model.sections.push(section);
+        for id in 0..2 {
+            model.add_enclosed_wall_plate_from_nodes(&ids, enclosed(id, Some(SectionId(0))));
+        }
+        model.wall_regions.push(sepika_core::model::WallRegion {
+            id: sepika_core::ids::WallRegionId(0),
+            name: String::new(),
+            boundary: ids,
+            wall_plate_ids: vec![WallPlateId(0), WallPlateId(1)],
+            posts: Vec::new(),
+        });
+        let (_, before, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        let selected = before
+            .generated_elem_ids()
+            .find(|id| before.plate_of(*id) == Some(selected_plate))
+            .unwrap();
+        let mut app = App::default();
+        app.core.model = model;
+        app.select_member(selected);
+        let selection = crate::app::GeometrySelection::Members {
+            ids: vec![selected],
+            active: Some(selected),
+        };
+
+        set_wall_plate_section(&mut app, WallPlateId(0), Some(SectionId(1)));
+
+        assert_eq!(app.core.model.wall_plates[0].section, Some(SectionId(1)));
+        let (_, after, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+        for id in before.generated_elem_ids() {
+            assert_eq!(after.plate_of(id), before.plate_of(id));
+        }
+        assert_eq!(app.ui.scoped.selection, selection);
+    }
+
+    #[test]
+    fn section_change_clears_generated_selection_before_ids_shift() {
+        let (mut model, ids) = plate_model();
+        model
+            .sections
+            .push(crate::sample::portal_frame().sections[0].clone());
+        for id in 0..2 {
+            model.add_enclosed_wall_plate_from_nodes(
+                &ids,
+                enclosed(id, (id == 1).then_some(SectionId(0))),
+            );
+        }
+        model.wall_regions.push(sepika_core::model::WallRegion {
+            id: sepika_core::ids::WallRegionId(0),
+            name: String::new(),
+            boundary: ids,
+            wall_plate_ids: vec![WallPlateId(0), WallPlateId(1)],
+            posts: Vec::new(),
+        });
+        let (_, before, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        let selected = before
+            .generated_elem_ids()
+            .find(|id| before.plate_of(*id) == Some(WallPlateId(1)))
+            .unwrap();
+        let mut app = App::default();
+        app.core.model = model;
+        app.select_member(selected);
+
+        set_wall_plate_section(&mut app, WallPlateId(0), Some(SectionId(0)));
+
+        let (_, after, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+        assert_eq!(after.plate_of(selected), Some(WallPlateId(0)));
+        assert_eq!(app.ui.scoped.selection, crate::app::GeometrySelection::None);
+
+        app.select_member(selected);
+        set_wall_plate_section(&mut app, WallPlateId(0), None);
+        let (_, restored, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+        assert_eq!(restored.plate_of(selected), Some(WallPlateId(1)));
+        assert_eq!(app.ui.scoped.selection, crate::app::GeometrySelection::None);
+    }
+
+    #[test]
+    fn rejected_section_change_preserves_generated_selection_and_active() {
+        let (mut model, ids) = plate_model();
+        model
+            .sections
+            .push(crate::sample::portal_frame().sections[0].clone());
+        for id in 0..2 {
+            model.add_enclosed_wall_plate_from_nodes(
+                &ids,
+                enclosed(id, (id == 1).then_some(SectionId(0))),
+            );
+        }
+        model.wall_regions.push(sepika_core::model::WallRegion {
+            id: sepika_core::ids::WallRegionId(0),
+            name: String::new(),
+            boundary: ids,
+            wall_plate_ids: vec![WallPlateId(0), WallPlateId(1)],
+            posts: Vec::new(),
+        });
+        let (_, before, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        let selected = before.generated_elem_ids().next().unwrap();
+        let mut app = App::default();
+        app.core.model = model;
+        app.select_member(selected);
+
+        for plate in [WallPlateId(0), WallPlateId(1), WallPlateId(99)] {
+            set_wall_plate_section(&mut app, plate, Some(SectionId(99)));
+            assert_eq!(app.ui.scoped.selection.members(), &[selected]);
+            assert_eq!(app.ui.scoped.selection.active_member(), Some(selected));
+        }
+        assert_eq!(app.core.model.wall_plates[0].section, None);
+        assert_eq!(app.core.model.wall_plates[1].section, Some(SectionId(0)));
+    }
+
+    #[test]
+    fn region_unassignment_clears_selection_before_generated_id_is_reused() {
+        use sepika_core::ids::WallPlateAssignmentRegionId;
+        use sepika_core::model::{PlateAssignment, WallPlateAssignmentRegion, WallRegion};
+        let (mut model, ids) = plate_model();
+        model
+            .sections
+            .push(crate::sample::portal_frame().sections[0].clone());
+        for id in 0..2 {
+            model.add_enclosed_wall_plate_from_nodes(&ids, enclosed(id, Some(SectionId(0))));
+            model.wall_regions.push(WallRegion {
+                id: sepika_core::ids::WallRegionId(id),
+                name: String::new(),
+                boundary: ids.clone(),
+                wall_plate_ids: vec![WallPlateId(id)],
+                posts: Vec::new(),
+            });
+        }
+        model
+            .wall_assignment_regions
+            .regions
+            .push(WallPlateAssignmentRegion {
+                id: WallPlateAssignmentRegionId(0),
+                boundary: Vec::new(),
+                assignment: PlateAssignment::Plate(WallPlateId(0)),
+            });
+        let (_, before, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        let selected = before
+            .generated_elem_ids()
+            .find(|id| before.plate_of(*id) == Some(WallPlateId(0)))
+            .unwrap();
+        let mut app = App::default();
+        app.core.model = model;
+        app.select_member(selected);
+        run_wall_region_command(
+            &mut app,
+            Box::new(SetWallPlateRegionNoPlate {
+                region: WallPlateAssignmentRegionId(0),
+            }),
+        );
+        let (_, after, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+        assert_eq!(after.plate_of(selected), Some(WallPlateId(0)));
+        assert_eq!(app.ui.scoped.selection, crate::app::GeometrySelection::None);
+    }
+
+    #[test]
+    fn inspector_section_usage_and_highlight_include_generated_wall() {
+        let (mut model, ids) = plate_model();
+        model
+            .sections
+            .push(crate::sample::portal_frame().sections[0].clone());
+        model.add_enclosed_wall_plate_from_nodes(&ids, enclosed(0, Some(SectionId(0))));
+        model.wall_regions.push(sepika_core::model::WallRegion {
+            id: sepika_core::ids::WallRegionId(0),
+            name: String::new(),
+            boundary: ids,
+            wall_plate_ids: vec![WallPlateId(0)],
+            posts: Vec::new(),
+        });
+        let mut app = App::default();
+        app.core.model = model;
+        let display = crate::viewer::wall_expanded_view_model(&app.core.model);
+        let used = crate::app::panels::inspector::section_member_ids(&display, SectionId(0));
+        assert_eq!(used.len(), 1);
+        let wall_id = used[0];
+        assert!(app.core.model.element(wall_id).is_none());
+        assert_eq!(
+            display.element(wall_id).unwrap().section,
+            Some(SectionId(0))
+        );
+        app.select_members(used, None);
+        assert_eq!(app.ui.scoped.selection.members(), &[wall_id]);
     }
 
     /// 「解析要素」列のホバーは、要素にならない理由を実際の状態どおりに述べる。

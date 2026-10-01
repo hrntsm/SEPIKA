@@ -9,7 +9,7 @@
 mod activity_bar;
 mod analysis;
 mod draw_tools;
-mod inspector;
+pub(crate) mod inspector;
 mod navigator;
 mod preparation;
 mod results;

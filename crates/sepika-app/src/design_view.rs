@@ -186,7 +186,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         |row| {
             let i = row.index();
             let r = &checks[i];
-            let is_focus = app.ui.scoped.nav.focus_member == Some(r.elem);
+            let is_focus = app.ui.scoped.selection.active_member() == Some(r.elem);
             row.col(|ui| {
                 if crate::table_util::id_cell(
                     ui,
@@ -261,13 +261,10 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         },
     );
     if let Some(id) = focus {
-        app.ui.scoped.nav.focus_member = Some(id);
+        app.select_member(id);
     }
     if let Some((sid, eid)) = jump_to_section {
-        app.ui.view.active_tab = crate::app::Tab::Model;
-        app.ui.view.model_tab = crate::app::ModelTab::Sections;
-        app.ui.scoped.nav.focus_section = Some(sid);
-        app.ui.scoped.nav.focus_member = Some(eid);
+        jump_to_member_section(app, sid, eid);
     }
 
     struct JointCheckRow {
@@ -801,6 +798,17 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
     floor_design_section(ui, app);
 }
 
+fn jump_to_member_section(
+    app: &mut App,
+    section: sepika_core::ids::SectionId,
+    member: sepika_core::ids::ElemId,
+) {
+    app.select_member(member);
+    app.ui.view.active_tab = crate::app::Tab::Model;
+    app.ui.view.model_tab = crate::app::ModelTab::Sections;
+    app.ui.scoped.nav.focus_section = Some(section);
+}
+
 /// 床の中での小梁・スラブ設計の表示（`ResultsBundle.beam_checks`/`slab_checks`）。
 /// 小梁は単純梁または片持ち梁として曲げ・たわみを検定し、スラブは一方向版として設計曲げ
 /// モーメント・必要鉄筋量を表示する（いずれも全体 FEM から独立）。
@@ -957,4 +965,25 @@ fn secondary_label<'a>(
         .filter(|sm| sm.id == id)
         .find_map(|sm| (!sm.name.is_empty()).then(|| sm.name.clone()))
         .unwrap_or_else(|| format!("SM{}", id.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sepika_core::ids::{ElemId, SectionId};
+
+    #[test]
+    fn section_jump_replaces_other_member_detail() {
+        let mut app = App::default();
+        app.select_member(ElemId(0));
+        app.ui.scoped.nav.focus_section = Some(SectionId(0));
+
+        jump_to_member_section(&mut app, SectionId(1), ElemId(1));
+
+        assert_eq!(app.ui.scoped.selection.members(), &[ElemId(1)]);
+        assert_eq!(app.ui.scoped.selection.active_member(), Some(ElemId(1)));
+        assert_eq!(app.ui.scoped.nav.focus_section, Some(SectionId(1)));
+        assert_eq!(app.ui.view.active_tab, crate::app::Tab::Model);
+        assert_eq!(app.ui.view.model_tab, crate::app::ModelTab::Sections);
+    }
 }
