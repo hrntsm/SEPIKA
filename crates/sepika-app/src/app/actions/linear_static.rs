@@ -16,6 +16,7 @@ impl App {
         let ready = self.begin_analysis();
         self.invalidate_missing_tip_seismic(&[lc]);
         if !ready {
+            self.invalidate_static_cases(&[lc]);
             return;
         }
         let res = sepika_job::compute::compute_linear_static(self.core.model.clone(), lc)
@@ -47,7 +48,10 @@ impl App {
                 self.core.scoped.staleness.mark_fresh();
                 self.run_design_check();
             }
-            Err(e) => self.report_error(e),
+            Err(e) => {
+                self.invalidate_static_key(key);
+                self.report_error(e);
+            }
         }
     }
 
@@ -88,6 +92,9 @@ impl App {
             self.invalidate_missing_tip_seismic(&[lc]);
         }
         if !ready {
+            if self.core.scoped.job.is_none() {
+                self.invalidate_static_cases(&[lc]);
+            }
             return;
         }
         let model = self.core.model.clone();
@@ -138,11 +145,8 @@ impl App {
     /// （地震項が黙って 0 になるのを防ぐ）。
     pub fn run_combination(&mut self, index: usize) {
         let ready = self.begin_analysis();
-        if let Some(combo) = self.core.model.combinations.get(index) {
-            let ids: Vec<_> = combo.terms.iter().map(|(id, _)| *id).collect();
-            self.invalidate_missing_tip_seismic(&ids);
-        }
         if !ready {
+            self.invalidate_static_combo(index);
             return;
         }
         let Some(combo) = self.core.model.combinations.get(index).cloned() else {
@@ -150,8 +154,9 @@ impl App {
             return;
         };
         if let Some(name) = self.empty_lateral_case_in_combo(&combo) {
+            self.invalidate_static_combo(index);
             self.report_error(format!(
-                "荷重組合せ「{}」が参照する水平力の荷重ケース「{}」が空です（地震水平力がありません）。解析タブの「準備計算 実行」を行うか水平力を手入力してください。",
+                "荷重組合せ「{}」が参照する荷重ケース「{}」に水平力がありません。標準 EX/EY は Ai 地震力の再生成が必要です。それ以外は水平力を設定してください。",
                 combo.name, name
             ));
             return;
@@ -215,7 +220,10 @@ impl App {
                 };
                 self.run_design_check();
             }
-            Err(e) => self.report_error(e),
+            Err(e) => {
+                self.remove_excluded_tip_results(&(Vec::new(), vec![name]));
+                self.report_error(e);
+            }
         }
     }
 
@@ -224,13 +232,10 @@ impl App {
     /// 既にジョブが実行中の場合は何もしない（last_error に案内文を設定）。
     pub fn start_combination_job(&mut self, index: usize) {
         let ready = self.begin_analysis_job();
-        if self.core.scoped.job.is_none() {
-            if let Some(combo) = self.core.model.combinations.get(index) {
-                let ids: Vec<_> = combo.terms.iter().map(|(id, _)| *id).collect();
-                self.invalidate_missing_tip_seismic(&ids);
-            }
-        }
         if !ready {
+            if self.core.scoped.job.is_none() {
+                self.invalidate_static_combo(index);
+            }
             return;
         }
         let Some(combo) = self.core.model.combinations.get(index).cloned() else {
@@ -238,8 +243,9 @@ impl App {
             return;
         };
         if let Some(name) = self.empty_lateral_case_in_combo(&combo) {
+            self.invalidate_static_combo(index);
             self.report_error(format!(
-                "荷重組合せ「{}」が参照する水平力の荷重ケース「{}」が空です（地震水平力がありません）。解析タブの「準備計算 実行」を行うか水平力を手入力してください。",
+                "荷重組合せ「{}」が参照する荷重ケース「{}」に水平力がありません。標準 EX/EY は Ai 地震力の再生成が必要です。それ以外は水平力を設定してください。",
                 combo.name, name
             ));
             return;
@@ -262,14 +268,14 @@ impl App {
     /// 何件あっても、求解は荷重ケース数ぶんで済む。
     ///
     /// 個別の解析エラーは処理を止めず、件数と最初のエラー内容を `last_error` に
-    /// まとめる（他の結果は失わない）。荷重ケースが 1 件もない場合、および 1 件も
-    /// 解けなかった場合は既存の結果を変更せず、案内メッセージを `last_error` に
-    /// 設定して return する。
+    /// まとめる。失敗・除外対象の旧結果を削除し、対象外の結果は保持する。
     pub fn run_static_all(&mut self) {
         if !self.begin_analysis() {
+            self.invalidate_static_all_targets();
             return;
         }
         if self.core.model.load_cases.is_empty() {
+            self.invalidate_static_all_targets();
             self.report_error("荷重ケースがありません。荷重タブで作成してください。");
             return;
         }
@@ -307,11 +313,9 @@ impl App {
             .iter()
             .filter(|lc| {
                 if is_empty_lateral_case(lc) {
-                    if self.tip_seismic_case(lc) {
-                        excluded_ids.push(lc.id);
-                    }
+                    excluded_ids.push(lc.id);
                     errors.push(format!(
-                        "[{}] 水平力がありません。「準備計算 実行」を行うか水平力を手入力してください。",
+                        "[{}] 水平力がありません。標準 EX/EY は Ai 地震力の再生成が必要です。それ以外は水平力を設定してください。",
                         lc.name
                     ));
                     return false;
@@ -347,7 +351,7 @@ impl App {
                 match self.empty_lateral_case_in_combo(combo) {
                     Some(name) => {
                         errors.push(format!(
-                            "[{}] 荷重ケース「{}」に水平力がありません。「準備計算 実行」を行うか水平力を手入力してください。",
+                            "[{}] 荷重ケース「{}」に水平力がありません。標準 EX/EY は Ai 地震力の再生成が必要です。それ以外は水平力を設定してください。",
                             combo.name, name
                         ));
                         false
@@ -360,35 +364,28 @@ impl App {
         (case_keys, combos, errors, (excluded_keys, excluded_combos))
     }
 
-    fn tip_seismic_case(&self, case: &sepika_core::model::LoadCase) -> bool {
-        self.standard_lateral_case(case.id).is_some()
-            && self
-                .core
-                .model
-                .slabs
-                .iter()
-                .any(|slab| slab.tip_loads.iter().any(|tip| tip.case == case.id))
-    }
-
-    fn invalidate_missing_tip_seismic(&mut self, ids: &[LoadCaseId]) {
+    pub(super) fn invalidate_missing_tip_seismic(&mut self, ids: &[LoadCaseId]) {
         let affected: Vec<_> = self
             .core
             .model
             .load_cases
             .iter()
-            .filter(|case| {
-                ids.contains(&case.id) && self.tip_seismic_case(case) && is_empty_lateral_case(case)
-            })
+            .filter(|case| ids.contains(&case.id) && is_empty_lateral_case(case))
             .map(|case| case.id)
             .collect();
         if affected.is_empty() {
             return;
         }
+        self.invalidate_static_cases(&affected);
+    }
+
+    pub(super) fn invalidate_static_cases(&mut self, affected: &[LoadCaseId]) {
         let keys = affected
             .iter()
             .flat_map(|id| {
                 [
-                    self.standard_lateral_case(*id).unwrap(),
+                    self.standard_lateral_case(*id)
+                        .unwrap_or(StaticCaseKey::User(*id)),
                     StaticCaseKey::User(*id),
                 ]
             })
@@ -404,13 +401,50 @@ impl App {
         self.remove_excluded_tip_results(&(keys, combos));
     }
 
+    fn invalidate_static_key(&mut self, key: StaticCaseKey) {
+        let id = match key {
+            StaticCaseKey::User(id) => Some(id),
+            StaticCaseKey::Seismic(dir) => self.seismic_case_id(dir),
+        };
+        if let Some(id) = id {
+            self.invalidate_static_cases(&[id]);
+        } else {
+            self.remove_excluded_tip_results(&(vec![key], Vec::new()));
+        }
+    }
+
+    pub(super) fn invalidate_static_combo(&mut self, index: usize) {
+        if let Some(combo) = self.core.model.combinations.get(index) {
+            self.remove_excluded_tip_results(&(Vec::new(), vec![combo.name.clone()]));
+        }
+    }
+
+    pub(super) fn invalidate_static_all_targets(&mut self) {
+        let ids: Vec<_> = self
+            .core
+            .model
+            .load_cases
+            .iter()
+            .map(|case| case.id)
+            .collect();
+        self.invalidate_static_cases(&ids);
+        let names = self
+            .core
+            .model
+            .combinations
+            .iter()
+            .map(|combo| combo.name.clone())
+            .collect();
+        self.remove_excluded_tip_results(&(Vec::new(), names));
+    }
+
     /// 一括解析の純粋計算部分。所有権を取り `&self` を使わないため、
     /// バックグラウンドジョブ（`start_static_all_job`）からも呼び出せる。
     ///
     /// `Analysis::prepare` を 1 回だけ行い、`case_keys` の荷重ケースを単体で解いて
     /// （荷重ケース単位の並列）、`combos` をその結果の線形和として組み立てる。
     /// `Analysis::prepare` 自体が失敗した場合は `Err` で全体を中断する
-    /// （既存結果は `apply_static_all_result` 側で変更しない）。
+    /// （今回実行対象の旧結果は `apply_static_all_result` 側で削除する）。
     fn compute_static_all(
         model: sepika_core::model::Model,
         case_keys: Vec<(LoadCaseId, StaticCaseKey)>,
@@ -454,8 +488,7 @@ impl App {
     /// `compute_static_all` の結果を適用する。個別の解析エラーは処理を止めず、
     /// 件数と最初のエラー内容を `last_error` にまとめる（他の結果は失わない）。
     /// `pre_errors`（事前フィルタで除外された荷重ケース・組合せのエラー）と合わせて
-    /// 1 件も解けなかった場合、および `Analysis::prepare` 自体が失敗した場合は
-    /// 既存の結果を変更せず、案内メッセージを `last_error` に設定して return する。
+    /// 失敗・除外対象の旧結果は削除する。共通前処理失敗時は今回実行対象を削除する。
     ///
     /// 表示対象（`last_static`）は最後に成功した荷重組合せ、組合せが 1 件もなければ
     /// 最後に成功した荷重ケースとする。
@@ -469,11 +502,24 @@ impl App {
         let items = match computed {
             Ok(items) => items,
             Err(e) => {
+                self.invalidate_static_all_targets();
                 self.report_error(e);
                 return;
             }
         };
 
+        for (key, res) in &items.cases {
+            if res.is_err() {
+                self.invalidate_static_key(*key);
+            }
+        }
+        let failed_combos = items
+            .combos
+            .iter()
+            .filter(|(_, res)| res.is_err())
+            .map(|(name, _)| name.clone())
+            .collect();
+        self.remove_excluded_tip_results(&(Vec::new(), failed_combos));
         let had_results = self.core.scoped.results.is_some();
         let mut bundle = self.core.scoped.results.take().unwrap_or_default();
         let mut last_case: Option<StaticCaseKey> = None;
@@ -599,9 +645,13 @@ impl App {
     /// 既にジョブが実行中の場合は何もしない（last_error に案内文を設定）。
     pub fn start_static_all_job(&mut self) {
         if !self.begin_analysis_job() {
+            if self.core.scoped.job.is_none() {
+                self.invalidate_static_all_targets();
+            }
             return;
         }
         if self.core.model.load_cases.is_empty() {
+            self.invalidate_static_all_targets();
             self.report_error("荷重ケースがありません。荷重タブで作成してください。");
             return;
         }
@@ -692,13 +742,16 @@ impl App {
             self.invalidate_missing_tip_seismic(&[id]);
         }
         if !ready {
+            self.invalidate_static_key(StaticCaseKey::Seismic(dir));
             return;
         }
         let Some(lc) = self.seismic_case_id(dir) else {
+            self.invalidate_static_key(StaticCaseKey::Seismic(dir));
             self.report_error("地震荷重ケースがありません");
             return;
         };
         if let Err(msg) = self.check_seismic_period_for_synced_case(lc) {
+            self.invalidate_static_key(StaticCaseKey::Seismic(dir));
             self.report_error(msg);
             return;
         }
@@ -718,13 +771,18 @@ impl App {
             }
         }
         if !ready {
+            if self.core.scoped.job.is_none() {
+                self.invalidate_static_key(StaticCaseKey::Seismic(dir));
+            }
             return;
         }
         let Some(lc) = self.seismic_case_id(dir) else {
+            self.invalidate_static_key(StaticCaseKey::Seismic(dir));
             self.report_error("地震荷重ケースがありません");
             return;
         };
         if let Err(msg) = self.check_seismic_period_for_synced_case(lc) {
+            self.invalidate_static_key(StaticCaseKey::Seismic(dir));
             self.report_error(msg);
             return;
         }
@@ -768,6 +826,184 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn lifecycle_app() -> App {
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        app.core.model.load_cases[1].kind = sepika_core::model::LoadCaseKind::Other;
+        for (name, id) in [("依存", LoadCaseId(0)), ("保持", LoadCaseId(1))] {
+            app.core
+                .model
+                .combinations
+                .push(sepika_core::model::LoadCombination {
+                    name: name.into(),
+                    terms: vec![(id, 1.0)],
+                });
+        }
+        app.run_static_all();
+        assert!(app.core.scoped.last_error.is_none());
+        let bundle = app.core.scoped.results.as_mut().unwrap();
+        let unrelated = bundle.statics[0].1.clone();
+        bundle
+            .statics
+            .push((StaticCaseKey::User(LoadCaseId(99)), unrelated.clone()));
+        bundle.combos.push(("対象外".into(), unrelated));
+        app
+    }
+
+    #[test]
+    fn case_failure_removes_unexecuted_dependencies_and_selected_cache() {
+        let mut app = lifecycle_app();
+        app.select_displayed_result(StaticKey::Combo(0));
+        app.apply_static_case_result(StaticCaseKey::User(LoadCaseId(0)), Err("求解失敗".into()));
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert!(!bundle
+            .statics
+            .iter()
+            .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(0))));
+        assert!(bundle
+            .statics
+            .iter()
+            .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(1))));
+        assert_eq!(
+            bundle
+                .combos
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["保持", "対象外"]
+        );
+        assert!(app.current_static().is_none());
+        assert!(bundle.member_forces.is_empty());
+        assert!(bundle.member_checks.is_empty());
+    }
+
+    #[test]
+    fn combo_failure_only_removes_that_combo_and_remaps_retained_selection() {
+        let mut app = lifecycle_app();
+        app.select_displayed_result(StaticKey::Combo(1));
+        let before = app.current_static().unwrap().disp.clone();
+        let forces = app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .member_forces
+            .clone();
+        app.apply_combo_result("依存".into(), Err("組合せ求解失敗".into()));
+        assert_eq!(app.core.scoped.last_static, Some(StaticKey::Combo(0)));
+        assert_eq!(app.ui.scoped.nav.focus_result, Some(StaticKey::Combo(0)));
+        assert_eq!(app.current_static().unwrap().disp, before);
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert_eq!(bundle.member_forces, forces);
+        assert!(bundle
+            .statics
+            .iter()
+            .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(0))));
+    }
+
+    #[test]
+    fn batch_partial_success_and_all_failure_remove_only_failed_targets() {
+        for partial in [false, true] {
+            let mut app = lifecycle_app();
+            app.select_displayed_result(StaticKey::Combo(0));
+            let success = app.core.scoped.results.as_ref().unwrap().statics[1]
+                .1
+                .clone();
+            app.apply_static_all_result(
+                Ok(StaticAllComputed {
+                    cases: vec![
+                        (StaticCaseKey::User(LoadCaseId(0)), Err("単体失敗".into())),
+                        (
+                            StaticCaseKey::User(LoadCaseId(1)),
+                            if partial {
+                                Ok(success.clone())
+                            } else {
+                                Err("単体失敗".into())
+                            },
+                        ),
+                    ],
+                    combos: vec![
+                        ("依存".into(), Err("依存ケース失敗".into())),
+                        (
+                            "保持".into(),
+                            if partial {
+                                Ok(success)
+                            } else {
+                                Err("依存ケース失敗".into())
+                            },
+                        ),
+                    ],
+                }),
+                Vec::new(),
+                (Vec::new(), Vec::new()),
+            );
+            let bundle = app.core.scoped.results.as_ref().unwrap();
+            assert!(!bundle
+                .statics
+                .iter()
+                .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(0))));
+            assert_eq!(
+                bundle
+                    .statics
+                    .iter()
+                    .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(1))),
+                partial
+            );
+            assert!(bundle
+                .statics
+                .iter()
+                .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(99))));
+            assert!(bundle.combos.iter().any(|(name, _)| name == "対象外"));
+            assert!(!bundle.combos.iter().any(|(name, _)| name == "依存"));
+            assert_eq!(app.current_static().is_some(), partial);
+        }
+    }
+
+    #[test]
+    fn batch_exclusion_removes_non_seismic_case_and_dependencies() {
+        let mut app = lifecycle_app();
+        app.select_displayed_result(StaticKey::Combo(1));
+        app.core.model.load_cases[1].kind = sepika_core::model::LoadCaseKind::Wind;
+        app.core.model.load_cases[1].nodal.clear();
+        app.run_static_all();
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert!(app.core.scoped.last_error.is_some());
+        assert!(!bundle
+            .statics
+            .iter()
+            .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(1))));
+        assert!(!bundle.combos.iter().any(|(name, _)| name == "保持"));
+        assert!(bundle
+            .statics
+            .iter()
+            .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(0))));
+        assert!(bundle
+            .statics
+            .iter()
+            .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(99))));
+        assert!(bundle.combos.iter().any(|(name, _)| name == "対象外"));
+        assert_eq!(app.core.scoped.last_static, Some(StaticKey::Combo(0)));
+        assert_eq!(app.current_static().unwrap().disp, bundle.combos[0].1.disp);
+    }
+
+    #[test]
+    fn batch_solver_preparation_failure_removes_execution_targets_only() {
+        let mut app = lifecycle_app();
+        app.select_displayed_result(StaticKey::Combo(0));
+        app.apply_static_all_result(
+            Err("解析準備失敗".into()),
+            Vec::new(),
+            (Vec::new(), Vec::new()),
+        );
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert_eq!(bundle.statics.len(), 1);
+        assert_eq!(bundle.statics[0].0, StaticCaseKey::User(LoadCaseId(99)));
+        assert_eq!(bundle.combos.len(), 1);
+        assert_eq!(bundle.combos[0].0, "対象外");
+        assert!(app.current_static().is_none());
+    }
 
     #[test]
     fn excluded_tip_results_clear_selected_cache_even_without_new_success() {

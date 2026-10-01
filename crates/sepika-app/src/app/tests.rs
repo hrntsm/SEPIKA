@@ -275,6 +275,9 @@ fn test_request_analysis_waits_for_unset_region_confirmation() {
         ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Node,
     };
     let mut app = App::default();
+    app.load_model(crate::sample::portal_frame());
+    app.run_linear_static(LoadCaseId(0));
+    let before = app.current_static().unwrap().disp.clone();
     let mut model = sepika_core::Model::default();
     for (i, (x, y)) in [(0.0, 0.0), (4000.0, 0.0), (4000.0, 4000.0), (0.0, 4000.0)]
         .into_iter()
@@ -315,6 +318,11 @@ fn test_request_analysis_waits_for_unset_region_confirmation() {
         "未設定があるので確認待ち"
     );
     assert!(app.core.scoped.job.is_none(), "確認前に計算を開始しない");
+
+    app.cancel_pending_analysis();
+    assert!(app.core.scoped.pending_unset_analysis.is_none());
+    assert_eq!(app.current_static().unwrap().disp, before);
+    app.request_analysis(crate::app::PendingAnalysis::StaticAll);
 
     app.resume_pending_analysis();
     assert!(app.core.scoped.pending_unset_analysis.is_none());
@@ -1151,17 +1159,9 @@ fn tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results() {
             [100.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         ));
     app.run_seismic(SeismicDir::X);
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
-    );
+    assert!(app.core.scoped.last_error.is_some());
     app.run_combination(0);
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
-    );
+    assert!(app.core.scoped.last_error.is_some());
     app.generate_stories_action();
     app.sync_auto_load_cases_action();
     assert!(app.core.model.load_cases[ex.index()]
@@ -1188,10 +1188,7 @@ fn tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results() {
     assert!(bundle.combos.iter().all(|(n, _)| n != "G+EX"));
 }
 
-/// 性能修正: 精算周期（`AiMode::SemiPrecise`）を選択したが固有値解析が
-/// 未実行の場合、`sync_seismic_load_cases_action` は EX/EY を更新せず、
-/// `last_notice` に実行を促すメッセージを設定する（`last_error` は使わない。
-/// 解析自体は継続してよいため）。
+/// 精算周期を得られない場合、旧 Auto 水平力を除去し、再生成が必要であると案内する。
 #[test]
 fn test_sync_seismic_semiprecise_without_eigen_sets_notice_and_skips() {
     let mut app = App::default();
@@ -1229,10 +1226,8 @@ fn test_sync_seismic_semiprecise_without_eigen_sets_notice_and_skips() {
         .find(|lc| lc.name == EX_CASE_NAME)
         .cloned()
         .expect("EXケースは残っているはず（削除されない）");
-    assert_eq!(
-        ex_before, ex_after,
-        "固有値解析未実行時はEXケースが更新されないはず"
-    );
+    assert!(!ex_before.nodal.is_empty());
+    assert!(ex_after.nodal.is_empty());
 
     // run_seismic も同様に、解析を行わず last_error で案内する。
     app.core.scoped.last_error = None;
@@ -5341,6 +5336,400 @@ fn test_load_case_job_routes_standard_lateral_cases() {
     );
 }
 
+#[test]
+#[cfg(feature = "gui")]
+fn request_analysis_preparation_failure_deletes_only_static_targets() {
+    use sepika_core::model::LoadCombination;
+    for path in 0..8 {
+        let mut app = tip_seismic_app();
+        app.generate_stories_action();
+        app.core.model.combinations = vec![
+            LoadCombination {
+                name: "対象".into(),
+                terms: vec![(LoadCaseId(0), 1.0)],
+            },
+            LoadCombination {
+                name: "無関係".into(),
+                terms: vec![(LoadCaseId(1), 1.0)],
+            },
+        ];
+        app.run_static_all();
+        assert!(app.core.scoped.last_error.is_none());
+        app.select_displayed_result(StaticKey::Combo(0));
+        let before = app.current_static().unwrap().disp.clone();
+        app.core.model.slabs[0].tip_loads[0].intensity = -1.0;
+        let pending = match path {
+            0 => PendingAnalysis::StaticTarget(StaticTarget::Case(LoadCaseId(0))),
+            1 => PendingAnalysis::StaticTarget(StaticTarget::Combo(0)),
+            2 => PendingAnalysis::StaticAll,
+            3 => PendingAnalysis::Eigen(1),
+            4 => PendingAnalysis::Pushover,
+            5 => PendingAnalysis::TimeHistory(Box::new(
+                sepika_solver::dynamic::timehistory::GroundMotion {
+                    dt: 0.01,
+                    accel_x: vec![0.0],
+                    accel_y: None,
+                    accel_theta: None,
+                },
+            )),
+            6 => PendingAnalysis::LumpedMassEigen,
+            _ => PendingAnalysis::LumpedMassTimeHistory(vec![0.0]),
+        };
+        app.request_analysis(pending);
+        assert!(app
+            .core
+            .scoped
+            .last_error
+            .as_deref()
+            .unwrap()
+            .contains("先端荷重強度"));
+        assert!(app.core.scoped.job.is_none());
+        assert!(app.core.scoped.pending_unset_analysis.is_none());
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert_eq!(
+            bundle.combos.iter().any(|(name, _)| name == "対象"),
+            path >= 3
+        );
+        assert_eq!(
+            bundle.combos.iter().any(|(name, _)| name == "無関係"),
+            path != 2
+        );
+        assert_eq!(
+            bundle
+                .statics
+                .iter()
+                .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(0))),
+            path == 1 || path >= 3
+        );
+        assert_eq!(
+            bundle
+                .statics
+                .iter()
+                .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(1))),
+            path != 2
+        );
+        if path >= 3 {
+            assert_eq!(app.current_static().unwrap().disp, before);
+            assert!(!bundle.member_forces.is_empty());
+        } else {
+            assert!(app.current_static().is_none());
+            assert!(app.core.scoped.last_static.is_none());
+            assert!(app.ui.scoped.nav.focus_result.is_none());
+            assert!(bundle.member_forces.is_empty());
+            assert!(bundle.panel_moments.is_empty());
+            assert!(bundle.member_checks.is_empty());
+            assert!(bundle.joint_checks.is_empty());
+            assert!(bundle.beam_checks.is_empty());
+            assert!(bundle.slab_checks.is_empty());
+        }
+    }
+}
+
+#[test]
+fn known_ai_failure_is_cleared_even_when_gravity_computation_fails() {
+    use sepika_core::ids::NodeId;
+    use sepika_core::model::{
+        DistributionMethod, LoadCombination, LoadSource, NodalLoad, OneWayDir,
+    };
+    for preparation_only in [false, true] {
+        let mut app = tip_seismic_app();
+        app.generate_stories_action();
+        let ex = app
+            .core
+            .model
+            .load_cases
+            .iter()
+            .find(|lc| lc.name == EX_CASE_NAME)
+            .unwrap()
+            .id;
+        let ey = app
+            .core
+            .model
+            .load_cases
+            .iter()
+            .find(|lc| lc.name == EY_CASE_NAME)
+            .unwrap()
+            .id;
+        for (id, values) in [
+            (ex, [100.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            (ey, [0.0, 100.0, 0.0, 0.0, 0.0, 0.0]),
+        ] {
+            app.core.model.load_cases[id.index()]
+                .nodal
+                .push(NodalLoad::manual(NodeId(2), values));
+        }
+        app.core.model.combinations = vec![
+            LoadCombination {
+                name: "EX依存".into(),
+                terms: vec![(ex, 1.0)],
+            },
+            LoadCombination {
+                name: "EY依存".into(),
+                terms: vec![(ey, 1.0)],
+            },
+            LoadCombination {
+                name: "無関係".into(),
+                terms: vec![(LoadCaseId(0), 1.0)],
+            },
+        ];
+        app.run_static_all();
+        assert!(app.core.scoped.last_error.is_none());
+        app.select_displayed_result(StaticKey::Combo(0));
+        let tip_before = app.core.model.load_cases[ex.index()]
+            .member
+            .iter()
+            .filter(|load| load.source == LoadSource::SlabTip)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(!tip_before.is_empty());
+        app.core.analysis_cfg.ai_mode = AiMode::SemiPrecise;
+        let n = app.core.model.nodes.len() as u32;
+        for (id, coord) in [
+            (NodeId(n), [6000.0, 6000.0, 3500.0]),
+            (NodeId(n + 1), [0.0, 6000.0, 3500.0]),
+        ] {
+            app.core.model.nodes.push(sepika_core::model::Node {
+                id,
+                coord,
+                ..app.core.model.nodes[2].clone()
+            });
+        }
+        app.core.model.add_enclosed_slab_from_nodes(
+            &[NodeId(2), NodeId(3), NodeId(n), NodeId(n + 1)],
+            SlabPlate {
+                method: DistributionMethod::OneWay,
+                one_way: Some(OneWayDir::Short),
+                ..Default::default()
+            },
+        );
+        assert!(sepika_job::auto_loads::compute_gravity_auto_load_cases(&app.core.model).is_err());
+        if preparation_only {
+            app.run_preparation();
+        } else {
+            app.sync_auto_load_cases_action();
+        }
+        assert!(app
+            .core
+            .scoped
+            .last_error
+            .as_deref()
+            .unwrap()
+            .contains("短辺方向"));
+        for id in [ex, ey] {
+            let case = &app.core.model.load_cases[id.index()];
+            assert!(case
+                .nodal
+                .iter()
+                .all(|load| load.source != LoadSource::Auto));
+            assert!(case
+                .nodal
+                .iter()
+                .any(|load| load.source == LoadSource::Manual));
+        }
+        assert_eq!(
+            app.core.model.load_cases[ex.index()]
+                .member
+                .iter()
+                .filter(|load| load.source == LoadSource::SlabTip)
+                .cloned()
+                .collect::<Vec<_>>(),
+            tip_before
+        );
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert!(bundle.seismic(SeismicDir::X).is_none());
+        assert!(bundle.seismic(SeismicDir::Y).is_none());
+        assert!(bundle
+            .statics
+            .iter()
+            .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(0))));
+        assert_eq!(
+            bundle
+                .combos
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["無関係"]
+        );
+        assert!(app.current_static().is_none());
+        assert!(bundle.member_forces.is_empty());
+        assert!(bundle.member_checks.is_empty());
+        assert!(app
+            .core
+            .scoped
+            .last_notice
+            .as_deref()
+            .unwrap()
+            .contains("再生成できない"));
+    }
+}
+
+#[test]
+fn static_failure_paths_delete_only_execution_targets() {
+    use sepika_core::model::LoadCombination;
+    for preprocessing in [false, true] {
+        for path in 0..6 {
+            let mut app = tip_seismic_app();
+            app.generate_stories_action();
+            app.core.model.combinations = vec![
+                LoadCombination {
+                    name: "対象".into(),
+                    terms: vec![(LoadCaseId(0), 1.0)],
+                },
+                LoadCombination {
+                    name: "無関係".into(),
+                    terms: vec![(LoadCaseId(1), 1.0)],
+                },
+            ];
+            app.run_static_all();
+            assert!(app.core.scoped.last_error.is_none());
+            app.select_displayed_result(StaticKey::Combo(0));
+            let bundle = app.core.scoped.results.as_mut().unwrap();
+            let unrelated = bundle.statics[0].1.clone();
+            bundle
+                .statics
+                .push((StaticCaseKey::User(LoadCaseId(99)), unrelated.clone()));
+            bundle.combos.push(("対象外".into(), unrelated));
+            if preprocessing {
+                app.core.model.slabs[0].tip_loads[0].intensity = -1.0;
+            } else {
+                app.core.model.materials[0].young = 0.0;
+            }
+            match path {
+                0 => app.run_linear_static(LoadCaseId(0)),
+                1 => app.start_linear_static_job(LoadCaseId(0)),
+                2 => app.run_combination(0),
+                3 => app.start_combination_job(0),
+                4 => app.run_static_all(),
+                _ => app.start_static_all_job(),
+            }
+            if app.core.scoped.job.is_some() {
+                wait_for_job(&mut app);
+            }
+            assert!(
+                app.core.scoped.last_error.is_some(),
+                "前処理={preprocessing}, 経路={path}"
+            );
+            let bundle = app.core.scoped.results.as_ref().unwrap();
+            assert!(!bundle.combos.iter().any(|(name, _)| name == "対象"));
+            assert_eq!(
+                bundle.combos.iter().any(|(name, _)| name == "無関係"),
+                path < 4
+            );
+            assert_eq!(
+                bundle
+                    .statics
+                    .iter()
+                    .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(0))),
+                (2..4).contains(&path)
+            );
+            assert_eq!(
+                bundle
+                    .statics
+                    .iter()
+                    .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(1))),
+                path < 4
+            );
+            assert!(bundle
+                .statics
+                .iter()
+                .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(99))));
+            assert!(bundle.combos.iter().any(|(name, _)| name == "対象外"));
+            assert!(app.current_static().is_none());
+            assert!(bundle.member_forces.is_empty());
+            assert!(bundle.panel_moments.is_empty());
+            assert!(bundle.member_checks.is_empty());
+            assert!(bundle.joint_checks.is_empty());
+            assert!(bundle.beam_checks.is_empty());
+            assert!(bundle.slab_checks.is_empty());
+        }
+    }
+}
+
+#[test]
+fn ai_failure_without_tip_loads_clears_old_auto_results_but_keeps_manual() {
+    use sepika_core::model::{LoadCombination, LoadSource, NodalLoad};
+    for preparation_only in [false, true] {
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        app.generate_stories_action();
+        let ex = app
+            .core
+            .model
+            .load_cases
+            .iter()
+            .find(|lc| lc.name == EX_CASE_NAME)
+            .unwrap()
+            .id;
+        let ey = app
+            .core
+            .model
+            .load_cases
+            .iter()
+            .find(|lc| lc.name == EY_CASE_NAME)
+            .unwrap()
+            .id;
+        app.core.model.load_cases[ex.index()]
+            .nodal
+            .push(NodalLoad::manual(
+                sepika_core::ids::NodeId(2),
+                [100.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ));
+        app.core.model.combinations = vec![
+            LoadCombination {
+                name: "EX依存".into(),
+                terms: vec![(ex, 1.0)],
+            },
+            LoadCombination {
+                name: "EY依存".into(),
+                terms: vec![(ey, 1.0)],
+            },
+            LoadCombination {
+                name: "無関係".into(),
+                terms: vec![(LoadCaseId(0), 1.0)],
+            },
+        ];
+        app.run_static_all();
+        assert!(app.core.scoped.last_error.is_none());
+        app.select_displayed_result(StaticKey::Combo(0));
+        app.core.analysis_cfg.ai_mode = AiMode::SemiPrecise;
+        if preparation_only {
+            app.run_preparation();
+        } else {
+            app.sync_auto_load_cases_action();
+        }
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert!(bundle.seismic(SeismicDir::X).is_none());
+        assert!(bundle.seismic(SeismicDir::Y).is_none());
+        assert_eq!(bundle.combos.len(), 1);
+        assert_eq!(bundle.combos[0].0, "無関係");
+        assert!(app.current_static().is_none());
+        assert!(bundle.member_forces.is_empty());
+        assert!(app.core.model.load_cases[ex.index()]
+            .nodal
+            .iter()
+            .any(|load| load.source == LoadSource::Manual));
+        assert!(app.core.model.load_cases[ex.index()]
+            .nodal
+            .iter()
+            .all(|load| load.source != LoadSource::Auto));
+        app.run_linear_static(ex);
+        assert!(app.core.scoped.last_error.is_some());
+        app.start_combination_job(0);
+        assert!(app.core.scoped.job.is_none());
+        app.core.analysis_cfg.ai_mode = AiMode::Approx;
+        app.run_static_all();
+        assert!(app.core.scoped.last_error.is_none());
+        assert!(app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .seismic(SeismicDir::X)
+            .is_some());
+    }
+}
+
 fn tip_seismic_app() -> App {
     use sepika_core::ids::{NodeId, SectionId, SlabId};
     use sepika_core::model::{
@@ -5415,6 +5804,7 @@ fn tip_ex_ey_failure_invalidates_previous_case_combo_and_display() {
                 [0.0, 1000.0, 0.0, 0.0, 0.0, 0.0]
             },
         ));
+        app.generate_stories_action();
         app.run_static_all();
         assert!(
             app.core.scoped.last_error.is_none(),
@@ -5431,6 +5821,7 @@ fn tip_ex_ey_failure_invalidates_previous_case_combo_and_display() {
             .member_forces
             .is_empty());
         app.core.model.load_cases[2].nodal.clear();
+        app.core.model.stories.clear();
         match path % 4 {
             0 => app.run_static_target(StaticTarget::Case(LoadCaseId(2))),
             1 => {
@@ -5553,15 +5944,15 @@ fn test_tip_only_seismic_rejected_in_single_combo_and_batch() {
         [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     ));
     app.run_static_target(StaticTarget::Case(LoadCaseId(2)));
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
-    );
-    assert_eq!(
-        app.core.scoped.last_static,
-        Some(StaticKey::Case(StaticCaseKey::Seismic(SeismicDir::X)))
-    );
+    assert!(app.core.scoped.last_error.is_some());
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .seismic(SeismicDir::X)
+        .is_none());
     assert_eq!(
         app.core.model.load_cases[2].nodal[0].source,
         sepika_core::model::LoadSource::Manual
@@ -5600,6 +5991,7 @@ fn test_batch_removes_old_combo_when_tip_ex_fails_after_empty_ey() {
         name: "保持対象".into(),
         terms: vec![(LoadCaseId(0), 1.0)],
     });
+    app.generate_stories_action();
     app.run_static_all();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -5618,6 +6010,7 @@ fn test_batch_removes_old_combo_when_tip_ex_fails_after_empty_ey() {
 
     app.core.model.load_cases[2].nodal.clear();
     app.core.model.load_cases[3].nodal.clear();
+    app.core.model.stories.clear();
     app.run_static_all();
     let bundle = app.core.scoped.results.as_ref().unwrap();
     assert!(app.core.model.load_cases[2].nodal.is_empty());
@@ -5643,6 +6036,7 @@ fn test_tip_seismic_sync_and_job_use_same_load_case() {
         NodeId(2),
         [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     ));
+    app.generate_stories_action();
     app.run_static_target(StaticTarget::Case(LoadCaseId(2)));
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -5705,7 +6099,7 @@ fn test_generated_ai_and_tip_load_are_both_used_by_single_ex_analysis() {
 }
 
 #[test]
-fn test_missing_tip_beam_stops_reanalysis_without_replacing_result() {
+fn test_missing_tip_beam_stops_reanalysis_and_removes_result() {
     use sepika_core::ids::NodeId;
     use sepika_core::model::{LoadCombination, NodalLoad};
     let mut app = tip_seismic_app();
@@ -5717,13 +6111,14 @@ fn test_missing_tip_beam_stops_reanalysis_without_replacing_result() {
         NodeId(2),
         [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     ));
+    app.generate_stories_action();
     app.run_static_target(StaticTarget::Case(LoadCaseId(2)));
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
         app.core.scoped.last_error
     );
-    let before = app.current_static().unwrap().disp.clone();
+    assert!(app.current_static().is_some());
     assert_eq!(app.core.model.slabs.len(), 1);
     app.core
         .model
@@ -5738,7 +6133,7 @@ fn test_missing_tip_beam_stops_reanalysis_without_replacing_result() {
         .as_ref()
         .unwrap()
         .contains("実梁"));
-    assert_eq!(app.current_static().unwrap().disp, before);
+    assert!(app.current_static().is_none());
     app.start_static_all_job();
     assert!(app.core.scoped.job.is_none());
     assert!(app
@@ -5756,7 +6151,7 @@ fn test_missing_tip_beam_stops_reanalysis_without_replacing_result() {
         .as_ref()
         .unwrap()
         .contains("実梁"));
-    assert_eq!(app.current_static().unwrap().disp, before);
+    assert!(app.current_static().is_none());
 }
 
 /// 種別からの標準組合せ自動生成は、準備計算が生成する標準ケース名で方向を判別し、
@@ -6347,7 +6742,7 @@ fn test_run_combination_errors_on_empty_seismic_case() {
     app.run_combination(0);
     let err = app.core.scoped.last_error.as_deref().unwrap_or("");
     assert!(
-        err.contains("EX") && err.contains("空"),
+        err.contains("EX") && err.contains("Ai 地震力の再生成"),
         "空の EX 参照はエラーで案内するはず: {err}"
     );
 }

@@ -603,6 +603,18 @@ impl App {
         self.core.scoped.last_error = None;
         self.ensure_preparation();
         if self.core.scoped.last_error.is_some() {
+            if self.core.scoped.job.is_none() {
+                match pending {
+                    PendingAnalysis::StaticTarget(StaticTarget::Case(id)) => {
+                        self.invalidate_static_cases(&[id]);
+                    }
+                    PendingAnalysis::StaticTarget(StaticTarget::Combo(index)) => {
+                        self.invalidate_static_combo(index);
+                    }
+                    PendingAnalysis::StaticAll => self.invalidate_static_all_targets(),
+                    _ => {}
+                }
+            }
             return;
         }
         if self.unset_regions_confirm_required() {

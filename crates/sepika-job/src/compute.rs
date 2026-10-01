@@ -17,32 +17,27 @@ fn expand_walls(model: sepika_core::model::Model) -> sepika_core::model::Model {
     sepika_load::wall_expand::expand_wall_elements_owned(model).0
 }
 
-/// 先端荷重付き EX/EY で対応する方向の自動 Ai・手入力水平力が欠けているか。
+/// 標準 EX/EY に再生成済みの Auto 水平力が欠けているか。
 pub fn missing_seismic_horizontal_load(case: &LoadCase) -> bool {
     let axis = match (case.name.as_str(), case.kind) {
         (EX_CASE_NAME, LoadCaseKind::Seismic) => 0,
         (EY_CASE_NAME, LoadCaseKind::Seismic) => 1,
         _ => return false,
     };
-    if !case
-        .member
+    !case
+        .nodal
         .iter()
-        .any(|load| load.source == LoadSource::SlabTip)
-    {
-        return false;
-    }
-    !case.nodal.iter().any(|load| {
-        matches!(load.source, LoadSource::Auto | LoadSource::Manual) && load.values[axis] != 0.0
-    }) && !case.member.iter().any(|load| {
-        matches!(load.source, LoadSource::Auto | LoadSource::Manual)
-            && load.dir[axis] != 0.0
-            && match load.kind {
-                sepika_core::model::MemberLoadKind::Point { p, .. } => p != 0.0,
-                sepika_core::model::MemberLoadKind::Distributed { w1, w2, .. } => {
-                    w1 != 0.0 || w2 != 0.0
+        .any(|load| load.source == LoadSource::Auto && load.values[axis] != 0.0)
+        && !case.member.iter().any(|load| {
+            load.source == LoadSource::Auto
+                && load.dir[axis] != 0.0
+                && match load.kind {
+                    sepika_core::model::MemberLoadKind::Point { p, .. } => p != 0.0,
+                    sepika_core::model::MemberLoadKind::Distributed { w1, w2, .. } => {
+                        w1 != 0.0 || w2 != 0.0
+                    }
                 }
-            }
-    })
+        })
 }
 
 /// 線形静的解析。前処理を通したモデルを渡すこと。
@@ -53,7 +48,7 @@ pub fn compute_linear_static(
     if let Some(case) = model.load_cases.iter().find(|case| case.id == lc) {
         if missing_seismic_horizontal_load(case) {
             return Err(JobError::InvalidInput(format!(
-                "荷重ケース「{}」に地震水平力がありません。Ai 地震力を生成するか水平力を手入力してください。",
+                "荷重ケース「{}」の Ai 地震水平力を再生成できていません。準備計算の条件を修正し、Ai 地震力を再生成してください（手入力水平力だけでは解析できません）。",
                 case.name
             )));
         }
@@ -397,6 +392,9 @@ mod seismic_guard_tests {
             values[other] = 1.0;
             case.nodal.push(NodalLoad::manual(NodeId(0), values));
             assert!(missing_seismic_horizontal_load(case));
+            case.nodal.push(NodalLoad::auto(NodeId(0), values));
+            assert!(missing_seismic_horizontal_load(case));
+            case.nodal.pop();
             case.member.push(MemberLoad::manual(
                 ElemId(0),
                 if other == 0 {
@@ -415,7 +413,7 @@ mod seismic_guard_tests {
             values[other] = 0.0;
             values[axis] = 1.0;
             case.nodal.push(NodalLoad::manual(NodeId(0), values));
-            assert!(!missing_seismic_horizontal_load(case));
+            assert!(missing_seismic_horizontal_load(case));
             case.nodal.pop();
             case.member.push(MemberLoad::manual(
                 ElemId(0),
@@ -431,7 +429,7 @@ mod seismic_guard_tests {
                     w2: 1.0,
                 },
             ));
-            assert!(!missing_seismic_horizontal_load(case));
+            assert!(missing_seismic_horizontal_load(case));
         }
     }
 
@@ -440,7 +438,7 @@ mod seismic_guard_tests {
         let mut cases = sepika_core::model::default_load_cases();
         for (index, axis, other) in [(3, 0, 1), (4, 1, 0)] {
             let case = &mut cases[index];
-            assert!(!missing_seismic_horizontal_load(case));
+            assert!(missing_seismic_horizontal_load(case));
             case.member.push(MemberLoad {
                 source: LoadSource::SlabTip,
                 ..MemberLoad::manual(
