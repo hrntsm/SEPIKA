@@ -73,7 +73,7 @@ impl App {
     /// 本関数自体は剛性行列組立や固有値解析を一切行わない）。X・Y 双方向で T を
     /// 共有するため `design_seismic_period` の呼び出しは 1 回のみ。
     ///
-    /// 再生成できない場合、先端荷重を持つ EX/EY だけは旧 Auto 荷重を除去する。
+    /// 再生成できない方向の旧 Auto 荷重と関連する静的解析結果を除去する。
     /// SemiPrecise で固有値解析が未実行の場合は `last_notice` に案内する。
     /// 冪等な同期アクション（`sync_gravity_load_cases_action` と同じ規約）。
     pub fn sync_seismic_load_cases_action(&mut self) {
@@ -90,6 +90,7 @@ impl App {
                         &self.core.model,
                         &mut result,
                     );
+                    self.apply_failed_seismic_cases(&result);
                     for case in result.cases {
                         self.sync_one_auto_case(case.name, case.kind, case.nodal, case.member);
                     }
@@ -105,6 +106,7 @@ impl App {
             design_period,
         );
         sepika_job::auto_loads::clear_failed_tip_seismic_cases(&self.core.model, &mut result);
+        self.apply_failed_seismic_cases(&result);
         for notice in result.notices {
             self.report_notice(notice);
         }
@@ -177,17 +179,21 @@ impl App {
         } else {
             None
         };
-        let result = match sepika_job::auto_loads::compute_auto_load_cases(
+        let mut seismic = sepika_job::auto_loads::compute_seismic_auto_load_cases(
             &self.core.model,
             &self.core.analysis_cfg,
             design_period,
-        ) {
-            Ok(result) => result,
-            Err(error) => {
-                self.report_error(error.to_string());
-                return;
-            }
-        };
+        );
+        sepika_job::auto_loads::clear_failed_tip_seismic_cases(&self.core.model, &mut seismic);
+        self.apply_failed_seismic_cases(&seismic);
+        let gravity =
+            match sepika_job::auto_loads::compute_gravity_auto_load_cases(&self.core.model) {
+                Ok(result) => result,
+                Err(error) => {
+                    self.report_error(error.to_string());
+                    return;
+                }
+            };
         let tip_cases = match sepika_job::auto_loads::compute_tip_loads(&self.core.model) {
             Ok(cases) => cases,
             Err(error) => {
@@ -195,14 +201,38 @@ impl App {
                 return;
             }
         };
-        for notice in result.notices {
+        for notice in seismic.notices {
             self.report_notice(notice);
         }
-        for case in result.cases {
+        for case in gravity.cases.into_iter().chain(seismic.cases) {
             self.sync_one_auto_case(case.name, case.kind, case.nodal, case.member);
         }
         self.apply_tip_load_cases(tip_cases);
         self.core.scoped.auto_load_sync_hash = Some(self.compute_auto_load_sync_hash());
+    }
+
+    fn apply_failed_seismic_cases(
+        &mut self,
+        result: &sepika_job::auto_loads::AutoLoadComputeResult,
+    ) {
+        for case in &result.cases {
+            if case.kind == sepika_core::model::LoadCaseKind::Seismic
+                && case.nodal.is_empty()
+                && case.member.is_empty()
+            {
+                self.sync_one_auto_case(case.name, case.kind, Vec::new(), Vec::new());
+                let ids: Vec<_> = self
+                    .core
+                    .model
+                    .load_cases
+                    .iter()
+                    .filter(|lc| lc.name == case.name && lc.kind == case.kind)
+                    .map(|lc| lc.id)
+                    .collect();
+                self.invalidate_missing_tip_seismic(&ids);
+                self.report_notice(format!("{} の Ai 地震力を再生成できないため、旧 Auto 水平力と単体・依存組合せの旧結果を除去しました。準備計算の条件を修正してください（手入力水平力だけでは解析できません）。", case.name));
+            }
+        }
     }
 
     pub(crate) fn rebuild_wall_regions_for_preparation(&mut self) {
@@ -297,5 +327,104 @@ impl App {
                 .filter(|lc| is_empty_lateral_case(lc))
                 .map(|lc| lc.name.clone())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_direction_failure_preserves_success_and_unrelated_results() {
+        use sepika_core::model::{LoadCombination, LoadSource, NodalLoad};
+        use sepika_job::auto_loads::{AutoLoadCaseContent, AutoLoadComputeResult};
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        app.generate_stories_action();
+        let ex = app
+            .core
+            .model
+            .load_cases
+            .iter()
+            .find(|lc| lc.name == EX_CASE_NAME)
+            .unwrap()
+            .id;
+        let ey = app
+            .core
+            .model
+            .load_cases
+            .iter()
+            .find(|lc| lc.name == EY_CASE_NAME)
+            .unwrap()
+            .id;
+        app.core.model.load_cases[ey.index()]
+            .nodal
+            .push(NodalLoad::manual(
+                sepika_core::ids::NodeId(2),
+                [0.0, 100.0, 0.0, 0.0, 0.0, 0.0],
+            ));
+        app.core.model.combinations = vec![
+            LoadCombination {
+                name: "EY依存".into(),
+                terms: vec![(ey, 1.0)],
+            },
+            LoadCombination {
+                name: "EX依存".into(),
+                terms: vec![(ex, 1.0)],
+            },
+            LoadCombination {
+                name: "無関係".into(),
+                terms: vec![(LoadCaseId(0), 1.0)],
+            },
+        ];
+        app.run_static_all();
+        assert!(app.core.scoped.last_error.is_none());
+        app.select_displayed_result(StaticKey::Combo(1));
+        let before = app.current_static().unwrap().disp.clone();
+        let ex_loads = app.core.model.load_cases[ex.index()].nodal.clone();
+        let result = AutoLoadComputeResult {
+            cases: vec![
+                AutoLoadCaseContent {
+                    name: EX_CASE_NAME,
+                    kind: sepika_core::model::LoadCaseKind::Seismic,
+                    nodal: ex_loads.clone(),
+                    member: Vec::new(),
+                },
+                AutoLoadCaseContent {
+                    name: EY_CASE_NAME,
+                    kind: sepika_core::model::LoadCaseKind::Seismic,
+                    nodal: Vec::new(),
+                    member: Vec::new(),
+                },
+            ],
+            notices: Vec::new(),
+        };
+        app.apply_failed_seismic_cases(&result);
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert!(bundle.seismic(SeismicDir::X).is_some());
+        assert!(bundle.seismic(SeismicDir::Y).is_none());
+        assert_eq!(
+            bundle
+                .combos
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["EX依存", "無関係"]
+        );
+        assert_eq!(app.current_static().unwrap().disp, before);
+        assert_eq!(app.ui.scoped.nav.focus_result, Some(StaticKey::Combo(0)));
+        assert_eq!(app.core.model.load_cases[ex.index()].nodal, ex_loads);
+        assert_eq!(app.core.model.load_cases[ey.index()].nodal.len(), 1);
+        assert_eq!(
+            app.core.model.load_cases[ey.index()].nodal[0].source,
+            LoadSource::Manual
+        );
+        assert!(app
+            .core
+            .scoped
+            .last_notice
+            .as_deref()
+            .unwrap()
+            .contains("EY"));
     }
 }

@@ -740,7 +740,7 @@ pub fn compute_seismic_auto_load_cases(
         notices.push(
             "精算周期(固有値解析)が選択されていますが固有値解析が未実行です。\
              解析タブの固有値解析を先に実行してください\
-             (EX/EY の地震荷重は更新されません)。"
+             (EX/EY の旧 Auto 水平力は除去されます)。"
                 .to_string(),
         );
         return AutoLoadComputeResult { cases, notices };
@@ -754,35 +754,31 @@ pub fn compute_seismic_auto_load_cases(
             soil: settings.soil,
             c0: settings.c0,
         };
-        if let Ok(lc) = analysis::build_seismic_load_case_from_model(model, cfg, t) {
-            cases.push(AutoLoadCaseContent {
+        match analysis::build_seismic_load_case_from_model(model, cfg, t) {
+            Ok(lc) => cases.push(AutoLoadCaseContent {
                 name,
                 kind: LoadCaseKind::Seismic,
                 nodal: lc.nodal,
                 member: lc.member,
-            });
+            }),
+            Err(error) => notices.push(format!("{name} の Ai 地震力を再生成できません: {error}")),
         }
     }
 
     AutoLoadComputeResult { cases, notices }
 }
 
-/// 先端荷重を持つ EX/EY の Ai 再生成失敗時に限り、旧 Auto 水平力を除去する同期内容を補う。
+/// 標準 EX/EY の Ai 再生成失敗時に、旧 Auto 水平力を除去する同期内容を補う。
 pub fn clear_failed_tip_seismic_cases(model: &Model, result: &mut AutoLoadComputeResult) {
     for name in [EX_CASE_NAME, EY_CASE_NAME] {
-        let Some(case) = model
+        let Some(_) = model
             .load_cases
             .iter()
             .find(|case| case.name == name && case.kind == LoadCaseKind::Seismic)
         else {
             continue;
         };
-        if result.cases.iter().any(|generated| generated.name == name)
-            || !model
-                .slabs
-                .iter()
-                .any(|slab| slab.tip_loads.iter().any(|tip| tip.case == case.id))
-        {
+        if result.cases.iter().any(|generated| generated.name == name) {
             continue;
         }
         result.cases.push(AutoLoadCaseContent {
@@ -987,7 +983,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_ai_clears_only_tip_seismic_auto_and_keeps_manual() {
+    fn failed_ai_clears_standard_seismic_auto_and_keeps_manual_and_success() {
         let mut model = tip_model();
         model.slabs[0].tip_loads[0].case = LoadCaseId(3);
         model.load_cases[3]
@@ -999,7 +995,7 @@ mod tests {
         let mut result =
             compute_seismic_auto_load_cases(&model, &AnalysisSettings::default(), None);
         clear_failed_tip_seismic_cases(&model, &mut result);
-        assert_eq!(result.cases.len(), 1);
+        assert_eq!(result.cases.len(), 2);
         assert_eq!(result.cases[0].name, EX_CASE_NAME);
         apply_auto_load_cases(&mut model, &result.cases);
         let tip_loads = compute_tip_loads(&model).unwrap();
@@ -1007,21 +1003,17 @@ mod tests {
         assert!(crate::compute::missing_seismic_horizontal_load(
             &model.load_cases[3]
         ));
-        assert_eq!(model.load_cases[4].nodal.len(), 1);
+        assert!(model.load_cases[4].nodal.is_empty());
 
         model.load_cases[3].nodal.push(NodalLoad::manual(
             NodeId(0),
             [50.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         ));
-        assert!(!crate::compute::missing_seismic_horizontal_load(
+        assert!(crate::compute::missing_seismic_horizontal_load(
             &model.load_cases[3]
         ));
 
-        model.slabs[0].tip_loads.push(SlabTipLoad {
-            case: LoadCaseId(4),
-            intensity: 1.0,
-            direction: TipLoadDirection::PosY,
-        });
+        model.slabs.clear();
         let mut partial = AutoLoadComputeResult {
             cases: vec![AutoLoadCaseContent {
                 name: EX_CASE_NAME,
