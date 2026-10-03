@@ -85,7 +85,7 @@ impl App {
             .preparation
             .as_ref()
             .filter(|_| !self.core.scoped.staleness.preparation_stale)
-            .map(rmp_serde::to_vec);
+            .map(rmp_serde::to_vec_named);
         let exclude_recording = include_recording == Some(false);
         let taken_recordings = if exclude_recording {
             self.core
@@ -112,13 +112,13 @@ impl App {
                 last_run: self.core.scoped.staleness.last_run,
             })
             .as_ref()
-            .map(rmp_serde::to_vec);
+            .map(rmp_serde::to_vec_named);
         if let Some(taken) = taken_recordings {
             if let Some(bundle) = self.core.scoped.results.as_mut() {
                 bundle.restore_th_recordings(taken);
             }
         }
-        let analysis_settings = Some(rmp_serde::to_vec(&SavedAnalysisSettings {
+        let analysis_settings = Some(rmp_serde::to_vec_named(&SavedAnalysisSettings {
             cfg: self.core.analysis_cfg,
             wave_name: self.core.scoped.wave_library_selection.clone(),
             wave_sha256: self.core.scoped.wave_library_selected_sha256.clone(),
