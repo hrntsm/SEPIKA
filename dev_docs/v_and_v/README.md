@@ -8,7 +8,7 @@
 |------|------|
 | [**未検証一覧**](未検証一覧.md) | ❌/🔶 の集約チェックリスト（パッと見る用） |
 | [§レポート目録](#レポート目録) | 各 `.md` レポートへの索引 |
-| [§索引（要素→テスト）](#索引要素設計式--テスト) | コード上のテスト対応表（#1–#30） |
+| [§索引（要素→テスト）](#索引要素設計式--テスト) | コード上のテスト対応表（#1–#32） |
 | [原典照合リスト.md](原典照合リスト.md) | 法令・規準の埋め込み値の専門家サインオフ用チェックリスト（実装者は使わない） |
 | [pending_items.md](pending_items.md) | P9 仕様乖離の歴史的記録（訂正履歴含む） |
 
@@ -64,6 +64,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [OVIKA_named_MessagePack_2026-10.md](OVIKA_named_MessagePack_2026-10.md) | 4 payload の named 保存・復元、順序独立・default・破損・モデル検証、実 STB モデル単体の codec 時間と最終 OVIKA サイズ | ✅ |
 | [壁版の支持範囲判定_2026-09.md](壁版の支持範囲判定_2026-09.md) | 壁の支持辺・間柱端部の負担率の明示入力、部分支持・支持梁重複の診断 | 🔶 |
 | [整合質量_2026-09.md](整合質量_2026-09.md) | Beam/Fiber の整合質量、材料領域質量、回転慣性、剛域質量、端部解放の質量縮約 | 🔶 |
 | [SRC_CFT等価断面のnsフォールバック_2026-09.md](SRC_CFT等価断面のnsフォールバック_2026-09.md) | SRC/CFT の等価断面 ns の材料由来経路と、算定不能時の N_S_EQ=15／鋼管のみへのフォールバック通知 | 🔶 |
@@ -175,6 +176,7 @@
 | 29 | 耐震スリット（辺ごとの縁切り。袖壁・腰壁垂壁・剛域・耐震壁判定・自重） | sepika-element / sepika-load | wall/misc_wall.rs, frame/beam/{construct,rigid_zone}.rs, story_gen/self_weight_calc.rs | `test_column_face_slit_drops_wing_wall_but_keeps_girder_strip` / `test_strip_height_follows_beam_face_slit` / `test_any_slit_breaks_seismic_wall` / `柱際スリットのある側は剛域の袖壁張り出しを持たない` / `test_column_face_slit_wall_is_collected_as_misc_wall` / `test_column_face_slit_is_per_side` / `test_column_face_slit_does_not_change_self_weight_destination` / `test_bottom_beam_face_slit_sends_self_weight_to_top` / `test_top_beam_face_slit_sends_self_weight_to_bottom`（柱際は行き先不変、梁際の切れ側で全量移動） | 横断 | 🔶 |
 | 30 | 壁版の要素生成判定と可視化 | sepika-core / sepika-load / sepika-app | model/wall_plate.rs, wall_expand.rs, viewer/scene.rs | `test_becomes_element_agrees_with_generated_elements` / `test_becomes_element_requires_section` / `test_boundary_coords_with_uses_supplied_coords` / `囲まれた壁版は境界節点が全て構面上にあるときだけ描く` / `取り付く壁版は取付き先の節点で構面を判定する` | 横断 | ☑ |
 | 31 | Fc>60 の NewRC 外挿 | sepika-material / sepika-element | newrc.rs, uniaxial/concrete_cyclic.rs, frame/fiber/mod.rs | Fc≤60 の材料 E 反映を維持し、Fc>60 の NewRC 固有 Ec 外挿、構成則選択・圧縮包絡線・ファイバー生成・3履歴則の応答をコードテストで照合済み。実験・原典適用範囲外の妥当性確認は未実施（詳細は [NewRC高強度コンクリート外挿_2026-09.md](NewRC高強度コンクリート外挿_2026-09.md)） | 横断 | 🔶 |
+| 32 | OVIKA の named MessagePack 永続化 | sepika-io / sepika-app | ovika.rs, tests/full_model.rs | `saved_model_fields_are_named_and_order_independent` / `ovika_roundtrip_preserves_model_and_results` 他。default・破損・復元モデル検証とモデル単体のサイズ・codec 比較は [検証記録](OVIKA_named_MessagePack_2026-10.md) を参照 | 横断 | ✅ |
 
 凡例: ✅ 実装済み・🔶 一部実装（要拡張）・❌ 未実装・対象外（採用しない）。
 #16 壁（TVLEM）は採用しない（[ADR 0013](../adr/0013-adopt-wall-element-model.md)）。耐震壁は壁エレメント置換モデルとして検証する（下表 #29・#30 と[未検証一覧 §3](未検証一覧.md)）。
