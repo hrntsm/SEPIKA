@@ -230,29 +230,25 @@ impl<'m> Analysis<'m> {
         member_forces
     }
 
+    /// 不存在の荷重ケース ID は、拘束状態に関係なく ID を含む `SolveError::InvalidInput` を返す。
     pub fn linear_static(&self, lc: LoadCaseId) -> Result<StaticOnce, SolveError> {
+        let load_case = self
+            .model
+            .load_cases
+            .iter()
+            .find(|c| c.id == lc)
+            .ok_or_else(|| {
+                SolveError::InvalidInput(format!("荷重ケース {} が存在しません", lc.0))
+            })?;
         if self.n_indep == 0 {
             return Ok(self.zero_result());
-        }
-        if !self.model.load_cases.iter().any(|c| c.id == lc) {
-            return Err(SolveError::InvalidInput(format!(
-                "荷重ケース {} が存在しません",
-                lc.0
-            )));
         }
         let f_free = self
             .f_free_cache
             .get(&lc)
             .cloned()
             .unwrap_or_else(|| assemble_global_f(self.model, &self.dofmap, lc));
-        let member_loads = self
-            .model
-            .load_cases
-            .iter()
-            .find(|c| c.id == lc)
-            .map(|c| c.member.as_slice())
-            .unwrap_or(&[]);
-        self.solve_and_recover(&f_free, member_loads)
+        self.solve_and_recover(&f_free, &load_case.member)
     }
 
     /// 通常は `prepare` で分解済みの `self.solver`（縮約後剛性行列 K_red の分解）を

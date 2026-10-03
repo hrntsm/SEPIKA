@@ -129,7 +129,14 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
     }
 }
 
+/// 不存在の荷重ケース ID は、拘束状態・解析経路に関係なく ID を含む `SolveError::InvalidInput` を返す。
 pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, SolveError> {
+    if !model.load_cases.iter().any(|c| c.id == lc) {
+        return Err(SolveError::InvalidInput(format!(
+            "荷重ケース {} が存在しません",
+            lc.0
+        )));
+    }
     sepika_math::parallelism::apply_to_faer();
     if model.stress_cfg.tension_only_iteration && has_tension_only_brace(model) {
         return solve_tension_only_iterative(model, lc);

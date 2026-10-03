@@ -445,6 +445,69 @@ fn test_linear_static_axial_cantilever() {
 }
 
 #[test]
+fn test_linear_static_once_unknown_load_case() {
+    let model = make_axial_cantilever();
+    let err = linear_static_once(&model, LoadCaseId(99)).unwrap_err();
+    assert!(
+        matches!(err, SolveError::InvalidInput(ref msg) if msg.contains("99")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn test_linear_static_once_zero_independent_dofs_load_case_validation() {
+    for all_fixed in [true, false] {
+        let mut model = make_axial_cantilever();
+        if all_fixed {
+            model.nodes[1].restraint = Dof6Mask::FIXED;
+        } else {
+            model
+                .constraints
+                .push(sepika_core::model::Constraint::RigidLink {
+                    master: NodeId(0),
+                    slaves: vec![NodeId(1)],
+                    dofs: Dof6Mask::FIXED,
+                });
+        }
+        let dofmap = DofMap::build(&model);
+        assert_eq!(dofmap.n_active() == 0, all_fixed);
+        assert_eq!(Reducer::build(&model, &dofmap).n_indep, 0);
+        let result = linear_static_once(&model, LoadCaseId(1)).unwrap();
+        assert_eq!(result.disp, vec![[0.0; 6]; model.nodes.len()]);
+        assert!(result.member_forces.is_empty());
+        assert!(result.panel_moments.is_empty());
+        let err = linear_static_once(&model, LoadCaseId(99)).unwrap_err();
+        assert!(
+            matches!(err, SolveError::InvalidInput(ref msg) if msg.contains("99")),
+            "{err:?}"
+        );
+    }
+}
+
+#[test]
+fn test_linear_static_once_tension_only_unknown_load_case_rejected_at_entry() {
+    let mut model = tension_only_portal(1.0e5, true);
+    model.stress_cfg.tension_only_iteration = true;
+    assert!(has_tension_only_brace(&model));
+    assert!(linear_static_once(&model, LoadCaseId(1)).is_ok());
+    let err = linear_static_once(&model, LoadCaseId(99)).unwrap_err();
+    assert!(
+        matches!(err, SolveError::InvalidInput(ref msg) if msg.contains("99")),
+        "{err:?}"
+    );
+
+    // 剛性が特異でも、反復の求解エラーより先に不存在ケースを拒否する。
+    for node in &mut model.nodes {
+        node.restraint = Dof6Mask::FREE;
+    }
+    let err = linear_static_once(&model, LoadCaseId(99)).unwrap_err();
+    assert!(
+        matches!(err, SolveError::InvalidInput(ref msg) if msg.contains("99")),
+        "{err:?}"
+    );
+}
+
+#[test]
 fn axial_distributed_gravity_recovers_full_base_compression() {
     let mut model = make_axial_cantilever();
     model.nodes[1].coord = [0.0, 0.0, 1000.0];

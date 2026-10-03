@@ -1052,8 +1052,101 @@ fn test_linear_static_unknown_load_case_is_error() {
     let model = make_cantilever_model();
     let analysis = Analysis::prepare(&model).unwrap();
     let err = analysis.linear_static(LoadCaseId(99)).err().unwrap();
-    let msg = format!("{}", err);
-    assert!(msg.contains("荷重ケース"), "{}", msg);
+    assert!(
+        matches!(err, SolveError::InvalidInput(ref msg) if msg.contains("99")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn test_linear_static_zero_independent_dofs_load_case_validation() {
+    for all_fixed in [true, false] {
+        let mut model = make_cantilever_model();
+        if all_fixed {
+            model.nodes[1].restraint = Dof6Mask::FIXED;
+        } else {
+            model.constraints.push(Constraint::RigidLink {
+                master: NodeId(0),
+                slaves: vec![NodeId(1)],
+                dofs: Dof6Mask::FIXED,
+            });
+        }
+        let analysis = Analysis::prepare(&model).unwrap();
+        assert_eq!(analysis.n_indep, 0);
+        assert_eq!(analysis.dofmap.n_active() == 0, all_fixed);
+        let result = analysis.linear_static(LoadCaseId(1)).unwrap();
+        assert_eq!(result.disp, vec![[0.0; 6]; model.nodes.len()]);
+        assert!(result.member_forces.is_empty());
+        assert!(result.panel_moments.is_empty());
+        let err = analysis.linear_static(LoadCaseId(99)).unwrap_err();
+        assert!(
+            matches!(err, SolveError::InvalidInput(ref msg) if msg.contains("99")),
+            "{err:?}"
+        );
+    }
+}
+
+#[test]
+fn test_linear_static_batch_load_case_validation_preserves_order() {
+    for all_fixed in [false, true] {
+        let mut model = make_cantilever_model();
+        if all_fixed {
+            model.nodes[1].restraint = Dof6Mask::FIXED;
+        }
+        let analysis = Analysis::prepare(&model).unwrap();
+        let ids = [LoadCaseId(2), LoadCaseId(99), LoadCaseId(1)];
+        let batch = analysis.linear_static_batch(&ids);
+        assert_eq!(batch.len(), ids.len());
+        for i in [0, 2] {
+            assert_eq!(
+                batch[i].as_ref().unwrap().disp,
+                analysis.linear_static(ids[i]).unwrap().disp
+            );
+        }
+        let err = batch[1].as_ref().unwrap_err();
+        assert!(
+            matches!(err, SolveError::InvalidInput(msg) if msg.contains("99")),
+            "{err:?}"
+        );
+    }
+}
+
+#[test]
+fn test_linear_combination_zero_dofs_load_case_validation() {
+    let mut model = make_cantilever_model();
+    model.nodes[1].restraint = Dof6Mask::FIXED;
+    let analysis = Analysis::prepare(&model).unwrap();
+    let invalid = LoadCombination {
+        name: "不存在ケースを含む組合せ".into(),
+        terms: vec![(LoadCaseId(1), 1.0), (LoadCaseId(99), 1.0)],
+    };
+    let err = analysis.linear_combination(&invalid).unwrap_err();
+    assert!(
+        matches!(err, SolveError::InvalidInput(ref msg) if msg.contains("99")),
+        "{err:?}"
+    );
+    let combos = [model.combinations[0].clone(), invalid];
+    let batch = analysis.linear_combination_batch(&combos);
+    assert!(batch[0].is_ok());
+    let err = batch[1].as_ref().unwrap_err();
+    assert!(
+        matches!(err, SolveError::InvalidInput(msg) if msg.contains("99")),
+        "{err:?}"
+    );
+    let combined = analysis
+        .linear_static_with_combinations(&[LoadCaseId(1), LoadCaseId(99), LoadCaseId(2)], &combos);
+    assert!(combined.cases[0].is_ok());
+    assert!(combined.cases[2].is_ok());
+    assert!(combined.combos[0].is_ok());
+    for err in [
+        combined.cases[1].as_ref().unwrap_err(),
+        combined.combos[1].as_ref().unwrap_err(),
+    ] {
+        assert!(
+            matches!(err, SolveError::InvalidInput(msg) if msg.contains("99")),
+            "{err:?}"
+        );
+    }
 }
 
 #[test]
