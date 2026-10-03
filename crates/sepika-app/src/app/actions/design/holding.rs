@@ -507,7 +507,7 @@ fn rank_new_rc_column_rect(
     rebar
         .validate(b, d)
         .map_err(|_| error("配筋形状が不正です"))?;
-    validate_new_column_materials(mat, rebar_mat, shear_mat, clear_span).map_err(&error)?;
+    validate_new_column_materials(mat, rebar_mat, shear_mat, clear_span).map_err(error)?;
     if !b.is_finite() || !d.is_finite() || b <= 0.0 || d <= 0.0 {
         return Err(error("断面寸法が不正です"));
     }
@@ -581,7 +581,7 @@ fn rank_new_rc_circle_column(
         return Err(error("配筋が未設定です"));
     }
     rebar.validate(d).map_err(|_| error("配筋形状が不正です"))?;
-    validate_new_column_materials(mat, rebar_mat, shear_mat, clear_span).map_err(&error)?;
+    validate_new_column_materials(mat, rebar_mat, shear_mat, clear_span).map_err(error)?;
     if !d.is_finite() || d <= 0.0 {
         return Err(error("断面寸法が不正です"));
     }
