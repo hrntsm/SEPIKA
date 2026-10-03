@@ -1,5 +1,4 @@
 use crate::manifest::Manifest;
-use crate::migrate::migrate;
 use sepika_core::model::Model;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
@@ -105,7 +104,7 @@ pub struct OvikaContents {
 pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result<(), IoError> {
     let tmp_path = path.with_extension("ovika.tmp");
 
-    let model_bytes = rmp_serde::to_vec(model).map_err(|e| IoError::Decode(e.to_string()))?;
+    let model_bytes = rmp_serde::to_vec_named(model).map_err(|e| IoError::Decode(e.to_string()))?;
     let settings_bytes = serde_json::to_vec_pretty(&serde_json::json!({
         "code": "JIS B 0001",
         "created_at": "",
@@ -244,8 +243,6 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
     }
 
     let model_data = model_data.ok_or_else(|| IoError::MissingEntry("model.msgpack".into()))?;
-
-    let model_data = migrate(manifest.schema_version, model_data)?;
 
     let model: Model =
         rmp_serde::from_slice(&model_data).map_err(|e| IoError::Decode(e.to_string()))?;
@@ -407,6 +404,170 @@ mod tests {
             .read_to_end(&mut mb)
             .unwrap();
         serde_json::from_slice(&mb).unwrap()
+    }
+
+    #[test]
+    fn saved_model_fields_are_named_and_order_independent() {
+        #[derive(serde::Deserialize)]
+        struct ReorderedModel {
+            slab_thickness: f64,
+            #[serde(default)]
+            added_field: bool,
+            nodes: Vec<ReorderedNode>,
+        }
+        #[derive(serde::Deserialize)]
+        struct ReorderedNode {
+            coord: [f64; 3],
+            id: NodeId,
+        }
+        let mut model = make_3node_model();
+        model.slab_thickness = 123.0;
+        let path = crate::test_util::test_tmp().join("named_model.ovika");
+        save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+        let mut bytes = Vec::new();
+        archive
+            .by_name("model.msgpack")
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        let fields: ReorderedModel = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(fields.slab_thickness, model.slab_thickness);
+        assert!(!fields.added_field);
+        assert_eq!(fields.nodes[1].id, model.nodes[1].id);
+        assert_eq!(fields.nodes[1].coord, model.nodes[1].coord);
+        let loaded = load_ovika(&path).unwrap().model;
+        loaded.validate().unwrap();
+        assert!(model.eq_ignoring_dofmap(&loaded));
+    }
+
+    #[test]
+    fn named_node_reads_added_default_field() {
+        #[derive(serde::Serialize)]
+        struct NodeWithoutSupportSpring {
+            story: Option<StoryId>,
+            mass: Option<[f64; 6]>,
+            restraint: Dof6Mask,
+            coord: [f64; 3],
+            id: NodeId,
+        }
+        let bytes = rmp_serde::to_vec_named(&NodeWithoutSupportSpring {
+            story: None,
+            mass: None,
+            restraint: Dof6Mask::FIXED,
+            coord: [100.0, 200.0, 300.0],
+            id: NodeId(7),
+        })
+        .unwrap();
+        let node: Node = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(node.id, NodeId(7));
+        assert_eq!(node.coord, [100.0, 200.0, 300.0]);
+        assert_eq!(node.restraint, Dof6Mask::FIXED);
+        assert!(node.support_spring.is_none());
+    }
+
+    #[test]
+    fn corrupt_model_with_matching_hash_returns_decode_error() {
+        let path = crate::test_util::test_tmp().join("corrupt_model.ovika");
+        save_ovika(&path, &make_3node_model(), OvikaExtras::default()).unwrap();
+        let mut manifest = read_manifest(&path);
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+        let mut settings = Vec::new();
+        archive
+            .by_name("settings.json")
+            .unwrap()
+            .read_to_end(&mut settings)
+            .unwrap();
+        drop(archive);
+        let corrupt = [0xc1];
+        manifest
+            .entries
+            .iter_mut()
+            .find(|e| e.name == "model.msgpack")
+            .unwrap()
+            .sha256 = sha256_of(&corrupt);
+        write_zip_with_manifest(&path, &manifest, &corrupt, &settings);
+        assert!(matches!(load_ovika(&path), Err(IoError::Decode(_))));
+    }
+
+    #[test]
+    #[ignore = "実モデルの codec 比較計測。release・単独で実行する"]
+    fn measure_real_model_msgpack() {
+        use std::hint::black_box;
+        use std::time::Instant;
+        let xml = crate::stbridge::read_stbridge_file(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../sepika-app/tests/fixtures/model.stb"),
+        )
+        .unwrap();
+        let (model, _) = crate::stbridge::import_stbridge_with_report(&xml).unwrap();
+        model.validate().unwrap();
+        println!(
+            "nodes={} elements={} secondary={} floor_regions={} sections={}",
+            model.nodes.len(),
+            model.elements.len(),
+            model.beams().count(),
+            model.floor_regions.len(),
+            model.sections.len()
+        );
+        let dir = crate::test_util::test_tmp();
+        let named_path = dir.join("measure_named.ovika");
+        let positional_path = dir.join("measure_positional.ovika");
+        save_ovika(&named_path, &model, OvikaExtras::default()).unwrap();
+        let mut manifest = read_manifest(&named_path);
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&named_path).unwrap()).unwrap();
+        let mut settings = Vec::new();
+        archive
+            .by_name("settings.json")
+            .unwrap()
+            .read_to_end(&mut settings)
+            .unwrap();
+        drop(archive);
+        for named in [false, true] {
+            let encode = || {
+                if named {
+                    rmp_serde::to_vec_named(black_box(&model))
+                } else {
+                    rmp_serde::to_vec(black_box(&model))
+                }
+                .unwrap()
+            };
+            let bytes = encode();
+            let path = if named { &named_path } else { &positional_path };
+            if !named {
+                manifest
+                    .entries
+                    .iter_mut()
+                    .find(|e| e.name == "model.msgpack")
+                    .unwrap()
+                    .sha256 = sha256_of(&bytes);
+                write_zip_with_manifest(path, &manifest, &bytes, &settings);
+            }
+            let loaded = load_ovika(path).unwrap().model;
+            loaded.validate().unwrap();
+            assert!(model.eq_ignoring_dofmap(&loaded));
+            for _ in 0..10 {
+                black_box(encode());
+                black_box(rmp_serde::from_slice::<Model>(&bytes).unwrap());
+            }
+            let mut enc = Vec::new();
+            let mut dec = Vec::new();
+            for _ in 0..7 {
+                let start = Instant::now();
+                for _ in 0..1000 {
+                    black_box(encode());
+                }
+                enc.push(start.elapsed().as_secs_f64() * 1e6 / 1000.0);
+                let start = Instant::now();
+                for _ in 0..1000 {
+                    black_box(rmp_serde::from_slice::<Model>(black_box(&bytes)).unwrap());
+                }
+                dec.push(start.elapsed().as_secs_f64() * 1e6 / 1000.0);
+            }
+            enc.sort_by(f64::total_cmp);
+            dec.sort_by(f64::total_cmp);
+            println!("named={named} msgpack_bytes={} ovika_bytes={} encode_us median={:.3} range={:.3}..{:.3} decode_us median={:.3} range={:.3}..{:.3}",
+                bytes.len(), std::fs::metadata(path).unwrap().len(), enc[3], enc[0], enc[6], dec[3], dec[0], dec[6]);
+        }
     }
 
     /// 断面 shape・一般ブレース・部材付帯情報・スラブ厚・二次部材などを含む

@@ -1197,7 +1197,7 @@ fn time_history_nonlinear_runs() {
 
 // ===================== 12. 保存・読込の往復 =====================
 
-/// プロジェクトファイル（SCZ）へ保存し、読み直してもモデルと結果が保たれる。
+/// OVIKA へ保存し、読み直してもモデル・準備計算・結果・解析条件が保たれる。
 #[test]
 fn ovika_roundtrip_preserves_model_and_results() {
     let mut app = analyzed();
@@ -1212,10 +1212,86 @@ fn ovika_roundtrip_preserves_model_and_results() {
     app.save_project_to(path.clone());
     assert_no_error(&app, "プロジェクト保存");
 
+    let contents = sepika_io::ovika::load_ovika(&path).unwrap();
+    contents.model.validate().unwrap();
+    assert!(app.core.model.eq_ignoring_dofmap(&contents.model));
+    for bytes in [
+        contents.preparation.as_ref().unwrap(),
+        contents.results.as_ref().unwrap(),
+        contents.analysis_settings.as_ref().unwrap(),
+    ] {
+        let fields: std::collections::BTreeMap<String, serde::de::IgnoredAny> =
+            rmp_serde::from_slice(bytes).unwrap();
+        assert!(!fields.is_empty(), "任意 payload のトップレベルは map");
+    }
+    #[derive(serde::Deserialize)]
+    struct ReorderedPreparation {
+        diag_warnings: usize,
+        #[serde(default)]
+        added_field: bool,
+        computed_at: std::time::SystemTime,
+    }
+    let prep: ReorderedPreparation =
+        rmp_serde::from_slice(contents.preparation.as_ref().unwrap()).unwrap();
+    let original_prep = app.core.scoped.preparation.as_ref().unwrap();
+    assert_eq!(prep.computed_at, original_prep.computed_at);
+    assert_eq!(prep.diag_warnings, original_prep.diag_warnings);
+    assert!(!prep.added_field);
+
+    #[derive(serde::Deserialize)]
+    struct ReorderedResults {
+        last_run: Option<std::time::SystemTime>,
+        #[serde(default)]
+        added_field: bool,
+        bundle: sepika_app::app::ResultsBundle,
+    }
+    let results: ReorderedResults =
+        rmp_serde::from_slice(contents.results.as_ref().unwrap()).unwrap();
+    assert_eq!(results.last_run, app.core.scoped.staleness.last_run);
+    assert!(!results.added_field);
+    assert_eq!(
+        rmp_serde::to_vec_named(&results.bundle).unwrap(),
+        rmp_serde::to_vec_named(app.core.scoped.results.as_ref().unwrap()).unwrap()
+    );
+
+    #[derive(serde::Deserialize)]
+    struct ReorderedSettings {
+        wave_name: Option<String>,
+        #[serde(default)]
+        added_field: bool,
+        cfg: ReorderedConfig,
+    }
+    #[derive(serde::Deserialize)]
+    struct ReorderedConfig {
+        th_damping: f64,
+        n_modes: usize,
+    }
+    let settings: ReorderedSettings =
+        rmp_serde::from_slice(contents.analysis_settings.as_ref().unwrap()).unwrap();
+    assert_eq!(settings.wave_name, app.core.scoped.wave_library_selection);
+    assert_eq!(settings.cfg.th_damping, app.core.analysis_cfg.th_damping);
+    assert_eq!(settings.cfg.n_modes, app.core.analysis_cfg.n_modes);
+    assert!(!settings.added_field);
+
     let mut reopened = App::default();
     reopened.core.analysis_cfg.threads = 1;
     reopened.open_project_from(path.clone());
     assert_no_error(&reopened, "プロジェクト読込");
+
+    reopened.core.model.validate().unwrap();
+    assert!(app.core.model.eq_ignoring_dofmap(&reopened.core.model));
+    assert_eq!(
+        rmp_serde::to_vec_named(reopened.core.scoped.results.as_ref().unwrap()).unwrap(),
+        rmp_serde::to_vec_named(&results.bundle).unwrap()
+    );
+    assert_eq!(
+        rmp_serde::to_vec_named(reopened.core.scoped.preparation.as_ref().unwrap()).unwrap(),
+        rmp_serde::to_vec_named(original_prep).unwrap()
+    );
+    assert_eq!(
+        rmp_serde::to_vec_named(&reopened.core.analysis_cfg).unwrap(),
+        rmp_serde::to_vec_named(&app.core.analysis_cfg).unwrap()
+    );
 
     assert_eq!(
         reopened.core.model.nodes.len(),
@@ -1270,6 +1346,98 @@ fn ovika_roundtrip_preserves_model_and_results() {
     );
 
     std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn ovika_reads_defaulted_settings_fields() {
+    #[derive(serde::Serialize)]
+    struct SettingsWithoutLumpedSelection {
+        wave_sha256: Option<String>,
+        wave_name: Option<String>,
+        cfg: sepika_app::app::AnalysisSettings,
+    }
+    let mut app = imported();
+    app.core.analysis_cfg.th_damping = 0.043;
+    let bytes = rmp_serde::to_vec_named(&SettingsWithoutLumpedSelection {
+        wave_sha256: None,
+        wave_name: None,
+        cfg: app.core.analysis_cfg,
+    })
+    .unwrap();
+    let settings: sepika_app::app::SavedAnalysisSettings = rmp_serde::from_slice(&bytes).unwrap();
+    assert!(settings.lumped_wave_name.is_none());
+    assert!(settings.lumped_wave_sha256.is_none());
+    let path = test_tmp().join("defaulted_settings.ovika");
+    sepika_io::ovika::save_ovika(
+        &path,
+        &app.core.model,
+        sepika_io::ovika::OvikaExtras {
+            analysis_settings: Some(&bytes),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert_no_error(&reopened, "default フィールドを持つ設定の復元");
+    assert_eq!(reopened.core.analysis_cfg.th_damping, 0.043);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn ovika_corrupt_optional_payloads_report_notices() {
+    let app = imported();
+    let path = test_tmp().join("corrupt_optional.ovika");
+    let corrupt = [0xc1];
+    sepika_io::ovika::save_ovika(
+        &path,
+        &app.core.model,
+        sepika_io::ovika::OvikaExtras {
+            preparation: Some(&corrupt),
+            results: Some(&corrupt),
+            analysis_settings: Some(&corrupt),
+        },
+    )
+    .unwrap();
+    let mut reopened = App::default();
+    let damping = reopened.core.analysis_cfg.th_damping;
+    reopened.open_project_from(path.clone());
+    assert_no_error(&reopened, "破損した任意 payload はモデル読込を妨げない");
+    assert!(reopened.core.scoped.preparation.is_none());
+    assert!(reopened.core.scoped.results.is_none());
+    assert_eq!(reopened.core.analysis_cfg.th_damping, damping);
+    for label in ["準備計算の結果", "解析結果", "解析タブの設定値"] {
+        assert!(reopened
+            .core
+            .log
+            .entries
+            .iter()
+            .any(|e| e.message.contains(label) && e.message.contains("読み込めませんでした")));
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn ovika_invalid_restored_model_is_not_installed() {
+    let mut app = imported();
+    app.core.model.nodes.push(app.core.model.nodes[0].clone());
+    assert!(app.core.model.validate().is_err());
+    let path = test_tmp().join("invalid_restored_model.ovika");
+    app.save_project_to(path.clone());
+    assert_no_error(&app, "検証前のモデル保存");
+    let mut reopened = App::default();
+    let original = reopened.core.model.clone();
+    reopened.open_project_from(path.clone());
+    assert!(reopened
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("読込モデルの検証エラー"));
+    assert!(original.eq_ignoring_dofmap(&reopened.core.model));
+    assert!(reopened.core.scoped.project_path.is_none());
+    std::fs::remove_file(path).unwrap();
 }
 
 /// ST-Bridge へ書き出し、読み直してもモデル構成が保たれ、そのまま再解析できる。
