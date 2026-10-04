@@ -2079,17 +2079,15 @@ fn slab_floor_load_reaches_primary_frame() {
         if model.secondary_member_materialized(sm) {
             continue;
         }
-        let Some((na, nb)) = model.secondary_member_end_points(sm) else {
-            continue;
-        };
         let (Some(sec), Some(mat)) = (
             sm.section.and_then(|id| model.sections.get(id.index())),
             model.secondary_material(sm),
         ) else {
             continue;
         };
-        let len =
-            ((nb[0] - na[0]).powi(2) + (nb[1] - na[1]).powi(2) + (nb[2] - na[2]).powi(2)).sqrt();
+        let [a, b] = sepika_core::face_distance::secondary_self_weight_interval(model, sm)
+            .expect("自重フェース間区間");
+        let len = b - a;
         let factor = if mat.fc.is_some() { 1.0 } else { steel_factor };
         expected += mat.design_unit_weight_n_per_mm3() * sec.area * len * factor;
     }

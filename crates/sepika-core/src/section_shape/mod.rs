@@ -14,6 +14,7 @@
 mod builder;
 mod composite;
 mod constants;
+pub mod face_geometry;
 mod geometry;
 mod label;
 mod material;

@@ -39,7 +39,7 @@ fn element_beam(id: u32, i: u32, j: u32) -> ElementData {
         id: ElemId(id),
         kind: ElementKind::Beam,
         nodes: [NodeId(i), NodeId(j)].into_iter().collect(),
-        section: None,
+        section: Some(SectionId(0)),
         local_axis: LocalAxis {
             ref_vector: [0.0, 0.0, 1.0],
         },
@@ -96,7 +96,10 @@ fn base_model() -> Model {
         as_z: 0.0,
         panel_thickness: None,
         thickness: None,
-        shape: None,
+        shape: Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
+            width: 200.0,
+            thick: 400.0,
+        }),
         material: Some(MaterialId(0)),
         rebar_material: None,
         shear_rebar_material: None,
@@ -109,6 +112,212 @@ fn solved(model: &mut Model) -> SecondaryTransfer {
     // 鉄骨重量割増は `load_cfg` 未設定なら 1.0（`beam_self_weight_udl`）。
     model.anchorize_secondary_members();
     solve(model, |_| 0.0, true).unwrap()
+}
+
+fn face_model(span: f64, widths: [f64; 2]) -> Model {
+    let mut model = base_model();
+    model.sections[0].width = widths[0];
+    model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
+        width: widths[0],
+        thick: 400.0,
+    });
+    let mut end = model.sections[0].clone();
+    end.id = SectionId(1);
+    end.width = widths[1];
+    end.shape = Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
+        width: widths[1],
+        thick: 400.0,
+    });
+    model.sections.push(end);
+    model.nodes = vec![
+        node(0, -1000.0, 0.0, 0.0),
+        node(1, 1000.0, 0.0, 0.0),
+        node(2, -1000.0, span, 0.0),
+        node(3, 1000.0, span, 0.0),
+    ];
+    model.elements = vec![element_beam(0, 0, 1), element_beam(1, 2, 3)];
+    model.elements[1].section = Some(SectionId(1));
+    model.unassigned_beams.push(SecondaryMember {
+        id: SecondaryMemberId(10),
+        section: Some(SectionId(0)),
+        ends: sepika_core::model::SecondaryMemberEnds::Supported([
+            sepika_core::model::SecondaryMemberAnchor {
+                support: sepika_core::model::SupportMemberId::Primary(ElemId(0)),
+                position: 0.5,
+            },
+            sepika_core::model::SecondaryMemberAnchor {
+                support: sepika_core::model::SupportMemberId::Primary(ElemId(1)),
+                position: 0.5,
+            },
+        ]),
+        ..Default::default()
+    });
+    model
+}
+
+#[test]
+fn rcとs小梁の支持幅400は内法3600に元の線荷重を載せる() {
+    for concrete in [false, true] {
+        let mut model = face_model(4000.0, [400.0; 2]);
+        if concrete {
+            model.materials[0].category = MaterialCategory::Concrete;
+            model.materials[0].fc = Some(24.0);
+            model.materials[0].density = 2.4e-9;
+        }
+        let transfer = solve(&model, |_| 0.0, true).unwrap();
+        let member = &transfer.members[&SecondaryMemberId(10)];
+        let w = beam_self_weight_udl(&model, &model.unassigned_beams[0]).unwrap();
+        assert_eq!(member.span, 4000.0);
+        assert_eq!(
+            member.member_loads,
+            vec![MemberLoadKind::Distributed {
+                a: 200.0,
+                b: 3800.0,
+                w1: w,
+                w2: w
+            }]
+        );
+        assert!((member.reactions.iter().sum::<f64>() - w * 3600.0).abs() < 1e-9);
+        if let sepika_core::model::SecondaryMemberEnds::Supported(anchors) =
+            &mut model.unassigned_beams[0].ends
+        {
+            for anchor in anchors {
+                anchor.position = 0.0;
+            }
+        }
+        assert_eq!(
+            sepika_core::face_distance::secondary_self_weight_interval(
+                &model,
+                &model.unassigned_beams[0]
+            )
+            .unwrap(),
+            [200.0, 3800.0]
+        );
+    }
+}
+
+#[test]
+fn 小梁支持と非対称反力は芯々スパンを保持する() {
+    let mut model = face_model(3000.0, [300.0, 200.0]);
+    let support = SecondaryMember {
+        id: SecondaryMemberId(20),
+        section: Some(SectionId(1)),
+        ends: sepika_core::model::SecondaryMemberEnds::Detached([
+            [-1000.0, 3000.0, 0.0],
+            [1000.0, 3000.0, 0.0],
+        ]),
+        ..Default::default()
+    };
+    model.elements.pop();
+    model.unassigned_beams.push(support);
+    if let sepika_core::model::SecondaryMemberEnds::Supported(anchors) =
+        &mut model.unassigned_beams[0].ends
+    {
+        anchors[1].support = sepika_core::model::SupportMemberId::Secondary(SecondaryMemberId(20));
+    }
+    let transfer = solve(&model, |_| 0.0, true).unwrap();
+    let member = &transfer.members[&SecondaryMemberId(10)];
+    let w = w_self();
+    assert_eq!(member.span, 3000.0);
+    assert_eq!(
+        member.member_loads,
+        vec![MemberLoadKind::Distributed {
+            a: 150.0,
+            b: 2900.0,
+            w1: w,
+            w2: w
+        }]
+    );
+    let total = w * 2750.0;
+    assert!((member.reactions[0] - total * (3000.0 - 1525.0) / 3000.0).abs() < 1e-9);
+    assert!((member.reactions[1] - total * 1525.0 / 3000.0).abs() < 1e-9);
+}
+
+#[test]
+fn 勾配小梁と勾配支持小梁は鉛直基準の投影フェースと三次元軸を使う() {
+    let mut model = face_model(4000.0, [400.0; 2]);
+    model.nodes[2].coord[2] = 3000.0;
+    model.nodes[3].coord[2] = 3000.0;
+    let support = SecondaryMember {
+        id: SecondaryMemberId(20),
+        section: Some(SectionId(1)),
+        ends: sepika_core::model::SecondaryMemberEnds::Detached([
+            [-1000.0, 4000.0, 2250.0],
+            [1000.0, 4000.0, 3750.0],
+        ]),
+        ..Default::default()
+    };
+    model.elements.pop();
+    model.unassigned_beams.push(support);
+    if let sepika_core::model::SecondaryMemberEnds::Supported(anchors) =
+        &mut model.unassigned_beams[0].ends
+    {
+        anchors[1].support = sepika_core::model::SupportMemberId::Secondary(SecondaryMemberId(20));
+    }
+    let interval = sepika_core::face_distance::secondary_self_weight_interval(
+        &model,
+        &model.unassigned_beams[0],
+    )
+    .unwrap();
+    assert_eq!(interval, [250.0, 4750.0]);
+    let transfer = solve(&model, |_| 0.0, true).unwrap();
+    let member = &transfer.members[&SecondaryMemberId(10)];
+    assert_eq!(member.span, 5000.0);
+    assert!((member.reactions.iter().sum::<f64>() - w_self() * 4500.0).abs() < 1e-9);
+    let physical = solve_with_basis(&model, |_| 0.0, true, SelfWeightBasis::MassEquiv).unwrap();
+    assert!(
+        (physical.members[&SecondaryMemberId(10)]
+            .reactions
+            .iter()
+            .sum::<f64>()
+            - DENSITY * AREA * sepika_core::units::GRAVITY_MM_S2 * 4500.0)
+            .abs()
+            < 1e-9
+    );
+    model.sections[1].shape = Some(sepika_core::section_shape::SectionShape::SteelChannel {
+        height: 300.0,
+        width: 100.0,
+        web_thick: 10.0,
+        flange_thick: 20.0,
+    });
+    let centroid = (4000.0 * 50.0 + 2600.0 * 5.0) / 6600.0;
+    let interval = sepika_core::face_distance::secondary_self_weight_interval(
+        &model,
+        &model.unassigned_beams[0],
+    )
+    .unwrap();
+    assert!((interval[1] - (5000.0 - (100.0 - centroid) / 0.8)).abs() < 1e-9);
+}
+
+#[test]
+fn 片持ち自重は支持端だけ控除し不正長と未解決参照はエラー() {
+    let mut model = face_model(3000.0, [300.0, 200.0]);
+    model.unassigned_beams[0].ends = sepika_core::model::SecondaryMemberEnds::Cantilever {
+        support: sepika_core::model::SecondaryMemberAnchor {
+            support: sepika_core::model::SupportMemberId::Primary(ElemId(0)),
+            position: 0.5,
+        },
+        free_end_vector: [0.0, 3000.0],
+    };
+    let transfer = solve(&model, |_| 0.0, true).unwrap();
+    let member = &transfer.members[&SecondaryMemberId(10)];
+    assert!((member.reactions[0] - w_self() * 2850.0).abs() < 1e-9);
+    assert_eq!(member.reactions[1], 0.0);
+    model.sections[0].width = 6000.0;
+    model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
+        width: 6000.0,
+        thick: 400.0,
+    });
+    let error = solve(&model, |_| 0.0, true).unwrap_err().to_string();
+    assert!(
+        error.contains("二次部材 10") && error.contains("3000") && error.contains("終端控除 0"),
+        "{error}"
+    );
+    model.elements[0].section = None;
+    assert!(solve(&model, |_| 0.0, true)
+        .unwrap_err()
+        .to_string()
+        .contains("断面を解決できません"));
 }
 
 /// 両端が大梁に載る小梁は、自重の半分ずつを主架構へ渡して終端する。
@@ -137,7 +346,7 @@ fn beam_on_girders_terminates_at_primary() {
     let key = sepika_core::ids::SecondaryMemberId(4);
     let sm = t.members.get(&key).expect("小梁");
     assert_eq!(sm.supports, [SupportAt::Primary, SupportAt::Primary]);
-    let expected = w_self() * 4000.0 / 2.0;
+    let expected = w_self() * 3800.0 / 2.0;
     for r in sm.reactions {
         assert!((r - expected).abs() / expected < 1e-9, "反力 {r}");
     }
@@ -179,8 +388,8 @@ fn beam_mass_equiv_applies_steel_weight_factor() {
     let rd = design.members.get(&key).expect("設計の小梁").reactions;
     let rm = mass.members.get(&key).expect("物理質量の小梁").reactions;
     let factor = 1.3;
-    let expect_d = DESIGN_UNIT_WEIGHT_N_PER_MM3 * AREA * factor * 4000.0 / 2.0;
-    let expect_m = DENSITY * AREA * sepika_core::units::GRAVITY_MM_S2 * factor * 4000.0 / 2.0;
+    let expect_d = DESIGN_UNIT_WEIGHT_N_PER_MM3 * AREA * factor * 3800.0 / 2.0;
+    let expect_m = DENSITY * AREA * sepika_core::units::GRAVITY_MM_S2 * factor * 3800.0 / 2.0;
     assert!(
         (rd[0] - expect_d).abs() / expect_d < 1e-9,
         "設計反力 {}",
@@ -242,7 +451,7 @@ fn beam_on_beam_cascades_to_primary() {
         .map(|(_, r)| *r)
         .chain(member.iter().map(|bl| bl.cmq.q_i + bl.cmq.q_j))
         .sum();
-    let expected = w_self() * (4000.0 + 3000.0);
+    let expected = w_self() * (3800.0 + 2800.0);
     assert!(
         (total - expected).abs() / expected < 1e-9,
         "主架構へ渡る総和 {total} != 自重合計 {expected}"
@@ -299,7 +508,7 @@ fn beam_anchored_to_girder_midspan_becomes_point_load() {
         nodal.is_empty(),
         "座標一致節点が無いので節点荷重は無い: {nodal:?}"
     );
-    let expected = w_self() * 4000.0;
+    let expected = w_self() * 3800.0;
     let total: f64 = member.iter().map(|bl| bl.cmq.q_i + bl.cmq.q_j).sum();
     assert!(
         (total - expected).abs() / expected < 1e-9,
@@ -411,10 +620,10 @@ fn inclined_beam_reactions_match_simple_beam() {
     let mut m = base_model();
     // 水平投影 4000・鉛直 3000（L=5000）の傾斜小梁。両端は大梁に載せて終端させる。
     for (i, c) in [
-        [-1000.0, 0.0, 0.0],
-        [1000.0, 0.0, 0.0],
-        [3000.0, 0.0, 3000.0],
-        [5000.0, 0.0, 3000.0],
+        [0.0, -1000.0, 0.0],
+        [0.0, 1000.0, 0.0],
+        [4000.0, -1000.0, 3000.0],
+        [4000.0, 1000.0, 3000.0],
         [0.0, 0.0, 0.0],       // 4 傾斜小梁の下端（下の大梁上）
         [4000.0, 0.0, 3000.0], // 5 傾斜小梁の上端（上の大梁上）
     ]
@@ -433,7 +642,7 @@ fn inclined_beam_reactions_match_simple_beam() {
     assert_eq!(sm.supports, [SupportAt::Primary, SupportAt::Primary]);
 
     // 自重は等分布なので、鉛直反力は両端等分（総量は ρAgL）。
-    let total = w_self() * 5000.0;
+    let total = w_self() * (5000.0 - 2.0 * 100.0 / 0.8);
     for r in sm.reactions {
         assert!(
             (r - total / 2.0).abs() / total < 1e-9,
@@ -610,7 +819,7 @@ fn cantilever_beam_transfers_to_base_only() {
         [SupportAt::Primary, SupportAt::Free],
         "基端のみ支持"
     );
-    let expected = w_self() * 4000.0;
+    let expected = w_self() * 3900.0;
     assert!((sm.reactions[0] - expected).abs() / expected < 1e-9);
     assert_eq!(sm.reactions[1], 0.0);
     assert!(t.unresolved.is_empty(), "{:?}", t.unresolved);
@@ -639,7 +848,7 @@ fn cantilever_beam_base_at_second_node() {
     let key = sepika_core::ids::SecondaryMemberId(2);
     let sm = t.members.get(&key).expect("片持ち小梁");
     assert_eq!(sm.supports, [SupportAt::Primary, SupportAt::Free]);
-    let expected = w_self() * 3000.0;
+    let expected = w_self() * 2900.0;
     assert!((sm.reactions[0] - expected).abs() / expected < 1e-9);
     assert_eq!(sm.reactions[1], 0.0);
     assert!(t.unresolved.is_empty(), "{:?}", t.unresolved);
@@ -690,7 +899,7 @@ fn tip_rib_on_cantilever_free_ends_cascades_to_bases() {
     assert!(matches!(rib.supports[0], SupportAt::Secondary { .. }));
     assert!(matches!(rib.supports[1], SupportAt::Secondary { .. }));
 
-    let expected_total = w_self() * (3000.0 * 2.0 + 4000.0);
+    let expected_total = w_self() * (2900.0 * 2.0 + 4000.0);
     let total = ca.reactions[0] + cb.reactions[0];
     assert!(
         (total - expected_total).abs() / expected_total < 1e-9,
@@ -745,7 +954,7 @@ fn attached_slab_load_ignores_side_beam() {
         .members
         .get(&sepika_core::ids::SecondaryMemberId(0))
         .expect("小梁");
-    let expected = w_self() * 1500.0;
+    let expected = w_self() * 1400.0;
     assert!(
         (beam.reactions[0] - expected).abs() / expected < 0.02,
         "基端反力={} expected={expected}",

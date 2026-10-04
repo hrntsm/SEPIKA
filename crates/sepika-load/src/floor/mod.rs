@@ -75,8 +75,9 @@ fn short_direction_dimensions(coords: &[[f64; 3]]) -> Option<(f64, f64)> {
     Some(dimensions)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FloorDistributionError {
+    SelfWeight(String),
     ShortDirectionOnSquare { slab_id: sepika_core::ids::SlabId },
     ShortDirectionRequiresRectangle { slab_id: sepika_core::ids::SlabId },
 }
@@ -84,6 +85,7 @@ pub enum FloorDistributionError {
 impl std::fmt::Display for FloorDistributionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::SelfWeight(message) => f.write_str(message),
             Self::ShortDirectionOnSquare { slab_id } => write!(
                 f,
                 "床板 {} は X・Y スパンが同寸の正方形のため、短辺方向を決められません。X または Y を指定してください。",

@@ -85,6 +85,33 @@ fn sig4(v: f64) -> String {
     format!("{v:.3e}")
 }
 
+#[test]
+fn rc_girder_self_weight_uses_columns_not_orthogonal_steel_girders() {
+    let model = wall_bay_model();
+    let (_, loads) =
+        sepika_load::self_weight::self_weight_case_content(&model, &Default::default()).unwrap();
+    for id in [ElemId(4), ElemId(8)] {
+        let element = model.element(id).unwrap();
+        let section = model.element_section(element).unwrap();
+        let material = model.element_material(element).unwrap();
+        let total: f64 = loads
+            .iter()
+            .filter(|load| load.elem == id)
+            .map(|load| match load.kind {
+                sepika_core::model::MemberLoadKind::Distributed { a, b, w1, w2 } => {
+                    (b - a) * (w1 + w2) / 2.0
+                }
+                sepika_core::model::MemberLoadKind::Point { p, .. } => p,
+            })
+            .sum();
+        let expected = material.design_unit_weight_n_per_mm3() * section.area * 3700.0;
+        assert!(
+            (total - expected).abs() < 1e-9,
+            "{id:?}: {total} != {expected}"
+        );
+    }
+}
+
 /// 指定した静的結果を取り出す（`full_model.rs::static_of` と同じ規則）。
 fn static_res_for(app: &App, key: StaticCaseKey) -> &sepika_solver::statics::linear::StaticOnce {
     &app.core
