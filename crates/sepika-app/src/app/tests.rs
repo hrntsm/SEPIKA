@@ -4047,6 +4047,51 @@ fn test_floor_design_skips_materialized_beam() {
     );
 }
 
+fn set_floor_test_self_weight_geometry(model: &mut sepika_core::model::Model) {
+    use sepika_core::ids::{MaterialId, SectionId};
+    use sepika_core::model::{FrameSectionUse, Material, MaterialCategory};
+    use sepika_core::section_shape::SectionShape;
+    let material = MaterialId(model.materials.len() as u32);
+    model.materials.push(Material {
+        id: material,
+        name: "床分配検証用の無質量鋼材".into(),
+        category: MaterialCategory::Steel,
+        young: 205000.0,
+        poisson: 0.3,
+        density: 0.0,
+        shear: None,
+        fc: None,
+        fy: Some(235.0),
+        concrete_class: Default::default(),
+        strength_factor: None,
+    });
+    for section in &mut model.sections {
+        if section.depth > 0.0 && section.width > 0.0 && section.shape.is_none() {
+            section.shape = Some(SectionShape::SteelFlatBar {
+                width: section.width,
+                thick: section.depth,
+            });
+        }
+        if section.material.is_none() {
+            section.material = Some(material);
+        }
+    }
+    let id = SectionId(model.sections.len() as u32);
+    let mut section = SectionShape::SteelFlatBar {
+        width: 200.0,
+        thick: 400.0,
+    }
+    .to_section(id, "床分配検証用支持梁".into());
+    section.frame_use = Some(FrameSectionUse::Girder);
+    section.material = Some(material);
+    model.sections.push(section);
+    for element in &mut model.elements {
+        if element.section.is_none() {
+            element.section = Some(id);
+        }
+    }
+}
+
 /// 二次部材（小梁）1 本が `Slab::beams` なしで床設計の対象になる。
 #[test]
 fn test_floor_design_checks_secondary_member_beam() {
@@ -4122,6 +4167,7 @@ fn test_floor_design_checks_secondary_member_beam() {
         )
         .expect("右半分");
     model.floor_regions[0].slab_ids = vec![first, second];
+    set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
     let app = App {
         core: AppCore {
@@ -4239,6 +4285,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
         )
         .expect("右半分");
     model.floor_regions[0].slab_ids = vec![first, second];
+    set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
     let app = App {
         core: AppCore {
@@ -4351,6 +4398,7 @@ fn test_floor_design_checks_cantilever_beam() {
         section: Some(SectionId(0)),
         name: "J1".into(),
     });
+    set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
     let app = App {
         core: AppCore {
@@ -4447,6 +4495,7 @@ fn test_floor_design_checks_secondary_beam_without_section_is_unchecked() {
         )
         .expect("右半分");
     model.floor_regions[0].slab_ids = vec![first, second];
+    set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
     let app = App {
         core: AppCore {
@@ -4585,6 +4634,7 @@ fn test_floor_design_checks_secondary_beam_uses_same_level_slab() {
             weight: None,
             ci_override: None,
         });
+    set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
     let app = App {
         core: AppCore {
@@ -4720,6 +4770,7 @@ fn test_floor_design_checks_secondary_beam_on_shared_edge_averages_width() {
         weight: None,
         ci_override: None,
     }];
+    set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
     let app = App {
         core: AppCore {
@@ -4815,6 +4866,7 @@ fn test_floor_design_checks_secondary_beam_on_slab_edge() {
         )
         .expect("右半分");
     model.floor_regions[0].slab_ids = vec![first, second];
+    set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
     let app = App {
         core: AppCore {
@@ -7356,6 +7408,13 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         slabs: vec![],
         ..Default::default()
     };
+    for index in [0, 2] {
+        model.sections[index].shape =
+            Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
+                width: 400.0,
+                thick: 600.0,
+            });
+    }
     model.rebuild_floor_assignment_regions();
     let first = model
         .assign_enclosed_slab_to_matching_region(
@@ -7413,11 +7472,10 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
     // 期待値には別途足す。
     for sm in app.core.model.beams().chain(app.core.model.posts()) {
         if let Some(w) = sepika_load::floor::beam_self_weight_udl(&app.core.model, sm) {
-            let Some((na, nb)) = app.core.model.secondary_member_end_points(sm) else {
-                continue;
-            };
-            let len = ((nb[0] - na[0]).powi(2) + (nb[1] - na[1]).powi(2) + (nb[2] - na[2]).powi(2))
-                .sqrt();
+            let [a, b] =
+                sepika_core::face_distance::secondary_self_weight_interval(&app.core.model, sm)
+                    .unwrap();
+            let len = b - a;
             sw_total += w * len;
         }
     }

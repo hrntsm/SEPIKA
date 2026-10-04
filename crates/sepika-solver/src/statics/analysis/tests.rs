@@ -2091,6 +2091,10 @@ fn test_model_issues_allows_steel_secondary_section() {
     };
 
     let mut model = make_cantilever_model();
+    model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
+        width: 10.0,
+        thick: 10.0,
+    });
     model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -2153,6 +2157,25 @@ fn test_model_issues_warns_free_end_on_support() {
     };
 
     let mut model = make_cantilever_model();
+    model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
+        width: 10.0,
+        thick: 10.0,
+    });
+    let origin = model.nodes[0].coord;
+    let tip = model.nodes[1].coord;
+    for (id, coord) in [
+        (2, [origin[0], 500.0, origin[2]]),
+        (3, [tip[0], 500.0, tip[2]]),
+    ] {
+        let mut node = model.nodes[0].clone();
+        node.id = NodeId(id);
+        node.coord = coord;
+        model.nodes.push(node);
+    }
+    let mut support = model.elements[0].clone();
+    support.id = ElemId(1);
+    support.nodes = [NodeId(2), NodeId(3)].into_iter().collect();
+    model.elements.push(support);
     model.unassigned_beams.push(SecondaryMember {
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
@@ -2162,7 +2185,7 @@ fn test_model_issues_warns_free_end_on_support() {
                 support: SupportMemberId::Primary(ElemId(0)),
                 position: 0.5,
             },
-            free_end_vector: [500.0, 0.0],
+            free_end_vector: [500.0, 500.0],
         },
         section: Some(SectionId(0)),
         name: "自由端が大梁上".into(),

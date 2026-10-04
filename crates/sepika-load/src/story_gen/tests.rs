@@ -1860,10 +1860,14 @@ fn secondary_beam_on_girder_midspan_model(with_beam: bool) -> Model {
 /// 無く密度から直接算入する経路でも階の地震用重量へ含まれること（欠落させない）。
 #[test]
 fn test_secondary_member_on_midspan_is_seismic_weight_in_density_path() {
-    let with = secondary_beam_on_girder_midspan_model(true);
+    let mut with = secondary_beam_on_girder_midspan_model(true);
     let without = secondary_beam_on_girder_midspan_model(false);
+    with.sections[0].shape = Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
+        width: 200.0,
+        thick: 300.0,
+    });
 
-    let sw = 78.5e-6 * 5000.0 * 4000.0;
+    let sw = 78.5e-6 * 5000.0 * 3800.0;
     let gen_with = generate_stories_with_opts(&with, &[], true, MassMethod::default()).unwrap();
     let gen_without =
         generate_stories_with_opts(&without, &[], true, MassMethod::default()).unwrap();
@@ -2228,6 +2232,12 @@ fn test_face_reduction_applies_to_horizontal_concrete_beam() {
         });
     }
 
+    model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+    model.sections[1].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    model.sections[1].shape = Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
+        width: 800.0,
+        thick: 800.0,
+    });
     let gen = generate_stories(&model, None).unwrap();
     let eff_len = len - 400.0 - 400.0;
     let expected = density * area * eff_len * GRAVITY_MM_S2;

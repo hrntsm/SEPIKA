@@ -392,6 +392,21 @@ pub fn solve_with_basis(
     include_self_weight: bool,
     basis: SelfWeightBasis,
 ) -> Result<SecondaryTransfer, crate::floor::FloorDistributionError> {
+    if include_self_weight {
+        for sm in model.beams() {
+            if sm.section.is_some() && !model.secondary_member_materialized(sm) && !sm.is_detached()
+            {
+                if model.secondary_material(sm).is_none() {
+                    return Err(crate::floor::FloorDistributionError::SelfWeight(format!(
+                        "二次部材 {} の自重材料を解決できません",
+                        sm.id.0
+                    )));
+                }
+                sepika_core::face_distance::secondary_self_weight_interval(model, sm)
+                    .map_err(crate::floor::FloorDistributionError::SelfWeight)?;
+            }
+        }
+    }
     let self_weight_udl = |sm: &SecondaryMember| match basis {
         SelfWeightBasis::Design => beam_self_weight_udl(model, sm),
         SelfWeightBasis::MassEquiv => beam_mass_equiv_udl(model, sm),
@@ -483,12 +498,10 @@ pub fn solve_with_basis(
         if include_self_weight {
             if let Some(sm) = by_key.get(&ax.key) {
                 if let Some(w) = self_weight_udl(sm) {
-                    loads.push(MemberLoadKind::Distributed {
-                        a: 0.0,
-                        b: ax.len,
-                        w1: w,
-                        w2: w,
-                    });
+                    let [a, b] =
+                        sepika_core::face_distance::secondary_self_weight_interval(model, sm)
+                            .map_err(crate::floor::FloorDistributionError::SelfWeight)?;
+                    loads.push(MemberLoadKind::Distributed { a, b, w1: w, w2: w });
                 }
             }
         }

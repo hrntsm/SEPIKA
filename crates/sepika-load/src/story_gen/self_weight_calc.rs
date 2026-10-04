@@ -163,8 +163,8 @@ pub(crate) enum SelfWeightItem {
 ///   重量×A×L。付加線重量・仕上げを含む）と物理質量相当（質量行列と同じ総断面・
 ///   節点間長で物理密度×g を算定し、鉄骨重量割増を掛けて付加重量を足したもの）を
 ///   別々に持つ。
-///   §1.8: 自重算定長 L は、コンクリート材（`mat.fc` あり = RC/SRC）の水平材（梁）は
-///   柱面間距離（`len` から両端の柱フェース距離を引いた、負にならない範囲）、鉛直材（柱）は
+///   §1.8: 自重算定長 L は、Concrete 材料で `mat.fc` のある RC/SRC の Girder 用途は
+///   柱面間距離（非正の控除後長さはエラー）、鉛直材（柱）は
 ///   床上面から床上面まで（＝節点間距離。フェイス控除しない）、鋼材（S 梁・柱）は
 ///   節点間距離（RC/SRC 大梁は柱面間距離、
 ///   RC/SRC 柱は床上面から床上面、S 梁・柱は節点間距離）。
@@ -220,7 +220,6 @@ pub(crate) fn enumerate_self_weight(
     let mut items = Vec::new();
     let node_adj = node_adjacency(model);
     let beam_pairs = beam_pair_map(model);
-    let faces = sepika_core::face_distance::face_distances(model);
     for (elem_idx, elem) in model.elements.iter().enumerate() {
         if matches!(elem.kind, ElementKind::Beam | ElementKind::Brace { .. })
             && elem.nodes.len() >= 2
@@ -270,9 +269,13 @@ pub(crate) fn enumerate_self_weight(
                 } else {
                     None
                 };
-                let eff_len = if is_concrete && !is_vertical {
-                    let [fi, fj] = faces[elem_idx];
-                    (len - fi - fj).max(0.0)
+                let eff_len = if is_concrete
+                    && mat.category == sepika_core::model::MaterialCategory::Concrete
+                    && sec.frame_use == Some(sepika_core::model::FrameSectionUse::Girder)
+                {
+                    let [a, b] =
+                        sepika_core::face_distance::girder_self_weight_interval(model, elem)?;
+                    b - a
                 } else {
                     len
                 };

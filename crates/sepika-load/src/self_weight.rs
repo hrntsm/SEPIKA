@@ -191,11 +191,118 @@ mod tests {
         }
     }
 
+    #[test]
+    fn rc_src大梁5400とs大梁6000はdlと重量列挙で共通し物理質量を変えない() {
+        use crate::story_gen::{enumerate_self_weight, SelfWeightItem};
+        use sepika_core::model::FrameSectionUse;
+        let mut girder = rc_section(240000.0, 400.0, 700.0);
+        girder.frame_use = Some(FrameSectionUse::Girder);
+        let mut column = rc_section(0.0, 600.0, 600.0);
+        column.id = SectionId(1);
+        column.frame_use = Some(FrameSectionUse::Column);
+        column.shape = Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
+            width: 600.0,
+            thick: 600.0,
+        });
+        let mut cross = girder.clone();
+        cross.id = SectionId(2);
+        cross.area = 0.0;
+        cross.depth = 900.0;
+        let mut model = Model {
+            nodes: vec![
+                simple_node(0, [0.0, 0.0, 3000.0]),
+                simple_node(1, [6000.0, 0.0, 3000.0]),
+                simple_node(2, [0.0, 0.0, 0.0]),
+                simple_node(3, [6000.0, 0.0, 0.0]),
+                simple_node(4, [0.0, 4000.0, 3000.0]),
+            ],
+            elements: vec![
+                beam_elem(0, 0, 1),
+                beam_elem(1, 2, 0),
+                beam_elem(2, 3, 1),
+                beam_elem(3, 0, 4),
+            ],
+            sections: vec![girder, column, cross],
+            materials: vec![rc_material()],
+            ..Default::default()
+        };
+        for elem in &mut model.elements[1..3] {
+            elem.section = Some(SectionId(1));
+            elem.local_axis.ref_vector = [1.0, 0.0, 0.0];
+        }
+        model.elements[3].section = Some(SectionId(2));
+        for structure in ["RC", "SRC", "S"] {
+            let steel = structure == "S";
+            model.sections[0].shape = if structure == "SRC" {
+                use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
+                Some(SectionShape::SrcBeamRect {
+                    b: 400.0,
+                    d: 600.0,
+                    rebar: RcBeamRebar {
+                        main_dia: 22.0,
+                        top: vec![3],
+                        bottom: vec![3],
+                        cover: 40.0,
+                        stirrup: BeamStirrup {
+                            dia: 10.0,
+                            pitch: 100.0,
+                            legs: 2,
+                        },
+                    },
+                    steel_height: 300.0,
+                    steel_width: 200.0,
+                    steel_web_thick: 10.0,
+                    steel_flange_thick: 20.0,
+                })
+            } else {
+                None
+            };
+            if steel {
+                model.materials[0].fc = Some(24.0);
+                model.materials[0].category = MaterialCategory::Steel;
+                model.materials[0].density = 7.85e-9;
+            }
+            let cfg = LoadCfg::default();
+            let items = enumerate_self_weight(&model, &cfg).unwrap();
+            let SelfWeightItem::Line {
+                load,
+                mass_equiv,
+                matrix_mass_equiv,
+                ..
+            } = &items[0]
+            else {
+                panic!("大梁の自重");
+            };
+            let expected_len = if steel { 6000.0 } else { 5400.0 };
+            let weight =
+                model.materials[0].design_unit_weight_n_per_mm3() * 240000.0 * expected_len;
+            assert!((load - weight).abs() < 1e-8);
+            let physical = model
+                .element_mass_properties(&model.elements[0])
+                .unwrap()
+                .mass_per_length
+                * 6000.0
+                * GRAVITY_MM_S2;
+            assert!((mass_equiv - physical).abs() < 1e-8);
+            assert!((matrix_mass_equiv - physical).abs() < 1e-8);
+            let (_, loads) = self_weight_case_content(&model, &cfg).unwrap();
+            let dl: f64 = loads
+                .iter()
+                .filter(|l| l.elem == ElemId(0))
+                .map(|l| match l.kind {
+                    MemberLoadKind::Distributed { a, b, w1, w2 } => (b - a) * (w1 + w2) / 2.0,
+                    MemberLoadKind::Point { p, .. } => p,
+                })
+                .sum();
+            assert!((dl - weight).abs() < 1e-8);
+        }
+    }
+
     /// 柱1本＋梁1本のモデルで、柱は上端・下端の節点荷重（各 W/2、追加なし）、
     /// 梁は等分布部材荷重として生成され、合計が ρ·A·L·g と一致すること。
     #[test]
     fn test_self_weight_case_totals() {
-        let model = Model {
+        let mut model = Model {
             nodes: vec![
                 simple_node(0, [0.0, 0.0, 0.0]),
                 simple_node(1, [0.0, 0.0, 3000.0]),
@@ -208,6 +315,18 @@ mod tests {
             ..Default::default()
         };
 
+        model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+        model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
+            width: 400.0,
+            thick: 600.0,
+        });
+        let mut girder = model.sections[0].clone();
+        girder.id = SectionId(1);
+        girder.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+        girder.shape = None;
+        model.sections.push(girder);
+        model.elements[1].section = Some(SectionId(1));
+        model.elements[0].local_axis.ref_vector = [1.0, 0.0, 0.0];
         let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
 
         // 柱は節点荷重（上下 1/2 ずつ、追加なし）。梁は等分布部材荷重。
