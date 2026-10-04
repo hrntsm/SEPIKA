@@ -966,7 +966,7 @@ mod tests {
             height: 300.0,
             width: 300.0,
             thick: 12.0,
-            corner_r: 30.0,
+            corner_r: Some(30.0),
         };
         let sec = shape.to_section(SectionId(0), "BOX-300x300x12".to_string());
         let mat_v = mat("SN400");
@@ -1004,8 +1004,7 @@ mod tests {
         );
     }
 
-    /// 角形鋼管の角部外半径が未入力（r=0。名前推定フォールバック含む）の場合は
-    /// 角部を直角とみなし Ay=2t(H−2t) となる。
+    /// 形状なし断面の名称推定経路は直角式 Ay=2t(H−2t) を維持する。
     #[test]
     fn test_beam_check_shear_box_r_zero_falls_back_to_sharp_corner() {
         let mut sec = rect_section(300.0, 300.0, "BOX-300x300x12");

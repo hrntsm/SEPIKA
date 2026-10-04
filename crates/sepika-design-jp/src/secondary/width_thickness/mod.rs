@@ -57,6 +57,7 @@ mod tests {
     #[test]
     fn test_max_width_thickness_steel_h() {
         let shape = SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 300.0,
             width: 200.0,
             web_thick: 10.0,
@@ -71,6 +72,7 @@ mod tests {
     #[test]
     fn test_max_width_thickness_steel_h_portal_frame_column() {
         let shape = SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 300.0,
             width: 300.0,
             web_thick: 10.0,
@@ -87,7 +89,7 @@ mod tests {
             height: 200.0,
             width: 150.0,
             thick: 9.0,
-            corner_r: 0.0,
+            corner_r: Some(0.0),
         };
         let wt = max_width_thickness(&shape).unwrap();
         assert!(
@@ -166,6 +168,7 @@ mod tests {
     #[test]
     fn test_max_width_thickness_zero_thickness_is_none() {
         let shape = SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 300.0,
             width: 200.0,
             web_thick: 0.0,
@@ -181,7 +184,7 @@ mod tests {
             height: 200.0,
             width: 150.0,
             thick: -9.0,
-            corner_r: 0.0,
+            corner_r: Some(0.0),
         };
         assert!(max_width_thickness(&shape).is_none());
     }
@@ -193,6 +196,7 @@ mod tests {
     /// は height=220, flange_thick=10, web_thick=60 で 200/60≈3.33（常に FA）。
     fn steel_h_flange_only(width: f64) -> SectionShape {
         SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 220.0,
             width,
             web_thick: 60.0,
@@ -227,6 +231,7 @@ mod tests {
     #[test]
     fn test_s_member_rank_by_kihon_h_worst_of_flange_and_web() {
         let shape = SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 400.0,
             width: 200.0,
             web_thick: 8.0,
@@ -248,7 +253,7 @@ mod tests {
                 height,
                 width: height,
                 thick: 10.0,
-                corner_r: 0.0,
+                corner_r: Some(0.0),
             };
             let rank =
                 s_member_rank_by_kihon(&shape, SteelMemberUse::Column, "BCR295").expect("Some");
@@ -266,7 +271,7 @@ mod tests {
             height: 400.0,
             width: 1000.0, // 幅は d の算定に使わないことを示すため、あえて全く違う値にする
             thick: 12.0,
-            corner_r: 0.0,
+            corner_r: Some(0.0),
         };
         let rank = s_member_rank_by_kihon(&shape, SteelMemberUse::Column, "STKR400").expect("Some");
         assert_eq!(rank, MemberRank::FB);
@@ -302,7 +307,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
-            corner_r: 0.0,
+            corner_r: Some(0.0),
         };
         let column_box_rank =
             s_member_rank_by_kihon(&box_shape, SteelMemberUse::Column, "STKR400").unwrap();
@@ -318,9 +323,10 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 12.0,
-            corner_r: 0.0,
+            corner_r: Some(0.0),
         };
         let cft_box = SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 12.0,
@@ -352,6 +358,7 @@ mod tests {
     #[test]
     fn test_s_member_rank_by_kihon_high_strength_over_325_tightens_limit() {
         let shape = SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 220.0, // web_clear=200, web=200/60≈3.33 で常に FA
             width: 158.0,  // (158/2)/10 = 7.9
             web_thick: 60.0,

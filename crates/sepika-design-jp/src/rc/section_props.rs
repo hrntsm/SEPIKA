@@ -366,6 +366,7 @@ mod tests {
         assert!(axis_props_from_shape(&unset_beam, RcDirection::Weak, true).is_none());
 
         let steel = SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 500.0,
             width: 200.0,
             web_thick: 9.0,

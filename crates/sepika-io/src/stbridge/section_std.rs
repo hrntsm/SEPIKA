@@ -171,13 +171,20 @@ fn steel_rank(entry: &str) -> u8 {
 }
 
 /// H 形鋼の形鋼図形名と `StbSecSteel` エントリ（鋼断面・SRC 内蔵鉄骨で共用）。
-fn h_figure(height: f64, width: f64, web_thick: f64, flange_thick: f64) -> (String, String) {
+fn h_figure(
+    height: f64,
+    width: f64,
+    web_thick: f64,
+    flange_thick: f64,
+    root_r: f64,
+) -> (String, String) {
     let name = format!(
-        "H-{}x{}x{}x{}",
+        "H-{}x{}x{}x{}r{}",
         num(height),
         num(width),
         num(web_thick),
-        num(flange_thick)
+        num(flange_thick),
+        num(root_r)
     );
     let body = format!(
         "<StbSecRoll-H name=\"{}\" type=\"H\" A=\"{}\" B=\"{}\" t1=\"{}\" t2=\"{}\" r=\"{}\"/>",
@@ -186,13 +193,13 @@ fn h_figure(height: f64, width: f64, web_thick: f64, flange_thick: f64) -> (Stri
         num(width),
         num(web_thick),
         num(flange_thick),
-        num(flange_thick)
+        num(root_r)
     );
     (name, body)
 }
 
 /// 角形鋼管の形鋼図形名と `StbSecSteel` エントリ。
-/// `corner_r > 0` ならその値を r 属性に出力し、そうでなければ板厚を出力する。
+/// 正の外角半径を r 属性に出力する。
 fn box_figure(height: f64, width: f64, thick: f64, corner_r: f64) -> (String, String) {
     let name = if corner_r > 0.0 {
         format!(
@@ -205,7 +212,7 @@ fn box_figure(height: f64, width: f64, thick: f64, corner_r: f64) -> (String, St
     } else {
         format!("BOX-{}x{}x{}", num(height), num(width), num(thick))
     };
-    let r = if corner_r > 0.0 { corner_r } else { thick };
+    let r = corner_r;
     let body = format!(
         "<StbSecRoll-BOX name=\"{}\" type=\"ELSE\" A=\"{}\" B=\"{}\" t=\"{}\" r=\"{}\"/>",
         esc(&name),
@@ -238,13 +245,14 @@ fn steel_figure(shape: &SectionShape) -> Option<(String, String)> {
             width,
             web_thick,
             flange_thick,
-        } => Some(h_figure(height, width, web_thick, flange_thick)),
+            root_r,
+        } => Some(h_figure(height, width, web_thick, flange_thick, root_r?)),
         SectionShape::SteelBox {
             height,
             width,
             thick,
             corner_r,
-        } => Some(box_figure(height, width, thick, corner_r)),
+        } => Some(box_figure(height, width, thick, corner_r?)),
         SectionShape::SteelPipe { outer_dia, thick } => Some(pipe_figure(outer_dia, thick)),
         SectionShape::SteelAngle {
             leg_a,
@@ -741,7 +749,8 @@ fn cft_figure(shape: &SectionShape, steel: &mut SteelLibrary) -> Option<String> 
             height,
             width,
             thick,
-        } => box_figure(height, width, thick, 0.0),
+            corner_r,
+        } => box_figure(height, width, thick, corner_r?),
         SectionShape::CftPipe { outer_dia, thick } => pipe_figure(outer_dia, thick),
         _ => return None,
     };
@@ -792,6 +801,7 @@ fn src_steel_figure(shape: &SectionShape, steel: &mut SteelLibrary) -> Option<St
                 steel_height,
                 steel_width,
                 steel_web_thick,
+                steel_flange_thick,
                 steel_flange_thick,
             );
             steel.add(&name, body);
@@ -1083,6 +1093,24 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
 
     for sec in &model.sections {
         let base = sec.id.0;
+        if let Some(shape) = &sec.shape {
+            shape.validate_surface_radius().map_err(|error| {
+                super::StbError::Unmappable(format!("断面 {}: {error}", sec.name))
+            })?;
+            let radius = match shape {
+                SectionShape::SteelH { root_r, .. } => Some(root_r),
+                SectionShape::SteelBox { corner_r, .. } | SectionShape::CftBox { corner_r, .. } => {
+                    Some(corner_r)
+                }
+                _ => None,
+            };
+            if radius.is_some_and(|r| !r.is_some_and(|v| v > 0.0)) {
+                return Err(super::StbError::Unmappable(format!(
+                    "断面 {} の未知または0の半径はST-Bridge圧延断面で表現できません",
+                    sec.name
+                )));
+            }
+        }
         if wall_only_sections.contains(&base) && sec.thickness.is_some() && sec.shape.is_none() {
             continue;
         }

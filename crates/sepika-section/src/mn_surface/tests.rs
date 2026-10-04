@@ -181,6 +181,7 @@ fn test_slice_at_n_symmetric() {
 fn test_steel_h_plastic_moment() {
     // H-400×200×8×13 の Mp ≈ fy × Zp（Zp = 手計算）
     let shape = SectionShape::SteelH {
+        root_r: Some(0.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,

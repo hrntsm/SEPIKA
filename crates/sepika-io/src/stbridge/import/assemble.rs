@@ -1551,11 +1551,12 @@ fn build_sections(
                             height,
                             width,
                             thick,
-                            ..
+                            corner_r,
                         } => Some(SectionShape::CftBox {
                             height,
                             width,
                             thick,
+                            corner_r,
                         }),
                         SectionShape::SteelPipe { outer_dia, thick } => {
                             Some(SectionShape::CftPipe { outer_dia, thick })
@@ -1587,7 +1588,18 @@ fn build_sections(
                             width,
                             web_thick,
                             flange_thick,
+                            ..
                         } => Some((height, width, web_thick, flange_thick)),
+                        SectionShape::SteelBuiltH {
+                            height,
+                            upper_width,
+                            upper_thick,
+                            lower_width,
+                            lower_thick,
+                            web_thick,
+                        } if upper_width == lower_width && upper_thick == lower_thick => {
+                            Some((height, upper_width, web_thick, upper_thick))
+                        }
                         _ => None,
                     });
                 if steel_dims.is_none() {

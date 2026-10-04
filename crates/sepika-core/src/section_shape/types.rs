@@ -13,15 +13,16 @@ pub enum SectionShape {
         width: f64,
         web_thick: f64,
         flange_thick: f64,
+        /// 被覆外周用のルートフィレット半径 [mm]。None は未知、Some(0) は明示した直角。
+        root_r: Option<f64>,
     },
     /// Steel rectangular hollow section / box (角形鋼管).
     SteelBox {
         height: f64,
         width: f64,
         thick: f64,
-        /// 角部外半径 r [mm]。0 は角部を直角とみなす。
-        #[serde(default)]
-        corner_r: f64,
+        /// 被覆外周用の角部外半径 [mm]。None は未知、Some(0) は明示した直角。
+        corner_r: Option<f64>,
     },
     /// Steel L‑angle (山形鋼).
     SteelAngle { leg_a: f64, leg_b: f64, thick: f64 },
@@ -104,7 +105,13 @@ pub enum SectionShape {
         steel_flange_thick: f64,
     },
     /// CFT 角形（角形鋼管 + 充填コンクリート）。検定では `Material.fc` の充填コンクリート強度を用いる。
-    CftBox { height: f64, width: f64, thick: f64 },
+    CftBox {
+        height: f64,
+        width: f64,
+        thick: f64,
+        /// 被覆外周用の角部外半径 [mm]。None は未知、Some(0) は明示した直角。
+        corner_r: Option<f64>,
+    },
     /// CFT 円形（円形鋼管 + 充填コンクリート）。
     CftPipe { outer_dia: f64, thick: f64 },
     /// RC 耐震壁（壁エレメント用）。

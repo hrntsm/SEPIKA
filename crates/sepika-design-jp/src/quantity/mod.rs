@@ -366,6 +366,7 @@ fn cft_infill_area(shape: &SectionShape) -> Option<f64> {
             height,
             width,
             thick,
+            ..
         } => Some(((width - 2.0 * thick) * (height - 2.0 * thick)).max(0.0)),
         SectionShape::CftPipe { outer_dia, thick } => {
             let ri = (outer_dia / 2.0 - thick).max(0.0);

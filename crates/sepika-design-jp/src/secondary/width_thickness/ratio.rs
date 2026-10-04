@@ -23,6 +23,7 @@ pub fn max_width_thickness(shape: &SectionShape) -> Option<f64> {
             width,
             web_thick,
             flange_thick,
+            ..
         } => {
             let flange = ratio(width, 2.0 * flange_thick)?;
             let web = ratio(height - 2.0 * flange_thick, web_thick)?;
@@ -81,6 +82,7 @@ pub fn max_width_thickness(shape: &SectionShape) -> Option<f64> {
             height,
             width,
             thick,
+            ..
         } => {
             let hi = ratio(height - 2.0 * thick, thick)?;
             let wi = ratio(width - 2.0 * thick, thick)?;

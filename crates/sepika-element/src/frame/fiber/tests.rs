@@ -92,6 +92,7 @@ fn beamとfiberは同じ断面なら整合質量が一致する() {
 #[test]
 fn cftの鋼管fyはsteel_materialの板厚区分を使う() {
     let shape = SectionShape::CftBox {
+        corner_r: Some(0.0),
         height: 400.0,
         width: 400.0,
         thick: 16.0,
@@ -121,6 +122,7 @@ fn 有効断面性能を使うbeamとfiberのphiと整合質量が一致する()
 
     let mut model = build_test_model(Some(78846.15));
     model.sections[0].shape = Some(SectionShape::CftBox {
+        corner_r: Some(0.0),
         height: 260.0,
         width: 180.0,
         thick: 12.0,
@@ -199,6 +201,7 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
         ),
         (
             SectionShape::CftBox {
+                corner_r: Some(0.0),
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
@@ -428,6 +431,7 @@ fn cftファイバーは鋼管と充填コンクリートの初期接線を分�
 
     let mut model = build_test_model(Some(190000.0));
     model.sections[0].shape = Some(SectionShape::CftBox {
+        corner_r: Some(0.0),
         height: 400.0,
         width: 300.0,
         thick: 12.0,
@@ -3358,7 +3362,7 @@ fn test_steel_box_fibers_are_hollow() {
         height: 400.0,
         width: 400.0,
         thick: 12.0,
-        corner_r: 0.0,
+        corner_r: Some(0.0),
     };
     let (sec, mats) = build_gauss_fibers(
         400.0,

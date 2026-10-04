@@ -24,6 +24,7 @@ impl SectionShape {
                 width,
                 web_thick,
                 flange_thick,
+                ..
             } => (
                 height,
                 width,
@@ -40,6 +41,7 @@ impl SectionShape {
                 height,
                 width,
                 thick,
+                ..
             } => (
                 height,
                 width,

@@ -153,6 +153,9 @@ impl EditCommand for AddSectionShape {
             return Box::new(Noop);
         }
         let mut candidate = self.shape.to_section(self.new_id, self.name.clone());
+        if self.shape.validate_surface_radius().is_err() {
+            return Box::new(Noop);
+        }
         candidate.frame_use = self.frame_use;
         if !candidate.cft_frame_use_allowed() {
             return Box::new(Noop);
@@ -186,8 +189,49 @@ pub struct EditSectionShape {
     pub frame_use: Option<sepika_core::model::FrameSectionUse>,
 }
 
+/// 被覆外周用半径のみを変更し、断面性能・材料・用途は維持する。
+pub struct SetSectionSurfaceRadius {
+    pub section: SectionId,
+    pub radius_mm: Option<f64>,
+}
+
+impl EditCommand for SetSectionSurfaceRadius {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let Some(section) = model.sections.get_mut(self.section.index()) else {
+            return Box::new(Noop);
+        };
+        if section.id != self.section {
+            return Box::new(Noop);
+        }
+        let old = section.clone();
+        let Some(mut shape) = section.shape.clone() else {
+            return Box::new(Noop);
+        };
+        match &mut shape {
+            sepika_section::shape::SectionShape::SteelH { root_r, .. } => *root_r = self.radius_mm,
+            sepika_section::shape::SectionShape::SteelBox { corner_r, .. }
+            | sepika_section::shape::SectionShape::CftBox { corner_r, .. } => {
+                *corner_r = self.radius_mm
+            }
+            _ => return Box::new(Noop),
+        }
+        if shape.validate_surface_radius().is_err() {
+            return Box::new(Noop);
+        }
+        section.shape = Some(shape);
+        Box::new(RestoreSection { old })
+    }
+
+    fn label(&self) -> &str {
+        "被覆外周用半径変更"
+    }
+}
+
 impl EditCommand for EditSectionShape {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if self.new_shape.validate_surface_radius().is_err() {
+            return Box::new(Noop);
+        }
         let non_frame = matches!(
             &self.new_shape,
             sepika_section::shape::SectionShape::RcWall { .. }

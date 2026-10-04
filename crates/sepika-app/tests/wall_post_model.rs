@@ -84,6 +84,7 @@ fn wall_post_model() -> Model {
 
     // 断面: 柱 H-300x300、梁 H-400x200（鋼）、壁 RC t=150、間柱 H-200x100。
     let mut col_section = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 300.0,
         width: 300.0,
         web_thick: 10.0,
@@ -93,6 +94,7 @@ fn wall_post_model() -> Model {
     col_section.frame_use = Some(FrameSectionUse::Column);
     model.sections.push(col_section);
     let mut beam_section = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,
@@ -109,6 +111,7 @@ fn wall_post_model() -> Model {
     wall_sec.material = Some(MaterialId(1));
     model.sections.push(wall_sec);
     let mut post_section = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 200.0,
         width: 100.0,
         web_thick: 6.0,

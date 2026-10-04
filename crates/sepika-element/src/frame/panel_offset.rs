@@ -248,6 +248,7 @@ mod tests {
             panel_thickness: None,
             thickness: None,
             shape: Some(SectionShape::SteelH {
+                root_r: Some(0.0),
                 height: 400.0,
                 width: 400.0,
                 web_thick: 13.0,

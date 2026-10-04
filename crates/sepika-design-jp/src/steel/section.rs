@@ -48,6 +48,7 @@ pub(crate) fn steel_lateral_buckling_i_af(sec: &Section, tf: f64, tw: f64) -> (f
             width,
             web_thick,
             flange_thick,
+            ..
         }) => {
             let i = steel_i_t(*width, *flange_thick, *height, *web_thick);
             (i, width * flange_thick)

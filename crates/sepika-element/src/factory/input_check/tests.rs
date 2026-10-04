@@ -309,6 +309,7 @@ fn test_issue_when_shapeless_member_lacks_positive_strength() {
 /// H 形鋼断面を持つ部材の断面（鋼材ファイバ領域あり）。
 fn steel_h_section() -> Section {
     SectionShape::SteelH {
+        root_r: Some(0.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,

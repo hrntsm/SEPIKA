@@ -20,6 +20,7 @@ mod label;
 mod material;
 mod properties;
 mod shear;
+mod surface;
 mod types;
 
 #[cfg(test)]

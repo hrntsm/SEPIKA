@@ -170,12 +170,14 @@ fn wall_bay_model() -> Model {
 
     // 断面: 柱 H-300x300、梁 H-400x200（鋼、SN400B）。
     let col_shape = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 300.0,
         width: 300.0,
         web_thick: 10.0,
         flange_thick: 15.0,
     };
     let beam_shape = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,
@@ -579,6 +581,7 @@ fn rotated_src_and_cft_side_columns_run_linear_analysis() {
             .clone();
         let shape = if cft {
             SectionShape::CftBox {
+                corner_r: Some(32.0),
                 height: 700.0,
                 width: 500.0,
                 thick: 20.0,

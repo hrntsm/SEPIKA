@@ -65,12 +65,14 @@ fn representative_model() -> Model {
     m.materials.push(sn400b(0));
     // 柱用・梁用で別断面（共有断面の分割を避け、意味的往復を単純化）。
     let col_h = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 300.0,
         width: 300.0,
         web_thick: 10.0,
         flange_thick: 15.0,
     };
     let beam_h = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,
@@ -405,6 +407,7 @@ fn ensure_material(
 fn test_standard_mode_steel_column() {
     let mut m = frame_nodes();
     let h = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,
@@ -419,17 +422,92 @@ fn test_standard_mode_steel_column() {
     assert!(xml.contains("<StbSecColumn_S "), "鋼柱は StbSecColumn_S");
     assert!(xml.contains("<StbSecSteel>"), "形鋼ライブラリを出す");
     assert!(
-        xml.contains("<StbSecRoll-H name=\"H-400x200x8x13\""),
+        xml.contains("<StbSecRoll-H name=\"H-400x200x8x13r13\""),
         "H 形鋼図形が定義される: {xml}"
     );
     assert!(
-        xml.contains("shape=\"H-400x200x8x13\""),
+        xml.contains("shape=\"H-400x200x8x13r13\""),
         "断面が図形名を参照する"
     );
     assert!(
         !xml.contains("<StbSecRaw "),
         "形状がある鋼断面は Raw にしない"
     );
+}
+
+#[test]
+fn surface_radius_export_rejects_unknown_zero_and_invalid() {
+    for radius in [
+        None,
+        Some(0.0),
+        Some(-1.0),
+        Some(151.0),
+        Some(f64::NAN),
+        Some(f64::INFINITY),
+    ] {
+        for shape in [
+            SectionShape::SteelH {
+                height: 400.0,
+                width: 200.0,
+                web_thick: 8.0,
+                flange_thick: 13.0,
+                root_r: radius,
+            },
+            SectionShape::SteelBox {
+                height: 400.0,
+                width: 300.0,
+                thick: 12.0,
+                corner_r: radius,
+            },
+            SectionShape::CftBox {
+                height: 400.0,
+                width: 300.0,
+                thick: 12.0,
+                corner_r: radius,
+            },
+        ] {
+            let mut model = frame_nodes();
+            push_section(
+                &mut model,
+                shape.to_section(SectionId(0), "半径出力拒否".into()),
+            );
+            assert!(matches!(
+                export_stbridge(&model),
+                Err(StbError::Unmappable(_))
+            ));
+        }
+    }
+}
+
+#[test]
+fn h_radii_roundtrip_and_missing_radius_stays_unknown() {
+    let mut model = frame_nodes();
+    for (index, r) in [13.0, 20.0].into_iter().enumerate() {
+        let shape = SectionShape::SteelH {
+            height: 400.0,
+            width: 200.0,
+            web_thick: 8.0,
+            flange_thick: 13.0,
+            root_r: Some(r),
+        };
+        push_section(
+            &mut model,
+            shape.to_section(SectionId(index as u32), format!("H{index}")),
+        );
+        model
+            .elements
+            .push(member(index as u32, true, index as u32));
+    }
+    let xml = export_stbridge(&model).unwrap();
+    let loaded = import_stbridge(&xml).unwrap();
+    for index in 0..2 {
+        assert_eq!(loaded.sections[index].shape, model.sections[index].shape);
+    }
+    let missing = import_stbridge(&xml.replace(" r=\"13\"", "")).unwrap();
+    let shape = missing.sections[0].shape.as_ref().unwrap();
+    assert!(matches!(shape, SectionShape::SteelH { root_r: None, .. }));
+    assert!(shape.coating_surface_perimeter().is_err());
+    assert!(export_stbridge(&missing).is_err());
 }
 
 /// 標準モード: RC 矩形が梁として使われると StbSecBeam_RC（幾何）で出力される。
@@ -458,6 +536,7 @@ fn test_standard_mode_rc_beam() {
 fn test_standard_mode_shared_section_split() {
     let mut m = frame_nodes();
     let h = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 300.0,
         width: 150.0,
         web_thick: 6.5,
@@ -518,6 +597,7 @@ fn test_standard_mode_fallback_raw_for_shapeless() {
 fn test_standard_import_roundtrip_steel_and_rc() {
     let mut m = frame_nodes();
     let h = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,
@@ -999,6 +1079,7 @@ fn test_import_rc_without_bar_arrangement_uses_default() {
 fn test_standard_import_recovers_split_shared_section() {
     let mut m = frame_nodes();
     let h = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 300.0,
         width: 150.0,
         web_thick: 6.5,
@@ -1662,7 +1743,7 @@ fn test_standard_roundtrip_built_h() {
     );
 }
 
-/// import: `StbSecBuild-H`（下フランジ属性なし＝第三者の対称 H）は `SteelH` として読む。
+/// import: 対称組立 H も板組輪郭として保持する。
 #[test]
 fn test_import_symmetric_build_h_is_steel_h() {
     let xml = r#"<?xml version="1.0"?>
@@ -1686,11 +1767,13 @@ fn test_import_symmetric_build_h_is_steel_h() {
     let m = import_stbridge(xml).expect("import");
     assert_eq!(
         m.sections[0].shape,
-        Some(SectionShape::SteelH {
+        Some(SectionShape::SteelBuiltH {
             height: 400.0,
-            width: 200.0,
+            upper_width: 200.0,
+            lower_width: 200.0,
             web_thick: 8.0,
-            flange_thick: 12.0
+            upper_thick: 12.0,
+            lower_thick: 12.0,
         }),
         "下フランジ属性がなければ対称 H"
     );
@@ -1707,13 +1790,13 @@ fn test_standard_roundtrip_steel_box_distinct_corner_r() {
         height: 300.0,
         width: 300.0,
         thick: 12.0,
-        corner_r: 30.0,
+        corner_r: Some(30.0),
     };
     let without_r = SectionShape::SteelBox {
         height: 300.0,
         width: 300.0,
         thick: 12.0,
-        corner_r: 0.0,
+        corner_r: Some(20.0),
     };
     push_section(&mut m, with_r.to_section(SectionId(0), "BOX-R30".into()));
     push_section(&mut m, without_r.to_section(SectionId(1), "BOX-R0".into()));
@@ -1728,23 +1811,10 @@ fn test_standard_roundtrip_steel_box_distinct_corner_r() {
         back.sections[0].shape, m.sections[0].shape,
         "corner_r=30 の断面が自身の r を保って往復"
     );
-    // corner_r=0 は ST-Bridge スキーマ（r は正値必須）の制約で便宜値 r=t として
-    // 出力されるため、再取り込みでは corner_r=t になる（既存仕様）。ここで
-    // 検証するのは「同寸別 r の断面（corner_r=30）の値に化けない」こと。
-    match back.sections[1].shape {
-        Some(SectionShape::SteelBox {
-            corner_r, thick, ..
-        }) => {
-            assert_eq!(
-                corner_r, thick,
-                "corner_r=0 の断面は便宜値 r=t のまま（別断面の r=30 に化けない）"
-            );
-        }
-        ref other => panic!("SteelBox のはず: {:?}", other),
-    }
+    assert_eq!(back.sections[1].shape, m.sections[1].shape);
 }
 
-/// import: `r` 属性がない `StbSecRoll-BOX` は角部直角（corner_r=0.0）として読む。
+/// import: 欠落した外角半径は未知のまま保持する。
 #[test]
 fn test_import_box_without_r_attr_is_corner_r_zero() {
     let xml = r#"<?xml version="1.0"?>
@@ -1772,9 +1842,9 @@ fn test_import_box_without_r_attr_is_corner_r_zero() {
             height: 300.0,
             width: 300.0,
             thick: 12.0,
-            corner_r: 0.0,
+            corner_r: None,
         }),
-        "r 属性がなければ角部直角（corner_r=0.0）"
+        "r 属性がなければ未知"
     );
 }
 
@@ -1796,6 +1866,7 @@ fn test_standard_roundtrip_cft_box() {
         fy: None,
     });
     let shape = SectionShape::CftBox {
+        corner_r: Some(32.0),
         height: 400.0,
         width: 400.0,
         thick: 16.0,
@@ -1806,6 +1877,14 @@ fn test_standard_roundtrip_cft_box() {
     sec.steel_material = Some(MaterialId(0));
     m.sections.push(sec);
     m.elements.push(member(0, true, 0)); // 柱
+    let mut second = m.sections[0].clone();
+    second.id = SectionId(1);
+    second.name = "CFT2".into();
+    if let Some(SectionShape::CftBox { corner_r, .. }) = &mut second.shape {
+        *corner_r = Some(40.0);
+    }
+    m.sections.push(second);
+    m.elements.push(member(1, true, 1));
 
     let xml = export_stbridge(&m).unwrap();
     assert!(xml.contains("<StbSecColumn_CFT "), "CFT 柱要素: {xml}");
@@ -1815,11 +1894,11 @@ fn test_standard_roundtrip_cft_box() {
         "充填コンクリート材料: {xml}"
     );
     assert!(
-        xml.contains("StbSecSteelColumn_CFT_Same shape=\"BOX-400x400x16\" strength=\"SN400B\""),
+        xml.contains("StbSecSteelColumn_CFT_Same shape=\"BOX-400x400x16r32\" strength=\"SN400B\""),
         "鋼管材料: {xml}"
     );
     assert!(
-        !xml.contains("StbSecSteelColumn_CFT_Same shape=\"BOX-400x400x16\" strength_main="),
+        !xml.contains("StbSecSteelColumn_CFT_Same shape=\"BOX-400x400x16r32\" strength_main="),
         "CFT 鋼管に非標準属性を出力しない: {xml}"
     );
     let back = import_stbridge(&xml).expect("import");
@@ -1828,6 +1907,19 @@ fn test_standard_roundtrip_cft_box() {
         back.sections[0].shape, m.sections[0].shape,
         "CFT 角形が往復"
     );
+    assert_eq!(back.sections[1].shape, m.sections[1].shape);
+    let missing = import_stbridge(&xml.replace(" r=\"32\"", "")).unwrap();
+    assert!(matches!(
+        missing.sections[0].shape,
+        Some(SectionShape::CftBox { corner_r: None, .. })
+    ));
+    assert!(missing.sections[0]
+        .shape
+        .as_ref()
+        .unwrap()
+        .coating_surface_perimeter()
+        .is_err());
+    assert!(export_stbridge(&missing).is_err());
     assert_eq!(
         back.materials[back.sections[0].material.unwrap().index()].name,
         "Fc24"
@@ -1995,6 +2087,7 @@ fn test_standard_roundtrip_src_beam() {
 fn test_standard_unsupported_beam_shapes_fall_back_to_raw() {
     let mut m = frame_nodes();
     let cft = SectionShape::CftBox {
+        corner_r: Some(32.0),
         height: 300.0,
         width: 300.0,
         thick: 12.0,
@@ -2038,6 +2131,7 @@ fn test_standard_import_steel_library_order_independent() {
     // export は StbSecSteel を末尾に書き出す。これを import できることを確認する。
     let mut m = frame_nodes();
     let h = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 350.0,
         width: 175.0,
         web_thick: 7.0,
@@ -2164,6 +2258,7 @@ fn test_standard_writes_section_material() {
         fy: Some(325.0),
     });
     let h = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 300.0,
         width: 150.0,
         web_thick: 6.5,
@@ -3041,6 +3136,7 @@ fn test_import_stbsecbrace_s() {
 fn test_export_strips_illegal_control_chars() {
     let mut m = frame_nodes();
     let mut sec = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 300.0,
         width: 150.0,
         web_thick: 6.5,
@@ -3262,6 +3358,7 @@ fn test_secondary_members_roundtrip() {
 
     let mut m = frame_nodes();
     let h = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 300.0,
         width: 150.0,
         web_thick: 6.5,
@@ -3338,6 +3435,7 @@ fn test_export_secondary_post_uses_column_section_map() {
 
     let mut m = frame_nodes();
     let h = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 300.0,
         width: 150.0,
         web_thick: 6.5,
@@ -3388,6 +3486,7 @@ fn test_export_post_only_uses_column_section() {
 
     let mut m = frame_nodes();
     let mut section = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 300.0,
         width: 150.0,
         web_thick: 6.5,
@@ -3426,6 +3525,7 @@ fn test_export_errors_when_secondary_has_no_end_node() {
 
     let mut m = frame_nodes();
     let h = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 300.0,
         width: 150.0,
         web_thick: 6.5,

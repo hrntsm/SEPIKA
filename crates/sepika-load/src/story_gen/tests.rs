@@ -1235,6 +1235,7 @@ fn test_both_mass_methods_equal_with_steel_weight_factor() {
 /// 主材料は鋼材区分＋ `fc`。質量行列は鋼管と充填コンクリートを別領域で計上する。
 fn cft_column_model() -> Model {
     let shape = SectionShape::CftBox {
+        corner_r: Some(0.0),
         height: 400.0,
         width: 400.0,
         thick: 16.0,
@@ -4514,6 +4515,7 @@ fn rc_rect_shape() -> sepika_core::section_shape::SectionShape {
 
 fn steel_h_shape() -> sepika_core::section_shape::SectionShape {
     sepika_core::section_shape::SectionShape::SteelH {
+        root_r: Some(0.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,

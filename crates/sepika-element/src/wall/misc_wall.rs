@@ -792,6 +792,7 @@ mod tests {
         let frame_section = |model: &mut Model, mat: MaterialId| -> SectionId {
             let id = SectionId(model.sections.len() as u32);
             let mut sec = SectionShape::SteelH {
+                root_r: Some(0.0),
                 height: 400.0,
                 width: 200.0,
                 web_thick: 8.0,

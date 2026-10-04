@@ -485,6 +485,7 @@ fn src_shape() -> sepika_core::section_shape::SectionShape {
 /// 診断用の CFT 角形断面。
 fn cft_shape() -> sepika_core::section_shape::SectionShape {
     sepika_core::section_shape::SectionShape::CftBox {
+        corner_r: Some(0.0),
         height: 400.0,
         width: 400.0,
         thick: 16.0,
@@ -578,6 +579,7 @@ fn test_model_issues_warns_cft_composite_fallback_for_zero_core() {
     let mut model = make_cantilever_model();
     // 板厚 200 で内法（400 − 2×200）が 0 になる CFT 角形断面。
     model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::CftBox {
+        corner_r: Some(0.0),
         height: 400.0,
         width: 400.0,
         thick: 200.0,

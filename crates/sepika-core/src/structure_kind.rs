@@ -242,6 +242,7 @@ mod tests {
 
     fn h_shape() -> SectionShape {
         SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 400.0,
             width: 200.0,
             web_thick: 8.0,
@@ -254,7 +255,7 @@ mod tests {
             height: 400.0,
             width: 400.0,
             thick: 16.0,
-            corner_r: 0.0,
+            corner_r: Some(0.0),
         }
     }
 
@@ -321,6 +322,7 @@ mod tests {
         );
 
         let cft = SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 16.0,

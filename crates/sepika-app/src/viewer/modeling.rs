@@ -1735,6 +1735,7 @@ mod tests {
     fn 塑性化域長は要素生成の既定と一致する() {
         // 断面せい 600mm → 既定 Lp = 300mm。
         let shape = SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 600.0,
             width: 200.0,
             web_thick: 11.0,

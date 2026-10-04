@@ -529,6 +529,7 @@ mod tests {
     #[test]
     fn collect_pca_checks_skips_non_rc_rect_shape() {
         let steel_shape = SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 700.0,
             width: 300.0,
             web_thick: 13.0,

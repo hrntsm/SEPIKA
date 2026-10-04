@@ -39,12 +39,14 @@ pub fn portal_frame() -> Model {
     }
 
     let col_shape = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 300.0,
         width: 300.0,
         web_thick: 10.0,
         flange_thick: 15.0,
     };
     let beam_shape = SectionShape::SteelH {
+        root_r: Some(13.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,

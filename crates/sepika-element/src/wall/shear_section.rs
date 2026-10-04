@@ -438,6 +438,7 @@ mod tests {
                 steel_flange_thick: 20.0,
             },
             SectionShape::CftBox {
+                corner_r: Some(0.0),
                 height: 800.0,
                 width: 600.0,
                 thick: 20.0,
@@ -466,7 +467,7 @@ mod tests {
             height: 600.0,
             width: 400.0,
             thick: 20.0,
-            corner_r: 0.0,
+            corner_r: Some(0.0),
         };
         let wall = section(&shape, 0.0);
         let strip = wall.strip(100.0, 1.0).unwrap();
@@ -480,6 +481,7 @@ mod tests {
     fn steel_shapes_have_positive_converged_union_properties() {
         for shape in [
             SectionShape::SteelH {
+                root_r: Some(0.0),
                 height: 600.0,
                 width: 300.0,
                 web_thick: 12.0,
@@ -489,7 +491,7 @@ mod tests {
                 height: 600.0,
                 width: 300.0,
                 thick: 12.0,
-                corner_r: 24.0,
+                corner_r: Some(24.0),
             },
             SectionShape::SteelAngle {
                 leg_a: 200.0,
