@@ -754,6 +754,7 @@ fn test_model_issues_warns_story_without_diaphragm() {
         level_kind: Default::default(),
         dynamic_mass: None,
         standard_floor_load: None,
+        column_finish_area_weight: 0.0,
     });
 
     let issues = model_issues(&model);
@@ -789,6 +790,7 @@ fn test_model_issues_errors_on_duplicate_story_names() {
         level_kind: Default::default(),
         dynamic_mass: None,
         standard_floor_load: None,
+        column_finish_area_weight: 0.0,
     };
     // 見た目で区別できない差（末尾の空白）でも同名として扱う。
     model.stories.push(story(0, "2F", 3000.0));
@@ -852,6 +854,7 @@ fn make_two_story_diaphragm_model(
                 level_kind: StoryLevelKind::Normal,
                 dynamic_mass: None,
                 standard_floor_load: None,
+                column_finish_area_weight: 0.0,
             },
             Story {
                 id: StoryId(1),
@@ -864,6 +867,7 @@ fn make_two_story_diaphragm_model(
                 level_kind: StoryLevelKind::Normal,
                 dynamic_mass: None,
                 standard_floor_load: None,
+                column_finish_area_weight: 0.0,
             },
         ],
         elements: vec![ElementData {
@@ -1205,6 +1209,7 @@ fn make_story_ratio_model(structures: &[StoryStructure]) -> Model {
         level_kind: StoryLevelKind::Normal,
         dynamic_mass: None,
         standard_floor_load: None,
+        column_finish_area_weight: 0.0,
     }];
     for (i, s) in structures.iter().enumerate() {
         let elev = (i as f64 + 1.0) * 1000.0;
@@ -1228,6 +1233,7 @@ fn make_story_ratio_model(structures: &[StoryStructure]) -> Model {
             level_kind: StoryLevelKind::Normal,
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         });
     }
     Model {
@@ -1272,6 +1278,7 @@ fn test_ground_elevation_from_basement_and_fallback() {
         level_kind: kind,
         dynamic_mass: None,
         standard_floor_load: None,
+        column_finish_area_weight: 0.0,
     };
     // 地下2層。各層の「床レベル + 深さ」がともに 0（GL）になる。
     // B2(-9000) B1(-5000, 深さ5000) B0(-1000, 深さ1000) 1F(3000)。
@@ -1337,6 +1344,7 @@ fn make_diaphragm_model(diaphragms: Vec<(NodeId, Option<f64>, Option<f64>)>) -> 
             level_kind: StoryLevelKind::Normal,
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         }],
         ..Default::default()
     };

@@ -251,6 +251,7 @@ mod tests {
             level_kind: sepika_core::model::StoryLevelKind::default(),
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         }
     }
 

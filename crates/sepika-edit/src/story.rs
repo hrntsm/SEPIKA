@@ -14,6 +14,31 @@ use crate::EditCommand;
 use sepika_core::ids::StoryId;
 use sepika_core::model::{Model, Story, StoryLevelKind};
 
+pub struct SetColumnFinishAreaWeight {
+    pub story: StoryId,
+    pub weight_n_per_mm2: f64,
+}
+
+impl EditCommand for SetColumnFinishAreaWeight {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if !self.weight_n_per_mm2.is_finite() || self.weight_n_per_mm2 < 0.0 {
+            return Box::new(crate::Noop);
+        }
+        let Some(story) = model.stories.iter_mut().find(|s| s.id == self.story) else {
+            return Box::new(crate::Noop);
+        };
+        let old = std::mem::replace(&mut story.column_finish_area_weight, self.weight_n_per_mm2);
+        Box::new(Self {
+            story: self.story,
+            weight_n_per_mm2: old,
+        })
+    }
+
+    fn label(&self) -> &str {
+        "RC/SRC柱の階共通仕上げ面重量変更"
+    }
+}
+
 /// 階の階名と階レベルを設定する（階種別は [`crate::SetStoryLevelKind`]）。
 ///
 /// 標高を変えると並び順の不変条件が崩れうるため、適用後に標高昇順へ並べ替え、
@@ -118,6 +143,7 @@ impl EditCommand for AddStory {
             level_kind: StoryLevelKind::default(),
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         });
         resort_and_renumber(model);
         Box::new(before)

@@ -652,8 +652,24 @@ pub fn compute_gravity_auto_load_cases(
 
     let (mut dl_nodal, mut dl_member) = slab_load_case_content(model, &dl_beam_loads);
     let load_cfg = model.load_cfg.clone().unwrap_or_default();
+    let initialized =
+        if model.stories.is_empty() && model.elements.iter().any(|e| model.is_rc_src_column(e)) {
+            let mut initial = model.clone();
+            initial.stories = sepika_load::story_gen::generate_stories_with_opts(
+                model,
+                &[],
+                false,
+                model.mass_method,
+            )
+            .map_err(crate::error::JobError::InvalidInput)?
+            .stories;
+            Some(initial)
+        } else {
+            None
+        };
+    let self_weight_model = initialized.as_ref().unwrap_or(model);
     let (sw_nodal, sw_member) =
-        sepika_load::self_weight::self_weight_case_content(model, &load_cfg)
+        sepika_load::self_weight::self_weight_case_content(self_weight_model, &load_cfg)
             .map_err(crate::error::JobError::InvalidInput)?;
     dl_nodal.extend(sw_nodal);
     dl_member.extend(sw_member);
@@ -1300,6 +1316,7 @@ mod tests {
             level_kind: Default::default(),
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         });
         model.stories.push(Story {
             id: StoryId(0),
@@ -1311,6 +1328,7 @@ mod tests {
             structure: Default::default(),
             level_kind: Default::default(),
             dynamic_mass: None,
+            column_finish_area_weight: 0.0,
             standard_floor_load: Some(StandardFloorLoad {
                 frame: 0.006,
                 ..Default::default()
@@ -1841,6 +1859,7 @@ mod tests {
             level_kind: Default::default(),
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         });
         let settings = AnalysisSettings {
             ai_mode: AiMode::SemiPrecise,

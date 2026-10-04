@@ -247,6 +247,26 @@ fn generate_stories_impl(
 
     let self_weight_items = if mode == SelfWeightMode::GravityCasesOnly {
         Vec::new()
+    } else if model.stories.is_empty() && model.elements.iter().any(|e| model.is_rc_src_column(e)) {
+        let mut initialized = model.clone();
+        initialized.stories = story_levels
+            .iter()
+            .enumerate()
+            .map(|(i, &elevation)| Story {
+                id: StoryId(i as u32),
+                name: sepika_core::model::default_story_name(i),
+                elevation,
+                node_ids: Vec::new(),
+                seismic_weight: None,
+                weight_override: None,
+                structure: Default::default(),
+                level_kind: Default::default(),
+                dynamic_mass: None,
+                standard_floor_load: None,
+                column_finish_area_weight: 0.0,
+            })
+            .collect();
+        enumerate_self_weight(&initialized, &load_cfg)?
     } else {
         enumerate_self_weight(model, &load_cfg)?
     };
@@ -628,6 +648,7 @@ fn generate_stories_impl(
             level_kind,
             dynamic_mass: Some(dynamic_mass),
             standard_floor_load: prev.and_then(|s| s.standard_floor_load),
+            column_finish_area_weight: prev.map_or(0.0, |s| s.column_finish_area_weight),
         });
     }
 

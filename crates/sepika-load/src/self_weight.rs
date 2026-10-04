@@ -231,6 +231,9 @@ mod tests {
             elem.local_axis.ref_vector = [1.0, 0.0, 0.0];
         }
         model.elements[3].section = Some(SectionId(2));
+        model.stories = crate::story_gen::generate_stories(&model, None)
+            .unwrap()
+            .stories;
         for structure in ["RC", "SRC", "S"] {
             let steel = structure == "S";
             model.sections[0].shape = if structure == "SRC" {
@@ -327,6 +330,9 @@ mod tests {
         model.sections.push(girder);
         model.elements[1].section = Some(SectionId(1));
         model.elements[0].local_axis.ref_vector = [1.0, 0.0, 0.0];
+        model.stories = crate::story_gen::generate_stories(&model, None)
+            .unwrap()
+            .stories;
         let (nodal, member) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
 
         // 柱は節点荷重（上下 1/2 ずつ、追加なし）。梁は等分布部材荷重。

@@ -208,6 +208,7 @@ mod tests {
                     level_kind: Default::default(),
                     dynamic_mass: None,
                     standard_floor_load: None,
+                    column_finish_area_weight: 0.0,
                 },
                 Story {
                     id: top_story,
@@ -220,6 +221,7 @@ mod tests {
                     level_kind: Default::default(),
                     dynamic_mass: None,
                     standard_floor_load: None,
+                    column_finish_area_weight: 0.0,
                 },
             ],
             ..Default::default()

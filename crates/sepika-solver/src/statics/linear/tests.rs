@@ -811,6 +811,7 @@ fn test_shell_rigid_floor_membrane_off() {
             weight_override: None,
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         }],
         constraints: vec![Constraint::rigid_diaphragm(
             StoryId(0),
@@ -1788,6 +1789,7 @@ fn rigid_floor_portal(with_rigid_floor: bool) -> Model {
             weight_override: None,
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         });
     }
     model
