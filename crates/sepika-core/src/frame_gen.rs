@@ -530,6 +530,7 @@ pub fn generate_frame(spec: &FrameSpec) -> Result<FrameGenResult, String> {
                 level_kind: Default::default(),
                 dynamic_mass: None,
                 standard_floor_load: None,
+                column_finish_area_weight: 0.0,
             }
         })
         .collect();

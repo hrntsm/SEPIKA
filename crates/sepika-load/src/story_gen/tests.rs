@@ -1,3 +1,4 @@
+use super::geom::dist3;
 use super::*;
 use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::{ElemId, FloorRegionId, MaterialId, SectionId, WallPlateId, WallRegionId};
@@ -3201,6 +3202,260 @@ fn test_finish_area_weight_column_perimeter_four_side() {
     );
 }
 
+fn column_finish_model() -> Model {
+    use sepika_core::model::FrameSectionUse;
+    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+    let mut model = single_beam_model(
+        3000.0,
+        2.4e-9,
+        350000.0,
+        Some(24.0),
+        Default::default(),
+        None,
+    );
+    model.stories = generate_stories(&model, None).unwrap().stories;
+    model.stories.push(Story {
+        id: StoryId(2),
+        name: "RF".into(),
+        elevation: 6000.0,
+        ..model.stories[1].clone()
+    });
+    model.sections[0].frame_use = Some(FrameSectionUse::Column);
+    model.sections[0].shape = Some(SectionShape::RcColumnRect {
+        b: 500.0,
+        d: 700.0,
+        rebar: RcRectColumnRebar {
+            main_dia: 22.0,
+            x: vec![],
+            y: vec![],
+            cover: 40.0,
+            hoop: RectColumnHoop {
+                dia: 10.0,
+                pitch: 100.0,
+                legs_x: 2,
+                legs_y: 2,
+            },
+        },
+    });
+    model
+}
+
+fn line_weights(model: &Model) -> Vec<f64> {
+    enumerate_self_weight(model, &model.load_cfg.clone().unwrap_or_default())
+        .unwrap()
+        .into_iter()
+        .filter_map(|item| match item {
+            SelfWeightItem::Line { load, .. } => Some(load),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn rc_src柱仕上げは階共通値と実形状を使いdlと地震用重量で一致する() {
+    use sepika_core::section_shape::{CircleColumnHoop, RcCircleColumnRebar, SectionShape};
+    let rect = column_finish_model().sections[0].shape.clone().unwrap();
+    let SectionShape::RcColumnRect { rebar, .. } = rect.clone() else {
+        unreachable!()
+    };
+    let shapes = [
+        (rect, 2400.0),
+        (
+            SectionShape::RcColumnCircle {
+                d: 600.0,
+                rebar: RcCircleColumnRebar {
+                    main_dia: 22.0,
+                    count: 0,
+                    cover: 40.0,
+                    hoop: CircleColumnHoop {
+                        dia: 10.0,
+                        pitch: 100.0,
+                    },
+                },
+            },
+            std::f64::consts::PI * 600.0,
+        ),
+        (
+            SectionShape::SrcColumnRect {
+                b: 500.0,
+                d: 700.0,
+                rebar,
+                steel_height: 300.0,
+                steel_width: 200.0,
+                steel_web_thick: 10.0,
+                steel_flange_thick: 20.0,
+            },
+            2400.0,
+        ),
+    ];
+    for (shape, phi) in shapes {
+        for (bottom, top) in [
+            ([0.0, 0.0, 0.0], [0.0, 0.0, 3000.0]),
+            ([0.0, 0.0, 0.0], [4000.0, 0.0, 3000.0]),
+            ([0.0, 0.0, 3000.0], [4000.0, 0.0, 3000.0]),
+            ([0.0, 0.0, 0.0], [0.0, 0.0, 6000.0]),
+            ([0.0, 0.0, 0.0], [0.0, 0.0, 4500.0]),
+        ] {
+            let mut model = column_finish_model();
+            model.nodes[0].coord = bottom;
+            model.nodes[1].coord = top;
+            model.sections[0].shape = Some(shape.clone());
+            // 断面性能の幅・せいではなく形状の寸法が正。
+            model.sections[0].width = 123.0;
+            model.sections[0].depth = 456.0;
+            let baseline = line_weights(&model)[0];
+            model.stories[0].column_finish_area_weight = 0.009;
+            model.stories[1].column_finish_area_weight = 0.001;
+            model.stories[2].column_finish_area_weight = 0.002;
+            model.load_cfg = Some(LoadCfg {
+                finish_area_weight: vec![(ElemId(0), 1.0)],
+                ..Default::default()
+            });
+            let q = if top[2] <= 3000.0 { 0.001 } else { 0.002 };
+            let len = dist3(bottom, top);
+            let expected = baseline + q * phi * len;
+            assert!((line_weights(&model)[0] - expected).abs() < 1e-7);
+            let (nodal, member) = crate::self_weight::self_weight_case_content(
+                &model,
+                model.load_cfg.as_ref().unwrap(),
+            )
+            .unwrap();
+            let dl = nodal.iter().map(|l| -l.values[2]).sum::<f64>()
+                + member
+                    .iter()
+                    .map(|l| match l.kind {
+                        MemberLoadKind::Distributed { a, b, w1, w2 } => (b - a) * (w1 + w2) / 2.0,
+                        MemberLoadKind::Point { p, .. } => p,
+                    })
+                    .sum::<f64>();
+            assert!((dl - expected).abs() < 1e-7);
+            let generated = generate_stories(&model, None).unwrap();
+            let seismic: f64 = generated
+                .stories
+                .iter()
+                .map(|s| s.seismic_weight.unwrap())
+                .sum();
+            assert!((seismic - expected).abs() < 1e-7);
+            model.load_cases.push(LoadCase {
+                id: LoadCaseId(0),
+                name: "DL".into(),
+                kind: LoadCaseKind::Dead,
+                nodal,
+                member,
+            });
+            let synced = generate_stories_with_synced_self_weight(
+                &model,
+                &[LoadCaseId(0)],
+                MassMethod::default(),
+            )
+            .unwrap();
+            assert!(
+                (synced
+                    .stories
+                    .iter()
+                    .map(|s| s.seismic_weight.unwrap())
+                    .sum::<f64>()
+                    - expected)
+                    .abs()
+                    < 1e-7
+            );
+            model.elements[0].nodes.reverse();
+            assert!((line_weights(&model)[0] - expected).abs() < 1e-7);
+        }
+    }
+}
+
+#[test]
+fn 同一階の柱は個別仕上げを無視して共通値を適用し別階は別の値になる() {
+    let mut model = column_finish_model();
+    for (id, z) in [(2, 3000.0), (3, 6000.0)] {
+        model.nodes.push(Node {
+            id: NodeId(id),
+            coord: [2000.0, 0.0, z],
+            ..model.nodes[1].clone()
+        });
+    }
+    model.elements.push(ElementData {
+        id: ElemId(1),
+        nodes: [NodeId(0), NodeId(2)].into_iter().collect(),
+        ..model.elements[0].clone()
+    });
+    model.elements.push(ElementData {
+        id: ElemId(2),
+        nodes: [NodeId(2), NodeId(3)].into_iter().collect(),
+        ..model.elements[0].clone()
+    });
+    let baseline = line_weights(&model);
+    model.stories[1].column_finish_area_weight = 0.001;
+    model.stories[2].column_finish_area_weight = 0.003;
+    model.load_cfg = Some(LoadCfg {
+        finish_area_weight: vec![(ElemId(0), 0.5), (ElemId(1), 0.9)],
+        ..Default::default()
+    });
+    let weights = line_weights(&model);
+    for i in 0..3 {
+        let elem = &model.elements[i];
+        let len = dist3(
+            model.nodes[elem.nodes[0].index()].coord,
+            model.nodes[elem.nodes[1].index()].coord,
+        );
+        let q = if i == 2 { 0.003 } else { 0.001 };
+        assert!((weights[i] - baseline[i] - q * 2400.0 * len).abs() < 1e-7);
+    }
+}
+
+#[test]
+fn 階未解決と不正柱仕上げは重量を欠落させずエラーにする() {
+    let mut model = column_finish_model();
+    model.nodes[1].coord[2] = 6500.0;
+    assert!(enumerate_self_weight(&model, &LoadCfg::default())
+        .err()
+        .unwrap()
+        .contains("所属階"));
+    model.nodes[1].coord[2] = 3000.0;
+    for q in [-0.001, f64::NAN, f64::INFINITY] {
+        model.stories[1].column_finish_area_weight = q;
+        assert!(enumerate_self_weight(&model, &LoadCfg::default()).is_err());
+    }
+    model.stories[1].column_finish_area_weight = 0.001;
+    model.sections[0].shape = None;
+    assert!(enumerate_self_weight(&model, &LoadCfg::default()).is_err());
+    model.stories.clear();
+    assert!(enumerate_self_weight(&model, &LoadCfg::default()).is_err());
+}
+
+#[test]
+fn 階共通柱仕上げは用途未設定とブレースとs柱に適用しない() {
+    use sepika_core::model::FrameSectionUse;
+    for case in 0..4 {
+        let mut model = column_finish_model();
+        match case {
+            0 => model.sections[0].frame_use = None,
+            1 => model.sections[0].frame_use = Some(FrameSectionUse::Brace),
+            2 => {
+                model.elements[0].kind = ElementKind::Brace {
+                    tension_only: false,
+                }
+            }
+            _ => {
+                model.materials[0].category = MaterialCategory::Steel;
+                model.materials[0].fc = None;
+            }
+        }
+        let baseline = line_weights(&model)[0];
+        model.stories[1].column_finish_area_weight = 0.001;
+        assert_eq!(line_weights(&model)[0], baseline);
+        model.load_cfg = Some(LoadCfg {
+            finish_area_weight: vec![(ElemId(0), 0.002)],
+            extra_line_weight: vec![(ElemId(0), 1.5)],
+            ..Default::default()
+        });
+        assert!(
+            (line_weights(&model)[0] - baseline - (0.002 * 1200.0 + 1.5) * 3000.0).abs() < 1e-7
+        );
+    }
+}
+
 #[test]
 fn test_finish_area_weight_beam_perimeter_three_side() {
     // 水平梁(非鉛直)。φ=b+2D の三面仕上げ。
@@ -4338,6 +4593,7 @@ fn test_regeneration_keeps_user_defined_story_fields() {
     model.stories = gen.stories;
     model.stories[0].name = "1FL".into();
     model.stories[0].weight_override = Some(12345.0);
+    model.stories[0].column_finish_area_weight = 0.002;
     model.stories[0].seismic_weight = Some(12345.0);
     model.stories[0].standard_floor_load = Some(StandardFloorLoad {
         dead: 0.001,
@@ -4371,6 +4627,7 @@ fn test_regeneration_keeps_user_defined_story_fields() {
         "手入力のない階は自動算定値"
     );
     assert_eq!(fresh[0].standard_floor_load.unwrap().dead, 0.001);
+    assert_eq!(fresh[0].column_finish_area_weight, 0.002);
 
     let mut with_inserted_floor = model.clone();
     with_inserted_floor.stories.insert(
@@ -4385,6 +4642,14 @@ fn test_regeneration_keeps_user_defined_story_fields() {
     let regenerated = generate_stories(&with_inserted_floor, Some(LoadCaseId(0)))
         .unwrap()
         .stories;
+    assert_eq!(
+        regenerated
+            .iter()
+            .find(|s| s.elevation == 0.0)
+            .unwrap()
+            .column_finish_area_weight,
+        0.002
+    );
     assert_eq!(
         regenerated
             .iter()
@@ -4435,6 +4700,7 @@ fn split_column_model() -> Model {
         level_kind: Default::default(),
         dynamic_mass: None,
         standard_floor_load: None,
+        column_finish_area_weight: 0.0,
     });
     model
 }
@@ -4483,6 +4749,7 @@ fn test_predefined_stories_drive_the_assignment() {
         level_kind: Default::default(),
         dynamic_mass: None,
         standard_floor_load: None,
+        column_finish_area_weight: 0.0,
     });
 
     let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
@@ -4514,6 +4781,7 @@ fn test_story_without_floor_nodes_gets_no_diaphragm() {
         level_kind: Default::default(),
         dynamic_mass: None,
         standard_floor_load: None,
+        column_finish_area_weight: 0.0,
     });
     // レベル 10500 には節点がない（区間 (3500, 10500] には z=7000 の節点が入る）。
     model.stories.push(Story {
@@ -4527,6 +4795,7 @@ fn test_story_without_floor_nodes_gets_no_diaphragm() {
         level_kind: Default::default(),
         dynamic_mass: None,
         standard_floor_load: None,
+        column_finish_area_weight: 0.0,
     });
 
     let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
@@ -4572,6 +4841,7 @@ fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
             level_kind: Default::default(),
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         },
         Story {
             id: StoryId(1),
@@ -4584,6 +4854,7 @@ fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
             level_kind: Default::default(),
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         },
     ];
 
@@ -4601,6 +4872,7 @@ fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
             level_kind: Default::default(),
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         },
         legacy.stories[0].clone(),
         legacy.stories[1].clone(),

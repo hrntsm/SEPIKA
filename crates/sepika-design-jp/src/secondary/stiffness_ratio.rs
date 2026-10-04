@@ -209,6 +209,7 @@ mod tests {
             level_kind: Default::default(),
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         };
         let story = Story {
             id: s0,
@@ -221,6 +222,7 @@ mod tests {
             level_kind: Default::default(),
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         };
         let model = Model {
             nodes,
@@ -341,6 +343,7 @@ mod tests {
             level_kind: Default::default(),
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         };
         let top = Story {
             id: top_story,
@@ -353,6 +356,7 @@ mod tests {
             level_kind: Default::default(),
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         };
         let model = Model {
             nodes,

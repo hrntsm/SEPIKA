@@ -199,7 +199,7 @@ impl StandardFloorLoad {
 /// フィールドは**誰が決めるか**で 2 系統に分かれる。
 ///
 /// - **利用者が決める**: [`Self::name`]・[`Self::elevation`]・[`Self::level_kind`]・
-///   [`Self::weight_override`]。新規作成時の入力、または ST-Bridge の `StbStory`
+///   [`Self::weight_override`]・[`Self::column_finish_area_weight`]。新規作成時の入力、または ST-Bridge の `StbStory`
 ///   から入り、準備計算では書き換えない。
 /// - **準備計算が埋める**: [`Self::node_ids`]・[`Self::seismic_weight`]・
 ///   [`Self::structure`]。節点と部材が確定してはじめて決まる派生値であり、
@@ -241,6 +241,9 @@ pub struct Story {
     /// 外周スラブに用いる標準床荷重（未設定なら外周スラブを生成しない）。
     #[serde(default)]
     pub standard_floor_load: Option<StandardFloorLoad>,
+    /// RC/SRC 柱の階共通仕上げ面重量 [N/mm²]。未設定は 0。
+    #[serde(default)]
+    pub column_finish_area_weight: f64,
 }
 
 /// 層（隣り合う 2 つの階の間）。法規上の「i 階」はこれを指す。
@@ -288,6 +291,18 @@ pub struct Layer {
 }
 
 impl Model {
+    pub fn is_rc_src_column(&self, elem: &ElementData) -> bool {
+        elem.kind == ElementKind::Beam
+            && self.element_section(elem).is_some_and(|sec| {
+                sec.frame_use == Some(FrameSectionUse::Column)
+                    && matches!(
+                        crate::structure_kind::member_structure_kind(self, elem),
+                        crate::structure_kind::StructureKind::Rc
+                            | crate::structure_kind::StructureKind::Src
+                    )
+            })
+    }
+
     /// 層（[`Layer`]）の一覧を下から順に返す。**層を数える処理の唯一の入口**。
     ///
     /// 階が床レベル列であるという不変条件（モジュールドキュメント参照）から、

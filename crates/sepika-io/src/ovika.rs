@@ -574,7 +574,24 @@ mod tests {
     /// rich なモデルが、保存→読込で各フィールドとも完全一致すること。
     #[test]
     fn test_roundtrip_preserves_rich_model() {
-        let model = make_rich_model();
+        let mut model = make_rich_model();
+        model.stories = [0.0, 3000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, elevation)| sepika_core::model::Story {
+                id: sepika_core::ids::StoryId(i as u32),
+                name: format!("{}F", i + 1),
+                elevation,
+                node_ids: vec![],
+                seismic_weight: None,
+                weight_override: None,
+                structure: Default::default(),
+                level_kind: Default::default(),
+                dynamic_mass: None,
+                standard_floor_load: None,
+                column_finish_area_weight: 0.001 * (i + 1) as f64,
+            })
+            .collect();
         let dir = crate::test_util::test_tmp();
         let path = dir.join("p_rich_roundtrip.ovika");
         save_ovika(&path, &model, OvikaExtras::default()).unwrap();
@@ -590,6 +607,10 @@ mod tests {
         );
 
         assert_eq!(back.nodes.len(), model.nodes.len());
+        assert_eq!(
+            back.stories, model.stories,
+            "階共通柱仕上げ面重量を保存読込で保持する"
+        );
         assert_eq!(
             back.slab_thickness, model.slab_thickness,
             "床スラブ厚は往復で保持される"

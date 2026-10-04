@@ -177,6 +177,7 @@ mod tests {
                     structure: Default::default(),
                     dynamic_mass: None,
                     standard_floor_load: None,
+                    column_finish_area_weight: 0.0,
                 },
                 Story {
                     id: StoryId(1),
@@ -193,6 +194,7 @@ mod tests {
                         inertia_t_mm2: 0.0,
                     }),
                     standard_floor_load: None,
+                    column_finish_area_weight: 0.0,
                 },
             ],
             ..Default::default()
@@ -295,6 +297,7 @@ mod tests {
                     structure: Default::default(),
                     dynamic_mass: None,
                     standard_floor_load: None,
+                    column_finish_area_weight: 0.0,
                 },
                 Story {
                     id: StoryId(1),
@@ -307,6 +310,7 @@ mod tests {
                     structure: Default::default(),
                     dynamic_mass: None,
                     standard_floor_load: None,
+                    column_finish_area_weight: 0.0,
                 },
             ],
             ..Default::default()
@@ -351,6 +355,7 @@ mod tests {
             structure: Default::default(),
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         };
         let pushover = crate::nonlinear::pushover::PushoverResult {
             steps: Vec::new(),

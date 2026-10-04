@@ -7429,6 +7429,10 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         )
         .expect("右半分");
     model.floor_regions[0].slab_ids = vec![first, second];
+    model.stories =
+        sepika_load::story_gen::generate_stories_with_opts(&model, &[], false, model.mass_method)
+            .unwrap()
+            .stories;
     model
         .validate()
         .expect("テストモデルは validate を通るはず");
@@ -8054,6 +8058,7 @@ fn test_rigid_floor_beam_has_forces_and_checks() {
         weight_override: None,
         dynamic_mass: None,
         standard_floor_load: None,
+        column_finish_area_weight: 0.0,
     });
 
     let mut app = App::default();

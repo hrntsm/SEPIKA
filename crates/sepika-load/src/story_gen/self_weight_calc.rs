@@ -220,6 +220,7 @@ pub(crate) fn enumerate_self_weight(
     let mut items = Vec::new();
     let node_adj = node_adjacency(model);
     let beam_pairs = beam_pair_map(model);
+    let story_spans = model.story_spans();
     for (elem_idx, elem) in model.elements.iter().enumerate() {
         if matches!(elem.kind, ElementKind::Beam | ElementKind::Brace { .. })
             && elem.nodes.len() >= 2
@@ -354,7 +355,45 @@ pub(crate) fn enumerate_self_weight(
                 {
                     extras_per_length += lw;
                 }
-                if let Some(&(_, wf)) = load_cfg
+                if model.is_rc_src_column(elem) {
+                    let top_z = ci[2].max(cj[2]);
+                    let story = model
+                        .story_at(&story_spans, top_z)
+                        .and_then(|id| model.stories.get(id.index()))
+                        .ok_or_else(|| {
+                            format!(
+                                "RC/SRC柱 {} の最上端節点の所属階を解決できません",
+                                elem.id.0
+                            )
+                        })?;
+                    let wf = story.column_finish_area_weight;
+                    if !wf.is_finite() || wf < 0.0 {
+                        return Err(format!("階 {} の柱仕上げ面重量が不正です", story.name));
+                    }
+                    let phi = if wf == 0.0 {
+                        0.0
+                    } else {
+                        match sec.shape.as_ref() {
+                            Some(
+                                SectionShape::RcColumnRect { b, d, .. }
+                                | SectionShape::SrcColumnRect { b, d, .. },
+                            ) if *b > 0.0 && *d > 0.0 => 2.0 * (b + d),
+                            Some(SectionShape::RcColumnCircle { d, .. }) if *d > 0.0 => {
+                                std::f64::consts::PI * d
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "RC/SRC柱 {} の仕上げ周長を解決できません",
+                                    elem.id.0
+                                ))
+                            }
+                        }
+                    };
+                    if !phi.is_finite() || (wf > 0.0 && phi <= 0.0) {
+                        return Err(format!("RC/SRC柱 {} の仕上げ周長が不正です", elem.id.0));
+                    }
+                    extras_per_length += wf * phi;
+                } else if let Some(&(_, wf)) = load_cfg
                     .finish_area_weight
                     .iter()
                     .find(|(id, _)| *id == elem.id)

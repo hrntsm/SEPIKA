@@ -322,9 +322,8 @@ pub struct LoadCfg {
     pub steel_weight_factor: f64,
     /// 部材ごとの付加線重量 [N/mm]（耐火被覆 γc·Ac 等の直接入力）。
     pub extra_line_weight: Vec<(ElemId, f64)>,
-    /// 部材ごとの仕上げ面重量 w_f [N/mm²]。断面寸法から仕上げ周長
-    /// （梁: b+2D の三面、柱: 2(b+D) の四周）を求めて線重量 w_f·φ に換算し
-    /// 自重へ加算する（固定荷重の仕上げ荷重）。
+    /// 部材ごとの仕上げ面重量 w_f [N/mm²]。RC/SRC Column は対象外。
+    /// その他の部材は鉛直材 2(b+D)、それ以外 b+2D で線重量へ換算する。
     #[serde(default)]
     pub finish_area_weight: Vec<(ElemId, f64)>,
     /// ダンパー装置の自重諸元。対象部材の断面自重（ρ·A·L·g）は使わず、

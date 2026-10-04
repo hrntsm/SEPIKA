@@ -2113,6 +2113,7 @@ fn make_story(id: u32, weight: Option<f64>) -> sepika_core::model::Story {
         weight_override: None,
         dynamic_mass: None,
         standard_floor_load: None,
+        column_finish_area_weight: 0.0,
     }
 }
 
@@ -2236,6 +2237,7 @@ fn test_apply_stories_roundtrip_with_generated_masters() {
             weight_override: None,
             dynamic_mass: None,
             standard_floor_load: None,
+            column_finish_area_weight: 0.0,
         }],
         node_story: vec![Some(StoryId(0)), Some(StoryId(0))],
         constraints: vec![Constraint::rigid_diaphragm(
@@ -4299,6 +4301,7 @@ fn story_edit_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
                 level_kind: Default::default(),
                 dynamic_mass: None,
                 standard_floor_load: None,
+                column_finish_area_weight: 0.0,
             })
             .collect(),
         ..Default::default()
@@ -4306,6 +4309,67 @@ fn story_edit_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
 }
 
 /// 階の追加は標高昇順の位置へ入り、以降の階の ID が繰り上がる。undo で元に戻る。
+#[test]
+fn 階共通柱仕上げの編集と階操作は設定を保持してundoできる() {
+    let mut model = story_edit_model(
+        &[0.0, 3000.0, 6000.0],
+        &[("1F", 0.0), ("2F", 3000.0), ("RF", 6000.0)],
+    );
+    let original = model.clone();
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetColumnFinishAreaWeight {
+            story: StoryId(1),
+            weight_n_per_mm2: 0.002
+        })
+    ));
+    assert_eq!(model.stories[1].column_finish_area_weight, 0.002);
+    for q in [-0.001, f64::NAN, f64::INFINITY] {
+        assert!(!undo.run(
+            &mut model,
+            Box::new(SetColumnFinishAreaWeight {
+                story: StoryId(1),
+                weight_n_per_mm2: q
+            })
+        ));
+    }
+    let configured = model.clone();
+    undo.run(
+        &mut model,
+        Box::new(AddStory {
+            name: "中間階".into(),
+            elevation: 1500.0,
+        }),
+    );
+    assert_eq!(model.stories[1].column_finish_area_weight, 0.0);
+    assert_eq!(model.stories[2].column_finish_area_weight, 0.002);
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&configured));
+    undo.run(
+        &mut model,
+        Box::new(SetStoryLevel {
+            story: StoryId(1),
+            name: "2F".into(),
+            elevation: 6500.0,
+        }),
+    );
+    assert_eq!(model.stories[2].column_finish_area_weight, 0.002);
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&configured));
+    undo.run(&mut model, Box::new(DeleteStory { story: StoryId(1) }));
+    assert!(model
+        .stories
+        .iter()
+        .all(|s| s.column_finish_area_weight == 0.0));
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&configured));
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&original));
+    undo.redo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&configured));
+}
+
 #[test]
 fn test_add_story_inserts_in_elevation_order_and_renumbers() {
     let mut model = story_edit_model(&[0.0, 4000.0, 11000.0], &[("1F", 4000.0), ("3F", 11000.0)]);

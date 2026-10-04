@@ -632,6 +632,7 @@ mod tests {
                     weight_override: None,
                     dynamic_mass: None,
                     standard_floor_load: None,
+                    column_finish_area_weight: 0.0,
                 },
                 Story {
                     level_kind: Default::default(),
@@ -644,6 +645,7 @@ mod tests {
                     weight_override: None,
                     dynamic_mass: None,
                     standard_floor_load: None,
+                    column_finish_area_weight: 0.0,
                 },
                 Story {
                     level_kind: Default::default(),
@@ -656,6 +658,7 @@ mod tests {
                     weight_override: None,
                     dynamic_mass: None,
                     standard_floor_load: None,
+                    column_finish_area_weight: 0.0,
                 },
             ],
             ..Default::default()

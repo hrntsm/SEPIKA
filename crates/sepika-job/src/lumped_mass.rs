@@ -507,6 +507,7 @@ mod tests {
                     inertia_t_mm2: 1000.0,
                 }),
                 standard_floor_load: None,
+                column_finish_area_weight: 0.0,
             });
         }
         model.sections.push(Section {

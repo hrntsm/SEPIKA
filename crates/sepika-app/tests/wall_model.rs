@@ -87,7 +87,11 @@ fn sig4(v: f64) -> String {
 
 #[test]
 fn rc_girder_self_weight_uses_columns_not_orthogonal_steel_girders() {
-    let model = wall_bay_model();
+    let mut model = wall_bay_model();
+    model.stories =
+        sepika_load::story_gen::generate_stories_with_opts(&model, &[], false, model.mass_method)
+            .unwrap()
+            .stories;
     let (_, loads) =
         sepika_load::self_weight::self_weight_case_content(&model, &Default::default()).unwrap();
     for id in [ElemId(4), ElemId(8)] {

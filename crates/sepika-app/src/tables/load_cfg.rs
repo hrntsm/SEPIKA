@@ -1,12 +1,13 @@
 //! 荷重計算条件（`Model.load_cfg` = `LoadCfg`）の編集 UI。
 //!
 //! 鉄骨重量割増率・K型ブレース配分規則・積載荷重低減の考慮と、部材別の
-//! 付加線重量／仕上げ面重量／ダンパー諸元の簡易テーブルを提供する。
-//! 全ての編集は `sepika_edit::SetLoadCfg`（全置換・undo 対応）経由で行う。
+//! 付加線重量／仕上げ面重量／ダンパー諸元と階共通柱仕上げの入力を提供する。
+//! 全ての編集は undo 対応の編集コマンド経由で行う。
 
 use crate::app::App;
 use sepika_core::ids::ElemId;
 use sepika_core::model::{DamperSpec, KBraceWeightRule, LoadCfg};
+use sepika_edit::SetColumnFinishAreaWeight;
 use sepika_edit::SetLoadCfg;
 
 /// 荷重計算条件フォームのドラフト状態（GUI 専用）。
@@ -62,6 +63,13 @@ fn commit(app: &mut App, cfg: LoadCfg) {
     app.core.scoped.staleness.mark_edited();
 }
 
+fn selectable_elem(model: &sepika_core::model::Model, id_salt: &str, id: ElemId) -> bool {
+    model
+        .elements
+        .get(id.index())
+        .is_some_and(|elem| id_salt != "load_cfg_finish_elem" || !model.is_rc_src_column(elem))
+}
+
 /// (ElemId, f64) リストの表示・削除と追加フォームの共通 UI。
 /// 変更後のリストを返す（None = 変更なし）。
 fn elem_value_table(
@@ -88,7 +96,9 @@ fn elem_value_table(
         elem_selector(ui, app_model, &format!("{id_salt}_elem"), sel_elem);
         ui.label(value_label);
         ui.add(egui::TextEdit::singleline(value_buf).desired_width(80.0));
-        let can_add = sel_elem.is_some() && value_buf.trim().parse::<f64>().is_ok();
+        let can_add = sel_elem
+            .is_some_and(|id| selectable_elem(app_model, &format!("{id_salt}_elem"), id))
+            && value_buf.trim().parse::<f64>().is_ok();
         if ui
             .add_enabled(can_add, egui::Button::new("+ 追加"))
             .clicked()
@@ -107,7 +117,7 @@ fn elem_value_table(
     result
 }
 
-/// 部材選択 ComboBox（全部材から選ぶ）。
+/// 部材選択 ComboBox。部材別仕上げは RC/SRC 柱を除く。
 fn elem_selector(
     ui: &mut egui::Ui,
     model: &sepika_core::model::Model,
@@ -121,6 +131,9 @@ fn elem_selector(
         .selected_text(text)
         .show_ui(ui, |ui| {
             for elem in &model.elements {
+                if !selectable_elem(model, id_salt, elem.id) {
+                    continue;
+                }
                 if ui
                     .selectable_label(
                         *selected == Some(elem.id),
@@ -226,7 +239,37 @@ pub fn load_cfg_panel(ui: &mut egui::Ui, app: &mut App) {
 
     ui.add_space(4.0);
 
-    ui.label(egui::RichText::new("仕上げ面重量（断面周長×面重量で線重量に換算）").strong());
+    ui.label(egui::RichText::new("RC/SRC柱の階共通仕上げ面重量 [N/mm²]").strong());
+    ui.label("最上端節点の所属階の値を柱全体へ適用します。未設定は0。個別例外は追加荷重を入力してください。");
+    let mut column_edit = None;
+    for story in &app.core.model.stories {
+        ui.horizontal(|ui| {
+            ui.label(&story.name);
+            let mut value = story.column_finish_area_weight;
+            if ui
+                .add(
+                    egui::DragValue::new(&mut value)
+                        .speed(0.0001)
+                        .range(0.0..=f64::MAX),
+                )
+                .changed()
+            {
+                column_edit = Some((story.id, value));
+            }
+        });
+    }
+    if let Some((story, weight_n_per_mm2)) = column_edit {
+        app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(SetColumnFinishAreaWeight {
+                story,
+                weight_n_per_mm2,
+            }),
+        );
+        app.core.scoped.staleness.mark_edited();
+        return;
+    }
+    ui.label(egui::RichText::new("部材別仕上げ面重量（RC/SRC柱は対象外）").strong());
     if let Some(new_rows) = elem_value_table(
         ui,
         &app.core.model,
@@ -333,5 +376,61 @@ pub fn load_cfg_panel(ui: &mut egui::Ui, app: &mut App) {
         let mut new_cfg = cfg.clone();
         new_cfg.dampers = rows;
         commit(app, new_cfg);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sepika_core::ids::{NodeId, SectionId};
+    use sepika_core::model::{ElementData, ElementKind, FrameSectionUse, Model};
+    use sepika_core::section_shape::{CircleColumnHoop, RcCircleColumnRebar, SectionShape};
+
+    #[test]
+    fn 部材別仕上げの選択はrc_src柱だけを除外し追加荷重の選択は残す() {
+        let shape = SectionShape::RcColumnCircle {
+            d: 600.0,
+            rebar: RcCircleColumnRebar {
+                main_dia: 22.0,
+                count: 0,
+                cover: 40.0,
+                hoop: CircleColumnHoop {
+                    dia: 10.0,
+                    pitch: 100.0,
+                },
+            },
+        };
+        let mut section = shape.to_section(SectionId(0), "C1".into());
+        section.frame_use = Some(FrameSectionUse::Column);
+        let mut model = Model {
+            sections: vec![section],
+            elements: vec![ElementData {
+                id: ElemId(0),
+                kind: ElementKind::Beam,
+                nodes: [NodeId(0), NodeId(1)].into_iter().collect(),
+                section: Some(SectionId(0)),
+                local_axis: sepika_core::model::LocalAxis {
+                    ref_vector: [1.0, 0.0, 0.0],
+                },
+                end_cond: [sepika_core::model::EndCondition::Fixed; 2],
+                force_regime: sepika_core::model::ForceRegime::Auto,
+                rigid_zone: Default::default(),
+                plastic_zone: None,
+                spring: None,
+            }],
+            ..Default::default()
+        };
+        assert!(!selectable_elem(&model, "load_cfg_finish_elem", ElemId(0)));
+        assert!(selectable_elem(&model, "load_cfg_extra_elem", ElemId(0)));
+        assert!(selectable_elem(&model, "load_cfg_damper_elem", ElemId(0)));
+        model.sections[0].frame_use = Some(FrameSectionUse::Girder);
+        assert!(selectable_elem(&model, "load_cfg_finish_elem", ElemId(0)));
+        model.sections[0].frame_use = Some(FrameSectionUse::Column);
+        model.sections[0].shape = Some(SectionShape::SteelPipe {
+            outer_dia: 600.0,
+            thick: 20.0,
+        });
+        assert!(selectable_elem(&model, "load_cfg_finish_elem", ElemId(0)));
+        assert!(!selectable_elem(&model, "load_cfg_finish_elem", ElemId(99)));
     }
 }
