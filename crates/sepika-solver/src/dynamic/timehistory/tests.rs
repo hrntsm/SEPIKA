@@ -816,6 +816,7 @@ fn fiber_column_model(fy: f64) -> Model {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
             Story {
                 level_kind: Default::default(),
@@ -829,6 +830,7 @@ fn fiber_column_model(fy: f64) -> Model {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
         ],
         ..Default::default()

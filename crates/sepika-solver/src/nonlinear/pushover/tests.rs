@@ -23,6 +23,7 @@ fn base_story(node_ids: Vec<NodeId>) -> Story {
         dynamic_mass: None,
         standard_floor_load: None,
         column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
     }
 }
 
@@ -111,6 +112,7 @@ fn single_column_model(fy: f64, seismic_weight: f64) -> Model {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
         ],
         ..Default::default()
@@ -427,6 +429,7 @@ fn spring_column_model(kx: f64, support_kx: Option<f64>, seismic_weight: f64) ->
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
         ],
         ..Default::default()
@@ -765,6 +768,7 @@ fn two_story_model() -> Model {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
             Story {
                 level_kind: Default::default(),
@@ -778,6 +782,7 @@ fn two_story_model() -> Model {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
         ],
         ..Default::default()
@@ -952,6 +957,7 @@ fn test_compute_static_indeterminacy_indeterminate_portal() {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
         ],
         ..Default::default()
@@ -1199,6 +1205,7 @@ fn portal_frame_model(fy: f64, seismic_weight: f64) -> Model {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
         ],
         constraints: vec![Constraint::rigid_diaphragm(
@@ -3574,6 +3581,7 @@ fn wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
         ],
         constraints: vec![Constraint::rigid_diaphragm(

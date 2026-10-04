@@ -180,7 +180,7 @@ pub(crate) enum SelfWeightItem {
 ///   ギャップ対応: 鋼材のみ `load_cfg.effective_steel_factor()`（鉄骨重量割増率）を
 ///   設計重量と物理質量の両方の躯体分に乗じ（物理質量では増分も物理密度ベース）、
 ///   CFT は鋼管部を鋼材と同じ扱いとして `factor` を乗じ、充填コンクリート部は γC で
-///   `factor` を乗じない。`load_cfg.extra_line_weight`（耐火被覆等の付加線重量 [N/mm]）・
+///   `factor` を乗じない。階共通耐火被覆・`load_cfg.extra_line_weight`（例外的な付加線重量 [N/mm]）・
 ///   `load_cfg.finish_area_weight`（仕上げ面重量 w_f、周長 φ から自動換算）が
 ///   あれば自重算定長を掛けて加算する。
 /// - 壁・シェル（`ElementKind::Wall`/`Shell`, 節点数3以上）: 設計重量（設計躯体＋
@@ -222,10 +222,17 @@ pub(crate) fn enumerate_self_weight(
     let beam_pairs = beam_pair_map(model);
     let story_spans = model.story_spans();
     for (elem_idx, elem) in model.elements.iter().enumerate() {
+        let coating_per_length = crate::fireproof::primary_line_weight(model, elem)?;
         if matches!(elem.kind, ElementKind::Beam | ElementKind::Brace { .. })
             && elem.nodes.len() >= 2
         {
             if let Some(damper) = load_cfg.dampers.iter().find(|d| d.elem == elem.id) {
+                if coating_per_length > 0.0 {
+                    return Err(format!(
+                        "部材 {} のダンパー自重置換は支持部の被覆断面形状を解決できません",
+                        elem.id.0
+                    ));
+                }
                 let ni = elem.nodes[0].index();
                 let nj = elem.nodes[1].index();
                 let len = dist3(model.nodes[ni].coord, model.nodes[nj].coord);
@@ -347,7 +354,7 @@ pub(crate) fn enumerate_self_weight(
                     .and_then(|s| s.cft_core_props())
                     .map_or(0.0, |c| c.area);
                 let steel_area = sec.area;
-                let mut extras_per_length = 0.0;
+                let mut extras_per_length = coating_per_length;
                 if let Some(&(_, lw)) = load_cfg
                     .extra_line_weight
                     .iter()

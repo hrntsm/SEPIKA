@@ -61,6 +61,7 @@ fn representative_model() -> Model {
         dynamic_mass: None,
         standard_floor_load: None,
         column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
     });
     m.materials.push(sn400b(0));
     // 柱用・梁用で別断面（共有断面の分割を避け、意味的往復を単純化）。

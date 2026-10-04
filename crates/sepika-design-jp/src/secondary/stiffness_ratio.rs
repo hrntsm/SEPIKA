@@ -210,6 +210,7 @@ mod tests {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         };
         let story = Story {
             id: s0,
@@ -223,6 +224,7 @@ mod tests {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         };
         let model = Model {
             nodes,
@@ -344,6 +346,7 @@ mod tests {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         };
         let top = Story {
             id: top_story,
@@ -357,6 +360,7 @@ mod tests {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         };
         let model = Model {
             nodes,

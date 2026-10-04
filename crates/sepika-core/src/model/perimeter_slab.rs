@@ -404,6 +404,7 @@ mod tests {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
         );
         model.stories.push(Story {
@@ -417,6 +418,7 @@ mod tests {
             level_kind: StoryLevelKind::default(),
             dynamic_mass: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
             standard_floor_load: Some(StandardFloorLoad {
                 dead: 0.005,
                 floor: 0.004,
@@ -503,6 +505,7 @@ mod tests {
                     dynamic_mass: None,
                     standard_floor_load: None,
                     column_finish_area_weight: 0.0,
+                    fireproof: Default::default(),
                 },
                 Story {
                     id: StoryId(1),
@@ -516,6 +519,7 @@ mod tests {
                     dynamic_mass: None,
                     standard_floor_load: None,
                     column_finish_area_weight: 0.0,
+                    fireproof: Default::default(),
                 },
             ];
             column_dimension(&model, &model.elements[0], NodeId(0), StoryId(1))
@@ -629,6 +633,7 @@ mod tests {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
             Story {
                 id: StoryId(1),
@@ -642,6 +647,7 @@ mod tests {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
         ];
         let expected = column_dimension(&model, &model.elements[0], NodeId(0), StoryId(1));

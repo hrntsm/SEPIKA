@@ -118,6 +118,14 @@ impl SectionShape {
                 }
                 PI * outer_dia
             }
+            Self::SteelFlatBar { width, thick } => {
+                positive(&[width, thick])?;
+                2.0 * (width + thick)
+            }
+            Self::SteelRoundBar { dia } => {
+                positive(&[dia])?;
+                PI * dia
+            }
             _ => return Err("被覆実外周の未対応形状です".into()),
         };
         if !p.is_finite() || p <= 0.0 {
@@ -126,7 +134,7 @@ impl SectionShape {
         Ok(p)
     }
 
-    /// 成形版被覆の包絡周長 [mm]。H・組立H・Box は矩形、鋼管は円形。
+    /// 成形版被覆の包絡周長 [mm]。矩形・円形の包絡を用い、未対応形状はエラー。
     pub fn coating_envelope_perimeter(&self) -> Result<f64, String> {
         self.validate_surface_radius()?;
         let p = match *self {
@@ -143,6 +151,9 @@ impl SectionShape {
                 2.0 * (height + upper_width.max(lower_width))
             }
             Self::SteelPipe { .. } | Self::CftPipe { .. } => self.coating_surface_perimeter()?,
+            Self::SteelFlatBar { .. } | Self::SteelRoundBar { .. } => {
+                self.coating_surface_perimeter()?
+            }
             _ => return Err("被覆包絡周長の未対応形状です".into()),
         };
         if !p.is_finite() || p <= 0.0 {

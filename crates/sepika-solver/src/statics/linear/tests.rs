@@ -812,6 +812,7 @@ fn test_shell_rigid_floor_membrane_off() {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         }],
         constraints: vec![Constraint::rigid_diaphragm(
             StoryId(0),
@@ -1790,6 +1791,7 @@ fn rigid_floor_portal(with_rigid_floor: bool) -> Model {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         });
     }
     model

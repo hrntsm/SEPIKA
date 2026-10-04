@@ -6,9 +6,9 @@
 
 use crate::app::App;
 use sepika_core::ids::ElemId;
-use sepika_core::model::{DamperSpec, KBraceWeightRule, LoadCfg};
-use sepika_edit::SetColumnFinishAreaWeight;
+use sepika_core::model::{DamperSpec, FireproofKind, KBraceWeightRule, LoadCfg};
 use sepika_edit::SetLoadCfg;
+use sepika_edit::{SetColumnFinishAreaWeight, SetStoryFireproof};
 
 /// 荷重計算条件フォームのドラフト状態（GUI 専用）。
 ///
@@ -221,7 +221,7 @@ pub fn load_cfg_panel(ui: &mut egui::Ui, app: &mut App) {
 
     ui.add_space(4.0);
 
-    ui.label(egui::RichText::new("付加線重量（耐火被覆等の直接入力）").strong());
+    ui.label(egui::RichText::new("付加線重量（部材固有の例外追加重量）").strong());
     if let Some(new_rows) = elem_value_table(
         ui,
         &app.core.model,
@@ -239,6 +239,42 @@ pub fn load_cfg_panel(ui: &mut egui::Ui, app: &mut App) {
 
     ui.add_space(4.0);
 
+    ui.label(egui::RichText::new("階共通耐火被覆（面重量 [N/m²]）").strong());
+    ui.label("S柱・S梁（小梁を含む）とCFT柱の条件を独立に指定します。既定は被覆なし。最上端の所属階を適用します。");
+    let mut fireproof_edit = None;
+    for story in &app.core.model.stories {
+        let mut conditions = story.fireproof;
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            ui.label(&story.name);
+            ui.label("S:");
+            changed |= fireproof_kind(ui, (story.id.0, "S"), &mut conditions.steel_kind);
+            for (label, value) in [
+                ("柱", &mut conditions.steel_column_area_weight),
+                ("梁", &mut conditions.steel_beam_area_weight),
+            ] {
+                ui.label(label);
+                changed |= fireproof_area_weight(ui, value);
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("CFT:");
+            changed |= fireproof_kind(ui, (story.id.0, "CFT"), &mut conditions.cft_kind);
+            ui.label("柱");
+            changed |= fireproof_area_weight(ui, &mut conditions.cft_column_area_weight);
+        });
+        if changed {
+            fireproof_edit = Some((story.id, conditions));
+        }
+    }
+    if let Some((story, conditions)) = fireproof_edit {
+        app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(SetStoryFireproof { story, conditions }),
+        );
+        app.core.scoped.staleness.mark_edited();
+        return;
+    }
     ui.label(egui::RichText::new("RC/SRC柱の階共通仕上げ面重量 [N/mm²]").strong());
     ui.label("最上端節点の所属階の値を柱全体へ適用します。未設定は0。個別例外は追加荷重を入力してください。");
     let mut column_edit = None;
@@ -377,6 +413,41 @@ pub fn load_cfg_panel(ui: &mut egui::Ui, app: &mut App) {
         new_cfg.dampers = rows;
         commit(app, new_cfg);
     }
+}
+
+fn fireproof_kind(ui: &mut egui::Ui, id: (u32, &str), kind: &mut FireproofKind) -> bool {
+    let mut changed = false;
+    egui::ComboBox::from_id_salt(("story_fireproof", id))
+        .selected_text(match kind {
+            FireproofKind::None => "なし",
+            FireproofKind::Spray => "吹きつけ",
+            FireproofKind::Board => "成形版",
+        })
+        .show_ui(ui, |ui| {
+            for (value, label) in [
+                (FireproofKind::None, "なし"),
+                (FireproofKind::Spray, "吹きつけ"),
+                (FireproofKind::Board, "成形版"),
+            ] {
+                changed |= ui.selectable_value(kind, value, label).changed();
+            }
+        });
+    changed
+}
+
+fn fireproof_area_weight(ui: &mut egui::Ui, value_n_per_mm2: &mut f64) -> bool {
+    let mut value_n_per_m2 = *value_n_per_mm2 * 1.0e6;
+    let changed = ui
+        .add(
+            egui::DragValue::new(&mut value_n_per_m2)
+                .speed(10.0)
+                .range(0.0..=f64::MAX),
+        )
+        .changed();
+    if changed {
+        *value_n_per_mm2 = value_n_per_m2 / 1.0e6;
+    }
+    changed
 }
 
 #[cfg(test)]

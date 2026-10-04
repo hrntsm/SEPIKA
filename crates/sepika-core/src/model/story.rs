@@ -194,20 +194,56 @@ impl StandardFloorLoad {
     }
 }
 
+/// 耐火被覆種別。既定は被覆なし。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum FireproofKind {
+    #[default]
+    None,
+    Spray,
+    Board,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StoryFireproof {
+    pub steel_kind: FireproofKind,
+    /// S柱の面重量 [N/mm²]。既定は0。
+    pub steel_column_area_weight: f64,
+    /// S梁の面重量 [N/mm²]。既定は0。
+    pub steel_beam_area_weight: f64,
+    pub cft_kind: FireproofKind,
+    /// CFT柱の面重量 [N/mm²]。既定は0。
+    pub cft_column_area_weight: f64,
+}
+
+impl StoryFireproof {
+    pub fn validate(&self) -> Result<(), String> {
+        if [
+            self.steel_column_area_weight,
+            self.steel_beam_area_weight,
+            self.cft_column_area_weight,
+        ]
+        .iter()
+        .all(|q| q.is_finite() && *q >= 0.0)
+        {
+            Ok(())
+        } else {
+            Err("耐火被覆面重量は有限な非負値が必要です".into())
+        }
+    }
+}
+
 /// 階（床）の定義。法規上の「層」は [`Layer`] である。
 ///
 /// フィールドは**誰が決めるか**で 2 系統に分かれる。
 ///
 /// - **利用者が決める**: [`Self::name`]・[`Self::elevation`]・[`Self::level_kind`]・
-///   [`Self::weight_override`]・[`Self::column_finish_area_weight`]。新規作成時の入力、または ST-Bridge の `StbStory`
-///   から入り、準備計算では書き換えない。
+///   [`Self::weight_override`]・[`Self::column_finish_area_weight`]・[`Self::fireproof`]。
+///   新規作成時の入力、または ST-Bridge の `StbStory` から入り、準備計算では書き換えない。
 /// - **準備計算が埋める**: [`Self::node_ids`]・[`Self::seismic_weight`]・
-///   [`Self::structure`]。節点と部材が確定してはじめて決まる派生値であり、
-///   階生成のたびに算定し直す。
+///   [`Self::structure`]。節点と部材が確定してはじめて決まる派生値であり、階生成のたびに算定し直す。
 ///
 /// [`Model::stories`] は [`Self::elevation`] の**昇順**に並び、**先頭は基部の床**
-/// （[`Model::base_elevation`] と同レベル）である。階への帰属区間が直下階のレベルで
-/// 決まるため、この並びが崩れると帰属が壊れる。
+/// （[`Model::base_elevation`] と同レベル）である。階への帰属区間が直下階のレベルで決まる。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Story {
     pub id: StoryId,
@@ -244,6 +280,9 @@ pub struct Story {
     /// RC/SRC 柱の階共通仕上げ面重量 [N/mm²]。未設定は 0。
     #[serde(default)]
     pub column_finish_area_weight: f64,
+    /// 階共通の耐火被覆条件。既定はS・CFTとも被覆なし。
+    #[serde(default)]
+    pub fireproof: StoryFireproof,
 }
 
 /// 層（隣り合う 2 つの階の間）。法規上の「i 階」はこれを指す。

@@ -252,6 +252,7 @@ mod tests {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         }
     }
 

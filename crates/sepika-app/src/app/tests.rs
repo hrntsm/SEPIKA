@@ -7478,7 +7478,7 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
     // 二次部材の自重は `self_weight_case_content` ではなく逐次伝達が運ぶ
     // 期待値には別途足す。
     for sm in app.core.model.beams().chain(app.core.model.posts()) {
-        if let Some(w) = sepika_load::floor::beam_self_weight_udl(&app.core.model, sm) {
+        if let Some(w) = sepika_load::floor::beam_self_weight_udl(&app.core.model, sm).unwrap() {
             let [a, b] =
                 sepika_core::face_distance::secondary_self_weight_interval(&app.core.model, sm)
                     .unwrap();
@@ -8062,6 +8062,7 @@ fn test_rigid_floor_beam_has_forces_and_checks() {
         dynamic_mass: None,
         standard_floor_load: None,
         column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
     });
 
     let mut app = App::default();

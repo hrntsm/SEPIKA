@@ -2202,6 +2202,7 @@ fn make_story(id: u32, weight: Option<f64>) -> sepika_core::model::Story {
         dynamic_mass: None,
         standard_floor_load: None,
         column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
     }
 }
 
@@ -2326,6 +2327,7 @@ fn test_apply_stories_roundtrip_with_generated_masters() {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         }],
         node_story: vec![Some(StoryId(0)), Some(StoryId(0))],
         constraints: vec![Constraint::rigid_diaphragm(
@@ -4391,6 +4393,7 @@ fn story_edit_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             })
             .collect(),
         ..Default::default()
@@ -4457,6 +4460,55 @@ fn 階共通柱仕上げの編集と階操作は設定を保持してundoでき�
     assert!(model.eq_ignoring_dofmap(&original));
     undo.redo(&mut model);
     assert!(model.eq_ignoring_dofmap(&configured));
+}
+
+#[test]
+fn story_fireproof_edit_undo_and_story_insertion() {
+    use sepika_core::model::{FireproofKind, StoryFireproof};
+    let mut model = story_edit_model(&[0.0, 3000.0], &[("1F", 0.0), ("2F", 3000.0)]);
+    let initial = model.clone();
+    let conditions = StoryFireproof {
+        steel_kind: FireproofKind::Spray,
+        steel_column_area_weight: 0.001,
+        steel_beam_area_weight: 0.002,
+        cft_kind: FireproofKind::Board,
+        cft_column_area_weight: 0.003,
+    };
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetStoryFireproof {
+            story: StoryId(1),
+            conditions
+        })
+    ));
+    assert_eq!(model.stories[1].fireproof, conditions);
+    for q in [-1.0, f64::NAN, f64::INFINITY] {
+        assert!(!undo.run(
+            &mut model,
+            Box::new(SetStoryFireproof {
+                story: StoryId(1),
+                conditions: StoryFireproof {
+                    steel_beam_area_weight: q,
+                    ..conditions
+                }
+            })
+        ));
+    }
+    undo.run(
+        &mut model,
+        Box::new(AddStory {
+            name: "中間階".into(),
+            elevation: 1500.0,
+        }),
+    );
+    assert_eq!(model.stories[1].fireproof, StoryFireproof::default());
+    assert_eq!(model.stories[2].fireproof, conditions);
+    undo.undo(&mut model);
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&initial));
+    undo.redo(&mut model);
+    assert_eq!(model.stories[1].fireproof, conditions);
 }
 
 #[test]

@@ -629,6 +629,13 @@ mod tests {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.001 * (i + 1) as f64,
+                fireproof: StoryFireproof {
+                    steel_kind: FireproofKind::Spray,
+                    steel_column_area_weight: 0.001 * (i + 1) as f64,
+                    steel_beam_area_weight: 0.002,
+                    cft_kind: FireproofKind::Board,
+                    cft_column_area_weight: 0.003,
+                },
             })
             .collect();
         let dir = crate::test_util::test_tmp();
