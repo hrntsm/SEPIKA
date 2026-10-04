@@ -992,7 +992,7 @@ mod tests {
             height: 400.0,
             width: 200.0,
             thick: 9.0,
-            corner_r: 0.0,
+            corner_r: Some(0.0),
         };
         let mut model = make_model(Some(shape), None);
         model.materials[0].fy = None;

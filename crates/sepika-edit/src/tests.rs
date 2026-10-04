@@ -555,6 +555,7 @@ fn test_add_section_shape_roundtrip() {
     let mut model = empty_model();
     let mut stack = UndoStack::new();
     let shape = sepika_section::shape::SectionShape::SteelH {
+        root_r: Some(0.0),
         height: 300.0,
         width: 300.0,
         web_thick: 10.0,
@@ -584,11 +585,94 @@ fn test_add_section_shape_roundtrip() {
 }
 
 #[test]
+fn surface_radius_edit_preserves_properties_and_undo() {
+    use sepika_core::section_shape::SectionShape;
+    for shape in [
+        SectionShape::SteelH {
+            height: 400.0,
+            width: 200.0,
+            web_thick: 8.0,
+            flange_thick: 13.0,
+            root_r: None,
+        },
+        SectionShape::SteelBox {
+            height: 400.0,
+            width: 300.0,
+            thick: 12.0,
+            corner_r: None,
+        },
+        SectionShape::CftBox {
+            height: 400.0,
+            width: 300.0,
+            thick: 12.0,
+            corner_r: None,
+        },
+    ] {
+        let mut model = empty_model();
+        let mut section = shape.to_section(SectionId(0), "半径編集".into());
+        section.material = Some(MaterialId(3));
+        section.steel_material = Some(MaterialId(4));
+        section.floor = Some("2F".into());
+        let old = section.clone();
+        model.sections.push(section);
+        let mut stack = UndoStack::new();
+        for radius_mm in [Some(20.0), Some(0.0), None] {
+            stack.run(
+                &mut model,
+                Box::new(SetSectionSurfaceRadius {
+                    section: SectionId(0),
+                    radius_mm,
+                }),
+            );
+            let current = &model.sections[0];
+            assert_eq!(
+                (
+                    current.area,
+                    current.iy,
+                    current.iz,
+                    current.j,
+                    current.material,
+                    current.steel_material,
+                    &current.floor
+                ),
+                (
+                    old.area,
+                    old.iy,
+                    old.iz,
+                    old.j,
+                    old.material,
+                    old.steel_material,
+                    &old.floor
+                )
+            );
+            let expected = current.shape.clone();
+            stack.undo(&mut model);
+            stack.redo(&mut model);
+            assert_eq!(model.sections[0].shape, expected);
+        }
+        for radius_mm in [Some(-1.0), Some(151.0), Some(f64::NAN), Some(f64::INFINITY)] {
+            let before = model.sections[0].shape.clone();
+            SetSectionSurfaceRadius {
+                section: SectionId(0),
+                radius_mm,
+            }
+            .apply(&mut model);
+            assert_eq!(model.sections[0].shape, before);
+        }
+        stack.undo(&mut model);
+        stack.undo(&mut model);
+        stack.undo(&mut model);
+        assert_eq!(model.sections[0].shape, old.shape);
+    }
+}
+
+#[test]
 fn test_edit_section_shape_roundtrip() {
     let mut model = empty_model();
     let mut stack = UndoStack::new();
 
     let shape1 = sepika_section::shape::SectionShape::SteelH {
+        root_r: Some(0.0),
         height: 300.0,
         width: 300.0,
         web_thick: 10.0,
@@ -602,7 +686,7 @@ fn test_edit_section_shape_roundtrip() {
         height: 200.0,
         width: 200.0,
         thick: 12.0,
-        corner_r: 0.0,
+        corner_r: Some(0.0),
     };
     let cmd = EditSectionShape {
         section: SectionId(0),
@@ -625,7 +709,7 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
         height: 200.0,
         width: 200.0,
         thick: 12.0,
-        corner_r: 0.0,
+        corner_r: Some(0.0),
     };
     let mut model = empty_model();
     let mut section = shape.to_section(SectionId(0), "S".into());
@@ -670,6 +754,7 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
         });
     for new_shape in [
         sepika_section::shape::SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 16.0,
@@ -784,9 +869,10 @@ fn test_edit_section_shape_rejects_cft_for_non_target_element_reference() {
             height: 200.0,
             width: 200.0,
             thick: 12.0,
-            corner_r: 0.0,
+            corner_r: Some(0.0),
         };
         let new_shape = sepika_section::shape::SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 16.0,
@@ -827,6 +913,7 @@ fn test_duplicate_section_for_member_roundtrip() {
     let mut stack = UndoStack::new();
 
     let shape = sepika_section::shape::SectionShape::SteelH {
+        root_r: Some(0.0),
         height: 300.0,
         width: 300.0,
         web_thick: 10.0,
@@ -889,7 +976,7 @@ fn test_edit_section_shape_invalid_id_noop() {
         height: 200.0,
         width: 200.0,
         thick: 12.0,
-        corner_r: 0.0,
+        corner_r: Some(0.0),
     };
     let cmd = EditSectionShape {
         section: SectionId(99),
@@ -908,6 +995,7 @@ fn test_delete_add_section_roundtrip() {
     let mut stack = UndoStack::new();
 
     let shape = sepika_section::shape::SectionShape::SteelH {
+        root_r: Some(0.0),
         height: 300.0,
         width: 300.0,
         web_thick: 10.0,
@@ -2114,6 +2202,7 @@ fn make_story(id: u32, weight: Option<f64>) -> sepika_core::model::Story {
         dynamic_mass: None,
         standard_floor_load: None,
         column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
     }
 }
 
@@ -2238,6 +2327,7 @@ fn test_apply_stories_roundtrip_with_generated_masters() {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         }],
         node_story: vec![Some(StoryId(0)), Some(StoryId(0))],
         constraints: vec![Constraint::rigid_diaphragm(
@@ -4114,6 +4204,7 @@ fn test_failed_command_keeps_redo_history() {
 
 fn h_shape() -> sepika_section::shape::SectionShape {
     sepika_section::shape::SectionShape::SteelH {
+        root_r: Some(0.0),
         height: 300.0,
         width: 150.0,
         web_thick: 6.5,
@@ -4233,7 +4324,7 @@ fn test_edit_section_shape_keeps_name_and_floor() {
                 height: 300.0,
                 width: 300.0,
                 thick: 12.0,
-                corner_r: 0.0,
+                corner_r: Some(0.0),
             },
             frame_use: Some(sepika_core::model::FrameSectionUse::Column),
         }),
@@ -4302,6 +4393,7 @@ fn story_edit_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             })
             .collect(),
         ..Default::default()
@@ -4368,6 +4460,55 @@ fn 階共通柱仕上げの編集と階操作は設定を保持してundoでき�
     assert!(model.eq_ignoring_dofmap(&original));
     undo.redo(&mut model);
     assert!(model.eq_ignoring_dofmap(&configured));
+}
+
+#[test]
+fn story_fireproof_edit_undo_and_story_insertion() {
+    use sepika_core::model::{FireproofKind, StoryFireproof};
+    let mut model = story_edit_model(&[0.0, 3000.0], &[("1F", 0.0), ("2F", 3000.0)]);
+    let initial = model.clone();
+    let conditions = StoryFireproof {
+        steel_kind: FireproofKind::Spray,
+        steel_column_area_weight: 0.001,
+        steel_beam_area_weight: 0.002,
+        cft_kind: FireproofKind::Board,
+        cft_column_area_weight: 0.003,
+    };
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetStoryFireproof {
+            story: StoryId(1),
+            conditions
+        })
+    ));
+    assert_eq!(model.stories[1].fireproof, conditions);
+    for q in [-1.0, f64::NAN, f64::INFINITY] {
+        assert!(!undo.run(
+            &mut model,
+            Box::new(SetStoryFireproof {
+                story: StoryId(1),
+                conditions: StoryFireproof {
+                    steel_beam_area_weight: q,
+                    ..conditions
+                }
+            })
+        ));
+    }
+    undo.run(
+        &mut model,
+        Box::new(AddStory {
+            name: "中間階".into(),
+            elevation: 1500.0,
+        }),
+    );
+    assert_eq!(model.stories[1].fireproof, StoryFireproof::default());
+    assert_eq!(model.stories[2].fireproof, conditions);
+    undo.undo(&mut model);
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&initial));
+    undo.redo(&mut model);
+    assert_eq!(model.stories[1].fireproof, conditions);
 }
 
 #[test]
@@ -5562,6 +5703,7 @@ fn push_cft_section(model: &mut Model) -> SectionId {
     let id = SectionId(model.sections.len() as u32);
     model.sections.push(
         sepika_core::section_shape::SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 16.0,
@@ -5871,6 +6013,7 @@ fn set_floor_region_beam_section_rejects_cft() {
     let mut model = sm_base_model();
     model.sections.push(
         sepika_core::section_shape::SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 16.0,

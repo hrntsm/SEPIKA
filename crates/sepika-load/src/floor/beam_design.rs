@@ -556,13 +556,18 @@ fn point_dist_to_axis(p: [f64; 3], a: [f64; 3], b: [f64; 3]) -> f64 {
 /// 二次部材小梁の自重を単純梁の等分布荷重 [N/mm] として返す（設計重量）。
 ///
 /// 自重算定（`enumerate_self_weight`）と同じ設計単位体積重量（鋼材 78.5 kN/m³・
-/// その他は密度×g）と鉄骨割増。断面または材料が無ければ `None`。
+/// その他は密度×g）と鉄骨割増に、階共通被覆を加算する。被覆の解決失敗はエラー。
 pub fn beam_self_weight_udl(
     model: &Model,
     sm: &sepika_core::model::SecondaryMember,
-) -> Option<f64> {
-    let mat = model.secondary_material(sm)?;
-    let sec = model.sections.get(sm.section?.index())?;
+) -> Result<Option<f64>, String> {
+    let coating = crate::fireproof::secondary_line_weight(model, sm)?;
+    let (Some(mat), Some(sec)) = (
+        model.secondary_material(sm),
+        sm.section.and_then(|id| model.sections.get(id.index())),
+    ) else {
+        return Ok(None);
+    };
     let factor = if mat.fc.is_some() {
         1.0
     } else {
@@ -572,16 +577,24 @@ pub fn beam_self_weight_udl(
             .map(|c| c.effective_steel_factor())
             .unwrap_or(1.0)
     };
-    let w = mat.design_unit_weight_n_per_mm3() * sec.area * factor;
-    (w > 0.0).then_some(w)
+    let w = mat.design_unit_weight_n_per_mm3() * sec.area * factor + coating;
+    Ok((w > 0.0).then_some(w))
 }
 
 /// 二次部材小梁の物理質量相当の自重 [N/mm]（質量行列・動的解析用）。
 /// 物理密度（`Material::density` × g）に鉄骨割増を掛ける（主架構線材と同じ規則）。
-/// 断面または材料が無ければ `None`。
-pub fn beam_mass_equiv_udl(model: &Model, sm: &sepika_core::model::SecondaryMember) -> Option<f64> {
-    let mat = model.secondary_material(sm)?;
-    let sec = model.sections.get(sm.section?.index())?;
+/// 被覆は設計重量と同じ値を加算し、解決失敗はエラー。
+pub fn beam_mass_equiv_udl(
+    model: &Model,
+    sm: &sepika_core::model::SecondaryMember,
+) -> Result<Option<f64>, String> {
+    let coating = crate::fireproof::secondary_line_weight(model, sm)?;
+    let (Some(mat), Some(sec)) = (
+        model.secondary_material(sm),
+        sm.section.and_then(|id| model.sections.get(id.index())),
+    ) else {
+        return Ok(None);
+    };
     let factor = if mat.fc.is_some() {
         1.0
     } else {
@@ -591,8 +604,8 @@ pub fn beam_mass_equiv_udl(model: &Model, sm: &sepika_core::model::SecondaryMemb
             .map(|c| c.effective_steel_factor())
             .unwrap_or(1.0)
     };
-    let w = mat.density * sec.area * GRAVITY_MM_S2 * factor;
-    (w > 0.0).then_some(w)
+    let w = mat.density * sec.area * GRAVITY_MM_S2 * factor + coating;
+    Ok((w > 0.0).then_some(w))
 }
 
 /// 全床領域の [`distribute_region`] 出力から、実部材化していない小梁へ荷重を載せる。

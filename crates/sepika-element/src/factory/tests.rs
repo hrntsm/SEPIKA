@@ -600,6 +600,7 @@ fn test_resolve_member_hysteresis_and_flexural_springs() {
     );
 
     model.sections[0].shape = Some(SectionShape::SteelH {
+        root_r: Some(0.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,
@@ -982,6 +983,7 @@ fn test_steel_beam_flexural_spring_buckling_degrades() {
     };
     model.elements.push(beam.clone());
     model.sections[0].shape = Some(SectionShape::SteelH {
+        root_r: Some(0.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,

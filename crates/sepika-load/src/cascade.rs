@@ -394,6 +394,8 @@ pub fn solve_with_basis(
 ) -> Result<SecondaryTransfer, crate::floor::FloorDistributionError> {
     if include_self_weight {
         for sm in model.beams() {
+            crate::fireproof::secondary_line_weight(model, sm)
+                .map_err(crate::floor::FloorDistributionError::SelfWeight)?;
             if sm.section.is_some() && !model.secondary_member_materialized(sm) && !sm.is_detached()
             {
                 if model.secondary_material(sm).is_none() {
@@ -497,7 +499,9 @@ pub fn solve_with_basis(
         }
         if include_self_weight {
             if let Some(sm) = by_key.get(&ax.key) {
-                if let Some(w) = self_weight_udl(sm) {
+                if let Some(w) =
+                    self_weight_udl(sm).map_err(crate::floor::FloorDistributionError::SelfWeight)?
+                {
                     let [a, b] =
                         sepika_core::face_distance::secondary_self_weight_interval(model, sm)
                             .map_err(crate::floor::FloorDistributionError::SelfWeight)?;

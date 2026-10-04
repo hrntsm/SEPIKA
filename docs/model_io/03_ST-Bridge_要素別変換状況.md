@@ -98,9 +98,10 @@ Post（間柱）が `StbSecColumn_*`、Brace（ブレース）が `StbSecBrace_*
 
 | 形鋼要素 | 取り込み | 書き出し | 内部形状・備考 |
 |---|:--:|:--:|---|
-| `StbSecRoll-H` / `StbSecBuild-H` | ✅ | ✅ | H 形鋼（`SteelH`）。書き出しは `StbSecRoll-H` |
+| `StbSecRoll-H` | ✅ | ✅ | `SteelH` のルート半径 `r` を保持。書き出しには既知の正半径が必要 |
+| `StbSecBuild-H` | ✅ | ✅ | 対称断面も `SteelBuiltH` の板組輪郭として保持 |
 | `StbSecBuild-H`（上下フランジ相違） | ✅ | ✅ | 非対称組立 H（`SteelBuiltH`）。下フランジは方言属性 `B2`/`t2_lower`。第三者は上フランジの対称 H として読む |
-| `StbSecRoll-BOX` / `StbSecBuild-BOX` | ✅ | ✅ | 角形鋼管（`SteelBox`）。角部外半径 `r` も往復する（属性がなければ角部直角として 0） |
+| `StbSecRoll-BOX` / `StbSecBuild-BOX` | ✅ | ⚠️ | `SteelBox` の外角半径 `r` を保持。圧延の欠落半径は未知、組立は明示した直角。書き出しには既知の正半径が必要 |
 | `StbSecPipe` / `StbSecRoll-Pipe` / `StbSecBuild-Pipe` | ✅ | ✅ | 鋼管（`SteelPipe`）。書き出しは `StbSecPipe` |
 | `StbSecRoll-L` | ✅ | ✅ | 山形鋼（`SteelAngle`） |
 | `StbSecRoll-C` | ✅ | ✅ | 溝形鋼（`SteelChannel`） |
@@ -109,6 +110,19 @@ Post（間柱）が `StbSecColumn_*`、Brace（ブレース）が `StbSecBrace_*
 | `StbSecRoll-RoundBar` | ✅ | ✅ | 中実丸鋼（`SteelRoundBar`）。直径 `D` がなければ半径 `R` を 2 倍する |
 | `StbSecRoll-LipC` | ✅ | ✅ | リップ溝形鋼（`SteelLipChannel`）。幅厚比・部材ランク検定は対象外 |
 | 組立断面（2L・2C・十字）・リップ Z・その他軽量形鋼 | ❌ | ❌ | 形鋼参照を解決できず、断面性能ゼロの断面として警告する |
+
+H と Box の圧延断面で `r` 属性が欠落した場合は、モデルを取り込んで半径を未知のまま保持します。
+被覆の実外周が必要になった時点で算定エラーとなるため、欠落を直角として黙って読み替えません。
+Box を角形 CFT へ変換する経路でも、既知・未知の半径を引き継ぎます。
+
+ST-Bridge 2.0.2 の圧延 H・Box は正の `r` が必須です。
+未知または明示した 0 はこの形式で表せないため、書き出しをエラーにします。
+フランジ厚・板厚を便宜半径にせず、出力の都合で製法を組立へ変更することもありません。
+不正半径も出力エラーとし、同寸法で半径だけ異なる図形は参照名を分けて保持します。
+未知と 0 を含む完全な保存には OViKA を使用してください。
+
+カタログの H・Box は名称でなく CSV の `r` 列から半径を保持します。
+カタログの A・I・J 等は表値を維持し、半径保持を理由に再計算値へ置き換えません。
 
 鋼断面の図形参照（`StbSecSteelColumn_S_Same`・`StbSecSteelBeam_S_Straight` など）は、
 `shape`・`shape_start`・`shape_center`・`shape_main` の順に見て、最初に見つかった形鋼名を採ります。

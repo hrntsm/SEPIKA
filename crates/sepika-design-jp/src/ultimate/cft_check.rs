@@ -188,6 +188,7 @@ pub fn cft_mu_nm(
             height,
             width,
             thick,
+            ..
         } => {
             if weak_axis {
                 (width, height, thick)

@@ -63,6 +63,7 @@ fn ctx_column(term: LoadTerm) -> DesignCtx {
 
 fn cft_box_section(height: f64, width: f64, thick: f64) -> Section {
     make_section(SectionShape::CftBox {
+        corner_r: Some(0.0),
         height,
         width,
         thick,
@@ -335,6 +336,7 @@ fn test_cft_box_steel_fc_uses_fixed_e_steel() {
     let design = CftDesign;
 
     let shape = SectionShape::CftBox {
+        corner_r: Some(0.0),
         height,
         width,
         thick,
@@ -528,6 +530,7 @@ fn test_cft_box_seismic_qd1_governs_when_smaller() {
 
     // 期待値: QD1 = 2·Mu(N=0)/h′（強軸。qy に対応）。
     let shape = SectionShape::CftBox {
+        corner_r: Some(0.0),
         height,
         width,
         thick,

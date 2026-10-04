@@ -4,6 +4,7 @@ pub mod cascade;
 /// 荷重ケースの意味（`LoadCaseKind`）と長期判定を持つ core に置き、
 /// 新規モデルの既定組合せと同じ実装を使う。
 pub use sepika_core::load_combo as combo;
+mod fireproof;
 pub mod floor;
 pub mod live_load;
 pub mod secondary;

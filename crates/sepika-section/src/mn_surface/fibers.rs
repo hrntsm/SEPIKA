@@ -285,6 +285,7 @@ pub fn plastic_fibers_at(
             width,
             web_thick,
             flange_thick,
+            ..
         } => {
             mesh_h_plates(
                 &mut fibers,
@@ -566,6 +567,7 @@ pub fn plastic_fibers_at(
             height,
             width,
             thick,
+            ..
         } => {
             mesh_box_plates(&mut fibers, height, width, thick, target, steel);
             mesh_rect(

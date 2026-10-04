@@ -99,6 +99,7 @@ fn test_beam_new_src_cft_composite_props() {
         steel_flange_thick: 12.0,
     };
     let cft_shape = SectionShape::CftBox {
+        corner_r: Some(0.0),
         height: 400.0,
         width: 400.0,
         thick: 12.0,
@@ -792,6 +793,7 @@ fn test_beam_new_composite_steel_beam_averages_stiffness() {
         support_spring: None,
     };
     let shape = SectionShape::SteelH {
+        root_r: Some(0.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,

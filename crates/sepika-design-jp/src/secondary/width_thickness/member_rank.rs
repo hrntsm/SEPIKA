@@ -284,6 +284,7 @@ pub fn s_member_rank_by_kihon(
             width,
             web_thick,
             flange_thick,
+            ..
         } => {
             if flange_thick <= 0.0 || web_thick <= 0.0 {
                 return None;

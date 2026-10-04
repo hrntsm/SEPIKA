@@ -675,6 +675,7 @@ mod tests {
     #[test]
     fn test_square_cft_column_design_weight_includes_filling_concrete() {
         let model = cft_column_model(SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 16.0,
@@ -726,6 +727,7 @@ mod tests {
     #[test]
     fn test_dl_self_weight_case_includes_cft_filling_concrete() {
         let model = cft_column_model(SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 16.0,
@@ -759,6 +761,7 @@ mod tests {
     #[test]
     fn test_generate_stories_seismic_weight_includes_cft_filling_concrete() {
         let model = cft_column_model(SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 16.0,
@@ -788,6 +791,7 @@ mod tests {
             ..Default::default()
         };
         let mut model = cft_column_model(SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 16.0,
@@ -822,6 +826,7 @@ mod tests {
     /// （area=0・せい `depths`）を持つモデル。主材料は鋼材区分＋充填 Fc36。
     fn cft_base_column_with_base_beams(depths: &[f64]) -> Model {
         let mut column = SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 16.0,

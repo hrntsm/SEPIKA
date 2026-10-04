@@ -24,6 +24,7 @@ pub(crate) use crate::rc::{shear_alpha, AxisProps as SrcAxisProps};
 /// 求める（H 形鋼: `sA`, 強軸 `sZ`, 弱軸 `sZ`）。
 fn steel_h_props(height: f64, width: f64, web_thick: f64, flange_thick: f64) -> (f64, f64, f64) {
     let shape = SectionShape::SteelH {
+        root_r: None,
         height,
         width,
         web_thick,

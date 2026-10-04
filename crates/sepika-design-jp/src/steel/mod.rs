@@ -103,6 +103,7 @@ fn shape_of(sec: &Section) -> (ShapeCategory, f64, f64) {
 
 /// せん断有効断面積 `(Ay, Az)` [mm²]（強軸 Qy・弱軸 Qz。梁・柱で共用の単一定義）。
 /// 断面形状ごとに算定する（角部外半径 r は断面定義時の入力値）。
+/// SteelBox の外角半径は検定入口で既知・有効と確認済みであること。
 fn shear_area_2d(shape: ShapeCategory, sec: &Section, tf: f64, tw: f64) -> (f64, f64) {
     let h = sec.depth;
     let b = sec.width;
@@ -115,7 +116,9 @@ fn shear_area_2d(shape: ShapeCategory, sec: &Section, tf: f64, tw: f64) -> (f64,
         ShapeCategory::Box => {
             let t = tw;
             let r = match &sec.shape {
-                Some(SectionShape::SteelBox { corner_r, .. }) => corner_r.max(0.0),
+                Some(SectionShape::SteelBox { corner_r, .. }) => {
+                    corner_r.expect("角形鋼管のせん断検定入口で外角半径を確認済み")
+                }
                 _ => 0.0,
             };
             let (ay, az) = if r > 1e-9 {
@@ -182,6 +185,26 @@ impl DesignCheck for SteelDesign {
         mat: &Material,
         ctx: &DesignCtx,
     ) -> CheckOutcome {
+        if matches!(ctx.kind, MemberKind::Girder | MemberKind::Column) {
+            if let Some(shape @ SectionShape::SteelBox { corner_r, .. }) = sec.shape.as_ref() {
+                if let Err(error) = shape.validate_surface_radius() {
+                    return CheckOutcome::Skipped {
+                        reason: format!(
+                            "鋼せん断検定: 断面 {} の角形鋼管外角半径または適用寸法が不正です。{error}",
+                            sec.name
+                        ),
+                    };
+                }
+                if corner_r.is_none() {
+                    return CheckOutcome::Skipped {
+                        reason: format!(
+                            "鋼せん断検定: 断面 {} の角形鋼管外角半径が未知です。半径を入力してください（0は明示した直角）",
+                            sec.name
+                        ),
+                    };
+                }
+            }
+        }
         let t = plate_thickness(sec);
         let f = steel_f_value_prefix(&mat.name, t)
             .or(mat.fy)
@@ -194,6 +217,133 @@ impl DesignCheck for SteelDesign {
             MemberKind::Brace => brace::check_brace(forces, sec, mat, ctx, f, term),
         };
         CheckOutcome::Checked(cr)
+    }
+}
+
+#[cfg(test)]
+mod surface_radius_tests {
+    use super::*;
+    use crate::LoadTerm;
+    use sepika_core::ids::SectionId;
+
+    #[test]
+    fn box_shear_requires_known_radius_for_girders_and_columns() {
+        let forces = MemberForcesAt {
+            pos: 0.5,
+            n: 0.0,
+            qy: 150_000.0,
+            qz: 0.0,
+            my: 0.0,
+            mz: 0.0,
+        };
+        let material = test_support::mat("SN400");
+        for kind in [MemberKind::Girder, MemberKind::Column] {
+            let ctx = DesignCtx {
+                kind,
+                term: LoadTerm::Long,
+                length: 0.0,
+                ..Default::default()
+            };
+            for radius in [None, Some(0.0), Some(60.0), Some(150.0)] {
+                let section = SectionShape::SteelBox {
+                    height: 400.0,
+                    width: 300.0,
+                    thick: 12.0,
+                    corner_r: radius,
+                }
+                .to_section(SectionId(0), "BOX半径検証".into());
+                let outcome = SteelDesign.check(&forces, &section, &material, &ctx);
+                match radius {
+                    None => match outcome {
+                        CheckOutcome::Skipped { reason } => {
+                            assert!(reason.contains("外角半径が未知"));
+                            assert!(reason.contains("入力してください"));
+                        }
+                        CheckOutcome::Checked(_) => panic!("半径未知で検定済みを返してはならない"),
+                    },
+                    Some(r) => {
+                        let ay = if r == 0.0 {
+                            2.0 * 12.0 * (400.0 - 2.0 * 12.0)
+                        } else {
+                            2.0 * (12.0 * (400.0 - 2.0 * r)
+                                + std::f64::consts::PI * 12.0 * (2.0 * r - 12.0) / 4.0)
+                        };
+                        let expected = forces.qy / ay / steel_fs(235.0, LoadTerm::Long);
+                        assert!((outcome.unwrap_checked().ratio() - expected).abs() < 1e-9);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn box_shear_rejects_invalid_radius_for_girders_and_columns() {
+        let forces = MemberForcesAt {
+            pos: 0.5,
+            n: 0.0,
+            qy: 150_000.0,
+            qz: 150_000.0,
+            my: 0.0,
+            mz: 0.0,
+        };
+        let material = test_support::mat("SN400");
+        for kind in [MemberKind::Girder, MemberKind::Column] {
+            let ctx = DesignCtx {
+                kind,
+                ..Default::default()
+            };
+            for r in [
+                -1.0,
+                f64::NAN,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                150.1,
+                300.0,
+            ] {
+                let section = SectionShape::SteelBox {
+                    height: 400.0,
+                    width: 300.0,
+                    thick: 12.0,
+                    corner_r: Some(r),
+                }
+                .to_section(SectionId(0), "BOX不正半径検証".into());
+                match SteelDesign.check(&forces, &section, &material, &ctx) {
+                    CheckOutcome::Skipped { reason } => {
+                        assert!(reason.contains("BOX不正半径検証"));
+                        assert!(reason.contains("外角半径"));
+                        assert!(reason.contains("不正"));
+                    }
+                    CheckOutcome::Checked(_) => panic!("不正半径で検定済みを返してはならない: {r}"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn axial_only_brace_does_not_require_surface_radius() {
+        let section = SectionShape::SteelBox {
+            height: 400.0,
+            width: 300.0,
+            thick: 12.0,
+            corner_r: None,
+        }
+        .to_section(SectionId(0), "BOXブレース".into());
+        let forces = MemberForcesAt {
+            pos: 0.5,
+            n: 100_000.0,
+            qy: 0.0,
+            qz: 0.0,
+            my: 0.0,
+            mz: 0.0,
+        };
+        let ctx = DesignCtx {
+            kind: MemberKind::Brace,
+            ..Default::default()
+        };
+        assert!(matches!(
+            SteelDesign.check(&forces, &section, &test_support::mat("SN400"), &ctx),
+            CheckOutcome::Checked(_)
+        ));
     }
 }
 
@@ -248,6 +398,7 @@ pub(crate) mod test_support {
     /// `SectionShape::SteelH` 付きの断面（実寸 tf/tw を持つ正規経路の検証用）。
     pub(crate) fn h_section(h: f64, b: f64, tw: f64, tf: f64) -> Section {
         let shape = SectionShape::SteelH {
+            root_r: Some(0.0),
             height: h,
             width: b,
             web_thick: tw,

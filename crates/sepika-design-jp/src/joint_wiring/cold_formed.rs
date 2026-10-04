@@ -70,6 +70,7 @@ pub(super) fn check_cold_formed(
                     height,
                     width,
                     thick,
+                    ..
                 }) => (height, width, thick),
                 _ => return None,
             };
@@ -104,6 +105,7 @@ pub(super) fn check_cold_formed(
                         width,
                         web_thick,
                         flange_thick,
+                        ..
                     }) => {
                         let fb = crate::steel::steel_f_value_prefix(
                             &b.mat.name,

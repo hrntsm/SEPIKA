@@ -16,6 +16,7 @@ impl SectionShape {
                 width,
                 web_thick,
                 flange_thick,
+                ..
             } => 2.0 * width * flange_thick + (height - 2.0 * flange_thick) * web_thick,
             SectionShape::SteelBox {
                 height,
@@ -83,6 +84,7 @@ impl SectionShape {
                 height,
                 width,
                 thick,
+                ..
             } => width * height - (width - 2.0 * thick) * (height - 2.0 * thick),
             SectionShape::CftPipe { outer_dia, thick } => {
                 let r = outer_dia / 2.0;
@@ -110,6 +112,7 @@ impl SectionShape {
                 width,
                 web_thick,
                 flange_thick,
+                ..
             } => Some(
                 width * flange_thick * (height - flange_thick)
                     + web_thick * (height - 2.0 * flange_thick).powi(2) / 4.0,
@@ -191,6 +194,7 @@ impl SectionShape {
                 width,
                 web_thick,
                 flange_thick,
+                ..
             } => {
                 let hw = height - 2.0 * flange_thick;
                 (width * height.powi(3) - (width - web_thick) * hw.powi(3)) / 12.0
@@ -326,6 +330,7 @@ impl SectionShape {
                 height,
                 width,
                 thick,
+                ..
             } => {
                 let hi = height - 2.0 * thick;
                 (width * height.powi(3) - (width - 2.0 * thick) * hi.powi(3)) / 12.0
@@ -349,6 +354,7 @@ impl SectionShape {
                 width,
                 web_thick,
                 flange_thick,
+                ..
             } => {
                 let hw = height - 2.0 * flange_thick;
                 (2.0 * flange_thick * width.powi(3) + hw * web_thick.powi(3)) / 12.0
@@ -472,6 +478,7 @@ impl SectionShape {
                 height,
                 width,
                 thick,
+                ..
             } => {
                 let wi = width - 2.0 * thick;
                 (height * width.powi(3) - (height - 2.0 * thick) * wi.powi(3)) / 12.0
@@ -489,6 +496,7 @@ impl SectionShape {
                 width,
                 web_thick,
                 flange_thick,
+                ..
             } => {
                 (2.0 * width * flange_thick.powi(3)
                     + (height - 2.0 * flange_thick) * web_thick.powi(3))
@@ -564,6 +572,7 @@ impl SectionShape {
                 height,
                 width,
                 thick,
+                ..
             } => {
                 let a0 = (height - thick) * (width - thick);
                 let perim = 2.0 * (height + width - 2.0 * thick);

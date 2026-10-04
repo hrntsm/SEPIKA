@@ -438,6 +438,7 @@ fn test_steel_member_weight() {
     // S 造: W = L×A×7.85（t/m³）。
     let mut model = rc_portal_model();
     let shape = SectionShape::SteelH {
+        root_r: Some(0.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,

@@ -308,12 +308,14 @@ fn validate_section_geometry(section: &Section) -> Result<(), String> {
         }
     };
     let mut dimensions = Vec::new();
+    shape.validate_surface_radius()?;
     match shape {
         SectionShape::SteelH {
             height,
             width,
             web_thick,
             flange_thick,
+            ..
         }
         | SectionShape::SteelChannel {
             height,
@@ -352,7 +354,9 @@ fn validate_section_geometry(section: &Section) -> Result<(), String> {
             corner_r,
         } => {
             dimensions.extend([("height", *height), ("width", *width), ("thick", *thick)]);
-            nonnegative("corner_r", *corner_r)?;
+            if let Some(r) = corner_r {
+                nonnegative("corner_r", *r)?;
+            }
             relation("height > 2 * thick", *height > 2.0 * *thick)?;
             relation("width > 2 * thick", *width > 2.0 * *thick)?;
         }
@@ -360,6 +364,7 @@ fn validate_section_geometry(section: &Section) -> Result<(), String> {
             height,
             width,
             thick,
+            ..
         } => {
             dimensions.extend([("height", *height), ("width", *width), ("thick", *thick)]);
             relation("height > 2 * thick", *height > 2.0 * *thick)?;
@@ -866,6 +871,7 @@ mod tests {
     #[test]
     fn cftは主材料のfcからコア密度を導く() {
         let shape = SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 12.0,
@@ -890,6 +896,7 @@ mod tests {
     #[test]
     fn cftはfc未設定なら質量特性を解決できない() {
         let shape = SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 12.0,
@@ -911,6 +918,7 @@ mod tests {
     #[test]
     fn cftは鋼管主材料の密度と充填コンクリートの密度を分離する() {
         let shape = SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 12.0,
@@ -935,6 +943,7 @@ mod tests {
     #[test]
     fn cftの主材料が鋼材ならエラーになる() {
         let shape = SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 12.0,
@@ -956,6 +965,7 @@ mod tests {
     #[test]
     fn cftはfcの非有限値を受け付けない() {
         let shape = SectionShape::CftBox {
+            corner_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             thick: 12.0,
@@ -1398,6 +1408,7 @@ mod tests {
         let steel = material(0, MaterialCategory::Steel, 8.0, None);
         let concrete = material(1, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
         let h = SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 400.0,
             width: 200.0,
             web_thick: 9.0,
@@ -1414,6 +1425,7 @@ mod tests {
 
         for shape in [
             SectionShape::SteelH {
+                root_r: Some(0.0),
                 height: 24.0,
                 width: 200.0,
                 web_thick: 9.0,
@@ -1427,7 +1439,7 @@ mod tests {
                 height: 24.0,
                 width: 200.0,
                 thick: 12.0,
-                corner_r: 0.0,
+                corner_r: Some(0.0),
             },
         ] {
             let section = shape.to_section(SectionId(1), "invalid-steel".into());

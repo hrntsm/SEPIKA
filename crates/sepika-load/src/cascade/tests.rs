@@ -166,7 +166,9 @@ fn rcとs小梁の支持幅400は内法3600に元の線荷重を載せる() {
         }
         let transfer = solve(&model, |_| 0.0, true).unwrap();
         let member = &transfer.members[&SecondaryMemberId(10)];
-        let w = beam_self_weight_udl(&model, &model.unassigned_beams[0]).unwrap();
+        let w = beam_self_weight_udl(&model, &model.unassigned_beams[0])
+            .unwrap()
+            .unwrap();
         assert_eq!(member.span, 4000.0);
         assert_eq!(
             member.member_loads,
@@ -193,6 +195,157 @@ fn rcとs小梁の支持幅400は内法3600に元の線荷重を載せる() {
             .unwrap(),
             [200.0, 3800.0]
         );
+    }
+}
+
+#[test]
+fn secondary_fireproof_support_reactions_design_loads_and_mass() {
+    use sepika_core::model::{FireproofKind, FrameSectionUse};
+    use sepika_core::section_shape::SectionShape;
+    for cantilever in [false, true] {
+        let mut model = face_model(4000.0, [400.0; 2]);
+        for sec in &mut model.sections {
+            sec.frame_use = Some(FrameSectionUse::Girder);
+            sec.shape = Some(SectionShape::SteelPipe {
+                outer_dia: 400.0,
+                thick: 12.0,
+            });
+        }
+        let mut beam = SectionShape::SteelH {
+            height: 300.0,
+            width: 100.0,
+            web_thick: 6.0,
+            flange_thick: 9.0,
+            root_r: Some(10.0),
+        }
+        .to_section(SectionId(2), "小梁".into());
+        beam.material = Some(MaterialId(0));
+        model.sections.push(beam);
+        model.unassigned_beams[0].section = Some(SectionId(2));
+        if cantilever {
+            model.unassigned_beams[0].ends = sepika_core::model::SecondaryMemberEnds::Cantilever {
+                support: sepika_core::model::SecondaryMemberAnchor {
+                    support: sepika_core::model::SupportMemberId::Primary(ElemId(0)),
+                    position: 0.5,
+                },
+                free_end_vector: [0.0, 4000.0],
+            };
+        }
+        model.load_cfg = Some(LoadCfg {
+            steel_weight_factor: 1.8,
+            ..Default::default()
+        });
+        model.stories = vec![sepika_core::model::Story {
+            id: sepika_core::ids::StoryId(0),
+            name: "1F".into(),
+            elevation: 0.0,
+            node_ids: vec![],
+            seismic_weight: None,
+            weight_override: None,
+            structure: Default::default(),
+            level_kind: Default::default(),
+            dynamic_mass: None,
+            standard_floor_load: None,
+            column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
+        }];
+        let baseline = model.clone();
+        let base_transfer = solve(&baseline, |_| 0.0, true).unwrap();
+        let base_mass =
+            solve_with_basis(&baseline, |_| 0.0, true, SelfWeightBasis::MassEquiv).unwrap();
+        model.stories[0].fireproof.steel_kind = FireproofKind::Spray;
+        model.stories[0].fireproof.steel_beam_area_weight = 0.002;
+        let transfer = solve(&model, |_| 0.0, true).unwrap();
+        let physical = solve_with_basis(&model, |_| 0.0, true, SelfWeightBasis::MassEquiv).unwrap();
+        let key = SecondaryMemberId(10);
+        let member = &transfer.members[&key];
+        let interval = sepika_core::face_distance::secondary_self_weight_interval(
+            &model,
+            &model.unassigned_beams[0],
+        )
+        .unwrap();
+        let p = 988.0 - (8.0 - 2.0 * std::f64::consts::PI) * 10.0;
+        let extra = 0.002 * p * (interval[1] - interval[0]);
+        assert!(
+            (member.reactions.iter().sum::<f64>()
+                - base_transfer.members[&key].reactions.iter().sum::<f64>()
+                - extra)
+                .abs()
+                < 1e-7
+        );
+        assert!(
+            (physical.members[&key].reactions.iter().sum::<f64>()
+                - base_mass.members[&key].reactions.iter().sum::<f64>()
+                - extra)
+                .abs()
+                < 1e-7
+        );
+        if cantilever {
+            assert_eq!(member.reactions[1], 0.0);
+        } else {
+            for end in 0..2 {
+                assert!(
+                    (member.reactions[end]
+                        - base_transfer.members[&key].reactions[end]
+                        - extra / 2.0)
+                        .abs()
+                        < 1e-7
+                );
+            }
+        }
+        let loads = &member.member_loads;
+        let old_loads = &base_transfer.members[&key].member_loads;
+        let extremes = if cantilever {
+            crate::floor::cantilever_extremes
+        } else {
+            crate::floor::simple_beam_extremes
+        };
+        assert!(
+            extremes(loads, member.span, 205000.0, 1.0e8).m_max
+                > extremes(old_loads, member.span, 205000.0, 1.0e8).m_max
+        );
+        let new_gen = crate::story_gen::generate_stories(&model, None).unwrap();
+        let old_gen = crate::story_gen::generate_stories(&baseline, None).unwrap();
+        let total_extra = extra + 0.002 * std::f64::consts::PI * 400.0 * 4000.0;
+        assert!(
+            (new_gen.stories[0].seismic_weight.unwrap()
+                - old_gen.stories[0].seismic_weight.unwrap()
+                - total_extra)
+                .abs()
+                < 1e-7
+        );
+        assert!(
+            (new_gen.stories[0].dynamic_mass.unwrap().mass_equiv_weight_n
+                - old_gen.stories[0].dynamic_mass.unwrap().mass_equiv_weight_n
+                - total_extra)
+                .abs()
+                < 1e-7
+        );
+        let mut post = model.unassigned_beams[0].clone();
+        post.kind = SecondaryMemberKind::Post;
+        assert_eq!(
+            beam_self_weight_udl(&model, &post).unwrap(),
+            beam_self_weight_udl(&baseline, &post).unwrap()
+        );
+        model.sections[2].shape = None;
+        assert!(solve(&model, |_| 0.0, true).is_err());
+        assert!(beam_self_weight_udl(&model, &model.unassigned_beams[0]).is_err());
+        assert!(beam_mass_equiv_udl(&model, &model.unassigned_beams[0]).is_err());
+        model.sections[2].shape = Some(SectionShape::SteelH {
+            height: 300.0,
+            width: 100.0,
+            web_thick: 6.0,
+            flange_thick: 9.0,
+            root_r: None,
+        });
+        assert!(solve(&model, |_| 0.0, true).is_err());
+        assert!(beam_self_weight_udl(&model, &model.unassigned_beams[0]).is_err());
+        assert!(beam_mass_equiv_udl(&model, &model.unassigned_beams[0]).is_err());
+        assert!(solve(&model, |_| 0.0, false).is_ok());
+        model.sections[2].shape = None;
+        model.sections[2].material = None;
+        assert!(beam_self_weight_udl(&model, &model.unassigned_beams[0]).is_err());
+        assert!(beam_mass_equiv_udl(&model, &model.unassigned_beams[0]).is_err());
     }
 }
 

@@ -12,6 +12,16 @@ pub(super) fn steel_shape_from(tag: &str, a: &Attrs) -> Option<SectionShape> {
             let web_thick = a_(&["t1"])?;
             let upper_width = a_(&["B"])?;
             let upper_thick = a_(&["t2"])?;
+            if tag == "StbSecBuild-H" {
+                return Some(SectionShape::SteelBuiltH {
+                    height,
+                    upper_width,
+                    upper_thick,
+                    lower_width: a_(&["B2", "B_lower"]).unwrap_or(upper_width),
+                    lower_thick: a_(&["t2_lower", "t2_2"]).unwrap_or(upper_thick),
+                    web_thick,
+                });
+            }
             match (a_(&["B2", "B_lower"]), a_(&["t2_lower", "t2_2"])) {
                 (Some(lower_width), Some(lower_thick)) => Some(SectionShape::SteelBuiltH {
                     height,
@@ -26,12 +36,17 @@ pub(super) fn steel_shape_from(tag: &str, a: &Attrs) -> Option<SectionShape> {
                     width: upper_width,
                     web_thick,
                     flange_thick: upper_thick,
+                    root_r: a_(&["r"]),
                 }),
             }
         }
         t if t.ends_with("-BOX") => {
             let thick = a_(&["t", "t1"])?;
-            let corner_r = a_(&["r"]).unwrap_or(0.0);
+            let corner_r = if tag == "StbSecBuild-BOX" {
+                Some(0.0)
+            } else {
+                a_(&["r"])
+            };
             Some(SectionShape::SteelBox {
                 height: a_(&["A"])?,
                 width: a_(&["B"])?,

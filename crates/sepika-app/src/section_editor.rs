@@ -10,7 +10,7 @@ use sepika_core::ids::SectionId;
 use sepika_core::model::FrameSectionUse;
 use sepika_edit::{
     AddCatalogSection, AddSectionShape, EditSectionShape, SectionField, SetSectionField,
-    SetSectionName,
+    SetSectionName, SetSectionSurfaceRadius,
 };
 use sepika_section::catalog::CatalogShape;
 use sepika_section::shape::{
@@ -37,8 +37,8 @@ pub struct SectionEditorDraft {
     pub tw: f64,
     pub tf: f64,
     pub t: f64,
-    /// 角形鋼管の角部外半径 r [mm]（0 は角部を直角とみなす）。
-    pub r: f64,
+    /// 被覆外周用半径 [mm]。None は未知。
+    pub r: Option<f64>,
     pub lip: f64,
     pub upper_width: f64,
     pub upper_thick: f64,
@@ -78,7 +78,7 @@ impl Default for SectionEditorDraft {
             tw: 8.0,
             tf: 12.0,
             t: 12.0,
-            r: 0.0,
+            r: None,
             lip: 20.0,
             upper_width: 200.0,
             upper_thick: 12.0,
@@ -311,6 +311,45 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
         app.ui.scoped.section_draft.synced_focus = None;
     }
 
+    let focused_radius = focused.and_then(|sec| {
+        let radius = match sec.shape.as_ref()? {
+            SectionShape::SteelH { root_r, .. } => *root_r,
+            SectionShape::SteelBox { corner_r, .. } | SectionShape::CftBox { corner_r, .. } => {
+                *corner_r
+            }
+            _ => return None,
+        };
+        Some((sec.id, radius, sec.shape.clone()?))
+    });
+    if let Some((section, mut radius, mut shape)) = focused_radius {
+        ui.horizontal(|ui| {
+            ui.label("選択断面の被覆外周用半径 [mm]（0＝直角）");
+            if radius_field(ui, &mut radius) {
+                match &mut shape {
+                    SectionShape::SteelH { root_r, .. } => *root_r = radius,
+                    SectionShape::SteelBox { corner_r, .. }
+                    | SectionShape::CftBox { corner_r, .. } => *corner_r = radius,
+                    _ => {}
+                }
+                match shape.validate_surface_radius() {
+                    Ok(()) => {
+                        app.core.scoped.undo.run(
+                            &mut app.core.model,
+                            Box::new(SetSectionSurfaceRadius {
+                                section,
+                                radius_mm: radius,
+                            }),
+                        );
+                        app.core.scoped.staleness.mark_edited();
+                    }
+                    Err(error) => {
+                        ui.colored_label(egui::Color32::RED, error);
+                    }
+                }
+            }
+        });
+    }
+
     let draft = &mut app.ui.scoped.section_draft;
 
     ui.group(|ui| {
@@ -391,9 +430,9 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
         ui.separator();
 
         let shape = build_shape(draft);
-        let rebar_validation = shape.validate_rebar();
+        let rebar_validation = shape.validate_rebar().map_err(|e| e.to_string()).and_then(|()| shape.validate_surface_radius());
         if let Err(error) = &rebar_validation {
-            ui.colored_label(egui::Color32::RED, format!("配筋エラー: {error}"));
+            ui.colored_label(egui::Color32::RED, format!("断面入力エラー: {error}"));
         }
         let sec = shape.to_section(
             SectionId(app.core.model.sections.len() as u32),
@@ -572,6 +611,8 @@ fn steel_h_fields(ui: &mut egui::Ui, d: &mut SectionEditorDraft) {
         num_field(ui, &mut d.tw);
         ui.label("tf:");
         num_field(ui, &mut d.tf);
+        ui.label("ルート半径 [mm]（0＝直角）:");
+        radius_field(ui, &mut d.r);
     });
 }
 
@@ -584,8 +625,22 @@ fn steel_box_fields(ui: &mut egui::Ui, d: &mut SectionEditorDraft) {
         ui.label("t 板厚:");
         num_field(ui, &mut d.t);
         ui.label("r 角部半径:");
-        num_field(ui, &mut d.r);
+        radius_field(ui, &mut d.r);
     });
+}
+
+fn radius_field(ui: &mut egui::Ui, radius: &mut Option<f64>) -> bool {
+    let mut known = radius.is_some();
+    let mut changed = ui.checkbox(&mut known, "半径既知").changed();
+    if changed {
+        *radius = known.then_some(0.0);
+    }
+    if let Some(value) = radius {
+        changed |= ui.add(egui::DragValue::new(value).speed(1.0)).changed();
+    } else {
+        ui.label("未知");
+    }
+    changed
 }
 
 fn steel_angle_fields(ui: &mut egui::Ui, d: &mut SectionEditorDraft) {
@@ -832,6 +887,7 @@ fn build_shape(d: &SectionEditorDraft) -> SectionShape {
             width: d.b,
             web_thick: d.tw,
             flange_thick: d.tf,
+            root_r: d.r,
         },
         ShapeKind::SteelBox => SectionShape::SteelBox {
             height: d.h,
@@ -997,19 +1053,41 @@ mod tests {
             width,
             web_thick,
             flange_thick,
+            root_r,
         } = s
         {
             assert_eq!(height, 500.0);
             assert_eq!(width, 250.0);
             assert_eq!(web_thick, 10.0);
             assert_eq!(flange_thick, 15.0);
+            assert_eq!(root_r, None);
         } else {
             panic!("expected SteelH");
         }
     }
 
+    #[test]
+    fn test_build_shape_surface_radius_states() {
+        for r in [None, Some(0.0), Some(13.0)] {
+            for kind in [ShapeKind::SteelH, ShapeKind::SteelBox] {
+                let draft = SectionEditorDraft {
+                    kind,
+                    r,
+                    ..Default::default()
+                };
+                let shape = build_shape(&draft);
+                let radius = match shape {
+                    SectionShape::SteelH { root_r, .. } => root_r,
+                    SectionShape::SteelBox { corner_r, .. } => corner_r,
+                    _ => panic!("半径入力対象"),
+                };
+                assert_eq!(radius, r);
+            }
+        }
+    }
+
     /// 角形鋼管の角部外半径 r は draft.r から SectionShape::SteelBox.corner_r
-    /// へそのまま配線される（未入力時は既定値 0 で角部直角扱い）。
+    /// へそのまま配線される（未入力時は未知）。
     #[test]
     fn test_build_shape_steel_box_wires_corner_r() {
         let d = SectionEditorDraft {
@@ -1017,7 +1095,7 @@ mod tests {
             h: 300.0,
             b: 300.0,
             t: 12.0,
-            r: 30.0,
+            r: Some(30.0),
             ..SectionEditorDraft::default()
         };
         let s = build_shape(&d);
@@ -1031,11 +1109,11 @@ mod tests {
             assert_eq!(height, 300.0);
             assert_eq!(width, 300.0);
             assert_eq!(thick, 12.0);
-            assert_eq!(corner_r, 30.0);
+            assert_eq!(corner_r, Some(30.0));
         } else {
             panic!("expected SteelBox");
         }
-        assert_eq!(SectionEditorDraft::default().r, 0.0, "r の既定値は 0");
+        assert_eq!(SectionEditorDraft::default().r, None, "r の既定値は未知");
     }
 
     #[test]

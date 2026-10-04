@@ -217,6 +217,7 @@ impl PanelGeometry {
                 width,
                 web_thick,
                 flange_thick,
+                ..
             }) => (
                 PanelShapeKind::H {
                     bc: width,
@@ -241,6 +242,7 @@ impl PanelGeometry {
                 height,
                 width,
                 thick,
+                ..
             }) => (
                 PanelShapeKind::Box { bc: width },
                 height - thick,
@@ -453,6 +455,7 @@ mod tests {
     fn test_h_column_geometry() {
         let s = sec(
             SectionShape::SteelH {
+                root_r: Some(0.0),
                 height: 400.0,
                 width: 400.0,
                 web_thick: 13.0,
@@ -476,7 +479,7 @@ mod tests {
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
-                corner_r: 0.0,
+                corner_r: Some(0.0),
             },
             400.0,
             None,
@@ -505,6 +508,7 @@ mod tests {
     fn test_panel_thickness_overrides_shape() {
         let s = sec(
             SectionShape::SteelH {
+                root_r: Some(0.0),
                 height: 400.0,
                 width: 400.0,
                 web_thick: 13.0,
@@ -519,6 +523,7 @@ mod tests {
         // 0 以下は未入力扱いとし、断面形状の値へフォールバックする。
         let z = sec(
             SectionShape::SteelH {
+                root_r: Some(0.0),
                 height: 400.0,
                 width: 400.0,
                 web_thick: 13.0,
@@ -538,6 +543,7 @@ mod tests {
         let cases = [
             (
                 SectionShape::CftBox {
+                    corner_r: Some(0.0),
                     height: 400.0,
                     width: 400.0,
                     thick: 16.0,
@@ -569,6 +575,7 @@ mod tests {
     fn test_steel_sections_are_modeling_targets() {
         let shapes = [
             SectionShape::SteelH {
+                root_r: Some(0.0),
                 height: 400.0,
                 width: 400.0,
                 web_thick: 13.0,
@@ -578,7 +585,7 @@ mod tests {
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
-                corner_r: 0.0,
+                corner_r: Some(0.0),
             },
             SectionShape::SteelPipe {
                 outer_dia: 400.0,
@@ -602,13 +609,14 @@ mod tests {
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
-                corner_r: 0.0,
+                corner_r: Some(0.0),
             },
             400.0,
             None,
         );
         let cft = sec(
             SectionShape::CftBox {
+                corner_r: Some(0.0),
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
@@ -668,6 +676,7 @@ mod tests {
 
     fn h_col() -> SectionShape {
         SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             web_thick: 13.0,
@@ -677,6 +686,7 @@ mod tests {
 
     fn h_beam() -> SectionShape {
         SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 600.0,
             width: 200.0,
             web_thick: 11.0,
@@ -809,6 +819,7 @@ mod tests {
     #[test]
     fn test_smallest_ve_column_is_selected() {
         let thin = SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 400.0,
             width: 400.0,
             web_thick: 9.0,
@@ -844,6 +855,7 @@ mod tests {
             h_beam(),
             600.0,
             SectionShape::CftBox {
+                corner_r: Some(0.0),
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
@@ -920,6 +932,7 @@ mod tests {
     fn test_beam_panel_depth() {
         let h = sec(
             SectionShape::SteelH {
+                root_r: Some(0.0),
                 height: 600.0,
                 width: 200.0,
                 web_thick: 11.0,
@@ -935,7 +948,7 @@ mod tests {
                 height: 500.0,
                 width: 300.0,
                 thick: 12.0,
-                corner_r: 0.0,
+                corner_r: Some(0.0),
             },
             500.0,
             None,

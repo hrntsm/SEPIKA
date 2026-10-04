@@ -37,6 +37,7 @@ impl SectionShape {
                 width,
                 web_thick,
                 flange_thick,
+                ..
             } => format!("H-{}", dims(&[*height, *width, *web_thick, *flange_thick])),
             SectionShape::SteelBuiltH {
                 height,
@@ -135,6 +136,7 @@ impl SectionShape {
                 height,
                 width,
                 thick,
+                ..
             } => format!("CFT-BOX-{}", dims(&[*height, *width, *thick])),
             SectionShape::CftPipe { outer_dia, thick } => {
                 format!("CFT-P-{}", dims(&[*outer_dia, *thick]))

@@ -170,6 +170,7 @@ mod tests {
             strength_factor: Some(1.1),
         });
         let mut sec = SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 400.0,
             width: 200.0,
             web_thick: 9.0,

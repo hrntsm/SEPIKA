@@ -448,6 +448,7 @@ mod tests {
         let mut s = section(0, 300.0);
         s.width = 200.0;
         s.shape = Some(SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 300.0,
             width: 200.0,
             web_thick: 10.0,

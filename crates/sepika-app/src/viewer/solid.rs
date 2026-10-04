@@ -122,6 +122,7 @@ pub(super) fn section_outline(sec: &Section) -> Option<Vec<[f64; 2]>> {
             width,
             web_thick,
             flange_thick,
+            ..
         } => {
             let (h, b, tw, tf) = (height * 0.5, width * 0.5, web_thick * 0.5, *flange_thick);
             vec![
@@ -276,6 +277,7 @@ pub(super) fn section_inner_outline(sec: &Section) -> Option<Vec<[f64; 2]>> {
             height,
             width,
             thick,
+            ..
         } => {
             let (hi, wi) = (height - 2.0 * thick, width - 2.0 * thick);
             (hi > 0.0 && wi > 0.0).then(|| rect_outline(hi, wi))

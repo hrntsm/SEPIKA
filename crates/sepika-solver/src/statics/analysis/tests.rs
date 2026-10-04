@@ -485,6 +485,7 @@ fn src_shape() -> sepika_core::section_shape::SectionShape {
 /// 診断用の CFT 角形断面。
 fn cft_shape() -> sepika_core::section_shape::SectionShape {
     sepika_core::section_shape::SectionShape::CftBox {
+        corner_r: Some(0.0),
         height: 400.0,
         width: 400.0,
         thick: 16.0,
@@ -578,6 +579,7 @@ fn test_model_issues_warns_cft_composite_fallback_for_zero_core() {
     let mut model = make_cantilever_model();
     // 板厚 200 で内法（400 − 2×200）が 0 になる CFT 角形断面。
     model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::CftBox {
+        corner_r: Some(0.0),
         height: 400.0,
         width: 400.0,
         thick: 200.0,
@@ -755,6 +757,7 @@ fn test_model_issues_warns_story_without_diaphragm() {
         dynamic_mass: None,
         standard_floor_load: None,
         column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
     });
 
     let issues = model_issues(&model);
@@ -791,6 +794,7 @@ fn test_model_issues_errors_on_duplicate_story_names() {
         dynamic_mass: None,
         standard_floor_load: None,
         column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
     };
     // 見た目で区別できない差（末尾の空白）でも同名として扱う。
     model.stories.push(story(0, "2F", 3000.0));
@@ -855,6 +859,7 @@ fn make_two_story_diaphragm_model(
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
             Story {
                 id: StoryId(1),
@@ -868,6 +873,7 @@ fn make_two_story_diaphragm_model(
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             },
         ],
         elements: vec![ElementData {
@@ -1210,6 +1216,7 @@ fn make_story_ratio_model(structures: &[StoryStructure]) -> Model {
         dynamic_mass: None,
         standard_floor_load: None,
         column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
     }];
     for (i, s) in structures.iter().enumerate() {
         let elev = (i as f64 + 1.0) * 1000.0;
@@ -1234,6 +1241,7 @@ fn make_story_ratio_model(structures: &[StoryStructure]) -> Model {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         });
     }
     Model {
@@ -1279,6 +1287,7 @@ fn test_ground_elevation_from_basement_and_fallback() {
         dynamic_mass: None,
         standard_floor_load: None,
         column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
     };
     // 地下2層。各層の「床レベル + 深さ」がともに 0（GL）になる。
     // B2(-9000) B1(-5000, 深さ5000) B0(-1000, 深さ1000) 1F(3000)。
@@ -1345,6 +1354,7 @@ fn make_diaphragm_model(diaphragms: Vec<(NodeId, Option<f64>, Option<f64>)>) -> 
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         }],
         ..Default::default()
     };

@@ -743,6 +743,7 @@ mod tests {
                 section(
                     0,
                     SectionShape::SteelH {
+                        root_r: Some(0.0),
                         height: 600.0,
                         width: 200.0,
                         web_thick: 11.0,
@@ -754,6 +755,7 @@ mod tests {
                 section(
                     1,
                     SectionShape::SteelH {
+                        root_r: Some(0.0),
                         height: 400.0,
                         width: 400.0,
                         web_thick: 13.0,

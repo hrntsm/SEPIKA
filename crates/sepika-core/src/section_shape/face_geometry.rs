@@ -155,6 +155,7 @@ impl SectionGeometry {
                 height: h,
                 width: w,
                 thick: t,
+                ..
             } => {
                 if t <= 0.0 || 2.0 * t >= h.min(w) {
                     return Err("CFT鋼管厚が不正です".into());
@@ -171,6 +172,7 @@ impl SectionGeometry {
                 width: w,
                 web_thick: tw,
                 flange_thick: tf,
+                ..
             } => {
                 rect([-h / 2.0, -h / 2.0 + tf], [-w / 2.0, w / 2.0], Some(0));
                 rect([h / 2.0 - tf, h / 2.0], [-w / 2.0, w / 2.0], Some(0));
@@ -287,6 +289,7 @@ impl SectionGeometry {
                 thick: t,
                 corner_r: r,
             } => {
+                let r = r.ok_or("角形鋼管の外角半径が未知です")?;
                 if t <= 0.0 || r < 0.0 || r > h.min(w) / 2.0 {
                     return Err("角形鋼管の寸法が不正です".into());
                 }
@@ -410,7 +413,7 @@ mod face_tests {
             height: 400.0,
             width: 400.0,
             thick: 20.0,
-            corner_r: 40.0,
+            corner_r: Some(40.0),
         };
         let geometry = SectionGeometry::of(&shape).unwrap();
         let d = std::f64::consts::FRAC_1_SQRT_2;
@@ -457,6 +460,7 @@ mod face_tests {
     #[test]
     fn 柱外形の交点と小梁用投影境界を区別する() {
         let h = SectionGeometry::of(&SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 300.0,
             width: 200.0,
             web_thick: 10.0,

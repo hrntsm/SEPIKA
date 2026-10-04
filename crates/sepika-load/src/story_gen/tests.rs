@@ -1235,6 +1235,7 @@ fn test_both_mass_methods_equal_with_steel_weight_factor() {
 /// 主材料は鋼材区分＋ `fc`。質量行列は鋼管と充填コンクリートを別領域で計上する。
 fn cft_column_model() -> Model {
     let shape = SectionShape::CftBox {
+        corner_r: Some(0.0),
         height: 400.0,
         width: 400.0,
         thick: 16.0,
@@ -1711,8 +1712,12 @@ fn test_secondary_beam_steel_weight_factor_applies_to_design_and_mass() {
 
     let (area, span, factor) = (5000.0, 2000.0, 1.3);
     let sm = &model.unassigned_beams[0];
-    let design_udl = crate::floor::beam_self_weight_udl(&model, sm).expect("設計自重");
-    let mass_udl = crate::floor::beam_mass_equiv_udl(&model, sm).expect("物理質量相当");
+    let design_udl = crate::floor::beam_self_weight_udl(&model, sm)
+        .unwrap()
+        .expect("設計自重");
+    let mass_udl = crate::floor::beam_mass_equiv_udl(&model, sm)
+        .unwrap()
+        .expect("物理質量相当");
     assert!((design_udl - 78.5e-6 * area * factor).abs() < 1e-9 * design_udl);
     assert!((mass_udl - 7.85e-9 * area * GRAVITY_MM_S2 * factor).abs() < 1e-9 * mass_udl);
 
@@ -3251,6 +3256,460 @@ fn line_weights(model: &Model) -> Vec<f64> {
         .collect()
 }
 
+fn fireproof_model(shape: SectionShape, usage: sepika_core::model::FrameSectionUse) -> Model {
+    let cft = matches!(
+        shape,
+        SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
+    );
+    let mut model = if cft {
+        cft_column_model()
+    } else {
+        column_finish_model()
+    };
+    if !cft {
+        model.materials[0].category = MaterialCategory::Steel;
+        model.materials[0].fc = None;
+        model.materials[0].density = 7.85e-9;
+        model.materials[0].name = "SN400B".into();
+    }
+    let old = model.sections[0].clone();
+    model.sections[0] = shape.to_section(SectionId(0), "被覆対象".into());
+    model.sections[0].material = old.material;
+    model.sections[0].steel_material = old.steel_material;
+    model.sections[0].frame_use = Some(usage);
+    if model.stories.is_empty() {
+        model.stories = generate_stories(&model, None).unwrap().stories;
+    }
+    model.load_cfg = Some(LoadCfg {
+        steel_weight_factor: 1.9,
+        extra_line_weight: vec![(ElemId(0), 0.4)],
+        ..Default::default()
+    });
+    model
+}
+
+#[test]
+fn fireproof_shapes_roles_and_weight_paths_agree_without_steel_markup() {
+    use sepika_core::model::{FireproofKind, FrameSectionUse, StoryFireproof};
+    let pi = std::f64::consts::PI;
+    let shapes = [
+        (
+            SectionShape::SteelFlatBar {
+                width: 200.0,
+                thick: 20.0,
+            },
+            440.0,
+            440.0,
+        ),
+        (
+            SectionShape::SteelRoundBar { dia: 200.0 },
+            pi * 200.0,
+            pi * 200.0,
+        ),
+        (
+            SectionShape::SteelH {
+                height: 400.0,
+                width: 200.0,
+                web_thick: 8.0,
+                flange_thick: 13.0,
+                root_r: Some(13.0),
+            },
+            1584.0 - (8.0 - 2.0 * pi) * 13.0,
+            1200.0,
+        ),
+        (
+            SectionShape::SteelBox {
+                height: 400.0,
+                width: 300.0,
+                thick: 12.0,
+                corner_r: Some(30.0),
+            },
+            1400.0 - (8.0 - 2.0 * pi) * 30.0,
+            1400.0,
+        ),
+        (
+            SectionShape::SteelPipe {
+                outer_dia: 400.0,
+                thick: 12.0,
+            },
+            pi * 400.0,
+            pi * 400.0,
+        ),
+        (
+            SectionShape::CftBox {
+                height: 400.0,
+                width: 300.0,
+                thick: 12.0,
+                corner_r: Some(30.0),
+            },
+            1400.0 - (8.0 - 2.0 * pi) * 30.0,
+            1400.0,
+        ),
+        (
+            SectionShape::CftPipe {
+                outer_dia: 400.0,
+                thick: 12.0,
+            },
+            pi * 400.0,
+            pi * 400.0,
+        ),
+    ];
+    for (shape, surface, envelope) in shapes {
+        let cft = matches!(
+            shape,
+            SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
+        );
+        for usage in [FrameSectionUse::Column, FrameSectionUse::Girder] {
+            if cft && usage == FrameSectionUse::Girder {
+                continue;
+            }
+            for coating in [
+                FireproofKind::None,
+                FireproofKind::Spray,
+                FireproofKind::Board,
+            ] {
+                let mut model = fireproof_model(shape.clone(), usage);
+                model.nodes[1].coord[0] = 4000.0;
+                let baseline = model.clone();
+                let baseline_items =
+                    enumerate_self_weight(&baseline, baseline.load_cfg.as_ref().unwrap()).unwrap();
+                let (base_load, base_mass) = match baseline_items[0] {
+                    SelfWeightItem::Line {
+                        load, mass_equiv, ..
+                    } => (load, mass_equiv),
+                    _ => panic!("線材"),
+                };
+                model.stories[1].fireproof = StoryFireproof {
+                    steel_kind: coating,
+                    steel_column_area_weight: 0.001,
+                    steel_beam_area_weight: 0.002,
+                    cft_kind: coating,
+                    cft_column_area_weight: 0.003,
+                };
+                let q = if cft {
+                    0.003
+                } else if usage == FrameSectionUse::Column {
+                    0.001
+                } else {
+                    0.002
+                };
+                let p = match coating {
+                    FireproofKind::None => 0.0,
+                    FireproofKind::Spray => surface,
+                    FireproofKind::Board => envelope,
+                };
+                let expected_extra = q * p * 5000.0;
+                let items =
+                    enumerate_self_weight(&model, model.load_cfg.as_ref().unwrap()).unwrap();
+                let (load, mass) = match items[0] {
+                    SelfWeightItem::Line {
+                        load, mass_equiv, ..
+                    } => (load, mass_equiv),
+                    _ => panic!("線材"),
+                };
+                assert!((load - base_load - expected_extra).abs() < 1e-7);
+                assert!((mass - base_mass - expected_extra).abs() < 1e-7);
+                let (nodal, member) = crate::self_weight::self_weight_case_content(
+                    &model,
+                    model.load_cfg.as_ref().unwrap(),
+                )
+                .unwrap();
+                let dl = nodal.iter().map(|l| -l.values[2]).sum::<f64>()
+                    + member
+                        .iter()
+                        .map(|l| match l.kind {
+                            MemberLoadKind::Distributed { a, b, w1, w2 } => {
+                                (b - a) * (w1 + w2) / 2.0
+                            }
+                            MemberLoadKind::Point { p, .. } => p,
+                        })
+                        .sum::<f64>();
+                assert!((dl - load).abs() < 1e-7);
+                let generated = generate_stories(&model, None).unwrap();
+                assert!(
+                    (generated
+                        .stories
+                        .iter()
+                        .map(|s| s.seismic_weight.unwrap())
+                        .sum::<f64>()
+                        - load)
+                        .abs()
+                        < 1e-7
+                );
+                assert!(
+                    (generated
+                        .stories
+                        .iter()
+                        .map(|s| s.dynamic_mass.unwrap().mass_equiv_weight_n)
+                        .sum::<f64>()
+                        - mass)
+                        .abs()
+                        < 1e-7
+                );
+                model.load_cases = vec![LoadCase {
+                    id: LoadCaseId(0),
+                    name: "DL".into(),
+                    kind: LoadCaseKind::Dead,
+                    nodal,
+                    member,
+                }];
+                let synced = generate_stories_with_synced_self_weight(
+                    &model,
+                    &[LoadCaseId(0)],
+                    MassMethod::default(),
+                )
+                .unwrap();
+                assert!(
+                    (synced
+                        .stories
+                        .iter()
+                        .map(|s| s.seismic_weight.unwrap())
+                        .sum::<f64>()
+                        - load)
+                        .abs()
+                        < 1e-7
+                );
+                assert!(
+                    (synced
+                        .stories
+                        .iter()
+                        .map(|s| s.dynamic_mass.unwrap().mass_equiv_weight_n)
+                        .sum::<f64>()
+                        - mass)
+                        .abs()
+                        < 1e-7
+                );
+                assert_eq!(generated.stories[1].fireproof, model.stories[1].fireproof);
+                model.elements[0].nodes.reverse();
+                assert!((line_weights(&model)[0] - load).abs() < 1e-7);
+            }
+        }
+    }
+}
+
+#[test]
+fn fireproof_story_difference_and_exclusions() {
+    use sepika_core::model::{FireproofKind, FrameSectionUse, StoryFireproof};
+    let shape = SectionShape::SteelPipe {
+        outer_dia: 400.0,
+        thick: 12.0,
+    };
+    let mut model = fireproof_model(shape, FrameSectionUse::Column);
+    model.stories[1].fireproof = StoryFireproof {
+        steel_kind: FireproofKind::Spray,
+        steel_column_area_weight: 0.001,
+        steel_beam_area_weight: 0.002,
+        cft_kind: FireproofKind::Board,
+        cft_column_area_weight: 0.004,
+    };
+    model.stories[2].fireproof = StoryFireproof {
+        steel_column_area_weight: 0.003,
+        ..model.stories[1].fireproof
+    };
+    let first = crate::fireproof::primary_line_weight(&model, &model.elements[0]).unwrap();
+    assert!((first - 0.001 * std::f64::consts::PI * 400.0).abs() < 1e-9);
+    model.nodes[1].coord[2] = 4500.0;
+    assert!(
+        (crate::fireproof::primary_line_weight(&model, &model.elements[0]).unwrap() - first * 3.0)
+            .abs()
+            < 1e-9
+    );
+    model.sections[0].frame_use = Some(FrameSectionUse::Brace);
+    assert_eq!(
+        crate::fireproof::primary_line_weight(&model, &model.elements[0]).unwrap(),
+        0.0
+    );
+    model.sections[0].frame_use = Some(FrameSectionUse::Column);
+    model.elements[0].kind = ElementKind::Brace {
+        tension_only: false,
+    };
+    assert_eq!(
+        crate::fireproof::primary_line_weight(&model, &model.elements[0]).unwrap(),
+        0.0
+    );
+    let mut rc = column_finish_model();
+    rc.stories[1].fireproof = model.stories[1].fireproof;
+    assert_eq!(
+        crate::fireproof::primary_line_weight(&rc, &rc.elements[0]).unwrap(),
+        0.0
+    );
+    let SectionShape::RcColumnRect { b, d, rebar } = rc.sections[0].shape.clone().unwrap() else {
+        panic!("RC柱")
+    };
+    rc.sections[0].shape = Some(SectionShape::SrcColumnRect {
+        b,
+        d,
+        rebar,
+        steel_height: 400.0,
+        steel_width: 200.0,
+        steel_web_thick: 8.0,
+        steel_flange_thick: 13.0,
+    });
+    assert_eq!(
+        crate::fireproof::primary_line_weight(&rc, &rc.elements[0]).unwrap(),
+        0.0
+    );
+}
+
+#[test]
+fn fireproof_mixed_steel_and_cft_conditions_are_independent() {
+    use sepika_core::model::{FireproofKind, FrameSectionUse, StoryFireproof};
+    let mut model = fireproof_model(
+        SectionShape::SteelPipe {
+            outer_dia: 400.0,
+            thick: 12.0,
+        },
+        FrameSectionUse::Column,
+    );
+    let cft = cft_column_model();
+    let mut concrete = cft.materials[0].clone();
+    concrete.id = MaterialId(1);
+    model.materials.push(concrete);
+    let mut section = cft.sections[0].clone();
+    section.id = SectionId(1);
+    section.material = Some(MaterialId(1));
+    section.steel_material = Some(MaterialId(0));
+    section.frame_use = Some(FrameSectionUse::Column);
+    model.sections.push(section);
+    for (id, z) in [(2, 0.0), (3, 3000.0)] {
+        model.nodes.push(Node {
+            id: NodeId(id),
+            coord: [1000.0, 0.0, z],
+            ..model.nodes[0].clone()
+        });
+    }
+    model.elements.push(ElementData {
+        id: ElemId(1),
+        section: Some(SectionId(1)),
+        nodes: [NodeId(2), NodeId(3)].into_iter().collect(),
+        ..model.elements[0].clone()
+    });
+    let mut beam = model.sections[0].clone();
+    beam.id = SectionId(2);
+    beam.frame_use = Some(FrameSectionUse::Girder);
+    model.sections.push(beam);
+    model.elements.push(ElementData {
+        id: ElemId(2),
+        section: Some(SectionId(2)),
+        nodes: [NodeId(1), NodeId(3)].into_iter().collect(),
+        ..model.elements[0].clone()
+    });
+    let baseline = line_weights(&model);
+    model.stories[1].fireproof = StoryFireproof {
+        steel_kind: FireproofKind::Spray,
+        steel_column_area_weight: 0.001,
+        steel_beam_area_weight: 0.002,
+        cft_kind: FireproofKind::Board,
+        cft_column_area_weight: 0.004,
+    };
+    let weights = line_weights(&model);
+    let pi = std::f64::consts::PI;
+    for (index, expected) in [
+        (0, 0.001 * pi * 400.0 * 3000.0),
+        (1, 0.004 * 1600.0 * 3000.0),
+        (2, 0.002 * pi * 400.0 * 1000.0),
+    ] {
+        assert!((weights[index] - baseline[index] - expected).abs() < 1e-7);
+    }
+}
+
+#[test]
+fn fireproof_active_unresolved_inputs_are_errors() {
+    use sepika_core::model::{FireproofKind, FrameSectionUse};
+    let mut model = fireproof_model(
+        SectionShape::SteelH {
+            height: 400.0,
+            width: 200.0,
+            web_thick: 8.0,
+            flange_thick: 13.0,
+            root_r: Some(13.0),
+        },
+        FrameSectionUse::Column,
+    );
+    model.stories[1].fireproof.steel_kind = FireproofKind::Spray;
+    model.stories[1].fireproof.steel_column_area_weight = 0.001;
+    for case in 0..11 {
+        let mut invalid = model.clone();
+        match case {
+            0 => invalid.sections[0].shape = None,
+            1 => invalid.elements[0].section = None,
+            2 => invalid.nodes[1].coord[2] = 9000.0,
+            3 => {
+                invalid.sections[0].shape = Some(SectionShape::SteelH {
+                    root_r: None,
+                    height: 400.0,
+                    width: 200.0,
+                    web_thick: 8.0,
+                    flange_thick: 13.0,
+                })
+            }
+            4 => {
+                invalid.sections[0].shape = Some(SectionShape::SteelAngle {
+                    leg_a: 100.0,
+                    leg_b: 100.0,
+                    thick: 10.0,
+                })
+            }
+            5 => invalid.stories[1].fireproof.steel_column_area_weight = f64::NAN,
+            6 => invalid.stories[1].fireproof.steel_column_area_weight = -0.001,
+            7 => invalid.sections[0].material = None,
+            8 => invalid.sections[0].frame_use = None,
+            9 => invalid.nodes[1].coord[2] = f64::NAN,
+            _ => {
+                invalid.load_cfg.as_mut().unwrap().dampers = vec![DamperSpec {
+                    elem: ElemId(0),
+                    device_weight: 100.0,
+                    device_length: 1000.0,
+                    support_area: 1000.0,
+                }]
+            }
+        }
+        assert!(
+            enumerate_self_weight(&invalid, invalid.load_cfg.as_ref().unwrap()).is_err(),
+            "case={case}"
+        );
+        assert!(generate_stories(&invalid, None).is_err(), "case={case}");
+    }
+    model.stories[1].fireproof.steel_kind = FireproofKind::None;
+    model.sections[0].shape = None;
+    assert!(enumerate_self_weight(&model, model.load_cfg.as_ref().unwrap()).is_ok());
+}
+
+#[test]
+fn fireproof_unresolved_structure_is_not_rc_exclusion() {
+    use sepika_core::model::{FireproofKind, FrameSectionUse};
+    for cft in [false, true] {
+        let shape = if cft {
+            SectionShape::CftBox {
+                height: 400.0,
+                width: 300.0,
+                thick: 12.0,
+                corner_r: Some(30.0),
+            }
+        } else {
+            SectionShape::SteelPipe {
+                outer_dia: 400.0,
+                thick: 12.0,
+            }
+        };
+        let mut model = fireproof_model(shape, FrameSectionUse::Column);
+        if cft {
+            model.stories[1].fireproof.cft_kind = FireproofKind::Board;
+            model.stories[1].fireproof.cft_column_area_weight = 0.001;
+        } else {
+            model.stories[1].fireproof.steel_kind = FireproofKind::Spray;
+            model.stories[1].fireproof.steel_column_area_weight = 0.001;
+            model.sections[0].material = None;
+        }
+        model.sections[0].shape = None;
+        assert!(
+            enumerate_self_weight(&model, model.load_cfg.as_ref().unwrap()).is_err(),
+            "cft={cft}"
+        );
+        assert!(generate_stories(&model, None).is_err(), "cft={cft}");
+    }
+}
+
 #[test]
 fn rc_src柱仕上げは階共通値と実形状を使いdlと地震用重量で一致する() {
     use sepika_core::section_shape::{CircleColumnHoop, RcCircleColumnRebar, SectionShape};
@@ -4514,6 +4973,7 @@ fn rc_rect_shape() -> sepika_core::section_shape::SectionShape {
 
 fn steel_h_shape() -> sepika_core::section_shape::SectionShape {
     sepika_core::section_shape::SectionShape::SteelH {
+        root_r: Some(0.0),
         height: 400.0,
         width: 200.0,
         web_thick: 8.0,
@@ -4594,6 +5054,9 @@ fn test_regeneration_keeps_user_defined_story_fields() {
     model.stories[0].name = "1FL".into();
     model.stories[0].weight_override = Some(12345.0);
     model.stories[0].column_finish_area_weight = 0.002;
+    model.stories[0].fireproof.steel_column_area_weight = 0.001;
+    model.stories[0].fireproof.steel_beam_area_weight = 0.002;
+    model.stories[0].fireproof.cft_column_area_weight = 0.003;
     model.stories[0].seismic_weight = Some(12345.0);
     model.stories[0].standard_floor_load = Some(StandardFloorLoad {
         dead: 0.001,
@@ -4628,6 +5091,7 @@ fn test_regeneration_keeps_user_defined_story_fields() {
     );
     assert_eq!(fresh[0].standard_floor_load.unwrap().dead, 0.001);
     assert_eq!(fresh[0].column_finish_area_weight, 0.002);
+    assert_eq!(fresh[0].fireproof, model.stories[0].fireproof);
 
     let mut with_inserted_floor = model.clone();
     with_inserted_floor.stories.insert(
@@ -4701,6 +5165,7 @@ fn split_column_model() -> Model {
         dynamic_mass: None,
         standard_floor_load: None,
         column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
     });
     model
 }
@@ -4750,6 +5215,7 @@ fn test_predefined_stories_drive_the_assignment() {
         dynamic_mass: None,
         standard_floor_load: None,
         column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
     });
 
     let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
@@ -4782,6 +5248,7 @@ fn test_story_without_floor_nodes_gets_no_diaphragm() {
         dynamic_mass: None,
         standard_floor_load: None,
         column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
     });
     // レベル 10500 には節点がない（区間 (3500, 10500] には z=7000 の節点が入る）。
     model.stories.push(Story {
@@ -4796,6 +5263,7 @@ fn test_story_without_floor_nodes_gets_no_diaphragm() {
         dynamic_mass: None,
         standard_floor_load: None,
         column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
     });
 
     let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
@@ -4842,6 +5310,7 @@ fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         },
         Story {
             id: StoryId(1),
@@ -4855,6 +5324,7 @@ fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         },
     ];
 
@@ -4873,6 +5343,7 @@ fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         },
         legacy.stories[0].clone(),
         legacy.stories[1].clone(),

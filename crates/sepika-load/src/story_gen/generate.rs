@@ -264,6 +264,7 @@ fn generate_stories_impl(
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             })
             .collect();
         enumerate_self_weight(&initialized, &load_cfg)?
@@ -649,6 +650,7 @@ fn generate_stories_impl(
             dynamic_mass: Some(dynamic_mass),
             standard_floor_load: prev.and_then(|s| s.standard_floor_load),
             column_finish_area_weight: prev.map_or(0.0, |s| s.column_finish_area_weight),
+            fireproof: prev.map_or_else(Default::default, |s| s.fireproof),
         });
     }
 

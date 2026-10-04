@@ -161,6 +161,7 @@ fn cft_common_steel(f_value: f64, term: LoadTerm, lambda: f64) -> (f64, f64, f64
 
 fn cft_box_steel_props(height: f64, width: f64, thick: f64) -> (f64, f64, f64) {
     let shape = SectionShape::CftBox {
+        corner_r: None,
         height,
         width,
         thick,
@@ -216,6 +217,7 @@ fn cft_box_check(
         .expect("CFT 鋼管材料は解析前に検証済み");
     let (sa, sz_z, sz_y) = cft_box_steel_props(height, width, thick);
     let shape = SectionShape::CftBox {
+        corner_r: None,
         height,
         width,
         thick,
@@ -267,6 +269,7 @@ fn cft_box_check(
     let s_qa_z = s_aw_z * s_fs;
     let (sum_c_my_z, sum_c_my_y) = if ctx.seismic_qd.is_some() {
         let shape = SectionShape::CftBox {
+            corner_r: None,
             height,
             width,
             thick,
@@ -462,6 +465,7 @@ impl DesignCheck for CftDesign {
                 height,
                 width,
                 thick,
+                ..
             }) => cft_box_check(forces, steel_mat, ctx, *height, *width, *thick, fc_raw),
             Some(SectionShape::CftPipe { outer_dia, thick }) => {
                 cft_pipe_check(forces, steel_mat, ctx, *outer_dia, *thick, fc_raw)

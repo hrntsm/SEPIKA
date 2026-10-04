@@ -77,6 +77,8 @@ pub struct CatalogEntry {
     pub iz: f64,
     /// ねじり定数 [mm⁴]
     pub j: f64,
+    /// 被覆外周用の半径 [mm]。H はルートフィレット、Box は外角半径。
+    pub radius: Option<f64>,
 }
 
 /// カタログ全件（初回アクセス時にパースしキャッシュする）。
@@ -124,7 +126,14 @@ pub fn to_section(entry: &CatalogEntry, id: SectionId) -> Section {
         floor: None,
         panel_thickness: None,
         thickness: None,
-        shape: parse_shape_from_name(entry.shape, &entry.name),
+        shape: parse_shape_from_name(entry.shape, &entry.name).map(|mut shape| {
+            match &mut shape {
+                SectionShape::SteelH { root_r, .. } => *root_r = entry.radius,
+                SectionShape::SteelBox { corner_r, .. } => *corner_r = entry.radius,
+                _ => {}
+            }
+            shape
+        }),
         material: None,
         rebar_material: None,
         shear_rebar_material: None,
@@ -134,7 +143,7 @@ pub fn to_section(entry: &CatalogEntry, id: SectionId) -> Section {
 
 /// `entry.name` の寸法表記から `SectionShape` をベストエフォートで復元する。
 ///
-/// 命名規則（H・Box・O 形式）は実装を参照。末尾の角R・フィレット半径は無視する。
+/// 半径は名称でなくカタログの専用列から設定する。
 /// フラットバーとパース失敗時は `None`。
 fn parse_shape_from_name(shape: CatalogShape, name: &str) -> Option<SectionShape> {
     match shape {
@@ -148,6 +157,7 @@ fn parse_shape_from_name(shape: CatalogShape, name: &str) -> Option<SectionShape
                 width: dims[1],
                 web_thick: dims[2],
                 flange_thick: dims[3],
+                root_r: None,
             })
         }
         CatalogShape::Box => {
@@ -159,7 +169,7 @@ fn parse_shape_from_name(shape: CatalogShape, name: &str) -> Option<SectionShape
                 height: dims[0],
                 width: dims[1],
                 thick: dims[2],
-                corner_r: 0.0,
+                corner_r: None,
             })
         }
         CatalogShape::Pipe => {
@@ -224,6 +234,7 @@ fn parse_csv() -> Vec<CatalogEntry> {
             iy: iy.abs(),
             iz: iz.abs(),
             j: it.abs(),
+            radius: fields[11].parse().ok(),
         });
     }
     out
@@ -307,7 +318,35 @@ mod tests {
         assert_eq!(sec.iy, e.iy);
         assert_eq!(sec.iz, e.iz);
         assert_eq!(sec.j, e.j);
-        assert!(matches!(sec.shape, Some(SectionShape::SteelH { .. })));
+        assert!(matches!(
+            sec.shape,
+            Some(SectionShape::SteelH {
+                root_r: Some(13.0),
+                ..
+            })
+        ));
+        assert_eq!(e.radius, Some(13.0));
+        let box_entry = entries()
+            .iter()
+            .find(|e| e.name == "Box-200x200x6")
+            .unwrap();
+        let box_section = to_section(box_entry, SectionId(1));
+        assert!(matches!(
+            box_section.shape,
+            Some(SectionShape::SteelBox {
+                corner_r: Some(12.0),
+                ..
+            })
+        ));
+        assert_eq!(
+            (
+                box_section.area,
+                box_section.iy,
+                box_section.iz,
+                box_section.j
+            ),
+            (box_entry.area, box_entry.iy, box_entry.iz, box_entry.j)
+        );
     }
 
     #[test]
@@ -318,6 +357,7 @@ mod tests {
                 CatalogShape::H,
                 "H-400x200x9x12x13",
                 Some(SectionShape::SteelH {
+                    root_r: None,
                     height: 400.0,
                     width: 200.0,
                     web_thick: 9.0,
@@ -331,7 +371,7 @@ mod tests {
                     height: 100.0,
                     width: 100.0,
                     thick: 12.0,
-                    corner_r: 0.0,
+                    corner_r: None,
                 }),
             ),
             (
@@ -341,7 +381,7 @@ mod tests {
                     height: 1000.0,
                     width: 1000.0,
                     thick: 22.0,
-                    corner_r: 0.0,
+                    corner_r: None,
                 }),
             ),
             (

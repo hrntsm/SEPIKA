@@ -639,6 +639,7 @@ fn test_ultimate_check_pushover_demand() {
 #[test]
 fn test_collect_cft_ultimate_checks() {
     let cft_shape = SectionShape::CftBox {
+        corner_r: Some(0.0),
         height: 400.0,
         width: 400.0,
         thick: 12.0,

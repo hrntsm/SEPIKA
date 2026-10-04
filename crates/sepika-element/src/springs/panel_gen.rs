@@ -256,6 +256,7 @@ mod tests {
 
     fn h_shape(height: f64, width: f64, tw: f64, tf: f64) -> SectionShape {
         SectionShape::SteelH {
+            root_r: Some(0.0),
             height,
             width,
             web_thick: tw,
@@ -495,6 +496,7 @@ mod tests {
     fn test_cft_column_is_not_modeling_target() {
         for shape in [
             SectionShape::CftBox {
+                corner_r: Some(0.0),
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
@@ -523,7 +525,7 @@ mod tests {
                 height: 400.0,
                 width: 400.0,
                 thick: 16.0,
-                corner_r: 0.0,
+                corner_r: Some(0.0),
             },
             SectionShape::SteelPipe {
                 outer_dia: 400.0,

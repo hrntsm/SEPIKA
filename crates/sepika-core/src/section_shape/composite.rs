@@ -163,6 +163,7 @@ impl SectionShape {
                 height: h,
                 width: w,
                 thick: t,
+                ..
             } => {
                 let bi = (w - 2.0 * t).max(0.0);
                 let hi = (h - 2.0 * t).max(0.0);

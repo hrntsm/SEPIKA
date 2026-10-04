@@ -263,6 +263,44 @@ mod tests {
     use sepika_core::model::*;
     use sepika_core::section_shape::SectionShape;
 
+    #[test]
+    fn surface_radii_ovika_roundtrip() {
+        let mut model = Model::default();
+        for radius in [None, Some(0.0), Some(13.0)] {
+            for shape in [
+                SectionShape::SteelH {
+                    height: 400.0,
+                    width: 200.0,
+                    web_thick: 8.0,
+                    flange_thick: 13.0,
+                    root_r: radius,
+                },
+                SectionShape::SteelBox {
+                    height: 400.0,
+                    width: 300.0,
+                    thick: 12.0,
+                    corner_r: radius,
+                },
+                SectionShape::CftBox {
+                    height: 400.0,
+                    width: 300.0,
+                    thick: 12.0,
+                    corner_r: radius,
+                },
+            ] {
+                let id = SectionId(model.sections.len() as u32);
+                model
+                    .sections
+                    .push(shape.to_section(id, format!("半径{}", id.0)));
+            }
+        }
+        let path = crate::test_util::test_tmp().join("surface_radii.ovika");
+        save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+        let loaded = load_ovika(&path).unwrap().model;
+        assert!(model.eq_ignoring_dofmap(&loaded));
+        std::fs::remove_file(path).unwrap();
+    }
+
     fn make_3node_model() -> Model {
         Model {
             nodes: vec![
@@ -332,6 +370,7 @@ mod tests {
             });
 
         let shape = SectionShape::SteelH {
+            root_r: Some(13.0),
             height: 400.0,
             width: 200.0,
             web_thick: 9.0,
@@ -590,6 +629,13 @@ mod tests {
                 dynamic_mass: None,
                 standard_floor_load: None,
                 column_finish_area_weight: 0.001 * (i + 1) as f64,
+                fireproof: StoryFireproof {
+                    steel_kind: FireproofKind::Spray,
+                    steel_column_area_weight: 0.001 * (i + 1) as f64,
+                    steel_beam_area_weight: 0.002,
+                    cft_kind: FireproofKind::Board,
+                    cft_column_area_weight: 0.003,
+                },
             })
             .collect();
         let dir = crate::test_util::test_tmp();

@@ -508,6 +508,7 @@ mod tests {
                 }),
                 standard_floor_load: None,
                 column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
             });
         }
         model.sections.push(Section {

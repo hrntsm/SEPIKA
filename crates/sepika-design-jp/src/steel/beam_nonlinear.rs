@@ -87,6 +87,7 @@ pub fn steel_h_props(shape: &SectionShape) -> Option<SteelHProps> {
             width,
             web_thick,
             flange_thick,
+            ..
         } => {
             let zp = width * flange_thick * (height - flange_thick)
                 + web_thick * (height - 2.0 * flange_thick).powi(2) / 4.0;
@@ -109,6 +110,7 @@ mod tests {
     /// H-500x200x10x16 相当。
     fn h_shape() -> SectionShape {
         SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 500.0,
             width: 200.0,
             web_thick: 10.0,

@@ -550,6 +550,7 @@ mod tests {
     #[test]
     fn test_rc_props_non_rc_none() {
         let shape = SectionShape::SteelH {
+            root_r: Some(0.0),
             height: 500.0,
             width: 200.0,
             web_thick: 9.0,

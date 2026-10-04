@@ -1317,6 +1317,7 @@ mod tests {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         });
         model.stories.push(Story {
             id: StoryId(0),
@@ -1329,6 +1330,7 @@ mod tests {
             level_kind: Default::default(),
             dynamic_mass: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
             standard_floor_load: Some(StandardFloorLoad {
                 frame: 0.006,
                 ..Default::default()
@@ -1860,6 +1862,7 @@ mod tests {
             dynamic_mass: None,
             standard_floor_load: None,
             column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
         });
         let settings = AnalysisSettings {
             ai_mode: AiMode::SemiPrecise,

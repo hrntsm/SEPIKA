@@ -149,6 +149,7 @@ fn l_frame_with(with_panel: bool, rigid_joint: bool) -> Model {
             steel_section(
                 0,
                 SectionShape::SteelH {
+                    root_r: Some(0.0),
                     height: BEAM_H,
                     width: 200.0,
                     web_thick: 11.0,
@@ -161,6 +162,7 @@ fn l_frame_with(with_panel: bool, rigid_joint: bool) -> Model {
             steel_section(
                 1,
                 SectionShape::SteelH {
+                    root_r: Some(0.0),
                     height: COL_H,
                     width: COL_B,
                     web_thick: COL_TW,
