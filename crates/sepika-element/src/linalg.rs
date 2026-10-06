@@ -69,16 +69,20 @@ mod tests {
 
     #[test]
     fn test_invert_small_identity_roundtrip() {
-        let a = vec![4.0, 1.0, 1.0, 3.0];
-        let inv = invert_small(&a, 2).expect("正則行列は逆行列を持つ");
-        for i in 0..2 {
-            for j in 0..2 {
-                let mut s = 0.0;
-                for k in 0..2 {
-                    s += a[i * 2 + k] * inv[k * 2 + j];
+        let six = (0..36)
+            .map(|i| if i / 6 == i % 6 { 10.0 } else { 1.0 })
+            .collect();
+        for (n, a) in [(2, vec![4.0, 1.0, 1.0, 3.0]), (6, six)] {
+            let inv = invert_small(&a, n).expect("正則行列は逆行列を持つ");
+            for i in 0..n {
+                for j in 0..n {
+                    let product: f64 = (0..n).map(|k| a[i * n + k] * inv[k * n + j]).sum();
+                    let expected = if i == j { 1.0 } else { 0.0 };
+                    assert!(
+                        (product - expected).abs() < 1e-12,
+                        "n={n} A·A⁻¹[{i}][{j}]={product}"
+                    );
                 }
-                let expect = if i == j { 1.0 } else { 0.0 };
-                assert!((s - expect).abs() < 1e-12, "A·A⁻¹[{i}][{j}] = {s}");
             }
         }
     }
@@ -113,27 +117,5 @@ mod tests {
             .expect("スケール比 1e-11 は正則として解ける");
         assert!((inv[0] - 1.0e-6).abs() < 1e-18, "inv[0] = {}", inv[0]);
         assert!((inv[3] - 1.0e5).abs() < 1e-9, "inv[3] = {}", inv[3]);
-    }
-
-    /// 上限の n=6 でも解ける。
-    #[test]
-    fn test_invert_small_max_size_six() {
-        let mut a = vec![0.0; 36];
-        for i in 0..6 {
-            for j in 0..6 {
-                a[i * 6 + j] = if i == j { 10.0 } else { 1.0 };
-            }
-        }
-        let inv = invert_small(&a, 6).expect("対角優位な行列は正則");
-        for i in 0..6 {
-            for j in 0..6 {
-                let mut s = 0.0;
-                for k in 0..6 {
-                    s += a[i * 6 + k] * inv[k * 6 + j];
-                }
-                let expect = if i == j { 1.0 } else { 0.0 };
-                assert!((s - expect).abs() < 1e-12, "A·A⁻¹[{i}][{j}] = {s}");
-            }
-        }
     }
 }

@@ -32,36 +32,22 @@ mod tests {
     }
 
     #[test]
-    fn test_concrete_shear_short_term_is_1_5x_long() {
-        let long = concrete_allowable_shear(24.0, true);
-        let short = concrete_allowable_shear(24.0, false);
-        assert!((short - long * 1.5).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_lightweight_concrete_is_0_9x() {
-        let normal = concrete_allowable_shear_class(24.0, ConcreteClass::Normal, false);
-        let light = concrete_allowable_shear_class(24.0, ConcreteClass::Lightweight1, false);
-        assert!((light - normal * 0.9).abs() < 1e-12);
-        // 許容圧縮応力度はコンクリート種類に依存しない（普通コンクリートと同値）。
-        assert!((concrete_allowable_compression(24.0, true) - 8.0).abs() < 1e-12);
-    }
-
-    #[test]
     fn test_concrete_fc24_representative_values() {
-        assert!((concrete_allowable_compression(24.0, true) - 8.0).abs() < 1e-12);
-        assert!((concrete_allowable_compression(24.0, false) - 16.0).abs() < 1e-12);
-        assert!(
-            (concrete_allowable_shear_class(24.0, ConcreteClass::Normal, true) - 0.74).abs()
-                < 1e-12
-        );
-        assert!(
-            (concrete_allowable_shear_class(24.0, ConcreteClass::Normal, false) - 1.11).abs()
-                < 1e-12
-        );
-        for class in [ConcreteClass::Lightweight1, ConcreteClass::Lightweight2] {
-            assert!((concrete_allowable_shear_class(24.0, class, true) - 0.666).abs() < 1e-12);
-            assert!((concrete_allowable_shear_class(24.0, class, false) - 0.999).abs() < 1e-12);
+        for (long, compression, normal_shear, lightweight_shear) in
+            [(true, 8.0, 0.74, 0.666), (false, 16.0, 1.11, 0.999)]
+        {
+            assert!((concrete_allowable_compression(24.0, long) - compression).abs() < 1e-12);
+            assert!((concrete_allowable_shear(24.0, long) - normal_shear).abs() < 1e-12);
+            for (class, expected) in [
+                (ConcreteClass::Normal, normal_shear),
+                (ConcreteClass::Lightweight1, lightweight_shear),
+                (ConcreteClass::Lightweight2, lightweight_shear),
+            ] {
+                assert!(
+                    (concrete_allowable_shear_class(24.0, class, long) - expected).abs() < 1e-12,
+                    "class={class:?} long={long}"
+                );
+            }
         }
     }
 
@@ -141,12 +127,18 @@ mod tests {
     }
 
     #[test]
-    fn test_steel_ft_fs_short_is_1_5x() {
-        assert!((steel_ft(235.0, LoadTerm::Long) - 235.0 / 1.5).abs() < 1e-9);
-        assert!((steel_ft(235.0, LoadTerm::Short) - 235.0).abs() < 1e-9);
-        assert!(
-            (steel_fs(235.0, LoadTerm::Short) - steel_fs(235.0, LoadTerm::Long) * 1.5).abs() < 1e-9
-        );
+    fn test_steel_tension_and_shear_reference_values() {
+        for (term, tension, shear) in [
+            (
+                LoadTerm::Long,
+                156.666_666_666_666_66,
+                90.451_542_173_041_36,
+            ),
+            (LoadTerm::Short, 235.0, 135.677_313_259_562_06),
+        ] {
+            assert!((steel_ft(235.0, term) - tension).abs() < 1e-9);
+            assert!((steel_fs(235.0, term) - shear).abs() < 1e-9);
+        }
     }
 
     #[test]
@@ -169,51 +161,42 @@ mod tests {
         assert!((above - 0.277 * f).abs() < 1e-6, "above={}", above);
     }
 
-    /// 代表値: `big_lambda(235, 205000) = √(π²·205000/(0.6·235)) ≈ 119.7891`。
     #[test]
     fn test_big_lambda_representative_value() {
-        let expected = (std::f64::consts::PI.powi(2) * 205_000.0 / (0.6 * 235.0)).sqrt();
-        assert!((expected - 119.7891).abs() < 1e-3, "expected={}", expected);
-        assert!((big_lambda(235.0, 205_000.0) - expected).abs() < 1e-12);
+        assert!((big_lambda(235.0, 205_000.0) - 119.789_084_805_182_68).abs() < 1e-9);
     }
 
-    /// E を小さくすると Λ が小さくなり、同じ λ（λ<Λ 側）で r=λ/Λ が増えて
-    /// fc が下がることを確認する。
     #[test]
-    fn test_steel_fc_decreases_with_smaller_e() {
-        let f = 235.0;
-        let lambda = 50.0;
-        let fc_e205 = steel_fc(f, 205_000.0, lambda, LoadTerm::Long);
-        let fc_e100 = steel_fc(f, 100_000.0, lambda, LoadTerm::Long);
-        assert!(
-            fc_e100 < fc_e205,
-            "fc(E=100000)={} fc(E=205000)={}",
-            fc_e100,
-            fc_e205
-        );
-    }
-
-    /// λ>Λ 側は `0.277·F/(λ/Λ)²` に一致する。
-    #[test]
-    fn test_steel_fc_elastic_branch_matches_formula() {
-        let f = 235.0;
-        let e = 205_000.0;
-        let lambda = 300.0;
-        let big_l = big_lambda(f, e);
-        let r = lambda / big_l;
-        let expected = 0.277 * f / (r * r);
-        assert!((steel_fc(f, e, lambda, LoadTerm::Long) - expected).abs() < 1e-9);
-    }
-
-    /// 短期は長期の 1.5 倍。
-    #[test]
-    fn test_steel_fc_short_is_1_5x_long() {
-        let f = 235.0;
-        let e = 205_000.0;
-        for lambda in [0.0, 50.0, 300.0] {
-            let long = steel_fc(f, e, lambda, LoadTerm::Long);
-            let short = steel_fc(f, e, lambda, LoadTerm::Short);
-            assert!((short - long * 1.5).abs() < 1e-9, "λ={}", lambda);
+    fn test_steel_fc_independent_reference_values() {
+        for (young, lambda, long, short) in [
+            (205_000.0, 0.0, 156.666_666_666_666_66, 235.0),
+            (
+                205_000.0,
+                50.0,
+                135.274_087_404_248_12,
+                202.911_131_106_372_18,
+            ),
+            (
+                205_000.0,
+                300.0,
+                10.378_620_109_552_948,
+                15.567_930_164_329_422,
+            ),
+            (
+                100_000.0,
+                50.0,
+                115.889_000_442_990_08,
+                173.833_500_664_485_11,
+            ),
+        ] {
+            assert!(
+                (steel_fc(235.0, young, lambda, LoadTerm::Long) - long).abs() < 1e-9,
+                "E={young} λ={lambda}"
+            );
+            assert!(
+                (steel_fc(235.0, young, lambda, LoadTerm::Short) - short).abs() < 1e-9,
+                "E={young} λ={lambda}"
+            );
         }
     }
 }
