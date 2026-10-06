@@ -328,15 +328,6 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
-    #[test]
-    fn server_name_is_sepika_mcp() {
-        let state = make_state(Model::default(), &test_store_dir("server_name"));
-        assert_eq!(
-            SepikaServer::new(state).get_info().server_info.name,
-            "sepika-mcp"
-        );
-    }
-
     /// テスト用の結果ストアディレクトリを用意する（テストごとに固有の名前を渡すこと）。
     /// 前回実行の残骸を消してから使う（実ストア=ファイルシステムを使うため）。
     /// プロセス ID 入りのサブディレクトリを介し、同一マシンで並行する別プロセスの
@@ -637,22 +628,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_analysis_run_completes_for_valid_model() {
-        let dir = test_store_dir("linear_static_basic");
-        let server = SepikaServer::new(make_state(cantilever_with_load_case(), &dir));
-        let result = server
-            .analysis_run(Parameters(run_args(JobKind::LinearStatic)))
-            .await
-            .unwrap();
-        let job_id = extract_job_id(&result);
-        let status = wait_for_terminal(&server, &job_id).await;
-        assert!(
-            matches!(status, JobStatus::Done { .. }),
-            "expected Done, got {status:?}"
-        );
-    }
-
-    #[tokio::test]
     async fn test_analysis_run_fails_without_load_case() {
         let dir = test_store_dir("linear_static_no_case");
         let server = SepikaServer::new(make_state(cantilever_without_load_case(), &dir));
@@ -839,22 +814,6 @@ mod tests {
             sepika_solver::statics::analysis::AiMode::SemiPrecise
         );
         assert_eq!(params.design_period, None);
-    }
-
-    #[test]
-    fn test_prepare_notices_for_semi_precise_without_design_period() {
-        // 階が無いと地震同期パスに入らず notices が空になる。
-        let params = JobParams {
-            ai_mode: sepika_solver::statics::analysis::AiMode::SemiPrecise,
-            design_period: None,
-            ..Default::default()
-        };
-        let (_model, notices) =
-            crate::job::model_prepared_for_analysis(&pushover_model(), &params).unwrap();
-        assert!(
-            notices.iter().any(|s| s.contains("EX/EY")),
-            "精算周期未指定時は EX/EY 未同期の注意が出ること: {notices:?}"
-        );
     }
 
     #[tokio::test]

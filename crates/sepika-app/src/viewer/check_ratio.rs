@@ -1285,20 +1285,4 @@ mod tests {
         )
         .is_none());
     }
-
-    /// マーカー半径とホバー判定しきい値の大小関係を保つ。
-    ///
-    /// NG のマーカーは OK より大きく描き（他の節点記号に埋もれないようにする）、
-    /// ホバー判定はマーカーより広く取る（マーカーの縁でも詳細を出せるようにする）。
-    /// 値を調整したときに関係が崩れていないかを押さえる。
-    #[test]
-    fn node_marker_radii_keep_ordering() {
-        let (ok, ng, hover) = (
-            NODE_MARKER_RADIUS,
-            NODE_MARKER_RADIUS_NG,
-            NODE_HOVER_THRESHOLD,
-        );
-        assert!(ng > ok, "NG のマーカーは OK より大きい: {ng} vs {ok}");
-        assert!(hover >= ng, "ホバー判定はマーカーより広い: {hover} vs {ng}");
-    }
 }

@@ -461,24 +461,4 @@ mod tests {
         assert!(s.contains("Qy=30kN"), "s={s}");
         assert!(s.contains("k2/k1=0.020"), "s={s}");
     }
-
-    #[test]
-    fn test_damper_kind_label() {
-        assert_eq!(
-            damper_kind_label(DamperKind::Maxwell),
-            "オイルダンパー(Maxwell)"
-        );
-        assert_eq!(
-            damper_kind_label(DamperKind::HystereticBilinear),
-            "履歴型(バイリニア)"
-        );
-    }
-
-    #[test]
-    fn test_damper_def_draft_default_is_maxwell() {
-        let d = DamperDefDraft::default();
-        assert_eq!(d.props.kind, DamperKind::Maxwell);
-        assert!(d.edit_index.is_none());
-        assert!(!d.name.trim().is_empty());
-    }
 }

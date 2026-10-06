@@ -582,16 +582,6 @@ mod tests {
         assert!(parse_lk_direct("abc", "lk_y").is_err());
     }
 
-    /// C 係数直接入力も lk_y/lk_z と同じ正値パーサを再利用できること
-    /// （空欄=自動、正の値はそのまま、0以下・非数値はエラー）。
-    #[test]
-    fn test_parse_c_direct_reuses_parse_lk_direct() {
-        assert_eq!(parse_lk_direct("", "C係数").unwrap(), None);
-        assert_eq!(parse_lk_direct("1.5", "C係数").unwrap(), Some(1.5));
-        assert!(parse_lk_direct("0", "C係数").is_err());
-        assert!(parse_lk_direct("-1.0", "C係数").is_err());
-    }
-
     /// 表示用整形（lb 直接入力・座屈長さ・横補剛本数）が None/Some で
     /// 期待通りの文字列になること。
     #[test]

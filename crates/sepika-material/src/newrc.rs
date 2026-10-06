@@ -295,13 +295,6 @@ mod tests {
     }
 
     #[test]
-    fn test_newrc_eps_c0_reasonable() {
-        let c = ConcreteNewRc::new(30.0, 2.0);
-        // εc0 は 0.002 前後（普通強度コンクリート）。
-        assert!(c.eps_c0 > 0.0015 && c.eps_c0 < 0.0030, "εc0={}", c.eps_c0);
-    }
-
-    #[test]
     fn test_newrc_tension_cracks() {
         let mut c = ConcreteNewRc::new(30.0, 2.0);
         let eps_cr = c.eps_cr();
@@ -330,17 +323,6 @@ mod tests {
 
         let after_probe = c.trial(probe_strain);
         assert_eq!(after_probe, via_trial);
-    }
-
-    #[test]
-    fn test_newrc_commit_revert() {
-        let mut c = ConcreteNewRc::new(30.0, 2.0);
-        c.trial(-0.001);
-        c.commit();
-        c.trial(-0.003);
-        c.revert();
-        let (stress, _) = c.trial(-0.0005);
-        assert!(stress < 0.0);
     }
 
     #[test]

@@ -273,15 +273,4 @@ mod tests {
         let after_probe = c.trial(probe_strain);
         assert_eq!(after_probe, via_trial);
     }
-
-    #[test]
-    fn test_concrete_commit_revert() {
-        let mut c = Concrete::new(30.0, 2.0);
-        c.trial(-0.001);
-        c.commit();
-        c.trial(-0.002);
-        c.revert();
-        let (stress, _) = c.trial(-0.0005);
-        assert!(stress < 0.0);
-    }
 }

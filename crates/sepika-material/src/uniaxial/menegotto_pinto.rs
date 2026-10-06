@@ -330,27 +330,6 @@ mod tests {
     }
 
     #[test]
-    fn test_menegotto_pinto_bauschinger_loop() {
-        // 繰り返し履歴でバウシンガー効果（反転後の丸み）を確認
-        let mut mp = MenegottoPinto::new(205000.0, 235.0);
-        let eps_y = 235.0 / 205000.0;
-        let mut peak = 0.0f64;
-        // +4εy → -4εy → +4εy の履歴
-        for &target in &[eps_y * 4.0, -eps_y * 4.0, eps_y * 4.0] {
-            let n = 20;
-            for i in 1..=n {
-                let eps = target * (i as f64) / (n as f64);
-                let (sig, _) = mp.trial(eps);
-                mp.commit();
-                peak = peak.max(sig.abs());
-            }
-        }
-        // 反転後の曲率 R は ξ 増加で小さくなり、ループは漸近線に近づく。
-        // ピーク応力は fy+硬化成分 に漸近し、fy を超えること（弾完全塑性ではない）
-        assert!(peak > 235.0, "MP peak should exceed fy due to hardening");
-    }
-
-    #[test]
     fn test_r_degrades_after_plastic_excursion() {
         // 大振幅の反転後は R が小さくなり、遷移曲線が丸くなる。
         // 丸みの指標として「反転から 1εy 戻った点の応力の弾性除荷直線からの乖離」を

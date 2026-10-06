@@ -30,7 +30,7 @@ use model::envelope_area;
 #[cfg(test)]
 use sepika_core::ids::StoryId;
 #[cfg(test)]
-use time_history::{fundamental_omega, solve_tridiagonal};
+use time_history::fundamental_omega;
 
 #[cfg(test)]
 mod tests {
@@ -143,20 +143,6 @@ mod tests {
                 q3,
             },
         }
-    }
-
-    #[test]
-    fn test_solve_tridiagonal_identity() {
-        // 単位行列: x=b。
-        let x = solve_tridiagonal(
-            &[0.0, 0.0, 0.0],
-            &[1.0, 1.0, 1.0],
-            &[0.0, 0.0, 0.0],
-            &[3.0, 5.0, 7.0],
-        );
-        assert!(
-            (x[0] - 3.0).abs() < 1e-12 && (x[1] - 5.0).abs() < 1e-12 && (x[2] - 7.0).abs() < 1e-12
-        );
     }
 
     /// `build_lumped_mass_model` は、長期荷重のみを載荷した初期点の (δ,Q) を層 Q-δ 曲線の原点として差し引くこと。

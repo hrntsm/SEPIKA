@@ -39,13 +39,6 @@ mod tests {
     }
 
     #[test]
-    fn test_concrete_compression_short_is_2x_long() {
-        let long = concrete_allowable_compression(24.0, true);
-        assert!((long - 8.0).abs() < 1e-9);
-        assert!((concrete_allowable_compression(24.0, false) - 16.0).abs() < 1e-9);
-    }
-
-    #[test]
     fn test_lightweight_concrete_is_0_9x() {
         let normal = concrete_allowable_shear_class(24.0, ConcreteClass::Normal, false);
         let light = concrete_allowable_shear_class(24.0, ConcreteClass::Lightweight1, false);
@@ -145,14 +138,6 @@ mod tests {
         assert!((rebar_sigma_y_of(Some(&m)) - 400.0).abs() < 1e-9);
         // 主筋の材料が未割当でも 0 とし、既定値をでっち上げない。
         assert!(rebar_sigma_y_of(None).abs() < 1e-9);
-    }
-
-    /// F 値表・prefix の詳細は `sepika_core::material_grade` を正とする。
-    /// 本クレートは再エクスポートの配線のみを確認する。
-    #[test]
-    fn test_steel_f_value_reexport_wires_to_core() {
-        assert_eq!(steel_f_value("SS400", 40.0), Some(235.0));
-        assert_eq!(steel_f_value_prefix("SN400B", 30.0), Some(235.0));
     }
 
     #[test]

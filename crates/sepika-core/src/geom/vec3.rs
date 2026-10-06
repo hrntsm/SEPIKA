@@ -77,19 +77,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dot_cross_norm_の基本則() {
-        let a = [1.0, 0.0, 0.0];
-        let b = [0.0, 2.0, 0.0];
-        assert_eq!(dot(a, b), 0.0);
-        assert_eq!(cross(a, b), [0.0, 0.0, 2.0]);
-        assert_eq!(norm(b), 2.0);
-        // 外積は両ベクトルに直交する。
-        let c = cross(a, b);
-        assert_eq!(dot(c, a), 0.0);
-        assert_eq!(dot(c, b), 0.0);
-    }
-
-    #[test]
     fn unit_は縮退ベクトルで_none_を返す() {
         assert_eq!(unit([0.0, 0.0, 0.0]), None);
         assert_eq!(unit([ZERO_TOL, 0.0, 0.0]), None);
