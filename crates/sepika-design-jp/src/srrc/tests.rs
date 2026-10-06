@@ -532,6 +532,7 @@ fn test_src_shape_mismatch_skip() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mat = make_material(24.0, "SD345");
     let ctx = ctx_column(LoadTerm::Long);

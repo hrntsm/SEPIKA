@@ -45,6 +45,7 @@ fn sample_model() -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         elements: vec![ElementData {
             id: ElemId(0),
@@ -64,6 +65,131 @@ fn sample_model() -> Model {
             spring: None,
         }],
         ..Default::default()
+    }
+}
+
+#[test]
+fn pending_geometry_queries_and_quantity_are_not_reported_as_zero() {
+    use sepika_core::model::{Material, PropertyBasis};
+    use sepika_core::section_shape::SectionShape;
+    let mut model = sample_model();
+    let mut section = SectionShape::SteelH {
+        height: 400.0,
+        width: 200.0,
+        web_thick: 9.0,
+        flange_thick: 12.0,
+        root_r: None,
+    }
+    .input_section(SectionId(0), "未入力H".into())
+    .unwrap();
+    section.material = Some(MaterialId(0));
+    section.frame_use = Some(FrameSectionUse::Column);
+    model.sections[0] = section;
+    model.materials.push(Material {
+        id: MaterialId(0),
+        name: "SN400B".into(),
+        category: MaterialCategory::Steel,
+        young: 205000.0,
+        poisson: 0.3,
+        density: 7.85e-9,
+        shear: None,
+        fc: None,
+        fy: Some(235.0),
+        concrete_class: Default::default(),
+        strength_factor: None,
+    });
+    let rows = query_model(&model, "sections", None);
+    assert!(rows[0]["area"].is_null());
+    assert!(rows[0]["iy"].is_null());
+    assert!(rows[0]["unavailable_reason"]
+        .as_str()
+        .unwrap()
+        .contains("未算定"));
+    let unavailable = quantity_takeoff_json(&model, None);
+    assert_eq!(unavailable["status"], "unavailable");
+    assert!(unavailable["totals"].is_null());
+    model.sections[0].area = 9000.0;
+    model.sections[0].property_basis.area = PropertyBasis::Supplied;
+    assert_eq!(query_model(&model, "sections", None)[0]["area"], 9000.0);
+    let available = quantity_takeoff_json(&model, None);
+    assert!(available["totals"]["steel_t"].as_f64().unwrap() > 0.0);
+    let mut known = model.sections[0].clone();
+    known.id = SectionId(1);
+    known.shape = Some(SectionShape::SteelH {
+        height: 400.0,
+        width: 200.0,
+        web_thick: 9.0,
+        flange_thick: 12.0,
+        root_r: Some(13.0),
+    });
+    known.property_basis = Default::default();
+    model.sections.push(known);
+    let mut normal = model.elements[0].clone();
+    normal.section = Some(SectionId(1));
+    model.elements[0].id = ElemId(1);
+    model.elements.insert(0, normal);
+    let before = model.clone();
+    match compute_job(&model, JobKind::LinearStatic, &JobParams::default()) {
+        Err(error) => assert!(error.to_string().contains("フィレット"), "{error}"),
+        Ok(_) => panic!("未知フィレットの部分入力から成功結果を公開してはいけない"),
+    }
+    assert_eq!(model.load_cases, before.load_cases);
+    assert_eq!(model.stories, before.stories);
+    assert_eq!(model.nodes, before.nodes);
+}
+
+#[test]
+fn rounded_cft_jobs_publish_unavailable_reasons_without_claiming_pass() {
+    use sepika_core::section_shape::SectionShape;
+    let mut model = rc_column_model();
+    let mut steel = model.materials[0].clone();
+    steel.id = MaterialId(model.materials.len() as u32);
+    steel.name = "SN400B".into();
+    steel.category = MaterialCategory::Steel;
+    steel.fc = None;
+    steel.fy = Some(235.0);
+    steel.young = 205000.0;
+    steel.poisson = 0.3;
+    steel.density = 7.85e-9;
+    let steel_id = steel.id;
+    model.materials.push(steel);
+    let mut section = SectionShape::CftBox {
+        height: 400.0,
+        width: 300.0,
+        thick: 10.0,
+        corner_r: Some(30.0),
+    }
+    .to_section(SectionId(0), "角丸CFT".into());
+    section.frame_use = Some(FrameSectionUse::Column);
+    section.material = Some(MaterialId(0));
+    section.steel_material = Some(steel_id);
+    model.sections[0] = section;
+    match compute_job(&model, JobKind::DesignCheck, &JobParams::default()).unwrap() {
+        JobOutcome::DesignCheck { summary, .. } => {
+            assert!(summary["n_skipped"].as_u64().unwrap() > 0);
+            assert_eq!(summary["all_members_checked_and_ok"], false);
+            assert!(summary["member_skipped"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["reason"].as_str().unwrap().contains("#418")));
+        }
+        _ => panic!("断面検定の結果が必要"),
+    }
+    match compute_job(&model, JobKind::UltimateCheck, &JobParams::default()).unwrap() {
+        JobOutcome::UltimateCheck { summary } => {
+            assert_eq!(summary["n_cft_mu_unavailable"], 1);
+            let row = &summary["cft_members"][0];
+            assert!(row["mu_nm"].is_null());
+            assert!(row["mu_nm_unavailable_reason"]
+                .as_str()
+                .unwrap()
+                .contains("#418"));
+            assert!(row["ncu"].as_f64().unwrap() > 0.0);
+            assert!(!row["axial_ok"].is_null());
+            assert_eq!(summary["all_checks_calculated_and_ok"], false);
+        }
+        _ => panic!("終局検定の結果が必要"),
     }
 }
 

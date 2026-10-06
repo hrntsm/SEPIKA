@@ -531,6 +531,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         });
         for i in 0..2u32 {
             model.elements.push(ElementData {

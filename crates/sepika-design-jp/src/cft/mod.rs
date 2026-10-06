@@ -159,9 +159,10 @@ fn cft_common_steel(f_value: f64, term: LoadTerm, lambda: f64) -> (f64, f64, f64
     (s_ft, s_fs, s_fc)
 }
 
+#[cfg(test)]
 fn cft_box_steel_props(height: f64, width: f64, thick: f64) -> (f64, f64, f64) {
     let shape = SectionShape::CftBox {
-        corner_r: None,
+        corner_r: Some(0.0),
         height,
         width,
         thick,
@@ -205,31 +206,43 @@ fn cft_box_check(
     forces: &MemberForcesAt,
     mat: &Material,
     ctx: &DesignCtx,
-    height: f64,
-    width: f64,
-    thick: f64,
+    shape: &SectionShape,
     fc_raw: f64,
-) -> CheckResult {
+) -> Result<CheckResult, String> {
+    let SectionShape::CftBox {
+        height,
+        width,
+        thick,
+        corner_r,
+    } = *shape
+    else {
+        return Err("角形 CFT の断面形状が不一致です".into());
+    };
+    let geometry = shape
+        .rounded_steel_properties()?
+        .ok_or("角形 CFT の鋼管性能を解決できません")?;
+    let r = corner_r.ok_or("角形 CFT の角Rが未知です")?;
+    if r > thick {
+        return Err("角形 CFT の内角Rが正の許容曲げは未対応です（設計仕様は #418 で策定）".into());
+    }
+    if r > 0.0
+        && ctx
+            .seismic_qd
+            .as_ref()
+            .is_some_and(|qd| qd.method != crate::QdMethod::Qd2)
+    {
+        return Err("角形 CFT の角Rが正の終局 N–M は未対応のため、Mu に依存する設計用せん断 QD1/min を算定できません（#418）。QD2 へ自動切替しません".into());
+    }
     let long_term = ctx.term == LoadTerm::Long;
     let fc_allow = concrete_allowable_compression(fc_raw, long_term);
 
     let f_value = sepika_core::material_grade::cft_steel_f_value(mat, thick)
         .expect("CFT 鋼管材料は解析前に検証済み");
-    let (sa, sz_z, sz_y) = cft_box_steel_props(height, width, thick);
-    let shape = SectionShape::CftBox {
-        corner_r: None,
-        height,
-        width,
-        thick,
-    };
-    let lambda = effective_slenderness(
-        shape.calc_iy(),
-        shape.calc_iz(),
-        sa,
-        ctx.length,
-        ctx.lk_y,
-        ctx.lk_z,
-    );
+    let sa = geometry.area;
+    let sz_z = geometry.iy * 2.0 / height;
+    let sz_y = geometry.iz * 2.0 / width;
+    let lambda =
+        effective_slenderness(geometry.iy, geometry.iz, sa, ctx.length, ctx.lk_y, ctx.lk_z);
     let (s_ft, s_fs, s_fc) = cft_common_steel(f_value, ctx.term, lambda);
     let s_nt = sa * s_ft;
     let s_nc = sa * s_fc;
@@ -239,7 +252,10 @@ fn cft_box_check(
     let c_b_y = c_d_z;
     let c_d_y = c_b_z;
 
-    let c_area = c_b_z * c_d_z;
+    let c_area = shape
+        .try_cft_core_props()?
+        .ok_or("角形 CFT のコア性能を解決できません")?
+        .area;
     let cnc = c_area * fc_allow;
 
     let n_design = -forces.n;
@@ -267,19 +283,15 @@ fn cft_box_check(
     let s_aw_z = 2.0 * thick * (width - 2.0 * thick).max(0.0);
     let s_qa_y = s_aw_y * s_fs;
     let s_qa_z = s_aw_z * s_fs;
-    let (sum_c_my_z, sum_c_my_y) = if ctx.seismic_qd.is_some() {
-        let shape = SectionShape::CftBox {
-            corner_r: None,
-            height,
-            width,
-            thick,
-        };
+    let (sum_c_my_z, sum_c_my_y) = if ctx
+        .seismic_qd
+        .as_ref()
+        .is_some_and(|qd| qd.method != crate::QdMethod::Qd2)
+    {
         let lk_y = ctx.lk_y.unwrap_or(ctx.length);
         let lk_z = ctx.lk_z.unwrap_or(ctx.length);
-        let mu_z = crate::ultimate::cft_mu_nm(&shape, fc_raw, f_value, n_design, lk_y, false)
-            .unwrap_or(0.0);
-        let mu_y = crate::ultimate::cft_mu_nm(&shape, fc_raw, f_value, n_design, lk_z, true)
-            .unwrap_or(0.0);
+        let mu_z = crate::ultimate::cft_mu_nm(shape, fc_raw, f_value, n_design, lk_y, false)?;
+        let mu_y = crate::ultimate::cft_mu_nm(shape, fc_raw, f_value, n_design, lk_z, true)?;
         (2.0 * mu_z, 2.0 * mu_y)
     } else {
         (0.0, 0.0)
@@ -323,11 +335,11 @@ fn cft_box_check(
         },
     ];
 
-    CheckResult {
+    Ok(CheckResult {
         basis,
         detail,
         components,
-    }
+    })
 }
 
 fn cft_pipe_check(
@@ -337,7 +349,7 @@ fn cft_pipe_check(
     outer_dia: f64,
     thick: f64,
     fc_raw: f64,
-) -> CheckResult {
+) -> Result<CheckResult, String> {
     let long_term = ctx.term == LoadTerm::Long;
     let fc_allow = concrete_allowable_compression(fc_raw, long_term);
 
@@ -375,14 +387,17 @@ fn cft_pipe_check(
 
     let s_aw = sa / 2.0;
     let s_qa = s_aw * s_fs;
-    let sum_c_my = if ctx.seismic_qd.is_some() {
+    let sum_c_my = if ctx
+        .seismic_qd
+        .as_ref()
+        .is_some_and(|qd| qd.method != crate::QdMethod::Qd2)
+    {
         let shape = SectionShape::CftPipe { outer_dia, thick };
         let lk = ctx
             .lk_y
             .unwrap_or(ctx.length)
             .max(ctx.lk_z.unwrap_or(ctx.length));
-        2.0 * crate::ultimate::cft_mu_nm(&shape, fc_raw, f_value, n_design, lk, false)
-            .unwrap_or(0.0)
+        2.0 * crate::ultimate::cft_mu_nm(&shape, fc_raw, f_value, n_design, lk, false)?
     } else {
         0.0
     };
@@ -416,11 +431,11 @@ fn cft_pipe_check(
         },
     ];
 
-    CheckResult {
+    Ok(CheckResult {
         basis,
         detail,
         components,
-    }
+    })
 }
 
 /// CFT 柱の断面検定（`SectionShape::CftBox`/`CftPipe` を対象とする）。
@@ -437,9 +452,9 @@ impl DesignCheck for CftDesign {
         ctx: &DesignCtx,
     ) -> CheckOutcome {
         let fc_raw = mat.fc.unwrap_or(0.0);
-        if fc_raw <= 0.0 {
+        if !fc_raw.is_finite() || fc_raw <= 0.0 {
             return CheckOutcome::Skipped {
-                reason: "CFT検定: Fc未設定（Material.fc が None/0 です）".to_string(),
+                reason: "CFT検定: Fc未設定または不正（有限な正値が必要です）".to_string(),
             };
         }
         let Some(steel_mat) = ctx.steel_material.as_ref() else {
@@ -461,12 +476,9 @@ impl DesignCheck for CftDesign {
         }
 
         let cr = match &sec.shape {
-            Some(SectionShape::CftBox {
-                height,
-                width,
-                thick,
-                ..
-            }) => cft_box_check(forces, steel_mat, ctx, *height, *width, *thick, fc_raw),
+            Some(shape @ SectionShape::CftBox { .. }) => {
+                cft_box_check(forces, steel_mat, ctx, shape, fc_raw)
+            }
             Some(SectionShape::CftPipe { outer_dia, thick }) => {
                 cft_pipe_check(forces, steel_mat, ctx, *outer_dia, *thick, fc_raw)
             }
@@ -478,7 +490,10 @@ impl DesignCheck for CftDesign {
                 };
             }
         };
-        CheckOutcome::Checked(cr)
+        match cr {
+            Ok(cr) => CheckOutcome::Checked(cr),
+            Err(reason) => CheckOutcome::Skipped { reason },
+        }
     }
 }
 

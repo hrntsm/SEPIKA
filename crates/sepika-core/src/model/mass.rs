@@ -78,6 +78,57 @@ impl SectionMassProperties {
             };
         };
 
+        if matches!(
+            shape,
+            SectionShape::SteelH { .. } | SectionShape::SteelBox { .. }
+        ) {
+            shape.validate_surface_radius()?;
+            let geometry = match shape.rounded_steel_properties() {
+                Ok(Some(p)) => GeometryMass {
+                    area: p.area,
+                    iy: p.iy,
+                    iz: p.iz,
+                },
+                Err(error)
+                    if matches!(
+                        shape,
+                        SectionShape::SteelH { root_r: None, .. }
+                            | SectionShape::SteelBox { corner_r: None, .. }
+                    ) && [
+                        section.property_basis.area,
+                        section.property_basis.iy,
+                        section.property_basis.iz,
+                    ]
+                    .iter()
+                    .all(|basis| *basis == super::PropertyBasis::Supplied) =>
+                {
+                    if ![section.area, section.iy, section.iz]
+                        .iter()
+                        .all(|v| v.is_finite() && *v >= 0.0)
+                    {
+                        return Err(error);
+                    }
+                    GeometryMass {
+                        area: section.area,
+                        iy: section.iy,
+                        iz: section.iz,
+                    }
+                }
+                Err(error) => return Err(error),
+                Ok(None) => return Err("鋼材の材料領域を解決できません".into()),
+            };
+            return Ok(Self::uniform(
+                main.map_or(0.0, |m| m.density),
+                geometry.area,
+                geometry.iy,
+                geometry.iz,
+            ));
+        }
+        if matches!(shape, SectionShape::CftBox { .. }) {
+            shape.rounded_steel_properties()?;
+            shape.try_cft_core_props()?;
+        }
+
         let properties = shaped_mass(shape, main, rebar, shear_rebar, steel);
         if valid_mass_properties(properties) {
             Ok(properties)
@@ -1442,7 +1493,10 @@ mod tests {
                 corner_r: Some(0.0),
             },
         ] {
-            let section = shape.to_section(SectionId(1), "invalid-steel".into());
+            let section = Section {
+                shape: Some(shape),
+                ..Section::zero(SectionId(1), "invalid-steel".into())
+            };
             assert!(SectionMassProperties::try_from_section(
                 &section,
                 Some(&steel),
@@ -1648,5 +1702,71 @@ mod tests {
             SectionMassProperties::try_from_section(&section, Some(&concrete), None, None, None)
                 .unwrap_err();
         assert!(error.contains("密度が不正"));
+    }
+    #[test]
+    fn rounded_material_mass_and_rotary_inertias_match_independent_geometry() {
+        let steel = material(0, MaterialCategory::Steel, 7.85e-9, None);
+        let concrete = material(1, MaterialCategory::Concrete, 2.4e-9, Some(24.0));
+        let rho_c = 23.0e-6 / 9806.65;
+        for (shape, reference, core) in [
+            (
+                SectionShape::SteelH {
+                    height: 400.0,
+                    width: 200.0,
+                    web_thick: 9.0,
+                    flange_thick: 12.0,
+                    root_r: Some(13.0),
+                },
+                [8329.070841543, 225549509.4320, 16031656.18828],
+                [0.0; 3],
+            ),
+            (
+                SectionShape::SteelBox {
+                    height: 500.0,
+                    width: 300.0,
+                    thick: 10.0,
+                    corner_r: Some(30.0),
+                },
+                [15170.79632679, 517817051.0231, 237343309.2454],
+                [0.0; 3],
+            ),
+            (
+                SectionShape::CftBox {
+                    height: 500.0,
+                    width: 300.0,
+                    thick: 10.0,
+                    corner_r: Some(30.0),
+                },
+                [15170.79632679, 517817051.0231, 237343309.2454],
+                [134056.6370614, 2561426897.480, 871767904.0575],
+            ),
+        ] {
+            let section = shape.to_section(SectionId(0), "独立積分断面".into());
+            let cft = section.is_cft();
+            let actual = SectionMassProperties::try_from_section(
+                &section,
+                Some(if cft { &concrete } else { &steel }),
+                None,
+                None,
+                cft.then_some(&steel),
+            )
+            .unwrap();
+            let expected = [
+                steel.density * reference[0] + rho_c * core[0],
+                steel.density * reference[1] + rho_c * core[1],
+                steel.density * reference[2] + rho_c * core[2],
+            ];
+            for (a, e) in [
+                actual.mass_per_length,
+                actual.rotary_inertia_y_per_length,
+                actual.rotary_inertia_z_per_length,
+            ]
+            .into_iter()
+            .zip(expected)
+            {
+                assert!((a / e - 1.0).abs() < 1.0e-10);
+            }
+            eprintln!("{shape:?}: 質量特性={actual:?}");
+        }
     }
 }

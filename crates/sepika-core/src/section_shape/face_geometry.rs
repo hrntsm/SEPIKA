@@ -100,12 +100,27 @@ impl SectionGeometry {
             return Err("支持部材と材軸が平行でフェース距離を解決できません".into());
         }
         let normal = [direction[1] / norm, -direction[0] / norm];
-        let distance = self
+        let intervals: Vec<_> = self
             .parts
             .iter()
-            .filter(|(_, material)| material.is_some())
-            .filter_map(|(primitive, _)| primitive.interval(0.0, normal))
-            .map(|interval| interval[1] / norm)
+            .filter_map(|(primitive, material)| {
+                primitive.interval(0.0, normal).map(|span| (span, material))
+            })
+            .collect();
+        let mut boundaries: Vec<_> = intervals.iter().flat_map(|(span, _)| *span).collect();
+        boundaries.sort_by(f64::total_cmp);
+        boundaries.dedup();
+        let distance = boundaries
+            .windows(2)
+            .filter_map(|pair| {
+                let mid = (pair[0] + pair[1]) / 2.0;
+                let material = intervals
+                    .iter()
+                    .rev()
+                    .find(|(span, _)| span[0] <= mid && mid <= span[1])?
+                    .1;
+                material.is_some().then_some(pair[1] / norm)
+            })
             .fold(f64::NEG_INFINITY, f64::max);
         if !distance.is_finite() || distance <= 0.0 {
             return Err("材軸から正方向の外側フェースを解決できません".into());
@@ -114,6 +129,7 @@ impl SectionGeometry {
     }
 
     pub fn of(shape: &SectionShape) -> Result<Self, String> {
+        shape.rounded_steel_properties()?;
         let mut parts = Vec::new();
         let mut rect = |y: [f64; 2], z: [f64; 2], material| {
             parts.push((Primitive::Rectangle { y, z }, material));
@@ -155,15 +171,18 @@ impl SectionGeometry {
                 height: h,
                 width: w,
                 thick: t,
-                ..
+                corner_r,
             } => {
                 if t <= 0.0 || 2.0 * t >= h.min(w) {
                     return Err("CFT鋼管厚が不正です".into());
                 }
-                rect([-h / 2.0, h / 2.0], [-w / 2.0, w / 2.0], Some(0));
-                rect(
-                    [-h / 2.0 + t, h / 2.0 - t],
-                    [-w / 2.0 + t, w / 2.0 - t],
+                let r = corner_r.ok_or("角形 CFT の角Rが未知です")?;
+                rounded_rectangle(&mut parts, h, w, r, Some(0));
+                rounded_rectangle(
+                    &mut parts,
+                    h - 2.0 * t,
+                    w - 2.0 * t,
+                    (r - t).max(0.0),
                     Some(1),
                 );
             }
@@ -172,7 +191,7 @@ impl SectionGeometry {
                 width: w,
                 web_thick: tw,
                 flange_thick: tf,
-                ..
+                root_r,
             } => {
                 rect([-h / 2.0, -h / 2.0 + tf], [-w / 2.0, w / 2.0], Some(0));
                 rect([h / 2.0 - tf, h / 2.0], [-w / 2.0, w / 2.0], Some(0));
@@ -181,6 +200,28 @@ impl SectionGeometry {
                     [-tw / 2.0, tw / 2.0],
                     Some(0),
                 );
+                let r = root_r.ok_or("H 形鋼のフィレット半径が未知です")?;
+                if r > 0.0 {
+                    for sy in [-1.0, 1.0] {
+                        for sz in [-1.0, 1.0] {
+                            let bounds = |a: f64, b: f64| [a.min(b), a.max(b)];
+                            parts.push((
+                                Primitive::Rectangle {
+                                    y: bounds(sy * (h / 2.0 - tf - r), sy * (h / 2.0 - tf)),
+                                    z: bounds(sz * tw / 2.0, sz * (tw / 2.0 + r)),
+                                },
+                                Some(0),
+                            ));
+                            parts.push((
+                                Primitive::Circle {
+                                    center: [sy * (h / 2.0 - tf - r), sz * (tw / 2.0 + r)],
+                                    radius: r,
+                                },
+                                None,
+                            ));
+                        }
+                    }
+                }
             }
             SectionShape::SteelFlatBar { width: w, thick: h } => {
                 rect([-h / 2.0, h / 2.0], [-w / 2.0, w / 2.0], Some(0))
@@ -388,6 +429,97 @@ fn rounded_rectangle(
 #[cfg(test)]
 mod face_tests {
     use super::*;
+
+    #[test]
+    fn rounded_material_intervals_match_area_and_both_inertias() {
+        for shape in [
+            SectionShape::SteelH {
+                height: 400.0,
+                width: 200.0,
+                web_thick: 9.0,
+                flange_thick: 12.0,
+                root_r: Some(13.0),
+            },
+            SectionShape::SteelH {
+                height: 400.0,
+                width: 200.0,
+                web_thick: 9.0,
+                flange_thick: 12.0,
+                root_r: Some(95.5),
+            },
+            SectionShape::SteelBox {
+                height: 500.0,
+                width: 300.0,
+                thick: 10.0,
+                corner_r: Some(5.0),
+            },
+            SectionShape::CftBox {
+                height: 500.0,
+                width: 300.0,
+                thick: 10.0,
+                corner_r: Some(30.0),
+            },
+            SectionShape::CftBox {
+                height: 400.0,
+                width: 400.0,
+                thick: 10.0,
+                corner_r: Some(200.0),
+            },
+        ] {
+            let geometry = SectionGeometry::of(&shape).unwrap();
+            let mut breaks: Vec<_> = geometry
+                .parts
+                .iter()
+                .flat_map(|(p, _)| p.breaks([1.0, 0.0]))
+                .collect();
+            breaks.sort_by(f64::total_cmp);
+            breaks.dedup();
+            let mut result = [[0.0; 3]; 2];
+            for segment in breaks.windows(2) {
+                let mid = (segment[0] + segment[1]) / 2.0;
+                let half = (segment[1] - segment[0]) / 2.0;
+                let dt = std::f64::consts::PI / 2048.0;
+                for i in 0..2048 {
+                    let theta = -std::f64::consts::FRAC_PI_2 + (i as f64 + 0.5) * dt;
+                    let y = mid + half * theta.sin();
+                    let dy = half * theta.cos() * dt;
+                    let spans: Vec<_> = geometry
+                        .parts
+                        .iter()
+                        .filter_map(|(p, mat)| p.interval(y, [1.0, 0.0]).map(|span| (span, mat)))
+                        .collect();
+                    let mut zs: Vec<_> = spans.iter().flat_map(|(span, _)| *span).collect();
+                    zs.sort_by(f64::total_cmp);
+                    zs.dedup();
+                    for pair in zs.windows(2) {
+                        let z = (pair[0] + pair[1]) / 2.0;
+                        if let Some((_, Some(mat))) = spans
+                            .iter()
+                            .rev()
+                            .find(|(span, _)| span[0] < z && z < span[1])
+                        {
+                            let a = (pair[1] - pair[0]) * dy;
+                            result[*mat][0] += a;
+                            result[*mat][1] += a * y * y;
+                            result[*mat][2] += (pair[1].powi(3) - pair[0].powi(3)) / 3.0 * dy;
+                        }
+                    }
+                }
+            }
+            let steel = shape.rounded_steel_properties().unwrap().unwrap();
+            let core = shape.rounded_core_properties().unwrap();
+            for (i, p) in [Some(steel), core].into_iter().enumerate() {
+                if let Some(p) = p {
+                    for (actual, expected) in result[i].into_iter().zip([p.area, p.iy, p.iz]) {
+                        assert!(
+                            (actual / expected - 1.0).abs() < 1.0e-6,
+                            "{shape:?}: {actual}/{expected}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn 中空断面は内面でなく外側フェースを使い丸角も実形状で求める() {

@@ -280,8 +280,13 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                     row.col(|ui| {
                         ui.label(format!("{:.0}", force_kn(c.ntu)));
                     });
-                    row.col(|ui| {
-                        ui.label(format!("{:.1}", moment_kn_m(c.mu_nm)));
+                    row.col(|ui| match &c.mu_nm {
+                        Ok(mu) => {
+                            ui.label(format!("{:.1}", moment_kn_m(*mu)));
+                        }
+                        Err(reason) => {
+                            ui.label("未算定").on_hover_text(reason);
+                        }
                     });
                     row.col(|ui| {
                         ui.label(format!("{:.0}", force_kn(c.n_design)));
@@ -294,9 +299,9 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                     });
                     row.col(|ui| {
                         if c.ok {
-                            ui.colored_label(crate::theme::GOOD_GREEN, "OK");
+                            ui.colored_label(crate::theme::GOOD_GREEN, "軸OK");
                         } else {
-                            ui.colored_label(crate::theme::ERROR_RED, "NG");
+                            ui.colored_label(crate::theme::ERROR_RED, "軸NG");
                         }
                     });
                 },

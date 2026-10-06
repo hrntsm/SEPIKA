@@ -73,9 +73,11 @@ pub fn query_model(model: &Model, kind: &str, filter: Option<&str>) -> Vec<serde
                     "name": s.name,
                     "frame_use": s.frame_use,
                     "floor": s.floor,
-                    "area": s.area,
-                    "iy": s.iy,
-                    "iz": s.iz,
+                    "area": (s.property_basis.area != sepika_core::model::PropertyBasis::PendingShape).then_some(s.area),
+                    "iy": (s.property_basis.iy != sepika_core::model::PropertyBasis::PendingShape).then_some(s.iy),
+                    "iz": (s.property_basis.iz != sepika_core::model::PropertyBasis::PendingShape).then_some(s.iz),
+                    "property_basis": s.property_basis,
+                    "unavailable_reason": s.ensure_properties_resolved().err(),
                     "material": s.material.map(|m| m.0),
                     "rebar_material": s.rebar_material.map(|m| m.0),
                     "shear_rebar_material": s.shear_rebar_material.map(|m| m.0),
@@ -223,10 +225,13 @@ pub fn query_model(model: &Model, kind: &str, filter: Option<&str>) -> Vec<serde
 
 /// 数量積算（feature 非依存・テスト可能）。
 pub fn quantity_takeoff_json(model: &Model, group_by: Option<&str>) -> serde_json::Value {
-    use sepika_design_jp::quantity::{compute_quantity_takeoff, QuantityCfg, QuantityTotals};
+    use sepika_design_jp::quantity::{try_compute_quantity_takeoff, QuantityCfg, QuantityTotals};
     use serde_json::json;
 
-    let q = compute_quantity_takeoff(model, &QuantityCfg::default());
+    let q = match try_compute_quantity_takeoff(model, &QuantityCfg::default()) {
+        Ok(q) => q,
+        Err(reason) => return json!({ "status": "unavailable", "reason": reason, "totals": null }),
+    };
     let totals_json = |t: &QuantityTotals| {
         json!({
             "concrete_m3": t.concrete_m3,

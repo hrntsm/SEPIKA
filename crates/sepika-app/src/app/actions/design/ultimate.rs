@@ -158,7 +158,7 @@ impl App {
             .map(|(id, d)| (id, d.n_axial))
             .collect();
         let checks =
-            sepika_design_jp::ultimate::collect_cft_ultimate_checks(&self.core.model, &axial);
+            sepika_design_jp::ultimate::collect_cft_ultimate_checks(&self.core.model, &axial)?;
         if checks.is_empty() {
             return Err(
                 "終局検定の対象（CftBox/CftPipe の CFT 柱）がありません。CFT 断面と\

@@ -318,6 +318,8 @@ pub(super) fn validate_composite_material(
         shape,
         SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
     ) {
+        shape.rounded_steel_properties()?;
+        shape.try_cft_core_props()?;
         let Some(steel) = steel else {
             return Err("CFT 断面の鋼管材料が未設定です".into());
         };

@@ -104,6 +104,7 @@ fn base_model() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     m
 }
@@ -423,7 +424,7 @@ fn 勾配小梁と勾配支持小梁は鉛直基準の投影フェースと三�
             .reactions
             .iter()
             .sum::<f64>()
-            - DENSITY * AREA * sepika_core::units::GRAVITY_MM_S2 * 4500.0)
+            - DENSITY * 160000.0 * sepika_core::units::GRAVITY_MM_S2 * 4500.0)
             .abs()
             < 1e-9
     );
@@ -542,7 +543,7 @@ fn beam_mass_equiv_applies_steel_weight_factor() {
     let rm = mass.members.get(&key).expect("物理質量の小梁").reactions;
     let factor = 1.3;
     let expect_d = DESIGN_UNIT_WEIGHT_N_PER_MM3 * AREA * factor * 3800.0 / 2.0;
-    let expect_m = DENSITY * AREA * sepika_core::units::GRAVITY_MM_S2 * factor * 3800.0 / 2.0;
+    let expect_m = DENSITY * 80000.0 * sepika_core::units::GRAVITY_MM_S2 * factor * 3800.0 / 2.0;
     assert!(
         (rd[0] - expect_d).abs() / expect_d < 1e-9,
         "設計反力 {}",
@@ -553,6 +554,125 @@ fn beam_mass_equiv_applies_steel_weight_factor() {
         "物理反力 {}",
         rm[0]
     );
+}
+
+#[test]
+fn rounded_secondary_supplied_area_mass_reaches_stories_and_unknown_is_error() {
+    use sepika_core::model::PropertyBasis;
+    use sepika_core::section_shape::SectionShape;
+    for shape in [
+        SectionShape::SteelH {
+            height: 400.0,
+            width: 200.0,
+            web_thick: 8.0,
+            flange_thick: 13.0,
+            root_r: Some(13.0),
+        },
+        SectionShape::SteelBox {
+            height: 500.0,
+            width: 300.0,
+            thick: 10.0,
+            corner_r: Some(30.0),
+        },
+        SectionShape::CftBox {
+            height: 500.0,
+            width: 300.0,
+            thick: 10.0,
+            corner_r: Some(30.0),
+        },
+    ] {
+        let mut model = face_model(4000.0, [400.0; 2]);
+        model.nodes.push(node(4, -1000.0, 0.0, -3000.0));
+        model.elements.push(element_beam(2, 4, 0));
+        model.elements[2].local_axis.ref_vector = [1.0, 0.0, 0.0];
+        model.load_cfg = Some(LoadCfg {
+            steel_weight_factor: 1.3,
+            ..Default::default()
+        });
+        let is_cft = matches!(shape, SectionShape::CftBox { .. });
+        let mut section = shape.to_section(SectionId(2), "保護A小梁".into());
+        section.material = Some(MaterialId(0));
+        section.area = 20000.0;
+        section.property_basis.area = PropertyBasis::Supplied;
+        if is_cft {
+            let mut concrete = model.materials[0].clone();
+            concrete.id = MaterialId(1);
+            concrete.category = MaterialCategory::Concrete;
+            concrete.fc = Some(36.0);
+            model.materials.push(concrete);
+            section.material = Some(MaterialId(1));
+            section.steel_material = Some(MaterialId(0));
+        }
+        model.sections.push(section);
+        model.unassigned_beams[0].section = Some(SectionId(2));
+        let sec = &model.sections[2];
+        let main = model
+            .secondary_material(&model.unassigned_beams[0])
+            .unwrap();
+        let mu = sepika_core::model::SectionMassProperties::try_from_section(
+            sec,
+            Some(main),
+            None,
+            None,
+            Some(&model.materials[0]),
+        )
+        .unwrap()
+        .mass_per_length;
+        let core_mu = if is_cft {
+            main.cft_core_mass_density() * shape.try_cft_core_props().unwrap().unwrap().area
+        } else {
+            0.0
+        };
+        let expected = (mu + 0.3 * (mu - core_mu)) * sepika_core::units::GRAVITY_MM_S2 * 3600.0;
+        let transfer = solve_with_basis(&model, |_| 0.0, true, SelfWeightBasis::MassEquiv).unwrap();
+        assert!(
+            (transfer.members[&SecondaryMemberId(10)]
+                .reactions
+                .iter()
+                .sum::<f64>()
+                - expected)
+                .abs()
+                < 1e-8
+        );
+        let mut baseline = model.clone();
+        baseline.unassigned_beams.clear();
+        let sum_mass = |m: &Model| {
+            crate::story_gen::generate_stories(m, None)
+                .unwrap()
+                .stories
+                .iter()
+                .map(|s| s.dynamic_mass.unwrap().mass_equiv_weight_n)
+                .sum::<f64>()
+        };
+        assert!((sum_mass(&model) - sum_mass(&baseline) - expected).abs() < 1e-8);
+        assert_eq!(model.sections[2].area, 20000.0);
+        let design_udl = beam_self_weight_udl(&model, &model.unassigned_beams[0])
+            .unwrap()
+            .unwrap();
+        let factor = if is_cft { 1.0 } else { 1.3 };
+        assert!((design_udl - main.design_unit_weight_n_per_mm3() * 20000.0 * factor).abs() < 1e-9);
+        if !is_cft {
+            let mut unknown = shape;
+            match &mut unknown {
+                SectionShape::SteelH { root_r, .. } => *root_r = None,
+                SectionShape::SteelBox { corner_r, .. } => *corner_r = None,
+                _ => unreachable!(),
+            }
+            model.sections[2] = unknown
+                .input_section(SectionId(2), "未知小梁".into())
+                .unwrap();
+            model.sections[2].material = Some(MaterialId(0));
+            model.sections[2].area = 20000.0;
+            model.sections[2].property_basis.area = PropertyBasis::Supplied;
+            assert!(beam_self_weight_udl(&model, &model.unassigned_beams[0]).is_ok());
+            assert!(solve_with_basis(&model, |_| 0.0, true, SelfWeightBasis::MassEquiv).is_err());
+            let error = crate::story_gen::generate_stories(&model, None).unwrap_err();
+            assert!(
+                error.contains("フィレット") || error.contains("角R"),
+                "{error}"
+            );
+        }
+    }
 }
 
 /// 小梁 B の端点が小梁 A の内部に載るとき、B の反力は A の集中荷重として渡り、

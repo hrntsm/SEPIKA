@@ -54,7 +54,7 @@ impl SectionShape {
             } => {
                 positive(&[height, width, thick])?;
                 if height.min(width) <= 2.0 * thick {
-                    return Err("角形鋼管の被覆外周寸法が不正です".into());
+                    return Err("角形鋼管の内法寸法が不正です（高さ・幅は板厚の 2 倍より大きい必要があります）".into());
                 }
                 radius(corner_r, height.min(width) / 2.0)
             }
@@ -236,28 +236,22 @@ mod tests {
         assert!(h(Some(96.1)).validate_surface_radius().is_err());
     }
     #[test]
-    fn 半径は断面性能と充填コアを変更しない() {
+    fn フィレット半径と角rは幾何性能を更新しjは維持する() {
         for (a, b) in [
             (h(Some(0.0)), h(Some(13.0))),
             (boxes(Some(0.0))[0].clone(), boxes(Some(30.0))[0].clone()),
             (boxes(Some(0.0))[1].clone(), boxes(Some(30.0))[1].clone()),
         ] {
-            assert_eq!(
-                (
-                    a.calc_area(),
-                    a.calc_iy(),
-                    a.calc_iz(),
-                    a.calc_j(),
-                    a.cft_core_props()
-                ),
-                (
-                    b.calc_area(),
-                    b.calc_iy(),
-                    b.calc_iz(),
-                    b.calc_j(),
-                    b.cft_core_props()
-                )
-            );
+            assert_ne!(a.calc_area(), b.calc_area());
+            assert_ne!(a.calc_iy(), b.calc_iy());
+            assert_ne!(a.calc_iz(), b.calc_iz());
+            assert_eq!(a.calc_j(), b.calc_j());
+            if let (Some(a), Some(b)) = (a.cft_core_props(), b.cft_core_props()) {
+                assert_ne!(a.area, b.area);
+                assert_ne!(a.iy, b.iy);
+                assert_ne!(a.iz, b.iz);
+                assert_eq!(a.j, b.j);
+            }
         }
     }
     #[test]

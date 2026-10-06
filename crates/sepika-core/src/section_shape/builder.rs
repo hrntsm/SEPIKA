@@ -7,16 +7,45 @@ use crate::ids::SectionId;
 use crate::model::Section;
 
 impl SectionShape {
-    /// Build a fully-populated `sepika_core::Section` from the shape parameters.
-    ///
-    /// `id` and `name` must be supplied by the caller; all section properties
-    /// are computed automatically. 階（`Section::floor`）は形状から決まらないため
-    /// `None` とし、必要な呼び出し側（ST-Bridge 取り込み・断面形状の変更）が
-    /// 生成後に設定する。
+    /// 形状算定の断面を生成する。材料・用途・階は未設定。
+    /// 算定不能なら panic。入力値の検証には `try_to_section` を用いる。
     pub fn to_section(&self, id: SectionId, name: String) -> Section {
-        let area = self.calc_area();
-        let iy = self.calc_iy();
-        let iz = self.calc_iz();
+        self.try_to_section(id, name)
+            .unwrap_or_else(|error| panic!("断面性能を算定できません: {error}"))
+    }
+
+    /// 形状から断面を生成する。必要なフィレット半径・角Rが未知・不正ならエラー。
+    pub fn try_to_section(&self, id: SectionId, name: String) -> Result<Section, String> {
+        Ok(self.build_section(
+            id,
+            name,
+            self.try_calc_area()?,
+            self.try_calc_iy()?,
+            self.try_calc_iz()?,
+        ))
+    }
+
+    /// 未知のフィレット半径・角Rを保持して入力する。A・Iy・Iz は明示的な未算定区分となる。
+    /// 不正な寸法はエラー。未算定値を用いる計算は `Section` の解決検証で拒否する。
+    pub fn input_section(&self, id: SectionId, name: String) -> Result<Section, String> {
+        self.validate_surface_radius()?;
+        if matches!(
+            self,
+            Self::SteelH { root_r: None, .. }
+                | Self::SteelBox { corner_r: None, .. }
+                | Self::CftBox { corner_r: None, .. }
+        ) {
+            let mut section = self.build_section(id, name, 0.0, 0.0, 0.0);
+            section.property_basis.area = crate::model::PropertyBasis::PendingShape;
+            section.property_basis.iy = crate::model::PropertyBasis::PendingShape;
+            section.property_basis.iz = crate::model::PropertyBasis::PendingShape;
+            Ok(section)
+        } else {
+            self.try_to_section(id, name)
+        }
+    }
+
+    fn build_section(&self, id: SectionId, name: String, area: f64, iy: f64, iz: f64) -> Section {
         let j = self.calc_j();
         let (depth, width, as_y, as_z) = match *self {
             SectionShape::SteelH {
@@ -180,6 +209,7 @@ impl SectionShape {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: crate::model::SectionPropertyBasis::SHAPE,
         }
     }
 }

@@ -19,6 +19,7 @@ mod geometry;
 mod label;
 mod material;
 mod properties;
+mod rounded;
 mod shear;
 mod surface;
 mod types;
@@ -31,6 +32,7 @@ pub use constants::{E_STEEL, KAPPA_RC, N_S_EQ};
 pub use material::{
     concrete_young_modulus, concrete_young_modulus_gamma, wall_shear_shape_factor_isection,
 };
+pub use rounded::RoundedSectionProperties;
 pub use shear::{
     material_strip_section_properties, strip_section_properties,
     wall_rectangular_section_properties, MaterialSectionStrip, MaterialStripSectionProperties,

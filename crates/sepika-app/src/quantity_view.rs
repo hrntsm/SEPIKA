@@ -6,7 +6,7 @@
 //! CSV エクスポート（[`crate::summary::build_quantity_csv`]）にも対応する。
 
 use crate::table_util::Col;
-use sepika_design_jp::quantity::{compute_quantity_takeoff, QuantityCfg, QuantityTotals};
+use sepika_design_jp::quantity::{try_compute_quantity_takeoff, QuantityCfg, QuantityTotals};
 
 use crate::app::App;
 
@@ -34,7 +34,16 @@ pub struct QuantityViewState {
 
 /// 数量積算パネルの描画。
 pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
-    let takeoff = compute_quantity_takeoff(&app.core.model, &QuantityCfg::default());
+    let takeoff = match try_compute_quantity_takeoff(&app.core.model, &QuantityCfg::default()) {
+        Ok(takeoff) => takeoff,
+        Err(reason) => {
+            ui.colored_label(
+                crate::theme::ERROR_RED,
+                format!("数量積算は未算定です: {reason}"),
+            );
+            return;
+        }
+    };
 
     if takeoff.items.is_empty() {
         ui.colored_label(

@@ -155,6 +155,27 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
+        }
+    }
+
+    fn rc_column_shape(b: f64, d: f64) -> sepika_core::section_shape::SectionShape {
+        use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+        SectionShape::RcColumnRect {
+            b,
+            d,
+            rebar: RcRectColumnRebar {
+                main_dia: 22.0,
+                x: vec![],
+                y: vec![],
+                cover: 40.0,
+                hoop: RectColumnHoop {
+                    dia: 10.0,
+                    pitch: 100.0,
+                    legs_x: 2,
+                    legs_y: 2,
+                },
+            },
         }
     }
 
@@ -200,10 +221,7 @@ mod tests {
         let mut column = rc_section(0.0, 600.0, 600.0);
         column.id = SectionId(1);
         column.frame_use = Some(FrameSectionUse::Column);
-        column.shape = Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
-            width: 600.0,
-            thick: 600.0,
-        });
+        column.shape = Some(rc_column_shape(600.0, 600.0));
         let mut cross = girder.clone();
         cross.id = SectionId(2);
         cross.area = 0.0;
@@ -261,6 +279,11 @@ mod tests {
                 None
             };
             if steel {
+                model.sections[1].shape =
+                    Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
+                        width: 600.0,
+                        thick: 600.0,
+                    });
                 model.materials[0].fc = Some(24.0);
                 model.materials[0].category = MaterialCategory::Steel;
                 model.materials[0].density = 7.85e-9;
@@ -319,10 +342,7 @@ mod tests {
         };
 
         model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
-        model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
-            width: 400.0,
-            thick: 600.0,
-        });
+        model.sections[0].shape = Some(rc_column_shape(400.0, 600.0));
         let mut girder = model.sections[0].clone();
         girder.id = SectionId(1);
         girder.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
@@ -487,6 +507,7 @@ mod tests {
                 rebar_material: None,
                 shear_rebar_material: None,
                 steel_material: None,
+                property_basis: Default::default(),
             });
         }
         let mut elements = vec![beam_elem(0, 0, 1)];
@@ -666,6 +687,57 @@ mod tests {
             ],
             elements: vec![beam_elem(0, 0, 1)],
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn rounded_design_weight_and_physical_mass_use_independent_areas() {
+        for (shape, steel_area, core_area) in [
+            (
+                SectionShape::SteelH {
+                    height: 400.0,
+                    width: 200.0,
+                    web_thick: 9.0,
+                    flange_thick: 12.0,
+                    root_r: Some(13.0),
+                },
+                8329.070841543,
+                0.0,
+            ),
+            (
+                SectionShape::SteelBox {
+                    height: 500.0,
+                    width: 300.0,
+                    thick: 10.0,
+                    corner_r: Some(30.0),
+                },
+                15170.79632679,
+                0.0,
+            ),
+            (
+                SectionShape::CftBox {
+                    height: 500.0,
+                    width: 300.0,
+                    thick: 10.0,
+                    corner_r: Some(30.0),
+                },
+                15170.79632679,
+                134056.6370614,
+            ),
+        ] {
+            let mut model = cft_column_model(shape.clone());
+            if core_area == 0.0 {
+                model.materials[0].category = MaterialCategory::Steel;
+                model.materials[0].fc = None;
+            }
+            let (nodal, _) = self_weight_case_content(&model, &LoadCfg::default()).unwrap();
+            let actual = node_force(&nodal, 0) + node_force(&nodal, 1);
+            let expected = (78.5e-6 * steel_area + 23.0e-6 * core_area) * 3000.0;
+            assert!((actual / expected - 1.0).abs() < 1.0e-10);
+            let mass = model.element_mass_properties(&model.elements[0]).unwrap();
+            let physical = (7.85e-9 * steel_area + 23.0e-6 / 9806.65 * core_area) * 3000.0;
+            assert!((mass.total_mass(3000.0) / physical - 1.0).abs() < 1.0e-10);
+            eprintln!("{shape:?}: DL={actual:.12e} N, 物理質量={physical:.12e} t");
         }
     }
 
@@ -857,6 +929,7 @@ mod tests {
                 rebar_material: None,
                 shear_rebar_material: None,
                 steel_material: None,
+                property_basis: Default::default(),
             });
         }
         let mut elements = vec![beam_elem(0, 0, 1)];

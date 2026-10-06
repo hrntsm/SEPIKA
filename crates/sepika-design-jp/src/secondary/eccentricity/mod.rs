@@ -70,6 +70,7 @@ pub(crate) mod test_support {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         };
         // 右側柱用 section（iy を上書き）
         let sec_right = Section {
@@ -100,6 +101,7 @@ pub(crate) mod test_support {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         };
 
         // 材料（共通）

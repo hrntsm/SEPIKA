@@ -27,7 +27,8 @@ pub(crate) fn compute_ultimate_check_job(
     let opts = sepika_design_jp::ultimate::UltimateShearOptions::default();
     let checks = sepika_design_jp::ultimate::collect_rc_ultimate_checks(model, &demand, &opts)
         .map_err(JobError::InvalidInput)?;
-    let cft_checks = sepika_design_jp::ultimate::collect_cft_ultimate_checks(model, &axial);
+    let cft_checks = sepika_design_jp::ultimate::collect_cft_ultimate_checks(model, &axial)
+        .map_err(JobError::InvalidInput)?;
 
     let n_checks = checks.len();
     let n_ng = checks.iter().filter(|c| !c.ok).count();
@@ -61,10 +62,11 @@ pub(crate) fn compute_ultimate_check_job(
                 "class": format!("{:?}", c.class),
                 "ncu": c.ncu,
                 "ntu": c.ntu,
-                "mu_nm": c.mu_nm,
+                "mu_nm": c.mu_nm.as_ref().ok(),
+                "mu_nm_unavailable_reason": c.mu_nm.as_ref().err(),
                 "n_design": c.n_design,
                 "axial_margin": c.axial_margin,
-                "ok": c.ok,
+                "axial_ok": c.ok,
             })
         })
         .collect();
@@ -77,7 +79,9 @@ pub(crate) fn compute_ultimate_check_job(
         "min_shear_margin": if min_shear_margin.is_finite() { serde_json::json!(min_shear_margin) } else { serde_json::Value::Null },
         "members": members,
         "n_cft_checks": cft_checks.len(),
-        "n_cft_ng": cft_checks.iter().filter(|c| !c.ok).count(),
+        "n_cft_axial_ng": cft_checks.iter().filter(|c| !c.ok).count(),
+        "n_cft_mu_unavailable": cft_checks.iter().filter(|c| c.mu_nm.is_err()).count(),
+        "all_checks_calculated_and_ok": (!checks.is_empty() || !cft_checks.is_empty()) && n_ng == 0 && cft_checks.iter().all(|c| c.ok && c.mu_nm.is_ok()),
         "cft_members": cft_members,
     });
     attach_prepare_notices(&mut summary, notices);

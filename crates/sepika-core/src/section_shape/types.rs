@@ -13,7 +13,7 @@ pub enum SectionShape {
         width: f64,
         web_thick: f64,
         flange_thick: f64,
-        /// 被覆外周用のルートフィレット半径 [mm]。None は未知、Some(0) は明示した直角。
+        /// フィレット半径 [mm]。None は未知、Some(0) は明示した直角。
         root_r: Option<f64>,
     },
     /// Steel rectangular hollow section / box (角形鋼管).
@@ -21,7 +21,7 @@ pub enum SectionShape {
         height: f64,
         width: f64,
         thick: f64,
-        /// 被覆外周用の角部外半径 [mm]。None は未知、Some(0) は明示した直角。
+        /// 角R [mm]。None は未知、Some(0) は明示した直角。
         corner_r: Option<f64>,
     },
     /// Steel L‑angle (山形鋼).
@@ -109,7 +109,7 @@ pub enum SectionShape {
         height: f64,
         width: f64,
         thick: f64,
-        /// 被覆外周用の角部外半径 [mm]。None は未知、Some(0) は明示した直角。
+        /// 角R [mm]。None は未知、Some(0) は明示した直角。
         corner_r: Option<f64>,
     },
     /// CFT 円形（円形鋼管 + 充填コンクリート）。

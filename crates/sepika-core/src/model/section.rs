@@ -60,12 +60,151 @@ pub struct Section {
     /// SRC 断面の内蔵鉄骨、CFT 断面の鋼管の材料。
     #[serde(default)]
     pub steel_material: Option<MaterialId>,
+    pub property_basis: SectionPropertyBasis,
+}
+
+/// 各断面性能が形状算定値か、カタログ・直接入力値かを表す。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PropertyBasis {
+    Shape,
+    /// 形状算定に必要な入力が未知で未算定。数値欄の格納値は計算に使わない。
+    PendingShape,
+    #[default]
+    Supplied,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SectionPropertyBasis {
+    pub area: PropertyBasis,
+    pub iy: PropertyBasis,
+    pub iz: PropertyBasis,
+    pub j: PropertyBasis,
+    pub depth: PropertyBasis,
+    pub width: PropertyBasis,
+    pub as_y: PropertyBasis,
+    pub as_z: PropertyBasis,
+}
+
+impl SectionPropertyBasis {
+    pub const SHAPE: Self = Self {
+        area: PropertyBasis::Shape,
+        iy: PropertyBasis::Shape,
+        iz: PropertyBasis::Shape,
+        j: PropertyBasis::Shape,
+        depth: PropertyBasis::Shape,
+        width: PropertyBasis::Shape,
+        as_y: PropertyBasis::Shape,
+        as_z: PropertyBasis::Shape,
+    };
 }
 
 /// 断面の同一性キー（符号＋階）。モデル内で重複してはならない。
 pub type SectionKey<'a> = (&'a str, Option<&'a str>);
 
 impl Section {
+    pub fn ensure_properties_resolved(&self) -> Result<(), String> {
+        let basis = self.property_basis;
+        for (name, value) in [
+            ("A", self.area),
+            ("Iy", self.iy),
+            ("Iz", self.iz),
+            ("J", self.j),
+            ("せい", self.depth),
+            ("幅", self.width),
+            ("Asy", self.as_y),
+            ("Asz", self.as_z),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(format!(
+                    "断面「{}」の {name} は有限な非負値が必要です",
+                    self.name
+                ));
+            }
+        }
+        if let Some(shape) = &self.shape {
+            shape.validate_surface_radius()?;
+            if [basis.area, basis.iy, basis.iz].contains(&PropertyBasis::Shape) {
+                shape.rounded_steel_properties()?;
+            }
+        }
+        for (name, source) in [
+            ("A", basis.area),
+            ("Iy", basis.iy),
+            ("Iz", basis.iz),
+            ("J", basis.j),
+            ("せい", basis.depth),
+            ("幅", basis.width),
+            ("Asy", basis.as_y),
+            ("Asz", basis.as_z),
+        ] {
+            if source == PropertyBasis::PendingShape {
+                return Err(format!(
+                    "断面「{}」の {name} は未算定です。フィレット半径・角Rを設定してください",
+                    self.name
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn resolved_area(&self) -> Result<f64, String> {
+        if !self.area.is_finite() || self.area < 0.0 {
+            return Err(format!(
+                "断面「{}」の A は有限な非負値が必要です",
+                self.name
+            ));
+        }
+        if let Some(shape) = &self.shape {
+            shape.validate_surface_radius()?;
+            if self.property_basis.area == PropertyBasis::Shape {
+                shape.rounded_steel_properties()?;
+            }
+        }
+        if self.property_basis.area == PropertyBasis::PendingShape {
+            return Err(format!(
+                "断面「{}」の A は未算定です。フィレット半径・角Rを設定してください",
+                self.name
+            ));
+        }
+        Ok(self.area)
+    }
+
+    /// フィレット半径・角Rを変更し、形状算定の A・Iy・Iz だけを更新する。
+    /// 算定不能なら元の断面を変更せずエラー。材料・用途・階と入力性能は維持する。
+    pub fn with_surface_radius(&self, radius_mm: Option<f64>) -> Result<Self, String> {
+        use crate::section_shape::SectionShape;
+        let mut result = self.clone();
+        let shape = result.shape.as_mut().ok_or("断面形状が未設定です")?;
+        match shape {
+            SectionShape::SteelH { root_r, .. } => *root_r = radius_mm,
+            SectionShape::SteelBox { corner_r, .. } | SectionShape::CftBox { corner_r, .. } => {
+                *corner_r = radius_mm
+            }
+            _ => return Err("フィレット半径・角Rの編集対象ではありません".into()),
+        }
+        shape.validate_surface_radius()?;
+        let basis = self.property_basis;
+        let derived = |source| source != PropertyBasis::Supplied;
+        if [basis.area, basis.iy, basis.iz].into_iter().any(derived) {
+            let p = shape
+                .rounded_steel_properties()?
+                .ok_or("鋼材性能の算定対象ではありません")?;
+            if derived(basis.area) {
+                result.area = p.area;
+                result.property_basis.area = PropertyBasis::Shape;
+            }
+            if derived(basis.iy) {
+                result.iy = p.iy;
+                result.property_basis.iy = PropertyBasis::Shape;
+            }
+            if derived(basis.iz) {
+                result.iz = p.iz;
+                result.property_basis.iz = PropertyBasis::Shape;
+            }
+        }
+        Ok(result)
+    }
+
     pub fn is_cft(&self) -> bool {
         matches!(
             self.shape,
@@ -102,6 +241,7 @@ impl Section {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: SectionPropertyBasis::default(),
         }
     }
 
@@ -135,6 +275,7 @@ impl Section {
             && self.rebar_material == other.rebar_material
             && self.shear_rebar_material == other.shear_rebar_material
             && self.steel_material == other.steel_material
+            && self.property_basis == other.property_basis
     }
 }
 

@@ -124,6 +124,18 @@ pub fn run_member_design_checks(
         let (Some(sec), Some(mat)) = (sec, mat) else {
             continue;
         };
+        if let Err(reason) = sec.ensure_properties_resolved() {
+            for (pos, _) in &mf.at {
+                member_checks.push((
+                    *elem_id,
+                    *pos,
+                    crate::CheckOutcome::Skipped {
+                        reason: reason.clone(),
+                    },
+                ));
+            }
+            continue;
+        }
 
         let kind = MemberKind::of_element(elem, model);
         let length = model.member_length(elem);

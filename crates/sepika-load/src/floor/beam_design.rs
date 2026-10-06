@@ -577,12 +577,12 @@ pub fn beam_self_weight_udl(
             .map(|c| c.effective_steel_factor())
             .unwrap_or(1.0)
     };
-    let w = mat.design_unit_weight_n_per_mm3() * sec.area * factor + coating;
+    let w = mat.design_unit_weight_n_per_mm3() * sec.resolved_area()? * factor + coating;
     Ok((w > 0.0).then_some(w))
 }
 
 /// 二次部材小梁の物理質量相当の自重 [N/mm]（質量行列・動的解析用）。
-/// 物理密度（`Material::density` × g）に鉄骨割増を掛ける（主架構線材と同じ規則）。
+/// 材料領域の物理質量に鉄骨割増を掛ける。CFTコアは割増しない。
 /// 被覆は設計重量と同じ値を加算し、解決失敗はエラー。
 pub fn beam_mass_equiv_udl(
     model: &Model,
@@ -595,7 +595,14 @@ pub fn beam_mass_equiv_udl(
     ) else {
         return Ok(None);
     };
-    let factor = if mat.fc.is_some() {
+    let is_cft = matches!(
+        sec.shape.as_ref(),
+        Some(
+            sepika_core::section_shape::SectionShape::CftBox { .. }
+                | sepika_core::section_shape::SectionShape::CftPipe { .. }
+        )
+    );
+    let factor = if mat.fc.is_some() && !is_cft {
         1.0
     } else {
         model
@@ -604,7 +611,31 @@ pub fn beam_mass_equiv_udl(
             .map(|c| c.effective_steel_factor())
             .unwrap_or(1.0)
     };
-    let w = mat.density * sec.area * GRAVITY_MM_S2 * factor + coating;
+    let material = |id: Option<sepika_core::ids::MaterialId>| {
+        id.and_then(|id| model.materials.get(id.index()))
+    };
+    let mass_per_length = sepika_core::model::SectionMassProperties::try_from_section(
+        sec,
+        Some(mat),
+        material(sec.rebar_material),
+        material(sec.shear_rebar_material),
+        material(sec.steel_material),
+    )?
+    .mass_per_length;
+    let factored_mass_per_length = if is_cft {
+        let core = sec
+            .shape
+            .as_ref()
+            .map(|shape| shape.try_cft_core_props())
+            .transpose()?
+            .flatten()
+            .ok_or_else(|| format!("CFT断面 {} のコアを解決できません", sec.name))?;
+        mass_per_length
+            + (factor - 1.0) * (mass_per_length - mat.cft_core_mass_density() * core.area)
+    } else {
+        mass_per_length * factor
+    };
+    let w = factored_mass_per_length * GRAVITY_MM_S2 + coating;
     Ok((w > 0.0).then_some(w))
 }
 

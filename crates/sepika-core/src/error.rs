@@ -10,11 +10,11 @@ pub enum CoreError {
     IndexMismatch(String),
 }
 
-/// RC 実配筋の幾何検証エラー。
-///
-/// 段別配筋の入力値と断面寸法から実鉄筋座標を一意に生成できない場合に返す。
+/// 実配筋とファイバー断面の幾何検証エラー。
 #[derive(Error, Debug, Clone, PartialEq)]
 pub enum RebarGeometryError {
+    #[error("断面材料領域を解決できません: {0}")]
+    SectionGeometry(String),
     #[error("寸法が非有限または非正です: {field}")]
     InvalidDimension { field: &'static str },
     #[error("段の本数が不正です: {location} 段{layer} の {count} 本")]

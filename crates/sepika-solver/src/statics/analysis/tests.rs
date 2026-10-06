@@ -65,6 +65,7 @@ fn make_cantilever_model() -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -173,6 +174,32 @@ fn test_prepare_reports_diagnostics() {
     let mut model = make_cantilever_model();
     model.sections[0].as_z = 0.0;
     expect(&model, "有効せん断断面積");
+}
+
+#[test]
+fn brace_unknown_fillet_input_is_returned_as_prepare_error_before_factory_construction() {
+    use sepika_core::section_shape::SectionShape;
+    let mut model = make_cantilever_model();
+    let mut section = SectionShape::SteelH {
+        height: 400.0,
+        width: 200.0,
+        web_thick: 9.0,
+        flange_thick: 12.0,
+        root_r: None,
+    }
+    .input_section(SectionId(0), "未知ブレース".into())
+    .unwrap();
+    section.material = Some(MaterialId(0));
+    section.frame_use = Some(FrameSectionUse::Brace);
+    model.sections[0] = section;
+    model.elements[0].kind = ElementKind::Brace {
+        tension_only: false,
+    };
+    let error = Analysis::prepare(&model)
+        .err()
+        .expect("未知寸法は公開解析入口でエラーにする");
+    assert!(error.to_string().contains("フィレット半径"));
+    assert!(error.to_string().contains("未算定"));
 }
 
 /// `model_issues` は最初の 1 件で打ち切らず、不備をすべて集める。
@@ -573,7 +600,7 @@ fn test_model_issues_errors_on_invalid_rc_material() {
 /// なる形状では等価断面性能を算定できず、鋼管のみへフォールバックする。材料条件が
 /// 原因ではないため、警告の是正文が形状条件にも触れていることを確認する。
 #[test]
-fn test_model_issues_warns_cft_composite_fallback_for_zero_core() {
+fn test_model_issues_rejects_cft_composite_with_zero_core() {
     use super::precheck::{model_issues, IssueSeverity, IssueTargets};
 
     let mut model = make_cantilever_model();
@@ -589,9 +616,9 @@ fn test_model_issues_warns_cft_composite_fallback_for_zero_core() {
 
     let issue = model_issues(&model)
         .into_iter()
-        .find(|i| i.message.contains("等価断面性能"))
-        .expect("CFT の形状起因のフォールバック警告が出るはず");
-    assert_eq!(issue.severity, IssueSeverity::Warning);
+        .find(|i| i.message.contains("内法"))
+        .expect("内法が消えた CFT は算定エラーとなる");
+    assert_eq!(issue.severity, IssueSeverity::Error);
     assert!(issue.message.contains("内法"));
     assert_eq!(issue.targets, IssueTargets::Members(vec![ElemId(0)]));
 }
@@ -910,6 +937,7 @@ fn make_two_story_diaphragm_model(
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -1572,6 +1600,7 @@ fn ss_beam_udl(l: f64, w: f64) -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,

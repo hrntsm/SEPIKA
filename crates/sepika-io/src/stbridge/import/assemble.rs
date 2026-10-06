@@ -1520,16 +1520,21 @@ fn build_sections(
                 rebar_material: None,
                 shear_rebar_material: None,
                 steel_material: None,
+                property_basis: Default::default(),
             },
             PendingSecKind::Shape(shape) => {
-                let mut section = shape.to_section(new_id, ps.name);
+                let mut section = shape
+                    .input_section(new_id, ps.name)
+                    .map_err(StbError::Unmappable)?;
                 section.frame_use = section_uses.get(&file_id).copied();
                 section
             }
             PendingSecKind::SteelRef(shape_name) => {
                 match shape_name.and_then(|nm| steel_lib.get(&nm).cloned()) {
                     Some(shape) => {
-                        let mut section = shape.to_section(new_id, ps.name);
+                        let mut section = shape
+                            .input_section(new_id, ps.name)
+                            .map_err(StbError::Unmappable)?;
                         section.frame_use = section_uses.get(&file_id).copied();
                         section
                     }
@@ -1565,7 +1570,9 @@ fn build_sections(
                         _ => None,
                     });
                 match cft {
-                    Some(shape) => shape.to_section(new_id, ps.name),
+                    Some(shape) => shape
+                        .input_section(new_id, ps.name)
+                        .map_err(StbError::Unmappable)?,
                     None => {
                         warnings.push(format!(
                             "CFT 断面 (name=\"{}\") の充填鋼管参照を解決できず物性ゼロで取り込みました",

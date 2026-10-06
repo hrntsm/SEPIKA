@@ -52,6 +52,7 @@ fn rc_beam_rect_section(
         rebar_material: Some(MaterialId(0)),
         shear_rebar_material: Some(MaterialId(0)),
         steel_material: None,
+        property_basis: Default::default(),
     }
 }
 
@@ -97,6 +98,7 @@ fn rc_column_rect_section(
         rebar_material: Some(MaterialId(0)),
         shear_rebar_material: Some(MaterialId(0)),
         steel_material: None,
+        property_basis: Default::default(),
     }
 }
 
@@ -664,6 +666,7 @@ fn test_collect_cft_ultimate_checks() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: Some(MaterialId(1)),
+        property_basis: Default::default(),
     };
     let mat = Material {
         strength_factor: None,
@@ -700,7 +703,7 @@ fn test_collect_cft_ultimate_checks() {
     };
     // 圧縮軸力 3000kN。
     let axial = vec![(ElemId(0), 3_000_000.0)];
-    let checks = collect_cft_ultimate_checks(&model, &axial);
+    let checks = collect_cft_ultimate_checks(&model, &axial).unwrap();
     assert_eq!(checks.len(), 1);
     let c = &checks[0];
     assert!(c.ncu > 0.0 && c.ntu > 0.0);
@@ -708,7 +711,19 @@ fn test_collect_cft_ultimate_checks() {
     // lk=3000, D=400 → lk/D=7.5 → 中柱。
     assert_eq!(c.class, CftColumnClass::Medium);
     // 短柱 N-M 曲げ耐力 Mu(N) が正（圧縮軸力 3000kN 時）。
-    assert!(c.mu_nm > 0.0, "mu_nm={}", c.mu_nm);
+    assert!(
+        c.mu_nm.as_ref().is_ok_and(|mu| *mu > 0.0),
+        "mu_nm={:?}",
+        c.mu_nm
+    );
+    let mut rounded = model.clone();
+    rounded.sections[0] = rounded.sections[0].with_surface_radius(Some(30.0)).unwrap();
+    let checks = collect_cft_ultimate_checks(&rounded, &axial).unwrap();
+    assert_eq!(checks.len(), 1);
+    assert!(checks[0].ncu > 0.0 && checks[0].ntu > 0.0);
+    assert_ne!(checks[0].ncu, c.ncu);
+    assert!(checks[0].mu_nm.as_ref().unwrap_err().contains("#418"));
+    assert!(checks[0].detail.contains("未算定"));
 }
 
 /// 実配筋モデルの断面から 1 部材のモデルを作る（部材軸は `horizontal` で切替）。
@@ -733,6 +748,7 @@ fn single_shape_model(shape: SectionShape, b: f64, d: f64, horizontal: bool) -> 
         rebar_material: Some(MaterialId(0)),
         shear_rebar_material: Some(MaterialId(0)),
         steel_material: None,
+        property_basis: Default::default(),
     };
     let nodes = if horizontal {
         vec![node(0, [0.0, 0.0, 0.0]), node(1, [6000.0, 0.0, 0.0])]

@@ -69,6 +69,7 @@ fn make_1dof_spring_model() -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -143,6 +144,7 @@ fn make_shear_2dof_model() -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -211,6 +213,7 @@ fn make_portal_frame_like_model(top_mass: f64) -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let beam_section = Section {
         frame_use: None,
@@ -232,6 +235,7 @@ fn make_portal_frame_like_model(top_mass: f64) -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let members = [(0u32, 1u32, 2u32, 0u32), (1, 1, 3, 0), (2, 2, 3, 1)];
     let elements = members
@@ -598,6 +602,7 @@ fn make_diaphragm_columns_model(top_mass: f64, rot_mass: f64) -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mut master_restraint = Dof6Mask::FREE;
     master_restraint.set_fixed(Dof::Uz);
@@ -810,6 +815,7 @@ fn make_four_column_diaphragm_model(top_mass: f64, rot_mass: f64) -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mut master_restraint = Dof6Mask::FREE;
     master_restraint.set_fixed(Dof::Uz);
@@ -977,6 +983,7 @@ fn test_2dof_shear_unequal_mass_matches_analytic() {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -1078,6 +1085,7 @@ fn make_mass_chain_model(n_masses: usize) -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -1233,6 +1241,7 @@ fn test_eigen_consistent_mass_orientation_invariant() {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         };
         let elements = vec![ElementData {
             id: ElemId(0),

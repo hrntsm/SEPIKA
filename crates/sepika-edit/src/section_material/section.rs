@@ -33,7 +33,8 @@ impl EditCommand for SetSectionField {
             return Box::new(Noop);
         }
         let sec = &mut model.sections[idx];
-        let old = match self.field {
+        let old = sec.clone();
+        let _old_value = match self.field {
             SectionField::Area => {
                 let o = sec.area;
                 sec.area = self.value;
@@ -80,11 +81,20 @@ impl EditCommand for SetSectionField {
                 o
             }
         };
-        Box::new(SetSectionField {
-            id: self.id,
-            field: self.field,
-            value: old,
-        })
+        use sepika_core::model::PropertyBasis;
+        let basis = &mut sec.property_basis;
+        match self.field {
+            SectionField::Area => basis.area = PropertyBasis::Supplied,
+            SectionField::Iy => basis.iy = PropertyBasis::Supplied,
+            SectionField::Iz => basis.iz = PropertyBasis::Supplied,
+            SectionField::J => basis.j = PropertyBasis::Supplied,
+            SectionField::Depth => basis.depth = PropertyBasis::Supplied,
+            SectionField::Width => basis.width = PropertyBasis::Supplied,
+            SectionField::AsY => basis.as_y = PropertyBasis::Supplied,
+            SectionField::AsZ => basis.as_z = PropertyBasis::Supplied,
+            SectionField::PanelThickness => {}
+        }
+        Box::new(RestoreSection { old })
     }
 
     fn label(&self) -> &str {
@@ -152,7 +162,9 @@ impl EditCommand for AddSectionShape {
         if (!non_frame && self.frame_use.is_none()) || (non_frame && self.frame_use.is_some()) {
             return Box::new(Noop);
         }
-        let mut candidate = self.shape.to_section(self.new_id, self.name.clone());
+        let Ok(mut candidate) = self.shape.try_to_section(self.new_id, self.name.clone()) else {
+            return Box::new(Noop);
+        };
         if self.shape.validate_surface_radius().is_err() {
             return Box::new(Noop);
         }
@@ -167,7 +179,7 @@ impl EditCommand for AddSectionShape {
         ) {
             return Box::new(Noop);
         }
-        let mut sec = self.shape.to_section(self.new_id, self.name.clone());
+        let mut sec = candidate;
         sec.floor = self.floor.clone();
         sec.frame_use = self.frame_use;
         model.sections.push(sec);
@@ -189,7 +201,7 @@ pub struct EditSectionShape {
     pub frame_use: Option<sepika_core::model::FrameSectionUse>,
 }
 
-/// 被覆外周用半径のみを変更し、断面性能・材料・用途は維持する。
+/// フィレット半径・角Rを変更する。直接入力・カタログ性能と材料・用途は維持する。
 pub struct SetSectionSurfaceRadius {
     pub section: SectionId,
     pub radius_mm: Option<f64>,
@@ -204,26 +216,15 @@ impl EditCommand for SetSectionSurfaceRadius {
             return Box::new(Noop);
         }
         let old = section.clone();
-        let Some(mut shape) = section.shape.clone() else {
+        let Ok(updated) = section.with_surface_radius(self.radius_mm) else {
             return Box::new(Noop);
         };
-        match &mut shape {
-            sepika_section::shape::SectionShape::SteelH { root_r, .. } => *root_r = self.radius_mm,
-            sepika_section::shape::SectionShape::SteelBox { corner_r, .. }
-            | sepika_section::shape::SectionShape::CftBox { corner_r, .. } => {
-                *corner_r = self.radius_mm
-            }
-            _ => return Box::new(Noop),
-        }
-        if shape.validate_surface_radius().is_err() {
-            return Box::new(Noop);
-        }
-        section.shape = Some(shape);
+        *section = updated;
         Box::new(RestoreSection { old })
     }
 
     fn label(&self) -> &str {
-        "被覆外周用半径変更"
+        "フィレット半径・角R変更"
     }
 }
 
@@ -258,9 +259,45 @@ impl EditCommand for EditSectionShape {
             return Box::new(Noop);
         }
         let old = model.sections[idx].clone();
-        let mut new_sec = self.new_shape.to_section(self.section, old.name.clone());
+        let without_radius = |shape: &sepika_core::section_shape::SectionShape| {
+            let mut dimensions = shape.clone();
+            let radius = match &mut dimensions {
+                sepika_core::section_shape::SectionShape::SteelH { root_r, .. } => root_r.take(),
+                sepika_core::section_shape::SectionShape::SteelBox { corner_r, .. }
+                | sepika_core::section_shape::SectionShape::CftBox { corner_r, .. } => {
+                    corner_r.take()
+                }
+                _ => return None,
+            };
+            Some((dimensions, radius))
+        };
+        let radius_only = old
+            .shape
+            .as_ref()
+            .and_then(without_radius)
+            .zip(without_radius(&self.new_shape))
+            .filter(|(old, new)| old.0 == new.0)
+            .map(|(_, new)| new.1);
+        if let Some(radius) = radius_only {
+            let Ok(mut updated) = old.with_surface_radius(radius) else {
+                return Box::new(Noop);
+            };
+            updated.frame_use = self.frame_use;
+            model.sections[idx] = updated;
+            return Box::new(RestoreSection { old });
+        }
+        let Ok(mut new_sec) = self
+            .new_shape
+            .try_to_section(self.section, old.name.clone())
+        else {
+            return Box::new(Noop);
+        };
         new_sec.floor = old.floor.clone();
         new_sec.frame_use = self.frame_use;
+        new_sec.material = old.material;
+        new_sec.rebar_material = old.rebar_material;
+        new_sec.shear_rebar_material = old.shear_rebar_material;
+        new_sec.steel_material = old.steel_material;
         model.sections[idx] = new_sec;
         Box::new(RestoreSection { old })
     }

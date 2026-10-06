@@ -267,10 +267,10 @@ pub struct PrepSectionRow {
     /// この断面を割り当てられた部材の数。
     pub n_elements: usize,
     /// 断面積 A [mm²]。
-    pub area: f64,
+    pub area: Option<f64>,
     /// 断面二次モーメント Iy・Iz [mm⁴]（y=強軸まわり）。
-    pub iy: f64,
-    pub iz: f64,
+    pub iy: Option<f64>,
+    pub iz: Option<f64>,
     /// ねじり定数 J [mm⁴]。
     pub j: f64,
     /// せん断有効断面積 Asy・Asz [mm²]。
@@ -280,8 +280,9 @@ pub struct PrepSectionRow {
     pub depth: f64,
     pub width: f64,
     /// 断面二次半径 iy・iz [mm]（√(I/A)。座屈長さ比の確認用）。
-    pub ry: f64,
-    pub rz: f64,
+    pub ry: Option<f64>,
+    pub rz: Option<f64>,
+    pub unavailable_reason: Option<String>,
     /// この断面に割り当てられた材料名（複数あれば「〜 他N」）。未割当は `None`。
     pub material: Option<String>,
     /// 代表材料のヤング係数 E [N/mm²]。
@@ -748,12 +749,20 @@ impl App {
                     .material
                     .and_then(|mid| model.materials.get(mid.index()));
                 let material = first_mat.map(|m| m.name.clone());
-                let radius = |inertia: f64| {
-                    if sec.area > 0.0 && inertia > 0.0 {
-                        (inertia / sec.area).sqrt()
-                    } else {
-                        0.0
-                    }
+                let resolved = |value, basis| {
+                    (basis != sepika_core::model::PropertyBasis::PendingShape).then_some(value)
+                };
+                let area = resolved(sec.area, sec.property_basis.area);
+                let iy = resolved(sec.iy, sec.property_basis.iy);
+                let iz = resolved(sec.iz, sec.property_basis.iz);
+                let radius = |inertia: Option<f64>| {
+                    area.zip(inertia).map(|(area, inertia)| {
+                        if area > 0.0 && inertia > 0.0 {
+                            (inertia / area).sqrt()
+                        } else {
+                            0.0
+                        }
+                    })
                 };
                 PrepSectionRow {
                     section: sec.id,
@@ -764,16 +773,17 @@ impl App {
                         .as_ref()
                         .map(|sh| section_shape_label(sh).to_string()),
                     n_elements,
-                    area: sec.area,
-                    iy: sec.iy,
-                    iz: sec.iz,
+                    area,
+                    iy,
+                    iz,
                     j: sec.j,
                     as_y: sec.as_y,
                     as_z: sec.as_z,
                     depth: sec.depth,
                     width: sec.width,
-                    ry: radius(sec.iy),
-                    rz: radius(sec.iz),
+                    ry: radius(iy),
+                    rz: radius(iz),
+                    unavailable_reason: sec.ensure_properties_resolved().err(),
                     material,
                     young: first_mat.map(|m| m.young),
                 }
@@ -895,6 +905,14 @@ impl App {
             ) else {
                 continue;
             };
+            if sec.ensure_properties_resolved().is_err()
+                || sec
+                    .shape
+                    .as_ref()
+                    .is_some_and(|shape| shape.try_cft_core_props().is_err())
+            {
+                continue;
+            }
             let factors = sepika_element::frame::beam::stiffness_breakdown(model, e);
             let composite = sepika_element::frame::beam::composite_props_of(model, e);
             let fallback = if composite.is_none() {

@@ -11,6 +11,7 @@
 use std::f64::consts::PI;
 
 /// CFT 短柱の N-M 相互作用の算定入力。
+/// 角形は鋼管・コアとも直角モデルに限る。角Rを持つ形状は上位入口で適用を検証する。
 #[derive(Clone, Copy, Debug)]
 pub struct CftBendingInput {
     /// 円形断面なら true（角型なら false）。

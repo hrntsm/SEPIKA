@@ -470,7 +470,13 @@ fn surface_radius_export_rejects_unknown_zero_and_invalid() {
             let mut model = frame_nodes();
             push_section(
                 &mut model,
-                shape.to_section(SectionId(0), "半径出力拒否".into()),
+                sepika_core::model::Section {
+                    shape: Some(shape),
+                    ..sepika_core::model::Section::zero(
+                        SectionId(0),
+                        "フィレット半径・角R出力拒否".into(),
+                    )
+                },
             );
             assert!(matches!(
                 export_stbridge(&model),
@@ -581,6 +587,7 @@ fn test_standard_mode_fallback_raw_for_shapeless() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     m.elements.push(member(0, true, 0));
 
@@ -2785,6 +2792,7 @@ fn test_wall_roundtrip_export_import() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
@@ -2894,6 +2902,7 @@ fn test_non_quad_wall_plate_roundtrip_export_import() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3), NodeId(4)],

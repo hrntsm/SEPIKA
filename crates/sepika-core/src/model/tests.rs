@@ -924,6 +924,7 @@ fn named_section(id: u32, name: &str, floor: Option<&str>) -> Section {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     }
 }
 

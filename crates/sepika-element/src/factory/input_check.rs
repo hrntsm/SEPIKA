@@ -132,6 +132,12 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
         return Some(msg);
     }
     if let Some(shape) = sec.and_then(|s| s.shape.as_ref()) {
+        if let Err(error) = shape.rounded_steel_properties() {
+            return Some(format!(
+                "部材 ID {} の断面材料領域を解決できません: {error}",
+                data.id.0
+            ));
+        }
         if let Err(err) = shape.validate_rebar() {
             return Some(format!(
                 "部材 ID {} の断面「{}」は実配筋の幾何が不整合です（{}）。\
