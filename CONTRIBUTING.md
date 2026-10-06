@@ -346,6 +346,19 @@ PR を作成すると以下が自動実行されます（`.github/workflows/ci.y
 - 脆弱性確認（cargo audit）
 - 依存性チェック（cargo-deny）
 
+## Issue の起票
+
+GitHub の Issue 作成画面で、目的に応じて [Issue Forms](.github/ISSUE_TEMPLATE/) を選んでください。
+
+| フォーム | 用途 |
+| --- | --- |
+| Bug / Fix | 不具合修正 |
+| Feature / Change | 機能追加・仕様変更・リファクタリング・性能改善・文書や開発環境の変更 |
+| Investigation / Specification | 実装前の調査・規準照合・仕様確定・設計検討 |
+
+Issue では **Why / What / Scope と完了条件**を明確にし、詳細な実装方法は調査・設計・実装時に決定します。
+分類しづらい親 Issue や初期調査には blank issue も利用できます。
+
 ## プルリクエスト
 
 PR の説明は、レビュアーが「何を、なぜ変えたか」「どのように確認したか」「既存の挙動にどんな影響があるか」を追えることを目的とします。PR 本文には `.github/pull_request_template.md` を使用します。
