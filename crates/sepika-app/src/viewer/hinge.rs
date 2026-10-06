@@ -1794,6 +1794,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }
     }
 
@@ -1900,6 +1901,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         };
         let (outer, inner) = fiber_frame_outline(&sec).unwrap();
         assert!(inner.is_none(), "溝形鋼は中実断面のため内側輪郭はない");
@@ -1979,6 +1981,7 @@ mod tests {
             rebar_material: Some(MaterialId(1)),
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         };
         let material = |id, name: &str, category, fy: f64| Material {
             id,

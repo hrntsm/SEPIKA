@@ -715,6 +715,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         };
         let member = |id: u32, n0: u32, n1: u32, sec: u32| ElementData {
             id: ElemId(id),

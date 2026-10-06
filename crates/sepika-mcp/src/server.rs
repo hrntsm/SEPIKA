@@ -419,6 +419,7 @@ mod tests {
                 rebar_material: None,
                 shear_rebar_material: None,
                 steel_material: None,
+                property_basis: Default::default(),
             }],
             materials: vec![Material {
                 concrete_class: Default::default(),
@@ -519,6 +520,7 @@ mod tests {
                 rebar_material: None,
                 shear_rebar_material: None,
                 steel_material: None,
+                property_basis: Default::default(),
             }],
             materials: vec![Material {
                 concrete_class: Default::default(),

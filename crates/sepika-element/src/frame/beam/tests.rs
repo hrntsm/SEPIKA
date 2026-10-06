@@ -268,6 +268,36 @@ fn test_beam_new_src_cft_composite_props() {
         let nodal_mass = mass.get(0, 0) + mass.get(6, 6);
         assert!((nodal_mass - beam.density * beam.a_mass * beam.length).abs() < 1e-9);
     }
+    model.materials[1].density = 7.85e-9;
+    model.sections[1] = Section {
+        material: Some(MaterialId(0)),
+        steel_material: Some(MaterialId(1)),
+        ..SectionShape::CftBox {
+            height: 500.0,
+            width: 300.0,
+            thick: 10.0,
+            corner_r: Some(30.0),
+        }
+        .to_section(SectionId(1), "保護A角丸CFT".into())
+    };
+    model.sections[1].area = 15600.0;
+    model.sections[1].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
+    let k = 4.0 - std::f64::consts::PI;
+    let steel_mass = (15600.0 - k * 500.0) * 7.85e-9 * 3000.0;
+    let core_mass =
+        (480.0 * 280.0 - k * 400.0) * model.materials[0].cft_core_mass_density() * 3000.0;
+    let beam = BeamElement::new(&make_elem(1), &model);
+    for option in [MassOption::Lumped, MassOption::Consistent] {
+        let mass = beam.mass_matrix(option);
+        for dof in 0..3 {
+            let total = mass.get(dof, dof)
+                + mass.get(dof, dof + 6)
+                + mass.get(dof + 6, dof)
+                + mass.get(dof + 6, dof + 6);
+            assert!((total - steel_mass - core_mass).abs() < 1e-10);
+        }
+    }
+    assert_eq!(model.sections[1].area, 15600.0);
     let rc_rebar = match &src_shape {
         SectionShape::SrcColumnRect { rebar, .. } => rebar.clone(),
         _ => unreachable!(),
@@ -1157,6 +1187,7 @@ fn test_apply_auto_rigid_zones_and_manual_protection() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mk_node = |id: u32, c: [f64; 3]| Node {
         id: NodeId(id),
@@ -1256,6 +1287,7 @@ fn test_eval_sections_from_face_distance() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mat = Material {
         strength_factor: None,
@@ -1388,6 +1420,7 @@ fn test_auto_rigid_zone_wall_does_not_affect_orthogonal_search() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let beam_sec = Section {
         frame_use: None,
@@ -1409,6 +1442,7 @@ fn test_auto_rigid_zone_wall_does_not_affect_orthogonal_search() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let wall_sec = Section {
         frame_use: None,
@@ -1430,6 +1464,7 @@ fn test_auto_rigid_zone_wall_does_not_affect_orthogonal_search() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mat = Material {
         strength_factor: None,
@@ -1569,6 +1604,7 @@ fn test_beam_new_wall_girder_bottom_edge_scales_stiffness() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mat = Material {
         strength_factor: None,
@@ -1711,6 +1747,7 @@ fn test_beam_new_wall_girder_factor_not_applied_to_partial_shared_or_vertical() 
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mat = Material {
         strength_factor: None,
@@ -1843,6 +1880,7 @@ fn test_beam_new_misc_wall_wing_augments_column_inplane_stiffness() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let wall_shape = SectionShape::RcWall {
         thickness: 150.0,
@@ -2007,6 +2045,7 @@ fn test_beam_new_misc_wall_strip_augments_girder_iy_without_100x() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let wall_shape = SectionShape::RcWall {
         thickness: 150.0,
@@ -2177,6 +2216,7 @@ fn test_column_face_slit_drops_wing_wall_but_keeps_girder_strip() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let beam_sec = Section {
         frame_use: None,
@@ -2198,6 +2238,7 @@ fn test_column_face_slit_drops_wing_wall_but_keeps_girder_strip() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let wall_shape = SectionShape::RcWall {
         thickness: 150.0,
@@ -2402,6 +2443,7 @@ fn test_beam_new_seismic_wall_no_misc_wall_augmentation() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let beam_sec = Section {
         frame_use: None,
@@ -2423,6 +2465,7 @@ fn test_beam_new_seismic_wall_no_misc_wall_augmentation() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let wall_shape = SectionShape::RcWall {
         thickness: 150.0,
@@ -2588,6 +2631,7 @@ fn test_vertical_bending_stiffness_uses_section_strong_axis() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mat = Material {
         strength_factor: None,
@@ -2805,6 +2849,7 @@ fn test_misc_wall_wing_eccentricity_is_independent_of_wall_node_order() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let wall_shape = SectionShape::RcWall {
         thickness: 150.0,
@@ -2981,6 +3026,7 @@ fn torsion_test_model(split_x: bool) -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -3190,6 +3236,7 @@ fn t_joint_model(
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mk_node = |id: u32, c: [f64; 3]| Node {
         id: NodeId(id),
@@ -3323,6 +3370,7 @@ fn portal_with_wing_wall(col_depth: f64, beam_depth: f64, wall_thickness: f64) -
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mk_node = |id: u32, c: [f64; 3]| Node {
         id: NodeId(id),

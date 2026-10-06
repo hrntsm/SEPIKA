@@ -144,6 +144,36 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             "節点がありません。モデルタブで節点を追加してください。",
         ));
     }
+    let unresolved_start = issues.len();
+    for elem in &model.elements {
+        if let Some(section) = model.element_section(elem) {
+            if let Err(reason) = section.ensure_properties_resolved() {
+                issues.push(ModelIssue::members(
+                    &format!("断面性能を算定できません: {reason}"),
+                    "ID ",
+                    vec![elem.id],
+                    &reason,
+                    "断面の入力値と算定元を確認してください。",
+                ));
+            }
+            if section.is_cft() {
+                if let Some(shape) = &section.shape {
+                    if let Err(reason) = shape.try_cft_core_props() {
+                        issues.push(ModelIssue::members(
+                            "CFT の材料領域を算定できません",
+                            "ID ",
+                            vec![elem.id],
+                            &reason,
+                            "角Rと内法寸法を確認してください。",
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    if issues.len() > unresolved_start {
+        return issues;
+    }
     if let Err(error) = sepika_load::floor::validate_one_way_directions(model) {
         issues.push(ModelIssue::model(error.to_string()));
         return issues;

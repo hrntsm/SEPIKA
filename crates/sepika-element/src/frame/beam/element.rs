@@ -18,7 +18,7 @@ pub struct BeamElement {
     pub g: f64,
     /// 軸剛性（EA）用断面積。
     pub a: f64,
-    /// 質量算定用の幾何断面積。
+    /// 質量算定用断面積 [mm²]。CFT は鋼管とコアの合計面積。
     pub a_mass: f64,
     /// ローカル y 軸まわりの断面二次モーメント。`Section.iz` が入る。
     pub iy: f64,
@@ -30,6 +30,7 @@ pub struct BeamElement {
     /// ローカル z 方向せん断の有効せん断断面積。`Section.as_y` が入る。
     pub as_z: f64,
     pub length: f64,
+    /// 質量算定用密度 [t/mm³]。CFT は材料領域の総質量を合計面積で除した等価密度。
     pub density: f64,
     pub mass_properties: SectionMassProperties,
     pub mass_properties_error: Option<String>,

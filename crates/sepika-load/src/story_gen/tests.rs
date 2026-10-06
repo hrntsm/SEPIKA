@@ -56,6 +56,7 @@ fn two_story_model() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -481,6 +482,7 @@ fn two_columns_with_dl_model() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -609,6 +611,7 @@ fn rc_base_column_with_base_beam_model() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.sections.push(Section {
         frame_use: None,
@@ -630,6 +633,7 @@ fn rc_base_column_with_base_beam_model() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -981,9 +985,11 @@ fn main_frame_matrix_mass_equiv(model: &Model) -> f64 {
                 && model.element_material(e).is_some()
         })
         .map(|e| {
-            model.element_mass_properties(e).map_or(0.0, |p| {
-                p.total_mass(model.member_length(e)) * GRAVITY_MM_S2
-            })
+            model
+                .element_mass_properties(e)
+                .unwrap()
+                .total_mass(model.member_length(e))
+                * GRAVITY_MM_S2
         })
         .sum()
 }
@@ -1069,6 +1075,7 @@ fn rc_beam_with_slab_model() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     // 自重ゼロ（A=0）の柱断面。せい 800 で水平梁のフェイス控除 400×2 を作る。
     model.sections.push(Section {
@@ -1091,6 +1098,7 @@ fn rc_beam_with_slab_model() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -1296,6 +1304,168 @@ fn cft_column_model() -> Model {
         spring: None,
     });
     model
+}
+
+#[test]
+fn rounded_partial_supplied_mass_errors_are_not_zero_filled() {
+    use sepika_core::model::{PropertyBasis, SectionPropertyBasis};
+    let mut model = cft_column_model();
+    model.sections[0] = steel_h_shape().to_section(SectionId(0), "正常H".into());
+    model.sections[0].material = Some(MaterialId(1));
+    let mut unknown = SectionShape::SteelH {
+        height: 400.0,
+        width: 200.0,
+        web_thick: 8.0,
+        flange_thick: 13.0,
+        root_r: None,
+    }
+    .input_section(SectionId(1), "未知H".into())
+    .unwrap();
+    unknown.material = Some(MaterialId(1));
+    unknown.area = 8184.0;
+    unknown.property_basis.area = PropertyBasis::Supplied;
+    assert_eq!(unknown.resolved_area().unwrap(), 8184.0);
+    model.sections.push(unknown);
+    let mut second = model.elements[0].clone();
+    second.id = ElemId(1);
+    second.section = Some(SectionId(1));
+    model.elements.push(second);
+    let before = model.clone();
+    for error in [
+        model
+            .element_mass_properties(&model.elements[1])
+            .unwrap_err(),
+        crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap_err(),
+        generate_stories(&model, None).unwrap_err(),
+    ] {
+        assert!(error.contains("フィレット"), "{error}");
+    }
+    assert_eq!(model.load_cases, before.load_cases);
+    assert_eq!(model.stories, before.stories);
+    assert_eq!(model.nodes, before.nodes);
+    assert!(generate_stories_with_opts(&model, &[], false, MassMethod::LumpedOnly).is_ok());
+    model.sections[1].iy = 1e8;
+    model.sections[1].iz = 1e7;
+    model.sections[1].property_basis = SectionPropertyBasis::default();
+    assert!(model.element_mass_properties(&model.elements[1]).is_ok());
+    assert!(generate_stories(&model, None).is_ok());
+}
+
+#[test]
+fn rounded_cft_supplied_area_preserves_dl_and_all_story_mass_modes() {
+    use sepika_core::model::PropertyBasis;
+    let mut model = cft_column_model();
+    model.sections[0] = SectionShape::CftBox {
+        height: 500.0,
+        width: 300.0,
+        thick: 10.0,
+        corner_r: Some(30.0),
+    }
+    .to_section(SectionId(0), "角丸CFT".into());
+    model.sections[0].material = Some(MaterialId(0));
+    model.sections[0].steel_material = Some(MaterialId(1));
+    model.sections[0].area = 15600.0;
+    model.sections[0].property_basis.area = PropertyBasis::Supplied;
+    let k = 4.0 - std::f64::consts::PI;
+    let steel_area = 15600.0 - k * (30.0_f64.powi(2) - 20.0_f64.powi(2));
+    let core_area = 480.0 * 280.0 - k * 20.0_f64.powi(2);
+    let steel_mass = 7.85e-9 * steel_area * 3000.0;
+    assert!((steel_mass - 0.357272253496).abs() < 1e-12);
+    let core_mass = model.materials[0].cft_core_mass_density() * core_area * 3000.0;
+    for factor in [1.0, 1.3] {
+        let cfg = LoadCfg {
+            steel_weight_factor: factor,
+            extra_line_weight: vec![(ElemId(0), 0.2)],
+            ..Default::default()
+        };
+        model.load_cfg = Some(cfg.clone());
+        let physical = (steel_mass * factor + core_mass) * GRAVITY_MM_S2 + 600.0;
+        let matrix = (steel_mass + core_mass) * GRAVITY_MM_S2;
+        let design = 78.5e-6 * 15600.0 * factor * 3000.0
+            + model.materials[0].cft_core_design_unit_weight_n_per_mm3() * core_area * 3000.0
+            + 600.0;
+        let (nodal, member) = crate::self_weight::self_weight_case_content(&model, &cfg).unwrap();
+        assert!((nodal.iter().map(|n| -n.values[2]).sum::<f64>() - design).abs() < 1e-8);
+        model.load_cases = vec![LoadCase {
+            id: LoadCaseId(0),
+            kind: LoadCaseKind::Dead,
+            name: "DL".into(),
+            nodal,
+            member,
+        }];
+        for method in [MassMethod::LumpedOnly, MassMethod::CorrectedLumped] {
+            let direct = generate_stories_with_opts(&model, &[], true, method).unwrap();
+            let synced =
+                generate_stories_with_synced_self_weight(&model, &[LoadCaseId(0)], method).unwrap();
+            for result in [direct, synced] {
+                let dm = result.stories[1].dynamic_mass.unwrap();
+                assert!((dm.mass_equiv_weight_n - physical / 2.0).abs() < 1e-8);
+                assert!((result.stories[1].seismic_weight.unwrap() - design / 2.0).abs() < 1e-8);
+                let nodal_mass = result.rep_nodes[1].mass.map_or(0.0, |m| m[0]);
+                let expected = if method == MassMethod::LumpedOnly {
+                    physical
+                } else {
+                    physical - matrix
+                };
+                assert!((nodal_mass * GRAVITY_MM_S2 - expected / 2.0).abs() < 1e-8);
+            }
+        }
+        assert_eq!(model.sections[0].area, 15600.0);
+    }
+}
+
+#[test]
+fn rounded_h_box_supplied_area_uses_shape_mass_but_saved_design_area() {
+    use sepika_core::model::PropertyBasis;
+    for shape in [
+        SectionShape::SteelH {
+            height: 400.0,
+            width: 200.0,
+            web_thick: 8.0,
+            flange_thick: 13.0,
+            root_r: Some(13.0),
+        },
+        SectionShape::SteelBox {
+            height: 500.0,
+            width: 300.0,
+            thick: 10.0,
+            corner_r: Some(30.0),
+        },
+        steel_h_shape(),
+    ] {
+        let mut model = cft_column_model();
+        model.sections[0] = shape.to_section(SectionId(0), "保護A".into());
+        model.sections[0].material = Some(MaterialId(1));
+        model.sections[0].area = 20000.0;
+        model.sections[0].property_basis.area = PropertyBasis::Supplied;
+        let p = model.element_mass_properties(&model.elements[0]).unwrap();
+        let gen = generate_stories(&model, None).unwrap();
+        assert!(
+            (gen.stories[1].dynamic_mass.unwrap().mass_equiv_weight_n
+                - p.mass_per_length * 1500.0 * GRAVITY_MM_S2)
+                .abs()
+                < 1e-8
+        );
+        assert!((gen.stories[1].seismic_weight.unwrap() - 78.5e-6 * 20000.0 * 1500.0).abs() < 1e-8);
+        assert_eq!(model.sections[0].area, 20000.0);
+        model.sections[0].shape = None;
+        let direct = generate_stories(&model, None).unwrap();
+        assert!(
+            (direct.stories[1].dynamic_mass.unwrap().mass_equiv_weight_n
+                - 7.85e-9 * 20000.0 * 1500.0 * GRAVITY_MM_S2)
+                .abs()
+                < 1e-8
+        );
+        let mut invalid = shape;
+        match &mut invalid {
+            SectionShape::SteelH { root_r, .. } => *root_r = Some(-1.0),
+            SectionShape::SteelBox { corner_r, .. } => *corner_r = Some(-1.0),
+            _ => unreachable!(),
+        }
+        model.sections[0].shape = Some(invalid);
+        assert!(crate::self_weight::self_weight_case_content(&model, &LoadCfg::default()).is_err());
+        assert!(generate_stories(&model, None).is_err());
+    }
 }
 
 /// CFT 柱でも両 MassMethod の公称並進総動的質量が一致し、物理質量を二重計上しない
@@ -1558,6 +1728,7 @@ fn secondary_beam_model() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -1660,6 +1831,7 @@ fn test_secondary_beam_steel_weight_factor_applies_to_design_and_mass() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     model
         .sections
@@ -1784,6 +1956,7 @@ fn secondary_beam_on_girder_midspan_model(with_beam: bool) -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.sections.push(Section {
         frame_use: None,
@@ -1805,6 +1978,7 @@ fn secondary_beam_on_girder_midspan_model(with_beam: bool) -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -1933,6 +2107,7 @@ fn single_beam_model(
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -2168,6 +2343,7 @@ fn test_face_reduction_applies_to_horizontal_concrete_beam() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -2205,6 +2381,7 @@ fn test_face_reduction_applies_to_horizontal_concrete_beam() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     // 水平梁（節点1→2）のみ断面・材料を持たせ、フェイス控除を検証する。
     model.elements.push(ElementData {
@@ -2240,10 +2417,12 @@ fn test_face_reduction_applies_to_horizontal_concrete_beam() {
 
     model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
     model.sections[1].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
-    model.sections[1].shape = Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
-        width: 800.0,
-        thick: 800.0,
-    });
+    let mut column_shape = rc_rect_shape();
+    if let SectionShape::RcColumnRect { b, d, .. } = &mut column_shape {
+        *b = 800.0;
+        *d = 800.0;
+    }
+    model.sections[1].shape = Some(column_shape);
     let gen = generate_stories(&model, None).unwrap();
     let eff_len = len - 400.0 - 400.0;
     let expected = density * area * eff_len * GRAVITY_MM_S2;
@@ -2368,6 +2547,7 @@ fn wall_model() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -2546,6 +2726,7 @@ fn test_wall_self_weight_uses_clear_dimensions_of_boundary_members() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.sections.push(Section {
         frame_use: None,
@@ -2567,6 +2748,7 @@ fn test_wall_self_weight_uses_clear_dimensions_of_boundary_members() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     let line = |id: u32, sec: u32, n0: u32, n1: u32| ElementData {
         id: ElemId(id),
@@ -2869,6 +3051,7 @@ fn test_density_seismic_weight_includes_attached_wall_plate() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     let plate = WallPlate {
         self_weight_shares: Vec::new(),
@@ -3034,6 +3217,7 @@ fn single_column_with_attached_wall(transfer: LoadTransfer) -> (Model, f64) {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     // 壁版用の断面（板厚 120）。
     let mut wall_sec = model.sections[0].clone();
@@ -3899,6 +4083,7 @@ fn 階共通柱仕上げは用途未設定とブレースとs柱に適用しな�
             _ => {
                 model.materials[0].category = MaterialCategory::Steel;
                 model.materials[0].fc = None;
+                model.sections[0].shape = Some(steel_h_shape());
             }
         }
         let baseline = line_weights(&model)[0];
@@ -3963,6 +4148,7 @@ fn test_finish_area_weight_beam_perimeter_three_side() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -4059,6 +4245,7 @@ fn test_base_column_without_lower_column_adds_max_beam_depth() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.sections.push(Section {
         frame_use: None,
@@ -4080,6 +4267,7 @@ fn test_base_column_without_lower_column_adds_max_beam_depth() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -4201,6 +4389,7 @@ fn test_base_column_with_lower_brace_still_adds_max_beam_depth() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.sections.push(Section {
         frame_use: None,
@@ -4222,6 +4411,7 @@ fn test_base_column_with_lower_brace_still_adds_max_beam_depth() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.sections.push(Section {
         frame_use: None,
@@ -4243,6 +4433,7 @@ fn test_base_column_with_lower_brace_still_adds_max_beam_depth() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -4394,6 +4585,7 @@ fn test_base_column_with_lower_three_node_vertical_beam_still_adds_max_beam_dept
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.sections.push(Section {
         frame_use: None,
@@ -4415,6 +4607,7 @@ fn test_base_column_with_lower_three_node_vertical_beam_still_adds_max_beam_dept
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.sections.push(Section {
         frame_use: None,
@@ -4436,6 +4629,7 @@ fn test_base_column_with_lower_three_node_vertical_beam_still_adds_max_beam_dept
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -4570,6 +4764,7 @@ fn test_base_column_with_lower_column_does_not_add_beam_depth() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.sections.push(Section {
         frame_use: None,
@@ -4591,6 +4786,7 @@ fn test_base_column_with_lower_column_does_not_add_beam_depth() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.sections.push(Section {
         frame_use: None,
@@ -4612,6 +4808,7 @@ fn test_base_column_with_lower_column_does_not_add_beam_depth() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -4733,6 +4930,7 @@ fn k_brace_model(rule: KBraceWeightRule) -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     // ブレース1(node2-node4)
     model.sections.push(Section {
@@ -4755,6 +4953,7 @@ fn k_brace_model(rule: KBraceWeightRule) -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     // ブレース2(node3-node4): 面積を2倍にして非対称にする
     model.sections.push(Section {
@@ -4777,6 +4976,7 @@ fn k_brace_model(rule: KBraceWeightRule) -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -4930,6 +5130,9 @@ fn two_story_model_with_shapes(
     upper_mat.id = MaterialId(1);
     upper_mat.category = upper.1;
     model.materials.push(upper_mat);
+    for mat in &mut model.materials {
+        mat.fc = (mat.category == MaterialCategory::Concrete).then_some(24.0);
+    }
     // 部材の所属階は「材端節点のうち最も高い節点」で決まる。
     // 節点 Z: 0/0/3500/3500/7000/7000 → 1F = 柱(0-2,1-3)・梁(2-3)、2F = 柱(2-4,3-5)・梁(4-5)。
     for e in &mut model.elements {
@@ -5006,7 +5209,9 @@ fn test_generate_story_structure_follows_material_not_shape() {
         (steel_h_shape(), MaterialCategory::Concrete),
         (steel_h_shape(), MaterialCategory::Steel),
     );
-    let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
+    assert!(generate_stories(&model, Some(LoadCaseId(0))).is_err());
+    let gen =
+        generate_stories_with_opts(&model, &[LoadCaseId(0)], false, model.mass_method).unwrap();
     assert_eq!(gen.stories[1].structure, StoryStructure::Rc);
     assert_eq!(gen.stories[2].structure, StoryStructure::S);
 }

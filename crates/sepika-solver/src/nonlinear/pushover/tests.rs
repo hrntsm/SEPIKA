@@ -84,6 +84,7 @@ fn single_column_model(fy: f64, seismic_weight: f64) -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -681,6 +682,7 @@ fn two_story_model() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mat = Material {
         strength_factor: None,
@@ -929,6 +931,7 @@ fn test_compute_static_indeterminacy_indeterminate_portal() {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -1177,6 +1180,7 @@ fn portal_frame_model(fy: f64, seismic_weight: f64) -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -2533,6 +2537,7 @@ fn steel_hinge_model(name: &str, fy: f64, strength_factor: Option<f64>) -> Model
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor,
@@ -3136,6 +3141,7 @@ fn portal_frame_rigid_zone_model(fy: f64, seismic_weight: f64, rigid: f64) -> Mo
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     model.sections.push(strong);
     model.elements[1].section = Some(SectionId(1));

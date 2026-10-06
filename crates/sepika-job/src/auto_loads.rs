@@ -668,6 +668,13 @@ pub fn compute_gravity_auto_load_cases(
             None
         };
     let self_weight_model = initialized.as_ref().unwrap_or(model);
+    sepika_load::cascade::solve_with_basis(
+        self_weight_model,
+        |_| 0.0,
+        true,
+        sepika_load::cascade::SelfWeightBasis::MassEquiv,
+    )
+    .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
     let (sw_nodal, sw_member) =
         sepika_load::self_weight::self_weight_case_content(self_weight_model, &load_cfg)
             .map_err(crate::error::JobError::InvalidInput)?;
@@ -874,6 +881,79 @@ mod tests {
         LoadSource, LoadTransfer, RegionAnchor, Slab, SlabShape, SlabTipLoad, TipLoadDirection,
     };
     use sepika_core::model::{Section, StandardFloorLoad, Story};
+
+    #[test]
+    fn rounded_partial_supplied_gravity_returns_reason_without_partial_cases() {
+        use sepika_core::ids::MaterialId;
+        use sepika_core::model::{Material, MaterialCategory, PropertyBasis};
+        use sepika_core::section_shape::SectionShape;
+        let mut model = make_square_slab_model();
+        model.materials.push(Material {
+            id: MaterialId(0),
+            name: "SN400B".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            shear: None,
+            fc: None,
+            fy: Some(235.0),
+            concrete_class: Default::default(),
+            strength_factor: None,
+        });
+        for (id, root_r) in [(0, Some(13.0)), (1, None)] {
+            let mut sec = SectionShape::SteelH {
+                height: 400.0,
+                width: 200.0,
+                web_thick: 8.0,
+                flange_thick: 13.0,
+                root_r,
+            }
+            .input_section(SectionId(id), format!("H{id}"))
+            .unwrap();
+            sec.material = Some(MaterialId(0));
+            sec.area = 8184.0;
+            sec.property_basis.area = PropertyBasis::Supplied;
+            model.sections.push(sec);
+            model.elements[id as usize].section = Some(SectionId(id));
+        }
+        let before = model.clone();
+        let error = compute_gravity_auto_load_cases(&model)
+            .err()
+            .expect("部分成功なし")
+            .to_string();
+        assert!(error.contains("フィレット"), "{error}");
+        assert_eq!(model.load_cases, before.load_cases);
+        assert_eq!(model.stories, before.stories);
+        assert_eq!(model.nodes, before.nodes);
+        for elem in &mut model.elements {
+            elem.section = Some(SectionId(0));
+        }
+        model
+            .unassigned_beams
+            .push(sepika_core::model::SecondaryMember {
+                id: sepika_core::ids::SecondaryMemberId(0),
+                section: Some(SectionId(1)),
+                ends: sepika_core::model::SecondaryMemberEnds::Supported([
+                    sepika_core::model::SecondaryMemberAnchor {
+                        support: sepika_core::model::SupportMemberId::Primary(ElemId(0)),
+                        position: 0.5,
+                    },
+                    sepika_core::model::SecondaryMemberAnchor {
+                        support: sepika_core::model::SupportMemberId::Primary(ElemId(2)),
+                        position: 0.5,
+                    },
+                ]),
+                ..Default::default()
+            });
+        let error = compute_gravity_auto_load_cases(&model)
+            .err()
+            .expect("二次質量の部分成功なし")
+            .to_string();
+        assert!(error.contains("フィレット"), "{error}");
+        assert_eq!(model.load_cases, before.load_cases);
+        assert_eq!(model.stories, before.stories);
+    }
 
     fn make_square_slab_model() -> Model {
         let mk_node = |id: u32, x: f64, y: f64| Node {
@@ -1452,6 +1532,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         });
         model.unassigned_beams.push(SecondaryMember {
             gravity_end_shares: None,
@@ -1555,6 +1636,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         });
         // 辺0（節点0-1、大梁として実在）に全長載るパラペット（立ち上がり500mm）。
         let plate = WallPlate {
@@ -1665,6 +1747,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         });
         let plate = WallPlate {
             self_weight_shares: Vec::new(),
@@ -1772,6 +1855,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         });
         // 自立壁は床領域の**内側**に置く（境界の辺上に置くと、厳密内包の判定で
         // 「床に載っていない」＝解析前チェックのエラー対象になる）。
@@ -2527,6 +2611,7 @@ mod cascade_tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }];
         model.unassigned_beams.clear();
         model.floor_regions.push(region);

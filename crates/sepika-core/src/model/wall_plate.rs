@@ -1217,6 +1217,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         });
         m.add_enclosed_wall_plate_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
@@ -1279,6 +1280,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         });
         m
     }

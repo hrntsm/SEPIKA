@@ -94,18 +94,32 @@ impl SectionShape {
         fc: f64,
         gamma_c: f64,
     ) -> Option<CompositeProps> {
+        self.try_cft_equivalent_props(es, nu_s, fc, gamma_c)
+            .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// CFT の材料由来の等価性能。必要な角Rが未知・不正ならエラー。
+    pub fn try_cft_equivalent_props(
+        &self,
+        es: f64,
+        nu_s: f64,
+        fc: f64,
+        gamma_c: f64,
+    ) -> Result<Option<CompositeProps>, String> {
+        let Some(core) = self.try_cft_core_props()? else {
+            return Ok(None);
+        };
         let ec = concrete_young_modulus_gamma(fc, gamma_c);
         if !ec.is_finite() || ec <= 0.0 || !es.is_finite() || es <= 0.0 || !nu_s.is_finite() {
-            return None;
+            return Ok(None);
         }
-        let core = self.cft_core_props()?;
         if core.area <= 0.0 {
-            return None;
+            return Ok(None);
         }
         let n = es / ec;
         let ngs = n * (1.0 + NU_CONCRETE) / (1.0 + nu_s);
         if !n.is_finite() || !ngs.is_finite() || ngs <= 0.0 {
-            return None;
+            return Ok(None);
         }
         let (s_as_y, s_as_z) = match *self {
             SectionShape::CftBox { thick: t, .. } => {
@@ -117,14 +131,14 @@ impl SectionShape {
             }
             _ => unreachable!("cft_core_props が Some を返した非 CFT 断面"),
         };
-        Some(CompositeProps {
-            area_ax: self.calc_area() + core.area / n,
-            iy: self.calc_iy() + core.iy / n,
-            iz: self.calc_iz() + core.iz / n,
+        Ok(Some(CompositeProps {
+            area_ax: self.try_calc_area()? + core.area / n,
+            iy: self.try_calc_iy()? + core.iy / n,
+            iz: self.try_calc_iz()? + core.iz / n,
             j: self.calc_j() + core.j / ngs,
             as_y: s_as_y + core.area / KAPPA_RC / ngs,
             as_z: s_as_z + core.area / KAPPA_RC / ngs,
-        })
+        }))
     }
 }
 
@@ -150,14 +164,26 @@ pub struct CftCoreProps {
 }
 
 impl SectionShape {
-    /// CFT 断面（`CftBox`/`CftPipe`）の充填コンクリート部分の諸元。
-    /// CFT 以外の形状は `None`。
-    ///
-    /// 内法寸法は 0 で下限クランプするため、板厚が過大で内法が消える断面では
-    /// `area` が 0 になる（＝充填コンクリートが効かない）。呼び出し側が
-    /// 「鋼管のみへフォールバックする」か「充填ゼロのまま続行する」かを選べるよう、
-    /// ここでは `None` にせず 0 を返す。
+    /// CFT の充填コンクリート性能。対象外は `None`。
+    /// 必要な角Rが未知・不正なら panic。入力値の検証には `try_cft_core_props` を用いる。
     pub fn cft_core_props(&self) -> Option<CftCoreProps> {
+        self.try_cft_core_props()
+            .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// CFT コア性能。必要な角Rが未知・不正ならエラー。対象外は `Ok(None)`。
+    pub fn try_cft_core_props(&self) -> Result<Option<CftCoreProps>, String> {
+        let rounded = self.rounded_core_properties()?;
+        let mut core = self.rectangular_cft_core_props();
+        if let (Some(p), Some(core)) = (rounded, &mut core) {
+            core.area = p.area;
+            core.iy = p.iy;
+            core.iz = p.iz;
+        }
+        Ok(core)
+    }
+
+    fn rectangular_cft_core_props(&self) -> Option<CftCoreProps> {
         match *self {
             SectionShape::CftBox {
                 height: h,

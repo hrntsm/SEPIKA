@@ -74,6 +74,72 @@ fn cft_pipe_section(outer_dia: f64, thick: f64) -> Section {
     make_section(SectionShape::CftPipe { outer_dia, thick })
 }
 
+#[test]
+fn rounded_cft_gate_distinguishes_core_steel_and_qd_methods() {
+    for (height, width) in [(400.0, 400.0), (500.0, 300.0)] {
+        for r in [0.0, 5.0, 10.0, 30.0] {
+            let shape = SectionShape::CftBox {
+                height,
+                width,
+                thick: 10.0,
+                corner_r: Some(r),
+            };
+            let section = make_section(shape.clone());
+            let mat = make_material(24.0, "Fc24");
+            for method in [
+                crate::QdMethod::Qd1,
+                crate::QdMethod::Qd2,
+                crate::QdMethod::Min,
+            ] {
+                let mut ctx = ctx_column(LoadTerm::Short);
+                ctx.seismic_qd = Some(crate::SeismicQd {
+                    long_at: vec![(0.0, [0.0; 6])],
+                    n_factor: 1.5,
+                    n_mechanism: 1.0,
+                    q_simple: None,
+                    clear_length: 3000.0,
+                    method,
+                });
+                let outcome = CftDesign.check(&zero_forces(), &section, &mat, &ctx);
+                if r > 10.0 || (r > 0.0 && method != crate::QdMethod::Qd2) {
+                    match outcome {
+                        CheckOutcome::Skipped { reason } => {
+                            assert!(reason.contains("#418"));
+                            if r <= 10.0 {
+                                assert!(reason.contains("QD1/min"));
+                            } else {
+                                assert!(reason.contains("内角R"));
+                            }
+                        }
+                        CheckOutcome::Checked(_) => {
+                            panic!("正の角Rの未対応設計を適合へ読み替えてはならない")
+                        }
+                    }
+                } else {
+                    assert!(matches!(outcome, CheckOutcome::Checked(_)));
+                }
+            }
+            let outcome =
+                CftDesign.check(&zero_forces(), &section, &mat, &ctx_column(LoadTerm::Long));
+            assert_eq!(matches!(outcome, CheckOutcome::Checked(_)), r <= 10.0);
+            let mu = crate::ultimate::cft_mu_nm(&shape, 24.0, 235.0, 0.0, 3000.0, false);
+            assert_eq!(mu.is_ok(), r == 0.0);
+            if r > 0.0 {
+                assert!(mu.unwrap_err().contains("#418"));
+            }
+            if r <= 10.0 {
+                let mut forces = zero_forces();
+                forces.mz = 1.0e6;
+                let cr = CftDesign
+                    .check(&forces, &section, &mat, &ctx_column(LoadTerm::Long))
+                    .unwrap_checked();
+                let expected_ma = shape.calc_iy() * 2.0 / height * steel_ft(235.0, LoadTerm::Long);
+                assert!((cr.ratio() / (forces.mz / expected_ma) - 1.0).abs() < 1.0e-12);
+            }
+        }
+    }
+}
+
 // ------------------------------------------------------------------
 // CFT 矩形: 閉形式
 // ------------------------------------------------------------------
@@ -416,6 +482,7 @@ fn test_cft_shape_mismatch_skip() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mat = make_material(24.0, "SN400B");
     let ctx = ctx_column(LoadTerm::Long);

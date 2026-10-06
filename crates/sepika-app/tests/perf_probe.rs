@@ -100,6 +100,7 @@ fn build_grid_model(nx: usize, ny: usize, n_stories: usize, with_slabs: bool) ->
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.sections.push(Section {
         frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
@@ -121,6 +122,7 @@ fn build_grid_model(nx: usize, ny: usize, n_stories: usize, with_slabs: bool) ->
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,

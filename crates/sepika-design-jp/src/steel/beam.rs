@@ -1415,6 +1415,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         };
         let (n, lambda_y) = steel_required_lateral_bracing_count(235.0, 9000.0, &sec).unwrap();
         assert!((lambda_y - 90.0).abs() < 1e-9, "λy={}", lambda_y);
@@ -1448,6 +1449,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         };
         assert!(steel_required_lateral_bracing_count(235.0, 0.0, &sec).is_none());
     }
@@ -1513,6 +1515,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         };
         let material = mat("SN400");
         let material = Material {
@@ -1561,6 +1564,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         };
         let material = mat("SN400");
         let ctx = DesignCtx {

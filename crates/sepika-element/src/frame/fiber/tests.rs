@@ -18,6 +18,216 @@ fn make_test_fiber_beam(shear_mod: Option<f64>) -> FiberBeam {
     )
 }
 
+#[test]
+fn rounded_beam_fiber_mass_and_default_fiber_geometry_follow_independent_properties() {
+    use sepika_core::section_shape::SectionShape;
+    for (shape, s, c) in [
+        (
+            SectionShape::SteelH {
+                height: 400.0,
+                width: 200.0,
+                web_thick: 9.0,
+                flange_thick: 12.0,
+                root_r: Some(0.0),
+            },
+            [8184.0, 220578432.0, 16022842.0],
+            [0.0; 3],
+        ),
+        (
+            SectionShape::SteelH {
+                height: 400.0,
+                width: 200.0,
+                web_thick: 9.0,
+                flange_thick: 12.0,
+                root_r: Some(13.0),
+            },
+            [8329.070841543, 225549509.4320, 16031656.18828],
+            [0.0; 3],
+        ),
+        (
+            SectionShape::SteelBox {
+                height: 500.0,
+                width: 300.0,
+                thick: 10.0,
+                corner_r: Some(30.0),
+            },
+            [15170.79632679, 517817051.0231, 237343309.2454],
+            [0.0; 3],
+        ),
+        (
+            SectionShape::SteelBox {
+                height: 500.0,
+                width: 300.0,
+                thick: 10.0,
+                corner_r: Some(0.0),
+            },
+            [15600.0, 544520000.0, 246920000.0],
+            [0.0; 3],
+        ),
+        (
+            SectionShape::CftBox {
+                height: 500.0,
+                width: 300.0,
+                thick: 10.0,
+                corner_r: Some(30.0),
+            },
+            [15170.79632679, 517817051.0231, 237343309.2454],
+            [134056.6370614, 2561426897.480, 871767904.0575],
+        ),
+        (
+            SectionShape::CftBox {
+                height: 500.0,
+                width: 300.0,
+                thick: 10.0,
+                corner_r: Some(0.0),
+            },
+            [15600.0, 544520000.0, 246920000.0],
+            [134400.0, 2580480000.0, 878080000.0],
+        ),
+    ] {
+        let cft = matches!(shape, SectionShape::CftBox { .. });
+        let mut model = build_test_model(Some(78846.15));
+        model.materials[0].category = MaterialCategory::Steel;
+        model.materials[0].name = "SN400B".into();
+        model.materials[0].young = 205000.0;
+        model.materials[0].fc = None;
+        model.materials[0].fy = Some(235.0);
+        model.materials[0].density = 7.85e-9;
+        model.materials.push(Material {
+            id: MaterialId(1),
+            name: "Fc24".into(),
+            category: MaterialCategory::Concrete,
+            young: 25000.0,
+            poisson: 0.2,
+            density: 2.4e-9,
+            shear: None,
+            fc: Some(24.0),
+            fy: None,
+            concrete_class: Default::default(),
+            strength_factor: None,
+        });
+        let mut section = shape.to_section(SectionId(0), "角丸断面".into());
+        section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+        section.material = Some(MaterialId(u32::from(cft)));
+        section.steel_material = cft.then_some(MaterialId(0));
+        model.sections[0] = section;
+        let beam = crate::frame::beam::BeamElement::try_new(&model.elements[0], &model).unwrap();
+        let mut fiber = FiberBeam::new(
+            &model.elements[0],
+            &model,
+            StrengthBasis::Nominal,
+            AnalysisKind::Incremental,
+        );
+        let rho_c = 23.0e-6 / 9806.65;
+        let reference = sepika_core::model::SectionMassProperties {
+            mass_per_length: 7.85e-9 * s[0] + rho_c * c[0],
+            rotary_inertia_y_per_length: 7.85e-9 * s[1] + rho_c * c[1],
+            rotary_inertia_z_per_length: 7.85e-9 * s[2] + rho_c * c[2],
+        };
+        assert_relative_eq!(
+            beam.mass_properties.mass_per_length,
+            reference.mass_per_length,
+            max_relative = 1.0e-10
+        );
+        assert_relative_eq!(
+            beam.mass_properties.rotary_inertia_y_per_length,
+            reference.rotary_inertia_y_per_length,
+            max_relative = 1.0e-10
+        );
+        assert_relative_eq!(
+            beam.mass_properties.rotary_inertia_z_per_length,
+            reference.rotary_inertia_z_per_length,
+            max_relative = 1.0e-10
+        );
+        assert_eq!(fiber.mass_properties, beam.mass_properties);
+        for lumped in [
+            beam.mass_matrix(crate::behavior::MassOption::Lumped),
+            fiber.mass_matrix(crate::behavior::MassOption::Lumped),
+        ] {
+            for direction in 0..3 {
+                assert_relative_eq!(
+                    lumped.get(direction, direction) + lumped.get(direction + 6, direction + 6),
+                    reference.mass_per_length * fiber.length,
+                    max_relative = 1.0e-10
+                );
+            }
+        }
+        let bm = beam.mass_matrix(crate::behavior::MassOption::Consistent);
+        let fm = fiber.mass_matrix(crate::behavior::MassOption::Consistent);
+        let mut matrix_delta = 0.0_f64;
+        for i in 0..12 {
+            for j in 0..12 {
+                matrix_delta = matrix_delta.max((bm.get(i, j) - fm.get(i, j)).abs());
+                assert_relative_eq!(
+                    bm.get(i, j),
+                    fm.get(i, j),
+                    epsilon = 1.0e-11,
+                    max_relative = 1.0e-12
+                );
+            }
+        }
+        eprintln!("{shape:?}: Beam/Fiber 質量行列の最大絶対差={matrix_delta:.9e}");
+        for direction in 0..3 {
+            let mass = fm.get(direction, direction)
+                + fm.get(direction, direction + 6)
+                + fm.get(direction + 6, direction)
+                + fm.get(direction + 6, direction + 6);
+            assert_relative_eq!(
+                mass,
+                reference.mass_per_length * fiber.length,
+                max_relative = 1.0e-10
+            );
+            let beam_mass = bm.get(direction, direction)
+                + bm.get(direction, direction + 6)
+                + bm.get(direction + 6, direction)
+                + bm.get(direction + 6, direction + 6);
+            assert_relative_eq!(
+                beam_mass,
+                reference.mass_per_length * beam.length,
+                max_relative = 1.0e-10
+            );
+        }
+        let fs = &fiber.gauss_points[0].section.fibers;
+        for (tag, expected) in [(2, s), (0, c)] {
+            if expected[0] == 0.0 {
+                continue;
+            }
+            let actual = fs
+                .iter()
+                .filter(|f| f.material == tag)
+                .fold([0.0; 3], |mut sum, f| {
+                    sum[0] += f.area;
+                    sum[1] += f.area * f.y * f.y;
+                    sum[2] += f.area * f.z * f.z;
+                    sum
+                });
+            assert_relative_eq!(actual[0], expected[0], max_relative = 1.0e-10);
+            eprintln!(
+                "要素既定分割: {shape:?}, 材料={tag}, Iy差={:.9e}, Iz差={:.9e}",
+                actual[1] / expected[1] - 1.0,
+                actual[2] / expected[2] - 1.0
+            );
+        }
+        if !cft {
+            let gp = &mut fiber.gauss_points[0];
+            let (response, _) = sepika_section::fiber::section_response(
+                &gp.section,
+                sepika_section::fiber::SectionStrain {
+                    eps0: 0.0,
+                    ky: 1.0e-8,
+                    kz: -1.0e-8,
+                },
+                &mut gp.mats,
+            );
+            eprintln!(
+                "要素の実材料応答: {shape:?}, My差={:.9e}, Mz差={:.9e}",
+                response.my / (205000.0 * s[2] * 1.0e-8) - 1.0,
+                response.mz / (205000.0 * s[1] * -1.0e-8) - 1.0
+            );
+        }
+    }
+}
+
 fn make_test_beam_element(as_val: f64) -> crate::frame::beam::BeamElement {
     crate::frame::beam::BeamElement {
         id: ElemId(0),
@@ -65,16 +275,7 @@ fn beamとfiberは同じ断面なら整合質量が一致する() {
         AnalysisKind::Incremental,
     );
 
-    let mut beam = make_test_beam_element(as_val);
-    beam.density = density;
-    beam.iy = model.sections[0].iy;
-    beam.iz = model.sections[0].iz;
-    beam.mass_properties = sepika_core::model::SectionMassProperties::uniform(
-        density,
-        model.sections[0].area,
-        model.sections[0].iy,
-        model.sections[0].iz,
-    );
+    let beam = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
     let mass_beam = beam.mass_matrix(crate::behavior::MassOption::Consistent);
     let mass_fiber = fiber.mass_matrix(crate::behavior::MassOption::Consistent);
     for i in 0..12 {
@@ -501,19 +702,7 @@ fn 非対称断面のbeamとfiberは各曲げブロックが一致する() {
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
-    let mut beam = make_test_beam_element(model.sections[0].as_z);
-    beam.as_y = model.sections[0].as_y;
-    beam.as_z = model.sections[0].as_z;
-    beam.iy = model.sections[0].iy;
-    beam.iz = model.sections[0].iz;
-    beam.rigid = model.elements[0].rigid_zone;
-    beam.density = density;
-    beam.mass_properties = sepika_core::model::SectionMassProperties::uniform(
-        density,
-        model.sections[0].area,
-        model.sections[0].iy,
-        model.sections[0].iz,
-    );
+    let beam = crate::frame::beam::BeamElement::new(&model.elements[0], &model);
     let mass_beam = beam.mass_matrix(crate::behavior::MassOption::Consistent);
     let mass_fiber = fiber.mass_matrix(crate::behavior::MassOption::Consistent);
     for indices in [[1usize, 5, 7, 11], [2, 4, 8, 10]] {
@@ -845,6 +1034,7 @@ fn build_test_model(shear_mod: Option<f64>) -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -918,6 +1108,7 @@ fn make_oriented_fiber(p0: [f64; 3], p1: [f64; 3], ref_vec: [f64; 3]) -> FiberBe
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -997,6 +1188,7 @@ fn make_steel_fiber_with_fy(fy: Option<f64>) -> FiberBeam {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -1329,6 +1521,7 @@ fn test_yield_progression() {
                 rebar_material: None,
                 shear_rebar_material: None,
                 steel_material: None,
+                property_basis: Default::default(),
             }],
             materials: vec![Material {
                 strength_factor: None,
@@ -1689,6 +1882,7 @@ fn test_vertical_column_rz_nonsingular() {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,

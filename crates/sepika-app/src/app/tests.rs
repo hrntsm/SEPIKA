@@ -1768,6 +1768,7 @@ fn shear_model(n: usize) -> sepika_core::model::Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -3992,6 +3993,7 @@ fn test_floor_design_skips_materialized_beam() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     let mk_mid = |id: u32, x: f64, y: f64| sepika_core::model::Node {
         id: NodeId(id),
@@ -4121,6 +4123,7 @@ fn test_floor_design_checks_secondary_member_beam() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     let mk_mid = |id: u32, x: f64, y: f64| sepika_core::model::Node {
         id: NodeId(id),
@@ -4231,6 +4234,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     let mk_mid = |id: u32, x: f64, y: f64| sepika_core::model::Node {
         id: NodeId(id),
@@ -4357,6 +4361,7 @@ fn test_floor_design_checks_cantilever_beam() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     let mk_mid = |id: u32, x: f64, y: f64| sepika_core::model::Node {
         id: NodeId(id),
@@ -4546,6 +4551,7 @@ fn test_floor_design_checks_secondary_beam_uses_same_level_slab() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     // 下階スラブ（Z=0、室用途なし）は既にモデルにある。同じ平面形の上階スラブを足す。
     let mk_node = |id: u32, x: f64, y: f64, z: f64| Node {
@@ -4689,6 +4695,7 @@ fn test_floor_design_checks_secondary_beam_on_shared_edge_averages_width() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     let mk = |id: u32, x: f64, y: f64| Node {
         id: NodeId(id),
@@ -4819,6 +4826,7 @@ fn test_floor_design_checks_secondary_beam_on_slab_edge() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     let mk_mid = |id: u32, x: f64, y: f64| sepika_core::model::Node {
         id: NodeId(id),
@@ -6780,6 +6788,7 @@ fn test_sync_gravity_dl_includes_self_weight_and_slab() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.materials.push(Material {
         strength_factor: None,
@@ -7345,6 +7354,7 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
                 rebar_material: None,
                 shear_rebar_material: None,
                 steel_material: None,
+                property_basis: Default::default(),
             },
             {
                 // スラブ断面（板厚 150 mm・Fc24）。板厚と自重はここから解決する。
@@ -7411,11 +7421,34 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         slabs: vec![],
         ..Default::default()
     };
+    let mut rebar = model.materials[0].clone();
+    rebar.id = MaterialId(1);
+    rebar.category = MaterialCategory::Rebar;
+    rebar.name = "SD345".into();
+    rebar.young = 205000.0;
+    rebar.density = 7.85e-9;
+    rebar.fc = None;
+    rebar.fy = Some(345.0);
+    model.materials.push(rebar);
     for index in [0, 2] {
+        model.sections[index].rebar_material = Some(MaterialId(1));
+        model.sections[index].shear_rebar_material = Some(MaterialId(1));
         model.sections[index].shape =
-            Some(sepika_core::section_shape::SectionShape::SteelFlatBar {
-                width: 400.0,
-                thick: 600.0,
+            Some(sepika_core::section_shape::SectionShape::RcColumnRect {
+                b: 400.0,
+                d: 600.0,
+                rebar: sepika_core::section_shape::RcRectColumnRebar {
+                    main_dia: 22.0,
+                    x: vec![],
+                    y: vec![],
+                    cover: 40.0,
+                    hoop: sepika_core::section_shape::RectColumnHoop {
+                        dia: 10.0,
+                        pitch: 100.0,
+                        legs_x: 2,
+                        legs_y: 2,
+                    },
+                },
             });
     }
     model.rebuild_floor_assignment_regions();
@@ -8646,15 +8679,15 @@ fn test_preparation_lists_section_properties() {
     for (row, sec) in prep.sections.iter().zip(app.core.model.sections.iter()) {
         // 表示値はモデルが持つ解析入力そのもの（ここで再計算はしない）。
         assert_eq!(row.section, sec.id);
-        assert_eq!(row.area, sec.area);
-        assert_eq!(row.iy, sec.iy);
-        assert_eq!(row.iz, sec.iz);
+        assert_eq!(row.area, Some(sec.area));
+        assert_eq!(row.iy, Some(sec.iy));
+        assert_eq!(row.iz, Some(sec.iz));
         assert_eq!(row.j, sec.j);
         assert!(row.shape_label.is_some(), "形状定義を持つ断面");
         assert!(row.n_elements > 0, "サンプルは全断面が使われている");
         // 断面二次半径 i = √(I/A)。
-        assert!((row.ry - (sec.iy / sec.area).sqrt()).abs() < 1e-9);
-        assert!((row.rz - (sec.iz / sec.area).sqrt()).abs() < 1e-9);
+        assert!((row.ry.unwrap() - (sec.iy / sec.area).sqrt()).abs() < 1e-9);
+        assert!((row.rz.unwrap() - (sec.iz / sec.area).sqrt()).abs() < 1e-9);
         assert_eq!(row.material.as_deref(), Some("SN400B"));
     }
     // 柱 H-300x300 は 2 本、梁 H-400x200 は 1 本。
@@ -8834,7 +8867,15 @@ fn test_preparation_member_stiffness_reports_composite_props() {
         frame_use: Some(sepika_core::model::FrameSectionUse::Column),
         ..cft.to_section(SectionId(0), "CFT-□400x400x16".into())
     };
-    model.materials[0].fc = Some(36.0);
+    let mut concrete = model.materials[0].clone();
+    concrete.id = sepika_core::ids::MaterialId(model.materials.len() as u32);
+    concrete.category = sepika_core::model::MaterialCategory::Concrete;
+    concrete.fc = Some(36.0);
+    concrete.fy = None;
+    concrete.density = 2.4e-9;
+    concrete.young = sepika_core::section_shape::concrete_young_modulus(36.0);
+    model.sections[0].material = Some(concrete.id);
+    model.materials.push(concrete);
 
     let mut app = App::default();
     app.load_model(model);
@@ -8870,10 +8911,9 @@ fn test_preparation_member_stiffness_reports_composite_props() {
     assert_eq!(props.area_ax, c.area_ax);
 }
 
-/// SRC 断面の主材料に Fc が無いとき、材料由来の等価断面性能を算定できず既定値
-/// N_S_EQ=15 へフォールバックする。部材剛性表はその行と種別を表示する。
+/// SRC の必要な材料入力が欠けた場合は準備計算の成功結果を公開しない。
 #[test]
-fn test_preparation_member_stiffness_reports_src_fallback_without_fc() {
+fn test_preparation_rejects_src_without_fc() {
     use sepika_core::ids::SectionId;
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
 
@@ -8911,23 +8951,13 @@ fn test_preparation_member_stiffness_reports_src_fallback_without_fc() {
     app.load_model(model);
     app.run_preparation();
 
-    let prep = app.core.scoped.preparation.as_ref().unwrap();
-    let row = prep
-        .member_stiffness
-        .iter()
-        .find(|r| r.elem == sepika_core::ids::ElemId(0))
-        .expect("SRC フォールバックの行があるはず");
-    assert!(row.composite.is_none());
-    assert_eq!(
-        row.composite_fallback,
-        Some(CompositeFallbackKind::SrcNsDefault)
-    );
+    assert!(app.core.scoped.preparation.is_none());
+    assert!(app.core.scoped.last_error.as_ref().unwrap().contains("Fc"));
 }
 
-/// CFT 断面の主材料に Fc が無いとき、充填コンクリートを無視して鋼管のみで剛性を
-/// 評価する。部材剛性表はその行と種別を表示する。
+/// CFT の必要な材料入力が欠けた場合は準備計算の成功結果を公開しない。
 #[test]
-fn test_preparation_member_stiffness_reports_cft_fallback_without_fc() {
+fn test_preparation_rejects_cft_without_fc() {
     use sepika_core::ids::SectionId;
     use sepika_core::section_shape::SectionShape;
 
@@ -8946,27 +8976,24 @@ fn test_preparation_member_stiffness_reports_cft_fallback_without_fc() {
     };
     model.materials[0].fc = None;
 
+    let mut concrete = model.materials[0].clone();
+    concrete.id = sepika_core::ids::MaterialId(model.materials.len() as u32);
+    concrete.category = sepika_core::model::MaterialCategory::Concrete;
+    concrete.fy = None;
+    model.sections[0].material = Some(concrete.id);
+    model.materials.push(concrete);
+
     let mut app = App::default();
     app.load_model(model);
     app.run_preparation();
 
-    let prep = app.core.scoped.preparation.as_ref().unwrap();
-    let row = prep
-        .member_stiffness
-        .iter()
-        .find(|r| r.elem == sepika_core::ids::ElemId(0))
-        .expect("CFT フォールバックの行があるはず");
-    assert!(row.composite.is_none());
-    assert_eq!(
-        row.composite_fallback,
-        Some(CompositeFallbackKind::CftSteelOnly)
-    );
+    assert!(app.core.scoped.preparation.is_none());
+    assert!(app.core.scoped.last_error.as_ref().unwrap().contains("Fc"));
 }
 
-/// CFT では Fc とヤング係数が揃っていても、鋼管の板厚が過大で充填部の内法が 0 に
-/// なる形状では等価断面性能を算定できず、準備表は鋼管のみの種別を表示する。
+/// 内法が消えた CFT は鋼管のみへ読み替えず、寸法エラーを診断する。
 #[test]
-fn test_preparation_member_stiffness_reports_cft_fallback_for_zero_core() {
+fn test_preparation_rejects_cft_with_zero_core() {
     use sepika_core::ids::SectionId;
     use sepika_core::section_shape::SectionShape;
 
@@ -8982,7 +9009,8 @@ fn test_preparation_member_stiffness_reports_cft_fallback_for_zero_core() {
         frame_use: Some(sepika_core::model::FrameSectionUse::Column),
         material: Some(sepika_core::ids::MaterialId(0)),
         steel_material: Some(sepika_core::ids::MaterialId(0)),
-        ..cft.to_section(SectionId(0), "CFT-□400x400x200".into())
+        shape: Some(cft),
+        ..sepika_core::model::Section::zero(SectionId(0), "CFT-□400x400x200".into())
     };
     model.materials[0].fc = Some(36.0);
     model.materials[0].young = 205000.0;
@@ -8991,17 +9019,54 @@ fn test_preparation_member_stiffness_reports_cft_fallback_for_zero_core() {
     app.load_model(model);
     app.run_preparation();
 
-    let prep = app.core.scoped.preparation.as_ref().unwrap();
-    let row = prep
-        .member_stiffness
+    app.run_diagnostics();
+    assert!(app
+        .core
+        .scoped
+        .diagnostics
         .iter()
-        .find(|r| r.elem == sepika_core::ids::ElemId(0))
-        .expect("CFT フォールバックの行があるはず");
-    assert!(row.composite.is_none());
-    assert_eq!(
-        row.composite_fallback,
-        Some(CompositeFallbackKind::CftSteelOnly)
-    );
+        .any(|d| d.severity == DiagSeverity::Error && d.message.contains("内法")));
+}
+
+#[test]
+fn cft_ultimate_app_keeps_axial_result_and_rounded_mu_reason() {
+    use sepika_core::model::{FrameSectionUse, Material, MaterialCategory};
+    use sepika_core::section_shape::SectionShape;
+    let mut model = crate::sample::portal_frame();
+    let main_id = MaterialId(model.materials.len() as u32);
+    model.materials.push(Material {
+        id: main_id,
+        name: "Fc24".into(),
+        category: MaterialCategory::Concrete,
+        young: 25000.0,
+        poisson: 0.2,
+        density: 2.4e-9,
+        shear: None,
+        fc: Some(24.0),
+        fy: None,
+        concrete_class: Default::default(),
+        strength_factor: None,
+    });
+    let mut section = SectionShape::CftBox {
+        height: 400.0,
+        width: 300.0,
+        thick: 10.0,
+        corner_r: Some(30.0),
+    }
+    .to_section(SectionId(0), "CFT角R30".into());
+    section.frame_use = Some(FrameSectionUse::Column);
+    section.material = Some(main_id);
+    section.steel_material = Some(MaterialId(0));
+    model.sections[0] = section;
+    let mut app = App::default();
+    app.load_model(model);
+    let rows = app.compute_cft_ultimate_checks().unwrap();
+    assert!(!rows.is_empty());
+    for row in rows {
+        assert!(row.ncu > 0.0 && row.ntu > 0.0);
+        assert!(row.mu_nm.unwrap_err().contains("#418"));
+        assert!(row.detail.contains("未算定"));
+    }
 }
 
 /// 解析結果はプロジェクトファイル（.ovika）へ保存され、読込で復元される。
@@ -10251,6 +10316,81 @@ fn test_prune_orphan_vibration_cases() {
     };
     app.prune_orphan_vibration_cases();
     assert_eq!(app.core.model.vibration_cases.len(), 1);
+}
+
+#[test]
+fn rounded_partial_supplied_story_action_does_not_apply_dl_mass_or_success() {
+    use sepika_core::model::PropertyBasis;
+    use sepika_core::section_shape::SectionShape;
+    let mut app = App::default();
+    app.load_model(crate::sample::portal_frame());
+    let id = SectionId(app.core.model.sections.len() as u32);
+    let mut sec = SectionShape::SteelH {
+        height: 400.0,
+        width: 200.0,
+        web_thick: 8.0,
+        flange_thick: 13.0,
+        root_r: None,
+    }
+    .input_section(id, "未知H".into())
+    .unwrap();
+    sec.material = app.core.model.sections[0].material;
+    sec.area = 8184.0;
+    sec.property_basis.area = PropertyBasis::Supplied;
+    app.core.model.sections.push(sec);
+    app.core.model.elements.last_mut().unwrap().section = Some(id);
+    let before = app.core.model.clone();
+    app.generate_stories_action();
+    let error = app.core.scoped.last_error.as_ref().expect("理由付き失敗");
+    assert!(error.contains("フィレット"), "{error}");
+    assert_eq!(app.core.model.load_cases, before.load_cases);
+    assert_eq!(app.core.model.stories, before.stories);
+    assert_eq!(app.core.model.nodes, before.nodes);
+    assert!(app.core.scoped.results.is_none());
+    assert!(app.core.scoped.auto_load_sync_hash.is_none());
+    assert!(sepika_solver::statics::analysis::Analysis::prepare(&app.core.model).is_err());
+    app.core.model.elements.last_mut().unwrap().section = before.elements[0].section;
+    for original in [2, 3] {
+        let mut node = app.core.model.nodes[original].clone();
+        node.id = NodeId(app.core.model.nodes.len() as u32);
+        node.coord[1] = 4000.0;
+        app.core.model.nodes.push(node);
+    }
+    let mut support = app.core.model.elements.last().unwrap().clone();
+    support.id = ElemId(3);
+    support.nodes = [NodeId(4), NodeId(5)].into_iter().collect();
+    app.core.model.elements.push(support);
+    app.core
+        .model
+        .unassigned_beams
+        .push(sepika_core::model::SecondaryMember {
+            id: sepika_core::ids::SecondaryMemberId(0),
+            section: Some(id),
+            ends: sepika_core::model::SecondaryMemberEnds::Supported([
+                sepika_core::model::SecondaryMemberAnchor {
+                    support: sepika_core::model::SupportMemberId::Primary(ElemId(2)),
+                    position: 0.5,
+                },
+                sepika_core::model::SecondaryMemberAnchor {
+                    support: sepika_core::model::SupportMemberId::Primary(ElemId(3)),
+                    position: 0.5,
+                },
+            ]),
+            ..Default::default()
+        });
+    let before = app.core.model.clone();
+    app.generate_stories_action();
+    let error = app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .expect("二次質量の理由付き失敗");
+    assert!(error.contains("フィレット"), "{error}");
+    assert_eq!(app.core.model.load_cases, before.load_cases);
+    assert_eq!(app.core.model.stories, before.stories);
+    assert_eq!(app.core.model.nodes, before.nodes);
+    assert!(app.core.scoped.results.is_none());
 }
 
 /// 古い結果のまま保存すると、振動ケースもファイルへ書かない。

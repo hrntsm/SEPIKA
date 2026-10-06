@@ -83,6 +83,7 @@ fn portal_frame(rigid: f64, seismic_weight: f64) -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }
     };
     Model {

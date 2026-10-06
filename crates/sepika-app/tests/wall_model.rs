@@ -222,6 +222,7 @@ fn wall_bay_model() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     // 断面: 耐震壁の側柱・上下大梁（柱 0・1 → id 3、大梁 4-5・0-1 → id 4）。
     // 壁エレメントは壁と周辺架構を一体の耐震要素としてモデル化するため、
@@ -349,6 +350,7 @@ fn wall_bay_model() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     for sec in model.sections.iter_mut().take(2) {
         sec.material = Some(MaterialId(0));
@@ -597,12 +599,23 @@ fn rotated_src_and_cft_side_columns_run_linear_analysis() {
                 steel_flange_thick: 20.0,
             }
         };
-        app.core.model.sections[3].shape = Some(shape);
-        app.core.model.sections[3].steel_material = Some(MaterialId(0));
+        let old = app.core.model.sections[3].clone();
+        let mut section = shape.to_section(old.id, old.name.clone());
+        section.frame_use = old.frame_use;
+        section.floor = old.floor;
+        section.material = old.material;
+        section.rebar_material = old.rebar_material;
+        section.shear_rebar_material = old.shear_rebar_material;
+        section.steel_material = Some(MaterialId(0));
+        app.core.model.sections[3] = section;
         if cft {
             let mut material = app.core.model.materials[0].clone();
             material.id = MaterialId(app.core.model.materials.len() as u32);
             material.fc = Some(30.0);
+            material.category = MaterialCategory::Concrete;
+            material.name = "Fc30".into();
+            material.young = sepika_core::section_shape::concrete_young_modulus(30.0);
+            material.density = 2.4e-9;
             app.core.model.sections[3].material = Some(material.id);
             app.core.model.materials.push(material);
         }
@@ -620,6 +633,77 @@ fn rotated_src_and_cft_side_columns_run_linear_analysis() {
         );
         assert!(app.core.scoped.results.is_some());
     }
+}
+
+#[test]
+fn wall_fixture_weight_change_is_the_independent_fillet_area_increment() {
+    let mut actual = wall_bay_app();
+    let mut baseline = wall_bay_app();
+    let mut area_deltas = std::collections::HashMap::new();
+    for section in &mut baseline.core.model.sections {
+        if let Some(SectionShape::SteelH {
+            height,
+            width,
+            web_thick,
+            flange_thick,
+            root_r: Some(r),
+        }) = section.shape
+        {
+            let old_area = 2.0 * width * flange_thick + (height - 2.0 * flange_thick) * web_thick;
+            let delta = (4.0 - std::f64::consts::PI) * r * r;
+            assert!((section.area - old_area - delta).abs() < 1.0e-8);
+            area_deltas.insert(section.id, delta);
+            section.area = old_area;
+            section.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
+        }
+    }
+    let expected: f64 = actual
+        .core
+        .model
+        .elements
+        .iter()
+        .filter_map(|elem| {
+            let share = elem
+                .nodes
+                .iter()
+                .filter(|id| actual.core.model.nodes[id.index()].coord[2] > 0.0)
+                .count() as f64
+                / elem.nodes.len() as f64;
+            Some(
+                area_deltas.get(&elem.section?)?
+                    * actual.core.model.member_length(elem)
+                    * 78.5e-6
+                    * share,
+            )
+        })
+        .sum();
+    actual.run_preparation();
+    baseline.run_preparation();
+    assert!(actual.core.scoped.last_error.is_none());
+    assert!(baseline.core.scoped.last_error.is_none());
+    let new_weight = actual
+        .core
+        .scoped
+        .preparation
+        .as_ref()
+        .unwrap()
+        .summary
+        .total_seismic_weight;
+    let old_weight = baseline
+        .core
+        .scoped
+        .preparation
+        .as_ref()
+        .unwrap()
+        .summary
+        .total_seismic_weight;
+    assert!(
+        (new_weight - old_weight - expected).abs() < 1.0e-7,
+        "角丸={new_weight}, 直角={old_weight}, 実差={}, 独立差={expected}, cfg={:?}",
+        new_weight - old_weight,
+        actual.core.model.load_cfg
+    );
+    eprintln!("壁モデルの総重量: 角丸={new_weight:.12e} N, 直角面積={old_weight:.12e} N, 独立差={expected:.12e} N");
 }
 
 /// `App::run_design_check` が壁展開モデルを見ていることの回帰テスト（申し送り

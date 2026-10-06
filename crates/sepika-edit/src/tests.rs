@@ -609,7 +609,14 @@ fn surface_radius_edit_preserves_properties_and_undo() {
         },
     ] {
         let mut model = empty_model();
-        let mut section = shape.to_section(SectionId(0), "半径編集".into());
+        let mut section = sepika_core::model::Section {
+            area: 123.0,
+            iy: 456.0,
+            iz: 789.0,
+            j: 321.0,
+            shape: Some(shape),
+            ..sepika_core::model::Section::zero(SectionId(0), "フィレット半径・角R編集".into())
+        };
         section.material = Some(MaterialId(3));
         section.steel_material = Some(MaterialId(4));
         section.floor = Some("2F".into());
@@ -663,6 +670,102 @@ fn surface_radius_edit_preserves_properties_and_undo() {
         stack.undo(&mut model);
         stack.undo(&mut model);
         assert_eq!(model.sections[0].shape, old.shape);
+    }
+}
+
+#[test]
+fn radius_edit_updates_only_shape_properties_and_restores_basis() {
+    use sepika_core::model::PropertyBasis;
+    use sepika_core::section_shape::SectionShape;
+    for shape in [
+        SectionShape::SteelH {
+            height: 400.0,
+            width: 200.0,
+            web_thick: 9.0,
+            flange_thick: 12.0,
+            root_r: Some(0.0),
+        },
+        SectionShape::SteelBox {
+            height: 400.0,
+            width: 300.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        },
+        SectionShape::CftBox {
+            height: 400.0,
+            width: 300.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        },
+    ] {
+        let mut section = shape.to_section(SectionId(0), "C1".into());
+        section.material = Some(MaterialId(2));
+        section.rebar_material = Some(MaterialId(3));
+        section.shear_rebar_material = Some(MaterialId(4));
+        section.steel_material = Some(MaterialId(5));
+        section.floor = Some("2F".into());
+        section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+        let original = section.clone();
+        let mut model = empty_model();
+        model.sections.push(section);
+        let mut stack = UndoStack::new();
+        assert!(stack.run(
+            &mut model,
+            Box::new(SetSectionField {
+                id: SectionId(0),
+                field: SectionField::Area,
+                value: 123.0
+            })
+        ));
+        let direct = model.sections[0].clone();
+        assert_eq!(direct.property_basis.area, PropertyBasis::Supplied);
+        assert_eq!(direct.property_basis.iy, PropertyBasis::Shape);
+        assert!(stack.run(
+            &mut model,
+            Box::new(SetSectionSurfaceRadius {
+                section: SectionId(0),
+                radius_mm: Some(20.0)
+            })
+        ));
+        let changed = model.sections[0].clone();
+        let expected = changed
+            .shape
+            .as_ref()
+            .unwrap()
+            .rounded_steel_properties()
+            .unwrap()
+            .unwrap();
+        assert_eq!(changed.area, 123.0);
+        assert_eq!(changed.iy, expected.iy);
+        assert_eq!(changed.iz, expected.iz);
+        assert_eq!(changed.property_basis, direct.property_basis);
+        assert_eq!(changed.material, original.material);
+        assert_eq!(changed.rebar_material, original.rebar_material);
+        assert_eq!(changed.shear_rebar_material, original.shear_rebar_material);
+        assert_eq!(changed.steel_material, original.steel_material);
+        assert_eq!(changed.floor, original.floor);
+        assert_eq!(changed.frame_use, original.frame_use);
+        assert!(changed.with_surface_radius(None).is_err());
+        stack.undo(&mut model);
+        assert_eq!(model.sections[0], direct);
+        stack.undo(&mut model);
+        assert_eq!(model.sections[0], original);
+        stack.redo(&mut model);
+        stack.redo(&mut model);
+        assert_eq!(model.sections[0], changed);
+        let expected = changed.with_surface_radius(Some(25.0)).unwrap();
+        assert!(stack.run(
+            &mut model,
+            Box::new(EditSectionShape {
+                section: SectionId(0),
+                new_shape: expected.shape.clone().unwrap(),
+                frame_use: changed.frame_use,
+            })
+        ));
+        assert_eq!(model.sections[0], expected);
+        assert_eq!(model.sections[0].area, 123.0);
+        stack.undo(&mut model);
+        assert_eq!(model.sections[0], changed);
     }
 }
 
@@ -1112,6 +1215,7 @@ fn bare_section(id: SectionId, material: Option<MaterialId>) -> sepika_core::mod
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     }
 }
 
@@ -1183,6 +1287,7 @@ fn test_delete_section_in_use_is_noop_and_renumbers() {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         });
     }
     // 部材 0 に断面 1 を割当（断面 0 は未使用）
@@ -1246,6 +1351,7 @@ fn test_delete_section_referenced_by_beam() {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         });
     }
     // 二次部材小梁が断面 1 のみを参照する床領域（要素は断面を参照しない）。
@@ -2847,6 +2953,7 @@ fn model_with_enclosed_wall_plate() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
@@ -4100,6 +4207,7 @@ fn test_delete_section_material_shift_and_guard_secondary_refs() {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         });
         model.materials.push(Material {
             id: MaterialId(i),
@@ -5736,6 +5844,7 @@ fn push_steel_section(model: &mut Model) -> SectionId {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     id
 }
@@ -5983,6 +6092,7 @@ fn set_floor_region_beam_section() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model.floor_regions.push(FloorRegion::new(
         FloorRegionId(0),
@@ -6365,6 +6475,7 @@ fn set_wall_region_post_section_accepts_steel() {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     });
     model
         .wall_regions

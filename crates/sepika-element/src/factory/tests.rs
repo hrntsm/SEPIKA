@@ -59,6 +59,7 @@ fn make_diaphragm_model() -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -294,6 +295,7 @@ fn make_brace_model(tension_only: bool) -> (Model, ElementData) {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -401,6 +403,7 @@ fn test_build_behavior_wall_opening_reduces_shear_stiffness() {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,

@@ -675,13 +675,24 @@ fn sections_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                 ui.label(format!("{:.0} × {:.0}", r.depth, r.width));
             });
             row.col(|ui| {
-                ui.label(crate::table_util::fmt_section_prop(area_cm2(r.area)));
+                ui.label(
+                    r.area
+                        .map(|v| crate::table_util::fmt_section_prop(area_cm2(v)))
+                        .unwrap_or_else(|| "未算定".into()),
+                )
+                .on_hover_text(r.unavailable_reason.as_deref().unwrap_or(""));
             });
             row.col(|ui| {
-                ui.label(crate::table_util::fmt_section_prop(inertia_cm4(r.iy)));
+                ui.label(
+                    r.iy.map(|v| crate::table_util::fmt_section_prop(inertia_cm4(v)))
+                        .unwrap_or_else(|| "未算定".into()),
+                );
             });
             row.col(|ui| {
-                ui.label(crate::table_util::fmt_section_prop(inertia_cm4(r.iz)));
+                ui.label(
+                    r.iz.map(|v| crate::table_util::fmt_section_prop(inertia_cm4(v)))
+                        .unwrap_or_else(|| "未算定".into()),
+                );
             });
             row.col(|ui| {
                 ui.label(crate::table_util::fmt_section_prop(inertia_cm4(r.j)));
@@ -694,7 +705,13 @@ fn sections_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                 ));
             });
             row.col(|ui| {
-                ui.label(format!("{:.1} / {:.1}", r.ry, r.rz));
+                ui.label(format!(
+                    "{} / {}",
+                    r.ry.map(|v| format!("{v:.1}"))
+                        .unwrap_or_else(|| "未算定".into()),
+                    r.rz.map(|v| format!("{v:.1}"))
+                        .unwrap_or_else(|| "未算定".into())
+                ));
             });
             row.col(|ui| match (&r.material, r.young) {
                 (Some(m), Some(e)) => {

@@ -87,9 +87,10 @@ pub(crate) fn compute_design_check_job(
     let mut n_checks = 0usize;
     let mut n_ng = 0usize;
     let mut n_skipped = 0usize;
+    let mut member_skipped = Vec::new();
     let mut max_ratio = 0.0_f64;
 
-    for (_, _, outcome) in &report.member_checks {
+    for (elem, pos, outcome) in &report.member_checks {
         n_checks += 1;
         match outcome {
             sepika_design_jp::CheckOutcome::Checked(cr) => {
@@ -100,8 +101,10 @@ pub(crate) fn compute_design_check_job(
                     max_ratio = cr.ratio();
                 }
             }
-            sepika_design_jp::CheckOutcome::Skipped { .. } => {
+            sepika_design_jp::CheckOutcome::Skipped { reason } => {
                 n_skipped += 1;
+                member_skipped
+                    .push(serde_json::json!({"elem": elem.0, "position": pos, "reason": reason}));
             }
         }
     }
@@ -141,6 +144,8 @@ pub(crate) fn compute_design_check_job(
         "n_checks": n_checks,
         "n_ng": n_ng,
         "n_skipped": n_skipped,
+        "member_skipped": member_skipped,
+        "all_members_checked_and_ok": n_checks > 0 && n_skipped == 0 && n_ng == 0,
         "n_joint_checks": n_joint_checks,
         "n_joint_ng": n_joint_ng,
         "n_joint_skipped": n_joint_skipped,

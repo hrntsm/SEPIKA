@@ -311,13 +311,31 @@ pub fn sections_table(ui: &mut egui::Ui, app: &mut App) {
                 ui.label(format!("{:.0} × {:.0}", sec.depth, sec.width));
             });
             row.col(|ui| {
-                ui.label(table_util::fmt_section_prop(to_cm2(sec.area)));
+                ui.label(
+                    if sec.property_basis.area == sepika_core::model::PropertyBasis::PendingShape {
+                        "未算定".into()
+                    } else {
+                        table_util::fmt_section_prop(to_cm2(sec.area))
+                    },
+                );
             });
             row.col(|ui| {
-                ui.label(table_util::fmt_section_prop(to_cm4(sec.iy)));
+                ui.label(
+                    if sec.property_basis.iy == sepika_core::model::PropertyBasis::PendingShape {
+                        "未算定".into()
+                    } else {
+                        table_util::fmt_section_prop(to_cm4(sec.iy))
+                    },
+                );
             });
             row.col(|ui| {
-                ui.label(table_util::fmt_section_prop(to_cm4(sec.iz)));
+                ui.label(
+                    if sec.property_basis.iz == sepika_core::model::PropertyBasis::PendingShape {
+                        "未算定".into()
+                    } else {
+                        table_util::fmt_section_prop(to_cm4(sec.iz))
+                    },
+                );
             });
             row.col(|ui| {
                 ui.label(table_util::fmt_section_prop(to_cm4(sec.j)));

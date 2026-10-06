@@ -37,7 +37,7 @@ pub struct SectionEditorDraft {
     pub tw: f64,
     pub tf: f64,
     pub t: f64,
-    /// 被覆外周用半径 [mm]。None は未知。
+    /// H のフィレット半径、角形鋼管・角形 CFT の角R [mm]。None は未知。
     pub r: Option<f64>,
     pub lip: f64,
     pub upper_width: f64,
@@ -321,18 +321,16 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
         };
         Some((sec.id, radius, sec.shape.clone()?))
     });
-    if let Some((section, mut radius, mut shape)) = focused_radius {
+    if let Some((section, mut radius, shape)) = focused_radius {
         ui.horizontal(|ui| {
-            ui.label("選択断面の被覆外周用半径 [mm]（0＝直角）");
+            ui.label(if matches!(shape, SectionShape::SteelH { .. }) {
+                "選択断面のフィレット半径 [mm]（0＝直角）"
+            } else {
+                "選択断面の角R [mm]（0＝直角）"
+            });
             if radius_field(ui, &mut radius) {
-                match &mut shape {
-                    SectionShape::SteelH { root_r, .. } => *root_r = radius,
-                    SectionShape::SteelBox { corner_r, .. }
-                    | SectionShape::CftBox { corner_r, .. } => *corner_r = radius,
-                    _ => {}
-                }
-                match shape.validate_surface_radius() {
-                    Ok(()) => {
+                match app.core.model.sections[section.index()].with_surface_radius(radius) {
+                    Ok(_) => {
                         app.core.scoped.undo.run(
                             &mut app.core.model,
                             Box::new(SetSectionSurfaceRadius {
@@ -430,18 +428,21 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
         ui.separator();
 
         let shape = build_shape(draft);
-        let rebar_validation = shape.validate_rebar().map_err(|e| e.to_string()).and_then(|()| shape.validate_surface_radius());
+        let rebar_validation = shape.validate_rebar().map_err(|e| e.to_string())
+            .and_then(|()| shape.rounded_steel_properties().map(|_| ()));
         if let Err(error) = &rebar_validation {
             ui.colored_label(egui::Color32::RED, format!("断面入力エラー: {error}"));
         }
-        let sec = shape.to_section(
+        let sec = shape.try_to_section(
             SectionId(app.core.model.sections.len() as u32),
             draft.name.clone(),
         );
-        ui.label(format!(
+        if let Ok(sec) = sec {
+            ui.label(format!(
             "算定: A = {:.3e} mm²   Iy = {:.3e} mm⁴   Iz = {:.3e} mm⁴   J = {:.3e} mm⁴",
             sec.area, sec.iy, sec.iz, sec.j
-        ));
+            ));
+        }
 
         ui.separator();
 
@@ -611,7 +612,7 @@ fn steel_h_fields(ui: &mut egui::Ui, d: &mut SectionEditorDraft) {
         num_field(ui, &mut d.tw);
         ui.label("tf:");
         num_field(ui, &mut d.tf);
-        ui.label("ルート半径 [mm]（0＝直角）:");
+        ui.label("フィレット半径 [mm]（0＝直角）:");
         radius_field(ui, &mut d.r);
     });
 }
@@ -624,14 +625,14 @@ fn steel_box_fields(ui: &mut egui::Ui, d: &mut SectionEditorDraft) {
         num_field(ui, &mut d.b);
         ui.label("t 板厚:");
         num_field(ui, &mut d.t);
-        ui.label("r 角部半径:");
+        ui.label("角R [mm]（0＝直角）:");
         radius_field(ui, &mut d.r);
     });
 }
 
 fn radius_field(ui: &mut egui::Ui, radius: &mut Option<f64>) -> bool {
     let mut known = radius.is_some();
-    let mut changed = ui.checkbox(&mut known, "半径既知").changed();
+    let mut changed = ui.checkbox(&mut known, "寸法既知").changed();
     if changed {
         *radius = known.then_some(0.0);
     }
@@ -1175,12 +1176,20 @@ mod tests {
 
     #[test]
     fn test_to_section_preview_matches_drafted_shape() {
-        let d = SectionEditorDraft::default();
-        let s = build_shape(&d);
-        let sec = s.to_section(SectionId(0), "test".into());
-        // H 400x200x8x12 の A は閉形式
-        let expected = 2.0 * 200.0 * 12.0 + (400.0 - 24.0) * 8.0;
-        assert!((sec.area - expected).abs() < 1e-9);
+        let mut d = SectionEditorDraft::default();
+        assert!(build_shape(&d)
+            .try_to_section(SectionId(0), "未知".into())
+            .unwrap_err()
+            .contains("フィレット半径が未知"));
+        for r in [0.0, 13.0] {
+            d.r = Some(r);
+            let sec = build_shape(&d)
+                .try_to_section(SectionId(0), "test".into())
+                .unwrap();
+            let expected =
+                2.0 * 200.0 * 12.0 + (400.0 - 24.0) * 8.0 + (4.0 - std::f64::consts::PI) * r * r;
+            assert!((sec.area - expected).abs() < 1e-9);
+        }
     }
 
     /// 「選択断面へ適用」ボタンが発行する `EditSectionShape` を undo.run 経由で
@@ -1192,7 +1201,10 @@ mod tests {
         use sepika_edit::UndoStack;
 
         // 既存断面（H 400x200x8x12）を用意
-        let old_draft = SectionEditorDraft::default();
+        let old_draft = SectionEditorDraft {
+            r: Some(13.0),
+            ..Default::default()
+        };
         let old_shape = build_shape(&old_draft);
         let sid = SectionId(0);
         let old_sec = old_shape.to_section(sid, "既存断面".to_string());
@@ -1203,6 +1215,7 @@ mod tests {
 
         // フォーム（draft）で寸法を変更 → 断面編集パネルの「適用」と同じ経路で shape を構築
         let new_draft = SectionEditorDraft {
+            r: Some(20.0),
             h: 500.0,
             b: 250.0,
             tw: 10.0,

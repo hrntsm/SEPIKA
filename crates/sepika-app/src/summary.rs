@@ -632,27 +632,34 @@ pub fn build_preparation_csv(app: &App) -> String {
 
     if !p.sections.is_empty() {
         out.push_str(
-            "\n[断面性能]\n断面ID,断面,形状,部材数,D[mm],B[mm],A[mm2],Iy[mm4],Iz[mm4],J[mm4],Asy[mm2],Asz[mm2],iy[mm],iz[mm],材料,E[N/mm2]\n",
+            "\n[断面性能]\n断面ID,断面,形状,部材数,D[mm],B[mm],A[mm2],Iy[mm4],Iz[mm4],J[mm4],Asy[mm2],Asz[mm2],iy[mm],iz[mm],材料,E[N/mm2],未算定理由\n",
         );
         for r in &p.sections {
             out.push_str(&format!(
-                "{},{},{},{},{:.1},{:.1},{:.1},{:.4e},{:.4e},{:.4e},{:.1},{:.1},{:.2},{:.2},{},{}\n",
+                "{},{},{},{},{:.1},{:.1},{},{},{},{:.4e},{:.1},{:.1},{},{},{},{},{}\n",
                 r.section.0,
                 r.name,
                 r.shape_label.as_deref().unwrap_or("数値直入力"),
                 r.n_elements,
                 r.depth,
                 r.width,
-                r.area,
-                r.iy,
-                r.iz,
+                r.area
+                    .map(|v| format!("{v:.1}"))
+                    .unwrap_or_else(|| "未算定".into()),
+                r.iy.map(|v| format!("{v:.4e}"))
+                    .unwrap_or_else(|| "未算定".into()),
+                r.iz.map(|v| format!("{v:.4e}"))
+                    .unwrap_or_else(|| "未算定".into()),
                 r.j,
                 r.as_y,
                 r.as_z,
-                r.ry,
-                r.rz,
+                r.ry.map(|v| format!("{v:.2}"))
+                    .unwrap_or_else(|| "未算定".into()),
+                r.rz.map(|v| format!("{v:.2}"))
+                    .unwrap_or_else(|| "未算定".into()),
                 r.material.as_deref().unwrap_or(""),
                 r.young.map(|e| format!("{:.0}", e)).unwrap_or_default(),
+                r.unavailable_reason.as_deref().unwrap_or(""),
             ));
         }
     }
@@ -739,9 +746,12 @@ pub fn build_preparation_csv(app: &App) -> String {
 /// （[`sepika_design_jp::quantity::compute_quantity_takeoff`]）を、
 /// 部位別・階別・鉄骨種類別・鉄筋径別・明細・注記のセクションに整形する。
 pub fn build_quantity_csv(model: &Model) -> String {
-    use sepika_design_jp::quantity::{compute_quantity_takeoff, QuantityCfg};
+    use sepika_design_jp::quantity::{try_compute_quantity_takeoff, QuantityCfg};
 
-    let q = compute_quantity_takeoff(model, &QuantityCfg::default());
+    let q = match try_compute_quantity_takeoff(model, &QuantityCfg::default()) {
+        Ok(q) => q,
+        Err(reason) => return format!("[数量積算 未算定]\n理由\n{reason}\n"),
+    };
     let mut out = String::new();
     if q.items.is_empty() {
         return out;

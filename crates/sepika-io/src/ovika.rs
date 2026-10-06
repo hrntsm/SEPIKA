@@ -289,9 +289,11 @@ mod tests {
                 },
             ] {
                 let id = SectionId(model.sections.len() as u32);
-                model
-                    .sections
-                    .push(shape.to_section(id, format!("半径{}", id.0)));
+                model.sections.push(
+                    shape
+                        .input_section(id, format!("フィレット半径・角R{}", id.0))
+                        .unwrap(),
+                );
             }
         }
         let path = crate::test_util::test_tmp().join("surface_radii.ovika");
@@ -685,6 +687,43 @@ mod tests {
         assert_eq!(back.unassigned_posts, model.unassigned_posts);
         assert!(model.eq_ignoring_dofmap(&back));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn property_basis_roundtrip_keeps_individual_inputs_and_radius_updates() {
+        use sepika_core::ids::SectionId;
+        use sepika_core::model::{PropertyBasis, SectionPropertyBasis};
+        use sepika_core::section_shape::SectionShape;
+        let shape = SectionShape::SteelH {
+            height: 400.0,
+            width: 200.0,
+            web_thick: 9.0,
+            flange_thick: 12.0,
+            root_r: Some(13.0),
+        };
+        let mut section = shape.to_section(SectionId(0), "G1".into());
+        section.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+        section.area = 123.0;
+        section.property_basis.area = PropertyBasis::Supplied;
+        let mut supplied = section.clone();
+        supplied.id = SectionId(1);
+        supplied.name = "入力値".into();
+        supplied.property_basis = SectionPropertyBasis::default();
+        let mut model = make_rich_model();
+        model.sections = vec![section.clone(), supplied.clone()];
+        let dir = crate::test_util::test_tmp();
+        let path = dir.join("individual_property_basis.ovika");
+        save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+        let loaded = load_ovika(&path).unwrap().model;
+        assert_eq!(loaded.sections, model.sections);
+        let updated = loaded.sections[0].with_surface_radius(Some(20.0)).unwrap();
+        assert_eq!(updated.area, 123.0);
+        assert_ne!(updated.iy, section.iy);
+        assert_ne!(updated.iz, section.iz);
+        let updated = loaded.sections[1].with_surface_radius(None).unwrap();
+        assert_eq!(updated.area, supplied.area);
+        assert_eq!(updated.iy, supplied.iy);
+        assert_eq!(updated.iz, supplied.iz);
     }
 
     #[test]

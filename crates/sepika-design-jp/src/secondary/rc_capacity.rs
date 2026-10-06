@@ -84,6 +84,7 @@ mod tests {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         };
         // 引張側 z = +(d_eff - D/2)、圧縮側 z = -(d_eff - D/2)（上下対称配置、断面積同一）。
         let z_tension = d_eff - d_total / 2.0;

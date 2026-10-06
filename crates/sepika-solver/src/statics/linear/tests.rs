@@ -94,6 +94,7 @@ fn simply_supported_udl_midspan_moment() {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -215,6 +216,7 @@ fn ss_beam(l: f64, member: Vec<MemberLoad>) -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -399,6 +401,7 @@ fn make_axial_cantilever() -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -665,6 +668,7 @@ fn test_linear_static_vertical_cantilever_bending() {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -786,6 +790,7 @@ fn test_shell_rigid_floor_membrane_off() {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -933,6 +938,7 @@ fn make_ss_plate(n: usize, a: f64, t: f64, e: f64, nu: f64, q: f64, clamped: boo
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,
@@ -1040,6 +1046,7 @@ fn braced_frame(kind: sepika_core::model::LoadCaseKind) -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mat = Material {
         strength_factor: None,
@@ -1182,6 +1189,7 @@ fn column_with_parallel_vertical_brace() -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mat = Material {
         strength_factor: None,
@@ -1511,6 +1519,7 @@ fn tension_only_portal(fx: f64, tension_only: bool) -> Model {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     };
     let mat = Material {
         strength_factor: None,
@@ -1718,6 +1727,7 @@ fn rigid_floor_portal(with_rigid_floor: bool) -> Model {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }],
         materials: vec![Material {
             strength_factor: None,

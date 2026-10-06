@@ -226,6 +226,23 @@ mod surface_radius_tests {
     use crate::LoadTerm;
     use sepika_core::ids::SectionId;
 
+    fn supplied_box_section(radius: Option<f64>, name: &str) -> Section {
+        Section {
+            area: 400.0 * 300.0 - 376.0 * 276.0,
+            iy: (300.0 * 400.0_f64.powi(3) - 276.0 * 376.0_f64.powi(3)) / 12.0,
+            iz: (400.0 * 300.0_f64.powi(3) - 376.0 * 276.0_f64.powi(3)) / 12.0,
+            depth: 400.0,
+            width: 300.0,
+            shape: Some(SectionShape::SteelBox {
+                height: 400.0,
+                width: 300.0,
+                thick: 12.0,
+                corner_r: radius,
+            }),
+            ..Section::zero(SectionId(0), name.into())
+        }
+    }
+
     #[test]
     fn box_shear_requires_known_radius_for_girders_and_columns() {
         let forces = MemberForcesAt {
@@ -245,13 +262,7 @@ mod surface_radius_tests {
                 ..Default::default()
             };
             for radius in [None, Some(0.0), Some(60.0), Some(150.0)] {
-                let section = SectionShape::SteelBox {
-                    height: 400.0,
-                    width: 300.0,
-                    thick: 12.0,
-                    corner_r: radius,
-                }
-                .to_section(SectionId(0), "BOX半径検証".into());
+                let section = supplied_box_section(radius, "BOX半径検証");
                 let outcome = SteelDesign.check(&forces, &section, &material, &ctx);
                 match radius {
                     None => match outcome {
@@ -300,13 +311,7 @@ mod surface_radius_tests {
                 150.1,
                 300.0,
             ] {
-                let section = SectionShape::SteelBox {
-                    height: 400.0,
-                    width: 300.0,
-                    thick: 12.0,
-                    corner_r: Some(r),
-                }
-                .to_section(SectionId(0), "BOX不正半径検証".into());
+                let section = supplied_box_section(Some(r), "BOX不正半径検証");
                 match SteelDesign.check(&forces, &section, &material, &ctx) {
                     CheckOutcome::Skipped { reason } => {
                         assert!(reason.contains("BOX不正半径検証"));
@@ -321,13 +326,7 @@ mod surface_radius_tests {
 
     #[test]
     fn axial_only_brace_does_not_require_surface_radius() {
-        let section = SectionShape::SteelBox {
-            height: 400.0,
-            width: 300.0,
-            thick: 12.0,
-            corner_r: None,
-        }
-        .to_section(SectionId(0), "BOXブレース".into());
+        let section = supplied_box_section(None, "BOXブレース");
         let forces = MemberForcesAt {
             pos: 0.5,
             n: 100_000.0,
@@ -392,6 +391,7 @@ pub(crate) mod test_support {
             rebar_material: None,
             shear_rebar_material: None,
             steel_material: None,
+            property_basis: Default::default(),
         }
     }
 

@@ -23,12 +23,13 @@ pub(crate) use crate::rc::{shear_alpha, AxisProps as SrcAxisProps};
 /// 内蔵鋼材の断面積・断面係数を [`SectionShape`] の断面性能計算を借りて
 /// 求める（H 形鋼: `sA`, 強軸 `sZ`, 弱軸 `sZ`）。
 fn steel_h_props(height: f64, width: f64, web_thick: f64, flange_thick: f64) -> (f64, f64, f64) {
-    let shape = SectionShape::SteelH {
-        root_r: None,
+    let shape = SectionShape::SteelBuiltH {
         height,
-        width,
+        upper_width: width,
+        lower_width: width,
+        upper_thick: flange_thick,
+        lower_thick: flange_thick,
         web_thick,
-        flange_thick,
     };
     let a = shape.calc_area();
     let iy = shape.calc_iy();

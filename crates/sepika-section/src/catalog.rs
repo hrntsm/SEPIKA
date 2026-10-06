@@ -77,7 +77,7 @@ pub struct CatalogEntry {
     pub iz: f64,
     /// ねじり定数 [mm⁴]
     pub j: f64,
-    /// 被覆外周用の半径 [mm]。H はルートフィレット、Box は外角半径。
+    /// H のフィレット半径、Box の角R [mm]。
     pub radius: Option<f64>,
 }
 
@@ -138,6 +138,7 @@ pub fn to_section(entry: &CatalogEntry, id: SectionId) -> Section {
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
+        property_basis: Default::default(),
     }
 }
 

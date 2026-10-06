@@ -29,8 +29,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use sepika_core::ids::{ElemId, SlabId};
 use sepika_core::model::{
-    ElementData, ElementKind, Model, RegionAnchor, SecondaryMember, SecondaryMemberKind, Slab,
-    WallPlate, WallPlateShape,
+    ElementData, ElementKind, Model, RegionAnchor, SecondaryMember, SecondaryMemberKind, Section,
+    Slab, WallPlate, WallPlateShape,
 };
 use sepika_core::section_shape::{
     RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar, SectionShape,
@@ -361,19 +361,63 @@ fn src_steel_area(shape: &SectionShape) -> Option<f64> {
 
 /// CFT の充填コンクリート断面積 [mm²]。
 fn cft_infill_area(shape: &SectionShape) -> Option<f64> {
-    match *shape {
-        SectionShape::CftBox {
-            height,
-            width,
-            thick,
-            ..
-        } => Some(((width - 2.0 * thick) * (height - 2.0 * thick)).max(0.0)),
-        SectionShape::CftPipe { outer_dia, thick } => {
-            let ri = (outer_dia / 2.0 - thick).max(0.0);
-            Some(std::f64::consts::PI * ri * ri)
+    shape.cft_core_props().map(|core| core.area)
+}
+
+fn quantity_area(section: &Section) -> Result<f64, String> {
+    let Some(shape) = &section.shape else {
+        return section.resolved_area();
+    };
+    shape.validate_surface_radius()?;
+    match shape.try_calc_area() {
+        Ok(area) => Ok(area),
+        Err(_)
+            if matches!(
+                shape,
+                SectionShape::SteelH { root_r: None, .. }
+                    | SectionShape::SteelBox { corner_r: None, .. }
+            ) && section.property_basis.area == sepika_core::model::PropertyBasis::Supplied =>
+        {
+            section.resolved_area()
         }
-        _ => None,
+        Err(error) => Err(error),
     }
+}
+
+/// 必要な材料領域が未知・不正の場合は理由付きエラー。未参照断面の未入力は許容する。
+pub fn try_compute_quantity_takeoff(
+    model: &Model,
+    cfg: &QuantityCfg,
+) -> Result<QuantityTakeoff, String> {
+    let ids: HashSet<_> = model
+        .elements
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.kind,
+                ElementKind::Beam
+                    | ElementKind::Brace { .. }
+                    | ElementKind::Shell
+                    | ElementKind::Wall
+            )
+        })
+        .map(|e| e.section)
+        .chain(model.beams().chain(model.posts()).map(|m| m.section))
+        .chain(model.slabs.iter().map(|s| s.section()))
+        .chain(model.wall_plates.iter().map(|w| w.section))
+        .flatten()
+        .collect();
+    for section in model.sections.iter().filter(|s| ids.contains(&s.id)) {
+        quantity_area(section)?;
+        if section.is_cft() {
+            section
+                .shape
+                .as_ref()
+                .ok_or("CFT の形状が未設定です")?
+                .try_cft_core_props()?;
+        }
+    }
+    Ok(compute_quantity_takeoff(model, cfg))
 }
 
 /// モデル走査用の前処理データ。
@@ -658,11 +702,7 @@ fn secondary_member_quantity(ctx: &Ctx, sm: &SecondaryMember) -> Option<MemberQu
         rebar_joints: 0.0,
     };
     if structure == StructureKind::S || structure == StructureKind::Cft {
-        let area = sec
-            .shape
-            .as_ref()
-            .map(|s| s.calc_area())
-            .unwrap_or(sec.area);
+        let area = quantity_area(sec).expect("数量積算の断面積を解決できません");
         item.steel = Some(SteelItem {
             section_name: sec.name.clone(),
             length_m: len / 1_000.0,
@@ -895,11 +935,7 @@ fn column_quantity(
             }
         }
         (StructureKind::S, _) => {
-            let a = sec
-                .shape
-                .as_ref()
-                .map(|s| s.calc_area())
-                .unwrap_or(sec.area);
+            let a = quantity_area(sec).expect("数量積算の断面積を解決できません");
             item.steel = Some(SteelItem {
                 section_name: sec.name.clone(),
                 length_m: h / 1_000.0,
@@ -907,7 +943,7 @@ fn column_quantity(
             });
         }
         (StructureKind::Cft, shape) => {
-            let a = shape.map(|s| s.calc_area()).unwrap_or(sec.area);
+            let a = quantity_area(sec).expect("数量積算の断面積を解決できません");
             item.steel = Some(SteelItem {
                 section_name: sec.name.clone(),
                 length_m: h / 1_000.0,
@@ -962,11 +998,7 @@ fn beam_quantity(
     };
 
     if structure == StructureKind::S || structure == StructureKind::Cft {
-        let a = sec
-            .shape
-            .as_ref()
-            .map(|s| s.calc_area())
-            .unwrap_or(sec.area);
+        let a = quantity_area(sec).expect("数量積算の断面積を解決できません");
         item.steel = Some(SteelItem {
             section_name: sec.name.clone(),
             length_m: len / 1_000.0,
@@ -1133,11 +1165,7 @@ fn brace_quantity(ctx: &Ctx, elem: &ElementData) -> Option<MemberQuantity> {
         steel: None,
         rebar_joints: 0.0,
     };
-    let a = sec
-        .shape
-        .as_ref()
-        .map(|s| s.calc_area())
-        .unwrap_or(sec.area);
+    let a = quantity_area(sec).expect("数量積算の断面積を解決できません");
     if structure == StructureKind::Rc {
         item.concrete_m3 = a * lb * 1e-9;
     } else {

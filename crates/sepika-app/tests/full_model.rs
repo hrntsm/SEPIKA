@@ -54,6 +54,171 @@ fn fixture_path() -> std::path::PathBuf {
         .join("model.stb")
 }
 
+#[test]
+fn rounded_fixture_properties_and_weight_are_independently_integrated() {
+    use sepika_core::section_shape::SectionShape;
+    use std::f64::consts::PI;
+    fn integrate(h: f64, breaks: Vec<f64>, width: impl Fn(f64) -> f64) -> [f64; 4] {
+        let mut bounds = breaks;
+        bounds.extend([-h / 2.0, 0.0, h / 2.0]);
+        bounds.sort_by(f64::total_cmp);
+        bounds.dedup();
+        let mut result = [0.0; 4];
+        for pair in bounds.windows(2) {
+            let mid = (pair[0] + pair[1]) / 2.0;
+            let half = (pair[1] - pair[0]) / 2.0;
+            let dt = PI / 16384.0;
+            for i in 0..16384 {
+                let theta = -PI / 2.0 + (i as f64 + 0.5) * dt;
+                let z = mid + half * theta.sin();
+                let dz = half * theta.cos() * dt;
+                let b = width(z);
+                result[0] += b * dz;
+                result[1] += b * z * z * dz;
+                result[2] += b.powi(3) / 12.0 * dz;
+                result[3] += b * z.abs() * dz;
+            }
+        }
+        result
+    }
+    fn rectangle(h: f64, b: f64, r: f64) -> [f64; 4] {
+        integrate(h, vec![-h / 2.0 + r, h / 2.0 - r], |z| {
+            let d = z.abs() - h / 2.0 + r;
+            if d <= 0.0 {
+                b
+            } else {
+                b - 2.0 * r + 2.0 * (r * r - d * d).max(0.0).sqrt()
+            }
+        })
+    }
+    fn reference(shape: &SectionShape) -> Option<([f64; 4], f64)> {
+        match *shape {
+            SectionShape::SteelH {
+                height: h,
+                width: b,
+                web_thick: tw,
+                flange_thick: tf,
+                root_r: Some(r),
+            } => {
+                let hw = h - 2.0 * tf;
+                Some((
+                    integrate(
+                        h,
+                        vec![-hw / 2.0, hw / 2.0, -hw / 2.0 + r, hw / 2.0 - r],
+                        |z| {
+                            let d = hw / 2.0 - z.abs();
+                            if d <= 0.0 {
+                                b
+                            } else if d >= r {
+                                tw
+                            } else {
+                                tw + 2.0 * (r - (r * r - (r - d).powi(2)).max(0.0).sqrt())
+                            }
+                        },
+                    ),
+                    2.0 * b * tf + hw * tw,
+                ))
+            }
+            SectionShape::SteelBox {
+                height: h,
+                width: b,
+                thick: t,
+                corner_r: Some(r),
+            } => {
+                let outer = rectangle(h, b, r);
+                let inner = rectangle(h - 2.0 * t, b - 2.0 * t, (r - t).max(0.0));
+                Some((
+                    std::array::from_fn(|i| outer[i] - inner[i]),
+                    h * b - (h - 2.0 * t) * (b - 2.0 * t),
+                ))
+            }
+            _ => None,
+        }
+    }
+    let mut app = imported();
+    let mut references = std::collections::HashMap::new();
+    let mut max_error = 0.0_f64;
+    for section in &app.core.model.sections {
+        let Some(shape) = &section.shape else {
+            continue;
+        };
+        let Some((p, old_area)) = reference(shape) else {
+            continue;
+        };
+        for (actual, expected) in [section.area, section.iy, section.iz].into_iter().zip(p) {
+            let error = (actual / expected - 1.0).abs();
+            max_error = max_error.max(error);
+            assert!(error < 1.0e-7, "{}: {actual}/{expected}", section.name);
+        }
+        let zp = shape.plastic_modulus_strong().unwrap();
+        assert!((zp / p[3] - 1.0).abs() < 1.0e-7);
+        references.insert(section.id, (p[0], old_area));
+    }
+    assert!(!references.is_empty());
+    let mut model = app.core.model.clone();
+    model
+        .elements
+        .retain(|e| e.section.is_some_and(|id| references.contains_key(&id)));
+    model.wall_plates.clear();
+    let mut expected = 0.0;
+    let mut old = 0.0;
+    for (i, elem) in model.elements.iter_mut().enumerate() {
+        elem.id = sepika_core::ids::ElemId(i as u32);
+    }
+    for elem in &model.elements {
+        let (area, old_area) = references[&elem.section.unwrap()];
+        let length = model.member_length(elem);
+        expected += area * length * 78.5e-6;
+        old += old_area * length * 78.5e-6;
+    }
+    let (nodal, member) =
+        sepika_load::self_weight::self_weight_case_content(&model, &Default::default()).unwrap();
+    let mut actual: f64 = nodal.iter().map(|n| -n.values[2]).sum();
+    for load in member {
+        if let sepika_core::model::MemberLoadKind::Distributed { a, b, w1, w2 } = load.kind {
+            actual += (b - a) * (w1 + w2) / 2.0;
+        }
+    }
+    assert!((actual / expected - 1.0).abs() < 1.0e-7);
+    eprintln!("実モデル断面数={}, 独立 A/I 最大差={max_error:.12e}, 対象線材DL={actual:.12e} N, 直角モデルDL={old:.12e} N, 差={:.12e} N", references.len(), actual - old);
+    let mut baseline = imported();
+    for section in &mut baseline.core.model.sections {
+        if let Some((_, old_area)) = references.get(&section.id) {
+            section.area = *old_area;
+            section.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
+        }
+    }
+    app.run_preparation();
+    baseline.run_preparation();
+    assert_no_error(&app, "角丸モデルの準備計算");
+    assert_no_error(&baseline, "独立直角面積の比較用準備計算");
+    let new_weight = app
+        .core
+        .scoped
+        .preparation
+        .as_ref()
+        .unwrap()
+        .summary
+        .total_seismic_weight;
+    let old_weight = baseline
+        .core
+        .scoped
+        .preparation
+        .as_ref()
+        .unwrap()
+        .summary
+        .total_seismic_weight;
+    assert!(
+        (old_weight - 3.195e6).abs() < 500.0,
+        "旧スナップショットの重量と不整合: {old_weight}"
+    );
+    assert!(
+        (new_weight - 3.192e6).abs() < 500.0,
+        "新スナップショットの重量と不整合: {new_weight}"
+    );
+    eprintln!("小梁・床荷重を含む総地震用重量: 角丸={new_weight:.12e} N, 独立直角面積={old_weight:.12e} N, 差={:.12e} N", new_weight - old_weight);
+}
+
 /// テストが書き込む一時ディレクトリ（プロセス ID 入り）。
 /// `std::env::temp_dir()` 直下へ固定名で書き込むと、同一マシンで並行する
 /// 別プロセスのテスト実行と衝突するため、プロセスごとに一意なサブディレクトリを

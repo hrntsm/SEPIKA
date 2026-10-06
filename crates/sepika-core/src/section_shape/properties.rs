@@ -8,8 +8,21 @@ use super::geometry::{
 use super::types::SectionShape;
 
 impl SectionShape {
-    /// Compute the cross‑sectional area [mm²].
+    /// 断面積 [mm²]。算定不能なら panic。入力値の検証には `try_calc_area` を用いる。
     pub fn calc_area(&self) -> f64 {
+        self.try_calc_area()
+            .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// 断面積 [mm²]。必要なフィレット半径・角Rが未知・不正ならエラー。
+    pub fn try_calc_area(&self) -> Result<f64, String> {
+        Ok(match self.rounded_steel_properties()? {
+            Some(p) => p.area,
+            None => self.rectangular_area(),
+        })
+    }
+
+    fn rectangular_area(&self) -> f64 {
         match *self {
             SectionShape::SteelH {
                 height,
@@ -106,6 +119,24 @@ impl SectionShape {
     /// 意図的にこの定義を採る。主軸まわりで扱うには断面相乗モーメント Iyz を
     /// 断面データに持たせて二軸連成を解く必要がある）。
     pub fn plastic_modulus_strong(&self) -> Option<f64> {
+        self.try_plastic_modulus_strong()
+            .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// 強軸の塑性断面係数 [mm³]。必要なフィレット半径・角Rが未知・不正ならエラー。
+    pub fn try_plastic_modulus_strong(&self) -> Result<Option<f64>, String> {
+        if matches!(self, Self::CftBox { .. } | Self::CftPipe { .. }) {
+            return Ok(None);
+        }
+        Ok(match self.rounded_steel_properties()? {
+            Some(p) if matches!(self, Self::SteelH { .. } | Self::SteelBox { .. }) => {
+                Some(p.plastic_modulus_strong)
+            }
+            _ => self.rectangular_plastic_modulus_strong(),
+        })
+    }
+
+    fn rectangular_plastic_modulus_strong(&self) -> Option<f64> {
         match *self {
             SectionShape::SteelH {
                 height,
@@ -186,8 +217,21 @@ impl SectionShape {
         }
     }
 
-    /// Moment of inertia about the local y‑axis [mm⁴] (strong axis for beams).
+    /// 局所 y 軸まわりの断面二次モーメント [mm⁴]。
+    /// 算定不能なら panic。入力値の検証には `try_calc_iy` を用いる。
     pub fn calc_iy(&self) -> f64 {
+        self.try_calc_iy().unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// y 軸まわりの断面二次モーメント [mm⁴]。必要なフィレット半径・角Rが未知・不正ならエラー。
+    pub fn try_calc_iy(&self) -> Result<f64, String> {
+        Ok(match self.rounded_steel_properties()? {
+            Some(p) => p.iy,
+            None => self.rectangular_iy(),
+        })
+    }
+
+    fn rectangular_iy(&self) -> f64 {
         match *self {
             SectionShape::SteelH {
                 height,
@@ -346,8 +390,21 @@ impl SectionShape {
         }
     }
 
-    /// Moment of inertia about the local z‑axis [mm⁴] (weak axis for beams).
+    /// 局所 z 軸まわりの断面二次モーメント [mm⁴]。
+    /// 算定不能なら panic。入力値の検証には `try_calc_iz` を用いる。
     pub fn calc_iz(&self) -> f64 {
+        self.try_calc_iz().unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// z 軸まわりの断面二次モーメント [mm⁴]。必要なフィレット半径・角Rが未知・不正ならエラー。
+    pub fn try_calc_iz(&self) -> Result<f64, String> {
+        Ok(match self.rounded_steel_properties()? {
+            Some(p) => p.iz,
+            None => self.rectangular_iz(),
+        })
+    }
+
+    fn rectangular_iz(&self) -> f64 {
         match *self {
             SectionShape::SteelH {
                 height,
