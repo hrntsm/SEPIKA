@@ -198,12 +198,14 @@ mod tests {
                 let solution = solver.solve(&rhs).unwrap();
                 solver.solve_into(&rhs, &mut out).unwrap();
                 assert_eq!(out, solution, "{backend}");
+                assert_eq!(out.len(), expected.len(), "{backend}");
                 for (actual, expected) in out.iter().zip(expected) {
                     approx::assert_relative_eq!(*actual, expected, max_relative = 1e-10);
                 }
             }
             solver.factorize(&diagonal(2.0)).unwrap();
             solver.solve_into(&[8.0, 18.0], &mut out).unwrap();
+            assert_eq!(out.len(), 2, "{backend}");
             for (actual, expected) in out.iter().zip([2.0, 3.0]) {
                 approx::assert_relative_eq!(*actual, expected, max_relative = 1e-10);
             }
