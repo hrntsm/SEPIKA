@@ -43,6 +43,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0035](0035-lumped-mass-physical-mass.md) | accepted | 質点系の層質量を物理質量相当へ統一する |
 | [0037](0037-cantilever-slab-load-to-attachment-girder.md) | accepted | 線アンカーの取り付く床板は取付き大梁だけへ等分布伝達する |
 | [0038](0038-cantilever-slab-tip-load-transfer.md) | accepted | 片持ちスラブの先端荷重は取付き梁へ力のみ等分布伝達する |
+| [0039](0039-section-property-basis.md) | accepted | 断面性能の算定元を項目別に区別し、フィレット半径・角Rの編集時の更新を分ける |
 
 ## 規約
 
