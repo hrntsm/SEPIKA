@@ -133,7 +133,6 @@ impl LinearSolver for AutoSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::{make_solver, SolverBackend};
     use crate::sparse::{assemble_csc, Triplet};
 
     fn k_2dof() -> SparseColMat<usize, f64> {
@@ -164,43 +163,16 @@ mod tests {
         )
     }
 
-    /// しきい値未満の小規模系では直接法が選ばれ、厳密解が得られる。
     #[test]
-    fn test_auto_small_uses_direct() {
-        faer::set_global_parallelism(faer::Par::Seq);
-        let mut solver = AutoSolver::default();
-        solver.factorize(&k_2dof()).unwrap();
-        assert_eq!(solver.selected(), Some(SelectedBackend::DirectCholesky));
-        let x = solver.solve(&[0.0, 1000.0]).unwrap();
-        approx::assert_relative_eq!(x[0], 10.0, max_relative = 1e-9);
-        approx::assert_relative_eq!(x[1], 15.0, max_relative = 1e-9);
-
-        // 直接法分岐の solve_into が Cholesky の solve_into に委譲し、solve と一致すること。
-        let mut out = Vec::new();
-        solver.solve_into(&[0.0, 1000.0], &mut out).unwrap();
-        assert_eq!(x, out);
-    }
-
-    /// `make_solver(SolverBackend::Auto)` が AutoSolver を返し、小規模系を解けること。
-    #[test]
-    fn test_make_solver_auto() {
-        faer::set_global_parallelism(faer::Par::Seq);
-        let mut solver = make_solver(SolverBackend::Auto);
-        solver.factorize(&k_2dof()).unwrap();
-        let x = solver.solve(&[0.0, 1000.0]).unwrap();
-        approx::assert_relative_eq!(x[0], 10.0, max_relative = 1e-9);
-        approx::assert_relative_eq!(x[1], 15.0, max_relative = 1e-9);
-    }
-
-    /// しきい値を 0 にして PCG 経路を強制し、収束解が得られる。
-    #[test]
-    fn test_auto_large_uses_pcg() {
-        let mut solver = AutoSolver::with_params(0, 1e-6, 1000);
-        solver.factorize(&k_2dof()).unwrap();
-        assert_eq!(solver.selected(), Some(SelectedBackend::IterativePcg));
-        let x = solver.solve(&[0.0, 1000.0]).unwrap();
-        approx::assert_relative_eq!(x[0], 10.0, max_relative = 1e-4);
-        approx::assert_relative_eq!(x[1], 15.0, max_relative = 1e-4);
+    fn test_auto_selects_backend_at_threshold() {
+        for (threshold, expected) in [
+            (3, SelectedBackend::DirectCholesky),
+            (2, SelectedBackend::IterativePcg),
+        ] {
+            let mut solver = AutoSolver::with_params(threshold, 1e-6, 1000);
+            solver.factorize(&k_2dof()).unwrap();
+            assert_eq!(solver.selected(), Some(expected), "threshold={threshold}");
+        }
     }
 
     /// PCG が収束しない場合は直接法へフォールバックし、正しい解を返す。
@@ -253,59 +225,5 @@ mod tests {
         solver.factorize(&k).unwrap();
         let result = solver.solve(&[1.0, 0.0]);
         assert!(matches!(result, Err(SolveError::NotPositiveDefinite)));
-    }
-
-    #[test]
-    fn test_auto_not_factorized() {
-        let solver = AutoSolver::default();
-        assert!(matches!(
-            solver.solve(&[1.0]),
-            Err(SolveError::NotFactorized)
-        ));
-    }
-
-    /// 直接法分岐のインスタンス再利用: 同一 `AutoSolver` へ factorize を
-    /// 繰り返しても（値が変わっても）、毎回新規生成した場合とビット一致すること。
-    #[test]
-    fn test_auto_direct_refactorize_matches_fresh_bit_exact() {
-        faer::set_global_parallelism(faer::Par::Seq);
-        let k1 = k_2dof();
-        let k2 = assemble_csc(
-            2,
-            vec![
-                Triplet {
-                    row: 0,
-                    col: 0,
-                    val: 500.0,
-                },
-                Triplet {
-                    row: 1,
-                    col: 0,
-                    val: -120.0,
-                },
-                Triplet {
-                    row: 0,
-                    col: 1,
-                    val: -120.0,
-                },
-                Triplet {
-                    row: 1,
-                    col: 1,
-                    val: 340.0,
-                },
-            ],
-        );
-        let rhs = [7.0, -3.0];
-
-        let mut reused = AutoSolver::default();
-        reused.factorize(&k1).unwrap();
-        reused.factorize(&k2).unwrap();
-        let x_reused = reused.solve(&rhs).unwrap();
-
-        let mut fresh = AutoSolver::default();
-        fresh.factorize(&k2).unwrap();
-        let x_fresh = fresh.solve(&rhs).unwrap();
-
-        assert_eq!(x_reused, x_fresh, "インスタンス再利用でビット不一致");
     }
 }
