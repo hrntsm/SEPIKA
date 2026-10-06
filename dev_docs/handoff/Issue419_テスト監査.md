@@ -18,12 +18,12 @@
 
 | 判定 | 対象数 | 意味 |
 |---|---:|---|
-| KEEP | 2,756 | 独立した物理/外部入力/状態/解析経路の不具合を検出 |
+| KEEP | 2,750 | 独立した物理/外部入力/状態/解析経路の不具合を検出 |
 | DELETE | 33 | 固有保証なし、または強い既存テストと重複 |
-| MERGE | 219 | 必要な条件を保持して同一契約・fixture を共有 |
-| SIMPLIFY | 46 | 不要な反復/内部数値を削り、意味ある代表値・境界に絞る |
+| MERGE | 224 | 必要な条件を保持して同一契約・fixture を共有 |
+| SIMPLIFY | 47 | 不要な反復/内部数値を削り、意味ある代表値・境界に絞る |
 
-候補は **132 グループ、298 関数**。これは削除予定数ではない。MERGE でも異なる failure mode の入力は残るため、減った関数数を品質・性能の指標にはしない。
+候補は **136 グループ、304 関数**。これは削除予定数ではない。MERGE でも異なる failure mode の入力は残るため、減った関数数を品質・性能の指標にはしない。
 
 ## コストと保証の比較
 
@@ -142,11 +142,11 @@
 
 #### C007 — SIMPLIFY
 
-**理由:** factory 検証で Cholesky のばね解を再実行。
+**理由:** factory 経由で Cholesky と同じ2DOFのばね解を再計算。
 
-**失う検出・代替保証:** make_solver(Auto) が誤った backend を返す配線ミス。
+**失う検出・代替保証:** factory 経由の基本的な計算配線。この2DOFの数値だけでは Auto を Cholesky に置き換える誤りは検出できない。
 
-**具体案:** factory の backend 選択だけ残し、10/15 の数値解と solve_into の再検証を共有契約へ。
+**具体案:** make_solver 経由の各backendの両API・再分解を共有契約で検証し、単独の10/15の再計算を削る。Autoの閾値選択は selected の表で保持。
 
 **費用:** 実行短縮より、fixture と期待値の二重管理・変更追従の削減が主な効果。
 
@@ -815,11 +815,11 @@
 
 #### C048 — SIMPLIFY
 
-**理由:** 単位倍率の単独算術例。core と同じ N→kN と独自 gal / m/s 換算が混在。
+**理由:** 単位倍率の単独算術例。N→kN と mm/s→m/s は core の換算へ委譲し、mm/s²→gal だけが独自。
 
-**失う検出・代替保証:** gal と速度の表示倍率取り違えは core では検出できない。
+**失う検出・代替保証:** 独自の mm/s²→gal の倍率取り違えは core では検出できない。速度換算の倍率は core の length 契約で検証する。
 
-**具体案:** N→kN の重複を削り、gal / m/s の換算を実際の応答表示 data 作成テストに統合。
+**具体案:** N→kN と mm/s→m/s の重複を削り、mm/s²→gal の独立値 10→1 を残す。
 
 **費用:** 実行短縮より、fixture と期待値の二重管理・変更追従の削減が主な効果。
 
@@ -1635,6 +1635,50 @@
 
 - [crates/sepika-design-jp/src/ultimate/cft_nm.rs::test_cft_short_column_mu_circular_positive](https://github.com/hrntsm/SEPIKA/blob/3286fbcb45a3cc7e296a839a5488d3a3b42a9307/crates/sepika-design-jp/src/ultimate/cft_nm.rs#L332)
 
+#### C133 — MERGE
+
+**理由:** 長短期倍率を helper 同士の比で確認し、fc24 の代表値と同じ材料・期間を重ねる。
+
+**失う検出・代替保証:** wrapper の long_term が誤って転送される不具合と軽量区分の誤適用。
+
+**具体案:** fc24 の長短期・Normal/LW1/LW2 を独立固定値の一表へ統合し、wrapper と class API の両方を検証する。
+
+**費用:** 実行短縮より、fixture と期待値の二重管理・変更追従の削減が主な効果。
+
+**対象:**
+
+- [crates/sepika-design-jp/src/material_strength/mod.rs::test_concrete_shear_short_term_is_1_5x_long](https://github.com/hrntsm/SEPIKA/blob/3286fbcb45a3cc7e296a839a5488d3a3b42a9307/crates/sepika-design-jp/src/material_strength/mod.rs#L34)
+- [crates/sepika-design-jp/src/material_strength/mod.rs::test_concrete_fc24_representative_values](https://github.com/hrntsm/SEPIKA/blob/3286fbcb45a3cc7e296a839a5488d3a3b42a9307/crates/sepika-design-jp/src/material_strength/mod.rs#L57)
+
+#### C134 — SIMPLIFY
+
+**理由:** 引張・せん断の長短期を自分の出力同士の比だけで確認。
+
+**失う検出・代替保証:** 両期間が同じ倍率で誤っていても通る。絶対強度と期間選択の誤りを独立値で検出する必要がある。
+
+**具体案:** F=235 の長期 ft=156.66666666666666/fs=90.45154217304136、短期 ft=235/fs=135.67731325956206 と比較する。
+
+**費用:** 実行短縮より、fixture と期待値の二重管理・変更追従の削減が主な効果。
+
+**対象:**
+
+- [crates/sepika-design-jp/src/material_strength/mod.rs::test_steel_ft_fs_short_is_1_5x](https://github.com/hrntsm/SEPIKA/blob/3286fbcb45a3cc7e296a839a5488d3a3b42a9307/crates/sepika-design-jp/src/material_strength/mod.rs#L158)
+
+#### C135 — MERGE
+
+**理由:** 圧縮強度の E 変更・長短期を単調性/自分の出力比で個別検査。
+
+**失う検出・代替保証:** E 入力の無視、期間係数、elastic/inelastic 分岐の絶対値誤り。
+
+**具体案:** 独立参照値の一表に E=205000/100000、λ=0/50/300 と長短期を含める。既存の λ=Λ 連続性テストは保持。
+
+**費用:** 実行短縮より、fixture と期待値の二重管理・変更追従の削減が主な効果。
+
+**対象:**
+
+- [crates/sepika-design-jp/src/material_strength/mod.rs::test_steel_fc_decreases_with_smaller_e](https://github.com/hrntsm/SEPIKA/blob/3286fbcb45a3cc7e296a839a5488d3a3b42a9307/crates/sepika-design-jp/src/material_strength/mod.rs#L197)
+- [crates/sepika-design-jp/src/material_strength/mod.rs::test_steel_fc_short_is_1_5x_long](https://github.com/hrntsm/SEPIKA/blob/3286fbcb45a3cc7e296a839a5488d3a3b42a9307/crates/sepika-design-jp/src/material_strength/mod.rs#L224)
+
 ### 編集
 
 #### C096 — MERGE
@@ -2093,6 +2137,42 @@
 
 - [crates/sepika-io/src/ovika.rs::measure_real_model_msgpack](https://github.com/hrntsm/SEPIKA/blob/3286fbcb45a3cc7e296a839a5488d3a3b42a9307/crates/sepika-io/src/ovika.rs#L532)
 
+### 基盤
+
+#### C136 — MERGE
+
+**理由:** 同じ Markdown の fence 除外規則を impl ref と link の別 fixture で展開。
+
+**失う検出・代替保証:** 通常/blockquote の impl ref を取り落とす、fence 内の ref を検査してしまう不具合。
+
+**具体案:** Markdown parser の表で link と impl ref の期待列を両方確認する。実在/欠落ファイルの filesystem 統合テストは維持。
+
+**費用:** 実行短縮より、fixture と期待値の二重管理・変更追従の削減が主な効果。
+
+**対象:**
+
+- [xtask/src/check_docs.rs::extracts_crate_impl_refs](https://github.com/hrntsm/SEPIKA/blob/3286fbcb45a3cc7e296a839a5488d3a3b42a9307/xtask/src/check_docs.rs#L384)
+
+## 今回の実施範囲
+
+全候補の判断は上記と CSV に記録した。今回は Issue の指定箇所と、固有保証を持たない明確な削除を実施した。DELETE の33件はすべて整理し、必要な正規化・既定値・状態更新の保証は先に残すテストへ移した。以下の実施済みIDは元テストの本文を基準ソースと照合したもの。
+
+**実施済み:** C001、C002、C003、C004、C005、C006、C007、C008、C009、C010、C011、C012、C013、C014、C015、C016、C017、C025、C027、C028、C029、C031、C032、C033、C044、C048、C052、C067、C068、C069、C071、C075、C076、C077、C078、C081、C082、C083、C084、C085、C099、C105、C108、C113、C114、C115、C119、C120、C132、C133、C134、C135、C136。
+
+**候補一覧に記録した未実施の統合・簡略化:** C018、C019、C020、C021、C022、C023、C024、C026、C030、C034、C035、C036、C037、C038、C039、C040、C041、C042、C043、C045、C046、C047、C049、C050、C051、C053、C054、C055、C056、C057、C058、C059、C060、C061、C062、C063、C064、C065、C066、C070、C072、C073、C074、C079、C080、C086、C087、C088、C089、C090、C091、C092、C093、C094、C095、C096、C097、C098、C100、C101、C102、C103、C104、C106、C107、C109、C110、C111、C112、C116、C117、C118、C121、C122、C123、C124、C125、C126、C127、C128、C129、C130、C131。
+
+未実施の提案には、編集command間で異なる履歴経路、別の材料/断面/入力branchを保ったfixture共通化、入力からUI反映までの保証移設、ignoredの手動計測の再配置を含む。今回の削除と混同しない。全件数・カバレッジを目標に追加のproduction refactorは行わない。
+
+| 対象 | 残した保証・移設先 |
+|---|---|
+| LinearSolver | Cholesky/LU/PCG/Auto direct/Auto PCG の両API、未分解・次元不一致・短いbuffer・変更RHS・再分解を共有契約で確認。bit比較とpattern invalidation・fallbackは保持 |
+| Core | 床/壁の正常→種別違反と正しいエラー、二次部材の用途未指定/反対用途、せん断弾性の明示/派生、ZERO_TOLと同一点の縮退、serde未指定時のliteral false |
+| UI | カラーマップの選択と力の正規化、描画の端点・有限性・対称性・縮退を確認。任意RGB/LUT/点数/幅の固定を除去 |
+| 要素・設計 | n=6の配列上限、singular/pivot/scale、fc24の長短期/軽量区分とwrapper、steelの独立強度値とLambda境界を保持 |
+| xtask | 11種類のparser入力を表へ統合。存在/欠落ファイル・directory・SUMMARYの6統合テストは別に維持 |
+
+steel圧縮の参照値はproduction helperを使わず、λ²×0.6F/(π²E)を基準とする規準式の別計算から固定した。E=205000/100000、λ=0/50/300の絶対値と長短期を比較し、同じ出力の比だけの検査を除いた。実装式を期待値のRustコードへ写していない。
+
 ## 検証
 
 - GUI / MCP / Parquet 有効の `cargo test --workspace --features sepika-app/gui,sepika-mcp/mcp,sepika-io/parquet --locked -- --list` が完了。3,052通常関数＋2 rustdoc と source 一覧が一致。これは実行テストの成功を意味しない。
@@ -2101,4 +2181,22 @@
 
 ## 実装との対応
 
-この文書は整理前の監査スナップショットであり、すべての候補を削除済みという意味ではない。実装時は変更したグループと移した保証を別途記録する。大規模な production refactor を必要とする提案はテスト整理のためだけに実施しない。
+この文書は整理前の監査スナップショットであり、すべての候補を削除済みという意味ではない。今回の実施IDと移した保証は「今回の実施範囲」に記録した。大規模な production refactor を必要とする提案はテスト整理のためだけに実施しない。
+
+## 実装後の検証結果
+
+以下はすべて成功。容量不足で中断したビルド/リンクは、古い再生成可能なキャッシュとテスト実行ファイルを削除し、同じコマンドで再実行した。増分キャッシュを増やさないため `CARGO_INCREMENTAL=0` を設定した。
+
+- `cargo test --workspace --locked`
+- `cargo test -p sepika-app -p sepika-mcp -p sepika-io --features sepika-app/gui,sepika-mcp/mcp,sepika-io/parquet --locked`
+- `cargo test -p sepika-io --locked`
+- `cargo check -p sepika-app --features sepika-app/gui --locked`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `cargo clippy -p sepika-app -p sepika-mcp -p sepika-io --all-targets --features sepika-app/gui,sepika-mcp/mcp,sepika-io/parquet --locked -- -D warnings`
+- `cargo fmt --all -- --check`
+- `cargo run -p xtask -- check-deps`
+- `cargo run -p xtask -- check-docs`
+- `cargo test -p sepika-math --locked` と `cargo clippy -p sepika-math --all-targets --locked -- -D warnings`: 返却次元assert追加後の共有契約を再確認。
+- 全件CSVの3,054件・一意性・分類数、136グループの本文・基準ソース行・ローカルリンクを独立に照合。
+
+`mdbook build` は未実行。mdBookは環境に未導入で、取得試行もネットワーク接続ができなかった。今回変更した開発者向け文書は `dev_docs/` にあり、`book.toml` の入力 `docs/` は変更していない。参照の実在確認は上記 `check-docs` と監査用の独立照合で行った。
