@@ -1,0 +1,59 @@
+name: 機能追加・変更（Feature / Change）
+description: 機能追加・仕様変更・リファクタリング・文書や開発環境の変更を整理する
+body:
+  - type: markdown
+    attributes:
+      value: |
+        なぜ必要か、何を達成するか、今回扱う範囲を記載してください。
+        文書改善・性能改善・リファクタリング・開発環境変更もこのフォームで扱います。
+        詳細な実装手順やクラス・関数構成は不要です。
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景
+      description: 現状の課題と、変更が必要な理由を記載してください。
+      placeholder: "例: Issue ごとに記述形式が異なり、作業の目的や範囲を把握しづらい。"
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal（達成したいこと）
+      description: この変更で実現したい状態や、利用者・開発者が得られる結果を記載してください。
+      placeholder: "例: Issue の種類ごとに、目的・範囲・完了条件が揃った形で起票できる。"
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope（今回扱う範囲）
+      description: 今回変更する機能・対象・条件を記載してください。実装方法ではなく、達成する内容と境界を示してください。
+      placeholder: "例: 不具合修正・機能追加や変更・調査や仕様確定の3種類を対象とする。"
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: 対象外
+      description: 今回扱わない内容や、後続作業に回す内容があれば記載してください。
+      placeholder: "例: 過去の Issue 本文の統一は対象外。"
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完了条件
+      description: どのような結果を確認できれば、この変更を完了とするかを記載してください。
+      placeholder: |
+        - [ ] 対象の3種類について、日本語で目的・範囲・完了条件を入力できる。
+        - [ ] 分類しづらい内容は blank issue で起票できる。
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: 関連情報
+      description: 関連 Issue・規準や資料・既存コード・設計文書などがあれば記載してください。
+      placeholder: "例: 関連 Issue #123、資料の名称・版・ページ、関連コードや文書へのリンク"
+    validations:
+      required: false

@@ -1,0 +1,76 @@
+name: 不具合修正（Bug / Fix）
+description: 不具合の現象・期待する挙動・影響と修正の完了条件を整理する
+body:
+  - type: markdown
+    attributes:
+      value: |
+        分かっている現象と、修正によって達成したい状態を記載してください。
+        再現条件や影響が未判明でも起票できます。詳細な実装手順は不要です。
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景 / 現象
+      description: どのような状況で何が起き、なぜ修正が必要かを記載してください。
+      placeholder: |
+        例: 保存したモデルを開き直すと、入力した荷重が表示されず、作業を再開できない。
+        エラーメッセージや画面があれば添付してください。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する挙動
+      description: 本来成立するべき挙動を記載してください。計算結果の場合は期待値と根拠も添えてください。
+      placeholder: 保存前と同じ荷重が復元され、編集を再開できる。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 再現条件
+      description: 分かる範囲で操作・入力データ・バージョンまたはコミット・環境を記載してください。未確認でも構いません。
+      placeholder: |
+        1. 使用したモデル・設定:
+        2. 現象が起きるまでの操作:
+        バージョン / コミット:
+        OS 等の環境:
+    validations:
+      required: false
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影響範囲
+      description: 分かる範囲で影響する機能・利用条件と、今回修正する範囲を記載してください。未確認でも構いません。
+      placeholder: 特定のファイルだけか、同じ条件のモデル全般か。今回扱わない問題があれば、その境界も記載してください。
+    validations:
+      required: false
+  - type: textarea
+    id: safety-impact
+    attributes:
+      label: 構造計算上の安全性・結果・データへの影響
+      description: 構造計算・解析結果に関係する場合など、必要に応じて記載してください。安全側 / 危険側 / 未判明とその根拠、設計結果・解析結果・データ保全への影響を分かる範囲で示してください。
+      placeholder: |
+        安全側 / 危険側 / 未判明:
+        判断の根拠:
+        設計結果・解析結果への影響:
+        データの欠落・破損等への影響:
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完了条件
+      description: どのような結果を確認できれば、この不具合修正を完了とするかを記載してください。
+      placeholder: |
+        - [ ] 現象が発生するモデルで、保存した荷重が開き直した後も復元される。
+        - [ ] 復元した荷重を編集・再保存できる。
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: 関連情報
+      description: 関連 Issue・資料・コード・ログなどがあれば記載してください。
+      placeholder: "例: 関連 Issue #123、期待値の根拠となる資料の版・ページ、ログや最小再現モデル"
+    validations:
+      required: false

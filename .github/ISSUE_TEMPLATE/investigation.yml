@@ -1,0 +1,75 @@
+name: 調査・仕様確定（Investigation / Specification）
+description: 実装前の調査・規準照合・仕様確定・設計検討の目的と確認事項を整理する
+body:
+  - type: markdown
+    attributes:
+      value: |
+        なぜ調査するか、何を明らかにするか、どこまで確認するかを記載してください。
+        完了条件は実装完了ではなく、仕様・根拠・後続作業が明確になることを基本とします。
+        詳細な実装方法を先に決める必要はありません。
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景
+      description: 現状の疑問・課題と、調査や仕様確定が必要な理由を記載してください。
+      placeholder: "例: 規準の適用条件と現在の実装の対応が明確でなく、計算結果の妥当性を判断できない。"
+    validations:
+      required: true
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 調査目的
+      description: 調査によって何を明らかにし、どの判断ができる状態を目指すかを記載してください。
+      placeholder: "例: 適用すべき規準と条件を特定し、現在の実装に変更が必要か判断できる。"
+    validations:
+      required: true
+  - type: textarea
+    id: questions
+    attributes:
+      label: 確認したい事項
+      description: 今回確認する問い・対象・条件を記載してください。対象外があれば併せて示してください。
+      placeholder: |
+        - 対象となる規準の式と適用条件は何か。
+        - 現在の実装と差異があるか。
+        - 差異は安全側 / 危険側のどちらに影響しうるか。
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: 参照資料 / 関連コード
+      description: 調査対象の資料・規準・コードがあれば記載してください。出典は名称・版・ページや条文を分かる範囲で示してください。
+      placeholder: |
+        資料・規準の名称 / 版 / ページ・条文:
+        関連コード・文書のパスやリンク:
+    validations:
+      required: false
+  - type: textarea
+    id: decisions
+    attributes:
+      label: 調査後に決めるべき事項
+      description: 調査結果を踏まえて決める仕様・採否・後続作業があれば記載してください。結論が未定でも構いません。
+      placeholder: |
+        - どの規準と適用条件を採用するか。
+        - 実装変更や追加検証の Issue が必要か。
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完了条件
+      description: 仕様・根拠・後続作業について、何が明確になれば調査を完了とするかを記載してください。
+      placeholder: |
+        - [ ] 確認事項への結論と出典・根拠が整理されている。
+        - [ ] 採用する仕様と、追加調査や実装変更の要否が明確になっている。
+        - [ ] 必要な文書更新や後続 Issue に結果が反映されている。
+    validations:
+      required: true
+  - type: textarea
+    id: related-issues
+    attributes:
+      label: 関連 Issue
+      description: 親 Issue・関連する調査・後続作業などがあれば記載してください。
+      placeholder: "例: 親 Issue #123、関連調査 #456"
+    validations:
+      required: false
