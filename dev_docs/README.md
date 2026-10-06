@@ -9,6 +9,9 @@ SEPIKA の開発者向けドキュメントを集約したディレクトリ。
 
 | 置き場 | 書くもの |
 |--------|----------|
+| [AGENTS.md](../AGENTS.md) | エージェントの判断に必要な原則と、各正本への参照 |
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | 一般開発ルールの正本（コミット・コード・テスト・コメント・検証・PR の手順） |
+| [.github/pull_request_template.md](../.github/pull_request_template.md) | PR 本文の構成と記入欄 |
 | [CONTEXT.md](../CONTEXT.md) | 用語の意味・禁止語（会話と設計の語彙） |
 | [adr/](adr/) | 重要な設計判断と理由。現在有効かどうかは Status で管理する |
 | [handoff/](handoff/README.md) | 実装経緯・移行記録・申し送り・残課題 |
