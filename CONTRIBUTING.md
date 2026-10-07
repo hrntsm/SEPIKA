@@ -1,10 +1,12 @@
 # コントリビューションガイド
 
-SEPIKA の開発に参加いただきありがとうございます。本書はビルド・テスト・静的解析・
-ドキュメントの手順と、開発上の約束事をまとめたものです。
+本書は開発参加の入口です。詳細な正本は [文書配置の索引](dev_docs/README.md) から確認してください。
 
-日本での利用を想定したプロジェクトです。**コミットメッセージ・コード中のコメント・
-Issue / PR のやりとりは日本語**で行ってください。
+## 開発参加時の基本事項
+
+- コミットメッセージ・コード中のコメント・Issue / PR のやりとりは日本語で行ってください。
+- [Rust ツールチェイン](https://rustup.rs/) の最新 stable を使用してください。静的解析の前に `rustup update stable` で更新し、`cargo clippy --version` で確認します。`--locked` は依存解決を固定するもので、ツールチェインは固定しません。
+- 実装・コード・テスト・コメントの原則は [AGENTS.md](AGENTS.md)、文書の配置は [dev_docs/README.md](dev_docs/README.md) を参照してください。
 
 ## Git コミットルール
 
@@ -21,410 +23,51 @@ Issue / PR のやりとりは日本語**で行ってください。
 | `test` | テスト関連 |
 | `chore` | ビルド・補助ツール・ライブラリ関連 |
 
-コミットログは **Why** を表現します。タイトルは変更内容を簡潔に示し、本文や必要な説明には、
-差分から分かる変更内容の繰り返しではなく、変更が必要だった理由・意図・解決する問題を残してください。
+コミットの理由・意図の記録は [AGENTS.md](AGENTS.md#how--what--why--why-not) に従ってください。
 
-### コミットの単位
+- 論理的な区切りごとに、1 コミットへ 1 つの目的をまとめます。
+- コードの変更には対応するテストを含め、ドキュメントのみの更新は別コミットに分けます。
+- コミット前に下記の原則で必要な検証を行い、区切りで `git status` を確認します。
 
-- 論理的な区切りごとにコミットし、1 コミットには 1 つの目的だけを含める。
-- コードの変更には対応するテストを含め、ドキュメントのみの更新は別コミットに分ける。
-- コミット前に変更クレートのテストと静的解析を通す。検証が重い場合も、少なくともコンパイルと変更クレートのテストが通る状態にする。
-- 区切りで `git status` を確認し、コミットし忘れた変更をためたまま次の作業を続けない。
+## ローカル検証の原則
 
-## コード・テスト・コメントの記述ルール
-
-### コードとテスト
-
-- コードは **How** を表現する。処理方法はコードそのもので読み取れるようにする。
-- テストコードは **What** を表現する。テスト名・入力・assert から、保証する観測可能な仕様・期待結果・契約が読めるようにする。
-- 実装コードをテスト側にコピーして同じ計算を再現せず、内部の実装手順ではなく結果・契約を検証する。
-- 手計算や期待値の根拠がコードだけでは明確にならない場合のみ、テストに必要最小限の注記を残してよい。
-- 単位は可能な範囲で名前に埋め込む（例: 内部実装の引数・定数名）。公開 API の改名は別課題として扱い、Rustdoc で単位を明記する。
-
-### 通常のコードコメント
-
-`//` は **Why not** を書くために使います。一見自然な別案を採用できない理由や、
-単純化できない・特定の順序や回避策が必要といった非自明な制約だけを残してください。
-コードを読めば分かる処理内容（How）の言い換えや、単なる設計経緯は書きません。
-`TODO` / `FIXME` などの未対応事項のマーカーは例外として許容します。
-
-### Rustdoc
-
-`///` / `//!` は通常コメントと分けて扱い、API 利用者が知る必要のある契約を簡潔に記述します（目安 1〜3 行）。
-単位・前提条件・失敗時の振る舞い・順序等の取り決め（例: タプルの要素順序）・既定動作を記載してください。
-実装方法・設計経緯・過去との差分や、契約ではない現行仕様の要約は書きません。
-
-### 計算根拠・出典・経緯との境界
-
-文書の配置は [dev_docs/README.md](dev_docs/README.md#ドキュメント配置ルール正本) に従います。
-
-- Rustdoc に記載する既定動作は `docs/` にも必ず記載し、矛盾した場合は `docs/` を正とする。
-- 算定の導出過程・既定値の一覧表・代表値の議論・複数式による完全な定義をコードコメントや Rustdoc に書かない。
-- 開発経緯・過去との差分（従来の実装・旧スキーマ・レビュー経緯等）はコメントに書かず、必要なら文書に残す。
-- 規準名・条文番号は API 契約の特定に必要な場合に限り Rustdoc に残してよい。書名・版・ページ番号は `docs/` で管理する。
-- 計算根拠・既定値・安全側／危険側の判定はコードコメントで管理しない。コード側から文書へのリンクを残さず、`docs/` 側の実装参照からコードへさかのぼれるようにする。
-
-## 前提ツール
-
-- [Rust ツールチェイン](https://rustup.rs/)（stable）。`cargo` / `rustc` が使えること。
-  CI は毎回その時点の最新 stable を取得するため、手元も `rustup update stable` で最新に
-  保ってください（「[静的解析](#静的解析)」の「ツールチェインのバージョンを合わせる」）
-- ドキュメントをローカルで確認する場合は [mdBook](https://rust-lang.github.io/mdBook/)
-
-## ビルド
+開発中は変更したクレートと、作業に直接関係するテスト・静的解析を中心に実行します。
 
 ```bash
-# ワークスペース全体ビルド
-cargo build --workspace
-
-# リリースビルド
-cargo build --workspace --release
-```
-
-### 機能フラグ
-
-| フラグ | 対象クレート | 内容 |
-|--------|-------------|------|
-| `gui` | sepika-app | GUI（egui/eframe） |
-| `mcp` | sepika-mcp | MCP サーバ |
-| `parquet` | sepika-io | 結果 I/O（Arrow / Parquet）。sepika-mcp は常に有効化して利用し、sepika-app の通常開発では無効のまま軽量に保つ |
-
-非デフォルトの機能フラグは `--workspace` ビルドでは検証されないため、
-対象クレートを `-p` で指定して有効化する（ワークスペースルートで
-`cargo build -p sepika-app --features mcp` のように**フラグを持たない
-クレートを指定するとエラーになる**ことに注意）。
-
-```bash
-# MCP サーバのビルド・テスト（bin ターゲット含む）
-cargo build -p sepika-mcp --features mcp
-cargo test  -p sepika-mcp --features mcp
-
-# MCP サーバの起動（stdio。使い方は docs/mcp_server/ を参照）
-cargo run -p sepika-mcp --features mcp
-```
-
-## 開発時の検証
-
-検証は「編集中」と「PR 前」の2段階です。
-
-- 編集中：変更したクレートだけ検証する。小さな修正のたびに workspace 全体を回さない
-- PR 前：workspace 全体＋非デフォルト feature のフル検証を行う。
-  CI（`.github/workflows/ci.yml`）も同じ範囲を検証する
-
-具体的なコマンドは「テスト」「静的解析」の各節を正本とする。
-
-## テスト
-
-```bash
-# 編集中：変更クレートのみ
 cargo test -p <changed-crate>
-
-# GUI / MCP 領域を変更したときだけ feature 付きで確認する
-cargo test -p sepika-app --features gui
-cargo test -p sepika-mcp --features mcp
-
-# sepika-io の結果 I/O（parquet feature 配下）を変更したときだけ feature 付きで確認する
-cargo test -p sepika-io --features parquet
-```
-
-PR 前のフル検証は以下です（テスト系コマンドの正本はこの節）。
-決定性テスト（ビット一致確認）は通常テストとして含まれます。
-
-```bash
-# 全テスト実行（default 構成）
-cargo test --workspace --locked
-
-# GUI / MCP / Parquet の非デフォルト feature（3 クレートまとめて 1 回の呼び出し。
-# `クレート名/機能名` 形式で指定する。default 構成は上の実行で別に検証する）
-cargo test -p sepika-app -p sepika-mcp -p sepika-io --features sepika-app/gui,sepika-mcp/mcp,sepika-io/parquet --locked
-
-# Parquet 無効構成の独立検証。sepika-mcp が sepika-io/parquet を常時有効化しているため、
-# --workspace では feature 統一により sepika-io の default（parquet 無効）構成が
-# 独立には検証されない。以下で直接保証する
-cargo test -p sepika-io --locked
-cargo check -p sepika-app --features sepika-app/gui --locked
-```
-
-特定のテストだけ再実行したいときは、名前で絞り込めます。
-
-```bash
-# 決定性テストだけを実行する例
-cargo test --workspace deterministic
-```
-
-### PR 前のその他の検証
-
-```bash
-# 依存方向チェック（循環依存の検出）
-cargo run -p xtask -- check-deps
-```
-
-依存方向は上層から下層のみです。新しいクレート間依存を追加した場合は
-`check-deps` が通ることを必ず確認してください。
-
-### 実モデルの統合テスト
-
-`crates/sepika-app/tests/full_model.rs` は、実建物の ST-Bridge
-（`crates/sepika-app/tests/fixtures/model.stb`。4 層＋PH の S 造・一部 RC、
-節点 166・解析要素 115・小梁 56。ST-Bridge 上のスラブ片 82 枚は取り込み時に大梁の区画（床領域）26 へ帰属を割り当てる）を読み込み、GUI のボタンが呼ぶのと
-同じ入口（`App` の `run_*` / `compute_*`）で全解析を通します。手組みの小規模
-モデルでは現れない、実建物特有の構成（剛床・二次部材・多数のスラブ）に起因する
-退行を検出することが目的です。
-
-```bash
-cargo test -p sepika-app --test full_model
-
-# 既知の不具合として #[ignore] にしているテストを実行する
-cargo test -p sepika-app --test full_model -- --ignored
-
-# スナップショット（代表スカラ）の差分を承認する
-cargo insta review
-```
-
-**`App` に解析エントリ（`run_*` / `compute_*`）を追加したら、このファイルにも
-テストを追加してください。** 追加を怠ると、その機能だけが回帰検出の対象外に
-なります。既定で無効な機能や利用頻度の低い経路ほど、この漏れによって静かに
-壊れます。
-
-現在 `#[ignore]` にしている既知の不具合と、その原因・再開手順は
-[dev_docs/handoff/実モデル統合テスト_申し送り.md](dev_docs/handoff/実モデル統合テスト_申し送り.md)
-にまとめています。
-
-`crates/sepika-app/tests/wall_model.rs` は、`full_model.rs` のフィクスチャに壁要素が
-含まれていないことを補う、壁（耐震壁・フレーム外雑壁）専用の最小フィクスチャです。
-`full_model.rs` の床領域（26 件）を巻き込まずに壁関連の代表スカラを独立してスナップショット
-します。壁の型（`WallAttr`・`MiscWall` 等）を変更したときはこちらも実行してください。
-
-```bash
-cargo test -p sepika-app --test wall_model
-```
-
-## 静的解析
-
-編集中は変更クレートのみ、PR 前は以下の CI 相当のフル検証を行います
-（`--all-targets` がないとテストコードが clippy の対象外になります）。
-
-```bash
-# 編集中：変更クレートのみ（GUI / MCP / Parquet 領域の変更時は feature 付きも同様に -p で確認する）
 cargo clippy -p <changed-crate> --all-targets --locked -- -D warnings
 ```
 
-```bash
-# PR 前のフル検証（clippy / fmt 系の正本はこの節）。
-# GUI / MCP / Parquet の feature 付き検証は、同じ依存グラフを
-# 何度も構築しないよう 3 クレートまとめて 1 回の呼び出しにしている
-# （`sepika-app/gui` のような `クレート名/機能名` 形式で指定する）。
-# default 構成の検証は別に維持するため、`--all-features` にはまとめない。
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo clippy -p sepika-app -p sepika-mcp -p sepika-io --all-targets --features sepika-app/gui,sepika-mcp/mcp,sepika-io/parquet --locked -- -D warnings
-cargo fmt --all -- --check
-```
+非デフォルト feature 配下を変更した場合は、対象クレートが持つ関連 feature を有効にして確認します。
+feature 定義は各クレートの `Cargo.toml` を参照してください。
 
-`cargo fmt --all` で自動整形できます。
+PR 前は、変更範囲と合理的に影響を受ける範囲を検証します。共通型・データモデル・解析コア・
+シリアライズやファイル形式・workspace や Cargo feature・クレート間依存・複数クレートの API
+を変更した場合は、利用側や関連構成まで範囲を広げます。
+無関係なクレートや統合テストを、PR 前という理由だけで毎回ローカル実行することは必須ではありません。
 
-**フラグ付きの検証を省略しないでください。** `gui`・`mcp` は既定で無効な
-フィーチャフラグのため、1 行目のワークスペース全体の実行だけでは
-`cfg(feature = "gui")` 配下のコード（GUI のビュー・テーブル・3D 表示のほぼ全体）が
-コンパイルすらされません。フラグ付きでしか現れないビルドエラー・警告があります。
-`sepika-io` の `results`（Parquet 結果 I/O）も `parquet` feature 配下のため、
-`-p sepika-io` 単体では既定で検証されません（workspace 解決では mcp 経由で
-有効化されますが、明示指定で io 単体の検証も保証します）。
+新しいクレート間依存を追加した場合は `cargo run -p xtask -- check-deps` を実行し、
+依存方向を確認してください。文書変更時の検証は [文書の執筆・検証](dev_docs/docs_authoring.md) を参照してください。
 
-テストも同様に、フラグ付きの実行が必要です。テスト系のフル検証コマンドは
-「テスト」節を正本とします。
-
-### ツールチェインのバージョンを合わせる
-
-**静的解析を実行する前に、ツールチェインを最新の stable へ更新してください。**
-
-```bash
-rustup update stable
-cargo clippy --version
-```
-
-CI は `dtolnay/rust-toolchain@stable` で**その時点の最新 stable** を取得します。clippy の
-lint は stable の更新で追加・拡張されるため、手元のツールチェインが古いと手元では通って
-CI だけが落ちます。実際に、手元の 1.94 では通ったコードが CI の 1.97 で
-`explicit_counter_loop` に引っかかった例があります。また、手元の 1.96/1.97 では通ったコードが
-CI の 1.98 で `needless_late_init` に引っかかった例もあります。**2026-08-22 時点で
-CI が使う stable は 1.98 以上のため、手元のツールチェインは少なくとも 1.98 以上に
-更新してください。**
-
-`--locked` が固定するのは `Cargo.lock` による依存の解決だけで、ツールチェインの
-バージョンは固定されません。既存の開発環境や、ツールチェインが同梱されたコンテナを
-使う場合は、そこに入っているものが最新の stable とは限らないため特に注意してください。
-
-## ドキュメントサイト（mdBook）
-
-ドキュメントサイトは**アプリケーション利用者向け**（計算根拠・理論・出典）です。
-[mdBook](https://rust-lang.github.io/mdBook/) で構築しています。
-開発者向けドキュメント（設計判断（ADR）・アーキテクチャ・検証記録・申し送り・ロードマップ）は `dev_docs/` に集約しており、
-サイトには含めません。構成は [dev_docs/README.md](dev_docs/README.md) を参照してください。
-
-```bash
-# mdBook の導入（初回のみ）
-cargo install mdbook
-
-# ローカルでプレビュー（http://localhost:3000、変更を自動リロード）
-mdbook serve --open
-
-# 静的 HTML をビルド（出力先: book/）
-mdbook build
-```
-
-PR 前には、リンク切れと実装参照パスの実在を検証してください。
-
-```bash
-cargo run -p xtask -- check-docs
-mdbook build
-```
-
-- ソース: `docs/`（利用者向けコンテンツのみを置く）
-- 目次: `docs/SUMMARY.md`（ページを追加・削除したらここも更新する）
-- 章・節の番号は mdBook が `docs/SUMMARY.md` の並びから自動採番します。`SUMMARY.md` のタイトルと
-  各ページの見出しに手書きの番号（例: `1.2`）を付けないでください。本文から他の節を参照する場合は、
-  番号ではなく見出しタイトルへのリンク（`[...](...#アンカー)`）にしてください
-- 説明のある節には、その内容を実装している箇所を次の共通表示で追記してください。
-
-  ```html
-  <div class="impl-ref">
-
-  **実装参照**：`sepika_xxx::module::item`（`crates/...`）が…します。
-
-  </div>
-  ```
-
-  参照は必ずコードを検索して実在を確認し、行番号は書きません（陳腐化するため）。既に実装への言及が
-  ある節には重複して書かず、入口となる関数は必要最小限に絞ります（目安 1〜2 個。独立した役割が
-  複数ある場合はこの限りではありません）。ページ全体の実装を末尾の `## 実装参照` 節にまとめる方式の
-  ページでは、そちらを正とし、節ごとの追記は重複する場合に省略してよい。表示スタイルは
-  `theme/impl-ref.css`（`book.toml` の `additional-css`）で全ページ共通です
-- 設定: `book.toml`（数式は `mathjax-support` により `\\(...\\)`／`\\[...\\]` で記述）
-- 各章は**章ディレクトリ＋小項目ページ**の構成です（`docs/calc_basis/` のほか、
-  `docs/model_io/`・`docs/mcp_server/`・`docs/preparation/`・`docs/result_view/`）。
-  小項目を追加したら章の `README.md` の一覧と `docs/SUMMARY.md` に追記してください
-- 章トップの `README.md` は `index.html` として出力される一方、リンクは `README.html` の
-  まま解決されるため、章ディレクトリを追加したら `book.toml` の
-  `[output.html.redirect]` にも 1 行追加してください
-- 全ページ末尾のフッター（MIT License と無保証の注意書き）は `theme/footer.js`・`theme/footer.css`
-  で差し込んでいます。リンク先は `docs/introduction.md` の「ライセンスと免責事項」のため、
-  この見出しを変更する場合は `theme/footer.js` のアンカーも合わせて更新してください
-
-`main` への push で GitHub Pages に自動デプロイされます
-（`.github/workflows/docs.yml`）。API リファレンス（rustdoc）も同時に生成され、
-`/api/` 以下に併設されます。
-
-## UI 実装の約束事
-
-配色・寸法・角丸・フォントサイズなどの値の単一情報源は
-[`crates/sepika-app/src/theme.rs`](crates/sepika-app/src/theme.rs) です。値を変えるときは
-`theme.rs` を直し、同じ値を文書やほかのコードへ写さないでください。
-
-- 文字サイズは `TextStyle`（Heading / Body / Button / Monospace / Small）で指定し、
-  ウィジェットへ `FontId::new(...)` のような生の pt を書かない。サイズの変更は
-  `theme::apply_theme` の 1 か所で行う。
-- テキストを内包する箱の寸法（テーブル行高・ヘッダ高・ステータスバー高など）を固定 px で
-  書かず、`ui.text_style_height()`（例: `theme::table_row_height`）から導出する。和文の
-  フォントフォールバックで行高が変わるため、固定値は文字が見切れる形で壊れる。固定 px は
-  文字が入らない非テキスト形状（アイコン半径・線幅・当たり判定など）に限る。
-- パネル内側余白は `theme.rs` の共通 frame helper（`toolbar_frame` /
-  `content_panel_frame` / `central_panel_frame` / `status_bar_frame` 等）を用い、
-  各 UI で独自値を持たせない。標準の項目間隔を基本にし、密集領域（リスト・
-  アイコン列）のみ明示的に縮める。
-- 表は `table_util::standard_table` を通し、列定義は `Col`、列幅は `ColWidth` トークンで
-  指定する。全列クリップ・列区切りの縦線・縦横スクロールの所在は `table_util` の doc を
-  参照。スプレッドシート様式のグリッド（`grid/`）は意図的に別様式とする。
-
-## CI
-
-PR を作成すると以下が自動実行されます（`.github/workflows/ci.yml`）。
-ローカルで上記の静的解析・テストを通しておくと手戻りが減ります。
-
-- テスト（default 構成の `cargo test --workspace` と、GUI / MCP feature 付きをまとめた呼び出し）
-- Clippy 静的解析（同上: default 全体と feature 付きをまとめた呼び出し）
-- フォーマットチェック
-- 脆弱性確認（cargo audit）
-- 依存性チェック（cargo-deny）
+リポジトリ全体の網羅的な回帰検証は CI が担当します。実際のコマンド・構成の正本は
+[CI workflow](.github/workflows/ci.yml) とし、本書へ一覧を複製しません。
 
 ## Issue の起票
 
-GitHub の Issue 作成画面で、目的に応じて [Issue Forms](.github/ISSUE_TEMPLATE/) を選んでください。
-
-| フォーム | 用途 |
-| --- | --- |
-| Bug / Fix | 不具合修正 |
-| Feature / Change | 機能追加・仕様変更・リファクタリング・性能改善・文書や開発環境の変更 |
-| Investigation / Specification | 実装前の調査・規準照合・仕様確定・設計検討 |
-
-Issue では **Why / What / Scope と完了条件**を明確にし、詳細な実装方法は調査・設計・実装時に決定します。
+GitHub の Issue 作成画面で、目的に合う [Issue Forms](.github/ISSUE_TEMPLATE/) を選んでください。
+入力項目は各フォームを正とし、詳細な実装方法は調査・設計・実装時に決定します。
 分類しづらい親 Issue や初期調査には blank issue も利用できます。
 
 ## プルリクエスト
 
-PR の説明は、レビュアーが「何を、なぜ変えたか」「どのように確認したか」「既存の挙動にどんな影響があるか」を追えることを目的とします。PR 本文には `.github/pull_request_template.md` を使用します。
+1. `main` から作業ブランチを作成します。
+2. 変更を加え、変更範囲と影響範囲をローカルで検証します。
+3. [Git コミットルール](#git-コミットルール) に従ってコミットします。PR タイトルも同じ書式です。
+4. `main` 向けに PR を作成し、[PR テンプレート](.github/pull_request_template.md) に従って記録します。
 
-### 手順
+検証欄には実際にローカルで実行したコマンドと結果を記載し、CI の結果とは区別してください。
+変更内容に対応する文書を更新し、申し送り・V&V の更新時はそれぞれの索引の手順に従います。
 
-1. `main` から作業ブランチを作成する
-2. 変更を加え、上記のビルド・テスト・静的解析が通ることを確認する
-3. 日本語でコミットメッセージを記述する（プレフィックス規約は「Git コミットルール」を参照）
-4. `main` 向けに PR を作成し、本文を `.github/pull_request_template.md` の構成に従って記述する
+## 詳細情報
 
-### タイトル
-
-PR タイトルは「[Git コミットルール](#git-コミットルール)」の書式とプレフィックス規約に従います。
-
-例:
-
-```text
-feat: 荷重ケースのツリー編集に対応する
-fix: 材料未割当の診断漏れを修正する
-docs: 計算根拠の説明を追加する
-```
-
-### 本文
-
-以下を具体的に記載してください。
-
-- **概要**: この PR の目的と、なぜこの変更が必要なのか
-- **変更内容**: 主な変更を、必要なら機能・モデル・UI・テスト・ドキュメントなどに分けて説明
-- **影響・注意事項**: 利用者から見える挙動、データ形式、既存プロジェクトファイル、後方互換性などへの影響
-- **検証**: 実行したテスト・静的解析・ビルドなどと結果
-- **ドキュメント**: `docs/` / `dev_docs/` を更新した場合は対象と理由
-- **残課題**: 後続 PR に回した事項や既知の制約
-- **レビューで確認してほしい点**: 特にレビューしてほしい設計・仕様・実装上のポイント（なければ省略可）
-
-大きな変更では、変更前後の挙動や設計上の判断理由を表や箇条書きで整理するとレビューしやすくなります。レビュー中に検出して修正した不具合や回帰テストを追加した場合は、その内容も記載してください。
-
-### 検証
-
-変更内容に応じて、必要な検証を行ってください。通常は「静的解析」「テスト」節の
-フル検証コマンドに加え、以下を使用します。コマンドの正本は各節に置き、
-ここでは再掲しません。
-
-```bash
-mdbook build
-```
-
-すべてを実行しない場合は、変更範囲に応じて必要なものを選び、PR 本文の「検証」に実行結果を記載してください。CI で実行される検証と、ローカルで実行した検証を混同しないようにしてください。
-
-### ドキュメント
-
-文書の役割と配置先は、[dev_docs/README.md](dev_docs/README.md) の「ドキュメント配置ルール」を正とします。変更内容に対応する文書を更新してください。
-
-### dev_docs（申し送り・V&V）
-
-実装・修正の申し送りや V&V レポートを追加・更新したら、**集約一覧も合わせて更新**してください。
-詳細な索引構成は [dev_docs/README.md](dev_docs/README.md) を参照。
-
-| 操作 | 更新するファイル |
-|------|------------------|
-| 申し送りを新規作成 | [`dev_docs/handoff/README.md`](dev_docs/handoff/README.md) のカテゴリ表・**時系列**表に 1 行ずつ追加（ファイル先頭に `作成日:` を記載） |
-| 残課題がある | [`dev_docs/handoff/残課題一覧.md`](dev_docs/handoff/残課題一覧.md) に 1 行追加 |
-| 残課題が解消した | 上記 `残課題一覧.md` から該当行を削除 |
-| V&V レポートを追加・更新 | [`dev_docs/v_and_v/README.md`](dev_docs/v_and_v/README.md) のレポート目録と索引 #N の状態（✅/🔶/❌）を更新 |
-| 未検証・一部が残る | [`dev_docs/v_and_v/未検証一覧.md`](dev_docs/v_and_v/未検証一覧.md) に 1 行追加 |
-
-申し送りの詳細は個別ファイル、横断的な未完了は [`残課題一覧.md`](dev_docs/handoff/残課題一覧.md)、
-V&V の未完了は [`未検証一覧.md`](dev_docs/v_and_v/未検証一覧.md) が入口です。
-PR 本文の「残課題」欄と内容が食い違わないよう、PR 作成前に一覧の更新を済ませてください。
+文書・コード・設定の正本への入口は [dev_docs/README.md](dev_docs/README.md) にまとめています。
