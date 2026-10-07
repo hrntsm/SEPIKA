@@ -36,8 +36,13 @@
 //! # 新しい解析を追加したとき
 //!
 //! `App` に解析エントリを追加したら、本ファイルにもテストを追加すること
-//! （CONTRIBUTING.md「実モデルの統合テスト」参照）。追加を怠ると、その機能だけが
-//! 回帰検出の対象外になる。
+//! 追加を怠ると、その機能だけが回帰検出の対象外になる。
+//!
+//! # 実行
+//!
+//! `cargo test -p sepika-app --test full_model` で実行する。
+//! `#[ignore]` のテストは末尾に `-- --ignored` を付けて実行する。
+//! スナップショットの差分は `cargo insta review` で確認・承認する。
 
 use sepika_app::app::{App, StaticCaseKey, ThDampingModel, ThDir, DL_CASE_NAME};
 use sepika_core::dof::Dof6Mask;

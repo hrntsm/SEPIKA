@@ -25,23 +25,18 @@
 
 ## 検証
 
-<!-- 実行したコマンドと結果を記載してください。 -->
+<!--
+変更範囲と合理的に影響を受ける範囲について、実際にローカルで実行したコマンドと結果を記載してください。
+全 CI コマンドのローカル実行は必須ではありません。検証範囲を選んだ理由や未実施の検証があれば補足してください。
+CI の結果を記載する場合は、ローカルの実行結果と分けてください。
+レビュー中に修正した不具合や追加した回帰テストも記載してください。
+-->
 
-- [ ] `cargo clippy --workspace --all-targets --locked -- -D warnings`
-- [ ] `cargo clippy -p sepika-app -p sepika-mcp -p sepika-io --all-targets --features sepika-app/gui,sepika-mcp/mcp,sepika-io/parquet --locked -- -D warnings`
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo test --workspace --locked`
-- [ ] `cargo test -p sepika-app -p sepika-mcp -p sepika-io --features sepika-app/gui,sepika-mcp/mcp,sepika-io/parquet --locked`
-- [ ] `cargo test -p sepika-io --locked`
-- [ ] `cargo check -p sepika-app --features sepika-app/gui --locked`
-- [ ] `cargo run -p xtask -- check-deps`
-- [ ] `mdbook build`
+| ローカルで実行したコマンド | 結果 |
+| --- | --- |
+|  |  |
 
-<!-- 実行していない項目はそのままで構いません。変更範囲に応じて必要な検証を行い、結果や補足を以下に記載してください。 -->
-
-### 検証結果
-
-<!-- 例: cargo test -p sepika-app --features gui: 475 passed / 0 failed -->
+<!-- 大きな変更では変更前後の挙動や設計判断を整理し、レビューに必要な情報を補ってください。 -->
 
 ## ドキュメント
 

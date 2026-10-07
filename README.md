@@ -32,7 +32,7 @@ Layer 7: sepika-mcp（MCP サーバ）、sepika-app（GUI アプリケーショ�
 
 ## ビルド・開発
 
-手順の詳細（テスト・静的解析・機能フラグ）は [CONTRIBUTING.md](CONTRIBUTING.md) を参照。
+開発参加の手順とローカル検証の考え方は [CONTRIBUTING.md](CONTRIBUTING.md) を参照。
 
 ```bash
 # ワークスペース全体ビルド
@@ -52,7 +52,7 @@ cargo run -p sepika-mcp --features mcp
 計算根拠・理論・入出力・MCP の使い方は [docs/](docs/) を mdBook でビルドした
 [ドキュメントサイト](https://hrntsm.github.io/SEPIKA/) に公開している
 （`main` への push で GitHub Pages に自動デプロイ）。
-ローカルプレビューは [CONTRIBUTING.md](CONTRIBUTING.md#ドキュメントサイトmdbook) を参照。
+ローカルプレビューは [文書の執筆・検証](dev_docs/docs_authoring.md#ローカルでの確認) を参照。
 
 主な章: [はじめに](docs/introduction.md) · [モデル入出力](docs/model_io/README.md) ·
 [MCP サーバ](docs/mcp_server/README.md) ·

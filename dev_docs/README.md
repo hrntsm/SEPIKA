@@ -1,55 +1,40 @@
 # dev_docs — 開発者向けドキュメント
 
-SEPIKA の開発者向けドキュメントを集約したディレクトリ。
-**利用者向けの計算根拠は `docs/`（mdBook サイト）** にあり、本ディレクトリはサイトには含めない。
-
 ## ドキュメント配置ルール（正本）
 
-どの情報をどこへ書くかは、この表を唯一の正本とする。`AGENTS.md` と `CONTRIBUTING.md` はこの表を参照し、同じルールを重複して書かない。
+どの情報をどこへ書くかは、本書を唯一の索引・配置ルールとする。
+1 つのルールは 1 か所だけを正本とし、詳細はリンク先で管理する。
 
-| 置き場 | 書くもの |
-|--------|----------|
-| [AGENTS.md](../AGENTS.md) | エージェントの判断に必要な原則と、各正本への参照 |
-| [CONTRIBUTING.md](../CONTRIBUTING.md) | 一般開発ルールの正本（コミット・コード・テスト・コメント・検証・PR の手順） |
-| [.github/ISSUE_TEMPLATE/](../.github/ISSUE_TEMPLATE/) | Issue 起票時に Why / What / Scope と完了条件を揃える入力フォーム |
-| [.github/pull_request_template.md](../.github/pull_request_template.md) | PR 本文の構成と記入欄 |
-| [CONTEXT.md](../CONTEXT.md) | 用語の意味・禁止語（会話と設計の語彙） |
-| [adr/](adr/) | 重要な設計判断と理由。現在有効かどうかは Status で管理する |
-| [handoff/](handoff/README.md) | 実装経緯・移行記録・申し送り・残課題 |
-| [v_and_v/](v_and_v/README.md) | 検証の証拠（V&V レポート・原典照合リスト） |
-| [architecture.md](architecture.md) | 開発者向けアーキテクチャ（クレート階層・依存方向） |
-| [docs/](../docs/) | 現在の製品仕様・計算根拠。利用者向けサイトの正本。開発者も現在仕様はここを見る |
-
-**現在の製品仕様（利用者から見える挙動・既定値・制約・計算根拠）は `docs/` が唯一の正本であり、
-`dev_docs/` に同じ現在仕様を重複して書かない。** `dev_docs/` は、現在仕様そのものではなく、
-その背景にある設計判断（ADR）・検証（V&V）・経緯（handoff）・開発者向けアーキテクチャを扱う。
-
-## パッと見る一覧
-
-| 一覧 | 内容 |
-|------|------|
-| [**handoff/残課題一覧.md**](handoff/残課題一覧.md) | 実装残りの集約チェックリスト |
-| [**v_and_v/未検証一覧.md**](v_and_v/未検証一覧.md) | V&V 未完了（❌/🔶）の集約チェックリスト |
-
-## 構成
-
-| ディレクトリ / ファイル | 内容 |
+| 置き場 | 正本とする内容 |
 | --- | --- |
-| [`adr/`](adr/) | 設計判断（ADR）の正本 |
-| [`architecture.md`](architecture.md) | 開発者向けアーキテクチャ（クレート階層・依存方向） |
-| [`v_and_v/`](v_and_v/README.md) | Verification & Validation（参照実装照合・監査・レビュー記録・原典照合リスト） |
-| [`handoff/`](handoff/README.md) | 申し送り・開発運用ドキュメント（実装内容と残課題） |
+| [AGENTS.md](../AGENTS.md) | エージェントの実装・判断原則。コード・テスト・コメントの原則、安全性判断、語彙・ADR、Goal / Scope の扱い |
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | 開発参加の基本フロー。言語、コミット形式、ローカル検証の考え方、Issue / PR の手順 |
+| [.github/ISSUE_TEMPLATE/](../.github/ISSUE_TEMPLATE/) | Issue 起票時の入力項目 |
+| [.github/pull_request_template.md](../.github/pull_request_template.md) | PR で記録する内容。実際にローカルで実行した検証と結果 |
+| [.github/workflows/ci.yml](../.github/workflows/ci.yml) | CI で実行する網羅的検証のコマンド・構成 |
+| [CONTEXT.md](../CONTEXT.md) | ドメイン語彙 |
+| [docs/](../docs/) | GUI から利用する構造設計者向けの製品ドキュメント。現在仕様・理論・計算根拠と、分離した実装参照 |
+| [docs_authoring.md](docs_authoring.md) | 製品ドキュメントの執筆・検証・プレビュー手順 |
+| [adr/](adr/README.md) | 設計判断と理由。現在有効かどうかは Status で管理 |
+| [handoff/](handoff/README.md) | 実装経緯・申し送り・残課題。目録と更新手順はリンク先で管理 |
+| [v_and_v/](v_and_v/README.md) | V&V の証拠・未検証項目。目録・要素→テスト索引と更新手順はリンク先で管理 |
+| [architecture.md](architecture.md) | クレート構成・依存方向等のアーキテクチャ |
+| [theme.rs](../crates/sepika-app/src/theme.rs)・[table_util.rs](../crates/sepika-app/src/table_util.rs) | UI のテーマ・frame helper・表の規約と実装 |
+| [full_model.rs](../crates/sepika-app/tests/full_model.rs)・[wall_model.rs](../crates/sepika-app/tests/wall_model.rs) | 実モデル統合テスト固有の情報・実行方法。既知不具合・経緯は [既存 handoff](handoff/実モデル統合テスト_申し送り.md) |
+| [book.toml](../book.toml)・[theme/](../theme/)・[docs workflow](../.github/workflows/docs.yml) | mdBook 設定、表示・フッター、公開と API リファレンス生成の実装 |
 
-### handoff（申し送り）
+`docs/` は **GUI から SEPIKA を利用する構造設計者向け**の製品ドキュメントとする。
+本文は、理論・計算根拠・利用者から見える現在仕様・制約を中心とする。
+実装上の注意事項も「関数 A が X を Y として扱う」ではなく「この機能では X は Y として扱われる」
+という利用者向け仕様として説明する。
+OSS としてコードまで追えるよう、既存の `実装参照` を本文と分離して維持する。
+これは実装位置への導線であり、API ドキュメントや実装詳細の解説、本文の代わりではない。
+具体的な執筆規約は [docs_authoring.md](docs_authoring.md) を正とする。
 
-- [**README.md**](handoff/README.md) — 全申し送りファイルの目録（**時系列**・カテゴリ別）
-- [**残課題一覧.md**](handoff/残課題一覧.md) — 未完了項目の集約チェックリスト
-- [`ROADMAP.md`](handoff/ROADMAP.md) — 動作達成ロードマップ（2026-07 完了済み・歴史的記録）
-- [`申し送り.md`](handoff/申し送り.md) — 初期ロードマップ実装の横断申し送り
+現在の製品仕様・既定値・制約・計算根拠は `docs/` を唯一の正本とし、`dev_docs/` に複製しない。
+`dev_docs/` は判断・検証・経緯・アーキテクチャを扱い、製品ドキュメントサイトには含めない。
 
-### v_and_v（検証記録）
+## 未完了項目へのショートカット
 
-- [**README.md**](v_and_v/README.md) — レポート目録・要素→テスト索引
-- [**未検証一覧.md**](v_and_v/未検証一覧.md) — 未検証・一部項目の集約チェックリスト
-- [`原典照合リスト.md`](v_and_v/原典照合リスト.md) — 法令・規準の埋め込み値の専門家照合チェックリスト
-- [`pending_items.md`](v_and_v/pending_items.md) — P9 仕様乖離の歴史的記録
+- [残課題一覧](handoff/残課題一覧.md)
+- [未検証一覧](v_and_v/未検証一覧.md)
