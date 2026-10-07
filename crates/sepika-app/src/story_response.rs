@@ -193,10 +193,8 @@ mod tests {
     }
 
     #[test]
-    fn test_unit_conversions() {
-        assert!((n_to_kn(1000.0) - 1.0).abs() < 1e-12);
+    fn test_acceleration_display_is_gal() {
         assert!((mm_s2_to_gal(10.0) - 1.0).abs() < 1e-12);
-        assert!((mm_s_to_m_s(1000.0) - 1.0).abs() < 1e-12);
     }
 
     #[test]

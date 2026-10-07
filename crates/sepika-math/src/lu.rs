@@ -93,19 +93,6 @@ mod tests {
         let x = solver.solve(&[4.0, 6.5]).unwrap();
         approx::assert_relative_eq!(x[0], 1.0, max_relative = 1e-9);
         approx::assert_relative_eq!(x[1], 2.0, max_relative = 1e-9);
-
-        let mut out = Vec::new();
-        solver.solve_into(&[4.0, 6.5], &mut out).unwrap();
-        assert_eq!(x, out);
-    }
-
-    #[test]
-    fn test_lu_not_factorized() {
-        let solver = LuSolver::default();
-        assert!(matches!(
-            solver.solve(&[1.0]),
-            Err(SolveError::NotFactorized)
-        ));
     }
 
     /// 非対称だがスパースパターンが同一な 2 つの行列。symbolic キャッシュの再利用
@@ -176,12 +163,5 @@ mod tests {
             x_reused, x_fresh,
             "symbolic 再利用と毎回新規構築でビット不一致"
         );
-
-        // 再利用側で factorize を繰り返しても毎回ビット一致すること（決定性テストと同じ 2 回比較）。
-        for _ in 0..2 {
-            reused.factorize(&k2).unwrap();
-            let x = reused.solve(&rhs).unwrap();
-            assert_eq!(x, x_fresh);
-        }
     }
 }

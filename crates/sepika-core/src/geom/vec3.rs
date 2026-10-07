@@ -77,32 +77,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dot_cross_norm_の基本則() {
-        let a = [1.0, 0.0, 0.0];
-        let b = [0.0, 2.0, 0.0];
-        assert_eq!(dot(a, b), 0.0);
-        assert_eq!(cross(a, b), [0.0, 0.0, 2.0]);
-        assert_eq!(norm(b), 2.0);
-        // 外積は両ベクトルに直交する。
-        let c = cross(a, b);
-        assert_eq!(dot(c, a), 0.0);
-        assert_eq!(dot(c, b), 0.0);
-    }
-
-    #[test]
-    fn unit_は縮退ベクトルで_none_を返す() {
-        assert_eq!(unit([0.0, 0.0, 0.0]), None);
-        assert_eq!(unit([ZERO_TOL, 0.0, 0.0]), None);
-        assert_eq!(unit([0.0, 3.0, 4.0]), Some([0.0, 0.6, 0.8]));
-    }
-
-    #[test]
-    fn dist_と_midpoint() {
-        let a = [0.0, 0.0, 0.0];
-        let b = [3.0, 4.0, 0.0];
-        assert_eq!(dist(a, b), 5.0);
-        assert_eq!(midpoint(a, b), [1.5, 2.0, 0.0]);
-        assert_eq!(unit_from(a, b), Some([0.6, 0.8, 0.0]));
-        assert_eq!(unit_from(a, a), None);
+    fn unit_and_direction_reject_degenerate_vectors() {
+        for (vector, expected) in [
+            ([0.0; 3], None),
+            ([ZERO_TOL, 0.0, 0.0], None),
+            ([0.0, 3.0, 4.0], Some([0.0, 0.6, 0.8])),
+        ] {
+            assert_eq!(unit(vector), expected);
+            assert_eq!(unit_from([0.0; 3], vector), expected);
+        }
+        assert_eq!(unit_from([3.0, 4.0, 0.0], [3.0, 4.0, 0.0]), None);
     }
 }

@@ -220,36 +220,6 @@ mod tests {
     use crate::sparse::{assemble_csc, Triplet};
 
     #[test]
-    fn test_pcg_not_factorized() {
-        let solver = PcgSolver::new(1e-6, 100);
-        let result = solver.solve(&[1.0, 2.0]);
-        assert!(matches!(result, Err(SolveError::NotFactorized)));
-    }
-
-    #[test]
-    fn test_pcg_dim_mismatch() {
-        let k = assemble_csc(
-            2,
-            vec![
-                Triplet {
-                    row: 0,
-                    col: 0,
-                    val: 1.0,
-                },
-                Triplet {
-                    row: 1,
-                    col: 1,
-                    val: 1.0,
-                },
-            ],
-        );
-        let mut solver = PcgSolver::new(1e-6, 100);
-        solver.factorize(&k).unwrap();
-        let result = solver.solve(&[1.0]);
-        assert!(matches!(result, Err(SolveError::DimMismatch { .. })));
-    }
-
-    #[test]
     fn test_pcg_agrees_with_direct() {
         use crate::cholesky::CholeskySolver;
         let k = assemble_csc(

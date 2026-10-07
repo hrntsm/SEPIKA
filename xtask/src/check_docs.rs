@@ -251,68 +251,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extracts_relative_md_links() {
-        let links = markdown_links("参照: [a](./b.md) と [c](../d.md)");
-        assert_eq!(links, vec!["./b.md".to_string(), "../d.md".to_string()]);
-    }
-
-    #[test]
-    fn strips_anchor_from_md_link() {
-        let links = markdown_links("[a](./b.md#見出し)");
-        assert_eq!(links, vec!["./b.md".to_string()]);
-    }
-
-    #[test]
-    fn ignores_https_links() {
-        assert!(markdown_links("[a](https://example.com/x.md)").is_empty());
-    }
-
-    #[test]
-    fn ignores_anchor_only_links() {
-        assert!(markdown_links("[a](#見出し)").is_empty());
-    }
-
-    #[test]
-    fn ignores_image_links() {
-        assert!(markdown_links("![a](./b.md)").is_empty());
-    }
-
-    #[test]
-    fn ignores_fenced_content() {
-        let text = "```\n[a](./b.md)\n`crates/x.rs`\n```\n[c](./d.md)\n";
-        assert_eq!(markdown_links(text), vec!["./d.md".to_string()]);
-        assert!(impl_refs(text).is_empty());
-    }
-
-    #[test]
-    fn ignores_tilde_fenced_content() {
-        let text = "~~~\n[a](./b.md)\n`crates/x.rs`\n~~~\n";
-        assert!(markdown_links(text).is_empty());
-        assert!(impl_refs(text).is_empty());
-    }
-
-    #[test]
-    fn does_not_close_backtick_fence_with_tildes() {
-        let text = "```rust\n[a](./b.md)\n~~~\n`crates/x.rs`\n```\n[c](./d.md)\n";
-        assert_eq!(markdown_links(text), vec!["./d.md".to_string()]);
-        assert!(impl_refs(text).is_empty());
-    }
-
-    #[test]
-    fn does_not_close_longer_fence_with_shorter_run() {
-        let text = "````\n[a](./b.md)\n```\n`crates/x.rs`\n````\n";
-        assert!(markdown_links(text).is_empty());
-        assert!(impl_refs(text).is_empty());
-    }
-
-    #[test]
-    fn ignores_blockquoted_fenced_content() {
-        let text = "> ```rust\n> [a](./b.md)\n> `crates/x.rs`\n> ```\n[c](./d.md)\n> [e](./f.md)\n";
-        assert_eq!(
-            markdown_links(text),
-            vec!["./d.md".to_string(), "./f.md".to_string()]
-        );
-        assert!(impl_refs(text).is_empty());
+    fn parses_links_and_impl_refs_outside_fences() {
+        let cases: [(&str, &[&str], &[&str]); 11] = [
+            (
+                "参照: [a](./b.md) と [c](../d.md)",
+                &["./b.md", "../d.md"],
+                &[],
+            ),
+            ("[a](./b.md#見出し)", &["./b.md"], &[]),
+            ("[a](https://example.com/x.md)", &[], &[]),
+            ("[a](#見出し)", &[], &[]),
+            ("![a](./b.md)", &[], &[]),
+            (
+                "```\n[a](./b.md)\n`crates/x.rs`\n```\n[c](./d.md)\n",
+                &["./d.md"],
+                &[],
+            ),
+            ("~~~\n[a](./b.md)\n`crates/x.rs`\n~~~\n", &[], &[]),
+            (
+                "```rust\n[a](./b.md)\n~~~\n`crates/x.rs`\n```\n[c](./d.md)\n",
+                &["./d.md"],
+                &[],
+            ),
+            ("````\n[a](./b.md)\n```\n`crates/x.rs`\n````\n", &[], &[]),
+            (
+                "> ```rust\n> [a](./b.md)\n> `crates/x.rs`\n> ```\n[c](./d.md)\n> [e](./f.md)\n",
+                &["./d.md", "./f.md"],
+                &[],
+            ),
+            (
+                "実装 `crates/a/b.rs` と `xtask/src/c.rs`",
+                &[],
+                &["crates/a/b.rs", "xtask/src/c.rs"],
+            ),
+        ];
+        for (text, links, refs) in cases {
+            assert_eq!(markdown_links(text), links, "{text}");
+            assert_eq!(impl_refs(text), refs, "{text}");
+        }
     }
 
     #[test]
@@ -379,15 +355,6 @@ mod tests {
             .any(|e| e == "BROKEN DOC LINK: docs/a.md -> ./sub.md"));
 
         let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn extracts_crate_impl_refs() {
-        let refs = impl_refs("実装 `crates/a/b.rs` と `xtask/src/c.rs`");
-        assert_eq!(
-            refs,
-            vec!["crates/a/b.rs".to_string(), "xtask/src/c.rs".to_string()]
-        );
     }
 
     #[test]

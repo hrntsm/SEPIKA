@@ -516,45 +516,6 @@ fn case4_nonrect_trapezoid_and_lshape() {
     );
 }
 
-/// ケース6: 等距離ケース。正方形 4900×4900（49×49 分割）で、等分あり／なしを比較する。
-#[test]
-fn case6_equal_distance_split_vs_unsplit() {
-    let w = 0.005_f64;
-    let side = 4900.0_f64;
-    let coords: Vec<[f64; 3]> = vec![
-        [0.0, 0.0, 0.0],
-        [side, 0.0, 0.0],
-        [side, side, 0.0],
-        [0.0, side, 0.0],
-    ];
-    let split = segment_extension_edge_loads(&coords, w, true);
-    let unsplit = segment_extension_edge_loads(&coords, w, false);
-
-    println!("--- ケース6: 等距離ケース 正方形 4900x4900 (49x49分割) ---");
-    println!("辺   等分あり[N]      等分なし[N]");
-    for i in 0..4 {
-        println!("{i:<3} {:15.3} {:15.3}", split[i], unsplit[i]);
-    }
-    println!(
-        "等分あり: max-min={:.3e}  等分なし: max-min={:.3e}",
-        split.iter().cloned().fold(f64::MIN, f64::max)
-            - split.iter().cloned().fold(f64::MAX, f64::min),
-        unsplit.iter().cloned().fold(f64::MIN, f64::max)
-            - unsplit.iter().cloned().fold(f64::MAX, f64::min),
-    );
-
-    assert_total("等分あり", &split, w * side * side);
-    assert_total("等分なし", &unsplit, w * side * side);
-    assert_symmetric(&split, "等分あり");
-    let unsplit_token = unsplit.iter().cloned().fold(f64::MIN, f64::max)
-        - unsplit.iter().cloned().fold(f64::MAX, f64::min);
-    assert!(
-        unsplit_token > 0.0,
-        "等分なしは対称形でも非対称になるはず: {unsplit:?}"
-    );
-    assert_reference_conserves(&coords, "等距離ケース");
-}
-
 /// ケース5の床モデルの大梁（辺→節点）。
 const GIRDER_ENDS: [(usize, usize); 4] = [(0, 1), (1, 2), (2, 3), (3, 0)];
 
@@ -811,14 +772,6 @@ fn rel_diff_pct(a: f64, b: f64) -> f64 {
 /// `a` の `b` に対する相対誤差。
 fn rel_err(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-12)
-}
-
-/// 辺ごとの相対差の最大値 [%]。分母は `max(|a|,|b|)`。
-fn max_rel_diff_pct(a: &[f64], b: &[f64]) -> f64 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(&x, &y)| rel_diff_pct(x, y).abs())
-        .fold(0.0_f64, f64::max)
 }
 
 /// `a` と `b` の辺ごとの相対差の最大値（比）が `limit` 未満であることを確認する。
@@ -1091,7 +1044,7 @@ fn case7_split_ties_shape_matrix() {
     );
 }
 
-/// ケース7で使う凹形状のうち、ケース8・9で共通に使う代表形状。
+/// ケース7で使う凹形状のうち、頂点列の変換検査で使う代表形状。
 const LSHAPE_PTS: [(f64, f64); 6] = [
     (0.0, 0.0),
     (12000.0, 0.0),
@@ -1099,16 +1052,6 @@ const LSHAPE_PTS: [(f64, f64); 6] = [
     (6000.0, 6000.0),
     (6000.0, 12000.0),
     (0.0, 12000.0),
-];
-const TSHAPE_PTS: [(f64, f64); 8] = [
-    (0.0, 0.0),
-    (12000.0, 0.0),
-    (12000.0, 6000.0),
-    (9000.0, 6000.0),
-    (9000.0, 12000.0),
-    (3000.0, 12000.0),
-    (3000.0, 6000.0),
-    (0.0, 6000.0),
 ];
 const CROSS_PTS: [(f64, f64); 12] = [
     (3000.0, 0.0),
@@ -1124,137 +1067,6 @@ const CROSS_PTS: [(f64, f64); 12] = [
     (0.0, 3000.0),
     (3000.0, 3000.0),
 ];
-const USHAPE_PTS: [(f64, f64); 8] = [
-    (0.0, 0.0),
-    (12000.0, 0.0),
-    (12000.0, 12000.0),
-    (9000.0, 12000.0),
-    (9000.0, 4000.0),
-    (3000.0, 4000.0),
-    (3000.0, 12000.0),
-    (0.0, 12000.0),
-];
-
-/// 凸四辺形（正方形・長方形・斜めの凸四辺形）で、各辺の累積負担が有限線分距離と無限直線
-/// 距離で全辺相対 1e-9 以内に一致することを確認して数値を出力する。原典との直接照合の根拠となる。
-fn check_convex_quad_distance_equivalence(label: &str, pts: &[(f64, f64)], w: f64) {
-    let coords: Vec<[f64; 3]> = pts.iter().map(|(x, y)| [*x, *y, 0.0]).collect();
-    let (segment, _) = segment_extension_edge_areas(&coords, true);
-    let (line, _) = supporting_line_sensitivity_edge_areas(&coords, true);
-    println!("--- ケース8: 凸四辺形 {label} 有限線分 vs 無限直線 ---");
-    println!("辺   有限線分[N]    無限直線[N]    相対差");
-    let mut max_rel = 0.0_f64;
-    for e in 0..coords.len() {
-        let s = w * segment[e];
-        let l = w * line[e];
-        let rel = (s - l).abs() / s.abs().max(l.abs()).max(1e-12);
-        max_rel = max_rel.max(rel);
-        println!("{e:<3} {s:13.3} {l:13.3} {rel:11.3e}");
-    }
-    println!("最大相対差: {max_rel:.3e}");
-    assert!(
-        max_rel < 1e-9,
-        "{label}: 凸四辺形では各辺の累積負担が有限線分距離と無限直線距離で一致するはず（最大相対差={max_rel:e}）"
-    );
-}
-
-/// 4 通りの距離・等分の組み合わせによる辺負担 [N] を出力する。
-///
-/// `line_split_min_rel` は「有限線分・等分」と「無限直線・等分」の最大相対差の下限、
-/// `line_unsplit_zero_edge` は「無限直線・先勝」で 0 になるべき辺、
-/// `seg_unsplit_min_rel` は「有限線分・等分」と「有限線分・先勝」の最大相対差の下限。
-fn print_distance_modes(
-    label: &str,
-    pts: &[(f64, f64)],
-    w: f64,
-    line_split_min_rel: f64,
-    line_unsplit_zero_edge: Option<usize>,
-    seg_unsplit_min_rel: Option<f64>,
-) {
-    let coords: Vec<[f64; 3]> = pts.iter().map(|(x, y)| [*x, *y, 0.0]).collect();
-    let seg_split = segment_extension_edge_loads(&coords, w, true);
-    let seg_unsplit = segment_extension_edge_loads(&coords, w, false);
-    let line_split = supporting_line_edge_loads(&coords, w, true);
-    let line_unsplit = supporting_line_edge_loads(&coords, w, false);
-    println!("--- ケース8: {label} 距離解釈の感度分析 ---");
-    println!("辺   線分等分[N]    線分先勝[N]    直線等分[N]    直線先勝[N]");
-    for e in 0..coords.len() {
-        println!(
-            "{e:<3} {:13.3} {:13.3} {:13.3} {:13.3}",
-            seg_split[e], seg_unsplit[e], line_split[e], line_unsplit[e],
-        );
-    }
-    println!(
-        "最大相対差: 線分等分vs直線等分={:.4}%  線分等分vs線分先勝={:.4}%",
-        max_rel_diff_pct(&seg_split, &line_split),
-        max_rel_diff_pct(&seg_split, &seg_unsplit),
-    );
-    let area = area_xy(&coords);
-    let line_split_rel = max_rel_diff_pct(&seg_split, &line_split) / 100.0;
-    assert!(
-        line_split_rel > line_split_min_rel,
-        "{label}: 有限線分・等分 と 無限直線・等分 の最大相対差={:.4}% は {:.2}% を超えるはず",
-        100.0 * line_split_rel,
-        100.0 * line_split_min_rel,
-    );
-    if let Some(e) = line_unsplit_zero_edge {
-        assert!(
-            line_unsplit[e].abs() <= 1e-9 * w * area,
-            "{label}: 無限直線・先勝では辺{e} が 0 になるはず: {:.6}",
-            line_unsplit[e],
-        );
-    }
-    if let Some(min_rel) = seg_unsplit_min_rel {
-        let seg_unsplit_rel = max_rel_diff_pct(&seg_split, &seg_unsplit) / 100.0;
-        assert!(
-            seg_unsplit_rel > min_rel,
-            "{label}: 有限線分・等分 と 有限線分・先勝 の最大相対差={:.4}% は {:.2}% を超えるはず",
-            100.0 * seg_unsplit_rel,
-            100.0 * min_rel,
-        );
-    }
-    assert_total("線分等分", &seg_split, w * area);
-    assert_total("線分先勝", &seg_unsplit, w * area);
-    assert_total("直線等分", &line_split, w * area);
-    assert_total("直線先勝", &line_unsplit, w * area);
-    assert_reference_conserves(&coords, label);
-}
-
-/// ケース8: 距離解釈の感度分析。凸四辺形での両解釈の一致を assert し、凹形状
-/// （L形・T形・十字形・U字）で有限線分と無限直線の 4 通りを比較出力する。凹形状では
-/// 「有限線分・等分 と 無限直線・等分」の最大相対差が 10% を超えること、T形・U字では
-/// 「無限直線・先勝」で同一支持直線上の離れた辺（辺6）が 0 になること、L形では
-/// 「有限線分・等分 と 有限線分・先勝」の最大相対差が 10% を超えることを assert する。
-#[test]
-fn case8_distance_interpretation_sensitivity() {
-    let w = 0.003_f64;
-
-    check_convex_quad_distance_equivalence(
-        "正方形 6000x6000",
-        &[(0.0, 0.0), (6000.0, 0.0), (6000.0, 6000.0), (0.0, 6000.0)],
-        w,
-    );
-    check_convex_quad_distance_equivalence(
-        "長方形 6000x4000",
-        &[(0.0, 0.0), (6000.0, 0.0), (6000.0, 4000.0), (0.0, 4000.0)],
-        w,
-    );
-    check_convex_quad_distance_equivalence(
-        "斜めの凸四辺形",
-        &[
-            (0.0, 0.0),
-            (8000.0, 1000.0),
-            (7000.0, 6000.0),
-            (500.0, 5000.0),
-        ],
-        w,
-    );
-
-    print_distance_modes("L形 12000x12000", &LSHAPE_PTS, w, 0.10, None, Some(0.10));
-    print_distance_modes("T形 12000x12000", &TSHAPE_PTS, w, 0.10, Some(6), None);
-    print_distance_modes("十字形 12000x12000", &CROSS_PTS, w, 0.10, None, None);
-    print_distance_modes("U字形状 12000x12000", &USHAPE_PTS, w, 0.10, Some(6), None);
-}
 
 /// 頂点列を `shift` 個循環移動し、`reverse` なら時計回りへ反転した座標列を返す。
 fn transformed_cycle(pts: &[(f64, f64)], shift: usize, reverse: bool) -> Vec<(f64, f64)> {

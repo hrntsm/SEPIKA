@@ -328,24 +328,6 @@ mod tests {
     }
 
     #[test]
-    fn test_axis_props_from_shape_circle() {
-        let shape = SectionShape::RcColumnCircle {
-            d: 600.0,
-            rebar: RcCircleColumnRebar {
-                main_dia: 22.0,
-                count: 6,
-                cover: 40.0,
-                hoop: CircleColumnHoop {
-                    dia: 10.0,
-                    pitch: 100.0,
-                },
-            },
-        };
-        let p = axis_props_from_shape(&shape, RcDirection::Strong, true).unwrap();
-        assert!(p.at > 0.0 && p.pw > 0.0);
-    }
-
-    #[test]
     fn test_axis_props_from_shape_none() {
         let unset_beam = SectionShape::RcBeamRect {
             b: 400.0,

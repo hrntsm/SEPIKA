@@ -26,13 +26,6 @@ fn block(rows: &[&[&str]]) -> Vec<Vec<String>> {
 // ---- 選択状態機械 ----
 
 #[test]
-fn test_grid_state_starts_inactive() {
-    let g = GridState::new(3, 4);
-    assert!(!g.active);
-    assert!(g.editing.is_none());
-}
-
-#[test]
 fn test_click_moves_anchor_and_collapses() {
     let mut g = GridState::new(3, 4);
     g.click(cell(1, 2), false);

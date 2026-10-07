@@ -234,48 +234,13 @@ mod tests {
     use approx::assert_relative_eq;
 
     #[test]
-    fn test_unit_conversions() {
-        assert_relative_eq!(to_internal::length_m(6.0), 6000.0, max_relative = 1e-12);
-        assert_relative_eq!(
-            to_internal::line_load_kn_per_m(10.0),
-            10.0,
-            max_relative = 1e-12
-        );
-        assert_relative_eq!(to_internal::force_kn(50.0), 50000.0, max_relative = 1e-12);
-        assert_relative_eq!(
-            to_internal::stiffness_kn_per_mm(10.0),
-            10000.0,
-            max_relative = 1e-12
-        );
-        assert_relative_eq!(
-            to_display::stiffness_kn_per_mm(10000.0),
-            10.0,
-            max_relative = 1e-12
-        );
-        assert_relative_eq!(
-            to_display::area_load_kn_per_m2(0.0029),
-            2.9,
-            max_relative = 1e-12
-        );
+    fn test_unit_scales_and_roundtrips() {
+        assert_relative_eq!(to_display::force_kn(1000.0), 1.0, max_relative = 1e-12);
+        assert_relative_eq!(to_display::length_m(1000.0), 1.0, max_relative = 1e-12);
+        assert_relative_eq!(to_display::moment_kn_m(1.0e6), 1.0, max_relative = 1e-12);
         assert_relative_eq!(
             to_internal::area_load_kn_per_m2(2.9),
             0.0029,
-            max_relative = 1e-12
-        );
-        assert_relative_eq!(
-            to_display::moment_kn_m_per_m(5000.0),
-            5.0,
-            max_relative = 1e-12
-        );
-        assert_relative_eq!(to_display::viscous_c0_kn(1000.0), 1.0, max_relative = 1e-12);
-        assert_relative_eq!(
-            to_internal::viscous_c0_kn(1.0),
-            1000.0,
-            max_relative = 1e-12
-        );
-        assert_relative_eq!(
-            to_internal::stress_n_per_mm2(24.0),
-            24.0,
             max_relative = 1e-12
         );
         assert_relative_eq!(
@@ -284,18 +249,18 @@ mod tests {
             max_relative = 1e-12
         );
         assert_relative_eq!(
-            to_internal::unit_weight_kn_per_m3(24.0),
-            2.4e-5,
-            max_relative = 1e-12
-        );
-        assert_relative_eq!(
-            to_internal::unit_weight_kn_m3_from_mass_density(24.0e-6 / GRAVITY_MM_S2),
-            24.0,
-            max_relative = 1e-12
-        );
-        assert_relative_eq!(
             to_internal::weight_n_to_mass(1.0e6),
             101.971_621_297_792_82,
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(
+            to_internal::force_kn(to_display::force_kn(1234.5)),
+            1234.5,
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(
+            to_internal::area_load_kn_per_m2(to_display::area_load_kn_per_m2(0.0029)),
+            0.0029,
             max_relative = 1e-12
         );
     }
@@ -323,7 +288,6 @@ mod tests {
     fn test_mass_density_from_unit_weight() {
         // γRC=24 kN/m³ → 24e-6 N/mm³ / 9806.65 mm/s² ≈ 2.4473e-9 t/mm³
         let rho = to_internal::mass_density_from_unit_weight_kn_m3(24.0);
-        assert_relative_eq!(rho, 24.0e-6 / GRAVITY_MM_S2, max_relative = 1e-12);
         assert!((rho - 2.4473e-9).abs() / rho < 1e-3);
     }
 

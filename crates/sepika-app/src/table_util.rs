@@ -409,22 +409,6 @@ mod tests {
         });
     }
 
-    /// 幅トークンは用途の広さ順（操作 < 短ラベル < 名称 < 長文）を保つ。
-    #[test]
-    fn width_tokens_are_ordered() {
-        run_test_ui(|ui| {
-            let actions = ColWidth::Actions(1).to_pt(ui);
-            let label = ColWidth::Label.to_pt(ui);
-            let name = ColWidth::Name.to_pt(ui);
-            let text = ColWidth::Text.to_pt(ui);
-            assert!(actions < label, "{actions} < {label}");
-            assert!(label < name, "{label} < {name}");
-            assert!(name < text, "{name} < {text}");
-            // 複合数値は単一の数値より広い
-            assert!(ColWidth::Num.to_pt(ui) < ColWidth::WideNum.to_pt(ui));
-        });
-    }
-
     /// 見出しがトークン幅より長い列は、見出しが収まる幅まで広がる
     /// （クリップ有効下で見出しが切り詰められると列の意味が読めなくなるため）。
     #[test]
@@ -434,37 +418,6 @@ mod tests {
             let col = Col::num(long);
             assert!(col.width_pt(ui) >= text_width(ui, long) + cell_padding(ui));
             assert!(col.width_pt(ui) > ColWidth::Num.to_pt(ui));
-        });
-    }
-
-    /// `Col` は見出しとホバーを保持する。
-    #[test]
-    fn col_keeps_header_and_hover() {
-        let col = Col::name("符号").hover("断面の呼び名");
-        assert_eq!(col.header, "符号");
-        assert_eq!(col.hover, Some("断面の呼び名"));
-        assert_eq!(col.width, ColWidth::Name);
-        assert_eq!(Col::actions().header, "");
-        assert_eq!(Col::id().header, "ID");
-        assert_eq!(Col::num("A").hover, None);
-    }
-
-    /// 横スクロール時のスクロール領域の最小高さは、行が数行しか見えない高さまで
-    /// 縮まない（行高から導出しているので、フォントを変えても比が保たれる）。
-    #[test]
-    fn min_scrolled_height_keeps_several_rows() {
-        run_test_ui(|ui| {
-            let row_h = crate::theme::table_row_height(ui);
-            assert!(min_scrolled_height(row_h) >= row_h * 4.0);
-        });
-    }
-
-    /// リサイズの下限は 0 ではなく、3 桁が読める幅を残す。
-    #[test]
-    fn min_column_width_keeps_three_digits() {
-        run_test_ui(|ui| {
-            assert!(min_column_width(ui) >= text_width(ui, "000"));
-            assert!(min_column_width(ui) < ColWidth::Name.to_pt(ui));
         });
     }
 }

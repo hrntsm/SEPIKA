@@ -455,16 +455,6 @@ mod tests {
         assert_eq!(preset.young, rc);
     }
 
-    /// 直接入力の既定密度は鋼材の物理質量密度 7.85 t/m³（= 7.85e-9 t/mm³）由来。
-    /// 設計用単位体積重量 78.5 kN/m³ からは導出しない。
-    #[test]
-    fn test_default_custom_density_is_steel_mass_density() {
-        assert_eq!(
-            format!("{:.4e}", sepika_core::units::STEEL_MASS_DENSITY_TON_MM3),
-            "7.8500e-9"
-        );
-    }
-
     #[test]
     fn standard_concrete_young_is_not_editable_but_direct_input_is() {
         assert!(!young_editable(

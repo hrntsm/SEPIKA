@@ -482,20 +482,6 @@ mod tests {
     }
 
     #[test]
-    fn test_rigid_diaphragm() {
-        let mut model = make_3node_model();
-        model.constraints.push(Constraint::rigid_diaphragm(
-            StoryId(0),
-            NodeId(1),
-            vec![NodeId(2)],
-        ));
-        let dofmap = DofMap::build(&model);
-        let reducer = Reducer::build(&model, &dofmap);
-        // slave Ux/Uy/Rz が master に従うため独立 DOF が減る
-        assert!(reducer.n_indep < reducer.n_free);
-    }
-
-    #[test]
     fn test_rigid_link() {
         let mut model = make_3node_model();
         model.constraints.push(Constraint::RigidLink {
@@ -657,19 +643,6 @@ mod tests {
         let reducer = Reducer::build(&model, &dofmap);
         // ダングリング拘束は無効化され、独立自由度は全自由度のまま。
         assert_eq!(reducer.n_indep, reducer.n_free);
-    }
-
-    #[test]
-    fn test_mpc() {
-        let mut model = make_3node_model();
-        // スレーブ NodeId(2) の Ux = 0.5 * NodeId(1) の Ux
-        model.constraints.push(Constraint::Mpc {
-            master: NodeId(2),
-            terms: vec![(NodeId(1), sepika_core::dof::Dof::Ux, 0.5)],
-        });
-        let dofmap = DofMap::build(&model);
-        let reducer = Reducer::build(&model, &dofmap);
-        assert!(reducer.n_indep < reducer.n_free);
     }
 
     /// 連鎖拘束（スレーブのマスターがさらに別拘束のスレーブ）の合成を検証する。

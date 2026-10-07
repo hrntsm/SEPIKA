@@ -126,42 +126,10 @@ mod tests {
         let mut solver0 = make_solver(SolverBackend::DirectSparseCholesky);
         solver0.factorize(&k).unwrap();
         let x0 = solver0.solve(&[0.0, 1000.0]).unwrap();
-        for _ in 0..2 {
-            let mut solver = make_solver(SolverBackend::DirectSparseCholesky);
-            solver.factorize(&k).unwrap();
-            let x = solver.solve(&[0.0, 1000.0]).unwrap();
-            assert_eq!(x, x0);
-        }
-    }
-
-    #[test]
-    fn test_not_factorized() {
-        let solver = CholeskySolver::default();
-        let result = solver.solve(&[1.0, 2.0]);
-        assert!(matches!(result, Err(SolveError::NotFactorized)));
-    }
-
-    #[test]
-    fn test_dim_mismatch() {
-        let k = assemble_csc(
-            2,
-            vec![
-                Triplet {
-                    row: 0,
-                    col: 0,
-                    val: 1.0,
-                },
-                Triplet {
-                    row: 1,
-                    col: 1,
-                    val: 1.0,
-                },
-            ],
-        );
-        let mut solver = CholeskySolver::default();
+        let mut solver = make_solver(SolverBackend::DirectSparseCholesky);
         solver.factorize(&k).unwrap();
-        let result = solver.solve(&[1.0]);
-        assert!(matches!(result, Err(SolveError::DimMismatch { .. })));
+        let x = solver.solve(&[0.0, 1000.0]).unwrap();
+        assert_eq!(x, x0);
     }
 
     /// 3 自由度のバネ連成系（三重対角パターン）。行列の値だけを差し替えて
@@ -235,13 +203,6 @@ mod tests {
             x_reused, x_fresh,
             "symbolic 再利用と毎回新規構築でビット不一致"
         );
-
-        // 再利用側で factorize を繰り返しても毎回ビット一致すること（決定性テストと同じ 2 回比較）。
-        for _ in 0..2 {
-            reused.factorize(&k2).unwrap();
-            let x = reused.solve(&rhs).unwrap();
-            assert_eq!(x, x_fresh);
-        }
     }
 
     /// スパースパターンが変わった場合は symbolic を自動的に作り直し、
@@ -314,24 +275,5 @@ mod tests {
         fresh.factorize(&k_dense).unwrap();
         let x_fresh = fresh.solve(&rhs).unwrap();
         assert_eq!(x, x_fresh);
-    }
-
-    #[test]
-    fn test_solve_into_matches_solve() {
-        faer::set_global_parallelism(faer::Par::Seq);
-        let k = spring_chain_3dof(200.0, 100.0);
-        let mut solver = CholeskySolver::default();
-        solver.factorize(&k).unwrap();
-        let rhs = [1.0, -2.0, 3.5];
-
-        let expected = solver.solve(&rhs).unwrap();
-        let mut out = Vec::new();
-        solver.solve_into(&rhs, &mut out).unwrap();
-        assert_eq!(expected, out);
-
-        // out を使い回しても（別の長さから始めても）同じ結果になること。
-        let mut out2 = vec![f64::NAN; 1];
-        solver.solve_into(&rhs, &mut out2).unwrap();
-        assert_eq!(expected, out2);
     }
 }

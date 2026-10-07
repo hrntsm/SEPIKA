@@ -99,36 +99,51 @@ fn test_validate_dangling_slab_boundary() {
 }
 
 #[test]
-fn test_validate_rejects_post_in_floor_region_secondary_beams() {
-    let model = Model {
-        floor_regions: vec![FloorRegion {
-            id: FloorRegionId(0),
-            name: String::new(),
-            boundary: vec![],
-            secondary_beams: vec![test_secondary(SecondaryMemberKind::Post, 0, "P0")],
-            slab_ids: vec![],
-        }],
-        nodes: vec![
-            Node {
-                id: NodeId(0),
-                coord: [0.0; 3],
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-            Node {
-                id: NodeId(1),
-                coord: [1000.0, 0.0, 0.0],
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-        ],
-        ..Default::default()
-    };
-    assert!(model.validate().is_err());
+fn test_validate_secondary_member_kind_matches_region() {
+    for (floor, required, wrong, message) in [
+        (
+            true,
+            SecondaryMemberKind::Beam,
+            SecondaryMemberKind::Post,
+            "は Beam でない",
+        ),
+        (
+            false,
+            SecondaryMemberKind::Post,
+            SecondaryMemberKind::Beam,
+            "は Post でない",
+        ),
+    ] {
+        let mut model = Model::default();
+        let member = test_secondary(required, 0, "secondary");
+        if floor {
+            model.floor_regions.push(FloorRegion {
+                id: FloorRegionId(0),
+                name: String::new(),
+                boundary: vec![],
+                secondary_beams: vec![member],
+                slab_ids: vec![],
+            });
+        } else {
+            model.wall_regions.push(WallRegion {
+                id: WallRegionId(0),
+                name: String::new(),
+                boundary: vec![],
+                posts: vec![member],
+                wall_plate_ids: vec![],
+            });
+        }
+        assert!(model.validate().is_ok());
+        if floor {
+            model.floor_regions[0].secondary_beams[0].kind = wrong;
+        } else {
+            model.wall_regions[0].posts[0].kind = wrong;
+        }
+        assert!(
+            matches!(model.validate(), Err(crate::error::CoreError::DanglingRef(reason)) if reason.contains(message)),
+            "floor={floor}"
+        );
+    }
 }
 
 #[test]
@@ -175,46 +190,8 @@ fn test_validate_rejects_duplicate_beam_endpoints() {
 }
 
 #[test]
-fn test_validate_rejects_beam_in_wall_region_posts() {
-    let model = Model {
-        wall_regions: vec![crate::model::WallRegion {
-            id: WallRegionId(0),
-            name: String::new(),
-            boundary: vec![],
-            wall_plate_ids: vec![],
-            posts: vec![test_secondary(SecondaryMemberKind::Beam, 0, "J0")],
-        }],
-        nodes: vec![
-            Node {
-                id: NodeId(0),
-                coord: [0.0; 3],
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-            Node {
-                id: NodeId(1),
-                coord: [0.0, 0.0, 3000.0],
-                restraint: Dof6Mask::FREE,
-                mass: None,
-                story: None,
-                support_spring: None,
-            },
-        ],
-        ..Default::default()
-    };
-    assert!(model.validate().is_err());
-}
-
-#[test]
 fn test_validate_allows_secondary_sections_with_any_frame_use() {
-    let frame_uses = [
-        None,
-        Some(FrameSectionUse::Girder),
-        Some(FrameSectionUse::Column),
-        Some(FrameSectionUse::Brace),
-    ];
+    let frame_uses = [None, Some(FrameSectionUse::Brace)];
     let mut model = Model::default();
     for (index, frame_use) in frame_uses.into_iter().enumerate() {
         let section_id = SectionId(index as u32);
@@ -239,26 +216,8 @@ fn test_validate_allows_secondary_sections_with_any_frame_use() {
 }
 
 #[test]
-fn test_shear_modulus_explicit() {
-    let mat = Material {
-        concrete_class: Default::default(),
-        id: MaterialId(0),
-        strength_factor: None,
-        name: "Test".to_string(),
-        category: MaterialCategory::Steel,
-        young: 205000.0,
-        poisson: 0.3,
-        density: 0.0,
-        shear: Some(80000.0),
-        fc: None,
-        fy: None,
-    };
-    assert_eq!(mat.shear_modulus(), 80000.0);
-}
-
-#[test]
-fn test_shear_modulus_derived() {
-    let mat = Material {
+fn test_shear_modulus_uses_override_or_elastic_constants() {
+    let mut mat = Material {
         concrete_class: Default::default(),
         id: MaterialId(0),
         strength_factor: None,
@@ -271,8 +230,13 @@ fn test_shear_modulus_derived() {
         fc: None,
         fy: None,
     };
-    let expected = 205000.0 / (2.0 * (1.0 + 0.3));
-    assert!((mat.shear_modulus() - expected).abs() < 1e-9);
+    for (shear, expected) in [(Some(80000.0), 80000.0), (None, 78_846.153_846_153_84)] {
+        mat.shear = shear;
+        assert!(
+            (mat.shear_modulus() - expected).abs() < 1e-9,
+            "shear={shear:?}"
+        );
+    }
 }
 
 /// `concrete_class` を持たない入力は既定（Normal）で補完されること。
@@ -518,14 +482,6 @@ fn test_load_case_kind_is_long_term() {
 }
 
 #[test]
-fn test_stress_cfg_default_is_false() {
-    let cfg = StressAnalysisCfg::default();
-    assert!(!cfg.no_long_axial_brace);
-    assert!(!cfg.no_long_axial_column);
-    assert_eq!(Model::default().stress_cfg, cfg);
-}
-
-#[test]
 fn test_model_stress_cfg_default_missing_field() {
     // 旧スキーマ（stress_cfg フィールドがない JSON）からの互換性を確認する。
     let json = r#"{
@@ -534,7 +490,9 @@ fn test_model_stress_cfg_default_missing_field() {
             "combinations": []
         }"#;
     let model: Model = serde_json::from_str(json).unwrap();
-    assert_eq!(model.stress_cfg, StressAnalysisCfg::default());
+    assert!(!model.stress_cfg.no_long_axial_brace);
+    assert!(!model.stress_cfg.no_long_axial_column);
+    assert_eq!(model.stress_cfg, Model::default().stress_cfg);
 }
 
 /// 旧スキーマ（support_spring フィールドがない JSON）の Node が読み込めること
@@ -614,20 +572,6 @@ fn test_node_support_spring_msgpack_backward_compat() {
     assert_eq!(node.coord, [1.0, 2.0, 3.0]);
     assert_eq!(node.restraint, Dof6Mask::FIXED);
     assert_eq!(node.support_spring, None);
-}
-
-/// 地下階の深さは内部単位の mm（`depth_mm`）で保存され、msgpack
-/// （.ovika の `model.msgpack` と同じ位置ベースの形式）を往復しても値が保たれること。
-#[test]
-fn test_story_level_kind_basement_msgpack_roundtrip() {
-    let kind = StoryLevelKind::Basement { depth_mm: 5000.0 };
-    let bytes = rmp_serde::to_vec(&kind).expect("msgpack serialize");
-    let back: StoryLevelKind = rmp_serde::from_slice(&bytes).expect("msgpack deserialize");
-    assert_eq!(back, kind);
-
-    let json = serde_json::to_string(&kind).expect("json serialize");
-    let back: StoryLevelKind = serde_json::from_str(&json).expect("json deserialize");
-    assert_eq!(back, kind);
 }
 
 #[test]

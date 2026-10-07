@@ -878,50 +878,17 @@ mod tests {
         );
     }
 
-    /// Viridis（既定カラーマップ）で t=-1 は濃紫端（#440154）、t=+1 は黄端（#FDE725）、
-    /// t=0 は中央の青緑（#26828E）へ写像される。
     #[test]
-    fn contour_color_endpoints_and_neutral() {
-        let map = theme::ColorMap::Viridis;
-        assert_eq!(
-            contour_color(-1.0, map),
-            egui::Color32::from_rgb(0x44, 0x01, 0x54)
-        );
-        assert_eq!(
-            contour_color(1.0, map),
-            egui::Color32::from_rgb(0xFD, 0xE7, 0x25)
-        );
-        assert_eq!(
-            contour_color(0.0, map),
-            egui::Color32::from_rgb(0x26, 0x82, 0x8E)
-        );
-    }
-
-    /// 範囲外の値はクランプされる（t<-1 は t=-1 と同じ、t>1 は t=1 と同じ）。
-    #[test]
-    fn contour_color_clamps_out_of_range() {
-        let map = theme::ColorMap::Viridis;
-        assert_eq!(contour_color(-5.0, map), contour_color(-1.0, map));
-        assert_eq!(contour_color(5.0, map), contour_color(1.0, map));
-    }
-
-    /// Viridis は t の増加とともに G 成分が単調非減少（濃紫→青緑→黄で緑みが増す）。
-    #[test]
-    fn contour_color_green_channel_is_monotonic() {
-        let map = theme::ColorMap::Viridis;
-        let ts = [-1.0, -0.5, 0.0, 0.5, 1.0];
-        let greens: Vec<u8> = ts.iter().map(|&t| contour_color(t, map).g()).collect();
-        for w in greens.windows(2) {
-            assert!(w[0] <= w[1], "G成分が非単調: {:?}", greens);
+    fn contour_color_normalizes_force_for_selected_colormap() {
+        for map in [theme::ColorMap::Viridis, theme::ColorMap::Jet] {
+            for (force, sample) in [(-1.0, 0.0), (0.0, 0.5), (1.0, 1.0)] {
+                assert_eq!(
+                    contour_color(force, map),
+                    map.sample(sample),
+                    "map={map:?} force={force}"
+                );
+            }
         }
-    }
-
-    /// カラーマップを切り替えると異なる色になる（同じ t でも Viridis と Jet で異なる）。
-    #[test]
-    fn contour_color_respects_selected_colormap() {
-        let viridis = contour_color(0.0, theme::ColorMap::Viridis);
-        let jet = contour_color(0.0, theme::ColorMap::Jet);
-        assert_ne!(viridis, jet);
     }
 
     #[test]

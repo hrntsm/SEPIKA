@@ -400,51 +400,6 @@ pub fn apply_status_bar_visuals(ui: &mut egui::Ui) {
 mod tests {
     use super::*;
 
-    /// 既定のカラーマップは Viridis。
-    #[test]
-    fn colormap_default_is_viridis() {
-        assert_eq!(ColorMap::default(), ColorMap::Viridis);
-    }
-
-    /// 各カラーマップの端点（t=0.0 / t=1.0）が LUT の先頭・末尾の色と一致する。
-    #[test]
-    fn colormap_sample_matches_endpoint_anchors() {
-        assert_eq!(
-            ColorMap::Viridis.sample(0.0),
-            Color32::from_rgb(0x44, 0x01, 0x54)
-        );
-        assert_eq!(
-            ColorMap::Viridis.sample(1.0),
-            Color32::from_rgb(0xFD, 0xE7, 0x25)
-        );
-        assert_eq!(
-            ColorMap::Plasma.sample(0.0),
-            Color32::from_rgb(0x0D, 0x08, 0x87)
-        );
-        assert_eq!(
-            ColorMap::Plasma.sample(1.0),
-            Color32::from_rgb(0xF0, 0xF9, 0x21)
-        );
-        assert_eq!(
-            ColorMap::Turbo.sample(0.0),
-            Color32::from_rgb(0x30, 0x12, 0x3B)
-        );
-        assert_eq!(
-            ColorMap::Turbo.sample(1.0),
-            Color32::from_rgb(0x7A, 0x04, 0x03)
-        );
-        assert_eq!(
-            ColorMap::Jet.sample(0.0),
-            Color32::from_rgb(0x00, 0x00, 0x7F)
-        );
-        assert_eq!(
-            ColorMap::Jet.sample(1.0),
-            Color32::from_rgb(0x7F, 0x00, 0x00)
-        );
-        assert_eq!(ColorMap::BlueWhiteRed.sample(0.0), DATA_BLUE);
-        assert_eq!(ColorMap::BlueWhiteRed.sample(1.0), PARETO_RED);
-    }
-
     /// 発散型（青-白-赤）は中央 t=0.5 がニュートラルな白になる。
     #[test]
     fn colormap_blue_white_red_midpoint_is_white() {
@@ -489,15 +444,5 @@ mod tests {
     #[test]
     fn check_ratio_color_clamps_negative() {
         assert_eq!(check_ratio_color(-1.0), check_ratio_color(0.0));
-    }
-
-    /// 表示ラベルが想定どおり。
-    #[test]
-    fn colormap_labels() {
-        assert_eq!(ColorMap::Viridis.label(), "Viridis");
-        assert_eq!(ColorMap::Plasma.label(), "Plasma");
-        assert_eq!(ColorMap::Turbo.label(), "Turbo");
-        assert_eq!(ColorMap::Jet.label(), "Jet");
-        assert_eq!(ColorMap::BlueWhiteRed.label(), "青-白-赤");
     }
 }

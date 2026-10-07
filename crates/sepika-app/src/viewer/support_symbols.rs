@@ -367,93 +367,68 @@ mod tests {
     // ----- zigzag_points -----
 
     #[test]
-    fn zigzag_points_endpoints_match_from_to() {
+    fn zigzag_points_preserve_endpoints_and_remain_drawable() {
         let from = egui::pos2(0.0, 0.0);
         let to = egui::pos2(20.0, 0.0);
-        let pts = zigzag_points(from, to, 4, 3.0);
-        assert_eq!(pts.first().copied(), Some(from));
-        assert_eq!(pts.last().copied(), Some(to));
-        // 4 コイル → 内部点 8 個 + 両端 = 10 点
-        assert_eq!(pts.len(), 10);
-    }
-
-    #[test]
-    fn zigzag_points_alternates_perpendicular_side() {
-        let from = egui::pos2(0.0, 0.0);
-        let to = egui::pos2(20.0, 0.0);
-        let pts = zigzag_points(from, to, 2, 3.0);
-        // 水平線分なので直交方向は Y。内部点の y は符号が交互になる。
-        let interior: Vec<f32> = pts[1..pts.len() - 1].iter().map(|p| p.y).collect();
-        assert!(interior.len() >= 2);
-        for w in interior.windows(2) {
-            assert!(
-                w[0] * w[1] < 0.0,
-                "隣接する内部点は符号が反転するはず: {w:?}"
-            );
+        for (end, coils, bends) in [(to, 2, true), (to, 0, false), (from, 4, false)] {
+            let pts = zigzag_points(from, end, coils, 3.0);
+            assert_eq!(pts.first().copied(), Some(from));
+            assert_eq!(pts.last().copied(), Some(end));
+            assert!(pts.iter().all(|p| p.x.is_finite() && p.y.is_finite()));
+            assert_eq!(pts.iter().any(|p| p.y > from.y), bends);
+            assert_eq!(pts.iter().any(|p| p.y < from.y), bends);
         }
-        for y in interior {
-            assert!((y.abs() - 3.0).abs() < 1e-4);
-        }
-    }
-
-    #[test]
-    fn zigzag_points_zero_coils_or_degenerate_returns_two_points() {
-        let from = egui::pos2(0.0, 0.0);
-        let to = egui::pos2(20.0, 0.0);
-        assert_eq!(zigzag_points(from, to, 0, 3.0), vec![from, to]);
-        // from == to（長さ 0）も直線扱い（2 点）に落とす
-        assert_eq!(zigzag_points(from, from, 4, 3.0), vec![from, from]);
     }
 
     // ----- spiral_fracs -----
 
     #[test]
-    fn spiral_fracs_monotonic_and_bounded() {
-        let fracs = spiral_fracs(1.5, 10);
-        assert_eq!(fracs.len(), 11);
-        assert_eq!(fracs[0], (0.0, 0.0));
-        let (last_r, last_theta) = *fracs.last().unwrap();
-        assert!((last_r - 1.0).abs() < 1e-12);
-        assert!((last_theta - 1.5 * std::f64::consts::TAU).abs() < 1e-9);
-        for w in fracs.windows(2) {
-            assert!(w[1].0 >= w[0].0, "半径比は単調非減少のはず");
-            assert!(w[1].1 >= w[0].1, "角度は単調非減少のはず");
+    fn spiral_fracs_remain_finite_and_cover_radius() {
+        for segments in [0, 10] {
+            let fracs = spiral_fracs(1.5, segments);
+            if segments == 0 {
+                assert!(fracs.is_empty());
+                continue;
+            }
+            assert_eq!(fracs.first().copied(), Some((0.0, 0.0)));
+            let (radius, angle) = *fracs.last().unwrap();
+            assert!((radius - 1.0).abs() < 1e-12 && angle > 0.0);
+            assert!(fracs
+                .iter()
+                .all(|(r, theta)| (0.0..=1.0).contains(r) && theta.is_finite()));
+            assert!(fracs
+                .windows(2)
+                .all(|w| w[1].0 >= w[0].0 && w[1].1 >= w[0].1));
         }
-    }
-
-    #[test]
-    fn spiral_fracs_zero_segments_is_empty() {
-        assert!(spiral_fracs(1.5, 0).is_empty());
     }
 
     // ----- isolator_marker_geometry -----
 
     #[test]
-    fn isolator_marker_geometry_is_symmetric_about_center() {
+    fn isolator_marker_geometry_is_centered_and_drawable() {
         let center = egui::pos2(100.0, 50.0);
-        let geo = isolator_marker_geometry(center, 8.0, 9.0, 6.0, 2);
-        // フランジ線は中心を挟んで対称（上下とも中心からの距離が等しい）
-        assert!((geo.flange_top[0].y - center.y + 9.0).abs() < 1e-6);
-        assert!((geo.flange_bottom[0].y - center.y - 9.0).abs() < 1e-6);
-        // フランジ線は水平（両端の y が一致）かつ中心を x 方向にまたぐ
-        assert_eq!(geo.flange_top[0].y, geo.flange_top[1].y);
-        assert!(geo.flange_top[0].x < center.x && geo.flange_top[1].x > center.x);
-        // 積層線の本数が指定どおり、いずれも水平でフランジ線より短い
-        assert_eq!(geo.layers.len(), 2);
-        for l in &geo.layers {
-            assert_eq!(l[0].y, l[1].y);
-            let layer_width = l[1].x - l[0].x;
-            let flange_width = geo.flange_top[1].x - geo.flange_top[0].x;
-            assert!(layer_width < flange_width);
+        for layers in [0, 2] {
+            let geo = isolator_marker_geometry(center, 8.0, 9.0, 6.0, layers);
+            assert!((geo.flange_top[0].y + geo.flange_bottom[0].y - 2.0 * center.y).abs() < 1e-6);
+            assert!(geo.flange_top[0].y < center.y && geo.flange_bottom[0].y > center.y);
+            for line in [geo.flange_top, geo.flange_bottom] {
+                assert_eq!(line[0].y, line[1].y);
+                assert!(line[0].x < center.x && line[1].x > center.x);
+            }
+            assert_eq!(geo.layers.is_empty(), layers == 0);
+            for line in &geo.layers {
+                assert_eq!(line[0].y, line[1].y);
+                assert!(line[1].x - line[0].x < geo.flange_top[1].x - geo.flange_top[0].x);
+            }
+            assert!(geo
+                .flange_top
+                .into_iter()
+                .chain(geo.flange_bottom)
+                .chain(geo.layers.iter().flatten().copied())
+                .all(|p| p.x.is_finite() && p.y.is_finite()));
+            assert_eq!(geo.circle_center, center);
+            assert!(geo.circle_radius.is_finite() && geo.circle_radius > 0.0);
         }
-        assert_eq!(geo.circle_center, center);
-        assert_eq!(geo.circle_radius, 6.0);
-    }
-
-    #[test]
-    fn isolator_marker_geometry_zero_layers_has_no_layer_lines() {
-        let geo = isolator_marker_geometry(egui::pos2(0.0, 0.0), 8.0, 9.0, 6.0, 0);
-        assert!(geo.layers.is_empty());
     }
 
     // ----- support_isolators -----

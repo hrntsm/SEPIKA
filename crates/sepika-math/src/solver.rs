@@ -124,3 +124,91 @@ pub fn make_solver(backend: SolverBackend) -> Box<dyn LinearSolver> {
         SolverBackend::Auto => Box::new(crate::auto::AutoSolver::default()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auto::AutoSolver;
+    use crate::sparse::{assemble_csc, Triplet};
+
+    fn solvers() -> Vec<(&'static str, Box<dyn LinearSolver>)> {
+        vec![
+            ("Cholesky", make_solver(SolverBackend::DirectSparseCholesky)),
+            ("LU", make_solver(SolverBackend::DirectSparseLu)),
+            (
+                "PCG",
+                make_solver(SolverBackend::IterativePcg {
+                    tol: 1e-12,
+                    max_iter: 10,
+                }),
+            ),
+            ("Auto/direct", make_solver(SolverBackend::Auto)),
+            ("Auto/PCG", Box::new(AutoSolver::with_params(0, 1e-12, 10))),
+        ]
+    }
+
+    #[test]
+    fn linear_solver_lifecycle_contract() {
+        let diagonal = |scale: f64| {
+            assemble_csc(
+                2,
+                vec![
+                    Triplet {
+                        row: 0,
+                        col: 0,
+                        val: 2.0 * scale,
+                    },
+                    Triplet {
+                        row: 1,
+                        col: 1,
+                        val: 3.0 * scale,
+                    },
+                ],
+            )
+        };
+        for (backend, mut solver) in solvers() {
+            let mut out = vec![f64::NAN];
+            assert!(
+                matches!(solver.solve(&[4.0, 9.0]), Err(SolveError::NotFactorized)),
+                "{backend}"
+            );
+            assert!(
+                matches!(
+                    solver.solve_into(&[4.0, 9.0], &mut out),
+                    Err(SolveError::NotFactorized)
+                ),
+                "{backend}"
+            );
+            solver.factorize(&diagonal(1.0)).unwrap();
+            assert!(
+                matches!(
+                    solver.solve(&[4.0]),
+                    Err(SolveError::DimMismatch { k: 2, rhs: 1 })
+                ),
+                "{backend}"
+            );
+            assert!(
+                matches!(
+                    solver.solve_into(&[4.0], &mut out),
+                    Err(SolveError::DimMismatch { k: 2, rhs: 1 })
+                ),
+                "{backend}"
+            );
+            for (rhs, expected) in [([4.0, 9.0], [2.0, 3.0]), ([8.0, 18.0], [4.0, 6.0])] {
+                let solution = solver.solve(&rhs).unwrap();
+                solver.solve_into(&rhs, &mut out).unwrap();
+                assert_eq!(out, solution, "{backend}");
+                assert_eq!(out.len(), expected.len(), "{backend}");
+                for (actual, expected) in out.iter().zip(expected) {
+                    approx::assert_relative_eq!(*actual, expected, max_relative = 1e-10);
+                }
+            }
+            solver.factorize(&diagonal(2.0)).unwrap();
+            solver.solve_into(&[8.0, 18.0], &mut out).unwrap();
+            assert_eq!(out.len(), 2, "{backend}");
+            for (actual, expected) in out.iter().zip([2.0, 3.0]) {
+                approx::assert_relative_eq!(*actual, expected, max_relative = 1e-10);
+            }
+        }
+    }
+}
