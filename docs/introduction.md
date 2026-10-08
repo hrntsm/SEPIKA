@@ -74,4 +74,4 @@ SEPIKA は、国土交通大臣の認定を受けた構造計算プログラム�
 
 ソースコードは [github.com/hrntsm/SEPIKA](https://github.com/hrntsm/SEPIKA) にあります。
 
-ビルド・テスト・静的解析の手順はリポジトリの `README.md` を参照してください。
+ビルド・テスト・静的解析の手順はリポジトリの [CONTRIBUTING.md](https://github.com/hrntsm/SEPIKA/blob/main/CONTRIBUTING.md) を参照してください。

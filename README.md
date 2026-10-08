@@ -3,75 +3,32 @@
 Integrated Structural Analysis
 
 <div align="center">
-<img src="./crates/sepika-app/assets/squid.png" width="25%">
+<img src="./crates/sepika-app/assets/squid.png" width="25%" alt="SEPIKA ロゴ">
 </div>
 
-SEPIKA（セピカ）は、日本の建築構造計算一貫プログラム。Rust で実装。
-SEPIKA は Sepia（コウイカ）と IKA を組み合わせた名前で、日本語の「一貫計算（IKKAN）」に由来する。
-モデル作成 → 荷重 → 解析（静的・固有値・地震・プッシュオーバー・時刻歴）→ 検定・設計 → レポートまでを
-デスクトップ GUI または MCP サーバから扱う。
+## 概要
 
-## アーキテクチャ
+SEPIKA（セピカ）は、Rust で開発する日本の建築構造計算一貫プログラムです。
+モデル作成から荷重計算・構造解析・検定・設計・レポートまでを一つの流れで扱い、
+計算根拠を確認しながら構造設計を進められるオープンソースのソフトウェアを目指しています。
 
-**14** のクレートから成る階層型アーキテクチャ（詳細は [dev_docs/architecture.md](dev_docs/architecture.md)）:
+## 開発状況・はじめ方
 
-```
-Layer 0: sepika-core（基本データ構造・DOF 管理・荷重組合せ）、sepika-math（疎行列・ソルバ）、
-         sepika-material（一軸材料履歴則）
-Layer 1: sepika-section（断面性能算定）、sepika-load（Ai 分布・床荷重）
-Layer 2: sepika-edit（編集トランザクション）、sepika-skeleton（スケルトン曲線）
-Layer 3: sepika-element（梁・板・パネルゾーン要素）
-Layer 4: sepika-solver（各種解析）、sepika-io（結果 I/O・ST-Bridge）
-Layer 5: sepika-design-jp（日本仕様設計計算）
-Layer 6: sepika-job（解析前処理・解析条件・解析の純粋計算）
-Layer 7: sepika-mcp（MCP サーバ）、sepika-app（GUI アプリケーション）
-```
-
-`sepika-job` は GUI と MCP の共通下層。依存方向は上層から下層のみ。
-循環依存は `cargo run -p xtask -- check-deps` で検出する。
-
-## ビルド・開発
-
-開発参加の手順とローカル検証の考え方は [CONTRIBUTING.md](CONTRIBUTING.md) を参照。
-
-```bash
-# ワークスペース全体ビルド
-cargo build --workspace
-
-# GUI 起動（egui/eframe）
-cargo run -p sepika-app --features gui
-
-# MCP サーバ起動（stdio）
-cargo run -p sepika-mcp --features mcp
-```
+現在は開発中です。機能の実装・検証と GUI の整備を進めており、
+一般利用向けの完成した正式リリースとして案内する段階ではありません。
+開発参加やソースコードからの検証は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
 
 ## ドキュメント
 
-### 利用者向け（mdBook）
+利用方法・現在の対応範囲・制約・計算根拠は、
+[利用者向けドキュメントサイト](https://hrntsm.github.io/SEPIKA/) を参照してください。
 
-計算根拠・理論・入出力・MCP の使い方は [docs/](docs/) を mdBook でビルドした
-[ドキュメントサイト](https://hrntsm.github.io/SEPIKA/) に公開している
-（`main` への push で GitHub Pages に自動デプロイ）。
-ローカルプレビューは [文書の執筆・検証](dev_docs/docs_authoring.md#ローカルでの確認) を参照。
+## 開発への参加
 
-主な章: [はじめに](docs/introduction.md) · [モデル入出力](docs/model_io/README.md) ·
-[MCP サーバ](docs/mcp_server/README.md) ·
-[計算根拠](docs/calc_basis/README.md)
-
-### 開発者向け（`dev_docs/`）
-
-設計判断（ADR）・アーキテクチャ・検証記録・申し送りは [dev_docs/](dev_docs/README.md) に集約（ドキュメントサイトには含めない）。
-
-| 一覧 | 内容 |
-|------|------|
-| [dev_docs/handoff/残課題一覧.md](dev_docs/handoff/残課題一覧.md) | 実装残りの集約チェックリスト |
-| [dev_docs/v_and_v/未検証一覧.md](dev_docs/v_and_v/未検証一覧.md) | V&V 未完了（❌/🔶）の集約チェックリスト |
-| [dev_docs/architecture.md](dev_docs/architecture.md) | クレート階層・依存方向 |
-| [dev_docs/v_and_v/](dev_docs/v_and_v/README.md) | 検証レポート・要素→テスト索引 |
-| [dev_docs/handoff/](dev_docs/handoff/README.md) | 申し送り目録（時系列・カテゴリ別） |
+開発参加の手順は [CONTRIBUTING.md](CONTRIBUTING.md)、
+設計判断・検証記録・アーキテクチャは [開発資料の索引](dev_docs/README.md) にまとめています。
+不具合報告・提案・未完了の開発課題は [GitHub Issues](https://github.com/hrntsm/SEPIKA/issues) で扱います。
 
 ## ライセンス
 
-MIT License (see [LICENSE](LICENSE))
-
-Copyright (c) 2026 Hiroaki NATSUME
+[MIT License](LICENSE)
