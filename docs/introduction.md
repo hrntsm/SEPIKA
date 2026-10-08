@@ -68,7 +68,8 @@ SEPIKA は、国土交通大臣の認定を受けた構造計算プログラム�
 
 - [dev_docs/architecture.md](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/architecture.md)：クレート階層と依存方向
 - [dev_docs/v_and_v/](https://github.com/hrntsm/SEPIKA/tree/main/dev_docs/v_and_v)：各要素・各設計式の Verification & Validation レポート（[未検証一覧](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/未検証一覧.md)）。法令・規準の埋め込み値の照合チェックリスト [原典照合リスト](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/原典照合リスト.md) も同ディレクトリにあります
-- [dev_docs/handoff/](https://github.com/hrntsm/SEPIKA/tree/main/dev_docs/handoff)：申し送り目録（[残課題一覧](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/handoff/残課題一覧.md)）。[ROADMAP.md](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/handoff/ROADMAP.md) は 2026-07 完了済みの歴史的記録
+- [GitHub Issues](https://github.com/hrntsm/SEPIKA/issues)：未完了の開発作業・不具合報告・提案
+- [dev_docs/handoff/](https://github.com/hrntsm/SEPIKA/tree/main/dev_docs/handoff)：過去の実装経緯・判断の履歴と申し送り目録。[ROADMAP.md](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/handoff/ROADMAP.md) は 2026-07 完了済みの歴史的記録
 
 ## リポジトリ
 

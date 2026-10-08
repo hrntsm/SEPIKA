@@ -27,7 +27,9 @@ SEPIKA（セピカ）は、Rust で開発する日本の建築構造計算一貫
 
 開発参加の手順は [CONTRIBUTING.md](CONTRIBUTING.md)、
 設計判断・検証記録・アーキテクチャは [開発資料の索引](dev_docs/README.md) にまとめています。
-不具合報告・提案・未完了の開発課題は [GitHub Issues](https://github.com/hrntsm/SEPIKA/issues) で扱います。
+未完了の開発作業・不具合報告・提案は [GitHub Issues](https://github.com/hrntsm/SEPIKA/issues) で扱います。
+[handoff](dev_docs/handoff/README.md) は実装経緯・判断の履歴、
+[V&V](dev_docs/v_and_v/README.md) は検証状態と証跡を管理します。
 
 ## ライセンス
 

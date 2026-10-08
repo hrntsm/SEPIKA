@@ -115,7 +115,7 @@ GUI の 3D ビューアが使う `wgpu` は eframe / egui-wgpu 経由で、`squi
 | `specs/UI設計.md` | UI-19（GPU 設定 UI）を削除。実装順表の `[P10/P11]` 行を P11・UI-18 のみへ |
 | `specs/P0_基盤.md` | §2 の冒頭に注記（ツリー・members・feature 例は P0 当時の記録として残す） |
 | `handoff/ROADMAP.md` | v2 予定から GPU(P10) を削除 |
-| `handoff/残課題一覧.md` | 「GPU / ML / Grasshopper 連携」から GPU を外し、実装しない旨を明記 |
+| 当時の集約表（廃止済み。[Issue #430移行判定記録](handoffのIssue移行_Issue430_判定記録.md)） | 「GPU / ML / Grasshopper 連携」から GPU を外し、実装しない旨を明記 |
 | `v_and_v/README.md` | 決定性テストの説明から GPU を削除（保証外の列挙に存在しない経路を残さない） |
 
 **書き換えていないもの**
