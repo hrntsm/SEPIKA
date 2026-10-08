@@ -18,7 +18,7 @@
 | [docs/](../docs/) | GUI から利用する構造設計者向けの製品ドキュメント。現在仕様・理論・計算根拠と、分離した実装参照 |
 | [docs_authoring.md](docs_authoring.md) | 製品ドキュメントの執筆・検証・プレビュー手順 |
 | [adr/](adr/README.md) | 設計判断と理由。現在有効かどうかは Status で管理 |
-| [handoff/](handoff/README.md) | 実装経緯・申し送り・残課題。目録と更新手順はリンク先で管理 |
+| [handoff/](handoff/README.md) | 過去の実装経緯・判断の履歴。未完了作業の状態はGitHub Issuesで管理 |
 | [v_and_v/](v_and_v/README.md) | V&V の証拠・未検証項目。目録・要素→テスト索引と更新手順はリンク先で管理 |
 | [architecture.md](architecture.md) | クレート構成・依存方向等のアーキテクチャ |
 | [theme.rs](../crates/sepika-app/src/theme.rs)・[table_util.rs](../crates/sepika-app/src/table_util.rs) | UI のテーマ・frame helper・表の規約と実装 |
@@ -36,7 +36,8 @@ OSS としてコードまで追えるよう、既存の `実装参照` を本文
 現在の製品仕様・既定値・制約・計算根拠は `docs/` を唯一の正本とし、`dev_docs/` に複製しない。
 `dev_docs/` は判断・検証・経緯・アーキテクチャを扱い、製品ドキュメントサイトには含めない。
 
-## 未完了項目へのショートカット
+## 開発作業と検証状態への入口
 
-- [残課題一覧](handoff/残課題一覧.md)
+- [未完了の開発作業（GitHub Issues）](https://github.com/hrntsm/SEPIKA/issues)
+- [handoffのIssue移行判定記録](handoff/handoffのIssue移行_Issue430_判定記録.md)（移行時点の履歴）
 - [未検証一覧](v_and_v/未検証一覧.md)

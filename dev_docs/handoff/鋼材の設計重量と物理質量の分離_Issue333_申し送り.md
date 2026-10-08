@@ -62,10 +62,10 @@ Squid-n の設計判断として設計重量（DL・地震用重量）と物理�
 ## 残課題
 
 - **D8（対応済み）**: 質点系解析 `crates/squid-n-job/src/lumped_mass.rs` の層質量は
-  `seismic_weight/g`（設計重量ベース）であったが、[ADR-0034](../adr/0034-lumped-mass-physical-mass.md)
+  `seismic_weight/g`（設計重量ベース）であったが、[ADR 0035（旧番号0034）](../adr/0035-lumped-mass-physical-mass.md)
   と [`質点系の物理質量化_Issue365_申し送り.md`](質点系の物理質量化_Issue365_申し送り.md) により、
   階生成が `Story::dynamic_mass`（物理質量相当）へ保存した値へ統一した
-  （GitHub Issue #365）。[残課題一覧](../handoff/残課題一覧.md) の該当行は削除済み。
+  （GitHub Issue #365）。旧集約表の該当行は当時削除済み。移行時点の確認は [Issue #430判定記録](handoffのIssue移行_Issue430_判定記録.md) に残した。
 - **高密度カスタム鋼材**: 設計重量を 78.5 kN/m³ 固定としたため、78.5/g ≈ 8.005 t/m³ を
   超える密度を入力した鋼材では設計重量が物理重量を下回る（DL・地震用重量を過小評価する
   危険側）。ADR-0033 に留保として明記。入力制限・警告を設けるかは別途判断。
