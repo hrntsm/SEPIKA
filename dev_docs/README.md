@@ -7,8 +7,10 @@
 
 | 置き場 | 正本とする内容 |
 | --- | --- |
+| [README.md](../README.md) | 初見の読者向けのプロジェクト紹介と各正本への入口 |
 | [AGENTS.md](../AGENTS.md) | エージェントの実装・判断原則。コード・テスト・コメントの原則、安全性判断、語彙・ADR、Goal / Scope の扱い |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | 開発参加の基本フロー。言語、コミット形式、ローカル検証の考え方、Issue / PR の手順 |
+| [GitHub Issues](https://github.com/hrntsm/SEPIKA/issues) | 未完了の開発課題・不具合報告・提案 |
 | [.github/ISSUE_TEMPLATE/](../.github/ISSUE_TEMPLATE/) | Issue 起票時の入力項目 |
 | [.github/pull_request_template.md](../.github/pull_request_template.md) | PR で記録する内容。実際にローカルで実行した検証と結果 |
 | [.github/workflows/ci.yml](../.github/workflows/ci.yml) | CI で実行する網羅的検証のコマンド・構成 |
