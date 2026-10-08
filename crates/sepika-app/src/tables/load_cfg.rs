@@ -24,10 +24,8 @@ pub struct LoadCfgDraft {
     pub extra_value: String,
     /// 仕上げ面重量の追加フォーム: 値 [N/mm²]。
     pub finish_value: String,
-    /// ダンパー諸元の追加フォーム: 装置重量 [N]・装置長さ [mm]・支持部断面積 [mm²]。
+    /// ダンパー諸元の追加フォーム: モデル化範囲の総重量 [N]。
     pub damper_weight: String,
-    pub damper_length: String,
-    pub damper_area: String,
     /// 各追加フォームで選択中の部材（付加線重量/仕上げ/ダンパー共用）。
     pub sel_elem: Option<ElemId>,
 }
@@ -40,8 +38,6 @@ impl Default for LoadCfgDraft {
             extra_value: "0".into(),
             finish_value: "0".into(),
             damper_weight: "0".into(),
-            damper_length: "0".into(),
-            damper_area: "0".into(),
             sel_elem: None,
         }
     }
@@ -323,14 +319,12 @@ pub fn load_cfg_panel(ui: &mut egui::Ui, app: &mut App) {
 
     ui.add_space(4.0);
 
-    ui.label(egui::RichText::new("ダンパー自重諸元（断面自重を装置+支持部重量で置換）").strong());
+    ui.label(egui::RichText::new("ダンパー総重量（断面・付加重量を置換）").strong());
+    ui.label("モデル化範囲内の支持部・付加重量を含め、別モデルの支持部は除いてください。");
     let mut new_dampers: Option<Vec<DamperSpec>> = None;
     for (i, d) in cfg.dampers.iter().enumerate() {
         ui.horizontal(|ui| {
-            ui.label(format!(
-                "部材#{}: 装置 {:.0} N / 長さ {:.0} mm / 支持部 {:.0} mm²",
-                d.elem.0, d.device_weight, d.device_length, d.support_area
-            ));
+            ui.label(format!("部材#{}: 総重量 {:.0} N", d.elem.0, d.total_weight));
             if ui
                 .button("🗑")
                 .on_hover_text("このダンパー諸元を削除")
@@ -349,19 +343,9 @@ pub fn load_cfg_panel(ui: &mut egui::Ui, app: &mut App) {
             "load_cfg_damper_elem",
             &mut app.ui.scoped.load_cfg_draft.sel_elem,
         );
-        ui.label("装置[N]:");
+        ui.label("総重量[N]:");
         ui.add(
             egui::TextEdit::singleline(&mut app.ui.scoped.load_cfg_draft.damper_weight)
-                .desired_width(60.0),
-        );
-        ui.label("長さ[mm]:");
-        ui.add(
-            egui::TextEdit::singleline(&mut app.ui.scoped.load_cfg_draft.damper_length)
-                .desired_width(60.0),
-        );
-        ui.label("支持部[mm²]:");
-        ui.add(
-            egui::TextEdit::singleline(&mut app.ui.scoped.load_cfg_draft.damper_area)
                 .desired_width(60.0),
         );
         let parsed = (
@@ -372,31 +356,25 @@ pub fn load_cfg_panel(ui: &mut egui::Ui, app: &mut App) {
                 .damper_weight
                 .trim()
                 .parse::<f64>(),
-            app.ui
-                .scoped
-                .load_cfg_draft
-                .damper_length
-                .trim()
-                .parse::<f64>(),
-            app.ui
-                .scoped
-                .load_cfg_draft
-                .damper_area
-                .trim()
-                .parse::<f64>(),
         );
-        let can_add =
-            parsed.0.is_some() && parsed.1.is_ok() && parsed.2.is_ok() && parsed.3.is_ok();
+        let can_add = parsed.0.is_some_and(|id| {
+            app.core.model.element(id).is_some_and(|e| {
+                e.kind.is_weight_frame()
+                    || matches!(
+                        e.kind,
+                        sepika_core::model::ElementKind::Brace { .. }
+                            | sepika_core::model::ElementKind::Damper
+                    )
+            })
+        }) && parsed.1.as_ref().is_ok_and(|w| w.is_finite() && *w >= 0.0);
         if ui
             .add_enabled(can_add, egui::Button::new("+ 追加"))
             .clicked()
         {
-            if let (Some(elem), Ok(w), Ok(l), Ok(a)) = parsed {
+            if let (Some(elem), Ok(w)) = parsed {
                 let spec = DamperSpec {
                     elem,
-                    device_weight: w,
-                    device_length: l,
-                    support_area: a,
+                    total_weight: w,
                 };
                 let mut rows = cfg.dampers.clone();
                 if let Some(pos) = rows.iter().position(|d| d.elem == elem) {

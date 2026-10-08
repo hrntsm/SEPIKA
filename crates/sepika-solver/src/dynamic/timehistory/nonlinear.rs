@@ -92,6 +92,9 @@ pub fn nonlinear_time_history_analysis(
     initial_vel: &[f64],
     cfg: NonlinearThCfg,
 ) -> Result<ResponseResult, SolveError> {
+    model
+        .validate_damper_mass_placement()
+        .map_err(SolveError::InvalidInput)?;
     sepika_math::parallelism::apply_to_faer();
 
     sepika_element::factory::ensure_nonlinear_input(model).map_err(SolveError::InvalidInput)?;
@@ -111,7 +114,7 @@ pub fn nonlinear_time_history_analysis(
     let mut peak_force_scale = 0.0_f64;
     let mut mu_hist: Vec<Vec<f64>> = vec![Vec::new(); model.elements.len()];
 
-    let m_free = assemble_global_m(model, dofmap, MassOption::Consistent);
+    let m_free = assemble_global_m(model, dofmap, MassOption::Consistent)?;
     let m_red = reducer.reduce_k(&m_free);
 
     let n_free = dofmap.n_active();

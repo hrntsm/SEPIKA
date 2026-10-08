@@ -616,6 +616,13 @@ mod tests {
     #[test]
     fn test_roundtrip_preserves_rich_model() {
         let mut model = make_rich_model();
+        model.load_cfg = Some(sepika_core::model::LoadCfg {
+            dampers: vec![sepika_core::model::DamperSpec {
+                elem: ElemId(0),
+                total_weight: 19613.3,
+            }],
+            ..Default::default()
+        });
         model.stories = [0.0, 3000.0]
             .into_iter()
             .enumerate()
@@ -642,9 +649,56 @@ mod tests {
             .collect();
         let dir = crate::test_util::test_tmp();
         let path = dir.join("p_rich_roundtrip.ovika");
+        model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
+            mass_equiv_weight_n: 19613.3,
+            center_xy_mm: [0.0, 0.0],
+            inertia_t_mm2: 8000000.0,
+            lumped_mass: Some(sepika_core::model::StoryLumpedMass {
+                master: NodeId(0),
+                mass_method: sepika_core::model::MassMethod::CorrectedLumped,
+                mass: Some([2.0, 2.0, 0.0, 0.0, 0.0, 8000000.0]),
+                damper_weight_n: 19613.3,
+            }),
+        });
+        model.damper_mass_generation = Some(
+            model
+                .capture_damper_mass_generation(
+                    &[model.nodes[0].clone()],
+                    &[sepika_core::model::Constraint::rigid_diaphragm(
+                        sepika_core::ids::StoryId(1),
+                        NodeId(0),
+                        vec![NodeId(1)],
+                    )],
+                    &vec![Some(sepika_core::ids::StoryId(1)); model.nodes.len()],
+                    &model.stories,
+                )
+                .unwrap(),
+        );
+        assert_eq!(
+            model.damper_mass_generation.as_ref().unwrap().inputs.len(),
+            1
+        );
+        assert_eq!(
+            model
+                .damper_mass_generation
+                .as_ref()
+                .unwrap()
+                .placements
+                .len(),
+            1
+        );
         save_ovika(&path, &model, OvikaExtras::default()).unwrap();
         let back = load_ovika(&path).unwrap().model;
         let manifest = read_manifest(&path);
+        assert_eq!(back.load_cfg, model.load_cfg);
+        assert_eq!(back.damper_mass_generation, model.damper_mass_generation);
+        assert_eq!(
+            back.damper_mass_generation.as_ref().unwrap().dynamic_masses,
+            vec![
+                (model.stories[0].id, model.stories[0].dynamic_mass),
+                (model.stories[1].id, model.stories[1].dynamic_mass)
+            ]
+        );
         assert_eq!(manifest.schema_version, 1);
         assert_eq!(manifest.created_by, "SEPIKA");
         let file = std::fs::File::open(&path).unwrap();
@@ -687,6 +741,18 @@ mod tests {
         assert_eq!(back.unassigned_posts, model.unassigned_posts);
         assert!(model.eq_ignoring_dofmap(&back));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn 指定なし生成記録の保存往復は未生成と区別する() {
+        let mut model = make_rich_model();
+        assert!(model.damper_mass_generation.is_none());
+        model.damper_mass_generation = Some(Default::default());
+        let dir = crate::test_util::test_tmp();
+        let path = dir.join("empty_damper_generation.ovika");
+        save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+        let back = load_ovika(&path).unwrap().model;
+        assert_eq!(back.damper_mass_generation, Some(Default::default()));
     }
 
     #[test]

@@ -287,20 +287,13 @@ pub fn default_combinations() -> Vec<LoadCombination> {
     })
 }
 
-/// ダンパー装置の自重諸元（固定荷重）。
-/// 自重 = 装置重量 + 支持部断面積 ×（節点間距離 − 装置長さ）× 鋼材単位体積重量。
-/// 両端節点へ 1/2 ずつ伝達（鉛直配置は上下階へ、水平配置は同一階の両節点へ、
-/// が節点標高から自然に成立する）。
+/// ダンパーとしてモデル化した範囲の総重量。両端節点へ半分ずつ伝達する。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DamperSpec {
     pub elem: ElemId,
-    /// 装置重量 [N]（直接入力）。自重を考慮しない装置は 0 を入力する
-    /// （自重を考慮しない部材の扱い）。
-    pub device_weight: f64,
-    /// 装置長さ [mm]。支持部長さ =（節点間距離 − 装置長さ）の算定に用いる。
-    pub device_length: f64,
-    /// 支持部断面積 [mm²]。0 なら支持部重量なし。
-    pub support_area: f64,
+    /// 総重量 [N]（有限・非負）。範囲内の支持部・付加重量を含み、別モデルの支持部を除く。
+    pub total_weight: f64,
 }
 
 /// K 型ブレースの重量配分規則（固定荷重の重量配分規則）。
@@ -326,8 +319,7 @@ pub struct LoadCfg {
     /// その他の部材は鉛直材 2(b+D)、それ以外 b+2D で線重量へ換算する。
     #[serde(default)]
     pub finish_area_weight: Vec<(ElemId, f64)>,
-    /// ダンパー装置の自重諸元。対象部材の断面自重（ρ·A·L·g）は使わず、
-    /// この諸元による装置+支持部重量で置き換える。
+    /// ダンパー総重量。対象部材の断面自重・要素質量・付加重量を置き換える。
     #[serde(default)]
     pub dampers: Vec<DamperSpec>,
     /// K 型ブレース（`ElementKind::Brace`）の重量配分規則。
@@ -353,6 +345,45 @@ impl Default for LoadCfg {
 }
 
 impl LoadCfg {
+    /// ダンパー総重量の値・参照・明示 Damper の指定漏れを検証する。重量は生成しない。
+    pub fn validate_damper_weights(&self, model: &Model) -> Result<(), String> {
+        let mut ids = std::collections::HashSet::new();
+        for damper in &self.dampers {
+            if !ids.insert(damper.elem) {
+                return Err(format!(
+                    "部材 {} のダンパー総重量が重複しています",
+                    damper.elem.0
+                ));
+            }
+            if !damper.total_weight.is_finite() || damper.total_weight < 0.0 {
+                return Err(format!("部材 {} のダンパー総重量が不正です", damper.elem.0));
+            }
+            let elem = model.element(damper.elem).ok_or_else(|| {
+                format!("ダンパー総重量の参照部材 {} がありません", damper.elem.0)
+            })?;
+            if !(elem.kind.is_weight_frame()
+                || matches!(elem.kind, ElementKind::Brace { .. } | ElementKind::Damper))
+                || elem.nodes.len() != 2
+                || elem.nodes.iter().any(|id| {
+                    model
+                        .node(*id)
+                        .is_none_or(|node| node.coord.iter().any(|v| !v.is_finite()))
+                })
+            {
+                return Err(format!(
+                    "部材 {} のダンパー総重量の対象・節点参照が不正です",
+                    elem.id.0
+                ));
+            }
+        }
+        for elem in &model.elements {
+            if elem.kind == ElementKind::Damper && !ids.contains(&elem.id) {
+                return Err(format!("ダンパー部材 {} の総重量が未設定です", elem.id.0));
+            }
+        }
+        Ok(())
+    }
+
     /// 有効な鉄骨重量割増率（0 以下の入力は 1.0 とみなす）。
     pub fn effective_steel_factor(&self) -> f64 {
         if self.steel_weight_factor > 0.0 {

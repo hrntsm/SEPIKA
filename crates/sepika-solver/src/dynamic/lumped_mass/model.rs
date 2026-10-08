@@ -310,12 +310,16 @@ pub fn fit_story_trilinear(curve: &[(f64, f64)], secant_ratio: f64) -> StoryTril
 ///
 /// 層質量は各層の上端床の [`sepika_core::model::Story::dynamic_mass`]（物理質量相当）から採る。
 /// 未算定（`None`）は [`SolveError::InvalidInput`] を返す（設計用地震重量へのフォールバックはしない）。
+/// ダンパー指定・生成質量の配置／反映が不正な場合も `InvalidInput` を返す。
 pub fn build_lumped_mass_model(
     model: &Model,
     pushover: &PushoverResult,
     model_type: LumpedMassType,
     secant_ratio: f64,
 ) -> Result<LumpedMassModel, SolveError> {
+    model
+        .validate_damper_mass_placement()
+        .map_err(SolveError::InvalidInput)?;
     let layers = model.layers();
     let mut sticks = Vec::with_capacity(layers.len());
     for layer in &layers {

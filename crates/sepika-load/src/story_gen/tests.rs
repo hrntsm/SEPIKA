@@ -1154,9 +1154,7 @@ fn test_both_mass_methods_equal_with_secondary_member_and_damper() {
 
     let damper = DamperSpec {
         elem: ElemId(0),
-        device_weight: 20000.0,
-        device_length: 1000.0,
-        support_area: 5000.0,
+        total_weight: 20000.0,
     };
     let cfg = LoadCfg {
         dampers: vec![damper],
@@ -1558,29 +1556,24 @@ fn test_synced_self_weight_cft_column_mass_excludes_core_from_factor() {
     );
 }
 
-/// ダンパー: 装置重量は設計・物理で同値、支持部だけが 78.5/7.85 で分離する。
+/// ダンパー総重量は設計・物理質量相当で同値。
 #[test]
-fn test_damper_device_weight_is_common_and_support_is_separated() {
+fn test_damper_total_weight_is_common_for_design_and_physical_mass() {
     let len = 4000.0;
     let damper = DamperSpec {
         elem: ElemId(0),
-        device_weight: 20000.0,
-        device_length: 1000.0,
-        support_area: 5000.0,
+        total_weight: 20000.0,
     };
     let cfg = LoadCfg {
         dampers: vec![damper],
         ..Default::default()
     };
     let model = single_beam_model(len, 7.85e-9, 90000.0, None, RigidZone::default(), Some(cfg));
-    let support_len = (len - 1000.0).max(0.0);
     let gen = generate_stories(&model, None).unwrap();
-    // 設計重量（地震用重量）: 装置＋支持部×78.5e-6。
-    let design = 20000.0 + 5000.0 * support_len * 78.5e-6;
+    let design = 20000.0;
     assert!((gen.stories[1].seismic_weight.unwrap() - design / 2.0).abs() < 1e-6);
-    // 物理質量（LumpedOnly）: 装置＋支持部×物理密度×g。装置は同値、支持部のみ小さい。
     let lumped = generate_stories_with_opts(&model, &[], true, MassMethod::LumpedOnly).unwrap();
-    let mass_equiv = 20000.0 + 5000.0 * support_len * 7.85e-9 * GRAVITY_MM_S2;
+    let mass_equiv = 20000.0;
     let m = lumped.rep_nodes[1].mass.expect("ダンパー質量が質点に残る");
     assert!(
         (m[0] - mass_equiv / 2.0 / GRAVITY_MM_S2).abs() < 1e-9 * (mass_equiv / 2.0 / GRAVITY_MM_S2),
@@ -2775,6 +2768,14 @@ fn test_wall_self_weight_uses_clear_dimensions_of_boundary_members() {
     let factor = ((l - 2.0 * 250.0) / l) * ((h - 2.0 * 350.0) / h);
     let w_total = 2.4e-9 * 150.0 * (l * h * factor) * GRAVITY_MM_S2;
     let expected = w_total / 2.0; // 上端2節点分のみ階重量に算入
+    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+        let mut mixed = model.clone();
+        mixed.elements[4].kind = kind;
+        mixed.elements[6].kind = kind;
+        let actual = generate_stories(&mixed, None).unwrap();
+        assert_eq!(actual.stories, gen.stories);
+        assert_eq!(actual.rep_nodes, gen.rep_nodes);
+    }
     assert!(
         (gen.stories[1].seismic_weight.unwrap() - expected).abs() < 1e-6,
         "got={}, expected={}",
@@ -3316,9 +3317,7 @@ fn test_damper_weight_replaces_section_self_weight() {
     let len = 4000.0;
     let damper = DamperSpec {
         elem: ElemId(0),
-        device_weight: 20000.0,
-        device_length: 1000.0,
-        support_area: 5000.0,
+        total_weight: 20000.0,
     };
     let cfg = LoadCfg {
         dampers: vec![damper],
@@ -3326,8 +3325,7 @@ fn test_damper_weight_replaces_section_self_weight() {
     };
     let model = single_beam_model(len, 7.85e-9, 90000.0, None, RigidZone::default(), Some(cfg));
     let gen = generate_stories(&model, None).unwrap();
-    let support_len = (len - 1000.0_f64).max(0.0);
-    let w = 20000.0 + 5000.0 * support_len * 78.5e-6;
+    let w = 20000.0;
     let expected = w / 2.0;
     assert!(
         (gen.stories[1].seismic_weight.unwrap() - expected).abs() < 1e-6,
@@ -3337,14 +3335,11 @@ fn test_damper_weight_replaces_section_self_weight() {
 }
 
 #[test]
-fn test_damper_zero_device_weight_counts_support_only() {
-    // 「自重を考慮しない部材」: device_weight=0 かつ support_area>0 は支持部のみ算入。
+fn test_damper_zero_total_weight_excludes_section_weight() {
     let len = 4000.0;
     let damper = DamperSpec {
         elem: ElemId(0),
-        device_weight: 0.0,
-        device_length: 500.0,
-        support_area: 8000.0,
+        total_weight: 0.0,
     };
     let cfg = LoadCfg {
         dampers: vec![damper],
@@ -3352,8 +3347,7 @@ fn test_damper_zero_device_weight_counts_support_only() {
     };
     let model = single_beam_model(len, 7.85e-9, 90000.0, None, RigidZone::default(), Some(cfg));
     let gen = generate_stories(&model, None).unwrap();
-    let support_len = (len - 500.0_f64).max(0.0);
-    let w = 8000.0 * support_len * 78.5e-6;
+    let w = 0.0;
     let expected = w / 2.0;
     assert!(
         (gen.stories[1].seismic_weight.unwrap() - expected).abs() < 1e-6,
@@ -3438,6 +3432,143 @@ fn line_weights(model: &Model) -> Vec<f64> {
             _ => None,
         })
         .collect()
+}
+
+#[test]
+fn 明示非線形線材は混在接続でもbeamとdl階重量物理質量が一致する() {
+    use sepika_core::model::{FireproofKind, FrameSectionUse};
+    let mut rc = column_finish_model();
+    rc.stories[1].column_finish_area_weight = 0.001;
+    let mut steel = fireproof_model(
+        SectionShape::SteelBox {
+            height: 400.0,
+            width: 300.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        },
+        FrameSectionUse::Column,
+    );
+    steel.stories[1].fireproof.steel_kind = FireproofKind::Spray;
+    steel.stories[1].fireproof.steel_column_area_weight = 0.001;
+    steel.load_cfg.as_mut().unwrap().finish_area_weight = vec![(ElemId(0), 0.002)];
+    let mut cft = fireproof_model(
+        SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 16.0,
+            corner_r: Some(0.0),
+        },
+        FrameSectionUse::Column,
+    );
+    cft.stories[1].fireproof.cft_kind = FireproofKind::Board;
+    cft.stories[1].fireproof.cft_column_area_weight = 0.001;
+    cft.load_cfg = Some(LoadCfg {
+        steel_weight_factor: 1.3,
+        extra_line_weight: vec![(ElemId(0), 0.4)],
+        ..Default::default()
+    });
+    let mut lower_columns = two_story_model();
+    lower_columns.materials[0].category = MaterialCategory::Concrete;
+    lower_columns.materials[0].fc = Some(24.0);
+    lower_columns.materials[0].density = 2.4e-9;
+    for baseline in [
+        rc,
+        steel,
+        cft,
+        rc_base_column_with_base_beam_model(),
+        rc_beam_with_slab_model(),
+        lower_columns,
+        wall_model(),
+    ] {
+        let cfg = baseline.load_cfg.clone().unwrap_or_default();
+        let expected_dl = crate::self_weight::self_weight_case_content(&baseline, &cfg).unwrap();
+        assert!(!expected_dl.0.is_empty() || !expected_dl.1.is_empty());
+        for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+            for mixed in [false, true] {
+                let mut model = baseline.clone();
+                for (i, elem) in model.elements.iter_mut().enumerate() {
+                    if elem.kind == ElementKind::Beam && (!mixed || i % 2 == 0) {
+                        elem.kind = kind;
+                    }
+                }
+                let dl = crate::self_weight::self_weight_case_content(&model, &cfg).unwrap();
+                assert_eq!(dl, expected_dl, "{kind:?} mixed={mixed}");
+                for method in [MassMethod::CorrectedLumped, MassMethod::LumpedOnly] {
+                    let expected =
+                        generate_stories_with_opts(&baseline, &[], true, method).unwrap();
+                    let direct = generate_stories_with_opts(&model, &[], true, method).unwrap();
+                    assert_eq!(direct.stories, expected.stories);
+                    assert_eq!(direct.rep_nodes, expected.rep_nodes);
+                    model.load_cases = vec![LoadCase {
+                        id: LoadCaseId(0),
+                        name: "DL".into(),
+                        kind: LoadCaseKind::Dead,
+                        nodal: dl.0.clone(),
+                        member: dl.1.clone(),
+                    }];
+                    let synced =
+                        generate_stories_with_synced_self_weight(&model, &[LoadCaseId(0)], method)
+                            .unwrap();
+                    for (a, b) in direct.stories.iter().zip(&synced.stories) {
+                        assert!(
+                            (a.seismic_weight.unwrap() - b.seismic_weight.unwrap()).abs() < 1e-6
+                        );
+                        let (a, b) = (a.dynamic_mass.unwrap(), b.dynamic_mass.unwrap());
+                        assert!((a.mass_equiv_weight_n - b.mass_equiv_weight_n).abs() < 1e-6);
+                        assert!((a.inertia_t_mm2 - b.inertia_t_mm2).abs() < 1e-6);
+                        for d in 0..2 {
+                            assert!((a.center_xy_mm[d] - b.center_xy_mm[d]).abs() < 1e-8);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn ダンパー総重量の不正入力と参照は診断する() {
+    let baseline = single_beam_model(4000.0, 7.85e-9, 90000.0, None, RigidZone::default(), None);
+    for weight in [-1.0, f64::NAN, f64::INFINITY] {
+        let cfg = LoadCfg {
+            dampers: vec![DamperSpec {
+                elem: ElemId(0),
+                total_weight: weight,
+            }],
+            ..Default::default()
+        };
+        assert!(
+            crate::self_weight::self_weight_case_content(&baseline, &cfg)
+                .unwrap_err()
+                .contains("総重量が不正")
+        );
+    }
+    let valid = DamperSpec {
+        elem: ElemId(0),
+        total_weight: 100.0,
+    };
+    for case in 0..5 {
+        let mut model = baseline.clone();
+        let mut cfg = LoadCfg {
+            dampers: vec![valid.clone()],
+            ..Default::default()
+        };
+        match case {
+            0 => cfg.dampers[0].elem = ElemId(999),
+            1 => cfg.dampers.push(valid.clone()),
+            2 => model.elements[0].kind = ElementKind::Shell,
+            3 => model.elements[0].nodes.pop().map(|_| ()).unwrap(),
+            _ => model.elements[0].nodes[1] = NodeId(999),
+        }
+        assert!(crate::self_weight::self_weight_case_content(&model, &cfg).is_err());
+    }
+    let mut explicit = baseline;
+    explicit.elements[0].kind = ElementKind::Damper;
+    assert!(
+        crate::self_weight::self_weight_case_content(&explicit, &LoadCfg::default())
+            .unwrap_err()
+            .contains("総重量が未設定")
+    );
 }
 
 fn fireproof_model(shape: SectionShape, usage: sepika_core::model::FrameSectionUse) -> Model {
@@ -3812,7 +3943,7 @@ fn fireproof_active_unresolved_inputs_are_errors() {
     );
     model.stories[1].fireproof.steel_kind = FireproofKind::Spray;
     model.stories[1].fireproof.steel_column_area_weight = 0.001;
-    for case in 0..11 {
+    for case in 0..10 {
         let mut invalid = model.clone();
         match case {
             0 => invalid.sections[0].shape = None,
@@ -3838,15 +3969,7 @@ fn fireproof_active_unresolved_inputs_are_errors() {
             6 => invalid.stories[1].fireproof.steel_column_area_weight = -0.001,
             7 => invalid.sections[0].material = None,
             8 => invalid.sections[0].frame_use = None,
-            9 => invalid.nodes[1].coord[2] = f64::NAN,
-            _ => {
-                invalid.load_cfg.as_mut().unwrap().dampers = vec![DamperSpec {
-                    elem: ElemId(0),
-                    device_weight: 100.0,
-                    device_length: 1000.0,
-                    support_area: 1000.0,
-                }]
-            }
+            _ => invalid.nodes[1].coord[2] = f64::NAN,
         }
         assert!(
             enumerate_self_weight(&invalid, invalid.load_cfg.as_ref().unwrap()).is_err(),

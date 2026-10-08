@@ -70,14 +70,21 @@ pub fn add_support_spring_diag(model: &Model, dofmap: &DofMap, triplets: &mut Ve
 /// 全体質量行列を組み立てる。
 /// 質量源は「部材密度による要素質量」と「節点集中質量（`Node::mass`）」の 2 つで、
 /// どちらを算入するかはモデルの質量方式（`Model::mass_method`）に従う。
+/// ダンパー入力・配置・生成質量の反映が不正な場合は `InvalidInput` を返す。
 pub fn assemble_global_m(
     model: &Model,
     dofmap: &DofMap,
     opt: sepika_element::behavior::MassOption,
-) -> SparseColMat<usize, f64> {
+) -> Result<SparseColMat<usize, f64>, sepika_math::solver::SolveError> {
+    model
+        .validate_damper_mass_placement()
+        .map_err(sepika_math::solver::SolveError::InvalidInput)?;
     let mut all_triplets = Vec::new();
     if model.mass_method != sepika_core::model::MassMethod::LumpedOnly {
         for elem in &model.elements {
+            if model.uses_damper_total_weight(elem) {
+                continue;
+            }
             let behavior = build_behavior(elem, model);
             let gdofs = behavior.global_dofs(dofmap);
             let m_local = behavior.mass_matrix(opt);
@@ -104,7 +111,7 @@ pub fn assemble_global_m(
         }
     }
 
-    assemble_csc(dofmap.n_active(), all_triplets)
+    Ok(assemble_csc(dofmap.n_active(), all_triplets))
 }
 
 pub fn assemble_global_f(model: &Model, dofmap: &DofMap, lc: LoadCaseId) -> Vec<f64> {

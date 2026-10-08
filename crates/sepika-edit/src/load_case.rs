@@ -164,6 +164,7 @@ indexed_delete_insert!(
 /// まとめて差し替える。既存の RigidDiaphragm 拘束は除去し、Mpc / RigidLink は
 /// 保持する。逆操作は差し替え前の状態の復元。
 pub struct ApplyStories {
+    pub damper_mass_generation: sepika_core::model::DamperMassGeneration,
     pub stories: Vec<sepika_core::model::Story>,
     /// `model.nodes` と同順の所属階。長さが合わない分は無視する。
     pub node_story: Vec<Option<sepika_core::ids::StoryId>>,
@@ -184,6 +185,7 @@ impl EditCommand for ApplyStories {
         let old_nodes = model.nodes.clone();
         let old_generated_masters = model.generated_masters.clone();
         let old_mass_method = model.mass_method;
+        let old_damper_mass_generation = model.damper_mass_generation.clone();
 
         let old_stories = std::mem::replace(&mut model.stories, self.stories.clone());
         for (node, st) in model.nodes.iter_mut().zip(self.node_story.iter()) {
@@ -206,6 +208,7 @@ impl EditCommand for ApplyStories {
         }
         model.generated_masters = self.generated_masters.clone();
         model.mass_method = self.mass_method;
+        model.damper_mass_generation = Some(self.damper_mass_generation.clone());
 
         Box::new(RestoreStories {
             stories: old_stories,
@@ -213,6 +216,7 @@ impl EditCommand for ApplyStories {
             constraints: old_constraints,
             generated_masters: old_generated_masters,
             mass_method: old_mass_method,
+            damper_mass_generation: old_damper_mass_generation,
         })
     }
 
@@ -224,6 +228,7 @@ impl EditCommand for ApplyStories {
 /// [`ApplyStories`] の逆操作。`model.nodes` を丸ごと復元することで、
 /// 追加された剛床代表節点の除去（truncate）や既存節点の置換をまとめて元に戻す。
 pub struct RestoreStories {
+    pub damper_mass_generation: Option<sepika_core::model::DamperMassGeneration>,
     pub stories: Vec<sepika_core::model::Story>,
     pub nodes: Vec<sepika_core::model::Node>,
     pub constraints: Vec<sepika_core::model::Constraint>,
@@ -239,12 +244,17 @@ impl EditCommand for RestoreStories {
         let new_generated_masters =
             std::mem::replace(&mut model.generated_masters, self.generated_masters.clone());
         let new_mass_method = std::mem::replace(&mut model.mass_method, self.mass_method);
+        let new_damper_mass_generation = std::mem::replace(
+            &mut model.damper_mass_generation,
+            self.damper_mass_generation.clone(),
+        );
         Box::new(RestoreStories {
             stories: new_stories,
             nodes: new_nodes,
             constraints: new_constraints,
             generated_masters: new_generated_masters,
             mass_method: new_mass_method,
+            damper_mass_generation: new_damper_mass_generation,
         })
     }
 

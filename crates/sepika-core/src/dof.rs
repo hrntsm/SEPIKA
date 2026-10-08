@@ -55,15 +55,23 @@ pub type GlobalDof = usize;
 /// 解析（[`DofMap::build`]）と表示（解析対象外の節点を描かない・剛床スレーブから
 /// 除く）で同じ規則を使うため、判定をここへ一元化する。
 pub fn structural_nodes(model: &Model) -> Vec<bool> {
-    let mut structural = vec![false; model.nodes.len()];
-    for e in &model.elements {
+    structural_nodes_with_constraints(model.nodes.len(), &model.elements, model.constraints.iter())
+}
+
+pub(crate) fn structural_nodes_with_constraints<'a>(
+    node_count: usize,
+    elements: &[crate::model::ElementData],
+    constraints: impl Iterator<Item = &'a crate::model::Constraint>,
+) -> Vec<bool> {
+    let mut structural = vec![false; node_count];
+    for e in elements {
         for n in &e.nodes {
             if let Some(slot) = structural.get_mut(n.index()) {
                 *slot = true;
             }
         }
     }
-    for c in &model.constraints {
+    for c in constraints {
         use crate::model::Constraint;
         match c {
             Constraint::RigidDiaphragm { master, .. } | Constraint::RigidLink { master, .. } => {

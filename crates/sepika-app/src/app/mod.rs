@@ -1715,6 +1715,7 @@ fn story_gen_changes_model(
     if model.mass_method != mass_method
         || model.stories != gen.stories
         || model.generated_masters != gen.generated_masters
+        || model.damper_mass_generation.as_ref() != Some(&gen.damper_mass_generation)
     {
         return true;
     }

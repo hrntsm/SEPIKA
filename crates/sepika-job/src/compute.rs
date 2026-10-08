@@ -17,6 +17,26 @@ fn expand_walls(model: sepika_core::model::Model) -> sepika_core::model::Model {
     sepika_load::wall_expand::expand_wall_elements_owned(model).0
 }
 
+fn dynamic_solve_error(error: sepika_math::solver::SolveError) -> JobError {
+    match error {
+        sepika_math::solver::SolveError::InvalidInput(message) => JobError::InvalidInput(message),
+        other => JobError::Solve(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn 動的solverの入力不備は公開ジョブでも入力不備の分類を維持する() {
+    let error = dynamic_solve_error(sepika_math::solver::SolveError::InvalidInput(
+        "質量不備".into(),
+    ));
+    assert!(matches!(error, JobError::InvalidInput(message) if message == "質量不備"));
+    assert!(matches!(
+        dynamic_solve_error(sepika_math::solver::SolveError::NotPositiveDefinite),
+        JobError::Solve(_)
+    ));
+}
+
 /// 標準 EX/EY に再生成済みの Auto 水平力が欠けているか。
 pub fn missing_seismic_horizontal_load(case: &LoadCase) -> bool {
     let axis = match (case.name.as_str(), case.kind) {
@@ -67,11 +87,12 @@ pub fn compute_eigen(
     model: sepika_core::model::Model,
     n_modes: usize,
 ) -> JobResult<sepika_solver::dynamic::eigen::ModalResult> {
+    model
+        .validate_damper_mass_placement()
+        .map_err(JobError::InvalidInput)?;
     let model = expand_walls(model);
     match Analysis::prepare(&model) {
-        Ok(analysis) => analysis
-            .eigen(n_modes)
-            .map_err(|e| JobError::Solve(format!("{e:?}"))),
+        Ok(analysis) => analysis.eigen(n_modes).map_err(dynamic_solve_error),
         Err(e) => Err(JobError::Prepare(format!("{e:?}"))),
     }
 }
@@ -156,6 +177,9 @@ pub fn compute_time_history(
     cfg: AnalysisSettings,
     wave: sepika_solver::dynamic::timehistory::GroundMotion,
 ) -> JobResult<sepika_solver::dynamic::timehistory::ResponseResult> {
+    model
+        .validate_damper_mass_placement()
+        .map_err(JobError::InvalidInput)?;
     let wave = apply_phase_diff(&cfg, wave);
     let model = expand_walls(model);
     let analysis = Analysis::prepare(&model).map_err(|e| JobError::Prepare(e.to_string()))?;
@@ -170,7 +194,7 @@ pub fn compute_time_history(
                         ))
                     }
                 },
-                Err(e) => return Err(JobError::Solve(e.to_string())),
+                Err(e) => return Err(dynamic_solve_error(e)),
             };
             sepika_solver::dynamic::damping::Damping::StiffnessProportional {
                 h: cfg.th_damping,
@@ -181,7 +205,7 @@ pub fn compute_time_history(
         ThDampingModel::Rayleigh => {
             let modal = match analysis.eigen(2) {
                 Ok(m) => m,
-                Err(e) => return Err(JobError::Solve(e.to_string())),
+                Err(e) => return Err(dynamic_solve_error(e)),
             };
             let (w1, w2) = match (modal.omega2.first(), modal.omega2.get(1)) {
                 (Some(&a), Some(&b)) if a > 0.0 && b > 0.0 => (a.sqrt(), b.sqrt()),
@@ -230,7 +254,7 @@ pub fn compute_time_history(
                         ))
                     }
                 },
-                Err(e) => return Err(JobError::Solve(e.to_string())),
+                Err(e) => return Err(dynamic_solve_error(e)),
             };
             if cfg.th_damping_model == ThDampingModel::TangentAlpha1 {
                 sepika_solver::dynamic::damping::Damping::StiffnessProportional {
@@ -253,7 +277,7 @@ pub fn compute_time_history(
     let newmark = sepika_solver::dynamic::timehistory::NewmarkCfg::average_accel();
     analysis
         .time_history(&wave, newmark, damping, record_every)
-        .map_err(|e| JobError::Solve(e.to_string()))
+        .map_err(dynamic_solve_error)
 }
 
 /// 非線形時刻歴応答解析（[`compute_time_history`] の非線形分岐）。
@@ -292,7 +316,10 @@ fn compute_nonlinear_time_history(
         &init,
         nl_cfg,
     )
-    .map_err(|e| JobError::Convergence(e.to_string()))
+    .map_err(|e| match e {
+        sepika_math::solver::SolveError::InvalidInput(message) => JobError::InvalidInput(message),
+        other => JobError::Convergence(other.to_string()),
+    })
 }
 
 /// 質点系（固有値。`accel` があれば時刻歴も）。

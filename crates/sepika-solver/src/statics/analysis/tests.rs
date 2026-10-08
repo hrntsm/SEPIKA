@@ -2041,6 +2041,15 @@ fn test_model_issues_errors_cft_shell_and_wall_references() {
         model.sections[0].shape = Some(cft_shape());
         model.sections[0].frame_use = Some(FrameSectionUse::Column);
         model.materials[0].fc = Some(24.0);
+        if kind == ElementKind::Damper {
+            model.load_cfg = Some(sepika_core::model::LoadCfg {
+                dampers: vec![sepika_core::model::DamperSpec {
+                    elem: ElemId(0),
+                    total_weight: 0.0,
+                }],
+                ..Default::default()
+            });
+        }
 
         let err = precheck_model(&model).expect_err("CFT の Shell/Wall 参照はエラーにする");
         assert!(err.to_string().contains("CFT"), "{err}");

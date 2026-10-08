@@ -2421,6 +2421,7 @@ fn test_apply_stories_roundtrip_with_generated_masters() {
         support_spring: None,
     };
     let cmd = ApplyStories {
+        damper_mass_generation: Default::default(),
         stories: vec![Story {
             level_kind: Default::default(),
             structure: Default::default(),
@@ -2449,6 +2450,7 @@ fn test_apply_stories_roundtrip_with_generated_masters() {
     stack.run(&mut model, Box::new(cmd));
     assert_eq!(model.nodes.len(), 3);
     assert_eq!(model.generated_masters, vec![NodeId(2)]);
+    assert_eq!(model.damper_mass_generation, Some(Default::default()));
     assert_eq!(model.stories.len(), 1);
     assert_eq!(model.constraints.len(), 1);
     assert!(model.validate().is_ok());
@@ -2456,12 +2458,14 @@ fn test_apply_stories_roundtrip_with_generated_masters() {
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
     assert!(model.generated_masters.is_empty());
+    assert!(model.damper_mass_generation.is_none());
     assert!(model.stories.is_empty());
     assert!(model.validate().is_ok());
 
     stack.redo(&mut model);
     assert_eq!(model.nodes.len(), 3);
     assert_eq!(model.generated_masters, vec![NodeId(2)]);
+    assert_eq!(model.damper_mass_generation, Some(Default::default()));
     assert_eq!(model.stories.len(), 1);
     assert_eq!(model.constraints.len(), 1);
 }
@@ -2487,6 +2491,7 @@ fn test_apply_stories_sets_and_restores_mass_method() {
     let mut stack = UndoStack::new();
 
     let cmd = ApplyStories {
+        damper_mass_generation: Default::default(),
         stories: vec![],
         node_story: vec![None, None],
         constraints: vec![],

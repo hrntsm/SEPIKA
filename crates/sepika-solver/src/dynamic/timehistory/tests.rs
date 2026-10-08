@@ -850,7 +850,7 @@ fn test_nonlinear_time_history_sdof_elastic() {
     let reducer = Reducer::build(&model, &dofmap);
 
     // 線形解との比較用: SDOF 線形剛性を計算
-    let m_free = assemble_global_m(&model, &dofmap, MassOption::Consistent);
+    let m_free = assemble_global_m(&model, &dofmap, MassOption::Consistent).unwrap();
     let k_free = assemble_global_k(&model, &dofmap);
     let m_red_lin = reducer.reduce_k(&m_free);
     let k_red_lin = reducer.reduce_k(&k_free);
@@ -928,7 +928,7 @@ fn test_nonlinear_time_history_sdof_plastic() {
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
 
-    let m_free = assemble_global_m(&model, &dofmap, MassOption::Consistent);
+    let m_free = assemble_global_m(&model, &dofmap, MassOption::Consistent).unwrap();
     let k_free = assemble_global_k(&model, &dofmap);
     let m_red_lin = reducer.reduce_k(&m_free);
     let k_red_lin = reducer.reduce_k(&k_free);
@@ -995,7 +995,8 @@ fn test_nonlinear_time_history_extended_damping_models_run() {
     let base = fiber_column_model(100.0);
     let dofmap0 = DofMap::build(&base);
     let reducer0 = Reducer::build(&base, &dofmap0);
-    let m_red = reducer0.reduce_k(&assemble_global_m(&base, &dofmap0, MassOption::Consistent));
+    let m_red =
+        reducer0.reduce_k(&assemble_global_m(&base, &dofmap0, MassOption::Consistent).unwrap());
     let k_red = reducer0.reduce_k(&assemble_global_k(&base, &dofmap0));
     let m_val = *m_red.get(0, 0).unwrap_or(&1.0);
     let omega = (*k_red.get(0, 0).unwrap_or(&0.0) / m_val).sqrt();
@@ -1054,7 +1055,7 @@ fn test_nonlinear_time_history_cumulative_vs_noncumulative() {
     let base = fiber_column_model(100.0);
     let dof0 = DofMap::build(&base);
     let red0 = Reducer::build(&base, &dof0);
-    let m_red = red0.reduce_k(&assemble_global_m(&base, &dof0, MassOption::Consistent));
+    let m_red = red0.reduce_k(&assemble_global_m(&base, &dof0, MassOption::Consistent).unwrap());
     let k_red = red0.reduce_k(&assemble_global_k(&base, &dof0));
     let omega = (*k_red.get(0, 0).unwrap_or(&0.0) / *m_red.get(0, 0).unwrap_or(&1.0)).sqrt();
     let dt = 0.001;
@@ -1121,7 +1122,7 @@ fn test_nonlinear_time_history_convergence() {
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
 
-    let m_free = assemble_global_m(&model, &dofmap, MassOption::Consistent);
+    let m_free = assemble_global_m(&model, &dofmap, MassOption::Consistent).unwrap();
     let k_free = assemble_global_k(&model, &dofmap);
     let m_red_lin = reducer.reduce_k(&m_free);
     let k_red_lin = reducer.reduce_k(&k_free);
@@ -1185,6 +1186,13 @@ fn test_maxwell_damper_reduces_free_vibration() {
         let mut model = sdof_model();
         if with_damper {
             let did = ElemId(model.elements.len() as u32);
+            model.load_cfg = Some(sepika_core::model::LoadCfg {
+                dampers: vec![sepika_core::model::DamperSpec {
+                    elem: did,
+                    total_weight: 0.0,
+                }],
+                ..Default::default()
+            });
             model.elements.push(ElementData {
                 id: did,
                 kind: ElementKind::Damper,
@@ -2016,7 +2024,7 @@ fn test_nonlinear_time_history_deterministic_guard() {
     let base = fiber_column_model(100.0);
     let dof0 = DofMap::build(&base);
     let red0 = Reducer::build(&base, &dof0);
-    let m_red = red0.reduce_k(&assemble_global_m(&base, &dof0, MassOption::Consistent));
+    let m_red = red0.reduce_k(&assemble_global_m(&base, &dof0, MassOption::Consistent).unwrap());
     let k_red = red0.reduce_k(&assemble_global_k(&base, &dof0));
     let omega = (*k_red.get(0, 0).unwrap_or(&0.0) / *m_red.get(0, 0).unwrap_or(&1.0)).sqrt();
     let damping = Damping::StiffnessProportional {
@@ -2066,7 +2074,7 @@ fn test_nonlinear_time_history_tangent_damping_deterministic_guard() {
     let base = fiber_column_model(100.0);
     let dof0 = DofMap::build(&base);
     let red0 = Reducer::build(&base, &dof0);
-    let m_red = red0.reduce_k(&assemble_global_m(&base, &dof0, MassOption::Consistent));
+    let m_red = red0.reduce_k(&assemble_global_m(&base, &dof0, MassOption::Consistent).unwrap());
     let k_red = red0.reduce_k(&assemble_global_k(&base, &dof0));
     let omega = (*k_red.get(0, 0).unwrap_or(&0.0) / *m_red.get(0, 0).unwrap_or(&1.0)).sqrt();
     let damping = Damping::StiffnessProportional {

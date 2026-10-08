@@ -132,6 +132,12 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     let mut issues = Vec::new();
 
     if let Err(e) = model.validate() {
+        if matches!(e, sepika_core::error::CoreError::InvalidInput(_)) {
+            issues.push(ModelIssue::model(format!(
+                "モデル検証エラー: {e}。荷重計算条件を修正してください。"
+            )));
+            return issues;
+        }
         issues.push(ModelIssue::model(format!(
             "モデル検証エラー: {e}。モデルの ID 参照が壊れています。\
              直前の編集を取り消すか、保存済みのプロジェクトファイルを開き直してください。"

@@ -2,7 +2,6 @@
 //!
 //! - [`SelfWeightItem`] — 自重 1 件分の設計重量・物理質量相当と帰属の中間表現
 //! - [`enumerate_self_weight`] — モデル全要素の自重を列挙する
-//! - [`steel_density_ton_mm3`] — 鋼材の物理質量密度 [ton/mm³]
 //! - [`finish_perimeter`] — 仕上げ周長 φ
 //! - [`wall_clear_area`] — 耐震壁の内法面積
 
@@ -23,14 +22,16 @@ fn ordered_pair(a: NodeId, b: NodeId) -> (NodeId, NodeId) {
     }
 }
 
-/// 節点 → その節点に取り付く線材（`Beam`/`Brace`、2 節点以上）の `model.elements`
+/// 節点 → その節点に取り付く線材（Beam/Fiber/MultiSpring/Brace、2 節点以上）の `model.elements`
 /// 添字一覧。`has_column_below`/`max_depth`（柱脚に接続する部材の探索）を
 /// O(柱数×要素数) から O(1) 参照へ落とすための事前索引（`enumerate_self_weight`
 /// の主ループ前に 1 回だけ構築する）。
 fn node_adjacency(model: &Model) -> HashMap<NodeId, Vec<usize>> {
     let mut adj: HashMap<NodeId, Vec<usize>> = HashMap::new();
     for (idx, e) in model.elements.iter().enumerate() {
-        if matches!(e.kind, ElementKind::Beam | ElementKind::Brace { .. }) && e.nodes.len() >= 2 {
+        if (e.kind.is_weight_frame() || matches!(e.kind, ElementKind::Brace { .. }))
+            && e.nodes.len() >= 2
+        {
             for &n in &e.nodes {
                 adj.entry(n).or_default().push(idx);
             }
@@ -40,7 +41,7 @@ fn node_adjacency(model: &Model) -> HashMap<NodeId, Vec<usize>> {
 }
 
 /// 節点対 (min,max)（辺の両端。線材が3節点以上でも先頭・末尾を辺とみなす。
-/// `wall_clear_area_factor` の元の照合と同じ）→ `Beam` 要素の `model.elements`
+/// `wall_clear_area_factor` の元の照合と同じ）→ Beam/Fiber/MultiSpring 要素の `model.elements`
 /// 添字。壁の各辺→柱梁対応付けを O(壁の辺数×要素数) から O(1) 参照へ落とすための
 /// 事前索引（`enumerate_self_weight` で1回構築し使い回す）。同一節点対に複数の
 /// 候補がある場合は断面を持つ要素を優先し、どちらも同じなら要素順で最初に
@@ -49,7 +50,7 @@ fn node_adjacency(model: &Model) -> HashMap<NodeId, Vec<usize>> {
 fn beam_pair_map(model: &Model) -> HashMap<(NodeId, NodeId), usize> {
     let mut map = HashMap::new();
     for (idx, e) in model.elements.iter().enumerate() {
-        if e.kind == ElementKind::Beam && e.nodes.len() >= 2 {
+        if e.kind.is_weight_frame() && e.nodes.len() >= 2 {
             let (a, b) = (e.nodes[0], e.nodes[e.nodes.len() - 1]);
             match map.entry(ordered_pair(a, b)) {
                 std::collections::hash_map::Entry::Vacant(v) => {
@@ -65,20 +66,6 @@ fn beam_pair_map(model: &Model) -> HashMap<(NodeId, NodeId), usize> {
         }
     }
     map
-}
-
-/// 鋼材の物理質量密度 [ton/mm³]（質量行列・動的解析用）。ダンパー支持部の
-/// 質量相当重量の算定に用いる。設計用単位体積重量からは導出しない。
-pub(crate) fn steel_density_ton_mm3() -> f64 {
-    sepika_core::units::STEEL_MASS_DENSITY_TON_MM3
-}
-
-/// 鋼材の設計用単位体積重量 [N/mm³]（DL・地震用重量用）。ダンパー支持部の
-/// 設計重量の算定に用いる。
-pub(crate) fn steel_design_unit_weight_n_per_mm3() -> f64 {
-    sepika_core::units::to_internal::unit_weight_kn_per_m3(
-        sepika_core::units::STEEL_UNIT_WEIGHT_KN_M3,
-    )
 }
 
 /// 解析の質量行列が線材へ与える単位長さ当たり質量 [t/mm]。
@@ -124,7 +111,7 @@ pub(crate) enum SelfWeightItem {
     /// - `matrix_mass_equiv` は通常部のうち解析の質量行列（部材密度質量）が受け持つ分 [N]。
     ///   付加重量・下端付加分は質量行列に対応物がないため含めない。躯体分（CFT は鋼管部）
     ///   の割増増分と付加重量が `mass_equiv − matrix_mass_equiv` に残る。
-    /// - `is_column` は 2 節点の鉛直 `ElementKind::Beam`（ブレースは false）。
+    /// - `is_column` は 2 節点の鉛直 Beam/Fiber/MultiSpring（ブレースは false）。
     Line {
         elem_idx: usize,
         load: f64,
@@ -134,8 +121,8 @@ pub(crate) enum SelfWeightItem {
         extra_bottom_mass_equiv: f64,
         is_column: bool,
     },
-    /// ダンパー装置＋支持部の重量。両端節点（`model.nodes` 添字）へ 1/2 ずつ。
-    /// `load` は設計重量、`mass_equiv` は物理質量相当（装置重量はそのまま）。
+    /// ダンパー総重量。両端節点（`model.nodes` 添字）へ 1/2 ずつ。
+    /// `load` と `mass_equiv` は入力総重量 [N]。
     Damper {
         ni: usize,
         nj: usize,
@@ -159,7 +146,7 @@ pub(crate) enum SelfWeightItem {
 
 /// モデル全要素の自重を列挙する（§柱梁自重・§壁自重・§ダンパー自重）。
 ///
-/// - 線材（柱・梁・ブレース, `ElementKind::Beam`/`Brace`）: 設計重量（設計単位体積
+/// - 線材（柱・梁・ブレース, Beam/Fiber/MultiSpring/Brace）: 設計重量（設計単位体積
 ///   重量×A×L。付加線重量・仕上げを含む）と物理質量相当（質量行列と同じ総断面・
 ///   節点間長で物理密度×g を算定し、鉄骨重量割増を掛けて付加重量を足したもの）を
 ///   別々に持つ。
@@ -172,9 +159,9 @@ pub(crate) enum SelfWeightItem {
 ///   （w_c = γ·b(D−t)+…。スラブ重量は構造芯間の面積で別途計上されるため、
 ///   控除しないと梁幅×スラブ厚の体積が二重計上になる）。スラブが定義されて
 ///   いないモデル（純フレーム等）では控除しない。
-///   §柱の長さ: コンクリート柱（2 節点の鉛直 `ElementKind::Beam`）で下端へ別の柱
-///   （同じく 2 節点の鉛直 `ElementKind::Beam`）が接続しない場合、下端節点に取り付く
-///   非鉛直 Beam の最大せい [mm] に相当する重量を
+///   §柱の長さ: コンクリート柱（2 節点の鉛直 Beam/Fiber/MultiSpring）で下端へ別の柱
+///   （同じく 2 節点の鉛直 Beam/Fiber/MultiSpring）が接続しない場合、下端節点に取り付く
+///   非鉛直 Beam/Fiber/MultiSpring の最大せい [mm] に相当する重量を
 ///   追加自重として下端節点だけへ加算する（通常自重は上下へ 1/2 ずつ。柱以外・S 柱・
 ///   下階柱ありは 0。ブレースは柱とみなさない）。総重量は `w·(L+Dmax)` で保存する。
 ///   ギャップ対応: 鋼材のみ `load_cfg.effective_steel_factor()`（鉄骨重量割増率）を
@@ -194,11 +181,7 @@ pub(crate) enum SelfWeightItem {
 ///   §壁自重: 4 節点の耐震壁は「周辺の柱梁の内法寸法」で面積を評価する
 ///   （[`wall_clear_area`]。芯々面積に内法係数を乗じる。控除相手の
 ///   柱・梁が見つからない辺は控除なし＝芯々のまま保守側）。
-/// - ダンパー（`load_cfg.dampers` に登録された Beam/Brace 要素）: 断面自重は使わず、
-///   設計重量は装置重量＋支持部×設計単位体積重量、物理質量相当は装置重量＋支持部×
-///   物理密度×g に置き換える（§ダンパー自重。装置重量は両者で同値。
-///   `device_weight=0` かつ `support_area>0` の場合は支持部のみが算入され、
-///   自重を考慮しない部材に相当する）。
+/// - ダンパー: 入力総重量を設計重量・物理質量相当重量に用い、断面・付加重量は加算しない。
 ///
 /// 壁の解析要素（`ElementKind::Wall`）は入力の正である `model` には存在しない
 /// 生成物（D5）のため、本関数は内部で壁展開モデル
@@ -213,43 +196,29 @@ pub(crate) fn enumerate_self_weight(
     model: &Model,
     load_cfg: &LoadCfg,
 ) -> Result<Vec<SelfWeightItem>, String> {
-    validate_cft_steel_materials(model)?;
-    let (expanded, _wall_index, _wall_expand_report) =
+    load_cfg.validate_damper_weights(model)?;
+    let (mut expanded, _wall_index, _wall_expand_report) =
         crate::wall_expand::expand_wall_elements(model);
+    expanded.load_cfg = Some(load_cfg.clone());
     let model = &expanded;
+    validate_cft_steel_materials(model)?;
     let mut items = Vec::new();
     let node_adj = node_adjacency(model);
     let beam_pairs = beam_pair_map(model);
     let story_spans = model.story_spans();
     for (elem_idx, elem) in model.elements.iter().enumerate() {
-        let coating_per_length = crate::fireproof::primary_line_weight(model, elem)?;
-        if matches!(elem.kind, ElementKind::Beam | ElementKind::Brace { .. })
-            && elem.nodes.len() >= 2
-        {
-            if let Some(damper) = load_cfg.dampers.iter().find(|d| d.elem == elem.id) {
-                if coating_per_length > 0.0 {
-                    return Err(format!(
-                        "部材 {} のダンパー自重置換は支持部の被覆断面形状を解決できません",
-                        elem.id.0
-                    ));
-                }
-                let ni = elem.nodes[0].index();
-                let nj = elem.nodes[1].index();
-                let len = dist3(model.nodes[ni].coord, model.nodes[nj].coord);
-                let support_len = (len - damper.device_length).max(0.0);
-                let load = damper.device_weight
-                    + damper.support_area * support_len * steel_design_unit_weight_n_per_mm3();
-                let mass_equiv = damper.device_weight
-                    + damper.support_area * support_len * steel_density_ton_mm3() * GRAVITY_MM_S2;
-                items.push(SelfWeightItem::Damper {
-                    ni,
-                    nj,
-                    load,
-                    mass_equiv,
-                });
-                continue;
-            }
+        if let Some(damper) = load_cfg.dampers.iter().find(|d| d.elem == elem.id) {
+            let ni = elem.nodes[0].index();
+            let nj = elem.nodes[1].index();
+            items.push(SelfWeightItem::Damper {
+                ni,
+                nj,
+                load: damper.total_weight,
+                mass_equiv: damper.total_weight,
+            });
+            continue;
         }
+        let coating_per_length = crate::fireproof::primary_line_weight(model, elem)?;
 
         let (Some(sec), Some(mat)) = (model.element_section(elem), model.element_material(elem))
         else {
@@ -258,14 +227,18 @@ pub(crate) fn enumerate_self_weight(
         sec.resolved_area()?;
 
         match elem.kind {
-            ElementKind::Beam | ElementKind::Brace { .. } if elem.nodes.len() >= 2 => {
+            ElementKind::Beam
+            | ElementKind::Fiber
+            | ElementKind::MultiSpring
+            | ElementKind::Brace { .. }
+                if elem.nodes.len() >= 2 =>
+            {
                 let ni = elem.nodes[0].index();
                 let nj = elem.nodes[1].index();
                 let (ci, cj) = (model.nodes[ni].coord, model.nodes[nj].coord);
                 let len = dist3(ci, cj);
                 let is_vertical = is_vertical_pair(ci, cj);
-                let is_column =
-                    elem.kind == ElementKind::Beam && elem.nodes.len() == 2 && is_vertical;
+                let is_column = elem.kind.is_weight_frame() && elem.nodes.len() == 2 && is_vertical;
                 let is_concrete = mat.fc.is_some();
                 let is_cft = matches!(
                     sec.shape.as_ref(),
@@ -300,7 +273,7 @@ pub(crate) fn enumerate_self_weight(
                         .unwrap_or(&[]);
                     let has_column_below = adj_at_bottom.iter().any(|&idx| {
                         let e2 = &model.elements[idx];
-                        e2.id != elem.id && e2.kind == ElementKind::Beam && e2.nodes.len() == 2 && {
+                        e2.id != elem.id && e2.kind.is_weight_frame() && e2.nodes.len() == 2 && {
                             let (a, b) = (
                                 model.nodes[e2.nodes[0].index()].coord,
                                 model.nodes[e2.nodes[1].index()].coord,
@@ -316,7 +289,7 @@ pub(crate) fn enumerate_self_weight(
                             .iter()
                             .filter_map(|&idx| {
                                 let e2 = &model.elements[idx];
-                                if e2.kind != ElementKind::Beam || e2.id == elem.id {
+                                if !e2.kind.is_weight_frame() || e2.id == elem.id {
                                     return None;
                                 }
                                 let (a, b) = (
@@ -486,7 +459,11 @@ pub(crate) fn enumerate_self_weight(
 }
 
 pub fn validate_cft_steel_materials(model: &Model) -> Result<(), String> {
+    model.validate_damper_weights()?;
     for elem in &model.elements {
+        if model.uses_damper_total_weight(elem) {
+            continue;
+        }
         let Some(section) = model.element_section(elem) else {
             continue;
         };
@@ -518,7 +495,7 @@ pub fn validate_cft_steel_materials(model: &Model) -> Result<(), String> {
 /// 耐震壁の重量は周辺の柱梁の内法寸法で計算する扱いに対応。
 /// 対象は 4 節点の `ElementKind::Wall` のみ（シェル床・多角形壁は 1.0）。
 /// 各辺を鉛直辺（側柱候補）・水平辺（上下梁候補）に分類し、辺の節点対に一致する
-/// 線材（`ElementKind::Beam`）の断面寸法の半分を芯々寸法から控除する:
+/// 線材（Beam/Fiber/MultiSpring）の断面寸法の半分を芯々寸法から控除する:
 /// - 水平辺（上下梁）: 梁せい `sec.depth` の半分を高さから控除
 /// - 鉛直辺（側柱）: 平面内の向きが特定できないため `min(width, depth)` の半分を
 ///   長さから控除（控除を小さくとる保守側の近似）

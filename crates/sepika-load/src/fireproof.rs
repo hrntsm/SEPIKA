@@ -1,6 +1,6 @@
 use sepika_core::model::{
-    ElementData, ElementKind, FireproofKind, FrameSectionUse, Model, SecondaryMember,
-    SecondaryMemberKind, Section,
+    ElementData, FireproofKind, FrameSectionUse, Model, SecondaryMember, SecondaryMemberKind,
+    Section,
 };
 use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 
@@ -84,7 +84,7 @@ fn line_weight(
 }
 
 pub(crate) fn primary_line_weight(model: &Model, element: &ElementData) -> Result<f64, String> {
-    if element.kind != ElementKind::Beam {
+    if !element.kind.is_weight_frame() {
         return Ok(0.0);
     }
     let active = enabled(model, StructureKind::S, true)
