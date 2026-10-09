@@ -177,6 +177,7 @@ mod tests {
                     structure: Default::default(),
                     dynamic_mass: Some(sepika_core::model::StoryDynamicMass {
                         mass_equiv_weight_n: 1.0e6,
+                        lumped_mass: None,
                         center_xy_mm: [0.0, 0.0],
                         inertia_t_mm2: 0.0,
                     }),
@@ -367,6 +368,7 @@ mod tests {
             let mut top = base_story(1, 3000.0);
             top.dynamic_mass = Some(StoryDynamicMass {
                 mass_equiv_weight_n: weight,
+                lumped_mass: None,
                 center_xy_mm: [0.0, 0.0],
                 inertia_t_mm2: 0.0,
             });

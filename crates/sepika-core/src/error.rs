@@ -8,6 +8,8 @@ pub enum CoreError {
     DanglingRef(String),
     #[error("index mismatch: {0}")]
     IndexMismatch(String),
+    #[error("入力が不正です: {0}")]
+    InvalidInput(String),
 }
 
 /// 実配筋とファイバー断面の幾何検証エラー。

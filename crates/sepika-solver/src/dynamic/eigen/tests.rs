@@ -1151,7 +1151,8 @@ fn test_eigen_subspace_matches_dense_ground_truth_q_lt_n() {
         &model,
         &dofmap,
         sepika_element::behavior::MassOption::Consistent,
-    );
+    )
+    .unwrap();
     let m_red = reducer.reduce_k(&m_free);
     let n = k_red.nrows();
     let mut k_dense = vec![0.0; n * n];

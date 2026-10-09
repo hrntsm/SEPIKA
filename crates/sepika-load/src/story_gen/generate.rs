@@ -19,6 +19,8 @@ pub struct StoryGenResult {
     pub rep_nodes: Vec<Node>,
     /// 適用後の `model.generated_masters` の全量。
     pub generated_masters: Vec<NodeId>,
+    /// 部材別ダンパー指定と配置の生成記録（空指定も記録する）。
+    pub damper_mass_generation: sepika_core::model::DamperMassGeneration,
 }
 
 /// 階へ節点・剛床・地震用重量を割り付ける（複数の重力荷重ケースを地震用重量に
@@ -151,6 +153,7 @@ fn generate_stories_impl(
     mode: SelfWeightMode,
     mass_method: MassMethod,
 ) -> Result<StoryGenResult, String> {
+    model.validate_damper_weights()?;
     if model.nodes.is_empty() {
         return Err("節点がありません".into());
     }
@@ -220,6 +223,18 @@ fn generate_stories_impl(
 
     let mut node_weight = vec![0.0f64; model.nodes.len()];
     let load_cfg = model.load_cfg.clone().unwrap_or_default();
+    let damper_inputs = model.damper_mass_inputs()?;
+    for damper in load_cfg.dampers.iter().filter(|d| d.total_weight > 0.0) {
+        let elem = model.element(damper.elem).expect("検証済みの部材参照");
+        for id in &elem.nodes {
+            if !nodes_by_story.iter().any(|nodes| nodes.contains(id)) {
+                return Err(format!(
+                    "部材 {} のダンパー総重量の節点 {} の帰属階を解決できません",
+                    elem.id.0, id.0
+                ));
+            }
+        }
+    }
 
     let mut is_base_node = vec![false; model.nodes.len()];
     for e in &model.elements {
@@ -497,7 +512,7 @@ fn generate_stories_impl(
 
         let weight: f64 = node_ids.iter().map(|n| node_weight[n.index()]).sum();
 
-        let dynamic_mass = {
+        let mut dynamic_mass = {
             let w_sum: f64 = node_ids.iter().map(|n| node_mass_equiv[n.index()]).sum();
             let (gx, gy) = if w_sum > 0.0 {
                 (
@@ -547,6 +562,7 @@ fn generate_stories_impl(
                 mass_equiv_weight_n: w_sum,
                 center_xy_mm: [gx, gy],
                 inertia_t_mm2: inertia,
+                lumped_mass: None,
             }
         };
 
@@ -558,6 +574,17 @@ fn generate_stories_impl(
 
         for n in &node_ids {
             node_story[n.index()] = Some(story_id);
+        }
+
+        if slaves.is_empty() {
+            if let Some(damper) = load_cfg.dampers.iter().find(|d| {
+                d.total_weight > 0.0
+                    && model
+                        .element(d.elem)
+                        .is_some_and(|e| e.nodes.iter().any(|id| node_ids.contains(id)))
+            }) {
+                return Err(format!("部材 {} のダンパー総重量を階 {} の床面代表質点へ配置できません（床面スレーブ節点なし）", damper.elem.0, name));
+            }
         }
 
         if !slaves.is_empty() {
@@ -619,6 +646,21 @@ fn generate_stories_impl(
                 None
             };
 
+            if !load_cfg.dampers.is_empty() {
+                dynamic_mass.lumped_mass = Some(sepika_core::model::StoryLumpedMass {
+                    master,
+                    mass_method,
+                    mass,
+                    damper_weight_n: damper_inputs
+                        .iter()
+                        .map(|d| {
+                            d.nodes.iter().filter(|id| node_ids.contains(id)).count() as f64
+                                * (d.weight_n / 2.0)
+                        })
+                        .sum(),
+                });
+            }
+
             rep_nodes.push(Node {
                 id: master,
                 coord: [gx, gy, elev],
@@ -672,12 +714,15 @@ fn generate_stories_impl(
         generated_masters.push(id);
     }
 
+    let damper_mass_generation =
+        model.capture_damper_mass_generation(&rep_nodes, &constraints, &node_story, &stories)?;
     Ok(StoryGenResult {
         stories,
         node_story,
         constraints,
         rep_nodes,
         generated_masters,
+        damper_mass_generation,
     })
 }
 
@@ -700,7 +745,7 @@ fn assign_story_structures(model: &Model, node_story: &[Option<StoryId>], storie
     let mut counts: std::collections::HashMap<StoryId, (usize, usize, usize)> =
         std::collections::HashMap::with_capacity(stories.len());
     for e in &model.elements {
-        if !matches!(e.kind, ElementKind::Beam) || e.nodes.len() < 2 {
+        if !e.kind.is_weight_frame() || e.nodes.len() < 2 {
             continue;
         }
         if e.section.is_none() {

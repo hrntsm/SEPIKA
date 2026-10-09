@@ -44,6 +44,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0037](0037-cantilever-slab-load-to-attachment-girder.md) | accepted | 線アンカーの取り付く床板は取付き大梁だけへ等分布伝達する |
 | [0038](0038-cantilever-slab-tip-load-transfer.md) | accepted | 片持ちスラブの先端荷重は取付き梁へ力のみ等分布伝達する |
 | [0039](0039-section-property-basis.md) | accepted | 断面性能の算定元を項目別に区別し、フィレット半径・角Rの編集時の更新を分ける |
+| [0040](0040-damper-total-weight-and-mass-source.md) | accepted | ダンパーはモデル化範囲の総重量を直接入力し、断面由来質量を置き換える |
 
 ## 規約
 

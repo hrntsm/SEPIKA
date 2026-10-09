@@ -45,6 +45,9 @@ pub struct Model {
     /// 構造節点と区別するために保持し、再生成時に再利用する。
     #[serde(default)]
     pub generated_masters: Vec<NodeId>,
+    /// 階生成に使ったダンパー指定と質量配置。未生成は `None`、指定なしの生成は空の記録。
+    #[serde(default)]
+    pub damper_mass_generation: Option<DamperMassGeneration>,
     /// 動的解析の質量モデルの方式（[`MassMethod`]）。
     #[serde(default)]
     pub mass_method: MassMethod,
@@ -223,6 +226,8 @@ impl Model {
         use crate::error::CoreError;
 
         check_id_consistency(&self.nodes, "nodes", "NodeId", |n| n.id.index(), |n| n.id.0)?;
+        self.validate_damper_weights()
+            .map_err(CoreError::InvalidInput)?;
 
         for (i, elem) in self.elements.iter().enumerate() {
             if elem.id.index() != i {
@@ -1048,6 +1053,7 @@ impl Model {
             && self.vibration_cases == other.vibration_cases
             && self.lumped_vibration_cases == other.lumped_vibration_cases
             && self.generated_masters == other.generated_masters
+            && self.damper_mass_generation == other.damper_mass_generation
             && self.mass_method == other.mass_method
             && self.slab_thickness == other.slab_thickness
             && self.load_cfg == other.load_cfg

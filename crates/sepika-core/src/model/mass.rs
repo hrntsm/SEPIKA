@@ -501,12 +501,426 @@ fn validate_section_geometry(section: &Section) -> Result<(), String> {
     Ok(())
 }
 
+/// 階生成で使用した部材別ダンパー重量と配置の記録。質量の入力元ではない。
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DamperMassGeneration {
+    pub inputs: Vec<DamperMassInput>,
+    pub placements: Vec<DamperMassPlacement>,
+    /// 階生成で算定した全量物理重量・重心・慣性と質量反映記録。未算定も記録する。
+    pub dynamic_masses: Vec<(crate::ids::StoryId, Option<super::StoryDynamicMass>)>,
+}
+
+/// ダンパーとして重量を置換した部材と材端配置。重量は [N]、座標は [mm]。
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DamperMassInput {
+    pub elem: crate::ids::ElemId,
+    pub weight_n: f64,
+    pub nodes: [crate::ids::NodeId; 2],
+    pub coords: [[f64; 3]; 2],
+}
+
+/// ダンパー質量を受け持つ剛床の代表・スレーブと、直接関係する拘束の配置記録。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DamperMassPlacement {
+    pub story: crate::ids::StoryId,
+    pub anchors: Vec<crate::ids::NodeId>,
+    pub nodes: Vec<MassPlacementNode>,
+    pub constraints: Vec<super::Constraint>,
+}
+
+/// 質量配置に関係する節点の位置 [mm] と拘束。
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MassPlacementNode {
+    pub id: crate::ids::NodeId,
+    pub coord: [f64; 3],
+    pub restraint: crate::dof::Dof6Mask,
+    /// 要素・拘束の接続による解析節点か。
+    pub structural: bool,
+}
+
+fn mass_constraint_nodes(constraint: &super::Constraint) -> Vec<crate::ids::NodeId> {
+    match constraint {
+        super::Constraint::RigidDiaphragm { master, slaves, .. }
+        | super::Constraint::RigidLink { master, slaves, .. } => std::iter::once(*master)
+            .chain(slaves.iter().copied())
+            .collect(),
+        super::Constraint::Mpc { master, terms } => std::iter::once(*master)
+            .chain(terms.iter().map(|(id, _, _)| *id))
+            .collect(),
+    }
+}
+
+fn placement_constraints<'a>(
+    constraints: impl Iterator<Item = &'a super::Constraint>,
+    anchors: &[crate::ids::NodeId],
+) -> Vec<super::Constraint> {
+    constraints
+        .filter(|c| {
+            mass_constraint_nodes(c)
+                .iter()
+                .any(|id| anchors.contains(id))
+        })
+        .map(|c| match c {
+            super::Constraint::RigidDiaphragm {
+                story,
+                master,
+                slaves,
+                ..
+            } => super::Constraint::rigid_diaphragm(*story, *master, slaves.clone()),
+            other => other.clone(),
+        })
+        .collect()
+}
+
+fn complete_unique_ids<T: Ord>(mut recorded: Vec<T>, mut required: Vec<T>) -> bool {
+    recorded.sort_unstable();
+    required.sort_unstable();
+    recorded == required && recorded.windows(2).all(|pair| pair[0] != pair[1])
+}
+
 impl Model {
-    /// 要素断面の材料領域から分布質量特性を求める。
+    /// 有効な部材別ダンパー指定と両端配置を部材 ID 順に返す。
+    pub fn damper_mass_inputs(&self) -> Result<Vec<DamperMassInput>, String> {
+        self.validate_damper_weights()?;
+        let mut inputs = Vec::new();
+        if let Some(cfg) = &self.load_cfg {
+            for d in &cfg.dampers {
+                let elem = self.element(d.elem).expect("検証済みの部材参照");
+                let nodes = [elem.nodes[0], elem.nodes[1]];
+                inputs.push(DamperMassInput {
+                    elem: d.elem,
+                    weight_n: d.total_weight,
+                    nodes,
+                    coords: nodes.map(|id| self.node(id).expect("検証済みの節点参照").coord),
+                });
+            }
+        }
+        inputs.sort_by_key(|i| i.elem.0);
+        Ok(inputs)
+    }
+
+    /// 階生成結果に対応するダンパー指定・配置記録を作る。空指定も生成済みとして記録する。
+    pub fn capture_damper_mass_generation(
+        &self,
+        rep_nodes: &[super::Node],
+        constraints: &[super::Constraint],
+        node_story: &[Option<crate::ids::StoryId>],
+        stories: &[super::Story],
+    ) -> Result<DamperMassGeneration, String> {
+        let inputs = self.damper_mass_inputs()?;
+        if inputs.is_empty() {
+            return Ok(DamperMassGeneration::default());
+        }
+        let applied_constraints: Vec<_> = self
+            .constraints
+            .iter()
+            .filter(|c| !matches!(c, super::Constraint::RigidDiaphragm { .. }))
+            .chain(constraints.iter())
+            .cloned()
+            .collect();
+        let node_count = rep_nodes
+            .iter()
+            .map(|n| n.id.index() + 1)
+            .max()
+            .unwrap_or(0)
+            .max(self.nodes.len());
+        let structural = crate::dof::structural_nodes_with_constraints(
+            node_count,
+            &self.elements,
+            applied_constraints.iter(),
+        );
+        let mut placements = Vec::new();
+        for c in constraints {
+            let super::Constraint::RigidDiaphragm { story, .. } = c else {
+                continue;
+            };
+            if !inputs.iter().any(|i| {
+                i.nodes
+                    .iter()
+                    .any(|id| node_story.get(id.index()) == Some(&Some(*story)))
+            }) {
+                continue;
+            }
+            let anchors = mass_constraint_nodes(c);
+            let related = placement_constraints(applied_constraints.iter(), &anchors);
+            let mut ids: Vec<_> = related.iter().flat_map(mass_constraint_nodes).collect();
+            ids.sort_by_key(|id| id.0);
+            ids.dedup();
+            let nodes = ids
+                .into_iter()
+                .map(|id| {
+                    let n = rep_nodes
+                        .iter()
+                        .find(|n| n.id == id)
+                        .or_else(|| self.node(id))
+                        .ok_or_else(|| {
+                            format!("ダンパー質量配置の節点 {} を解決できません", id.0)
+                        })?;
+                    Ok(MassPlacementNode {
+                        id,
+                        coord: n.coord,
+                        restraint: n.restraint,
+                        structural: structural.get(n.id.index()).copied().ok_or_else(|| {
+                            format!("ダンパー質量配置の解析節点 {} の添字が不正です", n.id.0)
+                        })?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            placements.push(DamperMassPlacement {
+                story: *story,
+                anchors,
+                nodes,
+                constraints: related,
+            });
+        }
+        Ok(DamperMassGeneration {
+            inputs,
+            placements,
+            dynamic_masses: stories.iter().map(|s| (s.id, s.dynamic_mass)).collect(),
+        })
+    }
+    /// ダンパー総重量の入力を検証する。自重の生成・置換は行わない。
+    pub fn validate_damper_weights(&self) -> Result<(), String> {
+        self.load_cfg
+            .as_ref()
+            .unwrap_or(&super::LoadCfg::default())
+            .validate_damper_weights(self)
+    }
+
+    /// ダンパー質量の生成記録の反映と、正重量の帰属階への配置を検証する。
+    pub fn validate_damper_mass_placement(&self) -> Result<(), String> {
+        self.validate_damper_weights()?;
+        let inputs = self.damper_mass_inputs()?;
+        if let Some(generation) = &self.damper_mass_generation {
+            if generation.inputs != inputs {
+                return Err("ダンパーの部材別重量指定・材端配置が階生成時と一致しません。階を再生成してください".into());
+            }
+            let required_story_ids: Vec<_> = if inputs.is_empty() {
+                Vec::new()
+            } else {
+                self.stories.iter().map(|s| s.id.0).collect()
+            };
+            if !complete_unique_ids(
+                generation
+                    .dynamic_masses
+                    .iter()
+                    .map(|(id, _)| id.0)
+                    .collect(),
+                required_story_ids,
+            ) {
+                return Err(
+                    "動的質量の生成記録の階集合に不足・余分・重複があります。階を再生成してください"
+                        .into(),
+                );
+            }
+            for (id, expected) in &generation.dynamic_masses {
+                let actual = self
+                    .stories
+                    .iter()
+                    .find(|s| s.id == *id)
+                    .map(|s| s.dynamic_mass);
+                let valid = expected.is_none_or(|m| {
+                    m.mass_equiv_weight_n.is_finite()
+                        && m.mass_equiv_weight_n >= 0.0
+                        && m.center_xy_mm.iter().all(|v| v.is_finite())
+                        && m.inertia_t_mm2.is_finite()
+                        && m.inertia_t_mm2 >= 0.0
+                });
+                if actual != Some(*expected) || !valid {
+                    return Err(format!("階 {} の動的質量の全量物理重量・重心・慣性または反映記録が生成結果と一致しません。階を再生成してください", id.0));
+                }
+            }
+            let spans = self.story_spans();
+            let target_stories: std::collections::HashSet<_> = inputs
+                .iter()
+                .flat_map(|input| {
+                    input
+                        .coords
+                        .iter()
+                        .filter_map(|coord| self.story_at(&spans, coord[2]))
+                })
+                .collect();
+            let required_placements: Vec<_> = self
+                .constraints
+                .iter()
+                .filter_map(|c| match c {
+                    super::Constraint::RigidDiaphragm { story, master, .. }
+                        if target_stories.contains(story) =>
+                    {
+                        Some((*story, *master, c))
+                    }
+                    _ => None,
+                })
+                .collect();
+            let recorded_keys: Option<Vec<_>> = generation
+                .placements
+                .iter()
+                .map(|p| p.anchors.first().map(|master| (p.story.0, master.0)))
+                .collect();
+            if recorded_keys.is_none_or(|keys| {
+                !complete_unique_ids(
+                    keys,
+                    required_placements
+                        .iter()
+                        .map(|(story, master, _)| (story.0, master.0))
+                        .collect(),
+                )
+            }) {
+                return Err("ダンパー質量の配置記録の集合に不足・余分・重複があります。階を再生成してください".into());
+            }
+            let structural = if required_placements.is_empty() {
+                Vec::new()
+            } else {
+                crate::dof::structural_nodes(self)
+            };
+            for placement in &generation.placements {
+                let (_, _, constraint) = required_placements
+                    .iter()
+                    .find(|(story, master, _)| {
+                        *story == placement.story && placement.anchors.first() == Some(master)
+                    })
+                    .expect("検証済みの配置集合");
+                let anchors = mass_constraint_nodes(constraint);
+                let related = placement_constraints(self.constraints.iter(), &anchors);
+                let mut required_nodes: Vec<_> = related
+                    .iter()
+                    .flat_map(mass_constraint_nodes)
+                    .map(|id| id.0)
+                    .collect();
+                required_nodes.sort_unstable();
+                required_nodes.dedup();
+                if placement.anchors != anchors
+                    || !complete_unique_ids(
+                        placement.anchors.iter().map(|id| id.0).collect(),
+                        anchors.iter().map(|id| id.0).collect(),
+                    )
+                    || !complete_unique_ids(
+                        placement.nodes.iter().map(|n| n.id.0).collect(),
+                        required_nodes,
+                    )
+                {
+                    return Err(format!("階 {} のダンパー質量配置の節点集合に不足・余分・重複があります。階を再生成してください", placement.story.0));
+                }
+                let nodes_match = placement.nodes.iter().all(|n| {
+                    self.node(n.id).is_some_and(|actual| {
+                        actual.coord == n.coord
+                            && actual.restraint == n.restraint
+                            && structural.get(n.id.index()) == Some(&n.structural)
+                    })
+                });
+                if !nodes_match || placement.constraints != related {
+                    return Err(format!(
+                        "階 {} のダンパー質量配置が生成記録と一致しません。階を再生成してください",
+                        placement.story.0
+                    ));
+                }
+            }
+        } else if (!inputs.is_empty() && !self.generated_masters.is_empty())
+            || self
+                .stories
+                .iter()
+                .any(|s| s.dynamic_mass.is_some_and(|m| m.lumped_mass.is_some()))
+        {
+            return Err(
+                "ダンパー重量指定・配置の生成記録がありません。階を再生成してください".into(),
+            );
+        }
+        let dampers = self
+            .load_cfg
+            .as_ref()
+            .map_or(&[][..], |cfg| cfg.dampers.as_slice());
+        let spans = self.story_spans();
+        for story in &self.stories {
+            let Some(record) = story.dynamic_mass.and_then(|m| m.lumped_mass) else {
+                continue;
+            };
+            let input_weight: f64 = inputs
+                .iter()
+                .map(|d| {
+                    d.nodes
+                        .iter()
+                        .filter(|id| {
+                            self.node(**id).is_some_and(|n| {
+                                self.story_at(&spans, n.coord[2]) == Some(story.id)
+                            })
+                        })
+                        .count() as f64
+                        * (d.weight_n / 2.0)
+                })
+                .sum();
+            let reflected = self.node(record.master).is_some_and(|master| {
+                master.mass == record.mass
+                    && master.story == Some(story.id)
+                    && self.generated_masters.contains(&record.master)
+                    && self.constraints.iter().any(|c| {
+                        matches!(c,
+                        super::Constraint::RigidDiaphragm { story: sid, master: id, .. }
+                            if *sid == story.id && *id == record.master)
+                    })
+            });
+            if record.mass_method != self.mass_method
+                || !record.damper_weight_n.is_finite()
+                || record.damper_weight_n != input_weight
+                || !reflected
+                || record
+                    .mass
+                    .is_some_and(|m| m.iter().any(|v| !v.is_finite() || *v < 0.0))
+            {
+                return Err(format!("階 {} のダンパー質量の生成記録と代表節点質量が一致しません。階を再生成してください", story.name));
+            }
+        }
+        for damper in dampers.iter().filter(|d| d.total_weight > 0.0) {
+            let elem = self.element(damper.elem).expect("検証済みの部材参照");
+            for id in &elem.nodes {
+                let node = self.node(*id).expect("検証済みの節点参照");
+                let story = self
+                    .story_at(&spans, node.coord[2])
+                    .and_then(|id| self.stories.get(id.index()));
+                let represented = story.is_some_and(|story| self.constraints.iter().any(|c| {
+                    matches!(c, super::Constraint::RigidDiaphragm { story: sid, master, slaves, .. }
+                        if *sid == story.id && self.node(*master).is_some()
+                            && slaves.iter().any(|id| self.node(*id).is_some_and(|n|
+                                (n.coord[2] - story.elevation).abs() <= super::DIAPHRAGM_LEVEL_TOL_MM)))
+                }));
+                if !represented {
+                    return Err(format!(
+                        "部材 {} のダンパー総重量を節点 {} の帰属階の床面代表質点へ配置できません",
+                        elem.id.0, id.0
+                    ));
+                }
+                let story = story.expect("検証済みの帰属階");
+                story
+                    .dynamic_mass
+                    .and_then(|m| m.lumped_mass)
+                    .ok_or_else(|| {
+                        format!(
+                            "階 {} のダンパー質量の生成記録がありません。階を再生成してください",
+                            story.name
+                        )
+                    })?;
+            }
+        }
+        Ok(())
+    }
+
+    /// 断面由来の質量を用いず、ダンパー総重量から集中質量を生成する部材か。
+    pub fn uses_damper_total_weight(&self, elem: &ElementData) -> bool {
+        elem.kind == super::ElementKind::Damper
+            || self
+                .load_cfg
+                .as_ref()
+                .is_some_and(|cfg| cfg.dampers.iter().any(|damper| damper.elem == elem.id))
+    }
+
+    /// 要素断面の材料領域から分布質量特性を求める。ダンパー総重量の不正入力はエラー。
     pub fn element_mass_properties(
         &self,
         elem: &ElementData,
     ) -> Result<SectionMassProperties, String> {
+        self.validate_damper_weights()?;
+        if self.uses_damper_total_weight(elem) {
+            return Ok(SectionMassProperties::default());
+        }
         let Some(section) = self.element_section(elem) else {
             return Ok(SectionMassProperties::default());
         };

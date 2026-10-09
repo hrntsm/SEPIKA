@@ -31,7 +31,11 @@ pub struct LumpedMassBuildInput<'a> {
     pub po_y: Option<&'a PushoverResult>,
 }
 
+/// ダンパー指定・生成質量の整合を検証し、質点系を生成する。不備は `InvalidInput`。
 pub fn build_lumped_mass(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
+    inp.model
+        .validate_damper_mass_placement()
+        .map_err(JobError::InvalidInput)?;
     match inp.dim {
         StickDim::Planar => build_planar(inp),
         StickDim::Spatial => build_spatial(inp),
@@ -503,6 +507,7 @@ mod tests {
                 level_kind: Default::default(),
                 dynamic_mass: Some(sepika_core::model::StoryDynamicMass {
                     mass_equiv_weight_n: f64::from(3 - i) * 10.0 * GRAVITY_MM_S2,
+                    lumped_mass: None,
                     center_xy_mm: [f64::from(i), 0.0],
                     inertia_t_mm2: 1000.0,
                 }),
@@ -686,6 +691,7 @@ mod tests {
         let mut model = two_story_column_model();
         model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
             mass_equiv_weight_n: 0.0,
+            lumped_mass: None,
             center_xy_mm: [0.0, 0.0],
             inertia_t_mm2: 0.0,
         });
@@ -711,6 +717,7 @@ mod tests {
         let mut model = two_story_column_model();
         model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
             mass_equiv_weight_n: f64::NAN,
+            lumped_mass: None,
             center_xy_mm: [0.0, 0.0],
             inertia_t_mm2: 1000.0,
         });
@@ -729,6 +736,7 @@ mod tests {
         let mut model = two_story_column_model();
         model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
             mass_equiv_weight_n: f64::NAN,
+            lumped_mass: None,
             center_xy_mm: [0.0, 0.0],
             inertia_t_mm2: 1000.0,
         });
@@ -754,6 +762,7 @@ mod tests {
         // 質量は正・J のみ NaN にして、J 側の検証だけを見る。
         model.stories[1].dynamic_mass = Some(sepika_core::model::StoryDynamicMass {
             mass_equiv_weight_n: 10.0 * GRAVITY_MM_S2,
+            lumped_mass: None,
             center_xy_mm: [0.0, 0.0],
             inertia_t_mm2: f64::NAN,
         });

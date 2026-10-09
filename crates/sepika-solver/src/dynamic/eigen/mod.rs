@@ -36,6 +36,9 @@ pub fn solve_eigen(
     reducer: &Reducer,
     n_modes: usize,
 ) -> Result<ModalResult, SolveError> {
+    model
+        .validate_damper_mass_placement()
+        .map_err(SolveError::InvalidInput)?;
     if reducer.n_indep == 0 || n_modes == 0 {
         return Ok(ModalResult {
             omega2: vec![],
@@ -72,7 +75,7 @@ pub fn solve_eigen_with_solver(
     n_modes: usize,
     solver: &dyn LinearSolver,
 ) -> Result<ModalResult, SolveError> {
-    let m_free = assemble_global_m(model, dofmap, MassOption::Consistent);
+    let m_free = assemble_global_m(model, dofmap, MassOption::Consistent)?;
     let m_red = reducer.reduce_k(&m_free);
     let n = m_red.nrows();
     let n_modes = n_modes.min(n);

@@ -170,6 +170,20 @@ pub struct StoryDynamicMass {
     pub center_xy_mm: [f64; 2],
     /// 質量重心まわりの回転慣性 [t·mm²]。
     pub inertia_t_mm2: f64,
+    /// 階生成で算定した代表節点質量の反映記録。未生成・代表節点なしは `None`。
+    #[serde(default)]
+    pub lumped_mass: Option<StoryLumpedMass>,
+}
+
+/// 階生成が算定した代表節点と質量。組立時に反映状態を照合するための生成データ。
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StoryLumpedMass {
+    pub master: NodeId,
+    pub mass_method: MassMethod,
+    /// 節点質量6成分 [t, t, t, t·mm², t·mm², t·mm²]。無質量は `None`。
+    pub mass: Option<[f64; 6]>,
+    /// この階へ配分したダンパー入力総重量 [N]（重力ケースのみ方式でも入力を記録）。
+    pub damper_weight_n: f64,
 }
 
 /// 階の外周スラブ算定に使う標準床荷重。値の単位は内部単位 [N/mm²]。
@@ -331,7 +345,7 @@ pub struct Layer {
 
 impl Model {
     pub fn is_rc_src_column(&self, elem: &ElementData) -> bool {
-        elem.kind == ElementKind::Beam
+        elem.kind.is_weight_frame()
             && self.element_section(elem).is_some_and(|sec| {
                 sec.frame_use == Some(FrameSectionUse::Column)
                     && matches!(

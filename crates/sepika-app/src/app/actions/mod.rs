@@ -306,6 +306,7 @@ impl App {
                 self.core.scoped.undo.run(
                     &mut self.core.model,
                     Box::new(sepika_edit::ApplyStories {
+                        damper_mass_generation: gen.damper_mass_generation,
                         stories: gen.stories,
                         node_story: gen.node_story,
                         constraints: gen.constraints,

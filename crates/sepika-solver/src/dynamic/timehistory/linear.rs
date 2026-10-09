@@ -74,6 +74,9 @@ pub fn linear_time_history_with_state(
     use_kg: bool,
     record_every: Option<usize>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
+    model
+        .validate_damper_mass_placement()
+        .map_err(SolveError::InvalidInput)?;
     sepika_math::parallelism::apply_to_faer();
 
     let dt = resolve_dt(newmark.dt, wave)?;
@@ -143,6 +146,9 @@ pub fn linear_time_history_from_state(
     use_kg: bool,
     record_every: Option<usize>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
+    model
+        .validate_damper_mass_placement()
+        .map_err(SolveError::InvalidInput)?;
     sepika_math::parallelism::apply_to_faer();
 
     let dt = resolve_dt(newmark.dt, wave)?;
@@ -208,13 +214,13 @@ impl LinearSetup {
                     .into(),
             ));
         }
+        let m_free = assemble_global_m(model, dofmap, MassOption::Consistent)?;
         let behaviors: Vec<Box<dyn ElementBehavior>> = model
             .elements
             .iter()
             .map(|e| build_behavior(e, model))
             .collect();
 
-        let m_free = assemble_global_m(model, dofmap, MassOption::Consistent);
         let k_free = assemble_global_k(model, dofmap);
         let m_red = reducer.reduce_k(&m_free);
         let k_red = reducer.reduce_k(&k_free);

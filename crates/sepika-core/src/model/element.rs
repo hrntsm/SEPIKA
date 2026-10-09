@@ -49,6 +49,11 @@ pub enum ElementKind {
 }
 
 impl ElementKind {
+    /// 自重の柱梁接続・仕上げ・被覆を扱う線材種別か（ブレースを除く）。
+    pub fn is_weight_frame(self) -> bool {
+        matches!(self, Self::Beam | Self::Fiber | Self::MultiSpring)
+    }
+
     /// 剛性の算定に断面（`ElementData::section`）の割当が必須な要素種別か。
     /// 断面・材料の未割当を検出する検査は、必ず本判定で対象を絞ること。
     ///

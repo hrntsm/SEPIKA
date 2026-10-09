@@ -308,6 +308,7 @@ fn timed_generate_stories(app: &mut App) -> [std::time::Duration; 5] {
     app.core.scoped.undo.run(
         &mut app.core.model,
         Box::new(sepika_edit::ApplyStories {
+            damper_mass_generation: gen.damper_mass_generation,
             stories: gen.stories,
             node_story: gen.node_story,
             constraints: gen.constraints,

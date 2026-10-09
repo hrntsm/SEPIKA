@@ -1836,3 +1836,16 @@ fn infer_free_end_for_cantilever_post() {
     assert_eq!(report.inferred_free_ends.len(), 1);
     assert!(model.unassigned_posts[0].is_cantilever());
 }
+#[test]
+fn ダンパー総重量の公開入力は旧装置重量を読み替えない() {
+    let spec: DamperSpec = serde_json::from_str(r#"{"elem":0,"total_weight":19613.3}"#).unwrap();
+    assert_eq!(spec.total_weight, 19613.3);
+    assert!(serde_json::from_str::<DamperSpec>(
+        r#"{"elem":0,"device_weight":20000,"device_length":1000,"support_area":5000}"#
+    )
+    .is_err());
+    assert!(serde_json::from_str::<DamperSpec>(
+        r#"{"elem":0,"total_weight":19613.3,"device_weight":20000}"#
+    )
+    .is_err());
+}

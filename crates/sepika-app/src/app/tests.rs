@@ -3768,6 +3768,110 @@ fn make_square_slab_test_model() -> sepika_core::model::Model {
     model
 }
 
+#[test]
+fn ダンパー総重量はgui共通同期経路の再実行でも増殖しない() {
+    use sepika_core::model::{DamperSpec, ElementKind, LoadCaseKind, LoadCfg, MassMethod};
+    for kind in [
+        ElementKind::Damper,
+        ElementKind::Beam,
+        ElementKind::Brace {
+            tension_only: false,
+        },
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for method in [MassMethod::CorrectedLumped, MassMethod::LumpedOnly] {
+            let mut app = App::default();
+            app.core.model = make_square_slab_test_model();
+            app.core.model.slabs.clear();
+            app.core.model.floor_regions.clear();
+            app.core.model.floor_assignment_regions.regions.clear();
+            app.core.model.constraints.clear();
+            app.core.model.elements.truncate(1);
+            app.core.model.elements[0].kind = kind;
+            app.core.model.nodes[2].coord[2] = -3000.0;
+            app.core.model.load_cfg = Some(LoadCfg {
+                dampers: vec![DamperSpec {
+                    elem: ElemId(0),
+                    total_weight: 19613.3,
+                }],
+                extra_line_weight: vec![(ElemId(0), 999.0)],
+                ..Default::default()
+            });
+            app.core.model.mass_method = method;
+            app.sync_gravity_load_cases_action();
+            let dl = app
+                .core
+                .model
+                .load_cases
+                .iter()
+                .find(|lc| lc.kind == LoadCaseKind::Dead)
+                .unwrap();
+            assert_eq!(dl.nodal.iter().map(|n| -n.values[2]).sum::<f64>(), 19613.3);
+            assert!(dl.member.is_empty());
+            let cases = app.core.model.load_cases.clone();
+            app.sync_gravity_load_cases_action();
+            assert_eq!(app.core.model.load_cases, cases);
+            app.generate_stories_action();
+            let stories = app.core.model.stories.clone();
+            let nodes = app.core.model.nodes.clone();
+            let cases = app.core.model.load_cases.clone();
+            assert_eq!(stories[1].seismic_weight, Some(19613.3));
+            let mass: f64 = nodes.iter().filter_map(|n| n.mass).map(|m| m[0]).sum();
+            assert!((mass - 2.0).abs() < 1e-10);
+            app.generate_stories_action();
+            assert_eq!(app.core.model.stories, stories);
+            assert_eq!(app.core.model.nodes, nodes);
+            assert_eq!(app.core.model.load_cases, cases);
+        }
+    }
+}
+
+#[test]
+fn ゼロ重量指定追加で重量が同じでも階生成記録を更新する() {
+    use sepika_core::model::{DamperSpec, LoadCfg};
+    let mut app = App::default();
+    app.core.model = make_square_slab_test_model();
+    app.core.model.slabs.clear();
+    app.core.model.floor_regions.clear();
+    app.core.model.floor_assignment_regions.regions.clear();
+    app.core.model.constraints.clear();
+    app.core.model.elements.truncate(1);
+    app.core.model.nodes[2].coord[2] = -3000.0;
+    app.generate_stories_action();
+    assert!(app
+        .core
+        .model
+        .damper_mass_generation
+        .as_ref()
+        .unwrap()
+        .inputs
+        .is_empty());
+    app.core.model.load_cfg = Some(LoadCfg {
+        dampers: vec![DamperSpec {
+            elem: ElemId(0),
+            total_weight: 0.0,
+        }],
+        ..Default::default()
+    });
+    assert!(app.core.model.validate_damper_mass_placement().is_err());
+    app.generate_stories_action();
+    assert!(app.core.model.validate_damper_mass_placement().is_ok());
+    assert_eq!(
+        app.core
+            .model
+            .damper_mass_generation
+            .as_ref()
+            .unwrap()
+            .inputs
+            .len(),
+        1
+    );
+    let record = app.core.model.damper_mass_generation.clone();
+    app.generate_stories_action();
+    assert_eq!(app.core.model.damper_mass_generation, record);
+}
+
 /// スラブ荷重が `sync_gravity_load_cases_action` で
 /// 「DL」荷重ケースへ実際に書き込まれ、応力解析から参照可能に
 /// なることを確認する。正方形スラブは全辺三角形分布（2区間）になるため
