@@ -33,11 +33,14 @@ impl App {
         key: StaticCaseKey,
         res: Result<sepika_solver::statics::linear::StaticOnce, String>,
     ) {
+        let input_key = ResultInputKey::Static(key);
+        let input = self.result_input(&input_key);
         match res {
             Ok(res) => {
                 let member_forces = res.member_forces.clone();
                 let panel_moments = res.panel_moments.clone();
                 let mut bundle = self.core.scoped.results.take().unwrap_or_default();
+                bundle.record_input(input_key, input);
                 bundle.statics.retain(|(id, _)| *id != key);
                 bundle.statics.push((key, res));
                 bundle.member_forces = member_forces;
@@ -192,11 +195,14 @@ impl App {
         name: String,
         res: Result<sepika_solver::statics::linear::StaticOnce, String>,
     ) {
+        let input_key = ResultInputKey::Combo(name.clone());
+        let input = self.result_input(&input_key);
         match res {
             Ok(res) => {
                 let member_forces = res.member_forces.clone();
                 let panel_moments = res.panel_moments.clone();
                 let mut bundle = self.core.scoped.results.take().unwrap_or_default();
+                bundle.record_input(input_key, input);
                 let pos = match bundle.combos.iter().position(|(n, _)| *n == name) {
                     Some(pos) => {
                         bundle.combos[pos].1 = res;
@@ -520,8 +526,31 @@ impl App {
             .map(|(name, _)| name.clone())
             .collect();
         self.remove_excluded_tip_results(&(Vec::new(), failed_combos));
+        let case_inputs: Vec<_> = items
+            .cases
+            .iter()
+            .filter(|(_, r)| r.is_ok())
+            .map(|(key, _)| {
+                let k = ResultInputKey::Static(*key);
+                let input = self.result_input(&k);
+                (k, input)
+            })
+            .collect();
+        let combo_inputs: Vec<_> = items
+            .combos
+            .iter()
+            .filter(|(_, r)| r.is_ok())
+            .map(|(name, _)| {
+                let k = ResultInputKey::Combo(name.clone());
+                let input = self.result_input(&k);
+                (k, input)
+            })
+            .collect();
         let had_results = self.core.scoped.results.is_some();
         let mut bundle = self.core.scoped.results.take().unwrap_or_default();
+        for (key, input) in case_inputs.into_iter().chain(combo_inputs) {
+            bundle.record_input(key, input);
+        }
         let mut last_case: Option<StaticCaseKey> = None;
         for (key, res) in items.cases {
             match res {

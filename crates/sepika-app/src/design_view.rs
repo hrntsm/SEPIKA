@@ -652,13 +652,25 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
     match app.compute_holding_capacity() {
         Err(msg) => {
             ui.colored_label(crate::theme::GRAY_600, &msg);
-            let needs_analysis =
-                msg.contains("増分解析") || msg.contains("地震静的") || msg.contains("階");
+            let needs_analysis = msg.contains("増分解析")
+                || msg.contains("静的")
+                || msg.contains("固有値解析")
+                || msg.contains("階");
             if needs_analysis && ui.button("▶ 解析タブへ").clicked() {
                 app.ui.view.active_tab = crate::app::Tab::Analysis;
             }
         }
         Ok((result, story_ranks)) => {
+            if let Some(source) = &app.core.scoped.holding_capacity_source {
+                ui.label(format!(
+                    "採用方向: {:?}、部材応答・変形の採用ステップ: {}",
+                    source.direction,
+                    source
+                        .response_step
+                        .map_or_else(|| "なし".into(), |step| step.to_string())
+                ));
+            }
+
             crate::table_util::standard_table(
                 ui,
                 "design_holding_capacity",
@@ -687,7 +699,17 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                         crate::table_util::text_cell(ui, &name);
                     });
                     row.col(|ui| {
-                        ui.label(format!("{:.1}", force_kn(s.qu)));
+                        let step = app
+                            .core
+                            .scoped
+                            .holding_capacity_source
+                            .as_ref()
+                            .and_then(|source| source.qu_steps.get(i).copied().flatten());
+                        ui.label(format!("{:.1}", force_kn(s.qu)))
+                            .on_hover_text(step.map_or_else(
+                                || "採用ステップなし".into(),
+                                |step| format!("Qu の採用ステップ: {step}"),
+                            ));
                     });
                     row.col(|ui| {
                         ui.label(format!("{:.1}", force_kn(s.qud)));

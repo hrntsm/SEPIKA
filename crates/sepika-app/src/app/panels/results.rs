@@ -147,12 +147,12 @@ impl App {
         });
         ui.separator();
 
-        let hc_verdict = self.compute_holding_capacity().ok();
+        let hc_verdict = self.compute_holding_capacity();
 
         let po = self.displayed_pushover().expect("checked above");
 
         match &hc_verdict {
-            Some((res, _)) if !res.stories.is_empty() => {
+            Ok((res, _)) if !res.stories.is_empty() => {
                 let ng = res.stories.iter().filter(|s| !s.ok).count();
                 if ng == 0 {
                     ui.colored_label(
@@ -173,12 +173,10 @@ impl App {
                     );
                 }
             }
-            _ => {
-                ui.colored_label(
-                    crate::theme::GRAY_600,
-                    "必要保有水平耐力の判定には荷重ケース EX／EY（地震力）の実行が必要です（解析タブ）。",
-                );
+            Err(reason) => {
+                ui.colored_label(crate::theme::GRAY_600, reason);
             }
+            Ok(_) => {}
         }
         if po.termination.is_premature() {
             ui.colored_label(
