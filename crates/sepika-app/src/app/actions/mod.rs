@@ -221,6 +221,7 @@ impl App {
         self.core.scoped.job = Some(AnalysisJob {
             label,
             started: std::time::SystemTime::now(),
+            input: self.job_input(),
             rx,
             #[cfg(feature = "gui")]
             jump_on_success: None,
@@ -409,6 +410,10 @@ impl App {
                 // ラベルと経過時間は完了ログ用に、jump_on_success は結果タブへの
                 // 自動遷移用に、job を take する前に取り出しておく。
                 let job = self.core.scoped.job.take();
+                if job.as_ref().is_some_and(|j| j.input != self.job_input()) {
+                    self.report_error("計算中にモデル・計算設定が変更されたため、旧入力の解析結果を破棄しました。必要な解析を再実行してください。");
+                    return true;
+                }
                 let (label, elapsed_secs) = job
                     .as_ref()
                     .map(|j| {

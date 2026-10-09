@@ -527,6 +527,8 @@ pub struct ResultsBundle {
         LumpedVibrationCaseId,
         sepika_solver::dynamic::lumped_mass::LumpedMassResult,
     )>,
+    #[serde(default)]
+    pub(crate) input_records: Vec<(ResultInputKey, Vec<u8>)>,
 }
 
 impl ResultsBundle {
@@ -643,6 +645,7 @@ pub enum JobResult {
 pub struct AnalysisJob {
     pub label: &'static str,
     pub started: std::time::SystemTime,
+    input: Vec<u8>,
     rx: std::sync::mpsc::Receiver<JobResult>,
     /// ジョブ成功時に自動遷移する結果タブ・表示切替（GUI 専用）。
     #[cfg(feature = "gui")]
@@ -933,6 +936,7 @@ pub struct ModelScoped {
     /// 直近の保有水平耐力算定で用いた層別 βu（耐力壁・筋かいの水平耐力比）。
     /// `compute_holding_capacity` が設定する（表示用）。
     pub ds_beta_u_by_story: Vec<f64>,
+    pub holding_capacity_source: Option<HoldingCapacitySource>,
     /// 架構種別が耐力壁付き／筋かい付きなのに耐力壁・筋かいを検出できず、βu を
     /// 算定できなかったため架構種別別 Ds 表へフォールバックしたか（表示用）。
     pub ds_beta_u_unavailable: bool,
@@ -1005,6 +1009,7 @@ impl Default for ModelScoped {
             diagnostics: Vec::new(),
             preparation: None,
             ds_beta_u_by_story: Vec::new(),
+            holding_capacity_source: None,
             ds_beta_u_unavailable: false,
             ds_rank_fallback_stories: Vec::new(),
             stick_response: None,
@@ -1952,6 +1957,9 @@ pub(crate) fn steel_width_thickness_rank(
     )
 }
 
+mod result_validity;
+pub use result_validity::HoldingCapacitySource;
+use result_validity::ResultInputKey;
 mod actions;
 pub mod node_grid;
 mod preparation;

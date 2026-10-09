@@ -2952,6 +2952,8 @@ fn test_holding_capacity_rank_auto_records_fallback_stories() {
     for sec in &mut app.core.model.sections {
         sec.shape = None;
     }
+    app.run_seismic(SeismicDir::X);
+    app.run_pushover();
     app.core.design_rank_auto = true;
     app.core.design_rank = MemberRank::FB;
     let (_, story_ranks) = app.compute_holding_capacity().expect("Ok のはず");
@@ -3318,6 +3320,16 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
             elem_id.0
         );
     }
+    let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut app.core.model.sections[0].shape
+    else {
+        panic!("RC柱断面");
+    };
+    rebar.hoop.pitch += 50.0;
+    assert!(app.compute_holding_capacity().is_err());
+    app.run_seismic(SeismicDir::X);
+    assert!(app.compute_holding_capacity().is_err());
+    app.run_pushover();
+    assert!(app.compute_holding_capacity().is_ok());
 }
 
 /// `rc_sigma_0_from_gravity_or_last_static`: 圧縮軸力から σ0 が正しく算定されることを、

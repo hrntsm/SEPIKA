@@ -29,6 +29,10 @@ impl App {
         use sepika_design_jp::steel_f_value_prefix;
         use sepika_solver::nonlinear::pushover::MechanismType;
 
+        self.core.scoped.holding_capacity_source = None;
+        self.core.scoped.ds_beta_u_by_story.clear();
+        self.core.scoped.ds_beta_u_unavailable = false;
+        self.core.scoped.ds_rank_fallback_stories.clear();
         self.apply_rigid_zones_for_analysis();
 
         if self.core.model.stories.is_empty() {
@@ -37,26 +41,65 @@ impl App {
             );
         }
         let view_dir = self.core.scoped.pushover_view_dir;
+        let mut dependencies = vec![
+            ResultInputKey::Pushover(view_dir),
+            ResultInputKey::Static(StaticCaseKey::Seismic(view_dir)),
+        ];
+        let ctx = crate::summary::metrics_ctx_from_results(self.core.scoped.results.as_ref());
+        if ctx.seismic_x.is_some() && ctx.seismic_y.is_some() {
+            for dir in [SeismicDir::X, SeismicDir::Y] {
+                let key = ResultInputKey::Static(StaticCaseKey::Seismic(dir));
+                if !dependencies.contains(&key) {
+                    dependencies.push(key);
+                }
+            }
+            if let Some((name, _)) = self.core.scoped.results.as_ref().and_then(|r| {
+                r.combos
+                    .iter()
+                    .find(|(name, _)| !sepika_load::combo::is_short_term_combo(name))
+            }) {
+                dependencies.push(ResultInputKey::Combo(name.clone()));
+            }
+        }
+        if self
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .and_then(|r| r.modal.as_ref())
+            .and_then(|m| m.period.first())
+            .is_some()
+        {
+            dependencies.push(ResultInputKey::Modal);
+        }
+        let reasons: Vec<_> = dependencies
+            .into_iter()
+            .filter_map(|key| self.require_result_input(key).err())
+            .collect();
+        if !reasons.is_empty() {
+            return Err(reasons.join("\n"));
+        }
         let po = self
             .core
             .scoped
             .results
             .as_ref()
-            .and_then(|r| r.pushover_for_dir(view_dir).or(r.pushover.as_ref()))
+            .and_then(|r| r.pushover_for_dir(view_dir))
             .ok_or_else(|| {
                 "増分解析未実行です。解析タブから増分解析を実行してください。".to_string()
             })?;
-        let st = self.current_static().ok_or_else(|| {
-            "静的解析結果がありません。地震静的(Ai)を実行してください。".to_string()
-        })?;
+        let st = self
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .and_then(|r| r.seismic(view_dir))
+            .ok_or_else(|| {
+                "静的解析結果がありません。地震静的(Ai)を実行してください。".to_string()
+            })?;
 
-        let ctx = crate::summary::metrics_ctx_from_results(self.core.scoped.results.as_ref());
-        let metrics = crate::summary::compute_story_metrics_with(
-            &self.core.model,
-            &st.disp,
-            self.core.analysis_cfg.seismic_dir,
-            &ctx,
-        );
+        let metrics =
+            crate::summary::compute_story_metrics_with(&self.core.model, &st.disp, view_dir, &ctx);
 
         let layers = self.core.model.layers();
         let weights: Vec<f64> = layers.iter().map(|l| l.weight.unwrap_or(0.0)).collect();
@@ -477,6 +520,24 @@ impl App {
         let rs: Vec<f64> = metrics.iter().map(|m| m.rs).collect();
         let re: Vec<f64> = metrics.iter().map(|m| m.re).collect();
         let fes: Vec<f64> = metrics.iter().map(|m| m.fes).collect();
+
+        self.core.scoped.holding_capacity_source = Some(HoldingCapacitySource {
+            direction: view_dir,
+            qu_steps: (0..n_stories)
+                .map(|i| {
+                    let mut maximum = 0.0;
+                    let mut step = None;
+                    for point in &po.capacity_curve {
+                        if let Some(q) = point.story_shear.get(i).filter(|q| **q > maximum) {
+                            maximum = *q;
+                            step = Some(point.step);
+                        }
+                    }
+                    step
+                })
+                .collect(),
+            response_step: po.capacity_curve.last().map(|point| point.step),
+        });
 
         let result =
             check_holding_capacity(po, &qud, &ds_vec, &fes, &rs, &re, &heights, member_ranks);

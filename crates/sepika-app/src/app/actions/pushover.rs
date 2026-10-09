@@ -57,6 +57,8 @@ impl App {
         &mut self,
         res: Result<sepika_solver::nonlinear::pushover::PushoverResult, String>,
     ) {
+        let input_key = ResultInputKey::Pushover(self.core.analysis_cfg.push_dir);
+        let input = self.result_input(&input_key);
         match res {
             Ok(result) => {
                 if result.termination.is_premature() {
@@ -67,6 +69,7 @@ impl App {
                 }
                 let dir = self.core.analysis_cfg.push_dir;
                 let mut bundle = self.core.scoped.results.take().unwrap_or_default();
+                bundle.record_input(input_key, input);
                 match dir {
                     SeismicDir::X => bundle.pushover_x = Some(result.clone()),
                     SeismicDir::Y => bundle.pushover_y = Some(result.clone()),

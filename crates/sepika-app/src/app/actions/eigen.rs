@@ -33,9 +33,12 @@ impl App {
         &mut self,
         res: Result<sepika_solver::dynamic::eigen::ModalResult, String>,
     ) {
+        let input_key = ResultInputKey::Modal;
+        let input = self.result_input(&input_key);
         match res {
             Ok(modal) => {
                 let mut bundle = self.core.scoped.results.take().unwrap_or_default();
+                bundle.record_input(input_key, input);
                 bundle.modal = Some(modal);
                 self.core.scoped.results = Some(bundle);
                 self.core.scoped.staleness.last_run = Some(SystemTime::now());
