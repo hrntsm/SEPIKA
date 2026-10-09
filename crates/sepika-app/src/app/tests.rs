@@ -2074,7 +2074,7 @@ fn test_pushover_x_y_slots_and_view_dir() {
 }
 
 /// `poll_job` が完了するまで待つ（タイムアウト5秒でパニック、10ms 間隔でポーリング）。
-fn wait_for_job(app: &mut App) {
+pub(super) fn wait_for_job(app: &mut App) {
     let start = std::time::Instant::now();
     while !app.poll_job() {
         assert!(

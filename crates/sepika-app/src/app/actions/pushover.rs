@@ -62,7 +62,7 @@ impl App {
         match res {
             Ok(result) => {
                 if result.termination.is_premature() {
-                    self.report_notice(format!(
+                    self.append_analysis_notice(format!(
                         "⚠ 増分解析は目標到達前に打ち切られました（{}）。Qu はその時点までの最大値です。",
                         result.termination.describe()
                     ));
@@ -84,36 +84,7 @@ impl App {
         }
     }
 
-    /// 増分解析（プッシュオーバー）を実行する。モデルは複製の上で解析する
-    /// （非線形状態の副作用を GUI 上のモデルへ残さないため）。
-    /// 鋼板耐震壁を含むモデルの増分解析で、せん断座屈を考慮していない旨を知らせる。
-    ///
-    /// 鋼板耐震壁の面内せん断終局強度は鋼板のせん断降伏 Qy=t·lw·F/√3 で評価している
-    /// （`sepika_element::wall::wall_element::WallElement::steel_shear_capacity_of`）。
-    /// 幅厚比の大きい無補剛の鋼板は降伏前に面外へせん断座屈するため、その場合は
-    /// 耐力を過大評価する（危険側）。解析は継続してよい事項のため注意事項として扱う。
-    fn notice_steel_seismic_walls(&mut self) {
-        let n = self
-            .core
-            .model
-            .elements
-            .iter()
-            .filter(|e| {
-                matches!(e.kind, sepika_core::model::ElementKind::Wall)
-                    && sepika_element::wall::misc_wall::wall_is_seismic(e, &self.core.model)
-                    && !sepika_element::wall::misc_wall::is_rc_wall(e, &self.core.model)
-            })
-            .count();
-        if n == 0 {
-            return;
-        }
-        self.report_notice(format!(
-            "鋼板耐震壁 {} 枚の面内せん断終局強度を、鋼板のせん断降伏 Qy=t·lw·F/√3 で評価します。\
-             せん断座屈は考慮していないため、幅厚比が大きく補剛のない鋼板では耐力を過大評価します。",
-            n
-        ));
-    }
-
+    /// 増分解析を実行する。鋼板耐震壁の座屈未考慮は注意として通知し、解析を継続する。
     pub fn run_pushover(&mut self) {
         if !self.begin_analysis() {
             return;
@@ -144,5 +115,38 @@ impl App {
         if let Some(job) = self.core.scoped.job.as_mut() {
             job.jump_on_success = Some((Tab::Results, ResultsView::Pushover));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::steel_wall_notice_tests::{steel_wall_model, wall_notices};
+    #[test]
+    fn 増分解析の打切り注意は鋼板壁注意を消さない() {
+        let mut app = App::default();
+        app.load_model(steel_wall_model());
+        app.generate_stories_action();
+        app.core.analysis_cfg.push_steps = 2;
+        app.run_pushover();
+        let mut result = app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .pushover
+            .clone()
+            .unwrap();
+        result.termination =
+            sepika_solver::nonlinear::pushover::PushoverTermination::NonConvergence {
+                phase: "荷重制御".into(),
+                load_factor: 0.5,
+            };
+        app.apply_pushover_result(Ok(result));
+        let notice = app.core.scoped.last_notice.as_ref().unwrap();
+        assert!(notice.contains("せん断座屈"));
+        assert!(notice.contains("目標到達前に打ち切られました"));
+        assert_eq!(wall_notices(&app).len(), 1);
     }
 }
