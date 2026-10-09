@@ -33,11 +33,13 @@ impl App {
         }
     }
 
-    /// 線形時刻歴応答解析を実行する。減衰モデル・積分法は `analysis_cfg` に従う
-    /// （剛性比例／Rayleigh、Newmark-β）。
+    /// 時刻歴応答解析を実行する。線形/非線形・減衰・積分条件は `analysis_cfg` に従う。
     pub fn run_time_history(&mut self, wave: sepika_solver::dynamic::timehistory::GroundMotion) {
         if !self.begin_analysis() {
             return;
+        }
+        if self.core.analysis_cfg.th_nonlinear {
+            self.notice_steel_seismic_walls();
         }
         let res = sepika_job::compute::compute_time_history(
             self.core.model.clone(),
@@ -57,6 +59,9 @@ impl App {
     ) {
         if !self.begin_analysis_job() {
             return;
+        }
+        if self.core.analysis_cfg.th_nonlinear {
+            self.notice_steel_seismic_walls();
         }
         let model = self.core.model.clone();
         let cfg = self.core.analysis_cfg;

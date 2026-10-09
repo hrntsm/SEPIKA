@@ -88,6 +88,24 @@ impl App {
         self.core.scoped.last_notice = Some(msg);
     }
 
+    fn notice_steel_seismic_walls(&mut self) {
+        let (model, index, _) = sepika_load::wall_expand::expand_wall_elements(&self.core.model);
+        if let Some(notice) = sepika_job::notices::steel_seismic_wall_notice(&model, &index) {
+            self.append_analysis_notice(notice);
+        }
+    }
+
+    fn append_analysis_notice(&mut self, notice: String) {
+        self.core.log.push(LogLevel::Notice, notice.clone());
+        match &mut self.core.scoped.last_notice {
+            Some(previous) => {
+                previous.push('\n');
+                previous.push_str(&notice);
+            }
+            None => self.core.scoped.last_notice = Some(notice),
+        }
+    }
+
     /// ログのみに残す情報（ジョブの開始・完了など）。
     pub fn report_info(&mut self, msg: impl Into<String>) {
         self.core.log.push(LogLevel::Info, msg.into());
