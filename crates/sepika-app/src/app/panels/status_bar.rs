@@ -147,6 +147,14 @@ impl App {
                         self.open_log_dock();
                     }
                 }
+                if let Some(error) = self.core.scoped.undo.last_error() {
+                    ui.separator();
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(error).color(crate::theme::WHITE))
+                            .truncate(),
+                    )
+                    .on_hover_text(error);
+                }
                 if let Some(notice) = &self.core.scoped.last_notice {
                     ui.separator();
                     let one_line = notice.replace('\n', " ");

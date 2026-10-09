@@ -60,6 +60,9 @@ pub fn prepare_model_for_analysis(
     settings: &AnalysisSettings,
     design_period: Option<f64>,
 ) -> Result<PrepareReport, JobError> {
+    model
+        .validate_attached_slabs()
+        .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     let _ = model.anchorize_secondary_members();
     model.rebuild_floor_assignment_regions();
     model.rebuild_wall_assignment_regions();

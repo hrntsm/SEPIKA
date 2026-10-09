@@ -7020,6 +7020,20 @@ fn test_add_attached_slab_roundtrip() {
             support_spring: None,
         });
     }
+    model.elements.push(sepika_core::model::ElementData {
+        id: sepika_core::ids::ElemId(0),
+        kind: sepika_core::model::ElementKind::Beam,
+        nodes: vec![NodeId(0), NodeId(1)].into(),
+        section: None,
+        local_axis: sepika_core::model::LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [sepika_core::model::EndCondition::Fixed; 2],
+        force_regime: sepika_core::model::ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    });
     let mut undo = UndoStack::default();
 
     let cmd = crate::AddAttachedSlab {
@@ -7093,6 +7107,20 @@ fn test_add_attached_slab_sectionless_extent_1000_roundtrip() {
             support_spring: None,
         });
     }
+    model.elements.push(sepika_core::model::ElementData {
+        id: sepika_core::ids::ElemId(0),
+        kind: sepika_core::model::ElementKind::Beam,
+        nodes: vec![NodeId(0), NodeId(1)].into(),
+        section: None,
+        local_axis: sepika_core::model::LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [sepika_core::model::EndCondition::Fixed; 2],
+        force_regime: sepika_core::model::ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    });
     let mut undo = UndoStack::default();
     assert!(undo.run(
         &mut model,
@@ -8127,4 +8155,102 @@ fn 荷重ケース削除は先端荷重参照を取り消し可能な形で更�
     assert_eq!(model.slabs[0].tip_loads[1].case, LoadCaseId(4));
     undo.redo(&mut model);
     assert_eq!(model.slabs[0].tip_loads[0].case, LoadCaseId(3));
+}
+
+#[test]
+fn attached_slab_rejection_preserves_model_and_undo_redo_history() {
+    use sepika_core::model::{LoadTransfer, RegionAnchor};
+    let mut model = Model::default();
+    for (i, x) in [0.0, 4000.0].into_iter().enumerate() {
+        model.nodes.push(Node {
+            id: NodeId(i as u32),
+            coord: [x, 0.0, 0.0],
+            restraint: Dof6Mask::FREE,
+            mass: None,
+            story: None,
+            support_spring: None,
+        });
+    }
+    model.elements.push(ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Beam,
+        nodes: smallvec![NodeId(0), NodeId(1)],
+        section: None,
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed; 2],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    });
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(AddAttachedSlab {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(0), NodeId(1)],
+                span: [0.25, 0.75],
+                transfer: LoadTransfer::Anchor
+            },
+            extent: [1000.0, 2000.0],
+            plate: SlabPlate::default()
+        })
+    ));
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetAttachedExtent {
+            id: SlabId(0),
+            extent: [2000.0, 2000.0]
+        })
+    ));
+    undo.undo(&mut model);
+    let original = model.clone();
+    let revision = undo.revision();
+    let undo_label = undo.undo_label().unwrap().to_owned();
+    let redo_label = undo.redo_label().unwrap().to_owned();
+    let mut slab = model.slabs[0].clone();
+    let error = {
+        slab.shape = SlabShape::Attached {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(0), NodeId(1)],
+                span: [0.25, 0.75],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: [1000.0, -1000.0],
+        };
+        model.validate_attached_slab(&slab).unwrap_err().to_string()
+    };
+    assert!(!undo.run(
+        &mut model,
+        Box::new(SetAttachedExtent {
+            id: SlabId(0),
+            extent: [1000.0, -1000.0]
+        })
+    ));
+    assert_eq!(undo.last_error(), Some(error.as_str()));
+    assert_eq!(format!("{model:?}"), format!("{original:?}"));
+    assert_eq!(undo.revision(), revision);
+    assert_eq!(undo.undo_label(), Some(undo_label.as_str()));
+    assert_eq!(undo.redo_label(), Some(redo_label.as_str()));
+    assert!(!undo.run(
+        &mut model,
+        Box::new(CompositeCommand {
+            label: "無効な複合".into(),
+            children: vec![
+                Box::new(SetAttachedExtent {
+                    id: SlabId(0),
+                    extent: [1500.0; 2]
+                }),
+                Box::new(SetNodeCoord {
+                    node: NodeId(1),
+                    coord: [0.0, 0.0, 0.0]
+                })
+            ]
+        })
+    ));
+    assert_eq!(format!("{model:?}"), format!("{original:?}"));
+    assert_eq!(undo.revision(), revision);
+    assert!(undo.can_redo());
 }

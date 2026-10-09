@@ -225,6 +225,8 @@ impl Model {
     pub fn validate(&self) -> Result<(), crate::error::CoreError> {
         use crate::error::CoreError;
 
+        self.validate_attached_slabs()?;
+
         check_id_consistency(&self.nodes, "nodes", "NodeId", |n| n.id.index(), |n| n.id.0)?;
         self.validate_damper_weights()
             .map_err(CoreError::InvalidInput)?;

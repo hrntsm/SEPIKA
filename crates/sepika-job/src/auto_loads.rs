@@ -17,7 +17,8 @@ use sepika_solver::statics::analysis::{self, AiMode, SeismicDir};
 
 use crate::settings::AnalysisSettings;
 
-/// 片持ちスラブ先端辺の荷重を、ケース ID ごとの取付き実梁の部分等分布荷重に変換する。
+/// 先端辺の線荷重 [N/mm] を、ケース ID ごとの実梁区間 [mm] の等分布荷重に変換する。
+/// 不正な取付き幾何・参照・支持先は共通の床板 ID と理由付きで拒否する。
 pub fn compute_tip_loads(
     model: &Model,
 ) -> Result<Vec<(LoadCaseId, Vec<MemberLoad>)>, crate::error::JobError> {
@@ -30,12 +31,23 @@ pub fn compute_tip_loads(
         if slab.tip_loads.is_empty() {
             continue;
         }
-        if !slab.supports_tip_loads() {
+        let sepika_core::model::SlabShape::Attached {
+            anchor:
+                sepika_core::model::RegionAnchor::Line {
+                    transfer: sepika_core::model::LoadTransfer::Anchor,
+                    ..
+                },
+            extent,
+        } = slab.shape
+        else {
             return Err(crate::error::JobError::InvalidInput(format!(
                 "床板 {} は先端荷重の対象ではありません",
                 slab.id.0
             )));
-        }
+        };
+        let cover = model
+            .attached_slab_supports(slab)
+            .map_err(|error| crate::error::JobError::InvalidInput(error.to_string()))?;
         let Some(coords) = slab.boundary_coords(model) else {
             return Err(crate::error::JobError::InvalidInput(format!(
                 "床板 {} の先端辺を解決できません",
@@ -43,18 +55,10 @@ pub fn compute_tip_loads(
             )));
         };
         let length = sepika_core::geom::vec3::dist(coords[0], coords[1]);
-        let tip_length = sepika_core::geom::vec3::dist(coords[2], coords[3]);
+        let tip_length = length.hypot(extent[1] - extent[0]);
         if length <= 0.0 || !length.is_finite() || !tip_length.is_finite() {
             return Err(crate::error::JobError::InvalidInput(format!(
                 "床板 {} の辺の長さが不正です",
-                slab.id.0
-            )));
-        }
-        let cover =
-            sepika_load::secondary::beams_along_segment(model, coords[0], coords[1], SPAN_TOL_MM);
-        if !sepika_load::secondary::coverage_covers_full(&cover, length, 1e-6) {
-            return Err(crate::error::JobError::InvalidInput(format!(
-                "床板 {} の先端荷重の取付き区間を実梁で覆えません",
                 slab.id.0
             )));
         }
@@ -74,28 +78,39 @@ pub fn compute_tip_loads(
                     slab.id.0
                 )));
             };
-            let w = tip.intensity * tip_length / length;
-            if !w.is_finite() {
-                return Err(crate::error::JobError::InvalidInput(format!(
-                    "床板 {} の先端荷重が有限値を超えました",
-                    slab.id.0
-                )));
-            }
-            if w == 0.0 {
+            if tip.intensity == 0.0 {
                 continue;
             }
             for part in &cover {
+                let elem = model
+                    .elements
+                    .iter()
+                    .find(|elem| elem.id == part.elem)
+                    .ok_or_else(|| {
+                        crate::error::JobError::InvalidInput(format!(
+                            "Slab {}: 支持梁 {} が存在しません",
+                            slab.id.0, part.elem.0
+                        ))
+                    })?;
+                let beam_length = sepika_core::geom::vec3::dist(
+                    model.nodes[elem.nodes[0].index()].coord,
+                    model.nodes[elem.nodes[1].index()].coord,
+                );
+                let a = part.span[0].min(part.span[1]) * beam_length;
+                let b = part.span[0].max(part.span[1]) * beam_length;
+                let w = tip.intensity * tip_length * part.fraction / (b - a);
+                if !w.is_finite() {
+                    return Err(crate::error::JobError::InvalidInput(format!(
+                        "床板 {} の先端荷重が有限値を超えました",
+                        slab.id.0
+                    )));
+                }
                 loads.push(MemberLoad {
                     source: sepika_core::model::LoadSource::SlabTip,
                     ..MemberLoad::auto(
                         part.elem,
                         tip.direction.vector(),
-                        MemberLoadKind::Distributed {
-                            a: part.elem_pos[0].min(part.elem_pos[1]),
-                            b: part.elem_pos[0].max(part.elem_pos[1]),
-                            w1: w,
-                            w2: w,
-                        },
+                        MemberLoadKind::Distributed { a, b, w1: w, w2: w },
                     )
                 });
             }
@@ -501,16 +516,21 @@ pub fn slab_load_case_content(
                 emit_shape(&mut member, elem.id, 0.0, l, false, &bl.shape);
             }
             LoadTarget::Span { nodes: [n0, n1], t } => {
-                let full = (t[0] - 0.0).abs() <= 1e-9 && (t[1] - 1.0).abs() <= 1e-9;
-                if full {
-                    if let Some(elem) = model.element(bl.elem) {
-                        let l = model.member_length(elem);
-                        if l > 1e-9 {
-                            emit_shape(&mut member, elem.id, 0.0, l, false, &bl.shape);
-                        }
-                        continue;
-                    }
+                if let Some(elem) = model.element(bl.elem) {
+                    let length = model.member_length(elem);
+                    let a = t[0] * length;
+                    let b = t[1] * length;
+                    emit_shape(
+                        &mut member,
+                        elem.id,
+                        a.min(b),
+                        (a - b).abs(),
+                        a > b,
+                        &bl.shape,
+                    );
+                    continue;
                 }
+                let full = (t[0] - 0.0).abs() <= 1e-9 && (t[1] - 1.0).abs() <= 1e-9;
                 let (Some(node0), Some(node1)) =
                     (model.nodes.get(n0.index()), model.nodes.get(n1.index()))
                 else {
@@ -641,6 +661,9 @@ fn compute_dl_beam_loads_checked(
 pub fn compute_gravity_auto_load_cases(
     model: &Model,
 ) -> Result<AutoLoadComputeResult, crate::error::JobError> {
+    model
+        .validate_attached_slabs()
+        .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
     sepika_load::story_gen::validate_cft_steel_materials(model)
         .map_err(crate::error::JobError::InvalidInput)?;
     sepika_load::floor::validate_one_way_directions(model)
@@ -1152,6 +1175,247 @@ mod tests {
     }
 
     #[test]
+    fn direct_tip_load_calculation_rejects_invalid_attached_slabs_without_panicking() {
+        let base = tip_model();
+        let mut models = vec![];
+        for (span, extent) in [
+            ([0.5, 0.5], [0.0; 2]),
+            ([0.25, 0.75], [1000.0, -1000.0]),
+            ([0.25, 0.75], [f64::NAN, 1000.0]),
+            ([f64::INFINITY, 0.75], [1000.0; 2]),
+        ] {
+            let mut model = base.clone();
+            model.slabs[0].shape = SlabShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(0), NodeId(1)],
+                    span,
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent,
+            };
+            models.push(model);
+        }
+        let mut missing_reference = base.clone();
+        missing_reference.nodes.pop();
+        models.push(missing_reference);
+        for value in [f64::NAN, f64::INFINITY, 0.0] {
+            let mut model = base.clone();
+            model.nodes[1].coord[0] = value;
+            models.push(model);
+        }
+        let mut missing_support = base.clone();
+        missing_support.elements.clear();
+        models.push(missing_support);
+        let mut ambiguous_support = base;
+        let mut duplicate = ambiguous_support.elements[0].clone();
+        duplicate.id = ElemId(1);
+        ambiguous_support.elements.push(duplicate);
+        models.push(ambiguous_support);
+        for model in models {
+            let expected = model.validate_attached_slabs().unwrap_err().to_string();
+            let result = std::panic::catch_unwind(|| compute_tip_loads(&model))
+                .expect("不正入力で panic しないこと");
+            let Err(crate::error::JobError::InvalidInput(actual)) = result else {
+                panic!("共通の理由付き入力エラーで拒否すること");
+            };
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn short_tip_load_spans_preserve_actual_supports_and_resultant_across_split_and_reversal() {
+        for split in [false, true] {
+            for cross in [false, true] {
+                for sign in [1.0, -1.0] {
+                    for reversed in [false, true] {
+                        let mut model = tip_model();
+                        model.nodes[1].coord[0] = 4000.0;
+                        if split {
+                            let mut middle = model.nodes[0].clone();
+                            middle.id = NodeId(2);
+                            middle.coord[0] = 2000.0;
+                            model.nodes.push(middle);
+                            model.elements[0].nodes = vec![NodeId(0), NodeId(2)].into();
+                            let mut second = model.elements[0].clone();
+                            second.id = ElemId(1);
+                            second.nodes = vec![NodeId(2), NodeId(1)].into();
+                            model.elements.push(second);
+                        }
+                        let span = if cross {
+                            [0.4995, 0.5005]
+                        } else {
+                            [0.5, 0.501]
+                        };
+                        model.slabs[0].shape = SlabShape::Attached {
+                            anchor: RegionAnchor::Line {
+                                nodes: if reversed {
+                                    [NodeId(1), NodeId(0)]
+                                } else {
+                                    [NodeId(0), NodeId(1)]
+                                },
+                                span: if reversed {
+                                    [1.0 - span[1], 1.0 - span[0]]
+                                } else {
+                                    span
+                                },
+                                transfer: LoadTransfer::Anchor,
+                            },
+                            extent: [if reversed {
+                                -sign * 1000.0
+                            } else {
+                                sign * 1000.0
+                            }; 2],
+                        };
+                        assert_eq!(model.validate_attached_slabs(), Ok(()));
+                        let supports = model.attached_slab_supports(&model.slabs[0]).unwrap();
+                        let loads = compute_tip_loads(&model).unwrap();
+                        let expected = if split && cross {
+                            vec![(ElemId(0), 1998.0, 2000.0), (ElemId(1), 0.0, 2.0)]
+                        } else if split {
+                            vec![(ElemId(1), 0.0, 4.0)]
+                        } else if cross {
+                            vec![(ElemId(0), 1998.0, 2002.0)]
+                        } else {
+                            vec![(ElemId(0), 2000.0, 2004.0)]
+                        };
+                        assert_eq!(supports.len(), expected.len());
+                        assert_eq!(loads[0].1.len(), expected.len());
+                        let mut total_n = 0.0;
+                        for (elem, expected_a, expected_b) in expected {
+                            let support = supports
+                                .iter()
+                                .find(|support| support.elem == elem)
+                                .unwrap();
+                            let beam_length_mm = if split { 2000.0 } else { 4000.0 };
+                            assert!(
+                                (support.span[0].min(support.span[1])
+                                    - expected_a / beam_length_mm)
+                                    .abs()
+                                    < 1e-10
+                            );
+                            assert!(
+                                (support.span[0].max(support.span[1])
+                                    - expected_b / beam_length_mm)
+                                    .abs()
+                                    < 1e-10
+                            );
+                            assert!(
+                                (support.fraction - if split && cross { 0.5 } else { 1.0 }).abs()
+                                    < 1e-10
+                            );
+                            let load = loads[0].1.iter().find(|load| load.elem == elem).unwrap();
+                            let MemberLoadKind::Distributed { a, b, w1, w2 } = load.kind else {
+                                panic!("実梁区間への分布荷重");
+                            };
+                            assert!((a - expected_a).abs() < 1e-8);
+                            assert!((b - expected_b).abs() < 1e-8);
+                            assert!((w1 - 2.0).abs() < 1e-8);
+                            assert!((w2 - 2.0).abs() < 1e-8);
+                            total_n += (w1 + w2) / 2.0 * (b - a);
+                        }
+                        assert!((total_n - 8.0).abs() < 1e-8);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tip_resultant_is_preserved_on_slightly_inclined_actual_supports() {
+        for split in [false, true] {
+            for reversed in [false, true] {
+                let mut model = tip_model();
+                model.nodes[1].coord[0] = 4000.0;
+                for (id, coord) in [
+                    (2, [0.0, -5.0, 0.0]),
+                    (3, [4000.0, 5.0, 6.0]),
+                    (4, [2000.0, 0.0, 3.0]),
+                ] {
+                    let mut node = model.nodes[0].clone();
+                    node.id = NodeId(id);
+                    node.coord = coord;
+                    model.nodes.push(node);
+                }
+                model.elements[0].nodes = if split {
+                    vec![NodeId(2), NodeId(4)]
+                } else {
+                    vec![NodeId(2), NodeId(3)]
+                }
+                .into();
+                if split {
+                    let mut second = model.elements[0].clone();
+                    second.id = ElemId(1);
+                    second.nodes = vec![NodeId(4), NodeId(3)].into();
+                    model.elements.push(second);
+                }
+                model.slabs[0].shape = SlabShape::Attached {
+                    anchor: RegionAnchor::Line {
+                        nodes: if reversed {
+                            [NodeId(1), NodeId(0)]
+                        } else {
+                            [NodeId(0), NodeId(1)]
+                        },
+                        span: [0.4995, 0.5005],
+                        transfer: LoadTransfer::Anchor,
+                    },
+                    extent: [if reversed { -1000.0 } else { 1000.0 }; 2],
+                };
+                let supports = model.attached_slab_supports(&model.slabs[0]).unwrap();
+                let loads = compute_tip_loads(&model).unwrap();
+                assert_eq!(loads[0].1.len(), if split { 2 } else { 1 });
+                let mut total_n = 0.0;
+                for load in &loads[0].1 {
+                    let support = supports
+                        .iter()
+                        .find(|support| support.elem == load.elem)
+                        .unwrap();
+                    let MemberLoadKind::Distributed { a, b, w1, w2 } = load.kind else {
+                        panic!("実梁区間への等分布");
+                    };
+                    let elem = model.element(load.elem).unwrap();
+                    let length_mm = sepika_core::geom::vec3::dist(
+                        model.nodes[elem.nodes[0].index()].coord,
+                        model.nodes[elem.nodes[1].index()].coord,
+                    );
+                    assert!((a - length_mm * support.span[0].min(support.span[1])).abs() < 1e-8);
+                    assert!((b - length_mm * support.span[0].max(support.span[1])).abs() < 1e-8);
+                    assert!((support.fraction - if split { 0.5 } else { 1.0 }).abs() < 1e-10);
+                    let resultant_n = (b - a) * (w1 + w2) / 2.0;
+                    assert!((resultant_n - if split { 4.0 } else { 8.0 }).abs() < 1e-8);
+                    total_n += resultant_n;
+                }
+                assert!((total_n - 8.0).abs() < 1e-8);
+            }
+        }
+    }
+
+    #[test]
+    fn tip_input_errors_remain_distinct_from_attached_geometry_validation() {
+        for intensity in [f64::NAN, f64::INFINITY, -1.0] {
+            let mut model = tip_model();
+            model.slabs[0].tip_loads[0].intensity = intensity;
+            assert!(compute_tip_loads(&model)
+                .unwrap_err()
+                .to_string()
+                .contains("先端荷重強度が不正"));
+        }
+        let mut model = tip_model();
+        model.slabs[0].tip_loads[0].case = LoadCaseId(99);
+        assert!(compute_tip_loads(&model)
+            .unwrap_err()
+            .to_string()
+            .contains("先端荷重ケースが存在しません"));
+        model.slabs[0].shape = SlabShape::Attached {
+            anchor: RegionAnchor::Point(NodeId(0)),
+            extent: [1000.0; 2],
+        };
+        assert!(compute_tip_loads(&model)
+            .unwrap_err()
+            .to_string()
+            .contains("先端荷重の対象ではありません"));
+    }
+
+    #[test]
     fn tip_load_partial_span_adds_to_surface_once() {
         let mut model = tip_model();
         let (surface_nodal, surface) = slab_load_case_content(
@@ -1234,6 +1498,66 @@ mod tests {
         assert_eq!(model.load_cases[3].member[0].source, LoadSource::Manual);
         assert_eq!(model.load_cases[3].nodal[0].values[0], 100.0);
         assert!(model.load_cases[5].member.is_empty());
+    }
+
+    #[test]
+    fn tip_load_resultant_and_support_are_preserved_for_normalized_triangles_and_reversal() {
+        for (extent, vertices) in [
+            ([0.0, 1000.0], 3),
+            ([1e-10, 1000.0], 3),
+            ([1000.0, 0.0], 3),
+            ([1000.0, 1e-10], 3),
+            ([1000.0, 2000.0], 4),
+        ] {
+            for sign in [1.0, -1.0] {
+                for reversed in [false, true] {
+                    let mut model = tip_model();
+                    model.slabs[0].shape = SlabShape::Attached {
+                        anchor: RegionAnchor::Line {
+                            nodes: if reversed {
+                                [NodeId(1), NodeId(0)]
+                            } else {
+                                [NodeId(0), NodeId(1)]
+                            },
+                            span: [0.25, 0.75],
+                            transfer: LoadTransfer::Anchor,
+                        },
+                        extent: if reversed {
+                            [-sign * extent[1], -sign * extent[0]]
+                        } else {
+                            extent.map(|value| sign * value)
+                        },
+                    };
+                    assert_eq!(model.validate_attached_slabs(), Ok(()));
+                    assert_eq!(
+                        model.slabs[0].boundary_coords(&model).unwrap().len(),
+                        vertices
+                    );
+                    let supports = model.attached_slab_supports(&model.slabs[0]).unwrap();
+                    assert_eq!(supports.len(), 1);
+                    assert_eq!(supports[0].elem, ElemId(0));
+                    assert_eq!(
+                        supports[0].span,
+                        if reversed { [0.75, 0.25] } else { [0.25, 0.75] }
+                    );
+                    assert_eq!(supports[0].fraction, 1.0);
+                    let loads = compute_tip_loads(&model).unwrap();
+                    assert_eq!(loads[0].1.len(), 1);
+                    let load = &loads[0].1[0];
+                    assert_eq!(load.elem, ElemId(0));
+                    assert_eq!(load.dir, [0.0, 0.0, -1.0]);
+                    let MemberLoadKind::Distributed { a, b, w1, w2 } = load.kind else {
+                        panic!("取付き実梁への分布荷重");
+                    };
+                    assert_eq!([a, b], [2000.0, 6000.0]);
+                    // 先端辺 sqrt(4000² + 1000²) mm × 2 N/mm。
+                    assert!(
+                        ((w1 + w2) / 2.0 * (b - a) - 8246.21125123532).abs() < 1e-6,
+                        "extent={extent:?} sign={sign} reversed={reversed}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1997,6 +2321,181 @@ mod attached_anchor_tests {
         }
     }
 
+    #[test]
+    fn point_and_columns_transfer_to_specified_nodes_without_attachment_beam() {
+        let mut model = Model {
+            nodes: vec![node(0, 0.0), node(1, 4000.0), node(2, 0.0), node(3, 4000.0)],
+            elements: vec![beam(0, 0, 2), beam(1, 1, 3)],
+            ..Default::default()
+        };
+        model.nodes[2].coord[2] = -1000.0;
+        model.nodes[3].coord[2] = -1000.0;
+        for anchor in [
+            RegionAnchor::Point(NodeId(0)),
+            RegionAnchor::Line {
+                nodes: [NodeId(0), NodeId(1)],
+                span: [0.25, 0.75],
+                transfer: LoadTransfer::Columns,
+            },
+        ] {
+            let slab = Slab {
+                id: SlabId(0),
+                shape: SlabShape::Attached {
+                    anchor,
+                    extent: [1000.0, 2000.0],
+                },
+                plate: SlabPlate::default(),
+                tip_loads: vec![],
+            };
+            let loads = sepika_load::floor::distribute_slab_resolved(&model, &slab, 0.003).unwrap();
+            let (nodal, member) = slab_load_case_content(&model, &loads);
+            assert!(member.is_empty());
+            let expected = if matches!(anchor, RegionAnchor::Point(_)) {
+                6000.0
+            } else {
+                9000.0
+            };
+            assert!(
+                (nodal.iter().map(|load| -load.values[2]).sum::<f64>() - expected).abs() < 1e-6
+            );
+            assert!(nodal
+                .iter()
+                .all(|load| load.node == NodeId(0) || load.node == NodeId(1)));
+        }
+    }
+    #[test]
+    fn attached_shapes_preserve_load_resultant_on_actual_supports() {
+        for split in [false, true] {
+            for slope in [0.0, 1000.0] {
+                let mut model = Model {
+                    nodes: vec![node(0, 0.0), node(1, 4000.0), node(2, 2000.0)],
+                    ..Default::default()
+                };
+                model.nodes[1].coord[2] = slope;
+                model.nodes[2].coord[2] = slope / 2.0;
+                model.elements = if split {
+                    vec![beam(0, 0, 2), beam(1, 2, 1)]
+                } else {
+                    vec![beam(0, 0, 1)]
+                };
+                for (extent, expected) in [
+                    ([1000.0, 2000.0], 9000.0),
+                    ([-1000.0, -2000.0], 9000.0),
+                    ([0.0, 2000.0], 6000.0),
+                    ([2000.0, 0.0], 6000.0),
+                    ([0.0, -2000.0], 6000.0),
+                    ([-2000.0, 0.0], 6000.0),
+                ] {
+                    let slab = Slab {
+                        id: SlabId(0),
+                        shape: SlabShape::Attached {
+                            anchor: RegionAnchor::Line {
+                                nodes: [NodeId(0), NodeId(1)],
+                                span: [0.25, 0.75],
+                                transfer: LoadTransfer::Anchor,
+                            },
+                            extent,
+                        },
+                        plate: SlabPlate::default(),
+                        tip_loads: vec![],
+                    };
+                    let loads =
+                        sepika_load::floor::distribute_slab_resolved(&model, &slab, 0.003).unwrap();
+                    let (nodal, member) = slab_load_case_content(&model, &loads);
+                    assert!(nodal.is_empty());
+                    assert_eq!(member.len(), if split { 2 } else { 1 });
+                    let sum: f64 = member
+                        .iter()
+                        .map(|load| match load.kind {
+                            MemberLoadKind::Distributed { a, b, w1, w2 } => {
+                                (w1 + w2) / 2.0 * (b - a)
+                            }
+                            _ => panic!("分布荷重"),
+                        })
+                        .sum();
+                    assert!(
+                        (sum - expected).abs() < 1e-6,
+                        "split={split} slope={slope} extent={extent:?} total={sum}"
+                    );
+                    let mut reversed = slab.clone();
+                    reversed.shape = SlabShape::Attached {
+                        anchor: RegionAnchor::Line {
+                            nodes: [NodeId(1), NodeId(0)],
+                            span: [0.25, 0.75],
+                            transfer: LoadTransfer::Anchor,
+                        },
+                        extent: [-extent[1], -extent[0]],
+                    };
+                    let reversed_loads =
+                        sepika_load::floor::distribute_slab_resolved(&model, &reversed, 0.003)
+                            .unwrap();
+                    let (reversed_nodal, mut reversed_member) =
+                        slab_load_case_content(&model, &reversed_loads);
+                    assert!(reversed_nodal.is_empty());
+                    let mut original_member = member.clone();
+                    original_member.sort_by_key(|load| load.elem);
+                    reversed_member.sort_by_key(|load| load.elem);
+                    assert_eq!(original_member.len(), reversed_member.len());
+                    for (original, reversed) in original_member.iter().zip(&reversed_member) {
+                        assert_eq!(original.elem, reversed.elem);
+                        assert_eq!(original.dir, reversed.dir);
+                        let (
+                            MemberLoadKind::Distributed {
+                                a: a0,
+                                b: b0,
+                                w1: w0,
+                                w2: v0,
+                            },
+                            MemberLoadKind::Distributed {
+                                a: a1,
+                                b: b1,
+                                w1,
+                                w2: v1,
+                            },
+                        ) = (&original.kind, &reversed.kind)
+                        else {
+                            panic!("分布荷重");
+                        };
+                        assert!((a0 - a1).abs() < 1e-9);
+                        assert!((b0 - b1).abs() < 1e-9);
+                        assert!((w0 - w1).abs() < 1e-9);
+                        assert!((v0 - v1).abs() < 1e-9);
+                    }
+                }
+                for anchor in [
+                    RegionAnchor::Point(NodeId(0)),
+                    RegionAnchor::Line {
+                        nodes: [NodeId(0), NodeId(1)],
+                        span: [0.25, 0.75],
+                        transfer: LoadTransfer::Columns,
+                    },
+                ] {
+                    let slab = Slab {
+                        id: SlabId(0),
+                        shape: SlabShape::Attached {
+                            anchor,
+                            extent: [1000.0, 2000.0],
+                        },
+                        plate: SlabPlate::default(),
+                        tip_loads: vec![],
+                    };
+                    let loads =
+                        sepika_load::floor::distribute_slab_resolved(&model, &slab, 0.003).unwrap();
+                    let (nodal, member) = slab_load_case_content(&model, &loads);
+                    assert!(member.is_empty());
+                    let expected = if matches!(anchor, RegionAnchor::Point(_)) {
+                        6000.0
+                    } else {
+                        9000.0
+                    };
+                    assert!(
+                        (nodal.iter().map(|load| -load.values[2]).sum::<f64>() - expected).abs()
+                            < 1e-6
+                    );
+                }
+            }
+        }
+    }
     /// 取付き線 A—B の下の大梁が A—M—B の 2 本に分割されていても、片持ちの等分布は
     /// 両方の梁へ分布荷重として載る（節点への集中荷重に化けない）。
     #[test]
@@ -2370,9 +2869,8 @@ mod attached_anchor_tests {
     ///
     /// 被覆長の単純合計で判定すると、重なりのぶんだけ長さが水増しされ、隙間があっても
     /// 全長を覆えたと誤判定する。前半へ二重に載り、後半が無荷重になるため、
-    /// 従来どおり両端節点へ振り分ける。
     #[test]
-    fn test_overlapping_beams_fall_back_to_nodes() {
+    fn test_overlapping_beams_reject_attached_slab() {
         const L: f64 = 4000.0;
         const D: f64 = 1500.0;
         const W: f64 = 0.003;
@@ -2403,23 +2901,12 @@ mod attached_anchor_tests {
             tip_loads: Vec::new(),
         }];
 
-        let beam_map = beam_elem_map(&model);
-        let beam_loads =
-            slab_beam_loads_with(&model, |s| model.slab_dead_intensity(s), false, &beam_map)
-                .unwrap();
-        let (nodal, member) = slab_load_case_content(&model, &beam_loads);
-        assert!(
-            member.is_empty(),
-            "重なりがあるときは梁へ割り付けない: {member:?}"
-        );
-        let total: f64 = nodal.iter().map(|nl| -nl.values[2]).sum();
-        assert!(
-            (total - W * L * D).abs() / (W * L * D) < 1e-9,
-            "総和は保たれる: {total}"
-        );
+        let error = sepika_load::floor::distribute_slab_resolved(&model, &model.slabs[0], 0.003)
+            .unwrap_err();
+        assert!(error.to_string().contains("Slab 0:"));
+        assert!(error.to_string().contains("複数"));
     }
 
-    /// 集中荷重が被覆区間の境目に載っても、二重に計上しない。
     #[test]
     fn test_point_load_on_coverage_boundary_is_placed_once() {
         const L: f64 = 4000.0;

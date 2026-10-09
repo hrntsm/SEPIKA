@@ -130,6 +130,10 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     use sepika_core::model::ElementKind;
 
     let mut issues = Vec::new();
+    if let Err(error) = model.validate_attached_slabs() {
+        issues.push(ModelIssue::model(error.to_string()));
+        return issues;
+    }
 
     if let Err(e) = model.validate() {
         if matches!(e, sepika_core::error::CoreError::InvalidInput(_)) {
@@ -1415,4 +1419,36 @@ pub(super) fn singular_diagnosis(model: &Model) -> String {
          (3) 断面性能(A・I)が 0 の断面がある。",
         n_restrained
     )
+}
+
+#[cfg(test)]
+mod attached_slab_diagnostic_tests {
+    use super::*;
+    use sepika_core::ids::{NodeId, SlabId};
+    use sepika_core::model::{LoadTransfer, RegionAnchor, Slab, SlabPlate, SlabShape};
+
+    #[test]
+    fn invalid_attached_slab_returns_only_the_first_common_diagnostic() {
+        let model = Model {
+            slabs: vec![Slab {
+                id: SlabId(0),
+                shape: SlabShape::Attached {
+                    anchor: RegionAnchor::Line {
+                        nodes: [NodeId(0), NodeId(1)],
+                        span: [0.0, 1.0],
+                        transfer: LoadTransfer::Anchor,
+                    },
+                    extent: [1000.0; 2],
+                },
+                plate: SlabPlate::default(),
+                tip_loads: vec![],
+            }],
+            ..Default::default()
+        };
+        let expected = model.validate_attached_slabs().unwrap_err().to_string();
+        let issues = model_issues(&model);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].message, expected);
+        assert_eq!(issues[0].short, expected);
+    }
 }

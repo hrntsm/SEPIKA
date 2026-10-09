@@ -420,6 +420,9 @@ pub fn apply_edit(
     let label = cmd.label().to_string();
     let revision_before = state.undo.revision();
     let applied = state.undo.run(&mut state.model, cmd);
+    if let Some(reason) = state.undo.last_error() {
+        return Err(reason.to_owned());
+    }
     let op_id = format!("op-{}", state.undo.revision());
     Ok(WriteResult {
         op_id,

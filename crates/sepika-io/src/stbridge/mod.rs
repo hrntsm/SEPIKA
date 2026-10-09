@@ -46,6 +46,8 @@ pub use import::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum StbError {
+    #[error("{0}")]
+    InvalidAttachedSlab(String),
     #[error("xml parse: {0}")]
     Parse(String),
     #[error("unsupported version: {0}")]

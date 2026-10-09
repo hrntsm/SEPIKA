@@ -246,6 +246,9 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
 
     let model: Model =
         rmp_serde::from_slice(&model_data).map_err(|e| IoError::Decode(e.to_string()))?;
+    model
+        .validate_attached_slabs()
+        .map_err(|e| IoError::Decode(e.to_string()))?;
 
     Ok(OvikaContents {
         model,
@@ -263,6 +266,37 @@ mod tests {
     use sepika_core::model::*;
     use sepika_core::section_shape::SectionShape;
 
+    #[test]
+    fn load_rejects_attached_slab_with_common_geometry_diagnostic() {
+        let mut model = Model::default();
+        for (i, x) in [0.0, 4000.0].into_iter().enumerate() {
+            model.nodes.push(Node {
+                id: NodeId(i as u32),
+                coord: [x, 0.0, 0.0],
+                restraint: Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            });
+        }
+        model.slabs.push(Slab {
+            id: SlabId(0),
+            shape: SlabShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(0), NodeId(1)],
+                    span: [0.0, 1.0],
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: [1000.0, -1000.0],
+            },
+            plate: SlabPlate::default(),
+            tip_loads: vec![],
+        });
+        let expected = model.validate_attached_slabs().unwrap_err().to_string();
+        let path = crate::test_util::test_tmp().join("attached-invalid.ovika");
+        save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+        assert!(matches!(load_ovika(&path),Err(IoError::Decode(reason)) if reason==expected));
+    }
     #[test]
     fn surface_radii_ovika_roundtrip() {
         let mut model = Model::default();
@@ -796,6 +830,20 @@ mod tests {
     fn tip_load_roundtrip() {
         let mut model = make_3node_model();
         model.load_cases = default_load_cases();
+        model.elements.push(ElementData {
+            id: ElemId(0),
+            kind: ElementKind::Beam,
+            nodes: vec![NodeId(0), NodeId(1)].into(),
+            section: None,
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 0.0, 1.0],
+            },
+            end_cond: [EndCondition::Fixed; 2],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        });
         model.slabs.push(Slab {
             id: SlabId(0),
             shape: SlabShape::Attached {

@@ -12,6 +12,9 @@ pub trait EditCommand: Send {
     fn is_noop(&self) -> bool {
         false
     }
+    fn rejection(&self) -> Option<&str> {
+        None
+    }
 }
 
 impl<T: EditCommand + 'static> From<T> for Box<dyn EditCommand> {
@@ -20,11 +23,28 @@ impl<T: EditCommand + 'static> From<T> for Box<dyn EditCommand> {
     }
 }
 
+pub(crate) struct RejectedEdit(pub String);
+impl EditCommand for RejectedEdit {
+    fn apply(&self, _model: &mut Model) -> Box<dyn EditCommand> {
+        Box::new(Noop)
+    }
+    fn label(&self) -> &str {
+        "編集拒否"
+    }
+    fn is_noop(&self) -> bool {
+        true
+    }
+    fn rejection(&self) -> Option<&str> {
+        Some(&self.0)
+    }
+}
+
 pub struct UndoStack {
     done: Vec<Box<dyn EditCommand>>,
     undone: Vec<Box<dyn EditCommand>>,
     max_undo: usize,
     revision: u64,
+    last_error: Option<String>,
 }
 
 impl UndoStack {
@@ -34,6 +54,7 @@ impl UndoStack {
             undone: Vec::new(),
             max_undo: 100,
             revision: 0,
+            last_error: None,
         }
     }
 
@@ -43,6 +64,7 @@ impl UndoStack {
             undone: Vec::new(),
             max_undo,
             revision: 0,
+            last_error: None,
         }
     }
 
@@ -63,10 +85,21 @@ impl UndoStack {
     /// undo ラベルに「Noop」が表示される・undo が 1 段を無駄に消費する・
     /// 失敗した操作で redo 履歴が失われる、という不整合が生じていた。
     pub fn run(&mut self, model: &mut Model, cmd: Box<dyn EditCommand>) -> bool {
-        let inv = cmd.apply(model);
+        self.last_error = None;
+        let mut candidate = model.clone();
+        let inv = cmd.apply(&mut candidate);
+        if let Some(reason) = inv.rejection() {
+            self.last_error = Some(reason.to_owned());
+            return false;
+        }
         if inv.is_noop() {
             return false;
         }
+        if let Err(error) = candidate.validate_attached_slabs() {
+            self.last_error = Some(error.to_string());
+            return false;
+        }
+        *model = candidate;
         self.done.push(inv);
         if self.done.len() > self.max_undo {
             self.done.remove(0);
@@ -74,6 +107,11 @@ impl UndoStack {
         self.undone.clear();
         self.revision += 1;
         true
+    }
+
+    /// 直前の編集で拒否された取り付く床板の診断。成功または通常の Noop では `None`。
+    pub fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
     }
 
     pub fn undo(&mut self, model: &mut Model) {

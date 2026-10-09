@@ -285,12 +285,9 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                     plastic_zone: None,
                     spring: None,
                 };
-                app.clear_generated_member_selection();
-                app.core
-                    .scoped
-                    .undo
-                    .run(&mut app.core.model, Box::new(AddMember { elem }));
-                app.core.scoped.staleness.mark_edited();
+                if app.apply_model_edit(Box::new(AddMember { elem })) {
+                    app.clear_generated_member_selection();
+                }
             }
         }
 
@@ -623,10 +620,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
         app.select_member(id);
     }
 
-    let had_pending = !pending_section.is_empty()
-        || !pending_hysteresis.is_empty()
-        || !pending_hysteresis_th.is_empty()
-        || pending_delete.is_some();
+    let revision_before = app.core.scoped.undo.revision();
     for (elem_id, sec_id) in pending_section {
         let section = if sec_id == u32::MAX {
             None
@@ -672,24 +666,26 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
         );
     }
     if let Some(elem_id) = pending_delete {
-        if let Some(plate_id) = wall_index
+        let applied = if let Some(plate_id) = wall_index
             .as_ref()
             .and_then(|index| index.plate_of(elem_id))
         {
             app.core.scoped.undo.run(
                 &mut app.core.model,
                 Box::new(DeleteWallPlate { id: plate_id }),
-            );
+            )
         } else {
             app.core
                 .scoped
                 .undo
-                .run(&mut app.core.model, Box::new(DeleteMember { id: elem_id }));
+                .run(&mut app.core.model, Box::new(DeleteMember { id: elem_id }))
+        };
+        if applied {
+            app.clear_geometry_selection();
         }
-        app.clear_geometry_selection();
     }
 
-    if had_pending {
+    if app.core.scoped.undo.revision() != revision_before {
         app.core.scoped.staleness.mark_edited();
     }
 
@@ -905,12 +901,10 @@ fn dampers_table(ui: &mut egui::Ui, app: &mut App) {
         changed = true;
     }
     if let Some(elem_id) = pending_del {
-        app.core
-            .scoped
-            .undo
-            .run(&mut app.core.model, Box::new(DeleteMember { id: elem_id }));
-        app.clear_geometry_selection();
-        changed = true;
+        if app.apply_model_edit(Box::new(DeleteMember { id: elem_id })) {
+            app.clear_geometry_selection();
+            changed = true;
+        }
     }
     if changed {
         app.core.scoped.staleness.mark_edited();
@@ -1093,23 +1087,20 @@ fn isolators_table(ui: &mut egui::Ui, app: &mut App) {
         changed = true;
     }
     if let Some(elem_id) = pending_del {
-        match app.core.model.support_isolator_ends(elem_id) {
-            Some((upper, _ground)) => {
-                app.core.scoped.undo.run(
-                    &mut app.core.model,
-                    Box::new(RemoveSupportIsolator { node: upper }),
-                );
-                app.ui.scoped.boundary_node = None;
+        let applied = match app.core.model.support_isolator_ends(elem_id) {
+            Some((upper, _)) => {
+                let applied = app.apply_model_edit(Box::new(RemoveSupportIsolator { node: upper }));
+                if applied {
+                    app.ui.scoped.boundary_node = None;
+                }
+                applied
             }
-            None => {
-                app.core
-                    .scoped
-                    .undo
-                    .run(&mut app.core.model, Box::new(DeleteMember { id: elem_id }));
-            }
+            None => app.apply_model_edit(Box::new(DeleteMember { id: elem_id })),
+        };
+        if applied {
+            app.clear_geometry_selection();
+            changed = true;
         }
-        app.clear_geometry_selection();
-        changed = true;
     }
     if changed {
         app.core.scoped.staleness.mark_edited();
