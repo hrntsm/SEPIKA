@@ -77,6 +77,7 @@ fn short_direction_dimensions(coords: &[[f64; 3]]) -> Option<(f64, f64)> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FloorDistributionError {
+    InvalidAttachedSlab(String),
     SelfWeight(String),
     ShortDirectionOnSquare { slab_id: sepika_core::ids::SlabId },
     ShortDirectionRequiresRectangle { slab_id: sepika_core::ids::SlabId },
@@ -85,6 +86,7 @@ pub enum FloorDistributionError {
 impl std::fmt::Display for FloorDistributionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidAttachedSlab(message) => f.write_str(message),
             Self::SelfWeight(message) => f.write_str(message),
             Self::ShortDirectionOnSquare { slab_id } => write!(
                 f,
@@ -177,6 +179,9 @@ pub fn distribute_slab_w_checked(
     w: f64,
 ) -> Result<Vec<BeamLoad>, FloorDistributionError> {
     let mut loads = Vec::new();
+    model
+        .validate_attached_slab(slab)
+        .map_err(|e| FloorDistributionError::InvalidAttachedSlab(e.to_string()))?;
     let Some(coords) = boundary_coords(model, slab) else {
         return Ok(loads);
     };
@@ -266,7 +271,11 @@ fn distribute_attached(
 /// 床板割当領域の境界（[`sepika_core::model::SupportBoundary`]）を正本として辺の支持部材と
 /// 材軸区間を引く。解決できない辺は `Edge` のまま返し、`elem` は `Primary` の `Span` では
 /// 実要素 ID、それ以外は呼び出し側が解決する番兵 `ElemId(u32::MAX)` とする。
-fn resolve_edges_to_span(model: &Model, slab: &Slab, loads: Vec<BeamLoad>) -> Vec<BeamLoad> {
+fn resolve_edges_to_span(
+    model: &Model,
+    slab: &Slab,
+    loads: Vec<BeamLoad>,
+) -> Result<Vec<BeamLoad>, FloorDistributionError> {
     let attached_anchor_t = match &slab.shape {
         SlabShape::Attached {
             anchor: RegionAnchor::Line { span, .. },
@@ -278,7 +287,43 @@ fn resolve_edges_to_span(model: &Model, slab: &Slab, loads: Vec<BeamLoad>) -> Ve
         SlabShape::Enclosed => model.slab_assignment_region(slab.id),
         SlabShape::Attached { .. } => None,
     };
-    loads
+    if slab.supports_tip_loads() {
+        let supports = model
+            .attached_slab_supports(slab)
+            .map_err(|e| FloorDistributionError::InvalidAttachedSlab(e.to_string()))?;
+        let boundary = slab.boundary_coords(model).expect("検証済み取付き線");
+        let attach_length = sepika_core::geom::vec3::dist(boundary[0], boundary[1]);
+        return Ok(loads
+            .into_iter()
+            .flat_map(|load| {
+                if load.target != LoadTarget::Edge(0) {
+                    return vec![load];
+                }
+                let LoadShape::Uniform { w } = load.shape else {
+                    return vec![load];
+                };
+                supports
+                    .iter()
+                    .filter_map(|support| {
+                        let elem = model.element(support.elem)?;
+                        let length =
+                            model.member_length(elem) * (support.span[1] - support.span[0]).abs();
+                        let intensity = w * attach_length * support.fraction / length;
+                        Some(BeamLoad {
+                            elem: support.elem,
+                            target: LoadTarget::Span {
+                                nodes: [elem.nodes[0], elem.nodes[1]],
+                                t: support.span,
+                            },
+                            shape: LoadShape::Uniform { w: intensity },
+                            cmq: fem::fem_uniform(intensity, length),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect());
+    }
+    Ok(loads
         .into_iter()
         .map(|mut bl| {
             let LoadTarget::Edge(k) = bl.target else {
@@ -324,7 +369,7 @@ fn resolve_edges_to_span(model: &Model, slab: &Slab, loads: Vec<BeamLoad>) -> Ve
             }
             bl
         })
-        .collect()
+        .collect())
 }
 
 /// [`distribute_slab_w`] の戻り値を [`resolve_edges_to_span`] で解決した版。
@@ -346,11 +391,7 @@ pub fn distribute_slab_resolved_checked(
     slab: &Slab,
     w: f64,
 ) -> Result<Vec<BeamLoad>, FloorDistributionError> {
-    Ok(resolve_edges_to_span(
-        model,
-        slab,
-        distribute_slab_w_checked(model, slab, w)?,
-    ))
+    resolve_edges_to_span(model, slab, distribute_slab_w_checked(model, slab, w)?)
 }
 
 /// 床領域（大梁の 1 スパン区画）の面荷重を、床領域内の床板へ束ねて分配する。
@@ -371,7 +412,7 @@ pub fn distribute_region(
             continue;
         };
         let slab_loads = distribute_slab_w(model, slab, w_of(slab))?;
-        loads.extend(resolve_edges_to_span(model, slab, slab_loads));
+        loads.extend(resolve_edges_to_span(model, slab, slab_loads)?);
     }
     Ok(loads)
 }

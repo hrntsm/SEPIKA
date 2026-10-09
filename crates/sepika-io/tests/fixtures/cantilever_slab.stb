@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<ST_BRIDGE version="2.0.0"><StbModel>
+  <StbNodes>
+    <StbNode id="0" X="0" Y="0" Z="0"/>
+    <StbNode id="1" X="4000" Y="0" Z="0"/>
+    <StbNode id="2" X="4000" Y="1500" Z="0"/>
+    <StbNode id="3" X="0" Y="1500" Z="0"/>
+  </StbNodes>
+  <StbSections>
+    <StbSecBeam_S id="0" name="G">
+      <StbSecSteelFigureBeam_S><StbSecSteelBeam_S_Straight shape="H1" strength_main="SN400B"/></StbSecSteelFigureBeam_S>
+    </StbSecBeam_S>
+    <StbSecSteel>
+      <StbSecRoll-H name="H1" A="300" B="150" t1="6.5" t2="9"/>
+    </StbSecSteel>
+    <StbSecSlab_RC id="7" name="S1">
+      <StbSecFigureSlab_RC>
+        <StbSecSlab_RC_Straight thickness="150"/>
+      </StbSecFigureSlab_RC>
+    </StbSecSlab_RC>
+  </StbSections>
+  <StbMembers>
+    <StbGirders>
+      <StbGirder id="0" id_node_start="0" id_node_end="1" id_section="0"/>
+    </StbGirders>
+    <StbSlab id="0" name="S1" id_section="7" kind_structure="RC">
+      <StbNodeIdOrder>0 1 2 3</StbNodeIdOrder>
+    </StbSlab>
+  </StbMembers>
+</StbModel></ST_BRIDGE>

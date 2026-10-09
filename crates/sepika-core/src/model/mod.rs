@@ -4,6 +4,7 @@ use smallvec::SmallVec;
 
 mod aggregate;
 mod assignment_region;
+mod attached_slab;
 mod axis;
 mod constraint;
 mod element;
@@ -18,6 +19,7 @@ mod region;
 mod secondary;
 mod section;
 mod slab;
+pub use attached_slab::AttachedSlabSupport;
 mod story;
 mod stress_cfg;
 mod vibration;

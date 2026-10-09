@@ -666,11 +666,12 @@ fn test_cantilever_conservation() {
         mk_node(2, l_attach, depth),
         mk_node(3, 0.0, depth),
     ];
-    let model = Model {
+    let mut model = Model {
         nodes,
         ..Default::default()
     };
     // 取付き線 0→1 の左（+Y）側へ `depth` 跳ね出す片持ち床板。
+    attach_support(&mut model);
     let slab = Slab {
         id: SlabId(0),
         shape: SlabShape::Attached {
@@ -734,6 +735,7 @@ fn test_cantilever_with_side_beam_loads_attachment_only() {
         section: None,
         name: "J".into(),
     });
+    attach_support(&mut model);
     let slab = Slab {
         id: SlabId(0),
         shape: SlabShape::Attached {
@@ -781,7 +783,7 @@ fn test_cantilever_ignores_load_transfer_direction() {
     use sepika_core::ids::{NodeId, SlabId};
     use sepika_core::model::AreaLoad;
     let (l, depth, w) = (4000.0_f64, 1500.0_f64, 0.003_f64);
-    let model = Model {
+    let mut model = Model {
         nodes: vec![
             mk_node(0, 0.0, 0.0),
             mk_node(1, l, 0.0),
@@ -790,6 +792,7 @@ fn test_cantilever_ignores_load_transfer_direction() {
         ],
         ..Default::default()
     };
+    attach_support(&mut model);
     for direction in [OneWayDir::X, OneWayDir::Y, OneWayDir::Short] {
         let slab = Slab {
             id: SlabId(0),
@@ -853,6 +856,7 @@ fn test_cantilever_with_real_beam_edge_loads_attachment_only() {
         plastic_zone: None,
         spring: None,
     });
+    attach_support(&mut model);
     let slab = Slab {
         id: SlabId(0),
         shape: SlabShape::Attached {
@@ -1052,6 +1056,7 @@ fn test_cantilever_support_edges_do_not_receive_load() {
     };
     full.elements.push(mk_element_beam(0, 4, 5));
     full.unassigned_beams.push(mk_secondary_beam());
+    attach_support(&mut full);
     let loads = distribute_slab(&full, &mk_slab()).unwrap();
     assert_eq!(loads.len(), 1);
     assert!(matches!(loads[0].target, LoadTarget::Edge(0)));
@@ -1070,6 +1075,7 @@ fn test_cantilever_support_edges_do_not_receive_load() {
     };
     partial.elements.push(mk_element_beam(0, 4, 5));
     partial.unassigned_beams.push(mk_secondary_beam());
+    attach_support(&mut partial);
     let loads = distribute_slab(&partial, &mk_slab()).unwrap();
     assert_eq!(loads.len(), 1);
     assert!(matches!(loads[0].target, LoadTarget::Edge(0)));
@@ -1241,4 +1247,23 @@ fn test_midspan_beam_edge_loads_resolve_from_support_boundary() {
         )),
         "小梁境界の辺荷重は Secondary で小梁を指す: {loads:?}"
     );
+}
+
+fn attach_support(model: &mut Model) {
+    use sepika_core::ids::*;
+    use sepika_core::model::*;
+    model.elements.push(ElementData {
+        id: ElemId(model.elements.len() as u32),
+        kind: ElementKind::Beam,
+        nodes: vec![NodeId(0), NodeId(1)].into(),
+        section: None,
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed; 2],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    });
 }

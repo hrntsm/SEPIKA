@@ -1309,6 +1309,20 @@ fn test_validate_checks_anchor_span_bounds() {
             support_spring: None,
         });
     }
+    model.elements.push(ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Beam,
+        nodes: vec![NodeId(0), NodeId(1)].into(),
+        section: None,
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed; 2],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    });
     let mk = |span: [f64; 2]| Slab {
         id: SlabId(0),
         shape: SlabShape::Attached {

@@ -290,5 +290,9 @@ pub fn import_stbridge(xml: &str) -> Result<Model, StbError> {
 /// ST-Bridge 2.0 XML を内部モデルへ取り込み、[`ImportReport`]も返す。
 pub fn import_stbridge_with_report(xml: &str) -> Result<(Model, ImportReport), StbError> {
     let parsed = parser::parse(xml)?;
-    assemble::assemble(parsed)
+    let (model, report) = assemble::assemble(parsed)?;
+    model
+        .validate_attached_slabs()
+        .map_err(|e| StbError::InvalidAttachedSlab(e.to_string()))?;
+    Ok((model, report))
 }

@@ -6546,7 +6546,7 @@ fn test_missing_tip_beam_stops_reanalysis_and_removes_result() {
         .last_error
         .as_ref()
         .unwrap()
-        .contains("実梁"));
+        .contains("荷重支持先が欠落"));
     assert!(app.current_static().is_none());
     app.start_static_all_job();
     assert!(app.core.scoped.job.is_none());
@@ -6556,7 +6556,7 @@ fn test_missing_tip_beam_stops_reanalysis_and_removes_result() {
         .last_error
         .as_ref()
         .unwrap()
-        .contains("実梁"));
+        .contains("荷重支持先が欠落"));
     app.run_combination(0);
     assert!(app
         .core
@@ -6564,7 +6564,7 @@ fn test_missing_tip_beam_stops_reanalysis_and_removes_result() {
         .last_error
         .as_ref()
         .unwrap()
-        .contains("実梁"));
+        .contains("荷重支持先が欠落"));
     assert!(app.current_static().is_none());
 }
 
@@ -10590,4 +10590,101 @@ fn test_hydrate_saved_vibration_views_fills_graph_data() {
     {
         assert_eq!(app.ui.scoped.time_history_data.time, vec![0.0, 0.1, 0.2]);
     }
+}
+
+#[test]
+fn gui_node_paste_rejects_attached_slab_geometry_atomically() {
+    use super::node_grid::NodeGridAdapter;
+    use crate::grid::GridAdapter;
+    use sepika_core::ids::{NodeId, SlabId};
+    use sepika_core::model::{LoadTransfer, RegionAnchor};
+    let mut app = App::default();
+    app.core.model = crate::sample::portal_frame();
+    assert!(app.core.scoped.undo.run(
+        &mut app.core.model,
+        Box::new(sepika_edit::AddAttachedSlab {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(2), NodeId(3)],
+                span: [0.25, 0.75],
+                transfer: LoadTransfer::Anchor
+            },
+            extent: [1000.0, 2000.0],
+            plate: SlabPlate::default()
+        })
+    ));
+    let original = format!("{:?}", app.core.model);
+    let revision = app.core.scoped.undo.revision();
+    let mut invalid = app.core.model.clone();
+    invalid.nodes[3].coord = invalid.nodes[2].coord;
+    let expected = invalid.validate_attached_slabs().unwrap_err().to_string();
+    let issues = sepika_solver::statics::analysis::precheck::model_issues(&invalid);
+    assert!(issues.iter().any(|issue| issue.message == expected));
+    let before = format!("{invalid:?}");
+    let error = sepika_job::prepare::prepare_model_for_analysis(
+        &mut invalid,
+        &sepika_job::AnalysisSettings::default(),
+        None,
+    )
+    .err()
+    .expect("不正床板を拒否");
+    assert!(error.to_string().contains(&expected));
+    assert_eq!(format!("{invalid:?}"), before);
+    let mut adapter = NodeGridAdapter {
+        model: &mut app.core.model,
+        undo: &mut app.core.scoped.undo,
+        edited: false,
+    };
+    adapter.apply_block(
+        &[
+            (2, 1, "100".into()),
+            (3, 0, "0".into()),
+            (3, 1, "100".into()),
+        ],
+        0,
+    );
+    assert!(!adapter.edited);
+    assert_eq!(app.core.scoped.undo.last_error(), Some(expected.as_str()));
+    assert_eq!(format!("{:?}", app.core.model), original);
+    assert_eq!(app.core.scoped.undo.revision(), revision);
+    assert_eq!(app.core.model.slabs[0].id, SlabId(0));
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn rejected_support_deletion_preserves_preparation_and_result_validity() {
+    use sepika_core::ids::{ElemId, NodeId};
+    use sepika_core::model::{LoadTransfer, RegionAnchor};
+    let mut app = App::default();
+    app.core.model = crate::sample::portal_frame();
+    assert!(app.apply_model_edit(Box::new(sepika_edit::AddAttachedSlab {
+        anchor: RegionAnchor::Line {
+            nodes: [NodeId(2), NodeId(3)],
+            span: [0.25, 0.75],
+            transfer: LoadTransfer::Anchor
+        },
+        extent: [1000.0, 2000.0],
+        plate: SlabPlate::default()
+    })));
+    app.core.scoped.staleness.results_stale = false;
+    app.core.scoped.staleness.design_stale = false;
+    app.core.scoped.staleness.preparation_stale = false;
+    app.core.scoped.staleness.diagnostics_stale = false;
+    app.core.scoped.staleness.unsaved_changes = false;
+    let before = format!("{:?}", app.core.model);
+    let revision = app.core.scoped.undo.revision();
+    assert!(!app.apply_model_edit(Box::new(sepika_edit::DeleteMember { id: ElemId(2) })));
+    assert_eq!(format!("{:?}", app.core.model), before);
+    assert_eq!(app.core.scoped.undo.revision(), revision);
+    assert!(app
+        .core
+        .scoped
+        .undo
+        .last_error()
+        .unwrap()
+        .contains("荷重支持先が欠落"));
+    assert!(!app.core.scoped.staleness.results_stale);
+    assert!(!app.core.scoped.staleness.design_stale);
+    assert!(!app.core.scoped.staleness.preparation_stale);
+    assert!(!app.core.scoped.staleness.diagnostics_stale);
+    assert!(!app.core.scoped.staleness.unsaved_changes);
 }

@@ -56,6 +56,16 @@ fn analysis_panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 }
 
 impl App {
+    /// 編集が適用されたときだけモデル由来の結果と準備計算を陳腐化する。
+    #[cfg(feature = "gui")]
+    pub(crate) fn apply_model_edit(&mut self, command: Box<dyn sepika_edit::EditCommand>) -> bool {
+        let applied = self.core.scoped.undo.run(&mut self.core.model, command);
+        if applied {
+            self.core.scoped.staleness.mark_edited();
+        }
+        applied
+    }
+
     /// エラーを `last_error`（ステータスバー表示）とログの両方へ反映する。
     /// エラーはユーザーが気づかないまま埋もれると解析結果を誤って信頼しかねない
     /// ため、GUI ではログパネルを自動的に開く。

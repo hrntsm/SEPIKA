@@ -27,7 +27,7 @@ pub const BOUNDARY_TOL_MM: f64 = 1.0;
 
 /// 縮退とみなす、境界ボックスの最大辺長の 2 乗に対する面積の相対上限
 /// （根拠は [`centroid`] のドキュメントを参照）。
-const DEGENERATE_AREA_REL: f64 = 1e-12;
+pub const DEGENERATE_AREA_REL: f64 = 1e-12;
 
 /// 多角形の符号付き面積 \[mm²\]（シューレース公式。反時計回りが正）。頂点が 3 個未満なら 0。
 ///

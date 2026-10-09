@@ -361,8 +361,8 @@ impl EditCommand for SetFloorRegionName {
 /// 取り付く床板（片持ちスラブ・バルコニー・出隅）の追加。末尾に追加する。
 /// 逆操作は末尾の床板削除（[`DeleteSlabEntity`]）。
 ///
-/// 取付き線・取付き点が実在しない節点を指す場合は Noop。取付き線の張り出し量は
-/// 符号つきで、取付き線 `nodes[0]`→`nodes[1]` の左側を正とする。
+/// 張り出し量 [mm] は符号付きで、取付き線 `nodes[0]`→`nodes[1]` の左側を正とする。
+/// 不正な取付き参照・幾何・支持先はモデルを変更せず、床板 ID と理由付きで拒否する。
 pub struct AddAttachedSlab {
     pub anchor: sepika_core::model::RegionAnchor,
     pub extent: [f64; 2],
@@ -371,29 +371,13 @@ pub struct AddAttachedSlab {
 
 impl EditCommand for AddAttachedSlab {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        use sepika_core::model::{RegionAnchor, Slab, SlabShape};
+        use sepika_core::model::{Slab, SlabShape};
 
-        let nodes_ok = match self.anchor {
-            RegionAnchor::Line { nodes, span, .. } => {
-                if !sepika_core::model::span_is_valid(span) {
-                    return Box::new(Noop);
-                }
-                nodes[0] != nodes[1] && nodes.iter().all(|&n| crate::refs::node_exists(model, n))
-            }
-            RegionAnchor::Point(n) => crate::refs::node_exists(model, n),
-            RegionAnchor::FloorRegion { .. } => false,
-        };
-        if !nodes_ok {
-            return Box::new(Noop);
-        };
-        if !self.extent[0].is_finite() || !self.extent[1].is_finite() {
-            return Box::new(Noop);
-        }
         if !crate::refs::plate_section_ref_ok(model, self.plate.section) {
             return Box::new(Noop);
         }
         let id = SlabId(model.slabs.len() as u32);
-        model.slabs.push(Slab {
+        let slab = Slab {
             id,
             shape: SlabShape::Attached {
                 anchor: self.anchor,
@@ -401,7 +385,11 @@ impl EditCommand for AddAttachedSlab {
             },
             plate: self.plate.clone(),
             tip_loads: Vec::new(),
-        });
+        };
+        if let Err(error) = model.validate_attached_slab(&slab) {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
+        model.slabs.push(slab);
         Box::new(crate::DeleteSlab { id })
     }
 
@@ -410,8 +398,9 @@ impl EditCommand for AddAttachedSlab {
     }
 }
 
-/// 取り付く床板の張り出し量（`extent`）変更。逆操作は変更前の値への復元。
-/// 対象が取り付く床板でない、存在しない `SlabId`、または非有限の張り出し量は Noop。
+/// 取り付く床板の張り出し量 `extent` [mm] を変更する。逆操作は変更前の値への復元。
+/// 対象が取り付く床板でない、存在しない `SlabId` は Noop。
+/// 不正な幾何・支持先はモデルを変更せず、床板 ID と理由付きで拒否する。
 pub struct SetAttachedExtent {
     pub id: SlabId,
     pub extent: [f64; 2],
@@ -425,8 +414,13 @@ impl EditCommand for SetAttachedExtent {
         if idx >= model.slabs.len() || model.slabs[idx].id != self.id {
             return Box::new(Noop);
         }
-        if !self.extent[0].is_finite() || !self.extent[1].is_finite() {
+        let mut candidate = model.slabs[idx].clone();
+        let SlabShape::Attached { extent, .. } = &mut candidate.shape else {
             return Box::new(Noop);
+        };
+        *extent = self.extent;
+        if let Err(error) = model.validate_attached_slab(&candidate) {
+            return Box::new(RejectedEdit(error.to_string()));
         }
         let SlabShape::Attached { extent, .. } = &mut model.slabs[idx].shape else {
             return Box::new(Noop);
@@ -445,8 +439,8 @@ impl EditCommand for SetAttachedExtent {
 }
 
 /// 取り付く床板の取付き先（`anchor`）変更。逆操作は変更前の値への復元。
-/// 対象が取り付く床板でない、存在しない `SlabId`、および
-/// [`AddAttachedSlab`] と同じ取付き先検証に落ちる場合は Noop。
+/// 対象が取り付く床板でない、存在しない `SlabId` は Noop。
+/// 不正な取付き参照・幾何・支持先はモデルを変更せず、床板 ID と理由付きで拒否する。
 pub struct SetAttachedAnchor {
     pub id: SlabId,
     pub anchor: sepika_core::model::RegionAnchor,
@@ -463,18 +457,13 @@ impl EditCommand for SetAttachedAnchor {
         if !matches!(model.slabs[idx].shape, SlabShape::Attached { .. }) {
             return Box::new(Noop);
         }
-        let nodes_ok = match self.anchor {
-            RegionAnchor::Line { nodes, span, .. } => {
-                if !sepika_core::model::span_is_valid(span) {
-                    return Box::new(Noop);
-                }
-                nodes[0] != nodes[1] && nodes.iter().all(|&n| crate::refs::node_exists(model, n))
-            }
-            RegionAnchor::Point(n) => crate::refs::node_exists(model, n),
-            RegionAnchor::FloorRegion { .. } => false,
-        };
-        if !nodes_ok {
+        let mut candidate = model.slabs[idx].clone();
+        let SlabShape::Attached { anchor, .. } = &mut candidate.shape else {
             return Box::new(Noop);
+        };
+        *anchor = self.anchor;
+        if let Err(error) = model.validate_attached_slab(&candidate) {
+            return Box::new(RejectedEdit(error.to_string()));
         }
         if !model.slabs[idx].tip_loads.is_empty()
             && !matches!(

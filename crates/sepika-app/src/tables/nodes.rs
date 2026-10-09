@@ -576,12 +576,7 @@ fn isolator_support_section(ui: &mut egui::Ui, app: &mut App, node_id: NodeId) {
                             )
                             .clicked()
                         {
-                            app.core.scoped.undo.run(
-                                &mut app.core.model,
-                                Box::new(RemoveSupportIsolator { node: node_id }),
-                            );
-                            app.core.scoped.staleness.mark_edited();
-                            clear_deleted_node_selection(app);
+                            remove_support_isolator(app, node_id);
                         }
                     }
                     None => {
@@ -607,18 +602,22 @@ fn isolator_support_section(ui: &mut egui::Ui, app: &mut App, node_id: NodeId) {
                     "接地節点＋零長の免震支承要素を追加し、対象節点の拘束を解放します（undo可）",
                 )
                 .clicked()
+                && app.apply_model_edit(Box::new(PlaceSupportIsolator {
+                    node: node_id,
+                    props: app.ui.scoped.isolator_support_draft.props,
+                }))
             {
                 app.clear_generated_member_selection();
-                app.core.scoped.undo.run(
-                    &mut app.core.model,
-                    Box::new(PlaceSupportIsolator {
-                        node: node_id,
-                        props: app.ui.scoped.isolator_support_draft.props,
-                    }),
-                );
-                app.core.scoped.staleness.mark_edited();
             }
         });
+}
+
+fn remove_support_isolator(app: &mut App, node: NodeId) -> bool {
+    if !app.apply_model_edit(Box::new(RemoveSupportIsolator { node })) {
+        return false;
+    }
+    clear_deleted_node_selection(app);
+    true
 }
 
 /// 対象節点 `node_id` に設置済みの支点免震支承（零長 Isolator 要素）を探す。
@@ -648,6 +647,79 @@ mod tests {
     use sepika_core::dof::Dof6Mask;
     use sepika_core::model::Model;
     use sepika_edit::UndoStack;
+
+    #[test]
+    fn rejected_point_slab_support_removal_preserves_model_history_selection_and_validity() {
+        use sepika_core::model::{RegionAnchor, SlabPlate};
+        let mut app = App::default();
+        app.core.model = crate::sample::portal_frame();
+        app.run_preparation();
+        assert!(app.core.scoped.preparation.is_some());
+        app.core.model = Model {
+            nodes: vec![app.core.model.nodes[0].clone()],
+            ..Default::default()
+        };
+        assert!(app.apply_model_edit(Box::new(PlaceSupportIsolator {
+            node: NodeId(0),
+            props: IsolatorProps::default(),
+        })));
+        assert!(app.apply_model_edit(Box::new(sepika_edit::AddAttachedSlab {
+            anchor: RegionAnchor::Point(NodeId(0)),
+            extent: [1000.0, 2000.0],
+            plate: SlabPlate::default(),
+        })));
+        assert_eq!(app.core.model.validate_attached_slabs(), Ok(()));
+        assert!(app.apply_model_edit(Box::new(AddNode {
+            coord: [8000.0, 0.0, 0.0],
+            restraint: Dof6Mask::FREE,
+        })));
+        app.core.scoped.undo.undo(&mut app.core.model);
+        app.select_node(NodeId(0));
+        app.ui.scoped.boundary_node = Some(NodeId(0));
+        app.core.scoped.results = Some(crate::app::ResultsBundle {
+            panel_moments: vec![(NodeId(0), [1200.0, 3400.0])],
+            ..Default::default()
+        });
+        app.core.scoped.staleness.results_stale = false;
+        app.core.scoped.staleness.design_stale = false;
+        app.core.scoped.staleness.preparation_stale = false;
+        app.core.scoped.staleness.diagnostics_stale = false;
+        app.core.scoped.staleness.unsaved_changes = false;
+        let model = format!("{:?}", app.core.model);
+        let selection = format!("{:?}", app.ui.scoped.selection);
+        let revision = app.core.scoped.undo.revision();
+        let preparation = format!("{:?}", app.core.scoped.preparation);
+        let results = format!("{:?}", app.core.scoped.results);
+        let undo_label = app.core.scoped.undo.undo_label().map(str::to_owned);
+        let redo_label = app.core.scoped.undo.redo_label().map(str::to_owned);
+        assert!(app.core.scoped.undo.can_undo());
+        assert!(app.core.scoped.undo.can_redo());
+
+        assert!(!remove_support_isolator(&mut app, NodeId(0)));
+
+        assert_eq!(format!("{:?}", app.core.model), model);
+        assert_eq!(format!("{:?}", app.ui.scoped.selection), selection);
+        assert_eq!(app.ui.scoped.boundary_node, Some(NodeId(0)));
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        assert_eq!(format!("{:?}", app.core.scoped.preparation), preparation);
+        assert_eq!(format!("{:?}", app.core.scoped.results), results);
+        assert_eq!(app.core.scoped.undo.undo_label(), undo_label.as_deref());
+        assert_eq!(app.core.scoped.undo.redo_label(), redo_label.as_deref());
+        assert!(app.core.scoped.undo.can_undo());
+        assert!(app.core.scoped.undo.can_redo());
+        assert!(!app.core.scoped.staleness.results_stale);
+        assert!(!app.core.scoped.staleness.design_stale);
+        assert!(!app.core.scoped.staleness.preparation_stale);
+        assert!(!app.core.scoped.staleness.diagnostics_stale);
+        assert!(!app.core.scoped.staleness.unsaved_changes);
+        assert!(app
+            .core
+            .scoped
+            .undo
+            .last_error()
+            .unwrap()
+            .contains("Slab 0: 集中荷重の支持先が欠落"));
+    }
 
     #[test]
     fn grid_cell_and_boundary_default_render_do_not_override_geometry_selection() {

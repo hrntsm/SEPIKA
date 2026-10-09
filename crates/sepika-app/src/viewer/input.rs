@@ -168,9 +168,9 @@ pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickC
                         if let Some((cmd, new_id)) =
                             space_grid::beam_command(&app.core.model, first, point)
                         {
-                            app.core.scoped.undo.run(&mut app.core.model, Box::new(cmd));
-                            app.core.scoped.staleness.mark_edited();
-                            app.select_member(new_id);
+                            if app.apply_model_edit(Box::new(cmd)) {
+                                app.select_member(new_id);
+                            }
                         }
                         app.ui.scoped.beam_draw_first = None;
                     }

@@ -4,8 +4,7 @@ impl App {
     /// フレーム先頭で保留中の階編集を一件だけ適用する。
     pub(crate) fn apply_pending_story_command(&mut self) {
         if let Some(cmd) = self.ui.scoped.pending_story_cmds.pop_front() {
-            self.core.scoped.undo.run(&mut self.core.model, cmd);
-            self.core.scoped.staleness.mark_edited();
+            self.apply_model_edit(cmd);
         }
     }
 

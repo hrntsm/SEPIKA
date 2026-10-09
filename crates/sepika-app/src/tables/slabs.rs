@@ -1,7 +1,7 @@
 use crate::app::App;
 use sepika_core::ids::{FloorPlateAssignmentRegionId, FloorRegionId, NodeId, SlabId};
 use sepika_core::model::{AreaLoad, DistributionMethod, LoadPurpose, OneWayDir, SlabUsage};
-use sepika_core::model::{RegionAnchor, SlabShape};
+use sepika_core::model::{LoadTransfer, RegionAnchor, SlabShape};
 use sepika_core::units::to_display::area_load_kn_per_m2;
 use sepika_core::units::to_internal;
 use sepika_edit::{
@@ -186,6 +186,9 @@ fn one_way_label(o: Option<OneWayDir>) -> &'static str {
 }
 
 pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
+    if let Some(reason) = app.core.scoped.undo.last_error() {
+        ui.colored_label(crate::theme::ERROR_RED, reason);
+    }
     use crate::table_util::{self, Col};
 
     ui.label(
@@ -474,12 +477,7 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
         },
     );
 
-    let had_pending = !pending_one_way.is_empty()
-        || !pending_usage.is_empty()
-        || !pending_section.is_empty()
-        || !pending_extent.is_empty()
-        || !pending_anchor.is_empty()
-        || pending_delete.is_some();
+    let revision_before = app.core.scoped.undo.revision();
     for (id, one_way) in pending_one_way {
         app.core
             .scoped
@@ -498,25 +496,14 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
             Box::new(sepika_edit::SetSlabSection { id, section }),
         );
     }
-    for (id, extent) in pending_extent {
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(SetAttachedExtent { id, extent }),
-        );
-    }
-    for (id, anchor) in pending_anchor {
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(SetAttachedAnchor { id, anchor }),
-        );
-    }
+    apply_attached_boundary_changes(app, pending_extent, pending_anchor);
     if let Some(id) = pending_delete {
         app.core
             .scoped
             .undo
             .run(&mut app.core.model, Box::new(DeleteSlab { id }));
     }
-    if had_pending {
+    if app.core.scoped.undo.revision() != revision_before {
         app.core.scoped.staleness.mark_edited();
     }
 
@@ -945,8 +932,6 @@ fn tip_load_section(ui: &mut egui::Ui, app: &mut App) {
 /// どの床領域からも参照されない独立した床板であり、名前は持たない。
 /// 張り出し量の符号は、線なら取付き線 1→2 の**左側が正**、点なら全体座標の X/Y の向き。
 fn attached_section(ui: &mut egui::Ui, app: &mut App) {
-    use sepika_core::model::{LoadTransfer, RegionAnchor};
-
     ui.separator();
     ui.strong("取り付く床板を追加（片持ち・バルコニー・出隅）");
     ui.label(
@@ -1051,46 +1036,74 @@ fn attached_section(ui: &mut egui::Ui, app: &mut App) {
         a.zip(b).map(|(a, b)| [a, b])
     };
     let span = app.ui.scoped.slab_draft.attached_span;
-    let span_ok = sepika_core::model::span_is_valid(span);
-    let anchor: Option<RegionAnchor> = if app.ui.scoped.slab_draft.attached_point {
-        app.ui.scoped.slab_draft.attached_nodes[0].map(RegionAnchor::Point)
-    } else {
-        match (
-            app.ui.scoped.slab_draft.attached_nodes[0],
-            app.ui.scoped.slab_draft.attached_nodes[1],
-        ) {
-            (Some(a), Some(b)) if a != b && span_ok => Some(RegionAnchor::Line {
-                nodes: [a, b],
-                span,
-                transfer: app.ui.scoped.slab_draft.attached_transfer,
-            }),
-            _ => None,
-        }
-    };
-
-    if !app.ui.scoped.slab_draft.attached_point && !span_ok {
-        ui.label("取付き線の区間は始端 < 終端にしてください");
-    }
-    let ready = anchor.is_some() && extent.is_some();
-    if !ready {
+    let candidate = attached_creation_candidate(
+        &app.core.model,
+        app.ui.scoped.slab_draft.attached_point,
+        app.ui.scoped.slab_draft.attached_nodes,
+        span,
+        app.ui.scoped.slab_draft.attached_transfer,
+        extent,
+    );
+    let error = candidate.as_ref().and_then(|slab| {
+        app.core
+            .model
+            .validate_attached_slab(slab)
+            .err()
+            .map(|error| error.to_string())
+    });
+    if candidate.is_none() {
         ui.label("取付き先の節点と張り出し量を指定してください");
+    } else if let Some(error) = &error {
+        ui.colored_label(crate::theme::ERROR_RED, error);
     }
+    let ready = candidate.is_some() && error.is_none();
     if ui
         .add_enabled(ready, egui::Button::new("取り付く床板を追加"))
         .clicked()
     {
-        if let (Some(anchor), Some(extent)) = (anchor, extent) {
-            app.core.scoped.undo.run(
-                &mut app.core.model,
-                Box::new(sepika_edit::AddAttachedSlab {
-                    anchor,
-                    extent,
-                    plate: sepika_core::model::SlabPlate::default(),
-                }),
-            );
-            app.core.scoped.staleness.mark_edited();
+        if let Some(candidate) = candidate {
+            add_attached_candidate(app, candidate);
         }
     }
+}
+
+fn attached_creation_candidate(
+    model: &sepika_core::model::Model,
+    point: bool,
+    nodes: [Option<NodeId>; 2],
+    span: [f64; 2],
+    transfer: LoadTransfer,
+    extent: Option<[f64; 2]>,
+) -> Option<sepika_core::model::Slab> {
+    let anchor = if point {
+        RegionAnchor::Point(nodes[0]?)
+    } else {
+        RegionAnchor::Line {
+            nodes: [nodes[0]?, nodes[1]?],
+            span,
+            transfer,
+        }
+    };
+    Some(sepika_core::model::Slab {
+        id: SlabId(model.slabs.len() as u32),
+        shape: SlabShape::Attached {
+            anchor,
+            extent: extent?,
+        },
+        plate: sepika_core::model::SlabPlate::default(),
+        tip_loads: vec![],
+    })
+}
+
+fn add_attached_candidate(app: &mut App, candidate: sepika_core::model::Slab) -> bool {
+    let SlabShape::Attached { anchor, extent } = candidate.shape else {
+        return false;
+    };
+    app.apply_model_edit(Box::new(sepika_edit::AddAttachedSlab {
+        anchor,
+        extent,
+        plate: candidate.plate,
+    }))
 }
 
 fn attached_boundary_cell(
@@ -1119,18 +1132,18 @@ fn attached_boundary_cell(
                                     ui.selectable_value(&mut sel, nid, format!("N{}", nid.0));
                                 }
                             });
-                        if sel != nodes[k] && sel != nodes[1 - k] {
-                            let mut n = nodes;
-                            n[k] = sel;
-                            pending_anchor.push((
-                                id,
-                                RegionAnchor::Line {
-                                    nodes: n,
-                                    span,
-                                    transfer,
-                                },
-                            ));
-                        }
+                        let mut n = nodes;
+                        n[k] = sel;
+                        queue_attached_anchor(
+                            id,
+                            anchor,
+                            RegionAnchor::Line {
+                                nodes: n,
+                                span,
+                                transfer,
+                            },
+                            pending_anchor,
+                        );
                     }
                 });
                 ui.horizontal(|ui| {
@@ -1139,16 +1152,16 @@ fn attached_boundary_cell(
                     ui.add(egui::DragValue::new(&mut s[0]).range(0.0..=1.0).speed(0.01));
                     ui.label("〜");
                     ui.add(egui::DragValue::new(&mut s[1]).range(0.0..=1.0).speed(0.01));
-                    if s != span && sepika_core::model::span_is_valid(s) {
-                        pending_anchor.push((
-                            id,
-                            RegionAnchor::Line {
-                                nodes,
-                                span: s,
-                                transfer,
-                            },
-                        ));
-                    }
+                    queue_attached_anchor(
+                        id,
+                        anchor,
+                        RegionAnchor::Line {
+                            nodes,
+                            span: s,
+                            transfer,
+                        },
+                        pending_anchor,
+                    );
                 });
             }
             RegionAnchor::Point(n) => {
@@ -1160,9 +1173,7 @@ fn attached_boundary_cell(
                             ui.selectable_value(&mut sel, nid, format!("N{}", nid.0));
                         }
                     });
-                if sel != n {
-                    pending_anchor.push((id, RegionAnchor::Point(sel)));
-                }
+                queue_attached_anchor(id, anchor, RegionAnchor::Point(sel), pending_anchor);
             }
             RegionAnchor::FloorRegion { .. } => {}
         }
@@ -1170,17 +1181,343 @@ fn attached_boundary_cell(
             let mut e = extent;
             ui.add(egui::DragValue::new(&mut e[0]).suffix(" mm"));
             ui.add(egui::DragValue::new(&mut e[1]).suffix(" mm"));
-            if e != extent && e[0].is_finite() && e[1].is_finite() {
-                pending_extent.push((id, e));
-            }
+            queue_attached_extent(id, extent, e, pending_extent);
         });
     });
+}
+
+fn queue_attached_anchor(
+    id: SlabId,
+    previous: RegionAnchor,
+    candidate: RegionAnchor,
+    pending: &mut Vec<(SlabId, RegionAnchor)>,
+) {
+    if candidate != previous {
+        pending.push((id, candidate));
+    }
+}
+
+fn apply_attached_boundary_changes(
+    app: &mut App,
+    extents: Vec<(SlabId, [f64; 2])>,
+    anchors: Vec<(SlabId, RegionAnchor)>,
+) {
+    for (id, extent) in extents {
+        app.apply_model_edit(Box::new(SetAttachedExtent { id, extent }));
+    }
+    for (id, anchor) in anchors {
+        app.apply_model_edit(Box::new(SetAttachedAnchor { id, anchor }));
+    }
+}
+
+fn queue_attached_extent(
+    id: SlabId,
+    previous: [f64; 2],
+    candidate: [f64; 2],
+    pending: &mut Vec<(SlabId, [f64; 2])>,
+) {
+    if candidate != previous {
+        pending.push((id, candidate));
+    }
 }
 
 #[cfg(test)]
 mod tip_load_tests {
     use super::*;
     use sepika_core::model::{LoadTransfer, Slab, SlabPlate, TipLoadDirection};
+
+    #[test]
+    fn attached_creation_distinguishes_missing_input_from_invalid_complete_candidate() {
+        let model = sepika_core::model::Model::default();
+        for nodes in [[None, None], [Some(NodeId(0)), None]] {
+            assert!(attached_creation_candidate(
+                &model,
+                false,
+                nodes,
+                [0.0, 1.0],
+                LoadTransfer::Anchor,
+                Some([1000.0; 2])
+            )
+            .is_none());
+        }
+        assert!(attached_creation_candidate(
+            &model,
+            false,
+            [Some(NodeId(0)); 2],
+            [0.0, 1.0],
+            LoadTransfer::Anchor,
+            None
+        )
+        .is_none());
+        assert!(attached_creation_candidate(
+            &model,
+            false,
+            [Some(NodeId(0)); 2],
+            [0.75, 0.25],
+            LoadTransfer::Anchor,
+            Some([f64::NAN; 2])
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn attached_creation_reports_common_diagnostic_and_preserves_state_on_rejection() {
+        let mut base = App::default();
+        base.core.model = crate::sample::portal_frame();
+        base.run_preparation();
+        assert!(base.core.scoped.preparation.is_some());
+        for (point, nodes, span, extent, missing_support, reason) in [
+            (
+                false,
+                [2, 2],
+                [0.25, 0.75],
+                [1000.0; 2],
+                false,
+                "XY 長さがゼロ",
+            ),
+            (
+                false,
+                [2, 3],
+                [0.8, 0.75],
+                [1000.0; 2],
+                false,
+                "span が不正",
+            ),
+            (
+                false,
+                [2, 3],
+                [0.75, 0.75],
+                [1000.0; 2],
+                false,
+                "span が不正",
+            ),
+            (
+                false,
+                [2, 3],
+                [0.25, 0.75],
+                [f64::NAN, 1000.0],
+                false,
+                "extent が非有限",
+            ),
+            (
+                false,
+                [2, 3],
+                [0.25, 0.75],
+                [f64::INFINITY, 1000.0],
+                false,
+                "extent が非有限",
+            ),
+            (
+                true,
+                [99, 3],
+                [0.25, 0.75],
+                [1000.0; 2],
+                false,
+                "節点 99 が存在しません",
+            ),
+            (
+                false,
+                [2, 3],
+                [0.25, 0.75],
+                [1000.0; 2],
+                true,
+                "荷重支持先が欠落",
+            ),
+        ] {
+            let mut app = App::default();
+            app.core.model = base.core.model.clone();
+            if missing_support {
+                app.core.model.elements.clear();
+            }
+            app.core.scoped.preparation = base.core.scoped.preparation.clone();
+            app.core.scoped.results = Some(crate::app::ResultsBundle::default());
+            assert!(app.apply_model_edit(Box::new(sepika_edit::AddNode {
+                coord: [9000.0, 0.0, 0.0],
+                restraint: sepika_core::dof::Dof6Mask::FREE
+            })));
+            app.core.scoped.undo.undo(&mut app.core.model);
+            app.select_node(NodeId(2));
+            app.core.scoped.staleness.results_stale = false;
+            app.core.scoped.staleness.design_stale = false;
+            app.core.scoped.staleness.preparation_stale = false;
+            app.core.scoped.staleness.diagnostics_stale = false;
+            app.core.scoped.staleness.unsaved_changes = false;
+            let state = format!(
+                "{:?}{:?}{:?}{:?}{:?}",
+                app.core.model,
+                app.ui.scoped.selection,
+                app.core.scoped.preparation,
+                app.core.scoped.results,
+                app.core.scoped.staleness
+            );
+            let revision = app.core.scoped.undo.revision();
+            let redo = app.core.scoped.undo.redo_label().map(str::to_owned);
+            let candidate = attached_creation_candidate(
+                &app.core.model,
+                point,
+                nodes.map(|id| Some(NodeId(id))),
+                span,
+                LoadTransfer::Anchor,
+                Some(extent),
+            )
+            .unwrap();
+            let diagnostic = app
+                .core
+                .model
+                .validate_attached_slab(&candidate)
+                .unwrap_err()
+                .to_string();
+            assert!(diagnostic.contains("Slab 0:"));
+            assert!(diagnostic.contains(reason), "{diagnostic}");
+            app.ui.scoped.slab_draft.attached_point = point;
+            app.ui.scoped.slab_draft.attached_nodes = nodes.map(|id| Some(NodeId(id)));
+            app.ui.scoped.slab_draft.attached_span = span;
+            app.ui.scoped.slab_draft.attached_extent = extent.map(|value| value.to_string());
+            let ctx = egui::Context::default();
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                attached_section(ui, &mut app)
+            });
+            assert!(
+                output.shapes.iter().any(|shape| matches!(
+                    &shape.shape,
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == diagnostic
+                )),
+                "{diagnostic}"
+            );
+            assert!(!add_attached_candidate(&mut app, candidate));
+            assert_eq!(app.core.scoped.undo.last_error(), Some(diagnostic.as_str()));
+            assert_eq!(app.core.scoped.undo.revision(), revision);
+            assert_eq!(app.core.scoped.undo.redo_label(), redo.as_deref());
+            assert!(!app.core.scoped.undo.can_undo());
+            assert!(app.core.scoped.undo.can_redo());
+            assert_eq!(
+                format!(
+                    "{:?}{:?}{:?}{:?}{:?}",
+                    app.core.model,
+                    app.ui.scoped.selection,
+                    app.core.scoped.preparation,
+                    app.core.scoped.results,
+                    app.core.scoped.staleness
+                ),
+                state
+            );
+        }
+    }
+
+    #[test]
+    fn valid_line_and_point_creation_candidates_are_added() {
+        for point in [false, true] {
+            let mut app = App::default();
+            app.core.model = crate::sample::portal_frame();
+            let candidate = attached_creation_candidate(
+                &app.core.model,
+                point,
+                [Some(NodeId(2)), Some(NodeId(3))],
+                [0.25, 0.75],
+                LoadTransfer::Anchor,
+                Some([-1000.0, -2000.0]),
+            )
+            .unwrap();
+            assert_eq!(app.core.model.validate_attached_slab(&candidate), Ok(()));
+            let expected = candidate.shape.clone();
+            assert!(add_attached_candidate(&mut app, candidate));
+            assert_eq!(app.core.model.slabs.len(), 1);
+            assert_eq!(app.core.model.slabs[0].shape, expected);
+            assert!(app.core.scoped.undo.can_undo());
+            assert!(app.core.scoped.staleness.unsaved_changes);
+        }
+    }
+
+    #[test]
+    fn existing_attached_boundary_candidates_report_common_rejection_and_preserve_state() {
+        let anchor = RegionAnchor::Line {
+            nodes: [NodeId(2), NodeId(3)],
+            span: [0.25, 0.75],
+            transfer: LoadTransfer::Anchor,
+        };
+        let mut base = App::default();
+        base.core.model = crate::sample::portal_frame();
+        base.run_preparation();
+        assert!(base.core.scoped.preparation.is_some());
+        assert!(
+            base.apply_model_edit(Box::new(sepika_edit::AddAttachedSlab {
+                anchor,
+                extent: [1000.0, 2000.0],
+                plate: SlabPlate::default(),
+            }))
+        );
+        let id = base.core.model.slabs[0].id;
+        let candidate_anchors = [
+            RegionAnchor::Line {
+                nodes: [NodeId(3); 2],
+                span: [0.25, 0.75],
+                transfer: LoadTransfer::Anchor,
+            },
+            RegionAnchor::Line {
+                nodes: [NodeId(2), NodeId(3)],
+                span: [0.8, 0.75],
+                transfer: LoadTransfer::Anchor,
+            },
+            RegionAnchor::Line {
+                nodes: [NodeId(2), NodeId(3)],
+                span: [0.75, 0.75],
+                transfer: LoadTransfer::Anchor,
+            },
+        ];
+        for (candidate_anchor, candidate_extent) in candidate_anchors
+            .into_iter()
+            .map(|value| (value, [1000.0, 2000.0]))
+            .chain(
+                [f64::NAN, f64::INFINITY, f64::NEG_INFINITY]
+                    .into_iter()
+                    .map(|value| (anchor, [value, 2000.0])),
+            )
+        {
+            let mut app = App::default();
+            app.core.model = base.core.model.clone();
+            app.core.scoped.preparation = base.core.scoped.preparation.clone();
+            app.core.scoped.results = Some(crate::app::ResultsBundle::default());
+            app.select_node(NodeId(2));
+            app.core.scoped.staleness.results_stale = false;
+            app.core.scoped.staleness.design_stale = false;
+            app.core.scoped.staleness.preparation_stale = false;
+            app.core.scoped.staleness.diagnostics_stale = false;
+            app.core.scoped.staleness.unsaved_changes = false;
+            let model = format!("{:?}", app.core.model);
+            let selection = format!("{:?}", app.ui.scoped.selection);
+            let preparation = format!("{:?}", app.core.scoped.preparation);
+            let results = format!("{:?}", app.core.scoped.results);
+            let revision = app.core.scoped.undo.revision();
+            let mut candidate = app.core.model.slabs[0].clone();
+            candidate.shape = SlabShape::Attached {
+                anchor: candidate_anchor,
+                extent: candidate_extent,
+            };
+            let expected = app
+                .core
+                .model
+                .validate_attached_slab(&candidate)
+                .unwrap_err()
+                .to_string();
+            let mut extents = vec![];
+            let mut anchors = vec![];
+            queue_attached_anchor(id, anchor, candidate_anchor, &mut anchors);
+            queue_attached_extent(id, [1000.0, 2000.0], candidate_extent, &mut extents);
+            assert_eq!(extents.len() + anchors.len(), 1);
+            apply_attached_boundary_changes(&mut app, extents, anchors);
+            assert_eq!(app.core.scoped.undo.last_error(), Some(expected.as_str()));
+            assert_eq!(format!("{:?}", app.core.model), model);
+            assert_eq!(format!("{:?}", app.ui.scoped.selection), selection);
+            assert_eq!(format!("{:?}", app.core.scoped.preparation), preparation);
+            assert_eq!(format!("{:?}", app.core.scoped.results), results);
+            assert_eq!(app.core.scoped.undo.revision(), revision);
+            assert!(!app.core.scoped.staleness.results_stale);
+            assert!(!app.core.scoped.staleness.design_stale);
+            assert!(!app.core.scoped.staleness.preparation_stale);
+            assert!(!app.core.scoped.staleness.diagnostics_stale);
+            assert!(!app.core.scoped.staleness.unsaved_changes);
+        }
+    }
 
     #[test]
     fn gui_shows_tip_controls_only_for_line_anchor_transfer() {

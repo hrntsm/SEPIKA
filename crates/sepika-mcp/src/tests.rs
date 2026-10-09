@@ -900,6 +900,26 @@ fn four_node_edit_state(name: &str) -> ServerState {
                     support_spring: None,
                 })
                 .collect(),
+            elements: if name.starts_with("attached_slab") {
+                use sepika_core::ids::*;
+                use sepika_core::model::*;
+                vec![ElementData {
+                    id: ElemId(0),
+                    kind: ElementKind::Beam,
+                    nodes: vec![NodeId(0), NodeId(1)].into(),
+                    section: Some(SectionId(0)),
+                    local_axis: LocalAxis {
+                        ref_vector: [0.0, 0.0, 1.0],
+                    },
+                    end_cond: [EndCondition::Fixed; 2],
+                    force_regime: ForceRegime::Auto,
+                    rigid_zone: Default::default(),
+                    plastic_zone: None,
+                    spring: None,
+                }]
+            } else {
+                Vec::new()
+            },
             sections: sample_model().sections,
             ..Default::default()
         },
@@ -1270,4 +1290,68 @@ fn test_mcp_set_post_gravity_end_shares() {
     .unwrap()
     .apply(&mut model);
     assert_eq!(model.unassigned_posts[0].gravity_end_shares, None);
+}
+
+#[test]
+fn attached_slab_mcp_rejects_creation_extent_and_anchor_with_common_diagnostic() {
+    use sepika_core::ids::{NodeId, SlabId};
+    use sepika_core::model::{LoadTransfer, RegionAnchor, Slab, SlabPlate, SlabShape};
+    let mut state = four_node_edit_state("attached_slab_invalid");
+    let create = serde_json::json!({"command":"AddAttachedSlab","anchor":{"Line":{"nodes":[0,1],"span":[0.25,0.75],"transfer":"Anchor"}},"extent":[1000.0,-1000.0]});
+    let invalid = Slab {
+        id: SlabId(0),
+        shape: SlabShape::Attached {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(0), NodeId(1)],
+                span: [0.25, 0.75],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: [1000.0, -1000.0],
+        },
+        plate: SlabPlate::default(),
+        tip_loads: vec![],
+    };
+    let expected = state
+        .model
+        .validate_attached_slab(&invalid)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(apply_edit(&mut state, &create).unwrap_err(), expected);
+    assert!(state.model.slabs.is_empty());
+    assert_eq!(state.undo.revision(), 0);
+    let mut create = create;
+    create["extent"] = serde_json::json!([1000.0, 2000.0]);
+    assert!(apply_edit(&mut state, &create).unwrap().applied);
+    let original = format!("{:?}", state.model);
+    let revision = state.undo.revision();
+    assert_eq!(
+        apply_edit(
+            &mut state,
+            &serde_json::json!({"command":"SetAttachedExtent","id":0,"extent":[1000.0,-1000.0]})
+        )
+        .unwrap_err(),
+        expected
+    );
+    assert_eq!(format!("{:?}", state.model), original);
+    assert_eq!(state.undo.revision(), revision);
+    let mut candidate = state.model.slabs[0].clone();
+    candidate.shape = SlabShape::Attached {
+        anchor: RegionAnchor::Point(NodeId(99)),
+        extent: [1000.0, 2000.0],
+    };
+    let expected = state
+        .model
+        .validate_attached_slab(&candidate)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        apply_edit(
+            &mut state,
+            &serde_json::json!({"command":"SetAttachedAnchor","id":0,"anchor":{"Point":99}})
+        )
+        .unwrap_err(),
+        expected
+    );
+    assert_eq!(format!("{:?}", state.model), original);
+    assert_eq!(state.undo.revision(), revision);
 }

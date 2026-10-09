@@ -189,20 +189,30 @@ impl Slab {
                             a[2] + (b[2] - a[2]) * t,
                         ]
                     };
-                    let p0 = lerp(span[0]);
-                    let p1 = lerp(span[1]);
+                    let p0 = lerp(span[0].clamp(0.0, 1.0));
+                    let p1 = lerp(span[1].clamp(0.0, 1.0));
                     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
                     let len = (dx * dx + dy * dy).sqrt();
                     if len <= f64::EPSILON {
                         return None;
                     }
                     let n = [-dy / len, dx / len];
-                    Some(vec![
+                    let mut boundary = vec![
                         p0,
                         p1,
                         [p1[0] + n[0] * extent[1], p1[1] + n[1] * extent[1], p1[2]],
                         [p0[0] + n[0] * extent[0], p0[1] + n[1] * extent[0], p0[2]],
-                    ])
+                    ];
+                    boundary.dedup_by(|a, b| {
+                        crate::geom::vec3::dist(*a, *b) <= crate::geom::vec3::ZERO_TOL
+                    });
+                    if boundary.len() > 2
+                        && crate::geom::vec3::dist(boundary[0], *boundary.last()?)
+                            <= crate::geom::vec3::ZERO_TOL
+                    {
+                        boundary.pop();
+                    }
+                    Some(boundary)
                 }
                 RegionAnchor::Point(nid) => {
                     let p = coord_of(*nid)?;

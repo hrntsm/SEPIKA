@@ -4269,40 +4269,21 @@ fn test_import_enclosed_frame_with_slab_folds_to_one_region() {
 /// 大梁 1 本 + 跳ね出し StbSlab は取り付き領域になる。
 #[test]
 fn test_import_cantilever_slab_becomes_attached() {
-    let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
-  <StbNodes>
-    <StbNode id="0" X="0" Y="0" Z="0"/>
-    <StbNode id="1" X="4000" Y="0" Z="0"/>
-    <StbNode id="2" X="4000" Y="1500" Z="0"/>
-    <StbNode id="3" X="0" Y="1500" Z="0"/>
-  </StbNodes>
-  <StbSections>
-    <StbSecBeam_S id="0" name="G">
-      <StbSecSteelFigureBeam_S><StbSecSteelBeam_S_Straight shape="H1" strength_main="SN400B"/></StbSecSteelFigureBeam_S>
-    </StbSecBeam_S>
-    <StbSecSteel>
-      <StbSecRoll-H name="H1" A="300" B="150" t1="6.5" t2="9"/>
-    </StbSecSteel>
-    <StbSecSlab_RC id="7" name="S1">
-      <StbSecFigureSlab_RC>
-        <StbSecSlab_RC_Straight thickness="150"/>
-      </StbSecFigureSlab_RC>
-    </StbSecSlab_RC>
-  </StbSections>
-  <StbMembers>
-    <StbGirders>
-      <StbGirder id="0" id_node_start="0" id_node_end="1" id_section="0"/>
-    </StbGirders>
-    <StbSlab id="0" name="S1" id_section="7" kind_structure="RC">
-      <StbNodeIdOrder>0 1 2 3</StbNodeIdOrder>
-    </StbSlab>
-  </StbMembers>
-</StbModel></ST_BRIDGE>"#;
+    let xml = include_str!("../../tests/fixtures/cantilever_slab.stb");
     let (m, _) = import_stbridge_with_report(xml).expect("import");
     assert!(
         m.slabs.iter().any(|s| s.is_attached()),
         "片持ち相当は is_attached: {:?}",
         m.slabs.iter().map(|s| &s.shape).collect::<Vec<_>>()
     );
+    let slab = &m.slabs[0];
+    let before_xy = [[0.0, 0.0], [4000.0, 0.0], [4000.0, 1500.0], [0.0, 1500.0]];
+    assert_eq!(sepika_core::geom::polygon::area(&before_xy), 6_000_000.0);
+    let after = slab.boundary_coords(&m).unwrap();
+    assert_eq!(sepika_core::geom::polygon::area_xy(&after), 6_000_000.0);
+    let supports = m.attached_slab_supports(slab).unwrap();
+    assert_eq!(supports.len(), 1);
+    assert_eq!(supports[0].elem, m.elements[0].id);
+    assert_eq!(supports[0].span, [0.0, 1.0]);
+    assert_eq!(supports[0].fraction, 1.0);
 }
