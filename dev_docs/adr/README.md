@@ -47,6 +47,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0040](0040-damper-total-weight-and-mass-source.md) | accepted | ダンパーはモデル化範囲の総重量を直接入力し、断面由来質量を置き換える |
 | [0041](0041-holding-result-input-validity.md) | accepted | 保有水平耐力に採用する結果ごとに生成入力を照合する |
 
+| [0042](0042-attached-slab-validation-and-support-resolution.md) | accepted | 取り付く床板の幾何と支持先を入力境界で共通検査する |
+
 ## 規約
 
 - ADR にするのは「後から覆すコストが高い」「背景を知らないと意外に見える」「実際のトレードオフがあった」の 3 条件をすべて満たす**現在有効な判断**だけ。単なる実装手順・容易に変えられる選択・未実装の計画・自明な判断は書かない。
