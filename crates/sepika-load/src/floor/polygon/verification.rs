@@ -272,37 +272,61 @@ fn deep_c_independent_integral_and_transform_matrix() {
             );
         }
     }
-    for base in [u_shape(), c_shape()] {
-        let reference = integrate(&base, 25., 0.25);
-        for angle in [0., 0.37, std::f64::consts::FRAC_PI_2] {
-            for (shift, reverse) in [(0, false), (3, false), (0, true), (3, true)] {
-                let n = base.len();
-                let transformed: Vec<_> = (0..n)
-                    .map(|i| {
-                        let k = if reverse {
-                            (shift + n - i) % n
+    let u_expected_m2 = [
+        20.07074872440124,
+        16.311054705156383,
+        2.25,
+        12.139285466321498,
+        14.528570932642996,
+        12.139285466321498,
+        2.25,
+        16.311054705156383,
+    ];
+    for (base, analytic_m2) in [(u_shape(), u_expected_m2), (c_shape(), expected)] {
+        for (h, phase) in [(100., 0.), (50., 0.25), (25., 0.5), (12.5, 0.25)] {
+            let reference = integrate(&base, h, phase);
+            for angle in [0., 0.37, std::f64::consts::FRAC_PI_2] {
+                for (shift, reverse) in [(0, false), (3, false), (0, true), (3, true)] {
+                    let n = base.len();
+                    let transformed: Vec<_> = (0..n)
+                        .map(|i| {
+                            let k = if reverse {
+                                (shift + n - i) % n
+                            } else {
+                                (shift + i) % n
+                            };
+                            let p = base[k];
+                            [
+                                1e9 + angle.cos() * p[0] - angle.sin() * p[1],
+                                -1e9 + angle.sin() * p[0] + angle.cos() * p[1],
+                                0.,
+                            ]
+                        })
+                        .collect();
+                    let result = integrate(&transformed, h, phase);
+                    for e in 0..n {
+                        let original = if reverse {
+                            (shift + n - e - 1) % n
                         } else {
-                            (shift + i) % n
+                            (shift + e) % n
                         };
-                        let p = base[k];
-                        [
-                            1e9 + angle.cos() * p[0] - angle.sin() * p[1],
-                            -1e9 + angle.sin() * p[0] + angle.cos() * p[1],
-                            0.,
-                        ]
-                    })
-                    .collect();
-                let result = integrate(&transformed, 25., 0.25);
-                for e in 0..n {
-                    let original = if reverse {
-                        (shift + n - e - 1) % n
-                    } else {
-                        (shift + e) % n
-                    };
-                    assert!(
-                        (result.edge_areas_mm2[e] - reference.edge_areas_mm2[original]).abs()
-                            <= result.edge_error_bounds_mm2[e]
-                                + reference.edge_error_bounds_mm2[original]
+                        let error_mm2 =
+                            (result.edge_areas_mm2[e] - analytic_m2[original] * 1e6).abs();
+                        assert!(
+                            error_mm2 <= result.edge_error_bounds_mm2[e],
+                            "h={h} phase={phase} angle={angle} shift={shift} reverse={reverse} edge={e}"
+                        );
+                        assert!(
+                            (result.edge_areas_mm2[e] - reference.edge_areas_mm2[original]).abs()
+                                <= result.edge_error_bounds_mm2[e]
+                                    + reference.edge_error_bounds_mm2[original]
+                        );
+                    }
+                    println!(
+                        "transform area_m2={} h={h} phase={phase} angle={angle} shift={shift} reverse={reverse} areas_mm2={:?} bounds_mm2={:?}",
+                        analytic_m2.iter().sum::<f64>(),
+                        result.edge_areas_mm2,
+                        result.edge_error_bounds_mm2
                     );
                 }
             }
