@@ -352,6 +352,101 @@ fn prepared_steel_portal(four_story: bool) -> App {
     app
 }
 
+/// 床なし4層RC矩形。柱600角・梁400×700、D25主筋、Fc24/SD345を明示した独立fixture。
+fn prepared_rectangular_rc_portal() -> App {
+    use sepika_core::ids::{MaterialId, SectionId};
+    use sepika_core::model::{FrameSectionUse, Material, MaterialCategory};
+    use sepika_core::section_shape::{
+        BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
+    };
+    let mut model = four_story_steel_portal();
+    let shapes = [
+        SectionShape::RcColumnRect {
+            b: 600.0,
+            d: 600.0,
+            rebar: RcRectColumnRebar {
+                main_dia: 25.0,
+                x: vec![8],
+                y: vec![8],
+                cover: 40.0,
+                hoop: RectColumnHoop {
+                    dia: 10.0,
+                    pitch: 100.0,
+                    legs_x: 2,
+                    legs_y: 2,
+                },
+            },
+        },
+        SectionShape::RcBeamRect {
+            b: 400.0,
+            d: 700.0,
+            rebar: RcBeamRebar {
+                main_dia: 25.0,
+                top: vec![4],
+                bottom: vec![4],
+                cover: 40.0,
+                stirrup: BeamStirrup {
+                    dia: 10.0,
+                    pitch: 100.0,
+                    legs: 2,
+                },
+            },
+        },
+    ];
+    model.sections = shapes
+        .into_iter()
+        .enumerate()
+        .map(|(i, shape)| {
+            let mut sec = shape.to_section(SectionId(i as u32), format!("RC矩形{i}"));
+            sec.frame_use = Some(if i == 0 {
+                FrameSectionUse::Column
+            } else {
+                FrameSectionUse::Girder
+            });
+            sec.material = Some(MaterialId(0));
+            sec.rebar_material = Some(MaterialId(1));
+            sec.shear_rebar_material = Some(MaterialId(1));
+            sec
+        })
+        .collect();
+    model.materials = vec![
+        Material {
+            id: MaterialId(0),
+            name: "Fc24".into(),
+            category: MaterialCategory::Concrete,
+            young: 23000.0,
+            poisson: 0.2,
+            density: 2.4e-9,
+            shear: None,
+            fc: Some(24.0),
+            fy: None,
+            strength_factor: None,
+            concrete_class: Default::default(),
+        },
+        Material {
+            id: MaterialId(1),
+            name: "SD345".into(),
+            category: MaterialCategory::Rebar,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            shear: None,
+            fc: None,
+            fy: Some(345.0),
+            strength_factor: None,
+            concrete_class: Default::default(),
+        },
+    ];
+    let mut app = App::default();
+    app.core.analysis_cfg.threads = 1;
+    app.load_model(model);
+    app.generate_stories_action();
+    app.run_preparation();
+    assert_no_error(&app, "RC矩形準備");
+    sepika_element::factory::ensure_nonlinear_input(&app.core.model).expect("RC矩形入力");
+    app
+}
+
 fn assert_t_beam_diagnostic(app: &App) {
     let error = app.core.scoped.last_error.as_deref().expect("T形入力診断");
     for id in [40, 41, 48, 49, 56] {
@@ -1459,6 +1554,37 @@ fn time_history_nonlinear_long_duration_has_no_false_non_convergence() {
         th.peak_disp.iter().flatten().all(|v| v.is_finite()),
         "ピーク変位に非有限値がある"
     );
+}
+
+/// 明示RC矩形フレームの減衰末尾で、ピーク力下限を欠く旧判定による偽非収束を検出する。
+#[test]
+fn rectangular_rc_decay_tail_has_no_false_non_convergence() {
+    let mut app = prepared_rectangular_rc_portal();
+    app.core.analysis_cfg.th_dir = ThDir::X;
+    app.core.analysis_cfg.th_nonlinear = true;
+    app.core.analysis_cfg.th_apply_long_term = false;
+    app.core.analysis_cfg.th_duration = 120.0;
+    app.core.analysis_cfg.th_dt = 0.05;
+    app.core.analysis_cfg.th_amp = 10000.0;
+    app.core.analysis_cfg.th_period = 1.0;
+    app.run_time_history_sample();
+    assert_no_error(&app, "RC矩形の減衰末尾回帰");
+    let th = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .time_history
+        .as_ref()
+        .unwrap();
+    assert!(th.nonlinear);
+    assert!(!th.applied_long_term);
+    assert_eq!(th.time.len(), 2401);
+    assert!((th.time.last().unwrap() - 120.0).abs() < 1e-9);
+    assert_eq!(th.non_converged_steps, 0, "減衰末尾で偽の非収束が出ている");
+    assert!(th.peak_disp.iter().flatten().all(|v| v.is_finite()));
+    assert!(th.peak_disp.iter().flatten().any(|v| v.abs() > 0.0));
 }
 
 /// 既存1層鋼サンプルの非線形時刻歴が長期荷重初期化を含め完走する。
