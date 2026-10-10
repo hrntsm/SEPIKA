@@ -277,7 +277,10 @@ fn generate_stories_impl(
         model
             .wall_plates
             .iter()
-            .map(|p| model.wall_weight(p))
+            .map(|p| {
+                model.validate_wall_design_self_weight(p)?;
+                model.wall_weight(p)
+            })
             .collect::<Result<Vec<_>, _>>()?
     };
     let mut wall_bands = vec![Vec::new(); story_levels.len()];

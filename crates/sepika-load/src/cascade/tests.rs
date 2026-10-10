@@ -1390,3 +1390,32 @@ fn midspan_beam_floor_conserves_total_through_cascade() {
         w * area
     );
 }
+
+#[test]
+fn secondary_high_density_design_guard_does_not_block_physical_cascade() {
+    for kind in [SecondaryMemberKind::Beam, SecondaryMemberKind::Post] {
+        let mut model = face_model(4000.0, [400.0; 2]);
+        model.unassigned_beams[0].kind = kind;
+        if kind == SecondaryMemberKind::Post {
+            let post = model.unassigned_beams.pop().unwrap();
+            model.unassigned_posts.push(post);
+        }
+        model.materials[0].density = 85e-6 / 9806.65;
+        let error = beam_self_weight_udl(
+            &model,
+            model.secondary_member(SecondaryMemberId(10)).unwrap(),
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("材料 0") && error.contains("二次部材 10"),
+            "{error}"
+        );
+        assert!(beam_mass_equiv_udl(
+            &model,
+            model.secondary_member(SecondaryMemberId(10)).unwrap()
+        )
+        .is_ok());
+        assert!(solve_with_basis(&model, |_| 0.0, true, SelfWeightBasis::Design).is_err());
+        assert!(solve_with_basis(&model, |_| 0.0, true, SelfWeightBasis::MassEquiv).is_ok());
+    }
+}

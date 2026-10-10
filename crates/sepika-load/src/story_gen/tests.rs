@@ -5767,3 +5767,123 @@ fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
     assert_eq!(a[0].1, 3500.0);
     assert_eq!(a[1].1, 3500.0);
 }
+
+#[test]
+fn high_density_primary_kinds_and_cft_steel_reference_reject_design_only() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+        ElementKind::Brace {
+            tension_only: false,
+        },
+    ] {
+        let mut model = two_story_model();
+        model.elements[0].kind = kind;
+        model.materials[0].density = 85e-6 / 9806.65;
+        let error = generate_stories(&model, None).unwrap_err();
+        assert!(
+            error.contains("材料 0") && error.contains("要素 0") && error.contains("過小評価"),
+            "{error}"
+        );
+        assert!(model.element_mass_properties(&model.elements[0]).is_ok());
+    }
+    let mut cft = cft_column_model();
+    cft.materials[0].density = 85e-6 / 9806.65;
+    assert!(generate_stories(&cft, None).is_ok());
+    cft.materials[1].density = 85e-6 / 9806.65;
+    let error = generate_stories(&cft, None).unwrap_err();
+    assert!(
+        error.contains("材料 1") && error.contains("過小評価"),
+        "{error}"
+    );
+    assert!(cft.element_mass_properties(&cft.elements[0]).is_ok());
+    let mut pipe = cft.clone();
+    pipe.sections[0] = SectionShape::CftPipe {
+        outer_dia: 400.0,
+        thick: 12.0,
+    }
+    .to_section(SectionId(0), "CFT円形".into());
+    pipe.sections[0].material = Some(MaterialId(0));
+    pipe.sections[0].steel_material = Some(MaterialId(1));
+    assert!(generate_stories(&pipe, None)
+        .unwrap_err()
+        .contains("材料 1"));
+}
+
+#[test]
+fn one_cubic_metre_steel_keeps_independent_design_weight_and_physical_mass() {
+    let mut model = two_story_model();
+    model.elements.truncate(1);
+    model.nodes.truncate(3);
+    model.nodes[2].coord[2] = 1000.0;
+    model.sections[0].area = 1e6;
+    let generated = generate_stories(&model, None).unwrap();
+    let design_total: f64 = generated
+        .stories
+        .iter()
+        .filter_map(|s| s.seismic_weight)
+        .sum();
+    assert!((design_total - 78500.0).abs() < 1e-8);
+    let physical = model.element_mass_properties(&model.elements[0]).unwrap();
+    assert!((physical.mass_per_length * 1000.0 - 7.85).abs() < 1e-12);
+    model.materials[0].density = 85e-6 / 9806.65;
+    assert!(generate_stories(&model, None)
+        .unwrap_err()
+        .contains("過小評価"));
+    assert!(
+        (model
+            .element_mass_properties(&model.elements[0])
+            .unwrap()
+            .mass_per_length
+            * 1000.0
+            - 8.66758781031239)
+            .abs()
+            < 1e-12
+    );
+}
+
+#[test]
+fn src_embedded_steel_high_density_does_not_apply_steel_threshold_to_total_section() {
+    let mut model = column_finish_model();
+    let SectionShape::RcColumnRect { b, d, rebar } = model.sections[0].shape.clone().unwrap()
+    else {
+        panic!("RC柱")
+    };
+    model.sections[0].shape = Some(SectionShape::SrcColumnRect {
+        b,
+        d,
+        rebar,
+        steel_height: 300.0,
+        steel_width: 200.0,
+        steel_web_thick: 10.0,
+        steel_flange_thick: 20.0,
+    });
+    let mut steel = model.materials[0].clone();
+    steel.id = MaterialId(model.materials.len() as u32);
+    steel.category = MaterialCategory::Steel;
+    steel.name = "SN400B".into();
+    steel.young = 205000.0;
+    steel.fc = None;
+    steel.fy = Some(235.0);
+    steel.density = 85e-6 / 9806.65;
+    model.sections[0].steel_material = Some(steel.id);
+    model.materials.push(steel);
+    assert!(generate_stories(&model, None).is_ok());
+    assert!(model.element_mass_properties(&model.elements[0]).is_ok());
+}
+
+#[test]
+fn steel_shell_design_self_weight_rejects_high_density_with_element_id() {
+    let mut model = two_story_model();
+    model.elements.truncate(1);
+    model.elements[0].kind = ElementKind::Shell;
+    model.elements[0].nodes = vec![NodeId(0), NodeId(1), NodeId(3), NodeId(2)].into();
+    model.sections[0].thickness = Some(10.0);
+    model.materials[0].density = 85e-6 / 9806.65;
+    let error = generate_stories(&model, None).unwrap_err();
+    assert!(
+        error.contains("要素 0") && error.contains("シェル") && error.contains("過小評価"),
+        "{error}"
+    );
+}

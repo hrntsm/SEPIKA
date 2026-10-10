@@ -133,6 +133,17 @@ impl Model {
             .map_err(|e| format!("壁版 {}: {e}", plate.id.0))
     }
 
+    /// 壁版の設計自重に参照される鋼材を検査する。物理重量の算定は制限しない。
+    pub fn validate_wall_design_self_weight(&self, plate: &WallPlate) -> Result<(), String> {
+        if let Some(material) = self.wall_plate_material(plate) {
+            material.validate_design_self_weight(
+                &format!("壁版 {}", plate.id.0),
+                "壁版のDL・地震用重量",
+            )?;
+        }
+        Ok(())
+    }
+
     fn wall_weight_inner(&self, plate: &WallPlate) -> Result<WallWeight, String> {
         scalar(plate.opening_area, false, "開口面積")?;
         scalar(plate.opening_weight, false, "開口部重量")?;

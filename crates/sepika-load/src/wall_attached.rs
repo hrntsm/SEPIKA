@@ -57,7 +57,7 @@ fn push_node_load(loads: &mut Vec<BeamLoad>, node: NodeId, total: f64) {
 
 /// 「線」アンカーの取り付く壁版（パラペット・腰壁・垂れ壁で梁に取り付くもの）の
 /// 自重を [`BeamLoad`] へ変換する（D16）。
-pub fn attached_wall_beam_loads(model: &Model) -> Vec<BeamLoad> {
+pub fn attached_wall_beam_loads(model: &Model) -> Result<Vec<BeamLoad>, String> {
     let mut loads = Vec::new();
     for plate in &model.wall_plates {
         let WallPlateShape::Attached { anchor, .. } = &plate.shape else {
@@ -71,6 +71,7 @@ pub fn attached_wall_beam_loads(model: &Model) -> Vec<BeamLoad> {
         else {
             continue;
         };
+        model.validate_wall_design_self_weight(plate)?;
         let Ok(weight) = model.wall_weight(plate) else {
             continue;
         };
@@ -130,7 +131,7 @@ pub fn attached_wall_beam_loads(model: &Model) -> Vec<BeamLoad> {
             }
         }
     }
-    loads
+    Ok(loads)
 }
 
 /// 床領域の床板合計面積 [mm²]（床板を1枚も持たない、または境界座標が引けない
@@ -161,8 +162,15 @@ fn add_node_weight(node_weight: &mut [f64], node: NodeId, w: f64) {
 
 /// 取り付く壁版のDL支持反力相当量を節点へ集計する。
 /// 地震用階重量はこの反力を使わず、`Model::wall_weight` の水平帯積分で算定する。
-pub fn accumulate_attached_wall_dl_weight(model: &Model, node_weight: &mut [f64]) {
+pub fn accumulate_attached_wall_dl_weight(
+    model: &Model,
+    node_weight: &mut [f64],
+) -> Result<(), String> {
+    for plate in model.wall_plates.iter().filter(|p| p.is_attached()) {
+        model.validate_wall_design_self_weight(plate)?;
+    }
     accumulate_attached_wall_weight_with(model, node_weight, false);
+    Ok(())
 }
 
 /// 物理質量相当重量をDL支持反力と同じ端点比で集計する補助API。
@@ -224,7 +232,10 @@ fn accumulate_attached_wall_weight_with(model: &Model, node_weight: &mut [f64], 
 ///
 /// どの床領域にも載らない部分を持つ自立壁は、解析前チェックがエラーで止める。
 /// ここでは覆われている部分だけを配る。
-pub fn floor_region_wall_extra_intensity(model: &Model) -> HashMap<SlabId, f64> {
+pub fn floor_region_wall_extra_intensity(model: &Model) -> Result<HashMap<SlabId, f64>, String> {
+    for plate in model.wall_plates.iter().filter(|p| p.is_attached()) {
+        model.validate_wall_design_self_weight(plate)?;
+    }
     let mut total_by_region: HashMap<FloorRegionId, f64> = HashMap::new();
     for plate in &model.wall_plates {
         let Some(total) = model.wall_plate_self_weight(plate, model) else {
@@ -241,7 +252,7 @@ pub fn floor_region_wall_extra_intensity(model: &Model) -> HashMap<SlabId, f64> 
         }
     }
     if total_by_region.is_empty() {
-        return HashMap::new();
+        return Ok(HashMap::new());
     }
 
     let mut extra_intensity: HashMap<SlabId, f64> = HashMap::new();
@@ -259,7 +270,7 @@ pub fn floor_region_wall_extra_intensity(model: &Model) -> HashMap<SlabId, f64> 
         }
     }
 
-    extra_intensity
+    Ok(extra_intensity)
 }
 
 #[cfg(test)]
@@ -363,7 +374,7 @@ mod tests {
         m.wall_plates.push(plate.clone());
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
 
-        let loads = attached_wall_beam_loads(&m);
+        let loads = attached_wall_beam_loads(&m).unwrap();
         assert_eq!(loads.len(), 1);
         let bl = &loads[0];
         assert_eq!(
@@ -395,7 +406,7 @@ mod tests {
         m.wall_plates.push(plate.clone());
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
 
-        let loads = attached_wall_beam_loads(&m);
+        let loads = attached_wall_beam_loads(&m).unwrap();
         assert_eq!(loads.len(), 1);
         let bl = &loads[0];
         assert_eq!(
@@ -426,7 +437,7 @@ mod tests {
         m.wall_plates.push(plate.clone());
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
 
-        let loads = attached_wall_beam_loads(&m);
+        let loads = attached_wall_beam_loads(&m).unwrap();
         assert_eq!(loads.len(), 2);
         for bl in &loads {
             let LoadTarget::Node(n) = bl.target else {
@@ -449,7 +460,7 @@ mod tests {
         m.wall_plates.push(plate.clone());
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
 
-        let loads = attached_wall_beam_loads(&m);
+        let loads = attached_wall_beam_loads(&m).unwrap();
         assert_eq!(loads.len(), 2);
         let get = |n: NodeId| -> f64 {
             loads
@@ -482,7 +493,7 @@ mod tests {
             .wall_plate_self_weight(&anchor_plate, &m)
             .expect("自重が求まる");
         m.wall_plates.push(anchor_plate);
-        let anchor_loads = attached_wall_beam_loads(&m);
+        let anchor_loads = attached_wall_beam_loads(&m).unwrap();
         assert_eq!(anchor_loads.len(), 1);
         let LoadShape::Linear { w_i, w_j } = anchor_loads[0].shape else {
             panic!("Linear を期待");
@@ -503,7 +514,7 @@ mod tests {
             .wall_plate_self_weight(&columns_plate, &m)
             .expect("自重が求まる");
         m.wall_plates.push(columns_plate);
-        let columns_loads = attached_wall_beam_loads(&m);
+        let columns_loads = attached_wall_beam_loads(&m).unwrap();
         let get = |n: NodeId| -> f64 {
             columns_loads
                 .iter()
@@ -537,7 +548,7 @@ mod tests {
         let plate = line_attached_plate(span, extent, LoadTransfer::Columns);
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
         m.wall_plates.push(plate);
-        let loads = attached_wall_beam_loads(&m);
+        let loads = attached_wall_beam_loads(&m).unwrap();
         let get = |n: NodeId| -> f64 {
             loads
                 .iter()
@@ -629,7 +640,7 @@ mod tests {
         assert_eq!(weight.totals.matrix_n, 0.0);
         assert!((weight.band(3000.0, 4500.0).unwrap().design_n - 16800.0).abs() < 1e-7);
         assert_eq!(weight.band(4500.0, 6000.0).unwrap().design_n, 0.0);
-        let extra = floor_region_wall_extra_intensity(&m);
+        let extra = floor_region_wall_extra_intensity(&m).unwrap();
         assert!((extra[&SlabId(0)] * 8_000_000.0 - 7200.0).abs() < 1e-7);
         assert!((extra[&SlabId(1)] * 8_000_000.0 - 9600.0).abs() < 1e-7);
     }
@@ -658,7 +669,7 @@ mod tests {
             let w = m.wall_weight(&m.wall_plates[0]).unwrap();
             assert!((w.totals.design_n - 9120.0).abs() < 1e-7);
             assert!((w.band(1500.0, 4500.0).unwrap().design_n - 9120.0).abs() < 1e-7);
-            let extra = floor_region_wall_extra_intensity(&m);
+            let extra = floor_region_wall_extra_intensity(&m).unwrap();
             for (i, expected) in expected.into_iter().enumerate() {
                 assert!((extra[&SlabId(i as u32)] * 8_000_000.0 - expected).abs() < 1e-7);
             }
@@ -674,7 +685,7 @@ mod tests {
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
         m.wall_plates.push(plate);
 
-        let extra = floor_region_wall_extra_intensity(&m);
+        let extra = floor_region_wall_extra_intensity(&m).unwrap();
         let dw = extra.get(&SlabId(0)).copied().expect("床板への追加強度");
         let slab_area = 6000.0 * 4000.0;
         assert!(
@@ -696,7 +707,7 @@ mod tests {
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
         m.wall_plates.push(plate);
 
-        let extra = floor_region_wall_extra_intensity(&m);
+        let extra = floor_region_wall_extra_intensity(&m).unwrap();
         assert_eq!(extra.len(), 2, "両方の床板へ配ること: {extra:?}");
         // 各床板の面積は 3000×4000。強度×面積の和が総重量に一致する。
         let sum: f64 = extra.values().map(|dw| dw * 3000.0 * 4000.0).sum();
@@ -723,7 +734,7 @@ mod tests {
         assert!(total > 0.0, "符号反転でも面積は正: {total}");
         m.wall_plates.push(plate);
 
-        let extra = floor_region_wall_extra_intensity(&m);
+        let extra = floor_region_wall_extra_intensity(&m).unwrap();
         let sum: f64 = extra.values().map(|dw| dw * 3000.0 * 4000.0).sum();
         assert!(
             (sum - total).abs() / total < 1e-9,
@@ -740,7 +751,7 @@ mod tests {
         let plate = self_standing_plate();
         m.wall_plates.push(plate);
 
-        let extra = floor_region_wall_extra_intensity(&m);
+        let extra = floor_region_wall_extra_intensity(&m).unwrap();
         assert!(
             extra.is_empty(),
             "床板が無ければ分配しない（危険側のフォールバックはしない）: {extra:?}"
@@ -757,7 +768,7 @@ mod tests {
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
         m.wall_plates.push(plate);
 
-        let extra = floor_region_wall_extra_intensity(&m);
+        let extra = floor_region_wall_extra_intensity(&m).unwrap();
         let dw = extra.get(&SlabId(0)).copied().expect("追加強度");
         let carried = dw * 3000.0 * 4000.0;
         assert!(
@@ -802,7 +813,7 @@ mod tests {
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
         m.wall_plates.push(plate);
 
-        let extra = floor_region_wall_extra_intensity(&m);
+        let extra = floor_region_wall_extra_intensity(&m).unwrap();
         let dw = extra.get(&SlabId(0)).copied().expect("追加強度");
         let xy_area = 6000.0 * 4000.0;
         assert!(
@@ -820,7 +831,7 @@ mod tests {
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
         m.wall_plates.push(plate);
         let mut nw = vec![0.0; m.nodes.len()];
-        accumulate_attached_wall_dl_weight(&m, &mut nw);
+        accumulate_attached_wall_dl_weight(&m, &mut nw).unwrap();
         assert!((nw[0] - total * 0.75).abs() / total < 1e-9);
         assert!((nw[1] - total * 0.25).abs() / total < 1e-9);
     }
@@ -833,7 +844,7 @@ mod tests {
         m.wall_plates.push(plate);
         let s = (500.0 + 2.0 * 1500.0) / (3.0 * 2000.0);
         let mut nw = vec![0.0; m.nodes.len()];
-        accumulate_attached_wall_dl_weight(&m, &mut nw);
+        accumulate_attached_wall_dl_weight(&m, &mut nw).unwrap();
         assert!((nw[0] - total * (1.0 - s)).abs() / total < 1e-9);
         assert!((nw[1] - total * s).abs() / total < 1e-9);
     }

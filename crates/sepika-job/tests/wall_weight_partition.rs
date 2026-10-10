@@ -599,7 +599,7 @@ fn enclosed_secondary_beam_receives_all_dl_before_reaction_cascade() {
         let ratios =
             sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0]).unwrap();
         assert_eq!(ratios, vec![1.0, 0.0, 0.0, 0.0]);
-        let loads = sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model);
+        let loads = sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model).unwrap();
         let MemberLoadKind::Distributed { a, b, w1, w2 } = &loads.posts[&key].member_loads[0]
         else {
             panic!("小梁区間荷重")
@@ -851,7 +851,7 @@ fn enclosed_partial_beam_spans_and_midspan_posts_support_all_dl_modes() {
         close(w.totals.physical_n, 48000.0);
         close(w.totals.matrix_n, 0.0);
         bands(&model, &[0.0, 28800.0, 19200.0, 0.0]);
-        let dl = sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model);
+        let dl = sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model).unwrap();
         let mut actual = [0.0, 0.0];
         for load in &dl.primary {
             let LoadTarget::Span { t, .. } = load.target else {
@@ -892,7 +892,7 @@ fn enclosed_partial_beam_spans_and_midspan_posts_support_all_dl_modes() {
             sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0]).unwrap(),
             vec![0.0, 0.0, 0.0, 1.0]
         );
-        let dl = sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model);
+        let dl = sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model).unwrap();
         let total: f64 = dl.posts[&SecondaryMemberId(0)]
             .member_loads
             .iter()
@@ -1021,7 +1021,7 @@ fn attached_sign_reversal_openings_use_all_components_and_union() {
             total,
         );
         bands(&model, &[0.0, total, 0.0, 0.0]);
-        let loads = sepika_load::wall_attached::attached_wall_beam_loads(&model);
+        let loads = sepika_load::wall_attached::attached_wall_beam_loads(&model).unwrap();
         close(
             loads
                 .iter()
@@ -1101,7 +1101,7 @@ fn nonrectangular_slits_require_every_specified_role_but_preserve_resolved_beams
     assert!((weight.totals.design_n - 50400.0).abs() < 1e-6);
     bands(&model, &[0.0, 27000.0, 23400.0, 0.0]);
     assert!(compute_gravity_auto_load_cases(&model).is_ok());
-    let loads = sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model);
+    let loads = sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model).unwrap();
     assert!(
         (loads
             .primary
@@ -1229,4 +1229,70 @@ fn wall_generation_outputs_are_excluded_from_input_key_and_tampering_is_refreshe
     let generated = generate_stories_with_opts(&model, &[], true, method).unwrap();
     apply_generated_weights(&mut model, generated, method);
     assert_eq!(model.seismic_weight_generation, record);
+}
+
+#[test]
+fn high_density_steel_wall_rejects_all_design_routes_but_preserves_physical_weight() {
+    for attached in [false, true] {
+        let mut model = fixture(6000.0);
+        model.sections[0].shape = None;
+        model.materials[0].category = MaterialCategory::Steel;
+        model.materials[0].fc = None;
+        model.materials[0].density = 85e-6 / 9806.65;
+        // 支持梁の無重量材料と壁鋼材を共有させない。
+        let mut support_material = model.materials[0].clone();
+        support_material.id = MaterialId(1);
+        support_material.density = 0.0;
+        model.materials.push(support_material);
+        model.sections[1].material = Some(MaterialId(1));
+        if attached {
+            model.wall_plates[0].shape = WallPlateShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(0), NodeId(1)],
+                    span: [0.0, 1.0],
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: Some([3000.0, 3000.0]),
+            };
+            model.wall_plates[0].dl_support = None;
+        }
+        let weight = model.wall_weight(&model.wall_plates[0]).unwrap();
+        close(weight.totals.physical_n, 204000.0);
+        let error = compute_gravity_auto_load_cases(&model)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            error.contains("材料 0") && error.contains("壁版 0") && error.contains("過小評価"),
+            "{error}"
+        );
+        assert!(generate_stories(&model, None)
+            .unwrap_err()
+            .contains("壁版 0"));
+        assert!(
+            sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model)
+                .unwrap_err()
+                .contains("壁版 0")
+        );
+        if attached {
+            assert!(sepika_load::wall_attached::attached_wall_beam_loads(&model)
+                .unwrap_err()
+                .contains("壁版 0"));
+            let mut nodes = vec![0.0; model.nodes.len()];
+            assert!(
+                sepika_load::wall_attached::accumulate_attached_wall_dl_weight(&model, &mut nodes)
+                    .is_err()
+            );
+            sepika_load::wall_attached::accumulate_attached_wall_dl_mass_equiv(&model, &mut nodes);
+            close(nodes.iter().sum(), 204000.0);
+        } else {
+            assert!(
+                sepika_load::wall_plate_load::distribute_enclosed_wall_plates_with_basis(
+                    &model,
+                    sepika_load::cascade::SelfWeightBasis::MassEquiv
+                )
+                .is_ok()
+            );
+        }
+    }
 }

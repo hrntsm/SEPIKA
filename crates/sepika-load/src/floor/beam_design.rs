@@ -577,6 +577,10 @@ pub fn beam_self_weight_udl(
             .map(|c| c.effective_steel_factor())
             .unwrap_or(1.0)
     };
+    mat.validate_design_self_weight(
+        &format!("二次部材 {}", sm.id.0),
+        "二次部材のDL・地震用重量・小梁設計",
+    )?;
     let w = mat.design_unit_weight_n_per_mm3() * sec.resolved_area()? * factor + coating;
     Ok((w > 0.0).then_some(w))
 }

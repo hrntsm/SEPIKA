@@ -478,7 +478,9 @@ pub fn solve_with_basis(
 
     let (distribution, leftover_region_loads) = secondary_beam_distribution_split(model, w_of)?;
     let wall_loads = if include_self_weight {
-        crate::wall_plate_load::distribute_enclosed_wall_plates_with_basis(model, basis).posts
+        crate::wall_plate_load::distribute_enclosed_wall_plates_with_basis(model, basis)
+            .map_err(crate::floor::FloorDistributionError::SelfWeight)?
+            .posts
     } else {
         HashMap::new()
     };

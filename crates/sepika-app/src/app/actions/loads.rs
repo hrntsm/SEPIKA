@@ -51,6 +51,7 @@ impl App {
         {
             Ok(result) => result,
             Err(error) => {
+                sepika_job::prepare::invalidate_design_weights(&mut self.core.model);
                 self.report_error(error.to_string());
                 return;
             }
@@ -189,7 +190,7 @@ impl App {
                 &mut self.core.model,
                 Box::new(sepika_edit::ApplyPreparedModel { prepared }),
             ) {
-                sepika_job::prepare::clear_standard_seismic_auto(&mut self.core.model);
+                sepika_job::prepare::invalidate_design_weights(&mut self.core.model);
                 self.invalidate_missing_tip_seismic(&failed);
                 self.report_error(format!(
                     "準備結果を採用できません: {}",

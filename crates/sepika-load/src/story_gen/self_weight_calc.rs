@@ -376,6 +376,10 @@ pub(crate) fn enumerate_self_weight(
                     let phi = finish_perimeter(sec.width, sec.depth, is_vertical);
                     extras_per_length += wf * phi;
                 }
+                steel_mat.unwrap_or(mat).validate_design_self_weight(
+                    &format!("要素 {}", elem.id.0),
+                    "主架構のDL・地震用重量",
+                )?;
                 let design_per_length = steel_mat.map_or(mat.design_unit_weight_n_per_mm3(), |m| {
                     m.design_unit_weight_n_per_mm3()
                 }) * self_weight_area
@@ -425,6 +429,10 @@ pub(crate) fn enumerate_self_weight(
                 let opening_weight = attr.map(|a| a.opening_weight).unwrap_or(0.0);
                 let net_area = (area - opening_area).max(0.0);
                 let finish = attr.map(|a| a.finish_intensity).unwrap_or(0.0);
+                mat.validate_design_self_weight(
+                    &format!("要素 {}", elem.id.0),
+                    "シェルのDL・地震用重量",
+                )?;
                 let w_load = ((mat.design_unit_weight_n_per_mm3() * t + finish) * net_area
                     + opening_weight)
                     .max(0.0);
