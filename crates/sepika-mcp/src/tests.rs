@@ -1746,6 +1746,25 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
         *extent = [2000.0, -2000.0];
     }
     cases.push((model, "自己交差"));
+    let mut model = base.clone();
+    for i in 0..2 {
+        let mut node = model.nodes[i].clone();
+        node.id = NodeId(i as u32 + 2);
+        model.nodes.push(node);
+    }
+    for slab in &mut model.slabs {
+        if let SlabShape::Attached {
+            anchor: RegionAnchor::Line { nodes, .. },
+            ..
+        } = &mut slab.shape
+        {
+            *nodes = [NodeId(2), NodeId(3)];
+        }
+    }
+    model.nodes[0].coord[2] = 0.0;
+    cases.push((model.clone(), "傾斜梁"));
+    model.elements[0].nodes.reverse();
+    cases.push((model, "傾斜梁"));
     cases
 }
 

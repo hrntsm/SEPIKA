@@ -1546,6 +1546,37 @@ fn beam_contact_direct_support_span_secondary_and_vertical_union() {
 }
 
 #[test]
+fn beam_contact_sloped_beam_contact_is_direction_independent() {
+    for span in [[0.0, 6000.0], [5700.0, 6000.0], [0.0, 3000.0]] {
+        let mut model = contact_model();
+        model.nodes[0].coord[2] = 0.0;
+        contact_slab(&mut model, span, 1.0, 150.0, 3000.0);
+        for _ in 0..2 {
+            let result = try_compute_quantity_takeoff(&model, &QuantityCfg::default());
+            if span[1] == 6000.0 {
+                assert!(result.unwrap_err().contains("傾斜梁"));
+            } else {
+                let q = result.unwrap();
+                // 非接触区間の床は控除せず、既存の梁長sqrt(6000²+3000²)を保持する。
+                assert!((q.items[0].formwork_m2 - 10.062305898749054).abs() <= 1e-9);
+            }
+            model.elements[0].nodes.reverse();
+        }
+    }
+    let mut model = contact_model();
+    model.nodes[0].coord[2] = 0.0;
+    contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3000.0);
+    model.elements[0].rigid_zone.face_i = Some(0.0);
+    model.elements[0].rigid_zone.face_j = Some(3354.1019662496847);
+    for _ in 0..2 {
+        assert!((contact_formwork(&model) - 5.031152949374527).abs() <= 1e-9);
+        model.elements[0].nodes.reverse();
+        let rz = &mut model.elements[0].rigid_zone;
+        std::mem::swap(&mut rz.face_i, &mut rz.face_j);
+    }
+}
+
+#[test]
 fn beam_contact_uses_shared_mm_tolerance_and_ignores_unrelated_slope() {
     for (offset, expected) in [(9.0, 8.1), (11.0, 9.0)] {
         let mut model = contact_model();
