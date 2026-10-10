@@ -371,6 +371,35 @@ impl Model {
         Some(t * mat.design_unit_weight_n_per_mm3())
     }
 
+    /// 床板本体の物理質量相当面荷重 [N/mm²]。仕上げ・積載・先端荷重は含まない。
+    /// 版の断面・材料を解決できない、板厚が非有限・非正、密度が非有限・負ならエラー。
+    pub fn slab_physical_self_weight_intensity(&self, slab: &Slab) -> Result<f64, String> {
+        let thickness_mm = self
+            .slab_plate_thickness(slab)
+            .filter(|t| t.is_finite())
+            .ok_or_else(|| {
+                format!(
+                    "床板 {}: 断面の板厚が未解決、非有限または非正です",
+                    slab.id.0
+                )
+            })?;
+        let material = self
+            .slab_plate_material(slab)
+            .ok_or_else(|| format!("床板 {}: 物理自重の材料を解決できません", slab.id.0))?;
+        let density_t_per_mm3 = material.density;
+        if !density_t_per_mm3.is_finite() || density_t_per_mm3 < 0.0 {
+            return Err(format!(
+                "材料 {}、床板 {}: 物理密度が非有限または負です（入力ρ={} t/mm³）",
+                material.id.0, slab.id.0, density_t_per_mm3
+            ));
+        }
+        let weight_n_per_mm2 = thickness_mm * density_t_per_mm3 * crate::units::GRAVITY_MM_S2;
+        if !weight_n_per_mm2.is_finite() {
+            return Err(format!("床板 {}: 物理自重の面荷重が非有限です", slab.id.0));
+        }
+        Ok(weight_n_per_mm2)
+    }
+
     /// 床板の設計自重の参照と密度を検査し、床板 ID と計算目的付きで拒否する。
     /// 材料は STB 強度情報を優先する既存の床板材料解決に従う。
     pub fn validate_slab_design_self_weight(
