@@ -54,6 +54,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0044](0044-wall-horizontal-ratio-and-component-validation.md) | accepted | 壁横筋比は最小筋比から推定せず出力成分ごとに入力不足を扱う |
 
 | [0045](0045-source-story-and-analysis-membership.md) | accepted | 原階の明示所属は解析用所属から独立して保存する |
+| [0045](0045-wall-committed-response.md) | accepted | 壁単体の確定step応答を線材応答から分離する |
 
 ## 規約
 

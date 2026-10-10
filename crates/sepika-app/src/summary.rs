@@ -404,6 +404,14 @@ pub fn build_report_csv(app: &App) -> String {
             force_kn(po.qu),
             po.hinges.len()
         ));
+        out.push_str("\n[壁単体 確定step応答]\n項目,値または未記録理由\n");
+        for (label, value) in wall_response_rows(po) {
+            out.push_str(&format!(
+                "\"{}\",\"{}\"\n",
+                label.replace('"', "\"\""),
+                value.replace('"', "\"\"")
+            ));
+        }
         let layers = model.layers();
         let n_stories = layers.len();
         let story_name = |i: usize| -> String {
@@ -857,6 +865,123 @@ pub fn has_report_content(results: &Option<ResultsBundle>) -> bool {
         })
         .unwrap_or(false)
 }
+pub(crate) fn wall_response_rows(
+    po: &sepika_solver::nonlinear::pushover::PushoverResult,
+) -> Vec<(String, String)> {
+    use sepika_solver::nonlinear::pushover::wall_response::WallUnavailableReason;
+    let mut rows = Vec::new();
+    let Some(records) = &po.wall_history else {
+        return vec![(
+            "壁応答".into(),
+            WallUnavailableReason::LegacyNotRecorded
+                .description()
+                .into(),
+        )];
+    };
+    if let Some(run) = &po.wall_run {
+        rows.push(("壁解析run".into(), run.run_id.clone()));
+        rows.push((
+            "入力世代".into(),
+            if run.input_generation.is_some() {
+                "記録あり".into()
+            } else {
+                WallUnavailableReason::InputIdentityNotRecorded
+                    .description()
+                    .into()
+            },
+        ));
+    } else {
+        rows.push((
+            "壁解析run・入力世代".into(),
+            WallUnavailableReason::InputIdentityNotRecorded
+                .description()
+                .into(),
+        ));
+    }
+    for record in records {
+        let prefix = format!(
+            "step {} 壁要素 {} 壁版 {} 壁単体",
+            record.step,
+            record.elem.0,
+            record
+                .plate
+                .map(|id| id.0.to_string())
+                .unwrap_or_else(|| "対応未記録".into())
+        );
+        let r = match po.wall_response_at(record.elem, record.step) {
+            Ok(response) => response,
+            Err(reason) => {
+                rows.push((prefix, reason.description().into()));
+                continue;
+            }
+        };
+        rows.push((
+            format!("{prefix} 正規化節点/面内軸/仮想壁柱軸"),
+            format!(
+                "{:?} / {:?} / {:?}",
+                r.nodes, r.inplane_axis, r.virtual_column_axes
+            ),
+        ));
+        for (name, value) in [
+            ("Qw[N]", r.qw_n),
+            ("Qdir[N]", r.qdir_n),
+            ("H[mm]", r.height_mm),
+            ("Δw[mm]", r.delta_wall_mm),
+            ("R_wall[rad]", r.chord_rotation_rad),
+        ] {
+            rows.push((format!("{prefix} {name}"), value.to_string()));
+        }
+        for (name, result) in [
+            ("下辺", &r.bottom),
+            ("上辺", &r.top),
+            ("釣合い残差", &r.equilibrium_residual),
+        ] {
+            rows.push((
+                format!("{prefix} {name} O[mm]/F[N]/M_O[Nmm]"),
+                format!(
+                    "{:?} / {:?} / {:?}",
+                    result.origin_mm, result.force_n, result.moment_nmm
+                ),
+            ));
+        }
+        rows.push((
+            format!("{prefix} γ_wall"),
+            r.material_shear_strain
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| {
+                    r.material_shear_unavailable
+                        .unwrap_or(WallUnavailableReason::MaterialShearNotRecovered)
+                        .description()
+                        .into()
+                }),
+        ));
+        rows.push((
+            format!("{prefix} 線材イベント"),
+            r.line_events_unavailable
+                .unwrap_or(WallUnavailableReason::LineEventsNotApplicable)
+                .description()
+                .into(),
+        ));
+        if let Some(mf) = &r.virtual_column {
+            for (pos, f) in &mf.at {
+                rows.push((
+                    format!("{prefix} 仮想壁柱 位置{pos} N引張正/Qy/Qz/Mx/My/Mz[N・Nmm]"),
+                    format!("{:?}", f),
+                ));
+            }
+        } else {
+            rows.push((
+                format!("{prefix} 仮想壁柱"),
+                r.virtual_column_unavailable
+                    .unwrap_or(WallUnavailableReason::VirtualColumnNotRecorded)
+                    .description()
+                    .into(),
+            ));
+        }
+    }
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

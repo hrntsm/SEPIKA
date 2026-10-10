@@ -485,7 +485,7 @@ fn test_query_model_elements_with_member_detail() {
 }
 
 /// RC 矩形の片持ち柱モデル（終局検定ジョブ用）。長期荷重ケース 1 つ。
-fn rc_column_model() -> Model {
+pub(crate) fn rc_column_model() -> Model {
     use sepika_core::model::{LoadCase, Material, NodalLoad};
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
 
