@@ -1548,6 +1548,7 @@ fn tip_load_sync_merges_into_ex_and_custom_case_without_losing_manual() {
             },
         ],
     });
+    assign_massless_slab_sections(&mut app.core.model);
     app.sync_auto_load_cases_action();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -4237,7 +4238,9 @@ fn ゼロ重量指定追加で重量が同じでも階生成記録を更新す�
 fn test_sync_gravity_load_cases_action_square_slab_triangle_distribution() {
     use sepika_core::model::{LoadCaseKind, MemberLoadKind};
 
-    let model = make_square_slab_test_model();
+    let mut model = make_square_slab_test_model();
+    set_floor_test_self_weight_geometry(&mut model);
+    assign_massless_slab_sections(&mut model);
     model
         .validate()
         .expect("テストモデルは validate を通るはず");
@@ -4323,6 +4326,8 @@ fn test_sync_gravity_load_cases_action_separates_dead_and_live() {
     use sepika_core::model::{LoadCaseKind, MemberLoadKind, SlabUsage};
 
     let mut model = make_square_slab_test_model();
+    set_floor_test_self_weight_geometry(&mut model);
+    assign_massless_slab_sections(&mut model);
     // 事務室用途を設定（骨組用 LL = 1800 N/m² = 1.8e-3 N/mm²）。
     model.slabs[0].plate.usage = Some(SlabUsage::Office);
     model
@@ -4511,6 +4516,36 @@ fn test_floor_design_skips_materialized_beam() {
     );
 }
 
+fn assign_massless_slab_sections(model: &mut sepika_core::model::Model) {
+    use sepika_core::ids::{MaterialId, SectionId};
+    use sepika_core::model::Material;
+    let material = MaterialId(model.materials.len() as u32);
+    model.materials.push(Material {
+        id: material,
+        name: "分配検証用の無質量鋼材".into(),
+        category: sepika_core::model::MaterialCategory::Steel,
+        young: 205000.0,
+        poisson: 0.3,
+        density: 0.0,
+        shear: None,
+        fc: None,
+        fy: Some(235.0),
+        concrete_class: Default::default(),
+        strength_factor: None,
+    });
+    let section = SectionId(model.sections.len() as u32);
+    let mut plate = sepika_core::section_shape::SectionShape::RcSlab { thickness: 100.0 }
+        .to_section(section, "分配検証用の無質量床板".into());
+    plate.material = Some(material);
+    model.sections.push(plate);
+    for slab in &mut model.slabs {
+        let section = slab.plate.section.get_or_insert(section);
+        if model.sections[section.index()].material.is_none() {
+            model.sections[section.index()].material = Some(material);
+        }
+    }
+}
+
 fn set_floor_test_self_weight_geometry(model: &mut sepika_core::model::Model) {
     use sepika_core::ids::{MaterialId, SectionId};
     use sepika_core::model::{FrameSectionUse, Material, MaterialCategory};
@@ -4558,7 +4593,7 @@ fn set_floor_test_self_weight_geometry(model: &mut sepika_core::model::Model) {
 
 /// 二次部材（小梁）1 本が `Slab::beams` なしで床設計の対象になる。
 #[test]
-fn test_floor_design_checks_secondary_member_beam() {
+fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
     use sepika_core::ids::SectionId;
     use sepika_core::model::{SecondaryMember, SecondaryMemberKind, Section, SlabUsage};
 
@@ -4634,7 +4669,7 @@ fn test_floor_design_checks_secondary_member_beam() {
     model.floor_regions[0].slab_ids = vec![first, second];
     set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
-    let app = App {
+    let mut app = App {
         core: AppCore {
             model,
             ..Default::default()
@@ -4657,6 +4692,42 @@ fn test_floor_design_checks_secondary_member_beam() {
         jr.w
     );
     assert!(jr.m_max > 0.0);
+
+    let material = sepika_core::ids::MaterialId(app.core.model.materials.len() as u32);
+    let mut steel = app.core.model.materials.last().unwrap().clone();
+    steel.id = material;
+    steel.density = 7.85e-9;
+    app.core.model.materials.push(steel);
+    let section = SectionId(app.core.model.sections.len() as u32);
+    let mut plate = sepika_core::section_shape::SectionShape::RcSlab { thickness: 100.0 }
+        .to_section(section, "鋼床板".into());
+    plate.material = Some(material);
+    app.core.model.sections.push(plate);
+    for slab in &mut app.core.model.slabs {
+        slab.plate.section = Some(section);
+    }
+    app.core.scoped.results = Some(ResultsBundle::default());
+    app.run_design_check();
+    let bundle = app.core.scoped.results.as_ref().unwrap();
+    assert_eq!(bundle.beam_checks.len(), 1);
+    assert_eq!(bundle.slab_checks.len(), 2);
+    app.core.model.materials[material.index()].density = 85e-6 / 9806.65;
+    app.run_design_check();
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("過小評価"));
+    let bundle = app.core.scoped.results.as_ref().unwrap();
+    assert!(bundle.beam_checks.is_empty());
+    assert!(bundle.slab_checks.is_empty());
+    app.core.model.materials[material.index()].density = 7.85e-9;
+    app.run_design_check();
+    let bundle = app.core.scoped.results.as_ref().unwrap();
+    assert_eq!(bundle.beam_checks.len(), 1);
+    assert_eq!(bundle.slab_checks.len(), 2);
 }
 
 /// 小梁検定は小梁用（`LoadPurpose::Beam`）、床スラブ検定は床用（`LoadPurpose::Floor`）を
@@ -7320,6 +7391,7 @@ fn test_sync_gravity_dl_includes_self_weight_and_slab() {
     }
     // 材料は断面が持つ。
     model.sections[0].material = Some(MaterialId(0));
+    assign_massless_slab_sections(&mut model);
     model
         .validate()
         .expect("テストモデルは validate を通るはず");
@@ -9147,6 +9219,7 @@ fn test_prep_sections_count_slab_reference() {
         method: DistributionMethod::TriTrapezoid,
         one_way: None,
     };
+    assign_massless_slab_sections(&mut model);
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
     let mut app = App {
@@ -12058,6 +12131,7 @@ fn high_density_steel_gui_preparation_sync_rejects_and_undo_recovers() {
     for (model, material) in [
         (high_density_steel_fixture::steel_frame(), 0),
         (steel_slab_density_fixture::one_cubic_metre(true), 1),
+        (steel_slab_density_fixture::one_cubic_metre(false), 1),
     ] {
         let mut app = App::default();
         app.load_model(model);
@@ -12089,6 +12163,21 @@ fn high_density_steel_gui_preparation_sync_rejects_and_undo_recovers() {
                 )
             })
             .collect();
+        let prior_design = if material == 1 {
+            app.core.scoped.results = Some(ResultsBundle::default());
+            app.run_design_check();
+            let bundle = app.core.scoped.results.as_ref().unwrap();
+            assert_eq!(bundle.slab_checks.len(), 1);
+            let expected_moment = if app.core.model.slabs[0].is_attached() {
+                15700.0
+            } else {
+                3925.0
+            };
+            assert!((bundle.slab_checks[0].1.moment - expected_moment).abs() < 1e-8);
+            Some(bundle.clone())
+        } else {
+            None
+        };
         assert!(app.core.scoped.undo.run(
             &mut app.core.model,
             Box::new(sepika_edit::SetMaterialField {
@@ -12126,6 +12215,20 @@ fn high_density_steel_gui_preparation_sync_rejects_and_undo_recovers() {
                 .iter()
                 .all(|l| l.source != sepika_core::model::LoadSource::Auto));
         }
+        if let Some(bundle) = &prior_design {
+            app.core.scoped.results = Some(bundle.clone());
+            app.run_design_check();
+            let error = app.core.scoped.last_error.as_ref().unwrap();
+            for token in ["床板・小梁検定", "材料 1", "床板 0", "過小評価", "78.5"] {
+                assert!(error.contains(token), "{error}");
+            }
+            let bundle = app.core.scoped.results.as_ref().unwrap();
+            assert!(bundle.member_checks.is_empty());
+            assert!(bundle.joint_checks.is_empty());
+            assert!(bundle.wall_checks.is_empty());
+            assert!(bundle.beam_checks.is_empty());
+            assert!(bundle.slab_checks.is_empty());
+        }
         app.core.scoped.undo.undo(&mut app.core.model);
         app.core.scoped.undo.undo(&mut app.core.model);
         assert_eq!(app.core.model.materials[material as usize].density, 7.85e-9);
@@ -12134,6 +12237,14 @@ fn high_density_steel_gui_preparation_sync_rejects_and_undo_recovers() {
             &app.core.model,
             app.core.analysis_cfg.mass_method
         ));
+        if material == 1 {
+            app.core.scoped.results = Some(ResultsBundle::default());
+            app.run_design_check();
+            assert_eq!(
+                app.core.scoped.results.as_ref().unwrap().slab_checks.len(),
+                1
+            );
+        }
         app.core.model.materials[material as usize].density = 85e-6 / 9806.65;
         app.sync_gravity_load_cases_action();
         assert!(app
@@ -12156,5 +12267,15 @@ fn high_density_steel_gui_preparation_sync_rejects_and_undo_recovers() {
                 && c.member
                     .iter()
                     .all(|l| l.source != sepika_core::model::LoadSource::Auto)));
+        if material == 1 {
+            app.core.model.materials[material as usize].density = 7.85e-9;
+            app.run_preparation();
+            app.core.scoped.results = Some(ResultsBundle::default());
+            app.run_design_check();
+            assert_eq!(
+                app.core.scoped.results.as_ref().unwrap().slab_checks.len(),
+                1
+            );
+        }
     }
 }
