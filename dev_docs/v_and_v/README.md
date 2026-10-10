@@ -14,7 +14,7 @@
 |------|------|
 | [**未検証一覧**](未検証一覧.md) | ❌/🔶 の集約チェックリスト（パッと見る用） |
 | [§レポート目録](#レポート目録) | 各 `.md` レポートへの索引 |
-| [§索引（要素→テスト）](#索引要素設計式--テスト) | コード上のテスト対応表（#1–#33） |
+| [§索引（要素→テスト）](#索引要素設計式--テスト) | コード上のテスト対応表（#1–#34） |
 | [原典照合リスト.md](原典照合リスト.md) | 法令・規準の埋め込み値の専門家サインオフ用チェックリスト（実装者は使わない） |
 | [pending_items.md](pending_items.md) | P9 仕様乖離の歴史的記録（訂正履歴含む） |
 
@@ -132,6 +132,7 @@
 | [フレーム外雑壁の壁版への移行_2026-09.md](フレーム外雑壁の壁版への移行_2026-09.md) | `OutOfFrameMiscWall` を廃止し取り付く壁版へ吸収（§5.48）。壁の仕上げ・増打ちの面荷重、立ち上がり高さの未指定（＝階高）、n 倍法の自立壁限定を含む。**旧「柱」伝達が階の地震用重量から壁の重量の 49.9% を落としていたことを実測** | 🔶 |
 | [壁版の取り込み・要素生成・参照張り替え_2026-08.md](壁版の取り込み・要素生成・参照張り替え_2026-08.md) | 壁の解析要素を準備計算からの生成物へ転換（Step 7+8 本体） | ☑ |
 | [剛域算定の壁展開順序不整合_2026-08.md](剛域算定の壁展開順序不整合_2026-08.md) | 壁展開モデルを見ていなかった4箇所（剛域自動算定・耐震壁のせん断断面検定・数量拾い・保有水平耐力の部材ランク自動判定）の是正 | ☑ |
+| [RC鉄筋比契約_Issue435_2026-10.md](RC鉄筋比契約_Issue435_2026-10.md) | RC梁のαy小数/bD、せん断百分率/bd、T形方向別定義と入力不足停止 | 🔶（単位契約のVerification済み、T形解析接続・原著・Validation未完） |
 
 ### フェーズ監査
 
@@ -190,7 +191,8 @@
 | 31 | Fc>60 の NewRC 外挿 | sepika-material / sepika-element | newrc.rs, uniaxial/concrete_cyclic.rs, frame/fiber/mod.rs | Fc≤60 の材料 E 反映を維持し、Fc>60 の NewRC 固有 Ec 外挿、構成則選択・圧縮包絡線・ファイバー生成・3履歴則の応答をコードテストで照合済み。実験・原典適用範囲外の妥当性確認は未実施（詳細は [NewRC高強度コンクリート外挿_2026-09.md](NewRC高強度コンクリート外挿_2026-09.md)） | 横断 | 🔶 |
 | 32 | OVIKA の named MessagePack 永続化 | sepika-io / sepika-app | ovika.rs, tests/full_model.rs | `saved_model_fields_are_named_and_order_independent` / `ovika_roundtrip_preserves_model_and_results` 他。default・破損・復元モデル検証とモデル単体のサイズ・codec 比較は [検証記録](OVIKA_named_MessagePack_2026-10.md) を参照 | 横断 | ✅ |
 | 33 | 単一リップ溝形材の未検定 | sepika-design-jp / sepika-app | steel/lip_channel.rs、tests/lip_channel.rs、viewer/check_ratio.rs | `steel::lip_channel::tests::*` / `lip_channel_*`。詳細は[検証記録](リップ溝形材_未検定_Issue509_2026-10.md) | 横断 | 🔶（未検定契約のみ） |
-| 34 | 耐震壁の未検定状態 | sepika-design-jp / sepika-app / sepika-mcp | wall_check.rs、joint_wiring/tests.rs、tests/wall_check_status.rs、viewer/check_ratio.rs、job/design_check.rs | `wall_status_*` / `wall_tooltip_real_egui_*` / `wall_output_assembly_*`。[Issue495検証](耐震壁_未検定_Issue495_2026-10.md) | 横断 | 🔶（状態契約のみ） |
+| 34 | RC鉄筋比の単位・分母 | sepika-core / sepika-element / sepika-design-jp / sepika-solver | rc_capacity.rs、factory/{springs,input_check}.rs、rc/beam_nonlinear.rs、pushover/shear_yield.rs | [Issue #435の直接回帰表](RC鉄筋比契約_Issue435_2026-10.md#独立fixtureと直接回帰) | 横断 | 🔶（契約Verification、T形解析・原著照合・Validationは残る） |
+| 35 | 耐震壁の未検定状態 | sepika-design-jp / sepika-app / sepika-mcp | wall_check.rs、joint_wiring/tests.rs、tests/wall_check_status.rs、viewer/check_ratio.rs、job/design_check.rs | `wall_status_*` / `wall_tooltip_real_egui_*` / `wall_output_assembly_*`。[Issue495検証](耐震壁_未検定_Issue495_2026-10.md) | 横断 | 🔶（状態契約のみ） |
 
 凡例: ✅ 実装済み・🔶 一部実装（要拡張）・❌ 未実装・対象外（採用しない）。
 壁横筋βs・参考骨格の単体/GUI共通/MCP実ジョブ検証は[Issue503検証](壁横筋入力と終局割線骨格_Issue503_2026-10.md)を参照（Verification ✅、実験Validation 🔶）。
