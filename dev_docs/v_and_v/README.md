@@ -70,6 +70,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [RC梁αyと追加端ばね_Issue523_2026-10.md](RC梁αyと追加端ばね_Issue523_2026-10.md) | 採用分岐、T方向別数値、総角と追加角、明示基準の実factory・GUI・解析入口 | 🔶（Scope内Verification。原典完全照合・実験Validation・T全解析接続は未完） |
 | [壁の確定ステップ応答_Issue443_2026-10.md](壁の確定ステップ応答_Issue443_2026-10.md) | 壁単体Qw/Qdir・基準点付き24成分F/M・実要素N/M・弦変形・確定履歴・GUI/MCP/CSV/保存・設計拒否 | ✅（Scope内Verification。材料γ・壁用イベント・系全体集計・実験Validationは未対応） |
 | [リップ溝形材_未検定_Issue509_2026-10.md](リップ溝形材_未検定_Issue509_2026-10.md) | 単一リップ材の3座屈分類、荷重/補剛状態と理由付き未検定、保存・GUI・CSV | 🔶（未検定契約のVerification。耐力式・実験照合は未対応） |
 | [明示線材とダンパー総重量_Issue422_2026-10.md](明示線材とダンパー総重量_Issue422_2026-10.md) | 線材重量同等性、実M、重量／配置／動的質量の記録集合の完全性と反映値、公開フレーム・質点系InvalidInput、GUI・undo・保存 | ✅（Scope内 Verification。二次部材支持解決はScope外の残課題） |
@@ -242,3 +243,5 @@
 並列計算（ケース並列バッチ・faer 内部並列）の速度比は
 `cargo run -p sepika-solver --example parallel_bench --release` で計測できる
 （ドキュメントサイト 5.10 並列計算に参考値を記載）。
+
+採用RC梁αyと総角・追加角の直接検証は [Issue #523](RC梁αyと追加端ばね_Issue523_2026-10.md) に記録する。
