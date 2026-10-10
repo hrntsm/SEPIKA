@@ -255,20 +255,19 @@ pub(super) fn handle_click(app: &mut App, response: &egui::Response, ctx: ClickC
                                     _ => false,
                                 };
                                 let applied = inside
-                                    && app.core.scoped.undo.run(
-                                        &mut app.core.model,
-                                        Box::new(PlaceSecondaryMember {
-                                            parent,
-                                            kind,
-                                            ends: SecondaryMemberEnds::Supported([first, anchor]),
-                                            section: app.ui.scoped.secondary_draft.section,
-                                            name: app.ui.scoped.secondary_draft.name.clone(),
-                                        }),
-                                    );
+                                    && app.apply_model_edit(Box::new(PlaceSecondaryMember {
+                                        parent,
+                                        kind,
+                                        ends: SecondaryMemberEnds::Supported([first, anchor]),
+                                        section: app.ui.scoped.secondary_draft.section,
+                                        name: app.ui.scoped.secondary_draft.name.clone(),
+                                    }));
                                 if applied {
                                     app.clear_generated_member_selection();
                                     app.core.scoped.staleness.mark_edited();
-                                } else {
+                                } else if app.core.scoped.pending_plate_loss_edit.is_none()
+                                    && app.core.scoped.last_error.is_none()
+                                {
                                     app.core.scoped.last_notice = Some(
                                         "両端が作業範囲の外側をつなぐため配置しませんでした。\
                                          作業範囲（親領域）の内側で支持部材を選んでください。"

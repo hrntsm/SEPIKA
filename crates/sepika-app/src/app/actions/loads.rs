@@ -165,8 +165,10 @@ impl App {
     pub fn sync_auto_load_cases_action(&mut self) {
         #[cfg(feature = "gui")]
         self.clear_generated_member_selection();
-        self.core.model.rebuild_floor_assignment_regions();
-        self.core.model.rebuild_wall_assignment_regions();
+        if let Err(reason) = self.core.model.rebuild_assignment_regions() {
+            self.report_error(reason);
+            return;
+        }
         sepika_core::region_rebuild::rebuild_floor_regions(&mut self.core.model);
         self.rebuild_wall_regions_for_preparation();
         self.apply_rigid_zones_for_analysis();

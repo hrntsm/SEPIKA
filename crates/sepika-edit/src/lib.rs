@@ -33,6 +33,10 @@ pub trait EditCommand: Send {
     fn rejection(&self) -> Option<&str> {
         None
     }
+    /// 支持境界を変更し、旧版除去の事前確認を必要とする編集か。
+    fn changes_assignment_boundaries(&self) -> bool {
+        false
+    }
 }
 
 struct CommandWithIdChanges {
@@ -107,6 +111,28 @@ impl EditCommand for RejectedEdit {
     }
 }
 
+/// 編集を確定せず、失う版 ID・入力荷重を診断する。履歴は変更しない。
+pub fn preview_plate_assignment_loss(
+    model: &Model,
+    command: &dyn EditCommand,
+) -> Result<sepika_core::model::PlateAssignmentLoss, String> {
+    model
+        .validate_assignment_region_identity()
+        .map_err(|reason| format!("モデル・履歴は未更新: {reason}"))?;
+    if !command.changes_assignment_boundaries() {
+        return Ok(Default::default());
+    }
+    let mut candidate = model.clone();
+    let inverse = command.apply(&mut candidate);
+    if let Some(reason) = inverse.rejection() {
+        return Err(reason.to_owned());
+    }
+    candidate
+        .validate_assignment_region_identity()
+        .map_err(|reason| format!("モデル・履歴は未更新: {reason}"))?;
+    Ok(model.assignment_plate_loss(&candidate))
+}
+
 pub struct UndoStack {
     done: Vec<Box<dyn EditCommand>>,
     undone: Vec<Box<dyn EditCommand>>,
@@ -158,6 +184,10 @@ impl UndoStack {
     pub fn run(&mut self, model: &mut Model, cmd: Box<dyn EditCommand>) -> bool {
         self.last_error = None;
         self.id_changes.clear();
+        if let Err(reason) = model.validate_assignment_region_identity() {
+            self.last_error = Some(format!("モデルは未更新: {reason}"));
+            return false;
+        }
         let mut candidate = model.clone();
         if let Err(reason) = candidate.assign_stb_node_ids() {
             self.last_error = Some(reason);
@@ -169,6 +199,10 @@ impl UndoStack {
             return false;
         }
         if inv.is_noop() {
+            return false;
+        }
+        if let Err(reason) = candidate.validate_assignment_region_identity() {
+            self.last_error = Some(format!("モデルは未更新: {reason}"));
             return false;
         }
         if let Err(error) = candidate.validate_attached_slabs() {

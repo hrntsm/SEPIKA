@@ -63,9 +63,12 @@ pub fn prepare_model_for_analysis(
     model
         .validate_attached_slabs()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
-    let _ = model.anchorize_secondary_members();
-    model.rebuild_floor_assignment_regions();
-    model.rebuild_wall_assignment_regions();
+    let mut candidate = model.clone();
+    let _ = candidate.anchorize_secondary_members();
+    candidate
+        .rebuild_assignment_regions()
+        .map_err(JobError::InvalidInput)?;
+    *model = candidate;
     rebuild_floor_regions(model);
     rebuild_wall_regions(model);
     let panels = apply_rigid_zones_and_panels(model);

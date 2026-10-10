@@ -430,6 +430,16 @@ pub fn apply_edit(
 ) -> Result<WriteResult, String> {
     let cmd = parse_edit_command(value)?;
     let label = cmd.label().to_string();
+    let loss = sepika_edit::preview_plate_assignment_loss(&state.model, cmd.as_ref())?;
+    if cmd.changes_assignment_boundaries()
+        && !loss.is_empty()
+        && resolve_edit_payload(value)
+            .get("confirm_plate_loss")
+            .and_then(|v| v.as_bool())
+            != Some(true)
+    {
+        return Err(format!("モデル・履歴は未更新。{}\n旧版を除去し、新領域を未設定にします。1 Undo で全 ID・割当・版・入力荷重を復元できます。確認後 confirm_plate_loss=true を指定してください。", loss.description()));
+    }
     let revision_before = state.undo.revision();
     let applied = state.undo.run(&mut state.model, cmd);
     if let Some(reason) = state.undo.last_error() {
@@ -442,8 +452,13 @@ pub fn apply_edit(
         undoable: applied,
         summary: if applied {
             format!(
-                "{label} を適用しました（revision {revision_before} → {}）",
-                state.undo.revision()
+                "{label} を適用しました（revision {revision_before} → {}）{}",
+                state.undo.revision(),
+                if loss.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n{}\n1 Undo で復元できます。", loss.description())
+                }
             )
         } else {
             format!("{label} は適用されませんでした（参照検証等で Noop）")

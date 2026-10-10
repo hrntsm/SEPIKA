@@ -125,17 +125,19 @@ pub struct WallPlateAssignmentRegions {
     pub regions: Vec<WallPlateAssignmentRegion>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PlateAssignmentRegionRebuildReport {
     pub regions: usize,
     pub preserved: usize,
     pub created_unset: usize,
     pub removed: usize,
     pub unclosed: usize,
+    /// 拒否理由。存在する場合は領域と次 ID を更新していない。
+    pub rejection: Option<String>,
 }
 
 /// [`Model::rebuild_assignment_regions_dropping_orphan_plates`] の件数報告。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlateOrphanRebuildReport {
     pub floor: PlateAssignmentRegionRebuildReport,
     pub wall: PlateAssignmentRegionRebuildReport,
@@ -143,6 +145,76 @@ pub struct PlateOrphanRebuildReport {
     pub removed_slabs: usize,
     /// 参照先を失って取り除いた囲まれた壁版の数。
     pub removed_wall_plates: usize,
+    /// 除去前の版 ID と入力仕様・荷重。Undo で復元する対象。
+    pub loss: PlateAssignmentLoss,
+}
+
+/// 境界変更で行き先を失う版の入力。ID は変更前のもの。
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PlateAssignmentLoss {
+    pub slabs: Vec<super::Slab>,
+    pub wall_plates: Vec<super::WallPlate>,
+}
+
+impl PlateAssignmentLoss {
+    pub fn is_empty(&self) -> bool {
+        self.slabs.is_empty() && self.wall_plates.is_empty()
+    }
+
+    /// 失う版 ID・件数・入力荷重を確認するための表示。
+    pub fn description(&self) -> String {
+        let mut lines = vec![format!(
+            "割当境界変更: 床板 {} 件、壁版 {} 件",
+            self.slabs.len(),
+            self.wall_plates.len()
+        )];
+        for slab in &self.slabs {
+            lines.push(format!(
+                "床板 {:?}: 面荷重 {} 件 {:?}、室用途 {:?}、先端荷重 {} 件 {:?}",
+                slab.id,
+                slab.plate.loads.len(),
+                slab.plate.loads,
+                slab.plate.usage,
+                slab.tip_loads.len(),
+                slab.tip_loads
+            ));
+        }
+        for plate in &self.wall_plates {
+            lines.push(format!(
+                "壁版 {:?}: 面荷重 {} 件 {:?}、開口重量 {} N",
+                plate.id,
+                plate.loads.len(),
+                plate.loads,
+                plate.opening_weight
+            ));
+        }
+        lines.join("\n")
+    }
+}
+
+fn validate_identity<'a, Id: Eq + std::hash::Hash + std::fmt::Debug + 'a>(
+    entries: impl Iterator<Item = (u32, &'a [SupportBoundary], Option<Id>)>,
+) -> Result<(), String> {
+    let mut ids = HashSet::new();
+    let mut keys = HashSet::new();
+    let mut plates = HashSet::new();
+    for (id, boundary, plate) in entries {
+        if !ids.insert(id) {
+            return Err(format!("割当領域 R{id} の ID が重複しています"));
+        }
+        if boundary.len() < 3 || boundary.iter().any(|edge| !valid_span(edge.span)) {
+            return Err(format!("割当領域 R{id} の支持境界が不正です"));
+        }
+        if !keys.insert(boundary_key(boundary)) {
+            return Err(format!("割当領域 R{id} の境界キーが衝突しています"));
+        }
+        if let Some(plate) = plate {
+            if !plates.insert(plate) {
+                return Err("同じ版が複数の割当領域へ重複割当されています".into());
+            }
+        }
+    }
+    Ok(())
 }
 
 impl FloorPlateAssignmentRegions {
@@ -204,6 +276,27 @@ impl FloorPlateAssignmentRegions {
         boundaries: Vec<Vec<SupportBoundary>>,
         unclosed: usize,
     ) -> PlateAssignmentRegionRebuildReport {
+        let rejection = validate_identity(
+            self.regions
+                .iter()
+                .map(|r| (r.id.0, r.boundary.as_slice(), r.assignment.plate())),
+        )
+        .and_then(|()| {
+            validate_identity(
+                boundaries
+                    .iter()
+                    .enumerate()
+                    .map(|(i, b)| (i as u32, b.as_slice(), None::<SlabId>)),
+            )
+        });
+        if let Err(reason) = rejection {
+            return PlateAssignmentRegionRebuildReport {
+                regions: self.regions.len(),
+                unclosed,
+                rejection: Some(format!("割当領域は未更新: {reason}")),
+                ..Default::default()
+            };
+        }
         let old = std::mem::take(&mut self.regions);
         self.next_id = self.next_id.max(
             old.iter()
@@ -219,7 +312,9 @@ impl FloorPlateAssignmentRegions {
                 .find(|(i, region)| !used[*i] && same_boundary(&region.boundary, &boundary))
             {
                 used[index] = true;
-                self.regions.push(region.clone());
+                let mut preserved = region.clone();
+                preserved.boundary = boundary;
+                self.regions.push(preserved);
             } else {
                 let id = FloorPlateAssignmentRegionId(self.next_id);
                 self.next_id += 1;
@@ -237,6 +332,7 @@ impl FloorPlateAssignmentRegions {
             created_unset: self.regions.len() - preserved,
             removed: old.len() - preserved,
             unclosed,
+            rejection: None,
         }
     }
 
@@ -317,6 +413,27 @@ impl WallPlateAssignmentRegions {
         boundaries: Vec<Vec<SupportBoundary>>,
         unclosed: usize,
     ) -> PlateAssignmentRegionRebuildReport {
+        let rejection = validate_identity(
+            self.regions
+                .iter()
+                .map(|r| (r.id.0, r.boundary.as_slice(), r.assignment.plate())),
+        )
+        .and_then(|()| {
+            validate_identity(
+                boundaries
+                    .iter()
+                    .enumerate()
+                    .map(|(i, b)| (i as u32, b.as_slice(), None::<WallPlateId>)),
+            )
+        });
+        if let Err(reason) = rejection {
+            return PlateAssignmentRegionRebuildReport {
+                regions: self.regions.len(),
+                unclosed,
+                rejection: Some(format!("割当領域は未更新: {reason}")),
+                ..Default::default()
+            };
+        }
         let old = std::mem::take(&mut self.regions);
         self.next_id = self.next_id.max(
             old.iter()
@@ -332,7 +449,9 @@ impl WallPlateAssignmentRegions {
                 .find(|(i, region)| !used[*i] && same_boundary(&region.boundary, &boundary))
             {
                 used[index] = true;
-                self.regions.push(region.clone());
+                let mut preserved = region.clone();
+                preserved.boundary = boundary;
+                self.regions.push(preserved);
             } else {
                 let id = WallPlateAssignmentRegionId(self.next_id);
                 self.next_id += 1;
@@ -350,6 +469,7 @@ impl WallPlateAssignmentRegions {
             created_unset: self.regions.len() - preserved,
             removed: old.len() - preserved,
             unclosed,
+            rejection: None,
         }
     }
 
@@ -1033,6 +1153,22 @@ impl Model {
     /// （片持ちの自由端は閉領域の辺にならず、`Detached` は荷重の伝達経路を持たない）。
     /// 同じ位置に主架構と小梁が重なる場合は主架構を支持部材に選ぶ。
     pub fn rebuild_floor_assignment_regions(&mut self) -> PlateAssignmentRegionRebuildReport {
+        let old = self.floor_assignment_regions.clone();
+        let mut report = self.scan_floor_assignment_regions();
+        if report.rejection.is_none() {
+            let loss = self.orphan_plate_loss();
+            if !loss.slabs.is_empty() {
+                report.rejection = Some(format!(
+                    "割当領域は未更新: 孤立版が生じます。{}",
+                    loss.description()
+                ));
+                self.floor_assignment_regions = old;
+            }
+        }
+        report
+    }
+
+    fn scan_floor_assignment_regions(&mut self) -> PlateAssignmentRegionRebuildReport {
         let mut boundaries: Vec<Vec<SupportBoundary>> = Vec::new();
         let mut unclosed = 0usize;
         for level in self.horizontal_beam_levels() {
@@ -1080,6 +1216,22 @@ impl Model {
     /// だけとする（片持ちの自由端は閉領域の辺にならず、`Detached` は荷重の伝達経路を持たない）。
     /// 同じ位置に主架構と間柱が重なる場合は主架構を支持部材に選ぶ。
     pub fn rebuild_wall_assignment_regions(&mut self) -> PlateAssignmentRegionRebuildReport {
+        let old = self.wall_assignment_regions.clone();
+        let mut report = self.scan_wall_assignment_regions();
+        if report.rejection.is_none() {
+            let loss = self.orphan_plate_loss();
+            if !loss.wall_plates.is_empty() {
+                report.rejection = Some(format!(
+                    "割当領域は未更新: 孤立版が生じます。{}",
+                    loss.description()
+                ));
+                self.wall_assignment_regions = old;
+            }
+        }
+        report
+    }
+
+    fn scan_wall_assignment_regions(&mut self) -> PlateAssignmentRegionRebuildReport {
         let mut boundaries: Vec<Vec<SupportBoundary>> = Vec::new();
         let mut unclosed = 0usize;
         for (origin, direction) in crate::region_gen::wall::wall_planes(self) {
@@ -1094,6 +1246,118 @@ impl Model {
             .replace_boundaries(boundaries, unclosed)
     }
 
+    /// 支持境界・領域 ID・版割当の重複を検査する。幾何・親名は同一性判定に使わない。
+    pub fn validate_assignment_region_identity(&self) -> Result<(), String> {
+        validate_identity(
+            self.floor_assignment_regions
+                .regions
+                .iter()
+                .map(|r| (r.id.0, r.boundary.as_slice(), r.assignment.plate())),
+        )?;
+        validate_identity(
+            self.wall_assignment_regions
+                .regions
+                .iter()
+                .map(|r| (r.id.0, r.boundary.as_slice(), r.assignment.plate())),
+        )
+    }
+
+    /// 一般の再構築。衝突または孤立版が生じる場合は床・壁とも未更新にする。
+    pub fn rebuild_assignment_regions(&mut self) -> Result<(), String> {
+        self.validate_assignment_region_identity()
+            .map_err(|reason| format!("割当領域は未更新: {reason}"))?;
+        let floors = self.floor_assignment_regions.clone();
+        let walls = self.wall_assignment_regions.clone();
+        let floor = self.rebuild_floor_assignment_regions();
+        let wall = self.rebuild_wall_assignment_regions();
+        if let Some(reason) = floor.rejection.or(wall.rejection) {
+            self.floor_assignment_regions = floors;
+            self.wall_assignment_regions = walls;
+            return Err(reason);
+        }
+        Ok(())
+    }
+
+    /// 現在の割当から参照先を失った囲まれた版の入力を返す。版を変更しない。
+    pub fn orphan_plate_loss(&self) -> PlateAssignmentLoss {
+        PlateAssignmentLoss {
+            slabs: self
+                .slabs
+                .iter()
+                .filter(|s| {
+                    matches!(s.shape, SlabShape::Enclosed)
+                        && self.slab_assignment_region(s.id).is_none()
+                })
+                .cloned()
+                .collect(),
+            wall_plates: self
+                .wall_plates
+                .iter()
+                .filter(|p| {
+                    matches!(p.shape, WallPlateShape::Enclosed)
+                        && self.wall_plate_assignment_region(p.id).is_none()
+                })
+                .cloned()
+                .collect(),
+        }
+    }
+
+    /// 編集候補で失う版の入力。消える割当領域と、除去する既存孤立版を含む。
+    pub fn assignment_plate_loss(&self, candidate: &Model) -> PlateAssignmentLoss {
+        let mut loss = PlateAssignmentLoss {
+            slabs: self
+                .floor_assignment_regions
+                .regions
+                .iter()
+                .filter(|r| {
+                    candidate
+                        .floor_assignment_regions
+                        .get(r.id)
+                        .and_then(|r| r.assignment.plate())
+                        .is_none()
+                })
+                .filter_map(|r| {
+                    r.assignment
+                        .plate()
+                        .and_then(|id| self.slabs.get(id.index()))
+                })
+                .cloned()
+                .collect(),
+            wall_plates: self
+                .wall_assignment_regions
+                .regions
+                .iter()
+                .filter(|r| {
+                    candidate
+                        .wall_assignment_regions
+                        .get(r.id)
+                        .and_then(|r| r.assignment.plate())
+                        .is_none()
+                })
+                .filter_map(|r| {
+                    r.assignment
+                        .plate()
+                        .and_then(|id| self.wall_plates.get(id.index()))
+                })
+                .cloned()
+                .collect(),
+        };
+        let existing_orphans = self.orphan_plate_loss();
+        loss.slabs.extend(
+            existing_orphans
+                .slabs
+                .into_iter()
+                .filter(|slab| !candidate.slabs.contains(slab)),
+        );
+        loss.wall_plates.extend(
+            existing_orphans
+                .wall_plates
+                .into_iter()
+                .filter(|plate| !candidate.wall_plates.contains(plate)),
+        );
+        loss
+    }
+
     /// 床板・壁版の割当領域を再構築し、境界が変わって参照先を失った囲まれた版を
     /// 取り除く。
     ///
@@ -1105,8 +1369,20 @@ impl Model {
     pub fn rebuild_assignment_regions_dropping_orphan_plates(
         &mut self,
     ) -> PlateOrphanRebuildReport {
-        let floor = self.rebuild_floor_assignment_regions();
-        let wall = self.rebuild_wall_assignment_regions();
+        let floors = self.floor_assignment_regions.clone();
+        let walls = self.wall_assignment_regions.clone();
+        let floor = self.scan_floor_assignment_regions();
+        let wall = self.scan_wall_assignment_regions();
+        if floor.rejection.is_some() || wall.rejection.is_some() {
+            self.floor_assignment_regions = floors;
+            self.wall_assignment_regions = walls;
+            return PlateOrphanRebuildReport {
+                floor,
+                wall,
+                ..Default::default()
+            };
+        }
+        let loss = self.orphan_plate_loss();
 
         let floor_assigned: HashSet<SlabId> = self
             .floor_assignment_regions
@@ -1137,6 +1413,7 @@ impl Model {
             wall,
             removed_slabs,
             removed_wall_plates,
+            loss,
         }
     }
 
@@ -2258,3 +2535,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "assignment_identity_tests.rs"]
+mod identity_tests;

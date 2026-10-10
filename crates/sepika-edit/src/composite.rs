@@ -14,6 +14,11 @@ pub struct CompositeCommand {
 }
 
 impl EditCommand for CompositeCommand {
+    fn changes_assignment_boundaries(&self) -> bool {
+        self.children
+            .iter()
+            .any(|child| child.changes_assignment_boundaries())
+    }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let mut candidate = model.clone();
         let inverse = self.apply_candidate(&mut candidate);
