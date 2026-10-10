@@ -70,6 +70,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [参照骨格の部材角単位_Issue436_2026-10.md](参照骨格の部材角単位_Issue436_2026-10.md) | 正側参考骨格のQ/Ks・明示s/z・不正/未対応拒否・利用側比較 | 🔶（単位契約Verification済み、モデル一般精度・全履歴・実験未） |
 | [リップ溝形材_未検定_Issue509_2026-10.md](リップ溝形材_未検定_Issue509_2026-10.md) | 単一リップ材の3座屈分類、荷重/補剛状態と理由付き未検定、保存・GUI・CSV | 🔶（未検定契約のVerification。耐力式・実験照合は未対応） |
 | [明示線材とダンパー総重量_Issue422_2026-10.md](明示線材とダンパー総重量_Issue422_2026-10.md) | 線材重量同等性、実M、重量／配置／動的質量の記録集合の完全性と反映値、公開フレーム・質点系InvalidInput、GUI・undo・保存 | ✅（Scope内 Verification。二次部材支持解決はScope外の残課題） |
 | [フィレット_角R_断面整合_Issue413_2026-10.md](フィレット_角R_断面整合_Issue413_2026-10.md) | H・角形 CFT の領域性能、公開耐力・実要素、重量質量、項目別算定元、設計ゲートと公開結果。受入 P2 の Truss 質量源の回帰を含む | ✅ |
@@ -178,7 +179,7 @@
 | 18 | 一軸履歴則（Concrete/Bilinear/MP） | sepika-material | uniaxial.rs | `test_concrete_*`/`test_bilinear_*`/`test_menegotto_pinto_*` | P4 | ✅ |
 | 19 | 部材履歴則（武田・原点指向・スリップ） | sepika-material | hysteresis.rs | `tests/hysteresis_snapshots.rs`/`tests/uniaxial_snapshots.rs` | P4 | ✅ |
 | 20 | ファイバ断面（M–φ 積分） | sepika-section / sepika-core / sepika-element | fiber.rs, mn_surface/fibers.rs, section_shape/rounded.rs | `test_section_*`、`rounded_tests`、`rounded_beam_fiber_*`。フィレット・角Rの領域、公開耐力、両質量モードの証拠は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md) | P4 | ✅（指定形状の細分化照合。通常配置の一般精度保証ではない） |
-| 21 | スケルトン自動算定（M–φ→M–θ） | sepika-skeleton | lib.rs | `test_rc_skeleton_*` | P4 | ✅ |
+| 21 | 参考骨格算定（M–φ→M–θ） | sepika-skeleton | tests.rs | `test_rc_skeleton_*`, `shear_*`, `explicit_pullout_*`, `positive_reference_composition_*`, `rc_builder_rejects_*` | P4 / #436 | 🔶（単位・拒否契約検証済み） |
 | 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 🔶 |
 | 23 | ST-Bridge 入出力 | sepika-io | stbridge.rs | `test_roundtrip_*` | P8 | 🔶 |
 | 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*`（MCP `model_edit` は壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |

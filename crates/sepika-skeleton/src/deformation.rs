@@ -44,7 +44,7 @@ pub(crate) fn inflection_length(span_mm: f64, ratio: f64) -> Result<f64, Deforma
     positive(span_mm * ratio, "反曲点距離は有限正の mm が必要")
 }
 
-/// 一定せん断・反曲点モーメント0の区間の部材角 [rad] を返す。
+/// 一定せん断・反曲点モーメント0の区間の部材角 （rad） を返す。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn mphi_to_mtheta(
     curvature_inv_mm: f64,
@@ -74,7 +74,7 @@ pub(crate) fn mphi_to_mtheta(
     Ok((finite(theta, "合成部材角が非有限")?, moment_n_mm))
 }
 
-/// 明示的な寄与なし、または等価せん断剛性 Ks=GAs [N]。
+/// 明示的な寄与なし、または等価せん断剛性 Ks=GAs （N）。
 #[derive(Clone, Copy, Debug)]
 pub enum ShearContribution {
     None,
@@ -85,7 +85,7 @@ impl ShearContribution {
     pub fn none() -> Self {
         Self::None
     }
-    /// 矩形幅・せい [mm] と有限正の材料剛性から算定。不正入力は失敗する。
+    /// 矩形幅・せい （mm） と有限正の材料剛性から算定。不正入力は失敗する。
     pub fn rc_rect(width: f64, depth: f64, concrete: &Concrete) -> Result<Self, DeformationError> {
         positive(width, "矩形幅は有限正が必要")?;
         positive(depth, "矩形せいは有限正が必要")?;
@@ -99,7 +99,7 @@ impl ShearContribution {
         let k_s = positive(g * (5.0 / 6.0 * width * depth), "せん断剛性は有限正が必要")?;
         Ok(Self::Stiffness { k_s })
     }
-    /// M [Nmm]、材端反曲点距離 l [mm] に対する部材角 [rad]。M=Ql が前提。
+    /// M （Nmm）、材端反曲点距離 l （mm） に対する部材角 （rad）。M=Ql が前提。
     pub fn rotation(&self, m: f64, l: f64) -> Result<f64, DeformationError> {
         finite(m, "モーメントは有限値が必要")?;
         positive(l, "反曲点距離は有限正が必要")?;
@@ -113,7 +113,7 @@ impl ShearContribution {
     }
 }
 
-/// 同じ付着モデルの符号付き抜出し s [mm] と正の腕長 z [mm]、その定義。
+/// 同じ付着モデルの符号付き抜出し s （mm） と正の腕長 z （mm）、その定義。
 #[derive(Clone, Debug)]
 pub struct PulloutPoint {
     pub slip_mm: f64,
@@ -123,7 +123,7 @@ pub struct PulloutPoint {
     pub rotation_center: String,
 }
 impl PulloutPoint {
-    /// 抜出し角 s/z [rad]。腕長・出典・回転中心が欠落すれば失敗する。
+    /// 抜出し角 s/z （rad）。腕長・出典・回転中心が欠落すれば失敗する。
     pub fn rotation(&self) -> Result<f64, DeformationError> {
         finite(self.slip_mm, "抜出し量は有限値が必要")?;
         positive(self.lever_arm_mm, "抜出し腕長は有限正が必要")?;
