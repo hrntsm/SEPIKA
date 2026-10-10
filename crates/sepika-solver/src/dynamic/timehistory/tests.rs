@@ -2117,3 +2117,89 @@ fn test_nonlinear_time_history_tangent_damping_deterministic_guard() {
         "nonlinear time history (tangent damping) should be bit-identical across repeated runs"
     );
 }
+
+#[test]
+fn rc_reference_actual_entries_use_material_strength_for_pushover_and_nominal_for_th() {
+    use sepika_core::model::{HysteresisModel, RcBeamReference};
+    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
+    let mut model = sdof_model();
+    model.nodes[1].coord = [6000.0, 0.0, 0.0];
+    let mut section = SectionShape::RcBeamRect {
+        b: 300.0,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: 25.0,
+            top: vec![3],
+            bottom: vec![3],
+            cover: 50.0,
+            stirrup: BeamStirrup {
+                dia: 10.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    }
+    .to_section(SectionId(0), "RC基準".into());
+    section.material = Some(MaterialId(0));
+    section.rebar_material = Some(MaterialId(1));
+    section.shear_rebar_material = Some(MaterialId(1));
+    model.sections[0] = section;
+    model.materials[0].category = MaterialCategory::Concrete;
+    model.materials[0].young = 20000.0;
+    model.materials[0].fc = Some(24.0);
+    model.materials[0].fy = None;
+    model.materials[0].density = 2.4e-9;
+    let mut rebar = model.materials[0].clone();
+    rebar.id = MaterialId(1);
+    rebar.name = "SD345".into();
+    rebar.category = MaterialCategory::Rebar;
+    rebar.young = 200000.0;
+    rebar.fc = None;
+    rebar.fy = Some(345.0);
+    model.materials.push(rebar);
+    model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+    model.set_member_hysteresis(ElemId(1), HysteresisModel::Takeda);
+    model.set_member_rc_beam_reference(ElemId(1), Some(RcBeamReference::AntisymmetricHalfMember));
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    for factor in [0.1, 0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        model.materials[1].strength_factor = Some(factor);
+        let reason = crate::nonlinear::pushover::pushover_analysis(
+            &model,
+            &dofmap,
+            &reducer,
+            crate::statics::analysis::SeismicDir::X,
+            2,
+            0.0,
+            false,
+            false,
+            0.0,
+        )
+        .unwrap_err();
+        assert!(reason.contains("My"), "{reason}");
+        let dt = 0.01;
+        let response = nonlinear_time_history_analysis(
+            &model,
+            &dofmap,
+            &reducer,
+            &zero_wave(dt, 3),
+            &NewmarkCfg {
+                beta: 0.25,
+                gamma: 0.5,
+                dt,
+            },
+            &Damping::StiffnessProportional {
+                h: 0.0,
+                omega: 1.0,
+                basis: StiffnessKind::Initial,
+            },
+            DampingAccumulation::NonCumulative,
+            &[0.0],
+            &[0.0],
+            NonlinearThCfg::new(20, 1e-6),
+        )
+        .unwrap();
+        assert!(!response.time.is_empty());
+        assert_eq!(response.non_converged_steps, 0);
+    }
+}

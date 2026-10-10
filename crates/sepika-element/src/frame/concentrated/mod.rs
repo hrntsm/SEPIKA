@@ -44,6 +44,7 @@ pub struct ConcentratedSpringBeam {
     initial_spring_stiffness_i: f64,
     initial_spring_stiffness_j: f64,
     pub model: SpringModel,
+    total_rotation_reference: Option<f64>,
     /// N-M 相関。
     pub mn: Option<MnInteraction>,
     /// ばね変形の確定値。
@@ -75,6 +76,7 @@ impl ConcentratedSpringBeam {
             spring_i,
             spring_j,
             model,
+            total_rotation_reference: None,
             mn: None,
             rot_i: 0.0,
             rot_j: 0.0,
@@ -94,6 +96,33 @@ impl ConcentratedSpringBeam {
         spring_j: Box<dyn UniaxialMaterial>,
     ) -> Self {
         Self::new(elastic, spring_i, spring_j, SpringModel::OneComponent)
+    }
+
+    /// 総角材料からM/Sを控除して接続する。初期剛性S[N·mm/rad]を持つ同一逆対称基準に限定する。
+    pub fn with_total_rotation_reference(mut self, s_nmm: f64) -> Self {
+        assert!(s_nmm.is_finite() && s_nmm > 0.0);
+        self.total_rotation_reference = Some(s_nmm);
+        self.flex_stiffness_cache = std::sync::OnceLock::new();
+        self.initial_spring_stiffness_i = s_nmm;
+        self.initial_spring_stiffness_j = s_nmm;
+        self
+    }
+
+    fn total_material_probe(&self, end: usize, theta: f64) -> (f64, f64) {
+        let material = if end == 0 {
+            &self.spring_i
+        } else {
+            &self.spring_j
+        };
+        let (m, kt) = material.probe(theta);
+        if theta == 0.0 && kt == 0.0 {
+            (
+                m,
+                self.total_rotation_reference.expect("総角基準が必要です"),
+            )
+        } else {
+            (m, kt)
+        }
     }
 
     pub fn with_mn_interaction(mut self, my0: f64, n_allow: f64) -> Self {
@@ -122,8 +151,13 @@ impl ConcentratedSpringBeam {
     }
 
     fn k_flex(&self) -> &LocalMat {
-        self.flex_stiffness_cache
-            .get_or_init(|| self.elastic.local_stiffness_flex())
+        self.flex_stiffness_cache.get_or_init(|| {
+            if self.total_rotation_reference.is_some() {
+                self.elastic.local_stiffness_flex_rc_reference()
+            } else {
+                self.elastic.local_stiffness_flex()
+            }
+        })
     }
 
     fn u_flex_local(&self) -> [f64; 12] {
@@ -133,6 +167,10 @@ impl ConcentratedSpringBeam {
     }
 
     fn solve_internal_equilibrium(&mut self) {
+        if let Some(s) = self.total_rotation_reference {
+            self.solve_total_rotation_equilibrium(s);
+            return;
+        }
         let k_flex = self.k_flex();
         let u_flex = self.u_flex_local();
         let er = SPRING_ROT_DOFS;
@@ -183,6 +221,58 @@ impl ConcentratedSpringBeam {
         self.spring_i.trial(self.trial_rot_i);
         self.spring_j.trial(self.trial_rot_j);
     }
+    fn solve_total_rotation_equilibrium(&mut self, s: f64) {
+        let k = self.k_flex();
+        let u = self.u_flex_local();
+        let er = SPRING_ROT_DOFS;
+        let mut thb = [self.trial_thb_i, self.trial_thb_j];
+        for _ in 0..50 {
+            let mut ub = u;
+            ub[er[0]] = thb[0];
+            ub[er[1]] = thb[1];
+            let mb: [f64; 2] =
+                std::array::from_fn(|end| (0..12).map(|j| k.get(er[end], j) * ub[j]).sum());
+            let total: [f64; 2] = std::array::from_fn(|end| u[er[end]] - thb[end] + mb[end] / s);
+            let probes = [
+                self.total_material_probe(0, total[0]),
+                self.total_material_probe(1, total[1]),
+            ];
+            let r = [mb[0] - probes[0].0, mb[1] - probes[1].0];
+            let scale = mb[0]
+                .abs()
+                .max(mb[1].abs())
+                .max(probes[0].0.abs())
+                .max(probes[1].0.abs())
+                .max(1.0);
+            if r[0].abs().max(r[1].abs()) < 1e-9 * scale {
+                break;
+            }
+            let j: [[f64; 2]; 2] = std::array::from_fn(|i| {
+                std::array::from_fn(|j| {
+                    (1.0 - probes[i].1 / s) * k.get(er[i], er[j])
+                        + if i == j { probes[i].1 } else { 0.0 }
+                })
+            });
+            let det = j[0][0] * j[1][1] - j[0][1] * j[1][0];
+            assert!(
+                det.is_finite() && det != 0.0,
+                "RC総角基準の局所釣合が特異です"
+            );
+            thb[0] -= (j[1][1] * r[0] - j[0][1] * r[1]) / det;
+            thb[1] -= (-j[1][0] * r[0] + j[0][0] * r[1]) / det;
+        }
+        let mut ub = u;
+        ub[er[0]] = thb[0];
+        ub[er[1]] = thb[1];
+        let mb: [f64; 2] =
+            std::array::from_fn(|end| (0..12).map(|j| k.get(er[end], j) * ub[j]).sum());
+        self.trial_thb_i = thb[0];
+        self.trial_thb_j = thb[1];
+        self.trial_rot_i = u[er[0]] - thb[0] + mb[0] / s;
+        self.trial_rot_j = u[er[1]] - thb[1] + mb[1] / s;
+        self.spring_i.trial(self.trial_rot_i);
+        self.spring_j.trial(self.trial_rot_j);
+    }
 }
 
 /// 材端曲げばねが作用する局所回転自由度（局所 DOF 5・11）。
@@ -200,6 +290,32 @@ fn condense_springs(k_elem: &LocalMat, k_i: f64, k_j: f64) -> LocalMat {
         }
         kaa
     })
+}
+
+fn condense_total_rotation(k: &LocalMat, kt: [f64; 2], s: f64) -> LocalMat {
+    let er = SPRING_ROT_DOFS;
+    let b = [1.0 - kt[0] / s, 1.0 - kt[1] / s];
+    let a00 = kt[0] + b[0] * k.get(er[0], er[0]);
+    let a01 = b[0] * k.get(er[0], er[1]);
+    let a10 = b[1] * k.get(er[1], er[0]);
+    let a11 = kt[1] + b[1] * k.get(er[1], er[1]);
+    let det = a00 * a11 - a01 * a10;
+    assert!(det.is_finite() && det != 0.0, "RC追加柔性の縮約が特異です");
+    let mut result = k.clone();
+    for col in 0..k.n {
+        let v0 = b[0] * k.get(er[0], col);
+        let v1 = b[1] * k.get(er[1], col);
+        let d0 = (a11 * v0 - a01 * v1) / det;
+        let d1 = (-a10 * v0 + a00 * v1) / det;
+        for row in 0..k.n {
+            result.set(
+                row,
+                col,
+                k.get(row, col) - k.get(row, er[0]) * d0 - k.get(row, er[1]) * d1,
+            );
+        }
+    }
+    result
 }
 
 fn compute_kstar(
@@ -223,6 +339,18 @@ impl ElementBehavior for ConcentratedSpringBeam {
     }
 
     fn tangent_stiffness(&self, _ctx: &Ctx) -> LocalMat {
+        if let Some(s) = self.total_rotation_reference {
+            let kt = [
+                self.total_material_probe(0, self.trial_rot_i).1,
+                self.total_material_probe(1, self.trial_rot_j).1,
+            ];
+            let local = condense_total_rotation(self.k_flex(), kt, s);
+            let (li, lj) = self.elastic.rigid_lengths();
+            return self
+                .elastic
+                .axis
+                .to_global(&self.elastic.apply_rigid_zone_transform(&local, li, lj));
+        }
         let kti = self.spring_i.probe(self.trial_rot_i).1;
         let ktj = self.spring_j.probe(self.trial_rot_j).1;
 
@@ -276,6 +404,12 @@ impl ElementBehavior for ConcentratedSpringBeam {
     }
 
     fn end_spring_rotations(&self) -> Option<[f64; 2]> {
+        if let Some(s) = self.total_rotation_reference {
+            return Some([
+                self.rot_i - self.spring_i.probe(self.rot_i).0 / s,
+                self.rot_j - self.spring_j.probe(self.rot_j).0 / s,
+            ]);
+        }
         Some([self.rot_i, self.rot_j])
     }
 
@@ -315,7 +449,10 @@ impl ElementBehavior for ConcentratedSpringBeam {
                 } else {
                     0.0
                 };
-                let phi_z = if flex_length > 0.0 && self.elastic.g > 0.0 && self.elastic.as_y > 0.0
+                let phi_z = if self.total_rotation_reference.is_none()
+                    && flex_length > 0.0
+                    && self.elastic.g > 0.0
+                    && self.elastic.as_y > 0.0
                 {
                     12.0 * self.elastic.e * self.elastic.iz
                         / (self.elastic.g * self.elastic.as_y * flex_length.powi(2))
@@ -328,6 +465,15 @@ impl ElementBehavior for ConcentratedSpringBeam {
                     phi_z,
                     phi_y,
                 );
+                if self.total_rotation_reference.is_some() {
+                    let mass = crate::frame::prismatic::mass_without_end_releases(
+                        &flex,
+                        mass_properties,
+                        li,
+                        lj,
+                    );
+                    return self.elastic.axis.to_global(&mass);
+                }
                 let releases = [
                     (SPRING_ROT_DOFS[0], self.initial_spring_stiffness_i),
                     (SPRING_ROT_DOFS[1], self.initial_spring_stiffness_j),

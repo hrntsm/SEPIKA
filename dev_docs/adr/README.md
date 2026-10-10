@@ -57,6 +57,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0046](0046-polygon-floor-finite-segment-integration.md) | accepted | 全周支持の凹形床を有限線分最近接と境界実面積で分配し、モデル差と格子誤差を区別する |
 | [0047](0047-source-story-and-analysis-membership.md) | accepted | 原階の明示所属は解析用所属から独立して保存する |
+| [0048](0048-rc-beam-reference-total-rotation.md) | accepted | RC梁の明示基準総角と追加端回転を分離する |
 
 ## 規約
 
