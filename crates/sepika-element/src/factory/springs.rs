@@ -216,6 +216,16 @@ pub(super) fn flexural_alpha_y(data: &ElementData, model: &Model) -> f64 {
         SectionShape::RcBeamRect { b, d, rebar } => {
             let bottom = rebar.bending_steel(*d, false).tension;
             let top = rebar.bending_steel(*d, true).tension;
+            for steel in [bottom, top] {
+                sepika_core::rc_capacity::rc_rebar_ratios(
+                    *b,
+                    *d,
+                    steel.effective_depth_mm,
+                    steel.area_mm2,
+                    sepika_core::rc_capacity::RcAlphaSection::Rectangular,
+                )
+                .expect("RC梁の正負引張側の入力診断が必要です");
+            }
             let steel = if bottom.area_mm2 <= top.area_mm2 {
                 bottom
             } else {
@@ -228,15 +238,27 @@ pub(super) fn flexural_alpha_y(data: &ElementData, model: &Model) -> f64 {
     if b <= 0.0 || d <= 0.0 {
         return DEFAULT_ALPHA_Y;
     }
-    let pt = at / (b * d);
+    let pt_alpha_ratio = sepika_core::rc_capacity::rc_rebar_ratios(
+        b,
+        d,
+        d_eff,
+        at,
+        sepika_core::rc_capacity::RcAlphaSection::Rectangular,
+    )
+    .expect("RC梁の鉄筋比入力診断が必要です")
+    .pt_alpha_ratio;
     let ec = model.element_material(data).map(|m| m.young).unwrap_or(0.0);
     let n = if ec > 0.0 {
-        sepika_core::section_shape::E_STEEL / ec
+        model
+            .element_rebar_material(data)
+            .map(|m| m.young)
+            .unwrap_or(sepika_core::section_shape::E_STEEL)
+            / ec
     } else {
         15.0
     };
     let a = flexible_length(data, model) / 2.0;
-    let ay = sepika_core::rc_capacity::rc_alpha_y_sugano(pt, a / d, d_eff / d, n);
+    let ay = sepika_core::rc_capacity::rc_alpha_y_sugano(pt_alpha_ratio, a / d, d_eff / d, n);
     if ay.is_finite() && ay > 1e-6 {
         ay.min(1.0)
     } else {
