@@ -2648,3 +2648,90 @@ async fn beam_contact_quantity_mcp_tool_returns_verified_rows_and_unavailable_re
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
+
+#[test]
+fn stb_strength_s_main_assignment_changes_steel_without_concrete_attribute() {
+    use sepika_edit::{SectionMaterialRole, SetSectionMaterial};
+    let mut model = sepika_io::stbridge::import_stbridge(include_str!(
+        "../../sepika-io/tests/fixtures/public_strength_bars.stb"
+    ))
+    .unwrap();
+    let section = model.elements[1].section.unwrap();
+    let original = model.section(section).unwrap().material.unwrap();
+    let mut material = model.materials[original.index()].clone();
+    let id = MaterialId(model.materials.len() as u32);
+    material.id = id;
+    material.name = "SN490B".into();
+    material.fy = Some(325.);
+    model.materials.push(material);
+    let before = model.clone();
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetSectionMaterial {
+            section,
+            role: SectionMaterialRole::Main,
+            material: Some(id),
+        })
+    ));
+    for edited in [true, false, true] {
+        let input = model
+            .stb_strengths
+            .sections
+            .iter()
+            .find(|s| s.section == section)
+            .unwrap();
+        assert!(input.concrete.is_none());
+        let result = model.resolve_stb_steel(&input.steel[0]).unwrap();
+        assert_eq!(result.grade, if edited { "SN490B" } else { "SN400B" });
+        assert_eq!(result.value, if edited { 325. } else { 235. });
+        assert_eq!(
+            model.element_material(&model.elements[1]).unwrap().fy,
+            Some(result.value)
+        );
+        let output = sepika_io::stbridge::export_stbridge(&model).unwrap();
+        assert!(!output.contains("strength_concrete=\"SN"));
+        let again = sepika_io::stbridge::import_stbridge(&output).unwrap();
+        assert_eq!(
+            again.element_material(&again.elements[1]).unwrap().fy,
+            Some(result.value)
+        );
+        if edited {
+            let path =
+                std::env::temp_dir().join(format!("sepika-s-main-{}.ovika", std::process::id()));
+            sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+            let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
+            std::fs::remove_file(path).unwrap();
+            assert_eq!(restored.stb_strengths, model.stb_strengths);
+            undo.undo(&mut model);
+        } else {
+            assert!(model.eq_ignoring_dofmap(&before));
+            undo.redo(&mut model);
+        }
+    }
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetSectionMaterial {
+            section,
+            role: SectionMaterialRole::Main,
+            material: None,
+        })
+    ));
+    assert!(model.element_material(&model.elements[1]).is_none());
+    let input = model
+        .stb_strengths
+        .sections
+        .iter()
+        .find(|s| s.section == section)
+        .unwrap();
+    assert!(input.concrete.is_none());
+    assert!(model.resolve_stb_steel(&input.steel[0]).is_err());
+    assert!(matches!(
+        sepika_io::stbridge::export_stbridge(&model),
+        Err(sepika_io::stbridge::StbError::Unmappable(_))
+    ));
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&before));
+    undo.redo(&mut model);
+    assert!(model.element_material(&model.elements[1]).is_none());
+}

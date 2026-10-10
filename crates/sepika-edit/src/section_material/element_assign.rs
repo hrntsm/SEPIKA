@@ -81,13 +81,18 @@ impl EditCommand for SetSectionMaterial {
         if !crate::refs::material_ref_ok(model, self.material) {
             return Box::new(Noop);
         }
+        let main_steel = self.role == SectionMaterialRole::Main
+            && model.sections[idx]
+                .shape
+                .as_ref()
+                .is_some_and(|shape| !shape.is_concrete_like());
         let source_snapshot = model.stb_strengths.clone();
         let source_stories = model.source_stories.clone();
         let grade = self
             .material
             .and_then(|id| model.materials.get(id.index()))
             .map(|m| {
-                if self.role == SectionMaterialRole::Main {
+                if self.role == SectionMaterialRole::Main && !main_steel {
                     m.fc.map(|v| format!("Fc{v}"))
                         .unwrap_or_else(|| m.name.clone())
                 } else {
@@ -107,6 +112,12 @@ impl EditCommand for SetSectionMaterial {
             .find(|s| s.section == self.section)
         {
             match self.role {
+                SectionMaterialRole::Main if main_steel => {
+                    for steel in &mut input.steel {
+                        steel.strength = grade.clone().unwrap_or_default();
+                        steel.native_material = self.material;
+                    }
+                }
                 SectionMaterialRole::Main => {
                     input.concrete = grade;
                     input.native_material = self.material;

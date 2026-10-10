@@ -357,9 +357,21 @@ fn split_slab_keeps_original_first_node_supply_and_refuses_unrepresentable_expor
     {
         assert_eq!(model.resolve_stb_concrete(input).unwrap().value, 36.);
     }
-    assert!(
-        !matches!(export_stbridge(&model), Err(StbError::Unmappable(reason)) if reason.contains("元第1節点"))
-    );
+    let output = export_stbridge(&model).unwrap();
+    let again = import_stbridge(&output).unwrap();
+    let slabs: Vec<_> = again
+        .stb_strengths
+        .members
+        .iter()
+        .filter(|input| matches!(input.target, StrengthTarget::Slab(_)))
+        .collect();
+    assert_eq!(slabs.len(), 2);
+    for input in slabs {
+        assert_eq!(input.concrete.as_deref(), Some("Fc36"));
+        let resolved = again.resolve_stb_concrete(input).unwrap();
+        assert_eq!(resolved.value, 36.);
+        assert_eq!(resolved.source, StrengthSource::Member);
+    }
     let conflict=xml.replace("</StbMembers>",r#"<StbSlab id="1" name="S2" id_section="8" kind_structure="RC" strength_concrete="Fc36"><StbNodeIdOrder>1 2 3 4</StbNodeIdOrder></StbSlab></StbMembers>"#);
     assert!(matches!(
         import_stbridge(&conflict),
