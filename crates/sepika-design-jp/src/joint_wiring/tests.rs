@@ -1983,3 +1983,90 @@ fn wall_status_missing_invalid_fc_src_and_shape_applicability_are_distinct() {
         .filter(|w| w.elem == Some(rc))
         .all(|w| w.skip_kind == Some(WallSkipKind::NotImplemented)));
 }
+
+#[test]
+fn panel_504_check_uses_shape_depth_and_reports_unsupported_beams() {
+    let h = |height, width, web_thick, flange_thick| SectionShape::SteelH {
+        height,
+        width,
+        web_thick,
+        flange_thick,
+        root_r: Some(0.0),
+    };
+    let mut model = cross_joint_model(h(400.0, 400.0, 13.0, 21.0), h(600.0, 200.0, 11.0, 20.0));
+    model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    model.sections[1].depth = 650.0;
+    for section in &mut model.sections {
+        section.material = Some(MaterialId(2));
+    }
+    let zero = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+    let forces = vec![
+        (ElemId(0), zero.as_slice()),
+        (ElemId(1), zero.as_slice()),
+        (ElemId(2), zero.as_slice()),
+        (ElemId(3), zero.as_slice()),
+    ];
+    let checks = collect_joint_checks_with_long(
+        &model,
+        &forces,
+        None,
+        &[(NodeId(0), [100_000_000.0, 0.0])],
+        LoadTerm::Short,
+    );
+    assert!(checks
+        .iter()
+        .any(|(node, label, outcome)| *node == NodeId(0)
+            && label == "パネルゾーン(S)"
+            && matches!(outcome, CheckOutcome::Checked(_))));
+    let result = checks
+        .iter()
+        .find(|(node, label, _)| *node == NodeId(0) && label == "パネルゾーン(S)")
+        .unwrap()
+        .2
+        .clone()
+        .unwrap_checked();
+    assert!((result.components[0].ratio - 0.26940244887479575).abs() < 1e-12);
+    assert!(result.components[0].detail.contains("Ve=2857660.0 mm3"));
+    model.sections[1].shape = Some(SectionShape::SteelBuiltH {
+        height: 600.0,
+        upper_width: 200.0,
+        upper_thick: 20.0,
+        lower_width: 250.0,
+        lower_thick: 30.0,
+        web_thick: 12.0,
+    });
+    let built_checks = collect_joint_checks_with_long(
+        &model,
+        &forces,
+        None,
+        &[(NodeId(0), [100_000_000.0, 0.0])],
+        LoadTerm::Short,
+    );
+    let built = built_checks
+        .iter()
+        .find(|(node, label, _)| *node == NodeId(0) && label == "パネルゾーン(S)")
+        .unwrap()
+        .2
+        .clone()
+        .unwrap_checked();
+    assert!((built.components[0].ratio - 0.2717450788650114).abs() < 1e-12);
+    assert!(built.components[0].detail.contains("Ve=2833025.0 mm3"));
+    model.sections[1].shape = Some(SectionShape::SteelPipe {
+        outer_dia: 600.0,
+        thick: 20.0,
+    });
+    let expected = sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
+        .unwrap_err();
+    let checks = collect_joint_checks_with_long(
+        &model,
+        &forces,
+        None,
+        &[(NodeId(0), [100_000_000.0, 0.0])],
+        LoadTerm::Short,
+    );
+    assert!(checks
+        .iter()
+        .any(|(node, label, outcome)| *node == NodeId(0)
+            && label == "パネルゾーン(S)"
+            && matches!(outcome,CheckOutcome::Skipped { reason } if *reason == expected)));
+}

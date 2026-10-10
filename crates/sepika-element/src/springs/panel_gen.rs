@@ -104,7 +104,7 @@ fn panel_at(
     adjacency: &NodeAdjacency,
     node: NodeId,
 ) -> Option<(GeneratedPanel, Vec<NodeId>)> {
-    let joint = resolve_panel_joint(model, node, adjacency.elements_at(model, node))?;
+    let joint = resolve_panel_joint(model, node, adjacency.elements_at(model, node)).ok()??;
     if joint.has_filled_column {
         return None;
     }
@@ -764,5 +764,48 @@ mod tests {
         model.elements[0].id = ElemId(0);
         let panels = apply_auto_panel_zones(&mut model);
         assert!(panels.is_empty());
+    }
+    #[test]
+    fn panel_504_shape_depth_and_manual_reason_survive_generation() {
+        let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
+        model.sections[0].depth = 650.0;
+        model.sections[0].shape = Some(h_shape(600.0, 200.0, 11.0, 20.0));
+        let panels = apply_auto_panel_zones(&mut model);
+        assert_eq!(panels[0].db, 580.0);
+        assert_eq!(panels[0].ve, 2_857_660.0);
+        let data = model.elements.last().unwrap().clone();
+        let manual = crate::springs::panel::PanelZone::new(&data, &model);
+        assert_eq!(manual.db, 580.0);
+        assert_eq!(manual.ve, 2_857_660.0);
+        assert!((manual.k_panel - 225_315_500_000.0).abs() < 1.0);
+        model.sections[0].shape = Some(SectionShape::SteelPipe {
+            outer_dia: 600.0,
+            thick: 20.0,
+        });
+        let reason = resolve_panel_joint(&model, NodeId(0), &model.elements).unwrap_err();
+        let manual = crate::springs::panel::PanelZone::new(&data, &model);
+        assert_eq!(manual.resolution_error, Some(reason.clone()));
+        assert!(model.validate().unwrap_err().to_string().contains(&reason));
+        assert!(apply_auto_panel_zones(&mut model).is_empty());
+    }
+    #[test]
+    fn panel_504_built_h_beam_generates_575_mm_depth() {
+        let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
+        model.sections[0].depth = 650.0;
+        model.sections[0].shape = Some(SectionShape::SteelBuiltH {
+            height: 600.0,
+            upper_width: 200.0,
+            upper_thick: 20.0,
+            lower_width: 250.0,
+            lower_thick: 30.0,
+            web_thick: 12.0,
+        });
+        let panels = apply_auto_panel_zones(&mut model);
+        assert_eq!(panels[0].db, 575.0);
+        assert_eq!(panels[0].ve, 2_833_025.0);
+        let manual = crate::springs::panel::PanelZone::new(model.elements.last().unwrap(), &model);
+        assert_eq!(manual.db, 575.0);
+        assert_eq!(manual.ve, 2_833_025.0);
+        assert!((manual.k_panel - 223_373_125_000.0).abs() < 1.0);
     }
 }

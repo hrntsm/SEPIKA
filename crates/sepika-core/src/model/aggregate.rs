@@ -431,6 +431,15 @@ impl Model {
             }
         }
 
+        for elem in &self.elements {
+            if elem.kind == ElementKind::PanelZone {
+                if let Some(&node) = elem.nodes.first() {
+                    crate::panel_zone::resolve_panel_joint(self, node, &self.elements)
+                        .map_err(CoreError::InvalidInput)?;
+                }
+            }
+        }
+
         for sec in &self.sections {
             for (role, mid) in [
                 ("Material", sec.material),

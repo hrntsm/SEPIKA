@@ -99,7 +99,7 @@ pub fn s_panel_zone_check(inp: &SPanelInput) -> CheckResult {
             kind: CheckKind::Shear,
             ratio,
             detail: format!(
-                "Ve={:.1} mm2, kappa={:.4}, n={:.4}, pM={:.1} N*mm, pMy={:.1} N*mm, ratio={:.4}",
+                "Ve={:.1} mm3, kappa={:.4}, n={:.4}, pM={:.1} N*mm, pMy={:.1} N*mm, ratio={:.4}",
                 ve, kappa, n, p_m, p_my, ratio
             ),
         }],
