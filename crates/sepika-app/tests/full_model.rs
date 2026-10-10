@@ -1338,6 +1338,38 @@ fn story_metrics_computed_for_every_layer() {
 
 // ===================== 9. 保有水平耐力・Ds・終局検定 =====================
 
+fn select_holding_points(app: &mut App) -> u32 {
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    let dir = app.core.scoped.pushover_view_dir;
+    let bundle = app.core.scoped.results.as_mut().unwrap();
+    let mut selected_step = 0;
+    for po in [&mut bundle.pushover, &mut bundle.pushover_x]
+        .into_iter()
+        .flatten()
+    {
+        selected_step = po.capacity_curve.last().unwrap().step;
+        po.ds_evaluation = Some(
+            po.evaluation_point(
+                EvaluationPurpose::Ds,
+                dir,
+                selected_step,
+                "終端確定stepを試験で明示採用".into(),
+            )
+            .unwrap(),
+        );
+        po.capacity_evaluation = Some(
+            po.evaluation_point(
+                EvaluationPurpose::HoldingCapacity,
+                dir,
+                selected_step,
+                "終端確定stepを試験で明示採用".into(),
+            )
+            .unwrap(),
+        );
+    }
+    selected_step
+}
+
 /// 鋼構造サンプルの保有水平耐力・Ds・ランク、および元STBの静的結果によるRC終局検定。
 #[test]
 fn steel_portal_holding_capacity_and_imported_rc_ultimate_checks() {
@@ -1348,10 +1380,15 @@ fn steel_portal_holding_capacity_and_imported_rc_ultimate_checks() {
     assert_no_error(&app, "鋼構造サンプルの固有値解析");
     app.run_pushover();
     assert_no_error(&app, "増分解析");
+    let selected_step = select_holding_points(&mut app);
 
     let (holding, ranks) = app
         .compute_holding_capacity()
         .expect("保有水平耐力が算定できるはず");
+    let source = app.core.scoped.holding_capacity_source.as_ref().unwrap();
+    assert_eq!(source.ds_point.step, selected_step);
+    assert_eq!(source.capacity_point.step, selected_step);
+    assert_eq!(source.ds_point.run_id, source.capacity_point.run_id);
     // h=14m、S造高さ比1よりT=.42s、地盤IIのRt=1。独立手計算のQud。
     let expected_qud = [
         278_488.0739614658,
@@ -2640,6 +2677,7 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     assert_no_error(&app, "整合GLの地震静的");
     app.run_pushover();
     assert_no_error(&app, "整合GLの増分解析");
+    select_holding_points(&mut app);
     let qud = app.compute_holding_capacity().unwrap().0.stories[0].qud;
     assert!((qud - 217_750.0).abs() < 1e-8);
     for (i, elevation) in [(4, 30_000.0), (3, 15_000.0)] {
@@ -2657,8 +2695,10 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
         } else {
             sepika_core::model::StoryStructure::Rc
         };
-        for node in app.core.model.stories[i].node_ids.clone() {
-            app.core.model.nodes[node.index()].coord[2] = elevation;
+        for node in &mut app.core.model.nodes {
+            if node.story == Some(sepika_core::ids::StoryId(i as u32)) {
+                node.coord[2] = elevation;
+            }
         }
     }
     app.run_seismic(sepika_solver::statics::analysis::SeismicDir::X);
@@ -2682,6 +2722,8 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     );
     app.run_pushover();
     assert_no_error(&app, "GL跨ぎ混合構造の増分解析");
+    select_holding_points(&mut app);
+
     assert!((app.compute_holding_capacity().unwrap().0.stories[0].qud - 215_250.0).abs() < 1e-7);
 
     assert!(app.core.scoped.undo.run(
