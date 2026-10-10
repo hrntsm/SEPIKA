@@ -19,6 +19,7 @@
 //! 鉄骨重量は `W = L×A×7.85`（鉄骨単位重量 7.85 t/m³ 固定。
 //! 各部位共通事項）による。
 
+mod contact;
 pub mod member;
 pub mod rebar;
 
@@ -429,13 +430,14 @@ fn validate_circular_rc_posts(model: &Model) -> Result<(), String> {
     Ok(())
 }
 
-/// 必要な材料領域が未知・不正の場合は理由付きエラー。未参照断面の未入力は許容する。
+/// 必要な材料領域・床接触が未知、不正または適用対象外の場合は理由付きエラー。未参照断面の未入力は許容する。
 /// 円形RC間柱の直径・解決実長 [mm] が有限かつ正でない場合は部材 ID と原因を返す。
 pub fn try_compute_quantity_takeoff(
     model: &Model,
     cfg: &QuantityCfg,
 ) -> Result<QuantityTakeoff, String> {
     validate_circular_rc_posts(model)?;
+    let contacts = contact::Contacts::from_model(model)?;
     let ids: HashSet<_> = model
         .elements
         .iter()
@@ -464,7 +466,7 @@ pub fn try_compute_quantity_takeoff(
                 .try_cft_core_props()?;
         }
     }
-    Ok(compute_quantity_takeoff_validated(model, cfg))
+    Ok(compute_quantity_takeoff_validated(model, cfg, &contacts))
 }
 
 /// モデル走査用の前処理データ。
@@ -473,8 +475,7 @@ struct Ctx<'a> {
     cfg: &'a QuantityCfg,
     /// 鉛直材（柱）が取り付く節点集合（大梁/小梁の分類用）。
     column_nodes: HashSet<usize>,
-    /// スラブ境界辺 (節点対, 昇順) → (隣接スラブ数, 控除厚の max [mm])。
-    slab_edges: HashMap<(u32, u32), (u32, f64)>,
+    contacts: &'a contact::Contacts,
     /// 節点 index → その節点に取り付く水平梁（elem index, 節点から見た
     /// 梁の伸びる向きの単位ベクトル xy）。主筋の外端・内端判定
     /// （梁の連続性）に用いる。
@@ -520,25 +521,6 @@ impl Ctx<'_> {
             BeamBarEnd::Exterior { l2 }
         }
     }
-
-    /// 梁の両側のスラブ隣接数（0/1/2）。スラブ境界辺に梁の節点対が
-    /// 一致するスラブの数を数える。
-    fn adjacent_slab_count(&self, ni: usize, nj: usize) -> u32 {
-        let key = ((ni as u32).min(nj as u32), (ni as u32).max(nj as u32));
-        self.slab_edges
-            .get(&key)
-            .map(|(n, _)| *n)
-            .unwrap_or(0)
-            .min(2)
-    }
-
-    /// 梁側面のスラブ厚控除に使う厚さ [mm]（隣接版あり領域の `region_thickness`
-    /// の max。辺が無ければ 0。梁せい d でクランプ）。
-    fn adjacent_slab_t(&self, ni: usize, nj: usize, d: f64) -> f64 {
-        let key = ((ni as u32).min(nj as u32), (ni as u32).max(nj as u32));
-        let t = self.slab_edges.get(&key).map(|(_, t)| *t).unwrap_or(0.0);
-        t.clamp(0.0, d)
-    }
 }
 
 /// モデル全体の数量を集計する（部位別の概算数量）。
@@ -548,13 +530,18 @@ impl Ctx<'_> {
 /// （[`sepika_load::wall_expand::expand_wall_elements`]）を組み立てて数量拾いを
 /// 行う（呼び出し元に展開を要求しない。忘れると壁の数量が積算から静かに
 /// 消えるため。自重算定 `enumerate_self_weight` と同じ理由・同じパターン）。
-/// 円形RC間柱の直径・解決実長 [mm] が不正な場合は panic。診断には `try_compute_quantity_takeoff` を用いる。
+/// 円形RC間柱の寸法・床接触入力が不正または未確定の場合は panic。診断には `try_compute_quantity_takeoff` を用いる。
 pub fn compute_quantity_takeoff(model: &Model, cfg: &QuantityCfg) -> QuantityTakeoff {
     validate_circular_rc_posts(model).expect("円形RC間柱の数量を算定できません");
-    compute_quantity_takeoff_validated(model, cfg)
+    let contacts = contact::Contacts::from_model(model).expect("梁と床の接触面を解決できません");
+    compute_quantity_takeoff_validated(model, cfg, &contacts)
 }
 
-fn compute_quantity_takeoff_validated(model: &Model, cfg: &QuantityCfg) -> QuantityTakeoff {
+fn compute_quantity_takeoff_validated(
+    model: &Model,
+    cfg: &QuantityCfg,
+    contacts: &contact::Contacts,
+) -> QuantityTakeoff {
     let expanded_storage;
     let model: &Model = if sepika_load::wall_expand::model_has_wall_plates_to_expand(model) {
         let (expanded, _wall_index, _wall_report) =
@@ -604,38 +591,11 @@ fn compute_quantity_takeoff_validated(model: &Model, cfg: &QuantityCfg) -> Quant
         }
     }
 
-    let mut slab_edges: HashMap<(u32, u32), (u32, f64)> = HashMap::new();
-    for slab in &model.slabs {
-        let Some(t) = model.slab_plate_thickness(slab) else {
-            continue;
-        };
-        let t = t.max(0.0);
-        let mut add_edge = |a: u32, b: u32| {
-            let e = slab_edges.entry((a.min(b), a.max(b))).or_insert((0, 0.0));
-            e.0 += 1;
-            e.1 = e.1.max(t);
-        };
-        if let Some(boundary) = slab.boundary_nodes(model) {
-            let n = boundary.len();
-            if n < 3 {
-                continue;
-            }
-            for i in 0..n {
-                add_edge(
-                    boundary[i].index() as u32,
-                    boundary[(i + 1) % n].index() as u32,
-                );
-            }
-        } else if let Some([a, b]) = slab.edge_nodes(model, 0) {
-            add_edge(a.index() as u32, b.index() as u32);
-        }
-    }
-
     let ctx = Ctx {
         model,
         cfg,
         column_nodes,
-        slab_edges,
+        contacts,
         beams_at_node,
         min_z,
     };
@@ -784,7 +744,11 @@ fn secondary_member_quantity(ctx: &Ctx, sm: &SecondaryMember) -> Option<MemberQu
         item.formwork_m2 = member::column_formwork_area(width, depth, len) * 1e-6;
     } else {
         item.concrete_m3 = member::beam_concrete_volume(width, depth, len) * 1e-9;
-        item.formwork_m2 = member::beam_formwork_area(width, depth, len) * 1e-6;
+        item.formwork_m2 = (member::beam_formwork_area(width, depth, len)
+            - ctx
+                .contacts
+                .area(sepika_core::model::SupportMemberId::Secondary(sm.id)))
+            * 1e-6;
     }
     Some(item)
 }
@@ -1111,22 +1075,10 @@ fn beam_quantity(
         let vol = member::girder_concrete_volume(b, d, lo, haunch_i, haunch_j);
         item.concrete_m3 = vol * 1e-9;
 
-        let n_adj = ctx.adjacent_slab_count(ni, nj);
-        let t_slab = if n_adj == 0 {
-            0.0
-        } else {
-            ctx.adjacent_slab_t(ni, nj, d)
-        };
         let form = if category == MemberCategory::FoundationGirder {
-            let d_side = if n_adj >= 1 { d - t_slab } else { d };
-            member::foundation_girder_formwork_area(b, d_side, lo, haunch_i, haunch_j)
+            member::foundation_girder_formwork_area(b, d, lo, haunch_i, haunch_j)
         } else {
-            let (d1, d2) = match n_adj {
-                0 => (d, d),
-                1 => (d, d - t_slab),
-                _ => (d - t_slab, d - t_slab),
-            };
-            member::girder_formwork_area(b, d1, d2, lo, haunch_i, haunch_j)
+            member::girder_formwork_area(b, d, d, lo, haunch_i, haunch_j)
         };
         item.formwork_m2 = form * 1e-6;
 
@@ -1192,6 +1144,10 @@ fn beam_quantity(
             }
         }
     }
+    item.formwork_m2 -= ctx
+        .contacts
+        .area(sepika_core::model::SupportMemberId::Primary(elem.id))
+        * 1e-6;
     item
 }
 
