@@ -9012,6 +9012,7 @@ fn test_preparation_member_stiffness_reports_composite_props() {
         .find(|e| e.id == row.elem)
         .unwrap();
     let props = sepika_element::frame::beam::composite_props_of(&app.core.model, elem)
+        .expect("材料が有効なはず")
         .expect("要素側でも算定できるはず");
     assert_eq!(props.iy, c.iy);
     assert_eq!(props.area_ax, c.area_ax);
@@ -10690,4 +10691,182 @@ fn preparation_seismic_invalid_coefficient_is_not_a_zero_result() {
     let prep = app.core.scoped.preparation.as_ref().unwrap();
     assert!(prep.seismic.is_none());
     assert!(prep.seismic_note.as_ref().unwrap().contains("C0"));
+}
+
+#[test]
+fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
+    use sepika_core::ids::{MaterialId, SectionId};
+    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+    use sepika_edit::{MaterialField, SetMaterialField, UndoStack};
+    use sepika_element::frame::beam::{composite_props_of, stiffness_breakdown, BeamElement};
+
+    let shape = SectionShape::SrcColumnRect {
+        b: 300.0,
+        d: 600.0,
+        rebar: RcRectColumnRebar {
+            main_dia: 0.0,
+            x: vec![],
+            y: vec![],
+            cover: 40.0,
+            hoop: RectColumnHoop {
+                dia: 0.0,
+                pitch: 100.0,
+                legs_x: 0,
+                legs_y: 0,
+            },
+        },
+        steel_height: 400.0,
+        steel_width: 200.0,
+        steel_web_thick: 8.0,
+        steel_flange_thick: 12.0,
+    };
+    let mut model = crate::sample::portal_frame();
+    model.sections[0] = sepika_core::model::Section {
+        material: Some(MaterialId(1)),
+        steel_material: Some(MaterialId(0)),
+        frame_use: Some(sepika_core::model::FrameSectionUse::Column),
+        ..shape.to_section(SectionId(0), "SRC434".into())
+    };
+    let mut concrete = model.materials[0].clone();
+    concrete.id = MaterialId(1);
+    let mat = &mut concrete;
+    mat.category = sepika_core::model::MaterialCategory::Concrete;
+    mat.concrete_class = sepika_core::units::ConcreteClass::UserDefined;
+    mat.fc = Some(27.0);
+    mat.young = 20500.0;
+    mat.poisson = 0.2;
+    mat.shear = None;
+    mat.density = 2.4e-9;
+    model.materials.push(concrete);
+    let elem = model
+        .elements
+        .iter()
+        .find(|e| e.section == Some(SectionId(0)))
+        .unwrap()
+        .clone();
+    let p = composite_props_of(&model, &elem).unwrap().unwrap();
+    assert_eq!(p.area_ax, 250272.0);
+    assert!((p.iy - 7345337856.0).abs() < 1e-5);
+    let beam = BeamElement::try_new(&elem, &model).unwrap();
+    assert_eq!(beam.a, p.area_ax);
+    assert_eq!(beam.iz, p.iy);
+    assert_eq!(beam.a_mass, 180000.0);
+    assert!((beam.e * beam.iz - 150579426048000.0).abs() < 0.1);
+    let mut app = App::default();
+    app.load_model(model.clone());
+    app.run_preparation();
+    assert!(
+        app.core.scoped.preparation.is_some(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let row = app
+        .core
+        .scoped
+        .preparation
+        .as_ref()
+        .unwrap()
+        .member_stiffness
+        .iter()
+        .find(|r| r.elem == elem.id)
+        .unwrap();
+    assert_eq!(row.effective_area, p.area_ax);
+    assert_eq!(row.effective_iy, p.iy);
+
+    let mut preparation_edits = UndoStack::new();
+    preparation_edits.run(
+        &mut app.core.model,
+        Box::new(SetMaterialField {
+            id: MaterialId(1),
+            field: MaterialField::Young,
+            value: Some(0.0),
+        }),
+    );
+    app.run_preparation();
+    assert!(app.core.scoped.preparation.is_none());
+    assert!(app.core.scoped.last_error.is_some());
+    preparation_edits.undo(&mut app.core.model);
+    app.run_preparation();
+    assert!(app.core.scoped.preparation.is_some());
+
+    model.materials[0].young = 120000.0;
+    model.materials[1].fc = Some(48.0);
+    assert_eq!(composite_props_of(&model, &elem).unwrap(), Some(p));
+    model.materials[1].fc = Some(27.0);
+    for shear in [
+        0.0,
+        -1.0,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::MAX,
+    ] {
+        model.materials[1].shear = Some(shear);
+        assert!(composite_props_of(&model, &elem).is_err());
+        assert!(BeamElement::try_new(&elem, &model).is_err());
+    }
+    model.materials[1].shear = None;
+
+    let mut stack = UndoStack::new();
+    let cases = [
+        (MaterialField::Young, Some(0.0)),
+        (MaterialField::Young, Some(-1.0)),
+        (MaterialField::Young, Some(f64::NAN)),
+        (MaterialField::Young, Some(f64::INFINITY)),
+        (MaterialField::Young, Some(f64::NEG_INFINITY)),
+        (MaterialField::Poisson, Some(-1.0)),
+        (MaterialField::Poisson, Some(0.5)),
+        (MaterialField::Poisson, Some(f64::NAN)),
+        (MaterialField::Poisson, Some(f64::INFINITY)),
+        (MaterialField::Poisson, Some(f64::NEG_INFINITY)),
+        (MaterialField::Fc, None),
+        (MaterialField::Fc, Some(0.0)),
+        (MaterialField::Fc, Some(-1.0)),
+        (MaterialField::Fc, Some(f64::NAN)),
+        (MaterialField::Fc, Some(f64::INFINITY)),
+        (MaterialField::Fc, Some(f64::NEG_INFINITY)),
+    ];
+    let path = std::env::temp_dir().join(format!("sepika-src434-{}.ovika", std::process::id()));
+    for (field, value) in cases {
+        stack.run(
+            &mut model,
+            Box::new(SetMaterialField {
+                id: MaterialId(1),
+                field,
+                value,
+            }),
+        );
+        assert!(
+            composite_props_of(&model, &elem).is_err(),
+            "{field:?}={value:?}"
+        );
+        assert!(stiffness_breakdown(&model, &elem).is_err());
+        assert!(BeamElement::try_new(&elem, &model).is_err());
+        sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+        let loaded = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        assert!(composite_props_of(&loaded, &elem).is_err());
+        assert!(BeamElement::try_new(&elem, &loaded).is_err());
+        app.load_model(loaded);
+        app.run_preparation();
+        assert!(app.core.scoped.preparation.is_none(), "{field:?}={value:?}");
+        assert!(app.core.scoped.last_error.is_some());
+        stack.undo(&mut model);
+        assert!(composite_props_of(&model, &elem).unwrap().is_some());
+    }
+    std::fs::remove_file(path).unwrap();
+    model.sections[0].material = None;
+    assert!(composite_props_of(&model, &elem)
+        .unwrap_err()
+        .contains("未割当"));
+    assert!(BeamElement::try_new(&elem, &model).is_err());
+    app.load_model(model);
+    app.run_preparation();
+    assert!(app.core.scoped.preparation.is_none());
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("未割当"));
 }
