@@ -583,6 +583,207 @@ fn wall_side_column_props(shape: Option<&SectionShape>) -> Option<(f64, f64, f64
     }
 }
 
+pub(super) fn collect_wall_design_checks(
+    model: &Model,
+    forces: &[(ElemId, ForcesAt<'_>)],
+    members: &[MemberInfo<'_>],
+    term: LoadTerm,
+    index: Option<&sepika_load::wall_expand::WallExpansionIndex>,
+    case: &str,
+) -> Vec<crate::wall_check::WallCheck> {
+    use crate::wall_check::{WallCheck, WallCheckKind, WallSkipKind};
+    let mut out = Vec::new();
+    let mut candidates: Vec<_> = model
+        .elements
+        .iter()
+        .filter(|e| e.kind == ElementKind::Wall)
+        .map(|e| (index.and_then(|i| i.plate_of(e.id)), Some(e)))
+        .collect();
+    for plate in &model.wall_plates {
+        if !candidates.iter().any(|(id, _)| *id == Some(plate.id)) {
+            candidates.push((Some(plate.id), None));
+        }
+    }
+    for (plate_id, elem) in candidates {
+        let plate = plate_id.and_then(|id| model.wall_plate(id));
+        let input_invalid = elem
+            .is_some_and(|e| sepika_core::model::wall_element_geometry(e, model).is_none())
+            || elem
+                .and_then(|e| model.element_section(e))
+                .and_then(|s| s.thickness)
+                .is_some_and(|t| !t.is_finite() || t <= 0.0);
+        let known_slit = plate.is_some_and(|p| p.slit.any())
+            || elem.is_some_and(|e| {
+                model
+                    .wall_attrs
+                    .iter()
+                    .any(|a| a.elem == e.id && a.slit.any())
+            });
+        let seismic_target = !known_slit
+            && (input_invalid
+                || match elem {
+                    Some(e) => sepika_element::wall::misc_wall::wall_is_seismic(e, model),
+                    None => plate.is_some_and(|p| {
+                        model.wall_plate_covers_region(p)
+                            || (!p.is_attached() && p.boundary_nodes(model).is_none())
+                    }),
+                });
+        let section = elem
+            .and_then(|e| model.element_section(e))
+            .or_else(|| plate.and_then(|p| model.wall_plate_section(p)));
+        let response =
+            elem.and_then(|e| forces.iter().find(|(id, _)| *id == e.id).map(|(_, f)| *f));
+        let issue = if input_invalid {
+            Some((
+                WallSkipKind::InvalidInput,
+                "壁幾何または板厚が不正です（入力不足を自重のみへ読み替えません）".into(),
+            ))
+        } else if !seismic_target {
+            Some((
+                WallSkipKind::NotApplicable,
+                "自重・雑壁のみの壁版は耐震壁検定対象外です".to_string(),
+            ))
+        } else if elem.is_none() {
+            Some((
+                WallSkipKind::MissingInput,
+                "壁要素を生成できません（断面割当または壁領域・境界入力不足）".into(),
+            ))
+        } else if section.is_none() {
+            Some((
+                WallSkipKind::MissingInput,
+                "壁断面が未割当または解決不能です".into(),
+            ))
+        } else if section
+            .and_then(|s| s.material)
+            .and_then(|id| model.materials.get(id.index()).filter(|m| m.id == id))
+            .is_none()
+        {
+            Some((
+                WallSkipKind::MissingInput,
+                "壁主材料が未割当または解決不能です".into(),
+            ))
+        } else {
+            let sec = section.unwrap();
+            let mat = model.materials.get(sec.material.unwrap().index()).unwrap();
+            match sec.shape.as_ref() {
+                _ if mat.category == sepika_core::model::MaterialCategory::Steel => Some((WallSkipKind::NotImplemented, "純鋼板壁の国内許容応力度・終局検定式は未確定です（壁板・接合未検定。RC/SRC式は適用しません）".into())),
+                _ if sec.steel_material.is_some() => Some((WallSkipKind::NotImplemented, "SRC内蔵鋼板壁の検定は未実装です（純鋼板壁・RC壁の式を流用しません）".into())),
+                Some(SectionShape::RcWall { .. }) if mat.category != sepika_core::model::MaterialCategory::Concrete => Some((WallSkipKind::InvalidInput, "RC壁の主材料区分がコンクリートではありません".into())),
+                Some(SectionShape::RcWall { .. }) if mat.fc.is_none() => Some((WallSkipKind::MissingInput, "コンクリート強度 Fc が未入力です".into())),
+                Some(SectionShape::RcWall { .. }) if !mat.fc.is_some_and(|fc| fc.is_finite() && fc > 0.0) => Some((WallSkipKind::InvalidInput, "Fc が有限の正値ではありません".into())),
+                Some(SectionShape::RcWall { .. }) => if response.is_none_or(|f| f.is_empty()) { Some((WallSkipKind::MissingResponse, "壁応答を取得できません（空応答をゼロ応力として扱いません）".into())) } else if response.is_some_and(|f| f.iter().any(|(_, v)| v.iter().any(|x| !x.is_finite()))) { Some((WallSkipKind::InvalidInput, "壁応答に非有限値があります".into())) } else { None },
+                _ => Some((WallSkipKind::NotApplicable, "RC/SRC/純鋼板を区別し、この壁形状・材料への検定式は適用できません".into())),
+            }
+        };
+        let mut computed = Vec::new();
+        if issue.is_none() {
+            let e = elem.unwrap();
+            check_walls(
+                model,
+                &[(e.id, response.unwrap())],
+                members,
+                term,
+                &mut computed,
+            );
+        }
+        for kind in [
+            WallCheckKind::AllowableShear,
+            WallCheckKind::ReferenceSkeleton,
+        ] {
+            let (outcome, skip_kind) = if let Some((why, reason)) = &issue {
+                (
+                    CheckOutcome::Skipped {
+                        reason: reason.clone(),
+                    },
+                    Some(*why),
+                )
+            } else {
+                let row = computed.iter().find(|(_, label, _)| {
+                    label.ends_with("せん断非線形") == (kind == WallCheckKind::ReferenceSkeleton)
+                });
+                match row {
+                    Some((_, _, outcome @ CheckOutcome::Checked(_))) => (outcome.clone(), None),
+                    Some((_, _, outcome @ CheckOutcome::Skipped { reason })) => {
+                        let required_material_issue = elem.and_then(|e| {
+                            if kind == WallCheckKind::ReferenceSkeleton || term != LoadTerm::Long {
+                                wall_rebar_skip_kind(model.element_shear_rebar_material(e)).or_else(
+                                    || {
+                                        (kind == WallCheckKind::AllowableShear)
+                                            .then(|| {
+                                                wall_rebar_skip_kind(
+                                                    model.element_rebar_material(e),
+                                                )
+                                            })
+                                            .flatten()
+                                    },
+                                )
+                            } else {
+                                None
+                            }
+                        });
+                        let why = if let Some(why) = required_material_issue {
+                            why
+                        } else if reason.contains("未割当")
+                            || reason.contains("未入力")
+                            || reason.contains("不足")
+                            || reason.contains("未設定")
+                        {
+                            WallSkipKind::MissingInput
+                        } else if reason.contains("未対応") {
+                            WallSkipKind::NotImplemented
+                        } else if reason.contains("範囲") {
+                            WallSkipKind::NotApplicable
+                        } else {
+                            WallSkipKind::InvalidInput
+                        };
+                        (outcome.clone(), Some(why))
+                    }
+                    None => (
+                        CheckOutcome::Skipped {
+                            reason: "壁幾何・材料役割・参考骨格の必要入力を解決できません".into(),
+                        },
+                        Some(WallSkipKind::MissingInput),
+                    ),
+                }
+            };
+            out.push(WallCheck {
+                plate: plate_id,
+                elem: elem.map(|e| e.id),
+                node: elem.and_then(|e| e.nodes.first().copied()).or_else(|| {
+                    plate
+                        .and_then(|p| p.boundary_nodes(model))
+                        .and_then(|n| n.first().copied())
+                }),
+                case: case.into(),
+                kind,
+                seismic_target,
+                skip_kind,
+                outcome,
+            });
+        }
+    }
+    out
+}
+
+fn wall_rebar_skip_kind(
+    material: Option<&sepika_core::model::Material>,
+) -> Option<crate::wall_check::WallSkipKind> {
+    use crate::wall_check::WallSkipKind;
+    let Some(material) = material else {
+        return Some(WallSkipKind::MissingInput);
+    };
+    if material.category != sepika_core::model::MaterialCategory::Rebar
+        || !sepika_core::material_grade::is_supported_shear_rebar_grade(&material.name)
+    {
+        return Some(WallSkipKind::InvalidInput);
+    }
+    match material.fy {
+        None => Some(WallSkipKind::MissingInput),
+        Some(fy) if !fy.is_finite() || fy <= 0.0 => Some(WallSkipKind::InvalidInput),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::wall_side_column_props;

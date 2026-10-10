@@ -196,6 +196,11 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
                             r.joint_checks
                                 .iter()
                                 .filter_map(|j| checked_components(&j.outcome)),
+                        )
+                        .chain(
+                            r.wall_checks
+                                .iter()
+                                .filter_map(|w| checked_components(&w.outcome)),
                         ),
                 )
             })
