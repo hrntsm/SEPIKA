@@ -233,3 +233,155 @@ fn 明示編集が取り除く既存孤立版も確認対象から落とさな�
         fixture::assert_inputs_eq(&model, &before);
     }
 }
+
+fn frame_edit(wall: bool, operation: usize) -> Box<dyn EditCommand> {
+    match operation {
+        0 => Box::new(DeleteMember { id: ElemId(0) }),
+        1 => Box::new(SetNodeCoord {
+            node: NodeId(1),
+            coord: if wall {
+                [4000., 1000., 0.]
+            } else {
+                [4000., 0., 1000.]
+            },
+        }),
+        _ => {
+            let mut elem = fixture::rectangle(wall).elements[0].clone();
+            elem.id = ElemId(4);
+            elem.nodes = [NodeId(0), NodeId(2)].into_iter().collect();
+            Box::new(AddMember { elem })
+        }
+    }
+}
+
+#[test]
+fn 主架構追加削除と非平面節点移動は旧版荷重を診断し一undoとredoで全入力を復元する() {
+    for wall in [false, true] {
+        for operation in 0..3 {
+            let mut model = fixture::with_plate(wall);
+            model.assign_stb_node_ids().unwrap();
+            let before = model.clone();
+            let loss = preview_plate_assignment_loss(&model, frame_edit(wall, operation).as_ref())
+                .unwrap();
+            assert_eq!(
+                (loss.slabs.len(), loss.wall_plates.len()),
+                if wall { (0, 1) } else { (1, 0) },
+                "wall={wall}, operation={operation}"
+            );
+            assert!(loss.description().contains("0.0025"));
+            if wall {
+                assert_eq!(loss.wall_plates, before.wall_plates);
+            } else {
+                assert_eq!(loss.slabs, before.slabs);
+            }
+            fixture::assert_inputs_eq(&model, &before);
+            let mut undo = UndoStack::new();
+            assert!(
+                undo.run(&mut model, frame_edit(wall, operation)),
+                "{:?}",
+                undo.last_error()
+            );
+            assert!(model.slabs.is_empty() && model.wall_plates.is_empty());
+            let after = model.clone();
+            undo.undo(&mut model);
+            fixture::assert_inputs_eq(&model, &before);
+            undo.redo(&mut model);
+            fixture::assert_inputs_eq(&model, &after);
+        }
+    }
+}
+
+#[test]
+fn 主架構節点の直接編集も既存境界衝突を原子的に拒否する() {
+    for operation in 0..3 {
+        let mut model = fixture::with_plate(false);
+        let mut duplicate = model.floor_assignment_regions.regions[0].clone();
+        duplicate.id = FloorPlateAssignmentRegionId(90);
+        model.floor_assignment_regions.regions.push(duplicate);
+        let before = model.clone();
+        let inverse = frame_edit(false, operation).apply(&mut model);
+        assert!(inverse.rejection().unwrap().contains("境界キー"));
+        fixture::assert_inputs_eq(&model, &before);
+    }
+}
+
+#[test]
+fn 確認できない入口は支持境界変更の版荷重消失を拒否しredo履歴も保持する() {
+    for wall in [false, true] {
+        for operation in 0..3 {
+            let mut model = fixture::with_plate(wall);
+            model.assign_stb_node_ids().unwrap();
+            let before = model.clone();
+            let mut undo = UndoStack::new();
+            assert!(undo.run(
+                &mut model,
+                Box::new(SetNodeRestraint {
+                    node: NodeId(0),
+                    restraint: sepika_core::dof::Dof6Mask::FIXED,
+                })
+            ));
+            undo.undo(&mut model);
+            assert_eq!(undo.revision(), 2);
+            assert!(!undo.run_preserving_plate_assignments(&mut model, frame_edit(wall, operation)));
+            let reason = undo.last_error().unwrap();
+            assert!(
+                reason.contains("0.0025") && reason.contains("未更新") && reason.contains("1 Undo")
+            );
+            assert_eq!(undo.revision(), 2);
+            assert!(!undo.can_undo());
+            assert!(undo.can_redo());
+            fixture::assert_inputs_eq(&model, &before);
+            undo.redo(&mut model);
+            assert_eq!(model.nodes[0].restraint, sepika_core::dof::Dof6Mask::FIXED);
+        }
+    }
+}
+
+#[test]
+fn 同じ支持区間の構面内節点移動は確認なしで版idと入力荷重を保持する() {
+    for wall in [false, true] {
+        let mut model = fixture::with_plate(wall);
+        model.assign_stb_node_ids().unwrap();
+        let before = model.clone();
+        let plates = (model.slabs.clone(), model.wall_plates.clone());
+        let command = || {
+            Box::new(CompositeCommand {
+                label: "支持境界の幅を変更".into(),
+                children: vec![
+                    Box::new(SetNodeCoord {
+                        node: NodeId(1),
+                        coord: [5000., 0., 0.],
+                    }),
+                    Box::new(SetNodeCoord {
+                        node: NodeId(2),
+                        coord: if wall {
+                            [5000., 0., 3000.]
+                        } else {
+                            [5000., 3000., 0.]
+                        },
+                    }),
+                ],
+            })
+        };
+        assert!(preview_plate_assignment_loss(&model, command().as_ref())
+            .unwrap()
+            .is_empty());
+        let mut undo = UndoStack::new();
+        assert!(undo.run_preserving_plate_assignments(&mut model, command()));
+        assert_eq!(model.nodes[1].coord, [5000., 0., 0.]);
+        assert_eq!((model.slabs.clone(), model.wall_plates.clone()), plates);
+        assert_eq!(
+            if wall {
+                model.wall_assignment_regions.regions[0].id.0
+            } else {
+                model.floor_assignment_regions.regions[0].id.0
+            },
+            0
+        );
+        let after = model.clone();
+        undo.undo(&mut model);
+        fixture::assert_inputs_eq(&model, &before);
+        undo.redo(&mut model);
+        fixture::assert_inputs_eq(&model, &after);
+    }
+}

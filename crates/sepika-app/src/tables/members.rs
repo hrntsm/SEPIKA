@@ -695,10 +695,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                 Box::new(DeleteWallPlate { id: plate_id }),
             )
         } else {
-            app.core
-                .scoped
-                .undo
-                .run(&mut app.core.model, Box::new(DeleteMember { id: elem_id }))
+            delete_frame_member(app, elem_id)
         };
         if applied {
             app.clear_geometry_selection();
@@ -1179,6 +1176,10 @@ impl EditCommand for SetIsolatorPropsLocal {
         "免震支承材特性変更"
     }
 }
+pub(crate) fn delete_frame_member(app: &mut App, id: ElemId) -> bool {
+    app.apply_model_edit(Box::new(DeleteMember { id }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

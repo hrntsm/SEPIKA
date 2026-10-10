@@ -162,13 +162,21 @@ impl EditCommand for RestoreNodeCoord {
 }
 
 impl EditCommand for SetNodeCoord {
+    fn changes_assignment_boundaries(&self) -> bool {
+        true
+    }
+
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let mut candidate = model.clone();
         let inverse = self.apply_candidate(&mut candidate);
-        if inverse.is_noop() {
+        if inverse.is_noop() || inverse.rejection().is_some() {
             return inverse;
         }
         if let Err(reason) = validate_coordinate_loads(model, &candidate) {
+            return Box::new(RejectedEdit(reason));
+        }
+        let report = candidate.rebuild_assignment_regions_dropping_orphan_plates();
+        if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
             return Box::new(RejectedEdit(reason));
         }
         *model = candidate;
@@ -176,6 +184,9 @@ impl EditCommand for SetNodeCoord {
     }
 
     fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Err(reason) = model.validate_assignment_region_identity() {
+            return Box::new(RejectedEdit(reason));
+        }
         use sepika_core::model::{LoadSource, MemberLoadExtent, MemberLoadKind};
         let idx = self.node.index();
         if idx >= model.nodes.len() || model.nodes[idx].id != self.node {
@@ -206,7 +217,6 @@ impl EditCommand for SetNodeCoord {
                 }
             }
         }
-        model.rebuild_assignment_regions_dropping_orphan_plates();
         Box::new(RestoreNodeCoord {
             node: self.node,
             coord: old_coord,
@@ -451,7 +461,27 @@ pub struct AddMember {
 }
 
 impl EditCommand for AddMember {
+    fn changes_assignment_boundaries(&self) -> bool {
+        true
+    }
+
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let mut candidate = model.clone();
+        let inverse = self.apply_candidate(&mut candidate);
+        if inverse.rejection().is_none() && !inverse.is_noop() {
+            let report = candidate.rebuild_assignment_regions_dropping_orphan_plates();
+            if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
+                return Box::new(RejectedEdit(reason));
+            }
+            *model = candidate;
+        }
+        inverse
+    }
+
+    fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Err(reason) = model.validate_assignment_region_identity() {
+            return Box::new(RejectedEdit(reason));
+        }
         if !crate::refs::new_elem_ok(model, &self.elem)
             || !crate::refs::frame_element_section_ref_ok(model, &self.elem, self.elem.section)
         {
@@ -459,7 +489,6 @@ impl EditCommand for AddMember {
         }
         let snapshot = AssignmentTopology::capture(model);
         model.elements.push(self.elem.clone());
-        model.rebuild_assignment_regions_dropping_orphan_plates();
         Box::new(RestoreAssignmentTopology {
             snapshot,
             inverse: Box::new(DeleteMember { id: self.elem.id }),
@@ -754,7 +783,27 @@ pub struct DeleteMember {
 }
 
 impl EditCommand for DeleteMember {
+    fn changes_assignment_boundaries(&self) -> bool {
+        true
+    }
+
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let mut candidate = model.clone();
+        let inverse = self.apply_candidate(&mut candidate);
+        if inverse.rejection().is_none() && !inverse.is_noop() {
+            let report = candidate.rebuild_assignment_regions_dropping_orphan_plates();
+            if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
+                return Box::new(RejectedEdit(reason));
+            }
+            *model = candidate;
+        }
+        inverse
+    }
+
+    fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Err(reason) = model.validate_assignment_region_identity() {
+            return Box::new(RejectedEdit(reason));
+        }
         let idx = self.id.index();
         if idx >= model.elements.len() || model.elements[idx].id != self.id {
             return Box::new(Noop);
@@ -790,7 +839,6 @@ impl EditCommand for DeleteMember {
                 id.0 -= 1;
             }
         });
-        model.rebuild_assignment_regions_dropping_orphan_plates();
         Box::new(RestoreAssignmentTopology {
             snapshot,
             inverse: Box::new(InsertMember {

@@ -64,7 +64,7 @@ impl App {
         }
         match sepika_edit::preview_plate_assignment_loss(&self.core.model, command.as_ref()) {
             Err(reason) => {
-                self.report_error(reason);
+                self.report_error(format!("モデル・履歴は未更新: {reason}"));
                 return false;
             }
             Ok(loss) if command.changes_assignment_boundaries() && !loss.is_empty() => {
@@ -100,11 +100,15 @@ impl App {
 
     #[cfg(feature = "gui")]
     fn apply_confirmed_model_edit(&mut self, command: Box<dyn sepika_edit::EditCommand>) -> bool {
+        let changes_boundaries = command.changes_assignment_boundaries();
         let applied = self.core.scoped.undo.run(&mut self.core.model, command);
         if let Some(reason) = self.core.scoped.undo.last_error() {
             self.report_error(format!("モデル・履歴は未更新: {reason}"));
         }
         if applied {
+            if changes_boundaries {
+                self.clear_generated_member_selection();
+            }
             self.remap_model_focus();
             self.core.scoped.staleness.mark_edited();
         }

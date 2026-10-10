@@ -105,3 +105,86 @@ fn guiは境界衝突の拒否理由と未更新を表示し確認待ちにも�
     assert!(!app.core.scoped.undo.can_undo());
     fixture::assert_inputs_eq(&app.core.model, &before);
 }
+
+#[cfg(feature = "gui")]
+#[test]
+fn 主架構一覧削除と節点移動は確認前とキャンセルで未更新とし確認後の一undoで荷重を戻す() {
+    use sepika_core::ids::{ElemId, NodeId};
+    for wall in [false, true] {
+        for move_node in [false, true] {
+            let mut app = App::default();
+            app.core.model = fixture::with_plate(wall);
+            app.core.model.assign_stb_node_ids().unwrap();
+            let before = app.core.model.clone();
+            let edit = |app: &mut App| {
+                if move_node {
+                    app.apply_model_edit(Box::new(sepika_edit::SetNodeCoord {
+                        node: NodeId(1),
+                        coord: if wall {
+                            [4000., 1000., 0.]
+                        } else {
+                            [4000., 0., 1000.]
+                        },
+                    }))
+                } else {
+                    crate::tables::members::delete_frame_member(app, ElemId(0))
+                }
+            };
+            assert!(!edit(&mut app));
+            let message = &app.core.scoped.pending_plate_loss_edit.as_ref().unwrap().1;
+            assert!(message.contains("0.0025"));
+            assert!(message.contains(if wall { "WallPlateId(0)" } else { "SlabId(0)" }));
+            fixture::assert_inputs_eq(&app.core.model, &before);
+            assert_eq!(app.core.scoped.undo.revision(), 0);
+            app.resolve_plate_loss_edit(false);
+            fixture::assert_inputs_eq(&app.core.model, &before);
+            assert!(!app.core.scoped.undo.can_undo());
+            assert!(!edit(&mut app));
+            app.resolve_plate_loss_edit(true);
+            assert_eq!(app.core.scoped.undo.revision(), 1);
+            assert!(app.core.model.slabs.is_empty() && app.core.model.wall_plates.is_empty());
+            let after = app.core.model.clone();
+            app.core.scoped.undo.undo(&mut app.core.model);
+            fixture::assert_inputs_eq(&app.core.model, &before);
+            app.core.scoped.undo.redo(&mut app.core.model);
+            fixture::assert_inputs_eq(&app.core.model, &after);
+        }
+    }
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn 節点グリッドの非平面貼付は旧版荷重を診断して未更新としguiにも理由を表示する() {
+    use crate::grid::GridAdapter;
+    for wall in [false, true] {
+        let mut app = App::default();
+        app.core.model = fixture::with_plate(wall);
+        app.core.model.assign_stb_node_ids().unwrap();
+        let before = app.core.model.clone();
+        let mut adapter = node_grid::NodeGridAdapter {
+            model: &mut app.core.model,
+            undo: &mut app.core.scoped.undo,
+            edited: false,
+        };
+        adapter.apply_block(&[(1, if wall { 1 } else { 2 }, "1000".into())], 0);
+        assert!(!adapter.edited);
+        let reason = app.core.scoped.undo.last_error().unwrap();
+        assert!(reason.contains("0.0025"));
+        assert!(reason.contains("未更新"));
+        assert!(reason.contains("1 Undo"));
+        fixture::assert_inputs_eq(&app.core.model, &before);
+        assert_eq!(app.core.scoped.undo.revision(), 0);
+        assert!(!app.core.scoped.undo.can_undo());
+        let _ = egui::Context::default().run_ui(Default::default(), |ui| {
+            crate::tables::nodes::nodes_table(ui, &mut app);
+        });
+        assert!(app
+            .core
+            .scoped
+            .last_error
+            .as_ref()
+            .unwrap()
+            .contains("0.0025"));
+        fixture::assert_inputs_eq(&app.core.model, &before);
+    }
+}

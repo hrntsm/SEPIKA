@@ -228,6 +228,26 @@ impl UndoStack {
         true
     }
 
+    /// 確認を行えない入口では、版・入力荷重が失われる編集を確定せず拒否する。
+    pub fn run_preserving_plate_assignments(
+        &mut self,
+        model: &mut Model,
+        cmd: Box<dyn EditCommand>,
+    ) -> bool {
+        match preview_plate_assignment_loss(model, cmd.as_ref()) {
+            Err(reason) => self.last_error = Some(reason),
+            Ok(loss) if !loss.is_empty() => {
+                self.last_error = Some(format!(
+                    "モデル・履歴は未更新。{}\n旧版の除去には確認が必要です。この入口では確認できないため編集を拒否します。確認可能な入口で適用した場合は、1 Undo で全 ID・割当・版・入力荷重を復元できます。",
+                    loss.description()
+                ));
+            }
+            Ok(_) => return self.run(model, cmd),
+        }
+        self.id_changes.clear();
+        false
+    }
+
     /// 直前の編集が拒否された理由。成功または通常の Noop では `None`。
     pub fn last_error(&self) -> Option<&str> {
         self.last_error.as_deref()

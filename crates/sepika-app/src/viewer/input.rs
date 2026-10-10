@@ -475,6 +475,9 @@ mod selection_tests {
             let output = ctx.run_ui(raw_input(), &mut draw);
             click(&ctx, text_pos(&output, "配置"), draw);
         }
+        assert_eq!(app.core.model.posts().count(), 0);
+        assert!(app.core.scoped.pending_plate_loss_edit.is_some());
+        app.resolve_plate_loss_edit(true);
         assert_eq!(app.core.model.posts().count(), 1);
     }
 
@@ -562,6 +565,22 @@ mod selection_tests {
             let _ = ctx.run_ui(raw, |ui| {
                 crate::tables::nodes::nodes_table(ui, &mut app);
             });
+            assert_eq!(app.core.model.nodes[0].coord[0], 0.0);
+            assert_eq!(app.core.model.wall_plates.len(), 2);
+            assert!(app
+                .core
+                .scoped
+                .last_error
+                .as_ref()
+                .unwrap()
+                .contains("未更新"));
+            assert!(!app.core.scoped.undo.can_undo());
+            assert!(!app.apply_model_edit(Box::new(sepika_edit::SetNodeCoord {
+                node: NodeId(0),
+                coord: [4000.0, 0.0, 0.0],
+            })));
+            assert!(app.core.scoped.pending_plate_loss_edit.is_some());
+            app.resolve_plate_loss_edit(true);
             assert_eq!(app.core.model.nodes[0].coord[0], 4000.0);
             assert_eq!(app.core.model.wall_plates.len(), 1);
             let after = wall_expanded_view_model(&app.core.model);

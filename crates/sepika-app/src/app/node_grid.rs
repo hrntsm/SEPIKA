@@ -24,7 +24,7 @@ pub struct NodeGridAdapter<'a> {
 
 impl NodeGridAdapter<'_> {
     fn run(&mut self, cmd: Box<dyn EditCommand>) {
-        self.edited |= self.undo.run(self.model, cmd);
+        self.edited |= self.undo.run_preserving_plate_assignments(self.model, cmd);
     }
 
     /// 0 個 = 何もしない、1 個 = 単独コマンド（固有の undo ラベルを保つ）、
