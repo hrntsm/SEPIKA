@@ -57,11 +57,25 @@ impl App {
     ///   検定位置の値を採用する方針で部材単位に求める。
     /// - 柱は軸力＋二軸曲げ（n, my, mz）を検定に渡す。
     /// - 検定器は構造種別（`sepika_core::structure_kind`）で選択する。
+    /// - 床板の設計自重が計算不可の場合は理由を通知し、既存の検定結果を消去する。
     pub fn run_design_check(&mut self) {
+        if let Some(bundle) = self.core.scoped.results.as_mut() {
+            bundle.member_checks.clear();
+            bundle.joint_checks.clear();
+            bundle.wall_checks.clear();
+            bundle.beam_checks.clear();
+            bundle.slab_checks.clear();
+        }
         self.apply_rigid_zones_for_analysis();
         if let Err(error) = sepika_load::floor::validate_one_way_directions(&self.core.model) {
             self.report_error(error.to_string());
             return;
+        }
+        for slab in &self.core.model.slabs {
+            if let Err(error) = sepika_load::floor::distribute_slab(&self.core.model, slab) {
+                self.report_error(format!("床板・小梁検定: {error}"));
+                return;
+            }
         }
         let state = self.selected_design_load_state();
         if let Ok(state) = state {

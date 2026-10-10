@@ -347,6 +347,16 @@ fn linear_static_job_rejects_ex_without_seismic_horizontal_load() {
         nodal: Vec::new(),
         member: Vec::new(),
     });
+    let material = MaterialId(model.materials.len() as u32);
+    let mut massless = model.materials[0].clone();
+    massless.id = material;
+    massless.density = 0.0;
+    model.materials.push(massless);
+    let section = SectionId(model.sections.len() as u32);
+    let mut plate = sepika_core::section_shape::SectionShape::RcSlab { thickness: 100.0 }
+        .to_section(section, "先端荷重検証用の無質量床板".into());
+    plate.material = Some(material);
+    model.sections.push(plate);
     model.slabs.push(Slab {
         id: sepika_core::ids::SlabId(0),
         shape: SlabShape::Attached {
@@ -357,7 +367,10 @@ fn linear_static_job_rejects_ex_without_seismic_horizontal_load() {
             },
             extent: [1500.0, 1500.0],
         },
-        plate: SlabPlate::default(),
+        plate: SlabPlate {
+            section: Some(section),
+            ..Default::default()
+        },
         tip_loads: vec![SlabTipLoad {
             case: LoadCaseId(0),
             intensity: 2.0,

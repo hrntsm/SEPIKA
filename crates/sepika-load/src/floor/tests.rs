@@ -352,7 +352,7 @@ fn test_slab_conservation_square_triangle() {
     let w = 0.005_f64;
     let a = 4000.0_f64;
     let (model, slab) = make_square_slab_model(a, DistributionMethod::TriTrapezoid, w);
-    let loads = distribute_slab(&model, &slab).unwrap();
+    let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     let expected = w * a * a;
     assert!(
         (total_load(&loads) - expected).abs() < 1e-6,
@@ -381,7 +381,7 @@ fn test_slab_conservation_rect_all_methods() {
         DistributionMethod::TributaryArea,
     ] {
         let (model, slab) = make_rect_slab_model(lx, ly, method, w);
-        let loads = distribute_slab(&model, &slab).unwrap();
+        let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
         assert!(
             (total_load(&loads) - expected).abs() / expected < 1e-9,
             "method={:?} 総和={} expected={}",
@@ -406,7 +406,7 @@ fn test_one_way_direction_x_and_y() {
     // one_way=Y: 伝達方向Yに直交する辺0・2（X方向の辺、長さlx）が負担。従来互換と同じ結果。
     let (model, mut slab) = make_rect_slab_model(lx, ly, DistributionMethod::OneWay, w);
     slab.plate.one_way = Some(OneWayDir::Y);
-    let loads_y = distribute_slab(&model, &slab).unwrap();
+    let loads_y = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     assert!((total_load(&loads_y) - expected).abs() / expected < 1e-9);
     for l in &loads_y {
         assert!(matches!(
@@ -420,7 +420,7 @@ fn test_one_way_direction_x_and_y() {
 
     // one_way=X: 伝達方向Xに直交する辺1・3（Y方向の辺、長さly）が負担。
     slab.plate.one_way = Some(OneWayDir::X);
-    let loads_x = distribute_slab(&model, &slab).unwrap();
+    let loads_x = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     assert!((total_load(&loads_x) - expected).abs() / expected < 1e-9);
     for l in &loads_x {
         assert!(matches!(
@@ -439,7 +439,7 @@ fn test_one_way_short_direction_follows_short_span() {
     let w = 0.004_f64;
     let (model, mut slab) = make_rect_slab_model(5000.0, 3000.0, DistributionMethod::OneWay, w);
     slab.plate.one_way = Some(OneWayDir::Short);
-    let loads = distribute_slab(&model, &slab).unwrap();
+    let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     assert!(
         loads
             .iter()
@@ -576,7 +576,7 @@ fn test_polygon_trapezoid_conservation() {
     let (model, slab) = polygon_slab_model(&pts, DistributionMethod::TriTrapezoid, w);
     // slab_dimensions が None（多角形経路）になることを確認
     assert!(slab_dimensions(&model, &slab).is_none());
-    let loads = distribute_slab(&model, &slab).unwrap();
+    let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     assert!(!loads.is_empty());
 
     let coords: Vec<[f64; 3]> = pts.iter().map(|(x, y)| [*x, *y, 0.0]).collect();
@@ -593,7 +593,7 @@ fn test_polygon_trapezoid_conservation() {
     use sepika_core::model::OneWayDir;
     let (model, mut slab) = polygon_slab_model(&pts, DistributionMethod::OneWay, w);
     slab.plate.one_way = Some(OneWayDir::X);
-    let one_way_loads = distribute_slab(&model, &slab).unwrap();
+    let one_way_loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     let one_way_area = total_load(&one_way_loads) / w;
     assert!(
         (one_way_area - true_area).abs() / true_area < 0.01,
@@ -625,7 +625,7 @@ fn test_polygon_pentagon_conservation() {
     ];
     let w = 0.0025_f64;
     let (model, slab) = polygon_slab_model(&pts, DistributionMethod::TributaryArea, w);
-    let loads = distribute_slab(&model, &slab).unwrap();
+    let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     assert!(!loads.is_empty());
     // 辺インデックスが 0..5 の範囲内。
     for l in &loads {
@@ -691,7 +691,7 @@ fn test_cantilever_conservation() {
         },
         tip_loads: Vec::new(),
     };
-    let loads = distribute_slab(&model, &slab).unwrap();
+    let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     assert_eq!(loads.len(), 1);
     let l = &loads[0];
     assert!(matches!(l.target, LoadTarget::Edge(0)));
@@ -755,7 +755,7 @@ fn test_cantilever_with_side_beam_loads_attachment_only() {
         },
         tip_loads: Vec::new(),
     };
-    let loads = distribute_slab(&model, &slab).unwrap();
+    let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     assert_eq!(loads.len(), 1, "{loads:?}");
 
     let total = total_load(&loads);
@@ -815,7 +815,7 @@ fn test_cantilever_ignores_load_transfer_direction() {
             },
             tip_loads: Vec::new(),
         };
-        let loads = distribute_slab(&model, &slab).unwrap();
+        let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
         assert_eq!(loads.len(), 1);
         assert!(matches!(loads[0].target, LoadTarget::Edge(0)));
         assert!(
@@ -876,7 +876,7 @@ fn test_cantilever_with_real_beam_edge_loads_attachment_only() {
         },
         tip_loads: Vec::new(),
     };
-    let loads = distribute_slab(&model, &slab).unwrap();
+    let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     assert_eq!(loads.len(), 1, "{loads:?}");
     let total = total_load(&loads);
     let expected = w * l * depth;
@@ -963,7 +963,7 @@ fn test_cantilever_real_beam_inside_slab_after_rebuild() {
         let loads: Vec<_> = model
             .slabs
             .iter()
-            .flat_map(|s| distribute_slab(&model, s).unwrap())
+            .flat_map(|s| distribute_slab_w(&model, s, s.plate.finish_intensity()).unwrap())
             .collect();
         let expected = w * l * depth;
         let total = total_load(&loads);
@@ -1057,7 +1057,7 @@ fn test_cantilever_support_edges_do_not_receive_load() {
     full.elements.push(mk_element_beam(0, 4, 5));
     full.unassigned_beams.push(mk_secondary_beam());
     attach_support(&mut full);
-    let loads = distribute_slab(&full, &mk_slab()).unwrap();
+    let loads = distribute_slab_w(&full, &mk_slab(), mk_slab().plate.finish_intensity()).unwrap();
     assert_eq!(loads.len(), 1);
     assert!(matches!(loads[0].target, LoadTarget::Edge(0)));
 
@@ -1076,7 +1076,8 @@ fn test_cantilever_support_edges_do_not_receive_load() {
     partial.elements.push(mk_element_beam(0, 4, 5));
     partial.unassigned_beams.push(mk_secondary_beam());
     attach_support(&mut partial);
-    let loads = distribute_slab(&partial, &mk_slab()).unwrap();
+    let loads =
+        distribute_slab_w(&partial, &mk_slab(), mk_slab().plate.finish_intensity()).unwrap();
     assert_eq!(loads.len(), 1);
     assert!(matches!(loads[0].target, LoadTarget::Edge(0)));
     assert!(loads.iter().all(|bl| {

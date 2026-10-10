@@ -6,7 +6,7 @@ use std::time::Instant;
 use sepika_core::geom::polygon as geom_polygon;
 use sepika_core::ids::NodeId;
 use sepika_core::model::{AreaLoad, DistributionMethod, Model, Node, Slab, SlabPlate};
-use sepika_load::floor::distribute_slab;
+use sepika_load::floor::distribute_slab_w;
 
 /// 有限線分拡張方式の格子の最大辺長 [mm]。
 const MAX_CELL_MM: f64 = 100.0;
@@ -170,7 +170,7 @@ fn main() {
             .map(|c| [c[0], c[1], 0.0])
             .collect::<Vec<[f64; 3]>>();
 
-        let current = bench(iters, || distribute_slab(&model, &slab));
+        let current = bench(iters, || distribute_slab_w(&model, &slab, w));
         let reference = bench(iters, || reference_edge_areas(&coords));
         println!(
             "{:<28} {current:9.4} {reference:11.4} {:10.2}",
