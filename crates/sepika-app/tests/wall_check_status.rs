@@ -1,4 +1,4 @@
-use sepika_app::app::{App, ResultsBundle, StaticCaseKey, StaticKey};
+use sepika_app::app::{App, ResultsBundle, StaticKey};
 use sepika_core::ids::{LoadCaseId, MaterialId, NodeId, SectionId, WallPlateId, WallRegionId};
 use sepika_core::model::{MaterialCategory, WallPlate, WallPlateShape, WallRegion};
 use sepika_core::section_shape::SectionShape;
@@ -102,10 +102,36 @@ fn fixture() -> App {
             )
         })
         .collect();
+    // 明示した無載荷Pを含む保存G+P+Wで、壁の検定状態を検証する。
+    let mut live = model.load_cases[0].clone();
+    live.id = LoadCaseId(2);
+    live.kind = sepika_core::model::LoadCaseKind::Live;
+    live.nodal.clear();
+    live.member.clear();
+    model.load_cases.push(live);
+    model.load_cases[1].kind = sepika_core::model::LoadCaseKind::Wind;
+    model
+        .combinations
+        .push(sepika_core::model::LoadCombination {
+            name: "保存G+P+W".into(),
+            terms: vec![
+                (LoadCaseId(0), 1.0),
+                (LoadCaseId(2), 1.0),
+                (LoadCaseId(1), 1.0),
+            ],
+        });
     let mut results = ResultsBundle::default();
     results.member_forces = forces;
+    results.combos.push((
+        "保存G+P+W".into(),
+        sepika_solver::statics::linear::StaticOnce {
+            disp: vec![],
+            member_forces: results.member_forces.clone(),
+            panel_moments: vec![],
+        },
+    ));
     app.core.scoped.results = Some(results);
-    app.core.scoped.last_static = Some(StaticKey::Case(StaticCaseKey::User(LoadCaseId(1))));
+    app.core.scoped.last_static = Some(StaticKey::Combo(0));
     app.core.design_term = sepika_design_jp::LoadTerm::Short;
     app.run_design_check();
     app
@@ -116,7 +142,7 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
     let mut app = fixture();
     let checks = &app.core.scoped.results.as_ref().unwrap().wall_checks;
     assert_eq!(checks.len(), 6);
-    assert!(checks.iter().all(|w| w.case == "case:1"));
+    assert!(checks.iter().all(|w| w.case == "combo:0:保存G+P+W"));
     let s = WallCheckSummary::for_kind(checks, WallCheckKind::AllowableShear);
     assert_eq!((s.n_walls, s.n_ok, s.n_skipped), (3, 1, 2), "{checks:?}");
     assert_eq!(s.max_ratio, Some(0.0));
@@ -126,7 +152,7 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
         "{csv}"
     );
     assert!(csv.contains("国内許容応力度・終局検定式は未確定"));
-    assert!(csv.contains(",\"case:1\",許容せん断,,未検定,MissingInput"));
+    assert!(csv.contains(",\"combo:0:保存G+P+W\",許容せん断,,未検定,MissingInput"));
     let expected_checks = format!("{checks:?}");
     let path = std::env::temp_dir().join(format!(
         "sepika495-wall-status-{}.ovika",
@@ -182,9 +208,13 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
         .combinations
         .push(sepika_core::model::LoadCombination {
             name: "DL+E,独立".into(),
-            terms: vec![(LoadCaseId(1), 1.0)],
+            terms: vec![
+                (LoadCaseId(0), 1.0),
+                (LoadCaseId(2), 1.0),
+                (LoadCaseId(1), 1.0),
+            ],
         });
-    app.select_displayed_result(StaticKey::Combo(0));
+    app.select_displayed_result(StaticKey::Combo(1));
     assert!(app
         .core
         .scoped
@@ -193,9 +223,9 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
         .unwrap()
         .wall_checks
         .iter()
-        .all(|w| w.case == "combo:0:DL+E,独立"));
+        .all(|w| w.case == "combo:1:DL+E,独立"));
     let csv = sepika_app::summary::build_report_csv(&app);
-    assert!(csv.contains("\"combo:0:DL+E,独立\""));
+    assert!(csv.contains("\"combo:1:DL+E,独立\""));
     let identity: Vec<_> = app
         .core
         .scoped
@@ -206,7 +236,7 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
         .iter()
         .map(|w| (w.plate, w.elem, w.kind))
         .collect();
-    let other = app.core.scoped.results.as_ref().unwrap().combos[0]
+    let other = app.core.scoped.results.as_ref().unwrap().combos[1]
         .1
         .clone();
     app.core
@@ -221,11 +251,15 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
         .combinations
         .push(sepika_core::model::LoadCombination {
             name: "DL-E".into(),
-            terms: vec![(LoadCaseId(1), -1.0)],
+            terms: vec![
+                (LoadCaseId(0), 1.0),
+                (LoadCaseId(2), 1.0),
+                (LoadCaseId(1), -1.0),
+            ],
         });
-    app.select_displayed_result(StaticKey::Combo(1));
+    app.select_displayed_result(StaticKey::Combo(2));
     let checks = &app.core.scoped.results.as_ref().unwrap().wall_checks;
-    assert!(checks.iter().all(|w| w.case == "combo:1:DL-E"));
+    assert!(checks.iter().all(|w| w.case == "combo:2:DL-E"));
     assert_eq!(
         checks
             .iter()
@@ -285,7 +319,7 @@ fn wall_status_real_egui_design_table_shows_counts_and_reasons() {
         "許容せん断：合格 1・NG 0・未検定 2",
         "壁版 1",
         "壁版 2",
-        "case:1",
+        "combo:0:保存G+P+W",
         "国内許容応力度・終局検定式は未確定",
         "壁主材料が未割当",
     ] {

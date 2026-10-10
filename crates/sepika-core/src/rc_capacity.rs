@@ -218,28 +218,48 @@ pub fn rc_qsu_simple_checked(inp: &RcCapacityInput) -> Result<f64, crate::error:
     Ok(rc_qsu_simple(inp))
 }
 
-/// RC 梁の曲げ降伏時剛性低下率 αy（菅野式）。
-///
-/// ```text
-/// αy = (0.043 + 1.635·n·pt + 0.043·(a/D))·(d/D)²   (2.0 ≤ a/D ≤ 5.0)
-///      (−0.0836 + 0.159·(a/D))·(d/D)²              (1.0 ≤ a/D < 2.0)
-/// ```
-/// - `pt_alpha_ratio`: αy 用の引張鉄筋比 at/(bD)（小数、1% は 0.01）。T形は方向別の仮想断面で生成。
-/// - `a_over_d`: シアスパン比 a/D（a=l0/2）。適用範囲 [1.0, 5.0] にクランプする。
-/// - `d_over_full`: 有効せい/全せい d/D
-/// - `n`: ヤング係数比 Es/Ec
-///
-/// 要・原典照合。
-/// トリリニア骨格の降伏点変形（θy=θe/αy）に用いる剛性低下率で、0〜1 に収まる想定。
-/// 負となる異常入力は 0 にクランプする（1 超は補正しない＝呼び出し側で扱う）。
+/// 採用RC梁式のαyを数値評価する。pt=at/(bD)は小数、a/D・d/D・nは無次元。
+/// 入力域へのクランプ・結果の非正値補正は行わない。設計適用・ばね接続可否は別途診断する。
 pub fn rc_alpha_y_sugano(pt_alpha_ratio: f64, a_over_d: f64, d_over_full: f64, n: f64) -> f64 {
-    let ad = a_over_d.clamp(1.0, 5.0);
-    let base = if ad >= 2.0 {
-        0.043 + 1.635 * n * pt_alpha_ratio + 0.043 * ad
+    let base = if a_over_d <= 2.0 {
+        0.043 + 1.64 * n * pt_alpha_ratio + 0.043 * a_over_d
     } else {
-        -0.0836 + 0.159 * ad
+        -0.0336 - 0.1935 * n * pt_alpha_ratio + 0.1270 * a_over_d
     };
-    (base * d_over_full * d_over_full).max(0.0)
+    base * d_over_full * d_over_full
+}
+
+/// 正の有限比率・d/D≤1を診断してαyを評価する。有限な非正結果もそのまま返す。
+pub fn rc_alpha_y_sugano_checked(
+    pt_alpha_ratio: f64,
+    a_over_d: f64,
+    d_over_full: f64,
+    n: f64,
+) -> Result<f64, crate::error::CoreError> {
+    for (name, value) in [
+        ("pt_alpha_ratio", pt_alpha_ratio),
+        ("a/D", a_over_d),
+        ("d/D", d_over_full),
+        ("n", n),
+    ] {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(crate::error::CoreError::InvalidInput(format!(
+                "{name} は正の有限値が必要です"
+            )));
+        }
+    }
+    if d_over_full > 1.0 {
+        return Err(crate::error::CoreError::InvalidInput(
+            "有効せい d は全せい D 以下が必要です".into(),
+        ));
+    }
+    let alpha = rc_alpha_y_sugano(pt_alpha_ratio, a_over_d, d_over_full, n);
+    if !alpha.is_finite() {
+        return Err(crate::error::CoreError::InvalidInput(
+            "αyを有限値として算定できません".into(),
+        ));
+    }
+    Ok(alpha)
 }
 
 /// ひび割れ強度の係数 κ。
@@ -344,10 +364,12 @@ mod tests {
         assert!((top.pt_alpha_ratio - 0.013_333_333_333_333_3).abs() < 1e-15);
         assert_eq!(bottom.pt_shear_percent, rect.pt_shear_percent);
         assert_eq!(top.pt_shear_percent, rect.pt_shear_percent);
-        assert!((rc_alpha_y_sugano(rect.pt_alpha_ratio, 3.0, 0.9, 10.0) - 0.271_755).abs() < 1e-12);
         assert!(
-            (rc_alpha_y_sugano(rect.pt_alpha_ratio * 100.0, 3.0, 0.9, 10.0) - 0.271_755).abs()
-                > 10.0
+            (rc_alpha_y_sugano(rect.pt_alpha_ratio, 3.0, 0.9, 10.0) - 0.265_720_5).abs() < 1e-12
+        );
+        assert!(
+            (rc_alpha_y_sugano(rect.pt_alpha_ratio * 100.0, 3.0, 0.9, 10.0) - 0.265_720_5).abs()
+                > 1.0
         );
         let input = RcCapacityInput {
             b: 300.0,
@@ -583,26 +605,28 @@ mod tests {
     }
 
     #[test]
-    fn test_rc_alpha_y_sugano_matches_handcalc() {
-        // a/D=3.0（2.0-5.0域）, pt=0.008, n=15, d/D=0.9
-        let ay = rc_alpha_y_sugano(0.008, 3.0, 0.9, 15.0);
-        let base = 0.043 + 1.635 * 15.0 * 0.008 + 0.043 * 3.0;
-        assert!((ay - base * 0.9 * 0.9).abs() < 1e-9, "αy={ay}");
-        // 代表値は 0.2〜0.4 程度。
-        assert!(ay > 0.15 && ay < 0.5, "αy={ay}");
-
-        // a/D=1.5（1.0-2.0域）は別分岐。
-        let ay2 = rc_alpha_y_sugano(0.008, 1.5, 0.9, 15.0);
-        let base2 = -0.0836 + 0.159 * 1.5;
-        assert!((ay2 - base2 * 0.81).abs() < 1e-9);
-
-        // a/D クランプ: 0.5→1.0, 8.0→5.0。
-        let lo = rc_alpha_y_sugano(0.008, 0.5, 0.9, 15.0);
-        let at1 = rc_alpha_y_sugano(0.008, 1.0, 0.9, 15.0);
-        assert!((lo - at1).abs() < 1e-12);
-        let hi = rc_alpha_y_sugano(0.008, 8.0, 0.9, 15.0);
-        let at5 = rc_alpha_y_sugano(0.008, 5.0, 0.9, 15.0);
-        assert!((hi - at5).abs() < 1e-12);
+    fn adopted_alpha_branches_preserve_boundary_and_extrapolation() {
+        for (r, expected) in [
+            (1.0, 0.2025),
+            (2.0, 0.23733),
+            (5.0, 0.4714605),
+            (0.5, 0.185085),
+            (8.0, 0.7800705),
+        ] {
+            assert!((rc_alpha_y_sugano(0.01, r, 0.9, 10.0) - expected).abs() < 1e-12);
+        }
+        let epsilon = 1e-8;
+        assert!((rc_alpha_y_sugano(0.01, 2.0 - epsilon, 0.9, 10.0) - 0.23733).abs() < 1e-9);
+        assert!((rc_alpha_y_sugano(0.01, 2.0 + epsilon, 0.9, 10.0) - 0.1628505).abs() < 2e-9);
+        assert!(rc_alpha_y_sugano_checked(0.5, 3.0, 0.9, 10.0).unwrap() < 0.0);
+        assert!(rc_alpha_y_sugano_checked(0.01, 20.0, 0.9, 10.0).unwrap() > 1.0);
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(rc_alpha_y_sugano_checked(bad, 3.0, 0.9, 10.0).is_err());
+            assert!(rc_alpha_y_sugano_checked(0.01, bad, 0.9, 10.0).is_err());
+            assert!(rc_alpha_y_sugano_checked(0.01, 3.0, bad, 10.0).is_err());
+            assert!(rc_alpha_y_sugano_checked(0.01, 3.0, 0.9, bad).is_err());
+        }
+        assert!(rc_alpha_y_sugano_checked(0.01, 3.0, 1.01, 10.0).is_err());
     }
 
     #[test]

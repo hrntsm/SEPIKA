@@ -313,6 +313,8 @@ struct HingeViewKey {
     steel_material: Option<MaterialFingerprint>,
     /// 材端集中ばねの履歴則。それ以外は `None`。
     hysteresis: Option<HysteresisModel>,
+    rc_beam_reference: Option<sepika_core::model::RcBeamReference>,
+    rc_reference_diagnostic: Option<String>,
 }
 
 /// 要素の両端節点座標と局所軸の基準ベクトル。
@@ -338,6 +340,7 @@ fn element_geometry(model: &Model, elem: &ElementData) -> Option<ElementGeometry
 /// 断面のうち骨格・曲面生成に用いるフィールド。
 #[derive(Clone, PartialEq, Debug)]
 struct SectionFingerprint {
+    frame_use: Option<sepika_core::model::FrameSectionUse>,
     shape: Option<SectionShape>,
     area: f64,
     iy: f64,
@@ -358,6 +361,7 @@ struct SectionFingerprint {
 impl From<&Section> for SectionFingerprint {
     fn from(s: &Section) -> Self {
         SectionFingerprint {
+            frame_use: s.frame_use,
             shape: s.shape.clone(),
             area: s.area,
             iy: s.iy,
@@ -433,6 +437,13 @@ fn hinge_view_key(
         steel_material: model
             .element_steel_material(elem)
             .map(MaterialFingerprint::from),
+        rc_beam_reference: model.member_rc_beam_reference(elem.id),
+        rc_reference_diagnostic: sepika_element::factory::rc_beam_reference_input_issue(
+            elem,
+            model,
+            AnalysisKind::Incremental,
+            StrengthBasis::MaterialStrength,
+        ),
         hysteresis: concentrated
             .then(|| resolve_member_hysteresis(elem, model, AnalysisKind::Incremental)),
     }
@@ -768,6 +779,14 @@ fn draw_hinge_detail_content(ui: &mut egui::Ui, app: &mut App, elem_id: ElemId) 
     };
     ui.label(bend_face_label);
 
+    if let Some(reason) = &view.unavailability_reason {
+        ui.label(reason);
+    }
+    if view.total_backbone.is_some() {
+        ui.label(
+            "RC基準の骨格と端ばね応答は弾性M/Sを控除した追加角です。総降伏部材角とは区別します。",
+        );
+    }
     ui.strong("M-θ カーブ（荷重変形カーブ）");
     ui.label(m_theta_axis_label(view.model));
     draw_m_theta_plot(ui, elem_id, &records, view, bend_dir_z, &mine, step);
@@ -2606,6 +2625,231 @@ mod tests {
         );
     }
 
+    fn refresh_reference_cache(app: &mut App) -> (Option<String>, bool) {
+        let elem = app.core.model.elements[0].clone();
+        let key = hinge_view_key(&app.core.model, &elem, 0, &app.core.scoped.staleness);
+        ensure_hinge_view(
+            &app.core.model,
+            &mut app.ui.scoped.hinge_view_cache,
+            key,
+            &elem,
+            0.0,
+        );
+        let view = app
+            .ui
+            .scoped
+            .hinge_view_cache
+            .as_ref()
+            .unwrap()
+            .view
+            .as_ref()
+            .unwrap();
+        (
+            view.unavailability_reason.clone(),
+            view.mn_surface.is_some(),
+        )
+    }
+
+    #[test]
+    fn rc_reference_cache_tracks_fiber_basis_edits_and_undo_while_already_stale() {
+        use sepika_core::model::RcBeamReference;
+        let mut app = App::default();
+        app.core.model = key_test_model_rc();
+        app.core.model.elements.push(key_test_elem(
+            ElementKind::Beam,
+            ForceRegime::AxialBendingInteract,
+        ));
+        app.core.scoped.staleness.mark_edited();
+        let generation = (
+            app.core.scoped.staleness.last_run,
+            app.core.scoped.staleness.results_stale,
+        );
+        assert_eq!(refresh_reference_cache(&mut app), (None, true));
+        for reference in [Some(RcBeamReference::AntisymmetricHalfMember), None] {
+            let old_key = app.ui.scoped.hinge_view_cache.as_ref().unwrap().key.clone();
+            app.core.scoped.undo.run(
+                &mut app.core.model,
+                Box::new(sepika_edit::SetMemberRcBeamReference {
+                    elem: ElemId(0),
+                    reference,
+                }),
+            );
+            app.core.scoped.staleness.mark_edited();
+            let (reason, surface) = refresh_reference_cache(&mut app);
+            assert_ne!(
+                old_key,
+                app.ui.scoped.hinge_view_cache.as_ref().unwrap().key
+            );
+            assert_eq!(reason.is_some(), reference.is_some());
+            assert_eq!(surface, reference.is_none());
+            if let Some(reason) = reason {
+                assert!(reason.contains("材端集中ばね専用"));
+            }
+            assert_eq!(
+                generation,
+                (
+                    app.core.scoped.staleness.last_run,
+                    app.core.scoped.staleness.results_stale
+                )
+            );
+        }
+        for reference_present in [true, false] {
+            app.core.scoped.undo.undo(&mut app.core.model);
+            app.core.scoped.staleness.mark_edited();
+            let (reason, surface) = refresh_reference_cache(&mut app);
+            assert_eq!(reason.is_some(), reference_present);
+            assert_eq!(surface, !reference_present);
+            assert_eq!(
+                generation,
+                (
+                    app.core.scoped.staleness.last_run,
+                    app.core.scoped.staleness.results_stale
+                )
+            );
+        }
+    }
+
+    fn reference_cache_app() -> App {
+        let mut app = App::default();
+        app.core.model = key_test_model_rc();
+        let shape = app.core.model.sections[0].shape.clone().unwrap();
+        let mut section = shape.to_section(SectionId(0), "RC基準".into());
+        section.material = Some(MaterialId(0));
+        section.rebar_material = Some(MaterialId(1));
+        section.shear_rebar_material = Some(MaterialId(1));
+        app.core.model.sections[0] = section;
+        app.core.model.nodes[1].coord = [6000.0, 0.0, 0.0];
+        app.core.model.materials[0].young = 20500.0;
+        app.core.model.materials[0].density = 2.4e-9;
+        app.core.model.elements.push(key_test_elem(
+            ElementKind::Beam,
+            ForceRegime::UniaxialBendingShear,
+        ));
+        app.core
+            .model
+            .set_member_hysteresis(ElemId(0), HysteresisModel::Takeda);
+        app.core.model.set_member_rc_beam_reference(
+            ElemId(0),
+            Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+        );
+        app.core.scoped.staleness.mark_edited();
+        app
+    }
+
+    #[test]
+    fn rc_reference_cache_tracks_release_haunch_and_column_diagnostics_while_stale() {
+        use sepika_core::model::{EndCondition, FrameSectionUse, Haunch, MemberDetailAttr};
+        for edit in 0..4 {
+            let mut app = reference_cache_app();
+            assert_eq!(refresh_reference_cache(&mut app).0, None);
+            let generation = (
+                app.core.scoped.staleness.last_run,
+                app.core.scoped.staleness.results_stale,
+            );
+            let old_key = app.ui.scoped.hinge_view_cache.as_ref().unwrap().key.clone();
+            let expected = match edit {
+                0 => {
+                    app.core.model.elements[0].end_cond[0] = EndCondition::Pinned;
+                    "端部解放"
+                }
+                1 | 2 => {
+                    let mut detail = MemberDetailAttr::new(ElemId(0));
+                    let haunch = Some(Haunch {
+                        length: 700.0,
+                        depth_increase: 100.0,
+                        width_increase: 0.0,
+                    });
+                    if edit == 1 {
+                        detail.haunch_i = haunch;
+                    } else {
+                        detail.haunch_j = haunch;
+                    }
+                    app.core.model.member_detail_attrs.push(detail);
+                    "ハンチ"
+                }
+                _ => {
+                    app.core.model.sections[0].frame_use = Some(FrameSectionUse::Column);
+                    "材端集中ばね専用"
+                }
+            };
+            app.core.scoped.staleness.mark_edited();
+            let reason = refresh_reference_cache(&mut app).0.unwrap();
+            assert!(reason.contains(expected), "{reason}");
+            assert_ne!(
+                old_key,
+                app.ui.scoped.hinge_view_cache.as_ref().unwrap().key
+            );
+            assert_eq!(
+                generation,
+                (
+                    app.core.scoped.staleness.last_run,
+                    app.core.scoped.staleness.results_stale
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn rc_reference_cache_tracks_property_basis_and_slab_diagnostics_while_stale() {
+        use sepika_core::ids::{FloorRegionId, NodeId, SlabId};
+        use sepika_core::model::{FloorRegion, PropertyBasis, Slab, SlabPlate, SlabShape};
+        for edit in 0..2 {
+            let mut app = reference_cache_app();
+            assert_eq!(refresh_reference_cache(&mut app).0, None);
+            let generation = (
+                app.core.scoped.staleness.last_run,
+                app.core.scoped.staleness.results_stale,
+            );
+            let old_key = app.ui.scoped.hinge_view_cache.as_ref().unwrap().key.clone();
+            let expected = if edit == 0 {
+                app.core.model.sections[0].property_basis.iy = PropertyBasis::PendingShape;
+                "未算定"
+            } else {
+                app.core.model.sections.push(
+                    SectionShape::RcSlab { thickness: 150.0 }
+                        .to_section(SectionId(1), "S15".into()),
+                );
+                for coord in [[6000.0, 2500.0, 0.0], [0.0, 2500.0, 0.0]] {
+                    let mut node = app.core.model.nodes[0].clone();
+                    node.id = NodeId(app.core.model.nodes.len().try_into().unwrap());
+                    node.coord = coord;
+                    app.core.model.nodes.push(node);
+                }
+                app.core.model.floor_regions.push(FloorRegion {
+                    slab_ids: vec![SlabId(0)],
+                    ..FloorRegion::new(
+                        FloorRegionId(0),
+                        vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+                    )
+                });
+                app.core.model.slabs.push(Slab {
+                    id: SlabId(0),
+                    shape: SlabShape::Enclosed,
+                    plate: SlabPlate {
+                        section: Some(SectionId(1)),
+                        ..Default::default()
+                    },
+                    tip_loads: vec![],
+                });
+                "スラブ"
+            };
+            app.core.scoped.staleness.mark_edited();
+            let reason = refresh_reference_cache(&mut app).0.unwrap();
+            assert!(reason.contains(expected), "{reason}");
+            assert_ne!(
+                old_key,
+                app.ui.scoped.hinge_view_cache.as_ref().unwrap().key
+            );
+            assert_eq!(
+                generation,
+                (
+                    app.core.scoped.staleness.last_run,
+                    app.core.scoped.staleness.results_stale
+                )
+            );
+        }
+    }
+
     /// キャッシュは同じキーのときだけ再利用され、キーが変われば作り直される
     /// （`ensure_hinge_view` の一致判定）。
     #[test]
@@ -2618,6 +2862,8 @@ mod tests {
             view: Ok(HingeView {
                 model: AnalysisHingeModel::Other,
                 backbone: None,
+                total_backbone: None,
+                unavailability_reason: None,
                 mn_linear: None,
                 mn_surface: None,
             }),
@@ -2732,6 +2978,8 @@ mod tests {
         let input_shortage = HingeView {
             model: AnalysisHingeModel::ConcentratedSpring,
             backbone: None,
+            total_backbone: None,
+            unavailability_reason: None,
             mn_linear: None,
             mn_surface: None,
         };
@@ -2742,6 +2990,8 @@ mod tests {
 
         let history = HingeView {
             model: AnalysisHingeModel::ConcentratedSpring,
+            total_backbone: None,
+            unavailability_reason: None,
             backbone: Some(vec![[0.0, 0.0]]),
             mn_linear: None,
             mn_surface: None,

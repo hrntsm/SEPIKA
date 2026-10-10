@@ -126,7 +126,18 @@ pub fn pushover_analysis_recording(
 
     let mut st = SolverState::new(n_active, reducer.n_indep);
 
-    sepika_element::factory::ensure_nonlinear_input(model)?;
+    sepika_element::factory::ensure_nonlinear_input_with_basis(
+        model,
+        sepika_core::model::AnalysisKind::Incremental,
+        sepika_element::factory::StrengthBasis::MaterialStrength,
+    )?;
+    let active_cases: Vec<_> = model
+        .load_cases
+        .iter()
+        .filter(|case| apply_long_term && case.kind.is_long_term())
+        .map(|case| case.id)
+        .collect();
+    sepika_element::factory::ensure_rc_beam_reference_loads(model, &active_cases)?;
 
     let mut behaviors: Vec<Box<dyn ElementBehavior>> = Vec::new();
     for elem in &model.elements {
@@ -227,6 +238,8 @@ pub fn pushover_analysis_recording(
     } else {
         vec![0.0; n_active]
     };
+    recorder.reference_external = q.clone();
+    recorder.constant_external = f0.clone();
     if f0.iter().any(|v| v.abs() > 0.0) {
         let n_grav = 5usize;
         let mut applied = 0.0_f64;
@@ -635,7 +648,10 @@ pub fn pushover_analysis_recording(
     Ok(PushoverResult {
         steps: recorded.steps,
         wall_history: Some(recorded.wall_history),
-        wall_run: Some(super::wall_response::WallRunIdentity::new()),
+        wall_run: Some(recorded.run),
+        confirmed_history: Some(recorded.confirmed_history),
+        ds_evaluation: None,
+        capacity_evaluation: None,
         capacity_curve: recorded.capacity_curve,
         hinges: recorded.hinges,
         shear_yields: recorded.shear_yields,

@@ -281,6 +281,12 @@ pub struct PushoverResult {
     /// 同一解析実行の識別。未識別の旧結果は None。
     #[serde(default)]
     pub wall_run: Option<super::wall_response::WallRunIdentity>,
+    #[serde(default)]
+    pub confirmed_history: Option<Vec<super::story_response::ConfirmedStepResponse>>,
+    #[serde(default)]
+    pub ds_evaluation: Option<super::story_response::EvaluationPoint>,
+    #[serde(default)]
+    pub capacity_evaluation: Option<super::story_response::EvaluationPoint>,
     pub capacity_curve: Vec<CapacityPoint>,
     /// ヒンジ記録（確定ステップごとの閾値超過スナップショットの連なり。
     /// 同一材端が複数ステップで重複して並ぶ。[`HingeEvent`] の記録粒度参照）。
@@ -288,6 +294,7 @@ pub struct PushoverResult {
     /// せん断降伏イベント履歴。
     pub shear_yields: Vec<ShearYieldEvent>,
     pub mechanism: MechanismType,
+    /// 性能曲線上の最大ベースシア [N]。保有耐力比較の採用点とは独立。
     pub qu: f64,
     /// 最終確定ステップ時の部材別応答。ステップが 1 つも確定しなかった場合は空。
     pub member_response: Vec<PushoverMemberResponse>,

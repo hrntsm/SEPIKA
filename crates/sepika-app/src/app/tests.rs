@@ -2341,6 +2341,9 @@ fn test_legacy_pushover_deserialize_migrates_to_slot() {
             steps: vec![],
             wall_history: None,
             wall_run: None,
+            confirmed_history: None,
+            ds_evaluation: None,
+            capacity_evaluation: None,
             capacity_curve: vec![],
             hinges: vec![],
             shear_yields: vec![],
@@ -2919,15 +2922,29 @@ fn test_select_displayed_result_switches_forces_and_term() {
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
     app.core.analysis_cfg.threads = 1;
+    app.core
+        .model
+        .load_cases
+        .push(sepika_core::model::LoadCase {
+            id: LoadCaseId(2),
+            name: "P=0".into(),
+            kind: sepika_core::model::LoadCaseKind::Live,
+            nodal: vec![],
+            member: vec![],
+        });
     // 長期 DL+LL（重力 LC0 のみ）と短期 DL+LL+EX（地震 LC1 入り）の 2 組合せ。
     for combo in [
         sepika_core::model::LoadCombination {
             name: "DL + LL".into(),
-            terms: vec![(LoadCaseId(0), 1.0)],
+            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(2), 1.0)],
         },
         sepika_core::model::LoadCombination {
             name: "DL + LL + EX".into(),
-            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)],
+            terms: vec![
+                (LoadCaseId(0), 1.0),
+                (LoadCaseId(2), 1.0),
+                (LoadCaseId(1), 1.0),
+            ],
         },
     ] {
         app.core.scoped.undo.run(
@@ -3122,6 +3139,7 @@ fn test_holding_capacity_flow() {
 
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3133,19 +3151,18 @@ fn test_holding_capacity_flow() {
         .expect("前提が揃えば Ok のはず");
     assert_eq!(result.stories.len(), 1);
     assert!(result.stories[0].qun > 0.0);
-    // Qu はプッシュオーバー最終点の層せん断（capacity_curve.story_shear）から取得される。
+    // 明示採用点の層切断面力を用いる。
     assert!(result.stories[0].qu > 0.0, "{}", result.stories[0].qu);
-    // design_rank_auto=false（既定）→ 全層フォールバック（選択値 design_rank）。
+    // 手動ランクは明示設計入力。
     assert_eq!(story_ranks, vec![app.core.design_rank]);
     assert!(result.member_ranks.is_empty());
 }
 
 /// 架構種別が「S ブレース」なのに筋かい部材を検出できない場合、βu を算定できないため
-/// βu=0（純ラーメン）の行を使ってはならない（Ds を過小評価する）。架構種別別の
-/// Ds 表へフォールバックし、その旨のフラグが立つことを確認する。
+/// βu=0（純ラーメン）の行で隠さず理由付き失敗とする。
 #[test]
-fn test_holding_capacity_falls_back_when_brace_undetected() {
-    use sepika_design_jp::secondary::holding_capacity::{ds_value, FrameType, MemberRank};
+fn test_holding_capacity_rejects_declared_brace_when_undetected() {
+    use sepika_design_jp::secondary::holding_capacity::{FrameType, MemberRank};
 
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame()); // 筋かいのないラーメン
@@ -3153,6 +3170,7 @@ fn test_holding_capacity_falls_back_when_brace_undetected() {
     app.run_seismic(SeismicDir::X);
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3162,21 +3180,12 @@ fn test_holding_capacity_falls_back_when_brace_undetected() {
     app.core.design_rank_auto = false;
     app.core.design_rank = MemberRank::FA;
     app.core.design_frame = FrameType::SteelBrace;
-    let (result, _) = app.compute_holding_capacity().expect("Ok のはず");
-
+    let reason = app.compute_holding_capacity().err().expect("拒否される");
     assert!(
-        app.core.scoped.ds_beta_u_unavailable,
-        "筋かい未検出なら βu 算定不可のフラグが立つはず"
+        reason.contains("宣言した壁・筋かい架構の負担力がありません"),
+        "{reason}"
     );
-    // 純ラーメンの行（S造 FA=0.25）ではなく、S ブレースの行（FA=0.30）が使われる。
-    let expected = ds_value(FrameType::SteelBrace, MemberRank::FA);
-    assert!((expected - 0.30).abs() < 1e-9);
-    assert!(
-        (result.stories[0].ds - expected).abs() < 1e-9,
-        "Ds={} は架構種別別の値 {} であるべき（βu=0 行の 0.25 ではない）",
-        result.stories[0].ds,
-        expected
-    );
+    assert!(!app.core.scoped.ds_beta_u_unavailable);
 }
 
 /// UI-13: `design_rank_auto = true` で鋼部材の幅厚比から部材ランクを自動判定する。
@@ -3209,6 +3218,7 @@ fn test_holding_capacity_rank_auto_from_width_thickness() {
 
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3261,11 +3271,9 @@ fn test_holding_capacity_rank_auto_from_width_thickness() {
     );
 }
 
-/// rank-auto で部材ランクを 1 本も算定できない層（断面形状未設定等）は選択ランクへ
-/// フォールバックし、該当層が `ds_rank_fallback_stories` に記録される（設計タブの
-/// 警告表示用）。自動判定 OFF は全層が明示運用のため記録されない。
+/// 自動ランクの欠損は明示ランクで覆い隠さず失敗し、手動指定は設計入力として扱う。
 #[test]
-fn test_holding_capacity_rank_auto_records_fallback_stories() {
+fn test_holding_capacity_rank_auto_rejects_missing_rank() {
     use sepika_design_jp::secondary::holding_capacity::MemberRank;
 
     let mut app = App::default();
@@ -3274,6 +3282,7 @@ fn test_holding_capacity_rank_auto_records_fallback_stories() {
     app.run_seismic(SeismicDir::X);
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3286,16 +3295,14 @@ fn test_holding_capacity_rank_auto_records_fallback_stories() {
     }
     app.run_seismic(SeismicDir::X);
     app.run_pushover();
+    select_holding_points(&mut app);
     app.core.design_rank_auto = true;
     app.core.design_rank = MemberRank::FB;
-    let (_, story_ranks) = app.compute_holding_capacity().expect("Ok のはず");
-
-    // 全層が選択ランクへフォールバックし、層名が記録される。
-    assert_eq!(story_ranks, vec![MemberRank::FB]);
-    assert_eq!(
-        app.core.scoped.ds_rank_fallback_stories,
-        vec![app.core.model.stories[0].name.clone()]
-    );
+    assert!(app
+        .compute_holding_capacity()
+        .err()
+        .unwrap()
+        .contains("確定評価データが不足"));
 
     // 自動判定 OFF では全層が選択値の明示運用のため、フォールバック記録は空。
     app.core.design_rank_auto = false;
@@ -3538,6 +3545,9 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
         member: Vec::new(),
     });
 
+    // ランク配線の検証では、長期分布荷重を扱う独立の標準型骨格を使う。
+    model.set_member_hysteresis(ElemId(2), sepika_core::model::HysteresisModel::Standard);
+
     let mut app = App::default();
     app.load_model(model);
     app.generate_stories_action();
@@ -3563,6 +3573,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     app.core.analysis_cfg.push_max_disp = 3.0;
     app.core.analysis_cfg.push_use_drift_angle = false;
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3661,6 +3672,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     app.run_seismic(SeismicDir::X);
     assert!(app.compute_holding_capacity().is_err());
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(app.compute_holding_capacity().is_ok());
 }
 
@@ -4740,7 +4752,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
     model.floor_regions[0].slab_ids = vec![first, second];
     set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
-    let app = App {
+    let mut app = App {
         core: AppCore {
             model,
             ..Default::default()
@@ -4779,6 +4791,57 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
         slab.1.moment,
         w_floor
     );
+    app.core
+        .model
+        .load_cases
+        .push(sepika_core::model::LoadCase {
+            id: LoadCaseId(app.core.model.load_cases.len() as u32),
+            name: "任意風".into(),
+            kind: sepika_core::model::LoadCaseKind::Wind,
+            nodal: vec![],
+            member: vec![],
+        });
+    let id = app.core.model.load_cases.last().unwrap().id;
+    app.core.scoped.last_static = Some(StaticKey::Case(StaticCaseKey::User(id)));
+    app.core.design_term = LoadTerm::Short;
+    let (short_beams, short_slabs) = app.floor_design_checks();
+    assert_eq!(short_beams[0].2.m_max, beams[0].2.m_max);
+    assert_eq!(short_beams[0].2.ratio, beams[0].2.ratio);
+    assert_eq!(short_slabs[0].1.moment, slabs[0].1.moment);
+    assert!(!short_beams[0].2.unchecked, "既存長期略算を保持");
+    #[cfg(feature = "gui")]
+    {
+        app.core.scoped.results = Some(ResultsBundle {
+            beam_checks: short_beams,
+            slab_checks: short_slabs,
+            ..Default::default()
+        });
+        let context = egui::Context::default();
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(4000.0, 4000.0),
+                )),
+                ..Default::default()
+            },
+            |ui| crate::design_view::design_table(ui, &mut app),
+        );
+        let text = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) => Some(t.galley.job.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("小梁・床の長期略算"), "{text}");
+        assert!(
+            text.contains("選択中の雪・風・地震・任意組合せについて未検定"),
+            "{text}"
+        );
+    }
 }
 
 /// 片持ちの未割当小梁（端部支持条件 Free）も片持ち梁として検定する。
@@ -10077,6 +10140,7 @@ fn test_time_history_and_pushover_run_preparation() {
     app.core.scoped.staleness.mark_edited();
     assert!(app.core.scoped.staleness.preparation_stale);
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         !app.core.scoped.staleness.preparation_stale,
         "増分解析の実行で準備計算が走るべき"
@@ -10330,6 +10394,9 @@ fn dummy_pushover(qu: f64) -> sepika_solver::nonlinear::pushover::PushoverResult
         steps: vec![],
         wall_history: None,
         wall_run: None,
+        confirmed_history: None,
+        ds_evaluation: None,
+        capacity_evaluation: None,
         capacity_curve: vec![],
         hinges: vec![],
         shear_yields: vec![],
@@ -10435,6 +10502,9 @@ fn test_build_result_tree_sections_and_labels() {
             steps: vec![],
             wall_history: None,
             wall_run: None,
+            confirmed_history: None,
+            ds_evaluation: None,
+            capacity_evaluation: None,
             capacity_curve: vec![],
             hinges: vec![],
             shear_yields: vec![],
@@ -11298,4 +11368,172 @@ fn wall_opening_edit_undo_and_preparation_refresh_independent_band_weight() {
         .stories
         .iter()
         .any(|s| !s.wall_weights.is_empty()));
+}
+
+fn load_state_gui_contract_model() -> sepika_core::model::Model {
+    use sepika_core::model::{LoadCase, LoadCaseKind as K, LoadCombination, NodalLoad};
+    let mut model = crate::sample::portal_frame();
+    let mut top = model.nodes[2].clone();
+    top.id = NodeId(1);
+    top.coord = [0.0, 0.0, 3000.0];
+    model.nodes = vec![model.nodes[0].clone(), top];
+    model.elements.truncate(1);
+    model.elements[0].nodes = [NodeId(0), NodeId(1)].into_iter().collect();
+    model.load_cases = [
+        (K::Dead, 100.0),
+        (K::Live, 20.0),
+        (K::Snow, 40.0),
+        (K::Seismic, 30.0),
+        (K::Seismic, 30.0),
+        (K::Wind, 30.0),
+        (K::LiveSeismic, 8.0),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, (kind, kn))| LoadCase {
+        id: LoadCaseId(i as u32),
+        name: format!("手入力{i}"),
+        kind,
+        nodal: vec![NodalLoad::manual(
+            NodeId(1),
+            [kn * 1000.0, 0.0, -kn * 1000.0, 0.0, 0.0, 0.0],
+        )],
+        member: vec![],
+    })
+    .collect();
+    for extra in [
+        vec![],
+        vec![(2, 0.7)],
+        vec![(2, 1.0)],
+        vec![(2, 0.35), (3, 1.0)],
+        vec![(2, 0.35), (3, -1.0)],
+        vec![(2, 0.35), (4, 1.0)],
+        vec![(2, 0.35), (4, -1.0)],
+        vec![(5, 1.0)],
+        vec![(2, 0.35), (5, 1.0)],
+    ] {
+        let mut terms = vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)];
+        terms.extend(extra.into_iter().map(|(id, f)| (LoadCaseId(id), f)));
+        model.combinations.push(LoadCombination {
+            name: format!("任意名称{}", model.combinations.len()),
+            terms,
+        });
+    }
+    model
+}
+
+#[test]
+fn load_state_gui_actual_checks_selection_and_saved_terms_keep_n_q_m_and_duration() {
+    let path = test_tmp().join("load-state-contract.ovika");
+    let model = load_state_gui_contract_model();
+    sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+    let mut app = App::default();
+    app.load_model(sepika_io::ovika::load_ovika(&path).unwrap().model);
+    std::fs::remove_file(path).unwrap();
+    for (index, kn, term) in [
+        (0, 120.0, LoadTerm::Long),
+        (1, 148.0, LoadTerm::Long),
+        (2, 160.0, LoadTerm::Short),
+        (3, 164.0, LoadTerm::Short),
+        (4, 104.0, LoadTerm::Short),
+        (5, 164.0, LoadTerm::Short),
+        (6, 104.0, LoadTerm::Short),
+        (7, 150.0, LoadTerm::Short),
+        (8, 164.0, LoadTerm::Short),
+    ] {
+        app.run_combination(index);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app.select_displayed_result(StaticKey::Combo(index));
+        assert_eq!(app.core.design_term, term);
+        assert!(app.selected_design_load_state().unwrap().combination);
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        let (_, f) = bundle.member_forces[0]
+            .1
+            .at
+            .iter()
+            .find(|(p, _)| *p == 0.0)
+            .unwrap();
+        assert!((f[0].abs() / 1000.0 - kn).abs() < 1e-8);
+        assert!((f[1].hypot(f[2]) / 1000.0 - kn).abs() < 1e-8);
+        assert!((f[4].hypot(f[5]) / 1_000_000.0 - 3.0 * kn).abs() < 1e-8);
+        assert!(bundle
+            .member_checks
+            .iter()
+            .flat_map(|m| &m.positions)
+            .any(|p| matches!(p.outcome, sepika_design_jp::CheckOutcome::Checked(_))));
+    }
+    app.run_linear_static(LoadCaseId(2));
+    assert_eq!(app.core.design_term, LoadTerm::Short);
+    assert!(!app.selected_design_load_state().unwrap().combination);
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .iter()
+        .flat_map(|m| &m.positions)
+        .all(|p| matches!(p.outcome, sepika_design_jp::CheckOutcome::Skipped { .. })));
+    app.run_linear_static(LoadCaseId(0));
+    assert_eq!(app.core.design_term, LoadTerm::Long);
+    app.core.model.load_cases[0].kind = sepika_core::model::LoadCaseKind::Other;
+    app.run_design_check();
+    assert!(app.selected_design_load_state().is_err());
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .iter()
+        .flat_map(|m| &m.positions)
+        .all(|p| matches!(p.outcome, sepika_design_jp::CheckOutcome::Skipped { .. })));
+}
+
+pub(super) fn select_holding_points(app: &mut App) {
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    let dir = app.core.scoped.pushover_view_dir;
+    let Some(bundle) = &mut app.core.scoped.results else {
+        return;
+    };
+    for po in [
+        &mut bundle.pushover,
+        &mut bundle.pushover_x,
+        &mut bundle.pushover_y,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let Some(step) = po.capacity_curve.last().map(|p| p.step) else {
+            continue;
+        };
+        if let Ok(mut ds) = po.evaluation_point(
+            EvaluationPurpose::Ds,
+            dir,
+            step,
+            "テストの明示採用点".into(),
+        ) {
+            let mut ids: std::collections::BTreeSet<_> =
+                po.member_response.iter().map(|r| r.elem).collect();
+            if let Some(walls) = &po.wall_history {
+                ids.extend(walls.iter().map(|r| r.elem));
+            }
+            ds.member_capacities_n = ids.into_iter().map(|id| (id, 1_000_000.0)).collect();
+            po.ds_evaluation = Some(ds);
+            po.capacity_evaluation = po
+                .evaluation_point(
+                    EvaluationPurpose::HoldingCapacity,
+                    dir,
+                    step,
+                    "テストの明示採用点".into(),
+                )
+                .ok();
+        }
+    }
 }

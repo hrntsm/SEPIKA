@@ -64,7 +64,7 @@ impl App {
                 result.identify_wall_input(input.clone());
                 if result.termination.is_premature() {
                     self.append_analysis_notice(format!(
-                        "⚠ 増分解析は目標到達前に打ち切られました（{}）。Qu はその時点までの最大値です。",
+                        "⚠ 増分解析は目標到達前に打ち切られました（{}）。最大ベースシアはその時点までの最大値です。",
                         result.termination.describe()
                     ));
                 }
@@ -108,9 +108,9 @@ impl App {
         let model = self.core.model.clone();
         let cfg = self.core.analysis_cfg;
         self.spawn_analysis_job("増分解析", move || {
-            JobResult::Pushover(Self::run_compute(|| {
+            JobResult::Pushover(Box::new(Self::run_compute(|| {
                 sepika_job::compute::compute_pushover(model, cfg).map_err(|e| e.to_string())
-            }))
+            })))
         });
         #[cfg(feature = "gui")]
         if let Some(job) = self.core.scoped.job.as_mut() {

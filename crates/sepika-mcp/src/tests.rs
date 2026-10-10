@@ -1837,6 +1837,274 @@ fn mcp_eigen_entry_rejects_unknown_or_stale_wall_band_and_accepts_regeneration()
     }
 }
 
+fn load_state_contract_model() -> Model {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::{LoadCase, LoadCaseKind as K, LoadCombination, NodalLoad};
+    let mut model = rc_column_model();
+    model.load_cases = [
+        (K::Dead, 100.0),
+        (K::Live, 20.0),
+        (K::Snow, 40.0),
+        (K::Seismic, 30.0),
+        (K::Seismic, 30.0),
+        (K::Wind, 30.0),
+        (K::LiveSeismic, 8.0),
+        (K::Dead, 900.0),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, (kind, kn))| LoadCase {
+        id: LoadCaseId(i as u32),
+        name: format!("手入力{i}"),
+        kind,
+        nodal: vec![NodalLoad::manual(
+            NodeId(1),
+            [kn * 1000.0, 0.0, -kn * 1000.0, 0.0, 0.0, 0.0],
+        )],
+        member: vec![],
+    })
+    .collect();
+    for extra in [
+        vec![],
+        vec![(2, 0.7)],
+        vec![(2, 1.0)],
+        vec![(2, 0.35), (3, 1.0)],
+        vec![(2, 0.35), (3, -1.0)],
+        vec![(2, 0.35), (4, 1.0)],
+        vec![(2, 0.35), (4, -1.0)],
+        vec![(5, 1.0)],
+        vec![(2, 0.35), (5, 1.0)],
+    ] {
+        let mut terms = vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)];
+        terms.extend(extra.into_iter().map(|(id, f)| (LoadCaseId(id), f)));
+        model.combinations.push(LoadCombination {
+            name: format!("任意名称{}", model.combinations.len()),
+            terms,
+        });
+    }
+    model
+}
+
+#[test]
+fn load_state_saved_mcp_job_keeps_independent_n_q_m_values_and_duration() {
+    let mut model = load_state_contract_model();
+    let path = std::env::temp_dir().join(format!("sepika487-mcp-{}.ovika", std::process::id()));
+    sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+    model = sepika_io::ovika::load_ovika(&path).unwrap().model;
+    std::fs::remove_file(path).unwrap();
+    for (index, expected_kn, term) in [
+        (0, 120.0, "long"),
+        (1, 148.0, "long"),
+        (2, 160.0, "short"),
+        (3, 164.0, "short"),
+        (4, 104.0, "short"),
+        (5, 164.0, "short"),
+        (6, 104.0, "short"),
+        (7, 150.0, "short"),
+        (8, 164.0, "short"),
+    ] {
+        let JobOutcome::DesignCheck {
+            member_force_rows,
+            summary,
+            ..
+        } = compute_job(
+            &model,
+            JobKind::DesignCheck,
+            &JobParams {
+                load_combination: Some(index),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        else {
+            panic!("DesignCheck")
+        };
+        assert_eq!(summary["term"], term);
+        assert_eq!(summary["load_target"]["source"], "saved_combination");
+        assert_eq!(summary["load_target"]["state"]["combination"], true);
+        assert_eq!(summary["load_target"]["legal_conditions_verified"], false);
+        let (_, _, f) = member_force_rows
+            .iter()
+            .find(|(_, p, _)| *p == 0.0)
+            .unwrap();
+        assert!(
+            (f[0].abs() / 1000.0 - expected_kn).abs() < 1e-8,
+            "index {index}: {f:?}"
+        );
+        assert!((f[1].hypot(f[2]) / 1000.0 - expected_kn).abs() < 1e-8);
+        assert!((f[4].hypot(f[5]) / 1_000_000.0 - 3.0 * expected_kn).abs() < 1e-8);
+        if index == 3 {
+            assert_eq!(
+                summary["load_target"]["gravity_reference_terms"],
+                serde_json::json!([[0, 1.0], [1, 1.0], [2, 0.35]])
+            );
+        }
+    }
+    let terms = model.combinations[0].terms.clone();
+    model.combinations[0].name = "LOADCASE 雪 地震".into();
+    let JobOutcome::DesignCheck { summary, .. } = compute_job(
+        &model,
+        JobKind::DesignCheck,
+        &JobParams {
+            load_combination: Some(0),
+            ..Default::default()
+        },
+    )
+    .unwrap() else {
+        panic!()
+    };
+    assert_eq!(summary["term"], "long");
+    assert_eq!(summary["load_target"]["terms"], serde_json::json!(terms));
+    model.combinations[0].terms = model.combinations[2].terms.clone();
+    let JobOutcome::DesignCheck { summary, .. } = compute_job(
+        &model,
+        JobKind::DesignCheck,
+        &JobParams {
+            load_combination: Some(0),
+            ..Default::default()
+        },
+    )
+    .unwrap() else {
+        panic!()
+    };
+    assert_eq!(summary["term"], "short");
+}
+
+#[test]
+fn load_state_mcp_single_unknown_and_invalid_target_are_never_passed() {
+    let model = load_state_contract_model();
+    for id in [2, 5, 6] {
+        let JobOutcome::DesignCheck { summary, .. } = compute_job(
+            &model,
+            JobKind::DesignCheck,
+            &JobParams {
+                load_case: Some(id),
+                ..Default::default()
+            },
+        )
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!(summary["all_checked_and_ok"], false);
+        assert!(summary["n_skipped"].as_u64().unwrap() > 0);
+        assert_eq!(summary["load_target"]["source"], "single_case");
+    }
+    for params in [
+        JobParams {
+            load_case: Some(0),
+            load_combination: Some(0),
+            ..Default::default()
+        },
+        JobParams {
+            load_combination: Some(99),
+            ..Default::default()
+        },
+        JobParams {
+            load_case: Some(3),
+            ..Default::default()
+        },
+    ] {
+        assert!(matches!(
+            compute_job(&model, JobKind::DesignCheck, &params),
+            Err(sepika_job::JobError::InvalidInput(_))
+        ));
+    }
+}
+
+#[test]
+fn load_state_mcp_automatic_gravity_uses_frame_live_and_rejects_any_failed_gravity() {
+    use sepika_core::model::{LoadCaseKind as K, MemberLoad, MemberLoadExtent, MemberLoadKind};
+    let mut model = load_state_contract_model();
+    model.load_cases[2].kind = K::Other;
+    model.load_cases[7].kind = K::Other;
+    let params = JobParams {
+        load_case: Some(3),
+        ..Default::default()
+    };
+    let JobOutcome::DesignCheck {
+        member_force_rows,
+        summary,
+        ..
+    } = compute_job(&model, JobKind::DesignCheck, &params).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(
+        summary["load_target"]["source"],
+        "automatic_gravity_combination"
+    );
+    let (_, _, f) = member_force_rows
+        .iter()
+        .find(|(_, p, _)| *p == 0.0)
+        .unwrap();
+    let baseline_n = f[0].abs();
+    assert!(summary["load_target"]["terms"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t[0] == 1));
+    assert!(!summary["load_target"]["terms"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t[0] == 6));
+    let mut changed = model.clone();
+    changed.load_cases[1].nodal[0].values[2] -= 12_000.0;
+    changed.load_cases[6].nodal[0].values[2] -= 92_000.0;
+    let JobOutcome::DesignCheck {
+        member_force_rows, ..
+    } = compute_job(&changed, JobKind::DesignCheck, &params).unwrap()
+    else {
+        panic!()
+    };
+    let (_, _, f) = member_force_rows
+        .iter()
+        .find(|(_, p, _)| *p == 0.0)
+        .unwrap();
+    assert!((f[0].abs() - baseline_n - 12_000.0).abs() < 1e-8);
+    for failed in [vec![1usize], vec![0usize, 1usize]] {
+        let mut bad = model.clone();
+        for index in failed {
+            let mut load = MemberLoad::manual(
+                ElemId(0),
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Point {
+                    a: 100.0,
+                    p: 1000.0,
+                },
+            );
+            load.extent = MemberLoadExtent::FullLengthUniform;
+            bad.load_cases[index].member.push(load);
+        }
+        assert!(
+            compute_job(&bad, JobKind::DesignCheck, &params).is_err(),
+            "重力一部/全部失敗時は拒否"
+        );
+    }
+}
+
+#[test]
+fn load_state_rc_girder_missing_q0_is_skipped_instead_of_fem_ql_substitution() {
+    let mut model = load_state_contract_model();
+    model.nodes[1].coord = [3000.0, 0.0, 0.0];
+    model.elements[0].local_axis.ref_vector = [0.0, 0.0, 1.0];
+    model.sections[0].frame_use = Some(FrameSectionUse::Girder);
+    let params = JobParams {
+        load_combination: Some(3),
+        ..Default::default()
+    };
+    let JobOutcome::DesignCheck { summary, .. } =
+        compute_job(&model, JobKind::DesignCheck, &params).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(summary["all_checked_and_ok"], false);
+    assert!(summary["member_skipped"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["reason"].as_str().unwrap().contains("QD1用")));
+}
 fn beam_contact_fixture() -> sepika_core::model::Model {
     use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId, SlabId};
     use sepika_core::model::*;

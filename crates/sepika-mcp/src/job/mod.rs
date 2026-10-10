@@ -25,6 +25,8 @@ use ultimate::compute_ultimate_check_job;
 pub struct JobParams {
     /// 対象荷重ケース ID（未指定なら先頭ケース）。
     pub load_case: Option<u32>,
+    /// DesignCheck用の保存組合せindex。荷重ケースとの同時指定は禁止。
+    pub load_combination: Option<usize>,
     /// モード数。
     pub n_modes: usize,
     /// 加力・入力方向。
@@ -35,6 +37,9 @@ pub struct JobParams {
     pub max_disp: Option<f64>,
     /// 目標最大層間変形角の分母 n（既定 150）。
     pub max_drift_denom: Option<f64>,
+    /// 明示する Ds 判定 / 保有耐力比較の確定 step。未指定は未判定。
+    pub ds_step: Option<u32>,
+    pub capacity_step: Option<u32>,
     /// サンプル波の時間刻み [s]。
     pub dt: f64,
     /// サンプル波の継続時間 [s]。
@@ -60,11 +65,14 @@ impl Default for JobParams {
         let s = AnalysisSettings::default();
         Self {
             load_case: None,
+            load_combination: None,
             n_modes: s.n_modes,
             dir: JobDir::X,
             steps: s.push_steps,
             max_disp: None,
             max_drift_denom: None,
+            ds_step: None,
+            capacity_step: None,
             dt: s.th_dt,
             duration: 2.0,
             period: s.th_period,
@@ -140,7 +148,8 @@ pub enum JobOutcome {
         summary: serde_json::Value,
     },
     DesignCheck {
-        case: u32,
+        /// 単独ケースの保存ID。保存・自動組合せはケースストアへ書き込まない。
+        case: Option<u32>,
         member_force_rows: Vec<(u32, f64, [f64; 6])>,
         summary: serde_json::Value,
     },
@@ -155,6 +164,11 @@ pub fn compute_job(
     kind: JobKind,
     params: &JobParams,
 ) -> Result<JobOutcome, JobError> {
+    if params.load_combination.is_some() && kind != JobKind::DesignCheck {
+        return Err(JobError::InvalidInput(
+            "load_combinationはDesignCheck専用です".into(),
+        ));
+    }
     match kind {
         JobKind::LinearStatic => compute_linear_static_job(model, params),
         JobKind::Eigen => compute_eigen_job(model, params),

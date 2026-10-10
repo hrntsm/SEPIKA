@@ -664,7 +664,7 @@ fn test_pushover_ductility_method_selection_changes_reference() {
 /// determine_mechanism / hinge_story 用の2層・柱通り（基礎-1F-2F）モデル。
 /// node0=基礎(story None), node1=1F(story0), node2=2F(story1)。
 /// elem0=1F柱(0-1), elem1=2F柱(1-2)。
-fn two_story_model() -> Model {
+pub(super) fn two_story_model() -> Model {
     let sec = Section {
         frame_use: None,
         id: SectionId(0),

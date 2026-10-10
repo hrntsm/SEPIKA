@@ -167,20 +167,7 @@ pub fn check_holding_capacity(
             let f = *fes_by_story.get(i).unwrap_or(&1.0);
             let rs = *rs_by_story.get(i).unwrap_or(&0.0);
             let re = *re_by_story.get(i).unwrap_or(&0.0);
-            let qun = ds * f * qud;
-            let ok = qu >= qun;
-            StoryCheck {
-                story,
-                rs,
-                re,
-                ds,
-                fes: f,
-                qu,
-                qud,
-                qun,
-                drift_angle,
-                ok,
-            }
+            story_check(story, qu, drift_angle, qud, ds, f, rs, re)
         })
         .collect();
 
@@ -190,9 +177,105 @@ pub fn check_holding_capacity(
     }
 }
 
+/// 明示採用した同一状態の層力 [N]・層間変位 [mm] で判定する。
+/// 全層の入力長・有限性・正の階高が必要。欠損や不正値は Err。
+#[allow(clippy::too_many_arguments)]
+pub fn check_holding_capacity_at_state(
+    qu_n: &[f64],
+    story_drifts_mm: &[f64],
+    qud_n: &[f64],
+    ds: &[f64],
+    fes: &[f64],
+    rs: &[f64],
+    re: &[f64],
+    heights_mm: &[f64],
+    member_ranks: Vec<(ElemId, MemberRank)>,
+) -> Result<HoldingCapacityResult, String> {
+    let n = qud_n.len();
+    if n == 0
+        || [qu_n, story_drifts_mm, ds, fes, rs, re, heights_mm]
+            .iter()
+            .any(|v| v.len() != n || v.iter().any(|x| !x.is_finite()))
+        || qud_n.iter().any(|x| !x.is_finite())
+        || heights_mm.iter().any(|h| *h <= 0.0)
+    {
+        return Err("選定状態の層力・変形・階高・設計入力が欠損又は不正です".into());
+    }
+    let stories = (0..n)
+        .map(|i| {
+            story_check(
+                StoryId(i as u32),
+                qu_n[i].abs(),
+                story_drifts_mm[i] / heights_mm[i],
+                qud_n[i],
+                ds[i],
+                fes[i],
+                rs[i],
+                re[i],
+            )
+        })
+        .collect();
+    Ok(HoldingCapacityResult {
+        stories,
+        member_ranks,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn story_check(
+    story: StoryId,
+    qu: f64,
+    drift_angle: f64,
+    qud: f64,
+    ds: f64,
+    fes: f64,
+    rs: f64,
+    re: f64,
+) -> StoryCheck {
+    let qun = ds * fes * qud;
+    StoryCheck {
+        story,
+        rs,
+        re,
+        ds,
+        fes,
+        qu,
+        qud,
+        qun,
+        drift_angle,
+        ok: qu >= qun,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 明示状態のqu120と変位30を直接判定し欠損非有限を拒否する() {
+        let run = |drift: &[f64], heights: &[f64]| {
+            check_holding_capacity_at_state(
+                &[120_000.0],
+                drift,
+                &[200_000.0],
+                &[0.3],
+                &[1.0],
+                &[1.0],
+                &[0.0],
+                heights,
+                vec![],
+            )
+        };
+        let r = run(&[30.0], &[3000.0]).unwrap();
+        assert_eq!(r.stories[0].qu, 120_000.0);
+        assert_eq!(r.stories[0].qun, 60_000.0);
+        assert_eq!(r.stories[0].drift_angle, 0.01);
+        assert!(r.stories[0].ok);
+        for drift in [vec![], vec![f64::NAN], vec![f64::INFINITY]] {
+            assert!(run(&drift, &[3000.0]).is_err());
+        }
+        assert!(run(&[30.0], &[0.0]).is_err());
+    }
 
     #[test]
     fn test_stiffness_ratios_example() {
@@ -312,6 +395,9 @@ mod tests {
             steps: vec![],
             wall_history: None,
             wall_run: None,
+            confirmed_history: None,
+            ds_evaluation: None,
+            capacity_evaluation: None,
             capacity_curve: vec![CapacityPoint {
                 step: 0,
                 roof_disp: 0.0,
@@ -341,6 +427,9 @@ mod tests {
             steps: vec![],
             wall_history: None,
             wall_run: None,
+            confirmed_history: None,
+            ds_evaluation: None,
+            capacity_evaluation: None,
             capacity_curve: vec![
                 CapacityPoint {
                     step: 0,

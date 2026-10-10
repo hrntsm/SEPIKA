@@ -1,7 +1,7 @@
 use crate::ids::LoadCaseId;
 use crate::model::LoadCombination;
 
-/// 多雪区域の積雪荷重低減係数（令86条 多雪区域の荷重組合せ）。
+/// 多雪区域組合せの積雪係数。標準外の直接入力は検定継続時間を自動確認しない。
 ///
 /// - `delta1`: 長期積雪 `DL+LL+δ1・SL` の低減係数（既定 0.7）
 /// - `delta3`: 地震時 `DL+LL+δ3・SL±EX/EY` の低減係数（既定 0.35）
@@ -176,36 +176,130 @@ pub fn auto_combinations(
     standard_combinations(&input)
 }
 
-/// 荷重組合せ名から断面検定の荷重継続性区分（長期/短期）を判定する。
-///
-/// 令82条（標準組合せ）・令86条（多雪区域）: DL+LL（多雪区域では
-/// DL+LL+0.7SL も）が長期（常時・積雪時の長期）、地震（EX/EY）を含む組合せ
-/// および短期積雪（DL+LL+SL）は短期（令82条）。
-/// [`standard_combinations`] の命名規約（"DL + LL ± EX"・"DL + LL + 0.7SL" 等）に
-/// 基づき、追加項の記号で判定する。
-///
-/// 風記号 W も短期として扱う。自動生成では暴風の組合せを作らないが、風荷重を
-/// 含む組合せを保存データが持つ場合に長期と誤判定しないためである。
-pub fn is_short_term_combo(name: &str) -> bool {
-    let upper = name.to_uppercase();
-    if upper.contains('K') || upper.contains('E') || upper.contains('W') {
-        return true;
-    }
-    if let Some(pos) = upper.find('S') {
-        let coef: String = upper[..pos]
-            .chars()
-            .rev()
-            .take_while(|c| c.is_ascii_digit() || *c == '.')
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-        if let Ok(v) = coef.parse::<f64>() {
-            return v >= 1.0;
+/// 許容応力度に用いる荷重継続時間。名称とは独立に判定する。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoadDuration {
+    Long,
+    Short,
+}
+
+/// 検定対象の作用。地震用重量の積載ケースは検定用重力荷重に含めない。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoadAction {
+    Gravity,
+    Snow,
+    Wind,
+    Seismic,
+}
+
+/// 荷重状態の継続時間と作用。単独ケースは法令の組合せ検定を表さない。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct DesignLoadState {
+    pub duration: LoadDuration,
+    pub action: LoadAction,
+    pub combination: bool,
+}
+
+/// 保存種別から単独ケースの荷重状態を判定する。不明種別・地震重量用は未判定。
+pub fn case_design_state(kind: crate::model::LoadCaseKind) -> Result<DesignLoadState, String> {
+    use crate::model::LoadCaseKind as K;
+    let (duration, action) = match kind {
+        K::Dead | K::Live => (LoadDuration::Long, LoadAction::Gravity),
+        K::Snow => (LoadDuration::Short, LoadAction::Snow),
+        K::Wind => (LoadDuration::Short, LoadAction::Wind),
+        K::Seismic => (LoadDuration::Short, LoadAction::Seismic),
+        K::LiveSeismic => return Err("地震重量用積載は検定用の重力荷重ではありません".into()),
+        K::Other => return Err("荷重種別が未指定のため継続時間を判定できません".into()),
+    };
+    Ok(DesignLoadState {
+        duration,
+        action,
+        combination: false,
+    })
+}
+
+/// 保存係数・荷重種別から検定状態を判定する。標準外係数・不足・混合作用は理由付き未判定。
+/// 状態の判定は、多雪区域指定や風時の実況等の法的適用条件の確認を代替しない。
+pub fn combination_design_state(
+    combo: &LoadCombination,
+    cases: &[crate::model::LoadCase],
+) -> Result<DesignLoadState, String> {
+    use crate::model::LoadCaseKind as K;
+    let mut coefficients = std::collections::BTreeMap::new();
+    for (id, factor) in &combo.terms {
+        if !factor.is_finite() {
+            return Err("荷重組合せ係数が非有限です".into());
         }
-        return true;
+        *coefficients.entry(id.0).or_insert(0.0) += factor;
     }
-    false
+    let mut dead = false;
+    let mut live = false;
+    let mut snow = 0.0;
+    let mut snow_cases = 0;
+    let mut lateral = None;
+    for (id, factor) in coefficients {
+        if factor == 0.0 {
+            continue;
+        }
+        let case = cases
+            .iter()
+            .find(|c| c.id.0 == id)
+            .ok_or_else(|| format!("荷重ケース {id} がありません"))?;
+        match case.kind {
+            K::Dead | K::Live if factor == 1.0 => {
+                dead |= case.kind == K::Dead;
+                live |= case.kind == K::Live;
+            }
+            K::Snow if factor > 0.0 => {
+                snow = factor;
+                snow_cases += 1;
+            }
+            K::Wind | K::Seismic if factor.abs() == 1.0 && lateral.is_none() => {
+                lateral = Some(if case.kind == K::Wind {
+                    LoadAction::Wind
+                } else {
+                    LoadAction::Seismic
+                });
+            }
+            _ => {
+                return Err(format!(
+                    "荷重ケース {id} の種別・係数から検定状態を一意に判定できません"
+                ))
+            }
+        }
+    }
+    if !dead || !live {
+        return Err("固定荷重Gと架構用積載Pを含む組合せが必要です（P=0もケースで明示）".into());
+    }
+    if snow_cases > 1 {
+        return Err("複数の積雪ケースの適用条件が未判定です".into());
+    }
+    let (duration, action) = match lateral {
+        Some(action) if snow == 0.0 || snow == 0.35 => (LoadDuration::Short, action),
+        Some(_) => return Err("水平作用時の積雪係数が標準0.35と異なり適用条件が未判定です".into()),
+        None if snow == 0.0 => (LoadDuration::Long, LoadAction::Gravity),
+        None if snow == 0.7 => (LoadDuration::Long, LoadAction::Snow),
+        None if snow == 1.0 => (LoadDuration::Short, LoadAction::Snow),
+        None => return Err("積雪係数が標準0.7/1.0と異なり継続時間が未判定です".into()),
+    };
+    Ok(DesignLoadState {
+        duration,
+        action,
+        combination: true,
+    })
+}
+
+/// 表示結果名を保存組合せへ照合して常時G+Pを選ぶ。同名が重複すれば未判定。
+pub fn is_gravity_combination(name: &str, model: &crate::model::Model) -> bool {
+    let mut matches = model.combinations.iter().filter(|c| c.name == name);
+    let Some(combo) = matches.next() else {
+        return false;
+    };
+    matches.next().is_none()
+        && combination_design_state(combo, &model.load_cases)
+            .is_ok_and(|s| s.duration == LoadDuration::Long && s.action == LoadAction::Gravity)
 }
 
 #[cfg(test)]
@@ -231,26 +325,6 @@ mod tests {
         // 負側加力は係数 -1.0
         assert_eq!(combos[2].terms[2].1, -1.0);
         assert_eq!(combos[4].terms[2].1, -1.0);
-    }
-
-    #[test]
-    fn test_is_short_term_combo() {
-        assert!(!is_short_term_combo("DL + LL"));
-        assert!(is_short_term_combo("DL + LL + EX"));
-        assert!(is_short_term_combo("DL + LL - EX"));
-        assert!(is_short_term_combo("DL + LL + EY"));
-        assert!(is_short_term_combo("DL + LL + SL"));
-        assert!(is_short_term_combo("DL + LL + WX"));
-        assert!(is_short_term_combo("DL + LL - WY"));
-        // 多雪区域: 長期 0.7SL は長期、0.35SL 付き短期は短期。
-        assert!(!is_short_term_combo("DL + LL + 0.7SL"));
-        assert!(is_short_term_combo("DL + LL + 0.35SL + EX"));
-        assert!(is_short_term_combo("DL + LL + 0.35SL - WY"));
-        // 旧名（G+P・Kx/Wx 等）の保存データも従来どおり判定できる（後方互換）。
-        assert!(!is_short_term_combo("G + P"));
-        assert!(is_short_term_combo("G + P + Kx"));
-        assert!(is_short_term_combo("G + P + Wx"));
-        assert!(!is_short_term_combo("G + P + 0.7S"));
     }
 
     #[test]
@@ -363,10 +437,6 @@ mod tests {
             by_name("DL + LL + 0.4SL + EX").terms[2],
             (LoadCaseId(7), 0.4)
         );
-        // 長短期判定: δ1 付きは長期、δ3 付き地震は短期。
-        assert!(!is_short_term_combo("DL + LL + 0.65SL"));
-        assert!(is_short_term_combo("DL + LL + 0.4SL + EX"));
-        assert!(is_short_term_combo("DL + LL + SL"));
     }
 
     #[test]
@@ -390,13 +460,6 @@ mod tests {
 
     #[test]
     fn test_default_combinations_matches_auto_combinations() {
-        // default_combinations（新規モデルの既定）は standard_combinations の
-        // 固定引数版として実装されているため、生成規則そのものは一致が保証されている。
-        // 本テストが確かめるのは**ケース ID の割り当て**（標準ケースの並び
-        // 0:DL, 1:LL(架構用), 3:EX, 4:EY を正しく渡しているか）と、生成された
-        // 名前で長短期の判別が機能することの 2 点。
-        // （かつて default_combinations は組合せを手書きしており、本テストが
-        // 唯一の同期手段だった。実装を共有した現在は割り当ての検査に役割が変わる。）
         let expected = auto_combinations(
             LoadCaseId(0),
             LoadCaseId(1),
@@ -409,11 +472,6 @@ mod tests {
             actual, expected,
             "default_combinations が auto_combinations（DL/LL/EX/EY）と一致していない"
         );
-        // 表示名で長短期の判別が正しく機能する（DL+LL は長期、地震4件は短期）。
-        assert!(!is_short_term_combo(&actual[0].name));
-        for c in &actual[1..] {
-            assert!(is_short_term_combo(&c.name), "{} は短期のはず", c.name);
-        }
     }
 
     #[test]
@@ -430,5 +488,144 @@ mod tests {
         let combos = standard_combinations(&input);
         assert_eq!(combos.len(), 1);
         assert_eq!(combos[0].name, "DL + LL");
+    }
+}
+
+#[cfg(test)]
+mod state_tests {
+    use super::*;
+    use crate::model::{LoadCase, LoadCaseKind as K, LoadPurpose, SlabUsage};
+
+    fn cases() -> Vec<LoadCase> {
+        [
+            K::Dead,
+            K::Live,
+            K::Snow,
+            K::Seismic,
+            K::Wind,
+            K::LiveSeismic,
+            K::Other,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, kind)| LoadCase {
+            id: LoadCaseId(i as u32),
+            name: "任意名称".into(),
+            nodal: vec![],
+            member: vec![],
+            kind,
+        })
+        .collect()
+    }
+    #[test]
+    fn load_state_uses_saved_terms_and_kind_after_named_roundtrip() {
+        let cases = cases();
+        for (extra, duration, action) in [
+            (vec![], LoadDuration::Long, LoadAction::Gravity),
+            (
+                vec![(LoadCaseId(2), 0.7)],
+                LoadDuration::Long,
+                LoadAction::Snow,
+            ),
+            (
+                vec![(LoadCaseId(2), 1.0)],
+                LoadDuration::Short,
+                LoadAction::Snow,
+            ),
+            (
+                vec![(LoadCaseId(4), -1.0)],
+                LoadDuration::Short,
+                LoadAction::Wind,
+            ),
+            (
+                vec![(LoadCaseId(2), 0.35), (LoadCaseId(4), 1.0)],
+                LoadDuration::Short,
+                LoadAction::Wind,
+            ),
+            (
+                vec![(LoadCaseId(2), 0.35), (LoadCaseId(3), -1.0)],
+                LoadDuration::Short,
+                LoadAction::Seismic,
+            ),
+        ] {
+            for name in ["常時", "LOADCASE", "DL + LL", "任意に改名したケース"] {
+                let mut terms = vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)];
+                terms.extend(extra.clone());
+                let combo = LoadCombination {
+                    name: name.into(),
+                    terms,
+                };
+                let bytes = rmp_serde::to_vec_named(&combo).unwrap();
+                let saved: LoadCombination = rmp_serde::from_slice(&bytes).unwrap();
+                assert_eq!(
+                    combination_design_state(&saved, &cases).unwrap(),
+                    DesignLoadState {
+                        duration,
+                        action,
+                        combination: true
+                    }
+                );
+            }
+        }
+        for extra in [
+            vec![(LoadCaseId(2), 0.65)],
+            vec![(LoadCaseId(5), 1.0)],
+            vec![(LoadCaseId(6), 1.0)],
+            vec![(LoadCaseId(3), 1.0), (LoadCaseId(4), 1.0)],
+            vec![(LoadCaseId(99), 1.0)],
+        ] {
+            let mut terms = vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)];
+            terms.extend(extra);
+            assert!(combination_design_state(
+                &LoadCombination {
+                    name: "DL + LL".into(),
+                    terms
+                },
+                &cases
+            )
+            .is_err());
+        }
+        for (kind, duration) in [
+            (K::Dead, LoadDuration::Long),
+            (K::Snow, LoadDuration::Short),
+            (K::Wind, LoadDuration::Short),
+            (K::Seismic, LoadDuration::Short),
+        ] {
+            let state = case_design_state(kind).unwrap();
+            assert_eq!(state.duration, duration);
+            assert!(!state.combination);
+        }
+        assert!(case_design_state(K::Other).is_err());
+        assert!(case_design_state(K::LiveSeismic).is_err());
+    }
+
+    #[test]
+    fn office_10m2_and_actual_input_keep_purpose_columns() {
+        for (purpose, kn) in [
+            (LoadPurpose::Floor, 29.0),
+            (LoadPurpose::Beam, 29.0),
+            (LoadPurpose::Frame, 18.0),
+            (LoadPurpose::Seismic, 8.0),
+        ] {
+            assert!(
+                (SlabUsage::Office.live_load(purpose) * 10_000_000.0 / 1000.0 - kn).abs() < 1e-12
+            );
+        }
+        let actual = SlabUsage::Custom {
+            floor: 0.0033,
+            beam: 0.0031,
+            frame: 0.0022,
+            seismic: 0.0009,
+        };
+        let saved: SlabUsage =
+            rmp_serde::from_slice(&rmp_serde::to_vec_named(&actual).unwrap()).unwrap();
+        for (purpose, kn) in [
+            (LoadPurpose::Floor, 33.0),
+            (LoadPurpose::Beam, 31.0),
+            (LoadPurpose::Frame, 22.0),
+            (LoadPurpose::Seismic, 9.0),
+        ] {
+            assert!((saved.live_load(purpose) * 10_000_000.0 / 1000.0 - kn).abs() < 1e-12);
+        }
     }
 }

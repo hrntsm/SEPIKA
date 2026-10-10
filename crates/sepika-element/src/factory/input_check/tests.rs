@@ -500,9 +500,16 @@ fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
             },
         },
     });
+    model.set_member_rc_beam_reference(
+        ElemId(0),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+    );
+    model.sections[0].iy = 5_400_000_000.0;
+    model.sections[0].iz = 1_350_000_000.0;
+    model.sections[0].width = 300.0;
     assert!(ensure_nonlinear_input(&model).is_ok());
     assert!(
-        (super::super::springs::flexural_alpha_y(&model.elements[0], &model) - 0.271_755).abs()
+        (super::super::springs::flexural_alpha_y(&model.elements[0], &model) - 0.265_720_5).abs()
             < 1e-12
     );
     let (_, _, backbone) = super::super::springs::build_flexural_springs(
@@ -512,7 +519,7 @@ fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
         crate::factory::StrengthBasis::Nominal,
     );
     let [theta_y, my] = backbone.points[2];
-    assert!((my / (backbone.k_rot * theta_y) - 0.271_755).abs() < 1e-12);
+    assert!((my / (backbone.k_rot * theta_y) - 0.265_720_5).abs() < 1e-12);
     for bad in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
         let mut invalid = model.clone();
         if let Some(SectionShape::RcBeamRect { b, .. }) = invalid.sections[0].shape.as_mut() {
@@ -539,12 +546,19 @@ fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
 }
 
 fn public_generation_diagnostic(model: &Model) -> String {
+    public_generation_diagnostic_for_kind(model, sepika_core::model::AnalysisKind::Incremental)
+}
+
+fn public_generation_diagnostic_for_kind(
+    model: &Model,
+    kind: sepika_core::model::AnalysisKind,
+) -> String {
     let result = std::panic::catch_unwind(|| {
         crate::factory::build_nonlinear_behavior(
             &model.elements[0],
             model,
             crate::factory::StrengthBasis::Nominal,
-            sepika_core::model::AnalysisKind::Incremental,
+            kind,
         )
     });
     *result
@@ -598,6 +612,13 @@ fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
     let error = ensure_nonlinear_input(&model).unwrap_err();
     assert!(error.contains("スラブ引張筋面積と正負別骨格"), "{error}");
     assert_eq!(public_generation_diagnostic(&model), error);
+    model.set_member_rc_beam_reference(
+        ElemId(0),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+    );
+    if let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() {
+        rebar.top = rebar.bottom.clone();
+    }
     model.slabs.clear();
     model.floor_regions.clear();
     assert!(ensure_nonlinear_input(&model).is_ok());
@@ -702,4 +723,459 @@ fn src_stiffness_errors_reach_nonlinear_input_diagnostics_and_public_factories()
             "{factory_error}"
         );
     }
+}
+
+fn explicit_rc_reference_fixture() -> Model {
+    let mut model = beam_model(rc_section(), concrete_material());
+    let bar_dia = (2400.0 / std::f64::consts::PI).sqrt();
+    let mut section = SectionShape::RcBeamRect {
+        b: 300.0,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: bar_dia,
+            top: vec![3],
+            bottom: vec![3],
+            cover: 60.0 - 10.0 - bar_dia / 2.0,
+            stirrup: sepika_core::section_shape::BeamStirrup {
+                dia: 10.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    }
+    .to_section(SectionId(0), "RC基準".into());
+    section.material = Some(MaterialId(0));
+    section.rebar_material = Some(MaterialId(1));
+    section.shear_rebar_material = Some(MaterialId(1));
+    model.sections[0] = section;
+    model.materials[0].young = 20000.0;
+    model.materials[0].density = 2.4e-9;
+    model.materials[1].young = 200000.0;
+    model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+    model.set_member_hysteresis(ElemId(0), sepika_core::model::HysteresisModel::Retrograde);
+    model.set_member_rc_beam_reference(
+        ElemId(0),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+    );
+    model
+}
+
+#[test]
+fn actual_rc_factory_connects_additional_angle_and_publishes_both_backbones() {
+    use crate::behavior::{Ctx, ElementBehavior, LocalVec, MassOption};
+    use sepika_core::model::AnalysisKind;
+    let model = explicit_rc_reference_fixture();
+    ensure_nonlinear_input(&model).unwrap();
+    let data = &model.elements[0];
+    let mut behavior = crate::factory::build_nonlinear_behavior(
+        data,
+        &model,
+        crate::factory::StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    );
+    let reference = crate::factory::build_hinge_view(
+        data,
+        &model,
+        crate::factory::StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+        0.0,
+        8,
+        24,
+    )
+    .unwrap();
+    let total = reference.total_backbone.unwrap();
+    let additional = reference.backbone.unwrap();
+    assert!((total[2][0] - 0.005927325831114165).abs() < 1e-14);
+    assert!((additional[2][0] - 0.003132825831114165).abs() < 1e-14);
+    assert!(additional[1][0].abs() < 1e-15);
+    let elastic = crate::frame::beam::BeamElement::new(data, &model);
+    let ctx = Ctx { model: &model };
+    assert!(elastic
+        .mass_matrix(MassOption::Consistent)
+        .data
+        .iter()
+        .any(|value| value.abs() > 0.0));
+    let reference_mass = behavior.mass_matrix(MassOption::Consistent);
+    assert!(reference_mass.data.iter().all(|value| value.is_finite()));
+    assert!(reference_mass.data.iter().any(|value| value.abs() > 0.0));
+    // Euler-Bernoulliの非零回転質量係数を、局所強軸の単位回転で直接照合する。
+    let mut unit = [0.0; 12];
+    unit[5] = 1.0;
+    let unit_global = elastic.axis.rotate_to_global(&unit);
+    let quadratic = |matrix: &crate::behavior::LocalMat, left: &[f64; 12], right: &[f64; 12]| {
+        (0..12)
+            .map(|i| {
+                (0..12)
+                    .map(|j| left[i] * matrix.get(i, j) * right[j])
+                    .sum::<f64>()
+            })
+            .sum::<f64>()
+    };
+    let properties = elastic.mass_properties;
+    let expected = properties.mass_per_length * 6000.0_f64.powi(3) / 105.0
+        + properties.rotary_inertia_z_per_length * 6000.0 * 2.0 / 15.0;
+    assert!(
+        (quadratic(&reference_mass, &unit_global, &unit_global) / expected - 1.0).abs() < 1e-12
+    );
+    unit[11] = 1.0;
+    let equal_rotations = elastic.axis.rotate_to_global(&unit);
+    let initial = behavior.tangent_stiffness(&ctx);
+    assert!((quadratic(&initial, &unit_global, &equal_rotations) / 108e9 - 1.0).abs() < 1e-12);
+    assert_eq!(
+        behavior.mass_matrix(MassOption::Lumped).data,
+        elastic.mass_matrix(MassOption::Lumped).data
+    );
+    let mut local = [0.0; 12];
+    local[5] = 0.005927325831114165;
+    local[11] = local[5];
+    let global = elastic.axis.rotate_to_global(&local);
+    behavior.update_state(
+        &LocalVec {
+            data: global.into_iter().collect(),
+        },
+        true,
+        &ctx,
+    );
+    let force_global: [f64; 12] = std::array::from_fn(|i| behavior.internal_force(&ctx).data[i]);
+    let force_local = elastic.axis.rotate_to_local(&force_global);
+    assert!((force_local[5] - 301806000.0).abs() < 0.1);
+    assert!((force_local[11] - 301806000.0).abs() < 0.1);
+    for extra in behavior.end_spring_rotations().unwrap() {
+        assert!((extra - 0.003132825831114165).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn rc_reference_kind_and_active_load_diagnostics_do_not_use_inactive_settings() {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::{AnalysisKind, HysteresisModel, LoadCase, LoadCaseKind, MemberLoad};
+    let mut model = explicit_rc_reference_fixture();
+    model.set_member_hysteresis_th(ElemId(0), Some(HysteresisModel::OriginOriented));
+    assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::Incremental).is_ok());
+    assert!(
+        ensure_nonlinear_input_for_kind(&model, AnalysisKind::TimeHistory)
+            .unwrap_err()
+            .contains("原点指向型")
+    );
+    model.set_member_hysteresis_th(ElemId(0), Some(HysteresisModel::Retrograde));
+    model.set_member_hysteresis(ElemId(0), HysteresisModel::OriginOriented);
+    assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::TimeHistory).is_ok());
+    assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::Incremental).is_err());
+    model.set_member_hysteresis(ElemId(0), HysteresisModel::Retrograde);
+    model.load_cases.push(LoadCase {
+        id: LoadCaseId(0),
+        name: "長期".into(),
+        kind: LoadCaseKind::Dead,
+        nodal: vec![],
+        member: vec![MemberLoad::full_length_uniform(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            6000.0,
+            10.0,
+        )],
+    });
+    assert!(ensure_rc_beam_reference_loads(&model, &[]).is_ok());
+    assert!(ensure_rc_beam_reference_loads(&model, &[LoadCaseId(0)])
+        .unwrap_err()
+        .contains("一定せん断・三角形"));
+    model.set_member_rc_beam_reference(ElemId(0), None);
+    let reason = ensure_nonlinear_input(&model).unwrap_err();
+    assert!(reason.contains("未指定"));
+    assert!(public_generation_diagnostic(&model).contains("未指定"));
+    let view = crate::factory::build_hinge_view(
+        &model.elements[0],
+        &model,
+        crate::factory::StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+        0.0,
+        8,
+        24,
+    )
+    .unwrap();
+    assert!(view.backbone.is_none());
+    assert!(view.unavailability_reason.unwrap().contains("未指定"));
+}
+
+#[test]
+fn rc_alpha_materials_are_required_and_explicit_basis_never_falls_back_to_other_laws() {
+    use sepika_core::model::{AnalysisKind, HysteresisModel};
+    let model = explicit_rc_reference_fixture();
+    for role in ["Ec", "Es"] {
+        let mut missing = model.clone();
+        if role == "Ec" {
+            missing.sections[0].material = None;
+        } else {
+            missing.sections[0].rebar_material = None;
+        }
+        let error =
+            crate::factory::springs::flexural_alpha_y_checked(&missing.elements[0], &missing)
+                .unwrap_err();
+        assert!(error.to_string().contains(role), "{error}");
+    }
+    for rule in [
+        HysteresisModel::Standard,
+        HysteresisModel::TsujiYamada,
+        HysteresisModel::SteelBuckling,
+    ] {
+        let mut other = model.clone();
+        other.set_member_hysteresis(ElemId(0), rule);
+        assert!(ensure_nonlinear_input_for_kind(&other, AnalysisKind::Incremental).is_err());
+        assert!(public_generation_diagnostic(&other).contains("対象外"));
+    }
+}
+
+#[test]
+fn rc_reference_cracking_uses_the_same_rectangular_geometry_as_alpha_and_yield() {
+    use sepika_core::model::AnalysisKind;
+    let model = explicit_rc_reference_fixture();
+    let view = |model: &Model| {
+        crate::factory::build_hinge_view(
+            &model.elements[0],
+            model,
+            crate::factory::StrengthBasis::Nominal,
+            AnalysisKind::Incremental,
+            0.0,
+            8,
+            24,
+        )
+        .unwrap()
+    };
+    let before = view(&model);
+    let mut supplied = model.clone();
+    supplied.sections[0].depth = 1200.0;
+    supplied.sections[0].property_basis.depth = sepika_core::model::PropertyBasis::Supplied;
+    assert!(ensure_nonlinear_input(&supplied).is_ok());
+    let after = view(&supplied);
+    assert_eq!(before.total_backbone, after.total_backbone);
+    assert_eq!(before.backbone, after.backbone);
+    let mc = after.total_backbone.unwrap()[1][1];
+    assert!((mc - 0.56 * 24.0_f64.sqrt() * 18_000_000.0).abs() < 1e-6);
+}
+
+#[test]
+fn rc_alpha_checks_each_material_before_their_ratio() {
+    let model = explicit_rc_reference_fixture();
+    assert!(crate::factory::springs::flexural_alpha_y_checked(&model.elements[0], &model).is_ok());
+    for (index, role) in [(0, "Ec"), (1, "Es")] {
+        for value in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut invalid = model.clone();
+            invalid.materials[index].young = value;
+            let error =
+                crate::factory::springs::flexural_alpha_y_checked(&invalid.elements[0], &invalid)
+                    .unwrap_err();
+            assert!(error.to_string().contains(role), "{error}");
+        }
+    }
+    let mut both_negative = model.clone();
+    both_negative.materials[0].young = -20000.0;
+    both_negative.materials[1].young = -200000.0;
+    assert!(crate::factory::springs::flexural_alpha_y_checked(
+        &both_negative.elements[0],
+        &both_negative
+    )
+    .is_err());
+}
+
+#[test]
+fn unsupported_concentrated_rc_law_never_falls_through_to_takeda_without_basis() {
+    use sepika_core::model::{AnalysisKind, HysteresisModel};
+    let mut model = explicit_rc_reference_fixture();
+    model.set_member_rc_beam_reference(ElemId(0), None);
+    model.set_member_hysteresis(ElemId(0), HysteresisModel::KarsanJirsa);
+    for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+        let reason = ensure_nonlinear_input_for_kind(&model, kind).unwrap_err();
+        assert!(reason.contains("Karsan"), "{reason}");
+        assert!(reason.contains("未対応"), "{reason}");
+        assert_eq!(public_generation_diagnostic_for_kind(&model, kind), reason);
+        let view = crate::factory::build_hinge_view(
+            &model.elements[0],
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+            kind,
+            0.0,
+            8,
+            24,
+        )
+        .unwrap();
+        assert!(view.backbone.is_none());
+        assert!(view.total_backbone.is_none());
+        assert!(view.unavailability_reason.unwrap().contains("Karsan"));
+    }
+    // 未実行側の指定が対応済みの実行側を拒否する根拠にはならない。
+    model.set_member_rc_beam_reference(
+        ElemId(0),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+    );
+    model.set_member_hysteresis_th(ElemId(0), Some(HysteresisModel::Takeda));
+    assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::TimeHistory).is_ok());
+    assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::Incremental).is_err());
+}
+
+#[test]
+fn explicit_rc_basis_rejects_every_other_resolved_element_path() {
+    use sepika_core::model::AnalysisKind;
+    let base = explicit_rc_reference_fixture();
+    let mut variants = Vec::new();
+    for regime in [ForceRegime::AxialBendingInteract, ForceRegime::Auto] {
+        let mut model = base.clone();
+        model.elements[0].force_regime = regime;
+        variants.push(model);
+    }
+    for element_kind in [
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+        ElementKind::Shell,
+        ElementKind::Wall,
+        ElementKind::PanelZone,
+        ElementKind::Brace {
+            tension_only: false,
+        },
+        ElementKind::NodalSpring,
+        ElementKind::Isolator,
+        ElementKind::Damper,
+    ] {
+        let mut model = base.clone();
+        model.elements[0].kind = element_kind;
+        variants.push(model);
+    }
+    let mut column = base.clone();
+    column.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    variants.push(column);
+    for model in variants {
+        for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+            let reason = ensure_nonlinear_input_for_kind(&model, kind).unwrap_err();
+            assert!(reason.contains("材端集中ばね専用"), "{reason}");
+            assert_eq!(public_generation_diagnostic_for_kind(&model, kind), reason);
+            let view = crate::factory::build_hinge_view(
+                &model.elements[0],
+                &model,
+                crate::factory::StrengthBasis::Nominal,
+                kind,
+                0.0,
+                8,
+                24,
+            )
+            .unwrap();
+            assert!(view.backbone.is_none());
+            assert!(view.total_backbone.is_none());
+            assert!(view.mn_surface.is_none());
+            assert!(view
+                .unavailability_reason
+                .unwrap()
+                .contains("材端集中ばね専用"));
+        }
+    }
+}
+
+#[test]
+fn unspecified_rc_basis_preserves_the_existing_fiber_path() {
+    use sepika_core::model::AnalysisKind;
+    let mut model = explicit_rc_reference_fixture();
+    model.set_member_rc_beam_reference(ElemId(0), None);
+    for element_kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        model.elements[0].kind = element_kind;
+        model.elements[0].force_regime = ForceRegime::AxialBendingInteract;
+        for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+            assert!(ensure_nonlinear_input_for_kind(&model, kind).is_ok());
+            let view = crate::factory::build_hinge_view(
+                &model.elements[0],
+                &model,
+                crate::factory::StrengthBasis::Nominal,
+                kind,
+                0.0,
+                8,
+                24,
+            )
+            .unwrap();
+            assert!(view.unavailability_reason.is_none());
+            assert!(view.mn_surface.is_some());
+            let _element = crate::factory::build_nonlinear_behavior(
+                &model.elements[0],
+                &model,
+                crate::factory::StrengthBasis::Nominal,
+                kind,
+            );
+        }
+    }
+}
+
+#[test]
+fn rc_reference_backbone_diagnostics_follow_the_actual_strength_basis() {
+    use crate::factory::StrengthBasis;
+    use sepika_core::model::AnalysisKind;
+    let base = explicit_rc_reference_fixture();
+    let view = |model: &Model, basis| {
+        crate::factory::build_hinge_view(
+            &model.elements[0],
+            model,
+            basis,
+            AnalysisKind::Incremental,
+            0.0,
+            8,
+            24,
+        )
+        .unwrap()
+    };
+    let nominal = view(&base, StrengthBasis::Nominal).total_backbone.unwrap();
+    for factor in [0.1, 0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut model = base.clone();
+        model.materials[1].strength_factor = Some(factor);
+        assert!(ensure_nonlinear_input_with_basis(
+            &model,
+            AnalysisKind::Incremental,
+            StrengthBasis::Nominal
+        )
+        .is_ok());
+        assert_eq!(
+            view(&model, StrengthBasis::Nominal).total_backbone.as_ref(),
+            Some(&nominal)
+        );
+        let _nominal = crate::factory::build_nonlinear_behavior(
+            &model.elements[0],
+            &model,
+            StrengthBasis::Nominal,
+            AnalysisKind::TimeHistory,
+        );
+        let reason = ensure_nonlinear_input_with_basis(
+            &model,
+            AnalysisKind::Incremental,
+            StrengthBasis::MaterialStrength,
+        )
+        .unwrap_err();
+        let unavailable = view(&model, StrengthBasis::MaterialStrength);
+        assert!(unavailable.backbone.is_none());
+        assert!(unavailable.total_backbone.is_none());
+        assert!(reason.contains(&unavailable.unavailability_reason.unwrap()));
+        let result = std::panic::catch_unwind(|| {
+            crate::factory::build_nonlinear_behavior(
+                &model.elements[0],
+                &model,
+                StrengthBasis::MaterialStrength,
+                AnalysisKind::Incremental,
+            )
+        });
+        let factory_reason = *result.err().unwrap().downcast::<String>().unwrap();
+        assert_eq!(factory_reason, reason);
+        if factor == 0.1 {
+            assert!(reason.contains("Mc<My"), "{reason}");
+        } else {
+            assert!(reason.contains("My"), "{reason}");
+        }
+    }
+    let mut reduced = base.clone();
+    reduced.materials[1].strength_factor = Some(0.8);
+    assert!(ensure_nonlinear_input_with_basis(
+        &reduced,
+        AnalysisKind::Incremental,
+        StrengthBasis::MaterialStrength
+    )
+    .is_ok());
+    let backbone = view(&reduced, StrengthBasis::MaterialStrength)
+        .total_backbone
+        .unwrap();
+    assert!((backbone[2][1] - nominal[2][1] * 0.8).abs() < 1e-6);
 }

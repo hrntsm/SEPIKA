@@ -1869,3 +1869,47 @@ fn ダンパー総重量の公開入力は旧装置重量を読み替えない()
     )
     .is_err());
 }
+
+#[test]
+fn rc_beam_reference_is_explicit_persistent_and_survives_member_operations() {
+    let mut model = Model::default();
+    let elem = ElemId(4);
+    assert_eq!(model.member_rc_beam_reference(elem), None);
+    model.set_member_rc_beam_reference(elem, Some(RcBeamReference::AntisymmetricHalfMember));
+    model.set_member_hysteresis(elem, HysteresisModel::Takeda);
+    model.set_member_hysteresis_th(elem, Some(HysteresisModel::Retrograde));
+    model.set_member_hysteresis(elem, HysteresisModel::Auto);
+    model.set_member_hysteresis_th(elem, None);
+    assert_eq!(
+        model.member_rc_beam_reference(elem),
+        Some(RcBeamReference::AntisymmetricHalfMember)
+    );
+    let encoded = rmp_serde::to_vec_named(&model).unwrap();
+    let mut decoded: Model = rmp_serde::from_slice(&encoded).unwrap();
+    assert_eq!(
+        decoded.member_rc_beam_reference(elem),
+        Some(RcBeamReference::AntisymmetricHalfMember)
+    );
+    decoded.shift_elem_attr_refs(|id| {
+        if *id == elem {
+            *id = ElemId(7);
+        }
+    });
+    assert_eq!(decoded.member_rc_beam_reference(elem), None);
+    assert_eq!(
+        decoded.member_rc_beam_reference(ElemId(7)),
+        Some(RcBeamReference::AntisymmetricHalfMember)
+    );
+    let attrs = decoded.take_elem_attrs(ElemId(7));
+    assert_eq!(decoded.member_rc_beam_reference(elem), None);
+    decoded.restore_elem_attrs(ElemId(8), attrs);
+    assert_eq!(
+        decoded.member_rc_beam_reference(ElemId(8)),
+        Some(RcBeamReference::AntisymmetricHalfMember)
+    );
+    decoded.set_member_rc_beam_reference(ElemId(8), None);
+    assert!(decoded.member_hysteresis_attrs.is_empty());
+    let missing: MemberHysteresisAttr =
+        serde_json::from_str(r#"{"elem":4,"rule":"Auto","rule_th":null}"#).unwrap();
+    assert_eq!(missing.rc_beam_reference, None);
+}

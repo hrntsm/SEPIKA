@@ -515,7 +515,10 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             "階が未定義です。解析タブの「準備計算 実行」を行ってください。",
         );
     } else if let Some(st) = app.current_static() {
-        let ctx = crate::summary::metrics_ctx_from_results(app.core.scoped.results.as_ref());
+        let ctx = crate::summary::metrics_ctx_from_results(
+            &app.core.model,
+            app.core.scoped.results.as_ref(),
+        );
         let metrics = crate::summary::compute_story_metrics_with(
             &app.core.model,
             &st.disp,
@@ -610,25 +613,11 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             "Sブレース",
         );
     });
-    ui.horizontal(|ui| {
-        ui.checkbox(
-            &mut app.core.design_rank_auto,
-            "自動判定（鋼=幅厚比・RC矩形=Qsu/Qmu）",
-        )
-        .on_hover_text(
-            "鋼部材(断面形状を持つもの)は幅厚比から、RC矩形部材(RC梁・矩形柱かつ\
-                 コンクリート強度Fc設定済みの材料)はせん断余裕度 Qsu/Qmu の略算から\
-                 部材ランクを層ごとに自動判定します。断面形状未設定の部材・幅厚比の対象外\
-                 形状(円形鋼管等)・RC円形・Fc未設定材料はスキップされ、1 本も算定できなかった\
-                 層は下記の選択値にフォールバックします。RC の Qsu の軸力項に用いる軸力は\
-                 先頭荷重ケース（長期相当）の結果を優先し、なければ最後に実行した\
-                 静的解析結果を使用する簡易運用です。",
-        );
-    });
+    holding_rank_mode_input(ui, app);
     ui.horizontal(|ui| {
         use sepika_design_jp::secondary::holding_capacity::MemberRank;
         ui.label(if app.core.design_rank_auto {
-            "部材ランク（フォールバック用）:"
+            "部材ランク（手動判定時）:"
         } else {
             "部材ランク:"
         });
@@ -645,14 +634,8 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                  壁式構造以外（WA 0.20・WB 0.25）とは別の列になります。",
             );
     });
-    if !app.core.design_rank_auto {
-        let ds = sepika_design_jp::secondary::holding_capacity::ds_value(
-            app.core.design_frame,
-            app.core.design_rank,
-        );
-        ui.label(format!("Ds = {:.2}（部材ランク選択値による簡易運用）", ds));
-    }
 
+    holding_evaluation_inputs(ui, app);
     match app.compute_holding_capacity() {
         Err(msg) => {
             ui.colored_label(crate::theme::GRAY_600, &msg);
@@ -667,14 +650,24 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         Ok((result, story_ranks)) => {
             if let Some(source) = &app.core.scoped.holding_capacity_source {
                 ui.label(format!(
-                    "採用方向: {:?}、部材応答・変形の採用ステップ: {}",
+                    "採用方向: {:?}、Ds部材応答の採用ステップ: {}、保有耐力比較・変形の採用ステップ: {}",
                     source.direction,
-                    source
-                        .response_step
-                        .map_or_else(|| "なし".into(), |step| step.to_string())
+                    source.ds_point.step,
+                    source.capacity_point.step
                 ));
             }
 
+            if let Some(source) = &app.core.scoped.holding_capacity_source {
+                ui.collapsing("目的別採用点・力収支", |ui| {
+                    for (label, point, conditions, forces) in [("Ds判定", &source.ds_point, &source.ds_conditions, &source.ds_forces), ("保有耐力比較", &source.capacity_point, &source.capacity_conditions, &source.capacity_forces)] {
+                        ui.label(format!("{label}: run {} step {} {:?} / {}", point.run_id, point.step, point.direction, point.selection_reason));
+                        ui.label(format!("入力世代 {} / {}", crate::summary::input_generation_hash(&point.input_generation), crate::summary::pushover_conditions_text(conditions)));
+                        for f in forces { ui.label(format!("層{} Qu={} 壁={} 筋かい={} 柱梁={} 外力={} 基準={} 支持ばね={} 残差={} 許容差={} [N] βu={}", f.layer+1, f.qu_n, f.wall_n, f.brace_n, f.frame_n, f.external_n, f.reference_n, f.support_n, f.residual_n, f.tolerance_n, f.beta_u)); }
+                    }
+                    ui.label(format!("Ds終了理由: {:?} / 比較終了理由: {:?}", source.termination, source.capacity_termination));
+                    ui.hyperlink_to("βu定義の背景資料（住指発96・歴史通知）", "https://www.mlit.go.jp/notice/noticedata/sgml/099/81000085/81000085.html");
+                });
+            }
             crate::table_util::standard_table(
                 ui,
                 "design_holding_capacity",
@@ -739,9 +732,9 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                     });
                 },
             );
-            if let Some(po) = app.displayed_pushover() {
+            if let Some(source) = &app.core.scoped.holding_capacity_source {
                 use sepika_solver::nonlinear::pushover::MechanismType;
-                let (mech, warn) = match &po.mechanism {
+                let (mech, warn) = match &source.ds_mechanism {
                     MechanismType::Overall => ("全体崩壊形".to_string(), false),
                     MechanismType::StoryCollapse { layer } => {
                         let name = app
@@ -809,12 +802,12 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                 );
             }
             let note = if app.core.design_rank_auto {
-                "Qu は増分解析性能曲線上の層別ピーク層せん断力（崩壊機構形成時の耐力）。\
+                "Qu は保有耐力比較用に明示採用した同じ確定点の層切断面力。\
                  Ds は部材ランク自動判定（鋼=幅厚比、RC矩形=せん断余裕度 Qsu/Qmu の略算。柱は\
                  軸力考慮の曲げ終局から Qmu を算定）×崩壊機構。形状未設定・RC円形・Fc未設定材料は\
-                 選択値フォールバック。"
+                 自動判定不能として理由を表示。"
             } else {
-                "Qu は増分解析性能曲線上の層別ピーク層せん断力。Ds は選択ランク×崩壊機構\
+                "Qu は保有耐力比較用の確定点の層切断面力。Ds は明示ランクと Ds 用機構\
                  （部材ランク自動判定OFF）。"
             };
             ui.colored_label(crate::theme::GRAY_600, note);
@@ -848,12 +841,16 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
     }
 
     ui.add_space(12.0);
-    ui.strong("小梁・床の設計（床の中で・単純梁／片持ち梁・一方向）");
+    ui.strong("小梁・床の長期略算（固定＋用途別積載）");
     ui.colored_label(
         crate::theme::GRAY_600,
         "小梁は大梁を分割せず、床の中で単純梁または片持ち梁として曲げ・たわみを検定します\
          （反力は大梁へ CMQ として伝達）。スラブは一方向版として設計曲げと必要鉄筋量を算定します。\
          鋼小梁の E・長期 ft は断面材料（未設定時 E=205000・F=235）。鉄筋は SD295（長期 ft=195）です。",
+    );
+
+    ui.label(
+        "小梁・床は選択中の雪・風・地震・任意組合せについて未検定です。以下は長期略算の結果です。",
     );
 
     if !r.beam_checks.is_empty() {
@@ -993,6 +990,110 @@ fn secondary_label<'a>(
         .unwrap_or_else(|| format!("SM{}", id.0))
 }
 
+pub(crate) fn holding_evaluation_inputs(ui: &mut egui::Ui, app: &mut crate::app::App) {
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    let dir = app.core.scoped.pushover_view_dir;
+    let Some(bundle) = &mut app.core.scoped.results else {
+        return;
+    };
+    let mut adopt = None;
+    for input in bundle
+        .holding_evaluations
+        .iter()
+        .filter(|e| e.point.direction == dir)
+    {
+        ui.label(format!(
+            "保存採用 {:?}: run {} step {} / {}",
+            input.point.purpose, input.point.run_id, input.point.step, input.point.selection_reason
+        ));
+        ui.label(format!(
+            "入力世代 {} / 解析条件 {:?}",
+            crate::summary::input_generation_hash(&input.point.input_generation),
+            input.conditions
+        ));
+    }
+    let po = match dir {
+        sepika_solver::statics::analysis::SeismicDir::X => &mut bundle.pushover_x,
+        sepika_solver::statics::analysis::SeismicDir::Y => &mut bundle.pushover_y,
+    };
+    let Some(po) = po else {
+        return;
+    };
+    ui.label("目的別に確定stepと選定理由を指定してください。法的な停止点は自動選択しません。");
+    for (purpose, label) in [
+        (EvaluationPurpose::Ds, "Ds判定"),
+        (EvaluationPurpose::HoldingCapacity, "保有耐力比較"),
+    ] {
+        let slot = if purpose == EvaluationPurpose::Ds {
+            &mut po.ds_evaluation
+        } else {
+            &mut po.capacity_evaluation
+        };
+        if let Some(point) = slot {
+            ui.horizontal(|ui| {
+                ui.label(label);
+                ui.add(
+                    egui::DragValue::new(&mut point.step)
+                        .range(0..=po.steps.len().saturating_sub(1) as u32),
+                );
+                ui.text_edit_singleline(&mut point.selection_reason);
+                ui.label(format!("run {} / {:?}", point.run_id, point.direction));
+            });
+            if ui
+                .button(format!("{label}にこのrun・stepを採用して保持"))
+                .clicked()
+            {
+                adopt = Some(purpose);
+            }
+            if purpose == EvaluationPurpose::Ds && app.core.design_rank_auto {
+                ui.collapsing(
+                    "部材群の耐力入力 [N]（負担力とは別）",
+                    |ui| {
+                        if let Some(record) = po
+                            .confirmed_history
+                            .as_ref()
+                            .and_then(|h| h.iter().find(|r| r.step == point.step))
+                        {
+                            let elements: std::collections::BTreeSet<_> = record
+                                .members
+                                .iter()
+                                .map(|r| r.elem)
+                                .chain(record.cuts.iter().flat_map(|c| &c.forces).map(|f| f.elem))
+                                .collect();
+                            for elem in elements {
+                                if !point.member_capacities_n.iter().any(|(e, _)| *e == elem) {
+                                    point.member_capacities_n.push((elem, 0.0));
+                                }
+                            }
+                        }
+                        for (elem, capacity) in &mut point.member_capacities_n {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("部材 {}", elem.0));
+                                ui.add(egui::DragValue::new(capacity));
+                            });
+                        }
+                    },
+                );
+            }
+        } else if ui.button(format!("{label}の評価点を指定")).clicked() {
+            let step = po.capacity_curve.first().map_or(0, |p| p.step);
+            if let Ok(point) = po.evaluation_point(purpose, dir, step, "利用者指定step".into())
+            {
+                if purpose == EvaluationPurpose::Ds {
+                    po.ds_evaluation = Some(point);
+                } else {
+                    po.capacity_evaluation = Some(point);
+                }
+            }
+        }
+    }
+    if let Some(purpose) = adopt {
+        if let Err(reason) = app.adopt_holding_evaluation(purpose) {
+            app.core.scoped.last_error = Some(reason);
+        }
+    }
+}
+
 pub(crate) fn wall_checks_ui(
     ui: &mut egui::Ui,
     checks: &[sepika_design_jp::wall_check::WallCheck],
@@ -1055,6 +1156,18 @@ pub(crate) fn wall_checks_ui(
             reason
         ));
     }
+}
+
+pub(crate) fn holding_rank_mode_input(ui: &mut egui::Ui, app: &mut App) {
+    ui.horizontal(|ui| {
+        ui.checkbox(
+            &mut app.core.design_rank_auto,
+            "自動判定（鋼=幅厚比・RC矩形=Qsu/Qmu）",
+        )
+        .on_hover_text(
+            "鋼は幅厚比、RC はせん断余裕度等から Ds 用確定点の応力で判定します。群耐力重みは明示入力し、欠損・対象外部材は理由付きで停止します。",
+        );
+    });
 }
 
 #[cfg(test)]

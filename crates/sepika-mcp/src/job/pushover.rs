@@ -40,7 +40,24 @@ pub(crate) fn compute_pushover_job(
     let mut result = sepika_job::compute::compute_pushover(work, cfg)?;
     result.identify_wall_input(input);
 
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    for (purpose, step) in [
+        (EvaluationPurpose::Ds, params.ds_step),
+        (EvaluationPurpose::HoldingCapacity, params.capacity_step),
+    ] {
+        if let Some(step) = step {
+            let point = result
+                .evaluation_point(purpose, cfg.push_dir, step, "MCPで明示指定したstep".into())
+                .map_err(JobError::InvalidInput)?;
+            if purpose == EvaluationPurpose::Ds {
+                result.ds_evaluation = Some(point);
+            } else {
+                result.capacity_evaluation = Some(point);
+            }
+        }
+    }
     let mut summary = pushover_summary(&result);
+    summary["analysis_conditions"] = serde_json::to_value(cfg).expect("解析条件の直列化");
     attach_prepare_notices(&mut summary, prepare_report.notices);
     Ok(JobOutcome::Pushover { summary })
 }
@@ -57,11 +74,20 @@ fn pushover_summary(
     };
     serde_json::json!({
         "kind": "Pushover",
-        "qu_kN": force_kn(result.qu),
+        "max_base_shear_kN": force_kn(result.qu),
         "mechanism": mechanism,
         "n_steps": result.steps.len(),
         "wall_run": result.wall_run,
         "wall_history": result.wall_history,
+        "confirmed_history": result.confirmed_history,
+        "steps": result.steps,
+        "capacity_curve": result.capacity_curve,
+        "ds_evaluation": result.ds_evaluation,
+        "capacity_evaluation": result.capacity_evaluation,
+        "termination": result.termination,
+        "control": result.control,
+        "ds_story_evaluation": result.ds_evaluation.as_ref().map(|p| result.evaluate_stories(p, sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose::Ds)),
+        "capacity_story_evaluation": result.capacity_evaluation.as_ref().map(|p| result.evaluate_stories(p, sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose::HoldingCapacity)),
     })
 }
 
@@ -135,6 +161,8 @@ mod tests {
             &JobParams {
                 steps: 3,
                 max_disp: Some(1.0),
+                ds_step: Some(1),
+                capacity_step: Some(1),
                 ..Default::default()
             },
         )
@@ -144,6 +172,31 @@ mod tests {
         };
         assert!(summary["wall_run"]["input_generation"].is_array());
         assert!(summary["wall_run"]["run_id"].is_string());
+        assert_eq!(summary["ds_evaluation"]["step"], 1);
+        assert_eq!(summary["capacity_evaluation"]["step"], 1);
+        assert_eq!(summary["ds_evaluation"]["purpose"], "Ds");
+        assert!(summary["analysis_conditions"].is_object());
+        let ds = &summary["ds_story_evaluation"]["Ok"][0];
+        assert!(ds["qu_n"].is_number(), "{}", summary["ds_story_evaluation"]);
+        assert!(ds["residual_n"].as_f64().unwrap().abs() <= ds["tolerance_n"].as_f64().unwrap());
+        let confirmed = summary["confirmed_history"].as_array().unwrap();
+        assert_eq!(
+            confirmed.len(),
+            summary["n_steps"].as_u64().unwrap() as usize
+        );
+        let initial: sepika_solver::nonlinear::pushover::story_response::StoryCut =
+            serde_json::from_value(confirmed[0]["cuts"][0].clone()).unwrap();
+        assert!(initial.evaluate().unwrap_err().contains("分母"));
+        assert!((ds["qu_n"].as_f64().unwrap() - 100_000.0).abs() < 0.001);
+        for r in confirmed {
+            assert_eq!(r["run_id"], summary["wall_run"]["run_id"]);
+            assert_eq!(
+                r["input_generation"],
+                summary["wall_run"]["input_generation"]
+            );
+            assert!(r["cuts"][0]["reference_n"].is_number());
+            assert!(r["cuts"][0]["support_n"].is_number());
+        }
         let records = summary["wall_history"].as_array().unwrap();
         assert_eq!(records.len(), summary["n_steps"].as_u64().unwrap() as usize);
         for (step, r) in records.iter().enumerate() {
@@ -168,6 +221,99 @@ mod tests {
             "steps":[],"capacity_curve":[],"hinges":[],"shear_yields":[],"mechanism":"Partial","qu":0.0,"member_response":[],
             "wall_history":records,"wall_run":summary["wall_run"]
         })).unwrap();
+        result.qu = 150_000.0;
+        let unselected = pushover_summary(&result);
+        assert_eq!(unselected["max_base_shear_kN"], 150.0);
+        assert!(unselected.get("qu_kN").is_none());
+        assert!(unselected["capacity_story_evaluation"].is_null());
+        result.steps = serde_json::from_value(summary["steps"].clone()).unwrap();
+        result.capacity_curve = serde_json::from_value(summary["capacity_curve"].clone()).unwrap();
+        result.confirmed_history =
+            serde_json::from_value(summary["confirmed_history"].clone()).unwrap();
+        result.capacity_evaluation =
+            serde_json::from_value(summary["capacity_evaluation"].clone()).unwrap();
+        let record = result
+            .confirmed_history
+            .as_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|r| r.step == 1)
+            .unwrap();
+        for cut in &mut record.cuts {
+            let total: f64 = cut.forces.iter().map(|f| f.force_n).sum();
+            for force in &mut cut.forces {
+                force.force_n *= 120_000.0 / total;
+            }
+            cut.external_n = 120_000.0;
+        }
+        let selected = pushover_summary(&result);
+        assert_eq!(selected["max_base_shear_kN"], 150.0);
+        assert!(
+            (selected["capacity_story_evaluation"]["Ok"][0]["qu_n"]
+                .as_f64()
+                .unwrap()
+                - 120_000.0)
+                .abs()
+                < 1e-6
+        );
+        for (wall, frame, external, reason, beta, residual) in [
+            (90.0, 60.0, 120.0, "釣合い残差", "0.6", "30"),
+            (160.0, -10.0, 150.0, "範囲外", "1.0666666666666667", "0"),
+            (0.0, 0.0, 0.0, "分母", "未定義", "0"),
+            (-10.0, 160.0, 150.0, "範囲外", "-0.06666666666666667", "0"),
+        ] {
+            use sepika_solver::nonlinear::pushover::story_response::{CutForce, ForceGroup};
+            let point = result.capacity_evaluation.as_ref().unwrap();
+            let identity = format!("run={}", point.run_id);
+            let cut = &mut result
+                .confirmed_history
+                .as_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|r| r.step == point.step)
+                .unwrap()
+                .cuts[0];
+            cut.forces = vec![
+                CutForce {
+                    elem: ElemId(0),
+                    group: ForceGroup::Wall,
+                    force_n: wall,
+                },
+                CutForce {
+                    elem: ElemId(1),
+                    group: ForceGroup::Frame,
+                    force_n: frame,
+                },
+            ];
+            cut.external_n = external;
+            cut.reference_n = 100.0;
+            cut.support_n = 2.0;
+            cut.tolerance_n = 1e-6;
+            let published = pushover_summary(&result);
+            let error = published["capacity_story_evaluation"]["Err"]
+                .as_str()
+                .unwrap();
+            for fragment in [
+                reason.to_string(),
+                "purpose=HoldingCapacity".into(),
+                identity,
+                "direction=X".into(),
+                "step=1".into(),
+                format!("Qu={} N", wall + frame),
+                format!("Wall={wall} N"),
+                "Brace=0 N".into(),
+                format!("Frame={frame} N"),
+                format!("上層外力={external} N"),
+                "基準外力=100 N".into(),
+                "支持ばね内力=2 N".into(),
+                format!("残差={residual} N"),
+                "許容差=0.000001 N".into(),
+                format!("βu={beta} [-]"),
+            ] {
+                assert!(error.contains(&fragment), "{fragment}: {error}");
+            }
+            assert!(published["capacity_story_evaluation"].get("Ok").is_none());
+        }
         let r = result.wall_history.as_mut().unwrap().first_mut().unwrap();
         r.response.as_mut().unwrap().qdir_n = 0.0;
         assert_eq!(

@@ -1,6 +1,52 @@
 use super::super::*;
 
 impl App {
+    /// 選択対象の保存係数・種別による状態。単独ケースと組合せを区別する。
+    pub fn selected_design_load_state(
+        &self,
+    ) -> Result<sepika_core::load_combo::DesignLoadState, String> {
+        use sepika_core::load_combo::{case_design_state, combination_design_state};
+        match self.core.scoped.last_static {
+            Some(StaticKey::Combo(index)) => {
+                let name = self
+                    .core
+                    .scoped
+                    .results
+                    .as_ref()
+                    .and_then(|r| r.combos.get(index))
+                    .map(|(name, _)| name)
+                    .ok_or("選択組合せの解析結果がありません")?;
+                let mut combos = self
+                    .core
+                    .model
+                    .combinations
+                    .iter()
+                    .filter(|c| &c.name == name);
+                let combo = combos.next().ok_or("保存組合せがありません")?;
+                if combos.next().is_some() {
+                    return Err("同名組合せが複数あり対象が未判定です".into());
+                }
+                combination_design_state(combo, &self.core.model.load_cases)
+            }
+            Some(StaticKey::Case(key)) => {
+                let id = match key {
+                    StaticCaseKey::User(id) => Some(id),
+                    StaticCaseKey::Seismic(dir) => self.seismic_case_id(dir),
+                }
+                .ok_or("荷重ケースの検定用途が未判定です")?;
+                let case = self
+                    .core
+                    .model
+                    .load_cases
+                    .iter()
+                    .find(|c| c.id == id)
+                    .ok_or("荷重ケースがありません")?;
+                case_design_state(case.kind)
+            }
+            None => Err("検定対象が選択されていません".into()),
+        }
+    }
+
     /// 解析結果の member_forces から検定結果を生成する。
     /// 危険断面位置（既定は柱フェイスと中央）の内力に対し、
     /// 材種・部材種別に応じた検定を適用する（令82条・各構造設計規準準拠）。
@@ -16,6 +62,32 @@ impl App {
         if let Err(error) = sepika_load::floor::validate_one_way_directions(&self.core.model) {
             self.report_error(error.to_string());
             return;
+        }
+        let state = self.selected_design_load_state();
+        if let Ok(state) = state {
+            self.core.design_term = match state.duration {
+                sepika_core::load_combo::LoadDuration::Long => LoadTerm::Long,
+                sepika_core::load_combo::LoadDuration::Short => LoadTerm::Short,
+            };
+        }
+        let mut load_error = state.as_ref().err().cloned();
+        if state.as_ref().is_ok_and(|s| {
+            !s.combination && s.duration == sepika_core::load_combo::LoadDuration::Short
+        }) {
+            load_error =
+                Some("単独の雪・風・地震応力です。G+Pを含む保存組合せを選択してください".into());
+        }
+        if state.as_ref().is_ok_and(|s| s.combination)
+            && self.core.model.stress_cfg.tension_only_iteration
+            && self.core.model.elements.iter().any(|e| {
+                matches!(
+                    e.kind,
+                    sepika_core::model::ElementKind::Brace { tension_only: true }
+                )
+            })
+        {
+            load_error =
+                Some("引張専用ブレースの別ケース合成は同一解を保証できないため未検定です".into());
         }
         let Some(results) = &self.core.scoped.results else {
             return;
@@ -33,52 +105,44 @@ impl App {
                 wall_index = None;
                 &self.core.model
             };
-        let is_seismic_combo = match self.core.scoped.last_static {
-            Some(StaticKey::Combo(idx)) => results
+        let is_seismic_combo = state.as_ref().is_ok_and(|s| {
+            s.combination && s.action == sepika_core::load_combo::LoadAction::Seismic
+        });
+        let gravity_terms = match self.core.scoped.last_static {
+            Some(StaticKey::Combo(index)) => results
                 .combos
-                .get(idx)
-                .map(|(n, _)| {
-                    let u = n.to_uppercase();
-                    u.contains('K') || u.contains('E')
+                .get(index)
+                .and_then(|(name, _)| {
+                    self.core
+                        .model
+                        .combinations
+                        .iter()
+                        .find(|c| &c.name == name)
                 })
-                .unwrap_or(false),
-            _ => false,
+                .map(|combo| sepika_job::design_gravity_terms(&self.core.model, &combo.terms))
+                .unwrap_or_default(),
+            _ => Vec::new(),
         };
-        let gravity_long_owned = if is_seismic_combo && self.core.design_term == LoadTerm::Short {
-            sepika_job::sum_analyzed_gravity_member_forces(&self.core.model, |lc| {
-                results
-                    .statics
-                    .iter()
-                    .find(|(id, _)| *id == StaticCaseKey::User(lc))
-                    .map(|(_, s)| s.member_forces.clone())
-            })
+        let gravity_long_owned = if is_seismic_combo {
+            match sepika_job::complete_design_gravity_forces(&gravity_terms, |lc| {
+                sepika_job::compute::compute_linear_static(self.core.model.clone(), lc)
+                    .ok()
+                    .map(|r| r.member_forces)
+            }) {
+                Ok(forces) => Some(forces),
+                Err(missing) => {
+                    load_error = Some(format!("検定用G+Pの重力応力が不足しています: {missing:?}"));
+                    None
+                }
+            }
         } else {
             None
         };
-        let long_from_combo: Option<&Vec<(ElemId, sepika_element::frame::beam::MemberForces)>> =
-            if is_seismic_combo && self.core.design_term == LoadTerm::Short {
-                results
-                    .combos
-                    .iter()
-                    .find(|(n, _)| n == "DL + LL")
-                    .or_else(|| {
-                        results
-                            .combos
-                            .iter()
-                            .find(|(n, _)| !sepika_load::combo::is_short_term_combo(n))
-                    })
-                    .map(|(_, st)| &st.member_forces)
-            } else {
-                None
-            };
-        let long_member_forces: Option<&[(ElemId, sepika_element::frame::beam::MemberForces)]> =
-            gravity_long_owned
-                .as_deref()
-                .or(long_from_combo.map(|v| v.as_slice()));
+        let long_member_forces = gravity_long_owned.as_deref();
         let group_overrides =
             sepika_design_jp::girder_group_overrides(&self.core.model, &results.member_forces);
         let q0_by_elem = if long_member_forces.is_some() {
-            sepika_job::simple_beam_q0_by_gravity_cases(&self.core.model)
+            sepika_job::simple_beam_q0_by_terms(&self.core.model, &gravity_terms)
         } else {
             Default::default()
         };
@@ -92,7 +156,7 @@ impl App {
                 .unwrap_or_else(|| format!("combo:{idx}")),
             None => "未選択".into(),
         };
-        let report = sepika_design_jp::run_member_design_checks(
+        let mut report = sepika_design_jp::run_member_design_checks(
             design_model,
             &results.member_forces,
             &results.panel_moments,
@@ -109,6 +173,9 @@ impl App {
                 steel_fb_basis: sepika_design_jp::SteelFbBasis::default(),
             },
         );
+        if let Some(reason) = &load_error {
+            report.skip_for_load_state(reason);
+        }
         let joint_checks = report
             .joint_checks
             .into_iter()

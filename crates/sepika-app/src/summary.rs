@@ -9,7 +9,7 @@ use sepika_design_jp::secondary::stiffness_ratio::{cog_story_drifts, max_column_
 use sepika_solver::statics::analysis::SeismicDir;
 use sepika_solver::statics::linear::StaticOnce;
 
-use crate::app::{App, ResultsBundle, StaticCaseKey};
+use crate::app::{App, ResultsBundle, StaticCaseKey, StaticKey};
 
 /// 層ごとの二次設計指標（層間変形角・剛性率・偏心率・Fes）。
 #[derive(Clone, Debug)]
@@ -53,7 +53,10 @@ pub struct StoryMetricsCtx<'a> {
 
 /// 解析結果一式から `StoryMetricsCtx` を組み立てる。
 /// 長期は「短期でない荷重組合せ」を優先し、なければ None。
-pub fn metrics_ctx_from_results(results: Option<&ResultsBundle>) -> StoryMetricsCtx<'_> {
+pub fn metrics_ctx_from_results<'a>(
+    model: &Model,
+    results: Option<&'a ResultsBundle>,
+) -> StoryMetricsCtx<'a> {
     let Some(r) = results else {
         return StoryMetricsCtx::default();
     };
@@ -66,7 +69,7 @@ pub fn metrics_ctx_from_results(results: Option<&ResultsBundle>) -> StoryMetrics
     let long_term = r
         .combos
         .iter()
-        .find(|(name, _)| !sepika_load::combo::is_short_term_combo(name))
+        .find(|(name, _)| sepika_core::load_combo::is_gravity_combination(name, model))
         .map(|(_, s)| s);
     StoryMetricsCtx {
         seismic_x: find_seismic(SeismicDir::X),
@@ -278,7 +281,7 @@ pub fn build_report_csv(app: &App) -> String {
     }
 
     if let Some((_, st)) = results.statics.last() {
-        let ctx = metrics_ctx_from_results(app.core.scoped.results.as_ref());
+        let ctx = metrics_ctx_from_results(&app.core.model, app.core.scoped.results.as_ref());
         let metrics =
             compute_story_metrics_with(model, &st.disp, app.core.analysis_cfg.seismic_dir, &ctx);
         if !metrics.is_empty() {
@@ -313,7 +316,7 @@ pub fn build_report_csv(app: &App) -> String {
     }
 
     {
-        let ctx = metrics_ctx_from_results(app.core.scoped.results.as_ref());
+        let ctx = metrics_ctx_from_results(&app.core.model, app.core.scoped.results.as_ref());
         if let (Some(rx), Some(ry)) = (ctx.seismic_x, ctx.seismic_y) {
             let cfg = sepika_solver::statics::analysis::SeismicCfg {
                 dir: SeismicDir::X,
@@ -337,6 +340,112 @@ pub fn build_report_csv(app: &App) -> String {
                 }
             }
         }
+    }
+
+    {
+        use sepika_core::load_combo::{LoadAction, LoadDuration};
+        let cell = |text: &str| format!("\"{}\"", text.replace('"', "\"\""));
+        let (target, key, name, terms) = match app.core.scoped.last_static {
+            Some(StaticKey::Combo(index)) => {
+                let name = results
+                    .combos
+                    .get(index)
+                    .map(|(name, _)| name.as_str())
+                    .unwrap_or("");
+                let matches: Vec<_> = model
+                    .combinations
+                    .iter()
+                    .filter(|c| c.name == name)
+                    .collect();
+                let terms = if matches.len() == 1 {
+                    matches[0].terms.clone()
+                } else {
+                    vec![]
+                };
+                ("保存組合せ", format!("combo:{index}"), name, terms)
+            }
+            Some(StaticKey::Case(key)) => {
+                let id = match key {
+                    StaticCaseKey::User(id) => Some(id),
+                    StaticCaseKey::Seismic(dir) => app.seismic_case_id(dir),
+                };
+                let case = id.and_then(|id| model.load_cases.iter().find(|c| c.id == id));
+                (
+                    "単独ケース",
+                    id.map(|id| format!("case:{}", id.0))
+                        .unwrap_or_else(|| format!("{key:?}")),
+                    case.map(|c| c.name.as_str()).unwrap_or(""),
+                    id.map(|id| vec![(id, 1.0)]).unwrap_or_default(),
+                )
+            }
+            None => ("未選択", String::new(), "", vec![]),
+        };
+        let state = app.selected_design_load_state();
+        let (duration, action, diagnostic) = match &state {
+            Ok(state) => (
+                match state.duration {
+                    LoadDuration::Long => "長期",
+                    LoadDuration::Short => "短期",
+                },
+                match state.action {
+                    LoadAction::Gravity => "常時",
+                    LoadAction::Snow => "積雪",
+                    LoadAction::Wind => "風",
+                    LoadAction::Seismic => "地震",
+                },
+                if state.combination {
+                    "荷重状態判定済み（法的条件未確認）".to_owned()
+                } else {
+                    "法令組合せ未検定".to_owned()
+                },
+            ),
+            Err(reason) => ("未判定", "未判定", reason.clone()),
+        };
+        out.push_str("\n[検定荷重状態]\n対象種別,対象キー,名称,継続時間,作用,判定\n");
+        out.push_str(&format!(
+            "{},{},{},{},{},{}\n",
+            target,
+            key,
+            cell(name),
+            duration,
+            action,
+            cell(&diagnostic)
+        ));
+        out.push_str("法的全条件,未確認\n");
+        out.push_str(
+            if app.core.scoped.staleness.design_stale || app.core.scoped.staleness.results_stale {
+                "結果状態,要再計算（モデル編集前の検定結果）\n"
+            } else if app.core.scoped.last_static.is_none() {
+                "結果状態,未選択\n"
+            } else {
+                "結果状態,計算済み\n"
+            },
+        );
+        out.push_str("\n[検定荷重項]\nケースID,名称,種別,係数\n");
+        for (id, factor) in terms {
+            let case = model.load_cases.iter().find(|c| c.id == id);
+            out.push_str(&format!(
+                "{},{},{},{}\n",
+                id.0,
+                cell(case.map(|c| c.name.as_str()).unwrap_or("参照欠落")),
+                case.map(|c| format!("{:?}", c.kind))
+                    .unwrap_or_else(|| "未判定".into()),
+                factor
+            ));
+        }
+        let selected_scope = if state
+            .as_ref()
+            .is_ok_and(|s| s.duration == LoadDuration::Long && s.action == LoadAction::Gravity)
+        {
+            "固定＋用途別積載の独立略算（選択termsは未適用）"
+        } else {
+            "選択短期等は未検定（積雪・風・地震・任意組合せ）"
+        };
+        out.push_str("\n[小梁・床検定範囲]\n対象,対象荷重,継続時間,選択荷重状態の適用\n");
+        out.push_str(&format!(
+            "小梁,固定＋小梁用積載,長期略算,{}\n床,固定＋床用積載,長期略算,{}\n",
+            selected_scope, selected_scope
+        ));
     }
 
     if !results.member_checks.is_empty() {
@@ -478,7 +587,7 @@ pub fn build_report_csv(app: &App) -> String {
             sepika_solver::nonlinear::pushover::PushoverControl::LoadOnly => "荷重増分のみ",
         };
         out.push_str(&format!(
-            "\n[増分解析]\n増分方式,{}\n保有水平耐力Qu[kN],{:.2}\nヒンジ数,{}\n",
+            "\n[増分解析]\n増分方式,{}\n解析経過の最大ベースシア[kN],{:.2}\nヒンジ数,{}\n",
             control,
             force_kn(po.qu),
             po.hinges.len()
@@ -490,6 +599,25 @@ pub fn build_report_csv(app: &App) -> String {
                 label.replace('"', "\"\""),
                 value.replace('"', "\"\"")
             ));
+        }
+        for input in &results.holding_evaluations {
+            out.push_str(&format!(
+                "\n[目的別採用run {:?} {:?}]\n解析条件,\"{}\"\n",
+                input.point.purpose,
+                input.point.direction,
+                pushover_conditions_text(&input.conditions)
+            ));
+            if !app.holding_evaluation_is_current(input) {
+                out.push_str("集計不能,目的別採用runの生成入力が現在モデルと不一致\n");
+                continue;
+            }
+            for (label, value) in holding_evaluation_rows(&input.run) {
+                out.push_str(&format!(
+                    "\"{}\",\"{}\"\n",
+                    label.replace('"', "\"\""),
+                    value.replace('"', "\"\"")
+                ));
+            }
         }
         let layers = model.layers();
         let n_stories = layers.len();
@@ -948,7 +1076,7 @@ pub(crate) fn wall_response_rows(
     po: &sepika_solver::nonlinear::pushover::PushoverResult,
 ) -> Vec<(String, String)> {
     use sepika_solver::nonlinear::pushover::wall_response::WallUnavailableReason;
-    let mut rows = Vec::new();
+    let mut rows = holding_evaluation_rows(po);
     let Some(records) = &po.wall_history else {
         return vec![(
             "壁応答".into(),
@@ -1059,6 +1187,62 @@ pub(crate) fn wall_response_rows(
         }
     }
     rows
+}
+
+fn holding_evaluation_rows(
+    po: &sepika_solver::nonlinear::pushover::PushoverResult,
+) -> Vec<(String, String)> {
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    let mut rows = vec![("増分解析終了理由".into(), format!("{:?}", po.termination))];
+    for (purpose, point, label) in [
+        (EvaluationPurpose::Ds, &po.ds_evaluation, "Ds判定"),
+        (
+            EvaluationPurpose::HoldingCapacity,
+            &po.capacity_evaluation,
+            "保有耐力比較",
+        ),
+    ] {
+        let Some(point) = point else {
+            rows.push((label.into(), "目的別評価点が未指定".into()));
+            continue;
+        };
+        rows.push((
+            format!("{label}採用点"),
+            format!(
+                "run={} direction={:?} step={} generation_sha256={} reason={}",
+                point.run_id,
+                point.direction,
+                point.step,
+                input_generation_hash(&point.input_generation),
+                point.selection_reason
+            ),
+        ));
+        rows.push((
+            format!("{label} 群耐力重み[N]"),
+            format!("{:?}", point.member_capacities_n),
+        ));
+        match po.evaluate_stories(point, purpose) {
+            Ok(stories) => {
+                for s in stories {
+                    rows.push((format!("{label} 層{} 符号付き層切断面力[N]", s.layer+1), format!("Qu={} Wall={} Brace={} Frame={} βu={} 上層外力={} 基準外力={} 支持ばね内力={} 残差={} 許容差={}", s.qu_n, s.wall_n, s.brace_n, s.frame_n, s.beta_u, s.external_n, s.reference_n, s.support_n, s.residual_n, s.tolerance_n)));
+                }
+            }
+            Err(reason) => rows.push((format!("{label}集計不能"), reason)),
+        }
+    }
+    rows
+}
+
+pub(crate) fn pushover_conditions_text(cfg: &sepika_job::AnalysisSettings) -> String {
+    format!("Ai={:?}, Z={}, C0={}, 地盤={:?}, 方式={:?}, 刻み={}, 目標変位={:?} mm, 目標層間角={:?}, 長期載荷={}, 塑性率={:?}",
+        cfg.ai_mode, cfg.z, cfg.c0, cfg.soil, cfg.push_control, cfg.push_steps,
+        cfg.push_use_max_disp.then_some(cfg.push_max_disp),
+        cfg.push_use_drift_angle.then_some(1.0/cfg.push_drift_denom), cfg.push_apply_long_term, cfg.ductility_method)
+}
+
+pub(crate) fn input_generation_hash(input: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(input))
 }
 
 #[cfg(test)]
