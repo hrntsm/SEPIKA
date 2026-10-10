@@ -646,12 +646,9 @@ impl SectionShape {
         }
     }
 
-    /// 軸剛性（EA）算定用の等価断面積 [mm²]。
-    ///
-    /// SRC は各種合成構造設計指針の
-    /// An = rcAn + sAn·(ns−1) に従い鉄骨の等価換算断面を累加する
-    /// （ns は `N_S_EQ`）。質量算定用の断面積（`calc_area` は
-    /// コンクリート全断面）とは区別して用いること。他形状は `calc_area` と同値。
+    /// 形状だけからの軸剛性用面積 [mm²]。SRC は暫定比 `N_S_EQ` を使う。
+    /// SRC 解析は材料検証済みの等価性能を要し、この値へ代替しない。
+    /// 質量用の実面積 `calc_area` と区別する。他形状は `calc_area` と同値。
     pub fn calc_axial_stiffness_area(&self) -> f64 {
         match *self {
             SectionShape::SrcBeamRect {
