@@ -434,12 +434,23 @@ mod tests {
     #[test]
     fn 長期軸力の精算に使う組合せも再解析が必要になる() {
         let mut app = ready();
+        let p = LoadCaseId(app.core.model.load_cases.len() as u32);
+        app.core
+            .model
+            .load_cases
+            .push(sepika_core::model::LoadCase {
+                id: p,
+                name: "P=0".into(),
+                kind: sepika_core::model::LoadCaseKind::Live,
+                nodal: vec![],
+                member: vec![],
+            });
         app.core
             .model
             .combinations
             .push(sepika_core::model::LoadCombination {
                 name: "長期".into(),
-                terms: vec![(LoadCaseId(0), 1.0)],
+                terms: vec![(LoadCaseId(0), 1.0), (p, 1.0)],
             });
         app.run_static_all();
         app.run_pushover();

@@ -515,7 +515,10 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             "階が未定義です。解析タブの「準備計算 実行」を行ってください。",
         );
     } else if let Some(st) = app.current_static() {
-        let ctx = crate::summary::metrics_ctx_from_results(app.core.scoped.results.as_ref());
+        let ctx = crate::summary::metrics_ctx_from_results(
+            &app.core.model,
+            app.core.scoped.results.as_ref(),
+        );
         let metrics = crate::summary::compute_story_metrics_with(
             &app.core.model,
             &st.disp,
@@ -848,12 +851,16 @@ fn floor_design_section(ui: &mut egui::Ui, app: &App) {
     }
 
     ui.add_space(12.0);
-    ui.strong("小梁・床の設計（床の中で・単純梁／片持ち梁・一方向）");
+    ui.strong("小梁・床の長期略算（固定＋用途別積載）");
     ui.colored_label(
         crate::theme::GRAY_600,
         "小梁は大梁を分割せず、床の中で単純梁または片持ち梁として曲げ・たわみを検定します\
          （反力は大梁へ CMQ として伝達）。スラブは一方向版として設計曲げと必要鉄筋量を算定します。\
          鋼小梁の E・長期 ft は断面材料（未設定時 E=205000・F=235）。鉄筋は SD295（長期 ft=195）です。",
+    );
+
+    ui.label(
+        "小梁・床は選択中の雪・風・地震・任意組合せについて未検定です。以下は長期略算の結果です。",
     );
 
     if !r.beam_checks.is_empty() {

@@ -53,7 +53,10 @@ pub struct StoryMetricsCtx<'a> {
 
 /// 解析結果一式から `StoryMetricsCtx` を組み立てる。
 /// 長期は「短期でない荷重組合せ」を優先し、なければ None。
-pub fn metrics_ctx_from_results(results: Option<&ResultsBundle>) -> StoryMetricsCtx<'_> {
+pub fn metrics_ctx_from_results<'a>(
+    model: &Model,
+    results: Option<&'a ResultsBundle>,
+) -> StoryMetricsCtx<'a> {
     let Some(r) = results else {
         return StoryMetricsCtx::default();
     };
@@ -66,7 +69,7 @@ pub fn metrics_ctx_from_results(results: Option<&ResultsBundle>) -> StoryMetrics
     let long_term = r
         .combos
         .iter()
-        .find(|(name, _)| !sepika_load::combo::is_short_term_combo(name))
+        .find(|(name, _)| sepika_core::load_combo::is_gravity_combination(name, model))
         .map(|(_, s)| s);
     StoryMetricsCtx {
         seismic_x: find_seismic(SeismicDir::X),
@@ -278,7 +281,7 @@ pub fn build_report_csv(app: &App) -> String {
     }
 
     if let Some((_, st)) = results.statics.last() {
-        let ctx = metrics_ctx_from_results(app.core.scoped.results.as_ref());
+        let ctx = metrics_ctx_from_results(&app.core.model, app.core.scoped.results.as_ref());
         let metrics =
             compute_story_metrics_with(model, &st.disp, app.core.analysis_cfg.seismic_dir, &ctx);
         if !metrics.is_empty() {
@@ -313,7 +316,7 @@ pub fn build_report_csv(app: &App) -> String {
     }
 
     {
-        let ctx = metrics_ctx_from_results(app.core.scoped.results.as_ref());
+        let ctx = metrics_ctx_from_results(&app.core.model, app.core.scoped.results.as_ref());
         if let (Some(rx), Some(ry)) = (ctx.seismic_x, ctx.seismic_y) {
             let cfg = sepika_solver::statics::analysis::SeismicCfg {
                 dir: SeismicDir::X,

@@ -211,6 +211,8 @@ pub struct AnalysisRunArgs {
     pub kind: JobKind,
     /// 対象荷重ケース ID（未指定なら先頭ケース）。
     pub load_case: Option<u32>,
+    /// DesignCheck用の保存組合せindex。load_caseと同時指定不可。
+    pub load_combination: Option<usize>,
     /// モード数（既定 3）。
     pub n_modes: Option<usize>,
     /// 加力・入力方向 "X"/"Y"（既定 "X"）。
@@ -245,6 +247,13 @@ impl AnalysisRunArgs {
     /// 任意パラメータを `super::JobParams`（既定値込み）へ変換する。
     /// 不正な文字列の場合のみエラーを返す。
     fn to_job_params(&self) -> Result<super::JobParams, String> {
+        if self.load_combination.is_some()
+            && (self.load_case.is_some() || self.kind != JobKind::DesignCheck)
+        {
+            return Err(
+                "load_combinationはDesignCheck専用でload_caseとの同時指定はできません".into(),
+            );
+        }
         let dir = match self.dir.as_deref() {
             None => super::JobDir::X,
             Some("X") => super::JobDir::X,
@@ -277,6 +286,7 @@ impl AnalysisRunArgs {
         let d = super::JobParams::default();
         Ok(super::JobParams {
             load_case: self.load_case,
+            load_combination: self.load_combination,
             n_modes: self.n_modes.unwrap_or(d.n_modes),
             dir,
             steps: self.steps.unwrap_or(d.steps),
@@ -433,7 +443,7 @@ mod tests {
                     [0.0, 0.0, 1000.0, 0.0, 0.0, 0.0],
                 )],
                 member: Vec::new(),
-                kind: Default::default(),
+                kind: sepika_core::model::LoadCaseKind::Dead,
             }],
             ..Default::default()
         }
@@ -571,6 +581,7 @@ mod tests {
         AnalysisRunArgs {
             kind,
             load_case: None,
+            load_combination: None,
             n_modes: None,
             dir: None,
             steps: None,
