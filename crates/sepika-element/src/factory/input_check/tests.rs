@@ -546,12 +546,19 @@ fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
 }
 
 fn public_generation_diagnostic(model: &Model) -> String {
+    public_generation_diagnostic_for_kind(model, sepika_core::model::AnalysisKind::Incremental)
+}
+
+fn public_generation_diagnostic_for_kind(
+    model: &Model,
+    kind: sepika_core::model::AnalysisKind,
+) -> String {
     let result = std::panic::catch_unwind(|| {
         crate::factory::build_nonlinear_behavior(
             &model.elements[0],
             model,
             crate::factory::StrengthBasis::Nominal,
-            sepika_core::model::AnalysisKind::Incremental,
+            kind,
         )
     });
     *result
@@ -943,4 +950,63 @@ fn rc_reference_cracking_uses_the_same_rectangular_geometry_as_alpha_and_yield()
     assert_eq!(before.backbone, after.backbone);
     let mc = after.total_backbone.unwrap()[1][1];
     assert!((mc - 0.56 * 24.0_f64.sqrt() * 18_000_000.0).abs() < 1e-6);
+}
+
+#[test]
+fn rc_alpha_checks_each_material_before_their_ratio() {
+    let model = explicit_rc_reference_fixture();
+    assert!(crate::factory::springs::flexural_alpha_y_checked(&model.elements[0], &model).is_ok());
+    for (index, role) in [(0, "Ec"), (1, "Es")] {
+        for value in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut invalid = model.clone();
+            invalid.materials[index].young = value;
+            let error =
+                crate::factory::springs::flexural_alpha_y_checked(&invalid.elements[0], &invalid)
+                    .unwrap_err();
+            assert!(error.to_string().contains(role), "{error}");
+        }
+    }
+    let mut both_negative = model.clone();
+    both_negative.materials[0].young = -20000.0;
+    both_negative.materials[1].young = -200000.0;
+    assert!(crate::factory::springs::flexural_alpha_y_checked(
+        &both_negative.elements[0],
+        &both_negative
+    )
+    .is_err());
+}
+
+#[test]
+fn unsupported_concentrated_rc_law_never_falls_through_to_takeda_without_basis() {
+    use sepika_core::model::{AnalysisKind, HysteresisModel};
+    let mut model = explicit_rc_reference_fixture();
+    model.set_member_rc_beam_reference(ElemId(0), None);
+    model.set_member_hysteresis(ElemId(0), HysteresisModel::KarsanJirsa);
+    for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+        let reason = ensure_nonlinear_input_for_kind(&model, kind).unwrap_err();
+        assert!(reason.contains("Karsan"), "{reason}");
+        assert!(reason.contains("未対応"), "{reason}");
+        assert_eq!(public_generation_diagnostic_for_kind(&model, kind), reason);
+        let view = crate::factory::build_hinge_view(
+            &model.elements[0],
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+            kind,
+            0.0,
+            8,
+            24,
+        )
+        .unwrap();
+        assert!(view.backbone.is_none());
+        assert!(view.total_backbone.is_none());
+        assert!(view.unavailability_reason.unwrap().contains("Karsan"));
+    }
+    // 未実行側の指定が対応済みの実行側を拒否する根拠にはならない。
+    model.set_member_rc_beam_reference(
+        ElemId(0),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+    );
+    model.set_member_hysteresis_th(ElemId(0), Some(HysteresisModel::Takeda));
+    assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::TimeHistory).is_ok());
+    assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::Incremental).is_err());
 }

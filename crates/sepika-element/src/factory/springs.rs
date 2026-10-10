@@ -261,6 +261,13 @@ pub(super) fn flexural_alpha_y_checked(
             sepika_core::error::CoreError::InvalidInput("RC梁のEs材料が未指定です".into())
         })?
         .young;
+    for (role, value) in [("Ec", ec), ("Es", es)] {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(sepika_core::error::CoreError::InvalidInput(format!(
+                "RC梁の{role}は正の有限値が必要です"
+            )));
+        }
+    }
     let n = es / ec;
     let l = model.member_length(data)
         - data.rigid_zone.rigid_length_i()
@@ -384,6 +391,17 @@ pub(super) fn rc_reference_issue(
                 "指定履歴則は採用RC梁αy基準接続の対象外です（武田型・逆行型・最大点指向型のみ）"
                     .into(),
             );
+        }
+        if !matches!(
+            rule,
+            HysteresisModel::Standard
+                | HysteresisModel::TsujiYamada
+                | HysteresisModel::SteelBuckling
+        ) {
+            return Some(format!(
+                "{}は集中RC梁の採用αy基準接続に未対応です。武田型へ代用しません",
+                rule.label()
+            ));
         }
         return None;
     }
