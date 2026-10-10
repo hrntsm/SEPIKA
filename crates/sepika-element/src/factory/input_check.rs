@@ -138,6 +138,52 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
                 data.id.0
             ));
         }
+        if let SectionShape::RcBeamRect { b, d, rebar } = shape {
+            if !b.is_finite() || *b <= 0.0 || !d.is_finite() || *d <= 0.0 {
+                return Some(format!(
+                    "部材 ID {} の梁幅 b・全せい D は正の有限値が必要です",
+                    data.id.0
+                ));
+            }
+            for (name, value) in [
+                ("Ec", mat.young),
+                (
+                    "Es",
+                    model
+                        .element_rebar_material(data)
+                        .map(|m| m.young)
+                        .unwrap_or(sepika_core::section_shape::E_STEEL),
+                ),
+            ] {
+                if !value.is_finite() || value <= 0.0 {
+                    return Some(format!(
+                        "部材 ID {} の {name} は正の有限値が必要です",
+                        data.id.0
+                    ));
+                }
+            }
+            for top_tension in [false, true] {
+                let steel = rebar.bending_steel(*d, top_tension).tension;
+                if let Err(error) = sepika_core::rc_capacity::rc_rebar_ratios(
+                    *b,
+                    *d,
+                    steel.effective_depth_mm,
+                    steel.area_mm2,
+                    sepika_core::rc_capacity::RcAlphaSection::Rectangular,
+                ) {
+                    return Some(format!(
+                        "部材 ID {} の{}引張時の鉄筋比入力が不正です: {error}",
+                        data.id.0,
+                        if top_tension { "上端" } else { "下端" }
+                    ));
+                }
+            }
+            if super::hinge_view::resolves_to_concentrated_spring(data, model)
+                && crate::frame::beam::stiffness_breakdown(model, data).slab > 1.0 + 1e-12
+            {
+                return Some(format!("部材 ID {} はスラブ協力付きRC梁ですが、集中ばねの方向別T形鉄筋比に必要なスラブ引張筋面積と正負別骨格を設定できません。矩形梁への代用は行わず解析を停止します", data.id.0));
+            }
+        }
         if let Err(err) = shape.validate_rebar() {
             return Some(format!(
                 "部材 ID {} の断面「{}」は実配筋の幾何が不整合です（{}）。\
