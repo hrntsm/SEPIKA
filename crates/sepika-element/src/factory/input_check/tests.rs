@@ -476,3 +476,161 @@ fn test_error_message_lists_head_and_remaining_count() {
     assert_eq!(msg.lines().count(), MAX_LISTED + 1);
     assert!(msg.contains("他 3 件"), "{}", msg);
 }
+
+#[test]
+fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
+    let mut model = beam_model(rc_section(), concrete_material());
+    model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+    model.nodes[1].coord[0] = 3600.0;
+    model.materials[0].young = 20_000.0;
+    model.materials[1].young = 200_000.0;
+    let bar_dia = (2400.0 / std::f64::consts::PI).sqrt();
+    model.sections[0].shape = Some(SectionShape::RcBeamRect {
+        b: 300.0,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: bar_dia,
+            top: vec![3],
+            bottom: vec![3],
+            cover: 60.0 - 10.0 - bar_dia / 2.0,
+            stirrup: sepika_core::section_shape::BeamStirrup {
+                dia: 10.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    });
+    assert!(ensure_nonlinear_input(&model).is_ok());
+    assert!(
+        (super::super::springs::flexural_alpha_y(&model.elements[0], &model) - 0.271_755).abs()
+            < 1e-12
+    );
+    let (_, _, backbone) = super::super::springs::build_flexural_springs(
+        &model.elements[0],
+        &model,
+        sepika_core::model::HysteresisModel::Takeda,
+        crate::factory::StrengthBasis::Nominal,
+    );
+    let [theta_y, my] = backbone.points[2];
+    assert!((my / (backbone.k_rot * theta_y) - 0.271_755).abs() < 1e-12);
+    for bad in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+        let mut invalid = model.clone();
+        if let Some(SectionShape::RcBeamRect { b, .. }) = invalid.sections[0].shape.as_mut() {
+            *b = bad;
+        }
+        assert!(ensure_nonlinear_input(&invalid)
+            .unwrap_err()
+            .contains("梁幅 b・全せい D"));
+    }
+    for bad in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+        for material in [0, 1] {
+            let mut invalid = model.clone();
+            invalid.materials[material].young = bad;
+            assert!(ensure_nonlinear_input(&invalid)
+                .unwrap_err()
+                .contains("正の有限値"));
+        }
+    }
+    let mut invalid = model.clone();
+    if let Some(SectionShape::RcBeamRect { rebar, .. }) = invalid.sections[0].shape.as_mut() {
+        rebar.cover = -100.0;
+    }
+    assert!(ensure_nonlinear_input(&invalid).is_err());
+}
+
+fn public_generation_diagnostic(model: &Model) -> String {
+    let result = std::panic::catch_unwind(|| {
+        crate::factory::build_nonlinear_behavior(
+            &model.elements[0],
+            model,
+            crate::factory::StrengthBasis::Nominal,
+            sepika_core::model::AnalysisKind::Incremental,
+        )
+    });
+    *result
+        .err()
+        .expect("不正入力で公開生成を停止すること")
+        .downcast::<String>()
+        .expect("入力診断をpanicへ引き継ぐこと")
+}
+
+#[test]
+fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
+    use sepika_core::ids::{FloorRegionId, SlabId};
+    use sepika_core::model::{FloorRegion, Slab, SlabPlate, SlabShape};
+    let mut model = beam_model(rc_section(), concrete_material());
+    model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+    model
+        .sections
+        .push(SectionShape::RcSlab { thickness: 150.0 }.to_section(SectionId(1), "S15".into()));
+    for (id, coord) in [(2, [6000.0, 2500.0, 0.0]), (3, [0.0, 2500.0, 0.0])] {
+        model.nodes.push(Node {
+            id: NodeId(id),
+            coord,
+            restraint: Dof6Mask::FREE,
+            mass: None,
+            story: None,
+            support_spring: None,
+        });
+    }
+    model.floor_regions.push(FloorRegion {
+        slab_ids: vec![SlabId(0)],
+        ..FloorRegion::new(
+            FloorRegionId(0),
+            vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+        )
+    });
+    model.slabs.push(Slab {
+        id: SlabId(0),
+        shape: SlabShape::Enclosed,
+        plate: SlabPlate {
+            section: Some(SectionId(1)),
+            ..Default::default()
+        },
+        tip_loads: vec![],
+    });
+    assert!(crate::frame::beam::stiffness_breakdown(&model, &model.elements[0]).slab > 1.0);
+    let error = ensure_nonlinear_input(&model).unwrap_err();
+    assert!(error.contains("スラブ引張筋面積と正負別骨格"), "{error}");
+    assert_eq!(public_generation_diagnostic(&model), error);
+    model.slabs.clear();
+    model.floor_regions.clear();
+    assert!(ensure_nonlinear_input(&model).is_ok());
+    let _behavior = crate::factory::build_nonlinear_behavior(
+        &model.elements[0],
+        &model,
+        crate::factory::StrengthBasis::Nominal,
+        sepika_core::model::AnalysisKind::Incremental,
+    );
+}
+
+#[test]
+fn missing_rc_beam_tension_rebar_stops_analysis_and_has_no_public_backbone() {
+    for (top, bottom, missing_side) in [
+        (vec![], vec![], "下端"),
+        (vec![], vec![4], "上端"),
+        (vec![6], vec![], "下端"),
+    ] {
+        let mut model = beam_model(rc_section(), concrete_material());
+        model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+        if let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() {
+            rebar.top = top;
+            rebar.bottom = bottom;
+        }
+        let error = ensure_nonlinear_input(&model).unwrap_err();
+        assert!(error.contains("部材 ID 0"), "{error}");
+        assert!(error.contains(missing_side), "{error}");
+        assert_eq!(public_generation_diagnostic(&model), error);
+        let view = crate::factory::build_hinge_view(
+            &model.elements[0],
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+            sepika_core::model::AnalysisKind::Incremental,
+            0.0,
+            8,
+            8,
+        )
+        .unwrap();
+        assert!(view.backbone.is_none());
+    }
+}

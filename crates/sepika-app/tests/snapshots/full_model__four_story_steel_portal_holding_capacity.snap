@@ -1,0 +1,20 @@
+---
+source: crates/sepika-app/tests/full_model.rs
+expression: "holding.stories.iter().enumerate().map(|(i, story)|\nformat!(\"story[{i}].Qu={}\\nstory[{i}].Qun={}\\nstory[{i}].Ds={}\\nstory[{i}].Fes={}\",\nsig4(story.qu), sig4(story.qun), sig4(story.ds),\nsig4(story.fes),)).collect::<Vec<_>>().join(\"\\n\")"
+---
+story[0].Qu=1.075e5
+story[0].Qun=1.868e4
+story[0].Ds=2.500e-1
+story[0].Fes=1.000e0
+story[1].Qu=9.252e4
+story[1].Qun=1.744e4
+story[1].Ds=2.500e-1
+story[1].Fes=1.000e0
+story[2].Qu=7.143e4
+story[2].Qun=1.445e4
+story[2].Ds=2.500e-1
+story[2].Fes=1.000e0
+story[3].Qu=4.322e4
+story[3].Qun=9.437e3
+story[3].Ds=2.500e-1
+story[3].Fes=1.000e0
