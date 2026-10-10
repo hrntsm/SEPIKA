@@ -13,7 +13,8 @@ fn attach_store_info(summary: &mut serde_json::Value, case: u32, kinds: &[&str])
     }
 }
 
-/// `JobOutcome` を結果ストアへ永続化し、サマリ JSON 文字列を返す。
+/// 永続化対象の結果をストアへ保存し、サマリ JSON 文字列を返す。
+/// 組合せ内力はストアへ保存せず、非永続のサマリに含める。
 /// 書き込み失敗は `Err` で返す（呼び出し側はジョブを `Failed` へ遷移させる）。
 /// `ServerState` のロックを保持したまま呼び出すこと。
 pub fn persist_job_outcome(
