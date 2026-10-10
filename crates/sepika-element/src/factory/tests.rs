@@ -547,6 +547,14 @@ fn test_resolve_member_hysteresis_and_flexural_springs() {
     }
 
     let mut model = make_diaphragm_model();
+    let mut rebar_material = model.materials[0].clone();
+    rebar_material.id = MaterialId(1);
+    rebar_material.category = MaterialCategory::Rebar;
+    rebar_material.young = 205000.0;
+    rebar_material.fc = None;
+    rebar_material.fy = Some(345.0);
+    model.materials.push(rebar_material);
+    model.sections[0].rebar_material = Some(MaterialId(1));
     let beam = ElementData {
         id: ElemId(0),
         kind: ElementKind::Beam,
@@ -808,6 +816,14 @@ fn test_flexural_alpha_y_sugano_for_rc_beam() {
     use sepika_core::section_shape::{RcBeamRebar, SectionShape};
 
     let mut model = make_diaphragm_model();
+    let mut rebar_material = model.materials[0].clone();
+    rebar_material.id = MaterialId(1);
+    rebar_material.category = MaterialCategory::Rebar;
+    rebar_material.young = 205000.0;
+    rebar_material.fc = None;
+    rebar_material.fy = Some(345.0);
+    model.materials.push(rebar_material);
+    model.sections[0].rebar_material = Some(MaterialId(1));
     let beam = ElementData {
         id: ElemId(0),
         kind: ElementKind::Beam,
@@ -907,6 +923,14 @@ fn test_rc_beam_flexural_spring_exhibits_takeda_degradation() {
     use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
 
     let mut model = make_diaphragm_model();
+    let mut rebar_material = model.materials[0].clone();
+    rebar_material.id = MaterialId(1);
+    rebar_material.category = MaterialCategory::Rebar;
+    rebar_material.young = 205000.0;
+    rebar_material.fc = None;
+    rebar_material.fy = Some(345.0);
+    model.materials.push(rebar_material);
+    model.sections[0].rebar_material = Some(MaterialId(1));
     let beam = ElementData {
         id: ElemId(0),
         kind: ElementKind::Beam,

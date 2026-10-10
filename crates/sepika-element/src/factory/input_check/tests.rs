@@ -791,6 +791,29 @@ fn actual_rc_factory_connects_additional_angle_and_publishes_both_backbones() {
     let reference_mass = behavior.mass_matrix(MassOption::Consistent);
     assert!(reference_mass.data.iter().all(|value| value.is_finite()));
     assert!(reference_mass.data.iter().any(|value| value.abs() > 0.0));
+    // Euler-Bernoulliの非零回転質量係数を、局所強軸の単位回転で直接照合する。
+    let mut unit = [0.0; 12];
+    unit[5] = 1.0;
+    let unit_global = elastic.axis.rotate_to_global(&unit);
+    let quadratic = |matrix: &crate::behavior::LocalMat, left: &[f64; 12], right: &[f64; 12]| {
+        (0..12)
+            .map(|i| {
+                (0..12)
+                    .map(|j| left[i] * matrix.get(i, j) * right[j])
+                    .sum::<f64>()
+            })
+            .sum::<f64>()
+    };
+    let properties = elastic.mass_properties;
+    let expected = properties.mass_per_length * 6000.0_f64.powi(3) / 105.0
+        + properties.rotary_inertia_z_per_length * 6000.0 * 2.0 / 15.0;
+    assert!(
+        (quadratic(&reference_mass, &unit_global, &unit_global) / expected - 1.0).abs() < 1e-12
+    );
+    unit[11] = 1.0;
+    let equal_rotations = elastic.axis.rotate_to_global(&unit);
+    let initial = behavior.tangent_stiffness(&ctx);
+    assert!((quadratic(&initial, &unit_global, &equal_rotations) / 108e9 - 1.0).abs() < 1e-12);
     assert_eq!(
         behavior.mass_matrix(MassOption::Lumped).data,
         elastic.mass_matrix(MassOption::Lumped).data
@@ -864,4 +887,60 @@ fn rc_reference_kind_and_active_load_diagnostics_do_not_use_inactive_settings() 
     .unwrap();
     assert!(view.backbone.is_none());
     assert!(view.unavailability_reason.unwrap().contains("未指定"));
+}
+
+#[test]
+fn rc_alpha_materials_are_required_and_explicit_basis_never_falls_back_to_other_laws() {
+    use sepika_core::model::{AnalysisKind, HysteresisModel};
+    let model = explicit_rc_reference_fixture();
+    for role in ["Ec", "Es"] {
+        let mut missing = model.clone();
+        if role == "Ec" {
+            missing.sections[0].material = None;
+        } else {
+            missing.sections[0].rebar_material = None;
+        }
+        let error =
+            crate::factory::springs::flexural_alpha_y_checked(&missing.elements[0], &missing)
+                .unwrap_err();
+        assert!(error.to_string().contains(role), "{error}");
+    }
+    for rule in [
+        HysteresisModel::Standard,
+        HysteresisModel::TsujiYamada,
+        HysteresisModel::SteelBuckling,
+    ] {
+        let mut other = model.clone();
+        other.set_member_hysteresis(ElemId(0), rule);
+        assert!(ensure_nonlinear_input_for_kind(&other, AnalysisKind::Incremental).is_err());
+        assert!(public_generation_diagnostic(&other).contains("対象外"));
+    }
+}
+
+#[test]
+fn rc_reference_cracking_uses_the_same_rectangular_geometry_as_alpha_and_yield() {
+    use sepika_core::model::AnalysisKind;
+    let model = explicit_rc_reference_fixture();
+    let view = |model: &Model| {
+        crate::factory::build_hinge_view(
+            &model.elements[0],
+            model,
+            crate::factory::StrengthBasis::Nominal,
+            AnalysisKind::Incremental,
+            0.0,
+            8,
+            24,
+        )
+        .unwrap()
+    };
+    let before = view(&model);
+    let mut supplied = model.clone();
+    supplied.sections[0].depth = 1200.0;
+    supplied.sections[0].property_basis.depth = sepika_core::model::PropertyBasis::Supplied;
+    assert!(ensure_nonlinear_input(&supplied).is_ok());
+    let after = view(&supplied);
+    assert_eq!(before.total_backbone, after.total_backbone);
+    assert_eq!(before.backbone, after.backbone);
+    let mc = after.total_backbone.unwrap()[1][1];
+    assert!((mc - 0.56 * 24.0_f64.sqrt() * 18_000_000.0).abs() < 1e-6);
 }

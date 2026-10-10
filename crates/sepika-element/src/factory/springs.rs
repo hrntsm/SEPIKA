@@ -206,7 +206,7 @@ pub(super) fn flexural_alpha_y(data: &ElementData, model: &Model) -> f64 {
     flexural_alpha_y_checked(data, model).expect("RC梁のαy入力診断が必要です")
 }
 
-fn flexural_alpha_y_checked(
+pub(super) fn flexural_alpha_y_checked(
     data: &ElementData,
     model: &Model,
 ) -> Result<f64, sepika_core::error::CoreError> {
@@ -249,12 +249,19 @@ fn flexural_alpha_y_checked(
         sepika_core::rc_capacity::RcAlphaSection::Rectangular,
     )?
     .pt_alpha_ratio;
-    let ec = model.element_material(data).map(|m| m.young).unwrap_or(0.0);
-    let n = model
+    let ec = model
+        .element_material(data)
+        .ok_or_else(|| {
+            sepika_core::error::CoreError::InvalidInput("RC梁のEc材料が未指定です".into())
+        })?
+        .young;
+    let es = model
         .element_rebar_material(data)
-        .map(|m| m.young)
-        .unwrap_or(sepika_core::section_shape::E_STEEL)
-        / ec;
+        .ok_or_else(|| {
+            sepika_core::error::CoreError::InvalidInput("RC梁のEs材料が未指定です".into())
+        })?
+        .young;
+    let n = es / ec;
     let l = model.member_length(data)
         - data.rigid_zone.rigid_length_i()
         - data.rigid_zone.rigid_length_j();
@@ -332,6 +339,25 @@ pub(super) fn rc_reference_stiffness(data: &ElementData, model: &Model) -> Resul
     .map_err(|error| error.to_string())
 }
 
+fn rc_reference_crack_moment(data: &ElementData, model: &Model) -> Result<f64, String> {
+    let Some(sepika_core::section_shape::SectionShape::RcBeamRect { b, d, .. }) = model
+        .element_section(data)
+        .and_then(|section| section.shape.as_ref())
+    else {
+        return Err("矩形RC梁の幾何断面が必要です".into());
+    };
+    let fc = model
+        .element_material(data)
+        .and_then(|material| material.fc)
+        .ok_or_else(|| "RC梁のFcが必要です".to_string())?;
+    // αy、My、I0と同じ矩形幾何を使用する。独立のSection.depthへ切り替えない。
+    let mc = sepika_core::rc_capacity::rc_crack_moment(fc, b * d.powi(2) / 6.0);
+    if !mc.is_finite() || mc <= 0.0 {
+        return Err("RC梁の幾何断面によるMcは正の有限値が必要です".into());
+    }
+    Ok(mc)
+}
+
 pub(super) fn rc_reference_issue(
     data: &ElementData,
     model: &Model,
@@ -370,16 +396,10 @@ pub(super) fn rc_reference_issue(
         Err(error) => return Some(error.to_string()),
     };
     let my = flexural_yield_moment(data, model, StrengthBasis::Nominal);
-    let mc = sepika_core::rc_capacity::rc_crack_moment(
-        model
-            .element_material(data)
-            .and_then(|m| m.fc)
-            .unwrap_or(0.0),
-        model
-            .element_section(data)
-            .map(|s| s.iy / (s.depth / 2.0))
-            .unwrap_or(0.0),
-    );
+    let mc = match rc_reference_crack_moment(data, model) {
+        Ok(mc) => mc,
+        Err(error) => return Some(error),
+    };
     let result = match sepika_core::rc_beam_backbone::rc_beam_yield_evaluation(my, alpha, s) {
         Ok(result) => result,
         Err(error) => return Some(error.to_string()),
@@ -541,15 +561,7 @@ pub(super) fn build_flexural_springs(
         return (mk(), mk(), backbone);
     }
     let mc = if rc_reference {
-        let beam = crate::frame::beam::BeamElement::new(data, model);
-        let depth = model.element_section(data).expect("RC断面が必要です").depth;
-        sepika_core::rc_capacity::rc_crack_moment(
-            model
-                .element_material(data)
-                .and_then(|m| m.fc)
-                .expect("Fcが必要です"),
-            beam.iz / (depth / 2.0),
-        )
+        rc_reference_crack_moment(data, model).expect("RC幾何Mcの入力診断が必要です")
     } else {
         crack_moment(data, model, my)
     };

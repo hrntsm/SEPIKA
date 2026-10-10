@@ -711,3 +711,52 @@ fn explicit_total_reference_subtracts_elastic_rotation_without_penalty() {
         max_relative = 1e-9
     );
 }
+
+#[test]
+fn explicit_total_reference_preserves_takeda_unloading_values() {
+    let mut elastic = make_test_beam();
+    elastic.e = 1000.0;
+    elastic.iz = 1e9;
+    elastic.length = 6000.0;
+    let total = sepika_material::HysteresisRule::Takeda {
+        crack: (250000.0, 0.00025),
+        yield_point: (1e6, 0.004),
+        ultimate: (1.1e6, 0.016),
+        alpha: 0.4,
+    };
+    let mk = || {
+        Box::new(sepika_material::HysteresisMaterial::new(total.clone()))
+            as Box<dyn UniaxialMaterial>
+    };
+    let mut element = ConcentratedSpringBeam::new_one_component(elastic, mk(), mk())
+        .with_total_rotation_reference(1e9);
+    let model = sepika_core::model::Model::default();
+    let ctx = Ctx { model: &model };
+    let du = |theta| LocalVec {
+        data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, theta, 0.0, 0.0, 0.0, 0.0, 0.0, theta],
+    };
+    // 2Ryまで載荷した武田型の除荷勾配 Ku=S*(Rmax/Ry)^(-.4)。
+    element.update_state(&du(0.008), true, &ctx);
+    assert_relative_eq!(
+        element.internal_force(&ctx).data[5],
+        1_033_333.333_333_333_3,
+        max_relative = 1e-10
+    );
+    element.update_state(&du(-0.0001), true, &ctx);
+    assert_relative_eq!(
+        element.internal_force(&ctx).data[5],
+        957_547.505_007_813_4,
+        max_relative = 1e-10
+    );
+    assert_relative_eq!(
+        element.end_spring_rotations().unwrap()[0],
+        0.006_942_452_494_992_187,
+        epsilon = 1e-12
+    );
+    let tangent = element.tangent_stiffness(&ctx);
+    assert_relative_eq!(
+        tangent.get(5, 5) + tangent.get(5, 11),
+        757_858_283.255_199,
+        max_relative = 1e-10
+    );
+}
