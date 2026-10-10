@@ -61,28 +61,157 @@ impl EditCommand for RestoreAssignmentTopology {
     }
 }
 
-/// 節点座標変更。
+/// 節点座標 [mm] と全長追従の区間を変更する。Manual荷重を保持できない最終座標は編集全体を拒否する。
 pub struct SetNodeCoord {
     pub node: NodeId,
     pub coord: [f64; 3],
 }
 
+pub(crate) fn validate_coordinate_loads(before: &Model, after: &Model) -> Result<(), String> {
+    use sepika_core::model::{LoadSource, MemberLoadKind};
+    for case in &after.load_cases {
+        for (index, load) in case.member.iter().enumerate() {
+            if load.source != LoadSource::Manual {
+                continue;
+            }
+            let Some(elem) = after.element(load.elem) else {
+                continue;
+            };
+            if !elem.nodes.iter().any(|id| {
+                before
+                    .node(*id)
+                    .zip(after.node(*id))
+                    .is_some_and(|(a, b)| a.coord != b.coord)
+            }) {
+                continue;
+            }
+            let length_mm = after.member_length(elem);
+            let reason = if !length_mm.is_finite() || length_mm <= 1e-9 {
+                Some("材長が非正または非有限になるため荷重区間を保持できません".to_owned())
+            } else if let Err(reason) = load.validate_extent(length_mm) {
+                Some(reason)
+            } else {
+                match load.kind {
+                    MemberLoadKind::Point { a, .. }
+                        if !a.is_finite() || a < 0.0 || a > length_mm =>
+                    {
+                        Some(format!(
+                            "集中荷重位置 a={a} mm が材長 {length_mm} mm の範囲外です"
+                        ))
+                    }
+                    MemberLoadKind::Distributed { a, b, .. }
+                        if !a.is_finite()
+                            || !b.is_finite()
+                            || a < 0.0
+                            || b <= a
+                            || b > length_mm =>
+                    {
+                        Some(format!(
+                            "分布区間 [{a}, {b}] mm を材長 {length_mm} mm で保持できません"
+                        ))
+                    }
+                    _ => None,
+                }
+            };
+            if let Some(reason) = reason {
+                return Err(format!(
+                    "荷重ケース {} ({}) member[{}] 部材 {} 荷重「{}」: {}",
+                    case.id.0, case.name, index, load.elem.0, load.name, reason
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+struct RestoreNodeCoord {
+    node: NodeId,
+    coord: [f64; 3],
+    loads: Vec<(usize, usize, sepika_core::model::MemberLoad)>,
+    topology: AssignmentTopology,
+}
+
+impl EditCommand for RestoreNodeCoord {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let redo = RestoreNodeCoord {
+            node: self.node,
+            coord: model.nodes[self.node.index()].coord,
+            loads: self
+                .loads
+                .iter()
+                .map(|(case, index, _)| {
+                    (
+                        *case,
+                        *index,
+                        model.load_cases[*case].member[*index].clone(),
+                    )
+                })
+                .collect(),
+            topology: AssignmentTopology::capture(model),
+        };
+        model.nodes[self.node.index()].coord = self.coord;
+        for (case, index, load) in &self.loads {
+            model.load_cases[*case].member[*index] = load.clone();
+        }
+        self.topology.clone().restore(model);
+        Box::new(redo)
+    }
+    fn label(&self) -> &str {
+        "節点座標変更"
+    }
+}
+
 impl EditCommand for SetNodeCoord {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let mut candidate = model.clone();
+        let inverse = self.apply_candidate(&mut candidate);
+        if inverse.is_noop() {
+            return inverse;
+        }
+        if let Err(reason) = validate_coordinate_loads(model, &candidate) {
+            return Box::new(RejectedEdit(reason));
+        }
+        *model = candidate;
+        inverse
+    }
+
+    fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        use sepika_core::model::{LoadSource, MemberLoadExtent, MemberLoadKind};
         let idx = self.node.index();
         if idx >= model.nodes.len() || model.nodes[idx].id != self.node {
             return Box::new(Noop);
         }
         let old_coord = model.nodes[idx].coord;
-        let snapshot = AssignmentTopology::capture(model);
+        let topology = AssignmentTopology::capture(model);
         model.nodes[idx].coord = self.coord;
+        let lengths: std::collections::HashMap<_, _> = model
+            .elements
+            .iter()
+            .filter(|e| e.nodes.contains(&self.node))
+            .map(|e| (e.id, model.member_length(e)))
+            .collect();
+        let mut loads = Vec::new();
+        for (case, lc) in model.load_cases.iter_mut().enumerate() {
+            for (index, load) in lc.member.iter_mut().enumerate() {
+                if load.source == LoadSource::Manual
+                    && load.extent == MemberLoadExtent::FullLengthUniform
+                {
+                    if let Some(&length_mm) = lengths.get(&load.elem) {
+                        loads.push((case, index, load.clone()));
+                        if let MemberLoadKind::Distributed { a, b, .. } = &mut load.kind {
+                            *a = 0.0;
+                            *b = length_mm;
+                        }
+                    }
+                }
+            }
+        }
         model.rebuild_assignment_regions_dropping_orphan_plates();
-        Box::new(RestoreAssignmentTopology {
-            snapshot,
-            inverse: Box::new(SetNodeCoord {
-                node: self.node,
-                coord: old_coord,
-            }),
+        Box::new(RestoreNodeCoord {
+            node: self.node,
+            coord: old_coord,
+            loads,
+            topology,
         })
     }
 

@@ -27,6 +27,7 @@ const DIR_CHOICES: [(&str, [f64; 3]); 6] = [
 /// 部材荷重の作用方向が材軸方向であることを示す選択肢の番号
 /// （ブレースはこの選択肢しか選べない。[`brace_axis_dir`] を参照）。
 const DIR_ALONG_AXIS: usize = DIR_CHOICES.len();
+const DIR_SAVED: usize = DIR_ALONG_AXIS + 1;
 
 /// 荷重の種類。ツリーのどのグループから開いたかで決まり、モーダルの間は変わらない。
 #[derive(Clone, Debug, PartialEq)]
@@ -51,7 +52,7 @@ pub struct MemberDraft {
     pub elem: Option<ElemId>,
     /// 0=中間集中、1=等分布、2=台形。
     pub kind: u8,
-    /// [`DIR_CHOICES`] の番号、または [`DIR_ALONG_AXIS`]（材軸方向）。
+    /// 全体方向の選択肢、現在の材軸方向、または既存荷重の保存済み方向。
     pub dir: usize,
     pub a: String,
     pub b: String,
@@ -163,7 +164,7 @@ impl LoadEditor {
     }
 
     /// 既存の部材荷重を編集するモーダルを開く。
-    pub fn edit_member(lc: LoadCaseId, index: usize, load: &MemberLoad, model: &Model) -> Self {
+    pub fn edit_member(lc: LoadCaseId, index: usize, load: &MemberLoad, _model: &Model) -> Self {
         let (kind, a, b, w1, w2, p) = match load.kind {
             MemberLoadKind::Point { a, p } => (
                 0u8,
@@ -174,11 +175,8 @@ impl LoadEditor {
                 format!("{}", p),
             ),
             MemberLoadKind::Distributed { a, b, w1, w2 } => {
-                let full = model
-                    .element(load.elem)
-                    .map(|e| model.member_length(e))
-                    .unwrap_or(0.0);
-                let uniform = (w1 - w2).abs() < 1e-9 && a.abs() < 1e-6 && (b - full).abs() < 1e-6;
+                let uniform =
+                    load.extent == sepika_core::model::MemberLoadExtent::FullLengthUniform;
                 (
                     if uniform { 1 } else { 2 },
                     format!("{}", a),
@@ -199,7 +197,7 @@ impl LoadEditor {
                 name: load.name.clone(),
                 elem: Some(load.elem),
                 kind,
-                dir: dir_choice_of(load, model),
+                dir: DIR_SAVED,
                 a,
                 b,
                 w1,
@@ -257,6 +255,9 @@ impl LoadEditor {
     pub fn set_picked_member(&mut self, elem: ElemId, is_brace: bool) {
         if let LoadDraft::Member(d) = &mut self.draft {
             d.elem = Some(elem);
+            if d.dir == DIR_SAVED {
+                return;
+            }
             if is_brace {
                 d.dir = DIR_ALONG_AXIS;
             } else if d.dir == DIR_ALONG_AXIS {
@@ -304,19 +305,6 @@ fn brace_axis_dir(model: &Model, elem: ElemId) -> [f64; 3] {
     } else {
         [d[0] / n, d[1] / n, d[2] / n]
     }
-}
-
-/// 既存の部材荷重の方向が、どの選択肢に当たるかを引く。
-/// 一致するものがなければ材軸方向として扱う（ブレースの荷重を開いた場合）。
-fn dir_choice_of(load: &MemberLoad, model: &Model) -> usize {
-    let same = |a: [f64; 3], b: [f64; 3]| {
-        (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6 && (a[2] - b[2]).abs() < 1e-6
-    };
-    DIR_CHOICES
-        .iter()
-        .position(|(_, d)| same(*d, load.dir))
-        .filter(|_| !is_brace(model, load.elem))
-        .unwrap_or(DIR_ALONG_AXIS)
 }
 
 /// 入力欄の文字列を数値へ。空欄・解釈できない文字列は 0 とする。
@@ -432,6 +420,10 @@ impl App {
             .map(|lc| format!("[{}] {}", lc.id.0, lc.name))
             .unwrap_or_else(|| "（不明な荷重ケース）".to_string());
 
+        let saved_dir = match &editor.target {
+            LoadEditTarget::ExistingMember { snapshot, .. } => Some(snapshot.dir),
+            _ => None,
+        };
         let modal = egui::Modal::new(egui::Id::new("load_editor_modal")).show(ctx, |ui| {
             ui.set_width(420.0);
             ui.heading(title);
@@ -535,34 +527,51 @@ impl App {
                     if brace {
                         ui.colored_label(
                             crate::theme::GRAY_600,
-                            "ブレースは軸剛性のみを持つため、荷重は材軸方向のみ指定できます。\
+                            "新規ブレース荷重は材軸方向です。既存荷重の保存済み方向は保持できます。\
                              材軸直交方向の荷重は両端の節点へ静定分配されます。",
                         );
                     }
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.label("種別:");
                         ui.selectable_value(&mut d.kind, 0u8, "中間集中");
-                        ui.selectable_value(&mut d.kind, 1u8, "等分布");
-                        ui.selectable_value(&mut d.kind, 2u8, "台形");
+                        ui.selectable_value(&mut d.kind, 1u8, "全長等分布（全長追従）");
+                        ui.selectable_value(&mut d.kind, 2u8, "区間分布（固定距離）");
                     });
                     ui.horizontal(|ui| {
                         ui.label("方向:");
-                        if brace {
+                        if brace && d.dir != DIR_SAVED {
                             d.dir = DIR_ALONG_AXIS;
-                            ui.label("材軸方向");
+                        }
+                        let saved_label = saved_dir
+                            .map(|dir| format!("保存済み方向 ({},{},{})", dir[0], dir[1], dir[2]));
+                        let current = if d.dir == DIR_SAVED {
+                            saved_label.as_deref().unwrap_or("鉛直下(-Z)")
+                        } else if brace {
+                            "材軸方向"
                         } else {
-                            let current = DIR_CHOICES
+                            DIR_CHOICES
                                 .get(d.dir)
-                                .map(|(l, _)| *l)
-                                .unwrap_or("鉛直下(-Z)");
-                            egui::ComboBox::from_id_salt("load_editor_member_dir")
-                                .selected_text(current)
-                                .show_ui(ui, |ui| {
+                                .map(|(label, _)| *label)
+                                .unwrap_or("鉛直下(-Z)")
+                        };
+                        egui::ComboBox::from_id_salt("load_editor_member_dir")
+                            .selected_text(current)
+                            .show_ui(ui, |ui| {
+                                if let Some(label) = saved_label.as_deref() {
+                                    ui.selectable_value(&mut d.dir, DIR_SAVED, label);
+                                }
+                                if brace {
+                                    ui.selectable_value(
+                                        &mut d.dir,
+                                        DIR_ALONG_AXIS,
+                                        "現在の材軸方向",
+                                    );
+                                } else {
                                     for (idx, (label, _)) in DIR_CHOICES.iter().enumerate() {
                                         ui.selectable_value(&mut d.dir, idx, *label);
                                     }
-                                });
-                        }
+                                }
+                            });
                     });
                     match d.kind {
                         0 => {
@@ -696,7 +705,15 @@ impl App {
                 if length <= 1e-9 {
                     return Err(format!("部材 #{} の材長が 0 です", elem.0));
                 }
-                let dir = if is_brace(&self.core.model, elem) {
+                let preserved_dir = match &editor.target {
+                    LoadEditTarget::ExistingMember { snapshot, .. } if d.dir == DIR_SAVED => {
+                        Some(snapshot.dir)
+                    }
+                    _ => None,
+                };
+                let dir = if let Some(dir) = preserved_dir {
+                    dir
+                } else if is_brace(&self.core.model, elem) {
                     brace_axis_dir(&self.core.model, elem)
                 } else {
                     DIR_CHOICES
@@ -731,16 +748,19 @@ impl App {
                     elem,
                     dir,
                     kind,
+                    extent: if d.kind == 1 {
+                        sepika_core::model::MemberLoadExtent::FullLengthUniform
+                    } else {
+                        sepika_core::model::MemberLoadExtent::FixedDistance
+                    },
                     name: d.name.trim().to_string(),
                     source: sepika_core::model::LoadSource::Manual,
                 };
-                match &editor.target {
-                    LoadEditTarget::New => {
-                        self.core.scoped.undo.run(
-                            &mut self.core.model,
-                            Box::new(sepika_edit::AddMemberLoad { lc, load }),
-                        );
-                    }
+                let applied = match &editor.target {
+                    LoadEditTarget::New => self.core.scoped.undo.run(
+                        &mut self.core.model,
+                        Box::new(sepika_edit::AddMemberLoad { lc, load }),
+                    ),
                     LoadEditTarget::ExistingMember { index, snapshot } => {
                         self.verify_member_snapshot(lc, *index, snapshot)?;
                         self.core.scoped.undo.run(
@@ -750,11 +770,20 @@ impl App {
                                 index: *index,
                                 load,
                             }),
-                        );
+                        )
                     }
                     LoadEditTarget::ExistingNodal { .. } => {
                         return Err("編集対象の種類が一致しません".to_string())
                     }
+                };
+                if !applied {
+                    return Err(self
+                        .core
+                        .scoped
+                        .undo
+                        .last_error()
+                        .unwrap_or("部材荷重を変更できません")
+                        .to_owned());
                 }
             }
         }
@@ -976,5 +1005,194 @@ mod tests {
             vec![second],
             "書き換わらない"
         );
+    }
+    #[test]
+    fn full_length_creation_edit_and_coordinate_change_preserve_intent_and_resultant() {
+        use sepika_core::model::MemberLoadExtent;
+        use sepika_element::frame::member_load::{consistent_load_local, SpanLoadTransfer};
+        use sepika_element::transform::LocalFrame;
+        let mut app = App::default();
+        app.load_model(beam_and_brace_model());
+        let mut editor = LoadEditor::new_member(LoadCaseId(0), Some(ElemId(0)));
+        if let LoadDraft::Member(d) = &mut editor.draft {
+            d.w1 = "10".into();
+            d.name = "機器".into();
+        }
+        app.commit_load_editor(&editor).unwrap();
+        for (origin, coord, expected_force_n, expected_centroid_mm) in [
+            (
+                [0.0, 0.0, 0.0],
+                [6000.0, 0.0, 0.0],
+                60000.0,
+                [3000.0, 0.0, 0.0],
+            ),
+            (
+                [0.0, 0.0, 0.0],
+                [8000.0, 0.0, 0.0],
+                80000.0,
+                [4000.0, 0.0, 0.0],
+            ),
+            (
+                [0.0, 0.0, 0.0],
+                [0.0, 8000.0, 0.0],
+                80000.0,
+                [0.0, 4000.0, 0.0],
+            ),
+            (
+                [6000.0, 0.0, 0.0],
+                [12000.0, 0.0, 0.0],
+                60000.0,
+                [9000.0, 0.0, 0.0],
+            ),
+        ] {
+            assert!(app.core.scoped.undo.run(
+                &mut app.core.model,
+                Box::new(sepika_edit::CompositeCommand {
+                    label: "座標更新".into(),
+                    children: vec![
+                        Box::new(sepika_edit::SetNodeCoord {
+                            node: NodeId(0),
+                            coord: origin
+                        }),
+                        Box::new(sepika_edit::SetNodeCoord {
+                            node: NodeId(1),
+                            coord
+                        }),
+                    ],
+                })
+            ));
+            let model = &app.core.model;
+            let load = &model.load_cases[0].member[0];
+            assert_eq!(load.extent, MemberLoadExtent::FullLengthUniform);
+            assert_eq!(load.dir, [0.0, 0.0, -1.0]);
+            let length_mm = model.member_length(&model.elements[0]);
+            let frame = LocalFrame::from_nodes(model.nodes[0].coord, coord, [0.0, 0.0, 1.0]);
+            let q = frame.rotate_to_global(&consistent_load_local(
+                std::slice::from_ref(load),
+                &frame,
+                length_mm,
+                SpanLoadTransfer::Consistent,
+            ));
+            assert!((q[2] + q[8] + expected_force_n).abs() < 1e-7);
+            let centroid = std::array::from_fn::<_, 3, _>(|axis| {
+                (q[2] * model.nodes[0].coord[axis] + q[8] * coord[axis]) / (q[2] + q[8])
+            });
+            for axis in 0..3 {
+                assert!((centroid[axis] - expected_centroid_mm[axis]).abs() < 1e-7);
+            }
+            let opened = LoadEditor::edit_member(LoadCaseId(0), 0, load, model);
+            assert!(matches!(
+                opened.draft,
+                LoadDraft::Member(MemberDraft { kind: 1, .. })
+            ));
+            app.commit_load_editor(&opened).unwrap();
+        }
+    }
+
+    #[test]
+    fn fixed_uniform_full_span_opens_as_fixed_and_keeps_its_interval_on_commit() {
+        let mut app = App::default();
+        app.load_model(beam_and_brace_model());
+        let load = MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 6000.0,
+                w1: 10.0,
+                w2: 10.0,
+            },
+        );
+        app.core.model.load_cases[0].member.push(load.clone());
+        let editor = LoadEditor::edit_member(LoadCaseId(0), 0, &load, &app.core.model);
+        assert!(matches!(
+            editor.draft,
+            LoadDraft::Member(MemberDraft { kind: 2, .. })
+        ));
+        app.commit_load_editor(&editor).unwrap();
+        assert_eq!(app.core.model.load_cases[0].member[0], load);
+    }
+    #[test]
+    fn grid_paste_moves_both_ends_and_rejects_invalid_final_shortening_without_stale_change() {
+        use crate::app::node_grid::NodeGridAdapter;
+        use crate::grid::GridAdapter;
+        let mut app = App::default();
+        app.load_model(beam_and_brace_model());
+        app.core.model.load_cases[0].member = vec![
+            MemberLoad::full_length_uniform(ElemId(0), [0.0, 0.0, -1.0], 6000.0, 10.0),
+            MemberLoad::manual(
+                ElemId(0),
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Distributed {
+                    a: 1000.0,
+                    b: 3000.0,
+                    w1: 10.0,
+                    w2: 10.0,
+                },
+            ),
+        ];
+        let before = app.core.model.load_cases.clone();
+        let mut grid = NodeGridAdapter {
+            model: &mut app.core.model,
+            undo: &mut app.core.scoped.undo,
+            edited: false,
+        };
+        grid.apply_block(&[(0, 0, "6000".into()), (1, 0, "12000".into())], 0);
+        assert!(grid.edited);
+        assert_eq!(grid.model.load_cases, before);
+        grid.undo.undo(grid.model);
+        assert_eq!(grid.model.nodes[0].coord, [0.0, 0.0, 0.0]);
+        assert_eq!(grid.model.nodes[1].coord, [6000.0, 0.0, 0.0]);
+        grid.undo.redo(grid.model);
+        let before = rmp_serde::to_vec_named(grid.model).unwrap();
+        grid.edited = false;
+        grid.apply_block(&[(0, 0, "6000".into()), (1, 0, "8000".into())], 0);
+        assert!(!grid.edited);
+        assert_eq!(rmp_serde::to_vec_named(grid.model).unwrap(), before);
+        assert!(grid.undo.last_error().unwrap().contains("member[1]"));
+    }
+    #[test]
+    fn rotating_brace_then_reopening_and_committing_preserves_saved_global_direction() {
+        let mut app = App::default();
+        app.load_model(beam_and_brace_model());
+        let editor = LoadEditor::new_member(LoadCaseId(0), Some(ElemId(1)));
+        app.commit_load_editor(&editor).unwrap();
+        let saved_dir = app.core.model.load_cases[0].member[0].dir;
+        assert!(app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(sepika_edit::SetNodeCoord {
+                node: NodeId(2),
+                coord: [0.0, 6000.0, 0.0]
+            })
+        ));
+        let load = app.core.model.load_cases[0].member[0].clone();
+        let mut opened = LoadEditor::edit_member(LoadCaseId(0), 0, &load, &app.core.model);
+        app.ui.scoped.load_editor = Some(opened.clone());
+        let _ =
+            egui::Context::default().run_ui(Default::default(), |ui| app.load_editor_ui(ui.ctx()));
+        opened = app.ui.scoped.load_editor.take().unwrap();
+        app.commit_load_editor(&opened).unwrap();
+        assert_eq!(app.core.model.load_cases[0].member[0].dir, saved_dir);
+        if let LoadDraft::Member(draft) = &mut opened.draft {
+            draft.dir = DIR_ALONG_AXIS;
+        }
+        app.commit_load_editor(&opened).unwrap();
+        assert_eq!(app.core.model.load_cases[0].member[0].dir, [0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn existing_arbitrary_and_nearly_axis_directions_survive_edit_and_target_selection() {
+        for dir in [[0.2, 0.3, -0.9], [1e-8, 0.0, -1.0]] {
+            let mut app = App::default();
+            app.load_model(beam_and_brace_model());
+            let load = MemberLoad::full_length_uniform(ElemId(0), dir, 6000.0, 10.0);
+            app.core.model.load_cases[0].member.push(load.clone());
+            let mut editor = LoadEditor::edit_member(LoadCaseId(0), 0, &load, &app.core.model);
+            app.commit_load_editor(&editor).unwrap();
+            assert_eq!(app.core.model.load_cases[0].member[0].dir, dir);
+            editor.set_picked_member(ElemId(1), true);
+            app.commit_load_editor(&editor).unwrap();
+            assert_eq!(app.core.model.load_cases[0].member[0].dir, dir);
+        }
     }
 }

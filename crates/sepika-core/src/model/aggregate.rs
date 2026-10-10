@@ -226,6 +226,8 @@ impl Model {
         use crate::error::CoreError;
 
         self.validate_attached_slabs()?;
+        self.validate_member_load_extents()
+            .map_err(CoreError::InvalidInput)?;
 
         check_id_consistency(&self.nodes, "nodes", "NodeId", |n| n.id.index(), |n| n.id.0)?;
         self.validate_damper_weights()

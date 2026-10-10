@@ -402,6 +402,7 @@ pub fn resolve_nodal_to_primary(
                 kind: MemberLoadKind::Point { a, p },
                 name: nl.name.clone(),
                 source: nl.source,
+                extent: sepika_core::model::MemberLoadExtent::FixedDistance,
             }),
             None => out_nodal.push(nl),
         }

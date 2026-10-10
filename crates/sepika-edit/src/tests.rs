@@ -5446,15 +5446,11 @@ fn test_copy_story_fits_member_load_to_target_length() {
 
     // 全長載荷・収まる部分載荷・収まらない部分載荷の 3 つを載せる。
     let lc = &mut model.load_cases[0];
-    lc.member.push(MemberLoad::manual(
+    lc.member.push(MemberLoad::full_length_uniform(
         c2,
         [1.0, 0.0, 0.0],
-        MemberLoadKind::Distributed {
-            a: 0.0,
-            b: 4000.0,
-            w1: 1.0,
-            w2: 1.0,
-        },
+        4000.0,
+        1.0,
     ));
     lc.member.push(MemberLoad::manual(
         c2,
@@ -8253,4 +8249,301 @@ fn attached_slab_rejection_preserves_model_and_undo_redo_history() {
     assert_eq!(format!("{model:?}"), format!("{original:?}"));
     assert_eq!(undo.revision(), revision);
     assert!(undo.can_redo());
+}
+
+mod member_load_coordinate_contract {
+    use super::*;
+    use sepika_core::model::{
+        LoadCase, LoadCaseKind, LoadSource, MemberLoad, MemberLoadExtent, MemberLoadKind,
+    };
+
+    fn model() -> Model {
+        let mut model = seeded_model(4, 2);
+        model.nodes[1].coord = [6000.0, 0.0, 0.0];
+        model.nodes[2].coord = [0.0, 5000.0, 0.0];
+        model.nodes[3].coord = [6000.0, 5000.0, 0.0];
+        model.elements[1].nodes = smallvec![NodeId(2), NodeId(3)];
+        let mut full = MemberLoad::full_length_uniform(ElemId(0), [0.0, 0.0, -1.0], 6000.0, 10.0);
+        full.name = "機器".into();
+        let fixed = MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Distributed {
+                a: 1000.0,
+                b: 3000.0,
+                w1: 10.0,
+                w2: 10.0,
+            },
+        );
+        let other = MemberLoad::full_length_uniform(ElemId(1), [0.0, 0.0, -1.0], 6000.0, 20.0);
+        let auto = MemberLoad::auto(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 6000.0,
+                w1: 2.0,
+                w2: 2.0,
+            },
+        );
+        let tip = MemberLoad {
+            source: LoadSource::SlabTip,
+            ..auto.clone()
+        };
+        model.load_cases.push(LoadCase {
+            id: LoadCaseId(0),
+            name: "追加".into(),
+            kind: LoadCaseKind::Other,
+            nodal: vec![],
+            member: vec![full, fixed, other, auto, tip],
+        });
+        model
+    }
+
+    #[test]
+    fn extension_keeps_intensity_identity_direction_and_undoes_as_one_edit() {
+        let mut model = model();
+        let before = model.clone();
+        let mut undo = UndoStack::new();
+        assert!(undo.run(
+            &mut model,
+            Box::new(SetNodeCoord {
+                node: NodeId(1),
+                coord: [8000.0, 0.0, 0.0]
+            })
+        ));
+        let load = &model.load_cases[0].member[0];
+        assert_eq!(
+            load.kind,
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 8000.0,
+                w1: 10.0,
+                w2: 10.0
+            }
+        );
+        assert_eq!(load.extent, MemberLoadExtent::FullLengthUniform);
+        assert_eq!(
+            (load.elem, load.name.as_str(), load.dir),
+            (ElemId(0), "機器", [0.0, 0.0, -1.0])
+        );
+        assert_eq!(
+            &model.load_cases[0].member[1..],
+            &before.load_cases[0].member[1..]
+        );
+        let after = model.clone();
+        undo.undo(&mut model);
+        assert_eq!(format!("{model:?}"), format!("{before:?}"));
+        undo.redo(&mut model);
+        assert_eq!(format!("{model:?}"), format!("{after:?}"));
+    }
+
+    #[test]
+    fn invalid_shortening_and_zero_length_preserve_model_and_history() {
+        for coord in [[2000.0, 0.0, 0.0], [0.0, 0.0, 0.0]] {
+            let mut model = model();
+            let before = model.clone();
+            let mut undo = UndoStack::new();
+            assert!(!undo.run(
+                &mut model,
+                Box::new(SetNodeCoord {
+                    node: NodeId(1),
+                    coord
+                })
+            ));
+            assert_eq!(format!("{model:?}"), format!("{before:?}"));
+            assert_eq!(undo.revision(), 0);
+            assert!(!undo.can_undo());
+            let reason = undo.last_error().unwrap();
+            assert!(reason.contains("荷重ケース 0 (追加)"));
+            assert!(reason.contains("member[") && reason.contains("部材 0"));
+            assert!(reason.contains("保持できません"));
+            let inverse = SetNodeCoord {
+                node: NodeId(1),
+                coord,
+            }
+            .apply(&mut model);
+            assert!(inverse.rejection().is_some());
+            assert_eq!(format!("{model:?}"), format!("{before:?}"));
+        }
+    }
+
+    #[test]
+    fn translation_validates_final_coordinates_even_when_intermediate_member_is_zero_length() {
+        let mut model = model();
+        let before = model.clone();
+        let mut undo = UndoStack::new();
+        assert!(undo.run(
+            &mut model,
+            Box::new(CompositeCommand {
+                label: "平行移動".into(),
+                children: vec![
+                    Box::new(CompositeCommand {
+                        label: "内側".into(),
+                        children: vec![Box::new(SetNodeCoord {
+                            node: NodeId(0),
+                            coord: [6000.0, 0.0, 0.0]
+                        })]
+                    }),
+                    Box::new(SetNodeCoord {
+                        node: NodeId(1),
+                        coord: [12000.0, 0.0, 0.0]
+                    }),
+                ]
+            })
+        ));
+        assert_eq!(model.load_cases, before.load_cases);
+        assert_eq!(model.nodes[0].coord, [6000.0, 0.0, 0.0]);
+        let after = model.clone();
+        undo.undo(&mut model);
+        assert_eq!(format!("{model:?}"), format!("{before:?}"));
+        undo.redo(&mut model);
+        assert_eq!(format!("{model:?}"), format!("{after:?}"));
+    }
+
+    #[test]
+    fn rotation_keeps_global_direction_and_fixed_load_positions() {
+        let mut model = model();
+        let before = model.clone();
+        assert!(UndoStack::new().run(
+            &mut model,
+            Box::new(SetNodeCoord {
+                node: NodeId(1),
+                coord: [0.0, 6000.0, 0.0]
+            })
+        ));
+        assert_eq!(model.load_cases, before.load_cases);
+    }
+
+    #[test]
+    fn invalid_composite_final_candidate_is_rejected_as_a_whole() {
+        let mut model = model();
+        let before = model.clone();
+        let mut undo = UndoStack::new();
+        assert!(!undo.run(
+            &mut model,
+            Box::new(CompositeCommand {
+                label: "不正短縮".into(),
+                children: vec![
+                    Box::new(SetNodeCoord {
+                        node: NodeId(0),
+                        coord: [6000.0, 0.0, 0.0]
+                    }),
+                    Box::new(SetNodeCoord {
+                        node: NodeId(1),
+                        coord: [8000.0, 0.0, 0.0]
+                    }),
+                ]
+            })
+        ));
+        assert_eq!(format!("{model:?}"), format!("{before:?}"));
+        assert_eq!(undo.revision(), 0);
+        assert!(undo.last_error().unwrap().contains("member[1]"));
+    }
+
+    #[test]
+    fn equal_intensity_fixed_full_span_and_point_are_not_inferred_as_following() {
+        let mut model = model();
+        model.load_cases[0].member = vec![
+            MemberLoad::manual(
+                ElemId(0),
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: 6000.0,
+                    w1: 10.0,
+                    w2: 10.0,
+                },
+            ),
+            MemberLoad::manual(
+                ElemId(0),
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Point { a: 5000.0, p: 20.0 },
+            ),
+        ];
+        let loads = model.load_cases.clone();
+        let mut undo = UndoStack::new();
+        assert!(undo.run(
+            &mut model,
+            Box::new(SetNodeCoord {
+                node: NodeId(1),
+                coord: [8000.0, 0.0, 0.0]
+            })
+        ));
+        assert_eq!(model.load_cases, loads);
+        let before = model.clone();
+        assert!(!undo.run(
+            &mut model,
+            Box::new(SetNodeCoord {
+                node: NodeId(1),
+                coord: [4000.0, 0.0, 0.0]
+            })
+        ));
+        assert_eq!(format!("{model:?}"), format!("{before:?}"));
+    }
+    #[test]
+    fn every_loaded_member_sharing_the_edited_node_follows_without_touching_fixed_loads() {
+        let mut model = model();
+        model.elements[1].nodes = smallvec![NodeId(1), NodeId(3)];
+        model.load_cases[0].member[2] =
+            MemberLoad::full_length_uniform(ElemId(1), [0.0, 0.0, -1.0], 5000.0, 20.0);
+        let before = model.load_cases[0].member.clone();
+        assert!(UndoStack::new().run(
+            &mut model,
+            Box::new(SetNodeCoord {
+                node: NodeId(1),
+                coord: [6000.0, -3000.0, 0.0]
+            })
+        ));
+        assert_eq!(
+            model.load_cases[0].member[2].kind,
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 8000.0,
+                w1: 20.0,
+                w2: 20.0
+            }
+        );
+        assert_eq!(model.load_cases[0].member[1], before[1]);
+        assert_eq!(model.load_cases[0].member[3..], before[3..]);
+    }
+
+    #[test]
+    fn point_and_trapezoid_positions_are_preserved_and_invalid_shortening_has_identity() {
+        for kind in [
+            MemberLoadKind::Point { a: 5000.0, p: 20.0 },
+            MemberLoadKind::Distributed {
+                a: 1000.0,
+                b: 5000.0,
+                w1: 2.0,
+                w2: 10.0,
+            },
+        ] {
+            let mut model = model();
+            model.load_cases[0].member = vec![MemberLoad::manual(
+                ElemId(0),
+                [0.0, 0.0, -1.0],
+                kind.clone(),
+            )];
+            let mut undo = UndoStack::new();
+            assert!(undo.run(
+                &mut model,
+                Box::new(SetNodeCoord {
+                    node: NodeId(1),
+                    coord: [8000.0, 0.0, 0.0]
+                })
+            ));
+            assert_eq!(model.load_cases[0].member[0].kind, kind);
+            let before = format!("{model:?}");
+            assert!(!undo.run(
+                &mut model,
+                Box::new(SetNodeCoord {
+                    node: NodeId(1),
+                    coord: [4000.0, 0.0, 0.0]
+                })
+            ));
+            assert_eq!(format!("{model:?}"), before);
+            assert!(undo.last_error().unwrap().contains("member[0]"));
+        }
+    }
 }

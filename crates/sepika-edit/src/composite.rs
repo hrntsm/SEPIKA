@@ -16,16 +16,29 @@ pub struct CompositeCommand {
 impl EditCommand for CompositeCommand {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let mut candidate = model.clone();
+        let inverse = self.apply_candidate(&mut candidate);
+        if inverse.rejection().is_some() {
+            return inverse;
+        }
+        if let Err(error) = candidate.validate_attached_slabs() {
+            return Box::new(crate::RejectedEdit(error.to_string()));
+        }
+        if let Err(reason) = crate::node_member::validate_coordinate_loads(model, &candidate) {
+            return Box::new(crate::RejectedEdit(reason));
+        }
+        *model = candidate;
+        inverse
+    }
+
+    fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let mut candidate = model.clone();
         let mut inverses = Vec::new();
         for child in &self.children {
-            let inverse = child.apply(&mut candidate);
+            let inverse = child.apply_candidate(&mut candidate);
             if inverse.rejection().is_some() {
                 return inverse;
             }
             inverses.push(inverse);
-        }
-        if let Err(error) = candidate.validate_attached_slabs() {
-            return Box::new(crate::RejectedEdit(error.to_string()));
         }
         *model = candidate;
         Box::new(CompositeCommand {

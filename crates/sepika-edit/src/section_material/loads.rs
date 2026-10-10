@@ -172,6 +172,18 @@ impl EditCommand for AddMemberLoad {
         if self.load.source.is_auto() || !crate::refs::elem_exists(model, self.load.elem) {
             return Box::new(Noop);
         }
+        if let Err(reason) = self
+            .load
+            .validate_extent(model.member_length(model.element(self.load.elem).unwrap()))
+        {
+            return Box::new(RejectedEdit(format!(
+                "荷重ケース {} member[{}] 部材 {}: {}",
+                self.lc.0,
+                model.load_cases[idx].member.len(),
+                self.load.elem.0,
+                reason
+            )));
+        }
         model.load_cases[idx].member.push(self.load.clone());
         let pos = model.load_cases[idx].member.len() - 1;
         Box::new(DeleteMemberLoad {
@@ -200,6 +212,15 @@ impl EditCommand for SetMemberLoad {
         };
         if !crate::refs::elem_exists(model, self.load.elem) {
             return Box::new(Noop);
+        }
+        if let Err(reason) = self
+            .load
+            .validate_extent(model.member_length(model.element(self.load.elem).unwrap()))
+        {
+            return Box::new(RejectedEdit(format!(
+                "荷重ケース {} member[{}] 部材 {}: {}",
+                self.lc.0, self.index, self.load.elem.0, reason
+            )));
         }
         let member = &mut model.load_cases[idx].member;
         if self.index >= member.len() || member[self.index].source.is_auto() {

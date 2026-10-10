@@ -319,13 +319,17 @@ pub fn loads_table(ui: &mut egui::Ui, app: &mut App) {
                 ui.horizontal(|ui| {
                     let is_auto = ml.source.is_auto();
                     let label = format!(
-                        "{} / 部材#{} / {} / {}",
+                        "{} / 部材#{} / {} / {} / {}",
                         if is_auto {
                             AUTO_LOAD_LABEL.to_string()
                         } else {
                             member_load_display_name(ml)
                         },
                         ml.elem.0,
+                        match ml.extent {
+                            sepika_core::model::MemberLoadExtent::FullLengthUniform => "全長追従",
+                            sepika_core::model::MemberLoadExtent::FixedDistance => "固定距離",
+                        },
                         member_load_kind_text(&ml.kind),
                         format_args!("dir=({:.1},{:.1},{:.1})", ml.dir[0], ml.dir[1], ml.dir[2]),
                     );
