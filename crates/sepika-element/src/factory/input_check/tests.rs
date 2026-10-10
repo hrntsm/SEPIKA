@@ -538,6 +538,22 @@ fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
     assert!(ensure_nonlinear_input(&invalid).is_err());
 }
 
+fn public_generation_diagnostic(model: &Model) -> String {
+    let result = std::panic::catch_unwind(|| {
+        crate::factory::build_nonlinear_behavior(
+            &model.elements[0],
+            model,
+            crate::factory::StrengthBasis::Nominal,
+            sepika_core::model::AnalysisKind::Incremental,
+        )
+    });
+    *result
+        .err()
+        .expect("不正入力で公開生成を停止すること")
+        .downcast::<String>()
+        .expect("入力診断をpanicへ引き継ぐこと")
+}
+
 #[test]
 fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
     use sepika_core::ids::{FloorRegionId, SlabId};
@@ -576,9 +592,16 @@ fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
     assert!(crate::frame::beam::stiffness_breakdown(&model, &model.elements[0]).slab > 1.0);
     let error = ensure_nonlinear_input(&model).unwrap_err();
     assert!(error.contains("スラブ引張筋面積と正負別骨格"), "{error}");
+    assert_eq!(public_generation_diagnostic(&model), error);
     model.slabs.clear();
     model.floor_regions.clear();
     assert!(ensure_nonlinear_input(&model).is_ok());
+    let _behavior = crate::factory::build_nonlinear_behavior(
+        &model.elements[0],
+        &model,
+        crate::factory::StrengthBasis::Nominal,
+        sepika_core::model::AnalysisKind::Incremental,
+    );
 }
 
 #[test]
@@ -597,6 +620,7 @@ fn missing_rc_beam_tension_rebar_stops_analysis_and_has_no_public_backbone() {
         let error = ensure_nonlinear_input(&model).unwrap_err();
         assert!(error.contains("部材 ID 0"), "{error}");
         assert!(error.contains(missing_side), "{error}");
+        assert_eq!(public_generation_diagnostic(&model), error);
         let view = crate::factory::build_hinge_view(
             &model.elements[0],
             &model,
