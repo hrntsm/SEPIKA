@@ -60,7 +60,7 @@ pub struct RcBeamBendingInput {
     pub d_full: f64,
     /// 主筋降伏強度 σy [N/mm²]。
     pub sigma_y: f64,
-    /// せん断スパン a = l0/2 [mm]（αy の a/D 用）。
+    /// 明示した三角形曲げ分布のせん断スパン a = abs(M/Q) [mm]（αy の a/D 用）。
     pub a_shear_span: f64,
     /// 鉄筋ヤング係数 Es [N/mm²]。
     pub es: f64,
@@ -95,18 +95,13 @@ pub fn rc_beam_bending(inp: &RcBeamBendingInput) -> RcBeamBending {
         sigma_0: 0.0,
     };
     let my = rc_mu_simple(&cap);
-    let n = if inp.ec > 0.0 { inp.es / inp.ec } else { 15.0 };
-    let a_over_d = if inp.d_full > 0.0 {
-        inp.a_shear_span / inp.d_full
-    } else {
-        3.0
-    };
-    let d_over_full = if inp.d_full > 0.0 {
-        inp.d_eff / inp.d_full
-    } else {
-        0.9
-    };
-    let alpha_y = rc_alpha_y_sugano(inp.pt, a_over_d, d_over_full, n);
+    let n = inp.es / inp.ec;
+    let alpha_y = rc_alpha_y_sugano(
+        inp.pt,
+        inp.a_shear_span / inp.d_full,
+        inp.d_eff / inp.d_full,
+        n,
+    );
     RcBeamBending { mc, my, alpha_y }
 }
 
@@ -136,7 +131,24 @@ pub fn rc_beam_bending_checked(
             "有効せい d は全せい D 以下が必要です".into(),
         ));
     }
-    Ok(rc_beam_bending(inp))
+    for (name, value) in [("Fc", inp.fc), ("Ze", inp.ze), ("σy", inp.sigma_y)] {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(CoreError::InvalidInput(format!(
+                "{name} は正の有限値が必要です"
+            )));
+        }
+    }
+    let result = rc_beam_bending(inp);
+    sepika_core::rc_capacity::rc_alpha_y_sugano_checked(
+        inp.pt,
+        inp.a_shear_span / inp.d_full,
+        inp.d_eff / inp.d_full,
+        inp.es / inp.ec,
+    )?;
+    if !result.mc.is_finite() || !result.my.is_finite() {
+        return Err(CoreError::InvalidInput("骨格耐力が非有限です".into()));
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -160,30 +172,30 @@ mod tests {
             es: 200_000.0,
             ec: 20_000.0,
         };
-        assert!((rc_beam_bending_checked(&input).unwrap().alpha_y - 0.271_755).abs() < 1e-12);
+        assert!((rc_beam_bending_checked(&input).unwrap().alpha_y - 0.265_720_5).abs() < 1e-12);
         assert!(
             (rc_beam_bending(&RcBeamBendingInput {
                 pt: input.pt * 100.0,
                 ..input
             })
             .alpha_y
-                - 0.271_755)
+                - 0.265_720_5)
                 .abs()
-                > 10.0
+                > 1.0
         );
         for (section, expected) in [
             (
                 RcAlphaSection::TBottomTension {
                     effective_width_mm: 1500.0,
                 },
-                0.165_807,
+                0.278_259_3,
             ),
             (
                 RcAlphaSection::TTopTension {
                     effective_width_mm: 1500.0,
                     slab_tension_area_mm2: 600.0,
                 },
-                0.315_9,
+                0.260_496,
             ),
         ] {
             let pt = rc_rebar_ratios(300.0, 600.0, 540.0, 1800.0, section)

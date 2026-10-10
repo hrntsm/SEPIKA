@@ -168,3 +168,26 @@ impl EditCommand for SetDamperProps {
         "制振ダンパー特性変更"
     }
 }
+
+/// RC梁の逆対称基準の明示選択。未指定は採用αyの自動接続を許可しない。
+pub struct SetMemberRcBeamReference {
+    pub elem: ElemId,
+    pub reference: Option<sepika_core::model::RcBeamReference>,
+}
+
+impl EditCommand for SetMemberRcBeamReference {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let idx = self.elem.index();
+        if idx >= model.elements.len() || model.elements[idx].id != self.elem {
+            return Box::new(Noop);
+        }
+        let old = model.set_member_rc_beam_reference(self.elem, self.reference);
+        Box::new(Self {
+            elem: self.elem,
+            reference: old,
+        })
+    }
+    fn label(&self) -> &str {
+        "RC梁基準変更"
+    }
+}
