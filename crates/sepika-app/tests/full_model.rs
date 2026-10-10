@@ -2306,6 +2306,99 @@ fn wall_regions_survive_save_reopen_reprepare() {
     std::fs::remove_file(&path).ok();
 }
 
+fn assert_panel_505_fixture_geometry_and_states(app: &App) {
+    use sepika_design_jp::CheckOutcome;
+    let model = &app.core.model;
+    let source_id = |node| {
+        model
+            .stb_node_ids
+            .iter()
+            .find(|identity| identity.node == node)
+            .unwrap()
+            .id
+    };
+    // model.stbの鋼接合42節点のうち、X面でH500/tf16とH700/tf19が相対する12節点。
+    let staggered = [14, 17, 20, 23, 26, 29, 32, 35, 38, 41, 45, 49];
+    let standard = [
+        13, 15, 16, 18, 19, 21, 22, 24, 25, 27, 28, 30, 31, 33, 34, 36, 37, 39, 40, 42, 43, 44, 46,
+        47, 48, 50, 51, 52, 53, 54,
+    ];
+    let mut panels: Vec<_> = model
+        .elements
+        .iter()
+        .filter(|e| matches!(e.kind, ElementKind::PanelZone))
+        .map(|e| source_id(e.nodes[0]))
+        .collect();
+    panels.sort_unstable();
+    assert_eq!(panels, standard);
+    assert_eq!(model.elements.len(), 115 + 30);
+    let checks: Vec<_> = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .joint_checks
+        .iter()
+        .filter(|c| c.label.starts_with("パネルゾーン(S)"))
+        .collect();
+    assert_eq!(checks.len(), 42 * 2);
+    let mut skipped = Vec::new();
+    for id in standard.into_iter().chain(staggered) {
+        let pair: Vec<_> = checks.iter().filter(|c| source_id(c.node) == id).collect();
+        assert_eq!(pair.len(), 2, "STB節点{id}");
+        let x = pair
+            .iter()
+            .find(|c| c.label.contains("[1.000, 0.000, 0.000]"))
+            .unwrap();
+        let y = pair
+            .iter()
+            .find(|c| c.label.contains("[0.000, 1.000, 0.000]"))
+            .unwrap();
+        assert!(
+            matches!(y.outcome, CheckOutcome::Checked(_)),
+            "STB節点{id}直交Y面"
+        );
+        if staggered.contains(&id) {
+            let CheckOutcome::Skipped { reason } = &x.outcome else {
+                panic!("STB節点{id}段違いX面");
+            };
+            assert!(
+                reason.contains("db=484 mm") && reason.contains("db=681 mm"),
+                "{reason}"
+            );
+            assert!(
+                reason.contains("上位置差=-98.5 mm") && reason.contains("下位置差=98.5 mm"),
+                "{reason}"
+            );
+            skipped.push(id);
+        } else {
+            assert!(
+                matches!(x.outcome, CheckOutcome::Checked(_)),
+                "STB節点{id}標準X面"
+            );
+        }
+    }
+    skipped.sort_unstable();
+    assert_eq!(skipped, staggered);
+}
+
+#[test]
+fn panel_505_real_fixture_retains_standard_joints_and_skips_only_staggered_planes() {
+    let mut app = prepared();
+    app.run_linear_static(
+        app.core
+            .model
+            .load_cases
+            .iter()
+            .find(|case| case.name == DL_CASE_NAME)
+            .unwrap()
+            .id,
+    );
+    assert_no_error(&app, "実モデルDLと面別検定");
+    assert_panel_505_fixture_geometry_and_states(&app);
+}
+
 // ===================== スナップショット =====================
 
 /// 全解析の代表スカラをスナップショットで固定する。
@@ -2321,6 +2414,7 @@ fn snapshot_key_scalars() {
     let mut app = analyzed();
     app.run_design_check();
     clear_error(&mut app);
+    assert_panel_505_fixture_geometry_and_states(&app);
 
     let mut out = String::new();
     let mut line = |k: &str, v: String| {
