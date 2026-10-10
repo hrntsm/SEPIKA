@@ -10,7 +10,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0002](0002-determinism.md) | accepted | 決定性は単一スレッドのビット一致を保証する |
 | [0003](0003-single-writer-edit-commands.md) | accepted | モデル所有権は単一ライタとし、編集はコマンド経由に限る |
 | [0004](0004-story-and-diaphragm-separation.md) | accepted | 階と剛床を分離し、階は床レベル基準の利用者定義とする |
-| [0005](0005-materials-on-sections.md) | accepted | 材料は断面が持つ |
+| [0005](0005-materials-on-sections.md) | superseded by ADR-0051 | 材料は断面が持つ |
 | [0006](0006-wall-elements-generated-from-wall-plates.md) | accepted | 壁エレメントは壁版から都度生成する派生物とする |
 | [0007](0007-floor-regions-slabs-secondary-members.md) | accepted | 床は床領域・床板・二次部材で表し、解析要素は柱と大梁までとする |
 | [0008](0008-secondary-member-load-cascade.md) | superseded by ADR-0018 | 二次部材の荷重は支持相手へ逐次伝達し、交点は常にピンとする |
@@ -57,6 +57,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0046](0046-polygon-floor-finite-segment-integration.md) | accepted | 全周支持の凹形床を有限線分最近接と境界実面積で分配し、モデル差と格子誤差を区別する |
 | [0047](0047-source-story-and-analysis-membership.md) | accepted | 原階の明示所属は解析用所属から独立して保存する |
+
+| [0051](0051-stbridge-strength-input-and-section-material.md) | accepted | ST-Bridgeの元強度指定と断面材料を分離する |
 
 ## 規約
 
