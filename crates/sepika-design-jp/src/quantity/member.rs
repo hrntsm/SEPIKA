@@ -203,6 +203,16 @@ pub fn beam_formwork_area(b: f64, d: f64, l: f64) -> f64 {
 pub fn wall_bar_length(span: f64, s: f64, count: f64) -> f64 {
     (span + 2.0 * s) * count
 }
+/// 円形柱の体積 [mm³]。直径・長さ [mm] は有限かつ正を前提とする。
+pub fn circle_column_concrete_volume(diameter_mm: f64, length_mm: f64) -> f64 {
+    std::f64::consts::PI * diameter_mm * diameter_mm / 4.0 * length_mm
+}
+
+/// 円形柱の側面型枠面積 [mm²]。直径・長さ [mm] は有限かつ正を前提とする。
+pub fn circle_column_formwork_area(diameter_mm: f64, length_mm: f64) -> f64 {
+    std::f64::consts::PI * diameter_mm * length_mm
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
