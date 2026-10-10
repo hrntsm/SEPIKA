@@ -14,6 +14,8 @@ STB kind は階分類であり、Frame/WallBuilding の設計法を意味しな�
 
 原階 Fc 参照 API は #520 の消費側へ渡す供給契約とする。部材・断面・共通の元材料指定の保存や全材料解決は #520 に残す。
 
+原階の初期化済み状態を保存し、STB取り込み時は階0件でも初期化済みとする。全原階削除後も状態を保持し、exportや基部編集が派生解析階を原階へ再作成しない。未初期化のnativeモデルは従来のexportを保持し、成功した初回階編集でだけ原階を初期化する。状態はModelの末尾へserde既定falseで追加し、保存・snapshot・undo/redo・入力同一性へ含める。
+
 Legacy source:
 
 - [Issue #497](https://github.com/hrntsm/SEPIKA/issues/497) P2再監査・2026-10-10実装契約補足
