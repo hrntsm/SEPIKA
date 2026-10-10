@@ -1003,6 +1003,7 @@ mod tests {
             story: None,
             support_spring: None,
         });
+        model.assign_stb_node_ids().unwrap();
         let before = model.clone();
         let mut undo = UndoStack::new();
         undo.run(

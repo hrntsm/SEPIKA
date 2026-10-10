@@ -1,6 +1,333 @@
 use super::*;
+#[cfg(feature = "gui")]
+use sepika_core::ids::StoryId;
 use sepika_core::model::MaterialCategory;
 use sepika_core::model::{FloorRegion, Slab, SlabPlate, SlabShape};
+
+#[cfg(feature = "gui")]
+fn source_story_close_levels_model() -> sepika_core::model::Model {
+    sepika_io::stbridge::import_stbridge(
+        r#"<ST_BRIDGE version="2.0.2"><StbModel><StbNodes>
+    <StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/>
+    <StbNode id="3" X="0" Y="0" Z="3000.5"/><StbNode id="4" X="0" Y="0" Z="6000"/>
+    </StbNodes><StbStories>
+    <StbStory id="20" name="基部" height="0" kind="GENERAL"/>
+    <StbStory id="30" name="A" height="3000" kind="ROOF"/>
+    <StbStory id="40" name="B" height="3000.5" kind="ISOLATION"/>
+    <StbStory id="50" name="C" height="6000" kind="DEPENDENCE" id_dependence="30"/>
+    </StbStories></StbModel></ST_BRIDGE>"#,
+    )
+    .unwrap()
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn source_story_empty_table_gui_kind_edit_does_not_create_source() {
+    let mut model = source_story_close_levels_model();
+    model.source_stories.clear();
+    assert!(model.source_stories_initialized);
+    let mut app = App::default();
+    app.load_model(model);
+    let before = app.core.model.clone();
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::SetStoryLevelKind {
+            story: StoryId(0),
+            level_kind: sepika_core::model::StoryLevelKind::Penthouse { k: 0.7 },
+        }));
+    app.apply_pending_story_command();
+    assert!(app.core.model.source_stories.is_empty());
+    assert!(app.core.model.source_stories_initialized);
+    assert!(!sepika_io::stbridge::export_stbridge(&app.core.model)
+        .unwrap()
+        .contains("<StbStory "));
+    app.core.scoped.undo.undo(&mut app.core.model);
+    assert!(app.core.model.eq_ignoring_dofmap(&before));
+    app.core.scoped.undo.redo(&mut app.core.model);
+    assert!(app.core.model.source_stories.is_empty());
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn source_story_native_kind_gui_export_save_undo_and_initialization_order() {
+    use sepika_core::model::{SourceStoryKind, StoryLevelKind};
+    for order in 0..3 {
+        let mut model = source_story_close_levels_model();
+        model.nodes.truncate(2);
+        model.stories.truncate(2);
+        model.source_stories.clear();
+        model.source_stories_initialized = false;
+        model.stb_node_ids.clear();
+        let mut app = App::default();
+        app.load_model(model);
+        let target = if order == 2 {
+            assert!(app.apply_model_edit(Box::new(sepika_edit::AddStory {
+                name: "追加".into(),
+                elevation: 6000.0
+            })));
+            StoryId(2)
+        } else {
+            if order == 1 {
+                assert!(app.apply_model_edit(Box::new(sepika_edit::SetStoryLevel {
+                    story: StoryId(1),
+                    name: "編集".into(),
+                    elevation: 3000.0
+                })));
+            }
+            StoryId(1)
+        };
+        let before = app.core.model.clone();
+        let key = result_validity::ResultInputKey::Modal;
+        let input = app.result_input(&key);
+        app.ui
+            .scoped
+            .pending_story_cmds
+            .push_back(Box::new(sepika_edit::SetStoryLevelKind {
+                story: target,
+                level_kind: StoryLevelKind::Penthouse { k: 0.7 },
+            }));
+        app.apply_pending_story_command();
+        assert_ne!(app.result_input(&key), input);
+        let exported = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
+        let output = sepika_io::stbridge::import_stbridge(&exported).unwrap();
+        assert_eq!(
+            output
+                .source_stories
+                .iter()
+                .find(|s| s.height == app.core.model.stories[target.index()].elevation)
+                .unwrap()
+                .kind,
+            SourceStoryKind::Penthouse
+        );
+        assert!(app
+            .core
+            .model
+            .source_stories
+            .iter()
+            .all(|s| s.kind_from_native));
+        let path = test_tmp().join(format!("497-native-kind-{order}.ovika"));
+        sepika_io::ovika::save_ovika(&path, &app.core.model, Default::default()).unwrap();
+        let saved = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        assert_eq!(saved.source_stories, app.core.model.source_stories);
+        std::fs::remove_file(path).unwrap();
+        app.undo_action();
+        assert!(app.core.model.eq_ignoring_dofmap(&before));
+        assert_eq!(app.result_input(&key), input);
+        app.redo_action();
+        assert_eq!(
+            sepika_io::stbridge::export_stbridge(&app.core.model).unwrap(),
+            exported
+        );
+        app.run_preparation();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        assert_eq!(
+            app.core.model.stories[target.index()].level_kind,
+            StoryLevelKind::Penthouse { k: 0.7 }
+        );
+        assert!(
+            app.apply_model_edit(Box::new(sepika_edit::SetStoryLevelKind {
+                story: target,
+                level_kind: StoryLevelKind::Basement { depth_mm: 1000.0 }
+            }))
+        );
+        let source = app
+            .core
+            .model
+            .source_stories
+            .iter()
+            .find(|s| s.height == app.core.model.stories[target.index()].elevation)
+            .unwrap();
+        assert_eq!(source.kind, SourceStoryKind::Basement);
+    }
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn source_story_imported_kinds_close_levels_and_explicit_edit_correspondence() {
+    use sepika_core::model::StoryLevelKind;
+    let mut app = App::default();
+    app.load_model(source_story_close_levels_model());
+    let source = app.core.model.source_stories.clone();
+    for index in 0..4 {
+        assert!(
+            app.apply_model_edit(Box::new(sepika_edit::SetStoryLevelKind {
+                story: StoryId(index),
+                level_kind: StoryLevelKind::Penthouse {
+                    k: 0.5 + index as f64 * 0.1
+                }
+            }))
+        );
+    }
+    app.run_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert_eq!(app.core.model.source_stories, source);
+    assert_eq!(app.core.model.stories[1].name, "A");
+    assert_eq!(app.core.model.stories[2].name, "B");
+    assert_eq!(
+        app.core.model.stories[2].level_kind,
+        StoryLevelKind::Penthouse { k: 0.7 }
+    );
+    app.core.model.stories[2].name = "解析表示名".into();
+    let before = app.core.model.clone();
+    assert!(app.apply_model_edit(Box::new(sepika_edit::SetStoryLevel {
+        story: StoryId(2),
+        name: "B編集".into(),
+        elevation: 3500.0
+    })));
+    let edited = sepika_io::stbridge::import_stbridge(
+        &sepika_io::stbridge::export_stbridge(&app.core.model).unwrap(),
+    )
+    .unwrap();
+    let raw = edited.source_stories.iter().find(|s| s.id == 40).unwrap();
+    assert_eq!((&raw.name, raw.height), (&"B編集".to_string(), 3500.0));
+    app.undo_action();
+    assert!(app.core.model.eq_ignoring_dofmap(&before));
+    assert!(app.apply_model_edit(Box::new(sepika_edit::DeleteStory { story: StoryId(2) })));
+    assert!(!app.core.model.source_stories.iter().any(|s| s.id == 40));
+    app.undo_action();
+    assert!(app.core.model.eq_ignoring_dofmap(&before));
+    app.redo_action();
+    assert!(!sepika_io::stbridge::import_stbridge(
+        &sepika_io::stbridge::export_stbridge(&app.core.model).unwrap()
+    )
+    .unwrap()
+    .source_stories
+    .iter()
+    .any(|s| s.id == 40));
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn source_story_missing_ambiguous_mapping_rejects_and_generated_base_has_no_source() {
+    use sepika_core::model::StoryLevelKind;
+    for ambiguous in [false, true] {
+        let mut model = source_story_close_levels_model();
+        if ambiguous {
+            let mut duplicate = model.source_stories[2].clone();
+            duplicate.id = 99;
+            model.source_stories.push(duplicate);
+        } else {
+            model.stories[2].elevation = 3300.0;
+        }
+        let mut app = App::default();
+        app.load_model(model);
+        let before = app.core.model.clone();
+        let revision = app.core.scoped.undo.revision();
+        for command in [
+            Box::new(sepika_edit::SetStoryLevel {
+                story: StoryId(2),
+                name: "変更".into(),
+                elevation: 3400.0,
+            }) as Box<dyn sepika_edit::EditCommand>,
+            Box::new(sepika_edit::DeleteStory { story: StoryId(2) }),
+            Box::new(sepika_edit::SetStoryLevelKind {
+                story: StoryId(2),
+                level_kind: StoryLevelKind::Penthouse { k: 0.7 },
+            }),
+        ] {
+            assert!(!app.apply_model_edit(command));
+            assert!(app.core.scoped.undo.last_error().unwrap().contains("対応"));
+            assert!(app.core.model.eq_ignoring_dofmap(&before));
+            assert_eq!(app.core.scoped.undo.revision(), revision);
+        }
+    }
+    let mut model = source_story_close_levels_model();
+    model.source_stories.remove(0);
+    model.stories.remove(0);
+    for (index, story) in model.stories.iter_mut().enumerate() {
+        story.id = StoryId(index as u32);
+    }
+    let mut app = App::default();
+    app.load_model(model);
+    app.run_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let source = app.core.model.source_stories.clone();
+    assert!(app.apply_model_edit(Box::new(sepika_edit::SetStoryLevel {
+        story: StoryId(0),
+        name: "解析基部".into(),
+        elevation: 0.0
+    })));
+    assert_eq!(app.core.model.source_stories, source);
+    assert!(
+        app.apply_model_edit(Box::new(sepika_edit::SetStoryLevelKind {
+            story: StoryId(0),
+            level_kind: StoryLevelKind::Penthouse { k: 0.7 }
+        }))
+    );
+    assert_eq!(app.core.model.source_stories, source);
+    let revision = app.core.scoped.undo.revision();
+    let before = app.core.model.clone();
+    assert!(
+        !app.apply_model_edit(Box::new(sepika_edit::SetStoryLevelKind {
+            story: StoryId(0),
+            level_kind: StoryLevelKind::Penthouse { k: 0.7 }
+        }))
+    );
+    assert!(
+        !app.apply_model_edit(Box::new(sepika_edit::SetStoryLevelKind {
+            story: StoryId(u32::MAX),
+            level_kind: StoryLevelKind::Normal
+        }))
+    );
+    assert_eq!(app.core.scoped.undo.revision(), revision);
+    assert!(app.core.model.eq_ignoring_dofmap(&before));
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn source_story_gui_membership_edit_invalidates_input_and_undo_restores_it() {
+    let fixture = include_str!("../../tests/fixtures/public_source_stories_497.stb");
+    let mut app = App::default();
+    app.load_model(sepika_io::stbridge::import_stbridge(fixture).unwrap());
+    let source = app.core.model.source_stories.clone();
+    let source_id = source.iter().find(|s| !s.node_ids.is_empty()).unwrap().id;
+    let key = result_validity::ResultInputKey::Modal;
+    let before = app.result_input(&key);
+    app.core.scoped.staleness.mark_fresh();
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::SetSourceStoryNodes {
+            source_story: source_id,
+            nodes: Vec::new(),
+        }));
+    app.apply_pending_story_command();
+    assert!(app.core.scoped.staleness.results_stale);
+    assert!(app.core.scoped.staleness.preparation_stale);
+    assert_ne!(app.result_input(&key), before);
+    app.undo_action();
+    assert_eq!(app.core.model.source_stories, source);
+    assert_eq!(app.result_input(&key), before);
+    app.redo_action();
+    assert_ne!(app.result_input(&key), before);
+    let revision = app.core.scoped.undo.revision();
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::SetSourceStoryNodes {
+            source_story: source_id,
+            nodes: vec![NodeId(u32::MAX)],
+        }));
+    app.apply_pending_story_command();
+    assert_eq!(app.core.scoped.undo.revision(), revision);
+    assert_eq!(
+        app.core.scoped.last_error.as_deref(),
+        Some("原階所属には実在する構造節点が必要です")
+    );
+}
 
 /// テストが書き込む一時ディレクトリ（プロセス ID 入り）。
 /// `std::env::temp_dir()` 直下へ固定名で書き込むと、同一マシンで並行する

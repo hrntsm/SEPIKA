@@ -1,0 +1,285 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="Public source story fixture" app_name="fixture" app_version="1"/>
+  <StbModel><StbNodes>
+      <StbNode id="1" X="0" Y="0" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="2" X="3600" Y="0" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="3" X="3600" Y="10800" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="4" X="0" Y="10800" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="5" X="3600" Y="14400" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="6" X="0" Y="14400" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="7" X="7200" Y="0" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="8" X="7200" Y="10800" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="9" X="7200" Y="14400" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="10" X="10800" Y="0" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="11" X="10800" Y="10800" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="12" X="10800" Y="14400" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="13" X="14400" Y="0" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="14" X="14400" Y="10800" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="15" X="14400" Y="14400" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="16" X="18000" Y="0" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="17" X="18000" Y="10800" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="18" X="18000" Y="14400" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="19" X="21600" Y="0" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="20" X="21600" Y="10800" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="21" X="21600" Y="14400" Z="0" kind="ON_GIRDER"/>
+      <StbNode id="22" X="0" Y="0" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="23" X="0" Y="0" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="24" X="0" Y="0" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="25" X="0" Y="0" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="26" X="0" Y="0" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="27" X="3600" Y="0" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="28" X="3600" Y="0" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="29" X="3600" Y="0" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="30" X="3600" Y="0" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="31" X="3600" Y="0" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="32" X="3600" Y="10800" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="33" X="3600" Y="10800" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="34" X="3600" Y="10800" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="35" X="3600" Y="10800" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="36" X="3600" Y="10800" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="37" X="0" Y="10800" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="38" X="0" Y="10800" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="39" X="0" Y="10800" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="40" X="0" Y="10800" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="41" X="0" Y="10800" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="42" X="3600" Y="14400" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="43" X="3600" Y="14400" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="44" X="3600" Y="14400" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="45" X="3600" Y="14400" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="46" X="3600" Y="14400" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="47" X="0" Y="14400" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="48" X="0" Y="14400" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="49" X="0" Y="14400" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="50" X="0" Y="14400" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="51" X="0" Y="14400" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="52" X="7200" Y="0" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="53" X="7200" Y="0" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="54" X="7200" Y="0" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="55" X="7200" Y="0" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="56" X="7200" Y="0" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="57" X="7200" Y="10800" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="58" X="7200" Y="10800" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="59" X="7200" Y="10800" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="60" X="7200" Y="10800" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="61" X="7200" Y="10800" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="62" X="7200" Y="14400" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="63" X="7200" Y="14400" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="64" X="7200" Y="14400" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="65" X="7200" Y="14400" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="66" X="7200" Y="14400" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="67" X="10800" Y="0" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="68" X="10800" Y="0" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="69" X="10800" Y="0" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="70" X="10800" Y="0" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="71" X="10800" Y="0" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="72" X="10800" Y="10800" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="73" X="10800" Y="10800" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="74" X="10800" Y="10800" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="75" X="10800" Y="10800" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="76" X="10800" Y="10800" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="77" X="10800" Y="14400" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="78" X="10800" Y="14400" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="79" X="10800" Y="14400" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="80" X="10800" Y="14400" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="81" X="10800" Y="14400" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="82" X="14400" Y="0" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="83" X="14400" Y="0" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="84" X="14400" Y="0" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="85" X="14400" Y="0" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="86" X="14400" Y="0" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="87" X="14400" Y="10800" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="88" X="14400" Y="10800" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="89" X="14400" Y="10800" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="90" X="14400" Y="10800" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="91" X="14400" Y="10800" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="92" X="14400" Y="14400" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="93" X="14400" Y="14400" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="94" X="14400" Y="14400" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="95" X="14400" Y="14400" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="96" X="14400" Y="14400" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="97" X="18000" Y="0" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="98" X="18000" Y="0" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="99" X="18000" Y="0" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="100" X="18000" Y="0" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="101" X="18000" Y="0" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="102" X="18000" Y="10800" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="103" X="18000" Y="10800" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="104" X="18000" Y="10800" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="105" X="18000" Y="10800" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="106" X="18000" Y="10800" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="107" X="18000" Y="14400" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="108" X="18000" Y="14400" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="109" X="18000" Y="14400" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="110" X="18000" Y="14400" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="111" X="18000" Y="14400" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="112" X="21600" Y="0" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="113" X="21600" Y="0" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="114" X="21600" Y="0" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="115" X="21600" Y="0" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="116" X="21600" Y="0" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="117" X="21600" Y="10800" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="118" X="21600" Y="10800" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="119" X="21600" Y="10800" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="120" X="21600" Y="10800" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="121" X="21600" Y="10800" Z="20000" kind="ON_GIRDER"/>
+      <StbNode id="122" X="21600" Y="14400" Z="4000" kind="ON_GIRDER"/>
+      <StbNode id="123" X="21600" Y="14400" Z="8000" kind="ON_GIRDER"/>
+      <StbNode id="124" X="21600" Y="14400" Z="12000" kind="ON_GIRDER"/>
+      <StbNode id="125" X="21600" Y="14400" Z="16000" kind="ON_GIRDER"/>
+      <StbNode id="126" X="21600" Y="14400" Z="20000" kind="ON_GIRDER"/>
+    </StbNodes>
+    <StbStories>
+      <StbStory id="1" name="1F" height="0" kind="GENERAL">
+        <StbNodeIdList>
+          <StbNodeId id="1"/>
+          <StbNodeId id="2"/>
+          <StbNodeId id="3"/>
+          <StbNodeId id="4"/>
+          <StbNodeId id="5"/>
+          <StbNodeId id="6"/>
+          <StbNodeId id="7"/>
+          <StbNodeId id="8"/>
+          <StbNodeId id="9"/>
+          <StbNodeId id="10"/>
+          <StbNodeId id="11"/>
+          <StbNodeId id="12"/>
+          <StbNodeId id="13"/>
+          <StbNodeId id="14"/>
+          <StbNodeId id="15"/>
+          <StbNodeId id="16"/>
+          <StbNodeId id="17"/>
+          <StbNodeId id="18"/>
+          <StbNodeId id="19"/>
+          <StbNodeId id="20"/>
+          <StbNodeId id="21"/>
+        </StbNodeIdList>
+      </StbStory>
+      <StbStory id="2" name="2F" height="4000" kind="GENERAL">
+        <StbNodeIdList>
+          <StbNodeId id="22"/>
+          <StbNodeId id="27"/>
+          <StbNodeId id="32"/>
+          <StbNodeId id="37"/>
+          <StbNodeId id="42"/>
+          <StbNodeId id="47"/>
+          <StbNodeId id="52"/>
+          <StbNodeId id="57"/>
+          <StbNodeId id="62"/>
+          <StbNodeId id="67"/>
+          <StbNodeId id="72"/>
+          <StbNodeId id="77"/>
+          <StbNodeId id="82"/>
+          <StbNodeId id="87"/>
+          <StbNodeId id="92"/>
+          <StbNodeId id="97"/>
+          <StbNodeId id="102"/>
+          <StbNodeId id="107"/>
+          <StbNodeId id="112"/>
+          <StbNodeId id="117"/>
+          <StbNodeId id="122"/>
+        </StbNodeIdList>
+      </StbStory>
+      <StbStory id="3" name="3F" height="8000" kind="GENERAL">
+        <StbNodeIdList>
+          <StbNodeId id="23"/>
+          <StbNodeId id="28"/>
+          <StbNodeId id="33"/>
+          <StbNodeId id="38"/>
+          <StbNodeId id="43"/>
+          <StbNodeId id="48"/>
+          <StbNodeId id="53"/>
+          <StbNodeId id="58"/>
+          <StbNodeId id="63"/>
+          <StbNodeId id="68"/>
+          <StbNodeId id="73"/>
+          <StbNodeId id="78"/>
+          <StbNodeId id="83"/>
+          <StbNodeId id="88"/>
+          <StbNodeId id="93"/>
+          <StbNodeId id="98"/>
+          <StbNodeId id="103"/>
+          <StbNodeId id="108"/>
+          <StbNodeId id="113"/>
+          <StbNodeId id="118"/>
+          <StbNodeId id="123"/>
+        </StbNodeIdList>
+      </StbStory>
+      <StbStory id="4" name="4F" height="12000" kind="GENERAL">
+        <StbNodeIdList>
+          <StbNodeId id="24"/>
+          <StbNodeId id="29"/>
+          <StbNodeId id="34"/>
+          <StbNodeId id="39"/>
+          <StbNodeId id="44"/>
+          <StbNodeId id="49"/>
+          <StbNodeId id="54"/>
+          <StbNodeId id="59"/>
+          <StbNodeId id="64"/>
+          <StbNodeId id="69"/>
+          <StbNodeId id="74"/>
+          <StbNodeId id="79"/>
+          <StbNodeId id="84"/>
+          <StbNodeId id="89"/>
+          <StbNodeId id="94"/>
+          <StbNodeId id="99"/>
+          <StbNodeId id="104"/>
+          <StbNodeId id="109"/>
+          <StbNodeId id="114"/>
+          <StbNodeId id="119"/>
+          <StbNodeId id="124"/>
+        </StbNodeIdList>
+      </StbStory>
+      <StbStory id="5" name="5F" height="16000" kind="GENERAL">
+        <StbNodeIdList>
+          <StbNodeId id="25"/>
+          <StbNodeId id="30"/>
+          <StbNodeId id="35"/>
+          <StbNodeId id="40"/>
+          <StbNodeId id="45"/>
+          <StbNodeId id="50"/>
+          <StbNodeId id="55"/>
+          <StbNodeId id="60"/>
+          <StbNodeId id="65"/>
+          <StbNodeId id="70"/>
+          <StbNodeId id="75"/>
+          <StbNodeId id="80"/>
+          <StbNodeId id="85"/>
+          <StbNodeId id="90"/>
+          <StbNodeId id="95"/>
+          <StbNodeId id="100"/>
+          <StbNodeId id="105"/>
+          <StbNodeId id="110"/>
+          <StbNodeId id="115"/>
+          <StbNodeId id="120"/>
+          <StbNodeId id="125"/>
+        </StbNodeIdList>
+      </StbStory>
+      <StbStory id="6" name="RF" height="20000" kind="GENERAL">
+        <StbNodeIdList>
+          <StbNodeId id="26"/>
+          <StbNodeId id="31"/>
+          <StbNodeId id="36"/>
+          <StbNodeId id="41"/>
+          <StbNodeId id="46"/>
+          <StbNodeId id="51"/>
+          <StbNodeId id="56"/>
+          <StbNodeId id="61"/>
+          <StbNodeId id="66"/>
+          <StbNodeId id="71"/>
+          <StbNodeId id="76"/>
+          <StbNodeId id="81"/>
+          <StbNodeId id="86"/>
+          <StbNodeId id="91"/>
+          <StbNodeId id="96"/>
+          <StbNodeId id="101"/>
+          <StbNodeId id="106"/>
+          <StbNodeId id="111"/>
+          <StbNodeId id="116"/>
+          <StbNodeId id="121"/>
+          <StbNodeId id="126"/>
+        </StbNodeIdList>
+      </StbStory>
+    </StbStories>
+    </StbModel>
+</ST_BRIDGE>
