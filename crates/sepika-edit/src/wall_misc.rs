@@ -650,6 +650,11 @@ impl EditCommand for DeleteWallPlate {
             }
         }
 
+        let strength_input = model.stb_strengths.clone();
+        model
+            .stb_strengths
+            .members
+            .retain(|m| m.target != sepika_core::model::StrengthTarget::Wall(self.id));
         let removed = model.wall_plates.remove(idx);
         let target = self.id.0;
         model.visit_wall_plate_ids(|id| {
@@ -658,11 +663,15 @@ impl EditCommand for DeleteWallPlate {
             }
         });
 
-        Box::new(InsertWallPlate {
-            index: idx,
-            plate: removed,
-            region_refs,
-            assignment_refs,
+        Box::new(crate::strength::RestoreStrengthInput {
+            input: strength_input,
+            stories: model.source_stories.clone(),
+            inverse: Box::new(InsertWallPlate {
+                index: idx,
+                plate: removed,
+                region_refs,
+                assignment_refs,
+            }),
         })
     }
 

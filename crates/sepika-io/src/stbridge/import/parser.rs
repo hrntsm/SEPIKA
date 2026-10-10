@@ -725,6 +725,7 @@ impl StbParser {
                 let bot = get_u32(a, "id_node_bottom")?;
                 let top = get_u32(a, "id_node_top")?;
                 let mut member = make_member(a, bot, top, PendingMemberKind::Girder)?;
+                member.strength_index = self.strengths.current_member_index();
                 member.source_usage = FrameSectionUse::Column;
                 member.source_tag = tag.to_string();
                 member.source_id = a.get("id").and_then(|v| v.parse().ok());
@@ -734,6 +735,7 @@ impl StbParser {
                 let st = get_u32(a, "id_node_start")?;
                 let en = get_u32(a, "id_node_end")?;
                 let mut member = make_member(a, st, en, PendingMemberKind::Girder)?;
+                member.strength_index = self.strengths.current_member_index();
                 member.source_usage = FrameSectionUse::Girder;
                 member.source_tag = tag.to_string();
                 member.source_id = a.get("id").and_then(|v| v.parse().ok());
@@ -747,6 +749,7 @@ impl StbParser {
                     st,
                     en,
                     sepika_core::model::SecondaryMemberKind::Beam,
+                    self.strengths.current_member_index(),
                 ));
             }
             "StbPost" => {
@@ -757,6 +760,7 @@ impl StbParser {
                     bot,
                     top,
                     sepika_core::model::SecondaryMemberKind::Post,
+                    self.strengths.current_member_index(),
                 ));
             }
             "StbBrace" => {
@@ -814,6 +818,7 @@ impl StbParser {
             "StbSlab" => {
                 self.cur_wall = None;
                 self.cur_slab = Some(RawSlab {
+                    strength_index: self.strengths.current_member_index(),
                     section_fid: match get_i64(a, "id_section") {
                         Some(s) if s >= 0 => Some(s as u32),
                         _ => None,
@@ -824,6 +829,7 @@ impl StbParser {
             "StbWall" => {
                 self.cur_slab = None;
                 self.cur_wall = Some(RawWall {
+                    strength_index: self.strengths.current_member_index(),
                     section_fid: match get_i64(a, "id_section") {
                         Some(s) if s >= 0 => Some(s as u32),
                         _ => None,
@@ -1208,6 +1214,7 @@ fn make_member(
         end_condition_of(a, &["condition_top", "condition_end"]),
     ];
     Ok(PendingMember {
+        strength_index: None,
         kind,
         n_i,
         n_j,
@@ -1228,6 +1235,7 @@ fn make_secondary(
     n_i: u32,
     n_j: u32,
     kind: sepika_core::model::SecondaryMemberKind,
+    strength_index: Option<usize>,
 ) -> PendingSecondary {
     let section = match get_i64(a, "id_section") {
         Some(s) if s >= 0 => Some(s as u32),
@@ -1238,6 +1246,7 @@ fn make_secondary(
         _ => None,
     };
     PendingSecondary {
+        strength_index,
         kind,
         n_i,
         n_j,

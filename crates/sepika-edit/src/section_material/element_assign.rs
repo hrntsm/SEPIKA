@@ -81,12 +81,60 @@ impl EditCommand for SetSectionMaterial {
         if !crate::refs::material_ref_ok(model, self.material) {
             return Box::new(Noop);
         }
+        let source_snapshot = model.stb_strengths.clone();
+        let source_stories = model.source_stories.clone();
+        let grade = self
+            .material
+            .and_then(|id| model.materials.get(id.index()))
+            .map(|m| {
+                if self.role == SectionMaterialRole::Main {
+                    m.fc.map(|v| format!("Fc{v}"))
+                        .unwrap_or_else(|| m.name.clone())
+                } else {
+                    m.name.clone()
+                }
+            });
+        if let Some(input) = model
+            .stb_strengths
+            .sections
+            .iter_mut()
+            .find(|s| s.section == self.section)
+        {
+            match self.role {
+                SectionMaterialRole::Main => {
+                    input.concrete = grade;
+                    input.native_material = self.material;
+                }
+                SectionMaterialRole::Rebar => {
+                    for bar in &mut input.reinforcement {
+                        if bar.part == "main" {
+                            bar.strength = grade.clone();
+                            bar.native_material = self.material;
+                        }
+                    }
+                }
+                SectionMaterialRole::ShearRebar => {
+                    for bar in &mut input.reinforcement {
+                        if matches!(bar.part.as_str(), "band" | "stirrup") {
+                            bar.strength = grade.clone();
+                            bar.native_material = self.material;
+                        }
+                    }
+                }
+                SectionMaterialRole::Steel => {}
+            }
+        }
+        model.prepare_stb_strength_materials();
         let slot = self.role.slot(&mut model.sections[idx]);
         let old = std::mem::replace(slot, self.material);
-        Box::new(SetSectionMaterial {
-            section: self.section,
-            role: self.role,
-            material: old,
+        Box::new(crate::strength::RestoreStrengthInput {
+            input: source_snapshot,
+            stories: source_stories,
+            inverse: Box::new(SetSectionMaterial {
+                section: self.section,
+                role: self.role,
+                material: old,
+            }),
         })
     }
 

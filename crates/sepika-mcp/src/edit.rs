@@ -46,6 +46,15 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
         .and_then(|v| v.as_str())
         .ok_or("command が必要です")?;
     match command {
+        "SetStbStrengths" => {
+            let input=serde_json::from_value(value.get("input").ok_or("input が必要です")?.clone()).map_err(|e| e.to_string())?;
+            Ok(Box::new(sepika_edit::SetStbStrengths { input }))
+        }
+        "SetSourceStoryConcreteStrength" => {
+            let source_story = value.get("source_story").and_then(serde_json::Value::as_u64).and_then(|v| u32::try_from(v).ok()).ok_or("source_story は元STB階IDが必要です")?;
+            let strength = value.get("strength").and_then(serde_json::Value::as_str).map(str::to_owned);
+            Ok(Box::new(sepika_edit::SetSourceStoryConcreteStrength { source_story, strength }))
+        }
         "SetSourceStoryNodes" => {
             let source_story = value.get("source_story").and_then(|v| v.as_u64()).and_then(|v| u32::try_from(v).ok()).ok_or("source_story は元STB階IDが必要です")?;
             let nodes: Vec<sepika_core::ids::NodeId> = serde_json::from_value(value.get("nodes").ok_or("nodes が必要です（内部NodeIdの配列）")?.clone()).map_err(|e| e.to_string())?;

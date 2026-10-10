@@ -2,11 +2,11 @@ use super::super::StbError;
 use super::xml::{get_u32, Attrs};
 use sepika_core::ids::*;
 use sepika_core::model::*;
-use std::collections::HashMap;
 
 #[derive(Default)]
 pub(super) struct StrengthInputs {
     common: Option<StbCommonStrength>,
+    frame_section_ids: Vec<(u32, String)>,
     sections: Vec<RawSection>,
     members: Vec<RawMember>,
     current_section: Option<usize>,
@@ -15,8 +15,7 @@ pub(super) struct StrengthInputs {
 struct RawSection {
     tag: String,
     id: u32,
-    name: Option<String>,
-    floor: Option<String>,
+    bound: Option<SectionId>,
     concrete: Option<String>,
     bars: Vec<StbRebarStrength>,
 }
@@ -26,9 +25,43 @@ struct RawMember {
     concrete: Option<String>,
     nodes: Vec<u32>,
     is_concrete: bool,
+    targets: Vec<StrengthTarget>,
 }
 impl StrengthInputs {
+    pub(super) fn same_section_strength(&self, a: u32, b: u32) -> bool {
+        let source = |id| {
+            self.sections
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| (&s.concrete, &s.bars))
+        };
+        source(a) == source(b)
+    }
+
     pub(super) fn start(&mut self, tag: &str, a: &Attrs) -> Result<(), StbError> {
+        if matches!(
+            tag,
+            "StbSecColumn_RC"
+                | "StbSecColumn_SRC"
+                | "StbSecColumn_CFT"
+                | "StbSecColumn_S"
+                | "StbSecBeam_RC"
+                | "StbSecBeam_SRC"
+                | "StbSecBeam_S"
+                | "StbSecBrace_S"
+        ) {
+            let id = get_u32(a, "id")?;
+            if self
+                .frame_section_ids
+                .iter()
+                .any(|(other, kind)| *other == id && kind != tag)
+            {
+                return Err(StbError::Unmappable(format!(
+                    "断面系列間で重複するID {id} は現行の断面参照で区別できません ({tag})"
+                )));
+            }
+            self.frame_section_ids.push((id, tag.to_owned()));
+        }
         if tag == "StbCommon" {
             let required = |key| {
                 a.get(key)
@@ -66,13 +99,13 @@ impl StrengthInputs {
                 | "StbSecBeam_RC"
                 | "StbSecBeam_SRC"
                 | "StbSecSlab_RC"
+                | "StbSecSlabDeck"
                 | "StbSecWall_RC"
         ) {
             self.sections.push(RawSection {
                 tag: tag.into(),
                 id: get_u32(a, "id")?,
-                name: a.get("name").cloned(),
-                floor: a.get("floor").cloned(),
+                bound: None,
                 concrete: a.get("strength_concrete").cloned(),
                 bars: Vec::new(),
             });
@@ -95,6 +128,7 @@ impl StrengthInputs {
                 section: a.get("id_section").and_then(|s| s.parse().ok()),
                 concrete: a.get("strength_concrete").cloned(),
                 nodes,
+                targets: Vec::new(),
                 is_concrete: matches!(
                     a.get("kind_structure").map(String::as_str),
                     Some("RC" | "SRC" | "CFT")
@@ -118,6 +152,8 @@ impl StrengthInputs {
                         self.sections[index].bars.push(StbRebarStrength {
                             element: tag.into(),
                             part: part.into(),
+                            position: a.get("pos").cloned(),
+                            native_material: None,
                             diameter,
                             strength,
                         });
@@ -146,36 +182,94 @@ impl StrengthInputs {
             super::xml::push_node_id_tokens(text, &mut self.members[index].nodes);
         }
     }
+    pub(super) fn current_member_index(&self) -> Option<usize> {
+        self.current_member
+    }
+    pub(super) fn bind_member(&mut self, index: Option<usize>, target: StrengthTarget) {
+        if let Some(input) = index.and_then(|i| self.members.get_mut(i)) {
+            if !input.targets.contains(&target) {
+                input.targets.push(target);
+            }
+        }
+    }
+    pub(super) fn bind_section(&mut self, id: u32, kind: &str, target: SectionId) {
+        for source in &mut self.sections {
+            if source.id == id && source.tag.starts_with(kind) {
+                source.bound = Some(target);
+            }
+        }
+    }
+    pub(super) fn same_member_strength(&self, model: &Model, a: usize, b: usize) -> bool {
+        let resolve = |index: usize| {
+            let input = &self.members[index];
+            let node = input
+                .nodes
+                .first()
+                .and_then(|id| {
+                    model
+                        .stb_node_ids
+                        .iter()
+                        .find(|n| n.id == *id)
+                        .map(|n| n.node)
+                })
+                .ok_or("元床の第1節点がありません".to_string())?;
+            let section = self
+                .sections
+                .iter()
+                .find(|s| Some(s.id) == input.section && s.tag.starts_with("StbSecSlab"))
+                .and_then(|s| s.concrete.as_deref());
+            model.resolve_stb_concrete_at(
+                node,
+                input.concrete.as_deref(),
+                section,
+                self.common
+                    .as_ref()
+                    .and_then(|c| c.strength_concrete.as_deref()),
+            )
+        };
+        match (resolve(a), resolve(b)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => a == b,
+        }
+    }
     pub(super) fn apply(
         self,
         model: &mut Model,
-        section_index: &HashMap<u32, u32>,
         warnings: &mut Vec<String>,
     ) -> Result<(), StbError> {
         model.stb_strengths.common = self.common;
-        let sections = self.sections;
-        for source in &sections {
-            let id =
-                if source.tag.starts_with("StbSecColumn") || source.tag.starts_with("StbSecBeam") {
-                    section_index.get(&source.id).copied().map(SectionId)
-                } else if source.tag == "StbSecSlab_RC" {
-                    model
-                        .sections
-                        .iter()
-                        .find(|s| Some(&s.name) == source.name.as_ref() && s.floor == source.floor)
-                        .map(|s| s.id)
-                } else {
-                    None
-                };
-            if let Some(id) = id {
-                model.stb_strengths.sections.push(StbSectionStrength {
-                    section: id,
-                    concrete: source.concrete.clone(),
-                    reinforcement: source.bars.clone(),
-                });
+        for source in &self.sections {
+            if let Some(section) = source.bound {
+                if !model
+                    .stb_strengths
+                    .sections
+                    .iter()
+                    .any(|s| s.section == section)
+                {
+                    model.stb_strengths.sections.push(StbSectionStrength {
+                        section,
+                        native_material: None,
+                        concrete: source.concrete.clone(),
+                        reinforcement: source.bars.clone(),
+                    });
+                }
             }
         }
         for input in self.members {
+            let source_section = self.sections.iter().any(|s| {
+                Some(s.id) == input.section
+                    && s.bound.is_some()
+                    && match input.tag.as_str() {
+                        "StbColumn" | "StbPost" => s.tag.starts_with("StbSecColumn"),
+                        "StbGirder" | "StbBeam" => s.tag.starts_with("StbSecBeam"),
+                        "StbSlab" => s.tag.starts_with("StbSecSlab"),
+                        "StbWall" => s.tag.starts_with("StbSecWall"),
+                        _ => false,
+                    }
+            });
+            if !input.is_concrete && !source_section && input.concrete.is_none() {
+                continue;
+            }
             let Some(nodes): Option<Vec<_>> = input
                 .nodes
                 .iter()
@@ -190,107 +284,33 @@ impl StrengthInputs {
             else {
                 continue;
             };
-            if nodes.is_empty() {
-                continue;
-            }
-            let source_section = sections.iter().find(|s| {
-                Some(s.id) == input.section
-                    && match input.tag.as_str() {
-                        "StbColumn" | "StbPost" => s.tag.starts_with("StbSecColumn"),
-                        "StbGirder" | "StbBeam" => s.tag.starts_with("StbSecBeam"),
-                        "StbSlab" => s.tag == "StbSecSlab_RC",
-                        "StbWall" => s.tag == "StbSecWall_RC",
-                        _ => false,
-                    }
-            });
-            if !input.is_concrete && source_section.is_none() && input.concrete.is_none() {
-                continue;
-            }
-            let (target, section) = match input.tag.as_str() {
-                "StbColumn" | "StbGirder" => {
-                    let Some(e) = model.elements.iter().find(|e| e.nodes.as_slice() == nodes)
-                    else {
-                        continue;
-                    };
-                    (StrengthTarget::Element(e.id), e.section)
-                }
-                "StbPost" | "StbBeam" => {
-                    let member = model
-                        .floor_regions
-                        .iter()
-                        .flat_map(|r| &r.secondary_beams)
-                        .chain(model.wall_regions.iter().flat_map(|r| &r.posts))
-                        .chain(&model.unassigned_beams)
-                        .chain(&model.unassigned_posts)
-                        .find(|e| {
-                            model.secondary_member_end_points(e).is_some_and(|(a, b)| {
-                                a == model.node(nodes[0]).unwrap().coord
-                                    && b == model.node(nodes[1]).unwrap().coord
-                            })
-                        });
-                    let Some(e) = member else {
-                        continue;
-                    };
-                    (StrengthTarget::Secondary(e.id), e.section)
-                }
-                "StbSlab" => {
-                    let Some(e) = model
-                        .slabs
-                        .iter()
-                        .find(|e| same_nodes(e.boundary_nodes(model), &nodes))
-                    else {
-                        continue;
-                    };
-                    (StrengthTarget::Slab(e.id), e.plate.section)
-                }
-                "StbWall" => {
-                    let Some(e) = model
-                        .wall_plates
-                        .iter()
-                        .find(|e| same_nodes(e.boundary_nodes(model), &nodes))
-                    else {
-                        continue;
-                    };
-                    (StrengthTarget::Wall(e.id), e.section)
-                }
-                _ => continue,
-            };
-            if let (Some(section), Some(source)) = (section, source_section) {
-                if !model
-                    .stb_strengths
-                    .sections
-                    .iter()
-                    .any(|s| s.section == section)
-                {
-                    model.stb_strengths.sections.push(StbSectionStrength {
-                        section,
-                        concrete: source.concrete.clone(),
-                        reinforcement: source.bars.clone(),
-                    });
-                }
-            }
-            let node = if matches!(input.tag.as_str(), "StbColumn" | "StbPost" | "StbWall") {
-                *nodes.last().unwrap()
+            let Some(&node) = (if matches!(input.tag.as_str(), "StbColumn" | "StbPost" | "StbWall")
+            {
+                nodes.last()
             } else {
-                nodes[0]
+                nodes.first()
+            }) else {
+                continue;
             };
-            model.stb_strengths.members.push(StbMemberStrength {
-                target,
-                node,
-                concrete: input.concrete,
-            });
+            for target in input.targets {
+                if model
+                    .stb_strengths
+                    .members
+                    .iter()
+                    .any(|m| m.target == target)
+                {
+                    continue;
+                }
+                model.stb_strengths.members.push(StbMemberStrength {
+                    target,
+                    node,
+                    node_order: nodes.clone(),
+                    concrete: input.concrete.clone(),
+                });
+            }
         }
         model.prepare_stb_strength_materials();
         warnings.extend(model.stb_strength_diagnostics());
         Ok(())
     }
-}
-fn same_nodes(left: Option<Vec<NodeId>>, right: &[NodeId]) -> bool {
-    let Some(mut left) = left else {
-        return false;
-    };
-    let mut right = right.to_vec();
-    left.sort_unstable_by_key(|n| n.0);
-    right.sort_unstable_by_key(|n| n.0);
-    left == right
 }

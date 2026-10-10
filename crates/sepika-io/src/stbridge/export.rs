@@ -73,6 +73,46 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     if model.stb_node_ids.iter().any(|n| n.id == 0) {
         return Err(StbError::Unmappable("STB節点IDは正整数が必要です".into()));
     }
+    for input in &model.stb_strengths.members {
+        if let StrengthTarget::Slab(id) = input.target {
+            let boundary = model
+                .slabs
+                .iter()
+                .find(|s| s.id == id)
+                .and_then(|s| s.boundary_nodes(model));
+            let represented = boundary.is_some_and(|nodes| nodes.contains(&input.node));
+            let resolved = model.resolve_stb_concrete(input);
+            if !represented
+                && !resolved.is_ok_and(|r| {
+                    matches!(
+                        r.source,
+                        sepika_core::model::StrengthSource::Member
+                            | sepika_core::model::StrengthSource::Section
+                    )
+                })
+            {
+                return Err(StbError::Unmappable(format!(
+                    "床 {} の元第1節点 {} に依存するFc省略を分割後の境界で表現できません",
+                    id.0, input.node.0
+                )));
+            }
+        }
+    }
+    for section in &model.stb_strengths.sections {
+        for bar in &section.reinforcement {
+            if bar.native_material.is_some() {
+                let resolved = model.resolve_stb_rebar(bar).map_err(StbError::Unmappable)?;
+                if sepika_core::standard_material::rebar_grade_strength(&resolved.grade)
+                    != Some(resolved.value)
+                {
+                    return Err(StbError::Unmappable(format!(
+                        "断面 {} のnative鉄筋物性を標準grade {} で表現できません",
+                        section.section.0, resolved.grade
+                    )));
+                }
+            }
+        }
+    }
     let std = standard_sections(model)?;
     let mut warnings = std.warnings;
     warnings.extend(model.source_story_diagnostics());
@@ -412,7 +452,13 @@ fn members_body(
             sepika_core::model::SecondaryMemberKind::Post => {
                 let n0 = &model.nodes[nodes[0].index()];
                 let n1 = &model.nodes[nodes[1].index()];
-                let (bot, top) = if n0.coord[2] <= n1.coord[2] {
+                let (bot, top) = if model
+                    .stb_strengths
+                    .members
+                    .iter()
+                    .any(|m| m.target == StrengthTarget::Secondary(sm.id))
+                    || n0.coord[2] <= n1.coord[2]
+                {
                     (nodes[0], nodes[1])
                 } else {
                     (nodes[1], nodes[0])
@@ -431,9 +477,21 @@ fn members_body(
     let slab_sec_ids = slab_section_ids(model, slab_sec_base);
     let mut slabs = String::new();
     for slab in &model.slabs {
-        let Some(boundary) = slab.boundary_nodes(model) else {
+        let Some(mut boundary) = slab.boundary_nodes(model) else {
             continue;
         };
+        if let Some(input) = model
+            .stb_strengths
+            .members
+            .iter()
+            .find(|m| m.target == StrengthTarget::Slab(slab.id))
+        {
+            if input.node_order.len() == boundary.len()
+                && input.node_order.iter().all(|n| boundary.contains(n))
+            {
+                boundary = input.node_order.clone();
+            }
+        }
         let mid = slab_member_base + slab.id.0;
         let sec = slab_sec_ids.get(&slab.id).copied().unwrap_or(slab_sec_base);
         let order = boundary
@@ -443,11 +501,12 @@ fn members_body(
             .join(" ");
         let kind_slab = "NORMAL";
         slabs.push_str(&format!(
-            "        <StbSlab id=\"{}\" name=\"S{}\" id_section=\"{}\" kind_structure=\"RC\" kind_slab=\"{}\" isFoundation=\"false\">\n",
+            "        <StbSlab id=\"{}\" name=\"S{}\" id_section=\"{}\" kind_structure=\"RC\" kind_slab=\"{}\" isFoundation=\"false\"{}>\n",
             sid(mid),
             sid(slab.id.0),
             sid(sec),
             kind_slab,
+            super::strength_export::member_attr(model,StrengthTarget::Slab(slab.id)),
         ));
         slabs.push_str(&format!(
             "          <StbNodeIdOrder>{order}</StbNodeIdOrder>\n"
@@ -469,10 +528,14 @@ fn members_body(
         let mid = wall_member_base + wall_idx as u32;
         let sec = wall_sec_base + wall_idx as u32;
         walls.push_str(&format!(
-            "        <StbWall id=\"{}\" name=\"W{}\" id_section=\"{}\" kind_structure=\"RC\">\n",
+            "        <StbWall id=\"{}\" name=\"W{}\" id_section=\"{}\" kind_structure=\"RC\"{}>\n",
             sid(mid),
             sid(mid),
             sid(sec),
+            super::strength_export::member_attr(
+                model,
+                StrengthTarget::Wall(sepika_core::ids::WallPlateId(wall.id))
+            ),
         ));
         walls.push_str(&format!(
             "          <StbNodeIdOrder>{order}</StbNodeIdOrder>\n"
@@ -806,11 +869,23 @@ fn stb_walls_for_export(model: &Model) -> Vec<StbWallOut> {
         if !matches!(plate.shape, WallPlateShape::Enclosed) {
             continue;
         }
-        let Some(boundary) = plate.boundary_nodes(model) else {
+        let Some(mut boundary) = plate.boundary_nodes(model) else {
             continue;
         };
         if boundary.len() < 3 {
             continue;
+        }
+        if let Some(input) = model
+            .stb_strengths
+            .members
+            .iter()
+            .find(|m| m.target == StrengthTarget::Wall(plate.id))
+        {
+            if input.node_order.len() == boundary.len()
+                && input.node_order.iter().all(|n| boundary.contains(n))
+            {
+                boundary = input.node_order.clone();
+            }
         }
         out.push(StbWallOut {
             id: plate.id.0,

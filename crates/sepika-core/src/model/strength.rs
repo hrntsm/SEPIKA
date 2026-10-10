@@ -30,6 +30,8 @@ pub enum StrengthSource {
 pub struct ResolvedStrength {
     pub grade: String,
     pub source: StrengthSource,
+    /// 明示native割当の数値。標準gradeの数値照合とは区別する。
+    pub native_override: bool,
     /// コンクリートは Fc、鉄筋は降伏点 [N/mm²]。
     pub value: f64,
 }
@@ -38,6 +40,10 @@ pub struct ResolvedStrength {
 pub struct StbRebarStrength {
     pub element: String,
     pub part: String,
+    #[serde(default)]
+    pub position: Option<String>,
+    #[serde(default)]
+    pub native_material: Option<MaterialId>,
     pub diameter: Option<String>,
     pub strength: Option<String>,
 }
@@ -46,6 +52,8 @@ pub struct StbRebarStrength {
 pub struct StbSectionStrength {
     pub section: SectionId,
     pub concrete: Option<String>,
+    #[serde(default)]
+    pub native_material: Option<MaterialId>,
     pub reinforcement: Vec<StbRebarStrength>,
 }
 
@@ -62,6 +70,8 @@ pub struct StbMemberStrength {
     pub target: StrengthTarget,
     /// 規格が指定する参照節点。解析用所属から推定しない。
     pub node: NodeId,
+    #[serde(default)]
+    pub node_order: Vec<NodeId>,
     pub concrete: Option<String>,
 }
 
@@ -98,6 +108,9 @@ impl Model {
             replace(&mut member.concrete);
         }
         for section in &mut self.stb_strengths.sections {
+            if section.native_material == Some(id) {
+                section.concrete = Some(grade.into());
+            }
             replace(&mut section.concrete);
             for bar in &mut section.reinforcement {
                 replace(&mut bar.strength);
@@ -164,7 +177,11 @@ impl Model {
             {
                 continue;
             }
-            let id = if let Some(material) = self.materials.iter().find(|m| m.name == grade) {
+            let id = if let Some(material) = self.materials.iter().find(|m| {
+                m.name == grade
+                    && crate::standard_material::standard_material_properties(&grade)
+                        .is_some_and(|p| m.fc == p.fc && m.fy == p.fy)
+            }) {
                 material.id
             } else {
                 let Some(properties) =
@@ -208,6 +225,18 @@ impl Model {
             .iter()
             .find(|m| m.target == target)?;
         let resolved = self.resolve_stb_concrete(input).ok()?;
+        if resolved.source == StrengthSource::Section {
+            let section = self.strength_target_section(target)?;
+            if let Some(id) = self
+                .stb_strengths
+                .sections
+                .iter()
+                .find(|s| s.section == section)
+                .and_then(|s| s.native_material)
+            {
+                return self.materials.get(id.index());
+            }
+        }
         let id = self
             .stb_strengths
             .materials
@@ -218,15 +247,26 @@ impl Model {
     }
 
     pub fn stb_rebar_material(&self, section: SectionId, part: &str) -> Option<&Material> {
-        let input = self
+        let inputs: Vec<_> = self
             .stb_strengths
             .sections
             .iter()
             .find(|s| s.section == section)?
             .reinforcement
             .iter()
-            .find(|r| r.part == part)?;
-        let resolved = self.resolve_stb_rebar(input).ok()?;
+            .filter(|r| r.part == part)
+            .collect();
+        let resolved = self.resolve_stb_rebar(inputs.first()?).ok()?;
+        if inputs.iter().any(|input| {
+            self.resolve_stb_rebar(input)
+                .ok()
+                .is_none_or(|other| other.grade != resolved.grade || other.value != resolved.value)
+        }) {
+            return None;
+        }
+        if let Some(id) = inputs.first()?.native_material {
+            return self.materials.get(id.index());
+        }
         let id = self
             .stb_strengths
             .materials
@@ -236,11 +276,8 @@ impl Model {
         self.materials.get(id.index())
     }
 
-    pub fn resolve_stb_concrete(
-        &self,
-        input: &StbMemberStrength,
-    ) -> Result<ResolvedStrength, String> {
-        let section = match input.target {
+    fn strength_target_section(&self, target: StrengthTarget) -> Option<SectionId> {
+        match target {
             StrengthTarget::Element(id) => self.element(id).and_then(|e| e.section),
             StrengthTarget::Secondary(id) => self.secondary_member(id).and_then(|e| e.section),
             StrengthTarget::Slab(id) => self
@@ -253,27 +290,74 @@ impl Model {
                 .iter()
                 .find(|e| e.id == id)
                 .and_then(|e| e.section),
-        };
+        }
+    }
+
+    pub fn resolve_stb_concrete(
+        &self,
+        input: &StbMemberStrength,
+    ) -> Result<ResolvedStrength, String> {
+        let section = self.strength_target_section(input.target);
+        if input.concrete.is_none() {
+            if let Some(material) = section
+                .and_then(|id| self.stb_strengths.sections.iter().find(|s| s.section == id))
+                .and_then(|s| s.native_material)
+                .and_then(|id| self.materials.get(id.index()))
+            {
+                let value = material
+                    .fc
+                    .filter(|v| v.is_finite() && *v > 0.0)
+                    .ok_or("明示したnative材料のFcがありません")?;
+                return Ok(ResolvedStrength {
+                    grade: format!("Fc{value}"),
+                    source: StrengthSource::Section,
+                    native_override: true,
+                    value,
+                });
+            }
+        }
         let section_grade = section
             .and_then(|id| self.stb_strengths.sections.iter().find(|s| s.section == id))
-            .and_then(|s| s.concrete.as_deref());
+            .and_then(|s| s.concrete.as_deref())
+            .or_else(|| {
+                section
+                    .filter(|id| !self.stb_strengths.sections.iter().any(|s| s.section == *id))
+                    .and_then(|id| self.section(id))
+                    .and_then(|s| s.material)
+                    .and_then(|id| self.materials.get(id.index()))
+                    .map(|m| m.name.as_str())
+            });
+        self.resolve_stb_concrete_at(
+            input.node,
+            input.concrete.as_deref(),
+            section_grade,
+            self.stb_strengths
+                .common
+                .as_ref()
+                .and_then(|c| c.strength_concrete.as_deref()),
+        )
+    }
+
+    /// 元の指定節点と明示属性からFcを解決する。組立前の床供給も同じ優先規則を使う。
+    pub fn resolve_stb_concrete_at(
+        &self,
+        node: NodeId,
+        member: Option<&str>,
+        section: Option<&str>,
+        common: Option<&str>,
+    ) -> Result<ResolvedStrength, String> {
         for (grade, source) in [
-            (input.concrete.as_deref(), StrengthSource::Member),
-            (section_grade, StrengthSource::Section),
+            (member, StrengthSource::Member),
+            (section, StrengthSource::Section),
         ] {
             if let Some(grade) = grade {
                 return concrete_strength(grade, source);
             }
         }
-        let common = self
-            .stb_strengths
-            .common
-            .as_ref()
-            .and_then(|c| c.strength_concrete.as_deref());
         let stories: Vec<_> = self
             .source_stories
             .iter()
-            .filter(|s| s.node_ids.iter().any(|n| n.node == Some(input.node)))
+            .filter(|s| s.node_ids.iter().any(|n| n.node == Some(node)))
             .collect();
         let mut candidates = Vec::new();
         for story in &stories {
@@ -292,11 +376,11 @@ impl Model {
             }
         }
         if candidates.len() > 1 {
-            return Err(format!("原階Fcが競合: 節点 {}", input.node.0));
+            return Err(format!("原階Fcが競合: 節点 {}", node.0));
         }
         if let Some(result) = candidates.pop() {
             self.resolve_source_concrete_fc(
-                input.node,
+                node,
                 None,
                 None,
                 common.and_then(crate::standard_material::concrete_grade_strength),
@@ -310,6 +394,25 @@ impl Model {
     }
 
     pub fn resolve_stb_rebar(&self, input: &StbRebarStrength) -> Result<ResolvedStrength, String> {
+        if let Some(id) = input.native_material {
+            let material = self
+                .materials
+                .get(id.index())
+                .ok_or("明示したnative鉄筋材料がありません")?;
+            let value = material
+                .fy
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .ok_or("明示したnative鉄筋材料のfyがありません")?;
+            return Ok(ResolvedStrength {
+                grade: input
+                    .strength
+                    .clone()
+                    .unwrap_or_else(|| material.name.clone()),
+                source: StrengthSource::Section,
+                native_override: true,
+                value,
+            });
+        }
         let (grade, source) = if let Some(grade) = input.strength.as_deref() {
             (grade, StrengthSource::Section)
         } else {
@@ -338,6 +441,7 @@ impl Model {
         Ok(ResolvedStrength {
             grade: grade.into(),
             source,
+            native_override: false,
             value,
         })
     }
@@ -366,6 +470,24 @@ impl Model {
             }
         }
         for section in &self.stb_strengths.sections {
+            for part in ["main", "band", "stirrup"] {
+                let resolved: Vec<_> = section
+                    .reinforcement
+                    .iter()
+                    .filter(|r| r.part == part)
+                    .filter_map(|r| self.resolve_stb_rebar(r).ok())
+                    .collect();
+                if resolved.first().is_some_and(|first| {
+                    resolved
+                        .iter()
+                        .any(|r| r.grade != first.grade || r.value != first.value)
+                }) {
+                    errors.push(format!(
+                        "断面 {} / {}: 位置別鉄筋強度を現行材料消費口で縮約できません",
+                        section.section.0, part
+                    ));
+                }
+            }
             for input in &section.reinforcement {
                 if let Err(reason) = self.resolve_stb_rebar(input) {
                     errors.push(format!(
@@ -386,6 +508,7 @@ fn concrete_strength(grade: &str, source: StrengthSource) -> Result<ResolvedStre
     Ok(ResolvedStrength {
         grade: grade.into(),
         source,
+        native_override: false,
         value,
     })
 }

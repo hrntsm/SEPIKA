@@ -154,3 +154,241 @@ fn diameter_and_individual_strength_keep_all_parts_separate() {
         .iter()
         .any(|e| e.contains("競合")));
 }
+
+#[test]
+fn exact_member_and_section_binding_keeps_coincident_members_distinct() {
+    let xml = column(Some("Fc36"), Some("Fc30"), Some("Fc27"), Some("Fc24"))
+        .replace("</StbColumns>", r#"<StbColumn id="2" name="C2" id_node_bottom="1" id_node_top="2" id_section="2" kind_structure="RC" strength_concrete="Fc33"/></StbColumns>"#)
+        .replace("</StbSections>", r#"<StbSecColumn_RC id="2" name="C" strength_concrete="Fc21"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="400" width_Y="400"/></StbSecFigureColumn_RC></StbSecColumn_RC></StbSections>"#);
+    let model = import_stbridge(&xml).unwrap();
+    assert_eq!(model.elements.len(), 2);
+    assert_ne!(model.elements[0].section, model.elements[1].section);
+    assert_eq!(
+        model.element_material(&model.elements[0]).unwrap().fc,
+        Some(36.)
+    );
+    assert_eq!(
+        model.element_material(&model.elements[1]).unwrap().fc,
+        Some(33.)
+    );
+    let mut model = model;
+    model
+        .stb_strengths
+        .members
+        .iter_mut()
+        .for_each(|m| m.concrete = None);
+    assert_eq!(
+        model.element_material(&model.elements[0]).unwrap().fc,
+        Some(30.)
+    );
+    assert_eq!(
+        model.element_material(&model.elements[1]).unwrap().fc,
+        Some(21.)
+    );
+}
+
+#[test]
+fn unknown_present_grade_never_uses_known_lower_grade() {
+    for unknown in [
+        "",
+        "SN400UNKNOWN",
+        "FcNaN",
+        "Fcinf",
+        "Fc0",
+        "Fc-24",
+        "Fc24BAD",
+    ] {
+        let model = import_stbridge(&column(
+            Some(unknown),
+            Some("Fc30"),
+            Some("Fc27"),
+            Some("Fc24"),
+        ))
+        .unwrap();
+        assert!(
+            model
+                .resolve_stb_concrete(&model.stb_strengths.members[0])
+                .is_err(),
+            "{unknown}"
+        );
+        assert!(
+            model.element_material(&model.elements[0]).is_none(),
+            "{unknown}"
+        );
+    }
+    let model = import_stbridge(&column(None, Some("Fc24"), None, None)).unwrap();
+    for strength in [Some(""), Some("SD345BAD"), None] {
+        let bar = StbRebarStrength {
+            element: "StbSecBarColumn_RC_RectSame".into(),
+            part: "main".into(),
+            position: None,
+            native_material: None,
+            diameter: Some("D13".into()),
+            strength: strength.map(str::to_owned),
+        };
+        assert!(model.resolve_stb_rebar(&bar).is_err());
+    }
+}
+
+#[test]
+fn designated_original_node_survives_order_level_and_prepare_changes() {
+    use sepika_core::ids::NodeId;
+    for (tag, first, second, expected) in [
+        ("StbColumn", "id_node_bottom", "id_node_top", 27.),
+        ("StbPost", "id_node_bottom", "id_node_top", 27.),
+        ("StbGirder", "id_node_start", "id_node_end", 24.),
+        ("StbBeam", "id_node_start", "id_node_end", 24.),
+    ] {
+        let source = column(None, None, Some("Fc27"), Some("Fc21"));
+        let section_tag = if matches!(tag, "StbGirder" | "StbBeam") {
+            "StbSecBeam_RC"
+        } else {
+            "StbSecColumn_RC"
+        };
+        let source = source.replace("<StbColumns>", "").replace("</StbColumns>", "").replace("StbColumn id=", &format!("{tag} id=")).replace("id_node_bottom=",&format!("{first}=")).replace("id_node_top=",&format!("{second}=")).replace("StbSecColumn_RC",section_tag)
+            .replace("StbSecFigureColumn_RC", if section_tag=="StbSecBeam_RC" {"StbSecFigureBeam_RC"} else {"StbSecFigureColumn_RC"})
+            .replace("StbSecColumn_RC_Rect width_X=\"400\" width_Y=\"400\"", if section_tag=="StbSecBeam_RC" {"StbSecBeam_RC_Straight width=\"400\" depth=\"400\""} else {"StbSecColumn_RC_Rect width_X=\"400\" width_Y=\"400\""})
+            .replace("</StbStories>",r#"<StbStory id="2" name="bottom" height="0" kind="GENERAL" strength_concrete="Fc24"><StbNodeIdList><StbNodeId id="1"/></StbNodeIdList></StbStory></StbStories>"#);
+        let mut model = import_stbridge(&source).unwrap();
+        let input = &model.stb_strengths.members[0];
+        assert_eq!(
+            input.node,
+            NodeId(if expected == 27. { 1 } else { 0 }),
+            "{tag}"
+        );
+        assert_eq!(
+            model.resolve_stb_concrete(input).unwrap().value,
+            expected,
+            "{tag}"
+        );
+        model.nodes[0].coord[2] = 9000.;
+        model.nodes[1].coord[2] = -3000.;
+        for sm in model
+            .unassigned_beams
+            .iter_mut()
+            .chain(&mut model.unassigned_posts)
+        {
+            sm.ends = SecondaryMemberEnds::Detached([model.nodes[0].coord, model.nodes[1].coord]);
+        }
+        model.source_stories.reverse();
+        model.prepare_stb_strength_materials();
+        assert_eq!(
+            model
+                .resolve_stb_concrete(&model.stb_strengths.members[0])
+                .unwrap()
+                .value,
+            expected,
+            "{tag}"
+        );
+        let again = import_stbridge(&export_stbridge(&model).unwrap()).unwrap();
+        assert_eq!(
+            again
+                .resolve_stb_concrete(&again.stb_strengths.members[0])
+                .unwrap()
+                .value,
+            expected,
+            "{tag}"
+        );
+    }
+}
+
+#[test]
+fn ovika_preserves_raw_omission_and_arbitrary_properties() {
+    let mut model = import_stbridge(&column(None, None, Some("Fc27"), Some("Fc24"))).unwrap();
+    model.materials[0].young = 12345.;
+    model.materials[0].poisson = 0.23;
+    model.materials[0].density = 2345.;
+    let path = std::env::temp_dir().join(format!("sepika-strength-{}.ovika", std::process::id()));
+    crate::ovika::save_ovika(&path, &model, crate::ovika::OvikaExtras::default()).unwrap();
+    let again = crate::ovika::load_ovika(&path).unwrap().model;
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(model.stb_strengths, again.stb_strengths);
+    assert_eq!(model.materials, again.materials);
+    assert_eq!(model.source_stories, again.source_stories);
+}
+
+#[test]
+fn split_slab_keeps_original_first_node_supply_and_refuses_unrepresentable_export() {
+    let xml = include_str!("../../tests/fixtures/strength_split_slab.stb");
+    let model = import_stbridge(xml).unwrap();
+    assert_eq!(model.slabs.len(), 2);
+    assert_eq!(
+        model
+            .stb_strengths
+            .members
+            .iter()
+            .filter(|m| matches!(m.target, StrengthTarget::Slab(_)))
+            .count(),
+        2
+    );
+    for input in model
+        .stb_strengths
+        .members
+        .iter()
+        .filter(|m| matches!(m.target, StrengthTarget::Slab(_)))
+    {
+        assert_eq!(input.node, sepika_core::ids::NodeId(0));
+        assert_eq!(model.resolve_stb_concrete(input).unwrap().value, 27.);
+        let StrengthTarget::Slab(id) = input.target else {
+            panic!("slab")
+        };
+        assert_eq!(
+            model
+                .slab_plate_material(&model.slabs[id.index()])
+                .unwrap()
+                .fc,
+            Some(27.)
+        );
+    }
+    assert!(model.validate().is_ok());
+    assert!(
+        matches!(export_stbridge(&model), Err(StbError::Unmappable(reason)) if reason.contains("元第1節点"))
+    );
+    let explicit = xml.replace(
+        "name=\"S1\" id_section=\"8\" kind_structure=\"RC\"",
+        "name=\"S1\" id_section=\"8\" kind_structure=\"RC\" strength_concrete=\"Fc36\"",
+    );
+    let model = import_stbridge(&explicit).unwrap();
+    for input in model
+        .stb_strengths
+        .members
+        .iter()
+        .filter(|m| matches!(m.target, StrengthTarget::Slab(_)))
+    {
+        assert_eq!(model.resolve_stb_concrete(input).unwrap().value, 36.);
+    }
+    assert!(
+        !matches!(export_stbridge(&model), Err(StbError::Unmappable(reason)) if reason.contains("元第1節点"))
+    );
+    let conflict=xml.replace("</StbMembers>",r#"<StbSlab id="1" name="S2" id_section="8" kind_structure="RC" strength_concrete="Fc36"><StbNodeIdOrder>1 2 3 4</StbNodeIdOrder></StbSlab></StbMembers>"#);
+    assert!(matches!(
+        import_stbridge(&conflict),
+        Err(StbError::SlabRegionConflict(_))
+    ));
+}
+
+#[test]
+fn qualified_numeric_section_id_is_rejected_without_silent_strength_binding() {
+    let xml=column(None,Some("Fc30"),None,Some("Fc24")).replace("</StbSections>",r#"<StbSecBeam_RC id="1" name="B" strength_concrete="Fc24"><StbSecFigureBeam_RC><StbSecBeam_RC_Straight width="400" depth="600"/></StbSecFigureBeam_RC></StbSecBeam_RC></StbSections>"#);
+    assert!(
+        matches!(import_stbridge(&xml),Err(StbError::Unmappable(reason)) if reason.contains("系列"))
+    );
+}
+
+#[test]
+fn wall_last_node_and_explicit_member_omission_roundtrip() {
+    let source=include_str!("../../tests/fixtures/strength_wall.stb");
+    for (member,expected) in [(None,27.),(Some("Fc36"),36.)] {
+        let source=if let Some(member)=member {source.replace("name=\"W\" id_section=\"3\" kind_structure=\"RC\"",&format!("name=\"W\" id_section=\"3\" kind_structure=\"RC\" strength_concrete=\"{member}\""))} else {source.to_owned()};
+        let mut model=import_stbridge(&source).unwrap();
+        assert_eq!(model.stb_strengths.members.len(),1);
+        let input=&model.stb_strengths.members[0];assert_eq!(input.node,sepika_core::ids::NodeId(2));
+        assert_eq!(model.resolve_stb_concrete(input).unwrap().value,expected);
+        assert_eq!(model.wall_plate_material(&model.wall_plates[0]).unwrap().fc,Some(expected));
+        model.source_stories.reverse();model.prepare_stb_strength_materials();
+        let output=export_stbridge(&model).unwrap();let again=import_stbridge(&output).unwrap();
+        assert_eq!(again.stb_strengths.members[0].concrete,member.map(str::to_owned));
+        assert_eq!(again.resolve_stb_concrete(&again.stb_strengths.members[0]).unwrap().value,expected);
+        assert_eq!(again.stb_strengths.members[0].node_order,model.stb_strengths.members[0].node_order);
+    }
+}

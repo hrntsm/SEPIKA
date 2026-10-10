@@ -2046,6 +2046,10 @@ fn test_standard_roundtrip_src_column() {
     );
     assert!(xml.contains("N_main_Y_1st=\"3\""), "Y 方向の本数: {xml}");
     let back = import_stbridge(&xml).expect("import");
+    assert_eq!(back.element_steel_material(&back.elements[0]).unwrap().name, "SN490B");
+    assert_eq!(back.element_steel_material(&back.elements[0]).unwrap().fy, Some(325.));
+    assert_eq!(back.element_rebar_material(&back.elements[0]).unwrap().fy, Some(345.));
+    assert_eq!(back.element_shear_rebar_material(&back.elements[0]).unwrap().fy, Some(345.));
     assert!(back.validate().is_ok(), "{:?}", back.validate());
     assert_eq!(
         back.sections[0].shape, m.sections[0].shape,

@@ -97,6 +97,7 @@ enum PendingMemberKind {
 
 /// 取り込み途中の部材（id 正規化前。参照はすべて file id）。
 struct PendingMember {
+    strength_index: Option<usize>,
     kind: PendingMemberKind,
     n_i: u32,
     n_j: u32,
@@ -116,6 +117,7 @@ struct PendingMember {
 /// 全体解析の対象外で、床荷重・自重を主架構へ CMQ として伝達する部材
 /// （`sepika_core::model::SecondaryMember`）として取り込む。
 struct PendingSecondary {
+    strength_index: Option<usize>,
     kind: sepika_core::model::SecondaryMemberKind,
     n_i: u32,
     n_j: u32,
@@ -164,6 +166,7 @@ struct RawLoadCase {
 
 /// 取り込み途中のスラブ（節点参照は file id。`StbSlab` + `StbNodeIdOrder`）。
 struct RawSlab {
+    strength_index: Option<usize>,
     /// 断面参照（`id_section`。`StbSecSlab_RC` の file id）。負値/未指定は `None`。
     section_fid: Option<u32>,
     /// 境界節点ループ（`StbNodeIdOrder`。file node id 列）。
@@ -172,6 +175,7 @@ struct RawSlab {
 
 /// 取り込み途中の壁（節点参照は file id。`StbWall` + `StbNodeIdOrder`）。
 struct RawWall {
+    strength_index: Option<usize>,
     /// 断面参照（`id_section`。`StbSecWall_RC` の file id）。負値/未指定は `None`。
     section_fid: Option<u32>,
     /// 材料参照（`id_material`）。負値/未指定は `None`。

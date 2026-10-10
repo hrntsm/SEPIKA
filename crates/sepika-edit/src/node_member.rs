@@ -12,6 +12,7 @@ use sepika_core::model::{
 /// 再構築が変更しうる派生データ（床領域・壁領域・割当領域・版）を退避する。
 #[derive(Clone)]
 struct AssignmentTopology {
+    strengths: sepika_core::model::StbStrengthInput,
     floor_regions: Vec<FloorRegion>,
     wall_regions: Vec<WallRegion>,
     floor_assignment_regions: FloorPlateAssignmentRegions,
@@ -23,6 +24,7 @@ struct AssignmentTopology {
 impl AssignmentTopology {
     fn capture(model: &Model) -> Self {
         Self {
+            strengths: model.stb_strengths.clone(),
             floor_regions: model.floor_regions.clone(),
             wall_regions: model.wall_regions.clone(),
             floor_assignment_regions: model.floor_assignment_regions.clone(),
@@ -33,6 +35,7 @@ impl AssignmentTopology {
     }
 
     fn restore(self, model: &mut Model) {
+        model.stb_strengths = self.strengths;
         model.floor_regions = self.floor_regions;
         model.wall_regions = self.wall_regions;
         model.floor_assignment_regions = self.floor_assignment_regions;
@@ -784,6 +787,10 @@ impl EditCommand for DeleteMember {
                 }
             }
         }
+        model
+            .stb_strengths
+            .members
+            .retain(|m| m.target != sepika_core::model::StrengthTarget::Element(self.id));
         let removed = model.elements.remove(idx);
         shift_elem_ids(model, |id| {
             if id.0 > self.id.0 {

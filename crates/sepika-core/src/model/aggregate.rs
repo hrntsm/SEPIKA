@@ -237,7 +237,36 @@ impl Model {
         use crate::error::CoreError;
 
         self.validate_attached_slabs()?;
+        let mut strength_sections = std::collections::HashSet::new();
+        let mut strength_targets = Vec::new();
         for input in &self.stb_strengths.sections {
+            if !strength_sections.insert(input.section) {
+                return Err(CoreError::InvalidInput(format!(
+                    "STB強度の断面 {} が重複",
+                    input.section.0
+                )));
+            }
+        }
+        for input in &self.stb_strengths.members {
+            if strength_targets.contains(&input.target) {
+                return Err(CoreError::InvalidInput(format!(
+                    "STB強度の部材 {:?} が重複",
+                    input.target
+                )));
+            }
+            strength_targets.push(input.target);
+        }
+        for input in &self.stb_strengths.sections {
+            for id in input.native_material.iter().chain(
+                input
+                    .reinforcement
+                    .iter()
+                    .filter_map(|r| r.native_material.as_ref()),
+            ) {
+                if self.materials.get(id.index()).is_none_or(|m| m.id != *id) {
+                    return Err(CoreError::DanglingRef(format!("STB native材料 {}", id.0)));
+                }
+            }
             if self.section(input.section).is_none() {
                 return Err(CoreError::DanglingRef(format!(
                     "STB強度の断面 {}",
@@ -264,7 +293,10 @@ impl Model {
                 StrengthTarget::Slab(id) => self.slabs.iter().any(|s| s.id == id),
                 StrengthTarget::Wall(id) => self.wall_plates.iter().any(|s| s.id == id),
             };
-            if !exists || self.node(input.node).is_none() {
+            if !exists
+                || self.node(input.node).is_none()
+                || input.node_order.iter().any(|n| self.node(*n).is_none())
+            {
                 return Err(CoreError::DanglingRef(format!(
                     "STB強度の部材 {:?}",
                     input.target
@@ -1060,7 +1092,10 @@ impl Model {
     /// **`NodeId` を持つフィールドを `Model` へ新設したら、まず [`Model::visit_node_ids`]
     /// を更新し、次に該当フィールドがここでも参照有無を判定できることを確認すること**。
     pub fn node_referenced_by_regions_or_plates(&self, id: NodeId) -> bool {
-        self.stb_strengths.members.iter().any(|m| m.node == id)
+        self.stb_strengths
+            .members
+            .iter()
+            .any(|m| m.node == id || m.node_order.contains(&id))
             || self
                 .load_cases
                 .iter()
@@ -1195,6 +1230,9 @@ impl Model {
     pub fn visit_node_ids(&mut self, mut f: impl FnMut(&mut NodeId)) {
         for input in &mut self.stb_strengths.members {
             f(&mut input.node);
+            for node in &mut input.node_order {
+                f(node);
+            }
         }
         for identity in &mut self.stb_node_ids {
             f(&mut identity.node);
@@ -1369,6 +1407,16 @@ impl Model {
     pub fn visit_material_ids(&mut self, mut f: impl FnMut(&mut crate::ids::MaterialId)) {
         for input in &mut self.stb_strengths.materials {
             f(&mut input.material);
+        }
+        for input in &mut self.stb_strengths.sections {
+            if let Some(id) = &mut input.native_material {
+                f(id);
+            }
+            for bar in &mut input.reinforcement {
+                if let Some(id) = &mut bar.native_material {
+                    f(id);
+                }
+            }
         }
         for mat in &mut self.materials {
             f(&mut mat.id);
@@ -1709,6 +1757,19 @@ impl Model {
             return;
         }
 
+        self.stb_strengths.members.retain_mut(|input| {
+            if let StrengthTarget::Slab(id) = &mut input.target {
+                match remap.get(id.index()).copied().flatten() {
+                    Some(next) => {
+                        *id = next;
+                        true
+                    }
+                    None => false,
+                }
+            } else {
+                true
+            }
+        });
         let mut i = 0usize;
         self.slabs.retain(|_| {
             let k = remap[i].is_some();
@@ -1760,6 +1821,19 @@ impl Model {
             return;
         }
 
+        self.stb_strengths.members.retain_mut(|input| {
+            if let StrengthTarget::Wall(id) = &mut input.target {
+                match remap.get(id.index()).copied().flatten() {
+                    Some(next) => {
+                        *id = next;
+                        true
+                    }
+                    None => false,
+                }
+            } else {
+                true
+            }
+        });
         let mut i = 0usize;
         self.wall_plates.retain(|_| {
             let k = remap[i].is_some();

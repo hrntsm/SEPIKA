@@ -7,6 +7,7 @@ pub(super) fn section(xml: &str, input: &StbSectionStrength) -> Result<String, S
     let mut reader = Reader::from_str(xml);
     let mut writer = Writer::new(Vec::new());
     let mut depth = 0usize;
+    let mut represented = Vec::new();
     loop {
         let event = reader
             .read_event()
@@ -16,11 +17,15 @@ pub(super) fn section(xml: &str, input: &StbSectionStrength) -> Result<String, S
         }
         let event = match event {
             Event::Start(e) => {
+                represented.push(String::from_utf8_lossy(e.name().as_ref()).into_owned());
                 let result = attributes(&e, input, depth == 0)?;
                 depth += 1;
                 Event::Start(result)
             }
-            Event::Empty(e) => Event::Empty(attributes(&e, input, depth == 0)?),
+            Event::Empty(e) => {
+                represented.push(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                Event::Empty(attributes(&e, input, depth == 0)?)
+            }
             Event::End(e) => {
                 depth = depth.saturating_sub(1);
                 Event::End(e.into_owned())
@@ -30,6 +35,16 @@ pub(super) fn section(xml: &str, input: &StbSectionStrength) -> Result<String, S
         writer
             .write_event(event)
             .map_err(|e| StbError::Io(e.to_string()))?;
+    }
+    if input
+        .reinforcement
+        .iter()
+        .any(|r| r.position.is_some() || !represented.contains(&r.element))
+    {
+        return Err(StbError::Unmappable(format!(
+            "断面 {} の位置別鉄筋強度を現行配筋出力で表現できません",
+            input.section.0
+        )));
     }
     String::from_utf8(writer.into_inner()).map_err(|e| StbError::Decode(e.to_string()))
 }

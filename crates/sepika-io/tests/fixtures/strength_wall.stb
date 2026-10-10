@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="independent wall" app_name="SEPIKA test" app_version="1" strength_concrete="Fc21"/>
+  <StbModel>
+<StbNodes><StbNode id="1" X="0" Y="0" Z="0" kind="ON_COLUMN"/><StbNode id="2" X="0" Y="0" Z="3000" kind="ON_COLUMN"/><StbNode id="3" X="4000" Y="0" Z="0" kind="ON_COLUMN"/><StbNode id="4" X="4000" Y="0" Z="3000" kind="ON_COLUMN"/></StbNodes>
+<StbStories><StbStory id="1" name="first" height="0" kind="GENERAL" strength_concrete="Fc24"><StbNodeIdList><StbNodeId id="1"/></StbNodeIdList></StbStory><StbStory id="2" name="last" height="0" kind="GENERAL" strength_concrete="Fc27"><StbNodeIdList><StbNodeId id="3"/></StbNodeIdList></StbStory></StbStories>
+<StbMembers><StbColumns><StbColumn id="1" name="C1" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="S"/><StbColumn id="2" name="C2" id_node_bottom="3" id_node_top="4" id_section="1" kind_structure="S"/></StbColumns><StbGirders><StbGirder id="3" name="G1" id_node_start="1" id_node_end="3" id_section="2" kind_structure="S" isFoundation="false"/><StbGirder id="4" name="G2" id_node_start="2" id_node_end="4" id_section="2" kind_structure="S" isFoundation="false"/></StbGirders><StbWalls><StbWall id="1" name="W" id_section="3" kind_structure="RC" kind_layout="ON_GIRDER"><StbNodeIdOrder>1 2 4 3</StbNodeIdOrder></StbWall></StbWalls></StbMembers>
+<StbSections><StbSecColumn_S id="1" name="C"><StbSecSteelFigureColumn_S><StbSecSteelColumn_S_Same shape="H1" strength_main="SN400B"/></StbSecSteelFigureColumn_S></StbSecColumn_S><StbSecBeam_S id="2" name="G"><StbSecSteelFigureBeam_S><StbSecSteelBeam_S_Straight shape="H1" strength_main="SN400B"/></StbSecSteelFigureBeam_S></StbSecBeam_S><StbSecWall_RC id="3" name="W"><StbSecFigureWall_RC><StbSecWall_RC_Straight t="180"/></StbSecFigureWall_RC></StbSecWall_RC><StbSecSteel><StbSecRoll-H name="H1" type="H" A="300" B="150" t1="6.5" t2="9" r="10"/></StbSecSteel></StbSections>
+</StbModel>
+</ST_BRIDGE>

@@ -11200,3 +11200,68 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
         .unwrap()
         .contains("未割当"));
 }
+
+#[cfg(feature = "gui")]
+#[test]
+fn stb_strength_gui_edit_transaction_changes_result_input_and_restores_omission() {
+    use sepika_core::model::StrengthSource;
+    let path = test_tmp().join("520-strength-input.stb");
+    std::fs::write(
+        &path,
+        include_str!("../../../sepika-io/tests/fixtures/strength_priority.stb"),
+    )
+    .unwrap();
+    let mut app = App::default();
+    app.import_stbridge_from(path.clone());
+    let before = app.core.model.clone();
+    assert_eq!(
+        before.element_material(&before.elements[0]).unwrap().fc,
+        Some(36.)
+    );
+    let key = result_validity::ResultInputKey::Modal;
+    let generation = app.result_input(&key);
+    let mut input = before.stb_strengths.clone();
+    input.members[0].concrete = None;
+    input.sections[0].concrete = None;
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::CompositeCommand {
+            label: "強度編集".into(),
+            children: vec![
+                Box::new(sepika_edit::SetStbStrengths { input }),
+                Box::new(sepika_edit::SetSourceStoryConcreteStrength {
+                    source_story: 1,
+                    strength: Some("Fc33".into()),
+                }),
+            ],
+        }));
+    app.apply_pending_story_command();
+    assert_ne!(generation, app.result_input(&key));
+    let resolved = app
+        .core
+        .model
+        .resolve_stb_concrete(&app.core.model.stb_strengths.members[0])
+        .unwrap();
+    assert_eq!(resolved.value, 33.);
+    assert_eq!(resolved.source, StrengthSource::Story);
+    let output = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
+    let again = sepika_io::stbridge::import_stbridge(&output).unwrap();
+    assert!(again.stb_strengths.members[0].concrete.is_none());
+    assert!(again.stb_strengths.sections[0].concrete.is_none());
+    app.undo_action();
+    assert!(app.core.model.eq_ignoring_dofmap(&before));
+    assert_eq!(generation, app.result_input(&key));
+    app.redo_action();
+    assert_eq!(
+        app.core
+            .model
+            .element_material(&app.core.model.elements[0])
+            .unwrap()
+            .fc,
+        Some(33.)
+    );
+    let context = egui::Context::default();
+    let _ = context.run_ui(Default::default(), |ui| { app.preparation_panel(ui); });
+    std::fs::remove_file(path).unwrap();
+}

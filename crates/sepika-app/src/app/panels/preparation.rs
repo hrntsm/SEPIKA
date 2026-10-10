@@ -14,6 +14,21 @@ fn standard_floor_load_to_internal(value_kn_per_m2: f64) -> f64 {
     to_internal::area_load_kn_per_m2(value_kn_per_m2)
 }
 
+fn optional_strength_field(ui: &mut egui::Ui, label: &str, value: &mut Option<String>) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        let mut present = value.is_some();
+        if ui.checkbox(&mut present, label).changed() {
+            *value = present.then(String::new);
+            changed = true;
+        }
+        if let Some(text) = value {
+            changed |= ui.text_edit_singleline(text).changed();
+        }
+    });
+    changed
+}
+
 fn story_table_columns() -> [Col<'static>; 8] {
     [
         Col::label("階名"),
@@ -350,6 +365,108 @@ impl App {
     /// `StoryId` の繰り上げ・並べ替えを伴うため、モデルを書き換えたあと
     /// 残りの行が古い ID を指さないようにする）。
     fn stories_section(&mut self, ui: &mut egui::Ui) {
+        if !self.core.model.stb_strengths.members.is_empty() {
+            egui::CollapsingHeader::new("STB材料強度と採用元").show(ui, |ui| {
+                let mut input = self.core.model.stb_strengths.clone();
+                let mut changed = false;
+                if let Some(common) = &mut input.common {
+                    changed |=
+                        optional_strength_field(ui, "Common Fc指定", &mut common.strength_concrete);
+                    for (index, bar) in common.reinforcement.iter_mut().enumerate() {
+                        ui.push_id(("diameter_strength", index), |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("径 / 鉄筋強度");
+                                changed |= ui.text_edit_singleline(&mut bar.diameter).changed();
+                                changed |= ui.text_edit_singleline(&mut bar.strength).changed();
+                            });
+                        });
+                    }
+                }
+                for member in &mut input.members {
+                    ui.push_id(format!("{:?}", member.target), |ui| {
+                        changed |= optional_strength_field(
+                            ui,
+                            &format!("{:?} Fc指定", member.target),
+                            &mut member.concrete,
+                        );
+                    });
+                }
+                for section in &mut input.sections {
+                    ui.push_id(("section_strength", section.section.0), |ui| {
+                        if optional_strength_field(ui, "断面Fc指定", &mut section.concrete) {
+                            section.native_material = None;
+                            changed = true;
+                        }
+                        for (index, bar) in section.reinforcement.iter_mut().enumerate() {
+                            ui.push_id(index, |ui| {
+                                ui.label(format!(
+                                    "{} / {:?} / {}",
+                                    bar.element, bar.position, bar.part
+                                ));
+                                changed |= optional_strength_field(ui, "径指定", &mut bar.diameter);
+                                if optional_strength_field(ui, "鉄筋強度指定", &mut bar.strength)
+                                {
+                                    bar.native_material = None;
+                                    changed = true;
+                                }
+                            });
+                        }
+                    });
+                }
+                if changed {
+                    self.ui
+                        .scoped
+                        .pending_story_cmds
+                        .push_back(Box::new(sepika_edit::SetStbStrengths { input }));
+                }
+                for story in &self.core.model.source_stories {
+                    let mut strength = story.strength_concrete.clone();
+                    ui.push_id(("source_strength", story.id), |ui| {
+                        if optional_strength_field(
+                            ui,
+                            &format!("原階 {} Fc指定", story.id),
+                            &mut strength,
+                        ) {
+                            self.ui.scoped.pending_story_cmds.push_back(Box::new(
+                                sepika_edit::SetSourceStoryConcreteStrength {
+                                    source_story: story.id,
+                                    strength,
+                                },
+                            ));
+                        }
+                    });
+                }
+
+                for input in &self.core.model.stb_strengths.members {
+                    match self.core.model.resolve_stb_concrete(input) {
+                        Ok(value) => {
+                            ui.label(format!(
+                                "{:?}: {} / {:?} / {} N/mm²{}",
+                                input.target,
+                                value.grade,
+                                value.source,
+                                value.value,
+                                if value.native_override {
+                                    " (native指定)"
+                                } else {
+                                    ""
+                                }
+                            ));
+                        }
+                        Err(reason) => {
+                            ui.colored_label(
+                                crate::theme::WARN_TEXT,
+                                format!("{:?}: {reason}", input.target),
+                            );
+                        }
+                    }
+                }
+                for message in self.core.model.stb_strength_diagnostics() {
+                    ui.colored_label(crate::theme::WARN_TEXT, message);
+                }
+            });
+        }
+
         if !self.core.model.source_stories.is_empty() {
             egui::CollapsingHeader::new("STB明示所属と解析用推定")
                 .id_salt("source_story_membership")

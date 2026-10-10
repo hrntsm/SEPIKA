@@ -9,6 +9,7 @@ impl EditCommand for SetStbStrengths {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let mut candidate = model.clone();
         candidate.stb_strengths = self.input.clone();
+        candidate.stb_strengths.materials = model.stb_strengths.materials.clone();
         candidate.prepare_stb_strength_materials();
         if candidate.validate().is_err() {
             return Box::new(Noop);
@@ -64,5 +65,54 @@ impl EditCommand for RestoreStrengthInput {
     }
     fn label(&self) -> &str {
         self.inverse.label()
+    }
+}
+
+/// 原階IDを指定し、元Fc指定（省略を含む）を変更する。
+pub struct SetSourceStoryConcreteStrength {
+    pub source_story: u32,
+    pub strength: Option<String>,
+}
+struct RestoreSourceStrength {
+    stories: Vec<SourceStory>,
+    input: StbStrengthInput,
+    materials: Vec<Material>,
+}
+impl EditCommand for SetSourceStoryConcreteStrength {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let Some(index) = model
+            .source_stories
+            .iter()
+            .position(|s| s.id == self.source_story)
+        else {
+            return Box::new(Noop);
+        };
+        let inverse = RestoreSourceStrength {
+            stories: model.source_stories.clone(),
+            input: model.stb_strengths.clone(),
+            materials: model.materials.clone(),
+        };
+        model.source_stories[index].strength_concrete = self.strength.clone();
+        model.prepare_stb_strength_materials();
+        Box::new(inverse)
+    }
+    fn label(&self) -> &str {
+        "原階Fc指定変更"
+    }
+}
+impl EditCommand for RestoreSourceStrength {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let inverse = Self {
+            stories: model.source_stories.clone(),
+            input: model.stb_strengths.clone(),
+            materials: model.materials.clone(),
+        };
+        model.source_stories = self.stories.clone();
+        model.stb_strengths = self.input.clone();
+        model.materials = self.materials.clone();
+        Box::new(inverse)
+    }
+    fn label(&self) -> &str {
+        "原階Fc指定変更の取り消し"
     }
 }
