@@ -225,3 +225,104 @@ fn 一般準備の候補拒否は支持再推定もauto_ex生成記録強度入�
         assert!(!app.core.scoped.undo.can_undo());
     }
 }
+
+#[cfg(feature = "gui")]
+#[test]
+fn gui_redo拒否は理由を表示しモデル履歴と選択を維持し正常再試行できる() {
+    use sepika_core::ids::*;
+    use sepika_edit::{PlaceSecondaryMember, SecondaryParent};
+    for wall in [false, true] {
+        for duplicate_plate in [false, true] {
+            let mut app = App::default();
+            app.core.model = fixture::with_plate_metadata(wall);
+            app.core.model.assign_stb_node_ids().unwrap();
+            let valid = app.core.model.clone();
+            let sm = fixture::divider(wall);
+            assert!(!app.apply_model_edit(Box::new(PlaceSecondaryMember {
+                parent: if wall {
+                    SecondaryParent::Wall(WallRegionId(0))
+                } else {
+                    SecondaryParent::Floor(FloorRegionId(0))
+                },
+                kind: sm.kind,
+                ends: sm.ends,
+                section: None,
+                name: "分割".into(),
+            })));
+            app.resolve_plate_loss_edit(true);
+            let divided = app.core.model.clone();
+            app.undo_action();
+            fixture::assert_inputs_eq(&app.core.model, &valid);
+            if wall {
+                let mut r = app.core.model.wall_assignment_regions.regions[0].clone();
+                r.id = WallPlateAssignmentRegionId(90);
+                if duplicate_plate {
+                    r.boundary[0].span[1] = 0.5;
+                }
+                app.core.model.wall_assignment_regions.regions.push(r);
+            } else {
+                let mut r = app.core.model.floor_assignment_regions.regions[0].clone();
+                r.id = FloorPlateAssignmentRegionId(90);
+                if duplicate_plate {
+                    r.boundary[0].span[1] = 0.5;
+                }
+                app.core.model.floor_assignment_regions.regions.push(r);
+            }
+            app.select_node(NodeId(0));
+            let before = app.core.model.clone();
+            let label = app.core.scoped.undo.redo_label().unwrap().to_owned();
+            app.redo_action();
+            fixture::assert_inputs_eq(&app.core.model, &before);
+            assert_eq!(app.core.scoped.undo.revision(), 2);
+            assert!(!app.core.scoped.undo.can_undo());
+            assert!(app.core.scoped.undo.can_redo());
+            assert_eq!(app.core.scoped.undo.redo_label(), Some(label.as_str()));
+            assert_eq!(app.ui.scoped.selection.nodes(), &[NodeId(0)]);
+            let reason = app.core.scoped.last_error.as_ref().unwrap();
+            assert!(reason.contains("未更新"));
+            assert!(reason.contains(if duplicate_plate {
+                "重複割当"
+            } else {
+                "境界キー"
+            }));
+            assert_eq!(Some(reason.as_str()), app.core.scoped.undo.last_error());
+            app.core.model = valid;
+            app.redo_action();
+            fixture::assert_inputs_eq(&app.core.model, &divided);
+            assert_eq!(app.core.scoped.undo.revision(), 3);
+            assert!(app.core.scoped.undo.last_error().is_none());
+            assert!(app.core.scoped.last_error.is_none());
+            app.undo_action();
+            assert_eq!(app.core.scoped.undo.revision(), 4);
+        }
+    }
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn gui_noop_redoはモデル履歴と選択を更新しない() {
+    use sepika_core::ids::NodeId;
+    use sepika_edit::SetNodeRestraint;
+    let mut app = App::default();
+    app.core.model = fixture::rectangle(false);
+    assert!(app.core.scoped.undo.run(
+        &mut app.core.model,
+        Box::new(SetNodeRestraint {
+            node: NodeId(0),
+            restraint: sepika_core::dof::Dof6Mask::FIXED,
+        })
+    ));
+    app.undo_action();
+    app.core.model.nodes.clear();
+    app.select_node(NodeId(1));
+    let before = app.core.model.clone();
+    let label = app.core.scoped.undo.redo_label().unwrap().to_owned();
+    app.redo_action();
+    fixture::assert_inputs_eq(&app.core.model, &before);
+    assert_eq!(app.core.scoped.undo.revision(), 2);
+    assert!(!app.core.scoped.undo.can_undo() && app.core.scoped.undo.can_redo());
+    assert_eq!(app.core.scoped.undo.redo_label(), Some(label.as_str()));
+    assert_eq!(app.ui.scoped.selection.nodes(), &[NodeId(1)]);
+    assert!(app.core.scoped.undo.last_error().is_none());
+    assert!(app.core.scoped.last_error.is_none());
+}

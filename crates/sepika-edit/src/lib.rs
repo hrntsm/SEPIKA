@@ -62,6 +62,12 @@ impl EditCommand for RestoreStbNodeIdentities {
     fn label(&self) -> &str {
         self.command.label()
     }
+    fn is_noop(&self) -> bool {
+        self.command.is_noop()
+    }
+    fn rejection(&self) -> Option<&str> {
+        self.command.rejection()
+    }
     fn inverse_id_changes(&self) -> Vec<IdChange> {
         self.command.inverse_id_changes()
     }
@@ -269,13 +275,37 @@ impl UndoStack {
     }
 
     pub fn redo(&mut self, model: &mut Model) {
+        self.last_error = None;
         self.id_changes.clear();
-        if let Some(cmd) = self.undone.pop() {
-            let undo_cmd = cmd.apply(model);
-            self.id_changes = undo_cmd.inverse_id_changes();
-            self.done.push(undo_cmd);
-            self.revision += 1;
+        let Some(cmd) = self.undone.last() else {
+            return;
+        };
+        if let Err(reason) = model.validate_assignment_region_identity() {
+            self.last_error = Some(format!("モデル・履歴は未更新: {reason}"));
+            return;
         }
+        let mut candidate = model.clone();
+        let undo_cmd = cmd.apply(&mut candidate);
+        if let Some(reason) = undo_cmd.rejection() {
+            self.last_error = Some(format!("モデル・履歴は未更新: {reason}"));
+            return;
+        }
+        if undo_cmd.is_noop() {
+            return;
+        }
+        if let Err(reason) = candidate.validate_assignment_region_identity() {
+            self.last_error = Some(format!("モデル・履歴は未更新: {reason}"));
+            return;
+        }
+        if let Err(error) = candidate.validate_attached_slabs() {
+            self.last_error = Some(format!("モデル・履歴は未更新: {error}"));
+            return;
+        }
+        *model = candidate;
+        self.undone.pop();
+        self.id_changes = undo_cmd.inverse_id_changes();
+        self.done.push(undo_cmd);
+        self.revision += 1;
     }
 
     pub fn can_undo(&self) -> bool {

@@ -385,3 +385,180 @@ fn 同じ支持区間の構面内節点移動は確認なしで版idと入力荷
         fixture::assert_inputs_eq(&model, &after);
     }
 }
+
+#[test]
+fn 拒否redoは床壁の衝突と重複版でモデル両履歴ラベルrevisionを保持し修正後に再試行できる() {
+    for wall in [false, true] {
+        for duplicate_plate in [false, true] {
+            let mut model = fixture::with_plate_metadata(wall);
+            model.assign_stb_node_ids().unwrap();
+            let mut undo = UndoStack::new();
+            assert!(undo.run(
+                &mut model,
+                Box::new(SetNodeRestraint {
+                    node: NodeId(0),
+                    restraint: sepika_core::dof::Dof6Mask::FIXED,
+                })
+            ));
+            let valid = model.clone();
+            assert!(undo.run(&mut model, Box::new(place(wall))));
+            let divided = model.clone();
+            undo.undo(&mut model);
+            fixture::assert_inputs_eq(&model, &valid);
+            if wall {
+                let mut r = model.wall_assignment_regions.regions[0].clone();
+                r.id = WallPlateAssignmentRegionId(90);
+                if duplicate_plate {
+                    r.boundary[0].span[1] = 0.5;
+                }
+                model.wall_assignment_regions.regions.push(r);
+            } else {
+                let mut r = model.floor_assignment_regions.regions[0].clone();
+                r.id = FloorPlateAssignmentRegionId(90);
+                if duplicate_plate {
+                    r.boundary[0].span[1] = 0.5;
+                }
+                model.floor_assignment_regions.regions.push(r);
+            }
+            let before = model.clone();
+            let labels = (
+                undo.undo_label().unwrap().to_owned(),
+                undo.redo_label().unwrap().to_owned(),
+            );
+            assert_eq!(undo.revision(), 3);
+            for _ in 0..2 {
+                undo.redo(&mut model);
+                fixture::assert_inputs_eq(&model, &before);
+                assert_eq!(undo.revision(), 3);
+                assert!(undo.can_undo() && undo.can_redo());
+                assert_eq!(undo.undo_label(), Some(labels.0.as_str()));
+                assert_eq!(undo.redo_label(), Some(labels.1.as_str()));
+                assert!(undo.id_changes().is_empty());
+                let reason = undo.last_error().unwrap();
+                assert!(reason.contains("未更新"));
+                assert!(reason.contains(if duplicate_plate {
+                    "重複割当"
+                } else {
+                    "境界キー"
+                }));
+            }
+            model = valid.clone();
+            undo.redo(&mut model);
+            fixture::assert_inputs_eq(&model, &divided);
+            assert_eq!(undo.revision(), 4);
+            assert!(undo.last_error().is_none());
+            assert!(!undo.can_redo());
+            undo.undo(&mut model);
+            fixture::assert_inputs_eq(&model, &valid);
+            assert_eq!(undo.revision(), 5);
+        }
+    }
+}
+
+#[test]
+fn noop_redoは候補変更を確定せず履歴とrevisionを保持する() {
+    struct CandidateNoop;
+    impl EditCommand for CandidateNoop {
+        fn apply(&self, model: &mut sepika_core::model::Model) -> Box<dyn EditCommand> {
+            model.next_secondary_member_id = 999;
+            Box::new(Noop)
+        }
+        fn label(&self) -> &str {
+            "候補Noop"
+        }
+    }
+    struct MakeRedo;
+    impl EditCommand for MakeRedo {
+        fn apply(&self, _: &mut sepika_core::model::Model) -> Box<dyn EditCommand> {
+            Box::new(CandidateNoop)
+        }
+        fn label(&self) -> &str {
+            "戻す"
+        }
+    }
+    struct Initial;
+    impl EditCommand for Initial {
+        fn apply(&self, _: &mut sepika_core::model::Model) -> Box<dyn EditCommand> {
+            Box::new(MakeRedo)
+        }
+        fn label(&self) -> &str {
+            "開始"
+        }
+    }
+    let mut model = fixture::with_plate_metadata(false);
+    model.assign_stb_node_ids().unwrap();
+    let mut undo = UndoStack::new();
+    assert!(undo.run(&mut model, Box::new(Initial)));
+    undo.undo(&mut model);
+    let before = model.clone();
+    for _ in 0..2 {
+        undo.redo(&mut model);
+        fixture::assert_inputs_eq(&model, &before);
+        assert_eq!(undo.revision(), 2);
+        assert!(!undo.can_undo());
+        assert!(undo.can_redo());
+        assert_eq!(undo.redo_label(), Some("候補Noop"));
+        assert!(undo.last_error().is_none());
+        assert!(undo.id_changes().is_empty());
+    }
+}
+
+#[test]
+fn コマンド拒否redoはstb復元ラッパー越しに理由を伝え候補と履歴を確定しない() {
+    struct Reject;
+    impl EditCommand for Reject {
+        fn apply(&self, _: &mut sepika_core::model::Model) -> Box<dyn EditCommand> {
+            Box::new(Noop)
+        }
+        fn label(&self) -> &str {
+            "拒否"
+        }
+        fn rejection(&self) -> Option<&str> {
+            Some("候補編集を拒否")
+        }
+        fn is_noop(&self) -> bool {
+            true
+        }
+    }
+    struct Candidate;
+    impl EditCommand for Candidate {
+        fn apply(&self, model: &mut sepika_core::model::Model) -> Box<dyn EditCommand> {
+            model.next_secondary_member_id = 999;
+            Box::new(Reject)
+        }
+        fn label(&self) -> &str {
+            "再実行"
+        }
+    }
+    struct Inverse;
+    impl EditCommand for Inverse {
+        fn apply(&self, _: &mut sepika_core::model::Model) -> Box<dyn EditCommand> {
+            Box::new(Candidate)
+        }
+        fn label(&self) -> &str {
+            "戻す"
+        }
+    }
+    struct Initial;
+    impl EditCommand for Initial {
+        fn apply(&self, _: &mut sepika_core::model::Model) -> Box<dyn EditCommand> {
+            Box::new(Inverse)
+        }
+        fn label(&self) -> &str {
+            "開始"
+        }
+    }
+    let mut model = fixture::with_plate_metadata(false);
+    model.assign_stb_node_ids().unwrap();
+    let mut undo = UndoStack::new();
+    assert!(undo.run(&mut model, Box::new(Initial)));
+    undo.undo(&mut model);
+    let before = model.clone();
+    undo.redo(&mut model);
+    fixture::assert_inputs_eq(&model, &before);
+    assert_eq!(undo.revision(), 2);
+    assert!(!undo.can_undo() && undo.can_redo());
+    assert_eq!(undo.redo_label(), Some("再実行"));
+    assert!(undo.last_error().unwrap().contains("候補編集を拒否"));
+    assert!(undo.id_changes().is_empty());
+}
