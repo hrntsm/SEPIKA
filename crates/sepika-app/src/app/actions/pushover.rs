@@ -60,7 +60,8 @@ impl App {
         let input_key = ResultInputKey::Pushover(self.core.analysis_cfg.push_dir);
         let input = self.result_input(&input_key);
         match res {
-            Ok(result) => {
+            Ok(mut result) => {
+                result.identify_wall_input(input.clone());
                 if result.termination.is_premature() {
                     self.append_analysis_notice(format!(
                         "⚠ 増分解析は目標到達前に打ち切られました（{}）。Qu はその時点までの最大値です。",

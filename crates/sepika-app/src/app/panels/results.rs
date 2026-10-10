@@ -323,6 +323,11 @@ impl App {
             });
 
         ui.separator();
+        ui.collapsing("壁単体の確定step応答", |ui| {
+            for (label, value) in crate::summary::wall_response_rows(po) {
+                ui.label(format!("{label}: {value}"));
+            }
+        });
         ui.strong("ヒンジ発生履歴");
         egui::ScrollArea::vertical().show(ui, |ui| {
             for h in po.hinges.iter().take(20) {

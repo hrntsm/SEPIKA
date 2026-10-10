@@ -56,6 +56,7 @@ pub(super) struct StepRecorder<'a> {
     hinges: Vec<HingeEvent>,
     shear_yields: Vec<ShearYieldEvent>,
     member_history_steps: Vec<Vec<MemberStepState>>,
+    wall_history: Vec<super::wall_response::WallStepResponse>,
 }
 
 /// 解析終了時に [`StepRecorder`] から取り出す蓄積結果。
@@ -65,6 +66,7 @@ pub(super) struct RecordedSteps {
     pub(super) hinges: Vec<HingeEvent>,
     pub(super) shear_yields: Vec<ShearYieldEvent>,
     pub(super) member_history_steps: Vec<Vec<MemberStepState>>,
+    pub(super) wall_history: Vec<super::wall_response::WallStepResponse>,
 }
 
 impl<'a> StepRecorder<'a> {
@@ -88,6 +90,7 @@ impl<'a> StepRecorder<'a> {
             hinges: Vec::new(),
             shear_yields: Vec::new(),
             member_history_steps: Vec::new(),
+            wall_history: Vec::new(),
         }
     }
 
@@ -146,6 +149,15 @@ impl<'a> StepRecorder<'a> {
         );
         self.member_history_steps
             .push(record_member_step(model, dofmap, behaviors, total_disp));
+        self.wall_history
+            .extend(super::wall_response::record_wall_step(
+                model,
+                dofmap,
+                behaviors,
+                total_disp,
+                self.dir,
+                self.step_no,
+            ));
         self.step_no += 1;
 
         RecordedStep { roof, drift_angle }
@@ -182,6 +194,7 @@ impl<'a> StepRecorder<'a> {
             hinges: self.hinges,
             shear_yields: self.shear_yields,
             member_history_steps: self.member_history_steps,
+            wall_history: self.wall_history,
         }
     }
 }
