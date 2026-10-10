@@ -2544,3 +2544,61 @@ fn slab_floor_load_reaches_primary_frame() {
         "主架構へ届いた床荷重 {delivered:.1} N / 期待 {expected:.1} N = {ratio:.6}"
     );
 }
+
+#[test]
+fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() {
+    use sepika_core::model::StoryLevelKind;
+    let mut app = prepared_steel_portal(true);
+    app.core.analysis_cfg.push_steps = 3;
+    app.core.analysis_cfg.push_use_drift_angle = false;
+    for (i, elevation) in [-9000.0, -6000.0, -3000.0, 6000.0, 12000.0]
+        .into_iter()
+        .enumerate()
+    {
+        app.core.model.stories[i].elevation = elevation;
+        if i > 0 {
+            app.core.model.stories[i].weight_override = Some(100_000.0);
+        }
+        let nodes = app.core.model.stories[i].node_ids.clone();
+        for node in nodes {
+            app.core.model.nodes[node.index()].coord[2] = elevation;
+        }
+        if i == 1 || i == 2 {
+            assert!(app.core.scoped.undo.run(
+                &mut app.core.model,
+                Box::new(sepika_edit::SetStoryLevelKind {
+                    story: sepika_core::ids::StoryId(i as u32),
+                    level_kind: StoryLevelKind::Basement {
+                        depth_mm: -elevation
+                    },
+                })
+            ));
+        }
+    }
+    app.run_preparation();
+    let prep = app.core.scoped.preparation.as_ref().unwrap();
+    assert!(prep.seismic_note.is_none(), "{:?}", prep.seismic_note);
+    assert!((prep.seismic.as_ref().unwrap().rows[0].qi - 57_750.0).abs() < 1e-8);
+    app.run_seismic(sepika_solver::statics::analysis::SeismicDir::X);
+    assert_no_error(&app, "整合GLの地震静的");
+    app.run_pushover();
+    assert_no_error(&app, "整合GLの増分解析");
+    let qud = app.compute_holding_capacity().unwrap().0.stories[0].qud;
+    assert!((qud - 217_750.0).abs() < 1e-8);
+    assert!(app.core.scoped.undo.run(
+        &mut app.core.model,
+        Box::new(sepika_edit::SetStoryLevelKind {
+            story: sepika_core::ids::StoryId(1),
+            level_kind: StoryLevelKind::Basement { depth_mm: 9000.0 },
+        })
+    ));
+    app.run_preparation();
+    let prep = app.core.scoped.preparation.as_ref().unwrap();
+    assert!(prep.seismic.is_none());
+    assert!(prep.seismic_note.as_ref().unwrap().contains("GL"));
+    assert!(app.compute_holding_capacity().err().unwrap().contains("GL"));
+    app.run_seismic(sepika_solver::statics::analysis::SeismicDir::X);
+    assert!(app.core.scoped.last_error.as_ref().unwrap().contains("GL"));
+    app.run_pushover();
+    assert!(app.core.scoped.last_error.as_ref().unwrap().contains("GL"));
+}

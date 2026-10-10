@@ -67,6 +67,8 @@ pub fn compute_linear_static(
 ) -> JobResult<sepika_solver::statics::linear::StaticOnce> {
     if let Some(case) = model.load_cases.iter().find(|case| case.id == lc) {
         if missing_seismic_horizontal_load(case) {
+            sepika_solver::statics::analysis::validate_basement_ground(&model)
+                .map_err(dynamic_solve_error)?;
             return Err(JobError::InvalidInput(format!(
                 "荷重ケース「{}」の Ai 地震水平力を再生成できていません。準備計算の条件を修正し、Ai 地震力を再生成してください（手入力水平力だけでは解析できません）。",
                 case.name

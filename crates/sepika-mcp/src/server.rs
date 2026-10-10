@@ -850,9 +850,44 @@ mod tests {
         for (tag, c0, mode) in [
             ("invalid_c0", 0.1, "Approx"),
             ("unsupported_rt", 0.2, "SemiPrecise"),
+            ("inconsistent_gl", 0.2, "Approx"),
         ] {
             let dir = test_store_dir(tag);
             let mut model = pushover_model();
+            if tag == "inconsistent_gl" {
+                model.stories[0].elevation = -9000.0;
+                model.nodes[0].coord[2] = -9000.0;
+                let template = model.stories[1].clone();
+                let node_template = model.nodes[1].clone();
+                let beam_template = model.elements[0].clone();
+                model.stories.truncate(1);
+                model.nodes.truncate(1);
+                model.elements.clear();
+                for (i, elevation) in [-6000.0, -3000.0, 6000.0, 12000.0].into_iter().enumerate() {
+                    let id = (i + 1) as u32;
+                    let mut story = template.clone();
+                    story.id = StoryId(id);
+                    story.name = format!("floor{i}");
+                    story.elevation = elevation;
+                    story.node_ids = vec![NodeId(id)];
+                    story.weight_override = Some(100_000.0);
+                    if i < 2 {
+                        story.level_kind = sepika_core::model::StoryLevelKind::Basement {
+                            depth_mm: if i == 0 { 9000.0 } else { 3000.0 },
+                        };
+                    }
+                    model.stories.push(story);
+                    let mut node = node_template.clone();
+                    node.id = NodeId(id);
+                    node.coord[2] = elevation;
+                    node.story = Some(StoryId(id));
+                    model.nodes.push(node);
+                    let mut beam = beam_template.clone();
+                    beam.id = ElemId(i as u32);
+                    beam.nodes = smallvec::smallvec![NodeId(id - 1), NodeId(id)];
+                    model.elements.push(beam);
+                }
+            }
             model.load_cases.push(sepika_core::model::LoadCase {
                 id: sepika_core::ids::LoadCaseId(0),
                 name: "EX".into(),
@@ -875,6 +910,9 @@ mod tests {
                 matches!(status, JobStatus::Failed { .. }),
                 "{tag}: {status:?}"
             );
+            if tag == "inconsistent_gl" {
+                assert!(format!("{status:?}").contains("GL"), "{status:?}");
+            }
         }
     }
 }

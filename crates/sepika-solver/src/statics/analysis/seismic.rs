@@ -19,7 +19,7 @@ pub fn base_elevation(model: &Model) -> f64 {
 /// 地盤面（GL）レベル [mm] を求める。
 /// 地下階（`StoryLevelKind::Basement`）が定義されているモデルでは、
 /// 各地下階の「床レベル + 地盤面からの深さ depth_mm」から GL を復元する
-/// （深さの定義より各地下階で同一値になる想定。数値ずれに備え最大値を採る）。
+/// （標準地震力入口は各階の共通 GL を検証する。純数値取得は最大値）。
 /// 地下階がなければ [`base_elevation`]（最下構造節点レベル）を GL とみなす。
 pub fn ground_elevation(model: &Model) -> f64 {
     let gl = model
@@ -35,6 +35,31 @@ pub fn ground_elevation(model: &Model) -> f64 {
     } else {
         base_elevation(model)
     }
+}
+
+/// 各地下床の標高と地盤面からの深さ [mm] が、共通 GL を示すことを検証する。
+pub fn validate_basement_ground(model: &Model) -> Result<(), SolveError> {
+    let mut basement_gl_min = f64::INFINITY;
+    let mut basement_gl_max = f64::NEG_INFINITY;
+    for l in model.layers() {
+        if let StoryLevelKind::Basement { depth_mm } = l.level_kind {
+            if !depth_mm.is_finite() || depth_mm < 0.0 {
+                return Err(SolveError::InvalidInput(format!(
+                    "{} の地下深さ [mm] は有限の非負値が必要です。",
+                    l.name
+                )));
+            }
+            let gl = l.top_elevation + depth_mm;
+            basement_gl_min = basement_gl_min.min(gl);
+            basement_gl_max = basement_gl_max.max(gl);
+            if !gl.is_finite() || basement_gl_max - basement_gl_min > 0.001 {
+                return Err(SolveError::InvalidInput(
+                        "地下床レベルと地下深さ H から求める地盤面 GL が一致しません。各地下階の床レベル + H を共通 GL に合わせてください（許容差 0.001 mm）。".into(),
+                    ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// 建築物の高さ h [mm]（略算周期 T = h(0.02+0.01α) の h。令88条・
@@ -368,6 +393,7 @@ pub fn seismic_distribution_for_model(
     }
 
     let mut previous_rank = 0;
+    validate_basement_ground(model)?;
     for l in &layers {
         let weight = l.weight.ok_or_else(|| {
             SolveError::InvalidInput(format!("{} の地震用重量が未設定です。", l.name))

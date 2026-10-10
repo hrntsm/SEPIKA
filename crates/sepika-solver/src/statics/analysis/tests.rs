@@ -3205,3 +3205,70 @@ fn src_invalid_ec_and_poisson_are_analysis_errors() {
             .any(|i| i.severity == IssueSeverity::Error && i.short.contains("νc")));
     }
 }
+
+#[test]
+fn seismic_common_ground_rejects_conflicting_depths_and_preserves_hand_values() {
+    let mut model = seismic_two_layer_contract_model();
+    model.nodes.truncate(1);
+    model.stories.truncate(1);
+    model.constraints.clear();
+    model.nodes[0].coord[2] = -9000.0;
+    model.stories[0].elevation = -9000.0;
+    let template = seismic_two_layer_contract_model();
+    for (i, elevation) in [-6000.0, -3000.0, 6000.0, 12000.0].into_iter().enumerate() {
+        let id = (i + 1) as u32;
+        let mut story = template.stories[1].clone();
+        story.id = StoryId(id);
+        story.name = format!("floor{id}");
+        story.elevation = elevation;
+        story.node_ids = vec![NodeId(id)];
+        if i < 2 {
+            story.level_kind = StoryLevelKind::Basement {
+                depth_mm: -elevation,
+            };
+        }
+        model.stories.push(story);
+        let mut node = template.nodes[1].clone();
+        node.id = NodeId(id);
+        node.coord[2] = elevation;
+        node.story = Some(StoryId(id));
+        model.nodes.push(node);
+    }
+    let cfg = SeismicCfg::default();
+    assert_eq!(ground_elevation(&model), 0.0);
+    assert_eq!(building_height_mm(&model), 12000.0);
+    let dist = seismic_distribution_for_model(&model, cfg, 0.24).unwrap();
+    assert!((dist.qi[0] - 57_750.0).abs() < 1e-8);
+    assert!(
+        (build_seismic_load_case_from_model(&model, cfg, 0.24)
+            .unwrap()
+            .nodal
+            .iter()
+            .map(|l| l.values[0])
+            .sum::<f64>()
+            - 57_750.0)
+            .abs()
+            < 1e-8
+    );
+    for (offset, accepted) in [(0.0005, true), (0.002, false), (3000.0, false)] {
+        model.stories[1].level_kind = StoryLevelKind::Basement {
+            depth_mm: 6000.0 + offset,
+        };
+        assert_eq!(
+            seismic_distribution_for_model(&model, cfg, 0.24).is_ok(),
+            accepted
+        );
+    }
+    let error = build_seismic_load_case_from_model(&model, cfg, 0.18)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("GL"), "{error}");
+    for story in &mut model.stories {
+        story.elevation += 1e12;
+    }
+    model.stories[1].level_kind = StoryLevelKind::Basement { depth_mm: 6000.002 };
+    assert!(seismic_distribution_for_model(&model, cfg, 0.24)
+        .unwrap_err()
+        .to_string()
+        .contains("GL"));
+}

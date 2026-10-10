@@ -3947,3 +3947,68 @@ fn pushover_standard_basement_load_preserves_hand_resultant() {
     // 主系統14kN＋指定Ci副系統9kN＋地下10kN。
     assert!((result.capacity_curve.last().unwrap().base_shear - 33_000.0).abs() < 1e-6);
 }
+
+#[test]
+fn pushover_rejects_inconsistent_common_ground_from_basement_depths() {
+    let mut model = spring_column_model(1000.0, None, 100_000.0);
+    let node_template = model.nodes[1].clone();
+    let story_template = model.stories[1].clone();
+    let spring_template = model.elements[0].clone();
+    model.nodes.truncate(1);
+    model.stories.truncate(1);
+    model.elements.clear();
+    model.stories[0].elevation = -9000.0;
+    model.nodes[0].coord[2] = -9000.0;
+    for (i, elevation) in [-6000.0, -3000.0, 6000.0, 12000.0].into_iter().enumerate() {
+        let id = (i + 1) as u32;
+        let mut node = node_template.clone();
+        node.id = NodeId(id);
+        node.story = Some(StoryId(id));
+        node.coord[2] = -9000.0;
+        model.nodes.push(node);
+        let mut story = story_template.clone();
+        story.id = StoryId(id);
+        story.name = format!("floor{id}");
+        story.elevation = elevation;
+        story.node_ids = vec![NodeId(id)];
+        if i < 2 {
+            story.level_kind = sepika_core::model::StoryLevelKind::Basement {
+                depth_mm: -elevation,
+            };
+        }
+        model.stories.push(story);
+        let mut spring = spring_template.clone();
+        spring.id = ElemId(i as u32);
+        spring.nodes = smallvec::smallvec![NodeId(0), NodeId(id)];
+        model.elements.push(spring);
+    }
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = pushover_analysis(
+        &model,
+        &dofmap,
+        &reducer,
+        SeismicDir::X,
+        4,
+        0.0,
+        false,
+        false,
+        0.0,
+    )
+    .unwrap();
+    assert!((result.capacity_curve.last().unwrap().base_shear - 57_750.0).abs() < 1e-6);
+    model.stories[1].level_kind = sepika_core::model::StoryLevelKind::Basement { depth_mm: 9000.0 };
+    assert!(pushover_analysis(
+        &model,
+        &dofmap,
+        &reducer,
+        SeismicDir::X,
+        4,
+        0.0,
+        false,
+        false,
+        0.0
+    )
+    .unwrap_err()
+    .contains("GL"));
+}
