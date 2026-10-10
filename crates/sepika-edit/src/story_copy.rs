@@ -343,7 +343,10 @@ impl EditCommand for CopyStory {
             *model = before;
             return Box::new(Noop);
         }
-        Box::new(RestoreModel { old: before })
+        let changes = (before.sections.len()..model.sections.len())
+            .map(|index| IdChange::SectionInserted(SectionId(index as u32)))
+            .collect();
+        with_id_changes(Box::new(RestoreModel { old: before }), changes)
     }
 
     fn label(&self) -> &str {
@@ -359,7 +362,17 @@ pub struct RestoreModel {
 impl EditCommand for RestoreModel {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let replaced = std::mem::replace(model, self.old.clone());
-        Box::new(RestoreModel { old: replaced })
+        let changes = if model.sections.len() < replaced.sections.len() {
+            (model.sections.len()..replaced.sections.len())
+                .rev()
+                .map(|index| IdChange::SectionRemoved(SectionId(index as u32)))
+                .collect()
+        } else {
+            (replaced.sections.len()..model.sections.len())
+                .map(|index| IdChange::SectionInserted(SectionId(index as u32)))
+                .collect()
+        };
+        with_id_changes(Box::new(RestoreModel { old: replaced }), changes)
     }
 
     fn label(&self) -> &str {

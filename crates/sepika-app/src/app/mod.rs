@@ -2524,3 +2524,6 @@ fn member_material_groups(model: &sepika_core::model::Model) -> (Vec<ElemId>, Ve
 mod steel_wall_notice_tests;
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, feature = "gui"))]
+mod focus_id_remap_tests;

@@ -8547,3 +8547,149 @@ mod member_load_coordinate_contract {
         }
     }
 }
+
+#[test]
+fn id変更情報は受理した複合操作の順序だけを表す() {
+    let mut model = Model {
+        sections: (0..4).map(|id| bare_section(SectionId(id), None)).collect(),
+        ..Default::default()
+    };
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(CompositeCommand {
+            label: "複数断面削除".into(),
+            children: vec![
+                Box::new(DeleteSection { id: SectionId(2) }),
+                Box::new(Noop),
+                Box::new(CompositeCommand {
+                    label: "下位断面削除".into(),
+                    children: vec![
+                        Box::new(DeleteSection { id: SectionId(0) }),
+                        Box::new(DeleteSection { id: SectionId(99) }),
+                    ],
+                }),
+            ],
+        })
+    ));
+    assert_eq!(
+        undo.id_changes(),
+        &[
+            IdChange::SectionRemoved(SectionId(2)),
+            IdChange::SectionRemoved(SectionId(0)),
+        ]
+    );
+    assert_eq!(
+        model
+            .sections
+            .iter()
+            .map(|section| section.name.as_str())
+            .collect::<Vec<_>>(),
+        ["S1", "S3"]
+    );
+    undo.undo(&mut model);
+    assert_eq!(
+        undo.id_changes(),
+        &[
+            IdChange::SectionInserted(SectionId(0)),
+            IdChange::SectionInserted(SectionId(2)),
+        ]
+    );
+    undo.redo(&mut model);
+    assert_eq!(
+        undo.id_changes(),
+        &[
+            IdChange::SectionRemoved(SectionId(2)),
+            IdChange::SectionRemoved(SectionId(0)),
+        ]
+    );
+    assert!(!undo.run(
+        &mut model,
+        Box::new(CompositeCommand {
+            label: "全件変更なし".into(),
+            children: vec![
+                Box::new(Noop),
+                Box::new(DeleteSection { id: SectionId(99) })
+            ],
+        })
+    ));
+    assert!(undo.id_changes().is_empty());
+}
+
+#[test]
+fn 複合編集全体を拒否した場合はid変更も履歴も確定しない() {
+    struct Reject;
+    impl EditCommand for Reject {
+        fn apply(&self, _model: &mut Model) -> Box<dyn EditCommand> {
+            Box::new(RejectedEdit("拒否".into()))
+        }
+        fn label(&self) -> &str {
+            "拒否される編集"
+        }
+    }
+    let mut model = Model {
+        sections: (0..3).map(|id| bare_section(SectionId(id), None)).collect(),
+        ..Default::default()
+    };
+    let mut undo = UndoStack::new();
+    assert!(undo.run(&mut model, Box::new(DeleteSection { id: SectionId(2) })));
+    undo.undo(&mut model);
+    let revision = undo.revision();
+    assert!(!undo.run(
+        &mut model,
+        Box::new(CompositeCommand {
+            label: "拒否される複合操作".into(),
+            children: vec![
+                Box::new(DeleteSection { id: SectionId(0) }),
+                Box::new(Reject),
+            ],
+        })
+    ));
+    assert!(undo.id_changes().is_empty());
+    assert_eq!(undo.revision(), revision);
+    assert!(undo.can_redo());
+    assert_eq!(
+        model
+            .sections
+            .iter()
+            .map(|section| section.name.as_str())
+            .collect::<Vec<_>>(),
+        ["S0", "S1", "S2"]
+    );
+}
+
+#[test]
+fn 階コピーの断面復元は末尾の挿入削除情報を返す() {
+    let mut model = Model {
+        sections: (0..3).map(|id| bare_section(SectionId(id), None)).collect(),
+        ..Default::default()
+    };
+    let mut before = model.clone();
+    before.sections.truncate(1);
+    let mut undo = UndoStack::new();
+    assert!(undo.run(&mut model, Box::new(RestoreModel { old: before })));
+    assert_eq!(
+        undo.id_changes(),
+        &[
+            IdChange::SectionRemoved(SectionId(2)),
+            IdChange::SectionRemoved(SectionId(1)),
+        ]
+    );
+    undo.undo(&mut model);
+    assert_eq!(
+        undo.id_changes(),
+        &[
+            IdChange::SectionInserted(SectionId(1)),
+            IdChange::SectionInserted(SectionId(2)),
+        ]
+    );
+    undo.redo(&mut model);
+    assert_eq!(model.sections.len(), 1);
+    assert_eq!(
+        undo.id_changes(),
+        &[
+            IdChange::SectionRemoved(SectionId(2)),
+            IdChange::SectionRemoved(SectionId(1)),
+        ]
+    );
+}

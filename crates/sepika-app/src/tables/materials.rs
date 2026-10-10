@@ -402,25 +402,26 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
         );
         edited = true;
     }
-    if let Some(id) = pending_delete {
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(DeleteMaterial {
-                id: sepika_core::ids::MaterialId(id),
-            }),
-        );
-        if app.ui.scoped.nav.focus_material == Some(sepika_core::ids::MaterialId(id)) {
-            app.ui.scoped.nav.focus_material = None;
-        }
-        edited = true;
-    }
-    if let Some(mid) = pending_focus {
-        app.ui.scoped.nav.focus_material = Some(mid);
-    }
+    apply_pending_actions(app, pending_focus, pending_delete);
     if edited {
         app.core.scoped.staleness.mark_edited();
     }
 }
+pub(crate) fn apply_pending_actions(
+    app: &mut App,
+    pending_focus: Option<sepika_core::ids::MaterialId>,
+    pending_delete: Option<u32>,
+) {
+    if let Some(mid) = pending_focus {
+        app.ui.scoped.nav.focus_material = Some(mid);
+    }
+    if let Some(id) = pending_delete {
+        app.apply_model_edit(Box::new(DeleteMaterial {
+            id: sepika_core::ids::MaterialId(id),
+        }));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -47,6 +47,14 @@ impl EditCommand for CompositeCommand {
         })
     }
 
+    fn inverse_id_changes(&self) -> Vec<IdChange> {
+        self.children
+            .iter()
+            .rev()
+            .flat_map(|child| child.inverse_id_changes())
+            .collect()
+    }
+
     fn label(&self) -> &str {
         &self.label
     }

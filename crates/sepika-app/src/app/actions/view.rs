@@ -11,6 +11,7 @@ impl App {
     pub(crate) fn undo_action(&mut self) {
         if self.core.scoped.undo.can_undo() {
             self.core.scoped.undo.undo(&mut self.core.model);
+            self.remap_model_focus();
             self.clear_geometry_selection();
             self.ui.scoped.boundary_node = None;
             self.core.scoped.staleness.mark_edited();
@@ -20,9 +21,51 @@ impl App {
     pub(crate) fn redo_action(&mut self) {
         if self.core.scoped.undo.can_redo() {
             self.core.scoped.undo.redo(&mut self.core.model);
+            self.remap_model_focus();
             self.clear_geometry_selection();
             self.ui.scoped.boundary_node = None;
             self.core.scoped.staleness.mark_edited();
+        }
+    }
+
+    pub(crate) fn remap_model_focus(&mut self) {
+        for change in self.core.scoped.undo.id_changes() {
+            match *change {
+                sepika_edit::IdChange::MaterialRemoved(id) => {
+                    self.ui.scoped.nav.focus_material = self
+                        .ui
+                        .scoped
+                        .nav
+                        .focus_material
+                        .filter(|focus| *focus != id)
+                        .map(|focus| MaterialId(focus.0 - u32::from(focus.0 > id.0)));
+                }
+                sepika_edit::IdChange::MaterialInserted(id) => {
+                    self.ui.scoped.nav.focus_material = self
+                        .ui
+                        .scoped
+                        .nav
+                        .focus_material
+                        .map(|focus| MaterialId(focus.0 + u32::from(focus.0 >= id.0)));
+                }
+                sepika_edit::IdChange::SectionRemoved(id) => {
+                    self.ui.scoped.nav.focus_section = self
+                        .ui
+                        .scoped
+                        .nav
+                        .focus_section
+                        .filter(|focus| *focus != id)
+                        .map(|focus| SectionId(focus.0 - u32::from(focus.0 > id.0)));
+                }
+                sepika_edit::IdChange::SectionInserted(id) => {
+                    self.ui.scoped.nav.focus_section = self
+                        .ui
+                        .scoped
+                        .nav
+                        .focus_section
+                        .map(|focus| SectionId(focus.0 + u32::from(focus.0 >= id.0)));
+                }
+            }
         }
     }
 
