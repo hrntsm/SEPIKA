@@ -801,3 +801,101 @@ fn native_wall_without_physical_plate_is_explicitly_unavailable_for_weight() {
     )
     .is_err());
 }
+
+#[test]
+fn enclosed_partial_beam_spans_and_midspan_posts_support_all_dl_modes() {
+    use sepika_load::floor::{LoadShape, LoadTarget};
+    for (mode, lower, upper) in [
+        (WallDlSupport::LowerBeam, 48000.0, 0.0),
+        (WallDlSupport::UpperBeam, 0.0, 48000.0),
+        (WallDlSupport::HeightMidpoint, 28800.0, 19200.0),
+    ] {
+        let mut model = fixture(6000.0);
+        // 6m梁の両端に節点、内側の4m壁の左右は梁中間に取付く間柱。
+        // 壁の下端3000/上端6000。四隅にはモデル節点を作らない。
+        for (id, x) in [(0, -1000.0), (1, 5000.0), (2, 5000.0), (3, -1000.0)] {
+            model.nodes[id].coord[0] = x;
+        }
+        model.nodes[6].coord[0] = -1000.0;
+        model.wall_regions[0].wall_plate_ids.clear();
+        for (id, lower_t, upper_t) in [(0, 1.0 / 6.0, 5.0 / 6.0), (1, 5.0 / 6.0, 1.0 / 6.0)] {
+            model.unassigned_posts.push(SecondaryMember {
+                id: SecondaryMemberId(id),
+                kind: SecondaryMemberKind::Post,
+                ends: SecondaryMemberEnds::Supported([
+                    SecondaryMemberAnchor {
+                        support: SupportMemberId::Primary(ElemId(0)),
+                        position: lower_t,
+                    },
+                    SecondaryMemberAnchor {
+                        support: SupportMemberId::Primary(ElemId(2)),
+                        position: upper_t,
+                    },
+                ]),
+                section: Some(SectionId(1)),
+                name: "梁中間の間柱".into(),
+                gravity_end_shares: Some([1.0, 0.0]),
+            });
+        }
+        let boundary = &mut model.wall_assignment_regions.regions[0].boundary;
+        boundary[0].span = [1.0 / 6.0, 5.0 / 6.0];
+        boundary[1].support = SupportMemberId::Secondary(SecondaryMemberId(1));
+        boundary[2].span = [1.0 / 6.0, 5.0 / 6.0];
+        boundary[3].support = SupportMemberId::Secondary(SecondaryMemberId(0));
+        model.wall_plates[0].dl_support = Some(mode);
+        model.wall_plates[0].openings = vec![opening(1000.0, 2000.0)];
+        let p = &model.wall_plates[0];
+        assert!(p.boundary_nodes(&model).is_none());
+        let w = model.wall_weight(p).unwrap();
+        close(w.totals.design_n, 48000.0);
+        close(w.totals.physical_n, 48000.0);
+        close(w.totals.matrix_n, 0.0);
+        bands(&model, &[0.0, 28800.0, 19200.0, 0.0]);
+        let dl = sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model);
+        let mut actual = [0.0, 0.0];
+        for load in &dl.primary {
+            let LoadTarget::Span { t, .. } = load.target else {
+                panic!("支持梁の部分区間")
+            };
+            close(t[0], 1.0 / 6.0);
+            close(t[1], 5.0 / 6.0);
+            let LoadShape::Uniform { w } = load.shape else {
+                panic!("梁区間DL")
+            };
+            actual[if load.elem == ElemId(0) {
+                0
+            } else {
+                assert_eq!(load.elem, ElemId(2));
+                1
+            }] += w * 4000.0;
+        }
+        close(actual[0], lower);
+        close(actual[1], upper);
+        assert!(dl.posts.is_empty());
+        let auto = compute_gravity_auto_load_cases(&model).unwrap();
+        apply_auto_load_cases(&mut model, &auto.cases);
+        let dl_id = model
+            .load_cases
+            .iter()
+            .find(|c| c.kind == LoadCaseKind::Dead)
+            .unwrap()
+            .id;
+        let synced =
+            generate_stories_with_synced_self_weight(&model, &[dl_id], MassMethod::LumpedOnly)
+                .unwrap();
+        close(synced.stories[1].seismic_weight.unwrap(), 28800.0);
+        close(synced.stories[2].seismic_weight.unwrap(), 19200.0);
+        // 指定スリットが境界へ解決できない場合は切れていないと推定しない。
+        model.wall_plates[0].slit.column_face[0] = true;
+        assert!(
+            sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0])
+                .unwrap_err()
+                .contains("スリット対応")
+        );
+        let error = match compute_gravity_auto_load_cases(&model) {
+            Err(error) => error,
+            Ok(_) => panic!("対応が未解決のスリットを拒否する"),
+        };
+        assert!(error.to_string().contains("壁版 0"));
+    }
+}

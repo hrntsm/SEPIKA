@@ -271,8 +271,13 @@ pub fn dl_ratios(model: &Model, plate: &WallPlate) -> Result<Vec<f64>, String> {
             }
         }
     }
-    let flags = resolved_slit_edge_flags(model, plate, ratios.len())
-        .ok_or_else(|| err("支持辺のスリット対応が未解決です"))?;
+    let flags = if plate.slit.any() {
+        resolved_slit_edge_flags(model, plate, ratios.len())
+            .ok_or_else(|| err("支持辺のスリット対応が未解決です"))?
+    } else {
+        // 縁切り指定がない実支持区間には、境界頂点の節点対応は不要。
+        vec![false; ratios.len()]
+    };
     if ratios.iter().zip(flags).any(|(r, s)| *r > 0.0 && s) {
         return Err(err("選択したDL支持梁がスリットで切れています"));
     }
