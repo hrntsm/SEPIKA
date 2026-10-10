@@ -13,3 +13,5 @@ sepika-design-jp = { path = "../sepika-design-jp" }
 sepika-math = { path = "../sepika-math" }
 serde = { workspace = true }
 thiserror = { workspace = true }
+
+bincode = { workspace = true }

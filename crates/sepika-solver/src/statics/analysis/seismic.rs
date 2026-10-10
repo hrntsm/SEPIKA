@@ -400,9 +400,9 @@ pub fn seismic_distribution_for_model(
         let weight = l.weight.ok_or_else(|| {
             SolveError::InvalidInput(format!("{} の地震用重量が未設定です。", l.name))
         })?;
-        if !weight.is_finite() || weight < 0.0 {
+        if !weight.is_finite() || weight <= 0.0 {
             return Err(SolveError::InvalidInput(format!(
-                "{} の地震用重量は有限の非負値が必要です。",
+                "{} の地震用重量は有限の正数が必要です（部分的な 0 重量も使用できません）。",
                 l.name
             )));
         }
@@ -434,6 +434,28 @@ pub fn seismic_distribution_for_model(
         }
         previous_rank = rank;
         let story = &model.stories[l.top.index()];
+        let diaphragms: Vec<_> = model.diaphragms_of(story.id).collect();
+        if diaphragms.len() > 1 {
+            let mut total = 0.0;
+            for diaphragm in &diaphragms {
+                let diaphragm_weight = diaphragm
+                    .weight
+                    .filter(|w| w.is_finite() && *w > 0.0)
+                    .ok_or_else(|| {
+                        SolveError::InvalidInput(format!(
+                            "{} の複数剛床には各剛床の有限の正の重量が必要です。",
+                            l.name
+                        ))
+                    })?;
+                total += diaphragm_weight;
+            }
+            if !total.is_finite() || (total - weight).abs() > 1e-9 * weight.abs().max(1.0) {
+                return Err(SolveError::InvalidInput(format!(
+                    "{} の剛床重量合計と採用した階重量が一致しません。",
+                    l.name
+                )));
+            }
+        }
         let mut override_weight = 0.0;
         for d in model.diaphragms_of(story.id) {
             if d.weight.is_some_and(|w| !w.is_finite() || w < 0.0)

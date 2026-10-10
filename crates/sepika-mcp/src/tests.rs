@@ -2321,7 +2321,7 @@ fn stb_strength_src_steel_assignment_adopts_material_and_restores_input() {
 }
 
 #[test]
-fn mcp_eigen_entry_rejects_unknown_or_stale_wall_band_and_accepts_regeneration() {
+fn mcp_eigen_rejects_unknown_wall_band_and_refreshes_valid_edits_before_solving() {
     use sepika_core::model::*;
     let mut model = sample_model();
     let mut column = sepika_core::section_shape::SectionShape::SteelH {
@@ -2422,18 +2422,41 @@ fn mcp_eigen_entry_rejects_unknown_or_stale_wall_band_and_accepts_regeneration()
         panic!("regenerated eigen: {error}");
     }
     model.wall_plates[0].openings[0].offset = Some([1000.0, 0.0]);
-    let error = match crate::job::compute_job(&model, crate::JobKind::Eigen, &params) {
-        Err(error) => error.to_string(),
-        Ok(_) => panic!("wall generation must be rejected"),
-    };
+    let error = sepika_job::compute::compute_eigen(model.clone(), 1)
+        .unwrap_err()
+        .to_string();
     assert!(
         error.contains("壁版 0") && error.contains("再生成"),
         "{error}"
     );
-    apply(&mut model);
-    if let Err(error) = crate::job::compute_job(&model, crate::JobKind::Eigen, &params) {
-        panic!("regenerated eigen: {error}");
-    }
+    let (prepared, _) = crate::job::model_prepared_for_analysis(&model, &params).unwrap();
+    prepared.validate_wall_weight_generation().unwrap();
+    assert!(sepika_job::weight_preparation::weights_are_current(
+        &prepared,
+        prepared.mass_method
+    ));
+    assert_ne!(
+        prepared.stories[0].wall_weights,
+        model.stories[0].wall_weights
+    );
+    let wall_total: f64 = prepared
+        .stories
+        .iter()
+        .flat_map(|s| &s.wall_weights)
+        .map(|w| w.band.design_n)
+        .sum();
+    assert!((wall_total - 11500.0).abs() < 1e-8);
+    crate::job::compute_job(&model, crate::JobKind::Eigen, &params).unwrap();
+    model = prepared;
+    model.wall_plates[0].openings[0].offset = Some([f64::NAN, 0.0]);
+    let error = match crate::job::compute_job(&model, crate::JobKind::Eigen, &params) {
+        Err(error) => error.to_string(),
+        Ok(_) => panic!("invalid opening must be rejected"),
+    };
+    assert!(
+        error.contains("壁版") && error.contains("開口位置"),
+        "{error}"
+    );
 }
 
 fn load_state_contract_model() -> Model {

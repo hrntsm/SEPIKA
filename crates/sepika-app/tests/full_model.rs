@@ -2719,17 +2719,43 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
                 elevation,
             })
         ));
-        app.core.model.stories[i].structure = if i == 3 {
-            sepika_core::model::StoryStructure::S
-        } else {
-            sepika_core::model::StoryStructure::Rc
-        };
-        for node in &mut app.core.model.nodes {
-            if node.story == Some(sepika_core::ids::StoryId(i as u32)) {
-                node.coord[2] = elevation;
-            }
+        for node in app.core.model.stories[i].node_ids.clone() {
+            app.core.model.nodes[node.index()].coord[2] = elevation;
         }
     }
+    // 上層をRCにする入力は材料・断面で与える。Story.structureは重量準備の算定値。
+    let rc = prepared_rectangular_rc_portal().core.model;
+    let material_offset = app.core.model.materials.len() as u32;
+    for mut material in rc.materials {
+        material.id = sepika_core::ids::MaterialId(material.id.0 + material_offset);
+        app.core.model.materials.push(material);
+    }
+    let section_offset = app.core.model.sections.len() as u32;
+    for mut section in rc.sections.into_iter().take(2) {
+        section.id = sepika_core::ids::SectionId(section.id.0 + section_offset);
+        section.material = section
+            .material
+            .map(|id| sepika_core::ids::MaterialId(id.0 + material_offset));
+        section.rebar_material = section
+            .rebar_material
+            .map(|id| sepika_core::ids::MaterialId(id.0 + material_offset));
+        section.shear_rebar_material = section
+            .shear_rebar_material
+            .map(|id| sepika_core::ids::MaterialId(id.0 + material_offset));
+        app.core.model.sections.push(section);
+    }
+    for element in &mut app.core.model.elements {
+        if (9..=11).contains(&element.id.0) {
+            element.section = Some(sepika_core::ids::SectionId(
+                section_offset + u32::from(element.id.0 == 11),
+            ));
+        }
+    }
+
+    app.core.model.set_member_rc_beam_reference(
+        sepika_core::ids::ElemId(11),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+    );
     app.run_seismic(sepika_solver::statics::analysis::SeismicDir::X);
     assert_no_error(&app, "GL跨ぎ混合構造の地震静的");
     let ex = app
@@ -2749,6 +2775,33 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
             .abs()
             < 1e-7
     );
+    let ex_result = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .seismic(sepika_solver::statics::analysis::SeismicDir::X)
+        .unwrap();
+    let beam = &ex_result
+        .member_forces
+        .iter()
+        .find(|(id, _)| id.0 == 11)
+        .unwrap()
+        .1;
+    let fi = beam.at.first().unwrap().1;
+    let fj = beam.at.last().unwrap().1;
+    for component in [4, 5] {
+        let scale = fi[component].abs().max(fj[component].abs()).max(1.0);
+        assert!((fi[component] + fj[component]).abs() < 1e-8 * scale);
+    }
+    for (_, force) in &beam.at {
+        for component in [1, 2] {
+            assert!((force[component] - fi[component]).abs() < 1e-8 * fi[component].abs().max(1.0));
+        }
+    }
+    // GLと周期の照合は純水平載荷。中間部材荷重を持つ長期載荷へRC基準を代用しない。
+    app.core.analysis_cfg.push_apply_long_term = false;
     app.run_pushover();
     assert_no_error(&app, "GL跨ぎ混合構造の増分解析");
     select_holding_points(&mut app);

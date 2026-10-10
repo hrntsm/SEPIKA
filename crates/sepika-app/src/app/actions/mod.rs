@@ -258,109 +258,12 @@ impl App {
         self.report_info(format!("⏳ {label} を開始"));
     }
 
-    /// 階(Story)を節点標高から自動生成して適用する（undo 可能）。準備計算
-    /// （[`Self::run_preparation`]）の一工程であり、単独の UI 操作ではない。
-    ///
-    /// 地震重量には kind=Dead/LiveSeismic（なければ Dead+Live、種別未設定なら
-    /// 先頭ケース）の荷重ケースの鉛直下向き荷重を用いる。
-    /// 先立ってスラブ荷重・躯体自重を「DL」等の標準ケースへ同期する
-    /// ため、面荷重・自重も地震用重量に反映される
-    /// （`density_self_weight_for_stories`）。DL がないモデルでは密度から自重を
-    /// 直接算入し、DL があるモデルでは同期済みの設計自重を物理質量へ置換する
-    /// （`generate_stories_with_synced_self_weight`）。主要構造種別は各階の柱・梁の
-    /// 断面形状から自動判定される（`story_gen`）。
-    ///
-    /// 階そのもの（階名・階レベル・階種別・地震用重量の手入力）は利用者が定義する
-    /// データであり、再生成では書き換えない（`story_gen` が既存の階定義から
-    /// そのまま引き継ぐ）。ここで更新されるのは所属節点・剛床・算定重量である。
-    ///
-    /// 階の適用後、地震荷重を「EX」「EY」ケースへ同期する
-    /// （Ai 分布の水平力。これで荷重組合せ G+P±K が実行可能になる）。
-    ///
-    /// 生成結果が現在のモデルと一致する場合は `ApplyStories` を発行しない
-    /// （冪等。準備計算は実行のたびに階を作り直すため、モデルが変わっていないのに
-    /// undo 履歴を積んだり `mark_edited` で解析結果を stale にしたりしないようにする。
-    /// `sync_one_auto_case` と同じ規約）。
+    /// 未定義の階を初期化し、重量と自動荷重を Undo 可能な一括更新として採用する。
+    /// 階名・床レベル・種別・手入力重量は保持し、無変更時は再生成しない。
     pub fn generate_stories_action(&mut self) {
         self.core.scoped.last_error = None;
         self.core.scoped.last_notice = None;
-        // 柱フェース距離（`RigidZone::face_i/face_j`）の算定は自重の同期より先に
-        // 行う。RC/SRC 梁の自重は柱面間の内法長で算定するため
-        // （`sepika_load::story_gen::self_weight_calc`）、face が未算定（0）の
-        // まま同期すると節点間距離で算定した過大な自重が DL に入る。以前は同期の
-        // 後に算定していたため、1 回目の準備計算だけ DL が過大になり、2 回目の
-        // 実行で初めて正しい値へ変わっていた（＝準備計算が冪等でなかった）。
-        //
-        // face は接合関係と断面せいから決まる幾何量で、剛域長 `length_i/j` の
-        // Manual/Auto とは独立に常に再算定される（`recompute_auto_zones`）。
-        // ここで呼ぶ `apply_auto_rigid_zones` が剛域長と同時に face も算定する
-        // ため、名前に反して自重の前提でもある。算定は部材の幾何と断面のみに
-        // 依存し階の生成結果には依存しないため、先に呼んで差し支えない。
-        self.apply_rigid_zones_for_analysis();
-        self.sync_gravity_load_cases_action();
-        if self.core.scoped.last_error.is_some() {
-            return;
-        }
-        let gravity_lcs = gravity_cases_for_seismic_weight(&self.core.model);
-        let include_density = density_self_weight_for_stories(&self.core.model);
-        let mass_method = self.core.analysis_cfg.mass_method;
-        let result = if include_density {
-            // DL が無いモデル: 密度から自重を直接算入する。
-            sepika_load::story_gen::generate_stories_with_opts(
-                &self.core.model,
-                &gravity_lcs,
-                true,
-                mass_method,
-            )
-        } else {
-            // DL があるモデル: 直前に `sync_gravity_load_cases_action` で DL へ
-            // 自重を自動同期済み。DL の設計自重を物理質量へ置換する。
-            sepika_load::story_gen::generate_stories_with_synced_self_weight(
-                &self.core.model,
-                &gravity_lcs,
-                mass_method,
-            )
-        };
-        match result {
-            Ok(gen) => {
-                if !story_gen_changes_model(&self.core.model, &gen, mass_method) {
-                    // 階は既に最新。荷重の同期だけ冪等に確認して終える。
-                    self.apply_rigid_zones_for_analysis();
-                    self.sync_seismic_load_cases_action();
-                    if self.core.scoped.last_error.is_some() {
-                        return;
-                    }
-                    self.core.scoped.auto_load_sync_hash = Some(self.compute_auto_load_sync_hash());
-                    return;
-                }
-                self.core.scoped.undo.run(
-                    &mut self.core.model,
-                    Box::new(sepika_edit::ApplyStories {
-                        wall_weight_generation: gen.wall_weight_generation,
-                        damper_mass_generation: gen.damper_mass_generation,
-                        stories: gen.stories,
-                        node_story: gen.node_story,
-                        constraints: gen.constraints,
-                        rep_nodes: gen.rep_nodes,
-                        generated_masters: gen.generated_masters,
-                        mass_method,
-                    }),
-                );
-                self.core.scoped.staleness.mark_edited();
-                // 剛域の反映は地震荷重の同期より先に行う（SemiPrecise の固有周期算定が
-                // 剛域込みの剛性を用いるようにするため）。
-                self.apply_rigid_zones_for_analysis();
-                self.sync_seismic_load_cases_action();
-                if self.core.scoped.last_error.is_some() {
-                    return;
-                }
-                // 直後に run_linear_static 等（`sync_auto_load_cases_action`）が
-                // 呼ばれても、いま行った DL/LL/EX/EY の同期を無駄に繰り返さない
-                // よう、同期後の状態のハッシュを記録しておく。
-                self.core.scoped.auto_load_sync_hash = Some(self.compute_auto_load_sync_hash());
-            }
-            Err(e) => self.report_error(format!("階の生成エラー: {}", e)),
-        }
+        self.sync_prepared_model(true);
     }
 
     /// 荷重ケースから標準組合せを生成し、undo 可能に一括追加する

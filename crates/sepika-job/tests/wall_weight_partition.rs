@@ -1193,3 +1193,40 @@ fn nonrectangular_slits_require_every_specified_role_but_preserve_resolved_beams
         vec![0.0; 4]
     );
 }
+
+#[test]
+fn wall_generation_outputs_are_excluded_from_input_key_and_tampering_is_refreshed() {
+    use sepika_job::weight_preparation::{
+        apply_generated_weights, weight_input_key, weights_are_current,
+    };
+    let mut model = fixture(6000.0);
+    let method = MassMethod::CorrectedLumped;
+    let generated = generate_stories_with_opts(&model, &[], true, method).unwrap();
+    apply_generated_weights(&mut model, generated, method);
+    close(
+        model
+            .stories
+            .iter()
+            .flat_map(|s| &s.wall_weights)
+            .map(|w| w.band.design_n)
+            .sum(),
+        57600.0,
+    );
+    let input = weight_input_key(&model, method);
+    assert!(weights_are_current(&model, method));
+    model.wall_weight_generation = Some(WallWeightGenerationMode::GravityCasesOnly);
+    for story in &mut model.stories {
+        story.wall_weights.clear();
+    }
+    assert_eq!(weight_input_key(&model, method), input);
+    assert!(!weights_are_current(&model, method));
+    let generated = generate_stories_with_opts(&model, &[], true, method).unwrap();
+    apply_generated_weights(&mut model, generated, method);
+    assert_eq!(weight_input_key(&model, method), input);
+    assert!(weights_are_current(&model, method));
+    model.validate_wall_weight_generation().unwrap();
+    let record = model.seismic_weight_generation.clone();
+    let generated = generate_stories_with_opts(&model, &[], true, method).unwrap();
+    apply_generated_weights(&mut model, generated, method);
+    assert_eq!(model.seismic_weight_generation, record);
+}

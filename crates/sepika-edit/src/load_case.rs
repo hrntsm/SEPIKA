@@ -578,3 +578,19 @@ impl EditCommand for InsertSlab {
 fn shift_slab_ids(model: &mut Model, f: impl FnMut(&mut SlabId)) {
     model.visit_slab_ids(f);
 }
+
+/// 準備計算の確定済み作業コピーを、重量・質量・荷重とともに一括採用する。
+pub struct ApplyPreparedModel {
+    pub prepared: Model,
+}
+
+impl EditCommand for ApplyPreparedModel {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let previous = std::mem::replace(model, self.prepared.clone());
+        Box::new(Self { prepared: previous })
+    }
+
+    fn label(&self) -> &str {
+        "準備計算の採用"
+    }
+}

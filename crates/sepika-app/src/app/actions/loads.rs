@@ -42,7 +42,7 @@ impl App {
     /// 対応するケースがなく内容も空の場合は空ケースを作らない。
     ///
     /// DL に自重を含めるため、階の自動生成（地震用重量）では密度からの自重直接
-    /// 算入を無効にして二重計上を防ぐ（`density_self_weight_for_stories`）。
+    /// 算入を無効にして二重計上を防ぐ。
     ///
     /// 解析実行系（`sync_auto_load_cases_action` 経由）・`generate_stories_action`
     /// の入口で毎回呼ぶことを想定した冪等な同期アクション。
@@ -77,140 +77,153 @@ impl App {
     /// SemiPrecise で固有値解析が未実行の場合は `last_notice` に案内する。
     /// 冪等な同期アクション（`sync_gravity_load_cases_action` と同じ規約）。
     pub fn sync_seismic_load_cases_action(&mut self) {
-        let design_period = match self.core.analysis_cfg.ai_mode {
-            AiMode::SemiPrecise => match self.design_seismic_period() {
-                Ok(t) => Some(t),
-                Err(msg) => {
-                    self.report_notice(msg);
-                    let mut result = sepika_job::auto_loads::AutoLoadComputeResult {
-                        cases: Vec::new(),
-                        notices: Vec::new(),
-                    };
-                    sepika_job::auto_loads::clear_failed_tip_seismic_cases(
-                        &self.core.model,
-                        &mut result,
-                    );
-                    self.apply_failed_seismic_cases(&result);
-                    for case in result.cases {
-                        self.sync_one_auto_case(case.name, case.kind, case.nodal, case.member);
-                    }
-                    self.sync_tip_load_cases_action();
-                    return;
-                }
-            },
-            AiMode::Approx => None,
-        };
-        let mut result = sepika_job::auto_loads::compute_seismic_auto_load_cases(
-            &self.core.model,
-            &self.core.analysis_cfg,
-            design_period,
-        );
-        sepika_job::auto_loads::clear_failed_tip_seismic_cases(&self.core.model, &mut result);
-        self.apply_failed_seismic_cases(&result);
-        for notice in result.notices {
-            self.report_notice(notice);
-        }
-        for case in result.cases {
-            self.sync_one_auto_case(case.name, case.kind, case.nodal, case.member);
-        }
-        self.sync_tip_load_cases_action();
+        self.sync_prepared_model(false);
     }
 
-    /// `sync_auto_load_cases_action` が同期の要否判定に使うハッシュを計算する。
-    ///
-    /// 荷重同期（DL/LL/EX/EY）の結果に影響し得る入力をすべて含める:
-    /// モデル本体（`bincode` でシリアライズしてハッシュ）、地震荷重の
-    /// Ai算定法（`ai_mode`）・地域係数 Z・地盤種別・標準せん断力係数 C0、
-    /// および SemiPrecise 時は `design_seismic_period` の値（算定できた場合のみ。
-    /// `to_bits()` でビット列化してハッシュ。固有値解析が未実行で `Err` の場合は
-    /// 含めない＝モデル・設定が同じなら「未実行」状態も同一ハッシュに畳み込む）。
+    /// 入力・生成出力・地震設定の変更を検出する。表示名は重量入力から除く。
     pub(crate) fn compute_auto_load_sync_hash(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        if let Ok(bytes) = bincode::serialize(&self.core.model) {
-            bytes.hash(&mut hasher);
-        }
+        sepika_job::weight_preparation::weight_input_key(
+            &self.core.model,
+            self.core.analysis_cfg.mass_method,
+        )
+        .hash(&mut hasher);
+        sepika_job::weight_preparation::weight_output_key(&self.core.model).hash(&mut hasher);
+        sepika_job::weight_preparation::weights_are_current(
+            &self.core.model,
+            self.core.analysis_cfg.mass_method,
+        )
+        .hash(&mut hasher);
+        let generated_cases: Vec<_> = self
+            .core
+            .model
+            .load_cases
+            .iter()
+            .map(|case| {
+                (
+                    case.id,
+                    &case.name,
+                    case.kind,
+                    case.nodal
+                        .iter()
+                        .filter(|load| load.source != sepika_core::model::LoadSource::Manual)
+                        .collect::<Vec<_>>(),
+                    case.member
+                        .iter()
+                        .filter(|load| load.source != sepika_core::model::LoadSource::Manual)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        bincode::serialize(&generated_cases)
+            .expect("生成荷重の直列化")
+            .hash(&mut hasher);
         std::mem::discriminant(&self.core.analysis_cfg.ai_mode).hash(&mut hasher);
         self.core.analysis_cfg.z.to_bits().hash(&mut hasher);
         (self.core.analysis_cfg.soil as u8).hash(&mut hasher);
         self.core.analysis_cfg.c0.to_bits().hash(&mut hasher);
         if matches!(self.core.analysis_cfg.ai_mode, AiMode::SemiPrecise) {
-            if let Ok(t) = self.design_seismic_period() {
-                t.to_bits().hash(&mut hasher);
-            }
+            self.design_seismic_period()
+                .ok()
+                .map(f64::to_bits)
+                .hash(&mut hasher);
         }
         hasher.finish()
     }
 
-    /// 剛域の反映と、自重・積載・地震荷重の自動同期
-    /// （`sync_gravity_load_cases_action`・`sync_seismic_load_cases_action`）を
-    /// まとめて行う、準備計算
-    /// （`ensure_preparation`・`run_preparation`）のモデル更新部分。
-    ///
-    /// モデルが交差小梁スラブを含む場合、床荷重分配（DL・LL(架構用)・
-    /// LL(地震用)の3系統×床格子サブFEM解析）は重い処理になり得るため、
-    /// 前回の同期時からモデル・関連設定（`compute_auto_load_sync_hash`）が
-    /// 一切変わっていなければ丸ごとスキップする。
-    ///
-    /// 手順:
-    /// 1. `apply_rigid_zones_for_analysis`（冪等・軽量なので常に実行。
-    ///    剛域の反映は地震荷重の同期より先に行う。SemiPrecise の固有周期算定が
-    ///    剛域込みの剛性を用いるようにするため）。
-    /// 2. 現在のハッシュを計算し、前回保存したハッシュと一致すればスキップ。
-    /// 3. 不一致なら `sync_gravity_load_cases_action` →
-    ///    `sync_seismic_load_cases_action` の順で実行する。
-    /// 4. 同期後（荷重ケースの内容が書き換わった後）のモデルで再度ハッシュを
-    ///    計算して保存する（同期前のハッシュを保存すると、次回呼び出しで
-    ///    「同期していないのに一致」と誤判定するため、必ず同期後の状態で保存する）。
+    /// 現在入力から重量と自動荷重を一括同期する。無変更時は Undo を追加しない。
     pub fn sync_auto_load_cases_action(&mut self) {
+        self.sync_prepared_model(false);
+    }
+
+    pub(super) fn sync_prepared_model(&mut self, initialize_stories: bool) {
         #[cfg(feature = "gui")]
         self.clear_generated_member_selection();
-        self.core.model.rebuild_floor_assignment_regions();
-        self.core.model.rebuild_wall_assignment_regions();
-        sepika_core::region_rebuild::rebuild_floor_regions(&mut self.core.model);
-        self.rebuild_wall_regions_for_preparation();
-        self.apply_rigid_zones_for_analysis();
         let current = self.compute_auto_load_sync_hash();
-        if self.core.scoped.auto_load_sync_hash == Some(current) {
+        if self.core.scoped.auto_load_sync_hash == Some(current)
+            && (!initialize_stories || !self.core.model.stories.is_empty())
+        {
             return;
         }
-        let design_period = if matches!(self.core.analysis_cfg.ai_mode, AiMode::SemiPrecise) {
-            self.design_seismic_period().ok()
+        let period = if matches!(self.core.analysis_cfg.ai_mode, AiMode::SemiPrecise) {
+            match self.design_seismic_period() {
+                Ok(period) => Some(period),
+                Err(error) => {
+                    self.report_notice(error);
+                    None
+                }
+            }
         } else {
             None
         };
-        let mut seismic = sepika_job::auto_loads::compute_seismic_auto_load_cases(
-            &self.core.model,
+        let mut prepared = self.core.model.clone();
+        let result = sepika_job::prepare::prepare_model(
+            &mut prepared,
             &self.core.analysis_cfg,
-            design_period,
+            period,
+            initialize_stories,
         );
-        sepika_job::auto_loads::clear_failed_tip_seismic_cases(&self.core.model, &mut seismic);
-        self.apply_failed_seismic_cases(&seismic);
-        let gravity =
-            match sepika_job::auto_loads::compute_gravity_auto_load_cases(&self.core.model) {
-                Ok(result) => result,
-                Err(error) => {
-                    self.report_error(error.to_string());
-                    return;
-                }
-            };
-        let tip_cases = match sepika_job::auto_loads::compute_tip_loads(&self.core.model) {
-            Ok(cases) => cases,
-            Err(error) => {
-                self.report_error(error.to_string());
+        #[cfg(feature = "gui")]
+        if result.as_ref().is_ok_and(|report| report.nodes_renumbered) {
+            self.handle_prepared_node_renumbering(true);
+        }
+        let failed: Vec<_> = prepared
+            .load_cases
+            .iter()
+            .filter(|case| {
+                case.kind == sepika_core::model::LoadCaseKind::Seismic
+                    && matches!(case.name.as_str(), EX_CASE_NAME | EY_CASE_NAME)
+                    && sepika_job::compute::missing_seismic_horizontal_load(case)
+            })
+            .map(|case| case.id)
+            .collect();
+        if !self.core.model.eq_ignoring_dofmap(&prepared) {
+            if !self.core.scoped.undo.run(
+                &mut self.core.model,
+                Box::new(sepika_edit::ApplyPreparedModel { prepared }),
+            ) {
+                sepika_job::prepare::clear_standard_seismic_auto(&mut self.core.model);
+                self.invalidate_missing_tip_seismic(&failed);
+                self.report_error(format!(
+                    "準備結果を採用できません: {}",
+                    self.core.scoped.undo.last_error().unwrap_or("入力の不整合")
+                ));
                 return;
             }
-        };
-        for notice in seismic.notices {
-            self.report_notice(notice);
+            self.core.scoped.staleness.mark_edited();
         }
-        for case in gravity.cases.into_iter().chain(seismic.cases) {
-            self.sync_one_auto_case(case.name, case.kind, case.nodal, case.member);
+        self.invalidate_missing_tip_seismic(&failed);
+        match result {
+            Ok(report) => {
+                self.core.scoped.generated_panels = report.panels;
+                for notice in report.notices {
+                    if initialize_stories && notice.contains("地震用重量を再生成できません")
+                    {
+                        self.report_error(format!("階の生成エラー: {notice}"));
+                    }
+                    self.report_notice(notice);
+                }
+                self.core.scoped.auto_load_sync_hash = Some(self.compute_auto_load_sync_hash());
+            }
+            Err(error) => {
+                self.report_notice(
+                    "EX/EY を再生成できないため旧 Auto 水平力を両方向とも除去しました。",
+                );
+                self.report_error(error.to_string());
+            }
         }
-        self.apply_tip_load_cases(tip_cases);
-        self.core.scoped.auto_load_sync_hash = Some(self.compute_auto_load_sync_hash());
     }
 
+    #[cfg(feature = "gui")]
+    pub(crate) fn handle_prepared_node_renumbering(&mut self, renumbered: bool) {
+        if renumbered {
+            self.clear_geometry_selection();
+            self.ui.scoped.boundary_node = None;
+        }
+    }
+
+    #[cfg(test)]
     fn apply_failed_seismic_cases(
         &mut self,
         result: &sepika_job::auto_loads::AutoLoadComputeResult,
@@ -233,18 +246,6 @@ impl App {
                 self.report_notice(format!("{} の Ai 地震力を再生成できないため、旧 Auto 水平力と単体・依存組合せの旧結果を除去しました。準備計算の条件を修正してください（手入力水平力だけでは解析できません）。", case.name));
             }
         }
-    }
-
-    pub(crate) fn rebuild_wall_regions_for_preparation(&mut self) {
-        let wall_report =
-            sepika_core::wall_region_rebuild::rebuild_wall_regions(&mut self.core.model);
-        #[cfg(feature = "gui")]
-        if wall_report.deleted_nodes > 0 {
-            self.clear_geometry_selection();
-            self.ui.scoped.boundary_node = None;
-        }
-        #[cfg(not(feature = "gui"))]
-        let _ = wall_report;
     }
 
     fn sync_tip_load_cases_action(&mut self) {
@@ -335,7 +336,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn one_direction_failure_preserves_success_and_unrelated_results() {
+    fn one_direction_failure_rejects_both_and_keeps_unrelated_results() {
         use sepika_core::model::{LoadCombination, LoadSource, NodalLoad};
         use sepika_job::auto_loads::{AutoLoadCaseContent, AutoLoadComputeResult};
         let mut app = App::default();
@@ -399,9 +400,11 @@ mod tests {
             ],
             notices: Vec::new(),
         };
+        let mut result = result;
+        sepika_job::auto_loads::clear_failed_tip_seismic_cases(&app.core.model, &mut result);
         app.apply_failed_seismic_cases(&result);
         let bundle = app.core.scoped.results.as_ref().unwrap();
-        assert!(bundle.seismic(SeismicDir::X).is_some());
+        assert!(bundle.seismic(SeismicDir::X).is_none());
         assert!(bundle.seismic(SeismicDir::Y).is_none());
         assert_eq!(
             bundle
@@ -409,11 +412,11 @@ mod tests {
                 .iter()
                 .map(|(name, _)| name.as_str())
                 .collect::<Vec<_>>(),
-            ["EX依存", "無関係"]
+            ["無関係"]
         );
-        assert_eq!(app.current_static().unwrap().disp, before);
-        assert_eq!(app.ui.scoped.nav.focus_result, Some(StaticKey::Combo(0)));
-        assert_eq!(app.core.model.load_cases[ex.index()].nodal, ex_loads);
+        let _ = before;
+        assert!(app.current_static().is_none());
+        assert!(app.core.model.load_cases[ex.index()].nodal.is_empty());
         assert_eq!(app.core.model.load_cases[ey.index()].nodal.len(), 1);
         assert_eq!(
             app.core.model.load_cases[ey.index()].nodal[0].source,

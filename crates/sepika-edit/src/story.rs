@@ -162,6 +162,7 @@ pub struct SetStoryLevel {
 ///
 /// `model.stories` を丸ごと差し替え、`StoryId` の参照も復元前の対応へ戻す。
 pub struct RestoreStoryDefs {
+    pub seismic_weight_generation: Option<sepika_core::model::SeismicWeightGeneration>,
     pub source_stories_initialized: bool,
     pub source_stories: Vec<sepika_core::model::SourceStory>,
     pub stb_node_ids: Vec<sepika_core::model::StbNodeIdentity>,
@@ -175,6 +176,7 @@ pub struct RestoreStoryDefs {
 /// 現在の階定義・階参照のスナップショットを撮る。
 pub(crate) fn snapshot(model: &Model) -> RestoreStoryDefs {
     RestoreStoryDefs {
+        seismic_weight_generation: model.seismic_weight_generation.clone(),
         source_stories_initialized: model.source_stories_initialized,
         source_stories: model.source_stories.clone(),
         stb_node_ids: model.stb_node_ids.clone(),
@@ -385,23 +387,38 @@ impl EditCommand for DeleteStory {
             )
         });
         let removed = self.story;
+        if let Some(record) = &mut model.seismic_weight_generation {
+            record
+                .calculated_weights
+                .retain(|(story, _)| *story != removed);
+            let removed_masters: Vec<_> =
+                record
+                    .automatic_diaphragms
+                    .iter()
+                    .filter_map(|constraint| match constraint {
+                        sepika_core::model::Constraint::RigidDiaphragm {
+                            story, master, ..
+                        } if *story == removed => Some(*master),
+                        _ => None,
+                    })
+                    .collect();
+            record
+                .automatic_master_restraints
+                .retain(|(master, _)| !removed_masters.contains(master));
+            record.automatic_diaphragms.retain(|constraint| {
+                !matches!(constraint, sepika_core::model::Constraint::RigidDiaphragm { story, .. } if *story == removed)
+            });
+        }
         for node in &mut model.nodes {
-            match node.story {
-                Some(s) if s == removed => node.story = None,
-                Some(s) if s.0 > removed.0 => node.story = Some(StoryId(s.0 - 1)),
-                _ => {}
+            if node.story == Some(removed) {
+                node.story = None;
             }
         }
-        for c in &mut model.constraints {
-            if let sepika_core::model::Constraint::RigidDiaphragm { story, .. } = c {
-                if story.0 > removed.0 {
-                    *story = StoryId(story.0 - 1);
-                }
+        model.visit_story_ids(|story| {
+            if story.0 > removed.0 {
+                story.0 -= 1;
             }
-        }
-        for (i, story) in model.stories.iter_mut().enumerate() {
-            story.id = StoryId(i as u32);
-        }
+        });
         Box::new(before)
     }
 
@@ -413,6 +430,7 @@ impl EditCommand for DeleteStory {
 impl EditCommand for RestoreStoryDefs {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let redo = snapshot(model);
+        model.seismic_weight_generation = self.seismic_weight_generation.clone();
         model.stories = self.stories.clone();
         model.source_stories = self.source_stories.clone();
         model.source_stories_initialized = self.source_stories_initialized;

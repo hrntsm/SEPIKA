@@ -901,6 +901,9 @@ pub fn compute_seismic_auto_load_cases(
     let mut cases = Vec::new();
 
     if model.stories.is_empty() {
+        for name in [EX_CASE_NAME, EY_CASE_NAME] {
+            notices.push(format!("{name} の Ai 地震力を再生成できません: 階と地震用重量が未定義です。明示準備を実行してください。"));
+        }
         return AutoLoadComputeResult { cases, notices };
     }
 
@@ -952,23 +955,31 @@ pub fn compute_seismic_auto_load_cases(
 
 /// 標準 EX/EY の Ai 再生成失敗時に、旧 Auto 水平力を除去する同期内容を補う。
 pub fn clear_failed_tip_seismic_cases(model: &Model, result: &mut AutoLoadComputeResult) {
+    let complete = [EX_CASE_NAME, EY_CASE_NAME].iter().all(|name| {
+        result
+            .cases
+            .iter()
+            .any(|case| case.name == *name && !(case.nodal.is_empty() && case.member.is_empty()))
+    });
+    if complete {
+        return;
+    }
+    result
+        .cases
+        .retain(|case| !matches!(case.name, EX_CASE_NAME | EY_CASE_NAME));
     for name in [EX_CASE_NAME, EY_CASE_NAME] {
-        let Some(_) = model
+        if model
             .load_cases
             .iter()
-            .find(|case| case.name == name && case.kind == LoadCaseKind::Seismic)
-        else {
-            continue;
-        };
-        if result.cases.iter().any(|generated| generated.name == name) {
-            continue;
+            .any(|case| case.name == name && case.kind == LoadCaseKind::Seismic)
+        {
+            result.cases.push(AutoLoadCaseContent {
+                name,
+                kind: LoadCaseKind::Seismic,
+                nodal: Vec::new(),
+                member: Vec::new(),
+            });
         }
-        result.cases.push(AutoLoadCaseContent {
-            name,
-            kind: LoadCaseKind::Seismic,
-            nodal: Vec::new(),
-            member: Vec::new(),
-        });
     }
 }
 
@@ -1238,7 +1249,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_ai_clears_standard_seismic_auto_and_keeps_manual_and_success() {
+    fn failed_ai_clears_both_directions_and_keeps_manual() {
         let mut model = tip_model();
         model.slabs[0].tip_loads[0].case = LoadCaseId(3);
         model.load_cases[3]
@@ -1284,7 +1295,7 @@ mod tests {
         assert!(model.load_cases[3]
             .nodal
             .iter()
-            .any(|load| load.source == LoadSource::Auto));
+            .all(|load| load.source != LoadSource::Auto));
         assert!(model.load_cases[3]
             .nodal
             .iter()

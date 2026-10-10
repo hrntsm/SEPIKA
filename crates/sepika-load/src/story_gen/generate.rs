@@ -2,12 +2,15 @@
 
 use super::reactions::static_reactions;
 use super::*;
+use std::collections::HashSet;
 use std::ops::Add;
 
 /// 生成結果。[`Model`] へ適用するのは呼び出し側（EditCommand 経由）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct StoryGenResult {
     pub wall_weight_generation: sepika_core::model::WallWeightGenerationMode,
+    /// 階 ID と自動算定重量 [N]。手入力採用値とは独立。
+    pub calculated_weights: Vec<(StoryId, f64)>,
     /// 下から順の階（基部レベルは含まない）。
     pub stories: Vec<Story>,
     /// 各節点の所属階（`model.nodes` と同順。基部レベルは None）。
@@ -582,11 +585,28 @@ fn generate_stories_impl(
 
     let mut stories = Vec::new();
     let mut node_story = vec![None; model.nodes.len()];
+    let mut calculated_weights = Vec::new();
     let mut constraints = Vec::new();
     let mut rep_nodes: Vec<Node> = Vec::new();
     let mut generated_masters: Vec<NodeId> = Vec::new();
 
-    let mut reuse_masters = model.generated_masters.iter().copied();
+    let reserved_masters: HashSet<_> = model
+        .constraints
+        .iter()
+        .filter_map(|constraint| {
+            if let Constraint::RigidDiaphragm { master, .. } = constraint {
+                Some(*master)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let mut reuse_masters = model
+        .generated_masters
+        .iter()
+        .copied()
+        .filter(|id| !reserved_masters.contains(id));
+    let mut assigned_masters = HashSet::new();
     let mut next_new_id = model.nodes.len() as u32;
 
     let mut rep_restraint_base = Dof6Mask::FREE;
@@ -619,6 +639,7 @@ fn generate_stories_impl(
 
         let weight: f64 =
             node_ids.iter().map(|n| node_weight[n.index()]).sum::<f64>() + wall_design;
+        calculated_weights.push((story_id, weight));
 
         let mut dynamic_mass = {
             let w_sum: f64 = node_ids
@@ -727,49 +748,115 @@ fn generate_stories_impl(
             }
         }
 
-        if !slaves.is_empty() {
-            let (gx, gy) = if weight > 0.0 {
-                let gx = node_ids
-                    .iter()
-                    .map(|n| node_weight[n.index()] * model.nodes[n.index()].coord[0])
-                    .sum::<f64>()
-                    .add(
-                        wall.iter()
-                            .map(|w| w.band.design_n * w.center_xy_mm[0])
-                            .sum::<f64>(),
-                    )
-                    / weight;
-                let gy = node_ids
-                    .iter()
-                    .map(|n| node_weight[n.index()] * model.nodes[n.index()].coord[1])
-                    .sum::<f64>()
-                    .add(
-                        wall.iter()
-                            .map(|w| w.band.design_n * w.center_xy_mm[1])
-                            .sum::<f64>(),
-                    )
-                    / weight;
-                (gx, gy)
+        let existing: Vec<_> = prev
+            .map(|story| model.diaphragms_of(story.id).collect())
+            .unwrap_or_default();
+        let groups: Vec<_> = if existing.is_empty() {
+            if slaves.is_empty() {
+                Vec::new()
             } else {
-                let gx = node_ids
+                vec![(None, slaves.clone(), true)]
+            }
+        } else {
+            existing
+                .iter()
+                .map(|diaphragm| {
+                    let automatic = model.constraints.iter().any(|constraint| {
+                        matches!(constraint, Constraint::RigidDiaphragm { master, .. } if *master == diaphragm.master)
+                            && model.is_automatic_seismic_diaphragm(constraint)
+                    });
+                    (
+                        Some(*diaphragm),
+                        if automatic {
+                            slaves.clone()
+                        } else {
+                            diaphragm.slaves.to_vec()
+                        },
+                        automatic,
+                    )
+                })
+                .collect()
+        };
+        for (_, group_slaves, _) in &groups {
+            if group_slaves.is_empty() || group_slaves.iter().any(|id| !slaves.contains(id)) {
+                return Err(format!("階 {name} の利用者剛床に床面上の所属節点が不足しています。剛床設定を修正してください。"));
+            }
+        }
+        if groups.len() > 1 && !wall.is_empty() {
+            return Err(format!("階 {name} の壁重量・物理質量を複数剛床へ一意に帰属できません。剛床の所属設定を確認してください。"));
+        }
+        if groups.len() > 1
+            && node_ids.iter().any(|id| {
+                let owners = groups
                     .iter()
-                    .map(|n| model.nodes[n.index()].coord[0])
-                    .sum::<f64>()
-                    / node_ids.len() as f64;
-                let gy = node_ids
-                    .iter()
-                    .map(|n| model.nodes[n.index()].coord[1])
-                    .sum::<f64>()
-                    / node_ids.len() as f64;
-                (gx, gy)
+                    .filter(|(_, members, _)| members.contains(id))
+                    .count();
+                owners > 1
+                    || (owners == 0
+                        && (node_weight[id.index()] != 0.0 || node_mass_equiv[id.index()] != 0.0))
+            })
+        {
+            return Err(format!("階 {name} の複数剛床へ重量・物理質量を一意に帰属できません。所属節点の重複・不足を修正してください。"));
+        }
+        for (existing, group_slaves, automatic) in &groups {
+            let group_nodes: Vec<_> = if groups.len() == 1 {
+                node_ids.clone()
+            } else {
+                group_slaves.clone()
             };
-
-            let master = reuse_masters.next().unwrap_or_else(|| {
-                let id = NodeId(next_new_id);
-                next_new_id += 1;
-                id
+            let group_weight: f64 = group_nodes
+                .iter()
+                .map(|id| node_weight[id.index()])
+                .sum::<f64>()
+                + wall_design;
+            let center = |axis: usize| -> f64 {
+                if group_weight > 0.0 {
+                    group_nodes
+                        .iter()
+                        .map(|id| node_weight[id.index()] * model.nodes[id.index()].coord[axis])
+                        .sum::<f64>()
+                        .add(
+                            wall.iter()
+                                .map(|w| w.band.design_n * w.center_xy_mm[axis])
+                                .sum::<f64>(),
+                        )
+                        / group_weight
+                } else {
+                    group_nodes
+                        .iter()
+                        .map(|id| model.nodes[id.index()].coord[axis])
+                        .sum::<f64>()
+                        / group_nodes.len() as f64
+                }
+            };
+            let (gx, gy) = (center(0), center(1));
+            let master = existing.map(|d| d.master).unwrap_or_else(|| {
+                reuse_masters.next().unwrap_or_else(|| {
+                    let id = NodeId(next_new_id);
+                    next_new_id += 1;
+                    id
+                })
             });
-
+            if !assigned_masters.insert(master) {
+                return Err(format!("階 {name} の剛床代表節点 {} が別の階・剛床にも割り当てられています。代表節点を分けてください。", master.0));
+            }
+            let Some(previous_master) = model
+                .nodes
+                .get(master.index())
+                .filter(|n| n.id == master)
+                .or_else(|| {
+                    if existing.is_none() {
+                        struct_nodes.first().copied()
+                    } else {
+                        None
+                    }
+                })
+            else {
+                return Err(format!(
+                    "階 {name} の剛床代表節点 {} が存在しません。",
+                    master.0
+                ));
+            };
             let net_i = |idx: usize| -> f64 {
                 match mass_method {
                     MassMethod::CorrectedLumped => {
@@ -785,17 +872,16 @@ fn generate_stories_impl(
                     MassMethod::LumpedOnly => w.band.physical_n,
                 })
                 .sum();
-            let mt_weight: f64 = node_ids.iter().map(|n| net_i(n.index())).sum::<f64>() + wall_net;
+            let mt_weight: f64 =
+                group_nodes.iter().map(|id| net_i(id.index())).sum::<f64>() + wall_net;
             let mass = if mt_weight > 0.0 {
                 let mt = sepika_core::units::to_internal::weight_n_to_mass(mt_weight);
-                let j: f64 = node_ids
+                let inertia = group_nodes
                     .iter()
-                    .map(|n| {
-                        let idx = n.index();
-                        let mi = sepika_core::units::to_internal::weight_n_to_mass(net_i(idx));
-                        let dx = model.nodes[idx].coord[0] - gx;
-                        let dy = model.nodes[idx].coord[1] - gy;
-                        mi * (dx * dx + dy * dy)
+                    .map(|id| {
+                        let node = &model.nodes[id.index()];
+                        sepika_core::units::to_internal::weight_n_to_mass(net_i(id.index()))
+                            * ((node.coord[0] - gx).powi(2) + (node.coord[1] - gy).powi(2))
                     })
                     .sum::<f64>()
                     + wall
@@ -816,12 +902,41 @@ fn generate_stories_impl(
                                         + (w.center_xy_mm[1] - gy).powi(2))
                         })
                         .sum::<f64>();
-                Some([mt, mt, 0.0, 0.0, 0.0, j])
+                Some([mt, mt, 0.0, 0.0, 0.0, inertia])
             } else {
                 None
             };
-
-            if !load_cfg.dampers.is_empty() {
+            let generated_master = existing.is_none() || model.generated_masters.contains(&master);
+            rep_nodes.push(Node {
+                id: master,
+                coord: if generated_master {
+                    [gx, gy, elev]
+                } else {
+                    previous_master.coord
+                },
+                restraint: if existing.is_none()
+                    || model.is_automatic_seismic_master_restraint(master)
+                {
+                    master_restraint(model, rep_restraint_base, group_slaves, &structural)
+                } else {
+                    previous_master.restraint
+                },
+                mass: if generated_master {
+                    mass
+                } else {
+                    previous_master.mass
+                },
+                story: Some(story_id),
+                support_spring: if existing.is_some() {
+                    previous_master.support_spring
+                } else {
+                    None
+                },
+            });
+            if generated_master {
+                generated_masters.push(master);
+            }
+            if !load_cfg.dampers.is_empty() && groups.len() == 1 {
                 dynamic_mass.lumped_mass = Some(sepika_core::model::StoryLumpedMass {
                     master,
                     mass_method,
@@ -829,29 +944,22 @@ fn generate_stories_impl(
                     damper_weight_n: damper_inputs
                         .iter()
                         .map(|d| {
-                            d.nodes.iter().filter(|id| node_ids.contains(id)).count() as f64
+                            d.nodes.iter().filter(|id| group_nodes.contains(id)).count() as f64
                                 * (d.weight_n / 2.0)
                         })
                         .sum(),
                 });
             }
-
-            rep_nodes.push(Node {
-                id: master,
-                coord: [gx, gy, elev],
-                restraint: master_restraint(model, rep_restraint_base, &slaves, &structural),
-                mass,
-                story: Some(story_id),
-                support_spring: None,
-            });
-            generated_masters.push(master);
-
             constraints.push(Constraint::RigidDiaphragm {
                 story: story_id,
                 master,
-                slaves,
-                weight: Some(weight),
-                ci_override: None,
+                slaves: group_slaves.clone(),
+                weight: if *automatic {
+                    Some(group_weight)
+                } else {
+                    existing.and_then(|d| d.weight)
+                },
+                ci_override: existing.and_then(|d| d.ci_override),
             });
         }
 
@@ -878,7 +986,10 @@ fn generate_stories_impl(
 
     assign_story_structures(model, &node_story, &mut stories);
 
-    for id in reuse_masters {
+    for id in model.generated_masters.iter().copied() {
+        if generated_masters.contains(&id) {
+            continue;
+        }
         rep_nodes.push(Node {
             id,
             coord: model.nodes[id.index()].coord,
@@ -898,6 +1009,7 @@ fn generate_stories_impl(
         } else {
             sepika_core::model::WallWeightGenerationMode::Geometry
         },
+        calculated_weights,
         stories,
         node_story,
         constraints,

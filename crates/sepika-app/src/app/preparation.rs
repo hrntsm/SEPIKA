@@ -9,7 +9,7 @@
 //!
 //! 1. **階（層）データ** — 節点の標高から階高・剛床・地震用重量・主要構造種別を
 //!    算定してモデルへ反映する。以降のすべての項目の前提であり、
-//!    [`App::run_preparation`] は実行のたびに再生成する（利用者の手入力である
+//!    重量依存入力の変更時だけ再生成する（利用者の手入力である
 //!    地震用重量の手入力値・階の種別は引き継がれる）。
 //! 2. **剛域** — 部材端の剛域長 λ・柱フェース距離を接続部材のせいから自動算定し
 //!    モデルへ反映する（`ZoneSource::Manual` の端は保護される）。
@@ -140,6 +140,9 @@ pub struct PrepStoryRow {
     pub n_diaphragms: usize,
     /// 地震用重量 Wi [N]（未設定は 0）。
     pub weight: f64,
+    /// 自動算定重量 [N]。未算定・陳腐化は `None`。
+    #[serde(default)]
+    pub calculated_weight: Option<f64>,
     /// 当該階以上の累積地震用重量 ΣWj [N]。
     pub cumulative_weight: f64,
     pub structure: StoryStructure,
@@ -385,19 +388,8 @@ pub const RIGID_ZONE_RATIO_WARN: f64 = 0.5;
 
 impl App {
     /// 準備計算を実行する（利用者が明示的に実行する入口）。
-    ///
-    /// 階（層）の生成は準備計算の一工程であり、実行のたびに
-    /// [`App::generate_stories_action`] で再生成する（節点・断面・荷重の変更が
-    /// 階高・剛床・地震用重量へ反映されるようにするため。階高・剛床・地震用重量は
-    /// 剛域以外のすべての準備計算項目の前提となる）。利用者の手入力
-    /// （地震用重量の手入力値・階の種別）は再生成後も引き継がれる。
-    ///
-    /// 階を生成できないモデル（節点がない・単一レベルのみ）でも中断せず、
-    /// 生成エラーを `last_error` に残したまま残りの項目（剛域・断面性能・
-    /// 整合性チェックなど、階を前提としない項目）を集計する。
-    ///
-    /// 以降は [`App::refresh_preparation`] と同じ処理を行い、結果を
-    /// `self.core.scoped.preparation` へ格納する。
+    /// 階が未定義なら初期化し、変更した重量入力と自動荷重を一括更新する。
+    /// 階生成失敗時も、階に依存しない診断・断面などの集計は継続する。
     pub fn run_preparation(&mut self) {
         self.core.scoped.last_error = None;
         self.core.scoped.last_notice = None;
@@ -427,13 +419,8 @@ impl App {
         self.report_info(msg);
     }
 
-    /// 解析の実行前に準備計算の結果を最新化する（各解析エントリの先頭で呼ぶ）。
-    ///
-    /// 剛域の反映・荷重の同期は冪等であり、`sync_auto_load_cases_action` が
-    /// モデル・関連設定のハッシュで再計算要否を判定するため、毎回呼んでも
-    /// 重い再計算は繰り返さない。階の自動生成は行わない
-    /// （解析の実行が暗黙にモデルの階構成を書き換えないようにするため。
-    /// 階が必要な解析は階が未定義であればエラーで案内する）。
+    /// 解析前に既存階の重量・自動荷重・準備表示を現在入力へ同期する。
+    /// 階未定義の初期化は明示準備で行う。
     pub(crate) fn ensure_preparation(&mut self) {
         self.refresh_preparation();
     }
@@ -558,6 +545,13 @@ impl App {
                 n_nodes: l.node_ids.len(),
                 n_diaphragms: model.diaphragms_of(l.top).count(),
                 weight: weights[l.index],
+                calculated_weight: model.seismic_weight_generation.as_ref().and_then(|record| {
+                    record
+                        .calculated_weights
+                        .iter()
+                        .find(|(story, _)| *story == l.top)
+                        .map(|(_, weight)| *weight)
+                }),
                 cumulative_weight: weights[l.index..].iter().sum(),
                 structure: l.structure,
                 level_kind: l.level_kind,
@@ -575,6 +569,18 @@ impl App {
                     "階(Story)が未定義のため地震力(Ai分布)を算定できません。\
                      「① 準備計算」パネルの「準備計算 実行」を行ってください。"
                         .to_string(),
+                ),
+            );
+        }
+        if !sepika_job::weight_preparation::weights_are_current(
+            &self.core.model,
+            self.core.analysis_cfg.mass_method,
+        ) {
+            return (
+                None,
+                Some(
+                    "地震用重量が現在入力と一致しません。重量の再生成原因を確認してください。"
+                        .into(),
                 ),
             );
         }
@@ -1189,11 +1195,9 @@ mod tests {
             }
             app.core.model.stories.push(story);
         }
+        assert!((app.design_seismic_period().unwrap() - 0.75).abs() < 1e-12);
         let (seismic, note) = app.build_prep_seismic();
-        assert!(note.is_none(), "{note:?}");
-        let seismic = seismic.unwrap();
-        assert!((seismic.t - 0.75).abs() < 1e-12);
-        assert!((seismic.rt - 0.9875).abs() < 1e-12);
-        assert!((seismic.base_shear - 57_250.0).abs() < 1e-8);
+        assert!(seismic.is_none());
+        assert!(note.unwrap().contains("現在入力と一致しません"));
     }
 }

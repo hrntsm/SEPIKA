@@ -89,6 +89,7 @@ pub fn compute_eigen(
     model: sepika_core::model::Model,
     n_modes: usize,
 ) -> JobResult<sepika_solver::dynamic::eigen::ModalResult> {
+    crate::weight_preparation::require_current_generated_mass(&model)?;
     model
         .validate_wall_weight_generation()
         .map_err(JobError::InvalidInput)?;
@@ -188,6 +189,7 @@ pub fn compute_time_history(
     cfg: AnalysisSettings,
     wave: sepika_solver::dynamic::timehistory::GroundMotion,
 ) -> JobResult<sepika_solver::dynamic::timehistory::ResponseResult> {
+    crate::weight_preparation::require_current_generated_mass(&model)?;
     model
         .validate_wall_weight_generation()
         .map_err(JobError::InvalidInput)?;

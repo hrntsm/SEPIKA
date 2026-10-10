@@ -21,6 +21,7 @@ pub mod prepare;
 pub mod sample_wave;
 pub mod settings;
 pub mod ultimate_demand;
+pub mod weight_preparation;
 
 pub use auto_loads::{
     apply_auto_load_cases, compute_auto_load_cases, compute_dl_beam_loads,

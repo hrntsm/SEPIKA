@@ -570,7 +570,7 @@ mod tests {
                     elevation: 3000.0,
                     node_ids: vec![NodeId(1)],
                     seismic_weight: Some(80_000.0),
-                    weight_override: None,
+                    weight_override: Some(80_000.0),
                     structure: Default::default(),
                     level_kind: Default::default(),
                     dynamic_mass: None,
@@ -1130,6 +1130,15 @@ mod tests {
     async fn mixed_structure_basement_mcp_standard_load_matches_above_ground_period() {
         let dir = test_store_dir("mixed_above_gl");
         let mut model = pushover_model();
+        let rc = seismic_freshness_fixture::two_storeys();
+        let mut concrete = rc.materials[0].clone();
+        concrete.id = sepika_core::ids::MaterialId(1);
+        model.materials.push(concrete);
+        model.materials.push(rc.materials[2].clone());
+        let mut column = rc.sections[0].clone();
+        column.id = sepika_core::ids::SectionId(1);
+        column.material = Some(sepika_core::ids::MaterialId(1));
+        model.sections.push(column);
         let story_template = model.stories[1].clone();
         let node_template = model.nodes[1].clone();
         let beam_template = model.elements[0].clone();
@@ -1164,6 +1173,7 @@ mod tests {
             let mut beam = beam_template.clone();
             beam.id = ElemId(i as u32);
             beam.nodes = smallvec::smallvec![NodeId(id - 1), NodeId(id)];
+            beam.section = Some(sepika_core::ids::SectionId(if i == 2 { 0 } else { 1 }));
             model.elements.push(beam);
         }
         model.load_cases.push(sepika_core::model::LoadCase {
@@ -1198,6 +1208,79 @@ mod tests {
             let qy = row["qy"].as_f64().unwrap();
             let qz = row["qz"].as_f64().unwrap();
             assert!((qy.hypot(qz) - 57_250.0).abs() < 1e-4, "{row}");
+        }
+    }
+    mod seismic_freshness_fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-job/tests/fixtures/seismic_freshness.rs"
+        ));
+    }
+
+    #[tokio::test]
+    async fn public_mcp_ex_uses_edited_density_finish_and_seismic_live_without_prepare_button() {
+        use sepika_core::model::{AreaLoad, SlabUsage};
+        let dir = test_store_dir("seismic_freshness_439");
+        let mut model = seismic_freshness_fixture::two_storeys();
+        sepika_job::prepare::prepare_model(&mut model, &Default::default(), None, true).unwrap();
+        let ex = model
+            .load_cases
+            .iter()
+            .find(|case| case.name == "EX")
+            .unwrap()
+            .id
+            .0;
+        let server = SepikaServer::new(make_state(model, &dir));
+        for (density, finish, seismic_live) in [
+            (2.4e-9, 0.0, 0.0),
+            (2.6e-9, 0.0, 0.0),
+            (2.6e-9, 0.001, 0.0),
+            (2.6e-9, 0.001, 0.0005),
+        ] {
+            {
+                let mut state = server.state.lock().await;
+                state.model.materials[0].density = density;
+                for slab in &mut state.model.slabs {
+                    slab.plate.loads = vec![AreaLoad {
+                        kind: "DL".into(),
+                        value: finish,
+                    }];
+                    slab.plate.usage = Some(SlabUsage::Custom {
+                        floor: 0.005,
+                        beam: 0.004,
+                        frame: 0.003,
+                        seismic: seismic_live,
+                    });
+                }
+            }
+            let mut args = run_args(JobKind::LinearStatic);
+            args.load_case = Some(ex);
+            let result = server.analysis_run(Parameters(args)).await.unwrap();
+            let status = wait_for_terminal(&server, &extract_job_id(&result)).await;
+            assert!(matches!(status, JobStatus::Done { .. }), "{status:?}");
+            let result = server
+                .result_get(Parameters(ResultGetArgs {
+                    case: ex,
+                    kind: "MemberForce".into(),
+                    node_ids: None,
+                    member_ids: Some(vec![0, 1]),
+                    step_range: None,
+                }))
+                .await
+                .unwrap();
+            let value: serde_json::Value =
+                serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+            let rows = value["rows"].as_array().unwrap();
+            let actual: f64 = rows
+                .iter()
+                .filter(|row| row["pos"].as_f64() == Some(0.0))
+                .map(|row| row["qy"].as_f64().unwrap().abs())
+                .sum();
+            let expected = 0.2
+                * seismic_freshness_fixture::expected_weights(density, finish, seismic_live)
+                    .iter()
+                    .sum::<f64>();
+            assert!((actual - expected).abs() < 1e-4, "{value} / {expected}");
         }
     }
 }

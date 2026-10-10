@@ -727,7 +727,8 @@ fn preparation_wall_rebuild_clears_renumbered_node_selection() {
     app.select_node(NodeId(2));
     app.ui.scoped.boundary_node = Some(NodeId(4));
 
-    app.rebuild_wall_regions_for_preparation();
+    let report = sepika_core::wall_region_rebuild::rebuild_wall_regions(&mut app.core.model);
+    app.handle_prepared_node_renumbering(report.deleted_nodes > 0);
 
     assert_eq!(app.core.model.nodes.len(), 3);
     assert_eq!(
@@ -8694,7 +8695,10 @@ fn test_run_preparation_populates_result() {
 
     // Ai 分布（略算周期）。1 層なので α=Ai=1。Ci・Qi の式はここで再計算しない
     // （表示と解析入力の一致は `test_preparation_ai_matches_synced_seismic_case` で確認する）。
-    let sm = prep.seismic.as_ref().expect("Ai 分布が算定されるはず");
+    let sm = prep
+        .seismic
+        .as_ref()
+        .unwrap_or_else(|| panic!("Ai 分布: {:?}", prep.seismic_note));
     assert_eq!(sm.rows.len(), 1);
     assert!((sm.rows[0].alpha - 1.0).abs() < 1e-9);
     assert!((sm.rows[0].ai - 1.0).abs() < 1e-9);
@@ -11275,6 +11279,168 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
         .contains("未割当"));
 }
 
+mod seismic_freshness_fixture {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../sepika-job/tests/fixtures/seismic_freshness.rs"
+    ));
+}
+
+#[test]
+fn edited_density_finish_and_seismic_live_refresh_real_ex_without_preparation_button() {
+    use sepika_core::model::{AreaLoad, SlabUsage};
+    let mut app = App::default();
+    app.load_model(seismic_freshness_fixture::two_storeys());
+    app.run_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    for (density, finish, seismic_live) in [
+        (2.6e-9, 0.0, 0.0),
+        (2.6e-9, 0.001, 0.0),
+        (2.6e-9, 0.001, 0.0005),
+    ] {
+        app.core.model.materials[0].density = density;
+        for slab in &mut app.core.model.slabs {
+            slab.plate.loads = vec![AreaLoad {
+                kind: "DL".into(),
+                value: finish,
+            }];
+            slab.plate.usage = Some(SlabUsage::Custom {
+                floor: 0.005,
+                beam: 0.004,
+                frame: 0.003,
+                seismic: seismic_live,
+            });
+        }
+        app.run_seismic(SeismicDir::X);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let expected = seismic_freshness_fixture::expected_weights(density, finish, seismic_live);
+        for (layer, weight) in app.core.model.layers().iter().zip(expected) {
+            assert!(
+                (layer.weight.unwrap() - weight).abs() < 1e-7,
+                "{layer:?} / {weight}"
+            );
+        }
+        let upper_alpha = expected[1] / expected.iter().sum::<f64>();
+        let upper_ai = 1.0 + (1.0 / upper_alpha.sqrt() - upper_alpha) * 0.4;
+        for (name, axis) in [(EX_CASE_NAME, 0), (EY_CASE_NAME, 1)] {
+            let loads = &app
+                .core
+                .model
+                .load_cases
+                .iter()
+                .find(|case| case.name == name)
+                .unwrap()
+                .nodal;
+            assert!(
+                (loads.iter().map(|load| load.values[axis]).sum::<f64>()
+                    - 0.2 * expected.iter().sum::<f64>())
+                .abs()
+                    < 1e-7
+            );
+            assert!((loads[1].values[axis] - 0.2 * upper_ai * expected[1]).abs() < 1e-7);
+        }
+        assert!(app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .seismic(SeismicDir::X)
+            .is_some());
+        let revision = app.core.scoped.undo.revision();
+        let record = app.core.model.seismic_weight_generation.clone();
+        app.run_seismic(SeismicDir::Y);
+        app.run_preparation();
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        assert_eq!(app.core.model.seismic_weight_generation, record);
+        app.core.model.stories[1].name = "表示名".into();
+        app.sync_auto_load_cases_action();
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        assert_eq!(app.core.model.seismic_weight_generation, record);
+    }
+}
+
+#[test]
+fn freshness_preparation_undo_and_saved_output_tampering_are_detected() {
+    let mut app = App::default();
+    app.load_model(seismic_freshness_fixture::two_storeys());
+    app.run_preparation();
+    let before = app.core.model.clone();
+    app.core.model.materials[0].density = 2.6e-9;
+    app.sync_auto_load_cases_action();
+    let fresh = app.core.model.clone();
+    app.core.scoped.undo.undo(&mut app.core.model);
+    assert_eq!(app.core.model.stories, before.stories);
+    assert_eq!(app.core.model.load_cases, before.load_cases);
+    app.core.scoped.undo.redo(&mut app.core.model);
+    assert!(app.core.model.eq_ignoring_dofmap(&fresh));
+    let bytes = rmp_serde::to_vec_named(&app.core.model).unwrap();
+    app.core.model = rmp_serde::from_slice(&bytes).unwrap();
+    app.core.model.stories[1].seismic_weight = Some(1.0);
+    app.sync_auto_load_cases_action();
+    assert_eq!(app.core.model.stories, fresh.stories);
+    assert_eq!(app.core.model.load_cases, fresh.load_cases);
+    app.core.model.seismic_weight_generation = None;
+    app.sync_auto_load_cases_action();
+    assert!(sepika_job::weight_preparation::weights_are_current(
+        &app.core.model,
+        app.core.analysis_cfg.mass_method
+    ));
+    let revision = app.core.scoped.undo.revision();
+    app.sync_auto_load_cases_action();
+    assert_eq!(app.core.scoped.undo.revision(), revision);
+}
+
+#[test]
+fn rejected_prepared_model_never_leaves_old_auto_seismic_loads_usable() {
+    let mut app = App::default();
+    app.load_model(seismic_freshness_fixture::two_storeys());
+    app.run_preparation();
+    app.run_seismic(SeismicDir::X);
+    assert!(app.core.scoped.last_error.is_none());
+    if let sepika_core::model::SlabShape::Attached {
+        anchor: sepika_core::model::RegionAnchor::Line { span, .. },
+        ..
+    } = &mut app.core.model.slabs[0].shape
+    {
+        *span = [0.0, 0.0];
+    }
+    app.run_seismic(SeismicDir::X);
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("span"));
+    for name in [EX_CASE_NAME, EY_CASE_NAME] {
+        let case = app
+            .core
+            .model
+            .load_cases
+            .iter()
+            .find(|case| case.name == name)
+            .unwrap();
+        assert!(sepika_job::compute::missing_seismic_horizontal_load(case));
+    }
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .seismic(SeismicDir::X)
+        .is_none());
+}
+
 #[cfg(feature = "gui")]
 #[test]
 fn stb_strength_gui_edit_transaction_changes_result_input_and_restores_omission() {
@@ -11654,6 +11820,221 @@ pub(super) fn select_holding_points(app: &mut App) {
                     "テストの明示採用点".into(),
                 )
                 .ok();
+        }
+    }
+}
+
+#[test]
+fn public_story_insertion_keeps_automatic_weight_origin_and_manual_edits_through_undo() {
+    use sepika_core::ids::{ElemId, NodeId, StoryId};
+    use sepika_core::model::Constraint;
+    use sepika_edit::UndoStack;
+    for manual_weight in [None, Some(100100.0)] {
+        let mut model = seismic_freshness_fixture::two_storeys();
+        let settings = sepika_job::AnalysisSettings::default();
+        sepika_job::prepare::prepare_model(&mut model, &settings, None, true).unwrap();
+        let upper = model.generated_masters[2];
+        if let Some(value) = manual_weight {
+            for constraint in &mut model.constraints {
+                if let Constraint::RigidDiaphragm { master, weight, .. } = constraint {
+                    if *master == upper {
+                        *weight = Some(value);
+                    }
+                }
+            }
+        }
+        let first = model.nodes.len() as u32;
+        for (offset, template) in [4usize, 5].into_iter().enumerate() {
+            let mut node = model.nodes[template].clone();
+            node.id = NodeId(first + offset as u32);
+            node.coord[2] = 18750.0;
+            node.story = None;
+            model.nodes.push(node);
+        }
+        let mut beam = model.elements[5].clone();
+        beam.id = ElemId(model.elements.len() as u32);
+        beam.nodes = [NodeId(first), NodeId(first + 1)].into_iter().collect();
+        model.elements.push(beam);
+        let record_before = model.seismic_weight_generation.clone();
+        let mut undo = UndoStack::default();
+        assert!(undo.run(
+            &mut model,
+            Box::new(sepika_edit::AddStory {
+                name: "途中階".into(),
+                elevation: 18750.0,
+            })
+        ));
+        let is_auto = |model: &sepika_core::model::Model| {
+            model.constraints.iter().any(|constraint| {
+                matches!(constraint, Constraint::RigidDiaphragm { story, master, .. } if *story == StoryId(3) && *master == upper)
+                    && model.is_automatic_seismic_diaphragm(constraint)
+            })
+        };
+        assert_eq!(is_auto(&model), manual_weight.is_none());
+        let shifted = model.seismic_weight_generation.clone();
+        assert_eq!(
+            shifted.as_ref().unwrap().calculated_weights[2].0,
+            StoryId(3)
+        );
+        undo.undo(&mut model);
+        assert_eq!(model.seismic_weight_generation, record_before);
+        undo.redo(&mut model);
+        assert_eq!(model.seismic_weight_generation, shifted);
+        model.materials[0].density = 2.6e-9;
+        let result =
+            sepika_job::prepare::prepare_model(&mut model, &settings, None, false).unwrap();
+        assert!(
+            sepika_job::weight_preparation::weights_are_current(&model, settings.mass_method),
+            "{:?}",
+            result.notices
+        );
+        for name in [
+            sepika_core::model::EX_CASE_NAME,
+            sepika_core::model::EY_CASE_NAME,
+        ] {
+            assert!(
+                model
+                    .load_cases
+                    .iter()
+                    .any(|case| case.name == name && !case.nodal.is_empty()),
+                "{:?}",
+                result.notices
+            );
+        }
+        let expected_upper_n = 103548.04597;
+        assert!((model.stories[3].seismic_weight.unwrap() - expected_upper_n).abs() < 1e-8);
+        let diaphragm = model.diaphragms_of(StoryId(3)).next().unwrap();
+        assert_eq!(diaphragm.master, upper);
+        assert!(
+            (diaphragm.weight.unwrap() - manual_weight.unwrap_or(expected_upper_n)).abs() < 1e-8
+        );
+        assert_eq!(is_auto(&model), manual_weight.is_none());
+        let record = model.seismic_weight_generation.clone();
+        sepika_job::prepare::prepare_model(&mut model, &settings, None, false).unwrap();
+        assert_eq!(model.seismic_weight_generation, record);
+        let path = std::env::temp_dir().join(format!(
+            "439-inserted-generation-{}-{}.ovika",
+            std::process::id(),
+            manual_weight.is_some(),
+        ));
+        sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+        let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        std::fs::remove_file(path).unwrap();
+        assert!(restored.eq_ignoring_dofmap(&model));
+        assert!(sepika_job::weight_preparation::weights_are_current(
+            &restored,
+            settings.mass_method
+        ));
+        model = restored;
+        let inserted_master = model.diaphragms_of(StoryId(2)).next().unwrap().master;
+        let mut deletion_undo = UndoStack::default();
+        assert!(deletion_undo.run(
+            &mut model,
+            Box::new(sepika_edit::DeleteStory { story: StoryId(2) })
+        ));
+        let deleted_record = model.seismic_weight_generation.clone();
+        assert_eq!(deleted_record.as_ref().unwrap().calculated_weights.len(), 3);
+        assert!(deleted_record.as_ref().unwrap().automatic_diaphragms.iter().all(|constraint| {
+            !matches!(constraint, Constraint::RigidDiaphragm { master, .. } if *master == inserted_master)
+        }));
+        assert!(!deleted_record
+            .as_ref()
+            .unwrap()
+            .automatic_master_restraints
+            .iter()
+            .any(|(master, _)| *master == inserted_master));
+        let upper_constraint = model.constraints.iter().find(|constraint| matches!(constraint, Constraint::RigidDiaphragm { master, .. } if *master == upper)).unwrap();
+        assert_eq!(
+            model.is_automatic_seismic_diaphragm(upper_constraint),
+            manual_weight.is_none()
+        );
+        deletion_undo.undo(&mut model);
+        assert_eq!(model.seismic_weight_generation, record);
+        deletion_undo.redo(&mut model);
+        assert_eq!(model.seismic_weight_generation, deleted_record);
+    }
+}
+
+#[test]
+fn public_node_deletion_and_undo_remap_automatic_master_and_slave_snapshots() {
+    use sepika_core::dof::Dof6Mask;
+    use sepika_core::ids::NodeId;
+    use sepika_core::model::{Constraint, Node};
+    let mut model = seismic_freshness_fixture::two_storeys();
+    let settings = sepika_job::AnalysisSettings::default();
+    sepika_job::prepare::prepare_model(&mut model, &settings, None, true).unwrap();
+    model.visit_node_ids(|node| node.0 += 1);
+    model.nodes.insert(
+        0,
+        Node {
+            id: NodeId(0),
+            coord: [-1000.0, 0.0, -1000.0],
+            restraint: Dof6Mask::FIXED,
+            mass: None,
+            story: None,
+            support_spring: None,
+        },
+    );
+    let record = model.seismic_weight_generation.as_mut().unwrap();
+    record
+        .automatic_diaphragms
+        .push(Constraint::rigid_diaphragm(
+            sepika_core::ids::StoryId(1),
+            NodeId(0),
+            vec![NodeId(1)],
+        ));
+    record
+        .automatic_master_restraints
+        .push((NodeId(0), Dof6Mask::FIXED));
+    let before = model.seismic_weight_generation.clone();
+    let mut undo = sepika_edit::UndoStack::default();
+    assert!(undo.run(
+        &mut model,
+        Box::new(sepika_edit::DeleteNode { id: NodeId(0) })
+    ));
+    for constraint in &model.constraints {
+        if let Constraint::RigidDiaphragm { master, .. } = constraint {
+            assert!(model.is_automatic_seismic_diaphragm(constraint));
+            assert!(model.is_automatic_seismic_master_restraint(*master));
+        }
+    }
+    let deleted = model.seismic_weight_generation.clone();
+    assert_eq!(
+        deleted.as_ref().unwrap().automatic_diaphragms.len() + 1,
+        before.as_ref().unwrap().automatic_diaphragms.len()
+    );
+    assert_eq!(
+        deleted.as_ref().unwrap().automatic_master_restraints.len() + 1,
+        before.as_ref().unwrap().automatic_master_restraints.len()
+    );
+    assert_eq!(
+        deleted.as_ref().unwrap().input_key,
+        before.as_ref().unwrap().input_key
+    );
+    assert_eq!(
+        deleted.as_ref().unwrap().output_key,
+        before.as_ref().unwrap().output_key
+    );
+
+    undo.undo(&mut model);
+    assert_eq!(model.seismic_weight_generation, before);
+    undo.redo(&mut model);
+    assert_eq!(model.seismic_weight_generation, deleted);
+    model.materials[0].density = 2.6e-9;
+    sepika_job::prepare::prepare_model(&mut model, &settings, None, false).unwrap();
+    for (story, expected_n) in
+        model
+            .layers()
+            .iter()
+            .zip(seismic_freshness_fixture::expected_weights(
+                2.6e-9, 0.0, 0.0,
+            ))
+    {
+        assert!((story.weight.unwrap() - expected_n).abs() < 1e-8);
+    }
+    for constraint in &model.constraints {
+        if let Constraint::RigidDiaphragm { story, weight, .. } = constraint {
+            assert_eq!(*weight, model.stories[story.index()].seismic_weight);
         }
     }
 }

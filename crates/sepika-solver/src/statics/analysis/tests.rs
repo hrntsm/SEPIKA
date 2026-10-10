@@ -3369,3 +3369,53 @@ fn mixed_steel_period_excludes_below_ground_height_and_matches_hand_load() {
     assert_eq!(building_height_mm(&model), 30_000.0);
     assert_eq!(steel_height_ratio(&model), 0.0);
 }
+
+#[test]
+fn seismic_multiple_diaphragm_weights_require_complete_consistent_inputs() {
+    let mut model = seismic_two_layer_contract_model();
+    if let Constraint::RigidDiaphragm { weight, .. } = &mut model.constraints[0] {
+        *weight = Some(70_000.0);
+    }
+    let mut node = model.nodes[1].clone();
+    node.id = NodeId(model.nodes.len() as u32);
+    let master = node.id;
+    model.nodes.push(node);
+    model.constraints.push(Constraint::RigidDiaphragm {
+        story: StoryId(1),
+        master,
+        slaves: Vec::new(),
+        weight: Some(30_000.0),
+        ci_override: Some(0.3),
+    });
+    let cfg = SeismicCfg::default();
+    let case = build_seismic_load_case_from_model(&model, cfg, 0.5).unwrap();
+    assert!((case.nodal.iter().map(|load| load.values[0]).sum::<f64>() - 43_000.0).abs() < 1e-8);
+    for weight in [
+        None,
+        Some(0.0),
+        Some(-1.0),
+        Some(f64::NAN),
+        Some(f64::INFINITY),
+    ] {
+        let mut invalid = model.clone();
+        if let Constraint::RigidDiaphragm { weight: value, .. } =
+            invalid.constraints.last_mut().unwrap()
+        {
+            *value = weight;
+        }
+        assert!(seismic_distribution_for_model(&invalid, cfg, 0.5)
+            .unwrap_err()
+            .to_string()
+            .contains("有限の正の重量"));
+    }
+    if let Constraint::RigidDiaphragm { weight, .. } = model.constraints.last_mut().unwrap() {
+        *weight = Some(40_000.0);
+    }
+    assert!(seismic_distribution_for_model(&model, cfg, 0.5)
+        .unwrap_err()
+        .to_string()
+        .contains("階重量が一致しません"));
+    let mut partial_zero = seismic_two_layer_contract_model();
+    partial_zero.stories[1].seismic_weight = Some(0.0);
+    assert!(seismic_distribution_for_model(&partial_zero, cfg, 0.5).is_err());
+}

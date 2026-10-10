@@ -167,6 +167,10 @@ pub struct Model {
     pub source_stories_initialized: bool,
     #[serde(default)]
     pub stb_strengths: StbStrengthInput,
+    /// 地震用重量の入力識別・算定値・生成出力。未生成は `None`。
+    #[serde(default)]
+    pub seismic_weight_generation: Option<SeismicWeightGeneration>,
+
     /// 壁の階重量生成方式。旧ファイル・未生成はNone（ケース方式へ推定しない）。
     #[serde(default)]
     pub wall_weight_generation: Option<WallWeightGenerationMode>,
@@ -1189,6 +1193,7 @@ impl Model {
             && self.lumped_vibration_cases == other.lumped_vibration_cases
             && self.generated_masters == other.generated_masters
             && self.damper_mass_generation == other.damper_mass_generation
+            && self.seismic_weight_generation == other.seismic_weight_generation
             && self.wall_weight_generation == other.wall_weight_generation
             && self.mass_method == other.mass_method
             && self.slab_thickness == other.slab_thickness
@@ -1325,7 +1330,11 @@ impl Model {
                 f(n);
             }
         }
-        for c in &mut self.constraints {
+        for c in self.constraints.iter_mut().chain(
+            self.seismic_weight_generation
+                .iter_mut()
+                .flat_map(|record| &mut record.automatic_diaphragms),
+        ) {
             match c {
                 Constraint::RigidDiaphragm { master, slaves, .. }
                 | Constraint::RigidLink { master, slaves, .. } => {
@@ -1342,6 +1351,11 @@ impl Model {
                 }
             }
         }
+        if let Some(record) = &mut self.seismic_weight_generation {
+            for (master, _) in &mut record.automatic_master_restraints {
+                f(master);
+            }
+        }
         for lc in &mut self.load_cases {
             for nl in &mut lc.nodal {
                 f(&mut nl.node);
@@ -1355,6 +1369,11 @@ impl Model {
     /// 階の追加・削除では「ID＝配列位置」の不変条件を保つために ID の繰り上げが
     /// 必要になる。参照箇所を呼び出し側へ散らさないよう、走査はここに集約する。
     pub fn visit_story_ids(&mut self, mut f: impl FnMut(&mut StoryId)) {
+        if let Some(record) = &mut self.seismic_weight_generation {
+            for (story, _) in &mut record.calculated_weights {
+                f(story);
+            }
+        }
         for story in &mut self.stories {
             f(&mut story.id);
         }
@@ -1363,7 +1382,11 @@ impl Model {
                 f(sid);
             }
         }
-        for c in &mut self.constraints {
+        for c in self.constraints.iter_mut().chain(
+            self.seismic_weight_generation
+                .iter_mut()
+                .flat_map(|record| &mut record.automatic_diaphragms),
+        ) {
             if let Constraint::RigidDiaphragm { story, .. } = c {
                 f(story);
             }
@@ -2187,5 +2210,111 @@ mod node_reference_tests {
         assert!(!model.node_referenced_by_regions_or_plates(NodeId(6)));
         // 11 はどこからも参照されない対照節点。
         assert!(!model.node_referenced_by_regions_or_plates(NodeId(11)));
+    }
+}
+
+/// 地震用重量の依存入力と生成結果の一致を確認する記録。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SeismicWeightGeneration {
+    pub input_key: Vec<u8>,
+    pub output_key: Vec<u8>,
+    /// 階 ID と自動算定重量 [N]。採用重量の手入力とは別に保持する。
+    pub calculated_weights: Vec<(StoryId, f64)>,
+    #[serde(default)]
+    pub automatic_diaphragms: Vec<Constraint>,
+    #[serde(default)]
+    pub automatic_master_restraints: Vec<(NodeId, crate::dof::Dof6Mask)>,
+}
+
+impl SeismicWeightGeneration {
+    /// 削除された節点を含む生成由来を除外し、再採番後の別節点との誤照合を防ぐ。
+    pub fn retain_node_references(&mut self, mut keep: impl FnMut(NodeId) -> bool) {
+        self.automatic_diaphragms
+            .retain(|constraint| match constraint {
+                Constraint::RigidDiaphragm { master, slaves, .. }
+                | Constraint::RigidLink { master, slaves, .. } => {
+                    keep(*master) && slaves.iter().copied().all(&mut keep)
+                }
+                Constraint::Mpc { master, terms } => {
+                    keep(*master) && terms.iter().all(|(node, _, _)| keep(*node))
+                }
+            });
+        self.automatic_master_restraints
+            .retain(|(master, _)| keep(*master));
+    }
+
+    /// 自動生成の剛床設定が利用者に変更されていないかを確認する。
+    pub fn is_automatic_diaphragm(&self, constraint: &Constraint) -> bool {
+        self.automatic_diaphragms
+            .iter()
+            .any(|generated| match (generated, constraint) {
+                (
+                    Constraint::RigidDiaphragm {
+                        story: a,
+                        master: b,
+                        slaves: c,
+                        ci_override: d,
+                        weight: e,
+                    },
+                    Constraint::RigidDiaphragm {
+                        story: x,
+                        master: y,
+                        slaves: z,
+                        ci_override: w,
+                        weight: v,
+                    },
+                ) => a == x && b == y && c == z && d == w && e == v,
+                _ => false,
+            })
+    }
+}
+
+impl Model {
+    /// 生成記録と一致する未編集のマスター拘束を識別する。
+    pub fn is_automatic_seismic_master_restraint(&self, master: NodeId) -> bool {
+        if let Some(record) = &self.seismic_weight_generation {
+            return self.nodes.get(master.index()).is_some_and(|node| {
+                record
+                    .automatic_master_restraints
+                    .contains(&(master, node.restraint))
+            });
+        }
+        self.generated_masters.contains(&master)
+            && self.constraints.iter().any(|constraint| {
+                matches!(constraint, Constraint::RigidDiaphragm { master: id, .. } if *id == master)
+                    && self.is_automatic_seismic_diaphragm(constraint)
+            })
+    }
+
+    /// 記録済み自動剛床、または未記録の全床自動剛床を識別する。
+    pub fn is_automatic_seismic_diaphragm(&self, constraint: &Constraint) -> bool {
+        if let Some(record) = &self.seismic_weight_generation {
+            return record.is_automatic_diaphragm(constraint);
+        }
+        let Constraint::RigidDiaphragm {
+            story,
+            master,
+            slaves,
+            ci_override,
+            ..
+        } = constraint
+        else {
+            return false;
+        };
+        ci_override.is_none()
+            && self.generated_masters.contains(master)
+            && self.stories.get(story.index()).is_some_and(|s| {
+                let floor_nodes: Vec<_> = s
+                    .node_ids
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        self.nodes.get(id.index()).is_some_and(|node| {
+                            (node.coord[2] - s.elevation).abs() <= DIAPHRAGM_LEVEL_TOL_MM
+                        })
+                    })
+                    .collect();
+                floor_nodes == *slaves
+            })
     }
 }

@@ -328,6 +328,10 @@ impl EditCommand for DeleteNode {
         {
             return Box::new(Noop);
         }
+        let seismic_weight_generation = model.seismic_weight_generation.clone();
+        if let Some(record) = &mut model.seismic_weight_generation {
+            record.retain_node_references(|node| node != self.id);
+        }
         let source_stories = model.source_stories.clone();
         let stb_node_ids = model.stb_node_ids.clone();
         let story_membership = model.stories.iter().map(|s| s.node_ids.clone()).collect();
@@ -361,6 +365,7 @@ impl EditCommand for DeleteNode {
             }
         });
         Box::new(InsertNode {
+            seismic_weight_generation,
             index: idx,
             coord: removed.coord,
             restraint: removed.restraint,
@@ -382,6 +387,7 @@ impl EditCommand for DeleteNode {
 
 /// 指定インデックスへ節点を再挿入する（[`DeleteNode`] の逆操作専用）。
 pub struct InsertNode {
+    pub seismic_weight_generation: Option<sepika_core::model::SeismicWeightGeneration>,
     pub source_stories: Vec<sepika_core::model::SourceStory>,
     pub stb_node_ids: Vec<sepika_core::model::StbNodeIdentity>,
     pub story_membership: Vec<Vec<NodeId>>,
@@ -424,6 +430,7 @@ impl EditCommand for InsertNode {
                 axis.nodes.insert(pos, id);
             }
         }
+        model.seismic_weight_generation = self.seismic_weight_generation.clone();
         model.source_stories = self.source_stories.clone();
         model.stb_node_ids = self.stb_node_ids.clone();
         for (story, nodes) in model.stories.iter_mut().zip(&self.story_membership) {

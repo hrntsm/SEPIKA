@@ -820,6 +820,9 @@ pub(crate) fn delete_unref_nodes(model: &mut Model, candidates: &[NodeId]) -> us
             new_i += 1;
         }
     }
+    if let Some(record) = &mut model.seismic_weight_generation {
+        record.retain_node_references(|node| keep.get(node.index()).copied().unwrap_or(false));
+    }
     model.nodes = model
         .nodes
         .drain(..)
@@ -855,6 +858,51 @@ mod tests {
             story: None,
             support_spring: None,
         }
+    }
+
+    #[test]
+    fn region_node_compaction_discards_tombstones_and_remaps_live_generation_origins() {
+        use crate::dof::Dof6Mask;
+        use crate::ids::StoryId;
+        use crate::model::{Constraint, SeismicWeightGeneration};
+        let constraint = Constraint::rigid_diaphragm(StoryId(1), NodeId(2), vec![NodeId(1)]);
+        let mut model = Model {
+            nodes: (0..3).map(|i| node(i, i as f64, 0.0, 0.0)).collect(),
+            constraints: vec![constraint.clone()],
+            seismic_weight_generation: Some(SeismicWeightGeneration {
+                input_key: vec![1],
+                output_key: vec![2],
+                calculated_weights: vec![],
+                automatic_diaphragms: vec![
+                    constraint,
+                    Constraint::rigid_diaphragm(StoryId(1), NodeId(0), vec![NodeId(1)]),
+                ],
+                automatic_master_restraints: vec![
+                    (NodeId(0), Dof6Mask::FREE),
+                    (NodeId(2), Dof6Mask::FREE),
+                ],
+            }),
+            ..Default::default()
+        };
+        assert_eq!(delete_unref_nodes(&mut model, &[NodeId(0)]), 1);
+        assert_eq!(
+            model.constraints,
+            vec![Constraint::rigid_diaphragm(
+                StoryId(1),
+                NodeId(1),
+                vec![NodeId(0)]
+            )]
+        );
+        let record = model.seismic_weight_generation.as_ref().unwrap();
+        assert_eq!(record.automatic_diaphragms, model.constraints);
+        assert_eq!(
+            record.automatic_master_restraints,
+            vec![(NodeId(1), Dof6Mask::FREE)]
+        );
+        assert_eq!(record.input_key, vec![1]);
+        assert_eq!(record.output_key, vec![2]);
+        assert!(model.is_automatic_seismic_diaphragm(&model.constraints[0]));
+        assert!(model.is_automatic_seismic_master_restraint(NodeId(1)));
     }
 
     #[test]

@@ -8,7 +8,8 @@ use sepika_core::region_rebuild::rebuild_floor_regions;
 use sepika_core::wall_region_rebuild::rebuild_wall_regions;
 
 use crate::auto_loads::{
-    apply_auto_load_cases, apply_tip_loads, compute_auto_load_cases, compute_tip_loads,
+    apply_auto_load_cases, apply_tip_loads, clear_failed_tip_seismic_cases,
+    compute_gravity_auto_load_cases, compute_seismic_auto_load_cases, compute_tip_loads,
 };
 use crate::error::JobError;
 use crate::settings::AnalysisSettings;
@@ -19,6 +20,8 @@ pub struct PrepareReport {
     pub panels: Vec<sepika_element::springs::panel_gen::GeneratedPanel>,
     /// 荷重同期で発生した注意事項（SemiPrecise で固有周期未算定など）。
     pub notices: Vec<String>,
+    /// 領域再生成で節点が削除され、節点 ID の付け直しが発生した。
+    pub nodes_renumbered: bool,
 }
 
 /// 剛域と仕口パネルを自動算定してモデルへ反映する。
@@ -60,6 +63,46 @@ pub fn prepare_model_for_analysis(
     settings: &AnalysisSettings,
     design_period: Option<f64>,
 ) -> Result<PrepareReport, JobError> {
+    prepare_model(model, settings, design_period, false)
+}
+
+/// 明示準備では階未定義時に床レベルを初期化し、解析直前では既存階を保持する。
+/// 地震力算定不能は旧 Auto EX/EY を両方除去し、独立した重力解析を許す。
+pub fn prepare_model(
+    model: &mut Model,
+    settings: &AnalysisSettings,
+    design_period: Option<f64>,
+    initialize_stories: bool,
+) -> Result<PrepareReport, JobError> {
+    let mut work = model.clone();
+    let report = prepare_work_model(&mut work, settings, design_period, initialize_stories);
+    match report {
+        Ok(report) => {
+            *model = work;
+            Ok(report)
+        }
+        Err(error) => {
+            let seismic = compute_seismic_auto_load_cases(model, settings, design_period);
+            invalidate_generated_weights(model);
+            clear_standard_seismic_auto(model);
+            if seismic.notices.is_empty() {
+                Err(error)
+            } else {
+                Err(JobError::InvalidInput(format!(
+                    "{error}; {}",
+                    seismic.notices.join("; ")
+                )))
+            }
+        }
+    }
+}
+
+fn prepare_work_model(
+    model: &mut Model,
+    settings: &AnalysisSettings,
+    design_period: Option<f64>,
+    initialize_stories: bool,
+) -> Result<PrepareReport, JobError> {
     model
         .validate_attached_slabs()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
@@ -67,18 +110,102 @@ pub fn prepare_model_for_analysis(
     model.rebuild_floor_assignment_regions();
     model.rebuild_wall_assignment_regions();
     rebuild_floor_regions(model);
-    rebuild_wall_regions(model);
+    let wall_report = rebuild_wall_regions(model);
     let panels = apply_rigid_zones_and_panels(model);
-    let computed = compute_auto_load_cases(model, settings, design_period);
-    let computed = computed?;
+    let gravity = compute_gravity_auto_load_cases(model)?;
     let tip_loads = compute_tip_loads(model)?;
-    apply_auto_load_cases(model, &computed.cases);
+    apply_auto_load_cases(model, &gravity.cases);
     apply_tip_loads(model, tip_loads);
-    let mut notices = computed.notices;
+    let mut notices = gravity.notices;
+    let mut weights_valid = true;
+    if (!model.stories.is_empty() || initialize_stories)
+        && !crate::weight_preparation::weights_are_current(model, settings.mass_method)
+    {
+        let cases = crate::gravity_case_ids_for_seismic_weight(model);
+        let generated = if model.load_cases.iter().any(|case| {
+            case.kind == sepika_core::model::LoadCaseKind::Dead
+                && case.name == sepika_core::model::DL_CASE_NAME
+        }) {
+            sepika_load::story_gen::generate_stories_with_synced_self_weight(
+                model,
+                &cases,
+                settings.mass_method,
+            )
+        } else {
+            sepika_load::story_gen::generate_stories_with_opts(
+                model,
+                &cases,
+                true,
+                settings.mass_method,
+            )
+        };
+        match generated {
+            Ok(generated) => crate::weight_preparation::apply_generated_weights(
+                model,
+                generated,
+                settings.mass_method,
+            ),
+            Err(error) => {
+                weights_valid = false;
+                invalidate_generated_weights(model);
+                for name in [
+                    sepika_core::model::EX_CASE_NAME,
+                    sepika_core::model::EY_CASE_NAME,
+                ] {
+                    notices.push(format!("{name} の Ai 地震力を再生成できません: 地震用重量を再生成できません: {error}"));
+                }
+            }
+        }
+    }
+    let mut seismic = if weights_valid {
+        compute_seismic_auto_load_cases(model, settings, design_period)
+    } else {
+        crate::auto_loads::AutoLoadComputeResult {
+            cases: Vec::new(),
+            notices: Vec::new(),
+        }
+    };
+    clear_failed_tip_seismic_cases(model, &mut seismic);
+    apply_auto_load_cases(model, &seismic.cases);
+    notices.extend(seismic.notices);
     if let Some(warning) = model.unset_plate_assignment_warning() {
         notices.push(warning);
     }
-    Ok(PrepareReport { panels, notices })
+    Ok(PrepareReport {
+        panels,
+        notices,
+        nodes_renumbered: wall_report.deleted_nodes > 0,
+    })
+}
+
+fn invalidate_generated_weights(model: &mut Model) {
+    if model.generated_masters.is_empty() && model.seismic_weight_generation.is_none() {
+        return;
+    }
+    let record = model.seismic_weight_generation.get_or_insert_with(|| {
+        sepika_core::model::SeismicWeightGeneration {
+            input_key: Vec::new(),
+            output_key: Vec::new(),
+            calculated_weights: Vec::new(),
+            automatic_diaphragms: Vec::new(),
+            automatic_master_restraints: Vec::new(),
+        }
+    });
+    record.input_key.clear();
+    record.output_key.clear();
+    record.calculated_weights.clear();
+}
+
+/// 失敗した準備で旧自動地震力を使用させない。手入力荷重は保持する。
+pub fn clear_standard_seismic_auto(model: &mut Model) {
+    use sepika_core::model::{LoadCaseKind, EX_CASE_NAME, EY_CASE_NAME};
+    for case in &mut model.load_cases {
+        if case.kind == LoadCaseKind::Seismic
+            && matches!(case.name.as_str(), EX_CASE_NAME | EY_CASE_NAME)
+        {
+            case.replace_auto_loads(Vec::new(), Vec::new());
+        }
+    }
 }
 
 #[cfg(test)]
