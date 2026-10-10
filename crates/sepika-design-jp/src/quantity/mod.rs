@@ -384,11 +384,58 @@ fn quantity_area(section: &Section) -> Result<f64, String> {
     }
 }
 
+fn validate_circular_rc_posts(model: &Model) -> Result<(), String> {
+    for sm in model
+        .beams()
+        .chain(model.posts())
+        .filter(|sm| sm.kind == SecondaryMemberKind::Post)
+    {
+        let Some(sec) = sm.section.and_then(|id| model.sections.get(id.index())) else {
+            continue;
+        };
+        let Some(mat) = model.secondary_material(sm) else {
+            continue;
+        };
+        if sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category))
+            != StructureKind::Rc
+        {
+            continue;
+        }
+        let Some(SectionShape::RcColumnCircle { d, .. }) = sec.shape.as_ref() else {
+            continue;
+        };
+        if !d.is_finite() || *d <= 0.0 {
+            return Err(format!(
+                "{:?}: 円形RC間柱の直径 D [mm] は有限かつ正である必要があります（D={d}）",
+                sm.id
+            ));
+        }
+        let Some((ci, cj)) = model.secondary_member_end_points(sm) else {
+            continue;
+        };
+        let length_mm = dist3(ci, cj);
+        if !length_mm.is_finite() || length_mm <= 0.0 {
+            return Err(format!("{:?}: 円形RC間柱の解決端点間実長 L [mm] は有限かつ正である必要があります（L={length_mm}）", sm.id));
+        }
+        if !member::circle_column_concrete_volume(*d, length_mm).is_finite()
+            || !member::circle_column_formwork_area(*d, length_mm).is_finite()
+        {
+            return Err(format!(
+                "{:?}: 円形RC間柱の数量が有限範囲を超えています",
+                sm.id
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// 必要な材料領域が未知・不正の場合は理由付きエラー。未参照断面の未入力は許容する。
+/// 円形RC間柱の直径・解決実長 [mm] が有限かつ正でない場合は部材 ID と原因を返す。
 pub fn try_compute_quantity_takeoff(
     model: &Model,
     cfg: &QuantityCfg,
 ) -> Result<QuantityTakeoff, String> {
+    validate_circular_rc_posts(model)?;
     let ids: HashSet<_> = model
         .elements
         .iter()
@@ -417,7 +464,7 @@ pub fn try_compute_quantity_takeoff(
                 .try_cft_core_props()?;
         }
     }
-    Ok(compute_quantity_takeoff(model, cfg))
+    Ok(compute_quantity_takeoff_validated(model, cfg))
 }
 
 /// モデル走査用の前処理データ。
@@ -501,7 +548,13 @@ impl Ctx<'_> {
 /// （[`sepika_load::wall_expand::expand_wall_elements`]）を組み立てて数量拾いを
 /// 行う（呼び出し元に展開を要求しない。忘れると壁の数量が積算から静かに
 /// 消えるため。自重算定 `enumerate_self_weight` と同じ理由・同じパターン）。
+/// 円形RC間柱の直径・解決実長 [mm] が不正な場合は panic。診断には `try_compute_quantity_takeoff` を用いる。
 pub fn compute_quantity_takeoff(model: &Model, cfg: &QuantityCfg) -> QuantityTakeoff {
+    validate_circular_rc_posts(model).expect("円形RC間柱の数量を算定できません");
+    compute_quantity_takeoff_validated(model, cfg)
+}
+
+fn compute_quantity_takeoff_validated(model: &Model, cfg: &QuantityCfg) -> QuantityTakeoff {
     let expanded_storage;
     let model: &Model = if sepika_load::wall_expand::model_has_wall_plates_to_expand(model) {
         let (expanded, _wall_index, _wall_report) =
@@ -647,7 +700,7 @@ fn build_notes(model: &Model) -> Vec<String> {
         "基礎フーチングはモデルに定義がないため計上しない。".to_string(),
         "梁端ハンチは部材付帯情報（ハンチ長・せい増分・幅増分）から平均断面×ハンチ長で加算する（未入力の部材はハンチなし）。".to_string(),
         "鉄筋継手は個所数（圧接個所数）として集計する（梁 0.5 個所/本＋5m 毎 0.5、柱 1 個所/本＋7m 毎 1）。".to_string(),
-        "二次部材の小梁・間柱も数量に含める。同じ両端を持つ実部材の小梁は線材側のみ数え、二次部材側では重複計上しない。".to_string(),
+        "二次部材の小梁・間柱も数量に含める。同じ両端を持つ実部材の小梁・間柱は線材側のみ数え、二次部材側では重複計上しない。".to_string(),
         "鉄骨継手（部材付帯情報の継手位置）は位置・種別の保持のみで、プレート・ボルト重量は計上しない。".to_string(),
     ];
     if !model.slabs.is_empty() {
@@ -659,10 +712,10 @@ fn build_notes(model: &Model) -> Vec<String> {
     notes
 }
 
-/// 解析要素ではない二次部材（小梁・間柱）の数量。実部材化済み小梁は線材側で数える。
+/// 解析要素ではない二次部材（小梁・間柱）の数量。実部材化済みの二次部材は線材側で数える。
 fn secondary_member_quantity(ctx: &Ctx, sm: &SecondaryMember) -> Option<MemberQuantity> {
     let model = ctx.model;
-    if sm.kind == SecondaryMemberKind::Beam && model.secondary_member_materialized(sm) {
+    if model.secondary_member_materialized(sm) {
         return None;
     }
     let sec = model.sections.get(sm.section?.index())?;
@@ -709,6 +762,13 @@ fn secondary_member_quantity(ctx: &Ctx, sm: &SecondaryMember) -> Option<MemberQu
             weight_t: area * len * STEEL_UNIT_WEIGHT_T_PER_MM3,
         });
         return Some(item);
+    }
+    if sm.kind == SecondaryMemberKind::Post && structure == StructureKind::Rc {
+        if let Some(SectionShape::RcColumnCircle { d, .. }) = sec.shape.as_ref() {
+            item.concrete_m3 = member::circle_column_concrete_volume(*d, len) * 1e-9;
+            item.formwork_m2 = member::circle_column_formwork_area(*d, len) * 1e-6;
+            return Some(item);
+        }
     }
     let (width, depth) = match sec.shape.as_ref() {
         Some(SectionShape::RcBeamRect { b, d, .. } | SectionShape::SrcBeamRect { b, d, .. }) => {
@@ -892,8 +952,8 @@ fn column_quantity(
                     Some(ColumnRebar::Rect(rebar)),
                 ),
                 Some(SectionShape::RcColumnCircle { d, rebar }) => (
-                    std::f64::consts::PI * d * d / 4.0 * h,
-                    std::f64::consts::PI * d * h,
+                    member::circle_column_concrete_volume(*d, h),
+                    member::circle_column_formwork_area(*d, h),
                     Some(ColumnRebar::Circle(rebar)),
                 ),
                 _ => (
