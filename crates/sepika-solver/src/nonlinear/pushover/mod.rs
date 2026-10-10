@@ -22,6 +22,7 @@ pub(crate) mod member_response;
 mod response;
 mod shear_yield;
 mod step_record;
+pub mod story_response;
 mod types;
 pub mod wall_response;
 
