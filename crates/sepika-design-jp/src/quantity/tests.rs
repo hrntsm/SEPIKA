@@ -1070,3 +1070,236 @@ fn test_new_rc_rebar_unset_yields_zero_without_panic() {
         .filter(|i| i.category == MemberCategory::Column)
         .all(|i| i.rebar_weight_t() == 0.0));
 }
+
+fn circular_rc_post_model(end_mm: [f64; 3]) -> Model {
+    use sepika_core::ids::{SecondaryMemberId, StoryId};
+    use sepika_core::model::{SecondaryMemberEnds, Story};
+    let section = with_rc_materials(
+        SectionShape::RcColumnCircle {
+            d: 400.0,
+            rebar: RcCircleColumnRebar {
+                main_dia: 25.0,
+                count: 0,
+                cover: 40.0,
+                hoop: CircleColumnHoop {
+                    dia: 10.0,
+                    pitch: 100.0,
+                },
+            },
+        }
+        .to_section(SectionId(0), "円形断面".into()),
+    );
+    let mut lower = node(0, 0.0, 0.0, 0.0);
+    lower.story = Some(StoryId(0));
+    Model {
+        nodes: vec![lower, node(1, end_mm[0], end_mm[1], end_mm[2])],
+        sections: vec![section],
+        materials: vec![rc_material(0), rebar_material(1)],
+        unassigned_posts: vec![SecondaryMember {
+            id: SecondaryMemberId(448),
+            kind: SecondaryMemberKind::Post,
+            ends: SecondaryMemberEnds::Detached([[0.0; 3], end_mm]),
+            section: Some(SectionId(0)),
+            name: "間柱符号".into(),
+            gravity_end_shares: None,
+        }],
+        stories: vec![Story {
+            id: StoryId(0),
+            name: "1F".into(),
+            elevation: 0.0,
+            node_ids: vec![NodeId(0)],
+            seismic_weight: None,
+            weight_override: None,
+            structure: Default::default(),
+            level_kind: Default::default(),
+            dynamic_mass: None,
+            standard_floor_load: None,
+            column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
+        }],
+        ..Default::default()
+    }
+}
+
+fn assert_circular_post_quantity(q: &QuantityTakeoff) {
+    assert_eq!(q.items.len(), 1);
+    let item = &q.items[0];
+    assert!((item.concrete_m3 - 0.3769911184).abs() < 1e-9);
+    assert!((item.formwork_m2 - 3.7699111843).abs() < 1e-9);
+    assert_eq!(item.category, MemberCategory::Column);
+    assert_eq!(item.structure, StructureKind::Rc);
+    assert_eq!(item.story, "1F");
+    assert!(item.rebar.is_empty());
+    assert!(item.steel.is_none());
+    let totals = q.totals();
+    assert!((totals.concrete_m3 - 0.3769911184).abs() < 1e-9);
+    assert!((totals.formwork_m2 - 3.7699111843).abs() < 1e-9);
+    assert_eq!(q.totals_by_story()[0].0, "1F");
+    assert_eq!(q.totals_by_category()[0].0, MemberCategory::Column);
+    assert_eq!(q.totals_by_story()[0].1.concrete_m3, totals.concrete_m3);
+    assert_eq!(q.totals_by_category()[0].1.formwork_m2, totals.formwork_m2);
+}
+
+#[test]
+fn circular_rc_post_common_entry_uses_diameter_and_actual_length() {
+    for end_mm in [[0.0, 0.0, 3000.0], [1800.0, 0.0, 2400.0]] {
+        let mut model = circular_rc_post_model(end_mm);
+        model.sections[0].width = 900.0;
+        model.sections[0].depth = 700.0;
+        let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+        assert_circular_post_quantity(&q);
+        assert_eq!(q.items[0].label, "間柱符号");
+        assert_eq!(q.items[0].elem, None);
+        assert_eq!(q.items[0].slab, None);
+        model.unassigned_posts[0].name.clear();
+        assert_eq!(
+            try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+                .unwrap()
+                .items[0]
+                .label,
+            "円形断面"
+        );
+        model.unassigned_posts.clear();
+        model.elements.push(line_elem(0, 0, 1, 0));
+        let primary = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+        assert_circular_post_quantity(&primary);
+        assert_eq!(q.items[0].concrete_m3, primary.items[0].concrete_m3);
+        assert_eq!(q.items[0].formwork_m2, primary.items[0].formwork_m2);
+    }
+}
+
+#[test]
+fn circular_rc_post_materialized_is_counted_once_in_both_directions() {
+    for (start, end) in [(0, 1), (1, 0)] {
+        let mut model = circular_rc_post_model([0.0, 0.0, 3000.0]);
+        model.elements.push(line_elem(0, start, end, 0));
+        let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+        assert_circular_post_quantity(&q);
+        assert_eq!(q.items[0].elem, Some(ElemId(0)));
+    }
+}
+
+#[test]
+fn circular_rc_post_invalid_geometry_reports_id_and_cause() {
+    for diameter_mm in [0.0, -400.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut model = circular_rc_post_model([0.0, 0.0, 3000.0]);
+        if let Some(SectionShape::RcColumnCircle { d, .. }) = &mut model.sections[0].shape {
+            *d = diameter_mm;
+        }
+        let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+        assert!(error.contains("SecondaryMemberId(448)"), "{error}");
+        assert!(error.contains("直径 D"), "{error}");
+    }
+    for end_mm in [
+        [0.0; 3],
+        [f64::NAN, 0.0, 3000.0],
+        [0.0, 0.0, f64::INFINITY],
+        [0.0, 0.0, f64::MAX],
+    ] {
+        let model = circular_rc_post_model(end_mm);
+        let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+        assert!(error.contains("SecondaryMemberId(448)"), "{error}");
+        assert!(error.contains("実長 L"), "{error}");
+        assert!(std::panic::catch_unwind(|| compute_quantity_takeoff(
+            &model,
+            &QuantityCfg::default()
+        ))
+        .is_err());
+    }
+}
+
+#[test]
+fn secondary_rectangular_and_steel_paths_are_preserved() {
+    let mut model = circular_rc_post_model([0.0, 0.0, 3000.0]);
+    let SectionShape::RcColumnRect { rebar, .. } = rc_column_section(0).shape.unwrap() else {
+        unreachable!()
+    };
+    for shape in [
+        SectionShape::RcColumnRect {
+            b: 400.0,
+            d: 400.0,
+            rebar: rebar.clone(),
+        },
+        SectionShape::SrcColumnRect {
+            b: 400.0,
+            d: 400.0,
+            rebar,
+            steel_height: 200.0,
+            steel_width: 100.0,
+            steel_web_thick: 8.0,
+            steel_flange_thick: 10.0,
+        },
+    ] {
+        model.sections[0] = with_rc_materials(shape.to_section(SectionId(0), "矩形".into()));
+        let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+        assert!((q.items[0].concrete_m3 - 0.48).abs() < 1e-9);
+        assert!((q.items[0].formwork_m2 - 4.8).abs() < 1e-9);
+    }
+    model.unassigned_beams = std::mem::take(&mut model.unassigned_posts);
+    model.unassigned_beams[0].kind = SecondaryMemberKind::Beam;
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+    assert_eq!(q.items[0].category, MemberCategory::Beam);
+    assert!((q.items[0].concrete_m3 - 0.48).abs() < 1e-9);
+    assert!((q.items[0].formwork_m2 - 3.6).abs() < 1e-9);
+    model.elements.push(line_elem(0, 0, 1, 0));
+    assert_eq!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    model.elements.clear();
+    for kind in [SecondaryMemberKind::Beam, SecondaryMemberKind::Post] {
+        if kind == SecondaryMemberKind::Post {
+            model.unassigned_posts = std::mem::take(&mut model.unassigned_beams);
+            model.unassigned_posts[0].kind = kind;
+        }
+        for (shape, expected_structure, expected_weight_t) in [
+            (
+                SectionShape::SteelH {
+                    root_r: Some(0.0),
+                    height: 400.0,
+                    width: 200.0,
+                    web_thick: 8.0,
+                    flange_thick: 13.0,
+                },
+                StructureKind::S,
+                0.1929216,
+            ),
+            (
+                SectionShape::CftBox {
+                    height: 400.0,
+                    width: 400.0,
+                    thick: 10.0,
+                    corner_r: Some(0.0),
+                },
+                StructureKind::Cft,
+                0.36738,
+            ),
+        ] {
+            let mut section = shape.to_section(SectionId(0), "鋼材".into());
+            section.material = Some(MaterialId(0));
+            model.sections[0] = section;
+            model.materials[0] = steel_material(0);
+            let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+            assert_eq!(q.items[0].structure, expected_structure);
+            assert_eq!(q.items[0].concrete_m3, 0.0);
+            assert_eq!(q.items[0].formwork_m2, 0.0);
+            assert!((q.items[0].steel.as_ref().unwrap().length_m - 3.0).abs() < 1e-9);
+            assert!((q.items[0].steel.as_ref().unwrap().weight_t - expected_weight_t).abs() < 1e-9);
+        }
+    }
+}
+
+#[test]
+fn circular_rc_post_missing_endpoint_nodes_keeps_existing_exclusion() {
+    let mut model = circular_rc_post_model([0.0, 0.0, 3000.0]);
+    model.nodes.clear();
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap()
+            .items
+            .is_empty()
+    );
+}
