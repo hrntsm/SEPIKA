@@ -1216,6 +1216,43 @@ mod tests {
         }
     }
 
+    #[test]
+    fn lip_channel_tooltip_retains_all_unchecked_items_without_ratio_columns() {
+        use sepika_design_jp::{DesignCheck, DesignCtx, MemberForcesAt, SteelDesign};
+        let model = crate::sample::portal_frame();
+        let sec = sepika_core::section_shape::SectionShape::SteelLipChannel {
+            height: 150.0,
+            width: 75.0,
+            lip: 20.0,
+            thick: 2.3,
+        }
+        .to_section(sepika_core::ids::SectionId(0), "リップ検証".into());
+        let forces = MemberForcesAt {
+            pos: 0.5,
+            n: -1.0,
+            qy: 0.0,
+            qz: 0.0,
+            my: -1.0,
+            mz: 1.0,
+        };
+        let outcome = SteelDesign.check(&forces, &sec, &model.materials[0], &DesignCtx::default());
+        let (kinds, rows) = build_tooltip_rows(&[PositionCheck { xi: 0.5, outcome }]);
+        assert!(kinds.is_empty());
+        assert!(rows[0].values.is_empty());
+        let RowVerdict::Skipped(reason) = &rows[0].verdict else {
+            panic!("未検定の行判定を保持")
+        };
+        for item in [
+            "[局部座屈]",
+            "[ゆがみ座屈]",
+            "[全体座屈]",
+            "有効A[mm²]・有効Z[mm³]は未算定",
+            "[適用条件未確定]",
+        ] {
+            assert!(reason.contains(item));
+        }
+    }
+
     /// 検定位置がなければ表も空。
     #[test]
     fn build_tooltip_rows_empty_positions() {
