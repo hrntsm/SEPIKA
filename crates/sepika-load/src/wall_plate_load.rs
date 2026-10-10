@@ -226,6 +226,18 @@ pub fn dl_ratios(model: &Model, plate: &WallPlate) -> Result<Vec<f64>, String> {
     if plate.dl_support.is_some() && !plate.self_weight_shares.is_empty() {
         return Err(err("DL梁方式と任意辺負担率の同時指定はできません"));
     }
+    let flags = if plate.slit.any() {
+        resolved_slit_edge_flags(model, plate, region.boundary.len())
+            .ok_or_else(|| err("支持辺のスリット対応が未解決です"))?
+    } else {
+        vec![false; region.boundary.len()]
+    };
+    let checked = |ratios: Vec<f64>| {
+        if ratios.iter().zip(&flags).any(|(r, s)| *r > 0.0 && *s) {
+            return Err(err("選択したDL支持辺がスリットで切れています"));
+        }
+        Ok(ratios)
+    };
     let coords = plate
         .boundary_coords(model)
         .ok_or_else(|| err("支持境界が未設定です"))?;
@@ -239,7 +251,7 @@ pub fn dl_ratios(model: &Model, plate: &WallPlate) -> Result<Vec<f64>, String> {
         if !plate.has_valid_self_weight_shares(model) {
             return Err(err("DL支持方式または有効な任意辺負担率が未指定です"));
         }
-        return Ok(plate.self_weight_shares.clone());
+        return checked(plate.self_weight_shares.clone());
     }
     if horizontal.len() != 2 {
         return Err(err("三方式に必要な上下の水平支持梁を解決できません"));
@@ -264,24 +276,14 @@ pub fn dl_ratios(model: &Model, plate: &WallPlate) -> Result<Vec<f64>, String> {
                 let cut = (w.z_range_mm[0] + w.z_range_mm[1]) / 2.0;
                 let a = w.band(w.z_range_mm[0] - 1.0, cut)?.design_n;
                 if w.totals.design_n == 0.0 {
-                    return Ok(ratios);
+                    return checked(ratios);
                 }
                 ratios[lower] = a / w.totals.design_n;
                 ratios[upper] = 1.0 - ratios[lower];
             }
         }
     }
-    let flags = if plate.slit.any() {
-        resolved_slit_edge_flags(model, plate, ratios.len())
-            .ok_or_else(|| err("支持辺のスリット対応が未解決です"))?
-    } else {
-        // 縁切り指定がない実支持区間には、境界頂点の節点対応は不要。
-        vec![false; ratios.len()]
-    };
-    if ratios.iter().zip(flags).any(|(r, s)| *r > 0.0 && s) {
-        return Err(err("選択したDL支持梁がスリットで切れています"));
-    }
-    Ok(ratios)
+    checked(ratios)
 }
 
 /// 要素にならない全壁版の自重を分配する（設計重量基準）。

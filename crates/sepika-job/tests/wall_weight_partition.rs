@@ -885,6 +885,26 @@ fn enclosed_partial_beam_spans_and_midspan_posts_support_all_dl_modes() {
                 .unwrap();
         close(synced.stories[1].seismic_weight.unwrap(), 28800.0);
         close(synced.stories[2].seismic_weight.unwrap(), 19200.0);
+        // 任意辺率でも同じ実支持・スリット契約を用いる。
+        model.wall_plates[0].dl_support = None;
+        model.wall_plates[0].self_weight_shares = vec![0.0, 0.0, 0.0, 1.0];
+        assert_eq!(
+            sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0]).unwrap(),
+            vec![0.0, 0.0, 0.0, 1.0]
+        );
+        let dl = sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model);
+        let total: f64 = dl.posts[&SecondaryMemberId(0)]
+            .member_loads
+            .iter()
+            .map(|l| match l {
+                MemberLoadKind::Distributed { a, b, w1, w2 } => (b - a) * (w1 + w2) / 2.0,
+                MemberLoadKind::Point { p, .. } => *p,
+            })
+            .sum();
+        close(total, 48000.0);
+        assert!(dl.primary.is_empty());
+        assert!(compute_gravity_auto_load_cases(&model).is_ok());
+        bands(&model, &[0.0, 28800.0, 19200.0, 0.0]);
         // 指定スリットが境界へ解決できない場合は切れていないと推定しない。
         model.wall_plates[0].slit.column_face[0] = true;
         assert!(
@@ -897,6 +917,20 @@ fn enclosed_partial_beam_spans_and_midspan_posts_support_all_dl_modes() {
             Ok(_) => panic!("対応が未解決のスリットを拒否する"),
         };
         assert!(error.to_string().contains("壁版 0"));
+        model.wall_plates[0].dl_support = Some(WallDlSupport::HeightMidpoint);
+        model.wall_plates[0].self_weight_shares.clear();
+        model.wall_plates[0].section = None;
+        assert!(
+            sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0])
+                .unwrap_err()
+                .contains("スリット対応")
+        );
+        assert!(compute_gravity_auto_load_cases(&model).is_err());
+        model.wall_plates[0].slit = Default::default();
+        assert_eq!(
+            sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0]).unwrap(),
+            vec![0.0; 4]
+        );
     }
 }
 
@@ -1023,5 +1057,35 @@ fn attached_sign_reversal_openings_use_all_components_and_union() {
                 .unwrap_err()
                 .contains("外側"));
         }
+    }
+}
+
+#[test]
+fn resolved_arbitrary_dl_rates_obey_slit_edges_and_mode_exclusion() {
+    let mut model = fixture(6000.0);
+    model.wall_plates[0].openings = vec![opening(1000.0, 2000.0)];
+    model.wall_plates[0].dl_support = None;
+    model.wall_plates[0].slit.beam_face = [false, true];
+    model.wall_plates[0].self_weight_shares = vec![1.0, 0.0, 0.0, 0.0];
+    assert_eq!(
+        sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0]).unwrap(),
+        vec![1.0, 0.0, 0.0, 0.0]
+    );
+    assert!(compute_gravity_auto_load_cases(&model).is_ok());
+    bands(&model, &[0.0, 28800.0, 19200.0, 0.0]);
+    model.wall_plates[0].self_weight_shares = vec![0.0, 0.0, 1.0, 0.0];
+    assert!(sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0]).is_err());
+    assert!(compute_gravity_auto_load_cases(&model).is_err());
+    for mode in [
+        WallDlSupport::LowerBeam,
+        WallDlSupport::UpperBeam,
+        WallDlSupport::HeightMidpoint,
+    ] {
+        model.wall_plates[0].dl_support = Some(mode);
+        assert!(
+            sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0])
+                .unwrap_err()
+                .contains("同時指定")
+        );
     }
 }
