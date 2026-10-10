@@ -293,11 +293,17 @@ fn generated_master_restraints_follow_released_structure_and_preserve_user_edits
 
 #[test]
 fn edited_generated_diaphragm_weight_and_ci_survive_density_refresh() {
+    use sepika_core::dof::{Dof, Dof6Mask};
+
     for ci in [Some(0.3), None] {
         let mut model = fixture::two_storeys();
+        for node in &mut model.nodes[2..6] {
+            node.restraint.set_fixed(Dof::Uy);
+        }
         let settings = AnalysisSettings::default();
         prepare_model(&mut model, &settings, None, true).unwrap();
         let upper = model.generated_masters[2];
+        assert!(model.nodes[upper.index()].restraint.is_fixed(Dof::Uy));
         let key = weight_input_key(&model, settings.mass_method);
         let manual_weight = if ci.is_some() { 100000.0 } else { 100100.0 };
         let constraint = model
@@ -318,9 +324,14 @@ fn edited_generated_diaphragm_weight_and_ci_survive_density_refresh() {
             *ci_override = ci;
         }
         assert_ne!(weight_input_key(&model, settings.mass_method), key);
+        for node in &mut model.nodes[2..6] {
+            node.restraint = Dof6Mask::FREE;
+        }
         model.materials[0].density = 2.6e-9;
         let report = prepare_model(&mut model, &settings, None, false).unwrap();
         assert!(model.generated_masters.contains(&upper));
+        assert!(!model.nodes[upper.index()].restraint.is_fixed(Dof::Uy));
+        assert!(model.is_automatic_seismic_master_restraint(upper));
         assert!(model
             .constraints
             .iter()
