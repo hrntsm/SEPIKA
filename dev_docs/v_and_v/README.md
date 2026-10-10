@@ -74,7 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
-| [地震重量の鮮度と共通準備_Issue439_2026-10.md](地震重量の鮮度と共通準備_Issue439_2026-10.md) | 入力/生成出力一致・GUI/MCP実EX・atomic失敗・Modal世代・Undo/保存 | 🔶（入口Verification、#486適用制限と実測Validationは残る） |
+| [地震重量の鮮度と共通準備_Issue439_2026-10.md](地震重量の鮮度と共通準備_Issue439_2026-10.md) | 入力/生成出力一致・GUI/MCP実EX・atomic失敗・Modal世代・Undo/保存・追加/挿入階マスター一意 | 🔶（入口Verification、#486適用制限と実測Validationは残る） |
 
 | [荷重状態と検定対象_Issue487_2026-10.md](荷重状態と検定対象_Issue487_2026-10.md) | 荷重状態・用途別P・選択重力参照・GUI/MCP・組合せ非保存/単独結果保護・CSV・小梁床長期略算/選択短期未検定 | 🔶（Verification、現行法原文再取得・Validation未） |
 | [目的別確定層力_Issue442_2026-10.md](目的別確定層力_Issue442_2026-10.md) | 目的別run／step、符号付き層切断面、外力累積・支持ばね、壁側柱、GUI共通入口・MCP・保存・帳票 | ✅（Scope内Verification。一般配置・実験Validation・現行法全網羅は未完） |
