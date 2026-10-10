@@ -230,9 +230,9 @@ impl App {
                     ui.selectable_value(
                         &mut self.core.analysis_cfg.ai_mode,
                         AiMode::SemiPrecise,
-                        "固有値",
+                        "固有値（地震力未対応）",
                     )
-                    .on_hover_text("固有値解析による 1 次周期（先に固有値解析の実行が必要）");
+                    .on_hover_text("参考周期。告示1793号第2ただし書の適用証拠・採用Rt下限の検証は未対応のため、標準EX/EYは生成しません");
                     ui.selectable_value(
                         &mut self.core.analysis_cfg.ai_mode,
                         AiMode::Approx,
@@ -248,7 +248,7 @@ impl App {
                             .range(0.7..=1.0),
                     )
                     .on_hover_text(
-                        "地震地域係数 Z（昭55建告1793号 別表第2）。建設地の値を入力します",
+                        "地震地域係数 Z（昭55建告1793号 第1の表）。建設地の値を入力します。地域の根拠は利用者が確認してください",
                     );
                     ui.label("地盤:");
                     use sepika_load::ai::SoilClass;
