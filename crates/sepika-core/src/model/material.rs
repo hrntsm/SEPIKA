@@ -85,6 +85,31 @@ impl Material {
         }
     }
 
+    /// 参照された鋼材の設計自重を検査する。参照部材と計算目的を診断に含める。
+    /// 非有限・負の密度、または物理重量が固定設計重量を超える場合はエラー。
+    pub fn validate_design_self_weight(&self, member: &str, purpose: &str) -> Result<(), String> {
+        if self.category != MaterialCategory::Steel {
+            return Ok(());
+        }
+        let context = format!(
+            "材料 {}、{member}、{purpose}: 入力ρ={} t/mm³",
+            self.id.0, self.density
+        );
+        if !self.density.is_finite() {
+            return Err(format!("{context}: 物理密度が非有限です"));
+        }
+        if self.density < 0.0 {
+            return Err(format!("{context}: 物理密度が負です"));
+        }
+        let physical_n_per_mm3 = self.density * crate::units::GRAVITY_MM_S2;
+        let design_n_per_mm3 =
+            crate::units::to_internal::unit_weight_kn_per_m3(crate::units::STEEL_UNIT_WEIGHT_KN_M3);
+        if physical_n_per_mm3 > design_n_per_mm3 {
+            return Err(format!("{context}: ρg={physical_n_per_mm3} N/mm³ が固定設計単位重量 {design_n_per_mm3} N/mm³（78.5 kN/m³）を超え、設計自重を過小評価するため計算できません"));
+        }
+        Ok(())
+    }
+
     /// CFT 充填コンクリートの単位体積重量 [kN/m³]（無筋 `ConcreteComposition::Plain`）。
     /// `fc` 未設定または 0 以下なら 0。
     fn cft_filling_unit_weight_kn_m3(&self) -> f64 {
@@ -157,6 +182,58 @@ mod tests {
             concrete.design_unit_weight_n_per_mm3(),
             2.4e-9 * crate::units::GRAVITY_MM_S2,
             max_relative = 1e-12
+        );
+    }
+    #[test]
+    fn design_density_guard_uses_unrounded_boundary_and_separate_invalid_diagnostics() {
+        let boundary = 78.5e-6 / 9806.65;
+        for density in [0.0, 7.85e-9, boundary * (1.0 - 1e-8), boundary] {
+            assert!(steel(density)
+                .validate_design_self_weight("要素 12", "DL")
+                .is_ok());
+        }
+        for density in [boundary * (1.0 + 1e-8), 85e-6 / 9806.65] {
+            let error = steel(density)
+                .validate_design_self_weight("要素 12", "DL")
+                .unwrap_err();
+            for token in [
+                "材料 0",
+                "要素 12",
+                "入力ρ=",
+                "ρg=",
+                "78.5",
+                "DL",
+                "過小評価",
+            ] {
+                assert!(error.contains(token), "{error}");
+            }
+        }
+        for density in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let error = steel(density)
+                .validate_design_self_weight("要素 12", "DL")
+                .unwrap_err();
+            assert!(error.contains("非有限") && !error.contains("過小評価"));
+        }
+        assert!(steel(-1e-9)
+            .validate_design_self_weight("要素 12", "DL")
+            .unwrap_err()
+            .contains("負"));
+        for category in [MaterialCategory::Concrete, MaterialCategory::Rebar] {
+            let mut material = steel(85e-6 / 9806.65);
+            material.category = category;
+            assert!(material
+                .validate_design_self_weight("要素 12", "DL")
+                .is_ok());
+        }
+        assert_relative_eq!(
+            steel(7.85e-9).density * 9806.65 * 1e9 / 1000.0,
+            76.9822025,
+            epsilon = 1e-10
+        );
+        assert_relative_eq!(
+            steel(85e-6 / 9806.65).density * 9806.65 * 1e9 / 1000.0 - 78.5,
+            6.5,
+            epsilon = 1e-10
         );
     }
 }

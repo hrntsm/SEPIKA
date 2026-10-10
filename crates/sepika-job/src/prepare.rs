@@ -86,8 +86,7 @@ pub fn prepare_model(
         }
         Err(error) => {
             let seismic = compute_seismic_auto_load_cases(model, settings, design_period);
-            invalidate_generated_weights(model);
-            clear_standard_seismic_auto(model);
+            invalidate_design_weights(model);
             if seismic.notices.is_empty() {
                 Err(error)
             } else {
@@ -176,6 +175,19 @@ fn prepare_work_model(
         notices,
         nodes_renumbered: wall_report.deleted_nodes > 0,
     })
+}
+
+/// 設計重量の準備失敗で旧階重量と標準Auto DL/EX/EYを無効化する。手入力は保持する。
+pub fn invalidate_design_weights(model: &mut Model) {
+    invalidate_generated_weights(model);
+    clear_standard_seismic_auto(model);
+    for case in &mut model.load_cases {
+        if case.kind == sepika_core::model::LoadCaseKind::Dead
+            && case.name == sepika_core::model::DL_CASE_NAME
+        {
+            case.replace_auto_loads(Vec::new(), Vec::new());
+        }
+    }
 }
 
 fn invalidate_generated_weights(model: &mut Model) {

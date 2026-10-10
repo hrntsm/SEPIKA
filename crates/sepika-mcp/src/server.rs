@@ -1283,4 +1283,42 @@ mod tests {
             assert!((actual - expected).abs() < 1e-4, "{value} / {expected}");
         }
     }
+    mod high_density_steel_fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sepika-job/tests/fixtures/high_density_steel.rs"
+        ));
+    }
+
+    #[tokio::test]
+    async fn public_mcp_high_density_steel_rejects_existing_design_load_case_and_recovers() {
+        let dir = test_store_dir("high_density_steel_501");
+        let mut model = high_density_steel_fixture::steel_frame();
+        sepika_job::prepare::prepare_model(&mut model, &Default::default(), None, true).unwrap();
+        let ex = model
+            .load_cases
+            .iter()
+            .find(|c| c.name == "EX")
+            .unwrap()
+            .id
+            .0;
+        let server = SepikaServer::new(make_state(model, &dir));
+        server.state.lock().await.model.materials[0].density = 85e-6 / 9806.65;
+        let mut args = run_args(JobKind::LinearStatic);
+        args.load_case = Some(ex);
+        let result = server.analysis_run(Parameters(args)).await.unwrap();
+        let status = wait_for_terminal(&server, &extract_job_id(&result)).await;
+        let text = format!("{status:?}");
+        assert!(
+            text.contains("材料 0") && text.contains("過小評価"),
+            "{text}"
+        );
+        assert!(!matches!(status, JobStatus::Done { .. }));
+        server.state.lock().await.model.materials[0].density = 7.85e-9;
+        let mut args = run_args(JobKind::LinearStatic);
+        args.load_case = Some(ex);
+        let result = server.analysis_run(Parameters(args)).await.unwrap();
+        let status = wait_for_terminal(&server, &extract_job_id(&result)).await;
+        assert!(matches!(status, JobStatus::Done { .. }), "{status:?}");
+    }
 }

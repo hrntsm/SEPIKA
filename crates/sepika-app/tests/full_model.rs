@@ -2542,7 +2542,7 @@ fn slab_floor_load_reaches_primary_frame() {
     let model = &app.core.model;
 
     // 期待値: 全床板の固定荷重 × XY 投影面積（`compute_dl_beam_loads` と同じ強度）。
-    let extra = sepika_load::wall_attached::floor_region_wall_extra_intensity(model);
+    let extra = sepika_load::wall_attached::floor_region_wall_extra_intensity(model).unwrap();
     let w_of = |slab: &sepika_core::model::Slab| {
         model.slab_dead_intensity(slab) + extra.get(&slab.id).copied().unwrap_or(0.0)
     };

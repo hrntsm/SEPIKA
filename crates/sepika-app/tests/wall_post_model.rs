@@ -294,7 +294,7 @@ fn test_split_wall_plates_are_drawn_as_wall_plates() {
 #[test]
 fn test_wall_weight_is_split_between_columns_and_post() {
     let model = wall_post_model();
-    let out = sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model);
+    let out = sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model).unwrap();
 
     let post = out
         .posts

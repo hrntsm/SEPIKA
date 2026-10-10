@@ -180,7 +180,7 @@ fn 領域を覆う壁版も明示dl支持へ一度だけ分配する() {
         posts: Vec::new(),
     }];
     assert!(m.wall_plate_covers_region(&m.wall_plates[0]));
-    let out = distribute_enclosed_wall_plates(&m);
+    let out = distribute_enclosed_wall_plates(&m).unwrap();
     assert!(out.posts.is_empty());
     assert_eq!(out.primary.len(), 1);
     assert!((out.primary[0].cmq.q_i + out.primary[0].cmq.q_j - full_weight()).abs() < 1e-6);
@@ -211,7 +211,7 @@ fn 領域を覆っても断面が無ければ分配の対象になる() {
     assert!(m.wall_plate_covers_region(&m.wall_plates[0]));
     assert!(!m.wall_plate_becomes_element(&m.wall_plates[0]));
 
-    let out = distribute_enclosed_wall_plates(&m);
+    let out = distribute_enclosed_wall_plates(&m).unwrap();
     let primary_total: f64 = out
         .primary
         .iter()
@@ -247,7 +247,7 @@ fn 領域を覆っても断面が無ければ分配の対象になる() {
 #[test]
 fn 間柱で分割された壁は左右の鉛直辺へ半分ずつ配る() {
     let m = split_by_post();
-    let out = distribute_enclosed_wall_plates(&m);
+    let out = distribute_enclosed_wall_plates(&m).unwrap();
 
     let post = out
         .posts
@@ -561,7 +561,7 @@ fn 柱に並走する間柱は柱の荷重を奪わない() {
         "柱に並走する間柱は割当領域の境界に残らない: {boundaries:?}"
     );
 
-    let out = distribute_enclosed_wall_plates(&m);
+    let out = distribute_enclosed_wall_plates(&m).unwrap();
     assert!(
         !out.posts
             .contains_key(&sepika_core::ids::SecondaryMemberId(1)),
@@ -645,7 +645,7 @@ fn 間柱端が梁中間にある壁版も割当領域の支持部材へ自重�
         SupportMemberId::Secondary(SecondaryMemberId(0))
     );
 
-    let out = distribute_enclosed_wall_plates(&m);
+    let out = distribute_enclosed_wall_plates(&m).unwrap();
     let post = out
         .posts
         .get(&SecondaryMemberId(0))

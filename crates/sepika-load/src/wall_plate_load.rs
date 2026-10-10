@@ -295,7 +295,7 @@ pub fn dl_ratios(model: &Model, plate: &WallPlate) -> Result<Vec<f64>, String> {
 }
 
 /// 要素にならない全壁版の自重を分配する（設計重量基準）。
-pub fn distribute_enclosed_wall_plates(model: &Model) -> EnclosedWallLoads {
+pub fn distribute_enclosed_wall_plates(model: &Model) -> Result<EnclosedWallLoads, String> {
     distribute_enclosed_wall_plates_with_basis(model, crate::cascade::SelfWeightBasis::Design)
 }
 
@@ -304,7 +304,12 @@ pub fn distribute_enclosed_wall_plates(model: &Model) -> EnclosedWallLoads {
 pub fn distribute_enclosed_wall_plates_with_basis(
     model: &Model,
     basis: crate::cascade::SelfWeightBasis,
-) -> EnclosedWallLoads {
+) -> Result<EnclosedWallLoads, String> {
+    if basis == crate::cascade::SelfWeightBasis::Design {
+        for plate in &model.wall_plates {
+            model.validate_wall_design_self_weight(plate)?;
+        }
+    }
     let mut out = EnclosedWallLoads::default();
     for plate in &model.wall_plates {
         for share in edge_shares_with(model, plate, basis) {
@@ -314,7 +319,7 @@ pub fn distribute_enclosed_wall_plates_with_basis(
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// 間柱が受け持つぶんを、間柱の材軸局所の等分布荷重として積む。

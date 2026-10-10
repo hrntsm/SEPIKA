@@ -1390,3 +1390,66 @@ fn midspan_beam_floor_conserves_total_through_cascade() {
         w * area
     );
 }
+
+#[test]
+fn secondary_high_density_design_guard_does_not_block_physical_cascade() {
+    use sepika_core::section_shape::SectionShape;
+    for kind in [SecondaryMemberKind::Beam, SecondaryMemberKind::Post] {
+        let mut model = face_model(4000.0, [400.0; 2]);
+        model.unassigned_beams[0].kind = kind;
+        if kind == SecondaryMemberKind::Post {
+            let post = model.unassigned_beams.pop().unwrap();
+            model.unassigned_posts.push(post);
+        }
+        model.materials[0].density = 85e-6 / 9806.65;
+        let error = beam_self_weight_udl(
+            &model,
+            model.secondary_member(SecondaryMemberId(10)).unwrap(),
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("材料 0") && error.contains("二次部材 10"),
+            "{error}"
+        );
+        assert!(beam_mass_equiv_udl(
+            &model,
+            model.secondary_member(SecondaryMemberId(10)).unwrap()
+        )
+        .is_ok());
+        assert!(solve_with_basis(&model, |_| 0.0, true, SelfWeightBasis::Design).is_err());
+        assert!(solve_with_basis(&model, |_| 0.0, true, SelfWeightBasis::MassEquiv).is_ok());
+    }
+    for shape in [
+        SectionShape::CftBox {
+            height: 500.0,
+            width: 300.0,
+            thick: 10.0,
+            corner_r: Some(30.0),
+        },
+        SectionShape::CftPipe {
+            outer_dia: 400.0,
+            thick: 10.0,
+        },
+    ] {
+        let mut model = face_model(4000.0, [400.0; 2]);
+        let mut concrete = model.materials[0].clone();
+        concrete.id = MaterialId(1);
+        concrete.category = MaterialCategory::Concrete;
+        concrete.fc = Some(36.0);
+        concrete.density = 85e-6 / 9806.65;
+        model.materials.push(concrete);
+        let mut section = shape.to_section(SectionId(2), "CFT二次部材".into());
+        section.material = Some(MaterialId(1));
+        section.steel_material = Some(MaterialId(0));
+        model.sections.push(section);
+        model.unassigned_beams[0].section = Some(SectionId(2));
+        assert!(beam_self_weight_udl(&model, &model.unassigned_beams[0]).is_ok());
+        model.materials[0].density = 85e-6 / 9806.65;
+        let error = beam_self_weight_udl(&model, &model.unassigned_beams[0]).unwrap_err();
+        assert!(
+            error.contains("材料 0") && error.contains("CFT二次部材 10"),
+            "{error}"
+        );
+        assert!(beam_mass_equiv_udl(&model, &model.unassigned_beams[0]).is_ok());
+    }
+}

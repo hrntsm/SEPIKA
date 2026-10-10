@@ -646,7 +646,8 @@ fn compute_dl_beam_loads_checked(
     model: &Model,
 ) -> Result<Vec<BeamLoad>, sepika_load::floor::FloorDistributionError> {
     let beam_map = beam_elem_map(model);
-    let extra_intensity = sepika_load::wall_attached::floor_region_wall_extra_intensity(model);
+    let extra_intensity = sepika_load::wall_attached::floor_region_wall_extra_intensity(model)
+        .map_err(sepika_load::floor::FloorDistributionError::SelfWeight)?;
     slab_beam_loads_with_checked(
         model,
         |slab| {
@@ -662,6 +663,9 @@ pub fn compute_gravity_auto_load_cases(
     model: &Model,
 ) -> Result<AutoLoadComputeResult, crate::error::JobError> {
     for plate in &model.wall_plates {
+        model
+            .validate_wall_design_self_weight(plate)
+            .map_err(crate::error::JobError::InvalidInput)?;
         model
             .wall_weight(plate)
             .map_err(crate::error::JobError::InvalidInput)?;
@@ -839,7 +843,8 @@ fn compute_gravity_auto_load_cases_impl(
             .map_err(crate::error::JobError::InvalidInput)?;
     dl_nodal.extend(sw_nodal);
     dl_member.extend(sw_member);
-    let attached_wall_loads = sepika_load::wall_attached::attached_wall_beam_loads(model);
+    let attached_wall_loads = sepika_load::wall_attached::attached_wall_beam_loads(model)
+        .map_err(crate::error::JobError::InvalidInput)?;
     let (aw_nodal, aw_member) = slab_load_case_content(model, &attached_wall_loads);
     dl_nodal.extend(aw_nodal);
     dl_member.extend(aw_member);

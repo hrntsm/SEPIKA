@@ -101,7 +101,7 @@ pub fn self_weight_case_content(
             crate::wall_plate_load::dl_ratios(model, plate)?;
         }
     }
-    for load in crate::wall_plate_load::distribute_enclosed_wall_plates(model).primary {
+    for load in crate::wall_plate_load::distribute_enclosed_wall_plates(model)?.primary {
         let Some(elem) = model.element(load.elem) else {
             continue;
         };
