@@ -598,3 +598,165 @@ fn test_state_member_forces_matches_internal_force() {
         mz_i
     );
 }
+
+#[test]
+fn explicit_total_reference_subtracts_elastic_rotation_without_penalty() {
+    let mut elastic = make_test_beam();
+    elastic.e = 1000.0;
+    elastic.iz = 1e9;
+    elastic.length = 6000.0;
+    let total = sepika_material::HysteresisRule::Retrograde {
+        crack: (250000.0, 0.00025),
+        yield_point: (1e6, 0.004),
+        ultimate: (1.1e6, 0.016),
+    };
+    let mk = || {
+        Box::new(sepika_material::HysteresisMaterial::new(total.clone()))
+            as Box<dyn UniaxialMaterial>
+    };
+    let mut element = ConcentratedSpringBeam::new_one_component(elastic, mk(), mk())
+        .with_total_rotation_reference(1e9);
+    let model = sepika_core::model::Model::default();
+    let ctx = Ctx { model: &model };
+    let elastic_k = element.elastic.local_stiffness_flex_rc_reference();
+    let initial = element.tangent_stiffness(&ctx);
+    assert_eq!(initial.data, elastic_k.data);
+    assert_relative_eq!(initial.get(5, 5) + initial.get(5, 11), 1e9, epsilon = 1e-6);
+    assert_eq!(
+        element.mass_matrix(MassOption::Consistent).data,
+        element.elastic.mass_matrix(MassOption::Consistent).data
+    );
+    let du = |theta| LocalVec {
+        data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, theta, 0.0, 0.0, 0.0, 0.0, 0.0, theta],
+    };
+    element.update_state(&du(0.0001), true, &ctx);
+    assert!(element
+        .end_spring_rotations()
+        .unwrap()
+        .iter()
+        .all(|r| r.abs() < 1e-15));
+    element.update_state(&du(0.0039), true, &ctx);
+    assert_relative_eq!(
+        element.internal_force(&ctx).data[5],
+        1e6,
+        max_relative = 1e-9
+    );
+    assert_relative_eq!(element.thb_i, 0.001, epsilon = 1e-12);
+    assert_relative_eq!(element.rot_i, 0.004, epsilon = 1e-12);
+    assert_relative_eq!(
+        element.end_spring_rotations().unwrap()[0],
+        0.003,
+        epsilon = 1e-12
+    );
+    let saved = element.serialize_checkpoint();
+    let snapshot = element.snapshot_state();
+    element.update_state(&du(0.08), false, &ctx);
+    assert!(element
+        .tangent_stiffness(&ctx)
+        .data
+        .iter()
+        .all(|v| v.is_finite()));
+    element.revert_state();
+    assert_relative_eq!(
+        element.end_spring_rotations().unwrap()[0],
+        0.003,
+        epsilon = 1e-12
+    );
+    element.update_state(&du(0.08), true, &ctx);
+    assert!(element
+        .tangent_stiffness(&ctx)
+        .data
+        .iter()
+        .all(|v| v.is_finite()));
+    element.update_state(&du(-0.1), true, &ctx);
+    assert!(element
+        .internal_force(&ctx)
+        .data
+        .iter()
+        .all(|v| v.is_finite()));
+    element.restore_state(snapshot.as_ref());
+    assert_relative_eq!(
+        element.internal_force(&ctx).data[5],
+        1e6,
+        max_relative = 1e-9
+    );
+    element.deserialize_checkpoint(&saved).unwrap();
+    assert_relative_eq!(
+        element.end_spring_rotations().unwrap()[0],
+        0.003,
+        epsilon = 1e-12
+    );
+    let alpha_one = sepika_material::HysteresisRule::Retrograde {
+        crack: (250000.0, 0.00025),
+        yield_point: (1e6, 0.001),
+        ultimate: (1.1e6, 0.004),
+    };
+    let mk = || {
+        Box::new(sepika_material::HysteresisMaterial::new(alpha_one.clone()))
+            as Box<dyn UniaxialMaterial>
+    };
+    let mut element = ConcentratedSpringBeam::new_one_component(element.elastic, mk(), mk())
+        .with_total_rotation_reference(1e9);
+    element.elastic.committed_disp = [0.0; 12];
+    element.elastic.trial_disp = [0.0; 12];
+    element.update_state(&du(0.001), true, &ctx);
+    assert!(element
+        .end_spring_rotations()
+        .unwrap()
+        .iter()
+        .all(|r| r.abs() < 1e-15));
+    assert_relative_eq!(
+        element.internal_force(&ctx).data[5],
+        1e6,
+        max_relative = 1e-9
+    );
+}
+
+#[test]
+fn explicit_total_reference_preserves_takeda_unloading_values() {
+    let mut elastic = make_test_beam();
+    elastic.e = 1000.0;
+    elastic.iz = 1e9;
+    elastic.length = 6000.0;
+    let total = sepika_material::HysteresisRule::Takeda {
+        crack: (250000.0, 0.00025),
+        yield_point: (1e6, 0.004),
+        ultimate: (1.1e6, 0.016),
+        alpha: 0.4,
+    };
+    let mk = || {
+        Box::new(sepika_material::HysteresisMaterial::new(total.clone()))
+            as Box<dyn UniaxialMaterial>
+    };
+    let mut element = ConcentratedSpringBeam::new_one_component(elastic, mk(), mk())
+        .with_total_rotation_reference(1e9);
+    let model = sepika_core::model::Model::default();
+    let ctx = Ctx { model: &model };
+    let du = |theta| LocalVec {
+        data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, theta, 0.0, 0.0, 0.0, 0.0, 0.0, theta],
+    };
+    // 2Ryまで載荷した武田型の除荷勾配 Ku=S*(Rmax/Ry)^(-.4)。
+    element.update_state(&du(0.008), true, &ctx);
+    assert_relative_eq!(
+        element.internal_force(&ctx).data[5],
+        1_033_333.333_333_333_3,
+        max_relative = 1e-10
+    );
+    element.update_state(&du(-0.0001), true, &ctx);
+    assert_relative_eq!(
+        element.internal_force(&ctx).data[5],
+        957_547.505_007_813_4,
+        max_relative = 1e-10
+    );
+    assert_relative_eq!(
+        element.end_spring_rotations().unwrap()[0],
+        0.006_942_452_494_992_187,
+        epsilon = 1e-12
+    );
+    let tangent = element.tangent_stiffness(&ctx);
+    assert_relative_eq!(
+        tangent.get(5, 5) + tangent.get(5, 11),
+        757_858_283.255_199,
+        max_relative = 1e-10
+    );
+}
