@@ -1287,6 +1287,16 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
 #[test]
 fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
     let mut app = wall_bay_app();
+    app.core.analysis_cfg.push_use_drift_angle = false;
+    app.core.analysis_cfg.push_use_max_disp = true;
+    app.core.analysis_cfg.push_max_disp = 1.0;
+    app.core.analysis_cfg.push_steps = 4;
+    let section = &mut app.core.model.sections[2];
+    section.shape = Some(SectionShape::RcWall {
+        thickness: 150.0,
+        ps: 0.012,
+        pwh_ratio: None,
+    });
     let c = std::f64::consts::FRAC_1_SQRT_2;
     for node in &mut app.core.model.nodes {
         let [x, y, z] = node.coord;
@@ -1307,8 +1317,80 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
     let po = app.displayed_pushover().unwrap();
     let last = po.wall_history.as_ref().unwrap().last().unwrap();
     let wall = po.wall_response_at(last.elem, last.step).unwrap();
-    assert!(wall.qw_n.abs() > 100.0);
+    assert!(
+        wall.qw_n.abs() > 100.0,
+        "実壁の局所せん断は有限非ゼロ: Qw={}, Qdir={}, steps={}",
+        wall.qw_n,
+        wall.qdir_n,
+        po.steps.len()
+    );
     assert!((wall.qw_n.abs() - wall.qdir_n.abs()).abs() > 10.0);
+    assert!((wall.inplane_axis[0].abs() - c).abs() < 1e-12);
+    assert!((wall.inplane_axis[1].abs() - c).abs() < 1e-12);
+    let elem_id = last.elem;
+    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let elem = expanded.element(elem_id).unwrap();
+    let qu = sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(
+        elem, &expanded,
+    );
+    let geom = sepika_core::model::wall_element_geometry(elem, &expanded).unwrap();
+    let r2 = sepika_element::wall::wall_element::WallElement::opening_strength_reduction(
+        elem, &expanded,
+    );
+    let fc = expanded.element_material(elem).unwrap().fc.unwrap();
+    let tau_case_qw = 0.105 * fc * 150.0 * geom.lw * r2;
+    assert!(
+        tau_case_qw < 0.99 * qu[0],
+        "τu単独の試験で頭打ちに達しない: Qw={tau_case_qw}, Qu={qu:?}"
+    );
     app.core.design_rank_auto = true;
-    assert!(app.compute_holding_capacity().is_ok());
+    app.core.wall_structure = true;
+    use sepika_design_jp::secondary::holding_capacity::MemberRank;
+    for (qw, expected) in [
+        (qu[0], MemberRank::FD),
+        (-qu[1], MemberRank::FD),
+        (tau_case_qw, MemberRank::FB),
+    ] {
+        let bundle = app.core.scoped.results.as_mut().unwrap();
+        for po in [&mut bundle.pushover, &mut bundle.pushover_x]
+            .into_iter()
+            .flatten()
+        {
+            let wall = po
+                .wall_history
+                .as_mut()
+                .unwrap()
+                .last_mut()
+                .unwrap()
+                .response
+                .as_mut()
+                .unwrap();
+            wall.qw_n = qw;
+            wall.top.force_n = wall.inplane_axis.map(|component| qw * component);
+            wall.qdir_n = wall.top.force_n[0];
+            wall.bottom.force_n = wall.top.force_n.map(|force| -force);
+            wall.top.moment_nmm = [0.0; 3];
+            wall.bottom.moment_nmm = [
+                wall.height_mm * wall.top.force_n[1],
+                -wall.height_mm * wall.top.force_n[0],
+                0.0,
+            ];
+            wall.equilibrium_residual.force_n = [0.0; 3];
+            wall.equilibrium_residual.moment_nmm = [0.0; 3];
+            assert!((wall.qdir_n.abs() - c * qw.abs()).abs() < 1e-6);
+        }
+        let (holding, _) = app
+            .compute_holding_capacity()
+            .expect("斜め壁の専用応答で種別を判定");
+        assert_eq!(
+            holding
+                .member_ranks
+                .iter()
+                .find(|(id, _)| *id == elem_id)
+                .unwrap()
+                .1,
+            expected,
+            "Qdirへ投影して局所頭打ち/τuを低下させない"
+        );
+    }
 }

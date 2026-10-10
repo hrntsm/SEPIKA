@@ -330,7 +330,7 @@ impl App {
                                 elem.id
                             ));
                         }
-                        let shear_failure = wall.qdir_n.abs() >= 0.99 * qu;
+                        let shear_failure = wall.qw_n.abs() >= 0.99 * qu;
                         sepika_design_jp::secondary::src_rank::src_wall_type(shear_failure)
                     } else {
                         let fc = mat
@@ -351,7 +351,7 @@ impl App {
                                 elem, model,
                             );
                         let Some(tau_over_fc) =
-                            rc_wall_tau_over_fc(wall.qdir_n.abs(), *thickness, wall_len, r2, fc)
+                            rc_wall_tau_over_fc(wall.qw_n.abs(), *thickness, wall_len, r2, fc)
                         else {
                             return Err(format!("壁要素 {:?}: τu/Fc の入力が不正です", elem.id));
                         };
@@ -366,7 +366,7 @@ impl App {
                                 elem.id
                             ));
                         }
-                        let brittle = rc_wall_shear_brittle(wall.qdir_n.abs(), qu);
+                        let brittle = rc_wall_shear_brittle(wall.qw_n.abs(), qu);
                         let wall_structure = self.core.wall_structure;
                         rc_wall_type(tau_over_fc, wall_structure, brittle)
                     }
