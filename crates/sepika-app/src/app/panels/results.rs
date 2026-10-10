@@ -259,7 +259,7 @@ impl App {
                 .map(|l| l.name.clone())
                 .unwrap_or_else(|| sepika_core::model::default_story_name(i))
         };
-        let story_qu_kn: Vec<f64> = (0..n_stories)
+        let story_max_shear_kn: Vec<f64> = (0..n_stories)
             .map(|i| {
                 force_kn(
                     po.capacity_curve
@@ -270,14 +270,16 @@ impl App {
                 )
             })
             .collect();
-        if !story_qu_kn.is_empty() {
-            let line = story_qu_kn
+        if !story_max_shear_kn.is_empty() {
+            let line = story_max_shear_kn
                 .iter()
                 .enumerate()
                 .map(|(i, q)| format!("{} {:.1} kN", story_name(i), q))
                 .collect::<Vec<_>>()
                 .join(" / ");
-            ui.label(format!("層別 Qu: {line}"));
+            ui.label(format!(
+                "解析経過の層別最大せん断力（各層のピーク）: {line}"
+            ));
         }
 
         const STORY_COLORS: [egui::Color32; 8] = [

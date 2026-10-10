@@ -677,6 +677,31 @@ mod purpose_tests {
             .flatten()
         {
             po.qu = 150_000.0;
+            for point in &mut po.capacity_curve {
+                point.story_shear.fill(120_000.0);
+            }
+            po.capacity_curve
+                .first_mut()
+                .unwrap()
+                .story_shear
+                .fill(150_000.0);
+            let step = po.capacity_curve.last().unwrap().step;
+            let response = po
+                .confirmed_history
+                .as_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|r| r.step == step)
+                .unwrap();
+            for cut in &mut response.cuts {
+                let count = cut.forces.len() as f64;
+                for force in &mut cut.forces {
+                    force.force_n = 120_000.0 / count;
+                }
+                cut.external_n = 120_000.0;
+                cut.reference_n = 120_000.0;
+                cut.support_n = 0.0;
+            }
         }
         let ctx = egui::Context::default();
         ctx.global_style_mut(|style| style.animation_time = 0.0);
@@ -693,10 +718,44 @@ mod purpose_tests {
             .collect();
         assert!(labels.contains(&"解析経過の最大ベースシア = 150.0 kN"));
         assert!(!labels.iter().any(|text| text.contains("保有水平耐力 Qu")));
+        assert!(labels.iter().any(|text| text
+            .starts_with("解析経過の層別最大せん断力（各層のピーク）:")
+            && text.contains("150.0 kN")));
+        assert!(!labels.iter().any(|text| text.contains("層別 Qu:")));
         let csv = crate::summary::build_report_csv(&app);
         assert!(csv.contains("解析経過の最大ベースシア[kN],150.00"));
         assert!(!csv.contains("保有水平耐力Qu[kN]"));
         super::super::tests::select_holding_points(&mut app);
+        assert_eq!(
+            app.compute_holding_capacity().unwrap().0.stories[0].qu,
+            120_000.0
+        );
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.pushover_results_panel(ui)
+        });
+        let labels: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(labels.iter().any(|text| text
+            .starts_with("解析経過の層別最大せん断力（各層のピーク）:")
+            && text.contains("150.0 kN")));
+        assert!(!labels.iter().any(|text| text.contains("層別 Qu:")));
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(2000.0, 10000.0),
+                )),
+                ..Default::default()
+            },
+            |ui| crate::design_view::design_table(ui, &mut app),
+        );
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "120.0")));
         app.core
             .scoped
             .results
