@@ -30,14 +30,42 @@ fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
 /// 弾性としてモデル化することが仕様である要素（`Shell` / `PanelZone` / `NodalSpring`、
 /// および特性を専用の属性で持つ `Isolator` / `Damper` / `Brace`）は対象外。
 pub fn nonlinear_input_issues(model: &Model) -> Vec<String> {
+    nonlinear_input_issues_for_kind(model, sepika_core::model::AnalysisKind::Incremental)
+}
+
+/// 公称値で当該解析種別の履歴則と共通材料・幾何を診断する。未実行側の履歴則は拒否根拠にしない。
+pub fn nonlinear_input_issues_for_kind(
+    model: &Model,
+    kind: sepika_core::model::AnalysisKind,
+) -> Vec<String> {
+    nonlinear_input_issues_with_basis(model, kind, super::StrengthBasis::Nominal)
+}
+
+fn nonlinear_input_issues_with_basis(
+    model: &Model,
+    kind: sepika_core::model::AnalysisKind,
+    basis: super::StrengthBasis,
+) -> Vec<String> {
     let mut issues = Vec::new();
     for elem in &model.elements {
+        if let Some(issue) = super::springs::rc_reference_target_issue(elem, model) {
+            issues.push(format!("部材 ID {} のRC梁基準接続: {issue}", elem.id.0));
+            continue;
+        }
         let issue = match elem.kind {
             ElementKind::Wall => {
                 crate::wall::wall_element::WallElement::wall_shear_capacity_issue(elem, model)
             }
             ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
-                member_strength_issue(elem, model)
+                member_strength_issue(elem, model).or_else(|| {
+                    super::springs::rc_reference_issue(
+                        elem,
+                        model,
+                        super::springs::resolve_member_hysteresis(elem, model, kind),
+                        basis,
+                    )
+                    .map(|issue| format!("部材 ID {} のRC梁基準接続: {issue}", elem.id.0))
+                })
             }
             _ => None,
         };
@@ -48,10 +76,47 @@ pub fn nonlinear_input_issues(model: &Model) -> Vec<String> {
     issues
 }
 
+/// 明示RC梁基準の入力診断。未指定なら `None`、不適合なら当該解析種別の理由を返す。
+pub fn rc_beam_reference_input_issue(
+    data: &ElementData,
+    model: &Model,
+    kind: sepika_core::model::AnalysisKind,
+    basis: super::StrengthBasis,
+) -> Option<String> {
+    model.member_rc_beam_reference(data.id)?;
+    super::springs::rc_reference_target_issue(data, model)
+        .or_else(|| member_strength_issue(data, model))
+        .or_else(|| {
+            super::springs::rc_reference_issue(
+                data,
+                model,
+                super::springs::resolve_member_hysteresis(data, model, kind),
+                basis,
+            )
+        })
+}
+
 /// [`nonlinear_input_issues`] が不備を検出した場合に、解析を停止するための
 /// エラーメッセージ（先頭 [`MAX_LISTED`] 件＋残件数）を返す。
 pub fn ensure_nonlinear_input(model: &Model) -> Result<(), String> {
-    let issues = nonlinear_input_issues(model);
+    ensure_nonlinear_input_for_kind(model, sepika_core::model::AnalysisKind::Incremental)
+}
+
+/// 公称値で解析種別を指定して理由付き入力診断を行う。材料強度基準には `ensure_nonlinear_input_with_basis` を使う。
+pub fn ensure_nonlinear_input_for_kind(
+    model: &Model,
+    kind: sepika_core::model::AnalysisKind,
+) -> Result<(), String> {
+    ensure_nonlinear_input_with_basis(model, kind, super::StrengthBasis::Nominal)
+}
+
+/// 当該解析種別と実使用強度基準に整合する理由付き入力診断。
+pub fn ensure_nonlinear_input_with_basis(
+    model: &Model,
+    kind: sepika_core::model::AnalysisKind,
+    basis: super::StrengthBasis,
+) -> Result<(), String> {
+    let issues = nonlinear_input_issues_with_basis(model, kind, basis);
     if issues.is_empty() {
         return Ok(());
     }
@@ -193,6 +258,7 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
                 return Some(format!("部材 ID {} はスラブ協力付きRC梁ですが、集中ばねの方向別T形鉄筋比に必要なスラブ引張筋面積と正負別骨格を設定できません。矩形梁への代用は行わず解析を停止します", data.id.0));
             }
         }
+
         if let Err(err) = shape.validate_rebar() {
             return Some(format!(
                 "部材 ID {} の断面「{}」は実配筋の幾何が不整合です（{}）。\
@@ -318,3 +384,41 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
 
 #[cfg(test)]
 mod tests;
+
+/// 指定した有効荷重ケースだけで、RC逆対称基準と非三角部材荷重の矛盾を診断する。
+/// ケース未適用の重力荷重は拒否根拠としない。実M/Qの確認を代行するAPIではない。
+pub fn ensure_rc_beam_reference_loads(
+    model: &Model,
+    active_cases: &[sepika_core::ids::LoadCaseId],
+) -> Result<(), String> {
+    for case in model
+        .load_cases
+        .iter()
+        .filter(|case| active_cases.contains(&case.id))
+    {
+        for load in &case.member {
+            let Some(data) = model
+                .elements
+                .iter()
+                .find(|element| element.id == load.elem)
+            else {
+                continue;
+            };
+            if model.member_rc_beam_reference(data.id).is_none()
+                || !super::hinge_view::resolves_to_concentrated_spring(data, model)
+            {
+                continue;
+            }
+            let nonzero = match load.kind {
+                sepika_core::model::MemberLoadKind::Point { p, .. } => p != 0.0,
+                sepika_core::model::MemberLoadKind::Distributed { w1, w2, .. } => {
+                    w1 != 0.0 || w2 != 0.0
+                }
+            };
+            if nonzero {
+                return Err(format!("部材 ID {} の有効荷重ケース「{}」に中間部材荷重があります。一定せん断・三角形曲げのRC逆対称基準へ自動接続できません", data.id.0, case.name));
+            }
+        }
+    }
+    Ok(())
+}

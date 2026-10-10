@@ -23,7 +23,11 @@ mod wall_opening;
 pub use hinge_view::{
     build_hinge_view, resolves_to_concentrated_spring, AnalysisHingeModel, HingeView,
 };
-pub use input_check::{ensure_nonlinear_input, nonlinear_input_issues};
+pub use input_check::{
+    ensure_nonlinear_input, ensure_nonlinear_input_for_kind, ensure_nonlinear_input_with_basis,
+    ensure_rc_beam_reference_loads, nonlinear_input_issues, nonlinear_input_issues_for_kind,
+    rc_beam_reference_input_issue,
+};
 pub use regime::{resolve_force_regime, ResolvedRegime};
 pub use sepika_core::model::AnalysisKind;
 pub use springs::{
@@ -180,6 +184,9 @@ pub fn build_nonlinear_behavior(
     basis: StrengthBasis,
     kind: AnalysisKind,
 ) -> Box<dyn ElementBehavior> {
+    if let Some(issue) = springs::rc_reference_target_issue(data, model) {
+        panic!("部材 ID {} のRC梁基準接続: {issue}", data.id.0);
+    }
     match data.kind {
         ElementKind::Beam => {
             if let Some(axis) = crate::wall::side_column::wall_side_column_release(data, model) {
@@ -203,12 +210,26 @@ pub fn build_nonlinear_behavior(
                     }
                     let elem = crate::frame::beam::BeamElement::new(data, model);
                     let rule = resolve_member_hysteresis(data, model, kind);
+                    if let Some(issue) = springs::rc_reference_issue(data, model, rule, basis) {
+                        panic!("部材 ID {} のRC梁基準接続: {issue}", data.id.0);
+                    }
                     let (spring_i, spring_j, backbone) =
                         build_flexural_springs(data, model, rule, basis);
                     let beam =
                         crate::frame::concentrated::ConcentratedSpringBeam::new_one_component(
                             elem, spring_i, spring_j,
                         );
+                    let beam = if springs::uses_rc_alpha_reference(data, model)
+                        && matches!(
+                            rule,
+                            sepika_core::model::HysteresisModel::Takeda
+                                | sepika_core::model::HysteresisModel::Retrograde
+                                | sepika_core::model::HysteresisModel::MaxPointOriented
+                        ) {
+                        beam.with_total_rotation_reference(backbone.k_rot)
+                    } else {
+                        beam
+                    };
                     let beam = if backbone.use_mn {
                         let (my0, n_allow) = yield_moment_and_axial(data, model, basis);
                         beam.with_mn_interaction(my0, n_allow)

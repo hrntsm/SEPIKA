@@ -472,6 +472,11 @@ fn wall_bay_model() -> Model {
     );
     assert_eq!(report.unassigned_wall_plates, 0);
 
+    // 壁の応答・Dsを検証する周辺梁は、分布荷重を扱う独立の標準型骨格を使う。
+    for id in [ElemId(4), ElemId(8)] {
+        model.set_member_hysteresis(id, sepika_core::model::HysteresisModel::Standard);
+    }
+
     model
 }
 

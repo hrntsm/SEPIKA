@@ -7,6 +7,16 @@ use smallvec::SmallVec;
 
 impl BeamElement {
     pub fn local_stiffness_raw(&self) -> LocalMat {
+        let (e, g, iy, iz, l) = (self.e, self.g, self.iy, self.iz, self.length);
+        if l < 1e-12 {
+            return LocalMat::zeros(12);
+        }
+        let phiz = 12.0 * e * iz / (g * self.as_y * l * l);
+        let phiy = 12.0 * e * iy / (g * self.as_z * l * l);
+        self.local_stiffness_with_shear_factors(phiz, phiy)
+    }
+
+    fn local_stiffness_with_shear_factors(&self, phiz: f64, phiy: f64) -> LocalMat {
         let (e, g, a, iy, iz, jj, l) = (
             self.e,
             self.g,
@@ -16,11 +26,6 @@ impl BeamElement {
             self.j,
             self.length,
         );
-        if l < 1e-12 {
-            return LocalMat::zeros(12);
-        }
-        let phiz = 12.0 * e * iz / (g * self.as_y * l * l);
-        let phiy = 12.0 * e * iy / (g * self.as_z * l * l);
         let az = e * iz / ((1.0 + phiz) * l * l * l);
         let ay = e * iy / ((1.0 + phiy) * l * l * l);
 
@@ -136,6 +141,23 @@ impl BeamElement {
     pub(crate) fn local_stiffness_flex(&self) -> LocalMat {
         let k_raw = self.local_stiffness_flex_raw();
         self.condense_end_springs(&k_raw)
+    }
+
+    pub(crate) fn local_stiffness_flex_rc_reference(&self) -> LocalMat {
+        let (li, lj) = self.rigid_lengths();
+        let l = self.length - li - lj;
+        assert!(
+            l.is_finite() && l > 0.0,
+            "RC基準の柔部材長は正の有限値が必要です"
+        );
+        let mut beam = self.clone();
+        beam.length = l;
+        beam.end_cond = [EndCondition::Fixed, EndCondition::Fixed];
+        beam.a = self.a * (l / self.length);
+        beam.j = self.j * (l / self.length);
+        let phi_y = 12.0 * beam.e * beam.iy / (beam.g * beam.as_z * l * l);
+        let raw = beam.local_stiffness_with_shear_factors(0.0, phi_y);
+        beam.condense_end_springs(&raw)
     }
 
     pub(crate) fn local_stiffness_flex_raw(&self) -> LocalMat {

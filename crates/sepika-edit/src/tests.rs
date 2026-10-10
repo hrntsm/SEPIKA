@@ -8696,3 +8696,82 @@ fn 階コピーの断面復元は末尾の挿入削除情報を返す() {
         ]
     );
 }
+
+#[test]
+fn rc_reference_selection_undo_redo_preserves_hysteresis() {
+    use sepika_core::model::{HysteresisModel, RcBeamReference};
+    let mut model = seeded_model(2, 1);
+    model.set_member_hysteresis(ElemId(0), HysteresisModel::Takeda);
+    let mut stack = UndoStack::new();
+    stack.run(
+        &mut model,
+        Box::new(SetMemberRcBeamReference {
+            elem: ElemId(0),
+            reference: Some(RcBeamReference::AntisymmetricHalfMember),
+        }),
+    );
+    assert_eq!(
+        model.member_rc_beam_reference(ElemId(0)),
+        Some(RcBeamReference::AntisymmetricHalfMember)
+    );
+    stack.undo(&mut model);
+    assert_eq!(model.member_rc_beam_reference(ElemId(0)), None);
+    assert_eq!(
+        model.member_hysteresis(ElemId(0)),
+        Some(HysteresisModel::Takeda)
+    );
+    stack.redo(&mut model);
+    assert_eq!(
+        model.member_rc_beam_reference(ElemId(0)),
+        Some(RcBeamReference::AntisymmetricHalfMember)
+    );
+    let inverse = SetMemberRcBeamReference {
+        elem: ElemId(99),
+        reference: Some(RcBeamReference::AntisymmetricHalfMember),
+    }
+    .apply(&mut model);
+    assert!(inverse.is_noop());
+    assert_eq!(model.member_rc_beam_reference(ElemId(99)), None);
+}
+
+#[test]
+fn supplied_rc_depth_edit_preserves_shape_geometry_and_other_properties() {
+    use sepika_core::model::PropertyBasis;
+    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
+    let shape = SectionShape::RcBeamRect {
+        b: 300.0,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: 25.0,
+            top: vec![3],
+            bottom: vec![3],
+            cover: 40.0,
+            stirrup: BeamStirrup {
+                dia: 10.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    };
+    let original = shape.to_section(SectionId(0), "RC幾何".into());
+    let mut model = empty_model();
+    model.sections.push(original.clone());
+    let mut stack = UndoStack::new();
+    assert!(stack.run(
+        &mut model,
+        Box::new(SetSectionField {
+            id: SectionId(0),
+            field: SectionField::Depth,
+            value: 1200.0,
+        })
+    ));
+    let changed = &model.sections[0];
+    assert_eq!(changed.depth, 1200.0);
+    assert_eq!(changed.property_basis.depth, PropertyBasis::Supplied);
+    assert_eq!(changed.shape, Some(shape));
+    assert_eq!(changed.iy, original.iy);
+    assert_eq!(changed.iz, original.iz);
+    assert_eq!(changed.width, original.width);
+    stack.undo(&mut model);
+    assert_eq!(model.sections[0], original);
+}

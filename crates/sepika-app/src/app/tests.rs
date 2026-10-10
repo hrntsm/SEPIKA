@@ -3550,6 +3550,9 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
         member: Vec::new(),
     });
 
+    // ランク配線の検証では、長期分布荷重を扱う独立の標準型骨格を使う。
+    model.set_member_hysteresis(ElemId(2), sepika_core::model::HysteresisModel::Standard);
+
     let mut app = App::default();
     app.load_model(model);
     app.generate_stories_action();
