@@ -29,8 +29,17 @@ pub(super) fn check_s_panel(
     out: &mut Vec<(NodeId, String, CheckOutcome)>,
 ) {
     let members = cols.iter().chain(beams.iter()).map(|m| m.elem);
-    let Some(joint) = resolve_panel_joint(model, nid, members) else {
-        return;
+    let joint = match resolve_panel_joint(model, nid, members) {
+        Ok(Some(joint)) => joint,
+        Ok(None) => return,
+        Err(reason) => {
+            out.push((
+                nid,
+                "パネルゾーン(S)".into(),
+                CheckOutcome::Skipped { reason },
+            ));
+            return;
+        }
     };
     let Some(col) = cols.iter().find(|c| c.elem.id == joint.column) else {
         return;

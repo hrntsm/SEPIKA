@@ -213,7 +213,7 @@ fn panel_stiffness(model: &Model) -> (f64, f64) {
     let col = &model.sections[1];
     let beam = &model.sections[0];
     let geom = PanelGeometry::from_column(col).expect("H 形柱");
-    let db = beam_panel_depth(beam);
+    let db = beam_panel_depth(beam).unwrap();
     let ve = geom.effective_volume(db);
     let mat = &model.materials[0];
     (ve, mat.shear_modulus() * ve)
@@ -386,4 +386,21 @@ fn test_panel_stiffness_effects() {
         d_panel < d_plain,
         "剛域が折り込まれていない: 接合部無視 {d_plain}, パネル有り {d_panel}"
     );
+}
+
+#[test]
+fn panel_504_standard_solver_rejects_unsupported_manual_panel_with_reason() {
+    let mut model = l_frame(true);
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    assert!(sepika_solver::statics::analysis::Analysis::prepare(&model).is_ok());
+    model.sections[0].shape = Some(SectionShape::SteelPipe {
+        outer_dia: 600.0,
+        thick: 20.0,
+    });
+    let expected = sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
+        .unwrap_err();
+    let error = sepika_solver::statics::analysis::Analysis::prepare(&model)
+        .err()
+        .expect("未対応の手動パネルを剛性算定成功と扱わない");
+    assert!(error.to_string().contains(&expected));
 }

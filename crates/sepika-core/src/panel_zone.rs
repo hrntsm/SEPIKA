@@ -330,13 +330,14 @@ pub struct PanelJoint {
 /// 持たない側は全要素を渡してよい）。
 ///
 /// 判定規則はモジュール冒頭「対象とする接合部」のとおりで、モデル化と断面検定の
-/// 双方がこの関数を通る。モデル化はさらに [`PanelJoint::has_filled_column`] が
+/// 双方がこの関数を通る。不正・未対応梁は接合部/梁ID付きエラー、候補外は `Ok(None)`。
+/// モデル化はさらに [`PanelJoint::has_filled_column`] が
 /// `false` であることを要求する。
 pub fn resolve_panel_joint<'a>(
     model: &Model,
     node: NodeId,
     members: impl IntoIterator<Item = &'a ElementData>,
-) -> Option<PanelJoint> {
+) -> Result<Option<PanelJoint>, String> {
     let mut columns: Vec<&ElementData> = Vec::new();
     let mut beams: Vec<&ElementData> = Vec::new();
     for e in members {
@@ -353,56 +354,158 @@ pub fn resolve_panel_joint<'a>(
         }
     }
     if columns.is_empty() || beams.is_empty() {
-        return None;
+        return Ok(None);
     }
     if columns
         .iter()
         .chain(beams.iter())
         .any(|e| !member_structure_kind(model, e).is_steel_like())
     {
-        return None;
+        return Ok(None);
     }
 
     let section_of = |e: &ElementData| e.section.and_then(|sid| model.sections.get(sid.index()));
-    let db = beams
-        .iter()
-        .filter_map(|e| section_of(e))
-        .map(beam_panel_depth)
-        .fold(0.0_f64, f64::max);
-    if db <= 0.0 {
-        return None;
+    beams.sort_by_key(|e| e.id);
+    let mut db = 0.0_f64;
+    let mut reasons = Vec::new();
+    for beam in &beams {
+        let Some(section) = section_of(beam) else {
+            reasons.push(format!("梁 ID {}: 断面未設定", beam.id.0));
+            continue;
+        };
+        let properties = beam_panel_properties(section);
+        let shape = section
+            .shape
+            .as_ref()
+            .map(SectionShape::dimension_label)
+            .unwrap_or_else(|| "形状未定義".into());
+        match (&properties.depth, &properties.applicability) {
+            (Ok(depth), Ok(())) => db = db.max(*depth),
+            _ => {
+                let conditions = properties
+                    .depth
+                    .err()
+                    .into_iter()
+                    .chain(properties.applicability.err())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                let mut axis = member_unit_axis(model, beam).unwrap_or([0.0; 3]);
+                if axis
+                    .iter()
+                    .find(|v| v.abs() > 1e-12)
+                    .is_some_and(|v| *v < 0.0)
+                {
+                    axis = axis.map(|v| -v);
+                }
+                let axis = axis.map(|v| if v.abs() < 1e-12 { 0.0 } else { v });
+                reasons.push(format!(
+                    "梁 ID {} ({shape}, 検討面の梁材軸 [{:.3}, {:.3}, {:.3}]): {conditions}",
+                    beam.id.0, axis[0], axis[1], axis[2]
+                ));
+            }
+        }
+    }
+    if !reasons.is_empty() {
+        return Err(format!(
+            "接合部 ID {} のパネル未算定: {}。同一面・直交別面の分離と段違い標準形式の判定は未対応",
+            node.0,
+            reasons.join(" / ")
+        ));
     }
 
     let geometry_of = |e: &&ElementData| section_of(e).and_then(PanelGeometry::from_column);
     let has_filled_column = columns.iter().filter_map(geometry_of).any(|g| g.filled);
 
-    let (column, geometry, ve) = columns
+    let selected = columns
         .iter()
         .filter_map(|e| {
             let geometry = geometry_of(e)?;
             let ve = geometry.effective_volume(db);
             (ve > 0.0).then_some((e.id, geometry, ve))
         })
-        .min_by(|a, b| a.2.total_cmp(&b.2))?;
+        .min_by(|a, b| a.2.total_cmp(&b.2));
+    let Some((column, geometry, ve)) = selected else {
+        return Ok(None);
+    };
 
-    Some(PanelJoint {
+    Ok(Some(PanelJoint {
         geometry,
         db,
         ve,
         column,
         has_filled_column,
-    })
+    }))
 }
 
-/// 梁のフランジ板厚中心間距離 `db` [mm]。
-///
-/// H 形鋼は `せい − フランジ厚`、それ以外の断面は情報がないため `0.9・せい` で
-/// 近似する（S 造パネルゾーン検定と同じ近似）。
-pub fn beam_panel_depth(sec: &Section) -> f64 {
-    match sec.shape {
-        Some(SectionShape::SteelH { flange_thick, .. }) => sec.depth - flange_thick,
-        _ => 0.9 * sec.depth,
+/// 梁の幾何解決 [mm] とパネル式適用の状態。保存断面諸元の代用は行わない。
+#[derive(Clone, Debug, PartialEq)]
+pub struct BeamPanelProperties {
+    pub depth: Result<f64, String>,
+    pub applicability: Result<(), String>,
+}
+
+/// 梁のフランジ板厚中心間距離 [mm] と式の適用可否を別々に返す。
+pub fn beam_panel_properties(sec: &Section) -> BeamPanelProperties {
+    let applicability = match sec.shape {
+        Some(SectionShape::SteelH { .. } | SectionShape::SteelBuiltH { .. }) => Ok(()),
+        _ => Err("この梁形状・接合詳細へのH梁パネル式の適用根拠未確認".into()),
+    };
+    BeamPanelProperties {
+        depth: beam_panel_depth(sec),
+        applicability,
     }
+}
+
+/// 形状寸法から梁フランジ板厚中心間距離 `db` [mm] を返す。
+/// 不正寸法・未定義のフランジ対は理由付きエラー。式適用可否は別途確認する。
+pub fn beam_panel_depth(sec: &Section) -> Result<f64, String> {
+    let (height, upper, lower, dimensions) = match sec.shape {
+        Some(SectionShape::SteelH {
+            height,
+            width,
+            web_thick,
+            flange_thick,
+            ..
+        }) => (
+            height,
+            flange_thick,
+            flange_thick,
+            vec![height, width, web_thick, flange_thick],
+        ),
+        Some(SectionShape::SteelBuiltH {
+            height,
+            upper_width,
+            upper_thick,
+            lower_width,
+            lower_thick,
+            web_thick,
+        }) => (
+            height,
+            upper_thick,
+            lower_thick,
+            vec![
+                height,
+                upper_width,
+                upper_thick,
+                lower_width,
+                lower_thick,
+                web_thick,
+            ],
+        ),
+        None => return Err("断面形状未定義: フランジ対を解決できません".into()),
+        _ => return Err("梁フランジ対とその板厚中心間距離の定義が未対応".into()),
+    };
+    if dimensions.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+        return Err("外寸・幅・上下フランジ板厚・ウェブ厚は有限の正値 [mm] が必要".into());
+    }
+    if upper + lower >= height {
+        return Err("上下フランジが干渉: 板厚合計は外寸未満が必要".into());
+    }
+    let db = height - (upper / 2.0 + lower / 2.0);
+    if !db.is_finite() || db <= 0.0 {
+        return Err("板厚中心間距離は有限の正値 [mm] が必要".into());
+    }
+    Ok(db)
 }
 
 #[cfg(test)]
@@ -770,7 +873,9 @@ mod tests {
     #[test]
     fn test_all_steel_joint_is_target() {
         let m = joint_model(h_beam(), 600.0, h_col());
-        let joint = resolve_panel_joint(&m, NodeId(0), &m.elements).expect("S 造接合部");
+        let joint = resolve_panel_joint(&m, NodeId(0), &m.elements)
+            .unwrap()
+            .expect("S 造接合部");
         assert!((joint.db - (600.0 - 17.0)).abs() < 1e-9);
         assert_eq!(joint.column, ElemId(1));
         assert!(!joint.has_filled_column);
@@ -781,14 +886,18 @@ mod tests {
     #[test]
     fn test_rc_beam_disqualifies_joint() {
         let m = joint_model_with_mats(rc_rect_shape(400.0, 700.0), 700.0, h_col(), 1, 0);
-        assert!(resolve_panel_joint(&m, NodeId(0), &m.elements).is_none());
+        assert!(resolve_panel_joint(&m, NodeId(0), &m.elements)
+            .unwrap()
+            .is_none());
     }
 
     /// RC 柱が 1 本でもあれば対象外。
     #[test]
     fn test_rc_column_disqualifies_joint() {
         let m = joint_model_with_mats(h_beam(), 600.0, rc_rect_shape(400.0, 700.0), 0, 1);
-        assert!(resolve_panel_joint(&m, NodeId(0), &m.elements).is_none());
+        assert!(resolve_panel_joint(&m, NodeId(0), &m.elements)
+            .unwrap()
+            .is_none());
     }
 
     /// H 形の断面でも材料がコンクリートなら対象外になる。
@@ -797,7 +906,9 @@ mod tests {
     fn test_steel_shape_with_concrete_material_is_excluded() {
         let m = joint_model_with_mats(h_beam(), 600.0, h_col(), 1, 0);
         assert!(
-            resolve_panel_joint(&m, NodeId(0), &m.elements).is_none(),
+            resolve_panel_joint(&m, NodeId(0), &m.elements)
+                .unwrap()
+                .is_none(),
             "H 形でも材料がコンクリートなら S 造の接合部ではない"
         );
     }
@@ -811,9 +922,15 @@ mod tests {
             mm.elements.retain(|e| e.id != ElemId(1));
             mm
         };
-        assert!(resolve_panel_joint(&beam_only, NodeId(0), &beam_only.elements).is_none());
+        assert!(
+            resolve_panel_joint(&beam_only, NodeId(0), &beam_only.elements)
+                .unwrap()
+                .is_none()
+        );
         m.elements.retain(|e| e.id != ElemId(0));
-        assert!(resolve_panel_joint(&m, NodeId(0), &m.elements).is_none());
+        assert!(resolve_panel_joint(&m, NodeId(0), &m.elements)
+            .unwrap()
+            .is_none());
     }
 
     /// 柱が複数あれば Ve が最小の柱を採り、要素の並び順に依存しない。
@@ -842,8 +959,12 @@ mod tests {
         };
         let a = build(true);
         let b = build(false);
-        let ja = resolve_panel_joint(&a, NodeId(0), &a.elements).expect("接合部");
-        let jb = resolve_panel_joint(&b, NodeId(0), &b.elements).expect("接合部");
+        let ja = resolve_panel_joint(&a, NodeId(0), &a.elements)
+            .unwrap()
+            .expect("接合部");
+        let jb = resolve_panel_joint(&b, NodeId(0), &b.elements)
+            .unwrap()
+            .expect("接合部");
         assert!((ja.geometry.tp - 9.0).abs() < 1e-9, "Ve 最小の柱を採る");
         assert_eq!(ja.ve, jb.ve, "要素の並び順に依存しない");
         assert_eq!(ja.column, jb.column);
@@ -862,7 +983,9 @@ mod tests {
                 thick: 16.0,
             },
         );
-        let joint = resolve_panel_joint(&m, NodeId(0), &m.elements).expect("検定の対象にはなる");
+        let joint = resolve_panel_joint(&m, NodeId(0), &m.elements)
+            .unwrap()
+            .expect("検定の対象にはなる");
         assert!(joint.has_filled_column, "モデル化からは除外する");
     }
 
@@ -893,7 +1016,9 @@ mod tests {
         m.sections.push(diagonal_section);
         m.elements.push(member(2, 0, 3, 2));
 
-        let joint = resolve_panel_joint(&m, NodeId(0), &m.elements).expect("接合部");
+        let joint = resolve_panel_joint(&m, NodeId(0), &m.elements)
+            .unwrap()
+            .expect("接合部");
         assert!((joint.db - (600.0 - 17.0)).abs() < 1e-9);
         let extent = panel_half_extent(&m, NodeId(0), &m.elements);
         assert!((extent.beam_half - 300.0).abs() < 1e-9);
@@ -925,10 +1050,12 @@ mod tests {
         let mut m = joint_model(h_beam(), 600.0, h_col());
         m.elements[0].kind = ElementKind::Wall;
         assert_eq!(member_orientation(&m, &m.elements[0]), None);
-        assert!(resolve_panel_joint(&m, NodeId(0), &m.elements).is_none());
+        assert!(resolve_panel_joint(&m, NodeId(0), &m.elements)
+            .unwrap()
+            .is_none());
     }
 
-    /// 梁の db: H 形はせい − フランジ厚、それ以外は 0.9・せい。
+    /// H 梁の中心間距離を解決し、箱形の未定義フランジ対は拒否する。
     #[test]
     fn test_beam_panel_depth() {
         let h = sec(
@@ -942,7 +1069,7 @@ mod tests {
             600.0,
             None,
         );
-        assert!((beam_panel_depth(&h) - (600.0 - 17.0)).abs() < 1e-9);
+        assert!((beam_panel_depth(&h).unwrap() - (600.0 - 17.0)).abs() < 1e-9);
 
         let b = sec(
             SectionShape::SteelBox {
@@ -954,6 +1081,170 @@ mod tests {
             500.0,
             None,
         );
-        assert!((beam_panel_depth(&b) - 0.9 * 500.0).abs() < 1e-9);
+        assert!(beam_panel_depth(&b).is_err());
+    }
+    #[test]
+    fn shape_dimensions_define_h_and_built_h_depth() {
+        let mut h = sec(h_beam(), 650.0, None);
+        if let Some(SectionShape::SteelH { flange_thick, .. }) = &mut h.shape {
+            *flange_thick = 20.0;
+        }
+        assert_eq!(beam_panel_depth(&h), Ok(580.0));
+        for (upper_thick, lower_thick) in [(20.0, 30.0), (30.0, 20.0)] {
+            h.shape = Some(SectionShape::SteelBuiltH {
+                height: 600.0,
+                upper_width: 200.0,
+                upper_thick,
+                lower_width: 250.0,
+                lower_thick,
+                web_thick: 12.0,
+            });
+            assert_eq!(beam_panel_depth(&h), Ok(575.0));
+            assert_eq!(beam_panel_properties(&h).applicability, Ok(()));
+        }
+    }
+
+    #[test]
+    fn invalid_flange_dimensions_are_not_calculated() {
+        for (height, flange_thick) in [
+            (f64::NAN, 20.0),
+            (600.0, f64::INFINITY),
+            (0.0, 20.0),
+            (600.0, 0.0),
+            (600.0, -20.0),
+            (600.0, 300.0),
+            (600.0, 301.0),
+        ] {
+            let h = sec(
+                SectionShape::SteelH {
+                    height,
+                    flange_thick,
+                    width: 200.0,
+                    web_thick: 12.0,
+                    root_r: None,
+                },
+                650.0,
+                None,
+            );
+            assert!(beam_panel_depth(&h).is_err(), "{height}, {flange_thick}");
+            assert_eq!(beam_panel_properties(&h).applicability, Ok(()));
+        }
+        let mut h = sec(h_beam(), 650.0, None);
+        h.shape = None;
+        assert!(beam_panel_depth(&h).is_err());
+        assert!(beam_panel_properties(&h).applicability.is_err());
+        h.shape = Some(SectionShape::SteelPipe {
+            outer_dia: 600.0,
+            thick: 20.0,
+        });
+        assert!(beam_panel_depth(&h).is_err());
+        assert!(beam_panel_properties(&h).applicability.is_err());
+    }
+
+    #[test]
+    fn mixed_beams_preserve_joint_beam_shape_and_plane_reasons() {
+        for (coord, axis) in [
+            ([-6000.0, 0.0, 3000.0], "[1.000, 0.000, 0.000]"),
+            ([0.0, 6000.0, 3000.0], "[0.000, 1.000, 0.000]"),
+            ([6000.0, 6000.0, 3000.0], "[0.707, 0.707, 0.000]"),
+            ([6000.0, -6000.0, 3000.0], "[0.707, -0.707, 0.000]"),
+        ] {
+            let mut m = joint_model(h_beam(), 650.0, h_col());
+            m.nodes.push(node(3, coord));
+            let mut unsupported = m.sections[0].clone();
+            unsupported.id = SectionId(2);
+            unsupported.shape = Some(SectionShape::SteelBox {
+                height: 600.0,
+                width: 200.0,
+                thick: 20.0,
+                corner_r: None,
+            });
+            m.sections.push(unsupported);
+            m.elements.push(member(2, 0, 3, 2));
+            let reason = resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err();
+            assert!(reason.contains("接合部 ID 0"));
+            assert!(reason.contains("梁 ID 2 (BOX-"));
+            assert!(reason.contains(axis));
+            m.elements.reverse();
+            for e in &mut m.elements {
+                e.nodes.reverse();
+            }
+            assert_eq!(
+                resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err(),
+                reason
+            );
+        }
+    }
+
+    #[test]
+    fn one_sided_h_joint_uses_580_mm_independent_of_member_order_and_ends() {
+        let mut m = joint_model(h_beam(), 650.0, h_col());
+        if let Some(SectionShape::SteelH { flange_thick, .. }) = &mut m.sections[0].shape {
+            *flange_thick = 20.0;
+        }
+        let a = resolve_panel_joint(&m, NodeId(0), &m.elements)
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.db, 580.0);
+        assert_eq!(a.ve, 2_857_660.0);
+        m.elements.reverse();
+        for e in &mut m.elements {
+            e.nodes.reverse();
+        }
+        assert_eq!(
+            resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap(),
+            Some(a)
+        );
+    }
+    #[test]
+    fn beam_504_all_shape_dimensions_and_built_column_scope_are_checked() {
+        let shape = SectionShape::SteelBuiltH {
+            height: 600.0,
+            upper_width: 200.0,
+            upper_thick: 20.0,
+            lower_width: 250.0,
+            lower_thick: 30.0,
+            web_thick: 12.0,
+        };
+        let mut section = sec(shape, 650.0, None);
+        assert!(PanelGeometry::from_column(&section).is_none());
+        for invalid in [f64::NAN, 0.0, -1.0] {
+            for dim in 0..3 {
+                section.shape = Some(SectionShape::SteelBuiltH {
+                    height: 600.0,
+                    upper_width: if dim == 0 { invalid } else { 200.0 },
+                    upper_thick: 20.0,
+                    lower_width: if dim == 1 { invalid } else { 250.0 },
+                    lower_thick: 30.0,
+                    web_thick: if dim == 2 { invalid } else { 12.0 },
+                });
+                assert!(beam_panel_depth(&section).is_err());
+            }
+            section.shape = Some(SectionShape::SteelH {
+                height: 600.0,
+                width: invalid,
+                web_thick: 12.0,
+                flange_thick: 20.0,
+                root_r: None,
+            });
+            assert!(beam_panel_depth(&section).is_err());
+            section.shape = Some(SectionShape::SteelH {
+                height: 600.0,
+                width: 200.0,
+                web_thick: invalid,
+                flange_thick: 20.0,
+                root_r: None,
+            });
+            assert!(beam_panel_depth(&section).is_err());
+        }
+        section.shape = Some(SectionShape::SteelBuiltH {
+            height: 600.0,
+            upper_width: 200.0,
+            upper_thick: 20.0,
+            lower_width: 250.0,
+            lower_thick: 580.0,
+            web_thick: 12.0,
+        });
+        assert!(beam_panel_depth(&section).is_err());
     }
 }

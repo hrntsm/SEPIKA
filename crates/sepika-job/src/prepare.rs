@@ -110,12 +110,60 @@ fn prepare_work_model(
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     rebuild_floor_regions(model);
     let wall_report = rebuild_wall_regions(model);
+    let mut panel_notices = Vec::new();
+    {
+        let adjacency = sepika_core::adjacency::NodeAdjacency::build(model);
+        for node in &model.nodes {
+            if !model.panel_zone.is_enabled()
+                && !model.elements.iter().any(|e| {
+                    e.kind == sepika_core::model::ElementKind::PanelZone
+                        && e.nodes.first() == Some(&node.id)
+                })
+            {
+                continue;
+            }
+            match sepika_core::panel_zone::resolve_panel_joint(
+                model,
+                node.id,
+                adjacency.elements_at(model, node.id),
+            ) {
+                Err(reason) => {
+                    panel_notices.push(format!("{reason}。パネルせん断変形をモデル化できません"))
+                }
+                Ok(Some(joint)) => {
+                    let beam_depths: Vec<_> = adjacency
+                        .elements_at(model, node.id)
+                        .filter(|e| {
+                            sepika_core::panel_zone::member_orientation(model, e)
+                                == Some(sepika_core::panel_zone::MemberOrientation::Beam)
+                                && sepika_core::panel_zone::is_horizontal_or_vertical_member(
+                                    model, e,
+                                )
+                        })
+                        .filter_map(|e| {
+                            model
+                                .element_section(e)
+                                .and_then(|section| {
+                                    sepika_core::panel_zone::beam_panel_depth(section).ok()
+                                })
+                                .map(|db| format!("梁 ID {} db={db} mm", e.id.0))
+                        })
+                        .collect();
+                    if beam_depths.len() > 1 {
+                        panel_notices.push(format!("接合部 ID {}: {}。最大 db={} mm は幾何集約です。複数db・左右梁位置・上下フランジ位置と標準形式への適用は未判定（#505）",node.id.0,beam_depths.join(" / "),joint.db));
+                    }
+                }
+                Ok(None) => {}
+            }
+        }
+    }
     let panels = apply_rigid_zones_and_panels(model);
     let gravity = compute_gravity_auto_load_cases(model)?;
     let tip_loads = compute_tip_loads(model)?;
     apply_auto_load_cases(model, &gravity.cases);
     apply_tip_loads(model, tip_loads);
     let mut notices = gravity.notices;
+    notices.extend(panel_notices);
     let mut weights_valid = true;
     if (!model.stories.is_empty() || initialize_stories)
         && !crate::weight_preparation::weights_are_current(model, settings.mass_method)
@@ -611,5 +659,102 @@ mod tests {
                 .all(|e| e.kind != sepika_core::model::ElementKind::Wall),
             "apply_rigid_zones_and_panels は壁要素を model.elements へ残してはならない"
         );
+    }
+    #[test]
+    fn panel_504_prepare_reports_auto_and_disabled_manual_failures() {
+        use sepika_core::ids::MaterialId;
+        use sepika_core::model::{FrameSectionUse, Material, MaterialCategory, PanelZoneMode};
+        for manual in [false, true] {
+            let mut model = Model::default();
+            model.nodes = vec![node(0, 0.0, 0.0), node(1, 6000.0, 0.0), node(2, 0.0, 0.0)];
+            model.nodes[0].coord[2] = 3000.0;
+            model.nodes[1].coord[2] = 3000.0;
+            let h = SectionShape::SteelH {
+                height: 400.0,
+                width: 400.0,
+                web_thick: 13.0,
+                flange_thick: 21.0,
+                root_r: None,
+            };
+            let mut col = h.to_section(SectionId(0), "C".into());
+            col.frame_use = Some(FrameSectionUse::Column);
+            col.material = Some(MaterialId(0));
+            let mut girder = SectionShape::SteelPipe {
+                outer_dia: 600.0,
+                thick: 20.0,
+            }
+            .to_section(SectionId(1), "B".into());
+            girder.frame_use = Some(FrameSectionUse::Girder);
+            girder.material = Some(MaterialId(0));
+            model.sections = vec![col, girder];
+            model.materials.push(Material {
+                id: MaterialId(0),
+                name: "SN400B".into(),
+                category: MaterialCategory::Steel,
+                young: 205_000.0,
+                poisson: 0.3,
+                density: 0.0,
+                shear: None,
+                fc: None,
+                fy: Some(235.0),
+                strength_factor: None,
+                concrete_class: Default::default(),
+            });
+            let mut col = beam(0, 2, 0);
+            col.section = Some(SectionId(0));
+            let mut girder = beam(1, 0, 1);
+            girder.section = Some(SectionId(1));
+            model.elements = vec![col, girder];
+            if manual {
+                model.panel_zone = PanelZoneMode::None;
+                let mut panel = beam(2, 0, 1);
+                panel.kind = ElementKind::PanelZone;
+                model.elements.push(panel);
+            }
+            let expected =
+                sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
+                    .unwrap_err();
+            let report =
+                prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
+            assert!(report.panels.is_empty());
+            assert!(report
+                .notices
+                .iter()
+                .any(|reason| reason.contains(&expected)));
+            if !manual {
+                model.sections[1].shape = Some(SectionShape::SteelH {
+                    height: 600.0,
+                    width: 200.0,
+                    web_thick: 11.0,
+                    flange_thick: 20.0,
+                    root_r: None,
+                });
+                let mut other = model.sections[1].clone();
+                other.id = SectionId(2);
+                other.shape = Some(SectionShape::SteelH {
+                    height: 500.0,
+                    width: 200.0,
+                    web_thick: 11.0,
+                    flange_thick: 20.0,
+                    root_r: None,
+                });
+                model.sections.push(other);
+                let mut far = node(3, -6000.0, 0.0);
+                far.coord[2] = 3000.0;
+                model.nodes.push(far);
+                let mut other = beam(2, 3, 0);
+                other.section = Some(SectionId(2));
+                model.elements.push(other);
+                let report =
+                    prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
+                        .unwrap();
+                assert_eq!(report.panels[0].db, 580.0);
+                assert!(report
+                    .notices
+                    .iter()
+                    .any(|reason| reason.contains("db=480 mm")
+                        && reason.contains("標準形式への適用は未判定（#505）")));
+            }
+        }
     }
 }

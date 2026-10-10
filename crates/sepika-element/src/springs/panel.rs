@@ -60,6 +60,8 @@ impl ColumnAxial {
 pub struct PanelZone {
     /// 接合部の節点（追加自由度 `γX`・`γY` の持ち主）。
     pub node: NodeId,
+    /// 諸元未算定の理由。剛パネルへの数値的代用を算定成功と扱わない。
+    pub resolution_error: Option<String>,
     /// 柱せい方向のパネル寸法 `dc` [mm]。
     pub dc: f64,
     /// 梁フランジ板厚中心間距離 `db` [mm]。
@@ -100,7 +102,7 @@ struct ResolvedPanel {
 
 /// 接合部節点 `node` に取り付く柱・梁からパネル諸元を解決する。
 fn resolve(model: &Model, node: NodeId) -> Option<ResolvedPanel> {
-    let joint = resolve_panel_joint(model, node, &model.elements)?;
+    let joint = resolve_panel_joint(model, node, &model.elements).ok()??;
     if joint.has_filled_column {
         return None;
     }
@@ -164,6 +166,7 @@ impl PanelZone {
 
     fn build(data: &ElementData, model: &Model, nonlinear: bool) -> Self {
         let node = data.nodes.first().copied().unwrap_or(NodeId(0));
+        let resolution_error = resolve_panel_joint(model, node, &model.elements).err();
         let resolved = resolve(model, node);
 
         let (dc, tp, db, ve, kappa, g, fy, column) = match &resolved {
@@ -201,6 +204,7 @@ impl PanelZone {
 
         Self {
             node,
+            resolution_error,
             dc,
             db,
             tp,
