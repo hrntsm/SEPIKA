@@ -49,6 +49,45 @@ fn integrate(coords: &[[f64; 3]], h: f64, phase: f64) -> PolygonDistribution {
 }
 
 #[test]
+fn convex_trapezoid_independent_integral() {
+    let coords = [
+        [0., 0., 0.],
+        [6000., 0., 0.],
+        [4000., 3000., 0.],
+        [1000., 3000., 0.],
+    ];
+    // 凸台形の角二等分線で区切った領域の解析面積 [m²]。
+    let a = 3. * 13_f64.sqrt();
+    let b = 3. * 10_f64.sqrt();
+    let expected_m2 = [(63. - a - b) / 8., a / 4., (45. - a - b) / 8., b / 4.];
+    assert!((expected_m2.iter().sum::<f64>() - 13.5).abs() < 1e-12);
+    let result = integrate(&coords, 100., 0.);
+    assert!((result.polygon_area_mm2 - 13.5e6).abs() < 1e-6);
+    let area_mm2 = result.edge_areas_mm2.iter().sum::<f64>();
+    assert!((area_mm2 - 13.5e6).abs() <= result.area_roundoff_bound_mm2);
+    assert!((area_mm2 * 0.003 - 40500.).abs() < 1e-6);
+    for (edge, expected) in expected_m2.iter().enumerate() {
+        assert!(
+            (result.edge_areas_mm2[edge] - expected * 1e6).abs()
+                <= result.edge_error_bounds_mm2[edge]
+        );
+    }
+    println!(
+        "convex trapezoid areas_m2={:?} bounds_m2={:?}",
+        result
+            .edge_areas_mm2
+            .iter()
+            .map(|x| x / 1e6)
+            .collect::<Vec<_>>(),
+        result
+            .edge_error_bounds_mm2
+            .iter()
+            .map(|x| x / 1e6)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn u_exact_integral_grid_matrix() {
     // 底左区画の直線/凹端点境界の解析積分。m単位。
     let s = 7. - 24_f64.sqrt();
