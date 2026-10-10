@@ -8867,23 +8867,12 @@ fn test_preparation_semiprecise_without_eigen_reports_note() {
         prep.seismic_note
     );
 
-    // 固有値解析を実行すると、その1次周期で Ai 分布が算定できるようになる。
     app.run_eigen(3);
+    assert!(app.design_seismic_period().unwrap() > 0.0);
     app.run_preparation();
     let prep = app.core.scoped.preparation.as_ref().unwrap();
-    let sm = prep.seismic.as_ref().expect("固有値実行後は算定できる");
-    assert_eq!(sm.t_mode, AiMode::SemiPrecise);
-    let t1 = app
-        .core
-        .scoped
-        .results
-        .as_ref()
-        .unwrap()
-        .modal
-        .as_ref()
-        .unwrap()
-        .period[0];
-    assert!((sm.t - t1).abs() < 1e-12);
+    assert!(prep.seismic.is_none());
+    assert!(prep.seismic_note.as_ref().unwrap().contains("未対応"));
 }
 
 /// モデル読込は準備計算の結果・診断をリセットする（前モデルの結果が残らない）。
@@ -11023,6 +11012,18 @@ fn rejected_support_deletion_preserves_preparation_and_result_validity() {
     assert!(!app.core.scoped.staleness.preparation_stale);
     assert!(!app.core.scoped.staleness.diagnostics_stale);
     assert!(!app.core.scoped.staleness.unsaved_changes);
+}
+
+#[test]
+fn preparation_seismic_invalid_coefficient_is_not_a_zero_result() {
+    let mut app = App::default();
+    app.load_model(crate::sample::portal_frame());
+    app.generate_stories_action();
+    app.core.analysis_cfg.c0 = 0.1;
+    app.run_preparation();
+    let prep = app.core.scoped.preparation.as_ref().unwrap();
+    assert!(prep.seismic.is_none());
+    assert!(prep.seismic_note.as_ref().unwrap().contains("C0"));
 }
 
 #[test]
