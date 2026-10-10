@@ -1667,6 +1667,52 @@ fn beam_contact_nonconvex_slab_side_occupancy_is_local_to_contact_interval() {
 }
 
 #[test]
+fn beam_contact_three_node_primary_is_unavailable_without_negative_quantity() {
+    use sepika_core::model::{LoadTransfer, RegionAnchor};
+    let mut model = contact_model();
+    model.nodes.push(node(2, 3000.0, 0.0, 3000.0));
+    model.elements[0].nodes = [NodeId(0), NodeId(2), NodeId(1)].into_iter().collect();
+    let mut boundary = line_elem(1, 0, 1, 0);
+    boundary.section = None;
+    model.elements.push(boundary);
+    model
+        .sections
+        .push(SectionShape::RcSlab { thickness: 600.0 }.to_section(SectionId(1), "床".into()));
+    for side in [-1.0, 1.0] {
+        model.slabs.push(Slab {
+            id: SlabId(model.slabs.len() as u32),
+            shape: SlabShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(0), NodeId(1)],
+                    span: [0.0, 1.0],
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: [side * 2000.0; 2],
+            },
+            plate: SlabPlate {
+                section: Some(SectionId(1)),
+                ..Default::default()
+            },
+            tip_loads: vec![],
+        });
+    }
+    assert!(model.validate().is_ok());
+    for _ in 0..2 {
+        let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+        assert!(
+            reason.contains("Primary(ElemId(0))") && reason.contains("2節点以外"),
+            "{reason}"
+        );
+        model.elements[0].nodes.reverse();
+    }
+    model.elements[0].nodes = [NodeId(0), NodeId(1)].into_iter().collect();
+    assert!((contact_formwork(&model) - 1.8).abs() <= 1e-9);
+    model.slabs.clear();
+    model.elements[0].nodes = [NodeId(0), NodeId(2), NodeId(1)].into_iter().collect();
+    assert!((contact_formwork(&model) - 4.5).abs() <= 1e-9);
+}
+
+#[test]
 fn beam_contact_unknown_beam_section_is_unavailable() {
     for support_secondary in [false, true] {
         let mut model = contact_model();

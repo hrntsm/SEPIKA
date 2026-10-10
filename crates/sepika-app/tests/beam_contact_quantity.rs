@@ -165,6 +165,27 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
     let base = beam_contact_fixture();
     let mut cases = Vec::new();
     let mut model = base.clone();
+    let mut midpoint = model.nodes[0].clone();
+    midpoint.id = NodeId(2);
+    midpoint.coord[0] = 3000.0;
+    model.nodes.push(midpoint);
+    model.elements[0].nodes = [NodeId(0), NodeId(2), NodeId(1)].into_iter().collect();
+    for section in &mut model.sections[1..] {
+        section.thickness = Some(600.0);
+        section.shape = Some(sepika_core::section_shape::SectionShape::RcSlab { thickness: 600.0 });
+    }
+    let mut boundary = model.elements[0].clone();
+    boundary.id = sepika_core::ids::ElemId(1);
+    boundary.nodes = [NodeId(0), NodeId(1)].into_iter().collect();
+    boundary.section = None;
+    model.elements.push(boundary);
+    assert!(model.validate().is_ok());
+    for _ in 0..2 {
+        cases.push((model.clone(), "Primary(ElemId(0)): 2節点以外"));
+        model.elements[0].nodes.reverse();
+    }
+
+    let mut model = base.clone();
     model.elements[0].section = Some(SectionId(999));
     cases.push((model, "Primary(ElemId(0)): 梁断面 SectionId(999)"));
     let mut model = base.clone();

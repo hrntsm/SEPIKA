@@ -342,6 +342,18 @@ fn add_contact(
     if s[1] <= s[0] || z[1] <= z[0] {
         return Ok(());
     }
+    if let SupportMemberId::Primary(id) = support {
+        if model
+            .elements
+            .iter()
+            .find(|e| e.id == id)
+            .is_some_and(|e| e.nodes.len() != 2)
+        {
+            return Err(format!(
+                "支持材 {support:?}: 2節点以外の主架構梁の接触型枠は未対応です"
+            ));
+        }
+    }
     if let SupportMemberId::Secondary(id) = support {
         if let Some(sm) = model.beams().find(|m| m.id == id) {
             if !model.secondary_member_materialized(sm)
