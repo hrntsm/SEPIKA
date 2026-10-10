@@ -1557,6 +1557,41 @@ mod tests {
         }
     }
 
+    fn add_distinct_wall(
+        model: &mut sepika_core::model::Model,
+        first_boundary: &[NodeId],
+        id: u32,
+        section: Option<SectionId>,
+    ) {
+        let boundary = if id == 0 {
+            first_boundary.to_vec()
+        } else {
+            first_boundary
+                .iter()
+                .map(|node_id| {
+                    let mut node = model.node(*node_id).unwrap().clone();
+                    node.id = NodeId(model.nodes.len() as u32);
+                    node.coord[0] += 5000.0 * f64::from(id);
+                    let node_id = node.id;
+                    model.nodes.push(node);
+                    node_id
+                })
+                .collect()
+        };
+        assert_eq!(
+            model.add_enclosed_wall_plate_from_nodes(&boundary, enclosed(id, section)),
+            WallPlateId(id)
+        );
+        model.wall_regions.push(sepika_core::model::WallRegion {
+            id: sepika_core::ids::WallRegionId(id),
+            name: String::new(),
+            boundary,
+            wall_plate_ids: vec![WallPlateId(id)],
+            posts: Vec::new(),
+        });
+        model.validate_assignment_region_identity().unwrap();
+    }
+
     #[test]
     fn section_change_preserves_selected_wall_and_active() {
         assert_section_change_preserves_selection(WallPlateId(0));
@@ -1576,15 +1611,8 @@ mod tests {
         section.thickness = Some(200.0);
         model.sections.push(section);
         for id in 0..2 {
-            model.add_enclosed_wall_plate_from_nodes(&ids, enclosed(id, Some(SectionId(0))));
+            add_distinct_wall(&mut model, &ids, id, Some(SectionId(0)));
         }
-        model.wall_regions.push(sepika_core::model::WallRegion {
-            id: sepika_core::ids::WallRegionId(0),
-            name: String::new(),
-            boundary: ids,
-            wall_plate_ids: vec![WallPlateId(0), WallPlateId(1)],
-            posts: Vec::new(),
-        });
         let (_, before, _) = sepika_load::wall_expand::expand_wall_elements(&model);
         let selected = before
             .generated_elem_ids()
@@ -1615,18 +1643,8 @@ mod tests {
             .sections
             .push(crate::sample::portal_frame().sections[0].clone());
         for id in 0..2 {
-            model.add_enclosed_wall_plate_from_nodes(
-                &ids,
-                enclosed(id, (id == 1).then_some(SectionId(0))),
-            );
+            add_distinct_wall(&mut model, &ids, id, (id == 1).then_some(SectionId(0)));
         }
-        model.wall_regions.push(sepika_core::model::WallRegion {
-            id: sepika_core::ids::WallRegionId(0),
-            name: String::new(),
-            boundary: ids,
-            wall_plate_ids: vec![WallPlateId(0), WallPlateId(1)],
-            posts: Vec::new(),
-        });
         let (_, before, _) = sepika_load::wall_expand::expand_wall_elements(&model);
         let selected = before
             .generated_elem_ids()
@@ -1656,18 +1674,8 @@ mod tests {
             .sections
             .push(crate::sample::portal_frame().sections[0].clone());
         for id in 0..2 {
-            model.add_enclosed_wall_plate_from_nodes(
-                &ids,
-                enclosed(id, (id == 1).then_some(SectionId(0))),
-            );
+            add_distinct_wall(&mut model, &ids, id, (id == 1).then_some(SectionId(0)));
         }
-        model.wall_regions.push(sepika_core::model::WallRegion {
-            id: sepika_core::ids::WallRegionId(0),
-            name: String::new(),
-            boundary: ids,
-            wall_plate_ids: vec![WallPlateId(0), WallPlateId(1)],
-            posts: Vec::new(),
-        });
         let (_, before, _) = sepika_load::wall_expand::expand_wall_elements(&model);
         let selected = before.generated_elem_ids().next().unwrap();
         let mut app = App::default();
@@ -1686,29 +1694,13 @@ mod tests {
     #[test]
     fn region_unassignment_clears_selection_before_generated_id_is_reused() {
         use sepika_core::ids::WallPlateAssignmentRegionId;
-        use sepika_core::model::{PlateAssignment, WallPlateAssignmentRegion, WallRegion};
         let (mut model, ids) = plate_model();
         model
             .sections
             .push(crate::sample::portal_frame().sections[0].clone());
         for id in 0..2 {
-            model.add_enclosed_wall_plate_from_nodes(&ids, enclosed(id, Some(SectionId(0))));
-            model.wall_regions.push(WallRegion {
-                id: sepika_core::ids::WallRegionId(id),
-                name: String::new(),
-                boundary: ids.clone(),
-                wall_plate_ids: vec![WallPlateId(id)],
-                posts: Vec::new(),
-            });
+            add_distinct_wall(&mut model, &ids, id, Some(SectionId(0)));
         }
-        model
-            .wall_assignment_regions
-            .regions
-            .push(WallPlateAssignmentRegion {
-                id: WallPlateAssignmentRegionId(0),
-                boundary: Vec::new(),
-                assignment: PlateAssignment::Plate(WallPlateId(0)),
-            });
         let (_, before, _) = sepika_load::wall_expand::expand_wall_elements(&model);
         let selected = before
             .generated_elem_ids()
