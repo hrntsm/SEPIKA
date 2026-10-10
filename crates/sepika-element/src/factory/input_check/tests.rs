@@ -589,7 +589,12 @@ fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
         },
         tip_loads: vec![],
     });
-    assert!(crate::frame::beam::stiffness_breakdown(&model, &model.elements[0]).slab > 1.0);
+    assert!(
+        crate::frame::beam::stiffness_breakdown(&model, &model.elements[0])
+            .unwrap()
+            .slab
+            > 1.0
+    );
     let error = ensure_nonlinear_input(&model).unwrap_err();
     assert!(error.contains("スラブ引張筋面積と正負別骨格"), "{error}");
     assert_eq!(public_generation_diagnostic(&model), error);
@@ -632,5 +637,69 @@ fn missing_rc_beam_tension_rebar_stops_analysis_and_has_no_public_backbone() {
         )
         .unwrap();
         assert!(view.backbone.is_none());
+    }
+}
+
+#[test]
+fn src_stiffness_errors_reach_nonlinear_input_diagnostics_and_public_factories() {
+    let mut model = beam_model(src_section(), concrete_material());
+    model.materials[0].young = 20500.0;
+    model.materials[0].poisson = 0.2;
+    for (kind, regime) in [
+        (ElementKind::Fiber, ForceRegime::Auto),
+        (ElementKind::MultiSpring, ForceRegime::Auto),
+        (ElementKind::Beam, ForceRegime::UniaxialBendingShear),
+    ] {
+        model.elements[0].kind = kind;
+        model.elements[0].force_regime = regime;
+        assert!(ensure_nonlinear_input(&model).is_ok());
+        let _behavior = crate::factory::build_nonlinear_behavior(
+            &model.elements[0],
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+            sepika_core::model::AnalysisKind::Incremental,
+        );
+        for field in ["Ec", "Fc", "nu"] {
+            let bad_values = if field == "nu" {
+                vec![-1.0, 0.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY]
+            } else {
+                vec![0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY]
+            };
+            for bad in bad_values {
+                let mut invalid = model.clone();
+                match field {
+                    "Ec" => invalid.materials[0].young = bad,
+                    "Fc" => invalid.materials[0].fc = Some(bad),
+                    _ => invalid.materials[0].poisson = bad,
+                }
+                let reason =
+                    crate::frame::beam::stiffness_breakdown(&invalid, &invalid.elements[0])
+                        .unwrap_err();
+                let error = ensure_nonlinear_input(&invalid).unwrap_err();
+                assert!(error.contains("部材 ID 0"), "{error}");
+                assert!(error.contains(&reason), "{error}");
+                let factory_error = public_generation_diagnostic(&invalid);
+                // Fiber の既存 Fc 検査は等価性能より先に、同じ不正を理由付きで止める。
+                let expected_reason = if field == "Fc" { "Fc" } else { &reason };
+                assert!(factory_error.contains(expected_reason), "{factory_error}");
+            }
+        }
+        let mut missing_fc = model.clone();
+        missing_fc.materials[0].fc = None;
+        assert!(ensure_nonlinear_input(&missing_fc)
+            .unwrap_err()
+            .contains("Fc"));
+        assert!(public_generation_diagnostic(&missing_fc).contains("Fc"));
+        let mut missing_material = model.clone();
+        missing_material.sections[0].material = None;
+        assert!(ensure_nonlinear_input(&missing_material)
+            .unwrap_err()
+            .contains("材料"));
+        let factory_error = public_generation_diagnostic(&missing_material);
+        // Fiber の入口では未割当主材料から Fc を解決できない理由が先に示される。
+        assert!(
+            factory_error.contains("材料") || factory_error.contains("Fc"),
+            "{factory_error}"
+        );
     }
 }

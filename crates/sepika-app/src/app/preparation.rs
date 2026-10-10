@@ -308,11 +308,9 @@ pub struct PrepWidthThicknessRow {
     pub rank: Option<sepika_design_jp::secondary::holding_capacity::MemberRank>,
 }
 
-/// 材料由来の等価断面性能を算定できず、既定値で剛性を評価した SRC/CFT 部材の種別。
+/// 材料由来の等価断面性能を算定できず、鋼管のみで評価した CFT 部材の種別。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CompositeFallbackKind {
-    /// SRC: N_S_EQ=15 固定で鉄骨を等価換算した。
-    SrcNsDefault,
     /// CFT: 充填コンクリートを無視し、鋼管のみで評価した。
     CftSteelOnly,
 }
@@ -322,8 +320,8 @@ pub enum CompositeFallbackKind {
 /// 断面性能の表（断面単位）では表せない、**部材ごとに決まる**剛性の割増しを示す。
 /// 値は [`sepika_element::frame::beam::stiffness_breakdown`] ・
 /// [`sepika_element::frame::beam::composite_props_of`] を通した、要素構築が実際に
-/// 適用するものと同じ算定結果。材料由来の等価断面性能を算定できない SRC/CFT は、
-/// 既定値へフォールバックした種別を `composite_fallback` に持つ。
+/// 適用するものと同じ算定結果。
+/// SRC の算定不能は準備計算を停止し、CFT の既定評価種別を `composite_fallback` に持つ。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PrepMemberStiffnessRow {
     pub elem: ElemId,
@@ -405,6 +403,9 @@ impl App {
         self.generate_stories_action();
         let story_error = self.core.scoped.last_error.is_some();
         self.refresh_preparation();
+        if self.core.scoped.preparation.is_none() && self.core.scoped.last_error.is_some() {
+            return;
+        }
         if story_error {
             self.report_info("準備計算を実行しました（階の生成に失敗したため、階を前提とする項目は算定していません）");
             return;
@@ -441,6 +442,7 @@ impl App {
     ///
     /// 割当領域の再構築は解析ジョブと同じ順で行い、GUI の表示・操作対象を解析入力と一致させる。
     fn refresh_preparation(&mut self) {
+        self.core.scoped.preparation = None;
         self.apply_parallelism_setting();
         let _ = self.core.model.anchorize_secondary_members();
         let previous_error = self.core.scoped.last_error.take();
@@ -450,20 +452,26 @@ impl App {
         }
         self.core.scoped.last_error = previous_error;
         self.run_diagnostics();
-        self.core.scoped.preparation = Some(self.build_preparation_result());
+        match self.build_preparation_result() {
+            Ok(result) => self.core.scoped.preparation = Some(result),
+            Err(error) => {
+                self.core.scoped.last_error = Some(error);
+                return;
+            }
+        }
         self.core.scoped.staleness.preparation_stale = false;
     }
 
     /// 現在のモデル・解析設定から準備計算の結果を集計する（モデルは変更しない）。
-    fn build_preparation_result(&self) -> PreparationResult {
+    fn build_preparation_result(&self) -> Result<PreparationResult, String> {
         let (diag_errors, diag_warnings) = self.diagnostics_counts();
         let (unset_floor_regions, unset_wall_regions) =
             self.core.model.unset_plate_assignment_regions();
         let (seismic, seismic_note) = self.build_prep_seismic();
         let (rigid_zones, rigid_zone_candidates) = self.build_prep_rigid_zones();
-        let (member_stiffness, member_stiffness_candidates) = self.build_prep_member_stiffness();
+        let (member_stiffness, member_stiffness_candidates) = self.build_prep_member_stiffness()?;
         let torsion_skipped = self.build_prep_torsion_skipped();
-        PreparationResult {
+        Ok(PreparationResult {
             computed_at: SystemTime::now(),
             summary: self.build_prep_summary(),
             stories: self.build_prep_stories(),
@@ -498,7 +506,7 @@ impl App {
             diag_warnings,
             unset_floor_regions,
             unset_wall_regions,
-        }
+        })
     }
 
     fn build_prep_summary(&self) -> PrepSummary {
@@ -854,7 +862,7 @@ impl App {
     /// 展開の有無で変わらない。壁を持たないモデル（実 ST-Bridge フィクスチャは
     /// 現状すべて該当する）では `expand_wall_elements` の `model.clone()` を
     /// 避け、`self.core.model` をそのまま見る。
-    fn build_prep_member_stiffness(&self) -> (Vec<PrepMemberStiffnessRow>, usize) {
+    fn build_prep_member_stiffness(&self) -> Result<(Vec<PrepMemberStiffnessRow>, usize), String> {
         use sepika_core::model::{ElementKind, Model};
         use sepika_core::section_shape::SectionShape;
 
@@ -868,6 +876,21 @@ impl App {
             } else {
                 &self.core.model
             };
+        for elem in &model.elements {
+            if model
+                .element_section(elem)
+                .and_then(|s| s.shape.as_ref())
+                .is_some_and(|shape| {
+                    matches!(
+                        shape,
+                        SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
+                    )
+                })
+            {
+                sepika_element::frame::beam::composite_props_of(model, elem)
+                    .map_err(|error| format!("部材 #{}: {error}", elem.id.0))?;
+            }
+        }
         let candidates = model
             .elements
             .iter()
@@ -891,7 +914,7 @@ impl App {
                 .is_some()
         });
         if !(slab_stiffness_enabled || has_wall_element || has_composite_section) {
-            return (Vec::new(), candidates);
+            return Ok((Vec::new(), candidates));
         }
 
         let mut rows = Vec::new();
@@ -913,17 +936,14 @@ impl App {
             {
                 continue;
             }
-            let factors = sepika_element::frame::beam::stiffness_breakdown(model, e);
-            let composite = sepika_element::frame::beam::composite_props_of(model, e);
+            let factors = sepika_element::frame::beam::stiffness_breakdown(model, e)?;
+            let composite = sepika_element::frame::beam::composite_props_of(model, e)?;
             let fallback = if composite.is_none() {
                 match sec
                     .shape
                     .as_ref()
                     .and_then(sepika_core::structure_kind::shape_composite_kind)
                 {
-                    Some(sepika_core::structure_kind::StructureKind::Src) => {
-                        Some(CompositeFallbackKind::SrcNsDefault)
-                    }
                     Some(sepika_core::structure_kind::StructureKind::Cft) => {
                         Some(CompositeFallbackKind::CftSteelOnly)
                     }
@@ -933,17 +953,7 @@ impl App {
                 None
             };
             let base_iy = composite.map(|p| p.iy).unwrap_or(sec.iy);
-            let base_area = match (composite, sec.shape.as_ref()) {
-                (Some(p), _) => p.area_ax,
-                (
-                    None,
-                    Some(
-                        shape @ (SectionShape::SrcBeamRect { .. }
-                        | SectionShape::SrcColumnRect { .. }),
-                    ),
-                ) => shape.calc_axial_stiffness_area(),
-                _ => sec.area,
-            };
+            let base_area = composite.map_or(sec.area, |p| p.area_ax);
             if factors.slab == 1.0
                 && factors.wall_girder == 1.0
                 && composite.is_none()
@@ -974,7 +984,7 @@ impl App {
                 effective_area: base_area * factors.wall_girder,
             });
         }
-        (rows, candidates)
+        Ok((rows, candidates))
     }
 
     fn build_prep_load_cases(&self) -> Vec<PrepLoadCaseRow> {

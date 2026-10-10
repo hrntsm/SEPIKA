@@ -3037,3 +3037,26 @@ fn self_standing_wall_off_the_floor_is_an_error() {
     );
     assert!(precheck_model(&model).is_err(), "解析を止めること");
 }
+
+#[test]
+fn src_invalid_ec_and_poisson_are_analysis_errors() {
+    use super::precheck::{model_issues, precheck_model, IssueSeverity};
+    let mut model = make_cantilever_model();
+    model.sections[0].shape = Some(src_shape());
+    model.materials[0].fc = Some(27.0);
+    for ec in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        model.materials[0].young = ec;
+        assert!(precheck_model(&model).is_err());
+        assert!(model_issues(&model)
+            .iter()
+            .any(|i| i.severity == IssueSeverity::Error && i.short.contains("Ec")));
+    }
+    model.materials[0].young = 20500.0;
+    for nu in [-1.0, 0.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        model.materials[0].poisson = nu;
+        assert!(precheck_model(&model).is_err());
+        assert!(model_issues(&model)
+            .iter()
+            .any(|i| i.severity == IssueSeverity::Error && i.short.contains("νc")));
+    }
+}
