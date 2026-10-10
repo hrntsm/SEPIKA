@@ -372,27 +372,25 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
 
     let mut edited = false;
     if let Some((id, name)) = pending_name {
-        app.core.scoped.undo.run(
+        edited |= app.core.scoped.undo.run(
             &mut app.core.model,
             Box::new(SetMaterialName {
                 id: sepika_core::ids::MaterialId(id),
                 name,
             }),
         );
-        edited = true;
     }
     if let Some((id, category)) = pending_category {
-        app.core.scoped.undo.run(
+        edited |= app.core.scoped.undo.run(
             &mut app.core.model,
             Box::new(SetMaterialCategory {
                 id: sepika_core::ids::MaterialId(id),
                 category,
             }),
         );
-        edited = true;
     }
     if let Some((id, field, value)) = pending_field {
-        app.core.scoped.undo.run(
+        edited |= app.core.scoped.undo.run(
             &mut app.core.model,
             Box::new(SetMaterialField {
                 id: sepika_core::ids::MaterialId(id),
@@ -400,9 +398,43 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                 value,
             }),
         );
-        edited = true;
     }
     apply_pending_actions(app, pending_focus, pending_delete);
+    if edited {
+        app.core.scoped.staleness.mark_edited();
+    }
+    ui.separator();
+    ui.label("材料定数のグリッド編集（E・ν・ρ・割増、TSVコピー／貼り付け）");
+    material_constants_grid(ui, app);
+}
+
+fn material_constants_grid(ui: &mut egui::Ui, app: &mut App) {
+    let edited = {
+        let mut adapter = crate::app::material_grid::MaterialGridAdapter {
+            model: &mut app.core.model,
+            undo: &mut app.core.scoped.undo,
+            edited: false,
+        };
+        ui.push_id("material_constants_grid", |ui| {
+            app.ui.scoped.material_grid.show(
+                ui,
+                &mut adapter,
+                &["E [N/mm²]", "ν [-]", "ρ [t/mm³]", "割増 [-]"],
+            );
+        });
+        adapter.edited
+    };
+    for (message, is_error) in app.ui.scoped.material_grid.take_log() {
+        app.core.log.push(
+            if is_error {
+                crate::app::LogLevel::Error
+            } else {
+                crate::app::LogLevel::Info
+            },
+            message,
+        );
+    }
+    let _ = app.ui.scoped.material_grid.take_row_selection();
     if edited {
         app.core.scoped.staleness.mark_edited();
     }
@@ -483,5 +515,174 @@ mod tests {
             MaterialCategory::Concrete,
             ConcreteClass::UserDefined,
         ));
+    }
+    fn paste_frame(app: &mut App, text: &str) {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 1200.0),
+                )),
+                events: vec![egui::Event::Paste(text.into())],
+                ..Default::default()
+            },
+            |ui| materials_table(ui, app),
+        );
+    }
+
+    fn grid_app() -> App {
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        app.select_node(sepika_core::ids::NodeId(0));
+        app.ui.scoped.material_grid.grid =
+            crate::grid::GridState::new(app.core.model.materials.len(), 4);
+        app.ui
+            .scoped
+            .material_grid
+            .grid
+            .click(crate::grid::CellRef { row: 0, col: 0 }, false);
+        app
+    }
+
+    #[test]
+    fn material_table_paste_entry_updates_stale_atomically_and_keeps_geometry() {
+        let mut app = grid_app();
+        let geometry = format!("{:?}", app.ui.scoped.selection);
+        let original = rmp_serde::to_vec_named(&app.core.model).unwrap();
+        paste_frame(&mut app, "210000\t0.28\t7.85e-9\t1.05\r\n");
+        assert_eq!(app.core.model.materials[0].young, 210000.0);
+        assert_eq!(app.core.model.materials[0].density, 7.85e-9);
+        assert_eq!(app.core.model.materials[0].strength_factor, Some(1.05));
+        assert!(app.core.scoped.staleness.results_stale);
+        assert!(app.core.scoped.staleness.design_stale);
+        assert!(app.core.scoped.staleness.unsaved_changes);
+        assert_eq!(format!("{:?}", app.ui.scoped.selection), geometry);
+        assert_eq!(app.core.scoped.undo.revision(), 1);
+        let changed = rmp_serde::to_vec_named(&app.core.model).unwrap();
+        app.core.scoped.undo.undo(&mut app.core.model);
+        assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), original);
+        assert!(!app.core.scoped.undo.can_undo());
+        app.core.scoped.undo.redo(&mut app.core.model);
+        assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), changed);
+    }
+
+    #[test]
+    fn material_table_rejects_invalid_dimensions_and_values_without_stale_or_history() {
+        let invalid_blocks = [
+            "1\t2\t3\t4\t",
+            "1\n\t",
+            "1\tNaN",
+            "1\tinf",
+            "1\t1e309",
+            "1\tabc",
+            "1\t=1+2",
+            "1\t1,000",
+            "1\t10mm",
+        ];
+        for text in invalid_blocks {
+            let mut app = grid_app();
+            let geometry = format!("{:?}", app.ui.scoped.selection);
+            let original = rmp_serde::to_vec_named(&app.core.model).unwrap();
+            paste_frame(&mut app, text);
+            assert_eq!(
+                rmp_serde::to_vec_named(&app.core.model).unwrap(),
+                original,
+                "{text:?}"
+            );
+            assert!(!app.core.scoped.staleness.results_stale, "{text:?}");
+            assert!(!app.core.scoped.staleness.unsaved_changes, "{text:?}");
+            assert!(!app.core.scoped.undo.can_undo(), "{text:?}");
+            assert_eq!(format!("{:?}", app.ui.scoped.selection), geometry);
+            assert!(
+                app.core
+                    .log
+                    .entries
+                    .iter()
+                    .any(|e| e.level == crate::app::LogLevel::Error),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn material_table_blank_paste_keeps_redo_and_geometry() {
+        let mut app = grid_app();
+        paste_frame(&mut app, "210000");
+        app.core.scoped.undo.undo(&mut app.core.model);
+        app.core.scoped.staleness = Default::default();
+        let revision = app.core.scoped.undo.revision();
+        let geometry = format!("{:?}", app.ui.scoped.selection);
+        for text in ["\t\t\t", "NaN"] {
+            paste_frame(&mut app, text);
+            assert_eq!(app.core.scoped.undo.revision(), revision);
+            assert!(app.core.scoped.undo.can_redo());
+            assert!(!app.core.scoped.staleness.results_stale);
+            assert_eq!(format!("{:?}", app.ui.scoped.selection), geometry);
+        }
+    }
+    #[test]
+    fn focused_external_text_edit_does_not_paste_into_active_material_grid() {
+        let mut app = grid_app();
+        let original = rmp_serde::to_vec_named(&app.core.model).unwrap();
+        let ctx = egui::Context::default();
+        let mut text = String::new();
+        let id = egui::Id::new("external_material_text");
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.add(egui::TextEdit::singleline(&mut text).id(id))
+                .request_focus();
+            materials_table(ui, &mut app);
+        });
+        assert!(ctx.text_edit_focused());
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Paste("210000".into())],
+                ..Default::default()
+            },
+            |ui| {
+                ui.add(egui::TextEdit::singleline(&mut text).id(id));
+                materials_table(ui, &mut app);
+            },
+        );
+        assert_eq!(text, "210000");
+        assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), original);
+        assert!(!app.core.scoped.undo.can_undo());
+    }
+    #[test]
+    fn material_table_copy_emits_canonical_density_before_display_rounding() {
+        let mut app = grid_app();
+        app.core.model.materials[0].density = 7.851234567890123e-9;
+        app.ui
+            .scoped
+            .material_grid
+            .grid
+            .click(crate::grid::CellRef { row: 0, col: 2 }, false);
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Copy],
+                ..Default::default()
+            },
+            |ui| materials_table(ui, &mut app),
+        );
+        let text = output
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            text.parse::<f64>().unwrap().to_bits(),
+            app.core.model.materials[0].density.to_bits()
+        );
+        assert_ne!(
+            *text,
+            format!("{:.3e}", app.core.model.materials[0].density)
+        );
+        assert!(!app.core.scoped.undo.can_undo());
+        assert!(!app.core.scoped.staleness.results_stale);
     }
 }

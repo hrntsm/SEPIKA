@@ -77,13 +77,31 @@ impl GridAdapter for NodeGridAdapter<'_> {
             .unwrap_or_default()
     }
 
-    fn validate_cell(&self, _row: usize, _col: usize, text: &str) -> Result<(), String> {
-        text.parse::<f64>()
-            .map(|_| ())
-            .map_err(|_| "数値として解釈できません".to_string())
+    fn validate_cell(&self, row: usize, col: usize, text: &str) -> Result<(), String> {
+        if col >= 3 {
+            return Err(format!("節点ID {row}: 座標列の範囲外"));
+        }
+        match text.parse::<f64>() {
+            Ok(value) if value.is_finite() => Ok(()),
+            _ => Err(format!("節点ID {row}: 有限の数値を入力してください")),
+        }
     }
 
-    fn apply_block(&mut self, cells: &[(usize, usize, String)], append_rows: usize) {
+    fn apply_block(
+        &mut self,
+        cells: &[(usize, usize, String)],
+        append_rows: usize,
+    ) -> Result<bool, String> {
+        if cells.is_empty() {
+            return Ok(false);
+        }
+        for (row, col, text) in cells {
+            self.validate_cell(*row, *col, text)?;
+            if *row >= self.rows().saturating_add(append_rows) {
+                return Err(format!("節点ID {row}: 追加行の範囲外"));
+            }
+        }
+        let revision = self.undo.revision();
         let n0 = self.model.nodes.len();
         let parsed: Vec<(usize, usize, f64)> = cells
             .iter()
@@ -111,6 +129,10 @@ impl GridAdapter for NodeGridAdapter<'_> {
             }));
         }
         self.run_all(children, "節点座標の貼り付け");
+        if let Some(reason) = self.undo.last_error() {
+            return Err(reason.to_owned());
+        }
+        Ok(self.undo.revision() != revision)
     }
 
     fn clear_cells(&mut self, cells: &[(usize, usize)]) -> usize {
@@ -171,5 +193,127 @@ impl GridAdapter for NodeGridAdapter<'_> {
             })
             .collect();
         self.run_all(children, &label);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grid::{parse_tsv, plan_paste, rect_to_tsv, CellRef, SelRect};
+
+    #[test]
+    fn exact_node_tsv_round_trip_and_blank_short_rows() {
+        let values: [[f64; 3]; 2] = [
+            [1.2345678901234567, -10.0, 3e3],
+            [0.0, 1.23456789012345, 7.85e-9],
+        ];
+        let mut model = Model::default();
+        let mut undo = UndoStack::new();
+        let mut adapter = NodeGridAdapter {
+            model: &mut model,
+            undo: &mut undo,
+            edited: false,
+        };
+        let source = rect_to_tsv(
+            SelRect {
+                r0: 0,
+                r1: 1,
+                c0: 0,
+                c1: 2,
+            },
+            |r, c| values[r][c].to_string(),
+        );
+        let block = parse_tsv(&(source + "\r\n"));
+        let plan = plan_paste(&block, CellRef { row: 0, col: 0 }, 0, 3, |r, c, t| {
+            adapter.validate_cell(r, c, t)
+        })
+        .unwrap();
+        adapter.apply_block(&plan.set, plan.extra_rows).unwrap();
+        for (r, expected) in values.iter().enumerate() {
+            for (c, value) in expected.iter().enumerate() {
+                assert_eq!(adapter.model.nodes[r].coord[c].to_bits(), value.to_bits());
+            }
+        }
+        let tsv = rect_to_tsv(
+            SelRect {
+                r0: 0,
+                r1: 1,
+                c0: 0,
+                c1: 2,
+            },
+            |r, c| adapter.cell_text(r, c),
+        );
+        let copy = parse_tsv(&tsv);
+        for (r, expected) in values.iter().enumerate() {
+            for (c, value) in expected.iter().enumerate() {
+                assert_eq!(
+                    copy[r][c].parse::<f64>().unwrap().to_bits(),
+                    value.to_bits()
+                );
+            }
+        }
+        let block = parse_tsv("\t0\r\n4\r\n");
+        let plan = plan_paste(&block, CellRef { row: 0, col: 0 }, 2, 3, |r, c, t| {
+            adapter.validate_cell(r, c, t)
+        })
+        .unwrap();
+        adapter.apply_block(&plan.set, 0).unwrap();
+        assert_eq!(adapter.model.nodes[0].coord, [values[0][0], 0.0, 3e3]);
+        assert_eq!(
+            adapter.model.nodes[1].coord,
+            [4.0, values[1][1], values[1][2]]
+        );
+    }
+
+    #[test]
+    fn invalid_node_values_are_rejected_at_plan_and_apply_preserving_redo() {
+        let mut model = Model::default();
+        let mut undo = UndoStack::new();
+        let mut adapter = NodeGridAdapter {
+            model: &mut model,
+            undo: &mut undo,
+            edited: false,
+        };
+        adapter.apply_block(&[(0, 0, "1".into())], 1).unwrap();
+        adapter.undo.undo(adapter.model);
+        let original = adapter.model.clone();
+        let revision = adapter.undo.revision();
+        adapter.edited = false;
+        for invalid in [
+            "NaN", "inf", "-inf", "∞", "1e309", "1,000", "=1+2", "10mm", "abc",
+        ] {
+            let block = parse_tsv(&format!("2\t{invalid}"));
+            let error = plan_paste(&block, CellRef { row: 0, col: 0 }, 0, 3, |r, c, t| {
+                adapter.validate_cell(r, c, t)
+            })
+            .unwrap_err();
+            assert!(error[0].contains("ブロック1行2列目"));
+            assert!(error[0].contains("節点ID 0"));
+            assert!(adapter
+                .apply_block(&[(0, 0, "2".into()), (0, 1, invalid.into())], 1)
+                .is_err());
+            assert_eq!(
+                rmp_serde::to_vec_named(adapter.model).unwrap(),
+                rmp_serde::to_vec_named(&original).unwrap()
+            );
+            assert_eq!(adapter.undo.revision(), revision);
+            assert!(adapter.undo.can_redo());
+            assert!(!adapter.edited);
+        }
+    }
+
+    #[test]
+    fn fifteen_digit_scientific_tsv_fixture_meets_relative_tolerance() {
+        let expected = [1.23456789012345_f64, -10.0, 3000.0, 0.0, 7.85e-9];
+        let text = "1.23456789012345E+00\t-1.00000000000000E+01\t3.00000000000000E+03\t0.00000000000000E+00\t7.85000000000000E-09\r\n";
+        let block = parse_tsv(text);
+        for (text, value) in block[0].iter().zip(expected) {
+            let actual = text.parse::<f64>().unwrap();
+            if value == 0.0 {
+                assert_eq!(actual, 0.0);
+            } else {
+                assert!((actual - value).abs() <= 1e-14 * value.abs());
+            }
+        }
     }
 }

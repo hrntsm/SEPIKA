@@ -1054,6 +1054,8 @@ pub struct UiModelScoped {
     #[cfg(feature = "gui")]
     pub node_grid: crate::grid::GridWidget,
     #[cfg(feature = "gui")]
+    pub material_grid: crate::grid::GridWidget,
+    #[cfg(feature = "gui")]
     pub boundary_node: Option<NodeId>,
     /// 節点追加フォームの入力中座標（境界条件の編集とは別の独立 UI）
     pub node_draft: [String; 3],
@@ -1219,6 +1221,8 @@ impl Default for UiModelScoped {
             node_edit: Vec::new(),
             #[cfg(feature = "gui")]
             node_grid: crate::grid::GridWidget::new(),
+            #[cfg(feature = "gui")]
+            material_grid: crate::grid::GridWidget::new(),
             #[cfg(feature = "gui")]
             boundary_node: None,
             node_draft: ["0".to_string(), "0".to_string(), "0".to_string()],
@@ -1961,6 +1965,7 @@ mod result_validity;
 pub use result_validity::HoldingCapacitySource;
 use result_validity::ResultInputKey;
 mod actions;
+pub mod material_grid;
 pub mod node_grid;
 mod preparation;
 

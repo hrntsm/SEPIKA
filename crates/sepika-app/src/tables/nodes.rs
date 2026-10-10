@@ -1049,4 +1049,66 @@ mod tests {
         undo.undo(&mut model);
         assert_eq!(model.nodes[0].support_spring, None);
     }
+    #[test]
+    fn node_table_paste_command_rejection_keeps_results_stale_flags_and_redo() {
+        use sepika_core::model::{MemberLoad, MemberLoadKind};
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        app.core.model.load_cases[0].member = vec![MemberLoad::manual(
+            app.core.model.elements[0].id,
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 2000.0,
+                w1: 1.0,
+                w2: 1.0,
+            },
+        )];
+        app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(AddNode {
+                coord: [8000.0, 0.0, 0.0],
+                restraint: Dof6Mask::FREE,
+            }),
+        );
+        app.core.scoped.undo.undo(&mut app.core.model);
+        app.core.scoped.staleness = Default::default();
+        app.select_node(NodeId(0));
+        let original = rmp_serde::to_vec_named(&app.core.model).unwrap();
+        let geometry = format!("{:?}", app.ui.scoped.selection);
+        let revision = app.core.scoped.undo.revision();
+        app.ui.scoped.node_grid.grid =
+            crate::grid::GridState::new(app.core.model.nodes.len() + 1, 3);
+        app.ui
+            .scoped
+            .node_grid
+            .grid
+            .click(crate::grid::CellRef { row: 2, col: 2 }, false);
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Paste("1000".into())],
+                ..Default::default()
+            },
+            |ui| nodes_table(ui, &mut app),
+        );
+        assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), original);
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        assert!(app.core.scoped.undo.can_redo());
+        assert_eq!(format!("{:?}", app.ui.scoped.selection), geometry);
+        assert!(!app.core.scoped.staleness.results_stale);
+        assert!(!app.core.scoped.staleness.unsaved_changes);
+        assert!(app
+            .core
+            .log
+            .entries
+            .iter()
+            .any(|entry| entry.level == LogLevel::Error && entry.message.contains("member[0]")));
+        assert!(!app
+            .core
+            .log
+            .entries
+            .iter()
+            .any(|entry| entry.message.contains("セル適用")));
+    }
 }
