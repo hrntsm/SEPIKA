@@ -359,3 +359,54 @@ pub(crate) fn track_shear_yield(
         }
     }
 }
+
+#[cfg(test)]
+mod ratio_contract_tests {
+    use super::*;
+
+    #[test]
+    fn shear_factory_uses_web_width_effective_depth_and_decimal_hoop_ratio() {
+        use sepika_core::ids::MaterialId;
+        use sepika_core::model::MaterialCategory;
+        use sepika_core::section_shape::{BeamStirrup, RcBeamRebar};
+        let main_dia = (2400.0 / std::f64::consts::PI).sqrt();
+        let hoop_dia = (120.0 / std::f64::consts::PI).sqrt();
+        let shape = SectionShape::RcBeamRect {
+            b: 300.0,
+            d: 600.0,
+            rebar: RcBeamRebar {
+                main_dia,
+                top: vec![3],
+                bottom: vec![3],
+                cover: 60.0 - hoop_dia - main_dia / 2.0,
+                stirrup: BeamStirrup {
+                    dia: hoop_dia,
+                    pitch: 100.0,
+                    legs: 2,
+                },
+            },
+        };
+        let mat = Material {
+            id: MaterialId(0),
+            name: "FC24".into(),
+            category: MaterialCategory::Concrete,
+            young: 20_000.0,
+            poisson: 0.2,
+            density: 0.0,
+            shear: None,
+            fc: Some(24.0),
+            fy: None,
+            strength_factor: None,
+            concrete_class: Default::default(),
+        };
+        let (input, steel_qy) =
+            real_rebar_capacity_input(&shape, &mat, None, None, None, ShearDir::Y, 3000.0).unwrap();
+        assert!((input.at - 1800.0).abs() < 1e-9);
+        assert_eq!(input.b, 300.0);
+        assert_eq!(input.d, 600.0);
+        assert!((input.d_eff - 540.0).abs() < 1e-12);
+        assert!((input.pw - 0.002).abs() < 1e-15);
+        assert_eq!(steel_qy, 0.0);
+        assert!((rc_qsu_simple(&input) - 235_681.416_383_415_87).abs() < 1e-8);
+    }
+}
