@@ -7,7 +7,7 @@ mod fixture;
 #[test]
 fn 解析準備は孤立版と入力荷重を候補で診断しモデルを確定しない() {
     for wall in [false, true] {
-        let mut model = fixture::with_plate(wall);
+        let mut model = fixture::with_plate_metadata(wall);
         if wall {
             model.unassigned_posts.push(fixture::divider(true));
         } else {

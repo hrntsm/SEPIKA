@@ -432,7 +432,6 @@ impl App {
     fn refresh_preparation(&mut self) {
         self.core.scoped.preparation = None;
         self.apply_parallelism_setting();
-        let _ = self.core.model.anchorize_secondary_members();
         let previous_error = self.core.scoped.last_error.take();
         self.sync_auto_load_cases_action();
         if self.core.scoped.last_error.is_some() {

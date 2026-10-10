@@ -60,6 +60,7 @@ pub fn with_plate(wall: bool) -> Model {
             loads,
             slit: Default::default(),
             self_weight_shares: vec![],
+            dl_support: None,
         });
         model.wall_assignment_regions.regions[0].assignment =
             PlateAssignment::Plate(WallPlateId(0));
@@ -126,4 +127,39 @@ pub fn assert_inputs_eq(actual: &Model, expected: &Model) {
     assert_eq!(actual.load_cases, expected.load_cases);
     assert_eq!(actual.stb_node_ids, expected.stb_node_ids);
     assert!(actual.eq_ignoring_dofmap(expected));
+}
+
+#[allow(dead_code)]
+pub fn with_plate_metadata(wall: bool) -> Model {
+    let mut model = with_plate(wall);
+    model.stb_strengths.members.push(StbMemberStrength {
+        target: if wall {
+            StrengthTarget::Wall(WallPlateId(0))
+        } else {
+            StrengthTarget::Slab(SlabId(0))
+        },
+        node: NodeId(0),
+        node_order: vec![],
+        concrete: Some("Fc24".into()),
+    });
+    model.seismic_weight_generation = Some(SeismicWeightGeneration {
+        input_key: vec![5, 0, 6],
+        output_key: vec![24],
+        calculated_weights: vec![],
+        automatic_diaphragms: vec![],
+        automatic_master_restraints: vec![],
+    });
+    model.load_cases.push(LoadCase {
+        id: sepika_core::ids::LoadCaseId(0),
+        name: EX_CASE_NAME.into(),
+        kind: LoadCaseKind::Seismic,
+        nodal: vec![NodalLoad {
+            node: NodeId(0),
+            values: [123., 0., 0., 0., 0., 0.],
+            name: String::new(),
+            source: LoadSource::Auto,
+        }],
+        member: vec![],
+    });
+    model
 }

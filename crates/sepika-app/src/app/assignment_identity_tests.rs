@@ -7,7 +7,7 @@ mod fixture;
 fn 準備計算は孤立版を表示し領域と入力荷重を未更新にする() {
     for wall in [false, true] {
         let mut app = App::default();
-        app.core.model = fixture::with_plate(wall);
+        app.core.model = fixture::with_plate_metadata(wall);
         if wall {
             app.core.model.unassigned_posts.push(fixture::divider(true));
         } else {
@@ -186,5 +186,42 @@ fn 節点グリッドの非平面貼付は旧版荷重を診断して未更新�
             .unwrap()
             .contains("0.0025"));
         fixture::assert_inputs_eq(&app.core.model, &before);
+    }
+}
+
+#[test]
+fn 一般準備の候補拒否は支持再推定もauto_ex生成記録強度入力も確定しない() {
+    use sepika_core::model::SecondaryMemberEnds;
+    for wall in [false, true] {
+        let mut app = App::default();
+        app.core.model = fixture::with_plate_metadata(wall);
+        let mut member = fixture::divider(wall);
+        member.ends = SecondaryMemberEnds::Detached(if wall {
+            [[2000., 0., 0.], [2000., 0., 3000.]]
+        } else {
+            [[2000., 0., 0.], [2000., 3000., 0.]]
+        });
+        if wall {
+            app.core.model.unassigned_posts.push(member);
+        } else {
+            app.core.model.unassigned_beams.push(member);
+        }
+        let before = app.core.model.clone();
+        app.ensure_preparation();
+        assert!(app
+            .core
+            .scoped
+            .last_error
+            .as_ref()
+            .unwrap()
+            .contains("孤立版"));
+        fixture::assert_inputs_eq(&app.core.model, &before);
+        assert_eq!(
+            app.core.model.seismic_weight_generation,
+            before.seismic_weight_generation
+        );
+        assert_eq!(app.core.model.stb_strengths, before.stb_strengths);
+        assert_eq!(app.core.scoped.undo.revision(), 0);
+        assert!(!app.core.scoped.undo.can_undo());
     }
 }
