@@ -20,3 +20,7 @@ Legacy source:
 
 - [Issue #497](https://github.com/hrntsm/SEPIKA/issues/497) P2再監査・2026-10-10実装契約補足
 - [ADR 0004](0004-story-and-diaphragm-separation.md) の階・剛床・層の分離を維持し、交換形式の明示所属を別入力として追加
+
+## native初回所属保存
+
+原階未初期化のnative階編集は既存標準出力と同じ `Node.story` と `Story.node_ids` の和集合を保存する。片側入力の合法な所属を失わず、同一階の重複は除去し、解析生成代表節点は除外する。相異なる階への指定は両方を残して原階の多重所属診断へ渡す。取り込み済み原階と意図的な原階0件では初期化せず、prepareの解析所属を追加しない。
