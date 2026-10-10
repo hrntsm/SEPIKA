@@ -710,6 +710,118 @@ mod purpose_tests {
         app
     }
     #[test]
+    fn 拒否した層力の数値と採用識別を共通入口csvとguiへ保持する() {
+        use sepika_solver::nonlinear::pushover::story_response::{CutForce, ForceGroup};
+        for (wall, brace, frame, external, reason, beta, residual) in [
+            (90.0, 0.0, 60.0, 120.0, "釣合い残差", "0.6", "30"),
+            (
+                160.0,
+                0.0,
+                -10.0,
+                150.0,
+                "範囲外",
+                "1.0666666666666667",
+                "0",
+            ),
+            (0.0, 0.0, 0.0, 0.0, "分母", "未定義", "0"),
+            (
+                90.0,
+                -10.0,
+                70.0,
+                150.0,
+                "負の負担寄与",
+                "0.5333333333333333",
+                "0",
+            ),
+        ] {
+            let mut app = ready();
+            super::super::tests::select_holding_points(&mut app);
+            let po = app
+                .core
+                .scoped
+                .results
+                .as_mut()
+                .unwrap()
+                .pushover_x
+                .as_mut()
+                .unwrap();
+            let point = po.ds_evaluation.as_ref().unwrap().clone();
+            let cut = &mut po
+                .confirmed_history
+                .as_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|r| r.step == point.step)
+                .unwrap()
+                .cuts[0];
+            cut.forces = [
+                (0, ForceGroup::Wall, wall),
+                (1, ForceGroup::Brace, brace),
+                (2, ForceGroup::Frame, frame),
+            ]
+            .into_iter()
+            .map(|(id, group, force_n)| CutForce {
+                elem: sepika_core::ids::ElemId(id),
+                group,
+                force_n,
+            })
+            .collect();
+            cut.external_n = external;
+            cut.reference_n = 100.0;
+            cut.support_n = 2.0;
+            cut.tolerance_n = 1e-6;
+            let expected = [
+                reason.to_string(),
+                "purpose=Ds".into(),
+                format!("run={}", point.run_id),
+                "direction=X".into(),
+                format!("step={}", point.step),
+                format!("Wall={wall} N"),
+                format!("Brace={brace} N"),
+                format!("Frame={frame} N"),
+                format!("上層外力={external} N"),
+                "基準外力=100 N".into(),
+                "支持ばね内力=2 N".into(),
+                format!("残差={residual} N"),
+                "許容差=0.000001 N".into(),
+                format!("βu={beta} [-]"),
+                format!("Qu={} N", wall + brace + frame),
+            ];
+            let error = app.compute_holding_capacity().err().unwrap();
+            let csv = crate::summary::build_report_csv(&app);
+            for fragment in &expected {
+                assert!(error.contains(fragment), "{fragment}: {error}");
+                assert!(csv.contains(fragment), "{fragment}: {csv}");
+            }
+            #[cfg(feature = "gui")]
+            {
+                let ctx = egui::Context::default();
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(4000.0, 10000.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| crate::design_view::design_table(ui, &mut app),
+                );
+                let text = output
+                    .shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Text(t) => Some(t.galley.job.text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                for fragment in &expected {
+                    assert!(text.contains(fragment), "{fragment}: {text}");
+                }
+            }
+        }
+    }
+    #[test]
     fn 共通入口は目的別点の未指定を法定既定点で埋めない() {
         let mut app = ready();
         assert!(app

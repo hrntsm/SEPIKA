@@ -252,6 +252,64 @@ mod tests {
                 .abs()
                 < 1e-6
         );
+        for (wall, frame, external, reason, beta, residual) in [
+            (90.0, 60.0, 120.0, "釣合い残差", "0.6", "30"),
+            (160.0, -10.0, 150.0, "範囲外", "1.0666666666666667", "0"),
+            (0.0, 0.0, 0.0, "分母", "未定義", "0"),
+            (-10.0, 160.0, 150.0, "範囲外", "-0.06666666666666667", "0"),
+        ] {
+            use sepika_solver::nonlinear::pushover::story_response::{CutForce, ForceGroup};
+            let point = result.capacity_evaluation.as_ref().unwrap();
+            let identity = format!("run={}", point.run_id);
+            let cut = &mut result
+                .confirmed_history
+                .as_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|r| r.step == point.step)
+                .unwrap()
+                .cuts[0];
+            cut.forces = vec![
+                CutForce {
+                    elem: ElemId(0),
+                    group: ForceGroup::Wall,
+                    force_n: wall,
+                },
+                CutForce {
+                    elem: ElemId(1),
+                    group: ForceGroup::Frame,
+                    force_n: frame,
+                },
+            ];
+            cut.external_n = external;
+            cut.reference_n = 100.0;
+            cut.support_n = 2.0;
+            cut.tolerance_n = 1e-6;
+            let published = pushover_summary(&result);
+            let error = published["capacity_story_evaluation"]["Err"]
+                .as_str()
+                .unwrap();
+            for fragment in [
+                reason.to_string(),
+                "purpose=HoldingCapacity".into(),
+                identity,
+                "direction=X".into(),
+                "step=1".into(),
+                format!("Qu={} N", wall + frame),
+                format!("Wall={wall} N"),
+                "Brace=0 N".into(),
+                format!("Frame={frame} N"),
+                format!("上層外力={external} N"),
+                "基準外力=100 N".into(),
+                "支持ばね内力=2 N".into(),
+                format!("残差={residual} N"),
+                "許容差=0.000001 N".into(),
+                format!("βu={beta} [-]"),
+            ] {
+                assert!(error.contains(&fragment), "{fragment}: {error}");
+            }
+            assert!(published["capacity_story_evaluation"].get("Ok").is_none());
+        }
         let r = result.wall_history.as_mut().unwrap().first_mut().unwrap();
         r.response.as_mut().unwrap().qdir_n = 0.0;
         assert_eq!(

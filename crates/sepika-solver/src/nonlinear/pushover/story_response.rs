@@ -112,21 +112,26 @@ impl StoryCut {
         }
         let qu = wall + brace + frame;
         let residual = qu - self.external_n;
+        let beta = (qu.abs() > self.tolerance_n).then(|| (wall + brace) / qu);
+        let diagnostic = |reason: &str| {
+            let beta_text = beta.map_or_else(|| "未定義".into(), |v| v.to_string());
+            fail(&format!("{reason}; Qu={qu} N Wall={wall} N Brace={brace} N Frame={frame} N 上層外力={} N 基準外力={} N 支持ばね内力={} N 残差={residual} N 許容差={} N βu={beta_text} [-]", self.external_n, self.reference_n, self.support_n, self.tolerance_n))
+        };
         if residual.abs() > self.tolerance_n {
-            return Err(fail(
+            return Err(diagnostic(
                 "層切断面力と上層外力の釣合い残差が許容差を超えています",
             ));
         }
         if qu.abs() <= self.tolerance_n {
-            return Err(fail("βuの分母がゼロまたは許容差以下です"));
+            return Err(diagnostic("βuの分母がゼロまたは許容差以下です"));
         }
         let beta = (wall + brace) / qu;
         if !(0.0..=1.0).contains(&beta) {
-            return Err(fail("βuが0〜1の範囲外です"));
+            return Err(diagnostic("βuが0〜1の範囲外です"));
         }
         let sign = qu.signum();
         if [wall, brace, frame].iter().any(|v| v * sign < 0.0) {
-            return Err(fail("負の負担寄与があります"));
+            return Err(diagnostic("負の負担寄与があります"));
         }
         Ok(StoryForceEvaluation {
             layer: self.layer,
@@ -266,7 +271,16 @@ impl PushoverResult {
                 if cut.layer != i {
                     return Err("層切断面の順序・層識別が不整合です".into());
                 }
-                cut.evaluate()
+                cut.evaluate().map_err(|reason| {
+                    format!(
+                        "purpose={:?} run={} direction={:?} step={} reason={}: {reason}",
+                        point.purpose,
+                        point.run_id,
+                        point.direction,
+                        point.step,
+                        point.selection_reason
+                    )
+                })
             })
             .collect()
     }
