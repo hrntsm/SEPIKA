@@ -170,33 +170,26 @@ pub(crate) enum SelfWeightItem {
 ///   `factor` を乗じない。階共通耐火被覆・`load_cfg.extra_line_weight`（例外的な付加線重量 [N/mm]）・
 ///   `load_cfg.finish_area_weight`（仕上げ面重量 w_f、周長 φ から自動換算）が
 ///   あれば自重算定長を掛けて加算する。
-/// - 壁・シェル（`ElementKind::Wall`/`Shell`, 節点数3以上）: 設計重量（設計躯体＋
-///   仕上げ・増打ち＋開口重量）・物理質量相当（物理密度の躯体＋仕上げ・増打ち＋
-///   開口重量）・質量行列が受け持つ分（物理密度の躯体＋開口重量）を別々に
-///   全頂点へ等分配（§壁自重）。要素になる壁版は上下の梁と一体なので、行き先を
-///   上下どちらかへ寄せる扱いはしない（上下いずれかの梁との縁切りは壁版の形が表し、
-///   取り付く壁版として `crate::wall_attached` が受け持つ）。
-///   §1.2: 壁の重量を階高の中央で上下階の節点に分配する扱いに対応
-///   （矩形壁なら上下2節点ずつに1/4ずつ配分される）。
-///   §壁自重: 4 節点の耐震壁は「周辺の柱梁の内法寸法」で面積を評価する
-///   （[`wall_clear_area`]。芯々面積に内法係数を乗じる。控除相手の
-///   柱・梁が見つからない辺は控除なし＝芯々のまま保守側）。
-/// - ダンパー: 入力総重量を設計重量・物理質量相当重量に用い、断面・付加重量は加算しない。
+/// - シェル: 設計重量・物理質量相当重量・行列負担を別々に全頂点へ配る。
+/// - 壁版: 本列挙から除外する。物理壁版IDの共通実領域からDL支持と階帯を別々に生成する。
+/// - ダンパー: 入力総重量を使い、断面・付加重量は加算しない。
 ///
-/// 壁の解析要素（`ElementKind::Wall`）は入力の正である `model` には存在しない
-/// 生成物（D5）のため、本関数は内部で壁展開モデル
-/// （[`crate::wall_expand::expand_wall_elements`]）を組み立てて壁を検出する
-/// （呼び出し元に展開を要求しない。忘れると壁の自重が静かに消えるため）。
-/// 返す [`SelfWeightItem::Line`] の `elem_idx` は柱・梁・ブレースのみを指し、
-/// 生成要素は展開モデルの末尾へ追加されるだけなので、`model.elements` に対する
-/// 添字としてもそのまま有効。壁の開口は、壁展開モデルに合成される
-/// `wall_attrs`（[`crate::wall_expand::expand_wall_elements`] が壁版から複製する。
-/// モジュール doc 参照）から今までどおり読む。
+/// 壁展開モデルは周辺線材の列挙に使うが、生成Wall自体の重量を再列挙しない。
 pub(crate) fn enumerate_self_weight(
     model: &Model,
     load_cfg: &LoadCfg,
 ) -> Result<Vec<SelfWeightItem>, String> {
     load_cfg.validate_damper_weights(model)?;
+    if let Some(wall) = model
+        .elements
+        .iter()
+        .find(|e| e.kind == ElementKind::Wall && !model.generated_wall_origins.contains_key(&e.id))
+    {
+        return Err(format!(
+            "解析壁要素 {}: 物理壁版IDが未定義です。壁版入力へ変換して重量を再生成してください",
+            wall.id.0
+        ));
+    }
     let (mut expanded, _wall_index, _wall_expand_report) =
         crate::wall_expand::expand_wall_elements(model);
     expanded.load_cfg = Some(load_cfg.clone());
@@ -416,7 +409,7 @@ pub(crate) fn enumerate_self_weight(
                     is_column,
                 });
             }
-            ElementKind::Wall | ElementKind::Shell if elem.nodes.len() >= 3 => {
+            ElementKind::Shell if elem.nodes.len() >= 3 => {
                 let Some(t) = sec.thickness else {
                     continue;
                 };

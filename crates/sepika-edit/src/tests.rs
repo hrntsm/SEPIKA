@@ -1374,6 +1374,7 @@ fn test_delete_section_referenced_by_beam() {
     }];
     model.floor_regions.push(region);
     model.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
         shape: WallPlateShape::Enclosed,
@@ -2299,6 +2300,7 @@ fn test_delete_slab_out_of_range_is_noop() {
 
 fn make_story(id: u32, weight: Option<f64>) -> sepika_core::model::Story {
     sepika_core::model::Story {
+        wall_weights: Vec::new(),
         level_kind: Default::default(),
         structure: Default::default(),
         id: StoryId(id),
@@ -2423,8 +2425,10 @@ fn test_apply_stories_roundtrip_with_generated_masters() {
         support_spring: None,
     };
     let cmd = ApplyStories {
+        wall_weight_generation: sepika_core::model::WallWeightGenerationMode::Geometry,
         damper_mass_generation: Default::default(),
         stories: vec![Story {
+            wall_weights: Vec::new(),
             level_kind: Default::default(),
             structure: Default::default(),
             id: StoryId(0),
@@ -2493,6 +2497,7 @@ fn test_apply_stories_sets_and_restores_mass_method() {
     let mut stack = UndoStack::new();
 
     let cmd = ApplyStories {
+        wall_weight_generation: sepika_core::model::WallWeightGenerationMode::Geometry,
         damper_mass_generation: Default::default(),
         stories: vec![],
         node_story: vec![None, None],
@@ -2965,6 +2970,7 @@ fn model_with_enclosed_wall_plate() -> Model {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -2990,6 +2996,7 @@ fn test_set_wall_plate_attrs_roundtrip() {
     stack.run(
         &mut model,
         Box::new(SetWallPlateAttrs {
+            dl_support: Some(sepika_core::model::WallDlSupport::LowerBeam),
             self_weight_shares: Vec::new(),
             id,
             opening_area: 200.0,
@@ -3017,7 +3024,12 @@ fn test_set_wall_plate_attrs_roundtrip() {
     assert_eq!(model.wall_plates[0].slit.column_face, [true, false]);
     assert_eq!(model.wall_plates[0].slit.beam_face, [false, true]);
 
+    assert_eq!(
+        model.wall_plates[0].dl_support,
+        Some(sepika_core::model::WallDlSupport::LowerBeam)
+    );
     stack.undo(&mut model);
+    assert_eq!(model.wall_plates[0].dl_support, None);
     assert_eq!(model.wall_plates[0].opening_area, 0.0);
     assert_eq!(model.wall_plates[0].opening_weight, 0.0);
     assert!(model.wall_plates[0].openings.is_empty());
@@ -3033,6 +3045,7 @@ fn test_set_wall_plate_attrs_missing_id_is_noop() {
     stack.run(
         &mut model,
         Box::new(SetWallPlateAttrs {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             opening_area: 1.0,
@@ -4497,6 +4510,7 @@ fn story_edit_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
             .iter()
             .enumerate()
             .map(|(i, &(name, elevation))| Story {
+                wall_weights: Vec::new(),
                 id: StoryId(i as u32),
                 name: name.into(),
                 elevation,
@@ -7321,6 +7335,7 @@ fn test_plate_section_commands_reject_cft() {
         tip_loads: Vec::new(),
     });
     model.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
         shape: WallPlateShape::Enclosed,
@@ -7717,6 +7732,7 @@ fn test_set_attached_wall_plate_extent_and_anchor_noop() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -7827,6 +7843,7 @@ fn test_wall_plate_region_assignment_roundtrip() {
     let first = model.add_enclosed_wall_plate_from_nodes(
         &boundary,
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -7926,6 +7943,7 @@ fn test_unset_wall_plate_region_restores_wall_region_membership() {
     let plate_id = model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -7976,6 +7994,7 @@ fn test_delete_wall_plate_cascades_region_ids_and_undoes() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,

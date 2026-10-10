@@ -12,6 +12,7 @@ use sepika_core::section_shape::SectionShape;
 /// `Model::layers` が依拠する不変条件のため、テストのモデルにも必ず置く。
 fn base_story(node_ids: Vec<NodeId>) -> Story {
     Story {
+        wall_weights: Vec::new(),
         level_kind: Default::default(),
         structure: Default::default(),
         id: StoryId(0),
@@ -102,6 +103,7 @@ fn single_column_model(fy: f64, seismic_weight: f64) -> Model {
         stories: vec![
             base_story(vec![]),
             Story {
+                wall_weights: Vec::new(),
                 level_kind: Default::default(),
                 structure: Default::default(),
                 id: StoryId(1),
@@ -419,6 +421,7 @@ fn spring_column_model(kx: f64, support_kx: Option<f64>, seismic_weight: f64) ->
         stories: vec![
             base_story(vec![]),
             Story {
+                wall_weights: Vec::new(),
                 level_kind: Default::default(),
                 structure: Default::default(),
                 id: StoryId(1),
@@ -759,6 +762,7 @@ fn two_story_model() -> Model {
         stories: vec![
             base_story(vec![]),
             Story {
+                wall_weights: Vec::new(),
                 level_kind: Default::default(),
                 structure: Default::default(),
                 id: StoryId(1),
@@ -773,6 +777,7 @@ fn two_story_model() -> Model {
                 fireproof: Default::default(),
             },
             Story {
+                wall_weights: Vec::new(),
                 level_kind: Default::default(),
                 structure: Default::default(),
                 id: StoryId(2),
@@ -949,6 +954,7 @@ fn test_compute_static_indeterminacy_indeterminate_portal() {
         stories: vec![
             base_story(vec![]),
             Story {
+                wall_weights: Vec::new(),
                 level_kind: Default::default(),
                 structure: Default::default(),
                 id: StoryId(1),
@@ -1198,6 +1204,7 @@ fn portal_frame_model(fy: f64, seismic_weight: f64) -> Model {
         stories: vec![
             base_story(vec![]),
             Story {
+                wall_weights: Vec::new(),
                 level_kind: Default::default(),
                 structure: Default::default(),
                 id: StoryId(1),
@@ -3577,6 +3584,7 @@ pub(super) fn wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
         stories: vec![
             base_story(vec![]),
             Story {
+                wall_weights: Vec::new(),
                 level_kind: Default::default(),
                 structure: Default::default(),
                 id: StoryId(1),

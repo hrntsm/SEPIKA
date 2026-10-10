@@ -157,6 +157,7 @@ impl EditCommand for AddStory {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let before = snapshot(model);
         model.stories.push(Story {
+            wall_weights: Vec::new(),
             id: StoryId(model.stories.len() as u32),
             name: self.name.clone(),
             elevation: self.elevation,

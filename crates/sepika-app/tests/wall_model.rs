@@ -102,7 +102,9 @@ fn rc_girder_self_weight_uses_columns_not_orthogonal_steel_girders() {
         let material = model.element_material(element).unwrap();
         let total: f64 = loads
             .iter()
-            .filter(|load| load.elem == id)
+            .filter(|load| {
+                load.elem == id && load.source != sepika_core::model::LoadSource::WallSelfWeight
+            })
             .map(|load| match load.kind {
                 sepika_core::model::MemberLoadKind::Distributed { a, b, w1, w2 } => {
                     (b - a) * (w1 + w2) / 2.0
@@ -416,6 +418,7 @@ fn wall_bay_model() -> Model {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(5), NodeId(4)],
         WallPlate {
+            dl_support: Some(sepika_core::model::WallDlSupport::HeightMidpoint),
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -425,13 +428,22 @@ fn wall_bay_model() -> Model {
             openings: vec![WallOpening {
                 width: 900.0,
                 height: 1200.0,
-                offset: Some([1550.0, 0.0]),
+                offset: Some([1550.0, 500.0]),
             }],
             loads: vec![],
             slit: Default::default(),
         },
     );
 
+    // 屋上パラペットの階帯上端を覆う階レベルを明示する（未定義端帯は推測しない）。
+    model.nodes.push(Node {
+        id: NodeId(model.nodes.len() as u32),
+        coord: [0.0, 0.0, 6000.0],
+        restraint: Dof6Mask::FREE,
+        mass: None,
+        story: None,
+        support_spring: None,
+    });
     // 取り付く壁版 1 枚（Y=3000 面の梁 6-7 に載るパラペット。立ち上がり 900、
     // 荷重は取付き線の両端＝柱頭の節点 6・7 へ集中する）。
     //
@@ -440,6 +452,7 @@ fn wall_bay_model() -> Model {
     // どのフィクスチャも `loads` を持たないと、仕上げ・増打ちを自重へ算入する
     // 経路が壊れても代表スカラが動かず、静かに落ちる。
     model.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(1),
         shape: WallPlateShape::Attached {
@@ -479,6 +492,13 @@ fn wall_bay_app() -> App {
     let mut app = App::default();
     app.core.analysis_cfg.threads = 1;
     app.core.model = wall_bay_model();
+    // 単層の構造解析例には未定義上端帯の屋上突出壁を含めない。
+    // Attachedの実帯・質量は独立多層fixtureで照合する。
+    app.core
+        .model
+        .wall_plates
+        .retain(|p| p.id != WallPlateId(1));
+    app.core.model.nodes.retain(|n| n.coord[2] != 6000.0);
     // 架構種別（Ds 表の行を選ぶ設定。`App::design_frame`）は既定で SteelFrame
     // のままだと、耐震壁を持つ本フィクスチャでも Ds 計算が鋼構造の表
     // （`ds_steel`）を使ってしまい、RC 耐力壁の Ds 表（`ds_rc`）が一度も

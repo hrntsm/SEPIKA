@@ -168,12 +168,12 @@ pub fn expand_wall_elements_owned(
         expanded
             .elements
             .iter()
-            .all(|e| e.kind != ElementKind::Wall),
-        "expand_wall_elements への入力モデルに既に ElementKind::Wall が含まれている。\
-         壁展開モデルを再度展開しようとしていないか確認すること（モジュール doc の\
-         「二重展開しないこと」参照。壁の自重・剛性が二重計上される）。"
+            .all(|e| e.kind != ElementKind::Wall
+                || !expanded.generated_wall_origins.contains_key(&e.id)),
+        "壁展開モデルを再度展開しようとしていないか確認してください"
     );
 
+    expanded.generated_wall_origins.clear();
     let mut index = WallExpansionIndex::default();
     let mut report = WallExpansionReport::default();
     let mut next_id = expanded
@@ -184,8 +184,12 @@ pub fn expand_wall_elements_owned(
         .map_or(0, |m| m + 1);
 
     let mut jobs: Vec<(WallPlateId, ElementData, WallAttr)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for region in &expanded.wall_regions {
         for &plate_id in &region.wall_plate_ids {
+            if !seen.insert(plate_id) {
+                continue;
+            }
             let Some(plate) = expanded.wall_plate(plate_id) else {
                 continue;
             };
@@ -235,6 +239,7 @@ pub fn expand_wall_elements_owned(
     }
     for (plate_id, elem, attr) in jobs {
         index.0.insert(elem.id, plate_id);
+        expanded.generated_wall_origins.insert(elem.id, plate_id);
         expanded.elements.push(elem);
         expanded.wall_attrs.push(attr);
     }
@@ -286,6 +291,7 @@ mod tests {
 
     fn quad_plate(id: u32, section: Option<SectionId>) -> WallPlate {
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(id),
             shape: WallPlateShape::Enclosed,
@@ -550,6 +556,7 @@ mod tests {
     fn test_attached_plate_is_not_generated() {
         let mut m = base_model();
         m.wall_plates.push(WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
             shape: WallPlateShape::Attached {

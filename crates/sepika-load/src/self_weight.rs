@@ -31,9 +31,9 @@ const DIR_DOWN: [f64; 3] = [0.0, 0.0, -1.0];
 /// - **二次部材（小梁・間柱）**: ここでは扱わない。逐次伝達（[`crate::cascade`]）が
 ///   床分配の辺荷重と一緒に受け持ち、主架構まで運ぶ。
 /// - **ダンパー**: 入力総重量を両端節点へ 1/2 ずつの節点荷重とする。
-/// - **壁・シェル**: 頂点への節点荷重（縁が切れていない梁際の辺へ。上下とも一体なら
-///   四隅へ等分、片側の梁際が切れていれば反対側の 2 節点へ全量）。
-/// - **フレーム外雑壁**: 近傍節点への節点荷重（`story_gen` と同じ配分）。
+/// - **囲まれた壁版**: 共通総量を明示DL方式・任意辺率で実支持梁へ伝える。
+///   Attached壁・二次支持は床分配／逐次反力伝達が扱う。
+/// - **シェル**: 頂点への節点荷重。壁の階重量は別の水平帯積分で算定する。
 ///
 /// 同一節点への荷重は 1 件の `NodalLoad` に合算して返す。
 pub fn self_weight_case_content(
@@ -92,6 +92,35 @@ pub fn self_weight_case_content(
                     node_force[i] += w;
                 }
             }
+        }
+    }
+
+    for plate in &model.wall_plates {
+        model.wall_weight(plate)?;
+        if !plate.is_attached() {
+            crate::wall_plate_load::dl_ratios(model, plate)?;
+        }
+    }
+    for load in crate::wall_plate_load::distribute_enclosed_wall_plates(model).primary {
+        let Some(elem) = model.element(load.elem) else {
+            continue;
+        };
+        let len = model.member_length(elem);
+        if let (crate::floor::LoadTarget::Span { t, .. }, crate::floor::LoadShape::Uniform { w }) =
+            (load.target, load.shape)
+        {
+            let mut wall_load = MemberLoad::auto(
+                elem.id,
+                DIR_DOWN,
+                MemberLoadKind::Distributed {
+                    a: t[0].min(t[1]) * len,
+                    b: t[0].max(t[1]) * len,
+                    w1: w,
+                    w2: w,
+                },
+            );
+            wall_load.source = sepika_core::model::LoadSource::WallSelfWeight;
+            member.push(wall_load);
         }
     }
 

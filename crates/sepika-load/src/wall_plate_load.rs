@@ -170,9 +170,7 @@ fn edge_shares_with(
     if !matches!(plate.shape, WallPlateShape::Enclosed) {
         return Vec::new();
     }
-    if model.wall_plate_becomes_element(plate) {
-        return Vec::new();
-    }
+
     let total = match basis {
         crate::cascade::SelfWeightBasis::Design => model.wall_plate_self_weight(plate, model),
         crate::cascade::SelfWeightBasis::MassEquiv => {
@@ -182,7 +180,7 @@ fn edge_shares_with(
     let Some(total) = total else {
         return Vec::new();
     };
-    if total <= 0.0 || !plate.has_valid_self_weight_shares(model) {
+    if total <= 0.0 {
         return Vec::new();
     }
     let Some(region) = model.wall_plate_assignment_region(plate.id) else {
@@ -195,7 +193,10 @@ fn edge_shares_with(
     let slit_edge = resolved_slit_edge_flags(model, plate, boundary.len())
         .unwrap_or_else(|| vec![false; boundary.len()]);
     let mut shares = Vec::new();
-    for (i, &ratio) in plate.self_weight_shares.iter().enumerate() {
+    let Ok(ratios) = dl_ratios(model, plate) else {
+        return Vec::new();
+    };
+    for (i, &ratio) in ratios.iter().enumerate() {
         if ratio == 0.0 {
             continue;
         }
@@ -210,6 +211,72 @@ fn edge_shares_with(
         });
     }
     shares
+}
+
+/// DL支持比。指定辺・梁三方式・スリット例外を同時適用しない。
+pub fn dl_ratios(model: &Model, plate: &WallPlate) -> Result<Vec<f64>, String> {
+    use sepika_core::model::WallDlSupport;
+    let err = |s: &str| format!("壁版 {}: {s}", plate.id.0);
+    if plate.is_attached() {
+        return Err(err("取付き壁のDLは取付き先と伝達規則で決めます"));
+    }
+    let region = model
+        .wall_plate_assignment_region(plate.id)
+        .ok_or_else(|| err("壁版割当領域が未設定です"))?;
+    if plate.dl_support.is_some() && !plate.self_weight_shares.is_empty() {
+        return Err(err("DL梁方式と任意辺負担率の同時指定はできません"));
+    }
+    let coords = plate
+        .boundary_coords(model)
+        .ok_or_else(|| err("支持境界が未設定です"))?;
+    let mut horizontal: Vec<_> = (0..coords.len())
+        .filter(|&i| is_horizontal(coords[i], coords[(i + 1) % coords.len()]))
+        .collect();
+    let z = |i: usize| (coords[i][2] + coords[(i + 1) % coords.len()][2]) / 2.0;
+    horizontal.sort_by(|&a, &b| z(a).total_cmp(&z(b)));
+    let exception = plate.slit.column_face == [true, true] && plate.slit.beam_face == [true, false];
+    if !exception && plate.dl_support.is_none() {
+        if !plate.has_valid_self_weight_shares(model) {
+            return Err(err("DL支持方式または有効な任意辺負担率が未指定です"));
+        }
+        return Ok(plate.self_weight_shares.clone());
+    }
+    if horizontal.len() != 2 {
+        return Err(err("三方式に必要な上下の水平支持梁を解決できません"));
+    }
+    let lower = horizontal[0];
+    let upper = horizontal[1];
+    let mut ratios = vec![0.0; region.boundary.len()];
+    let mode = if exception {
+        WallDlSupport::UpperBeam
+    } else {
+        plate.dl_support.unwrap()
+    };
+    let lower_secondary = matches!(region.boundary[lower].support,SupportMemberId::Secondary(id) if model.secondary_member(id).is_some_and(|m|m.kind==sepika_core::model::SecondaryMemberKind::Beam));
+    if lower_secondary && !exception {
+        ratios[lower] = 1.0;
+    } else {
+        match mode {
+            WallDlSupport::LowerBeam => ratios[lower] = 1.0,
+            WallDlSupport::UpperBeam => ratios[upper] = 1.0,
+            WallDlSupport::HeightMidpoint => {
+                let w = model.wall_weight(plate)?;
+                let cut = (w.z_range_mm[0] + w.z_range_mm[1]) / 2.0;
+                let a = w.band(w.z_range_mm[0] - 1.0, cut)?.design_n;
+                if w.totals.design_n == 0.0 {
+                    return Ok(ratios);
+                }
+                ratios[lower] = a / w.totals.design_n;
+                ratios[upper] = 1.0 - ratios[lower];
+            }
+        }
+    }
+    let flags = resolved_slit_edge_flags(model, plate, ratios.len())
+        .ok_or_else(|| err("支持辺のスリット対応が未解決です"))?;
+    if ratios.iter().zip(flags).any(|(r, s)| *r > 0.0 && s) {
+        return Err(err("選択したDL支持梁がスリットで切れています"));
+    }
+    Ok(ratios)
 }
 
 /// 要素にならない全壁版の自重を分配する（設計重量基準）。
@@ -244,7 +311,7 @@ fn push_post_share(
     key: SecondaryKey,
     share: &WallEdgeShare,
 ) {
-    let Some(sm) = model.posts().find(|sm| sm.id == key) else {
+    let Some(sm) = model.secondary_member(key) else {
         return;
     };
     let Some((_, _, len)) = model.secondary_member_axis(sm) else {
@@ -306,9 +373,9 @@ fn push_primary_share(model: &Model, loads: &mut Vec<BeamLoad>, share: &WallEdge
     });
 }
 
-/// 壁版と二次部材の自重を支持先へ伝え、地震用節点重量 [N] に加算する（設計重量）。
-/// 未指定・支持欠落・循環があれば加算前にエラーを返す。
-pub fn accumulate_wall_and_secondary_seismic_weight(
+/// 壁版と二次部材のDL支持反力相当量 [N] を節点へ加算する。
+/// 壁の地震用階重量では使用せず、共通実領域の水平帯積分を使う。
+pub fn accumulate_wall_and_secondary_dl_weight(
     model: &Model,
     node_weight: &mut [f64],
 ) -> Result<(), String> {
@@ -320,10 +387,10 @@ pub fn accumulate_wall_and_secondary_seismic_weight(
     )
 }
 
-/// 壁版と二次部材の自重を支持先へ伝え、物理質量相当の節点重量 [N] に加算する。
-/// 支持経路・端部負担率は設計重量版と同じで、二次部材の自重だけを物理密度で扱う
-/// （壁版はコンクリートで設計＝物理のため値は変わらない）。
-pub fn accumulate_wall_and_secondary_mass_equiv(
+/// DL支持反力の物理質量相当量を節点へ集計する（階帯集計ではない）。
+/// 支持経路・端部負担率は設計重量版と同じで、各部材の物理質量相当総量を使う。
+/// 設計重量・階帯・質量行列負担との同一配分を意味しない。
+pub fn accumulate_wall_and_secondary_dl_mass_equiv(
     model: &Model,
     node_mass: &mut [f64],
 ) -> Result<(), String> {
@@ -335,13 +402,13 @@ pub fn accumulate_wall_and_secondary_mass_equiv(
     )
 }
 
-/// [`accumulate_wall_and_secondary_seismic_weight`] の、二次部材端の反力を重力ケースと
+/// [`accumulate_wall_and_secondary_dl_weight`] の、二次部材端の反力を重力ケースと
 /// 同じく主架構へ解決してから集計する版（自重同期済み DL の置換量 [N] の算定用）。
 ///
 /// 重力ケース（`compute_gravity_auto_load_cases`）は要素が接続しない節点の荷重を
 /// `resolve_nodal_to_primary` で大梁の中間集中荷重へ変換する。置換量を重力ケースと
 /// 同じ帰属で求めることで、質量置換後の節点質量が負になるのを防ぐ。
-pub(crate) fn accumulate_wall_and_secondary_seismic_weight_resolved(
+pub(crate) fn accumulate_wall_and_secondary_dl_weight_resolved(
     model: &Model,
     node_weight: &mut [f64],
 ) -> Result<(), String> {
@@ -353,8 +420,8 @@ pub(crate) fn accumulate_wall_and_secondary_seismic_weight_resolved(
     )
 }
 
-/// [`accumulate_wall_and_secondary_mass_equiv`] の解決版（物理質量相当）。
-pub(crate) fn accumulate_wall_and_secondary_mass_equiv_resolved(
+/// [`accumulate_wall_and_secondary_dl_mass_equiv`] の解決版（物理質量相当）。
+pub(crate) fn accumulate_wall_and_secondary_dl_mass_equiv_resolved(
     model: &Model,
     node_mass: &mut [f64],
 ) -> Result<(), String> {
@@ -482,9 +549,7 @@ pub fn wall_plates_without_load_path(model: &Model) -> Vec<WallPlateId> {
         .wall_plates
         .iter()
         .filter(|plate| {
-            if !matches!(plate.shape, WallPlateShape::Enclosed)
-                || model.wall_plate_becomes_element(plate)
-            {
+            if !matches!(plate.shape, WallPlateShape::Enclosed) {
                 return false;
             }
             model

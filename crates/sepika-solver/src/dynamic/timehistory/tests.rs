@@ -809,6 +809,7 @@ fn fiber_column_model(fy: f64) -> Model {
         stories: vec![
             // 階は床であり、先頭は基部の床（`Model::layers` の不変条件）。
             Story {
+                wall_weights: Vec::new(),
                 level_kind: Default::default(),
                 structure: Default::default(),
                 id: StoryId(0),
@@ -823,6 +824,7 @@ fn fiber_column_model(fy: f64) -> Model {
                 fireproof: Default::default(),
             },
             Story {
+                wall_weights: Vec::new(),
                 level_kind: Default::default(),
                 structure: Default::default(),
                 id: StoryId(1),

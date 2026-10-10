@@ -1718,7 +1718,8 @@ fn story_gen_changes_model(
     mass_method: sepika_core::model::MassMethod,
 ) -> bool {
     use sepika_core::model::Constraint;
-    if model.mass_method != mass_method
+    if model.wall_weight_generation != Some(gen.wall_weight_generation)
+        || model.mass_method != mass_method
         || model.stories != gen.stories
         || model.generated_masters != gen.generated_masters
         || model.damper_mass_generation.as_ref() != Some(&gen.damper_mass_generation)

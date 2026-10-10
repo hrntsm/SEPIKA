@@ -297,6 +297,9 @@ pub struct Story {
     /// 階共通の耐火被覆条件。既定はS・CFTとも被覆なし。
     #[serde(default)]
     pub fireproof: StoryFireproof,
+    /// 物理壁版IDごとの独立階帯集計。空は壁なしまたは未生成。
+    #[serde(default)]
+    pub wall_weights: Vec<WallStoryWeight>,
 }
 
 /// 層（隣り合う 2 つの階の間）。法規上の「i 階」はこれを指す。

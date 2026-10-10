@@ -50,6 +50,7 @@ fn representative_model() -> Model {
         });
     }
     m.stories.push(Story {
+        wall_weights: Vec::new(),
         level_kind: Default::default(),
         structure: Default::default(),
         id: StoryId(0),
@@ -2797,6 +2798,7 @@ fn test_wall_roundtrip_export_import() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -2907,6 +2909,7 @@ fn test_non_quad_wall_plate_roundtrip_export_import() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3), NodeId(4)],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,

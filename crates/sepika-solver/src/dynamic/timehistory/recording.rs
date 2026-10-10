@@ -623,6 +623,7 @@ mod tests {
             stories: vec![
                 // 階は床であり、先頭は基部の床（`Model::layers` の不変条件）。
                 Story {
+                    wall_weights: Vec::new(),
                     level_kind: Default::default(),
                     structure: Default::default(),
                     id: StoryId(0),
@@ -637,6 +638,7 @@ mod tests {
                     fireproof: Default::default(),
                 },
                 Story {
+                    wall_weights: Vec::new(),
                     level_kind: Default::default(),
                     structure: Default::default(),
                     id: StoryId(1),
@@ -651,6 +653,7 @@ mod tests {
                     fireproof: Default::default(),
                 },
                 Story {
+                    wall_weights: Vec::new(),
                     level_kind: Default::default(),
                     structure: Default::default(),
                     id: StoryId(2),

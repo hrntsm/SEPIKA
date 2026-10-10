@@ -311,39 +311,49 @@ impl WallElement {
             column,
             a_mat,
             mass_total: {
-                let attr = model.wall_attrs.iter().find(|a| a.elem == data.id);
-                let opening_area = attr.map(|a| a.total_opening_area()).unwrap_or(0.0);
-                let opening_weight = attr.map(|a| a.opening_weight).unwrap_or(0.0);
-                let boundary = [geom.bottom[0], geom.bottom[1], geom.top[1], geom.top[0]];
-                let points: Vec<_> = boundary
-                    .iter()
-                    .map(|n| model.nodes[n.index()].coord)
-                    .collect();
-                let dimensions = std::array::from_fn(|i| {
-                    let a = boundary[i];
-                    let b = boundary[(i + 1) % 4];
-                    model
-                        .elements
-                        .iter()
-                        .find(|e| {
-                            e.kind == sepika_core::model::ElementKind::Beam
-                                && e.nodes.len() >= 2
-                                && ((e.nodes[0] == a && e.nodes[e.nodes.len() - 1] == b)
-                                    || (e.nodes[0] == b && e.nodes[e.nodes.len() - 1] == a))
-                        })
-                        .and_then(|e| model.element_section(e))
-                        .map(|s| [s.width, s.depth])
-                });
-                let area = sepika_core::geom::polygon::area_3d(&points)
-                    * sepika_core::model::wall_clear_area_factor(&points, &dimensions);
-                let net_area = (area - opening_area).max(0.0);
-                let mass_per_area = if is_rc_wall {
-                    rc_density * t
+                let origin = model.generated_wall_origins.get(&data.id);
+                let plate = origin.and_then(|id| model.wall_plate(*id));
+                if origin.is_some() && plate.is_none() {
+                    return None;
+                }
+                if let Some(plate) = plate {
+                    model.wall_weight(plate).ok()?.totals.matrix_n
+                        / sepika_core::units::GRAVITY_MM_S2
                 } else {
-                    section_mass_properties.mass_per_length / 1000.0
-                };
-                (mass_per_area * net_area + opening_weight / sepika_core::units::GRAVITY_MM_S2)
-                    .max(0.0)
+                    let attr = model.wall_attrs.iter().find(|a| a.elem == data.id);
+                    let opening_area = attr.map(|a| a.total_opening_area()).unwrap_or(0.0);
+                    let opening_weight = attr.map(|a| a.opening_weight).unwrap_or(0.0);
+                    let boundary = [geom.bottom[0], geom.bottom[1], geom.top[1], geom.top[0]];
+                    let points: Vec<_> = boundary
+                        .iter()
+                        .map(|n| model.nodes[n.index()].coord)
+                        .collect();
+                    let dimensions = std::array::from_fn(|i| {
+                        let a = boundary[i];
+                        let b = boundary[(i + 1) % 4];
+                        model
+                            .elements
+                            .iter()
+                            .find(|e| {
+                                e.kind == sepika_core::model::ElementKind::Beam
+                                    && e.nodes.len() >= 2
+                                    && ((e.nodes[0] == a && e.nodes[e.nodes.len() - 1] == b)
+                                        || (e.nodes[0] == b && e.nodes[e.nodes.len() - 1] == a))
+                            })
+                            .and_then(|e| model.element_section(e))
+                            .map(|s| [s.width, s.depth])
+                    });
+                    let area = sepika_core::geom::polygon::area_3d(&points)
+                        * sepika_core::model::wall_clear_area_factor(&points, &dimensions);
+                    let net_area = (area - opening_area).max(0.0);
+                    let mass_per_area = if is_rc_wall {
+                        rc_density * t
+                    } else {
+                        section_mass_properties.mass_per_length / 1000.0
+                    };
+                    (mass_per_area * net_area + opening_weight / sepika_core::units::GRAVITY_MM_S2)
+                        .max(0.0)
+                }
             },
             committed_disp: [0.0; 24],
             trial_disp: [0.0; 24],

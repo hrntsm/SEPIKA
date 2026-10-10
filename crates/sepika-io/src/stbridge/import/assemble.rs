@@ -301,6 +301,7 @@ fn build_nodes_and_stories(
             .filter_map(|fid| node_index.get(fid).copied().map(NodeId))
             .collect();
         model.stories.push(Story {
+            wall_weights: Vec::new(),
             level_kind: Default::default(),
             structure: Default::default(),
             id: StoryId(story_rank[&s.file_id]),
@@ -1190,6 +1191,7 @@ fn assign_imported_walls(model: &mut Model, pending: Vec<PendingWall>) -> Result
         let plate_id = WallPlateId(model.wall_plates.len() as u32);
         if let Some(region_id) = region {
             model.wall_plates.push(WallPlate {
+                dl_support: None,
                 self_weight_shares: Vec::new(),
                 id: plate_id,
                 shape: WallPlateShape::Enclosed,
@@ -1212,6 +1214,7 @@ fn assign_imported_walls(model: &mut Model, pending: Vec<PendingWall>) -> Result
             &wall.boundary,
         ) {
             model.wall_plates.push(WallPlate {
+                dl_support: None,
                 self_weight_shares: Vec::new(),
                 id: plate_id,
                 shape,
