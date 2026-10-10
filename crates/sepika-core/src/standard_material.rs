@@ -1,6 +1,8 @@
 //! 標準グレードから復元するアプリの物性既定値。
 
-use crate::material_grade::{parse_concrete_fc, rebar_grade_f_value, steel_f_value, STEEL_GRADES};
+use crate::material_grade::{
+    parse_concrete_fc, rebar_grade_f_value, steel_f_value, steel_grade_base,
+};
 use crate::section_shape::{concrete_young_modulus_gamma, E_STEEL};
 use crate::units::STEEL_MASS_DENSITY_TON_MM3;
 use crate::units::{
@@ -24,8 +26,8 @@ pub struct StandardMaterialProperties {
 /// - 構造用鋼材（`SN400B`・`SS400`・`STKR400`・`SM490` 等）→ E=205000、基準強度 F を降伏点に
 ///   （板厚 40mm 以下の値。板厚区分は ST-Bridge の材料テーブルにないため一律 40mm 以下とみなす）。
 ///
-/// 鉄筋（`SD`/`SR`）は鋼材の前方一致より先に判定する（`SD` は鋼材グレード表と
-/// 前方一致しないため順序自体は結果に影響しないが、意図を明示するため維持する）。
+/// 鋼材は対応済みの分類名・種別記号付き名称のみ解決する。
+/// 前後空白は除き、鋼材名の大小文字は区別する。
 pub fn standard_material_properties(name: &str) -> Option<StandardMaterialProperties> {
     let n = name.trim();
     if n.is_empty() {
@@ -51,19 +53,7 @@ pub fn standard_material_properties(name: &str) -> Option<StandardMaterialProper
             fy: Some(fy),
         });
     }
-    let base = STEEL_GRADES.iter().find(|base| {
-        n == **base
-            || n.strip_prefix(**base).is_some_and(|suffix| match **base {
-                "SN400" => matches!(suffix, "A" | "B" | "C"),
-                "SN490" => matches!(suffix, "B" | "C"),
-                "SM400" | "SM490" => matches!(suffix, "A" | "B" | "C" | "YA" | "YB"),
-                "SM520" => matches!(suffix, "B" | "C"),
-                "STKN400" | "STKN490" => matches!(suffix, "B" | "W"),
-                "SNR400" => matches!(suffix, "A" | "B"),
-                "SNR490" => suffix == "B",
-                _ => false,
-            })
-    })?;
+    let base = steel_grade_base(n)?;
     steel_f_value(base, 40.0).map(|fy| StandardMaterialProperties {
         young: E_STEEL,
         poisson: 0.3,
