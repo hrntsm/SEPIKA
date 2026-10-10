@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [参照鋼の高密度防護_Issue501_2026-10.md](参照鋼の高密度防護_Issue501_2026-10.md) | 境界/単位・参照対象・設計拒否/物理許可・共通準備/旧Auto失効・GUI/MCP/Undo | 🔶（Verification実行中、二次CFT重量式・実験Validationは対象外） |
 | [標準強度_Issue520_2026-10.md](標準強度_Issue520_2026-10.md) | 標準2.0.2強度の元省略・優先解決・径別/部位別・編集/保存/出力 | ✅（Scope内強度Verification、全相互運用/Validationは未対応） |
 | [割当領域同一性_Issue506_2026-10.md](割当領域同一性_Issue506_2026-10.md) | 支持 ID/span・版と入力荷重の保持、孤立版診断、確認付き編集と原子的拒否・Undo/Redo | ✅（Scope内の状態契約Verification。力学・描画Validationは対象外） |
 | [地震重量の鮮度と共通準備_Issue439_2026-10.md](地震重量の鮮度と共通準備_Issue439_2026-10.md) | 入力/生成出力一致・GUI/MCP実EX・atomic失敗・Modal世代・Undo/保存・追加/挿入階マスター一意・公開編集ID/Undo | 🔶（入口Verification、#486適用制限と実測Validationは残る） |
@@ -185,6 +186,7 @@
 | 8 | 線形静的解析 | sepika-solver | linear.rs | `test_*`（座標変換回帰 `test_beam_to_global_transverse_uses_correct_inertia` 含む） | P2 | ✅ |
 | 9 | 固有値解析 | sepika-solver | eigen.rs | `test_1dof_period` | P2 | ✅ |
 | 10 | 地震力標準式・適用診断 | sepika-load / sepika-solver / sepika-app / sepika-mcp | ai.rs / statics/analysis/seismic.rs / app/tests.rs / design/holding.rs / nonlinear/pushover/driver.rs / server.rs | [Issue486の独立期待値・入口対応表](地震力標準式と適用診断_Issue486_2026-10.md) | P2 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |
+| 10b | 参照鋼の設計自重密度防護 | sepika-core / sepika-load / sepika-job / sepika-app / sepika-mcp | material.rs、self_weight_calc.rs、beam_design.rs、wall_plate_load.rs、wall_attached.rs、prepare.rs | [Issue501の独立期待値・実入口](参照鋼の高密度防護_Issue501_2026-10.md#独立期待値と直接試験) | 横断 | 🔶（Verification実行中、実験未） |
 | 10a | 地震重量鮮度・共通準備 | sepika-core / sepika-load / sepika-job / sepika-app / sepika-mcp | weight_preparation.rs / prepare.rs / actions/loads.rs / period.rs / server.rs | [Issue439の実入口試験表](地震重量の鮮度と共通準備_Issue439_2026-10.md#独立期待値と直接試験) | 横断 | 🔶（入口Verification、法適用・実測は別） |
 | 11 | 床荷重分割 | sepika-load / sepika-solver | floor/{mod,polygon}.rs / statics/analysis/tests.rs | `polygon::verification::*` / `distribution_verification::*` / `floor::tests::*` / `test_model_issues_warns_floating_plate`（正当な水平全周支持床の警告と解析前チェック）。幾何Verification済み（台形は[Issue438検証](凸台形の独立幾何と格子差_Issue438_2026-10.md)）、実験Validation未実施 | P2 | 🔶 |
 | 11a | 壁・間柱の自重支持先 | sepika-load / sepika-app | wall_plate_load.rs / cascade.rs | `wall_plate_load::tests`・`vertical_post_uses_explicit_end_shares`・`明示負担率で密度直接集計とdl集計の階重量が一致する` | [検証記録](壁版の支持範囲判定_2026-09.md) | 🔶（実測照合は未実施） |
