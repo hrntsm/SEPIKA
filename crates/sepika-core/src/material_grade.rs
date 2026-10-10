@@ -7,7 +7,7 @@
 //! いずれも本対応表を参照し、独立の表を持たない。
 //!
 //! - [`steel_f_value`] — 鋼材の基準強度 F（完全一致、板厚区分対応）
-//! - [`steel_f_value_prefix`] — 同（前方一致。`SN490B` → `SN490` 等）
+//! - [`steel_f_value_prefix`] — 同（対応する種別記号付き名称。`SN490B` → `SN490` 等）
 //! - [`rebar_f_value`] — 鉄筋の基準強度（`SD345` → 345 等）
 //! - [`rebar_grade_f_value`] — 同（高強度鉄筋の製品名を含む。`KH785` → 785 等）
 //! - [`rebar_yield_strength`] / [`shear_rebar_yield_strength`] — 配筋の材質からの σy・σwy 解決
@@ -33,8 +33,7 @@ fn bucket2(t: f64, le40: f64, gt40: f64) -> f64 {
     }
 }
 
-/// 鋼材グレード一覧（前方一致の探索対象。`SN490B` のような接尾辞付き名称を
-/// 解決するため、[`steel_f_value_prefix`] は最長一致のグレードを選ぶ）。
+/// 鋼材の基準強度表で扱う分類名一覧。種別記号付きの対応名は別途解決する。
 pub const STEEL_GRADES: &[&str] = &[
     "SS400", "SS490", "SM400", "SM490", "SM520", "SN400", "SN490", "STK400", "STK490", "STKN400",
     "STKN490", "STKR400", "STKR490", "SNR400", "SNR490", "SSC400", "SWH400", "BCR235", "BCR295",
@@ -73,17 +72,29 @@ pub fn steel_f_value(grade: &str, thickness: f64) -> Option<f64> {
     }
 }
 
-/// 鋼材の基準強度 F [N/mm²]（前方一致、板厚 [mm] 区分対応）。
-///
-/// `SN490B`・`SM490YA` のような JIS 種別記号付きの名称を、
-/// [`STEEL_GRADES`] の最長一致で解決する（`SN490B` は `SN400` ではなく
-/// `SN490` に一致）。未知の名称は `None`。
+/// 対応済み鋼材名から基準強度表の分類名を解決する。前後空白は除き、大小文字は区別する。
+pub(crate) fn steel_grade_base(name: &str) -> Option<&'static str> {
+    let name = name.trim();
+    STEEL_GRADES.iter().copied().find(|base| {
+        name == *base
+            || name.strip_prefix(base).is_some_and(|suffix| match *base {
+                "SN400" | "SM400" => matches!(suffix, "A" | "B" | "C"),
+                "SN490" => matches!(suffix, "B" | "C"),
+                "SM490" => matches!(suffix, "A" | "B" | "C" | "YA" | "YB"),
+                "SM520" => matches!(suffix, "B" | "C"),
+                "STKN400" | "STKN490" => matches!(suffix, "B" | "W"),
+                "SNR400" => matches!(suffix, "A" | "B"),
+                "SNR490" => suffix == "B",
+                _ => false,
+            })
+    })
+}
+
+/// 鋼材の基準強度 F [N/mm²]（板厚 [mm] 区分対応）。
+/// 対応済みの分類名・種別記号付き名称のみ解決し、任意の前方一致は行わない。
+/// 前後空白は除き、大小文字は区別する。未知の名称は `None`。
 pub fn steel_f_value_prefix(name: &str, thickness: f64) -> Option<f64> {
-    STEEL_GRADES
-        .iter()
-        .filter(|g| name.starts_with(*g))
-        .max_by_key(|g| g.len())
-        .and_then(|g| steel_f_value(g, thickness))
+    steel_grade_base(name).and_then(|grade| steel_f_value(grade, thickness))
 }
 
 /// CFT 鋼管材料の F 値を解決する。鋼材区分でない材料、または直接入力した
@@ -507,8 +518,122 @@ mod tests {
         }
     }
 
-    /// 前方一致解決: JIS 種別記号付き名称・最長一致を、ST-Bridge の材料 std が
-    /// 列挙する代表的なグレード名について確認する。
+    #[test]
+    fn supported_steel_names_restore_stock_properties_and_f_values() {
+        use crate::standard_material::standard_material_properties;
+        for (name, le40, gt40) in [
+            ("SS400", 235., 215.),
+            ("SS490", 275., 255.),
+            ("SM400", 235., 215.),
+            ("SM400A", 235., 215.),
+            ("SM400B", 235., 215.),
+            ("SM400C", 235., 215.),
+            ("SM490", 325., 295.),
+            ("SM490A", 325., 295.),
+            ("SM490B", 325., 295.),
+            ("SM490C", 325., 295.),
+            ("SM490YA", 325., 295.),
+            ("SM490YB", 325., 295.),
+            ("SM520", 355., 335.),
+            ("SM520B", 355., 335.),
+            ("SM520C", 355., 335.),
+            ("SN400", 235., 215.),
+            ("SN400A", 235., 215.),
+            ("SN400B", 235., 215.),
+            ("SN400C", 235., 215.),
+            ("SN490", 325., 295.),
+            ("SN490B", 325., 295.),
+            ("SN490C", 325., 295.),
+            ("STK400", 235., 215.),
+            ("STK490", 325., 295.),
+            ("STKN400", 235., 215.),
+            ("STKN400B", 235., 215.),
+            ("STKN400W", 235., 215.),
+            ("STKN490", 325., 295.),
+            ("STKN490B", 325., 295.),
+            ("STKN490W", 325., 295.),
+            ("STKR400", 235., 215.),
+            ("STKR490", 325., 295.),
+            ("SNR400", 235., 215.),
+            ("SNR400A", 235., 215.),
+            ("SNR400B", 235., 215.),
+            ("SNR490", 325., 295.),
+            ("SNR490B", 325., 295.),
+            ("SSC400", 235., 215.),
+            ("SWH400", 235., 215.),
+            ("BCR235", 235., 235.),
+            ("BCR295", 295., 295.),
+            ("BCP235", 235., 235.),
+            ("BCP325", 325., 325.),
+            ("TMCP325", 325., 325.),
+            ("TMCP355", 355., 355.),
+            ("TMCP385", 385., 385.),
+            ("TMCP440", 440., 440.),
+            ("SA440", 440., 440.),
+            ("LY100", 80., 80.),
+            ("LY225", 205., 205.),
+        ] {
+            for input in [name.to_owned(), format!(" \t{name}\n ")] {
+                let properties = standard_material_properties(&input).unwrap();
+                assert_eq!(properties.young, 205000., "{input:?}");
+                assert_eq!(properties.poisson, 0.3, "{input:?}");
+                assert_eq!(properties.density, 7.85e-9, "{input:?}");
+                assert_eq!(properties.fc, None, "{input:?}");
+                assert_eq!(properties.fy, Some(le40), "{input:?}");
+                assert_eq!(steel_f_value_prefix(&input, 40.), Some(le40), "{input:?}");
+                assert_eq!(
+                    steel_f_value_prefix(&input, 40.001),
+                    Some(gt40),
+                    "{input:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unsupported_steel_names_do_not_restore_stock_properties_or_f_values() {
+        for name in [
+            "SM400YA",
+            "SM400YB",
+            "SM400XYZ",
+            "SN400XYZ",
+            "SM490XYZ",
+            "SM490Y",
+            "SN490A",
+            "SM520A",
+            "STKN400A",
+            "STKN490C",
+            "SNR400C",
+            "SNR490A",
+            "SS400A",
+            "STK400B",
+            "STKR490B",
+            "BCR295X",
+            "TMCP325X",
+            "LY100X",
+            "SM400AA",
+            "SM400A-extra",
+            "SM490YAextra",
+            "SM400 A",
+            "SM 400A",
+            "sm400a",
+            "Sm400A",
+            "SM400a",
+            "sn490b",
+            "",
+            " \t\n",
+            "未知",
+        ] {
+            assert!(
+                crate::standard_material::standard_material_properties(name).is_none(),
+                "{name:?}"
+            );
+            for thickness in [40., 40.001] {
+                assert_eq!(steel_f_value_prefix(name, thickness), None, "{name:?}");
+            }
+        }
+    }
+
     #[test]
     fn test_steel_f_value_prefix() {
         for (name, fy) in [

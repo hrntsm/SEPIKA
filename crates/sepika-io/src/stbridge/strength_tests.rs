@@ -588,3 +588,113 @@ fn src_standard_steel_child_survives_and_numeric_override_is_not_exported_as_gra
         .iter()
         .any(|r| r.contains("SN490UNKNOWN")));
 }
+
+#[test]
+fn unknown_src_steel_grades_keep_metadata_without_stock_strength_or_mapping() {
+    for grade in ["SM400YA", "SM400YB", "SM400XYZ", "SN400XYZ"] {
+        let xml = include_str!("../../tests/fixtures/strength_src.stb").replace("SN490B", grade);
+        let (mut model, report) = import_stbridge_with_report(&xml).unwrap();
+        let input = &model.stb_strengths.sections[0].steel[0];
+        assert_eq!(input.strength, grade);
+        assert_eq!(input.native_material, None);
+        assert!(model.resolve_stb_steel(input).is_err());
+        assert!(report.warnings.iter().any(|r| r.contains(grade)), "{grade}");
+        assert!(model
+            .stb_strength_diagnostics()
+            .iter()
+            .any(|r| r.contains(grade)));
+        assert!(!model
+            .stb_strengths
+            .materials
+            .iter()
+            .any(|m| m.grade == grade));
+        let steel_id = model.sections[0].steel_material.unwrap();
+        let steel = &model.materials[steel_id.index()];
+        assert_eq!(steel.name, grade);
+        assert_eq!(steel.category, MaterialCategory::Steel);
+        assert_eq!(steel.fy, None);
+        assert_eq!(steel.young, 205000.);
+        assert_eq!(steel.density, 0.);
+        assert_eq!(
+            model.materials.iter().filter(|m| m.name == grade).count(),
+            1
+        );
+        model.prepare_stb_strength_materials();
+        assert_eq!(model.stb_strengths.sections[0].steel[0].strength, grade);
+        assert!(!model
+            .stb_strengths
+            .materials
+            .iter()
+            .any(|m| m.grade == grade));
+        assert_eq!(model.materials[steel_id.index()].fy, None);
+        assert_eq!(model.materials[steel_id.index()].density, 0.);
+    }
+}
+
+#[test]
+fn explicit_unknown_src_steel_keeps_all_properties_and_native_override() {
+    let xml = include_str!("../../tests/fixtures/strength_src.stb")
+        .replace("SN490B", "SM400YA")
+        .replace("<StbModel>", r#"<StbModel><StbMaterials><StbMaterial id="7" name="SM400YA" young="123456" poisson="0.27" density="6.1e-9" shear="45678" fy="177"/></StbMaterials>"#);
+    let (mut model, report) = import_stbridge_with_report(&xml).unwrap();
+    let steel_id = model.sections[0].steel_material.unwrap();
+    assert_eq!(steel_id, model.materials[0].id);
+    let steel = &model.materials[steel_id.index()];
+    assert_eq!(steel.name, "SM400YA");
+    assert_eq!(steel.category, MaterialCategory::Steel);
+    assert_eq!(steel.young, 123456.);
+    assert_eq!(steel.poisson, 0.27);
+    assert_eq!(steel.density, 6.1e-9);
+    assert_eq!(steel.shear, Some(45678.));
+    assert_eq!(steel.fc, None);
+    assert_eq!(steel.fy, Some(177.));
+    assert_eq!(
+        model
+            .materials
+            .iter()
+            .filter(|m| m.name == "SM400YA")
+            .count(),
+        1
+    );
+    assert_eq!(
+        sepika_core::material_grade::steel_f_value_prefix(&steel.name, 40.),
+        None
+    );
+    assert_eq!(
+        sepika_core::material_grade::cft_steel_f_value(steel, 40.),
+        Some(177.)
+    );
+    assert_eq!(
+        sepika_core::material_grade::cft_steel_f_value(steel, 41.),
+        Some(177.)
+    );
+    let input = &model.stb_strengths.sections[0].steel[0];
+    assert_eq!(input.strength, "SM400YA");
+    assert_eq!(input.native_material, None);
+    assert!(model.resolve_stb_steel(input).is_err());
+    assert!(report.warnings.iter().any(|r| r.contains("SM400YA")));
+    assert!(!model
+        .stb_strengths
+        .materials
+        .iter()
+        .any(|m| m.grade == "SM400YA"));
+    let original = steel.clone();
+    model.prepare_stb_strength_materials();
+    assert_eq!(model.sections[0].steel_material, Some(steel_id));
+    assert_eq!(model.materials[steel_id.index()], original);
+    assert_eq!(
+        model
+            .materials
+            .iter()
+            .filter(|m| m.name == "SM400YA")
+            .count(),
+        1
+    );
+    model.stb_strengths.sections[0].steel[0].native_material = Some(steel_id);
+    let resolved = model
+        .resolve_stb_steel(&model.stb_strengths.sections[0].steel[0])
+        .unwrap();
+    assert_eq!(resolved.grade, "SM400YA");
+    assert_eq!(resolved.value, 177.);
+    assert!(resolved.native_override);
+}
