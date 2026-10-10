@@ -33,6 +33,10 @@ pub trait EditCommand: Send {
     fn rejection(&self) -> Option<&str> {
         None
     }
+    /// 支持境界を変更し、旧版除去の事前確認を必要とする編集か。
+    fn changes_assignment_boundaries(&self) -> bool {
+        false
+    }
 }
 
 struct CommandWithIdChanges {
@@ -57,6 +61,12 @@ impl EditCommand for RestoreStbNodeIdentities {
     }
     fn label(&self) -> &str {
         self.command.label()
+    }
+    fn is_noop(&self) -> bool {
+        self.command.is_noop()
+    }
+    fn rejection(&self) -> Option<&str> {
+        self.command.rejection()
     }
     fn inverse_id_changes(&self) -> Vec<IdChange> {
         self.command.inverse_id_changes()
@@ -105,6 +115,28 @@ impl EditCommand for RejectedEdit {
     fn rejection(&self) -> Option<&str> {
         Some(&self.0)
     }
+}
+
+/// 編集を確定せず、失う版 ID・入力荷重を診断する。履歴は変更しない。
+pub fn preview_plate_assignment_loss(
+    model: &Model,
+    command: &dyn EditCommand,
+) -> Result<sepika_core::model::PlateAssignmentLoss, String> {
+    model
+        .validate_assignment_region_identity()
+        .map_err(|reason| format!("モデル・履歴は未更新: {reason}"))?;
+    if !command.changes_assignment_boundaries() {
+        return Ok(Default::default());
+    }
+    let mut candidate = model.clone();
+    let inverse = command.apply(&mut candidate);
+    if let Some(reason) = inverse.rejection() {
+        return Err(reason.to_owned());
+    }
+    candidate
+        .validate_assignment_region_identity()
+        .map_err(|reason| format!("モデル・履歴は未更新: {reason}"))?;
+    Ok(model.assignment_plate_loss(&candidate))
 }
 
 pub struct UndoStack {
@@ -158,6 +190,10 @@ impl UndoStack {
     pub fn run(&mut self, model: &mut Model, cmd: Box<dyn EditCommand>) -> bool {
         self.last_error = None;
         self.id_changes.clear();
+        if let Err(reason) = model.validate_assignment_region_identity() {
+            self.last_error = Some(format!("モデルは未更新: {reason}"));
+            return false;
+        }
         let mut candidate = model.clone();
         if let Err(reason) = candidate.assign_stb_node_ids() {
             self.last_error = Some(reason);
@@ -169,6 +205,10 @@ impl UndoStack {
             return false;
         }
         if inv.is_noop() {
+            return false;
+        }
+        if let Err(reason) = candidate.validate_assignment_region_identity() {
+            self.last_error = Some(format!("モデルは未更新: {reason}"));
             return false;
         }
         if let Err(error) = candidate.validate_attached_slabs() {
@@ -194,6 +234,26 @@ impl UndoStack {
         true
     }
 
+    /// 確認を行えない入口では、版・入力荷重が失われる編集を確定せず拒否する。
+    pub fn run_preserving_plate_assignments(
+        &mut self,
+        model: &mut Model,
+        cmd: Box<dyn EditCommand>,
+    ) -> bool {
+        match preview_plate_assignment_loss(model, cmd.as_ref()) {
+            Err(reason) => self.last_error = Some(reason),
+            Ok(loss) if !loss.is_empty() => {
+                self.last_error = Some(format!(
+                    "モデル・履歴は未更新。{}\n旧版の除去には確認が必要です。この入口では確認できないため編集を拒否します。確認可能な入口で適用した場合は、1 Undo で全 ID・割当・版・入力荷重を復元できます。",
+                    loss.description()
+                ));
+            }
+            Ok(_) => return self.run(model, cmd),
+        }
+        self.id_changes.clear();
+        false
+    }
+
     /// 直前の編集が拒否された理由。成功または通常の Noop では `None`。
     pub fn last_error(&self) -> Option<&str> {
         self.last_error.as_deref()
@@ -215,13 +275,37 @@ impl UndoStack {
     }
 
     pub fn redo(&mut self, model: &mut Model) {
+        self.last_error = None;
         self.id_changes.clear();
-        if let Some(cmd) = self.undone.pop() {
-            let undo_cmd = cmd.apply(model);
-            self.id_changes = undo_cmd.inverse_id_changes();
-            self.done.push(undo_cmd);
-            self.revision += 1;
+        let Some(cmd) = self.undone.last() else {
+            return;
+        };
+        if let Err(reason) = model.validate_assignment_region_identity() {
+            self.last_error = Some(format!("モデル・履歴は未更新: {reason}"));
+            return;
         }
+        let mut candidate = model.clone();
+        let undo_cmd = cmd.apply(&mut candidate);
+        if let Some(reason) = undo_cmd.rejection() {
+            self.last_error = Some(format!("モデル・履歴は未更新: {reason}"));
+            return;
+        }
+        if undo_cmd.is_noop() {
+            return;
+        }
+        if let Err(reason) = candidate.validate_assignment_region_identity() {
+            self.last_error = Some(format!("モデル・履歴は未更新: {reason}"));
+            return;
+        }
+        if let Err(error) = candidate.validate_attached_slabs() {
+            self.last_error = Some(format!("モデル・履歴は未更新: {error}"));
+            return;
+        }
+        *model = candidate;
+        self.undone.pop();
+        self.id_changes = undo_cmd.inverse_id_changes();
+        self.done.push(undo_cmd);
+        self.revision += 1;
     }
 
     pub fn can_undo(&self) -> bool {

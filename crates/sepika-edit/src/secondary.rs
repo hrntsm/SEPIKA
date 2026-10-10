@@ -527,6 +527,9 @@ fn ends_supported(ends: &SecondaryMemberEnds) -> Option<[bool; 2]> {
 }
 
 impl EditCommand for SetSecondaryMemberEndSupport {
+    fn changes_assignment_boundaries(&self) -> bool {
+        true
+    }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let new_supported = [
             self.end_support[0] == EndSupport::Supported,
@@ -558,7 +561,11 @@ impl EditCommand for SetSecondaryMemberEndSupport {
         let snapshot = snapshot_secondary(model);
         let action = SecondaryAction::SetEnds(self.member, ends);
         apply_secondary_action(model, &action);
-        model.rebuild_assignment_regions_dropping_orphan_plates();
+        let report = model.rebuild_assignment_regions_dropping_orphan_plates();
+        if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
+            restore_secondary(model, snapshot);
+            return Box::new(crate::RejectedEdit(reason));
+        }
         Box::new(RestoreSecondarySnapshot {
             snapshot,
             redo: action,
@@ -680,6 +687,9 @@ pub struct PlaceSecondaryMember {
 }
 
 impl EditCommand for PlaceSecondaryMember {
+    fn changes_assignment_boundaries(&self) -> bool {
+        true
+    }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         if !self.parent.accepts(self.kind)
             || !crate::refs::plate_section_ref_ok(model, self.section)
@@ -712,7 +722,11 @@ impl EditCommand for PlaceSecondaryMember {
         if !apply_secondary_action(model, &action) {
             return Box::new(Noop);
         }
-        model.rebuild_assignment_regions_dropping_orphan_plates();
+        let report = model.rebuild_assignment_regions_dropping_orphan_plates();
+        if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
+            restore_secondary(model, snapshot);
+            return Box::new(crate::RejectedEdit(reason));
+        }
         Box::new(RestoreSecondarySnapshot {
             snapshot,
             redo: action,
@@ -731,6 +745,9 @@ pub struct DeleteSecondaryMember {
 }
 
 impl EditCommand for DeleteSecondaryMember {
+    fn changes_assignment_boundaries(&self) -> bool {
+        true
+    }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         if model.secondary_member(self.member).is_none() {
             return Box::new(Noop);
@@ -740,7 +757,11 @@ impl EditCommand for DeleteSecondaryMember {
         if !apply_secondary_action(model, &action) {
             return Box::new(Noop);
         }
-        model.rebuild_assignment_regions_dropping_orphan_plates();
+        let report = model.rebuild_assignment_regions_dropping_orphan_plates();
+        if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
+            restore_secondary(model, snapshot);
+            return Box::new(crate::RejectedEdit(reason));
+        }
         Box::new(RestoreSecondarySnapshot {
             snapshot,
             redo: action,
@@ -763,6 +784,9 @@ pub struct SetSecondaryMemberEnds {
 }
 
 impl EditCommand for SetSecondaryMemberEnds {
+    fn changes_assignment_boundaries(&self) -> bool {
+        true
+    }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let Some(sm) = model.secondary_member(self.member) else {
             return Box::new(Noop);
@@ -789,7 +813,11 @@ impl EditCommand for SetSecondaryMemberEnds {
         if !apply_secondary_action(model, &action) {
             return Box::new(Noop);
         }
-        model.rebuild_assignment_regions_dropping_orphan_plates();
+        let report = model.rebuild_assignment_regions_dropping_orphan_plates();
+        if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
+            restore_secondary(model, snapshot);
+            return Box::new(crate::RejectedEdit(reason));
+        }
         Box::new(RestoreSecondarySnapshot {
             snapshot,
             redo: action,
@@ -908,7 +936,7 @@ fn apply_secondary_action(model: &mut Model, action: &SecondaryAction) -> bool {
                 section: *section,
                 name: name.clone(),
             };
-            match parent {
+            let applied = match parent {
                 SecondaryParent::Floor(region) => {
                     let idx = region.index();
                     match model.floor_regions.get_mut(idx) {
@@ -937,7 +965,12 @@ fn apply_secondary_action(model: &mut Model, action: &SecondaryAction) -> bool {
                     }
                     true
                 }
+            };
+            if applied {
+                model.next_secondary_member_id =
+                    model.next_secondary_member_id.max(id.0.saturating_add(1));
             }
+            applied
         }
         SecondaryAction::Delete(id) => remove_secondary(model, *id),
         SecondaryAction::SetEnds(id, ends) => match find_secondary_mut(model, *id) {
@@ -980,7 +1013,11 @@ impl EditCommand for ApplySecondaryAction {
         if !apply_secondary_action(model, &self.action) {
             return Box::new(Noop);
         }
-        model.rebuild_assignment_regions_dropping_orphan_plates();
+        let report = model.rebuild_assignment_regions_dropping_orphan_plates();
+        if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
+            restore_secondary(model, snapshot);
+            return Box::new(crate::RejectedEdit(reason));
+        }
         Box::new(RestoreSecondarySnapshot {
             snapshot,
             redo: self.action.clone(),

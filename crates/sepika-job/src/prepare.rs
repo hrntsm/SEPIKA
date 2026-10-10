@@ -75,6 +75,9 @@ pub fn prepare_model(
     initialize_stories: bool,
 ) -> Result<PrepareReport, JobError> {
     let mut work = model.clone();
+    let _ = work.anchorize_secondary_members();
+    work.rebuild_assignment_regions()
+        .map_err(JobError::InvalidInput)?;
     let report = prepare_work_model(&mut work, settings, design_period, initialize_stories);
     match report {
         Ok(report) => {
@@ -106,9 +109,6 @@ fn prepare_work_model(
     model
         .validate_attached_slabs()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
-    let _ = model.anchorize_secondary_members();
-    model.rebuild_floor_assignment_regions();
-    model.rebuild_wall_assignment_regions();
     rebuild_floor_regions(model);
     let wall_report = rebuild_wall_regions(model);
     let panels = apply_rigid_zones_and_panels(model);

@@ -928,6 +928,9 @@ pub struct ModelScoped {
     /// モデル差し替えで破棄する（差し替え前のモデル用に選んだパスへ保存して
     /// しまうのを防ぐ）。
     pub pending_save_recording: Option<(std::path::PathBuf, u64)>,
+    /// 版・入力荷重の除去確認（編集、診断、プレビュー時の revision）。
+    #[cfg(feature = "gui")]
+    pub pending_plate_loss_edit: Option<(Box<dyn sepika_edit::EditCommand>, String, u64)>,
     /// stale（要再計算）状態と最終実行時刻
     pub staleness: Staleness,
     /// モデル整合性チェック（診断）の結果一覧。`run_diagnostics` で再構築する。
@@ -1008,6 +1011,8 @@ impl Default for ModelScoped {
             last_notice: None,
             job: None,
             pending_save_recording: None,
+            #[cfg(feature = "gui")]
+            pending_plate_loss_edit: None,
             staleness: Staleness::default(),
             diagnostics: Vec::new(),
             preparation: None,
@@ -2037,6 +2042,24 @@ impl eframe::App for App {
             }
         }
 
+        if self.core.scoped.pending_plate_loss_edit.is_some() {
+            let mut choice = None;
+            egui::Window::new("境界変更で旧版を取り除きます")
+                .collapsible(false).resizable(true).show(ui.ctx(), |ui| {
+                    if let Some((_, message, _)) = &self.core.scoped.pending_plate_loss_edit {
+                        ui.label(message);
+                    }
+                    ui.label("旧版を除去して新領域を未設定にします。1 Undo で全 ID・割当・版・入力荷重を復元できます。確認待ちの間はモデル・履歴を更新しません。");
+                    ui.horizontal(|ui| {
+                        if ui.button("取り除いて編集").clicked() { choice = Some(true); }
+                        if ui.button("キャンセル").clicked() { choice = Some(false); }
+                    });
+                });
+            if let Some(confirmed) = choice {
+                self.resolve_plate_loss_edit(confirmed);
+            }
+        }
+
         if self.core.scoped.pending_unset_analysis.is_some() {
             let (floors, walls) = self.core.model.unset_plate_assignment_regions();
             let mut do_confirm = false;
@@ -2467,3 +2490,6 @@ mod tests;
 
 #[cfg(all(test, feature = "gui"))]
 mod focus_id_remap_tests;
+
+#[cfg(test)]
+mod assignment_identity_tests;

@@ -250,6 +250,12 @@ pub fn nodes_table(ui: &mut egui::Ui, app: &mut App) {
             .show(ui, &mut adapter, &["X", "Y", "Z"]);
         adapter.edited
     };
+    if let Some(reason) = app.core.scoped.undo.last_error() {
+        let message = format!("モデル・履歴は未更新: {reason}");
+        if app.core.scoped.last_error.as_deref() != Some(message.as_str()) {
+            app.report_error(message);
+        }
+    }
     for (msg, is_err) in app.ui.scoped.node_grid.take_log() {
         app.core.log.push(
             if is_err {

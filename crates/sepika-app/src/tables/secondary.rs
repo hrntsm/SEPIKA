@@ -467,20 +467,19 @@ pub(crate) fn secondary_member_placement_form(
                 }
             }
         };
-        let applied = app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(PlaceSecondaryMember {
-                parent,
-                kind,
-                ends,
-                section: draft.section,
-                name: draft.name.clone(),
-            }),
-        );
+        let applied = app.apply_model_edit(Box::new(PlaceSecondaryMember {
+            parent,
+            kind,
+            ends,
+            section: draft.section,
+            name: draft.name.clone(),
+        }));
         if applied {
             app.clear_generated_member_selection();
             app.core.scoped.staleness.mark_edited();
-        } else {
+        } else if app.core.scoped.pending_plate_loss_edit.is_none()
+            && app.core.scoped.last_error.is_none()
+        {
             app.core.scoped.last_notice = Some(
                 "支持端が親領域の内側・境界上にないため配置しませんでした。\
                  親領域の内側で支持部材を選んでください。"
@@ -607,19 +606,13 @@ pub(crate) fn secondary_member_list(app: &mut App, ui: &mut egui::Ui, kind: Seco
     );
     let mut edited = false;
     for (member, end_support) in pending_end_support {
-        edited |= app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(SetSecondaryMemberEndSupport {
-                member,
-                end_support,
-            }),
-        );
+        edited |= app.apply_model_edit(Box::new(SetSecondaryMemberEndSupport {
+            member,
+            end_support,
+        }));
     }
     for member in pending_delete {
-        edited |= app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(DeleteSecondaryMember { member }),
-        );
+        edited |= app.apply_model_edit(Box::new(DeleteSecondaryMember { member }));
     }
     if edited {
         app.clear_generated_member_selection();

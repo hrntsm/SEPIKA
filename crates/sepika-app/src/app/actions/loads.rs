@@ -140,6 +140,12 @@ impl App {
     pub(super) fn sync_prepared_model(&mut self, initialize_stories: bool) {
         #[cfg(feature = "gui")]
         self.clear_generated_member_selection();
+        let mut assignment_candidate = self.core.model.clone();
+        let _ = assignment_candidate.anchorize_secondary_members();
+        if let Err(reason) = assignment_candidate.rebuild_assignment_regions() {
+            self.report_error(reason);
+            return;
+        }
         let current = self.compute_auto_load_sync_hash();
         if self.core.scoped.auto_load_sync_hash == Some(current)
             && (!initialize_stories || !self.core.model.stories.is_empty())

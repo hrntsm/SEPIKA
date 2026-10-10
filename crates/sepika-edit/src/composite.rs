@@ -14,6 +14,11 @@ pub struct CompositeCommand {
 }
 
 impl EditCommand for CompositeCommand {
+    fn changes_assignment_boundaries(&self) -> bool {
+        self.children
+            .iter()
+            .any(|child| child.changes_assignment_boundaries())
+    }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let mut candidate = model.clone();
         let inverse = self.apply_candidate(&mut candidate);
@@ -25,6 +30,12 @@ impl EditCommand for CompositeCommand {
         }
         if let Err(reason) = crate::node_member::validate_coordinate_loads(model, &candidate) {
             return Box::new(crate::RejectedEdit(reason));
+        }
+        if self.changes_assignment_boundaries() {
+            let report = candidate.rebuild_assignment_regions_dropping_orphan_plates();
+            if let Some(reason) = report.floor.rejection.or(report.wall.rejection) {
+                return Box::new(crate::RejectedEdit(reason));
+            }
         }
         *model = candidate;
         inverse
