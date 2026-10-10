@@ -109,7 +109,8 @@ mod tests {
             &opts,
             &ShearContribution::none(),
             &PulloutContribution::none(),
-        );
+        )
+        .unwrap();
 
         let mu_fiber = skeleton.points.get(3).map(|p| p.1).unwrap_or(0.0);
         let mu_simple = rc_mu_simple(&inp);

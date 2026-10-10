@@ -4,7 +4,10 @@ use sepika_core::model::Section;
 use sepika_material::{Bilinear, Concrete, HysteresisRule, UniaxialMaterial};
 use sepika_section::fiber::{section_response, SectionStrain};
 
-use crate::deformation::{mphi_to_mtheta, PulloutContribution, ShearContribution};
+use crate::deformation::{
+    finite, inflection_length, mphi_to_mtheta, positive, DeformationError, PulloutContribution,
+    ShearContribution,
+};
 use crate::fiber_model::{build_rc_fiber_section, compute_m_phi_curve_rc};
 use crate::types::{MemberData, MemberSkeleton, Reinforcement, SkeletonOptions};
 
@@ -12,7 +15,7 @@ const RC_GRID_W: usize = 16;
 const RC_GRID_D: usize = 32;
 const RC_SWEEP_STEPS: usize = 800;
 
-/// RC 部材スケルトンを構築する。
+/// 正側参照骨格を構築する。不正入力・未対応の自動抜出し指定は理由付きで失敗する。
 pub fn build_rc_member_skeleton(
     section: &Section,
     reinforcement: &Reinforcement,
@@ -21,7 +24,28 @@ pub fn build_rc_member_skeleton(
     opts: &SkeletonOptions,
     shear: &ShearContribution,
     pullout: &PulloutContribution,
-) -> MemberSkeleton {
+) -> Result<MemberSkeleton, DeformationError> {
+    let l = inflection_length(opts.span, opts.inflection_ratio)?;
+    shear.rotation(0.0, l)?;
+    let pullout_angles = pullout.rotations()?;
+    positive(section.width, "断面幅は有限正が必要")?;
+    positive(section.depth, "断面せいは有限正が必要")?;
+    ShearContribution::rc_rect(section.width, section.depth, concrete)?;
+    positive(steel.e, "鉄筋ヤング係数は有限正が必要")?;
+    positive(steel.fy, "鉄筋降伏強度は有限正が必要")?;
+    finite(opts.n_axial, "軸力は有限値が必要")?;
+    finite(opts.alpha, "除荷指数は有限値が必要")?;
+    positive(concrete.ft, "引張強度は有限正が必要")?;
+    if !concrete.ecu.is_finite() || concrete.ecu >= 0.0 {
+        return Err(DeformationError::InvalidInput(
+            "終局圧縮ひずみは有限負が必要",
+        ));
+    }
+    for &(y, z, area) in &reinforcement.main_bars {
+        finite(y, "主筋座標は有限値が必要")?;
+        finite(z, "主筋座標は有限値が必要")?;
+        positive(area, "主筋面積は有限正が必要")?;
+    }
     let span = opts.span;
     let inflection_ratio = opts.inflection_ratio;
     let n_axial = opts.n_axial;
@@ -73,7 +97,7 @@ pub fn build_rc_member_skeleton(
         .unwrap_or((ky_yield_est, section.iy * e0_conc * ky_yield_est));
     let (ky_ultimate, m_u) = events.ultimate.unwrap_or((ky_ultimate_est, m_y * 1.2));
 
-    let convert = |ky: f64, m: f64| {
+    let convert = |ky: f64, m: f64, pullout_angle: f64| {
         mphi_to_mtheta(
             ky,
             m,
@@ -82,16 +106,17 @@ pub fn build_rc_member_skeleton(
             inflection_ratio,
             plastic_hinge_length,
             *shear,
-            *pullout,
+            pullout_angle,
         )
-        .0
+        .map(|point| point.0)
     };
     let (m_c, m_y, m_u) = (m_c.abs(), m_y.abs(), m_u.abs());
-    let theta_c = convert(ky_crack, m_c);
-    let theta_y = convert(ky_yield, m_y);
-    let theta_u = convert(ky_ultimate, m_u);
+    let theta_c = convert(ky_crack, m_c, pullout_angles[0])?;
+    let theta_y = convert(ky_yield, m_y, pullout_angles[1])?;
+    let theta_u = convert(ky_ultimate, m_u, pullout_angles[2])?;
 
     let points = vec![(0.0, 0.0), (theta_c, m_c), (theta_y, m_y), (theta_u, m_u)];
+    validate_composed_points(&points)?;
     let hysteresis = HysteresisRule::Takeda {
         crack: (m_c, theta_c),
         yield_point: (m_y, theta_y),
@@ -99,7 +124,9 @@ pub fn build_rc_member_skeleton(
         alpha: opts.alpha,
     };
 
-    MemberSkeleton::with_axial_entry(points, hysteresis, n_axial)
+    Ok(MemberSkeleton::with_axial_entry(
+        points, hysteresis, n_axial,
+    ))
 }
 
 /// 既定のファイバ断面（呼出側提供）からスケルトンを構築する（汎用パス）。
@@ -109,12 +136,16 @@ pub fn build_member_skeleton(
     n_axial: f64,
     mats: &mut [Box<dyn UniaxialMaterial>],
     alpha: f64,
-) -> MemberSkeleton {
-    assert_eq!(
-        mats.len(),
-        member.fibers.fibers.len(),
-        "build_member_skeleton: mats.len() must equal fibers.len() (per-fiber state)"
-    );
+) -> Result<MemberSkeleton, DeformationError> {
+    inflection_length(member.span, member.inflection_ratio)?;
+    positive(member.section.depth, "断面せいは有限正が必要")?;
+    finite(n_axial, "軸力は有限値が必要")?;
+    finite(alpha, "除荷指数は有限値が必要")?;
+    if mats.len() != member.fibers.fibers.len() {
+        return Err(DeformationError::InvalidInput(
+            "材料数とファイバー数が不一致",
+        ));
+    }
     let max_curvature = 0.01;
     let num_steps = 200;
     let plastic_hinge_length = 0.5 * member.section.depth;
@@ -169,11 +200,12 @@ pub fn build_member_skeleton(
                 member.inflection_ratio,
                 plastic_hinge_length,
                 ShearContribution::none(),
-                PulloutContribution::none(),
+                0.0,
             )
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
 
+    validate_composed_points(&mtheta)?;
     let pt = |i: usize| {
         (
             mtheta.get(i).map(|p| p.1).unwrap_or(0.0),
@@ -188,7 +220,9 @@ pub fn build_member_skeleton(
         alpha,
     };
 
-    MemberSkeleton::with_axial_entry(mtheta, hysteresis, n_axial)
+    Ok(MemberSkeleton::with_axial_entry(
+        mtheta, hysteresis, n_axial,
+    ))
 }
 
 fn extract_trilinear_generic(mphi: &[(f64, f64)]) -> Vec<(f64, f64)> {
@@ -219,4 +253,26 @@ fn extract_trilinear_generic(mphi: &[(f64, f64)]) -> Vec<(f64, f64)> {
         (mphi[yield_idx].0, mphi[yield_idx].1),
         (mphi[ultimate_idx].0, mphi[ultimate_idx].1),
     ]
+}
+
+fn validate_composed_points(points: &[(f64, f64)]) -> Result<(), DeformationError> {
+    for &(theta, moment) in points {
+        finite(theta, "合成部材角は有限値が必要")?;
+        finite(moment, "モーメントは有限値が必要")?;
+        if theta < 0.0 || moment < 0.0 {
+            return Err(DeformationError::InvalidInput(
+                "正側参考骨格の折点は非負が必要",
+            ));
+        }
+    }
+    if points.windows(2).any(|pair| {
+        pair[1].0 < pair[0].0
+            || pair[1].1 < pair[0].1
+            || (pair[1].0 == pair[0].0 && pair[1].1 != pair[0].1)
+    }) {
+        return Err(DeformationError::InvalidInput(
+            "合成後の参考骨格の折点が昇順でない",
+        ));
+    }
+    Ok(())
 }
