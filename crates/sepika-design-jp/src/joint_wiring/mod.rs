@@ -58,8 +58,71 @@ pub fn collect_joint_checks_with_long(
     panel_moments: &[(NodeId, [f64; 2])],
     term: LoadTerm,
 ) -> Vec<(NodeId, String, CheckOutcome)> {
+    collect_joint_checks_impl(
+        model,
+        member_forces,
+        long_member_forces,
+        panel_moments,
+        term,
+        true,
+    )
+}
+
+pub(crate) fn collect_joint_checks_impl(
+    model: &Model,
+    member_forces: &[(ElemId, ForcesAt<'_>)],
+    long_member_forces: Option<&[(ElemId, ForcesAt<'_>)]>,
+    panel_moments: &[(NodeId, [f64; 2])],
+    term: LoadTerm,
+    include_walls: bool,
+) -> Vec<(NodeId, String, CheckOutcome)> {
     let mut out = Vec::new();
 
+    let members = member_infos(model, member_forces);
+
+    if include_walls {
+        wall::check_walls(model, member_forces, &members, term, &mut out);
+    }
+
+    for (ni, node) in model.nodes.iter().enumerate() {
+        let nid = node.id;
+        let _ = ni;
+        let cols: Vec<&MemberInfo> = members
+            .iter()
+            .filter(|m| m.is_column() && m.elem.nodes.contains(&nid))
+            .collect();
+        let beams: Vec<&MemberInfo> = members
+            .iter()
+            .filter(|m| m.is_beam_horiz() && m.elem.nodes.contains(&nid))
+            .collect();
+        if cols.is_empty() || beams.is_empty() {
+            continue;
+        }
+
+        let panel_moment = panel_moments.iter().find(|(n, _)| *n == nid).map(|(_, m)| {
+            if m[0].abs() >= m[1].abs() {
+                m[0]
+            } else {
+                m[1]
+            }
+        });
+
+        rc_joint::check_rc_joint(&cols, &beams, nid, &mut out);
+        steel_panel::check_s_panel(model, &cols, &beams, nid, panel_moment, &mut out);
+        src_panel::check_src_panel(&cols, &beams, nid, term, &mut out);
+        cold_formed::check_cold_formed(&cols, &beams, nid, long_member_forces, &mut out);
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod tests;
+
+fn member_infos<'a>(
+    model: &'a Model,
+    member_forces: &'a [(ElemId, ForcesAt<'a>)],
+) -> Vec<MemberInfo<'a>> {
     let mut members: Vec<MemberInfo<'_>> = Vec::new();
     for (eid, forces) in member_forces {
         let Some(elem) = model.element(*eid) else {
@@ -97,39 +160,17 @@ pub fn collect_joint_checks_with_long(
         });
     }
 
-    wall::check_walls(model, member_forces, &members, term, &mut out);
-
-    for (ni, node) in model.nodes.iter().enumerate() {
-        let nid = node.id;
-        let _ = ni;
-        let cols: Vec<&MemberInfo> = members
-            .iter()
-            .filter(|m| m.is_column() && m.elem.nodes.contains(&nid))
-            .collect();
-        let beams: Vec<&MemberInfo> = members
-            .iter()
-            .filter(|m| m.is_beam_horiz() && m.elem.nodes.contains(&nid))
-            .collect();
-        if cols.is_empty() || beams.is_empty() {
-            continue;
-        }
-
-        let panel_moment = panel_moments.iter().find(|(n, _)| *n == nid).map(|(_, m)| {
-            if m[0].abs() >= m[1].abs() {
-                m[0]
-            } else {
-                m[1]
-            }
-        });
-
-        rc_joint::check_rc_joint(&cols, &beams, nid, &mut out);
-        steel_panel::check_s_panel(model, &cols, &beams, nid, panel_moment, &mut out);
-        src_panel::check_src_panel(&cols, &beams, nid, term, &mut out);
-        cold_formed::check_cold_formed(&cols, &beams, nid, long_member_forces, &mut out);
-    }
-
-    out
+    members
 }
 
-#[cfg(test)]
-mod tests;
+/// 壁版・生成壁要素から候補を列挙し、種別ごとの未検定理由を保持する。
+pub fn collect_wall_design_checks(
+    model: &Model,
+    member_forces: &[(ElemId, ForcesAt<'_>)],
+    term: LoadTerm,
+    index: Option<&sepika_load::wall_expand::WallExpansionIndex>,
+    case: &str,
+) -> Vec<crate::wall_check::WallCheck> {
+    let members = member_infos(model, member_forces);
+    wall::collect_wall_design_checks(model, member_forces, &members, term, index, case)
+}

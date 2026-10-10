@@ -1474,13 +1474,16 @@ fn wall_horizontal_input_survives_ovika_and_mcp_design_reports_missing_assignmen
     let JobOutcome::DesignCheck { summary, .. } = outcome else {
         panic!("断面検定結果")
     };
-    let skipped = summary["joint_skipped"].as_array().unwrap();
-    for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
+    let skipped = summary["wall_checks"].as_array().unwrap();
+    for kind in ["AllowableShear", "ReferenceSkeleton"] {
         let item = skipped
             .iter()
-            .find(|item| item["label"] == label)
+            .find(|item| item["kind"] == kind)
             .expect("不足出力はSkipped");
-        let reason = item["reason"].as_str().unwrap();
+        assert_eq!(item["plate"], 0);
+        assert_eq!(item["case"], "case:0");
+        assert_eq!(item["skip_kind"], "MissingInput");
+        let reason = item["outcome"]["Skipped"]["reason"].as_str().unwrap();
         assert!(
             reason.contains("耐震壁 ID") && reason.contains("横筋") && reason.contains("未割当"),
             "{reason}"

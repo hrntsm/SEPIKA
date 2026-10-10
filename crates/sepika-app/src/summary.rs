@@ -367,6 +367,85 @@ pub fn build_report_csv(app: &App) -> String {
         }
     }
 
+    if !results.wall_checks.is_empty() {
+        out.push_str(
+            if app.core.scoped.staleness.design_stale || app.core.scoped.staleness.results_stale {
+                "\n[耐震壁結果状態]\n要再計算,モデル編集前の検定結果です\n"
+            } else {
+                "\n[耐震壁結果状態]\n計算済み\n"
+            },
+        );
+        let summary =
+            sepika_design_jp::wall_check::WallCheckSummary::from_checks(&results.wall_checks);
+        out.push_str("\n[耐震壁検定集計]\n壁枚数,検定件数,合格,NG,未検定,対象外,最大検定比\n");
+        out.push_str(&format!(
+            "{},{},{},{},{},{},{}\n",
+            summary.n_walls,
+            summary.n_checks,
+            summary.n_ok,
+            summary.n_ng,
+            summary.n_skipped,
+            summary.n_outside,
+            summary
+                .max_ratio
+                .map(|r| format!("{r:.4}"))
+                .unwrap_or_default()
+        ));
+        out.push_str("\n[耐震壁種別集計]\n種別,壁枚数,合格,NG,未検定,対象外\n");
+        for kind in [
+            sepika_design_jp::wall_check::WallCheckKind::AllowableShear,
+            sepika_design_jp::wall_check::WallCheckKind::ReferenceSkeleton,
+        ] {
+            let s = sepika_design_jp::wall_check::WallCheckSummary::for_kind(
+                &results.wall_checks,
+                kind,
+            );
+            out.push_str(&format!(
+                "{},{},{},{},{},{}\n",
+                kind.label(),
+                s.n_walls,
+                s.n_ok,
+                s.n_ng,
+                s.n_skipped,
+                s.n_outside
+            ));
+        }
+        out.push_str("\n[耐震壁検定]\n壁版,生成要素,case,種別,検定比,判定,理由区分,根拠\n");
+        for check in &results.wall_checks {
+            let (ratio, status, reason) = match &check.outcome {
+                sepika_design_jp::CheckOutcome::Checked(cr) => (
+                    format!("{:.4}", cr.ratio()),
+                    if cr.ok() { "OK" } else { "NG" },
+                    cr.basis.as_str(),
+                ),
+                sepika_design_jp::CheckOutcome::Skipped { reason } => (
+                    String::new(),
+                    if check.seismic_target {
+                        "未検定"
+                    } else {
+                        "対象外"
+                    },
+                    reason.as_str(),
+                ),
+            };
+            let escape = |text: &str| format!("\"{}\"", text.replace('"', "\"\""));
+            out.push_str(&format!(
+                "{},{},{},{},{},{},{},{}\n",
+                check.plate.map(|id| id.0.to_string()).unwrap_or_default(),
+                check.elem.map(|id| id.0.to_string()).unwrap_or_default(),
+                escape(&check.case),
+                check.kind.label(),
+                ratio,
+                status,
+                check
+                    .skip_kind
+                    .map(|r| format!("{r:?}"))
+                    .unwrap_or_default(),
+                escape(reason)
+            ));
+        }
+    }
+
     if !results.joint_checks.is_empty() {
         out.push_str("\n[接合部検定]\n節点,種別,検定比,判定,根拠\n");
         for j in &results.joint_checks {
