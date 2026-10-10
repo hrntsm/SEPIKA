@@ -3828,3 +3828,122 @@ fn test_pushover_unconverged_load_control_reports_reason() {
         "ソルバ内部表現がそのまま露出している: {err}"
     );
 }
+
+#[test]
+fn pushover_standard_load_rejects_invalid_weight_and_unverified_penthouse() {
+    for weight in [-1.0, f64::NAN, f64::INFINITY] {
+        let model = spring_column_model(1000.0, None, weight);
+        let dofmap = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &dofmap);
+        let error = pushover_analysis(
+            &model,
+            &dofmap,
+            &reducer,
+            SeismicDir::X,
+            4,
+            0.0,
+            false,
+            false,
+            0.0,
+        )
+        .unwrap_err();
+        assert!(error.contains("重量"), "{error}");
+    }
+    let mut model = spring_column_model(1000.0, None, 100_000.0);
+    model.stories[1].level_kind = sepika_core::model::StoryLevelKind::Penthouse { k: 1.0 };
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let error = pushover_analysis(
+        &model,
+        &dofmap,
+        &reducer,
+        SeismicDir::X,
+        4,
+        0.0,
+        false,
+        false,
+        0.0,
+    )
+    .unwrap_err();
+    assert!(error.contains("未検証"), "{error}");
+}
+
+#[test]
+fn pushover_standard_basement_load_preserves_hand_resultant() {
+    let mut model = spring_column_model(1000.0, None, 100_000.0);
+    model.stories[1].level_kind = sepika_core::model::StoryLevelKind::Basement { depth_mm: 0.0 };
+    let mut node = model.nodes[1].clone();
+    node.id = NodeId(2);
+    node.story = Some(StoryId(2));
+    model.nodes.push(node);
+    let mut story = model.stories[1].clone();
+    story.id = StoryId(2);
+    story.elevation = 6000.0;
+    story.node_ids = vec![NodeId(2)];
+    story.level_kind = Default::default();
+    model.stories.push(story);
+    let mut element = model.elements[0].clone();
+    element.id = ElemId(1);
+    element.nodes = smallvec::smallvec![NodeId(0), NodeId(2)];
+    model.elements.push(element);
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = pushover_analysis(
+        &model,
+        &dofmap,
+        &reducer,
+        SeismicDir::X,
+        4,
+        0.0,
+        false,
+        false,
+        0.0,
+    )
+    .unwrap();
+    let last = result.capacity_curve.last().unwrap();
+    assert!(
+        (last.base_shear - 30_000.0).abs() < 1e-6,
+        "{}",
+        last.base_shear
+    );
+    assert!((last.roof_disp - 20.0).abs() < 1e-8, "{}", last.roof_disp);
+
+    let mut node = model.nodes[2].clone();
+    node.id = NodeId(3);
+    model.nodes.push(node);
+    model.stories[2].node_ids.push(NodeId(3));
+    let mut spring = model.elements[1].clone();
+    spring.id = ElemId(2);
+    spring.nodes = smallvec::smallvec![NodeId(0), NodeId(3)];
+    model.elements.push(spring);
+    for (master, weight, ci_override) in [
+        (NodeId(2), 70_000.0, None),
+        (NodeId(3), 30_000.0, Some(0.3)),
+    ] {
+        model
+            .constraints
+            .push(sepika_core::model::Constraint::RigidDiaphragm {
+                story: StoryId(2),
+                master,
+                slaves: vec![],
+                weight: Some(weight),
+                ci_override,
+            });
+    }
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let result = pushover_analysis(
+        &model,
+        &dofmap,
+        &reducer,
+        SeismicDir::X,
+        4,
+        0.0,
+        false,
+        false,
+        0.0,
+    )
+    .unwrap();
+    // 主系統14kN＋指定Ci副系統9kN＋地下10kN。
+    assert!((result.capacity_curve.last().unwrap().base_shear - 33_000.0).abs() < 1e-6);
+}

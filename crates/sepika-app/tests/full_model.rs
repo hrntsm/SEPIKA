@@ -1340,6 +1340,16 @@ fn steel_portal_holding_capacity_and_imported_rc_ultimate_checks() {
     let (holding, ranks) = app
         .compute_holding_capacity()
         .expect("保有水平耐力が算定できるはず");
+    // h=14m、S造高さ比1よりT=.42s、地盤IIのRt=1。独立手計算のQud。
+    let expected_qud = [
+        278_488.0739614658,
+        239_747.96841710428,
+        185_103.76674667903,
+        111_996.66208577435,
+    ];
+    for (story, expected) in holding.stories.iter().zip(expected_qud) {
+        assert!((story.qud - expected).abs() < 1e-7, "Qud={}", story.qud);
+    }
     assert_eq!(holding.stories.len(), 4, "保有水平耐力の層数");
     assert_eq!(ranks.len(), 4, "層ごとの部材ランク");
     for s in &holding.stories {

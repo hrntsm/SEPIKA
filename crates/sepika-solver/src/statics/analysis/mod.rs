@@ -27,7 +27,6 @@ mod seismic;
 
 pub use combination::StaticBatch;
 pub use config::{AiMode, SeismicCfg, SeismicDir};
-pub(crate) use seismic::distribute_pi_over_diaphragms;
 pub use seismic::{
     base_elevation, build_seismic_load_case_from_model, building_height_mm, ground_elevation,
     seismic_distribution_for_model, steel_height_ratio,

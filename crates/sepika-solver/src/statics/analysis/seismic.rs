@@ -191,6 +191,9 @@ pub(crate) fn distribute_seismic_forces(
     if diaphragms.is_empty() {
         return distribute_pi_over_story_nodes(model, story, pi);
     }
+    if diaphragms.iter().all(|d| d.ci_override.is_none()) {
+        return distribute_pi_over_diaphragms(model, story, pi);
+    }
     let main_diaphragms: Vec<DiaphragmRef<'_>> = diaphragms
         .iter()
         .filter(|d| d.ci_override.is_none())

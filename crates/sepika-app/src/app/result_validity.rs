@@ -143,6 +143,7 @@ fn is_standard_seismic_case(case: &sepika_core::model::LoadCase) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sepika_core::{dof::Dof6Mask, ids::StoryId};
 
     fn ready() -> App {
         let mut app = App::default();
@@ -304,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn 使用する固有値と偏心精算の静的結果も入力一致を要求する() {
+    fn 略算_qudは固有値に依存せず偏心精算の静的結果は入力一致を要求する() {
         let mut app = ready();
         app.run_seismic(SeismicDir::Y);
         app.run_eigen(1);
@@ -318,11 +319,7 @@ mod tests {
             .expect("拒否される")
             .contains("地震静的 Y"));
         app.run_seismic(SeismicDir::Y);
-        assert!(app
-            .compute_holding_capacity()
-            .err()
-            .expect("拒否される")
-            .contains("固有値解析"));
+        assert!(app.compute_holding_capacity().is_ok());
         app.run_eigen(1);
         assert!(app.compute_holding_capacity().is_ok());
     }
@@ -485,5 +482,116 @@ mod tests {
             .contains("旧入力の解析結果を破棄"));
         assert_eq!(app.pushover_for(SeismicDir::X).unwrap().qu, old_qu);
         assert!(app.compute_holding_capacity().is_err());
+    }
+    #[test]
+    fn 略算_qudは固有値の参考周期があっても独立略算値を採用する() {
+        let mut app = ready();
+        app.core.model.stories[1].seismic_weight = Some(100_000.0);
+        app.run_seismic(SeismicDir::X);
+        app.run_pushover();
+        let baseline = app.compute_holding_capacity().unwrap().0.stories[0].qud;
+        assert!((baseline - 100_000.0).abs() < 1e-8);
+        app.run_eigen(1);
+        app.core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .modal
+            .as_mut()
+            .unwrap()
+            .period[0] = 20.0;
+        let with_modal = app.compute_holding_capacity().unwrap().0.stories[0].qud;
+        assert_eq!(baseline, with_modal);
+    }
+    #[test]
+    fn 必要耐力用地震力は未検証精算塔屋と指定_ci副剛床を拒否する() {
+        let mut app = ready();
+        app.core.analysis_cfg.ai_mode = AiMode::SemiPrecise;
+        assert!(app
+            .compute_holding_capacity()
+            .err()
+            .unwrap()
+            .contains("未対応"));
+        app.core.analysis_cfg.ai_mode = AiMode::Approx;
+        app.core.model.stories[1].level_kind =
+            sepika_core::model::StoryLevelKind::Penthouse { k: 1.0 };
+        assert!(app
+            .compute_holding_capacity()
+            .err()
+            .unwrap()
+            .contains("未検証"));
+        app.core.model.stories[1].level_kind = Default::default();
+        app.core
+            .model
+            .constraints
+            .push(sepika_core::model::Constraint::RigidDiaphragm {
+                story: StoryId(1),
+                master: NodeId(2),
+                slaves: vec![],
+                weight: Some(100.0),
+                ci_override: Some(0.3),
+            });
+        let error = app.compute_holding_capacity().err().unwrap();
+        assert!(
+            error.contains("指定 Ci") && error.contains("未対応"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn 地下_qudは上部_c0一のせん断力と地下震度重量を加算する() {
+        let mut app = ready();
+        let basement_node = NodeId(app.core.model.nodes.len() as u32);
+        let spring_id = ElemId(app.core.model.elements.len() as u32);
+        let mut basement = app.core.model.stories[1].clone();
+        basement.id = StoryId(1);
+        basement.name = "B1".into();
+        basement.elevation = 1000.0;
+        basement.node_ids = vec![basement_node];
+        basement.seismic_weight = Some(100_000.0);
+        basement.level_kind = sepika_core::model::StoryLevelKind::Basement { depth_mm: 0.0 };
+        app.core.model.stories[1].id = StoryId(2);
+        app.core.model.stories[1].seismic_weight = Some(100_000.0);
+        for node in &mut app.core.model.nodes {
+            if node.story == Some(StoryId(1)) {
+                node.story = Some(StoryId(2));
+            }
+        }
+        for constraint in &mut app.core.model.constraints {
+            if let sepika_core::model::Constraint::RigidDiaphragm { story, .. } = constraint {
+                if *story == StoryId(1) {
+                    *story = StoryId(2);
+                }
+            }
+        }
+        app.core.model.stories.insert(1, basement);
+        let mut node = app.core.model.nodes[0].clone();
+        node.id = basement_node;
+        node.story = Some(StoryId(1));
+        node.restraint = Dof6Mask(0b111110);
+        app.core.model.nodes.push(node);
+        let mut spring = app.core.model.elements[0].clone();
+        spring.id = spring_id;
+        spring.kind = sepika_core::model::ElementKind::NodalSpring;
+        spring.nodes = [NodeId(0), basement_node].into_iter().collect();
+        spring.section = None;
+        spring.spring = Some([1000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        app.core.model.elements.push(spring);
+        app.run_seismic(SeismicDir::X);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app.run_pushover();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let result = app.compute_holding_capacity().unwrap().0;
+        assert!((result.stories[0].qud - 110_000.0).abs() < 1e-8);
+        assert!((result.stories[1].qud - 100_000.0).abs() < 1e-8);
     }
 }
