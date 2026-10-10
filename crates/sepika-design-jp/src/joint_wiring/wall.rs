@@ -612,15 +612,22 @@ pub(super) fn collect_wall_design_checks(
                 .and_then(|e| model.element_section(e))
                 .and_then(|s| s.thickness)
                 .is_some_and(|t| !t.is_finite() || t <= 0.0);
-        let seismic_target = input_invalid
-            || match elem {
-                Some(e) => sepika_element::wall::misc_wall::wall_is_seismic(e, model),
-                None => plate.is_some_and(|p| {
-                    !p.slit.any()
-                        && (model.wall_plate_covers_region(p)
-                            || (!p.is_attached() && p.boundary_nodes(model).is_none()))
-                }),
-            };
+        let known_slit = plate.is_some_and(|p| p.slit.any())
+            || elem.is_some_and(|e| {
+                model
+                    .wall_attrs
+                    .iter()
+                    .any(|a| a.elem == e.id && a.slit.any())
+            });
+        let seismic_target = !known_slit
+            && (input_invalid
+                || match elem {
+                    Some(e) => sepika_element::wall::misc_wall::wall_is_seismic(e, model),
+                    None => plate.is_some_and(|p| {
+                        model.wall_plate_covers_region(p)
+                            || (!p.is_attached() && p.boundary_nodes(model).is_none())
+                    }),
+                });
         let section = elem
             .and_then(|e| model.element_section(e))
             .or_else(|| plate.and_then(|p| model.wall_plate_section(p)));

@@ -1802,6 +1802,69 @@ fn wall_status_slit_stays_outside_with_or_without_section() {
 }
 
 #[test]
+fn wall_status_slit_stays_outside_with_invalid_thickness_and_plate_or_attr() {
+    use crate::wall_check::{WallCheckSummary, WallSkipKind};
+    let (mut source, _) = status_wall_model();
+    source.elements.retain(|e| e.kind != ElementKind::Wall);
+    source.wall_attrs.clear();
+    source.wall_plates.truncate(1);
+    source.wall_regions[0].wall_plate_ids.truncate(1);
+    source.wall_plates[0].slit.beam_face[0] = true;
+    for thickness in [180.0, -1.0] {
+        source.sections[0].thickness = Some(thickness);
+        let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(&source);
+        let wall = expanded
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Wall)
+            .unwrap();
+        assert!(!sepika_element::wall::misc_wall::wall_is_seismic(
+            wall, &expanded
+        ));
+        for slit_source in ["plate_and_attr", "plate", "attr"] {
+            let mut model = expanded.clone();
+            if slit_source == "plate" {
+                model
+                    .wall_attrs
+                    .iter_mut()
+                    .for_each(|a| a.slit = Default::default());
+            } else if slit_source == "attr" {
+                model.wall_plates.clear();
+            }
+            let checks = collect_wall_design_checks(
+                &model,
+                &[],
+                LoadTerm::Short,
+                (slit_source != "attr").then_some(&index),
+                "case:0",
+            );
+            assert_eq!(checks.len(), 2);
+            let expected_kind = if thickness > 0.0 {
+                WallSkipKind::NotApplicable
+            } else {
+                WallSkipKind::InvalidInput
+            };
+            assert!(checks
+                .iter()
+                .all(|w| !w.seismic_target && w.skip_kind == Some(expected_kind)));
+            assert!(checks.iter().all(|w| w.elem == Some(wall.id)
+                && w.plate == (slit_source != "attr").then_some(source.wall_plates[0].id)
+                && matches!(w.outcome, CheckOutcome::Skipped { .. })));
+            let summary = WallCheckSummary::from_checks(&checks);
+            assert_eq!(
+                (summary.n_walls, summary.n_skipped, summary.n_outside),
+                (0, 0, 2)
+            );
+            assert_eq!(summary.max_ratio, None);
+            if thickness < 0.0 {
+                assert!(checks.iter().all(|w| matches!(&w.outcome,
+                    CheckOutcome::Skipped { reason } if reason.contains("板厚が不正"))));
+            }
+        }
+    }
+}
+
+#[test]
 fn wall_status_ungenerated_missing_section_and_attached_weight_only_remain_visible() {
     use crate::wall_check::{WallCheckSummary, WallSkipKind};
     use sepika_core::model::{LoadTransfer, RegionAnchor, WallPlateShape};
