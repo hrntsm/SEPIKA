@@ -294,6 +294,7 @@ pub struct PushoverResult {
     /// せん断降伏イベント履歴。
     pub shear_yields: Vec<ShearYieldEvent>,
     pub mechanism: MechanismType,
+    /// 性能曲線上の最大ベースシア [N]。保有耐力比較の採用点とは独立。
     pub qu: f64,
     /// 最終確定ステップ時の部材別応答。ステップが 1 つも確定しなかった場合は空。
     pub member_response: Vec<PushoverMemberResponse>,

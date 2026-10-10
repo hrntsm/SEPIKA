@@ -267,10 +267,11 @@ impl App {
             .map(|s| s.elem)
             .collect();
         let mut capacity_seen = std::collections::HashSet::new();
-        if ds_point
-            .member_capacities_n
-            .iter()
-            .any(|(elem, q)| !capacity_seen.insert(*elem) || !q.is_finite() || *q <= 0.0)
+        if self.core.design_rank_auto
+            && ds_point
+                .member_capacities_n
+                .iter()
+                .any(|(elem, q)| !capacity_seen.insert(*elem) || !q.is_finite() || *q <= 0.0)
         {
             return Err("部材群の耐力入力が重複・非有限・非正です".into());
         }

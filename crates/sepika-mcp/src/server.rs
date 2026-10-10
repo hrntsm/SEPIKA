@@ -745,7 +745,7 @@ mod tests {
 
     /// Pushover ジョブ（stories 付きモデル）→ Done でサマリに qu[kN] が含まれる。
     #[tokio::test]
-    async fn test_pushover_job_completes_with_qu_in_summary() {
+    async fn test_pushover_job_completes_with_max_base_shear_in_summary() {
         let dir = test_store_dir("pushover_basic");
         let server = SepikaServer::new(make_state(pushover_model(), &dir));
         let mut args = run_args(JobKind::Pushover);
@@ -757,7 +757,7 @@ mod tests {
         let job_id = extract_job_id(&result);
         let status = wait_for_terminal(&server, &job_id).await;
         let summary = done_summary(&status);
-        assert!(summary["qu_kN"].as_f64().unwrap() > 0.0);
+        assert!(summary["max_base_shear_kN"].as_f64().unwrap() > 0.0);
         assert!(
             summary.get("store").is_none(),
             "Pushover はストアへ書かない"

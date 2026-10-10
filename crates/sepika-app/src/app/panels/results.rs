@@ -183,7 +183,7 @@ impl App {
                 crate::theme::SECONDARY_AMBER,
                 format!(
                     "⚠ 増分解析は目標到達前に打ち切られました（{}）。性能曲線が途中で\
-                     途切れており、Qu はその時点までの最大値です。",
+                     途切れており、最大ベースシアはその時点までの最大値です。",
                     po.termination.describe()
                 ),
             );
@@ -201,7 +201,7 @@ impl App {
         ui.separator();
 
         ui.horizontal(|ui| {
-            ui.label(format!("保有水平耐力 Qu = {:.1} kN", force_kn(po.qu)));
+            ui.label(format!("解析経過の最大ベースシア = {:.1} kN", force_kn(po.qu)));
             ui.separator();
             let mech = match &po.mechanism {
                 sepika_solver::nonlinear::pushover::MechanismType::Overall => {

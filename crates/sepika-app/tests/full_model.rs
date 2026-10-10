@@ -1336,10 +1336,42 @@ fn steel_portal_holding_capacity_and_imported_rc_ultimate_checks() {
     assert_no_error(&app, "鋼構造サンプルの固有値解析");
     app.run_pushover();
     assert_no_error(&app, "増分解析");
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    let dir = app.core.scoped.pushover_view_dir;
+    let bundle = app.core.scoped.results.as_mut().unwrap();
+    let mut selected_step = 0;
+    for po in [&mut bundle.pushover, &mut bundle.pushover_x]
+        .into_iter()
+        .flatten()
+    {
+        selected_step = po.capacity_curve.last().unwrap().step;
+        po.ds_evaluation = Some(
+            po.evaluation_point(
+                EvaluationPurpose::Ds,
+                dir,
+                selected_step,
+                "終端確定stepを試験で明示採用".into(),
+            )
+            .unwrap(),
+        );
+        po.capacity_evaluation = Some(
+            po.evaluation_point(
+                EvaluationPurpose::HoldingCapacity,
+                dir,
+                selected_step,
+                "終端確定stepを試験で明示採用".into(),
+            )
+            .unwrap(),
+        );
+    }
 
     let (holding, ranks) = app
         .compute_holding_capacity()
         .expect("保有水平耐力が算定できるはず");
+    let source = app.core.scoped.holding_capacity_source.as_ref().unwrap();
+    assert_eq!(source.ds_point.step, selected_step);
+    assert_eq!(source.capacity_point.step, selected_step);
+    assert_eq!(source.ds_point.run_id, source.capacity_point.run_id);
     assert_eq!(holding.stories.len(), 4, "保有水平耐力の層数");
     assert_eq!(ranks.len(), 4, "層ごとの部材ランク");
     for s in &holding.stories {

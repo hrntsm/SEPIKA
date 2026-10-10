@@ -610,15 +610,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             "Sブレース",
         );
     });
-    ui.horizontal(|ui| {
-        ui.checkbox(
-            &mut app.core.design_rank_auto,
-            "自動判定（鋼=幅厚比・RC矩形=Qsu/Qmu）",
-        )
-        .on_hover_text(
-            "鋼は幅厚比、RC はせん断余裕度等から Ds 用確定点の応力で判定します。群耐力重みは明示入力し、欠損・対象外部材は理由付きで停止します。",
-        );
-    });
+    holding_rank_mode_input(ui, app);
     ui.horizontal(|ui| {
         use sepika_design_jp::secondary::holding_capacity::MemberRank;
         ui.label(if app.core.design_rank_auto {
@@ -999,7 +991,7 @@ fn secondary_label<'a>(
         .unwrap_or_else(|| format!("SM{}", id.0))
 }
 
-fn holding_evaluation_inputs(ui: &mut egui::Ui, app: &mut crate::app::App) {
+pub(crate) fn holding_evaluation_inputs(ui: &mut egui::Ui, app: &mut crate::app::App) {
     use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
     let dir = app.core.scoped.pushover_view_dir;
     let Some(bundle) = &mut app.core.scoped.results else {
@@ -1165,6 +1157,18 @@ pub(crate) fn wall_checks_ui(
             reason
         ));
     }
+}
+
+pub(crate) fn holding_rank_mode_input(ui: &mut egui::Ui, app: &mut App) {
+    ui.horizontal(|ui| {
+        ui.checkbox(
+            &mut app.core.design_rank_auto,
+            "自動判定（鋼=幅厚比・RC矩形=Qsu/Qmu）",
+        )
+        .on_hover_text(
+            "鋼は幅厚比、RC はせん断余裕度等から Ds 用確定点の応力で判定します。群耐力重みは明示入力し、欠損・対象外部材は理由付きで停止します。",
+        );
+    });
 }
 
 #[cfg(test)]

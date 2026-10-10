@@ -74,7 +74,7 @@ fn pushover_summary(
     };
     serde_json::json!({
         "kind": "Pushover",
-        "qu_kN": force_kn(result.qu),
+        "max_base_shear_kN": force_kn(result.qu),
         "mechanism": mechanism,
         "n_steps": result.steps.len(),
         "wall_run": result.wall_run,
@@ -217,6 +217,41 @@ mod tests {
             "steps":[],"capacity_curve":[],"hinges":[],"shear_yields":[],"mechanism":"Partial","qu":0.0,"member_response":[],
             "wall_history":records,"wall_run":summary["wall_run"]
         })).unwrap();
+        result.qu = 150_000.0;
+        let unselected = pushover_summary(&result);
+        assert_eq!(unselected["max_base_shear_kN"], 150.0);
+        assert!(unselected.get("qu_kN").is_none());
+        assert!(unselected["capacity_story_evaluation"].is_null());
+        result.steps = serde_json::from_value(summary["steps"].clone()).unwrap();
+        result.capacity_curve = serde_json::from_value(summary["capacity_curve"].clone()).unwrap();
+        result.confirmed_history =
+            serde_json::from_value(summary["confirmed_history"].clone()).unwrap();
+        result.capacity_evaluation =
+            serde_json::from_value(summary["capacity_evaluation"].clone()).unwrap();
+        let record = result
+            .confirmed_history
+            .as_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|r| r.step == 1)
+            .unwrap();
+        for cut in &mut record.cuts {
+            let total: f64 = cut.forces.iter().map(|f| f.force_n).sum();
+            for force in &mut cut.forces {
+                force.force_n *= 120_000.0 / total;
+            }
+            cut.external_n = 120_000.0;
+        }
+        let selected = pushover_summary(&result);
+        assert_eq!(selected["max_base_shear_kN"], 150.0);
+        assert!(
+            (selected["capacity_story_evaluation"]["Ok"][0]["qu_n"]
+                .as_f64()
+                .unwrap()
+                - 120_000.0)
+                .abs()
+                < 1e-6
+        );
         let r = result.wall_history.as_mut().unwrap().first_mut().unwrap();
         r.response.as_mut().unwrap().qdir_n = 0.0;
         assert_eq!(

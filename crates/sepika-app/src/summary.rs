@@ -478,7 +478,7 @@ pub fn build_report_csv(app: &App) -> String {
             sepika_solver::nonlinear::pushover::PushoverControl::LoadOnly => "荷重増分のみ",
         };
         out.push_str(&format!(
-            "\n[増分解析]\n増分方式,{}\n保有水平耐力Qu[kN],{:.2}\nヒンジ数,{}\n",
+            "\n[増分解析]\n増分方式,{}\n解析経過の最大ベースシア[kN],{:.2}\nヒンジ数,{}\n",
             control,
             force_kn(po.qu),
             po.hinges.len()

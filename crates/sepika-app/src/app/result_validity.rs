@@ -639,6 +639,135 @@ mod purpose_tests {
             .unwrap()
             .contains("評価点を明示"));
     }
+    #[test]
+    fn 手動ランクは未使用の自動耐力入力を検査せず自動ランクは不正入力を拒否する() {
+        let mut app = ready();
+        super::super::tests::select_holding_points(&mut app);
+        app.core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .pushover_x
+            .as_mut()
+            .unwrap()
+            .ds_evaluation
+            .as_mut()
+            .unwrap()
+            .member_capacities_n = vec![
+            (sepika_core::ids::ElemId(0), 0.0),
+            (sepika_core::ids::ElemId(0), f64::NAN),
+        ];
+        app.core.design_rank_auto = false;
+        assert!(app.compute_holding_capacity().is_ok());
+        app.core.design_rank_auto = true;
+        assert!(app
+            .compute_holding_capacity()
+            .err()
+            .unwrap()
+            .contains("耐力入力"));
+    }
+    #[cfg(feature = "gui")]
+    #[test]
+    fn gui未採用でもピークは解析経過と表示し自動耐力未入力は手動切替を妨げない() {
+        let mut app = ready();
+        let bundle = app.core.scoped.results.as_mut().unwrap();
+        for po in [bundle.pushover.as_mut(), bundle.pushover_x.as_mut()]
+            .into_iter()
+            .flatten()
+        {
+            po.qu = 150_000.0;
+        }
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.pushover_results_panel(ui)
+        });
+        let labels: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(labels.contains(&"解析経過の最大ベースシア = 150.0 kN"));
+        assert!(!labels.iter().any(|text| text.contains("保有水平耐力 Qu")));
+        let csv = crate::summary::build_report_csv(&app);
+        assert!(csv.contains("解析経過の最大ベースシア[kN],150.00"));
+        assert!(!csv.contains("保有水平耐力Qu[kN]"));
+        super::super::tests::select_holding_points(&mut app);
+        app.core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .pushover_x
+            .as_mut()
+            .unwrap()
+            .ds_evaluation
+            .as_mut()
+            .unwrap()
+            .member_capacities_n
+            .clear();
+        app.core.design_rank_auto = true;
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            egui::collapsing_header::CollapsingState::load_with_default_open(
+                ui.ctx(),
+                ui.make_persistent_id(egui::Id::new("部材群の耐力入力 [N]（負担力とは別）")),
+                true,
+            )
+            .store(ui.ctx());
+            crate::design_view::holding_evaluation_inputs(ui, &mut app);
+        });
+        assert!(app
+            .pushover_for(SeismicDir::X)
+            .unwrap()
+            .ds_evaluation
+            .as_ref()
+            .unwrap()
+            .member_capacities_n
+            .iter()
+            .any(|(_, q)| *q == 0.0));
+        assert!(app
+            .compute_holding_capacity()
+            .err()
+            .unwrap()
+            .contains("非正"));
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            crate::design_view::holding_rank_mode_input(ui, &mut app)
+        });
+        let pos = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text)
+                    if text.galley.job.text == "自動判定（鋼=幅厚比・RC矩形=Qsu/Qmu）" =>
+                {
+                    Some(text.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .unwrap();
+        for pressed in [true, false] {
+            let raw = egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(raw, |ui| {
+                crate::design_view::holding_rank_mode_input(ui, &mut app)
+            });
+        }
+        assert!(!app.core.design_rank_auto);
+        assert!(app.compute_holding_capacity().is_ok());
+    }
     fn two_purposes() -> App {
         let mut app = ready();
         super::super::tests::select_holding_points(&mut app);
@@ -663,6 +792,13 @@ mod purpose_tests {
     #[test]
     fn 目的別run条件の差を許容し同時点の独立期待値と保存帳票を維持する() {
         let mut app = two_purposes();
+        let bundle = app.core.scoped.results.as_mut().unwrap();
+        for po in [bundle.pushover.as_mut(), bundle.pushover_x.as_mut()]
+            .into_iter()
+            .flatten()
+        {
+            po.qu = 150_000.0;
+        }
         let entries = &mut app
             .core
             .scoped
@@ -710,6 +846,7 @@ mod purpose_tests {
         assert_eq!(source.capacity_conditions.push_max_disp, 2.0);
         let csv = crate::summary::build_report_csv(&app);
         for expected in [
+            "解析経過の最大ベースシア[kN],150.00",
             "目的別採用run Ds",
             "目的別採用run HoldingCapacity",
             "Qu=150000",
@@ -720,6 +857,7 @@ mod purpose_tests {
         ] {
             assert!(csv.contains(expected), "{expected}");
         }
+        assert!(!csv.contains("保有水平耐力Qu[kN]"));
         let dir = std::env::temp_dir().join(format!("sepika-issue442-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("purpose-runs.ovika");

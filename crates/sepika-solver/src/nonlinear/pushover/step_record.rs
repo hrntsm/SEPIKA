@@ -217,7 +217,7 @@ impl<'a> StepRecorder<'a> {
         self.steps.is_empty()
     }
 
-    /// 性能曲線上の最大ベースシア＝保有水平耐力 Qu [N]。
+    /// 性能曲線上の最大ベースシア [N]。目的別の採用層耐力とは区別する。
     /// 単調載荷では崩壊機構形成後に頭打ちとなるため、ピーク値を採る。
     pub(super) fn qu(&self) -> f64 {
         self.capacity_curve

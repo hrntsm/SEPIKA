@@ -1045,6 +1045,16 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
     let mut line = |k: &str, v: String| out.push_str(&format!("{k} = {v}\n"));
     assert_eq!(holding.stories.len(), 1, "本フィクスチャは 1 層");
     let s = &holding.stories[0];
+    let source = app.core.scoped.holding_capacity_source.as_ref().unwrap();
+    assert!(source.ds_forces[0].beta_u > 0.7);
+    assert!(matches!(
+        source.ds_mechanism,
+        sepika_solver::nonlinear::pushover::MechanismType::Partial
+    ));
+    assert_eq!(s.ds, 0.4);
+    assert_eq!(s.fes, 1.5);
+    assert!((s.qun - 0.4 * 1.5 * s.qud).abs() < 1e-8);
+
     assert!(
         s.qu > 0.0 && s.qu.is_finite(),
         "保有水平耐力 Qu が異常: {}",

@@ -64,7 +64,7 @@ impl App {
                 result.identify_wall_input(input.clone());
                 if result.termination.is_premature() {
                     self.append_analysis_notice(format!(
-                        "⚠ 増分解析は目標到達前に打ち切られました（{}）。Qu はその時点までの最大値です。",
+                        "⚠ 増分解析は目標到達前に打ち切られました（{}）。最大ベースシアはその時点までの最大値です。",
                         result.termination.describe()
                     ));
                 }
