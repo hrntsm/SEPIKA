@@ -173,6 +173,7 @@ impl StrengthBasis {
 /// 部材耐力算定に用いる材料強度の基準は `basis` で指定する。
 /// 時刻歴応答解析は [`StrengthBasis::Nominal`]、
 /// 保有水平耐力計算は [`StrengthBasis::MaterialStrength`] を渡す。
+/// RC矩形梁の集中ばね入力が不正・不足なら診断文付きでpanicする。
 pub fn build_nonlinear_behavior(
     data: &ElementData,
     model: &Model,
@@ -190,6 +191,16 @@ pub fn build_nonlinear_behavior(
             let panel = crate::frame::panel_offset::resolve(data, model);
             let inner: Box<dyn ElementBehavior> = match resolve_force_regime(data, model) {
                 ResolvedRegime::ConcentratedSpring => {
+                    if matches!(
+                        model
+                            .element_section(data)
+                            .and_then(|section| section.shape.as_ref()),
+                        Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
+                    ) {
+                        if let Some(issue) = input_check::member_strength_issue(data, model) {
+                            panic!("{issue}");
+                        }
+                    }
                     let elem = crate::frame::beam::BeamElement::new(data, model);
                     let rule = resolve_member_hysteresis(data, model, kind);
                     let (spring_i, spring_j, backbone) =

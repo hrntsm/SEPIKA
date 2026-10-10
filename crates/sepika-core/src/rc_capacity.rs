@@ -5,7 +5,7 @@
 pub struct RcCapacityInput {
     /// 断面幅 b \[mm\]
     pub b: f64,
-    /// 断面せい D \[mm\]
+    /// 全せい D \[mm\]（有効せいではない）
     pub d: f64,
     /// 引張側主筋の総断面積 at \[mm²\]（片側）
     pub at: f64,
@@ -15,7 +15,7 @@ pub struct RcCapacityInput {
     pub sigma_y: f64,
     /// コンクリート強度 Fc \[N/mm²\]
     pub fc: f64,
-    /// せん断補強筋比 pw（= aw・組数/(b・ピッチ)）
+    /// せん断補強筋比 pw（小数、0.2% は 0.002。= aw・組数/(b・ピッチ)）
     pub pw: f64,
     /// せん断補強筋降伏強度 σwy \[N/mm²\]
     pub sigma_wy: f64,
@@ -25,6 +25,96 @@ pub struct RcCapacityInput {
     /// `0.1・σ0・b・j` に用いる。荒川式の適用範囲である 0〜0.4Fc に
     /// `rc_qsu_simple` 内でクランプされる（要・原典照合）。
     pub sigma_0: f64,
+}
+
+/// αy 用の断面・引張方向。T形では有効幅 B [mm] と協力スラブ筋面積 [mm²] を明示する。
+#[derive(Clone, Copy, Debug)]
+pub enum RcAlphaSection {
+    Rectangular,
+    TBottomTension {
+        effective_width_mm: f64,
+    },
+    TTopTension {
+        effective_width_mm: f64,
+        slab_tension_area_mm2: f64,
+    },
+}
+
+/// 幾何・配筋から αy 用の小数とせん断用の百分率を別々に生成した鉄筋比。
+#[derive(Clone, Copy, Debug)]
+pub struct RcRebarRatios {
+    pub pt_alpha_ratio: f64,
+    pub pt_shear_percent: f64,
+}
+
+/// b・D・d [mm]、片側主筋 at [mm²]から方向別鉄筋比を生成する。
+/// 非有限・非正値、d>D、不正なT形入力は入力エラー。I0/IT補正は適用しない。
+pub fn rc_rebar_ratios(
+    b_mm: f64,
+    full_depth_mm: f64,
+    effective_depth_mm: f64,
+    tension_area_mm2: f64,
+    section: RcAlphaSection,
+) -> Result<RcRebarRatios, crate::error::CoreError> {
+    use crate::error::CoreError;
+    for (name, value) in [
+        ("b", b_mm),
+        ("D", full_depth_mm),
+        ("d", effective_depth_mm),
+        ("at", tension_area_mm2),
+    ] {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(CoreError::InvalidInput(format!(
+                "{name} は正の有限値が必要です"
+            )));
+        }
+    }
+    if effective_depth_mm > full_depth_mm {
+        return Err(CoreError::InvalidInput(
+            "有効せい d は全せい D 以下が必要です".into(),
+        ));
+    }
+    let (alpha_width_mm, alpha_tension_area_mm2) = match section {
+        RcAlphaSection::Rectangular => (b_mm, tension_area_mm2),
+        RcAlphaSection::TBottomTension { effective_width_mm } => {
+            (effective_width_mm, tension_area_mm2)
+        }
+        RcAlphaSection::TTopTension {
+            effective_width_mm,
+            slab_tension_area_mm2,
+        } => {
+            if !slab_tension_area_mm2.is_finite() || slab_tension_area_mm2 < 0.0 {
+                return Err(CoreError::InvalidInput(
+                    "スラブ引張筋面積は非負の有限値が必要です".into(),
+                ));
+            }
+            if !effective_width_mm.is_finite() || effective_width_mm < b_mm {
+                return Err(CoreError::InvalidInput(
+                    "T形有効幅 B は梁幅 b 以上の有限値が必要です".into(),
+                ));
+            }
+            (b_mm, tension_area_mm2 + slab_tension_area_mm2)
+        }
+    };
+    if !alpha_width_mm.is_finite() || alpha_width_mm < b_mm {
+        return Err(CoreError::InvalidInput(
+            "T形有効幅 B は梁幅 b 以上の有限値が必要です".into(),
+        ));
+    }
+    let ratios = RcRebarRatios {
+        pt_alpha_ratio: alpha_tension_area_mm2 / (alpha_width_mm * full_depth_mm),
+        pt_shear_percent: 100.0 * tension_area_mm2 / (b_mm * effective_depth_mm),
+    };
+    if !ratios.pt_alpha_ratio.is_finite()
+        || !ratios.pt_shear_percent.is_finite()
+        || ratios.pt_alpha_ratio <= 0.0
+        || ratios.pt_shear_percent <= 0.0
+    {
+        return Err(CoreError::InvalidInput(
+            "鉄筋比を有限の正値として算定できません".into(),
+        ));
+    }
+    Ok(ratios)
 }
 
 /// 曲げ終局モーメント Mu = 0.9・at・σy・d（引張鉄筋降伏型の略算式）。
@@ -109,15 +199,23 @@ pub fn rc_qsu_simple(inp: &RcCapacityInput) -> f64 {
     if inp.b <= 0.0 || inp.d_eff <= 0.0 || inp.at <= 0.0 || inp.fc <= 0.0 || inp.clear_span <= 0.0 {
         return 0.0;
     }
-    let pt = 100.0 * inp.at / (inp.b * inp.d_eff);
+    let pt_shear_percent = 100.0 * inp.at / (inp.b * inp.d_eff);
     let j = 7.0 * inp.d_eff / 8.0;
     let shear_span_ratio = (inp.clear_span / (2.0 * inp.d_eff)).clamp(1.0, 3.0);
-    let pw = inp.pw.clamp(0.0, 0.012);
-    let concrete_term = 0.068 * pt.powf(0.23) * (inp.fc + 18.0) / (shear_span_ratio + 0.12);
-    let hoop_term = 0.85 * (pw * inp.sigma_wy).max(0.0).sqrt();
+    let pw_ratio = inp.pw.clamp(0.0, 0.012);
+    let concrete_term =
+        0.068 * pt_shear_percent.powf(0.23) * (inp.fc + 18.0) / (shear_span_ratio + 0.12);
+    let hoop_term = 0.85 * (pw_ratio * inp.sigma_wy).max(0.0).sqrt();
     let sigma_0 = inp.sigma_0.clamp(0.0, 0.4 * inp.fc);
     let axial_term = 0.1 * sigma_0;
     (concrete_term + hoop_term + axial_term) * inp.b * j
+}
+
+/// 幾何・配筋の入力診断後にせん断終局耐力 [N] を算定する。
+/// b・D・d・at の不正値はゼロへ置換せず入力エラー。pt は幾何から内部生成する。
+pub fn rc_qsu_simple_checked(inp: &RcCapacityInput) -> Result<f64, crate::error::CoreError> {
+    rc_rebar_ratios(inp.b, inp.d, inp.d_eff, inp.at, RcAlphaSection::Rectangular)?;
+    Ok(rc_qsu_simple(inp))
 }
 
 /// RC 梁の曲げ降伏時剛性低下率 αy（菅野式）。
@@ -126,7 +224,7 @@ pub fn rc_qsu_simple(inp: &RcCapacityInput) -> f64 {
 /// αy = (0.043 + 1.635·n·pt + 0.043·(a/D))·(d/D)²   (2.0 ≤ a/D ≤ 5.0)
 ///      (−0.0836 + 0.159·(a/D))·(d/D)²              (1.0 ≤ a/D < 2.0)
 /// ```
-/// - `pt`: 引張鉄筋比（小数）
+/// - `pt_alpha_ratio`: αy 用の引張鉄筋比 at/(bD)（小数、1% は 0.01）。T形は方向別の仮想断面で生成。
 /// - `a_over_d`: シアスパン比 a/D（a=l0/2）。適用範囲 [1.0, 5.0] にクランプする。
 /// - `d_over_full`: 有効せい/全せい d/D
 /// - `n`: ヤング係数比 Es/Ec
@@ -134,10 +232,10 @@ pub fn rc_qsu_simple(inp: &RcCapacityInput) -> f64 {
 /// 要・原典照合。
 /// トリリニア骨格の降伏点変形（θy=θe/αy）に用いる剛性低下率で、0〜1 に収まる想定。
 /// 負となる異常入力は 0 にクランプする（1 超は補正しない＝呼び出し側で扱う）。
-pub fn rc_alpha_y_sugano(pt: f64, a_over_d: f64, d_over_full: f64, n: f64) -> f64 {
+pub fn rc_alpha_y_sugano(pt_alpha_ratio: f64, a_over_d: f64, d_over_full: f64, n: f64) -> f64 {
     let ad = a_over_d.clamp(1.0, 5.0);
     let base = if ad >= 2.0 {
-        0.043 + 1.635 * n * pt + 0.043 * ad
+        0.043 + 1.635 * n * pt_alpha_ratio + 0.043 * ad
     } else {
         -0.0836 + 0.159 * ad
     };
@@ -213,6 +311,135 @@ mod tests {
     use crate::ids::MaterialId;
     use crate::model::{Material, MaterialCategory};
     use crate::section_shape::{RcRectColumnRebar, RectColumnHoop};
+
+    #[test]
+    fn rebar_ratios_use_distinct_denominators_and_tension_directions() {
+        let rect =
+            rc_rebar_ratios(300.0, 600.0, 540.0, 1800.0, RcAlphaSection::Rectangular).unwrap();
+        assert!((rect.pt_alpha_ratio - 0.010).abs() < 1e-15);
+        assert!((rect.pt_shear_percent - 1.111_111_111_111_111).abs() < 1e-14);
+        assert!((rect.pt_shear_percent - 1.0).abs() > 0.1);
+        let bottom = rc_rebar_ratios(
+            300.0,
+            600.0,
+            540.0,
+            1800.0,
+            RcAlphaSection::TBottomTension {
+                effective_width_mm: 1500.0,
+            },
+        )
+        .unwrap();
+        assert!((bottom.pt_alpha_ratio - 0.002).abs() < 1e-15);
+        let top = rc_rebar_ratios(
+            300.0,
+            600.0,
+            540.0,
+            1800.0,
+            RcAlphaSection::TTopTension {
+                effective_width_mm: 1500.0,
+                slab_tension_area_mm2: 600.0,
+            },
+        )
+        .unwrap();
+        assert!((top.pt_alpha_ratio - 0.013_333_333_333_333_3).abs() < 1e-15);
+        assert_eq!(bottom.pt_shear_percent, rect.pt_shear_percent);
+        assert_eq!(top.pt_shear_percent, rect.pt_shear_percent);
+        assert!((rc_alpha_y_sugano(rect.pt_alpha_ratio, 3.0, 0.9, 10.0) - 0.271_755).abs() < 1e-12);
+        assert!(
+            (rc_alpha_y_sugano(rect.pt_alpha_ratio * 100.0, 3.0, 0.9, 10.0) - 0.271_755).abs()
+                > 10.0
+        );
+        let input = RcCapacityInput {
+            b: 300.0,
+            d: 600.0,
+            d_eff: 540.0,
+            at: 1800.0,
+            ..sample_input()
+        };
+        assert!((rc_qsu_simple(&input) - 235_681.416_383_415_87).abs() < 1e-8);
+        assert!((input.pw * 100.0 - 0.2).abs() < 1e-15);
+        let percent_pw = RcCapacityInput { pw: 0.2, ..input };
+        assert!((rc_qsu_simple(&percent_pw) - rc_qsu_simple(&input)).abs() > 100_000.0);
+    }
+
+    #[test]
+    fn rebar_ratios_diagnose_invalid_geometry_and_t_section_inputs() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -1.0] {
+            for i in 0..4 {
+                let mut values = [300.0, 600.0, 540.0, 1800.0];
+                values[i] = bad;
+                assert!(rc_rebar_ratios(
+                    values[0],
+                    values[1],
+                    values[2],
+                    values[3],
+                    RcAlphaSection::Rectangular
+                )
+                .is_err());
+            }
+            assert!(rc_rebar_ratios(
+                300.0,
+                600.0,
+                540.0,
+                1800.0,
+                RcAlphaSection::TBottomTension {
+                    effective_width_mm: bad
+                }
+            )
+            .is_err());
+        }
+        assert!(rc_rebar_ratios(300.0, 600.0, 601.0, 1800.0, RcAlphaSection::Rectangular).is_err());
+        assert!(rc_rebar_ratios(
+            300.0,
+            600.0,
+            540.0,
+            1800.0,
+            RcAlphaSection::TBottomTension {
+                effective_width_mm: 299.0
+            }
+        )
+        .is_err());
+        for bad in [f64::NAN, f64::INFINITY, -1.0] {
+            assert!(rc_rebar_ratios(
+                300.0,
+                600.0,
+                540.0,
+                1800.0,
+                RcAlphaSection::TTopTension {
+                    effective_width_mm: 1500.0,
+                    slab_tension_area_mm2: bad
+                }
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn checked_shear_rejects_invalid_geometry_without_zero_capacity() {
+        let base = RcCapacityInput {
+            b: 300.0,
+            d: 600.0,
+            d_eff: 540.0,
+            at: 1800.0,
+            ..sample_input()
+        };
+        assert!((rc_qsu_simple_checked(&base).unwrap() - 235_681.416_383_415_87).abs() < 1e-8);
+        for bad in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+            for input in [
+                RcCapacityInput { b: bad, ..base },
+                RcCapacityInput { d: bad, ..base },
+                RcCapacityInput { d_eff: bad, ..base },
+                RcCapacityInput { at: bad, ..base },
+            ] {
+                assert!(rc_qsu_simple_checked(&input).is_err());
+            }
+        }
+        assert!(rc_qsu_simple_checked(&RcCapacityInput {
+            d_eff: 601.0,
+            ..base
+        })
+        .is_err());
+    }
 
     /// 代表断面: b=400, D=600, at=1935(D25×3程度), d_eff=530, σy=345, Fc=24,
     /// pw=0.002, σwy=295, h0=3000。

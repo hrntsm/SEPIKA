@@ -51,7 +51,8 @@ pub struct RcBeamBendingInput {
     pub ze: f64,
     /// 引張鉄筋断面積 at [mm²]（片側）。
     pub at: f64,
-    /// 引張鉄筋比 pt（小数、αy 用）。
+    /// αy 用の引張鉄筋比 at/(bD)（小数、1% は 0.01）。
+    /// T形は明示した引張方向の仮想断面で生成し、せん断用百分率を渡さない。
     pub pt: f64,
     /// 有効せい d [mm]。
     pub d_eff: f64,
@@ -109,9 +110,113 @@ pub fn rc_beam_bending(inp: &RcBeamBendingInput) -> RcBeamBending {
     RcBeamBending { mc, my, alpha_y }
 }
 
+/// αy 用の小数入力と at・D・d を診断して曲げ骨格諸元を算定する。
+/// 不正入力は既定値やゼロへ置換せず入力エラーを返す。
+pub fn rc_beam_bending_checked(
+    inp: &RcBeamBendingInput,
+) -> Result<RcBeamBending, sepika_core::error::CoreError> {
+    use sepika_core::error::CoreError;
+    for (name, value) in [
+        ("at", inp.at),
+        ("D", inp.d_full),
+        ("d", inp.d_eff),
+        ("pt_alpha_ratio", inp.pt),
+        ("Es", inp.es),
+        ("Ec", inp.ec),
+        ("a", inp.a_shear_span),
+    ] {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(CoreError::InvalidInput(format!(
+                "{name} は正の有限値が必要です"
+            )));
+        }
+    }
+    if inp.d_eff > inp.d_full {
+        return Err(CoreError::InvalidInput(
+            "有効せい d は全せい D 以下が必要です".into(),
+        ));
+    }
+    Ok(rc_beam_bending(inp))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bending_reference_receives_alpha_ratio_without_percent_conversion() {
+        use sepika_core::rc_capacity::{rc_rebar_ratios, RcAlphaSection};
+        let ratios =
+            rc_rebar_ratios(300.0, 600.0, 540.0, 1800.0, RcAlphaSection::Rectangular).unwrap();
+        let input = RcBeamBendingInput {
+            fc: 24.0,
+            ze: 18_000_000.0,
+            at: 1800.0,
+            pt: ratios.pt_alpha_ratio,
+            d_eff: 540.0,
+            d_full: 600.0,
+            sigma_y: 345.0,
+            a_shear_span: 1800.0,
+            es: 200_000.0,
+            ec: 20_000.0,
+        };
+        assert!((rc_beam_bending_checked(&input).unwrap().alpha_y - 0.271_755).abs() < 1e-12);
+        assert!(
+            (rc_beam_bending(&RcBeamBendingInput {
+                pt: input.pt * 100.0,
+                ..input
+            })
+            .alpha_y
+                - 0.271_755)
+                .abs()
+                > 10.0
+        );
+        for (section, expected) in [
+            (
+                RcAlphaSection::TBottomTension {
+                    effective_width_mm: 1500.0,
+                },
+                0.165_807,
+            ),
+            (
+                RcAlphaSection::TTopTension {
+                    effective_width_mm: 1500.0,
+                    slab_tension_area_mm2: 600.0,
+                },
+                0.315_9,
+            ),
+        ] {
+            let pt = rc_rebar_ratios(300.0, 600.0, 540.0, 1800.0, section)
+                .unwrap()
+                .pt_alpha_ratio;
+            assert!(
+                (rc_beam_bending_checked(&RcBeamBendingInput { pt, ..input })
+                    .unwrap()
+                    .alpha_y
+                    - expected)
+                    .abs()
+                    < 1e-12
+            );
+        }
+        for bad in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+            assert!(rc_beam_bending_checked(&RcBeamBendingInput { at: bad, ..input }).is_err());
+            assert!(rc_beam_bending_checked(&RcBeamBendingInput {
+                d_full: bad,
+                ..input
+            })
+            .is_err());
+            assert!(rc_beam_bending_checked(&RcBeamBendingInput {
+                d_eff: bad,
+                ..input
+            })
+            .is_err());
+        }
+        assert!(rc_beam_bending_checked(&RcBeamBendingInput {
+            d_eff: 601.0,
+            ..input
+        })
+        .is_err());
+    }
 
     /// 曲げひび割れモーメント Mc = 0.56·√Fc·Ze の配線 smoke。
     #[test]
