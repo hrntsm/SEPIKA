@@ -203,14 +203,21 @@ fn crack_moment(data: &ElementData, model: &Model, my: f64) -> f64 {
 /// 材端曲げバネの降伏時剛性低下率 αy。
 /// RC 矩形断面の梁（水平材）は菅野式で算定する。それ以外は 0.3 を用いる。
 pub(super) fn flexural_alpha_y(data: &ElementData, model: &Model) -> f64 {
+    flexural_alpha_y_checked(data, model).expect("RC梁のαy入力診断が必要です")
+}
+
+pub(super) fn flexural_alpha_y_checked(
+    data: &ElementData,
+    model: &Model,
+) -> Result<f64, sepika_core::error::CoreError> {
     use sepika_core::section_shape::SectionShape;
     const DEFAULT_ALPHA_Y: f64 = 0.3;
     if is_column_member(data, model) {
-        return DEFAULT_ALPHA_Y;
+        return Ok(DEFAULT_ALPHA_Y);
     }
     let sec = data.section.and_then(|sid| model.sections.get(sid.index()));
     let Some(shape) = sec.and_then(|s| s.shape.as_ref()) else {
-        return DEFAULT_ALPHA_Y;
+        return Ok(DEFAULT_ALPHA_Y);
     };
     let (b, d, at, d_eff) = match shape {
         SectionShape::RcBeamRect { b, d, rebar } => {
@@ -223,8 +230,7 @@ pub(super) fn flexural_alpha_y(data: &ElementData, model: &Model) -> f64 {
                     steel.effective_depth_mm,
                     steel.area_mm2,
                     sepika_core::rc_capacity::RcAlphaSection::Rectangular,
-                )
-                .expect("RC梁の正負引張側の入力診断が必要です");
+                )?;
             }
             let steel = if bottom.area_mm2 <= top.area_mm2 {
                 bottom
@@ -233,37 +239,217 @@ pub(super) fn flexural_alpha_y(data: &ElementData, model: &Model) -> f64 {
             };
             (*b, *d, steel.area_mm2, steel.effective_depth_mm)
         }
-        _ => return DEFAULT_ALPHA_Y,
+        _ => return Ok(DEFAULT_ALPHA_Y),
     };
-    if b <= 0.0 || d <= 0.0 {
-        return DEFAULT_ALPHA_Y;
-    }
     let pt_alpha_ratio = sepika_core::rc_capacity::rc_rebar_ratios(
         b,
         d,
         d_eff,
         at,
         sepika_core::rc_capacity::RcAlphaSection::Rectangular,
-    )
-    .expect("RC梁の鉄筋比入力診断が必要です")
+    )?
     .pt_alpha_ratio;
-    let ec = model.element_material(data).map(|m| m.young).unwrap_or(0.0);
-    let n = if ec > 0.0 {
-        model
-            .element_rebar_material(data)
-            .map(|m| m.young)
-            .unwrap_or(sepika_core::section_shape::E_STEEL)
-            / ec
-    } else {
-        15.0
-    };
-    let a = flexible_length(data, model) / 2.0;
-    let ay = sepika_core::rc_capacity::rc_alpha_y_sugano(pt_alpha_ratio, a / d, d_eff / d, n);
-    if ay.is_finite() && ay > 1e-6 {
-        ay.min(1.0)
-    } else {
-        DEFAULT_ALPHA_Y
+    let ec = model
+        .element_material(data)
+        .ok_or_else(|| {
+            sepika_core::error::CoreError::InvalidInput("RC梁のEc材料が未指定です".into())
+        })?
+        .young;
+    let es = model
+        .element_rebar_material(data)
+        .ok_or_else(|| {
+            sepika_core::error::CoreError::InvalidInput("RC梁のEs材料が未指定です".into())
+        })?
+        .young;
+    for (role, value) in [("Ec", ec), ("Es", es)] {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(sepika_core::error::CoreError::InvalidInput(format!(
+                "RC梁の{role}は正の有限値が必要です"
+            )));
+        }
     }
+    let n = es / ec;
+    let l = model.member_length(data)
+        - data.rigid_zone.rigid_length_i()
+        - data.rigid_zone.rigid_length_j();
+    sepika_core::rc_capacity::rc_alpha_y_sugano_checked(pt_alpha_ratio, l / (2.0 * d), d_eff / d, n)
+}
+
+pub(super) fn uses_rc_alpha_reference(data: &ElementData, model: &Model) -> bool {
+    !is_column_member(data, model)
+        && matches!(
+            model.element_section(data).and_then(|s| s.shape.as_ref()),
+            Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
+        )
+}
+
+pub(super) fn rc_reference_stiffness(data: &ElementData, model: &Model) -> Result<f64, String> {
+    use sepika_core::model::{EndCondition, RcBeamReference};
+    use sepika_core::section_shape::SectionShape;
+    if model.member_rc_beam_reference(data.id) != Some(RcBeamReference::AntisymmetricHalfMember) {
+        return Err(
+            "RC梁の逆対称・同一半部材の基準分布が未指定です。実応力確認とは別の明示選択が必要です"
+                .into(),
+        );
+    }
+    let Some(SectionShape::RcBeamRect { b, d, rebar }) =
+        model.element_section(data).and_then(|s| s.shape.as_ref())
+    else {
+        return Err("矩形RC梁の一様断面が必要です".into());
+    };
+    if rebar.top != rebar.bottom {
+        return Err("逆対称基準には上下引張側が同じ配筋の両半部材が必要です".into());
+    }
+    if data
+        .end_cond
+        .iter()
+        .any(|end| !matches!(end, EndCondition::Fixed))
+    {
+        return Err("逆対称RC基準の対象曲げ面に端部解放を設定できません".into());
+    }
+    if model
+        .member_detail(data.id)
+        .is_some_and(|detail| detail.haunch_i.is_some() || detail.haunch_j.is_some())
+    {
+        return Err("逆対称RC基準はハンチのない同一一様半部材に限定します".into());
+    }
+    if [
+        data.rigid_zone.length_i,
+        data.rigid_zone.length_j,
+        data.rigid_zone.panel_offset_i,
+        data.rigid_zone.panel_offset_j,
+    ]
+    .iter()
+    .any(|value| !value.is_finite() || *value < 0.0)
+    {
+        return Err("剛域長・パネルオフセットは非負の有限値が必要です".into());
+    }
+    let l = model.member_length(data)
+        - data.rigid_zone.rigid_length_i()
+        - data.rigid_zone.rigid_length_j();
+    if !l.is_finite() || l <= 0.0 {
+        return Err("剛域控除後の柔部材長Lは正の有限値が必要です。全長へ代用しません".into());
+    }
+    let beam = crate::frame::beam::BeamElement::try_new(data, model)?;
+    let i0 = b * d.powi(3) / 12.0;
+    if !beam.iz.is_finite() || (beam.iz - i0).abs() > i0.abs() * 1e-10 {
+        return Err(
+            "対象曲げ軸の弾性梁Iと矩形コンクリート幾何I0が一致しません。付帯断面の代用は行いません"
+                .into(),
+        );
+    }
+    sepika_core::rc_beam_backbone::RcBeamMomentDiagram::Antisymmetric {
+        flexible_length_mm: l,
+        identical_halves: true,
+    }
+    .initial_stiffness(beam.e * beam.iz)
+    .map_err(|error| error.to_string())
+}
+
+fn rc_reference_crack_moment(data: &ElementData, model: &Model) -> Result<f64, String> {
+    let Some(sepika_core::section_shape::SectionShape::RcBeamRect { b, d, .. }) = model
+        .element_section(data)
+        .and_then(|section| section.shape.as_ref())
+    else {
+        return Err("矩形RC梁の幾何断面が必要です".into());
+    };
+    let fc = model
+        .element_material(data)
+        .and_then(|material| material.fc)
+        .ok_or_else(|| "RC梁のFcが必要です".to_string())?;
+    // αy、My、I0と同じ矩形幾何を使用する。独立のSection.depthへ切り替えない。
+    let mc = sepika_core::rc_capacity::rc_crack_moment(fc, b * d.powi(2) / 6.0);
+    if !mc.is_finite() || mc <= 0.0 {
+        return Err("RC梁の幾何断面によるMcは正の有限値が必要です".into());
+    }
+    Ok(mc)
+}
+
+pub(super) fn rc_reference_target_issue(data: &ElementData, model: &Model) -> Option<String> {
+    if model.member_rc_beam_reference(data.id).is_some()
+        && (!uses_rc_alpha_reference(data, model)
+            || !super::hinge_view::resolves_to_concentrated_spring(data, model))
+    {
+        return Some(
+            "指定RC梁基準は矩形RC梁の材端集中ばね専用です。現在の要素・断面・応力評価方式では使用できません".into(),
+        );
+    }
+    None
+}
+
+pub(super) fn rc_reference_issue(
+    data: &ElementData,
+    model: &Model,
+    rule: HysteresisModel,
+    basis: StrengthBasis,
+) -> Option<String> {
+    if let Some(issue) = rc_reference_target_issue(data, model) {
+        return Some(issue);
+    }
+    if !uses_rc_alpha_reference(data, model)
+        || !super::hinge_view::resolves_to_concentrated_spring(data, model)
+    {
+        return None;
+    }
+
+    let adopted = matches!(
+        rule,
+        HysteresisModel::Takeda | HysteresisModel::Retrograde | HysteresisModel::MaxPointOriented
+    );
+    if rule == HysteresisModel::OriginOriented {
+        return Some(
+            "原点指向型は初期K0とひび割れ点を持たないため採用RC梁αyの総角接続に未対応です".into(),
+        );
+    }
+    if !adopted {
+        if model.member_rc_beam_reference(data.id).is_some() {
+            return Some(
+                "指定履歴則は採用RC梁αy基準接続の対象外です（武田型・逆行型・最大点指向型のみ）"
+                    .into(),
+            );
+        }
+        if !matches!(
+            rule,
+            HysteresisModel::Standard
+                | HysteresisModel::TsujiYamada
+                | HysteresisModel::SteelBuckling
+        ) {
+            return Some(format!(
+                "{}は集中RC梁の採用αy基準接続に未対応です。武田型へ代用しません",
+                rule.label()
+            ));
+        }
+        return None;
+    }
+    let s = match rc_reference_stiffness(data, model) {
+        Ok(s) => s,
+        Err(error) => return Some(error),
+    };
+    let alpha = match flexural_alpha_y_checked(data, model) {
+        Ok(alpha) => alpha,
+        Err(error) => return Some(error.to_string()),
+    };
+    let my = flexural_yield_moment(data, model, basis);
+    let mc = match rc_reference_crack_moment(data, model) {
+        Ok(mc) => mc,
+        Err(error) => return Some(error),
+    };
+    let result = match sepika_core::rc_beam_backbone::rc_beam_yield_evaluation(my, alpha, s) {
+        Ok(result) => result,
+        Err(error) => return Some(error.to_string()),
+    };
+    if let Err(error) = result.additional_flexibility {
+        return Some(error.to_string());
+    }
+    if let Err(error) = sepika_core::rc_beam_backbone::rc_beam_second_slope(
+        mc,
+        my,
+        mc / s,
+        result.total_rotation_rad,
+    ) {
+        return Some(error.to_string());
+    }
+    None
 }
 
 /// 材端曲げバネの骨格種別。N-M 相関時の折れ点の置換規則を決める。
@@ -352,7 +538,20 @@ pub(super) fn build_flexural_springs(
     Box<dyn UniaxialMaterial>,
     FlexuralSpringBackbone,
 ) {
-    let (k_rot, my) = rotational_spring_params(data, model, basis);
+    let (mut k_rot, my) = rotational_spring_params(data, model, basis);
+    let rc_reference = uses_rc_alpha_reference(data, model)
+        && matches!(
+            rule,
+            HysteresisModel::Takeda
+                | HysteresisModel::Retrograde
+                | HysteresisModel::MaxPointOriented
+        );
+    if rc_reference {
+        if let Some(issue) = rc_reference_issue(data, model, rule, basis) {
+            panic!("{issue}");
+        }
+        k_rot = rc_reference_stiffness(data, model).expect("RC基準剛性の入力診断が必要です");
+    }
     if my <= 0.0 || k_rot <= 0.0 || rule == HysteresisModel::Standard {
         let my = my.max(1.0);
         let backbone = FlexuralSpringBackbone {
@@ -395,10 +594,35 @@ pub(super) fn build_flexural_springs(
         };
         return (mk(), mk(), backbone);
     }
-    let mc = crack_moment(data, model, my);
-    let tc = (mc / k_rot).max(1e-9);
+    let mc = if rc_reference {
+        rc_reference_crack_moment(data, model).expect("RC幾何Mcの入力診断が必要です")
+    } else {
+        crack_moment(data, model, my)
+    };
+    let tc = if rc_reference {
+        mc / k_rot
+    } else {
+        (mc / k_rot).max(1e-9)
+    };
     let alpha_y = flexural_alpha_y(data, model);
-    let ty = (my / (alpha_y * k_rot)).max(tc * 1.5);
+    let ty = if rc_reference {
+        let evaluation =
+            sepika_core::rc_beam_backbone::rc_beam_yield_evaluation(my, alpha_y, k_rot)
+                .expect("RC降伏角の入力診断が必要です");
+        evaluation
+            .additional_flexibility
+            .expect("RC受動接続の入力診断が必要です");
+        sepika_core::rc_beam_backbone::rc_beam_second_slope(
+            mc,
+            my,
+            tc,
+            evaluation.total_rotation_rad,
+        )
+        .expect("RC折れ点の入力診断が必要です");
+        evaluation.total_rotation_rad
+    } else {
+        (my / (alpha_y * k_rot)).max(tc * 1.5)
+    };
     let mu = 1.1 * my;
     let tu = ty * 4.0;
     let alpha = 0.4;

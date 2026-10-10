@@ -13,6 +13,7 @@ pub mod load_combo;
 pub mod material_grade;
 pub mod model;
 pub mod panel_zone;
+pub mod rc_beam_backbone;
 pub mod rc_capacity;
 pub mod rc_rebar_geom;
 pub mod rc_wall_capacity;

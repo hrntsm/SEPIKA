@@ -71,6 +71,7 @@
 | レポート | 対象 | 状態 |
 | [標準強度_Issue520_2026-10.md](標準強度_Issue520_2026-10.md) | 標準2.0.2強度の元省略・優先解決・径別/部位別・編集/保存/出力 | 🔶（独立強度Verification、最終GUI/影響範囲/CI確認中） |
 |---|---|---|
+| [RC梁αyと追加端ばね_Issue523_2026-10.md](RC梁αyと追加端ばね_Issue523_2026-10.md) | 採用分岐、T方向別数値、総角と追加角、明示基準の実factory・GUI・解析入口 | 🔶（Scope内Verification。原典完全照合・実験Validation・T全解析接続は未完） |
 | [地震力標準式と適用診断_Issue486_2026-10.md](地震力標準式と適用診断_Issue486_2026-10.md) | 標準地震力・Qud/増分標準接続・共通GL/入力/適用診断・GUI/MCP入口と失敗理由 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |
 | [原階所属_Issue497_2026-10.md](原階所属_Issue497_2026-10.md) | 原階保存・編集・Fc供給・公開fixture意味的往復・採用2.0.2全XML schema・GUI/MCP入力世代 | ✅（原階/節点Scope。全構造モデルの標準出力は#507/#550に残る） |
 | [参照骨格の部材角単位_Issue436_2026-10.md](参照骨格の部材角単位_Issue436_2026-10.md) | 正側参考骨格のQ/Ks・明示s/z・不正/未対応拒否・利用側比較 | 🔶（単位契約Verification済み、モデル一般精度・全履歴・実験未） |
@@ -96,6 +97,7 @@
 | [非線形モデル_参照実装照合.md](非線形モデル_参照実装照合.md) | 05 非線形モデル | 🔶 | 免震 UI・分割ロジック等 |
 | [終局検定_参照実装照合.md](終局検定_参照実装照合.md) | 06 終局検定 | 🔶 | Vu・二軸曲げ等 |
 | [非線形動的解析_参照実装照合.md](非線形動的解析_参照実装照合.md) | 07 非線形動的 | 🔶 | UI/IO 経路整備 |
+| [梁型枠接触和集合_Issue451_2026-10.md](梁型枠接触和集合_Issue451_2026-10.md) | 水平一定矩形梁の左右別接触和集合・公開数量入口。実施工Validationは未実施 | 🔶 |
 | [数量積算_参照実装照合.md](数量積算_参照実装照合.md) | 数量積算 | 🔶 | モデル制約による C 節 |
 
 ### 原典・論文・資料照合
@@ -192,6 +194,7 @@
 | 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*`、`source_story_*`（[原階所属](原階所属_Issue497_2026-10.md)。MCP `model_edit` は原階所属・壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |
 | 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*` | P7 | 🔶 |
 | 26 | 数量積算（部位別のコンクリート・型枠・鉄筋・鉄骨・継手個所） | sepika-design-jp | quantity/{mod,member,rebar}.rs | `quantity::member::tests::*`（手計算照合）/`quantity::tests::*`（走査・分類）/`summary::tests::test_quantity_csv_from_sample_model`（CSV 一気通貫）/`test_quantity_takeoff_json_column`（MCP） | 横断 | 🔶 |
+| 26a | 梁型枠の床接触控除 | sepika-design-jp / sepika-app / sepika-mcp | quantity/contact.rs・tests.rs、tests/beam_contact_quantity.rs | [Issue451検証](梁型枠接触和集合_Issue451_2026-10.md)の独立期待値・診断・実入口対応表 | 横断 | 🔶（限定Verification、一般形状・実施工未検証） |
 | 27a | ST-Bridge標準強度と省略 | sepika-core / sepika-io / sepika-edit / sepika-app / sepika-mcp | model/strength.rs、stbridge/strength_tests.rs、app/tests.rs、tests.rs | [Issue520の直接回帰表](標準強度_Issue520_2026-10.md#独立期待値と入口) | 横断 | 🔶（最終確認中） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
 | 28 | 二次部材小梁の分配 Span 検定 | sepika-load / sepika-app | floor/joist_design.rs, check.rs | `distribution_loads_on_shared_joist_match_average_width` / `split_slab_edges_compose_onto_full_joist` / `span_attaches_to_nearest_joist_only` / `perimeter_parallel_joist_does_not_steal_beam_span` / `joist_distribution_cover_rejects_half_span` / `shared_joist_expects_both_slabs` / `missing_expected_slab_is_not_ready` / `zero_expected_axis_does_not_receive_spans` / `joist_design_checks_cover_imported_secondary_members` | 横断 | ☑ |
@@ -250,3 +253,5 @@
 並列計算（ケース並列バッチ・faer 内部並列）の速度比は
 `cargo run -p sepika-solver --example parallel_bench --release` で計測できる
 （ドキュメントサイト 5.10 並列計算に参考値を記載）。
+
+採用RC梁αyと総角・追加角の直接検証は [Issue #523](RC梁αyと追加端ばね_Issue523_2026-10.md) に記録する。

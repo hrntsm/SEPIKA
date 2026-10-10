@@ -10,7 +10,7 @@ use sepika_core::units::to_internal;
 use sepika_edit::{
     AddDamper, AddIsolator, AddMember, DeleteMember, DeleteWallPlate, EditCommand,
     RemoveSupportIsolator, SetDamperProps, SetElementSection, SetMemberHysteresis,
-    SetMemberHysteresisTh,
+    SetMemberHysteresisTh, SetMemberRcBeamReference,
 };
 use sepika_load::wall_expand::{self, WallExpansionIndex};
 use std::borrow::Cow;
@@ -357,6 +357,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
         pending_section,
         pending_hysteresis,
         pending_hysteresis_th,
+        pending_rc_reference,
         pending_delete,
         selected_member,
     ) = {
@@ -399,6 +400,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
         let mut pending_section: Vec<(ElemId, u32)> = Vec::new();
         let mut pending_hysteresis: Vec<(ElemId, HysteresisModel)> = Vec::new();
         let mut pending_hysteresis_th: Vec<(ElemId, Option<HysteresisModel>)> = Vec::new();
+        let mut pending_rc_reference = Vec::new();
         let mut pending_delete: Option<ElemId> = None;
         let mut selected_member: Option<ElemId> = None;
 
@@ -413,6 +415,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                 Col::name("材料"),
                 Col::text("履歴則(増分)"),
                 Col::text("履歴則(時刻歴)"),
+                Col::text("RC梁基準"),
                 Col::actions(),
             ],
             n,
@@ -594,6 +597,16 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                     });
                 });
                 row.col(|ui| {
+                    let enabled = generated_wall.is_none() && elem.kind == ElementKind::Beam && matches!(view.model.element_section(elem).and_then(|section| section.shape.as_ref()), Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. }));
+                    let current = app.core.model.member_rc_beam_reference(elem.id);
+                    ui.add_enabled_ui(enabled, |ui| {
+                        table_util::cell_combo(ui, format!("elem_rc_reference_{i}"), if current.is_some() { "逆対称・同一半部材の基準" } else { "未指定" }, |ui| {
+                            if ui.selectable_label(current.is_none(), "未指定").clicked() { pending_rc_reference.push((elem.id, None)); }
+                            if ui.selectable_label(current.is_some(), "逆対称・同一半部材の基準").clicked() { pending_rc_reference.push((elem.id, Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember))); }
+                        }).response.on_hover_text("一定せん断・逆対称曲げ・同一半部材の基準骨格を選択します。実応力分布への適合を確認済みという意味ではありません。矩形RC梁の武田型・逆行型・最大点指向型に限定します。");
+                    });
+                });
+                row.col(|ui| {
                     let delete_hover = if generated_wall.is_some() {
                         "壁版由来の耐震壁を削除します（対応する壁版も削除されます）"
                     } else {
@@ -611,6 +624,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
             pending_section,
             pending_hysteresis,
             pending_hysteresis_th,
+            pending_rc_reference,
             pending_delete,
             selected_member,
         )
@@ -663,6 +677,12 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                 elem: elem_id,
                 rule_th,
             }),
+        );
+    }
+    for (elem, reference) in pending_rc_reference {
+        app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(SetMemberRcBeamReference { elem, reference }),
         );
     }
     if let Some(elem_id) = pending_delete {
