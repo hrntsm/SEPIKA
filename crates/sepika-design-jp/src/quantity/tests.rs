@@ -383,7 +383,7 @@ fn test_girder_formwork_slab_deduction() {
     model.nodes.push(node(5, 6_000.0, 5_000.0, 3_500.0));
     model.nodes.push(node(6, 0.0, -5_000.0, 3_500.0));
     model.nodes.push(node(7, 6_000.0, -5_000.0, 3_500.0));
-    for (a, b) in [(5u32, 4u32), (6u32, 7u32)] {
+    for (a, b) in [(5u32, 4u32), (7u32, 6u32)] {
         model.add_enclosed_slab_from_nodes(
             &[NodeId(2), NodeId(3), NodeId(a), NodeId(b)],
             SlabPlate {
@@ -1301,5 +1301,305 @@ fn circular_rc_post_missing_endpoint_nodes_keeps_existing_exclusion() {
             .unwrap()
             .items
             .is_empty()
+    );
+}
+
+fn contact_model() -> Model {
+    let mut section = with_rc_materials(
+        SectionShape::RcBeamRect {
+            b: 300.0,
+            d: 600.0,
+            rebar: rc_beam_rebar(),
+        }
+        .to_section(SectionId(0), "G451".into()),
+    );
+    section.frame_use = Some(FrameSectionUse::Girder);
+    Model {
+        nodes: vec![node(0, 0.0, 0.0, 3000.0), node(1, 6000.0, 0.0, 3000.0)],
+        elements: vec![line_elem(0, 0, 1, 0)],
+        sections: vec![section],
+        materials: vec![rc_material(0), rebar_material(1)],
+        ..Default::default()
+    }
+}
+
+fn contact_slab(model: &mut Model, span: [f64; 2], side: f64, t: f64, top: f64) {
+    let sec = SectionId(model.sections.len() as u32);
+    let mut section = SectionShape::RcSlab { thickness: t }.to_section(sec, "床".into());
+    section.material = Some(MaterialId(0));
+    model.sections.push(section);
+    let n = model.nodes.len() as u32;
+    for (i, (x, y)) in [
+        (span[0], 0.0),
+        (span[1], 0.0),
+        (span[1], side * 2000.0),
+        (span[0], side * 2000.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        model.nodes.push(node(n + i as u32, x, y, top));
+    }
+    model.add_enclosed_slab_from_nodes(
+        &[NodeId(n), NodeId(n + 1), NodeId(n + 2), NodeId(n + 3)],
+        SlabPlate {
+            section: Some(sec),
+            ..Default::default()
+        },
+    );
+}
+
+fn contact_formwork(model: &Model) -> f64 {
+    try_compute_quantity_takeoff(model, &QuantityCfg::default())
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|i| i.elem == Some(ElemId(0)))
+        .unwrap()
+        .formwork_m2
+}
+
+#[test]
+fn beam_contact_union_independent_rectangles_and_invariances() {
+    for (slabs, expected) in [
+        (vec![], 9.0),
+        (vec![(1.0, 150.0, 6000.0), (-1.0, 100.0, 6000.0)], 7.5),
+        (vec![(1.0, 150.0, 6000.0)], 8.1),
+        (vec![(1.0, 100.0, 6000.0), (1.0, 150.0, 6000.0)], 8.1),
+        (vec![(1.0, 150.0, 3000.0)], 8.55),
+        (vec![(1.0, 150.0, 3000.0), (1.0, 100.0, 3000.0)], 8.55),
+    ] {
+        for reflected in [1.0, -1.0] {
+            let mut model = contact_model();
+            for &(side, t, end) in &slabs {
+                contact_slab(&mut model, [0.0, end], side * reflected, t, 3000.0);
+            }
+            assert!((contact_formwork(&model) - expected).abs() <= 1e-9);
+            model.slabs.reverse();
+            model.floor_assignment_regions.regions.reverse();
+            assert!((contact_formwork(&model) - expected).abs() <= 1e-9);
+            model.elements[0].nodes.reverse();
+            assert!((contact_formwork(&model) - expected).abs() <= 1e-9);
+            model.slab_thickness = 0.0;
+            assert!((contact_formwork(&model) - expected).abs() <= 1e-9);
+        }
+    }
+}
+
+#[test]
+fn beam_contact_height_intersection_opening_gap_and_clear_span() {
+    for (top, t, expected) in [
+        (3100.0, 150.0, 8.7),
+        (2400.0, 150.0, 9.0),
+        (2300.0, 150.0, 9.0),
+        (3500.0, 150.0, 9.0),
+        (3000.0, 900.0, 5.4),
+    ] {
+        let mut model = contact_model();
+        contact_slab(&mut model, [0.0, 6000.0], 1.0, t, top);
+        assert!(
+            (contact_formwork(&model) - expected).abs() <= 1e-9,
+            "top={top}"
+        );
+    }
+    let mut model = contact_model();
+    contact_slab(&mut model, [0.0, 2000.0], 1.0, 150.0, 3000.0);
+    contact_slab(&mut model, [4000.0, 6000.0], 1.0, 150.0, 3000.0);
+    assert!((contact_formwork(&model) - 8.4).abs() <= 1e-9);
+    let mut model = contact_model();
+    contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
+    model.elements[0].rigid_zone.face_i = Some(500.0);
+    model.elements[0].rigid_zone.face_j = Some(1000.0);
+    assert!((contact_formwork(&model) - 6.375).abs() <= 1e-9);
+    model.elements[0].nodes.reverse();
+    model.elements[0].rigid_zone.face_i = Some(1000.0);
+    model.elements[0].rigid_zone.face_j = Some(500.0);
+    assert!((contact_formwork(&model) - 6.375).abs() <= 1e-9);
+}
+
+#[test]
+fn beam_contact_rejects_unknown_invalid_and_unsupported_inputs() {
+    use sepika_core::model::PlateAssignment;
+    let mut base = contact_model();
+    contact_slab(&mut base, [0.0, 3000.0], 1.0, 150.0, 3000.0);
+    for t in [-1.0, 0.0, f64::NAN, f64::INFINITY] {
+        let mut model = base.clone();
+        model.sections[1].thickness = Some(t);
+        let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+        assert!(reason.contains("実厚"), "{reason}");
+    }
+    for assignment in [PlateAssignment::Unset, PlateAssignment::Plate(SlabId(999))] {
+        let mut model = base.clone();
+        model.floor_assignment_regions.regions[0].assignment = assignment;
+        assert!(try_compute_quantity_takeoff(&model, &QuantityCfg::default()).is_err());
+    }
+    let mut model = base.clone();
+    model.slabs.clear();
+    model.floor_assignment_regions.regions[0].assignment = PlateAssignment::NoPlate;
+    assert!((contact_formwork(&model) - 9.0).abs() <= 1e-9);
+    let mut model = base.clone();
+    model.slabs[0].plate.section = Some(SectionId(999));
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("断面")
+    );
+    let mut model = base.clone();
+    model.floor_assignment_regions.regions[0].boundary[0].support =
+        sepika_core::model::SupportMemberId::Primary(ElemId(999));
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("支持材")
+    );
+    let mut model = base.clone();
+    model.nodes[1].coord[2] += 100.0;
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("傾斜梁")
+    );
+    let mut model = base.clone();
+    model.sections[0].shape = None;
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("矩形")
+    );
+    let mut model = contact_model();
+    let sec = SectionId(1);
+    model
+        .sections
+        .push(SectionShape::RcSlab { thickness: 150.0 }.to_section(sec, "床".into()));
+    for (i, (x, y)) in [(0.0, 0.0), (3000.0, 2000.0), (0.0, 2000.0), (3000.0, 0.0)]
+        .into_iter()
+        .enumerate()
+    {
+        model.nodes.push(node(i as u32 + 2, x, y, 3000.0));
+    }
+    model.add_enclosed_slab_from_nodes(
+        &[NodeId(2), NodeId(3), NodeId(4), NodeId(5)],
+        SlabPlate {
+            section: Some(sec),
+            ..Default::default()
+        },
+    );
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("自己交差")
+    );
+}
+
+#[test]
+fn beam_contact_direct_support_span_secondary_and_vertical_union() {
+    use sepika_core::ids::SecondaryMemberId;
+    use sepika_core::model::{SecondaryMemberEnds, SupportMemberId};
+    let mut model = contact_model();
+    contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
+    model.floor_assignment_regions.regions[0].boundary[0].support =
+        SupportMemberId::Primary(ElemId(0));
+    model.floor_assignment_regions.regions[0].boundary[0].span = [0.0, 0.5];
+    assert!((contact_formwork(&model) - 8.55).abs() <= 1e-9);
+    model.elements[0].nodes.reverse();
+    model.floor_assignment_regions.regions[0].boundary[0].span = [1.0, 0.5];
+    assert!((contact_formwork(&model) - 8.55).abs() <= 1e-9);
+    let mut model = contact_model();
+    contact_slab(&mut model, [0.0, 6000.0], 1.0, 100.0, 3000.0);
+    contact_slab(&mut model, [0.0, 6000.0], 1.0, 100.0, 2700.0);
+    assert!((contact_formwork(&model) - 7.8).abs() <= 1e-9);
+    let mut model = contact_model();
+    model.elements.clear();
+    model.unassigned_beams.push(SecondaryMember {
+        id: SecondaryMemberId(451),
+        kind: SecondaryMemberKind::Beam,
+        ends: SecondaryMemberEnds::Detached([[0.0, 0.0, 3000.0], [6000.0, 0.0, 3000.0]]),
+        section: Some(SectionId(0)),
+        name: "二次小梁451".into(),
+        gravity_end_shares: None,
+    });
+    contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+    let beam = q.items.iter().find(|i| i.label == "二次小梁451").unwrap();
+    assert!((beam.formwork_m2 - 8.55).abs() <= 1e-9);
+    let mut foundation = rc_portal_model();
+    contact_slab(&mut foundation, [0.0, 6000.0], 1.0, 150.0, 0.0);
+    assert!(
+        try_compute_quantity_takeoff(&foundation, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("基礎梁")
+    );
+    let mut model = contact_model();
+    contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3000.0);
+    let mut detail = sepika_core::model::MemberDetailAttr::new(ElemId(0));
+    detail.haunch_i = Some(sepika_core::model::Haunch {
+        length: 1000.0,
+        depth_increase: 100.0,
+        width_increase: 0.0,
+    });
+    model.member_detail_attrs.push(detail);
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("ハンチ")
+    );
+}
+
+#[test]
+fn beam_contact_uses_shared_mm_tolerance_and_ignores_unrelated_slope() {
+    for (offset, expected) in [(9.0, 8.1), (11.0, 9.0)] {
+        let mut model = contact_model();
+        contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3000.0);
+        for node in &mut model.nodes[2..] {
+            node.coord[1] += offset;
+        }
+        assert!((contact_formwork(&model) - expected).abs() <= 1e-9);
+    }
+    let mut model = contact_model();
+    contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3500.0);
+    model.nodes[4].coord[2] += 100.0;
+    assert!((contact_formwork(&model) - 9.0).abs() <= 1e-9);
+    model.nodes[2].coord[2] = 3000.0;
+    model.nodes[3].coord[2] = 3000.0;
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("傾斜床")
+    );
+}
+
+#[test]
+fn beam_contact_non_nodal_secondary_is_unavailable_materialized_is_counted_once() {
+    use sepika_core::ids::SecondaryMemberId;
+    use sepika_core::model::SecondaryMemberEnds;
+    let mut model = contact_model();
+    model.unassigned_beams.push(SecondaryMember {
+        id: SecondaryMemberId(451),
+        kind: SecondaryMemberKind::Beam,
+        ends: SecondaryMemberEnds::Detached([[0.0, 0.0, 3000.0], [6000.0, 0.0, 3000.0]]),
+        section: Some(SectionId(0)),
+        name: "二次小梁451".into(),
+        gravity_end_shares: None,
+    });
+    contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+    assert!(!q.items.iter().any(|i| i.label == "二次小梁451"));
+    assert!((contact_formwork(&model) - 8.55).abs() <= 1e-9);
+    let mut model = contact_model();
+    model.elements.clear();
+    model.nodes.clear();
+    model.unassigned_beams.push(SecondaryMember {
+        id: SecondaryMemberId(451),
+        kind: SecondaryMemberKind::Beam,
+        ends: SecondaryMemberEnds::Detached([[0.0, 0.0, 3000.0], [6000.0, 0.0, 3000.0]]),
+        section: Some(SectionId(0)),
+        name: "二次小梁451".into(),
+        gravity_end_shares: None,
+    });
+    contact_slab(&mut model, [1000.0, 3000.0], 1.0, 150.0, 3000.0);
+    let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+    assert!(
+        reason.contains("SecondaryMemberId(451)") && reason.contains("実節点"),
+        "{reason}"
     );
 }
