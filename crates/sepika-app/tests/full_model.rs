@@ -1,4 +1,4 @@
-//! 実建物モデル（ST-Bridge）を読み込み、全解析を通す統合テスト。
+//! 実建物モデル（ST-Bridge）の対応解析と入力診断、および鋼構造サンプルの非線形解析の統合テスト。
 //!
 //! # 目的
 //!
@@ -6,7 +6,8 @@
 //! 対象としており、実建物特有の構成（剛床・二次部材・混構造・多数のスラブ）が
 //! 揃って初めて現れる不具合を検出できない。本テストは実際の設計モデルを 1 つ
 //! フィクスチャとして固定し、GUI のボタンが呼ぶのと同じ入口（`App` の
-//! `run_*` / `compute_*`）を通して全解析を実行する。
+//! `run_*` / `compute_*`）を通して実行する。スラブ協力付きRC梁の非線形解析は
+//! 必要情報不足を診断し、完走・収束は独立した既存の鋼構造サンプルで検証する。
 //!
 //! # モデル（`tests/fixtures/model.stb`）
 //!
@@ -289,6 +290,200 @@ fn analyzed() -> App {
     app.run_eigen(app.core.analysis_cfg.n_modes);
     assert_no_error(&app, "固有値解析");
     app
+}
+
+/// 既存鋼門型の断面・材料を使う床なし4層（各3500 mm）・1スパン6000 mmの独立fixture。
+/// 各層梁に既存の鉛直10 N/mm、各層両節点に水平20 kNを明示して与える。
+fn four_story_steel_portal() -> sepika_core::model::Model {
+    use sepika_core::ids::{ElemId, NodeId};
+    let base = sepika_app::sample::portal_frame();
+    let mut model = base.clone();
+    model.nodes.clear();
+    model.elements.clear();
+    model.load_cases[0].member.clear();
+    model.load_cases[1].nodal.clear();
+    for level in 0..=4u32 {
+        for side in 0..2u32 {
+            let mut node = base.nodes[if level == 0 { side } else { side + 2 } as usize].clone();
+            node.id = NodeId(2 * level + side);
+            node.coord[2] = 3500.0 * f64::from(level);
+            model.nodes.push(node);
+        }
+    }
+    for level in 0..4u32 {
+        for (offset, source) in base.elements.iter().enumerate() {
+            let mut element = source.clone();
+            element.id = ElemId(3 * level + offset as u32);
+            element.nodes = source
+                .nodes
+                .iter()
+                .map(|node| NodeId(node.0 + 2 * level))
+                .collect();
+            model.elements.push(element);
+        }
+        let mut gravity = base.load_cases[0].member[0].clone();
+        gravity.elem = ElemId(3 * level + 2);
+        model.load_cases[0].member.push(gravity);
+        for source in &base.load_cases[1].nodal {
+            let mut load = source.clone();
+            load.node = NodeId(source.node.0 + 2 * level);
+            model.load_cases[1].nodal.push(load);
+        }
+    }
+    model.validate().expect("4層鋼門型のモデル契約");
+    model
+}
+
+/// 元STBとは独立した、床を持たない鋼構造の非線形解析用モデル。
+fn prepared_steel_portal(four_story: bool) -> App {
+    let mut app = App::default();
+    app.core.analysis_cfg.threads = 1;
+    app.load_model(if four_story {
+        four_story_steel_portal()
+    } else {
+        sepika_app::sample::portal_frame()
+    });
+    app.generate_stories_action();
+    app.run_preparation();
+    assert_no_error(&app, "鋼構造サンプルの準備計算");
+    assert!(app.core.model.slabs.is_empty());
+    sepika_element::factory::ensure_nonlinear_input(&app.core.model)
+        .expect("鋼構造サンプルの非線形入力");
+    app
+}
+
+/// 床なし4層RC矩形。柱600角・梁400×700、D25主筋、Fc24/SD345を明示した独立fixture。
+fn prepared_rectangular_rc_portal() -> App {
+    use sepika_core::ids::{MaterialId, SectionId};
+    use sepika_core::model::{FrameSectionUse, Material, MaterialCategory};
+    use sepika_core::section_shape::{
+        BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
+    };
+    let mut model = four_story_steel_portal();
+    let shapes = [
+        SectionShape::RcColumnRect {
+            b: 600.0,
+            d: 600.0,
+            rebar: RcRectColumnRebar {
+                main_dia: 25.0,
+                x: vec![8],
+                y: vec![8],
+                cover: 40.0,
+                hoop: RectColumnHoop {
+                    dia: 10.0,
+                    pitch: 100.0,
+                    legs_x: 2,
+                    legs_y: 2,
+                },
+            },
+        },
+        SectionShape::RcBeamRect {
+            b: 400.0,
+            d: 700.0,
+            rebar: RcBeamRebar {
+                main_dia: 25.0,
+                top: vec![4],
+                bottom: vec![4],
+                cover: 40.0,
+                stirrup: BeamStirrup {
+                    dia: 10.0,
+                    pitch: 100.0,
+                    legs: 2,
+                },
+            },
+        },
+    ];
+    model.sections = shapes
+        .into_iter()
+        .enumerate()
+        .map(|(i, shape)| {
+            let mut sec = shape.to_section(SectionId(i as u32), format!("RC矩形{i}"));
+            sec.frame_use = Some(if i == 0 {
+                FrameSectionUse::Column
+            } else {
+                FrameSectionUse::Girder
+            });
+            sec.material = Some(MaterialId(0));
+            sec.rebar_material = Some(MaterialId(1));
+            sec.shear_rebar_material = Some(MaterialId(1));
+            sec
+        })
+        .collect();
+    model.materials = vec![
+        Material {
+            id: MaterialId(0),
+            name: "Fc24".into(),
+            category: MaterialCategory::Concrete,
+            young: 23000.0,
+            poisson: 0.2,
+            density: 2.4e-9,
+            shear: None,
+            fc: Some(24.0),
+            fy: None,
+            strength_factor: None,
+            concrete_class: Default::default(),
+        },
+        Material {
+            id: MaterialId(1),
+            name: "SD345".into(),
+            category: MaterialCategory::Rebar,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            shear: None,
+            fc: None,
+            fy: Some(345.0),
+            strength_factor: None,
+            concrete_class: Default::default(),
+        },
+    ];
+    let mut app = App::default();
+    app.core.analysis_cfg.threads = 1;
+    app.load_model(model);
+    app.generate_stories_action();
+    app.run_preparation();
+    assert_no_error(&app, "RC矩形準備");
+    sepika_element::factory::ensure_nonlinear_input(&app.core.model).expect("RC矩形入力");
+    app
+}
+
+fn assert_t_beam_diagnostic(app: &App) {
+    let error = app.core.scoped.last_error.as_deref().expect("T形入力診断");
+    for id in [40, 41, 48, 49, 56] {
+        assert!(
+            error.contains(&format!("部材 ID {id} はスラブ協力付きRC梁")),
+            "{error}"
+        );
+    }
+    assert!(error.contains("スラブ引張筋面積と正負別骨格"), "{error}");
+    assert!(
+        error.contains("矩形梁への代用は行わず解析を停止"),
+        "{error}"
+    );
+    assert!(error.contains("他 12 件"), "{error}");
+}
+
+#[test]
+fn imported_t_beams_stop_pushover_and_nonlinear_time_history() {
+    let mut app = prepared();
+    app.run_pushover();
+    assert_t_beam_diagnostic(&app);
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .is_none_or(|r| r.pushover.is_none()));
+    clear_error(&mut app);
+    app.core.analysis_cfg.th_nonlinear = true;
+    app.run_time_history_sample();
+    assert_t_beam_diagnostic(&app);
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .is_none_or(|r| r.time_history.is_none()));
 }
 
 /// 解析対象の梁要素（断面力が必ず得られる部材）の本数。
@@ -1131,10 +1326,14 @@ fn story_metrics_computed_for_every_layer() {
 
 // ===================== 9. 保有水平耐力・Ds・終局検定 =====================
 
-/// 保有水平耐力・Ds・部材ランク・RC 終局検定が算定される。
+/// 鋼構造サンプルの保有水平耐力・Ds・ランク、および元STBの静的結果によるRC終局検定。
 #[test]
-fn holding_capacity_and_ultimate_checks() {
-    let mut app = analyzed();
+fn steel_portal_holding_capacity_and_imported_rc_ultimate_checks() {
+    let mut app = prepared_steel_portal(true);
+    app.run_static_all();
+    assert_no_error(&app, "鋼構造サンプルの静的解析");
+    app.run_eigen(app.core.analysis_cfg.n_modes);
+    assert_no_error(&app, "鋼構造サンプルの固有値解析");
     app.run_pushover();
     assert_no_error(&app, "増分解析");
 
@@ -1162,6 +1361,23 @@ fn holding_capacity_and_ultimate_checks() {
         assert!(s.fes >= 1.0, "Fes が 1.0 未満: {}", s.fes);
     }
 
+    insta::assert_snapshot!(
+        "four_story_steel_portal_holding_capacity",
+        holding
+            .stories
+            .iter()
+            .enumerate()
+            .map(|(i, story)| format!(
+                "story[{i}].Qu={}\nstory[{i}].Qun={}\nstory[{i}].Ds={}\nstory[{i}].Fes={}",
+                sig4(story.qu),
+                sig4(story.qun),
+                sig4(story.ds),
+                sig4(story.fes),
+            ))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    let mut app = analyzed();
     let ultimate = app
         .compute_ultimate_checks()
         .expect("終局検定が算定できるはず");
@@ -1179,10 +1395,10 @@ fn holding_capacity_and_ultimate_checks() {
 
 // ===================== 10. 増分解析（プッシュオーバー） =====================
 
-/// 増分解析が終局まで進み、性能曲線・層せん断が力学的に整合する。
+/// 鋼構造サンプルの増分解析で性能曲線・層せん断が力学的に整合する。
 #[test]
 fn pushover_reaches_ultimate_state() {
-    let mut app = prepared();
+    let mut app = prepared_steel_portal(true);
     app.run_pushover();
     assert_no_error(&app, "増分解析");
 
@@ -1207,6 +1423,17 @@ fn pushover_reaches_ultimate_state() {
         push.qu
     );
 
+    insta::assert_snapshot!(
+        "four_story_steel_portal_pushover",
+        format!(
+            "steps={}\nQu={}\nmechanism={:?}\nhinges={}",
+            push.steps.len(),
+            sig4(push.qu),
+            push.mechanism,
+            push.hinges.len(),
+        )
+    );
+
     // 屋根変位は増分とともに単調増加する。
     let roof: Vec<f64> = push.capacity_curve.iter().map(|c| c.roof_disp).collect();
     assert!(
@@ -1221,6 +1448,8 @@ fn pushover_reaches_ultimate_state() {
         last.base_shear,
         push.qu
     );
+    assert_eq!(last.story_shear.len(), 4, "4層の層せん断");
+    assert!(last.story_shear.windows(2).next().is_some());
     // 層せん断はベースシアから始まり、上階へ向かって減少する（水平力の累積）。
     assert!(
         (last.story_shear[0] - last.base_shear).abs() <= last.base_shear.abs() * 1e-9,
@@ -1287,20 +1516,13 @@ fn time_history_linear_runs() {
     );
 }
 
-/// 長い波形でも、応答が減衰しきった末尾で偽の非収束を出さない。
+/// 鋼構造サンプルの120秒波形で、減衰末尾を含め非収束を生じない。
 ///
-/// 収束判定の基準ノルムは動的釣り合いの各項の最大を採るが、それだけでは応答が
-/// 減衰しきった時刻で 3 項すべてが床（1 N）を下回り、判定が到達不能な絶対値判定へ
-/// 化ける。継続時間 120 秒では 202 ステップがこれに当たっていた。解析中に観測した
-/// 力のスケールの最大値に対する下限を設けて解消したことを、既定の 10 秒では
-/// 現れない長さで固定する（`dev_docs/handoff/非線形時刻歴の収束_申し送り.md` 4.1）。
-///
-/// この不具合は長期荷重を載荷しない動的応答を対象に同定したもの。既定の長期荷重初期化を
-/// 有効にすると、この条件では強振動中に実非収束が生じ、本来の対象（減衰末尾の偽の非収束）に
-/// 別事象が混ざるため、本テストでは明示的に無効化する。
+/// 元STBで同定された収束不具合の条件はT形骨格未対応のため現在は完走検証できない。
+/// 有効な別モデルでも長期荷重初期化なし・dt=.05の長時間検証を維持する。
 #[test]
 fn time_history_nonlinear_long_duration_has_no_false_non_convergence() {
-    let mut app = prepared();
+    let mut app = prepared_steel_portal(false);
     app.core.analysis_cfg.th_dir = ThDir::X;
     app.core.analysis_cfg.th_nonlinear = true;
     app.core.analysis_cfg.th_apply_long_term = false;
@@ -1320,6 +1542,10 @@ fn time_history_nonlinear_long_duration_has_no_false_non_convergence() {
         .time_history
         .as_ref()
         .expect("時刻歴の結果");
+    assert!(th.nonlinear);
+    assert!(!th.applied_long_term);
+    assert!((th.time.last().unwrap() - 120.0).abs() < 1e-9);
+    assert!(th.peak_disp.iter().flatten().any(|v| v.abs() > 0.0));
     assert_eq!(
         th.non_converged_steps, 0,
         "減衰しきった末尾で偽の非収束が出ている"
@@ -1330,16 +1556,41 @@ fn time_history_nonlinear_long_duration_has_no_false_non_convergence() {
     );
 }
 
-/// 非線形時刻歴応答解析（サンプル波）が完走する。
-///
-/// かつては既定設定（サンプル波 dt=0.01・継続時間 10 秒・減衰 2%・Newmark-β）で
-/// step 50 の Newton 反復が収束せず落ちていた。原因は収束判定の基準ノルムで、
-/// 動的外力  だけを基準にしていたため、地動加速度がゼロを横切る時刻
-/// （サンプル波は周期 0.5 秒なので t=0.25・0.50…）で基準が消え、判定が
-/// 「残差 < 1e-6 N」という到達不能な絶対値判定に化けていた。
+/// 明示RC矩形フレームの減衰末尾で、ピーク力下限を欠く旧判定による偽非収束を検出する。
+#[test]
+fn rectangular_rc_decay_tail_has_no_false_non_convergence() {
+    let mut app = prepared_rectangular_rc_portal();
+    app.core.analysis_cfg.th_dir = ThDir::X;
+    app.core.analysis_cfg.th_nonlinear = true;
+    app.core.analysis_cfg.th_apply_long_term = false;
+    app.core.analysis_cfg.th_duration = 120.0;
+    app.core.analysis_cfg.th_dt = 0.05;
+    app.core.analysis_cfg.th_amp = 10000.0;
+    app.core.analysis_cfg.th_period = 1.0;
+    app.run_time_history_sample();
+    assert_no_error(&app, "RC矩形の減衰末尾回帰");
+    let th = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .time_history
+        .as_ref()
+        .unwrap();
+    assert!(th.nonlinear);
+    assert!(!th.applied_long_term);
+    assert_eq!(th.time.len(), 2401);
+    assert!((th.time.last().unwrap() - 120.0).abs() < 1e-9);
+    assert_eq!(th.non_converged_steps, 0, "減衰末尾で偽の非収束が出ている");
+    assert!(th.peak_disp.iter().flatten().all(|v| v.is_finite()));
+    assert!(th.peak_disp.iter().flatten().any(|v| v.abs() > 0.0));
+}
+
+/// 既存1層鋼サンプルの非線形時刻歴が長期荷重初期化を含め完走する。
 #[test]
 fn time_history_nonlinear_runs() {
-    let mut app = prepared();
+    let mut app = prepared_steel_portal(false);
     app.core.analysis_cfg.th_dir = ThDir::X;
     app.core.analysis_cfg.th_nonlinear = true;
     app.run_time_history_sample();
@@ -1354,6 +1605,15 @@ fn time_history_nonlinear_runs() {
         .time_history
         .as_ref()
         .expect("時刻歴の結果");
+    insta::assert_snapshot!(
+        "steel_portal_nonlinear_time_history",
+        format!(
+            "frames={}\npeak_ux={}\ndrift_angle={}",
+            th.time.len(),
+            sig4(th.peak_disp.iter().map(|d| d[0].abs()).fold(0.0, f64::max)),
+            sig4(th.story_drift_angle[0]),
+        )
+    );
     assert!(th.nonlinear, "非線形として記録される");
     assert!(
         th.applied_long_term,
@@ -2125,30 +2385,11 @@ fn snapshot_key_scalars() {
         line(&format!("metrics[{}].Re", m.name), sig4(m.re));
     }
 
-    // --- 増分解析・保有水平耐力 ---
     app.run_pushover();
+    assert_t_beam_diagnostic(&app);
+    assert!(app.core.scoped.results.as_ref().unwrap().pushover.is_none());
+    line("pushover.input", "T形梁の情報不足により停止".into());
     clear_error(&mut app);
-    let push = app
-        .core
-        .scoped
-        .results
-        .as_ref()
-        .expect("解析結果")
-        .pushover
-        .as_ref()
-        .expect("増分解析");
-    line("pushover.steps", push.steps.len().to_string());
-    line("pushover.Qu", sig4(push.qu));
-    line("pushover.mechanism", format!("{:?}", push.mechanism));
-    line("pushover.hinges", push.hinges.len().to_string());
-
-    let (holding, _) = app.compute_holding_capacity().expect("保有水平耐力");
-    for (i, s) in holding.stories.iter().enumerate() {
-        line(&format!("holding[{i}].Qu"), sig4(s.qu));
-        line(&format!("holding[{i}].Qun"), sig4(s.qun));
-        line(&format!("holding[{i}].Ds"), sig4(s.ds));
-        line(&format!("holding[{i}].Fes"), sig4(s.fes));
-    }
     line(
         "ultimate.checks",
         app.compute_ultimate_checks()
@@ -2180,27 +2421,21 @@ fn snapshot_key_scalars() {
         line(&format!("th.drift_angle[{i}]"), sig4(*a));
     }
 
-    // --- 時刻歴（非線形） ---
     app.core.analysis_cfg.th_nonlinear = true;
     app.run_time_history_sample();
-    clear_error(&mut app);
-    let th = app
-        .core
-        .scoped
-        .results
-        .as_ref()
-        .expect("解析結果")
-        .time_history
-        .as_ref()
-        .expect("時刻歴");
-    line("th_nl.frames", th.time.len().to_string());
-    line(
-        "th_nl.peak_ux",
-        sig4(th.peak_disp.iter().map(|d| d[0].abs()).fold(0.0, f64::max)),
+    assert_t_beam_diagnostic(&app);
+    assert!(
+        !app.core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .time_history
+            .as_ref()
+            .unwrap()
+            .nonlinear
     );
-    for (i, a) in th.story_drift_angle.iter().enumerate() {
-        line(&format!("th_nl.drift_angle[{i}]"), sig4(*a));
-    }
+    line("th_nl.input", "T形梁の情報不足により停止".into());
 
     insta::assert_snapshot!(out);
 }
