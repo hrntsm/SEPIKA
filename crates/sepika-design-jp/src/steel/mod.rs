@@ -19,6 +19,7 @@ mod brace;
 pub mod buckling;
 pub mod cold_formed;
 mod column;
+mod lip_channel;
 pub mod panel_zone;
 mod section;
 
@@ -185,6 +186,11 @@ impl DesignCheck for SteelDesign {
         mat: &Material,
         ctx: &DesignCtx,
     ) -> CheckOutcome {
+        if matches!(sec.shape, Some(SectionShape::SteelLipChannel { .. })) {
+            return CheckOutcome::Skipped {
+                reason: lip_channel::unsupported_reason(forces, sec, ctx),
+            };
+        }
         if matches!(ctx.kind, MemberKind::Girder | MemberKind::Column) {
             if let Some(shape @ SectionShape::SteelBox { corner_r, .. }) = sec.shape.as_ref() {
                 if let Err(error) = shape.validate_surface_radius() {
