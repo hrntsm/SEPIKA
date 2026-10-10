@@ -665,8 +665,10 @@ mod tests {
         use sepika_core::ids::MaterialId;
         use sepika_core::model::{FrameSectionUse, Material, MaterialCategory, PanelZoneMode};
         for manual in [false, true] {
-            let mut model = Model::default();
-            model.nodes = vec![node(0, 0.0, 0.0), node(1, 6000.0, 0.0), node(2, 0.0, 0.0)];
+            let mut model = Model {
+                nodes: vec![node(0, 0.0, 0.0), node(1, 6000.0, 0.0), node(2, 0.0, 0.0)],
+                ..Model::default()
+            };
             model.nodes[0].coord[2] = 3000.0;
             model.nodes[1].coord[2] = 3000.0;
             let h = SectionShape::SteelH {
