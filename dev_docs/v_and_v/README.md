@@ -70,6 +70,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [荷重状態と検定対象_Issue487_2026-10.md](荷重状態と検定対象_Issue487_2026-10.md) | 荷重状態・用途別P・選択重力参照・GUI/MCP・小梁床長期略算/選択短期未検定 | 🔶（Verification、現行法原文再取得・Validation未） |
 | [耐震壁_未検定_Issue495_2026-10.md](耐震壁_未検定_Issue495_2026-10.md) | 壁版候補・case・種別別未検定とスリット／自重対象外、不正入力、GUI・MCP・CSV・保存 | 🔶（状態契約のVerification。純鋼板国内式・実験Validationは未対応） |
 | [壁の確定ステップ応答_Issue443_2026-10.md](壁の確定ステップ応答_Issue443_2026-10.md) | 壁単体Qw/Qdir・基準点付き24成分F/M・実要素N/M・弦変形・確定履歴・GUI/MCP/CSV/保存・設計拒否 | ✅（Scope内Verification。材料γ・壁用イベント・系全体集計・実験Validationは未対応） |
 | [リップ溝形材_未検定_Issue509_2026-10.md](リップ溝形材_未検定_Issue509_2026-10.md) | 単一リップ材の3座屈分類、荷重/補剛状態と理由付き未検定、保存・GUI・CSV | 🔶（未検定契約のVerification。耐力式・実験照合は未対応） |
@@ -171,7 +172,7 @@
 | 10 | Ai分布 | sepika-load | ai.rs | `test_*` | P2 | ✅ |
 | 11 | 床荷重分割 | sepika-load | floor.rs | `test_*` | P2 | ✅ |
 | 11a | 壁・間柱の自重支持先 | sepika-load / sepika-app | wall_plate_load.rs / cascade.rs | `wall_plate_load::tests`・`vertical_post_uses_explicit_end_shares`・`明示負担率で密度直接集計とdl集計の階重量が一致する` | [検証記録](壁版の支持範囲判定_2026-09.md) | 🔶（実測照合は未実施） |
-| 12 | 荷重組合せ | sepika-load | combo.rs | `test_combinations` | P2 | ✅ |
+| 12 | 荷重組合せ・検定対象 | sepika-core / sepika-job / sepika-app / sepika-mcp | load_combo.rs、design_q0.rs、app/tests.rs、tests.rs | [荷重状態の検証対応](荷重状態と検定対象_Issue487_2026-10.md#直接検証の対応) | P2 | 🔶（原文再取得・Validation未） |
 | 13 | 許容応力度設計 | sepika-design-jp | allowable_stress.rs | `test_beam_check_bending_rect_section_hand_calc` 他 | P3 | ✅ |
 | 14 | 保有耐力 | sepika-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
 | 15 | プッシュオーバー | sepika-solver | pushover.rs | — | P5 | 🔶 |
