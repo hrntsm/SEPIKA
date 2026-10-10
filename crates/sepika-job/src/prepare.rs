@@ -130,29 +130,7 @@ fn prepare_work_model(
                 Err(reason) => {
                     panel_notices.push(format!("{reason}。パネルせん断変形をモデル化できません"))
                 }
-                Ok(Some(joint)) => {
-                    let beam_depths: Vec<_> = adjacency
-                        .elements_at(model, node.id)
-                        .filter(|e| {
-                            sepika_core::panel_zone::member_orientation(model, e)
-                                == Some(sepika_core::panel_zone::MemberOrientation::Beam)
-                                && sepika_core::panel_zone::is_horizontal_or_vertical_member(
-                                    model, e,
-                                )
-                        })
-                        .filter_map(|e| {
-                            model
-                                .element_section(e)
-                                .and_then(|section| {
-                                    sepika_core::panel_zone::beam_panel_depth(section).ok()
-                                })
-                                .map(|db| format!("梁 ID {} db={db} mm", e.id.0))
-                        })
-                        .collect();
-                    if beam_depths.len() > 1 {
-                        panel_notices.push(format!("接合部 ID {}: {}。最大 db={} mm は幾何集約です。複数db・左右梁位置・上下フランジ位置と標準形式への適用は未判定（#505）",node.id.0,beam_depths.join(" / "),joint.db));
-                    }
-                }
+                Ok(Some(_)) => {}
                 Ok(None) => {}
             }
         }
@@ -750,12 +728,13 @@ mod tests {
                 let report =
                     prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
                         .unwrap();
-                assert_eq!(report.panels[0].db, 580.0);
+                assert!(report.panels.is_empty());
                 assert!(report
                     .notices
                     .iter()
                     .any(|reason| reason.contains("db=480 mm")
-                        && reason.contains("標準形式への適用は未判定（#505）")));
+                        && reason.contains("上位置差=50 mm")
+                        && reason.contains("下位置差=-50 mm")));
             }
         }
     }

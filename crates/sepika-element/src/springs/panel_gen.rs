@@ -319,7 +319,11 @@ mod tests {
             nodes: smallvec::smallvec![NodeId(n0), NodeId(n1)],
             section: Some(SectionId(sec)),
             local_axis: LocalAxis {
-                ref_vector: [0.0, 1.0, 0.0],
+                ref_vector: if sec == 1 {
+                    [0.0, 1.0, 0.0]
+                } else {
+                    [0.0, 0.0, 1.0]
+                },
             },
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
@@ -606,7 +610,11 @@ mod tests {
             story: None,
             support_spring: None,
         });
-        model.elements.push(member(2, 0, 3, 0));
+        let mut brace_section = model.sections[0].clone();
+        brace_section.id = SectionId(2);
+        brace_section.frame_use = Some(FrameSectionUse::Brace);
+        model.sections.push(brace_section);
+        model.elements.push(member(2, 0, 3, 2));
 
         apply_auto_panel_zones(&mut model);
 
@@ -807,5 +815,40 @@ mod tests {
         assert_eq!(manual.db, 575.0);
         assert_eq!(manual.ve, 2_833_025.0);
         assert!((manual.k_panel - 223_373_125_000.0).abs() < 1.0);
+    }
+    #[test]
+    fn panel_505_old_panel_is_rejected_and_regeneration_removes_offsets() {
+        let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
+        apply_auto_panel_zones(&mut model);
+        let old = model.elements.last().unwrap().clone();
+        let mut other = model.sections[0].clone();
+        other.id = SectionId(2);
+        other.shape = Some(h_shape(500.0, 200.0, 11.0, 17.0));
+        model.sections.push(other);
+        let mut far = model.nodes[1].clone();
+        far.id = NodeId(3);
+        far.coord[0] = -6000.0;
+        model.nodes.push(far);
+        let id = model.elements.len() as u32;
+        model.elements.push(member(id, 3, 0, 2));
+        let reason = resolve_panel_joint(&model, NodeId(0), &model.elements).unwrap_err();
+        assert!(reason.contains("上位置差=50 mm"));
+        assert!(model.validate().unwrap_err().to_string().contains(&reason));
+        for panel in [
+            crate::springs::panel::PanelZone::new(&old, &model),
+            crate::springs::panel::PanelZone::new_nonlinear(&old, &model),
+        ] {
+            assert_eq!(panel.resolution_error, Some(reason.clone()));
+        }
+        assert!(apply_auto_panel_zones(&mut model).is_empty());
+        assert!(!model
+            .elements
+            .iter()
+            .any(|e| e.kind == ElementKind::PanelZone));
+        assert!(model
+            .elements
+            .iter()
+            .all(|e| e.rigid_zone.panel_offset_i == 0.0 && e.rigid_zone.panel_offset_j == 0.0));
+        model.validate().unwrap();
     }
 }

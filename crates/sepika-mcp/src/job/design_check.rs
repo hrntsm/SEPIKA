@@ -347,4 +347,42 @@ mod tests {
         assert!(empty["max_ratio"].is_null());
         assert_eq!(empty["all_checked_and_ok"], false);
     }
+    #[test]
+    fn panel_505_mcp_summary_retains_skipped_plane_and_denies_all_ok() {
+        let report = sepika_design_jp::MemberDesignCheckReport {
+            joint_checks: vec![
+                (
+                    NodeId(0),
+                    "パネルゾーン(S) X-Z".into(),
+                    CheckOutcome::Skipped {
+                        reason: "接合部 ID 0 梁 db=580/480 上位置差=50 下位置差=-50 段違い".into(),
+                    },
+                ),
+                (
+                    NodeId(0),
+                    "パネルゾーン(S) Y-Z".into(),
+                    CheckOutcome::Checked(CheckResult {
+                        basis: "標準形式".into(),
+                        detail: String::new(),
+                        components: vec![CheckComponent {
+                            kind: CheckKind::Shear,
+                            ratio: 0.5,
+                            detail: String::new(),
+                        }],
+                    }),
+                ),
+            ],
+            ..Default::default()
+        };
+        let summary = assemble_design_check_summary(&report, Some(0), LoadTerm::Short, false, 0);
+        assert_eq!(summary["all_checked_and_ok"], false);
+        assert_eq!(summary["n_joint_checks"], 2);
+        assert_eq!(summary["n_joint_skipped"], 1);
+        assert_eq!(summary["n_joint_ng"], 0);
+        assert_eq!(summary["max_ratio"], 0.5);
+        assert!(summary["joint_skipped"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("上位置差=50"));
+    }
 }

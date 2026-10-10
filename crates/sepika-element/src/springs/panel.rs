@@ -727,7 +727,11 @@ mod tests {
             nodes: smallvec::smallvec![NodeId(n0), NodeId(n1)],
             section: Some(SectionId(sec)),
             local_axis: LocalAxis {
-                ref_vector: [0.0, 1.0, 0.0],
+                ref_vector: if sec == 0 {
+                    [0.0, 0.0, 1.0]
+                } else {
+                    [0.0, 1.0, 0.0]
+                },
             },
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,

@@ -156,6 +156,18 @@ fn max_ratio_by_node<I: IntoIterator<Item = (NodeId, Option<(f64, bool)>)>>(
     max_ratio_by_key(items)
 }
 
+/// 面別に検定不能を含む節点。適合色の最大値へ集約しない。
+fn incomplete_joint_nodes<'a>(
+    items: impl IntoIterator<Item = (NodeId, &'a CheckOutcome)>,
+) -> std::collections::HashSet<NodeId> {
+    items
+        .into_iter()
+        .filter_map(|(node, outcome)| {
+            matches!(outcome, CheckOutcome::Skipped { .. }).then_some(node)
+        })
+        .collect()
+}
+
 /// 部材中点に数値ラベルを描くかを判定する（純粋関数）。
 ///
 /// 既定（`label_all == false`）では注意域以上（検定比 ≥ [`LABEL_MIN_RATIO`]）
@@ -427,6 +439,8 @@ pub(super) fn draw_check_ratio(
             .iter()
             .map(|p| (m.elem, ratio_for_filter(&p.outcome, filter)))
     }));
+    let incomplete_nodes =
+        incomplete_joint_nodes(results.joint_checks.iter().map(|j| (j.node, &j.outcome)));
     let node_ratios = max_ratio_by_node(
         results
             .joint_checks
@@ -550,6 +564,31 @@ pub(super) fn draw_check_ratio(
     }
 
     for (idx, node) in app.core.model.nodes.iter().enumerate() {
+        if incomplete_nodes.contains(&node.id) {
+            if idx < pts.len() && frame_filter.shows_node(idx) {
+                let p = pts[idx];
+                let r = NODE_MARKER_RADIUS;
+                let diamond = vec![
+                    egui::pos2(p.x, p.y - r),
+                    egui::pos2(p.x + r, p.y),
+                    egui::pos2(p.x, p.y + r),
+                    egui::pos2(p.x - r, p.y),
+                ];
+                painter.add(egui::Shape::convex_polygon(
+                    diamond,
+                    theme::GRAY_600,
+                    egui::Stroke::new(1.5_f32, theme::VIEW_BG),
+                ));
+                painter.text(
+                    p + egui::vec2(r + 2.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    "未算定",
+                    egui::FontId::proportional(11.0),
+                    theme::GRAY_700,
+                );
+            }
+            continue;
+        }
         let Some(&(ratio, ok)) = node_ratios.get(&node.id) else {
             continue;
         };
@@ -1526,5 +1565,27 @@ mod tests {
             components: vec![],
         });
         assert_eq!(ratio_for_filter(&empty, CheckRatioFilter::Max), None);
+    }
+    #[test]
+    fn panel_505_joint_marker_does_not_hide_one_skipped_plane() {
+        let checked = CheckOutcome::Checked(CheckResult {
+            basis: String::new(),
+            detail: String::new(),
+            components: vec![CheckComponent {
+                kind: CheckKind::Shear,
+                ratio: 0.5,
+                detail: String::new(),
+            }],
+        });
+        let skipped = CheckOutcome::Skipped {
+            reason: "段違い接合".into(),
+        };
+        for items in [
+            vec![(NodeId(0), &checked), (NodeId(0), &skipped)],
+            vec![(NodeId(0), &skipped), (NodeId(0), &checked)],
+        ] {
+            assert!(incomplete_joint_nodes(items).contains(&NodeId(0)));
+        }
+        assert!(incomplete_joint_nodes([(NodeId(0), &checked)]).is_empty());
     }
 }

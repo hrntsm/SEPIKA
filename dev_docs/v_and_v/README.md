@@ -74,7 +74,8 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
-| [梁パネル寸法_Issue504_2026-10.md](梁パネル寸法_Issue504_2026-10.md) | H/BuiltH幾何・非H未算定・生成/検定/共通準備/manual | 🔶（直接Verification、#505位置/形式・最終head全CI・実験未） |
+| [フランジ位置の標準形式ゲート_Issue505_2026-10.md](フランジ位置の標準形式ゲート_Issue505_2026-10.md) | 面別上下位置・段違い対象外・旧パネル/solver・SkippedのGUI/MCP/CSV | 🔶（直接Verification、#455実入力・正式段違い式・公開全構成CI・Validation未） |
+| [梁パネル寸法_Issue504_2026-10.md](梁パネル寸法_Issue504_2026-10.md) | H/BuiltH幾何・非H未算定・生成/検定/共通準備/manual | 🔶（直接Verification、#505位置/形式は別レポート、最終head全CI・実験未） |
 | [床板の同期物理質量_Issue583_2026-10.md](床板の同期物理質量_Issue583_2026-10.md) | 両形状・材料由来physical・同期置換・仕上LL/先端保持・STB優先・層モデル・Undo/鮮度 | 🔶（直接Verification、最終head全CI・freshレビュー後続、実験未） |
 | [鋼床板の高密度防護_Issue581_2026-10.md](鋼床板の高密度防護_Issue581_2026-10.md) | 囲み/取付き・境界・設計拒否/LL・STB優先・共通準備/GUI/MCP | 🔶（床板階physical質量は別課題#583、最終headゲート未完） |
 | [参照鋼の高密度防護_Issue501_2026-10.md](参照鋼の高密度防護_Issue501_2026-10.md) | 境界/単位・参照対象・設計拒否/物理許可・共通準備/旧Auto失効・GUI/MCP/Undo | 🔶（同コード公開全構成成功、最終headゲート後続。CFTは柱専用、実験Validationは対象外） |
@@ -186,7 +187,8 @@
 | 6 | MITC4 シェル（せん断/収束） | sepika-solver | linear.rs | `test_plate_convergence`（単純支持・四辺固定の板たわみ ±2% 収束＝ロッキングなし。テスト再編により旧 2 テストを統合） | P1.5 | ✅ |
 | 7 | パネルゾーンのフェイスモーメント | sepika-element | panel.rs | `test_face_moments_reference_case1`（pQc=851.135kN 等）, `test_face_moments_reference_case2_t_joint`（ト型） | P1 | ✅ |
 | 7a | 仕口パネル（せん断変形角の追加自由度） | sepika-solver | tests/panel_zone.rs | `test_panel_shear_angle_matches_closed_form`（M=K·γ）, `test_panel_dof_equilibrium_residual_is_zero`（資料 2.10.3-3）。定式化と残課題は [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | P1 | ✅ |
-| 7b | 梁パネル寸法と未算定伝播 | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-solver | panel_zone.rs / springs/panel_gen.rs / joint_wiring/steel_panel.rs / prepare.rs | [Issue504独立期待値・実入口](梁パネル寸法_Issue504_2026-10.md) | 横断 | 🔶（位置/形式は#505、最終head全CI・実験未） |
+| 7b | 梁パネル寸法と未算定伝播 | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-solver | panel_zone.rs / springs/panel_gen.rs / joint_wiring/steel_panel.rs / prepare.rs | [Issue504独立期待値・実入口](梁パネル寸法_Issue504_2026-10.md) | 横断 | 🔶（位置/形式は#7c、最終head全CI・実験未） |
+| 7c | フランジ位置の標準形式ゲート | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-solver / sepika-app / sepika-mcp | panel_zone.rs / joint_wiring / prepare.rs / viewer / design_check.rs / summary.rs | [Issue505独立期待値・状態](フランジ位置の標準形式ゲート_Issue505_2026-10.md) | 横断 | 🔶（#455実入力・正式段違い式・公開全構成CI・Validation未） |
 | 8 | 線形静的解析 | sepika-solver | linear.rs | `test_*`（座標変換回帰 `test_beam_to_global_transverse_uses_correct_inertia` 含む） | P2 | ✅ |
 | 9 | 固有値解析 | sepika-solver | eigen.rs | `test_1dof_period` | P2 | ✅ |
 | 10 | 地震力標準式・適用診断 | sepika-load / sepika-solver / sepika-app / sepika-mcp | ai.rs / statics/analysis/seismic.rs / app/tests.rs / design/holding.rs / nonlinear/pushover/driver.rs / server.rs | [Issue486の独立期待値・入口対応表](地震力標準式と適用診断_Issue486_2026-10.md) | P2 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |

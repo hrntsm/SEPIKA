@@ -1,4 +1,5 @@
 use super::*;
+use sepika_design_jp::CheckOutcome;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum ResultInputKey {
@@ -42,6 +43,84 @@ impl ResultsBundle {
 }
 
 impl App {
+    pub(super) fn reject_unsupported_panel_results(&mut self, allow_recorded_skips: bool) -> bool {
+        let Some(saved) = self.core.scoped.results.as_ref() else {
+            return false;
+        };
+        let has_analysis_results = !saved.statics.is_empty()
+            || !saved.combos.is_empty()
+            || saved.modal.is_some()
+            || !saved.member_forces.is_empty()
+            || !saved.panel_moments.is_empty()
+            || saved.pushover.is_some()
+            || saved.pushover_x.is_some()
+            || saved.pushover_y.is_some()
+            || !saved.holding_evaluations.is_empty()
+            || saved.time_history.is_some()
+            || !saved.time_histories.is_empty()
+            || saved.lumped.is_some()
+            || !saved.lumped_results.is_empty();
+        let has_panel_success = saved.joint_checks.iter().any(|check| {
+            check.label.starts_with("パネルゾーン(S)")
+                && matches!(check.outcome, CheckOutcome::Checked(_))
+        });
+        // 空の結果容器や床板だけの直接設計には、流用を拒否すべき架構解析応力がない。
+        if !has_analysis_results && !has_panel_success {
+            return false;
+        }
+        let model = &self.core.model;
+        let mut rejected = Vec::new();
+        for node in &model.nodes {
+            for plane in
+                sepika_core::panel_zone::panel_joint_planes(model, node.id, &model.elements)
+            {
+                let members = model.elements.iter().filter(|e| {
+                    e.nodes.contains(&node.id)
+                        && (sepika_core::panel_zone::member_orientation(model, e)
+                            == Some(sepika_core::panel_zone::MemberOrientation::Column)
+                            || plane.beams.iter().any(|b| b.element == e.id))
+                });
+                if let Err(reason) =
+                    sepika_core::panel_zone::resolve_panel_joint(model, node.id, members)
+                {
+                    if allow_recorded_skips && saved.joint_checks.iter().any(|check| {
+                        check.node == node.id && check.label.starts_with("パネルゾーン(S)")
+                            && matches!(&check.outcome, CheckOutcome::Skipped { reason: recorded } if recorded == &reason)
+                            && !saved.joint_checks.iter().any(|other| other.node == node.id
+                                && (other.label == check.label || other.label == "パネルゾーン(S)")
+                                && matches!(other.outcome, CheckOutcome::Checked(_)))
+                    }) { continue; }
+                    rejected.push(JointCheck {
+                        node: node.id,
+                        label: format!("パネルゾーン(S) {}", plane.label()),
+                        outcome: CheckOutcome::Skipped { reason },
+                    });
+                }
+            }
+        }
+        if rejected.is_empty() {
+            return false;
+        }
+        let reasons = rejected
+            .iter()
+            .filter_map(|check| match &check.outcome {
+                CheckOutcome::Skipped { reason } => Some(reason.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" / ");
+        // 全体解析の応力は接合部の剛性と連成するため、旧成功成果の他面だけを再認証できない。
+        self.core.scoped.results = Some(ResultsBundle {
+            joint_checks: rejected,
+            ..Default::default()
+        });
+        self.core.scoped.last_static = None;
+        self.core.scoped.staleness.results_stale = true;
+        self.core.scoped.staleness.design_stale = true;
+        self.core.scoped.staleness.last_run = None;
+        self.report_notice(format!("既存の解析・検定結果は利用不可です。標準パネルの適用条件を再確認して解析を再実行してください: {reasons}"));
+        true
+    }
     /// 現在runの明示評価点を目的別に保存する。目的別runは次の解析で上書きしない。
     pub fn adopt_holding_evaluation(
         &mut self,

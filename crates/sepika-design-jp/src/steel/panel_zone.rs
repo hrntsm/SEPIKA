@@ -6,10 +6,14 @@
 //! （[`sepika_core::panel_zone::PanelGeometry`] を唯一の出所とする）。
 
 use crate::{CheckComponent, CheckKind, CheckResult};
-use sepika_core::panel_zone::{PanelGeometry, PanelShapeKind};
+use sepika_core::panel_zone::{
+    standard_flange_differences, BeamFlangePositions, PanelGeometry, PanelShapeKind,
+};
 
 /// S 造パネルゾーンの検定の入力。
 pub struct SPanelInput {
+    /// 局所上下位置を検証する梁対。片側梁は同じ位置を2回渡す。未指定は未算定。
+    pub beam_flanges: Option<[BeamFlangePositions; 2]>,
     /// 柱断面から解決したパネル諸元（寸法 `dc`・板厚 `tp`・断面区分）。
     /// CFT も対象に含める（鋼管部を S 造と同じ式で評価する）。
     pub geometry: PanelGeometry,
@@ -30,7 +34,7 @@ pub struct SPanelInput {
     /// 設計用パネルモーメント `pM` [N·mm] を直接与える場合の値。
     ///
     /// 仕口パネルをモデル化した接合部では、解析が出力するパネルせん断モーメント
-    /// `{MSX, MSY}` の絶対値が大きい方をここへ与える。節点まわりのモーメント
+    /// `{MSX, MSY}` を検討面へ投影した値を与える。節点まわりのモーメント
     /// 釣り合いが解析上厳密に満たされた値であり、梁端モーメント・柱せん断から
     /// 手で組み立てる近似（`beam_moment_*` / `col_shear_*`）を経ない。
     ///
@@ -39,35 +43,23 @@ pub struct SPanelInput {
     pub design_moment: Option<f64>,
 }
 
-/// S 造パネルゾーンの検定（鋼構造接合部設計指針）。
-///
-/// ## 設計用パネルモーメント（標準形式・梁段違いなし）
-/// `pM = bML + bMR − (cQU + cQL)・db/2`
-///
-/// 梁段違い形式（左右梁のせい差が概ね 150mm 以上）は本関数の対象外とし、
-/// 呼び出し側が段違いを考慮した等価な `db`（低い方の梁の値）を渡す簡略化とする。
-///
-/// 仕口パネルをモデル化した接合部では、この組み立てに代えて解析が出力する
-/// パネルせん断モーメントを [`SPanelInput::design_moment`] へ直接与える
-/// （節点まわりの釣り合いが解析上厳密に満たされた値を用いる）。
-///
-/// ## パネル降伏モーメント
-/// `pMy = (Ve/κ)・√(1 − n²)・Fy/√3`
-///
-/// - H形: `Ve = dc・db・tp`、
-///   `κ = 1/(2/3 + (4・bc・tf)/(dc・tp)) + 1/(1 + (dc・tp)/(6・bc・tf))`
-/// - 角形: `Ve = 2・dc・db・tp`、
-///   `κ = 1/(2/3 + 2・bc/dc) + 1/(1 + dc/(3・bc))`
-/// - 円形: `Ve = 2・dc・db・tp`、`κ = 4/π`
-///
-/// `pMy = (Ve/κ)・√(1−n²)・Fy/√3`（Ve を κ で**除する**）。
-/// κ は概ね 0.5〜1.5 のオーダー。
-///
-/// `n = |axial_ratio|` とし、`|n| ≥ 1` の場合は `√(1 − n²)` を 0 にクランプする
-/// （軸力が全塑性軸耐力に達している状態を表し、曲げ・せん断耐力の余裕なしに対応）。
-///
-/// 検定比 = `|pM| / pMy`（1.0 以下で OK）。
-pub fn s_panel_zone_check(inp: &SPanelInput) -> CheckResult {
+/// 上下フランジ位置が一致する標準形式の検定。未検証・段違いは理由付きエラー。
+pub fn s_panel_zone_check(inp: &SPanelInput) -> Result<CheckResult, String> {
+    let [left, right] = inp
+        .beam_flanges
+        .ok_or("上下フランジ位置未検証: dbだけでは標準形式を確認できません")?;
+    let du = left.upper - right.upper;
+    let dl = left.lower - right.lower;
+    if !standard_flange_differences(du, dl) {
+        return Err(format!("段違い接合の標準形式は未対応: 左db={} mm、右db={} mm、上位置差={du} mm、下位置差={dl} mm", left.db(), right.db()));
+    }
+    if [left, right].iter().any(|p| {
+        !p.db().is_finite()
+            || p.db() <= 0.0
+            || (p.db() - inp.db).abs() > 2.0 * sepika_core::panel_zone::FLANGE_POSITION_TOL_MM
+    }) {
+        return Err("dbとフランジ位置が不整合です".into());
+    }
     let ve = inp.geometry.effective_volume(inp.db);
     let kappa = inp.geometry.kappa();
     let shape_label = match inp.geometry.kind {
@@ -92,7 +84,7 @@ pub fn s_panel_zone_check(inp: &SPanelInput) -> CheckResult {
         f64::INFINITY
     };
     let basis = format!("鋼構造接合部設計指針 パネルゾーン検定 {}断面", shape_label);
-    CheckResult {
+    Ok(CheckResult {
         basis,
         detail: String::new(),
         components: vec![CheckComponent {
@@ -103,7 +95,7 @@ pub fn s_panel_zone_check(inp: &SPanelInput) -> CheckResult {
                 ve, kappa, n, p_m, p_my, ratio
             ),
         }],
-    }
+    })
 }
 
 #[cfg(test)]
@@ -112,6 +104,12 @@ mod tests {
 
     fn base_panel_h_input(axial_ratio: f64) -> SPanelInput {
         SPanelInput {
+            beam_flanges: Some(
+                [BeamFlangePositions {
+                    upper: 250.0,
+                    lower: -250.0,
+                }; 2],
+            ),
             geometry: PanelGeometry {
                 kind: PanelShapeKind::H {
                     bc: 300.0,
@@ -153,7 +151,7 @@ mod tests {
         let check = |geometry: PanelGeometry| {
             let mut inp = base_panel_h_input(0.0);
             inp.geometry = geometry;
-            s_panel_zone_check(&inp).ratio()
+            s_panel_zone_check(&inp).unwrap().ratio()
         };
         let (rs, rc) = (check(steel), check(cft));
         assert!(rs > 0.0 && rs.is_finite());
@@ -168,13 +166,13 @@ mod tests {
     /// 接合部で、解析出力のせん断モーメントを使う経路）。
     #[test]
     fn s_panel_uses_design_moment_when_given() {
-        let assembled = s_panel_zone_check(&base_panel_h_input(0.0));
+        let assembled = s_panel_zone_check(&base_panel_h_input(0.0)).unwrap();
         // 手組み式の pM = 200e6 + 200e6 − (50e3 + 50e3)・500/2 = 375e6
         let assembled_pm = 375_000_000.0_f64;
 
         let mut inp = base_panel_h_input(0.0);
         inp.design_moment = Some(assembled_pm);
-        let same = s_panel_zone_check(&inp);
+        let same = s_panel_zone_check(&inp).unwrap();
         assert!(
             (same.ratio() - assembled.ratio()).abs() < 1e-12,
             "同じ pM を与えれば結果は一致する: {} vs {}",
@@ -185,7 +183,7 @@ mod tests {
         // 別の値を与えれば検定比は pM に比例して変わる。
         let mut half = base_panel_h_input(0.0);
         half.design_moment = Some(assembled_pm / 2.0);
-        let half = s_panel_zone_check(&half);
+        let half = s_panel_zone_check(&half).unwrap();
         assert!(
             (half.ratio() - assembled.ratio() / 2.0).abs() < 1e-12,
             "pM が半分なら検定比も半分: {} vs {}",
@@ -196,7 +194,7 @@ mod tests {
         // 符号は絶対値で扱う（左右どちら向きのパネルモーメントでも同じ検定比）。
         let mut neg = base_panel_h_input(0.0);
         neg.design_moment = Some(-assembled_pm);
-        assert!((s_panel_zone_check(&neg).ratio() - assembled.ratio()).abs() < 1e-12);
+        assert!((s_panel_zone_check(&neg).unwrap().ratio() - assembled.ratio()).abs() < 1e-12);
     }
 
     #[test]
@@ -210,7 +208,7 @@ mod tests {
 
     // pMy を検定比から逆算するテスト用ヘルパ。
     fn rc_or_s_pmy(inp: &SPanelInput) -> f64 {
-        let res = s_panel_zone_check(inp);
+        let res = s_panel_zone_check(inp).unwrap();
         let p_m = inp.beam_moment_left + inp.beam_moment_right
             - (inp.col_shear_upper + inp.col_shear_lower) * inp.db / 2.0;
         p_m.abs() / res.ratio()
@@ -219,7 +217,7 @@ mod tests {
     #[test]
     fn s_panel_moment_hand_calc() {
         let inp = base_panel_h_input(0.0);
-        let res = s_panel_zone_check(&inp);
+        let res = s_panel_zone_check(&inp).unwrap();
         let expected_pm = inp.beam_moment_left + inp.beam_moment_right
             - (inp.col_shear_upper + inp.col_shear_lower) * inp.db / 2.0;
         // pM = 200e6+200e6 - (50000+50000)*500/2 = 400e6 - 25e6 = 375e6
@@ -230,13 +228,46 @@ mod tests {
     #[test]
     fn s_panel_axial_ratio_at_or_above_one_clamps_to_zero() {
         let inp = base_panel_h_input(1.0);
-        let res = s_panel_zone_check(&inp);
+        let res = s_panel_zone_check(&inp).unwrap();
         assert!(
             res.ratio().is_infinite(),
             "pMy=0 のとき ratio は無限大になる"
         );
         let inp2 = base_panel_h_input(1.5);
-        let res2 = s_panel_zone_check(&inp2);
+        let res2 = s_panel_zone_check(&inp2).unwrap();
         assert!(res2.ratio().is_infinite());
+    }
+    #[test]
+    fn panel_505_positions_gate_precedes_direct_moment_and_rejects_db_only() {
+        let mut inp = base_panel_h_input(0.0);
+        inp.db = 580.0;
+        let positions = BeamFlangePositions::from_dimensions(600.0, 20.0, 20.0, 0.0).unwrap();
+        inp.beam_flanges = Some([positions; 2]);
+        let check = s_panel_zone_check(&inp).unwrap();
+        assert!(check.components[0].detail.contains("pM=371000000.0 N*mm"));
+        inp.beam_moment_left = -200_000_000.0;
+        inp.beam_moment_right = -200_000_000.0;
+        inp.col_shear_upper = -50_000.0;
+        inp.col_shear_lower = -50_000.0;
+        assert!((s_panel_zone_check(&inp).unwrap().ratio() - check.ratio()).abs() < 1e-12);
+        inp.beam_moment_left = 200_000_000.0;
+        inp.beam_moment_right = 200_000_000.0;
+        inp.col_shear_upper = 50_000.0;
+        inp.col_shear_lower = 50_000.0;
+        for direct in [None, Some(371_000_000.0), Some(-371_000_000.0)] {
+            inp.design_moment = direct;
+            let standard = s_panel_zone_check(&inp).unwrap();
+            assert!((standard.ratio() - check.ratio()).abs() < 1e-12);
+            inp.beam_flanges = None;
+            assert!(s_panel_zone_check(&inp).unwrap_err().contains("位置未検証"));
+            inp.beam_flanges = Some([
+                positions,
+                BeamFlangePositions::from_dimensions(600.0, 20.0, 20.0, 20.0).unwrap(),
+            ]);
+            assert!(s_panel_zone_check(&inp)
+                .unwrap_err()
+                .contains("上位置差=-20"));
+            inp.beam_flanges = Some([positions; 2]);
+        }
     }
 }

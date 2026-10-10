@@ -1391,4 +1391,40 @@ mod tests {
         assert!(csv.contains("解析結果なし"));
         assert!(!has_report_content(&app.core.scoped.results));
     }
+    #[test]
+    fn panel_505_csv_keeps_incomplete_and_checked_planes_separate() {
+        use crate::app::{JointCheck, ResultsBundle};
+        use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
+        let mut app = App::default();
+        let results = ResultsBundle {
+            joint_checks: vec![
+                JointCheck {
+                    node: sepika_core::ids::NodeId(0),
+                    label: "パネルゾーン(S) X-Z".into(),
+                    outcome: CheckOutcome::Skipped {
+                        reason: "接合部 ID 0 db=580/480 上位置差=50 下位置差=-50 段違い".into(),
+                    },
+                },
+                JointCheck {
+                    node: sepika_core::ids::NodeId(0),
+                    label: "パネルゾーン(S) Y-Z".into(),
+                    outcome: CheckOutcome::Checked(CheckResult {
+                        basis: "標準形式".into(),
+                        detail: String::new(),
+                        components: vec![CheckComponent {
+                            kind: CheckKind::Shear,
+                            ratio: 0.5,
+                            detail: String::new(),
+                        }],
+                    }),
+                },
+            ],
+            ..Default::default()
+        };
+        app.core.scoped.results = Some(results);
+        let csv = build_report_csv(&app);
+        assert!(csv.contains("パネルゾーン(S) X-Z,-,検定不能,接合部 ID 0"));
+        assert!(csv.contains("上位置差=50 下位置差=-50"));
+        assert!(csv.contains("パネルゾーン(S) Y-Z,0.5000,OK,標準形式"));
+    }
 }

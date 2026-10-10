@@ -217,8 +217,8 @@ impl App {
     /// プロジェクトを指定パスから読み込む。成功時はモデルを差し替える。
     ///
     /// 準備計算の結果・解析結果・解析タブの設定値が同梱されていれば復元し、
-    /// 実行済み扱いにする（保存側が最新のときだけ書き出すため、同梱＝そのモデルに
-    /// 対して最新である）。準備計算・解析結果は、同梱がない・復号に失敗した場合は
+    /// 実行済み扱いにする。ただし現在の標準パネル適用条件を満たさない旧成功成果は、
+    /// 共通理由の未算定記録を確認して利用不可にする。準備計算・解析結果は、同梱がない・復号に失敗した場合は
     /// 未実行のままとし、解析実行時または「準備計算 実行」で再計算する。解析タブの
     /// 設定値は、同梱がない・復号に失敗した場合は現状（既定値）のまま変更しない
     /// （同梱に含まれない場合があるため）。ただし質量モデルの方式
@@ -297,6 +297,7 @@ impl App {
                     self.core.scoped.staleness.last_run = saved.last_run;
                     self.core.scoped.staleness.results_stale = false;
                     self.core.scoped.staleness.design_stale = false;
+                    self.reject_unsupported_panel_results(true);
                 }
                 self.prune_orphan_vibration_cases();
                 self.core.scoped.project_path = Some(path);

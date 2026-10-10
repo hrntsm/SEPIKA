@@ -904,7 +904,11 @@ fn cross_joint_model(col_shape: SectionShape, beam_shape: SectionShape) -> Model
         },
         section: Some(SectionId(sec)),
         local_axis: LocalAxis {
-            ref_vector: [1.0, 0.0, 0.0],
+            ref_vector: if sec == 1 {
+                [0.0, 0.0, 1.0]
+            } else {
+                [1.0, 0.0, 0.0]
+            },
         },
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
@@ -2010,7 +2014,7 @@ fn panel_504_check_uses_shape_depth_and_reports_unsupported_beams() {
         &model,
         &forces,
         None,
-        &[(NodeId(0), [100_000_000.0, 0.0])],
+        &[(NodeId(0), [0.0, 100_000_000.0])],
         LoadTerm::Short,
     );
     assert!(checks
@@ -2039,7 +2043,7 @@ fn panel_504_check_uses_shape_depth_and_reports_unsupported_beams() {
         &model,
         &forces,
         None,
-        &[(NodeId(0), [100_000_000.0, 0.0])],
+        &[(NodeId(0), [0.0, 100_000_000.0])],
         LoadTerm::Short,
     );
     let built = built_checks
@@ -2061,7 +2065,7 @@ fn panel_504_check_uses_shape_depth_and_reports_unsupported_beams() {
         &model,
         &forces,
         None,
-        &[(NodeId(0), [100_000_000.0, 0.0])],
+        &[(NodeId(0), [0.0, 100_000_000.0])],
         LoadTerm::Short,
     );
     assert!(checks
@@ -2069,4 +2073,111 @@ fn panel_504_check_uses_shape_depth_and_reports_unsupported_beams() {
         .any(|(node, label, outcome)| *node == NodeId(0)
             && label == "パネルゾーン(S)"
             && matches!(outcome,CheckOutcome::Skipped { reason } if *reason == expected)));
+}
+
+#[test]
+fn panel_505_plane_demands_and_skips_survive_order_ends_and_direct_moments() {
+    let h = |height| SectionShape::SteelH {
+        height,
+        width: 400.0,
+        web_thick: 13.0,
+        flange_thick: 20.0,
+        root_r: Some(0.0),
+    };
+    let mut model = cross_joint_model(h(400.0), h(600.0));
+    model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    for sec in &mut model.sections {
+        sec.material = Some(MaterialId(2));
+    }
+    for e in &mut model.elements {
+        if e.section == Some(SectionId(1)) {
+            e.local_axis.ref_vector = [0.0, 0.0, 1.0];
+        }
+    }
+    let mut ynode = model.nodes[4].clone();
+    ynode.id = NodeId(5);
+    ynode.coord = [0.0, 6000.0, 3000.0];
+    model.nodes.push(ynode);
+    let mut ybeam = model.elements[3].clone();
+    ybeam.id = ElemId(4);
+    ybeam.nodes = smallvec::smallvec![NodeId(0), NodeId(5)];
+    model.elements.push(ybeam);
+    let column = [
+        (0.0, [0.0, 50_000.0, 30_000.0, 0.0, 0.0, 0.0]),
+        (1.0, [0.0, 50_000.0, 30_000.0, 0.0, 0.0, 0.0]),
+    ];
+    let beam_x = [
+        (0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 200_000_000.0]),
+        (1.0, [0.0, 0.0, 0.0, 0.0, 0.0, 200_000_000.0]),
+    ];
+    let beam_y = [
+        (0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 100_000_000.0]),
+        (1.0, [0.0, 0.0, 0.0, 0.0, 0.0, 100_000_000.0]),
+    ];
+    let forces = vec![
+        (ElemId(0), column.as_slice()),
+        (ElemId(1), column.as_slice()),
+        (ElemId(2), beam_x.as_slice()),
+        (ElemId(3), beam_x.as_slice()),
+        (ElemId(4), beam_y.as_slice()),
+    ];
+    for missing in [ElemId(1), ElemId(3)] {
+        let incomplete: Vec<_> = forces
+            .iter()
+            .copied()
+            .filter(|(id, _)| *id != missing)
+            .collect();
+        let checks = collect_joint_checks(&model, &incomplete, LoadTerm::Short);
+        assert!(checks.iter().any(|(_,label,o)| label.contains("[1.000, 0.000, 0.000]") && matches!(o,CheckOutcome::Skipped{reason} if reason.contains("検定用応力が未取得"))));
+    }
+    let assembled = collect_joint_checks(&model, &forces, LoadTerm::Short);
+    let panels: Vec<_> = assembled
+        .iter()
+        .filter(|(_, label, _)| label.starts_with("パネルゾーン(S)"))
+        .collect();
+    assert_eq!(panels.len(), 2);
+    assert!(panels[0].2.clone().unwrap_checked().components[0]
+        .detail
+        .contains("pM=371000000.0"));
+    assert!(panels[1].2.clone().unwrap_checked().components[0]
+        .detail
+        .contains("pM=82600000.0"));
+    for sign in [-1.0, 1.0] {
+        let moments = [(NodeId(0), [-82_600_000.0 * sign, 371_000_000.0 * sign])];
+        let checks =
+            collect_joint_checks_with_long(&model, &forces, None, &moments, LoadTerm::Short);
+        let result: Vec<_> = checks
+            .iter()
+            .filter(|(_, label, _)| label.starts_with("パネルゾーン(S)"))
+            .collect();
+        for k in 0..2 {
+            assert!(
+                (result[k].2.clone().unwrap_checked().ratio()
+                    - panels[k].2.clone().unwrap_checked().ratio())
+                .abs()
+                    < 1e-12
+            );
+        }
+    }
+    let mut small = model.sections[1].clone();
+    small.id = SectionId(2);
+    small.shape = Some(h(500.0));
+    model.sections.push(small);
+    model.elements[3].section = Some(SectionId(2));
+    for direct in [vec![], vec![(NodeId(0), [1e9, -2e9])]] {
+        let checks =
+            collect_joint_checks_with_long(&model, &forces, None, &direct, LoadTerm::Short);
+        assert!(checks.iter().any(|(_,label,o)|label.contains("[1.000, 0.000, 0.000]") && matches!(o,CheckOutcome::Skipped{reason} if reason.contains("db=580 mm") && reason.contains("db=480 mm") && reason.contains("上位置差=50"))));
+        assert!(checks
+            .iter()
+            .any(|(_, label, o)| label.contains("[0.000, 1.000, 0.000]")
+                && matches!(o, CheckOutcome::Checked(_))));
+        model.elements.reverse();
+        for e in &mut model.elements {
+            e.nodes.reverse();
+        }
+        let reversed =
+            collect_joint_checks_with_long(&model, &forces, None, &direct, LoadTerm::Short);
+        assert_eq!(format!("{checks:?}"), format!("{reversed:?}"));
+    }
 }
