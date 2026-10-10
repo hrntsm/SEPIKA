@@ -10772,6 +10772,22 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
     assert_eq!(row.effective_area, p.area_ax);
     assert_eq!(row.effective_iy, p.iy);
 
+    let mut preparation_edits = UndoStack::new();
+    preparation_edits.run(
+        &mut app.core.model,
+        Box::new(SetMaterialField {
+            id: MaterialId(1),
+            field: MaterialField::Young,
+            value: Some(0.0),
+        }),
+    );
+    app.run_preparation();
+    assert!(app.core.scoped.preparation.is_none());
+    assert!(app.core.scoped.last_error.is_some());
+    preparation_edits.undo(&mut app.core.model);
+    app.run_preparation();
+    assert!(app.core.scoped.preparation.is_some());
+
     model.materials[0].young = 120000.0;
     model.materials[1].fc = Some(48.0);
     assert_eq!(composite_props_of(&model, &elem).unwrap(), Some(p));
