@@ -74,6 +74,11 @@ pub struct MemberDesignCheckOptions<'a> {
 pub struct MemberDesignCheckReport {
     /// 部材断面検定（危険断面位置・BRB・PCa 水平接合面を含む）。
     pub member_checks: Vec<(ElemId, f64, CheckOutcome)>,
+    /// 必要横補剛箇所数の参考結果。検定比・合否には含めない。
+    pub lateral_bracing_references: Vec<(
+        ElemId,
+        crate::steel::lateral_bracing::LateralBracingReference,
+    )>,
     /// 節点単位検定（柱梁接合部・パネルゾーン・冷間成形耐力比）。
     pub joint_checks: Vec<(NodeId, String, CheckOutcome)>,
     /// 元壁版・生成要素・荷重キー・検定種別ごとの壁検定。
@@ -133,6 +138,7 @@ pub fn run_member_design_checks(
 
     let column_k_index = sepika_core::adjacency::NodeAdjacency::build(model);
     let mut member_checks: Vec<(ElemId, f64, CheckOutcome)> = Vec::new();
+    let mut lateral_bracing_references = Vec::new();
 
     for (elem_id, mf) in member_forces {
         let Some(elem) = elem_by_id.get(elem_id).copied() else {
@@ -168,6 +174,13 @@ pub fn run_member_design_checks(
             continue;
         }
 
+        let reference = (mat.category == sepika_core::model::MaterialCategory::Steel
+            && sec.frame_use != Some(sepika_core::model::FrameSectionUse::Column)
+            && sec.frame_use != Some(sepika_core::model::FrameSectionUse::Brace))
+        .then(|| crate::steel::lateral_bracing::resolve_lateral_bracing_reference(model, *elem_id));
+        if let Some(reference) = &reference {
+            lateral_bracing_references.push((*elem_id, reference.clone()));
+        }
         let kind = MemberKind::of_element(elem, model);
         let length = model.member_length(elem);
         let shear_span = mf
@@ -331,7 +344,7 @@ pub fn run_member_design_checks(
                     .q_simple_by_elem
                     .and_then(|q| q.get(elem_id))
                     .is_none();
-            let outcome = if missing_q0 {
+            let mut outcome = if missing_q0 {
                 CheckOutcome::Skipped {
                     reason: "QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません".into(),
                 }
@@ -340,6 +353,16 @@ pub fn run_member_design_checks(
             } else {
                 checker.check(&mfa, sec, mat, &ctx)
             };
+            if let (Some(reference), CheckOutcome::Checked(result)) = (&reference, &mut outcome) {
+                let unconfirmed = crate::steel::lateral_bracing::UNCONFIRMED_DETAIL;
+                if result.detail.starts_with(unconfirmed) {
+                    result
+                        .detail
+                        .replace_range(..unconfirmed.len(), &reference.detail());
+                } else {
+                    result.detail.push_str(&format!(", {}", reference.detail()));
+                }
+            }
             member_checks.push((*elem_id, *pos, outcome));
         }
     }
@@ -383,6 +406,7 @@ pub fn run_member_design_checks(
     );
     MemberDesignCheckReport {
         member_checks,
+        lateral_bracing_references,
         joint_checks,
         wall_checks,
     }

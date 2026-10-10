@@ -182,10 +182,7 @@ pub(crate) fn check_beam(
         tau_y, tau_z, ratio_vy, ratio_vz
     );
 
-    let mut detail = String::new();
-    if let Some((n, lambda_y)) = steel_required_lateral_bracing_count(f, ctx.length, sec) {
-        detail.push_str(&format!("必要横補剛数n={} (λy={:.3})", n, lambda_y));
-    }
+    let mut detail = super::lateral_bracing::UNCONFIRMED_DETAIL.to_string();
     if let Some(s) = steel_beam_deflection(ctx, sec, mat) {
         let ratio_str = if s.abs() > 1e-9 {
             format!("1/{:.0}", ctx.length / s.abs())
@@ -218,30 +215,6 @@ pub(crate) fn check_beam(
         detail,
         components,
     }
-}
-
-/// 大梁の必要横補剛数 n と弱軸細長比 λy を求める（保有耐力横補剛・
-/// 均等間隔配置。昭55建告1791号第2）。検定比には含めない参考情報。
-/// `length` が 0 以下の場合は `None`（算定省略）。
-fn steel_required_lateral_bracing_count(f: f64, length: f64, sec: &Section) -> Option<(u32, f64)> {
-    if length <= 1e-9 {
-        return None;
-    }
-    let area = nonzero(sec.area);
-    let iy_weak_sq = (sec.iz / area).max(0.0);
-    let iy_weak = iy_weak_sq.sqrt();
-    let lambda_y = if iy_weak > 1e-9 {
-        length / iy_weak
-    } else {
-        0.0
-    };
-
-    let is_400_grade = (f - 235.0).abs() < 1e-6 || (f - 215.0).abs() < 1e-6;
-    let coef = if is_400_grade { 170.0 } else { 130.0 };
-
-    let n_raw = (lambda_y - coef) / 20.0;
-    let n = n_raw.max(0.0).ceil() as u32;
-    Some((n, lambda_y))
 }
 
 /// 大梁のたわみ S [mm] を求める（たわみの検定、長期のみ）。
@@ -1389,74 +1362,9 @@ mod tests {
         assert_eq!(steel_c_factor(&ctx, true), 1.0);
     }
 
-    // 大梁必要横補剛数
-
-    /// 均等間隔配置 λy ≦ 170 + 20n（400N/mm²級。告示1791号・技術基準解説書）:
-    /// λy=90 ≦ 170 → n=0（補剛不要）、λy=250 → n=(250−170)/20=4。
-    #[test]
-    fn test_required_lateral_bracing_count_hand_calc() {
-        let sec = Section {
-            frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
-            id: SectionId(0),
-            name: "H-dummy".to_string(),
-            area: 100.0,
-            iy: 0.0,
-            iz: 100.0 * 100.0_f64.powi(2), // iy_weak=√(iz/A)=100mm となるよう設定
-            j: 0.0,
-            depth: 0.0,
-            width: 0.0,
-            as_y: 0.0,
-            as_z: 0.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: None,
-            shape: None,
-            material: Some(MaterialId(0)),
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        };
-        let (n, lambda_y) = steel_required_lateral_bracing_count(235.0, 9000.0, &sec).unwrap();
-        assert!((lambda_y - 90.0).abs() < 1e-9, "λy={}", lambda_y);
-        assert_eq!(n, 0, "λy=90 ≦ 170 のため補剛不要");
-
-        let (n, lambda_y) = steel_required_lateral_bracing_count(235.0, 25000.0, &sec).unwrap();
-        assert!((lambda_y - 250.0).abs() < 1e-9, "λy={}", lambda_y);
-        assert_eq!(n, 4, "λy=250 → n=(250−170)/20=4");
-    }
-
-    /// length=0 の場合は算定を省略する（None）。
-    #[test]
-    fn test_required_lateral_bracing_count_skipped_when_length_zero() {
-        let sec = Section {
-            frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
-            id: SectionId(0),
-            name: "H-dummy".to_string(),
-            area: 100.0,
-            iy: 0.0,
-            iz: 1_000_000.0,
-            j: 0.0,
-            depth: 0.0,
-            width: 0.0,
-            as_y: 0.0,
-            as_z: 0.0,
-            floor: None,
-            panel_thickness: None,
-            thickness: None,
-            shape: None,
-            material: Some(MaterialId(0)),
-            rebar_material: None,
-            shear_rebar_material: None,
-            steel_material: None,
-            property_basis: Default::default(),
-        };
-        assert!(steel_required_lateral_bracing_count(235.0, 0.0, &sec).is_none());
-    }
-
     /// 梁検定 detail 末尾に必要横補剛数が出力されることを確認する。
     #[test]
-    fn test_beam_check_detail_contains_bracing_count() {
+    fn test_beam_check_without_model_reports_unconfirmed_reference() {
         let sec = h_section(400.0, 200.0, 10.0, 15.0);
         let mat_v = mat("SN400");
         let forces = MemberForcesAt {
@@ -1477,7 +1385,7 @@ mod tests {
             .check(&forces, &sec, &mat_v, &ctx)
             .unwrap_checked();
         assert!(
-            crate::full_detail(&result).contains("必要横補剛数n="),
+            crate::full_detail(&result).contains("柱間全長・端条件未確認"),
             "detail={}",
             crate::full_detail(&result)
         );

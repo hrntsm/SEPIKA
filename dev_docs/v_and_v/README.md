@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [大梁横補剛参考数_Issue488_2026-10.md](大梁横補剛参考数_Issue488_2026-10.md) | 材種・H断面・柱間全長/group・支配区間・GUI/MCP参考状態 | 🔶（参考式Verification、配置/性能・Validationは未対応） |
 | [フランジ位置の標準形式ゲート_Issue505_2026-10.md](フランジ位置の標準形式ゲート_Issue505_2026-10.md) | 面別上下位置・段違い対象外・旧パネル/solver・SkippedのGUI/MCP/CSV | 🔶（直接Verification、#455実入力・正式段違い式・公開全構成CI・Validation未） |
 | [梁パネル寸法_Issue504_2026-10.md](梁パネル寸法_Issue504_2026-10.md) | H/BuiltH幾何・非H未算定・生成/検定/共通準備/manual | 🔶（直接Verification、#505位置/形式は別レポート、最終head全CI・実験未） |
 | [床板の同期物理質量_Issue583_2026-10.md](床板の同期物理質量_Issue583_2026-10.md) | 両形状・材料由来physical・同期置換・仕上LL/先端保持・STB優先・層モデル・Undo/鮮度 | 🔶（直接Verification、最終head全CI・freshレビュー後続、実験未） |
@@ -200,6 +201,7 @@
 | 11a | 壁・間柱の自重支持先 | sepika-load / sepika-app | wall_plate_load.rs / cascade.rs | `wall_plate_load::tests`・`vertical_post_uses_explicit_end_shares`・`明示負担率で密度直接集計とdl集計の階重量が一致する` | [検証記録](壁版の支持範囲判定_2026-09.md) | 🔶（実測照合は未実施） |
 | 12 | 荷重組合せ・検定対象 | sepika-core / sepika-job / sepika-app / sepika-mcp | load_combo.rs、design_q0.rs、app/tests.rs、tests.rs | [荷重状態の検証対応](荷重状態と検定対象_Issue487_2026-10.md#直接検証の対応) | P2 | 🔶（原文再取得・Validation未） |
 | 13 | 許容応力度設計 | sepika-design-jp | allowable_stress.rs | `test_beam_check_bending_rect_section_hand_calc` 他 | P3 | ✅ |
+| 13a | 大梁必要横補剛箇所数（参考） | sepika-design-jp / sepika-app / sepika-mcp | steel/lateral_bracing.rs・member_design_check.rs・app/tests.rs・tests.rs | [Issue488直接受入](大梁横補剛参考数_Issue488_2026-10.md#直接試験) | 横断 | 🔶（参考式Verification、実配置・性能・Validation未） |
 | 14 | 保有耐力 | sepika-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
 | 15 | プッシュオーバー | sepika-solver | pushover.rs | — | P5 | 🔶 |
 | 15a | 壁単体の確定step応答 | sepika-solver / sepika-app / sepika-job / sepika-mcp | nonlinear/pushover/wall_response.rs・tests.rs, tests/wall_model.rs, ultimate_demand.rs, job/pushover.rs | [Issue443検証](壁の確定ステップ応答_Issue443_2026-10.md)の試験対応表 | — | ✅（Scope内Verification） |
