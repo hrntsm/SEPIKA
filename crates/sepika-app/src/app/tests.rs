@@ -2010,6 +2010,8 @@ fn test_legacy_pushover_deserialize_migrates_to_slot() {
     let legacy = ResultsBundle {
         pushover: Some(sepika_solver::nonlinear::pushover::PushoverResult {
             steps: vec![],
+            wall_history: None,
+            wall_run: None,
             capacity_curve: vec![],
             hinges: vec![],
             shear_yields: vec![],
@@ -10007,6 +10009,8 @@ fn dummy_static_once() -> sepika_solver::statics::linear::StaticOnce {
 fn dummy_pushover(qu: f64) -> sepika_solver::nonlinear::pushover::PushoverResult {
     sepika_solver::nonlinear::pushover::PushoverResult {
         steps: vec![],
+        wall_history: None,
+        wall_run: None,
         capacity_curve: vec![],
         hinges: vec![],
         shear_yields: vec![],
@@ -10110,6 +10114,8 @@ fn test_build_result_tree_sections_and_labels() {
         }),
         pushover_x: Some(sepika_solver::nonlinear::pushover::PushoverResult {
             steps: vec![],
+            wall_history: None,
+            wall_run: None,
             capacity_curve: vec![],
             hinges: vec![],
             shear_yields: vec![],
