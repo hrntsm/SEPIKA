@@ -634,6 +634,8 @@ pub fn pushover_analysis_recording(
     };
     Ok(PushoverResult {
         steps: recorded.steps,
+        wall_history: Some(recorded.wall_history),
+        wall_run: Some(super::wall_response::WallRunIdentity::new()),
         capacity_curve: recorded.capacity_curve,
         hinges: recorded.hinges,
         shear_yields: recorded.shear_yields,

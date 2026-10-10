@@ -238,6 +238,8 @@ mod tests {
         ];
         let pushover = crate::nonlinear::pushover::PushoverResult {
             steps,
+            wall_history: None,
+            wall_run: None,
             capacity_curve,
             hinges: Vec::new(),
             shear_yields: Vec::new(),
@@ -308,6 +310,8 @@ mod tests {
         };
         let pushover = crate::nonlinear::pushover::PushoverResult {
             steps: Vec::new(),
+            wall_history: None,
+            wall_run: None,
             capacity_curve: Vec::new(),
             hinges: Vec::new(),
             shear_yields: Vec::new(),
@@ -351,6 +355,8 @@ mod tests {
         };
         let pushover = crate::nonlinear::pushover::PushoverResult {
             steps: Vec::new(),
+            wall_history: None,
+            wall_run: None,
             capacity_curve: Vec::new(),
             hinges: Vec::new(),
             shear_yields: Vec::new(),

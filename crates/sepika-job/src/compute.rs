@@ -146,7 +146,7 @@ pub fn compute_pushover(
     model: sepika_core::model::Model,
     cfg: AnalysisSettings,
 ) -> JobResult<sepika_solver::nonlinear::pushover::PushoverResult> {
-    let work = expand_walls(model);
+    let (work, wall_index, _) = sepika_load::wall_expand::expand_wall_elements_owned(model);
     Analysis::prepare(&work).map_err(|e| JobError::Prepare(e.to_string()))?;
     let dofmap = sepika_core::dof::DofMap::build(&work);
     let reducer = sepika_solver::common::constraint::Reducer::build(&work, &dofmap);
@@ -156,7 +156,7 @@ pub fn compute_pushover(
             .push_use_drift_angle
             .then_some(1.0 / cfg.push_drift_denom.max(1.0)),
     };
-    sepika_solver::nonlinear::pushover::pushover_analysis_recording(
+    let mut result = sepika_solver::nonlinear::pushover::pushover_analysis_recording(
         &work,
         &dofmap,
         &reducer,
@@ -170,7 +170,13 @@ pub fn compute_pushover(
         0.0,
         cfg.ductility_method,
     )
-    .map_err(|e| JobError::Convergence(e.to_string()))
+    .map_err(|e| JobError::Convergence(e.to_string()))?;
+    if let Some(records) = &mut result.wall_history {
+        for record in records {
+            record.plate = wall_index.plate_of(record.elem);
+        }
+    }
+    Ok(result)
 }
 
 /// 時刻歴応答解析。減衰モデル・積分法は `cfg` に従う。前処理を通したモデルを渡すこと。

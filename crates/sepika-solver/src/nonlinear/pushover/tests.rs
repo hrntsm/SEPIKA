@@ -3460,7 +3460,7 @@ fn wall_story_model(seismic_weight: f64) -> Model {
 /// 耐震壁は四周を柱・梁に囲まれた壁を対象とする（`misc_wall::wall_is_seismic`）ため、
 /// 四周へ RC 側柱・大梁を配置する。側柱は面内両端ピン化されて面内せん断・曲げを
 /// 負担しないため、面内の応答は壁エレメントが支配する。
-fn wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
+pub(super) fn wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
     let make_node = |id: u32, coord: [f64; 3], restraint: Dof6Mask, story: Option<StoryId>| Node {
         id: NodeId(id),
@@ -3624,6 +3624,7 @@ fn test_pushover_drift_angle_target_runs_with_wall_element() {
         DuctilityMethod::default(),
     )
     .expect("耐震壁モデルの増分解析が完走すること");
+    assert_wall_committed_history(&result);
     let last = result.steps.last().expect("収束ステップがあること");
     assert!(
         last.story_drifts[0].abs() / 3000.0 >= (1.0 / 150.0) * 0.999,
@@ -3735,6 +3736,7 @@ fn test_pushover_wall_flexural_yield_softens() {
         DuctilityMethod::default(),
     )
     .expect("細長壁の増分解析が完走すること");
+    assert_wall_committed_history(&result);
     let last = result.steps.last().expect("収束ステップがあること");
     assert!(
         last.story_drifts[0].abs() / 3000.0 >= (1.0 / 150.0) * 0.999,
@@ -4011,4 +4013,39 @@ fn pushover_rejects_inconsistent_common_ground_from_basement_depths() {
     )
     .unwrap_err()
     .contains("GL"));
+}
+
+fn assert_wall_committed_history(result: &PushoverResult) {
+    let history = result.wall_history.as_ref().expect("壁確定履歴");
+    assert_eq!(history.len(), result.steps.len());
+    assert!(
+        !result.member_response.iter().any(|r| r.elem == ElemId(0)),
+        "線材集合へ壁を含めない"
+    );
+    for (step, record) in history.iter().enumerate() {
+        assert_eq!(record.step, step as u32);
+        let wall = record.response.as_ref().expect("矩形壁の確定応答");
+        assert!(wall.virtual_column.is_some());
+        assert!(wall.material_shear_strain.is_none());
+        assert!(wall.line_events.is_none());
+        for residual in wall.equilibrium_residual.force_n {
+            assert!(residual.abs() < 1e-4);
+        }
+        for residual in wall.equilibrium_residual.moment_nmm {
+            assert!(residual.abs() < 0.1);
+        }
+        assert!(
+            (wall.chord_rotation_rad - result.steps[step].story_drifts[0] / 3000.0).abs() < 1e-9
+        );
+    }
+    let first = history.first().unwrap().response.as_ref().unwrap();
+    let last = history.last().unwrap().response.as_ref().unwrap();
+    assert!(first.qw_n.abs() < 0.5 * last.qw_n.abs());
+    assert!(last.qw_n.abs() > 100.0);
+    assert!(last.delta_wall_mm > first.delta_wall_mm);
+    assert!(result
+        .wall_response_at(ElemId(0), result.steps.len() as u32)
+        .is_err());
+    assert!(result.hinges.iter().all(|h| h.elem != ElemId(0)));
+    assert!(result.shear_yields.iter().all(|e| e.elem != ElemId(0)));
 }
