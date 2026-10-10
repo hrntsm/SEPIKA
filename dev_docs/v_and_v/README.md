@@ -76,7 +76,7 @@
 | [OVIKA_named_MessagePack_2026-10.md](OVIKA_named_MessagePack_2026-10.md) | 4 payload の named 保存・復元、順序独立・default・破損・モデル検証、実 STB モデル単体の codec 時間と最終 OVIKA サイズ | ✅ |
 | [壁版の支持範囲判定_2026-09.md](壁版の支持範囲判定_2026-09.md) | 壁の支持辺・間柱端部の負担率の明示入力、部分支持・支持梁重複の診断 | 🔶 |
 | [整合質量_2026-09.md](整合質量_2026-09.md) | Beam/Fiber の整合質量、材料領域質量、回転慣性、剛域質量、端部解放の質量縮約 | 🔶 |
-| [SRC_CFT等価断面のnsフォールバック_2026-09.md](SRC_CFT等価断面のnsフォールバック_2026-09.md) | SRC/CFT の等価断面 ns の材料由来経路と、算定不能時の N_S_EQ=15／鋼管のみへのフォールバック通知 | 🔶 |
+| [SRC解析用弾性係数比_Issue434_2026-10.md](SRC解析用弾性係数比_Issue434_2026-10.md) | SRCの解析比・許容曲げ比の分離、材料不正の理由付き停止、独立数値と読込み/編集/準備入口（旧フォールバック記録は履歴） | 🔶（軸・曲げと入口検証済み、原本全式/実験未） |
 | [NewRC高強度コンクリート外挿_2026-09.md](NewRC高強度コンクリート外挿_2026-09.md) | Issue #385: Fc>60 のコンクリートを NewRC 式で外挿する現行仕様 | 🔶 |
 
 ### 参照実装マニュアル照合
@@ -155,6 +155,7 @@
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
 | 1 | ティモシェンコ梁 | sepika-element | beam.rs | `test_phi_zero_converges_to_bernoulli`（Bernoulli 極限。軸 EA/L・ねじり GJ/L を含む 12×12 成分。テスト再編により旧 `test_beam_axial_stiffness`・`test_beam_torsion_stiffness` を統合）, `test_torsion_not_stiffened_by_rigid_zone`（剛域ありでもねじりは GJ/L のまま） | P1 | ✅ |
+| 1b | SRC解析用弾性係数比 | sepika-core / sepika-element / sepika-solver / sepika-app / sepika-design-jp | section_shape/composite.rs, frame/beam/stiffness_factors.rs, app/preparation.rs | `src_analysis_ratio_matches_independent_rectangular_h_section` / `src_loaded_and_edited_materials_never_use_provisional_analysis_properties` / `src_invalid_ec_and_poisson_are_analysis_errors` / `allowable_bending_ratio_boundaries_are_separate_from_analysis_ratio` | 横断 | 🔶（原本全式/実験未） |
 | 1a | 線材の整合質量 | sepika-core / sepika-element / sepika-solver | model/mass.rs, frame/prismatic.rs, frame/rigid_arm.rs, beam/behavior.rs, fiber/mod.rs, frame/truss.rs, dynamic/eigen/tests.rs | 材料領域入口・共通実装・`rigid_zone_mass`・`transform_mass`・Beam/Fiber/Truss 質量入口・座標変換。Truss の受入 P2 回帰は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md)。Fiber の非線形 factory 生成は確認済みだが、solver の固有値組立は線形 `BeamElement` 経路であり、Fiber 固有値は未検証。対応テストと条件は [整合質量_2026-09.md](整合質量_2026-09.md) の追跡表を正とする | P1/P2 | 🔶（Kbb 特異時の失敗経路・Fiber 固有値未検証を含む。Truss P2 回帰は検証済み） |
 | 1b | 明示線材自重・ダンパー総重量 | sepika-core / sepika-load / sepika-solver / sepika-job / sepika-edit / sepika-app / sepika-io | story_gen/tests.rs, tests/weight_mass.rs, tests/damper_mass_errors.rs, dynamic/lumped_mass/model.rs・job/lumped_mass.rs, load_case.rs・edit/tests.rs, app/tests.rs, model/tests.rs, ovika.rs | [Issue #422 検証](明示線材とダンパー総重量_Issue422_2026-10.md) のテスト対応表。実M・両方式・重量／配置・ゼロ追加・公開フレーム／質点系入口・undo／保存を含む | P1/P2 | ✅（Verification） |
 | 2 | 剛域あり梁 | sepika-element | beam.rs | `test_apply_auto_rigid_zones_and_manual_protection`, `test_auto_rigid_zone_only_when_all_members_are_rc`（自動剛域の適用と手動端の保護・適用条件。テスト再編により旧 `test_auto_rigid_zone_standard_formula` を統合） | P1 | 🔶 |

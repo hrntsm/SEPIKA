@@ -184,7 +184,7 @@ fn test_beam_new_src_cft_composite_props() {
 
     let src_beam = BeamElement::new(&make_elem(0), &model);
     let ec = model.materials[0].young;
-    let p = src_shape.src_equivalent_props(ec, 0.2).unwrap();
+    let p = src_shape.src_equivalent_props(ec, 0.2).unwrap().unwrap();
     assert!((src_beam.e - ec).abs() < 1e-9);
     assert!((src_beam.g - ec / (2.0 * (1.0 + 0.2))).abs() < 1e-9);
     assert!(
@@ -200,6 +200,7 @@ fn test_beam_new_src_cft_composite_props() {
         (src_beam.a
             - src_shape
                 .src_equivalent_props(23000.0, 0.2)
+                .unwrap()
                 .unwrap()
                 .area_ax)
             .abs()
@@ -222,6 +223,7 @@ fn test_beam_new_src_cft_composite_props() {
         &invalid_cft_material,
         Some(&model.materials[1]),
     )
+    .unwrap()
     .is_none());
     invalid_cft_material.fc = Some(0.0);
     assert!(super::stiffness_factors::composite_props_with(
@@ -229,6 +231,7 @@ fn test_beam_new_src_cft_composite_props() {
         &invalid_cft_material,
         Some(&model.materials[1]),
     )
+    .unwrap()
     .is_none());
     invalid_cft_material.fc = Some(36.0);
     invalid_cft_material.young = 0.0;
@@ -727,7 +730,7 @@ fn test_slab_stiffness_factor_only_for_enclosed_plated_slabs() {
     use sepika_core::model::{LoadTransfer, RegionAnchor, Slab, SlabPlate, SlabShape};
 
     let (m_none, e) = rc_beam_for_slab_factor(None);
-    let b_none = stiffness_breakdown(&m_none, &e);
+    let b_none = stiffness_breakdown(&m_none, &e).unwrap();
     assert!(
         (b_none.slab - 1.0).abs() < 1e-12,
         "版なしは協力幅 1.0、got {}",
@@ -738,7 +741,7 @@ fn test_slab_stiffness_factor_only_for_enclosed_plated_slabs() {
         section: Some(sepika_core::ids::SectionId(1)),
         ..Default::default()
     }));
-    let b_plated = stiffness_breakdown(&m_plated, &e);
+    let b_plated = stiffness_breakdown(&m_plated, &e).unwrap();
     assert!(
         b_plated.slab > 1.0,
         "版あり＋断面厚なら協力幅 > 1、got {}",
@@ -762,7 +765,7 @@ fn test_slab_stiffness_factor_only_for_enclosed_plated_slabs() {
         },
         tip_loads: Vec::new(),
     }];
-    let b_attached = stiffness_breakdown(&m_attached, &e);
+    let b_attached = stiffness_breakdown(&m_attached, &e).unwrap();
     assert!(
         (b_attached.slab - 1.0).abs() < 1e-12,
         "取り付く床板は協力幅 1.0、got {}",
@@ -794,7 +797,7 @@ fn test_src_beam_slab_stiffness_falls_back_to_one() {
         steel_web_thick: 9.0,
         steel_flange_thick: 12.0,
     });
-    let got = stiffness_breakdown(&m_plated, &e);
+    let got = stiffness_breakdown(&m_plated, &e).unwrap();
     assert!(
         (got.slab - 1.0).abs() < 1e-12,
         "SRC 梁のスラブ協力幅は 1.0、got {}",

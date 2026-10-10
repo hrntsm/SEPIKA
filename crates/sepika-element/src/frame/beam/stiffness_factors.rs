@@ -253,25 +253,38 @@ pub(super) fn breakdown_with(
 }
 
 /// 部材の剛性算定で適用される割増し率を、モデルと要素データから求める。
-/// 断面・材料が引けない要素、2 節点未満の要素はすべて 1.0 を返す。
+/// SRC 材料不正はエラー。対象外で断面・材料が引けない場合はすべて 1.0。
 pub fn stiffness_breakdown(
     model: &Model,
     data: &sepika_core::model::ElementData,
-) -> StiffnessBreakdown {
+) -> Result<StiffnessBreakdown, String> {
+    if model
+        .element_section(data)
+        .and_then(|s| s.shape.as_ref())
+        .is_some_and(|shape| {
+            matches!(
+                shape,
+                sepika_core::section_shape::SectionShape::SrcBeamRect { .. }
+                    | sepika_core::section_shape::SectionShape::SrcColumnRect { .. }
+            )
+        })
+    {
+        composite_props_of(model, data)?;
+    }
     if data.nodes.len() < 2 {
-        return StiffnessBreakdown::default();
+        return Ok(StiffnessBreakdown::default());
     }
     let (Some(sec), Some(mat)) = (
         data.section.and_then(|sid| model.sections.get(sid.index())),
         model.element_material(data),
     ) else {
-        return StiffnessBreakdown::default();
+        return Ok(StiffnessBreakdown::default());
     };
     let (Some(p0), Some(p1)) = (
         model.nodes.get(data.nodes[0].index()),
         model.nodes.get(data.nodes[1].index()),
     ) else {
-        return StiffnessBreakdown::default();
+        return Ok(StiffnessBreakdown::default());
     };
     let (dx, dy, dz) = (
         p1.coord[0] - p0.coord[0],
@@ -280,19 +293,31 @@ pub fn stiffness_breakdown(
     );
     let lp = (dx * dx + dy * dy).sqrt();
     let is_horizontal = lp > 1e-9 && dz.abs() <= 0.05 * lp;
-    breakdown_with(model, data, sec, mat.young, is_horizontal)
+    Ok(breakdown_with(model, data, sec, mat.young, is_horizontal))
 }
 
-/// 要素の SRC/CFT 等価断面性能を求める。対象外・算定不能では `None`。
+/// SRC/CFT 等価性能。対象外は `Ok(None)`、SRC の材料不正は理由付きエラー。
 pub fn composite_props_of(
     model: &Model,
     data: &sepika_core::model::ElementData,
-) -> Option<sepika_core::section_shape::CompositeProps> {
-    let sec = data
-        .section
-        .and_then(|sid| model.sections.get(sid.index()))?;
-    let mat = model.element_material(data)?;
-    composite_props_with(sec.shape.as_ref()?, mat, model.element_steel_material(data))
+) -> Result<Option<sepika_core::section_shape::CompositeProps>, String> {
+    let Some(sec) = data.section.and_then(|sid| model.sections.get(sid.index())) else {
+        return Ok(None);
+    };
+    let Some(shape) = sec.shape.as_ref() else {
+        return Ok(None);
+    };
+    let Some(mat) = model.element_material(data) else {
+        if matches!(
+            shape,
+            sepika_core::section_shape::SectionShape::SrcBeamRect { .. }
+                | sepika_core::section_shape::SectionShape::SrcColumnRect { .. }
+        ) {
+            return Err("SRC の主材料が未割当です".into());
+        }
+        return Ok(None);
+    };
+    composite_props_with(shape, mat, model.element_steel_material(data))
 }
 
 pub(super) fn validate_composite_material(
@@ -340,14 +365,26 @@ pub(super) fn composite_props_with(
     shape: &sepika_core::section_shape::SectionShape,
     mat: &sepika_core::model::Material,
     steel: Option<&sepika_core::model::Material>,
-) -> Option<sepika_core::section_shape::CompositeProps> {
+) -> Result<Option<sepika_core::section_shape::CompositeProps>, String> {
     use sepika_core::section_shape::SectionShape;
     match shape {
-        SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. } => mat
-            .fc
-            .filter(|fc| fc.is_finite() && *fc > 0.0)
-            .and_then(|_| shape.src_equivalent_props(mat.young, mat.poisson)),
-        SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => mat.fc.and_then(|fc| {
+        SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. } => {
+            if !mat.fc.is_some_and(|fc| fc.is_finite() && fc > 0.0) {
+                return Err("SRC の Fc は設定済みの正の有限値が必要です".into());
+            }
+            let props = shape.src_equivalent_props(mat.young, mat.poisson)?;
+            if let Some(p) = props {
+                let g = mat.shear_modulus();
+                if [g, g * p.j, g * p.as_y, g * p.as_z]
+                    .iter()
+                    .any(|v| !v.is_finite() || *v <= 0.0)
+                {
+                    return Err("SRC のせん断剛性は正の有限値が必要です".into());
+                }
+            }
+            Ok(props)
+        }
+        SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => Ok(mat.fc.and_then(|fc| {
             if !fc.is_finite() || fc <= 0.0 {
                 return None;
             }
@@ -358,8 +395,8 @@ pub(super) fn composite_props_with(
             );
             let steel = steel?;
             shape.cft_equivalent_props(steel.young, steel.poisson, fc, gamma_c)
-        }),
-        _ => None,
+        })),
+        _ => Ok(None),
     }
 }
 
