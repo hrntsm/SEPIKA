@@ -865,6 +865,7 @@ mod tests {
         };
         model.assign_stb_node_ids().unwrap();
         model.source_stories.push(crate::model::SourceStory {
+            kind_from_native: false,
             id: 51,
             guid: None,
             name: "原階".into(),

@@ -48,6 +48,9 @@ pub struct SourceStory {
     pub name: String,
     pub height: f64,
     pub kind: SourceStoryKind,
+    /// native の明示階種別編集を反映する原階。STB 取り込み時は false。
+    #[serde(default)]
+    pub kind_from_native: bool,
     pub id_dependence: Option<u32>,
     pub strength_concrete: Option<String>,
     pub node_ids: Vec<SourceStoryNode>,
@@ -74,6 +77,7 @@ impl Model {
                     super::StoryLevelKind::Basement { .. } => SourceStoryKind::Basement,
                     super::StoryLevelKind::Penthouse { .. } => SourceStoryKind::Penthouse,
                 },
+                kind_from_native: true,
                 id_dependence: None,
                 strength_concrete: None,
                 node_ids: s

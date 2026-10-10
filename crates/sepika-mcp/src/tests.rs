@@ -6,10 +6,66 @@ use sepika_core::model::{
 };
 
 #[test]
+fn source_story_native_kind_mcp_matches_gui_command_and_preserves_imported_kinds() {
+    use sepika_core::ids::StoryId;
+    use sepika_core::model::{SourceStoryKind, StoryLevelKind};
+    let xml = r#"<ST_BRIDGE version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/></StbNodes><StbStories><StbStory id="1" name="基部" height="0" kind="GENERAL"/><StbStory id="2" name="上階" height="3000" kind="ROOF"/></StbStories></StbModel></ST_BRIDGE>"#;
+    for native in [true, false] {
+        let mut model = sepika_io::stbridge::import_stbridge(xml).unwrap();
+        if native {
+            model.source_stories.clear();
+        }
+        let initial = model.clone();
+        let directory =
+            std::env::temp_dir().join(format!("sepika-497-kind-{}-{native}", std::process::id()));
+        let mut state = ServerState::with_fs_store(model.clone(), &directory).unwrap();
+        let payload = serde_json::json!({"command":"SetStoryLevelKind", "story":1, "level_kind":{"Penthouse":{"k":0.7}}});
+        assert!(apply_edit(&mut state, &payload).unwrap().applied);
+        let mut undo = UndoStack::new();
+        assert!(undo.run(
+            &mut model,
+            Box::new(sepika_edit::SetStoryLevelKind {
+                story: StoryId(1),
+                level_kind: StoryLevelKind::Penthouse { k: 0.7 }
+            })
+        ));
+        assert!(model.eq_ignoring_dofmap(&state.model));
+        let expected = if native {
+            SourceStoryKind::Penthouse
+        } else {
+            SourceStoryKind::Roof
+        };
+        assert_eq!(state.model.source_stories[1].kind, expected);
+        assert_eq!(state.model.source_stories[1].kind_from_native, native);
+        let exported = sepika_io::stbridge::export_stbridge(&state.model).unwrap();
+        assert_eq!(
+            sepika_io::stbridge::import_stbridge(&exported)
+                .unwrap()
+                .source_stories[1]
+                .kind,
+            expected
+        );
+        state.undo.undo(&mut state.model);
+        assert!(state.model.eq_ignoring_dofmap(&initial));
+        state.undo.redo(&mut state.model);
+        assert_eq!(
+            sepika_io::stbridge::export_stbridge(&state.model).unwrap(),
+            exported
+        );
+        let revision = state.undo.revision();
+        assert!(!apply_edit(&mut state, &payload).unwrap().applied);
+        assert!(!apply_edit(&mut state, &serde_json::json!({"command":"SetStoryLevelKind", "story":4294967295_u32, "level_kind":"Normal"})).unwrap().applied);
+        assert_eq!(state.undo.revision(), revision);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[test]
 fn source_story_mcp_edit_query_diagnostics_and_snapshot_match_shared_command() {
     let mut model = sample_model();
     model.assign_stb_node_ids().unwrap();
     model.source_stories.push(sepika_core::model::SourceStory {
+        kind_from_native: false,
         id: 51,
         guid: None,
         name: "原階".into(),

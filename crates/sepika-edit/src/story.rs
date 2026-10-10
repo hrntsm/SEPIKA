@@ -172,13 +172,38 @@ pub struct RestoreStoryDefs {
 }
 
 /// 現在の階定義・階参照のスナップショットを撮る。
-fn snapshot(model: &Model) -> RestoreStoryDefs {
+pub(crate) fn snapshot(model: &Model) -> RestoreStoryDefs {
     RestoreStoryDefs {
         source_stories: model.source_stories.clone(),
         stb_node_ids: model.stb_node_ids.clone(),
         stories: model.stories.clone(),
         node_story: model.nodes.iter().map(|n| n.story).collect(),
         constraints: model.constraints.clone(),
+    }
+}
+
+pub(crate) fn source_story_index(model: &Model, story: StoryId) -> Result<Option<usize>, String> {
+    let level = &model.stories[story.index()];
+    let matches: Vec<_> = model
+        .source_stories
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.height == level.elevation)
+        .map(|(i, _)| i)
+        .collect();
+    match matches.as_slice() {
+        [index] => Ok(Some(*index)),
+        [] if story.index() == 0
+            && level.elevation == model.base_elevation()
+            && model
+                .source_stories
+                .iter()
+                .all(|s| s.height > level.elevation) =>
+        {
+            Ok(None)
+        }
+        [] => Err("解析階と原階の対応を確認できません".into()),
+        _ => Err("解析階と原階の対応が一意ではありません".into()),
     }
 }
 
@@ -225,20 +250,11 @@ impl EditCommand for SetStoryLevel {
         if let Err(reason) = model.initialize_source_stories() {
             return Box::new(crate::RejectedEdit(reason));
         }
-        let original = &model.stories[idx];
-        let matches: Vec<_> = model
-            .source_stories
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.height == original.elevation && s.name == original.name)
-            .map(|(i, _)| i)
-            .collect();
-        if matches.len() > 1 {
-            return Box::new(crate::RejectedEdit(
-                "解析階と原階の対応が一意ではありません".into(),
-            ));
-        }
-        if let Some(&index) = matches.first() {
+        let index = match source_story_index(model, self.story) {
+            Ok(index) => index,
+            Err(reason) => return Box::new(crate::RejectedEdit(reason)),
+        };
+        if let Some(index) = index {
             model.source_stories[index].name = self.name.clone();
             if idx != 0 {
                 model.source_stories[index].height = self.elevation;
@@ -290,6 +306,7 @@ impl EditCommand for AddStory {
             return Box::new(crate::RejectedEdit("STB原階IDの上限です".into()));
         };
         model.source_stories.push(sepika_core::model::SourceStory {
+            kind_from_native: true,
             id,
             guid: None,
             name: self.name.clone(),
@@ -340,20 +357,11 @@ impl EditCommand for DeleteStory {
         if let Err(reason) = model.initialize_source_stories() {
             return Box::new(crate::RejectedEdit(reason));
         }
-        let original = &model.stories[idx];
-        let matches: Vec<_> = model
-            .source_stories
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.height == original.elevation && s.name == original.name)
-            .map(|(i, _)| i)
-            .collect();
-        if matches.len() > 1 {
-            return Box::new(crate::RejectedEdit(
-                "解析階と原階の対応が一意ではありません".into(),
-            ));
-        }
-        if let Some(&index) = matches.first() {
+        let index = match source_story_index(model, self.story) {
+            Ok(index) => index,
+            Err(reason) => return Box::new(crate::RejectedEdit(reason)),
+        };
+        if let Some(index) = index {
             let source_id = model.source_stories[index].id;
             if model
                 .source_stories

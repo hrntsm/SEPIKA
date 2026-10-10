@@ -51,6 +51,13 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
             let nodes: Vec<sepika_core::ids::NodeId> = serde_json::from_value(value.get("nodes").ok_or("nodes が必要です（内部NodeIdの配列）")?.clone()).map_err(|e| e.to_string())?;
             Ok(Box::new(sepika_edit::SetSourceStoryNodes { source_story, nodes }))
         }
+        "SetStoryLevelKind" => {
+            let story = serde_json::from_value(value.get("story").ok_or("story が必要です")?.clone())
+                .map_err(|e| format!("story の解析に失敗: {e}"))?;
+            let level_kind = serde_json::from_value(value.get("level_kind").ok_or("level_kind が必要です")?.clone())
+                .map_err(|e| format!("level_kind の解析に失敗: {e}"))?;
+            Ok(Box::new(sepika_edit::SetStoryLevelKind { story, level_kind }))
+        }
         "SetPostGravityEndShares" => {
             let member = value
                 .get("member")

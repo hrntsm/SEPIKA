@@ -297,6 +297,7 @@ fn build_nodes_and_stories(
         .collect();
     for s in raw_stories {
         model.source_stories.push(sepika_core::model::SourceStory {
+            kind_from_native: false,
             id: s.file_id,
             guid: s.guid,
             name: s.name.clone(),

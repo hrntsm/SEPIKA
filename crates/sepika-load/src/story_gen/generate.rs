@@ -507,7 +507,13 @@ fn generate_stories_impl(
         let prev = model
             .stories
             .iter()
-            .find(|s| (s.elevation - elev).abs() <= LEVEL_TOL_MM);
+            .find(|s| s.elevation == elev)
+            .or_else(|| {
+                model
+                    .stories
+                    .iter()
+                    .find(|s| (s.elevation - elev).abs() <= LEVEL_TOL_MM)
+            });
         let name = prev
             .map(|s| s.name.clone())
             .unwrap_or_else(|| sepika_core::model::default_story_name(si));
