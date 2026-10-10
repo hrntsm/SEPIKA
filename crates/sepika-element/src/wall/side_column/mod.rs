@@ -272,6 +272,7 @@ mod tests {
     fn make_bare_wall_model() -> Model {
         let wall_shape = SectionShape::RcWall {
             thickness: 150.0,
+            pwh_ratio: None,
             ps: 0.0025,
         };
         Model {

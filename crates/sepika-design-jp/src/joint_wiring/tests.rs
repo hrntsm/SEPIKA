@@ -56,6 +56,7 @@ fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>)
         thickness: Some(thickness),
         shape: Some(SectionShape::RcWall {
             thickness,
+            pwh_ratio: Some(0.006),
             ps: 0.006,
         }),
         // 材料は断面が持つ。壁筋（縦筋・横筋）は SD345。
@@ -548,12 +549,8 @@ fn wall_envelope_mode_excludes_wall_when_envelope_ratio_too_large() {
     );
 }
 
-/// 側柱付き耐震壁は、せん断非線形トリリニア骨格（Qc/βu/Qu、技術基準解説書）が
-/// 算定・出力される（付帯柱の主筋量が得られる壁のみ）。
-#[test]
-fn wall_with_side_columns_emits_nonlinear_shear_trilinear() {
+fn wall_with_columns_model() -> Model {
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
-
     let mut model = wall_model(None);
     // 四周のうち両側の鉛直辺（ElemId 3・4）へ 600×600 RC 側柱の断面を与える。
     let col_shape = SectionShape::RcColumnRect {
@@ -576,6 +573,8 @@ fn wall_with_side_columns_emits_nonlinear_shear_trilinear() {
     let mut col_sec = col_shape.to_section(SectionId(1), "C600".into());
     col_sec.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
     col_sec.material = Some(MaterialId(0));
+    col_sec.rebar_material = Some(MaterialId(1));
+    col_sec.shear_rebar_material = Some(MaterialId(1));
     model.sections.push(col_sec);
     for e in model
         .elements
@@ -587,16 +586,28 @@ fn wall_with_side_columns_emits_nonlinear_shear_trilinear() {
             ref_vector: [1.0, 0.0, 0.0],
         };
     }
-    // 圧縮軸力 1000kN・水平せん断 800kN・曲げ 1000kN·m（壁）。
+    model.materials[0].fc = Some(17.0);
+    if let Some(SectionShape::RcWall { ps, pwh_ratio, .. }) = &mut model.sections[0].shape {
+        *ps = 0.002;
+        *pwh_ratio = Some(0.015);
+    }
+    model
+}
+
+#[test]
+fn wall_with_side_columns_emits_reference_skeleton_and_missing_columns_are_skipped() {
+    let mut model = wall_with_columns_model();
     let forces: [(f64, [f64; 6]); 1] = [(0.0, [-1_000_000.0, 800_000.0, 0.0, 0.0, 0.0, 1.0e9])];
-    // 側柱の内力（実アプリではソルバ結果に全要素が含まれる。側柱の主筋量を
-    // 集計するため member_forces に側柱の内力エントリも渡す）。
     let col_forces: [(f64, [f64; 6]); 1] = [(0.0, [-500_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])];
     let member_forces = vec![
         (ElemId(0), forces.as_slice()),
         (ElemId(3), col_forces.as_slice()),
         (ElemId(4), col_forces.as_slice()),
     ];
+    model.materials[0].fc = Some(17.0);
+    if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut model.sections[0].shape {
+        *pwh_ratio = Some(0.015);
+    }
     let checks = collect_joint_checks(&model, &member_forces, LoadTerm::Short);
 
     let nl = checks
@@ -608,18 +619,20 @@ fn wall_with_side_columns_emits_nonlinear_shear_trilinear() {
     };
     let full = crate::full_detail(cr);
     assert!(
-        full.contains("Qc=") && full.contains("βu=") && full.contains("Qu="),
+        full.contains("Qc=") && full.contains("βs=") && full.contains("Qu="),
         "detail にトリリニア諸元が含まれる: {}",
         full
     );
     assert!(cr.ratio() > 0.0, "Qu 検定比が正: {}", cr.ratio());
 
-    // 側柱のない壁（主筋量ゼロ）ではトリリニアは出力されない。
-    let plain = collect_joint_checks(&wall_model(None), &member_forces, LoadTerm::Short);
+    let mut columnless = wall_model(None);
+    columnless
+        .elements
+        .retain(|element| ![ElemId(3), ElemId(4)].contains(&element.id));
+    let plain = collect_joint_checks(&columnless, &member_forces, LoadTerm::Short);
     assert!(
-        !plain
-            .iter()
-            .any(|(_, label, _)| label == "耐震壁(RC)せん断非線形"),
+        plain.iter().any(|(_, label, outcome)| label == "耐震壁(RC)せん断非線形"
+            && matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("側柱主筋量"))),
         "側柱のない壁はトリリニア対象外"
     );
 }
@@ -1126,4 +1139,451 @@ fn src_cross_panel_new_types_emits_check() {
         "ratio={}",
         cr.ratio()
     );
+}
+
+fn all_wall_outcomes(model: &Model) -> Vec<(NodeId, String, CheckOutcome)> {
+    let forces = [(0.0, [-1_000_000.0, 800_000.0, 0.0, 0.0, 0.0, 1.0e9])];
+    let columns = [(0.0, [0.0; 6])];
+    collect_joint_checks(
+        model,
+        &[
+            (ElemId(0), &forces),
+            (ElemId(3), &columns),
+            (ElemId(4), &columns),
+        ],
+        LoadTerm::Short,
+    )
+}
+
+#[test]
+fn horizontal_material_absence_and_invalid_strength_never_fallback() {
+    for fy in [
+        None,
+        Some(0.0),
+        Some(-1.0),
+        Some(f64::NAN),
+        Some(f64::INFINITY),
+    ] {
+        let mut model = wall_with_columns_model();
+        model.materials[1].fy = fy;
+        let checks = all_wall_outcomes(&model);
+        for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
+            let outcome = &checks.iter().find(|(_, l, _)| l == label).unwrap().2;
+            assert!(
+                matches!(outcome, CheckOutcome::Skipped { reason }
+                if reason.contains("ID 0") && reason.contains("横筋") && reason.contains("fy")),
+                "{outcome:?}"
+            );
+        }
+    }
+    for missing_vertical in [false, true] {
+        let mut model = wall_with_columns_model();
+        model.sections[0].shear_rebar_material = None;
+        if missing_vertical {
+            model.sections[0].rebar_material = None;
+        }
+        assert!(all_wall_outcomes(&model).iter().any(|(_,label,outcome)| label == "耐震壁(RC)"
+            && matches!(outcome,CheckOutcome::Skipped { reason } if reason.contains("横筋") && reason.contains("未割当"))));
+    }
+}
+
+#[test]
+fn wall_skeleton_accepts_parallel_square_columns_and_rejects_relative_rotation() {
+    for global_angle in [0.0_f64, 0.7, 1.9] {
+        let rotate = |v: [f64; 3]| {
+            let (sin, cos) = global_angle.sin_cos();
+            [cos * v[0] - sin * v[1], sin * v[0] + cos * v[1], v[2]]
+        };
+        let mut accepted_detail = None;
+        for (reference, accepted) in [
+            ([1.0, 0.0, 0.0], true),
+            ([0.0, 1.0, 0.0], true),
+            ([1.0, 0.0, 5.0], true),
+            ([1.0, 1.0, 0.0], false),
+        ] {
+            let mut model = wall_with_columns_model();
+            for node in &mut model.nodes {
+                node.coord = rotate(node.coord);
+            }
+            for element in &mut model.elements {
+                let reference = if element.id == ElemId(3) || element.id == ElemId(4) {
+                    reference
+                } else {
+                    element.local_axis.ref_vector
+                };
+                element.local_axis.ref_vector = rotate(reference);
+            }
+            let checks = all_wall_outcomes(&model);
+            assert!(matches!(
+                &checks
+                    .iter()
+                    .find(|(_, label, _)| label == "耐震壁(RC)")
+                    .unwrap()
+                    .2,
+                CheckOutcome::Checked(_)
+            ));
+            let outcome = &checks
+                .iter()
+                .find(|(_, label, _)| label == "耐震壁(RC)せん断非線形")
+                .unwrap()
+                .2;
+            if accepted {
+                let CheckOutcome::Checked(result) = outcome else {
+                    panic!("{outcome:?}");
+                };
+                let detail = crate::full_detail(result);
+                if let Some(expected) = &accepted_detail {
+                    assert_eq!(&detail, expected);
+                } else {
+                    accepted_detail = Some(detail);
+                }
+            } else {
+                assert!(matches!(outcome, CheckOutcome::Skipped { reason }
+                    if reason.contains("耐震壁 ID 0")
+                    && reason.contains("側柱 ID") && reason.contains("断面方向")));
+            }
+        }
+    }
+}
+
+#[test]
+fn explicit_295_and_345_are_valid_and_vertical_input_does_not_control_beta() {
+    for (name, fy) in [("SD295", 295.0), ("SD345", 345.0)] {
+        let mut model = wall_with_columns_model();
+        model.materials[1].name = name.into();
+        model.materials[1].fy = Some(fy);
+        let original = all_wall_outcomes(&model);
+        let original_nl = &original
+            .iter()
+            .find(|(_, l, _)| l == "耐震壁(RC)せん断非線形")
+            .unwrap()
+            .2;
+        assert!(
+            matches!(original_nl, CheckOutcome::Checked(_)),
+            "{original_nl:?}"
+        );
+        for vertical in [None, Some(MaterialId(2))] {
+            let mut altered = model.clone();
+            let mut material = altered.materials[1].clone();
+            material.id = MaterialId(2);
+            material.name = "SD345".into();
+            material.fy = None;
+            altered.materials.push(material);
+            altered.sections[0].rebar_material = vertical;
+            let checks = all_wall_outcomes(&altered);
+            assert!(
+                matches!(&checks.iter().find(|(_,l,_)| l == "耐震壁(RC)").unwrap().2,
+                CheckOutcome::Skipped { reason } if reason.contains("縦筋"))
+            );
+            assert_eq!(
+                format!(
+                    "{:?}",
+                    checks
+                        .iter()
+                        .find(|(_, l, _)| l == "耐震壁(RC)せん断非線形")
+                        .unwrap()
+                        .2
+                ),
+                format!("{original_nl:?}")
+            );
+        }
+    }
+}
+
+#[test]
+fn horizontal_ratio_is_explicit_and_missing_or_inconsistent_input_is_skipped() {
+    for ratio in [
+        None,
+        Some(-0.01),
+        Some(0.001),
+        Some(f64::NAN),
+        Some(f64::INFINITY),
+    ] {
+        let mut model = wall_with_columns_model();
+        if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut model.sections[0].shape {
+            *pwh_ratio = ratio;
+        }
+        let checks = all_wall_outcomes(&model);
+        assert!(matches!(
+            &checks.iter().find(|(_, l, _)| l == "耐震壁(RC)").unwrap().2,
+            CheckOutcome::Checked(_)
+        ));
+        assert!(
+            matches!(&checks.iter().find(|(_,l,_)| l == "耐震壁(RC)せん断非線形").unwrap().2,CheckOutcome::Skipped {reason} if reason.contains("横筋比"))
+        );
+    }
+}
+
+#[test]
+fn gui_mcp_common_dispatch_and_direct_entry_report_identical_missing_material() {
+    use sepika_element::frame::beam::MemberForces;
+    let mut model = wall_with_columns_model();
+    model.sections[0].shear_rebar_material = None;
+    let rows = vec![(0.0, [0.0; 6])];
+    let direct = collect_joint_checks(&model, &[(ElemId(0), rows.as_slice())], LoadTerm::Short);
+    let report = crate::run_member_design_checks(
+        &model,
+        &[(ElemId(0), MemberForces { at: rows })],
+        &[],
+        &crate::MemberDesignCheckOptions {
+            term: LoadTerm::Short,
+            ..Default::default()
+        },
+    );
+    for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
+        let direct = &direct.iter().find(|(_, l, _)| l == label).unwrap().2;
+        let common = &report
+            .joint_checks
+            .iter()
+            .find(|(_, l, _)| l == label)
+            .unwrap()
+            .2;
+        assert_eq!(format!("{direct:?}"), format!("{common:?}"));
+        assert!(
+            matches!(common,CheckOutcome::Skipped {reason} if reason.contains("横筋") && reason.contains("ID 0"))
+        );
+    }
+}
+
+#[test]
+fn concrete_missing_or_invalid_is_reported_at_wall_entry() {
+    for strength in [
+        None,
+        Some(0.0),
+        Some(-1.0),
+        Some(f64::NAN),
+        Some(f64::INFINITY),
+    ] {
+        let mut model = wall_with_columns_model();
+        model.materials[0].fc = strength;
+        let checks = all_wall_outcomes(&model);
+        for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
+            assert!(matches!(&checks.iter().find(|(_,l,_)|l==label).unwrap().2,
+                CheckOutcome::Skipped {reason} if reason.contains("ID 0") && reason.contains("コンクリート") && reason.contains("Fc")));
+        }
+    }
+    let mut model = wall_with_columns_model();
+    model.sections[0].material = None;
+    assert!(all_wall_outcomes(&model).iter().any(|(_,label,outcome)|label=="耐震壁(RC)せん断非線形"
+        && matches!(outcome,CheckOutcome::Skipped {reason} if reason.contains("コンクリート") && reason.contains("Fc"))));
+}
+
+#[test]
+fn wall_main_material_must_have_concrete_category() {
+    for category in [
+        MaterialCategory::Concrete,
+        MaterialCategory::Steel,
+        MaterialCategory::Rebar,
+    ] {
+        let mut model = wall_with_columns_model();
+        model.materials[0].category = category;
+        let checks = all_wall_outcomes(&model);
+        for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
+            let outcome = &checks
+                .iter()
+                .find(|(_, current, _)| current == label)
+                .unwrap()
+                .2;
+            if category == MaterialCategory::Concrete {
+                assert!(matches!(outcome, CheckOutcome::Checked(_)));
+            } else {
+                assert!(matches!(outcome, CheckOutcome::Skipped { reason }
+                    if reason.contains("耐震壁 ID 0") && reason.contains("主材 ID 0")
+                    && reason.contains("コンクリート役割に不適合")));
+            }
+        }
+    }
+}
+
+#[test]
+fn actual_side_column_missing_inputs_are_not_removed_from_reference_section() {
+    for column_id in [ElemId(3), ElemId(4)] {
+        for missing in [
+            "主材なし",
+            "主材不解決",
+            "断面なし",
+            "断面不解決",
+            "形状なし",
+        ] {
+            let mut model = wall_with_columns_model();
+            let mut section = model.sections[1].clone();
+            section.id = SectionId(2);
+            if missing == "主材なし" {
+                section.material = None;
+            } else if missing == "主材不解決" {
+                section.material = Some(MaterialId(999));
+            } else if missing == "形状なし" {
+                section.shape = None;
+            }
+            model.sections.push(section);
+            model
+                .elements
+                .iter_mut()
+                .find(|e| e.id == column_id)
+                .unwrap()
+                .section = match missing {
+                "断面なし" => None,
+                "断面不解決" => Some(SectionId(999)),
+                _ => Some(SectionId(2)),
+            };
+            let checks = all_wall_outcomes(&model);
+            let outcome = &checks
+                .iter()
+                .find(|(_, label, _)| label == "耐震壁(RC)せん断非線形")
+                .unwrap()
+                .2;
+            assert!(
+                matches!(outcome, CheckOutcome::Skipped { reason }
+                if reason.contains("耐震壁 ID 0") && reason.contains(&format!("側柱 ID {}", column_id.0))
+                && reason.contains(if missing.starts_with("主材") { "コンクリート主材" } else { "断面" })),
+                "{missing}: {outcome:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn mixed_side_column_concrete_and_asymmetric_sections_are_outside_reference_scope() {
+    for column_id in [ElemId(3), ElemId(4)] {
+        let mut single_column = wall_with_columns_model();
+        single_column
+            .elements
+            .retain(|element| element.id != column_id);
+        assert!(matches!(&all_wall_outcomes(&single_column).iter()
+            .find(|(_, label, _)| label == "耐震壁(RC)せん断非線形").unwrap().2,
+            CheckOutcome::Skipped { reason } if reason.contains("片側のみ") && reason.contains("非対称")));
+        for change in ["軽量", "主筋", "断面寸法"] {
+            let mut model = wall_with_columns_model();
+            let mut section = model.sections[1].clone();
+            section.id = SectionId(2);
+            if change == "軽量" {
+                let mut material = model.materials[0].clone();
+                material.id = MaterialId(2);
+                material.concrete_class = sepika_core::units::ConcreteClass::Lightweight1;
+                model.materials.push(material);
+                section.material = Some(MaterialId(2));
+            } else if let Some(SectionShape::RcColumnRect { b, d, rebar }) = &mut section.shape {
+                if change == "主筋" {
+                    rebar.main_dia = 10.0;
+                } else {
+                    *b = 700.0;
+                    *d = 700.0;
+                }
+            }
+            model.sections.push(section);
+            model
+                .elements
+                .iter_mut()
+                .find(|e| e.id == column_id)
+                .unwrap()
+                .section = Some(SectionId(2));
+            let checks = all_wall_outcomes(&model);
+            assert!(
+                matches!(&checks.iter().find(|(_, label, _)| label == "耐震壁(RC)せん断非線形").unwrap().2,
+                CheckOutcome::Skipped { reason } if reason.contains("耐震壁 ID 0")
+                    && reason.contains("側柱 ID")
+                    && reason.contains(if change == "軽量" { "コンクリート種別" } else { "非対称" }))
+            );
+        }
+    }
+}
+
+#[test]
+fn reference_section_resolves_actual_columns_without_column_force_rows() {
+    let model = wall_with_columns_model();
+    let normal = all_wall_outcomes(&model);
+    let rows = [(0.0, [-1_000_000.0, 800_000.0, 0.0, 0.0, 0.0, 1.0e9])];
+    let wall_only = collect_joint_checks(&model, &[(ElemId(0), &rows)], LoadTerm::Short);
+    let reference = |checks: &[(NodeId, String, CheckOutcome)]| {
+        format!(
+            "{:?}",
+            checks
+                .iter()
+                .find(|(_, label, _)| label == "耐震壁(RC)せん断非線形")
+                .unwrap()
+                .2
+        )
+    };
+    assert_eq!(reference(&normal), reference(&wall_only));
+    assert!(matches!(
+        &wall_only
+            .iter()
+            .find(|(_, label, _)| label == "耐震壁(RC)せん断非線形")
+            .unwrap()
+            .2,
+        CheckOutcome::Checked(_)
+    ));
+}
+
+#[test]
+fn tilted_wall_reference_skeleton_is_skipped_without_changing_allowable_entry() {
+    for angle in [0.5_f64, -0.5] {
+        let mut model = wall_with_columns_model();
+        let (sin, cos) = angle.sin_cos();
+        let rotate = |v: [f64; 3]| [v[0], cos * v[1] - sin * v[2], sin * v[1] + cos * v[2]];
+        for node in &mut model.nodes {
+            node.coord = rotate(node.coord);
+        }
+        for element in &mut model.elements {
+            element.local_axis.ref_vector = rotate(element.local_axis.ref_vector);
+        }
+        let checks = all_wall_outcomes(&model);
+        assert!(matches!(
+            &checks
+                .iter()
+                .find(|(_, label, _)| label == "耐震壁(RC)")
+                .unwrap()
+                .2,
+            CheckOutcome::Checked(_)
+        ));
+        assert!(
+            matches!(&checks.iter().find(|(_, label, _)| label == "耐震壁(RC)せん断非線形").unwrap().2,
+            CheckOutcome::Skipped { reason } if reason.contains("耐震壁 ID 0")
+                && reason.contains("傾斜壁") && reason.contains("適用未確認"))
+        );
+    }
+}
+
+#[test]
+fn long_concrete_only_output_does_not_require_wall_rebar_material() {
+    let mut model = wall_model(None);
+    model.sections[0].rebar_material = None;
+    model.sections[0].shear_rebar_material = None;
+    let rows = [(0.0, [0.0, 500_000.0, 0.0, 0.0, 0.0, 0.0])];
+    let checks = collect_joint_checks(&model, &[(ElemId(0), &rows)], LoadTerm::Long);
+    assert!(matches!(
+        &checks.iter().find(|(_, l, _)| l == "耐震壁(RC)").unwrap().2,
+        CheckOutcome::Checked(_)
+    ));
+    assert!(
+        matches!(&checks.iter().find(|(_,l,_)|l=="耐震壁(RC)せん断非線形").unwrap().2,CheckOutcome::Skipped {reason} if reason.contains("横筋"))
+    );
+}
+
+#[test]
+fn changing_vertical_ratio_and_strength_keeps_horizontal_skeleton_unchanged() {
+    let mut model = wall_with_columns_model();
+    let original = all_wall_outcomes(&model);
+    let original = &original
+        .iter()
+        .find(|(_, l, _)| l == "耐震壁(RC)せん断非線形")
+        .unwrap()
+        .2;
+    let mut vertical = model.materials[1].clone();
+    vertical.id = MaterialId(2);
+    vertical.name = "SR235".into();
+    vertical.fy = Some(235.0);
+    model.materials.push(vertical);
+    model.sections[0].rebar_material = Some(MaterialId(2));
+    if let Some(SectionShape::RcWall { ps, .. }) = &mut model.sections[0].shape {
+        *ps = 0.006;
+    }
+    let altered = all_wall_outcomes(&model);
+    let altered = &altered
+        .iter()
+        .find(|(_, l, _)| l == "耐震壁(RC)せん断非線形")
+        .unwrap()
+        .2;
+    assert_eq!(format!("{original:?}"), format!("{altered:?}"));
+    assert!(matches!(altered, CheckOutcome::Checked(_)));
 }

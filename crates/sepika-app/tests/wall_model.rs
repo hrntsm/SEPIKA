@@ -218,6 +218,7 @@ fn wall_bay_model() -> Model {
         thickness: Some(150.0),
         shape: Some(SectionShape::RcWall {
             thickness: 150.0,
+            pwh_ratio: None,
             ps: 0.0025,
         }),
         material: Some(MaterialId(1)),
@@ -346,6 +347,7 @@ fn wall_bay_model() -> Model {
         thickness: Some(120.0),
         shape: Some(SectionShape::RcWall {
             thickness: 120.0,
+            pwh_ratio: None,
             ps: 0.0025,
         }),
         material: Some(MaterialId(1)),
