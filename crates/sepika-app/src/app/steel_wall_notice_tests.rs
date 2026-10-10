@@ -217,6 +217,7 @@ fn 共通通知は明示壁と生成壁を集約しrcとsrc内蔵鋼板と要素
     )));
     expanded.sections[2].shape = Some(sepika_core::section_shape::SectionShape::RcWall {
         thickness: 180.0,
+        pwh_ratio: None,
         ps: 0.0025,
     });
     assert!(sepika_job::notices::steel_seismic_wall_notice(&expanded, &index).is_none());

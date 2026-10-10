@@ -110,6 +110,7 @@
 | [adversarial_review_2026-07.md](adversarial_review_2026-07.md) | 横断（PO・剛域・MITC4 等） | 🔶 |
 | [解析コア_敵対的レビュー_2026-07.md](解析コア_敵対的レビュー_2026-07.md) | 静解析・固有値・増分解析 | 🔶 |
 | [壁断面統一と正負別せん断耐力_2026-09.md](壁断面統一と正負別せん断耐力_2026-09.md) | 材料別実幅・SRC/CFT・任意角度・正負別壁ばね、PR #277統合後の回帰結果 | 🔶（数値検証済み・実験照合未） |
+| [壁横筋入力と終局割線骨格_Issue503_2026-10.md](壁横筋入力と終局割線骨格_Issue503_2026-10.md) | 明示横筋入力・成分別不足診断・終局割線接続のVerification、新規実験Validation未実施 | 🔶 |
 | [耐震壁_敵対的レビュー_2026-07.md](耐震壁_敵対的レビュー_2026-07.md) | 壁エレメントの再現試験・独立算式照合・追加回帰検証（判断と途中履歴はADR・申し送りを参照） | 🔶 |
 | [保有水平耐力_プッシュオーバー_敵対的レビュー_2026-07.md](保有水平耐力_プッシュオーバー_敵対的レビュー_2026-07.md) | ルート3 PO | 🔶 |
 | [材端集中ばね梁_定式化レビュー_2026-07.md](材端集中ばね梁_定式化レビュー_2026-07.md) | ConcentratedSpringBeam | 🔶 |
@@ -188,6 +189,8 @@
 | 32 | OVIKA の named MessagePack 永続化 | sepika-io / sepika-app | ovika.rs, tests/full_model.rs | `saved_model_fields_are_named_and_order_independent` / `ovika_roundtrip_preserves_model_and_results` 他。default・破損・復元モデル検証とモデル単体のサイズ・codec 比較は [検証記録](OVIKA_named_MessagePack_2026-10.md) を参照 | 横断 | ✅ |
 
 凡例: ✅ 実装済み・🔶 一部実装（要拡張）・❌ 未実装・対象外（採用しない）。
+壁横筋βs・参考骨格の単体/GUI共通/MCP実ジョブ検証は[Issue503検証](壁横筋入力と終局割線骨格_Issue503_2026-10.md)を参照（Verification ✅、実験Validation 🔶）。
+
 #16 壁（TVLEM）は採用しない（[ADR 0013](../adr/0013-adopt-wall-element-model.md)）。耐震壁は壁エレメント置換モデルとして検証する（下表 #29・#30 と[未検証一覧 §3](未検証一覧.md)）。
 
 各 # の修正履歴・監査結果の詳細は [§レポート目録](#レポート目録) の該当レポートを参照。

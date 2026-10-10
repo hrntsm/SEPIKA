@@ -488,7 +488,7 @@ fn validate_section_geometry(section: &Section) -> Result<(), String> {
         SectionShape::RcColumnCircle { d, .. } => {
             dimensions.push(("d", *d));
         }
-        SectionShape::RcWall { thickness, ps } => {
+        SectionShape::RcWall { thickness, ps, .. } => {
             dimensions.push(("thickness", *thickness));
             nonnegative("ps", *ps)?;
             relation("ps <= 1", *ps <= 1.0)?;
@@ -1234,6 +1234,7 @@ mod tests {
     fn rc壁は標準rc密度を総断面へ適用する() {
         let shape = SectionShape::RcWall {
             thickness: 200.0,
+            pwh_ratio: None,
             ps: 0.0025,
         };
         let section = shape.to_section(SectionId(0), "W".into());
@@ -1255,6 +1256,7 @@ mod tests {
         for shape in [
             SectionShape::RcWall {
                 thickness: 200.0,
+                pwh_ratio: None,
                 ps: 0.0025,
             },
             SectionShape::RcSlab { thickness: 150.0 },
@@ -1671,6 +1673,7 @@ mod tests {
             },
             SectionShape::RcWall {
                 thickness: 150.0,
+                pwh_ratio: None,
                 ps: 0.0025,
             },
             SectionShape::RcSlab { thickness: 150.0 },
@@ -1929,6 +1932,7 @@ mod tests {
         let rebar = material(2, MaterialCategory::Rebar, 7.0, None);
         let wall = SectionShape::RcWall {
             thickness: 150.0,
+            pwh_ratio: None,
             ps: 0.0025,
         }
         .to_section(SectionId(0), "RC壁".into());

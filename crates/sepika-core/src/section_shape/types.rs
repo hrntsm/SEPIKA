@@ -117,8 +117,13 @@ pub enum SectionShape {
     /// RC 耐震壁（壁エレメント用）。
     ///
     /// `thickness`: 壁板厚 [mm]、`ps`: 壁板の直交する各方向のせん断補強筋比の
-    /// うち小さい方（小数。例 0.0025）。
-    RcWall { thickness: f64, ps: f64 },
+    /// うち小さい方（小数。例 0.0025）。`pwh_ratio` は実壁厚に対する横筋比。
+    /// 横筋比が不明の場合は `None` とし、最小比から推定しない。
+    RcWall {
+        thickness: f64,
+        ps: f64,
+        pwh_ratio: Option<f64>,
+    },
     /// RC スラブ（床）。
     ///
     /// `thickness`: 板厚 [mm]。

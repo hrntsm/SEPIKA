@@ -544,6 +544,7 @@ fn test_wall_quantity_with_opening() {
     // 柱・梁で囲まれた 4 節点壁（節点 0-1-3-2）。
     let shape = SectionShape::RcWall {
         thickness: 200.0,
+        pwh_ratio: None,
         ps: 0.0025,
     };
     let sec = shape.to_section(SectionId(2), "W20".to_string());
@@ -595,6 +596,7 @@ fn test_wall_quantity_via_wall_plate_is_included() {
     let mut model = rc_portal_model();
     let shape = SectionShape::RcWall {
         thickness: 200.0,
+        pwh_ratio: None,
         ps: 0.0025,
     };
     let sec = shape.to_section(SectionId(2), "W20".to_string());
@@ -650,6 +652,7 @@ fn test_attached_wall_plate_quantity_is_included_as_misc_wall() {
     let mut model = rc_portal_model();
     let shape = SectionShape::RcWall {
         thickness: 150.0,
+        pwh_ratio: None,
         ps: 0.0,
     };
     let sec = shape.to_section(SectionId(2), "W15".to_string());
