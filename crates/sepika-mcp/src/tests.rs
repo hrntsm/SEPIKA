@@ -1355,3 +1355,55 @@ fn attached_slab_mcp_rejects_creation_extent_and_anchor_with_common_diagnostic()
     assert_eq!(format!("{:?}", state.model), original);
     assert_eq!(state.undo.revision(), revision);
 }
+
+#[test]
+fn loaded_full_length_intent_survives_mcp_preparation_and_linear_analysis() {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::{LoadCase, LoadCaseKind, MemberLoad};
+    let mut model = rc_column_model();
+    let elem = model.elements[0].id;
+    let length_mm = model.member_length(&model.elements[0]);
+    let case_id = LoadCaseId(model.load_cases.len() as u32);
+    model.load_cases.push(LoadCase {
+        id: case_id,
+        name: "手入力".into(),
+        kind: LoadCaseKind::Other,
+        nodal: vec![],
+        member: vec![MemberLoad::full_length_uniform(
+            elem,
+            [0.0, 0.0, -1.0],
+            length_mm,
+            10.0,
+        )],
+    });
+    let path = std::env::temp_dir().join(format!("sepika-449-mcp-{}.ovika", std::process::id()));
+    sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+    let loaded = sepika_io::ovika::load_ovika(&path).unwrap().model;
+    let params = JobParams {
+        load_case: Some(case_id.0),
+        ..Default::default()
+    };
+    let (prepared, _) = job::model_prepared_for_analysis(&loaded, &params).unwrap();
+    assert_eq!(
+        prepared.load_cases[case_id.index()],
+        model.load_cases[case_id.index()]
+    );
+    let outcome = compute_job(&loaded, JobKind::LinearStatic, &params)
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(matches!(outcome, JobOutcome::LinearStatic { case, .. } if case == case_id.0));
+    assert_eq!(
+        loaded.load_cases[case_id.index()],
+        model.load_cases[case_id.index()]
+    );
+    let mut invalid = loaded;
+    if let sepika_core::model::MemberLoadKind::Distributed { b, .. } =
+        &mut invalid.load_cases[case_id.index()].member[0].kind
+    {
+        *b += 100.0;
+    }
+    match compute_job(&invalid, JobKind::LinearStatic, &params) {
+        Err(error) => assert!(error.to_string().contains("member[0]")),
+        Ok(_) => panic!("全長属性と不整合な作用区間を解析してはいけない"),
+    }
+    let _ = std::fs::remove_file(path);
+}

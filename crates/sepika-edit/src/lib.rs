@@ -7,6 +7,10 @@ use sepika_core::model::Model;
 pub trait EditCommand: Send {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand>;
     fn label(&self) -> &str;
+    /// 複合編集の途中候補へ適用する。座標と荷重区間の整合は複合編集の最終候補で検証する。
+    fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        self.apply(model)
+    }
     /// 何も変更しないコマンド（適用失敗時の安全なフォールバック `Noop` 等）か。
     /// [`UndoStack::run`] は逆コマンドがこれに該当する場合、undo 履歴へ積まない。
     fn is_noop(&self) -> bool {
@@ -109,7 +113,7 @@ impl UndoStack {
         true
     }
 
-    /// 直前の編集で拒否された取り付く床板の診断。成功または通常の Noop では `None`。
+    /// 直前の編集が拒否された理由。成功または通常の Noop では `None`。
     pub fn last_error(&self) -> Option<&str> {
         self.last_error.as_deref()
     }

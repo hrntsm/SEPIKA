@@ -102,6 +102,9 @@ pub struct OvikaContents {
 
 /// モデルと派生データを .ovika へ保存する。
 pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result<(), IoError> {
+    model
+        .validate_member_load_extents()
+        .map_err(IoError::Decode)?;
     let tmp_path = path.with_extension("ovika.tmp");
 
     let model_bytes = rmp_serde::to_vec_named(model).map_err(|e| IoError::Decode(e.to_string()))?;
@@ -250,6 +253,10 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
         .validate_attached_slabs()
         .map_err(|e| IoError::Decode(e.to_string()))?;
 
+    model
+        .validate_member_load_extents()
+        .map_err(IoError::Decode)?;
+
     Ok(OvikaContents {
         model,
         preparation,
@@ -265,6 +272,45 @@ mod tests {
     use sepika_core::ids::*;
     use sepika_core::model::*;
     use sepika_core::section_shape::SectionShape;
+
+    #[test]
+    fn full_length_and_fixed_extent_roundtrip_without_numeric_inference() {
+        let mut model = make_3node_model();
+        model.nodes[1].coord = [8000.0, 0.0, 0.0];
+        model.elements.push(ElementData {
+            id: ElemId(0),
+            kind: ElementKind::Beam,
+            nodes: vec![NodeId(0), NodeId(1)].into(),
+            section: None,
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 0.0, 1.0],
+            },
+            end_cond: [EndCondition::Fixed; 2],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        });
+        model.load_cases = default_load_cases();
+        let mut full = MemberLoad::full_length_uniform(ElemId(0), [0.0, 0.0, -1.0], 8000.0, 10.0);
+        full.name = "機器".into();
+        let fixed = MemberLoad::manual(ElemId(0), [0.0, 0.0, -1.0], full.kind.clone());
+        model.load_cases[0].member = vec![full, fixed];
+        let path = crate::test_util::test_tmp().join("member-load-extents.ovika");
+        save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+        let loaded = load_ovika(&path).unwrap().model;
+        assert_eq!(loaded.nodes, model.nodes);
+        assert_eq!(loaded.load_cases, model.load_cases);
+        assert_eq!(
+            loaded.load_cases[0].member[0].extent,
+            MemberLoadExtent::FullLengthUniform
+        );
+        assert_eq!(
+            loaded.load_cases[0].member[1].extent,
+            MemberLoadExtent::FixedDistance
+        );
+        let _ = std::fs::remove_file(path);
+    }
 
     #[test]
     fn load_rejects_attached_slab_with_common_geometry_diagnostic() {

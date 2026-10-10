@@ -1254,7 +1254,7 @@ fn copy_secondary(
 /// 部材荷重を複製先の材長へ合わせる。合わせられない場合は `None`。
 fn fit_member_load(
     kind: sepika_core::model::MemberLoadKind,
-    src_len: f64,
+    extent: sepika_core::model::MemberLoadExtent,
     dst_len: f64,
 ) -> Option<sepika_core::model::MemberLoadKind> {
     use sepika_core::model::MemberLoadKind;
@@ -1263,7 +1263,7 @@ fn fit_member_load(
             (a <= dst_len + PLAN_TOL_MM).then_some(MemberLoadKind::Point { a, p })
         }
         MemberLoadKind::Distributed { a, b, w1, w2 } => {
-            if a.abs() <= PLAN_TOL_MM && (b - src_len).abs() <= PLAN_TOL_MM {
+            if extent == sepika_core::model::MemberLoadExtent::FullLengthUniform {
                 return Some(MemberLoadKind::Distributed {
                     a: 0.0,
                     b: dst_len,
@@ -1327,10 +1327,10 @@ fn copy_case_loads(
         }
         let mut add_member = Vec::new();
         for ml in lc.member.iter().filter(|l| !l.source.is_auto()) {
-            let Some(&(e, src_len, dst_len)) = elem_map.get(&ml.elem) else {
+            let Some(&(e, _src_len, dst_len)) = elem_map.get(&ml.elem) else {
                 continue;
             };
-            match fit_member_load(ml.kind.clone(), src_len, dst_len) {
+            match fit_member_load(ml.kind.clone(), ml.extent, dst_len) {
                 Some(kind) => add_member.push(sepika_core::model::MemberLoad {
                     elem: e,
                     kind,

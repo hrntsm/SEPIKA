@@ -69,6 +69,15 @@ pub enum MemberLoadKind {
     Distributed { a: f64, b: f64, w1: f64, w2: f64 },
 }
 
+/// 部材荷重の区間指定。既定は i 端からの固定距離 [mm]。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MemberLoadExtent {
+    #[default]
+    FixedDistance,
+    /// 利用者入力の全長等分布。強度 [N/mm] を保持して現在材長へ追従する。
+    FullLengthUniform,
+}
+
 /// 部材に作用する荷重。`dir` は全体座標系での作用方向（内部で正規化）。
 /// 既定の重力方向は `[0.0, 0.0, -1.0]`。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -76,6 +85,9 @@ pub struct MemberLoad {
     pub elem: ElemId,
     pub dir: [f64; 3],
     pub kind: MemberLoadKind,
+    /// 全長追従か、i 端からの固定距離 [mm] か。省略時は固定距離。
+    #[serde(default)]
+    pub extent: MemberLoadExtent,
     /// 利用者が付けた荷重の名称。空文字は無名（[`NodalLoad::name`] と同じ規約）。
     pub name: String,
     /// 準備計算が生成した荷重か（[`NodalLoad::source`] と同じ規約）。
@@ -89,8 +101,48 @@ impl MemberLoad {
             elem,
             dir,
             kind,
+            extent: MemberLoadExtent::FixedDistance,
             name: String::new(),
             source: LoadSource::Manual,
+        }
+    }
+
+    /// 全長等分布を作る。材長 [mm] と強度 [N/mm] を与え、方向は全体座標で保持する。
+    pub fn full_length_uniform(elem: ElemId, dir: [f64; 3], length_mm: f64, w: f64) -> Self {
+        Self {
+            extent: MemberLoadExtent::FullLengthUniform,
+            ..Self::manual(
+                elem,
+                dir,
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: length_mm,
+                    w1: w,
+                    w2: w,
+                },
+            )
+        }
+    }
+
+    /// 全長追従と分布諸元の整合を検証する。固定距離は検証対象外。
+    /// 全長追従は材長 [mm] が非正・非有限、または指定が矛盾すれば失敗する。
+    pub fn validate_extent(&self, length_mm: f64) -> Result<(), String> {
+        if self.extent == MemberLoadExtent::FixedDistance {
+            return Ok(());
+        }
+        if self.source != LoadSource::Manual {
+            return Err("全長追従は利用者入力荷重にのみ指定できます".into());
+        }
+        if !length_mm.is_finite() || length_mm <= 1e-9 {
+            return Err("全長追従の材長が非正または非有限です".into());
+        }
+        match self.kind {
+            MemberLoadKind::Distributed { a, b, w1, w2 }
+                if a == 0.0 && b.is_finite() && b == length_mm && w1.is_finite() && w1 == w2 =>
+            {
+                Ok(())
+            }
+            _ => Err("全長追従は a=0、b=現在材長、w1=w2 の等分布が必要です".into()),
         }
     }
 
@@ -100,6 +152,7 @@ impl MemberLoad {
             elem,
             dir,
             kind,
+            extent: MemberLoadExtent::FixedDistance,
             name: String::new(),
             source: LoadSource::Auto,
         }
@@ -391,5 +444,60 @@ impl LoadCfg {
         } else {
             1.0
         }
+    }
+}
+
+impl Model {
+    /// 全長追従の属性・諸元を検証する。不整合は荷重ケース・部材荷重添字を付けて返す。
+    pub fn validate_member_load_extents(&self) -> Result<(), String> {
+        for case in &self.load_cases {
+            for (index, load) in case.member.iter().enumerate() {
+                let length_mm = self
+                    .element(load.elem)
+                    .map_or(0.0, |e| self.member_length(e));
+                load.validate_extent(length_mm).map_err(|reason| {
+                    format!(
+                        "荷重ケース {} ({}) member[{}] 部材 {}: {}",
+                        case.id.0, case.name, index, load.elem.0, reason
+                    )
+                })?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod extent_tests {
+    use super::*;
+
+    #[test]
+    fn missing_extent_keeps_fixed_distance_even_for_equal_intensity_full_span() {
+        let load: MemberLoad = serde_json::from_value(serde_json::json!({
+            "elem": 0, "dir": [0, 0, -1], "name": "", "source": "Manual",
+            "kind": {"Distributed": {"a": 0, "b": 6000, "w1": 10, "w2": 10}}
+        }))
+        .unwrap();
+        assert_eq!(load.extent, MemberLoadExtent::FixedDistance);
+    }
+
+    #[test]
+    fn full_length_intent_rejects_inconsistent_distribution_and_generated_source() {
+        let mut load = MemberLoad::full_length_uniform(ElemId(0), [0.0, 0.0, -1.0], 6000.0, 10.0);
+        assert!(load.validate_extent(6000.0).is_ok());
+        assert!(load.validate_extent(8000.0).is_err());
+        assert!(load.validate_extent(0.0).is_err());
+        load.source = LoadSource::Auto;
+        assert!(load.validate_extent(6000.0).is_err());
+        load.source = LoadSource::Manual;
+        load.kind = MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 6000.0,
+            w1: 10.0,
+            w2: 11.0,
+        };
+        assert!(load.validate_extent(6000.0).is_err());
+        load.kind = MemberLoadKind::Point { a: 1000.0, p: 10.0 };
+        assert!(load.validate_extent(6000.0).is_err());
     }
 }
