@@ -47,6 +47,27 @@ impl App {
         let Some(saved) = self.core.scoped.results.as_ref() else {
             return false;
         };
+        let has_analysis_results = !saved.statics.is_empty()
+            || !saved.combos.is_empty()
+            || saved.modal.is_some()
+            || !saved.member_forces.is_empty()
+            || !saved.panel_moments.is_empty()
+            || saved.pushover.is_some()
+            || saved.pushover_x.is_some()
+            || saved.pushover_y.is_some()
+            || !saved.holding_evaluations.is_empty()
+            || saved.time_history.is_some()
+            || !saved.time_histories.is_empty()
+            || saved.lumped.is_some()
+            || !saved.lumped_results.is_empty();
+        let has_panel_success = saved.joint_checks.iter().any(|check| {
+            check.label.starts_with("パネルゾーン(S)")
+                && matches!(check.outcome, CheckOutcome::Checked(_))
+        });
+        // 空の結果容器や床板だけの直接設計には、流用を拒否すべき架構解析応力がない。
+        if !has_analysis_results && !has_panel_success {
+            return false;
+        }
         let model = &self.core.model;
         let mut rejected = Vec::new();
         for node in &model.nodes {

@@ -12403,6 +12403,34 @@ fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_reta
     let csv = crate::summary::build_report_csv(&reopened);
     assert!(!csv.contains("旧標準形式成功"));
     assert!(csv.contains("検定不能") && csv.contains("上位置差=50"));
+    assert!(!old.member_forces.is_empty());
+    for artifact in [
+        ResultsBundle {
+            joint_checks: old.joint_checks.clone(),
+            ..Default::default()
+        },
+        ResultsBundle {
+            member_forces: old.member_forces.clone(),
+            ..Default::default()
+        },
+    ] {
+        save(&path, &staggered, artifact);
+        reopened.open_project_from(path.clone());
+        let rejected = reopened.core.scoped.results.as_ref().unwrap();
+        assert!(rejected.member_forces.is_empty());
+        assert!(rejected
+            .joint_checks
+            .iter()
+            .all(|check| matches!(check.outcome, CheckOutcome::Skipped { .. })));
+        assert!(reopened.core.scoped.staleness.results_stale);
+        assert!(reopened
+            .core
+            .scoped
+            .last_notice
+            .as_deref()
+            .unwrap()
+            .contains("利用不可"));
+    }
     reopened.run_design_check();
     assert!(reopened
         .core
