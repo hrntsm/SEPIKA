@@ -128,6 +128,7 @@ pub struct PrepSummary {
 /// 階の分布 1 行。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PrepStoryRow {
+    pub wall_weights: Vec<sepika_core::model::WallStoryWeight>,
     pub name: String,
     /// 床レベル [mm]（モデル座標）。
     pub elevation: f64,
@@ -533,6 +534,11 @@ impl App {
         layers
             .iter()
             .map(|l| PrepStoryRow {
+                wall_weights: model
+                    .stories
+                    .get(l.top.index())
+                    .map(|s| s.wall_weights.clone())
+                    .unwrap_or_default(),
                 name: l.name.clone(),
                 elevation: l.top_elevation,
                 height: l.height,

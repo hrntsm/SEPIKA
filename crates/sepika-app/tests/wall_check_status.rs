@@ -68,6 +68,7 @@ fn fixture() -> App {
             &boundary,
             WallPlate {
                 id: WallPlateId(0),
+                dl_support: None,
                 self_weight_shares: vec![],
                 shape: WallPlateShape::Enclosed,
                 section: Some(SectionId(section)),

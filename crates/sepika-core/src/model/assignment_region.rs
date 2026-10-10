@@ -419,6 +419,7 @@ fn wall_support_is_valid(model: &Model, support: SupportMemberId) -> bool {
             .is_some_and(|element| element.kind == ElementKind::Beam),
         SupportMemberId::Secondary(id) => model
             .posts()
+            .chain(model.beams())
             .any(|post| post.id == id && matches!(post.ends, SecondaryMemberEnds::Supported(_))),
     }
 }
@@ -916,7 +917,7 @@ fn wall_support_segments_on_plane(
         });
     }
     let mut secondaries = Vec::new();
-    for sm in model.posts() {
+    for sm in model.posts().chain(model.beams()) {
         let id = sm.id;
         if !matches!(sm.ends, SecondaryMemberEnds::Supported(_)) {
             continue;

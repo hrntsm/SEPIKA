@@ -252,17 +252,32 @@ fn stories_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                 } else {
                     ui.label(format!("{:.1}", force_kn(r.weight)))
                         .on_hover_text(
-                            r.calculated_weight
-                                .map(|weight| {
-                                    format!(
-                                        "自動算定: {:.3} kN / 採用: {:.3} kN",
-                                        force_kn(weight),
-                                        force_kn(r.weight)
-                                    )
-                                })
-                                .unwrap_or_else(|| {
-                                    "自動算定重量は未算定または陳腐化しています".into()
-                                }),
+                            [
+                                r.calculated_weight
+                                    .map(|weight| {
+                                        format!(
+                                            "自動算定: {:.3} kN / 採用: {:.3} kN",
+                                            force_kn(weight),
+                                            force_kn(r.weight)
+                                        )
+                                    })
+                                    .unwrap_or_else(|| {
+                                        "自動算定重量は未算定または陳腐化しています".into()
+                                    }),
+                                r.wall_weights
+                                    .iter()
+                                    .map(|w| {
+                                        format!(
+                                            "壁版 {}: 階帯 {:.3} kN / 物理総量 {:.3} kN",
+                                            w.plate.0,
+                                            force_kn(w.band.design_n),
+                                            force_kn(w.total.physical_n)
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\n"),
+                            ]
+                            .join("\n"),
                         );
                 }
             });

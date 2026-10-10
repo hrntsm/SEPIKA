@@ -91,6 +91,9 @@ pub fn compute_eigen(
 ) -> JobResult<sepika_solver::dynamic::eigen::ModalResult> {
     crate::weight_preparation::require_current_generated_mass(&model)?;
     model
+        .validate_wall_weight_generation()
+        .map_err(JobError::InvalidInput)?;
+    model
         .validate_damper_mass_placement()
         .map_err(JobError::InvalidInput)?;
     let model = expand_walls(model);
@@ -187,6 +190,9 @@ pub fn compute_time_history(
     wave: sepika_solver::dynamic::timehistory::GroundMotion,
 ) -> JobResult<sepika_solver::dynamic::timehistory::ResponseResult> {
     crate::weight_preparation::require_current_generated_mass(&model)?;
+    model
+        .validate_wall_weight_generation()
+        .map_err(JobError::InvalidInput)?;
     model
         .validate_damper_mass_placement()
         .map_err(JobError::InvalidInput)?;

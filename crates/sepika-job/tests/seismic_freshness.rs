@@ -390,3 +390,135 @@ fn edited_generated_diaphragm_weight_and_ci_survive_density_refresh() {
         assert_eq!(model.seismic_weight_generation, record);
     }
 }
+
+#[test]
+fn added_and_inserted_storeys_reserve_existing_masters_and_keep_independent_resultants() {
+    use sepika_core::dof::Dof;
+    use sepika_core::ids::{ElemId, NodeId, StoryId};
+    use std::collections::HashSet;
+    for inserted in [false, true] {
+        let mut model = fixture::two_storeys();
+        let settings = AnalysisSettings {
+            soil: sepika_load::ai::SoilClass::III,
+            ..Default::default()
+        };
+        prepare_model(&mut model, &settings, None, true).unwrap();
+        for story in &mut model.stories {
+            story.weight_override = Some(100000.0);
+        }
+        let original_masters = model.generated_masters.clone();
+        let upper = original_masters[2];
+        model.nodes[upper.index()].restraint.set_fixed(Dof::Rz);
+        for constraint in &mut model.constraints {
+            if let Constraint::RigidDiaphragm { master, weight, .. } = constraint {
+                if *master == upper {
+                    *weight = Some(100100.0);
+                }
+            }
+        }
+        let original: Vec<_> = original_masters
+            .iter()
+            .map(|id| {
+                (
+                    *id,
+                    model.nodes[id.index()].coord,
+                    model.nodes[id.index()].restraint,
+                )
+            })
+            .collect();
+        let first = model.nodes.len() as u32;
+        let elevation = if inserted { 18750.0 } else { 37500.0 };
+        for (offset, template) in [4usize, 5].into_iter().enumerate() {
+            let mut node = model.nodes[template].clone();
+            node.id = NodeId(first + offset as u32);
+            node.coord[2] = elevation;
+            node.story = None;
+            model.nodes.push(node);
+        }
+        for (template, bottom, top) in [(2usize, 4u32, first), (3, 5, first + 1)] {
+            let mut element = model.elements[template].clone();
+            element.id = ElemId(model.elements.len() as u32);
+            if inserted {
+                model.elements[template].nodes =
+                    [NodeId(bottom - 2), NodeId(top)].into_iter().collect();
+                element.nodes = [NodeId(top), NodeId(bottom)].into_iter().collect();
+            } else {
+                element.nodes = [NodeId(bottom), NodeId(top)].into_iter().collect();
+            }
+            model.elements.push(element);
+        }
+        let mut beam = model.elements[5].clone();
+        beam.id = ElemId(model.elements.len() as u32);
+        beam.nodes = [NodeId(first), NodeId(first + 1)].into_iter().collect();
+        model.elements.push(beam);
+        let mut story = model.stories[2].clone();
+        story.id = StoryId(3);
+        story.name = "追加階".into();
+        story.elevation = elevation;
+        story.node_ids.clear();
+        story.seismic_weight = None;
+        story.dynamic_mass = None;
+        story.weight_override = Some(100000.0);
+        if inserted {
+            model.stories[2].id = StoryId(3);
+            for constraint in &mut model.constraints {
+                if let Constraint::RigidDiaphragm { story, .. } = constraint {
+                    if *story == StoryId(2) {
+                        *story = StoryId(3);
+                    }
+                }
+            }
+            story.id = StoryId(2);
+            model.stories.insert(2, story);
+        } else {
+            model.stories.push(story);
+        }
+        let report = prepare_model(&mut model, &settings, None, false).unwrap();
+        assert_eq!(
+            model.generated_masters.len(),
+            4,
+            "inserted={inserted} notices={:?}",
+            report.notices
+        );
+        assert_eq!(
+            model.generated_masters.iter().collect::<HashSet<_>>().len(),
+            4
+        );
+        for (id, coord, restraint) in original {
+            for (actual, expected) in model.nodes[id.index()].coord.iter().zip(coord) {
+                assert!((actual - expected).abs() < 1e-9);
+            }
+            assert_eq!(model.nodes[id.index()].restraint, restraint);
+            let diaphragm = model
+                .constraints
+                .iter()
+                .find(|c| matches!(c, Constraint::RigidDiaphragm { master, .. } if *master == id))
+                .unwrap();
+            if let Constraint::RigidDiaphragm { story, .. } = diaphragm {
+                assert_eq!(model.stories[story.index()].elevation, coord[2]);
+            }
+        }
+        assert!(model.constraints.iter().any(|c| matches!(c, Constraint::RigidDiaphragm {master, weight:Some(weight), ci_override:None, ..} if *master==upper && *weight==100100.0)));
+        assert_eq!(
+            model
+                .layers()
+                .iter()
+                .map(|layer| layer.weight.unwrap())
+                .sum::<f64>(),
+            300000.0
+        );
+        for (name, axis) in [(EX_CASE_NAME, 0), (EY_CASE_NAME, 1)] {
+            let case = model.load_cases.iter().find(|c| c.name == name).unwrap();
+            assert!(
+                (case.nodal.iter().map(|load| load.values[axis]).sum::<f64>() - 60000.0).abs()
+                    < 1e-8,
+                "{inserted} {name}: {:?}",
+                case.nodal
+            );
+            sepika_job::compute::compute_linear_static(model.clone(), case.id).unwrap();
+        }
+        let record = model.seismic_weight_generation.clone();
+        prepare_model(&mut model, &settings, None, false).unwrap();
+        assert_eq!(model.seismic_weight_generation, record);
+    }
+}

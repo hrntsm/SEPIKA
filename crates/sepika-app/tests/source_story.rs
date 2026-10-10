@@ -26,6 +26,7 @@ fn prepare(model: &mut Model, undo: &mut UndoStack) {
     assert!(undo.run(
         model,
         Box::new(sepika_edit::ApplyStories {
+            wall_weight_generation: g.wall_weight_generation,
             damper_mass_generation: g.damper_mass_generation,
             stories: g.stories,
             node_story: g.node_story,
@@ -519,11 +520,12 @@ fn main_native_model_without_source_fields_keeps_messagepack_export_fallback() {
     m.stb_node_ids.clear();
     let mut bytes = rmp_serde::to_vec(&m).unwrap();
     assert_eq!(bytes.pop(), Some(0xc0));
+    assert_eq!(bytes.pop(), Some(0xc0));
     assert_eq!(bytes.pop(), Some(0xc2));
     assert_eq!(bytes.pop(), Some(0x90));
     assert_eq!(bytes.pop(), Some(0x90));
     assert_eq!(bytes[0], 0xdc);
-    let fields = u16::from_be_bytes([bytes[1], bytes[2]]) - 4;
+    let fields = u16::from_be_bytes([bytes[1], bytes[2]]) - 5;
     bytes[1..3].copy_from_slice(&fields.to_be_bytes());
     let restored: Model = rmp_serde::from_slice(&bytes).unwrap();
     assert!(!restored.source_stories_initialized);

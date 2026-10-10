@@ -1617,6 +1617,7 @@ fn status_wall_model() -> (Model, sepika_load::wall_expand::WallExpansionIndex) 
         model.add_enclosed_wall_plate_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             WallPlate {
+                dl_support: None,
                 self_weight_shares: vec![],
                 id: WallPlateId(0),
                 shape: WallPlateShape::Enclosed,

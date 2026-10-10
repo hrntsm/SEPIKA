@@ -40,6 +40,7 @@ fn beam(id: u32, a: u32, b: u32) -> ElementData {
 
 fn plate(id: u32) -> WallPlate {
     WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(id),
         shape: WallPlateShape::Enclosed,
@@ -84,6 +85,11 @@ fn bay() -> Model {
     wall_sec.material = Some(MaterialId(0));
     let mut beam_sec = wall_sec.clone();
     beam_sec.id = SectionId(1);
+    beam_sec.area = 0.0;
+    beam_sec.shape = None;
+    beam_sec.thickness = None;
+    beam_sec.width = 0.0;
+    beam_sec.depth = 0.0;
     m.sections = vec![wall_sec, beam_sec];
     m.materials = vec![Material {
         strength_factor: None,
@@ -163,7 +169,7 @@ fn split_by_post() -> Model {
 
 /// 壁版が壁領域全体を覆う場合、壁エレメントになるので分配しない。
 #[test]
-fn 領域を覆う壁版は分配の対象外() {
+fn 領域を覆う壁版も明示dl支持へ一度だけ分配する() {
     let mut m = bay();
     add_plate(&mut m, 0, [0, 1, 2, 3], [1.0, 0.0, 0.0, 0.0]);
     m.wall_regions = vec![WallRegion {
@@ -176,7 +182,8 @@ fn 領域を覆う壁版は分配の対象外() {
     assert!(m.wall_plate_covers_region(&m.wall_plates[0]));
     let out = distribute_enclosed_wall_plates(&m);
     assert!(out.posts.is_empty());
-    assert!(out.primary.is_empty());
+    assert_eq!(out.primary.len(), 1);
+    assert!((out.primary[0].cmq.q_i + out.primary[0].cmq.q_j - full_weight()).abs() < 1e-6);
 }
 
 /// 壁領域を覆っていても、断面が無く壁エレメントにならない壁版は分配の対象になる。
@@ -477,14 +484,14 @@ fn edge_len(model: &Model, bl: &BeamLoad) -> f64 {
 /// 矩形の壁版が左右の鉛直辺で受ける場合、上下 2 節点ずつへ 1/4 ずつとなり、
 /// 壁エレメントの頂点等分配と一致する。
 #[test]
-fn 地震用重量は辺の両端へ半分ずつ配り総和を保存する() {
+fn dl支持反力は総和を保存する() {
     let mut m = split_by_post();
     // 壁版自重の分配だけを確認するため、間柱自身の自重は外す。
     for p in m.wall_regions.iter_mut().flat_map(|r| r.posts.iter_mut()) {
-        p.section = None;
+        p.section = Some(SectionId(1));
     }
     let mut node_weight = vec![0.0; m.nodes.len()];
-    accumulate_wall_and_secondary_seismic_weight(&m, &mut node_weight).unwrap();
+    accumulate_wall_and_secondary_dl_weight(&m, &mut node_weight).unwrap();
 
     let sum: f64 = node_weight.iter().sum();
     assert!(

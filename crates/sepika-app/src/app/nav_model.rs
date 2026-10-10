@@ -241,6 +241,7 @@ mod tests {
 
     fn story(name: &str) -> Story {
         Story {
+            wall_weights: Vec::new(),
             id: StoryId(0),
             name: name.to_string(),
             elevation: 0.0,

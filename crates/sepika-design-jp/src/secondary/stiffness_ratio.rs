@@ -199,6 +199,7 @@ mod tests {
             })
             .collect();
         let base_story = Story {
+            wall_weights: Vec::new(),
             id: base,
             name: "1F".to_string(),
             elevation: 0.0,
@@ -213,6 +214,7 @@ mod tests {
             fireproof: Default::default(),
         };
         let story = Story {
+            wall_weights: Vec::new(),
             id: s0,
             name: "2F".to_string(),
             elevation: 3000.0,
@@ -335,6 +337,7 @@ mod tests {
         };
         let elements = vec![mk_elem(0, 1, 2), mk_elem(1, 0, 1)];
         let base_story = Story {
+            wall_weights: Vec::new(),
             id: base,
             name: "1F".to_string(),
             elevation: 0.0,
@@ -349,6 +352,7 @@ mod tests {
             fireproof: Default::default(),
         };
         let top = Story {
+            wall_weights: Vec::new(),
             id: top_story,
             name: "2F".to_string(),
             elevation: 4000.0,

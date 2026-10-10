@@ -661,6 +661,132 @@ fn compute_dl_beam_loads_checked(
 pub fn compute_gravity_auto_load_cases(
     model: &Model,
 ) -> Result<AutoLoadComputeResult, crate::error::JobError> {
+    for plate in &model.wall_plates {
+        model
+            .wall_weight(plate)
+            .map_err(crate::error::JobError::InvalidInput)?;
+        if !plate.is_attached() {
+            sepika_load::wall_plate_load::dl_ratios(model, plate)
+                .map_err(crate::error::JobError::InvalidInput)?;
+        } else if plate.dl_support.is_some() || !plate.self_weight_shares.is_empty() {
+            return Err(crate::error::JobError::InvalidInput(format!(
+                "壁版 {}: 取付き壁に梁三方式・任意辺率は適用できません",
+                plate.id.0
+            )));
+        }
+    }
+    for plate in model.wall_plates.iter().filter(|p| p.is_attached()) {
+        model
+            .wall_weight(plate)
+            .and_then(|w| w.projected_design_line_loads())
+            .map_err(crate::error::JobError::InvalidInput)?;
+    }
+    let missing = sepika_load::wall_plate_load::wall_plates_without_load_path(model);
+    if !missing.is_empty() {
+        return Err(crate::error::JobError::InvalidInput(format!(
+            "壁版 {:?}: DL支持辺へ伝達できません（スリット・区間・支持部材を確認）",
+            missing.iter().map(|id| id.0).collect::<Vec<_>>()
+        )));
+    }
+    let mut full = compute_gravity_auto_load_cases_impl(model)?;
+    if model.wall_plates.is_empty() {
+        return Ok(full);
+    }
+    let mut without = model.clone();
+    without.wall_plates.clear();
+    let baseline = compute_gravity_auto_load_cases_impl(&without)?;
+    let dead = full
+        .cases
+        .iter_mut()
+        .find(|c| c.kind == LoadCaseKind::Dead)
+        .unwrap();
+    let base = baseline
+        .cases
+        .iter()
+        .find(|c| c.kind == LoadCaseKind::Dead)
+        .unwrap();
+    let mut wall_nodes: Vec<NodalLoad> = Vec::new();
+    for n in &dead.nodal {
+        if let Some(w) = wall_nodes.iter_mut().find(|w| w.node == n.node) {
+            for (v, x) in w.values.iter_mut().zip(n.values) {
+                *v += x;
+            }
+        } else {
+            wall_nodes.push(n.clone());
+        }
+    }
+    for b in &base.nodal {
+        if let Some(w) = wall_nodes.iter_mut().find(|w| w.node == b.node) {
+            for (v, d) in w.values.iter_mut().zip(b.values) {
+                *v -= d;
+            }
+        } else {
+            let mut w = b.clone();
+            for v in &mut w.values {
+                *v = -*v;
+            }
+            wall_nodes.push(w);
+        }
+    }
+    let mut wall_members = dead.member.clone();
+    for b in &base.member {
+        let matched = wall_members.iter_mut().find(|w| {
+            w.elem == b.elem
+                && w.dir == b.dir
+                && match (&w.kind, &b.kind) {
+                    (MemberLoadKind::Point { a, .. }, MemberLoadKind::Point { a: c, .. }) => a == c,
+                    (
+                        MemberLoadKind::Distributed { a, b, .. },
+                        MemberLoadKind::Distributed { a: c, b: d, .. },
+                    ) => a == c && b == d,
+                    _ => false,
+                }
+        });
+        if let Some(w) = matched {
+            match (&mut w.kind, &b.kind) {
+                (MemberLoadKind::Point { p, .. }, MemberLoadKind::Point { p: q, .. }) => *p -= q,
+                (
+                    MemberLoadKind::Distributed { w1, w2, .. },
+                    MemberLoadKind::Distributed { w1: x, w2: y, .. },
+                ) => {
+                    *w1 -= x;
+                    *w2 -= y;
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            let mut w = b.clone();
+            match &mut w.kind {
+                MemberLoadKind::Point { p, .. } => *p = -*p,
+                MemberLoadKind::Distributed { w1, w2, .. } => {
+                    *w1 = -*w1;
+                    *w2 = -*w2;
+                }
+            }
+            wall_members.push(w);
+        }
+    }
+    wall_nodes.retain(|n| n.values.iter().any(|v| v.abs() > 1e-9));
+    wall_members.retain(|m| match m.kind {
+        MemberLoadKind::Point { p, .. } => p.abs() > 1e-9,
+        MemberLoadKind::Distributed { w1, w2, .. } => w1.abs() > 1e-12 || w2.abs() > 1e-12,
+    });
+    for n in &mut wall_nodes {
+        n.source = sepika_core::model::LoadSource::WallSelfWeight;
+    }
+    for m in &mut wall_members {
+        m.source = sepika_core::model::LoadSource::WallSelfWeight;
+    }
+    dead.nodal = base.nodal.clone();
+    dead.nodal.extend(wall_nodes);
+    dead.member = base.member.clone();
+    dead.member.extend(wall_members);
+    Ok(full)
+}
+
+fn compute_gravity_auto_load_cases_impl(
+    model: &Model,
+) -> Result<AutoLoadComputeResult, crate::error::JobError> {
     model
         .validate_attached_slabs()
         .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
@@ -691,13 +817,23 @@ pub fn compute_gravity_auto_load_cases(
             None
         };
     let self_weight_model = initialized.as_ref().unwrap_or(model);
-    sepika_load::cascade::solve_with_basis(
+    let transfer = sepika_load::cascade::solve_with_basis(
         self_weight_model,
         |_| 0.0,
         true,
         sepika_load::cascade::SelfWeightBasis::MassEquiv,
     )
     .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
+    if !model.wall_plates.is_empty()
+        && (!transfer.unresolved.is_empty() || !transfer.cyclic.is_empty())
+    {
+        return Err(crate::error::JobError::InvalidInput(format!(
+            "壁版 {:?}: 二次支持の伝達先未解決 {:?}・循環 {:?}",
+            model.wall_plates.iter().map(|p| p.id.0).collect::<Vec<_>>(),
+            transfer.unresolved,
+            transfer.cyclic
+        )));
+    }
     let (sw_nodal, sw_member) =
         sepika_load::self_weight::self_weight_case_content(self_weight_model, &load_cfg)
             .map_err(crate::error::JobError::InvalidInput)?;
@@ -707,11 +843,6 @@ pub fn compute_gravity_auto_load_cases(
     let (aw_nodal, aw_member) = slab_load_case_content(model, &attached_wall_loads);
     dl_nodal.extend(aw_nodal);
     dl_member.extend(aw_member);
-    let enclosed_wall_loads =
-        sepika_load::wall_plate_load::distribute_enclosed_wall_plates(model).primary;
-    let (ew_nodal, ew_member) = slab_load_case_content(model, &enclosed_wall_loads);
-    dl_nodal.extend(ew_nodal);
-    dl_member.extend(ew_member);
     let (dl_nodal, extra_member) = resolve_nodal_to_primary(model, dl_nodal, SPAN_TOL_MM);
     dl_member.extend(extra_member);
 
@@ -773,6 +904,11 @@ pub fn compute_seismic_auto_load_cases(
         for name in [EX_CASE_NAME, EY_CASE_NAME] {
             notices.push(format!("{name} の Ai 地震力を再生成できません: 階と地震用重量が未定義です。明示準備を実行してください。"));
         }
+        return AutoLoadComputeResult { cases, notices };
+    }
+
+    if let Err(reason) = model.validate_wall_weight_generation() {
+        notices.push(reason);
         return AutoLoadComputeResult { cases, notices };
     }
 
@@ -1721,6 +1857,7 @@ mod tests {
         region.slab_ids.push(sepika_core::ids::SlabId(0));
         model.floor_regions.push(region);
         model.stories.push(Story {
+            wall_weights: Vec::new(),
             id: StoryId(1),
             name: "基部".into(),
             elevation: 0.0,
@@ -1735,6 +1872,7 @@ mod tests {
             fireproof: Default::default(),
         });
         model.stories.push(Story {
+            wall_weights: Vec::new(),
             id: StoryId(0),
             name: "1F".into(),
             elevation: 3000.0,
@@ -1975,6 +2113,7 @@ mod tests {
         });
         // 辺0（節点0-1、大梁として実在）に全長載るパラペット（立ち上がり500mm）。
         let plate = WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Attached {
@@ -2085,6 +2224,7 @@ mod tests {
             property_basis: Default::default(),
         });
         let plate = WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Attached {
@@ -2206,6 +2346,7 @@ mod tests {
             });
         }
         let plate = WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Attached {
@@ -2270,6 +2411,7 @@ mod tests {
 
         let mut model = Model::default();
         model.stories.push(Story {
+            wall_weights: Vec::new(),
             id: StoryId(0),
             name: "1F".into(),
             elevation: 0.0,

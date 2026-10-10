@@ -773,6 +773,7 @@ fn test_model_issues_warns_story_without_diaphragm() {
 
     let mut model = make_cantilever_model();
     model.stories.push(Story {
+        wall_weights: Vec::new(),
         id: StoryId(0),
         name: "2F".into(),
         elevation: 3000.0,
@@ -810,6 +811,7 @@ fn test_model_issues_errors_on_duplicate_story_names() {
 
     let mut model = make_cantilever_model();
     let story = |id: u32, name: &str, elevation: f64| Story {
+        wall_weights: Vec::new(),
         id: StoryId(id),
         name: name.into(),
         elevation,
@@ -875,6 +877,7 @@ fn make_two_story_diaphragm_model(
         nodes,
         stories: vec![
             Story {
+                wall_weights: Vec::new(),
                 id: StoryId(0),
                 name: "1F".into(),
                 elevation: 0.0,
@@ -889,6 +892,7 @@ fn make_two_story_diaphragm_model(
                 fireproof: Default::default(),
             },
             Story {
+                wall_weights: Vec::new(),
                 id: StoryId(1),
                 name: "2F".into(),
                 elevation: 3000.0,
@@ -1233,6 +1237,7 @@ fn make_story_ratio_model(structures: &[StoryStructure]) -> Model {
         support_spring: None,
     }];
     let mut stories = vec![Story {
+        wall_weights: Vec::new(),
         id: StoryId(0),
         name: "F1".to_string(),
         elevation: 0.0,
@@ -1258,6 +1263,7 @@ fn make_story_ratio_model(structures: &[StoryStructure]) -> Model {
             support_spring: None,
         });
         stories.push(Story {
+            wall_weights: Vec::new(),
             id: StoryId((i + 1) as u32),
             name: format!("F{}", i + 2),
             elevation: elev,
@@ -1304,6 +1310,7 @@ fn test_steel_height_ratio() {
 #[test]
 fn test_ground_elevation_from_basement_and_fallback() {
     let story = |id: u32, z: f64, kind: StoryLevelKind| Story {
+        wall_weights: Vec::new(),
         id: StoryId(id),
         name: format!("S{id}"),
         elevation: z,
@@ -1371,6 +1378,7 @@ fn test_ground_elevation_from_basement_and_fallback() {
 fn make_diaphragm_model(diaphragms: Vec<(NodeId, Option<f64>, Option<f64>)>) -> Model {
     let mut model = Model {
         stories: vec![Story {
+            wall_weights: Vec::new(),
             id: StoryId(0),
             name: "F1".into(),
             elevation: 1000.0,
@@ -2513,6 +2521,7 @@ fn test_model_issues_errors_on_both_beam_face_slit() {
         &boundary,
         WallPlate {
             // 切れていない鉛直支持辺（辺 1・辺 3）へ負担率を明示する。
+            dl_support: None,
             self_weight_shares: vec![0.0, 0.5, 0.0, 0.5],
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -2593,6 +2602,7 @@ fn test_model_issues_errors_on_both_beam_face_slit_on_element_plate() {
     let plate_id = model.add_enclosed_wall_plate_from_nodes(
         &boundary,
         WallPlate {
+            dl_support: None,
             self_weight_shares: vec![0.0, 0.5, 0.0, 0.5],
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -2672,6 +2682,7 @@ fn test_model_issues_warns_ignored_slit_on_non_quad_plate() {
             NodeId(n + 1),
         ],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -2803,6 +2814,7 @@ fn test_model_issues_warns_ignored_slit_without_boundary_nodes() {
         .expect("間柱を辺に持つ 4 辺の壁版割当領域");
     let plate_id = WallPlateId(0);
     model.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: vec![1.0, 0.0, 0.0, 0.0],
         id: plate_id,
         shape: WallPlateShape::Enclosed,
@@ -2839,7 +2851,7 @@ fn test_model_issues_warns_ignored_slit_without_boundary_nodes() {
 
 /// 4 節点でない壁版・断面未割当の壁版は警告し、解析は止めない。
 #[test]
-fn test_model_issues_warns_wall_plates_not_expanded() {
+fn test_model_issues_reports_unexpanded_walls_and_unresolved_weight_inputs() {
     use super::precheck::{model_issues, precheck_model, IssueSeverity};
     use sepika_core::ids::WallPlateId;
     use sepika_core::model::{WallPlate, WallPlateShape};
@@ -2872,6 +2884,7 @@ fn test_model_issues_warns_wall_plates_not_expanded() {
             NodeId(n + 1),
         ],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -2886,6 +2899,7 @@ fn test_model_issues_warns_wall_plates_not_expanded() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(n), NodeId(n + 1)],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(1),
             shape: WallPlateShape::Enclosed,
@@ -2898,6 +2912,7 @@ fn test_model_issues_warns_wall_plates_not_expanded() {
         },
     );
     model.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(2),
         shape: WallPlateShape::Attached {
@@ -2916,6 +2931,7 @@ fn test_model_issues_warns_wall_plates_not_expanded() {
         slit: Default::default(),
     });
     model.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(3),
         shape: WallPlateShape::Attached {
@@ -2981,11 +2997,8 @@ fn test_model_issues_warns_wall_plates_not_expanded() {
             e.section = Some(SectionId(1));
         }
     }
-    assert!(
-        precheck_model(&model).is_ok(),
-        "解析は止めない: {:?}",
-        precheck_model(&model).err()
-    );
+    let error = precheck_model(&model).unwrap_err().to_string();
+    assert!(error.contains("壁版") && error.contains("板厚"), "{error}");
 }
 
 /// 自立壁（床領域アンカー）が荷重を流せる床の上に載っていない場合はエラーで止める。
@@ -2997,7 +3010,12 @@ fn self_standing_wall_off_the_floor_is_an_error() {
     use sepika_core::model::{RegionAnchor, WallPlate, WallPlateShape};
 
     let mut model = make_cantilever_model();
-    let sec = model.sections[0].id;
+    let mut wall_section = model.sections[0].clone();
+    wall_section.id = SectionId(model.sections.len() as u32);
+    wall_section.thickness = Some(200.0);
+    wall_section.shape = None;
+    let sec = wall_section.id;
+    model.sections.push(wall_section);
     let n = model.nodes.len() as u32;
     // 床領域からも部材からも離れた位置に置いた自立壁の 2 節点。
     for (i, x) in [50000.0f64, 54000.0].into_iter().enumerate() {
@@ -3011,6 +3029,7 @@ fn self_standing_wall_off_the_floor_is_an_error() {
         });
     }
     model.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(model.wall_plates.len() as u32),
         shape: WallPlateShape::Attached {

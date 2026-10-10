@@ -42,7 +42,7 @@ impl App {
     /// 対応するケースがなく内容も空の場合は空ケースを作らない。
     ///
     /// DL に自重を含めるため、階の自動生成（地震用重量）では密度からの自重直接
-    /// 算入を無効にして二重計上を防ぐ（`density_self_weight_for_stories`）。
+    /// 算入を無効にして二重計上を防ぐ。
     ///
     /// 解析実行系（`sync_auto_load_cases_action` 経由）・`generate_stories_action`
     /// の入口で毎回呼ぶことを想定した冪等な同期アクション。
@@ -138,6 +138,8 @@ impl App {
     }
 
     pub(super) fn sync_prepared_model(&mut self, initialize_stories: bool) {
+        #[cfg(feature = "gui")]
+        self.clear_generated_member_selection();
         let current = self.compute_auto_load_sync_hash();
         if self.core.scoped.auto_load_sync_hash == Some(current)
             && (!initialize_stories || !self.core.model.stories.is_empty())
@@ -177,8 +179,6 @@ impl App {
             .map(|case| case.id)
             .collect();
         if !self.core.model.eq_ignoring_dofmap(&prepared) {
-            #[cfg(feature = "gui")]
-            self.clear_generated_member_selection();
             if !self.core.scoped.undo.run(
                 &mut self.core.model,
                 Box::new(sepika_edit::ApplyPreparedModel { prepared }),

@@ -517,6 +517,7 @@ mod tests {
         with_wall.add_enclosed_wall_plate_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(5), NodeId(4)],
             WallPlate {
+                dl_support: None,
                 self_weight_shares: Vec::new(),
                 id: WallPlateId(0),
                 shape: WallPlateShape::Enclosed,

@@ -605,6 +605,7 @@ fn preparation_rebuild_clears_generated_wall_selection_only() {
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
             section: Some(SectionId(0)),
+            dl_support: None,
             self_weight_shares: Vec::new(),
             opening_area: 0.0,
             opening_weight: 0.0,
@@ -715,6 +716,7 @@ fn preparation_wall_rebuild_clears_renumbered_node_selection() {
         id: WallPlateId(0),
         shape: WallPlateShape::Enclosed,
         section: None,
+        dl_support: None,
         self_weight_shares: Vec::new(),
         opening_area: 0.0,
         opening_weight: 0.0,
@@ -8594,6 +8596,7 @@ fn test_rigid_floor_beam_has_forces_and_checks() {
         vec![NodeId(2)],
     ));
     model.stories.push(Story {
+        wall_weights: Vec::new(),
         level_kind: Default::default(),
         structure: Default::default(),
         id: sepika_core::ids::StoryId(0),
@@ -11436,6 +11439,101 @@ fn rejected_prepared_model_never_leaves_old_auto_seismic_loads_usable() {
         .unwrap()
         .seismic(SeismicDir::X)
         .is_none());
+}
+
+#[test]
+fn wall_opening_edit_undo_and_preparation_refresh_independent_band_weight() {
+    use sepika_core::model::{WallDlSupport, WallOpening, WallWeightGenerationMode};
+    let mut app = App::default();
+    let mut model = super::steel_wall_notice_tests::steel_wall_model();
+    model.wall_weight_generation = None;
+    model.wall_plates[0].dl_support = Some(WallDlSupport::LowerBeam);
+    model.wall_plates[0].openings = vec![WallOpening {
+        width: 1000.0,
+        height: 1000.0,
+        offset: Some([2000.0, 2400.0]),
+    }];
+    app.load_model(model);
+    app.run_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert_eq!(
+        app.core.model.wall_weight_generation,
+        Some(WallWeightGenerationMode::Geometry)
+    );
+    app.core.model.validate_wall_weight_generation().unwrap();
+    #[cfg(feature = "gui")]
+    {
+        app.ui.scoped.wall_plate_draft.target = Some(app.core.model.wall_plates[0].id);
+        let ctx = egui::Context::default();
+        let rendered = ctx.run_ui(Default::default(), |ui| {
+            crate::tables::wall_plates::wall_plates_table(ui, &mut app);
+            crate::prep_view::preparation_panel(ui, &mut app);
+        });
+        fn has_text(shape: &egui::epaint::Shape, needle: &str) -> bool {
+            match shape {
+                egui::epaint::Shape::Text(text) => text.galley.text().contains(needle),
+                egui::epaint::Shape::Vec(parts) => parts.iter().any(|p| has_text(p, needle)),
+                _ => false,
+            }
+        }
+        assert!(rendered
+            .shapes
+            .iter()
+            .any(|s| has_text(&s.shape, "下梁全量")));
+        assert!(rendered.shapes.iter().any(|s| has_text(&s.shape, "重量")));
+        app.core.model.validate_wall_weight_generation().unwrap();
+    }
+    let before = app.core.model.stories.clone();
+    let p = app.core.model.wall_plates[0].clone();
+    app.core.scoped.undo.run(
+        &mut app.core.model,
+        Box::new(sepika_edit::SetWallPlateAttrs {
+            id: p.id,
+            dl_support: p.dl_support,
+            self_weight_shares: p.self_weight_shares,
+            opening_area: p.opening_area,
+            opening_weight: p.opening_weight,
+            openings: vec![WallOpening {
+                width: 1000.0,
+                height: 1000.0,
+                offset: Some([2000.0, 100.0]),
+            }],
+            loads: p.loads,
+            slit: p.slit,
+        }),
+    );
+    assert!(app.core.model.validate_wall_weight_generation().is_err());
+    app.core.scoped.undo.undo(&mut app.core.model);
+    app.core.model.validate_wall_weight_generation().unwrap();
+    assert_eq!(app.core.model.stories, before);
+    app.core.scoped.undo.redo(&mut app.core.model);
+    app.run_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.core.model.validate_wall_weight_generation().unwrap();
+    assert_ne!(
+        app.core.model.stories[0].wall_weights,
+        before[0].wall_weights
+    );
+    let once = app.core.model.load_cases.clone();
+    app.run_preparation();
+    assert_eq!(app.core.model.load_cases, once);
+    assert!(app
+        .core
+        .scoped
+        .preparation
+        .as_ref()
+        .unwrap()
+        .stories
+        .iter()
+        .any(|s| !s.wall_weights.is_empty()));
 }
 
 fn load_state_gui_contract_model() -> sepika_core::model::Model {

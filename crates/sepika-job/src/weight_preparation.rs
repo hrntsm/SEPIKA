@@ -8,6 +8,8 @@ pub fn weight_input_key(model: &Model, mass_method: sepika_core::model::MassMeth
     let mut input = model.clone();
     input.seismic_weight_generation = None;
     input.damper_mass_generation = None;
+    input.wall_weight_generation = None;
+    input.generated_wall_origins.clear();
     input.axes.clear();
     input.stb_node_ids.clear();
     input.vibration_cases.clear();
@@ -35,6 +37,7 @@ pub fn weight_input_key(model: &Model, mass_method: sepika_core::model::MassMeth
         story.node_ids.clear();
         story.seismic_weight = None;
         story.dynamic_mass = None;
+        story.wall_weights.clear();
         story.structure = Default::default();
     }
     for section in &mut input.sections {
@@ -100,6 +103,7 @@ pub fn weight_output_key(model: &Model) -> Vec<u8> {
                 &story.node_ids,
                 story.seismic_weight,
                 story.dynamic_mass,
+                &story.wall_weights,
             )
         })
         .collect();
@@ -121,6 +125,7 @@ pub fn weight_output_key(model: &Model) -> Vec<u8> {
         &model.generated_masters,
         model.mass_method,
         &model.damper_mass_generation,
+        model.wall_weight_generation,
     ))
     .expect("重量生成出力の直列化")
 }
@@ -182,6 +187,7 @@ pub fn apply_generated_weights(
         })
         .map(|node| (node.id, node.restraint))
         .collect();
+    model.wall_weight_generation = Some(generated.wall_weight_generation);
     model.stories = generated.stories;
     for (node, story) in model.nodes.iter_mut().zip(generated.node_story) {
         node.story = story;

@@ -717,6 +717,7 @@ fn test_query_model_wall_plates() {
 
     let mut m = sample_model();
     m.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: sepika_core::ids::WallPlateId(0),
         shape: WallPlateShape::Enclosed,
@@ -755,6 +756,7 @@ fn test_apply_edit_set_wall_plate_slit() {
         .expect("temp store"),
     };
     state.model.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: sepika_core::ids::WallPlateId(0),
         shape: WallPlateShape::Enclosed,
@@ -770,9 +772,14 @@ fn test_apply_edit_set_wall_plate_slit() {
     let body = serde_json::json!({
         "command": "SetWallPlateAttrs",
         "id": 0,
+        "dl_support": "UpperBeam",
         "slit": { "column_face": [true, true], "beam_face": [true, false] }
     });
     assert!(apply_edit(&mut state, &body).expect("apply").applied);
+    assert_eq!(
+        state.model.wall_plates[0].dl_support,
+        Some(sepika_core::model::WallDlSupport::UpperBeam)
+    );
     assert_eq!(state.model.wall_plates[0].slit.column_face, [true, true]);
     assert_eq!(state.model.wall_plates[0].slit.beam_face, [true, false]);
 
@@ -829,6 +836,7 @@ fn test_apply_edit_wall_plate_region_assignment() {
     let first = model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -1449,7 +1457,7 @@ fn attached_slab_mcp_rejects_creation_extent_and_anchor_with_common_diagnostic()
     let expected = state
         .model
         .validate_attached_slab(&invalid)
-        .unwrap_err()
+        .expect_err("attached slab must be rejected")
         .to_string();
     assert_eq!(apply_edit(&mut state, &create).unwrap_err(), expected);
     assert!(state.model.slabs.is_empty());
@@ -1477,7 +1485,7 @@ fn attached_slab_mcp_rejects_creation_extent_and_anchor_with_common_diagnostic()
     let expected = state
         .model
         .validate_attached_slab(&candidate)
-        .unwrap_err()
+        .expect_err("attached slab must be rejected")
         .to_string();
     assert_eq!(
         apply_edit(
@@ -1565,6 +1573,7 @@ fn wall_horizontal_input_survives_ovika_and_mcp_design_reports_missing_assignmen
         element.id = ElemId(id);
         element.nodes = nodes.map(NodeId).into_iter().collect();
         element.section = Some(SectionId(section));
+        element.local_axis.ref_vector = [0.0, 1.0, 0.0];
         model.elements.push(element);
     }
     let mut section = SectionShape::RcWall {
@@ -1583,6 +1592,7 @@ fn wall_horizontal_input_survives_ovika_and_mcp_design_reports_missing_assignmen
             id: sepika_core::ids::WallPlateId(0),
             shape: sepika_core::model::WallPlateShape::Enclosed,
             section: Some(SectionId(2)),
+            dl_support: Some(sepika_core::model::WallDlSupport::LowerBeam),
             self_weight_shares: vec![],
             opening_area: 0.0,
             opening_weight: 0.0,
@@ -1591,6 +1601,8 @@ fn wall_horizontal_input_survives_ovika_and_mcp_design_reports_missing_assignmen
             slit: Default::default(),
         },
     );
+    model.wall_weight_generation =
+        Some(sepika_core::model::WallWeightGenerationMode::GravityCasesOnly);
     model.load_cases[0].kind = LoadCaseKind::Wind;
     let path = std::env::temp_dir().join(format!("sepika-503-mcp-{}.ovika", std::process::id()));
     sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
@@ -1707,6 +1719,145 @@ fn circular_post_quantity_headless_preserves_values_and_diagnostics() {
         assert!(reason.contains("SecondaryMemberId(448)"), "{reason}");
         assert!(reason.contains("実長 L"), "{reason}");
     }
+}
+
+#[test]
+fn mcp_eigen_rejects_unknown_wall_band_and_refreshes_valid_edits_before_solving() {
+    use sepika_core::model::*;
+    let mut model = sample_model();
+    let mut column = sepika_core::section_shape::SectionShape::SteelH {
+        height: 400.0,
+        width: 200.0,
+        web_thick: 9.0,
+        flange_thick: 13.0,
+        root_r: Some(13.0),
+    }
+    .to_section(SectionId(0), "検証柱".into());
+    column.frame_use = Some(FrameSectionUse::Column);
+    column.material = Some(MaterialId(0));
+    model.sections[0] = column.clone();
+    column.id = SectionId(1);
+    column.frame_use = Some(FrameSectionUse::Girder);
+    model.sections.push(column);
+    for (id, coord) in [(2, [4000.0, 0.0, 0.0]), (3, [4000.0, 0.0, 3000.0])] {
+        let mut n = model.nodes[if id == 2 { 0 } else { 1 }].clone();
+        n.id = NodeId(id);
+        n.coord = coord;
+        model.nodes.push(n);
+    }
+    model.materials.push(Material {
+        id: MaterialId(0),
+        name: "検証鋼".into(),
+        category: MaterialCategory::Steel,
+        young: 200000.0,
+        poisson: 0.3,
+        density: 7.85e-9,
+        shear: None,
+        fc: None,
+        fy: Some(235.0),
+        concrete_class: Default::default(),
+        strength_factor: None,
+    });
+    for (id, a, b) in [(1, 0, 2), (2, 1, 3), (3, 2, 3)] {
+        let mut e = model.elements[0].clone();
+        e.id = ElemId(id);
+        e.nodes = vec![NodeId(a), NodeId(b)].into();
+        e.section = Some(SectionId(if a == 2 { 0 } else { 1 }));
+        e.local_axis.ref_vector = [0.0, 1.0, 0.0];
+        model.elements.push(e);
+    }
+    model.add_enclosed_wall_plate_from_nodes(
+        &[NodeId(0), NodeId(2), NodeId(3), NodeId(1)],
+        WallPlate {
+            id: sepika_core::ids::WallPlateId(0),
+            shape: WallPlateShape::Enclosed,
+            section: None,
+            dl_support: Some(WallDlSupport::LowerBeam),
+            self_weight_shares: vec![],
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: vec![WallOpening {
+                width: 1000.0,
+                height: 500.0,
+                offset: Some([1000.0, 2000.0]),
+            }],
+            loads: vec![AreaLoad {
+                kind: "仕上げ".into(),
+                value: 0.001,
+            }],
+            slit: Default::default(),
+        },
+    );
+    let params = crate::job::JobParams::default();
+    let error = match crate::job::compute_job(&model, crate::JobKind::Eigen, &params) {
+        Err(error) => error.to_string(),
+        Ok(_) => panic!("wall generation must be rejected"),
+    };
+    assert!(
+        error.contains("壁版 0") && error.contains("未設定"),
+        "{error}"
+    );
+    let apply = |model: &mut Model| {
+        let gen =
+            sepika_load::story_gen::generate_stories_with_opts(model, &[], true, model.mass_method)
+                .unwrap();
+        for (n, s) in model.nodes.iter_mut().zip(&gen.node_story) {
+            n.story = *s;
+        }
+        for rn in gen.rep_nodes {
+            if rn.id.index() < model.nodes.len() {
+                let index = rn.id.index();
+                model.nodes[index] = rn;
+            } else {
+                model.nodes.push(rn);
+            }
+        }
+        model.stories = gen.stories;
+        model.constraints = gen.constraints;
+        model.generated_masters = gen.generated_masters;
+        model.damper_mass_generation = Some(gen.damper_mass_generation);
+        model.wall_weight_generation = Some(gen.wall_weight_generation);
+    };
+    apply(&mut model);
+    if let Err(error) = crate::job::compute_job(&model, crate::JobKind::Eigen, &params) {
+        panic!("regenerated eigen: {error}");
+    }
+    model.wall_plates[0].openings[0].offset = Some([1000.0, 0.0]);
+    let error = sepika_job::compute::compute_eigen(model.clone(), 1)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("壁版 0") && error.contains("再生成"),
+        "{error}"
+    );
+    let (prepared, _) = crate::job::model_prepared_for_analysis(&model, &params).unwrap();
+    prepared.validate_wall_weight_generation().unwrap();
+    assert!(sepika_job::weight_preparation::weights_are_current(
+        &prepared,
+        prepared.mass_method
+    ));
+    assert_ne!(
+        prepared.stories[0].wall_weights,
+        model.stories[0].wall_weights
+    );
+    let wall_total: f64 = prepared
+        .stories
+        .iter()
+        .flat_map(|s| &s.wall_weights)
+        .map(|w| w.band.design_n)
+        .sum();
+    assert!((wall_total - 11500.0).abs() < 1e-8);
+    crate::job::compute_job(&model, crate::JobKind::Eigen, &params).unwrap();
+    model = prepared;
+    model.wall_plates[0].openings[0].offset = Some([f64::NAN, 0.0]);
+    let error = match crate::job::compute_job(&model, crate::JobKind::Eigen, &params) {
+        Err(error) => error.to_string(),
+        Ok(_) => panic!("invalid opening must be rejected"),
+    };
+    assert!(
+        error.contains("壁版") && error.contains("開口位置"),
+        "{error}"
+    );
 }
 
 fn load_state_contract_model() -> Model {
