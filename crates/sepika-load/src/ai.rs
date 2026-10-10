@@ -20,6 +20,7 @@ pub struct AiDistribution {
     pub clamped_negative_pi: bool,
 }
 
+/// 正の有限周期 T、Tc [s] の標準式を返す。入力・適用可否は検証しない。
 pub fn rt(t: f64, tc: f64) -> f64 {
     if t < tc {
         1.0
@@ -39,8 +40,7 @@ pub fn tc_of(soil: SoilClass) -> f64 {
 }
 
 /// Qi 列から Pi＝Qi−Qi+1（最上層は Pi=Qi）を求める。数値誤差の閾値
-/// `-1e-9・Q1` を超える負値が現れた場合は `clamped_negative_pi=true` を返す
-/// （レビュー §1.12）。
+/// `-1e-9・Q1` を超える負値が現れた場合は `clamped_negative_pi=true` を返す。
 fn pi_from_qi(qi: &[f64]) -> (Vec<f64>, bool) {
     let n = qi.len();
     let mut pi = Vec::with_capacity(n);
@@ -56,15 +56,8 @@ fn pi_from_qi(qi: &[f64]) -> (Vec<f64>, bool) {
     (pi, clamped_negative)
 }
 
-/// 高さ方向分布係数 Ai = 1 + (1/√αi − αi)・2T/(1+3T)。
-///
-/// αi = 0 は「その階から上に地震用重量がない」退化状態（利用者が定義しただけで
-/// まだ部材を持たない最上階、地震用重量が算定できていない階など）で、式の
-/// 1/√αi が発散して Ai を定義できない。支える重量が 0 である以上、層せん断力
-/// Qi = Ci・αi・ΣW も 0 が正しいので、Ai を 0 に倒して Qi を 0 に落とす。
-///
-/// クランプしないと ∞ と 0 の積が NaN になり、NaN の水平力が載荷時に
-/// 非有限値として無言で捨てられ、地震力そのものが消える。
+/// αi が正の場合の Ai を返す。αi が 0 以下の退化入力では数値処理用に 0 を返す。
+/// 標準地震力への適用可否は呼出し側で検証する。
 fn ai_of_alpha(alpha: f64, t_factor: f64) -> f64 {
     if alpha <= 0.0 {
         0.0
@@ -73,6 +66,8 @@ fn ai_of_alpha(alpha: f64, t_factor: f64) -> f64 {
     }
 }
 
+/// 下層から上層への重量 [N] と周期 [s] の参考数値分布。入力・適用可否は検証しない。
+/// αi=0の退化処理や負Piクランプを標準式への適合として採用しないこと。
 pub fn ai_distribution(
     stories_weight_bottom_to_top: &[f64],
     z: f64,
@@ -133,30 +128,9 @@ pub struct StorySeismicSpec {
     pub level_kind: StoryLevelKind,
 }
 
-/// 一般階・PH（塔屋）階・地下階が混在する建物の地震層せん断力分布を求める
-/// （令88条および同条の実務的運用）。
-///
-/// `stories_bottom_to_top` は建物の最下部（最も深い地下階、なければ最下の一般階）
-/// から最上部（最上の PH 階、なければ最上の一般階）の順に並べる。階種別は
-/// 下から「地下 → 一般 → PH」の順で連続する前提（`debug_assert` で検証。
-/// 違反しても計算自体は各層の式に従って進める）。
-///
-/// - **一般階**: 通常の Ai 分布に従う（[`ai_distribution`] と同じ式）。
-///   ただし αi・Wi の算定に用いる「当該階以上の重量」には PH 階の重量を
-///   含める（PH は最上部の付加重量として扱う）。地下階の重量は含めない
-///   （αi は地上部分のみで正規化する）。α・Ai・Ci は `ci_weight`
-///   （副剛床を含む階全体の重量）から求め、層せん断力 Qi = Ci・ΣWj の
-///   ΣWj は `weight`（主系統の重量）の累積とする（「主剛床は全剛床の
-///   場合の Ci に従って層せん断力を計算する」規定）。
-/// - **PH階**: Qi = k・ΣWj（j はその階以上の重量和、k は 0.5〜1.0 の指定震度）。
-///   `ci` 欄には k をそのまま格納する（等価係数）。
-/// - **地下階**: Qi = Q(i+1) + Ki・Wi、Ki = 0.1・(1 − min(Hi,20)/40)・Z
-///   （令88条4項。Hi は地盤面からの深さで、内部 mm の `depth_mm` を m 換算する。
-///   20m 超は 20m。Q(i+1) は直上の層のせん断力）。`ci` 欄には Ki を格納する
-///   （等価係数）。
-///
-/// Pi = Qi − Q(i+1)（最上層は Pi=Qi）は階種別によらず全層を通して算定する。
-/// 返り値の `alpha`・`ai` は一般階以外では意味を持たない（0.0 のまま）。
+/// 下層から上層へ並べた入力の参考数値分布を返す。重量は N、周期は s、地下深さは mm。
+/// PH の指定震度 k は Z を含めた数値として扱い、Z を再乗算しない。
+/// 適用可否・入力妥当性は検証しない。標準地震力には solver の検証済み入口を用いる。
 pub fn seismic_shear_distribution(
     stories_bottom_to_top: &[StorySeismicSpec],
     z: f64,
@@ -275,6 +249,65 @@ pub fn seismic_shear_distribution(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standard_formula_independent_values_and_boundaries() {
+        for soil in [SoilClass::I, SoilClass::II, SoilClass::III] {
+            let tc = tc_of(soil);
+            for (ratio, expected) in [(0.5, 1.0), (1.0, 1.0), (1.5, 0.95), (2.0, 0.8), (4.0, 0.4)] {
+                assert!((rt(ratio * tc, tc) - expected).abs() < 1e-12);
+            }
+            for boundary in [tc, 2.0 * tc] {
+                assert!((rt(boundary - 1e-10, tc) - rt(boundary + 1e-10, tc)).abs() < 1e-8);
+            }
+        }
+        assert_eq!(
+            [
+                tc_of(SoilClass::I),
+                tc_of(SoilClass::II),
+                tc_of(SoilClass::III)
+            ],
+            [0.4, 0.6, 0.8]
+        );
+        for (ratio, expected) in [(0.0, 0.6), (0.5, 0.75), (1.0, 0.9)] {
+            assert!((approx_t(30.0, ratio) - expected).abs() < 1e-12);
+        }
+        let d = ai_distribution(&[100_000.0, 100_000.0], 1.0, 1.0, 0.2, 0.5);
+        for (actual, expected) in d.qi.iter().zip([40_000.0, 27_313.708_498_984_76]) {
+            assert!((actual - expected).abs() < 1e-8);
+        }
+        assert!((d.pi[0] - 12_686.291_501_015_24).abs() < 1e-8);
+        assert!((d.pi.iter().sum::<f64>() - 40_000.0).abs() < 1e-8);
+    }
+
+    #[test]
+    fn basement_and_specified_penthouse_independent_values() {
+        for (depth_mm, expected_k) in [(0.0, 0.1), (20_000.0, 0.05), (25_000.0, 0.05)] {
+            let specs = [
+                StorySeismicSpec {
+                    weight: 100_000.0,
+                    ci_weight: 100_000.0,
+                    level_kind: StoryLevelKind::Basement { depth_mm },
+                },
+                StorySeismicSpec {
+                    weight: 100_000.0,
+                    ci_weight: 100_000.0,
+                    level_kind: StoryLevelKind::Normal,
+                },
+            ];
+            let d = seismic_shear_distribution(&specs, 1.0, 1.0, 0.2, 0.5);
+            assert!((d.ci[0] - expected_k).abs() < 1e-12);
+            assert!((d.qi[0] - (20_000.0 + expected_k * 100_000.0)).abs() < 1e-8);
+        }
+        let specs = [StorySeismicSpec {
+            weight: 100_000.0,
+            ci_weight: 100_000.0,
+            level_kind: StoryLevelKind::Penthouse { k: 1.0 },
+        }];
+        let d = seismic_shear_distribution(&specs, 0.8, 1.0, 0.2, 0.5);
+        assert_eq!(d.qi, [100_000.0]);
+        assert_eq!(d.ci, [1.0]);
+    }
 
     #[test]
     fn test_rt_values() {

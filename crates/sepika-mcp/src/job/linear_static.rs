@@ -15,8 +15,37 @@ pub(crate) fn compute_linear_static_job(
     params: &JobParams,
 ) -> Result<JobOutcome, JobError> {
     let (work, notices) = model_prepared_for_analysis(model, params)?;
-    let lc_id = resolve_load_case(&work, params.load_case)?.id;
-    let result = sepika_job::compute::compute_linear_static(work.clone(), lc_id)?;
+    let case = resolve_load_case(&work, params.load_case)?;
+    let lc_id = case.id;
+    let seismic_notice = if sepika_job::compute::missing_seismic_horizontal_load(case) {
+        let prefix = format!("{} の Ai 地震力を再生成できません:", case.name);
+        notices
+            .iter()
+            .find(|notice| notice.starts_with(&prefix))
+            .or_else(|| {
+                if params.ai_mode == sepika_solver::statics::analysis::AiMode::SemiPrecise
+                    && params.design_period.is_none()
+                {
+                    notices.iter().find(|notice| {
+                        notice.starts_with(
+                            "精算周期(固有値解析)が選択されていますが固有値解析が未実行です。",
+                        )
+                    })
+                } else {
+                    None
+                }
+            })
+    } else {
+        None
+    };
+    let result = sepika_job::compute::compute_linear_static(work.clone(), lc_id).map_err(
+        |error| match (error, seismic_notice) {
+            (JobError::InvalidInput(message), Some(notice)) => {
+                JobError::InvalidInput(format!("{message}\n{notice}"))
+            }
+            (error, _) => error,
+        },
+    )?;
     let model = &work;
     let lc_id = lc_id.0;
 
