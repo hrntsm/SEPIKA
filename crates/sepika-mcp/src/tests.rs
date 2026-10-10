@@ -2735,3 +2735,233 @@ fn stb_strength_s_main_assignment_changes_steel_without_concrete_attribute() {
     undo.redo(&mut model);
     assert!(model.element_material(&model.elements[1]).is_none());
 }
+
+#[test]
+fn stb_strength_raw_steel_edit_updates_src_s_and_secondary_consumers() {
+    use sepika_core::model::{SecondaryMember, SecondaryMemberEnds};
+    for (index, xml, member, grade, expected) in [
+        (
+            0,
+            include_str!("../../sepika-io/tests/fixtures/strength_src.stb"),
+            0,
+            "SN400B",
+            235.,
+        ),
+        (
+            1,
+            include_str!("../../sepika-io/tests/fixtures/public_strength_bars.stb"),
+            1,
+            "SN490B",
+            325.,
+        ),
+    ] {
+        let mut model = sepika_io::stbridge::import_stbridge(xml).unwrap();
+        let section = model.elements[member].section.unwrap();
+        if index == 1 {
+            model.unassigned_beams.push(SecondaryMember {
+                section: Some(section),
+                ends: SecondaryMemberEnds::Detached([[1000., 1000., 4700.], [5000., 1000., 4700.]]),
+                ..Default::default()
+            });
+        }
+        let before = model.clone();
+        let dir = std::env::temp_dir().join(format!(
+            "sepika-520-steel-input-{}-{index}",
+            std::process::id()
+        ));
+        let mut state = ServerState::with_fs_store(model, &dir).unwrap();
+        let mut input = state.model.stb_strengths.clone();
+        input
+            .sections
+            .iter_mut()
+            .find(|s| s.section == section)
+            .unwrap()
+            .steel[0]
+            .strength = grade.into();
+        assert!(
+            apply_edit(
+                &mut state,
+                &serde_json::json!({"command":"SetStbStrengths","input":input})
+            )
+            .unwrap()
+            .applied
+        );
+        let after = state.model.clone();
+        for edited in [true, false, true] {
+            let raw = &state
+                .model
+                .stb_strengths
+                .sections
+                .iter()
+                .find(|s| s.section == section)
+                .unwrap()
+                .steel[0];
+            let resolved = state.model.resolve_stb_steel(raw).unwrap();
+            let value = if edited {
+                expected
+            } else if index == 0 {
+                325.
+            } else {
+                235.
+            };
+            assert_eq!(resolved.value, value);
+            assert!(!resolved.native_override);
+            let material = if index == 0 {
+                state
+                    .model
+                    .element_steel_material(&state.model.elements[member])
+            } else {
+                assert_eq!(
+                    state
+                        .model
+                        .secondary_material(&state.model.unassigned_beams[0])
+                        .unwrap()
+                        .fy,
+                    Some(value)
+                );
+                state.model.element_material(&state.model.elements[member])
+            }
+            .unwrap();
+            assert_eq!(material.fy, Some(value));
+            assert!(state.model.stb_strength_diagnostics().is_empty());
+            let output = sepika_io::stbridge::export_stbridge(&state.model).unwrap();
+            let again = sepika_io::stbridge::import_stbridge(&output).unwrap();
+            let supplied = if index == 0 {
+                again.element_steel_material(&again.elements[member])
+            } else {
+                again.element_material(&again.elements[member])
+            };
+            assert_eq!(supplied.unwrap().fy, Some(value));
+            if edited {
+                state.undo.undo(&mut state.model);
+            } else {
+                assert!(state.model.eq_ignoring_dofmap(&before));
+                state.undo.redo(&mut state.model);
+            }
+        }
+        assert!(state.model.eq_ignoring_dofmap(&before));
+        state.undo.redo(&mut state.model);
+        assert!(state.model.eq_ignoring_dofmap(&after));
+        drop(state);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[test]
+fn stb_strength_native_concrete_assignment_does_not_generate_materials_and_undo_is_complete() {
+    use sepika_edit::{SectionMaterialRole, SetSectionMaterial};
+    let mut model = sepika_io::stbridge::import_stbridge(include_str!(
+        "../../sepika-io/tests/fixtures/public_strength_bars.stb"
+    ))
+    .unwrap();
+    let section = model.elements[0].section.unwrap();
+    let mut material = model
+        .materials
+        .iter()
+        .find(|m| m.fc.is_some())
+        .unwrap()
+        .clone();
+    material.id = MaterialId(model.materials.len() as u32);
+    material.name = "Custom Concrete".into();
+    material.fc = Some(37.);
+    let id = material.id;
+    model.materials.push(material);
+    let before = model.clone();
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetSectionMaterial {
+            section,
+            role: SectionMaterialRole::Main,
+            material: Some(id),
+        })
+    ));
+    let after = model.clone();
+    assert_eq!(model.materials, before.materials);
+    assert_eq!(model.element_material(&model.elements[0]).unwrap().id, id);
+    assert_eq!(
+        model.element_material(&model.elements[0]).unwrap().fc,
+        Some(37.)
+    );
+    assert!(model.validate().is_ok());
+    let output = sepika_io::stbridge::export_stbridge(&model).unwrap();
+    let again = sepika_io::stbridge::import_stbridge(&output).unwrap();
+    assert_eq!(
+        again.element_material(&again.elements[0]).unwrap().fc,
+        Some(37.)
+    );
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&before));
+    undo.redo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&after));
+}
+
+#[test]
+fn stb_strength_raw_steel_edit_keeps_explicit_native_override_separate() {
+    use sepika_edit::{SectionMaterialRole, SetSectionMaterial, SetStbStrengths};
+    let mut model = sepika_io::stbridge::import_stbridge(include_str!(
+        "../../sepika-io/tests/fixtures/strength_src.stb"
+    ))
+    .unwrap();
+    let section = model.elements[0].section.unwrap();
+    let id = model.element_steel_material(&model.elements[0]).unwrap().id;
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetSectionMaterial {
+            section,
+            role: SectionMaterialRole::Steel,
+            material: Some(id),
+        })
+    ));
+    let before = model.clone();
+    let mut input = model.stb_strengths.clone();
+    input.sections[0].steel[0].strength = "SN400B".into();
+    assert!(undo.run(&mut model, Box::new(SetStbStrengths { input })));
+    let resolved = model
+        .resolve_stb_steel(&model.stb_strengths.sections[0].steel[0])
+        .unwrap();
+    assert_eq!(resolved.grade, "SN400B");
+    assert_eq!(resolved.value, 325.);
+    assert!(resolved.native_override);
+    assert_eq!(
+        model.element_steel_material(&model.elements[0]).unwrap().id,
+        id
+    );
+    assert_eq!(
+        model.element_steel_material(&model.elements[0]).unwrap().fy,
+        Some(325.)
+    );
+    assert!(matches!(
+        sepika_io::stbridge::export_stbridge(&model),
+        Err(sepika_io::stbridge::StbError::Unmappable(_))
+    ));
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&before));
+    undo.redo(&mut model);
+    assert_eq!(
+        model.element_steel_material(&model.elements[0]).unwrap().fy,
+        Some(325.)
+    );
+}
+
+#[test]
+fn stb_strength_incompatible_steel_parts_do_not_supply_a_single_material() {
+    use sepika_edit::SetStbStrengths;
+    let mut model = sepika_io::stbridge::import_stbridge(include_str!(
+        "../../sepika-io/tests/fixtures/strength_src.stb"
+    ))
+    .unwrap();
+    let mut input = model.stb_strengths.clone();
+    let mut other = input.sections[0].steel[0].clone();
+    other.part = "web".into();
+    other.strength = "SN400B".into();
+    input.sections[0].steel.push(other);
+    let mut undo = UndoStack::new();
+    assert!(undo.run(&mut model, Box::new(SetStbStrengths { input })));
+    assert!(model.element_steel_material(&model.elements[0]).is_none());
+    assert!(model
+        .stb_strength_diagnostics()
+        .iter()
+        .any(|reason| reason.contains("部位別鋼材強度")));
+}

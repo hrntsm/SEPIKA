@@ -146,7 +146,6 @@ impl EditCommand for SetSectionMaterial {
                 }
             }
         }
-        model.prepare_stb_strength_materials();
         let slot = self.role.slot(&mut model.sections[idx]);
         let old = std::mem::replace(slot, self.material);
         Box::new(crate::strength::RestoreStrengthInput {

@@ -289,6 +289,32 @@ impl Model {
         self.materials.get(id.index())
     }
 
+    pub fn stb_steel_material(&self, section: SectionId) -> Option<&Material> {
+        let inputs = &self
+            .stb_strengths
+            .sections
+            .iter()
+            .find(|s| s.section == section)?
+            .steel;
+        let first = inputs.first()?;
+        let resolved = self.resolve_stb_steel(first).ok()?;
+        if inputs.iter().any(|input| {
+            self.resolve_stb_steel(input)
+                .ok()
+                .is_none_or(|other| other.grade != resolved.grade || other.value != resolved.value)
+        }) {
+            return None;
+        }
+        let id = first.native_material.or_else(|| {
+            self.stb_strengths
+                .materials
+                .iter()
+                .find(|m| m.grade == resolved.grade)
+                .map(|m| m.material)
+        })?;
+        self.materials.get(id.index())
+    }
+
     fn strength_target_section(&self, target: StrengthTarget) -> Option<SectionId> {
         match target {
             StrengthTarget::Element(id) => self.element(id).and_then(|e| e.section),

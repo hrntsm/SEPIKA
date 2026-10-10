@@ -11271,3 +11271,56 @@ fn stb_strength_gui_edit_transaction_changes_result_input_and_restores_omission(
     });
     std::fs::remove_file(path).unwrap();
 }
+
+#[cfg(feature = "gui")]
+#[test]
+fn stb_strength_gui_raw_src_grade_edit_updates_material_and_result_input() {
+    let path = test_tmp().join("520-src-strength-edit.stb");
+    std::fs::write(
+        &path,
+        include_str!("../../../sepika-io/tests/fixtures/strength_src.stb"),
+    )
+    .unwrap();
+    let mut app = App::default();
+    app.import_stbridge_from(path);
+    let before = app.core.model.clone();
+    let key = result_validity::ResultInputKey::Modal;
+    let generation = app.result_input(&key);
+    let mut input = before.stb_strengths.clone();
+    input.sections[0].steel[0].strength = "SN400B".into();
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::SetStbStrengths { input }));
+    app.apply_pending_story_command();
+    assert_eq!(
+        app.core
+            .model
+            .element_steel_material(&app.core.model.elements[0])
+            .unwrap()
+            .fy,
+        Some(235.)
+    );
+    assert_eq!(
+        app.core
+            .model
+            .element_material(&app.core.model.elements[0])
+            .unwrap()
+            .fc,
+        Some(36.)
+    );
+    assert!(app.core.model.stb_strength_diagnostics().is_empty());
+    assert_ne!(generation, app.result_input(&key));
+    app.undo_action();
+    assert!(app.core.model.eq_ignoring_dofmap(&before));
+    assert_eq!(generation, app.result_input(&key));
+    app.redo_action();
+    assert_eq!(
+        app.core
+            .model
+            .element_steel_material(&app.core.model.elements[0])
+            .unwrap()
+            .fy,
+        Some(235.)
+    );
+}
