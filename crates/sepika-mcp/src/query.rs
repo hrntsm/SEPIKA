@@ -10,6 +10,8 @@ pub fn get_model_json(state: &ServerState) -> String {
 pub fn query_model(model: &Model, kind: &str, filter: Option<&str>) -> Vec<serde_json::Value> {
     use serde_json::json;
     let items: Vec<serde_json::Value> = match kind {
+        "source_stories" => model.source_stories.iter().map(|s| serde_json::to_value(s).unwrap()).collect(),
+        "source_story_diagnostics" => model.source_story_diagnostics().into_iter().chain(model.source_story_assignment_diagnostics()).map(|message| json!({"message": message})).collect(),
         "node" | "nodes" => model
             .nodes
             .iter()
