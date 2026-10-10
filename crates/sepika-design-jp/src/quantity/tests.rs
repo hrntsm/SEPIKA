@@ -1546,6 +1546,165 @@ fn beam_contact_direct_support_span_secondary_and_vertical_union() {
 }
 
 #[test]
+fn beam_contact_nonconstant_height_within_tolerance_is_unavailable() {
+    for difference in [0.5, 1.0] {
+        let mut model = contact_model();
+        model.nodes[1].coord[2] += difference;
+        contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3100.0);
+        for _ in 0..2 {
+            let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+            assert!(reason.contains("高さが一定でない梁"), "{reason}");
+            model.elements[0].nodes.reverse();
+        }
+        for node in &mut model.nodes[2..] {
+            node.coord[2] = 4000.0;
+        }
+        let first = contact_formwork(&model);
+        let expected = if difference == 0.5 {
+            9.00000003125
+        } else {
+            9.000000125
+        };
+        assert!((first - expected).abs() <= 1e-9);
+        model.elements[0].nodes.reverse();
+        assert!((contact_formwork(&model) - first).abs() <= 1e-9);
+    }
+    let mut model = contact_model();
+    contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3000.0);
+    model.nodes[4].coord[2] += 0.5;
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("傾斜床")
+    );
+}
+
+#[test]
+fn beam_contact_narrow_one_sided_slab_does_not_create_opposite_contact() {
+    for side in [-1.0, 1.0] {
+        for (spans, expected) in [
+            (vec![[0.0, 6000.0]], 8.1),
+            (vec![[0.0, 6000.0], [0.0, 6000.0]], 8.1),
+            (vec![[0.0, 3000.0], [0.0, 3000.0]], 8.55),
+        ] {
+            let mut model = contact_model();
+            for span in spans {
+                let n = model.nodes.len();
+                let t = if model.slabs.is_empty() { 150.0 } else { 100.0 };
+                contact_slab(&mut model, span, side, t, 3000.0);
+                model.nodes[n + 2].coord[1] = side * 5.0;
+                model.nodes[n + 3].coord[1] = side * 5.0;
+            }
+            for _ in 0..2 {
+                assert!((contact_formwork(&model) - expected).abs() <= 1e-9);
+                model.elements[0].nodes.reverse();
+            }
+        }
+        for (offset, expected) in [(9.0, 8.1), (11.0, 9.0)] {
+            let mut model = contact_model();
+            contact_slab(&mut model, [0.0, 6000.0], side, 150.0, 3000.0);
+            for (i, node) in model.nodes[2..].iter_mut().enumerate() {
+                node.coord[1] = side * (offset + if i < 2 { 0.0 } else { 5.0 });
+            }
+            for _ in 0..2 {
+                assert!((contact_formwork(&model) - expected).abs() <= 1e-9);
+                model.elements[0].nodes.reverse();
+            }
+        }
+    }
+}
+
+#[test]
+fn beam_contact_nonconvex_slab_side_occupancy_is_local_to_contact_interval() {
+    for (coords, expected) in [
+        (
+            vec![
+                (0.0, 0.0),
+                (3000.0, 0.0),
+                (3000.0, -5.0),
+                (6000.0, -5.0),
+                (6000.0, 5.0),
+                (0.0, 5.0),
+            ],
+            7.65,
+        ),
+        (
+            vec![
+                (0.0, 0.0),
+                (6000.0, 0.0),
+                (6000.0, -2000.0),
+                (0.0, -2000.0),
+                (0.0, -2005.0),
+                (6005.0, -2005.0),
+                (6005.0, 5.0),
+                (0.0, 5.0),
+            ],
+            8.1,
+        ),
+    ] {
+        let mut model = contact_model();
+        model
+            .sections
+            .push(SectionShape::RcSlab { thickness: 150.0 }.to_section(SectionId(1), "床".into()));
+        let mut boundary = Vec::new();
+        for (x, y) in coords {
+            let id = model.nodes.len() as u32;
+            model.nodes.push(node(id, x, y, 3000.0));
+            boundary.push(NodeId(id));
+        }
+        model.add_enclosed_slab_from_nodes(
+            &boundary,
+            SlabPlate {
+                section: Some(SectionId(1)),
+                ..Default::default()
+            },
+        );
+        for _ in 0..2 {
+            assert!((contact_formwork(&model) - expected).abs() <= 1e-9);
+            model.elements[0].nodes.reverse();
+        }
+    }
+}
+
+#[test]
+fn beam_contact_unknown_beam_section_is_unavailable() {
+    for support_secondary in [false, true] {
+        let mut model = contact_model();
+        contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3000.0);
+        if support_secondary {
+            model
+                .unassigned_beams
+                .push(sepika_core::model::SecondaryMember {
+                    id: sepika_core::ids::SecondaryMemberId(451),
+                    kind: sepika_core::model::SecondaryMemberKind::Beam,
+                    ends: sepika_core::model::SecondaryMemberEnds::Detached([
+                        [0.0, 0.0, 3000.0],
+                        [6000.0, 0.0, 3000.0],
+                    ]),
+                    section: Some(SectionId(999)),
+                    name: "断面不明451".into(),
+                    gravity_end_shares: None,
+                });
+        } else {
+            model.elements[0].section = Some(SectionId(999));
+        }
+        let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+        assert!(
+            reason.contains(if support_secondary {
+                "Secondary(SecondaryMemberId(451))"
+            } else {
+                "Primary(ElemId(0))"
+            }),
+            "{reason}"
+        );
+        assert!(
+            reason.contains("SectionId(999)") && reason.contains("参照が不明"),
+            "{reason}"
+        );
+    }
+}
+
+#[test]
 fn beam_contact_sloped_beam_contact_is_direction_independent() {
     for span in [[0.0, 6000.0], [5700.0, 6000.0], [0.0, 3000.0]] {
         let mut model = contact_model();

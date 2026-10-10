@@ -102,7 +102,7 @@ impl Contacts {
             let pts = slab
                 .boundary_coords(model)
                 .ok_or_else(|| format!("床板 {:?}: 取付き先の参照が不明です", slab.id))?;
-            let winding = validate_polygon(&pts).map_err(|e| format!("床板 {:?}: {e}", slab.id))?;
+            validate_polygon(&pts).map_err(|e| format!("床板 {:?}: {e}", slab.id))?;
             let (slab_z, horizontal) = contact_height(&pts, t);
             let supports = model
                 .elements
@@ -126,16 +126,17 @@ impl Contacts {
                     let (p, q) = (pts[i], pts[(i + 1) % pts.len()]);
                     if across(p) <= MEMBER_AXIS_TOL_MM && across(q) <= MEMBER_AXIS_TOL_MM {
                         let span = [along(p), along(q)];
-                        let side = usize::from((span[1] - span[0]) * winding < 0.0);
-                        add_contact(
-                            model,
-                            support,
-                            span,
-                            slab_z,
-                            horizontal,
-                            side,
-                            &mut rectangles,
-                        )?;
+                        for (span, side) in local_contact_spans(&pts, a, b, i, span) {
+                            add_contact(
+                                model,
+                                support,
+                                span,
+                                slab_z,
+                                horizontal,
+                                side,
+                                &mut rectangles,
+                            )?;
+                        }
                     }
                 }
             }
@@ -157,6 +158,58 @@ impl Contacts {
     }
 }
 
+fn local_contact_spans(
+    pts: &[[f64; 3]],
+    a: [f64; 3],
+    b: [f64; 3],
+    edge: usize,
+    span: [f64; 2],
+) -> Vec<([f64; 2], usize)> {
+    let dx = b[0] - a[0];
+    let dy = b[1] - a[1];
+    let len = dx.hypot(dy);
+    let along = |p: [f64; 3]| ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (len * len);
+    let across = |p: [f64; 3]| (dx * (p[1] - a[1]) - dy * (p[0] - a[0])) / len;
+    let mut cuts = vec![span[0].min(span[1]), span[0].max(span[1])];
+    for i in 0..pts.len() {
+        let (p, q) = (pts[i], pts[(i + 1) % pts.len()]);
+        cuts.push(along(p));
+        if across(p) * across(q) < 0.0 {
+            cuts.push(along(p) + (along(q) - along(p)) * across(p) / (across(p) - across(q)));
+        }
+    }
+    cuts.retain(|s| *s >= span[0].min(span[1]) && *s <= span[0].max(span[1]));
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup();
+    cuts.windows(2)
+        .filter_map(|cut| {
+            let middle = cut[0] + (cut[1] - cut[0]) / 2.0;
+            let mut crossings: Vec<_> = (0..pts.len())
+                .filter_map(|i| {
+                    let (p, q) = (pts[i], pts[(i + 1) % pts.len()]);
+                    let (s0, s1) = (along(p), along(q));
+                    if middle <= s0.min(s1) || middle >= s0.max(s1) {
+                        return None;
+                    }
+                    Some((
+                        i,
+                        across(p) + (across(q) - across(p)) * (middle - s0) / (s1 - s0),
+                    ))
+                })
+                .collect();
+            crossings.sort_by(|p, q| p.1.total_cmp(&q.1));
+            let rank = crossings.iter().position(|(i, _)| *i == edge)?;
+            let side = rank % 2;
+            let occupied = if side == 0 {
+                crossings.get(rank + 1).is_some_and(|(_, r)| *r > 0.0)
+            } else {
+                crossings[rank - 1].1 < 0.0
+            };
+            occupied.then_some(([cut[0], cut[1]], side))
+        })
+        .collect()
+}
+
 fn thickness(model: &Model, slab: &sepika_core::model::Slab) -> Result<f64, String> {
     let sec = model
         .slab_section(slab)
@@ -175,19 +228,25 @@ fn thickness(model: &Model, slab: &sepika_core::model::Slab) -> Result<f64, Stri
         .ok_or_else(|| format!("床板 {:?}: 実厚を解決できません", slab.id))
 }
 
-fn support_section(model: &Model, support: SupportMemberId) -> Option<&Section> {
-    match support {
+fn support_section(model: &Model, support: SupportMemberId) -> Result<Option<&Section>, String> {
+    let section = match support {
         SupportMemberId::Primary(id) => model
             .elements
             .iter()
             .find(|e| e.id == id)
-            .and_then(|e| model.element_section(e)),
-        SupportMemberId::Secondary(id) => model
-            .beams()
-            .find(|m| m.id == id)
-            .and_then(|m| m.section)
-            .and_then(|id| model.sections.get(id.index())),
-    }
+            .and_then(|e| e.section),
+        SupportMemberId::Secondary(id) => {
+            model.beams().find(|m| m.id == id).and_then(|m| m.section)
+        }
+    };
+    section
+        .map(|id| {
+            model
+                .sections
+                .get(id.index())
+                .ok_or_else(|| format!("支持材 {support:?}: 梁断面 {id:?} の参照が不明です"))
+        })
+        .transpose()
 }
 
 fn add_contact(
@@ -202,7 +261,11 @@ fn add_contact(
     let (a, b) = model
         .support_member_axis(support)
         .ok_or_else(|| format!("支持材 {support:?}: 材軸の参照が不明です"))?;
-    let Some(sec) = support_section(model, support) else {
+    if span[0].max(span[1]) <= 0.0 || span[0].min(span[1]) >= 1.0 {
+        return Ok(());
+    }
+    let Some(sec) = support_section(model, support)? else {
+        // 断面未割当の床境界線と実梁は現モデルで区別できない。
         return Ok(());
     };
     if matches!(support, SupportMemberId::Primary(_))
@@ -268,7 +331,7 @@ fn add_contact(
             "支持材 {support:?}: 梁の型枠面積・下端高さが有限範囲を超えています"
         ));
     }
-    let sloped = (a[2] - b[2]).abs() > LEVEL_TOL_MM;
+    let sloped = a[2] != b[2];
     let beam_z = if sloped {
         let tops = s.map(|s| a[2] + (b[2] - a[2]) * (s / len));
         [tops[0].min(tops[1]) - d, tops[0].max(tops[1])]
@@ -301,9 +364,11 @@ fn add_contact(
         ));
     }
     if sloped {
-        return Err(format!(
-            "支持材 {support:?}: 傾斜梁との接触型枠は未対応です"
-        ));
+        return Err(if (a[2] - b[2]).abs() > LEVEL_TOL_MM {
+            format!("支持材 {support:?}: 傾斜梁との接触型枠は未対応です")
+        } else {
+            format!("支持材 {support:?}: 水平幾何判定の許容差内でも高さが一定でない梁の接触型枠は未対応です")
+        });
     }
     if !matches!(
         sec.shape,
@@ -356,7 +421,7 @@ fn add_contact(
 fn contact_height(pts: &[[f64; 3]], t: f64) -> ([f64; 2], bool) {
     let low = pts.iter().map(|p| p[2]).fold(f64::INFINITY, f64::min);
     let high = pts.iter().map(|p| p[2]).fold(f64::NEG_INFINITY, f64::max);
-    ([low - t, high], high - low <= LEVEL_TOL_MM)
+    ([low - t, high], high == low)
 }
 
 fn validate_polygon(pts: &[[f64; 3]]) -> Result<f64, String> {

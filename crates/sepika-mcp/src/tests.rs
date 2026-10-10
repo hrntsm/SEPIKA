@@ -1665,6 +1665,19 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
 
 #[test]
 fn beam_contact_quantity_mcp_preserves_union_and_diagnostics() {
+    for model in beam_contact_narrow_fixtures() {
+        let value = quantity_takeoff_json(&model, Some("detail"));
+        let beam = value["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["label"] == "G451")
+            .unwrap();
+        assert!(
+            (beam["formwork_m2"].as_f64().unwrap() - 8.1).abs() <= 1e-9,
+            "{value}"
+        );
+    }
     let no_plate = quantity_takeoff_json(&beam_contact_no_plate_fixture(), Some("detail"));
     let beam = no_plate["rows"]
         .as_array()
@@ -1702,6 +1715,30 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
     };
     let base = beam_contact_fixture();
     let mut cases = Vec::new();
+    let mut model = base.clone();
+    model.elements[0].section = Some(SectionId(999));
+    cases.push((model, "Primary(ElemId(0)): 梁断面 SectionId(999)"));
+    let mut model = base.clone();
+    for i in 0..2 {
+        let mut node = model.nodes[i].clone();
+        node.id = NodeId(i as u32 + 2);
+        node.coord[2] = 3100.0;
+        model.nodes.push(node);
+    }
+    for slab in &mut model.slabs {
+        if let SlabShape::Attached {
+            anchor: RegionAnchor::Line { nodes, .. },
+            ..
+        } = &mut slab.shape
+        {
+            *nodes = [NodeId(2), NodeId(3)];
+        }
+    }
+    model.nodes[1].coord[2] += 0.5;
+    cases.push((model.clone(), "高さが一定でない梁"));
+    model.elements[0].nodes.reverse();
+    cases.push((model, "高さが一定でない梁"));
+
     for t in [-1.0, 0.0, f64::NAN, f64::INFINITY] {
         let mut model = base.clone();
         model.sections[1].thickness = Some(t);
@@ -1768,6 +1805,21 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
     cases
 }
 
+fn beam_contact_narrow_fixtures() -> Vec<sepika_core::model::Model> {
+    let mut models = Vec::new();
+    for side in [-1.0, 1.0] {
+        let mut model = beam_contact_fixture();
+        model.slabs.truncate(1);
+        if let sepika_core::model::SlabShape::Attached { extent, .. } = &mut model.slabs[0].shape {
+            *extent = [side * 5.0; 2];
+        }
+        models.push(model.clone());
+        model.elements[0].nodes.reverse();
+        models.push(model);
+    }
+    models
+}
+
 fn beam_contact_no_plate_fixture() -> sepika_core::model::Model {
     let mut model = beam_contact_fixture();
     model.slabs.remove(0);
@@ -1791,6 +1843,11 @@ async fn beam_contact_quantity_mcp_tool_returns_verified_rows_and_unavailable_re
         (beam_contact_fixture(), Some(7.5), ""),
         (beam_contact_no_plate_fixture(), Some(8.4), ""),
     ];
+    cases.extend(
+        beam_contact_narrow_fixtures()
+            .into_iter()
+            .map(|model| (model, Some(8.1), "")),
+    );
     cases.extend(
         beam_contact_invalid_cases()
             .into_iter()
