@@ -145,39 +145,37 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
                     data.id.0
                 ));
             }
-            if !rebar.is_unset() {
-                for (name, value) in [
-                    ("Ec", mat.young),
-                    (
-                        "Es",
-                        model
-                            .element_rebar_material(data)
-                            .map(|m| m.young)
-                            .unwrap_or(sepika_core::section_shape::E_STEEL),
-                    ),
-                ] {
-                    if !value.is_finite() || value <= 0.0 {
-                        return Some(format!(
-                            "部材 ID {} の {name} は正の有限値が必要です",
-                            data.id.0
-                        ));
-                    }
+            for (name, value) in [
+                ("Ec", mat.young),
+                (
+                    "Es",
+                    model
+                        .element_rebar_material(data)
+                        .map(|m| m.young)
+                        .unwrap_or(sepika_core::section_shape::E_STEEL),
+                ),
+            ] {
+                if !value.is_finite() || value <= 0.0 {
+                    return Some(format!(
+                        "部材 ID {} の {name} は正の有限値が必要です",
+                        data.id.0
+                    ));
                 }
-                for top_tension in [false, true] {
-                    let steel = rebar.bending_steel(*d, top_tension).tension;
-                    if let Err(error) = sepika_core::rc_capacity::rc_rebar_ratios(
-                        *b,
-                        *d,
-                        steel.effective_depth_mm,
-                        steel.area_mm2,
-                        sepika_core::rc_capacity::RcAlphaSection::Rectangular,
-                    ) {
-                        return Some(format!(
-                            "部材 ID {} の{}引張時の鉄筋比入力が不正です: {error}",
-                            data.id.0,
-                            if top_tension { "上端" } else { "下端" }
-                        ));
-                    }
+            }
+            for top_tension in [false, true] {
+                let steel = rebar.bending_steel(*d, top_tension).tension;
+                if let Err(error) = sepika_core::rc_capacity::rc_rebar_ratios(
+                    *b,
+                    *d,
+                    steel.effective_depth_mm,
+                    steel.area_mm2,
+                    sepika_core::rc_capacity::RcAlphaSection::Rectangular,
+                ) {
+                    return Some(format!(
+                        "部材 ID {} の{}引張時の鉄筋比入力が不正です: {error}",
+                        data.id.0,
+                        if top_tension { "上端" } else { "下端" }
+                    ));
                 }
             }
             if super::hinge_view::resolves_to_concentrated_spring(data, model)

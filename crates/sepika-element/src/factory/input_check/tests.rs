@@ -580,3 +580,33 @@ fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
     model.floor_regions.clear();
     assert!(ensure_nonlinear_input(&model).is_ok());
 }
+
+#[test]
+fn missing_rc_beam_tension_rebar_stops_analysis_and_has_no_public_backbone() {
+    for (top, bottom, missing_side) in [
+        (vec![], vec![], "下端"),
+        (vec![], vec![4], "上端"),
+        (vec![6], vec![], "下端"),
+    ] {
+        let mut model = beam_model(rc_section(), concrete_material());
+        model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+        if let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() {
+            rebar.top = top;
+            rebar.bottom = bottom;
+        }
+        let error = ensure_nonlinear_input(&model).unwrap_err();
+        assert!(error.contains("部材 ID 0"), "{error}");
+        assert!(error.contains(missing_side), "{error}");
+        let view = crate::factory::build_hinge_view(
+            &model.elements[0],
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+            sepika_core::model::AnalysisKind::Incremental,
+            0.0,
+            8,
+            8,
+        )
+        .unwrap();
+        assert!(view.backbone.is_none());
+    }
+}
