@@ -98,7 +98,9 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
         if app.core.ultimate_use_pushover {
             let has_po = app
                 .displayed_pushover()
-                .map(|p| !p.member_response.is_empty())
+                .map(|p| {
+                    sepika_job::member_demand_from_pushover(&p.member_response, None).is_some()
+                })
                 .unwrap_or(false);
             if has_po {
                 ui.colored_label(crate::theme::GOOD_GREEN, "● 応答反映中");
@@ -215,7 +217,9 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             let using_po = app.core.ultimate_use_pushover
                 && app
                     .displayed_pushover()
-                    .map(|p| !p.member_response.is_empty())
+                    .map(|p| {
+                        sepika_job::member_demand_from_pushover(&p.member_response, None).is_some()
+                    })
                     .unwrap_or(false);
             let demand_note = if using_po {
                 "Qmu・需要曲げ・軸力・Rp は増分解析終局応答（部材別）を直接反映"

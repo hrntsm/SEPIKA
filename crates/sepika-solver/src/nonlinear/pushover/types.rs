@@ -275,6 +275,12 @@ pub struct MemberStepState {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PushoverResult {
     pub steps: Vec<PushoverStep>,
+    /// 壁要素単体の確定ステップ応答。未記録の旧結果は None。
+    #[serde(default)]
+    pub wall_history: Option<Vec<super::wall_response::WallStepResponse>>,
+    /// 同一解析実行の識別。未識別の旧結果は None。
+    #[serde(default)]
+    pub wall_run: Option<super::wall_response::WallRunIdentity>,
     pub capacity_curve: Vec<CapacityPoint>,
     /// ヒンジ記録（確定ステップごとの閾値超過スナップショットの連なり。
     /// 同一材端が複数ステップで重複して並ぶ。[`HingeEvent`] の記録粒度参照）。

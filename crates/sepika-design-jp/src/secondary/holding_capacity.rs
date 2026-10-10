@@ -310,6 +310,8 @@ mod tests {
         use sepika_solver::nonlinear::pushover::{CapacityPoint, MechanismType};
         PushoverResult {
             steps: vec![],
+            wall_history: None,
+            wall_run: None,
             capacity_curve: vec![CapacityPoint {
                 step: 0,
                 roof_disp: 0.0,
@@ -337,6 +339,8 @@ mod tests {
         // 1層。層せん断は 100 → 150(ピーク) → 120(劣化) と推移。
         let pushover = PushoverResult {
             steps: vec![],
+            wall_history: None,
+            wall_run: None,
             capacity_curve: vec![
                 CapacityPoint {
                     step: 0,
