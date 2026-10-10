@@ -1,7 +1,7 @@
 //! 物理壁版の自重総量と、支持先に依存しない実領域の積分。
 
 use super::*;
-use crate::geom::polygon::{area, intersection_area, signed_area};
+use crate::geom::polygon::{area, signed_area};
 use i_overlay::core::{fill_rule::FillRule, overlay_rule::OverlayRule};
 use i_overlay::float::single::SingleFloatOverlay;
 
@@ -268,6 +268,8 @@ impl Model {
         }
         let mut region = vec![vec![clear.clone()]];
         region.extend(extra_polys.into_iter().map(|p| vec![p]));
+        // 内包検査は開口控除前の全実領域で行い、重複開口も正当とする。
+        let clear_region = region.clone();
         let gross = shapes_area(&region);
         let clear_z_range = region
             .iter()
@@ -300,7 +302,8 @@ impl Model {
                 [x, z + o.height],
             ];
             validate_polygon(&r)?;
-            let covered = intersection_area(&clear, &r);
+            let covered =
+                shapes_area(&clear_region.overlay(&r, OverlayRule::Intersect, FillRule::NonZero));
             if (covered - o.width * o.height).abs() > 1e-6 * (o.width * o.height).max(1.0) {
                 return Err("開口が躯体実領域の外側にあります".into());
             }

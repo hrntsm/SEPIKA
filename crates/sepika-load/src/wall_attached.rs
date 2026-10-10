@@ -635,6 +635,37 @@ mod tests {
     }
 
     #[test]
+    fn floor_region_sign_reversal_positioned_opening_uses_both_components() {
+        for (x, z, expected) in [
+            (3000.0, 1250.0, [4800.0, 4320.0]),
+            (500.0, 550.0, [4320.0, 4800.0]),
+        ] {
+            let mut m = model_with_line_anchor_nodes();
+            m.sections[0].thickness = Some(200.0);
+            m.materials[0].density = 24e-6 / sepika_core::units::GRAVITY_MM_S2;
+            push_floor_region(&mut m, [0.0, 2000.0], 0, true, 3000.0);
+            push_floor_region(&mut m, [2000.0, 4000.0], 1, true, 3000.0);
+            let mut plate = self_standing_plate();
+            if let WallPlateShape::Attached { extent, .. } = &mut plate.shape {
+                *extent = Some([-1000.0, 1000.0]);
+            }
+            plate.openings = vec![sepika_core::model::WallOpening {
+                width: 500.0,
+                height: 200.0,
+                offset: Some([x, z]),
+            }];
+            m.wall_plates.push(plate);
+            let w = m.wall_weight(&m.wall_plates[0]).unwrap();
+            assert!((w.totals.design_n - 9120.0).abs() < 1e-7);
+            assert!((w.band(1500.0, 4500.0).unwrap().design_n - 9120.0).abs() < 1e-7);
+            let extra = floor_region_wall_extra_intensity(&m);
+            for (i, expected) in expected.into_iter().enumerate() {
+                assert!((extra[&SlabId(i as u32)] * 8_000_000.0 - expected).abs() < 1e-7);
+            }
+        }
+    }
+
+    #[test]
     fn floor_region_anchor_adds_equivalent_intensity_to_slabs() {
         let mut m = model_with_line_anchor_nodes();
         // 壁（X=0..4000）を完全に含む床領域（X=-1000..5000）。

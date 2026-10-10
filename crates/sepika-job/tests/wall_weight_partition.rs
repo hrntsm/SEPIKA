@@ -899,3 +899,129 @@ fn enclosed_partial_beam_spans_and_midspan_posts_support_all_dl_modes() {
         assert!(error.to_string().contains("壁版 0"));
     }
 }
+
+#[test]
+fn attached_sign_reversal_openings_use_all_components_and_union() {
+    for (openings, total, below, above) in [
+        (
+            vec![WallOpening {
+                width: 500.0,
+                height: 200.0,
+                offset: Some([3000.0, 1250.0]),
+            }],
+            9120.0,
+            4800.0,
+            4320.0,
+        ),
+        (
+            vec![WallOpening {
+                width: 500.0,
+                height: 200.0,
+                offset: Some([500.0, 550.0]),
+            }],
+            9120.0,
+            4320.0,
+            4800.0,
+        ),
+        (
+            vec![
+                WallOpening {
+                    width: 500.0,
+                    height: 200.0,
+                    offset: Some([3000.0, 1250.0]),
+                },
+                WallOpening {
+                    width: 500.0,
+                    height: 200.0,
+                    offset: Some([3250.0, 1250.0]),
+                },
+            ],
+            8880.0,
+            4800.0,
+            4080.0,
+        ),
+        (
+            vec![
+                WallOpening {
+                    width: 500.0,
+                    height: 200.0,
+                    offset: Some([3000.0, 1250.0]),
+                },
+                WallOpening {
+                    width: 500.0,
+                    height: 200.0,
+                    offset: Some([500.0, 550.0]),
+                },
+            ],
+            8640.0,
+            4320.0,
+            4320.0,
+        ),
+    ] {
+        let mut model = fixture(6000.0);
+        model.wall_regions.clear();
+        model.wall_assignment_regions.regions.clear();
+        let p = &mut model.wall_plates[0];
+        p.shape = WallPlateShape::Attached {
+            anchor: RegionAnchor::Line {
+                nodes: [NodeId(0), NodeId(1)],
+                span: [0.0, 1.0],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: Some([-1000.0, 1000.0]),
+        };
+        p.dl_support = None;
+        p.openings = openings;
+        let w = model.wall_weight(&model.wall_plates[0]).unwrap();
+        // 各三角形1m²、γt=4.8kN/m²。単一開口0.1m²、重複和集合0.15m²。
+        close(w.totals.design_n, total);
+        close(w.totals.physical_n, total);
+        close(w.band(2000.0, 3000.0).unwrap().design_n, below);
+        close(w.band(3000.0, 4000.0).unwrap().design_n, above);
+        close(
+            w.projected_design_line_loads()
+                .unwrap()
+                .iter()
+                .map(|p| (p[1] - p[0]) * (p[2] + p[3]) / 2.0)
+                .sum(),
+            total,
+        );
+        bands(&model, &[0.0, total, 0.0, 0.0]);
+        let loads = sepika_load::wall_attached::attached_wall_beam_loads(&model);
+        close(
+            loads
+                .iter()
+                .map(|l| match (l.target, l.shape) {
+                    (
+                        sepika_load::floor::LoadTarget::Span { t, .. },
+                        sepika_load::floor::LoadShape::Linear { w_i, w_j },
+                    ) => 4000.0 * (t[1] - t[0]).abs() * (w_i + w_j) / 2.0,
+                    (
+                        sepika_load::floor::LoadTarget::Span { t, .. },
+                        sepika_load::floor::LoadShape::Uniform { w },
+                    ) => 4000.0 * (t[1] - t[0]).abs() * w,
+                    _ => panic!("線アンカー投影DL"),
+                })
+                .sum(),
+            total,
+        );
+        for opening in [
+            WallOpening {
+                width: 1000.0,
+                height: 100.0,
+                offset: Some([1500.0, 950.0]),
+            },
+            WallOpening {
+                width: 500.0,
+                height: 200.0,
+                offset: Some([3000.0, 1750.0]),
+            },
+        ] {
+            model.wall_plates[0].openings = vec![opening];
+            assert!(model
+                .wall_weight(&model.wall_plates[0])
+                .unwrap_err()
+                .contains("外側"));
+        }
+    }
+}
