@@ -3473,6 +3473,7 @@ fn wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
     let top_mask = Dof6Mask(0b111010);
     let shape = SectionShape::RcWall {
         thickness: 150.0,
+        pwh_ratio: None,
         ps: 0.0025,
     };
     let rebar = RcRectColumnRebar {

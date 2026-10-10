@@ -31,7 +31,7 @@ pub use column_mechanism::{
     sum_my_from_end_hinges, ColumnEndHinge,
 };
 pub use wall_nonlinear::{
-    wall_shear_beta_u, wall_shear_crack, wall_shear_trilinear, wall_shear_ultimate,
+    wall_shear_beta_s, wall_shear_crack, wall_shear_trilinear, wall_shear_ultimate,
     WallShearTrilinear, WallShearTrilinearInput,
 };
 

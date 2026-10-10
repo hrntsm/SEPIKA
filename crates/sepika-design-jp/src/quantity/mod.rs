@@ -1239,7 +1239,7 @@ fn wall_quantity(ctx: &Ctx, elem: &ElementData) -> Option<MemberQuantity> {
     let model = ctx.model;
     let sec = model.sections.get(elem.section?.index())?;
     let (t, ps) = match sec.shape.as_ref() {
-        Some(SectionShape::RcWall { thickness, ps }) => (*thickness, *ps),
+        Some(SectionShape::RcWall { thickness, ps, .. }) => (*thickness, *ps),
         _ => (sec.thickness?, 0.0),
     };
     if t <= 0.0 {

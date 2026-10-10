@@ -353,6 +353,7 @@ fn app_with_abc_and_generated_wall() -> App {
     }
     app.core.model.sections[2] = SectionShape::RcWall {
         thickness: 180.0,
+        pwh_ratio: None,
         ps: 0.0025,
     }
     .to_section(SectionId(2), "C".into());
