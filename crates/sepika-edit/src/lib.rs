@@ -1,4 +1,14 @@
+use sepika_core::ids::{MaterialId, SectionId};
 use sepika_core::model::Model;
+
+/// 編集適用前から適用後への材料・断面 ID の挿入・削除。列挙順に適用する。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IdChange {
+    MaterialRemoved(MaterialId),
+    MaterialInserted(MaterialId),
+    SectionRemoved(SectionId),
+    SectionInserted(SectionId),
+}
 
 /// 編集コマンド。`Send` を要求するのは、MCP サーバが `UndoStack` を
 /// スレッド間で共有する(`rmcp::ServerHandler: Send + Sync`)ため。
@@ -7,6 +17,10 @@ use sepika_core::model::Model;
 pub trait EditCommand: Send {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand>;
     fn label(&self) -> &str;
+    /// この逆コマンドを生成した編集の ID 変更を、適用順に返す。材料・断面の挿入・削除がなければ空。
+    fn inverse_id_changes(&self) -> Vec<IdChange> {
+        Vec::new()
+    }
     /// 複合編集の途中候補へ適用する。座標と荷重区間の整合は複合編集の最終候補で検証する。
     fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
         self.apply(model)
@@ -18,6 +32,33 @@ pub trait EditCommand: Send {
     }
     fn rejection(&self) -> Option<&str> {
         None
+    }
+}
+
+struct CommandWithIdChanges {
+    command: Box<dyn EditCommand>,
+    changes: Vec<IdChange>,
+}
+
+fn with_id_changes(command: Box<dyn EditCommand>, changes: Vec<IdChange>) -> Box<dyn EditCommand> {
+    Box::new(CommandWithIdChanges { command, changes })
+}
+
+impl EditCommand for CommandWithIdChanges {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        self.command.apply(model)
+    }
+
+    fn apply_candidate(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        self.command.apply_candidate(model)
+    }
+
+    fn label(&self) -> &str {
+        self.command.label()
+    }
+
+    fn inverse_id_changes(&self) -> Vec<IdChange> {
+        self.changes.clone()
     }
 }
 
@@ -49,6 +90,7 @@ pub struct UndoStack {
     max_undo: usize,
     revision: u64,
     last_error: Option<String>,
+    id_changes: Vec<IdChange>,
 }
 
 impl UndoStack {
@@ -59,6 +101,7 @@ impl UndoStack {
             max_undo: 100,
             revision: 0,
             last_error: None,
+            id_changes: Vec::new(),
         }
     }
 
@@ -69,6 +112,7 @@ impl UndoStack {
             max_undo,
             revision: 0,
             last_error: None,
+            id_changes: Vec::new(),
         }
     }
 
@@ -90,6 +134,7 @@ impl UndoStack {
     /// 失敗した操作で redo 履歴が失われる、という不整合が生じていた。
     pub fn run(&mut self, model: &mut Model, cmd: Box<dyn EditCommand>) -> bool {
         self.last_error = None;
+        self.id_changes.clear();
         let mut candidate = model.clone();
         let inv = cmd.apply(&mut candidate);
         if let Some(reason) = inv.rejection() {
@@ -104,6 +149,7 @@ impl UndoStack {
             return false;
         }
         *model = candidate;
+        self.id_changes = inv.inverse_id_changes();
         self.done.push(inv);
         if self.done.len() > self.max_undo {
             self.done.remove(0);
@@ -118,17 +164,26 @@ impl UndoStack {
         self.last_error.as_deref()
     }
 
+    /// 直前の run・undo・redo で確定した ID 変更。失敗または履歴なしでは空。
+    pub fn id_changes(&self) -> &[IdChange] {
+        &self.id_changes
+    }
+
     pub fn undo(&mut self, model: &mut Model) {
+        self.id_changes.clear();
         if let Some(cmd) = self.done.pop() {
             let redo_cmd = cmd.apply(model);
+            self.id_changes = redo_cmd.inverse_id_changes();
             self.undone.push(redo_cmd);
             self.revision += 1;
         }
     }
 
     pub fn redo(&mut self, model: &mut Model) {
+        self.id_changes.clear();
         if let Some(cmd) = self.undone.pop() {
             let undo_cmd = cmd.apply(model);
+            self.id_changes = undo_cmd.inverse_id_changes();
             self.done.push(undo_cmd);
             self.revision += 1;
         }
@@ -187,6 +242,7 @@ macro_rules! id_indexed_delete_insert {
         vec = $vecf:ident,
         shift = $shift:expr,
         guard = $guard:expr,
+        $(remap = ($removed:ident, $inserted:ident),)?
         del_label = $dl:literal,
         ins_label = $il:literal $(,)?
     ) => {
@@ -221,6 +277,9 @@ macro_rules! id_indexed_delete_insert {
             fn label(&self) -> &str {
                 $dl
             }
+            $(fn inverse_id_changes(&self) -> Vec<IdChange> {
+                vec![IdChange::$inserted(self.id)]
+            })?
         }
 
         $(#[$ins_meta])*
@@ -249,6 +308,9 @@ macro_rules! id_indexed_delete_insert {
             fn label(&self) -> &str {
                 $il
             }
+            $(fn inverse_id_changes(&self) -> Vec<IdChange> {
+                vec![IdChange::$removed($id_ty(self.index as u32))]
+            })?
         }
     };
 }

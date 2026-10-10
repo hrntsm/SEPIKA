@@ -489,11 +489,14 @@ impl EditCommand for DuplicateSectionForMember {
         new_sec.name = unique_duplicate_name(&model.sections, &orig.name, orig.floor.as_deref());
         model.sections.push(new_sec);
         model.elements[elem_idx].section = Some(new_id);
-        Box::new(RestoreElementSectionAndDeleteSection {
-            elem: self.member,
-            old_section: Some(sid),
-            new_section: new_id,
-        })
+        with_id_changes(
+            Box::new(RestoreElementSectionAndDeleteSection {
+                elem: self.member,
+                old_section: Some(sid),
+                new_section: new_id,
+            }),
+            vec![IdChange::SectionInserted(new_id)],
+        )
     }
 
     fn label(&self) -> &str {
@@ -526,7 +529,10 @@ impl EditCommand for RestoreElementSectionAndDeleteSection {
                 sid.0 -= 1;
             }
         });
-        Box::new(DuplicateSectionForMember { member: self.elem })
+        with_id_changes(
+            Box::new(DuplicateSectionForMember { member: self.elem }),
+            vec![IdChange::SectionRemoved(self.new_section)],
+        )
     }
 
     fn label(&self) -> &str {
@@ -547,6 +553,7 @@ id_indexed_delete_insert!(
     vec = sections,
     shift = shift_section_ids,
     guard = section_in_use,
+    remap = (SectionRemoved, SectionInserted),
     del_label = "断面削除",
     ins_label = "断面追加",
 );

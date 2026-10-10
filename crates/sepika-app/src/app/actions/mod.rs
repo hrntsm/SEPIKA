@@ -61,6 +61,7 @@ impl App {
     pub(crate) fn apply_model_edit(&mut self, command: Box<dyn sepika_edit::EditCommand>) -> bool {
         let applied = self.core.scoped.undo.run(&mut self.core.model, command);
         if applied {
+            self.remap_model_focus();
             self.core.scoped.staleness.mark_edited();
         }
         applied

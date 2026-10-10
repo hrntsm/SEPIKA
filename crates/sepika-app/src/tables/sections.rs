@@ -369,17 +369,18 @@ pub fn sections_table(ui: &mut egui::Ui, app: &mut App) {
         );
         app.core.scoped.staleness.mark_edited();
     }
-    if let Some(sid) = pending_delete {
-        app.core
-            .scoped
-            .undo
-            .run(&mut app.core.model, Box::new(DeleteSection { id: sid }));
-        if app.ui.scoped.nav.focus_section == Some(sid) {
-            app.ui.scoped.nav.focus_section = None;
-        }
-        app.core.scoped.staleness.mark_edited();
-    }
+    apply_pending_actions(app, pending_focus, pending_delete);
+}
+
+pub(crate) fn apply_pending_actions(
+    app: &mut App,
+    pending_focus: Option<SectionId>,
+    pending_delete: Option<SectionId>,
+) {
     if let Some(sid) = pending_focus {
         app.ui.scoped.nav.focus_section = Some(sid);
+    }
+    if let Some(sid) = pending_delete {
+        app.apply_model_edit(Box::new(DeleteSection { id: sid }));
     }
 }

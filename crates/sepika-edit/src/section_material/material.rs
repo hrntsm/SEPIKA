@@ -1,7 +1,6 @@
 //! 材料の編集コマンド（追加・削除・プロパティ編集）。
 
 use super::*;
-use sepika_core::ids::*;
 use sepika_core::model::MaterialCategory;
 
 /// 材料追加。末尾に `MaterialId(len)` で追加する（ID＝配列インデックスの不変条件を維持）。
@@ -55,6 +54,7 @@ id_indexed_delete_insert!(
     vec = materials,
     shift = shift_material_ids,
     guard = material_in_use,
+    remap = (MaterialRemoved, MaterialInserted),
     del_label = "材料削除",
     ins_label = "材料削除の取り消し",
 );
