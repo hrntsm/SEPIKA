@@ -109,6 +109,18 @@ impl App {
             );
         }
 
+        if sepika_load::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
+            let generation = po
+                .wall_run
+                .as_ref()
+                .and_then(|run| run.input_generation.as_ref())
+                .ok_or_else(|| {
+                    "壁応答の入力識別情報がありません。増分解析を再実行してください".to_string()
+                })?;
+            if *generation != self.result_input(&ResultInputKey::Pushover(view_dir)) {
+                return Err("壁応答の生成入力が現在の計算入力と一致しません".into());
+            }
+        }
         let t = self
             .core
             .scoped
@@ -164,9 +176,21 @@ impl App {
                     &self.core.model
                 };
             for elem in &model.elements {
+                if matches!(elem.kind, sepika_core::model::ElementKind::Wall) {
+                    let step = po
+                        .steps
+                        .len()
+                        .checked_sub(1)
+                        .ok_or_else(|| "壁応答の確定stepがありません".to_string())?
+                        as u32;
+                    po.wall_response_at(elem.id, step).map_err(|reason| {
+                        format!("壁要素 {:?}: {}", elem.id, reason.description())
+                    })?;
+                }
                 if !matches!(
                     elem.kind,
-                    sepika_core::model::ElementKind::Beam
+                    sepika_core::model::ElementKind::Wall
+                        | sepika_core::model::ElementKind::Beam
                         | sepika_core::model::ElementKind::Fiber
                         | sepika_core::model::ElementKind::MultiSpring
                         | sepika_core::model::ElementKind::Brace { .. }
@@ -209,9 +233,16 @@ impl App {
                     .unwrap_or_default();
                 let is_brace_elem =
                     matches!(elem.kind, sepika_core::model::ElementKind::Brace { .. })
-                        || sepika_design_jp::MemberKind::of_element(elem, model)
-                            == sepika_design_jp::MemberKind::Brace;
+                        || (!matches!(elem.kind, sepika_core::model::ElementKind::Wall)
+                            && sepika_design_jp::MemberKind::of_element(elem, model)
+                                == sepika_design_jp::MemberKind::Brace);
                 let elem_steel = elem_is_steel(elem, model);
+                if elem_steel && matches!(elem.kind, sepika_core::model::ElementKind::Wall) {
+                    return Err(format!(
+                        "壁要素 {:?}: 鋼板壁のランク判定は未対応です",
+                        elem.id
+                    ));
+                }
                 let rank = if is_brace_elem && elem_steel {
                     let len = model.member_length(elem);
                     let i_min = sec.iy.min(sec.iz);
@@ -289,52 +320,53 @@ impl App {
                 } else if let Some(SectionShape::RcWall { thickness, .. }) = sec.shape.as_ref() {
                     if wall_has_src_boundary_column(elem, model) {
                         let capacities = sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(elem, model);
-                        let qu = resp_by_elem
-                            .get(&elem.id)
-                            .and_then(|r| r.wall_shear_signed)
-                            .map(|q| capacities[usize::from(q < 0.0)])
-                            .unwrap_or(0.0);
-                        let Some(resp) = resp_by_elem.get(&elem.id) else {
-                            continue;
-                        };
-                        if qu <= 0.0 {
-                            continue;
+                        let wall = po
+                            .wall_response_at(elem.id, (po.steps.len() - 1) as u32)
+                            .map_err(|reason| reason.description().to_string())?;
+                        let qu = capacities[usize::from(wall.qw_n < 0.0)];
+                        if !qu.is_finite() || qu <= 0.0 {
+                            return Err(format!(
+                                "壁要素 {:?}: 正負別せん断耐力を算定できません",
+                                elem.id
+                            ));
                         }
-                        let shear_failure = resp.horizontal_force >= 0.99 * qu;
+                        let shear_failure = wall.qdir_n.abs() >= 0.99 * qu;
                         sepika_design_jp::secondary::src_rank::src_wall_type(shear_failure)
                     } else {
-                        let Some(fc) = mat.fc else {
-                            continue;
-                        };
-                        let Some(resp) = resp_by_elem.get(&elem.id) else {
-                            continue;
-                        };
-                        let Some(wgeom) =
+                        let fc = mat
+                            .fc
+                            .filter(|v| v.is_finite() && *v > 0.0)
+                            .ok_or_else(|| {
+                                format!("壁要素 {:?}: Fc が未設定または不正です", elem.id)
+                            })?;
+                        let wall = po
+                            .wall_response_at(elem.id, (po.steps.len() - 1) as u32)
+                            .map_err(|reason| reason.description().to_string())?;
+                        let wgeom =
                             sepika_element::wall::wall_element::wall_element_geometry(elem, model)
-                        else {
-                            continue;
-                        };
+                                .ok_or_else(|| format!("壁要素 {:?}: 壁幾何が不正です", elem.id))?;
                         let wall_len = wgeom.lw;
                         let r2 =
                             sepika_element::wall::wall_element::WallElement::opening_strength_reduction(
                                 elem, model,
                             );
-                        let Some(tau_over_fc) = rc_wall_tau_over_fc(
-                            resp.horizontal_force,
-                            *thickness,
-                            wall_len,
-                            r2,
-                            fc,
-                        ) else {
-                            continue;
+                        let Some(tau_over_fc) =
+                            rc_wall_tau_over_fc(wall.qdir_n.abs(), *thickness, wall_len, r2, fc)
+                        else {
+                            return Err(format!("壁要素 {:?}: τu/Fc の入力が不正です", elem.id));
                         };
                         let capacities = sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(elem, model);
-                        let qu = resp_by_elem
-                            .get(&elem.id)
-                            .and_then(|r| r.wall_shear_signed)
-                            .map(|q| capacities[usize::from(q < 0.0)])
-                            .unwrap_or(0.0);
-                        let brittle = rc_wall_shear_brittle(resp.horizontal_force, qu);
+                        let wall = po
+                            .wall_response_at(elem.id, (po.steps.len() - 1) as u32)
+                            .map_err(|reason| reason.description().to_string())?;
+                        let qu = capacities[usize::from(wall.qw_n < 0.0)];
+                        if !qu.is_finite() || qu <= 0.0 {
+                            return Err(format!(
+                                "壁要素 {:?}: 正負別せん断耐力を算定できません",
+                                elem.id
+                            ));
+                        }
+                        let brittle = rc_wall_shear_brittle(wall.qdir_n.abs(), qu);
                         let wall_structure = self.core.wall_structure;
                         rc_wall_type(tau_over_fc, wall_structure, brittle)
                     }
@@ -422,10 +454,17 @@ impl App {
                 per_story[idx].push(rank);
                 computed.push((elem.id, rank));
 
-                let q_h = resp_by_elem
-                    .get(&elem.id)
-                    .map(|r| r.horizontal_force)
-                    .unwrap_or(0.0);
+                let q_h = if matches!(elem.kind, sepika_core::model::ElementKind::Wall) {
+                    po.wall_response_at(elem.id, (po.steps.len() - 1) as u32)
+                        .map_err(|reason| reason.description().to_string())?
+                        .qdir_n
+                        .abs()
+                } else {
+                    resp_by_elem
+                        .get(&elem.id)
+                        .map(|r| r.horizontal_force)
+                        .ok_or_else(|| format!("部材 {:?}: 増分解析応答がありません", elem.id))?
+                };
                 let gi = rank_index_for_group(rank);
                 if matches!(
                     elem.kind,

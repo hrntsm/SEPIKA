@@ -1118,7 +1118,197 @@ fn test_holding_capacity_auto_rank_detects_wall() {
         .expect("保有水平耐力が算定できるはず");
 
     assert!(
-        app.core.scoped.ds_beta_u_unavailable,
-        "壁要素の階が解決できない場合は βu 不可として明示的にフォールバックする"
+        !app.core.scoped.ds_beta_u_unavailable,
+        "壁専用応答を利用して壁を検出し βu を算定する"
     );
+}
+
+#[test]
+fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_input() {
+    use sepika_solver::nonlinear::pushover::wall_response::WallUnavailableReason;
+    let mut app = wall_bay_app();
+    app.run_preparation();
+    app.run_static_all();
+    app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.core.design_rank_auto = true;
+    let po = app.displayed_pushover().unwrap();
+    let records = po.wall_history.as_ref().unwrap();
+    assert_eq!(records.len(), po.steps.len());
+    assert!(records.iter().all(|r| r.plate == Some(WallPlateId(0))));
+    let elem = records[0].elem;
+    assert!(po.member_response.iter().all(|r| r.elem != elem));
+    assert!(po.wall_run.as_ref().unwrap().input_generation.is_some());
+    let bytes = rmp_serde::to_vec_named(po).unwrap();
+    let saved: sepika_solver::nonlinear::pushover::PushoverResult =
+        rmp_serde::from_slice(&bytes).unwrap();
+    assert_eq!(
+        saved.wall_run.unwrap().run_id,
+        po.wall_run.as_ref().unwrap().run_id
+    );
+    assert_eq!(saved.wall_history.unwrap().len(), records.len());
+    let csv = sepika_app::summary::build_report_csv(&app);
+    for label in [
+        "Qw[N]",
+        "Qdir[N]",
+        "R_wall[rad]",
+        "O[mm]/F[N]/M_O[Nmm]",
+        "仮想壁柱",
+        "剛体回転・曲げを除いた材料せん断ひずみを復元していません",
+        "線材ヒンジ・せん断降伏イベント",
+    ] {
+        assert!(csv.contains(label), "{label}");
+    }
+    assert!(app.compute_holding_capacity().is_ok());
+    let original = app.core.scoped.results.clone();
+    for reason in [
+        None,
+        Some(WallUnavailableReason::InvalidForce),
+        Some(WallUnavailableReason::UnsupportedGeometry),
+    ] {
+        app.core.scoped.results = original.clone();
+        let bundle = app.core.scoped.results.as_mut().unwrap();
+        for po in [&mut bundle.pushover, &mut bundle.pushover_x]
+            .into_iter()
+            .flatten()
+        {
+            if let Some(reason) = reason {
+                let record = po.wall_history.as_mut().unwrap().last_mut().unwrap();
+                record.response = None;
+                record.unavailable = Some(reason);
+            } else {
+                po.wall_history = None;
+            }
+        }
+        let error = app
+            .compute_holding_capacity()
+            .err()
+            .expect("壁未記録は設計を拒否");
+        assert!(
+            error.contains(
+                reason
+                    .unwrap_or(WallUnavailableReason::LegacyNotRecorded)
+                    .description()
+            ),
+            "{error}"
+        );
+    }
+    app.core.scoped.results = original.clone();
+    let bundle = app.core.scoped.results.as_mut().unwrap();
+    for po in [&mut bundle.pushover, &mut bundle.pushover_x]
+        .into_iter()
+        .flatten()
+    {
+        po.wall_run = None;
+    }
+    assert!(app
+        .compute_holding_capacity()
+        .err()
+        .expect("壁未記録は設計を拒否")
+        .contains("入力識別情報"));
+    for corrupt in 0..3 {
+        app.core.scoped.results = original.clone();
+        let bundle = app.core.scoped.results.as_mut().unwrap();
+        for po in [&mut bundle.pushover, &mut bundle.pushover_x]
+            .into_iter()
+            .flatten()
+        {
+            match corrupt {
+                0 => po.wall_run.as_mut().unwrap().input_generation = Some(vec![0]),
+                1 => {
+                    po.wall_history
+                        .as_mut()
+                        .unwrap()
+                        .last_mut()
+                        .unwrap()
+                        .response
+                        .as_mut()
+                        .unwrap()
+                        .qw_n = f64::NAN
+                }
+                _ => {
+                    po.wall_history
+                        .as_mut()
+                        .unwrap()
+                        .last_mut()
+                        .unwrap()
+                        .response
+                        .as_mut()
+                        .unwrap()
+                        .equilibrium_residual
+                        .force_n[0] = 1e12
+                }
+            }
+        }
+        let error = app
+            .compute_holding_capacity()
+            .err()
+            .expect("不正壁入力は設計を拒否");
+        let expected = match corrupt {
+            0 => "生成入力が現在の計算入力と一致しません",
+            1 => WallUnavailableReason::InvalidForce.description(),
+            _ => WallUnavailableReason::UnbalancedForces.description(),
+        };
+        assert!(error.contains(expected), "{error}");
+        if corrupt > 0 {
+            assert!(sepika_app::summary::build_report_csv(&app).contains(expected));
+        }
+    }
+    app.core.scoped.results = original;
+    for po in [&mut app.core.scoped.results.as_mut().unwrap().pushover_x]
+        .into_iter()
+        .flatten()
+    {
+        let last = po.wall_history.as_mut().unwrap().last_mut().unwrap();
+        let wall = last.response.as_mut().unwrap();
+        wall.qw_n = 0.0;
+        wall.qdir_n = 0.0;
+        for resultant in [
+            &mut wall.bottom,
+            &mut wall.top,
+            &mut wall.equilibrium_residual,
+        ] {
+            resultant.force_n = [0.0; 3];
+            resultant.moment_nmm = [0.0; 3];
+        }
+        let step = last.step;
+        assert_eq!(po.wall_response_at(elem, step).unwrap().qdir_n, 0.0);
+    }
+    let csv = sepika_app::summary::build_report_csv(&app);
+    assert!(csv
+        .lines()
+        .any(|line| line.contains("Qdir[N]") && line.ends_with(",\"0\"")));
+}
+
+#[test]
+fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
+    let mut app = wall_bay_app();
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    for node in &mut app.core.model.nodes {
+        let [x, y, z] = node.coord;
+        node.coord = [c * (x - y), c * (x + y), z];
+    }
+    for elem in &mut app.core.model.elements {
+        let [x, y, z] = elem.local_axis.ref_vector;
+        elem.local_axis.ref_vector = [c * (x - y), c * (x + y), z];
+    }
+    app.run_preparation();
+    app.run_static_all();
+    app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let po = app.displayed_pushover().unwrap();
+    let last = po.wall_history.as_ref().unwrap().last().unwrap();
+    let wall = po.wall_response_at(last.elem, last.step).unwrap();
+    assert!(wall.qw_n.abs() > 100.0);
+    assert!((wall.qw_n.abs() - wall.qdir_n.abs()).abs() > 10.0);
+    app.core.design_rank_auto = true;
+    assert!(app.compute_holding_capacity().is_ok());
 }

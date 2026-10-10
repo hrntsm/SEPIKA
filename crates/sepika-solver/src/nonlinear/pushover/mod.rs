@@ -23,6 +23,7 @@ mod response;
 mod shear_yield;
 mod step_record;
 mod types;
+pub mod wall_response;
 
 pub use driver::{pushover_analysis, pushover_analysis_recording};
 pub use response::story_reference_node;
