@@ -2548,20 +2548,21 @@ fn slab_floor_load_reaches_primary_frame() {
 #[test]
 fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() {
     use sepika_core::model::StoryLevelKind;
-    let mut app = prepared_steel_portal(true);
+    // 原階を初期化する前に独立fixtureの床標高を設定する。
+    let mut model = four_story_steel_portal();
+    let elevations = [-9000.0, -6000.0, -3000.0, 6000.0, 12000.0];
+    for node in &mut model.nodes {
+        node.coord[2] = elevations[node.id.index() / 2];
+    }
+    let mut app = App::default();
+    app.core.analysis_cfg.threads = 1;
+    app.load_model(model);
+    app.generate_stories_action();
     app.core.analysis_cfg.push_steps = 3;
     app.core.analysis_cfg.push_use_drift_angle = false;
-    for (i, elevation) in [-9000.0, -6000.0, -3000.0, 6000.0, 12000.0]
-        .into_iter()
-        .enumerate()
-    {
-        app.core.model.stories[i].elevation = elevation;
+    for (i, elevation) in elevations.into_iter().enumerate() {
         if i > 0 {
             app.core.model.stories[i].weight_override = Some(100_000.0);
-        }
-        let nodes = app.core.model.stories[i].node_ids.clone();
-        for node in nodes {
-            app.core.model.nodes[node.index()].coord[2] = elevation;
         }
         if i == 1 || i == 2 {
             assert!(app.core.scoped.undo.run(
@@ -2585,8 +2586,16 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     assert_no_error(&app, "整合GLの増分解析");
     let qud = app.compute_holding_capacity().unwrap().0.stories[0].qud;
     assert!((qud - 217_750.0).abs() < 1e-8);
-    for (i, elevation) in [(3, 15_000.0), (4, 30_000.0)] {
-        app.core.model.stories[i].elevation = elevation;
+    for (i, elevation) in [(4, 30_000.0), (3, 15_000.0)] {
+        let name = app.core.model.stories[i].name.clone();
+        assert!(app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(sepika_edit::SetStoryLevel {
+                story: sepika_core::ids::StoryId(i as u32),
+                name,
+                elevation,
+            })
+        ));
         app.core.model.stories[i].structure = if i == 3 {
             sepika_core::model::StoryStructure::S
         } else {
