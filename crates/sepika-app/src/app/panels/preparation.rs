@@ -350,6 +350,68 @@ impl App {
     /// `StoryId` の繰り上げ・並べ替えを伴うため、モデルを書き換えたあと
     /// 残りの行が古い ID を指さないようにする）。
     fn stories_section(&mut self, ui: &mut egui::Ui) {
+        if !self.core.model.source_stories.is_empty() {
+            egui::CollapsingHeader::new("STB明示所属と解析用推定")
+                .id_salt("source_story_membership")
+                .show(ui, |ui| {
+                    for diagnostic in self
+                        .core
+                        .model
+                        .source_story_diagnostics()
+                        .into_iter()
+                        .chain(self.core.model.source_story_assignment_diagnostics())
+                    {
+                        ui.colored_label(crate::theme::WARN_TEXT, diagnostic);
+                    }
+                    for story in &self.core.model.source_stories {
+                        ui.label(format!(
+                            "元階ID {}: {} / {} / height {} mm",
+                            story.id,
+                            story.name,
+                            story.kind.as_str(),
+                            story.height
+                        ));
+                        let key = egui::Id::new(("source_story_nodes", story.id));
+                        let current = story
+                            .node_ids
+                            .iter()
+                            .filter_map(|n| n.node)
+                            .map(|n| n.0.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        let mut text = ui.data(|d| d.get_temp::<String>(key)).unwrap_or(current);
+                        ui.horizontal(|ui| {
+                            ui.label("明示節点ID（内部ID）");
+                            if ui.text_edit_singleline(&mut text).changed() {
+                                ui.data_mut(|d| d.insert_temp(key, text.clone()));
+                            }
+                            if ui.button("所属を適用").clicked() {
+                                match text
+                                    .split_whitespace()
+                                    .map(|n| n.parse::<u32>().map(sepika_core::ids::NodeId))
+                                    .collect::<Result<Vec<_>, _>>()
+                                {
+                                    Ok(nodes) => {
+                                        self.ui.scoped.pending_story_cmds.push_back(Box::new(
+                                            sepika_edit::SetSourceStoryNodes {
+                                                source_story: story.id,
+                                                nodes,
+                                            },
+                                        ));
+                                        ui.data_mut(|d| d.remove::<String>(key));
+                                    }
+                                    Err(_) => {
+                                        ui.colored_label(
+                                            crate::theme::ERROR_RED,
+                                            "節点IDは空白区切りの整数で指定してください",
+                                        );
+                                    }
+                                }
+                            }
+                        });
+                    }
+                });
+        }
         egui::CollapsingHeader::new("階の定義")
             .default_open(false)
             .id_salt("as_stories_table")

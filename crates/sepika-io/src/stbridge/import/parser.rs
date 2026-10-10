@@ -338,13 +338,37 @@ impl StbParser {
             "StbNode" => {
                 self.raw_nodes.push(RawNode {
                     file_id: get_u32(a, "id")?,
+                    guid: a.get("guid").cloned(),
                     coord: [get_f64(a, "X")?, get_f64(a, "Y")?, get_f64(a, "Z")?],
                 });
             }
             "StbStory" => {
                 self.raw_stories.push(RawStory {
                     file_id: get_u32(a, "id")?,
-                    name: a.get("name").cloned().unwrap_or_default(),
+                    guid: a.get("guid").cloned(),
+                    kind: match a.get("kind").map(String::as_str) {
+                        Some("GENERAL") => sepika_core::model::SourceStoryKind::General,
+                        Some("BASEMENT") => sepika_core::model::SourceStoryKind::Basement,
+                        Some("ROOF") => sepika_core::model::SourceStoryKind::Roof,
+                        Some("PENTHOUSE") => sepika_core::model::SourceStoryKind::Penthouse,
+                        Some("ISOLATION") => sepika_core::model::SourceStoryKind::Isolation,
+                        Some("DEPENDENCE") => sepika_core::model::SourceStoryKind::Dependence,
+                        value => {
+                            return Err(StbError::Parse(format!(
+                                "StbStory kind が不正です: {value:?}"
+                            )))
+                        }
+                    },
+                    id_dependence: a
+                        .get("id_dependence")
+                        .map(|v| v.parse::<u32>())
+                        .transpose()
+                        .map_err(|e| StbError::Parse(e.to_string()))?,
+                    strength_concrete: a.get("strength_concrete").cloned(),
+                    name: a
+                        .get("name")
+                        .cloned()
+                        .ok_or_else(|| StbError::Parse("StbStory name がありません".into()))?,
                     elevation: get_f64(a, "height")?,
                     node_ids: Vec::new(),
                 });
