@@ -12279,3 +12279,193 @@ fn high_density_steel_gui_preparation_sync_rejects_and_undo_recovers() {
         }
     }
 }
+
+#[test]
+fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_retained() {
+    use sepika_core::{
+        dof::Dof6Mask,
+        model::{ElementKind, PanelZoneMode},
+    };
+    use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
+    use sepika_section::shape::SectionShape;
+    let mut model = crate::sample::portal_frame();
+    model.panel_zone = PanelZoneMode::None;
+    let h = |height| SectionShape::SteelH {
+        height,
+        width: 200.0,
+        web_thick: 10.0,
+        flange_thick: 20.0,
+        root_r: Some(0.0),
+    };
+    let mut large = h(600.0).to_section(SectionId(1), "H600".into());
+    large.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+    large.material = model.sections[1].material;
+    model.sections[1] = large.clone();
+    large.id = SectionId(2);
+    model.sections.push(large);
+    let mut far = model.nodes[2].clone();
+    far.id = NodeId(4);
+    far.coord = [-6000.0, 0.0, 3500.0];
+    far.restraint = Dof6Mask::FIXED;
+    model.nodes.push(far);
+    let mut opposite = model.elements[2].clone();
+    opposite.id = ElemId(3);
+    opposite.nodes = smallvec::smallvec![NodeId(4), NodeId(2)];
+    opposite.section = Some(SectionId(2));
+    model.elements.push(opposite);
+    let mut orthogonal_far = model.nodes[4].clone();
+    orthogonal_far.id = NodeId(5);
+    orthogonal_far.coord = [0.0, 6000.0, 3500.0];
+    model.nodes.push(orthogonal_far);
+    let mut orthogonal = model.elements[2].clone();
+    orthogonal.id = ElemId(4);
+    orthogonal.nodes = smallvec::smallvec![NodeId(2), NodeId(5)];
+    model.elements.push(orthogonal);
+    let mut original = App::default();
+    original.load_model(model);
+    original.run_linear_static(LoadCaseId(0));
+    assert!(
+        original.core.scoped.last_error.is_none(),
+        "{:?}",
+        original.core.scoped.last_error
+    );
+    let mut old = original.core.scoped.results.as_ref().unwrap().clone();
+    old.joint_checks = vec![JointCheck {
+        node: NodeId(2),
+        label: "パネルゾーン(S)".into(),
+        outcome: CheckOutcome::Checked(CheckResult {
+            basis: "旧標準形式成功".into(),
+            detail: String::new(),
+            components: vec![CheckComponent {
+                kind: CheckKind::Shear,
+                ratio: 0.5,
+                detail: String::new(),
+            }],
+        }),
+    }];
+    let static_key = original.core.scoped.last_static;
+    let save =
+        |path: &std::path::Path, model: &sepika_core::model::Model, bundle: ResultsBundle| {
+            let bytes = rmp_serde::to_vec_named(&SavedResults {
+                bundle,
+                last_static: static_key,
+                view_vibration_case: None,
+                view_lumped_vibration_case: None,
+                last_run: Some(SystemTime::now()),
+            })
+            .unwrap();
+            sepika_io::ovika::save_ovika(
+                path,
+                model,
+                sepika_io::ovika::OvikaExtras {
+                    results: Some(&bytes),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        };
+    let path = test_tmp().join("panel_505_saved_gate.ovika");
+    save(&path, &original.core.model, old.clone());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(!reopened.core.scoped.staleness.results_stale);
+    assert_eq!(
+        reopened.core.scoped.results.as_ref().unwrap().statics.len(),
+        old.statics.len()
+    );
+    assert!(crate::summary::build_report_csv(&reopened).contains("旧標準形式成功"));
+
+    let mut staggered = original.core.model.clone();
+    staggered.sections[2].shape = Some(h(500.0));
+    assert!(staggered.validate().is_ok());
+    assert!(!staggered
+        .elements
+        .iter()
+        .any(|e| matches!(e.kind, ElementKind::PanelZone)));
+    save(&path, &staggered, old.clone());
+    reopened.open_project_from(path.clone());
+    let results = reopened.core.scoped.results.as_ref().unwrap();
+    assert!(results.statics.is_empty() && results.modal.is_none());
+    assert!(results.member_checks.is_empty());
+    assert!(results.joint_checks.iter().all(|check| matches!(&check.outcome,
+        CheckOutcome::Skipped { reason } if reason.contains("db=580") && reason.contains("db=480") && reason.contains("上位置差=50") && reason.contains("下位置差=-50"))));
+    assert!(reopened.core.scoped.last_static.is_none());
+    assert!(
+        reopened.core.scoped.staleness.results_stale && reopened.core.scoped.staleness.design_stale
+    );
+    assert!(reopened
+        .core
+        .scoped
+        .last_notice
+        .as_deref()
+        .unwrap()
+        .contains("利用不可"));
+    let csv = crate::summary::build_report_csv(&reopened);
+    assert!(!csv.contains("旧標準形式成功"));
+    assert!(csv.contains("検定不能") && csv.contains("上位置差=50"));
+    reopened.run_design_check();
+    assert!(reopened
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .statics
+        .is_empty());
+    assert!(crate::summary::build_report_csv(&reopened).contains("検定不能"));
+
+    original.core.model = staggered.clone();
+    original.core.scoped.results = Some(old);
+    original.core.scoped.staleness.mark_edited();
+    original.run_design_check();
+    assert!(original
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .statics
+        .is_empty());
+    assert!(original
+        .core
+        .scoped
+        .last_notice
+        .as_deref()
+        .unwrap()
+        .contains("利用不可"));
+
+    let mut current = App::default();
+    current.load_model(staggered);
+    current.run_linear_static(LoadCaseId(0));
+    assert!(
+        current.core.scoped.last_error.is_none(),
+        "{:?}",
+        current.core.scoped.last_error
+    );
+    let gated = current.core.scoped.results.as_ref().unwrap();
+    assert!(gated.joint_checks.iter().any(
+        |c| matches!(&c.outcome, CheckOutcome::Skipped { reason } if reason.contains("段違い"))
+    ));
+    assert!(gated.joint_checks.iter().any(|c| c.node == NodeId(2)
+        && c.label.contains("[0.000, 1.000, 0.000]")
+        && matches!(c.outcome, CheckOutcome::Checked(_))));
+    save(&path, &current.core.model, gated.clone());
+    reopened.open_project_from(path.clone());
+    assert!(!reopened.core.scoped.staleness.results_stale);
+    assert_eq!(
+        reopened.core.scoped.results.as_ref().unwrap().statics.len(),
+        gated.statics.len()
+    );
+    assert_eq!(
+        reopened
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .joint_checks
+            .len(),
+        gated.joint_checks.len()
+    );
+    std::fs::remove_file(path).unwrap();
+}
