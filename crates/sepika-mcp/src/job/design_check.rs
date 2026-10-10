@@ -29,13 +29,9 @@ pub(crate) fn compute_design_check_job(
         let combo = work.combinations.get(index).ok_or_else(|| {
             JobError::InvalidInput(format!("保存組合せindex {index} がありません"))
         })?;
-        let id = combo
-            .terms
-            .first()
-            .map(|(id, _)| *id)
-            .unwrap_or(sepika_core::ids::LoadCaseId(0));
+
         (
-            id,
+            None,
             combo.terms.clone(),
             "saved_combination",
             combination_design_state(combo, &work.load_cases),
@@ -59,10 +55,15 @@ pub(crate) fn compute_design_check_job(
             };
             let state = combination_design_state(&combo, &work.load_cases)
                 .map_err(JobError::InvalidInput)?;
-            (lc.id, terms, "automatic_gravity_combination", Ok(state))
+            (
+                Some(lc.id),
+                terms,
+                "automatic_gravity_combination",
+                Ok(state),
+            )
         } else {
             (
-                lc.id,
+                Some(lc.id),
                 vec![(lc.id, 1.0)],
                 "single_case",
                 case_design_state(lc.kind),
@@ -96,7 +97,7 @@ pub(crate) fn compute_design_check_job(
         wall_index = None;
         &work
     };
-    let lc_id_u32 = lc_id.0;
+    let case = (source == "single_case").then(|| lc_id.unwrap().0);
 
     let term = match state.as_ref().map(|s| s.duration) {
         Ok(LoadDuration::Short) => LoadTerm::Short,
@@ -145,8 +146,10 @@ pub(crate) fn compute_design_check_job(
 
     let wall_case = match params.load_combination {
         Some(index) => format!("combo:{index}:{}", work.combinations[index].name),
-        None if source == "automatic_gravity_combination" => format!("auto:G+P+case:{}", lc_id.0),
-        None => format!("case:{}", lc_id.0),
+        None if source == "automatic_gravity_combination" => {
+            format!("auto:G+P+case:{}", lc_id.unwrap().0)
+        }
+        None => format!("case:{}", lc_id.unwrap().0),
     };
     let mut report = sepika_design_jp::run_member_design_checks(
         model,
@@ -170,15 +173,15 @@ pub(crate) fn compute_design_check_job(
         report.skip_for_load_state(reason);
     }
     let mut summary =
-        assemble_design_check_summary(&report, lc_id_u32, term, long_member_forces.is_some(), 0);
-    summary["load_target"] = serde_json::json!({ "source": source, "combination_index": params.load_combination, "terms": terms, "gravity_reference_terms": gravity_terms, "state": state.as_ref().ok(), "diagnostic": load_error, "legal_conditions_verified": false });
+        assemble_design_check_summary(&report, case, term, long_member_forces.is_some(), 0);
+    summary["load_target"] = serde_json::json!({ "source": source, "combination_index": params.load_combination, "requested_case": lc_id.map(|id| id.0), "terms": terms, "gravity_reference_terms": gravity_terms, "state": state.as_ref().ok(), "diagnostic": load_error, "legal_conditions_verified": false });
     summary["floor_scope"] = serde_json::json!({ "selected_combination_checked": false, "long_term_approximation": "GUIの固定＋用途別積載の独立略算。MCPでは未実行" });
     if state.is_err() {
         summary["term"] = serde_json::Value::Null;
     }
     attach_prepare_notices(&mut summary, notices);
     Ok(JobOutcome::DesignCheck {
-        case: lc_id_u32,
+        case,
         member_force_rows,
         summary,
     })
@@ -186,7 +189,7 @@ pub(crate) fn compute_design_check_job(
 
 fn assemble_design_check_summary(
     report: &sepika_design_jp::MemberDesignCheckReport,
-    lc_id_u32: u32,
+    case: Option<u32>,
     term: LoadTerm,
     qd_wired: bool,
     gravity_failed: usize,
@@ -254,7 +257,7 @@ fn assemble_design_check_summary(
             "ReferenceSkeleton": sepika_design_jp::wall_check::WallCheckSummary::for_kind(&report.wall_checks, sepika_design_jp::wall_check::WallCheckKind::ReferenceSkeleton),
         },
         "kind": "DesignCheck",
-        "case": lc_id_u32,
+        "case": case,
         "term": match term {
             LoadTerm::Long => "long",
             LoadTerm::Short => "short",
@@ -314,7 +317,7 @@ mod tests {
             },
             Some(WallSkipKind::NotImplemented),
         ));
-        let summary = assemble_design_check_summary(&report, 5, LoadTerm::Short, false, 0);
+        let summary = assemble_design_check_summary(&report, Some(5), LoadTerm::Short, false, 0);
         assert_eq!(summary["wall_summary"]["n_ok"], 1);
         assert_eq!(summary["wall_summary"]["n_skipped"], 1);
         assert_eq!(summary["wall_summary"]["n_walls"], 2);
@@ -330,17 +333,17 @@ mod tests {
             },
             Some(WallSkipKind::MissingInput),
         ));
-        let summary = assemble_design_check_summary(&report, 5, LoadTerm::Short, false, 0);
+        let summary = assemble_design_check_summary(&report, Some(5), LoadTerm::Short, false, 0);
         assert_eq!(summary["wall_summary"]["n_skipped"], 2);
         report.wall_checks[0].outcome = CheckOutcome::Skipped {
             reason: "壁応答欠落".into(),
         };
         report.wall_checks[0].skip_kind = Some(WallSkipKind::MissingResponse);
-        let summary = assemble_design_check_summary(&report, 5, LoadTerm::Short, false, 0);
+        let summary = assemble_design_check_summary(&report, Some(5), LoadTerm::Short, false, 0);
         assert!(summary["max_ratio"].is_null());
         assert!(summary["wall_summary_by_kind"]["AllowableShear"]["max_ratio"].is_null());
         let empty =
-            assemble_design_check_summary(&Default::default(), 5, LoadTerm::Short, false, 0);
+            assemble_design_check_summary(&Default::default(), Some(5), LoadTerm::Short, false, 0);
         assert!(empty["max_ratio"].is_null());
         assert_eq!(empty["all_checked_and_ok"], false);
     }

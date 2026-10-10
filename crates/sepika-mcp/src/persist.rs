@@ -8,7 +8,7 @@ fn attach_store_info(summary: &mut serde_json::Value, case: u32, kinds: &[&str])
     if let serde_json::Value::Object(map) = summary {
         map.insert(
             "store".to_string(),
-            serde_json::json!({ "case": case, "kinds": kinds }),
+            serde_json::json!({ "case": case, "kinds": kinds, "persisted": true }),
         );
     }
 }
@@ -87,6 +87,26 @@ fn persist_job_outcome_inner(
             member_force_rows,
             mut summary,
         } => {
+            let Some(case) = case else {
+                let batch = member_force_batch(&member_force_rows)
+                    .map_err(|e| format!("結果バッチの生成に失敗: {e}"))?;
+                let (rows, truncated) = batch_to_json_rows(&batch, RESULT_GET_ROW_LIMIT);
+                summary["member_forces"] = serde_json::json!({
+                    "rows": rows, "truncated": truncated, "total_rows": member_force_rows.len(),
+                    "units": {"n_q": "N", "m": "Nmm"},
+                });
+                summary["store"] = serde_json::json!({
+                    "case": null, "kinds": [], "persisted": false,
+                    "reason": "組合せ内力を単独荷重ケースの結果へ保存しません。result_getでは取得できません",
+                    "retrieval": {
+                        "tool": "analysis_status", "field": "status.Done.result_ref",
+                        "encoding": "json_string", "force_field": "member_forces",
+                        "load_target_field": "load_target",
+                    },
+                    "lifetime": "server_process",
+                });
+                return Ok(summary.to_string());
+            };
             let mut kinds: Vec<&str> = Vec::new();
             if !member_force_rows.is_empty() {
                 write_one(
@@ -233,4 +253,38 @@ pub fn result_get_json(
         "rows": rows,
         "truncated": truncated,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_state_combination_inline_forces_report_truncation_without_store_entries() {
+        let dir =
+            std::env::temp_dir().join(format!("sepika487-inline-limit-{}", std::process::id()));
+        let mut store = sepika_io::results::FsResultStore::open(&dir).unwrap();
+        let outcome = JobOutcome::DesignCheck {
+            case: None,
+            member_force_rows: (0..10_001)
+                .map(|id| (id, 0.0, [100.0, 20.0, 40.0, 30.0, 50.0, 60.0]))
+                .collect(),
+            summary: serde_json::json!({"case": null, "load_target": {"source": "saved_combination", "combination_index": 0}}),
+        };
+        let summary: serde_json::Value =
+            serde_json::from_str(&persist_job_outcome(&mut store, outcome).unwrap()).unwrap();
+        assert_eq!(
+            summary["member_forces"]["rows"].as_array().unwrap().len(),
+            10_000
+        );
+        assert_eq!(summary["member_forces"]["total_rows"], 10_001);
+        assert_eq!(summary["member_forces"]["truncated"], true);
+        assert_eq!(summary["store"]["persisted"], false);
+        assert!(store.manifest().entries.is_empty());
+        assert!(sepika_io::results::FsResultStore::open(dir)
+            .unwrap()
+            .manifest()
+            .entries
+            .is_empty());
+    }
 }

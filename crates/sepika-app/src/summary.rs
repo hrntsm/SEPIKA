@@ -9,7 +9,7 @@ use sepika_design_jp::secondary::stiffness_ratio::{cog_story_drifts, max_column_
 use sepika_solver::statics::analysis::SeismicDir;
 use sepika_solver::statics::linear::StaticOnce;
 
-use crate::app::{App, ResultsBundle, StaticCaseKey};
+use crate::app::{App, ResultsBundle, StaticCaseKey, StaticKey};
 
 /// 層ごとの二次設計指標（層間変形角・剛性率・偏心率・Fes）。
 #[derive(Clone, Debug)]
@@ -340,6 +340,112 @@ pub fn build_report_csv(app: &App) -> String {
                 }
             }
         }
+    }
+
+    {
+        use sepika_core::load_combo::{LoadAction, LoadDuration};
+        let cell = |text: &str| format!("\"{}\"", text.replace('"', "\"\""));
+        let (target, key, name, terms) = match app.core.scoped.last_static {
+            Some(StaticKey::Combo(index)) => {
+                let name = results
+                    .combos
+                    .get(index)
+                    .map(|(name, _)| name.as_str())
+                    .unwrap_or("");
+                let matches: Vec<_> = model
+                    .combinations
+                    .iter()
+                    .filter(|c| c.name == name)
+                    .collect();
+                let terms = if matches.len() == 1 {
+                    matches[0].terms.clone()
+                } else {
+                    vec![]
+                };
+                ("保存組合せ", format!("combo:{index}"), name, terms)
+            }
+            Some(StaticKey::Case(key)) => {
+                let id = match key {
+                    StaticCaseKey::User(id) => Some(id),
+                    StaticCaseKey::Seismic(dir) => app.seismic_case_id(dir),
+                };
+                let case = id.and_then(|id| model.load_cases.iter().find(|c| c.id == id));
+                (
+                    "単独ケース",
+                    id.map(|id| format!("case:{}", id.0))
+                        .unwrap_or_else(|| format!("{key:?}")),
+                    case.map(|c| c.name.as_str()).unwrap_or(""),
+                    id.map(|id| vec![(id, 1.0)]).unwrap_or_default(),
+                )
+            }
+            None => ("未選択", String::new(), "", vec![]),
+        };
+        let state = app.selected_design_load_state();
+        let (duration, action, diagnostic) = match &state {
+            Ok(state) => (
+                match state.duration {
+                    LoadDuration::Long => "長期",
+                    LoadDuration::Short => "短期",
+                },
+                match state.action {
+                    LoadAction::Gravity => "常時",
+                    LoadAction::Snow => "積雪",
+                    LoadAction::Wind => "風",
+                    LoadAction::Seismic => "地震",
+                },
+                if state.combination {
+                    "荷重状態判定済み（法的条件未確認）".to_owned()
+                } else {
+                    "法令組合せ未検定".to_owned()
+                },
+            ),
+            Err(reason) => ("未判定", "未判定", reason.clone()),
+        };
+        out.push_str("\n[検定荷重状態]\n対象種別,対象キー,名称,継続時間,作用,判定\n");
+        out.push_str(&format!(
+            "{},{},{},{},{},{}\n",
+            target,
+            key,
+            cell(name),
+            duration,
+            action,
+            cell(&diagnostic)
+        ));
+        out.push_str("法的全条件,未確認\n");
+        out.push_str(
+            if app.core.scoped.staleness.design_stale || app.core.scoped.staleness.results_stale {
+                "結果状態,要再計算（モデル編集前の検定結果）\n"
+            } else if app.core.scoped.last_static.is_none() {
+                "結果状態,未選択\n"
+            } else {
+                "結果状態,計算済み\n"
+            },
+        );
+        out.push_str("\n[検定荷重項]\nケースID,名称,種別,係数\n");
+        for (id, factor) in terms {
+            let case = model.load_cases.iter().find(|c| c.id == id);
+            out.push_str(&format!(
+                "{},{},{},{}\n",
+                id.0,
+                cell(case.map(|c| c.name.as_str()).unwrap_or("参照欠落")),
+                case.map(|c| format!("{:?}", c.kind))
+                    .unwrap_or_else(|| "未判定".into()),
+                factor
+            ));
+        }
+        let selected_scope = if state
+            .as_ref()
+            .is_ok_and(|s| s.duration == LoadDuration::Long && s.action == LoadAction::Gravity)
+        {
+            "固定＋用途別積載の独立略算（選択termsは未適用）"
+        } else {
+            "選択短期等は未検定（積雪・風・地震・任意組合せ）"
+        };
+        out.push_str("\n[小梁・床検定範囲]\n対象,対象荷重,継続時間,選択荷重状態の適用\n");
+        out.push_str(&format!(
+            "小梁,固定＋小梁用積載,長期略算,{}\n床,固定＋床用積載,長期略算,{}\n",
+            selected_scope, selected_scope
+        ));
     }
 
     if !results.member_checks.is_empty() {

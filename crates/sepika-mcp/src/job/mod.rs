@@ -143,7 +143,8 @@ pub enum JobOutcome {
         summary: serde_json::Value,
     },
     DesignCheck {
-        case: u32,
+        /// 単独ケースの保存ID。保存・自動組合せはケースストアへ書き込まない。
+        case: Option<u32>,
         member_force_rows: Vec<(u32, f64, [f64; 6])>,
         summary: serde_json::Value,
     },
