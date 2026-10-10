@@ -679,6 +679,7 @@ mod purpose_tests {
             po.qu = 150_000.0;
         }
         let ctx = egui::Context::default();
+        ctx.global_style_mut(|style| style.animation_time = 0.0);
         let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             app.pushover_results_panel(ui)
         });
@@ -710,15 +711,38 @@ mod purpose_tests {
             .member_capacities_n
             .clear();
         app.core.design_rank_auto = true;
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            egui::collapsing_header::CollapsingState::load_with_default_open(
-                ui.ctx(),
-                ui.make_persistent_id(egui::Id::new("部材群の耐力入力 [N]（負担力とは別）")),
-                true,
-            )
-            .store(ui.ctx());
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             crate::design_view::holding_evaluation_inputs(ui, &mut app);
         });
+        let editor_pos = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text)
+                    if text.galley.job.text == "部材群の耐力入力 [N]（負担力とは別）" =>
+                {
+                    Some(text.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .unwrap();
+        for pressed in [true, false] {
+            let raw = egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(editor_pos),
+                    egui::Event::PointerButton {
+                        pos: editor_pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(raw, |ui| {
+                crate::design_view::holding_evaluation_inputs(ui, &mut app)
+            });
+        }
         assert!(app
             .pushover_for(SeismicDir::X)
             .unwrap()
