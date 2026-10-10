@@ -915,4 +915,78 @@ mod tests {
             }
         }
     }
+    #[tokio::test]
+    async fn mixed_structure_basement_mcp_standard_load_matches_above_ground_period() {
+        let dir = test_store_dir("mixed_above_gl");
+        let mut model = pushover_model();
+        let story_template = model.stories[1].clone();
+        let node_template = model.nodes[1].clone();
+        let beam_template = model.elements[0].clone();
+        model.stories.truncate(1);
+        model.nodes.truncate(1);
+        model.elements.clear();
+        model.stories[0].elevation = -9000.0;
+        model.nodes[0].coord[2] = -9000.0;
+        for (i, elevation) in [-6000.0, -3000.0, 15000.0, 30000.0].into_iter().enumerate() {
+            let id = (i + 1) as u32;
+            let mut story = story_template.clone();
+            story.id = StoryId(id);
+            story.name = format!("floor{id}");
+            story.elevation = elevation;
+            story.node_ids = vec![NodeId(id)];
+            story.seismic_weight = Some(100_000.0);
+            story.weight_override = Some(100_000.0);
+            if i < 2 {
+                story.level_kind = sepika_core::model::StoryLevelKind::Basement {
+                    depth_mm: -elevation,
+                };
+            }
+            if i == 2 {
+                story.structure = sepika_core::model::StoryStructure::S;
+            }
+            model.stories.push(story);
+            let mut node = node_template.clone();
+            node.id = NodeId(id);
+            node.coord[2] = elevation;
+            node.story = Some(StoryId(id));
+            model.nodes.push(node);
+            let mut beam = beam_template.clone();
+            beam.id = ElemId(i as u32);
+            beam.nodes = smallvec::smallvec![NodeId(id - 1), NodeId(id)];
+            model.elements.push(beam);
+        }
+        model.load_cases.push(sepika_core::model::LoadCase {
+            id: sepika_core::ids::LoadCaseId(0),
+            name: "EX".into(),
+            kind: sepika_core::model::LoadCaseKind::Seismic,
+            nodal: vec![],
+            member: vec![],
+        });
+        let server = SepikaServer::new(make_state(model, &dir));
+        let mut args = run_args(JobKind::LinearStatic);
+        args.load_case = Some(0);
+        args.ai_mode = Some("Approx".into());
+        let run = server.analysis_run(Parameters(args)).await.unwrap();
+        let status = wait_for_terminal(&server, &extract_job_id(&run)).await;
+        let _summary = done_summary(&status);
+        let result = server
+            .result_get(Parameters(ResultGetArgs {
+                case: 0,
+                kind: "MemberForce".into(),
+                node_ids: None,
+                member_ids: Some(vec![0]),
+                step_range: None,
+            }))
+            .await
+            .unwrap();
+        let text = &result.content[0].raw.as_text().unwrap().text;
+        let value: serde_json::Value = serde_json::from_str(text).unwrap();
+        let rows = value["rows"].as_array().unwrap();
+        assert!(!rows.is_empty());
+        for row in rows {
+            let qy = row["qy"].as_f64().unwrap();
+            let qz = row["qz"].as_f64().unwrap();
+            assert!((qy.hypot(qz) - 57_250.0).abs() < 1e-4, "{row}");
+        }
+    }
 }

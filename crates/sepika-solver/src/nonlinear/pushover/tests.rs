@@ -4013,6 +4013,23 @@ fn pushover_rejects_inconsistent_common_ground_from_basement_depths() {
     )
     .unwrap_err()
     .contains("GL"));
+    model.stories[1].level_kind = sepika_core::model::StoryLevelKind::Basement { depth_mm: 6000.0 };
+    model.stories[3].elevation = 15_000.0;
+    model.stories[4].elevation = 30_000.0;
+    model.stories[3].structure = sepika_core::model::StoryStructure::S;
+    let result = pushover_analysis(
+        &model,
+        &dofmap,
+        &reducer,
+        SeismicDir::X,
+        4,
+        0.0,
+        false,
+        false,
+        0.0,
+    )
+    .unwrap();
+    assert!((result.capacity_curve.last().unwrap().base_shear - 57_250.0).abs() < 1e-6);
 }
 
 fn assert_wall_committed_history(result: &PushoverResult) {

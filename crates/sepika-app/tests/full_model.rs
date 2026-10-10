@@ -2585,6 +2585,40 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     assert_no_error(&app, "整合GLの増分解析");
     let qud = app.compute_holding_capacity().unwrap().0.stories[0].qud;
     assert!((qud - 217_750.0).abs() < 1e-8);
+    for (i, elevation) in [(3, 15_000.0), (4, 30_000.0)] {
+        app.core.model.stories[i].elevation = elevation;
+        app.core.model.stories[i].structure = if i == 3 {
+            sepika_core::model::StoryStructure::S
+        } else {
+            sepika_core::model::StoryStructure::Rc
+        };
+        for node in app.core.model.stories[i].node_ids.clone() {
+            app.core.model.nodes[node.index()].coord[2] = elevation;
+        }
+    }
+    app.run_seismic(sepika_solver::statics::analysis::SeismicDir::X);
+    assert_no_error(&app, "GL跨ぎ混合構造の地震静的");
+    let ex = app
+        .core
+        .model
+        .load_cases
+        .iter()
+        .find(|case| case.name == "EX")
+        .unwrap();
+    assert!(
+        (ex.nodal
+            .iter()
+            .filter(|l| l.source == sepika_core::model::LoadSource::Auto)
+            .map(|l| l.values[0])
+            .sum::<f64>()
+            - 57_250.0)
+            .abs()
+            < 1e-7
+    );
+    app.run_pushover();
+    assert_no_error(&app, "GL跨ぎ混合構造の増分解析");
+    assert!((app.compute_holding_capacity().unwrap().0.stories[0].qud - 215_250.0).abs() < 1e-7);
+
     assert!(app.core.scoped.undo.run(
         &mut app.core.model,
         Box::new(sepika_edit::SetStoryLevelKind {

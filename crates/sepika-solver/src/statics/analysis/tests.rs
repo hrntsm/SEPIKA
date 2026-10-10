@@ -3272,3 +3272,55 @@ fn seismic_common_ground_rejects_conflicting_depths_and_preserves_hand_values() 
         .to_string()
         .contains("GL"));
 }
+
+#[test]
+fn mixed_steel_period_excludes_below_ground_height_and_matches_hand_load() {
+    let mut model = make_story_ratio_model(&[
+        StoryStructure::S,
+        StoryStructure::S,
+        StoryStructure::S,
+        StoryStructure::Rc,
+    ]);
+    for (i, elevation) in [-9000.0, -6000.0, -3000.0, 15000.0, 30000.0]
+        .into_iter()
+        .enumerate()
+    {
+        model.stories[i].elevation = elevation;
+        model.nodes[i].coord[2] = elevation;
+        model.stories[i].seismic_weight = Some(100_000.0);
+        if i == 1 || i == 2 {
+            model.stories[i].level_kind = StoryLevelKind::Basement {
+                depth_mm: -elevation,
+            };
+        }
+    }
+    assert_eq!(building_height_mm(&model), 30_000.0);
+    assert_eq!(steel_height_ratio(&model), 0.5);
+    let t = sepika_load::ai::approx_t(30.0, steel_height_ratio(&model));
+    assert!((t - 0.75).abs() < 1e-12);
+    assert!((sepika_load::ai::rt(t, 0.6) - 0.9875).abs() < 1e-12);
+    let cfg = SeismicCfg::default();
+    let dist = seismic_distribution_for_model(&model, cfg, t).unwrap();
+    assert!((dist.qi[2] - 39_500.0).abs() < 1e-8);
+    assert!((dist.qi[0] - 57_250.0).abs() < 1e-8);
+    let load = build_seismic_load_case_from_model(&model, cfg, t).unwrap();
+    assert!((load.nodal.iter().map(|l| l.values[0]).sum::<f64>() - 57_250.0).abs() < 1e-8);
+    let qud = seismic_distribution_for_model(&model, SeismicCfg { c0: 1.0, ..cfg }, t).unwrap();
+    assert!((qud.qi[0] - 215_250.0).abs() < 1e-8);
+    model.stories[2].elevation = 0.0;
+    model.stories[2].level_kind = StoryLevelKind::Basement { depth_mm: 0.0 };
+    assert_eq!(steel_height_ratio(&model), 0.5);
+    model.stories[4].structure = StoryStructure::S;
+    assert_eq!(steel_height_ratio(&model), 1.0);
+    model.stories[3].structure = StoryStructure::Rc;
+    model.stories[4].structure = StoryStructure::Rc;
+    assert_eq!(steel_height_ratio(&model), 0.0);
+    let mut ph = model.stories[4].clone();
+    ph.id = StoryId(5);
+    ph.elevation = 40_000.0;
+    ph.structure = StoryStructure::S;
+    ph.level_kind = StoryLevelKind::Penthouse { k: 1.0 };
+    model.stories.push(ph);
+    assert_eq!(building_height_mm(&model), 30_000.0);
+    assert_eq!(steel_height_ratio(&model), 0.0);
+}

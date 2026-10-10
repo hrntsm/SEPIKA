@@ -92,19 +92,21 @@ pub fn building_height_mm(model: &Model) -> f64 {
 /// 「地階を除く」に従い地下階は分子・分母とも算入しない。PH（塔屋）階も
 /// 建築物の高さに算入しない扱いに合わせて対象外とする。
 ///
-/// 階高は層の高さ（[`sepika_core::model::Layer::height`]）そのものである。
+/// 各一般S層のうち、GL から最上一般床までの範囲に含まれる高さを用いる。
 /// 階が定義されていない、または建築物の高さが 0 以下の場合は 0.0 を返す。
 pub fn steel_height_ratio(model: &Model) -> f64 {
     let total_h = building_height_mm(model);
     if total_h <= 0.0 {
         return 0.0;
     }
+    let gl = ground_elevation(model);
+    let top = gl + total_h;
     let steel_h: f64 = model
         .layers()
         .iter()
         .filter(|l| matches!(l.level_kind, StoryLevelKind::Normal))
         .filter(|l| matches!(l.structure, StoryStructure::S))
-        .map(|l| l.height.max(0.0))
+        .map(|l| (l.top_elevation.min(top) - l.bottom_elevation.max(gl)).max(0.0))
         .sum();
     (steel_h / total_h).clamp(0.0, 1.0)
 }
