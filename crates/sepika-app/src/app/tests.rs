@@ -8741,23 +8741,21 @@ fn test_prep_sections_count_slab_reference() {
     use sepika_core::ids::SectionId;
     use sepika_core::model::DistributionMethod;
 
-    let mut model = crate::sample::portal_frame();
+    let mut model = make_square_slab_test_model();
+    set_floor_test_self_weight_geometry(&mut model);
     let slab_sec = SectionId(model.sections.len() as u32);
     model.sections.push(
         sepika_core::section_shape::SectionShape::RcSlab { thickness: 150.0 }
             .to_section(slab_sec, "S15".into()),
     );
-    // 門型ラーメンの 4 節点を境界にした床板を 1 枚置く。
-    model.add_enclosed_slab_from_nodes(
-        &[NodeId(0), NodeId(1), NodeId(3), NodeId(2)],
-        SlabPlate {
-            section: Some(slab_sec),
-            loads: Vec::new(),
-            usage: None,
-            method: DistributionMethod::TriTrapezoid,
-            one_way: None,
-        },
-    );
+    // 水平な全周支持床だけが S15 を参照し、支持梁は別断面を使う。
+    model.slabs[0].plate = SlabPlate {
+        section: Some(slab_sec),
+        loads: Vec::new(),
+        usage: None,
+        method: DistributionMethod::TriTrapezoid,
+        one_way: None,
+    };
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
     let mut app = App {

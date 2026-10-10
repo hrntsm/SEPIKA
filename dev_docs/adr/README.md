@@ -55,6 +55,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0045](0045-wall-committed-response.md) | accepted | 壁単体の確定step応答を線材応答から分離する |
 
+| [0046](0046-polygon-floor-finite-segment-integration.md) | accepted | 全周支持の凹形床を有限線分最近接と境界実面積で分配し、モデル差と格子誤差を区別する |
 | [0046](0046-purpose-specific-story-evaluation.md) | accepted | 目的別確定評価点と層切断面力を保持する |
 
 ## 規約
