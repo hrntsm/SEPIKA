@@ -71,6 +71,9 @@
 | レポート | 対象 | 状態 |
 |---|---|---|
 | [地震重量の鮮度と共通準備_Issue439_2026-10.md](地震重量の鮮度と共通準備_Issue439_2026-10.md) | 入力/生成出力一致・GUI/MCP実EX・atomic失敗・Modal世代・Undo/保存 | 🔶（入口Verification、#486適用制限と実測Validationは残る） |
+
+| [荷重状態と検定対象_Issue487_2026-10.md](荷重状態と検定対象_Issue487_2026-10.md) | 荷重状態・用途別P・選択重力参照・GUI/MCP・組合せ非保存/単独結果保護・CSV・小梁床長期略算/選択短期未検定 | 🔶（Verification、現行法原文再取得・Validation未） |
+| [目的別確定層力_Issue442_2026-10.md](目的別確定層力_Issue442_2026-10.md) | 目的別run／step、符号付き層切断面、外力累積・支持ばね、壁側柱、GUI共通入口・MCP・保存・帳票 | ✅（Scope内Verification。一般配置・実験Validation・現行法全網羅は未完） |
 | [RC梁αyと追加端ばね_Issue523_2026-10.md](RC梁αyと追加端ばね_Issue523_2026-10.md) | 採用分岐、T方向別数値、総角と追加角、明示基準の実factory・GUI・解析入口 | 🔶（Scope内Verification。原典完全照合・実験Validation・T全解析接続は未完） |
 | [地震力標準式と適用診断_Issue486_2026-10.md](地震力標準式と適用診断_Issue486_2026-10.md) | 標準地震力・Qud/増分標準接続・共通GL/入力/適用診断・GUI/MCP入口と失敗理由 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |
 | [原階所属_Issue497_2026-10.md](原階所属_Issue497_2026-10.md) | 原階保存・編集・Fc供給・公開fixture意味的往復・採用2.0.2全XML schema・GUI/MCP入力世代 | ✅（原階/節点Scope。全構造モデルの標準出力は#507/#550に残る） |
@@ -180,11 +183,12 @@
 | 10a | 地震重量鮮度・共通準備 | sepika-core / sepika-load / sepika-job / sepika-app / sepika-mcp | weight_preparation.rs / prepare.rs / actions/loads.rs / period.rs / server.rs | [Issue439の実入口試験表](地震重量の鮮度と共通準備_Issue439_2026-10.md#独立期待値と直接試験) | 横断 | 🔶（入口Verification、法適用・実測は別） |
 | 11 | 床荷重分割 | sepika-load / sepika-solver | floor/{mod,polygon}.rs / statics/analysis/tests.rs | `polygon::verification::*` / `distribution_verification::*` / `floor::tests::*` / `test_model_issues_warns_floating_plate`（正当な水平全周支持床の警告と解析前チェック）。幾何Verification済み（台形は[Issue438検証](凸台形の独立幾何と格子差_Issue438_2026-10.md)）、実験Validation未実施 | P2 | 🔶 |
 | 11a | 壁・間柱の自重支持先 | sepika-load / sepika-app | wall_plate_load.rs / cascade.rs | `wall_plate_load::tests`・`vertical_post_uses_explicit_end_shares`・`明示負担率で密度直接集計とdl集計の階重量が一致する` | [検証記録](壁版の支持範囲判定_2026-09.md) | 🔶（実測照合は未実施） |
-| 12 | 荷重組合せ | sepika-load | combo.rs | `test_combinations` | P2 | ✅ |
+| 12 | 荷重組合せ・検定対象 | sepika-core / sepika-job / sepika-app / sepika-mcp | load_combo.rs、design_q0.rs、app/tests.rs、tests.rs | [荷重状態の検証対応](荷重状態と検定対象_Issue487_2026-10.md#直接検証の対応) | P2 | 🔶（原文再取得・Validation未） |
 | 13 | 許容応力度設計 | sepika-design-jp | allowable_stress.rs | `test_beam_check_bending_rect_section_hand_calc` 他 | P3 | ✅ |
 | 14 | 保有耐力 | sepika-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
 | 15 | プッシュオーバー | sepika-solver | pushover.rs | — | P5 | 🔶 |
 | 15a | 壁単体の確定step応答 | sepika-solver / sepika-app / sepika-job / sepika-mcp | nonlinear/pushover/wall_response.rs・tests.rs, tests/wall_model.rs, ultimate_demand.rs, job/pushover.rs | [Issue443検証](壁の確定ステップ応答_Issue443_2026-10.md)の試験対応表 | — | ✅（Scope内Verification） |
+| 15b | 目的別確定層力 | sepika-solver / sepika-app / sepika-mcp | story_response.rs・result_validity.rs・job/pushover.rs | [Issue442検証](目的別確定層力_Issue442_2026-10.md) | — | ✅（Scope内Verification） |
 | 16 | 壁（TVLEM） | sepika-element | — | — | P5.5 | 対象外 |
 | 17 | 時刻歴 | sepika-solver | timehistory.rs | — | P6 | ❌ |
 | 18 | 一軸履歴則（Concrete/Bilinear/MP） | sepika-material | uniaxial.rs | `test_concrete_*`/`test_bilinear_*`/`test_menegotto_pinto_*` | P4 | ✅ |

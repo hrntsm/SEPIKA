@@ -57,6 +57,10 @@ pub(super) struct StepRecorder<'a> {
     shear_yields: Vec<ShearYieldEvent>,
     member_history_steps: Vec<Vec<MemberStepState>>,
     wall_history: Vec<super::wall_response::WallStepResponse>,
+    pub(super) run: super::wall_response::WallRunIdentity,
+    pub(super) reference_external: Vec<f64>,
+    pub(super) constant_external: Vec<f64>,
+    confirmed_history: Vec<super::story_response::ConfirmedStepResponse>,
 }
 
 /// 解析終了時に [`StepRecorder`] から取り出す蓄積結果。
@@ -67,6 +71,8 @@ pub(super) struct RecordedSteps {
     pub(super) shear_yields: Vec<ShearYieldEvent>,
     pub(super) member_history_steps: Vec<Vec<MemberStepState>>,
     pub(super) wall_history: Vec<super::wall_response::WallStepResponse>,
+    pub(super) run: super::wall_response::WallRunIdentity,
+    pub(super) confirmed_history: Vec<super::story_response::ConfirmedStepResponse>,
 }
 
 impl<'a> StepRecorder<'a> {
@@ -91,6 +97,10 @@ impl<'a> StepRecorder<'a> {
             shear_yields: Vec::new(),
             member_history_steps: Vec::new(),
             wall_history: Vec::new(),
+            run: super::wall_response::WallRunIdentity::new(),
+            reference_external: vec![],
+            constant_external: vec![],
+            confirmed_history: vec![],
         }
     }
 
@@ -158,6 +168,45 @@ impl<'a> StepRecorder<'a> {
                 self.dir,
                 self.step_no,
             ));
+        let mut cuts = super::story_response::record_cuts(model, dofmap, behaviors, self.dir);
+        let external: Vec<_> = self
+            .reference_external
+            .iter()
+            .zip(&self.constant_external)
+            .map(|(q, f)| q * load_factor + f)
+            .collect();
+        let mut support = vec![0.0; dofmap.n_active()];
+        add_support_spring_f_int(model, dofmap, total_disp, &mut support);
+        let force_scale = crate::common::newton::l2_norm(&external).max(1.0);
+        let d = usize::from(self.dir == SeismicDir::Y);
+        for cut in &mut cuts {
+            let sum_above = |f: &[f64]| {
+                model
+                    .nodes
+                    .iter()
+                    .filter(|n| n.coord[2] > cut.elevation_mm)
+                    .filter_map(|n| dofmap.active(n.id.index() * 6 + d))
+                    .filter_map(|a| f.get(a as usize))
+                    .sum::<f64>()
+            };
+            cut.reference_n = sum_above(&self.reference_external);
+            cut.support_n = sum_above(&support);
+            cut.external_n = sum_above(&external) - cut.support_n;
+            cut.tolerance_n = crate::common::newton::STATIC_NEWTON.tol
+                * force_scale
+                * (model.nodes.len() as f64).sqrt();
+        }
+        self.confirmed_history
+            .push(super::story_response::ConfirmedStepResponse {
+                run_id: self.run.run_id.clone(),
+                input_generation: None,
+                direction: self.dir,
+                step: self.step_no,
+                members: super::member_response::compute_member_response(
+                    model, dofmap, behaviors, total_disp, self.dir,
+                ),
+                cuts,
+            });
         self.step_no += 1;
 
         RecordedStep { roof, drift_angle }
@@ -168,7 +217,7 @@ impl<'a> StepRecorder<'a> {
         self.steps.is_empty()
     }
 
-    /// 性能曲線上の最大ベースシア＝保有水平耐力 Qu [N]。
+    /// 性能曲線上の最大ベースシア [N]。目的別の採用層耐力とは区別する。
     /// 単調載荷では崩壊機構形成後に頭打ちとなるため、ピーク値を採る。
     pub(super) fn qu(&self) -> f64 {
         self.capacity_curve
@@ -195,6 +244,8 @@ impl<'a> StepRecorder<'a> {
             shear_yields: self.shear_yields,
             member_history_steps: self.member_history_steps,
             wall_history: self.wall_history,
+            run: self.run,
+            confirmed_history: self.confirmed_history,
         }
     }
 }

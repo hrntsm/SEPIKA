@@ -215,14 +215,23 @@ impl App {
                             }
                         }
                     });
-                let term_label = match self.core.design_term {
-                    LoadTerm::Long => "長期",
-                    LoadTerm::Short => "短期",
-                };
-                ui.label(format!("許容応力度: {term_label}")).on_hover_text(
-                    "対象荷重（組合せ）の内容から自動判定します（令82条: G+P=長期、\
-                         地震・積雪・風を含む組合せ=短期）。",
-                );
+                match self.selected_design_load_state() {
+                    Ok(state) => {
+                        let term = match state.duration {
+                            sepika_core::load_combo::LoadDuration::Long => "長期",
+                            sepika_core::load_combo::LoadDuration::Short => "短期",
+                        };
+                        let scope = if state.combination {
+                            "組合せ"
+                        } else {
+                            "単独ケース（法令組合せ未検定）"
+                        };
+                        ui.label(format!("許容応力度: {term} / {scope}"));
+                    }
+                    Err(reason) => {
+                        ui.label("許容応力度: 未判定").on_hover_text(reason);
+                    }
+                }
             }
         });
         if let Some(key) = selected_result {

@@ -32,6 +32,7 @@ rfd = { version = "0.17", optional = true }
 sepika-math = { version = "0.0.1", path = "../sepika-math" }
 bincode = { workspace = true }
 serde = { workspace = true }
+sha2 = { workspace = true }
 rmp-serde = { workspace = true }
 
 [dev-dependencies]

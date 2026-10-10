@@ -4,8 +4,8 @@ impl App {
     /// 保有水平耐力の層別判定を行う。前提データが不足していれば Err(案内文)。
     ///
     /// 戻り値の第 2 要素は層ごとに採用された部材ランク（`design_rank_auto` が
-    /// true の場合は幅厚比からの自動判定、算定できなかった層は `design_rank`
-    /// へフォールバック。false の場合は全層 `design_rank`）。
+    /// true の場合は自動判定。確定応力・耐力入力・ランクの欠損は Err。
+    /// false の場合は全層の明示入力 `design_rank`）。
     #[allow(clippy::type_complexity)]
     pub fn compute_holding_capacity(
         &mut self,
@@ -21,9 +21,12 @@ impl App {
             ds_rc, ds_steel, member_group, rank_index_for_group, rc_wall_shear_brittle,
             rc_wall_tau_over_fc, rc_wall_type, steel_brace_type, GroupType,
         };
-        use sepika_design_jp::secondary::holding_capacity::{check_holding_capacity, MemberRank};
+        use sepika_design_jp::secondary::holding_capacity::{
+            check_holding_capacity_at_state, MemberRank,
+        };
         use sepika_design_jp::secondary::member_rank::worst_rank;
         use sepika_design_jp::steel_f_value_prefix;
+        use sepika_solver::nonlinear::pushover::story_response::{EvaluationPurpose, ForceGroup};
         use sepika_solver::nonlinear::pushover::MechanismType;
 
         self.core.scoped.holding_capacity_source = None;
@@ -69,11 +72,34 @@ impl App {
         .qi;
         let n_stories = layers.len();
 
+        let saved_evaluations = self
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .map(|b| &b.holding_evaluations);
+        let saved_ds = saved_evaluations.and_then(|entries| {
+            entries
+                .iter()
+                .find(|e| e.point.direction == view_dir && e.point.purpose == EvaluationPurpose::Ds)
+        });
+        let saved_capacity = saved_evaluations.and_then(|entries| {
+            entries.iter().find(|e| {
+                e.point.direction == view_dir
+                    && e.point.purpose == EvaluationPurpose::HoldingCapacity
+            })
+        });
         let mut dependencies = vec![
             ResultInputKey::Pushover(view_dir),
             ResultInputKey::Static(StaticCaseKey::Seismic(view_dir)),
         ];
-        let ctx = crate::summary::metrics_ctx_from_results(self.core.scoped.results.as_ref());
+        if saved_ds.is_some() && saved_capacity.is_some() {
+            dependencies.retain(|key| !matches!(key, ResultInputKey::Pushover(_)));
+        }
+        let ctx = crate::summary::metrics_ctx_from_results(
+            &self.core.model,
+            self.core.scoped.results.as_ref(),
+        );
         if ctx.seismic_x.is_some() && ctx.seismic_y.is_some() {
             for dir in [SeismicDir::X, SeismicDir::Y] {
                 let key = ResultInputKey::Static(StaticCaseKey::Seismic(dir));
@@ -82,9 +108,9 @@ impl App {
                 }
             }
             if let Some((name, _)) = self.core.scoped.results.as_ref().and_then(|r| {
-                r.combos
-                    .iter()
-                    .find(|(name, _)| !sepika_load::combo::is_short_term_combo(name))
+                r.combos.iter().find(|(name, _)| {
+                    sepika_core::load_combo::is_gravity_combination(name, &self.core.model)
+                })
             }) {
                 dependencies.push(ResultInputKey::Combo(name.clone()));
             }
@@ -96,15 +122,22 @@ impl App {
         if !reasons.is_empty() {
             return Err(reasons.join("\n"));
         }
-        let po = self
+        let latest = self
             .core
             .scoped
             .results
             .as_ref()
-            .and_then(|r| r.pushover_for_dir(view_dir))
-            .ok_or_else(|| {
-                "増分解析未実行です。解析タブから増分解析を実行してください。".to_string()
-            })?;
+            .and_then(|r| r.pushover_for_dir(view_dir));
+        let po = saved_ds
+            .map(|e| &e.run)
+            .or(latest)
+            .ok_or("増分解析未実行です。増分解析を実行してください")?;
+        let capacity_po = saved_capacity
+            .map(|e| &e.run)
+            .or(latest)
+            .ok_or("保有耐力比較用の増分解析結果がありません")?;
+        let ds_conditions = saved_ds.map_or(self.core.analysis_cfg, |e| e.conditions);
+        let capacity_conditions = saved_capacity.map_or(self.core.analysis_cfg, |e| e.conditions);
         let st = self
             .core
             .scoped
@@ -126,27 +159,118 @@ impl App {
                 .ok_or_else(|| {
                     "壁応答の入力識別情報がありません。増分解析を再実行してください".to_string()
                 })?;
-            if *generation != self.result_input(&ResultInputKey::Pushover(view_dir)) {
+            if *generation
+                != self
+                    .result_input_with_settings(&ResultInputKey::Pushover(view_dir), ds_conditions)
+            {
                 return Err("壁応答の生成入力が現在の計算入力と一致しません".into());
             }
         }
-        let resp_by_elem: std::collections::HashMap<
-            ElemId,
-            sepika_solver::nonlinear::pushover::PushoverMemberResponse,
-        > = po.member_response.iter().map(|r| (r.elem, *r)).collect();
-        let shear_yield_elems: std::collections::HashSet<ElemId> =
-            po.shear_yields.iter().map(|s| s.elem).collect();
-        let story_qu: Vec<f64> = (0..n_stories)
-            .map(|i| {
-                po.capacity_curve
+        let ds_point = saved_ds
+            .map(|e| &e.point)
+            .or(po.ds_evaluation.as_ref())
+            .ok_or("Ds判定用の評価点を明示してください")?;
+        let capacity_point = saved_capacity
+            .map(|e| &e.point)
+            .or(capacity_po.capacity_evaluation.as_ref())
+            .ok_or("保有耐力比較用の評価点を明示してください")?;
+        for (point, conditions) in [
+            (ds_point, ds_conditions),
+            (capacity_point, capacity_conditions),
+        ] {
+            if point.direction != view_dir
+                || point.input_generation
+                    != self
+                        .result_input_with_settings(&ResultInputKey::Pushover(view_dir), conditions)
+            {
+                return Err("評価点の方向・生成入力が現在の計算入力と一致しません".into());
+            }
+        }
+        let ds_response = po.confirmed_response(ds_point, EvaluationPurpose::Ds)?;
+        let ds_forces = po.evaluate_stories(ds_point, EvaluationPurpose::Ds)?;
+        let capacity_forces =
+            capacity_po.evaluate_stories(capacity_point, EvaluationPurpose::HoldingCapacity)?;
+        if ds_forces.len() != n_stories || capacity_forces.len() != n_stories {
+            return Err("評価点の層数が現在モデルと一致しません".into());
+        }
+        let expanded_storage;
+        let evaluation_model =
+            if sepika_load::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
+                expanded_storage =
+                    sepika_load::wall_expand::expand_wall_elements(&self.core.model).0;
+                &expanded_storage
+            } else {
+                &self.core.model
+            };
+        for (point, run) in [(ds_point, po), (capacity_point, capacity_po)] {
+            let record = run.confirmed_response(point, point.purpose)?;
+            for cut in &record.cuts {
+                let expected: std::collections::HashSet<_> = evaluation_model
+                    .elements
                     .iter()
-                    .filter_map(|p| p.story_shear.get(i).copied())
-                    .fold(0.0_f64, f64::max)
-            })
+                    .filter(|e| !matches!(e.kind, sepika_core::model::ElementKind::PanelZone))
+                    .filter(|e| {
+                        e.nodes
+                            .iter()
+                            .filter_map(|n| evaluation_model.nodes.get(n.index()))
+                            .any(|n| n.coord[2] > cut.elevation_mm)
+                            && e.nodes
+                                .iter()
+                                .filter_map(|n| evaluation_model.nodes.get(n.index()))
+                                .any(|n| n.coord[2] < cut.elevation_mm)
+                    })
+                    .map(|e| e.id)
+                    .collect();
+                let recorded: std::collections::HashSet<_> =
+                    cut.forces.iter().map(|f| f.elem).collect();
+                if expected != recorded {
+                    return Err("層切断面の物理要素履歴がモデルと一致しません".into());
+                }
+            }
+        }
+        for elem in evaluation_model
+            .elements
+            .iter()
+            .filter(|e| matches!(e.kind, sepika_core::model::ElementKind::Wall))
+        {
+            for (point, run) in [(ds_point, po), (capacity_point, capacity_po)] {
+                run.wall_response_at(elem.id, point.step)
+                    .map_err(|reason| format!("壁要素 {:?}: {}", elem.id, reason.description()))?;
+            }
+        }
+        if matches!(
+            self.core.design_frame,
+            sepika_design_jp::secondary::holding_capacity::FrameType::RcWall
+                | sepika_design_jp::secondary::holding_capacity::FrameType::SteelBrace
+        ) && ds_forces
+            .iter()
+            .any(|f| f.wall_n == 0.0 && f.brace_n == 0.0)
+        {
+            return Err(
+                "宣言した壁・筋かい架構の負担力がありません。架構・方向・評価点を確認してください"
+                    .into(),
+            );
+        }
+        let ds_step = ds_point.step;
+        let resp_by_elem: std::collections::HashMap<_, _> =
+            ds_response.members.iter().map(|r| (r.elem, *r)).collect();
+        let shear_yield_elems: std::collections::HashSet<ElemId> = po
+            .shear_yields
+            .iter()
+            .filter(|s| s.step <= ds_step)
+            .map(|s| s.elem)
             .collect();
+        let mut capacity_seen = std::collections::HashSet::new();
+        if self.core.design_rank_auto
+            && ds_point
+                .member_capacities_n
+                .iter()
+                .any(|(elem, q)| !capacity_seen.insert(*elem) || !q.is_finite() || *q <= 0.0)
+        {
+            return Err("部材群の耐力入力が重複・非有限・非正です".into());
+        }
         let mut cb_members: Vec<Vec<(u8, f64)>> = vec![Vec::new(); n_stories];
         let mut wall_members: Vec<Vec<(u8, f64)>> = vec![Vec::new(); n_stories];
-        let mut wall_horizontal: Vec<f64> = vec![0.0; n_stories];
 
         let (story_ranks, member_ranks): (Vec<MemberRank>, Vec<(ElemId, MemberRank)>) = if self
             .core
@@ -166,13 +290,7 @@ impl App {
                 };
             for elem in &model.elements {
                 if matches!(elem.kind, sepika_core::model::ElementKind::Wall) {
-                    let step = po
-                        .steps
-                        .len()
-                        .checked_sub(1)
-                        .ok_or_else(|| "壁応答の確定stepがありません".to_string())?
-                        as u32;
-                    po.wall_response_at(elem.id, step).map_err(|reason| {
+                    po.wall_response_at(elem.id, ds_step).map_err(|reason| {
                         format!("壁要素 {:?}: {}", elem.id, reason.description())
                     })?;
                 }
@@ -310,7 +428,7 @@ impl App {
                     if wall_has_src_boundary_column(elem, model) {
                         let capacities = sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(elem, model);
                         let wall = po
-                            .wall_response_at(elem.id, (po.steps.len() - 1) as u32)
+                            .wall_response_at(elem.id, ds_step)
                             .map_err(|reason| reason.description().to_string())?;
                         let qu = capacities[usize::from(wall.qw_n < 0.0)];
                         if !qu.is_finite() || qu <= 0.0 {
@@ -329,7 +447,7 @@ impl App {
                                 format!("壁要素 {:?}: Fc が未設定または不正です", elem.id)
                             })?;
                         let wall = po
-                            .wall_response_at(elem.id, (po.steps.len() - 1) as u32)
+                            .wall_response_at(elem.id, ds_step)
                             .map_err(|reason| reason.description().to_string())?;
                         let wgeom =
                             sepika_element::wall::wall_element::wall_element_geometry(elem, model)
@@ -346,7 +464,7 @@ impl App {
                         };
                         let capacities = sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(elem, model);
                         let wall = po
-                            .wall_response_at(elem.id, (po.steps.len() - 1) as u32)
+                            .wall_response_at(elem.id, ds_step)
                             .map_err(|reason| reason.description().to_string())?;
                         let qu = capacities[usize::from(wall.qw_n < 0.0)];
                         if !qu.is_finite() || qu <= 0.0 {
@@ -443,68 +561,80 @@ impl App {
                 per_story[idx].push(rank);
                 computed.push((elem.id, rank));
 
-                let q_h = if matches!(elem.kind, sepika_core::model::ElementKind::Wall) {
-                    po.wall_response_at(elem.id, (po.steps.len() - 1) as u32)
-                        .map_err(|reason| reason.description().to_string())?
-                        .qdir_n
-                        .abs()
-                } else {
-                    resp_by_elem
-                        .get(&elem.id)
-                        .map(|r| r.horizontal_force)
-                        .ok_or_else(|| format!("部材 {:?}: 増分解析応答がありません", elem.id))?
-                };
+                let capacity_n = ds_point
+                    .member_capacities_n
+                    .iter()
+                    .find(|(id, _)| *id == elem.id)
+                    .map(|(_, q)| *q)
+                    .ok_or_else(|| {
+                        format!(
+                            "部材 {:?}: 群判定用の耐力入力がありません。負担力では代用できません",
+                            elem.id
+                        )
+                    })?;
                 let gi = rank_index_for_group(rank);
-                if matches!(
-                    elem.kind,
-                    sepika_core::model::ElementKind::Wall
-                        | sepika_core::model::ElementKind::Brace { .. }
-                ) {
-                    wall_members[idx].push((gi, q_h));
-                    wall_horizontal[idx] += q_h;
+                let group = ds_response
+                    .cuts
+                    .iter()
+                    .flat_map(|c| &c.forces)
+                    .find(|f| f.elem == elem.id)
+                    .map(|f| f.group);
+                if matches!(group, Some(ForceGroup::Wall | ForceGroup::Brace)) {
+                    wall_members[idx].push((gi, capacity_n));
                 } else {
-                    cb_members[idx].push((gi, q_h));
+                    cb_members[idx].push((gi, capacity_n));
                 }
             }
-            let mut fallback_stories: Vec<String> = Vec::new();
+            if per_story.iter().any(|ranks| ranks.is_empty()) {
+                return Err("自動部材ランクの確定評価データが不足しています".into());
+            }
+            for cut in &ds_response.cuts {
+                for force in &cut.forces {
+                    if !computed.iter().any(|(id, _)| *id == force.elem) {
+                        return Err(format!(
+                            "部材 {:?}: 自動部材ランクの確定評価データが不足しています",
+                            force.elem
+                        ));
+                    }
+                }
+            }
             let ranks: Vec<MemberRank> = per_story
                 .into_iter()
-                .enumerate()
-                .map(|(i, rs)| {
-                    worst_rank(&rs).unwrap_or_else(|| {
-                        if let Some(s) = self.core.model.stories.get(i) {
-                            fallback_stories.push(s.name.clone());
-                        }
-                        self.core.design_rank
-                    })
-                })
+                .map(|rs| worst_rank(&rs).expect("非空の部材ランク集合"))
                 .collect();
-            self.core.scoped.ds_rank_fallback_stories = fallback_stories;
             (ranks, computed)
         } else {
             self.core.scoped.ds_rank_fallback_stories = Vec::new();
             (vec![self.core.design_rank; n_stories], Vec::new())
         };
 
-        let mechanism = &po.mechanism;
+        let mechanism = &po.mechanism_at(ds_point, evaluation_model)?;
         let is_rc_frame = matches!(
             self.core.design_frame,
             sepika_design_jp::secondary::holding_capacity::FrameType::RcFrame
                 | sepika_design_jp::secondary::holding_capacity::FrameType::RcWall
         );
-        let mut beta_u_by_story: Vec<f64> = vec![0.0; n_stories];
-        let mut beta_u_unavailable = false;
+        let beta_u_by_story: Vec<_> = ds_forces.iter().map(|f| f.beta_u).collect();
         let ds_vec: Vec<f64> = (0..n_stories)
             .map(|i| {
-                let fallback_group = |rank: MemberRank| match rank {
+                let explicit_group = |rank: MemberRank| match rank {
                     MemberRank::FA => GroupType::A,
                     MemberRank::FB => GroupType::B,
                     MemberRank::FC => GroupType::C,
                     MemberRank::FD => GroupType::D,
                 };
-                let rep_rank = story_ranks.get(i).copied().unwrap_or(self.core.design_rank);
-                let mut cb_group =
-                    member_group(&cb_members[i]).unwrap_or_else(|| fallback_group(rep_rank));
+                let rep_rank = story_ranks[i];
+                let mut cb_group = if self.core.design_rank_auto {
+                    member_group(&cb_members[i]).ok_or_else(|| {
+                        if ds_response.cuts[i].forces.iter().any(|f| f.group == ForceGroup::Frame) {
+                            format!("層{}: 存在する柱梁群の耐力入力が欠損しています", i+1)
+                        } else {
+                            format!("層{}: 柱梁群を持たない構造の自動Ds判定は未対応です。明示設計入力が必要です", i+1)
+                        }
+                    })?
+                } else {
+                    explicit_group(rep_rank)
+                };
                 if let MechanismType::StoryCollapse { layer } = mechanism {
                     if *layer == i {
                         cb_group = match cb_group {
@@ -514,61 +644,73 @@ impl App {
                         };
                     }
                 }
-                let wall_group = member_group(&wall_members[i]).unwrap_or(GroupType::A);
-                let qu_i = story_qu.get(i).copied().unwrap_or(0.0);
-                let beta_u = if qu_i > 0.0 {
-                    (wall_horizontal[i] / qu_i).clamp(0.0, 1.0)
-                } else {
-                    0.0
-                };
-                let declares_wall_or_brace = matches!(
-                    self.core.design_frame,
-                    sepika_design_jp::secondary::holding_capacity::FrameType::RcWall
-                        | sepika_design_jp::secondary::holding_capacity::FrameType::SteelBrace
-                );
-                if declares_wall_or_brace && wall_members[i].is_empty() {
-                    beta_u_unavailable = true;
-                    return sepika_design_jp::secondary::holding_capacity::ds_value(
-                        self.core.design_frame,
-                        rep_rank,
-                    );
+                if beta_u_by_story[i] == 0.0 {
+                    let rank = match cb_group {
+                        GroupType::A => MemberRank::FA,
+                        GroupType::B => MemberRank::FB,
+                        GroupType::C => MemberRank::FC,
+                        GroupType::D => MemberRank::FD,
+                    };
+                    let frame = if is_rc_frame {
+                        sepika_design_jp::secondary::holding_capacity::FrameType::RcFrame
+                    } else {
+                        sepika_design_jp::secondary::holding_capacity::FrameType::SteelFrame
+                    };
+                    return Ok(sepika_design_jp::secondary::holding_capacity::ds_value(
+                        frame, rank,
+                    ));
                 }
-                beta_u_by_story[i] = beta_u;
-                if is_rc_frame {
-                    ds_rc(wall_group, beta_u, cb_group)
+                let wall_group = if self.core.design_rank_auto {
+                    member_group(&wall_members[i]).ok_or_else(|| {
+                        format!("層{}: 壁・筋かい群の耐力入力が欠損しています", i + 1)
+                    })?
                 } else {
-                    ds_steel(wall_group, beta_u, cb_group)
+                    explicit_group(rep_rank)
+                };
+                if is_rc_frame {
+                    Ok(ds_rc(wall_group, beta_u_by_story[i], cb_group))
+                } else {
+                    Ok(ds_steel(wall_group, beta_u_by_story[i], cb_group))
                 }
             })
-            .collect();
+            .collect::<Result<Vec<_>, String>>()?;
         self.core.scoped.ds_beta_u_by_story = beta_u_by_story;
-        self.core.scoped.ds_beta_u_unavailable = beta_u_unavailable;
-
         let heights: Vec<f64> = metrics.iter().map(|m| m.height).collect();
         let rs: Vec<f64> = metrics.iter().map(|m| m.rs).collect();
         let re: Vec<f64> = metrics.iter().map(|m| m.re).collect();
         let fes: Vec<f64> = metrics.iter().map(|m| m.fes).collect();
 
+        let capacity_curve = capacity_po
+            .capacity_curve
+            .iter()
+            .find(|p| p.step == capacity_point.step)
+            .ok_or("比較評価点の変形履歴がありません")?;
+        let qu_n: Vec<_> = capacity_forces.iter().map(|f| f.qu_n).collect();
+        let result = check_holding_capacity_at_state(
+            &qu_n,
+            &capacity_curve.story_drift,
+            &qud,
+            &ds_vec,
+            &fes,
+            &rs,
+            &re,
+            &heights,
+            member_ranks,
+        )?;
         self.core.scoped.holding_capacity_source = Some(HoldingCapacitySource {
             direction: view_dir,
-            qu_steps: (0..n_stories)
-                .map(|i| {
-                    let mut maximum = 0.0;
-                    let mut step = None;
-                    for point in &po.capacity_curve {
-                        if let Some(q) = point.story_shear.get(i).filter(|q| **q > maximum) {
-                            maximum = *q;
-                            step = Some(point.step);
-                        }
-                    }
-                    step
-                })
-                .collect(),
-            response_step: po.capacity_curve.last().map(|point| point.step),
+            qu_steps: vec![Some(capacity_point.step); n_stories],
+            response_step: Some(ds_step),
+            ds_point: ds_point.clone(),
+            capacity_point: capacity_point.clone(),
+            ds_forces,
+            capacity_forces: capacity_forces.clone(),
+            termination: po.termination.clone(),
+            capacity_termination: capacity_po.termination.clone(),
+            ds_mechanism: mechanism.clone(),
+            ds_conditions,
+            capacity_conditions,
         });
-
-        let result =
-            check_holding_capacity(po, &qud, &ds_vec, &fes, &rs, &re, &heights, member_ranks);
         Ok((result, story_ranks))
     }
 }

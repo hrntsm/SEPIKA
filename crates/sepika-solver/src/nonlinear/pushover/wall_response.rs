@@ -204,6 +204,11 @@ impl super::types::PushoverResult {
     }
     pub fn identify_wall_input(&mut self, input: Vec<u8>) {
         if let Some(run) = &mut self.wall_run {
+            if let Some(history) = &mut self.confirmed_history {
+                for record in history {
+                    record.input_generation = Some(input.clone());
+                }
+            }
             run.input_generation = Some(input);
             run.input_unavailable = None;
         }
