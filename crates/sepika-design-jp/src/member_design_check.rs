@@ -49,6 +49,10 @@ pub struct GirderGroupContextOverride {
 pub struct MemberDesignCheckOptions<'a> {
     /// 検定条件（長期/短期）。
     pub term: LoadTerm,
+    /// 壁展開時の元壁版と生成要素の対応。壁版のない要素fixtureではNoneを許す。
+    pub wall_index: Option<&'a sepika_load::wall_expand::WallExpansionIndex>,
+    /// 検定する荷重ケース・組合せの既存キー。
+    pub wall_case: &'a str,
     /// RC 短期許容せん断力で損傷制御式（2/3·α）を使うか。
     pub rc_damage_control: bool,
     /// RC 梁付着検定の方式（既定は 1999）。
@@ -70,8 +74,10 @@ pub struct MemberDesignCheckOptions<'a> {
 pub struct MemberDesignCheckReport {
     /// 部材断面検定（危険断面位置・BRB・PCa 水平接合面を含む）。
     pub member_checks: Vec<(ElemId, f64, CheckOutcome)>,
-    /// 節点単位検定（柱梁接合部・パネルゾーン・冷間成形耐力比・耐震壁等）。
+    /// 節点単位検定（柱梁接合部・パネルゾーン・冷間成形耐力比）。
     pub joint_checks: Vec<(NodeId, String, CheckOutcome)>,
+    /// 元壁版・生成要素・荷重キー・検定種別ごとの壁検定。
+    pub wall_checks: Vec<crate::wall_check::WallCheck>,
 }
 
 /// 部材内力に対する許容応力度検定を一括実行する。
@@ -318,16 +324,25 @@ pub fn run_member_design_checks(
         .map(|(id, pos, cr)| (id, pos, CheckOutcome::Checked(cr))),
     );
 
-    let joint_checks = crate::joint_wiring::collect_joint_checks_with_long(
+    let joint_checks = crate::joint_wiring::collect_joint_checks_impl(
         model,
         &mf_slices,
         long_slices.as_deref(),
         panel_moments,
         options.term,
+        false,
     );
 
+    let wall_checks = crate::joint_wiring::collect_wall_design_checks(
+        model,
+        &mf_slices,
+        options.term,
+        options.wall_index,
+        options.wall_case,
+    );
     MemberDesignCheckReport {
         member_checks,
         joint_checks,
+        wall_checks,
     }
 }

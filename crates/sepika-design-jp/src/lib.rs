@@ -543,3 +543,5 @@ pub fn checker_for(kind: sepika_core::structure_kind::StructureKind) -> Box<dyn 
         StructureKind::Cft => Box::new(CftDesign),
     }
 }
+
+pub mod wall_check;

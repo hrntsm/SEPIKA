@@ -70,6 +70,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [耐震壁_未検定_Issue495_2026-10.md](耐震壁_未検定_Issue495_2026-10.md) | 壁版候補・case・種別別未検定とスリット／自重対象外、不正入力、GUI・MCP・CSV・保存 | 🔶（状態契約のVerification。純鋼板国内式・実験Validationは未対応） |
 | [壁の確定ステップ応答_Issue443_2026-10.md](壁の確定ステップ応答_Issue443_2026-10.md) | 壁単体Qw/Qdir・基準点付き24成分F/M・実要素N/M・弦変形・確定履歴・GUI/MCP/CSV/保存・設計拒否 | ✅（Scope内Verification。材料γ・壁用イベント・系全体集計・実験Validationは未対応） |
 | [リップ溝形材_未検定_Issue509_2026-10.md](リップ溝形材_未検定_Issue509_2026-10.md) | 単一リップ材の3座屈分類、荷重/補剛状態と理由付き未検定、保存・GUI・CSV | 🔶（未検定契約のVerification。耐力式・実験照合は未対応） |
 | [明示線材とダンパー総重量_Issue422_2026-10.md](明示線材とダンパー総重量_Issue422_2026-10.md) | 線材重量同等性、実M、重量／配置／動的質量の記録集合の完全性と反映値、公開フレーム・質点系InvalidInput、GUI・undo・保存 | ✅（Scope内 Verification。二次部材支持解決はScope外の残課題） |
@@ -196,6 +197,7 @@
 | 32 | OVIKA の named MessagePack 永続化 | sepika-io / sepika-app | ovika.rs, tests/full_model.rs | `saved_model_fields_are_named_and_order_independent` / `ovika_roundtrip_preserves_model_and_results` 他。default・破損・復元モデル検証とモデル単体のサイズ・codec 比較は [検証記録](OVIKA_named_MessagePack_2026-10.md) を参照 | 横断 | ✅ |
 | 33 | 単一リップ溝形材の未検定 | sepika-design-jp / sepika-app | steel/lip_channel.rs、tests/lip_channel.rs、viewer/check_ratio.rs | `steel::lip_channel::tests::*` / `lip_channel_*`。詳細は[検証記録](リップ溝形材_未検定_Issue509_2026-10.md) | 横断 | 🔶（未検定契約のみ） |
 | 34 | RC鉄筋比の単位・分母 | sepika-core / sepika-element / sepika-design-jp / sepika-solver | rc_capacity.rs、factory/{springs,input_check}.rs、rc/beam_nonlinear.rs、pushover/shear_yield.rs | [Issue #435の直接回帰表](RC鉄筋比契約_Issue435_2026-10.md#独立fixtureと直接回帰) | 横断 | 🔶（契約Verification、T形解析・原著照合・Validationは残る） |
+| 35 | 耐震壁の未検定状態 | sepika-design-jp / sepika-app / sepika-mcp | wall_check.rs、joint_wiring/tests.rs、tests/wall_check_status.rs、viewer/check_ratio.rs、job/design_check.rs | `wall_status_*` / `wall_tooltip_real_egui_*` / `wall_ng_real_egui_*` / `wall_output_assembly_*`。[Issue495検証](耐震壁_未検定_Issue495_2026-10.md) | 横断 | 🔶（状態契約のみ） |
 
 凡例: ✅ 実装済み・🔶 一部実装（要拡張）・❌ 未実装・対象外（採用しない）。
 壁横筋βs・参考骨格の単体/GUI共通/MCP実ジョブ検証は[Issue503検証](壁横筋入力と終局割線骨格_Issue503_2026-10.md)を参照（Verification ✅、実験Validation 🔶）。
