@@ -383,7 +383,7 @@ fn case1_square_6000_tritrapezoid_vs_reference() {
     let w = 0.005_f64;
     let side = 6000.0_f64;
     let (model, slab) = make_square_slab_model(side, DistributionMethod::TriTrapezoid, w);
-    let loads = distribute_slab(&model, &slab).unwrap();
+    let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     let current = edge_totals(&loads, 4);
     let coords = slab.boundary_coords(&model).expect("境界座標");
     let (baseline_areas, _) = manual_quadrilateral_edge_areas(&coords);
@@ -415,7 +415,7 @@ fn case2_rect_6000x4000_tritrapezoid_vs_reference() {
     let w = 0.005_f64;
     let (lx, ly) = (6000.0_f64, 4000.0_f64);
     let (model, slab) = make_rect_slab_model(lx, ly, DistributionMethod::TriTrapezoid, w);
-    let loads = distribute_slab(&model, &slab).unwrap();
+    let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     let current = edge_totals(&loads, 4);
     let coords = slab.boundary_coords(&model).expect("境界座標");
     let (baseline_areas, _) = manual_quadrilateral_edge_areas(&coords);
@@ -471,7 +471,10 @@ fn case3_large_floor_polygon200_vs_reference() {
     );
 
     let (model, slab) = make_rect_slab_model(lx, ly, DistributionMethod::TriTrapezoid, w);
-    let tri = edge_totals(&distribute_slab(&model, &slab).unwrap(), 4);
+    let tri = edge_totals(
+        &distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap(),
+        4,
+    );
     println!("参考 TriTrapezoid(現行矩形経路)[N]: {tri:?}");
 
     assert_total("現行polygon200", &current, w * lx * ly);
@@ -483,7 +486,7 @@ fn case3_large_floor_polygon200_vs_reference() {
 /// 非矩形床の現行 polygon と有限線分拡張方式を比較して出力する。
 fn run_nonrect_case(label: &str, pts: &[(f64, f64)], w: f64) {
     let (model, slab) = polygon_slab_model(pts, DistributionMethod::TriTrapezoid, w);
-    let loads = distribute_slab(&model, &slab).unwrap();
+    let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
     let n = pts.len();
     let current = edge_totals(&loads, n);
     let coords: Vec<[f64; 3]> = pts.iter().map(|(x, y)| [*x, *y, 0.0]).collect();

@@ -12046,75 +12046,115 @@ mod high_density_steel_fixture {
     ));
 }
 
+mod steel_slab_density_fixture {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../sepika-job/tests/fixtures/steel_slab.rs"
+    ));
+}
+
 #[test]
 fn high_density_steel_gui_preparation_sync_rejects_and_undo_recovers() {
-    let mut app = App::default();
-    app.load_model(high_density_steel_fixture::steel_frame());
-    app.run_preparation();
-    assert!(app.core.scoped.last_error.is_none());
-    assert!(app.core.scoped.undo.run(
-        &mut app.core.model,
-        Box::new(sepika_edit::SetMaterialField {
-            id: sepika_core::ids::MaterialId(0),
-            field: sepika_edit::MaterialField::Density,
-            value: Some(85e-6 / 9806.65),
-        })
-    ));
-    app.sync_auto_load_cases_action();
-    let error = app.core.scoped.last_error.as_ref().unwrap();
-    assert!(
-        error.contains("材料 0") && error.contains("過小評価"),
-        "{error}"
-    );
-    assert!(!sepika_job::weight_preparation::weights_are_current(
-        &app.core.model,
-        app.core.analysis_cfg.mass_method
-    ));
-    for name in [DL_CASE_NAME, EX_CASE_NAME, EY_CASE_NAME] {
-        let case = app
+    for (model, material) in [
+        (high_density_steel_fixture::steel_frame(), 0),
+        (steel_slab_density_fixture::one_cubic_metre(true), 1),
+    ] {
+        let mut app = App::default();
+        app.load_model(model);
+        app.run_preparation();
+        assert!(app.core.scoped.last_error.is_none());
+        for name in [DL_CASE_NAME, EX_CASE_NAME, EY_CASE_NAME] {
+            app.core
+                .model
+                .load_cases
+                .iter_mut()
+                .find(|case| case.name == name)
+                .unwrap()
+                .nodal
+                .push(sepika_core::model::NodalLoad::manual(NodeId(2), [1.0; 6]));
+        }
+        let manual_before: Vec<_> = app
             .core
             .model
             .load_cases
             .iter()
-            .find(|c| c.name == name)
-            .unwrap();
-        assert!(case
-            .nodal
-            .iter()
-            .all(|l| l.source != sepika_core::model::LoadSource::Auto));
-        assert!(case
-            .member
-            .iter()
-            .all(|l| l.source != sepika_core::model::LoadSource::Auto));
-    }
-    app.core.scoped.undo.undo(&mut app.core.model);
-    app.core.scoped.undo.undo(&mut app.core.model);
-    assert_eq!(app.core.model.materials[0].density, 7.85e-9);
-    app.sync_auto_load_cases_action();
-    assert!(sepika_job::weight_preparation::weights_are_current(
-        &app.core.model,
-        app.core.analysis_cfg.mass_method
-    ));
-    app.core.model.materials[0].density = 85e-6 / 9806.65;
-    app.sync_gravity_load_cases_action();
-    assert!(app
-        .core
-        .scoped
-        .last_error
-        .as_ref()
-        .unwrap()
-        .contains("過小評価"));
-    assert!(app
-        .core
-        .model
-        .load_cases
-        .iter()
-        .filter(|c| [DL_CASE_NAME, EX_CASE_NAME, EY_CASE_NAME].contains(&c.name.as_str()))
-        .all(|c| c
-            .nodal
-            .iter()
-            .all(|l| l.source != sepika_core::model::LoadSource::Auto)
-            && c.member
+            .map(|case| {
+                (
+                    case.name.clone(),
+                    case.nodal
+                        .iter()
+                        .filter(|load| load.source == sepika_core::model::LoadSource::Manual)
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        assert!(app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(sepika_edit::SetMaterialField {
+                id: sepika_core::ids::MaterialId(material),
+                field: sepika_edit::MaterialField::Density,
+                value: Some(85e-6 / 9806.65),
+            })
+        ));
+        app.sync_auto_load_cases_action();
+        let error = app.core.scoped.last_error.as_ref().unwrap();
+        assert!(
+            error.contains(&format!("材料 {material}")) && error.contains("過小評価"),
+            "{error}"
+        );
+        assert!(!sepika_job::weight_preparation::weights_are_current(
+            &app.core.model,
+            app.core.analysis_cfg.mass_method
+        ));
+        for name in [DL_CASE_NAME, EX_CASE_NAME, EY_CASE_NAME] {
+            let case = app
+                .core
+                .model
+                .load_cases
                 .iter()
-                .all(|l| l.source != sepika_core::model::LoadSource::Auto)));
+                .find(|c| c.name == name)
+                .unwrap();
+            let expected = &manual_before
+                .iter()
+                .find(|(case_name, _)| case_name == name)
+                .unwrap()
+                .1;
+            assert_eq!(&case.nodal, expected);
+            assert!(case
+                .member
+                .iter()
+                .all(|l| l.source != sepika_core::model::LoadSource::Auto));
+        }
+        app.core.scoped.undo.undo(&mut app.core.model);
+        app.core.scoped.undo.undo(&mut app.core.model);
+        assert_eq!(app.core.model.materials[material as usize].density, 7.85e-9);
+        app.sync_auto_load_cases_action();
+        assert!(sepika_job::weight_preparation::weights_are_current(
+            &app.core.model,
+            app.core.analysis_cfg.mass_method
+        ));
+        app.core.model.materials[material as usize].density = 85e-6 / 9806.65;
+        app.sync_gravity_load_cases_action();
+        assert!(app
+            .core
+            .scoped
+            .last_error
+            .as_ref()
+            .unwrap()
+            .contains("過小評価"));
+        assert!(app
+            .core
+            .model
+            .load_cases
+            .iter()
+            .filter(|c| [DL_CASE_NAME, EX_CASE_NAME, EY_CASE_NAME].contains(&c.name.as_str()))
+            .all(|c| c
+                .nodal
+                .iter()
+                .all(|l| l.source != sepika_core::model::LoadSource::Auto)
+                && c.member
+                    .iter()
+                    .all(|l| l.source != sepika_core::model::LoadSource::Auto)));
+    }
 }

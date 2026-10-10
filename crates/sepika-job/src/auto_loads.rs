@@ -636,6 +636,7 @@ pub fn slab_load_case_content(
 
 /// 床の DL 分配 `BeamLoad` 列（スラブ固定荷重＋自立壁の等価面荷重）。
 /// 荷重ケースの全部材荷重ではない（梁自重・取り付く壁版の線アンカーを含まない）。
+/// 床板自重の参照が未解決、または参照鋼の物理単位重量が固定値を超える場合はエラー。
 pub fn compute_dl_beam_loads(
     model: &Model,
 ) -> Result<Vec<BeamLoad>, sepika_load::floor::FloorDistributionError> {
@@ -648,14 +649,20 @@ fn compute_dl_beam_loads_checked(
     let beam_map = beam_elem_map(model);
     let extra_intensity = sepika_load::wall_attached::floor_region_wall_extra_intensity(model)
         .map_err(sepika_load::floor::FloorDistributionError::SelfWeight)?;
-    slab_beam_loads_with_checked(
+    let loads = slab_beam_loads_with_checked(
         model,
         |slab| {
             model.slab_dead_intensity(slab) + extra_intensity.get(&slab.id).copied().unwrap_or(0.0)
         },
         true,
         &beam_map,
-    )
+    )?;
+    for slab in &model.slabs {
+        model
+            .validate_slab_design_self_weight(slab, "設計DL・地震用重量")
+            .map_err(sepika_load::floor::FloorDistributionError::SelfWeight)?;
+    }
+    Ok(loads)
 }
 
 /// 重力系（DL・LL(架構用)・LL(地震用)）の自動生成内容を計算する。
@@ -1092,6 +1099,7 @@ mod tests {
             model.sections.push(sec);
             model.elements[id as usize].section = Some(SectionId(id));
         }
+        resolve_massless_slab_sections(&mut model);
         let before = model.clone();
         let error = compute_gravity_auto_load_cases(&model)
             .err()
@@ -1128,6 +1136,33 @@ mod tests {
         assert!(error.contains("フィレット"), "{error}");
         assert_eq!(model.load_cases, before.load_cases);
         assert_eq!(model.stories, before.stories);
+    }
+
+    fn resolve_massless_slab_sections(model: &mut Model) {
+        use sepika_core::ids::MaterialId;
+        use sepika_core::model::{Material, MaterialCategory};
+        let material_id = MaterialId(model.materials.len() as u32);
+        model.materials.push(Material {
+            id: material_id,
+            name: "自重除外".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 0.0,
+            shear: None,
+            fc: None,
+            fy: Some(235.0),
+            concrete_class: Default::default(),
+            strength_factor: None,
+        });
+        let section_id = SectionId(model.sections.len() as u32);
+        let mut section = sepika_core::section_shape::SectionShape::RcSlab { thickness: 100.0 }
+            .to_section(section_id, "自重除外床板".into());
+        section.material = Some(material_id);
+        model.sections.push(section);
+        for slab in &mut model.slabs {
+            slab.plate.section = Some(section_id);
+        }
     }
 
     fn make_square_slab_model() -> Model {
@@ -1315,6 +1350,7 @@ mod tests {
         model.load_cases[3]
             .nodal
             .push(NodalLoad::auto(NodeId(0), [100.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
+        resolve_massless_slab_sections(&mut model);
         crate::prepare::prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
             .unwrap();
         assert!(crate::compute::missing_seismic_horizontal_load(
@@ -2042,8 +2078,9 @@ mod tests {
 
     #[test]
     fn compute_gravity_creates_dl_with_slab_loads() {
-        let model = make_square_slab_model();
+        let mut model = make_square_slab_model();
         model.validate().expect("valid model");
+        resolve_massless_slab_sections(&mut model);
         let result = compute_gravity_auto_load_cases(&model).unwrap();
         assert_eq!(result.cases.len(), 3);
         let dl = result
@@ -2059,6 +2096,7 @@ mod tests {
     fn apply_auto_load_cases_creates_dl_case() {
         let mut model = make_square_slab_model();
         model.validate().expect("valid model");
+        resolve_massless_slab_sections(&mut model);
         let computed = compute_gravity_auto_load_cases(&model).unwrap();
         apply_auto_load_cases(&mut model, &computed.cases);
         let dl = model
@@ -2142,13 +2180,16 @@ mod tests {
         model.wall_plates.push(plate);
         model.validate().expect("valid model");
 
-        let baseline = compute_gravity_auto_load_cases(&make_square_slab_model()).unwrap();
+        let mut baseline = make_square_slab_model();
+        resolve_massless_slab_sections(&mut baseline);
+        let baseline = compute_gravity_auto_load_cases(&baseline).unwrap();
         let baseline_dl = baseline
             .cases
             .iter()
             .find(|c| c.name == DL_CASE_NAME)
             .unwrap();
 
+        resolve_massless_slab_sections(&mut model);
         let result = compute_gravity_auto_load_cases(&model).unwrap();
         let dl = result
             .cases
@@ -2253,6 +2294,7 @@ mod tests {
         model.wall_plates.push(plate);
         model.validate().expect("valid model");
 
+        resolve_massless_slab_sections(&mut model);
         let result = compute_gravity_auto_load_cases(&model).unwrap();
         let dl = result
             .cases
@@ -2388,12 +2430,15 @@ mod tests {
             nodal.iter().map(|nl| -nl.values[2]).sum()
         };
 
-        let baseline = compute_gravity_auto_load_cases(&make_square_slab_model()).unwrap();
+        let mut baseline = make_square_slab_model();
+        resolve_massless_slab_sections(&mut baseline);
+        let baseline = compute_gravity_auto_load_cases(&baseline).unwrap();
         let baseline_dl = baseline
             .cases
             .iter()
             .find(|c| c.name == DL_CASE_NAME)
             .unwrap();
+        resolve_massless_slab_sections(&mut model);
         let result = compute_gravity_auto_load_cases(&model).unwrap();
         let dl = result
             .cases

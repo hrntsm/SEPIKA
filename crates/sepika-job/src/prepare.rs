@@ -288,6 +288,20 @@ mod tests {
         model
             .sections
             .push(SectionShape::RcSlab { thickness: 150.0 }.to_section(sid, "S150".into()));
+        model.materials.push(sepika_core::model::Material {
+            id: sepika_core::ids::MaterialId(0),
+            name: "自重除外".into(),
+            category: sepika_core::model::MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 0.0,
+            shear: None,
+            fc: None,
+            fy: Some(235.0),
+            concrete_class: Default::default(),
+            strength_factor: None,
+        });
+        model.sections[0].material = Some(sepika_core::ids::MaterialId(0));
         model
             .unassigned_beams
             .push(sepika_core::model::SecondaryMember {

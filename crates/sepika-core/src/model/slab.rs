@@ -371,6 +371,31 @@ impl Model {
         Some(t * mat.design_unit_weight_n_per_mm3())
     }
 
+    /// 床板の設計自重の参照と密度を検査し、床板 ID と計算目的付きで拒否する。
+    /// 材料は STB 強度情報を優先する既存の床板材料解決に従う。
+    pub fn validate_slab_design_self_weight(
+        &self,
+        slab: &Slab,
+        purpose: &str,
+    ) -> Result<(), String> {
+        if self.slab_section(slab).is_none() {
+            return Err(format!(
+                "床板 {}: 断面が未割当です。板厚が定まらないと自重が算定できません。",
+                slab.id.0
+            ));
+        }
+        let material = self
+            .slab_plate_material(slab)
+            .filter(|_| self.slab_plate_thickness(slab).is_some())
+            .ok_or_else(|| {
+                format!(
+                    "床板 {}: 断面の材料または板厚が定まりません。自重が算定できません。",
+                    slab.id.0
+                )
+            })?;
+        material.validate_design_self_weight(&format!("床板 {}", slab.id.0), purpose)
+    }
+
     /// 固定荷重（DL）の面荷重強度 [N/mm²]（版の自重 ＋ 仕上げ等）。
     ///
     /// 自重が算定できない版（断面・主材料が未割当）は仕上げ分だけを返す。

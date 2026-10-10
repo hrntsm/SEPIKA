@@ -136,6 +136,7 @@ pub fn generate_stories_with_opts(
 ///
 /// `gravity_lcs` のケース内容だけを階の設計地震用重量へ算入し、そのうち自重相当分を
 /// 物理質量へ置換して質点質量を算定する（質量行列に計上される分は控除する）。
+/// 床板の設計自重が未算定または密度条件に不適合ならエラー。
 pub fn generate_stories_with_synced_self_weight(
     model: &Model,
     gravity_lcs: &[LoadCaseId],
@@ -548,6 +549,9 @@ fn generate_stories_impl(
             node_mass_equiv.copy_from_slice(&gravity_weight);
         }
         SelfWeightMode::SyncedGravityCases => {
+            for slab in &model.slabs {
+                crate::floor::distribute_slab(model, slab).map_err(|e| e.to_string())?;
+            }
             // 重力ケースに含まれる設計自重（`design_sw`）を物理質量相当（`physical_sw`）
             // へ置換する。重力ケースに設計自重が含まれないモデルでは置換後の質量が
             // 負になるため、clamp で隠さずエラーにする（質量の欠落・過小評価の防止）。

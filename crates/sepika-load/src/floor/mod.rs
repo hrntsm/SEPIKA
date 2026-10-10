@@ -143,6 +143,7 @@ pub fn validate_one_way_directions(model: &Model) -> Result<(), FloorDistributio
 use fem::{fem_trapezoid, fem_triangle};
 
 /// 床板の面荷重を境界（および二次部材経由の節点荷重）へ分配する。
+/// 自重の参照が未解決、または鋼の物理単位重量が固定設計値を超える場合はエラー。
 ///
 /// 分岐は床板の形で決まる:
 ///
@@ -168,9 +169,11 @@ pub fn distribute_slab(
     model: &Model,
     slab: &Slab,
 ) -> Result<Vec<BeamLoad>, FloorDistributionError> {
-    // 固定荷重 DL（版の自重＋仕上げ等）の総和を分配する。自重は断面の板厚と
-    // 材料から算定する（`Model::slab_dead_intensity`）。
-    distribute_slab_w(model, slab, model.slab_dead_intensity(slab))
+    let loads = distribute_slab_w(model, slab, model.slab_dead_intensity(slab))?;
+    model
+        .validate_slab_design_self_weight(slab, "床板の設計DL分配")
+        .map_err(FloorDistributionError::SelfWeight)?;
+    Ok(loads)
 }
 
 /// 指定した面荷重強度 `w`（N/mm²）のみを床板の境界へ分配する。
