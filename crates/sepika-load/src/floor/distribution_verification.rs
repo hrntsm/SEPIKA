@@ -3,7 +3,9 @@
 //! 等分する」ものとする。辺を有限線分とみなす距離解釈は原典（凸四辺形対象）を凹多角形へ
 //! 拡張した SEPIKA の仮定であり、無限直線方式は感度分析用に併記する。
 
-use super::polygon::polygon_edge_areas;
+use super::polygon::{
+    integrate_polygon, polygon_edge_areas, PolygonDistributionError, PolygonIntegrationOptions,
+};
 use super::tests::{make_rect_slab_model, make_square_slab_model, polygon_slab_model, total_load};
 use super::*;
 use sepika_core::geom::polygon as geom_polygon;
@@ -484,7 +486,7 @@ fn run_nonrect_case(label: &str, pts: &[(f64, f64)], w: f64) {
         "格子内面積: 現行polygon200={poly_sampled:.1} 有限線分拡張方式={base_sampled:.1} 真値={true_area:.1}"
     );
 
-    assert_total("現行polygon200", &current, w * poly_sampled);
+    assert_total("本番凸片積分", &current, w * true_area);
     assert_reference_conserves(&coords, label);
 }
 
@@ -841,36 +843,7 @@ fn print_three_way(
     );
 }
 
-/// 本番（等距離均等割り）と先勝ちリファレンスの辺ごとの最大相対差（比）が、`expect_ties`
-/// の期待どおりかを確認する。`expect_ties=true` は等距離が生じる形状（相違するはず）、
-/// `false` は等距離が生じない形状（不変のはず）を表す。閾値は相対 1e-9。
-fn assert_split_effect(production: &[f64], unsplit: &[f64], expect_ties: bool, label: &str) {
-    let max_rel = production
-        .iter()
-        .zip(unsplit.iter())
-        .map(|(&a, &b)| {
-            let denom = a.abs().max(b.abs());
-            if denom > 1e-12 {
-                (a - b).abs() / denom
-            } else {
-                0.0
-            }
-        })
-        .fold(0.0_f64, f64::max);
-    if expect_ties {
-        assert!(
-            max_rel > 1e-9,
-            "{label}: 等距離が生じる形状のはずが本番と先勝ちリファレンスが不変（最大相対差={max_rel:e}）"
-        );
-    } else {
-        assert!(
-            max_rel < 1e-9,
-            "{label}: 等距離が生じない形状のはずが本番と先勝ちリファレンスが相違（最大相対差={max_rel:e}）"
-        );
-    }
-}
-
-/// 本番 `polygon_edge_areas`（200×200 固定格子・等距離均等割り）・先勝ちリファレンス
+/// 本番 `polygon_edge_areas`（最大100mm・凸片積分・等距離均等割り）・先勝ちリファレンス
 /// `polygon_unsplit_reference_edge_areas`・有限線分拡張方式
 /// `segment_extension_edge_areas(split_ties=true)` を比較して出力する。
 /// `split_baseline_limit` は本番対有限線分拡張方式の許容相対差（比）。総和保存と、
@@ -881,8 +854,8 @@ fn run_split_case(
     pts: &[(f64, f64)],
     w: f64,
     symmetry_pairs: &[(usize, usize)],
-    expect_ties: bool,
-    split_baseline_limit: Option<f64>,
+    _expect_ties: bool,
+    _split_baseline_limit: Option<f64>,
 ) {
     let n = pts.len();
     let coords: Vec<[f64; 3]> = pts.iter().map(|(x, y)| [*x, *y, 0.0]).collect();
@@ -902,22 +875,19 @@ fn run_split_case(
         "格子内面積: 本番200x200={sampled:.1} 有限線分拡張={baseline_sampled:.1} 真値={true_area:.1}"
     );
 
-    assert_total("本番polygon200", &production_areas, sampled);
+    assert_total("本番凸片積分", &production_areas, true_area);
     assert_total("先勝ちリファレンス", &unsplit_areas, sampled);
     assert_reference_conserves(&coords, label);
 
-    if !symmetry_pairs.is_empty() {
-        assert_pairs_equal(&production, symmetry_pairs, &format!("{label} 本番"));
-    }
-    assert_split_effect(&production, &unsplit, expect_ties, label);
-    if let Some(limit) = split_baseline_limit {
-        assert_max_rel_diff_below(
-            &production,
-            &baseline,
-            limit,
-            &format!("{label}: 本番 と 有限線分拡張方式"),
+    let diagnostics =
+        integrate_polygon(&coords, &candidate, PolygonIntegrationOptions::default()).unwrap();
+    for &(a, b) in symmetry_pairs {
+        assert!(
+            (production_areas[a] - production_areas[b]).abs()
+                <= diagnostics.edge_error_bounds_mm2[a] + diagnostics.edge_error_bounds_mm2[b]
         );
     }
+    // 旧格子/先勝ち/延長方式との差は比較出力に残し、新契約の誤差許容へ転用しない。
 }
 
 /// ケース7: 本番 `polygon_edge_areas`（等距離均等割り）を、L形・T形・十字形・
@@ -1161,16 +1131,25 @@ fn check_vertex_order(label: &str, pts: &[(f64, f64)], w: f64) {
         (0, true),
         (1, true),
     ];
-    let production = physical_edge_loads(pts, &patterns, w, polygon_current_edge_loads_ref, false);
+    let base_coords: Vec<_> = pts.iter().map(|&(x, y)| [x, y, 0.0]).collect();
+    let all: Vec<_> = (0..pts.len()).collect();
+    let base_result = integrate_polygon(&base_coords, &all, Default::default()).unwrap();
+    let base_area = edge_load_map(pts, &base_result.edge_areas_mm2);
+    let base_bounds = edge_load_map(pts, &base_result.edge_error_bounds_mm2);
+    for &(shift, reverse) in &patterns {
+        let transformed = transformed_cycle(pts, shift, reverse);
+        let coords: Vec<_> = transformed.iter().map(|&(x, y)| [x, y, 0.]).collect();
+        let result = integrate_polygon(&coords, &all, Default::default()).unwrap();
+        let areas = edge_load_map(&transformed, &result.edge_areas_mm2);
+        let bounds = edge_load_map(&transformed, &result.edge_error_bounds_mm2);
+        for (key, a) in &base_area {
+            assert!((a - areas[key]).abs() <= base_bounds[key] + bounds[key]);
+        }
+    }
     let split = physical_edge_loads(pts, &patterns, w, segment_extension_edge_loads_ref, true);
     let line_split = physical_edge_loads(pts, &patterns, w, supporting_line_edge_loads_ref, true);
 
     println!("--- ケース9: {label} 頂点順序の不変性 ---");
-    assert_maps_invariant(
-        &production,
-        1e-9,
-        &format!("{label} 本番（線分・等距離均等割り）"),
-    );
     assert_maps_invariant(&split, 1e-9, &format!("{label} 等分版（線分・等分）"));
     assert_maps_invariant(&line_split, 1e-9, &format!("{label} 無限直線・等分版"));
 }
@@ -1180,24 +1159,13 @@ fn segment_extension_edge_loads_ref(coords: &[[f64; 3]], w: f64, split_ties: boo
     segment_extension_edge_loads(coords, w, split_ties)
 }
 
-/// `physical_edge_loads` へ渡す本番の非矩形経路 [`polygon_edge_areas`]（200×200 固定格子・
-/// 最近接辺、等距離は最小距離に並ぶ辺へ均等割り）の関数ポインタ相当。辺ごとの負担荷重 [N]
-/// を返す。`split_ties` は本番実装では用いない（常に等距離を均等割りする）。
-fn polygon_current_edge_loads_ref(coords: &[[f64; 3]], w: f64, _split_ties: bool) -> Vec<f64> {
-    let candidates: Vec<usize> = (0..coords.len()).collect();
-    polygon_edge_areas(coords, &candidates)
-        .iter()
-        .map(|a| w * a)
-        .collect()
-}
-
 /// `physical_edge_loads` へ渡す無限直線方式の関数ポインタ相当。
 fn supporting_line_edge_loads_ref(coords: &[[f64; 3]], w: f64, split_ties: bool) -> Vec<f64> {
     supporting_line_edge_loads(coords, w, split_ties)
 }
 
 /// ケース9: L形と十字形について、頂点列の循環移動・反転で本番の `polygon_edge_areas`
-/// （200×200 固定格子・等距離均等割り）・有限線分等分版・無限直線等分版の物理辺負担が
+/// （最大100mm・凸片積分・等距離均等割り）・有限線分等分版・無限直線等分版の物理辺負担が
 /// 不変であることを assert する。
 #[test]
 fn case9_vertex_order_invariance() {
@@ -1261,29 +1229,17 @@ fn case10_convex_shapes_unchanged_by_tie_split() {
         let candidate: Vec<usize> = (0..pts.len()).collect();
         let production = polygon_edge_areas(&coords, &candidate);
         let unsplit = polygon_unsplit_reference_edge_areas(&coords, &candidate);
-        assert_max_rel_diff_below(
-            &production,
-            &unsplit,
-            1e-9,
-            &format!("{label}: 本番 vs 先勝ちリファレンス（等距離なし）"),
-        );
-        let sampled = polygon_grid_sampled_area(&coords);
-        assert_total(&format!("{label} 本番"), &production, sampled);
+        print_comparison(label, 1.0, area_xy(&coords), &production, &unsplit);
+        assert_total(&format!("{label} 本番"), &production, area_xy(&coords));
     }
 }
 
-/// ケース11: 候補辺の部分集合を渡す経路（取り付く床板の支持辺分配と同じ）で、非候補辺が
-/// 0 のまま、総和が格子内サンプル面積に一致し、等距離が候補辺へ均等配分されることを確認する。
+/// 全周支持モデルへ候補辺の部分集合を流用しない。
 #[test]
-fn case11_candidate_subset_keeps_tie_split() {
+fn case11_candidate_subset_is_unsupported() {
     let coords: Vec<[f64; 3]> = LSHAPE_PTS.iter().map(|(x, y)| [*x, *y, 0.0]).collect();
-    let candidate = [2usize, 3];
-    let areas = polygon_edge_areas(&coords, &candidate);
-    for e in [0usize, 1, 4, 5] {
-        assert_eq!(areas[e], 0.0, "非候補辺 {e} に負担が付いた");
-    }
-    let sampled = polygon_grid_sampled_area(&coords);
-    assert_total("部分集合経路の総和", &areas, sampled);
-    assert_pairs_equal(&areas, &[(2, 3)], "L形 凹辺 e2/e3（等距離均等割り）");
-    assert!(areas[2] > 0.0 && areas[3] > 0.0);
+    assert!(matches!(
+        integrate_polygon(&coords, &[2, 3], Default::default()),
+        Err(PolygonDistributionError::Unsupported(_))
+    ));
 }
