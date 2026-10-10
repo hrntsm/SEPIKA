@@ -45,8 +45,18 @@ pub use beam_design::{
 pub(crate) use fem::{fem_linear, fem_uniform};
 pub use fem::{fixed_end_moments, simple_beam_moment_at, simple_reactions};
 pub use geometry::{point_in_slab_boundary, slab_dimensions, slab_dimensions_of};
+pub use polygon::{
+    integrate_polygon, PolygonDistribution, PolygonDistributionError, PolygonIntegrationOptions,
+};
 pub use rigid_zone::{cmq_with_rigid_zone, RigidZoneCmqMode, RigidZoneCmqResult};
 pub use types::{BeamLoad, Cmq, LoadShape, LoadTarget};
+
+/// 分配荷重と、多角形経路の面積・格子・誤差診断。
+#[derive(Clone, Debug)]
+pub struct SlabDistribution {
+    pub loads: Vec<BeamLoad>,
+    pub polygon: Option<PolygonDistribution>,
+}
 
 use cantilever::{distribute_cantilever, distribute_to_node};
 use geometry::boundary_coords;
@@ -75,8 +85,10 @@ fn short_direction_dimensions(coords: &[[f64; 3]]) -> Option<(f64, f64)> {
     Some(dimensions)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum FloorDistributionError {
+    Polygon(PolygonDistributionError),
+    InvalidBoundary(String),
     InvalidAttachedSlab(String),
     SelfWeight(String),
     ShortDirectionOnSquare { slab_id: sepika_core::ids::SlabId },
@@ -86,6 +98,8 @@ pub enum FloorDistributionError {
 impl std::fmt::Display for FloorDistributionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Polygon(error) => error.fmt(f),
+            Self::InvalidBoundary(message) => f.write_str(message),
             Self::InvalidAttachedSlab(message) => f.write_str(message),
             Self::SelfWeight(message) => f.write_str(message),
             Self::ShortDirectionOnSquare { slab_id } => write!(
@@ -164,7 +178,7 @@ pub fn distribute_slab(
 /// 分岐ロジックは [`distribute_slab`] と同一で、荷重源だけを引数 `w` に差し替える。
 /// これにより DL（固定荷重）と LL（積載荷重）を別々の荷重ケースへ分配できる
 /// （用途別（床用/小梁用/大梁・柱・基礎用/地震力用）の積載荷重の使い分けや、荷重組合せでの DL/LL 係数分けに用いる）。
-/// `w == 0.0` の場合は、短辺方向指定の正方形・非矩形を除き空の分配結果を返す。
+/// ゼロ荷重でも境界・支持参照を検査する。
 pub fn distribute_slab_w(
     model: &Model,
     slab: &Slab,
@@ -178,17 +192,46 @@ pub fn distribute_slab_w_checked(
     slab: &Slab,
     w: f64,
 ) -> Result<Vec<BeamLoad>, FloorDistributionError> {
+    Ok(
+        distribute_slab_w_with_diagnostics(model, slab, w, PolygonIntegrationOptions::default())?
+            .loads,
+    )
+}
+
+/// 面荷重 [N/mm²] を分配し、多角形では辺別面積・格子・誤差上界も返す。
+/// 要求誤差は多角形経路に適用する。境界・支持参照異常はゼロ荷重時もエラー。
+pub fn distribute_slab_w_with_diagnostics(
+    model: &Model,
+    slab: &Slab,
+    w: f64,
+    options: PolygonIntegrationOptions,
+) -> Result<SlabDistribution, FloorDistributionError> {
     let mut loads = Vec::new();
+    if !w.is_finite() {
+        return Err(FloorDistributionError::InvalidBoundary(
+            "床板の面荷重が非有限".into(),
+        ));
+    }
     model
         .validate_attached_slab(slab)
         .map_err(|e| FloorDistributionError::InvalidAttachedSlab(e.to_string()))?;
-    let Some(coords) = boundary_coords(model, slab) else {
-        return Ok(loads);
-    };
-    if coords.len() < 3 {
-        return Ok(loads);
+    if matches!(slab.shape, SlabShape::Enclosed) {
+        validate_enclosed_supports(model, slab)?;
     }
-
+    let coords = boundary_coords(model, slab).ok_or_else(|| {
+        FloorDistributionError::InvalidBoundary(format!(
+            "床板 {} の境界参照を解決できません",
+            slab.id.0
+        ))
+    })?;
+    if coords.len() < 3 || coords.iter().flatten().any(|x| !x.is_finite()) {
+        return Err(FloorDistributionError::InvalidBoundary(
+            "床板の境界頂点不足または非有限座標".into(),
+        ));
+    }
+    if matches!(slab.shape, SlabShape::Enclosed) {
+        polygon::local_polygon(&coords).map_err(FloorDistributionError::Polygon)?;
+    }
     if matches!(&slab.shape, SlabShape::Enclosed)
         && slab.method() == sepika_core::model::DistributionMethod::OneWay
         && slab.one_way() == Some(sepika_core::model::OneWayDir::Short)
@@ -202,25 +245,91 @@ pub fn distribute_slab_w_checked(
             return Err(FloorDistributionError::ShortDirectionOnSquare { slab_id: slab.id });
         }
     }
-
-    if w == 0.0 {
-        return Ok(loads);
-    }
-
-    match &slab.shape {
-        SlabShape::Attached { anchor, .. } => {
+    if let SlabShape::Attached { anchor, .. } = &slab.shape {
+        if w != 0.0 {
             distribute_attached(&coords, w, *anchor, &mut loads);
-            return Ok(loads);
         }
-        SlabShape::Enclosed => {}
+        return Ok(SlabDistribution {
+            loads,
+            polygon: None,
+        });
     }
+    let polygon = match slab_dimensions_of(&coords) {
+        Some((lx, ly)) => {
+            if w != 0.0 {
+                distribute_rect(slab, &coords, lx, ly, w, &mut loads)?;
+            }
+            None
+        }
+        None => Some(
+            distribute_polygon(&coords, w, &mut loads, options)
+                .map_err(FloorDistributionError::Polygon)?,
+        ),
+    };
+    Ok(SlabDistribution { loads, polygon })
+}
 
-    match slab_dimensions_of(&coords) {
-        Some((lx, ly)) => distribute_rect(slab, &coords, lx, ly, w, &mut loads)?,
-        None => distribute_polygon(&coords, w, &mut loads),
+fn validate_enclosed_supports(model: &Model, slab: &Slab) -> Result<(), FloorDistributionError> {
+    let invalid = |reason: String| {
+        FloorDistributionError::InvalidBoundary(format!("床板 {}: {reason}", slab.id.0))
+    };
+    let region = model
+        .slab_assignment_region(slab.id)
+        .ok_or_else(|| invalid("支持境界なし（全周支持以外は未対応）".into()))?;
+    if region.boundary.len() < 3 {
+        return Err(invalid("支持境界不足（自由辺・支持欠落は未対応）".into()));
     }
-
-    Ok(loads)
+    let mut intervals = Vec::new();
+    for edge in &region.boundary {
+        if edge
+            .span
+            .iter()
+            .any(|t| !t.is_finite() || *t < 0.0 || *t > 1.0)
+            || edge.span[0] == edge.span[1]
+        {
+            return Err(invalid("支持辺の有向区間が不正".into()));
+        }
+        let (a, b) = model
+            .support_member_axis(edge.support)
+            .ok_or_else(|| invalid(format!("支持部材 {:?} の参照不明", edge.support)))?;
+        if a.iter().chain(b.iter()).any(|x| !x.is_finite()) {
+            return Err(invalid("支持部材の非有限座標".into()));
+        }
+        if let SupportMemberId::Primary(id) = edge.support {
+            if model
+                .element(id)
+                .is_none_or(|element| element.nodes.len() != 2)
+            {
+                return Err(invalid("支持大梁は2節点線分のみ対応".into()));
+            }
+        }
+        let at = |t: f64| {
+            [
+                a[0] + (b[0] - a[0]) * t,
+                a[1] + (b[1] - a[1]) * t,
+                a[2] + (b[2] - a[2]) * t,
+            ]
+        };
+        intervals.push((at(edge.span[0]), at(edge.span[1])));
+    }
+    let origin = intervals[0].0;
+    let points: Vec<_> = intervals
+        .iter()
+        .flat_map(|&(a, b)| [a, b])
+        .map(|p| [p[0] - origin[0], p[1] - origin[1]])
+        .collect();
+    let (lo, hi) = sepika_core::geom::polygon::bounding_box(&points);
+    let tolerance = 64.0 * f64::EPSILON * (hi[0] - lo[0]).hypot(hi[1] - lo[1]).max(1.0);
+    for i in 0..intervals.len() {
+        let end = intervals[i].1;
+        let start = intervals[(i + 1) % intervals.len()].0;
+        if (0..3).any(|k| (end[k] - start[k]).abs() > tolerance) {
+            return Err(invalid(
+                "支持辺が閉じていない（開口・自由辺・支持欠落は未対応）".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// 取り付く床板（片持ちスラブ・バルコニー・出隅）の分配。
@@ -408,9 +517,9 @@ pub fn distribute_region(
 ) -> Result<Vec<BeamLoad>, FloorDistributionError> {
     let mut loads = Vec::new();
     for &sid in &region.slab_ids {
-        let Some(slab) = model.slab(sid) else {
-            continue;
-        };
+        let slab = model.slab(sid).ok_or_else(|| {
+            FloorDistributionError::InvalidBoundary(format!("床領域の床板 {} は参照不明", sid.0))
+        })?;
         let slab_loads = distribute_slab_w(model, slab, w_of(slab))?;
         loads.extend(resolve_edges_to_span(model, slab, slab_loads)?);
     }
