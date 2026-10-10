@@ -372,11 +372,129 @@ fn split_slab_keeps_original_first_node_supply_and_refuses_unrepresentable_expor
         assert_eq!(resolved.value, 36.);
         assert_eq!(resolved.source, StrengthSource::Member);
     }
+    let section_explicit = xml.replace(
+        "<StbSecSlab_RC id=\"8\" name=\"S1\">",
+        "<StbSecSlab_RC id=\"8\" name=\"S1\" strength_concrete=\"Fc30\">",
+    );
+    let model = import_stbridge(&section_explicit).unwrap();
+    let again = import_stbridge(&export_stbridge(&model).unwrap()).unwrap();
+    for input in again
+        .stb_strengths
+        .members
+        .iter()
+        .filter(|input| matches!(input.target, StrengthTarget::Slab(_)))
+    {
+        assert_eq!(input.concrete, None);
+        let resolved = again.resolve_stb_concrete(input).unwrap();
+        assert_eq!(resolved.value, 30.);
+        assert_eq!(resolved.source, StrengthSource::Section);
+    }
     let conflict=xml.replace("</StbMembers>",r#"<StbSlab id="1" name="S2" id_section="8" kind_structure="RC" strength_concrete="Fc36"><StbNodeIdOrder>1 2 3 4</StbNodeIdOrder></StbSlab></StbMembers>"#);
     assert!(matches!(
         import_stbridge(&conflict),
         Err(StbError::SlabRegionConflict(_))
     ));
+}
+
+#[test]
+fn split_slab_export_starts_at_original_strength_node_and_keeps_omission() {
+    let source = include_str!("../../tests/fixtures/strength_split_slab.stb")
+        .replace("<StbNodeIdOrder>1 2 3 4</StbNodeIdOrder>", "<StbNodeIdOrder>5 2 3 6 4 1</StbNodeIdOrder>")
+        .replace("<StbNodeId id=\"1\"/>", "<StbNodeId id=\"5\"/>")
+        .replace("</StbStories>", "<StbStory id=\"3\" name=\"other\" height=\"0\" kind=\"GENERAL\" strength_concrete=\"Fc30\"><StbNodeIdList><StbNodeId id=\"1\"/><StbNodeId id=\"2\"/><StbNodeId id=\"3\"/><StbNodeId id=\"4\"/><StbNodeId id=\"6\"/></StbNodeIdList></StbStory></StbStories>");
+    for (source, grade, value, strength_source) in [
+        (source.clone(), "Fc27", 27., StrengthSource::Story),
+        (
+            source.replace(" strength_concrete=\"Fc27\"", ""),
+            "Fc21",
+            21.,
+            StrengthSource::Common,
+        ),
+    ] {
+        let model = import_stbridge(&source).unwrap();
+        assert_eq!(model.slabs.len(), 2);
+        assert!(model.slabs.iter().any(|slab| {
+            let first = slab.boundary_nodes(&model).unwrap()[0];
+            if first == sepika_core::ids::NodeId(4) {
+                return false;
+            }
+            let mut input = model
+                .stb_strengths
+                .members
+                .iter()
+                .find(|input| input.target == StrengthTarget::Slab(slab.id))
+                .unwrap()
+                .clone();
+            input.node = first;
+            let changed = model.resolve_stb_concrete(&input).unwrap();
+            assert_eq!(changed.value, 30.);
+            assert_eq!(changed.source, StrengthSource::Story);
+            true
+        }));
+        for retained in [None, Some(0), Some(1)] {
+            let mut selected = model.clone();
+            if let Some(index) = retained {
+                let target = StrengthTarget::Slab(selected.slabs[index].id);
+                selected
+                    .slabs
+                    .retain(|slab| StrengthTarget::Slab(slab.id) == target);
+                selected.stb_strengths.members.retain(|input| {
+                    !matches!(input.target, StrengthTarget::Slab(_)) || input.target == target
+                });
+            }
+            for slab in &selected.slabs {
+                assert!(slab
+                    .boundary_nodes(&selected)
+                    .unwrap()
+                    .contains(&sepika_core::ids::NodeId(4)));
+            }
+            let output = export_stbridge(&selected).unwrap();
+            for line in output
+                .lines()
+                .filter(|line| line.trim_start().starts_with("<StbSlab "))
+            {
+                assert!(!line.contains("strength_concrete="));
+            }
+            let orders: Vec<_> = output
+                .lines()
+                .filter(|line| line.contains("<StbNodeIdOrder>"))
+                .collect();
+            assert_eq!(orders.len(), selected.slabs.len());
+            for order in orders {
+                assert!(order.trim_start().starts_with("<StbNodeIdOrder>5 "));
+            }
+            let again = import_stbridge(&output).unwrap();
+            let slabs: Vec<_> = again
+                .stb_strengths
+                .members
+                .iter()
+                .filter(|input| matches!(input.target, StrengthTarget::Slab(_)))
+                .collect();
+            assert_eq!(slabs.len(), if retained.is_some() { 1 } else { 2 });
+            for input in slabs {
+                assert_eq!(again.nodes[input.node.index()].coord, [2000., 0., 0.]);
+                assert_eq!(input.concrete, None);
+                let StrengthTarget::Slab(id) = input.target else {
+                    unreachable!()
+                };
+                let section_id = again.slabs[id.index()].plate.section.unwrap();
+                assert_eq!(
+                    again
+                        .stb_strengths
+                        .sections
+                        .iter()
+                        .find(|section| section.section == section_id)
+                        .unwrap()
+                        .concrete,
+                    None
+                );
+                let resolved = again.resolve_stb_concrete(input).unwrap();
+                assert_eq!(resolved.grade, grade);
+                assert_eq!(resolved.value, value);
+                assert_eq!(resolved.source, strength_source);
+            }
+        }
+    }
 }
 
 #[test]

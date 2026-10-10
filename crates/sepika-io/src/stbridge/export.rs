@@ -516,6 +516,9 @@ fn members_body(
             {
                 boundary = input.node_order.clone();
             }
+            if let Some(first) = boundary.iter().position(|node| *node == input.node) {
+                boundary.rotate_left(first);
+            }
         }
         let mid = slab_member_base + slab.id.0;
         let sec = slab_sec_ids.get(&slab.id).copied().unwrap_or(slab_sec_base);
