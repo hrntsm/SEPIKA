@@ -49,12 +49,24 @@ pub struct StbRebarStrength {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StbSteelStrength {
+    #[serde(default)]
+    pub native_material: Option<MaterialId>,
+    pub element: String,
+    pub part: String,
+    pub position: Option<String>,
+    pub strength: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StbSectionStrength {
     pub section: SectionId,
     pub concrete: Option<String>,
     #[serde(default)]
     pub native_material: Option<MaterialId>,
     pub reinforcement: Vec<StbRebarStrength>,
+    #[serde(default)]
+    pub steel: Vec<StbSteelStrength>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -145,6 +157,7 @@ impl Model {
             for r in &s.reinforcement {
                 grades.extend(r.strength.iter().cloned());
             }
+            grades.extend(s.steel.iter().map(|steel| steel.strength.clone()));
         }
         for s in &self.source_stories {
             grades.extend(s.strength_concrete.iter().cloned());
@@ -393,6 +406,25 @@ impl Model {
         )
     }
 
+    // 元gradeは保存し、材料数値の意図的編集を標準値の解決と区別する。
+    fn stb_yield_value(&self, grade: &str, standard: f64) -> Result<(f64, bool), String> {
+        let Some(record) = self
+            .stb_strengths
+            .materials
+            .iter()
+            .find(|m| m.grade == grade)
+        else {
+            return Ok((standard, false));
+        };
+        let value = self
+            .materials
+            .get(record.material.index())
+            .and_then(|m| m.fy)
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .ok_or_else(|| format!("材料 {grade} の明示fyが未指定または不正です"))?;
+        Ok((value, value != standard))
+    }
+
     pub fn resolve_stb_rebar(&self, input: &StbRebarStrength) -> Result<ResolvedStrength, String> {
         if let Some(id) = input.native_material {
             let material = self
@@ -438,10 +470,45 @@ impl Model {
         };
         let value = crate::standard_material::rebar_grade_strength(grade)
             .ok_or_else(|| format!("鉄筋強度 {grade} を解決できません"))?;
+        let (value, native_override) = self.stb_yield_value(grade, value)?;
         Ok(ResolvedStrength {
             grade: grade.into(),
             source,
-            native_override: false,
+            native_override,
+            value,
+        })
+    }
+
+    /// 元鋼材部位の標準gradeと採用元。材料物性の既定復元とは別に解決する。
+    pub fn resolve_stb_steel(&self, input: &StbSteelStrength) -> Result<ResolvedStrength, String> {
+        if let Some(id) = input.native_material {
+            let value = self
+                .materials
+                .get(id.index())
+                .and_then(|m| m.fy)
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .ok_or("明示したnative鋼材のfyがありません")?;
+            return Ok(ResolvedStrength {
+                grade: input.strength.clone(),
+                source: StrengthSource::Section,
+                native_override: true,
+                value,
+            });
+        }
+        let properties = crate::standard_material::standard_material_properties(&input.strength)
+            .filter(|p| {
+                p.fc.is_none()
+                    && crate::standard_material::rebar_grade_strength(&input.strength).is_none()
+            })
+            .ok_or_else(|| format!("鋼材強度 {} を解決できません", input.strength))?;
+        let (value, native_override) = self.stb_yield_value(
+            &input.strength,
+            properties.fy.ok_or("鋼材強度がありません")?,
+        )?;
+        Ok(ResolvedStrength {
+            grade: input.strength.clone(),
+            source: StrengthSource::Section,
+            native_override,
             value,
         })
     }
@@ -470,6 +537,29 @@ impl Model {
             }
         }
         for section in &self.stb_strengths.sections {
+            for steel in &section.steel {
+                if let Err(reason) = self.resolve_stb_steel(steel) {
+                    errors.push(format!(
+                        "断面 {} / {} / {}: {reason}",
+                        section.section.0, steel.element, steel.part
+                    ));
+                }
+            }
+            let steel_values: Vec<_> = section
+                .steel
+                .iter()
+                .filter_map(|steel| self.resolve_stb_steel(steel).ok())
+                .collect();
+            if steel_values.first().is_some_and(|first| {
+                steel_values
+                    .iter()
+                    .any(|r| r.grade != first.grade || r.value != first.value)
+            }) {
+                errors.push(format!(
+                    "断面 {}: 部位別鋼材強度を現行材料消費口で縮約できません",
+                    section.section.0
+                ));
+            }
             for part in ["main", "band", "stirrup"] {
                 let resolved: Vec<_> = section
                     .reinforcement

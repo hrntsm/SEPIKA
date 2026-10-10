@@ -257,12 +257,22 @@ impl Model {
             strength_targets.push(input.target);
         }
         for input in &self.stb_strengths.sections {
-            for id in input.native_material.iter().chain(
-                input
-                    .reinforcement
-                    .iter()
-                    .filter_map(|r| r.native_material.as_ref()),
-            ) {
+            for id in input
+                .native_material
+                .iter()
+                .chain(
+                    input
+                        .reinforcement
+                        .iter()
+                        .filter_map(|r| r.native_material.as_ref()),
+                )
+                .chain(
+                    input
+                        .steel
+                        .iter()
+                        .filter_map(|r| r.native_material.as_ref()),
+                )
+            {
                 if self.materials.get(id.index()).is_none_or(|m| m.id != *id) {
                     return Err(CoreError::DanglingRef(format!("STB native材料 {}", id.0)));
                 }
@@ -1411,6 +1421,11 @@ impl Model {
         for input in &mut self.stb_strengths.sections {
             if let Some(id) = &mut input.native_material {
                 f(id);
+            }
+            for steel in &mut input.steel {
+                if let Some(id) = &mut steel.native_material {
+                    f(id);
+                }
             }
             for bar in &mut input.reinforcement {
                 if let Some(id) = &mut bar.native_material {

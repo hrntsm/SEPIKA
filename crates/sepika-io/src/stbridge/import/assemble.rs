@@ -1797,6 +1797,7 @@ fn build_sections(
         };
         strengths.bind_section(file_id, "StbSecColumn", SectionId(idx as u32));
         strengths.bind_section(file_id, "StbSecBeam", SectionId(idx as u32));
+        strengths.bind_section(file_id, "StbSecBrace", SectionId(idx as u32));
         index_map.insert(file_id, idx as u32);
     }
     if merged > 0 {

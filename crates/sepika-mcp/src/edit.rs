@@ -52,7 +52,11 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
         }
         "SetSourceStoryConcreteStrength" => {
             let source_story = value.get("source_story").and_then(serde_json::Value::as_u64).and_then(|v| u32::try_from(v).ok()).ok_or("source_story は元STB階IDが必要です")?;
-            let strength = value.get("strength").and_then(serde_json::Value::as_str).map(str::to_owned);
+            let strength = match value.get("strength").ok_or("strength は文字列またはnullが必要です")? {
+                serde_json::Value::Null => None,
+                serde_json::Value::String(s) => Some(s.clone()),
+                _ => return Err("strength は文字列またはnullが必要です".into()),
+            };
             Ok(Box::new(sepika_edit::SetSourceStoryConcreteStrength { source_story, strength }))
         }
         "SetSourceStoryNodes" => {

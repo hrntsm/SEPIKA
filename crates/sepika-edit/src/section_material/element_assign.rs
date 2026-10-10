@@ -91,7 +91,13 @@ impl EditCommand for SetSectionMaterial {
                     m.fc.map(|v| format!("Fc{v}"))
                         .unwrap_or_else(|| m.name.clone())
                 } else {
-                    m.name.clone()
+                    model
+                        .stb_strengths
+                        .materials
+                        .iter()
+                        .find(|record| record.material == m.id)
+                        .map(|record| record.grade.clone())
+                        .unwrap_or_else(|| m.name.clone())
                 }
             });
         if let Some(input) = model
@@ -121,7 +127,14 @@ impl EditCommand for SetSectionMaterial {
                         }
                     }
                 }
-                SectionMaterialRole::Steel => {}
+                SectionMaterialRole::Steel => {
+                    for steel in &mut input.steel {
+                        if let Some(grade) = &grade {
+                            steel.strength = grade.clone();
+                        }
+                        steel.native_material = self.material;
+                    }
+                }
             }
         }
         model.prepare_stb_strength_materials();

@@ -11263,6 +11263,8 @@ fn stb_strength_gui_edit_transaction_changes_result_input_and_restores_omission(
         Some(33.)
     );
     let context = egui::Context::default();
-    let _ = context.run_ui(Default::default(), |ui| { app.preparation_panel(ui); });
+    let _ = context.run_ui(Default::default(), |ui| {
+        app.preparation_panel(ui);
+    });
     std::fs::remove_file(path).unwrap();
 }

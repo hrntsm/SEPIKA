@@ -18,6 +18,7 @@ struct RawSection {
     bound: Option<SectionId>,
     concrete: Option<String>,
     bars: Vec<StbRebarStrength>,
+    steel: Vec<StbSteelStrength>,
 }
 struct RawMember {
     tag: String,
@@ -30,10 +31,24 @@ struct RawMember {
 impl StrengthInputs {
     pub(super) fn same_section_strength(&self, a: u32, b: u32) -> bool {
         let source = |id| {
-            self.sections
-                .iter()
-                .find(|s| s.id == id)
-                .map(|s| (&s.concrete, &s.bars))
+            self.sections.iter().find(|s| s.id == id).map(|s| {
+                (
+                    s.concrete.clone(),
+                    s.bars.clone(),
+                    s.steel
+                        .iter()
+                        .map(|r| {
+                            (
+                                super::super::strength_export::steel_element_key(&r.element)
+                                    .to_owned(),
+                                r.part.clone(),
+                                r.position.clone(),
+                                r.strength.clone(),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
         };
         source(a) == source(b)
     }
@@ -93,7 +108,10 @@ impl StrengthInputs {
                 .push(DiameterStrength { diameter, strength });
         } else if matches!(
             tag,
-            "StbSecColumn_RC"
+            "StbSecColumn_S"
+                | "StbSecBeam_S"
+                | "StbSecBrace_S"
+                | "StbSecColumn_RC"
                 | "StbSecColumn_SRC"
                 | "StbSecColumn_CFT"
                 | "StbSecBeam_RC"
@@ -108,6 +126,7 @@ impl StrengthInputs {
                 bound: None,
                 concrete: a.get("strength_concrete").cloned(),
                 bars: Vec::new(),
+                steel: Vec::new(),
             });
             self.current_section = Some(self.sections.len() - 1);
         } else if matches!(
@@ -135,6 +154,44 @@ impl StrengthInputs {
                 ),
             });
             self.current_member = Some(self.members.len() - 1);
+        }
+        if let Some(index) = self.current_section {
+            let is_steel = tag.starts_with("StbSecSteel")
+                || tag.starts_with("StbSecColumn_SRC_SameShape")
+                || tag.starts_with("StbSecColumn_SRC_NotSameShape")
+                || tag.starts_with("StbSecColumn_SRC_ThreeTypesShape");
+            if is_steel {
+                for key in a
+                    .names()
+                    .into_iter()
+                    .filter(|name| name.starts_with("strength_") || *name == "strength")
+                {
+                    self.sections[index].steel.push(StbSteelStrength {
+                        native_material: None,
+                        element: tag.into(),
+                        part: key.strip_prefix("strength_").unwrap_or("").into(),
+                        position: a.get("pos").cloned(),
+                        strength: a.get(key).unwrap().clone(),
+                    });
+                }
+            }
+            // 非標準SRC属性の入力を拒否せず保持するが、出力先は標準の鋼材子要素とする。
+            if matches!(tag, "StbSecColumn_SRC" | "StbSecBeam_SRC") {
+                if let Some(grade) = a.get("strength_steel").or_else(|| a.get("strength_main_S")) {
+                    let element = if tag == "StbSecColumn_SRC" {
+                        "StbSecColumn_SRC_SameShapeH"
+                    } else {
+                        "StbSecSteelBeam_SRC_Straight"
+                    };
+                    self.sections[index].steel.push(StbSteelStrength {
+                        native_material: None,
+                        element: element.into(),
+                        part: "main".into(),
+                        position: None,
+                        strength: grade.clone(),
+                    });
+                }
+            }
         }
         if tag.starts_with("StbSecBar") {
             if let Some(index) = self.current_section {
@@ -251,6 +308,7 @@ impl StrengthInputs {
                         native_material: None,
                         concrete: source.concrete.clone(),
                         reinforcement: source.bars.clone(),
+                        steel: source.steel.clone(),
                     });
                 }
             }
@@ -259,6 +317,10 @@ impl StrengthInputs {
             let source_section = self.sections.iter().any(|s| {
                 Some(s.id) == input.section
                     && s.bound.is_some()
+                    && !matches!(
+                        s.tag.as_str(),
+                        "StbSecColumn_S" | "StbSecBeam_S" | "StbSecBrace_S"
+                    )
                     && match input.tag.as_str() {
                         "StbColumn" | "StbPost" => s.tag.starts_with("StbSecColumn"),
                         "StbGirder" | "StbBeam" => s.tag.starts_with("StbSecBeam"),

@@ -377,18 +377,84 @@ fn qualified_numeric_section_id_is_rejected_without_silent_strength_binding() {
 
 #[test]
 fn wall_last_node_and_explicit_member_omission_roundtrip() {
-    let source=include_str!("../../tests/fixtures/strength_wall.stb");
-    for (member,expected) in [(None,27.),(Some("Fc36"),36.)] {
-        let source=if let Some(member)=member {source.replace("name=\"W\" id_section=\"3\" kind_structure=\"RC\"",&format!("name=\"W\" id_section=\"3\" kind_structure=\"RC\" strength_concrete=\"{member}\""))} else {source.to_owned()};
-        let mut model=import_stbridge(&source).unwrap();
-        assert_eq!(model.stb_strengths.members.len(),1);
-        let input=&model.stb_strengths.members[0];assert_eq!(input.node,sepika_core::ids::NodeId(2));
-        assert_eq!(model.resolve_stb_concrete(input).unwrap().value,expected);
-        assert_eq!(model.wall_plate_material(&model.wall_plates[0]).unwrap().fc,Some(expected));
-        model.source_stories.reverse();model.prepare_stb_strength_materials();
-        let output=export_stbridge(&model).unwrap();let again=import_stbridge(&output).unwrap();
-        assert_eq!(again.stb_strengths.members[0].concrete,member.map(str::to_owned));
-        assert_eq!(again.resolve_stb_concrete(&again.stb_strengths.members[0]).unwrap().value,expected);
-        assert_eq!(again.stb_strengths.members[0].node_order,model.stb_strengths.members[0].node_order);
+    let source = include_str!("../../tests/fixtures/strength_wall.stb");
+    for (member, expected) in [(None, 27.), (Some("Fc36"), 36.)] {
+        let source = if let Some(member) = member {
+            source.replace("name=\"W\" id_section=\"3\" kind_structure=\"RC\"",&format!("name=\"W\" id_section=\"3\" kind_structure=\"RC\" strength_concrete=\"{member}\""))
+        } else {
+            source.to_owned()
+        };
+        let mut model = import_stbridge(&source).unwrap();
+        assert_eq!(model.stb_strengths.members.len(), 1);
+        let input = &model.stb_strengths.members[0];
+        assert_eq!(input.node, sepika_core::ids::NodeId(2));
+        assert_eq!(model.resolve_stb_concrete(input).unwrap().value, expected);
+        assert_eq!(
+            model.wall_plate_material(&model.wall_plates[0]).unwrap().fc,
+            Some(expected)
+        );
+        model.source_stories.reverse();
+        model.prepare_stb_strength_materials();
+        let output = export_stbridge(&model).unwrap();
+        let again = import_stbridge(&output).unwrap();
+        assert_eq!(
+            again.stb_strengths.members[0].concrete,
+            member.map(str::to_owned)
+        );
+        assert_eq!(
+            again
+                .resolve_stb_concrete(&again.stb_strengths.members[0])
+                .unwrap()
+                .value,
+            expected
+        );
+        assert_eq!(
+            again.stb_strengths.members[0].node_order,
+            model.stb_strengths.members[0].node_order
+        );
     }
+}
+
+#[test]
+fn src_standard_steel_child_survives_and_numeric_override_is_not_exported_as_grade() {
+    let xml = include_str!("../../tests/fixtures/strength_src.stb");
+    let mut model = import_stbridge(xml).unwrap();
+    let input = &model.stb_strengths.sections[0].steel[0];
+    assert_eq!(input.strength, "SN490B");
+    assert_eq!(model.resolve_stb_steel(input).unwrap().value, 325.);
+    let steel = model
+        .section(model.elements[0].section.unwrap())
+        .unwrap()
+        .steel_material
+        .unwrap();
+    assert_eq!(model.materials[steel.index()].fy, Some(325.));
+    let output = export_stbridge(&model).unwrap();
+    assert!(output.contains("strength_main=\"SN490B\""));
+    assert!(!output.contains("strength_steel="));
+    let again = import_stbridge(&output).unwrap();
+    assert_eq!(
+        again.stb_strengths.sections[0].steel,
+        model.stb_strengths.sections[0].steel
+    );
+    assert_eq!(
+        again
+            .resolve_stb_concrete(&again.stb_strengths.members[0])
+            .unwrap()
+            .value,
+        36.
+    );
+    model.materials[steel.index()].fy = Some(320.);
+    let resolved = model
+        .resolve_stb_steel(&model.stb_strengths.sections[0].steel[0])
+        .unwrap();
+    assert!(resolved.native_override);
+    assert_eq!(resolved.value, 320.);
+    assert!(
+        matches!(export_stbridge(&model), Err(StbError::Unmappable(reason)) if reason.contains("明示鋼材fy"))
+    );
+    let unknown = import_stbridge(&xml.replace("SN490B", "SN490UNKNOWN")).unwrap();
+    assert!(unknown
+        .stb_strength_diagnostics()
+        .iter()
+        .any(|r| r.contains("SN490UNKNOWN")));
 }

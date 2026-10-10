@@ -100,7 +100,10 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     }
     for section in &model.stb_strengths.sections {
         for bar in &section.reinforcement {
-            if bar.native_material.is_some() {
+            if model
+                .resolve_stb_rebar(bar)
+                .is_ok_and(|r| r.native_override)
+            {
                 let resolved = model.resolve_stb_rebar(bar).map_err(StbError::Unmappable)?;
                 if sepika_core::standard_material::rebar_grade_strength(&resolved.grade)
                     != Some(resolved.value)
@@ -110,6 +113,28 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
                         section.section.0, resolved.grade
                     )));
                 }
+            }
+        }
+    }
+    for section in &model.stb_strengths.sections {
+        for steel in &section.steel {
+            let resolved = model
+                .resolve_stb_steel(steel)
+                .map_err(StbError::Unmappable)?;
+            if resolved.native_override
+                && sepika_core::standard_material::standard_material_properties(&resolved.grade)
+                    .filter(|p| {
+                        p.fc.is_none()
+                            && sepika_core::standard_material::rebar_grade_strength(&resolved.grade)
+                                .is_none()
+                    })
+                    .and_then(|p| p.fy)
+                    != Some(resolved.value)
+            {
+                return Err(StbError::Unmappable(format!(
+                    "断面 {} の明示鋼材fyを標準grade {} で表現できません",
+                    section.section.0, resolved.grade
+                )));
             }
         }
     }

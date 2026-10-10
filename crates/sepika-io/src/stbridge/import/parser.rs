@@ -431,7 +431,8 @@ impl StbParser {
             }
             t if t.starts_with("StbSecSteelColumn_")
                 || t.starts_with("StbSecSteelBeam_")
-                || t.starts_with("StbSecSteelBrace_") =>
+                || t.starts_with("StbSecSteelBrace_")
+                || t.starts_with("StbSecColumn_SRC_SameShape") =>
             {
                 let sname = a
                     .get("shape")
@@ -467,7 +468,16 @@ impl StbParser {
                             *steel_grade = gr;
                         }
                     }
-                    CurSec::Src { steel_name, .. } if steel_name.is_none() => *steel_name = sname,
+                    CurSec::Src {
+                        steel_name, grade, ..
+                    } => {
+                        if steel_name.is_none() {
+                            *steel_name = sname;
+                        }
+                        if grade.is_empty() {
+                            *grade = gr.unwrap_or_default();
+                        }
+                    }
                     _ => {}
                 }
             }

@@ -366,12 +366,12 @@ impl App {
     /// 残りの行が古い ID を指さないようにする）。
     fn stories_section(&mut self, ui: &mut egui::Ui) {
         if !self.core.model.stb_strengths.members.is_empty() {
-            egui::CollapsingHeader::new("STB材料強度と採用元").show(ui, |ui| {
+            egui::CollapsingHeader::new("STB強度指定と採用元").show(ui, |ui| {
                 let mut input = self.core.model.stb_strengths.clone();
                 let mut changed = false;
                 if let Some(common) = &mut input.common {
                     changed |=
-                        optional_strength_field(ui, "Common Fc指定", &mut common.strength_concrete);
+                        optional_strength_field(ui, "共通Fc指定", &mut common.strength_concrete);
                     for (index, bar) in common.reinforcement.iter_mut().enumerate() {
                         ui.push_id(("diameter_strength", index), |ui| {
                             ui.horizontal(|ui| {
@@ -386,13 +386,56 @@ impl App {
                     ui.push_id(format!("{:?}", member.target), |ui| {
                         changed |= optional_strength_field(
                             ui,
-                            &format!("{:?} Fc指定", member.target),
+                            &format!(
+                                "{} Fc指定",
+                                match member.target {
+                                    sepika_core::model::StrengthTarget::Element(id) => {
+                                        let kind = self
+                                            .core
+                                            .model
+                                            .element(id)
+                                            .map(|e| match e.kind {
+                                                sepika_core::model::ElementKind::Column => "柱",
+                                                _ => "大梁",
+                                            })
+                                            .unwrap_or("部材");
+                                        format!("{kind} ID {}", id.0)
+                                    }
+                                    sepika_core::model::StrengthTarget::Secondary(id) => self
+                                        .core
+                                        .model
+                                        .secondary_member(id)
+                                        .map(|e| format!(
+                                            "{} ID {}: {}",
+                                            match e.kind {
+                                                sepika_core::model::SecondaryMemberKind::Beam =>
+                                                    "小梁",
+                                                sepika_core::model::SecondaryMemberKind::Post =>
+                                                    "間柱",
+                                            },
+                                            id.0,
+                                            e.name
+                                        ))
+                                        .unwrap_or_else(|| format!("二次部材 ID {}", id.0)),
+                                    sepika_core::model::StrengthTarget::Slab(id) =>
+                                        format!("床 ID {}", id.0),
+                                    sepika_core::model::StrengthTarget::Wall(id) =>
+                                        format!("壁 ID {}", id.0),
+                                }
+                            ),
                             &mut member.concrete,
                         );
                     });
                 }
                 for section in &mut input.sections {
                     ui.push_id(("section_strength", section.section.0), |ui| {
+                        if let Some(sec) = self.core.model.section(section.section) {
+                            ui.label(format!(
+                                "断面 {}: {}",
+                                section.section.0,
+                                sec.display_name()
+                            ));
+                        }
                         if optional_strength_field(ui, "断面Fc指定", &mut section.concrete) {
                             section.native_material = None;
                             changed = true;
@@ -400,8 +443,17 @@ impl App {
                         for (index, bar) in section.reinforcement.iter_mut().enumerate() {
                             ui.push_id(index, |ui| {
                                 ui.label(format!(
-                                    "{} / {:?} / {}",
-                                    bar.element, bar.position, bar.part
+                                    "部位 {} / 位置 {}",
+                                    match bar.part.as_str() {
+                                        "main" => "主筋",
+                                        "2nd_main" => "副主筋",
+                                        "band" => "帯筋",
+                                        "stirrup" => "あばら筋",
+                                        "web" => "腹筋",
+                                        "bar_spacing" => "巾止筋",
+                                        other => other,
+                                    },
+                                    bar.position.as_deref().unwrap_or("全長共通")
                                 ));
                                 changed |= optional_strength_field(ui, "径指定", &mut bar.diameter);
                                 if optional_strength_field(ui, "鉄筋強度指定", &mut bar.strength)
@@ -447,7 +499,7 @@ impl App {
                                 value.source,
                                 value.value,
                                 if value.native_override {
-                                    " (native指定)"
+                                    " (明示材料指定)"
                                 } else {
                                     ""
                                 }

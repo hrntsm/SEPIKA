@@ -76,6 +76,7 @@ fn material_in_use(model: &Model, id: MaterialId) -> bool {
         .any(|m| m.material == id)
         || model.stb_strengths.sections.iter().any(|s| {
             s.native_material == Some(id)
+                || s.steel.iter().any(|r| r.native_material == Some(id))
                 || s.reinforcement
                     .iter()
                     .any(|r| r.native_material == Some(id))
