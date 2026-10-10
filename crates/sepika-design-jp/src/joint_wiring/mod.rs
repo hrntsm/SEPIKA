@@ -48,7 +48,7 @@ pub fn collect_joint_checks(
 ///
 /// `panel_moments` には、仕口パネルをモデル化した接合部で解析が出力した
 /// せん断モーメント `{MSX, MSY}` [N·mm] を節点ごとに渡す。該当する節点の
-/// S 造パネルゾーン検定は、この値の絶対値の大きい方を設計用パネルモーメント
+/// S 造パネルゾーン検定は、検討面の成分を設計用パネルモーメント
 /// `pM` に用いる。空スライス、または該当節点が含まれない場合は、
 /// 梁端モーメント・柱せん断から `pM` を組み立てる。**検定の実施自体はパネルのモデル化の有無に依らない**。
 pub fn collect_joint_checks_with_long(
@@ -95,20 +95,16 @@ pub(crate) fn collect_joint_checks_impl(
             .iter()
             .filter(|m| m.is_beam_horiz() && m.elem.nodes.contains(&nid))
             .collect();
+        let panel_moment = panel_moments
+            .iter()
+            .find(|(n, _)| *n == nid)
+            .map(|(_, m)| *m);
+
+        steel_panel::check_s_panel(model, &cols, &beams, nid, panel_moment, &mut out);
         if cols.is_empty() || beams.is_empty() {
             continue;
         }
-
-        let panel_moment = panel_moments.iter().find(|(n, _)| *n == nid).map(|(_, m)| {
-            if m[0].abs() >= m[1].abs() {
-                m[0]
-            } else {
-                m[1]
-            }
-        });
-
         rc_joint::check_rc_joint(&cols, &beams, nid, &mut out);
-        steel_panel::check_s_panel(model, &cols, &beams, nid, panel_moment, &mut out);
         src_panel::check_src_panel(&cols, &beams, nid, term, &mut out);
         cold_formed::check_cold_formed(&cols, &beams, nid, long_member_forces, &mut out);
     }

@@ -324,6 +324,235 @@ pub struct PanelJoint {
     pub has_filled_column: bool,
 }
 
+/// 局所座標のフランジ位置比較用公差 [mm]。閉区間で比較する。
+pub const FLANGE_POSITION_TOL_MM: f64 = 1e-6;
+
+/// 接合部を原点とする上・下フランジ板厚中心位置 [mm]。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BeamFlangePositions {
+    pub upper: f64,
+    pub lower: f64,
+}
+
+impl BeamFlangePositions {
+    /// 形状外寸・上下板厚・局所鉛直配置から解決する。不正寸法はエラー。
+    pub fn from_dimensions(
+        height: f64,
+        upper_tf: f64,
+        lower_tf: f64,
+        offset_z: f64,
+    ) -> Result<Self, String> {
+        if [height, upper_tf, lower_tf]
+            .iter()
+            .any(|v| !v.is_finite() || *v <= 0.0)
+            || !offset_z.is_finite()
+            || upper_tf + lower_tf >= height
+        {
+            return Err("フランジ位置には有限の正寸法・非干渉板厚・有限の局所配置が必要".into());
+        }
+        Ok(Self {
+            upper: offset_z + height / 2.0 - upper_tf / 2.0,
+            lower: offset_z - height / 2.0 + lower_tf / 2.0,
+        })
+    }
+
+    pub fn db(self) -> f64 {
+        self.upper - self.lower
+    }
+}
+
+/// 上下両方の局所位置差 [mm] が公差内なら標準形式。非有限値は対象外。
+pub fn standard_flange_differences(upper_difference: f64, lower_difference: f64) -> bool {
+    [upper_difference, lower_difference]
+        .iter()
+        .all(|v| v.is_finite() && v.abs() <= FLANGE_POSITION_TOL_MM)
+}
+
+/// 同一検討面の梁。材軸は接合部から外向き、位置は接合部原点 [mm]。
+#[derive(Clone, Debug, PartialEq)]
+pub struct PanelPlaneBeam {
+    pub element: ElemId,
+    pub outward_axis: [f64; 3],
+    pub outer_depth: Option<f64>,
+    pub flanges: Result<BeamFlangePositions, String>,
+}
+
+/// 水平検討面の正方向材軸と、その面に取り付く梁。
+#[derive(Clone, Debug, PartialEq)]
+pub struct PanelPlane {
+    pub axis: [f64; 3],
+    pub beams: Vec<PanelPlaneBeam>,
+}
+
+impl PanelPlane {
+    pub fn label(&self) -> String {
+        format!(
+            "検討面 [{:.3}, {:.3}, {:.3}]",
+            self.axis[0], self.axis[1], self.axis[2]
+        )
+    }
+
+    /// 片側梁は保持し、相対する梁の上下位置一致を確認する。
+    pub fn standard_applicability(&self, node: NodeId) -> Result<(), String> {
+        for beam in &self.beams {
+            beam.flanges.as_ref().map_err(|reason| {
+                format!(
+                    "接合部 ID {} のパネル未算定: 梁 ID {} {}: {reason}",
+                    node.0,
+                    beam.element.0,
+                    self.label()
+                )
+            })?;
+        }
+        if self.beams.len() > 2
+            || (self.beams.len() == 2
+                && geom::vec3::dot(self.beams[0].outward_axis, self.beams[1].outward_axis) >= 0.0)
+        {
+            return Err(format!(
+                "接合部 ID {} のパネル未算定: {} 同じ側の複数梁の標準形式は未対応",
+                node.0,
+                self.label()
+            ));
+        }
+        if let [left, right] = self.beams.as_slice() {
+            let a = *left.flanges.as_ref().unwrap();
+            let b = *right.flanges.as_ref().unwrap();
+            let du = a.upper - b.upper;
+            let dl = a.lower - b.lower;
+            if !standard_flange_differences(du, dl) {
+                return Err(format!("接合部 ID {} のパネル未算定: {} 梁 ID {} db={} mm / 梁 ID {} db={} mm、上位置差={} mm、下位置差={} mm、外寸差={} mm、db差={} mm。段違い接合の耐力・剛性式は未対応", node.0, self.label(), left.element.0, a.db(), right.element.0, b.db(), du, dl, left.outer_depth.unwrap_or(0.0)-right.outer_depth.unwrap_or(0.0), a.db()-b.db()));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// 標準形式の方向確認用の無次元数値公差。施工・設計の傾斜許容値ではない。
+pub const PANEL_DIRECTION_TOL: f64 = 1e-12;
+
+fn model_beam_flanges(model: &Model, beam: &ElementData) -> Result<BeamFlangePositions, String> {
+    let sec = model.element_section(beam).ok_or("断面未設定")?;
+    beam_panel_depth(sec)?;
+    let ex = member_unit_axis(model, beam).ok_or("梁材軸未解決")?;
+    if !ex[2].is_finite() || ex[2].abs() > PANEL_DIRECTION_TOL {
+        return Err("勾配梁・鉛直Girderのフランジ位置と標準形式は未対応（材軸水平が必要）".into());
+    }
+    let reject_ex = |v| geom::vec3::sub(v, geom::vec3::scale(ex, geom::vec3::dot(v, ex)));
+    let mut ey = reject_ex(beam.local_axis.ref_vector);
+    let mut length = geom::vec3::norm(ey);
+    if length <= 1e-12 {
+        ey = reject_ex(if ex[0].abs() < 0.9 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        });
+        length = geom::vec3::norm(ey);
+    }
+    if !length.is_finite() || length <= 1e-12 {
+        return Err("梁せい方向未解決".into());
+    }
+    ey = geom::vec3::scale(ey, 1.0 / length);
+    if ey[0].abs() > PANEL_DIRECTION_TOL
+        || ey[1].abs() > PANEL_DIRECTION_TOL
+        || (ey[2].abs() - 1.0).abs() > PANEL_DIRECTION_TOL
+    {
+        return Err(
+            "横倒し・斜め断面回転のフランジ位置と標準形式は未対応（直交化した梁せい方向±Zが必要）"
+                .into(),
+        );
+    }
+    let (h, mut upper, mut lower) = match sec.shape {
+        Some(SectionShape::SteelH {
+            height,
+            flange_thick,
+            ..
+        }) => (height, flange_thick, flange_thick),
+        Some(SectionShape::SteelBuiltH {
+            height,
+            upper_thick,
+            lower_thick,
+            ..
+        }) => (height, upper_thick, lower_thick),
+        _ => unreachable!(),
+    };
+    if ey[2] < 0.0 {
+        std::mem::swap(&mut upper, &mut lower);
+    }
+    BeamFlangePositions::from_dimensions(h, upper, lower, 0.0)
+}
+
+/// 相対する材軸で梁を検討面へ分ける。端部反転・要素順は結果に影響しない。
+pub fn panel_joint_planes<'a>(
+    model: &Model,
+    node: NodeId,
+    members: impl IntoIterator<Item = &'a ElementData>,
+) -> Vec<PanelPlane> {
+    let mut beams: Vec<_> = members
+        .into_iter()
+        .filter(|e| {
+            e.nodes.iter().take(2).any(|n| *n == node)
+                && member_orientation(model, e) == Some(MemberOrientation::Beam)
+        })
+        .collect();
+    beams.sort_by_key(|e| e.id);
+    let mut planes: Vec<PanelPlane> = Vec::new();
+    for beam in beams {
+        let mut outward_axis = member_unit_axis(model, beam).unwrap_or([0.0; 3]);
+        if beam.nodes[0] != node {
+            outward_axis = outward_axis.map(|v| -v);
+        }
+        let horizontal_length = outward_axis[0].hypot(outward_axis[1]);
+        let mut axis = if horizontal_length > 1e-12 {
+            [
+                outward_axis[0] / horizontal_length,
+                outward_axis[1] / horizontal_length,
+                0.0,
+            ]
+        } else {
+            outward_axis
+        };
+        if axis
+            .iter()
+            .find(|v| v.abs() > 1e-12)
+            .is_some_and(|v| *v < 0.0)
+        {
+            axis = axis.map(|v| -v);
+        }
+        axis = axis.map(|v| if v.abs() < 1e-12 { 0.0 } else { v });
+        let flanges = model_beam_flanges(model, beam);
+        let outer_depth = model.element_section(beam).and_then(|sec| match sec.shape {
+            Some(
+                SectionShape::SteelH { height, .. } | SectionShape::SteelBuiltH { height, .. },
+            ) => Some(height),
+            _ => None,
+        });
+        let entry = PanelPlaneBeam {
+            element: beam.id,
+            outward_axis,
+            outer_depth,
+            flanges,
+        };
+        if let Some(plane) = planes
+            .iter_mut()
+            .find(|p| geom::vec3::dot(p.axis, axis) > 1.0 - 1e-12)
+        {
+            plane.beams.push(entry);
+        } else {
+            planes.push(PanelPlane {
+                axis,
+                beams: vec![entry],
+            });
+        }
+    }
+    planes.sort_by(|a, b| {
+        a.axis[0]
+            .total_cmp(&b.axis[0])
+            .reverse()
+            .then(a.axis[1].total_cmp(&b.axis[1]))
+    });
+    planes
+}
+
 /// 節点 `node` に仕口パネルを設けられるか判定し、諸元を解決する。
 ///
 /// `members` は当該節点へ接続する要素（隣接マップを持つ呼び出し側はそれを渡し、
@@ -344,13 +573,12 @@ pub fn resolve_panel_joint<'a>(
         if !e.nodes.iter().take(2).any(|n| *n == node) {
             continue;
         }
-        if !is_horizontal_or_vertical_member(model, e) {
-            continue;
-        }
         match member_orientation(model, e) {
-            Some(MemberOrientation::Column) => columns.push(e),
+            Some(MemberOrientation::Column) if is_horizontal_or_vertical_member(model, e) => {
+                columns.push(e)
+            }
             Some(MemberOrientation::Beam) => beams.push(e),
-            None => {}
+            _ => {}
         }
     }
     if columns.is_empty() || beams.is_empty() {
@@ -407,10 +635,14 @@ pub fn resolve_panel_joint<'a>(
     }
     if !reasons.is_empty() {
         return Err(format!(
-            "接合部 ID {} のパネル未算定: {}。同一面・直交別面の分離と段違い標準形式の判定は未対応",
+            "接合部 ID {} のパネル未算定: {}",
             node.0,
             reasons.join(" / ")
         ));
+    }
+
+    for plane in panel_joint_planes(model, node, beams.iter().copied()) {
+        plane.standard_applicability(node)?;
     }
 
     let geometry_of = |e: &&ElementData| section_of(e).and_then(PanelGeometry::from_column);
@@ -765,7 +997,11 @@ mod tests {
             nodes: smallvec::smallvec![NodeId(n0), NodeId(n1)],
             section: Some(crate::ids::SectionId(sec)),
             local_axis: crate::model::LocalAxis {
-                ref_vector: [0.0, 1.0, 0.0],
+                ref_vector: if sec == 1 {
+                    [0.0, 1.0, 0.0]
+                } else {
+                    [0.0, 0.0, 1.0]
+                },
             },
             end_cond: [
                 crate::model::EndCondition::Fixed,
@@ -1012,6 +1248,7 @@ mod tests {
         m.nodes.push(node(3, [4000.0, 0.0, 6000.0]));
         let mut diagonal_section = m.sections[0].clone();
         diagonal_section.id = SectionId(2);
+        diagonal_section.frame_use = Some(FrameSectionUse::Brace);
         diagonal_section.depth = 2000.0;
         m.sections.push(diagonal_section);
         m.elements.push(member(2, 0, 3, 2));
@@ -1246,5 +1483,177 @@ mod tests {
             web_thick: 12.0,
         });
         assert!(beam_panel_depth(&section).is_err());
+    }
+    #[test]
+    fn panel_505_pure_flange_positions_and_closed_tolerance() {
+        let delta = FLANGE_POSITION_TOL_MM;
+        for sign in [-1.0, 1.0] {
+            for factor in [0.5, 1.0, 2.0] {
+                assert_eq!(
+                    standard_flange_differences(sign * factor * delta, 0.0),
+                    factor <= 1.0
+                );
+                assert_eq!(
+                    standard_flange_differences(0.0, sign * factor * delta),
+                    factor <= 1.0
+                );
+            }
+        }
+        let h600 = BeamFlangePositions::from_dimensions(600.0, 20.0, 20.0, 0.0).unwrap();
+        assert_eq!(
+            h600,
+            BeamFlangePositions {
+                upper: 290.0,
+                lower: -290.0
+            }
+        );
+        assert_eq!(h600.db(), 580.0);
+        for (h, offset, du, dl) in [
+            (600.0, 20.0, -20.0, -20.0),
+            (500.0, 0.0, 50.0, -50.0),
+            (500.0, 50.0, 0.0, -100.0),
+        ] {
+            let b = BeamFlangePositions::from_dimensions(h, 20.0, 20.0, offset).unwrap();
+            assert_eq!((h600.upper - b.upper, h600.lower - b.lower), (du, dl));
+            assert!(!standard_flange_differences(du, dl));
+        }
+        for depth_difference in [149.0, 150.0, 151.0] {
+            let b = BeamFlangePositions::from_dimensions(600.0 - depth_difference, 20.0, 20.0, 0.0)
+                .unwrap();
+            assert!(!standard_flange_differences(
+                h600.upper - b.upper,
+                h600.lower - b.lower
+            ));
+        }
+        let thicker = BeamFlangePositions::from_dimensions(610.0, 30.0, 30.0, 0.0).unwrap();
+        assert_eq!(h600, thicker);
+        assert!(!standard_flange_differences(f64::NAN, 0.0));
+    }
+
+    #[test]
+    fn panel_505_model_pairs_are_local_and_independent_of_order_and_ends() {
+        let mut m = joint_model(h_beam(), 600.0, h_col());
+        m.nodes.push(node(3, [-6000.0, 0.0, 3000.0]));
+        m.elements.push(member(2, 3, 0, 0));
+        assert!(resolve_panel_joint(&m, NodeId(0), &m.elements).is_ok());
+        let mut small = m.sections[0].clone();
+        small.id = SectionId(2);
+        if let Some(SectionShape::SteelH { height, .. }) = &mut small.shape {
+            *height = 500.0;
+        }
+        m.sections.push(small);
+        m.elements[2].section = Some(SectionId(2));
+        let reason = resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err();
+        assert!(reason.contains("上位置差=50 mm"));
+        assert!(reason.contains("下位置差=-50 mm"));
+        let planes = panel_joint_planes(&m, NodeId(0), &m.elements);
+        m.elements.reverse();
+        for e in &mut m.elements {
+            e.nodes.reverse();
+        }
+        for n in &mut m.nodes {
+            for c in &mut n.coord {
+                *c += 1e12;
+            }
+        }
+        assert_eq!(panel_joint_planes(&m, NodeId(0), &m.elements), planes);
+        assert_eq!(
+            resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err(),
+            reason
+        );
+        m.nodes[3].coord = [1e12, 1e12 + 6000.0, 1e12 + 3000.0];
+        assert_eq!(panel_joint_planes(&m, NodeId(0), &m.elements).len(), 2);
+        assert!(resolve_panel_joint(&m, NodeId(0), &m.elements).is_ok());
+    }
+    #[test]
+    fn panel_505_orientation_retains_unsupported_girders_and_orthogonalizes_reference() {
+        let mut m = joint_model(h_beam(), 600.0, h_col());
+        m.elements[0].local_axis.ref_vector = [1.0, 0.0, 1.0];
+        assert!(resolve_panel_joint(&m, NodeId(0), &m.elements)
+            .unwrap()
+            .is_some());
+        for reference in [[0.0, 1.0, 0.0], [0.0, 1.0, 1.0], [1.0, 0.0, 0.0]] {
+            m.elements[0].local_axis.ref_vector = reference;
+            let reason = resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err();
+            assert!(reason.contains("横倒し・斜め断面回転"));
+            assert_eq!(
+                panel_joint_planes(&m, NodeId(0), &m.elements)[0]
+                    .beams
+                    .len(),
+                1
+            );
+            m.elements[0].nodes.reverse();
+            assert_eq!(
+                resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err(),
+                reason
+            );
+        }
+        m.elements[0].local_axis.ref_vector = [0.0, 0.0, 1.0];
+        for far in [
+            [6000.0, 0.0, 3600.0],
+            [6000.0, 0.0, 9000.0],
+            [0.0, 0.0, 9000.0],
+        ] {
+            m.nodes[1].coord = far;
+            assert!(resolve_panel_joint(&m, NodeId(0), &m.elements)
+                .unwrap_err()
+                .contains("勾配梁・鉛直Girder"));
+            assert_eq!(
+                panel_joint_planes(&m, NodeId(0), &m.elements)[0]
+                    .beams
+                    .len(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn panel_505_reversed_built_h_maps_flange_thicknesses_to_global_up_and_down() {
+        let shape = SectionShape::SteelBuiltH {
+            height: 600.0,
+            upper_width: 200.0,
+            upper_thick: 20.0,
+            lower_width: 250.0,
+            lower_thick: 30.0,
+            web_thick: 12.0,
+        };
+        let mut m = joint_model(shape, 600.0, h_col());
+        let upright = panel_joint_planes(&m, NodeId(0), &m.elements)[0].beams[0]
+            .flanges
+            .clone()
+            .unwrap();
+        assert_eq!(
+            upright,
+            BeamFlangePositions {
+                upper: 290.0,
+                lower: -285.0
+            }
+        );
+        m.elements[0].local_axis.ref_vector = [0.0, 0.0, -1.0];
+        let reversed = panel_joint_planes(&m, NodeId(0), &m.elements)[0].beams[0]
+            .flanges
+            .clone()
+            .unwrap();
+        assert_eq!(
+            reversed,
+            BeamFlangePositions {
+                upper: 285.0,
+                lower: -290.0
+            }
+        );
+        assert_eq!(upright.db(), reversed.db());
+        m.elements[0].nodes.reverse();
+        assert_eq!(
+            panel_joint_planes(&m, NodeId(0), &m.elements)[0].beams[0]
+                .flanges
+                .clone()
+                .unwrap(),
+            reversed
+        );
+        m.nodes.push(node(3, [-6000.0, 0.0, 3000.0]));
+        m.elements.push(member(2, 3, 0, 0));
+        let reason = resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err();
+        assert!(reason.contains("上位置差=-5 mm"));
+        assert!(reason.contains("下位置差=-5 mm"));
     }
 }

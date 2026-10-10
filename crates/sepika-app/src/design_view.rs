@@ -323,7 +323,13 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         ui.add_space(12.0);
         ui.strong("接合部・耐震壁の検定");
         let ng = joint_checks.iter().filter(|j| j.ok == Some(false)).count();
-        ui.label(format!("{} 箇所を検定、NG {} 件", joint_checks.len(), ng));
+        let checked = joint_checks.iter().filter(|j| j.ok.is_some()).count();
+        ui.label(format!(
+            "検定済み {} 面・項目、検定不能 {} 面・項目、NG {} 件",
+            checked,
+            joint_checks.len() - checked,
+            ng
+        ));
         crate::table_util::standard_table(
             ui,
             "joint_checks",

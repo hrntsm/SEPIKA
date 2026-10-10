@@ -79,7 +79,11 @@ fn member(id: u32, n0: u32, n1: u32, sec: u32, rigid: RigidZone) -> ElementData 
         nodes: smallvec::smallvec![NodeId(n0), NodeId(n1)],
         section: Some(SectionId(sec)),
         local_axis: LocalAxis {
-            ref_vector: [0.0, 1.0, 0.0],
+            ref_vector: if sec == 1 {
+                [0.0, 1.0, 0.0]
+            } else {
+                [0.0, 0.0, 1.0]
+            },
         },
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
@@ -403,4 +407,41 @@ fn panel_504_standard_solver_rejects_unsupported_manual_panel_with_reason() {
         .err()
         .expect("未対応の手動パネルを剛性算定成功と扱わない");
     assert!(error.to_string().contains(&expected));
+}
+
+#[test]
+fn panel_505_public_solver_rejects_old_or_manual_staggered_panel() {
+    let mut model = l_frame(true);
+    let mut section = model.sections[0].clone();
+    section.id = SectionId(2);
+    section.shape = Some(SectionShape::SteelH {
+        height: 500.0,
+        width: 200.0,
+        web_thick: 11.0,
+        flange_thick: 17.0,
+        root_r: Some(0.0),
+    });
+    model.sections.push(section);
+    let mut far = model.nodes[1].clone();
+    far.id = NodeId(model.nodes.len() as u32);
+    far.coord[0] = -6000.0;
+    model.nodes.push(far.clone());
+    let mut other = model.elements[0].clone();
+    other.id = ElemId(model.elements.len() as u32);
+    other.section = Some(SectionId(2));
+    other.nodes = smallvec::smallvec![far.id, NodeId(0)];
+    model.elements.push(other);
+    let reason = sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
+        .unwrap_err();
+    assert!(reason.contains("上位置差=50 mm"));
+    for mode in [
+        sepika_core::model::PanelZoneMode::Model,
+        sepika_core::model::PanelZoneMode::None,
+    ] {
+        model.panel_zone = mode;
+        let error = sepika_solver::statics::analysis::Analysis::prepare(&model)
+            .err()
+            .expect("旧/手動パネルは解析不可");
+        assert!(error.to_string().contains(&reason));
+    }
 }
