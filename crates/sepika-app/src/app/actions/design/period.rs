@@ -33,7 +33,8 @@ impl App {
                     .and_then(|m| m.period.first().copied())
                     .filter(|t| t.is_finite() && *t > 0.0)
                     .ok_or_else(|| {
-                        "固有値解析の有効な一次周期がありません。固有値解析を再実行してください。".into()
+                        "固有値解析の有効な一次周期がありません。固有値解析を再実行してください。"
+                            .into()
                     })
             }
         }
@@ -50,14 +51,33 @@ mod tests {
         app.load_model(crate::sample::portal_frame());
         app.generate_stories_action();
         app.core.analysis_cfg.ai_mode = AiMode::SemiPrecise;
-        assert!(app.design_seismic_period().unwrap_err().contains("入力識別情報"));
+        assert!(app
+            .design_seismic_period()
+            .unwrap_err()
+            .contains("入力識別情報"));
         app.run_eigen(1);
-        assert!(app.core.scoped.last_error.is_none(), "{:?}", app.core.scoped.last_error);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
         assert!(app.design_seismic_period().unwrap() > 0.0);
         app.core.model.materials[0].density *= 0.9;
-        assert!(app.design_seismic_period().unwrap_err().contains("一致しません"));
+        assert!(app
+            .design_seismic_period()
+            .unwrap_err()
+            .contains("一致しません"));
         app.core.model.materials[0].density /= 0.9;
-        app.core.scoped.results.as_mut().unwrap().input_records.clear();
-        assert!(app.design_seismic_period().unwrap_err().contains("入力識別情報"));
+        app.core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .input_records
+            .clear();
+        assert!(app
+            .design_seismic_period()
+            .unwrap_err()
+            .contains("入力識別情報"));
     }
 }

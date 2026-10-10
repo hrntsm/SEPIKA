@@ -8628,7 +8628,10 @@ fn test_run_preparation_populates_result() {
 
     // Ai 分布（略算周期）。1 層なので α=Ai=1。Ci・Qi の式はここで再計算しない
     // （表示と解析入力の一致は `test_preparation_ai_matches_synced_seismic_case` で確認する）。
-    let sm = prep.seismic.as_ref().expect("Ai 分布が算定されるはず");
+    let sm = prep
+        .seismic
+        .as_ref()
+        .unwrap_or_else(|| panic!("Ai 分布: {:?}", prep.seismic_note));
     assert_eq!(sm.rows.len(), 1);
     assert!((sm.rows[0].alpha - 1.0).abs() < 1e-9);
     assert!((sm.rows[0].ai - 1.0).abs() < 1e-9);
@@ -11200,4 +11203,115 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
         .as_ref()
         .unwrap()
         .contains("未割当"));
+}
+
+mod seismic_freshness_fixture {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../sepika-job/tests/fixtures/seismic_freshness.rs"
+    ));
+}
+
+#[test]
+fn edited_density_finish_and_seismic_live_refresh_real_ex_without_preparation_button() {
+    use sepika_core::model::{AreaLoad, SlabUsage};
+    let mut app = App::default();
+    app.load_model(seismic_freshness_fixture::two_storeys());
+    app.run_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    for (density, finish, seismic_live) in [
+        (2.6e-9, 0.0, 0.0),
+        (2.6e-9, 0.001, 0.0),
+        (2.6e-9, 0.001, 0.0005),
+    ] {
+        app.core.model.materials[0].density = density;
+        for slab in &mut app.core.model.slabs {
+            slab.plate.loads = vec![AreaLoad {
+                kind: "DL".into(),
+                value: finish,
+            }];
+            slab.plate.usage = Some(SlabUsage::Custom {
+                floor: 0.005,
+                beam: 0.004,
+                frame: 0.003,
+                seismic: seismic_live,
+            });
+        }
+        app.run_seismic(SeismicDir::X);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let expected = seismic_freshness_fixture::expected_weights(density, finish, seismic_live);
+        for (layer, weight) in app.core.model.layers().iter().zip(expected) {
+            assert!(
+                (layer.weight.unwrap() - weight).abs() < 1e-7,
+                "{layer:?} / {weight}"
+            );
+        }
+        let upper_alpha = expected[1] / expected.iter().sum::<f64>();
+        let upper_ai = 1.0 + (1.0 / upper_alpha.sqrt() - upper_alpha) * 0.4;
+        for (name, axis) in [(EX_CASE_NAME, 0), (EY_CASE_NAME, 1)] {
+            let loads = &app
+                .core
+                .model
+                .load_cases
+                .iter()
+                .find(|case| case.name == name)
+                .unwrap()
+                .nodal;
+            assert!(
+                (loads.iter().map(|load| load.values[axis]).sum::<f64>()
+                    - 0.2 * expected.iter().sum::<f64>())
+                .abs()
+                    < 1e-7
+            );
+            assert!((loads[1].values[axis] - 0.2 * upper_ai * expected[1]).abs() < 1e-7);
+        }
+        assert!(app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .seismic(SeismicDir::X)
+            .is_some());
+        let revision = app.core.scoped.undo.revision();
+        let record = app.core.model.seismic_weight_generation.clone();
+        app.run_seismic(SeismicDir::Y);
+        app.run_preparation();
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        assert_eq!(app.core.model.seismic_weight_generation, record);
+        app.core.model.stories[1].name = "表示名".into();
+        app.sync_auto_load_cases_action();
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        assert_eq!(app.core.model.seismic_weight_generation, record);
+    }
+}
+
+#[test]
+fn freshness_preparation_undo_and_saved_output_tampering_are_detected() {
+    let mut app = App::default();
+    app.load_model(seismic_freshness_fixture::two_storeys());
+    app.run_preparation();
+    let before = app.core.model.clone();
+    app.core.model.materials[0].density = 2.6e-9;
+    app.sync_auto_load_cases_action();
+    let fresh = app.core.model.clone();
+    app.core.scoped.undo.undo(&mut app.core.model);
+    assert_eq!(app.core.model.stories, before.stories);
+    assert_eq!(app.core.model.load_cases, before.load_cases);
+    app.core.scoped.undo.redo(&mut app.core.model);
+    assert!(app.core.model.eq_ignoring_dofmap(&fresh));
+    let bytes = rmp_serde::to_vec_named(&app.core.model).unwrap();
+    app.core.model = rmp_serde::from_slice(&bytes).unwrap();
+    app.core.model.stories[1].seismic_weight = Some(1.0);
+    app.sync_auto_load_cases_action();
+    assert_eq!(app.core.model.stories, fresh.stories);
+    assert_eq!(app.core.model.load_cases, fresh.load_cases);
 }

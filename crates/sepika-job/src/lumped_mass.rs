@@ -33,6 +33,7 @@ pub struct LumpedMassBuildInput<'a> {
 
 /// ダンパー指定・生成質量の整合を検証し、質点系を生成する。不備は `InvalidInput`。
 pub fn build_lumped_mass(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
+    crate::weight_preparation::require_current_generated_mass(inp.model)?;
     inp.model
         .validate_damper_mass_placement()
         .map_err(JobError::InvalidInput)?;
