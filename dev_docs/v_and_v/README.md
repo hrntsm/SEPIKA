@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [床板の同期物理質量_Issue583_2026-10.md](床板の同期物理質量_Issue583_2026-10.md) | 両形状・材料由来physical・同期置換・仕上LL/先端保持・STB優先・層モデル・Undo/鮮度 | 🔶（直接Verification、最終head全CI・freshレビュー後続、実験未） |
 | [鋼床板の高密度防護_Issue581_2026-10.md](鋼床板の高密度防護_Issue581_2026-10.md) | 囲み/取付き・境界・設計拒否/LL・STB優先・共通準備/GUI/MCP | 🔶（床板階physical質量は別課題#583、最終headゲート未完） |
 | [参照鋼の高密度防護_Issue501_2026-10.md](参照鋼の高密度防護_Issue501_2026-10.md) | 境界/単位・参照対象・設計拒否/物理許可・共通準備/旧Auto失効・GUI/MCP/Undo | 🔶（同コード公開全構成成功、最終headゲート後続。CFTは柱専用、実験Validationは対象外） |
 | [標準強度_Issue520_2026-10.md](標準強度_Issue520_2026-10.md) | 標準2.0.2強度の元省略・優先解決・径別/部位別・編集/保存/出力 | ✅（Scope内強度Verification、全相互運用/Validationは未対応） |
@@ -188,6 +189,7 @@
 | 9 | 固有値解析 | sepika-solver | eigen.rs | `test_1dof_period` | P2 | ✅ |
 | 10 | 地震力標準式・適用診断 | sepika-load / sepika-solver / sepika-app / sepika-mcp | ai.rs / statics/analysis/seismic.rs / app/tests.rs / design/holding.rs / nonlinear/pushover/driver.rs / server.rs | [Issue486の独立期待値・入口対応表](地震力標準式と適用診断_Issue486_2026-10.md) | P2 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |
 | 10b | 参照鋼の設計自重密度防護 | sepika-core / sepika-load / sepika-job / sepika-app / sepika-mcp | material.rs、self_weight_calc.rs、beam_design.rs、wall_plate_load.rs、wall_attached.rs、prepare.rs | [Issue501の独立期待値・実入口](参照鋼の高密度防護_Issue501_2026-10.md#独立期待値と直接試験) | 横断 | 🔶（同コード公開全構成成功、最終headゲート後続、実験未） |
+| 10d | 床板の同期物理質量 | sepika-core / sepika-load / sepika-job / sepika-app | slab.rs、slab_load.rs、story_gen/generate.rs | [Issue583の独立期待値・実入口](床板の同期物理質量_Issue583_2026-10.md#対象と独立期待値) | 横断 | 🔶（全CI・freshレビュー後続、実験未） |
 | 10c | 鋼床板の設計自重密度防護 | sepika-core / sepika-load / sepika-job / sepika-app / sepika-mcp | slab.rs、floor/mod.rs、auto_loads.rs、story_gen/generate.rs、app/actions/design/check.rs | [Issue581の独立期待値・実入口](鋼床板の高密度防護_Issue581_2026-10.md#独立期待値と直接試験) | 横断 | 🔶（階physicalは別課題#583、最終headゲート未完、実験未） |
 | 10a | 地震重量鮮度・共通準備 | sepika-core / sepika-load / sepika-job / sepika-app / sepika-mcp | weight_preparation.rs / prepare.rs / actions/loads.rs / period.rs / server.rs | [Issue439の実入口試験表](地震重量の鮮度と共通準備_Issue439_2026-10.md#独立期待値と直接試験) | 横断 | 🔶（入口Verification、法適用・実測は別） |
 | 11 | 床荷重分割 | sepika-load / sepika-solver | floor/{mod,polygon}.rs / statics/analysis/tests.rs | `polygon::verification::*` / `distribution_verification::*` / `floor::tests::*` / `test_model_issues_warns_floating_plate`（正当な水平全周支持床の警告と解析前チェック）。幾何Verification済み（台形は[Issue438検証](凸台形の独立幾何と格子差_Issue438_2026-10.md)）、実験Validation未実施 | P2 | 🔶 |

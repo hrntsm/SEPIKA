@@ -549,9 +549,6 @@ fn generate_stories_impl(
             node_mass_equiv.copy_from_slice(&gravity_weight);
         }
         SelfWeightMode::SyncedGravityCases => {
-            for slab in &model.slabs {
-                crate::floor::distribute_slab(model, slab).map_err(|e| e.to_string())?;
-            }
             // 重力ケースに含まれる設計自重（`design_sw`）を物理質量相当（`physical_sw`）
             // へ置換する。重力ケースに設計自重が含まれないモデルでは置換後の質量が
             // 負になるため、clamp で隠さずエラーにする（質量の欠落・過小評価の防止）。
@@ -569,6 +566,11 @@ fn generate_stories_impl(
             )?;
             crate::wall_plate_load::accumulate_wall_and_secondary_dl_mass_equiv_resolved(
                 &secondary_only,
+                &mut physical_sw,
+            )?;
+            crate::slab_load::accumulate_synced_self_weight(
+                model,
+                &mut design_sw,
                 &mut physical_sw,
             )?;
             for i in 0..model.nodes.len() {

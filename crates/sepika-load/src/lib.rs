@@ -9,6 +9,7 @@ pub mod floor;
 pub mod live_load;
 pub mod secondary;
 pub mod self_weight;
+pub mod slab_load;
 pub mod story_gen;
 pub mod wall_attached;
 pub mod wall_expand;
