@@ -40,6 +40,10 @@ pub fn nonlinear_input_issues_for_kind(
 ) -> Vec<String> {
     let mut issues = Vec::new();
     for elem in &model.elements {
+        if let Some(issue) = super::springs::rc_reference_target_issue(elem, model) {
+            issues.push(format!("部材 ID {} のRC梁基準接続: {issue}", elem.id.0));
+            continue;
+        }
         let issue = match elem.kind {
             ElementKind::Wall => {
                 crate::wall::wall_element::WallElement::wall_shear_capacity_issue(elem, model)

@@ -183,6 +183,9 @@ pub fn build_nonlinear_behavior(
     basis: StrengthBasis,
     kind: AnalysisKind,
 ) -> Box<dyn ElementBehavior> {
+    if let Some(issue) = springs::rc_reference_target_issue(data, model) {
+        panic!("部材 ID {} のRC梁基準接続: {issue}", data.id.0);
+    }
     match data.kind {
         ElementKind::Beam => {
             if let Some(axis) = crate::wall::side_column::wall_side_column_release(data, model) {

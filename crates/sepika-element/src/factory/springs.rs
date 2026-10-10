@@ -365,11 +365,26 @@ fn rc_reference_crack_moment(data: &ElementData, model: &Model) -> Result<f64, S
     Ok(mc)
 }
 
+pub(super) fn rc_reference_target_issue(data: &ElementData, model: &Model) -> Option<String> {
+    if model.member_rc_beam_reference(data.id).is_some()
+        && (!uses_rc_alpha_reference(data, model)
+            || !super::hinge_view::resolves_to_concentrated_spring(data, model))
+    {
+        return Some(
+            "指定RC梁基準は矩形RC梁の材端集中ばね専用です。現在の要素・断面・応力評価方式では使用できません".into(),
+        );
+    }
+    None
+}
+
 pub(super) fn rc_reference_issue(
     data: &ElementData,
     model: &Model,
     rule: HysteresisModel,
 ) -> Option<String> {
+    if let Some(issue) = rc_reference_target_issue(data, model) {
+        return Some(issue);
+    }
     if !uses_rc_alpha_reference(data, model)
         || !super::hinge_view::resolves_to_concentrated_spring(data, model)
     {

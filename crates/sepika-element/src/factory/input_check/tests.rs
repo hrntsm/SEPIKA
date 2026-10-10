@@ -1010,3 +1010,95 @@ fn unsupported_concentrated_rc_law_never_falls_through_to_takeda_without_basis()
     assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::TimeHistory).is_ok());
     assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::Incremental).is_err());
 }
+
+#[test]
+fn explicit_rc_basis_rejects_every_other_resolved_element_path() {
+    use sepika_core::model::AnalysisKind;
+    let base = explicit_rc_reference_fixture();
+    let mut variants = Vec::new();
+    for regime in [ForceRegime::AxialBendingInteract, ForceRegime::Auto] {
+        let mut model = base.clone();
+        model.elements[0].force_regime = regime;
+        variants.push(model);
+    }
+    for element_kind in [
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+        ElementKind::Shell,
+        ElementKind::Wall,
+        ElementKind::PanelZone,
+        ElementKind::Brace {
+            tension_only: false,
+        },
+        ElementKind::NodalSpring,
+        ElementKind::Isolator,
+        ElementKind::Damper,
+    ] {
+        let mut model = base.clone();
+        model.elements[0].kind = element_kind;
+        variants.push(model);
+    }
+    let mut column = base.clone();
+    column.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    variants.push(column);
+    for model in variants {
+        for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+            let reason = ensure_nonlinear_input_for_kind(&model, kind).unwrap_err();
+            assert!(reason.contains("材端集中ばね専用"), "{reason}");
+            assert_eq!(public_generation_diagnostic_for_kind(&model, kind), reason);
+            let view = crate::factory::build_hinge_view(
+                &model.elements[0],
+                &model,
+                crate::factory::StrengthBasis::Nominal,
+                kind,
+                0.0,
+                8,
+                24,
+            )
+            .unwrap();
+            assert!(view.backbone.is_none());
+            assert!(view.total_backbone.is_none());
+            assert!(view.mn_surface.is_none());
+            assert!(view
+                .unavailability_reason
+                .unwrap()
+                .contains("材端集中ばね専用"));
+        }
+    }
+}
+
+#[test]
+fn unspecified_rc_basis_preserves_the_existing_fiber_path() {
+    use sepika_core::model::AnalysisKind;
+    let mut model = explicit_rc_reference_fixture();
+    model.set_member_rc_beam_reference(ElemId(0), None);
+    for element_kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        model.elements[0].kind = element_kind;
+        model.elements[0].force_regime = ForceRegime::AxialBendingInteract;
+        for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+            assert!(ensure_nonlinear_input_for_kind(&model, kind).is_ok());
+            let view = crate::factory::build_hinge_view(
+                &model.elements[0],
+                &model,
+                crate::factory::StrengthBasis::Nominal,
+                kind,
+                0.0,
+                8,
+                24,
+            )
+            .unwrap();
+            assert!(view.unavailability_reason.is_none());
+            assert!(view.mn_surface.is_some());
+            let _element = crate::factory::build_nonlinear_behavior(
+                &model.elements[0],
+                &model,
+                crate::factory::StrengthBasis::Nominal,
+                kind,
+            );
+        }
+    }
+}

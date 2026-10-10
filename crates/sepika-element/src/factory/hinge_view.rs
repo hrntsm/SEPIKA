@@ -77,6 +77,24 @@ pub fn build_hinge_view(
     n_alpha: usize,
     n_beta: usize,
 ) -> Result<HingeView, RebarGeometryError> {
+    if let Some(reason) = super::springs::rc_reference_target_issue(data, model) {
+        let model_kind = match data.kind {
+            ElementKind::Beam if resolves_to_concentrated_spring(data, model) => {
+                AnalysisHingeModel::ConcentratedSpring
+            }
+            ElementKind::Beam
+                if crate::wall::side_column::wall_side_column_release(data, model).is_none() =>
+            {
+                AnalysisHingeModel::Fiber
+            }
+            ElementKind::Fiber => AnalysisHingeModel::Fiber,
+            ElementKind::MultiSpring => AnalysisHingeModel::MultiSpring,
+            _ => AnalysisHingeModel::Other,
+        };
+        let mut view = HingeView::none(model_kind);
+        view.unavailability_reason = Some(reason);
+        return Ok(view);
+    }
     match data.kind {
         ElementKind::Beam => beam_view(
             data,
