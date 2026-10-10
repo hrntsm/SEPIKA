@@ -1603,3 +1603,47 @@ fn beam_contact_non_nodal_secondary_is_unavailable_materialized_is_counted_once(
         "{reason}"
     );
 }
+
+#[test]
+fn beam_contact_uses_shape_dimensions_and_rejects_nonfinite_formwork() {
+    let mut base = contact_model();
+    contact_slab(&mut base, [0.0, 6000.0], 1.0, 900.0, 3000.0);
+    base.sections[0].width = 10000.0;
+    base.sections[0].depth = 10000.0;
+    assert!((contact_formwork(&base) - 5.4).abs() <= 1e-9);
+    for bad in [-1.0, 0.0, f64::NAN, f64::INFINITY] {
+        for width in [false, true] {
+            let mut model = base.clone();
+            if let Some(SectionShape::RcBeamRect { b, d, .. }) = &mut model.sections[0].shape {
+                if width {
+                    *b = bad;
+                } else {
+                    *d = bad;
+                }
+            }
+            assert!(
+                try_compute_quantity_takeoff(&model, &QuantityCfg::default()).is_err(),
+                "bad={bad}, width={width}"
+            );
+        }
+    }
+    let mut model = base.clone();
+    if let Some(SectionShape::RcBeamRect { b, .. }) = &mut model.sections[0].shape {
+        *b = f64::MAX;
+    }
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("有限範囲")
+    );
+    for face in [-1.0, f64::NAN, f64::INFINITY] {
+        let mut model = base.clone();
+        model.elements[0].rigid_zone.face_i = Some(face);
+        model.elements[0].rigid_zone.face_j = Some(0.0);
+        assert!(
+            try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+                .unwrap_err()
+                .contains("内法区間")
+        );
+    }
+}

@@ -143,8 +143,16 @@ impl Contacts {
         Ok(Self {
             areas: rectangles
                 .into_iter()
-                .map(|(support, sides)| (support, union_area(&sides[0]) + union_area(&sides[1])))
-                .collect(),
+                .map(|(support, sides)| {
+                    let area = union_area(&sides[0]) + union_area(&sides[1]);
+                    if !area.is_finite() {
+                        return Err(format!(
+                            "支持材 {support:?}: 接触面積が有限範囲を超えています"
+                        ));
+                    }
+                    Ok((support, area))
+                })
+                .collect::<Result<_, String>>()?,
         })
     }
 }
@@ -220,6 +228,11 @@ fn add_contact(
         return Ok(());
     }
     let len = sepika_core::geom::vec3::dist(a, b);
+    if !len.is_finite() || len <= 0.0 || a.iter().chain(b.iter()).any(|v| !v.is_finite()) {
+        return Err(format!(
+            "支持材 {support:?}: 梁の数量寸法・標高 [mm] が不正です"
+        ));
+    }
     let (mut start, mut end) = (0.0, len);
     if let SupportMemberId::Primary(id) = support {
         let elem = model.elements.iter().find(|e| e.id == id).unwrap();
@@ -228,14 +241,31 @@ fn add_contact(
             end = len - elem.rigid_zone.face_j_or_zero();
         }
     }
+    if !start.is_finite() || !end.is_finite() || start < 0.0 || end > len || end < start {
+        return Err(format!(
+            "支持材 {support:?}: 梁の数量内法区間 [mm] が不正です"
+        ));
+    }
     let s = [
         (span[0].min(span[1]) * len).max(start),
         (span[0].max(span[1]) * len).min(end),
     ];
-    let d = match sec.shape {
-        Some(SectionShape::RcBeamRect { d, .. } | SectionShape::SrcBeamRect { d, .. }) => d,
-        _ => sec.depth,
+    let (width_mm, d) = match sec.shape {
+        Some(SectionShape::RcBeamRect { b, d, .. } | SectionShape::SrcBeamRect { b, d, .. }) => {
+            (b, d)
+        }
+        _ => (sec.width, sec.depth),
     };
+    if !width_mm.is_finite() || width_mm <= 0.0 || !d.is_finite() || d <= 0.0 {
+        return Err(format!(
+            "支持材 {support:?}: 梁の断面幅・せい [mm] は有限かつ正である必要があります"
+        ));
+    }
+    if !((width_mm + 2.0 * d) * (end - start)).is_finite() || !(a[2] - d).is_finite() {
+        return Err(format!(
+            "支持材 {support:?}: 梁の型枠面積・下端高さが有限範囲を超えています"
+        ));
+    }
     let z = [slab_z[0].max(a[2] - d), slab_z[1].min(a[2])];
     if s[1] <= s[0] || z[1] <= z[0] {
         return Ok(());

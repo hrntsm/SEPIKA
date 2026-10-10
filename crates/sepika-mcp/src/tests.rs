@@ -1762,3 +1762,55 @@ fn beam_contact_no_plate_fixture() -> sepika_core::model::Model {
         });
     model
 }
+
+#[cfg(feature = "mcp")]
+#[tokio::test]
+async fn beam_contact_quantity_mcp_tool_returns_verified_rows_and_unavailable_reasons() {
+    use crate::server::{QuantityTakeoffArgs, SepikaServer};
+    use rmcp::handler::server::wrapper::Parameters;
+    let mut cases = vec![
+        (beam_contact_fixture(), Some(7.5), ""),
+        (beam_contact_no_plate_fixture(), Some(8.4), ""),
+    ];
+    cases.extend(
+        beam_contact_invalid_cases()
+            .into_iter()
+            .map(|(model, reason)| (model, None, reason)),
+    );
+    for (id, (model, expected, reason)) in cases.into_iter().enumerate() {
+        let dir = std::env::temp_dir().join(format!(
+            "sepika-beam-contact-mcp-{}-{id}",
+            std::process::id()
+        ));
+        let server = SepikaServer::new(ServerState::with_fs_store(model, &dir).unwrap());
+        let result = server
+            .quantity_takeoff(Parameters(QuantityTakeoffArgs {
+                group_by: Some("detail".into()),
+            }))
+            .await
+            .unwrap();
+        let text = &result.content[0].raw.as_text().unwrap().text;
+        let value: serde_json::Value = serde_json::from_str(text).unwrap();
+        if let Some(expected) = expected {
+            let beam = value["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|i| i["label"] == "G451")
+                .unwrap();
+            assert!(
+                (beam["formwork_m2"].as_f64().unwrap() - expected).abs() <= 1e-9,
+                "{value}"
+            );
+        } else {
+            assert_eq!(value["status"], "unavailable");
+            assert!(value["totals"].is_null());
+            assert!(
+                value["reason"].as_str().unwrap().contains(reason),
+                "{value}"
+            );
+        }
+        drop(server);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
