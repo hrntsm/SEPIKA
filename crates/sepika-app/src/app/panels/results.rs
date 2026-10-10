@@ -183,7 +183,7 @@ impl App {
                 crate::theme::SECONDARY_AMBER,
                 format!(
                     "⚠ 増分解析は目標到達前に打ち切られました（{}）。性能曲線が途中で\
-                     途切れており、Qu はその時点までの最大値です。",
+                     途切れており、最大ベースシアはその時点までの最大値です。",
                     po.termination.describe()
                 ),
             );
@@ -201,7 +201,10 @@ impl App {
         ui.separator();
 
         ui.horizontal(|ui| {
-            ui.label(format!("保有水平耐力 Qu = {:.1} kN", force_kn(po.qu)));
+            ui.label(format!(
+                "解析経過の最大ベースシア = {:.1} kN",
+                force_kn(po.qu)
+            ));
             ui.separator();
             let mech = match &po.mechanism {
                 sepika_solver::nonlinear::pushover::MechanismType::Overall => {
@@ -256,7 +259,7 @@ impl App {
                 .map(|l| l.name.clone())
                 .unwrap_or_else(|| sepika_core::model::default_story_name(i))
         };
-        let story_qu_kn: Vec<f64> = (0..n_stories)
+        let story_max_shear_kn: Vec<f64> = (0..n_stories)
             .map(|i| {
                 force_kn(
                     po.capacity_curve
@@ -267,14 +270,16 @@ impl App {
                 )
             })
             .collect();
-        if !story_qu_kn.is_empty() {
-            let line = story_qu_kn
+        if !story_max_shear_kn.is_empty() {
+            let line = story_max_shear_kn
                 .iter()
                 .enumerate()
                 .map(|(i, q)| format!("{} {:.1} kN", story_name(i), q))
                 .collect::<Vec<_>>()
                 .join(" / ");
-            ui.label(format!("層別 Qu: {line}"));
+            ui.label(format!(
+                "解析経過の層別最大せん断力（各層のピーク）: {line}"
+            ));
         }
 
         const STORY_COLORS: [egui::Color32; 8] = [

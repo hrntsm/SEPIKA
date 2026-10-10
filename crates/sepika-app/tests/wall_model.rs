@@ -1072,6 +1072,7 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
         app.core.scoped.last_error
     );
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "増分解析: {:?}",
@@ -1086,6 +1087,16 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
     let mut line = |k: &str, v: String| out.push_str(&format!("{k} = {v}\n"));
     assert_eq!(holding.stories.len(), 1, "本フィクスチャは 1 層");
     let s = &holding.stories[0];
+    let source = app.core.scoped.holding_capacity_source.as_ref().unwrap();
+    assert!(source.ds_forces[0].beta_u > 0.7);
+    assert!(matches!(
+        source.ds_mechanism,
+        sepika_solver::nonlinear::pushover::MechanismType::Partial
+    ));
+    assert_eq!(s.ds, 0.4);
+    assert_eq!(s.fes, 1.5);
+    assert!((s.qun - 0.4 * 1.5 * s.qud).abs() < 1e-8);
+
     assert!(
         s.qu > 0.0 && s.qu.is_finite(),
         "保有水平耐力 Qu が異常: {}",
@@ -1148,6 +1159,7 @@ fn test_holding_capacity_auto_rank_detects_wall() {
         app.core.scoped.last_error
     );
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "増分解析: {:?}",
@@ -1172,6 +1184,7 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
     app.run_preparation();
     app.run_static_all();
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -1351,6 +1364,7 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
     app.run_preparation();
     app.run_static_all();
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -1434,5 +1448,47 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
             expected,
             "Qdirへ投影して局所頭打ち/τuを低下させない"
         );
+    }
+}
+
+fn select_holding_points(app: &mut sepika_app::app::App) {
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    let dir = app.core.scoped.pushover_view_dir;
+    let Some(bundle) = &mut app.core.scoped.results else {
+        return;
+    };
+    for po in [
+        &mut bundle.pushover,
+        &mut bundle.pushover_x,
+        &mut bundle.pushover_y,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let Some(step) = po.capacity_curve.last().map(|p| p.step) else {
+            continue;
+        };
+        if let Ok(mut ds) = po.evaluation_point(
+            EvaluationPurpose::Ds,
+            dir,
+            step,
+            "テストの明示採用点".into(),
+        ) {
+            let mut ids: std::collections::BTreeSet<_> =
+                po.member_response.iter().map(|r| r.elem).collect();
+            if let Some(walls) = &po.wall_history {
+                ids.extend(walls.iter().map(|r| r.elem));
+            }
+            ds.member_capacities_n = ids.into_iter().map(|id| (id, 1_000_000.0)).collect();
+            po.ds_evaluation = Some(ds);
+            po.capacity_evaluation = po
+                .evaluation_point(
+                    EvaluationPurpose::HoldingCapacity,
+                    dir,
+                    step,
+                    "テストの明示採用点".into(),
+                )
+                .ok();
+        }
     }
 }

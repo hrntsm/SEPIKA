@@ -2339,6 +2339,9 @@ fn test_legacy_pushover_deserialize_migrates_to_slot() {
             steps: vec![],
             wall_history: None,
             wall_run: None,
+            confirmed_history: None,
+            ds_evaluation: None,
+            capacity_evaluation: None,
             capacity_curve: vec![],
             hinges: vec![],
             shear_yields: vec![],
@@ -3134,6 +3137,7 @@ fn test_holding_capacity_flow() {
 
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3145,19 +3149,18 @@ fn test_holding_capacity_flow() {
         .expect("前提が揃えば Ok のはず");
     assert_eq!(result.stories.len(), 1);
     assert!(result.stories[0].qun > 0.0);
-    // Qu はプッシュオーバー最終点の層せん断（capacity_curve.story_shear）から取得される。
+    // 明示採用点の層切断面力を用いる。
     assert!(result.stories[0].qu > 0.0, "{}", result.stories[0].qu);
-    // design_rank_auto=false（既定）→ 全層フォールバック（選択値 design_rank）。
+    // 手動ランクは明示設計入力。
     assert_eq!(story_ranks, vec![app.core.design_rank]);
     assert!(result.member_ranks.is_empty());
 }
 
 /// 架構種別が「S ブレース」なのに筋かい部材を検出できない場合、βu を算定できないため
-/// βu=0（純ラーメン）の行を使ってはならない（Ds を過小評価する）。架構種別別の
-/// Ds 表へフォールバックし、その旨のフラグが立つことを確認する。
+/// βu=0（純ラーメン）の行で隠さず理由付き失敗とする。
 #[test]
-fn test_holding_capacity_falls_back_when_brace_undetected() {
-    use sepika_design_jp::secondary::holding_capacity::{ds_value, FrameType, MemberRank};
+fn test_holding_capacity_rejects_declared_brace_when_undetected() {
+    use sepika_design_jp::secondary::holding_capacity::{FrameType, MemberRank};
 
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame()); // 筋かいのないラーメン
@@ -3165,6 +3168,7 @@ fn test_holding_capacity_falls_back_when_brace_undetected() {
     app.run_seismic(SeismicDir::X);
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3174,21 +3178,12 @@ fn test_holding_capacity_falls_back_when_brace_undetected() {
     app.core.design_rank_auto = false;
     app.core.design_rank = MemberRank::FA;
     app.core.design_frame = FrameType::SteelBrace;
-    let (result, _) = app.compute_holding_capacity().expect("Ok のはず");
-
+    let reason = app.compute_holding_capacity().err().expect("拒否される");
     assert!(
-        app.core.scoped.ds_beta_u_unavailable,
-        "筋かい未検出なら βu 算定不可のフラグが立つはず"
+        reason.contains("宣言した壁・筋かい架構の負担力がありません"),
+        "{reason}"
     );
-    // 純ラーメンの行（S造 FA=0.25）ではなく、S ブレースの行（FA=0.30）が使われる。
-    let expected = ds_value(FrameType::SteelBrace, MemberRank::FA);
-    assert!((expected - 0.30).abs() < 1e-9);
-    assert!(
-        (result.stories[0].ds - expected).abs() < 1e-9,
-        "Ds={} は架構種別別の値 {} であるべき（βu=0 行の 0.25 ではない）",
-        result.stories[0].ds,
-        expected
-    );
+    assert!(!app.core.scoped.ds_beta_u_unavailable);
 }
 
 /// UI-13: `design_rank_auto = true` で鋼部材の幅厚比から部材ランクを自動判定する。
@@ -3221,6 +3216,7 @@ fn test_holding_capacity_rank_auto_from_width_thickness() {
 
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3273,11 +3269,9 @@ fn test_holding_capacity_rank_auto_from_width_thickness() {
     );
 }
 
-/// rank-auto で部材ランクを 1 本も算定できない層（断面形状未設定等）は選択ランクへ
-/// フォールバックし、該当層が `ds_rank_fallback_stories` に記録される（設計タブの
-/// 警告表示用）。自動判定 OFF は全層が明示運用のため記録されない。
+/// 自動ランクの欠損は明示ランクで覆い隠さず失敗し、手動指定は設計入力として扱う。
 #[test]
-fn test_holding_capacity_rank_auto_records_fallback_stories() {
+fn test_holding_capacity_rank_auto_rejects_missing_rank() {
     use sepika_design_jp::secondary::holding_capacity::MemberRank;
 
     let mut app = App::default();
@@ -3286,6 +3280,7 @@ fn test_holding_capacity_rank_auto_records_fallback_stories() {
     app.run_seismic(SeismicDir::X);
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3298,16 +3293,14 @@ fn test_holding_capacity_rank_auto_records_fallback_stories() {
     }
     app.run_seismic(SeismicDir::X);
     app.run_pushover();
+    select_holding_points(&mut app);
     app.core.design_rank_auto = true;
     app.core.design_rank = MemberRank::FB;
-    let (_, story_ranks) = app.compute_holding_capacity().expect("Ok のはず");
-
-    // 全層が選択ランクへフォールバックし、層名が記録される。
-    assert_eq!(story_ranks, vec![MemberRank::FB]);
-    assert_eq!(
-        app.core.scoped.ds_rank_fallback_stories,
-        vec![app.core.model.stories[0].name.clone()]
-    );
+    assert!(app
+        .compute_holding_capacity()
+        .err()
+        .unwrap()
+        .contains("確定評価データが不足"));
 
     // 自動判定 OFF では全層が選択値の明示運用のため、フォールバック記録は空。
     app.core.design_rank_auto = false;
@@ -3578,6 +3571,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     app.core.analysis_cfg.push_max_disp = 3.0;
     app.core.analysis_cfg.push_use_drift_angle = false;
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3676,6 +3670,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     app.run_seismic(SeismicDir::X);
     assert!(app.compute_holding_capacity().is_err());
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(app.compute_holding_capacity().is_ok());
 }
 
@@ -10142,6 +10137,7 @@ fn test_time_history_and_pushover_run_preparation() {
     app.core.scoped.staleness.mark_edited();
     assert!(app.core.scoped.staleness.preparation_stale);
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         !app.core.scoped.staleness.preparation_stale,
         "増分解析の実行で準備計算が走るべき"
@@ -10395,6 +10391,9 @@ fn dummy_pushover(qu: f64) -> sepika_solver::nonlinear::pushover::PushoverResult
         steps: vec![],
         wall_history: None,
         wall_run: None,
+        confirmed_history: None,
+        ds_evaluation: None,
+        capacity_evaluation: None,
         capacity_curve: vec![],
         hinges: vec![],
         shear_yields: vec![],
@@ -10500,6 +10499,9 @@ fn test_build_result_tree_sections_and_labels() {
             steps: vec![],
             wall_history: None,
             wall_run: None,
+            confirmed_history: None,
+            ds_evaluation: None,
+            capacity_evaluation: None,
             capacity_curve: vec![],
             hinges: vec![],
             shear_yields: vec![],
@@ -11394,4 +11396,46 @@ fn load_state_gui_actual_checks_selection_and_saved_terms_keep_n_q_m_and_duratio
         .iter()
         .flat_map(|m| &m.positions)
         .all(|p| matches!(p.outcome, sepika_design_jp::CheckOutcome::Skipped { .. })));
+}
+
+pub(super) fn select_holding_points(app: &mut App) {
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    let dir = app.core.scoped.pushover_view_dir;
+    let Some(bundle) = &mut app.core.scoped.results else {
+        return;
+    };
+    for po in [
+        &mut bundle.pushover,
+        &mut bundle.pushover_x,
+        &mut bundle.pushover_y,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let Some(step) = po.capacity_curve.last().map(|p| p.step) else {
+            continue;
+        };
+        if let Ok(mut ds) = po.evaluation_point(
+            EvaluationPurpose::Ds,
+            dir,
+            step,
+            "テストの明示採用点".into(),
+        ) {
+            let mut ids: std::collections::BTreeSet<_> =
+                po.member_response.iter().map(|r| r.elem).collect();
+            if let Some(walls) = &po.wall_history {
+                ids.extend(walls.iter().map(|r| r.elem));
+            }
+            ds.member_capacities_n = ids.into_iter().map(|id| (id, 1_000_000.0)).collect();
+            po.ds_evaluation = Some(ds);
+            po.capacity_evaluation = po
+                .evaluation_point(
+                    EvaluationPurpose::HoldingCapacity,
+                    dir,
+                    step,
+                    "テストの明示採用点".into(),
+                )
+                .ok();
+        }
+    }
 }

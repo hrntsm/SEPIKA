@@ -48,43 +48,220 @@ fn integrate(coords: &[[f64; 3]], h: f64, phase: f64) -> PolygonDistribution {
     .unwrap()
 }
 
+fn trapezoid_reference_m2() -> [f64; 4] {
+    // d0=d2=1.5、d0=d3(L)、d0=d1(R)の半平面境界の交点。
+    let l = [(1. + 10_f64.sqrt()) / 2., 1.5];
+    let r = [5. - 13_f64.sqrt() / 2., 1.5];
+    let vertices = [[0., 0.], [6., 0.], [4., 3.], [1., 3.]];
+    let regions = [
+        vec![vertices[0], vertices[1], r, l],
+        vec![vertices[1], vertices[2], r],
+        vec![vertices[2], vertices[3], l, r],
+        vec![vertices[3], vertices[0], l],
+    ];
+    let distances = |p: Point| {
+        [
+            p[1],
+            (18. - 3. * p[0] - 2. * p[1]) / 13_f64.sqrt(),
+            3. - p[1],
+            (3. * p[0] - p[1]) / 10_f64.sqrt(),
+        ]
+    };
+    let areas = std::array::from_fn(|e| {
+        for &p in &regions[e] {
+            let d = distances(p);
+            assert!(d.iter().all(|&other| d[e] <= other + 1e-14));
+        }
+        (0..regions[e].len())
+            .map(|i| {
+                let a = regions[e][i];
+                let b = regions[e][(i + 1) % regions[e].len()];
+                a[0] * b[1] - a[1] * b[0]
+            })
+            .sum::<f64>()
+            .abs()
+            / 2.
+    });
+    let a = 3. * 13_f64.sqrt();
+    let b = 3. * 10_f64.sqrt();
+    let analytic = [(63. - a - b) / 8., a / 4., (45. - a - b) / 8., b / 4.];
+    for e in 0..4 {
+        assert!((areas[e] - analytic[e]).abs() < 1e-10);
+    }
+    assert!((areas.iter().sum::<f64>() - 13.5).abs() < 1e-12);
+    areas
+}
+
 #[test]
 fn convex_trapezoid_independent_integral() {
+    let expected_m2 = trapezoid_reference_m2();
+    let base = [
+        [0., 0., 0.],
+        [6000., 0., 0.],
+        [4000., 3000., 0.],
+        [1000., 3000., 0.],
+    ];
+    for h in [100., 50., 25., 12.5] {
+        for phase in [0., 0.5] {
+            for shift in 0..4 {
+                for reverse in [false, true] {
+                    let coords: Vec<_> = (0..4)
+                        .map(|i| {
+                            base[if reverse {
+                                (shift + 4 - i) % 4
+                            } else {
+                                (shift + i) % 4
+                            }]
+                        })
+                        .collect();
+                    let result = integrate(&coords, h, phase);
+                    assert!((result.polygon_area_mm2 - 13.5e6).abs() < 1e-6);
+                    assert!(
+                        (result.edge_areas_mm2.iter().sum::<f64>() - 13.5e6).abs()
+                            <= result.area_roundoff_bound_mm2
+                    );
+                    let mut loads = Vec::new();
+                    let actual = distribute_polygon(
+                        &coords,
+                        0.003,
+                        &mut loads,
+                        PolygonIntegrationOptions {
+                            cell_size_mm: h,
+                            phase: [phase; 2],
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(actual.edge_areas_mm2, result.edge_areas_mm2);
+                    let mut forces_n = [0.; 4];
+                    for load in loads {
+                        let super::super::types::LoadTarget::Edge(e) = load.target else {
+                            panic!("辺荷重を期待")
+                        };
+                        assert!(load.cmq.q_i > 0. && load.cmq.q_j > 0.);
+                        forces_n[e] += load.cmq.q_i + load.cmq.q_j;
+                    }
+                    assert!((forces_n.iter().sum::<f64>() - 40500.).abs() < 1e-6);
+                    let mut areas = [0.; 4];
+                    let mut errors = [0.; 4];
+                    let mut bounds = [0.; 4];
+                    let mut mapping = [0; 4];
+                    for e in 0..4 {
+                        let original = if reverse {
+                            (shift + 3 - e) % 4
+                        } else {
+                            (shift + e) % 4
+                        };
+                        mapping[e] = original;
+                        areas[original] = result.edge_areas_mm2[e] / 1e6;
+                        errors[original] = (areas[original] - expected_m2[original]).abs();
+                        bounds[original] = (result.edge_error_bounds_mm2[e]
+                            - result.area_roundoff_bound_mm2)
+                            / 1e6;
+                        assert!(
+                            errors[original]
+                                <= bounds[original] + result.area_roundoff_bound_mm2 / 1e6
+                        );
+                        assert!((forces_n[e] - result.edge_areas_mm2[e] * 0.003).abs() < 1e-6);
+                    }
+                    println!("trapezoid h={h} phase={phase} shift={shift} reverse={reverse} mapping={mapping:?} areas_m2={areas:?} errors_m2={errors:?} B_m2={bounds:?} roundoff_m2={}", result.area_roundoff_bound_mm2 / 1e6);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn trapezoid_partial_pieces_partition_and_radius_bound() {
     let coords = [
         [0., 0., 0.],
         [6000., 0., 0.],
         [4000., 3000., 0.],
         [1000., 3000., 0.],
     ];
-    // 凸台形の角二等分線で区切った領域の解析面積 [m²]。
-    let a = 3. * 13_f64.sqrt();
-    let b = 3. * 10_f64.sqrt();
-    let expected_m2 = [(63. - a - b) / 8., a / 4., (45. - a - b) / 8., b / 4.];
-    assert!((expected_m2.iter().sum::<f64>() - 13.5).abs() < 1e-12);
-    let result = integrate(&coords, 100., 0.);
-    assert!((result.polygon_area_mm2 - 13.5e6).abs() < 1e-6);
-    let area_mm2 = result.edge_areas_mm2.iter().sum::<f64>();
-    assert!((area_mm2 - 13.5e6).abs() <= result.area_roundoff_bound_mm2);
-    assert!((area_mm2 * 0.003 - 40500.).abs() < 1e-6);
-    for (edge, expected) in expected_m2.iter().enumerate() {
-        assert!(
-            (result.edge_areas_mm2[edge] - expected * 1e6).abs()
-                <= result.edge_error_bounds_mm2[edge]
-        );
+    let poly = local_polygon(&coords).unwrap();
+    let triangles = triangulate(&poly).unwrap();
+    for h in [100., 50., 25., 12.5] {
+        for phase in [0., 0.5] {
+            let result = integrate(&coords, h, phase);
+            let mut clipped_area = 0.;
+            let mut ambiguous_area = 0.;
+            let mut bounds = [0.; 4];
+            let mut partial_pieces = 0;
+            for iy in 0..((3000. + phase * h) / h).ceil() as usize {
+                for ix in 0..((6000. + phase * h) / h).ceil() as usize {
+                    let lo = [(ix as f64 - phase) * h, (iy as f64 - phase) * h];
+                    let hi = [lo[0] + h, lo[1] + h];
+                    for triangle in &triangles {
+                        let piece = clip_cell(triangle, lo, hi);
+                        if piece.len() < 3 {
+                            continue;
+                        }
+                        let anchor = piece[0];
+                        let shifted: Vec<_> = piece
+                            .iter()
+                            .map(|p| [p[0] - anchor[0], p[1] - anchor[1]])
+                            .collect();
+                        let area = geom_polygon::area(&shifted);
+                        if area <= 0. {
+                            continue;
+                        }
+                        clipped_area += area;
+                        if area < h * h - 1e-6 {
+                            partial_pieces += 1;
+                        }
+                        let c = geom_polygon::centroid(&shifted);
+                        let c = [c[0] + anchor[0], c[1] + anchor[1]];
+                        let r = piece
+                            .iter()
+                            .map(|p| (p[0] - c[0]).hypot(p[1] - c[1]))
+                            .fold(0., f64::max);
+                        let (d, winners) = nearest(&poly, c, result.distance_epsilon_mm);
+                        assert!(!winners.is_empty());
+                        assert!(
+                            (winners
+                                .iter()
+                                .map(|_| 1. / winners.len() as f64)
+                                .sum::<f64>()
+                                - 1.)
+                                .abs()
+                                < 1e-14
+                        );
+                        let min = d[winners[0]];
+                        let stable = winners.len() == 1
+                            && (0..4)
+                                .filter(|&e| e != winners[0])
+                                .all(|e| d[e] - min > 2. * r + result.distance_epsilon_mm);
+                        if stable {
+                            for &p in &piece {
+                                assert_eq!(
+                                    nearest(&poly, p, result.distance_epsilon_mm).1,
+                                    winners
+                                );
+                            }
+                        } else {
+                            ambiguous_area += area;
+                            for e in 0..4 {
+                                if d[e] - min <= 2. * r + result.distance_epsilon_mm {
+                                    bounds[e] += area;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            assert!(partial_pieces > 0);
+            assert!((clipped_area - 13.5e6).abs() < 1e-5);
+            for (e, bound) in bounds.iter().enumerate() {
+                assert!(
+                    (result.edge_error_bounds_mm2[e] - result.area_roundoff_bound_mm2 - bound)
+                        .abs()
+                        < 1e-5
+                );
+            }
+            println!("trapezoid pieces h={h} phase={phase} partial_pieces={partial_pieces} total_m2={} ambiguous_B_m2={} edge_B_m2={:?}", clipped_area / 1e6, ambiguous_area / 1e6, bounds.map(|b| b / 1e6));
+        }
     }
-    println!(
-        "convex trapezoid areas_m2={:?} bounds_m2={:?}",
-        result
-            .edge_areas_mm2
-            .iter()
-            .map(|x| x / 1e6)
-            .collect::<Vec<_>>(),
-        result
-            .edge_error_bounds_mm2
-            .iter()
-            .map(|x| x / 1e6)
-            .collect::<Vec<_>>()
-    );
 }
 
 #[test]

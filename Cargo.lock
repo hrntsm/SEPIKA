@@ -4672,6 +4672,7 @@ dependencies = [
  "sepika-section",
  "sepika-solver",
  "serde",
+ "sha2",
  "smallvec",
 ]
 

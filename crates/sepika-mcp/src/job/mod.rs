@@ -37,6 +37,9 @@ pub struct JobParams {
     pub max_disp: Option<f64>,
     /// 目標最大層間変形角の分母 n（既定 150）。
     pub max_drift_denom: Option<f64>,
+    /// 明示する Ds 判定 / 保有耐力比較の確定 step。未指定は未判定。
+    pub ds_step: Option<u32>,
+    pub capacity_step: Option<u32>,
     /// サンプル波の時間刻み [s]。
     pub dt: f64,
     /// サンプル波の継続時間 [s]。
@@ -68,6 +71,8 @@ impl Default for JobParams {
             steps: s.push_steps,
             max_disp: None,
             max_drift_denom: None,
+            ds_step: None,
+            capacity_step: None,
             dt: s.th_dt,
             duration: 2.0,
             period: s.th_period,

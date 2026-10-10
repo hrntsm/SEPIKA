@@ -223,6 +223,10 @@ pub struct AnalysisRunArgs {
     pub max_disp: Option<f64>,
     /// 目標最大層間変形角の分母 n（既定 150）。
     pub max_drift_denom: Option<f64>,
+    /// Ds 判定に明示採用する確定 step（0 始まり、未指定は未判定）。
+    pub ds_step: Option<u32>,
+    /// 保有耐力比較に明示採用する確定 step（0 始まり、未指定は未判定）。
+    pub capacity_step: Option<u32>,
     /// サンプル波の時間刻み [s]（既定 0.01）。
     pub dt: Option<f64>,
     /// サンプル波の継続時間 [s]（既定 2.0）。
@@ -292,6 +296,8 @@ impl AnalysisRunArgs {
             steps: self.steps.unwrap_or(d.steps),
             max_disp: self.max_disp,
             max_drift_denom: self.max_drift_denom,
+            ds_step: self.ds_step,
+            capacity_step: self.capacity_step,
             dt: self.dt.unwrap_or(d.dt),
             duration: self.duration.unwrap_or(d.duration),
             period: self.period.unwrap_or(d.period),
@@ -587,6 +593,8 @@ mod tests {
             steps: None,
             max_disp: None,
             max_drift_denom: None,
+            ds_step: None,
+            capacity_step: None,
             dt: None,
             duration: None,
             period: None,
@@ -903,7 +911,7 @@ mod tests {
 
     /// Pushover ジョブ（stories 付きモデル）→ Done でサマリに qu[kN] が含まれる。
     #[tokio::test]
-    async fn test_pushover_job_completes_with_qu_in_summary() {
+    async fn test_pushover_job_completes_with_max_base_shear_in_summary() {
         let dir = test_store_dir("pushover_basic");
         let server = SepikaServer::new(make_state(pushover_model(), &dir));
         let mut args = run_args(JobKind::Pushover);
@@ -915,7 +923,7 @@ mod tests {
         let job_id = extract_job_id(&result);
         let status = wait_for_terminal(&server, &job_id).await;
         let summary = done_summary(&status);
-        assert!(summary["qu_kN"].as_f64().unwrap() > 0.0);
+        assert!(summary["max_base_shear_kN"].as_f64().unwrap() > 0.0);
         assert!(
             summary.get("store").is_none(),
             "Pushover はストアへ書かない"
