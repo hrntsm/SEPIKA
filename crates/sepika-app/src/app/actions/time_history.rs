@@ -21,7 +21,7 @@ impl App {
                     .core
                     .model
                     .upsert_vibration_case(wave_name, dir, nonlinear);
-                let mut bundle = self.core.scoped.results.take().unwrap_or_default();
+                let mut bundle = self.take_results_for_analysis();
                 bundle.upsert_time_history(case_id, res.clone());
                 self.core.scoped.results = Some(bundle);
                 self.set_spatial_time_history_view(case_id, &res);

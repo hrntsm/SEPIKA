@@ -1,14 +1,14 @@
-use sepika_app::app::{App, ResultsBundle, StaticKey};
+use sepika_app::app::{App, StaticKey};
 use sepika_core::ids::{LoadCaseId, MaterialId, NodeId, SectionId, WallPlateId, WallRegionId};
 use sepika_core::model::{MaterialCategory, WallPlate, WallPlateShape, WallRegion};
 use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::wall_check::{WallCheckKind, WallCheckSummary, WallSkipKind};
-use sepika_element::frame::beam::MemberForces;
 
 fn fixture() -> App {
     let mut app = App::default();
     let model = &mut app.core.model;
     *model = sepika_app::sample::portal_frame();
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
     let mut concrete = model.materials[0].clone();
     concrete.id = MaterialId(1);
     concrete.name = "Fc24".into();
@@ -39,11 +39,84 @@ fn fixture() -> App {
     steel.thickness = Some(6.0);
     model.sections.push(steel);
     rc.id = SectionId(4);
-    rc.material = None;
+    rc.shear_rebar_material = None;
     model.sections.push(rc);
+    for (id, original) in [(5, 0), (6, 1)] {
+        let mut section = model.sections[original].clone();
+        section.id = SectionId(id);
+        model.sections.push(section);
+    }
+    for (id, shape) in [
+        (
+            0,
+            SectionShape::RcColumnRect {
+                b: 300.0,
+                d: 300.0,
+                rebar: sepika_core::section_shape::RcRectColumnRebar {
+                    main_dia: 22.0,
+                    x: vec![4],
+                    y: vec![4],
+                    cover: 40.0,
+                    hoop: sepika_core::section_shape::RectColumnHoop {
+                        dia: 10.0,
+                        pitch: 100.0,
+                        legs_x: 2,
+                        legs_y: 2,
+                    },
+                },
+            },
+        ),
+        (
+            1,
+            SectionShape::RcBeamRect {
+                b: 300.0,
+                d: 400.0,
+                rebar: sepika_core::section_shape::RcBeamRebar {
+                    main_dia: 22.0,
+                    top: vec![2],
+                    bottom: vec![2],
+                    cover: 40.0,
+                    stirrup: sepika_core::section_shape::BeamStirrup {
+                        dia: 10.0,
+                        pitch: 100.0,
+                        legs: 2,
+                    },
+                },
+            },
+        ),
+    ] {
+        let mut section = shape.to_section(SectionId(id as u32), format!("RC支持材{id}"));
+        section.material = Some(MaterialId(1));
+        section.rebar_material = Some(MaterialId(2));
+        section.shear_rebar_material = Some(MaterialId(2));
+        section.frame_use = model.sections[id].frame_use;
+        model.sections[id] = section;
+    }
     for (index, section) in [2, 3, 4].into_iter().enumerate() {
         let boundary = if index == 0 {
             [NodeId(0), NodeId(1), NodeId(3), NodeId(2)]
+        } else if index == 1 {
+            let first = model.nodes.len() as u32;
+            for (offset, coord) in [
+                [0.0, 6000.0, 0.0],
+                [6000.0, 6000.0, 0.0],
+                [6000.0, 6000.0, 3500.0],
+                [0.0, 6000.0, 3500.0],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut node = model.nodes[if offset < 2 { 0 } else { 2 }].clone();
+                node.id = NodeId(first + offset as u32);
+                node.coord = coord;
+                model.nodes.push(node);
+            }
+            [
+                NodeId(first),
+                NodeId(first + 1),
+                NodeId(first + 2),
+                NodeId(first + 3),
+            ]
         } else {
             let lower = NodeId(model.nodes.len() as u32);
             let upper = NodeId(lower.0 + 1);
@@ -68,7 +141,7 @@ fn fixture() -> App {
             &boundary,
             WallPlate {
                 id: WallPlateId(0),
-                dl_support: None,
+                dl_support: Some(sepika_core::model::WallDlSupport::LowerBeam),
                 self_weight_shares: vec![],
                 shape: WallPlateShape::Enclosed,
                 section: Some(SectionId(section)),
@@ -79,6 +152,23 @@ fn fixture() -> App {
                 slit: Default::default(),
             },
         );
+        for element in &mut model.elements {
+            if element.section.is_none() {
+                let vertical = model.nodes[element.nodes[0].index()].coord[2]
+                    != model.nodes[element.nodes[1].index()].coord[2];
+                element.section = Some(SectionId(if index == 1 {
+                    if vertical {
+                        5
+                    } else {
+                        6
+                    }
+                } else if vertical {
+                    0
+                } else {
+                    1
+                }));
+            }
+        }
         model.wall_regions.push(WallRegion {
             id: WallRegionId(index as u32),
             name: format!("共通側柱壁{index}"),
@@ -87,21 +177,6 @@ fn fixture() -> App {
             posts: vec![],
         });
     }
-    sepika_job::prepare::apply_rigid_zones_and_panels(model);
-    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(model);
-    let forces = expanded
-        .elements
-        .iter()
-        .filter(|e| e.kind == sepika_core::model::ElementKind::Wall)
-        .map(|e| {
-            (
-                e.id,
-                MemberForces {
-                    at: vec![(0.0, [0.0; 6])],
-                },
-            )
-        })
-        .collect();
     // 明示した無載荷Pを含む保存G+P+Wで、壁の検定状態を検証する。
     let mut live = model.load_cases[0].clone();
     live.id = LoadCaseId(2);
@@ -120,20 +195,41 @@ fn fixture() -> App {
                 (LoadCaseId(1), 1.0),
             ],
         });
-    let mut results = ResultsBundle::default();
-    results.member_forces = forces;
-    results.combos.push((
-        "保存G+P+W".into(),
-        sepika_solver::statics::linear::StaticOnce {
-            disp: vec![],
-            member_forces: results.member_forces.clone(),
-            panel_moments: vec![],
-        },
-    ));
-    app.core.scoped.results = Some(results);
-    app.core.scoped.last_static = Some(StaticKey::Combo(0));
-    app.core.design_term = sepika_design_jp::LoadTerm::Short;
-    app.run_design_check();
+    for case in &mut model.load_cases {
+        case.nodal.clear();
+        case.member.clear();
+    }
+    model.load_cases[1].name = "固定支点への水平力W".into();
+    model.load_cases[1]
+        .nodal
+        .push(sepika_core::model::NodalLoad::manual(
+            NodeId(0),
+            [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        ));
+    app.run_combination(0);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let results = app.core.scoped.results.as_ref().unwrap();
+    assert_eq!(
+        results.analysis_contract_version,
+        Some(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION)
+    );
+    assert_eq!(app.core.scoped.last_static, Some(StaticKey::Combo(0)));
+    assert!(!results.member_forces.is_empty());
+    assert!(results.member_forces.iter().all(|(_, forces)| forces
+        .at
+        .iter()
+        .all(|(_, values)| values.iter().all(|value| *value == 0.0))));
+    assert!(!results.combos[0].1.disp.is_empty());
+    assert!(results.combos[0]
+        .1
+        .disp
+        .iter()
+        .flatten()
+        .all(|value| *value == 0.0));
     app
 }
 
@@ -186,23 +282,6 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
         ),
         expected_checks
     );
-    let forces = app
-        .core
-        .scoped
-        .results
-        .as_ref()
-        .unwrap()
-        .member_forces
-        .clone();
-    let bundle = app.core.scoped.results.as_mut().unwrap();
-    bundle.combos.push((
-        "DL+E,独立".into(),
-        sepika_solver::statics::linear::StaticOnce {
-            disp: vec![],
-            member_forces: forces,
-            panel_moments: vec![],
-        },
-    ));
     app.core
         .model
         .combinations
@@ -214,6 +293,12 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
                 (LoadCaseId(1), 1.0),
             ],
         });
+    app.run_combination(1);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
     app.select_displayed_result(StaticKey::Combo(1));
     assert!(app
         .core
@@ -236,16 +321,6 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
         .iter()
         .map(|w| (w.plate, w.elem, w.kind))
         .collect();
-    let other = app.core.scoped.results.as_ref().unwrap().combos[1]
-        .1
-        .clone();
-    app.core
-        .scoped
-        .results
-        .as_mut()
-        .unwrap()
-        .combos
-        .push(("DL-E".into(), other));
     app.core
         .model
         .combinations
@@ -257,6 +332,12 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
                 (LoadCaseId(1), -1.0),
             ],
         });
+    app.run_combination(2);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
     app.select_displayed_result(StaticKey::Combo(2));
     let checks = &app.core.scoped.results.as_ref().unwrap().wall_checks;
     assert!(checks.iter().all(|w| w.case == "combo:2:DL-E"));
@@ -266,6 +347,43 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
             .map(|w| (w.plate, w.elem, w.kind))
             .collect::<Vec<_>>(),
         identity
+    );
+    app.core.model.sections[0].area *= 1.1;
+    app.run_design_check();
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("一致しません"));
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .wall_checks
+        .is_empty());
+    assert!(!sepika_app::summary::build_report_csv(&app).contains("許容せん断,3,1,0,2,0"));
+    app.run_combination(2);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let checks = &app.core.scoped.results.as_ref().unwrap().wall_checks;
+    assert_eq!(checks.len(), 6);
+    assert_eq!(
+        checks
+            .iter()
+            .map(|w| (w.plate, w.elem, w.kind))
+            .collect::<Vec<_>>(),
+        identity
+    );
+    assert_eq!(
+        WallCheckSummary::for_kind(checks, WallCheckKind::AllowableShear).max_ratio,
+        Some(0.0)
     );
     let bundle = app.core.scoped.results.as_mut().unwrap();
     bundle.member_forces.clear();
@@ -281,6 +399,59 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
     let csv = sepika_app::summary::build_report_csv(&app);
     assert!(csv.contains("3,6,0,0,6,0,\n"));
     assert!(csv.contains("要再計算,モデル編集前の検定結果です"));
+    app.core.model.elements[0].section = Some(SectionId(5));
+    app.run_combination(2);
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("混合構造は扱えません"));
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .wall_checks
+        .is_empty());
+    app.core.model.elements[0].section = Some(SectionId(0));
+    app.core.model.materials[1].fc = None;
+    app.run_combination(2);
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("Fcが未設定"));
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .wall_checks
+        .is_empty());
+    app.core.model.materials[1].fc = Some(24.0);
+    app.core.model.sections[4].material = None;
+    app.run_combination(2);
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("主材料が未設定"));
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .wall_checks
+        .is_empty());
     app.core.model.load_cases.clear();
     app.run_static_all();
     assert!(app
@@ -321,7 +492,7 @@ fn wall_status_real_egui_design_table_shows_counts_and_reasons() {
         "壁版 2",
         "combo:0:保存G+P+W",
         "国内許容応力度・終局検定式は未確定",
-        "壁主材料が未割当",
+        "横筋材料が未割当",
     ] {
         assert!(text.contains(expected), "{expected}: {text}");
     }

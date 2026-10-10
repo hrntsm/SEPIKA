@@ -1,0 +1,727 @@
+use super::*;
+use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
+
+fn calculated() -> App {
+    let mut app = App::default();
+    let mut model = crate::sample::portal_frame();
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    app.load_model(model);
+    app.core.analysis_cfg.threads = 1;
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert!(!app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .is_empty());
+    assert!(!app
+        .core
+        .model
+        .elements
+        .iter()
+        .any(|element| matches!(element.kind, sepika_core::model::ElementKind::PanelZone)));
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .panel_moments
+        .is_empty());
+    app
+}
+
+struct ContractFixture<'a>(&'a SavedResults);
+impl serde::Serialize for ContractFixture<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        struct Bundle<'a>(&'a ResultsBundle);
+        impl serde::Serialize for Bundle<'_> {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                use serde::ser::SerializeMap;
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("holding_evaluations", &self.0.holding_evaluations)?;
+                map.serialize_entry("statics", &self.0.statics)?;
+                map.serialize_entry("combos", &self.0.combos)?;
+                map.serialize_entry("modal", &self.0.modal)?;
+                map.serialize_entry("member_forces", &self.0.member_forces)?;
+                map.serialize_entry("panel_moments", &self.0.panel_moments)?;
+                map.serialize_entry("member_checks", &self.0.member_checks)?;
+                map.serialize_entry("joint_checks", &self.0.joint_checks)?;
+                map.serialize_entry("wall_checks", &self.0.wall_checks)?;
+                map.serialize_entry("beam_checks", &self.0.beam_checks)?;
+                map.serialize_entry("slab_checks", &self.0.slab_checks)?;
+                map.serialize_entry("pushover", &self.0.pushover)?;
+                map.serialize_entry("pushover_x", &self.0.pushover_x)?;
+                map.serialize_entry("pushover_y", &self.0.pushover_y)?;
+                map.serialize_entry("time_history", &self.0.time_history)?;
+                map.serialize_entry("time_histories", &self.0.time_histories)?;
+                map.serialize_entry("lumped", &self.0.lumped)?;
+                map.serialize_entry("lumped_results", &self.0.lumped_results)?;
+                map.serialize_entry("input_records", &self.0.input_records)?;
+                if let Some(version) = self.0.analysis_contract_version {
+                    map.serialize_entry("analysis_contract_version", &version)?;
+                }
+                if let Some(version) = self.0.design_contract_version {
+                    map.serialize_entry("design_contract_version", &version)?;
+                }
+                map.end()
+            }
+        }
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("bundle", &Bundle(&self.0.bundle))?;
+        map.serialize_entry("last_static", &self.0.last_static)?;
+        map.serialize_entry("last_run", &self.0.last_run)?;
+        map.end()
+    }
+}
+
+pub(super) fn restore(
+    app: &App,
+    analysis: Option<u32>,
+    design: Option<u32>,
+    name: &str,
+) -> (App, std::path::PathBuf) {
+    let mut bundle = app.core.scoped.results.clone().unwrap();
+    bundle.analysis_contract_version = analysis;
+    bundle.design_contract_version = design;
+    let saved = SavedResults {
+        bundle,
+        last_static: app.core.scoped.last_static,
+        view_vibration_case: None,
+        view_lumped_vibration_case: None,
+        last_run: app.core.scoped.staleness.last_run,
+    };
+    let results = rmp_serde::to_vec_named(&ContractFixture(&saved)).unwrap();
+    let settings = rmp_serde::to_vec_named(&SavedAnalysisSettings {
+        cfg: app.core.analysis_cfg,
+        wave_name: None,
+        wave_sha256: None,
+        lumped_wave_name: None,
+        lumped_wave_sha256: None,
+    })
+    .unwrap();
+    let path = std::env::temp_dir().join(format!("sepika-587-{}-{name}.ovika", std::process::id()));
+    sepika_io::ovika::save_ovika(
+        &path,
+        &app.core.model,
+        sepika_io::ovika::OvikaExtras {
+            results: Some(&results),
+            analysis_settings: Some(&settings),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    (loaded, path)
+}
+
+#[test]
+fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_results() {
+    let app = calculated();
+    for (name, version, reason) in [
+        ("missing", None, "版不明"),
+        ("old", Some(0), "旧契約"),
+        ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
+        ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
+    ] {
+        let (loaded, path) = restore(&app, version, Some(DESIGN_CONTRACT_VERSION), name);
+        assert_eq!(loaded.core.model.nodes.len(), app.core.model.nodes.len());
+        assert_eq!(loaded.core.analysis_cfg.threads, 1);
+        let bundle = loaded.core.scoped.results.as_ref().unwrap();
+        if reason.is_empty() {
+            assert_eq!(
+                bundle.statics[0].1.disp,
+                app.core.scoped.results.as_ref().unwrap().statics[0].1.disp
+            );
+            assert_eq!(loaded.core.scoped.last_static, app.core.scoped.last_static);
+            assert!(!bundle.member_checks.is_empty());
+            assert!(!loaded.core.scoped.staleness.results_stale);
+        } else {
+            assert!(!bundle.has_analysis_results());
+            assert!(!bundle.has_design_results());
+            assert!(loaded.core.scoped.last_static.is_none());
+            assert!(loaded.core.scoped.staleness.results_stale);
+            let notice = loaded.core.scoped.result_contract_notice.as_ref().unwrap();
+            assert!(
+                notice.contains(reason) && notice.contains("保存版") && notice.contains("現行版")
+            );
+            let csv = crate::summary::build_report_csv(&loaded);
+            assert!(csv.contains(reason));
+            assert!(!csv.contains("全適合"));
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_mark_fresh_restamping(
+) {
+    let mut app = App::default();
+    app.load_model(super::tests::lateral_bracing_fixture::frame(true));
+    app.run_linear_static(LoadCaseId(0));
+    assert!(app.core.scoped.last_error.is_none());
+    let checks = &mut app.core.scoped.results.as_mut().unwrap().member_checks;
+    let old_check = checks
+        .iter_mut()
+        .flat_map(|member| &mut member.positions)
+        .find_map(|p| match &mut p.outcome {
+            sepika_design_jp::CheckOutcome::Checked(check)
+                if check.detail.contains("（参考）n=2") =>
+            {
+                Some(check)
+            }
+            _ => None,
+        })
+        .expect("保存する横補剛参考detail");
+    old_check.basis = "旧横補剛の合否".into();
+    assert!(crate::summary::build_report_csv(&app).contains("旧横補剛の合否"));
+    let mut in_memory = App::default();
+    in_memory.load_model(app.core.model.clone());
+    in_memory.core.scoped.results = app.core.scoped.results.clone();
+    in_memory
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .design_contract_version = Some(0);
+    in_memory.core.scoped.ds_beta_u_by_story = vec![0.5];
+    assert!(in_memory.reject_result_contracts());
+    assert_eq!(in_memory.core.scoped.ds_beta_u_by_story, vec![0.5]);
+    assert_eq!(
+        in_memory
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .member_forces,
+        app.core.scoped.results.as_ref().unwrap().member_forces
+    );
+    for (name, version) in [
+        ("design-missing", None),
+        ("design-old", Some(0)),
+        ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
+    ] {
+        let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);
+        let forces = loaded
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .member_forces
+            .clone();
+        assert_eq!(
+            forces,
+            app.core.scoped.results.as_ref().unwrap().member_forces
+        );
+        assert!(!loaded.core.scoped.staleness.results_stale);
+        assert!(loaded.core.scoped.staleness.design_stale);
+        assert!(
+            loaded
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .member_checks
+                .is_empty(),
+            "旧横補剛detail/合否を除外"
+        );
+        let csv = crate::summary::build_report_csv(&loaded);
+        assert!(!csv.contains("旧横補剛の合否") && !csv.contains("全適合"));
+        loaded.select_displayed_result(app.core.scoped.last_static.unwrap());
+        loaded.core.scoped.staleness.mark_fresh();
+        loaded.save_project_to(path.clone());
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        let bundle = reopened.core.scoped.results.as_ref().unwrap();
+        assert_eq!(bundle.member_forces, forces);
+        assert!(bundle.member_checks.is_empty());
+        assert_eq!(bundle.design_contract_version, None);
+        reopened.run_design_check();
+        assert!(
+            reopened.core.scoped.last_error.is_none(),
+            "{:?}",
+            reopened.core.scoped.last_error
+        );
+        let bundle = reopened.core.scoped.results.as_ref().unwrap();
+        assert!(!bundle.member_checks.is_empty());
+        assert!(reopened.core.scoped.result_contract_notice.is_none());
+        assert_eq!(
+            bundle.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn selected_case_and_saved_combo_name_require_matching_input_but_ignore_display_axes() {
+    for combo in [false, true] {
+        for missing in [false, true] {
+            let mut app = calculated();
+            if combo {
+                app.core
+                    .model
+                    .combinations
+                    .push(sepika_core::model::LoadCombination {
+                        name: "照合対象".into(),
+                        terms: vec![(LoadCaseId(0), 1.0)],
+                    });
+                app.run_combination(0);
+                assert_eq!(app.core.scoped.last_static, Some(StaticKey::Combo(0)));
+            }
+            if missing {
+                app.core
+                    .scoped
+                    .results
+                    .as_mut()
+                    .unwrap()
+                    .input_records
+                    .clear();
+            } else {
+                app.core.model.sections[0].area *= 1.1;
+            }
+            app.run_design_check();
+            let reason = app.core.scoped.last_error.as_ref().unwrap();
+            assert!(
+                reason.contains(if missing {
+                    "入力識別情報がありません"
+                } else {
+                    "一致しません"
+                }),
+                "{reason}"
+            );
+            assert!(reason.contains(if combo {
+                "照合対象"
+            } else {
+                "静的荷重ケース"
+            }));
+            assert!(app
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .member_checks
+                .is_empty());
+            if combo {
+                app.run_combination(0);
+            } else {
+                app.run_linear_static(LoadCaseId(0));
+            }
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            app.core.model.axes.push(sepika_core::model::AxisGroup {
+                name: "表示".into(),
+                kind: sepika_core::model::AxisGroupKind::Other,
+                axes: Vec::new(),
+            });
+            app.run_design_check();
+            assert!(!app
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .member_checks
+                .is_empty());
+        }
+    }
+}
+
+#[test]
+fn old_analysis_is_excluded_before_partial_success_or_failure_without_restamping_other_runs() {
+    let mut app = calculated();
+    app.run_eigen(1);
+    app.core.analysis_cfg.push_steps = 2;
+    app.generate_stories_action();
+    app.run_seismic(SeismicDir::X);
+    app.run_pushover();
+    super::tests::select_holding_points(&mut app);
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    app.adopt_holding_evaluation(EvaluationPurpose::Ds).unwrap();
+    app.adopt_holding_evaluation(EvaluationPurpose::HoldingCapacity)
+        .unwrap();
+    assert!(!app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .holding_evaluations
+        .is_empty());
+    app.core.analysis_cfg.th_duration = 0.1;
+    app.run_time_history_sample();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .time_history
+        .is_some());
+    assert!(app.core.scoped.results.as_ref().unwrap().modal.is_some());
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .pushover_x
+        .is_some());
+    let (mut loaded, path) = restore(
+        &app,
+        Some(0),
+        Some(DESIGN_CONTRACT_VERSION),
+        "all-analysis-old",
+    );
+    assert!(!loaded
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .has_analysis_results());
+    #[cfg(feature = "gui")]
+    assert!(loaded.ui.scoped.time_history_data.time.is_empty());
+    assert!(loaded.core.scoped.stick_response.is_none());
+    loaded.run_linear_static(LoadCaseId(0));
+    let recovered = loaded.core.scoped.results.as_ref().unwrap();
+    assert!(
+        recovered.modal.is_none()
+            && recovered.pushover_x.is_none()
+            && recovered.time_histories.is_empty()
+            && recovered.holding_evaluations.is_empty()
+    );
+    assert_eq!(recovered.statics.len(), 1);
+    std::fs::remove_file(path).unwrap();
+    app.core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .analysis_contract_version = Some(0);
+    app.run_linear_static(LoadCaseId(0));
+    let bundle = app.core.scoped.results.as_ref().unwrap();
+    assert_eq!(
+        bundle.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    assert!(
+        bundle.modal.is_none()
+            && bundle.pushover.is_none()
+            && bundle.pushover_x.is_none()
+            && bundle.pushover_y.is_none()
+    );
+    assert!(
+        bundle.time_history.is_none()
+            && bundle.time_histories.is_empty()
+            && bundle.holding_evaluations.is_empty()
+    );
+    #[cfg(feature = "gui")]
+    assert!(app.ui.scoped.time_history_data.time.is_empty());
+    assert_eq!(bundle.statics.len(), 1);
+    app.core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .analysis_contract_version = Some(0);
+    app.run_linear_static(LoadCaseId(999));
+    let bundle = app.core.scoped.results.as_ref().unwrap();
+    assert_eq!(bundle.analysis_contract_version, None);
+    assert!(!bundle.has_analysis_results());
+    assert!(app.core.scoped.last_error.is_some());
+}
+
+#[test]
+fn empty_bundle_is_not_an_unknown_result_and_direct_floor_design_survives_stale_state() {
+    let mut app = App::default();
+    app.core.scoped.results = Some(ResultsBundle::default());
+    assert!(!app.reject_result_contracts());
+    assert!(app.core.scoped.last_notice.is_none());
+    for stale in [false, true] {
+        let mut model = super::tests::make_square_slab_test_model();
+        let slab_section = SectionId(model.sections.len() as u32);
+        model.sections.push(
+            sepika_core::section_shape::SectionShape::RcSlab { thickness: 150.0 }
+                .to_section(slab_section, "S15".into()),
+        );
+        let mut concrete = crate::sample::portal_frame().materials[0].clone();
+        concrete.category = sepika_core::model::MaterialCategory::Concrete;
+        concrete.fc = Some(24.0);
+        concrete.density = 2.4e-9;
+        model.sections[slab_section.0 as usize].material = Some(concrete.id);
+        model.materials.push(concrete);
+        model.slabs[0].plate.section = Some(slab_section);
+        let mut app = App::default();
+        app.load_model(model);
+        app.core.scoped.staleness.results_stale = stale;
+        app.run_design_check();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert_eq!(bundle.analysis_contract_version, None);
+        assert_eq!(bundle.slab_checks.len(), 1);
+        assert_eq!(
+            bundle.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        let (mut loaded, path) = restore(
+            &app,
+            None,
+            Some(0),
+            if stale { "slab-stale" } else { "slab-fresh" },
+        );
+        assert!(loaded
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .slab_checks
+            .is_empty());
+        assert!(loaded
+            .core
+            .scoped
+            .result_contract_notice
+            .as_ref()
+            .unwrap()
+            .contains("旧契約"));
+        loaded.run_design_check();
+        assert!(
+            loaded.core.scoped.last_error.is_none(),
+            "{:?}",
+            loaded.core.scoped.last_error
+        );
+        assert_eq!(
+            loaded
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .slab_checks
+                .len(),
+            1
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn gui_reports_old_contract_and_explicit_recheck_button_recovers_without_reanalysis() {
+    fn text_position(shape: &egui::epaint::Shape, needle: &str) -> Option<egui::Pos2> {
+        match shape {
+            egui::epaint::Shape::Text(text) if text.galley.text().contains(needle) => {
+                Some(text.pos + text.galley.size() * 0.5)
+            }
+            egui::epaint::Shape::Vec(parts) => {
+                parts.iter().find_map(|part| text_position(part, needle))
+            }
+            _ => None,
+        }
+    }
+    let app = calculated();
+    let (mut loaded, path) = restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(0),
+        "gui-recheck",
+    );
+    let forces = loaded
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_forces
+        .clone();
+    let context = egui::Context::default();
+    let rendered = context.run_ui(Default::default(), |ui| {
+        crate::design_view::design_table(ui, &mut loaded)
+    });
+    assert!(rendered
+        .shapes
+        .iter()
+        .any(|s| text_position(&s.shape, "旧契約").is_some()));
+    let button = rendered
+        .shapes
+        .iter()
+        .find_map(|s| text_position(&s.shape, "検定を再実行"))
+        .unwrap();
+    assert_eq!(
+        loaded
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .design_contract_version,
+        None
+    );
+    for pressed in [true, false] {
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::PointerMoved(button),
+                egui::Event::PointerButton {
+                    pos: button,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                },
+            ],
+            ..Default::default()
+        };
+        let _ = context.run_ui(input, |ui| {
+            crate::design_view::design_table(ui, &mut loaded)
+        });
+    }
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    let recovered = loaded.core.scoped.results.as_ref().unwrap();
+    assert_eq!(
+        recovered.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    assert!(!recovered.member_checks.is_empty());
+    assert_eq!(recovered.member_forces, forces);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn ovika_current_selected_input_missing_or_mismatched_is_excluded_without_losing_other_runs() {
+    for combo in [false, true] {
+        for missing in [false, true] {
+            let mut app = calculated();
+            if combo {
+                app.core
+                    .model
+                    .combinations
+                    .push(sepika_core::model::LoadCombination {
+                        name: "保存照合".into(),
+                        terms: vec![(LoadCaseId(0), 1.0)],
+                    });
+                app.run_combination(0);
+            }
+            app.run_eigen(1);
+            if missing {
+                app.core
+                    .scoped
+                    .results
+                    .as_mut()
+                    .unwrap()
+                    .input_records
+                    .retain(|(key, _)| matches!(key, ResultInputKey::Modal));
+            } else {
+                app.core.model.sections[0].area *= 1.1;
+            }
+            let (mut loaded, path) = restore(
+                &app,
+                Some(ANALYSIS_CONTRACT_VERSION),
+                Some(DESIGN_CONTRACT_VERSION),
+                &format!("input-{combo}-{missing}"),
+            );
+            let bundle = loaded.core.scoped.results.as_ref().unwrap();
+            assert!(bundle.member_checks.is_empty() && bundle.member_forces.is_empty());
+            assert!(bundle.panel_moments.is_empty());
+            assert!(
+                bundle.modal.is_some(),
+                "非選択の固有値成果まで一括除外しない"
+            );
+            assert!(loaded.core.scoped.last_static.is_none());
+            assert!(
+                loaded.core.scoped.staleness.results_stale
+                    && loaded.core.scoped.staleness.design_stale
+            );
+            let expected = if missing {
+                "入力識別情報"
+            } else {
+                "一致しません"
+            };
+            assert!(crate::summary::build_report_csv(&loaded).contains(expected));
+            if combo {
+                loaded.run_combination(0);
+            } else {
+                loaded.run_linear_static(LoadCaseId(0));
+            }
+            assert!(loaded.core.scoped.last_error.is_none());
+            assert!(!loaded
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .member_checks
+                .is_empty());
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+    let mut invalid_selection = calculated();
+    invalid_selection.core.scoped.last_static = Some(StaticKey::Combo(999));
+    let (loaded, path) = restore(
+        &invalid_selection,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(DESIGN_CONTRACT_VERSION),
+        "missing-selected-combo",
+    );
+    let bundle = loaded.core.scoped.results.as_ref().unwrap();
+    assert!(bundle.member_forces.is_empty() && bundle.panel_moments.is_empty());
+    assert!(bundle.member_checks.is_empty());
+    assert!(loaded.core.scoped.last_static.is_none());
+    std::fs::remove_file(path).unwrap();
+    let mut app = calculated();
+    app.core.model.axes.push(sepika_core::model::AxisGroup {
+        name: "表示だけの変更".into(),
+        kind: sepika_core::model::AxisGroupKind::Other,
+        axes: Vec::new(),
+    });
+    let (loaded, path) = restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(DESIGN_CONTRACT_VERSION),
+        "display-only-loaded",
+    );
+    assert!(!loaded.core.scoped.staleness.results_stale);
+    assert!(!loaded
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .is_empty());
+    std::fs::remove_file(path).unwrap();
+}

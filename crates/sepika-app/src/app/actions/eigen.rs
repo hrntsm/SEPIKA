@@ -37,7 +37,7 @@ impl App {
         let input = self.result_input(&input_key);
         match res {
             Ok(modal) => {
-                let mut bundle = self.core.scoped.results.take().unwrap_or_default();
+                let mut bundle = self.take_results_for_analysis();
                 bundle.record_input(input_key, input);
                 bundle.modal = Some(modal);
                 self.core.scoped.results = Some(bundle);

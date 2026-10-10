@@ -82,7 +82,7 @@ impl App {
     pub(crate) fn apply_lumped_mass_result(&mut self, res: Result<LumpedMassResult, String>) {
         match res {
             Ok(result) => {
-                let mut bundle = self.core.scoped.results.take().unwrap_or_default();
+                let mut bundle = self.take_results_for_analysis();
                 if result.response.is_some() {
                     let wave_name = self.lumped_th_wave_name();
                     let dir = lumped_vibration_dir_from_seismic(self.core.analysis_cfg.lumped_dir);

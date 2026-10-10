@@ -245,6 +245,12 @@ pub fn build_report_csv(app: &App) -> String {
         }
     }
 
+    if let Some(reason) = &app.core.scoped.result_contract_notice {
+        out.push_str(&format!(
+            "\n[計算契約]\n結果状態,利用不可\n理由,{}\n",
+            reason.replace(',', ";").replace('\n', " ")
+        ));
+    }
     let Some(results) = &app.core.scoped.results else {
         out.push_str("\n(解析結果なし)\n");
         return out;

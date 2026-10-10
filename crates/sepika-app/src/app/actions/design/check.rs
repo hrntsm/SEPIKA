@@ -63,14 +63,23 @@ impl App {
         {
             return;
         }
+        self.core.scoped.staleness.design_stale = true;
         if let Some(bundle) = self.core.scoped.results.as_mut() {
-            bundle.member_checks.clear();
-            bundle.joint_checks.clear();
-            bundle.wall_checks.clear();
-            bundle.beam_checks.clear();
-            bundle.slab_checks.clear();
+            bundle.clear_design_results();
         }
         self.apply_rigid_zones_for_analysis();
+        let has_frame_forces = self
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .is_some_and(|r| !r.member_forces.is_empty() || !r.panel_moments.is_empty());
+        if has_frame_forces || self.core.scoped.last_static.is_some() {
+            if let Err(reason) = self.require_selected_static_input() {
+                self.report_error(reason);
+                return;
+            }
+        }
         if let Err(error) = sepika_load::floor::validate_one_way_directions(&self.core.model) {
             self.report_error(error.to_string());
             return;
@@ -107,9 +116,11 @@ impl App {
             load_error =
                 Some("引張専用ブレースの別ケース合成は同一解を保証できないため未検定です".into());
         }
-        let Some(results) = &self.core.scoped.results else {
-            return;
-        };
+        self.core
+            .scoped
+            .results
+            .get_or_insert_with(ResultsBundle::default);
+        let results = self.core.scoped.results.as_ref().unwrap();
         let expanded_storage;
         let wall_index;
         let design_model: &sepika_core::model::Model =
@@ -213,6 +224,10 @@ impl App {
             bundle.wall_checks = report.wall_checks;
             bundle.beam_checks = beam_checks;
             bundle.slab_checks = slab_checks;
+            bundle.design_contract_version =
+                Some(sepika_core::result_contract::DESIGN_CONTRACT_VERSION);
+            self.core.scoped.staleness.design_stale = false;
+            self.clear_result_contract_notice();
         }
     }
 

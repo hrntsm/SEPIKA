@@ -264,6 +264,7 @@ impl App {
         self.apply_parallelism_setting();
         self.core.scoped.last_error = None;
         self.core.scoped.last_notice = None;
+        self.reject_result_contracts();
         self.ensure_preparation();
         self.core.scoped.last_error.is_none()
     }
