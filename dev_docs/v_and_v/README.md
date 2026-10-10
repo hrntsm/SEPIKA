@@ -101,7 +101,9 @@
 | [ファイバー材料モデル_論文照合_2026-07.md](ファイバー材料モデル_論文照合_2026-07.md) | MP/Mander/Yassin | ✅ |
 | [ファイバー形状_長期初期載荷_2026-07.md](ファイバー形状_長期初期載荷_2026-07.md) | ファイバー形状・長期荷重 | ✅ |
 | [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | パネルゾーン力学 | 🔶 |
-| [床荷重XY両方向分配_基準資料比較_2026-09.md](床荷重XY両方向分配_基準資料比較_2026-09.md) | 床荷重の XY 両方向分配（矩形 TriTrapezoid・非矩形 polygon 200×200）と基準資料 2.2.2 の最近接梁法の数値比較。等距離均等割りは #363 で本番実装済み（残るは U/C 字の格子位相残差と台形の収束確認） | 🔶 |
+| [床荷重XY両方向分配_基準資料比較_2026-09.md](床荷重XY両方向分配_基準資料比較_2026-09.md) | 2026-09時点の矩形/非矩形200×200比較記録。U/Cの現行VerificationはIssue437記録、台形の追加精度は#438 | 🔶 |
+
+| [凹形床の有限線分と格子積分_Issue437_2026-10.md](凹形床の有限線分と格子積分_Issue437_2026-10.md) | U/Cの独立解析辺面積、境界真面積、共有端点群、格子寸法/位相、回転/順序、実入口と異常/資源/精度診断。幾何Verification、実験Validationは未実施 | 🔶 |
 
 ### 敵対的レビュー・定式化レビュー
 
@@ -164,7 +166,7 @@
 | 8 | 線形静的解析 | sepika-solver | linear.rs | `test_*`（座標変換回帰 `test_beam_to_global_transverse_uses_correct_inertia` 含む） | P2 | ✅ |
 | 9 | 固有値解析 | sepika-solver | eigen.rs | `test_1dof_period` | P2 | ✅ |
 | 10 | Ai分布 | sepika-load | ai.rs | `test_*` | P2 | ✅ |
-| 11 | 床荷重分割 | sepika-load | floor.rs | `test_*` | P2 | ✅ |
+| 11 | 床荷重分割 | sepika-load | floor/{mod,polygon}.rs | `polygon::verification::*` / `distribution_verification::*` / `floor::tests::*`。幾何Verification済み、実験Validation未実施 | P2 | 🔶 |
 | 11a | 壁・間柱の自重支持先 | sepika-load / sepika-app | wall_plate_load.rs / cascade.rs | `wall_plate_load::tests`・`vertical_post_uses_explicit_end_shares`・`明示負担率で密度直接集計とdl集計の階重量が一致する` | [検証記録](壁版の支持範囲判定_2026-09.md) | 🔶（実測照合は未実施） |
 | 12 | 荷重組合せ | sepika-load | combo.rs | `test_combinations` | P2 | ✅ |
 | 13 | 許容応力度設計 | sepika-design-jp | allowable_stress.rs | `test_beam_check_bending_rect_section_hand_calc` 他 | P3 | ✅ |
