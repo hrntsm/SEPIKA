@@ -5,6 +5,64 @@ use sepika_core::model::{
     MemberDetailAttr, MemberJoint, Node, Section,
 };
 
+#[test]
+fn source_story_mcp_edit_query_diagnostics_and_snapshot_match_shared_command() {
+    let mut model = sample_model();
+    model.assign_stb_node_ids().unwrap();
+    model.source_stories.push(sepika_core::model::SourceStory {
+        id: 51,
+        guid: None,
+        name: "原階".into(),
+        height: 3000.0,
+        kind: sepika_core::model::SourceStoryKind::General,
+        id_dependence: None,
+        strength_concrete: Some("FC27".into()),
+        node_ids: vec![sepika_core::model::SourceStoryNode {
+            id: 2,
+            node: Some(NodeId(1)),
+        }],
+    });
+    let snapshot = model.clone();
+    let directory =
+        std::env::temp_dir().join(format!("sepika-source-story-mcp-{}", std::process::id()));
+    let mut state = ServerState::with_fs_store(model.clone(), &directory).unwrap();
+    let payload =
+        serde_json::json!({"command":"SetSourceStoryNodes", "source_story":51, "nodes":[0]});
+    assert!(apply_edit(&mut state, &payload).unwrap().applied);
+    let mut stack = UndoStack::new();
+    assert!(stack.run(
+        &mut model,
+        Box::new(sepika_edit::SetSourceStoryNodes {
+            source_story: 51,
+            nodes: vec![NodeId(0)]
+        })
+    ));
+    assert!(model.eq_ignoring_dofmap(&state.model));
+    assert_eq!(
+        query_model(&state.model, "source_stories", None)[0]["node_ids"][0]["id"],
+        1
+    );
+    let expected: Vec<_> = state
+        .model
+        .source_story_diagnostics()
+        .into_iter()
+        .chain(state.model.source_story_assignment_diagnostics())
+        .map(|message| serde_json::json!({"message":message}))
+        .collect();
+    assert_eq!(
+        query_model(&state.model, "source_story_diagnostics", None),
+        expected
+    );
+    assert_ne!(state.model.source_stories, snapshot.source_stories);
+    assert_eq!(snapshot.source_stories[0].node_ids[0].id, 2);
+    let error = apply_edit(&mut state, &serde_json::json!({"command":"SetSourceStoryNodes", "source_story":51, "nodes":[4294967295_u32]})).unwrap_err();
+    assert_eq!(error, "原階所属には実在する構造節点が必要です");
+    assert_eq!(state.undo.revision(), 1);
+    state.undo.undo(&mut state.model);
+    assert!(state.model.eq_ignoring_dofmap(&snapshot));
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
 fn sample_model() -> Model {
     Model {
         nodes: vec![

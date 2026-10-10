@@ -27,6 +27,12 @@ pub struct Model {
     pub sections: Vec<Section>,
     pub materials: Vec<Material>,
     pub stories: Vec<Story>,
+    /// STB の明示階。準備計算の解析所属とは別に保持する。
+    #[serde(default)]
+    pub source_stories: Vec<SourceStory>,
+    /// 節点の標準出力 ID/GUID。内部 ID の再採番で標準 ID は変えない。
+    #[serde(default)]
+    pub stb_node_ids: Vec<StbNodeIdentity>,
     /// 通り芯（各通りを識別するための呼称。[`AxisGroup`]）。**構造計算には
     /// 用いない**表示・識別専用のデータで、解析結果・設計結果には影響しない。
     #[serde(default)]
@@ -230,6 +236,35 @@ impl Model {
             .map_err(CoreError::InvalidInput)?;
 
         check_id_consistency(&self.nodes, "nodes", "NodeId", |n| n.id.index(), |n| n.id.0)?;
+        let mut stb_ids = std::collections::HashSet::new();
+        let mut stb_nodes = std::collections::HashSet::new();
+        for identity in &self.stb_node_ids {
+            if self.node(identity.node).is_none()
+                || !stb_ids.insert(identity.id)
+                || !stb_nodes.insert(identity.node)
+            {
+                return Err(CoreError::DanglingRef(format!(
+                    "STB節点識別子 {} -> Node {} が不整合",
+                    identity.id, identity.node.0
+                )));
+            }
+        }
+        for story in &self.source_stories {
+            for reference in &story.node_ids {
+                if let Some(node) = reference.node {
+                    if !self
+                        .stb_node_ids
+                        .iter()
+                        .any(|id| id.node == node && id.id == reference.id)
+                    {
+                        return Err(CoreError::DanglingRef(format!(
+                            "原階 {} -> STB節点 {} / Node {} が不整合",
+                            story.id, reference.id, node.0
+                        )));
+                    }
+                }
+            }
+        }
         self.validate_damper_weights()
             .map_err(CoreError::InvalidInput)?;
 
@@ -985,7 +1020,7 @@ impl Model {
     ///
     /// **`NodeId` を持つフィールドを `Model` へ新設したら、まず [`Model::visit_node_ids`]
     /// を更新し、次に該当フィールドがここでも参照有無を判定できることを確認すること**。
-    pub(crate) fn node_referenced_by_regions_or_plates(&self, id: NodeId) -> bool {
+    pub fn node_referenced_by_regions_or_plates(&self, id: NodeId) -> bool {
         self.load_cases
             .iter()
             .any(|lc| lc.nodal.iter().any(|nl| nl.node == id))
@@ -1049,6 +1084,8 @@ impl Model {
             && self.sections == other.sections
             && self.materials == other.materials
             && self.stories == other.stories
+            && self.source_stories == other.source_stories
+            && self.stb_node_ids == other.stb_node_ids
             && self.floor_regions == other.floor_regions
             && self.slabs == other.slabs
             && self.constraints == other.constraints
@@ -1113,6 +1150,16 @@ impl Model {
     /// **`NodeId` を持つフィールドを `Model` へ追加したら必ずここへ追随すること**
     /// （`validate`・`eq_ignoring_dofmap` と同様）。
     pub fn visit_node_ids(&mut self, mut f: impl FnMut(&mut NodeId)) {
+        for identity in &mut self.stb_node_ids {
+            f(&mut identity.node);
+        }
+        for story in &mut self.source_stories {
+            for reference in &mut story.node_ids {
+                if let Some(node) = &mut reference.node {
+                    f(node);
+                }
+            }
+        }
         for node in &mut self.nodes {
             f(&mut node.id);
         }

@@ -2,6 +2,49 @@ use super::*;
 use sepika_core::model::MaterialCategory;
 use sepika_core::model::{FloorRegion, Slab, SlabPlate, SlabShape};
 
+#[cfg(feature = "gui")]
+#[test]
+fn source_story_gui_membership_edit_invalidates_input_and_undo_restores_it() {
+    let fixture = include_str!("../../tests/fixtures/public_source_stories_497.stb");
+    let mut app = App::default();
+    app.load_model(sepika_io::stbridge::import_stbridge(fixture).unwrap());
+    let source = app.core.model.source_stories.clone();
+    let source_id = source.iter().find(|s| !s.node_ids.is_empty()).unwrap().id;
+    let key = result_validity::ResultInputKey::Modal;
+    let before = app.result_input(&key);
+    app.core.scoped.staleness.mark_fresh();
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::SetSourceStoryNodes {
+            source_story: source_id,
+            nodes: Vec::new(),
+        }));
+    app.apply_pending_story_command();
+    assert!(app.core.scoped.staleness.results_stale);
+    assert!(app.core.scoped.staleness.preparation_stale);
+    assert_ne!(app.result_input(&key), before);
+    app.undo_action();
+    assert_eq!(app.core.model.source_stories, source);
+    assert_eq!(app.result_input(&key), before);
+    app.redo_action();
+    assert_ne!(app.result_input(&key), before);
+    let revision = app.core.scoped.undo.revision();
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::SetSourceStoryNodes {
+            source_story: source_id,
+            nodes: vec![NodeId(u32::MAX)],
+        }));
+    app.apply_pending_story_command();
+    assert_eq!(app.core.scoped.undo.revision(), revision);
+    assert_eq!(
+        app.core.scoped.last_error.as_deref(),
+        Some("原階所属には実在する構造節点が必要です")
+    );
+}
+
 /// テストが書き込む一時ディレクトリ（プロセス ID 入り）。
 /// `std::env::temp_dir()` 直下へ固定名で書き込むと、同一マシンで並行する
 /// 別プロセスのテスト実行と衝突するため、プロセスごとに一意なサブディレクトリを

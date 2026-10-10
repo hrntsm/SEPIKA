@@ -40,6 +40,29 @@ struct CommandWithIdChanges {
     changes: Vec<IdChange>,
 }
 
+struct RestoreStbNodeIdentities {
+    command: Box<dyn EditCommand>,
+    identities: Vec<sepika_core::model::StbNodeIdentity>,
+}
+
+impl EditCommand for RestoreStbNodeIdentities {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let identities = model.stb_node_ids.clone();
+        let command = self.command.apply(model);
+        model.stb_node_ids = self.identities.clone();
+        Box::new(Self {
+            command,
+            identities,
+        })
+    }
+    fn label(&self) -> &str {
+        self.command.label()
+    }
+    fn inverse_id_changes(&self) -> Vec<IdChange> {
+        self.command.inverse_id_changes()
+    }
+}
+
 fn with_id_changes(command: Box<dyn EditCommand>, changes: Vec<IdChange>) -> Box<dyn EditCommand> {
     Box::new(CommandWithIdChanges { command, changes })
 }
@@ -148,6 +171,14 @@ impl UndoStack {
             self.last_error = Some(error.to_string());
             return false;
         }
+        if let Err(reason) = candidate.assign_stb_node_ids() {
+            self.last_error = Some(reason);
+            return false;
+        }
+        let inv: Box<dyn EditCommand> = Box::new(RestoreStbNodeIdentities {
+            command: inv,
+            identities: model.stb_node_ids.clone(),
+        });
         *model = candidate;
         self.id_changes = inv.inverse_id_changes();
         self.done.push(inv);

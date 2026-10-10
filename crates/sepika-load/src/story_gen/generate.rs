@@ -153,6 +153,10 @@ fn generate_stories_impl(
     mode: SelfWeightMode,
     mass_method: MassMethod,
 ) -> Result<StoryGenResult, String> {
+    let source_errors = model.source_story_diagnostics();
+    if !source_errors.is_empty() {
+        return Err(source_errors.join("\n"));
+    }
     model.validate_damper_weights()?;
     if model.nodes.is_empty() {
         return Err("節点がありません".into());
