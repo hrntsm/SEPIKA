@@ -25,7 +25,8 @@ use crate::common::tangent::{add_support_spring_f_int, assemble_k_cached, comput
 use crate::common::transaction::StateSnapshot;
 use crate::nonlinear::arc_length::ArcLengthSolver;
 use crate::statics::analysis::{
-    building_height_mm, distribute_pi_over_diaphragms, steel_height_ratio, SeismicDir,
+    build_seismic_load_case_from_model, building_height_mm, steel_height_ratio, SeismicCfg,
+    SeismicDir,
 };
 use sepika_core::dof::DofMap;
 use sepika_core::model::Model;
@@ -156,36 +157,21 @@ pub fn pushover_analysis_recording(
     let height_m = building_height_mm(model) / 1000.0;
     let steel_ratio = steel_height_ratio(model);
     let t = sepika_load::ai::approx_t(height_m, steel_ratio);
-    let z = 1.0;
-    let tc = sepika_load::ai::tc_of(sepika_load::ai::SoilClass::II);
-    let rt_val = sepika_load::ai::rt(t, tc);
-    let c0 = 0.2;
-    let story_weights: Vec<f64> = layers.iter().map(|l| l.weight.unwrap_or(0.0)).collect();
-    if story_weights.iter().all(|&w| w == 0.0) {
-        return Err("no seismic weight defined".into());
-    }
-    let ai = sepika_load::ai::ai_distribution(&story_weights, z, rt_val, c0, t);
-
-    let dir_vec = match dir {
-        SeismicDir::X => [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        SeismicDir::Y => [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-    };
+    let load_case = build_seismic_load_case_from_model(
+        model,
+        SeismicCfg {
+            dir,
+            ..SeismicCfg::default()
+        },
+        t,
+    )
+    .map_err(|e| e.to_string())?;
     let mut q = vec![0.0; n_active];
-    for layer in &layers {
-        let pi = ai.pi.get(layer.index).copied().unwrap_or(0.0);
-        if pi == 0.0 {
-            continue;
-        }
-        let Some(story) = model.stories.get(layer.top.index()) else {
-            continue;
-        };
-        for (master, share) in distribute_pi_over_diaphragms(model, story, pi) {
-            let ni = master.index();
-            for d in 0..6 {
-                let g = ni * 6 + d;
-                if let Some(a) = dofmap.active(g) {
-                    q[a as usize] += dir_vec[d] * share;
-                }
+    for load in &load_case.nodal {
+        for (d, value) in load.values.iter().enumerate() {
+            let g = load.node.index() * 6 + d;
+            if let Some(a) = dofmap.active(g) {
+                q[a as usize] += value;
             }
         }
     }
