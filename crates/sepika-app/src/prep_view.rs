@@ -856,13 +856,6 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                             c.as_z * 1e-2
                         ),
                     ),
-                    (None, Some(CompositeFallbackKind::SrcNsDefault)) => (
-                        format!("{}（既定値 15）", r.section_name),
-                        "材料からヤング係数比を算定できないため、既定値 N_S_EQ=15 で\
-                         鉄骨を等価換算しています（暫定値・要照合）。\
-                         診断タブにも警告が出ます。"
-                            .to_string(),
-                    ),
                     (None, Some(CompositeFallbackKind::CftSteelOnly)) => (
                         format!("{}（鋼管のみ）", r.section_name),
                         "材料由来の等価断面性能を算定できないため、充填コンクリートを\
@@ -907,7 +900,7 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
          強軸曲げの増大率、「壁上下梁」は壁エレメント上下大梁の一律倍率です。\
          「実効 Iy」は等価換算とこれらをすべて適用した強軸曲げ剛性用の値で、\
           フレーム内雑壁（腰壁・垂壁・袖壁）の算入分は含みません。\
-          材料から等価断面性能を算定できない SRC/CFT は、既定値で評価した行も表示します。",
+          SRC の材料が不正な場合は準備計算を停止し、理由をエラー表示します。",
     );
 }
 

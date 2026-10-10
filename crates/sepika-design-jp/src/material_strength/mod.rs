@@ -52,6 +52,22 @@ mod tests {
     }
 
     #[test]
+    fn allowable_bending_ratio_boundaries_are_separate_from_analysis_ratio() {
+        for (fc, expected) in [
+            (27.0, 15.0),
+            (27.0001, 13.0),
+            (36.0, 13.0),
+            (36.0001, 11.0),
+            (48.0, 11.0),
+            (48.0001, 9.0),
+            (60.0, 9.0),
+        ] {
+            assert_eq!(young_ratio_n(fc), expected);
+            assert_ne!(young_ratio_n(fc), 205000.0 / 20500.0);
+        }
+    }
+
+    #[test]
     fn test_young_ratio_n_buckets() {
         assert_eq!(young_ratio_n(24.0), 15.0);
         assert_eq!(young_ratio_n(27.0), 15.0);

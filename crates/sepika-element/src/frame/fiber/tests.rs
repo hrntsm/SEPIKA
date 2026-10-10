@@ -3652,3 +3652,226 @@ fn test_rc_circle_fibers_match_circle_area() {
     let n_rebar = sec.fibers.iter().filter(|f| f.material == 1).count();
     assert_eq!(n_rebar, 8);
 }
+
+fn src_analysis_ratio_model() -> Model {
+    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+    let mut model = build_test_model(None);
+    let shape = SectionShape::SrcColumnRect {
+        b: 300.0,
+        d: 600.0,
+        rebar: RcRectColumnRebar {
+            main_dia: 0.0,
+            x: vec![],
+            y: vec![],
+            cover: 40.0,
+            hoop: RectColumnHoop {
+                dia: 0.0,
+                pitch: 100.0,
+                legs_x: 0,
+                legs_y: 0,
+            },
+        },
+        steel_height: 400.0,
+        steel_width: 200.0,
+        steel_web_thick: 8.0,
+        steel_flange_thick: 12.0,
+    };
+    model.sections[0] = Section {
+        material: Some(MaterialId(0)),
+        steel_material: Some(MaterialId(1)),
+        ..shape.to_section(SectionId(0), "SRC434".into())
+    };
+    let concrete = &mut model.materials[0];
+    concrete.category = MaterialCategory::Concrete;
+    concrete.young = 20500.0;
+    concrete.poisson = 0.2;
+    concrete.density = 2.4e-9;
+    concrete.fc = Some(27.0);
+    concrete.fy = None;
+    concrete.concrete_class = sepika_core::units::ConcreteClass::UserDefined;
+    let mut steel = concrete.clone();
+    steel.id = MaterialId(1);
+    steel.category = MaterialCategory::Steel;
+    steel.young = 205000.0;
+    steel.poisson = 0.3;
+    steel.fc = None;
+    steel.fy = Some(235.0);
+    model.materials.push(steel);
+    model
+}
+
+#[test]
+fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
+    use crate::frame::beam::BeamElement;
+    use crate::frame::multi_spring::MultiSpringElement;
+    let model = src_analysis_ratio_model();
+    let data = &model.elements[0];
+    let beam = BeamElement::try_new(data, &model).unwrap();
+    let expected_d = [5130576000.0, 30629959872000.0, 150579426048000.0];
+    assert_eq!(beam.a, 250272.0);
+    assert_eq!(beam.a_mass, 180000.0);
+    assert_ne!(beam.iz, model.sections[0].iy);
+
+    let full = FiberBeam::try_new(
+        data,
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    )
+    .unwrap();
+    assert_eq!(full.torsion_j, beam.j);
+    assert_eq!(
+        full.torsion_stiffness().unwrap(),
+        beam.g * beam.j / beam.length
+    );
+    assert!(full.torsion_j > model.sections[0].j);
+
+    let plastic = FiberBeam::with_plastic_zone(
+        data,
+        &model,
+        300.0,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    );
+    let multi = MultiSpringElement::new(
+        data,
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    );
+    for fiber in [&plastic, &multi.inner] {
+        let h = fiber.hinge.as_ref().unwrap();
+        for (actual, expected) in h.d_nom.into_iter().zip(expected_d) {
+            assert_relative_eq!(actual, expected, max_relative = 1e-12);
+        }
+        assert_relative_eq!(
+            h.k_el.get(0, 0),
+            expected_d[0] / fiber.flex_length,
+            max_relative = 1e-12
+        );
+        assert_eq!(fiber.initial_elastic_stiffness.get(0, 0), h.k_el.get(0, 0));
+        assert_eq!(fiber.torsion_j, beam.j);
+        assert_eq!(fiber.mass_properties, beam.mass_properties);
+        let mass = fiber.mass_matrix(crate::behavior::MassOption::Consistent);
+        let total_x = mass.get(0, 0) + mass.get(0, 6) + mass.get(6, 0) + mass.get(6, 6);
+        assert_relative_eq!(
+            total_x,
+            beam.mass_properties.total_mass(beam.length),
+            max_relative = 1e-12
+        );
+    }
+
+    let ctx = Ctx { model: &model };
+    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+        let mut data = data.clone();
+        data.kind = kind;
+        let behavior = crate::factory::build_nonlinear_behavior(
+            &data,
+            &model,
+            StrengthBasis::Nominal,
+            AnalysisKind::Incremental,
+        );
+        let k = behavior.tangent_stiffness(&ctx);
+        assert_relative_eq!(
+            k.get(0, 0),
+            expected_d[0] / beam.length,
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(
+            k.get(3, 3),
+            beam.g * beam.j / beam.length,
+            max_relative = 1e-12
+        );
+    }
+
+    let mut spring_data = data.clone();
+    spring_data.kind = ElementKind::Beam;
+    spring_data.force_regime = ForceRegime::UniaxialBendingShear;
+    let behavior = crate::factory::build_nonlinear_behavior(
+        &spring_data,
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    );
+    let snapshot = behavior.snapshot_state();
+    let state = snapshot
+        .downcast_ref::<(
+            Vec<Box<dyn sepika_material::uniaxial::UniaxialMaterial>>,
+            [f64; 4],
+            [f64; 4],
+            [f64; 12],
+            [f64; 12],
+        )>()
+        .unwrap();
+    let expected_k_rot = 6.0 * 150579426048000.0 / 3000.0;
+    for spring in &state.0 {
+        assert_relative_eq!(spring.probe(0.0).1, expected_k_rot, max_relative = 1e-12);
+    }
+    assert_relative_eq!(
+        behavior.tangent_stiffness(&ctx).get(0, 0),
+        expected_d[0] / beam.length,
+        max_relative = 1e-12
+    );
+}
+
+#[test]
+fn src_nonlinear_entries_reject_invalid_materials_instead_of_provisional_properties() {
+    let mut cases = Vec::new();
+    for value in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut model = src_analysis_ratio_model();
+        model.materials[0].young = value;
+        cases.push(model);
+        let mut model = src_analysis_ratio_model();
+        model.materials[0].fc = Some(value);
+        cases.push(model);
+    }
+    for value in [-1.0, 0.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut model = src_analysis_ratio_model();
+        model.materials[0].poisson = value;
+        cases.push(model);
+    }
+    let mut missing_fc = src_analysis_ratio_model();
+    missing_fc.materials[0].fc = None;
+    cases.push(missing_fc);
+    let mut unassigned = src_analysis_ratio_model();
+    unassigned.sections[0].material = None;
+    cases.push(unassigned);
+    for model in cases {
+        let data = &model.elements[0];
+        assert!(FiberBeam::try_new(
+            data,
+            &model,
+            StrengthBasis::Nominal,
+            AnalysisKind::Incremental
+        )
+        .is_err());
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            FiberBeam::with_plastic_zone(
+                data,
+                &model,
+                300.0,
+                StrengthBasis::Nominal,
+                AnalysisKind::Incremental,
+            )
+        }))
+        .is_err());
+        for (kind, regime) in [
+            (ElementKind::Fiber, ForceRegime::Auto),
+            (ElementKind::MultiSpring, ForceRegime::Auto),
+            (ElementKind::Beam, ForceRegime::UniaxialBendingShear),
+        ] {
+            let mut data = data.clone();
+            data.kind = kind;
+            data.force_regime = regime;
+            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::factory::build_nonlinear_behavior(
+                    &data,
+                    &model,
+                    StrengthBasis::Nominal,
+                    AnalysisKind::Incremental,
+                )
+            }))
+            .is_err());
+        }
+    }
+}

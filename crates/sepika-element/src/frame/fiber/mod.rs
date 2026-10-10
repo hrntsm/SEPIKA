@@ -655,9 +655,16 @@ impl FiberBeam {
         let sec = data.section.and_then(|sid| model.sections.get(sid.index()));
         let width = sec.map(|s| s.width).unwrap_or(0.0);
         let depth = sec.map(|s| s.depth).unwrap_or(0.0);
-        let torsion_j = sec.map(|s| s.j).unwrap_or(0.0);
-
         let beam_props = crate::frame::beam::BeamElement::try_new(data, model)?;
+        let is_src = sec
+            .and_then(|s| s.shape.as_ref())
+            .and_then(sepika_core::structure_kind::shape_composite_kind)
+            == Some(sepika_core::structure_kind::StructureKind::Src);
+        let torsion_j = if is_src {
+            beam_props.j
+        } else {
+            sec.map(|s| s.j).unwrap_or(0.0)
+        };
         let density = beam_props.density;
         let e = beam_props.e;
         let g = beam_props.g;
@@ -948,7 +955,17 @@ impl FiberBeam {
             GaussPoint::new(1.0, w_end, sec_b, mats_b, l, fb.phi_y, fb.phi_z),
         ];
 
-        let d_nom = [e * area, e * iy, e * iz];
+        let d_nom = if sec
+            .and_then(|s| s.shape.as_ref())
+            .and_then(sepika_core::structure_kind::shape_composite_kind)
+            == Some(sepika_core::structure_kind::StructureKind::Src)
+        {
+            let beam = crate::frame::beam::BeamElement::try_new(data, model)
+                .expect("Self::new で SRC の等価断面性能を検証済み");
+            [beam.e * beam.a, beam.e * beam.iy, beam.e * beam.iz]
+        } else {
+            [e * area, e * iy, e * iz]
+        };
         let mut k_el = LocalMat::zeros(12);
         for sgn in [-1.0_f64, 1.0] {
             let xi = sgn / 3.0_f64.sqrt();

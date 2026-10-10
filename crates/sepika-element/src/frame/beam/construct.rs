@@ -1,7 +1,7 @@
 //! モデルデータからの [`BeamElement`] 構築。
 
 use super::element::BeamElement;
-use super::stiffness_factors::{breakdown_with, composite_props_with};
+use super::stiffness_factors::breakdown_with;
 use crate::frame::section_lookup::{get_material, get_section, sec_material};
 use sepika_core::ids::NodeId;
 use sepika_core::model::Model;
@@ -82,19 +82,8 @@ impl BeamElement {
             }
             _ => (mat.young, mat.shear_modulus()),
         };
-        let composite = sec
-            .shape
-            .as_ref()
-            .and_then(|shape| composite_props_with(shape, &mat, steel_mat));
-
-        let a_stiff = match (&composite, &sec.shape) {
-            (Some(p), _) => p.area_ax,
-            (None, Some(shape @ SectionShape::SrcBeamRect { .. }))
-            | (None, Some(shape @ SectionShape::SrcColumnRect { .. })) => {
-                shape.calc_axial_stiffness_area()
-            }
-            _ => sec.area,
-        };
+        let composite = super::stiffness_factors::composite_props_of(model, data)?;
+        let a_stiff = composite.map_or(sec.area, |p| p.area_ax);
         let (sec_iy, sec_iz, j, sec_as_y, sec_as_z) = match &composite {
             Some(p) => (p.iy, p.iz, p.j, p.as_y, p.as_z),
             None => (sec.iy, sec.iz, sec.j, as_y, as_z),
