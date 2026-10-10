@@ -788,6 +788,7 @@ fn draw_legend(
     let ng_count = elem_ratios
         .values()
         .chain(node_ratios.values())
+        .chain(wall_ratios.iter())
         .filter(|&&(_, ok)| !ok)
         .count();
 
@@ -1401,6 +1402,60 @@ mod tests {
         )
         .is_none());
     }
+    #[test]
+    fn wall_ng_real_egui_legend_matches_ratio_filter() {
+        use sepika_core::ids::WallPlateId;
+        use sepika_design_jp::wall_check::{WallCheck, WallCheckKind};
+        let mut app = App::default();
+        app.core.model = crate::sample::portal_frame();
+        let mut results = crate::app::ResultsBundle::default();
+        results.wall_checks.push(WallCheck {
+            plate: Some(WallPlateId(0)),
+            elem: Some(ElemId(10)),
+            node: Some(NodeId(0)),
+            case: "case:0".into(),
+            kind: WallCheckKind::AllowableShear,
+            seismic_target: true,
+            skip_kind: None,
+            outcome: checked(
+                1.25,
+                vec![CheckComponent {
+                    kind: CheckKind::Shear,
+                    ratio: 1.25,
+                    detail: String::new(),
+                }],
+            ),
+        });
+        app.core.scoped.results = Some(results);
+        for (filter, expected) in [
+            (CheckRatioFilter::Max, "max=1.25, NG 1件"),
+            (CheckRatioFilter::Kind(CheckKind::Shear), "max=1.25, NG 1件"),
+            (CheckRatioFilter::Kind(CheckKind::Bending), "max=-, NG 0件"),
+        ] {
+            app.ui.view.check_ratio_filter = filter;
+            let context = egui::Context::default();
+            let output = context.run_ui(egui::RawInput::default(), |ui| {
+                draw_check_ratio(
+                    ui.painter(),
+                    &app,
+                    &app.core.model,
+                    &[egui::pos2(100.0, 100.0); 4],
+                    Default::default(),
+                );
+            });
+            let title = output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some(t.galley.job.text.as_str()),
+                    _ => None,
+                })
+                .find(|text| text.starts_with("検定比図 (対象:"))
+                .unwrap();
+            assert!(title.contains(expected), "{title}");
+        }
+    }
+
     #[test]
     fn wall_tooltip_real_egui_keeps_two_walls_on_same_node_and_empty_max() {
         use sepika_core::ids::WallPlateId;

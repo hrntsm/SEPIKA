@@ -1774,6 +1774,34 @@ fn wall_status_missing_empty_invalid_response_and_self_weight_are_distinct() {
 }
 
 #[test]
+fn wall_status_slit_stays_outside_with_or_without_section() {
+    use crate::wall_check::{WallCheckSummary, WallSkipKind};
+    let (mut source, _) = status_wall_model();
+    source.elements.retain(|e| e.kind != ElementKind::Wall);
+    source.wall_attrs.clear();
+    source.wall_plates.truncate(1);
+    source.wall_regions[0].wall_plate_ids.truncate(1);
+    source.wall_plates[0].slit.beam_face[0] = true;
+    for section in [Some(SectionId(0)), None] {
+        source.wall_plates[0].section = section;
+        let (model, index, _) = sepika_load::wall_expand::expand_wall_elements(&source);
+        let checks =
+            collect_wall_design_checks(&model, &[], LoadTerm::Short, Some(&index), "case:0");
+        assert_eq!(checks.len(), 2);
+        assert!(checks
+            .iter()
+            .all(|w| !w.seismic_target && w.skip_kind == Some(WallSkipKind::NotApplicable)));
+        let summary = WallCheckSummary::from_checks(&checks);
+        assert_eq!(
+            (summary.n_walls, summary.n_skipped, summary.n_outside),
+            (0, 0, 2)
+        );
+        assert_eq!(summary.max_ratio, None);
+        assert!(checks.iter().all(|w| w.elem.is_some() == section.is_some()));
+    }
+}
+
+#[test]
 fn wall_status_ungenerated_missing_section_and_attached_weight_only_remain_visible() {
     use crate::wall_check::{WallCheckSummary, WallSkipKind};
     use sepika_core::model::{LoadTransfer, RegionAnchor, WallPlateShape};

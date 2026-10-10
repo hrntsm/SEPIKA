@@ -616,8 +616,9 @@ pub(super) fn collect_wall_design_checks(
             || match elem {
                 Some(e) => sepika_element::wall::misc_wall::wall_is_seismic(e, model),
                 None => plate.is_some_and(|p| {
-                    model.wall_plate_covers_region(p)
-                        || (!p.is_attached() && p.boundary_nodes(model).is_none())
+                    !p.slit.any()
+                        && (model.wall_plate_covers_region(p)
+                            || (!p.is_attached() && p.boundary_nodes(model).is_none()))
                 }),
             };
         let section = elem
