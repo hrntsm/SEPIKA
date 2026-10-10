@@ -295,9 +295,10 @@ fn compute_nonlinear_time_history(
     damping: sepika_solver::dynamic::damping::Damping,
 ) -> JobResult<sepika_solver::dynamic::timehistory::ResponseResult> {
     let model = model;
-    sepika_element::factory::ensure_nonlinear_input_for_kind(
+    sepika_element::factory::ensure_nonlinear_input_with_basis(
         &model,
         sepika_core::model::AnalysisKind::TimeHistory,
+        sepika_element::factory::StrengthBasis::Nominal,
     )
     .map_err(|e| {
         JobError::InvalidInput(format!("非線形時刻歴（部材耐力を算定できません）:\n{e}"))

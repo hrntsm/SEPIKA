@@ -97,9 +97,10 @@ pub fn nonlinear_time_history_analysis(
         .map_err(SolveError::InvalidInput)?;
     sepika_math::parallelism::apply_to_faer();
 
-    sepika_element::factory::ensure_nonlinear_input_for_kind(
+    sepika_element::factory::ensure_nonlinear_input_with_basis(
         model,
         sepika_core::model::AnalysisKind::TimeHistory,
+        sepika_element::factory::StrengthBasis::Nominal,
     )
     .map_err(SolveError::InvalidInput)?;
     let active_cases: Vec<_> = model

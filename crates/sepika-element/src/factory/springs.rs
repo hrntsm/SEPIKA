@@ -381,6 +381,7 @@ pub(super) fn rc_reference_issue(
     data: &ElementData,
     model: &Model,
     rule: HysteresisModel,
+    basis: StrengthBasis,
 ) -> Option<String> {
     if let Some(issue) = rc_reference_target_issue(data, model) {
         return Some(issue);
@@ -428,7 +429,7 @@ pub(super) fn rc_reference_issue(
         Ok(alpha) => alpha,
         Err(error) => return Some(error.to_string()),
     };
-    let my = flexural_yield_moment(data, model, StrengthBasis::Nominal);
+    let my = flexural_yield_moment(data, model, basis);
     let mc = match rc_reference_crack_moment(data, model) {
         Ok(mc) => mc,
         Err(error) => return Some(error),
@@ -546,7 +547,7 @@ pub(super) fn build_flexural_springs(
                 | HysteresisModel::MaxPointOriented
         );
     if rc_reference {
-        if let Some(issue) = rc_reference_issue(data, model, rule) {
+        if let Some(issue) = rc_reference_issue(data, model, rule, basis) {
             panic!("{issue}");
         }
         k_rot = rc_reference_stiffness(data, model).expect("RC基準剛性の入力診断が必要です");

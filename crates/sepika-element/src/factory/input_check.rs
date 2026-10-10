@@ -33,10 +33,18 @@ pub fn nonlinear_input_issues(model: &Model) -> Vec<String> {
     nonlinear_input_issues_for_kind(model, sepika_core::model::AnalysisKind::Incremental)
 }
 
-/// 当該解析種別の履歴則と共通材料・幾何を診断する。未実行側の履歴則は拒否根拠にしない。
+/// 公称値で当該解析種別の履歴則と共通材料・幾何を診断する。未実行側の履歴則は拒否根拠にしない。
 pub fn nonlinear_input_issues_for_kind(
     model: &Model,
     kind: sepika_core::model::AnalysisKind,
+) -> Vec<String> {
+    nonlinear_input_issues_with_basis(model, kind, super::StrengthBasis::Nominal)
+}
+
+fn nonlinear_input_issues_with_basis(
+    model: &Model,
+    kind: sepika_core::model::AnalysisKind,
+    basis: super::StrengthBasis,
 ) -> Vec<String> {
     let mut issues = Vec::new();
     for elem in &model.elements {
@@ -54,6 +62,7 @@ pub fn nonlinear_input_issues_for_kind(
                         elem,
                         model,
                         super::springs::resolve_member_hysteresis(elem, model, kind),
+                        basis,
                     )
                     .map(|issue| format!("部材 ID {} のRC梁基準接続: {issue}", elem.id.0))
                 })
@@ -67,18 +76,47 @@ pub fn nonlinear_input_issues_for_kind(
     issues
 }
 
+/// 明示RC梁基準の入力診断。未指定なら `None`、不適合なら当該解析種別の理由を返す。
+pub fn rc_beam_reference_input_issue(
+    data: &ElementData,
+    model: &Model,
+    kind: sepika_core::model::AnalysisKind,
+    basis: super::StrengthBasis,
+) -> Option<String> {
+    model.member_rc_beam_reference(data.id)?;
+    super::springs::rc_reference_target_issue(data, model)
+        .or_else(|| member_strength_issue(data, model))
+        .or_else(|| {
+            super::springs::rc_reference_issue(
+                data,
+                model,
+                super::springs::resolve_member_hysteresis(data, model, kind),
+                basis,
+            )
+        })
+}
+
 /// [`nonlinear_input_issues`] が不備を検出した場合に、解析を停止するための
 /// エラーメッセージ（先頭 [`MAX_LISTED`] 件＋残件数）を返す。
 pub fn ensure_nonlinear_input(model: &Model) -> Result<(), String> {
     ensure_nonlinear_input_for_kind(model, sepika_core::model::AnalysisKind::Incremental)
 }
 
-/// 解析種別を指定して理由付き入力診断を行う。
+/// 公称値で解析種別を指定して理由付き入力診断を行う。材料強度基準には `ensure_nonlinear_input_with_basis` を使う。
 pub fn ensure_nonlinear_input_for_kind(
     model: &Model,
     kind: sepika_core::model::AnalysisKind,
 ) -> Result<(), String> {
-    let issues = nonlinear_input_issues_for_kind(model, kind);
+    ensure_nonlinear_input_with_basis(model, kind, super::StrengthBasis::Nominal)
+}
+
+/// 当該解析種別と実使用強度基準に整合する理由付き入力診断。
+pub fn ensure_nonlinear_input_with_basis(
+    model: &Model,
+    kind: sepika_core::model::AnalysisKind,
+    basis: super::StrengthBasis,
+) -> Result<(), String> {
+    let issues = nonlinear_input_issues_with_basis(model, kind, basis);
     if issues.is_empty() {
         return Ok(());
     }

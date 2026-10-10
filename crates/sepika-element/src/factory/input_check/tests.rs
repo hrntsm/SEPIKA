@@ -1102,3 +1102,80 @@ fn unspecified_rc_basis_preserves_the_existing_fiber_path() {
         }
     }
 }
+
+#[test]
+fn rc_reference_backbone_diagnostics_follow_the_actual_strength_basis() {
+    use crate::factory::StrengthBasis;
+    use sepika_core::model::AnalysisKind;
+    let base = explicit_rc_reference_fixture();
+    let view = |model: &Model, basis| {
+        crate::factory::build_hinge_view(
+            &model.elements[0],
+            model,
+            basis,
+            AnalysisKind::Incremental,
+            0.0,
+            8,
+            24,
+        )
+        .unwrap()
+    };
+    let nominal = view(&base, StrengthBasis::Nominal).total_backbone.unwrap();
+    for factor in [0.1, 0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut model = base.clone();
+        model.materials[1].strength_factor = Some(factor);
+        assert!(ensure_nonlinear_input_with_basis(
+            &model,
+            AnalysisKind::Incremental,
+            StrengthBasis::Nominal
+        )
+        .is_ok());
+        assert_eq!(
+            view(&model, StrengthBasis::Nominal).total_backbone.as_ref(),
+            Some(&nominal)
+        );
+        let _nominal = crate::factory::build_nonlinear_behavior(
+            &model.elements[0],
+            &model,
+            StrengthBasis::Nominal,
+            AnalysisKind::TimeHistory,
+        );
+        let reason = ensure_nonlinear_input_with_basis(
+            &model,
+            AnalysisKind::Incremental,
+            StrengthBasis::MaterialStrength,
+        )
+        .unwrap_err();
+        let unavailable = view(&model, StrengthBasis::MaterialStrength);
+        assert!(unavailable.backbone.is_none());
+        assert!(unavailable.total_backbone.is_none());
+        assert!(reason.contains(&unavailable.unavailability_reason.unwrap()));
+        let result = std::panic::catch_unwind(|| {
+            crate::factory::build_nonlinear_behavior(
+                &model.elements[0],
+                &model,
+                StrengthBasis::MaterialStrength,
+                AnalysisKind::Incremental,
+            )
+        });
+        let factory_reason = *result.err().unwrap().downcast::<String>().unwrap();
+        assert_eq!(factory_reason, reason);
+        if factor == 0.1 {
+            assert!(reason.contains("Mc<My"), "{reason}");
+        } else {
+            assert!(reason.contains("My"), "{reason}");
+        }
+    }
+    let mut reduced = base.clone();
+    reduced.materials[1].strength_factor = Some(0.8);
+    assert!(ensure_nonlinear_input_with_basis(
+        &reduced,
+        AnalysisKind::Incremental,
+        StrengthBasis::MaterialStrength
+    )
+    .is_ok());
+    let backbone = view(&reduced, StrengthBasis::MaterialStrength)
+        .total_backbone
+        .unwrap();
+    assert!((backbone[2][1] - nominal[2][1] * 0.8).abs() < 1e-6);
+}

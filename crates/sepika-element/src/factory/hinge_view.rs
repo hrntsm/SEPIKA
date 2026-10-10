@@ -137,7 +137,7 @@ fn beam_view(
     if resolves_to_concentrated_spring(data, model) {
         let rule = resolve_member_hysteresis(data, model, kind);
         if let Some(reason) = super::input_check::member_strength_issue(data, model)
-            .or_else(|| super::springs::rc_reference_issue(data, model, rule))
+            .or_else(|| super::springs::rc_reference_issue(data, model, rule, basis))
         {
             let mut view = HingeView::none(AnalysisHingeModel::ConcentratedSpring);
             view.unavailability_reason = Some(reason);

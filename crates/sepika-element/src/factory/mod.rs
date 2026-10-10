@@ -24,8 +24,9 @@ pub use hinge_view::{
     build_hinge_view, resolves_to_concentrated_spring, AnalysisHingeModel, HingeView,
 };
 pub use input_check::{
-    ensure_nonlinear_input, ensure_nonlinear_input_for_kind, ensure_rc_beam_reference_loads,
-    nonlinear_input_issues, nonlinear_input_issues_for_kind,
+    ensure_nonlinear_input, ensure_nonlinear_input_for_kind, ensure_nonlinear_input_with_basis,
+    ensure_rc_beam_reference_loads, nonlinear_input_issues, nonlinear_input_issues_for_kind,
+    rc_beam_reference_input_issue,
 };
 pub use regime::{resolve_force_regime, ResolvedRegime};
 pub use sepika_core::model::AnalysisKind;
@@ -209,7 +210,7 @@ pub fn build_nonlinear_behavior(
                     }
                     let elem = crate::frame::beam::BeamElement::new(data, model);
                     let rule = resolve_member_hysteresis(data, model, kind);
-                    if let Some(issue) = springs::rc_reference_issue(data, model, rule) {
+                    if let Some(issue) = springs::rc_reference_issue(data, model, rule, basis) {
                         panic!("部材 ID {} のRC梁基準接続: {issue}", data.id.0);
                     }
                     let (spring_i, spring_j, backbone) =

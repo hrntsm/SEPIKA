@@ -125,9 +125,10 @@ pub fn pushover_analysis_recording(
 
     let mut st = SolverState::new(n_active, reducer.n_indep);
 
-    sepika_element::factory::ensure_nonlinear_input_for_kind(
+    sepika_element::factory::ensure_nonlinear_input_with_basis(
         model,
         sepika_core::model::AnalysisKind::Incremental,
+        sepika_element::factory::StrengthBasis::MaterialStrength,
     )?;
     let active_cases: Vec<_> = model
         .load_cases
