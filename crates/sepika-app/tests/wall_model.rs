@@ -723,10 +723,42 @@ fn wall_fixture_weight_change_is_the_independent_fillet_area_increment() {
 #[test]
 fn test_wall_shear_check_appears_after_run_design_check() {
     let mut app = wall_bay_app();
+    let wall_section = &mut app.core.model.sections[2];
+    wall_section.rebar_material = Some(MaterialId(2));
+    wall_section.shear_rebar_material = Some(MaterialId(2));
+    if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut wall_section.shape {
+        *pwh_ratio = Some(0.0025);
+    }
     app.run_preparation();
     assert!(
         app.core.scoped.last_error.is_none(),
         "準備計算: {:?}",
+        app.core.scoped.last_error
+    );
+    let live_id = sepika_core::ids::LoadCaseId(
+        app.core
+            .model
+            .load_cases
+            .iter()
+            .map(|c| c.id.0)
+            .max()
+            .unwrap()
+            + 1,
+    );
+    app.core
+        .model
+        .load_cases
+        .push(sepika_core::model::LoadCase {
+            id: live_id,
+            name: "無載荷の架構用P".into(),
+            kind: sepika_core::model::LoadCaseKind::Live,
+            nodal: vec![],
+            member: vec![],
+        });
+    app.auto_generate_combinations_action();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
         app.core.scoped.last_error
     );
     app.run_static_all();
@@ -734,6 +766,11 @@ fn test_wall_shear_check_appears_after_run_design_check() {
         app.core.scoped.last_error.is_none(),
         "静的解析: {:?}",
         app.core.scoped.last_error
+    );
+    app.select_displayed_result(sepika_app::app::StaticKey::Combo(1));
+    assert_eq!(
+        app.core.scoped.last_static,
+        Some(sepika_app::app::StaticKey::Combo(1))
     );
     app.run_design_check();
 

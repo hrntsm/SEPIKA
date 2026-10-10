@@ -1303,7 +1303,7 @@ fn story_metrics_computed_for_every_layer() {
     let app = analyzed();
     let results = app.core.scoped.results.as_ref().expect("解析結果");
     let ex = static_of(&app, StaticCaseKey::Seismic(SeismicDir::X));
-    let ctx = sepika_app::summary::metrics_ctx_from_results(Some(results));
+    let ctx = sepika_app::summary::metrics_ctx_from_results(&app.core.model, Some(results));
     let metrics = sepika_app::summary::compute_story_metrics_with(
         &app.core.model,
         &ex.disp,
@@ -2428,7 +2428,7 @@ fn snapshot_key_scalars() {
     line("design.beam_max_ratio", sig4(beam_max_ratio));
 
     // --- 層指標 ---
-    let ctx = sepika_app::summary::metrics_ctx_from_results(Some(results));
+    let ctx = sepika_app::summary::metrics_ctx_from_results(&app.core.model, Some(results));
     let metrics = sepika_app::summary::compute_story_metrics_with(
         &app.core.model,
         &ex.disp,

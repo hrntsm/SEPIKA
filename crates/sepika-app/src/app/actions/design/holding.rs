@@ -96,7 +96,10 @@ impl App {
         if saved_ds.is_some() && saved_capacity.is_some() {
             dependencies.retain(|key| !matches!(key, ResultInputKey::Pushover(_)));
         }
-        let ctx = crate::summary::metrics_ctx_from_results(self.core.scoped.results.as_ref());
+        let ctx = crate::summary::metrics_ctx_from_results(
+            &self.core.model,
+            self.core.scoped.results.as_ref(),
+        );
         if ctx.seismic_x.is_some() && ctx.seismic_y.is_some() {
             for dir in [SeismicDir::X, SeismicDir::Y] {
                 let key = ResultInputKey::Static(StaticCaseKey::Seismic(dir));
@@ -105,9 +108,9 @@ impl App {
                 }
             }
             if let Some((name, _)) = self.core.scoped.results.as_ref().and_then(|r| {
-                r.combos
-                    .iter()
-                    .find(|(name, _)| !sepika_load::combo::is_short_term_combo(name))
+                r.combos.iter().find(|(name, _)| {
+                    sepika_core::load_combo::is_gravity_combination(name, &self.core.model)
+                })
             }) {
                 dependencies.push(ResultInputKey::Combo(name.clone()));
             }

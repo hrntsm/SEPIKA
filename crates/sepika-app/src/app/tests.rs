@@ -2920,15 +2920,29 @@ fn test_select_displayed_result_switches_forces_and_term() {
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
     app.core.analysis_cfg.threads = 1;
+    app.core
+        .model
+        .load_cases
+        .push(sepika_core::model::LoadCase {
+            id: LoadCaseId(2),
+            name: "P=0".into(),
+            kind: sepika_core::model::LoadCaseKind::Live,
+            nodal: vec![],
+            member: vec![],
+        });
     // 長期 DL+LL（重力 LC0 のみ）と短期 DL+LL+EX（地震 LC1 入り）の 2 組合せ。
     for combo in [
         sepika_core::model::LoadCombination {
             name: "DL + LL".into(),
-            terms: vec![(LoadCaseId(0), 1.0)],
+            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(2), 1.0)],
         },
         sepika_core::model::LoadCombination {
             name: "DL + LL + EX".into(),
-            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)],
+            terms: vec![
+                (LoadCaseId(0), 1.0),
+                (LoadCaseId(2), 1.0),
+                (LoadCaseId(1), 1.0),
+            ],
         },
     ] {
         app.core.scoped.undo.run(
@@ -4736,7 +4750,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
     model.floor_regions[0].slab_ids = vec![first, second];
     set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
-    let app = App {
+    let mut app = App {
         core: AppCore {
             model,
             ..Default::default()
@@ -4775,6 +4789,57 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
         slab.1.moment,
         w_floor
     );
+    app.core
+        .model
+        .load_cases
+        .push(sepika_core::model::LoadCase {
+            id: LoadCaseId(app.core.model.load_cases.len() as u32),
+            name: "任意風".into(),
+            kind: sepika_core::model::LoadCaseKind::Wind,
+            nodal: vec![],
+            member: vec![],
+        });
+    let id = app.core.model.load_cases.last().unwrap().id;
+    app.core.scoped.last_static = Some(StaticKey::Case(StaticCaseKey::User(id)));
+    app.core.design_term = LoadTerm::Short;
+    let (short_beams, short_slabs) = app.floor_design_checks();
+    assert_eq!(short_beams[0].2.m_max, beams[0].2.m_max);
+    assert_eq!(short_beams[0].2.ratio, beams[0].2.ratio);
+    assert_eq!(short_slabs[0].1.moment, slabs[0].1.moment);
+    assert!(!short_beams[0].2.unchecked, "既存長期略算を保持");
+    #[cfg(feature = "gui")]
+    {
+        app.core.scoped.results = Some(ResultsBundle {
+            beam_checks: short_beams,
+            slab_checks: short_slabs,
+            ..Default::default()
+        });
+        let context = egui::Context::default();
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(4000.0, 4000.0),
+                )),
+                ..Default::default()
+            },
+            |ui| crate::design_view::design_table(ui, &mut app),
+        );
+        let text = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) => Some(t.galley.job.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("小梁・床の長期略算"), "{text}");
+        assert!(
+            text.contains("選択中の雪・風・地震・任意組合せについて未検定"),
+            "{text}"
+        );
+    }
 }
 
 /// 片持ちの未割当小梁（端部支持条件 Free）も片持ち梁として検定する。
@@ -11205,6 +11270,132 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
         .as_ref()
         .unwrap()
         .contains("未割当"));
+}
+
+fn load_state_gui_contract_model() -> sepika_core::model::Model {
+    use sepika_core::model::{LoadCase, LoadCaseKind as K, LoadCombination, NodalLoad};
+    let mut model = crate::sample::portal_frame();
+    let mut top = model.nodes[2].clone();
+    top.id = NodeId(1);
+    top.coord = [0.0, 0.0, 3000.0];
+    model.nodes = vec![model.nodes[0].clone(), top];
+    model.elements.truncate(1);
+    model.elements[0].nodes = [NodeId(0), NodeId(1)].into_iter().collect();
+    model.load_cases = [
+        (K::Dead, 100.0),
+        (K::Live, 20.0),
+        (K::Snow, 40.0),
+        (K::Seismic, 30.0),
+        (K::Seismic, 30.0),
+        (K::Wind, 30.0),
+        (K::LiveSeismic, 8.0),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, (kind, kn))| LoadCase {
+        id: LoadCaseId(i as u32),
+        name: format!("手入力{i}"),
+        kind,
+        nodal: vec![NodalLoad::manual(
+            NodeId(1),
+            [kn * 1000.0, 0.0, -kn * 1000.0, 0.0, 0.0, 0.0],
+        )],
+        member: vec![],
+    })
+    .collect();
+    for extra in [
+        vec![],
+        vec![(2, 0.7)],
+        vec![(2, 1.0)],
+        vec![(2, 0.35), (3, 1.0)],
+        vec![(2, 0.35), (3, -1.0)],
+        vec![(2, 0.35), (4, 1.0)],
+        vec![(2, 0.35), (4, -1.0)],
+        vec![(5, 1.0)],
+        vec![(2, 0.35), (5, 1.0)],
+    ] {
+        let mut terms = vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)];
+        terms.extend(extra.into_iter().map(|(id, f)| (LoadCaseId(id), f)));
+        model.combinations.push(LoadCombination {
+            name: format!("任意名称{}", model.combinations.len()),
+            terms,
+        });
+    }
+    model
+}
+
+#[test]
+fn load_state_gui_actual_checks_selection_and_saved_terms_keep_n_q_m_and_duration() {
+    let path = test_tmp().join("load-state-contract.ovika");
+    let model = load_state_gui_contract_model();
+    sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+    let mut app = App::default();
+    app.load_model(sepika_io::ovika::load_ovika(&path).unwrap().model);
+    std::fs::remove_file(path).unwrap();
+    for (index, kn, term) in [
+        (0, 120.0, LoadTerm::Long),
+        (1, 148.0, LoadTerm::Long),
+        (2, 160.0, LoadTerm::Short),
+        (3, 164.0, LoadTerm::Short),
+        (4, 104.0, LoadTerm::Short),
+        (5, 164.0, LoadTerm::Short),
+        (6, 104.0, LoadTerm::Short),
+        (7, 150.0, LoadTerm::Short),
+        (8, 164.0, LoadTerm::Short),
+    ] {
+        app.run_combination(index);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app.select_displayed_result(StaticKey::Combo(index));
+        assert_eq!(app.core.design_term, term);
+        assert!(app.selected_design_load_state().unwrap().combination);
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        let (_, f) = bundle.member_forces[0]
+            .1
+            .at
+            .iter()
+            .find(|(p, _)| *p == 0.0)
+            .unwrap();
+        assert!((f[0].abs() / 1000.0 - kn).abs() < 1e-8);
+        assert!((f[1].hypot(f[2]) / 1000.0 - kn).abs() < 1e-8);
+        assert!((f[4].hypot(f[5]) / 1_000_000.0 - 3.0 * kn).abs() < 1e-8);
+        assert!(bundle
+            .member_checks
+            .iter()
+            .flat_map(|m| &m.positions)
+            .any(|p| matches!(p.outcome, sepika_design_jp::CheckOutcome::Checked(_))));
+    }
+    app.run_linear_static(LoadCaseId(2));
+    assert_eq!(app.core.design_term, LoadTerm::Short);
+    assert!(!app.selected_design_load_state().unwrap().combination);
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .iter()
+        .flat_map(|m| &m.positions)
+        .all(|p| matches!(p.outcome, sepika_design_jp::CheckOutcome::Skipped { .. })));
+    app.run_linear_static(LoadCaseId(0));
+    assert_eq!(app.core.design_term, LoadTerm::Long);
+    app.core.model.load_cases[0].kind = sepika_core::model::LoadCaseKind::Other;
+    app.run_design_check();
+    assert!(app.selected_design_load_state().is_err());
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .iter()
+        .flat_map(|m| &m.positions)
+        .all(|p| matches!(p.outcome, sepika_design_jp::CheckOutcome::Skipped { .. })));
 }
 
 pub(super) fn select_holding_points(app: &mut App) {

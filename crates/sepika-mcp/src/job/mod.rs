@@ -25,6 +25,8 @@ use ultimate::compute_ultimate_check_job;
 pub struct JobParams {
     /// 対象荷重ケース ID（未指定なら先頭ケース）。
     pub load_case: Option<u32>,
+    /// DesignCheck用の保存組合せindex。荷重ケースとの同時指定は禁止。
+    pub load_combination: Option<usize>,
     /// モード数。
     pub n_modes: usize,
     /// 加力・入力方向。
@@ -63,6 +65,7 @@ impl Default for JobParams {
         let s = AnalysisSettings::default();
         Self {
             load_case: None,
+            load_combination: None,
             n_modes: s.n_modes,
             dir: JobDir::X,
             steps: s.push_steps,
@@ -145,7 +148,8 @@ pub enum JobOutcome {
         summary: serde_json::Value,
     },
     DesignCheck {
-        case: u32,
+        /// 単独ケースの保存ID。保存・自動組合せはケースストアへ書き込まない。
+        case: Option<u32>,
         member_force_rows: Vec<(u32, f64, [f64; 6])>,
         summary: serde_json::Value,
     },
@@ -160,6 +164,11 @@ pub fn compute_job(
     kind: JobKind,
     params: &JobParams,
 ) -> Result<JobOutcome, JobError> {
+    if params.load_combination.is_some() && kind != JobKind::DesignCheck {
+        return Err(JobError::InvalidInput(
+            "load_combinationはDesignCheck専用です".into(),
+        ));
+    }
     match kind {
         JobKind::LinearStatic => compute_linear_static_job(model, params),
         JobKind::Eigen => compute_eigen_job(model, params),

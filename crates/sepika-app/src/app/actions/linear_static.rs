@@ -219,11 +219,6 @@ impl App {
                 self.core.scoped.last_static = Some(StaticKey::Combo(pos));
                 self.ui.scoped.nav.focus_result = Some(StaticKey::Combo(pos));
                 self.core.scoped.staleness.mark_fresh();
-                self.core.design_term = if sepika_load::combo::is_short_term_combo(&name) {
-                    LoadTerm::Short
-                } else {
-                    LoadTerm::Long
-                };
                 self.run_design_check();
             }
             Err(e) => {
@@ -616,13 +611,6 @@ impl App {
         self.core.scoped.last_static = Some(display);
         self.ui.scoped.nav.focus_result = Some(display);
         self.core.scoped.staleness.mark_fresh();
-        if let Some((_, name)) = &last_combo {
-            self.core.design_term = if sepika_load::combo::is_short_term_combo(name) {
-                LoadTerm::Short
-            } else {
-                LoadTerm::Long
-            };
-        }
         self.run_design_check();
 
         if !errors.is_empty() {
@@ -717,12 +705,8 @@ impl App {
 
     /// 結果表示の対象を切り替える（ナビゲータ・結果タブの選択ドロップダウン共通）。
     ///
-    /// 変位図・層指標だけでなく、応力図（N/Q/M）・断面検定が参照する
-    /// [`ResultsBundle::member_forces`] も選択結果へ差し替える。荷重組合せを選んだ
-    /// 場合は荷重継続性区分（長期/短期）を組合せ名から `is_short_term_combo` で
-    /// 再判定し、断面検定を再実行する。これにより、選んだ荷重（組合せ）の長期/短期に
-    /// 応じた断面算定結果が表示される。単一荷重ケースを選んだ場合は現在の区分を維持する
-    /// （`apply_static_case_result` と同じ扱い）。該当キーの解析結果がない場合は何もしない。
+    /// 応力図と検定対象を選択結果へ差し替え、保存係数・種別で検定状態を再判定する。
+    /// 該当キーの解析結果がない場合は何もしない。
     pub fn select_displayed_result(&mut self, key: StaticKey) {
         let resolved = self
             .core
@@ -743,7 +727,7 @@ impl App {
                     )
                 }),
             });
-        let Some((member_forces, panel_moments, combo_name)) = resolved else {
+        let Some((member_forces, panel_moments, _combo_name)) = resolved else {
             return;
         };
         self.ui.scoped.nav.focus_result = Some(key);
@@ -751,13 +735,6 @@ impl App {
         if let Some(bundle) = self.core.scoped.results.as_mut() {
             bundle.member_forces = member_forces;
             bundle.panel_moments = panel_moments;
-        }
-        if let Some(name) = combo_name {
-            self.core.design_term = if sepika_load::combo::is_short_term_combo(&name) {
-                LoadTerm::Short
-            } else {
-                LoadTerm::Long
-            };
         }
         self.run_design_check();
     }
@@ -825,7 +802,7 @@ impl App {
         });
     }
 
-    fn seismic_case_id(&self, dir: SeismicDir) -> Option<LoadCaseId> {
+    pub(crate) fn seismic_case_id(&self, dir: SeismicDir) -> Option<LoadCaseId> {
         let name = match dir {
             SeismicDir::X => sepika_core::model::EX_CASE_NAME,
             SeismicDir::Y => sepika_core::model::EY_CASE_NAME,
