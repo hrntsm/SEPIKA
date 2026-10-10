@@ -577,22 +577,6 @@ pub fn beam_self_weight_udl(
             .map(|c| c.effective_steel_factor())
             .unwrap_or(1.0)
     };
-    if matches!(
-        sec.shape.as_ref(),
-        Some(
-            sepika_core::section_shape::SectionShape::CftBox { .. }
-                | sepika_core::section_shape::SectionShape::CftPipe { .. }
-        )
-    ) {
-        let steel = sec
-            .steel_material
-            .and_then(|id| model.materials.get(id.index()))
-            .ok_or_else(|| format!("CFT二次部材 {} の鋼管材料を解決できません", sm.id.0))?;
-        steel.validate_design_self_weight(
-            &format!("CFT二次部材 {} の鋼管", sm.id.0),
-            "二次部材のDL・地震用重量・小梁設計",
-        )?;
-    }
     mat.validate_design_self_weight(
         &format!("二次部材 {}", sm.id.0),
         "二次部材のDL・地震用重量・小梁設計",
