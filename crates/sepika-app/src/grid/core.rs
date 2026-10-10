@@ -253,6 +253,32 @@ pub fn tile_block(block: &[Vec<String>], sel_rows: usize, sel_cols: usize) -> Ve
         .collect()
 }
 
+/// タイル展開後の矩形も上限以内であることを確認して展開する。
+pub fn checked_tile_block(
+    block: &[Vec<String>],
+    sel_rows: usize,
+    sel_cols: usize,
+) -> Result<Vec<Vec<String>>, String> {
+    let br = block.len();
+    let bc = block.iter().map(Vec::len).max().unwrap_or(0);
+    let tiles = br > 0
+        && bc > 0
+        && sel_rows.is_multiple_of(br)
+        && sel_cols.is_multiple_of(bc)
+        && (sel_rows / br > 1 || sel_cols / bc > 1);
+    let cells = if tiles {
+        sel_rows.saturating_mul(sel_cols)
+    } else {
+        br.saturating_mul(bc)
+    };
+    if br.saturating_mul(bc) > MAX_PASTE_CELLS || cells > MAX_PASTE_CELLS {
+        return Err(format!(
+            "ペースト矩形が大きすぎます（{cells} セル、上限 {MAX_PASTE_CELLS} セル）"
+        ));
+    }
+    Ok(tile_block(block, sel_rows, sel_cols))
+}
+
 /// テーブルアダプタ。汎用グリッドレイヤとテーブルの境界で、
 /// ドメイン知識（セルの型・行追加の可否と方法）はすべてこちら側に置く。
 /// 第 2 弾以降のテーブル展開は「アダプタ実装の追加」だけで済む。
@@ -274,14 +300,13 @@ pub trait GridAdapter {
     /// [`plan_paste`]がこれを全セルに適用する
     fn validate_cell(&self, row: usize, col: usize, text: &str) -> Result<(), String>;
 
-    /// 検証済みセル群の適用。sepika-edit の複合コマンド 1 個に落とす。
-    /// append_rows > 0 なら先に行を追加する（追加行の貼り付け対象外の列は
-    /// アダプタの既定値）。呼び出し規約:
-    /// - 通常のペースト: cells 全部 + append_rows = はみ出し行数（自動追加。）
-    /// - 行追加非対応テーブル: widget が cells を row < rows() にフィルタして渡し、
-    ///   append_rows = 0（はみ出し分は切り捨て）
-    /// - 新規行プレースホルダでの編集確定: cells = その 1 セル、append_rows = 1
-    fn apply_block(&mut self, cells: &[(usize, usize, String)], append_rows: usize);
+    /// セル群を1つの編集として適用する。適用時も検証し、不正なら変更しない。
+    /// 戻り値のfalseはモデル・履歴に変更がないことを表す。
+    fn apply_block(
+        &mut self,
+        cells: &[(usize, usize, String)],
+        append_rows: usize,
+    ) -> Result<bool, String>;
 
     /// 選択範囲クリア（Delete）。クリアの意味（0 埋め・既定値・禁止）は
     /// アダプタが決める。cells は選択が跨ぐ**実データ行**のセルのみ
@@ -328,8 +353,11 @@ pub fn commit_cell_text(adapter: &mut dyn GridAdapter, cell: CellRef, raw: &str)
         return CommitOutcome::Rejected(reason);
     }
     let appended = cell.row >= adapter.rows();
-    adapter.apply_block(&[(cell.row, cell.col, t.to_string())], appended as usize);
-    CommitOutcome::Applied { appended }
+    match adapter.apply_block(&[(cell.row, cell.col, t.to_string())], appended as usize) {
+        Ok(true) => CommitOutcome::Applied { appended },
+        Ok(false) => CommitOutcome::NoChange,
+        Err(reason) => CommitOutcome::Rejected(reason),
+    }
 }
 
 /// ペーストブロックのセル数上限（行数×最大列数。）。
@@ -376,6 +404,19 @@ pub fn plan_paste(
     if cells > MAX_PASTE_CELLS {
         return Err(vec![format!(
             "ペーストブロックが大きすぎます（{block_rows}行×{block_cols}列 = {cells} セル。上限 {MAX_PASTE_CELLS} セル）"
+        )]);
+    }
+    if block_cols > cols.saturating_sub(anchor.col) {
+        let overflow_col = cols.saturating_sub(anchor.col);
+        let overflow_row = block
+            .iter()
+            .position(|line| line.len() > overflow_col)
+            .unwrap_or(0);
+        return Err(vec![format!(
+            "ブロック{}行{}列目: 対象行ID {}、貼り付け先が表の列範囲外",
+            overflow_row + 1,
+            overflow_col + 1,
+            anchor.row + overflow_row
         )]);
     }
     let mut errors = Vec::new();

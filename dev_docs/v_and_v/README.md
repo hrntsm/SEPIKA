@@ -33,6 +33,8 @@
 法令・告示・学会規準等の 1 次資料で示し、参照実装との突合はあくまで
 「同種の実務計算と結果・機能範囲が整合しているか」の検証記録として保持する。
 
+TSVのアプリ内往復・実GUI入口と、実Excel未検証の区別は[Issue #480検証](TSVグリッド_Issue480_2026-10.md)を参照する。
+
 ## レポート構造
 
 各エントリは以下の項目を持つ:
@@ -64,6 +66,8 @@
 | 決定性 | 同一入力ビット一致 | 専用テスト |
 
 ## レポート目録
+
+- [節点・材料定数TSV（Issue #480）](TSVグリッド_Issue480_2026-10.md)：アプリ側fixtureと実Excel未検証の記録。
 
 各レポートの照合結果・修正履歴・残課題の詳細。**未完了の要約**は
 [未検証一覧.md](未検証一覧.md) を参照。
@@ -189,6 +193,8 @@
 | 31 | Fc>60 の NewRC 外挿 | sepika-material / sepika-element | newrc.rs, uniaxial/concrete_cyclic.rs, frame/fiber/mod.rs | Fc≤60 の材料 E 反映を維持し、Fc>60 の NewRC 固有 Ec 外挿、構成則選択・圧縮包絡線・ファイバー生成・3履歴則の応答をコードテストで照合済み。実験・原典適用範囲外の妥当性確認は未実施（詳細は [NewRC高強度コンクリート外挿_2026-09.md](NewRC高強度コンクリート外挿_2026-09.md)） | 横断 | 🔶 |
 | 32 | OVIKA の named MessagePack 永続化 | sepika-io / sepika-app | ovika.rs, tests/full_model.rs | `saved_model_fields_are_named_and_order_independent` / `ovika_roundtrip_preserves_model_and_results` 他。default・破損・復元モデル検証とモデル単体のサイズ・codec 比較は [検証記録](OVIKA_named_MessagePack_2026-10.md) を参照 | 横断 | ✅ |
 | 33 | 単一リップ溝形材の未検定 | sepika-design-jp / sepika-app | steel/lip_channel.rs、tests/lip_channel.rs、viewer/check_ratio.rs | `steel::lip_channel::tests::*` / `lip_channel_*`。詳細は[検証記録](リップ溝形材_未検定_Issue509_2026-10.md) | 横断 | 🔶（未検定契約のみ） |
+
+節点・材料定数TSV（#480）: `sepika-app` の `node_grid::tests`・`material_grid::tests`・`grid::tests`・`tables::materials::tests`・`tables::nodes::tests`。アプリ経路はVerification対象、実Excel往復は🔶（[検証記録](TSVグリッド_Issue480_2026-10.md)）。
 
 凡例: ✅ 実装済み・🔶 一部実装（要拡張）・❌ 未実装・対象外（採用しない）。
 壁横筋βs・参考骨格の単体/GUI共通/MCP実ジョブ検証は[Issue503検証](壁横筋入力と終局割線骨格_Issue503_2026-10.md)を参照（Verification ✅、実験Validation 🔶）。

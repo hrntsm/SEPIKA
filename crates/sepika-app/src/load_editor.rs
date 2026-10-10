@@ -1137,7 +1137,8 @@ mod tests {
             undo: &mut app.core.scoped.undo,
             edited: false,
         };
-        grid.apply_block(&[(0, 0, "6000".into()), (1, 0, "12000".into())], 0);
+        grid.apply_block(&[(0, 0, "6000".into()), (1, 0, "12000".into())], 0)
+            .unwrap();
         assert!(grid.edited);
         assert_eq!(grid.model.load_cases, before);
         grid.undo.undo(grid.model);
@@ -1146,7 +1147,9 @@ mod tests {
         grid.undo.redo(grid.model);
         let before = rmp_serde::to_vec_named(grid.model).unwrap();
         grid.edited = false;
-        grid.apply_block(&[(0, 0, "6000".into()), (1, 0, "8000".into())], 0);
+        assert!(grid
+            .apply_block(&[(0, 0, "6000".into()), (1, 0, "8000".into())], 0)
+            .is_err());
         assert!(!grid.edited);
         assert_eq!(rmp_serde::to_vec_named(grid.model).unwrap(), before);
         assert!(grid.undo.last_error().unwrap().contains("member[1]"));

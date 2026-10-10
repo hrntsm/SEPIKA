@@ -4,7 +4,7 @@
 //! スプレッドシート様式のグリッドウィジェット。
 //! テーブルごとの差は [`GridAdapter`] に隔離し、本モジュールはテーブル固有の知識を持たない。
 
-use super::{parse_tsv, plan_paste, rect_to_tsv, tile_block};
+use super::{checked_tile_block, parse_tsv, plan_paste, rect_to_tsv};
 use super::{CellRef, GridAdapter, GridState, PastePlan, SelRect, MAX_PASTE_CELLS};
 use crate::theme;
 
@@ -232,7 +232,23 @@ impl GridWidget {
             return;
         }
         let (sel_rows, sel_cols) = (rect.r1 - rect.r0 + 1, rect.c1 - rect.c0 + 1);
-        let block = tile_block(&block, sel_rows, sel_cols);
+        let block = match checked_tile_block(&block, sel_rows, sel_cols) {
+            Ok(block) => block,
+            Err(reason) => {
+                self.push_err(reason);
+                self.start_flash(rect, now, theme::ERROR_RED);
+                return;
+            }
+        };
+        if !adapter.can_append_rows() && anchor.row.saturating_add(block.len()) > adapter.rows() {
+            self.push_err(format!(
+                "ブロック{}行1列目: 対象行ID {}、表の行範囲外（行追加非対応）",
+                adapter.rows().saturating_sub(anchor.row) + 1,
+                adapter.rows()
+            ));
+            self.start_flash(rect, now, theme::ERROR_RED);
+            return;
+        }
         let tiled_cols = block.iter().map(Vec::len).max().unwrap_or(0);
         let tiled = block.len() != orig_rows || tiled_cols != orig_cols;
         let mismatch = !tiled
@@ -280,39 +296,33 @@ impl GridWidget {
         }
     }
 
-    /// ペースト計画の適用。行追加対応テーブルでははみ出し行を自動追加し、
-    /// 非対応テーブルでははみ出し分を確認なしで切り捨ててログに通知する。
-    /// 適用結果は 1 行でログに報告し、貼り付けブロックの矩形を
-    /// 選択状態にする
+    /// 全セルの計画を1つの編集として適用する。
     fn apply_plan(&mut self, adapter: &mut dyn GridAdapter, plan: PastePlan) {
-        let (applied, dropped, extra_rows);
-        if adapter.can_append_rows() {
-            applied = plan.set.len();
-            dropped = 0;
-            extra_rows = plan.extra_rows;
-            adapter.apply_block(&plan.set, plan.extra_rows);
-        } else {
-            let rows = adapter.rows();
-            let kept: Vec<_> = plan
-                .set
-                .iter()
-                .filter(|(r, _, _)| *r < rows)
-                .cloned()
-                .collect();
-            applied = kept.len();
-            dropped = plan.set.len() - kept.len();
-            extra_rows = 0;
-            adapter.apply_block(&kept, 0);
+        if !adapter.can_append_rows()
+            && plan.anchor.row.saturating_add(plan.block_rows) > adapter.rows()
+        {
+            self.push_err("貼り付けを全体拒否: 表の行範囲外（行追加非対応）");
+            return;
         }
+        let extra_rows = if adapter.can_append_rows() {
+            plan.extra_rows
+        } else {
+            0
+        };
+        let applied = match adapter.apply_block(&plan.set, extra_rows) {
+            Ok(true) => plan.set.len(),
+            Ok(false) => 0,
+            Err(reason) => {
+                self.push_err(format!("貼り付けを全体拒否: {reason}"));
+                return;
+            }
+        };
         let mut msg = format!("貼り付け: {applied} セル適用");
         if plan.skipped_empty > 0 {
             msg += &format!("、空セル {} 個は既存値維持", plan.skipped_empty);
         }
         if extra_rows > 0 {
             msg += &format!("、{extra_rows} 行を追加");
-        }
-        if dropped > 0 {
-            msg += &format!("、はみ出し {dropped} セルを切り捨て");
         }
         self.push_log(msg);
         self.sync_rows(adapter);
@@ -441,7 +451,7 @@ impl GridWidget {
     /// 選択モード時のグローバル入力（編集モード中は一切処理しない。
     /// TextEdit が Ctrl+C/V・矢印・文字入力を消費する）
     fn handle_events(&mut self, ctx: &egui::Context, adapter: &mut dyn GridAdapter) {
-        if self.grid.editing.is_some() {
+        if self.grid.editing.is_some() || ctx.text_edit_focused() {
             return;
         }
         let events = ctx.input(|i| i.events.clone());

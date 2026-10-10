@@ -385,3 +385,40 @@ fn test_rect_to_tsv_row_col_and_all_selection() {
         "00\t01\t02\n10\t11\t12"
     );
 }
+
+#[test]
+fn empty_excess_columns_are_rejected_by_block_dimensions() {
+    let error = plan_paste(
+        &parse_tsv("1\n2\t3\t4\t "),
+        CellRef { row: 7, col: 0 },
+        9,
+        3,
+        |_, _, _| Ok(()),
+    )
+    .unwrap_err();
+    assert!(error[0].contains("ブロック2行4列目"));
+    assert!(error[0].contains("対象行ID 8"));
+}
+
+#[test]
+fn rectangle_limit_applies_before_and_after_tiling() {
+    let small = vec![vec!["".into()]; 50_000];
+    assert!(checked_tile_block(&small, 100_000, 1).is_ok());
+    assert!(checked_tile_block(&small, 150_000, 1).is_err());
+    let large = vec![vec!["".into()]; 100_001];
+    assert!(checked_tile_block(&large, 1, 1).is_err());
+    assert!(checked_tile_block(&[vec!["".into()]], 100_001, 1).is_err());
+    let unchanged = checked_tile_block(&small, 100_001, 1).unwrap();
+    assert_eq!(unchanged.len(), 50_000);
+    assert!(plan_paste(
+        &vec![vec!["".into()]; 100_000],
+        CellRef { row: 0, col: 0 },
+        0,
+        1,
+        |_, _, _| Ok(())
+    )
+    .unwrap()
+    .set
+    .is_empty());
+    assert!(plan_paste(&large, CellRef { row: 0, col: 0 }, 0, 1, |_, _, _| Ok(())).is_err());
+}

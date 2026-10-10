@@ -7969,7 +7969,7 @@ mod grid_headless {
         let plan = plan_paste(block, anchor, adapter.rows(), adapter.cols(), |r, c, t| {
             adapter.validate_cell(r, c, t)
         })?;
-        adapter.apply_block(&plan.set, plan.extra_rows);
+        adapter.apply_block(&plan.set, plan.extra_rows).unwrap();
         Ok(plan)
     }
 
@@ -10636,14 +10636,17 @@ fn gui_node_paste_rejects_attached_slab_geometry_atomically() {
         undo: &mut app.core.scoped.undo,
         edited: false,
     };
-    adapter.apply_block(
-        &[
-            (2, 1, "100".into()),
-            (3, 0, "0".into()),
-            (3, 1, "100".into()),
-        ],
-        0,
-    );
+    let error = adapter
+        .apply_block(
+            &[
+                (2, 1, "100".into()),
+                (3, 0, "0".into()),
+                (3, 1, "100".into()),
+            ],
+            0,
+        )
+        .unwrap_err();
+    assert_eq!(error, expected);
     assert!(!adapter.edited);
     assert_eq!(app.core.scoped.undo.last_error(), Some(expected.as_str()));
     assert_eq!(format!("{:?}", app.core.model), original);
