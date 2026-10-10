@@ -59,6 +59,9 @@ pub(super) fn ratio_for_filter(
     let CheckOutcome::Checked(cr) = outcome else {
         return None;
     };
+    if cr.components.is_empty() {
+        return None;
+    }
     match filter {
         CheckRatioFilter::Max => Some((cr.ratio(), cr.ok())),
         CheckRatioFilter::Kind(k) => {
@@ -184,11 +187,15 @@ pub(super) fn pick_nearest_checked_node(
     frame_filter: super::FrameFilter,
 ) -> Option<(usize, f32)> {
     let results = app.core.scoped.results.as_ref()?;
-    if results.joint_checks.is_empty() {
+    if results.joint_checks.is_empty() && results.wall_checks.is_empty() {
         return None;
     }
-    let checked: std::collections::HashSet<NodeId> =
-        results.joint_checks.iter().map(|j| j.node).collect();
+    let checked: std::collections::HashSet<NodeId> = results
+        .joint_checks
+        .iter()
+        .map(|j| j.node)
+        .chain(results.wall_checks.iter().filter_map(|w| w.node))
+        .collect();
     let mut best: Option<(usize, f32)> = None;
     for (idx, node) in app.core.model.nodes.iter().enumerate() {
         if idx >= pts.len() || !checked.contains(&node.id) || !frame_filter.shows_node(idx) {
@@ -212,7 +219,13 @@ pub(super) fn show_node_check_tooltip(ui: &egui::Ui, app: &App, node: NodeId) {
         .iter()
         .filter(|j| j.node == node)
         .collect();
-    if rows.is_empty() {
+    let wall_rows: Vec<_> = results
+        .wall_checks
+        .iter()
+        .filter(|w| w.node == Some(node))
+        .cloned()
+        .collect();
+    if rows.is_empty() && wall_rows.is_empty() {
         return;
     }
     #[allow(deprecated)]
@@ -222,6 +235,7 @@ pub(super) fn show_node_check_tooltip(ui: &egui::Ui, app: &App, node: NodeId) {
         egui::Id::new("node_check_tooltip"),
         |ui| {
             ui.label(format!("節点 {}", node.0));
+            crate::design_view::wall_checks_ui(ui, &wall_rows);
             egui::Grid::new("node_check_tooltip_grid")
                 .striped(true)
                 .show(ui, |ui| {
@@ -364,11 +378,46 @@ pub(super) fn draw_check_ratio(
         draw_no_result_legend(painter);
         return;
     };
-    if results.member_checks.is_empty() && results.joint_checks.is_empty() {
+    if results.member_checks.is_empty()
+        && results.joint_checks.is_empty()
+        && results.wall_checks.is_empty()
+    {
         draw_no_result_legend(painter);
         return;
     }
 
+    for (offset, wall) in results.wall_checks.iter().enumerate() {
+        let Some((idx, _)) = wall.node.and_then(|id| {
+            app.core
+                .model
+                .nodes
+                .iter()
+                .enumerate()
+                .find(|(_, n)| n.id == id)
+        }) else {
+            continue;
+        };
+        if idx >= pts.len() || !frame_filter.shows_node(idx) {
+            continue;
+        }
+        let status = match &wall.outcome {
+            CheckOutcome::Checked(cr) => format!("{:.2}", cr.ratio()),
+            CheckOutcome::Skipped { .. } => {
+                if wall.seismic_target {
+                    "未検定".into()
+                } else {
+                    "対象外".into()
+                }
+            }
+        };
+        painter.text(
+            pts[idx] + egui::vec2(12.0, 14.0 * offset as f32),
+            egui::Align2::LEFT_TOP,
+            format!("{} {}", wall.label(), status),
+            egui::FontId::proportional(11.0),
+            theme::GRAY_600,
+        );
+    }
     let filter = app.ui.view.check_ratio_filter;
     let markers = app.ui.view.check_ratio_markers;
     let label_all = app.ui.view.check_ratio_label_all;
@@ -720,14 +769,26 @@ fn draw_legend(
     let x0 = rect.min.x + 10.0;
     let mut y = rect.min.y + 10.0;
 
+    let wall_ratios: Vec<_> = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .into_iter()
+        .flat_map(|r| &r.wall_checks)
+        .filter(|w| w.seismic_target)
+        .filter_map(|w| ratio_for_filter(&w.outcome, filter))
+        .collect();
     let max_ratio = elem_ratios
         .values()
         .chain(node_ratios.values())
         .map(|&(r, _)| r)
-        .fold(0.0_f64, f64::max);
+        .chain(wall_ratios.iter().map(|&(r, _)| r))
+        .reduce(f64::max);
     let ng_count = elem_ratios
         .values()
         .chain(node_ratios.values())
+        .chain(wall_ratios.iter())
         .filter(|&&(_, ok)| !ok)
         .count();
 
@@ -735,15 +796,34 @@ fn draw_legend(
         egui::pos2(x0, y),
         egui::Align2::LEFT_TOP,
         format!(
-            "検定比図 (対象: {}, max={:.2}, NG {}件)",
+            "検定比図 (対象: {}, max={}, NG {}件)",
             filter_label(filter),
-            max_ratio,
+            max_ratio
+                .map(|r| format!("{r:.2}"))
+                .unwrap_or_else(|| "-".into()),
             ng_count
         ),
         egui::FontId::proportional(14.0),
         theme::GRAY_700,
     );
     y = title_rect.max.y + 4.0;
+    if let Some(results) = &app.core.scoped.results {
+        if !results.wall_checks.is_empty() {
+            let s =
+                sepika_design_jp::wall_check::WallCheckSummary::from_checks(&results.wall_checks);
+            let text = painter.text(
+                egui::pos2(x0, y),
+                egui::Align2::LEFT_TOP,
+                format!(
+                    "壁 {} 枚 / 検定 {} 件：合格 {}・NG {}・未検定 {} / 対象外 {}",
+                    s.n_walls, s.n_checks, s.n_ok, s.n_ng, s.n_skipped, s.n_outside
+                ),
+                egui::FontId::proportional(12.0),
+                theme::GRAY_600,
+            );
+            y = text.max.y + 4.0;
+        }
+    }
 
     y = draw_ratio_color_bar(painter, x0, y) + 4.0;
 
@@ -1321,5 +1401,130 @@ mod tests {
             Default::default()
         )
         .is_none());
+    }
+    #[test]
+    fn wall_ng_real_egui_legend_matches_ratio_filter() {
+        use sepika_core::ids::WallPlateId;
+        use sepika_design_jp::wall_check::{WallCheck, WallCheckKind};
+        let mut app = App::default();
+        app.core.model = crate::sample::portal_frame();
+        let mut results = crate::app::ResultsBundle::default();
+        results.wall_checks.push(WallCheck {
+            plate: Some(WallPlateId(0)),
+            elem: Some(ElemId(10)),
+            node: Some(NodeId(0)),
+            case: "case:0".into(),
+            kind: WallCheckKind::AllowableShear,
+            seismic_target: true,
+            skip_kind: None,
+            outcome: checked(
+                1.25,
+                vec![CheckComponent {
+                    kind: CheckKind::Shear,
+                    ratio: 1.25,
+                    detail: String::new(),
+                }],
+            ),
+        });
+        app.core.scoped.results = Some(results);
+        for (filter, expected) in [
+            (CheckRatioFilter::Max, "max=1.25, NG 1件"),
+            (CheckRatioFilter::Kind(CheckKind::Shear), "max=1.25, NG 1件"),
+            (CheckRatioFilter::Kind(CheckKind::Bending), "max=-, NG 0件"),
+        ] {
+            app.ui.view.check_ratio_filter = filter;
+            let context = egui::Context::default();
+            let output = context.run_ui(egui::RawInput::default(), |ui| {
+                draw_check_ratio(
+                    ui.painter(),
+                    &app,
+                    &app.core.model,
+                    &[egui::pos2(100.0, 100.0); 4],
+                    Default::default(),
+                );
+            });
+            let title = output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some(t.galley.job.text.as_str()),
+                    _ => None,
+                })
+                .find(|text| text.starts_with("検定比図 (対象:"))
+                .unwrap();
+            assert!(title.contains(expected), "{title}");
+        }
+    }
+
+    #[test]
+    fn wall_tooltip_real_egui_keeps_two_walls_on_same_node_and_empty_max() {
+        use sepika_core::ids::WallPlateId;
+        use sepika_design_jp::wall_check::{WallCheck, WallCheckKind, WallSkipKind};
+        let mut app = App::default();
+        app.core.model = crate::sample::portal_frame();
+        let mut results = crate::app::ResultsBundle::default();
+        for id in [0, 1] {
+            results.wall_checks.push(WallCheck {
+                plate: Some(WallPlateId(id)),
+                elem: Some(ElemId(10 + id)),
+                node: Some(NodeId(0)),
+                case: "combo:2:DL+E".into(),
+                kind: WallCheckKind::AllowableShear,
+                seismic_target: true,
+                skip_kind: Some(WallSkipKind::NotImplemented),
+                outcome: skipped("純鋼板の国内検定式未確定"),
+            });
+        }
+        app.core.scoped.results = Some(results);
+        let hit = pick_nearest_checked_node(
+            &app,
+            &[egui::pos2(10.0, 10.0); 4],
+            egui::pos2(10.0, 10.0),
+            Default::default(),
+        )
+        .unwrap();
+        assert_eq!(hit.0, 0);
+        let context = egui::Context::default();
+        let mut text = String::new();
+        for _ in 0..2 {
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(3000.0, 1000.0),
+                    )),
+                    events: vec![egui::Event::PointerMoved(egui::pos2(30.0, 30.0))],
+                    ..Default::default()
+                },
+                |ui| show_node_check_tooltip(ui, &app, NodeId(0)),
+            );
+            text.push_str(
+                &output
+                    .shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Text(t) => Some(t.galley.job.text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
+        }
+        for expected in [
+            "壁版 0 / 要素 10",
+            "壁版 1 / 要素 11",
+            "combo:2:DL+E",
+            "未検定 2",
+            "最大検定比 -",
+            "純鋼板の国内検定式未確定",
+        ] {
+            assert!(text.contains(expected), "{expected}: {text}");
+        }
+        let empty = CheckOutcome::Checked(CheckResult {
+            basis: String::new(),
+            detail: String::new(),
+            components: vec![],
+        });
+        assert_eq!(ratio_for_filter(&empty, CheckRatioFilter::Max), None);
     }
 }
