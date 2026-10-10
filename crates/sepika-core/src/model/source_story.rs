@@ -59,7 +59,7 @@ pub struct SourceStory {
 impl Model {
     /// 利用者の階定義を明示階として保存する。STB 取り込み済みの原階には触らない。
     pub fn initialize_source_stories(&mut self) -> Result<(), String> {
-        if !self.source_stories.is_empty() {
+        if self.source_stories_initialized || !self.source_stories.is_empty() {
             return Ok(());
         }
         self.assign_stb_node_ids()?;
@@ -94,6 +94,7 @@ impl Model {
                     .collect(),
             })
             .collect();
+        self.source_stories_initialized = true;
         Ok(())
     }
 

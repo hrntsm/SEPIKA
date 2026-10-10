@@ -162,6 +162,7 @@ pub struct SetStoryLevel {
 ///
 /// `model.stories` を丸ごと差し替え、`StoryId` の参照も復元前の対応へ戻す。
 pub struct RestoreStoryDefs {
+    pub source_stories_initialized: bool,
     pub source_stories: Vec<sepika_core::model::SourceStory>,
     pub stb_node_ids: Vec<sepika_core::model::StbNodeIdentity>,
     pub stories: Vec<Story>,
@@ -174,6 +175,7 @@ pub struct RestoreStoryDefs {
 /// 現在の階定義・階参照のスナップショットを撮る。
 pub(crate) fn snapshot(model: &Model) -> RestoreStoryDefs {
     RestoreStoryDefs {
+        source_stories_initialized: model.source_stories_initialized,
         source_stories: model.source_stories.clone(),
         stb_node_ids: model.stb_node_ids.clone(),
         stories: model.stories.clone(),
@@ -412,6 +414,7 @@ impl EditCommand for RestoreStoryDefs {
         let redo = snapshot(model);
         model.stories = self.stories.clone();
         model.source_stories = self.source_stories.clone();
+        model.source_stories_initialized = self.source_stories_initialized;
         model.stb_node_ids = self.stb_node_ids.clone();
         for (node, story) in model.nodes.iter_mut().zip(self.node_story.iter()) {
             node.story = *story;

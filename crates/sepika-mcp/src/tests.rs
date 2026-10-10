@@ -6,6 +6,26 @@ use sepika_core::model::{
 };
 
 #[test]
+fn source_story_empty_table_mcp_kind_edit_preserves_empty_table_and_undo() {
+    let mut model = sepika_io::stbridge::import_stbridge(r#"<ST_BRIDGE version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/></StbNodes><StbStories><StbStory id="1" name="基部" height="0" kind="GENERAL"/></StbStories></StbModel></ST_BRIDGE>"#).unwrap();
+    model.source_stories.clear();
+    let initial = model.clone();
+    let directory = std::env::temp_dir().join(format!("sepika-497-empty-{}", std::process::id()));
+    let mut state = ServerState::with_fs_store(model, &directory).unwrap();
+    assert!(apply_edit(&mut state, &serde_json::json!({"command":"SetStoryLevelKind", "story":0, "level_kind":{"Penthouse":{"k":0.7}}})).unwrap().applied);
+    assert!(state.model.source_stories.is_empty());
+    assert!(state.model.source_stories_initialized);
+    assert!(!sepika_io::stbridge::export_stbridge(&state.model)
+        .unwrap()
+        .contains("<StbStory "));
+    state.undo.undo(&mut state.model);
+    assert!(state.model.eq_ignoring_dofmap(&initial));
+    state.undo.redo(&mut state.model);
+    assert!(state.model.source_stories.is_empty());
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn source_story_native_kind_mcp_matches_gui_command_and_preserves_imported_kinds() {
     use sepika_core::ids::StoryId;
     use sepika_core::model::{SourceStoryKind, StoryLevelKind};
@@ -14,6 +34,7 @@ fn source_story_native_kind_mcp_matches_gui_command_and_preserves_imported_kinds
         let mut model = sepika_io::stbridge::import_stbridge(xml).unwrap();
         if native {
             model.source_stories.clear();
+            model.source_stories_initialized = false;
         }
         let initial = model.clone();
         let directory =

@@ -337,6 +337,7 @@ fn source_native_save_and_calculation_snapshot_preserve_the_explicit_table() {
 fn native_first_delete_keeps_existing_export_ids_and_undo_restores_unassigned_table() {
     let mut m = model();
     m.source_stories.clear();
+    m.source_stories_initialized = false;
     m.stories.clear();
     m.stb_node_ids.clear();
     for node in &mut m.nodes {
@@ -367,6 +368,7 @@ fn native_first_delete_keeps_existing_export_ids_and_undo_restores_unassigned_ta
 fn native_story_delete_preserves_source_ids_and_restores_uninitialized_tables() {
     let mut m = model();
     m.source_stories.clear();
+    m.source_stories_initialized = false;
     m.stb_node_ids.clear();
     let original = m.clone();
     let before = sepika_io::stbridge::export_stbridge(&m).unwrap();
@@ -419,4 +421,120 @@ fn native_story_delete_preserves_source_ids_and_restores_uninitialized_tables() 
     assert!(undo.last_error().unwrap().contains("従属階から参照"));
     assert!(referenced.eq_ignoring_dofmap(&original));
     assert_eq!(undo.revision(), 0);
+}
+
+#[test]
+fn empty_import_and_last_source_delete_stay_empty_through_edit_prepare_save_and_undo() {
+    let envelope = |stories: &str| {
+        format!(
+            r#"<ST_BRIDGE version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/></StbNodes><StbStories>{stories}</StbStories></StbModel></ST_BRIDGE>"#
+        )
+    };
+    for initially_empty in [false, true] {
+        let mut m = sepika_io::stbridge::import_stbridge(&envelope(if initially_empty { "" } else {
+            r#"<StbStory id="50" name="upper" height="3000" kind="ROOF"><StbNodeIdList><StbNodeId id="2"/></StbNodeIdList></StbStory>"#
+        })).unwrap();
+        assert!(m.source_stories_initialized);
+        let mut undo = UndoStack::new();
+        prepare(&mut m, &mut undo);
+        let before_delete = m.clone();
+        if !initially_empty {
+            assert!(undo.run(
+                &mut m,
+                Box::new(sepika_edit::DeleteStory { story: StoryId(1) })
+            ));
+            let deleted = m.clone();
+            undo.undo(&mut m);
+            assert!(m.eq_ignoring_dofmap(&before_delete));
+            undo.redo(&mut m);
+            assert!(m.eq_ignoring_dofmap(&deleted));
+        }
+        assert!(m.source_stories.is_empty());
+        let assert_empty_export = |m: &Model| {
+            let xml = sepika_io::stbridge::export_stbridge(m).unwrap();
+            assert!(!xml.contains("<StbStory"));
+            assert_eq!(xml, sepika_io::stbridge::export_stbridge(m).unwrap());
+            let restored = sepika_io::stbridge::import_stbridge(&xml).unwrap();
+            assert!(restored.source_stories.is_empty());
+            assert!(restored.source_stories_initialized);
+        };
+        assert_empty_export(&m);
+        let before_edit = m.clone();
+        assert!(undo.run(
+            &mut m,
+            Box::new(sepika_edit::SetStoryLevel {
+                story: StoryId(0),
+                name: "明示基部名".into(),
+                elevation: 0.0,
+            })
+        ));
+        assert!(m.source_stories.is_empty());
+        undo.undo(&mut m);
+        assert!(m.eq_ignoring_dofmap(&before_edit));
+        undo.redo(&mut m);
+        assert!(undo.run(
+            &mut m,
+            Box::new(sepika_edit::SetStoryLevelKind {
+                story: StoryId(0),
+                level_kind: sepika_core::model::StoryLevelKind::Penthouse { k: 0.7 },
+            })
+        ));
+        assert_empty_export(&m);
+        let before_reject = m.clone();
+        let revision = undo.revision();
+        assert!(!undo.run(
+            &mut m,
+            Box::new(sepika_edit::DeleteStory { story: StoryId(0) })
+        ));
+        assert!(!undo.run(
+            &mut m,
+            Box::new(sepika_edit::SetStoryLevelKind {
+                story: StoryId(u32::MAX),
+                level_kind: Default::default(),
+            })
+        ));
+        assert!(m.eq_ignoring_dofmap(&before_reject));
+        assert_eq!(undo.revision(), revision);
+        prepare(&mut m, &mut undo);
+        prepare(&mut m, &mut undo);
+        assert!(m.source_stories.is_empty());
+        assert_empty_export(&m);
+        let path = std::env::temp_dir().join(format!(
+            "497-empty-{}-{initially_empty}.ovika",
+            std::process::id()
+        ));
+        sepika_io::ovika::save_ovika(&path, &m, Default::default()).unwrap();
+        let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        assert!(restored.eq_ignoring_dofmap(&m));
+        assert_empty_export(&restored);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn main_native_model_without_source_fields_keeps_messagepack_export_fallback() {
+    let mut m = model();
+    m.source_stories.clear();
+    m.source_stories_initialized = false;
+    m.stb_node_ids.clear();
+    let mut bytes = rmp_serde::to_vec(&m).unwrap();
+    assert_eq!(bytes.pop(), Some(0xc2));
+    assert_eq!(bytes.pop(), Some(0x90));
+    assert_eq!(bytes.pop(), Some(0x90));
+    assert_eq!(bytes[0], 0xdc);
+    let fields = u16::from_be_bytes([bytes[1], bytes[2]]) - 3;
+    bytes[1..3].copy_from_slice(&fields.to_be_bytes());
+    let restored: Model = rmp_serde::from_slice(&bytes).unwrap();
+    assert!(!restored.source_stories_initialized);
+    assert!(restored.eq_ignoring_dofmap(&m));
+    assert_eq!(
+        sepika_io::stbridge::export_stbridge(&restored).unwrap(),
+        sepika_io::stbridge::export_stbridge(&m).unwrap()
+    );
+    assert!(!sepika_io::stbridge::import_stbridge(
+        &sepika_io::stbridge::export_stbridge(&restored).unwrap()
+    )
+    .unwrap()
+    .source_stories
+    .is_empty());
 }

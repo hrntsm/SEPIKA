@@ -277,6 +277,7 @@ fn build_nodes_and_stories(
     mut raw_stories: Vec<RawStory>,
     node_index: &HashMap<u32, u32>,
 ) {
+    model.source_stories_initialized = true;
     let node_story_from_list: HashMap<u32, u32> = raw_stories
         .iter()
         .flat_map(|s| {

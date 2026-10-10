@@ -122,74 +122,83 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
 
     s.push_str(&axes_body(model));
 
-    s.push_str("    <StbStories>\n");
-    if model.source_stories.is_empty() {
-        for st in &model.stories {
-            let mut members: Vec<u32> = model
-                .nodes
-                .iter()
-                .filter(|n| n.story == Some(st.id) && !model.generated_masters.contains(&n.id))
-                .map(|n| n.id.0)
-                .collect();
-            for nid in &st.node_ids {
-                if !model.generated_masters.contains(nid) && !members.contains(&nid.0) {
-                    members.push(nid.0);
-                }
-            }
-            members.sort_unstable();
-            s.push_str(&format!(
-                "      <StbStory id=\"{}\" name=\"{}\" height=\"{}\" kind=\"{}\">\n",
-                sid(st.id.0),
-                esc(&st.name),
-                fmt(st.elevation),
-                story_kind(st.level_kind),
-            ));
-            if !members.is_empty() {
-                s.push_str("        <StbNodeIdList>\n");
-                for nid in members {
-                    s.push_str(&format!(
-                        "          <StbNodeId id=\"{}\"/>\n",
-                        node_sid(model, NodeId(nid))
-                    ));
-                }
-                s.push_str("        </StbNodeIdList>\n");
-            }
-            s.push_str("      </StbStory>\n");
-        }
+    let export_native_stories =
+        !model.source_stories_initialized && model.source_stories.is_empty();
+    let has_stories = if export_native_stories {
+        !model.stories.is_empty()
     } else {
-        for story in &model.source_stories {
-            if story.id == 0 {
-                return Err(StbError::Unmappable("STB原階IDは正整数が必要です".into()));
-            }
-            let mut attributes = String::new();
-            if let Some(guid) = &story.guid {
-                attributes.push_str(&format!(" guid=\"{}\"", esc(guid)));
-            }
-            if let Some(id) = story.id_dependence {
-                attributes.push_str(&format!(" id_dependence=\"{}\"", id));
-            }
-            if let Some(fc) = &story.strength_concrete {
-                attributes.push_str(&format!(" strength_concrete=\"{}\"", esc(fc)));
-            }
-            s.push_str(&format!(
-                "      <StbStory id=\"{}\" name=\"{}\" height=\"{}\" kind=\"{}\"{}>\n",
-                story.id,
-                esc(&story.name),
-                fmt(story.height),
-                story.kind.as_str(),
-                attributes
-            ));
-            if !story.node_ids.is_empty() {
-                s.push_str("        <StbNodeIdList>\n");
-                for reference in &story.node_ids {
-                    s.push_str(&format!("          <StbNodeId id=\"{}\"/>\n", reference.id));
+        !model.source_stories.is_empty()
+    };
+    if has_stories {
+        s.push_str("    <StbStories>\n");
+        if export_native_stories {
+            for st in &model.stories {
+                let mut members: Vec<u32> = model
+                    .nodes
+                    .iter()
+                    .filter(|n| n.story == Some(st.id) && !model.generated_masters.contains(&n.id))
+                    .map(|n| n.id.0)
+                    .collect();
+                for nid in &st.node_ids {
+                    if !model.generated_masters.contains(nid) && !members.contains(&nid.0) {
+                        members.push(nid.0);
+                    }
                 }
-                s.push_str("        </StbNodeIdList>\n");
+                members.sort_unstable();
+                s.push_str(&format!(
+                    "      <StbStory id=\"{}\" name=\"{}\" height=\"{}\" kind=\"{}\">\n",
+                    sid(st.id.0),
+                    esc(&st.name),
+                    fmt(st.elevation),
+                    story_kind(st.level_kind),
+                ));
+                if !members.is_empty() {
+                    s.push_str("        <StbNodeIdList>\n");
+                    for nid in members {
+                        s.push_str(&format!(
+                            "          <StbNodeId id=\"{}\"/>\n",
+                            node_sid(model, NodeId(nid))
+                        ));
+                    }
+                    s.push_str("        </StbNodeIdList>\n");
+                }
+                s.push_str("      </StbStory>\n");
             }
-            s.push_str("      </StbStory>\n");
+        } else {
+            for story in &model.source_stories {
+                if story.id == 0 {
+                    return Err(StbError::Unmappable("STB原階IDは正整数が必要です".into()));
+                }
+                let mut attributes = String::new();
+                if let Some(guid) = &story.guid {
+                    attributes.push_str(&format!(" guid=\"{}\"", esc(guid)));
+                }
+                if let Some(id) = story.id_dependence {
+                    attributes.push_str(&format!(" id_dependence=\"{}\"", id));
+                }
+                if let Some(fc) = &story.strength_concrete {
+                    attributes.push_str(&format!(" strength_concrete=\"{}\"", esc(fc)));
+                }
+                s.push_str(&format!(
+                    "      <StbStory id=\"{}\" name=\"{}\" height=\"{}\" kind=\"{}\"{}>\n",
+                    story.id,
+                    esc(&story.name),
+                    fmt(story.height),
+                    story.kind.as_str(),
+                    attributes
+                ));
+                if !story.node_ids.is_empty() {
+                    s.push_str("        <StbNodeIdList>\n");
+                    for reference in &story.node_ids {
+                        s.push_str(&format!("          <StbNodeId id=\"{}\"/>\n", reference.id));
+                    }
+                    s.push_str("        </StbNodeIdList>\n");
+                }
+                s.push_str("      </StbStory>\n");
+            }
         }
+        s.push_str("    </StbStories>\n");
     }
-    s.push_str("    </StbStories>\n");
 
     s.push_str("    <StbMembers>\n");
     s.push_str(&members_body(model, &col_map, &beam_map, &brace_map)?);

@@ -27,12 +27,6 @@ pub struct Model {
     pub sections: Vec<Section>,
     pub materials: Vec<Material>,
     pub stories: Vec<Story>,
-    /// STB の明示階。準備計算の解析所属とは別に保持する。
-    #[serde(default)]
-    pub source_stories: Vec<SourceStory>,
-    /// 節点の標準出力 ID/GUID。内部 ID の再採番で標準 ID は変えない。
-    #[serde(default)]
-    pub stb_node_ids: Vec<StbNodeIdentity>,
     /// 通り芯（各通りを識別するための呼称。[`AxisGroup`]）。**構造計算には
     /// 用いない**表示・識別専用のデータで、解析結果・設計結果には影響しない。
     #[serde(default)]
@@ -162,6 +156,15 @@ pub struct Model {
     /// 単調増加で払い出す。既存 ID の最大 + 1 以上を保つ。フィールド無しは 0。
     #[serde(default)]
     pub next_secondary_member_id: u32,
+    /// STB の明示階。準備計算の解析所属とは別に保持する。
+    #[serde(default)]
+    pub source_stories: Vec<SourceStory>,
+    /// 節点の標準出力 ID/GUID。内部 ID の再採番で標準 ID は変えない。
+    #[serde(default)]
+    pub stb_node_ids: Vec<StbNodeIdentity>,
+    /// 原階の取り込み・初期化済み状態。明示的な空テーブルを未初期化と区別する。
+    #[serde(default)]
+    pub source_stories_initialized: bool,
     #[serde(skip)]
     pub dof_map: crate::dof::DofMap,
 }
@@ -1085,6 +1088,7 @@ impl Model {
             && self.materials == other.materials
             && self.stories == other.stories
             && self.source_stories == other.source_stories
+            && self.source_stories_initialized == other.source_stories_initialized
             && self.stb_node_ids == other.stb_node_ids
             && self.floor_regions == other.floor_regions
             && self.slabs == other.slabs

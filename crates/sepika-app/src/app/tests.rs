@@ -22,6 +22,34 @@ fn source_story_close_levels_model() -> sepika_core::model::Model {
 
 #[cfg(feature = "gui")]
 #[test]
+fn source_story_empty_table_gui_kind_edit_does_not_create_source() {
+    let mut model = source_story_close_levels_model();
+    model.source_stories.clear();
+    assert!(model.source_stories_initialized);
+    let mut app = App::default();
+    app.load_model(model);
+    let before = app.core.model.clone();
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::SetStoryLevelKind {
+            story: StoryId(0),
+            level_kind: sepika_core::model::StoryLevelKind::Penthouse { k: 0.7 },
+        }));
+    app.apply_pending_story_command();
+    assert!(app.core.model.source_stories.is_empty());
+    assert!(app.core.model.source_stories_initialized);
+    assert!(!sepika_io::stbridge::export_stbridge(&app.core.model)
+        .unwrap()
+        .contains("<StbStory "));
+    app.core.scoped.undo.undo(&mut app.core.model);
+    assert!(app.core.model.eq_ignoring_dofmap(&before));
+    app.core.scoped.undo.redo(&mut app.core.model);
+    assert!(app.core.model.source_stories.is_empty());
+}
+
+#[cfg(feature = "gui")]
+#[test]
 fn source_story_native_kind_gui_export_save_undo_and_initialization_order() {
     use sepika_core::model::{SourceStoryKind, StoryLevelKind};
     for order in 0..3 {
@@ -29,6 +57,7 @@ fn source_story_native_kind_gui_export_save_undo_and_initialization_order() {
         model.nodes.truncate(2);
         model.stories.truncate(2);
         model.source_stories.clear();
+        model.source_stories_initialized = false;
         model.stb_node_ids.clear();
         let mut app = App::default();
         app.load_model(model);
