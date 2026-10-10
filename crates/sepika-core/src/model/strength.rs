@@ -32,7 +32,7 @@ pub struct ResolvedStrength {
     pub source: StrengthSource,
     /// 明示native割当の数値。標準gradeの数値照合とは区別する。
     pub native_override: bool,
-    /// コンクリートは Fc、鉄筋は降伏点 [N/mm²]。
+    /// コンクリートはFc、鉄筋・鋼材は降伏点 [N/mm²]。
     pub value: f64,
 }
 

@@ -101,7 +101,7 @@ struct BarGrades<'a> {
     main: Option<&'a str>,
     /// せん断補強筋（`strength_band` ほか）。
     shear: Option<&'a str>,
-    /// SRC の内蔵鉄骨（`strength_steel`）。
+    /// SRCの内蔵鉄骨（標準鋼材子要素の`strength_main`）。
     steel: Option<&'a str>,
 }
 

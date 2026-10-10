@@ -394,9 +394,16 @@ impl App {
                                             .core
                                             .model
                                             .element(id)
-                                            .map(|e| match e.kind {
-                                                sepika_core::model::ElementKind::Column => "柱",
-                                                _ => "大梁",
+                                            .and_then(|e| self.core.model.element_section(e))
+                                            .and_then(|s| s.frame_use)
+                                            .map(|usage| match usage {
+                                                sepika_core::model::FrameSectionUse::Column => "柱",
+                                                sepika_core::model::FrameSectionUse::Girder => {
+                                                    "大梁"
+                                                }
+                                                sepika_core::model::FrameSectionUse::Brace => {
+                                                    "ブレース"
+                                                }
                                             })
                                             .unwrap_or("部材");
                                         format!("{kind} ID {}", id.0)

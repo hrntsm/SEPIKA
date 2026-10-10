@@ -2283,4 +2283,26 @@ fn stb_strength_src_steel_assignment_adopts_material_and_restores_input() {
             undo.redo(&mut model);
         }
     }
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetSectionMaterial {
+            section,
+            role: SectionMaterialRole::Steel,
+            material: None,
+        })
+    ));
+    assert!(model.section(section).unwrap().steel_material.is_none());
+    assert!(model
+        .resolve_stb_steel(&model.stb_strengths.sections[0].steel[0])
+        .is_err());
+    assert!(matches!(
+        sepika_io::stbridge::export_stbridge(&model),
+        Err(sepika_io::stbridge::StbError::Unmappable(_))
+    ));
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&before));
+    undo.redo(&mut model);
+    assert!(model
+        .resolve_stb_steel(&model.stb_strengths.sections[0].steel[0])
+        .is_err());
 }

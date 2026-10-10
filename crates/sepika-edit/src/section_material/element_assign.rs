@@ -129,9 +129,7 @@ impl EditCommand for SetSectionMaterial {
                 }
                 SectionMaterialRole::Steel => {
                     for steel in &mut input.steel {
-                        if let Some(grade) = &grade {
-                            steel.strength = grade.clone();
-                        }
+                        steel.strength = grade.clone().unwrap_or_default();
                         steel.native_material = self.material;
                     }
                 }
