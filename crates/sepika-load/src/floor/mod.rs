@@ -229,6 +229,9 @@ pub fn distribute_slab_w_with_diagnostics(
             "床板の境界頂点不足または非有限座標".into(),
         ));
     }
+    if matches!(slab.shape, SlabShape::Enclosed) {
+        polygon::local_polygon(&coords).map_err(FloorDistributionError::Polygon)?;
+    }
     if matches!(&slab.shape, SlabShape::Enclosed)
         && slab.method() == sepika_core::model::DistributionMethod::OneWay
         && slab.one_way() == Some(sepika_core::model::OneWayDir::Short)

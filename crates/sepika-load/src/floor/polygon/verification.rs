@@ -373,3 +373,62 @@ fn actual_slab_entry_diagnostics_and_support_errors() {
     region.slab_ids = vec![sepika_core::ids::SlabId(u32::MAX)];
     assert!(distribute_region(&model, &region, |_| 0.).is_err());
 }
+
+#[test]
+fn enclosed_geometry_errors_precede_rectangle_and_zero_load_dispatch() {
+    use crate::floor::{distribute_slab_resolved, distribute_slab_w, FloorDistributionError};
+    use sepika_core::model::DistributionMethod;
+    let cases = [
+        (
+            vec![
+                [0., 0., 0.],
+                [1000., 0., 0.],
+                [3000., 0., 0.],
+                [2000., 0., 0.],
+            ],
+            false,
+        ),
+        (
+            vec![
+                [0., 0., 0.],
+                [1000., 0., 0.],
+                [1000., 1000., 500.],
+                [0., 1000., 500.],
+            ],
+            true,
+        ),
+    ];
+    for (coords, unsupported) in cases {
+        assert!(crate::floor::slab_dimensions_of(&coords).is_some());
+        let direct = integrate_polygon(&coords, &[0, 1, 2, 3], Default::default()).unwrap_err();
+        assert_eq!(
+            matches!(direct, PolygonDistributionError::Unsupported(_)),
+            unsupported
+        );
+        assert_eq!(
+            matches!(direct, PolygonDistributionError::InvalidInput(_)),
+            !unsupported
+        );
+        let pts: Vec<_> = coords.iter().map(|p| (p[0], p[1])).collect();
+        for method in [
+            DistributionMethod::TriTrapezoid,
+            DistributionMethod::OneWay,
+            DistributionMethod::TributaryArea,
+        ] {
+            let (mut model, slab) = crate::floor::tests::polygon_slab_model(&pts, method, 0.003);
+            for (node, coord) in model.nodes.iter_mut().zip(&coords) {
+                node.coord = *coord;
+            }
+            for w in [0., 0.003] {
+                assert_eq!(
+                    distribute_slab_w(&model, &slab, w).unwrap_err(),
+                    FloorDistributionError::Polygon(direct.clone())
+                );
+                assert_eq!(
+                    distribute_slab_resolved(&model, &slab, w).unwrap_err(),
+                    FloorDistributionError::Polygon(direct.clone())
+                );
+            }
+        }
+    }
+}

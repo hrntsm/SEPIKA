@@ -98,7 +98,7 @@ fn segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool {
         || on(c, d, b)
 }
 
-fn local_polygon(coords: &[[f64; 3]]) -> Result<Vec<Point>, PolygonDistributionError> {
+pub(super) fn local_polygon(coords: &[[f64; 3]]) -> Result<Vec<Point>, PolygonDistributionError> {
     let invalid = |s: &str| PolygonDistributionError::InvalidInput(s.into());
     if coords.len() < 3 {
         return Err(invalid("境界頂点が3個未満"));
