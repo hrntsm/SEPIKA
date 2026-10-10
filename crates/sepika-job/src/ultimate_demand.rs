@@ -57,7 +57,21 @@ pub fn member_demand_from_pushover(
     member_response: &[PushoverMemberResponse],
     q_long_by_elem: Option<&HashMap<ElemId, f64>>,
 ) -> Option<Vec<(ElemId, MemberDemand)>> {
-    if member_response.is_empty() {
+    if member_response.is_empty()
+        || member_response.iter().any(|r| {
+            r.wall_shear_signed.is_some()
+                || [
+                    r.axial,
+                    r.m_strong,
+                    r.m_weak,
+                    r.shear_strong,
+                    r.shear_weak,
+                    r.rp,
+                ]
+                .iter()
+                .any(|v| !v.is_finite())
+        })
+    {
         return None;
     }
     Some(
@@ -149,5 +163,32 @@ mod tests {
         assert_eq!(*id, ElemId(3));
         assert!((d.n_axial - 2000.0).abs() < 1e-12);
         assert_eq!(d.q_long, Some(8_000.0));
+    }
+}
+
+#[cfg(test)]
+mod wall_availability_tests {
+    use super::*;
+    #[test]
+    fn line_demand_rejects_legacy_wall_zero_and_nonfinite_but_preserves_measured_zero() {
+        let mut response = PushoverMemberResponse {
+            elem: ElemId(0),
+            m_strong: 0.0,
+            m_weak: 0.0,
+            shear_strong: 0.0,
+            shear_weak: 0.0,
+            axial: 0.0,
+            rp: 0.0,
+            horizontal_force: 0.0,
+            wall_shear_signed: None,
+        };
+        let demand = member_demand_from_pushover(&[response], None).unwrap();
+        assert_eq!(demand.len(), 1);
+        assert_eq!(demand[0].1.n_axial, 0.0);
+        response.wall_shear_signed = Some(0.0);
+        assert!(member_demand_from_pushover(&[response], None).is_none());
+        response.wall_shear_signed = None;
+        response.m_strong = f64::NAN;
+        assert!(member_demand_from_pushover(&[response], None).is_none());
     }
 }
