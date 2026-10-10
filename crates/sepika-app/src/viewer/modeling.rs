@@ -580,7 +580,8 @@ fn is_wall_girder(
     ) && elem.nodes.len() >= 2
         && wall_nodes.contains(&elem.nodes[0])
         && wall_nodes.contains(&elem.nodes[1])
-        && sepika_element::frame::beam::stiffness_breakdown(model, elem).wall_girder > 1.0
+        && sepika_element::frame::beam::stiffness_breakdown(model, elem)
+            .is_ok_and(|b| b.wall_girder > 1.0)
 }
 
 /// 部材 `elem` が「端部塑性化域モデル」（材端 ξ=∓1 にファイバー断面を置き、

@@ -25,15 +25,13 @@ pub struct CompositeProps {
 }
 
 impl SectionShape {
-    /// SRC 断面の等価断面性能を、実際のヤング係数比 ns=Es/Ec から算定する
-    /// （各種合成構造設計指針: An=rcAn+sAn·(ns−1)、Ie=rcIe+sIe·(ns−1)、
-    /// As=rcAs+sAs·(ngs−1)、J=cJ+(sG/cG)·sJ）。
-    ///
-    /// `ec`/`nu_c`: 要素材料（コンクリート）のヤング係数・ポアソン比。
-    /// 鉄骨は Es=`E_STEEL`・νs=0.3 とする。ngs=ns·(1+νc)/(1+νs)。
-    /// SRC 以外、または ec≤0 では None（呼び出し側は `to_section` の
-    /// 既定値=N_S_EQ 固定へフォールバックする）。
-    pub fn src_equivalent_props(&self, ec: f64, nu_c: f64) -> Option<CompositeProps> {
+    /// SRC 等価性能。Ec [N/mm²] は有限正、νc は −1 < νc < 0.5 を要する。
+    /// 対象外は `Ok(None)`、材料・必要剛性が不正なら理由付きエラーを返す。
+    pub fn src_equivalent_props(
+        &self,
+        ec: f64,
+        nu_c: f64,
+    ) -> Result<Option<CompositeProps>, String> {
         let (SectionShape::SrcBeamRect {
             b,
             d,
@@ -53,14 +51,20 @@ impl SectionShape {
             ..
         }) = *self
         else {
-            return None;
+            return Ok(None);
         };
-        if ec <= 0.0 {
-            return None;
+        if !ec.is_finite() || ec <= 0.0 {
+            return Err("SRC の Ec は正の有限値が必要です".into());
+        }
+        if !nu_c.is_finite() || nu_c <= -1.0 || nu_c >= 0.5 {
+            return Err("SRC の νc は有限値かつ −1 < νc < 0.5 が必要です".into());
         }
         let ns = E_STEEL / ec;
         let ngs = ns * (1.0 + nu_c) / (1.0 + NU_STEEL);
 
+        if !ns.is_finite() || ns <= 0.0 || !ngs.is_finite() || ngs <= 0.0 {
+            return Err("SRC の解析用ヤング係数比・せん断弾性係数比が不正です".into());
+        }
         let s_a = 2.0 * sw * tf + (sh - 2.0 * tf) * tw;
         let hw = sh - 2.0 * tf;
         let s_iy = (sw * sh.powi(3) - (sw - tw) * hw.powi(3)) / 12.0;
@@ -68,14 +72,34 @@ impl SectionShape {
         let s_j = (2.0 * sw * tf.powi(3) + hw * tw.powi(3)) / 3.0;
 
         let rc_as = b * d / KAPPA_RC;
-        Some(CompositeProps {
+        let props = CompositeProps {
             area_ax: b * d + (ns - 1.0) * s_a,
             iy: b * d.powi(3) / 12.0 + (ns - 1.0) * s_iy,
             iz: d * b.powi(3) / 12.0 + (ns - 1.0) * s_iz,
             j: rect_torsion_j(b, d) + ngs * s_j,
             as_y: rc_as + (ngs - 1.0) * 2.0 * sw * tf,
             as_z: rc_as + (ngs - 1.0) * h_web_shear_area(sh, tw),
-        })
+        };
+        let gc = ec / (2.0 * (1.0 + nu_c));
+        for value in [
+            props.area_ax,
+            props.iy,
+            props.iz,
+            props.j,
+            props.as_y,
+            props.as_z,
+            ec * props.area_ax,
+            ec * props.iy,
+            ec * props.iz,
+            gc * props.j,
+            gc * props.as_y,
+            gc * props.as_z,
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err("SRC の等価断面性能または必要剛性が正の有限値ではありません".into());
+            }
+        }
+        Ok(Some(props))
     }
 
     /// CFT 断面（CftBox/CftPipe）の等価断面性能を鋼管基準で算定する
@@ -216,5 +240,89 @@ impl SectionShape {
             }
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod src_tests {
+    use super::*;
+    use crate::section_shape::{RcRectColumnRebar, RectColumnHoop};
+
+    fn shape() -> SectionShape {
+        SectionShape::SrcColumnRect {
+            b: 300.0,
+            d: 600.0,
+            rebar: RcRectColumnRebar {
+                main_dia: 0.0,
+                x: vec![],
+                y: vec![],
+                cover: 40.0,
+                hoop: RectColumnHoop {
+                    dia: 0.0,
+                    pitch: 100.0,
+                    legs_x: 0,
+                    legs_y: 0,
+                },
+            },
+            steel_height: 400.0,
+            steel_width: 200.0,
+            steel_web_thick: 8.0,
+            steel_flange_thick: 12.0,
+        }
+    }
+
+    #[test]
+    fn src_analysis_ratio_matches_independent_rectangular_h_section() {
+        let p = shape().src_equivalent_props(20500.0, 0.2).unwrap().unwrap();
+        assert_eq!(p.area_ax, 250272.0);
+        assert!((p.iy - 7345337856.0).abs() < 1e-5);
+        assert!((20500.0 * p.iy - 150579426048000.0).abs() < 0.1);
+        let p15 = shape()
+            .src_equivalent_props(205000.0 / 15.0, 0.2)
+            .unwrap()
+            .unwrap();
+        assert_eq!(p15.area_ax, 289312.0);
+        assert!((p15.iy - 8426081109.333333).abs() < 1e-5);
+        assert_ne!(p.iy, p15.iy);
+        assert_eq!(shape().calc_area(), 180000.0);
+    }
+
+    #[test]
+    fn src_material_errors_are_distinct_from_non_src() {
+        for ec in [
+            0.0,
+            -1.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::MIN_POSITIVE,
+            f64::MAX,
+        ] {
+            assert!(shape().src_equivalent_props(ec, 0.2).is_err(), "Ec={ec}");
+        }
+        for nu in [
+            -1.0,
+            0.5,
+            -2.0,
+            1.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            assert!(shape().src_equivalent_props(20500.0, nu).is_err(), "ν={nu}");
+        }
+        for nu in [-0.5, 0.0, 0.2, 0.49] {
+            assert!(shape().src_equivalent_props(20500.0, nu).unwrap().is_some());
+        }
+        let non_src = SectionShape::CftPipe {
+            outer_dia: 400.0,
+            thick: 12.0,
+        };
+        assert_eq!(non_src.src_equivalent_props(f64::NAN, f64::NAN), Ok(None));
+        let mut invalid = shape();
+        if let SectionShape::SrcColumnRect { d, .. } = &mut invalid {
+            *d = f64::NAN;
+        }
+        assert!(invalid.src_equivalent_props(20500.0, 0.2).is_err());
     }
 }
