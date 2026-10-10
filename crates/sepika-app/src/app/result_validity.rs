@@ -792,6 +792,97 @@ mod purpose_tests {
         assert!(!app.core.design_rank_auto);
         assert!(app.compute_holding_capacity().is_ok());
     }
+    #[cfg(feature = "gui")]
+    #[test]
+    fn guiは壁負担率適用後のdsと目的ごとの部材応答変形stepを表示する() {
+        use sepika_design_jp::secondary::holding_capacity::{FrameType, MemberRank};
+        use sepika_solver::nonlinear::pushover::story_response::{CutForce, ForceGroup};
+        let mut app = ready();
+        app.core.design_rank_auto = false;
+        app.core.design_frame = FrameType::RcFrame;
+        app.core.design_rank = MemberRank::FA;
+        let po = app
+            .core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .pushover_x
+            .as_mut()
+            .unwrap();
+        let ds_step = po.capacity_curve.first().unwrap().step;
+        let capacity_step = po.capacity_curve.last().unwrap().step;
+        assert_ne!(ds_step, capacity_step);
+        po.ds_evaluation = Some(
+            po.evaluation_point(
+                EvaluationPurpose::Ds,
+                SeismicDir::X,
+                ds_step,
+                "Ds部材応答を初回確定点から採用".into(),
+            )
+            .unwrap(),
+        );
+        po.capacity_evaluation = Some(
+            po.evaluation_point(
+                EvaluationPurpose::HoldingCapacity,
+                SeismicDir::X,
+                capacity_step,
+                "比較変形を最終確定点から採用".into(),
+            )
+            .unwrap(),
+        );
+        let response = po
+            .confirmed_history
+            .as_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|r| r.step == ds_step)
+            .unwrap();
+        let cut = &mut response.cuts[0];
+        cut.forces = vec![
+            CutForce {
+                elem: sepika_core::ids::ElemId(0),
+                group: ForceGroup::Wall,
+                force_n: 77_000.0,
+            },
+            CutForce {
+                elem: sepika_core::ids::ElemId(1),
+                group: ForceGroup::Frame,
+                force_n: 23_000.0,
+            },
+        ];
+        cut.external_n = 100_000.0;
+        cut.reference_n = 100_000.0;
+        cut.support_n = 0.0;
+        let (result, _) = app.compute_holding_capacity().unwrap();
+        assert_eq!(app.core.scoped.ds_beta_u_by_story, vec![0.77]);
+        assert_eq!(result.stories[0].ds, 0.40);
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(2000.0, 10000.0),
+                )),
+                ..Default::default()
+            },
+            |ui| crate::design_view::design_table(ui, &mut app),
+        );
+        let labels: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(labels.contains(&"0.40"));
+        assert!(!labels.iter().any(|text| text.contains("簡易運用")));
+        assert!(labels.contains(&format!("採用方向: X、Ds部材応答の採用ステップ: {ds_step}、保有耐力比較・変形の採用ステップ: {capacity_step}").as_str()));
+        assert!(!labels
+            .iter()
+            .any(|text| text.contains("部材応答・変形の採用ステップ")));
+    }
     fn two_purposes() -> App {
         let mut app = ready();
         super::super::tests::select_holding_points(&mut app);

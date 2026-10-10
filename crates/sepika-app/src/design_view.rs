@@ -631,13 +631,6 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                  壁式構造以外（WA 0.20・WB 0.25）とは別の列になります。",
             );
     });
-    if !app.core.design_rank_auto {
-        let ds = sepika_design_jp::secondary::holding_capacity::ds_value(
-            app.core.design_frame,
-            app.core.design_rank,
-        );
-        ui.label(format!("Ds = {:.2}（部材ランク選択値による簡易運用）", ds));
-    }
 
     holding_evaluation_inputs(ui, app);
     match app.compute_holding_capacity() {
@@ -654,11 +647,10 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         Ok((result, story_ranks)) => {
             if let Some(source) = &app.core.scoped.holding_capacity_source {
                 ui.label(format!(
-                    "採用方向: {:?}、部材応答・変形の採用ステップ: {}",
+                    "採用方向: {:?}、Ds部材応答の採用ステップ: {}、保有耐力比較・変形の採用ステップ: {}",
                     source.direction,
-                    source
-                        .response_step
-                        .map_or_else(|| "なし".into(), |step| step.to_string())
+                    source.ds_point.step,
+                    source.capacity_point.step
                 ));
             }
 
