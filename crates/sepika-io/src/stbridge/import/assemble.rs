@@ -26,6 +26,7 @@ use std::collections::HashMap;
 pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbError> {
     let StbParser {
         mut warnings,
+        mut strengths,
         unsupported,
         attr_usage,
         raw_nodes,
@@ -86,6 +87,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &mut warnings,
         &mut notes,
         &section_uses,
+        &mut strengths,
     )?;
 
     let mut stats = LinkStats::default();
@@ -96,6 +98,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &section_index,
         &material_index,
         &mut stats,
+        &mut strengths,
     );
     let (n_beams, n_posts) = build_secondaries(
         &mut model,
@@ -104,6 +107,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &section_index,
         &material_index,
         &mut stats,
+        &mut strengths,
     );
     stats.push_warnings(&mut warnings);
 
@@ -113,6 +117,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &slab_secs,
         &node_index,
         &mut warnings,
+        &mut strengths,
     );
     let pending_walls = build_walls(
         &mut model,
@@ -121,13 +126,14 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &node_index,
         &material_index,
         &mut warnings,
+        &mut strengths,
     );
     let anchorize = model.anchorize_secondary_members();
     model.rebuild_floor_assignment_regions();
-    assign_imported_slabs(&mut model, pending_slabs)?;
+    assign_imported_slabs(&mut model, pending_slabs, &mut strengths)?;
     model.rebuild_wall_assignment_regions();
     if !pending_walls.is_empty() {
-        assign_imported_walls(&mut model, pending_walls)?;
+        assign_imported_walls(&mut model, pending_walls, &mut strengths)?;
     }
     let rebuild = rebuild_floor_regions(&mut model);
     if rebuild.unassigned_slabs != 0 {
@@ -237,6 +243,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
     );
     auto_assign_supports(&mut model, &mut notes);
 
+    strengths.apply(&mut model, &mut warnings)?;
     let attributes = attr_dispositions(attr_usage);
     Ok((
         model,
@@ -567,6 +574,7 @@ fn build_members(
     section_index: &HashMap<u32, u32>,
     material_index: &HashMap<u32, u32>,
     stats: &mut LinkStats,
+    strengths: &mut super::strength::StrengthInputs,
 ) {
     for m in pending_members {
         let (Some(&ni), Some(&nj)) = (node_index.get(&m.n_i), node_index.get(&m.n_j)) else {
@@ -609,6 +617,10 @@ fn build_members(
             model.nodes[nj as usize].coord,
             m.rotate,
         );
+        strengths.bind_member(
+            m.strength_index,
+            sepika_core::model::StrengthTarget::Element(id),
+        );
         model.elements.push(ElementData {
             id,
             kind,
@@ -632,6 +644,7 @@ fn build_secondaries(
     section_index: &HashMap<u32, u32>,
     material_index: &HashMap<u32, u32>,
     stats: &mut LinkStats,
+    strengths: &mut super::strength::StrengthInputs,
 ) -> (usize, usize) {
     let mut n_beams = 0usize;
     let mut n_posts = 0usize;
@@ -674,6 +687,10 @@ fn build_secondaries(
             section,
             name: s.name,
         };
+        strengths.bind_member(
+            s.strength_index,
+            sepika_core::model::StrengthTarget::Secondary(sm.id),
+        );
         match s.kind {
             sepika_core::model::SecondaryMemberKind::Beam => {
                 n_beams += 1;
@@ -690,6 +707,7 @@ fn build_secondaries(
 
 /// 割当領域へ結びつける前のスラブ（境界節点と版仕様）。
 struct PendingSlab {
+    strength_index: Option<usize>,
     boundary: Vec<NodeId>,
     plate: SlabPlate,
 }
@@ -702,6 +720,7 @@ fn build_slabs(
     slab_secs: &HashMap<u32, RawSlabSection>,
     node_index: &HashMap<u32, u32>,
     warnings: &mut Vec<String>,
+    strengths: &mut super::strength::StrengthInputs,
 ) -> (Vec<PendingSlab>, usize) {
     let mut skipped_slabs = 0u32;
     let mut sec_of_file: HashMap<u32, SectionId> = HashMap::new();
@@ -732,11 +751,13 @@ fn build_slabs(
                 return Some(sid);
             }
             let sid = push_slab_section(model, fid, raw);
+            strengths.bind_section(fid, "StbSecSlab", sid);
             sec_of_file.insert(fid, sid);
             slab_section_count += 1;
             Some(sid)
         });
         pending.push(PendingSlab {
+            strength_index: rs.strength_index,
             boundary,
             plate: SlabPlate {
                 section,
@@ -760,8 +781,13 @@ fn build_slabs(
 /// 割って面荷重強度へ戻す。躯体の断面・材料は元 StbSlab から継承する。
 /// どの領域にも入らない面積が残る StbSlab は、1 辺が大梁に全長覆われる取り付く床板を
 /// 除いて取り込み全体をエラーにする（面積を欠落させない）。
-fn assign_imported_slabs(model: &mut Model, pending: Vec<PendingSlab>) -> Result<(), StbError> {
+fn assign_imported_slabs(
+    model: &mut Model,
+    pending: Vec<PendingSlab>,
+    strengths: &mut super::strength::StrengthInputs,
+) -> Result<(), StbError> {
     struct Accum {
+        sources: Vec<usize>,
         finish: Vec<(String, f64)>,
         section: Option<SectionId>,
         usage: Option<SlabUsage>,
@@ -788,7 +814,7 @@ fn assign_imported_slabs(model: &mut Model, pending: Vec<PendingSlab>) -> Result
         .map(|(_, polygon, _)| sepika_core::geom::polygon::area(polygon))
         .collect();
     let mut accum: Vec<Option<Accum>> = (0..regions.len()).map(|_| None).collect();
-    let mut attached: Vec<(SlabShape, SlabPlate)> = Vec::new();
+    let mut attached: Vec<(Option<usize>, SlabShape, SlabPlate)> = Vec::new();
 
     for slab in pending {
         let mut coords: Vec<[f64; 2]> = Vec::with_capacity(slab.boundary.len());
@@ -821,7 +847,7 @@ fn assign_imported_slabs(model: &mut Model, pending: Vec<PendingSlab>) -> Result
         if covered + area_tolerance(source_area) < source_area {
             if hits.is_empty() {
                 if let Some(shape) = convert_to_attached(model, &slab.boundary) {
-                    attached.push((shape, slab.plate));
+                    attached.push((slab.strength_index, shape, slab.plate));
                     continue;
                 }
             }
@@ -839,6 +865,7 @@ fn assign_imported_slabs(model: &mut Model, pending: Vec<PendingSlab>) -> Result
         }
         for (ri, a) in hits {
             let entry = accum[ri].get_or_insert_with(|| Accum {
+                sources: Vec::new(),
                 finish: Vec::new(),
                 section: slab.plate.section,
                 usage: slab.plate.usage,
@@ -850,6 +877,21 @@ fn assign_imported_slabs(model: &mut Model, pending: Vec<PendingSlab>) -> Result
                     "床板割当領域 {} に厚さ・材料の異なる床板が重なります",
                     regions[ri].0 .0
                 )));
+            }
+            if let Some(source) = slab.strength_index {
+                if entry
+                    .sources
+                    .iter()
+                    .any(|previous| !strengths.same_member_strength(model, *previous, source))
+                {
+                    return Err(StbError::SlabRegionConflict(format!(
+                        "床板割当領域 {} の元部材Fc指定・参照節点が異なります",
+                        regions[ri].0 .0
+                    )));
+                }
+                if !entry.sources.contains(&source) {
+                    entry.sources.push(source);
+                }
             }
             if entry.section.is_none() {
                 entry.section = slab.plate.section;
@@ -872,8 +914,9 @@ fn assign_imported_slabs(model: &mut Model, pending: Vec<PendingSlab>) -> Result
         }
     }
 
-    for (shape, plate) in attached {
+    for (source, shape, plate) in attached {
         let slab_id = SlabId(model.slabs.len() as u32);
+        strengths.bind_member(source, sepika_core::model::StrengthTarget::Slab(slab_id));
         model.slabs.push(Slab {
             id: slab_id,
             shape,
@@ -904,6 +947,12 @@ fn assign_imported_slabs(model: &mut Model, pending: Vec<PendingSlab>) -> Result
             one_way: entry.one_way,
         };
         let slab_id = SlabId(model.slabs.len() as u32);
+        for source in entry.sources {
+            strengths.bind_member(
+                Some(source),
+                sepika_core::model::StrengthTarget::Slab(slab_id),
+            );
+        }
         model.slabs.push(Slab {
             id: slab_id,
             shape: SlabShape::Enclosed,
@@ -1079,7 +1128,7 @@ fn push_slab_section(model: &mut Model, file_id: u32, raw: &RawSlabSection) -> S
 
 /// グレード名の材料を探し、無ければ標準材料表から起こして追加する。
 /// 標準表にも無い名前（`Fc21` のような規格名でないもの）は `None`。
-fn ensure_material_by_grade(model: &mut Model, grade: &str) -> Option<MaterialId> {
+pub(super) fn ensure_material_by_grade(model: &mut Model, grade: &str) -> Option<MaterialId> {
     if let Some(m) = model.materials.iter().find(|m| m.name == grade) {
         return Some(m.id);
     }
@@ -1104,6 +1153,7 @@ fn ensure_material_by_grade(model: &mut Model, grade: &str) -> Option<MaterialId
 
 /// 割当領域へ結びつける前の壁（境界節点と断面）。
 struct PendingWall {
+    strength_index: Option<usize>,
     boundary: Vec<NodeId>,
     section: Option<SectionId>,
 }
@@ -1116,11 +1166,12 @@ fn build_walls(
     node_index: &HashMap<u32, u32>,
     material_index: &HashMap<u32, u32>,
     warnings: &mut Vec<String>,
+    strengths: &mut super::strength::StrengthInputs,
 ) -> Vec<PendingWall> {
     let mut skipped_walls = 0u32;
     let mut no_section_walls = 0u32;
     let mut pending = Vec::new();
-    let mut wall_sections: HashMap<String, SectionId> = HashMap::new();
+    let mut wall_sections: HashMap<u32, SectionId> = HashMap::new();
     for rw in raw_walls {
         let mut boundary: Vec<NodeId> = Vec::with_capacity(rw.boundary.len());
         let mut resolved = true;
@@ -1143,7 +1194,7 @@ fn build_walls(
             .filter(|t| *t > 0.0)
             .map(|t| {
                 let base = format!("Wall t{}", t);
-                if let Some(&sid) = wall_sections.get(&base) {
+                if let Some(&sid) = wall_sections.get(&rw.section_fid.unwrap()) {
                     return sid;
                 }
                 let mut name = base.clone();
@@ -1157,7 +1208,8 @@ fn build_walls(
                     thickness: Some(t),
                     ..Section::zero(sid, name.clone())
                 });
-                wall_sections.insert(base, sid);
+                strengths.bind_section(rw.section_fid.unwrap(), "StbSecWall", sid);
+                wall_sections.insert(rw.section_fid.unwrap(), sid);
                 sid
             });
         if let Some(mid) = rw
@@ -1174,7 +1226,11 @@ fn build_walls(
         if section.is_none() {
             no_section_walls += 1;
         }
-        pending.push(PendingWall { boundary, section });
+        pending.push(PendingWall {
+            strength_index: rw.strength_index,
+            boundary,
+            section,
+        });
     }
     if skipped_walls > 0 {
         warnings.push(format!(
@@ -1196,7 +1252,11 @@ fn build_walls(
 /// 変換できるときだけ取り込み、それもできない場合は取り込み全体を失敗させる。
 /// 壁は任意の鉛直構面にあり、間柱で分割された領域への面積按分は未実装のため、
 /// 一致しない版を黙って落とさず安全側にエラーとする。
-fn assign_imported_walls(model: &mut Model, pending: Vec<PendingWall>) -> Result<(), StbError> {
+fn assign_imported_walls(
+    model: &mut Model,
+    pending: Vec<PendingWall>,
+    strengths: &mut super::strength::StrengthInputs,
+) -> Result<(), StbError> {
     for wall in pending {
         let mut key: Vec<u32> = wall.boundary.iter().map(|n| n.0).collect();
         key.sort_unstable();
@@ -1216,6 +1276,10 @@ fn assign_imported_walls(model: &mut Model, pending: Vec<PendingWall>) -> Result
             })
             .map(|region| region.id);
         let plate_id = WallPlateId(model.wall_plates.len() as u32);
+        strengths.bind_member(
+            wall.strength_index,
+            sepika_core::model::StrengthTarget::Wall(plate_id),
+        );
         if let Some(region_id) = region {
             model.wall_plates.push(WallPlate {
                 dl_support: None,
@@ -1503,6 +1567,7 @@ fn section_uses(members: &[PendingMember]) -> Result<HashMap<u32, FrameSectionUs
 ///   同じ index へ写す（統合件数は `notes` で通知する）
 /// - 一致しないものは符号へ連番を付けて（`b3` → `b3#2`）別断面として残す。
 ///   キーを一意にしたうえで定義を 1 件も捨てないための扱いで、`warnings` で通知する
+#[allow(clippy::too_many_arguments)]
 fn build_sections(
     model: &mut Model,
     mut pending: Vec<PendingSec>,
@@ -1511,6 +1576,7 @@ fn build_sections(
     warnings: &mut Vec<String>,
     notes: &mut Vec<String>,
     section_uses: &HashMap<u32, FrameSectionUse>,
+    strengths: &mut super::strength::StrengthInputs,
 ) -> Result<HashMap<u32, u32>, StbError> {
     pending.sort_by_key(|s| s.file_id);
 
@@ -1705,7 +1771,15 @@ fn build_sections(
                     section.frame_use
                 )));
             }
-            Some(&existing) if model.sections[existing].properties_eq(&section) => {
+            Some(&existing)
+                if model.sections[existing].properties_eq(&section)
+                    && index_map
+                        .iter()
+                        .find(|(_, index)| **index == existing as u32)
+                        .is_none_or(|(previous, _)| {
+                            strengths.same_section_strength(*previous, file_id)
+                        }) =>
+            {
                 if model.sections[existing].frame_use.is_none() {
                     model.sections[existing].frame_use = section.frame_use;
                 }
@@ -1724,6 +1798,9 @@ fn build_sections(
             }
             None => push_section(model, &mut by_key, section),
         };
+        strengths.bind_section(file_id, "StbSecColumn", SectionId(idx as u32));
+        strengths.bind_section(file_id, "StbSecBeam", SectionId(idx as u32));
+        strengths.bind_section(file_id, "StbSecBrace", SectionId(idx as u32));
         index_map.insert(file_id, idx as u32);
     }
     if merged > 0 {
@@ -1852,8 +1929,8 @@ fn find_or_create_bar_material(
         return Some(m.id);
     }
     let fy = match category {
-        MaterialCategory::Rebar => sepika_core::material_grade::rebar_grade_f_value(grade),
-        _ => sepika_core::material_grade::steel_f_value_prefix(grade, 40.0),
+        MaterialCategory::Rebar => sepika_core::standard_material::rebar_grade_strength(grade),
+        _ => material_std::resolve_grade(grade).and_then(|m| m.fy),
     };
     if fy.is_none() {
         notes.push(format!(

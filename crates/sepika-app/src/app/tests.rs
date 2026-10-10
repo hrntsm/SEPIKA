@@ -11441,6 +11441,126 @@ fn rejected_prepared_model_never_leaves_old_auto_seismic_loads_usable() {
         .is_none());
 }
 
+#[cfg(feature = "gui")]
+#[test]
+fn stb_strength_gui_edit_transaction_changes_result_input_and_restores_omission() {
+    use sepika_core::model::StrengthSource;
+    let path = test_tmp().join("520-strength-input.stb");
+    std::fs::write(
+        &path,
+        include_str!("../../../sepika-io/tests/fixtures/strength_priority.stb"),
+    )
+    .unwrap();
+    let mut app = App::default();
+    app.import_stbridge_from(path.clone());
+    let before = app.core.model.clone();
+    assert_eq!(
+        before.element_material(&before.elements[0]).unwrap().fc,
+        Some(36.)
+    );
+    let key = result_validity::ResultInputKey::Modal;
+    let generation = app.result_input(&key);
+    let mut input = before.stb_strengths.clone();
+    input.members[0].concrete = None;
+    input.sections[0].concrete = None;
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::CompositeCommand {
+            label: "強度編集".into(),
+            children: vec![
+                Box::new(sepika_edit::SetStbStrengths { input }),
+                Box::new(sepika_edit::SetSourceStoryConcreteStrength {
+                    source_story: 1,
+                    strength: Some("Fc33".into()),
+                }),
+            ],
+        }));
+    app.apply_pending_story_command();
+    assert_ne!(generation, app.result_input(&key));
+    let resolved = app
+        .core
+        .model
+        .resolve_stb_concrete(&app.core.model.stb_strengths.members[0])
+        .unwrap();
+    assert_eq!(resolved.value, 33.);
+    assert_eq!(resolved.source, StrengthSource::Story);
+    let output = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
+    let again = sepika_io::stbridge::import_stbridge(&output).unwrap();
+    assert!(again.stb_strengths.members[0].concrete.is_none());
+    assert!(again.stb_strengths.sections[0].concrete.is_none());
+    app.undo_action();
+    assert!(app.core.model.eq_ignoring_dofmap(&before));
+    assert_eq!(generation, app.result_input(&key));
+    app.redo_action();
+    assert_eq!(
+        app.core
+            .model
+            .element_material(&app.core.model.elements[0])
+            .unwrap()
+            .fc,
+        Some(33.)
+    );
+    let context = egui::Context::default();
+    let _ = context.run_ui(Default::default(), |ui| {
+        app.preparation_panel(ui);
+    });
+    std::fs::remove_file(path).unwrap();
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn stb_strength_gui_raw_src_grade_edit_updates_material_and_result_input() {
+    let path = test_tmp().join("520-src-strength-edit.stb");
+    std::fs::write(
+        &path,
+        include_str!("../../../sepika-io/tests/fixtures/strength_src.stb"),
+    )
+    .unwrap();
+    let mut app = App::default();
+    app.import_stbridge_from(path);
+    let before = app.core.model.clone();
+    let key = result_validity::ResultInputKey::Modal;
+    let generation = app.result_input(&key);
+    let mut input = before.stb_strengths.clone();
+    input.sections[0].steel[0].strength = "SN400B".into();
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::SetStbStrengths { input }));
+    app.apply_pending_story_command();
+    assert_eq!(
+        app.core
+            .model
+            .element_steel_material(&app.core.model.elements[0])
+            .unwrap()
+            .fy,
+        Some(235.)
+    );
+    assert_eq!(
+        app.core
+            .model
+            .element_material(&app.core.model.elements[0])
+            .unwrap()
+            .fc,
+        Some(36.)
+    );
+    assert!(app.core.model.stb_strength_diagnostics().is_empty());
+    assert_ne!(generation, app.result_input(&key));
+    app.undo_action();
+    assert!(app.core.model.eq_ignoring_dofmap(&before));
+    assert_eq!(generation, app.result_input(&key));
+    app.redo_action();
+    assert_eq!(
+        app.core
+            .model
+            .element_steel_material(&app.core.model.elements[0])
+            .unwrap()
+            .fy,
+        Some(235.)
+    );
+}
+
 #[test]
 fn wall_opening_edit_undo_and_preparation_refresh_independent_band_weight() {
     use sepika_core::model::{WallDlSupport, WallOpening, WallWeightGenerationMode};
@@ -11792,6 +11912,20 @@ fn public_story_insertion_keeps_automatic_weight_origin_and_manual_edits_through
         let record = model.seismic_weight_generation.clone();
         sepika_job::prepare::prepare_model(&mut model, &settings, None, false).unwrap();
         assert_eq!(model.seismic_weight_generation, record);
+        let path = std::env::temp_dir().join(format!(
+            "439-inserted-generation-{}-{}.ovika",
+            std::process::id(),
+            manual_weight.is_some(),
+        ));
+        sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+        let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        std::fs::remove_file(path).unwrap();
+        assert!(restored.eq_ignoring_dofmap(&model));
+        assert!(sepika_job::weight_preparation::weights_are_current(
+            &restored,
+            settings.mass_method
+        ));
+        model = restored;
         let inserted_master = model.diaphragms_of(StoryId(2)).next().unwrap().master;
         let mut deletion_undo = UndoStack::default();
         assert!(deletion_undo.run(

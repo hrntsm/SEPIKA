@@ -165,9 +165,12 @@ pub struct Model {
     /// 原階の取り込み・初期化済み状態。明示的な空テーブルを未初期化と区別する。
     #[serde(default)]
     pub source_stories_initialized: bool,
+    #[serde(default)]
+    pub stb_strengths: StbStrengthInput,
     /// 地震用重量の入力識別・算定値・生成出力。未生成は `None`。
     #[serde(default)]
     pub seismic_weight_generation: Option<SeismicWeightGeneration>,
+
     /// 壁の階重量生成方式。旧ファイル・未生成はNone（ケース方式へ推定しない）。
     #[serde(default)]
     pub wall_weight_generation: Option<WallWeightGenerationMode>,
@@ -244,6 +247,82 @@ impl Model {
         use crate::error::CoreError;
 
         self.validate_attached_slabs()?;
+        let mut strength_sections = std::collections::HashSet::new();
+        let mut strength_targets = Vec::new();
+        for input in &self.stb_strengths.sections {
+            if !strength_sections.insert(input.section) {
+                return Err(CoreError::InvalidInput(format!(
+                    "STB強度の断面 {} が重複",
+                    input.section.0
+                )));
+            }
+        }
+        for input in &self.stb_strengths.members {
+            if strength_targets.contains(&input.target) {
+                return Err(CoreError::InvalidInput(format!(
+                    "STB強度の部材 {:?} が重複",
+                    input.target
+                )));
+            }
+            strength_targets.push(input.target);
+        }
+        for input in &self.stb_strengths.sections {
+            for id in input
+                .native_material
+                .iter()
+                .chain(
+                    input
+                        .reinforcement
+                        .iter()
+                        .filter_map(|r| r.native_material.as_ref()),
+                )
+                .chain(
+                    input
+                        .steel
+                        .iter()
+                        .filter_map(|r| r.native_material.as_ref()),
+                )
+            {
+                if self.materials.get(id.index()).is_none_or(|m| m.id != *id) {
+                    return Err(CoreError::DanglingRef(format!("STB native材料 {}", id.0)));
+                }
+            }
+            if self.section(input.section).is_none() {
+                return Err(CoreError::DanglingRef(format!(
+                    "STB強度の断面 {}",
+                    input.section.0
+                )));
+            }
+        }
+        for input in &self.stb_strengths.materials {
+            if self
+                .materials
+                .get(input.material.index())
+                .is_none_or(|m| m.id != input.material)
+            {
+                return Err(CoreError::DanglingRef(format!(
+                    "STB強度の材料 {}",
+                    input.material.0
+                )));
+            }
+        }
+        for input in &self.stb_strengths.members {
+            let exists = match input.target {
+                StrengthTarget::Element(id) => self.element(id).is_some(),
+                StrengthTarget::Secondary(id) => self.secondary_member(id).is_some(),
+                StrengthTarget::Slab(id) => self.slabs.iter().any(|s| s.id == id),
+                StrengthTarget::Wall(id) => self.wall_plates.iter().any(|s| s.id == id),
+            };
+            if !exists
+                || self.node(input.node).is_none()
+                || input.node_order.iter().any(|n| self.node(*n).is_none())
+            {
+                return Err(CoreError::DanglingRef(format!(
+                    "STB強度の部材 {:?}",
+                    input.target
+                )));
+            }
+        }
         self.validate_member_load_extents()
             .map_err(CoreError::InvalidInput)?;
 
@@ -1033,9 +1112,14 @@ impl Model {
     /// **`NodeId` を持つフィールドを `Model` へ新設したら、まず [`Model::visit_node_ids`]
     /// を更新し、次に該当フィールドがここでも参照有無を判定できることを確認すること**。
     pub fn node_referenced_by_regions_or_plates(&self, id: NodeId) -> bool {
-        self.load_cases
+        self.stb_strengths
+            .members
             .iter()
-            .any(|lc| lc.nodal.iter().any(|nl| nl.node == id))
+            .any(|m| m.node == id || m.node_order.contains(&id))
+            || self
+                .load_cases
+                .iter()
+                .any(|lc| lc.nodal.iter().any(|nl| nl.node == id))
             || self.floor_regions.iter().any(|r| r.boundary.contains(&id))
             || self
                 .slabs
@@ -1099,6 +1183,7 @@ impl Model {
             && self.source_stories == other.source_stories
             && self.source_stories_initialized == other.source_stories_initialized
             && self.stb_node_ids == other.stb_node_ids
+            && self.stb_strengths == other.stb_strengths
             && self.floor_regions == other.floor_regions
             && self.slabs == other.slabs
             && self.constraints == other.constraints
@@ -1165,6 +1250,12 @@ impl Model {
     /// **`NodeId` を持つフィールドを `Model` へ追加したら必ずここへ追随すること**
     /// （`validate`・`eq_ignoring_dofmap` と同様）。
     pub fn visit_node_ids(&mut self, mut f: impl FnMut(&mut NodeId)) {
+        for input in &mut self.stb_strengths.members {
+            f(&mut input.node);
+            for node in &mut input.node_order {
+                f(node);
+            }
+        }
         for identity in &mut self.stb_node_ids {
             f(&mut identity.node);
         }
@@ -1305,6 +1396,9 @@ impl Model {
     /// モデル内の全ての `SectionId` 参照（断面自身の ID を含む）へ `f` を適用する
     /// （[`Model::visit_node_ids`] と同じ規約）。
     pub fn visit_section_ids(&mut self, mut f: impl FnMut(&mut crate::ids::SectionId)) {
+        for input in &mut self.stb_strengths.sections {
+            f(&mut input.section);
+        }
         for sec in &mut self.sections {
             f(&mut sec.id);
         }
@@ -1351,6 +1445,24 @@ impl Model {
     /// モデル内の全ての `MaterialId` 参照（材料自身の ID を含む）へ `f` を適用する
     /// （[`Model::visit_node_ids`] と同じ規約）。
     pub fn visit_material_ids(&mut self, mut f: impl FnMut(&mut crate::ids::MaterialId)) {
+        for input in &mut self.stb_strengths.materials {
+            f(&mut input.material);
+        }
+        for input in &mut self.stb_strengths.sections {
+            if let Some(id) = &mut input.native_material {
+                f(id);
+            }
+            for steel in &mut input.steel {
+                if let Some(id) = &mut steel.native_material {
+                    f(id);
+                }
+            }
+            for bar in &mut input.reinforcement {
+                if let Some(id) = &mut bar.native_material {
+                    f(id);
+                }
+            }
+        }
         for mat in &mut self.materials {
             f(&mut mat.id);
         }
@@ -1372,6 +1484,11 @@ impl Model {
     /// モデル内の全ての `ElemId` 参照（要素自身の ID・部材荷重・側テーブル属性・
     /// 一本部材指定）へ `f` を適用する（[`Model::visit_node_ids`] と同じ規約）。
     pub fn visit_elem_ids(&mut self, mut f: impl FnMut(&mut ElemId)) {
+        for input in &mut self.stb_strengths.members {
+            if let StrengthTarget::Element(id) = &mut input.target {
+                f(id);
+            }
+        }
         for elem in &mut self.elements {
             f(&mut elem.id);
         }
@@ -1658,6 +1775,11 @@ impl Model {
     ///
     /// **`SlabId` を持つフィールドを `Model` へ追加したら必ずここへ追随すること**。
     pub fn visit_slab_ids(&mut self, mut f: impl FnMut(&mut SlabId)) {
+        for input in &mut self.stb_strengths.members {
+            if let StrengthTarget::Slab(id) = &mut input.target {
+                f(id);
+            }
+        }
         for slab in &mut self.slabs {
             f(&mut slab.id);
         }
@@ -1678,6 +1800,11 @@ impl Model {
     ///
     /// **`WallPlateId` を持つフィールドを `Model` へ追加したら必ずここへ追随すること**。
     pub fn visit_wall_plate_ids(&mut self, mut f: impl FnMut(&mut WallPlateId)) {
+        for input in &mut self.stb_strengths.members {
+            if let StrengthTarget::Wall(id) = &mut input.target {
+                f(id);
+            }
+        }
         for plate in &mut self.wall_plates {
             f(&mut plate.id);
         }
@@ -1713,6 +1840,19 @@ impl Model {
             return;
         }
 
+        self.stb_strengths.members.retain_mut(|input| {
+            if let StrengthTarget::Slab(id) = &mut input.target {
+                match remap.get(id.index()).copied().flatten() {
+                    Some(next) => {
+                        *id = next;
+                        true
+                    }
+                    None => false,
+                }
+            } else {
+                true
+            }
+        });
         let mut i = 0usize;
         self.slabs.retain(|_| {
             let k = remap[i].is_some();
@@ -1764,6 +1904,19 @@ impl Model {
             return;
         }
 
+        self.stb_strengths.members.retain_mut(|input| {
+            if let StrengthTarget::Wall(id) = &mut input.target {
+                match remap.get(id.index()).copied().flatten() {
+                    Some(next) => {
+                        *id = next;
+                        true
+                    }
+                    None => false,
+                }
+            } else {
+                true
+            }
+        });
         let mut i = 0usize;
         self.wall_plates.retain(|_| {
             let k = remap[i].is_some();

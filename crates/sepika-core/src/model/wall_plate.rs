@@ -505,6 +505,14 @@ impl Model {
 
     /// 壁版の主材料。断面未割当・材料未割当は `None`。
     pub fn wall_plate_material(&self, plate: &WallPlate) -> Option<&Material> {
+        if self
+            .stb_strengths
+            .members
+            .iter()
+            .any(|m| m.target == StrengthTarget::Wall(plate.id))
+        {
+            return self.stb_concrete_material(StrengthTarget::Wall(plate.id));
+        }
         self.wall_plate_section(plate)
             .and_then(|s| s.material)
             .and_then(|mid| self.materials.get(mid.index()))

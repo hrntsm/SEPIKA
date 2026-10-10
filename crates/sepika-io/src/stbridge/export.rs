@@ -19,7 +19,8 @@ use super::section_std::standard_sections;
 use super::{StbError, STB_VERSION};
 use sepika_core::ids::{NodeId, SectionId, SlabId};
 use sepika_core::model::{
-    AxisGroup, AxisGroupKind, ElementKind, EndCondition, Model, StoryLevelKind, WallPlateShape,
+    AxisGroup, AxisGroupKind, ElementKind, EndCondition, Model, StoryLevelKind, StrengthTarget,
+    WallPlateShape,
 };
 
 /// ST-Bridge の id は `positiveInteger`（1 以上）。内部 0 始まり id に +1 して出力する。
@@ -72,6 +73,71 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     if model.stb_node_ids.iter().any(|n| n.id == 0) {
         return Err(StbError::Unmappable("STB節点IDは正整数が必要です".into()));
     }
+    for input in &model.stb_strengths.members {
+        if let StrengthTarget::Slab(id) = input.target {
+            let boundary = model
+                .slabs
+                .iter()
+                .find(|s| s.id == id)
+                .and_then(|s| s.boundary_nodes(model));
+            let represented = boundary.is_some_and(|nodes| nodes.contains(&input.node));
+            let resolved = model.resolve_stb_concrete(input);
+            if !represented
+                && !resolved.is_ok_and(|r| {
+                    matches!(
+                        r.source,
+                        sepika_core::model::StrengthSource::Member
+                            | sepika_core::model::StrengthSource::Section
+                    )
+                })
+            {
+                return Err(StbError::Unmappable(format!(
+                    "床 {} の元第1節点 {} に依存するFc省略を分割後の境界で表現できません",
+                    id.0, input.node.0
+                )));
+            }
+        }
+    }
+    for section in &model.stb_strengths.sections {
+        for bar in &section.reinforcement {
+            if model
+                .resolve_stb_rebar(bar)
+                .is_ok_and(|r| r.native_override)
+            {
+                let resolved = model.resolve_stb_rebar(bar).map_err(StbError::Unmappable)?;
+                if sepika_core::standard_material::rebar_grade_strength(&resolved.grade)
+                    != Some(resolved.value)
+                {
+                    return Err(StbError::Unmappable(format!(
+                        "断面 {} のnative鉄筋物性を標準grade {} で表現できません",
+                        section.section.0, resolved.grade
+                    )));
+                }
+            }
+        }
+    }
+    for section in &model.stb_strengths.sections {
+        for steel in &section.steel {
+            let resolved = model
+                .resolve_stb_steel(steel)
+                .map_err(StbError::Unmappable)?;
+            if resolved.native_override
+                && sepika_core::standard_material::standard_material_properties(&resolved.grade)
+                    .filter(|p| {
+                        p.fc.is_none()
+                            && sepika_core::standard_material::rebar_grade_strength(&resolved.grade)
+                                .is_none()
+                    })
+                    .and_then(|p| p.fy)
+                    != Some(resolved.value)
+            {
+                return Err(StbError::Unmappable(format!(
+                    "断面 {} の明示鋼材fyを標準grade {} で表現できません",
+                    section.section.0, resolved.grade
+                )));
+            }
+        }
+    }
     let std = standard_sections(model)?;
     let mut warnings = std.warnings;
     warnings.extend(model.source_story_diagnostics());
@@ -91,9 +157,36 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
          xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"{STB_VERSION}\">\n"
     ));
 
-    s.push_str(
-        "  <StbCommon project_name=\"SEPIKA\" app_name=\"SEPIKA\" app_version=\"0.0.1\"/>\n",
-    );
+    if let Some(common) = &model.stb_strengths.common {
+        s.push_str(&format!(
+            "  <StbCommon project_name=\"{}\" app_name=\"{}\" app_version=\"{}\"{}",
+            esc(&common.project_name),
+            esc(&common.app_name),
+            esc(&common.app_version),
+            common
+                .strength_concrete
+                .as_ref()
+                .map(|g| format!(" strength_concrete=\"{}\"", esc(g)))
+                .unwrap_or_default()
+        ));
+        if common.reinforcement.is_empty() {
+            s.push_str("/>\n");
+        } else {
+            s.push_str(">\n    <StbReinforcementStrengthList>\n");
+            for r in &common.reinforcement {
+                s.push_str(&format!(
+                    "      <StbReinforcementStrength D=\"{}\" strength=\"{}\"/>\n",
+                    esc(&r.diameter),
+                    esc(&r.strength)
+                ));
+            }
+            s.push_str("    </StbReinforcementStrengthList>\n  </StbCommon>\n");
+        }
+    } else {
+        s.push_str(
+            "  <StbCommon project_name=\"SEPIKA\" app_name=\"SEPIKA\" app_version=\"0.0.1\"/>\n",
+        );
+    }
 
     s.push_str("  <StbModel>\n");
 
@@ -283,29 +376,41 @@ fn members_body(
                 let rot = rotate_of(e, n0.coord, n1.coord);
                 let ks = kind_structure(model, e);
                 if is_col {
-                    let (bot, top) = if n0.coord[2] <= n1.coord[2] {
+                    let (bot, top) = if model
+                        .stb_strengths
+                        .members
+                        .iter()
+                        .any(|m| m.target == StrengthTarget::Element(e.id))
+                        || n0.coord[2] <= n1.coord[2]
+                    {
                         (e.nodes[0], e.nodes[1])
                     } else {
                         (e.nodes[1], e.nodes[0])
                     };
-                    let (cb, ct) = if n0.coord[2] <= n1.coord[2] {
+                    let (cb, ct) = if model
+                        .stb_strengths
+                        .members
+                        .iter()
+                        .any(|m| m.target == StrengthTarget::Element(e.id))
+                        || n0.coord[2] <= n1.coord[2]
+                    {
                         (e.end_cond[0], e.end_cond[1])
                     } else {
                         (e.end_cond[1], e.end_cond[0])
                     };
                     columns.push_str(&format!(
                         "        <StbColumn id=\"{}\" name=\"C{}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
-                         rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" condition_bottom=\"{}\" condition_top=\"{}\"/>\n",
+                         rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" condition_bottom=\"{}\" condition_top=\"{}\"{}/>\n",
                         sid(e.id.0), sid(e.id.0), node_sid(model, bot), node_sid(model, top),
-                        fmt(rot), sec_ref(sec), ks, cond(cb), cond(ct),
+                        fmt(rot), sec_ref(sec), ks, cond(cb), cond(ct), super::strength_export::member_attr(model,StrengthTarget::Element(e.id)),
                     ));
                 } else {
                     girders.push_str(&format!(
                         "        <StbGirder id=\"{}\" name=\"G{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
                          rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\" \
-                         condition_start=\"{}\" condition_end=\"{}\"/>\n",
+                         condition_start=\"{}\" condition_end=\"{}\"{}/>\n",
                         sid(e.id.0), sid(e.id.0), node_sid(model, e.nodes[0]), node_sid(model, e.nodes[1]),
-                        fmt(rot), sec_ref(sec), ks, cond(e.end_cond[0]), cond(e.end_cond[1]),
+                        fmt(rot), sec_ref(sec), ks, cond(e.end_cond[0]), cond(e.end_cond[1]), super::strength_export::member_attr(model,StrengthTarget::Element(e.id)),
                     ));
                 }
             }
@@ -365,22 +470,28 @@ fn members_body(
             sepika_core::model::SecondaryMemberKind::Beam => {
                 sec_beams.push_str(&format!(
                     "        <StbBeam id=\"{}\" name=\"B{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
-                     rotate=\"0\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\"/>\n",
-                    sid(mid), sid(mid), node_sid(model, nodes[0]), node_sid(model, nodes[1]), sec_ref(sec), ks,
+                     rotate=\"0\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\"{}/>\n",
+                    sid(mid), sid(mid), node_sid(model, nodes[0]), node_sid(model, nodes[1]), sec_ref(sec), ks, super::strength_export::member_attr(model,StrengthTarget::Secondary(sm.id)),
                 ));
             }
             sepika_core::model::SecondaryMemberKind::Post => {
                 let n0 = &model.nodes[nodes[0].index()];
                 let n1 = &model.nodes[nodes[1].index()];
-                let (bot, top) = if n0.coord[2] <= n1.coord[2] {
+                let (bot, top) = if model
+                    .stb_strengths
+                    .members
+                    .iter()
+                    .any(|m| m.target == StrengthTarget::Secondary(sm.id))
+                    || n0.coord[2] <= n1.coord[2]
+                {
                     (nodes[0], nodes[1])
                 } else {
                     (nodes[1], nodes[0])
                 };
                 posts.push_str(&format!(
                     "        <StbPost id=\"{}\" name=\"P{}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
-                     rotate=\"0\" id_section=\"{}\" kind_structure=\"{}\"/>\n",
-                    sid(mid), sid(mid), node_sid(model, bot), node_sid(model, top), sec_ref(sec), ks,
+                     rotate=\"0\" id_section=\"{}\" kind_structure=\"{}\"{}/>\n",
+                    sid(mid), sid(mid), node_sid(model, bot), node_sid(model, top), sec_ref(sec), ks, super::strength_export::member_attr(model,StrengthTarget::Secondary(sm.id)),
                 ));
             }
         }
@@ -391,9 +502,24 @@ fn members_body(
     let slab_sec_ids = slab_section_ids(model, slab_sec_base);
     let mut slabs = String::new();
     for slab in &model.slabs {
-        let Some(boundary) = slab.boundary_nodes(model) else {
+        let Some(mut boundary) = slab.boundary_nodes(model) else {
             continue;
         };
+        if let Some(input) = model
+            .stb_strengths
+            .members
+            .iter()
+            .find(|m| m.target == StrengthTarget::Slab(slab.id))
+        {
+            if input.node_order.len() == boundary.len()
+                && input.node_order.iter().all(|n| boundary.contains(n))
+            {
+                boundary = input.node_order.clone();
+            }
+            if let Some(first) = boundary.iter().position(|node| *node == input.node) {
+                boundary.rotate_left(first);
+            }
+        }
         let mid = slab_member_base + slab.id.0;
         let sec = slab_sec_ids.get(&slab.id).copied().unwrap_or(slab_sec_base);
         let order = boundary
@@ -403,11 +529,12 @@ fn members_body(
             .join(" ");
         let kind_slab = "NORMAL";
         slabs.push_str(&format!(
-            "        <StbSlab id=\"{}\" name=\"S{}\" id_section=\"{}\" kind_structure=\"RC\" kind_slab=\"{}\" isFoundation=\"false\">\n",
+            "        <StbSlab id=\"{}\" name=\"S{}\" id_section=\"{}\" kind_structure=\"RC\" kind_slab=\"{}\" isFoundation=\"false\"{}>\n",
             sid(mid),
             sid(slab.id.0),
             sid(sec),
             kind_slab,
+            super::strength_export::member_attr(model,StrengthTarget::Slab(slab.id)),
         ));
         slabs.push_str(&format!(
             "          <StbNodeIdOrder>{order}</StbNodeIdOrder>\n"
@@ -429,10 +556,14 @@ fn members_body(
         let mid = wall_member_base + wall_idx as u32;
         let sec = wall_sec_base + wall_idx as u32;
         walls.push_str(&format!(
-            "        <StbWall id=\"{}\" name=\"W{}\" id_section=\"{}\" kind_structure=\"RC\">\n",
+            "        <StbWall id=\"{}\" name=\"W{}\" id_section=\"{}\" kind_structure=\"RC\"{}>\n",
             sid(mid),
             sid(mid),
             sid(sec),
+            super::strength_export::member_attr(
+                model,
+                StrengthTarget::Wall(sepika_core::ids::WallPlateId(wall.id))
+            ),
         ));
         walls.push_str(&format!(
             "          <StbNodeIdOrder>{order}</StbNodeIdOrder>\n"
@@ -766,11 +897,23 @@ fn stb_walls_for_export(model: &Model) -> Vec<StbWallOut> {
         if !matches!(plate.shape, WallPlateShape::Enclosed) {
             continue;
         }
-        let Some(boundary) = plate.boundary_nodes(model) else {
+        let Some(mut boundary) = plate.boundary_nodes(model) else {
             continue;
         };
         if boundary.len() < 3 {
             continue;
+        }
+        if let Some(input) = model
+            .stb_strengths
+            .members
+            .iter()
+            .find(|m| m.target == StrengthTarget::Wall(plate.id))
+        {
+            if input.node_order.len() == boundary.len()
+                && input.node_order.iter().all(|n| boundary.contains(n))
+            {
+                boundary = input.node_order.clone();
+            }
         }
         out.push(StbWallOut {
             id: plate.id.0,
@@ -824,6 +967,18 @@ fn slab_floor_attr(sec: &sepika_core::model::Section) -> String {
 
 /// 断面の主材料の名前を `strength_concrete` 属性へ（未割当は属性ごと省く）。
 fn concrete_attr(model: &Model, sec: &sepika_core::model::Section) -> String {
+    if let Some(input) = model
+        .stb_strengths
+        .sections
+        .iter()
+        .find(|s| s.section == sec.id)
+    {
+        return input
+            .concrete
+            .as_ref()
+            .map(|g| format!(" strength_concrete=\"{}\"", esc(g)))
+            .unwrap_or_default();
+    }
     match sec
         .material
         .and_then(|mid| model.materials.get(mid.index()))

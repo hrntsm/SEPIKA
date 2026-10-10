@@ -101,7 +101,7 @@ struct BarGrades<'a> {
     main: Option<&'a str>,
     /// せん断補強筋（`strength_band` ほか）。
     shear: Option<&'a str>,
-    /// SRC の内蔵鉄骨（`strength_steel`）。
+    /// SRCの内蔵鉄骨（標準鋼材子要素の`strength_main`）。
     steel: Option<&'a str>,
 }
 
@@ -856,19 +856,19 @@ fn src_section(
         )
     };
     let steel_same = if is_beam {
-        "StbSecSteelBeam_SRC_Same"
+        "StbSecSteelBeam_SRC_Straight"
     } else {
         "StbSecSteelColumn_SRC_Same"
     };
     let id = sid(id);
     (
         format!(
-            "      <{elem} id=\"{id}\" name=\"{name}\"{floor}{id_mat} strength_steel=\"{grade}\">\n\
+            "      <{elem} id=\"{id}\" name=\"{name}\"{floor}{id_mat}>\n\
              \x20       <{fig_wrap}>\n\
              \x20         {fig_body}\n\
              \x20       </{fig_wrap}>\n\
              \x20       <{steel_wrap}>\n\
-             \x20         <{steel_same} shape=\"{steel_fig}\"/>\n\
+             {steel_reference}\n\
              \x20       </{steel_wrap}>\n\
              {rebar_arrangement}\
              \x20     </{elem}>\n",
@@ -877,12 +877,17 @@ fn src_section(
             name = esc(&sec.name),
             floor = floor_attr(sec),
             id_mat = id_mat,
-            grade = esc(&grade),
             fig_wrap = fig_wrap,
             fig_body = fig_body,
             steel_wrap = steel_wrap,
-            steel_same = steel_same,
-            steel_fig = esc(steel_fig),
+            steel_reference = if is_beam {
+                format!(
+                    "        <{steel_same} shape=\"{steel_fig}\" strength_main=\"{}\"/>",
+                    esc(&grade)
+                )
+            } else {
+                format!("        <{steel_same}><StbSecColumn_SRC_SameShapeH shape=\"{steel_fig}\" direction_type=\"H\" strength_main=\"{}\"/></{steel_same}>",esc(&grade))
+            },
             rebar_arrangement = rebar_arrangement,
         ),
         warnings,
@@ -1019,6 +1024,18 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
         }
     };
     let id_mat_attr = |base: u32| -> String {
+        if let Some(input) = model
+            .stb_strengths
+            .sections
+            .iter()
+            .find(|s| s.section.0 == base)
+        {
+            return input
+                .concrete
+                .as_ref()
+                .map(|g| format!(" strength_concrete=\"{}\"", esc(g)))
+                .unwrap_or_default();
+        }
         match mat_name(base) {
             Some(name) => format!(" strength_concrete=\"{}\"", esc(name)),
             None => String::new(),
@@ -1133,21 +1150,42 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
         let need_beam = used_beam;
         let need_brace = used_brace;
 
+        let preserve_strength = |xml: String| -> Result<String, super::StbError> {
+            if let Some(input) = model
+                .stb_strengths
+                .sections
+                .iter()
+                .find(|s| s.section == sec.id)
+            {
+                super::strength_export::section(&xml, input)
+            } else {
+                Ok(xml)
+            }
+        };
         let steel_fig = sec.shape.as_ref().and_then(steel_figure);
         if let Some((fig_name, fig_body)) = steel_fig {
             steel.add(&fig_name, fig_body);
             if need_col {
-                parts.push((1, steel_column(base, sec, &fig_name, &strength_attr(base))));
+                parts.push((
+                    1,
+                    preserve_strength(steel_column(base, sec, &fig_name, &strength_attr(base)))?,
+                ));
                 col_map.insert(base, base);
             }
             if need_beam {
                 let bid = if need_col { alloc() } else { base };
-                parts.push((5, steel_beam(bid, sec, &fig_name, &strength_attr(base))));
+                parts.push((
+                    5,
+                    preserve_strength(steel_beam(bid, sec, &fig_name, &strength_attr(base)))?,
+                ));
                 beam_map.insert(base, bid);
             }
             if need_brace {
                 let bid = if need_col || need_beam { alloc() } else { base };
-                parts.push((7, steel_brace(bid, sec, &fig_name, &strength_attr(base))));
+                parts.push((
+                    7,
+                    preserve_strength(steel_brace(bid, sec, &fig_name, &strength_attr(base)))?,
+                ));
                 brace_map.insert(base, bid);
             }
             continue;
@@ -1162,13 +1200,13 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                 let fig = cft_figure(shape, &mut steel).expect("CFT 図形");
                 parts.push((
                     3,
-                    cft_column(
+                    preserve_strength(cft_column(
                         base,
                         sec,
                         &fig,
                         &id_mat_attr(base),
                         &cft_steel_strength_attr(base),
-                    ),
+                    ))?,
                 ));
                 col_map.insert(base, base);
             }
@@ -1201,7 +1239,19 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                     &steel_fig,
                     &id_mat_attr(base),
                 );
-                parts.push((2, xml));
+                parts.push((
+                    2,
+                    if let Some(input) = model
+                        .stb_strengths
+                        .sections
+                        .iter()
+                        .find(|s| s.section.0 == base)
+                    {
+                        super::strength_export::section(&xml, input)?
+                    } else {
+                        xml
+                    },
+                ));
                 warnings.extend(w);
                 col_map.insert(base, base);
             }
@@ -1220,7 +1270,19 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                     &steel_fig,
                     &id_mat_attr(base),
                 );
-                parts.push((6, xml));
+                parts.push((
+                    6,
+                    if let Some(input) = model
+                        .stb_strengths
+                        .sections
+                        .iter()
+                        .find(|s| s.section.0 == base)
+                    {
+                        super::strength_export::section(&xml, input)?
+                    } else {
+                        xml
+                    },
+                ));
                 warnings.extend(w);
                 beam_map.insert(base, bid);
             }
@@ -1235,7 +1297,19 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
             if need_col {
                 if let Some(fig) = &rc_col_fig {
                     let (xml, w) = rc_column(base, sec, shape, grades, fig, &id_mat_attr(base));
-                    parts.push((0, xml));
+                    parts.push((
+                        0,
+                        if let Some(input) = model
+                            .stb_strengths
+                            .sections
+                            .iter()
+                            .find(|s| s.section.0 == base)
+                        {
+                            super::strength_export::section(&xml, input)?
+                        } else {
+                            xml
+                        },
+                    ));
                     warnings.extend(w);
                     col_map.insert(base, base);
                 } else {
@@ -1256,7 +1330,19 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                         base
                     };
                     let (xml, w) = rc_beam(bid, sec, shape, grades, fig, &id_mat_attr(base));
-                    parts.push((4, xml));
+                    parts.push((
+                        4,
+                        if let Some(input) = model
+                            .stb_strengths
+                            .sections
+                            .iter()
+                            .find(|s| s.section.0 == base)
+                        {
+                            super::strength_export::section(&xml, input)?
+                        } else {
+                            xml
+                        },
+                    ));
                     warnings.extend(w);
                     beam_map.insert(base, bid);
                 } else if matches!(shape, SectionShape::RcColumnCircle { .. }) {

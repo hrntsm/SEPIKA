@@ -63,6 +63,7 @@ fn fixture_path() -> std::path::PathBuf {
 #[test]
 fn rounded_fixture_properties_and_weight_are_independently_integrated() {
     use sepika_core::section_shape::SectionShape;
+    use sepika_edit::EditCommand;
     use std::f64::consts::PI;
     fn integrate(h: f64, breaks: Vec<f64>, width: impl Fn(f64) -> f64) -> [f64; 4] {
         let mut bounds = breaks;
@@ -162,16 +163,41 @@ fn rounded_fixture_properties_and_weight_are_independently_integrated() {
     }
     assert!(!references.is_empty());
     let mut model = app.core.model.clone();
-    model
+    let secondaries: Vec<_> = model
+        .beams()
+        .chain(model.posts())
+        .map(|member| member.id)
+        .collect();
+    for member in secondaries.into_iter().rev() {
+        sepika_edit::DeleteSecondaryMember { member }.apply(&mut model);
+    }
+    let removed: Vec<_> = model
         .elements
-        .retain(|e| e.section.is_some_and(|id| references.contains_key(&id)));
-    model.wall_plates.clear();
+        .iter()
+        .filter(|e| !e.section.is_some_and(|id| references.contains_key(&id)))
+        .map(|e| e.id)
+        .collect();
+    for id in removed.into_iter().rev() {
+        sepika_edit::DeleteMember { id }.apply(&mut model);
+    }
+    assert!(model.wall_plates.is_empty());
+    assert!(model.generated_wall_origins.is_empty());
+    assert!(model.stb_strengths.members.iter().all(|input| !matches!(
+        input.target,
+        sepika_core::model::StrengthTarget::Element(_)
+            | sepika_core::model::StrengthTarget::Wall(_)
+    )));
+    model.validate().unwrap();
     let mut expected = 0.0;
     let mut old = 0.0;
-    for (i, elem) in model.elements.iter_mut().enumerate() {
-        elem.id = sepika_core::ids::ElemId(i as u32);
-    }
     for elem in &model.elements {
+        let material = model.element_material(elem).unwrap();
+        assert_eq!(
+            material.category,
+            sepika_core::model::MaterialCategory::Steel
+        );
+        assert_eq!(material.fc, None);
+        assert!((material.density / 7.85e-9 - 1.0).abs() < 1.0e-12);
         let (area, old_area) = references[&elem.section.unwrap()];
         let length = model.member_length(elem);
         expected += area * length * 78.5e-6;
@@ -185,8 +211,11 @@ fn rounded_fixture_properties_and_weight_are_independently_integrated() {
             actual += (b - a) * (w1 + w2) / 2.0;
         }
     }
-    assert!((actual / expected - 1.0).abs() < 1.0e-7);
-    eprintln!("実モデル断面数={}, 独立 A/I 最大差={max_error:.12e}, 対象線材DL={actual:.12e} N, 直角モデルDL={old:.12e} N, 差={:.12e} N", references.len(), actual - old);
+    assert!(
+        (actual / expected - 1.0).abs() < 1.0e-7,
+        "actual={actual:.12e}, independently expected={expected:.12e}"
+    );
+    eprintln!("実モデル断面数={}, 独立 A/I 最大差={max_error:.12e}, 対象線材DL={actual:.12e} N, 独立DL={expected:.12e} N, 直角モデルDL={old:.12e} N, 差={:.12e} N", references.len(), actual - old);
     let mut baseline = imported();
     for section in &mut baseline.core.model.sections {
         if let Some((_, old_area)) = references.get(&section.id) {

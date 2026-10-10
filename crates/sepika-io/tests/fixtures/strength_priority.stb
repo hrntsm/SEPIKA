@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+<StbCommon project_name="independent strength acceptance" app_name="SEPIKA test" app_version="1" strength_concrete="Fc24"/>
+<StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0" kind="ON_COLUMN"/><StbNode id="2" X="0" Y="0" Z="3000" kind="ON_COLUMN"/></StbNodes>
+<StbStories><StbStory id="1" name="top" height="3000" kind="GENERAL" strength_concrete="Fc27"><StbNodeIdList><StbNodeId id="2"/></StbNodeIdList></StbStory></StbStories>
+<StbMembers><StbColumns><StbColumn id="1" name="C" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="RC" strength_concrete="Fc36"/></StbColumns></StbMembers>
+<StbSections><StbSecColumn_RC id="1" name="C" strength_concrete="Fc30"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="400" width_Y="400"/></StbSecFigureColumn_RC></StbSecColumn_RC></StbSections>
+</StbModel></ST_BRIDGE>
