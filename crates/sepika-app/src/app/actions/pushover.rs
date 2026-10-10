@@ -108,9 +108,9 @@ impl App {
         let model = self.core.model.clone();
         let cfg = self.core.analysis_cfg;
         self.spawn_analysis_job("増分解析", move || {
-            JobResult::Pushover(Self::run_compute(|| {
+            JobResult::Pushover(Box::new(Self::run_compute(|| {
                 sepika_job::compute::compute_pushover(model, cfg).map_err(|e| e.to_string())
-            }))
+            })))
         });
         #[cfg(feature = "gui")]
         if let Some(job) = self.core.scoped.job.as_mut() {

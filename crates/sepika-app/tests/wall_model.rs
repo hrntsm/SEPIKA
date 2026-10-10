@@ -1030,6 +1030,7 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
         app.core.scoped.last_error
     );
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "増分解析: {:?}",
@@ -1106,6 +1107,7 @@ fn test_holding_capacity_auto_rank_detects_wall() {
         app.core.scoped.last_error
     );
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "増分解析: {:?}",
@@ -1130,6 +1132,7 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
     app.run_preparation();
     app.run_static_all();
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -1309,6 +1312,7 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
     app.run_preparation();
     app.run_static_all();
     app.run_pushover();
+    select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -1392,5 +1396,47 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
             expected,
             "Qdirへ投影して局所頭打ち/τuを低下させない"
         );
+    }
+}
+
+fn select_holding_points(app: &mut sepika_app::app::App) {
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    let dir = app.core.scoped.pushover_view_dir;
+    let Some(bundle) = &mut app.core.scoped.results else {
+        return;
+    };
+    for po in [
+        &mut bundle.pushover,
+        &mut bundle.pushover_x,
+        &mut bundle.pushover_y,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let Some(step) = po.capacity_curve.last().map(|p| p.step) else {
+            continue;
+        };
+        if let Ok(mut ds) = po.evaluation_point(
+            EvaluationPurpose::Ds,
+            dir,
+            step,
+            "テストの明示採用点".into(),
+        ) {
+            let mut ids: std::collections::BTreeSet<_> =
+                po.member_response.iter().map(|r| r.elem).collect();
+            if let Some(walls) = &po.wall_history {
+                ids.extend(walls.iter().map(|r| r.elem));
+            }
+            ds.member_capacities_n = ids.into_iter().map(|id| (id, 1_000_000.0)).collect();
+            po.ds_evaluation = Some(ds);
+            po.capacity_evaluation = po
+                .evaluation_point(
+                    EvaluationPurpose::HoldingCapacity,
+                    dir,
+                    step,
+                    "テストの明示採用点".into(),
+                )
+                .ok();
+        }
     }
 }

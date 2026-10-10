@@ -499,6 +499,9 @@ fn sample_pushover() -> sepika_solver::nonlinear::pushover::PushoverResult {
         steps: vec![],
         wall_history: None,
         wall_run: None,
+        confirmed_history: None,
+        ds_evaluation: None,
+        capacity_evaluation: None,
         capacity_curve: [(1.0, 100.0), (2.0, 200.0), (3.0, 250.0)]
             .into_iter()
             .enumerate()

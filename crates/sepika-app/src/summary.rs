@@ -412,6 +412,25 @@ pub fn build_report_csv(app: &App) -> String {
                 value.replace('"', "\"\"")
             ));
         }
+        for input in &results.holding_evaluations {
+            out.push_str(&format!(
+                "\n[目的別採用run {:?} {:?}]\n解析条件,\"{}\"\n",
+                input.point.purpose,
+                input.point.direction,
+                pushover_conditions_text(&input.conditions)
+            ));
+            if !app.holding_evaluation_is_current(input) {
+                out.push_str("集計不能,目的別採用runの生成入力が現在モデルと不一致\n");
+                continue;
+            }
+            for (label, value) in holding_evaluation_rows(&input.run) {
+                out.push_str(&format!(
+                    "\"{}\",\"{}\"\n",
+                    label.replace('"', "\"\""),
+                    value.replace('"', "\"\"")
+                ));
+            }
+        }
         let layers = model.layers();
         let n_stories = layers.len();
         let story_name = |i: usize| -> String {
@@ -869,7 +888,7 @@ pub(crate) fn wall_response_rows(
     po: &sepika_solver::nonlinear::pushover::PushoverResult,
 ) -> Vec<(String, String)> {
     use sepika_solver::nonlinear::pushover::wall_response::WallUnavailableReason;
-    let mut rows = Vec::new();
+    let mut rows = holding_evaluation_rows(po);
     let Some(records) = &po.wall_history else {
         return vec![(
             "壁応答".into(),
@@ -980,6 +999,62 @@ pub(crate) fn wall_response_rows(
         }
     }
     rows
+}
+
+fn holding_evaluation_rows(
+    po: &sepika_solver::nonlinear::pushover::PushoverResult,
+) -> Vec<(String, String)> {
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    let mut rows = vec![("増分解析終了理由".into(), format!("{:?}", po.termination))];
+    for (purpose, point, label) in [
+        (EvaluationPurpose::Ds, &po.ds_evaluation, "Ds判定"),
+        (
+            EvaluationPurpose::HoldingCapacity,
+            &po.capacity_evaluation,
+            "保有耐力比較",
+        ),
+    ] {
+        let Some(point) = point else {
+            rows.push((label.into(), "目的別評価点が未指定".into()));
+            continue;
+        };
+        rows.push((
+            format!("{label}採用点"),
+            format!(
+                "run={} direction={:?} step={} generation_sha256={} reason={}",
+                point.run_id,
+                point.direction,
+                point.step,
+                input_generation_hash(&point.input_generation),
+                point.selection_reason
+            ),
+        ));
+        rows.push((
+            format!("{label} 群耐力重み[N]"),
+            format!("{:?}", point.member_capacities_n),
+        ));
+        match po.evaluate_stories(point, purpose) {
+            Ok(stories) => {
+                for s in stories {
+                    rows.push((format!("{label} 層{} 符号付き層切断面力[N]", s.layer+1), format!("Qu={} Wall={} Brace={} Frame={} βu={} 上層外力={} 基準外力={} 支持ばね内力={} 残差={} 許容差={}", s.qu_n, s.wall_n, s.brace_n, s.frame_n, s.beta_u, s.external_n, s.reference_n, s.support_n, s.residual_n, s.tolerance_n)));
+                }
+            }
+            Err(reason) => rows.push((format!("{label}集計不能"), reason)),
+        }
+    }
+    rows
+}
+
+pub(crate) fn pushover_conditions_text(cfg: &sepika_job::AnalysisSettings) -> String {
+    format!("Ai={:?}, Z={}, C0={}, 地盤={:?}, 方式={:?}, 刻み={}, 目標変位={:?} mm, 目標層間角={:?}, 長期載荷={}, 塑性率={:?}",
+        cfg.ai_mode, cfg.z, cfg.c0, cfg.soil, cfg.push_control, cfg.push_steps,
+        cfg.push_use_max_disp.then_some(cfg.push_max_disp),
+        cfg.push_use_drift_angle.then_some(1.0/cfg.push_drift_denom), cfg.push_apply_long_term, cfg.ductility_method)
+}
+
+pub(crate) fn input_generation_hash(input: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(input))
 }
 
 #[cfg(test)]

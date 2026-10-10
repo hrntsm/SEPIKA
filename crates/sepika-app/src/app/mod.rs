@@ -484,6 +484,8 @@ pub struct SavedAnalysisSettings {
 
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ResultsBundle {
+    #[serde(default)]
+    pub holding_evaluations: Vec<result_validity::HoldingEvaluationInput>,
     pub statics: Vec<(StaticCaseKey, sepika_solver::statics::linear::StaticOnce)>,
     /// 荷重組合せの解析結果（組合せ名で保持）
     pub combos: Vec<(String, sepika_solver::statics::linear::StaticOnce)>,
@@ -611,7 +613,7 @@ pub struct StaticAllComputed {
 /// バックグラウンド解析ジョブ（増分解析／時刻歴／静的解析の単体実行・一括解析）が
 /// 送る結果。
 pub enum JobResult {
-    Pushover(Result<sepika_solver::nonlinear::pushover::PushoverResult, String>),
+    Pushover(Box<Result<sepika_solver::nonlinear::pushover::PushoverResult, String>>),
     /// 固有値解析（モード数は起動時の `analysis_cfg.n_modes`）。
     Modal(Result<sepika_solver::dynamic::eigen::ModalResult, String>),
     /// 時刻歴応答解析。`ResponseResult` は詳細記録を含み大きいため Box で運ぶ。

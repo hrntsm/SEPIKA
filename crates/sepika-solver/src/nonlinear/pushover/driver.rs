@@ -241,6 +241,8 @@ pub fn pushover_analysis_recording(
     } else {
         vec![0.0; n_active]
     };
+    recorder.reference_external = q.clone();
+    recorder.constant_external = f0.clone();
     if f0.iter().any(|v| v.abs() > 0.0) {
         let n_grav = 5usize;
         let mut applied = 0.0_f64;
@@ -649,7 +651,10 @@ pub fn pushover_analysis_recording(
     Ok(PushoverResult {
         steps: recorded.steps,
         wall_history: Some(recorded.wall_history),
-        wall_run: Some(super::wall_response::WallRunIdentity::new()),
+        wall_run: Some(recorded.run),
+        confirmed_history: Some(recorded.confirmed_history),
+        ds_evaluation: None,
+        capacity_evaluation: None,
         capacity_curve: recorded.capacity_curve,
         hinges: recorded.hinges,
         shear_yields: recorded.shear_yields,

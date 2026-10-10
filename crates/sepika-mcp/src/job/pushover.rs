@@ -40,7 +40,24 @@ pub(crate) fn compute_pushover_job(
     let mut result = sepika_job::compute::compute_pushover(work, cfg)?;
     result.identify_wall_input(input);
 
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    for (purpose, step) in [
+        (EvaluationPurpose::Ds, params.ds_step),
+        (EvaluationPurpose::HoldingCapacity, params.capacity_step),
+    ] {
+        if let Some(step) = step {
+            let point = result
+                .evaluation_point(purpose, cfg.push_dir, step, "MCPで明示指定したstep".into())
+                .map_err(JobError::InvalidInput)?;
+            if purpose == EvaluationPurpose::Ds {
+                result.ds_evaluation = Some(point);
+            } else {
+                result.capacity_evaluation = Some(point);
+            }
+        }
+    }
     let mut summary = pushover_summary(&result);
+    summary["analysis_conditions"] = serde_json::to_value(cfg).expect("解析条件の直列化");
     attach_prepare_notices(&mut summary, prepare_report.notices);
     Ok(JobOutcome::Pushover { summary })
 }
@@ -62,6 +79,15 @@ fn pushover_summary(
         "n_steps": result.steps.len(),
         "wall_run": result.wall_run,
         "wall_history": result.wall_history,
+        "confirmed_history": result.confirmed_history,
+        "steps": result.steps,
+        "capacity_curve": result.capacity_curve,
+        "ds_evaluation": result.ds_evaluation,
+        "capacity_evaluation": result.capacity_evaluation,
+        "termination": result.termination,
+        "control": result.control,
+        "ds_story_evaluation": result.ds_evaluation.as_ref().map(|p| result.evaluate_stories(p, sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose::Ds)),
+        "capacity_story_evaluation": result.capacity_evaluation.as_ref().map(|p| result.evaluate_stories(p, sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose::HoldingCapacity)),
     })
 }
 
@@ -131,6 +157,8 @@ mod tests {
             &JobParams {
                 steps: 3,
                 max_disp: Some(1.0),
+                ds_step: Some(1),
+                capacity_step: Some(1),
                 ..Default::default()
             },
         )
@@ -140,6 +168,31 @@ mod tests {
         };
         assert!(summary["wall_run"]["input_generation"].is_array());
         assert!(summary["wall_run"]["run_id"].is_string());
+        assert_eq!(summary["ds_evaluation"]["step"], 1);
+        assert_eq!(summary["capacity_evaluation"]["step"], 1);
+        assert_eq!(summary["ds_evaluation"]["purpose"], "Ds");
+        assert!(summary["analysis_conditions"].is_object());
+        let ds = &summary["ds_story_evaluation"]["Ok"][0];
+        assert!(ds["qu_n"].is_number(), "{}", summary["ds_story_evaluation"]);
+        assert!(ds["residual_n"].as_f64().unwrap().abs() <= ds["tolerance_n"].as_f64().unwrap());
+        let confirmed = summary["confirmed_history"].as_array().unwrap();
+        assert_eq!(
+            confirmed.len(),
+            summary["n_steps"].as_u64().unwrap() as usize
+        );
+        let initial: sepika_solver::nonlinear::pushover::story_response::StoryCut =
+            serde_json::from_value(confirmed[0]["cuts"][0].clone()).unwrap();
+        assert!(initial.evaluate().unwrap_err().contains("分母"));
+        assert!((ds["qu_n"].as_f64().unwrap() - 100_000.0).abs() < 0.001);
+        for r in confirmed {
+            assert_eq!(r["run_id"], summary["wall_run"]["run_id"]);
+            assert_eq!(
+                r["input_generation"],
+                summary["wall_run"]["input_generation"]
+            );
+            assert!(r["cuts"][0]["reference_n"].is_number());
+            assert!(r["cuts"][0]["support_n"].is_number());
+        }
         let records = summary["wall_history"].as_array().unwrap();
         assert_eq!(records.len(), summary["n_steps"].as_u64().unwrap() as usize);
         for (step, r) in records.iter().enumerate() {
