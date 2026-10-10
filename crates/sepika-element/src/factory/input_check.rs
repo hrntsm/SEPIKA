@@ -131,6 +131,15 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
     if let Some(msg) = category_mismatch_issue(data, sec, mat) {
         return Some(msg);
     }
+    let stiffness = match crate::frame::beam::stiffness_breakdown(model, data) {
+        Ok(stiffness) => stiffness,
+        Err(error) => {
+            return Some(format!(
+                "部材 ID {} の剛性を算定できません: {error}",
+                data.id.0
+            ));
+        }
+    };
     if let Some(shape) = sec.and_then(|s| s.shape.as_ref()) {
         if let Err(error) = shape.rounded_steel_properties() {
             return Some(format!(
@@ -179,7 +188,7 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
                 }
             }
             if super::hinge_view::resolves_to_concentrated_spring(data, model)
-                && crate::frame::beam::stiffness_breakdown(model, data).slab > 1.0 + 1e-12
+                && stiffness.slab > 1.0 + 1e-12
             {
                 return Some(format!("部材 ID {} はスラブ協力付きRC梁ですが、集中ばねの方向別T形鉄筋比に必要なスラブ引張筋面積と正負別骨格を設定できません。矩形梁への代用は行わず解析を停止します", data.id.0));
             }

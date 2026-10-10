@@ -77,6 +77,16 @@ fn rotational_spring_params(data: &ElementData, model: &Model, basis: StrengthBa
     let mat = model.element_material(data);
     let e = mat.map(|m| m.young).unwrap_or(205000.0);
     let iz = sec.map(|s| s.iz.max(s.iy)).unwrap_or(1.0e6);
+    let (e, iz) = if sec
+        .and_then(|s| s.shape.as_ref())
+        .and_then(sepika_core::structure_kind::shape_composite_kind)
+        == Some(sepika_core::structure_kind::StructureKind::Src)
+    {
+        let beam = crate::frame::beam::BeamElement::new(data, model);
+        (beam.e, beam.iy.max(beam.iz))
+    } else {
+        (e, iz)
+    };
     let my = flexural_yield_moment(data, model, basis);
 
     let l_eff = flexible_length(data, model);

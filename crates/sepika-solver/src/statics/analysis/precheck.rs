@@ -537,6 +537,35 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         ));
     }
 
+    for e in &model.elements {
+        if matches!(
+            e.kind,
+            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+        ) {
+            if !model
+                .element_section(e)
+                .and_then(|s| s.shape.as_ref())
+                .is_some_and(|shape| {
+                    matches!(
+                        shape,
+                        sepika_core::section_shape::SectionShape::SrcBeamRect { .. }
+                            | sepika_core::section_shape::SectionShape::SrcColumnRect { .. }
+                    )
+                })
+            {
+                continue;
+            }
+            if let Err(error) = sepika_element::frame::beam::composite_props_of(model, e) {
+                issues.push(ModelIssue::members(
+                    "SRC の材料由来の等価断面性能を算定できません",
+                    "ID ",
+                    vec![e.id],
+                    &error,
+                    "主材料の Fc・Ec・νc と断面寸法を確認してください。暫定値では解析しません。",
+                ));
+            }
+        }
+    }
     let composite_fallback: Vec<ElemId> = model
         .elements
         .iter()
@@ -560,7 +589,9 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 .and_then(|m| m.fc)
                 .is_some_and(|fc| fc.is_finite() && fc > 0.0)
         })
-        .filter(|e| sepika_element::frame::beam::composite_props_of(model, e).is_none())
+        .filter(|e| {
+            sepika_element::frame::beam::composite_props_of(model, e).is_ok_and(|p| p.is_none())
+        })
         .map(|e| e.id)
         .collect();
     if !composite_fallback.is_empty() {
@@ -572,7 +603,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                 "等価断面性能を算定できません",
                 "断面タブで主材料のコンクリート Fc とヤング係数を設定してください。\
                  CFT では鋼管の板厚・外径（充填部の内法が正の値か）も確認してください。\
-                 Fc が有効な場合に限り、SRC は N_S_EQ=15、CFT は充填部の内法が退化した場合に鋼管のみで剛性を評価します。",
+                 CFT の既存の鋼管のみ評価について確認してください。",
             )
             .warn(),
         );
