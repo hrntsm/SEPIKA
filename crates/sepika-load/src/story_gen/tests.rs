@@ -1633,8 +1633,11 @@ fn test_wall_mass_consistent_between_density_and_case_paths() {
         kind: "増打ち".into(),
         value: 5.0e-4,
     }];
-    model.wall_plates[0].opening_area = 500_000.0;
-    model.wall_plates[0].opening_weight = 3000.0;
+    model.wall_plates[0].openings = vec![sepika_core::model::WallOpening {
+        width: 1000.0,
+        height: 500.0,
+        offset: Some([1000.0, 2000.0]),
+    }];
 
     let by_density = generate_stories_with_opts(&model, &[], true, MassMethod::LumpedOnly).unwrap();
 
@@ -2555,6 +2558,10 @@ fn wall_model() -> Model {
         fc: Some(24.0),
         fy: None,
     });
+    let mut support = model.sections[0].clone();
+    support.id = SectionId(1);
+    support.thickness = None;
+    model.sections.push(support);
     // 壁の解析要素は入力の正ではなく生成物（D5）のため、壁版（`WallPlate`）と
     // それが属する壁領域（`WallRegion`）を直接構築する。`enumerate_self_weight`
     // が内部で壁展開モデルを組み立て、そこから `ElementKind::Wall` を生成する。
@@ -2572,7 +2579,7 @@ fn wall_model() -> Model {
             id: ElemId(id),
             kind: ElementKind::Beam,
             nodes: [NodeId(a), NodeId(b)].into_iter().collect(),
-            section: None,
+            section: Some(SectionId(1)),
             local_axis: LocalAxis {
                 ref_vector: [0.0, 0.0, 1.0],
             },
@@ -2586,6 +2593,7 @@ fn wall_model() -> Model {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            dl_support: Some(sepika_core::model::WallDlSupport::HeightMidpoint),
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -2698,6 +2706,7 @@ fn test_wall_self_weight_uses_clear_dimensions_of_boundary_members() {
     // 側柱 500 角 ×2、上下梁 400×700 を壁の 4 辺に配置すると、
     // 内法係数 = (L−500/2×2)/L × (H−700/2×2)/H が芯々面積に乗じられる。
     let mut model = wall_model();
+    model.sections.pop();
     // 側柱・上下梁用の断面（線材）。
     model.sections.push(Section {
         frame_use: None,
@@ -2763,6 +2772,33 @@ fn test_wall_self_weight_uses_clear_dimensions_of_boundary_members() {
     model.elements.push(line(3, 2, 0, 1)); // 下梁
     model.elements.push(line(4, 2, 2, 3)); // 上梁
 
+    let mut shape = rc_rect_shape();
+    if let SectionShape::RcColumnRect { b, d, .. } = &mut shape {
+        *b = 500.0;
+        *d = 500.0;
+    }
+    model.sections[1].shape = Some(shape);
+    model.sections[2].shape = Some(SectionShape::RcBeamRect {
+        b: 400.0,
+        d: 700.0,
+        rebar: sepika_core::section_shape::RcBeamRebar {
+            main_dia: 22.0,
+            top: vec![3],
+            bottom: vec![3],
+            cover: 40.0,
+            stirrup: sepika_core::section_shape::BeamStirrup {
+                dia: 10.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    });
+    for (i, sec) in [2, 1, 2, 1].into_iter().enumerate() {
+        model.elements[i].section = Some(SectionId(sec));
+        if i % 2 == 1 {
+            model.elements[i].local_axis.ref_vector = [1.0, 0.0, 0.0];
+        }
+    }
     let gen = generate_stories(&model, None).unwrap();
     let (l, h) = (4000.0_f64, 3000.0_f64);
     let factor = ((l - 2.0 * 250.0) / l) * ((h - 2.0 * 350.0) / h);
@@ -3030,6 +3066,10 @@ fn test_density_seismic_weight_includes_attached_wall_plate() {
     use sepika_core::model::{LoadTransfer, RegionAnchor};
 
     let mut model = two_story_model();
+    let mut upper = model.nodes[5].clone();
+    upper.id = NodeId(model.nodes.len() as u32);
+    upper.coord[2] = 9000.0;
+    model.nodes.push(upper);
     let baseline = generate_stories(&model, None).unwrap();
 
     model.sections.push(Section {
@@ -3055,6 +3095,7 @@ fn test_density_seismic_weight_includes_attached_wall_plate() {
         property_basis: Default::default(),
     });
     let plate = WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
         shape: WallPlateShape::Attached {
@@ -3097,25 +3138,20 @@ fn test_wall_opening_deduction_and_opening_weight() {
     let mut model = wall_model();
     model.wall_plates[0].opening_area = 1_000_000.0;
     model.wall_plates[0].opening_weight = 5000.0;
-    let gen = generate_stories(&model, None).unwrap();
-    let area = 4000.0 * 3000.0;
-    let net_area = area - 1_000_000.0;
-    let w_total = (2.4e-9 * 150.0 * net_area * GRAVITY_MM_S2 + 5000.0).max(0.0);
-    let expected = w_total / 2.0; // 上端2節点分(4節点等分の半分)
-    assert!(
-        (gen.stories[1].seismic_weight.unwrap() - expected).abs() < 1e-6,
-        "{}",
-        gen.stories[1].seismic_weight.unwrap()
-    );
+    let weight = model.wall_weight(&model.wall_plates[0]).unwrap();
+    let expected = 2.4e-9 * 150.0 * 11_000_000.0 * GRAVITY_MM_S2 + 5000.0;
+    assert!((weight.totals.design_n - expected).abs() < 1e-6);
+    let error = generate_stories(&model, None).unwrap_err();
+    assert!(error.contains("壁版 0") && error.contains("開口部重量") && error.contains("開口位置"));
 }
 
 #[test]
-fn test_wall_opening_deduction_clamped_non_negative() {
-    // 開口面積が壁面積を超える極端な入力でも自重が負にならない(clamp)。
+fn test_wall_opening_larger_than_body_is_rejected() {
     let mut model = wall_model();
-    model.wall_plates[0].opening_area = 4000.0 * 3000.0 * 2.0; // 壁面積を超える
-    let gen = generate_stories(&model, None).unwrap();
-    assert_eq!(gen.stories[1].seismic_weight, Some(0.0));
+    model.wall_plates[0].opening_area = 24_000_000.0;
+    assert!(generate_stories(&model, None)
+        .unwrap_err()
+        .contains("超えています"));
 }
 
 #[test]
@@ -3144,7 +3180,7 @@ fn test_column_face_slit_does_not_change_self_weight_destination() {
 /// `wall_model()` の頂点は下 2 節点・上 2 節点で、上位 2 節点はどちらも階に属する。
 /// 通常配分（上端 2 節点で w/2）に対し、下辺が切れると階の地震用重量は w 全量になる。
 #[test]
-fn test_bottom_beam_face_slit_sends_self_weight_to_top() {
+fn test_bottom_beam_face_slit_preserves_geometric_story_weight() {
     let mut model = wall_model();
     model.wall_plates[0].slit.beam_face = [true, false];
     let got = generate_stories(&model, None).unwrap().stories[1]
@@ -3153,20 +3189,23 @@ fn test_bottom_beam_face_slit_sends_self_weight_to_top() {
 
     let area = 4000.0 * 3000.0;
     let w_total = 2.4e-9 * 150.0 * area * GRAVITY_MM_S2;
-    assert!((got - w_total).abs() < 1e-6, "{got}");
+    assert!((got - w_total / 2.0).abs() < 1e-6, "{got}");
 }
 
 /// §壁自重: 上辺の梁際スリットは、自重を全量下辺へ寄せる（三方スリットの腰壁型）。
 ///
 /// 下端 2 節点は柱脚（階に属さない基部）なので、階の地震用重量は 0 になる。
 #[test]
-fn test_top_beam_face_slit_sends_self_weight_to_bottom() {
+fn test_top_beam_face_slit_preserves_geometric_story_weight() {
     let mut model = wall_model();
     model.wall_plates[0].slit.beam_face = [false, true];
     let got = generate_stories(&model, None).unwrap().stories[1]
         .seismic_weight
         .unwrap();
-    assert!(got.abs() < 1e-6, "{got}");
+    assert!(
+        (got - 2.4e-9 * 150.0 * 12_000_000.0 * GRAVITY_MM_S2 / 2.0).abs() < 1e-6,
+        "{got}"
+    );
 }
 
 // ------------------------------------------------------------------
@@ -3257,6 +3296,7 @@ fn single_column_with_attached_wall(transfer: LoadTransfer) -> (Model, f64) {
         });
     }
     model.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
         shape: WallPlateShape::Attached {
@@ -3275,6 +3315,10 @@ fn single_column_with_attached_wall(transfer: LoadTransfer) -> (Model, f64) {
         slit: Default::default(),
     });
     let total = 2.4e-9 * 120.0 * GRAVITY_MM_S2 * 4000.0 * 200.0;
+    let mut upper = model.nodes[2].clone();
+    upper.id = NodeId(3);
+    upper.coord[2] = 6000.0;
+    model.nodes.push(upper);
     (model, total)
 }
 
@@ -3398,6 +3442,7 @@ fn column_finish_model() -> Model {
     );
     model.stories = generate_stories(&model, None).unwrap().stories;
     model.stories.push(Story {
+        wall_weights: Vec::new(),
         id: StoryId(2),
         name: "RF".into(),
         elevation: 6000.0,
@@ -5425,6 +5470,7 @@ fn test_regeneration_keeps_user_defined_story_fields() {
     with_inserted_floor.stories.insert(
         1,
         Story {
+            wall_weights: Vec::new(),
             id: StoryId(99),
             name: "中間階".into(),
             elevation: 5250.0,
@@ -5482,6 +5528,7 @@ fn split_column_model() -> Model {
         });
     }
     model.stories.push(Story {
+        wall_weights: Vec::new(),
         id: StoryId(0),
         name: "2FL".into(),
         elevation: 3500.0,
@@ -5532,6 +5579,7 @@ fn test_predefined_stories_drive_the_assignment() {
     let mut model = two_story_model();
     // 2 レベル（3500・7000）あるが、階は 7000 の 1 つだけ定義する。
     model.stories.push(Story {
+        wall_weights: Vec::new(),
         id: StoryId(0),
         name: "RFL".into(),
         elevation: 7000.0,
@@ -5565,6 +5613,7 @@ fn test_predefined_stories_drive_the_assignment() {
 fn test_story_without_floor_nodes_gets_no_diaphragm() {
     let mut model = two_story_model();
     model.stories.push(Story {
+        wall_weights: Vec::new(),
         id: StoryId(0),
         name: "3F".into(),
         elevation: 3500.0,
@@ -5580,6 +5629,7 @@ fn test_story_without_floor_nodes_gets_no_diaphragm() {
     });
     // レベル 10500 には節点がない（区間 (3500, 10500] には z=7000 の節点が入る）。
     model.stories.push(Story {
+        wall_weights: Vec::new(),
         id: StoryId(1),
         name: "4F".into(),
         elevation: 10500.0,
@@ -5627,6 +5677,7 @@ fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
     let mut legacy = base_model.clone();
     legacy.stories = vec![
         Story {
+            wall_weights: Vec::new(),
             id: StoryId(0),
             name: "2F".into(),
             elevation: 3500.0,
@@ -5641,6 +5692,7 @@ fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
             fireproof: Default::default(),
         },
         Story {
+            wall_weights: Vec::new(),
             id: StoryId(1),
             name: "3F".into(),
             elevation: 7000.0,
@@ -5660,6 +5712,7 @@ fn test_layer_quantities_match_between_legacy_and_floor_based_stories() {
     let mut modern = base_model.clone();
     modern.stories = vec![
         Story {
+            wall_weights: Vec::new(),
             id: StoryId(0),
             name: "1F".into(),
             elevation: 0.0,

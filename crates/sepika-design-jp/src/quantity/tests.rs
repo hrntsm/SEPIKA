@@ -606,6 +606,7 @@ fn test_wall_quantity_via_wall_plate_is_included() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(3), NodeId(2)],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -659,6 +660,7 @@ fn test_attached_wall_plate_quantity_is_included_as_misc_wall() {
     model.sections.push(sec);
     // 頂部の大梁（節点2-3）に載るパラペット（立ち上がり高さ1000mm、全長）。
     model.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
         shape: WallPlateShape::Attached {
@@ -1104,6 +1106,7 @@ fn circular_rc_post_model(end_mm: [f64; 3]) -> Model {
             gravity_end_shares: None,
         }],
         stories: vec![Story {
+            wall_weights: Vec::new(),
             id: StoryId(0),
             name: "1F".into(),
             elevation: 0.0,

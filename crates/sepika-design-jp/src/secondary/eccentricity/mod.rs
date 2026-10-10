@@ -122,6 +122,7 @@ pub(crate) mod test_support {
         // 層
         let s0 = StoryId(0);
         let story = Story {
+            wall_weights: Vec::new(),
             level_kind: Default::default(),
             structure: Default::default(),
             id: s0,

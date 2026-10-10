@@ -27,12 +27,17 @@ pub enum LoadSource {
     Auto,
     /// 片持ちスラブの先端荷重から同期された部材荷重。
     SlabTip,
+    /// 同期DLのうち、物理壁版に由来する自重。階帯重量と独立に識別する。
+    WallSelfWeight,
 }
 
 impl LoadSource {
     /// 準備計算が生成した荷重か。
     pub fn is_auto(self) -> bool {
-        matches!(self, LoadSource::Auto | LoadSource::SlabTip)
+        matches!(
+            self,
+            LoadSource::Auto | LoadSource::SlabTip | LoadSource::WallSelfWeight
+        )
     }
 }
 
@@ -226,14 +231,20 @@ impl LoadCase {
     /// 渡された荷重の `source` は [`LoadSource::Auto`] に揃える。手入力扱いのまま
     /// 積むと次回の入れ替えで残ってしまい、同期のたびに荷重が増え続けるため。
     pub fn replace_auto_loads(&mut self, auto_nodal: Vec<NodalLoad>, auto_member: Vec<MemberLoad>) {
-        self.nodal.retain(|nl| nl.source != LoadSource::Auto);
+        self.nodal
+            .retain(|nl| !matches!(nl.source, LoadSource::Auto | LoadSource::WallSelfWeight));
         self.nodal.extend(auto_nodal.into_iter().map(|mut nl| {
-            nl.source = LoadSource::Auto;
+            if nl.source != LoadSource::WallSelfWeight {
+                nl.source = LoadSource::Auto;
+            }
             nl
         }));
-        self.member.retain(|ml| ml.source != LoadSource::Auto);
+        self.member
+            .retain(|ml| !matches!(ml.source, LoadSource::Auto | LoadSource::WallSelfWeight));
         self.member.extend(auto_member.into_iter().map(|mut ml| {
-            ml.source = LoadSource::Auto;
+            if ml.source != LoadSource::WallSelfWeight {
+                ml.source = LoadSource::Auto;
+            }
             ml
         }));
     }
@@ -243,12 +254,12 @@ impl LoadCase {
     pub fn auto_loads_match(&self, auto_nodal: &[NodalLoad], auto_member: &[MemberLoad]) -> bool {
         self.nodal
             .iter()
-            .filter(|nl| nl.source == LoadSource::Auto)
+            .filter(|nl| matches!(nl.source, LoadSource::Auto | LoadSource::WallSelfWeight))
             .eq(auto_nodal.iter())
             && self
                 .member
                 .iter()
-                .filter(|ml| ml.source == LoadSource::Auto)
+                .filter(|ml| matches!(ml.source, LoadSource::Auto | LoadSource::WallSelfWeight))
                 .eq(auto_member.iter())
     }
 

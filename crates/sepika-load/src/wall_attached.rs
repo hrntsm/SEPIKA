@@ -25,9 +25,8 @@
 //!   両端節点への集中荷重へ逃がすフォールバックは持たない（非構造節点への節点荷重は
 //!   `DofMap` が無視し、長期 DL から黙って消える危険側だったため）。
 //!
-//! 張り出し量 `extent[0] != extent[1]`（台形の壁）では、線荷重強度を張り出し高さに
-//! 比例させる（[`LoadShape::Linear`]）。柱按分・密度経路の節点集中は同じ台形の
-//! 面積重心へ置く。開口は総重量のスケールにだけ効き、開口位置は見ない。
+//! 張り出し量と位置付き開口の実領域を線方向へ積分し、区分的な線形荷重を作る。
+//! 地震用階重量は支持反力から生成せず、共通領域の水平帯積分を使う。
 
 use std::collections::HashMap;
 
@@ -37,85 +36,6 @@ use sepika_core::ids::{ElemId, FloorRegionId, NodeId, SlabId};
 use sepika_core::model::{LoadTransfer, Model, RegionAnchor, WallPlateShape};
 
 use crate::floor::{fem_linear, fem_uniform, BeamLoad, Cmq, LoadShape, LoadTarget};
-
-/// 取付き線上の集中位置（無次元）。矩形なら区間中点、台形なら ∫|h| の面積重心。
-fn line_resultant_t(span: [f64; 2], extent: [f64; 2]) -> f64 {
-    let s = sepika_core::geom::abs_lerp_centroid(extent[0], extent[1]);
-    span[0] + (span[1] - span[0]) * s
-}
-
-/// 線アンカー分布の形状。高さが両端で実質等しければ等分布、異なれば線形変化。
-/// 総荷重 `∫ w dx = total` を保存する。符号が同じ区間向け（反転は呼び出し側で分割）。
-fn line_load_shape(total: f64, len: f64, extent: [f64; 2]) -> (LoadShape, Cmq) {
-    let h0 = extent[0].abs();
-    let h1 = extent[1].abs();
-    let sum_h = h0 + h1;
-    if sum_h <= 1e-12 || (h0 - h1).abs() <= 1e-12 * sum_h.max(1.0) {
-        let w = total / len;
-        (LoadShape::Uniform { w }, fem_uniform(w, len))
-    } else {
-        let w_i = total * 2.0 * h0 / (sum_h * len);
-        let w_j = total * 2.0 * h1 / (sum_h * len);
-        (LoadShape::Linear { w_i, w_j }, fem_linear(w_i, w_j, len))
-    }
-}
-
-fn push_span_load(
-    loads: &mut Vec<BeamLoad>,
-    nodes: [NodeId; 2],
-    span: [f64; 2],
-    extent: [f64; 2],
-    total: f64,
-    len: f64,
-) {
-    if total <= 1e-9 || len <= 1e-9 {
-        return;
-    }
-    let (shape, cmq) = line_load_shape(total, len, extent);
-    loads.push(BeamLoad {
-        elem: ElemId(u32::MAX),
-        target: LoadTarget::Span { nodes, t: span },
-        shape,
-        cmq,
-    });
-}
-
-fn push_anchor_span_loads(
-    loads: &mut Vec<BeamLoad>,
-    nodes: [NodeId; 2],
-    span: [f64; 2],
-    extent: [f64; 2],
-    total: f64,
-    len: f64,
-) {
-    if extent[0] * extent[1] < 0.0 && extent[0].abs() > 1e-12 && extent[1].abs() > 1e-12 {
-        let tz = extent[0].abs() / (extent[0].abs() + extent[1].abs());
-        let a0 = sepika_core::geom::abs_lerp_integral(extent[0], extent[1], 0.0, tz);
-        let a1 = sepika_core::geom::abs_lerp_integral(extent[0], extent[1], tz, 1.0);
-        let ta = a0 + a1;
-        if ta > 1e-15 && tz > 1e-12 && tz < 1.0 - 1e-12 {
-            let mid = span[0] + (span[1] - span[0]) * tz;
-            push_span_load(
-                loads,
-                nodes,
-                [span[0], mid],
-                [extent[0], 0.0],
-                total * a0 / ta,
-                len * tz,
-            );
-            push_span_load(
-                loads,
-                nodes,
-                [mid, span[1]],
-                [0.0, extent[1]],
-                total * a1 / ta,
-                len * (1.0 - tz),
-            );
-            return;
-        }
-    }
-    push_span_load(loads, nodes, span, extent, total, len);
-}
 
 /// 節点 `node` への集中荷重（[`LoadTarget::Node`]）を1件積む。総量が実質0なら積まない。
 fn push_node_load(loads: &mut Vec<BeamLoad>, node: NodeId, total: f64) {
@@ -151,30 +71,62 @@ pub fn attached_wall_beam_loads(model: &Model) -> Vec<BeamLoad> {
         else {
             continue;
         };
-        let Some(extent) = model.wall_plate_extent(plate) else {
+        let Ok(weight) = model.wall_weight(plate) else {
             continue;
         };
-        let Some(total) = model.wall_plate_self_weight(plate, model) else {
+        let Ok(parts) = weight.projected_design_line_loads() else {
             continue;
         };
-        if total <= 0.0 {
-            continue;
-        }
         let Some(coords) = plate.boundary_coords(model) else {
             continue;
         };
+        let plan_len = (coords[1][0] - coords[0][0]).hypot(coords[1][1] - coords[0][1]);
         let len = dist3(coords[0], coords[1]);
-        if len <= 1e-9 {
+        if plan_len <= 1e-9 || len <= 1e-9 {
             continue;
         }
-        match transfer {
-            LoadTransfer::Anchor => {
-                push_anchor_span_loads(&mut loads, *nodes, *span, extent, total, len);
-            }
-            LoadTransfer::Columns => {
-                let t = line_resultant_t(*span, extent);
-                push_node_load(&mut loads, nodes[0], total * (1.0 - t));
-                push_node_load(&mut loads, nodes[1], total * t);
+        for [a, b, w1, w2] in parts {
+            let piece_len = (b - a) * len / plan_len;
+            let t0 = span[0] + (span[1] - span[0]) * a / plan_len;
+            let t1 = span[0] + (span[1] - span[0]) * b / plan_len;
+            let wi = w1 * plan_len / len;
+            let wj = w2 * plan_len / len;
+            let average = wi / 2.0 + wj / 2.0;
+            let total = average * piece_len;
+            match transfer {
+                LoadTransfer::Anchor => {
+                    let (shape, cmq) = if (wi - wj).abs() <= 1e-12 * wi.max(wj).max(1.0) {
+                        (
+                            LoadShape::Uniform { w: average },
+                            fem_uniform(average, piece_len),
+                        )
+                    } else {
+                        (
+                            LoadShape::Linear { w_i: wi, w_j: wj },
+                            fem_linear(wi, wj, piece_len),
+                        )
+                    };
+                    loads.push(BeamLoad {
+                        elem: ElemId(u32::MAX),
+                        target: LoadTarget::Span {
+                            nodes: *nodes,
+                            t: [t0, t1],
+                        },
+                        shape,
+                        cmq,
+                    });
+                }
+                LoadTransfer::Columns => {
+                    let scale = wi.max(wj);
+                    if scale == 0.0 {
+                        continue;
+                    }
+                    let mean =
+                        (wi / scale + 2.0 * (wj / scale)) / (3.0 * (wi / scale + wj / scale));
+                    let t = t0 + (t1 - t0) * mean;
+                    push_node_load(&mut loads, nodes[0], total * (1.0 - t));
+                    push_node_load(&mut loads, nodes[1], total * t);
+                }
             }
         }
     }
@@ -207,27 +159,15 @@ fn add_node_weight(node_weight: &mut [f64], node: NodeId, w: f64) {
     }
 }
 
-/// 取り付く壁版の自重を、密度からの地震用重量直接算入（`include_density_self_weight
-/// = true`。DL ケースが無いモデル向け）へ載せる。
-///
-/// 標準構成では自重は「DL」へ同期され、本関数は呼ばれない（二重計上防止。
-/// フレーム外雑壁の [`crate::story_gen::accumulate_misc_wall_weight`] と同じ位置づけ）。
-/// DL が無い経路でここを呼ばないと、取り付く壁版の自重が地震用重量から欠落する
-/// （囲まれた壁・フレーム外雑壁は `enumerate_self_weight` / 雑壁集計に入るのに、
-/// 取り付く壁版だけが抜けていた）。
-///
-/// 配分は総重量を保存する節点集中（線アンカーは台形の面積重心、矩形なら区間中点の
-/// 単純梁反力按分。床領域アンカーも張り出し高さが両端で異なれば同じ重心比、
-/// 矩形なら両端半分ずつ）。梁の曲げへの載り方は DL 同期側
-/// （[`attached_wall_beam_loads`] / 等価面荷重）が担い、こちらは階重量の総和が
-/// 抜けないことだけを保証する。
-pub fn accumulate_attached_wall_seismic_weight(model: &Model, node_weight: &mut [f64]) {
+/// 取り付く壁版のDL支持反力相当量を節点へ集計する。
+/// 地震用階重量はこの反力を使わず、`Model::wall_weight` の水平帯積分で算定する。
+pub fn accumulate_attached_wall_dl_weight(model: &Model, node_weight: &mut [f64]) {
     accumulate_attached_wall_weight_with(model, node_weight, false);
 }
 
-/// 取り付く壁版の物理質量相当の重量を節点へ配分する（質量行列・動的解析用）。
-/// 躯体は [`Model::wall_plate_physical_weight`]（物理密度×g）、仕上げ等は設計と同じ。
-pub fn accumulate_attached_wall_mass_equiv(model: &Model, node_weight: &mut [f64]) {
+/// 物理質量相当重量をDL支持反力と同じ端点比で集計する補助API。
+/// 地震用階帯・代表節点質量・質量行列の組立には使わない。
+pub fn accumulate_attached_wall_dl_mass_equiv(model: &Model, node_weight: &mut [f64]) {
     accumulate_attached_wall_weight_with(model, node_weight, true);
 }
 
@@ -236,33 +176,34 @@ fn accumulate_attached_wall_weight_with(model: &Model, node_weight: &mut [f64], 
         let WallPlateShape::Attached { anchor, .. } = &plate.shape else {
             continue;
         };
-        let Some(extent) = model.wall_plate_extent(plate) else {
+        let Ok(weight) = model.wall_weight(plate) else {
+            continue;
+        };
+        let Ok(band) = weight.story_band(weight.z_range_mm[0], weight.z_range_mm[1]) else {
             continue;
         };
         let total = if physical {
-            model.wall_plate_physical_weight(plate, model)
+            band.band.physical_n
         } else {
-            model.wall_plate_self_weight(plate, model)
+            band.band.design_n
         };
-        let Some(total) = total else {
+        let nodes = match anchor {
+            RegionAnchor::Line { nodes, .. } | RegionAnchor::FloorRegion { nodes, .. } => nodes,
+            RegionAnchor::Point(_) => continue,
+        };
+        let (Some(a), Some(b)) = (model.node(nodes[0]), model.node(nodes[1])) else {
             continue;
         };
-        if total <= 0.0 {
+        let delta = [b.coord[0] - a.coord[0], b.coord[1] - a.coord[1]];
+        let length_sq = delta[0].powi(2) + delta[1].powi(2);
+        if length_sq <= 0.0 || total <= 0.0 {
             continue;
         }
-        match anchor {
-            RegionAnchor::Line { nodes, span, .. } => {
-                let t = line_resultant_t(*span, extent);
-                add_node_weight(node_weight, nodes[0], total * (1.0 - t));
-                add_node_weight(node_weight, nodes[1], total * t);
-            }
-            RegionAnchor::FloorRegion { nodes, .. } => {
-                let s = sepika_core::geom::abs_lerp_centroid(extent[0], extent[1]);
-                add_node_weight(node_weight, nodes[0], total * (1.0 - s));
-                add_node_weight(node_weight, nodes[1], total * s);
-            }
-            RegionAnchor::Point(_) => {}
-        }
+        let t = ((band.center_xy_mm[0] - a.coord[0]) * delta[0]
+            + (band.center_xy_mm[1] - a.coord[1]) * delta[1])
+            / length_sq;
+        add_node_weight(node_weight, nodes[0], total * (1.0 - t));
+        add_node_weight(node_weight, nodes[1], total * t);
     }
 }
 
@@ -393,6 +334,7 @@ mod tests {
 
     fn line_attached_plate(span: [f64; 2], extent: [f64; 2], transfer: LoadTransfer) -> WallPlate {
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
             shape: WallPlateShape::Attached {
@@ -647,6 +589,7 @@ mod tests {
     /// 自立壁の壁版（節点 0-1 の間、Z=3000）。
     fn self_standing_plate() -> WallPlate {
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
             shape: WallPlateShape::Attached {
@@ -666,6 +609,62 @@ mod tests {
 
     /// 「床領域」アンカー（自立壁）: 床板を持つ床領域では、床領域内の全床板へ
     /// 同一の追加強度（総重量÷床板合計面積）が上乗せされる。
+    #[test]
+    fn floor_region_positioned_opening_changes_coverage_not_story_band_rule() {
+        let mut m = model_with_line_anchor_nodes();
+        m.sections[0].thickness = Some(200.0);
+        m.materials[0].density = 24e-6 / sepika_core::units::GRAVITY_MM_S2;
+        push_floor_region(&mut m, [0.0, 2000.0], 0, true, 3000.0);
+        push_floor_region(&mut m, [2000.0, 4000.0], 1, true, 3000.0);
+        let mut plate = self_standing_plate();
+        plate.openings = vec![sepika_core::model::WallOpening {
+            width: 1000.0,
+            height: 500.0,
+            offset: Some([500.0, 250.0]),
+        }];
+        m.wall_plates.push(plate);
+        let weight = m.wall_weight(&m.wall_plates[0]).unwrap();
+        assert!((weight.totals.design_n - 16800.0).abs() < 1e-7);
+        assert!((weight.totals.physical_n - 16800.0).abs() < 1e-7);
+        assert_eq!(weight.totals.matrix_n, 0.0);
+        assert!((weight.band(3000.0, 4500.0).unwrap().design_n - 16800.0).abs() < 1e-7);
+        assert_eq!(weight.band(4500.0, 6000.0).unwrap().design_n, 0.0);
+        let extra = floor_region_wall_extra_intensity(&m);
+        assert!((extra[&SlabId(0)] * 8_000_000.0 - 7200.0).abs() < 1e-7);
+        assert!((extra[&SlabId(1)] * 8_000_000.0 - 9600.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn floor_region_sign_reversal_positioned_opening_uses_both_components() {
+        for (x, z, expected) in [
+            (3000.0, 1250.0, [4800.0, 4320.0]),
+            (500.0, 550.0, [4320.0, 4800.0]),
+        ] {
+            let mut m = model_with_line_anchor_nodes();
+            m.sections[0].thickness = Some(200.0);
+            m.materials[0].density = 24e-6 / sepika_core::units::GRAVITY_MM_S2;
+            push_floor_region(&mut m, [0.0, 2000.0], 0, true, 3000.0);
+            push_floor_region(&mut m, [2000.0, 4000.0], 1, true, 3000.0);
+            let mut plate = self_standing_plate();
+            if let WallPlateShape::Attached { extent, .. } = &mut plate.shape {
+                *extent = Some([-1000.0, 1000.0]);
+            }
+            plate.openings = vec![sepika_core::model::WallOpening {
+                width: 500.0,
+                height: 200.0,
+                offset: Some([x, z]),
+            }];
+            m.wall_plates.push(plate);
+            let w = m.wall_weight(&m.wall_plates[0]).unwrap();
+            assert!((w.totals.design_n - 9120.0).abs() < 1e-7);
+            assert!((w.band(1500.0, 4500.0).unwrap().design_n - 9120.0).abs() < 1e-7);
+            let extra = floor_region_wall_extra_intensity(&m);
+            for (i, expected) in expected.into_iter().enumerate() {
+                assert!((extra[&SlabId(i as u32)] * 8_000_000.0 - expected).abs() < 1e-7);
+            }
+        }
+    }
+
     #[test]
     fn floor_region_anchor_adds_equivalent_intensity_to_slabs() {
         let mut m = model_with_line_anchor_nodes();
@@ -815,26 +814,26 @@ mod tests {
     }
 
     #[test]
-    fn accumulate_seismic_weight_conserves_line_and_floor_region() {
+    fn accumulate_dl_reference_weight_conserves_line_and_floor_region() {
         let mut m = model_with_line_anchor_nodes();
         let plate = line_attached_plate([0.0, 0.5], [1000.0, 1000.0], LoadTransfer::Anchor);
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
         m.wall_plates.push(plate);
         let mut nw = vec![0.0; m.nodes.len()];
-        accumulate_attached_wall_seismic_weight(&m, &mut nw);
+        accumulate_attached_wall_dl_weight(&m, &mut nw);
         assert!((nw[0] - total * 0.75).abs() / total < 1e-9);
         assert!((nw[1] - total * 0.25).abs() / total < 1e-9);
     }
 
     #[test]
-    fn accumulate_seismic_weight_uses_trapezoid_centroid() {
+    fn accumulate_dl_reference_weight_uses_trapezoid_centroid() {
         let mut m = model_with_line_anchor_nodes();
         let plate = line_attached_plate([0.0, 1.0], [500.0, 1500.0], LoadTransfer::Anchor);
         let total = m.wall_plate_self_weight(&plate, &m).expect("自重が求まる");
         m.wall_plates.push(plate);
         let s = (500.0 + 2.0 * 1500.0) / (3.0 * 2000.0);
         let mut nw = vec![0.0; m.nodes.len()];
-        accumulate_attached_wall_seismic_weight(&m, &mut nw);
+        accumulate_attached_wall_dl_weight(&m, &mut nw);
         assert!((nw[0] - total * (1.0 - s)).abs() / total < 1e-9);
         assert!((nw[1] - total * s).abs() / total < 1e-9);
     }

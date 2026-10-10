@@ -520,6 +520,7 @@ pub fn generate_frame(spec: &FrameSpec) -> Result<FrameGenResult, String> {
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| default_story_name(si));
             Story {
+                wall_weights: Vec::new(),
                 id: StoryId(si as u32),
                 name,
                 elevation: *z,

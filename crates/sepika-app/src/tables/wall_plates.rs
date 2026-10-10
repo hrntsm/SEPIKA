@@ -55,6 +55,7 @@ fn multi_opening_mode_label(mode: MultiOpeningMode) -> &'static str {
 /// 下段の `add_*` は「取り付く壁版を追加」フォームの入力欄。
 #[derive(Clone, Debug, Default)]
 pub struct WallPlateDraft {
+    pub dl_support: Option<sepika_core::model::WallDlSupport>,
     pub self_weight_shares: Vec<f64>,
     /// 編集対象の壁版。
     pub target: Option<WallPlateId>,
@@ -862,6 +863,7 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
             app.ui.scoped.wall_plate_draft.opening_weight = format!("{weight:.0}");
             app.ui.scoped.wall_plate_draft.slit = slit;
             app.ui.scoped.wall_plate_draft.self_weight_shares = plate.self_weight_shares.clone();
+            app.ui.scoped.wall_plate_draft.dl_support = plate.dl_support;
             app.ui.scoped.wall_plate_draft.openings = format_openings(&openings);
             let total = plate.finish_intensity();
             app.ui.scoped.wall_plate_draft.load_value =
@@ -885,10 +887,56 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
         .wall_plate(target)
         .is_some_and(|p| p.is_attached());
 
+    if !is_attached {
+        use sepika_core::model::WallDlSupport;
+        egui::ComboBox::from_id_salt("wall_dl_support")
+            .selected_text(match app.ui.scoped.wall_plate_draft.dl_support {
+                None => "任意辺負担率",
+                Some(WallDlSupport::LowerBeam) => "下梁全量",
+                Some(WallDlSupport::UpperBeam) => "上梁全量",
+                Some(WallDlSupport::HeightMidpoint) => "高さ中央の実体積切断",
+            })
+            .show_ui(ui, |ui| {
+                let mode = &mut app.ui.scoped.wall_plate_draft.dl_support;
+                ui.selectable_value(mode, None, "任意辺負担率");
+                ui.selectable_value(mode, Some(WallDlSupport::LowerBeam), "下梁全量");
+                ui.selectable_value(mode, Some(WallDlSupport::UpperBeam), "上梁全量");
+                ui.selectable_value(
+                    mode,
+                    Some(WallDlSupport::HeightMidpoint),
+                    "高さ中央の実体積切断",
+                );
+            });
+        if app.ui.scoped.wall_plate_draft.dl_support.is_some() {
+            app.ui.scoped.wall_plate_draft.self_weight_shares.clear();
+        }
+    }
     if let Some(plate) = app.core.model.wall_plate(target) {
-        if let Some(boundary) = plate.boundary_nodes(&app.core.model) {
+        match app.core.model.wall_weight(plate) {
+            Ok(w) => {
+                ui.label(format!(
+                    "総量：設計 {:.3} kN／物理質量相当 {:.3} kN",
+                    w.totals.design_n / 1000.0,
+                    w.totals.physical_n / 1000.0
+                ));
+                if let Some(reason) = w.partition_issue {
+                    ui.colored_label(crate::theme::ERROR_RED, format!("階配分未算定：{reason}"));
+                } else {
+                    ui.label("階重量は床レベル中央の実領域から独立集計します。");
+                }
+            }
+            Err(e) => {
+                ui.colored_label(crate::theme::ERROR_RED, e);
+            }
+        }
+    }
+    if let Some(plate) = app.core.model.wall_plate(target) {
+        if let Some(boundary) = plate
+            .boundary_nodes(&app.core.model)
+            .filter(|_| app.ui.scoped.wall_plate_draft.dl_support.is_none())
+        {
             ui.label("自重の支持先：各辺の負担率を合計 100% で指定してください。");
-            ui.label("解析要素にならない壁版に適用します。0% の辺へは伝えません。");
+            ui.label("囲まれた壁版のDL支持先へ適用します。階重量は別に水平帯で算定します。");
             let shares = &mut app.ui.scoped.wall_plate_draft.self_weight_shares;
             shares.resize(boundary.len(), 0.0);
             for (i, ratio) in shares.iter_mut().enumerate() {
@@ -1089,6 +1137,7 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
             app.core.scoped.undo.run(
                 &mut app.core.model,
                 Box::new(SetWallPlateAttrs {
+                    dl_support: app.ui.scoped.wall_plate_draft.dl_support,
                     self_weight_shares: app.ui.scoped.wall_plate_draft.self_weight_shares.clone(),
                     id: target,
                     opening_area,
@@ -1495,6 +1544,7 @@ mod tests {
 
     fn enclosed(id: u32, section: Option<SectionId>) -> WallPlate {
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(id),
             shape: WallPlateShape::Enclosed,

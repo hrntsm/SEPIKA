@@ -216,12 +216,15 @@ pub fn secondary_self_weight_interval(
                 anchor.support
             )
         })?;
-        deductions[end] = beam_projected_face(
-            section,
-            axis_direction(sa, sb)?,
-            reference,
-            vec3::scale(direction, if end == 0 { 1.0 } else { -1.0 }),
-        )
+        let support_axis = axis_direction(sa, sb)?;
+        let inward = vec3::scale(direction, if end == 0 { 1.0 } else { -1.0 });
+        deductions[end] = if section.width == 0.0 && section.depth == 0.0 {
+            Ok(0.0)
+        } else if support_axis[0].hypot(support_axis[1]) <= 1e-12 {
+            section_face(section, support_axis, reference, inward)
+        } else {
+            beam_projected_face(section, support_axis, reference, inward)
+        }
         .map_err(|error| format!("{label} の端 {end}・支持材 {:?}: {error}", anchor.support))?;
     }
     checked_interval(&label, len, deductions)
@@ -279,6 +282,48 @@ pub fn face_distances(model: &Model) -> Vec<[f64; 2]> {
             ]
         })
         .collect()
+}
+
+/// 壁実領域に面する支持材の図心から外側フェースまで [mm]。断面方向・形状不足はエラー。
+pub fn wall_support_face(
+    model: &Model,
+    support: SupportMemberId,
+    direction: [f64; 3],
+) -> Result<f64, String> {
+    let (a, b) = model
+        .support_member_axis(support)
+        .ok_or("壁支持材の材軸が未設定です")?;
+    let (section, reference) = match support {
+        SupportMemberId::Primary(id) => {
+            let e = model.element(id).ok_or("壁支持材が存在しません")?;
+            (
+                model
+                    .element_section(e)
+                    .ok_or("壁支持材の断面が未設定です")?,
+                e.local_axis.ref_vector,
+            )
+        }
+        SupportMemberId::Secondary(id) => {
+            let e = model
+                .secondary_member(id)
+                .ok_or("壁二次支持材が存在しません")?;
+            let section = e
+                .section
+                .and_then(|id| model.sections.get(id.index()))
+                .ok_or("壁二次支持材の断面が未設定です")?;
+            let axis = axis_direction(a, b)?;
+            let reference = if axis[2].abs() < 0.99 {
+                [0.0, 0.0, 1.0]
+            } else {
+                [1.0, 0.0, 0.0]
+            };
+            (section, reference)
+        }
+    };
+    if section.width == 0.0 && section.depth == 0.0 {
+        return Ok(0.0);
+    }
+    section_face(section, axis_direction(a, b)?, reference, direction)
 }
 
 #[cfg(test)]

@@ -718,6 +718,7 @@ mod tests {
 
     fn enclosed_plate() -> sepika_core::model::WallPlate {
         sepika_core::model::WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
             shape: sepika_core::model::WallPlateShape::Enclosed,

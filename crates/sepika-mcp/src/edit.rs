@@ -125,6 +125,7 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
                     .map_err(|e| format!("loads の解析に失敗: {e}"))?,
             };
             Ok(Box::new(SetWallPlateAttrs {
+                dl_support: value.get("dl_support").filter(|v|!v.is_null()).map(|v|serde_json::from_value(v.clone()).map_err(|e|format!("dl_support の解析に失敗: {e}"))).transpose()?,
                 self_weight_shares: match value.get("self_weight_shares") {
                     None | Some(serde_json::Value::Null) => Vec::new(),
                     Some(v) => serde_json::from_value(v.clone())

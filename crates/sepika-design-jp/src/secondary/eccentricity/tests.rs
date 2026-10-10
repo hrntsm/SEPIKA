@@ -181,6 +181,7 @@ fn push_self_standing(
     use sepika_core::model::{RegionAnchor, WallPlate, WallPlateShape};
     let id = sepika_core::ids::WallPlateId(model.wall_plates.len() as u32);
     model.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id,
         shape: WallPlateShape::Attached {
@@ -225,6 +226,7 @@ fn test_append_misc_wall_stiffnesses() {
     // 対象外: 取付き線に取り付く全高の腰壁。フロア間で壁がつながっていないもの
     // （腰壁・垂れ壁・パラペット）は周辺部材の断面性能へ算入する経路が受け持つ。
     model.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(model.wall_plates.len() as u32),
         shape: WallPlateShape::Attached {

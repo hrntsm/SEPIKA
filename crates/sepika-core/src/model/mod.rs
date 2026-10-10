@@ -27,6 +27,7 @@ mod vibration;
 mod wall;
 mod wall_plate;
 mod wall_region;
+mod wall_weight;
 
 pub use aggregate::*;
 pub use assignment_region::*;
@@ -51,6 +52,7 @@ pub use vibration::*;
 pub use wall::*;
 pub use wall_plate::*;
 pub use wall_region::*;
+pub use wall_weight::*;
 
 #[cfg(test)]
 mod tests;

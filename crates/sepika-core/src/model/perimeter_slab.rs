@@ -393,6 +393,7 @@ mod tests {
         model.stories.insert(
             0,
             Story {
+                wall_weights: Vec::new(),
                 id: StoryId(1),
                 name: "基部".into(),
                 elevation: 0.0,
@@ -408,6 +409,7 @@ mod tests {
             },
         );
         model.stories.push(Story {
+            wall_weights: Vec::new(),
             id: StoryId(2),
             name: "1F".into(),
             elevation: 3000.0,
@@ -494,6 +496,7 @@ mod tests {
             ];
             model.stories = vec![
                 Story {
+                    wall_weights: Vec::new(),
                     id: StoryId(0),
                     name: "1F".into(),
                     elevation: -3000.0,
@@ -508,6 +511,7 @@ mod tests {
                     fireproof: Default::default(),
                 },
                 Story {
+                    wall_weights: Vec::new(),
                     id: StoryId(1),
                     name: "2F".into(),
                     elevation: 0.0,
@@ -622,6 +626,7 @@ mod tests {
         ];
         model.stories = vec![
             Story {
+                wall_weights: Vec::new(),
                 id: StoryId(0),
                 name: "1F".into(),
                 elevation: 0.0,
@@ -636,6 +641,7 @@ mod tests {
                 fireproof: Default::default(),
             },
             Story {
+                wall_weights: Vec::new(),
                 id: StoryId(1),
                 name: "2F".into(),
                 elevation: 3000.0,

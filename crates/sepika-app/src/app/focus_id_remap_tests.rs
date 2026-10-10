@@ -365,6 +365,7 @@ fn app_with_abc_and_generated_wall() -> App {
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
             section: Some(SectionId(2)),
+            dl_support: None,
             self_weight_shares: Vec::new(),
             opening_area: 0.0,
             opening_weight: 0.0,

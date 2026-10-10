@@ -205,6 +205,7 @@ fn wall_post_model() -> Model {
             .assign_enclosed_wall_plate_to_matching_region(
                 &nodes,
                 WallPlate {
+                    dl_support: None,
                     self_weight_shares: Vec::new(),
                     id: WallPlateId(id),
                     shape: WallPlateShape::Enclosed,

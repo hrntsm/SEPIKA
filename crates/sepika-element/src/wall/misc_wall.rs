@@ -579,6 +579,7 @@ mod tests {
         let plate_id = model.add_enclosed_wall_plate_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             sepika_core::model::WallPlate {
+                dl_support: None,
                 self_weight_shares: Vec::new(),
                 id: sepika_core::ids::WallPlateId(0),
                 shape: sepika_core::model::WallPlateShape::Enclosed,

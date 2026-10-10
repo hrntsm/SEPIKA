@@ -250,7 +250,21 @@ fn stories_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                 if r.weight <= 0.0 {
                     ui.colored_label(crate::theme::BEST_YELLOW, "0.0");
                 } else {
-                    ui.label(format!("{:.1}", force_kn(r.weight)));
+                    ui.label(format!("{:.1}", force_kn(r.weight)))
+                        .on_hover_text(
+                            r.wall_weights
+                                .iter()
+                                .map(|w| {
+                                    format!(
+                                        "壁版 {}: 階帯 {:.3} kN / 物理総量 {:.3} kN",
+                                        w.plate.0,
+                                        force_kn(w.band.design_n),
+                                        force_kn(w.total.physical_n)
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        );
                 }
             });
             row.col(|ui| {

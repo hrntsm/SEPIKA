@@ -806,6 +806,7 @@ fn test_shell_rigid_floor_membrane_off() {
             fy: None,
         }],
         stories: vec![Story {
+            wall_weights: Vec::new(),
             level_kind: Default::default(),
             structure: Default::default(),
             id: StoryId(0),
@@ -1790,6 +1791,7 @@ fn rigid_floor_portal(with_rigid_floor: bool) -> Model {
                 Vec::new(),
             ));
         model.stories.push(Story {
+            wall_weights: Vec::new(),
             level_kind: Default::default(),
             structure: Default::default(),
             id: StoryId(0),
