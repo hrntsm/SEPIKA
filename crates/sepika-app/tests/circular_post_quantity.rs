@@ -92,8 +92,8 @@ fn circular_post_quantity_gui_panel_uses_shared_takeoff() {
         let mut app = sepika_app::app::App::default();
         app.core.model = model;
         let context = egui::Context::default();
-        let output = context.run(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let output = context.run_ui(egui::RawInput::default(), |root_ui| {
+            egui::CentralPanel::default().show_inside(root_ui, |ui| {
                 sepika_app::quantity_view::quantity_panel(ui, &mut app);
             });
         });
