@@ -2685,6 +2685,10 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
         }
     }
 
+    app.core.model.set_member_rc_beam_reference(
+        sepika_core::ids::ElemId(11),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+    );
     app.run_seismic(sepika_solver::statics::analysis::SeismicDir::X);
     assert_no_error(&app, "GL跨ぎ混合構造の地震静的");
     let ex = app
@@ -2704,6 +2708,33 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
             .abs()
             < 1e-7
     );
+    let ex_result = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .seismic(sepika_solver::statics::analysis::SeismicDir::X)
+        .unwrap();
+    let beam = &ex_result
+        .member_forces
+        .iter()
+        .find(|(id, _)| id.0 == 11)
+        .unwrap()
+        .1;
+    let fi = beam.at.first().unwrap().1;
+    let fj = beam.at.last().unwrap().1;
+    for component in [4, 5] {
+        let scale = fi[component].abs().max(fj[component].abs()).max(1.0);
+        assert!((fi[component] + fj[component]).abs() < 1e-8 * scale);
+    }
+    for (_, force) in &beam.at {
+        for component in [1, 2] {
+            assert!((force[component] - fi[component]).abs() < 1e-8 * fi[component].abs().max(1.0));
+        }
+    }
+    // GLと周期の照合は純水平載荷。中間部材荷重を持つ長期載荷へRC基準を代用しない。
+    app.core.analysis_cfg.push_apply_long_term = false;
     app.run_pushover();
     assert_no_error(&app, "GL跨ぎ混合構造の増分解析");
     assert!((app.compute_holding_capacity().unwrap().0.stories[0].qud - 215_250.0).abs() < 1e-7);
