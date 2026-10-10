@@ -63,6 +63,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
     )?;
 
     build_nodes_and_stories(&mut model, raw_nodes, raw_stories, &node_index);
+    warnings.extend(model.source_story_diagnostics());
     build_axes(&mut model, raw_axis_groups, &node_index);
 
     let mut guessed_categories: Vec<String> = Vec::new();
@@ -276,6 +277,7 @@ fn build_nodes_and_stories(
     mut raw_stories: Vec<RawStory>,
     node_index: &HashMap<u32, u32>,
 ) {
+    model.source_stories_initialized = true;
     let node_story_from_list: HashMap<u32, u32> = raw_stories
         .iter()
         .flat_map(|s| {
@@ -295,6 +297,24 @@ fn build_nodes_and_stories(
         .map(|(i, s)| (s.file_id, i as u32))
         .collect();
     for s in raw_stories {
+        model.source_stories.push(sepika_core::model::SourceStory {
+            kind_from_native: false,
+            id: s.file_id,
+            guid: s.guid,
+            name: s.name.clone(),
+            height: s.elevation,
+            kind: s.kind,
+            id_dependence: s.id_dependence,
+            strength_concrete: s.strength_concrete,
+            node_ids: s
+                .node_ids
+                .iter()
+                .map(|&id| sepika_core::model::SourceStoryNode {
+                    id,
+                    node: node_index.get(&id).copied().map(NodeId),
+                })
+                .collect(),
+        });
         let node_ids = s
             .node_ids
             .iter()
@@ -319,6 +339,13 @@ fn build_nodes_and_stories(
 
     raw_nodes.sort_by_key(|n| n.file_id);
     for n in raw_nodes {
+        model
+            .stb_node_ids
+            .push(sepika_core::model::StbNodeIdentity {
+                node: NodeId(node_index[&n.file_id]),
+                id: n.file_id,
+                guid: n.guid,
+            });
         model.nodes.push(Node {
             id: NodeId(node_index[&n.file_id]),
             coord: n.coord,

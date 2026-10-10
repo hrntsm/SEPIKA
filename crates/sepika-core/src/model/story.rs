@@ -253,6 +253,7 @@ impl StoryFireproof {
 /// - **利用者が決める**: [`Self::name`]・[`Self::elevation`]・[`Self::level_kind`]・
 ///   [`Self::weight_override`]・[`Self::column_finish_area_weight`]・[`Self::fireproof`]。
 ///   新規作成時の入力、または ST-Bridge の `StbStory` から入り、準備計算では書き換えない。
+///   STB 元属性と明示所属は [`Model::source_stories`] に独立して保存する。
 /// - **準備計算が埋める**: [`Self::node_ids`]・[`Self::seismic_weight`]・
 ///   [`Self::structure`]。節点と部材が確定してはじめて決まる派生値であり、階生成のたびに算定し直す。
 ///

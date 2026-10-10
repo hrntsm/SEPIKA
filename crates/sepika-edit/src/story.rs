@@ -14,6 +14,82 @@ use crate::EditCommand;
 use sepika_core::ids::StoryId;
 use sepika_core::model::{Model, Story, StoryLevelKind};
 
+/// 元の STB 階 ID を指定し、明示所属を置き換える。節点 ID は内部 ID。
+pub struct SetSourceStoryNodes {
+    pub source_story: u32,
+    pub nodes: Vec<sepika_core::ids::NodeId>,
+}
+
+struct RestoreSourceStories(Vec<sepika_core::model::SourceStory>);
+
+impl EditCommand for RestoreSourceStories {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        Box::new(Self(std::mem::replace(
+            &mut model.source_stories,
+            self.0.clone(),
+        )))
+    }
+    fn label(&self) -> &str {
+        "原階所属の復元"
+    }
+}
+
+impl EditCommand for SetSourceStoryNodes {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if self
+            .nodes
+            .iter()
+            .any(|n| model.node(*n).is_none() || model.generated_masters.contains(n))
+        {
+            return Box::new(crate::RejectedEdit(
+                "原階所属には実在する構造節点が必要です".into(),
+            ));
+        }
+        let Some(index) = model
+            .source_stories
+            .iter()
+            .position(|s| s.id == self.source_story)
+        else {
+            return Box::new(crate::RejectedEdit("原階IDが存在しません".into()));
+        };
+        if model.source_stories[index]
+            .node_ids
+            .iter()
+            .map(|n| n.node)
+            .eq(self.nodes.iter().copied().map(Some))
+        {
+            return Box::new(crate::Noop);
+        }
+        let mut seen = std::collections::HashSet::new();
+        if !self.nodes.iter().all(|n| seen.insert(*n)) {
+            return Box::new(crate::RejectedEdit(
+                "原階所属の節点IDが重複しています".into(),
+            ));
+        }
+        if let Err(reason) = model.assign_stb_node_ids() {
+            return Box::new(crate::RejectedEdit(reason));
+        }
+        let before = model.source_stories.clone();
+        model.source_stories[index].node_ids = self
+            .nodes
+            .iter()
+            .map(|node| sepika_core::model::SourceStoryNode {
+                id: model
+                    .stb_node_ids
+                    .iter()
+                    .find(|n| n.node == *node)
+                    .unwrap()
+                    .id,
+                node: Some(*node),
+            })
+            .collect();
+        Box::new(RestoreSourceStories(before))
+    }
+    fn label(&self) -> &str {
+        "原階の明示所属変更"
+    }
+}
+
 pub struct SetStoryFireproof {
     pub story: StoryId,
     pub conditions: sepika_core::model::StoryFireproof,
@@ -86,6 +162,9 @@ pub struct SetStoryLevel {
 ///
 /// `model.stories` を丸ごと差し替え、`StoryId` の参照も復元前の対応へ戻す。
 pub struct RestoreStoryDefs {
+    pub source_stories_initialized: bool,
+    pub source_stories: Vec<sepika_core::model::SourceStory>,
+    pub stb_node_ids: Vec<sepika_core::model::StbNodeIdentity>,
     pub stories: Vec<Story>,
     /// 復元後の各節点の所属階（`model.nodes` と同順）。
     pub node_story: Vec<Option<StoryId>>,
@@ -94,11 +173,39 @@ pub struct RestoreStoryDefs {
 }
 
 /// 現在の階定義・階参照のスナップショットを撮る。
-fn snapshot(model: &Model) -> RestoreStoryDefs {
+pub(crate) fn snapshot(model: &Model) -> RestoreStoryDefs {
     RestoreStoryDefs {
+        source_stories_initialized: model.source_stories_initialized,
+        source_stories: model.source_stories.clone(),
+        stb_node_ids: model.stb_node_ids.clone(),
         stories: model.stories.clone(),
         node_story: model.nodes.iter().map(|n| n.story).collect(),
         constraints: model.constraints.clone(),
+    }
+}
+
+pub(crate) fn source_story_index(model: &Model, story: StoryId) -> Result<Option<usize>, String> {
+    let level = &model.stories[story.index()];
+    let matches: Vec<_> = model
+        .source_stories
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.height == level.elevation)
+        .map(|(i, _)| i)
+        .collect();
+    match matches.as_slice() {
+        [index] => Ok(Some(*index)),
+        [] if story.index() == 0
+            && level.elevation == model.base_elevation()
+            && model
+                .source_stories
+                .iter()
+                .all(|s| s.height > level.elevation) =>
+        {
+            Ok(None)
+        }
+        [] => Err("解析階と原階の対応を確認できません".into()),
+        _ => Err("解析階と原階の対応が一意ではありません".into()),
     }
 }
 
@@ -130,7 +237,31 @@ impl EditCommand for SetStoryLevel {
         if idx >= model.stories.len() || model.stories[idx].id != self.story {
             return Box::new(crate::Noop);
         }
+        if idx != 0
+            && (!self.elevation.is_finite()
+                || model
+                    .stories
+                    .iter()
+                    .any(|s| s.id != self.story && s.elevation == self.elevation))
+        {
+            return Box::new(crate::RejectedEdit(
+                "階レベルは有限で、同一heightの階へ変更できません".into(),
+            ));
+        }
         let before = snapshot(model);
+        if let Err(reason) = model.initialize_source_stories() {
+            return Box::new(crate::RejectedEdit(reason));
+        }
+        let index = match source_story_index(model, self.story) {
+            Ok(index) => index,
+            Err(reason) => return Box::new(crate::RejectedEdit(reason)),
+        };
+        if let Some(index) = index {
+            model.source_stories[index].name = self.name.clone();
+            if idx != 0 {
+                model.source_stories[index].height = self.elevation;
+            }
+        }
         let story = &mut model.stories[idx];
         story.name = self.name.clone();
         if idx != 0 {
@@ -156,6 +287,37 @@ pub struct AddStory {
 impl EditCommand for AddStory {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let before = snapshot(model);
+        if !self.elevation.is_finite()
+            || model.stories.iter().any(|s| s.elevation == self.elevation)
+        {
+            return Box::new(crate::RejectedEdit(
+                "階レベルは有限で、同一heightの階を追加できません".into(),
+            ));
+        }
+        if let Err(reason) = model.initialize_source_stories() {
+            return Box::new(crate::RejectedEdit(reason));
+        }
+        let Some(id) = model
+            .source_stories
+            .iter()
+            .map(|s| s.id)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+        else {
+            return Box::new(crate::RejectedEdit("STB原階IDの上限です".into()));
+        };
+        model.source_stories.push(sepika_core::model::SourceStory {
+            kind_from_native: true,
+            id,
+            guid: None,
+            name: self.name.clone(),
+            height: self.elevation,
+            kind: sepika_core::model::SourceStoryKind::General,
+            id_dependence: None,
+            strength_concrete: None,
+            node_ids: Vec::new(),
+        });
         model.stories.push(Story {
             wall_weights: Vec::new(),
             id: StoryId(model.stories.len() as u32),
@@ -195,6 +357,26 @@ impl EditCommand for DeleteStory {
             return Box::new(crate::Noop);
         }
         let before = snapshot(model);
+        if let Err(reason) = model.initialize_source_stories() {
+            return Box::new(crate::RejectedEdit(reason));
+        }
+        let index = match source_story_index(model, self.story) {
+            Ok(index) => index,
+            Err(reason) => return Box::new(crate::RejectedEdit(reason)),
+        };
+        if let Some(index) = index {
+            let source_id = model.source_stories[index].id;
+            if model
+                .source_stories
+                .iter()
+                .any(|s| s.id_dependence == Some(source_id))
+            {
+                return Box::new(crate::RejectedEdit(
+                    "従属階から参照されている原階は削除できません".into(),
+                ));
+            }
+            model.source_stories.remove(index);
+        }
         model.stories.remove(idx);
         model.constraints.retain(|c| {
             !matches!(
@@ -232,6 +414,9 @@ impl EditCommand for RestoreStoryDefs {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let redo = snapshot(model);
         model.stories = self.stories.clone();
+        model.source_stories = self.source_stories.clone();
+        model.source_stories_initialized = self.source_stories_initialized;
+        model.stb_node_ids = self.stb_node_ids.clone();
         for (node, story) in model.nodes.iter_mut().zip(self.node_story.iter()) {
             node.story = *story;
         }

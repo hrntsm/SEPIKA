@@ -278,7 +278,7 @@ impl EditCommand for SetPanelZoneMode {
     }
 }
 
-/// 階の種別（一般/PH/地下、`StoryLevelKind`）変更。逆操作は変更前の値への復元。
+/// 明示階種別を変更する。native由来の標準kindだけを同期し、取り込みkindは保持する。
 /// 存在しない `StoryId` は Noop。
 pub struct SetStoryLevelKind {
     pub story: StoryId,
@@ -291,12 +291,27 @@ impl EditCommand for SetStoryLevelKind {
         if idx >= model.stories.len() || model.stories[idx].id != self.story {
             return Box::new(Noop);
         }
-        let old = model.stories[idx].level_kind;
+        if model.stories[idx].level_kind == self.level_kind {
+            return Box::new(Noop);
+        }
+        let before = crate::story::snapshot(model);
+        if let Err(reason) = model.initialize_source_stories() {
+            return Box::new(crate::RejectedEdit(reason));
+        }
+        let source = match crate::story::source_story_index(model, self.story) {
+            Ok(source) => source,
+            Err(reason) => return Box::new(crate::RejectedEdit(reason)),
+        };
+        if let Some(source) = source.filter(|&index| model.source_stories[index].kind_from_native) {
+            use sepika_core::model::{SourceStoryKind, StoryLevelKind};
+            model.source_stories[source].kind = match self.level_kind {
+                StoryLevelKind::Normal => SourceStoryKind::General,
+                StoryLevelKind::Penthouse { .. } => SourceStoryKind::Penthouse,
+                StoryLevelKind::Basement { .. } => SourceStoryKind::Basement,
+            };
+        }
         model.stories[idx].level_kind = self.level_kind;
-        Box::new(SetStoryLevelKind {
-            story: self.story,
-            level_kind: old,
-        })
+        Box::new(before)
     }
 
     fn label(&self) -> &str {

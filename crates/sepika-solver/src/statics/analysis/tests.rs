@@ -2374,7 +2374,10 @@ fn test_model_issues_warns_partial_beam_on_attached_edge() {
 fn test_model_issues_warns_floating_plate() {
     use super::precheck::{model_issues, precheck_model, IssueSeverity};
     use sepika_core::ids::{MaterialId, SlabId};
-    use sepika_core::model::{DistributionMethod, Material, MaterialCategory, Slab, SlabShape};
+    use sepika_core::model::{
+        DistributionMethod, Material, MaterialCategory, Slab, SlabShape, SupportBoundary,
+        SupportMemberId,
+    };
 
     let mut model = make_cantilever_model();
     let sid = SectionId(model.sections.len() as u32);
@@ -2396,8 +2399,24 @@ fn test_model_issues_warns_floating_plate() {
         .to_section(sid, "S15".into());
     sec.material = Some(mid);
     model.sections.push(sec);
-    // 大梁の区画（面走査が作る床領域）に入らない位置の床板。割当領域は実在する
-    // 支持部材で妥当に構成しつつ、幾何が床領域の外にあるため「浮き床板」として警告される。
+    for i in 0..2 {
+        let mut node = model.nodes[i].clone();
+        node.id = NodeId(2 + i as u32);
+        node.coord[1] = 1000.0;
+        model.nodes.push(node);
+    }
+    for (a, b) in [(1, 3), (3, 2), (2, 0), (0, 3)] {
+        let mut beam = model.elements[0].clone();
+        beam.id = ElemId(model.elements.len() as u32);
+        beam.nodes = smallvec::smallvec![NodeId(a), NodeId(b)];
+        model.elements.push(beam);
+    }
+    // 対角大梁上の床重心は、生成される2区画のどちらにも厳密内包されない。
+    let regions = sepika_core::region_gen::generate_region_boundaries(&model);
+    assert_eq!(regions.len(), 2);
+    assert!(regions
+        .iter()
+        .all(|region| !region.contains(&model, [500.0, 500.0])));
     let slab_id = SlabId(0);
     model.slabs.push(Slab {
         id: slab_id,
@@ -2416,17 +2435,24 @@ fn test_model_issues_warns_floating_plate() {
         .regions
         .push(sepika_core::model::FloorPlateAssignmentRegion {
             id: sepika_core::ids::FloorPlateAssignmentRegionId(0),
-            boundary: vec![
-                sepika_core::model::SupportBoundary {
-                    support: sepika_core::model::SupportMemberId::Primary(
-                        sepika_core::ids::ElemId(0),
-                    ),
+            boundary: (0..4)
+                .map(|id| SupportBoundary {
+                    support: SupportMemberId::Primary(ElemId(id)),
                     span: [0.0, 1.0],
-                };
-                4
-            ],
+                })
+                .collect(),
             assignment: sepika_core::model::PlateAssignment::Plate(slab_id),
         });
+    assert!(model.validate().is_ok(), "{:?}", model.validate());
+    assert_eq!(
+        model.slabs[0].boundary_coords(&model),
+        Some(vec![
+            [0.0, 0.0, 0.0],
+            [1000.0, 0.0, 0.0],
+            [1000.0, 1000.0, 0.0],
+            [0.0, 1000.0, 0.0],
+        ])
+    );
 
     let issues = model_issues(&model);
     let warning = issues

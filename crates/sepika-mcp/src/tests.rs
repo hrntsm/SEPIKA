@@ -5,6 +5,141 @@ use sepika_core::model::{
     MemberDetailAttr, MemberJoint, Node, Section,
 };
 
+#[test]
+fn source_story_empty_table_mcp_kind_edit_preserves_empty_table_and_undo() {
+    let mut model = sepika_io::stbridge::import_stbridge(r#"<ST_BRIDGE version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/></StbNodes><StbStories><StbStory id="1" name="基部" height="0" kind="GENERAL"/></StbStories></StbModel></ST_BRIDGE>"#).unwrap();
+    model.source_stories.clear();
+    let initial = model.clone();
+    let directory = std::env::temp_dir().join(format!("sepika-497-empty-{}", std::process::id()));
+    let mut state = ServerState::with_fs_store(model, &directory).unwrap();
+    assert!(apply_edit(&mut state, &serde_json::json!({"command":"SetStoryLevelKind", "story":0, "level_kind":{"Penthouse":{"k":0.7}}})).unwrap().applied);
+    assert!(state.model.source_stories.is_empty());
+    assert!(state.model.source_stories_initialized);
+    assert!(!sepika_io::stbridge::export_stbridge(&state.model)
+        .unwrap()
+        .contains("<StbStory "));
+    state.undo.undo(&mut state.model);
+    assert!(state.model.eq_ignoring_dofmap(&initial));
+    state.undo.redo(&mut state.model);
+    assert!(state.model.source_stories.is_empty());
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn source_story_native_kind_mcp_matches_gui_command_and_preserves_imported_kinds() {
+    use sepika_core::ids::StoryId;
+    use sepika_core::model::{SourceStoryKind, StoryLevelKind};
+    let xml = r#"<ST_BRIDGE version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/></StbNodes><StbStories><StbStory id="1" name="基部" height="0" kind="GENERAL"/><StbStory id="2" name="上階" height="3000" kind="ROOF"/></StbStories></StbModel></ST_BRIDGE>"#;
+    for native in [true, false] {
+        let mut model = sepika_io::stbridge::import_stbridge(xml).unwrap();
+        if native {
+            model.source_stories.clear();
+            model.source_stories_initialized = false;
+        }
+        let initial = model.clone();
+        let directory =
+            std::env::temp_dir().join(format!("sepika-497-kind-{}-{native}", std::process::id()));
+        let mut state = ServerState::with_fs_store(model.clone(), &directory).unwrap();
+        let payload = serde_json::json!({"command":"SetStoryLevelKind", "story":1, "level_kind":{"Penthouse":{"k":0.7}}});
+        assert!(apply_edit(&mut state, &payload).unwrap().applied);
+        let mut undo = UndoStack::new();
+        assert!(undo.run(
+            &mut model,
+            Box::new(sepika_edit::SetStoryLevelKind {
+                story: StoryId(1),
+                level_kind: StoryLevelKind::Penthouse { k: 0.7 }
+            })
+        ));
+        assert!(model.eq_ignoring_dofmap(&state.model));
+        let expected = if native {
+            SourceStoryKind::Penthouse
+        } else {
+            SourceStoryKind::Roof
+        };
+        assert_eq!(state.model.source_stories[1].kind, expected);
+        assert_eq!(state.model.source_stories[1].kind_from_native, native);
+        let exported = sepika_io::stbridge::export_stbridge(&state.model).unwrap();
+        assert_eq!(
+            sepika_io::stbridge::import_stbridge(&exported)
+                .unwrap()
+                .source_stories[1]
+                .kind,
+            expected
+        );
+        state.undo.undo(&mut state.model);
+        assert!(state.model.eq_ignoring_dofmap(&initial));
+        state.undo.redo(&mut state.model);
+        assert_eq!(
+            sepika_io::stbridge::export_stbridge(&state.model).unwrap(),
+            exported
+        );
+        let revision = state.undo.revision();
+        assert!(!apply_edit(&mut state, &payload).unwrap().applied);
+        assert!(!apply_edit(&mut state, &serde_json::json!({"command":"SetStoryLevelKind", "story":4294967295_u32, "level_kind":"Normal"})).unwrap().applied);
+        assert_eq!(state.undo.revision(), revision);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[test]
+fn source_story_mcp_edit_query_diagnostics_and_snapshot_match_shared_command() {
+    let mut model = sample_model();
+    model.assign_stb_node_ids().unwrap();
+    model.source_stories.push(sepika_core::model::SourceStory {
+        kind_from_native: false,
+        id: 51,
+        guid: None,
+        name: "原階".into(),
+        height: 3000.0,
+        kind: sepika_core::model::SourceStoryKind::General,
+        id_dependence: None,
+        strength_concrete: Some("FC27".into()),
+        node_ids: vec![sepika_core::model::SourceStoryNode {
+            id: 2,
+            node: Some(NodeId(1)),
+        }],
+    });
+    let snapshot = model.clone();
+    let directory =
+        std::env::temp_dir().join(format!("sepika-source-story-mcp-{}", std::process::id()));
+    let mut state = ServerState::with_fs_store(model.clone(), &directory).unwrap();
+    let payload =
+        serde_json::json!({"command":"SetSourceStoryNodes", "source_story":51, "nodes":[0]});
+    assert!(apply_edit(&mut state, &payload).unwrap().applied);
+    let mut stack = UndoStack::new();
+    assert!(stack.run(
+        &mut model,
+        Box::new(sepika_edit::SetSourceStoryNodes {
+            source_story: 51,
+            nodes: vec![NodeId(0)]
+        })
+    ));
+    assert!(model.eq_ignoring_dofmap(&state.model));
+    assert_eq!(
+        query_model(&state.model, "source_stories", None)[0]["node_ids"][0]["id"],
+        1
+    );
+    let expected: Vec<_> = state
+        .model
+        .source_story_diagnostics()
+        .into_iter()
+        .chain(state.model.source_story_assignment_diagnostics())
+        .map(|message| serde_json::json!({"message":message}))
+        .collect();
+    assert_eq!(
+        query_model(&state.model, "source_story_diagnostics", None),
+        expected
+    );
+    assert_ne!(state.model.source_stories, snapshot.source_stories);
+    assert_eq!(snapshot.source_stories[0].node_ids[0].id, 2);
+    let error = apply_edit(&mut state, &serde_json::json!({"command":"SetSourceStoryNodes", "source_story":51, "nodes":[4294967295_u32]})).unwrap_err();
+    assert_eq!(error, "原階所属には実在する構造節点が必要です");
+    assert_eq!(state.undo.revision(), 1);
+    state.undo.undo(&mut state.model);
+    assert!(state.model.eq_ignoring_dofmap(&snapshot));
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
 fn sample_model() -> Model {
     Model {
         nodes: vec![

@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [原階所属_Issue497_2026-10.md](原階所属_Issue497_2026-10.md) | 原階保存・編集・Fc供給・公開fixture意味的往復・採用2.0.2全XML schema・GUI/MCP入力世代 | ✅（原階/節点Scope。全構造モデルの標準出力は#507/#550に残る） |
 | [参照骨格の部材角単位_Issue436_2026-10.md](参照骨格の部材角単位_Issue436_2026-10.md) | 正側参考骨格のQ/Ks・明示s/z・不正/未対応拒否・利用側比較 | 🔶（単位契約Verification済み、モデル一般精度・全履歴・実験未） |
 | [耐震壁_未検定_Issue495_2026-10.md](耐震壁_未検定_Issue495_2026-10.md) | 壁版候補・case・種別別未検定とスリット／自重対象外、不正入力、GUI・MCP・CSV・保存 | 🔶（状態契約のVerification。純鋼板国内式・実験Validationは未対応） |
 | [壁の確定ステップ応答_Issue443_2026-10.md](壁の確定ステップ応答_Issue443_2026-10.md) | 壁単体Qw/Qdir・基準点付き24成分F/M・実要素N/M・弦変形・確定履歴・GUI/MCP/CSV/保存・設計拒否 | ✅（Scope内Verification。材料γ・壁用イベント・系全体集計・実験Validationは未対応） |
@@ -109,7 +110,8 @@
 | [ファイバー材料モデル_論文照合_2026-07.md](ファイバー材料モデル_論文照合_2026-07.md) | MP/Mander/Yassin | ✅ |
 | [ファイバー形状_長期初期載荷_2026-07.md](ファイバー形状_長期初期載荷_2026-07.md) | ファイバー形状・長期荷重 | ✅ |
 | [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | パネルゾーン力学 | 🔶 |
-| [床荷重XY両方向分配_基準資料比較_2026-09.md](床荷重XY両方向分配_基準資料比較_2026-09.md) | 床荷重の XY 両方向分配（矩形 TriTrapezoid・非矩形 polygon 200×200）と基準資料 2.2.2 の最近接梁法の数値比較。等距離均等割りは #363 で本番実装済み（残るは U/C 字の格子位相残差と台形の収束確認） | 🔶 |
+| [床荷重XY両方向分配_基準資料比較_2026-09.md](床荷重XY両方向分配_基準資料比較_2026-09.md) | 2026-09時点の矩形/非矩形200×200比較記録。U/Cの現行VerificationはIssue437記録、台形の追加精度は#438 | 🔶 |
+| [凹形床の有限線分と格子積分_Issue437_2026-10.md](凹形床の有限線分と格子積分_Issue437_2026-10.md) | U/Cと凸台形の独立解析辺面積、境界真面積、共有端点群、格子寸法/位相、回転/順序、実入口と異常/資源/精度診断。幾何Verification、実験Validationと通常結果への診断出力#555は未実施 | 🔶 |
 
 ### 敵対的レビュー・定式化レビュー
 
@@ -174,7 +176,7 @@
 | 8 | 線形静的解析 | sepika-solver | linear.rs | `test_*`（座標変換回帰 `test_beam_to_global_transverse_uses_correct_inertia` 含む） | P2 | ✅ |
 | 9 | 固有値解析 | sepika-solver | eigen.rs | `test_1dof_period` | P2 | ✅ |
 | 10 | Ai分布 | sepika-load | ai.rs | `test_*` | P2 | ✅ |
-| 11 | 床荷重分割 | sepika-load | floor.rs | `test_*` | P2 | ✅ |
+| 11 | 床荷重分割 | sepika-load / sepika-solver | floor/{mod,polygon}.rs / statics/analysis/tests.rs | `polygon::verification::*` / `distribution_verification::*` / `floor::tests::*` / `test_model_issues_warns_floating_plate`（正当な水平全周支持床の警告と解析前チェック）。幾何Verification済み、実験Validation未実施 | P2 | 🔶 |
 | 11a | 壁・間柱の自重支持先 | sepika-load / sepika-app | wall_plate_load.rs / cascade.rs | `wall_plate_load::tests`・`vertical_post_uses_explicit_end_shares`・`明示負担率で密度直接集計とdl集計の階重量が一致する` | [検証記録](壁版の支持範囲判定_2026-09.md) | 🔶（実測照合は未実施） |
 | 12 | 荷重組合せ | sepika-load | combo.rs | `test_combinations` | P2 | ✅ |
 | 13 | 許容応力度設計 | sepika-design-jp | allowable_stress.rs | `test_beam_check_bending_rect_section_hand_calc` 他 | P3 | ✅ |
@@ -188,8 +190,8 @@
 | 20 | ファイバ断面（M–φ 積分） | sepika-section / sepika-core / sepika-element | fiber.rs, mn_surface/fibers.rs, section_shape/rounded.rs | `test_section_*`、`rounded_tests`、`rounded_beam_fiber_*`。フィレット・角Rの領域、公開耐力、両質量モードの証拠は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md) | P4 | ✅（指定形状の細分化照合。通常配置の一般精度保証ではない） |
 | 21 | 参考骨格算定（M–φ→M–θ） | sepika-skeleton | tests.rs | `test_rc_skeleton_*`, `shear_*`, `explicit_pullout_*`, `positive_reference_composition_*`, `rc_builder_rejects_*` | P4 / #436 | 🔶（単位・拒否契約検証済み） |
 | 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 🔶 |
-| 23 | ST-Bridge 入出力 | sepika-io | stbridge.rs | `test_roundtrip_*` | P8 | 🔶 |
-| 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*`（MCP `model_edit` は壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |
+| 23 | ST-Bridge 入出力 | sepika-io | stbridge.rs | `test_roundtrip_*`、`source_story`（[原階所属](原階所属_Issue497_2026-10.md)） | P8 | 🔶 |
+| 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*`、`source_story_*`（[原階所属](原階所属_Issue497_2026-10.md)。MCP `model_edit` は原階所属・壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |
 | 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*` | P7 | 🔶 |
 | 26 | 数量積算（部位別のコンクリート・型枠・鉄筋・鉄骨・継手個所） | sepika-design-jp | quantity/{mod,member,rebar}.rs | `quantity::member::tests::*`（手計算照合）/`quantity::tests::*`（走査・分類）/`summary::tests::test_quantity_csv_from_sample_model`（CSV 一気通貫）/`test_quantity_takeoff_json_column`（MCP） | 横断 | 🔶 |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
