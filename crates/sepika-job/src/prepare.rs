@@ -381,6 +381,7 @@ mod tests {
         let mut with_wall = base_frame();
         let mut wall_sec = SectionShape::RcWall {
             thickness: 150.0,
+            pwh_ratio: None,
             ps: 0.0025,
         }
         .to_section(wall_section_id(), "耐震壁 t150".into());

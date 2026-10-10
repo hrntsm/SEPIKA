@@ -380,7 +380,7 @@ impl WallElement {
         };
         let sec = data.section.and_then(|sid| model.sections.get(sid.index()));
         let (t, ps) = match sec.and_then(|s| s.shape.as_ref()) {
-            Some(SectionShape::RcWall { thickness, ps }) => (*thickness, *ps),
+            Some(SectionShape::RcWall { thickness, ps, .. }) => (*thickness, *ps),
             _ => match sec.map(|s| s.thickness.unwrap_or(s.width)) {
                 Some(t) if t > 0.0 => (t, 0.0025),
                 _ => return self,
@@ -541,7 +541,7 @@ impl WallElement {
             return [0.0; 2];
         };
         let (t, ps) = match &sec.shape {
-            Some(SectionShape::RcWall { thickness, ps }) => (*thickness, (*ps).max(0.0)),
+            Some(SectionShape::RcWall { thickness, ps, .. }) => (*thickness, (*ps).max(0.0)),
             _ => (sec.thickness.unwrap_or(sec.width), 0.0),
         };
         let Ok(section) = super::shear_section::WallSection::new(data, model) else {
@@ -652,7 +652,7 @@ impl WallElement {
             ));
         };
         let (t, ps) = match &sec.shape {
-            Some(SectionShape::RcWall { thickness, ps }) => (*thickness, (*ps).max(0.0)),
+            Some(SectionShape::RcWall { thickness, ps, .. }) => (*thickness, (*ps).max(0.0)),
             _ => (sec.thickness.unwrap_or(sec.width), 0.0),
         };
         if t <= 0.0 {
@@ -1403,6 +1403,7 @@ mod tests {
         };
         let shape = SectionShape::RcWall {
             thickness: 150.0,
+            pwh_ratio: None,
             ps: 0.0025,
         };
         let model = Model {
@@ -1985,6 +1986,7 @@ mod geometry_tests {
     fn wall_with(coords: [[f64; 3]; 4], order: [u32; 4]) -> (Model, ElementData) {
         let shape = SectionShape::RcWall {
             thickness: 150.0,
+            pwh_ratio: None,
             ps: 0.0025,
         };
         let model = Model {
@@ -2093,6 +2095,7 @@ mod shear_yield_tests {
     fn wall_model() -> (Model, ElementData) {
         let shape = SectionShape::RcWall {
             thickness: 200.0,
+            pwh_ratio: None,
             ps: 0.0025,
         };
         let mk = |id: u32, c: [f64; 3]| Node {
@@ -2394,6 +2397,7 @@ mod capacity_issue_tests {
         let shape = SectionShape::RcWall {
             thickness: 200.0,
             ps,
+            pwh_ratio: None,
         };
         let mk = |id: u32, c: [f64; 3]| Node {
             id: NodeId(id),
