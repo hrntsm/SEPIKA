@@ -740,16 +740,16 @@ fn test_wall_shear_check_appears_after_run_design_check() {
         .expect("解析結果が格納されているはず");
     assert!(
         results
-            .joint_checks
+            .wall_checks
             .iter()
-            .any(|jc| jc.label.contains("耐震壁")),
-        "壁展開モデルを経由しないと、model.elements の壁要素が 0 件のため \
-         耐震壁のせん断断面検定（check_walls）が一度も実行されないはず: {:?}",
-        results
-            .joint_checks
-            .iter()
-            .map(|jc| &jc.label)
-            .collect::<Vec<_>>()
+            .any(|w| w.plate == Some(WallPlateId(0))
+                && w.seismic_target
+                && w.elem.is_some()
+                && !w.case.is_empty()
+                && w.kind == sepika_design_jp::wall_check::WallCheckKind::AllowableShear
+                && matches!(w.outcome, sepika_design_jp::CheckOutcome::Checked(_))),
+        "{:?}",
+        results.wall_checks
     );
 }
 

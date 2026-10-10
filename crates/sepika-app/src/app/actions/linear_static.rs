@@ -664,6 +664,7 @@ impl App {
             bundle.panel_moments.clear();
             bundle.member_checks.clear();
             bundle.joint_checks.clear();
+            bundle.wall_checks.clear();
             bundle.beam_checks.clear();
             bundle.slab_checks.clear();
         }

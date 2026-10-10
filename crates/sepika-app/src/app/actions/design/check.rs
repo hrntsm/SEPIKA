@@ -21,13 +21,16 @@ impl App {
             return;
         };
         let expanded_storage;
+        let wall_index;
         let design_model: &sepika_core::model::Model =
             if sepika_load::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
-                let (expanded, _wall_index, _wall_report) =
+                let (expanded, index, _wall_report) =
                     sepika_load::wall_expand::expand_wall_elements(&self.core.model);
+                wall_index = Some(index);
                 expanded_storage = expanded;
                 &expanded_storage
             } else {
+                wall_index = None;
                 &self.core.model
             };
         let is_seismic_combo = match self.core.scoped.last_static {
@@ -79,12 +82,24 @@ impl App {
         } else {
             Default::default()
         };
+        let wall_case = match self.core.scoped.last_static {
+            Some(StaticKey::Case(StaticCaseKey::User(id))) => format!("case:{}", id.0),
+            Some(StaticKey::Case(key)) => format!("case:{key:?}"),
+            Some(StaticKey::Combo(idx)) => results
+                .combos
+                .get(idx)
+                .map(|(name, _)| format!("combo:{idx}:{name}"))
+                .unwrap_or_else(|| format!("combo:{idx}")),
+            None => "未選択".into(),
+        };
         let report = sepika_design_jp::run_member_design_checks(
             design_model,
             &results.member_forces,
             &results.panel_moments,
             &sepika_design_jp::MemberDesignCheckOptions {
                 term: self.core.design_term,
+                wall_index: wall_index.as_ref(),
+                wall_case: &wall_case,
                 rc_damage_control: self.core.analysis_cfg.rc_damage_control,
                 bond_method: self.core.analysis_cfg.bond_method,
                 qd_method: self.core.analysis_cfg.qd_method,
@@ -110,6 +125,7 @@ impl App {
         if let Some(bundle) = self.core.scoped.results.as_mut() {
             bundle.member_checks = member_checks;
             bundle.joint_checks = joint_checks;
+            bundle.wall_checks = report.wall_checks;
             bundle.beam_checks = beam_checks;
             bundle.slab_checks = slab_checks;
         }

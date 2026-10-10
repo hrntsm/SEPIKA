@@ -1332,12 +1332,17 @@ fn gui_mcp_common_dispatch_and_direct_entry_report_identical_missing_material() 
     );
     for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
         let direct = &direct.iter().find(|(_, l, _)| l == label).unwrap().2;
+        let kind = if label.ends_with("せん断非線形") {
+            crate::wall_check::WallCheckKind::ReferenceSkeleton
+        } else {
+            crate::wall_check::WallCheckKind::AllowableShear
+        };
         let common = &report
-            .joint_checks
+            .wall_checks
             .iter()
-            .find(|(_, l, _)| l == label)
+            .find(|w| w.kind == kind)
             .unwrap()
-            .2;
+            .outcome;
         assert_eq!(format!("{direct:?}"), format!("{common:?}"));
         assert!(
             matches!(common,CheckOutcome::Skipped {reason} if reason.contains("横筋") && reason.contains("ID 0"))
@@ -1586,4 +1591,303 @@ fn changing_vertical_ratio_and_strength_keeps_horizontal_skeleton_unchanged() {
         .2;
     assert_eq!(format!("{original:?}"), format!("{altered:?}"));
     assert!(matches!(altered, CheckOutcome::Checked(_)));
+}
+
+fn status_wall_model() -> (Model, sepika_load::wall_expand::WallExpansionIndex) {
+    use sepika_core::ids::{WallPlateId, WallRegionId};
+    use sepika_core::model::{WallPlate, WallPlateShape, WallRegion};
+    let mut model = wall_with_columns_model();
+    model.elements.retain(|e| e.kind != ElementKind::Wall);
+    let mut steel = model.materials[1].clone();
+    steel.id = MaterialId(2);
+    steel.category = MaterialCategory::Steel;
+    steel.name = "SN400B".into();
+    model.materials.push(steel);
+    let mut steel_sec = model.sections[0].clone();
+    steel_sec.id = SectionId(2);
+    steel_sec.shape = None;
+    steel_sec.thickness = Some(6.0);
+    steel_sec.material = Some(MaterialId(2));
+    model.sections.push(steel_sec);
+    let mut missing = model.sections[0].clone();
+    missing.id = SectionId(3);
+    missing.material = None;
+    model.sections.push(missing);
+    for section in [0, 2, 3] {
+        model.add_enclosed_wall_plate_from_nodes(
+            &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+            WallPlate {
+                self_weight_shares: vec![],
+                id: WallPlateId(0),
+                shape: WallPlateShape::Enclosed,
+                section: Some(SectionId(section)),
+                opening_area: 0.0,
+                opening_weight: 0.0,
+                openings: vec![],
+                loads: vec![],
+                slit: Default::default(),
+            },
+        );
+    }
+    model.wall_regions.push(WallRegion {
+        id: WallRegionId(0),
+        name: "同節点3壁".into(),
+        boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+        wall_plate_ids: vec![WallPlateId(0), WallPlateId(1), WallPlateId(2)],
+        posts: vec![],
+    });
+    let (model, index, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+    (model, index)
+}
+
+#[test]
+fn wall_status_candidates_keep_plate_case_kind_and_independent_counts() {
+    use crate::wall_check::{WallCheckKind, WallCheckSummary, WallSkipKind};
+    use sepika_element::frame::beam::MemberForces;
+    let (model, index) = status_wall_model();
+    // Q=N=M=0 の独立入力では、正のRC耐力に対する許容検定比は厳密に0。
+    let forces: Vec<_> = model
+        .elements
+        .iter()
+        .map(|e| {
+            (
+                e.id,
+                MemberForces {
+                    at: vec![(0.0, [0.0; 6])],
+                },
+            )
+        })
+        .collect();
+    let report = crate::run_member_design_checks(
+        &model,
+        &forces,
+        &[],
+        &crate::MemberDesignCheckOptions {
+            wall_index: Some(&index),
+            wall_case: "combo:7:DL+E",
+            term: LoadTerm::Short,
+            ..Default::default()
+        },
+    );
+    assert!(report
+        .joint_checks
+        .iter()
+        .all(|(_, l, _)| !l.contains("耐震壁")));
+    assert_eq!(report.wall_checks.len(), 6);
+    for check in &report.wall_checks {
+        assert_eq!(check.case, "combo:7:DL+E");
+        assert_eq!(index.plate_of(check.elem.unwrap()), check.plate);
+    }
+    let first_two: Vec<_> = report
+        .wall_checks
+        .iter()
+        .filter(|w| w.plate.unwrap().0 < 2 && w.kind == WallCheckKind::AllowableShear)
+        .cloned()
+        .collect();
+    let s = WallCheckSummary::from_checks(&first_two);
+    assert_eq!(
+        (
+            s.n_walls,
+            s.n_ok,
+            s.n_skipped,
+            s.n_ok_walls,
+            s.n_skipped_walls
+        ),
+        (2, 1, 1, 1, 1)
+    );
+    assert_eq!(s.max_ratio, Some(0.0));
+    let s = WallCheckSummary::for_kind(&report.wall_checks, WallCheckKind::AllowableShear);
+    assert_eq!((s.n_walls, s.n_ok, s.n_skipped), (3, 1, 2));
+    assert_eq!(
+        report
+            .wall_checks
+            .iter()
+            .filter(|w| w.plate.unwrap().0 == 1)
+            .count(),
+        2
+    );
+    assert!(report
+        .wall_checks
+        .iter()
+        .filter(|w| w.plate.unwrap().0 == 1)
+        .all(|w| w.skip_kind == Some(WallSkipKind::NotImplemented)));
+    assert!(report
+        .wall_checks
+        .iter()
+        .filter(|w| w.plate.unwrap().0 == 2)
+        .all(|w| w.skip_kind == Some(WallSkipKind::MissingInput)));
+    let s = WallCheckSummary::from_checks(&report.wall_checks);
+    assert_eq!(
+        (s.n_walls, s.n_checks, s.n_ok_walls, s.n_skipped_walls),
+        (3, 6, 1, 2)
+    );
+}
+
+#[test]
+fn wall_status_missing_empty_invalid_response_and_self_weight_are_distinct() {
+    use crate::wall_check::{WallCheckSummary, WallSkipKind};
+    let (mut model, index) = status_wall_model();
+    let rc = index
+        .generated_elem_ids()
+        .find(|id| index.plate_of(*id).unwrap().0 == 0)
+        .unwrap();
+    for responses in [vec![], vec![(rc, vec![])]] {
+        let refs: Vec<_> = responses
+            .iter()
+            .map(|(id, f)| (*id, f.as_slice()))
+            .collect();
+        let checks =
+            collect_wall_design_checks(&model, &refs, LoadTerm::Short, Some(&index), "case:4");
+        assert!(checks
+            .iter()
+            .filter(|w| w.elem == Some(rc))
+            .all(|w| w.skip_kind == Some(WallSkipKind::MissingResponse)));
+        assert_eq!(WallCheckSummary::from_checks(&checks).max_ratio, None);
+    }
+    let response = [(0.0, [f64::NAN; 6])];
+    let checks = collect_wall_design_checks(
+        &model,
+        &[(rc, &response)],
+        LoadTerm::Short,
+        Some(&index),
+        "case:4",
+    );
+    assert!(checks
+        .iter()
+        .filter(|w| w.elem == Some(rc))
+        .all(|w| w.skip_kind == Some(WallSkipKind::InvalidInput)));
+    model
+        .wall_attrs
+        .iter_mut()
+        .find(|a| a.elem == rc)
+        .unwrap()
+        .slit
+        .beam_face[0] = true;
+    let checks = collect_wall_design_checks(&model, &[], LoadTerm::Short, Some(&index), "case:4");
+    assert!(checks
+        .iter()
+        .filter(|w| w.elem == Some(rc))
+        .all(|w| !w.seismic_target && w.skip_kind == Some(WallSkipKind::NotApplicable)));
+    let s = WallCheckSummary::from_checks(&checks);
+    assert_eq!((s.n_walls, s.n_outside, s.n_skipped), (2, 2, 4));
+    assert_eq!(s.max_ratio, None);
+}
+
+#[test]
+fn wall_status_ungenerated_missing_section_and_attached_weight_only_remain_visible() {
+    use crate::wall_check::{WallCheckSummary, WallSkipKind};
+    use sepika_core::model::{LoadTransfer, RegionAnchor, WallPlateShape};
+    let (mut expanded, _) = status_wall_model();
+    expanded.elements.retain(|e| e.kind != ElementKind::Wall);
+    expanded.wall_attrs.clear();
+    expanded.wall_plates[0].section = None;
+    expanded.wall_plates[1].shape = WallPlateShape::Attached {
+        anchor: RegionAnchor::Line {
+            nodes: [NodeId(0), NodeId(1)],
+            span: [0.0, 1.0],
+            transfer: LoadTransfer::Anchor,
+        },
+        extent: Some([500.0, 500.0]),
+    };
+    let (model, index, _) = sepika_load::wall_expand::expand_wall_elements(&expanded);
+    let checks = collect_wall_design_checks(&model, &[], LoadTerm::Long, Some(&index), "case:0");
+    assert!(checks
+        .iter()
+        .filter(|w| w.plate.unwrap().0 == 0)
+        .all(|w| w.seismic_target
+            && w.elem.is_none()
+            && w.skip_kind == Some(WallSkipKind::MissingInput)));
+    assert!(checks
+        .iter()
+        .filter(|w| w.plate.unwrap().0 == 1)
+        .all(|w| !w.seismic_target && w.elem.is_none()));
+    assert_eq!(WallCheckSummary::from_checks(&checks).max_ratio, None);
+}
+
+#[test]
+fn wall_status_missing_invalid_fc_src_and_shape_applicability_are_distinct() {
+    use crate::wall_check::WallSkipKind;
+    let (base, index) = status_wall_model();
+    let response = [(0.0, [0.0; 6])];
+    let rc = index
+        .generated_elem_ids()
+        .find(|id| index.plate_of(*id).unwrap().0 == 0)
+        .unwrap();
+    for (fc, expected) in [
+        (None, WallSkipKind::MissingInput),
+        (Some(f64::NAN), WallSkipKind::InvalidInput),
+        (Some(-1.0), WallSkipKind::InvalidInput),
+    ] {
+        let mut model = base.clone();
+        model.materials[0].fc = fc;
+        let checks = collect_wall_design_checks(
+            &model,
+            &[(rc, &response)],
+            LoadTerm::Long,
+            Some(&index),
+            "case:0",
+        );
+        assert!(checks
+            .iter()
+            .filter(|w| w.elem == Some(rc))
+            .all(|w| w.seismic_target && w.skip_kind == Some(expected)));
+    }
+    for (fy, expected) in [
+        (None, WallSkipKind::MissingInput),
+        (Some(f64::NAN), WallSkipKind::InvalidInput),
+        (Some(-1.0), WallSkipKind::InvalidInput),
+    ] {
+        let mut model = base.clone();
+        model.materials[1].fy = fy;
+        let checks = collect_wall_design_checks(
+            &model,
+            &[(rc, &response)],
+            LoadTerm::Short,
+            Some(&index),
+            "case:0",
+        );
+        assert!(checks
+            .iter()
+            .filter(|w| w.elem == Some(rc))
+            .all(|w| w.skip_kind == Some(expected)));
+    }
+    let mut model = base.clone();
+    model.sections[0].steel_material = Some(MaterialId(2));
+    let checks = collect_wall_design_checks(
+        &model,
+        &[(rc, &response)],
+        LoadTerm::Long,
+        Some(&index),
+        "case:0",
+    );
+    assert!(checks
+        .iter()
+        .filter(|w| w.elem == Some(rc))
+        .all(|w| matches!(&w.outcome, CheckOutcome::Skipped { reason } if reason.contains("SRC"))));
+    let mut model = base.clone();
+    model.sections[0].shape = Some(SectionShape::RcSlab { thickness: 180.0 });
+    let checks = collect_wall_design_checks(
+        &model,
+        &[(rc, &response)],
+        LoadTerm::Long,
+        Some(&index),
+        "case:0",
+    );
+    assert!(checks
+        .iter()
+        .filter(|w| w.elem == Some(rc))
+        .all(|w| w.skip_kind == Some(WallSkipKind::NotApplicable)));
+    let mut model = base;
+    model.sections[0].material = Some(MaterialId(2));
+    let checks = collect_wall_design_checks(
+        &model,
+        &[(rc, &response)],
+        LoadTerm::Long,
+        Some(&index),
+        "case:0",
+    );
+    assert!(checks
+        .iter()
+        .filter(|w| w.elem == Some(rc))
+        .all(|w| w.skip_kind == Some(WallSkipKind::NotImplemented)));
 }
