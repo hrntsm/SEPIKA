@@ -38,6 +38,7 @@
 mod export;
 mod import;
 mod section_std;
+mod strength_export;
 
 pub use export::{export_stbridge, export_stbridge_with_report, ExportReport};
 pub use import::{
@@ -76,3 +77,6 @@ const STB_VERSION: &str = "2.0.2";
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod strength_tests;

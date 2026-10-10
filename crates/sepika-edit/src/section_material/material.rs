@@ -69,15 +69,20 @@ fn shift_material_ids(model: &mut Model, f: impl FnMut(&mut MaterialId)) {
 /// 指定材料を参照している断面が存在するか（削除ガード用）。
 /// **材料は断面が持つ**ため、参照元は断面だけを見ればよい。
 fn material_in_use(model: &Model, id: MaterialId) -> bool {
-    model.sections.iter().any(|s| {
-        [
-            s.material,
-            s.rebar_material,
-            s.shear_rebar_material,
-            s.steel_material,
-        ]
-        .contains(&Some(id))
-    })
+    model
+        .stb_strengths
+        .materials
+        .iter()
+        .any(|m| m.material == id)
+        || model.sections.iter().any(|s| {
+            [
+                s.material,
+                s.rebar_material,
+                s.shear_rebar_material,
+                s.steel_material,
+            ]
+            .contains(&Some(id))
+        })
 }
 
 /// 編集対象の材料プロパティ。
@@ -107,6 +112,8 @@ impl EditCommand for SetMaterialField {
         if self.field == MaterialField::Young && model.materials[idx].is_standard_concrete() {
             return Box::new(Noop);
         }
+        let strength_input = model.stb_strengths.clone();
+        let strength_stories = model.source_stories.clone();
         let mat = &mut model.materials[idx];
         let old = match self.field {
             MaterialField::Young => {
@@ -130,10 +137,21 @@ impl EditCommand for SetMaterialField {
                 std::mem::replace(&mut mat.strength_factor, self.value)
             }
         };
-        Box::new(SetMaterialField {
-            id: self.id,
-            field: self.field,
-            value: old,
+        if self.field == MaterialField::Fc {
+            let grade = self
+                .value
+                .map(|v| format!("Fc{v}"))
+                .unwrap_or_else(|| "未指定Fc".into());
+            model.replace_stb_material_grade(self.id, &grade);
+        }
+        Box::new(crate::strength::RestoreStrengthInput {
+            input: strength_input,
+            stories: strength_stories,
+            inverse: Box::new(SetMaterialField {
+                id: self.id,
+                field: self.field,
+                value: old,
+            }),
         })
     }
 
@@ -154,10 +172,17 @@ impl EditCommand for SetMaterialName {
         if idx >= model.materials.len() || model.materials[idx].id != self.id {
             return Box::new(Noop);
         }
+        let strength_input = model.stb_strengths.clone();
+        let strength_stories = model.source_stories.clone();
         let old = std::mem::replace(&mut model.materials[idx].name, self.name.clone());
-        Box::new(SetMaterialName {
-            id: self.id,
-            name: old,
+        model.replace_stb_material_grade(self.id, &self.name);
+        Box::new(crate::strength::RestoreStrengthInput {
+            input: strength_input,
+            stories: strength_stories,
+            inverse: Box::new(SetMaterialName {
+                id: self.id,
+                name: old,
+            }),
         })
     }
 

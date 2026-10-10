@@ -27,3 +27,5 @@ pub use dof::*;
 pub use error::*;
 pub use ids::*;
 pub use model::*;
+
+pub mod standard_material;

@@ -198,6 +198,7 @@ pub(super) struct AttrCount {
 pub(super) struct StbParser {
     /// ルート `ST_BRIDGE` でバージョン 2.x を確認できたか。
     pub(super) version_ok: bool,
+    pub(super) strengths: super::strength::StrengthInputs,
     /// 人間可読の警告（断面図形を認識できず取り込めなかった等）。
     pub(super) warnings: Vec<String>,
     /// 未対応要素はタグごとに件数を集計し、最後にまとめて 1 行の警告にする。
@@ -256,7 +257,11 @@ pub(super) fn parse(xml: &str) -> Result<StbParser, StbError> {
                 let name = e.name();
                 let tag = String::from_utf8_lossy(name.as_ref()).to_string();
                 let a = attrs(&e)?;
+                p.strengths.start(&tag, &a)?;
                 p.on_start(&tag, &a)?;
+                if is_empty {
+                    p.strengths.end(&tag);
+                }
                 p.record_attr_usage(&tag, &a);
                 if !is_empty {
                     p.container_stack.push(tag);
@@ -265,12 +270,15 @@ pub(super) fn parse(xml: &str) -> Result<StbParser, StbError> {
             Event::End(e) => {
                 let name = e.name();
                 let tag = String::from_utf8_lossy(name.as_ref()).to_string();
+                p.strengths.end(&tag);
                 p.on_end(&tag);
             }
             Event::Text(t) if p.in_node_id_order => {
+                p.strengths.nodes(&String::from_utf8_lossy(t.as_ref()));
                 p.on_node_id_text(&String::from_utf8_lossy(t.as_ref()));
             }
             Event::CData(t) if p.in_node_id_order => {
+                p.strengths.nodes(&String::from_utf8_lossy(t.as_ref()));
                 p.on_node_id_text(&String::from_utf8_lossy(t.as_ref()));
             }
             _ => {}

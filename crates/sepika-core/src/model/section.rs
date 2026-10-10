@@ -296,6 +296,14 @@ impl Model {
     /// 要素の主材料（弾性剛性 E・ν と自重の密度を決める材料）。
     /// 断面が未割当、または断面が材料を持たない場合は `None`。
     pub fn element_material(&self, elem: &ElementData) -> Option<&Material> {
+        if self
+            .stb_strengths
+            .members
+            .iter()
+            .any(|m| m.target == StrengthTarget::Element(elem.id))
+        {
+            return self.stb_concrete_material(StrengthTarget::Element(elem.id));
+        }
         self.materials
             .get(self.element_section(elem)?.material?.index())
     }
@@ -303,18 +311,46 @@ impl Model {
     /// 二次部材（小梁・間柱）の主材料（自重算定に用いる）。
     /// 規約は [`Model::element_material`] と同じ。
     pub fn secondary_material(&self, sm: &SecondaryMember) -> Option<&Material> {
+        if self
+            .stb_strengths
+            .members
+            .iter()
+            .any(|m| m.target == StrengthTarget::Secondary(sm.id))
+        {
+            return self.stb_concrete_material(StrengthTarget::Secondary(sm.id));
+        }
         let sec = self.sections.get(sm.section?.index())?;
         self.materials.get(sec.material?.index())
     }
 
     /// 要素の主筋材料（RC・SRC 断面のみ）。
     pub fn element_rebar_material(&self, elem: &ElementData) -> Option<&Material> {
+        if self.stb_strengths.sections.iter().any(|s| {
+            Some(s.section) == elem.section && s.reinforcement.iter().any(|r| r.part == "main")
+        }) {
+            return self.stb_rebar_material(elem.section?, "main");
+        }
         self.materials
             .get(self.element_section(elem)?.rebar_material?.index())
     }
 
     /// 要素のせん断補強筋材料（RC・SRC 断面のみ）。
     pub fn element_shear_rebar_material(&self, elem: &ElementData) -> Option<&Material> {
+        if let Some(input) = self
+            .stb_strengths
+            .sections
+            .iter()
+            .find(|s| Some(s.section) == elem.section)
+        {
+            let part = if self.element_section(elem)?.frame_use == Some(FrameSectionUse::Column) {
+                "band"
+            } else {
+                "stirrup"
+            };
+            if input.reinforcement.iter().any(|r| r.part == part) {
+                return self.stb_rebar_material(elem.section?, part);
+            }
+        }
         self.materials
             .get(self.element_section(elem)?.shear_rebar_material?.index())
     }

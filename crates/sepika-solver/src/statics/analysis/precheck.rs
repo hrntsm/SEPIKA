@@ -127,7 +127,10 @@ fn support_label(support: sepika_core::model::SupportMemberId) -> String {
 /// 先頭のモデル検証（[`Model::validate`]）が失敗したときは、その 1 件だけを返して
 /// 打ち切る。
 pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
-    let source_issues = model.source_story_diagnostics();
+    let source_issues = model
+        .source_story_diagnostics()
+        .into_iter()
+        .chain(model.stb_strength_diagnostics());
     use sepika_core::model::ElementKind;
 
     let mut issues: Vec<_> = source_issues.into_iter().map(ModelIssue::model).collect();

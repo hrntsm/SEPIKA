@@ -26,6 +26,7 @@ mod material_std;
 mod parser;
 mod rebar;
 mod steel;
+mod strength;
 mod xml;
 
 /// 断面が持つ材料参照（ST-Bridge は材料を断面側に持つ）。

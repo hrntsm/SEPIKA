@@ -26,6 +26,7 @@ use std::collections::HashMap;
 pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbError> {
     let StbParser {
         mut warnings,
+        strengths,
         unsupported,
         attr_usage,
         raw_nodes,
@@ -237,6 +238,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
     );
     auto_assign_supports(&mut model, &mut notes);
 
+    strengths.apply(&mut model, &section_index, &mut warnings)?;
     let attributes = attr_dispositions(attr_usage);
     Ok((
         model,
@@ -1078,7 +1080,7 @@ fn push_slab_section(model: &mut Model, file_id: u32, raw: &RawSlabSection) -> S
 
 /// グレード名の材料を探し、無ければ標準材料表から起こして追加する。
 /// 標準表にも無い名前（`Fc21` のような規格名でないもの）は `None`。
-fn ensure_material_by_grade(model: &mut Model, grade: &str) -> Option<MaterialId> {
+pub(super) fn ensure_material_by_grade(model: &mut Model, grade: &str) -> Option<MaterialId> {
     if let Some(m) = model.materials.iter().find(|m| m.name == grade) {
         return Some(m.id);
     }
@@ -1119,7 +1121,7 @@ fn build_walls(
     let mut skipped_walls = 0u32;
     let mut no_section_walls = 0u32;
     let mut pending = Vec::new();
-    let mut wall_sections: HashMap<String, SectionId> = HashMap::new();
+    let mut wall_sections: HashMap<u32, SectionId> = HashMap::new();
     for rw in raw_walls {
         let mut boundary: Vec<NodeId> = Vec::with_capacity(rw.boundary.len());
         let mut resolved = true;
@@ -1142,7 +1144,7 @@ fn build_walls(
             .filter(|t| *t > 0.0)
             .map(|t| {
                 let base = format!("Wall t{}", t);
-                if let Some(&sid) = wall_sections.get(&base) {
+                if let Some(&sid) = wall_sections.get(&rw.section_fid.unwrap()) {
                     return sid;
                 }
                 let mut name = base.clone();
@@ -1156,7 +1158,7 @@ fn build_walls(
                     thickness: Some(t),
                     ..Section::zero(sid, name.clone())
                 });
-                wall_sections.insert(base, sid);
+                wall_sections.insert(rw.section_fid.unwrap(), sid);
                 sid
             });
         if let Some(mid) = rw
@@ -1849,8 +1851,8 @@ fn find_or_create_bar_material(
         return Some(m.id);
     }
     let fy = match category {
-        MaterialCategory::Rebar => sepika_core::material_grade::rebar_grade_f_value(grade),
-        _ => sepika_core::material_grade::steel_f_value_prefix(grade, 40.0),
+        MaterialCategory::Rebar => sepika_core::standard_material::rebar_grade_strength(grade),
+        _ => material_std::resolve_grade(grade).and_then(|m| m.fy),
     };
     if fy.is_none() {
         notes.push(format!(

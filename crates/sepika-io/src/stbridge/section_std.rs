@@ -1019,6 +1019,18 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
         }
     };
     let id_mat_attr = |base: u32| -> String {
+        if let Some(input) = model
+            .stb_strengths
+            .sections
+            .iter()
+            .find(|s| s.section.0 == base)
+        {
+            return input
+                .concrete
+                .as_ref()
+                .map(|g| format!(" strength_concrete=\"{}\"", esc(g)))
+                .unwrap_or_default();
+        }
         match mat_name(base) {
             Some(name) => format!(" strength_concrete=\"{}\"", esc(name)),
             None => String::new(),
@@ -1201,7 +1213,19 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                     &steel_fig,
                     &id_mat_attr(base),
                 );
-                parts.push((2, xml));
+                parts.push((
+                    2,
+                    if let Some(input) = model
+                        .stb_strengths
+                        .sections
+                        .iter()
+                        .find(|s| s.section.0 == base)
+                    {
+                        super::strength_export::section(&xml, input)?
+                    } else {
+                        xml
+                    },
+                ));
                 warnings.extend(w);
                 col_map.insert(base, base);
             }
@@ -1220,7 +1244,19 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                     &steel_fig,
                     &id_mat_attr(base),
                 );
-                parts.push((6, xml));
+                parts.push((
+                    6,
+                    if let Some(input) = model
+                        .stb_strengths
+                        .sections
+                        .iter()
+                        .find(|s| s.section.0 == base)
+                    {
+                        super::strength_export::section(&xml, input)?
+                    } else {
+                        xml
+                    },
+                ));
                 warnings.extend(w);
                 beam_map.insert(base, bid);
             }
@@ -1235,7 +1271,19 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
             if need_col {
                 if let Some(fig) = &rc_col_fig {
                     let (xml, w) = rc_column(base, sec, shape, grades, fig, &id_mat_attr(base));
-                    parts.push((0, xml));
+                    parts.push((
+                        0,
+                        if let Some(input) = model
+                            .stb_strengths
+                            .sections
+                            .iter()
+                            .find(|s| s.section.0 == base)
+                        {
+                            super::strength_export::section(&xml, input)?
+                        } else {
+                            xml
+                        },
+                    ));
                     warnings.extend(w);
                     col_map.insert(base, base);
                 } else {
@@ -1256,7 +1304,19 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
                         base
                     };
                     let (xml, w) = rc_beam(bid, sec, shape, grades, fig, &id_mat_attr(base));
-                    parts.push((4, xml));
+                    parts.push((
+                        4,
+                        if let Some(input) = model
+                            .stb_strengths
+                            .sections
+                            .iter()
+                            .find(|s| s.section.0 == base)
+                        {
+                            super::strength_export::section(&xml, input)?
+                        } else {
+                            xml
+                        },
+                    ));
                     warnings.extend(w);
                     beam_map.insert(base, bid);
                 } else if matches!(shape, SectionShape::RcColumnCircle { .. }) {
