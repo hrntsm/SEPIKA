@@ -336,6 +336,7 @@ impl App {
                 self.core.scoped.undo.run(
                     &mut self.core.model,
                     Box::new(sepika_edit::ApplyStories {
+                        wall_weight_generation: gen.wall_weight_generation,
                         damper_mass_generation: gen.damper_mass_generation,
                         stories: gen.stories,
                         node_story: gen.node_story,
@@ -464,7 +465,7 @@ impl App {
                 // （エラー自体はイベントログに残っており失われない）。
                 self.core.scoped.last_error = None;
                 match result {
-                    JobResult::Pushover(res) => self.apply_pushover_result(res),
+                    JobResult::Pushover(res) => self.apply_pushover_result(*res),
                     JobResult::Modal(res) => self.apply_eigen_result(res),
                     JobResult::TimeHistory(res) => self.apply_time_history_result(*res),
                     JobResult::LumpedMass(res) => self.apply_lumped_mass_result(*res),

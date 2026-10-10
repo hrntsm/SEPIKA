@@ -719,11 +719,8 @@ fn draw_peak_check(
             app.core.scoped.results.as_ref().and_then(|r| {
                 r.combos
                     .iter()
-                    .find(|(n, _)| n == "DL + LL")
-                    .or_else(|| {
-                        r.combos
-                            .iter()
-                            .find(|(n, _)| !sepika_load::combo::is_short_term_combo(n))
+                    .find(|(n, _)| {
+                        sepika_core::load_combo::is_gravity_combination(n, &app.core.model)
                     })
                     .map(|(_, st)| &st.member_forces)
             })

@@ -164,6 +164,7 @@ indexed_delete_insert!(
 /// まとめて差し替える。既存の RigidDiaphragm 拘束は除去し、Mpc / RigidLink は
 /// 保持する。逆操作は差し替え前の状態の復元。
 pub struct ApplyStories {
+    pub wall_weight_generation: sepika_core::model::WallWeightGenerationMode,
     pub damper_mass_generation: sepika_core::model::DamperMassGeneration,
     pub stories: Vec<sepika_core::model::Story>,
     /// `model.nodes` と同順の所属階。長さが合わない分は無視する。
@@ -185,6 +186,7 @@ impl EditCommand for ApplyStories {
         let old_nodes = model.nodes.clone();
         let old_generated_masters = model.generated_masters.clone();
         let old_mass_method = model.mass_method;
+        let old_wall_weight_generation = model.wall_weight_generation;
         let old_damper_mass_generation = model.damper_mass_generation.clone();
 
         let old_stories = std::mem::replace(&mut model.stories, self.stories.clone());
@@ -209,8 +211,10 @@ impl EditCommand for ApplyStories {
         model.generated_masters = self.generated_masters.clone();
         model.mass_method = self.mass_method;
         model.damper_mass_generation = Some(self.damper_mass_generation.clone());
+        model.wall_weight_generation = Some(self.wall_weight_generation);
 
         Box::new(RestoreStories {
+            wall_weight_generation: old_wall_weight_generation,
             stories: old_stories,
             nodes: old_nodes,
             constraints: old_constraints,
@@ -228,6 +232,7 @@ impl EditCommand for ApplyStories {
 /// [`ApplyStories`] の逆操作。`model.nodes` を丸ごと復元することで、
 /// 追加された剛床代表節点の除去（truncate）や既存節点の置換をまとめて元に戻す。
 pub struct RestoreStories {
+    pub wall_weight_generation: Option<sepika_core::model::WallWeightGenerationMode>,
     pub damper_mass_generation: Option<sepika_core::model::DamperMassGeneration>,
     pub stories: Vec<sepika_core::model::Story>,
     pub nodes: Vec<sepika_core::model::Node>,
@@ -238,6 +243,10 @@ pub struct RestoreStories {
 
 impl EditCommand for RestoreStories {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let new_wall_weight_generation = std::mem::replace(
+            &mut model.wall_weight_generation,
+            self.wall_weight_generation,
+        );
         let new_stories = std::mem::replace(&mut model.stories, self.stories.clone());
         let new_nodes = std::mem::replace(&mut model.nodes, self.nodes.clone());
         let new_constraints = std::mem::replace(&mut model.constraints, self.constraints.clone());
@@ -249,6 +258,7 @@ impl EditCommand for RestoreStories {
             self.damper_mass_generation.clone(),
         );
         Box::new(RestoreStories {
+            wall_weight_generation: new_wall_weight_generation,
             stories: new_stories,
             nodes: new_nodes,
             constraints: new_constraints,

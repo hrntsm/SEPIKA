@@ -167,6 +167,12 @@ pub struct Model {
     pub source_stories_initialized: bool,
     #[serde(default)]
     pub stb_strengths: StbStrengthInput,
+    /// 壁の階重量生成方式。旧ファイル・未生成はNone（ケース方式へ推定しない）。
+    #[serde(default)]
+    pub wall_weight_generation: Option<WallWeightGenerationMode>,
+    /// 一時壁展開モデルの生成元。保存モデルには含めない。
+    #[serde(skip)]
+    pub generated_wall_origins: std::collections::HashMap<ElemId, WallPlateId>,
     #[serde(skip)]
     pub dof_map: crate::dof::DofMap,
 }
@@ -1183,6 +1189,7 @@ impl Model {
             && self.lumped_vibration_cases == other.lumped_vibration_cases
             && self.generated_masters == other.generated_masters
             && self.damper_mass_generation == other.damper_mass_generation
+            && self.wall_weight_generation == other.wall_weight_generation
             && self.mass_method == other.mass_method
             && self.slab_thickness == other.slab_thickness
             && self.load_cfg == other.load_cfg
@@ -2095,6 +2102,7 @@ mod node_reference_tests {
         // 6: 壁版（Enclosed）。7: 壁版（Attached／Line）。
         // 囲まれた壁版は節点ではなく割当領域（支持部材）を参照する。
         model.wall_plates.push(WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -2106,6 +2114,7 @@ mod node_reference_tests {
             slit: Default::default(),
         });
         model.wall_plates.push(WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(1),
             shape: WallPlateShape::Attached {
@@ -2145,6 +2154,7 @@ mod node_reference_tests {
 
         // 10: 壁版（Attached／FloorRegion。自立壁）。
         model.wall_plates.push(WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(2),
             shape: WallPlateShape::Attached {

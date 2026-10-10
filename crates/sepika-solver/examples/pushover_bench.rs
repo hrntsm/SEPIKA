@@ -94,6 +94,7 @@ fn make_frame(nx: usize, ny: usize, nz: usize) -> Model {
             slaves,
         ));
         stories.push(Story {
+            wall_weights: Vec::new(),
             level_kind: Default::default(),
             structure: Default::default(),
             id: StoryId((iz - 1) as u32),

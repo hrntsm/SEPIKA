@@ -25,8 +25,10 @@ Status: accepted
 鋼材の `mass_equiv` の躯体分は「質量行列の物理質量 × factor」である。CFT は質量行列が
 鋼管と充填コンクリートを別領域で計上するためこの一般則は成り立たず、鋼管部にのみ
 `factor` を掛け、充填コンクリート部（無筋 \\( \gamma\_C \\)）には掛けない。
-壁・二次部材・床のコンクリートは設計単位体積重量が密度×g に等しいため `factor = 1` で
-設計重量と物理質量相当は一致する。
+二次部材・床のコンクリートは設計単位体積重量が密度×g に等しいため `factor = 1` で
+設計重量と物理質量相当は一致する。RcWall の壁版は [ADR-0050](0050-wall-weight-purpose-partitions.md) に従い、
+設計は既存材料設計値、physical/matrix は SectionMassProperties の標準 RC 密度を参照する。
+保存密度が標準値と異なる場合、両重量の一致は保証しない。
 仕上げ・付加線重量は質量行列に対応物がないため質量の 2 値でも同値として質点に残す。
 
 ## 背景と理由
@@ -77,7 +79,7 @@ g で除して導出していたため、基準資料の 78.5 と一致せず、
 - 数量積算（7.85 t/m³）は不変。
 - プリセット・ST-Bridge 取込・UI 既定の鋼材・鉄筋密度は 7.85e-9 t/mm³ になる。
 - 質点系解析 `crates/squid-n-job/src/lumped_mass.rs` の層質量は、本決定当時は
-  `seismic_weight/g`（設計重量ベース）のままであった。その後 [ADR-0034](0034-lumped-mass-physical-mass.md)
+  `seismic_weight/g`（設計重量ベース）のままであった。その後 [ADR-0034](0035-lumped-mass-physical-mass.md)
   で `Story::dynamic_mass`（物理質量相当）へ統一した（GitHub Issue #365）。
 - CFT 線材の設計重量（DL・地震用重量）が充填コンクリート分を欠く問題は GitHub Issue #364
   で解消した。鋼管部は `factor` を掛けた \\( \gamma\_s \\)、充填コンクリート部は無筋

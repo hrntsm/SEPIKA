@@ -319,6 +319,7 @@ impl EditCommand for AddStory {
             node_ids: Vec::new(),
         });
         model.stories.push(Story {
+            wall_weights: Vec::new(),
             id: StoryId(model.stories.len() as u32),
             name: self.name.clone(),
             elevation: self.elevation,

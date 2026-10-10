@@ -23,7 +23,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0015](0015-cantilever-secondary-members.md) | accepted | 片持ち小梁は支持条件で表し、基端モーメントは伝達しない |
 | [0016](0016-attached-slabs-between-members.md) | accepted | 取り付く床板は支持部材の間ごとに表す |
 | [0017](0017-attached-slab-support-edges.md) | superseded by ADR-0037 | 取り付く床板の荷重は、全長を覆う支持部材の辺へ最近接負担面積で分配する |
-| [0018](0018-explicit-gravity-supports.md) | accepted | 壁自重の支持辺と鉛直二次部材の端部負担率を明示する |
+| [0018](0018-explicit-gravity-supports.md) | partially superseded by ADR-0050 | 壁自重の支持辺と鉛直二次部材の端部負担率を明示する |
 | [0019](0019-material-wall-section-and-directional-strength.md) | accepted | 壁の材料別実断面と正負別せん断耐力を採用する |
 | [0020](0020-assign-plates-to-member-bounded-regions.md) | accepted | 囲まれた床板・壁版は支持部材で分割された領域へ割り当てる |
 | [0021](0021-same-position-support-members.md) | accepted | 同じ位置に支持部材が重なる場合は同種をエラー、異種は主架構優先とする |
@@ -58,6 +58,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0046](0046-polygon-floor-finite-segment-integration.md) | accepted | 全周支持の凹形床を有限線分最近接と境界実面積で分配し、モデル差と格子誤差を区別する |
 | [0047](0047-source-story-and-analysis-membership.md) | accepted | 原階の明示所属は解析用所属から独立して保存する |
 | [0048](0048-rc-beam-reference-total-rotation.md) | accepted | RC梁の明示基準総角と追加端回転を分離する |
+| [0049](0049-purpose-specific-story-evaluation.md) | accepted | 目的別確定評価点と層切断面力を保持する |
+| [0050](0050-wall-weight-purpose-partitions.md) | accepted | 壁版の物理総量からDL支持と地震用階帯を独立生成する |
 
 | [0051](0051-stbridge-strength-input-and-section-material.md) | accepted | ST-Bridgeの元強度指定と断面材料を分離する |
 

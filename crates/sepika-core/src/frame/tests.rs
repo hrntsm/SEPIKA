@@ -192,6 +192,7 @@ fn story_frame_includes_columns_below() {
     }
     m.nodes[up_a.index()].story = Some(StoryId(1));
     m.stories.push(Story {
+        wall_weights: Vec::new(),
         id: story,
         name: "2FL".into(),
         elevation: 4000.0,

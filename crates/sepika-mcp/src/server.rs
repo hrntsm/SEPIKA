@@ -211,6 +211,8 @@ pub struct AnalysisRunArgs {
     pub kind: JobKind,
     /// 対象荷重ケース ID（未指定なら先頭ケース）。
     pub load_case: Option<u32>,
+    /// DesignCheck用の保存組合せindex。load_caseと同時指定不可。
+    pub load_combination: Option<usize>,
     /// モード数（既定 3）。
     pub n_modes: Option<usize>,
     /// 加力・入力方向 "X"/"Y"（既定 "X"）。
@@ -221,6 +223,10 @@ pub struct AnalysisRunArgs {
     pub max_disp: Option<f64>,
     /// 目標最大層間変形角の分母 n（既定 150）。
     pub max_drift_denom: Option<f64>,
+    /// Ds 判定に明示採用する確定 step（0 始まり、未指定は未判定）。
+    pub ds_step: Option<u32>,
+    /// 保有耐力比較に明示採用する確定 step（0 始まり、未指定は未判定）。
+    pub capacity_step: Option<u32>,
     /// サンプル波の時間刻み [s]（既定 0.01）。
     pub dt: Option<f64>,
     /// サンプル波の継続時間 [s]（既定 2.0）。
@@ -245,6 +251,13 @@ impl AnalysisRunArgs {
     /// 任意パラメータを `super::JobParams`（既定値込み）へ変換する。
     /// 不正な文字列の場合のみエラーを返す。
     fn to_job_params(&self) -> Result<super::JobParams, String> {
+        if self.load_combination.is_some()
+            && (self.load_case.is_some() || self.kind != JobKind::DesignCheck)
+        {
+            return Err(
+                "load_combinationはDesignCheck専用でload_caseとの同時指定はできません".into(),
+            );
+        }
         let dir = match self.dir.as_deref() {
             None => super::JobDir::X,
             Some("X") => super::JobDir::X,
@@ -277,11 +290,14 @@ impl AnalysisRunArgs {
         let d = super::JobParams::default();
         Ok(super::JobParams {
             load_case: self.load_case,
+            load_combination: self.load_combination,
             n_modes: self.n_modes.unwrap_or(d.n_modes),
             dir,
             steps: self.steps.unwrap_or(d.steps),
             max_disp: self.max_disp,
             max_drift_denom: self.max_drift_denom,
+            ds_step: self.ds_step,
+            capacity_step: self.capacity_step,
             dt: self.dt.unwrap_or(d.dt),
             duration: self.duration.unwrap_or(d.duration),
             period: self.period.unwrap_or(d.period),
@@ -433,7 +449,7 @@ mod tests {
                     [0.0, 0.0, 1000.0, 0.0, 0.0, 0.0],
                 )],
                 member: Vec::new(),
-                kind: Default::default(),
+                kind: sepika_core::model::LoadCaseKind::Dead,
             }],
             ..Default::default()
         }
@@ -533,6 +549,7 @@ mod tests {
             stories: vec![
                 // 階は床であり、先頭は基部の床（`Model::layers` の不変条件）。
                 Story {
+                    wall_weights: Vec::new(),
                     id: StoryId(0),
                     name: "1F".into(),
                     elevation: 0.0,
@@ -547,6 +564,7 @@ mod tests {
                     fireproof: Default::default(),
                 },
                 Story {
+                    wall_weights: Vec::new(),
                     id: StoryId(1),
                     name: "2F".into(),
                     elevation: 3000.0,
@@ -571,11 +589,14 @@ mod tests {
         AnalysisRunArgs {
             kind,
             load_case: None,
+            load_combination: None,
             n_modes: None,
             dir: None,
             steps: None,
             max_disp: None,
             max_drift_denom: None,
+            ds_step: None,
+            capacity_step: None,
             dt: None,
             duration: None,
             period: None,
@@ -703,6 +724,161 @@ mod tests {
         assert_eq!(value["truncated"], false);
     }
 
+    #[tokio::test]
+    async fn load_state_combination_jobs_preserve_single_case_store_and_return_their_own_forces() {
+        async fn get(server: &SepikaServer, case: u32, kind: &str) -> serde_json::Value {
+            let result = server
+                .result_get(Parameters(ResultGetArgs {
+                    case,
+                    kind: kind.into(),
+                    node_ids: None,
+                    member_ids: None,
+                    step_range: None,
+                }))
+                .await
+                .unwrap();
+            serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap()
+        }
+        async fn run(server: &SepikaServer, args: AnalysisRunArgs) -> serde_json::Value {
+            let result = server.analysis_run(Parameters(args)).await.unwrap();
+            let job_id = extract_job_id(&result);
+            assert!(matches!(
+                wait_for_terminal(server, &job_id).await,
+                JobStatus::Done { .. }
+            ));
+            let status = server
+                .analysis_status(Parameters(AnalysisStatusArgs { job_id }))
+                .await
+                .unwrap();
+            let job: serde_json::Value =
+                serde_json::from_str(&status.content[0].raw.as_text().unwrap().text).unwrap();
+            // 公開 API の result_ref はオブジェクトではなく JSON 文字列。
+            serde_json::from_str(job["status"]["Done"]["result_ref"].as_str().unwrap()).unwrap()
+        }
+        let dir = test_store_dir("load_state_combination_store");
+        let mut model = cantilever_with_load_case();
+        model.load_cases = [
+            (sepika_core::model::LoadCaseKind::Dead, 100_000.0),
+            (sepika_core::model::LoadCaseKind::Live, 20_000.0),
+            (sepika_core::model::LoadCaseKind::Snow, 40_000.0),
+            (sepika_core::model::LoadCaseKind::Seismic, 30_000.0),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (kind, force))| LoadCase {
+            id: LoadCaseId(i as u32),
+            name: format!("任意荷重{i}"),
+            kind,
+            nodal: vec![NodalLoad::manual(
+                NodeId(1),
+                [0.0, 0.0, -force, 0.0, 0.0, 0.0],
+            )],
+            member: vec![],
+        })
+        .collect();
+        model.combinations = [1.0, 0.7]
+            .into_iter()
+            .enumerate()
+            .map(|(i, snow)| sepika_core::model::LoadCombination {
+                name: format!("保存組合せ{i}"),
+                terms: vec![
+                    (LoadCaseId(0), 1.0),
+                    (LoadCaseId(1), 1.0),
+                    (LoadCaseId(2), snow),
+                ],
+            })
+            .collect();
+        std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
+        let model_path = dir.with_extension("ovika");
+        sepika_io::ovika::save_ovika(&model_path, &model, Default::default()).unwrap();
+        let server = SepikaServer::new(make_state(
+            sepika_io::ovika::load_ovika(&model_path).unwrap().model,
+            &dir,
+        ));
+        let mut originals = Vec::new();
+        for case in [0, 3] {
+            let mut args = run_args(JobKind::LinearStatic);
+            args.load_case = Some(case);
+            let summary = run(&server, args).await;
+            assert_eq!(summary["store"]["case"], case);
+            assert_eq!(summary["store"]["persisted"], true);
+            originals.push((
+                case,
+                get(&server, case, "NodalDisp").await,
+                get(&server, case, "MemberForce").await,
+            ));
+        }
+        assert_eq!(
+            server.state.lock().await.results.manifest().entries.len(),
+            4
+        );
+        for (index, q, term) in [(0, 160_000.0, "short"), (1, 148_000.0, "long")] {
+            let mut args = run_args(JobKind::DesignCheck);
+            args.load_case = None;
+            args.load_combination = Some(index);
+            let summary = run(&server, args).await;
+            for (case, disp, force) in &originals {
+                assert_eq!(&get(&server, *case, "NodalDisp").await, disp);
+                assert_eq!(&get(&server, *case, "MemberForce").await, force);
+            }
+            assert!(summary["case"].is_null());
+            assert_eq!(summary["store"]["persisted"], false);
+            assert!(summary["store"]["case"].is_null());
+            assert_eq!(summary["load_target"]["source"], "saved_combination");
+            assert_eq!(summary["load_target"]["combination_index"], index);
+            assert_eq!(summary["term"], term);
+            assert_eq!(
+                summary["member_forces"]["rows"][0]["qy"]
+                    .as_f64()
+                    .unwrap()
+                    .abs(),
+                q
+            );
+            assert_eq!(summary["member_forces"]["truncated"], false);
+            assert_eq!(summary["member_forces"]["total_rows"], 3);
+            assert_eq!(
+                summary["member_forces"]["rows"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|row| row["pos"].as_f64().unwrap())
+                    .collect::<Vec<_>>(),
+                vec![0.0, 0.5, 1.0]
+            );
+            assert_eq!(summary["store"]["retrieval"]["encoding"], "json_string");
+            assert_eq!(summary["store"]["lifetime"], "server_process");
+        }
+        server.state.lock().await.model.load_cases[2].kind =
+            sepika_core::model::LoadCaseKind::Other;
+        let mut args = run_args(JobKind::DesignCheck);
+        args.load_case = Some(3);
+        let summary = run(&server, args).await;
+        assert!(summary["case"].is_null());
+        assert_eq!(summary["store"]["persisted"], false);
+        assert_eq!(
+            summary["load_target"]["source"],
+            "automatic_gravity_combination"
+        );
+        assert_eq!(
+            summary["member_forces"]["rows"][0]["qy"]
+                .as_f64()
+                .unwrap()
+                .abs(),
+            150_000.0
+        );
+        let reopened = SepikaServer::new(make_state(server.state.lock().await.model.clone(), &dir));
+        assert_eq!(
+            reopened.state.lock().await.results.manifest().entries.len(),
+            4
+        );
+        for (case, disp, force) in originals {
+            assert_eq!(get(&server, case, "NodalDisp").await, disp);
+            assert_eq!(get(&server, case, "MemberForce").await, force);
+            assert_eq!(get(&reopened, case, "NodalDisp").await, disp);
+            assert_eq!(get(&reopened, case, "MemberForce").await, force);
+        }
+    }
+
     /// Eigen ジョブ → Done（周期がサマリに含まれる）→
     /// result_get(Modal) が n_modes 行返す。
     #[tokio::test]
@@ -737,7 +913,7 @@ mod tests {
 
     /// Pushover ジョブ（stories 付きモデル）→ Done でサマリに qu[kN] が含まれる。
     #[tokio::test]
-    async fn test_pushover_job_completes_with_qu_in_summary() {
+    async fn test_pushover_job_completes_with_max_base_shear_in_summary() {
         let dir = test_store_dir("pushover_basic");
         let server = SepikaServer::new(make_state(pushover_model(), &dir));
         let mut args = run_args(JobKind::Pushover);
@@ -749,7 +925,7 @@ mod tests {
         let job_id = extract_job_id(&result);
         let status = wait_for_terminal(&server, &job_id).await;
         let summary = done_summary(&status);
-        assert!(summary["qu_kN"].as_f64().unwrap() > 0.0);
+        assert!(summary["max_base_shear_kN"].as_f64().unwrap() > 0.0);
         assert!(
             summary.get("store").is_none(),
             "Pushover はストアへ書かない"

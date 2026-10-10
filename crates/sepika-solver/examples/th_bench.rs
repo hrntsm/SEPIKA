@@ -110,6 +110,7 @@ fn make_frame(nx: usize, ny: usize, nz: usize) -> Model {
             .flat_map(|iy| (0..=nx).map(move |ix| grid.node_id(ix, iy, iz)))
             .collect();
         stories.push(Story {
+            wall_weights: Vec::new(),
             level_kind: Default::default(),
             structure: Default::default(),
             id: StoryId((iz - 1) as u32),

@@ -1102,6 +1102,22 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             )));
         }
 
+        for plate in &model.wall_plates {
+            if let Err(reason) = model.wall_weight(plate) {
+                let category = if matches!(
+                    &plate.shape,
+                    sepika_core::model::WallPlateShape::Attached {
+                        anchor: sepika_core::model::RegionAnchor::FloorRegion { .. },
+                        ..
+                    }
+                ) {
+                    "自立壁"
+                } else {
+                    "壁自重"
+                };
+                issues.push(ModelIssue::model(format!("{category}: {reason}")));
+            }
+        }
         let stranded = sepika_load::wall_plate_load::wall_plates_without_load_path(model);
         if !stranded.is_empty() {
             let ids = stranded

@@ -153,6 +153,7 @@ mod tests {
         let model = Model {
             stories: vec![
                 Story {
+                    wall_weights: Vec::new(),
                     id: StoryId(0),
                     name: "1F".to_string(),
                     elevation: 0.0,
@@ -167,6 +168,7 @@ mod tests {
                     fireproof: Default::default(),
                 },
                 Story {
+                    wall_weights: Vec::new(),
                     id: StoryId(1),
                     name: "2F".to_string(),
                     elevation: 3000.0,
@@ -240,6 +242,9 @@ mod tests {
             steps,
             wall_history: None,
             wall_run: None,
+            confirmed_history: None,
+            ds_evaluation: None,
+            capacity_evaluation: None,
             capacity_curve,
             hinges: Vec::new(),
             shear_yields: Vec::new(),
@@ -278,6 +283,7 @@ mod tests {
         let model = Model {
             stories: vec![
                 Story {
+                    wall_weights: Vec::new(),
                     id: StoryId(0),
                     name: "1F".to_string(),
                     elevation: 0.0,
@@ -292,6 +298,7 @@ mod tests {
                     fireproof: Default::default(),
                 },
                 Story {
+                    wall_weights: Vec::new(),
                     id: StoryId(1),
                     name: "2F".to_string(),
                     elevation: 3000.0,
@@ -312,6 +319,9 @@ mod tests {
             steps: Vec::new(),
             wall_history: None,
             wall_run: None,
+            confirmed_history: None,
+            ds_evaluation: None,
+            capacity_evaluation: None,
             capacity_curve: Vec::new(),
             hinges: Vec::new(),
             shear_yields: Vec::new(),
@@ -340,6 +350,7 @@ mod tests {
         use sepika_core::model::{Model, Story, StoryDynamicMass};
 
         let base_story = |id: u32, z: f64| Story {
+            wall_weights: Vec::new(),
             id: StoryId(id),
             name: format!("{}F", id + 1),
             elevation: z,
@@ -357,6 +368,9 @@ mod tests {
             steps: Vec::new(),
             wall_history: None,
             wall_run: None,
+            confirmed_history: None,
+            ds_evaluation: None,
+            capacity_evaluation: None,
             capacity_curve: Vec::new(),
             hinges: Vec::new(),
             shear_yields: Vec::new(),

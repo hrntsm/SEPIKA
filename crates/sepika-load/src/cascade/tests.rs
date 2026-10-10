@@ -237,6 +237,7 @@ fn secondary_fireproof_support_reactions_design_loads_and_mass() {
             ..Default::default()
         });
         model.stories = vec![sepika_core::model::Story {
+            wall_weights: Vec::new(),
             id: sepika_core::ids::StoryId(0),
             name: "1F".into(),
             elevation: 0.0,

@@ -505,7 +505,9 @@ impl Model {
                 };
                 match kind {
                     BoundarySecondaryKind::Beam => self.beams().find(|m| supported_near(m)),
-                    BoundarySecondaryKind::Post => self.posts().find(|m| supported_near(m)),
+                    BoundarySecondaryKind::Post => {
+                        self.posts().chain(self.beams()).find(|m| supported_near(m))
+                    }
                 }
                 .map(|m| m.id)
             }
