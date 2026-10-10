@@ -63,6 +63,8 @@ pub struct SectionEditorDraft {
     pub shear_legs: u32,
     pub shear_legs_x: u32,
     pub shear_legs_y: u32,
+    pub wall_ps: f64,
+    pub wall_pwh_ratio: Option<f64>,
 }
 
 impl Default for SectionEditorDraft {
@@ -103,6 +105,8 @@ impl Default for SectionEditorDraft {
             shear_legs: 2,
             shear_legs_x: 2,
             shear_legs_y: 2,
+            wall_ps: 0.0025,
+            wall_pwh_ratio: None,
         }
     }
 }
@@ -123,6 +127,7 @@ pub enum ShapeKind {
     RcColumnRect,
     RcColumnCircle,
     RcSlab,
+    RcWall,
 }
 
 impl ShapeKind {
@@ -142,9 +147,10 @@ impl ShapeKind {
             ShapeKind::RcColumnRect => "RC 矩形柱",
             ShapeKind::RcColumnCircle => "RC 円形柱",
             ShapeKind::RcSlab => "RC スラブ",
+            ShapeKind::RcWall => "RC 耐震壁",
         }
     }
-    pub const ALL: [ShapeKind; 14] = [
+    pub const ALL: [ShapeKind; 15] = [
         ShapeKind::SteelH,
         ShapeKind::SteelBox,
         ShapeKind::SteelAngle,
@@ -159,6 +165,7 @@ impl ShapeKind {
         ShapeKind::RcColumnRect,
         ShapeKind::RcColumnCircle,
         ShapeKind::RcSlab,
+        ShapeKind::RcWall,
     ];
 }
 
@@ -300,6 +307,9 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
         .map(|idx| &app.core.model.sections[idx]);
     if let Some(sec) = focused {
         if app.ui.scoped.section_draft.synced_focus != Some(sec.id) {
+            if let Some(shape) = &sec.shape {
+                sync_wall_shape(&mut app.ui.scoped.section_draft, shape);
+            }
             app.ui.scoped.section_draft.name = sec.name.clone();
             app.ui.scoped.section_draft.floor = sec.floor.clone().unwrap_or_default();
             if let Some(frame_use) = sec.frame_use {
@@ -417,6 +427,22 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
             ShapeKind::RcColumnCircle => {
                 rc_circle_column_fields(ui, draft);
             }
+            ShapeKind::RcWall => {
+                ui.horizontal(|ui| {
+                    ui.label("壁厚 t [mm]");
+                    ui.add(egui::DragValue::new(&mut draft.thick).speed(1.0));
+                    ui.label("直交最小筋比 ps");
+                    ui.add(egui::DragValue::new(&mut draft.wall_ps).speed(0.0001));
+                });
+                let mut known = draft.wall_pwh_ratio.is_some();
+                ui.label("参考骨格用横筋比（数量・解析には未反映）");
+                if ui.checkbox(&mut known, "横筋比を指定（実壁厚基準）").changed() {
+                    draft.wall_pwh_ratio = known.then_some(0.0);
+                }
+                if let Some(pwh) = &mut draft.wall_pwh_ratio {
+                    ui.add(egui::DragValue::new(pwh).speed(0.0001));
+                }
+            }
             ShapeKind::RcSlab => {
                 ui.horizontal(|ui| {
                     ui.label("板厚 t [mm]");
@@ -463,7 +489,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
             None => draft.name.clone(),
         };
 
-        if !matches!(draft.kind, ShapeKind::RcSlab) {
+        if !matches!(draft.kind, ShapeKind::RcSlab | ShapeKind::RcWall) {
             egui::ComboBox::from_label("主架構用途")
                 .selected_text(match draft.frame_use {
                     FrameSectionUse::Girder => "梁",
@@ -495,7 +521,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                         new_id: predicted_id,
                         name: draft.name.clone(),
                         floor: draft_floor.clone(),
-                        frame_use: (!matches!(draft.kind, ShapeKind::RcSlab))
+                        frame_use: (!matches!(draft.kind, ShapeKind::RcSlab | ShapeKind::RcWall))
                             .then_some(draft.frame_use),
                     }),
                 );
@@ -526,7 +552,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                             Box::new(EditSectionShape {
                                 section: sid,
                                 new_shape: shape.clone(),
-                                frame_use: (!matches!(draft.kind, ShapeKind::RcSlab))
+                                frame_use: (!matches!(draft.kind, ShapeKind::RcSlab | ShapeKind::RcWall))
                                     .then_some(draft.frame_use),
                             }),
                         );
@@ -881,6 +907,20 @@ fn non_empty(s: &str) -> Option<String> {
     (!t.is_empty()).then(|| t.to_string())
 }
 
+fn sync_wall_shape(draft: &mut SectionEditorDraft, shape: &SectionShape) {
+    if let SectionShape::RcWall {
+        thickness,
+        ps,
+        pwh_ratio,
+    } = shape
+    {
+        draft.kind = ShapeKind::RcWall;
+        draft.thick = *thickness;
+        draft.wall_ps = *ps;
+        draft.wall_pwh_ratio = *pwh_ratio;
+    }
+}
+
 fn build_shape(d: &SectionEditorDraft) -> SectionShape {
     match d.kind {
         ShapeKind::SteelH => SectionShape::SteelH {
@@ -980,6 +1020,11 @@ fn build_shape(d: &SectionEditorDraft) -> SectionShape {
             },
         },
         ShapeKind::RcSlab => SectionShape::RcSlab { thickness: d.thick },
+        ShapeKind::RcWall => SectionShape::RcWall {
+            thickness: d.thick,
+            ps: d.wall_ps,
+            pwh_ratio: d.wall_pwh_ratio,
+        },
     }
 }
 
@@ -1038,6 +1083,27 @@ fn panel_thickness_field(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wall_edit_preserves_explicit_horizontal_ratio() {
+        let shape = SectionShape::RcWall {
+            thickness: 180.0,
+            ps: 0.002,
+            pwh_ratio: Some(0.006),
+        };
+        let mut draft = SectionEditorDraft::default();
+        sync_wall_shape(&mut draft, &shape);
+        assert_eq!(build_shape(&draft), shape);
+        draft.wall_pwh_ratio = None;
+        assert!(matches!(
+            build_shape(&draft),
+            SectionShape::RcWall {
+                ps: 0.002,
+                pwh_ratio: None,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn test_build_shape_steel_h_uses_draft_fields() {

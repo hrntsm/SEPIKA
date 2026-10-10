@@ -526,6 +526,7 @@ mod tests {
         };
         let shape = SectionShape::RcWall {
             thickness,
+            pwh_ratio: None,
             ps: 0.0025,
         };
         let model = Model {
@@ -636,6 +637,7 @@ mod tests {
         };
         let shape = SectionShape::RcWall {
             thickness: 150.0,
+            pwh_ratio: None,
             ps: 0.0025,
         };
         let mut model = Model {

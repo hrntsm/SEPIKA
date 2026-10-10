@@ -17,7 +17,7 @@ pub(super) fn check_walls(
     term: LoadTerm,
     out: &mut Vec<(NodeId, String, CheckOutcome)>,
 ) {
-    'walls: for (eid, forces) in member_forces {
+    for (eid, forces) in member_forces {
         let Some(elem) = model.element(*eid) else {
             continue;
         };
@@ -27,22 +27,55 @@ pub(super) fn check_walls(
         let Some(sec) = model.element_section(elem) else {
             continue;
         };
-        let Some(SectionShape::RcWall { thickness, ps }) = sec.shape else {
+        let Some(SectionShape::RcWall {
+            thickness,
+            ps,
+            pwh_ratio,
+        }) = sec.shape
+        else {
             continue;
         };
         let Some(mat) = model.element_material(elem) else {
+            for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
+                out.push((
+                    elem.nodes[0],
+                    label.into(),
+                    CheckOutcome::Skipped {
+                        reason: format!(
+                            "耐震壁 ID {} のコンクリート材料が未割当または解決不能です（Fc不足）",
+                            elem.id.0
+                        ),
+                    },
+                ));
+            }
             continue;
         };
+        if mat.category != sepika_core::model::MaterialCategory::Concrete {
+            for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
+                out.push((
+                    elem.nodes[0],
+                    label.into(),
+                    CheckOutcome::Skipped {
+                        reason: format!(
+                            "耐震壁 ID {} のコンクリート主材 ID {} の材料区分 {:?} はコンクリート役割に不適合です",
+                            elem.id.0, mat.id.0, mat.category
+                        ),
+                    },
+                ));
+            }
+            continue;
+        }
         let fc = mat.fc.unwrap_or(0.0);
-        if fc <= 0.0 {
+        if !fc.is_finite() || fc <= 0.0 {
+            for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
+                out.push((elem.nodes[0], label.into(), CheckOutcome::Skipped {
+                    reason: format!("耐震壁 ID {} のコンクリート材料 ID {} の Fc が欠落または有限の正値ではありません", elem.id.0, mat.id.0),
+                }));
+            }
             continue;
         }
         let wall_shear_mat = model.element_shear_rebar_material(elem);
-        let sigma_y_wall =
-            sepika_core::material_grade::rebar_yield_strength(model.element_rebar_material(elem))
-                .unwrap_or(sepika_core::material_grade::SHEAR_REBAR_DEFAULT_FY);
-        let sigma_wh = sepika_core::material_grade::shear_rebar_yield_strength(wall_shear_mat)
-            .unwrap_or(sepika_core::material_grade::SHEAR_REBAR_DEFAULT_FY);
+        let wall_vertical_mat = model.element_rebar_material(elem);
         let coords: Vec<[f64; 3]> = elem
             .nodes
             .iter()
@@ -95,20 +128,51 @@ pub(super) fn check_walls(
         if !sepika_element::wall::misc_wall::is_rc_wall(elem, model) {
             continue;
         }
-        if let Some(msg) = sepika_core::material_grade::shear_rebar_material_issue(wall_shear_mat) {
-            out.push((
-                elem.nodes[0],
-                "耐震壁(RC)".to_string(),
-                CheckOutcome::Skipped {
-                    reason: format!("耐震壁 ID {} の{}", elem.id.0, msg),
-                },
-            ));
-            continue;
+        let sigma_wh = match wall_rebar_strength(wall_shear_mat, "横筋") {
+            Ok(strength) => Some(strength),
+            Err(msg) => {
+                let labels: &[&str] = if term == LoadTerm::Long {
+                    &["耐震壁(RC)せん断非線形"]
+                } else {
+                    &["耐震壁(RC)", "耐震壁(RC)せん断非線形"]
+                };
+                for label in labels {
+                    out.push((
+                        elem.nodes[0],
+                        (*label).into(),
+                        CheckOutcome::Skipped {
+                            reason: format!("耐震壁 ID {} の{}", elem.id.0, msg),
+                        },
+                    ));
+                }
+                if term != LoadTerm::Long {
+                    continue;
+                }
+                None
+            }
+        };
+        let mut allowable_issue = if term == LoadTerm::Long {
+            None
+        } else {
+            wall_rebar_strength(wall_vertical_mat, "縦筋").err()
+        };
+        if term != LoadTerm::Long && (!ps.is_finite() || ps < 0.0) {
+            allowable_issue = Some("直交最小筋比 ps が有限の非負値ではありません".into());
         }
         let wall_nodes = &elem.nodes;
         let mut side_columns = Vec::new();
         let mut sum_col_depth = 0.0;
-        let mut col_gross_area = 0.0_f64;
+        let mut nonlinear_issue = (mat.concrete_class != sepika_core::units::ConcreteClass::Normal)
+            .then(|| "通常コンクリート以外の参考骨格は未対応です".to_string());
+        let mut column_geometry = [None; 2];
+        let wall_geometry = sepika_core::model::wall_element_geometry(elem, model);
+        if !wall_geometry.as_ref().is_some_and(|geometry| {
+            sepika_core::geom::vec3::unit_from(geometry.bottom_center, geometry.top_center)
+                .is_some_and(|direction| (direction[2].abs() - 1.0).abs() <= 1e-9)
+                && geometry.ex_bottom[2].abs() <= 1e-9
+        }) {
+            nonlinear_issue = Some("原研究で適用未確認の傾斜壁または不正な壁幾何の参考骨格は未対応です（鉛直壁のみ対応）".into());
+        }
         let mut col_main_area_max = 0.0_f64;
         let mut dc_max = 0.0_f64;
         for m in members {
@@ -147,20 +211,13 @@ pub(super) fn check_walls(
                 }
                 _ => 0.0,
             };
-            let Some((b, d, d_eff, pw, main_area)) = wall_side_column_props(m.sec.shape.as_ref())
-            else {
+            let Some((b, d, d_eff, pw, _)) = wall_side_column_props(m.sec.shape.as_ref()) else {
                 continue;
             };
-            if let Some(msg) = sepika_core::material_grade::shear_rebar_material_issue(m.shear_mat)
-            {
-                out.push((
-                    elem.nodes[0],
-                    "耐震壁(RC)".to_string(),
-                    CheckOutcome::Skipped {
-                        reason: format!("耐震壁 ID {} の側柱の{}", elem.id.0, msg),
-                    },
-                ));
-                continue 'walls;
+            if let Err(msg) = wall_rebar_strength(m.shear_mat, "側柱帯筋") {
+                if term != LoadTerm::Long {
+                    allowable_issue = Some(format!("側柱 ID {} の{}", m.elem.id.0, msg));
+                }
             }
             side_columns.push(WallSideColumn {
                 b,
@@ -173,9 +230,81 @@ pub(super) fn check_walls(
                 steel_shear,
             });
             sum_col_depth += d;
-            col_gross_area += b * d;
-            dc_max = dc_max.max(d);
-            col_main_area_max = col_main_area_max.max(main_area);
+        }
+        let mut reference_column_shape = None;
+        let mut reference_column_depth = 0.0;
+        if let Some(geometry) = &wall_geometry {
+            for (side, column_dimensions) in column_geometry.iter_mut().enumerate() {
+                let edge = [geometry.bottom[side], geometry.top[side]];
+                let columns: Vec<_> = model
+                    .elements
+                    .iter()
+                    .filter(|column| {
+                        sepika_element::wall::side_column::is_line_member(column.kind)
+                            && column.nodes.len() == 2
+                            && column.nodes.contains(&edge[0])
+                            && column.nodes.contains(&edge[1])
+                    })
+                    .collect();
+                if columns.len() > 1 {
+                    nonlinear_issue = Some("同じ壁辺に複数の側柱がある参考骨格は未対応です".into());
+                }
+                for column in columns {
+                    let Some(section) = model.element_section(column) else {
+                        nonlinear_issue = Some(format!(
+                            "側柱 ID {} の断面が未割当または解決不能です",
+                            column.id.0
+                        ));
+                        continue;
+                    };
+                    let Some(column_mat) = model.element_material(column) else {
+                        nonlinear_issue = Some(format!(
+                            "側柱 ID {} のコンクリート主材が未割当または解決不能です",
+                            column.id.0
+                        ));
+                        continue;
+                    };
+                    if column_mat.category != mat.category
+                        || column_mat.concrete_class != mat.concrete_class
+                        || column_mat.fc != mat.fc
+                        || column_mat.young != mat.young
+                        || column_mat.poisson != mat.poisson
+                        || column_mat.shear != mat.shear
+                    {
+                        nonlinear_issue = Some(format!("側柱 ID {} のコンクリート主材 ID {} と壁の材料領域・コンクリート種別が異なる参考骨格は未対応です", column.id.0, column_mat.id.0));
+                    }
+                    let Some(shape @ SectionShape::RcColumnRect { b, d, rebar }) =
+                        section.shape.as_ref()
+                    else {
+                        nonlinear_issue = Some(format!("側柱 ID {} の主筋量・骨格用有効断面を解決できません（同質の正方形RC側柱のみ対応）", column.id.0));
+                        continue;
+                    };
+                    if b != d {
+                        nonlinear_issue = Some(format!(
+                            "側柱 ID {} の骨格用有効断面は未対応です（正方形RC側柱のみ対応）",
+                            column.id.0
+                        ));
+                    }
+                    if !side_column_section_is_parallel(column, model, geometry) {
+                        nonlinear_issue = Some(format!("側柱 ID {} の断面方向が壁面内方向・壁面法線に平行ではないため、骨格用有効断面は未対応です", column.id.0));
+                    }
+                    if reference_column_shape.is_some_and(|first| first != shape) {
+                        nonlinear_issue = Some(format!(
+                            "側柱 ID {} の断面寸法・配筋が反対側の柱と非対称な参考骨格は未対応です",
+                            column.id.0
+                        ));
+                    }
+                    reference_column_shape = Some(shape);
+                    *column_dimensions = Some([*d, *b]);
+                    reference_column_depth += d;
+                    dc_max = dc_max.max(*d);
+                    col_main_area_max = col_main_area_max.max(rebar.total_main_area());
+                }
+            }
+        }
+        if nonlinear_issue.is_none() && column_geometry[0].is_some() != column_geometry[1].is_some()
+        {
+            nonlinear_issue = Some("片側のみ側柱がある非対称な参考骨格は未対応です".into());
         }
         let l_clear = (l - sum_col_depth / 2.0).max(0.1 * l);
         let q_design = forces
@@ -192,7 +321,11 @@ pub(super) fn check_walls(
             w_ft: crate::rc::rebar_allowable_shear(
                 wall_shear_mat.map(|mm| mm.name.as_str()).unwrap_or(""),
                 term == LoadTerm::Long,
-            ),
+            )
+            .min(crate::rc::rebar_allowable_shear(
+                wall_vertical_mat.map(|mm| mm.name.as_str()).unwrap_or(""),
+                term == LoadTerm::Long,
+            )),
             side_columns,
             opening: if l0p > 1e-9 && h0p > 1e-9 {
                 Some((l0p, h0p, h, l))
@@ -202,15 +335,68 @@ pub(super) fn check_walls(
             q_design,
             long_term: term == LoadTerm::Long,
         };
-        let cr = rc_wall_shear_check(&inp);
-        out.push((
-            elem.nodes[0],
-            "耐震壁(RC)".to_string(),
-            CheckOutcome::Checked(cr),
-        ));
+        let outcome = match allowable_issue {
+            Some(msg) => CheckOutcome::Skipped {
+                reason: format!("耐震壁 ID {} の{}", elem.id.0, msg),
+            },
+            None => CheckOutcome::Checked(rc_wall_shear_check(&inp)),
+        };
+        out.push((elem.nodes[0], "耐震壁(RC)".into(), outcome));
 
-        let aw = thickness * l + col_gross_area;
-        let d_wall = l + sum_col_depth / 2.0;
+        let Some(sigma_wh) = sigma_wh else {
+            continue;
+        };
+        let horizontal_ratio = match pwh_ratio {
+            Some(ratio) if ratio.is_finite() && ratio >= 0.0 && ps.is_finite() && ratio >= ps => {
+                Ok(ratio)
+            }
+            Some(_) => Err("横筋比 pwh_ratio が有限・非負・直交最小筋比以上ではありません"),
+            None => Err("横筋比 pwh_ratio が未入力です（直交最小筋比 ps からは推定しません）"),
+        };
+        let pwh_ratio = match horizontal_ratio {
+            Ok(ratio) => ratio,
+            Err(msg) => {
+                out.push((
+                    elem.nodes[0],
+                    "耐震壁(RC)せん断非線形".into(),
+                    CheckOutcome::Skipped {
+                        reason: format!("耐震壁 ID {} の{}", elem.id.0, msg),
+                    },
+                ));
+                continue;
+            }
+        };
+        if !(0.33..=1.63).contains(&(h / l)) {
+            out.push((
+                elem.nodes[0],
+                "耐震壁(RC)せん断非線形".into(),
+                CheckOutcome::Skipped {
+                    reason: format!(
+                        "耐震壁 ID {} の高さ/壁長が剛性比の原研究範囲 0.33〜1.63 外です",
+                        elem.id.0
+                    ),
+                },
+            ));
+            continue;
+        }
+        let section_properties = sepika_core::section_shape::wall_rectangular_section_properties(
+            l,
+            thickness,
+            column_geometry,
+        );
+        let aw = section_properties.map(|p| p.area).unwrap_or(0.0);
+        let shear_area_mm2 = section_properties.map(|p| p.shear_area).unwrap_or(0.0);
+        if let Some(msg) = nonlinear_issue {
+            out.push((
+                elem.nodes[0],
+                "耐震壁(RC)せん断非線形".into(),
+                CheckOutcome::Skipped {
+                    reason: format!("耐震壁 ID {} の{}", elem.id.0, msg),
+                },
+            ));
+            continue;
+        }
+        let d_wall = l + reference_column_depth / 2.0;
         if col_main_area_max > 0.0 && aw > 0.0 && d_wall > 0.0 {
             let te = (aw / d_wall).clamp(thickness, 1.5 * thickness);
             let n_comp = forces.iter().map(|(_, f)| -f[0]).fold(0.0_f64, f64::max);
@@ -229,18 +415,18 @@ pub(super) fn check_walls(
                 })
                 .unwrap_or_else(|| h / (2.0 * d_wall));
             let tri_inp = WallShearTrilinearInput {
+                wall_height_mm: h,
+                wall_length_mm: l,
                 fc,
                 aw,
                 tension_column_main_area: col_main_area_max,
-                pw_vertical: ps,
-                sigma_y_wall,
                 te,
                 t: thickness,
                 d_wall,
                 dc_compression: dc_max,
                 tension_column_at: col_main_area_max,
                 sigma_wh,
-                pwh_ratio: ps,
+                pwh_ratio,
                 sigma_0,
                 shear_span_ratio,
                 opening: if l0p > 1e-9 && h0p > 1e-9 {
@@ -249,21 +435,49 @@ pub(super) fn check_walls(
                     None
                 },
             };
-            let tri = wall_shear_trilinear(&tri_inp);
-            let ratio = if tri.qu > 0.0 { q_design / tri.qu } else { 0.0 };
+            let tri = match wall_shear_trilinear(&tri_inp) {
+                Ok(tri) => tri,
+                Err(msg) => {
+                    out.push((
+                        elem.nodes[0],
+                        "耐震壁(RC)せん断非線形".into(),
+                        CheckOutcome::Skipped {
+                            reason: format!("耐震壁 ID {} の{}", elem.id.0, msg),
+                        },
+                    ));
+                    continue;
+                }
+            };
+            let shear_mpa = mat.shear.unwrap_or(mat.young / (2.0 * (1.0 + mat.poisson)));
+            let points = match tri.displacement_points(shear_mpa, shear_area_mm2, h) {
+                Ok(points) => points,
+                Err(msg) => {
+                    out.push((
+                        elem.nodes[0],
+                        "耐震壁(RC)せん断非線形".into(),
+                        CheckOutcome::Skipped {
+                            reason: format!("耐震壁 ID {} の{}", elem.id.0, msg),
+                        },
+                    ));
+                    continue;
+                }
+            };
+            let ratio = q_design / tri.qu;
             let detail = format!(
-                "Qc={:.1} kN, βu={:.3}, Qu={:.1} kN, r={:.3}, QD={:.1} kN（せん断非線形トリリニア骨格）",
+                "Qc={:.1} kN, βs={:.3}, Qu={:.1} kN, r={:.3}, QD={:.1} kN, δc={:.4} mm, δu={:.4} mm（純せん断の参考骨格）",
                 tri.qc / 1000.0,
-                tri.beta_u,
+                tri.beta_s,
                 tri.qu / 1000.0,
                 tri.r_opening,
-                q_design / 1000.0
+                q_design / 1000.0,
+                points[1].0,
+                points[2].0
             );
             out.push((
                 elem.nodes[0],
                 "耐震壁(RC)せん断非線形".to_string(),
                 CheckOutcome::Checked(CheckResult {
-                    basis: "技術基準解説書 耐震壁せん断非線形(Qc/βu/Qu)".to_string(),
+                    basis: "耐震壁せん断参考骨格（横筋βs・終局割線接続）".to_string(),
                     detail: String::new(),
                     components: vec![CheckComponent {
                         kind: CheckKind::Shear,
@@ -272,8 +486,70 @@ pub(super) fn check_walls(
                     }],
                 }),
             ));
+        } else {
+            out.push((
+                elem.nodes[0],
+                "耐震壁(RC)せん断非線形".into(),
+                CheckOutcome::Skipped {
+                    reason: format!(
+                        "耐震壁 ID {} の側柱主筋量または有効断面が不足し、Qc/Qu を算定できません",
+                        elem.id.0
+                    ),
+                },
+            ));
         }
     }
+}
+
+fn side_column_section_is_parallel(
+    column: &sepika_core::model::ElementData,
+    model: &Model,
+    wall: &sepika_core::model::WallElementGeometry,
+) -> bool {
+    use sepika_core::geom::vec3::{dot, unit_from};
+    let Some(height_direction) = unit_from(wall.bottom_center, wall.top_center) else {
+        return false;
+    };
+    let Some(first) = column.nodes.first().and_then(|id| model.node(*id)) else {
+        return false;
+    };
+    let Some(second) = column.nodes.get(1).and_then(|id| model.node(*id)) else {
+        return false;
+    };
+    let frame = sepika_element::transform::LocalFrame::from_nodes(
+        first.coord,
+        second.coord,
+        column.local_axis.ref_vector,
+    );
+    let parallel = |a, b| (dot(a, b).abs() - 1.0).abs() <= 1e-9;
+    dot(wall.ex_bottom, height_direction).abs() <= 1e-9
+        && parallel(frame.rot[0], height_direction)
+        && (parallel(frame.rot[1], wall.ex_bottom) || parallel(frame.rot[2], wall.ex_bottom))
+}
+
+/// 材料役割の割当・対応材種・有限正 fy を検査し、名称から強度を推定しない。
+fn wall_rebar_strength(
+    mat: Option<&sepika_core::model::Material>,
+    role: &str,
+) -> Result<f64, String> {
+    let mat = mat.ok_or_else(|| format!("{role}材料が未割当です"))?;
+    if mat.category != sepika_core::model::MaterialCategory::Rebar
+        || !sepika_core::material_grade::is_supported_shear_rebar_grade(&mat.name)
+    {
+        return Err(format!(
+            "{role}材料 ID {} の{}",
+            mat.id.0,
+            sepika_core::material_grade::unsupported_shear_rebar_message(&mat.name)
+        ));
+    }
+    mat.fy
+        .filter(|fy| fy.is_finite() && *fy > 0.0)
+        .ok_or_else(|| {
+            format!(
+                "{role}材料 ID {}「{}」の降伏強度 fy が未設定または有限の正値ではありません",
+                mat.id.0, mat.name
+            )
+        })
 }
 
 /// 壁側柱の RC 諸元 `(b, d, d_eff, pw, 主筋総面積)` を形状から引く。

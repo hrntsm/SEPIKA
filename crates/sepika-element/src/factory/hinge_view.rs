@@ -912,6 +912,7 @@ mod tests {
             ],
             sections: vec![SectionShape::RcWall {
                 thickness: 150.0,
+                pwh_ratio: None,
                 ps: 0.0025,
             }
             .to_section(SectionId(0), "W150".into())],

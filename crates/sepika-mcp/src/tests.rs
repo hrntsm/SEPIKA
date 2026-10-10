@@ -1408,6 +1408,86 @@ fn loaded_full_length_intent_survives_mcp_preparation_and_linear_analysis() {
     let _ = std::fs::remove_file(path);
 }
 
+#[test]
+fn wall_horizontal_input_survives_ovika_and_mcp_design_reports_missing_assignment() {
+    use sepika_core::model::LoadCaseKind;
+    use sepika_core::section_shape::SectionShape;
+    let mut model = rc_column_model();
+    let mut bottom = model.nodes[0].clone();
+    bottom.id = NodeId(2);
+    bottom.coord = [4000.0, 0.0, 0.0];
+    let mut top = model.nodes[1].clone();
+    top.id = NodeId(3);
+    top.coord = [4000.0, 0.0, 3000.0];
+    model.nodes.extend([bottom, top]);
+    let mut girder = model.sections[0].clone();
+    girder.id = SectionId(1);
+    girder.name = "梁".into();
+    girder.frame_use = Some(FrameSectionUse::Girder);
+    model.sections.push(girder);
+    for (id, nodes, section) in [(1, [0, 2], 1), (2, [1, 3], 1), (3, [2, 3], 0)] {
+        let mut element = model.elements[0].clone();
+        element.id = ElemId(id);
+        element.nodes = nodes.map(NodeId).into_iter().collect();
+        element.section = Some(SectionId(section));
+        model.elements.push(element);
+    }
+    let mut section = SectionShape::RcWall {
+        thickness: 180.0,
+        ps: 0.002,
+        pwh_ratio: Some(0.006),
+    }
+    .to_section(SectionId(2), "壁".into());
+    section.material = Some(MaterialId(0));
+    section.rebar_material = Some(MaterialId(1));
+    section.shear_rebar_material = None;
+    model.sections.push(section);
+    model.add_enclosed_wall_plate_from_nodes(
+        &[NodeId(0), NodeId(2), NodeId(3), NodeId(1)],
+        sepika_core::model::WallPlate {
+            id: sepika_core::ids::WallPlateId(0),
+            shape: sepika_core::model::WallPlateShape::Enclosed,
+            section: Some(SectionId(2)),
+            self_weight_shares: vec![],
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: vec![],
+            loads: vec![],
+            slit: Default::default(),
+        },
+    );
+    model.load_cases[0].kind = LoadCaseKind::Wind;
+    let path = std::env::temp_dir().join(format!("sepika-503-mcp-{}.ovika", std::process::id()));
+    sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+    let loaded = sepika_io::ovika::load_ovika(&path).unwrap().model;
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(loaded.sections[2].shape, model.sections[2].shape);
+    let outcome = compute_job(
+        &loaded,
+        JobKind::DesignCheck,
+        &JobParams {
+            load_case: Some(0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let JobOutcome::DesignCheck { summary, .. } = outcome else {
+        panic!("断面検定結果")
+    };
+    let skipped = summary["joint_skipped"].as_array().unwrap();
+    for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
+        let item = skipped
+            .iter()
+            .find(|item| item["label"] == label)
+            .expect("不足出力はSkipped");
+        let reason = item["reason"].as_str().unwrap();
+        assert!(
+            reason.contains("耐震壁 ID") && reason.contains("横筋") && reason.contains("未割当"),
+            "{reason}"
+        );
+    }
+}
+
 fn circular_post_model() -> sepika_core::model::Model {
     use sepika_core::ids::{MaterialId, NodeId, SecondaryMemberId, SectionId};
     use sepika_core::model::{

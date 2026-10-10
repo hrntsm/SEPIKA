@@ -77,6 +77,7 @@ fn bay() -> Model {
     m.elements = vec![beam(0, 0, 3), beam(1, 1, 2), beam(2, 0, 1), beam(3, 3, 2)];
     let mut wall_sec = sepika_core::section_shape::SectionShape::RcWall {
         thickness: T,
+        pwh_ratio: None,
         ps: 0.0025,
     }
     .to_section(SectionId(0), "W150".into());

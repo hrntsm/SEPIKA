@@ -105,6 +105,7 @@ fn wall_post_model() -> Model {
     model.sections.push(beam_section);
     let mut wall_sec = SectionShape::RcWall {
         thickness: WALL_T,
+        pwh_ratio: None,
         ps: 0.0025,
     }
     .to_section(SectionId(2), "壁 t150".into());

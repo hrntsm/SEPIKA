@@ -266,6 +266,7 @@ fn preparation_rebuild_clears_generated_wall_selection_only() {
     app.core.model.sections.push(
         SectionShape::RcWall {
             thickness: 180.0,
+            pwh_ratio: None,
             ps: 0.0025,
         }
         .to_section(SectionId(0), "壁".into()),
@@ -9806,6 +9807,7 @@ fn test_wall_has_src_boundary_column() {
     };
     let wall_shape = SectionShape::RcWall {
         thickness: 180.0,
+        pwh_ratio: None,
         ps: 0.0025,
     };
     let src_shape = SectionShape::SrcColumnRect {
