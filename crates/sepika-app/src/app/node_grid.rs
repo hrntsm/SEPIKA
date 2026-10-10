@@ -304,15 +304,29 @@ mod tests {
 
     #[test]
     fn fifteen_digit_scientific_tsv_fixture_meets_relative_tolerance() {
-        let expected = [1.23456789012345_f64, -10.0, 3000.0, 0.0, 7.85e-9];
-        let text = "1.23456789012345E+00\t-1.00000000000000E+01\t3.00000000000000E+03\t0.00000000000000E+00\t7.85000000000000E-09\r\n";
-        let block = parse_tsv(text);
-        for (text, value) in block[0].iter().zip(expected) {
-            let actual = text.parse::<f64>().unwrap();
-            if value == 0.0 {
-                assert_eq!(actual, 0.0);
-            } else {
-                assert!((actual - value).abs() <= 1e-14 * value.abs());
+        let expected: [[f64; 3]; 2] = [[1.23456789012345, -10.0, 3000.0], [0.0, 10.0, -3000.0]];
+        let block = parse_tsv(include_str!("../../tests/fixtures/tsv/excel_nodes.tsv"));
+        assert_eq!(block.len(), 2);
+        assert!(block.iter().all(|row| row.len() == 3));
+        let mut model = Model::default();
+        let mut undo = UndoStack::new();
+        let mut adapter = NodeGridAdapter {
+            model: &mut model,
+            undo: &mut undo,
+            edited: false,
+        };
+        let plan = plan_paste(&block, CellRef { row: 0, col: 0 }, 0, 3, |r, c, t| {
+            adapter.validate_cell(r, c, t)
+        })
+        .unwrap();
+        assert!(adapter.apply_block(&plan.set, plan.extra_rows).unwrap());
+        for (node, values) in adapter.model.nodes.iter().zip(expected) {
+            for (actual, value) in node.coord.iter().zip(values) {
+                if value == 0.0 {
+                    assert_eq!(*actual, 0.0);
+                } else {
+                    assert!((actual - value).abs() <= 1e-14 * value.abs());
+                }
             }
         }
     }

@@ -306,4 +306,40 @@ mod tests {
         assert!(!adapter.apply_block(&[], 0).unwrap());
         assert_eq!(adapter.undo.revision(), revision);
     }
+    #[test]
+    fn fifteen_digit_material_tsv_fixture_meets_relative_tolerance() {
+        let mut model = model();
+        assert_eq!(
+            model.materials[0].category,
+            sepika_core::model::MaterialCategory::Steel
+        );
+        let mut undo = UndoStack::new();
+        let mut adapter = MaterialGridAdapter {
+            model: &mut model,
+            undo: &mut undo,
+            edited: false,
+        };
+        let block = parse_tsv(include_str!("../../tests/fixtures/tsv/excel_materials.tsv"));
+        assert_eq!(block.len(), 1);
+        assert_eq!(block[0].len(), 4);
+        let plan = plan_paste(
+            &block,
+            CellRef { row: 0, col: 0 },
+            adapter.rows(),
+            adapter.cols(),
+            |r, c, t| adapter.validate_cell(r, c, t),
+        )
+        .unwrap();
+        assert!(adapter.apply_block(&plan.set, 0).unwrap());
+        let mat = &adapter.model.materials[0];
+        let actual = [
+            mat.young,
+            mat.poisson,
+            mat.density,
+            mat.strength_factor.unwrap(),
+        ];
+        for (actual, expected) in actual.into_iter().zip([200000_f64, 0.29, 7.85e-9, 1.05]) {
+            assert!((actual - expected).abs() <= 1e-14 * expected.abs());
+        }
+    }
 }
