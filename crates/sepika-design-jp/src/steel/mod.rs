@@ -19,6 +19,7 @@ mod brace;
 pub mod buckling;
 pub mod cold_formed;
 mod column;
+pub mod lateral_bracing;
 mod lip_channel;
 pub mod panel_zone;
 mod section;

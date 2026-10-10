@@ -250,6 +250,7 @@ fn assemble_design_check_summary(
         max_ratio = Some(max_ratio.map_or(ratio, |r| r.max(ratio)));
     }
     serde_json::json!({
+        "lateral_bracing_references": report.lateral_bracing_references.iter().map(|(elem, reference)| serde_json::json!({ "elem": elem.0, "reference": reference, "actual_bracing_verified": false })).collect::<Vec<_>>(),
         "wall_checks": report.wall_checks,
         "wall_summary": wall_summary,
         "wall_summary_by_kind": {

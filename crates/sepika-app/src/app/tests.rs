@@ -12497,3 +12497,91 @@ fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_reta
     );
     std::fs::remove_file(path).unwrap();
 }
+
+mod lateral_bracing_fixture {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../sepika-design-jp/tests/fixtures/lateral_bracing.rs"
+    ));
+}
+
+#[test]
+fn lateral_bracing_gui_entry_uses_column_span_for_panel_on_off_and_keeps_existing_checks() {
+    use sepika_core::model::{EndCondition, PanelZoneMode};
+    use sepika_design_jp::steel::lateral_bracing::{
+        resolve_lateral_bracing_reference, LateralBracingReference,
+    };
+    for split in [false, true] {
+        for panel in [PanelZoneMode::None, PanelZoneMode::Model] {
+            let mut model = lateral_bracing_fixture::frame(split);
+            model.panel_zone = panel;
+            let mut app = App::default();
+            app.load_model(model);
+            app.run_linear_static(LoadCaseId(0));
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            app.run_design_check();
+            let reference = resolve_lateral_bracing_reference(&app.core.model, ElemId(0));
+            let LateralBracingReference::Available {
+                required_count,
+                length_mm,
+                lambda_y,
+                ..
+            } = reference
+            else {
+                panic!("{reference:?}")
+            };
+            assert_eq!((required_count, length_mm, lambda_y), (2, 20000.0, 200.0));
+            let rows = &app.core.scoped.results.as_ref().unwrap().member_checks;
+            let beam = rows.iter().find(|r| r.elem == ElemId(0)).unwrap();
+            for row in &beam.positions {
+                let sepika_design_jp::CheckOutcome::Checked(result) = &row.outcome else {
+                    panic!("{:?}", row.outcome)
+                };
+                assert!(result.detail.contains("（参考）n=2"));
+                assert!(result.detail.contains("L=20000.000"));
+                assert!(result.detail.contains("実配置・補剛性能は未検定"));
+                assert!(!result.detail.contains("端条件未確認"));
+                assert_eq!(result.components.len(), 2);
+            }
+            let last = if split { 4 } else { 0 };
+            app.core.model.elements[last].end_cond[1] = EndCondition::Pinned;
+            app.run_design_check();
+            let rows = &app.core.scoped.results.as_ref().unwrap().member_checks;
+            let beam = rows.iter().find(|r| r.elem == ElemId(0)).unwrap();
+            for row in &beam.positions {
+                let sepika_design_jp::CheckOutcome::Checked(result) = &row.outcome else {
+                    panic!("{:?}", row.outcome)
+                };
+                assert!(result.detail.contains("算定不能（柱間両外端Fixed/Fixed"));
+                assert_eq!(result.components.len(), 2);
+            }
+        }
+    }
+}
+
+#[test]
+fn lateral_bracing_gui_invalid_group_reference_keeps_bending_and_shear() {
+    let model = lateral_bracing_fixture::frame(true);
+    let mut app = App::default();
+    app.load_model(model);
+    app.run_linear_static(LoadCaseId(0));
+    assert!(app.core.scoped.last_error.is_none());
+    app.core.model.girder_groups[0].swap(1, 2);
+    app.run_design_check();
+    let rows = &app.core.scoped.results.as_ref().unwrap().member_checks;
+    for beam in rows.iter().filter(|r| [0, 3, 4].contains(&r.elem.0)) {
+        for row in &beam.positions {
+            let sepika_design_jp::CheckOutcome::Checked(result) = &row.outcome else {
+                panic!("{:?}", row.outcome)
+            };
+            assert!(result.detail.contains("算定不能（group節点"));
+            assert!(result.detail.contains("連続"));
+            assert!(!result.detail.contains("（参考）n="));
+            assert_eq!(result.components.len(), 2);
+        }
+    }
+}

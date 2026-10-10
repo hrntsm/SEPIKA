@@ -3398,3 +3398,83 @@ fn stb_strength_incompatible_steel_parts_do_not_supply_a_single_material() {
         .iter()
         .any(|reason| reason.contains("部位別鋼材強度")));
 }
+
+mod lateral_bracing_fixture {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../sepika-design-jp/tests/fixtures/lateral_bracing.rs"
+    ));
+}
+
+#[test]
+fn lateral_bracing_mcp_job_preserves_typed_reference_and_member_checks() {
+    use sepika_core::model::EndCondition;
+    use sepika_design_jp::steel::lateral_bracing::resolve_lateral_bracing_reference;
+    for split in [false, true] {
+        let model = lateral_bracing_fixture::frame(split);
+        let JobOutcome::DesignCheck { summary, .. } =
+            compute_job(&model, JobKind::DesignCheck, &JobParams::default()).unwrap()
+        else {
+            panic!()
+        };
+        let refs = summary["lateral_bracing_references"].as_array().unwrap();
+        let reference = &refs.iter().find(|r| r["elem"] == 0).unwrap()["reference"];
+        assert_eq!(
+            reference,
+            &serde_json::to_value(resolve_lateral_bracing_reference(&model, ElemId(0))).unwrap()
+        );
+        assert_eq!(reference["required_count"], 2);
+        assert_eq!(reference["length_mm"], 20000.0);
+        assert_eq!(reference["lambda_y"], 200.0);
+        assert_eq!(summary["n_skipped"], 0);
+        assert_eq!(refs[0]["actual_bracing_verified"], false);
+        let mut bad = model.clone();
+        bad.elements[if split { 4 } else { 0 }].end_cond[1] =
+            EndCondition::SemiRigid { k_theta: 1e9 };
+        let JobOutcome::DesignCheck {
+            summary: unavailable,
+            ..
+        } = compute_job(&bad, JobKind::DesignCheck, &JobParams::default()).unwrap()
+        else {
+            panic!()
+        };
+        let refs = unavailable["lateral_bracing_references"]
+            .as_array()
+            .unwrap();
+        let reference = &refs.iter().find(|r| r["elem"] == 0).unwrap()["reference"];
+        assert_eq!(
+            reference,
+            &serde_json::to_value(resolve_lateral_bracing_reference(&bad, ElemId(0))).unwrap()
+        );
+        assert_eq!(reference["status"], "unavailable");
+        assert!(reference["required_count"].is_null());
+        assert!(reference["reason"]
+            .as_str()
+            .unwrap()
+            .contains("Fixed/Fixed"));
+        assert_eq!(unavailable["n_skipped"], 0);
+        assert_eq!(unavailable["n_checks"], summary["n_checks"]);
+    }
+}
+
+#[test]
+fn lateral_bracing_mcp_invalid_group_reference_is_retained_without_fallback() {
+    let mut model = lateral_bracing_fixture::frame(true);
+    model.girder_groups[0].swap(1, 2);
+    let JobOutcome::DesignCheck { summary, .. } =
+        compute_job(&model, JobKind::DesignCheck, &JobParams::default()).unwrap()
+    else {
+        panic!()
+    };
+    let references = summary["lateral_bracing_references"].as_array().unwrap();
+    assert_eq!(references.len(), 3);
+    for row in references {
+        assert_eq!(row["reference"]["status"], "unavailable");
+        assert!(row["reference"]["required_count"].is_null());
+        assert!(row["reference"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("連続"));
+    }
+    assert_eq!(summary["n_skipped"], 0);
+}
