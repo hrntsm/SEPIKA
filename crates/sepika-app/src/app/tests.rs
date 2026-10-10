@@ -4048,7 +4048,7 @@ fn cmq_display_load_case_falls_back_to_first_case() {
 /// 正方形スラブ（4000×4000）+ 外周4本の梁を持つモデル
 /// （`make_slab_test_model` の正方形版。正方形は `TriTrapezoid` で全辺
 /// 三角形分布になるためスラブ→荷重ケース同期の検算がしやすい）。
-fn make_square_slab_test_model() -> sepika_core::model::Model {
+pub(super) fn make_square_slab_test_model() -> sepika_core::model::Model {
     use sepika_core::ids::FloorRegionId;
     use sepika_core::model::{
         AreaLoad, DistributionMethod, ElementData, ElementKind, EndCondition, ForceRegime,
@@ -4711,6 +4711,28 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
     let bundle = app.core.scoped.results.as_ref().unwrap();
     assert_eq!(bundle.beam_checks.len(), 1);
     assert_eq!(bundle.slab_checks.len(), 2);
+    for stale in [true, false] {
+        app.core.scoped.staleness.results_stale = stale;
+        app.run_design_check();
+        let direct = app.core.scoped.results.as_ref().unwrap();
+        assert_eq!(direct.analysis_contract_version, None);
+        assert_eq!(
+            direct.design_contract_version,
+            Some(sepika_core::result_contract::DESIGN_CONTRACT_VERSION)
+        );
+        assert_eq!((direct.beam_checks.len(), direct.slab_checks.len()), (1, 2));
+    }
+    let (mut old_floor, path) =
+        super::result_contract_tests::restore(&app, None, Some(0), "old-floor-and-beam");
+    let invalid = old_floor.core.scoped.results.as_ref().unwrap();
+    assert!(invalid.beam_checks.is_empty() && invalid.slab_checks.is_empty());
+    old_floor.run_design_check();
+    let recovered = old_floor.core.scoped.results.as_ref().unwrap();
+    assert_eq!(
+        (recovered.beam_checks.len(), recovered.slab_checks.len()),
+        (1, 2)
+    );
+    std::fs::remove_file(path).unwrap();
     app.core.model.materials[material.index()].density = 85e-6 / 9806.65;
     app.run_design_check();
     assert!(app
@@ -12404,6 +12426,16 @@ fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_reta
     assert!(!csv.contains("旧標準形式成功"));
     assert!(csv.contains("検定不能") && csv.contains("上位置差=50"));
     assert!(!old.member_forces.is_empty());
+    let mut old_contract_checked = old.clone();
+    old_contract_checked.design_contract_version = Some(0);
+    save(&path, &staggered, old_contract_checked);
+    reopened.open_project_from(path.clone());
+    let rejected = reopened.core.scoped.results.as_ref().unwrap();
+    assert!(rejected.statics.is_empty() && rejected.member_checks.is_empty());
+    assert!(rejected.joint_checks.iter().any(|check| matches!(&check.outcome, CheckOutcome::Skipped { reason } if reason.contains("上位置差=50"))));
+    let csv = crate::summary::build_report_csv(&reopened);
+    assert!(csv.contains("旧契約") && csv.contains("上位置差=50"));
+    assert!(!csv.contains("旧標準形式成功"));
     for artifact in [
         ResultsBundle {
             joint_checks: old.joint_checks.clone(),
@@ -12495,10 +12527,31 @@ fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_reta
             .len(),
         gated.joint_checks.len()
     );
+    let mut old_gated = gated.clone();
+    old_gated.analysis_contract_version = Some(0);
+    save(&path, &current.core.model, old_gated);
+    reopened.open_project_from(path.clone());
+    assert!(reopened.core.scoped.staleness.results_stale);
+    assert!(reopened
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .statics
+        .is_empty());
+    assert!(reopened
+        .core
+        .scoped
+        .result_contract_notice
+        .as_ref()
+        .unwrap()
+        .contains("旧契約"));
+    assert!(crate::summary::build_report_csv(&reopened).contains("段違い"));
     std::fs::remove_file(path).unwrap();
 }
 
-mod lateral_bracing_fixture {
+pub(super) mod lateral_bracing_fixture {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../sepika-design-jp/tests/fixtures/lateral_bracing.rs"
@@ -12550,6 +12603,28 @@ fn lateral_bracing_gui_entry_uses_column_span_for_panel_on_off_and_keeps_existin
             let last = if split { 4 } else { 0 };
             app.core.model.elements[last].end_cond[1] = EndCondition::Pinned;
             app.run_design_check();
+            assert!(app
+                .core
+                .scoped
+                .last_error
+                .as_ref()
+                .unwrap()
+                .contains("一致しません"));
+            assert!(app
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .member_checks
+                .is_empty());
+            app.core.model.elements[last].end_cond[1] = EndCondition::SemiRigid { k_theta: 1.0e10 };
+            app.run_linear_static(LoadCaseId(0));
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
             let rows = &app.core.scoped.results.as_ref().unwrap().member_checks;
             let beam = rows.iter().find(|r| r.elem == ElemId(0)).unwrap();
             for row in &beam.positions {
@@ -12572,6 +12647,27 @@ fn lateral_bracing_gui_invalid_group_reference_keeps_bending_and_shear() {
     assert!(app.core.scoped.last_error.is_none());
     app.core.model.girder_groups[0].swap(1, 2);
     app.run_design_check();
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("一致しません"));
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .is_empty());
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
     let rows = &app.core.scoped.results.as_ref().unwrap().member_checks;
     for beam in rows.iter().filter(|r| [0, 3, 4].contains(&r.elem.0)) {
         for row in &beam.positions {

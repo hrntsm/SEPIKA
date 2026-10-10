@@ -69,7 +69,7 @@ impl App {
                     ));
                 }
                 let dir = self.core.analysis_cfg.push_dir;
-                let mut bundle = self.core.scoped.results.take().unwrap_or_default();
+                let mut bundle = self.take_results_for_analysis();
                 bundle.record_input(input_key, input);
                 match dir {
                     SeismicDir::X => bundle.pushover_x = Some(result.clone()),

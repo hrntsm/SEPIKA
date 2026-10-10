@@ -49,6 +49,15 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
     }
 
     ui.strong("部材検定（許容応力度）");
+    if ui
+        .add_enabled(
+            app.core.scoped.job.is_none(),
+            egui::Button::new("検定を再実行"),
+        )
+        .clicked()
+    {
+        app.run_design_check();
+    }
     ui.horizontal(|ui| {
         let mut changed = false;
         changed |= ui
@@ -96,10 +105,14 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             app.run_design_check();
         }
     });
-    if app.core.scoped.staleness.design_stale {
+    if app.core.scoped.staleness.design_stale || app.core.scoped.result_contract_notice.is_some() {
         ui.colored_label(
             crate::theme::WARN_TEXT,
-            "⚠ モデルが編集されました。解析を再実行してください。",
+            app.core
+                .scoped
+                .result_contract_notice
+                .as_deref()
+                .unwrap_or("⚠ 要再計算です。解析または検定を再実行してください。"),
         );
     }
     struct CheckRow {
@@ -159,7 +172,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
     if checks.is_empty() {
         ui.colored_label(
             crate::theme::GRAY_600,
-            "検定結果がありません。解析タブから静的解析を実行してください（部材に断面と材料の割当が必要です）。",
+            "検定結果がありません。現行応力がある場合は「検定を再実行」、応力が利用不可の場合は解析タブから静的解析を実行してください（部材に断面と材料の割当が必要です）。",
         );
     } else {
         let ng_count = checks.iter().filter(|row| row.ok == Some(false)).count();

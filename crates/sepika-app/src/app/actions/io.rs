@@ -290,14 +290,63 @@ impl App {
                         .cloned();
                     self.core.scoped.results = Some(bundle);
                     self.core.scoped.last_static = saved.last_static;
+                    self.core.scoped.staleness.last_run = saved.last_run;
+                    self.core.scoped.staleness.results_stale = false;
+                    self.core.scoped.staleness.design_stale = false;
+                    self.reject_result_contracts();
+                    self.reject_unsupported_panel_results(true);
+                    if let Some(key) = self.core.scoped.last_static {
+                        if let Err(reason) = self.require_selected_static_input() {
+                            let diagnostics = self
+                                .core
+                                .scoped
+                                .results
+                                .as_ref()
+                                .unwrap()
+                                .joint_checks
+                                .iter()
+                                .filter(|check| {
+                                    check.label.starts_with("パネルゾーン(S)")
+                                        && matches!(
+                                            check.outcome,
+                                            sepika_design_jp::CheckOutcome::Skipped { .. }
+                                        )
+                                })
+                                .cloned()
+                                .collect();
+                            match key {
+                                StaticKey::Case(key) => self.invalidate_static_key(key),
+                                StaticKey::Combo(index) => {
+                                    let name = self
+                                        .core
+                                        .scoped
+                                        .results
+                                        .as_ref()
+                                        .and_then(|bundle| bundle.combos.get(index))
+                                        .map(|(name, _)| name.clone());
+                                    if let Some(name) = name {
+                                        self.remove_excluded_tip_results(&(Vec::new(), vec![name]));
+                                    }
+                                }
+                            }
+                            if let Some(bundle) = self.core.scoped.results.as_mut() {
+                                bundle.member_forces.clear();
+                                bundle.panel_moments.clear();
+                                bundle.clear_design_results();
+                                bundle.joint_checks = diagnostics;
+                            }
+                            self.core.scoped.last_static = None;
+                            self.ui.scoped.nav.focus_result = None;
+                            self.core.scoped.staleness.results_stale = true;
+                            self.core.scoped.staleness.design_stale = true;
+                            self.core.scoped.result_contract_notice = Some(reason.clone());
+                            self.report_notice(reason);
+                        }
+                    }
                     self.hydrate_saved_vibration_views(
                         saved.view_vibration_case,
                         saved.view_lumped_vibration_case,
                     );
-                    self.core.scoped.staleness.last_run = saved.last_run;
-                    self.core.scoped.staleness.results_stale = false;
-                    self.core.scoped.staleness.design_stale = false;
-                    self.reject_unsupported_panel_results(true);
                 }
                 self.prune_orphan_vibration_cases();
                 self.core.scoped.project_path = Some(path);

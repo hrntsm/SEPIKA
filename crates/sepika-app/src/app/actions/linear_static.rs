@@ -39,7 +39,7 @@ impl App {
             Ok(res) => {
                 let member_forces = res.member_forces.clone();
                 let panel_moments = res.panel_moments.clone();
-                let mut bundle = self.core.scoped.results.take().unwrap_or_default();
+                let mut bundle = self.take_results_for_analysis();
                 bundle.record_input(input_key, input);
                 bundle.statics.retain(|(id, _)| *id != key);
                 bundle.statics.push((key, res));
@@ -201,7 +201,7 @@ impl App {
             Ok(res) => {
                 let member_forces = res.member_forces.clone();
                 let panel_moments = res.panel_moments.clone();
-                let mut bundle = self.core.scoped.results.take().unwrap_or_default();
+                let mut bundle = self.take_results_for_analysis();
                 bundle.record_input(input_key, input);
                 let pos = match bundle.combos.iter().position(|(n, _)| *n == name) {
                     Some(pos) => {
@@ -402,7 +402,7 @@ impl App {
         self.remove_excluded_tip_results(&(keys, combos));
     }
 
-    fn invalidate_static_key(&mut self, key: StaticCaseKey) {
+    pub(super) fn invalidate_static_key(&mut self, key: StaticCaseKey) {
         let id = match key {
             StaticCaseKey::User(id) => Some(id),
             StaticCaseKey::Seismic(dir) => self.seismic_case_id(dir),
@@ -499,6 +499,7 @@ impl App {
         mut errors: Vec<String>,
         excluded: (Vec<StaticCaseKey>, Vec<String>),
     ) {
+        self.reject_result_contracts();
         self.remove_excluded_tip_results(&excluded);
         let items = match computed {
             Ok(items) => items,
@@ -542,7 +543,11 @@ impl App {
             })
             .collect();
         let had_results = self.core.scoped.results.is_some();
-        let mut bundle = self.core.scoped.results.take().unwrap_or_default();
+        let mut bundle = if case_inputs.is_empty() && combo_inputs.is_empty() {
+            self.core.scoped.results.take().unwrap_or_default()
+        } else {
+            self.take_results_for_analysis()
+        };
         for (key, input) in case_inputs.into_iter().chain(combo_inputs) {
             bundle.record_input(key, input);
         }
@@ -618,7 +623,10 @@ impl App {
         }
     }
 
-    fn remove_excluded_tip_results(&mut self, excluded: &(Vec<StaticCaseKey>, Vec<String>)) {
+    pub(super) fn remove_excluded_tip_results(
+        &mut self,
+        excluded: &(Vec<StaticCaseKey>, Vec<String>),
+    ) {
         if excluded.0.is_empty() && excluded.1.is_empty() {
             return;
         }
@@ -736,7 +744,11 @@ impl App {
             bundle.member_forces = member_forces;
             bundle.panel_moments = panel_moments;
         }
-        self.run_design_check();
+        if self.core.scoped.results.as_ref().is_some_and(|r| {
+            r.design_contract_version == Some(sepika_core::result_contract::DESIGN_CONTRACT_VERSION)
+        }) {
+            self.run_design_check();
+        }
     }
 
     /// 同期済みの EX/EY ケースを線形静的解析し、結果を格納する。

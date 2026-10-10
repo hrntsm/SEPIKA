@@ -1,4 +1,5 @@
 use super::*;
+use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
 use sepika_design_jp::CheckOutcome;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -36,30 +37,170 @@ pub struct HoldingCapacitySource {
 }
 
 impl ResultsBundle {
+    pub(super) fn has_analysis_results(&self) -> bool {
+        !self.statics.is_empty()
+            || !self.combos.is_empty()
+            || self.modal.is_some()
+            || !self.member_forces.is_empty()
+            || !self.panel_moments.is_empty()
+            || self.pushover.is_some()
+            || self.pushover_x.is_some()
+            || self.pushover_y.is_some()
+            || !self.holding_evaluations.is_empty()
+            || self.time_history.is_some()
+            || !self.time_histories.is_empty()
+            || self.lumped.is_some()
+            || !self.lumped_results.is_empty()
+    }
+
+    pub(super) fn has_design_results(&self) -> bool {
+        !self.member_checks.is_empty()
+            || !self.joint_checks.is_empty()
+            || !self.wall_checks.is_empty()
+            || !self.beam_checks.is_empty()
+            || !self.slab_checks.is_empty()
+    }
+
+    pub(super) fn clear_design_results(&mut self) {
+        self.member_checks.clear();
+        self.joint_checks.clear();
+        self.wall_checks.clear();
+        self.beam_checks.clear();
+        self.slab_checks.clear();
+        self.design_contract_version = None;
+    }
+
     pub(super) fn record_input(&mut self, key: ResultInputKey, input: Vec<u8>) {
         self.input_records.retain(|(k, _)| *k != key);
         self.input_records.push((key, input));
     }
 }
 
+fn contract_reason(category: &str, saved: Option<u32>, current: u32) -> Option<String> {
+    if saved == Some(current) {
+        return None;
+    }
+    let reason = match saved {
+        None => "版不明",
+        Some(version) if version < current => "旧契約",
+        Some(_) => "現アプリ未対応の未来版",
+    };
+    let saved = saved.map_or_else(|| "欠落".into(), |version| version.to_string());
+    Some(format!("{category}結果は利用不可です（{reason}: 保存版={saved}, 現行版={current}）。{category}を再実行してください。"))
+}
+
 impl App {
+    pub(super) fn reject_result_contracts(&mut self) -> bool {
+        let Some(bundle) = self.core.scoped.results.as_ref() else {
+            return false;
+        };
+        let analysis = bundle
+            .has_analysis_results()
+            .then(|| {
+                contract_reason(
+                    "解析",
+                    bundle.analysis_contract_version,
+                    ANALYSIS_CONTRACT_VERSION,
+                )
+            })
+            .flatten();
+        let design = bundle
+            .has_design_results()
+            .then(|| {
+                contract_reason(
+                    "検定",
+                    bundle.design_contract_version,
+                    DESIGN_CONTRACT_VERSION,
+                )
+            })
+            .flatten();
+        if analysis.is_none() && design.is_none() {
+            return false;
+        }
+        let panel_rejected = self.reject_unsupported_panel_results(true);
+        if analysis.is_some() {
+            let rejected = if panel_rejected {
+                self.core
+                    .scoped
+                    .results
+                    .take()
+                    .unwrap_or_default()
+                    .joint_checks
+            } else {
+                self.core
+                    .scoped
+                    .results
+                    .as_ref()
+                    .unwrap()
+                    .joint_checks
+                    .iter()
+                    .filter(|c| {
+                        c.label.starts_with("パネルゾーン(S)")
+                            && matches!(c.outcome, CheckOutcome::Skipped { .. })
+                    })
+                    .cloned()
+                    .collect()
+            };
+            self.core.scoped.results = Some(ResultsBundle {
+                joint_checks: rejected,
+                ..Default::default()
+            });
+            self.core.scoped.view_vibration_case = None;
+            self.core.scoped.view_lumped_vibration_case = None;
+            self.core.scoped.stick_response = None;
+            self.hydrate_saved_vibration_views(None, None);
+            self.core.scoped.last_static = None;
+            self.ui.scoped.nav.focus_result = None;
+            self.core.scoped.staleness.results_stale = true;
+            self.core.scoped.staleness.last_run = None;
+            self.core.scoped.holding_capacity_source = None;
+            self.core.scoped.ds_beta_u_by_story.clear();
+            self.core.scoped.ds_beta_u_unavailable = false;
+            self.core.scoped.ds_rank_fallback_stories.clear();
+        } else if let Some(bundle) = self.core.scoped.results.as_mut() {
+            let rejected = bundle
+                .joint_checks
+                .iter()
+                .filter(|c| {
+                    c.label.starts_with("パネルゾーン(S)")
+                        && matches!(c.outcome, CheckOutcome::Skipped { .. })
+                })
+                .cloned()
+                .collect();
+            bundle.clear_design_results();
+            bundle.joint_checks = rejected;
+        }
+        self.core.scoped.staleness.design_stale = true;
+        let reason = analysis
+            .into_iter()
+            .chain(design)
+            .collect::<Vec<_>>()
+            .join(" / ");
+        self.core.scoped.result_contract_notice = Some(reason.clone());
+        self.report_notice(reason);
+        true
+    }
+
+    pub(super) fn clear_result_contract_notice(&mut self) {
+        if self.core.scoped.last_notice == self.core.scoped.result_contract_notice {
+            self.core.scoped.last_notice = None;
+        }
+        self.core.scoped.result_contract_notice = None;
+    }
+
+    pub(super) fn take_results_for_analysis(&mut self) -> ResultsBundle {
+        self.reject_result_contracts();
+        let mut bundle = self.core.scoped.results.take().unwrap_or_default();
+        bundle.analysis_contract_version = Some(ANALYSIS_CONTRACT_VERSION);
+        self.clear_result_contract_notice();
+        bundle
+    }
+
     pub(super) fn reject_unsupported_panel_results(&mut self, allow_recorded_skips: bool) -> bool {
         let Some(saved) = self.core.scoped.results.as_ref() else {
             return false;
         };
-        let has_analysis_results = !saved.statics.is_empty()
-            || !saved.combos.is_empty()
-            || saved.modal.is_some()
-            || !saved.member_forces.is_empty()
-            || !saved.panel_moments.is_empty()
-            || saved.pushover.is_some()
-            || saved.pushover_x.is_some()
-            || saved.pushover_y.is_some()
-            || !saved.holding_evaluations.is_empty()
-            || saved.time_history.is_some()
-            || !saved.time_histories.is_empty()
-            || saved.lumped.is_some()
-            || !saved.lumped_results.is_empty();
+        let has_analysis_results = saved.has_analysis_results();
         let has_panel_success = saved.joint_checks.iter().any(|check| {
             check.label.starts_with("パネルゾーン(S)")
                 && matches!(check.outcome, CheckOutcome::Checked(_))
@@ -172,7 +313,9 @@ impl App {
     }
 
     pub(crate) fn holding_evaluation_is_current(&self, input: &HoldingEvaluationInput) -> bool {
-        input.point.input_generation
+        self.core.scoped.results.as_ref().is_some_and(|bundle| {
+            bundle.analysis_contract_version == Some(ANALYSIS_CONTRACT_VERSION)
+        }) && input.point.input_generation
             == self.result_input_with_settings(
                 &ResultInputKey::Pushover(input.point.direction),
                 input.conditions,
@@ -288,7 +431,38 @@ impl App {
             .expect("ジョブ入力の直列化")
     }
 
+    pub(super) fn require_selected_static_input(&self) -> Result<(), String> {
+        let key = match self.core.scoped.last_static {
+            Some(StaticKey::Case(key)) => Some(ResultInputKey::Static(key)),
+            Some(StaticKey::Combo(index)) => self
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .and_then(|r| r.combos.get(index))
+                .map(|(name, _)| ResultInputKey::Combo(name.clone())),
+            None => None,
+        }
+        .ok_or_else(|| "参照解析結果の選択がありません。解析を再実行してください。".to_string())?;
+        self.require_result_input(key)
+    }
+
     pub(super) fn require_result_input(&self, key: ResultInputKey) -> Result<(), String> {
+        if let Some(bundle) = self
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .filter(|b| b.has_analysis_results())
+        {
+            if let Some(reason) = contract_reason(
+                "解析",
+                bundle.analysis_contract_version,
+                ANALYSIS_CONTRACT_VERSION,
+            ) {
+                return Err(reason);
+            }
+        }
         let label = match &key {
             ResultInputKey::Static(StaticCaseKey::Seismic(dir)) => format!("地震静的 {dir:?}"),
             ResultInputKey::Static(StaticCaseKey::User(id)) => format!("静的荷重ケース {id:?}"),
@@ -305,8 +479,8 @@ impl App {
             .map(|(_, input)| input);
         match input {
             Some(input) if *input == self.result_input(&key) => Ok(()),
-            Some(_) => Err(format!("保有水平耐力の判定は無効です。{label}の生成入力が現在のモデル・計算設定と一致しません。{label}を再実行してください。")),
-            None => Err(format!("保有水平耐力の判定は無効です。{label}の入力識別情報がありません。{label}を再実行してください。")),
+            Some(_) => Err(format!("解析結果の利用は無効です。{label}の生成入力が現在のモデル・計算設定と一致しません。{label}を再実行してください。")),
+            None => Err(format!("解析結果の利用は無効です。{label}の入力識別情報がありません。{label}を再実行してください。")),
         }
     }
 }

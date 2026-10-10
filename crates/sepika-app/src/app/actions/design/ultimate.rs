@@ -16,7 +16,7 @@ impl App {
 
         self.apply_rigid_zones_for_analysis();
 
-        let demand = self.ultimate_demand_by_elem();
+        let demand = self.ultimate_demand_by_elem()?;
 
         let opts = sepika_design_jp::ultimate::UltimateShearOptions {
             rp: self.core.ultimate_rp.max(0.0),
@@ -76,10 +76,16 @@ impl App {
     /// 静的解析結果を優先し、なければ最後に実行した静的解析結果を用いる（軸力は始端値、
     /// 曲げは部材内の最大絶対値、Qmu は両端ヒンジ 2·Mu/内法、Rp は UI 一律指定）。
     /// いずれの応答もなければ空（＝需要 0）。
-    fn ultimate_demand_by_elem(&self) -> Vec<(ElemId, sepika_design_jp::ultimate::MemberDemand)> {
+    fn ultimate_demand_by_elem(
+        &self,
+    ) -> Result<Vec<(ElemId, sepika_design_jp::ultimate::MemberDemand)>, String> {
         if self.core.ultimate_use_pushover {
             if let Some(demand) = self.ultimate_demand_from_pushover() {
-                return demand;
+                self.require_result_input(ResultInputKey::Pushover(
+                    self.core.scoped.pushover_view_dir,
+                ))?;
+                self.require_ultimate_gravity_inputs()?;
+                return Ok(demand);
             }
         }
         let gravity_long = self.core.scoped.results.as_ref().and_then(|r| {
@@ -90,7 +96,26 @@ impl App {
                     .map(|(_, s)| s.member_forces.clone())
             })
         });
-        self.core
+        if gravity_long.is_some() {
+            self.require_ultimate_gravity_inputs()?;
+        } else if let Some(bundle) = &self.core.scoped.results {
+            let gravity = gravity_cases_for_seismic_weight(&self.core.model)
+                .first()
+                .copied()
+                .filter(|lc| {
+                    bundle
+                        .statics
+                        .iter()
+                        .any(|(key, _)| *key == StaticCaseKey::User(*lc))
+                });
+            if let Some(lc) = gravity {
+                self.require_result_input(ResultInputKey::Static(StaticCaseKey::User(lc)))?;
+            } else if !bundle.member_forces.is_empty() {
+                self.require_selected_static_input()?;
+            }
+        }
+        Ok(self
+            .core
             .scoped
             .results
             .as_ref()
@@ -109,7 +134,22 @@ impl App {
                 let ql_map = sepika_job::q_long_map_from_member_forces(member_forces);
                 sepika_job::member_demand_from_static_forces(member_forces, Some(&ql_map))
             })
-            .unwrap_or_default()
+            .unwrap_or_default())
+    }
+
+    fn require_ultimate_gravity_inputs(&self) -> Result<(), String> {
+        if let Some(bundle) = &self.core.scoped.results {
+            for lc in gravity_cases_for_seismic_weight(&self.core.model) {
+                if bundle
+                    .statics
+                    .iter()
+                    .any(|(key, _)| *key == StaticCaseKey::User(lc))
+                {
+                    self.require_result_input(ResultInputKey::Static(StaticCaseKey::User(lc)))?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// 増分解析応答（部材別応答）から終局検定用の部材需要を組み立てる。
@@ -153,7 +193,7 @@ impl App {
     ) -> Result<Vec<sepika_design_jp::ultimate::CftUltimateCheck>, String> {
         self.apply_rigid_zones_for_analysis();
         let axial: Vec<(ElemId, f64)> = self
-            .ultimate_demand_by_elem()
+            .ultimate_demand_by_elem()?
             .into_iter()
             .map(|(id, d)| (id, d.n_axial))
             .collect();
@@ -167,5 +207,111 @@ impl App {
             );
         }
         Ok(checks)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn analyzed() -> App {
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        app.core.analysis_cfg.threads = 1;
+        app.run_linear_static(LoadCaseId(0));
+        assert!(app.core.scoped.last_error.is_none());
+        app
+    }
+
+    #[test]
+    fn ultimate_gravity_sources_reject_changed_missing_and_old_contract_inputs() {
+        for missing in [false, true] {
+            let mut app = analyzed();
+            assert!(!app.ultimate_demand_by_elem().unwrap().is_empty());
+            if missing {
+                app.core
+                    .scoped
+                    .results
+                    .as_mut()
+                    .unwrap()
+                    .input_records
+                    .clear();
+            } else {
+                app.core.model.sections[0].area *= 1.1;
+            }
+            let expected = if missing {
+                "入力識別情報"
+            } else {
+                "一致しません"
+            };
+            assert!(app
+                .compute_ultimate_checks()
+                .unwrap_err()
+                .contains(expected));
+            assert!(app
+                .compute_cft_ultimate_checks()
+                .unwrap_err()
+                .contains(expected));
+            app.run_linear_static(LoadCaseId(0));
+            assert!(!app.ultimate_demand_by_elem().unwrap().is_empty());
+            app.core
+                .scoped
+                .results
+                .as_mut()
+                .unwrap()
+                .analysis_contract_version = Some(0);
+            assert!(app
+                .compute_ultimate_checks()
+                .unwrap_err()
+                .contains("旧契約"));
+        }
+    }
+
+    #[test]
+    fn ultimate_fallback_checks_selected_combo_name_without_requiring_unused_static_keys() {
+        let mut app = analyzed();
+        app.core
+            .model
+            .combinations
+            .push(sepika_core::model::LoadCombination {
+                name: "終局用選択".into(),
+                terms: vec![(LoadCaseId(0), 1.0)],
+            });
+        app.run_combination(0);
+        app.core.scoped.results.as_mut().unwrap().statics.clear();
+        assert!(!app.ultimate_demand_by_elem().unwrap().is_empty());
+        app.core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .input_records
+            .retain(|(key, _)| !matches!(key, ResultInputKey::Combo(_)));
+        let reason = app.ultimate_demand_by_elem().unwrap_err();
+        assert!(reason.contains("終局用選択") && reason.contains("入力識別情報"));
+    }
+
+    #[test]
+    fn ultimate_pushover_requires_its_actual_direction_input_and_recovers_explicitly() {
+        let mut app = analyzed();
+        app.generate_stories_action();
+        app.run_seismic(SeismicDir::X);
+        app.run_linear_static(LoadCaseId(0));
+        app.core.analysis_cfg.push_steps = 3;
+        app.run_pushover();
+        app.core.ultimate_use_pushover = true;
+        assert!(app.ultimate_demand_from_pushover().is_some());
+        assert!(!app.ultimate_demand_by_elem().unwrap().is_empty());
+        app.core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .input_records
+            .retain(|(key, _)| !matches!(key, ResultInputKey::Pushover(SeismicDir::X)));
+        let reason = app.compute_ultimate_checks().unwrap_err();
+        assert!(reason.contains("増分解析 X") && reason.contains("入力識別情報"));
+        app.run_pushover();
+        assert!(!app.ultimate_demand_by_elem().unwrap().is_empty());
     }
 }

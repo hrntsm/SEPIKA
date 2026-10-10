@@ -532,6 +532,12 @@ pub struct ResultsBundle {
     )>,
     #[serde(default)]
     pub(crate) input_records: Vec<(ResultInputKey, Vec<u8>)>,
+    /// 生成時の解析契約版。欠落は版不明であり、現行版へ補完しない。
+    #[serde(default)]
+    pub analysis_contract_version: Option<u32>,
+    /// 生成時の検定契約版。解析とは独立して完全一致を要求する。
+    #[serde(default)]
+    pub design_contract_version: Option<u32>,
 }
 
 impl ResultsBundle {
@@ -912,6 +918,8 @@ pub struct ModelScoped {
     /// 更新されなかった旨）。ステータスバーは白文字、ログ側で情報色を付ける。
     /// `last_error` とは別枠。
     pub last_notice: Option<String>,
+    /// 保存成果を除外した計算契約の理由。明示再計算まで表示する。
+    pub result_contract_notice: Option<String>,
     /// 実行中のバックグラウンド解析ジョブ（増分解析・時刻歴・静的解析の単体実行と
     /// 一括解析）。
     /// 完了は `poll_job` で検知して結果を適用する。
@@ -1009,6 +1017,7 @@ impl Default for ModelScoped {
             last_static: None,
             last_error: None,
             last_notice: None,
+            result_contract_notice: None,
             job: None,
             pending_save_recording: None,
             #[cfg(feature = "gui")]
@@ -2493,3 +2502,6 @@ mod focus_id_remap_tests;
 
 #[cfg(test)]
 mod assignment_identity_tests;
+
+#[cfg(test)]
+mod result_contract_tests;
