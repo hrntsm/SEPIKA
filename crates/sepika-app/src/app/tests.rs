@@ -11703,3 +11703,204 @@ pub(super) fn select_holding_points(app: &mut App) {
         }
     }
 }
+
+#[test]
+fn public_story_insertion_keeps_automatic_weight_origin_and_manual_edits_through_undo() {
+    use sepika_core::ids::{ElemId, NodeId, StoryId};
+    use sepika_core::model::Constraint;
+    use sepika_edit::UndoStack;
+    for manual_weight in [None, Some(100100.0)] {
+        let mut model = seismic_freshness_fixture::two_storeys();
+        let settings = sepika_job::AnalysisSettings::default();
+        sepika_job::prepare::prepare_model(&mut model, &settings, None, true).unwrap();
+        let upper = model.generated_masters[2];
+        if let Some(value) = manual_weight {
+            for constraint in &mut model.constraints {
+                if let Constraint::RigidDiaphragm { master, weight, .. } = constraint {
+                    if *master == upper {
+                        *weight = Some(value);
+                    }
+                }
+            }
+        }
+        let first = model.nodes.len() as u32;
+        for (offset, template) in [4usize, 5].into_iter().enumerate() {
+            let mut node = model.nodes[template].clone();
+            node.id = NodeId(first + offset as u32);
+            node.coord[2] = 18750.0;
+            node.story = None;
+            model.nodes.push(node);
+        }
+        let mut beam = model.elements[5].clone();
+        beam.id = ElemId(model.elements.len() as u32);
+        beam.nodes = [NodeId(first), NodeId(first + 1)].into_iter().collect();
+        model.elements.push(beam);
+        let record_before = model.seismic_weight_generation.clone();
+        let mut undo = UndoStack::default();
+        assert!(undo.run(
+            &mut model,
+            Box::new(sepika_edit::AddStory {
+                name: "途中階".into(),
+                elevation: 18750.0,
+            })
+        ));
+        let is_auto = |model: &sepika_core::model::Model| {
+            model.constraints.iter().any(|constraint| {
+                matches!(constraint, Constraint::RigidDiaphragm { story, master, .. } if *story == StoryId(3) && *master == upper)
+                    && model.is_automatic_seismic_diaphragm(constraint)
+            })
+        };
+        assert_eq!(is_auto(&model), manual_weight.is_none());
+        let shifted = model.seismic_weight_generation.clone();
+        assert_eq!(
+            shifted.as_ref().unwrap().calculated_weights[2].0,
+            StoryId(3)
+        );
+        undo.undo(&mut model);
+        assert_eq!(model.seismic_weight_generation, record_before);
+        undo.redo(&mut model);
+        assert_eq!(model.seismic_weight_generation, shifted);
+        model.materials[0].density = 2.6e-9;
+        let result =
+            sepika_job::prepare::prepare_model(&mut model, &settings, None, false).unwrap();
+        assert!(
+            sepika_job::weight_preparation::weights_are_current(&model, settings.mass_method),
+            "{:?}",
+            result.notices
+        );
+        for name in [
+            sepika_core::model::EX_CASE_NAME,
+            sepika_core::model::EY_CASE_NAME,
+        ] {
+            assert!(
+                model
+                    .load_cases
+                    .iter()
+                    .any(|case| case.name == name && !case.nodal.is_empty()),
+                "{:?}",
+                result.notices
+            );
+        }
+        let expected_upper_n = 103548.04597;
+        assert!((model.stories[3].seismic_weight.unwrap() - expected_upper_n).abs() < 1e-8);
+        let diaphragm = model.diaphragms_of(StoryId(3)).next().unwrap();
+        assert_eq!(diaphragm.master, upper);
+        assert!(
+            (diaphragm.weight.unwrap() - manual_weight.unwrap_or(expected_upper_n)).abs() < 1e-8
+        );
+        assert_eq!(is_auto(&model), manual_weight.is_none());
+        let record = model.seismic_weight_generation.clone();
+        sepika_job::prepare::prepare_model(&mut model, &settings, None, false).unwrap();
+        assert_eq!(model.seismic_weight_generation, record);
+        let inserted_master = model.diaphragms_of(StoryId(2)).next().unwrap().master;
+        let mut deletion_undo = UndoStack::default();
+        assert!(deletion_undo.run(
+            &mut model,
+            Box::new(sepika_edit::DeleteStory { story: StoryId(2) })
+        ));
+        let deleted_record = model.seismic_weight_generation.clone();
+        assert_eq!(deleted_record.as_ref().unwrap().calculated_weights.len(), 3);
+        assert!(deleted_record.as_ref().unwrap().automatic_diaphragms.iter().all(|constraint| {
+            !matches!(constraint, Constraint::RigidDiaphragm { master, .. } if *master == inserted_master)
+        }));
+        assert!(!deleted_record
+            .as_ref()
+            .unwrap()
+            .automatic_master_restraints
+            .iter()
+            .any(|(master, _)| *master == inserted_master));
+        let upper_constraint = model.constraints.iter().find(|constraint| matches!(constraint, Constraint::RigidDiaphragm { master, .. } if *master == upper)).unwrap();
+        assert_eq!(
+            model.is_automatic_seismic_diaphragm(upper_constraint),
+            manual_weight.is_none()
+        );
+        deletion_undo.undo(&mut model);
+        assert_eq!(model.seismic_weight_generation, record);
+        deletion_undo.redo(&mut model);
+        assert_eq!(model.seismic_weight_generation, deleted_record);
+    }
+}
+
+#[test]
+fn public_node_deletion_and_undo_remap_automatic_master_and_slave_snapshots() {
+    use sepika_core::dof::Dof6Mask;
+    use sepika_core::ids::NodeId;
+    use sepika_core::model::{Constraint, Node};
+    let mut model = seismic_freshness_fixture::two_storeys();
+    let settings = sepika_job::AnalysisSettings::default();
+    sepika_job::prepare::prepare_model(&mut model, &settings, None, true).unwrap();
+    model.visit_node_ids(|node| node.0 += 1);
+    model.nodes.insert(
+        0,
+        Node {
+            id: NodeId(0),
+            coord: [-1000.0, 0.0, -1000.0],
+            restraint: Dof6Mask::FIXED,
+            mass: None,
+            story: None,
+            support_spring: None,
+        },
+    );
+    let record = model.seismic_weight_generation.as_mut().unwrap();
+    record
+        .automatic_diaphragms
+        .push(Constraint::rigid_diaphragm(
+            sepika_core::ids::StoryId(1),
+            NodeId(0),
+            vec![NodeId(1)],
+        ));
+    record
+        .automatic_master_restraints
+        .push((NodeId(0), Dof6Mask::FIXED));
+    let before = model.seismic_weight_generation.clone();
+    let mut undo = sepika_edit::UndoStack::default();
+    assert!(undo.run(
+        &mut model,
+        Box::new(sepika_edit::DeleteNode { id: NodeId(0) })
+    ));
+    for constraint in &model.constraints {
+        if let Constraint::RigidDiaphragm { master, .. } = constraint {
+            assert!(model.is_automatic_seismic_diaphragm(constraint));
+            assert!(model.is_automatic_seismic_master_restraint(*master));
+        }
+    }
+    let deleted = model.seismic_weight_generation.clone();
+    assert_eq!(
+        deleted.as_ref().unwrap().automatic_diaphragms.len() + 1,
+        before.as_ref().unwrap().automatic_diaphragms.len()
+    );
+    assert_eq!(
+        deleted.as_ref().unwrap().automatic_master_restraints.len() + 1,
+        before.as_ref().unwrap().automatic_master_restraints.len()
+    );
+    assert_eq!(
+        deleted.as_ref().unwrap().input_key,
+        before.as_ref().unwrap().input_key
+    );
+    assert_eq!(
+        deleted.as_ref().unwrap().output_key,
+        before.as_ref().unwrap().output_key
+    );
+
+    undo.undo(&mut model);
+    assert_eq!(model.seismic_weight_generation, before);
+    undo.redo(&mut model);
+    assert_eq!(model.seismic_weight_generation, deleted);
+    model.materials[0].density = 2.6e-9;
+    sepika_job::prepare::prepare_model(&mut model, &settings, None, false).unwrap();
+    for (story, expected_n) in
+        model
+            .layers()
+            .iter()
+            .zip(seismic_freshness_fixture::expected_weights(
+                2.6e-9, 0.0, 0.0,
+            ))
+    {
+        assert!((story.weight.unwrap() - expected_n).abs() < 1e-8);
+    }
+    for constraint in &model.constraints {
+        if let Constraint::RigidDiaphragm { story, weight, .. } = constraint {
+            assert_eq!(*weight, model.stories[story.index()].seismic_weight);
+        }
+    }
+}

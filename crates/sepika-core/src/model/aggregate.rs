@@ -1239,7 +1239,11 @@ impl Model {
                 f(n);
             }
         }
-        for c in &mut self.constraints {
+        for c in self.constraints.iter_mut().chain(
+            self.seismic_weight_generation
+                .iter_mut()
+                .flat_map(|record| &mut record.automatic_diaphragms),
+        ) {
             match c {
                 Constraint::RigidDiaphragm { master, slaves, .. }
                 | Constraint::RigidLink { master, slaves, .. } => {
@@ -1256,6 +1260,11 @@ impl Model {
                 }
             }
         }
+        if let Some(record) = &mut self.seismic_weight_generation {
+            for (master, _) in &mut record.automatic_master_restraints {
+                f(master);
+            }
+        }
         for lc in &mut self.load_cases {
             for nl in &mut lc.nodal {
                 f(&mut nl.node);
@@ -1269,6 +1278,11 @@ impl Model {
     /// 階の追加・削除では「ID＝配列位置」の不変条件を保つために ID の繰り上げが
     /// 必要になる。参照箇所を呼び出し側へ散らさないよう、走査はここに集約する。
     pub fn visit_story_ids(&mut self, mut f: impl FnMut(&mut StoryId)) {
+        if let Some(record) = &mut self.seismic_weight_generation {
+            for (story, _) in &mut record.calculated_weights {
+                f(story);
+            }
+        }
         for story in &mut self.stories {
             f(&mut story.id);
         }
@@ -1277,7 +1291,11 @@ impl Model {
                 f(sid);
             }
         }
-        for c in &mut self.constraints {
+        for c in self.constraints.iter_mut().chain(
+            self.seismic_weight_generation
+                .iter_mut()
+                .flat_map(|record| &mut record.automatic_diaphragms),
+        ) {
             if let Constraint::RigidDiaphragm { story, .. } = c {
                 f(story);
             }
@@ -2056,6 +2074,22 @@ pub struct SeismicWeightGeneration {
 }
 
 impl SeismicWeightGeneration {
+    /// 削除された節点を含む生成由来を除外し、再採番後の別節点との誤照合を防ぐ。
+    pub fn retain_node_references(&mut self, mut keep: impl FnMut(NodeId) -> bool) {
+        self.automatic_diaphragms
+            .retain(|constraint| match constraint {
+                Constraint::RigidDiaphragm { master, slaves, .. }
+                | Constraint::RigidLink { master, slaves, .. } => {
+                    keep(*master) && slaves.iter().copied().all(&mut keep)
+                }
+                Constraint::Mpc { master, terms } => {
+                    keep(*master) && terms.iter().all(|(node, _, _)| keep(*node))
+                }
+            });
+        self.automatic_master_restraints
+            .retain(|(master, _)| keep(*master));
+    }
+
     /// 自動生成の剛床設定が利用者に変更されていないかを確認する。
     pub fn is_automatic_diaphragm(&self, constraint: &Constraint) -> bool {
         self.automatic_diaphragms
