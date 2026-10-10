@@ -159,6 +159,10 @@ impl UndoStack {
         self.last_error = None;
         self.id_changes.clear();
         let mut candidate = model.clone();
+        if let Err(reason) = candidate.assign_stb_node_ids() {
+            self.last_error = Some(reason);
+            return false;
+        }
         let inv = cmd.apply(&mut candidate);
         if let Some(reason) = inv.rejection() {
             self.last_error = Some(reason.to_owned());

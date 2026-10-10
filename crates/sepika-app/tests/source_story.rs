@@ -332,3 +332,33 @@ fn source_native_save_and_calculation_snapshot_preserve_the_explicit_table() {
     undo.redo(&mut m);
     assert_eq!(undo.revision(), initial_revision + 3);
 }
+
+#[test]
+fn native_first_delete_keeps_existing_export_ids_and_undo_restores_unassigned_table() {
+    let mut m = model();
+    m.source_stories.clear();
+    m.stories.clear();
+    m.stb_node_ids.clear();
+    for node in &mut m.nodes {
+        node.story = None;
+    }
+    let original = m.clone();
+    let mut undo = UndoStack::new();
+    let before = sepika_io::stbridge::export_stbridge(&m).unwrap();
+    assert!(undo.run(&mut m, Box::new(sepika_edit::DeleteNode { id: NodeId(0) })));
+    let exported = sepika_io::stbridge::export_stbridge(&m).unwrap();
+    let restored = sepika_io::stbridge::import_stbridge(&exported).unwrap();
+    assert_eq!(
+        restored
+            .stb_node_ids
+            .iter()
+            .map(|n| n.id)
+            .collect::<Vec<_>>(),
+        vec![2, 3, 4, 5]
+    );
+    undo.undo(&mut m);
+    assert!(m.eq_ignoring_dofmap(&original));
+    assert_eq!(sepika_io::stbridge::export_stbridge(&m).unwrap(), before);
+    undo.redo(&mut m);
+    assert_eq!(sepika_io::stbridge::export_stbridge(&m).unwrap(), exported);
+}
