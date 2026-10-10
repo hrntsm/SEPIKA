@@ -322,6 +322,7 @@ fn seismic_section(ui: &mut egui::Ui, prep: &PreparationResult) {
             });
             ui.end_row();
         });
+    ui.colored_label(crate::theme::GRAY_600, "Zの地方区分・地盤種別の実態条件は利用者による確認が必要です。地域自動判定・Rt/Ai特例・突出部局部検討は未対応です。");
     if sm.clamped_negative_pi {
         ui.colored_label(
             crate::theme::ERROR_RED,
