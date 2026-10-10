@@ -44,6 +44,9 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
     use crate::table_util::Col;
 
     live_load_reduction_section(ui, app);
+    if let Some(results) = &app.core.scoped.results {
+        wall_checks_ui(ui, &results.wall_checks);
+    }
 
     ui.strong("部材検定（許容応力度）");
     ui.horizontal(|ui| {
@@ -988,6 +991,70 @@ fn secondary_label<'a>(
         .filter(|sm| sm.id == id)
         .find_map(|sm| (!sm.name.is_empty()).then(|| sm.name.clone()))
         .unwrap_or_else(|| format!("SM{}", id.0))
+}
+
+pub(crate) fn wall_checks_ui(
+    ui: &mut egui::Ui,
+    checks: &[sepika_design_jp::wall_check::WallCheck],
+) {
+    if checks.is_empty() {
+        return;
+    }
+    let summary = sepika_design_jp::wall_check::WallCheckSummary::from_checks(checks);
+    ui.strong("耐震壁検定");
+    ui.label(format!(
+        "壁 {} 枚 / 検定 {} 件：合格 {}・NG {}・未検定 {} / 対象外 {} 件 / 最大検定比 {}",
+        summary.n_walls,
+        summary.n_checks,
+        summary.n_ok,
+        summary.n_ng,
+        summary.n_skipped,
+        summary.n_outside,
+        summary
+            .max_ratio
+            .map(|r| format!("{r:.4}"))
+            .unwrap_or_else(|| "-".into())
+    ));
+    for kind in [
+        sepika_design_jp::wall_check::WallCheckKind::AllowableShear,
+        sepika_design_jp::wall_check::WallCheckKind::ReferenceSkeleton,
+    ] {
+        let s = sepika_design_jp::wall_check::WallCheckSummary::for_kind(checks, kind);
+        ui.label(format!(
+            "{}：合格 {}・NG {}・未検定 {}・対象外 {}",
+            kind.label(),
+            s.n_ok,
+            s.n_ng,
+            s.n_skipped,
+            s.n_outside
+        ));
+    }
+    for check in checks {
+        let (status, ratio, reason) = match &check.outcome {
+            sepika_design_jp::CheckOutcome::Checked(cr) => (
+                if cr.ok() { "OK" } else { "NG" },
+                format!("{:.4}", cr.ratio()),
+                cr.basis.as_str(),
+            ),
+            sepika_design_jp::CheckOutcome::Skipped { reason } => (
+                if check.seismic_target {
+                    "未検定"
+                } else {
+                    "対象外"
+                },
+                "-".into(),
+                reason.as_str(),
+            ),
+        };
+        ui.label(format!(
+            "{} / {} / 検定比 {} / {} / {}",
+            check.label(),
+            status,
+            ratio,
+            check.skip_kind.map(|kind| kind.label()).unwrap_or(""),
+            reason
+        ));
+    }
 }
 
 #[cfg(test)]
