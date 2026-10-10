@@ -1,0 +1,7 @@
+---
+source: crates/sepika-app/tests/full_model.rs
+expression: "format!(\"frames={}\\npeak_ux={}\\ndrift_angle={}\", th.time.len(),\nsig4(th.peak_disp.iter().map(|d| d[0].abs()).fold(0.0, f64::max)),\nsig4(th.story_drift_angle[0]),)"
+---
+frames=1001
+peak_ux=8.624e-1
+drift_angle=2.464e-4
