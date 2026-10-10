@@ -2150,7 +2150,7 @@ fn stb_strength_material_fy_edit_keeps_raw_grade_and_refuses_numeric_loss() {
     assert_eq!(
         model
             .resolve_stb_rebar(
-                &model
+                model
                     .stb_strengths
                     .sections
                     .iter()
