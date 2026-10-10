@@ -1944,6 +1944,7 @@ fn stb_strength_wall_delete_first_middle_last_restores_raw_targets_and_values() 
         for (index, fc) in [24., 30., 36.].into_iter().enumerate() {
             let id = WallPlateId(index as u32);
             model.wall_plates.push(WallPlate {
+                dl_support: None,
                 id,
                 shape: WallPlateShape::Attached {
                     anchor: RegionAnchor::Line {
