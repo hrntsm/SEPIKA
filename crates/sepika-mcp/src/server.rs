@@ -847,71 +847,106 @@ mod tests {
     }
     #[tokio::test]
     async fn seismic_mcp_rejects_invalid_c0_and_unsupported_refined_period() {
-        for (tag, c0, mode) in [
-            ("invalid_c0", 0.1, "Approx"),
-            ("unsupported_rt", 0.2, "SemiPrecise"),
-            ("inconsistent_gl", 0.2, "Approx"),
-        ] {
-            let dir = test_store_dir(tag);
-            let mut model = pushover_model();
-            if tag == "inconsistent_gl" {
-                model.stories[0].elevation = -9000.0;
-                model.nodes[0].coord[2] = -9000.0;
-                let template = model.stories[1].clone();
-                let node_template = model.nodes[1].clone();
-                let beam_template = model.elements[0].clone();
-                model.stories.truncate(1);
-                model.nodes.truncate(1);
-                model.elements.clear();
-                for (i, elevation) in [-6000.0, -3000.0, 6000.0, 12000.0].into_iter().enumerate() {
-                    let id = (i + 1) as u32;
-                    let mut story = template.clone();
-                    story.id = StoryId(id);
-                    story.name = format!("floor{i}");
-                    story.elevation = elevation;
-                    story.node_ids = vec![NodeId(id)];
-                    story.weight_override = Some(100_000.0);
-                    if i < 2 {
-                        story.level_kind = sepika_core::model::StoryLevelKind::Basement {
-                            depth_mm: if i == 0 { 9000.0 } else { 3000.0 },
-                        };
+        for name in ["EX", "EY"] {
+            for (tag, c0, mode) in [
+                ("invalid_c0", 0.1, "Approx"),
+                ("unsupported_rt", 0.2, "SemiPrecise"),
+                ("missing_period", 0.2, "SemiPrecise"),
+                ("inconsistent_gl", 0.2, "Approx"),
+            ] {
+                let dir = test_store_dir(&format!("{tag}_{name}"));
+                let mut model = pushover_model();
+                if tag == "inconsistent_gl" {
+                    model.stories[0].elevation = -9000.0;
+                    model.nodes[0].coord[2] = -9000.0;
+                    let template = model.stories[1].clone();
+                    let node_template = model.nodes[1].clone();
+                    let beam_template = model.elements[0].clone();
+                    model.stories.truncate(1);
+                    model.nodes.truncate(1);
+                    model.elements.clear();
+                    for (i, elevation) in
+                        [-6000.0, -3000.0, 6000.0, 12000.0].into_iter().enumerate()
+                    {
+                        let id = (i + 1) as u32;
+                        let mut story = template.clone();
+                        story.id = StoryId(id);
+                        story.name = format!("floor{i}");
+                        story.elevation = elevation;
+                        story.node_ids = vec![NodeId(id)];
+                        story.weight_override = Some(100_000.0);
+                        if i < 2 {
+                            story.level_kind = sepika_core::model::StoryLevelKind::Basement {
+                                depth_mm: if i == 0 { 9000.0 } else { 3000.0 },
+                            };
+                        }
+                        model.stories.push(story);
+                        let mut node = node_template.clone();
+                        node.id = NodeId(id);
+                        node.coord[2] = elevation;
+                        node.story = Some(StoryId(id));
+                        model.nodes.push(node);
+                        let mut beam = beam_template.clone();
+                        beam.id = ElemId(i as u32);
+                        beam.nodes = smallvec::smallvec![NodeId(id - 1), NodeId(id)];
+                        model.elements.push(beam);
                     }
-                    model.stories.push(story);
-                    let mut node = node_template.clone();
-                    node.id = NodeId(id);
-                    node.coord[2] = elevation;
-                    node.story = Some(StoryId(id));
-                    model.nodes.push(node);
-                    let mut beam = beam_template.clone();
-                    beam.id = ElemId(i as u32);
-                    beam.nodes = smallvec::smallvec![NodeId(id - 1), NodeId(id)];
-                    model.elements.push(beam);
                 }
-            }
-            model.load_cases.push(sepika_core::model::LoadCase {
-                id: sepika_core::ids::LoadCaseId(0),
-                name: "EX".into(),
-                kind: sepika_core::model::LoadCaseKind::Seismic,
-                nodal: vec![sepika_core::model::NodalLoad::auto(
-                    NodeId(1),
-                    [16_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                )],
-                member: Vec::new(),
-            });
-            let server = SepikaServer::new(make_state(model, &dir));
-            let mut args = run_args(JobKind::LinearStatic);
-            args.load_case = Some(0);
-            args.c0 = Some(c0);
-            args.ai_mode = Some(mode.into());
-            args.design_period = Some(0.5);
-            let result = server.analysis_run(Parameters(args)).await.unwrap();
-            let status = wait_for_terminal(&server, &extract_job_id(&result)).await;
-            assert!(
-                matches!(status, JobStatus::Failed { .. }),
-                "{tag}: {status:?}"
-            );
-            if tag == "inconsistent_gl" {
-                assert!(format!("{status:?}").contains("GL"), "{status:?}");
+                model.load_cases.push(sepika_core::model::LoadCase {
+                    id: sepika_core::ids::LoadCaseId(0),
+                    name: name.into(),
+                    kind: sepika_core::model::LoadCaseKind::Seismic,
+                    nodal: vec![sepika_core::model::NodalLoad::auto(
+                        NodeId(1),
+                        [16_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    )],
+                    member: Vec::new(),
+                });
+                model.load_cases.push(sepika_core::model::LoadCase {
+                    id: sepika_core::ids::LoadCaseId(1),
+                    name: "DL".into(),
+                    kind: sepika_core::model::LoadCaseKind::Dead,
+                    nodal: vec![sepika_core::model::NodalLoad::manual(
+                        NodeId(1),
+                        [0.0, 0.0, -1000.0, 0.0, 0.0, 0.0],
+                    )],
+                    member: Vec::new(),
+                });
+                let server = SepikaServer::new(make_state(model, &dir));
+                let mut args = run_args(JobKind::LinearStatic);
+                args.load_case = Some(0);
+                args.c0 = Some(c0);
+                args.ai_mode = Some(mode.into());
+                args.design_period = (tag != "missing_period").then_some(0.5);
+                let result = server.analysis_run(Parameters(args)).await.unwrap();
+                let status = wait_for_terminal(&server, &extract_job_id(&result)).await;
+                let JobStatus::Failed { error, kind } = status else {
+                    panic!("{tag}/{name}: {status:?}");
+                };
+                assert_eq!(kind, "invalid_input");
+                let expected = match tag {
+                    "invalid_c0" => "C0 は有限値かつ 0.2 以上",
+                    "unsupported_rt" => "告示1793号第2ただし書",
+                    "missing_period" => "固有値解析が未実行です",
+                    _ => "GL が一致しません",
+                };
+                assert!(error.contains(expected), "{tag}/{name}: {error}");
+                if tag != "missing_period" {
+                    assert!(error.contains(&format!("{name} の Ai 地震力")), "{error}");
+                }
+                let other = if name == "EX" { "EY" } else { "EX" };
+                assert!(!error.contains(&format!("{other} の Ai 地震力")), "{error}");
+                let mut dl_args = run_args(JobKind::LinearStatic);
+                dl_args.load_case = Some(1);
+                dl_args.c0 = Some(c0);
+                dl_args.ai_mode = Some(mode.into());
+                dl_args.design_period = (tag != "missing_period").then_some(0.5);
+                let result = server.analysis_run(Parameters(dl_args)).await.unwrap();
+                let status = wait_for_terminal(&server, &extract_job_id(&result)).await;
+                assert!(
+                    matches!(status, JobStatus::Done { .. }),
+                    "{tag}/{name}/DL: {status:?}"
+                );
             }
         }
     }
