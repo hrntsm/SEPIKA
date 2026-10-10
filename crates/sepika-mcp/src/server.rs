@@ -237,7 +237,7 @@ pub struct AnalysisRunArgs {
     pub c0: Option<f64>,
     /// Ai 算定法 `"Approx"`/`"SemiPrecise"`（既定 `"Approx"`）。
     pub ai_mode: Option<String>,
-    /// 精算時の設計用基本周期 T [s]。
+    /// 参考の固有周期 T [s]。数値指定は告示精算の適用証拠にならず、SemiPrecise の標準地震力は未対応。
     pub design_period: Option<f64>,
 }
 
@@ -844,5 +844,37 @@ mod tests {
                 .any(|n| n.as_str().is_some_and(|s| s.contains("EX/EY"))),
             "notices に EX/EY 未更新の旨が含まれること: {notices:?}"
         );
+    }
+    #[tokio::test]
+    async fn seismic_mcp_rejects_invalid_c0_and_unsupported_refined_period() {
+        for (tag, c0, mode) in [
+            ("invalid_c0", 0.1, "Approx"),
+            ("unsupported_rt", 0.2, "SemiPrecise"),
+        ] {
+            let dir = test_store_dir(tag);
+            let mut model = pushover_model();
+            model.load_cases.push(sepika_core::model::LoadCase {
+                id: sepika_core::ids::LoadCaseId(0),
+                name: "EX".into(),
+                kind: sepika_core::model::LoadCaseKind::Seismic,
+                nodal: vec![sepika_core::model::NodalLoad::auto(
+                    NodeId(1),
+                    [16_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                )],
+                member: Vec::new(),
+            });
+            let server = SepikaServer::new(make_state(model, &dir));
+            let mut args = run_args(JobKind::LinearStatic);
+            args.load_case = Some(0);
+            args.c0 = Some(c0);
+            args.ai_mode = Some(mode.into());
+            args.design_period = Some(0.5);
+            let result = server.analysis_run(Parameters(args)).await.unwrap();
+            let status = wait_for_terminal(&server, &extract_job_id(&result)).await;
+            assert!(
+                matches!(status, JobStatus::Failed { .. }),
+                "{tag}: {status:?}"
+            );
+        }
     }
 }

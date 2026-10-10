@@ -3011,3 +3011,174 @@ fn self_standing_wall_off_the_floor_is_an_error() {
     );
     assert!(precheck_model(&model).is_err(), "解析を止めること");
 }
+
+#[test]
+fn seismic_standard_entry_rejects_invalid_inputs_and_unsupported_routes() {
+    let original =
+        make_two_story_diaphragm_model(1, Dof6Mask::FREE, Some(100_000.0), Some(100_000.0));
+    let cfg = SeismicCfg::default();
+    let distribution = seismic_distribution_for_model(&original, cfg, 0.5).unwrap();
+    assert_eq!(distribution.qi, [20_000.0]);
+    for t in [0.0, -0.1, f64::NAN, f64::INFINITY] {
+        assert!(seismic_distribution_for_model(&original, cfg, t).is_err());
+    }
+    for z in [0.0, -0.1, f64::NAN, f64::INFINITY] {
+        assert!(seismic_distribution_for_model(&original, SeismicCfg { z, ..cfg }, 0.5).is_err());
+    }
+    for c0 in [0.0, 0.19, f64::NAN, f64::INFINITY] {
+        assert!(seismic_distribution_for_model(&original, SeismicCfg { c0, ..cfg }, 0.5).is_err());
+    }
+    assert_eq!(
+        seismic_distribution_for_model(&original, SeismicCfg { c0: 1.0, ..cfg }, 0.5)
+            .unwrap()
+            .qi,
+        [100_000.0]
+    );
+    let err = seismic_distribution_for_model(
+        &original,
+        SeismicCfg {
+            mode: AiMode::SemiPrecise,
+            ..cfg
+        },
+        0.5,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("未対応"));
+    for weight in [
+        None,
+        Some(-1.0),
+        Some(f64::NAN),
+        Some(f64::INFINITY),
+        Some(0.0),
+    ] {
+        let mut model = original.clone();
+        model.stories[1].seismic_weight = weight;
+        assert!(seismic_distribution_for_model(&model, cfg, 0.5).is_err());
+    }
+    for depth_mm in [-1.0, f64::NAN, f64::INFINITY] {
+        let mut model = original.clone();
+        model.stories[1].level_kind = StoryLevelKind::Basement { depth_mm };
+        assert!(seismic_distribution_for_model(&model, cfg, 0.5).is_err());
+    }
+    let mut model = original.clone();
+    model.stories[1].level_kind = StoryLevelKind::Penthouse { k: 1.0 };
+    assert!(seismic_distribution_for_model(&model, cfg, 0.5)
+        .unwrap_err()
+        .to_string()
+        .contains("未検証"));
+    for elevation in [0.0, -1.0, f64::NAN] {
+        let mut model = original.clone();
+        model.stories[1].elevation = elevation;
+        assert!(seismic_distribution_for_model(&model, cfg, 0.5).is_err());
+    }
+}
+
+#[test]
+fn seismic_load_case_preserves_independent_resultant_and_rejects_missing_destination() {
+    let mut model =
+        make_two_story_diaphragm_model(1, Dof6Mask::FREE, Some(100_000.0), Some(100_000.0));
+    let cfg = SeismicCfg::default();
+    let load = build_seismic_load_case_from_model(&model, cfg, 0.5).unwrap();
+    assert_eq!(
+        load.nodal.iter().map(|l| l.values[0]).sum::<f64>(),
+        20_000.0
+    );
+    model.constraints.clear();
+    model.stories[1].node_ids.clear();
+    assert!(build_seismic_load_case_from_model(&model, cfg, 0.5)
+        .unwrap_err()
+        .to_string()
+        .contains("合力"));
+}
+
+fn seismic_two_layer_contract_model() -> Model {
+    let mut model =
+        make_two_story_diaphragm_model(1, Dof6Mask::FREE, Some(100_000.0), Some(100_000.0));
+    let mut top = model.stories[1].clone();
+    top.id = StoryId(2);
+    top.name = "3F".into();
+    top.elevation = 6000.0;
+    top.node_ids = vec![NodeId(2)];
+    model.stories.push(top);
+    let mut node = model.nodes[1].clone();
+    node.id = NodeId(2);
+    node.coord[2] = 6000.0;
+    node.story = Some(StoryId(2));
+    model.nodes.push(node);
+    model.constraints.push(Constraint::RigidDiaphragm {
+        story: StoryId(2),
+        master: NodeId(2),
+        slaves: Vec::new(),
+        weight: Some(100_000.0),
+        ci_override: None,
+    });
+    model
+}
+
+#[test]
+fn seismic_two_layer_entry_matches_hand_values_and_rejects_negative_pi() {
+    let mut model = seismic_two_layer_contract_model();
+    let cfg = SeismicCfg::default();
+    let d = seismic_distribution_for_model(&model, cfg, 0.5).unwrap();
+    assert!((d.qi[0] - 40_000.0).abs() < 1e-8);
+    assert!((d.qi[1] - 27_313.708_498_984_76).abs() < 1e-8);
+    let lc = build_seismic_load_case_from_model(&model, cfg, 0.5).unwrap();
+    assert!((lc.nodal.iter().map(|n| n.values[0]).sum::<f64>() - 40_000.0).abs() < 1e-8);
+    if let Constraint::RigidDiaphragm { ci_override, .. } = &mut model.constraints[0] {
+        *ci_override = Some(0.2);
+    }
+    assert!(seismic_distribution_for_model(&model, cfg, 0.5)
+        .unwrap_err()
+        .to_string()
+        .contains("Pi"));
+}
+
+#[test]
+fn seismic_entry_rejects_reference_corruption_and_wrong_kind_order() {
+    let cfg = SeismicCfg::default();
+    let mut model = seismic_two_layer_contract_model();
+    model.stories[1].id = StoryId(99);
+    assert!(seismic_distribution_for_model(&model, cfg, 0.5)
+        .unwrap_err()
+        .to_string()
+        .contains("階ID"));
+    let mut model = seismic_two_layer_contract_model();
+    model.stories[2].level_kind = StoryLevelKind::Basement { depth_mm: 0.0 };
+    assert!(seismic_distribution_for_model(&model, cfg, 0.5)
+        .unwrap_err()
+        .to_string()
+        .contains("階種別"));
+    for node_ids in [vec![NodeId(99)], vec![NodeId(1), NodeId(1)]] {
+        let mut model = seismic_two_layer_contract_model();
+        model.stories[1].node_ids = node_ids;
+        assert!(build_seismic_load_case_from_model(&model, cfg, 0.5).is_err());
+    }
+    let mut model = seismic_two_layer_contract_model();
+    if let Constraint::RigidDiaphragm { master, .. } = &mut model.constraints[0] {
+        *master = NodeId(99);
+    }
+    assert!(build_seismic_load_case_from_model(&model, cfg, 0.5).is_err());
+}
+
+#[test]
+fn seismic_basement_entry_adds_above_shear_at_depth_boundaries() {
+    for (depth_mm, expected_k, expected_q) in [
+        (0.0, 0.1, 30_000.0),
+        (20_000.0, 0.05, 25_000.0),
+        (25_000.0, 0.05, 25_000.0),
+    ] {
+        let mut model = seismic_two_layer_contract_model();
+        model.stories[1].level_kind = StoryLevelKind::Basement { depth_mm };
+        let cfg = SeismicCfg {
+            dir: SeismicDir::Y,
+            ..SeismicCfg::default()
+        };
+        let d = seismic_distribution_for_model(&model, cfg, 0.5).unwrap();
+        assert!((d.ci[0] - expected_k).abs() < 1e-12);
+        assert!((d.qi[0] - expected_q).abs() < 1e-8);
+        assert!((d.qi[1] - 20_000.0).abs() < 1e-8);
+        let lc = build_seismic_load_case_from_model(&model, cfg, 0.5).unwrap();
+        assert!((lc.nodal.iter().map(|l| l.values[1]).sum::<f64>() - expected_q).abs() < 1e-8);
+        assert!(lc.nodal.iter().all(|l| l.values[0] == 0.0));
+    }
+}

@@ -246,7 +246,14 @@ impl Analysis<'_> {
                     return Ok(t);
                 }
                 let modal = self.eigen_solver_dispatch(1)?;
-                let t = modal.period.first().copied().unwrap_or(0.3);
+                let t = modal
+                    .period
+                    .first()
+                    .copied()
+                    .filter(|t| t.is_finite() && *t > 0.0)
+                    .ok_or_else(|| {
+                        SolveError::InvalidInput("固有値解析の有効な一次周期がありません。".into())
+                    })?;
                 let _ = self.semi_precise_t.set(t);
                 Ok(t)
             }
@@ -309,12 +316,124 @@ pub fn seismic_distribution_for_model(
     cfg: SeismicCfg,
     t: f64,
 ) -> Result<sepika_load::ai::AiDistribution, SolveError> {
-    let SeismicCfg { z, soil, c0, .. } = cfg;
+    let SeismicCfg {
+        z, soil, c0, mode, ..
+    } = cfg;
+    if !z.is_finite() || z <= 0.0 {
+        return Err(SolveError::InvalidInput(
+            "地域係数 Z は有限の正数で入力してください。地域適合は別途確認が必要です。".into(),
+        ));
+    }
+    if !c0.is_finite() || c0 < 0.2 {
+        return Err(SolveError::InvalidInput(
+            "通常の地震力では標準せん断力係数 C0 は有限値かつ 0.2 以上が必要です。".into(),
+        ));
+    }
+    if !t.is_finite() || t <= 0.0 {
+        return Err(SolveError::InvalidInput(
+            "設計用周期 T [s] は有限の正数が必要です。".into(),
+        ));
+    }
+    if mode == AiMode::SemiPrecise {
+        return Err(SolveError::InvalidInput("固有値周期を用いる地震力は未対応です。告示1793号第2ただし書の初期剛性・地盤/杭の変形を除く条件と採用Rt下限の適用証拠を保存・検証できません。略算を選択してください。".into()));
+    }
+    if model.stories.iter().any(|s| !s.elevation.is_finite())
+        || model
+            .stories
+            .windows(2)
+            .any(|s| s[0].elevation >= s[1].elevation)
+    {
+        return Err(SolveError::InvalidInput(
+            "階レベルは有限値かつ下から上へ厳密な昇順で定義してください。".into(),
+        ));
+    }
+    if model
+        .stories
+        .iter()
+        .enumerate()
+        .any(|(i, s)| s.id.index() != i)
+    {
+        return Err(SolveError::InvalidInput(
+            "階IDと格納位置が一致しません。".into(),
+        ));
+    }
     let layers = model.layers();
     if layers.is_empty() {
         return Err(SolveError::InvalidInput(
                 "階(Story)が定義されていません。地震荷重(Ai分布)には階の定義・地震重量・剛床(ダイアフラム)が必要です。解析タブの「準備計算 実行」を行ってください。".into(),
             ));
+    }
+
+    let mut previous_rank = 0;
+    for l in &layers {
+        let weight = l.weight.ok_or_else(|| {
+            SolveError::InvalidInput(format!("{} の地震用重量が未設定です。", l.name))
+        })?;
+        if !weight.is_finite() || weight < 0.0 {
+            return Err(SolveError::InvalidInput(format!(
+                "{} の地震用重量は有限の非負値が必要です。",
+                l.name
+            )));
+        }
+        let rank = match l.level_kind {
+            StoryLevelKind::Basement { depth_mm } => {
+                if !depth_mm.is_finite() || depth_mm < 0.0 {
+                    return Err(SolveError::InvalidInput(format!(
+                        "{} の地下深さ [mm] は有限の非負値が必要です。",
+                        l.name
+                    )));
+                }
+                0
+            }
+            StoryLevelKind::Normal => 1,
+            StoryLevelKind::Penthouse { k } => {
+                if !k.is_finite() || k <= 0.0 {
+                    return Err(SolveError::InvalidInput(format!(
+                        "{} の指定震度 k は有限の正数が必要です。",
+                        l.name
+                    )));
+                }
+                2
+            }
+        };
+        if rank < previous_rank {
+            return Err(SolveError::InvalidInput(
+                "階種別は下から地下→一般→PHの順に定義してください。".into(),
+            ));
+        }
+        previous_rank = rank;
+        let story = &model.stories[l.top.index()];
+        let mut override_weight = 0.0;
+        for d in model.diaphragms_of(story.id) {
+            if d.weight.is_some_and(|w| !w.is_finite() || w < 0.0)
+                || d.ci_override.is_some_and(|c| !c.is_finite() || c < 0.0)
+            {
+                return Err(SolveError::InvalidInput(format!(
+                    "{} の剛床重量・指定Ciは有限の非負値が必要です。",
+                    l.name
+                )));
+            }
+            if d.ci_override.is_some() {
+                override_weight += d.weight.ok_or_else(|| {
+                    SolveError::InvalidInput(format!(
+                        "{} の指定Ciを持つ剛床の重量が未設定です。",
+                        l.name
+                    ))
+                })?;
+            }
+        }
+        if !override_weight.is_finite() || override_weight > weight {
+            return Err(SolveError::InvalidInput(format!(
+                "{} の副剛床重量が階の地震用重量を超えています。",
+                l.name
+            )));
+        }
+    }
+    if layers
+        .iter()
+        .any(|l| matches!(l.level_kind, StoryLevelKind::Penthouse { .. }))
+    {
+        return Err(SolveError::InvalidInput("PH指定震度kによる経路は標準地震力として未検証です。Zを再乗算しない既存の指定震度経路は、通常Aiで計算する塔屋階とも突出部の局部検討とも同一視できません。通常Aiで全体計算する階は一般階として定義し、適用条件を確認してください。".into()));
     }
 
     let tc = sepika_load::ai::tc_of(soil);
@@ -338,9 +457,33 @@ pub fn seismic_distribution_for_model(
             level_kind: l.level_kind,
         })
         .collect();
-    Ok(sepika_load::ai::seismic_shear_distribution(
-        &specs, z, rt_val, c0, t,
-    ))
+    let distribution = sepika_load::ai::seismic_shear_distribution(&specs, z, rt_val, c0, t);
+    if specs.iter().enumerate().any(|(i, s)| {
+        matches!(s.level_kind, StoryLevelKind::Normal) && distribution.alpha[i] <= 0.0
+    }) {
+        return Err(SolveError::InvalidInput("一般層の累積地震用重量比 αi が 0 のため Ai を定義できません。重量と対象層を確認してください。".into()));
+    }
+    if distribution.clamped_negative_pi {
+        return Err(SolveError::InvalidInput("水平外力 Pi に数値誤差を超える負値があり、地震荷重を生成できません。主系統・副剛床の重量と係数を確認してください。".into()));
+    }
+    let sum_pi: f64 = distribution.pi.iter().sum();
+    let base_shear = distribution.qi[0];
+    if distribution
+        .alpha
+        .iter()
+        .chain(&distribution.ai)
+        .chain(&distribution.ci)
+        .chain(&distribution.qi)
+        .chain(&distribution.pi)
+        .any(|v| !v.is_finite())
+        || !sum_pi.is_finite()
+        || (sum_pi - base_shear).abs() > 1e-9 * base_shear.abs().max(1.0)
+    {
+        return Err(SolveError::InvalidInput(
+            "地震力が非有限値、または ΣPi と基部層せん断力が不一致です。".into(),
+        ));
+    }
+    Ok(distribution)
 }
 
 /// 地震静的解析の水平力（Ai 分布）荷重ケースを、モデルと設計用固有周期 T から
@@ -375,8 +518,48 @@ pub fn build_seismic_load_case_from_model(
         let Some(story) = model.stories.get(layer.top.index()) else {
             continue;
         };
-        for (master, share) in distribute_seismic_forces(model, story, pi) {
-            if share == 0.0 || !share.is_finite() {
+        if story
+            .node_ids
+            .iter()
+            .filter_map(|id| model.nodes.get(id.index()))
+            .any(|n| n.mass.is_some_and(|m| !m[0].is_finite() || m[0] < 0.0))
+        {
+            return Err(SolveError::InvalidInput(format!(
+                "{} の水平質量は有限の非負値が必要です。",
+                story.name
+            )));
+        }
+        let mut destinations = std::collections::HashSet::new();
+        if story.node_ids.iter().any(|id| {
+            model.nodes.get(id.index()).is_none_or(|n| n.id != *id) || !destinations.insert(*id)
+        }) {
+            return Err(SolveError::InvalidInput(format!(
+                "{} の節点所属に欠落ID・重複・格納位置不一致があります。",
+                story.name
+            )));
+        }
+        let forces = distribute_seismic_forces(model, story, pi);
+        let expected = pi
+            + model
+                .diaphragms_of(story.id)
+                .filter_map(|d| d.ci_override.map(|ci| ci * d.weight.unwrap_or(0.0)))
+                .sum::<f64>();
+        let resultant: f64 = forces.iter().map(|(_, share)| share).sum();
+        if forces.iter().any(|(node, share)| {
+            model.nodes.get(node.index()).is_none_or(|n| n.id != *node)
+                || !share.is_finite()
+                || *share < 0.0
+        }) || !resultant.is_finite()
+            || !expected.is_finite()
+            || (resultant - expected).abs() > 1e-9 * expected.abs().max(1.0)
+        {
+            return Err(SolveError::InvalidInput(format!(
+                "{} の水平力分配の載荷先・合力が不正です。",
+                story.name
+            )));
+        }
+        for (master, share) in forces {
+            if share == 0.0 {
                 continue;
             }
             let f = [dir_vec[0] * share, dir_vec[1] * share, 0.0, 0.0, 0.0, 0.0];

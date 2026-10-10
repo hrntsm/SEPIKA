@@ -328,62 +328,34 @@ mod tests {
     }
 
     #[test]
-    fn 精算周期は最後に固有値だけ再解析しても旧周期の地震結果を有効にしない() {
+    fn 精算周期は固有値を再解析しても標準地震結果として採用しない() {
         let mut app = ready();
-        let ex = app
-            .core
-            .model
-            .load_cases
-            .iter()
-            .find(|case| case.name == sepika_core::model::EX_CASE_NAME)
-            .unwrap()
-            .id;
-        app.core.model.combinations.extend([
-            sepika_core::model::LoadCombination {
-                name: "短期EX".into(),
-                terms: vec![(ex, 1.0)],
-            },
-            sepika_core::model::LoadCombination {
-                name: "長期".into(),
-                terms: vec![(LoadCaseId(0), 1.0)],
-            },
-        ]);
         app.run_eigen(1);
         app.core.analysis_cfg.ai_mode = AiMode::SemiPrecise;
-        app.run_eigen(1);
         app.run_static_all();
-        app.run_pushover();
-        assert!(app.compute_holding_capacity().is_ok());
-        let old_period = app.design_seismic_period().unwrap();
-
-        app.core.model.materials[0].young *= 0.5;
-        app.run_static_all();
-        app.run_pushover();
         assert!(app.compute_holding_capacity().is_err());
+        let old_period = app.design_seismic_period().unwrap();
+        app.core.model.materials[0].young *= 0.5;
         app.run_eigen(1);
-        let new_period = app.design_seismic_period().unwrap();
-        assert!(new_period > old_period);
-        let reason = app
-            .compute_holding_capacity()
-            .err()
-            .expect("旧周期の結果は拒否");
-        assert!(
-            reason.contains("増分解析 X")
-                && reason.contains("地震静的 X")
-                && reason.contains("地震静的 Y"),
-            "{reason}"
-        );
-        assert!(!reason.contains("固有値解析"), "{reason}");
-        assert!(app
-            .require_result_input(ResultInputKey::Combo("短期EX".into()))
-            .is_err());
-        assert!(app
-            .require_result_input(ResultInputKey::Combo("長期".into()))
-            .is_ok());
-
+        assert!(app.design_seismic_period().unwrap() > old_period);
         app.run_static_all();
-        app.run_pushover();
-        assert!(app.compute_holding_capacity().is_ok());
+        assert!(app.compute_holding_capacity().is_err());
+        assert!(app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .seismic(SeismicDir::X)
+            .is_none());
+        assert!(app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .seismic(SeismicDir::Y)
+            .is_none());
     }
 
     #[test]
