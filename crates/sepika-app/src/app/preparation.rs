@@ -1151,3 +1151,43 @@ pub fn ai_mode_label(m: AiMode) -> &'static str {
         AiMode::SemiPrecise => "精算(固有値解析)",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn preparation_mixed_structure_period_counts_only_height_above_ground() {
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        app.generate_stories_action();
+        let template = app.core.model.stories[1].clone();
+        app.core.model.stories.truncate(1);
+        app.core.model.stories[0].elevation = -9000.0;
+        app.core.model.nodes[0].coord[2] = -9000.0;
+        app.core.model.constraints.clear();
+        for (i, elevation) in [-6000.0, -3000.0, 15000.0, 30000.0].into_iter().enumerate() {
+            let mut story = template.clone();
+            story.id = sepika_core::ids::StoryId((i + 1) as u32);
+            story.name = format!("floor{i}");
+            story.elevation = elevation;
+            story.seismic_weight = Some(100_000.0);
+            story.structure = if i == 2 {
+                sepika_core::model::StoryStructure::S
+            } else {
+                sepika_core::model::StoryStructure::Rc
+            };
+            if i < 2 {
+                story.level_kind = sepika_core::model::StoryLevelKind::Basement {
+                    depth_mm: -elevation,
+                };
+            }
+            app.core.model.stories.push(story);
+        }
+        let (seismic, note) = app.build_prep_seismic();
+        assert!(note.is_none(), "{note:?}");
+        let seismic = seismic.unwrap();
+        assert!((seismic.t - 0.75).abs() < 1e-12);
+        assert!((seismic.rt - 0.9875).abs() < 1e-12);
+        assert!((seismic.base_shear - 57_250.0).abs() < 1e-8);
+    }
+}
