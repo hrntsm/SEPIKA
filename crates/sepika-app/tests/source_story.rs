@@ -362,3 +362,61 @@ fn native_first_delete_keeps_existing_export_ids_and_undo_restores_unassigned_ta
     undo.redo(&mut m);
     assert_eq!(sepika_io::stbridge::export_stbridge(&m).unwrap(), exported);
 }
+
+#[test]
+fn native_story_delete_preserves_source_ids_and_restores_uninitialized_tables() {
+    let mut m = model();
+    m.source_stories.clear();
+    m.stb_node_ids.clear();
+    let original = m.clone();
+    let before = sepika_io::stbridge::export_stbridge(&m).unwrap();
+    let before_stories = sepika_io::stbridge::import_stbridge(&before)
+        .unwrap()
+        .source_stories;
+    let removed_name = m.stories[1].name.clone();
+    let mut undo = UndoStack::new();
+    for id in [StoryId(0), StoryId(u32::MAX)] {
+        assert!(!undo.run(&mut m, Box::new(sepika_edit::DeleteStory { story: id })));
+        assert!(m.eq_ignoring_dofmap(&original));
+        assert_eq!(undo.revision(), 0);
+    }
+    assert!(undo.run(
+        &mut m,
+        Box::new(sepika_edit::DeleteStory { story: StoryId(1) })
+    ));
+    let exported = sepika_io::stbridge::export_stbridge(&m).unwrap();
+    let restored = sepika_io::stbridge::import_stbridge(&exported).unwrap();
+    assert_eq!(
+        restored.source_stories,
+        before_stories
+            .into_iter()
+            .filter(|s| s.name != removed_name)
+            .collect::<Vec<_>>()
+    );
+    assert!(m.validate().is_ok());
+    undo.undo(&mut m);
+    assert!(m.eq_ignoring_dofmap(&original));
+    assert!(m.source_stories.is_empty());
+    assert!(m.stb_node_ids.is_empty());
+    assert_eq!(sepika_io::stbridge::export_stbridge(&m).unwrap(), before);
+    undo.redo(&mut m);
+    assert_eq!(sepika_io::stbridge::export_stbridge(&m).unwrap(), exported);
+    assert!(m.validate().is_ok());
+
+    let mut referenced = model();
+    let original = referenced.clone();
+    let target = referenced
+        .stories
+        .iter()
+        .find(|s| s.elevation == 0.0)
+        .unwrap()
+        .id;
+    let mut undo = UndoStack::new();
+    assert!(!undo.run(
+        &mut referenced,
+        Box::new(sepika_edit::DeleteStory { story: target })
+    ));
+    assert!(undo.last_error().unwrap().contains("従属階から参照"));
+    assert!(referenced.eq_ignoring_dofmap(&original));
+    assert_eq!(undo.revision(), 0);
+}

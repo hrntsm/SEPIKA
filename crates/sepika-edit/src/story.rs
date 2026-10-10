@@ -337,6 +337,9 @@ impl EditCommand for DeleteStory {
             return Box::new(crate::Noop);
         }
         let before = snapshot(model);
+        if let Err(reason) = model.initialize_source_stories() {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         let original = &model.stories[idx];
         let matches: Vec<_> = model
             .source_stories
