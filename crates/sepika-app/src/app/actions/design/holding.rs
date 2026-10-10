@@ -1,5 +1,4 @@
 use super::super::*;
-use sepika_core::units::to_display::length_m;
 
 impl App {
     /// 保有水平耐力の層別判定を行う。前提データが不足していれば Err(案内文)。
@@ -22,9 +21,7 @@ impl App {
             ds_rc, ds_steel, member_group, rank_index_for_group, rc_wall_shear_brittle,
             rc_wall_tau_over_fc, rc_wall_type, steel_brace_type, GroupType,
         };
-        use sepika_design_jp::secondary::holding_capacity::{
-            check_holding_capacity, qud_by_story, MemberRank,
-        };
+        use sepika_design_jp::secondary::holding_capacity::{check_holding_capacity, MemberRank};
         use sepika_design_jp::secondary::member_rank::worst_rank;
         use sepika_design_jp::steel_f_value_prefix;
         use sepika_solver::nonlinear::pushover::MechanismType;
@@ -41,6 +38,37 @@ impl App {
             );
         }
         let view_dir = self.core.scoped.pushover_view_dir;
+        if self.core.model.constraints.iter().any(|constraint| {
+            matches!(
+                constraint,
+                sepika_core::model::Constraint::RigidDiaphragm {
+                    ci_override: Some(_),
+                    ..
+                }
+            )
+        }) {
+            return Err("指定 Ci の副剛床を含む必要耐力用地震力 Qud は未対応です。副系統の C0=1.0 に対する適用条件を確認していません。".to_string());
+        }
+        if self.core.analysis_cfg.ai_mode == AiMode::SemiPrecise {
+            return Err("精算周期による必要耐力用地震力 Qud は未対応です。Rt ただし書の適用証拠と採用 Rt の検証を保存していません。".to_string());
+        }
+        let layers = self.core.model.layers();
+        let t = self.design_seismic_period()?;
+        let qud = sepika_solver::statics::analysis::seismic_distribution_for_model(
+            &self.core.model,
+            sepika_solver::statics::analysis::SeismicCfg {
+                dir: view_dir,
+                mode: self.core.analysis_cfg.ai_mode,
+                z: self.core.analysis_cfg.z,
+                soil: self.core.analysis_cfg.soil,
+                c0: 1.0,
+            },
+            t,
+        )
+        .map_err(|e| format!("必要耐力用地震力 Qud を算定できません: {e}"))?
+        .qi;
+        let n_stories = layers.len();
+
         let mut dependencies = vec![
             ResultInputKey::Pushover(view_dir),
             ResultInputKey::Static(StaticCaseKey::Seismic(view_dir)),
@@ -60,17 +88,6 @@ impl App {
             }) {
                 dependencies.push(ResultInputKey::Combo(name.clone()));
             }
-        }
-        if self
-            .core
-            .scoped
-            .results
-            .as_ref()
-            .and_then(|r| r.modal.as_ref())
-            .and_then(|m| m.period.first())
-            .is_some()
-        {
-            dependencies.push(ResultInputKey::Modal);
         }
         let reasons: Vec<_> = dependencies
             .into_iter()
@@ -101,14 +118,6 @@ impl App {
         let metrics =
             crate::summary::compute_story_metrics_with(&self.core.model, &st.disp, view_dir, &ctx);
 
-        let layers = self.core.model.layers();
-        let weights: Vec<f64> = layers.iter().map(|l| l.weight.unwrap_or(0.0)).collect();
-        if weights.iter().any(|w| *w <= 0.0) {
-            return Err(
-                "地震重量が未設定です。解析タブの「準備計算 実行」を行ってください。".to_string(),
-            );
-        }
-
         if sepika_load::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
             let generation = po
                 .wall_run
@@ -121,26 +130,6 @@ impl App {
                 return Err("壁応答の生成入力が現在の計算入力と一致しません".into());
             }
         }
-        let t = self
-            .core
-            .scoped
-            .results
-            .as_ref()
-            .and_then(|r| r.modal.as_ref())
-            .and_then(|m| m.period.first().copied())
-            .unwrap_or_else(|| {
-                let height_m = length_m(sepika_solver::statics::analysis::building_height_mm(
-                    &self.core.model,
-                ));
-                let steel_ratio =
-                    sepika_solver::statics::analysis::steel_height_ratio(&self.core.model);
-                sepika_load::ai::approx_t(height_m, steel_ratio)
-            });
-        let rt = sepika_load::ai::rt(t, sepika_load::ai::tc_of(self.core.analysis_cfg.soil));
-        let qud = qud_by_story(&weights, self.core.analysis_cfg.z, rt, t);
-
-        let n_stories = weights.len();
-
         let resp_by_elem: std::collections::HashMap<
             ElemId,
             sepika_solver::nonlinear::pushover::PushoverMemberResponse,
