@@ -26,6 +26,7 @@ fn prepare(model: &mut Model, undo: &mut UndoStack) {
     assert!(undo.run(
         model,
         Box::new(sepika_edit::ApplyStories {
+            wall_weight_generation: g.wall_weight_generation,
             damper_mass_generation: g.damper_mass_generation,
             stories: g.stories,
             node_story: g.node_story,
