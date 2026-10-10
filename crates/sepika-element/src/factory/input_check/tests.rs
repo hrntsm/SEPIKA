@@ -500,9 +500,16 @@ fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
             },
         },
     });
+    model.set_member_rc_beam_reference(
+        ElemId(0),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+    );
+    model.sections[0].iy = 5_400_000_000.0;
+    model.sections[0].iz = 1_350_000_000.0;
+    model.sections[0].width = 300.0;
     assert!(ensure_nonlinear_input(&model).is_ok());
     assert!(
-        (super::super::springs::flexural_alpha_y(&model.elements[0], &model) - 0.271_755).abs()
+        (super::super::springs::flexural_alpha_y(&model.elements[0], &model) - 0.265_720_5).abs()
             < 1e-12
     );
     let (_, _, backbone) = super::super::springs::build_flexural_springs(
@@ -512,7 +519,7 @@ fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
         crate::factory::StrengthBasis::Nominal,
     );
     let [theta_y, my] = backbone.points[2];
-    assert!((my / (backbone.k_rot * theta_y) - 0.271_755).abs() < 1e-12);
+    assert!((my / (backbone.k_rot * theta_y) - 0.265_720_5).abs() < 1e-12);
     for bad in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
         let mut invalid = model.clone();
         if let Some(SectionShape::RcBeamRect { b, .. }) = invalid.sections[0].shape.as_mut() {
@@ -598,6 +605,13 @@ fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
     let error = ensure_nonlinear_input(&model).unwrap_err();
     assert!(error.contains("スラブ引張筋面積と正負別骨格"), "{error}");
     assert_eq!(public_generation_diagnostic(&model), error);
+    model.set_member_rc_beam_reference(
+        ElemId(0),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+    );
+    if let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() {
+        rebar.top = rebar.bottom.clone();
+    }
     model.slabs.clear();
     model.floor_regions.clear();
     assert!(ensure_nonlinear_input(&model).is_ok());
@@ -702,4 +716,152 @@ fn src_stiffness_errors_reach_nonlinear_input_diagnostics_and_public_factories()
             "{factory_error}"
         );
     }
+}
+
+fn explicit_rc_reference_fixture() -> Model {
+    let mut model = beam_model(rc_section(), concrete_material());
+    let bar_dia = (2400.0 / std::f64::consts::PI).sqrt();
+    let mut section = SectionShape::RcBeamRect {
+        b: 300.0,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: bar_dia,
+            top: vec![3],
+            bottom: vec![3],
+            cover: 60.0 - 10.0 - bar_dia / 2.0,
+            stirrup: sepika_core::section_shape::BeamStirrup {
+                dia: 10.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    }
+    .to_section(SectionId(0), "RC基準".into());
+    section.material = Some(MaterialId(0));
+    section.rebar_material = Some(MaterialId(1));
+    section.shear_rebar_material = Some(MaterialId(1));
+    model.sections[0] = section;
+    model.materials[0].young = 20000.0;
+    model.materials[0].density = 2.4e-9;
+    model.materials[1].young = 200000.0;
+    model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+    model.set_member_hysteresis(ElemId(0), sepika_core::model::HysteresisModel::Retrograde);
+    model.set_member_rc_beam_reference(
+        ElemId(0),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+    );
+    model
+}
+
+#[test]
+fn actual_rc_factory_connects_additional_angle_and_publishes_both_backbones() {
+    use crate::behavior::{Ctx, ElementBehavior, LocalVec, MassOption};
+    use sepika_core::model::AnalysisKind;
+    let model = explicit_rc_reference_fixture();
+    ensure_nonlinear_input(&model).unwrap();
+    let data = &model.elements[0];
+    let mut behavior = crate::factory::build_nonlinear_behavior(
+        data,
+        &model,
+        crate::factory::StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    );
+    let reference = crate::factory::build_hinge_view(
+        data,
+        &model,
+        crate::factory::StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+        0.0,
+        8,
+        24,
+    )
+    .unwrap();
+    let total = reference.total_backbone.unwrap();
+    let additional = reference.backbone.unwrap();
+    assert!((total[2][0] - 0.005927325831114165).abs() < 1e-14);
+    assert!((additional[2][0] - 0.003132825831114165).abs() < 1e-14);
+    assert!(additional[1][0].abs() < 1e-15);
+    let elastic = crate::frame::beam::BeamElement::new(data, &model);
+    let ctx = Ctx { model: &model };
+    assert!(elastic
+        .mass_matrix(MassOption::Consistent)
+        .data
+        .iter()
+        .any(|value| value.abs() > 0.0));
+    let reference_mass = behavior.mass_matrix(MassOption::Consistent);
+    assert!(reference_mass.data.iter().all(|value| value.is_finite()));
+    assert!(reference_mass.data.iter().any(|value| value.abs() > 0.0));
+    assert_eq!(
+        behavior.mass_matrix(MassOption::Lumped).data,
+        elastic.mass_matrix(MassOption::Lumped).data
+    );
+    let mut local = [0.0; 12];
+    local[5] = 0.005927325831114165;
+    local[11] = local[5];
+    let global = elastic.axis.rotate_to_global(&local);
+    behavior.update_state(
+        &LocalVec {
+            data: global.into_iter().collect(),
+        },
+        true,
+        &ctx,
+    );
+    let force_global: [f64; 12] = std::array::from_fn(|i| behavior.internal_force(&ctx).data[i]);
+    let force_local = elastic.axis.rotate_to_local(&force_global);
+    assert!((force_local[5] - 301806000.0).abs() < 0.1);
+    assert!((force_local[11] - 301806000.0).abs() < 0.1);
+    for extra in behavior.end_spring_rotations().unwrap() {
+        assert!((extra - 0.003132825831114165).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn rc_reference_kind_and_active_load_diagnostics_do_not_use_inactive_settings() {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::{AnalysisKind, HysteresisModel, LoadCase, LoadCaseKind, MemberLoad};
+    let mut model = explicit_rc_reference_fixture();
+    model.set_member_hysteresis_th(ElemId(0), Some(HysteresisModel::OriginOriented));
+    assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::Incremental).is_ok());
+    assert!(
+        ensure_nonlinear_input_for_kind(&model, AnalysisKind::TimeHistory)
+            .unwrap_err()
+            .contains("原点指向型")
+    );
+    model.set_member_hysteresis_th(ElemId(0), Some(HysteresisModel::Retrograde));
+    model.set_member_hysteresis(ElemId(0), HysteresisModel::OriginOriented);
+    assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::TimeHistory).is_ok());
+    assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::Incremental).is_err());
+    model.set_member_hysteresis(ElemId(0), HysteresisModel::Retrograde);
+    model.load_cases.push(LoadCase {
+        id: LoadCaseId(0),
+        name: "長期".into(),
+        kind: LoadCaseKind::Dead,
+        nodal: vec![],
+        member: vec![MemberLoad::full_length_uniform(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            6000.0,
+            10.0,
+        )],
+    });
+    assert!(ensure_rc_beam_reference_loads(&model, &[]).is_ok());
+    assert!(ensure_rc_beam_reference_loads(&model, &[LoadCaseId(0)])
+        .unwrap_err()
+        .contains("一定せん断・三角形"));
+    model.set_member_rc_beam_reference(ElemId(0), None);
+    let reason = ensure_nonlinear_input(&model).unwrap_err();
+    assert!(reason.contains("未指定"));
+    assert!(public_generation_diagnostic(&model).contains("未指定"));
+    let view = crate::factory::build_hinge_view(
+        &model.elements[0],
+        &model,
+        crate::factory::StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+        0.0,
+        8,
+        24,
+    )
+    .unwrap();
+    assert!(view.backbone.is_none());
+    assert!(view.unavailability_reason.unwrap().contains("未指定"));
 }

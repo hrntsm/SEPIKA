@@ -125,7 +125,17 @@ pub fn pushover_analysis_recording(
 
     let mut st = SolverState::new(n_active, reducer.n_indep);
 
-    sepika_element::factory::ensure_nonlinear_input(model)?;
+    sepika_element::factory::ensure_nonlinear_input_for_kind(
+        model,
+        sepika_core::model::AnalysisKind::Incremental,
+    )?;
+    let active_cases: Vec<_> = model
+        .load_cases
+        .iter()
+        .filter(|case| apply_long_term && case.kind.is_long_term())
+        .map(|case| case.id)
+        .collect();
+    sepika_element::factory::ensure_rc_beam_reference_loads(model, &active_cases)?;
 
     let mut behaviors: Vec<Box<dyn ElementBehavior>> = Vec::new();
     for elem in &model.elements {

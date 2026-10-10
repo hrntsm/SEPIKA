@@ -8695,3 +8695,40 @@ fn 階コピーの断面復元は末尾の挿入削除情報を返す() {
         ]
     );
 }
+
+#[test]
+fn rc_reference_selection_undo_redo_preserves_hysteresis() {
+    use sepika_core::model::{HysteresisModel, RcBeamReference};
+    let mut model = seeded_model(2, 1);
+    model.set_member_hysteresis(ElemId(0), HysteresisModel::Takeda);
+    let mut stack = UndoStack::new();
+    stack.run(
+        &mut model,
+        Box::new(SetMemberRcBeamReference {
+            elem: ElemId(0),
+            reference: Some(RcBeamReference::AntisymmetricHalfMember),
+        }),
+    );
+    assert_eq!(
+        model.member_rc_beam_reference(ElemId(0)),
+        Some(RcBeamReference::AntisymmetricHalfMember)
+    );
+    stack.undo(&mut model);
+    assert_eq!(model.member_rc_beam_reference(ElemId(0)), None);
+    assert_eq!(
+        model.member_hysteresis(ElemId(0)),
+        Some(HysteresisModel::Takeda)
+    );
+    stack.redo(&mut model);
+    assert_eq!(
+        model.member_rc_beam_reference(ElemId(0)),
+        Some(RcBeamReference::AntisymmetricHalfMember)
+    );
+    let inverse = SetMemberRcBeamReference {
+        elem: ElemId(99),
+        reference: Some(RcBeamReference::AntisymmetricHalfMember),
+    }
+    .apply(&mut model);
+    assert!(inverse.is_noop());
+    assert_eq!(model.member_rc_beam_reference(ElemId(99)), None);
+}

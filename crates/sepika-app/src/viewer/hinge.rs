@@ -313,6 +313,7 @@ struct HingeViewKey {
     steel_material: Option<MaterialFingerprint>,
     /// 材端集中ばねの履歴則。それ以外は `None`。
     hysteresis: Option<HysteresisModel>,
+    rc_beam_reference: Option<sepika_core::model::RcBeamReference>,
 }
 
 /// 要素の両端節点座標と局所軸の基準ベクトル。
@@ -433,6 +434,9 @@ fn hinge_view_key(
         steel_material: model
             .element_steel_material(elem)
             .map(MaterialFingerprint::from),
+        rc_beam_reference: concentrated
+            .then(|| model.member_rc_beam_reference(elem.id))
+            .flatten(),
         hysteresis: concentrated
             .then(|| resolve_member_hysteresis(elem, model, AnalysisKind::Incremental)),
     }
@@ -768,6 +772,14 @@ fn draw_hinge_detail_content(ui: &mut egui::Ui, app: &mut App, elem_id: ElemId) 
     };
     ui.label(bend_face_label);
 
+    if let Some(reason) = &view.unavailability_reason {
+        ui.label(reason);
+    }
+    if view.total_backbone.is_some() {
+        ui.label(
+            "RC基準の骨格と端ばね応答は弾性M/Sを控除した追加角です。総降伏部材角とは区別します。",
+        );
+    }
     ui.strong("M-θ カーブ（荷重変形カーブ）");
     ui.label(m_theta_axis_label(view.model));
     draw_m_theta_plot(ui, elem_id, &records, view, bend_dir_z, &mine, step);
@@ -2617,6 +2629,8 @@ mod tests {
             view: Ok(HingeView {
                 model: AnalysisHingeModel::Other,
                 backbone: None,
+                total_backbone: None,
+                unavailability_reason: None,
                 mn_linear: None,
                 mn_surface: None,
             }),
@@ -2731,6 +2745,8 @@ mod tests {
         let input_shortage = HingeView {
             model: AnalysisHingeModel::ConcentratedSpring,
             backbone: None,
+            total_backbone: None,
+            unavailability_reason: None,
             mn_linear: None,
             mn_surface: None,
         };
@@ -2741,6 +2757,8 @@ mod tests {
 
         let history = HingeView {
             model: AnalysisHingeModel::ConcentratedSpring,
+            total_backbone: None,
+            unavailability_reason: None,
             backbone: Some(vec![[0.0, 0.0]]),
             mn_linear: None,
             mn_surface: None,

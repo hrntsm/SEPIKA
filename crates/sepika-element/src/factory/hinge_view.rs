@@ -40,6 +40,10 @@ pub struct HingeView {
     pub model: AnalysisHingeModel,
     /// M-θ 骨格 [theta(rad), moment(N·mm)]。持たないモデルは `None`。
     pub backbone: Option<Vec<[f64; 2]>>,
+    /// RC明示基準の総部材角骨格。backboneは弾性M/S控除後の追加角を表示する。
+    pub total_backbone: Option<Vec<[f64; 2]>>,
+    /// 骨格を算定できない場合の入力不足・対象外理由。
+    pub unavailability_reason: Option<String>,
     /// N-M 線形相関（材端集中ばね）。持たないモデル・非対応の履歴則は `None`。
     pub mn_linear: Option<MnInteraction>,
     /// 3D N-M 曲面（ファイバー／MS）。持たないモデルは `None`。
@@ -51,6 +55,8 @@ impl HingeView {
         HingeView {
             model,
             backbone: None,
+            total_backbone: None,
+            unavailability_reason: None,
             mn_linear: None,
             mn_surface: None,
         }
@@ -111,17 +117,39 @@ fn beam_view(
     n_beta: usize,
 ) -> Result<HingeView, RebarGeometryError> {
     if resolves_to_concentrated_spring(data, model) {
-        if super::input_check::member_strength_issue(data, model).is_some() {
-            return Ok(HingeView::none(AnalysisHingeModel::ConcentratedSpring));
-        }
         let rule = resolve_member_hysteresis(data, model, kind);
+        if let Some(reason) = super::input_check::member_strength_issue(data, model)
+            .or_else(|| super::springs::rc_reference_issue(data, model, rule))
+        {
+            let mut view = HingeView::none(AnalysisHingeModel::ConcentratedSpring);
+            view.unavailability_reason = Some(reason);
+            return Ok(view);
+        }
         let (_i, _j, backbone) = build_flexural_springs(data, model, rule, basis);
         let (my0, n_allow) = yield_moment_and_axial(data, model, basis);
         let mn = backbone.use_mn.then(|| MnInteraction::new(my0, n_allow));
         let points = backbone.points_with_mn(mn.as_ref(), axial_force_compression_positive);
+        let total_reference = super::springs::uses_rc_alpha_reference(data, model)
+            && matches!(
+                rule,
+                sepika_core::model::HysteresisModel::Takeda
+                    | sepika_core::model::HysteresisModel::Retrograde
+                    | sepika_core::model::HysteresisModel::MaxPointOriented
+            );
+        let total_backbone = total_reference.then(|| points.clone());
+        let points = if total_reference {
+            points
+                .into_iter()
+                .map(|[theta, moment]| [theta - moment / backbone.k_rot, moment])
+                .collect()
+        } else {
+            points
+        };
         return Ok(HingeView {
             model: AnalysisHingeModel::ConcentratedSpring,
             backbone: Some(points),
+            total_backbone,
+            unavailability_reason: None,
             mn_linear: mn,
             mn_surface: None,
         });
@@ -179,6 +207,8 @@ fn surface_view(
         Some(fibers) => HingeView {
             model: model_kind,
             backbone: None,
+            total_backbone: None,
+            unavailability_reason: None,
             mn_linear: None,
             mn_surface: Some(build_surface(&fibers, surface_kind, n_alpha, n_beta)),
         },
@@ -483,6 +513,14 @@ mod tests {
         });
         rc_model.sections[0].rebar_material = Some(MaterialId(1));
         rc_model.set_member_hysteresis(ElemId(0), HysteresisModel::Takeda);
+        rc_model.set_member_rc_beam_reference(
+            ElemId(0),
+            Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+        );
+        rc_model.sections[0].iy = 400.0 * 700.0_f64.powi(3) / 12.0;
+        rc_model.sections[0].iz = 700.0 * 400.0_f64.powi(3) / 12.0;
+        rc_model.sections[0].depth = 700.0;
+        rc_model.sections[0].width = 400.0;
         let rc_beam = elem(ElementKind::Beam, [NodeId(0), NodeId(1)]);
         assert!(
             crate::factory::input_check::member_strength_issue(&rc_beam, &rc_model).is_none(),

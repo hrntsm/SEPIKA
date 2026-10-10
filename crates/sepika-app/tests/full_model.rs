@@ -437,6 +437,18 @@ fn prepared_rectangular_rc_portal() -> App {
             concrete_class: Default::default(),
         },
     ];
+    let rc_beams: Vec<_> = model
+        .elements
+        .iter()
+        .filter(|element| element.section == Some(SectionId(1)))
+        .map(|element| element.id)
+        .collect();
+    for elem in rc_beams {
+        model.set_member_rc_beam_reference(
+            elem,
+            Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+        );
+    }
     let mut app = App::default();
     app.core.analysis_cfg.threads = 1;
     app.load_model(model);
@@ -2533,4 +2545,48 @@ fn slab_floor_load_reaches_primary_frame() {
         (ratio - 1.0).abs() < 1e-6,
         "主架構へ届いた床荷重 {delivered:.1} N / 期待 {expected:.1} N = {ratio:.6}"
     );
+}
+
+#[test]
+fn rc_reference_rejects_only_member_loads_applied_in_the_current_analysis() {
+    let mut app = prepared_rectangular_rc_portal();
+    assert!(app
+        .core
+        .model
+        .load_cases
+        .iter()
+        .filter(|case| case.kind.is_long_term())
+        .any(|case| !case.member.is_empty()));
+    app.core.analysis_cfg.th_dir = ThDir::X;
+    app.core.analysis_cfg.th_nonlinear = true;
+    app.core.analysis_cfg.th_apply_long_term = true;
+    app.core.analysis_cfg.th_duration = 0.2;
+    app.core.analysis_cfg.th_dt = 0.05;
+    app.run_time_history_sample();
+    let error = app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .expect("有効な非三角部材荷重を拒否");
+    assert!(error.contains("一定せん断・三角形"), "{error}");
+    app.core.scoped.last_error = None;
+    app.core.analysis_cfg.th_apply_long_term = false;
+    app.run_time_history_sample();
+    assert_no_error(&app, "未適用部材荷重を拒否しない");
+    let response = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .time_history
+        .as_ref()
+        .unwrap();
+    assert!(!response.applied_long_term);
+    assert!(response
+        .peak_disp
+        .iter()
+        .flatten()
+        .all(|value| value.is_finite()));
 }

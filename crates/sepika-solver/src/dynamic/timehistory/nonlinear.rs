@@ -97,7 +97,19 @@ pub fn nonlinear_time_history_analysis(
         .map_err(SolveError::InvalidInput)?;
     sepika_math::parallelism::apply_to_faer();
 
-    sepika_element::factory::ensure_nonlinear_input(model).map_err(SolveError::InvalidInput)?;
+    sepika_element::factory::ensure_nonlinear_input_for_kind(
+        model,
+        sepika_core::model::AnalysisKind::TimeHistory,
+    )
+    .map_err(SolveError::InvalidInput)?;
+    let active_cases: Vec<_> = model
+        .load_cases
+        .iter()
+        .filter(|case| cfg.apply_long_term && case.kind.is_long_term())
+        .map(|case| case.id)
+        .collect();
+    sepika_element::factory::ensure_rc_beam_reference_loads(model, &active_cases)
+        .map_err(SolveError::InvalidInput)?;
 
     let dt = resolve_dt(newmark.dt, wave)?;
 

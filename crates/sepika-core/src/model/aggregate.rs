@@ -1434,7 +1434,10 @@ impl Model {
     /// 属性が既定（増分=Auto・時刻歴=増分と同じ）と等価なら側テーブルから除去する。
     fn prune_default_hysteresis(&mut self, elem: ElemId) {
         self.member_hysteresis_attrs.retain(|a| {
-            !(a.elem == elem && a.rule == HysteresisModel::Auto && a.rule_th.is_none())
+            !(a.elem == elem
+                && a.rule == HysteresisModel::Auto
+                && a.rule_th.is_none()
+                && a.rc_beam_reference.is_none())
         });
     }
 
@@ -1458,6 +1461,7 @@ impl Model {
                 elem,
                 rule,
                 rule_th: None,
+                rc_beam_reference: None,
             });
         }
         self.prune_default_hysteresis(elem);
@@ -1484,6 +1488,40 @@ impl Model {
                 elem,
                 rule: HysteresisModel::Auto,
                 rule_th,
+                rc_beam_reference: None,
+            });
+        }
+        self.prune_default_hysteresis(elem);
+        old
+    }
+
+    /// RC梁の明示基準分布を取得する。未指定は自動接続を許可しない。
+    pub fn member_rc_beam_reference(&self, elem: ElemId) -> Option<RcBeamReference> {
+        self.member_hysteresis_attrs
+            .iter()
+            .find(|a| a.elem == elem)
+            .and_then(|a| a.rc_beam_reference)
+    }
+
+    /// RC梁の基準分布を明示する。履歴則の増分・時刻歴スロットは保持する。
+    pub fn set_member_rc_beam_reference(
+        &mut self,
+        elem: ElemId,
+        reference: Option<RcBeamReference>,
+    ) -> Option<RcBeamReference> {
+        let old = self.member_rc_beam_reference(elem);
+        if let Some(a) = self
+            .member_hysteresis_attrs
+            .iter_mut()
+            .find(|a| a.elem == elem)
+        {
+            a.rc_beam_reference = reference;
+        } else if reference.is_some() {
+            self.member_hysteresis_attrs.push(MemberHysteresisAttr {
+                elem,
+                rule: HysteresisModel::Auto,
+                rule_th: None,
+                rc_beam_reference: reference,
             });
         }
         self.prune_default_hysteresis(elem);

@@ -583,7 +583,12 @@ fn test_resolve_member_hysteresis_and_flexural_springs() {
     });
     model.sections[0].depth = 700.0;
     model.sections[0].width = 400.0;
-    model.sections[0].iz = 400.0 * 700.0f64.powi(3) / 12.0;
+    model.sections[0].iy = 400.0 * 700.0f64.powi(3) / 12.0;
+    model.sections[0].iz = 700.0 * 400.0f64.powi(3) / 12.0;
+    model.set_member_rc_beam_reference(
+        ElemId(0),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+    );
     model.materials[0].fc = Some(24.0);
     model.materials[0].fy = Some(345.0);
     assert!(is_rc_like_section(&beam, &model));
@@ -796,7 +801,7 @@ fn test_resolve_wall_shear_hysteresis_defaults_and_overrides() {
 /// 材端曲げバネの降伏時剛性低下率 αy。
 /// - 形状未設定・非 RC 矩形・鉛直材（柱）は既定 0.3。
 /// - RC 矩形の梁は菅野式。b=400・D=700・4-D22（1 段）・かぶり 50・帯筋 D10・
-///   可撓長 5000・Ec=20000 のときの手計算値 αy≈0.19546
+///   可撓長 5000・Ec=20000 のときの独立値 αy≈0.33475
 ///   （pt=0.002715、a/D=3.571、d/D=629/700、n=10.25）。
 #[test]
 fn test_flexural_alpha_y_sugano_for_rc_beam() {
@@ -839,7 +844,7 @@ fn test_flexural_alpha_y_sugano_for_rc_beam() {
     });
     let got = flexural_alpha_y(&beam, &model);
     assert!(
-        (got - 0.195_459_048_474_485).abs() < 1e-12,
+        (got - 0.334_749_510_190_037_85).abs() < 1e-12,
         "菅野式の αy: got={got}"
     );
     assert!(got > 0.0 && got < 1.0);
@@ -934,7 +939,12 @@ fn test_rc_beam_flexural_spring_exhibits_takeda_degradation() {
     });
     model.sections[0].depth = 700.0;
     model.sections[0].width = 400.0;
-    model.sections[0].iz = 400.0 * 700.0f64.powi(3) / 12.0;
+    model.sections[0].iy = 400.0 * 700.0f64.powi(3) / 12.0;
+    model.sections[0].iz = 700.0 * 400.0f64.powi(3) / 12.0;
+    model.set_member_rc_beam_reference(
+        ElemId(0),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+    );
     model.materials[0].young = 25_000.0;
     model.materials[0].fc = Some(24.0);
     model.materials[0].fy = Some(345.0);

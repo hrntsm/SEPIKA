@@ -97,6 +97,13 @@ pub fn default_fiber_concrete_hysteresis(kind: AnalysisKind) -> HysteresisModel 
     }
 }
 
+/// RC梁集中ばねで採用する明示基準分布。実応力分布を確認したという意味ではない。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum RcBeamReference {
+    /// 一定せん断、逆対称曲げ、同一の両半部材を基準とする。
+    AntisymmetricHalfMember,
+}
+
 /// 部材の履歴則の指定。
 /// 増分解析用（`rule`）と時刻歴応答解析用（`rule_th`）を別々に指定できる。
 /// `rule_th = None` は「時刻歴も増分用と同じ指定に従う」。
@@ -108,4 +115,7 @@ pub struct MemberHysteresisAttr {
     /// 時刻歴応答解析用の履歴則（`None` = 増分用と同じ）。
     #[serde(default)]
     pub rule_th: Option<HysteresisModel>,
+    /// RC梁の明示基準（未指定は自動接続不可）。
+    #[serde(default)]
+    pub rc_beam_reference: Option<RcBeamReference>,
 }
