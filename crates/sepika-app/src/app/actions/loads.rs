@@ -90,6 +90,11 @@ impl App {
         )
         .hash(&mut hasher);
         sepika_job::weight_preparation::weight_output_key(&self.core.model).hash(&mut hasher);
+        sepika_job::weight_preparation::weights_are_current(
+            &self.core.model,
+            self.core.analysis_cfg.mass_method,
+        )
+        .hash(&mut hasher);
         let generated_cases: Vec<_> = self
             .core
             .model
@@ -157,6 +162,10 @@ impl App {
             period,
             initialize_stories,
         );
+        #[cfg(feature = "gui")]
+        if result.as_ref().is_ok_and(|report| report.nodes_renumbered) {
+            self.handle_prepared_node_renumbering(true);
+        }
         let failed: Vec<_> = prepared
             .load_cases
             .iter()
@@ -170,10 +179,18 @@ impl App {
         if !self.core.model.eq_ignoring_dofmap(&prepared) {
             #[cfg(feature = "gui")]
             self.clear_generated_member_selection();
-            self.core.scoped.undo.run(
+            if !self.core.scoped.undo.run(
                 &mut self.core.model,
                 Box::new(sepika_edit::ApplyPreparedModel { prepared }),
-            );
+            ) {
+                sepika_job::prepare::clear_standard_seismic_auto(&mut self.core.model);
+                self.invalidate_missing_tip_seismic(&failed);
+                self.report_error(format!(
+                    "準備結果を採用できません: {}",
+                    self.core.scoped.undo.last_error().unwrap_or("入力の不整合")
+                ));
+                return;
+            }
             self.core.scoped.staleness.mark_edited();
         }
         self.invalidate_missing_tip_seismic(&failed);
@@ -195,6 +212,14 @@ impl App {
                 );
                 self.report_error(error.to_string());
             }
+        }
+    }
+
+    #[cfg(feature = "gui")]
+    pub(crate) fn handle_prepared_node_renumbering(&mut self, renumbered: bool) {
+        if renumbered {
+            self.clear_geometry_selection();
+            self.ui.scoped.boundary_node = None;
         }
     }
 

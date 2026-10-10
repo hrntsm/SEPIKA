@@ -68,7 +68,7 @@ fn input_key_excludes_generated_outputs_and_retains_manual_mass_and_section_floo
     let settings = AnalysisSettings::default();
     prepare_model(&mut model, &settings, None, true).unwrap();
     let key = weight_input_key(&model, settings.mass_method);
-    model.assign_stb_node_ids();
+    model.assign_stb_node_ids().unwrap();
     assert_eq!(weight_input_key(&model, settings.mass_method), key);
     model.stories[1].seismic_weight = Some(123.0);
     model.stories[1].dynamic_mass = None;
@@ -181,6 +181,17 @@ fn multiple_diaphragms_with_ambiguous_ownership_reject_both_directions() {
         .iter()
         .any(|notice| notice.contains("一意に帰属できません")));
     let error = sepika_job::compute::compute_eigen(model.clone(), 1).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("物理質量が現在入力と一致しません"));
+    let wave = sepika_solver::dynamic::timehistory::GroundMotion {
+        dt: 0.01,
+        accel_x: vec![0.0; 2],
+        accel_y: None,
+        accel_theta: None,
+    };
+    let error =
+        sepika_job::compute::compute_time_history(model.clone(), settings, wave).unwrap_err();
     assert!(error
         .to_string()
         .contains("物理質量が現在入力と一致しません"));

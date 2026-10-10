@@ -2596,15 +2596,39 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
                 elevation,
             })
         ));
-        app.core.model.stories[i].structure = if i == 3 {
-            sepika_core::model::StoryStructure::S
-        } else {
-            sepika_core::model::StoryStructure::Rc
-        };
         for node in app.core.model.stories[i].node_ids.clone() {
             app.core.model.nodes[node.index()].coord[2] = elevation;
         }
     }
+    // 上層をRCにする入力は材料・断面で与える。Story.structureは重量準備の算定値。
+    let rc = prepared_rectangular_rc_portal().core.model;
+    let material_offset = app.core.model.materials.len() as u32;
+    for mut material in rc.materials {
+        material.id = sepika_core::ids::MaterialId(material.id.0 + material_offset);
+        app.core.model.materials.push(material);
+    }
+    let section_offset = app.core.model.sections.len() as u32;
+    for mut section in rc.sections.into_iter().take(2) {
+        section.id = sepika_core::ids::SectionId(section.id.0 + section_offset);
+        section.material = section
+            .material
+            .map(|id| sepika_core::ids::MaterialId(id.0 + material_offset));
+        section.rebar_material = section
+            .rebar_material
+            .map(|id| sepika_core::ids::MaterialId(id.0 + material_offset));
+        section.shear_rebar_material = section
+            .shear_rebar_material
+            .map(|id| sepika_core::ids::MaterialId(id.0 + material_offset));
+        app.core.model.sections.push(section);
+    }
+    for element in &mut app.core.model.elements {
+        if (9..=11).contains(&element.id.0) {
+            element.section = Some(sepika_core::ids::SectionId(
+                section_offset + u32::from(element.id.0 == 11),
+            ));
+        }
+    }
+
     app.run_seismic(sepika_solver::statics::analysis::SeismicDir::X);
     assert_no_error(&app, "GL跨ぎ混合構造の地震静的");
     let ex = app

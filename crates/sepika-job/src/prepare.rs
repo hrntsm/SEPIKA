@@ -20,6 +20,8 @@ pub struct PrepareReport {
     pub panels: Vec<sepika_element::springs::panel_gen::GeneratedPanel>,
     /// 荷重同期で発生した注意事項（SemiPrecise で固有周期未算定など）。
     pub notices: Vec<String>,
+    /// 領域再生成で節点が削除され、節点 ID の付け直しが発生した。
+    pub nodes_renumbered: bool,
 }
 
 /// 剛域と仕口パネルを自動算定してモデルへ反映する。
@@ -108,7 +110,7 @@ fn prepare_work_model(
     model.rebuild_floor_assignment_regions();
     model.rebuild_wall_assignment_regions();
     rebuild_floor_regions(model);
-    rebuild_wall_regions(model);
+    let wall_report = rebuild_wall_regions(model);
     let panels = apply_rigid_zones_and_panels(model);
     let gravity = compute_gravity_auto_load_cases(model)?;
     let tip_loads = compute_tip_loads(model)?;
@@ -169,7 +171,11 @@ fn prepare_work_model(
     if let Some(warning) = model.unset_plate_assignment_warning() {
         notices.push(warning);
     }
-    Ok(PrepareReport { panels, notices })
+    Ok(PrepareReport {
+        panels,
+        notices,
+        nodes_renumbered: wall_report.deleted_nodes > 0,
+    })
 }
 
 fn invalidate_generated_weights(model: &mut Model) {

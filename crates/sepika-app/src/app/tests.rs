@@ -725,7 +725,8 @@ fn preparation_wall_rebuild_clears_renumbered_node_selection() {
     app.select_node(NodeId(2));
     app.ui.scoped.boundary_node = Some(NodeId(4));
 
-    app.rebuild_wall_regions_for_preparation();
+    let report = sepika_core::wall_region_rebuild::rebuild_wall_regions(&mut app.core.model);
+    app.handle_prepared_node_renumbering(report.deleted_nodes > 0);
 
     assert_eq!(app.core.model.nodes.len(), 3);
     assert_eq!(
@@ -11314,4 +11315,55 @@ fn freshness_preparation_undo_and_saved_output_tampering_are_detected() {
     app.sync_auto_load_cases_action();
     assert_eq!(app.core.model.stories, fresh.stories);
     assert_eq!(app.core.model.load_cases, fresh.load_cases);
+    app.core.model.seismic_weight_generation = None;
+    app.sync_auto_load_cases_action();
+    assert!(sepika_job::weight_preparation::weights_are_current(
+        &app.core.model,
+        app.core.analysis_cfg.mass_method
+    ));
+    let revision = app.core.scoped.undo.revision();
+    app.sync_auto_load_cases_action();
+    assert_eq!(app.core.scoped.undo.revision(), revision);
+}
+
+#[test]
+fn rejected_prepared_model_never_leaves_old_auto_seismic_loads_usable() {
+    let mut app = App::default();
+    app.load_model(seismic_freshness_fixture::two_storeys());
+    app.run_preparation();
+    app.run_seismic(SeismicDir::X);
+    assert!(app.core.scoped.last_error.is_none());
+    if let sepika_core::model::SlabShape::Attached {
+        anchor: sepika_core::model::RegionAnchor::Line { span, .. },
+        ..
+    } = &mut app.core.model.slabs[0].shape
+    {
+        *span = [0.0, 0.0];
+    }
+    app.run_seismic(SeismicDir::X);
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("span"));
+    for name in [EX_CASE_NAME, EY_CASE_NAME] {
+        let case = app
+            .core
+            .model
+            .load_cases
+            .iter()
+            .find(|case| case.name == name)
+            .unwrap();
+        assert!(sepika_job::compute::missing_seismic_horizontal_load(case));
+    }
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .seismic(SeismicDir::X)
+        .is_none());
 }
