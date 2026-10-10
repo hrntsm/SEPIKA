@@ -115,6 +115,7 @@ mod tests {
             e.id = ElemId(id);
             e.nodes = nodes.map(NodeId).into_iter().collect();
             e.section = Some(SectionId(section));
+            e.local_axis.ref_vector = [0.0, 1.0, 0.0];
             model.elements.push(e);
         }
         let mut section = sepika_core::section_shape::SectionShape::RcWall {
@@ -133,6 +134,7 @@ mod tests {
                 id: WallPlateId(0),
                 shape: sepika_core::model::WallPlateShape::Enclosed,
                 section: Some(SectionId(2)),
+                dl_support: Some(sepika_core::model::WallDlSupport::LowerBeam),
                 self_weight_shares: vec![],
                 opening_area: 0.0,
                 opening_weight: 0.0,
@@ -149,6 +151,8 @@ mod tests {
         )
         .expect("階生成")
         .stories;
+        model.wall_weight_generation =
+            Some(sepika_core::model::WallWeightGenerationMode::GravityCasesOnly);
         let upper_floor = model.stories.last_mut().unwrap();
         upper_floor.weight_override = Some(500_000.0);
         upper_floor.seismic_weight = Some(500_000.0);

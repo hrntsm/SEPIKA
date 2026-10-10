@@ -22,6 +22,7 @@ pub(super) fn steel_wall_model() -> sepika_core::model::Model {
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
             section: Some(SectionId(2)),
+            dl_support: Some(sepika_core::model::WallDlSupport::LowerBeam),
             self_weight_shares: Vec::new(),
             opening_area: 0.0,
             opening_weight: 0.0,
@@ -37,6 +38,8 @@ pub(super) fn steel_wall_model() -> sepika_core::model::Model {
         wall_plate_ids: vec![WallPlateId(0)],
         posts: Vec::new(),
     });
+    model.wall_weight_generation =
+        Some(sepika_core::model::WallWeightGenerationMode::GravityCasesOnly);
     model
 }
 

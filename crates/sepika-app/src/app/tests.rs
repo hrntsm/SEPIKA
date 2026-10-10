@@ -605,6 +605,7 @@ fn preparation_rebuild_clears_generated_wall_selection_only() {
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
             section: Some(SectionId(0)),
+            dl_support: None,
             self_weight_shares: Vec::new(),
             opening_area: 0.0,
             opening_weight: 0.0,
@@ -715,6 +716,7 @@ fn preparation_wall_rebuild_clears_renumbered_node_selection() {
         id: WallPlateId(0),
         shape: WallPlateShape::Enclosed,
         section: None,
+        dl_support: None,
         self_weight_shares: Vec::new(),
         opening_area: 0.0,
         opening_weight: 0.0,
@@ -725,7 +727,8 @@ fn preparation_wall_rebuild_clears_renumbered_node_selection() {
     app.select_node(NodeId(2));
     app.ui.scoped.boundary_node = Some(NodeId(4));
 
-    app.rebuild_wall_regions_for_preparation();
+    let report = sepika_core::wall_region_rebuild::rebuild_wall_regions(&mut app.core.model);
+    app.handle_prepared_node_renumbering(report.deleted_nodes > 0);
 
     assert_eq!(app.core.model.nodes.len(), 3);
     assert_eq!(
@@ -2920,15 +2923,29 @@ fn test_select_displayed_result_switches_forces_and_term() {
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
     app.core.analysis_cfg.threads = 1;
+    app.core
+        .model
+        .load_cases
+        .push(sepika_core::model::LoadCase {
+            id: LoadCaseId(2),
+            name: "P=0".into(),
+            kind: sepika_core::model::LoadCaseKind::Live,
+            nodal: vec![],
+            member: vec![],
+        });
     // 長期 DL+LL（重力 LC0 のみ）と短期 DL+LL+EX（地震 LC1 入り）の 2 組合せ。
     for combo in [
         sepika_core::model::LoadCombination {
             name: "DL + LL".into(),
-            terms: vec![(LoadCaseId(0), 1.0)],
+            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(2), 1.0)],
         },
         sepika_core::model::LoadCombination {
             name: "DL + LL + EX".into(),
-            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)],
+            terms: vec![
+                (LoadCaseId(0), 1.0),
+                (LoadCaseId(2), 1.0),
+                (LoadCaseId(1), 1.0),
+            ],
         },
     ] {
         app.core.scoped.undo.run(
@@ -4736,7 +4753,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
     model.floor_regions[0].slab_ids = vec![first, second];
     set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
-    let app = App {
+    let mut app = App {
         core: AppCore {
             model,
             ..Default::default()
@@ -4775,6 +4792,57 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
         slab.1.moment,
         w_floor
     );
+    app.core
+        .model
+        .load_cases
+        .push(sepika_core::model::LoadCase {
+            id: LoadCaseId(app.core.model.load_cases.len() as u32),
+            name: "任意風".into(),
+            kind: sepika_core::model::LoadCaseKind::Wind,
+            nodal: vec![],
+            member: vec![],
+        });
+    let id = app.core.model.load_cases.last().unwrap().id;
+    app.core.scoped.last_static = Some(StaticKey::Case(StaticCaseKey::User(id)));
+    app.core.design_term = LoadTerm::Short;
+    let (short_beams, short_slabs) = app.floor_design_checks();
+    assert_eq!(short_beams[0].2.m_max, beams[0].2.m_max);
+    assert_eq!(short_beams[0].2.ratio, beams[0].2.ratio);
+    assert_eq!(short_slabs[0].1.moment, slabs[0].1.moment);
+    assert!(!short_beams[0].2.unchecked, "既存長期略算を保持");
+    #[cfg(feature = "gui")]
+    {
+        app.core.scoped.results = Some(ResultsBundle {
+            beam_checks: short_beams,
+            slab_checks: short_slabs,
+            ..Default::default()
+        });
+        let context = egui::Context::default();
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(4000.0, 4000.0),
+                )),
+                ..Default::default()
+            },
+            |ui| crate::design_view::design_table(ui, &mut app),
+        );
+        let text = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) => Some(t.galley.job.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("小梁・床の長期略算"), "{text}");
+        assert!(
+            text.contains("選択中の雪・風・地震・任意組合せについて未検定"),
+            "{text}"
+        );
+    }
 }
 
 /// 片持ちの未割当小梁（端部支持条件 Free）も片持ち梁として検定する。
@@ -8528,6 +8596,7 @@ fn test_rigid_floor_beam_has_forces_and_checks() {
         vec![NodeId(2)],
     ));
     model.stories.push(Story {
+        wall_weights: Vec::new(),
         level_kind: Default::default(),
         structure: Default::default(),
         id: sepika_core::ids::StoryId(0),
@@ -8626,7 +8695,10 @@ fn test_run_preparation_populates_result() {
 
     // Ai 分布（略算周期）。1 層なので α=Ai=1。Ci・Qi の式はここで再計算しない
     // （表示と解析入力の一致は `test_preparation_ai_matches_synced_seismic_case` で確認する）。
-    let sm = prep.seismic.as_ref().expect("Ai 分布が算定されるはず");
+    let sm = prep
+        .seismic
+        .as_ref()
+        .unwrap_or_else(|| panic!("Ai 分布: {:?}", prep.seismic_note));
     assert_eq!(sm.rows.len(), 1);
     assert!((sm.rows[0].alpha - 1.0).abs() < 1e-9);
     assert!((sm.rows[0].ai - 1.0).abs() < 1e-9);
@@ -11207,6 +11279,509 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
         .contains("未割当"));
 }
 
+mod seismic_freshness_fixture {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../sepika-job/tests/fixtures/seismic_freshness.rs"
+    ));
+}
+
+#[test]
+fn edited_density_finish_and_seismic_live_refresh_real_ex_without_preparation_button() {
+    use sepika_core::model::{AreaLoad, SlabUsage};
+    let mut app = App::default();
+    app.load_model(seismic_freshness_fixture::two_storeys());
+    app.run_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    for (density, finish, seismic_live) in [
+        (2.6e-9, 0.0, 0.0),
+        (2.6e-9, 0.001, 0.0),
+        (2.6e-9, 0.001, 0.0005),
+    ] {
+        app.core.model.materials[0].density = density;
+        for slab in &mut app.core.model.slabs {
+            slab.plate.loads = vec![AreaLoad {
+                kind: "DL".into(),
+                value: finish,
+            }];
+            slab.plate.usage = Some(SlabUsage::Custom {
+                floor: 0.005,
+                beam: 0.004,
+                frame: 0.003,
+                seismic: seismic_live,
+            });
+        }
+        app.run_seismic(SeismicDir::X);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let expected = seismic_freshness_fixture::expected_weights(density, finish, seismic_live);
+        for (layer, weight) in app.core.model.layers().iter().zip(expected) {
+            assert!(
+                (layer.weight.unwrap() - weight).abs() < 1e-7,
+                "{layer:?} / {weight}"
+            );
+        }
+        let upper_alpha = expected[1] / expected.iter().sum::<f64>();
+        let upper_ai = 1.0 + (1.0 / upper_alpha.sqrt() - upper_alpha) * 0.4;
+        for (name, axis) in [(EX_CASE_NAME, 0), (EY_CASE_NAME, 1)] {
+            let loads = &app
+                .core
+                .model
+                .load_cases
+                .iter()
+                .find(|case| case.name == name)
+                .unwrap()
+                .nodal;
+            assert!(
+                (loads.iter().map(|load| load.values[axis]).sum::<f64>()
+                    - 0.2 * expected.iter().sum::<f64>())
+                .abs()
+                    < 1e-7
+            );
+            assert!((loads[1].values[axis] - 0.2 * upper_ai * expected[1]).abs() < 1e-7);
+        }
+        assert!(app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .seismic(SeismicDir::X)
+            .is_some());
+        let revision = app.core.scoped.undo.revision();
+        let record = app.core.model.seismic_weight_generation.clone();
+        app.run_seismic(SeismicDir::Y);
+        app.run_preparation();
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        assert_eq!(app.core.model.seismic_weight_generation, record);
+        app.core.model.stories[1].name = "表示名".into();
+        app.sync_auto_load_cases_action();
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        assert_eq!(app.core.model.seismic_weight_generation, record);
+    }
+}
+
+#[test]
+fn freshness_preparation_undo_and_saved_output_tampering_are_detected() {
+    let mut app = App::default();
+    app.load_model(seismic_freshness_fixture::two_storeys());
+    app.run_preparation();
+    let before = app.core.model.clone();
+    app.core.model.materials[0].density = 2.6e-9;
+    app.sync_auto_load_cases_action();
+    let fresh = app.core.model.clone();
+    app.core.scoped.undo.undo(&mut app.core.model);
+    assert_eq!(app.core.model.stories, before.stories);
+    assert_eq!(app.core.model.load_cases, before.load_cases);
+    app.core.scoped.undo.redo(&mut app.core.model);
+    assert!(app.core.model.eq_ignoring_dofmap(&fresh));
+    let bytes = rmp_serde::to_vec_named(&app.core.model).unwrap();
+    app.core.model = rmp_serde::from_slice(&bytes).unwrap();
+    app.core.model.stories[1].seismic_weight = Some(1.0);
+    app.sync_auto_load_cases_action();
+    assert_eq!(app.core.model.stories, fresh.stories);
+    assert_eq!(app.core.model.load_cases, fresh.load_cases);
+    app.core.model.seismic_weight_generation = None;
+    app.sync_auto_load_cases_action();
+    assert!(sepika_job::weight_preparation::weights_are_current(
+        &app.core.model,
+        app.core.analysis_cfg.mass_method
+    ));
+    let revision = app.core.scoped.undo.revision();
+    app.sync_auto_load_cases_action();
+    assert_eq!(app.core.scoped.undo.revision(), revision);
+}
+
+#[test]
+fn rejected_prepared_model_never_leaves_old_auto_seismic_loads_usable() {
+    let mut app = App::default();
+    app.load_model(seismic_freshness_fixture::two_storeys());
+    app.run_preparation();
+    app.run_seismic(SeismicDir::X);
+    assert!(app.core.scoped.last_error.is_none());
+    if let sepika_core::model::SlabShape::Attached {
+        anchor: sepika_core::model::RegionAnchor::Line { span, .. },
+        ..
+    } = &mut app.core.model.slabs[0].shape
+    {
+        *span = [0.0, 0.0];
+    }
+    app.run_seismic(SeismicDir::X);
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("span"));
+    for name in [EX_CASE_NAME, EY_CASE_NAME] {
+        let case = app
+            .core
+            .model
+            .load_cases
+            .iter()
+            .find(|case| case.name == name)
+            .unwrap();
+        assert!(sepika_job::compute::missing_seismic_horizontal_load(case));
+    }
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .seismic(SeismicDir::X)
+        .is_none());
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn stb_strength_gui_edit_transaction_changes_result_input_and_restores_omission() {
+    use sepika_core::model::StrengthSource;
+    let path = test_tmp().join("520-strength-input.stb");
+    std::fs::write(
+        &path,
+        include_str!("../../../sepika-io/tests/fixtures/strength_priority.stb"),
+    )
+    .unwrap();
+    let mut app = App::default();
+    app.import_stbridge_from(path.clone());
+    let before = app.core.model.clone();
+    assert_eq!(
+        before.element_material(&before.elements[0]).unwrap().fc,
+        Some(36.)
+    );
+    let key = result_validity::ResultInputKey::Modal;
+    let generation = app.result_input(&key);
+    let mut input = before.stb_strengths.clone();
+    input.members[0].concrete = None;
+    input.sections[0].concrete = None;
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::CompositeCommand {
+            label: "強度編集".into(),
+            children: vec![
+                Box::new(sepika_edit::SetStbStrengths { input }),
+                Box::new(sepika_edit::SetSourceStoryConcreteStrength {
+                    source_story: 1,
+                    strength: Some("Fc33".into()),
+                }),
+            ],
+        }));
+    app.apply_pending_story_command();
+    assert_ne!(generation, app.result_input(&key));
+    let resolved = app
+        .core
+        .model
+        .resolve_stb_concrete(&app.core.model.stb_strengths.members[0])
+        .unwrap();
+    assert_eq!(resolved.value, 33.);
+    assert_eq!(resolved.source, StrengthSource::Story);
+    let output = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
+    let again = sepika_io::stbridge::import_stbridge(&output).unwrap();
+    assert!(again.stb_strengths.members[0].concrete.is_none());
+    assert!(again.stb_strengths.sections[0].concrete.is_none());
+    app.undo_action();
+    assert!(app.core.model.eq_ignoring_dofmap(&before));
+    assert_eq!(generation, app.result_input(&key));
+    app.redo_action();
+    assert_eq!(
+        app.core
+            .model
+            .element_material(&app.core.model.elements[0])
+            .unwrap()
+            .fc,
+        Some(33.)
+    );
+    let context = egui::Context::default();
+    let _ = context.run_ui(Default::default(), |ui| {
+        app.preparation_panel(ui);
+    });
+    std::fs::remove_file(path).unwrap();
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn stb_strength_gui_raw_src_grade_edit_updates_material_and_result_input() {
+    let path = test_tmp().join("520-src-strength-edit.stb");
+    std::fs::write(
+        &path,
+        include_str!("../../../sepika-io/tests/fixtures/strength_src.stb"),
+    )
+    .unwrap();
+    let mut app = App::default();
+    app.import_stbridge_from(path);
+    let before = app.core.model.clone();
+    let key = result_validity::ResultInputKey::Modal;
+    let generation = app.result_input(&key);
+    let mut input = before.stb_strengths.clone();
+    input.sections[0].steel[0].strength = "SN400B".into();
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::SetStbStrengths { input }));
+    app.apply_pending_story_command();
+    assert_eq!(
+        app.core
+            .model
+            .element_steel_material(&app.core.model.elements[0])
+            .unwrap()
+            .fy,
+        Some(235.)
+    );
+    assert_eq!(
+        app.core
+            .model
+            .element_material(&app.core.model.elements[0])
+            .unwrap()
+            .fc,
+        Some(36.)
+    );
+    assert!(app.core.model.stb_strength_diagnostics().is_empty());
+    assert_ne!(generation, app.result_input(&key));
+    app.undo_action();
+    assert!(app.core.model.eq_ignoring_dofmap(&before));
+    assert_eq!(generation, app.result_input(&key));
+    app.redo_action();
+    assert_eq!(
+        app.core
+            .model
+            .element_steel_material(&app.core.model.elements[0])
+            .unwrap()
+            .fy,
+        Some(235.)
+    );
+}
+
+#[test]
+fn wall_opening_edit_undo_and_preparation_refresh_independent_band_weight() {
+    use sepika_core::model::{WallDlSupport, WallOpening, WallWeightGenerationMode};
+    let mut app = App::default();
+    let mut model = super::steel_wall_notice_tests::steel_wall_model();
+    model.wall_weight_generation = None;
+    model.wall_plates[0].dl_support = Some(WallDlSupport::LowerBeam);
+    model.wall_plates[0].openings = vec![WallOpening {
+        width: 1000.0,
+        height: 1000.0,
+        offset: Some([2000.0, 2400.0]),
+    }];
+    app.load_model(model);
+    app.run_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert_eq!(
+        app.core.model.wall_weight_generation,
+        Some(WallWeightGenerationMode::Geometry)
+    );
+    app.core.model.validate_wall_weight_generation().unwrap();
+    #[cfg(feature = "gui")]
+    {
+        app.ui.scoped.wall_plate_draft.target = Some(app.core.model.wall_plates[0].id);
+        let ctx = egui::Context::default();
+        let rendered = ctx.run_ui(Default::default(), |ui| {
+            crate::tables::wall_plates::wall_plates_table(ui, &mut app);
+            crate::prep_view::preparation_panel(ui, &mut app);
+        });
+        fn has_text(shape: &egui::epaint::Shape, needle: &str) -> bool {
+            match shape {
+                egui::epaint::Shape::Text(text) => text.galley.text().contains(needle),
+                egui::epaint::Shape::Vec(parts) => parts.iter().any(|p| has_text(p, needle)),
+                _ => false,
+            }
+        }
+        assert!(rendered
+            .shapes
+            .iter()
+            .any(|s| has_text(&s.shape, "下梁全量")));
+        assert!(rendered.shapes.iter().any(|s| has_text(&s.shape, "重量")));
+        app.core.model.validate_wall_weight_generation().unwrap();
+    }
+    let before = app.core.model.stories.clone();
+    let p = app.core.model.wall_plates[0].clone();
+    app.core.scoped.undo.run(
+        &mut app.core.model,
+        Box::new(sepika_edit::SetWallPlateAttrs {
+            id: p.id,
+            dl_support: p.dl_support,
+            self_weight_shares: p.self_weight_shares,
+            opening_area: p.opening_area,
+            opening_weight: p.opening_weight,
+            openings: vec![WallOpening {
+                width: 1000.0,
+                height: 1000.0,
+                offset: Some([2000.0, 100.0]),
+            }],
+            loads: p.loads,
+            slit: p.slit,
+        }),
+    );
+    assert!(app.core.model.validate_wall_weight_generation().is_err());
+    app.core.scoped.undo.undo(&mut app.core.model);
+    app.core.model.validate_wall_weight_generation().unwrap();
+    assert_eq!(app.core.model.stories, before);
+    app.core.scoped.undo.redo(&mut app.core.model);
+    app.run_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.core.model.validate_wall_weight_generation().unwrap();
+    assert_ne!(
+        app.core.model.stories[0].wall_weights,
+        before[0].wall_weights
+    );
+    let once = app.core.model.load_cases.clone();
+    app.run_preparation();
+    assert_eq!(app.core.model.load_cases, once);
+    assert!(app
+        .core
+        .scoped
+        .preparation
+        .as_ref()
+        .unwrap()
+        .stories
+        .iter()
+        .any(|s| !s.wall_weights.is_empty()));
+}
+
+fn load_state_gui_contract_model() -> sepika_core::model::Model {
+    use sepika_core::model::{LoadCase, LoadCaseKind as K, LoadCombination, NodalLoad};
+    let mut model = crate::sample::portal_frame();
+    let mut top = model.nodes[2].clone();
+    top.id = NodeId(1);
+    top.coord = [0.0, 0.0, 3000.0];
+    model.nodes = vec![model.nodes[0].clone(), top];
+    model.elements.truncate(1);
+    model.elements[0].nodes = [NodeId(0), NodeId(1)].into_iter().collect();
+    model.load_cases = [
+        (K::Dead, 100.0),
+        (K::Live, 20.0),
+        (K::Snow, 40.0),
+        (K::Seismic, 30.0),
+        (K::Seismic, 30.0),
+        (K::Wind, 30.0),
+        (K::LiveSeismic, 8.0),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, (kind, kn))| LoadCase {
+        id: LoadCaseId(i as u32),
+        name: format!("手入力{i}"),
+        kind,
+        nodal: vec![NodalLoad::manual(
+            NodeId(1),
+            [kn * 1000.0, 0.0, -kn * 1000.0, 0.0, 0.0, 0.0],
+        )],
+        member: vec![],
+    })
+    .collect();
+    for extra in [
+        vec![],
+        vec![(2, 0.7)],
+        vec![(2, 1.0)],
+        vec![(2, 0.35), (3, 1.0)],
+        vec![(2, 0.35), (3, -1.0)],
+        vec![(2, 0.35), (4, 1.0)],
+        vec![(2, 0.35), (4, -1.0)],
+        vec![(5, 1.0)],
+        vec![(2, 0.35), (5, 1.0)],
+    ] {
+        let mut terms = vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)];
+        terms.extend(extra.into_iter().map(|(id, f)| (LoadCaseId(id), f)));
+        model.combinations.push(LoadCombination {
+            name: format!("任意名称{}", model.combinations.len()),
+            terms,
+        });
+    }
+    model
+}
+
+#[test]
+fn load_state_gui_actual_checks_selection_and_saved_terms_keep_n_q_m_and_duration() {
+    let path = test_tmp().join("load-state-contract.ovika");
+    let model = load_state_gui_contract_model();
+    sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+    let mut app = App::default();
+    app.load_model(sepika_io::ovika::load_ovika(&path).unwrap().model);
+    std::fs::remove_file(path).unwrap();
+    for (index, kn, term) in [
+        (0, 120.0, LoadTerm::Long),
+        (1, 148.0, LoadTerm::Long),
+        (2, 160.0, LoadTerm::Short),
+        (3, 164.0, LoadTerm::Short),
+        (4, 104.0, LoadTerm::Short),
+        (5, 164.0, LoadTerm::Short),
+        (6, 104.0, LoadTerm::Short),
+        (7, 150.0, LoadTerm::Short),
+        (8, 164.0, LoadTerm::Short),
+    ] {
+        app.run_combination(index);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app.select_displayed_result(StaticKey::Combo(index));
+        assert_eq!(app.core.design_term, term);
+        assert!(app.selected_design_load_state().unwrap().combination);
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        let (_, f) = bundle.member_forces[0]
+            .1
+            .at
+            .iter()
+            .find(|(p, _)| *p == 0.0)
+            .unwrap();
+        assert!((f[0].abs() / 1000.0 - kn).abs() < 1e-8);
+        assert!((f[1].hypot(f[2]) / 1000.0 - kn).abs() < 1e-8);
+        assert!((f[4].hypot(f[5]) / 1_000_000.0 - 3.0 * kn).abs() < 1e-8);
+        assert!(bundle
+            .member_checks
+            .iter()
+            .flat_map(|m| &m.positions)
+            .any(|p| matches!(p.outcome, sepika_design_jp::CheckOutcome::Checked(_))));
+    }
+    app.run_linear_static(LoadCaseId(2));
+    assert_eq!(app.core.design_term, LoadTerm::Short);
+    assert!(!app.selected_design_load_state().unwrap().combination);
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .iter()
+        .flat_map(|m| &m.positions)
+        .all(|p| matches!(p.outcome, sepika_design_jp::CheckOutcome::Skipped { .. })));
+    app.run_linear_static(LoadCaseId(0));
+    assert_eq!(app.core.design_term, LoadTerm::Long);
+    app.core.model.load_cases[0].kind = sepika_core::model::LoadCaseKind::Other;
+    app.run_design_check();
+    assert!(app.selected_design_load_state().is_err());
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .iter()
+        .flat_map(|m| &m.positions)
+        .all(|p| matches!(p.outcome, sepika_design_jp::CheckOutcome::Skipped { .. })));
+}
+
 pub(super) fn select_holding_points(app: &mut App) {
     use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
     let dir = app.core.scoped.pushover_view_dir;
@@ -11245,6 +11820,221 @@ pub(super) fn select_holding_points(app: &mut App) {
                     "テストの明示採用点".into(),
                 )
                 .ok();
+        }
+    }
+}
+
+#[test]
+fn public_story_insertion_keeps_automatic_weight_origin_and_manual_edits_through_undo() {
+    use sepika_core::ids::{ElemId, NodeId, StoryId};
+    use sepika_core::model::Constraint;
+    use sepika_edit::UndoStack;
+    for manual_weight in [None, Some(100100.0)] {
+        let mut model = seismic_freshness_fixture::two_storeys();
+        let settings = sepika_job::AnalysisSettings::default();
+        sepika_job::prepare::prepare_model(&mut model, &settings, None, true).unwrap();
+        let upper = model.generated_masters[2];
+        if let Some(value) = manual_weight {
+            for constraint in &mut model.constraints {
+                if let Constraint::RigidDiaphragm { master, weight, .. } = constraint {
+                    if *master == upper {
+                        *weight = Some(value);
+                    }
+                }
+            }
+        }
+        let first = model.nodes.len() as u32;
+        for (offset, template) in [4usize, 5].into_iter().enumerate() {
+            let mut node = model.nodes[template].clone();
+            node.id = NodeId(first + offset as u32);
+            node.coord[2] = 18750.0;
+            node.story = None;
+            model.nodes.push(node);
+        }
+        let mut beam = model.elements[5].clone();
+        beam.id = ElemId(model.elements.len() as u32);
+        beam.nodes = [NodeId(first), NodeId(first + 1)].into_iter().collect();
+        model.elements.push(beam);
+        let record_before = model.seismic_weight_generation.clone();
+        let mut undo = UndoStack::default();
+        assert!(undo.run(
+            &mut model,
+            Box::new(sepika_edit::AddStory {
+                name: "途中階".into(),
+                elevation: 18750.0,
+            })
+        ));
+        let is_auto = |model: &sepika_core::model::Model| {
+            model.constraints.iter().any(|constraint| {
+                matches!(constraint, Constraint::RigidDiaphragm { story, master, .. } if *story == StoryId(3) && *master == upper)
+                    && model.is_automatic_seismic_diaphragm(constraint)
+            })
+        };
+        assert_eq!(is_auto(&model), manual_weight.is_none());
+        let shifted = model.seismic_weight_generation.clone();
+        assert_eq!(
+            shifted.as_ref().unwrap().calculated_weights[2].0,
+            StoryId(3)
+        );
+        undo.undo(&mut model);
+        assert_eq!(model.seismic_weight_generation, record_before);
+        undo.redo(&mut model);
+        assert_eq!(model.seismic_weight_generation, shifted);
+        model.materials[0].density = 2.6e-9;
+        let result =
+            sepika_job::prepare::prepare_model(&mut model, &settings, None, false).unwrap();
+        assert!(
+            sepika_job::weight_preparation::weights_are_current(&model, settings.mass_method),
+            "{:?}",
+            result.notices
+        );
+        for name in [
+            sepika_core::model::EX_CASE_NAME,
+            sepika_core::model::EY_CASE_NAME,
+        ] {
+            assert!(
+                model
+                    .load_cases
+                    .iter()
+                    .any(|case| case.name == name && !case.nodal.is_empty()),
+                "{:?}",
+                result.notices
+            );
+        }
+        let expected_upper_n = 103548.04597;
+        assert!((model.stories[3].seismic_weight.unwrap() - expected_upper_n).abs() < 1e-8);
+        let diaphragm = model.diaphragms_of(StoryId(3)).next().unwrap();
+        assert_eq!(diaphragm.master, upper);
+        assert!(
+            (diaphragm.weight.unwrap() - manual_weight.unwrap_or(expected_upper_n)).abs() < 1e-8
+        );
+        assert_eq!(is_auto(&model), manual_weight.is_none());
+        let record = model.seismic_weight_generation.clone();
+        sepika_job::prepare::prepare_model(&mut model, &settings, None, false).unwrap();
+        assert_eq!(model.seismic_weight_generation, record);
+        let path = std::env::temp_dir().join(format!(
+            "439-inserted-generation-{}-{}.ovika",
+            std::process::id(),
+            manual_weight.is_some(),
+        ));
+        sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+        let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        std::fs::remove_file(path).unwrap();
+        assert!(restored.eq_ignoring_dofmap(&model));
+        assert!(sepika_job::weight_preparation::weights_are_current(
+            &restored,
+            settings.mass_method
+        ));
+        model = restored;
+        let inserted_master = model.diaphragms_of(StoryId(2)).next().unwrap().master;
+        let mut deletion_undo = UndoStack::default();
+        assert!(deletion_undo.run(
+            &mut model,
+            Box::new(sepika_edit::DeleteStory { story: StoryId(2) })
+        ));
+        let deleted_record = model.seismic_weight_generation.clone();
+        assert_eq!(deleted_record.as_ref().unwrap().calculated_weights.len(), 3);
+        assert!(deleted_record.as_ref().unwrap().automatic_diaphragms.iter().all(|constraint| {
+            !matches!(constraint, Constraint::RigidDiaphragm { master, .. } if *master == inserted_master)
+        }));
+        assert!(!deleted_record
+            .as_ref()
+            .unwrap()
+            .automatic_master_restraints
+            .iter()
+            .any(|(master, _)| *master == inserted_master));
+        let upper_constraint = model.constraints.iter().find(|constraint| matches!(constraint, Constraint::RigidDiaphragm { master, .. } if *master == upper)).unwrap();
+        assert_eq!(
+            model.is_automatic_seismic_diaphragm(upper_constraint),
+            manual_weight.is_none()
+        );
+        deletion_undo.undo(&mut model);
+        assert_eq!(model.seismic_weight_generation, record);
+        deletion_undo.redo(&mut model);
+        assert_eq!(model.seismic_weight_generation, deleted_record);
+    }
+}
+
+#[test]
+fn public_node_deletion_and_undo_remap_automatic_master_and_slave_snapshots() {
+    use sepika_core::dof::Dof6Mask;
+    use sepika_core::ids::NodeId;
+    use sepika_core::model::{Constraint, Node};
+    let mut model = seismic_freshness_fixture::two_storeys();
+    let settings = sepika_job::AnalysisSettings::default();
+    sepika_job::prepare::prepare_model(&mut model, &settings, None, true).unwrap();
+    model.visit_node_ids(|node| node.0 += 1);
+    model.nodes.insert(
+        0,
+        Node {
+            id: NodeId(0),
+            coord: [-1000.0, 0.0, -1000.0],
+            restraint: Dof6Mask::FIXED,
+            mass: None,
+            story: None,
+            support_spring: None,
+        },
+    );
+    let record = model.seismic_weight_generation.as_mut().unwrap();
+    record
+        .automatic_diaphragms
+        .push(Constraint::rigid_diaphragm(
+            sepika_core::ids::StoryId(1),
+            NodeId(0),
+            vec![NodeId(1)],
+        ));
+    record
+        .automatic_master_restraints
+        .push((NodeId(0), Dof6Mask::FIXED));
+    let before = model.seismic_weight_generation.clone();
+    let mut undo = sepika_edit::UndoStack::default();
+    assert!(undo.run(
+        &mut model,
+        Box::new(sepika_edit::DeleteNode { id: NodeId(0) })
+    ));
+    for constraint in &model.constraints {
+        if let Constraint::RigidDiaphragm { master, .. } = constraint {
+            assert!(model.is_automatic_seismic_diaphragm(constraint));
+            assert!(model.is_automatic_seismic_master_restraint(*master));
+        }
+    }
+    let deleted = model.seismic_weight_generation.clone();
+    assert_eq!(
+        deleted.as_ref().unwrap().automatic_diaphragms.len() + 1,
+        before.as_ref().unwrap().automatic_diaphragms.len()
+    );
+    assert_eq!(
+        deleted.as_ref().unwrap().automatic_master_restraints.len() + 1,
+        before.as_ref().unwrap().automatic_master_restraints.len()
+    );
+    assert_eq!(
+        deleted.as_ref().unwrap().input_key,
+        before.as_ref().unwrap().input_key
+    );
+    assert_eq!(
+        deleted.as_ref().unwrap().output_key,
+        before.as_ref().unwrap().output_key
+    );
+
+    undo.undo(&mut model);
+    assert_eq!(model.seismic_weight_generation, before);
+    undo.redo(&mut model);
+    assert_eq!(model.seismic_weight_generation, deleted);
+    model.materials[0].density = 2.6e-9;
+    sepika_job::prepare::prepare_model(&mut model, &settings, None, false).unwrap();
+    for (story, expected_n) in
+        model
+            .layers()
+            .iter()
+            .zip(seismic_freshness_fixture::expected_weights(
+                2.6e-9, 0.0, 0.0,
+            ))
+    {
+        assert!((story.weight.unwrap() - expected_n).abs() < 1e-8);
+    }
+    for constraint in &model.constraints {
+        if let Constraint::RigidDiaphragm { story, weight, .. } = constraint {
+            assert_eq!(*weight, model.stories[story.index()].seismic_weight);
         }
     }
 }

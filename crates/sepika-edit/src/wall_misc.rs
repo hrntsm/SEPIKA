@@ -650,6 +650,11 @@ impl EditCommand for DeleteWallPlate {
             }
         }
 
+        let strength_input = model.stb_strengths.clone();
+        model
+            .stb_strengths
+            .members
+            .retain(|m| m.target != sepika_core::model::StrengthTarget::Wall(self.id));
         let removed = model.wall_plates.remove(idx);
         let target = self.id.0;
         model.visit_wall_plate_ids(|id| {
@@ -658,11 +663,15 @@ impl EditCommand for DeleteWallPlate {
             }
         });
 
-        Box::new(InsertWallPlate {
-            index: idx,
-            plate: removed,
-            region_refs,
-            assignment_refs,
+        Box::new(crate::strength::RestoreStrengthInput {
+            input: strength_input,
+            stories: model.source_stories.clone(),
+            inverse: Box::new(InsertWallPlate {
+                index: idx,
+                plate: removed,
+                region_refs,
+                assignment_refs,
+            }),
         })
     }
 
@@ -744,6 +753,7 @@ impl EditCommand for AddAttachedWallPlate {
         }
         let id = WallPlateId(model.wall_plates.len() as u32);
         model.wall_plates.push(WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id,
             shape: WallPlateShape::Attached {
@@ -793,6 +803,7 @@ impl EditCommand for AssignWallPlateToRegion {
             region: self.region,
             assignment: sepika_core::model::PlateAssignment::Plate(new_id),
             plate: Some(sepika_core::model::WallPlate {
+                dl_support: None,
                 self_weight_shares: Vec::new(),
                 id: new_id,
                 shape: sepika_core::model::WallPlateShape::Enclosed,
@@ -1084,6 +1095,7 @@ impl EditCommand for SetWallPlateSection {
 /// そのまま保存する（`WallPlate` が形によらず同じフィールドを持つ設計〔D3〕を
 /// コマンド側で崩さないため）。
 pub struct SetWallPlateAttrs {
+    pub dl_support: Option<sepika_core::model::WallDlSupport>,
     pub self_weight_shares: Vec<f64>,
     pub id: WallPlateId,
     pub opening_area: f64,
@@ -1102,6 +1114,7 @@ impl EditCommand for SetWallPlateAttrs {
         }
         let plate = &mut model.wall_plates[idx];
         let old = SetWallPlateAttrs {
+            dl_support: plate.dl_support,
             self_weight_shares: plate.self_weight_shares.clone(),
             id: self.id,
             opening_area: plate.opening_area,
@@ -1116,6 +1129,7 @@ impl EditCommand for SetWallPlateAttrs {
         plate.loads = self.loads.clone();
         plate.slit = self.slit;
         plate.self_weight_shares = self.self_weight_shares.clone();
+        plate.dl_support = self.dl_support;
         Box::new(old)
     }
 

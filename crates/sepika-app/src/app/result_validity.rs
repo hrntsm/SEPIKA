@@ -415,6 +415,7 @@ mod tests {
         let mut app = ready();
         app.run_eigen(1);
         app.core.analysis_cfg.ai_mode = AiMode::SemiPrecise;
+        app.run_eigen(1);
         app.run_static_all();
         assert!(app.compute_holding_capacity().is_err());
         let old_period = app.design_seismic_period().unwrap();
@@ -489,12 +490,23 @@ mod tests {
     #[test]
     fn 長期軸力の精算に使う組合せも再解析が必要になる() {
         let mut app = ready();
+        let p = LoadCaseId(app.core.model.load_cases.len() as u32);
+        app.core
+            .model
+            .load_cases
+            .push(sepika_core::model::LoadCase {
+                id: p,
+                name: "P=0".into(),
+                kind: sepika_core::model::LoadCaseKind::Live,
+                nodal: vec![],
+                member: vec![],
+            });
         app.core
             .model
             .combinations
             .push(sepika_core::model::LoadCombination {
                 name: "長期".into(),
-                terms: vec![(LoadCaseId(0), 1.0)],
+                terms: vec![(LoadCaseId(0), 1.0), (p, 1.0)],
             });
         app.run_static_all();
         app.run_pushover();
@@ -575,7 +587,7 @@ mod tests {
     #[test]
     fn 略算_qudは固有値の参考周期があっても独立略算値を採用する() {
         let mut app = ready();
-        app.core.model.stories[1].seismic_weight = Some(100_000.0);
+        app.core.model.stories[1].weight_override = Some(100_000.0);
         app.run_seismic(SeismicDir::X);
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
@@ -639,10 +651,10 @@ mod tests {
         basement.name = "B1".into();
         basement.elevation = 1000.0;
         basement.node_ids = vec![basement_node];
-        basement.seismic_weight = Some(100_000.0);
+        basement.weight_override = Some(100_000.0);
         basement.level_kind = sepika_core::model::StoryLevelKind::Basement { depth_mm: 0.0 };
         app.core.model.stories[1].id = StoryId(2);
-        app.core.model.stories[1].seismic_weight = Some(100_000.0);
+        app.core.model.stories[1].weight_override = Some(100_000.0);
         for node in &mut app.core.model.nodes {
             if node.story == Some(StoryId(1)) {
                 node.story = Some(StoryId(2));
@@ -658,16 +670,35 @@ mod tests {
         app.core.model.stories.insert(1, basement);
         let mut node = app.core.model.nodes[0].clone();
         node.id = basement_node;
+        node.coord[2] = 1000.0;
         node.story = Some(StoryId(1));
-        node.restraint = Dof6Mask(0b111110);
+        node.restraint = Dof6Mask(0b111100);
         app.core.model.nodes.push(node);
         let mut spring = app.core.model.elements[0].clone();
         spring.id = spring_id;
         spring.kind = sepika_core::model::ElementKind::NodalSpring;
         spring.nodes = [NodeId(0), basement_node].into_iter().collect();
         spring.section = None;
-        spring.spring = Some([1000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        spring.spring = Some([1000.0, 1000.0, 0.0, 0.0, 0.0, 0.0]);
+        app.core.model.elements.push(spring.clone());
+        let mut node = app.core.model.nodes[basement_node.index()].clone();
+        node.id = NodeId(app.core.model.nodes.len() as u32);
+        node.coord[1] += 6000.0;
+        spring.id = ElemId(app.core.model.elements.len() as u32);
+        spring.nodes = [NodeId(0), node.id].into_iter().collect();
+        app.core.model.nodes.push(node);
+        let other = spring.nodes[1];
         app.core.model.elements.push(spring);
+        app.core
+            .model
+            .constraints
+            .push(sepika_core::model::Constraint::RigidDiaphragm {
+                story: StoryId(1),
+                master: basement_node,
+                slaves: vec![other],
+                weight: Some(100_000.0),
+                ci_override: None,
+            });
         app.run_seismic(SeismicDir::X);
         assert!(
             app.core.scoped.last_error.is_none(),

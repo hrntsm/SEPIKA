@@ -198,6 +198,7 @@ mod tests {
             }],
             stories: vec![
                 Story {
+                    wall_weights: Vec::new(),
                     id: base,
                     name: "1F".to_string(),
                     elevation: 0.0,
@@ -212,6 +213,7 @@ mod tests {
                     fireproof: Default::default(),
                 },
                 Story {
+                    wall_weights: Vec::new(),
                     id: top_story,
                     name: "2F".to_string(),
                     elevation: 4000.0,

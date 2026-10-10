@@ -427,6 +427,7 @@ mod tests {
         model.slab_thickness = 150.0;
         model.next_secondary_member_id = 7;
         model.wall_plates.push(sepika_core::model::WallPlate {
+            dl_support: None,
             self_weight_shares: vec![0.75, 0.25, 0.0],
             id: sepika_core::ids::WallPlateId(0),
             shape: sepika_core::model::WallPlateShape::Enclosed,
@@ -525,6 +526,44 @@ mod tests {
             .read_to_end(&mut mb)
             .unwrap();
         serde_json::from_slice(&mb).unwrap()
+    }
+
+    #[test]
+    fn wall_weight_generation_mode_and_dl_choice_roundtrip_and_old_default() {
+        use sepika_core::model::{
+            WallDlSupport, WallPlate, WallPlateShape, WallWeightGenerationMode,
+        };
+        let mut model = make_3node_model();
+        model.wall_weight_generation = Some(WallWeightGenerationMode::GravityCasesOnly);
+        model.wall_plates.push(WallPlate {
+            id: sepika_core::ids::WallPlateId(0),
+            shape: WallPlateShape::Attached {
+                anchor: sepika_core::model::RegionAnchor::Point(NodeId(0)),
+                extent: Some([1.0, 1.0]),
+            },
+            section: None,
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: vec![],
+            loads: vec![],
+            slit: Default::default(),
+            self_weight_shares: vec![],
+            dl_support: Some(WallDlSupport::UpperBeam),
+        });
+        let path = crate::test_util::test_tmp().join("wall_weight_mode.ovika");
+        save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+        let loaded = load_ovika(&path).unwrap().model;
+        assert_eq!(loaded.wall_weight_generation, model.wall_weight_generation);
+        assert_eq!(
+            loaded.wall_plates[0].dl_support,
+            model.wall_plates[0].dl_support
+        );
+        let mut old = serde_json::to_value(&model).unwrap();
+        old.as_object_mut()
+            .unwrap()
+            .remove("wall_weight_generation");
+        let decoded: Model = serde_json::from_value(old).unwrap();
+        assert_eq!(decoded.wall_weight_generation, None);
     }
 
     #[test]
@@ -707,6 +746,7 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(i, elevation)| sepika_core::model::Story {
+                wall_weights: Vec::new(),
                 id: sepika_core::ids::StoryId(i as u32),
                 name: format!("{}F", i + 1),
                 elevation,

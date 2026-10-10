@@ -373,6 +373,7 @@ mod selection_tests {
                     id: WallPlateId(wall),
                     shape: WallPlateShape::Enclosed,
                     section: Some(SectionId(0)),
+                    dl_support: None,
                     self_weight_shares: Vec::new(),
                     opening_area: 0.0,
                     opening_weight: 0.0,

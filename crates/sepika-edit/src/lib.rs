@@ -490,3 +490,6 @@ pub use wall_misc::*;
 
 #[cfg(test)]
 mod tests;
+
+mod strength;
+pub use strength::{SetSourceStoryConcreteStrength, SetStbStrengths};

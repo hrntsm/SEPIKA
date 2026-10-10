@@ -23,19 +23,61 @@ impl App {
                     sepika_solver::statics::analysis::steel_height_ratio(&self.core.model);
                 Ok(sepika_load::ai::approx_t(height_m, steel_ratio))
             }
-            AiMode::SemiPrecise => self
-                .core
-                .scoped
-                .results
-                .as_ref()
-                .and_then(|r| r.modal.as_ref())
-                .and_then(|m| m.period.first().copied())
-                .ok_or_else(|| {
-                    "精算周期(固有値解析)が選択されていますが固有値解析が未実行です。\
-                     解析タブの固有値解析を先に実行してください\
-                     (EX/EY の地震荷重は更新されません)。"
-                        .to_string()
-                }),
+            AiMode::SemiPrecise => {
+                self.require_result_input(ResultInputKey::Modal)?;
+                self.core
+                    .scoped
+                    .results
+                    .as_ref()
+                    .and_then(|r| r.modal.as_ref())
+                    .and_then(|m| m.period.first().copied())
+                    .filter(|t| t.is_finite() && *t > 0.0)
+                    .ok_or_else(|| {
+                        "固有値解析の有効な一次周期がありません。固有値解析を再実行してください。"
+                            .into()
+                    })
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn precise_period_requires_existing_modal_input_record() {
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        app.generate_stories_action();
+        app.core.analysis_cfg.ai_mode = AiMode::SemiPrecise;
+        assert!(app
+            .design_seismic_period()
+            .unwrap_err()
+            .contains("入力識別情報"));
+        app.run_eigen(1);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        assert!(app.design_seismic_period().unwrap() > 0.0);
+        app.core.model.materials[0].density *= 0.9;
+        assert!(app
+            .design_seismic_period()
+            .unwrap_err()
+            .contains("一致しません"));
+        app.core.model.materials[0].density /= 0.9;
+        app.core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .input_records
+            .clear();
+        assert!(app
+            .design_seismic_period()
+            .unwrap_err()
+            .contains("入力識別情報"));
     }
 }

@@ -1963,6 +1963,7 @@ fn test_beam_new_misc_wall_wing_augments_column_inplane_stiffness() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         sepika_core::model::WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
             shape: sepika_core::model::WallPlateShape::Enclosed,
@@ -2129,6 +2130,7 @@ fn test_beam_new_misc_wall_strip_augments_girder_iy_without_100x() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         sepika_core::model::WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
             shape: sepika_core::model::WallPlateShape::Enclosed,
@@ -2339,6 +2341,7 @@ fn test_column_face_slit_drops_wing_wall_but_keeps_girder_strip() {
         model.add_enclosed_wall_plate_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             sepika_core::model::WallPlate {
+                dl_support: None,
                 self_weight_shares: Vec::new(),
                 id: sepika_core::ids::WallPlateId(0),
                 shape: sepika_core::model::WallPlateShape::Enclosed,
@@ -3442,6 +3445,7 @@ fn portal_with_wing_wall(col_depth: f64, beam_depth: f64, wall_thickness: f64) -
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(4), NodeId(5), NodeId(1)],
         sepika_core::model::WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
             shape: sepika_core::model::WallPlateShape::Enclosed,

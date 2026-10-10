@@ -1679,8 +1679,7 @@ pub fn column_live_load_factors(model: &sepika_core::model::Model) -> Vec<(ElemI
 /// - `kind == Dead` の全ケースを対象とする（標準構成では「DL」に躯体自重＋
 ///   スラブ固定荷重が自動同期される）。ただし「自重(自動)」
 ///   （未移行の場合のみ存在）は除外する
-///   （その場合は密度からの自重直接算入と二重計上になるため。
-///   [`density_self_weight_for_stories`] 参照）。
+///   （その場合は密度からの自重直接算入と二重計上になるため）。
 /// - `kind == LiveSeismic`（地震用積載）のケースがあれば併せて対象とする。
 ///   なければ `kind == Live`（長期用積載）で代用する
 ///   （地震用の積載荷重には地震用の値を用いる（令85条）。地震用の値が
@@ -1694,68 +1693,6 @@ pub fn column_live_load_factors(model: &sepika_core::model::Model) -> Vec<(ElemI
 ///   （並び順に依存する規約。新規モデルは kind 設定を推奨）。
 fn gravity_cases_for_seismic_weight(model: &sepika_core::model::Model) -> Vec<LoadCaseId> {
     sepika_job::gravity_case_ids_for_seismic_weight(model)
-}
-
-/// 階の自動生成で自重を材料密度から直接算入すべきか（地震用重量の二重計上防止）。
-///
-/// 標準構成では躯体自重は「DL」（kind=Dead・[`DL_CASE_NAME`]）へ自動同期され、
-/// `gravity_cases_for_seismic_weight` が DL を重力ケースに含めるため、密度からの
-/// 直接算入は行わない（`false`）。DL ケースがないモデル・手動構成では
-/// 密度から直接算入する（`true`）。
-fn density_self_weight_for_stories(model: &sepika_core::model::Model) -> bool {
-    !model
-        .load_cases
-        .iter()
-        .any(|lc| lc.kind == sepika_core::model::LoadCaseKind::Dead && lc.name == DL_CASE_NAME)
-}
-
-/// 階の生成結果を `ApplyStories` で適用したときにモデルが変化するか。
-///
-/// 準備計算は実行のたびに階を作り直すため、モデルが変わっていないのに毎回
-/// undo 履歴を積み、`mark_edited` で解析結果を stale にしてしまわないよう、
-/// 適用前に「差分があるか」を判定する（`generate_stories_action` の冪等化）。
-///
-/// [`sepika_edit::ApplyStories`] が書き換える対象をすべて突き合わせる:
-/// 階・所属階・剛床拘束（非剛床の拘束を残したうえで剛床拘束を末尾へ置き換えるため、
-/// 適用後の並びを組み立てて比較する）・剛床代表節点（ID の位置に同じ内容の節点が
-/// 既にあること）・`generated_masters`・質量方式。
-fn story_gen_changes_model(
-    model: &sepika_core::model::Model,
-    gen: &sepika_load::story_gen::StoryGenResult,
-    mass_method: sepika_core::model::MassMethod,
-) -> bool {
-    use sepika_core::model::Constraint;
-    if model.mass_method != mass_method
-        || model.stories != gen.stories
-        || model.generated_masters != gen.generated_masters
-        || model.damper_mass_generation.as_ref() != Some(&gen.damper_mass_generation)
-    {
-        return true;
-    }
-    if gen
-        .rep_nodes
-        .iter()
-        .any(|rn| model.nodes.get(rn.id.index()) != Some(rn))
-    {
-        return true;
-    }
-    let rep: std::collections::HashSet<NodeId> = gen.rep_nodes.iter().map(|n| n.id).collect();
-    if model
-        .nodes
-        .iter()
-        .zip(gen.node_story.iter())
-        .any(|(n, s)| !rep.contains(&n.id) && n.story != *s)
-    {
-        return true;
-    }
-    let mut applied: Vec<Constraint> = model
-        .constraints
-        .iter()
-        .filter(|c| !matches!(c, Constraint::RigidDiaphragm { .. }))
-        .cloned()
-        .collect();
-    applied.extend(gen.constraints.iter().cloned());
-    applied != model.constraints
 }
 
 /// 波形 CSV/テキストの内容を解析する（ヘッドレステスト可能な純粋関数）。

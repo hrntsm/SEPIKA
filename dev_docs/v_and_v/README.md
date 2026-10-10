@@ -33,6 +33,10 @@
 法令・告示・学会規準等の 1 次資料で示し、参照実装との突合はあくまで
 「同種の実務計算と結果・機能範囲が整合しているか」の検証記録として保持する。
 
+## 壁自重の用途配分
+
+[Issue #444 の独立幾何・実入口検証](壁自重の独立用途配分_Issue444_2026-10.md)。DL支持、階帯、共通physical/matrix総量を別々に照合する。局所質量分布の精度と未閲覧原本は未検証として保持する。
+
 ## レポート構造
 
 各エントリは以下の項目を持つ:
@@ -70,7 +74,10 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [標準強度_Issue520_2026-10.md](標準強度_Issue520_2026-10.md) | 標準2.0.2強度の元省略・優先解決・径別/部位別・編集/保存/出力 | ✅（Scope内強度Verification、全相互運用/Validationは未対応） |
 | [割当領域同一性_Issue506_2026-10.md](割当領域同一性_Issue506_2026-10.md) | 支持 ID/span・版と入力荷重の保持、孤立版診断、確認付き編集と原子的拒否・Undo/Redo | ✅（Scope内の状態契約Verification。力学・描画Validationは対象外） |
+| [地震重量の鮮度と共通準備_Issue439_2026-10.md](地震重量の鮮度と共通準備_Issue439_2026-10.md) | 入力/生成出力一致・GUI/MCP実EX・atomic失敗・Modal世代・Undo/保存・追加/挿入階マスター一意・公開編集ID/Undo | 🔶（入口Verification、#486適用制限と実測Validationは残る） |
+| [荷重状態と検定対象_Issue487_2026-10.md](荷重状態と検定対象_Issue487_2026-10.md) | 荷重状態・用途別P・選択重力参照・GUI/MCP・組合せ非保存/単独結果保護・CSV・小梁床長期略算/選択短期未検定 | 🔶（Verification、現行法原文再取得・Validation未） |
 | [目的別確定層力_Issue442_2026-10.md](目的別確定層力_Issue442_2026-10.md) | 目的別run／step、符号付き層切断面、外力累積・支持ばね、壁側柱、GUI共通入口・MCP・保存・帳票 | ✅（Scope内Verification。一般配置・実験Validation・現行法全網羅は未完） |
 | [RC梁αyと追加端ばね_Issue523_2026-10.md](RC梁αyと追加端ばね_Issue523_2026-10.md) | 採用分岐、T方向別数値、総角と追加角、明示基準の実factory・GUI・解析入口 | 🔶（Scope内Verification。原典完全照合・実験Validation・T全解析接続は未完） |
 | [地震力標準式と適用診断_Issue486_2026-10.md](地震力標準式と適用診断_Issue486_2026-10.md) | 標準地震力・Qud/増分標準接続・共通GL/入力/適用診断・GUI/MCP入口と失敗理由 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |
@@ -178,9 +185,10 @@
 | 8 | 線形静的解析 | sepika-solver | linear.rs | `test_*`（座標変換回帰 `test_beam_to_global_transverse_uses_correct_inertia` 含む） | P2 | ✅ |
 | 9 | 固有値解析 | sepika-solver | eigen.rs | `test_1dof_period` | P2 | ✅ |
 | 10 | 地震力標準式・適用診断 | sepika-load / sepika-solver / sepika-app / sepika-mcp | ai.rs / statics/analysis/seismic.rs / app/tests.rs / design/holding.rs / nonlinear/pushover/driver.rs / server.rs | [Issue486の独立期待値・入口対応表](地震力標準式と適用診断_Issue486_2026-10.md) | P2 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |
+| 10a | 地震重量鮮度・共通準備 | sepika-core / sepika-load / sepika-job / sepika-app / sepika-mcp | weight_preparation.rs / prepare.rs / actions/loads.rs / period.rs / server.rs | [Issue439の実入口試験表](地震重量の鮮度と共通準備_Issue439_2026-10.md#独立期待値と直接試験) | 横断 | 🔶（入口Verification、法適用・実測は別） |
 | 11 | 床荷重分割 | sepika-load / sepika-solver | floor/{mod,polygon}.rs / statics/analysis/tests.rs | `polygon::verification::*` / `distribution_verification::*` / `floor::tests::*` / `test_model_issues_warns_floating_plate`（正当な水平全周支持床の警告と解析前チェック）。幾何Verification済み（台形は[Issue438検証](凸台形の独立幾何と格子差_Issue438_2026-10.md)）、実験Validation未実施 | P2 | 🔶 |
 | 11a | 壁・間柱の自重支持先 | sepika-load / sepika-app | wall_plate_load.rs / cascade.rs | `wall_plate_load::tests`・`vertical_post_uses_explicit_end_shares`・`明示負担率で密度直接集計とdl集計の階重量が一致する` | [検証記録](壁版の支持範囲判定_2026-09.md) | 🔶（実測照合は未実施） |
-| 12 | 荷重組合せ | sepika-load | combo.rs | `test_combinations` | P2 | ✅ |
+| 12 | 荷重組合せ・検定対象 | sepika-core / sepika-job / sepika-app / sepika-mcp | load_combo.rs、design_q0.rs、app/tests.rs、tests.rs | [荷重状態の検証対応](荷重状態と検定対象_Issue487_2026-10.md#直接検証の対応) | P2 | 🔶（原文再取得・Validation未） |
 | 13 | 許容応力度設計 | sepika-design-jp | allowable_stress.rs | `test_beam_check_bending_rect_section_hand_calc` 他 | P3 | ✅ |
 | 14 | 保有耐力 | sepika-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
 | 15 | プッシュオーバー | sepika-solver | pushover.rs | — | P5 | 🔶 |
@@ -199,6 +207,7 @@
 | 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*` | P7 | 🔶 |
 | 26 | 数量積算（部位別のコンクリート・型枠・鉄筋・鉄骨・継手個所） | sepika-design-jp | quantity/{mod,member,rebar}.rs | `quantity::member::tests::*`（手計算照合）/`quantity::tests::*`（走査・分類）/`summary::tests::test_quantity_csv_from_sample_model`（CSV 一気通貫）/`test_quantity_takeoff_json_column`（MCP） | 横断 | 🔶 |
 | 26a | 梁型枠の床接触控除 | sepika-design-jp / sepika-app / sepika-mcp | quantity/contact.rs・tests.rs、tests/beam_contact_quantity.rs | [Issue451検証](梁型枠接触和集合_Issue451_2026-10.md)の独立期待値・診断・実入口対応表 | 横断 | 🔶（限定Verification、一般形状・実施工未検証） |
+| 27a | ST-Bridge標準強度と省略 | sepika-core / sepika-io / sepika-edit / sepika-app / sepika-mcp | model/strength.rs、stbridge/strength_tests.rs、app/tests.rs、tests.rs | [Issue520の直接回帰表](標準強度_Issue520_2026-10.md#独立期待値と入口) | 横断 | ✅（Scope内Verification） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
 | 28 | 二次部材小梁の分配 Span 検定 | sepika-load / sepika-app | floor/joist_design.rs, check.rs | `distribution_loads_on_shared_joist_match_average_width` / `split_slab_edges_compose_onto_full_joist` / `span_attaches_to_nearest_joist_only` / `perimeter_parallel_joist_does_not_steal_beam_span` / `joist_distribution_cover_rejects_half_span` / `shared_joist_expects_both_slabs` / `missing_expected_slab_is_not_ready` / `zero_expected_axis_does_not_receive_spans` / `joist_design_checks_cover_imported_secondary_members` | 横断 | ☑ |
 | 29 | 耐震スリット（辺ごとの縁切り。袖壁・腰壁垂壁・剛域・耐震壁判定・自重） | sepika-element / sepika-load | wall/misc_wall.rs, frame/beam/{construct,rigid_zone}.rs, story_gen/self_weight_calc.rs | `test_column_face_slit_drops_wing_wall_but_keeps_girder_strip` / `test_strip_height_follows_beam_face_slit` / `test_any_slit_breaks_seismic_wall` / `柱際スリットのある側は剛域の袖壁張り出しを持たない` / `test_column_face_slit_wall_is_collected_as_misc_wall` / `test_column_face_slit_is_per_side` / `test_column_face_slit_does_not_change_self_weight_destination` / `test_bottom_beam_face_slit_sends_self_weight_to_top` / `test_top_beam_face_slit_sends_self_weight_to_bottom`（柱際は行き先不変、梁際の切れ側で全量移動） | 横断 | 🔶 |

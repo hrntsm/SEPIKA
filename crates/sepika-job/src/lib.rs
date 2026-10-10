@@ -21,6 +21,7 @@ pub mod prepare;
 pub mod sample_wave;
 pub mod settings;
 pub mod ultimate_demand;
+pub mod weight_preparation;
 
 pub use auto_loads::{
     apply_auto_load_cases, compute_auto_load_cases, compute_dl_beam_loads,
@@ -28,8 +29,10 @@ pub use auto_loads::{
     AutoLoadComputeResult,
 };
 pub use design_q0::{
-    gravity_case_ids_for_seismic_weight, simple_beam_q0_by_elem, simple_beam_q0_by_gravity_cases,
-    sum_analyzed_gravity_member_forces, sum_member_forces_lists,
+    complete_design_gravity_forces, complete_gravity_member_forces, design_gravity_terms,
+    gravity_case_ids_for_design, gravity_case_ids_for_seismic_weight, simple_beam_q0_by_elem,
+    simple_beam_q0_by_gravity_cases, simple_beam_q0_by_terms, sum_analyzed_gravity_member_forces,
+    sum_member_forces_lists,
 };
 pub use error::{JobError, JobResult};
 pub use lumped_mass::{build_lumped_mass, LumpedMassBuildInput};

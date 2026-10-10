@@ -1,0 +1,33 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="split" app_name="SEPIKA test" app_version="1" strength_concrete="Fc21"/>
+  <StbModel>
+  <StbNodes>
+    <StbNode id="1" X="0" Y="0" Z="0" kind="ON_GIRDER"/>
+    <StbNode id="2" X="4000" Y="0" Z="0" kind="ON_GIRDER"/>
+    <StbNode id="3" X="4000" Y="3000" Z="0" kind="ON_GIRDER"/>
+    <StbNode id="4" X="0" Y="3000" Z="0" kind="ON_GIRDER"/>
+    <StbNode id="5" X="2000" Y="0" Z="0" kind="ON_GIRDER"/>
+    <StbNode id="6" X="2000" Y="3000" Z="0" kind="ON_GIRDER"/>
+  </StbNodes><StbStories><StbStory id="2" name="source" height="0" kind="GENERAL" strength_concrete="Fc27"><StbNodeIdList><StbNodeId id="1"/></StbNodeIdList></StbStory></StbStories>
+  <StbMembers>
+    <StbGirders>
+      <StbGirder id="11" id_node_start="1" id_node_end="2" name="StbGirder11" kind_structure="RC" id_section="9" isFoundation="false"/>
+      <StbGirder id="12" id_node_start="2" id_node_end="3" name="StbGirder12" kind_structure="RC" id_section="9" isFoundation="false"/>
+      <StbGirder id="13" id_node_start="3" id_node_end="4" name="StbGirder13" kind_structure="RC" id_section="9" isFoundation="false"/>
+      <StbGirder id="14" id_node_start="4" id_node_end="1" name="StbGirder14" kind_structure="RC" id_section="9" isFoundation="false"/>
+    </StbGirders>
+    <StbBeams>
+      <StbBeam id="2" name="StbBeam2" id_node_start="5" id_node_end="6" kind_structure="RC" id_section="9" isFoundation="false"/>
+    </StbBeams>
+    <StbSlabs><StbSlab id="1" name="S1" id_section="8" kind_structure="RC" isFoundation="false" kind_slab="NORMAL">
+      <StbNodeIdOrder>1 2 3 4</StbNodeIdOrder>
+    </StbSlab>
+  </StbSlabs></StbMembers>
+<StbSections>
+    <StbSecBeam_RC id="9" name="G" strength_concrete="Fc24"><StbSecFigureBeam_RC><StbSecBeam_RC_Straight width="400" depth="600"/></StbSecFigureBeam_RC></StbSecBeam_RC><StbSecSlab_RC id="8" name="S1">
+      <StbSecFigureSlab_RC><StbSecSlab_RC_Straight depth="150"/></StbSecFigureSlab_RC>
+    </StbSecSlab_RC>
+  </StbSections>
+  </StbModel>
+</ST_BRIDGE>

@@ -102,7 +102,9 @@ fn rc_girder_self_weight_uses_columns_not_orthogonal_steel_girders() {
         let material = model.element_material(element).unwrap();
         let total: f64 = loads
             .iter()
-            .filter(|load| load.elem == id)
+            .filter(|load| {
+                load.elem == id && load.source != sepika_core::model::LoadSource::WallSelfWeight
+            })
             .map(|load| match load.kind {
                 sepika_core::model::MemberLoadKind::Distributed { a, b, w1, w2 } => {
                     (b - a) * (w1 + w2) / 2.0
@@ -416,6 +418,7 @@ fn wall_bay_model() -> Model {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(5), NodeId(4)],
         WallPlate {
+            dl_support: Some(sepika_core::model::WallDlSupport::HeightMidpoint),
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -425,13 +428,22 @@ fn wall_bay_model() -> Model {
             openings: vec![WallOpening {
                 width: 900.0,
                 height: 1200.0,
-                offset: Some([1550.0, 0.0]),
+                offset: Some([1550.0, 500.0]),
             }],
             loads: vec![],
             slit: Default::default(),
         },
     );
 
+    // 屋上パラペットの階帯上端を覆う階レベルを明示する（未定義端帯は推測しない）。
+    model.nodes.push(Node {
+        id: NodeId(model.nodes.len() as u32),
+        coord: [0.0, 0.0, 6000.0],
+        restraint: Dof6Mask::FREE,
+        mass: None,
+        story: None,
+        support_spring: None,
+    });
     // 取り付く壁版 1 枚（Y=3000 面の梁 6-7 に載るパラペット。立ち上がり 900、
     // 荷重は取付き線の両端＝柱頭の節点 6・7 へ集中する）。
     //
@@ -440,6 +452,7 @@ fn wall_bay_model() -> Model {
     // どのフィクスチャも `loads` を持たないと、仕上げ・増打ちを自重へ算入する
     // 経路が壊れても代表スカラが動かず、静かに落ちる。
     model.wall_plates.push(WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(1),
         shape: WallPlateShape::Attached {
@@ -484,6 +497,13 @@ fn wall_bay_app() -> App {
     let mut app = App::default();
     app.core.analysis_cfg.threads = 1;
     app.core.model = wall_bay_model();
+    // 単層の構造解析例には未定義上端帯の屋上突出壁を含めない。
+    // Attachedの実帯・質量は独立多層fixtureで照合する。
+    app.core
+        .model
+        .wall_plates
+        .retain(|p| p.id != WallPlateId(1));
+    app.core.model.nodes.retain(|n| n.coord[2] != 6000.0);
     // 架構種別（Ds 表の行を選ぶ設定。`App::design_frame`）は既定で SteelFrame
     // のままだと、耐震壁を持つ本フィクスチャでも Ds 計算が鋼構造の表
     // （`ds_steel`）を使ってしまい、RC 耐力壁の Ds 表（`ds_rc`）が一度も
@@ -723,10 +743,42 @@ fn wall_fixture_weight_change_is_the_independent_fillet_area_increment() {
 #[test]
 fn test_wall_shear_check_appears_after_run_design_check() {
     let mut app = wall_bay_app();
+    let wall_section = &mut app.core.model.sections[2];
+    wall_section.rebar_material = Some(MaterialId(2));
+    wall_section.shear_rebar_material = Some(MaterialId(2));
+    if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut wall_section.shape {
+        *pwh_ratio = Some(0.0025);
+    }
     app.run_preparation();
     assert!(
         app.core.scoped.last_error.is_none(),
         "準備計算: {:?}",
+        app.core.scoped.last_error
+    );
+    let live_id = sepika_core::ids::LoadCaseId(
+        app.core
+            .model
+            .load_cases
+            .iter()
+            .map(|c| c.id.0)
+            .max()
+            .unwrap()
+            + 1,
+    );
+    app.core
+        .model
+        .load_cases
+        .push(sepika_core::model::LoadCase {
+            id: live_id,
+            name: "無載荷の架構用P".into(),
+            kind: sepika_core::model::LoadCaseKind::Live,
+            nodal: vec![],
+            member: vec![],
+        });
+    app.auto_generate_combinations_action();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
         app.core.scoped.last_error
     );
     app.run_static_all();
@@ -734,6 +786,11 @@ fn test_wall_shear_check_appears_after_run_design_check() {
         app.core.scoped.last_error.is_none(),
         "静的解析: {:?}",
         app.core.scoped.last_error
+    );
+    app.select_displayed_result(sepika_app::app::StaticKey::Combo(1));
+    assert_eq!(
+        app.core.scoped.last_static,
+        Some(sepika_app::app::StaticKey::Combo(1))
     );
     app.run_design_check();
 
@@ -1050,6 +1107,31 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
     let mut line = |k: &str, v: String| out.push_str(&format!("{k} = {v}\n"));
     assert_eq!(holding.stories.len(), 1, "本フィクスチャは 1 層");
     let s = &holding.stories[0];
+    let fillet_area_m2 = (4.0 - std::f64::consts::PI) * 0.013_f64.powi(2);
+    let wall_upper_weight_kn = (3.7 * 1.3 - 0.9 * 0.2) * 0.15 * 23.53596;
+    let columns_upper_weight_kn =
+        2.0 * 0.3 * 0.3 * 3.0 * 23.53596 / 2.0 + (0.0117 + fillet_area_m2) * 3.0 * 78.5;
+    let roof_girders_weight_kn =
+        0.3 * 0.4 * 3.7 * 23.53596 + (0.008192 + fillet_area_m2) * 10.0 * 78.5;
+    let expected_weight_n =
+        (wall_upper_weight_kn + columns_upper_weight_kn + roof_girders_weight_kn) * 1000.0;
+    assert!(
+        (app.core
+            .scoped
+            .preparation
+            .as_ref()
+            .unwrap()
+            .summary
+            .total_seismic_weight
+            - expected_weight_n)
+            .abs()
+            < 1e-6
+    );
+    assert!(
+        (s.qud - expected_weight_n).abs() < 1e-6,
+        "単層Ai=1、Z=Rt=C0=1: {} != {expected_weight_n}",
+        s.qud
+    );
     let source = app.core.scoped.holding_capacity_source.as_ref().unwrap();
     assert!(source.ds_forces[0].beta_u > 0.7);
     assert!(matches!(

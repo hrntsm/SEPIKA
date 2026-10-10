@@ -351,12 +351,23 @@ impl Model {
     /// 断面または断面の主材料が未割当のときは `None`。自重を面荷重として焼き込まず
     /// 毎回算定するのは、板厚や材料を変えたときに自重が追随しないという食い違いを
     /// 作らないためである。
+    pub fn slab_plate_material(&self, slab: &Slab) -> Option<&Material> {
+        if self
+            .stb_strengths
+            .members
+            .iter()
+            .any(|m| m.target == StrengthTarget::Slab(slab.id))
+        {
+            return self.stb_concrete_material(StrengthTarget::Slab(slab.id));
+        }
+        self.slab_section(slab)
+            .and_then(|s| s.material)
+            .and_then(|id| self.materials.get(id.index()))
+    }
+
     pub fn slab_self_weight_intensity(&self, slab: &Slab) -> Option<f64> {
         let t = self.slab_plate_thickness(slab)?;
-        let mat = self
-            .slab_section(slab)
-            .and_then(|s| s.material)
-            .and_then(|mid| self.materials.get(mid.index()))?;
+        let mat = self.slab_plate_material(slab)?;
         Some(t * mat.design_unit_weight_n_per_mm3())
     }
 
@@ -494,7 +505,9 @@ impl Model {
                 };
                 match kind {
                     BoundarySecondaryKind::Beam => self.beams().find(|m| supported_near(m)),
-                    BoundarySecondaryKind::Post => self.posts().find(|m| supported_near(m)),
+                    BoundarySecondaryKind::Post => {
+                        self.posts().chain(self.beams()).find(|m| supported_near(m))
+                    }
                 }
                 .map(|m| m.id)
             }

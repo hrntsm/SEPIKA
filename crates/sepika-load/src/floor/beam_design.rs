@@ -617,8 +617,8 @@ pub fn beam_mass_equiv_udl(
     let mass_per_length = sepika_core::model::SectionMassProperties::try_from_section(
         sec,
         Some(mat),
-        material(sec.rebar_material),
-        material(sec.shear_rebar_material),
+        model.secondary_rebar_material(sm),
+        model.secondary_shear_rebar_material(sm),
         material(sec.steel_material),
     )?
     .mass_per_length;

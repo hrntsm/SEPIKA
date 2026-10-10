@@ -22,11 +22,13 @@ mod slab;
 pub use attached_slab::AttachedSlabSupport;
 mod source_story;
 mod story;
+mod strength;
 mod stress_cfg;
 mod vibration;
 mod wall;
 mod wall_plate;
 mod wall_region;
+mod wall_weight;
 
 pub use aggregate::*;
 pub use assignment_region::*;
@@ -46,11 +48,13 @@ pub use section::*;
 pub use slab::*;
 pub use source_story::*;
 pub use story::*;
+pub use strength::*;
 pub use stress_cfg::*;
 pub use vibration::*;
 pub use wall::*;
 pub use wall_plate::*;
 pub use wall_region::*;
+pub use wall_weight::*;
 
 #[cfg(test)]
 mod tests;

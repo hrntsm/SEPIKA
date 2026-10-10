@@ -103,6 +103,9 @@ pub struct WallPlate {
     /// 耐震スリット（辺ごとの縁切り）。[`WallSlit`] 参照。
     #[serde(default)]
     pub slit: WallSlit,
+    /// DLの梁支持方式。任意辺負担率との同時指定は不可。
+    #[serde(default)]
+    pub dl_support: Option<WallDlSupport>,
 }
 
 /// 壁版の4辺の縁切り。切れた辺へ剛性・自重を伝えない。
@@ -372,6 +375,7 @@ impl Model {
         }
         let plate_id = WallPlateId(self.wall_plates.len() as u32);
         self.wall_plates.push(WallPlate {
+            dl_support: plate.dl_support,
             self_weight_shares: plate.self_weight_shares,
             id: plate_id,
             shape: WallPlateShape::Enclosed,
@@ -419,6 +423,7 @@ impl Model {
             .map(|region| region.id)?;
         let plate_id = WallPlateId(self.wall_plates.len() as u32);
         self.wall_plates.push(WallPlate {
+            dl_support: plate.dl_support,
             self_weight_shares: plate.self_weight_shares,
             id: plate_id,
             shape: WallPlateShape::Enclosed,
@@ -500,6 +505,14 @@ impl Model {
 
     /// 壁版の主材料。断面未割当・材料未割当は `None`。
     pub fn wall_plate_material(&self, plate: &WallPlate) -> Option<&Material> {
+        if self
+            .stb_strengths
+            .members
+            .iter()
+            .any(|m| m.target == StrengthTarget::Wall(plate.id))
+        {
+            return self.stb_concrete_material(StrengthTarget::Wall(plate.id));
+        }
         self.wall_plate_section(plate)
             .and_then(|s| s.material)
             .and_then(|mid| self.materials.get(mid.index()))
@@ -560,16 +573,16 @@ impl Model {
     /// 仕上げも無いためである。開口周りの見込み・額縁の重さは `opening_weight`
     /// （開口部の重量）で見る場所が別にあり、面積側で二重に見ない。
     ///
-    /// 断面または主材料が未割当のとき、躯体分は 0 とする（既定厚で補わない。
+    /// 断面が未割当のとき、躯体分は 0 とする（割当済みの材料欠落は未算定）（既定厚で補わない。
     /// 解析前チェックが止める）。仕上げ・増打ちは断面に依らないので、この場合も
     /// そのまま計上する。壁版の高さが決まらないときだけ `None` を返す
-    /// （[`Model::wall_plate_extent`]）。開口面積が壁の面積を超える場合は正味面積を 0 とする。
+    /// （[`Model::wall_plate_extent`]）。開口が実領域外または過大な場合は未算定。
     pub fn wall_plate_self_weight(&self, plate: &WallPlate, model_for_area: &Model) -> Option<f64> {
         self.wall_plate_self_weight_with(plate, model_for_area, false)
     }
 
     /// 壁版の物理質量相当の重量 [N]（質量行列・動的解析用）。躯体の単位体積重量だけ
-    /// [`Material::density`]×g に置き換え、仕上げ・増打ち・開口重量は設計と同じに扱う。
+    /// RC壁はSectionMassPropertiesの標準RC密度、その他は保存物理密度を使い、仕上げ等は設計と同じ。
     pub fn wall_plate_physical_weight(
         &self,
         plate: &WallPlate,
@@ -584,27 +597,12 @@ impl Model {
         model_for_area: &Model,
         physical: bool,
     ) -> Option<f64> {
-        if plate.is_attached() && model_for_area.wall_plate_extent(plate).is_none() {
-            return None;
-        }
-        let area = plate.area(model_for_area);
-        let net_area = (area - plate.total_opening_area()).max(0.0);
-        let structural = match (
-            self.wall_plate_thickness(plate),
-            self.wall_plate_material(plate),
-        ) {
-            (Some(t), Some(mat)) => {
-                let unit_weight = if physical {
-                    mat.density * crate::units::GRAVITY_MM_S2
-                } else {
-                    mat.design_unit_weight_n_per_mm3()
-                };
-                unit_weight * t * net_area
-            }
-            _ => 0.0,
-        };
-        let finish = plate.finish_intensity() * net_area;
-        Some((structural + finish + plate.opening_weight).max(0.0))
+        let weight = model_for_area.wall_weight(plate).ok()?;
+        Some(if physical {
+            weight.totals.physical_n
+        } else {
+            weight.totals.design_n
+        })
     }
 
     /// 自立壁（[`RegionAnchor::FloorRegion`] の取り付く壁版）が、どの床領域の上に
@@ -693,6 +691,8 @@ impl Model {
             cuts.dedup_by(|x, y| (*x - *y).abs() <= 1e-12);
         }
         let total_area = crate::geom::abs_lerp_integral(h0, h1, 0.0, 1.0);
+        let weight = self.wall_weight(plate).ok()?;
+        let plan_len = (p1[0] - p0[0]).hypot(p1[1] - p0[1]);
 
         let mut cov = SelfStandingWallCoverage::default();
         for w in cuts.windows(2) {
@@ -700,7 +700,12 @@ impl Model {
             if t1 - t0 <= 1e-12 {
                 continue;
             }
-            let frac = if total_area > 0.0 {
+            let frac = if weight.totals.design_n > 0.0 {
+                weight
+                    .design_weight_between_x(t0 * plan_len, t1 * plan_len)
+                    .ok()?
+                    / weight.totals.design_n
+            } else if total_area > 0.0 {
                 crate::geom::abs_lerp_integral(h0, h1, t0, t1) / total_area
             } else {
                 t1 - t0
@@ -756,7 +761,7 @@ impl SelfStandingWallCoverage {
     /// 交点計算の丸め、および壁の端がちょうど床領域の境界に載る場合の
     /// ごく短い区間を拾わないよう、全体の 0.1% を下回る取りこぼしは無視する。
     pub fn has_uncovered(&self) -> bool {
-        self.uncovered > 1e-3
+        self.uncovered > 1e-9
     }
 }
 
@@ -795,9 +800,29 @@ mod tests {
         m
     }
 
+    // 独立面積fixtureの境界は、寸法ゼロを明示した支持材である。
+    fn assign_zero_boundary_dimensions(m: &mut Model) {
+        let template = model_with_wall_section();
+        if m.materials.is_empty() {
+            m.materials.push(template.materials[0].clone());
+        }
+        let mut section = template.sections[0].clone();
+        section.id = SectionId(m.sections.len() as u32);
+        section.width = 0.0;
+        section.depth = 0.0;
+        section.area = 0.0;
+        section.thickness = None;
+        let id = section.id;
+        m.sections.push(section);
+        for elem in &mut m.elements {
+            elem.section = Some(id);
+        }
+    }
+
     /// 囲まれた壁版の仕様のみを持つ雛形（境界は割当領域が持つ）。
     fn enclosed_plate() -> WallPlate {
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -840,6 +865,7 @@ mod tests {
 
         // 取り付く壁版も取付き先の節点座標に追従する。
         let attached = WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(1),
             shape: WallPlateShape::Attached {
@@ -947,6 +973,7 @@ mod tests {
         );
 
         let attached = WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(99),
             shape: WallPlateShape::Attached {
@@ -976,6 +1003,7 @@ mod tests {
     fn test_attached_line_extrudes_upward_not_sideways() {
         let m = model_with_nodes(&[[0.0, 0.0, 3000.0], [4000.0, 0.0, 3000.0]]);
         let p = WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Attached {
@@ -1009,6 +1037,7 @@ mod tests {
     fn attached_area_uses_abs_height_when_extent_sign_reverses() {
         let m = model_with_nodes(&[[0.0, 0.0, 3000.0], [4000.0, 0.0, 3000.0]]);
         let p = WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Attached {
@@ -1040,6 +1069,7 @@ mod tests {
     fn test_attached_floor_region_anchor_uses_its_own_nodes_for_length() {
         let m = model_with_nodes(&[[0.0, 0.0, 3000.0], [2000.0, 0.0, 3000.0]]);
         let p = WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Attached {
@@ -1063,6 +1093,7 @@ mod tests {
     fn test_attached_point_anchor_is_unsupported_for_wall() {
         let m = model_with_nodes(&[[0.0, 0.0, 3000.0]]);
         let p = WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Attached {
@@ -1095,6 +1126,7 @@ mod tests {
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             enclosed_plate(),
         );
+        assign_zero_boundary_dimensions(&mut m);
         let p = &m.wall_plates[0];
         assert_eq!(m.wall_plate_self_weight(p, &m), Some(0.0));
 
@@ -1120,6 +1152,7 @@ mod tests {
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             enclosed_plate(),
         );
+        assign_zero_boundary_dimensions(&mut m);
         m.wall_plates[0].opening_area = 2.0e6;
         m.wall_plates[0].loads.push(AreaLoad {
             kind: "仕上げ".into(),
@@ -1138,6 +1171,7 @@ mod tests {
         let mut m = model_with_nodes(&[[0.0, 0.0, 0.0], [4000.0, 0.0, 0.0]]);
         for (i, z) in [0.0_f64, 3200.0].into_iter().enumerate() {
             m.stories.push(Story {
+                wall_weights: Vec::new(),
                 id: StoryId(i as u32),
                 name: format!("{i}F"),
                 elevation: z,
@@ -1153,6 +1187,7 @@ mod tests {
             });
         }
         let p = WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Attached {
@@ -1223,6 +1258,7 @@ mod tests {
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             enclosed_plate(),
         );
+        assign_zero_boundary_dimensions(&mut m);
         m.wall_plates[0].section = Some(SectionId(0));
         m.wall_plates[0].openings = vec![WallOpening {
             width: 900.0,
@@ -1290,6 +1326,7 @@ mod tests {
     #[test]
     fn test_total_opening_area_falls_back_to_opening_area_field() {
         let p = WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -1311,6 +1348,7 @@ mod tests {
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             enclosed_plate(),
         );
+        assign_zero_boundary_dimensions(&mut m);
         m.wall_plates[0].section = Some(SectionId(0));
         m.wall_plates[0].opening_weight = 1234.0;
         let p = &m.wall_plates[0];
@@ -1364,6 +1402,7 @@ mod tests {
             });
         }
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Attached {
@@ -1523,6 +1562,7 @@ mod tests {
     fn coverage_is_none_for_enclosed() {
         let m = model_two_regions();
         let p = WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,

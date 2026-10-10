@@ -63,6 +63,7 @@ fn fixture_path() -> std::path::PathBuf {
 #[test]
 fn rounded_fixture_properties_and_weight_are_independently_integrated() {
     use sepika_core::section_shape::SectionShape;
+    use sepika_edit::EditCommand;
     use std::f64::consts::PI;
     fn integrate(h: f64, breaks: Vec<f64>, width: impl Fn(f64) -> f64) -> [f64; 4] {
         let mut bounds = breaks;
@@ -162,16 +163,41 @@ fn rounded_fixture_properties_and_weight_are_independently_integrated() {
     }
     assert!(!references.is_empty());
     let mut model = app.core.model.clone();
-    model
+    let secondaries: Vec<_> = model
+        .beams()
+        .chain(model.posts())
+        .map(|member| member.id)
+        .collect();
+    for member in secondaries.into_iter().rev() {
+        sepika_edit::DeleteSecondaryMember { member }.apply(&mut model);
+    }
+    let removed: Vec<_> = model
         .elements
-        .retain(|e| e.section.is_some_and(|id| references.contains_key(&id)));
-    model.wall_plates.clear();
+        .iter()
+        .filter(|e| !e.section.is_some_and(|id| references.contains_key(&id)))
+        .map(|e| e.id)
+        .collect();
+    for id in removed.into_iter().rev() {
+        sepika_edit::DeleteMember { id }.apply(&mut model);
+    }
+    assert!(model.wall_plates.is_empty());
+    assert!(model.generated_wall_origins.is_empty());
+    assert!(model.stb_strengths.members.iter().all(|input| !matches!(
+        input.target,
+        sepika_core::model::StrengthTarget::Element(_)
+            | sepika_core::model::StrengthTarget::Wall(_)
+    )));
+    model.validate().unwrap();
     let mut expected = 0.0;
     let mut old = 0.0;
-    for (i, elem) in model.elements.iter_mut().enumerate() {
-        elem.id = sepika_core::ids::ElemId(i as u32);
-    }
     for elem in &model.elements {
+        let material = model.element_material(elem).unwrap();
+        assert_eq!(
+            material.category,
+            sepika_core::model::MaterialCategory::Steel
+        );
+        assert_eq!(material.fc, None);
+        assert!((material.density / 7.85e-9 - 1.0).abs() < 1.0e-12);
         let (area, old_area) = references[&elem.section.unwrap()];
         let length = model.member_length(elem);
         expected += area * length * 78.5e-6;
@@ -185,8 +211,11 @@ fn rounded_fixture_properties_and_weight_are_independently_integrated() {
             actual += (b - a) * (w1 + w2) / 2.0;
         }
     }
-    assert!((actual / expected - 1.0).abs() < 1.0e-7);
-    eprintln!("実モデル断面数={}, 独立 A/I 最大差={max_error:.12e}, 対象線材DL={actual:.12e} N, 直角モデルDL={old:.12e} N, 差={:.12e} N", references.len(), actual - old);
+    assert!(
+        (actual / expected - 1.0).abs() < 1.0e-7,
+        "actual={actual:.12e}, independently expected={expected:.12e}"
+    );
+    eprintln!("実モデル断面数={}, 独立 A/I 最大差={max_error:.12e}, 対象線材DL={actual:.12e} N, 独立DL={expected:.12e} N, 直角モデルDL={old:.12e} N, 差={:.12e} N", references.len(), actual - old);
     let mut baseline = imported();
     for section in &mut baseline.core.model.sections {
         if let Some((_, old_area)) = references.get(&section.id) {
@@ -1303,7 +1332,7 @@ fn story_metrics_computed_for_every_layer() {
     let app = analyzed();
     let results = app.core.scoped.results.as_ref().expect("解析結果");
     let ex = static_of(&app, StaticCaseKey::Seismic(SeismicDir::X));
-    let ctx = sepika_app::summary::metrics_ctx_from_results(Some(results));
+    let ctx = sepika_app::summary::metrics_ctx_from_results(&app.core.model, Some(results));
     let metrics = sepika_app::summary::compute_story_metrics_with(
         &app.core.model,
         &ex.disp,
@@ -2428,7 +2457,7 @@ fn snapshot_key_scalars() {
     line("design.beam_max_ratio", sig4(beam_max_ratio));
 
     // --- 層指標 ---
-    let ctx = sepika_app::summary::metrics_ctx_from_results(Some(results));
+    let ctx = sepika_app::summary::metrics_ctx_from_results(&app.core.model, Some(results));
     let metrics = sepika_app::summary::compute_story_metrics_with(
         &app.core.model,
         &ex.disp,
@@ -2690,17 +2719,43 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
                 elevation,
             })
         ));
-        app.core.model.stories[i].structure = if i == 3 {
-            sepika_core::model::StoryStructure::S
-        } else {
-            sepika_core::model::StoryStructure::Rc
-        };
-        for node in &mut app.core.model.nodes {
-            if node.story == Some(sepika_core::ids::StoryId(i as u32)) {
-                node.coord[2] = elevation;
-            }
+        for node in app.core.model.stories[i].node_ids.clone() {
+            app.core.model.nodes[node.index()].coord[2] = elevation;
         }
     }
+    // 上層をRCにする入力は材料・断面で与える。Story.structureは重量準備の算定値。
+    let rc = prepared_rectangular_rc_portal().core.model;
+    let material_offset = app.core.model.materials.len() as u32;
+    for mut material in rc.materials {
+        material.id = sepika_core::ids::MaterialId(material.id.0 + material_offset);
+        app.core.model.materials.push(material);
+    }
+    let section_offset = app.core.model.sections.len() as u32;
+    for mut section in rc.sections.into_iter().take(2) {
+        section.id = sepika_core::ids::SectionId(section.id.0 + section_offset);
+        section.material = section
+            .material
+            .map(|id| sepika_core::ids::MaterialId(id.0 + material_offset));
+        section.rebar_material = section
+            .rebar_material
+            .map(|id| sepika_core::ids::MaterialId(id.0 + material_offset));
+        section.shear_rebar_material = section
+            .shear_rebar_material
+            .map(|id| sepika_core::ids::MaterialId(id.0 + material_offset));
+        app.core.model.sections.push(section);
+    }
+    for element in &mut app.core.model.elements {
+        if (9..=11).contains(&element.id.0) {
+            element.section = Some(sepika_core::ids::SectionId(
+                section_offset + u32::from(element.id.0 == 11),
+            ));
+        }
+    }
+
+    app.core.model.set_member_rc_beam_reference(
+        sepika_core::ids::ElemId(11),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+    );
     app.run_seismic(sepika_solver::statics::analysis::SeismicDir::X);
     assert_no_error(&app, "GL跨ぎ混合構造の地震静的");
     let ex = app
@@ -2720,6 +2775,33 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
             .abs()
             < 1e-7
     );
+    let ex_result = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .seismic(sepika_solver::statics::analysis::SeismicDir::X)
+        .unwrap();
+    let beam = &ex_result
+        .member_forces
+        .iter()
+        .find(|(id, _)| id.0 == 11)
+        .unwrap()
+        .1;
+    let fi = beam.at.first().unwrap().1;
+    let fj = beam.at.last().unwrap().1;
+    for component in [4, 5] {
+        let scale = fi[component].abs().max(fj[component].abs()).max(1.0);
+        assert!((fi[component] + fj[component]).abs() < 1e-8 * scale);
+    }
+    for (_, force) in &beam.at {
+        for component in [1, 2] {
+            assert!((force[component] - fi[component]).abs() < 1e-8 * fi[component].abs().max(1.0));
+        }
+    }
+    // GLと周期の照合は純水平載荷。中間部材荷重を持つ長期載荷へRC基準を代用しない。
+    app.core.analysis_cfg.push_apply_long_term = false;
     app.run_pushover();
     assert_no_error(&app, "GL跨ぎ混合構造の増分解析");
     select_holding_points(&mut app);

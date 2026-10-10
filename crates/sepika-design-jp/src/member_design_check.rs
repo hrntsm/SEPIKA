@@ -61,7 +61,7 @@ pub struct MemberDesignCheckOptions<'a> {
     pub qd_method: QdMethod,
     /// 地震時短期 QD 用の長期（DL+LL 等）内力。None なら QD 割増なし。
     pub long_member_forces: Option<&'a [(ElemId, MemberForces)]>,
-    /// 梁 QD1 用の単純梁せん断 Q0 [N]（部材 ID → 絶対値）。None なら QL で代替。
+    /// 梁 QD1 用の単純梁せん断 Q0 [N]（部材 ID → 絶対値）。RC/SRC梁のQD1で不足すれば未検定。
     pub q_simple_by_elem: Option<&'a HashMap<ElemId, f64>>,
     /// 一本部材グループの検定文脈上書き（梁のみ適用）。None なら部材単体の値を用いる。
     pub girder_group_overrides: Option<&'a HashMap<ElemId, GirderGroupContextOverride>>,
@@ -78,6 +78,31 @@ pub struct MemberDesignCheckReport {
     pub joint_checks: Vec<(NodeId, String, CheckOutcome)>,
     /// 元壁版・生成要素・荷重キー・検定種別ごとの壁検定。
     pub wall_checks: Vec<crate::wall_check::WallCheck>,
+}
+
+impl MemberDesignCheckReport {
+    /// 荷重状態・必要応力が不足する場合、全検定を理由付き未検定にする。
+    pub fn skip_for_load_state(&mut self, reason: &str) {
+        let skipped = || CheckOutcome::Skipped {
+            reason: reason.into(),
+        };
+        for (_, _, outcome) in &mut self.member_checks {
+            if matches!(outcome, CheckOutcome::Checked(_)) {
+                *outcome = skipped();
+            }
+        }
+        for (_, _, outcome) in &mut self.joint_checks {
+            if matches!(outcome, CheckOutcome::Checked(_)) {
+                *outcome = skipped();
+            }
+        }
+        for row in &mut self.wall_checks {
+            if matches!(row.outcome, CheckOutcome::Checked(_)) {
+                row.outcome = skipped();
+                row.skip_kind = Some(crate::wall_check::WallSkipKind::MissingInput);
+            }
+        }
+    }
 }
 
 /// 部材内力に対する許容応力度検定を一括実行する。
@@ -294,7 +319,23 @@ pub fn run_member_design_checks(
                 my: forces[4],
                 mz: forces[5],
             };
-            let outcome = if let Some(brb) = model.brb_attrs.iter().find(|a| a.elem == *elem_id) {
+            let missing_q0 = kind == MemberKind::Girder
+                && options.long_member_forces.is_some()
+                && options.qd_method != QdMethod::Qd2
+                && matches!(
+                    sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category)),
+                    sepika_core::structure_kind::StructureKind::Rc
+                        | sepika_core::structure_kind::StructureKind::Src
+                )
+                && options
+                    .q_simple_by_elem
+                    .and_then(|q| q.get(elem_id))
+                    .is_none();
+            let outcome = if missing_q0 {
+                CheckOutcome::Skipped {
+                    reason: "QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません".into(),
+                }
+            } else if let Some(brb) = model.brb_attrs.iter().find(|a| a.elem == *elem_id) {
                 CheckOutcome::Checked(crate::brb::brb_check(brb, mfa.n, length, brb_long))
             } else {
                 checker.check(&mfa, sec, mat, &ctx)

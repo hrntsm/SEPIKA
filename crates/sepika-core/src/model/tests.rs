@@ -974,6 +974,7 @@ fn make_story_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
         .iter()
         .enumerate()
         .map(|(i, &(name, elevation))| Story {
+            wall_weights: Vec::new(),
             id: StoryId(i as u32),
             name: name.into(),
             elevation,
@@ -1366,6 +1367,7 @@ fn test_validate_enclosed_wall_plate_requires_assignment_region() {
             support_spring: None,
         }],
         wall_plates: vec![WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             // 割当領域が無い＝境界を解決できない（陳腐化した状態）。
@@ -1402,6 +1404,7 @@ fn test_validate_duplicate_enclosed_wall_plate_boundary() {
     }
     let boundary = vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)];
     let empty = WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
         shape: WallPlateShape::Enclosed,
@@ -1438,6 +1441,7 @@ fn test_validate_checks_wall_plate_anchor_span_bounds() {
         });
     }
     let mk = |span: [f64; 2]| WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
         shape: WallPlateShape::Attached {
@@ -1480,6 +1484,7 @@ fn test_validate_self_standing_wall_checks_only_node_refs() {
         });
     }
     let mk = |nodes: [NodeId; 2]| WallPlate {
+        dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
         shape: WallPlateShape::Attached {
@@ -1551,6 +1556,7 @@ fn test_validate_wall_plate_shared_by_two_wall_regions() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -1906,4 +1912,63 @@ fn rc_beam_reference_is_explicit_persistent_and_survives_member_operations() {
     let missing: MemberHysteresisAttr =
         serde_json::from_str(r#"{"elem":4,"rule":"Auto","rule_th":null}"#).unwrap();
     assert_eq!(missing.rc_beam_reference, None);
+}
+
+#[test]
+fn seismic_generation_snapshot_id_visits_keep_keys_stale_and_drop_deleted_node_origins() {
+    use crate::dof::Dof6Mask;
+    let mut model = Model {
+        seismic_weight_generation: Some(SeismicWeightGeneration {
+            input_key: vec![1, 2],
+            output_key: vec![3, 4],
+            calculated_weights: vec![(StoryId(2), 123.0)],
+            automatic_diaphragms: vec![Constraint::rigid_diaphragm(
+                StoryId(2),
+                NodeId(4),
+                vec![NodeId(1), NodeId(3)],
+            )],
+            automatic_master_restraints: vec![(NodeId(4), Dof6Mask::FIXED)],
+        }),
+        ..Default::default()
+    };
+    model.visit_story_ids(|id| id.0 += 1);
+    model.visit_node_ids(|id| id.0 += 2);
+    let record = model.seismic_weight_generation.as_ref().unwrap();
+    assert_eq!(record.calculated_weights, vec![(StoryId(3), 123.0)]);
+    assert_eq!(
+        record.automatic_diaphragms,
+        vec![Constraint::rigid_diaphragm(
+            StoryId(3),
+            NodeId(6),
+            vec![NodeId(3), NodeId(5)]
+        )]
+    );
+    assert_eq!(
+        record.automatic_master_restraints,
+        vec![(NodeId(6), Dof6Mask::FIXED)]
+    );
+    assert_eq!(record.input_key, vec![1, 2]);
+    assert_eq!(record.output_key, vec![3, 4]);
+    model
+        .seismic_weight_generation
+        .as_mut()
+        .unwrap()
+        .retain_node_references(|node| node != NodeId(5));
+    assert!(model
+        .seismic_weight_generation
+        .as_ref()
+        .unwrap()
+        .automatic_diaphragms
+        .is_empty());
+    model
+        .seismic_weight_generation
+        .as_mut()
+        .unwrap()
+        .retain_node_references(|node| node != NodeId(6));
+    assert!(model
+        .seismic_weight_generation
+        .as_ref()
+        .unwrap()
+        .automatic_master_restraints
+        .is_empty());
 }

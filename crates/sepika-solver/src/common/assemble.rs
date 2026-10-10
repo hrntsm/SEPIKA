@@ -79,6 +79,9 @@ pub fn assemble_global_m(
     model
         .validate_damper_mass_placement()
         .map_err(sepika_math::solver::SolveError::InvalidInput)?;
+    model
+        .validate_wall_weight_generation()
+        .map_err(sepika_math::solver::SolveError::InvalidInput)?;
     let mut all_triplets = Vec::new();
     if model.mass_method != sepika_core::model::MassMethod::LumpedOnly {
         for elem in &model.elements {

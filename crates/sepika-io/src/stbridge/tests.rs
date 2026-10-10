@@ -50,6 +50,7 @@ fn representative_model() -> Model {
         });
     }
     m.stories.push(Story {
+        wall_weights: Vec::new(),
         level_kind: Default::default(),
         structure: Default::default(),
         id: StoryId(0),
@@ -622,6 +623,14 @@ fn test_standard_import_roundtrip_steel_and_rc() {
     let mut sec = rc.to_section(SectionId(1), "G1".into());
     sec.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
     push_section(&mut m, sec);
+    let concrete_id = MaterialId(m.materials.len() as u32);
+    let mut concrete = sn400b(concrete_id.0);
+    concrete.name = "Fc24".into();
+    concrete.category = MaterialCategory::Concrete;
+    concrete.fc = Some(24.0);
+    concrete.fy = None;
+    m.materials.push(concrete);
+    m.sections[1].material = Some(concrete_id);
     m.elements.push(member(0, true, 0)); // 柱 → 鋼断面
     m.elements.push(member(1, false, 1)); // 梁 → RC 断面
 
@@ -993,7 +1002,7 @@ fn test_standard_export_src_beam_rect_stages() {
     assert!(xml.contains("N_main_top_1st=\"4\""), "{xml}");
     assert!(xml.contains("N_main_top_2nd=\"2\""), "{xml}");
     assert!(xml.contains("N_main_bottom_1st=\"3\""), "{xml}");
-    assert!(xml.contains("strength_steel=\"SN490B\""), "{xml}");
+    assert!(xml.contains("strength_main=\"SN490B\""), "{xml}");
     let back = import_stbridge(&xml).expect("import");
     assert!(back.validate().is_ok(), "{:?}", back.validate());
 }
@@ -2036,7 +2045,7 @@ fn test_standard_roundtrip_src_column() {
     let xml = export_stbridge(&m).unwrap();
     assert!(xml.contains("<StbSecColumn_SRC "), "SRC 柱要素: {xml}");
     assert!(
-        xml.contains("strength_steel=\"SN490B\""),
+        xml.contains("strength_main=\"SN490B\""),
         "鋼種が書き出される"
     );
     assert!(xml.contains("<StbSecRoll-H "), "内蔵鉄骨の形鋼ライブラリ");
@@ -2046,6 +2055,24 @@ fn test_standard_roundtrip_src_column() {
     );
     assert!(xml.contains("N_main_Y_1st=\"3\""), "Y 方向の本数: {xml}");
     let back = import_stbridge(&xml).expect("import");
+    assert_eq!(
+        back.element_steel_material(&back.elements[0]).unwrap().name,
+        "SN490B"
+    );
+    assert_eq!(
+        back.element_steel_material(&back.elements[0]).unwrap().fy,
+        Some(325.)
+    );
+    assert_eq!(
+        back.element_rebar_material(&back.elements[0]).unwrap().fy,
+        Some(345.)
+    );
+    assert_eq!(
+        back.element_shear_rebar_material(&back.elements[0])
+            .unwrap()
+            .fy,
+        Some(345.)
+    );
     assert!(back.validate().is_ok(), "{:?}", back.validate());
     assert_eq!(
         back.sections[0].shape, m.sections[0].shape,
@@ -2589,7 +2616,13 @@ fn test_import_wall_with_node_order_and_thickness() {
         Some(200.0),
         "壁断面の厚さを解決"
     );
-    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    assert_eq!(
+        report.warnings.len(),
+        1,
+        "未指定Fcだけを診断: {:?}",
+        report.warnings
+    );
+    assert!(report.warnings[0].contains("Fc指定がありません"));
 }
 
 /// 壁版がない ST-Bridge でも、壁版割当領域と床板割当を生成する。
@@ -2637,7 +2670,13 @@ fn test_import_without_walls_rebuilds_wall_assignment_regions() {
         .regions
         .iter()
         .any(|region| region.assignment.plate().is_some()));
-    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    assert_eq!(
+        report.warnings.len(),
+        1,
+        "未指定Fcだけを診断: {:?}",
+        report.warnings
+    );
+    assert!(report.warnings[0].contains("Fc指定がありません"));
 }
 
 /// 頂部梁の上に立つパラペット（StbWall）は、どの壁領域にも収まらないが
@@ -2797,6 +2836,7 @@ fn test_wall_roundtrip_export_import() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -2907,6 +2947,7 @@ fn test_non_quad_wall_plate_roundtrip_export_import() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3), NodeId(4)],
         WallPlate {
+            dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
@@ -3037,7 +3078,16 @@ fn test_slab_roundtrip_export_import() {
         Some("Fc24"),
         "コンクリート材料が往復"
     );
-    assert!(report.is_clean(), "警告なし {:?}", report.warnings);
+    assert_eq!(
+        report.warnings.len(),
+        4,
+        "未指定線材Fcの診断: {:?}",
+        report.warnings
+    );
+    assert!(report
+        .warnings
+        .iter()
+        .all(|w| w.contains("Fc指定がありません")));
 }
 
 /// 形鋼ライブラリに定義のない鋼断面・SRC 内蔵鉄骨の参照は、物性ゼロ（または鉄骨寸法
