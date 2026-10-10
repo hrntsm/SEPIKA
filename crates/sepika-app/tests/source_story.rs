@@ -515,20 +515,32 @@ fn empty_import_and_last_source_delete_stay_empty_through_edit_prepare_save_and_
 #[test]
 fn main_native_model_without_source_fields_keeps_messagepack_export_fallback() {
     let mut m = model();
+    m.stb_strengths = Default::default();
     m.source_stories.clear();
     m.source_stories_initialized = false;
     m.stb_node_ids.clear();
     let mut bytes = rmp_serde::to_vec(&m).unwrap();
     // 壁重量方式を含む追加末尾フィールドを外し、原階導入前の実形式を再現する。
     assert_eq!(bytes.pop(), Some(0xc0));
+    assert_eq!(
+        m.stb_strengths,
+        sepika_core::model::StbStrengthInput::default()
+    );
+    let strengths = rmp_serde::to_vec(&m.stb_strengths).unwrap();
+    assert!(bytes.ends_with(&strengths));
+    bytes.truncate(bytes.len() - strengths.len());
     assert_eq!(bytes.pop(), Some(0xc2));
     assert_eq!(bytes.pop(), Some(0x90));
     assert_eq!(bytes.pop(), Some(0x90));
     assert_eq!(bytes[0], 0xdc);
-    let fields = u16::from_be_bytes([bytes[1], bytes[2]]) - 4;
+    let fields = u16::from_be_bytes([bytes[1], bytes[2]]) - 5;
     bytes[1..3].copy_from_slice(&fields.to_be_bytes());
     let restored: Model = rmp_serde::from_slice(&bytes).unwrap();
     assert!(!restored.source_stories_initialized);
+    assert_eq!(
+        restored.stb_strengths,
+        sepika_core::model::StbStrengthInput::default()
+    );
     assert!(restored.eq_ignoring_dofmap(&m));
     assert_eq!(
         sepika_io::stbridge::export_stbridge(&restored).unwrap(),

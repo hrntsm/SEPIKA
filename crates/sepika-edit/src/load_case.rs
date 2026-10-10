@@ -495,6 +495,11 @@ impl EditCommand for DeleteSlab {
             }
         }
 
+        let strength_input = model.stb_strengths.clone();
+        model
+            .stb_strengths
+            .members
+            .retain(|m| m.target != sepika_core::model::StrengthTarget::Slab(self.id));
         let removed = model.slabs.remove(idx);
         let target = self.id.0;
         shift_slab_ids(model, |id| {
@@ -503,11 +508,15 @@ impl EditCommand for DeleteSlab {
             }
         });
 
-        Box::new(InsertSlab {
-            index: idx,
-            slab: removed,
-            region_refs,
-            assignment_refs,
+        Box::new(crate::strength::RestoreStrengthInput {
+            input: strength_input,
+            stories: model.source_stories.clone(),
+            inverse: Box::new(InsertSlab {
+                index: idx,
+                slab: removed,
+                region_refs,
+                assignment_refs,
+            }),
         })
     }
 
