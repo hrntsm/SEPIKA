@@ -1487,3 +1487,86 @@ fn wall_horizontal_input_survives_ovika_and_mcp_design_reports_missing_assignmen
         );
     }
 }
+
+fn circular_post_model() -> sepika_core::model::Model {
+    use sepika_core::ids::{MaterialId, NodeId, SecondaryMemberId, SectionId};
+    use sepika_core::model::{
+        Material, MaterialCategory, Model, Node, SecondaryMember, SecondaryMemberEnds,
+        SecondaryMemberKind,
+    };
+    use sepika_core::section_shape::{CircleColumnHoop, RcCircleColumnRebar, SectionShape};
+    let mut section = SectionShape::RcColumnCircle {
+        d: 400.0,
+        rebar: RcCircleColumnRebar {
+            main_dia: 25.0,
+            count: 0,
+            cover: 40.0,
+            hoop: CircleColumnHoop {
+                dia: 10.0,
+                pitch: 100.0,
+            },
+        },
+    }
+    .to_section(SectionId(0), "円形断面".into());
+    section.material = Some(MaterialId(0));
+    section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    section.width = 900.0;
+    section.depth = 700.0;
+    let ends = [[0.0, 0.0, 0.0], [0.0, 0.0, 3000.0]];
+    Model {
+        nodes: ends
+            .into_iter()
+            .enumerate()
+            .map(|(id, coord)| Node {
+                id: NodeId(id as u32),
+                coord,
+                restraint: sepika_core::dof::Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            })
+            .collect(),
+        sections: vec![section],
+        materials: vec![Material {
+            id: MaterialId(0),
+            name: "Fc24".into(),
+            category: MaterialCategory::Concrete,
+            young: 22700.0,
+            poisson: 0.2,
+            density: 2.4e-9,
+            shear: None,
+            fc: Some(24.0),
+            fy: None,
+            concrete_class: Default::default(),
+            strength_factor: None,
+        }],
+        unassigned_posts: vec![SecondaryMember {
+            id: SecondaryMemberId(448),
+            kind: SecondaryMemberKind::Post,
+            ends: SecondaryMemberEnds::Detached(ends),
+            section: Some(SectionId(0)),
+            name: "間柱符号".into(),
+            gravity_end_shares: None,
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn circular_post_quantity_headless_preserves_values_and_diagnostics() {
+    let mut model = circular_post_model();
+    for grouping in ["category", "story", "detail"] {
+        let value = quantity_takeoff_json(&model, Some(grouping));
+        assert!((value["totals"]["concrete_m3"].as_f64().unwrap() - 0.3769911184).abs() < 1e-9);
+        assert!((value["totals"]["formwork_m2"].as_f64().unwrap() - 3.7699111843).abs() < 1e-9);
+    }
+    for ends in [[[0.0; 3]; 2], [[0.0; 3], [0.0, 0.0, f64::INFINITY]]] {
+        model.unassigned_posts[0].ends = sepika_core::model::SecondaryMemberEnds::Detached(ends);
+        let value = quantity_takeoff_json(&model, None);
+        assert_eq!(value["status"], "unavailable");
+        assert!(value["totals"].is_null());
+        let reason = value["reason"].as_str().unwrap();
+        assert!(reason.contains("SecondaryMemberId(448)"), "{reason}");
+        assert!(reason.contains("実長 L"), "{reason}");
+    }
+}
