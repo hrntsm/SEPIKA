@@ -428,6 +428,23 @@ fn shear_rotation_independent_units_length_and_sign() {
 
 #[test]
 fn shear_invalid_inputs_are_distinct_from_none() {
+    let shear = ShearContribution::Stiffness { k_s: 1e9 };
+    for moment in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(
+            shear.rotation(moment, 2000.0),
+            Err(DeformationError::InvalidInput("モーメントは有限値が必要"))
+        );
+        assert_eq!(
+            crate::deformation::mphi_to_mtheta(0.0, moment, None, 4000.0, 0.5, 250.0, shear, 0.0,),
+            Err(DeformationError::InvalidInput("モーメントは有限値が必要"))
+        );
+    }
+    for ratio in [0.0, -1.0, 1.1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(matches!(
+            crate::deformation::mphi_to_mtheta(0.0, 1e8, None, 4000.0, ratio, 250.0, shear, 0.0,),
+            Err(DeformationError::InvalidInput(_))
+        ));
+    }
     let invalid = [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
     for value in invalid {
         assert!(matches!(
