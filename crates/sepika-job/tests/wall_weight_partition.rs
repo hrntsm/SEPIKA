@@ -1089,3 +1089,107 @@ fn resolved_arbitrary_dl_rates_obey_slit_edges_and_mode_exclusion() {
         );
     }
 }
+
+#[test]
+fn nonrectangular_slits_require_every_specified_role_but_preserve_resolved_beams() {
+    let mut model = fixture(6000.0);
+    model.nodes[2].coord[0] = 3500.0;
+    model.nodes[3].coord[0] = 500.0;
+    model.wall_plates[0].dl_support = None;
+    model.wall_plates[0].self_weight_shares = vec![0.0, 1.0, 0.0, 0.0];
+    let weight = model.wall_weight(&model.wall_plates[0]).unwrap();
+    assert!((weight.totals.design_n - 50400.0).abs() < 1e-6);
+    bands(&model, &[0.0, 27000.0, 23400.0, 0.0]);
+    assert!(compute_gravity_auto_load_cases(&model).is_ok());
+    let loads = sepika_load::wall_plate_load::distribute_enclosed_wall_plates(&model);
+    assert!(
+        (loads
+            .primary
+            .iter()
+            .map(|l| l.cmq.q_i + l.cmq.q_j)
+            .sum::<f64>()
+            - 50400.0)
+            .abs()
+            < 1e-6
+    );
+    for mode in [
+        WallDlSupport::LowerBeam,
+        WallDlSupport::UpperBeam,
+        WallDlSupport::HeightMidpoint,
+    ] {
+        let mut selected = model.clone();
+        selected.wall_plates[0].self_weight_shares.clear();
+        selected.wall_plates[0].dl_support = Some(mode);
+        assert!(compute_gravity_auto_load_cases(&selected).is_ok());
+        bands(&selected, &[0.0, 27000.0, 23400.0, 0.0]);
+    }
+    let mut one_vertical = model.clone();
+    one_vertical.nodes[3].coord[0] = 0.0;
+    one_vertical.wall_plates[0].slit.column_face = [true, false];
+    assert!(
+        sepika_load::wall_plate_load::slit_specification_is_reflected(
+            &one_vertical,
+            &one_vertical.wall_plates[0]
+        )
+    );
+    assert!(compute_gravity_auto_load_cases(&one_vertical).is_ok());
+    one_vertical.wall_plates[0].slit.column_face = [true, true];
+    assert!(
+        !sepika_load::wall_plate_load::slit_specification_is_reflected(
+            &one_vertical,
+            &one_vertical.wall_plates[0]
+        )
+    );
+    assert!(compute_gravity_auto_load_cases(&one_vertical).is_err());
+    let mut rectangle = fixture(6000.0);
+    rectangle.wall_plates[0].slit.column_face = [true, true];
+    rectangle.wall_plates[0].slit.beam_face = [true, true];
+    assert!(
+        sepika_load::wall_plate_load::slit_specification_is_reflected(
+            &rectangle,
+            &rectangle.wall_plates[0]
+        )
+    );
+    assert!(compute_gravity_auto_load_cases(&rectangle).is_err());
+    model.wall_plates[0].slit.beam_face = [false, true];
+    assert!(
+        sepika_load::wall_plate_load::slit_specification_is_reflected(
+            &model,
+            &model.wall_plates[0]
+        )
+    );
+    assert!(compute_gravity_auto_load_cases(&model).is_ok());
+    for columns in [[true, false], [false, true], [true, true]] {
+        model.wall_plates[0].slit.column_face = columns;
+        assert!(
+            !sepika_load::wall_plate_load::slit_specification_is_reflected(
+                &model,
+                &model.wall_plates[0]
+            )
+        );
+        let error =
+            sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0]).unwrap_err();
+        assert!(
+            error.contains("壁版") && error.contains("スリット対応"),
+            "{error}"
+        );
+        assert!(compute_gravity_auto_load_cases(&model).is_err());
+    }
+    model.wall_plates[0].self_weight_shares.clear();
+    for mode in [
+        WallDlSupport::LowerBeam,
+        WallDlSupport::UpperBeam,
+        WallDlSupport::HeightMidpoint,
+    ] {
+        model.wall_plates[0].dl_support = Some(mode);
+        assert!(sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0]).is_err());
+        assert!(compute_gravity_auto_load_cases(&model).is_err());
+    }
+    model.wall_plates[0].section = None;
+    assert!(sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0]).is_err());
+    model.wall_plates[0].slit = Default::default();
+    assert_eq!(
+        sepika_load::wall_plate_load::dl_ratios(&model, &model.wall_plates[0]).unwrap(),
+        vec![0.0; 4]
+    );
+}

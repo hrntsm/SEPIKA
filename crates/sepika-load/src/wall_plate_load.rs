@@ -67,24 +67,21 @@ fn is_horizontal(a: [f64; 3], b: [f64; 3]) -> bool {
 }
 
 /// 境界の辺ごとに、耐震スリットで縁が切れているかを返す（`boundary` と同じ並び）。
-///
-/// スリットは辺ごとの縁切りなので、辺の役割（柱際か梁際か、下辺か上辺か）へ
-/// 対応付ける必要がある。柱際は [`WallPlate::column_face_nodes`] の並びで、
-/// 梁際は標高の低い側を下辺として引き当てる。
-///
-/// 境界が 4 節点でない壁版は役割を決められないため、切れていないものとして扱う
-/// （スリットは 4 節点の囲まれた壁版でのみ意味を持つ。[`sepika_core::model::WallSlit`]）。
+/// 指定した柱際・梁際スリットをすべて境界辺へ対応付ける。
+/// 指定した役割を解決できない辺がある場合は `None` を返す。
 fn slit_edge_flags(
     model: &Model,
     plate: &WallPlate,
     boundary: &[NodeId],
     coords: &[[f64; 3]],
-) -> Vec<bool> {
+) -> Option<Vec<bool>> {
     let n = boundary.len();
     let mut out = vec![false; n];
     if n != 4 || !plate.slit.any() {
-        return out;
+        return (!plate.slit.any()).then_some(out);
     }
+    let mut column_resolved = [false; 2];
+    let mut beam_resolved = [false; 2];
     let faces = plate.column_face_nodes(model);
     let mid_z = |i: usize| (coords[i][2] + coords[(i + 1) % n][2]) / 2.0;
     let horizontal: Vec<usize> = (0..n)
@@ -105,18 +102,34 @@ fn slit_edge_flags(
             if let Some([f0, f1]) = faces {
                 if f0 != f1 {
                     if lower == f0 {
+                        column_resolved[0] = true;
                         out[i] = plate.slit.column_face[0];
                     } else if lower == f1 {
+                        column_resolved[1] = true;
                         out[i] = plate.slit.column_face[1];
                     }
                 }
             }
         } else if is_horizontal(a, b) {
             let is_bottom = lowest == Some(i);
-            out[i] = plate.slit.beam_face[usize::from(!is_bottom)];
+            let role = usize::from(!is_bottom);
+            beam_resolved[role] = true;
+            out[i] = plate.slit.beam_face[role];
         }
     }
-    out
+    let columns_resolved = plate
+        .slit
+        .column_face
+        .iter()
+        .zip(column_resolved)
+        .all(|(&specified, resolved)| !specified || resolved);
+    let beams_resolved = plate
+        .slit
+        .beam_face
+        .iter()
+        .zip(beam_resolved)
+        .all(|(&specified, resolved)| !specified || resolved);
+    (columns_resolved && beams_resolved).then_some(out)
 }
 
 /// 耐震スリット指定を境界辺へ対応付けたフラグ（`boundary_len` と同じ並び）。
@@ -133,18 +146,14 @@ fn resolved_slit_edge_flags(
     }
     let nodes = plate.boundary_nodes(model)?;
     let coords = plate.boundary_coords(model)?;
-    (nodes.len() == 4 && coords.len() == 4).then(|| slit_edge_flags(model, plate, &nodes, &coords))
+    if nodes.len() != 4 || coords.len() != 4 {
+        return None;
+    }
+    slit_edge_flags(model, plate, &nodes, &coords)
 }
 
-/// 壁版の耐震スリット指定が少なくとも 1 辺へ反映されるか。
-///
-/// 指定が無ければ常に `true`（警告対象にしない）。境界が 4 辺の囲まれた壁版で、
-/// 境界頂点のモデル節点から辺の役割（柱際・梁際）を決められ、指定した辺が
-/// 実際に対応付くときに `true`。境界が 4 辺でない、頂点にモデル節点が無い、
-/// 指定した辺を柱際・梁際へ対応付けられない場合は `false` となる。
-///
-/// [`edge_shares_with`] が同一の判定で指定を反映するかを決めるため、診断と
-/// 荷重分配で「スリットが効くか」の答えが食い違わない。
+/// 指定した耐震スリットをすべて境界辺へ対応付けられるか。
+/// 指定なしは `true`、指定した役割が一つでも未解決なら `false`。
 pub fn slit_specification_is_reflected(model: &Model, plate: &WallPlate) -> bool {
     if !plate.slit.any() {
         return true;
@@ -152,16 +161,15 @@ pub fn slit_specification_is_reflected(model: &Model, plate: &WallPlate) -> bool
     let Some(region) = model.wall_plate_assignment_region(plate.id) else {
         return false;
     };
-    resolved_slit_edge_flags(model, plate, region.boundary.len())
-        .is_some_and(|flags| flags.iter().any(|flag| *flag))
+    resolved_slit_edge_flags(model, plate, region.boundary.len()).is_some()
 }
 
 /// 壁版 1 枚の自重を辺へ配る。
 ///
 /// 各辺の支持部材と材軸区間は、壁版が割り当てられた壁版割当領域の境界をそのまま使う
 /// （境界の頂点にモデル節点が無くても支持先を引ける）。負担率の並びは境界の辺順に
-/// 対応する。スリットは 4 節点の囲まれた壁版でのみ意味を持ち、境界頂点の節点を
-/// 引けない場合は切れていない扱いとする。
+/// 対応する。指定スリットの対応不足または不正なDL選択では分配せず、
+/// 公開DL生成入口が壁版ID付きのエラーを返す。
 fn edge_shares_with(
     model: &Model,
     plate: &WallPlate,
