@@ -67,31 +67,46 @@ impl Model {
             .stories
             .iter()
             .enumerate()
-            .map(|(i, s)| SourceStory {
-                id: i as u32 + 1,
-                guid: None,
-                name: s.name.clone(),
-                height: s.elevation,
-                kind: match s.level_kind {
-                    super::StoryLevelKind::Normal => SourceStoryKind::General,
-                    super::StoryLevelKind::Basement { .. } => SourceStoryKind::Basement,
-                    super::StoryLevelKind::Penthouse { .. } => SourceStoryKind::Penthouse,
-                },
-                kind_from_native: true,
-                id_dependence: None,
-                strength_concrete: None,
-                node_ids: s
+            .map(|(i, s)| {
+                let mut members: Vec<_> = s
                     .node_ids
                     .iter()
-                    .filter_map(|n| {
-                        self.stb_node_ids.iter().find(|id| id.node == *n).map(|id| {
-                            SourceStoryNode {
-                                id: id.id,
-                                node: Some(*n),
-                            }
+                    .copied()
+                    .chain(
+                        self.nodes
+                            .iter()
+                            .filter(|n| n.story == Some(s.id))
+                            .map(|n| n.id),
+                    )
+                    .filter(|n| !self.generated_masters.contains(n))
+                    .collect();
+                members.sort_unstable_by_key(|n| n.0);
+                members.dedup();
+                SourceStory {
+                    id: i as u32 + 1,
+                    guid: None,
+                    name: s.name.clone(),
+                    height: s.elevation,
+                    kind: match s.level_kind {
+                        super::StoryLevelKind::Normal => SourceStoryKind::General,
+                        super::StoryLevelKind::Basement { .. } => SourceStoryKind::Basement,
+                        super::StoryLevelKind::Penthouse { .. } => SourceStoryKind::Penthouse,
+                    },
+                    kind_from_native: true,
+                    id_dependence: None,
+                    strength_concrete: None,
+                    node_ids: members
+                        .iter()
+                        .filter_map(|n| {
+                            self.stb_node_ids.iter().find(|id| id.node == *n).map(|id| {
+                                SourceStoryNode {
+                                    id: id.id,
+                                    node: Some(*n),
+                                }
+                            })
                         })
-                    })
-                    .collect(),
+                        .collect(),
+                }
             })
             .collect();
         self.source_stories_initialized = true;

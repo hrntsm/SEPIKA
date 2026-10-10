@@ -538,3 +538,101 @@ fn main_native_model_without_source_fields_keeps_messagepack_export_fallback() {
     .source_stories
     .is_empty());
 }
+
+#[test]
+fn native_first_story_edit_preserves_both_membership_forms_and_conflict_diagnostics() {
+    for representation in 0..4 {
+        let mut m = model();
+        m.source_stories.clear();
+        m.source_stories_initialized = false;
+        m.stb_node_ids.clear();
+        match representation {
+            0 => {
+                for story in &mut m.stories {
+                    story.node_ids.clear();
+                }
+            }
+            1 => {
+                for node in &mut m.nodes {
+                    node.story = None;
+                }
+            }
+            2 => {}
+            3 => m.nodes[0].story = Some(StoryId(1)),
+            _ => unreachable!(),
+        }
+        m.generated_masters.push(NodeId(4));
+        assert!(m.validate().is_ok());
+        let path = std::env::temp_dir().join(format!(
+            "native-membership-497-{}-{representation}.ovika",
+            std::process::id()
+        ));
+        sepika_io::ovika::save_ovika(&path, &m, Default::default()).unwrap();
+        let saved = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        std::fs::remove_file(path).unwrap();
+        assert!(saved.eq_ignoring_dofmap(&m));
+        m = saved;
+        let original = m.clone();
+        let before = sepika_io::stbridge::export_stbridge(&m).unwrap();
+        let mut expected = sepika_io::stbridge::import_stbridge(&before)
+            .unwrap()
+            .source_stories;
+        let memberships: Vec<Vec<u32>> = expected
+            .iter()
+            .map(|story| story.node_ids.iter().map(|n| n.id).collect())
+            .collect();
+        assert_eq!(
+            memberships,
+            vec![
+                vec![1],
+                if representation == 3 {
+                    vec![1, 2]
+                } else {
+                    vec![2]
+                },
+                vec![3],
+                vec![4],
+                vec![],
+            ]
+        );
+        let mut undo = UndoStack::new();
+        let base_elevation = m.stories[0].elevation;
+        for story in [StoryId(u32::MAX), StoryId(1)] {
+            assert!(!undo.run(
+                &mut m,
+                Box::new(sepika_edit::SetStoryLevel {
+                    story,
+                    name: "rejected".into(),
+                    elevation: base_elevation,
+                })
+            ));
+            assert!(m.eq_ignoring_dofmap(&original));
+        }
+        let elevation = m.stories[1].elevation;
+        assert!(undo.run(
+            &mut m,
+            Box::new(sepika_edit::SetStoryLevel {
+                story: StoryId(1),
+                name: "renamed".into(),
+                elevation,
+            })
+        ));
+        expected[1].name = "renamed".into();
+        let after = sepika_io::stbridge::export_stbridge(&m).unwrap();
+        let restored = sepika_io::stbridge::import_stbridge(&after).unwrap();
+        assert_eq!(restored.source_stories, expected);
+        assert!(!m.stb_node_ids.iter().any(|n| n.node == NodeId(4)));
+        assert_eq!(
+            m.source_story_diagnostics()
+                .iter()
+                .any(|d| d.contains("多重所属")),
+            representation == 3
+        );
+        undo.undo(&mut m);
+        assert!(m.eq_ignoring_dofmap(&original));
+        assert_eq!(sepika_io::stbridge::export_stbridge(&m).unwrap(), before);
+        undo.redo(&mut m);
+        assert_eq!(sepika_io::stbridge::export_stbridge(&m).unwrap(), after);
+        assert_eq!(sepika_io::stbridge::export_stbridge(&m).unwrap(), after);
+    }
+}
