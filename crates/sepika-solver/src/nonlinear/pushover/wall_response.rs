@@ -226,7 +226,7 @@ fn resultant(coords: &[[f64; 3]], force: &[f64], origin_mm: [f64; 3]) -> WallRes
         force_n: [0.0; 3],
         moment_nmm: [0.0; 3],
     };
-    for (p, f) in coords.iter().zip(force.chunks_exact(6)) {
+    for (p, f) in coords.iter().zip(force.as_chunks::<6>().0) {
         let arm = std::array::from_fn(|d| p[d] - origin_mm[d]);
         let moment = cross(arm, [f[0], f[1], f[2]]);
         for d in 0..3 {
