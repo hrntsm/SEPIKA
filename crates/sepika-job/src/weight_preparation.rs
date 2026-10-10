@@ -50,13 +50,16 @@ pub fn weight_input_key(model: &Model, mass_method: sepika_core::model::MassMeth
     input
         .constraints
         .retain(|constraint| !model.is_automatic_seismic_diaphragm(constraint));
-    for constraint in &mut input.constraints {
-        if let Constraint::RigidDiaphragm { master, weight, .. } = constraint {
-            if model.generated_masters.contains(master) {
-                *weight = None;
-            }
-        }
-    }
+    let manual_master_settings: Vec<_> = model
+        .nodes
+        .iter()
+        .filter(|node| {
+            model.generated_masters.contains(&node.id)
+                && (!model.is_automatic_seismic_master_restraint(node.id)
+                    || node.support_spring.is_some())
+        })
+        .map(|node| (node.id, node.restraint, node.support_spring))
+        .collect();
     for case in &mut input.load_cases {
         case.nodal.retain(|load| load.source == LoadSource::Manual);
         case.member.retain(|load| load.source == LoadSource::Manual);
@@ -83,7 +86,7 @@ pub fn weight_input_key(model: &Model, mass_method: sepika_core::model::MassMeth
     {
         member.name.clear();
     }
-    bincode::serialize(&input).expect("重量依存入力の直列化")
+    bincode::serialize(&(input, manual_master_settings)).expect("重量依存入力の直列化")
 }
 
 /// 現在保持している派生重量・質量の内容を識別する。
@@ -140,7 +143,7 @@ pub fn apply_generated_weights(
     mass_method: sepika_core::model::MassMethod,
 ) {
     let calculated_weights = generated.calculated_weights.clone();
-    let automatic_diaphragms = generated
+    let automatic_diaphragms: Vec<Constraint> = generated
         .constraints
         .iter()
         .filter(|constraint| {
@@ -168,6 +171,17 @@ pub fn apply_generated_weights(
         })
         .cloned()
         .collect();
+    let automatic_master_restraints = generated
+        .rep_nodes
+        .iter()
+        .filter(|node| {
+            !model.constraints.iter().any(|constraint| {
+                matches!(constraint,
+                Constraint::RigidDiaphragm { master, .. } if *master == node.id)
+            }) || model.is_automatic_seismic_master_restraint(node.id)
+        })
+        .map(|node| (node.id, node.restraint))
+        .collect();
     model.stories = generated.stories;
     for (node, story) in model.nodes.iter_mut().zip(generated.node_story) {
         node.story = story;
@@ -192,6 +206,7 @@ pub fn apply_generated_weights(
         output_key: Vec::new(),
         calculated_weights,
         automatic_diaphragms,
+        automatic_master_restraints,
     });
     let input_key = weight_input_key(model, mass_method);
     let output_key = weight_output_key(model);

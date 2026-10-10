@@ -608,7 +608,7 @@ fn generate_stories_impl(
             if slaves.is_empty() {
                 Vec::new()
             } else {
-                vec![(None, slaves.clone())]
+                vec![(None, slaves.clone(), true)]
             }
         } else {
             existing
@@ -625,11 +625,12 @@ fn generate_stories_impl(
                         } else {
                             diaphragm.slaves.to_vec()
                         },
+                        automatic,
                     )
                 })
                 .collect()
         };
-        for (_, group_slaves) in &groups {
+        for (_, group_slaves, _) in &groups {
             if group_slaves.is_empty() || group_slaves.iter().any(|id| !slaves.contains(id)) {
                 return Err(format!("階 {name} の利用者剛床に床面上の所属節点が不足しています。剛床設定を修正してください。"));
             }
@@ -638,7 +639,7 @@ fn generate_stories_impl(
             && node_ids.iter().any(|id| {
                 let owners = groups
                     .iter()
-                    .filter(|(_, members)| members.contains(id))
+                    .filter(|(_, members, _)| members.contains(id))
                     .count();
                 owners > 1
                     || (owners == 0
@@ -647,7 +648,7 @@ fn generate_stories_impl(
         {
             return Err(format!("階 {name} の複数剛床へ重量・物理質量を一意に帰属できません。所属節点の重複・不足を修正してください。"));
         }
-        for (existing, group_slaves) in &groups {
+        for (existing, group_slaves, automatic) in &groups {
             let group_nodes: Vec<_> = if groups.len() == 1 {
                 node_ids.clone()
             } else {
@@ -725,10 +726,12 @@ fn generate_stories_impl(
                 } else {
                     previous_master.coord
                 },
-                restraint: if existing.is_some() {
-                    previous_master.restraint
-                } else {
+                restraint: if existing.is_none()
+                    || model.is_automatic_seismic_master_restraint(master)
+                {
                     master_restraint(model, rep_restraint_base, group_slaves, &structural)
+                } else {
+                    previous_master.restraint
                 },
                 mass: if generated_master {
                     mass
@@ -763,7 +766,7 @@ fn generate_stories_impl(
                 story: story_id,
                 master,
                 slaves: group_slaves.clone(),
-                weight: if generated_master {
+                weight: if *automatic {
                     Some(group_weight)
                 } else {
                     existing.and_then(|d| d.weight)

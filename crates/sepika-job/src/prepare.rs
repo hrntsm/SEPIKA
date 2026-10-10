@@ -188,6 +188,7 @@ fn invalidate_generated_weights(model: &mut Model) {
             output_key: Vec::new(),
             calculated_weights: Vec::new(),
             automatic_diaphragms: Vec::new(),
+            automatic_master_restraints: Vec::new(),
         }
     });
     record.input_key.clear();

@@ -237,3 +237,145 @@ fn legacy_saved_automatic_floor_includes_added_geometry_and_keeps_stable_generat
     prepare_model(&mut model, &settings, None, false).unwrap();
     assert_eq!(model.seismic_weight_generation, record);
 }
+
+#[test]
+fn generated_master_restraints_follow_released_structure_and_preserve_user_edits() {
+    use sepika_core::dof::{Dof, Dof6Mask};
+    let mut model = fixture::two_storeys();
+    let settings = AnalysisSettings::default();
+    for node in &mut model.nodes[2..6] {
+        node.restraint.set_fixed(Dof::Uy);
+    }
+    prepare_model(&mut model, &settings, None, true).unwrap();
+    let upper = model.generated_masters[2];
+    assert!(model.nodes[upper.index()].restraint.is_fixed(Dof::Uy));
+    for node in &mut model.nodes[2..6] {
+        node.restraint = Dof6Mask::FREE;
+    }
+    prepare_model(&mut model, &settings, None, false).unwrap();
+    assert!(!model.nodes[upper.index()].restraint.is_fixed(Dof::Uy));
+    let ey = model
+        .load_cases
+        .iter()
+        .find(|case| case.name == EY_CASE_NAME)
+        .unwrap();
+    assert!((ey.nodal.iter().map(|load| load.values[1]).sum::<f64>() - 40000.0).abs() < 1e-8);
+    let result = sepika_job::compute::compute_linear_static(model.clone(), ey.id).unwrap();
+    assert!(result.disp.iter().flatten().any(|value| value.abs() > 1e-8));
+    let record = model.seismic_weight_generation.clone();
+    prepare_model(&mut model, &settings, None, false).unwrap();
+    assert_eq!(model.seismic_weight_generation, record);
+
+    model.nodes[upper.index()].restraint.set_fixed(Dof::Uy);
+    let manual_key = weight_input_key(&model, settings.mass_method);
+    model.materials[0].density = 2.6e-9;
+    prepare_model(&mut model, &settings, None, false).unwrap();
+    assert!(model.generated_masters.contains(&upper));
+    assert!(model.nodes[upper.index()].restraint.is_fixed(Dof::Uy));
+    assert_ne!(weight_input_key(&model, settings.mass_method), manual_key);
+    assert!(!model.is_automatic_seismic_master_restraint(upper));
+    let ey = model
+        .load_cases
+        .iter()
+        .find(|case| case.name == EY_CASE_NAME)
+        .unwrap()
+        .id;
+    assert!(
+        sepika_job::compute::compute_linear_static(model.clone(), ey)
+            .unwrap_err()
+            .to_string()
+            .contains("水平拘束")
+    );
+    let record = model.seismic_weight_generation.clone();
+    prepare_model(&mut model, &settings, None, false).unwrap();
+    assert_eq!(model.seismic_weight_generation, record);
+}
+
+#[test]
+fn edited_generated_diaphragm_weight_and_ci_survive_density_refresh() {
+    for ci in [Some(0.3), None] {
+        let mut model = fixture::two_storeys();
+        let settings = AnalysisSettings::default();
+        prepare_model(&mut model, &settings, None, true).unwrap();
+        let upper = model.generated_masters[2];
+        let key = weight_input_key(&model, settings.mass_method);
+        let manual_weight = if ci.is_some() { 100000.0 } else { 100100.0 };
+        let constraint = model
+            .constraints
+            .iter_mut()
+            .find(|constraint| {
+                matches!(constraint,
+            Constraint::RigidDiaphragm {master, ..} if *master == upper)
+            })
+            .unwrap();
+        if let Constraint::RigidDiaphragm {
+            weight,
+            ci_override,
+            ..
+        } = constraint
+        {
+            *weight = Some(manual_weight);
+            *ci_override = ci;
+        }
+        assert_ne!(weight_input_key(&model, settings.mass_method), key);
+        model.materials[0].density = 2.6e-9;
+        let report = prepare_model(&mut model, &settings, None, false).unwrap();
+        assert!(model.generated_masters.contains(&upper));
+        assert!(model
+            .constraints
+            .iter()
+            .any(|constraint| matches!(constraint,
+            Constraint::RigidDiaphragm {master, weight: Some(weight), ci_override, ..}
+            if *master == upper && *weight == manual_weight && *ci_override == ci)));
+        let expected = fixture::expected_weights(2.6e-9, 0.0, 0.0);
+        for (layer, expected) in model.layers().iter().zip(expected) {
+            assert!((layer.weight.unwrap() - expected).abs() < 1e-8);
+        }
+        if ci.is_some() {
+            assert!(
+                report.notices.iter().any(|notice| notice.contains("合力")),
+                "{:?}",
+                report.notices
+            );
+            for name in [EX_CASE_NAME, EY_CASE_NAME] {
+                let case = model
+                    .load_cases
+                    .iter()
+                    .find(|case| case.name == name)
+                    .unwrap();
+                assert!(sepika_job::compute::missing_seismic_horizontal_load(case));
+            }
+            let dl = model
+                .load_cases
+                .iter()
+                .find(|case| case.name == DL_CASE_NAME)
+                .unwrap()
+                .id;
+            sepika_job::compute::compute_linear_static(model.clone(), dl).unwrap();
+        } else {
+            assert!(
+                !report
+                    .notices
+                    .iter()
+                    .any(|notice| notice.contains("Ai 地震力")),
+                "{:?}",
+                report.notices
+            );
+            let total = 0.2 * expected.iter().sum::<f64>();
+            for (name, axis) in [(EX_CASE_NAME, 0), (EY_CASE_NAME, 1)] {
+                let case = model
+                    .load_cases
+                    .iter()
+                    .find(|case| case.name == name)
+                    .unwrap();
+                assert!(
+                    (case.nodal.iter().map(|load| load.values[axis]).sum::<f64>() - total).abs()
+                        < 1e-8
+                );
+            }
+        }
+        let record = model.seismic_weight_generation.clone();
+        prepare_model(&mut model, &settings, None, false).unwrap();
+        assert_eq!(model.seismic_weight_generation, record);
+    }
+}

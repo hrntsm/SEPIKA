@@ -2041,6 +2041,8 @@ pub struct SeismicWeightGeneration {
     pub calculated_weights: Vec<(StoryId, f64)>,
     #[serde(default)]
     pub automatic_diaphragms: Vec<Constraint>,
+    #[serde(default)]
+    pub automatic_master_restraints: Vec<(NodeId, crate::dof::Dof6Mask)>,
 }
 
 impl SeismicWeightGeneration {
@@ -2055,22 +2057,38 @@ impl SeismicWeightGeneration {
                         master: b,
                         slaves: c,
                         ci_override: d,
-                        ..
+                        weight: e,
                     },
                     Constraint::RigidDiaphragm {
                         story: x,
                         master: y,
                         slaves: z,
                         ci_override: w,
-                        ..
+                        weight: v,
                     },
-                ) => a == x && b == y && c == z && d == w,
+                ) => a == x && b == y && c == z && d == w && e == v,
                 _ => false,
             })
     }
 }
 
 impl Model {
+    /// 生成記録と一致する未編集のマスター拘束を識別する。
+    pub fn is_automatic_seismic_master_restraint(&self, master: NodeId) -> bool {
+        if let Some(record) = &self.seismic_weight_generation {
+            return self.nodes.get(master.index()).is_some_and(|node| {
+                record
+                    .automatic_master_restraints
+                    .contains(&(master, node.restraint))
+            });
+        }
+        self.generated_masters.contains(&master)
+            && self.constraints.iter().any(|constraint| {
+                matches!(constraint, Constraint::RigidDiaphragm { master: id, .. } if *id == master)
+                    && self.is_automatic_seismic_diaphragm(constraint)
+            })
+    }
+
     /// 記録済み自動剛床、または未記録の全床自動剛床を識別する。
     pub fn is_automatic_seismic_diaphragm(&self, constraint: &Constraint) -> bool {
         if let Some(record) = &self.seismic_weight_generation {
