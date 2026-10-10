@@ -750,6 +750,13 @@ fn assign_beams(model: &mut Model) -> usize {
 /// [`Model::node_referenced_by_regions_or_plates`] へ委譲する（`Model::node_in_use`
 /// の削除ガードと共有）。
 fn node_has_structural_ref(model: &Model, id: NodeId) -> bool {
+    if model
+        .source_stories
+        .iter()
+        .any(|story| story.node_ids.iter().any(|node| node.node == Some(id)))
+    {
+        return true;
+    }
     if model.elements.iter().any(|e| e.nodes.contains(&id)) {
         return true;
     }
@@ -795,6 +802,9 @@ pub(crate) fn delete_unref_nodes(model: &mut Model, candidates: &[NodeId]) -> us
             .node_ids
             .retain(|id| keep.get(id.index()).copied().unwrap_or(false));
     }
+    model
+        .stb_node_ids
+        .retain(|identity| keep.get(identity.node.index()).copied().unwrap_or(false));
     for group in &mut model.axes {
         for axis in &mut group.axes {
             axis.nodes
@@ -845,6 +855,36 @@ mod tests {
             story: None,
             support_spring: None,
         }
+    }
+
+    #[test]
+    fn rebuild_keeps_explicit_source_nodes_and_remaps_external_identities() {
+        let mut model = Model {
+            nodes: (0..3).map(|i| node(i, i as f64, 0.0, 0.0)).collect(),
+            ..Default::default()
+        };
+        model.assign_stb_node_ids().unwrap();
+        model.source_stories.push(crate::model::SourceStory {
+            kind_from_native: false,
+            id: 51,
+            guid: None,
+            name: "原階".into(),
+            height: 0.0,
+            kind: crate::model::SourceStoryKind::General,
+            id_dependence: None,
+            strength_concrete: None,
+            node_ids: vec![crate::model::SourceStoryNode {
+                id: 3,
+                node: Some(NodeId(2)),
+            }],
+        });
+        assert_eq!(delete_unref_nodes(&mut model, &[NodeId(1), NodeId(2)]), 1);
+        assert_eq!(model.source_stories[0].node_ids[0].node, Some(NodeId(1)));
+        assert_eq!(
+            model.stb_node_ids.iter().map(|n| n.id).collect::<Vec<_>>(),
+            vec![1, 3]
+        );
+        assert!(model.validate().is_ok());
     }
 
     fn element_beam(id: u32, i: u32, j: u32) -> ElementData {
