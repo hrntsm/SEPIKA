@@ -83,6 +83,15 @@ fn grid_edge_areas(
     split_ties: bool,
     use_supporting_line: bool,
 ) -> (Vec<f64>, f64) {
+    grid_edge_areas_with_dimensions(coords, split_ties, use_supporting_line, None)
+}
+
+fn grid_edge_areas_with_dimensions(
+    coords: &[[f64; 3]],
+    split_ties: bool,
+    use_supporting_line: bool,
+    dimensions: Option<[usize; 2]>,
+) -> (Vec<f64>, f64) {
     let n = coords.len();
     let mut areas = vec![0.0_f64; n];
     if n < 3 {
@@ -95,8 +104,10 @@ fn grid_edge_areas(
     if width <= 0.0 || height <= 0.0 {
         return (areas, 0.0);
     }
-    let nx = (width / MAX_CELL_MM).ceil().max(1.0) as usize;
-    let ny = (height / MAX_CELL_MM).ceil().max(1.0) as usize;
+    let [nx, ny] = dimensions.unwrap_or([
+        (width / MAX_CELL_MM).ceil().max(1.0) as usize,
+        (height / MAX_CELL_MM).ceil().max(1.0) as usize,
+    ]);
     let dx = width / nx as f64;
     let dy = height / ny as f64;
     let cell_area = dx * dy;
@@ -201,7 +212,7 @@ fn supporting_line_edge_loads(coords: &[[f64; 3]], w: f64, split_ties: bool) -> 
         .collect()
 }
 
-/// 現行 polygon と同じ 200×200 固定格子で、多角形内部と判定したセル面積の総和 [mm²] を
+/// 旧 polygon の 200×200 固定格子で、多角形内部と判定したセル面積の総和 [mm²] を
 /// 独立に集計する。`polygon_edge_areas` の総和と比較することで、辺帰属による面積の
 /// 取りこぼしがないこと（総和保存）を辺負担のベクタ自身ではなく独立値で検証する。
 fn polygon_grid_sampled_area(coords: &[[f64; 3]]) -> f64 {
@@ -483,7 +494,7 @@ fn run_nonrect_case(label: &str, pts: &[(f64, f64)], w: f64) {
     let poly_sampled = polygon_grid_sampled_area(&coords);
     let (_, base_sampled) = segment_extension_edge_areas(&coords, true);
     println!(
-        "格子内面積: 現行polygon200={poly_sampled:.1} 有限線分拡張方式={base_sampled:.1} 真値={true_area:.1}"
+        "履歴中心判定面積: 旧200×200={poly_sampled:.1} 旧100mm={base_sampled:.1} 真値={true_area:.1}"
     );
 
     assert_total("本番凸片積分", &current, w * true_area);
@@ -495,7 +506,7 @@ fn run_nonrect_case(label: &str, pts: &[(f64, f64)], w: f64) {
 fn case4_nonrect_trapezoid_and_lshape() {
     let w = 0.003_f64;
     run_nonrect_case(
-        "ケース4a: 台形 polygon vs 有限線分拡張方式",
+        "ケース4a: 現行凸片積分 vs 旧100mm中心判定（履歴）",
         &[
             (0.0, 0.0),
             (6000.0, 0.0),
@@ -1242,4 +1253,95 @@ fn case11_candidate_subset_is_unsupported() {
         integrate_polygon(&coords, &[2, 3], Default::default()),
         Err(PolygonDistributionError::Unsupported(_))
     ));
+}
+
+#[test]
+fn case4a_legacy_grids_against_independent_exact_areas() {
+    let coords = [
+        [0., 0., 0.],
+        [6000., 0., 0.],
+        [4000., 3000., 0.],
+        [1000., 3000., 0.],
+    ];
+    let exact_m2 = [
+        5.33706414913786,
+        2.70416345659799,
+        3.08706414913786,
+        2.37170824512628,
+    ];
+    let old = polygon_unsplit_reference_edge_areas(&coords, &[0, 1, 2, 3]);
+    let (split, _) = grid_edge_areas_with_dimensions(&coords, true, false, Some([200, 200]));
+    let comparison = manual_quadrilateral_edge_areas(&coords).0;
+    for (actual, expected) in old.iter().zip([16013.7, 8063.55, 9262.35, 7115.85]) {
+        assert!((actual * 0.003 - expected).abs() < 1e-8);
+    }
+    for (actual, expected) in comparison.iter().zip([16020., 8100., 9270., 7260.]) {
+        assert!((actual * 0.003 - expected).abs() < 1e-8);
+    }
+    assert_eq!(old, split);
+    assert_eq!(comparison, grid_edge_areas(&coords, false, false).0);
+    let relative_difference = (old[3] - comparison[3]) / comparison[3] * 100.;
+    assert!((relative_difference - (-1.98553719008264)).abs() < 1e-10);
+    let poly: Vec<_> = coords.iter().map(|p| [p[0], p[1]]).collect();
+    for [nx, ny] in [[200, 200], [60, 30]] {
+        let dx = 6000. / nx as f64;
+        let dy = 3000. / ny as f64;
+        let mut clipped = [0.; 4];
+        let mut partial_area_mm2 = 0.;
+        let mut partial_cells = 0;
+        for iy in 0..ny {
+            for ix in 0..nx {
+                let x = ix as f64 * dx;
+                let y = iy as f64 * dy;
+                let mut cuts = vec![y, y + dy];
+                for crossing in [
+                    3. * x,
+                    3. * (x + dx),
+                    1.5 * (6000. - x),
+                    1.5 * (6000. - x - dx),
+                ] {
+                    if crossing > y && crossing < y + dy {
+                        cuts.push(crossing);
+                    }
+                }
+                cuts.sort_by(f64::total_cmp);
+                let width = |v: f64| ((x + dx).min(6000. - 2. * v / 3.) - x.max(v / 3.)).max(0.);
+                let a = cuts
+                    .windows(2)
+                    .map(|v| (width(v[0]) + width(v[1])) * (v[1] - v[0]) / 2.)
+                    .sum::<f64>();
+                if a <= 0. {
+                    continue;
+                }
+                if a < dx * dy - 1e-6 {
+                    partial_cells += 1;
+                    partial_area_mm2 += a;
+                }
+                let center = [x + dx / 2., y + dy / 2.];
+                let distances: Vec<_> = (0..4)
+                    .map(|e| geom_polygon::point_segment_dist(center, poly[e], poly[(e + 1) % 4]))
+                    .collect();
+                let min = distances.iter().copied().fold(f64::INFINITY, f64::min);
+                let winners: Vec<_> = (0..4)
+                    .filter(|&e| distances[e] - min <= dx.max(dy) * 1e-9)
+                    .collect();
+                let fractions: Vec<_> = winners.iter().map(|_| 1. / winners.len() as f64).collect();
+                assert!((fractions.iter().sum::<f64>() - 1.).abs() < 1e-14);
+                for e in winners {
+                    clipped[e] += a / fractions.len() as f64;
+                }
+            }
+        }
+        assert!((clipped.iter().sum::<f64>() - 13.5e6).abs() < 1e-4);
+        let sampled = grid_edge_areas_with_dimensions(&coords, true, false, Some([nx, ny])).0;
+        for e in 0..4 {
+            println!("legacy nx={nx} ny={ny} edge={e} area_m2={} bias_m2={} boundary_delta_m2={} clipped_center_bias_m2={}",
+                sampled[e] / 1e6, sampled[e] / 1e6 - exact_m2[e],
+                (sampled[e] - clipped[e]) / 1e6, clipped[e] / 1e6 - exact_m2[e]);
+        }
+        println!(
+            "legacy nx={nx} ny={ny} partial_cells={partial_cells} partial_area_m2={}",
+            partial_area_mm2 / 1e6
+        );
+    }
 }
