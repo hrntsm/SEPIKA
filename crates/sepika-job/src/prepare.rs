@@ -674,7 +674,7 @@ mod tests {
                 width: 400.0,
                 web_thick: 13.0,
                 flange_thick: 21.0,
-                root_r: None,
+                root_r: Some(0.0),
             };
             let mut col = h.to_section(SectionId(0), "C".into());
             col.frame_use = Some(FrameSectionUse::Column);
@@ -727,7 +727,7 @@ mod tests {
                     width: 200.0,
                     web_thick: 11.0,
                     flange_thick: 20.0,
-                    root_r: None,
+                    root_r: Some(0.0),
                 });
                 let mut other = model.sections[1].clone();
                 other.id = SectionId(2);
@@ -736,7 +736,7 @@ mod tests {
                     width: 200.0,
                     web_thick: 11.0,
                     flange_thick: 20.0,
-                    root_r: None,
+                    root_r: Some(0.0),
                 });
                 model.sections.push(other);
                 let mut far = node(3, -6000.0, 0.0);

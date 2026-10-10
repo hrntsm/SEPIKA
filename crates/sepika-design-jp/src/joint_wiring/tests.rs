@@ -1991,7 +1991,7 @@ fn panel_504_check_uses_shape_depth_and_reports_unsupported_beams() {
         width,
         web_thick,
         flange_thick,
-        root_r: None,
+        root_r: Some(0.0),
     };
     let mut model = cross_joint_model(h(400.0, 400.0, 13.0, 21.0), h(600.0, 200.0, 11.0, 20.0));
     model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
