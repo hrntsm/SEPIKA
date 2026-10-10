@@ -201,7 +201,10 @@ impl App {
         ui.separator();
 
         ui.horizontal(|ui| {
-            ui.label(format!("解析経過の最大ベースシア = {:.1} kN", force_kn(po.qu)));
+            ui.label(format!(
+                "解析経過の最大ベースシア = {:.1} kN",
+                force_kn(po.qu)
+            ));
             ui.separator();
             let mech = match &po.mechanism {
                 sepika_solver::nonlinear::pushover::MechanismType::Overall => {
