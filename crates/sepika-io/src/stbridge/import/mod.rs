@@ -126,12 +126,17 @@ struct PendingSecondary {
 /// 取り込み途中の節点（id 正規化前）。
 struct RawNode {
     file_id: u32,
+    guid: Option<String>,
     coord: [f64; 3],
 }
 
 /// 取り込み途中の層（id 正規化前）。
 struct RawStory {
     file_id: u32,
+    guid: Option<String>,
+    kind: sepika_core::model::SourceStoryKind,
+    id_dependence: Option<u32>,
+    strength_concrete: Option<String>,
     name: String,
     elevation: f64,
     /// `StbStory` 直下 `StbNodeIdList/StbNodeId` が示す所属節点（file node id 列）。
@@ -192,8 +197,7 @@ struct RawAxis {
 /// ファイルに現れた属性 1 種類（要素名＋属性名）の扱い。
 ///
 /// ST-Bridge ファイルに存在した属性は、取り込んだものも取り込まなかったものも
-/// すべてここに現れる。無視リストは持たないため、`guid` のように解析へ用いない
-/// 属性も「取り込まなかった」として報告される。
+/// すべてここに現れる。解析へ用いない属性も保存の有無に応じて報告される。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttrDisposition {
     /// 属性が付いていた要素名（例 `StbSecColumn_S`）。

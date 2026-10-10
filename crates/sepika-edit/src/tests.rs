@@ -3546,6 +3546,7 @@ fn test_remove_support_isolator_roundtrip() {
         story: None,
         support_spring: None,
     });
+    model.assign_stb_node_ids().unwrap();
     let before = model.clone();
 
     let props = IsolatorProps {

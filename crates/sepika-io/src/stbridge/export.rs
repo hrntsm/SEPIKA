@@ -1,12 +1,12 @@
 //! ST-Bridge 直列化（Export）。
 //!
-//! 出力は **ST-Bridge 2.0.2 標準スキーマ準拠**の幾何モデル（他ソフト・BIM が読める形）。
+//! ST-Bridge 2.0.2 の幾何モデルを出力する。対応範囲は入出力ドキュメントを参照。
 //! - 断面は標準要素（`StbSecColumn_S`/`StbSecBeam_RC` 等）＋形鋼ライブラリ `StbSecSteel`。
 //! - 部材は複数形コンテナ（`StbColumns`/`StbGirders`/`StbBeams`/`StbBraces`/`StbSlabs`/
 //!   `StbWalls`）に入れ、向きは `rotate`、端部は `condition_*`、ブレースは `feature_brace`。
 //! - 材料は ST-Bridge の慣習どおり断面のグレード名（鋼 `strength_main`、RC/SRC/CFT の
 //!   コンクリート `strength_concrete`）で表す（`StbModel` は材料テーブルを持たない）。
-//! - id は ST-Bridge の `positiveInteger`（1 始まり）に合わせ、内部 0 始まり id に +1 する。
+//! - 節点・原階は保存された外部 ID/GUID を用い、その他は内部 ID +1 で出力する。
 //!
 //! ST-Bridge の幾何スコープ外（材料の E/ν・節点荷重・拘束・独自属性）は往復しない。
 //! 完全一致の往復が必要な場合はネイティブの `.ovika` を使う。
@@ -25,6 +25,15 @@ use sepika_core::model::{
 /// ST-Bridge の id は `positiveInteger`（1 以上）。内部 0 始まり id に +1 して出力する。
 fn sid(internal_id: u32) -> u32 {
     internal_id + 1
+}
+
+fn node_sid(model: &Model, node: NodeId) -> u32 {
+    model
+        .stb_node_ids
+        .iter()
+        .find(|n| n.node == node)
+        .map(|n| n.id)
+        .unwrap_or_else(|| sid(node.0))
 }
 
 /// 二次部材の両端に一致するモデル節点。対応する節点が無ければ `None`
@@ -55,8 +64,18 @@ pub fn export_stbridge(model: &Model) -> Result<String, StbError> {
 /// 標準スキーマの表現限界による近似・切り捨て（主筋の 4 段目以降、円形 RC 梁の
 /// `StbSecRaw` フォールバックなど）は警告として報告する。
 pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportReport), StbError> {
+    let mut output_model = model.clone();
+    output_model
+        .assign_stb_node_ids()
+        .map_err(StbError::Unmappable)?;
+    let model = &output_model;
+    if model.stb_node_ids.iter().any(|n| n.id == 0) {
+        return Err(StbError::Unmappable("STB節点IDは正整数が必要です".into()));
+    }
     let std = standard_sections(model)?;
-    let warnings = std.warnings;
+    let mut warnings = std.warnings;
+    warnings.extend(model.source_story_diagnostics());
+    warnings.extend(model.source_story_assignment_diagnostics());
     let (sections_body, steel_lib, col_map, beam_map, brace_map) = (
         std.sections_xml,
         std.steel_lib,
@@ -79,50 +98,107 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     s.push_str("  <StbModel>\n");
 
     s.push_str("    <StbNodes>\n");
-    for n in &model.nodes {
+    for n in model
+        .nodes
+        .iter()
+        .filter(|n| !model.generated_masters.contains(&n.id))
+    {
         s.push_str(&format!(
-            "      <StbNode id=\"{}\" X=\"{}\" Y=\"{}\" Z=\"{}\" kind=\"ON_GRID\"/>\n",
-            sid(n.id.0),
+            "      <StbNode id=\"{}\" X=\"{}\" Y=\"{}\" Z=\"{}\" kind=\"ON_GRID\"{} />\n",
+            node_sid(model, n.id),
             fmt(n.coord[0]),
             fmt(n.coord[1]),
             fmt(n.coord[2]),
+            model
+                .stb_node_ids
+                .iter()
+                .find(|i| i.node == n.id)
+                .and_then(|i| i.guid.as_ref())
+                .map(|g| format!(" guid=\"{}\"", esc(g)))
+                .unwrap_or_default(),
         ));
     }
     s.push_str("    </StbNodes>\n");
 
     s.push_str(&axes_body(model));
 
-    s.push_str("    <StbStories>\n");
-    for st in &model.stories {
-        let mut members: Vec<u32> = model
-            .nodes
-            .iter()
-            .filter(|n| n.story == Some(st.id))
-            .map(|n| n.id.0)
-            .collect();
-        for nid in &st.node_ids {
-            if !members.contains(&nid.0) {
-                members.push(nid.0);
+    let export_native_stories =
+        !model.source_stories_initialized && model.source_stories.is_empty();
+    let has_stories = if export_native_stories {
+        !model.stories.is_empty()
+    } else {
+        !model.source_stories.is_empty()
+    };
+    if has_stories {
+        s.push_str("    <StbStories>\n");
+        if export_native_stories {
+            for st in &model.stories {
+                let mut members: Vec<u32> = model
+                    .nodes
+                    .iter()
+                    .filter(|n| n.story == Some(st.id) && !model.generated_masters.contains(&n.id))
+                    .map(|n| n.id.0)
+                    .collect();
+                for nid in &st.node_ids {
+                    if !model.generated_masters.contains(nid) && !members.contains(&nid.0) {
+                        members.push(nid.0);
+                    }
+                }
+                members.sort_unstable();
+                s.push_str(&format!(
+                    "      <StbStory id=\"{}\" name=\"{}\" height=\"{}\" kind=\"{}\">\n",
+                    sid(st.id.0),
+                    esc(&st.name),
+                    fmt(st.elevation),
+                    story_kind(st.level_kind),
+                ));
+                if !members.is_empty() {
+                    s.push_str("        <StbNodeIdList>\n");
+                    for nid in members {
+                        s.push_str(&format!(
+                            "          <StbNodeId id=\"{}\"/>\n",
+                            node_sid(model, NodeId(nid))
+                        ));
+                    }
+                    s.push_str("        </StbNodeIdList>\n");
+                }
+                s.push_str("      </StbStory>\n");
+            }
+        } else {
+            for story in &model.source_stories {
+                if story.id == 0 {
+                    return Err(StbError::Unmappable("STB原階IDは正整数が必要です".into()));
+                }
+                let mut attributes = String::new();
+                if let Some(guid) = &story.guid {
+                    attributes.push_str(&format!(" guid=\"{}\"", esc(guid)));
+                }
+                if let Some(id) = story.id_dependence {
+                    attributes.push_str(&format!(" id_dependence=\"{}\"", id));
+                }
+                if let Some(fc) = &story.strength_concrete {
+                    attributes.push_str(&format!(" strength_concrete=\"{}\"", esc(fc)));
+                }
+                s.push_str(&format!(
+                    "      <StbStory id=\"{}\" name=\"{}\" height=\"{}\" kind=\"{}\"{}>\n",
+                    story.id,
+                    esc(&story.name),
+                    fmt(story.height),
+                    story.kind.as_str(),
+                    attributes
+                ));
+                if !story.node_ids.is_empty() {
+                    s.push_str("        <StbNodeIdList>\n");
+                    for reference in &story.node_ids {
+                        s.push_str(&format!("          <StbNodeId id=\"{}\"/>\n", reference.id));
+                    }
+                    s.push_str("        </StbNodeIdList>\n");
+                }
+                s.push_str("      </StbStory>\n");
             }
         }
-        members.sort_unstable();
-        s.push_str(&format!(
-            "      <StbStory id=\"{}\" name=\"{}\" height=\"{}\" kind=\"{}\">\n",
-            sid(st.id.0),
-            esc(&st.name),
-            fmt(st.elevation),
-            story_kind(st.level_kind),
-        ));
-        if !members.is_empty() {
-            s.push_str("        <StbNodeIdList>\n");
-            for nid in members {
-                s.push_str(&format!("          <StbNodeId id=\"{}\"/>\n", sid(nid)));
-            }
-            s.push_str("        </StbNodeIdList>\n");
-        }
-        s.push_str("      </StbStory>\n");
+        s.push_str("    </StbStories>\n");
     }
-    s.push_str("    </StbStories>\n");
 
     s.push_str("    <StbMembers>\n");
     s.push_str(&members_body(model, &col_map, &beam_map, &brace_map)?);
@@ -220,7 +296,7 @@ fn members_body(
                     columns.push_str(&format!(
                         "        <StbColumn id=\"{}\" name=\"C{}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
                          rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" condition_bottom=\"{}\" condition_top=\"{}\"/>\n",
-                        sid(e.id.0), sid(e.id.0), sid(bot.0), sid(top.0),
+                        sid(e.id.0), sid(e.id.0), node_sid(model, bot), node_sid(model, top),
                         fmt(rot), sec_ref(sec), ks, cond(cb), cond(ct),
                     ));
                 } else {
@@ -228,7 +304,7 @@ fn members_body(
                         "        <StbGirder id=\"{}\" name=\"G{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
                          rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\" \
                          condition_start=\"{}\" condition_end=\"{}\"/>\n",
-                        sid(e.id.0), sid(e.id.0), sid(e.nodes[0].0), sid(e.nodes[1].0),
+                        sid(e.id.0), sid(e.id.0), node_sid(model, e.nodes[0]), node_sid(model, e.nodes[1]),
                         fmt(rot), sec_ref(sec), ks, cond(e.end_cond[0]), cond(e.end_cond[1]),
                     ));
                 }
@@ -247,7 +323,7 @@ fn members_body(
                     "        <StbBrace id=\"{}\" name=\"BR{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
                      rotate=\"0\" id_section=\"{}\" kind_structure=\"S\" feature_brace=\"{}\" \
                      condition_start=\"PIN\" condition_end=\"PIN\"/>\n",
-                    sid(e.id.0), sid(e.id.0), sid(e.nodes[0].0), sid(e.nodes[1].0),
+                    sid(e.id.0), sid(e.id.0), node_sid(model, e.nodes[0]), node_sid(model, e.nodes[1]),
                     sec_ref(sec), feature,
                 ));
             }
@@ -290,7 +366,7 @@ fn members_body(
                 sec_beams.push_str(&format!(
                     "        <StbBeam id=\"{}\" name=\"B{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
                      rotate=\"0\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\"/>\n",
-                    sid(mid), sid(mid), sid(nodes[0].0), sid(nodes[1].0), sec_ref(sec), ks,
+                    sid(mid), sid(mid), node_sid(model, nodes[0]), node_sid(model, nodes[1]), sec_ref(sec), ks,
                 ));
             }
             sepika_core::model::SecondaryMemberKind::Post => {
@@ -304,7 +380,7 @@ fn members_body(
                 posts.push_str(&format!(
                     "        <StbPost id=\"{}\" name=\"P{}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
                      rotate=\"0\" id_section=\"{}\" kind_structure=\"{}\"/>\n",
-                    sid(mid), sid(mid), sid(bot.0), sid(top.0), sec_ref(sec), ks,
+                    sid(mid), sid(mid), node_sid(model, bot), node_sid(model, top), sec_ref(sec), ks,
                 ));
             }
         }
@@ -322,7 +398,7 @@ fn members_body(
         let sec = slab_sec_ids.get(&slab.id).copied().unwrap_or(slab_sec_base);
         let order = boundary
             .iter()
-            .map(|n| sid(n.0).to_string())
+            .map(|n| node_sid(model, *n).to_string())
             .collect::<Vec<_>>()
             .join(" ");
         let kind_slab = "NORMAL";
@@ -347,7 +423,7 @@ fn members_body(
         let order = wall
             .nodes
             .iter()
-            .map(|n| sid(n.0).to_string())
+            .map(|n| node_sid(model, *n).to_string())
             .collect::<Vec<_>>()
             .join(" ");
         let mid = wall_member_base + wall_idx as u32;
@@ -474,7 +550,10 @@ fn axes_body(model: &Model) -> String {
             if !ax.nodes.is_empty() {
                 s.push_str("          <StbNodeIdList>\n");
                 for n in &ax.nodes {
-                    s.push_str(&format!("            <StbNodeId id=\"{}\"/>\n", sid(n.0)));
+                    s.push_str(&format!(
+                        "            <StbNodeId id=\"{}\"/>\n",
+                        node_sid(model, *n)
+                    ));
                 }
                 s.push_str("          </StbNodeIdList>\n");
             }

@@ -286,6 +286,9 @@ pub struct AddNode {
 impl EditCommand for AddNode {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let new_id = NodeId(model.nodes.len() as u32);
+        if let Err(reason) = model.assign_stb_node_ids() {
+            return Box::new(RejectedEdit(reason));
+        }
         model.nodes.push(sepika_core::model::Node {
             id: new_id,
             coord: self.coord,
@@ -294,6 +297,9 @@ impl EditCommand for AddNode {
             story: None,
             support_spring: None,
         });
+        if let Err(reason) = model.assign_stb_node_ids() {
+            return Box::new(RejectedEdit(reason));
+        }
         Box::new(DeleteNode { id: new_id })
     }
 
@@ -314,8 +320,20 @@ impl EditCommand for DeleteNode {
         if idx >= model.nodes.len() || model.nodes[idx].id != self.id {
             return Box::new(Noop);
         }
-        if model.node_in_use(self.id) {
+        if model.elements.iter().any(|e| e.nodes.contains(&self.id))
+            || model.node_referenced_by_regions_or_plates(self.id)
+        {
             return Box::new(Noop);
+        }
+        let source_stories = model.source_stories.clone();
+        let stb_node_ids = model.stb_node_ids.clone();
+        let story_membership = model.stories.iter().map(|s| s.node_ids.clone()).collect();
+        for story in &mut model.source_stories {
+            story.node_ids.retain(|n| n.node != Some(self.id));
+        }
+        model.stb_node_ids.retain(|n| n.node != self.id);
+        for story in &mut model.stories {
+            story.node_ids.retain(|n| *n != self.id);
         }
         let generated_master =
             if let Some(pos) = model.generated_masters.iter().position(|n| *n == self.id) {
@@ -348,6 +366,9 @@ impl EditCommand for DeleteNode {
             support_spring: removed.support_spring,
             generated_master,
             axis_membership,
+            source_stories,
+            stb_node_ids,
+            story_membership,
         })
     }
 
@@ -358,6 +379,9 @@ impl EditCommand for DeleteNode {
 
 /// 指定インデックスへ節点を再挿入する（[`DeleteNode`] の逆操作専用）。
 pub struct InsertNode {
+    pub source_stories: Vec<sepika_core::model::SourceStory>,
+    pub stb_node_ids: Vec<sepika_core::model::StbNodeIdentity>,
+    pub story_membership: Vec<Vec<NodeId>>,
     pub index: usize,
     pub coord: [f64; 3],
     pub restraint: sepika_core::dof::Dof6Mask,
@@ -396,6 +420,11 @@ impl EditCommand for InsertNode {
                 let pos = axis.nodes.partition_point(|n| *n < id);
                 axis.nodes.insert(pos, id);
             }
+        }
+        model.source_stories = self.source_stories.clone();
+        model.stb_node_ids = self.stb_node_ids.clone();
+        for (story, nodes) in model.stories.iter_mut().zip(&self.story_membership) {
+            story.node_ids = nodes.clone();
         }
         Box::new(DeleteNode { id })
     }

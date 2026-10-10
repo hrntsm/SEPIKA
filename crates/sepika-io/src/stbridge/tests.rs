@@ -4065,7 +4065,7 @@ fn test_import_fails_on_duplicate_section_frame_use_conflict() {
 }
 
 /// ファイルに存在した属性は、取り込んだものも取り込まなかったものもすべて報告する。
-/// 無視リストを持たないため `guid` も未取り込みとして現れる。
+/// 節点 GUID は保存し、未対応の kind と区別して報告する。
 #[test]
 fn test_import_reports_attribute_dispositions() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -4084,7 +4084,7 @@ fn test_import_reports_attribute_dispositions() {
     };
     assert_eq!(find("X").imported, 1, "座標は取り込む");
     assert!(!find("X").is_dropped());
-    assert!(find("guid").is_dropped(), "guid は取り込まない");
+    assert!(!find("guid").is_dropped(), "guid は保存する");
     assert!(find("kind").is_dropped(), "kind は取り込まない");
     // 報告は要素名・属性名の昇順（HashMap の走査順に依存しない）。
     let mut sorted = report.attributes.clone();
@@ -4094,7 +4094,7 @@ fn test_import_reports_attribute_dispositions() {
             .then_with(|| a.attribute.cmp(&b.attribute))
     });
     assert_eq!(sorted, report.attributes, "報告は整列済み");
-    assert!(report.dropped_attributes().count() >= 2);
+    assert!(report.dropped_attributes().count() >= 1);
 }
 
 /// `StbStory` が標高の昇順に並んでいないファイルでも、取り込み後の
@@ -4112,11 +4112,11 @@ fn test_import_sorts_stories_by_elevation() {
     <StbNode id="2" X="0" Y="0" Z="6000"/>
   </StbNodes>
   <StbStories>
-    <StbStory id="0" name="RF" height="6000">
+    <StbStory id="3" name="RF" height="6000" kind="ROOF">
       <StbNodeIdList><StbNodeId id="2"/></StbNodeIdList>
     </StbStory>
-    <StbStory id="1" name="1F" height="0"/>
-    <StbStory id="2" name="2F" height="3000">
+    <StbStory id="1" name="1F" height="0" kind="GENERAL"/>
+    <StbStory id="2" name="2F" height="3000" kind="GENERAL">
       <StbNodeIdList><StbNodeId id="1"/></StbNodeIdList>
     </StbStory>
   </StbStories>
