@@ -14,7 +14,7 @@
 |------|------|
 | [**未検証一覧**](未検証一覧.md) | ❌/🔶 の集約チェックリスト（パッと見る用） |
 | [§レポート目録](#レポート目録) | 各 `.md` レポートへの索引 |
-| [§索引（要素→テスト）](#索引要素設計式--テスト) | コード上のテスト対応表（#1–#32） |
+| [§索引（要素→テスト）](#索引要素設計式--テスト) | コード上のテスト対応表（#1–#34） |
 | [原典照合リスト.md](原典照合リスト.md) | 法令・規準の埋め込み値の専門家サインオフ用チェックリスト（実装者は使わない） |
 | [pending_items.md](pending_items.md) | P9 仕様乖離の歴史的記録（訂正履歴含む） |
 
@@ -70,6 +70,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [リップ溝形材_未検定_Issue509_2026-10.md](リップ溝形材_未検定_Issue509_2026-10.md) | 単一リップ材の3座屈分類、荷重/補剛状態と理由付き未検定、保存・GUI・CSV | 🔶（未検定契約のVerification。耐力式・実験照合は未対応） |
 | [明示線材とダンパー総重量_Issue422_2026-10.md](明示線材とダンパー総重量_Issue422_2026-10.md) | 線材重量同等性、実M、重量／配置／動的質量の記録集合の完全性と反映値、公開フレーム・質点系InvalidInput、GUI・undo・保存 | ✅（Scope内 Verification。二次部材支持解決はScope外の残課題） |
 | [フィレット_角R_断面整合_Issue413_2026-10.md](フィレット_角R_断面整合_Issue413_2026-10.md) | H・角形 CFT の領域性能、公開耐力・実要素、重量質量、項目別算定元、設計ゲートと公開結果。受入 P2 の Truss 質量源の回帰を含む | ✅ |
 | [OVIKA_named_MessagePack_2026-10.md](OVIKA_named_MessagePack_2026-10.md) | 4 payload の named 保存・復元、順序独立・default・破損・モデル検証、実 STB モデル単体の codec 時間と最終 OVIKA サイズ | ✅ |
@@ -188,7 +189,8 @@
 | 30 | 壁版の要素生成判定と可視化 | sepika-core / sepika-load / sepika-app | model/wall_plate.rs, wall_expand.rs, viewer/scene.rs | `test_becomes_element_agrees_with_generated_elements` / `test_becomes_element_requires_section` / `test_boundary_coords_with_uses_supplied_coords` / `囲まれた壁版は境界節点が全て構面上にあるときだけ描く` / `取り付く壁版は取付き先の節点で構面を判定する` | 横断 | ☑ |
 | 31 | Fc>60 の NewRC 外挿 | sepika-material / sepika-element | newrc.rs, uniaxial/concrete_cyclic.rs, frame/fiber/mod.rs | Fc≤60 の材料 E 反映を維持し、Fc>60 の NewRC 固有 Ec 外挿、構成則選択・圧縮包絡線・ファイバー生成・3履歴則の応答をコードテストで照合済み。実験・原典適用範囲外の妥当性確認は未実施（詳細は [NewRC高強度コンクリート外挿_2026-09.md](NewRC高強度コンクリート外挿_2026-09.md)） | 横断 | 🔶 |
 | 32 | OVIKA の named MessagePack 永続化 | sepika-io / sepika-app | ovika.rs, tests/full_model.rs | `saved_model_fields_are_named_and_order_independent` / `ovika_roundtrip_preserves_model_and_results` 他。default・破損・復元モデル検証とモデル単体のサイズ・codec 比較は [検証記録](OVIKA_named_MessagePack_2026-10.md) を参照 | 横断 | ✅ |
-| 33 | RC鉄筋比の単位・分母 | sepika-core / sepika-element / sepika-design-jp / sepika-solver | rc_capacity.rs、factory/{springs,input_check}.rs、rc/beam_nonlinear.rs、pushover/shear_yield.rs | [Issue #435の直接回帰表](RC鉄筋比契約_Issue435_2026-10.md#独立fixtureと直接回帰) | 横断 | 🔶（契約Verification、T形解析・原著照合・Validationは残る） |
+| 33 | 単一リップ溝形材の未検定 | sepika-design-jp / sepika-app | steel/lip_channel.rs、tests/lip_channel.rs、viewer/check_ratio.rs | `steel::lip_channel::tests::*` / `lip_channel_*`。詳細は[検証記録](リップ溝形材_未検定_Issue509_2026-10.md) | 横断 | 🔶（未検定契約のみ） |
+| 34 | RC鉄筋比の単位・分母 | sepika-core / sepika-element / sepika-design-jp / sepika-solver | rc_capacity.rs、factory/{springs,input_check}.rs、rc/beam_nonlinear.rs、pushover/shear_yield.rs | [Issue #435の直接回帰表](RC鉄筋比契約_Issue435_2026-10.md#独立fixtureと直接回帰) | 横断 | 🔶（契約Verification、T形解析・原著照合・Validationは残る） |
 
 凡例: ✅ 実装済み・🔶 一部実装（要拡張）・❌ 未実装・対象外（採用しない）。
 壁横筋βs・参考骨格の単体/GUI共通/MCP実ジョブ検証は[Issue503検証](壁横筋入力と終局割線骨格_Issue503_2026-10.md)を参照（Verification ✅、実験Validation 🔶）。
