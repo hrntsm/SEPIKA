@@ -18,3 +18,5 @@ References:
 - [直接検証と未検証境界](../v_and_v/標準配筋_Issue507_2026-10.md)
 
 数値/booleanのXML空白は意味解釈時にだけ処理する。rawの元字句は保持し、共通Applyのtrue/false/0/1と個別優先・partial指定を維持する。enum/stringの許可範囲は変更しない。
+
+center優先で採用したあきと実効coverの不整合は非blocking通知として分離する。GUI取込/準備パネルとMCP `rebar_notices`へ伝え、解析前検査にも使われる強度診断へ混ぜない。未指定属性や未知径から値を補完しない。
