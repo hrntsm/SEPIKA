@@ -4716,6 +4716,7 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
     assert_eq!(bundle.slab_checks.len(), 2);
     for stale in [true, false] {
         app.core.scoped.staleness.results_stale = stale;
+        app.core.design_term = LoadTerm::Short; // 直接床板・小梁は実効長期のまま。
         app.run_design_check();
         let direct = app.core.scoped.results.as_ref().unwrap();
         assert_eq!(direct.analysis_contract_version, None);
@@ -4725,6 +4726,35 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
         );
         assert_eq!((direct.beam_checks.len(), direct.slab_checks.len()), (1, 2));
     }
+    assert!(app.require_design_input().is_ok());
+    // 最新の直接検定は保存できる。staleな保持THを同梱しない。
+    let mut history = App::default();
+    history.load_model(crate::sample::portal_frame());
+    history.core.analysis_cfg.th_duration = 0.02;
+    history.run_time_history_sample();
+    let old_th = history
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .time_history
+        .clone();
+    app.core.scoped.results.as_mut().unwrap().time_history = old_th;
+    app.core.scoped.staleness.results_stale = true;
+    let direct_path = test_tmp().join("602-direct-floor-stale-analysis.ovika");
+    app.save_project_to(direct_path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut direct_loaded = App::default();
+    direct_loaded.open_project_from(direct_path.clone());
+    let direct = direct_loaded
+        .current_design_results()
+        .expect("直接検定は入力一致で復元");
+    assert_eq!((direct.beam_checks.len(), direct.slab_checks.len()), (1, 2));
+    assert!(direct.time_history.is_none());
+    assert!(direct_loaded.core.scoped.last_error.is_none());
+    std::fs::remove_file(direct_path).unwrap();
+    app.core.scoped.results.as_mut().unwrap().time_history = None;
     let (mut old_floor, path) =
         super::result_contract_tests::restore(&app, None, Some(0), "old-floor-and-beam");
     let invalid = old_floor.core.scoped.results.as_ref().unwrap();
@@ -4737,6 +4767,10 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
     );
     std::fs::remove_file(path).unwrap();
     app.core.model.materials[material.index()].density = 85e-6 / 9806.65;
+    app.core.scoped.staleness.mark_edited();
+    app.run_time_history_sample();
+    assert!(app.core.scoped.last_error.is_some());
+    assert!(app.require_design_input().is_err());
     app.run_design_check();
     assert!(app
         .core
@@ -4913,6 +4947,11 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
             slab_checks: short_slabs,
             ..Default::default()
         });
+        // この試験は表示用の直接床検定fixtureを構築する。
+        let selected = app.core.scoped.last_static.take();
+        let _ = app.compute_holding_capacity();
+        app.certify_design_fixture();
+        app.core.scoped.last_static = selected;
         let context = egui::Context::default();
         let output = context.run_ui(
             egui::RawInput {
@@ -10208,8 +10247,8 @@ fn test_time_history_apply_clears_stale() {
         "時刻歴の完了後は stale が解消されるべき"
     );
     assert!(
-        !app.core.scoped.staleness.design_stale,
-        "時刻歴の完了後は設計結果の stale も解消されるべき"
+        app.core.scoped.staleness.design_stale,
+        "時刻歴の完了は未再計算の検定を認定しない"
     );
     assert!(
         app.core.scoped.staleness.last_run.is_some(),

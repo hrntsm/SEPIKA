@@ -8,6 +8,7 @@ pub(crate) enum ResultInputKey {
     Combo(String),
     Pushover(SeismicDir),
     Modal,
+    Design,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -67,7 +68,10 @@ impl ResultsBundle {
         self.wall_checks.clear();
         self.beam_checks.clear();
         self.slab_checks.clear();
+        self.design_source = None;
         self.design_contract_version = None;
+        self.input_records
+            .retain(|(key, _)| *key != ResultInputKey::Design);
     }
 
     pub(super) fn record_input(&mut self, key: ResultInputKey, input: Vec<u8>) {
@@ -409,7 +413,7 @@ impl App {
                             .any(|case| case.id == *id && is_standard_seismic_case(case))
                     })
                 }),
-            ResultInputKey::Modal => false,
+            ResultInputKey::Modal | ResultInputKey::Design => false,
         };
         depends_on_seismic
             .then(|| {
@@ -421,6 +425,123 @@ impl App {
                     .and_then(|m| m.period.first().copied())
             })
             .flatten()
+    }
+
+    /// 検定が実際に採用した応力源。表示選択は生成証明として扱わない。
+    pub(super) fn selected_design_source(&self) -> Option<ResultInputKey> {
+        match self.core.scoped.last_static {
+            Some(StaticKey::Case(key)) => Some(ResultInputKey::Static(key)),
+            Some(StaticKey::Combo(index)) => self
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .and_then(|r| r.combos.get(index))
+                .map(|(name, _)| ResultInputKey::Combo(name.clone())),
+            None => None,
+        }
+    }
+
+    fn design_input(&self, source: Option<ResultInputKey>) -> Vec<u8> {
+        let term = match &source {
+            Some(ResultInputKey::Static(key)) => {
+                let id = match key {
+                    StaticCaseKey::User(id) => Some(*id),
+                    StaticCaseKey::Seismic(dir) => self.seismic_case_id(*dir),
+                };
+                id.and_then(|id| self.core.model.load_cases.iter().find(|case| case.id == id))
+                    .and_then(|case| sepika_core::load_combo::case_design_state(case.kind).ok())
+            }
+            Some(ResultInputKey::Combo(name)) => self
+                .core
+                .model
+                .combinations
+                .iter()
+                .find(|combo| combo.name == *name)
+                .and_then(|combo| {
+                    sepika_core::load_combo::combination_design_state(
+                        combo,
+                        &self.core.model.load_cases,
+                    )
+                    .ok()
+                }),
+            _ => None,
+        }
+        .is_some_and(|state| state.duration == sepika_core::load_combo::LoadDuration::Short);
+        let source = source.map(|key| {
+            let input = self
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .and_then(|r| r.input_records.iter().find(|(k, _)| *k == key))
+                .map(|(_, input)| input.clone());
+            (key, input)
+        });
+        bincode::serialize(&(
+            self.calculation_model(),
+            term,
+            self.core.analysis_cfg.rc_damage_control,
+            self.core.analysis_cfg.bond_method,
+            self.core.analysis_cfg.qd_method,
+            source,
+        ))
+        .expect("検定入力の直列化")
+    }
+
+    pub(super) fn record_design_input(&mut self) {
+        let source = self.selected_design_source();
+        let input = self.design_input(source.clone());
+        if let Some(bundle) = self.core.scoped.results.as_mut() {
+            bundle.design_source = source;
+            bundle.record_input(ResultInputKey::Design, input);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn certify_design_fixture(&mut self) {
+        self.core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .design_contract_version = Some(DESIGN_CONTRACT_VERSION);
+        self.record_design_input();
+    }
+
+    pub(crate) fn require_design_input(&self) -> Result<(), String> {
+        let bundle = self
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .ok_or("検定結果がありません")?;
+        if let Some(reason) = contract_reason(
+            "検定",
+            bundle.design_contract_version,
+            DESIGN_CONTRACT_VERSION,
+        ) {
+            return Err(reason);
+        }
+        if let Some(key) = &bundle.design_source {
+            self.require_result_input(key.clone())?;
+        }
+        let input = bundle
+            .input_records
+            .iter()
+            .find(|(key, _)| *key == ResultInputKey::Design);
+        if input.is_some_and(|(_, input)| *input == self.design_input(bundle.design_source.clone()))
+        {
+            Ok(())
+        } else {
+            Err("検定結果は利用不可です。生成入力が欠落または現在のモデル・実効設計条件と不一致です。検定を再実行してください。".into())
+        }
+    }
+
+    #[cfg(any(feature = "gui", test))]
+    pub(crate) fn current_design_results(&self) -> Option<&ResultsBundle> {
+        self.require_design_input().ok()?;
+        self.core.scoped.results.as_ref()
     }
 
     pub(super) fn job_input(&self) -> Vec<u8> {
@@ -469,6 +590,7 @@ impl App {
             ResultInputKey::Combo(name) => format!("静的組合せ「{name}」"),
             ResultInputKey::Pushover(dir) => format!("増分解析 {dir:?}"),
             ResultInputKey::Modal => "固有値解析".into(),
+            ResultInputKey::Design => "検定".into(),
         };
         let input = self
             .core

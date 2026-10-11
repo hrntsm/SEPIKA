@@ -394,11 +394,15 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
         .iter()
         .filter(|w| w.plate == Some(WallPlateId(0)))
         .all(|w| w.skip_kind == Some(WallSkipKind::MissingResponse)));
+    let csv = sepika_app::summary::build_report_csv(&app);
+    assert!(csv.contains("3,6,0,0,6,0,\n"));
+    app.core.model.nodes[0].coord[0] += 1.0;
     app.core.scoped.staleness.mark_edited();
     assert!(app.core.scoped.staleness.design_stale);
     let csv = sepika_app::summary::build_report_csv(&app);
-    assert!(csv.contains("3,6,0,0,6,0,\n"));
-    assert!(csv.contains("要再計算,モデル編集前の検定結果です"));
+    assert!(csv.contains("[検定結果状態]\n利用不可"));
+    assert!(!csv.contains("[耐震壁検定集計]"));
+    app.core.model.nodes[0].coord[0] -= 1.0;
     app.core.model.elements[0].section = Some(SectionId(5));
     app.run_combination(2);
     assert!(app

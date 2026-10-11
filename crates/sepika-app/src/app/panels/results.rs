@@ -42,7 +42,9 @@ impl App {
                     let t1 = m.period.first().copied().unwrap_or(0.0);
                     ui.label(format!("固有周期 T1: {:.3} s", t1));
                 }
-                let n_checks: usize = r.member_checks.iter().map(|m| m.positions.len()).sum();
+                let n_checks: usize = self.current_design_results().map_or(0, |r| {
+                    r.member_checks.iter().map(|m| m.positions.len()).sum()
+                });
                 ui.label(format!("検定結果数: {}", n_checks));
             } else {
                 ui.colored_label(crate::theme::GRAY_600, "▷ 未実行");

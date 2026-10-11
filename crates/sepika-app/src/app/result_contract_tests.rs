@@ -66,6 +66,7 @@ impl serde::Serialize for ContractFixture<'_> {
                 map.serialize_entry("lumped", &self.0.lumped)?;
                 map.serialize_entry("lumped_results", &self.0.lumped_results)?;
                 map.serialize_entry("input_records", &self.0.input_records)?;
+                map.serialize_entry("design_source", &self.0.design_source)?;
                 if let Some(version) = self.0.analysis_contract_version {
                     map.serialize_entry("analysis_contract_version", &version)?;
                 }

@@ -418,15 +418,13 @@ pub fn build_report_csv(app: &App) -> String {
             cell(&diagnostic)
         ));
         out.push_str("法的全条件,未確認\n");
-        out.push_str(
-            if app.core.scoped.staleness.design_stale || app.core.scoped.staleness.results_stale {
-                "結果状態,要再計算（モデル編集前の検定結果）\n"
-            } else if app.core.scoped.last_static.is_none() {
-                "結果状態,未選択\n"
-            } else {
-                "結果状態,計算済み\n"
-            },
-        );
+        out.push_str(if app.require_design_input().is_err() {
+            "結果状態,要再計算（モデル編集前の検定結果）\n"
+        } else if app.core.scoped.last_static.is_none() {
+            "結果状態,未選択\n"
+        } else {
+            "結果状態,計算済み\n"
+        });
         out.push_str("\n[検定荷重項]\nケースID,名称,種別,係数\n");
         for (id, factor) in terms {
             let case = model.load_cases.iter().find(|c| c.id == id);
@@ -454,7 +452,11 @@ pub fn build_report_csv(app: &App) -> String {
         ));
     }
 
-    if !results.member_checks.is_empty() {
+    let design_available = app.require_design_input().is_ok();
+    if !design_available {
+        out.push_str("\n[検定結果状態]\n利用不可,検定の生成入力が欠落または不一致です。検定を再実行してください\n");
+    }
+    if design_available && !results.member_checks.is_empty() {
         out.push_str("\n[部材検定]\n部材,位置,検定比,判定,根拠\n");
         for m in &results.member_checks {
             for p in &m.positions {
@@ -482,14 +484,12 @@ pub fn build_report_csv(app: &App) -> String {
         }
     }
 
-    if !results.wall_checks.is_empty() {
-        out.push_str(
-            if app.core.scoped.staleness.design_stale || app.core.scoped.staleness.results_stale {
-                "\n[耐震壁結果状態]\n要再計算,モデル編集前の検定結果です\n"
-            } else {
-                "\n[耐震壁結果状態]\n計算済み\n"
-            },
-        );
+    if design_available && !results.wall_checks.is_empty() {
+        out.push_str(if app.require_design_input().is_err() {
+            "\n[耐震壁結果状態]\n要再計算,モデル編集前の検定結果です\n"
+        } else {
+            "\n[耐震壁結果状態]\n計算済み\n"
+        });
         let summary =
             sepika_design_jp::wall_check::WallCheckSummary::from_checks(&results.wall_checks);
         out.push_str("\n[耐震壁検定集計]\n壁枚数,検定件数,合格,NG,未検定,対象外,最大検定比\n");
@@ -564,6 +564,10 @@ pub fn build_report_csv(app: &App) -> String {
     if !results.joint_checks.is_empty() {
         out.push_str("\n[接合部検定]\n節点,種別,検定比,判定,根拠\n");
         for j in &results.joint_checks {
+            if !design_available && matches!(j.outcome, sepika_design_jp::CheckOutcome::Checked(_))
+            {
+                continue;
+            }
             match &j.outcome {
                 sepika_design_jp::CheckOutcome::Checked(cr) => {
                     out.push_str(&format!(
@@ -1428,6 +1432,7 @@ mod tests {
             ..Default::default()
         };
         app.core.scoped.results = Some(results);
+        app.certify_design_fixture();
         let csv = build_report_csv(&app);
         assert!(csv.contains("パネルゾーン(S) X-Z,-,検定不能,接合部 ID 0"));
         assert!(csv.contains("上位置差=50 下位置差=-50"));
