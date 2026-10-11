@@ -45,6 +45,7 @@ ST-Bridge は未実装、MCP ツールの中身は大半がスタブ。DoD §8.1
 - **`JobRegistry`/`Job`/`JobStatus`/`JobKind`**: 型と register/get/update は健全（ただし誰も実行しない）。
 - **`analyze()`/`get_model_json()`**: feature 非依存の自由関数。`analyze` は実際に線形静的を解く（が MCP
   ツールには未接続）。
+  `analyze` / `analyze_model` は #605 で廃止済み。現在の解析入口は `compute_job` / `analysis_run`。
 - **GUI（squid-n-app）**: 固有値・時刻歴の起動とビューは一部存在。
 
 ---
