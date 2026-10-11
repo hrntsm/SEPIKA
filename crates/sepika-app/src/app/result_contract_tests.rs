@@ -144,11 +144,15 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-steel-grade-recognition", Some(7), "旧契約"),
         ("old-frame-support-representation", Some(8), "旧契約"),
         ("old-signed-reactions", Some(9), "旧契約"),
+        ("old-skew-rectangle", Some(10), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
         let (loaded, path) = restore(&app, version, Some(DESIGN_CONTRACT_VERSION), name);
-        assert_eq!(loaded.core.model.nodes.len(), app.core.model.nodes.len());
+        assert_eq!(
+            rmp_serde::to_vec_named(&loaded.core.model).unwrap(),
+            rmp_serde::to_vec_named(&app.core.model).unwrap()
+        );
         assert_eq!(loaded.core.analysis_cfg.threads, 1);
         let bundle = loaded.core.scoped.results.as_ref().unwrap();
         if reason.is_empty() {
@@ -258,9 +262,14 @@ fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_
         ("design-missing", None),
         ("design-old", Some(0)),
         ("design-old-signed-reactions", Some(3)),
+        ("design-old-skew-rectangle", Some(4)),
         ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
     ] {
         let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);
+        assert_eq!(
+            rmp_serde::to_vec_named(&loaded.core.model).unwrap(),
+            rmp_serde::to_vec_named(&app.core.model).unwrap()
+        );
         let forces = loaded
             .core
             .scoped

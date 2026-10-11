@@ -4431,6 +4431,50 @@ fn test_floor_design_checks_slab() {
     assert!((sr.effective_depth - 120.0).abs() < 1e-6, "d=t-かぶり");
 }
 
+#[test]
+fn issue561_floor_design_checks_skip_skew_and_preserve_rotated_rectangle() {
+    let mut model = make_square_slab_test_model();
+    let section_id = sepika_core::ids::SectionId(model.sections.len() as u32);
+    model.sections.push(
+        sepika_core::section_shape::SectionShape::RcSlab { thickness: 150. }
+            .to_section(section_id, "S15".into()),
+    );
+    model.slabs[0].plate.section = Some(section_id);
+    let mut app = App {
+        core: AppCore {
+            model,
+            ..Default::default()
+        },
+        ..App::default()
+    };
+    let boundary = app.core.model.slabs[0]
+        .boundary_nodes(&app.core.model)
+        .unwrap();
+    for (polygon, points) in [
+        (true, [[0., 0.], [1000., 0.], [1500., 1000.], [500., 1000.]]),
+        (false, [[0., 0.], [4000., 0.], [4000., 3000.], [0., 3000.]]),
+    ] {
+        for angle in [0_f64, std::f64::consts::PI / 6.] {
+            for (id, [x, y]) in boundary.iter().zip(points) {
+                app.core.model.nodes[id.index()].coord = [
+                    angle.cos() * x - angle.sin() * y,
+                    angle.sin() * x + angle.cos() * y,
+                    0.,
+                ];
+            }
+            let (_, checks) = app.floor_design_checks();
+            if polygon {
+                assert!(checks.is_empty());
+            } else {
+                assert_eq!(checks.len(), 1);
+                assert_eq!(checks[0].0, app.core.model.slabs[0].id);
+                assert!((checks[0].1.span - 3000.).abs() < 1e-9);
+                assert!(checks[0].1.moment > 0.);
+            }
+        }
+    }
+}
+
 /// 実部材化された小梁は全体 FEM で検定するため、床設計（小梁）の対象外になる。
 #[test]
 fn test_floor_design_skips_materialized_beam() {

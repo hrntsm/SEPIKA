@@ -2,7 +2,7 @@
 //!
 //! - [`boundary_coords`] — スラブ境界節点の座標列を取得する
 //! - [`dist3`] — 3次元2点間のユークリッド距離
-//! - [`slab_dimensions`] — 矩形（平行四辺形）判定と短辺・長辺寸法 `(lx, ly)`
+//! - [`slab_dimensions`] — 矩形判定と辺順の寸法 `(lx, ly)`
 //! - [`edge_len`] — 多角形の辺 i の長さ
 //! - [`point_in_slab_boundary`] — 点がスラブ境界多角形の内部または辺上にあるか
 
@@ -15,17 +15,8 @@ pub(crate) fn boundary_coords(model: &Model, slab: &Slab) -> Option<Vec<[f64; 3]
 /// 2 点間の距離 [mm]。算定の情報源は `sepika-core` に置く。
 pub(crate) use sepika_core::geom::vec3::dist as dist3;
 
-/// スラブ境界が矩形（正確には平行四辺形の閉合条件を満たす4辺形）かどうかを判定しつつ、
-/// 短辺・長辺相当の寸法 `(lx, ly)`（= `boundary[0]-[1]` 間、`boundary[0]-[3]` 間の距離）を返す。
-///
-/// `boundary[2]` が `boundary[0] + (boundary[1]-boundary[0]) + (boundary[3]-boundary[0])`
-/// （対角線の閉合＝平行四辺形条件）に相対誤差 1e-6 以内で一致することを確認する
-/// （レビュー §1.13 対応）。矩形でない4辺形・5角形以上・境界情報欠損の場合は `None` を返し、
-/// 呼び出し側は多角形経路（[`distribute_polygon`]）にフォールバックする。
-///
-/// 注: この判定は「向かい合う辺が等長・平行」という平行四辺形条件のみを検証しており、
-/// 直交性（90°）までは検証しない。実運用では境界は軸直交の矩形である前提のため、
-/// 既存の TriTrapezoid/OneWay/TributaryArea の面積計算（`lx*ly`）はその前提の下でのみ厳密。
+/// 矩形の寸法 [mm] を辺 0→1、0→3 の順で返す。閉合・直交・面積の相対許容は 1e-6。
+/// 寸法を採用できない境界は `None`。水平性・単純性・支持参照の検査は呼出し側が行う。
 pub fn slab_dimensions(model: &Model, slab: &Slab) -> Option<(f64, f64)> {
     slab_dimensions_of(&slab.boundary_coords(model)?)
 }
@@ -35,22 +26,42 @@ pub fn slab_dimensions_of(coords: &[[f64; 3]]) -> Option<(f64, f64)> {
     if coords.len() != 4 {
         return None;
     }
-    let (p0, p1, p2, p3) = (coords[0], coords[1], coords[2], coords[3]);
-
-    let lx = dist3(p0, p1);
-    let ly = dist3(p0, p3);
-    if lx <= 1e-9 || ly <= 1e-9 {
+    if !coords.iter().flatten().all(|x| x.is_finite()) {
         return None;
     }
-
-    let expected = [
-        p0[0] + (p1[0] - p0[0]) + (p3[0] - p0[0]),
-        p0[1] + (p1[1] - p0[1]) + (p3[1] - p0[1]),
-        p0[2] + (p1[2] - p0[2]) + (p3[2] - p0[2]),
-    ];
-    let scale = lx.max(ly);
-    let err = dist3(expected, p2);
-    if err / scale > 1e-6 {
+    let local: [[f64; 3]; 4] =
+        std::array::from_fn(|e| sepika_core::geom::vec3::sub(coords[e], coords[0]));
+    let u = local[1];
+    let v = local[3];
+    let norm = |p: [f64; 3]| p[0].hypot(p[1]).hypot(p[2]);
+    let lx = norm(u);
+    let ly = norm(v);
+    if !lx.is_finite() || !ly.is_finite() || lx <= 1e-9 || ly <= 1e-9 {
+        return None;
+    }
+    let closure = norm(std::array::from_fn(|i| local[2][i] - u[i] - v[i])) / lx.max(ly);
+    let dot = (0..3).map(|i| (u[i] / lx) * (v[i] / ly)).sum::<f64>().abs();
+    let area_vector: [f64; 3] = std::array::from_fn(|i| {
+        let j = (i + 1) % 3;
+        let k = (i + 2) % 3;
+        (0..4)
+            .map(|e| local[e][j] * local[(e + 1) % 4][k] - local[e][k] * local[(e + 1) % 4][j])
+            .sum::<f64>()
+            / 2.
+    });
+    let area = norm(area_vector);
+    let rectangle_area = lx * ly;
+    let area_error = (area - rectangle_area).abs() / area;
+    if !closure.is_finite()
+        || closure > 1e-6
+        || !dot.is_finite()
+        || dot > 1e-6
+        || !area.is_finite()
+        || area <= 0.
+        || !rectangle_area.is_finite()
+        || !area_error.is_finite()
+        || area_error > 1e-6
+    {
         return None;
     }
     Some((lx, ly))

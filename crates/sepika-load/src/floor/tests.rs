@@ -479,14 +479,16 @@ fn test_one_way_short_direction_rejects_skewed_parallelogram() {
     slab.plate.one_way = Some(OneWayDir::Short);
     model.slabs[slab.id.index()].plate.one_way = Some(OneWayDir::Short);
 
-    assert!(matches!(
+    assert_eq!(
         super::validate_one_way_directions(&model),
-        Err(FloorDistributionError::ShortDirectionRequiresRectangle { .. })
-    ));
-    assert!(matches!(
-        super::distribute_slab_w_checked(&model, &slab, w),
-        Err(FloorDistributionError::ShortDirectionRequiresRectangle { .. })
-    ));
+        Err(FloorDistributionError::ShortDirectionRequiresRectangle { slab_id: slab.id })
+    );
+    for load in [0., w] {
+        assert_eq!(
+            super::distribute_slab_w_checked(&model, &slab, load).unwrap_err(),
+            FloorDistributionError::ShortDirectionRequiresRectangle { slab_id: slab.id }
+        );
+    }
 }
 
 #[test]
@@ -1267,4 +1269,311 @@ fn attach_support(model: &mut Model) {
         plastic_zone: None,
         spring: None,
     });
+}
+
+#[test]
+fn issue561_rectangle_classification_thresholds_and_finiteness() {
+    let rectangle = [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]];
+    for (ratio, expected) in [(0.999e-6, true), (1e-6, true), (1.001e-6, false)] {
+        let mut closure = rectangle;
+        closure[2][2] = ratio;
+        assert_eq!(
+            slab_dimensions_of(&closure).is_some(),
+            expected,
+            "closure {ratio}"
+        );
+        let mut orthogonal = rectangle;
+        orthogonal[3] = [ratio, (1. - ratio * ratio).sqrt(), 0.];
+        orthogonal[2] = [1. + ratio, orthogonal[3][1], 0.];
+        assert_eq!(
+            slab_dimensions_of(&orthogonal).is_some(),
+            expected,
+            "dot {ratio}"
+        );
+    }
+    let height = 0.0018503595246113951;
+    let threshold_top = 0.001850363225334145_f64;
+    for (top, expected) in [
+        (threshold_top.next_down(), true),
+        (threshold_top, true),
+        (threshold_top.next_up(), false),
+    ] {
+        let mut thin = rectangle;
+        thin[3][1] = height;
+        thin[2][1] = top;
+        let area = (top + height) / 2.;
+        let actual_ratio = (area - height).abs() / area;
+        if top == threshold_top {
+            assert_eq!(actual_ratio, 1e-6);
+        } else if expected {
+            assert!(actual_ratio < 1e-6);
+        } else {
+            assert!(actual_ratio > 1e-6);
+        }
+        assert_eq!(
+            slab_dimensions_of(&thin).is_some(),
+            expected,
+            "area {actual_ratio}"
+        );
+    }
+    for length in [0.999e-9, 1e-9, 1.001e-9] {
+        let coords = [
+            [0., 0., 0.],
+            [length, 0., 0.],
+            [length, 1., 0.],
+            [0., 1., 0.],
+        ];
+        assert_eq!(slab_dimensions_of(&coords).is_some(), length > 1e-9);
+    }
+    assert!(slab_dimensions_of(&rectangle[..3]).is_none());
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for vertex in 0..4 {
+            for component in 0..3 {
+                let mut invalid = rectangle;
+                invalid[vertex][component] = value;
+                assert!(slab_dimensions_of(&invalid).is_none());
+            }
+        }
+    }
+    let huge = [
+        [0., 0., 0.],
+        [1e200, 0., 0.],
+        [1e200, 1e200, 0.],
+        [0., 1e200, 0.],
+    ];
+    assert!(slab_dimensions_of(&huge).is_none());
+    let overflowing_difference = [
+        [-1e308, 0., 0.],
+        [1e308, 0., 0.],
+        [1e308, 1., 0.],
+        [-1e308, 1., 0.],
+    ];
+    assert!(slab_dimensions_of(&overflowing_difference).is_none());
+}
+
+fn issue561_halfplane_areas_m2(vertices: [[f64; 2]; 4]) -> [f64; 4] {
+    // 凸床の内向き距離の半平面交差を座標面積へ照合する独立連続解。
+    let distances: [[f64; 3]; 4] = std::array::from_fn(|e| {
+        let a = vertices[e];
+        let b = vertices[(e + 1) % 4];
+        let dx = b[0] - a[0];
+        let dy = b[1] - a[1];
+        let length = dx.hypot(dy);
+        [-dy / length, dx / length, (dy * a[0] - dx * a[1]) / length]
+    });
+    std::array::from_fn(|edge| {
+        let mut region = vertices.to_vec();
+        for other in 0..4 {
+            if edge == other {
+                continue;
+            }
+            let plane: [f64; 3] = std::array::from_fn(|i| distances[edge][i] - distances[other][i]);
+            let eval = |p: [f64; 2]| plane[0] * p[0] + plane[1] * p[1] + plane[2];
+            let mut clipped = Vec::new();
+            for i in 0..region.len() {
+                let a = region[i];
+                let b = region[(i + 1) % region.len()];
+                let (da, db) = (eval(a), eval(b));
+                if da <= 0. {
+                    clipped.push(a);
+                }
+                if (da <= 0.) != (db <= 0.) {
+                    let t = da / (da - db);
+                    clipped.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]);
+                }
+            }
+            region = clipped;
+        }
+        (0..region.len())
+            .map(|i| {
+                let a = region[i];
+                let b = region[(i + 1) % region.len()];
+                a[0] * b[1] - a[1] * b[0]
+            })
+            .sum::<f64>()
+            .abs()
+            / 2.
+    })
+}
+
+#[test]
+fn issue561_product_entry_preserves_geometry_loads_and_physical_edges() {
+    use sepika_core::ids::{ElemId, NodeId};
+    use sepika_core::model::{ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis};
+    let fixtures = [
+        (
+            [(0., 0.), (1000., 0.), (1500., 1000.), (500., 1000.)],
+            [
+                0.223606797749979,
+                0.276393202250021,
+                0.223606797749979,
+                0.276393202250021,
+            ],
+            true,
+        ),
+        (
+            [(0., 0.), (4000., 0.), (4000., 3000.), (0., 3000.)],
+            [3.75, 2.25, 3.75, 2.25],
+            false,
+        ),
+    ];
+    for (base, expected_m2, polygon) in fixtures {
+        let oracle = issue561_halfplane_areas_m2(base.map(|(x, y)| [x / 1000., y / 1000.]));
+        for e in 0..4 {
+            assert!((oracle[e] - expected_m2[e]).abs() < 1e-13);
+        }
+        let mut reference: Option<([f64; 4], [f64; 4])> = None;
+        for angle in [0_f64, std::f64::consts::PI / 6.] {
+            for translation in [[0., 0.], [1e9, -2e9]] {
+                for shift in 0..4 {
+                    for reverse in [false, true] {
+                        for support_reverse in [false, true] {
+                            let indices: [usize; 4] = std::array::from_fn(|i| {
+                                if reverse {
+                                    (shift + 4 - i) % 4
+                                } else {
+                                    (shift + i) % 4
+                                }
+                            });
+                            let pts = indices.map(|i| {
+                                let (x, y) = base[i];
+                                (
+                                    angle.cos() * x - angle.sin() * y + translation[0],
+                                    angle.sin() * x + angle.cos() * y + translation[1],
+                                )
+                            });
+                            let (mut model, _) =
+                                polygon_slab_model(&pts, DistributionMethod::TriTrapezoid, 0.003);
+                            model.slabs.clear();
+                            model.floor_assignment_regions.regions.clear();
+                            model.elements = (0..4)
+                                .map(|e| {
+                                    let mut nodes = [NodeId(e), NodeId((e + 1) % 4)];
+                                    if support_reverse {
+                                        nodes.reverse();
+                                    }
+                                    ElementData {
+                                        id: ElemId(e),
+                                        kind: ElementKind::Beam,
+                                        nodes: nodes.into_iter().collect(),
+                                        section: None,
+                                        local_axis: LocalAxis {
+                                            ref_vector: [0., 0., 1.],
+                                        },
+                                        end_cond: [EndCondition::Fixed; 2],
+                                        force_regime: ForceRegime::Auto,
+                                        rigid_zone: Default::default(),
+                                        plastic_zone: None,
+                                        spring: None,
+                                    }
+                                })
+                                .collect();
+                            let id = model.add_enclosed_slab_from_nodes(
+                                &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+                                SlabPlate {
+                                    loads: vec![sepika_core::model::AreaLoad {
+                                        kind: "DL".into(),
+                                        value: 0.003,
+                                    }],
+                                    ..Default::default()
+                                },
+                            );
+                            let slab = &model.slabs[id.index()];
+                            let result = distribute_slab_w_with_diagnostics(
+                                &model,
+                                slab,
+                                0.003,
+                                Default::default(),
+                            )
+                            .unwrap();
+                            assert_eq!(result.polygon.is_some(), polygon);
+                            let zero = distribute_slab_w_with_diagnostics(
+                                &model,
+                                slab,
+                                0.,
+                                Default::default(),
+                            )
+                            .unwrap();
+                            assert_eq!(zero.polygon.is_some(), polygon);
+                            assert!(zero.loads.is_empty());
+                            if !polygon {
+                                let coords = slab.boundary_coords(&model).unwrap();
+                                let (lx, ly) = slab_dimensions_of(&coords).unwrap();
+                                let expected_lx = (pts[1].0 - pts[0].0).hypot(pts[1].1 - pts[0].1);
+                                let expected_ly = (pts[3].0 - pts[0].0).hypot(pts[3].1 - pts[0].1);
+                                assert!(
+                                    (lx - expected_lx).abs() < 1e-9
+                                        && (ly - expected_ly).abs() < 1e-9
+                                );
+                            }
+                            let mut areas = [0.; 4];
+                            let mut bounds = [0.; 4];
+                            for load in &result.loads {
+                                let LoadTarget::Edge(e) = load.target else {
+                                    panic!("辺荷重");
+                                };
+                                let original = if reverse {
+                                    (shift + 3 - e) % 4
+                                } else {
+                                    (shift + e) % 4
+                                };
+                                areas[original] += (load.cmq.q_i + load.cmq.q_j) / 0.003;
+                            }
+                            let expected_area = expected_m2.iter().sum::<f64>() * 1e6;
+                            assert!((areas.iter().sum::<f64>() - expected_area).abs() < 0.01);
+                            if let Some(d) = &result.polygon {
+                                assert!((d.polygon_area_mm2 - expected_area).abs() < 0.01);
+                                for e in 0..4 {
+                                    let original = if reverse {
+                                        (shift + 3 - e) % 4
+                                    } else {
+                                        (shift + e) % 4
+                                    };
+                                    bounds[original] = d.edge_error_bounds_mm2[e];
+                                }
+                            }
+                            for e in 0..4 {
+                                assert!(
+                                    (areas[e] - expected_m2[e] * 1e6).abs() <= bounds[e] + 0.01
+                                );
+                            }
+                            if let Some((reference_areas, reference_bounds)) = reference {
+                                for e in 0..4 {
+                                    assert!(
+                                        (areas[e] - reference_areas[e]).abs()
+                                            <= bounds[e] + reference_bounds[e] + 0.02
+                                    );
+                                }
+                            } else {
+                                reference = Some((areas, bounds));
+                            }
+                            let resolved = distribute_slab_resolved(&model, slab, 0.003).unwrap();
+                            let mut resolved_by_edge = [0.; 4];
+                            for load in resolved {
+                                let LoadTarget::Span { nodes, .. } = load.target else {
+                                    panic!("主架構支持への参照 {load:?}");
+                                };
+                                let e = load.elem.index();
+                                assert!(
+                                    nodes == [NodeId(e as u32), NodeId(((e + 1) % 4) as u32)]
+                                        || nodes
+                                            == [NodeId(((e + 1) % 4) as u32), NodeId(e as u32)]
+                                );
+                                let original = if reverse {
+                                    (shift + 3 - e) % 4
+                                } else {
+                                    (shift + e) % 4
+                                };
+                                resolved_by_edge[original] += load.cmq.q_i + load.cmq.q_j;
+                            }
+                            for e in 0..4 {
+                                assert!((resolved_by_edge[e] - areas[e] * 0.003).abs() < 1e-6);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        println!("Issue561 polygon={polygon} independent_area_m2={} edge_areas_m2={expected_m2:?} observed_reference_mm2_and_bounds={reference:?} checked_variants=128", expected_m2.iter().sum::<f64>());
+    }
 }
