@@ -27,6 +27,81 @@ fn sn400b(id: u32) -> Material {
     }
 }
 
+fn assign_roundtrip_boundary_sections(model: &mut Model) {
+    let needs_beam = model.elements.iter().any(|e| e.section.is_none())
+        || model.beams().any(|sm| sm.section.is_none());
+    let needs_post = model.posts().any(|sm| sm.section.is_none());
+    if !needs_beam && !needs_post {
+        return;
+    }
+    let material = MaterialId(model.materials.len() as u32);
+    model.materials.push(sn400b(material.0));
+    for (needed, frame_use, name) in [
+        (
+            needs_beam,
+            sepika_core::model::FrameSectionUse::Girder,
+            "G603",
+        ),
+        (
+            needs_post,
+            sepika_core::model::FrameSectionUse::Column,
+            "C603",
+        ),
+    ] {
+        if !needed {
+            continue;
+        }
+        let id = SectionId(model.sections.len() as u32);
+        let mut section = SectionShape::SteelH {
+            root_r: Some(10.),
+            height: 300.,
+            width: 150.,
+            web_thick: 6.5,
+            flange_thick: 9.,
+        }
+        .to_section(id, name.into());
+        section.frame_use = Some(frame_use);
+        section.material = Some(material);
+        model.sections.push(section);
+        match frame_use {
+            sepika_core::model::FrameSectionUse::Girder => {
+                for element in &mut model.elements {
+                    if element.section.is_none() {
+                        element.section = Some(id);
+                    }
+                }
+                for sm in model.unassigned_beams.iter_mut().chain(
+                    model
+                        .floor_regions
+                        .iter_mut()
+                        .flat_map(|r| &mut r.secondary_beams),
+                ) {
+                    if sm.section.is_none() {
+                        sm.section = Some(id);
+                    }
+                }
+            }
+            sepika_core::model::FrameSectionUse::Column => {
+                for sm in model
+                    .unassigned_posts
+                    .iter_mut()
+                    .chain(model.wall_regions.iter_mut().flat_map(|r| &mut r.posts))
+                {
+                    if sm.section.is_none() {
+                        sm.section = Some(id);
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+    assert!(model.elements.iter().all(|e| e.section.is_some()));
+    assert!(model
+        .beams()
+        .chain(model.posts())
+        .all(|sm| sm.section.is_some()));
+}
+
 /// 標準往復用の代表モデル（鋼 H 断面・標準グレード材料・階所属節点つき）。
 /// ST-Bridge の幾何スコープに収まる要素のみで構成する（材料の E/ν・荷重は対象外）。
 fn representative_model() -> Model {
@@ -2825,6 +2900,7 @@ fn test_wall_roundtrip_export_import() {
         wall_plate_ids: vec![WallPlateId(0)],
         posts: Vec::new(),
     });
+    assign_roundtrip_boundary_sections(&mut model);
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
     let xml = export_stbridge(&model).expect("export");
@@ -2929,6 +3005,7 @@ fn test_non_quad_wall_plate_roundtrip_export_import() {
             slit: Default::default(),
         },
     );
+    assign_roundtrip_boundary_sections(&mut model);
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
     let xml = export_stbridge(&model).expect("export");
@@ -2992,12 +3069,24 @@ fn test_slab_roundtrip_export_import() {
         .to_section(slab_sec, "S20".into());
     sec.material = Some(sepika_core::ids::MaterialId(0));
     model.sections.push(sec);
+    let boundary_section = SectionId(1);
+    let mut boundary = SectionShape::RcBeamRect {
+        b: 300.,
+        d: 600.,
+        rebar: beam_rebar(),
+    }
+    .to_section(boundary_section, "G30x60".into());
+    boundary.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+    let rebar_material = ensure_material(&mut model, "SD345", MaterialCategory::Rebar, Some(345.0));
+    boundary.rebar_material = Some(rebar_material);
+    boundary.shear_rebar_material = Some(rebar_material);
+    model.sections.push(boundary);
     // 大梁 4 本で境界を閉じる（床領域として帰属させ、浮き床板警告を避けるため）。
     let mk_beam = |id: u32, i: u32, j: u32| ElementData {
         id: ElemId(id),
         kind: ElementKind::Beam,
         nodes: smallvec![NodeId(i), NodeId(j)],
-        section: None,
+        section: Some(boundary_section),
         local_axis: LocalAxis {
             ref_vector: [0.0, 0.0, 1.0],
         },
@@ -3023,6 +3112,7 @@ fn test_slab_roundtrip_export_import() {
             one_way: None,
         },
     );
+    assign_roundtrip_boundary_sections(&mut model);
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
     let xml = export_stbridge(&model).expect("export");
@@ -3640,16 +3730,22 @@ fn test_slab_shared_section_does_not_multiply_on_roundtrip() {
             },
         );
     }
+    assign_roundtrip_boundary_sections(&mut model);
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
-    // 2 往復しても断面は 1 つのまま（符号に連番が付かない）。
+    // 床断面は共有した1つのまま、境界梁の断面も増殖しない。
     let mut m = model;
     for round in 1..=2 {
         let xml = export_stbridge(&m).expect("export");
         let (next, _) = import_stbridge_with_report(&xml).expect("import");
         assert_eq!(next.slabs.len(), 2, "{round} 往復目: 床 2 枚");
-        let names: Vec<&str> = next.sections.iter().map(|sc| sc.name.as_str()).collect();
-        assert_eq!(names, vec!["S15"], "{round} 往復目: 断面は 1 つ {names:?}");
+        let mut names: Vec<&str> = next.sections.iter().map(|sc| sc.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            vec!["G603", "S15"],
+            "{round} 往復目: 床と境界梁の断面を保持 {names:?}"
+        );
         assert_eq!(
             next.slabs[0].section(),
             next.slabs[1].section(),

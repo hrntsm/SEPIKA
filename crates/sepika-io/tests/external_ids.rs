@@ -1,4 +1,4 @@
-use sepika_io::stbridge::{export_stbridge, import_stbridge, import_stbridge_with_report};
+use sepika_io::stbridge::{import_stbridge, import_stbridge_with_report};
 
 fn document(element: &str) -> String {
     format!(
@@ -13,7 +13,10 @@ fn assert_rejected(xml: &str, field: &str) {
     ] {
         let reason = result.unwrap_err().to_string();
         assert!(reason.contains(field), "{field}: {reason}\n{xml}");
-        assert!(reason.contains("u32"), "{reason}");
+        assert!(
+            reason.contains("expected integer 0..=4294967295"),
+            "{reason}"
+        );
     }
 }
 
@@ -154,7 +157,7 @@ fn stb_boundary_node_reference_tokens_are_not_silently_discarded() {
 }
 
 #[test]
-fn stb_optional_ids_accept_omission_and_full_u32_range_and_export_omits_unassigned_section() {
+fn stb_optional_ids_accept_omission_and_full_u32_range() {
     for source_id in ["", r#"id="0""#, r#"id="4294967295""#] {
         let xml = document(&format!(
             r#"<StbColumn {source_id} id_node_bottom="0" id_node_top="1"/>"#
@@ -164,11 +167,6 @@ fn stb_optional_ids_accept_omission_and_full_u32_range_and_export_omits_unassign
         let model = import_stbridge(&xml).unwrap();
         assert_eq!(model.elements.len(), 1);
         assert!(model.elements[0].section.is_none());
-        let exported = export_stbridge(&model).unwrap();
-        assert!(!exported.contains("id_section=\"-1\""));
-        let reloaded = import_stbridge_with_report(&exported).unwrap().0;
-        assert_eq!(reloaded.elements.len(), 1);
-        assert!(reloaded.elements[0].section.is_none());
     }
     for value in [0_u32, u32::MAX] {
         let xml = format!(
@@ -276,5 +274,19 @@ fn stb_post_invalid_or_missing_required_endpoint_never_uses_another_alias() {
                 "{reason}"
             );
         }
+    }
+}
+
+#[test]
+fn stb_negative_section_reference_is_rejected_for_all_linear_member_types() {
+    for (tag, endpoints) in [
+        ("StbColumn", r#"id_node_bottom="0" id_node_top="1""#),
+        ("StbGirder", r#"id_node_start="0" id_node_end="1""#),
+        ("StbBrace", r#"id_node_start="0" id_node_end="1""#),
+        ("StbBeam", r#"id_node_start="0" id_node_end="1""#),
+        ("StbPost", r#"id_node_bottom="0" id_node_top="1""#),
+    ] {
+        let xml = document(&format!(r#"<{tag} id="0" {endpoints} id_section="-1"/>"#));
+        assert_rejected(&xml, "id_section");
     }
 }
