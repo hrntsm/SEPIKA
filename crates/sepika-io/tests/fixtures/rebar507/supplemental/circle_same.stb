@@ -1,0 +1,30 @@
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="independent" app_name="research_fixture" app_version="1"><StbApplyConditionsList><StbColumn_RC_RebarPositionApply set_default="true" center="51"/><StbBeam_RC_RebarPositionApply set_default="true" center_top_bottom="51" center_side="51"/></StbApplyConditionsList></StbCommon>
+  <StbModel>
+    <StbNodes>
+      <StbNode id="1" X="0" Y="0" Z="0" kind="ON_COLUMN"/>
+      <StbNode id="2" X="0" Y="0" Z="3000" kind="ON_COLUMN"/>
+      <StbNode id="3" X="6000" Y="0" Z="3000" kind="ON_GIRDER"/>
+    </StbNodes>
+    <StbMembers>
+      <StbColumns>
+        <StbColumn id="1" name="C" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="RC"/>
+      </StbColumns>
+      <StbGirders>
+        <StbGirder id="1" name="G" id_node_start="2" id_node_end="3" id_section="2" kind_structure="RC" isFoundation="false"/>
+      </StbGirders>
+    </StbMembers>
+    <StbSections>
+      <StbSecColumn_RC id="1" name="C1" strength_concrete="Fc30">
+        <StbSecFigureColumn_RC><StbSecColumn_RC_Circle D="600"/></StbSecFigureColumn_RC><StbSecBarArrangementColumn_RC><StbSecBarColumn_RC_CircleSame D_main="D22" strength_main="SD345" D_band="D10" strength_band="SD295A" N_main="12" N_band="2" pitch_band="100"/></StbSecBarArrangementColumn_RC></StbSecColumn_RC>
+      <StbSecBeam_RC id="2" name="G1" strength_concrete="Fc24">
+        <StbSecFigureBeam_RC>
+          <StbSecBeam_RC_Straight width="300" depth="600"/>
+        </StbSecFigureBeam_RC>
+        <StbSecBarArrangementBeam_RC>
+          <StbSecBarBeam_RC_Same D_main="D22" strength_main="SD345" N_main_top_1st="4" N_main_bottom_1st="3" D_stirrup="D10" strength_stirrup="SD295A" N_stirrup="2" pitch_stirrup="100"/>
+        </StbSecBarArrangementBeam_RC>
+      </StbSecBeam_RC>
+    </StbSections>
+  </StbModel>
+</ST_BRIDGE>

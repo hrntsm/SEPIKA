@@ -136,7 +136,7 @@ impl StbRebarArrangement {
                     "pitch_stirrup",
                 ]
             } else if circle {
-                vec!["D_main", "D_band", "N_main", "pitch_band"]
+                vec!["D_main", "D_band", "N_main", "N_band", "pitch_band"]
             } else {
                 vec![
                     "D_main",
@@ -184,47 +184,14 @@ impl StbRebarArrangement {
                     return Err(format!("{key} は正の長さが必要です"));
                 }
             }
-            if !beam
-                && !circle
-                && part
-                    .attributes
-                    .iter()
-                    .filter(|(k, _)| k.starts_with("N_"))
-                    .all(|(_, v)| v.parse::<u32>().is_ok())
-            {
-                let count = |prefix: &str| -> Result<u64, String> {
-                    let layers = |dir: &str| -> Vec<u32> {
-                        ["1st", "2nd"]
-                            .iter()
-                            .filter_map(|stage| {
-                                part.attributes
-                                    .get(&format!("N_{prefix}_{dir}_{stage}"))
-                                    .and_then(|v| v.parse().ok())
-                            })
-                            .collect()
-                    };
-                    let x = layers("X");
-                    let y = layers("Y");
-                    if x.is_empty() && y.is_empty() {
-                        return Ok(0);
+            if !beam && !circle {
+                if let Some(total) = self.known_main_total(part) {
+                    let declared: u64 = part.attributes["N_main_total"]
+                        .parse()
+                        .map_err(|_| "N_main_total が不正")?;
+                    if total != declared {
+                        return Err(format!("N_main_total {declared} と隅筋重複除去後の実本数 {total} が一致しません（軸筋は別扱い）"));
                     }
-                    let sum: u64 = x.iter().chain(&y).map(|n| u64::from(*n)).sum();
-                    let mut shared = 0;
-                    for (i, &nx) in x.iter().enumerate() {
-                        for (j, &ny) in y.iter().enumerate() {
-                            if nx >= 2 * (j as u32 + 1) && ny >= 2 * (i as u32 + 1) {
-                                shared += 4;
-                            }
-                        }
-                    }
-                    Ok(2 * sum - shared)
-                };
-                let total = count("main")? + count("2nd_main")?;
-                let declared: u64 = part.attributes["N_main_total"]
-                    .parse()
-                    .map_err(|_| "N_main_total が不正")?;
-                if total != declared {
-                    return Err(format!("N_main_total {declared} と隅筋重複除去後の実本数 {total} が一致しません（軸筋は別扱い）"));
                 }
             }
         }
@@ -232,6 +199,41 @@ impl StbRebarArrangement {
             return Err("配筋posが不足しています".into());
         }
         Ok(())
+    }
+
+    /// Only independently confirmed shared-corner topologies may reject a declared total.
+    /// Other standard-valid arrangements remain authoritative and are gated at consumption.
+    fn known_main_total(&self, part: &StbRebarElement) -> Option<u64> {
+        if part.attributes.keys().any(|key| key.contains("2nd_main")) {
+            return None;
+        }
+        let layers = |direction: &str| -> Option<Vec<u32>> {
+            ["1st", "2nd"]
+                .iter()
+                .filter_map(|stage| {
+                    part.attributes
+                        .get(&format!("N_main_{direction}_{stage}"))
+                        .map(|value| value.parse::<u32>().ok())
+                })
+                .collect()
+        };
+        let x = layers("X")?;
+        let y = layers("Y")?;
+        let corner = self
+            .container
+            .attributes
+            .get("kind_corner")
+            .map(String::as_str)
+            .unwrap_or("NONE");
+        let shared = match (corner, x.as_slice(), y.as_slice()) {
+            ("NONE", [nx], [ny]) if *nx >= 2 && *ny >= 2 => 4,
+            // Official p124/p125: four shared L-shaped groups of three bars.
+            ("NONE" | "DIR_XY", [7, 2], [7, 2]) => 12,
+            // Official p127: four shared 2-by-2 groups; axial bars are separate.
+            ("NONE", [7, 7], [7, 6]) => 16,
+            _ => return None,
+        };
+        Some(2 * x.iter().chain(&y).map(|n| u64::from(*n)).sum::<u64>() - shared)
     }
 }
 
@@ -332,6 +334,18 @@ impl Model {
             }
             for pos in &raw.positions {
                 let effective = raw.effective_attributes(pos, &self.stb_strengths.apply_conditions);
+                if pos.element.contains("Rect") && raw.known_main_total(pos).is_none() {
+                    errors.push(format!(
+                        "{prefix}: 隅筋共有位相とN_main_totalを独立に解決できません"
+                    ));
+                }
+                if pos.element.contains("Circle")
+                    && effective.get("N_band").and_then(|v| v.parse::<u32>().ok()) != Some(2)
+                {
+                    errors.push(format!(
+                        "{prefix}: 円形帯筋N_bandは現解析モデルの2脚で表現できません"
+                    ));
+                }
                 if effective
                     .iter()
                     .any(|(k, v)| k.starts_with("N_") && v.parse::<u32>().is_err())
@@ -492,8 +506,7 @@ impl Model {
                 let original = input.reinforcement.iter().find(|bar| {
                     bar.element == position.element && bar.position == pos && bar.part == part
                 });
-                let counts: BTreeMap<_, _> = position
-                    .attributes
+                let counts: BTreeMap<_, _> = attrs
                     .iter()
                     .filter(|(key, _)| {
                         **key == format!("N_{part}") || key.starts_with(&format!("N_{part}_"))
@@ -501,7 +514,10 @@ impl Model {
                     .filter(|(key, _)| !key.ends_with("_total"))
                     .filter_map(|(key, value)| value.parse().ok().map(|value| (key.clone(), value)))
                     .collect();
-                if original.is_none() && counts.is_empty() {
+                if original.is_none()
+                    && counts.is_empty()
+                    && !attrs.contains_key(&format!("D_{part}"))
+                {
                     continue;
                 }
                 let applied = match part {
@@ -510,6 +526,18 @@ impl Model {
                     _ => true,
                 };
                 let number = |key: &str| attrs.get(key).and_then(|v| v.parse::<f64>().ok());
+                let mut effective_strength =
+                    original.cloned().unwrap_or_else(|| StbRebarStrength {
+                        element: position.element.clone(),
+                        part: part.into(),
+                        position: pos.clone(),
+                        native_material: None,
+                        diameter: None,
+                        strength: attrs.get(&format!("strength_{part}")).cloned(),
+                    });
+                if effective_strength.diameter.is_none() {
+                    effective_strength.diameter = attrs.get(&format!("D_{part}")).cloned();
+                }
                 let main_geometry =
                     part == "main" && self.ensure_stb_rebar_supported(section).is_ok();
                 let points = if main_geometry {
@@ -537,16 +565,14 @@ impl Model {
                 roles.push(StbRebarRole {
                     position: pos.clone(),
                     part: part.into(),
-                    diameter: original.and_then(|s| s.diameter.clone()),
+                    diameter: effective_strength.diameter.clone(),
                     counts,
                     pitch_mm: number(&format!("pitch_{part}")),
                     applied,
                     strength: if !applied {
                         Err("非適用".into())
                     } else {
-                        original
-                            .ok_or_else(|| "強度入力がありません".to_owned())
-                            .and_then(|s| self.resolve_stb_rebar(s))
+                        self.resolve_stb_rebar(&effective_strength)
                     },
                     center_mm: attrs
                         .iter()

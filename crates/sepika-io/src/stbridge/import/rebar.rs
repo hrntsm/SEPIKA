@@ -295,11 +295,12 @@ pub(super) fn parse_beam_rebar(a: &Attrs) -> (RcBeamRebar, RebarGrades, Vec<Stri
 /// 段数が 3 を超える・主筋径が混在する・独自の段間隔属性がある場合は警告を返す。
 pub(super) fn parse_rect_column_rebar(a: &Attrs) -> (RcRectColumnRebar, RebarGrades, Vec<String>) {
     let mut warnings = Vec::new();
-    let mut x = stage_counts(a, &["N_main_X_"]);
+    // Standard X counts the vertical side rows; Rc.x counts horizontal rows.
+    let mut x = stage_counts(a, &["N_main_Y_"]);
     if x.is_empty() {
         x = total_as_stage(a, &["count_main_X", "N_main_X"]);
     }
-    let mut y = stage_counts(a, &["N_main_Y_"]);
+    let mut y = stage_counts(a, &["N_main_X_"]);
     if y.is_empty() {
         y = total_as_stage(a, &["count_main_Y", "N_main_Y"]);
     }

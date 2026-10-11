@@ -531,14 +531,14 @@ fn rect_column_rebar_attrs(
     );
     for (i, n) in r.x.iter().take(2).enumerate().filter(|(_, n)| **n > 0) {
         s.push_str(&format!(
-            " N_main_X_{}=\"{}\"",
+            " N_main_Y_{}=\"{}\"",
             stage_ordinal(i as u32 + 1),
             n
         ));
     }
     for (i, n) in r.y.iter().take(2).enumerate().filter(|(_, n)| **n > 0) {
         s.push_str(&format!(
-            " N_main_Y_{}=\"{}\"",
+            " N_main_X_{}=\"{}\"",
             stage_ordinal(i as u32 + 1),
             n
         ));
@@ -560,10 +560,10 @@ fn rect_column_rebar_attrs(
 }
 
 /// 実配筋の円形柱（[`RcCircleColumnRebar`]）を `StbSecBarColumn_RC_CircleSame` の属性文字列へ
-/// 整形する。主筋は円周上の全本数 `N_main`、帯筋は `D_band`/`pitch_band` で書き出す。
+/// 整形する。主筋は円周上の全本数 `N_main`、閉鎖フープの帯筋は検討方向の2脚を明示する。
 fn circle_column_rebar_attrs(r: &RcCircleColumnRebar, grades: BarGrades<'_>) -> String {
     let mut s = format!(
-        "D_main=\"{}\" N_main=\"{}\" D_band=\"{}\" pitch_band=\"{}\"",
+        "D_main=\"{}\" N_main=\"{}\" D_band=\"{}\" N_band=\"2\" pitch_band=\"{}\"",
         num(r.main_dia),
         r.count,
         num(r.hoop.dia),

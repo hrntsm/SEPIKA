@@ -849,9 +849,12 @@ fn test_standard_roundtrip_rc_column_rect_stages_legs() {
 
     let xml = export_stbridge(&m).unwrap();
     assert!(xml.contains("<StbSecColumn_RC "), "RC 柱要素: {xml}");
-    assert!(xml.contains("N_main_X_1st=\"4\""), "{xml}");
-    assert!(xml.contains("N_main_X_2nd=\"3\""), "X 方向 2 段目: {xml}");
-    assert!(xml.contains("N_main_Y_1st=\"5\""), "Y 方向: {xml}");
+    assert!(xml.contains("N_main_Y_1st=\"4\""), "{xml}");
+    assert!(
+        xml.contains("N_main_Y_2nd=\"3\""),
+        "標準Yの水平列 2 段目: {xml}"
+    );
+    assert!(xml.contains("N_main_X_1st=\"5\""), "標準Xの垂直列: {xml}");
     assert!(xml.contains("N_band_direction_X=\"3\""), "X 脚数: {xml}");
     assert!(xml.contains("N_band_direction_Y=\"2\""), "Y 脚数: {xml}");
     let back = import_stbridge(&xml).expect("import");
@@ -1020,9 +1023,9 @@ fn test_standard_export_src_column_rect_stages() {
 
     let xml = export_stbridge(&m).unwrap();
     assert!(xml.contains("<StbSecColumn_SRC "), "SRC 柱要素: {xml}");
-    assert!(xml.contains("N_main_X_1st=\"4\""), "{xml}");
-    assert!(xml.contains("N_main_X_2nd=\"3\""), "{xml}");
-    assert!(xml.contains("N_main_Y_1st=\"5\""), "{xml}");
+    assert!(xml.contains("N_main_Y_1st=\"4\""), "{xml}");
+    assert!(xml.contains("N_main_Y_2nd=\"3\""), "{xml}");
+    assert!(xml.contains("N_main_X_1st=\"5\""), "{xml}");
     assert!(xml.contains("N_band_direction_X=\"3\""), "{xml}");
     assert!(xml.contains("N_band_direction_Y=\"2\""), "{xml}");
     let back = import_stbridge(&xml).expect("import");
@@ -1386,8 +1389,8 @@ fn test_import_rc_rebar_third_party_names() {
     let m = import_stbridge(xml).expect("import");
     match &m.sections[0].shape {
         Some(SectionShape::RcColumnRect { rebar, .. }) => {
-            assert_eq!(rebar.x, vec![4]);
-            assert_eq!(rebar.y, vec![3]);
+            assert_eq!(rebar.x, vec![3]);
+            assert_eq!(rebar.y, vec![4]);
             assert_eq!(rebar.main_dia, 22.0, "呼び名 D22 → 22mm");
             assert_eq!(rebar.hoop.dia, 10.0, "呼び名 D10 → 10mm");
             assert_eq!(rebar.hoop.pitch, 100.0);
@@ -1414,8 +1417,8 @@ fn test_import_rc_rebar_layered_counts() {
     let m = import_stbridge(xml).expect("import");
     match &m.sections[0].shape {
         Some(SectionShape::RcColumnRect { rebar, .. }) => {
-            assert_eq!(rebar.x, vec![4, 3], "X 方向は段別の本数を保持 (合算しない)");
-            assert_eq!(rebar.y, vec![5], "Y 方向は 1 段目のみ");
+            assert_eq!(rebar.x, vec![5], "標準Yは上下の水平列");
+            assert_eq!(rebar.y, vec![4, 3], "標準Xは左右の垂直列で段別本数を保持");
             assert_eq!(rebar.main_dia, 25.0, "呼び名 D25 → 25mm");
         }
         other => panic!("RcColumnRect を期待: {other:?}"),
@@ -1468,8 +1471,8 @@ fn test_import_rc_rect_column_hoop_legs() {
     let m = import_stbridge(xml).expect("import");
     match &m.sections[0].shape {
         Some(SectionShape::RcColumnRect { rebar, .. }) => {
-            assert_eq!(rebar.x, vec![4]);
-            assert_eq!(rebar.y, vec![3]);
+            assert_eq!(rebar.x, vec![3]);
+            assert_eq!(rebar.y, vec![4]);
             assert_eq!(rebar.hoop.legs_x, 3, "X 方向の脚数");
             assert_eq!(rebar.hoop.legs_y, 2, "Y 方向の脚数");
         }
@@ -1486,7 +1489,7 @@ fn test_import_rc_circle_column_total_count() {
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Circle D="800"/></StbSecFigureColumn_RC>
       <StbSecBarArrangementColumn_RC>
-        <StbSecBarColumn_RC_CircleSame N_main="8" D_main="D25" D_band="D13" pitch_band="100"/>
+        <StbSecBarColumn_RC_CircleSame N_main="8" N_band="2" D_main="D25" D_band="D13" pitch_band="100"/>
       </StbSecBarArrangementColumn_RC>
     </StbSecColumn_RC>
   </StbSections>
@@ -2014,10 +2017,13 @@ fn test_standard_roundtrip_src_column() {
     );
     assert!(xml.contains("<StbSecRoll-H "), "内蔵鉄骨の形鋼ライブラリ");
     assert!(
-        xml.contains("N_main_X_1st=\"4\""),
-        "X 方向の段別本数: {xml}"
+        xml.contains("N_main_Y_1st=\"4\""),
+        "標準Yの水平列の段別本数: {xml}"
     );
-    assert!(xml.contains("N_main_Y_1st=\"3\""), "Y 方向の本数: {xml}");
+    assert!(
+        xml.contains("N_main_X_1st=\"3\""),
+        "標準Xの垂直列の本数: {xml}"
+    );
     let back = import_stbridge(&xml).expect("import");
     assert_eq!(
         back.element_steel_material(&back.elements[0]).unwrap().name,

@@ -12685,6 +12685,7 @@ fn lateral_bracing_gui_invalid_group_reference_keeps_bending_and_shear() {
     }
 }
 
+#[cfg(feature = "gui")]
 #[test]
 fn standard_rebar507_edit_undo_save_and_result_generation_preserve_source() {
     let xml = include_str!("../../../sepika-io/tests/fixtures/rebar507/normal_same.stb");
@@ -12809,6 +12810,7 @@ fn standard_rebar507_gui_pointer_apply_undo_and_save() {
     std::fs::remove_file(path).unwrap();
 }
 
+#[cfg(feature = "gui")]
 #[test]
 fn standard_rebar507_geometry_only_section_accepts_new_rebar_and_undo() {
     let mut xml =
