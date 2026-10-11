@@ -72,10 +72,7 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
             Ok(Box::new(sepika_edit::SetStoryLevelKind { story, level_kind }))
         }
         "SetPostGravityEndShares" => {
-            let member = value
-                .get("member")
-                .and_then(|v| v.as_u64())
-                .ok_or("member が必要です（SecondaryMemberId）")? as u32;
+            let member = parse_external_id(value.get("member").ok_or("member が必要です")?, "member")?;
             Ok(Box::new(sepika_edit::SetPostGravityEndShares {
                 member: sepika_core::ids::SecondaryMemberId(member),
                 shares: parse_optional_f64_pair(value.get("shares"), "shares")?,
@@ -252,7 +249,7 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
             }))
         }
         "SetFloorRegionName" => Ok(Box::new(SetFloorRegionName {
-            id: parse_floor_region_id(value.get("id").ok_or("id が必要です")?)?,
+            id: parse_floor_region_id(value.get("id").ok_or("id が必要です")?, "id")?,
             name: value
                 .get("name")
                 .and_then(|v| v.as_str())
@@ -285,6 +282,7 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
                         .get("floor_region")
                         .or(value.get("id"))
                         .ok_or("floor_region が必要です")?,
+                    if value.get("floor_region").is_some() { "floor_region" } else { "id" },
                 )?,
                 beams,
             }))
@@ -308,6 +306,7 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
                         .get("wall_region")
                         .or(value.get("id"))
                         .ok_or("wall_region が必要です")?,
+                    if value.get("wall_region").is_some() { "wall_region" } else { "id" },
                 )?,
                 posts,
             }))
@@ -330,10 +329,7 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
             Ok(Box::new(DeleteUnassignedBeam { index }))
         }
         "SetSecondaryMemberEndSupport" => {
-            let member = value
-                .get("member")
-                .and_then(|v| v.as_u64())
-                .ok_or("member が必要です（SecondaryMemberId）")? as u32;
+            let member = parse_external_id(value.get("member").ok_or("member が必要です")?, "member")?;
             let end_support: [EndSupport; 2] = serde_json::from_value(
                 value
                     .get("end_support")
@@ -362,9 +358,11 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
             {
                 "floor" => SecondaryParent::Floor(parse_floor_region_id(
                     value.get("region").ok_or("region が必要です")?,
+                    "region",
                 )?),
                 "wall" => SecondaryParent::Wall(parse_wall_region_id(
                     value.get("region").ok_or("region が必要です")?,
+                    "region",
                 )?),
                 "unassigned" => SecondaryParent::Unassigned,
                 other => return Err(format!("parent が不正です: {other}")),
@@ -382,19 +380,13 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
             }))
         }
         "DeleteSecondaryMember" => {
-            let member = value
-                .get("member")
-                .and_then(|v| v.as_u64())
-                .ok_or("member が必要です（SecondaryMemberId）")? as u32;
+            let member = parse_external_id(value.get("member").ok_or("member が必要です")?, "member")?;
             Ok(Box::new(DeleteSecondaryMember {
                 member: sepika_core::ids::SecondaryMemberId(member),
             }))
         }
         "SetSecondaryMemberEnds" => {
-            let member = value
-                .get("member")
-                .and_then(|v| v.as_u64())
-                .ok_or("member が必要です（SecondaryMemberId）")? as u32;
+            let member = parse_external_id(value.get("member").ok_or("member が必要です")?, "member")?;
             let ends: SecondaryMemberEnds = serde_json::from_value(
                 value.get("ends").cloned().ok_or("ends が必要です")?,
             )
@@ -496,50 +488,37 @@ fn resolve_edit_payload(value: &serde_json::Value) -> &serde_json::Value {
     }
 }
 
+fn parse_external_id(value: &serde_json::Value, field: &str) -> Result<u32, String> {
+    serde_json::from_value(value.clone())
+        .map_err(|e| format!("{field} は 0..=4294967295 の整数 ID が必要です: {e}"))
+}
+
 fn parse_wall_plate_id(value: &serde_json::Value) -> Result<WallPlateId, String> {
-    value
-        .as_u64()
-        .map(|n| WallPlateId(n as u32))
-        .ok_or_else(|| format!("壁版 ID は非負整数です: {value}"))
+    parse_external_id(value, "id").map(WallPlateId)
 }
 
 fn parse_slab_id(value: &serde_json::Value) -> Result<SlabId, String> {
-    value
-        .as_u64()
-        .map(|n| SlabId(n as u32))
-        .ok_or_else(|| format!("床板 ID は非負整数です: {value}"))
+    parse_external_id(value, "id").map(SlabId)
 }
 
-fn parse_floor_region_id(value: &serde_json::Value) -> Result<FloorRegionId, String> {
-    value
-        .as_u64()
-        .map(|n| FloorRegionId(n as u32))
-        .ok_or_else(|| format!("床領域 ID は非負整数です: {value}"))
+fn parse_floor_region_id(value: &serde_json::Value, field: &str) -> Result<FloorRegionId, String> {
+    parse_external_id(value, field).map(FloorRegionId)
 }
 
 fn parse_floor_assignment_region_id(
     value: &serde_json::Value,
 ) -> Result<FloorPlateAssignmentRegionId, String> {
-    value
-        .as_u64()
-        .map(|n| FloorPlateAssignmentRegionId(n as u32))
-        .ok_or_else(|| format!("床板割当領域 ID は非負整数です: {value}"))
+    parse_external_id(value, "region").map(FloorPlateAssignmentRegionId)
 }
 
 fn parse_wall_assignment_region_id(
     value: &serde_json::Value,
 ) -> Result<WallPlateAssignmentRegionId, String> {
-    value
-        .as_u64()
-        .map(|n| WallPlateAssignmentRegionId(n as u32))
-        .ok_or_else(|| format!("壁版割当領域 ID は非負整数です: {value}"))
+    parse_external_id(value, "region").map(WallPlateAssignmentRegionId)
 }
 
-fn parse_wall_region_id(value: &serde_json::Value) -> Result<WallRegionId, String> {
-    value
-        .as_u64()
-        .map(|n| WallRegionId(n as u32))
-        .ok_or_else(|| format!("壁領域 ID は非負整数です: {value}"))
+fn parse_wall_region_id(value: &serde_json::Value, field: &str) -> Result<WallRegionId, String> {
+    parse_external_id(value, field).map(WallRegionId)
 }
 
 fn parse_distribution_method(
@@ -569,11 +548,7 @@ fn parse_optional_section_id(
 ) -> Result<Option<SectionId>, String> {
     match value {
         None | Some(serde_json::Value::Null) => Ok(None),
-        Some(v) => {
-            Ok(Some(v.as_u64().map(|n| SectionId(n as u32)).ok_or_else(
-                || format!("断面 ID は非負整数または null です: {v}"),
-            )?))
-        }
+        Some(v) => parse_external_id(v, "section").map(SectionId).map(Some),
     }
 }
 

@@ -247,9 +247,17 @@ fn designated_original_node_survives_order_level_and_prepare_changes() {
         };
         let source = source.replace("<StbColumns>", "").replace("</StbColumns>", "").replace("StbColumn id=", &format!("{tag} id=")).replace("id_node_bottom=",&format!("{first}=")).replace("id_node_top=",&format!("{second}=")).replace("StbSecColumn_RC",section_tag)
             .replace("StbSecFigureColumn_RC", if section_tag=="StbSecBeam_RC" {"StbSecFigureBeam_RC"} else {"StbSecFigureColumn_RC"})
-            .replace("StbSecColumn_RC_Rect width_X=\"400\" width_Y=\"400\"", if section_tag=="StbSecBeam_RC" {"StbSecBeam_RC_Straight width=\"400\" depth=\"400\""} else {"StbSecColumn_RC_Rect width_X=\"400\" width_Y=\"400\""})
+            .replace("StbSecBeam_RC_Rect width_X=\"400\" width_Y=\"400\"", "StbSecBeam_RC_Straight width=\"400\" depth=\"400\"")
             .replace("</StbStories>",r#"<StbStory id="2" name="bottom" height="0" kind="GENERAL" strength_concrete="Fc24"><StbNodeIdList><StbNodeId id="1"/></StbNodeIdList></StbStory></StbStories>"#);
         let mut model = import_stbridge(&source).unwrap();
+        let section = if matches!(tag, "StbPost" | "StbBeam") {
+            model.beams().chain(model.posts()).next().unwrap().section
+        } else {
+            model.elements[0].section
+        }
+        .expect("元端点の強度往復は実在断面を持つ部材で検証する");
+        assert_eq!(model.sections[section.index()].depth, 400., "{tag}");
+        assert_eq!(model.sections[section.index()].width, 400., "{tag}");
         let input = &model.stb_strengths.members[0];
         assert_eq!(
             input.node,

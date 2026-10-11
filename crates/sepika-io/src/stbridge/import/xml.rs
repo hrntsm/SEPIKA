@@ -54,12 +54,16 @@ impl FromIterator<(String, String)> for Attrs {
 }
 
 /// `StbNodeIdOrder` の内容文字列を境界へ追加する（スラブ・壁共用）。
-pub(super) fn push_node_id_tokens(text: &str, boundary: &mut Vec<u32>) {
+pub(super) fn push_node_id_tokens(text: &str, boundary: &mut Vec<u32>) -> Result<(), StbError> {
     for tok in text.split_whitespace() {
-        if let Ok(id) = tok.parse::<u32>() {
-            boundary.push(id);
-        }
+        let id = tok.parse::<u32>().map_err(|_| {
+            StbError::Parse(format!(
+                "bad u32 StbNodeIdOrder: {tok}, expected integer 0..=4294967295"
+            ))
+        })?;
+        boundary.push(id);
     }
+    Ok(())
 }
 
 pub(super) fn attrs(e: &quick_xml::events::BytesStart) -> Result<Attrs, StbError> {
@@ -106,9 +110,9 @@ pub(super) fn get_u32(a: &Attrs, k: &str) -> Result<u32, StbError> {
     a.get(k)
         .ok_or_else(|| StbError::Parse(format!("missing attr {k}")))?
         .parse::<u32>()
-        .map_err(|_| StbError::Parse(format!("bad u32 attr {k}")))
+        .map_err(|_| StbError::Parse(format!("bad u32 attr {k}: expected integer 0..=4294967295")))
 }
 
-pub(super) fn get_i64(a: &Attrs, k: &str) -> Option<i64> {
-    a.get(k).and_then(|v| v.parse::<i64>().ok())
+pub(super) fn get_opt_u32(a: &Attrs, k: &str) -> Result<Option<u32>, StbError> {
+    a.get(k).map(|_| get_u32(a, k)).transpose()
 }

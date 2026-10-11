@@ -1,5 +1,5 @@
 use super::super::StbError;
-use super::xml::{get_u32, Attrs};
+use super::xml::{get_opt_u32, get_u32, Attrs};
 use sepika_core::ids::*;
 use sepika_core::model::*;
 
@@ -137,6 +137,7 @@ impl StrengthInputs {
             tag,
             "StbColumn" | "StbPost" | "StbGirder" | "StbBeam" | "StbSlab" | "StbWall"
         ) {
+            get_opt_u32(a, "id")?;
             let nodes = match tag {
                 "StbColumn" | "StbPost" => {
                     vec![get_u32(a, "id_node_bottom")?, get_u32(a, "id_node_top")?]
@@ -148,7 +149,7 @@ impl StrengthInputs {
             };
             self.members.push(RawMember {
                 tag: tag.into(),
-                section: a.get("id_section").and_then(|s| s.parse().ok()),
+                section: get_opt_u32(a, "id_section")?,
                 concrete: a.get("strength_concrete").cloned(),
                 nodes,
                 targets: Vec::new(),
@@ -281,10 +282,11 @@ impl StrengthInputs {
             self.current_member = None;
         }
     }
-    pub(super) fn nodes(&mut self, text: &str) {
+    pub(super) fn nodes(&mut self, text: &str) -> Result<(), StbError> {
         if let Some(index) = self.current_member {
-            super::xml::push_node_id_tokens(text, &mut self.members[index].nodes);
+            super::xml::push_node_id_tokens(text, &mut self.members[index].nodes)?;
         }
+        Ok(())
     }
     pub(super) fn current_member_index(&self) -> Option<usize> {
         self.current_member
