@@ -63,14 +63,13 @@ pub(super) fn default_circle_column_rebar() -> RcCircleColumnRebar {
 /// 鉄筋径の文字列を mm へ解釈する。数値ならそのまま、`D22`/`D10` のような呼び名は
 /// 先頭の `D`/`d` を除いた数値を径とする（best-effort。厳密な JIS 公称径ではない）。
 fn parse_bar_dia(v: &str) -> Option<f64> {
-    if let Ok(x) = v.parse::<f64>() {
-        return Some(x);
-    }
     let t = v.trim();
-    if let Some(rest) = t.strip_prefix(['D', 'd']) {
-        return rest.trim().parse::<f64>().ok();
-    }
-    None
+    t.strip_prefix(['D', 'd'])
+        .unwrap_or(t)
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|x| x.is_finite() && *x > 0.0)
 }
 
 /// 候補キーのいずれかから f64 を取る（欠落は 0）。
@@ -135,7 +134,16 @@ fn stage_counts(a: &Attrs, prefixes: &[&str]) -> Vec<u32> {
         }
     }
     found.sort_by_key(|(n, _)| *n);
-    found.into_iter().map(|(_, x)| x).collect()
+    let last = found.last().map(|(n, _)| *n).unwrap_or(0);
+    (1..=last)
+        .map(|stage| {
+            found
+                .iter()
+                .find(|(n, _)| *n == stage)
+                .map(|(_, count)| *count)
+                .unwrap_or(0)
+        })
+        .collect()
 }
 
 /// 段別属性のない合算本数を 1 段として扱う（見つからなければ空）。
@@ -241,7 +249,7 @@ pub(super) fn parse_beam_rebar(a: &Attrs) -> (RcBeamRebar, RebarGrades, Vec<Stri
     }
     let stage_count = top.len().max(bottom.len());
     push_limit_warnings(a, stage_count, &mut warnings);
-    let rebar = RcBeamRebar {
+    let mut rebar = RcBeamRebar {
         main_dia: attr_dia(
             a,
             &[
@@ -272,6 +280,12 @@ pub(super) fn parse_beam_rebar(a: &Attrs) -> (RcBeamRebar, RebarGrades, Vec<Stri
             ),
         },
     };
+    if let Some(center) = ["center_top", "center_bottom", "center_side"]
+        .iter()
+        .find_map(|k| a.get(k).and_then(|v| v.parse::<f64>().ok()))
+    {
+        rebar.cover = center - rebar.stirrup.dia - rebar.main_dia / 2.0;
+    }
     (rebar, parse_grades(a), warnings)
 }
 
@@ -300,7 +314,7 @@ pub(super) fn parse_rect_column_rebar(a: &Attrs) -> (RcRectColumnRebar, RebarGra
             legs_x
         }
     };
-    let rebar = RcRectColumnRebar {
+    let mut rebar = RcRectColumnRebar {
         main_dia: attr_dia(
             a,
             &[
@@ -332,6 +346,17 @@ pub(super) fn parse_rect_column_rebar(a: &Attrs) -> (RcRectColumnRebar, RebarGra
             legs_y,
         },
     };
+    if let Some(center) = [
+        "center_start_X",
+        "center_end_X",
+        "center_start_Y",
+        "center_end_Y",
+    ]
+    .iter()
+    .find_map(|k| a.get(k).and_then(|v| v.parse::<f64>().ok()))
+    {
+        rebar.cover = center - rebar.hoop.dia - rebar.main_dia / 2.0;
+    }
     (rebar, parse_grades(a), warnings)
 }
 
@@ -345,7 +370,7 @@ pub(super) fn parse_circle_column_rebar(
     let x = stage_counts(a, &["N_main_X_"]);
     let y = stage_counts(a, &["N_main_Y_"]);
     push_limit_warnings(a, x.len().max(y.len()), &mut warnings);
-    let rebar = RcCircleColumnRebar {
+    let mut rebar = RcCircleColumnRebar {
         main_dia: attr_dia(a, &["D_main", "dia_main", "dia_main_X", "D_main_X"]),
         count: circle_main_count(a),
         cover: attr_f64(
@@ -364,6 +389,17 @@ pub(super) fn parse_circle_column_rebar(
             pitch: attr_f64(a, &["pitch_band", "pitch_hoop"]),
         },
     };
+    if let Some(center) = [
+        "center_start_X",
+        "center_end_X",
+        "center_start_Y",
+        "center_end_Y",
+    ]
+    .iter()
+    .find_map(|k| a.get(k).and_then(|v| v.parse::<f64>().ok()))
+    {
+        rebar.cover = center - rebar.hoop.dia - rebar.main_dia / 2.0;
+    }
     (rebar, parse_grades(a), warnings)
 }
 

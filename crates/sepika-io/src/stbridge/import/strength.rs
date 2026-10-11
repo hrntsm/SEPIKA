@@ -6,6 +6,7 @@ use sepika_core::model::*;
 #[derive(Default)]
 pub(super) struct StrengthInputs {
     common: Option<StbCommonStrength>,
+    apply_conditions: Vec<StbRebarElement>,
     frame_section_ids: Vec<(u32, String)>,
     sections: Vec<RawSection>,
     members: Vec<RawMember>,
@@ -18,6 +19,7 @@ struct RawSection {
     bound: Option<SectionId>,
     concrete: Option<String>,
     bars: Vec<StbRebarStrength>,
+    rebar: Option<StbRebarArrangement>,
     steel: Vec<StbSteelStrength>,
 }
 struct RawMember {
@@ -35,6 +37,7 @@ impl StrengthInputs {
                 (
                     s.concrete.clone(),
                     s.bars.clone(),
+                    s.rebar.clone(),
                     s.steel
                         .iter()
                         .map(|r| {
@@ -126,6 +129,7 @@ impl StrengthInputs {
                 bound: None,
                 concrete: a.get("strength_concrete").cloned(),
                 bars: Vec::new(),
+                rebar: None,
                 steel: Vec::new(),
             });
             self.current_section = Some(self.sections.len() - 1);
@@ -190,6 +194,47 @@ impl StrengthInputs {
                         position: None,
                         strength: grade.clone(),
                     });
+                }
+            }
+        }
+        let raw_element = || StbRebarElement {
+            element: tag.into(),
+            attributes: a
+                .names()
+                .into_iter()
+                .map(|key| (key.to_owned(), a.get(key).unwrap().clone()))
+                .collect(),
+        };
+        if tag.starts_with("Stb") && tag.ends_with("Apply") {
+            let raw = raw_element();
+            if !matches!(
+                raw.attributes.get("set_default").map(String::as_str),
+                Some("true" | "false" | "0" | "1")
+            ) {
+                return Err(StbError::Parse(format!(
+                    "{tag}: set_defaultが不正または欠落"
+                )));
+            }
+            self.apply_conditions.push(raw);
+        }
+        if let Some(index) = self.current_section {
+            if tag.starts_with("StbSecBarArrangementColumn_")
+                || tag.starts_with("StbSecBarArrangementBeam_")
+            {
+                self.sections[index].rebar = Some(StbRebarArrangement {
+                    container: raw_element(),
+                    positions: Vec::new(),
+                    auxiliary: Vec::new(),
+                    projected_effective: Vec::new(),
+                    projected_shape: None,
+                });
+            } else if tag.starts_with("StbSecBarColumnXReinforced") {
+                if let Some(raw) = &mut self.sections[index].rebar {
+                    raw.auxiliary.push(raw_element());
+                }
+            } else if tag.starts_with("StbSecBarColumn_") || tag.starts_with("StbSecBarBeam_") {
+                if let Some(raw) = &mut self.sections[index].rebar {
+                    raw.positions.push(raw_element());
                 }
             }
         }
@@ -295,6 +340,7 @@ impl StrengthInputs {
         warnings: &mut Vec<String>,
     ) -> Result<(), StbError> {
         model.stb_strengths.common = self.common;
+        model.stb_strengths.apply_conditions = self.apply_conditions;
         for source in &self.sections {
             if let Some(section) = source.bound {
                 if !model
@@ -305,6 +351,8 @@ impl StrengthInputs {
                 {
                     model.stb_strengths.sections.push(StbSectionStrength {
                         section,
+                        native_rebar: false,
+                        rebar: source.rebar.clone(),
                         native_material: None,
                         concrete: source.concrete.clone(),
                         reinforcement: source.bars.clone(),
@@ -370,6 +418,56 @@ impl StrengthInputs {
                     concrete: input.concrete.clone(),
                 });
             }
+        }
+        for input in &mut model.stb_strengths.sections {
+            input.reinforcement.sort_by(|a, b| {
+                (&a.element, &a.position, &a.part).cmp(&(&b.element, &b.position, &b.part))
+            });
+            let Some(raw) = &mut input.rebar else {
+                continue;
+            };
+            raw.validate_standard()
+                .map_err(|reason| StbError::Parse(format!("断面 {}: {reason}", input.section.0)))?;
+            raw.positions
+                .sort_by_key(|p| p.attributes.get("pos").cloned().unwrap_or_default());
+            let part = raw
+                .positions
+                .iter()
+                .find(|p| {
+                    matches!(
+                        p.attributes.get("pos").map(String::as_str),
+                        None | Some("START" | "BASE")
+                    )
+                })
+                .unwrap();
+            let effective = raw.effective_attributes(part, &model.stb_strengths.apply_conditions);
+            let attrs: Attrs = effective.into_iter().collect();
+            if let Some(shape) = model.sections[input.section.index()].shape.as_mut() {
+                use sepika_core::section_shape::SectionShape;
+                match shape {
+                    SectionShape::RcBeamRect { rebar, .. }
+                    | SectionShape::SrcBeamRect { rebar, .. } => {
+                        *rebar = super::rebar::parse_beam_rebar(&attrs).0
+                    }
+                    SectionShape::RcColumnRect { rebar, .. }
+                    | SectionShape::SrcColumnRect { rebar, .. } => {
+                        *rebar = super::rebar::parse_rect_column_rebar(&attrs).0
+                    }
+                    SectionShape::RcColumnCircle { rebar, .. } => {
+                        *rebar = super::rebar::parse_circle_column_rebar(&attrs).0
+                    }
+                    _ => {}
+                }
+            }
+            raw.projected_shape = model.sections[input.section.index()].shape.clone();
+            raw.projected_effective = raw
+                .positions
+                .iter()
+                .map(|p| StbRebarElement {
+                    element: p.element.clone(),
+                    attributes: raw.effective_attributes(p, &model.stb_strengths.apply_conditions),
+                })
+                .collect();
         }
         model.prepare_stb_strength_materials();
         warnings.extend(model.stb_strength_diagnostics());

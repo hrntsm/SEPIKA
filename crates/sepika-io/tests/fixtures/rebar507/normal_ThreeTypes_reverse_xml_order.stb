@@ -1,0 +1,39 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="independent" app_name="research_fixture" app_version="1"/>
+  <StbModel>
+    <StbNodes>
+      <StbNode id="1" X="0" Y="0" Z="0" kind="ON_COLUMN"/>
+      <StbNode id="2" X="0" Y="0" Z="3000" kind="ON_COLUMN"/>
+      <StbNode id="3" X="6000" Y="0" Z="3000" kind="ON_GIRDER"/>
+    </StbNodes>
+    <StbMembers>
+      <StbColumns>
+        <StbColumn id="1" name="C" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="RC"/>
+      </StbColumns>
+      <StbGirders>
+        <StbGirder id="1" name="G" id_node_start="2" id_node_end="3" id_section="2" kind_structure="RC" isFoundation="false"/>
+      </StbGirders>
+    </StbMembers>
+    <StbSections>
+      <StbSecColumn_RC id="1" name="C1" strength_concrete="Fc30">
+        <StbSecFigureColumn_RC>
+          <StbSecColumn_RC_Rect width_X="600" width_Y="600"/>
+        </StbSecFigureColumn_RC>
+        <StbSecBarArrangementColumn_RC>
+          <StbSecBarColumn_RC_RectSame D_main="D22" strength_main="SD345" D_band="D10" strength_band="SD295A" N_main_X_1st="7" N_main_X_2nd="2" N_main_Y_1st="7" N_main_Y_2nd="2" N_main_total="24" pitch_band="100" N_band_direction_X="2" N_band_direction_Y="2"/>
+        </StbSecBarArrangementColumn_RC>
+      </StbSecColumn_RC>
+      <StbSecBeam_RC id="2" name="G1" strength_concrete="Fc24">
+        <StbSecFigureBeam_RC>
+          <StbSecBeam_RC_Straight width="300" depth="600"/>
+        </StbSecFigureBeam_RC>
+        <StbSecBarArrangementBeam_RC>
+          <StbSecBarBeam_RC_ThreeTypes D_main="D22" strength_main="SD345" N_main_top_1st="2" N_main_top_2nd="2" N_main_bottom_1st="3" D_2nd_main="D13" strength_2nd_main="SD295A" N_2nd_main_top_1st="2" N_2nd_main_bottom_1st="1" D_stirrup="D10" strength_stirrup="SD295A" N_stirrup="2" pitch_stirrup="100" D_web="D10" strength_web="SD295A" N_web="2" D_bar_spacing="D10" strength_bar_spacing="SD295A" N_bar_spacing="1" pitch_bar_spacing="200" pos="END"/>
+          <StbSecBarBeam_RC_ThreeTypes D_main="D22" strength_main="SD345" N_main_top_1st="3" N_main_top_2nd="2" N_main_bottom_1st="3" D_2nd_main="D13" strength_2nd_main="SD295A" N_2nd_main_top_1st="2" N_2nd_main_bottom_1st="1" D_stirrup="D10" strength_stirrup="SD295A" N_stirrup="2" pitch_stirrup="100" D_web="D10" strength_web="SD295A" N_web="2" D_bar_spacing="D10" strength_bar_spacing="SD295A" N_bar_spacing="1" pitch_bar_spacing="200" pos="CENTER"/>
+          <StbSecBarBeam_RC_ThreeTypes D_main="D22" strength_main="SD345" N_main_top_1st="4" N_main_top_2nd="2" N_main_bottom_1st="3" D_2nd_main="D13" strength_2nd_main="SD295A" N_2nd_main_top_1st="2" N_2nd_main_bottom_1st="1" D_stirrup="D10" strength_stirrup="SD295A" N_stirrup="2" pitch_stirrup="100" D_web="D10" strength_web="SD295A" N_web="2" D_bar_spacing="D10" strength_bar_spacing="SD295A" N_bar_spacing="1" pitch_bar_spacing="200" pos="START"/>
+        </StbSecBarArrangementBeam_RC>
+      </StbSecBeam_RC>
+    </StbSections>
+  </StbModel>
+</ST_BRIDGE>

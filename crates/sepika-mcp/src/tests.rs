@@ -3188,7 +3188,13 @@ fn stb_strength_raw_steel_edit_updates_src_s_and_secondary_consumers() {
             325.,
         ),
     ] {
-        let mut model = sepika_io::stbridge::import_stbridge(xml).unwrap();
+        // 強度編集の正常系は主筋中心を明示する。元のcover-only入力の
+        // 保存・解析不可は標準配筋の受入試験で別に確認する。
+        let xml = xml.replace(
+            "depth_cover_top=\"50.0\" depth_cover_bottom=\"50.0\"",
+            "center_top=\"50.0\" center_bottom=\"50.0\" center_side=\"50.0\"",
+        );
+        let mut model = sepika_io::stbridge::import_stbridge(&xml).unwrap();
         let section = model.elements[member].section.unwrap();
         if index == 1 {
             model.unassigned_beams.push(SecondaryMember {
@@ -3477,4 +3483,72 @@ fn lateral_bracing_mcp_invalid_group_reference_is_retained_without_fallback() {
             .contains("連続"));
     }
     assert_eq!(summary["n_skipped"], 0);
+}
+
+#[test]
+fn standard_rebar507_query_reports_preserved_source_and_unsupported_analysis() {
+    let model = sepika_io::stbridge::import_stbridge(include_str!(
+        "../../sepika-io/tests/fixtures/rebar507/normal_ThreeTypes_reverse_xml_order.stb"
+    ))
+    .unwrap();
+    let raw = query_model(&model, "stb_strengths", None);
+    assert_eq!(
+        raw[0]["sections"][1]["rebar"]["positions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    let expected = model.stb_strength_diagnostics();
+    let report = query_model(&model, "strength_diagnostics", None);
+    assert_eq!(report.len(), expected.len());
+    assert!(report
+        .iter()
+        .any(|r| r["message"].as_str().unwrap().contains("位置別配筋")));
+    let beam = model
+        .elements
+        .iter()
+        .find(|e| e.section == Some(sepika_core::ids::SectionId(1)))
+        .unwrap();
+    let checks = sepika_design_jp::run_member_design_checks(
+        &model,
+        &[(
+            beam.id,
+            sepika_element::frame::beam::MemberForces {
+                at: vec![(0.0, [0.0; 6])],
+            },
+        )],
+        &[],
+        &Default::default(),
+    );
+    assert!(matches!(
+        &checks.member_checks[0].2,
+        sepika_design_jp::CheckOutcome::Skipped { reason } if reason.contains("位置別配筋")
+    ));
+    let mut beam_only = model.clone();
+    beam_only.elements.retain(|e| e.id == beam.id);
+    let error = sepika_design_jp::ultimate::collect_rc_ultimate_checks(
+        &beam_only,
+        &[],
+        &Default::default(),
+    )
+    .unwrap_err();
+    assert!(error.contains("位置別配筋"));
+    let mut candidate = model;
+    let error = sepika_job::prepare_model_for_analysis(
+        &mut candidate,
+        &sepika_job::AnalysisSettings::default(),
+        None,
+    )
+    .err()
+    .unwrap()
+    .to_string();
+    assert!(error.contains("位置別配筋"));
+    candidate.elements.clear();
+    assert!(sepika_job::prepare_model_for_analysis(
+        &mut candidate,
+        &sepika_job::AnalysisSettings::default(),
+        None
+    )
+    .is_ok());
 }

@@ -478,42 +478,23 @@ fn stage_ordinal(stage: u32) -> &'static str {
     }
 }
 
-/// 段別本数が ST-Bridge 標準の 3 段を超えるとき、4 段目以降を切り捨てる旨の警告を作る。
-/// 無音の欠落を避けるため、断面名・段番号・本数を含める。3 段以下なら空。
-fn stage_limit_warnings(sec_name: &str, label: &str, stages: &[u32]) -> Vec<String> {
-    if stages.len() <= 3 {
-        return Vec::new();
-    }
-    let dropped: Vec<String> = stages[3..]
-        .iter()
-        .enumerate()
-        .map(|(i, n)| format!("{} 段目 {} 本", i + 4, n))
-        .collect();
-    vec![format!(
-        "断面 \"{sec_name}\" の{label}: 内部では {} 段ありますが、ST-Bridge 標準は 1〜3 段のため \
-         4 段目以降（{}）を切り捨てました",
-        stages.len(),
-        dropped.join("、")
-    )]
-}
-
 /// 実配筋の梁（[`RcBeamRebar`]）を `StbSecBarBeam_RC_Same` の属性文字列へ整形する。
 /// 上端筋・下端筋を `N_main_top_*`/`N_main_bottom_*` の段別（最大 3 段）で書き出す。
-/// 4 段目以降は切り捨て、その旨を警告として返す。
+/// 標準段数を超える入力は出力入口で拒否する。
 fn beam_rebar_attrs(
     r: &RcBeamRebar,
     grades: BarGrades<'_>,
-    sec_name: &str,
+    _sec_name: &str,
 ) -> (String, Vec<String>) {
     let mut s = format!("D_main=\"{}\"", num(r.main_dia));
-    for (i, n) in r.top.iter().take(3).enumerate() {
+    for (i, n) in r.top.iter().take(3).enumerate().filter(|(_, n)| **n > 0) {
         s.push_str(&format!(
             " N_main_top_{}=\"{}\"",
             stage_ordinal(i as u32 + 1),
             n
         ));
     }
-    for (i, n) in r.bottom.iter().take(3).enumerate() {
+    for (i, n) in r.bottom.iter().take(3).enumerate().filter(|(_, n)| **n > 0) {
         s.push_str(&format!(
             " N_main_bottom_{}=\"{}\"",
             stage_ordinal(i as u32 + 1),
@@ -532,28 +513,30 @@ fn beam_rebar_attrs(
     if let Some(g) = grades.main {
         s.push_str(&format!(" strength_main=\"{}\"", esc(g)));
     }
-    let mut warnings = stage_limit_warnings(sec_name, "上端筋", &r.top);
-    warnings.extend(stage_limit_warnings(sec_name, "下端筋", &r.bottom));
-    (s, warnings)
+    (s, Vec::new())
 }
 
 /// 実配筋の矩形柱（[`RcRectColumnRebar`]）を `StbSecBarColumn_RC_RectSame` の属性文字列へ
-/// 整形する。X 方向・Y 方向を `N_main_X_*`/`N_main_Y_*` の段別（最大 3 段）で書き出し、
-/// 帯筋の X/Y 脚数を別々に出す。4 段目以降は切り捨て、その旨を警告として返す。
+/// 整形する。X 方向・Y 方向を `N_main_X_*`/`N_main_Y_*` の段別（最大 2 段）で書き出し、
+/// 帯筋の X/Y 脚数を別々に出す。標準段数は入口で検査する。
 fn rect_column_rebar_attrs(
     r: &RcRectColumnRebar,
     grades: BarGrades<'_>,
-    sec_name: &str,
+    _sec_name: &str,
 ) -> (String, Vec<String>) {
-    let mut s = format!("D_main=\"{}\"", num(r.main_dia));
-    for (i, n) in r.x.iter().take(3).enumerate() {
+    let mut s = format!(
+        "D_main=\"{}\" N_main_total=\"{}\"",
+        num(r.main_dia),
+        (r.total_main_area() / sepika_core::section_shape::one_bar_area(r.main_dia)).round() as u64
+    );
+    for (i, n) in r.x.iter().take(2).enumerate().filter(|(_, n)| **n > 0) {
         s.push_str(&format!(
             " N_main_X_{}=\"{}\"",
             stage_ordinal(i as u32 + 1),
             n
         ));
     }
-    for (i, n) in r.y.iter().take(3).enumerate() {
+    for (i, n) in r.y.iter().take(2).enumerate().filter(|(_, n)| **n > 0) {
         s.push_str(&format!(
             " N_main_Y_{}=\"{}\"",
             stage_ordinal(i as u32 + 1),
@@ -573,9 +556,7 @@ fn rect_column_rebar_attrs(
     if let Some(g) = grades.main {
         s.push_str(&format!(" strength_main=\"{}\"", esc(g)));
     }
-    let mut warnings = stage_limit_warnings(sec_name, "X 方向主筋", &r.x);
-    warnings.extend(stage_limit_warnings(sec_name, "Y 方向主筋", &r.y));
-    (s, warnings)
+    (s, Vec::new())
 }
 
 /// 実配筋の円形柱（[`RcCircleColumnRebar`]）を `StbSecBarColumn_RC_CircleSame` の属性文字列へ
@@ -597,24 +578,24 @@ fn circle_column_rebar_attrs(r: &RcCircleColumnRebar, grades: BarGrades<'_>) -> 
     s
 }
 
-/// 梁配筋コンテナのかぶり属性（`cover>0` のときのみ。ST-Bridge の length は >0 必須なので
+/// 梁配筋コンテナの中心位置属性（`cover>0` のときのみ。ST-Bridge の length は >0 必須なので
 /// かぶり 0＝未指定は属性ごと省く）。
 fn cover_attr_beam(cover: f64) -> String {
     if cover > 0.0 {
         let cv = num(cover);
-        format!(" depth_cover_top=\"{cv}\" depth_cover_bottom=\"{cv}\"")
+        format!(" center_side=\"{cv}\" center_top=\"{cv}\" center_bottom=\"{cv}\"")
     } else {
         String::new()
     }
 }
 
-/// 柱配筋コンテナのかぶり属性（`cover>0` のときのみ）。
+/// 柱配筋コンテナの中心位置属性（`cover>0` のときのみ）。
 fn cover_attr_column(cover: f64) -> String {
     if cover > 0.0 {
         let cv = num(cover);
         format!(
-            " depth_cover_start_X=\"{cv}\" depth_cover_end_X=\"{cv}\" \
-             depth_cover_start_Y=\"{cv}\" depth_cover_end_Y=\"{cv}\""
+            " center_start_X=\"{cv}\" center_end_X=\"{cv}\" \
+             center_start_Y=\"{cv}\" center_end_Y=\"{cv}\""
         )
     } else {
         String::new()
@@ -622,7 +603,7 @@ fn cover_attr_column(cover: f64) -> String {
 }
 
 /// RC 柱断面の配筋 `StbSecBarArrangementColumn_RC`（矩形/円形）。配筋のない形状は空文字。
-/// 段別本数を書き出す（4 段目以降は警告を返して切り捨てる）。
+/// 標準段数は入口で検査する。
 fn rebar_arrangement_column(
     shape: &SectionShape,
     grades: BarGrades<'_>,
@@ -631,11 +612,16 @@ fn rebar_arrangement_column(
     let (child, cover, attrs, warnings) = match shape {
         SectionShape::RcColumnRect { rebar, .. } => {
             let (a, w) = rect_column_rebar_attrs(rebar, grades, sec_name);
-            ("StbSecBarColumn_RC_RectSame", rebar.cover, a, w)
+            (
+                "StbSecBarColumn_RC_RectSame",
+                rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0,
+                a,
+                w,
+            )
         }
         SectionShape::RcColumnCircle { rebar, .. } => (
             "StbSecBarColumn_RC_CircleSame",
-            rebar.cover,
+            rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0,
             circle_column_rebar_attrs(rebar, grades),
             Vec::new(),
         ),
@@ -655,7 +641,7 @@ fn rebar_arrangement_column(
 }
 
 /// RC 梁断面の配筋 `StbSecBarArrangementBeam_RC`（矩形）。配筋のない形状は空文字。
-/// 上端筋・下端筋の段別本数を書き出す（4 段目以降は警告を返す）。
+/// 上端筋・下端筋の段別本数を書き出す。標準段数は入口で検査する。
 fn rebar_arrangement_beam(
     shape: &SectionShape,
     grades: BarGrades<'_>,
@@ -664,7 +650,7 @@ fn rebar_arrangement_beam(
     let (cover, attrs, warnings) = match shape {
         SectionShape::RcBeamRect { rebar, .. } => {
             let (a, w) = beam_rebar_attrs(rebar, grades, sec_name);
-            (rebar.cover, a, w)
+            (rebar.cover + rebar.stirrup.dia + rebar.main_dia / 2.0, a, w)
         }
         _ => return (String::new(), Vec::new()),
     };
@@ -895,7 +881,7 @@ fn src_section(
 }
 
 /// SRC の配筋要素 `StbSecBarArrangement{Column,Beam}_SRC`。配筋のない形状は空文字。
-/// `kind` は要素名の中置（"SRC"）。実配筋型は段別本数を書き出す（4 段目以降は警告）。
+/// `kind` は要素名の中置（"SRC"）。実配筋型は段別本数を書き出す。標準段数は入口で検査する。
 fn rebar_arrangement_generic(
     shape: &SectionShape,
     grades: BarGrades<'_>,
@@ -906,11 +892,11 @@ fn rebar_arrangement_generic(
     let (cover, attrs, warnings) = match shape {
         SectionShape::SrcBeamRect { rebar, .. } => {
             let (a, w) = beam_rebar_attrs(rebar, grades, sec_name);
-            (rebar.cover, a, w)
+            (rebar.cover + rebar.stirrup.dia + rebar.main_dia / 2.0, a, w)
         }
         SectionShape::SrcColumnRect { rebar, .. } => {
             let (a, w) = rect_column_rebar_attrs(rebar, grades, sec_name);
-            (rebar.cover, a, w)
+            (rebar.cover + rebar.hoop.dia + rebar.main_dia / 2.0, a, w)
         }
         _ => return (String::new(), Vec::new()),
     };
@@ -1109,6 +1095,86 @@ pub(super) fn standard_sections(model: &Model) -> Result<StandardSections, super
     };
 
     for sec in &model.sections {
+        let source = model
+            .stb_strengths
+            .sections
+            .iter()
+            .find(|s| s.section == sec.id)
+            .and_then(|s| s.rebar.as_ref());
+        if let Some(raw) = source {
+            raw.validate_standard().map_err(|reason| {
+                super::StbError::Unmappable(format!("断面 {}: {reason}", sec.id.0))
+            })?;
+            if raw.projected_shape != sec.shape {
+                return Err(super::StbError::Unmappable(format!(
+                    "断面 {}: 原配筋と編集後形状が一致しません",
+                    sec.id.0
+                )));
+            }
+        } else if model
+            .stb_strengths
+            .sections
+            .iter()
+            .find(|s| s.section == sec.id)
+            .is_none_or(|s| s.native_rebar || !s.reinforcement.is_empty())
+        {
+            if let Some(shape) = &sec.shape {
+                let valid = match shape {
+                    SectionShape::RcBeamRect { rebar, .. }
+                    | SectionShape::SrcBeamRect { rebar, .. } => {
+                        rebar.top.len() <= 3
+                            && rebar.bottom.len() <= 3
+                            && rebar.top.first().is_some_and(|n| *n > 0)
+                            && rebar.bottom.first().is_some_and(|n| *n > 0)
+                            && rebar.main_dia.is_finite()
+                            && rebar.cover.is_finite()
+                            && rebar.cover >= 0.0
+                            && rebar.main_dia > 0.0
+                            && rebar.stirrup.dia.is_finite()
+                            && rebar.stirrup.pitch.is_finite()
+                            && rebar.stirrup.dia > 0.0
+                            && rebar.stirrup.pitch > 0.0
+                            && rebar.stirrup.legs > 0
+                    }
+                    SectionShape::RcColumnRect { rebar, .. }
+                    | SectionShape::SrcColumnRect { rebar, .. } => {
+                        rebar.total_main_area() > 0.0
+                            && rebar.x.len() <= 2
+                            && rebar.y.len() <= 2
+                            && rebar.x.first().is_some_and(|n| *n > 0)
+                            && rebar.y.first().is_some_and(|n| *n > 0)
+                            && rebar.main_dia.is_finite()
+                            && rebar.cover.is_finite()
+                            && rebar.cover >= 0.0
+                            && rebar.main_dia > 0.0
+                            && rebar.hoop.dia.is_finite()
+                            && rebar.hoop.pitch.is_finite()
+                            && rebar.hoop.dia > 0.0
+                            && rebar.hoop.pitch > 0.0
+                            && rebar.hoop.legs_x > 0
+                            && rebar.hoop.legs_y > 0
+                    }
+                    SectionShape::RcColumnCircle { rebar, .. } => {
+                        rebar.count > 0
+                            && rebar.main_dia.is_finite()
+                            && rebar.cover.is_finite()
+                            && rebar.cover >= 0.0
+                            && rebar.main_dia > 0.0
+                            && rebar.hoop.dia.is_finite()
+                            && rebar.hoop.pitch.is_finite()
+                            && rebar.hoop.dia > 0.0
+                            && rebar.hoop.pitch > 0.0
+                    }
+                    _ => true,
+                };
+                if !valid {
+                    return Err(super::StbError::Unmappable(format!(
+                        "断面 {}: 必須配筋値が未入力または標準段数を超えています",
+                        sec.id.0
+                    )));
+                }
+            }
+        }
         let base = sec.id.0;
         if let Some(shape) = &sec.shape {
             shape.validate_surface_radius().map_err(|error| {
