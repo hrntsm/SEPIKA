@@ -9217,3 +9217,102 @@ fn issue635_copy_to_6000mm_keeps_exact_endpoints_and_skips_point_and_interval_ov
     undo.redo(&mut model);
     assert!(model.eq_ignoring_dofmap(&after));
 }
+
+#[test]
+fn issue546_material_commands_reject_nonfinite_and_preserve_history() {
+    let mut model = empty_model();
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(AddMaterial {
+            name: "finite".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            fc: None,
+            fy: Some(235.0),
+            strength_factor: None,
+            concrete_class: Default::default()
+        })
+    ));
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetMaterialField {
+            id: MaterialId(0),
+            field: MaterialField::Young,
+            value: Some(204000.0)
+        })
+    ));
+    undo.undo(&mut model);
+    let before = model.clone();
+    let revision = undo.revision();
+    for field in [
+        MaterialField::Young,
+        MaterialField::Poisson,
+        MaterialField::Density,
+        MaterialField::Fc,
+        MaterialField::Fy,
+        MaterialField::StrengthFactor,
+    ] {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(!undo.run(
+                &mut model,
+                Box::new(SetMaterialField {
+                    id: MaterialId(0),
+                    field,
+                    value: Some(value)
+                })
+            ));
+            assert!(undo.last_error().unwrap().contains("非有限"));
+            assert!(model.eq_ignoring_dofmap(&before));
+            assert_eq!(undo.revision(), revision);
+            assert!(undo.can_redo());
+        }
+    }
+    for field in [
+        MaterialField::Young,
+        MaterialField::Poisson,
+        MaterialField::Density,
+    ] {
+        assert!(!undo.run(
+            &mut model,
+            Box::new(SetMaterialField {
+                id: MaterialId(0),
+                field,
+                value: None
+            })
+        ));
+        assert!(undo.last_error().unwrap().contains("必須空欄"));
+    }
+    assert!(!undo.run(
+        &mut model,
+        Box::new(SetMaterialField {
+            id: MaterialId(0),
+            field: MaterialField::Young,
+            value: Some(205000.0)
+        })
+    ));
+    assert!(undo.last_error().is_none());
+    assert_eq!(undo.revision(), revision);
+    assert!(undo.can_redo());
+    assert!(!undo.run(
+        &mut model,
+        Box::new(AddMaterial {
+            name: "bad last field".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            fc: None,
+            fy: None,
+            strength_factor: Some(f64::INFINITY),
+            concrete_class: Default::default()
+        })
+    ));
+    assert!(model.eq_ignoring_dofmap(&before));
+    assert_eq!(undo.revision(), revision);
+    assert!(undo.can_redo());
+    undo.redo(&mut model);
+    assert_eq!(model.materials[0].young, 204000.0);
+}

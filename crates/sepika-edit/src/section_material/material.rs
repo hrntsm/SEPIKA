@@ -21,6 +21,18 @@ pub struct AddMaterial {
 
 impl EditCommand for AddMaterial {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        for (field, value) in [
+            ("E", Some(self.young)),
+            ("ν", Some(self.poisson)),
+            ("ρ", Some(self.density)),
+            ("Fc", self.fc),
+            ("Fy", self.fy),
+            ("割増", self.strength_factor),
+        ] {
+            if value.is_some_and(|v| !v.is_finite()) {
+                return Box::new(crate::RejectedEdit(format!("材料追加 {field}: 非有限")));
+            }
+        }
         let new_id = MaterialId(model.materials.len() as u32);
         model.materials.push(sepika_core::model::Material {
             strength_factor: self.strength_factor,
@@ -113,12 +125,30 @@ pub struct SetMaterialField {
 impl EditCommand for SetMaterialField {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let idx = self.id.index();
+        let reject = |reason| {
+            Box::new(crate::RejectedEdit(format!(
+                "材料 {} {:?}: {reason}",
+                self.id.0, self.field
+            ))) as Box<dyn EditCommand>
+        };
         if idx >= model.materials.len() || model.materials[idx].id != self.id {
-            return Box::new(Noop);
+            return reject("参照不明");
         }
         if self.field == MaterialField::Young && model.materials[idx].is_standard_concrete() {
-            return Box::new(Noop);
+            return reject("編集不可");
         }
+        if self.value.is_some_and(|v| !v.is_finite()) {
+            return reject("非有限");
+        }
+        if self.value.is_none()
+            && matches!(
+                self.field,
+                MaterialField::Young | MaterialField::Poisson | MaterialField::Density
+            )
+        {
+            return reject("必須空欄");
+        }
+        let material_before = model.materials[idx].clone();
         let strength_input = model.stb_strengths.clone();
         let strength_stories = model.source_stories.clone();
         let mat = &mut model.materials[idx];
@@ -150,6 +180,12 @@ impl EditCommand for SetMaterialField {
                 .map(|v| format!("Fc{v}"))
                 .unwrap_or_else(|| "未指定Fc".into());
             model.replace_stb_material_grade(self.id, &grade);
+        }
+        if model.materials[idx] == material_before
+            && model.stb_strengths == strength_input
+            && model.source_stories == strength_stories
+        {
+            return Box::new(Noop);
         }
         Box::new(crate::strength::RestoreStrengthInput {
             input: strength_input,
