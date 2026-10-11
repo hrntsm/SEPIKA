@@ -76,6 +76,7 @@
 |---|---|---|
 | [外部ID入力拒否_Issue603_2026-10.md](外部ID入力拒否_Issue603_2026-10.md) | MCP/手書き/serde・STB全文書・境界/省略・正常編集/Undo | 🔶（入口Verification、freshレビュー・最終head全CIは後続） |
 | [二次CFT入口拒否_Issue539_2026-10.md](二次CFT入口拒否_Issue539_2026-10.md) | 共通用途・raw保存読込・App状態保持・数量/解析入口・正常主柱対照 | 🔶（入口Verification、freshレビュー・最終head全CIは後続） |
+| [直接線形求解_Issue598_2026-10.md](直接線形求解_Issue598_2026-10.md) | Cholesky適用・独立f64残差・LU別契約・52,920DOF前後実測・OVIKA旧6失効 | 🔶（Verification、一試行実測、Validation・freshレビュー・最終head全CIは後続） |
 | [静的設定採用_Issue595_2026-10.md](静的設定採用_Issue595_2026-10.md) | 公開静的経路・独立スカラー・自然未収束・GUI保存/MCP拒否 | 🔶（Verification、実験Validation・freshレビュー・最終head全CIは後続） |
 | [SRC材料領域_Issue552_2026-10.md](SRC材料領域_Issue552_2026-10.md) | 中心直角Hの非重複A/I/EA/EI・実Fiber/MS/MN/Mφ/保存/表示・旧版3 | 🔶（限定幾何Verification、実験Validation・freshレビュー・最終head全CIは後続） |
 | [共通断面質量_Issue594_2026-10.md](共通断面質量_Issue594_2026-10.md) | 両質量形式・幾何/採用密度・直接/公開診断・旧契約2成果 | 🔶（ローカルVerification、freshレビュー・最終head全CI後続、Validation未） |
@@ -245,6 +246,7 @@
 | 35 | 耐震壁の未検定状態 | sepika-design-jp / sepika-app / sepika-mcp | wall_check.rs、joint_wiring/tests.rs、tests/wall_check_status.rs、viewer/check_ratio.rs、job/design_check.rs | `wall_status_*` / `wall_tooltip_real_egui_*` / `wall_ng_real_egui_*` / `wall_output_assembly_*`。[Issue495検証](耐震壁_未検定_Issue495_2026-10.md) | 横断 | 🔶（状態契約のみ） |
 | 38 | 外部ID入力拒否 | sepika-mcp / sepika-io | edit、server、stbridge/import・export | [Issue603の直接入口](外部ID入力拒否_Issue603_2026-10.md#直接入口と観測) | 横断 | 🔶（入口Verification、最終headゲートは後続） |
 | 37 | 二次CFTの全入口拒否 | sepika-core / sepika-edit / sepika-io / sepika-app / sepika-design-jp / sepika-solver / sepika-mcp | model/aggregate・section、ovika、quantity、actions/io、precheck | [Issue539の直接入口と正常対照](二次CFT入口拒否_Issue539_2026-10.md#直接入口と観測) | 横断 | 🔶（入口Verification、最終headゲートは後続） |
+| 36a | 直接線形求解 | sepika-math / sepika-solver / sepika-core / sepika-app | cholesky・lu・solver・statics/analysis/linear・result_contract_tests | [Issue598独立期待値と実入口](直接線形求解_Issue598_2026-10.md#独立期待値と実入口) | 横断 | 🔶（Verification、実験Validation・最終headゲート未） |
 | 36 | 静的設定の公開経路一致 | sepika-solver / sepika-element / sepika-job / sepika-app / sepika-mcp | statics/linear、statics/analysis、factory、compute、actions/linear_static、tests | [Issue595の直接入口と回帰](静的設定採用_Issue595_2026-10.md#直接入口と回帰) | 横断 | 🔶（Verification、Validation・最終headゲート未） |
 
 凡例: ✅ 実装済み・🔶 一部実装（要拡張）・❌ 未実装・対象外（採用しない）。
