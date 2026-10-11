@@ -118,6 +118,7 @@
 | [断面検定_参照実装照合.md](断面検定_参照実装照合.md) | 04 断面検定 | 🔶 | C 節に残置項目 |
 | [非線形モデル_参照実装照合.md](非線形モデル_参照実装照合.md) | 05 非線形モデル | 🔶 | 免震 UI・分割ロジック等 |
 | [終局検定_参照実装照合.md](終局検定_参照実装照合.md) | 06 終局検定 | 🔶 | Vu・二軸曲げ等 |
+| [ゼロ増分履歴保持_Issue596_2026-10.md](ゼロ増分履歴保持_Issue596_2026-10.md) | 同点trial/probe/commitの全履歴・独立応答、実集中ばね/非対称壁/1D・spatial時刻歴、解析5の実OVIKA失効と明示回復 | 🔶（代表入口Verification、実験Validation未） |
 | [非線形動的解析_参照実装照合.md](非線形動的解析_参照実装照合.md) | 07 非線形動的 | 🔶 | UI/IO 経路整備 |
 | [梁型枠接触和集合_Issue451_2026-10.md](梁型枠接触和集合_Issue451_2026-10.md) | 水平一定矩形梁の左右別接触和集合・公開数量入口。実施工Validationは未実施 | 🔶 |
 | [数量積算_参照実装照合.md](数量積算_参照実装照合.md) | 数量積算 | 🔶 | モデル制約による C 節 |
@@ -219,7 +220,7 @@
 | 16 | 壁（TVLEM） | sepika-element | — | — | P5.5 | 対象外 |
 | 17 | 時刻歴 | sepika-solver | timehistory.rs | — | P6 | ❌ |
 | 18 | 一軸履歴則（Concrete/Bilinear/MP） | sepika-material | uniaxial.rs | `test_concrete_*`/`test_bilinear_*`/`test_menegotto_pinto_*` | P4 | ✅ |
-| 19 | 部材履歴則（武田・原点指向・スリップ） | sepika-material | hysteresis.rs | `tests/hysteresis_snapshots.rs`/`tests/uniaxial_snapshots.rs` | P4 | ✅ |
+| 19 | 部材履歴則（武田・原点指向・スリップ） | sepika-material | hysteresis.rs | `tests/hysteresis_snapshots.rs`/`tests/uniaxial_snapshots.rs`、`zero_increment_*`と実factory/壁/質点系solver（[Issue596検証](ゼロ増分履歴保持_Issue596_2026-10.md)） | P4 | 🔶（ゼロ増分Verification済み、全履歴Validation未） |
 | 20 | ファイバ断面（M–φ 積分） | sepika-section / sepika-core / sepika-element | fiber.rs, mn_surface/fibers.rs, section_shape/rounded.rs | `test_section_*`、`rounded_tests`、`rounded_beam_fiber_*`。フィレット・角Rの領域、公開耐力、両質量モードの証拠は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md) | P4 | ✅（指定形状の細分化照合。通常配置の一般精度保証ではない） |
 | 21 | 参考骨格算定（M–φ→M–θ） | sepika-skeleton | tests.rs | `test_rc_skeleton_*`, `shear_*`, `explicit_pullout_*`, `positive_reference_composition_*`, `rc_builder_rejects_*` | P4 / #436 | 🔶（単位・拒否契約検証済み） |
 | 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 🔶 |

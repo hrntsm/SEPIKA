@@ -436,6 +436,47 @@ mod tests {
     use crate::statics::analysis::SeismicDir;
 
     #[test]
+    fn zero_increment_spatial_xy_and_report_clone_keep_committed_story_response() {
+        let sk = StoryTrilinear {
+            k1: 1000.0,
+            d1: 0.01,
+            q1: 10.0,
+            d2: 0.02,
+            q2: 20.0,
+            d3: 0.04,
+            q3: 30.0,
+        };
+        let spatial = StorySpatial {
+            j: 1.0,
+            mass_xy: [0.0, 0.0],
+            rigidity_xy: [0.0, 0.0],
+            k1_x: 1000.0,
+            k1_y: 1000.0,
+            kr: 1.0,
+            skeleton_x: sk,
+            skeleton_y: sk,
+        };
+        let rel = relative_at_rigidity(&[-0.03, -0.03, 0.0], 0, &spatial);
+        assert_eq!(rel, [-0.03, -0.03, 0.0]);
+        for (sk, theta) in [(spatial.skeleton_x, rel[0]), (spatial.skeleton_y, rel[1])] {
+            let mut spring = story_spring(&sk);
+            assert_eq!(spring.trial(theta), (-25.0, 500.0));
+            spring.commit();
+            let before = spring.serialize_state();
+            let mut report = spring.clone();
+            assert_eq!(report.trial(theta), (-25.0, 500.0));
+            assert_eq!(before, report.serialize_state());
+            assert_eq!(before, spring.serialize_state());
+            spring.trial(theta);
+            spring.commit();
+            assert_eq!(before, spring.serialize_state());
+            assert_eq!(spring.trial(-0.04), (-30.0, 500.0));
+            spring.revert();
+            assert_eq!(before, spring.serialize_state());
+        }
+    }
+
+    #[test]
     fn spatial_eigen_one_story_matches_sda() {
         let mass = 10.0;
         let kx = 100.0;

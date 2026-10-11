@@ -71,11 +71,17 @@ pub struct HysteresisMaterial {
 
 impl HysteresisMaterial {
     pub fn new(rule: HysteresisRule) -> Self {
+        let (m, kt) = rule.skeleton(0.0);
+        let initial = HystState {
+            m,
+            kt,
+            ..Default::default()
+        };
         Self {
             rule,
             negative_rule: None,
-            committed: HystState::default(),
-            trial: HystState::default(),
+            committed: initial.clone(),
+            trial: initial,
         }
     }
 
@@ -143,12 +149,12 @@ impl HysteresisMaterial {
     /// 与えた θ での trial 状態を計算する。
     fn evaluate(&self, theta: f64) -> HystState {
         let c = &self.committed;
-        let dir_new = (theta - c.theta).signum();
-        let mut s = c.clone();
-
-        if dir_new == 0.0 {
-            return s;
+        let delta = theta - c.theta;
+        if delta == 0.0 {
+            return c.clone();
         }
+        let dir_new = delta.signum();
+        let mut s = c.clone();
 
         if self.rule.is_retrograde() {
             let (m, kt) = self.rule_for(theta).skeleton(theta);
@@ -437,6 +443,177 @@ mod tests {
     use super::*;
     use crate::hysteresis::rule::{max_point, retrograde, standard, takeda};
     use approx::assert_relative_eq;
+
+    fn zero_increment_rule(degrading: bool) -> HysteresisRule {
+        if degrading {
+            HysteresisRule::TakedaDegrading {
+                crack: (10.0, 0.01),
+                yield_point: (20.0, 0.02),
+                ultimate: (30.0, 0.04),
+                alpha: 0.0,
+                degradation: 0.9,
+            }
+        } else {
+            HysteresisRule::Takeda {
+                crack: (10.0, 0.01),
+                yield_point: (20.0, 0.02),
+                ultimate: (30.0, 0.04),
+                alpha: 0.0,
+            }
+        }
+    }
+
+    #[test]
+    fn zero_increment_preserves_initial_tangent_and_finite_tiny_motion() {
+        for zero in [0.0, -0.0] {
+            let mut m = HysteresisMaterial::new(zero_increment_rule(false));
+            assert_eq!(m.probe(zero), (0.0, 1000.0));
+            assert_eq!(m.trial(zero), (0.0, 1000.0));
+            m.commit();
+            m.trial(0.03);
+            m.revert();
+            assert_eq!(m.trial, m.committed);
+            assert_eq!(m.probe(zero), (0.0, 1000.0));
+        }
+        for theta in [1e-20, -1e-20] {
+            let mut m = HysteresisMaterial::new(zero_increment_rule(false));
+            assert_eq!(m.trial(theta), (1000.0 * theta, 1000.0));
+            assert_eq!(m.trial.theta, theta);
+            assert_eq!(m.trial.dir, theta.signum());
+        }
+    }
+
+    #[test]
+    fn zero_increment_signed_elastic_and_post_yield_response_is_independent() {
+        for (theta, force, tangent) in [
+            (-0.005, -5.0, 1000.0),
+            (0.005, 5.0, 1000.0),
+            (-0.03, -25.0, 500.0),
+            (0.03, 25.0, 500.0),
+        ] {
+            let mut material = HysteresisMaterial::new(zero_increment_rule(false));
+            assert_eq!(material.trial(theta), (force, tangent));
+            material.commit();
+            let before = material.serialize_state();
+            assert_eq!(material.probe(theta), (force, tangent));
+            assert_eq!(material.trial(theta), (force, tangent));
+            material.commit();
+            assert_eq!(before, material.serialize_state());
+        }
+    }
+
+    #[test]
+    fn zero_increment_negative_peak_has_independent_response_and_entire_history() {
+        let mut direct = HysteresisMaterial::new(zero_increment_rule(false));
+        assert_relative_eq!(direct.trial(-0.03).0, -25.0, epsilon = 1e-12);
+        assert_eq!(direct.trial.kt, 500.0);
+        direct.commit();
+        assert_eq!(direct.committed.dir, -1.0);
+        assert_eq!(direct.committed.branch, Branch::Skeleton);
+        assert_eq!(direct.committed.max_neg, (-0.03, -25.0));
+        assert_eq!(direct.committed.peak_count_neg, 0);
+        assert_eq!(
+            direct.committed,
+            HystState {
+                theta: -0.03,
+                m: -25.0,
+                kt: 500.0,
+                dir: -1.0,
+                max_neg: (-0.03, -25.0),
+                ..Default::default()
+            }
+        );
+        let mut reversal = direct.clone();
+        assert_relative_eq!(reversal.trial(-0.029).0, -24.0, epsilon = 1e-12);
+        assert_eq!(reversal.trial.kt, 1000.0);
+        assert_eq!(reversal.trial.dir, 1.0);
+        assert_eq!(reversal.trial.branch, Branch::Unloading { ku: 1000.0 });
+        assert_eq!(reversal.trial.reversal, (-0.03, -25.0));
+        assert_eq!(reversal.trial.max_neg, (-0.03, -25.0));
+        assert_eq!(reversal.trial.max_pos, (0.0, 0.0));
+        assert_eq!(
+            (reversal.trial.peak_count_pos, reversal.trial.peak_count_neg),
+            (0, 1)
+        );
+        let before_failed_restore = direct.serialize_state();
+        assert!(direct.deserialize_state(&[0xff, 0x00, 0x01]).is_err());
+        assert_eq!(before_failed_restore, direct.serialize_state());
+        let mut repeated = direct.clone();
+        assert_eq!(repeated.trial(-0.03), (-25.0, 500.0));
+        repeated.commit();
+        assert_eq!(direct.committed, repeated.committed);
+        assert_eq!(direct.trial(-0.04), (-30.0, 500.0));
+        assert_eq!(repeated.trial(-0.04), (-30.0, 500.0));
+        for theta in [-0.04, -0.039, 0.0, 0.03, 0.02, -0.01, -0.05] {
+            assert_eq!(direct.trial(theta), repeated.trial(theta));
+            direct.commit();
+            repeated.commit();
+            assert_eq!(direct.committed, repeated.committed);
+        }
+    }
+
+    #[test]
+    fn zero_increment_probe_keeps_outstanding_trial_and_trial_replaces_it() {
+        for degrading in [false, true] {
+            let mut base = HysteresisMaterial::new(zero_increment_rule(degrading));
+            for theta in [-0.005, -0.03, -0.029, 0.025, 0.015, -0.02] {
+                base.trial(theta);
+                base.commit();
+                let mut probe = base.clone();
+                probe.trial(theta + 0.001);
+                let outstanding = probe.trial.clone();
+                let committed = probe.committed.clone();
+                let before = probe.serialize_state();
+                assert_eq!(probe.probe(theta), (committed.m, committed.kt));
+                assert_eq!(before, probe.serialize_state());
+                probe.commit();
+                assert_eq!(probe.committed, outstanding);
+                let mut trial = base.clone();
+                trial.trial(theta + 0.001);
+                assert_eq!(trial.trial(theta), (committed.m, committed.kt));
+                trial.commit();
+                assert_eq!(trial.committed, committed);
+                trial.trial(theta - 0.001);
+                trial.revert();
+                assert_eq!(trial.trial, committed);
+                assert_eq!(trial.trial(theta + 0.001), base.trial(theta + 0.001));
+                base.revert();
+            }
+        }
+    }
+
+    #[test]
+    fn zero_increment_asymmetric_degrading_cycles_do_not_create_peaks_or_branches() {
+        let negative = HysteresisRule::TakedaDegrading {
+            crack: (10.0, 0.01),
+            yield_point: (30.0, 0.03),
+            ultimate: (40.0, 0.05),
+            alpha: 0.0,
+            degradation: 0.9,
+        };
+        let mut direct =
+            HysteresisMaterial::new(zero_increment_rule(true)).with_negative_rule(negative);
+        let mut repeated = direct.clone();
+        for theta in [
+            -0.005, -0.04, -0.039, 0.0, 0.03, 0.029, -0.04, -0.02, 0.01, 0.04,
+        ] {
+            assert_eq!(direct.trial(theta), repeated.trial(theta));
+            direct.commit();
+            repeated.commit();
+            assert_eq!(direct.committed, repeated.committed);
+            let before = repeated.serialize_state();
+            assert_eq!(
+                repeated.probe(theta),
+                (direct.committed.m, direct.committed.kt)
+            );
+            assert_eq!(before, repeated.serialize_state());
+            repeated.trial(theta);
+            repeated.commit();
+            assert_eq!(direct.committed, repeated.committed);
+        }
+        assert!(direct.committed.peak_count_neg > 0);
+        assert!(direct.committed.peak_count_pos > 0);
+    }
 
     #[test]
     fn asymmetric_envelopes_preserve_initial_stiffness_and_cyclic_limits() {

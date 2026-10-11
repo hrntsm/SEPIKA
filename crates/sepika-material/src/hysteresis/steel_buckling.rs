@@ -192,10 +192,11 @@ impl SteelBuckling {
 
     fn eval_state(&self, theta: f64) -> SbState {
         let c = self.committed;
-        let dir = (theta - c.theta).signum();
-        if dir == 0.0 {
+        let delta = theta - c.theta;
+        if delta == 0.0 {
             return c;
         }
+        let dir = delta.signum();
         let beyond_pos = dir > 0.0 && theta >= c.theta_max_pos;
         let beyond_neg = dir < 0.0 && theta <= c.theta_max_neg;
         let mut st = c;
@@ -272,6 +273,107 @@ impl UniaxialMaterial for SteelBuckling {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
+
+    #[test]
+    fn zero_increment_signed_elastic_and_hardened_response_is_independent() {
+        for (theta, force, tangent) in [
+            (-0.005, -5.0, 1000.0),
+            (0.005, 5.0, 1000.0),
+            (-0.03, -25.0, 500.0),
+            (0.03, 25.0, 500.0),
+        ] {
+            let mut material = SteelBuckling::with_defaults(1000.0, 20.0, 1.5);
+            assert_eq!(material.trial(theta), (force, tangent));
+            material.commit();
+            let before = material.serialize_state();
+            assert_eq!(material.probe(theta), (force, tangent));
+            assert_eq!(material.trial(theta), (force, tangent));
+            material.commit();
+            assert_eq!(before, material.serialize_state());
+        }
+    }
+
+    #[test]
+    fn zero_increment_preserves_backbone_ro_history_and_outstanding_trial() {
+        for zero in [0.0, -0.0] {
+            let mut m = SteelBuckling::with_defaults(1000.0, 20.0, 1.5);
+            assert_eq!(m.probe(zero), (0.0, 1000.0));
+            assert_eq!(m.trial(zero), (0.0, 1000.0));
+            m.commit();
+            m.trial(-0.03);
+            m.revert();
+            assert_eq!(m.probe(zero), (0.0, 1000.0));
+        }
+        for theta in [1e-20, -1e-20] {
+            let mut m = SteelBuckling::with_defaults(1000.0, 20.0, 1.5);
+            assert_eq!(m.trial(theta), (1000.0 * theta, 1000.0));
+            assert_eq!(m.trial.dir, theta.signum());
+        }
+        let mut direct = SteelBuckling::with_defaults(1000.0, 20.0, 1.5);
+        assert_eq!(direct.trial(-0.03), (-25.0, 500.0));
+        direct.commit();
+        assert!(direct.committed.on_backbone);
+        assert_eq!(direct.committed.dir, -1.0);
+        assert_eq!(direct.committed.theta_max_neg, -0.03);
+        let expected = SbState {
+            theta: -0.03,
+            m: -25.0,
+            tangent: 500.0,
+            dir: -1.0,
+            theta_max_neg: -0.03,
+            on_backbone: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            bincode::serialize(&direct.committed).unwrap(),
+            bincode::serialize(&expected).unwrap()
+        );
+        let mut reversal = direct.clone();
+        let (moment, tangent) = reversal.trial(-0.03 + 0.001000003125);
+        assert_relative_eq!(moment, -24.0, epsilon = 1e-12);
+        assert_relative_eq!(tangent, 1000.0 / (1.0 + 2.5 / 160000.0), epsilon = 1e-10);
+        assert!(!reversal.trial.on_backbone);
+        assert_eq!(reversal.trial.dir, 1.0);
+        assert_eq!((reversal.trial.theta_r, reversal.trial.m_r), (-0.03, -25.0));
+        assert_eq!(reversal.trial.theta_max_pos, 0.0);
+        assert_eq!(reversal.trial.theta_max_neg, -0.03);
+        let before_failed_restore = direct.serialize_state();
+        assert!(direct.deserialize_state(&[0xff, 0x00, 0x01]).is_err());
+        assert_eq!(before_failed_restore, direct.serialize_state());
+        let mut repeated = direct.clone();
+        assert_eq!(repeated.trial(-0.03), (-25.0, 500.0));
+        repeated.commit();
+        assert_eq!(direct.serialize_state(), repeated.serialize_state());
+        assert_eq!(direct.trial(-0.04), (-30.0, 500.0));
+        assert_eq!(repeated.trial(-0.04), (-30.0, 500.0));
+        for theta in [-0.04, -0.039, 0.0, 0.03, 0.029, -0.01, -0.05] {
+            assert_eq!(direct.trial(theta), repeated.trial(theta));
+            direct.commit();
+            repeated.commit();
+            assert_eq!(direct.serialize_state(), repeated.serialize_state());
+            let mut outstanding = repeated.clone();
+            outstanding.trial(theta + 0.001);
+            let before = outstanding.serialize_state();
+            let expected_trial = outstanding.trial;
+            assert_eq!(
+                outstanding.probe(theta),
+                (direct.committed.m, direct.committed.tangent)
+            );
+            assert_eq!(before, outstanding.serialize_state());
+            outstanding.commit();
+            assert_eq!(
+                bincode::serialize(&outstanding.committed).unwrap(),
+                bincode::serialize(&expected_trial).unwrap()
+            );
+            repeated.trial(theta + 0.001);
+            repeated.trial(theta);
+            repeated.commit();
+            assert_eq!(direct.serialize_state(), repeated.serialize_state());
+            repeated.trial(theta - 0.001);
+            repeated.revert();
+            assert_eq!(direct.serialize_state(), repeated.serialize_state());
+        }
+    }
 
     #[test]
     fn test_lateral_buckling_mu_ratio_slender_reduces() {
