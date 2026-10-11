@@ -303,6 +303,52 @@ mod tests {
     use sepika_core::ids::ElemId;
     use sepika_core::model::{MemberLoad, MemberLoadKind};
 
+    #[test]
+    fn signed_static_transfer_preserves_independent_reaction_fixtures_and_adapter() {
+        let frame = horiz_frame();
+        for (a, b, w1, w2, ri, rj) in [
+            (0.0, 6000.0, 1.0, -1.0, 1000.0, -1000.0),
+            (1000.0, 4000.0, 1.0, -1.0, 250.0, -250.0),
+            (0.0, 6000.0, 1.0, -1.0 + 1e-10, 1000.0000001, -999.9999998),
+            (0.0, 6000.0, -1.0, 1.0, -1000.0, 1000.0),
+            (2000.0, 5000.0, -1.0, 1.0, -250.0, 250.0),
+            (0.0, 6000.0, 1.0, -0.9, 1100.0, -800.0),
+            (-1000.0, 7000.0, 1.0, 1.0, 4000.0, 4000.0),
+            (2.0, 1.0, 1.0, 1.0, 0.0, 0.0),
+        ] {
+            let load = MemberLoad::manual(
+                ElemId(0),
+                frame.rot[1],
+                MemberLoadKind::Distributed { a, b, w1, w2 },
+            );
+            let q = consistent_load_local(
+                &[load],
+                &frame,
+                6000.0,
+                SpanLoadTransfer::StaticallyEquivalent,
+            );
+            assert!(
+                (q[1] - ri).abs() < 1e-8 && (q[7] - rj).abs() < 1e-8,
+                "{q:?}"
+            );
+            assert_eq!([q[5], q[11]], [0.0, 0.0]);
+        }
+        for (l, a, expected) in [
+            (6000.0, -1.0, [1000.0, 0.0]),
+            (6000.0, 7000.0, [0.0, 1000.0]),
+            (0.0, 0.5e-9, [500.0, 500.0]),
+        ] {
+            let load = MemberLoad::manual(
+                ElemId(0),
+                frame.rot[1],
+                MemberLoadKind::Point { a, p: 1000.0 },
+            );
+            let q =
+                consistent_load_local(&[load], &frame, l, SpanLoadTransfer::StaticallyEquivalent);
+            assert_eq!([q[1], q[7]], expected);
+        }
+    }
+
     fn horiz_frame() -> LocalFrame {
         LocalFrame::from_nodes([0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 0.0, 1.0])
     }

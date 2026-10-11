@@ -60,36 +60,27 @@ pub(crate) fn fem_trapezoid(w0: f64, a: f64, b: f64, l: f64) -> Cmq {
     }
 }
 
-/// 区間分布荷重 [a,b]（強度 w1→w2 の線形分布）の合計荷重と、i 端からの荷重重心位置。
-/// `b<=a`（無効区間）は合計 0・重心は区間中点を返す。
-fn distributed_total_and_centroid(a: f64, b: f64, w1: f64, w2: f64) -> (f64, f64) {
-    let len = b - a;
-    if len <= 1e-9 {
-        return (0.0, a);
-    }
-    let total = (w1 + w2) / 2.0 * len;
-    let xbar = if (w1 + w2).abs() < 1e-12 {
-        a + len / 2.0
-    } else {
-        a + len * (w1 + 2.0 * w2) / (3.0 * (w1 + w2))
-    };
-    (total, xbar)
-}
-
-/// `MemberLoadKind` 1件の単純梁（両端ピン支持）反力 (R_i, R_j)。
-/// 集中荷重は P·b/L, P·a/L、分布荷重は合計荷重を重心位置で按分する。
+/// 単純梁の符号付き反力 [N] を (i端, j端) の順で返す。位置・支間は [mm]。
+/// 点位置は支間内へ制限し、分布は原区間を用いる。区間長≤1e−9は0。
+/// 反力比は制限しない。正常域外の物理的妥当性は保証しない。
+/// 支間は非負を前提とし、1e−9以下なら合力を半分ずつ返す。負支間の点荷重はpanicする。
 pub fn simple_reactions(load: &MemberLoadKind, l: f64) -> (f64, f64) {
-    let (total, xbar) = match *load {
-        MemberLoadKind::Point { a, p } => (p, a.clamp(0.0, l)),
+    let (total, first_moment) = match *load {
+        MemberLoadKind::Point { a, p } => (p, p * a.clamp(0.0, l)),
         MemberLoadKind::Distributed { a, b, w1, w2 } => {
-            distributed_total_and_centroid(a, b, w1, w2)
+            let h = b - a;
+            if h <= 1e-9 {
+                return (0.0, 0.0);
+            }
+            let total = (w1 + w2) / 2.0 * h;
+            (total, a * total + h * h * (w1 + 2.0 * w2) / 6.0)
         }
     };
     if l <= 1e-9 {
         return (total / 2.0, total / 2.0);
     }
-    let t = (xbar / l).clamp(0.0, 1.0);
-    (total * (1.0 - t), total * t)
+    let r_j = first_moment / l;
+    (total - r_j, r_j)
 }
 
 /// `MemberLoadKind` 1件のみが作用する単純梁の、位置 x [mm]（i 端から）における

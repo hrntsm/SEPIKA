@@ -5887,3 +5887,105 @@ fn steel_shell_design_self_weight_rejects_high_density_with_element_id() {
         "{error}"
     );
 }
+
+#[test]
+fn signed_static_reactions_keep_couple_and_existing_range_adapter() {
+    for (a, b, w1, w2, ri, rj) in [
+        (0.0, 6000.0, 1.0, -1.0, 1000.0, -1000.0),
+        (1000.0, 4000.0, 1.0, -1.0, 250.0, -250.0),
+        (0.0, 6000.0, 1.0, -1.0 + 1e-10, 1000.0000001, -999.9999998),
+        (0.0, 6000.0, -1.0, 1.0, -1000.0, 1000.0),
+        (2000.0, 5000.0, -1.0, 1.0, -250.0, 250.0),
+        (0.0, 6000.0, 1.0, -0.9, 1100.0, -800.0),
+        (-1000.0, 7000.0, 1.0, 1.0, 3000.0, 3000.0),
+        (7000.0, 8000.0, 1.0, 1.0, 0.0, 0.0),
+    ] {
+        let actual = static_reactions(&MemberLoadKind::Distributed { a, b, w1, w2 }, 6000.0);
+        assert!(
+            (actual.0 - ri).abs() < 1e-8 && (actual.1 - rj).abs() < 1e-8,
+            "{actual:?}"
+        );
+    }
+    let tiny = static_reactions(
+        &MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 1e-10,
+            w1: 1.0,
+            w2: 1.0,
+        },
+        6000.0,
+    );
+    assert!(tiny.0 > 0.0 && tiny.1 > 0.0);
+    let point = static_reactions(
+        &MemberLoadKind::Point {
+            a: 1500.0,
+            p: 1000.0,
+        },
+        6000.0,
+    );
+    assert_eq!(point, (750.0, 250.0));
+    assert_eq!(
+        static_reactions(
+            &MemberLoadKind::Point {
+                a: 4500.0,
+                p: 1000.0
+            },
+            6000.0
+        ),
+        (250.0, 750.0)
+    );
+    assert_eq!(
+        static_reactions(
+            &MemberLoadKind::Point {
+                a: 1500.0,
+                p: -1000.0
+            },
+            6000.0
+        ),
+        (-750.0, -250.0)
+    );
+    for len in [0.0, -1.0] {
+        assert_eq!(
+            static_reactions(&MemberLoadKind::Point { a: 10.0, p: 1000.0 }, len),
+            (0.0, 0.0)
+        );
+    }
+    for (a, expected) in [(-1.0, (1000.0, 0.0)), (7000.0, (0.0, 1000.0))] {
+        assert_eq!(
+            static_reactions(&MemberLoadKind::Point { a, p: 1000.0 }, 6000.0),
+            expected
+        );
+    }
+}
+
+#[test]
+fn signed_story_reactions_preserve_synced_negative_mass_diagnostic_and_direction_filter() {
+    let mut model = two_story_model();
+    model.elements.retain(|e| e.id == ElemId(4));
+    model.elements[0].section = None;
+    model.load_cases[0].nodal.clear();
+    model.load_cases[0].member = vec![MemberLoad::manual(
+        ElemId(4),
+        [0.0, 0.0, -1.0],
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 6000.0,
+            w1: 1.0,
+            w2: -1.0,
+        },
+    )];
+    for method in [MassMethod::LumpedOnly, MassMethod::CorrectedLumped] {
+        let err =
+            generate_stories_with_synced_self_weight(&model, &[LoadCaseId(0)], method).unwrap_err();
+        assert!(err.contains("節点 3 の質量相当重量が -1000"), "{err}");
+    }
+    for dir in [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]] {
+        model.load_cases[0].member[0].dir = dir;
+        assert!(generate_stories_with_synced_self_weight(
+            &model,
+            &[LoadCaseId(0)],
+            MassMethod::LumpedOnly
+        )
+        .is_ok());
+    }
+}
