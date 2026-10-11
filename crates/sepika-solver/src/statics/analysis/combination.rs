@@ -1,7 +1,7 @@
 //! 荷重組合せの解析（荷重ケース単体の結果の線形和）。
 //!
 //! 解析の最小単位は荷重ケース単体とし、荷重組合せは解き直さずに
-//! 単体結果の線形和として組み立てる（重ね合わせの原理。
+//! 単体結果の係数和として組み立てる（引張専用の合成荷重解とは異なる。
 //! [`crate::statics::linear::superpose_static`]）。
 
 use sepika_core::ids::LoadCaseId;
@@ -106,10 +106,14 @@ impl Analysis<'_> {
                 SolveError::InvalidInput(format!("荷重ケース {} が存在しません", id.0))
             })?;
             let res = case.as_ref().map_err(|e| {
-                SolveError::InvalidInput(format!(
+                let message = format!(
                     "荷重ケース {} の解析が失敗したため荷重組合せ「{}」を組み立てられません: {}",
                     id.0, combo.name, e
-                ))
+                );
+                match e {
+                    SolveError::NonConvergence(_) => SolveError::NonConvergence(message),
+                    _ => SolveError::InvalidInput(message),
+                }
             })?;
             terms.push((res, *factor));
         }

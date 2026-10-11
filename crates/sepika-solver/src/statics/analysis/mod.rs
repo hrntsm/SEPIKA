@@ -1,22 +1,23 @@
 //! 静的解析のファサード [`Analysis`]。
 //!
-//! `prepare` で DofMap 構築・全体剛性 K の組立・拘束縮約・分解を一度行い、以降は
-//! 分解済み K を再利用して線形静的・荷重組合せ・固有値・時刻歴・地震の各解析を
-//! 実行する。地震荷重の生成は [`seismic`]、設定型は [`config`]、
-//! 解析前のモデル検証は [`precheck`] に分離している。
+//! 基準剛性の分解を固有値・周期と共有し、静的解析はケース種別・応力設定を採用する。
+//! 地震荷重の生成は [`seismic`]、設定型は [`config`]、入力検証は [`precheck`] が受け持つ。
 
 use crate::common::assemble::{assemble_global_f, assemble_global_k};
 use crate::common::constraint::Reducer;
 use crate::dynamic::damping::Damping;
 use crate::dynamic::eigen::{self, ModalResult};
 use crate::dynamic::timehistory::{GroundMotion, NewmarkCfg, ResponseResult};
-use crate::statics::linear::{group_member_loads_by_elem, StaticOnce};
+use crate::statics::linear::{
+    has_tension_only_brace, solve_static_case, uses_long_axial_stiffness, StaticOnce,
+    StaticStiffness, TENSION_ONLY_MAX_ITER,
+};
 use std::collections::HashMap;
 
 pub type StaticResult = StaticOnce;
 use sepika_core::dof::DofMap;
 use sepika_core::ids::LoadCaseId;
-use sepika_core::model::{MemberLoad, Model};
+use sepika_core::model::{LoadCase, Model};
 use sepika_element::factory::build_behavior;
 use sepika_math::solver::{make_solver, LinearSolver, SolveError, SolverBackend};
 
@@ -78,6 +79,7 @@ pub struct Analysis<'m> {
     /// （[`build_behavior_cache`]）。`f_free_cache` と同様、書き込みは構築時のみで
     /// `run_batch` の rayon 並列からも安全に共有できる（`ElementBehavior: Send + Sync`）。
     behavior_cache: Vec<crate::statics::BehaviorEntry>,
+    long_stiffness: std::sync::OnceLock<Result<StaticStiffness, SolveError>>,
 }
 
 impl<'m> Analysis<'m> {
@@ -100,6 +102,7 @@ impl<'m> Analysis<'m> {
                 semi_precise_t: std::sync::OnceLock::new(),
                 f_free_cache: HashMap::new(),
                 behavior_cache: Vec::new(),
+                long_stiffness: std::sync::OnceLock::new(),
             });
         }
 
@@ -130,6 +133,7 @@ impl<'m> Analysis<'m> {
             semi_precise_t: std::sync::OnceLock::new(),
             f_free_cache,
             behavior_cache,
+            long_stiffness: std::sync::OnceLock::new(),
         })
     }
 
@@ -142,91 +146,33 @@ impl<'m> Analysis<'m> {
         }
     }
 
-    /// 仕口パネルのせん断モーメント `{MSX, MSY}` を接合部の節点ごとに回収する。
-    /// パネル要素がなければ空。
-    fn recover_panel_moments(&self, u_free: &[f64]) -> Vec<(sepika_core::ids::NodeId, [f64; 2])> {
-        let mut out = Vec::new();
-        for (elem, (behavior, gdofs)) in self.model.elements.iter().zip(self.behavior_cache.iter())
-        {
-            let Some(&node) = elem.nodes.first() else {
-                continue;
-            };
-            let u_elem = crate::common::elem_loop::gather_u_elem(gdofs, u_free);
-            if let Some(m) = behavior.panel_moments_from(&u_elem) {
-                out.push((node, m));
-            }
-        }
-        out
-    }
-
-    /// 自由 DOF 空間の荷重ベクトルを縮約 → 解 → 展開し、
-    /// 節点変位と部材断面力を復元する（線形静的系の共通経路）。
-    ///
-    /// `member_loads` は当該解（荷重ケース／組合せ）に含まれる部材中間荷重で、
-    /// 内力回復時に両端固定梁のスパン内力として重ね合わせる。節点荷重のみの
-    /// 経路（地震・風）は空スライスを渡す。
     fn solve_and_recover(
         &self,
+        load_case: &LoadCase,
         f_free: &[f64],
-        member_loads: &[MemberLoad],
     ) -> Result<StaticOnce, SolveError> {
-        let f_red = self.reducer.reduce_f(f_free);
-        let u_indep = self.solver.solve(&f_red)?;
-        let u_free = self.reducer.expand_u(&u_indep);
-        let member_forces = self.recover_member_forces(&u_free, member_loads);
-        crate::statics::linear::ensure_line_member_forces(self.model, &member_forces)?;
-        Ok(StaticOnce {
-            disp: self.expand_disp(&u_free),
-            member_forces,
-            panel_moments: self.recover_panel_moments(&u_free),
-        })
-    }
-
-    /// 自由 DOF ベクトルを節点 6 成分配列へ展開する（単一実装は core 側）。
-    fn expand_disp(&self, u_free: &[f64]) -> Vec<[f64; 6]> {
-        self.dofmap.expand_to_nodes(u_free, self.model.nodes.len())
-    }
-
-    /// 自由 DOF ベクトルから全部材の断面力を復元する。
-    ///
-    /// `K·u` 由来の回復内力に、`member_loads` の部材中間荷重を両端固定梁の
-    /// スパン内力として重ね合わせる（[`crate::statics::linear::superpose_member_loads`]）。
-    /// これにより等分布荷重下の梁で M が放物線・Q が線形の正しい分布になる。
-    /// 分解済み K を再利用する `Analysis` 経路と、一度きりの
-    /// [`crate::statics::linear::linear_static_once`] 経路とで内力回復の扱いを一致させる。
-    fn recover_member_forces(
-        &self,
-        u_free: &[f64],
-        member_loads: &[MemberLoad],
-    ) -> Vec<(
-        sepika_core::ids::ElemId,
-        sepika_element::frame::beam::MemberForces,
-    )> {
-        let member_loads_by_elem = group_member_loads_by_elem(member_loads);
-        let mut member_forces = Vec::new();
-        for (elem, (behavior, gdofs)) in self.model.elements.iter().zip(self.behavior_cache.iter())
-        {
-            let mut u_elem = vec![0.0; gdofs.len()];
-            for (k, &g) in gdofs.iter().enumerate() {
-                if g != usize::MAX && g < u_free.len() {
-                    u_elem[k] = u_free[g];
-                }
-            }
-            if let Some(mut forces) = behavior.recover_forces(&u_elem) {
-                let loads = member_loads_by_elem
-                    .get(&elem.id)
-                    .map(Vec::as_slice)
-                    .unwrap_or(&[]);
-                crate::statics::linear::superpose_member_loads(
-                    self.model,
-                    elem,
-                    loads,
-                    &mut forces,
-                );
-                member_forces.push((elem.id, forces));
-            }
-        }
-        member_forces
+        let iterative =
+            self.model.stress_cfg.tension_only_iteration && has_tension_only_brace(self.model);
+        let fixed = if iterative || self.n_indep == 0 {
+            None
+        } else if uses_long_axial_stiffness(self.model, load_case.kind) {
+            let stiffness = self.long_stiffness.get_or_init(|| {
+                StaticStiffness::build(self.model, &self.dofmap, &self.reducer, load_case.kind)
+            });
+            let stiffness = stiffness.as_ref().map_err(Clone::clone)?;
+            Some((stiffness.solver.as_ref(), stiffness.behaviors.as_slice()))
+        } else {
+            Some((self.solver.as_ref(), self.behavior_cache.as_slice()))
+        };
+        solve_static_case(
+            self.model,
+            &self.dofmap,
+            &self.reducer,
+            load_case,
+            f_free,
+            fixed,
+            TENSION_ONLY_MAX_ITER,
+        )
     }
 
     /// 不存在の荷重ケース ID は、拘束状態に関係なく ID を含む `SolveError::InvalidInput` を返す。
@@ -242,12 +188,7 @@ impl<'m> Analysis<'m> {
         if self.n_indep == 0 {
             return Ok(self.zero_result());
         }
-        let f_free = self
-            .f_free_cache
-            .get(&lc)
-            .cloned()
-            .unwrap_or_else(|| assemble_global_f(self.model, &self.dofmap, lc));
-        self.solve_and_recover(&f_free, &load_case.member)
+        self.solve_and_recover(load_case, &self.f_free_cache[&lc])
     }
 
     /// 通常は `prepare` で分解済みの `self.solver`（縮約後剛性行列 K_red の分解）を
@@ -275,7 +216,7 @@ impl<'m> Analysis<'m> {
         }
     }
 
-    /// 複数の荷重ケースを一括で解く（分解済み K を共有）。
+    /// 複数の荷重ケースを一括で解く。固定剛性は採用条件が一致するケースで共有する。
     ///
     /// 並列度設定（[`sepika_math::parallelism`]）が並列（`Auto`/`Threads`）の
     /// 場合は荷重ケース単位に rayon で並列実行する。各ケースの計算はケース間で

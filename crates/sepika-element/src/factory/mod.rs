@@ -54,7 +54,7 @@ pub fn build_behavior(data: &ElementData, model: &Model) -> Box<dyn ElementBehav
     build_behavior_with_axial_factor(data, model, 1.0)
 }
 
-/// Beam・Brace の軸剛性だけに正の有限な係数を乗じる。他種別の係数は1に限る。
+/// Beam・Fiber・MultiSpring・Brace の軸剛性だけに正の有限な係数を乗じる。他種別の係数は1に限る。
 /// 形状・質量・曲げ・せん断剛性は保持する。
 pub fn build_behavior_with_axial_factor(
     data: &ElementData,
@@ -63,7 +63,13 @@ pub fn build_behavior_with_axial_factor(
 ) -> Box<dyn ElementBehavior> {
     assert!(axial_factor.is_finite() && axial_factor > 0.0);
     assert!(
-        matches!(data.kind, ElementKind::Beam | ElementKind::Brace { .. }) || axial_factor == 1.0
+        matches!(
+            data.kind,
+            ElementKind::Beam
+                | ElementKind::Fiber
+                | ElementKind::MultiSpring
+                | ElementKind::Brace { .. }
+        ) || axial_factor == 1.0
     );
     match data.kind {
         ElementKind::Beam => {
@@ -84,8 +90,11 @@ pub fn build_behavior_with_axial_factor(
         }
         ElementKind::PanelZone => Box::new(crate::springs::panel::PanelZone::new(data, model)),
         ElementKind::Shell => Box::new(crate::shell::ShellElement::new(data, model)),
-        ElementKind::MultiSpring => Box::new(crate::frame::beam::BeamElement::new(data, model)),
-        ElementKind::Fiber => Box::new(crate::frame::beam::BeamElement::new(data, model)),
+        ElementKind::MultiSpring | ElementKind::Fiber => {
+            let mut elem = crate::frame::beam::BeamElement::new(data, model);
+            elem.a *= axial_factor;
+            Box::new(elem)
+        }
         ElementKind::Wall => {
             crate::wall::shear_section::wall_shear_rigidity(data, model)
                 .unwrap_or_else(|reason| panic!("壁 ID {}: {reason}", data.id.0));

@@ -3761,3 +3761,85 @@ fn rebar_cover_center_notice_query_is_nonblocking_and_distinct_from_strength_err
         .ensure_stb_rebar_supported(sepika_core::ids::SectionId(1))
         .unwrap();
 }
+
+mod static595_fixture {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../test_fixtures/static595.rs"
+    ));
+}
+
+#[test]
+fn static595_mcp_linear_static_job_adopts_column_and_tension_settings() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+        ElementKind::Brace { tension_only: true },
+    ] {
+        let mut model = static595_fixture::scalar_model(kind);
+        model.stress_cfg.no_long_axial_column = true;
+        model.stress_cfg.no_long_axial_brace = true;
+        model.stress_cfg.tension_only_iteration = true;
+        let factor = if matches!(kind, ElementKind::Brace { .. }) {
+            1e-12
+        } else {
+            1e-6
+        };
+        let expected_u = -1000.0 / (200000.0 + factor * 200000.0);
+        let expected_n = factor * 200000.0 * expected_u;
+        let JobOutcome::LinearStatic {
+            disp,
+            member_force_rows,
+            ..
+        } = compute_job(&model, JobKind::LinearStatic, &JobParams::default()).unwrap()
+        else {
+            panic!()
+        };
+        assert!((disp[1][2] / expected_u - 1.0).abs() < 1e-10);
+        assert!((member_force_rows[0].2[0] / expected_n - 1.0).abs() < 1e-10);
+    }
+}
+
+#[test]
+fn static595_mcp_static_and_required_design_cases_reject_real_nonconvergence() {
+    let model = static595_fixture::cycling_brace_model();
+    for kind in [JobKind::LinearStatic, JobKind::DesignCheck] {
+        let error = compute_job(&model, kind, &JobParams::default())
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("cycling-braces"), "{error}");
+        assert!(error.to_string().contains("50"), "{error}");
+    }
+}
+
+#[test]
+fn static595_mcp_tension_case_superposition_remains_unchecked() {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::{LoadCaseKind, LoadCombination};
+    let mut model = static595_fixture::scalar_model(ElementKind::Brace { tension_only: true });
+    model.stress_cfg.tension_only_iteration = true;
+    let mut live = model.load_cases[0].clone();
+    live.id = LoadCaseId(1);
+    live.kind = LoadCaseKind::Live;
+    live.nodal[0].values[2] = 1000.0;
+    model.load_cases.push(live);
+    model.combinations.push(LoadCombination {
+        name: "G+P".into(),
+        terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)],
+    });
+    let params = JobParams {
+        load_combination: Some(0),
+        ..Default::default()
+    };
+    let JobOutcome::DesignCheck { summary, .. } =
+        compute_job(&model, JobKind::DesignCheck, &params).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(summary["all_checked_and_ok"], false);
+    assert!(summary["load_target"]["diagnostic"]
+        .as_str()
+        .unwrap()
+        .contains("引張専用ブレースの別ケース合成"));
+}

@@ -3419,3 +3419,76 @@ fn seismic_multiple_diaphragm_weights_require_complete_consistent_inputs() {
     partial_zero.stories[1].seismic_weight = Some(0.0);
     assert!(seismic_distribution_for_model(&partial_zero, cfg, 0.5).is_err());
 }
+
+#[test]
+fn generated_ai_uses_seismic_adoption_and_preserves_period_baseline() {
+    use sepika_core::model::LoadCaseKind;
+    let mut model =
+        make_two_story_diaphragm_model(1, Dof6Mask::FREE, Some(100_000.0), Some(100_000.0));
+    model.sections[0].frame_use = Some(FrameSectionUse::Column);
+    model.elements[0].local_axis.ref_vector = [1.0, 0.0, 0.0];
+    model.nodes[1].mass = Some([1.0; 6]);
+    model.nodes[1].restraint = Dof6Mask(0b111100);
+    model.nodes[1].support_spring = Some([200000.0, 200000.0, 0.0, 0.0, 0.0, 0.0]);
+    model.nodes.push(Node {
+        id: NodeId(2),
+        coord: [3000.0, 3000.0, 0.0],
+        restraint: Dof6Mask::FIXED,
+        mass: None,
+        story: Some(StoryId(0)),
+        support_spring: None,
+    });
+    model.stories[0].node_ids.push(NodeId(2));
+    let mut section = model.sections[0].clone();
+    section.id = SectionId(1);
+    section.frame_use = Some(FrameSectionUse::Brace);
+    model.sections.push(section);
+    let mut brace = model.elements[0].clone();
+    brace.id = ElemId(1);
+    brace.kind = ElementKind::Brace { tension_only: true };
+    brace.nodes = smallvec::smallvec![NodeId(2), NodeId(1)];
+    brace.section = Some(SectionId(1));
+    model.elements.push(brace);
+    let baseline_period = Analysis::prepare(&model)
+        .unwrap()
+        .seismic_period(AiMode::SemiPrecise)
+        .unwrap();
+    model.stress_cfg.no_long_axial_column = true;
+    model.stress_cfg.no_long_axial_brace = true;
+    model.stress_cfg.tension_only_iteration = true;
+    for dir in [SeismicDir::X, SeismicDir::Y] {
+        let cfg = SeismicCfg {
+            dir,
+            ..SeismicCfg::default()
+        };
+        let case = build_seismic_load_case_from_model(&model, cfg, 0.5).unwrap();
+        assert_eq!(case.kind, LoadCaseKind::Seismic);
+        assert!(!model.load_cases.iter().any(|c| c.id == case.id));
+        let mut ordinary_case = case.clone();
+        ordinary_case.name = match dir {
+            SeismicDir::X => sepika_core::model::EX_CASE_NAME,
+            SeismicDir::Y => sepika_core::model::EY_CASE_NAME,
+        }
+        .into();
+        model.load_cases = vec![ordinary_case];
+        let analysis = Analysis::prepare(&model).unwrap();
+        let direct = analysis.seismic_static_with_period(cfg, 0.5).unwrap();
+        let ordinary = analysis.linear_static(case.id).unwrap();
+        assert_eq!(direct.disp, ordinary.disp);
+        assert_eq!(direct.member_forces[1].1.at, ordinary.member_forces[1].1.at);
+        assert!(direct.member_forces[1].1.at[0].1[0] < 0.0);
+        assert_eq!(
+            analysis.seismic_period(AiMode::SemiPrecise).unwrap(),
+            baseline_period
+        );
+        let period = analysis.seismic_period(cfg.mode).unwrap();
+        assert_eq!(
+            analysis.seismic_static_with(cfg).unwrap().disp,
+            analysis
+                .seismic_static_with_period(cfg, period)
+                .unwrap()
+                .disp
+        );
+        model.load_cases.clear();
+    }
+}
