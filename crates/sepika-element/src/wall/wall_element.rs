@@ -1469,6 +1469,51 @@ mod tests {
     }
 
     #[test]
+    fn zero_increment_asymmetric_wall_shear_keeps_return_map_trial_commit_and_revert() {
+        let (model, data) = make_wall_model();
+        let ctx = Ctx { model: &model };
+        let mut wall = WallElement::try_new_scaled(&data, &model, 1.0)
+            .unwrap()
+            .with_shear_capacity([1000.0, 2000.0])
+            .with_shear_hysteresis(HysteresisModel::MaxPointOriented);
+        assert!(wall.shear_k0 > 0.0);
+        assert_eq!(
+            wall.shear_spring.as_ref().unwrap().probe(0.0),
+            (0.0, wall.shear_k0)
+        );
+        let zero = LocalVec {
+            data: smallvec::smallvec![0.0;24],
+        };
+        let mut previous = 0.0;
+        for (target, expected) in [(-20.0, -2000.0), (30.0, 1000.0), (-30.0, -2000.0)] {
+            let mut du = LocalVec {
+                data: smallvec::smallvec![0.0;24],
+            };
+            du.data[12] = target - previous;
+            du.data[18] = target - previous;
+            wall.update_state(&du, false, &ctx);
+            wall.commit_state();
+            previous = target;
+            let force = wall.internal_force(&ctx).data;
+            assert!((force[12] + force[18] - expected).abs() < 1e-7);
+            let state = wall.shear_spring.as_ref().unwrap().serialize_state();
+            let k = wall.stiffness_24(&ctx);
+            let _ = wall.shear_return_map(&k, &wall.trial_disp);
+            assert_eq!(state, wall.shear_spring.as_ref().unwrap().serialize_state());
+            wall.update_state(&zero, false, &ctx);
+            wall.commit_state();
+            assert_eq!(state, wall.shear_spring.as_ref().unwrap().serialize_state());
+            assert_eq!(force, wall.internal_force(&ctx).data);
+            let tangent = wall.tangent_stiffness(&ctx).data;
+            wall.update_state(&du, false, &ctx);
+            wall.revert_state();
+            assert_eq!(force, wall.internal_force(&ctx).data);
+            assert_eq!(tangent, wall.tangent_stiffness(&ctx).data);
+            assert_eq!(state, wall.shear_spring.as_ref().unwrap().serialize_state());
+        }
+    }
+
+    #[test]
     fn test_wall_mass_uses_clear_area_between_surrounding_members() {
         let (mut model, data) = make_wall_model();
         let mut section = SectionShape::RcColumnRect {

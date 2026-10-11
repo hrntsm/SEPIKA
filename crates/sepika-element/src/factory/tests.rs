@@ -1114,3 +1114,90 @@ fn axial_factor_preserves_nonaxial_stiffness_and_mass() {
         }
     }
 }
+
+#[test]
+fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_history() {
+    use sepika_material::UniaxialMaterial;
+    let mut model = make_diaphragm_model();
+    let beam = ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Beam,
+        nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 1.0, 0.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    };
+    model.set_member_hysteresis(ElemId(0), sepika_core::model::HysteresisModel::Takeda);
+    let mut behavior = build_nonlinear_behavior(
+        &beam,
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    );
+    let ctx = crate::behavior::Ctx { model: &model };
+    type Snapshot = (
+        Vec<Box<dyn sepika_material::UniaxialMaterial>>,
+        [f64; 4],
+        [f64; 4],
+        [f64; 12],
+        [f64; 12],
+    );
+    let initial = behavior.snapshot_state();
+    let initial = initial.downcast_ref::<Snapshot>().unwrap();
+    let k0 = 6.0 * 20000.0 * 833.33 / 5000.0;
+    for spring in &initial.0 {
+        assert!((spring.probe(0.0).1 - k0).abs() < 1e-9);
+        let mut material =
+            sepika_material::HysteresisMaterial::new(sepika_material::HysteresisRule::Takeda {
+                crack: (10.0, 0.01),
+                yield_point: (20.0, 0.02),
+                ultimate: (30.0, 0.04),
+                alpha: 0.0,
+            });
+        material
+            .deserialize_state(&spring.serialize_state())
+            .unwrap();
+    }
+    let du = crate::behavior::LocalVec {
+        data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, -0.001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.001],
+    };
+    behavior.update_state(&du, true, &ctx);
+    let before = behavior.snapshot_state();
+    let state = before.downcast_ref::<Snapshot>().unwrap();
+    let k = behavior.tangent_stiffness(&ctx);
+    let f = behavior.internal_force(&ctx);
+    for i in 0..12 {
+        let expected: f64 = (0..12).map(|j| k.get(i, j) * state.3[j]).sum();
+        assert!((f.data[i] - expected).abs() < 1e-7);
+    }
+    for end in 0..2 {
+        assert!((state.0[end].probe(state.1[end]).0 - f.data[5 + 6 * end]).abs() < 1e-7);
+        assert!((state.1[end] + state.2[end] - state.3[5 + 6 * end]).abs() < 1e-12);
+    }
+    let zero = crate::behavior::LocalVec {
+        data: smallvec::smallvec![0.0;12],
+    };
+    behavior.update_state(&zero, false, &ctx);
+    behavior.commit_state();
+    let after = behavior.snapshot_state();
+    let after = after.downcast_ref::<Snapshot>().unwrap();
+    assert_eq!(state.1, after.1);
+    assert_eq!(state.2, after.2);
+    for end in 0..2 {
+        assert_eq!(
+            state.0[end].serialize_state(),
+            after.0[end].serialize_state()
+        );
+    }
+    assert_eq!(k.data, behavior.tangent_stiffness(&ctx).data);
+    assert_eq!(f.data, behavior.internal_force(&ctx).data);
+    behavior.update_state(&du, false, &ctx);
+    behavior.revert_state();
+    assert_eq!(f.data, behavior.internal_force(&ctx).data);
+}

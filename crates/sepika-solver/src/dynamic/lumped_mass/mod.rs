@@ -39,6 +39,99 @@ mod tests {
     use sepika_core::units::GRAVITY_MM_S2;
 
     #[test]
+    fn zero_increment_actual_planar_and_spatial_xy_solvers_report_independent_shear() {
+        let sk = StoryTrilinear {
+            k1: 1000.0,
+            d1: 0.01,
+            q1: 10.0,
+            d2: 0.02,
+            q2: 20.0,
+            d3: 0.04,
+            q3: 30.0,
+        };
+        // m=1、dt=1、減衰0のNewmark釣合いで、変位[-.03,-.03,-.04]に対応する加速度。
+        let acceleration = [25.12, 24.64, 30.64];
+        for dim in [StickDim::Planar, StickDim::Spatial] {
+            for dir in [SeismicDir::X, SeismicDir::Y] {
+                let lm = LumpedMassModel {
+                    model_type: LumpedMassType::EquivalentShear,
+                    stories: vec![StoryStick {
+                        story: StoryId(0),
+                        mass: 1.0,
+                        height: 3000.0,
+                        skeleton: sk,
+                    }],
+                    dim,
+                    stiffness_source: LumpedStiffnessSource::StoryQd,
+                    dir,
+                    nonlinear: true,
+                    spatial: if dim == StickDim::Spatial {
+                        vec![StorySpatial {
+                            j: 1.0,
+                            mass_xy: [0.0, 0.0],
+                            rigidity_xy: [0.0, 0.0],
+                            k1_x: 1000.0,
+                            k1_y: 1000.0,
+                            kr: 1.0,
+                            skeleton_x: sk,
+                            skeleton_y: sk,
+                        }]
+                    } else {
+                        vec![]
+                    },
+                };
+                let response = lumped_mass_time_history(&lm, &acceleration, 1.0, 0.0);
+                assert_eq!(response.non_converged_steps, 0);
+                for (got, expected) in response.roof_disp.iter().zip([-0.03, -0.03, -0.04]) {
+                    assert!((got - expected).abs() < 1e-10, "{dim:?}/{dir:?}: {got}");
+                }
+                assert!((response.story_peak_shear[0] - 30.0).abs() < 1e-8);
+                let (active, inactive) = match dir {
+                    SeismicDir::X => (&response.shear_dir.x, &response.shear_dir.y),
+                    SeismicDir::Y => (&response.shear_dir.y, &response.shear_dir.x),
+                };
+                assert!((active[0] - 30.0).abs() < 1e-8);
+                assert_eq!(inactive[0], 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn zero_increment_planar_story_spring_preserves_negative_peak_and_next_response() {
+        use sepika_material::UniaxialMaterial;
+        let sk = StoryTrilinear {
+            k1: 1000.0,
+            d1: 0.01,
+            q1: 10.0,
+            d2: 0.02,
+            q2: 20.0,
+            d3: 0.04,
+            q3: 30.0,
+        };
+        let mut direct = time_history::story_spring(&sk);
+        assert_eq!(direct.probe(0.0), (0.0, 1000.0));
+        assert_eq!(direct.trial(-0.03), (-25.0, 500.0));
+        direct.commit();
+        let mut repeated = direct.clone();
+        let before = repeated.serialize_state();
+        assert_eq!(repeated.probe(-0.03), (-25.0, 500.0));
+        assert_eq!(before, repeated.serialize_state());
+        repeated.trial(-0.03);
+        repeated.commit();
+        assert_eq!(direct.serialize_state(), repeated.serialize_state());
+        assert_eq!(direct.trial(-0.04), (-30.0, 500.0));
+        assert_eq!(repeated.trial(-0.04), (-30.0, 500.0));
+        for theta in [-0.04, -0.039, 0.01, 0.03, 0.029, -0.02] {
+            assert_eq!(direct.trial(theta), repeated.trial(theta));
+            direct.commit();
+            repeated.commit();
+            repeated.trial(theta);
+            repeated.commit();
+            assert_eq!(direct.serialize_state(), repeated.serialize_state());
+        }
+    }
+
+    #[test]
     fn test_fit_trilinear_equal_area_and_endpoints() {
         // 実曲線: 折れ点のあるなめらかな軟化曲線を細かくサンプル。
         // 0→(1,100) K1=100、(1,100)→(3,140) K2=20、(3,140)→(6,155) K3=5。
