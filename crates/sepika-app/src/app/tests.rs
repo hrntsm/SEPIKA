@@ -12911,3 +12911,94 @@ fn standard_rebar507_import_notice_reports_center_priority_without_refusing_prep
     );
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn unassigned_member_625_app_export_preserves_files_state_and_recovers_by_assignment() {
+    let dir = test_tmp().join("sepika_app_unassigned625");
+    std::fs::create_dir_all(&dir).unwrap();
+    for unsaved in [false, true] {
+        let mut app = App::default();
+        let mut model = crate::sample::portal_frame();
+        let index = model
+            .elements
+            .iter()
+            .position(|e| e.kind == sepika_core::model::ElementKind::Beam)
+            .unwrap();
+        let section = model.elements[index].section.unwrap();
+        let id = model.elements[index].id;
+        model.elements[index].section = None;
+        app.load_model(model);
+        app.core.scoped.project_path = Some(dir.join("source.ovika"));
+        app.core.scoped.staleness.unsaved_changes = unsaved;
+        let model_before = serde_json::to_value(&app.core.model).unwrap();
+        let project_before = app.core.scoped.project_path.clone();
+        let absent = dir.join(format!("absent-{unsaved}.stb"));
+        let existing = dir.join(format!("existing-{unsaved}.stb"));
+        let bytes = b"existing output\0\xff\n";
+        std::fs::write(&existing, bytes).unwrap();
+        for path in [&absent, &existing, &absent, &existing] {
+            app.export_stbridge_to(path.clone());
+            let reason = app.core.scoped.last_error.as_deref().unwrap();
+            for expected in [
+                "ST-Bridge書出エラー",
+                "主架構部材",
+                "断面未割当",
+                "必須の断面参照",
+                "適切な断面を割り当てて再出力",
+            ] {
+                assert!(reason.contains(expected), "{reason}");
+            }
+            assert!(reason.contains(&format!("ElemId({})", id.0)), "{reason}");
+            assert!(app
+                .core
+                .log
+                .entries
+                .iter()
+                .any(|entry| entry.message == reason));
+            assert!(!absent.exists());
+            assert_eq!(std::fs::read(&existing).unwrap(), bytes);
+            assert_eq!(serde_json::to_value(&app.core.model).unwrap(), model_before);
+            assert_eq!(app.core.scoped.project_path, project_before);
+            assert_eq!(app.core.scoped.staleness.unsaved_changes, unsaved);
+        }
+        let normal = app
+            .core
+            .model
+            .elements
+            .iter()
+            .filter(|e| e.id != id)
+            .cloned()
+            .collect::<Vec<_>>();
+        app.core.model.elements[index].section = Some(section);
+        let repaired_before = serde_json::to_value(&app.core.model).unwrap();
+        for path in [&absent, &existing] {
+            app.export_stbridge_to(path.clone());
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            assert!(std::fs::read_to_string(path)
+                .unwrap()
+                .contains("<ST_BRIDGE"));
+            assert_eq!(
+                serde_json::to_value(&app.core.model).unwrap(),
+                repaired_before
+            );
+            assert_eq!(app.core.scoped.project_path, project_before);
+            assert_eq!(app.core.scoped.staleness.unsaved_changes, unsaved);
+        }
+        assert_eq!(
+            app.core
+                .model
+                .elements
+                .iter()
+                .filter(|e| e.id != id)
+                .cloned()
+                .collect::<Vec<_>>(),
+            normal
+        );
+        std::fs::remove_file(absent).unwrap();
+        std::fs::remove_file(existing).unwrap();
+    }
+}

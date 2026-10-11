@@ -3488,7 +3488,8 @@ fn test_secondary_members_roundtrip() {
     let mut post_section = h.to_section(SectionId(1), "P".into());
     post_section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
     push_section(&mut m, post_section);
-    m.elements.push(member(0, false, 0));
+    push_section(&mut m, h.to_section(SectionId(2), "主架構G".into()));
+    m.elements.push(member(0, false, 2));
     // 小梁と間柱を 1 本ずつ（節点は既存節点を使う）。
     let beam_ends =
         sepika_core::model::SecondaryMemberEnds::Detached([m.nodes[0].coord, m.nodes[1].coord]);
@@ -3517,7 +3518,6 @@ fn test_secondary_members_roundtrip() {
     assert!(xml.contains("<StbPosts>"), "間柱を書き出す: {xml}");
 
     m.sections[0].frame_use = None;
-    m.elements[0].section = None;
     export_stbridge(&m).expect("用途未設定の小梁断面を出力");
     m.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
     m.sections[1].frame_use = None;
@@ -4321,6 +4321,7 @@ fn test_export_skips_plateless_and_attached_orphan_sections() {
         },
         tip_loads: Vec::new(),
     });
+    assign_roundtrip_boundary_sections(&mut m);
     let xml = export_stbridge(&m).expect("export");
     let n_slab = xml.matches("<StbSlab ").count();
     let n_sec = xml.matches("<StbSecSlab_RC ").count();
@@ -4402,4 +4403,393 @@ fn test_import_cantilever_slab_becomes_attached() {
     assert_eq!(supports[0].elem, m.elements[0].id);
     assert_eq!(supports[0].span, [0.0, 1.0]);
     assert_eq!(supports[0].fraction, 1.0);
+}
+
+fn assigned_members_625(in_regions: bool) -> Model {
+    use sepika_core::ids::{FloorRegionId, SecondaryMemberId, WallRegionId};
+    use sepika_core::model::{
+        FrameSectionUse, SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind,
+    };
+    let mut m = frame_nodes();
+    for (role, name) in [
+        (FrameSectionUse::Column, "C625"),
+        (FrameSectionUse::Girder, "G625"),
+        (FrameSectionUse::Brace, "BR625"),
+    ] {
+        let id = SectionId(m.sections.len() as u32);
+        let mut section = SectionShape::SteelH {
+            root_r: Some(13.0),
+            height: 300.0,
+            width: 150.0,
+            web_thick: 6.5,
+            flange_thick: 9.0,
+        }
+        .to_section(id, name.into());
+        section.frame_use = Some(role);
+        push_section(&mut m, section);
+    }
+    for coord in [
+        [0., 2000., 3000.],
+        [6000., 2000., 3000.],
+        [3000., 0., 0.],
+        [3000., 0., 3000.],
+        [6000., 4000., 3000.],
+        [0., 4000., 3000.],
+    ] {
+        let mut node = m.nodes[0].clone();
+        node.id = NodeId(m.nodes.len() as u32);
+        node.coord = coord;
+        m.nodes.push(node);
+    }
+    m.elements.push(member(0, true, 0));
+    let mut girder = member(1, false, 1);
+    girder.end_cond = [EndCondition::Pinned, EndCondition::Fixed];
+    girder.local_axis.ref_vector = [0., -1., 0.];
+    m.elements.push(girder);
+    let mut brace = member(2, false, 2);
+    brace.kind = ElementKind::Brace { tension_only: true };
+    brace.nodes = smallvec![NodeId(0), NodeId(3)];
+    m.elements.push(brace);
+    let beam = SecondaryMember {
+        id: SecondaryMemberId(40),
+        kind: SecondaryMemberKind::Beam,
+        ends: SecondaryMemberEnds::Detached([m.nodes[4].coord, m.nodes[5].coord]),
+        section: Some(SectionId(1)),
+        name: "小梁625".into(),
+        gravity_end_shares: None,
+    };
+    let post = SecondaryMember {
+        id: SecondaryMemberId(73),
+        kind: SecondaryMemberKind::Post,
+        ends: SecondaryMemberEnds::Detached([m.nodes[6].coord, m.nodes[7].coord]),
+        section: Some(SectionId(0)),
+        name: "間柱625".into(),
+        gravity_end_shares: None,
+    };
+    if in_regions {
+        m.floor_regions.push(sepika_core::model::FloorRegion {
+            id: FloorRegionId(0),
+            name: "床625".into(),
+            boundary: vec![NodeId(2), NodeId(3), NodeId(8), NodeId(9)],
+            secondary_beams: vec![beam],
+            slab_ids: vec![],
+        });
+        let mut wall = sepika_core::model::WallRegion::new(
+            WallRegionId(0),
+            vec![NodeId(0), NodeId(1), NodeId(3), NodeId(2)],
+        );
+        wall.posts.push(post);
+        m.wall_regions.push(wall);
+    } else {
+        m.unassigned_beams.push(beam);
+        m.unassigned_posts.push(post);
+    }
+    m
+}
+
+fn assert_unassigned_625(
+    model: &Model,
+    expected_kind: &str,
+    expected_id: &str,
+    name: Option<&str>,
+) {
+    let before = serde_json::to_value(model).unwrap();
+    for error in [
+        export_stbridge(model).unwrap_err(),
+        export_stbridge_with_report(model).unwrap_err(),
+    ] {
+        assert!(matches!(error, StbError::Unmappable(_)), "{error}");
+        let reason = error.to_string();
+        for expected in [
+            expected_kind,
+            expected_id,
+            "断面未割当",
+            "必須の断面参照",
+            "適切な断面を割り当てて再出力",
+        ] {
+            assert!(reason.contains(expected), "{reason}: {expected}");
+        }
+        if let Some(name) = name {
+            assert!(reason.contains(name), "{reason}");
+        }
+        if expected_kind == "主架構部材" {
+            assert!(!reason.contains("柱"), "{reason}");
+        }
+    }
+    assert_eq!(serde_json::to_value(model).unwrap(), before);
+}
+
+#[test]
+fn unassigned_primary_members_625_reject_both_exports_and_recover_by_assignment() {
+    for (vertical, kind, section, expected_kind) in [
+        (false, ElementKind::Beam, 1, "主架構部材"),
+        (true, ElementKind::Beam, 0, "主架構部材"),
+        (
+            false,
+            ElementKind::Brace {
+                tension_only: false,
+            },
+            2,
+            "ブレース",
+        ),
+        (
+            false,
+            ElementKind::Brace { tension_only: true },
+            2,
+            "ブレース",
+        ),
+    ] {
+        let mut model = assigned_members_625(false);
+        let mut missing = member(3, vertical, section);
+        missing.kind = kind;
+        missing.section = None;
+        model.elements.push(missing);
+        let normal = model.elements[..3].to_vec();
+        assert_unassigned_625(&model, expected_kind, "ElemId(3)", None);
+        assert_unassigned_625(&model, expected_kind, "ElemId(3)", None);
+        model.elements[3].section = Some(SectionId(section));
+        assert_eq!(model.elements[..3], normal);
+        assert!(export_stbridge(&model).is_ok());
+        assert!(export_stbridge_with_report(&model).is_ok());
+    }
+}
+
+#[test]
+fn unassigned_secondary_members_625_reject_detached_and_region_exports_then_recover() {
+    for in_regions in [false, true] {
+        for beam in [false, true] {
+            let mut model = assigned_members_625(in_regions);
+            let (kind, id, name, section) = if beam {
+                ("小梁", "SecondaryMemberId(40)", "小梁625", 1)
+            } else {
+                ("間柱", "SecondaryMemberId(73)", "間柱625", 0)
+            };
+            let missing = if beam {
+                if in_regions {
+                    &mut model.floor_regions[0].secondary_beams[0]
+                } else {
+                    &mut model.unassigned_beams[0]
+                }
+            } else if in_regions {
+                &mut model.wall_regions[0].posts[0]
+            } else {
+                &mut model.unassigned_posts[0]
+            };
+            missing.section = None;
+            let normal = model.elements.clone();
+            let sm = if beam {
+                model.beams().next().unwrap()
+            } else {
+                model.posts().next().unwrap()
+            };
+            let (a, b) = model.secondary_member_end_points(sm).unwrap();
+            assert!(model.nodes.iter().any(|n| n.coord == a));
+            assert!(model.nodes.iter().any(|n| n.coord == b));
+            if in_regions {
+                if beam {
+                    assert!(model.floor_region_contains_point(
+                        sepika_core::ids::FloorRegionId(0),
+                        [3000., 2000., 3000.]
+                    ));
+                } else {
+                    assert!(model.wall_region_contains_point(
+                        sepika_core::ids::WallRegionId(0),
+                        [3000., 0., 1500.]
+                    ));
+                }
+            }
+            assert_unassigned_625(&model, kind, id, Some(name));
+            assert_unassigned_625(&model, kind, id, Some(name));
+            let missing = if beam {
+                if in_regions {
+                    &mut model.floor_regions[0].secondary_beams[0]
+                } else {
+                    &mut model.unassigned_beams[0]
+                }
+            } else if in_regions {
+                &mut model.wall_regions[0].posts[0]
+            } else {
+                &mut model.unassigned_posts[0]
+            };
+            missing.section = Some(SectionId(section));
+            assert_eq!(model.elements, normal);
+            assert!(export_stbridge(&model).is_ok());
+            assert!(export_stbridge_with_report(&model).is_ok());
+        }
+    }
+}
+
+#[test]
+fn assigned_members_625_preserve_independent_xml_fields_and_shape_none() {
+    let model = assigned_members_625(true);
+    let before = serde_json::to_value(&model).unwrap();
+    let xml = export_stbridge(&model).unwrap();
+    assert_eq!(xml, export_stbridge_with_report(&model).unwrap().0);
+    let mut reader = quick_xml::Reader::from_str(&xml);
+    let mut tags = Vec::new();
+    loop {
+        match reader.read_event().unwrap() {
+            quick_xml::events::Event::Start(e) | quick_xml::events::Event::Empty(e) => {
+                let name = String::from_utf8(e.name().as_ref().to_vec()).unwrap();
+                let attrs: std::collections::HashMap<String, String> = e
+                    .attributes()
+                    .map(|a| {
+                        let a = a.unwrap();
+                        (
+                            String::from_utf8(a.key.as_ref().to_vec()).unwrap(),
+                            a.normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                                .unwrap()
+                                .into_owned(),
+                        )
+                    })
+                    .collect();
+                tags.push((name, attrs));
+            }
+            quick_xml::events::Event::Eof => break,
+            _ => {}
+        }
+    }
+    let attr =
+        |attrs: &std::collections::HashMap<String, String>, name: &str| attrs.get(name).cloned();
+    for (tag, expected) in [
+        (
+            "StbColumn",
+            vec![
+                ("id", "1"),
+                ("id_section", "1"),
+                ("id_node_bottom", "1"),
+                ("id_node_top", "3"),
+                ("rotate", "90"),
+                ("condition_bottom", "FIX"),
+                ("condition_top", "FIX"),
+            ],
+        ),
+        (
+            "StbGirder",
+            vec![
+                ("id", "2"),
+                ("id_section", "2"),
+                ("id_node_start", "3"),
+                ("id_node_end", "4"),
+                ("rotate", "90"),
+                ("condition_start", "PIN"),
+                ("condition_end", "FIX"),
+            ],
+        ),
+        (
+            "StbBrace",
+            vec![
+                ("id", "3"),
+                ("id_section", "3"),
+                ("id_node_start", "1"),
+                ("id_node_end", "4"),
+                ("rotate", "0"),
+                ("feature_brace", "TENSION"),
+                ("condition_start", "PIN"),
+                ("condition_end", "PIN"),
+            ],
+        ),
+        (
+            "StbBeam",
+            vec![
+                ("id", "4"),
+                ("id_section", "2"),
+                ("id_node_start", "5"),
+                ("id_node_end", "6"),
+                ("rotate", "0"),
+            ],
+        ),
+        (
+            "StbPost",
+            vec![
+                ("id", "5"),
+                ("id_section", "1"),
+                ("id_node_bottom", "7"),
+                ("id_node_top", "8"),
+                ("rotate", "0"),
+            ],
+        ),
+    ] {
+        let members: Vec<_> = tags.iter().filter(|n| n.0 == tag).collect();
+        assert_eq!(members.len(), 1, "{tag}");
+        for (attr, value) in expected {
+            assert_eq!(
+                members[0].1.get(attr).map(String::as_str),
+                Some(value),
+                "{tag}.{attr}"
+            );
+        }
+        assert_eq!(attr(&members[0].1, "kind_structure"), Some("S".into()));
+    }
+    for (tag, id, name) in [
+        ("StbSecColumn_S", "1", "C625"),
+        ("StbSecBeam_S", "2", "G625"),
+        ("StbSecBrace_S", "3", "BR625"),
+    ] {
+        let definition = tags
+            .iter()
+            .find(|n| n.0 == tag && attr(&n.1, "id").as_deref() == Some(id))
+            .unwrap();
+        assert_eq!(attr(&definition.1, "name").as_deref(), Some(name));
+    }
+    for tag in [
+        "StbSecSteelColumn_S_Same",
+        "StbSecSteelBeam_S_Straight",
+        "StbSecSteelBrace_S_Same",
+    ] {
+        let figure = tags.iter().find(|n| n.0 == tag).unwrap();
+        assert_eq!(
+            attr(&figure.1, "shape").as_deref(),
+            Some("H-300x150x6.5x9r13")
+        );
+        assert_eq!(attr(&figure.1, "strength_main").as_deref(), Some("SN400B"));
+    }
+    let shapes: Vec<_> = tags.iter().filter(|n| n.0 == "StbSecRoll-H").collect();
+    assert!(!shapes.is_empty());
+    for shape in shapes {
+        for (attr, value) in [
+            ("A", "300"),
+            ("B", "150"),
+            ("t1", "6.5"),
+            ("t2", "9"),
+            ("r", "13"),
+        ] {
+            assert_eq!(shape.1.get(attr).map(String::as_str), Some(value));
+        }
+    }
+    for (id, x, y, z) in [
+        ("1", "0", "0", "0"),
+        ("4", "6000", "0", "3000"),
+        ("5", "0", "2000", "3000"),
+        ("8", "3000", "0", "3000"),
+    ] {
+        let node = tags
+            .iter()
+            .find(|n| n.0 == "StbNode" && attr(&n.1, "id").as_deref() == Some(id))
+            .unwrap();
+        for (attr, value) in [("X", x), ("Y", y), ("Z", z)] {
+            assert_eq!(node.1.get(attr).map(String::as_str), Some(value));
+        }
+    }
+    assert_eq!(serde_json::to_value(&model).unwrap(), before);
+    if let Ok(path) = std::env::var("SEPIKA_625_XML_PATH") {
+        std::fs::write(path, &xml).unwrap();
+    }
+    let mut no_shape = model.clone();
+    for section in &mut no_shape.sections {
+        section.shape = None;
+    }
+    let raw_xml = export_stbridge(&no_shape).expect("割当済みshape=Noneは従来出力を保持");
+    assert!(raw_xml.contains("<StbSecRaw "));
+    for tag in ["StbColumn", "StbGirder", "StbBrace", "StbBeam", "StbPost"] {
+        let prefix = format!("<{tag} ");
+        assert_eq!(
+            raw_xml
+                .lines()
+                .find(|line| line.trim_start().starts_with(&prefix)),
+            xml.lines()
+                .find(|line| line.trim_start().starts_with(&prefix)),
+            "{tag}: shape=Noneでも正常部材属性を保持"
+        );
+    }
 }
