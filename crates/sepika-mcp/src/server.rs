@@ -1338,3 +1338,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "server_external_ids.rs"]
+mod external_id_tests;

@@ -11,7 +11,7 @@ use super::rebar::{
 };
 use super::steel::steel_shape_from;
 use super::xml::{
-    attrs, get_f64, get_f64_any, get_i64, get_opt_f64, get_u32, push_node_id_tokens, Attrs,
+    attrs, get_f64, get_f64_any, get_opt_f64, get_opt_u32, get_u32, push_node_id_tokens, Attrs,
 };
 use super::{
     PendingMember, PendingMemberKind, PendingSec, PendingSecKind, PendingSecondary, RawAxis,
@@ -274,12 +274,12 @@ pub(super) fn parse(xml: &str) -> Result<StbParser, StbError> {
                 p.on_end(&tag);
             }
             Event::Text(t) if p.in_node_id_order => {
-                p.strengths.nodes(&String::from_utf8_lossy(t.as_ref()));
-                p.on_node_id_text(&String::from_utf8_lossy(t.as_ref()));
+                p.strengths.nodes(&String::from_utf8_lossy(t.as_ref()))?;
+                p.on_node_id_text(&String::from_utf8_lossy(t.as_ref()))?;
             }
             Event::CData(t) if p.in_node_id_order => {
-                p.strengths.nodes(&String::from_utf8_lossy(t.as_ref()));
-                p.on_node_id_text(&String::from_utf8_lossy(t.as_ref()));
+                p.strengths.nodes(&String::from_utf8_lossy(t.as_ref()))?;
+                p.on_node_id_text(&String::from_utf8_lossy(t.as_ref()))?;
             }
             _ => {}
         }
@@ -314,13 +314,13 @@ impl StbParser {
         if self.start_load(tag, a)? {
             return Ok(());
         }
-        if self.start_slab_wall(tag, a) {
+        if self.start_slab_wall(tag, a)? {
             return Ok(());
         }
         if self.start_axes(tag, a) {
             return Ok(());
         }
-        if self.start_node_id_ref(tag, a) {
+        if self.start_node_id_ref(tag, a)? {
             return Ok(());
         }
         self.record_unsupported(tag);
@@ -496,7 +496,7 @@ impl StbParser {
                     rebar: None,
                     rebar_grades: Default::default(),
                     rebar_cover: None,
-                    mat: sec_mat_ref_of(a),
+                    mat: sec_mat_ref_of(a)?,
                 };
             }
             "StbSecColumn_RC_Rect" => {
@@ -535,7 +535,7 @@ impl StbParser {
                     floor: floor_of(a),
                     steel_name: None,
                     steel_grade: None,
-                    mat: sec_mat_ref_of(a),
+                    mat: sec_mat_ref_of(a)?,
                 };
             }
             "StbSecColumn_SRC" | "StbSecBeam_SRC" => {
@@ -559,7 +559,7 @@ impl StbParser {
                         .or_else(|| a.get("strength_main_S"))
                         .cloned()
                         .unwrap_or_default(),
-                    mat: sec_mat_ref_of(a),
+                    mat: sec_mat_ref_of(a)?,
                 };
             }
             "StbSecColumn_SRC_Rect" => {
@@ -738,7 +738,7 @@ impl StbParser {
                 member.strength_index = self.strengths.current_member_index();
                 member.source_usage = FrameSectionUse::Column;
                 member.source_tag = tag.to_string();
-                member.source_id = a.get("id").and_then(|v| v.parse().ok());
+                member.source_id = get_opt_u32(a, "id")?;
                 self.pending_members.push(member);
             }
             "StbGirder" => {
@@ -748,7 +748,7 @@ impl StbParser {
                 member.strength_index = self.strengths.current_member_index();
                 member.source_usage = FrameSectionUse::Girder;
                 member.source_tag = tag.to_string();
-                member.source_id = a.get("id").and_then(|v| v.parse().ok());
+                member.source_id = get_opt_u32(a, "id")?;
                 self.pending_members.push(member);
             }
             "StbBeam" => {
@@ -760,18 +760,18 @@ impl StbParser {
                     en,
                     sepika_core::model::SecondaryMemberKind::Beam,
                     self.strengths.current_member_index(),
-                ));
+                )?);
             }
             "StbPost" => {
-                let bot = get_u32(a, "id_node_bottom").or_else(|_| get_u32(a, "id_node_start"))?;
-                let top = get_u32(a, "id_node_top").or_else(|_| get_u32(a, "id_node_end"))?;
+                let bot = get_u32(a, "id_node_bottom")?;
+                let top = get_u32(a, "id_node_top")?;
                 self.pending_secondaries.push(make_secondary(
                     a,
                     bot,
                     top,
                     sepika_core::model::SecondaryMemberKind::Post,
                     self.strengths.current_member_index(),
-                ));
+                )?);
             }
             "StbBrace" => {
                 let st = get_u32(a, "id_node_start")?;
@@ -783,7 +783,7 @@ impl StbParser {
                 let mut member = make_member(a, st, en, PendingMemberKind::Brace { tension_only })?;
                 member.source_usage = FrameSectionUse::Brace;
                 member.source_tag = tag.to_string();
-                member.source_id = a.get("id").and_then(|v| v.parse().ok());
+                member.source_id = get_opt_u32(a, "id")?;
                 self.pending_members.push(member);
             }
             _ => return Ok(false),
@@ -823,16 +823,13 @@ impl StbParser {
 
     /// スラブ・壁の開始要素を処理する（境界節点ループは後続の `StbNodeIdOrder` 等で
     /// 集める）。担当タグなら true。
-    fn start_slab_wall(&mut self, tag: &str, a: &Attrs) -> bool {
+    fn start_slab_wall(&mut self, tag: &str, a: &Attrs) -> Result<bool, StbError> {
         match tag {
             "StbSlab" => {
                 self.cur_wall = None;
                 self.cur_slab = Some(RawSlab {
                     strength_index: self.strengths.current_member_index(),
-                    section_fid: match get_i64(a, "id_section") {
-                        Some(s) if s >= 0 => Some(s as u32),
-                        _ => None,
-                    },
+                    section_fid: get_opt_u32(a, "id_section")?,
                     boundary: Vec::new(),
                 });
             }
@@ -840,20 +837,14 @@ impl StbParser {
                 self.cur_slab = None;
                 self.cur_wall = Some(RawWall {
                     strength_index: self.strengths.current_member_index(),
-                    section_fid: match get_i64(a, "id_section") {
-                        Some(s) if s >= 0 => Some(s as u32),
-                        _ => None,
-                    },
-                    material_fid: match get_i64(a, "id_material") {
-                        Some(s) if s >= 0 => Some(s as u32),
-                        _ => None,
-                    },
+                    section_fid: get_opt_u32(a, "id_section")?,
+                    material_fid: get_opt_u32(a, "id_material")?,
                     boundary: Vec::new(),
                 });
             }
-            _ => return false,
+            _ => return Ok(false),
         }
-        true
+        Ok(true)
     }
 
     /// 通り芯（`StbAxes` とその子）の開始要素を処理する。担当タグなら true。
@@ -896,31 +887,30 @@ impl StbParser {
     }
 
     /// 節点 id 参照（`StbNodeIdOrder`・`StbNodeId`）の開始要素を処理する。担当タグなら true。
-    fn start_node_id_ref(&mut self, tag: &str, a: &Attrs) -> bool {
+    fn start_node_id_ref(&mut self, tag: &str, a: &Attrs) -> Result<bool, StbError> {
         match tag {
             "StbNodeIdOrder" => {
                 self.in_node_id_order = true;
             }
             "StbNodeId" => {
-                if let Ok(id) = get_u32(a, "id") {
-                    if let Some(slab) = self.cur_slab.as_mut() {
-                        slab.boundary.push(id);
-                    } else if let Some(wall) = self.cur_wall.as_mut() {
-                        wall.boundary.push(id);
-                    } else if self.in_story {
-                        if let Some(story) = self.raw_stories.last_mut() {
-                            story.node_ids.push(id);
-                        }
-                    } else if let Some(axis) =
-                        self.cur_axis_group.as_mut().and_then(|g| g.axes.last_mut())
-                    {
-                        axis.node_ids.push(id);
+                let id = get_u32(a, "id")?;
+                if let Some(slab) = self.cur_slab.as_mut() {
+                    slab.boundary.push(id);
+                } else if let Some(wall) = self.cur_wall.as_mut() {
+                    wall.boundary.push(id);
+                } else if self.in_story {
+                    if let Some(story) = self.raw_stories.last_mut() {
+                        story.node_ids.push(id);
                     }
+                } else if let Some(axis) =
+                    self.cur_axis_group.as_mut().and_then(|g| g.axes.last_mut())
+                {
+                    axis.node_ids.push(id);
                 }
             }
-            _ => return false,
+            _ => return Ok(false),
         }
-        true
+        Ok(true)
     }
 
     /// どの取り込み分岐にも該当しなかった要素をデータ欠落として集計する（fail-loud）。
@@ -1190,15 +1180,16 @@ impl StbParser {
 
     /// `StbNodeIdOrder` のテキスト（空白区切りの節点 id 列）を、開いている
     /// スラブ／壁の境界へ追加する。
-    fn on_node_id_text(&mut self, text: &str) {
+    fn on_node_id_text(&mut self, text: &str) -> Result<(), StbError> {
         let boundary = self
             .cur_slab
             .as_mut()
             .map(|s| &mut s.boundary)
             .or(self.cur_wall.as_mut().map(|w| &mut w.boundary));
         if let Some(b) = boundary {
-            push_node_id_tokens(text, b);
+            push_node_id_tokens(text, b)?;
         }
+        Ok(())
     }
 }
 
@@ -1210,14 +1201,8 @@ fn make_member(
     n_j: u32,
     kind: PendingMemberKind,
 ) -> Result<PendingMember, StbError> {
-    let section = match get_i64(a, "id_section") {
-        Some(s) if s >= 0 => Some(s as u32),
-        _ => None,
-    };
-    let material = match get_i64(a, "id_material") {
-        Some(m) if m >= 0 => Some(m as u32),
-        _ => None,
-    };
+    let section = get_opt_u32(a, "id_section")?;
+    let material = get_opt_u32(a, "id_material")?;
     let rotate = get_f64(a, "rotate").unwrap_or(0.0);
     let end_cond = [
         end_condition_of(a, &["condition_bottom", "condition_start"]),
@@ -1246,16 +1231,10 @@ fn make_secondary(
     n_j: u32,
     kind: sepika_core::model::SecondaryMemberKind,
     strength_index: Option<usize>,
-) -> PendingSecondary {
-    let section = match get_i64(a, "id_section") {
-        Some(s) if s >= 0 => Some(s as u32),
-        _ => None,
-    };
-    let material = match get_i64(a, "id_material") {
-        Some(m) if m >= 0 => Some(m as u32),
-        _ => None,
-    };
-    PendingSecondary {
+) -> Result<PendingSecondary, StbError> {
+    let section = get_opt_u32(a, "id_section")?;
+    let material = get_opt_u32(a, "id_material")?;
+    Ok(PendingSecondary {
         strength_index,
         kind,
         n_i,
@@ -1263,7 +1242,7 @@ fn make_secondary(
         section,
         material,
         name: a.get("name").cloned().unwrap_or_default(),
-    }
+    })
 }
 
 /// 断面の階（`floor` 属性）。空文字列は「階の指定なし」として `None` に落とす
@@ -1343,16 +1322,18 @@ fn apply_cover(cover: &mut f64, rebar_cover: Option<f64>) {
 
 /// RC/SRC/CFT 断面のコンクリート材料参照。数値 id（`id_material` 系）を優先し、
 /// なければ ST-Bridge 標準のグレード名 `strength_concrete`（`Fc21` 等）を採る。
-fn sec_mat_ref_of(a: &Attrs) -> Option<SecMatRef> {
-    let id = get_i64(a, "id_material")
-        .or_else(|| get_i64(a, "id_material_concrete"))
-        .or_else(|| get_i64(a, "id_material_rc"))
-        .filter(|v| *v >= 0);
-    if let Some(v) = id {
-        return Some(SecMatRef::Id(v as u32));
+fn sec_mat_ref_of(a: &Attrs) -> Result<Option<SecMatRef>, StbError> {
+    let mut id = None;
+    for key in ["id_material", "id_material_concrete", "id_material_rc"] {
+        let specified = get_opt_u32(a, key)?;
+        if id.is_none() {
+            id = specified;
+        }
     }
-    a.get("strength_concrete")
-        .filter(|s| !s.is_empty())
-        .cloned()
-        .map(SecMatRef::Grade)
+    Ok(id.map(SecMatRef::Id).or_else(|| {
+        a.get("strength_concrete")
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .map(SecMatRef::Grade)
+    }))
 }

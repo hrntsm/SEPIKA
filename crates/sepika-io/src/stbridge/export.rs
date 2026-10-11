@@ -479,17 +479,17 @@ fn members_body(
                     };
                     columns.push_str(&format!(
                         "        <StbColumn id=\"{}\" name=\"C{}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
-                         rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" condition_bottom=\"{}\" condition_top=\"{}\"{}/>\n",
+                         rotate=\"{}\"{} kind_structure=\"{}\" condition_bottom=\"{}\" condition_top=\"{}\"{}/>\n",
                         sid(e.id.0), sid(e.id.0), node_sid(model, bot), node_sid(model, top),
-                        fmt(rot), sec_ref(sec), ks, cond(cb), cond(ct), super::strength_export::member_attr(model,StrengthTarget::Element(e.id)),
+                        fmt(rot), section_ref_attr(sec), ks, cond(cb), cond(ct), super::strength_export::member_attr(model,StrengthTarget::Element(e.id)),
                     ));
                 } else {
                     girders.push_str(&format!(
                         "        <StbGirder id=\"{}\" name=\"G{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
-                         rotate=\"{}\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\" \
+                         rotate=\"{}\"{} kind_structure=\"{}\" isFoundation=\"false\" \
                          condition_start=\"{}\" condition_end=\"{}\"{}/>\n",
                         sid(e.id.0), sid(e.id.0), node_sid(model, e.nodes[0]), node_sid(model, e.nodes[1]),
-                        fmt(rot), sec_ref(sec), ks, cond(e.end_cond[0]), cond(e.end_cond[1]), super::strength_export::member_attr(model,StrengthTarget::Element(e.id)),
+                        fmt(rot), section_ref_attr(sec), ks, cond(e.end_cond[0]), cond(e.end_cond[1]), super::strength_export::member_attr(model,StrengthTarget::Element(e.id)),
                     ));
                 }
             }
@@ -505,10 +505,10 @@ fn members_body(
                 };
                 braces.push_str(&format!(
                     "        <StbBrace id=\"{}\" name=\"BR{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
-                     rotate=\"0\" id_section=\"{}\" kind_structure=\"S\" feature_brace=\"{}\" \
+                     rotate=\"0\"{} kind_structure=\"S\" feature_brace=\"{}\" \
                      condition_start=\"PIN\" condition_end=\"PIN\"/>\n",
                     sid(e.id.0), sid(e.id.0), node_sid(model, e.nodes[0]), node_sid(model, e.nodes[1]),
-                    sec_ref(sec), feature,
+                    section_ref_attr(sec), feature,
                 ));
             }
             _ => {}
@@ -549,8 +549,8 @@ fn members_body(
             sepika_core::model::SecondaryMemberKind::Beam => {
                 sec_beams.push_str(&format!(
                     "        <StbBeam id=\"{}\" name=\"B{}\" id_node_start=\"{}\" id_node_end=\"{}\" \
-                     rotate=\"0\" id_section=\"{}\" kind_structure=\"{}\" isFoundation=\"false\"{}/>\n",
-                    sid(mid), sid(mid), node_sid(model, nodes[0]), node_sid(model, nodes[1]), sec_ref(sec), ks, super::strength_export::member_attr(model,StrengthTarget::Secondary(sm.id)),
+                     rotate=\"0\"{} kind_structure=\"{}\" isFoundation=\"false\"{}/>\n",
+                    sid(mid), sid(mid), node_sid(model, nodes[0]), node_sid(model, nodes[1]), section_ref_attr(sec), ks, super::strength_export::member_attr(model,StrengthTarget::Secondary(sm.id)),
                 ));
             }
             sepika_core::model::SecondaryMemberKind::Post => {
@@ -569,8 +569,8 @@ fn members_body(
                 };
                 posts.push_str(&format!(
                     "        <StbPost id=\"{}\" name=\"P{}\" id_node_bottom=\"{}\" id_node_top=\"{}\" \
-                     rotate=\"0\" id_section=\"{}\" kind_structure=\"{}\"{}/>\n",
-                    sid(mid), sid(mid), node_sid(model, bot), node_sid(model, top), sec_ref(sec), ks, super::strength_export::member_attr(model,StrengthTarget::Secondary(sm.id)),
+                     rotate=\"0\"{} kind_structure=\"{}\"{}/>\n",
+                    sid(mid), sid(mid), node_sid(model, bot), node_sid(model, top), section_ref_attr(sec), ks, super::strength_export::member_attr(model,StrengthTarget::Secondary(sm.id)),
                 ));
             }
         }
@@ -701,12 +701,11 @@ fn members_body(
     Ok(body)
 }
 
-/// 断面参照属性値。負（未参照）は -1、そうでなければ +1 した positiveInteger。
-fn sec_ref(sec_internal: i64) -> String {
+fn section_ref_attr(sec_internal: i64) -> String {
     if sec_internal < 0 {
-        "-1".to_string()
+        String::new()
     } else {
-        format!("{}", sec_internal as u32 + 1)
+        format!(" id_section=\"{}\"", sec_internal as u32 + 1)
     }
 }
 
