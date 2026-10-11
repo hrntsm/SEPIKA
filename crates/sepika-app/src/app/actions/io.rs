@@ -54,9 +54,9 @@ impl App {
 
     /// プロジェクトを指定パスへ保存する。成功時は project_path と未保存フラグを更新。
     ///
-    /// 準備計算の結果・解析結果は、いずれも**最新（モデル編集後に再実行済み）の
-    /// 場合のみ**同梱する（`preparation_stale` / `results_stale` なら保存しない）。
-    /// 読込側が「保存されている＝そのモデルに対して最新」と扱えるようにするため。
+    /// 準備計算・解析結果は最新の場合のみ同梱する。解析が stale でも、
+    /// 現在の生成入力と一致する応力源不要の直接検定は単独で保存できる。
+    /// 生成入力または検定契約が不一致の検定は保存対象から除外する。
     /// 解析結果を同梱しないときは、振動荷重ケースもモデルから外して書く
     /// （結果のない空ケースがナビに残らないようにする。メモリ上のケースは残す）。
     ///
@@ -96,8 +96,15 @@ impl App {
         } else {
             None
         };
-        let persist_results =
-            self.core.scoped.results.is_some() && !self.core.scoped.staleness.results_stale;
+        let persist_results = self.core.scoped.results.is_some()
+            && (!self.core.scoped.staleness.results_stale
+                || (self.require_design_input().is_ok()
+                    && self
+                        .core
+                        .scoped
+                        .results
+                        .as_ref()
+                        .is_some_and(|b| b.design_source.is_none())));
         let results = self
             .core
             .scoped
@@ -105,7 +112,32 @@ impl App {
             .as_ref()
             .filter(|_| persist_results)
             .map(|bundle| SavedResults {
-                bundle: bundle.clone(),
+                bundle: {
+                    let mut saved = if self.core.scoped.staleness.results_stale {
+                        ResultsBundle {
+                            member_checks: bundle.member_checks.clone(),
+                            joint_checks: bundle.joint_checks.clone(),
+                            wall_checks: bundle.wall_checks.clone(),
+                            beam_checks: bundle.beam_checks.clone(),
+                            slab_checks: bundle.slab_checks.clone(),
+                            design_contract_version: bundle.design_contract_version,
+                            design_source: bundle.design_source.clone(),
+                            input_records: bundle
+                                .input_records
+                                .iter()
+                                .filter(|(key, _)| *key == ResultInputKey::Design)
+                                .cloned()
+                                .collect(),
+                            ..Default::default()
+                        }
+                    } else {
+                        bundle.clone()
+                    };
+                    if self.require_design_input().is_err() {
+                        saved.clear_design_results();
+                    }
+                    saved
+                },
                 last_static: self.core.scoped.last_static,
                 view_vibration_case: self.core.scoped.view_vibration_case,
                 view_lumped_vibration_case: self.core.scoped.view_lumped_vibration_case,
@@ -337,11 +369,27 @@ impl App {
                             }
                             self.core.scoped.last_static = None;
                             self.ui.scoped.nav.focus_result = None;
-                            self.core.scoped.staleness.results_stale = true;
+                            self.core.scoped.staleness.results_stale =
+                                !self.core.scoped.results.as_ref().is_some_and(|bundle| {
+                                    bundle.time_history.is_some()
+                                        || !bundle.time_histories.is_empty()
+                                        || bundle.lumped.is_some()
+                                        || !bundle.lumped_results.is_empty()
+                                });
                             self.core.scoped.staleness.design_stale = true;
                             self.core.scoped.result_contract_notice = Some(reason.clone());
                             self.report_notice(reason);
                         }
+                    }
+                    if self
+                        .core
+                        .scoped
+                        .results
+                        .as_ref()
+                        .is_some_and(|b| b.has_design_results())
+                    {
+                        self.core.scoped.staleness.design_stale =
+                            self.require_design_input().is_err();
                     }
                     self.hydrate_saved_vibration_views(
                         saved.view_vibration_case,

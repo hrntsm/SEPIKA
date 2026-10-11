@@ -44,7 +44,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
     use crate::table_util::Col;
 
     live_load_reduction_section(ui, app);
-    if let Some(results) = &app.core.scoped.results {
+    if let Some(results) = app.current_design_results() {
         wall_checks_ui(ui, &results.wall_checks);
     }
 
@@ -105,7 +105,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             app.run_design_check();
         }
     });
-    if app.core.scoped.staleness.design_stale || app.core.scoped.result_contract_notice.is_some() {
+    if app.require_design_input().is_err() || app.core.scoped.result_contract_notice.is_some() {
         ui.colored_label(
             crate::theme::WARN_TEXT,
             app.core
@@ -126,10 +126,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         components: Vec<sepika_design_jp::CheckComponent>,
     }
     let checks: Vec<CheckRow> = app
-        .core
-        .scoped
-        .results
-        .as_ref()
+        .current_design_results()
         .map(|r| {
             r.member_checks
                 .iter()
@@ -295,10 +292,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         detail: String,
     }
     let joint_checks: Vec<JointCheckRow> = app
-        .core
-        .scoped
-        .results
-        .as_ref()
+        .current_design_results()
         .map(|r| {
             r.joint_checks
                 .iter()
@@ -852,7 +846,7 @@ fn jump_to_member_section(
 /// モーメント・必要鉄筋量を表示する（いずれも全体 FEM から独立）。
 fn floor_design_section(ui: &mut egui::Ui, app: &App) {
     use crate::table_util::Col;
-    let Some(r) = app.core.scoped.results.as_ref() else {
+    let Some(r) = app.current_design_results() else {
         return;
     };
     if r.beam_checks.is_empty() && r.slab_checks.is_empty() {

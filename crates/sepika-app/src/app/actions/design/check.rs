@@ -229,6 +229,7 @@ impl App {
             self.core.scoped.staleness.design_stale = false;
             self.clear_result_contract_notice();
         }
+        self.record_design_input();
     }
 
     /// 床の中での小梁・スラブ設計を算定する（`run_design_check` から呼ぶ）。

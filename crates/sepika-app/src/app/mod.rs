@@ -262,9 +262,9 @@ impl Staleness {
     }
 
     /// 解析が完了 → 最新化する。
+    /// 解析の成功は、再計算していない検定を認定しない。
     pub fn mark_fresh(&mut self) {
         self.results_stale = false;
-        self.design_stale = false;
         self.last_run = Some(SystemTime::now());
     }
 }
@@ -532,6 +532,9 @@ pub struct ResultsBundle {
     )>,
     #[serde(default)]
     pub(crate) input_records: Vec<(ResultInputKey, Vec<u8>)>,
+    /// 検定成功時に採用した架構応力源。直接床板・小梁検定では None。
+    #[serde(default)]
+    pub(crate) design_source: Option<ResultInputKey>,
     /// 生成時の解析契約版。欠落は版不明であり、現行版へ補完しない。
     #[serde(default)]
     pub analysis_contract_version: Option<u32>,
@@ -2503,5 +2506,7 @@ mod focus_id_remap_tests;
 #[cfg(test)]
 mod assignment_identity_tests;
 
+#[cfg(test)]
+pub(crate) mod design_input_tests;
 #[cfg(test)]
 mod result_contract_tests;

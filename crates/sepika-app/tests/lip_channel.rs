@@ -186,20 +186,17 @@ fn lip_channel_invalid_geometry_is_rejected_by_existing_mass_input() {
 #[cfg(feature = "gui")]
 #[test]
 fn lip_channel_egui_design_table_displays_unchecked_reason() {
-    use sepika_app::app::{MemberChecks, PositionCheck, ResultsBundle};
     let mut app = App::default();
-    let model = lip_model();
-    let reason = reason(&model);
-    app.load_model(model);
-    let mut results = ResultsBundle::default();
-    results.member_checks = vec![MemberChecks {
-        elem: sepika_core::ids::ElemId(0),
-        positions: vec![PositionCheck {
-            xi: 0.5,
-            outcome: CheckOutcome::Skipped { reason },
-        }],
-    }];
-    app.core.scoped.results = Some(results);
+    app.load_model(lip_model());
+    app.run_linear_static(sepika_core::ids::LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let results = app.core.scoped.results.as_mut().unwrap();
+    results.member_checks.truncate(1);
+    results.member_checks[0].positions.truncate(1);
     let text = rendered_design_table(&mut app);
     assert!(text.contains("検定済み 0 位置、検定不能 1 位置"), "{text}");
     assert!(text.contains("リップ溝形鋼"), "{text}");
@@ -244,47 +241,33 @@ fn rendered_design_table(app: &mut App) -> String {
 #[cfg(feature = "gui")]
 #[test]
 fn mixed_egui_design_table_counts_only_checked_positions_as_checked() {
-    use sepika_app::app::{MemberChecks, PositionCheck, ResultsBundle};
+    let mut model = lip_model();
+    model.sections[0] = sample::portal_frame().sections[0].clone();
     let mut app = App::default();
-    let model = lip_model();
-    let unsupported = reason(&model);
     app.load_model(model);
-    let supported = sample::portal_frame();
-    let forces = MemberForcesAt {
-        pos: 0.5,
-        n: 0.0,
-        qy: 0.0,
-        qz: 0.0,
-        my: 0.0,
-        mz: 0.0,
-    };
-    let checked = SteelDesign.check(
-        &forces,
-        &supported.sections[0],
-        &supported.materials[0],
-        &DesignCtx::default(),
+    app.run_linear_static(sepika_core::ids::LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
     );
-    assert!(matches!(checked, CheckOutcome::Checked(_)));
-    let mut results = ResultsBundle::default();
-    results.member_checks = vec![MemberChecks {
-        elem: sepika_core::ids::ElemId(0),
-        positions: vec![
-            PositionCheck {
-                xi: 0.0,
-                outcome: checked,
-            },
-            PositionCheck {
-                xi: 0.5,
-                outcome: CheckOutcome::Skipped {
-                    reason: unsupported,
-                },
-            },
-        ],
-    }];
-    app.core.scoped.results = Some(results);
+    let checks = &app.core.scoped.results.as_ref().unwrap().member_checks;
+    let checked = checks
+        .iter()
+        .flat_map(|m| &m.positions)
+        .filter(|p| matches!(p.outcome, CheckOutcome::Checked(_)))
+        .count();
+    let skipped = checks
+        .iter()
+        .flat_map(|m| &m.positions)
+        .filter(|p| matches!(p.outcome, CheckOutcome::Skipped { .. }))
+        .count();
+    assert!(checked > 0 && skipped > 0);
     let text = rendered_design_table(&mut app);
     assert!(
-        text.contains("検定済み 1 位置、検定不能 1 位置、NG 0 件"),
+        text.contains(&format!(
+            "検定済み {checked} 位置、検定不能 {skipped} 位置、NG 0 件"
+        )),
         "{text}"
     );
     assert!(text.contains("OK"), "{text}");

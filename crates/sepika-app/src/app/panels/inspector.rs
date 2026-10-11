@@ -156,7 +156,7 @@ impl App {
                         }
                     }
                     ui.separator();
-                    if let Some(r) = &self.core.scoped.results {
+                    if let Some(r) = self.current_design_results() {
                         let positions = r
                             .member_checks
                             .iter()

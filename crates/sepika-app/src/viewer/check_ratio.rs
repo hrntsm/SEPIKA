@@ -198,7 +198,7 @@ pub(super) fn pick_nearest_checked_node(
     pos: egui::Pos2,
     frame_filter: super::FrameFilter,
 ) -> Option<(usize, f32)> {
-    let results = app.core.scoped.results.as_ref()?;
+    let results = app.current_design_results()?;
     if results.joint_checks.is_empty() && results.wall_checks.is_empty() {
         return None;
     }
@@ -223,7 +223,7 @@ pub(super) fn pick_nearest_checked_node(
 
 /// 節点 `node` の検定詳細（種別・検定比・判定・根拠）をポインタ位置に表示する。
 pub(super) fn show_node_check_tooltip(ui: &egui::Ui, app: &App, node: NodeId) {
-    let Some(results) = app.core.scoped.results.as_ref() else {
+    let Some(results) = app.current_design_results() else {
         return;
     };
     let rows: Vec<&crate::app::JointCheck> = results
@@ -386,8 +386,16 @@ pub(super) fn draw_check_ratio(
     pts: &[egui::Pos2],
     frame_filter: super::FrameFilter,
 ) {
-    let Some(results) = &app.core.scoped.results else {
-        draw_no_result_legend(painter);
+    let Some(results) = app.current_design_results() else {
+        if let Err(reason) = app.require_design_input() {
+            painter.text(
+                painter.clip_rect().min + egui::vec2(10.0, 10.0),
+                egui::Align2::LEFT_TOP,
+                reason,
+                egui::FontId::proportional(14.0),
+                theme::WARN_TEXT,
+            );
+        }
         return;
     };
     if results.member_checks.is_empty()
@@ -643,7 +651,7 @@ pub(super) fn draw_check_ratio(
 /// B-3: 部材 `elem_id` の検定詳細（位置×式）をポインタ位置にツールチップ表示する。
 /// `app.core.scoped.results.member_checks` に当該部材の検定がなければ何も描かない。
 pub(super) fn show_check_tooltip(ui: &egui::Ui, app: &App, elem_id: ElemId) {
-    let Some(results) = &app.core.scoped.results else {
+    let Some(results) = app.current_design_results() else {
         return;
     };
     let positions = elem_check_positions(&results.member_checks, elem_id);
@@ -897,7 +905,7 @@ fn draw_legend(
         y = node_note.max.y + 4.0;
     }
 
-    if app.core.scoped.staleness.design_stale {
+    if app.require_design_input().is_err() {
         painter.text(
             egui::pos2(x0, y),
             egui::Align2::LEFT_TOP,
@@ -910,6 +918,52 @@ fn draw_legend(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn design602_actual_ratio_drawing_and_tooltip_hide_old_values() {
+        let mut app = crate::app::design_input_tests::pure_bending();
+        app.ui.view.check_ratio_label_all = true;
+        let ctx = egui::Context::default();
+        let labels = |app: &App| {
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                draw_check_ratio(
+                    ui.painter(),
+                    app,
+                    &app.core.model,
+                    &[egui::pos2(0.0, 0.0), egui::pos2(100.0, 0.0)],
+                    Default::default(),
+                );
+            })
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+        };
+        assert!(labels(&app).iter().any(|text| text.contains("0.80")));
+        crate::app::design_input_tests::edit_fy(&mut app);
+        app.run_time_history_sample();
+        let text = labels(&app);
+        assert!(!text.iter().any(|text| text.contains("0.80")), "{text:?}");
+        assert!(text
+            .iter()
+            .any(|text| text.contains("不一致") || text.contains("一致しません")));
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_check_tooltip(ui, &app, ElemId(0));
+            show_node_check_tooltip(ui, &app, NodeId(0));
+        });
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.job.text.contains("0.80"))));
+        assert!(pick_nearest_checked_node(
+            &app,
+            &[egui::Pos2::ZERO; 2],
+            egui::Pos2::ZERO,
+            Default::default()
+        )
+        .is_none());
+    }
 
     fn checked(ratio: f64, components: Vec<CheckComponent>) -> CheckOutcome {
         CheckOutcome::Checked(CheckResult {
@@ -1410,6 +1464,7 @@ mod tests {
             });
         }
         app.core.scoped.results = Some(results);
+        app.certify_design_fixture();
 
         let pts = [
             egui::pos2(0.0, 0.0),
@@ -1466,6 +1521,7 @@ mod tests {
             ),
         });
         app.core.scoped.results = Some(results);
+        app.certify_design_fixture();
         for (filter, expected) in [
             (CheckRatioFilter::Max, "max=1.25, NG 1件"),
             (CheckRatioFilter::Kind(CheckKind::Shear), "max=1.25, NG 1件"),
@@ -1515,6 +1571,7 @@ mod tests {
             });
         }
         app.core.scoped.results = Some(results);
+        app.certify_design_fixture();
         let hit = pick_nearest_checked_node(
             &app,
             &[egui::pos2(10.0, 10.0); 4],

@@ -182,10 +182,7 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
             }
         }
         let available_kinds = app
-            .core
-            .scoped
-            .results
-            .as_ref()
+            .current_design_results()
             .map(|r| {
                 check_ratio::available_check_kinds(
                     r.member_checks
