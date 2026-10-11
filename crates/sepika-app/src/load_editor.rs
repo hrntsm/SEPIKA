@@ -702,9 +702,6 @@ impl App {
                     return Err(format!("部材 #{} は存在しません", elem.0));
                 };
                 let length = self.core.model.member_length(element);
-                if length <= 1e-9 {
-                    return Err(format!("部材 #{} の材長が 0 です", elem.0));
-                }
                 let preserved_dir = match &editor.target {
                     LoadEditTarget::ExistingMember { snapshot, .. } if d.dir == DIR_SAVED => {
                         Some(snapshot.dir)
@@ -739,11 +736,6 @@ impl App {
                         w2: parse(&d.w2),
                     },
                 };
-                if let MemberLoadKind::Distributed { a, b, .. } = kind {
-                    if b <= a {
-                        return Err("分布区間は b > a となるように入力してください".to_string());
-                    }
-                }
                 let load = MemberLoad {
                     elem,
                     dir,
@@ -1006,6 +998,70 @@ mod tests {
             "書き換わらない"
         );
     }
+    #[test]
+    fn issue635_gui_confirmation_rejects_invalid_add_and_set_without_changing_state() {
+        for (kind, a, b, expected) in [
+            (0, "-1", "0", false),
+            (0, "0", "0", true),
+            (0, "6000", "0", true),
+            (0, "6000.5", "0", false),
+            (0, "6001.5", "0", false),
+            (0, "NaN", "0", false),
+            (2, "7000", "8000", false),
+            (2, "-1000", "1000", false),
+            (2, "5000", "7000", false),
+            (2, "0", "6000", true),
+            (2, "1000", "3000", true),
+            (2, "1000", "1000.0000000001", true),
+            (2, "0", "6000.5", false),
+            (2, "0", "6001.5", false),
+            (2, "1000", "1000", false),
+            (2, "3000", "1000", false),
+            (2, "0", "inf", false),
+        ] {
+            for editing in [false, true] {
+                let mut app = App::default();
+                app.load_model(beam_and_brace_model());
+                let normal = MemberLoad::manual(
+                    ElemId(0),
+                    [0.0, 0.0, -1.0],
+                    MemberLoadKind::Point { a: 3000.0, p: 1.0 },
+                );
+                let mut editor = if editing {
+                    app.core.model.load_cases[0].member.push(normal.clone());
+                    LoadEditor::edit_member(LoadCaseId(0), 0, &normal, &app.core.model)
+                } else {
+                    LoadEditor::new_member(LoadCaseId(0), Some(ElemId(0)))
+                };
+                if let LoadDraft::Member(d) = &mut editor.draft {
+                    d.kind = kind;
+                    d.a = a.into();
+                    d.b = b.into();
+                    d.p = "0".into();
+                    d.w1 = "1".into();
+                    d.w2 = "-1".into();
+                }
+                let before = format!("{:?}", app.core.model);
+                let revision = app.core.scoped.undo.revision();
+                let result = app.commit_load_editor(&editor);
+                assert_eq!(
+                    result.is_ok(),
+                    expected,
+                    "kind={kind} [{a},{b}] mm edit={editing}: {result:?}"
+                );
+                if !expected {
+                    let reason = result.as_ref().unwrap_err();
+                    assert!(
+                        reason.contains("member[0] 部材 0") && reason.contains("mm"),
+                        "{reason}"
+                    );
+                    assert_eq!(format!("{:?}", app.core.model), before);
+                    assert_eq!(app.core.scoped.undo.revision(), revision);
+                }
+            }
+        }
+    }
+
     #[test]
     fn full_length_creation_edit_and_coordinate_change_preserve_intent_and_resultant() {
         use sepika_core::model::MemberLoadExtent;

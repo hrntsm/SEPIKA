@@ -1044,7 +1044,7 @@ fn test_model_issues_errors_on_member_load_beyond_length() {
     assert!(
         !model_issues(&model)
             .iter()
-            .any(|i| i.message.contains("載荷区間")),
+            .any(|i| i.message.contains("集中荷重位置")),
         "全長載荷は不備ではない"
     );
 
@@ -1060,8 +1060,18 @@ fn test_model_issues_errors_on_member_load_beyond_length() {
     let issues = model_issues(&model);
     let issue = issues
         .iter()
-        .find(|i| i.message.contains("載荷区間"))
-        .expect("載荷区間の不備が診断に出ていない");
+        .find(|i| i.message.contains("集中荷重位置"))
+        .expect("集中荷重位置の不備が診断に出ていない");
+    assert!(
+        issue.message.contains("member[1] 部材 0"),
+        "{}",
+        issue.message
+    );
+    assert!(
+        issue.message.contains("a=1100 mm") && issue.message.contains("材長 1000 mm"),
+        "{}",
+        issue.message
+    );
     assert_eq!(issue.severity, IssueSeverity::Error);
     assert!(precheck_model(&model).is_err());
 }
@@ -3523,5 +3533,90 @@ fn public_static_entries_reject_unexcited_mechanism_and_zero_load() {
         assert!(
             matches!(error, SolveError::InvalidInput(message) if message.contains("機構") && message.contains("非正定値"))
         );
+    }
+}
+
+#[test]
+fn issue635_public_prepare_rejects_fixed_distance_geometry_and_keeps_normal_controls() {
+    for length_mm in [0.0, 0.5e-9, 1e-9, f64::NAN, f64::INFINITY] {
+        let mut model = make_cantilever_model();
+        model.nodes[1].coord = [length_mm, 0.0, 0.0];
+        model.load_cases[0].member = vec![MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Point { a: 0.0, p: 0.0 },
+        )];
+        assert!(model.validate().is_err(), "L={length_mm} mm");
+        let reason = Analysis::prepare(&model)
+            .err()
+            .expect("invalid loaded span must fail")
+            .to_string();
+        assert!(
+            reason.contains("member[0] 部材 0") && reason.contains("mm"),
+            "{reason}"
+        );
+    }
+    for (a, expected) in [
+        (-1.0, false),
+        (0.0, true),
+        (3000.0, true),
+        (6000.0, true),
+        (6000.5, false),
+        (6001.5, false),
+        (7000.0, false),
+        (f64::NAN, false),
+        (f64::INFINITY, false),
+    ] {
+        let mut model = make_cantilever_model();
+        model.nodes[1].coord = [6000.0, 0.0, 0.0];
+        model.load_cases[0].member = vec![MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Point { a, p: 0.0 },
+        )];
+        let result = Analysis::prepare(&model);
+        assert_eq!(result.is_ok(), expected, "a={a} mm");
+        if !expected {
+            let reason = result.err().unwrap().to_string();
+            assert!(
+                reason.contains("member[0] 部材 0") && reason.contains("mm"),
+                "{reason}"
+            );
+        }
+    }
+    for (a, b, expected) in [
+        (-2000.0, -1000.0, false),
+        (-1000.0, 1000.0, false),
+        (5000.0, 7000.0, false),
+        (7000.0, 8000.0, false),
+        (0.0, 6000.0, true),
+        (1000.0, 3000.0, true),
+        (0.0, 6000.5, false),
+        (0.0, 6001.5, false),
+        (1000.0, 1000.0, false),
+        (3000.0, 1000.0, false),
+        (1000.0, 1000.0 + 1e-10, true),
+    ] {
+        let mut model = make_cantilever_model();
+        model.nodes[1].coord = [6000.0, 0.0, 0.0];
+        model.load_cases[0].member = vec![MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Distributed {
+                a,
+                b,
+                w1: 1.0,
+                w2: -1.0,
+            },
+        )];
+        let result = Analysis::prepare(&model);
+        assert_eq!(result.is_ok(), expected, "[{a},{b}] mm");
+        if !expected {
+            let reason = result.err().unwrap().to_string();
+            assert!(
+                reason.contains("member[0] 部材 0") && reason.contains("mm"),
+                "{reason}"
+            );
+        }
     }
 }

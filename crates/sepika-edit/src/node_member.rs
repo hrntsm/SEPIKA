@@ -71,7 +71,7 @@ pub struct SetNodeCoord {
 }
 
 pub(crate) fn validate_coordinate_loads(before: &Model, after: &Model) -> Result<(), String> {
-    use sepika_core::model::{LoadSource, MemberLoadKind};
+    use sepika_core::model::LoadSource;
     for case in &after.load_cases {
         for (index, load) in case.member.iter().enumerate() {
             if load.source != LoadSource::Manual {
@@ -89,34 +89,7 @@ pub(crate) fn validate_coordinate_loads(before: &Model, after: &Model) -> Result
                 continue;
             }
             let length_mm = after.member_length(elem);
-            let reason = if !length_mm.is_finite() || length_mm <= 1e-9 {
-                Some("材長が非正または非有限になるため荷重区間を保持できません".to_owned())
-            } else if let Err(reason) = load.validate_extent(length_mm) {
-                Some(reason)
-            } else {
-                match load.kind {
-                    MemberLoadKind::Point { a, .. }
-                        if !a.is_finite() || a < 0.0 || a > length_mm =>
-                    {
-                        Some(format!(
-                            "集中荷重位置 a={a} mm が材長 {length_mm} mm の範囲外です"
-                        ))
-                    }
-                    MemberLoadKind::Distributed { a, b, .. }
-                        if !a.is_finite()
-                            || !b.is_finite()
-                            || a < 0.0
-                            || b <= a
-                            || b > length_mm =>
-                    {
-                        Some(format!(
-                            "分布区間 [{a}, {b}] mm を材長 {length_mm} mm で保持できません"
-                        ))
-                    }
-                    _ => None,
-                }
-            };
-            if let Some(reason) = reason {
+            if let Err(reason) = load.validate_extent(length_mm) {
                 return Err(format!(
                     "荷重ケース {} ({}) member[{}] 部材 {} 荷重「{}」: {}",
                     case.id.0, case.name, index, load.elem.0, load.name, reason

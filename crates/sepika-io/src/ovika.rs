@@ -280,6 +280,80 @@ mod tests {
     use sepika_core::section_shape::SectionShape;
 
     #[test]
+    fn issue635_save_and_correctly_hashed_load_reject_invalid_fixed_distance() {
+        let mut model = make_3node_model();
+        model.nodes[1].coord = [6000.0, 0.0, 0.0];
+        model.elements.push(ElementData {
+            id: ElemId(0),
+            kind: ElementKind::Beam,
+            nodes: vec![NodeId(0), NodeId(1)].into(),
+            section: None,
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 0.0, 1.0],
+            },
+            end_cond: [EndCondition::Fixed; 2],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        });
+        model.load_cases = default_load_cases();
+        let path = crate::test_util::test_tmp().join("issue635-invalid-fixed.ovika");
+        model.load_cases[0].member = vec![MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Distributed {
+                a: 1000.0,
+                b: 3000.0,
+                w1: 1.0,
+                w2: -1.0,
+            },
+        )];
+        save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        for (a, b) in [
+            (7000.0, 8000.0),
+            (-1000.0, 1000.0),
+            (0.0, 6000.5),
+            (0.0, 6001.5),
+        ] {
+            model.load_cases[0].member[0].kind = MemberLoadKind::Distributed {
+                a,
+                b,
+                w1: 1.0,
+                w2: -1.0,
+            };
+            let reason = model.validate_member_load_extents().unwrap_err();
+            assert!(
+                matches!(save_ovika(&path,&model,OvikaExtras::default()),Err(IoError::Decode(message)) if message==reason)
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), original);
+            let bytes = rmp_serde::to_vec_named(&model).unwrap();
+            let settings = b"{}";
+            let manifest = Manifest {
+                schema_version: CURRENT_SCHEMA_VERSION,
+                units: "internal: N-mm-s".into(),
+                created_by: "independent-635-fixture".into(),
+                entries: vec![
+                    crate::manifest::EntryHash {
+                        name: "model.msgpack".into(),
+                        sha256: sha256_of(&bytes),
+                    },
+                    crate::manifest::EntryHash {
+                        name: "settings.json".into(),
+                        sha256: sha256_of(settings),
+                    },
+                ],
+            };
+            let invalid_path = path.with_file_name(format!("issue635-invalid-{b}.ovika"));
+            write_zip_with_manifest(&invalid_path, &manifest, &bytes, settings);
+            assert!(
+                matches!(load_ovika(&invalid_path),Err(IoError::Decode(message)) if message==reason)
+            );
+        }
+    }
+
+    #[test]
     fn full_length_and_fixed_extent_roundtrip_without_numeric_inference() {
         let mut model = make_3node_model();
         model.nodes[1].coord = [8000.0, 0.0, 0.0];
