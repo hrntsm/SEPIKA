@@ -277,3 +277,90 @@ mod tests {
         assert_eq!(x, x_fresh);
     }
 }
+
+#[cfg(test)]
+mod acceptance_tests {
+    use super::*;
+    use crate::sparse::{assemble_csc, Triplet};
+
+    fn matrix(values: &[&[f64]]) -> SparseColMat<usize, f64> {
+        assemble_csc(
+            values.len(),
+            values
+                .iter()
+                .enumerate()
+                .flat_map(|(row, entries)| {
+                    entries
+                        .iter()
+                        .enumerate()
+                        .map(move |(col, &val)| Triplet { row, col, val })
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn non_spd_matrices_are_rejected_even_with_unexcited_or_zero_loads() {
+        for values in [
+            [&[1.0, 0.0][..], &[0.0, 0.0][..]],
+            [&[1.0, 2.0][..], &[2.0, 1.0][..]],
+        ] {
+            for rhs in [[1.0, 0.0], [1.0, 1.0], [0.0, 0.0]] {
+                let mut solver = CholeskySolver::default();
+                let result = solver
+                    .factorize(&matrix(&values))
+                    .and_then(|()| solver.solve(&rhs));
+                assert!(matches!(result, Err(SolveError::NotPositiveDefinite)));
+            }
+        }
+    }
+
+    #[test]
+    fn original_f64_residual_and_solution_for_small_and_zero_rhs() {
+        let values = [&[1.0][..]];
+        let mut solver = CholeskySolver::default();
+        solver.factorize(&matrix(&values)).unwrap();
+        for b in [1.0e-16, 0.0] {
+            let rhs = [b];
+            let solution = solver.solve(&rhs).unwrap();
+            let mut out = Vec::new();
+            solver.solve_into(&rhs, &mut out).unwrap();
+            assert_eq!(out, solution);
+            assert!(solution[0].is_finite());
+            assert!((solution[0] - b).abs() <= 1.0e-6 * b.abs());
+            let residual = (values[0][0] * solution[0] - rhs[0]).abs();
+            assert!(residual <= 1.0e-6 * b.abs());
+            if b != 0.0 {
+                assert!(b.abs() > 1.0e-6 * b.abs(), "ゼロ解を試験許容で拒否する");
+            }
+        }
+    }
+
+    #[test]
+    fn spd_multiple_rhs_and_updated_pattern_have_original_f64_residuals() {
+        let mut solver = CholeskySolver::default();
+        for values in [
+            [&[4.0, 1.0][..], &[1.0, 3.0][..]],
+            [&[8.0, 2.0][..], &[2.0, 6.0][..]],
+        ] {
+            solver.factorize(&matrix(&values)).unwrap();
+            for expected in [[1.0, 2.0], [-2.0, 3.0], [0.0, 0.0]] {
+                let rhs: Vec<f64> = values
+                    .iter()
+                    .map(|row| row.iter().zip(expected).map(|(k, x)| k * x).sum())
+                    .collect();
+                let solution = solver.solve(&rhs).unwrap();
+                let mut out = vec![f64::NAN];
+                solver.solve_into(&rhs, &mut out).unwrap();
+                assert_eq!(solution, out);
+                for (i, row) in values.iter().enumerate() {
+                    assert!(solution[i].is_finite());
+                    assert!((solution[i] - expected[i]).abs() <= 1.0e-6 * expected[i].abs());
+                    let residual =
+                        (row.iter().zip(&solution).map(|(k, x)| k * x).sum::<f64>() - rhs[i]).abs();
+                    assert!(residual <= 1.0e-6 * rhs[i].abs());
+                }
+            }
+        }
+    }
+}

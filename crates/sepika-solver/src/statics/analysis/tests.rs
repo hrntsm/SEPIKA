@@ -3492,3 +3492,36 @@ fn generated_ai_uses_seismic_adoption_and_preserves_period_baseline() {
         model.load_cases.clear();
     }
 }
+
+#[test]
+fn public_static_entries_reject_unexcited_mechanism_and_zero_load() {
+    for force in [1000.0, 0.0] {
+        let mut model = make_cantilever_model();
+        model.elements[0].kind = ElementKind::Brace {
+            tension_only: false,
+        };
+        model.sections[0].frame_use = Some(FrameSectionUse::Brace);
+        model.nodes[1].restraint = Dof6Mask(0b111100);
+        model.load_cases.truncate(1);
+        model.load_cases[0].nodal[0].values = [force, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let dofmap = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &dofmap);
+        let k = reducer.reduce_k(&assemble_global_k(&model, &dofmap));
+        assert_eq!(k.nrows(), 2);
+        let mut direct = make_solver(SolverBackend::DirectSparseCholesky);
+        assert!(matches!(
+            direct.factorize(&k),
+            Err(SolveError::NotPositiveDefinite)
+        ));
+        let error = Analysis::prepare(&model)
+            .err()
+            .expect("機構を持つモデルから解析成果を生成しない");
+        assert!(
+            matches!(&error, SolveError::InvalidInput(message) if message.contains("機構") && message.contains("非正定値"))
+        );
+        let error = crate::statics::linear::linear_static_once(&model, LoadCaseId(1)).unwrap_err();
+        assert!(
+            matches!(error, SolveError::InvalidInput(message) if message.contains("機構") && message.contains("非正定値"))
+        );
+    }
+}
