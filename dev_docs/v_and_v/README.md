@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [SRC材料領域_Issue552_2026-10.md](SRC材料領域_Issue552_2026-10.md) | 中心直角Hの非重複A/I/EA/EI・実Fiber/MS/MN/Mφ/保存/表示・旧版3 | 🔶（限定幾何Verification、実験Validation・freshレビュー・最終head全CIは後続） |
 | [共通断面質量_Issue594_2026-10.md](共通断面質量_Issue594_2026-10.md) | 両質量形式・幾何/採用密度・直接/公開診断・旧契約2成果 | 🔶（ローカルVerification、freshレビュー・最終head全CI後続、Validation未） |
 | [標準配筋_Issue507_2026-10.md](標準配筋_Issue507_2026-10.md) | 原配筋・役割/pos/適用、標準出力、OVIKA/編集/解析ゲート | 🔶（製品検証中、原図幾何・最終head全CI未） |
 | [標準鋼材名の厳密解決_Issue590_2026-10.md](標準鋼材名の厳密解決_Issue590_2026-10.md) | strict名称・標準物性/F・公開STB未知名/明示物性/native | 🔶（名称Verification、種類別F原典全照合・Validation・最終head全CI未） |
@@ -286,3 +287,7 @@
 （ドキュメントサイト 5.10 並列計算に参考値を記載）。
 
 採用RC梁αyと総角・追加角の直接検証は [Issue #523](RC梁αyと追加端ばね_Issue523_2026-10.md) に記録する。
+
+## SRC材料領域の共通入口
+
+[Issue552](SRC材料領域_Issue552_2026-10.md)の`src552_*`試験は、共通材料生成・実要素・OVIKA編集/保存・MN表示cacheと準備診断を対応づける。限定幾何のVerificationであり、SRC全履歴則のValidationは未実施。

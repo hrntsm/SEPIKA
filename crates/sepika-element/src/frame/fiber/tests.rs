@@ -3895,3 +3895,135 @@ fn fiber分割数とgauss積分形式はsrcの両質量形式の算定元にな�
         }
     }
 }
+
+#[test]
+fn src552_direct_fiber_ms_material_regions_and_micro_tangent() {
+    use crate::frame::multi_spring::MultiSpringElement;
+    use sepika_section::fiber::{integrate_fibers, section_response, SectionStrain};
+    let model = src_analysis_ratio_model();
+    let data = &model.elements[0];
+    let full = FiberBeam::try_new(
+        data,
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    )
+    .unwrap();
+    let multi = MultiSpringElement::new(
+        data,
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    );
+    for mut fiber in [full, multi.inner] {
+        let gp = &mut fiber.gauss_points[0];
+        for (tag, expected) in [(0, 172192.0), (2, 7808.0)] {
+            assert_relative_eq!(
+                gp.section
+                    .fibers
+                    .iter()
+                    .filter(|f| f.material == tag)
+                    .map(|f| f.area)
+                    .sum::<f64>(),
+                expected,
+                max_relative = 1e-10
+            );
+        }
+        let (constant, _) = integrate_fibers(&gp.section, |_, f| {
+            (if f.material == 0 { -24.0 } else { -235.0 }, 0.0)
+        });
+        assert_relative_eq!(constant.n, -5967488.0, max_relative = 1e-10);
+        let (elastic, stiffness) = integrate_fibers(&gp.section, |_, f| {
+            let e = if f.material == 0 { 20500.0 } else { 205000.0 };
+            (e * 1e-4, e)
+        });
+        assert_relative_eq!(elastic.n, 513057.6, max_relative = 1e-10);
+        assert_relative_eq!(stiffness.d[0][0], 5130576000.0, max_relative = 1e-10);
+        println!(
+            "SRC552 direct EI error={}",
+            (stiffness.d[2][2] / 150579426048000.0 - 1.0).abs()
+        );
+        let base = [-1e-7, 0.0, 0.0];
+        let (_, tangent) = section_response(
+            &gp.section,
+            SectionStrain {
+                eps0: base[0],
+                ky: base[1],
+                kz: base[2],
+            },
+            &mut gp.mats,
+        );
+        for axis in 0..3 {
+            let step = if axis == 0 { 1e-10 } else { 1e-13 };
+            let mut plus = base;
+            plus[axis] += step;
+            let mut minus = base;
+            minus[axis] -= step;
+            let (p, _) = section_response(
+                &gp.section,
+                SectionStrain {
+                    eps0: plus[0],
+                    ky: plus[1],
+                    kz: plus[2],
+                },
+                &mut gp.mats,
+            );
+            let (m, _) = section_response(
+                &gp.section,
+                SectionStrain {
+                    eps0: minus[0],
+                    ky: minus[1],
+                    kz: minus[2],
+                },
+                &mut gp.mats,
+            );
+            for (row, derivative) in [
+                (p.n - m.n) / (2.0 * step),
+                (p.my - m.my) / (2.0 * step),
+                (p.mz - m.mz) / (2.0 * step),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let scale = (tangent.d[row][row] * tangent.d[axis][axis]).sqrt();
+                assert!((derivative - tangent.d[row][axis]).abs() / scale < 1e-7);
+            }
+        }
+    }
+}
+
+#[test]
+fn src552_preparation_and_direct_entries_reject_bad_h() {
+    use crate::frame::beam::BeamElement;
+    use crate::frame::multi_spring::MultiSpringElement;
+    let mut model = src_analysis_ratio_model();
+    if let Some(sepika_core::section_shape::SectionShape::SrcColumnRect { steel_height, .. }) =
+        &mut model.sections[0].shape
+    {
+        *steel_height = 700.0;
+    }
+    let error = crate::factory::ensure_nonlinear_input(&model).unwrap_err();
+    assert!(error.contains("ID 0") && error.contains("H"), "{error}");
+    let data = &model.elements[0];
+    let direct_error = match BeamElement::try_new(data, &model) {
+        Ok(_) => panic!("不正Hが成功"),
+        Err(error) => error,
+    };
+    assert!(direct_error.contains("部材 ID 0") && direct_error.contains("断面 ID 0"));
+    assert!(FiberBeam::try_new(
+        data,
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental
+    )
+    .is_err());
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| MultiSpringElement::new(
+            data,
+            &model,
+            StrengthBasis::Nominal,
+            AnalysisKind::Incremental
+        )))
+        .is_err()
+    );
+}

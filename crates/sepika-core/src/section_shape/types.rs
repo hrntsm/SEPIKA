@@ -166,10 +166,98 @@ impl SectionShape {
             SectionShape::RcBeamRect { b, d, rebar } => rebar.validate(*b, *d),
             SectionShape::RcColumnRect { b, d, rebar } => rebar.validate(*b, *d),
             SectionShape::RcColumnCircle { d, rebar } => rebar.validate(*d),
-            SectionShape::SrcBeamRect { b, d, rebar, .. } => rebar.validate(*b, *d),
-            SectionShape::SrcColumnRect { b, d, rebar, .. } => rebar.validate(*b, *d),
+            SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. } => {
+                self.validate_src_geometry()
+            }
             _ => Ok(()),
         }
+    }
+
+    /// 矩形SRCの寸法・内蔵Hと実主筋の干渉を検証する。対象外は成功する。
+    pub fn validate_src_geometry(&self) -> Result<(), crate::error::RebarGeometryError> {
+        use crate::error::RebarGeometryError;
+        let (Self::SrcBeamRect {
+            b,
+            d,
+            steel_height: h,
+            steel_width: w,
+            steel_web_thick: tw,
+            steel_flange_thick: tf,
+            ..
+        }
+        | Self::SrcColumnRect {
+            b,
+            d,
+            steel_height: h,
+            steel_width: w,
+            steel_web_thick: tw,
+            steel_flange_thick: tf,
+            ..
+        }) = *self
+        else {
+            return Ok(());
+        };
+        for (field, value) in [
+            ("SRC b", b),
+            ("SRC d", d),
+            ("SRC Hせい", h),
+            ("SRC H幅", w),
+            ("SRC web厚", tw),
+            ("SRC flange厚", tf),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(RebarGeometryError::InvalidDimension { field });
+            }
+        }
+        if h > d || w > b || tw > w || 2.0 * tf >= h {
+            return Err(RebarGeometryError::SectionGeometry(
+                "SRCのHは矩形内に収まり、webとflangeが正面積・非重複となる寸法が必要です".into(),
+            ));
+        }
+        let as_mm2 = 2.0 * w * tf + tw * (h - 2.0 * tf);
+        for value in [
+            b * d - as_mm2,
+            as_mm2,
+            b * d.powi(3) / 12.0,
+            d * b.powi(3) / 12.0,
+            w * tf.powi(3) / 12.0,
+            tw * (h - 2.0 * tf).powi(3) / 12.0,
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(RebarGeometryError::SectionGeometry(
+                    "SRCの材料面積・断面二次モーメントは正の有限値が必要です".into(),
+                ));
+            }
+        }
+        let (points, dia) = match self {
+            Self::SrcBeamRect { rebar, .. } => (rebar.bar_positions(b, d)?, rebar.main_dia),
+            Self::SrcColumnRect { rebar, .. } => (rebar.bar_positions(b, d)?, rebar.main_dia),
+            _ => unreachable!(),
+        };
+        let radius = dia / 2.0;
+        for (i, p) in points.iter().enumerate() {
+            if p.x.abs() + radius > b / 2.0 || p.y.abs() + radius > d / 2.0 {
+                return Err(RebarGeometryError::SectionGeometry(format!(
+                    "SRC主筋{}が断面外です",
+                    i + 1
+                )));
+            }
+            for (cy, cz, width, height) in [
+                (0.0, (h - tf) / 2.0, w, tf),
+                (0.0, -(h - tf) / 2.0, w, tf),
+                (0.0, 0.0, tw, h - 2.0 * tf),
+            ] {
+                let dy = ((p.x - cy).abs() - width / 2.0).max(0.0);
+                let dz = ((p.y - cz).abs() - height / 2.0).max(0.0);
+                if dy.hypot(dz) < radius {
+                    return Err(RebarGeometryError::SectionGeometry(format!(
+                        "SRC主筋{}が内蔵Hと干渉します",
+                        i + 1
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// コンクリート系（RC / SRC / CFT）の断面形状か。

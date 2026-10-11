@@ -47,6 +47,14 @@ impl BeamElement {
         let axis = geom.local_frame(data.local_axis.ref_vector);
         let sec = get_section(model, data.section);
         sec.ensure_properties_resolved()?;
+        if let Some(shape) = &sec.shape {
+            shape.validate_src_geometry().map_err(|error| {
+                format!(
+                    "部材 ID {} の断面 ID {} のSRC幾何が不正です: {error}",
+                    data.id.0, sec.id.0
+                )
+            })?;
+        }
         let mat = get_material(model, sec_material(model, data));
         let steel_mat = model.element_steel_material(data);
 

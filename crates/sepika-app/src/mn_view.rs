@@ -795,6 +795,183 @@ mod tests {
         }
     }
 
+    #[test]
+    fn src552_ovika_edit_reload_and_display_share_material_regions() {
+        use sepika_core::ids::{MaterialId, SectionId};
+        use sepika_core::model::{AnalysisKind, MaterialCategory};
+        use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
+        use sepika_edit::{EditCommand, EditSectionShape};
+        let shape = SectionShape::SrcColumnRect {
+            b: 300.0,
+            d: 600.0,
+            rebar: RcRectColumnRebar {
+                main_dia: 0.0,
+                x: vec![],
+                y: vec![],
+                cover: 40.0,
+                hoop: RectColumnHoop {
+                    dia: 0.0,
+                    pitch: 100.0,
+                    legs_x: 0,
+                    legs_y: 0,
+                },
+            },
+            steel_height: 400.0,
+            steel_width: 200.0,
+            steel_web_thick: 8.0,
+            steel_flange_thick: 12.0,
+        };
+        let mut model = crate::sample::portal_frame();
+        model.panel_zone = sepika_core::model::PanelZoneMode::None;
+        let mut concrete = model.materials[0].clone();
+        concrete.id = MaterialId(0);
+        concrete.category = MaterialCategory::Concrete;
+        concrete.young = 20500.0;
+        concrete.poisson = 0.2;
+        concrete.fc = Some(24.0);
+        concrete.fy = None;
+        concrete.density = 2.4e-9;
+        concrete.concrete_class = sepika_core::units::ConcreteClass::UserDefined;
+        let mut steel = concrete.clone();
+        steel.id = MaterialId(1);
+        steel.category = MaterialCategory::Steel;
+        steel.young = 205000.0;
+        steel.poisson = 0.3;
+        steel.fc = None;
+        steel.fy = Some(235.0);
+        steel.density = 7.85e-9;
+        let mut rebar_material = steel.clone();
+        rebar_material.id = MaterialId(2);
+        rebar_material.category = MaterialCategory::Rebar;
+        rebar_material.name = "SD345".into();
+        rebar_material.fy = Some(345.0);
+        model.materials = vec![concrete, steel, rebar_material];
+        model.sections[0] = shape.to_section(SectionId(0), "SRC552".into());
+        model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+        model.sections[0].material = Some(MaterialId(0));
+        model.sections[0].steel_material = Some(MaterialId(1));
+        model.sections[0].rebar_material = Some(MaterialId(2));
+        model.sections[0].shear_rebar_material = Some(MaterialId(2));
+        let beam_shape = SectionShape::SrcBeamRect {
+            b: 300.0,
+            d: 600.0,
+            rebar: sepika_core::section_shape::RcBeamRebar {
+                main_dia: 0.0,
+                top: vec![],
+                bottom: vec![],
+                cover: 40.0,
+                stirrup: sepika_core::section_shape::BeamStirrup {
+                    dia: 0.0,
+                    pitch: 100.0,
+                    legs: 0,
+                },
+            },
+            steel_height: 400.0,
+            steel_width: 200.0,
+            steel_web_thick: 8.0,
+            steel_flange_thick: 12.0,
+        };
+        model.sections[1] = sepika_core::model::Section {
+            id: SectionId(1),
+            shape: Some(beam_shape),
+            frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
+            ..model.sections[0].clone()
+        };
+        let path = std::env::temp_dir().join(format!("sepika-src552-{}.ovika", std::process::id()));
+        sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+        let mut model = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        let mut state = MnViewState::default();
+        ensure_cache(&mut state, 0, model.sections[0].shape.as_ref().unwrap()).unwrap();
+        for fibers in [
+            &state.cache.as_ref().unwrap().fiber_fibers,
+            &state.cache.as_ref().unwrap().ms_fibers,
+        ] {
+            assert!((fibers.iter().map(|f| f.area).sum::<f64>() - 180000.0).abs() < 1e-6);
+        }
+        let mut edited = shape.clone();
+        if let SectionShape::SrcColumnRect { steel_width, .. } = &mut edited {
+            *steel_width = 180.0;
+        }
+        EditSectionShape {
+            section: SectionId(0),
+            new_shape: edited.clone(),
+            frame_use: Some(sepika_core::model::FrameSectionUse::Column),
+        }
+        .apply(&mut model);
+        sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+        let mut model = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        sepika_job::prepare::prepare_model_for_analysis(&mut model, &Default::default(), None)
+            .unwrap();
+        sepika_solver::statics::analysis::Analysis::prepare(&model).unwrap();
+        let mut app = App::default();
+        app.open_project_from(path.clone());
+        app.run_preparation();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        assert!(app.core.scoped.preparation.is_some());
+
+        assert_eq!(model.sections[0].shape.as_ref(), Some(&edited));
+        sepika_element::factory::ensure_nonlinear_input(&model).unwrap();
+        ensure_cache(&mut state, 0, model.sections[0].shape.as_ref().unwrap()).unwrap();
+        assert_eq!(state.cache.as_ref().unwrap().shape, edited);
+        for kind in [
+            sepika_core::model::ElementKind::Fiber,
+            sepika_core::model::ElementKind::MultiSpring,
+        ] {
+            let mut element = model.elements[0].clone();
+            element.kind = kind;
+            sepika_element::factory::build_nonlinear_behavior(
+                &element,
+                &model,
+                sepika_element::factory::StrengthBasis::Nominal,
+                AnalysisKind::Incremental,
+            );
+        }
+        let expected_as = 7328.0;
+        for fibers in [
+            &state.cache.as_ref().unwrap().fiber_fibers,
+            &state.cache.as_ref().unwrap().ms_fibers,
+        ] {
+            let area: f64 = fibers
+                .iter()
+                .filter(|f| f.region == sepika_section::mn_surface::FiberRegion::Steel)
+                .map(|f| f.area)
+                .sum();
+            assert!((area - expected_as).abs() < 1e-6);
+            assert!(m_phi_curve(fibers, 1.0, 0.0, 0.0, 20).is_some());
+        }
+        if let SectionShape::SrcColumnRect {
+            steel_height,
+            steel_width,
+            rebar,
+            ..
+        } = &mut edited
+        {
+            *steel_height = 485.0;
+            *steel_width = 200.0;
+            rebar.main_dia = 20.0;
+            rebar.x = vec![2];
+            rebar.y = vec![2];
+        }
+        assert!(ensure_cache(&mut state, 0, &edited).is_err());
+        assert!(state.cache.is_none());
+        model.sections[0].shape = Some(edited);
+        let error = match sepika_solver::statics::analysis::Analysis::prepare(&model) {
+            Ok(_) => panic!("不正Hで静的準備が成功"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("0") && error.to_string().contains("SRC"));
+        app.load_model(model);
+        app.run_preparation();
+        let error = app.core.scoped.last_error.as_ref().unwrap();
+        assert!(error.contains("#0") && error.contains("SRC"), "{error}");
+        assert!(app.core.scoped.preparation.is_none());
+        std::fs::remove_file(path).unwrap();
+    }
+
     /// 同じ添字のまま断面形状が別物へ変わったら、曲面キャッシュを作り直す。
     #[test]
     fn cache_is_rebuilt_when_shape_changes_at_same_index() {

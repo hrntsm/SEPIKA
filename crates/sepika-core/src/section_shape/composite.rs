@@ -53,6 +53,8 @@ impl SectionShape {
         else {
             return Ok(None);
         };
+        self.validate_src_geometry()
+            .map_err(|error| error.to_string())?;
         if !ec.is_finite() || ec <= 0.0 {
             return Err("SRC の Ec は正の有限値が必要です".into());
         }
