@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [節点材料の直接有限入力_Issue546_2026-10.md](節点材料の直接有限入力_Issue546_2026-10.md) | 節点・材料直接追加／単一失焦／有限判定と履歴・強度元指定保持 | 🔶（直接egui Verification、review修正後edit202件、既存値修正Undo含む追加eguiは新head CI後続） |
 | [矩形床の直交分類_Issue561_2026-10.md](矩形床の直交分類_Issue561_2026-10.md) | 閉合/直交/面積、斜め床真面積・支持辺対応、App適用・OVIKA11/5 | 🔶（直接幾何Verification、実験Validation・freshレビュー・最終head全CIは後続） |
 | [固定距離部材荷重の支間内検証_Issue635_2026-10.md](固定距離部材荷重の支間内検証_Issue635_2026-10.md) | 固定位置・区間の共通拒否／追加更新／座標・コピー／正しいhashの不正OVIKA／GUI・MCP | 🔶（入力境界Verification、freshレビュー・最終head全CIは後続） |
 | [主架構支持の解析表現不変性_Issue597_2026-10.md](主架構支持の解析表現不変性_Issue597_2026-10.md) | 明示Beam/Fiber/MSの床壁境界・割当・荷重合力/一次モーメント・編集/Undo/実OVIKA | 🔶（直接Verification、freshレビュー・最終head全CIは後続） |
@@ -257,6 +258,7 @@
 | 36a | 直接線形求解 | sepika-math / sepika-solver / sepika-core / sepika-app | cholesky・lu・solver・statics/analysis/linear・result_contract_tests | [Issue598独立期待値と実入口](直接線形求解_Issue598_2026-10.md#独立期待値と実入口) | 横断 | 🔶（Verification、実験Validation・最終headゲート未） |
 | 36 | 静的設定の公開経路一致 | sepika-solver / sepika-element / sepika-job / sepika-app / sepika-mcp | statics/linear、statics/analysis、factory、compute、actions/linear_static、tests | [Issue595の直接入口と回帰](静的設定採用_Issue595_2026-10.md#直接入口と回帰) | 横断 | 🔶（Verification、Validation・最終headゲート未） |
 | 633 | 符号付き単純梁反力 | sepika-load / sepika-element / sepika-app | floor/fem.rs・story_gen/reactions.rs・frame/member_load.rs・viewer/cmq.rs | [Issue633の独立値・公開入口](符号付き単純梁反力_Issue633_2026-10.md#独立verification) | 横断 | 🔶（直接Verification、原本／Validation・最終CIは後続） |
+| 546 | 節点・材料直接入力の有限判定 | sepika-app / sepika-edit | tables/nodes.rs・tables/materials.rs・section_material/material.rs | [直接入力matrix](節点材料の直接有限入力_Issue546_2026-10.md#独立期待値と実入口) | GUI／編集 | 🔶（直接Verification、最終head CI後続） |
 | 635 | 固定距離部材荷重の支間内検証 | sepika-core / sepika-edit / sepika-solver / sepika-io / sepika-app / sepika-mcp / sepika-job | model/load.rs・node_member.rs・story_copy.rs・precheck.rs | [Issue635の独立受入と実入口](固定距離部材荷重の支間内検証_Issue635_2026-10.md#独立期待値と実入口) | 横断 | 🔶（入力境界Verification、最終headゲートは後続） |
 
 凡例: ✅ 実装済み・🔶 一部実装（要拡張）・❌ 未実装・対象外（採用しない）。

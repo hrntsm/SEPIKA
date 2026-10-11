@@ -1,3 +1,4 @@
+use super::finite_input::{parse_finite, EmptyInput};
 use crate::app::App;
 use sepika_core::material_grade::{material_presets, MaterialPreset};
 use sepika_core::model::MaterialCategory;
@@ -65,6 +66,10 @@ fn young_editable(category: MaterialCategory, concrete_class: ConcreteClass) -> 
 pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
     use crate::table_util::{self, Col};
 
+    if app.ui.scoped.reset_material_inputs {
+        clear_material_inputs(ui);
+        app.ui.scoped.reset_material_inputs = false;
+    }
     let presets = material_presets();
     let id_preset_draft = egui::Id::new("material_preset_draft");
     let mut draft = ui
@@ -188,7 +193,17 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
             .on_hover_text("区分。S 造 / RC 造の判定と検定式の選択に用います");
         for (k, label) in [(1, "E"), (2, "ν"), (3, "ρ"), (4, "Fc"), (5, "Fy")] {
             ui.label(label);
-            ui.add(egui::TextEdit::singleline(&mut draft[k]).desired_width(60.0));
+            let resp = ui.add(egui::TextEdit::singleline(&mut draft[k]).desired_width(60.0));
+            if let Err(reason) = parse_finite(
+                &draft[k],
+                if k <= 3 {
+                    EmptyInput::Required
+                } else {
+                    EmptyInput::Optional
+                },
+            ) {
+                resp.on_hover_text(format!("材料追加 {label}: {reason}"));
+            }
         }
         ui.label("割増");
         ui.add(egui::TextEdit::singleline(&mut draft[6]).desired_width(50.0))
@@ -196,10 +211,10 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                 "保有水平耐力計算（増分解析）の材料強度割増係数。\
                  空欄=自動（鋼材1.1、590N級1.05、RC主筋1.1）",
             );
-        let parsed_e = draft[1].parse::<f64>();
-        let parsed_nu = draft[2].parse::<f64>();
-        let parsed_rho = draft[3].parse::<f64>();
-        let ok = parsed_e.is_ok() && parsed_nu.is_ok() && parsed_rho.is_ok();
+        if let Err(reason) = parse_material_draft(&draft) {
+            ui.colored_label(crate::theme::ERROR_RED, reason);
+        }
+        let ok = parse_material_draft(&draft).is_ok();
         if ui
             .add_enabled(ok, egui::Button::new("+ 追加"))
             .on_hover_text("E・ν・ρ は必須。Fc・Fy・割増は空欄可")
@@ -209,44 +224,63 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
         }
     });
     if do_add_custom {
-        let fc = draft[4].parse::<f64>().ok();
-        let fy = draft[5].parse::<f64>().ok();
-        let strength_factor = draft[6].parse::<f64>().ok();
-        if let (Ok(e), Ok(nu), Ok(rho)) = (
-            draft[1].parse::<f64>(),
-            draft[2].parse::<f64>(),
-            draft[3].parse::<f64>(),
-        ) {
-            app.core.scoped.undo.run(
-                &mut app.core.model,
-                Box::new(AddMaterial {
+        match parse_material_draft(&draft) {
+            Ok(values) => {
+                app.apply_model_edit(Box::new(AddMaterial {
                     name: draft[0].clone(),
                     category: custom_category,
-                    young: e,
-                    poisson: nu,
-                    density: rho,
-                    fc,
-                    fy,
-                    strength_factor,
+                    young: values[0].unwrap(),
+                    poisson: values[1].unwrap(),
+                    density: values[2].unwrap(),
+                    fc: values[3],
+                    fy: values[4],
+                    strength_factor: values[5],
                     concrete_class: if custom_category == MaterialCategory::Concrete {
                         ConcreteClass::UserDefined
                     } else {
                         Default::default()
                     },
-                }),
-            );
-            app.core.scoped.staleness.mark_edited();
+                }));
+            }
+            Err(reason) => app.report_error(reason),
         }
     }
     ui.data_mut(|d| d.insert_temp(id_cat, custom_category));
     ui.data_mut(|d| d.insert_temp(id_draft, draft));
     ui.separator();
 
+    let active_id = egui::Id::new("material_active_field");
+    let material_id_revision = app.ui.scoped.material_id_revision;
+    if let Some((id, field, revision)) =
+        ui.data(|d| d.get_temp::<(sepika_core::ids::MaterialId, MaterialField, u64)>(active_id))
+    {
+        if revision != material_id_revision
+            || app
+                .core
+                .model
+                .materials
+                .get(id.index())
+                .is_none_or(|m| m.id != id)
+        {
+            let cell_id = material_cell_id(id, field, revision);
+            let draft = ui
+                .data(|d| d.get_temp::<String>(cell_id))
+                .unwrap_or_default();
+            app.report_error(format!(
+                "材料 {} {:?}: 参照不明（保留入力: {draft}）",
+                id.0, field
+            ));
+            ui.memory_mut(|m| m.surrender_focus(cell_id));
+            ui.data_mut(|d| {
+                d.remove::<(sepika_core::ids::MaterialId, MaterialField, u64)>(active_id)
+            });
+        }
+    }
     let n = app.core.model.materials.len();
     ui.label(format!("材料一覧（{} 件）", n));
     let mut pending_name: Option<(u32, String)> = None;
     let mut pending_category: Option<(u32, MaterialCategory)> = None;
-    let mut pending_field: Option<(u32, MaterialField, Option<f64>)> = None;
+    let mut pending_field: Option<(sepika_core::ids::MaterialId, MaterialField, String)> = None;
     let mut pending_delete: Option<u32> = None;
     let mut pending_focus: Option<sepika_core::ids::MaterialId> = None;
 
@@ -304,11 +338,7 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                 }
             });
             let cells: [(MaterialField, String, bool); 6] = [
-                (
-                    MaterialField::Young,
-                    format!("{}", mat.young),
-                    young_editable(mat.category, mat.concrete_class),
-                ),
+                (MaterialField::Young, format!("{}", mat.young), true),
                 (MaterialField::Poisson, format!("{}", mat.poisson), true),
                 (MaterialField::Density, format!("{:.3e}", mat.density), true),
                 (
@@ -333,21 +363,69 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                 row.col(|ui| {
                     let editable = field != MaterialField::Young
                         || young_editable(mat.category, mat.concrete_class);
-                    let cell_id = egui::Id::new(("mat_cell", mat_id.0, field as u8));
+                    let cell_id = material_cell_id(mat_id, field, material_id_revision);
+                    ui.data_mut(|d| {
+                        let cells = d.get_temp_mut_or_default::<Vec<egui::Id>>(egui::Id::new(
+                            "material_cell_ids",
+                        ));
+                        if !cells.contains(&cell_id) {
+                            cells.push(cell_id);
+                        }
+                    });
                     let mut buf = ui
                         .data(|d| d.get_temp::<String>(cell_id))
                         .unwrap_or_else(|| current.clone());
                     let resp = ui
-                        .add_enabled_ui(editable, |ui| table_util::cell_text_edit(ui, &mut buf))
+                        .add_enabled_ui(editable, |ui| {
+                            let width = ui.available_width();
+                            ui.add(
+                                egui::TextEdit::singleline(&mut buf)
+                                    .id(cell_id)
+                                    .desired_width(width),
+                            )
+                        })
                         .inner;
-                    if resp.lost_focus() {
-                        let parsed = buf.trim().parse::<f64>().ok();
-                        let changed = buf.trim() != current.trim();
-                        if changed && (parsed.is_some() || !required) {
-                            pending_field = Some((mat_id.0, field, parsed));
-                        }
-                        ui.data_mut(|d| d.remove::<String>(cell_id));
-                    } else if resp.has_focus() {
+                    if !editable {
+                        resp.clone()
+                            .on_disabled_hover_text(format!("材料 {} E: 編集不可", mat_id.0));
+                    }
+                    let policy = if required {
+                        EmptyInput::Required
+                    } else {
+                        EmptyInput::Optional
+                    };
+                    if let Err(reason) = parse_finite(&buf, policy) {
+                        resp.clone()
+                            .on_hover_text(format!("材料 {} {:?}: {reason}", mat_id.0, field));
+                        ui.painter().rect_filled(
+                            resp.rect,
+                            0.0,
+                            crate::theme::translucent(crate::theme::ERROR_RED, 60),
+                        );
+                    }
+                    if resp.has_focus() {
+                        ui.data_mut(|d| {
+                            d.insert_temp(active_id, (mat_id, field, material_id_revision))
+                        });
+                    }
+                    let dirty_id = cell_id.with("changed");
+                    if resp.changed() {
+                        ui.data_mut(|d| d.insert_temp(dirty_id, true));
+                    }
+                    let dirty = ui.data(|d| d.get_temp::<bool>(dirty_id).unwrap_or(false));
+                    if resp.lost_focus() && dirty {
+                        pending_field = Some((mat_id, field, buf.clone()));
+                    }
+                    if resp.lost_focus() && !dirty {
+                        // 無変更の表示キャッシュはUndo/Redoや別入口の更新を隠さない。
+                        // 拒否された変更ドラフトはdirtyのまま保持する。
+                        ui.data_mut(|d| {
+                            d.remove::<String>(cell_id);
+                            d.remove::<bool>(dirty_id);
+                        });
+                    } else if resp.has_focus()
+                        || ui.data(|d| d.get_temp::<String>(cell_id).is_some())
+                    {
                         ui.data_mut(|d| d.insert_temp(cell_id, buf));
                     }
                 });
@@ -370,43 +448,107 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
         },
     );
 
-    let mut edited = false;
     if let Some((id, name)) = pending_name {
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(SetMaterialName {
-                id: sepika_core::ids::MaterialId(id),
-                name,
-            }),
-        );
-        edited = true;
+        app.apply_model_edit(Box::new(SetMaterialName {
+            id: sepika_core::ids::MaterialId(id),
+            name,
+        }));
     }
     if let Some((id, category)) = pending_category {
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(SetMaterialCategory {
-                id: sepika_core::ids::MaterialId(id),
-                category,
-            }),
-        );
-        edited = true;
+        app.apply_model_edit(Box::new(SetMaterialCategory {
+            id: sepika_core::ids::MaterialId(id),
+            category,
+        }));
     }
-    if let Some((id, field, value)) = pending_field {
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(SetMaterialField {
-                id: sepika_core::ids::MaterialId(id),
-                field,
-                value,
-            }),
-        );
-        edited = true;
+    if let Some((id, field, text)) = pending_field {
+        ui.data_mut(|d| d.remove::<(sepika_core::ids::MaterialId, MaterialField, u64)>(active_id));
+        if apply_material_text(app, id, field, &text).is_ok() {
+            ui.data_mut(|d| {
+                let cell_id = material_cell_id(id, field, material_id_revision);
+                d.remove::<String>(cell_id);
+                d.remove::<bool>(cell_id.with("changed"));
+            });
+        }
     }
     apply_pending_actions(app, pending_focus, pending_delete);
-    if edited {
-        app.core.scoped.staleness.mark_edited();
+}
+
+/// load_model が UI scoped を破棄した後、材料表に属する temp だけを破棄する。
+fn clear_material_inputs(ui: &mut egui::Ui) {
+    let registry = egui::Id::new("material_cell_ids");
+    let cells = ui.data(|d| d.get_temp::<Vec<egui::Id>>(registry).unwrap_or_default());
+    for cell in &cells {
+        ui.memory_mut(|m| m.surrender_focus(*cell));
+    }
+    ui.data_mut(|d| {
+        for cell in cells {
+            d.remove::<String>(cell);
+            d.remove::<bool>(cell.with("changed"));
+        }
+        d.remove::<Vec<egui::Id>>(registry);
+        d.remove::<(sepika_core::ids::MaterialId, MaterialField, u64)>(egui::Id::new(
+            "material_active_field",
+        ));
+        d.remove::<[String; 7]>(egui::Id::new("material_custom_draft"));
+        d.remove::<PresetDraft>(egui::Id::new("material_preset_draft"));
+    });
+}
+
+pub(super) fn material_cell_id(
+    id: sepika_core::ids::MaterialId,
+    field: MaterialField,
+    revision: u64,
+) -> egui::Id {
+    egui::Id::new(("mat_cell", revision, id.0, field as u8))
+}
+
+fn parse_material_draft(draft: &[String; 7]) -> Result<[Option<f64>; 6], String> {
+    let mut values = [None; 6];
+    for (k, field) in ["E", "ν", "ρ", "Fc", "Fy", "割増"].iter().enumerate() {
+        values[k] = parse_finite(
+            &draft[k + 1],
+            if k < 3 {
+                EmptyInput::Required
+            } else {
+                EmptyInput::Optional
+            },
+        )
+        .map_err(|reason| format!("材料追加 {field}: {reason}"))?;
+    }
+    Ok(values)
+}
+
+fn apply_material_text(
+    app: &mut App,
+    id: sepika_core::ids::MaterialId,
+    field: MaterialField,
+    text: &str,
+) -> Result<bool, ()> {
+    let policy = match field {
+        MaterialField::Young | MaterialField::Poisson | MaterialField::Density => {
+            EmptyInput::Required
+        }
+        _ => EmptyInput::Optional,
+    };
+    match parse_finite(text, policy) {
+        Ok(value) => {
+            let changed = app.apply_model_edit(Box::new(SetMaterialField { id, field, value }));
+            if !changed
+                && (app.core.scoped.undo.last_error().is_some()
+                    || app.core.scoped.pending_plate_loss_edit.is_some())
+            {
+                Err(())
+            } else {
+                Ok(changed)
+            }
+        }
+        Err(reason) => {
+            app.report_error(format!("材料 {} {:?}: {reason}", id.0, field));
+            Err(())
+        }
     }
 }
+
 pub(crate) fn apply_pending_actions(
     app: &mut App,
     pending_focus: Option<sepika_core::ids::MaterialId>,
@@ -425,6 +567,144 @@ pub(crate) fn apply_pending_actions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn issue546_commit_rechecks_target_and_standard_e_without_consuming_redo() {
+        use sepika_core::ids::MaterialId;
+        let mut app = App::default();
+        assert!(app.apply_model_edit(Box::new(AddMaterial {
+            name: "direct".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            fc: None,
+            fy: None,
+            strength_factor: None,
+            concrete_class: ConcreteClass::Normal
+        })));
+        assert!(
+            apply_material_text(&mut app, MaterialId(0), MaterialField::Young, "204000").unwrap()
+        );
+        app.core.scoped.undo.undo(&mut app.core.model);
+        let revision = app.core.scoped.undo.revision();
+        assert!(
+            apply_material_text(&mut app, MaterialId(99), MaterialField::Young, "203000").is_err()
+        );
+        assert!(app
+            .core
+            .scoped
+            .last_error
+            .as_ref()
+            .unwrap()
+            .contains("参照不明"));
+        app.core.model.materials[0].category = MaterialCategory::Concrete;
+        let before = rmp_serde::to_vec_named(&app.core.model).unwrap();
+        assert!(
+            apply_material_text(&mut app, MaterialId(0), MaterialField::Young, "203000").is_err()
+        );
+        assert!(app
+            .core
+            .scoped
+            .last_error
+            .as_ref()
+            .unwrap()
+            .contains("編集不可"));
+        assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), before);
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        assert!(app.core.scoped.undo.can_redo());
+        app.core.model.materials[0].category = MaterialCategory::Steel;
+        app.core.scoped.undo.redo(&mut app.core.model);
+        assert_eq!(app.core.model.materials[0].young, 204000.0);
+        app.core.model.materials.clear();
+        assert!(apply_material_text(&mut app, MaterialId(0), MaterialField::Density, "1").is_err());
+    }
+
+    #[test]
+    fn issue546_strength_origin_clear_is_semantic_and_undo_restores_omissions() {
+        use sepika_core::ids::MaterialId;
+        use sepika_core::model::{
+            SourceStory, SourceStoryKind, StbCommonStrength, StbSteelStrength,
+        };
+        let mut app = App::default();
+        app.core.model.stb_strengths.common = Some(StbCommonStrength {
+            project_name: "test".into(),
+            app_name: "STB".into(),
+            app_version: "2".into(),
+            strength_concrete: Some("Fc24".into()),
+            reinforcement: vec![],
+        });
+        app.core.model.source_stories.push(SourceStory {
+            id: 1,
+            guid: None,
+            name: "1F".into(),
+            height: 0.0,
+            kind: SourceStoryKind::General,
+            kind_from_native: false,
+            id_dependence: None,
+            strength_concrete: None,
+            node_ids: vec![],
+        });
+        app.core.model.prepare_stb_strength_materials();
+        let original = rmp_serde::to_vec_named(&app.core.model).unwrap();
+        let revision = app.core.scoped.undo.revision();
+        for text in ["NaN", "abc"] {
+            assert!(apply_material_text(&mut app, MaterialId(0), MaterialField::Fc, text).is_err());
+            assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), original);
+        }
+        assert!(
+            !apply_material_text(&mut app, MaterialId(0), MaterialField::Fc, " 2.4e1 ").unwrap()
+        );
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        assert!(apply_material_text(&mut app, MaterialId(0), MaterialField::Fc, "").unwrap());
+        assert_eq!(app.core.model.materials[0].fc, None);
+        assert_eq!(app.core.model.stb_strengths.materials[0].grade, "未指定Fc");
+        assert_eq!(
+            app.core
+                .model
+                .stb_strengths
+                .common
+                .as_ref()
+                .unwrap()
+                .strength_concrete
+                .as_deref(),
+            Some("未指定Fc")
+        );
+        assert_eq!(app.core.model.source_stories[0].strength_concrete, None);
+        let cleared = rmp_serde::to_vec_named(&app.core.model).unwrap();
+        app.core.scoped.undo.undo(&mut app.core.model);
+        assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), original);
+        app.core.scoped.undo.redo(&mut app.core.model);
+        assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), cleared);
+        app.core.model.stb_strengths.materials[0].grade = "Fc24".into();
+        app.core
+            .model
+            .stb_strengths
+            .common
+            .as_mut()
+            .unwrap()
+            .strength_concrete = Some("Fc24".into());
+        assert!(apply_material_text(&mut app, MaterialId(0), MaterialField::Fc, "").unwrap());
+        assert_eq!(app.core.model.stb_strengths.materials[0].grade, "未指定Fc");
+        assert!(apply_material_text(&mut app, MaterialId(0), MaterialField::Fy, " 235 ").unwrap());
+        let resolved = app
+            .core
+            .model
+            .resolve_stb_steel(&StbSteelStrength {
+                native_material: Some(MaterialId(0)),
+                element: "beam".into(),
+                part: "main".into(),
+                position: None,
+                strength: "SN400".into(),
+            })
+            .unwrap();
+        assert!(resolved.native_override);
+        assert_eq!(resolved.value, 235.0);
+        app.core.model.materials[0].concrete_class = ConcreteClass::UserDefined;
+        assert!(
+            apply_material_text(&mut app, MaterialId(0), MaterialField::Young, "20000").unwrap()
+        );
+    }
 
     /// SRC造トグル適用時の密度が γSRC=25.0 kN/m³ 由来であることを確認する
     /// （Fc≤36 帯。`apply_src_toggle` に切り出したロジックを直接検証する）。

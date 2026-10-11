@@ -1082,6 +1082,12 @@ pub struct UiModelScoped {
     pub pending_duplicate_node_coord: Option<[f64; 3]>,
     /// ナビゲータ（左ペイン）状態
     pub nav: Navigator,
+    /// 材料IDの挿入・削除を反映したUndo revision。セルドラフトを別材料へ引き継がない。
+    #[cfg(feature = "gui")]
+    pub material_id_revision: u64,
+    /// モデル切替後、材料表の一時入力だけを初回描画で破棄する。
+    #[cfg(feature = "gui")]
+    pub reset_material_inputs: bool,
     /// MN 相関曲面ビューの状態（断面選択・材料強度・表示切替・カメラ等）
     #[cfg(feature = "gui")]
     pub mn_view: crate::mn_view::MnViewState,
@@ -1244,6 +1250,10 @@ impl Default for UiModelScoped {
             node_draft: ["0".to_string(), "0".to_string(), "0".to_string()],
             pending_duplicate_node_coord: None,
             nav: Navigator::default(),
+            #[cfg(feature = "gui")]
+            material_id_revision: 0,
+            #[cfg(feature = "gui")]
+            reset_material_inputs: true,
             #[cfg(feature = "gui")]
             mn_view: crate::mn_view::MnViewState::default(),
             #[cfg(feature = "gui")]

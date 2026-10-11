@@ -9217,3 +9217,266 @@ fn issue635_copy_to_6000mm_keeps_exact_endpoints_and_skips_point_and_interval_ov
     undo.redo(&mut model);
     assert!(model.eq_ignoring_dofmap(&after));
 }
+
+#[test]
+fn issue546_material_commands_reject_nonfinite_and_preserve_history() {
+    let mut model = empty_model();
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(AddMaterial {
+            name: "finite".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            fc: None,
+            fy: Some(235.0),
+            strength_factor: None,
+            concrete_class: Default::default()
+        })
+    ));
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetMaterialField {
+            id: MaterialId(0),
+            field: MaterialField::Young,
+            value: Some(204000.0)
+        })
+    ));
+    undo.undo(&mut model);
+    let before = model.clone();
+    let revision = undo.revision();
+    for field in [
+        MaterialField::Young,
+        MaterialField::Poisson,
+        MaterialField::Density,
+        MaterialField::Fc,
+        MaterialField::Fy,
+        MaterialField::StrengthFactor,
+    ] {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(!undo.run(
+                &mut model,
+                Box::new(SetMaterialField {
+                    id: MaterialId(0),
+                    field,
+                    value: Some(value)
+                })
+            ));
+            assert!(undo.last_error().unwrap().contains("非有限"));
+            assert!(model.eq_ignoring_dofmap(&before));
+            assert_eq!(undo.revision(), revision);
+            assert!(undo.can_redo());
+        }
+    }
+    for field in [
+        MaterialField::Young,
+        MaterialField::Poisson,
+        MaterialField::Density,
+    ] {
+        assert!(!undo.run(
+            &mut model,
+            Box::new(SetMaterialField {
+                id: MaterialId(0),
+                field,
+                value: None
+            })
+        ));
+        assert!(undo.last_error().unwrap().contains("必須空欄"));
+    }
+    assert!(!undo.run(
+        &mut model,
+        Box::new(SetMaterialField {
+            id: MaterialId(0),
+            field: MaterialField::Young,
+            value: Some(205000.0)
+        })
+    ));
+    assert!(undo.last_error().is_none());
+    assert_eq!(undo.revision(), revision);
+    assert!(undo.can_redo());
+    assert!(!undo.run(
+        &mut model,
+        Box::new(AddMaterial {
+            name: "bad last field".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            fc: None,
+            fy: None,
+            strength_factor: Some(f64::INFINITY),
+            concrete_class: Default::default()
+        })
+    ));
+    assert!(model.eq_ignoring_dofmap(&before));
+    assert_eq!(undo.revision(), revision);
+    assert!(undo.can_redo());
+    undo.redo(&mut model);
+    assert_eq!(model.materials[0].young, 204000.0);
+}
+
+#[test]
+fn issue546_signed_zero_is_a_material_change_but_same_bits_are_noop() {
+    fn bits(model: &Model, field: MaterialField) -> u64 {
+        let m = &model.materials[0];
+        match field {
+            MaterialField::Young => m.young,
+            MaterialField::Poisson => m.poisson,
+            MaterialField::Density => m.density,
+            MaterialField::Fc => m.fc.unwrap(),
+            MaterialField::Fy => m.fy.unwrap(),
+            MaterialField::StrengthFactor => m.strength_factor.unwrap(),
+        }
+        .to_bits()
+    }
+    let mut model = empty_model();
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(AddMaterial {
+            name: "zero".into(),
+            category: MaterialCategory::Steel,
+            young: 0.0,
+            poisson: 0.0,
+            density: 0.0,
+            fc: Some(0.0),
+            fy: Some(0.0),
+            strength_factor: Some(0.0),
+            concrete_class: Default::default()
+        })
+    ));
+    for field in [
+        MaterialField::Young,
+        MaterialField::Poisson,
+        MaterialField::Density,
+        MaterialField::Fc,
+        MaterialField::Fy,
+        MaterialField::StrengthFactor,
+    ] {
+        for value in [-0.0, 0.0] {
+            let before = model.clone();
+            let revision = undo.revision();
+            assert!(undo.run(
+                &mut model,
+                Box::new(SetMaterialField {
+                    id: MaterialId(0),
+                    field,
+                    value: Some(value)
+                })
+            ));
+            assert_eq!(undo.revision(), revision + 1);
+            let after = model.clone();
+            undo.undo(&mut model);
+            assert!(model.eq_ignoring_dofmap(&before));
+            assert_eq!(bits(&model, field), bits(&before, field));
+            undo.redo(&mut model);
+            assert!(model.eq_ignoring_dofmap(&after));
+            assert_eq!(bits(&model, field), value.to_bits());
+            assert!(!undo.run(
+                &mut model,
+                Box::new(SetMaterialField {
+                    id: MaterialId(0),
+                    field,
+                    value: Some(value)
+                })
+            ));
+        }
+    }
+}
+
+#[test]
+fn issue546_repairs_nonfinite_material_values_restore_bits_and_strength_input() {
+    use sepika_core::model::{SourceStory, SourceStoryKind, StbCommonStrength};
+    use MaterialField::*;
+    fn bits(m: &sepika_core::model::Material) -> [Option<u64>; 6] {
+        [
+            Some(m.young),
+            Some(m.poisson),
+            Some(m.density),
+            m.fc,
+            m.fy,
+            m.strength_factor,
+        ]
+        .map(|v| v.map(f64::to_bits))
+    }
+    for field in [Young, Poisson, Density, Fc, Fy, StrengthFactor] {
+        for old in [
+            f64::from_bits(0x7ff8_0000_0000_0123),
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            let mut model = empty_model();
+            model.stb_strengths.common = Some(StbCommonStrength {
+                project_name: "repair".into(),
+                app_name: "STB".into(),
+                app_version: "2".into(),
+                strength_concrete: Some("Fc24".into()),
+                reinforcement: vec![],
+            });
+            model.source_stories.push(SourceStory {
+                id: 1,
+                guid: None,
+                name: "1F".into(),
+                height: 0.0,
+                kind: SourceStoryKind::General,
+                kind_from_native: false,
+                id_dependence: None,
+                strength_concrete: None,
+                node_ids: vec![],
+            });
+            model.prepare_stb_strength_materials();
+            model.materials[0].concrete_class = sepika_core::units::ConcreteClass::UserDefined;
+            let m = &mut model.materials[0];
+            match field {
+                Young => m.young = old,
+                Poisson => m.poisson = old,
+                Density => m.density = old,
+                Fc => m.fc = Some(old),
+                Fy => m.fy = Some(old),
+                StrengthFactor => m.strength_factor = Some(old),
+            }
+            let before = bits(&model.materials[0]);
+            let strengths = model.stb_strengths.clone();
+            let stories = model.source_stories.clone();
+            let mut undo = UndoStack::new();
+            assert!(undo.run(
+                &mut model,
+                Box::new(SetMaterialField {
+                    id: MaterialId(0),
+                    field,
+                    value: Some(204000.0),
+                })
+            ));
+            let after = bits(&model.materials[0]);
+            let after_strengths = model.stb_strengths.clone();
+            let after_stories = model.source_stories.clone();
+            undo.undo(&mut model);
+            assert_eq!(bits(&model.materials[0]), before);
+            assert_eq!(model.stb_strengths, strengths);
+            assert_eq!(model.source_stories, stories);
+            assert_eq!(model.source_stories[0].strength_concrete, None);
+            undo.redo(&mut model);
+            assert_eq!(bits(&model.materials[0]), after);
+            assert_eq!(model.stb_strengths, after_strengths);
+            assert_eq!(model.source_stories, after_stories);
+            // A NaN in another unchanged field must not turn a same-value input into a change.
+            if field == Density {
+                model.materials[0].young = f64::NAN;
+            } else {
+                model.materials[0].density = f64::NAN;
+            }
+            let revision = undo.revision();
+            assert!(!undo.run(
+                &mut model,
+                Box::new(SetMaterialField {
+                    id: MaterialId(0),
+                    field,
+                    value: Some(204000.0),
+                })
+            ));
+            assert_eq!(undo.revision(), revision);
+        }
+    }
+}

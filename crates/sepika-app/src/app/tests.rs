@@ -11417,7 +11417,8 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
     ];
     let path = std::env::temp_dir().join(format!("sepika-src434-{}.ovika", std::process::id()));
     for (field, value) in cases {
-        stack.run(
+        let before = model.clone();
+        let applied = stack.run(
             &mut model,
             Box::new(SetMaterialField {
                 id: MaterialId(1),
@@ -11425,6 +11426,20 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
                 value,
             }),
         );
+        let nonfinite = value.is_some_and(|v| !v.is_finite());
+        if nonfinite {
+            assert!(!applied);
+            assert!(model.eq_ignoring_dofmap(&before));
+            assert!(stack.last_error().unwrap().contains("非有限"));
+            match field {
+                MaterialField::Young => model.materials[1].young = value.unwrap(),
+                MaterialField::Poisson => model.materials[1].poisson = value.unwrap(),
+                MaterialField::Fc => model.materials[1].fc = value,
+                _ => unreachable!(),
+            }
+        } else {
+            assert!(applied);
+        }
         assert!(
             composite_props_of(&model, &elem).is_err(),
             "{field:?}={value:?}"
@@ -11439,7 +11454,11 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
         app.run_preparation();
         assert!(app.core.scoped.preparation.is_none(), "{field:?}={value:?}");
         assert!(app.core.scoped.last_error.is_some());
-        stack.undo(&mut model);
+        if nonfinite {
+            model = before;
+        } else {
+            stack.undo(&mut model);
+        }
         assert!(composite_props_of(&model, &elem).unwrap().is_some());
     }
     std::fs::remove_file(path).unwrap();

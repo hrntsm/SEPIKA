@@ -1,3 +1,4 @@
+use super::finite_input::{parse_finite, EmptyInput};
 use crate::app::node_grid::NodeGridAdapter;
 use crate::app::{App, LogLevel};
 use sepika_core::dof::Dof6Mask;
@@ -200,7 +201,9 @@ pub fn nodes_table(ui: &mut egui::Ui, app: &mut App) {
                         .desired_width(70.0)
                         .clip_text(false),
                 );
-                if slot.trim().parse::<f64>().is_err() {
+                if let Err(reason) = parse_finite(slot, EmptyInput::Zero) {
+                    resp.clone()
+                        .on_hover_text(format!("節点追加 {label}: {reason}"));
                     ui.painter().rect_filled(
                         resp.rect,
                         0.0,
@@ -208,10 +211,23 @@ pub fn nodes_table(ui: &mut egui::Ui, app: &mut App) {
                     );
                 }
             }
-            if ui.button("+ 追加").clicked() {
+            let valid = app
+                .ui
+                .scoped
+                .node_draft
+                .iter()
+                .all(|s| parse_finite(s, EmptyInput::Zero).is_ok());
+            if ui.add_enabled(valid, egui::Button::new("+ 追加")).clicked() {
                 let mut coord = [0.0; 3];
                 for (k, slot) in app.ui.scoped.node_draft.iter().enumerate() {
-                    coord[k] = slot.trim().parse::<f64>().unwrap_or(0.0);
+                    match parse_finite(slot, EmptyInput::Zero) {
+                        Ok(Some(value)) => coord[k] = value,
+                        Err(reason) => {
+                            app.report_error(format!("節点追加 {}: {reason}", ["X", "Y", "Z"][k]));
+                            return;
+                        }
+                        Ok(None) => unreachable!(),
+                    }
                 }
                 const COORD_TOL: f64 = 1e-9;
                 let dup = app.core.model.nodes.iter().any(|n| {
@@ -222,15 +238,12 @@ pub fn nodes_table(ui: &mut egui::Ui, app: &mut App) {
                 if dup {
                     app.ui.scoped.pending_duplicate_node_coord = Some(coord);
                 } else {
-                    app.core.scoped.undo.run(
-                        &mut app.core.model,
-                        Box::new(AddNode {
-                            coord,
-                            restraint: Dof6Mask::FREE,
-                        }),
-                    );
-                    app.sync_node_edit();
-                    app.core.scoped.staleness.mark_edited();
+                    if app.apply_model_edit(Box::new(AddNode {
+                        coord,
+                        restraint: Dof6Mask::FREE,
+                    })) {
+                        app.sync_node_edit();
+                    }
                 }
             }
         });
@@ -309,16 +322,16 @@ pub fn nodes_table(ui: &mut egui::Ui, app: &mut App) {
             app.ui.scoped.pending_duplicate_node_coord = None;
         }
         if do_add {
-            if let Some(coord) = app.ui.scoped.pending_duplicate_node_coord.take() {
-                app.core.scoped.undo.run(
-                    &mut app.core.model,
-                    Box::new(AddNode {
-                        coord,
-                        restraint: Dof6Mask::FREE,
-                    }),
-                );
-                app.sync_node_edit();
-                app.core.scoped.staleness.mark_edited();
+            if let Some(coord) = app.ui.scoped.pending_duplicate_node_coord {
+                if let Some(k) = coord.iter().position(|v| !v.is_finite()) {
+                    app.report_error(format!("節点追加 {}: 非有限", ["X", "Y", "Z"][k]));
+                } else if app.apply_model_edit(Box::new(AddNode {
+                    coord,
+                    restraint: Dof6Mask::FREE,
+                })) {
+                    app.ui.scoped.pending_duplicate_node_coord = None;
+                    app.sync_node_edit();
+                }
             }
         }
     }

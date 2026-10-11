@@ -44,6 +44,7 @@ impl App {
         for change in self.core.scoped.undo.id_changes() {
             match *change {
                 sepika_edit::IdChange::MaterialRemoved(id) => {
+                    self.ui.scoped.material_id_revision = self.core.scoped.undo.revision();
                     self.ui.scoped.nav.focus_material = self
                         .ui
                         .scoped
@@ -53,6 +54,7 @@ impl App {
                         .map(|focus| MaterialId(focus.0 - u32::from(focus.0 > id.0)));
                 }
                 sepika_edit::IdChange::MaterialInserted(id) => {
+                    self.ui.scoped.material_id_revision = self.core.scoped.undo.revision();
                     self.ui.scoped.nav.focus_material = self
                         .ui
                         .scoped

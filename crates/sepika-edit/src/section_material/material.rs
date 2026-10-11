@@ -21,6 +21,18 @@ pub struct AddMaterial {
 
 impl EditCommand for AddMaterial {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        for (field, value) in [
+            ("E", Some(self.young)),
+            ("ν", Some(self.poisson)),
+            ("ρ", Some(self.density)),
+            ("Fc", self.fc),
+            ("Fy", self.fy),
+            ("割増", self.strength_factor),
+        ] {
+            if value.is_some_and(|v| !v.is_finite()) {
+                return Box::new(crate::RejectedEdit(format!("材料追加 {field}: 非有限")));
+            }
+        }
         let new_id = MaterialId(model.materials.len() as u32);
         model.materials.push(sepika_core::model::Material {
             strength_factor: self.strength_factor,
@@ -113,37 +125,32 @@ pub struct SetMaterialField {
 impl EditCommand for SetMaterialField {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let idx = self.id.index();
+        let reject = |reason| {
+            Box::new(crate::RejectedEdit(format!(
+                "材料 {} {:?}: {reason}",
+                self.id.0, self.field
+            ))) as Box<dyn EditCommand>
+        };
         if idx >= model.materials.len() || model.materials[idx].id != self.id {
-            return Box::new(Noop);
+            return reject("参照不明");
         }
         if self.field == MaterialField::Young && model.materials[idx].is_standard_concrete() {
-            return Box::new(Noop);
+            return reject("編集不可");
+        }
+        if self.value.is_some_and(|v| !v.is_finite()) {
+            return reject("非有限");
+        }
+        if self.value.is_none()
+            && matches!(
+                self.field,
+                MaterialField::Young | MaterialField::Poisson | MaterialField::Density
+            )
+        {
+            return reject("必須空欄");
         }
         let strength_input = model.stb_strengths.clone();
         let strength_stories = model.source_stories.clone();
-        let mat = &mut model.materials[idx];
-        let old = match self.field {
-            MaterialField::Young => {
-                let old = Some(mat.young);
-                mat.young = self.value.unwrap_or(mat.young);
-                old
-            }
-            MaterialField::Poisson => {
-                let old = Some(mat.poisson);
-                mat.poisson = self.value.unwrap_or(mat.poisson);
-                old
-            }
-            MaterialField::Density => {
-                let old = Some(mat.density);
-                mat.density = self.value.unwrap_or(mat.density);
-                old
-            }
-            MaterialField::Fc => std::mem::replace(&mut mat.fc, self.value),
-            MaterialField::Fy => std::mem::replace(&mut mat.fy, self.value),
-            MaterialField::StrengthFactor => {
-                std::mem::replace(&mut mat.strength_factor, self.value)
-            }
-        };
+        let old = replace_material_field(&mut model.materials[idx], self.field, self.value);
         if self.field == MaterialField::Fc {
             let grade = self
                 .value
@@ -151,10 +158,16 @@ impl EditCommand for SetMaterialField {
                 .unwrap_or_else(|| "未指定Fc".into());
             model.replace_stb_material_grade(self.id, &grade);
         }
+        if old.map(f64::to_bits) == self.value.map(f64::to_bits)
+            && model.stb_strengths == strength_input
+            && model.source_stories == strength_stories
+        {
+            return Box::new(Noop);
+        }
         Box::new(crate::strength::RestoreStrengthInput {
             input: strength_input,
             stories: strength_stories,
-            inverse: Box::new(SetMaterialField {
+            inverse: Box::new(RestoreMaterialField {
                 id: self.id,
                 field: self.field,
                 value: old,
@@ -164,6 +177,57 @@ impl EditCommand for SetMaterialField {
 
     fn label(&self) -> &str {
         "材料プロパティ変更"
+    }
+}
+
+/// Undo/Redo専用。入力検査を再適用せず、読み込んだ元値のbitも復元する。
+struct RestoreMaterialField {
+    id: MaterialId,
+    field: MaterialField,
+    value: Option<f64>,
+}
+impl EditCommand for RestoreMaterialField {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let Some(mat) = model
+            .materials
+            .get_mut(self.id.index())
+            .filter(|m| m.id == self.id)
+        else {
+            return Box::new(Noop);
+        };
+        let old = replace_material_field(mat, self.field, self.value);
+        Box::new(Self {
+            id: self.id,
+            field: self.field,
+            value: old,
+        })
+    }
+    fn label(&self) -> &str {
+        "材料プロパティ変更"
+    }
+}
+
+fn replace_material_field(
+    mat: &mut sepika_core::model::Material,
+    field: MaterialField,
+    value: Option<f64>,
+) -> Option<f64> {
+    match field {
+        MaterialField::Young => {
+            let replacement = value.unwrap_or(mat.young);
+            Some(std::mem::replace(&mut mat.young, replacement))
+        }
+        MaterialField::Poisson => {
+            let replacement = value.unwrap_or(mat.poisson);
+            Some(std::mem::replace(&mut mat.poisson, replacement))
+        }
+        MaterialField::Density => {
+            let replacement = value.unwrap_or(mat.density);
+            Some(std::mem::replace(&mut mat.density, replacement))
+        }
+        MaterialField::Fc => std::mem::replace(&mut mat.fc, value),
+        MaterialField::Fy => std::mem::replace(&mut mat.fy, value),
+        MaterialField::StrengthFactor => std::mem::replace(&mut mat.strength_factor, value),
     }
 }
 

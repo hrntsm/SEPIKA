@@ -1,4 +1,7 @@
 pub mod axes;
+#[cfg(test)]
+mod direct_input_tests;
+mod finite_input;
 pub mod load_cfg;
 pub mod loads;
 pub mod materials;
