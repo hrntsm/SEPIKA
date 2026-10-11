@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [標準配筋_Issue507_2026-10.md](標準配筋_Issue507_2026-10.md) | 原配筋・役割/pos/適用、標準出力、OVIKA/編集/解析ゲート | 🔶（製品検証中、原図幾何・最終head全CI未） |
 | [標準鋼材名の厳密解決_Issue590_2026-10.md](標準鋼材名の厳密解決_Issue590_2026-10.md) | strict名称・標準物性/F・公開STB未知名/明示物性/native | 🔶（名称Verification、種類別F原典全照合・Validation・最終head全CI未） |
 | [大梁横補剛参考数_Issue488_2026-10.md](大梁横補剛参考数_Issue488_2026-10.md) | 材種・H断面・柱間全長/group・支配区間・GUI/MCP参考状態 | 🔶（参考式Verification、配置/性能・Validationは未対応） |
 | [フランジ位置の標準形式ゲート_Issue505_2026-10.md](フランジ位置の標準形式ゲート_Issue505_2026-10.md) | 面別上下位置・段違い対象外・旧パネル/solver・SkippedのGUI/MCP/CSV | 🔶（直接Verification、#455実入力・正式段違い式・公開全構成CI・Validation未） |

@@ -146,30 +146,41 @@ ST-Bridge 2.0.2 の圧延 H・Box は正の `r` が必須です。
 |---|:--:|:--:|---|
 | `StbSecColumn_RC`（`_Rect` / `_Circle`） | ✅ | ✅ | RC 矩形柱・円形柱（`RcColumnRect`/`RcColumnCircle`）＋配筋 |
 | `StbSecBeam_RC`（`_Straight`） | ✅ | ✅ | RC 矩形梁（`RcBeamRect`）＋配筋。円形梁は ST-Bridge に図形がなく `StbSecRaw` へフォールバック（警告を出す） |
-| `StbSecBarArrangement*`（配筋） | ⚠️ | ✅ | 主筋（本数・径・段数）・帯筋・あばら筋・かぶりを best-effort で取り込む。詳細は下記 |
+| `StbSecBarArrangement*`（配筋） | ✅ | ⚠️ | RC/SRC梁・柱の元部位・pos・標準属性・省略を保存。現解析型へ表現できない配置は計算不可。新規・編集済み配筋の標準出力は必須値と段数を検査する |
 | `StbSecColumn_CFT`（＋充填鋼管） | ✅ | ⚠️ | CFT 角形・円形（`CftBox`/`CftPipe`）。**`FrameSectionUse::Column` の主架構柱だけ**に使用でき、床板・壁版・`StbBeam` 等の二次部材には使用しない。用途不一致の既存参照や未参照断面は解析前チェックで ID・件数を示してエラーにする。書き出しで不正用途の部材が参照する場合は `StbSecRaw` へ |
 | `StbSecColumn_SRC` / `StbSecBeam_SRC` | ✅ | ✅ | SRC 矩形（`SrcColumnRect`/`SrcBeamRect`）＋内蔵鉄骨（H 形鋼）＋配筋＋鋼種 `strength_steel` |
 | `StbSecRaw`（物性直持ちの拡張要素） | ✅ | ✅ | 標準要素で表せない断面のフォールバック。他ソフトは解釈できないが、参照する部材の断面リンクは保たれる |
 | RC・SRC のテーパ・ハンチ等（矩形・円形以外の図形） | ❌ | ❌ | 図形を認識できず、断面を取り込めなかったものとして警告する |
 | `StbSecFoundation_RC` / `StbSecPile_*` / `StbSecParapet_RC` / `StbSecOpen_RC` | ❌ | ❌ | 取り込み時に警告 |
 
-配筋の取り込みは、実ファイルで使われる属性名の揺れを吸収するようにしています。
+配筋の保存と解析採用は別です。標準の配筋コンテナと各部位を、属性の省略を含めてOVIKAへ保存し、同じ標準系列へ再出力します。XML順序ではなく `pos` を対応させ、重複・不足する位置や必須値欠落、明示0本、ピッチ0を拒否します。
 
-- 主筋の本数は、段別の本数（`N_main_X_1st`・`N_main_top_1st` など 1〜3 段目）を合算して総本数とする
-- 段数は明示の属性があればそれを採り、なければ本数が 0 でない段を数える
-- 主筋の径は `D_main` などから採り、`D22` のような呼び名も数値 22 として読む
-- かぶりは配筋の子要素になければ、配置コンテナ（`StbSecBarArrangement*`）の `depth_cover_*` を採る
-- 材質は主筋が `strength_main`、せん断補強筋が `strength_band`・`strength_stirrup`
+| 入力 | 保存する意味 | 現解析への対応 |
+|---|---|---|
+| 梁 `N_main_top/bottom_1st/2nd/3rd` | 上端・下端の主筋段 | 主筋中心・段間位置を解決できる範囲。段間未解決は不可 |
+| `D_2nd_main` / `N_2nd_main_*` | 別径・材料の副主筋。2段筋とは別 | 保存・出力可、解析不可 |
+| `D_stirrup` / `N_stirrup` / `pitch_stirrup` | あばら筋 | 主筋・腹筋・巾止筋へ合算しない |
+| `D_web` / `N_web` | 腹筋 | 適用条件があるときだけ適用。現解析は不可 |
+| `D_bar_spacing` / `N_bar_spacing*` / `pitch_bar_spacing` | 巾止筋 | 適用条件があるときだけ適用。現解析は不可 |
+| 柱 `N_main_X/Y_1st/2nd` / `N_main_total` | 方向・段別配筋と隅筋重複を除いた総本数 | 既存実鉄筋座標で表現できない配置は不可 |
+| `D_axial` / `N_axial` | 軸筋。主筋総本数へ加えない | 保存・出力可、解析不可 |
+| Same / StartEnd / ThreeTypes / RectNotSame | 同一またはSTART/CENTER/END、BASE/TOPの各部位 | 位置別の新しい解析モデルは未対応 |
+| `kind_corner` | NONE/DIR_X/DIR_Y/DIR_XYと省略を保持 | 寄せ配置は未対応。NONEへ平滑化しない |
+| `depth_cover_*` / `center_*` | かぶりと明示主筋重心を別保存 | 適用時はcenter優先。面別値・未解決位置を診断。coverのみからの中心位置は未対応 |
 
-ST-Bridge の主筋径は `D_main` の 1 種類だけなので、X 方向と Y 方向で径を変えた配筋は往復しません。
-実配筋型（`RcBeamRect`・`RcColumnRect`・`RcColumnCircle`・`SrcBeamRect`・`SrcColumnRect`）は、
-梁の上端筋・下端筋、矩形柱の X 方向・Y 方向を段別本数（`N_main_top_*`・`N_main_X_*` など 1〜3 段目）として書き出し、
-帯筋の X/Y 脚数（`N_band_direction_X`/`_Y`）と円形柱の全本数（`N_main`）も保ちます。
-4 段目以降は ST-Bridge 標準が 1〜3 段のため切り捨て、断面名・段・本数を警告へ出します。
+`StbApplyConditionsList` の対象要素がない項目は非適用です。元属性は保存しても解析用入力には混ぜません。対象要素の `set_default=false` は共通省略値を供給せず、`true` は書かれた属性だけ供給します。個別指定を優先し、部分既定値の未指定項目に値を追加しません。
+
+径名 `D22` などは元の文字列を保存します。主筋・副主筋・軸筋・帯筋・あばら筋・腹筋・巾止筋それぞれの元部位・posを、[標準強度の解決](02_ST-Bridge_形式.md#標準強度の解決と編集)へ結びます。呼び名の保存はJIS公称断面積の全対応を意味しません。
+
+原配筋付き断面を形状編集した場合は、新しい配筋をnative入力として扱い、古い原配筋を再適用しません。Undoは原配筋と強度指定をともに復元します。新規・編集後の配筋は、必須本数・径・ピッチの不足、梁4段以上・矩形柱3段以上を対象断面付きで出力不可にします。任意の0本段は標準属性を省略し、後段を前段へ詰めません。
+
+保存できても解析できない標準入力は、準備・公開solver・該当架構検定で理由を示します。未使用断面や架構配筋を消費しない床板単独検定まで一律に禁止しません。完全保存はOVIKAを使用してください。
+
+出典：buildingSMART Japan『ST-Bridge XMLファイル仕様書（ver.2.0）Revision 2』採用2.0.2、[2022-06-15版](https://www.building-smart.or.jp/wp-content/uploads/2022/06/ST-Bridge_XML%E4%BB%95%E6%A7%98%E8%AA%AC%E6%98%8E%E6%9B%B8%EF%BC%88ver.2.0.2%EF%BC%89_20220615.pdf)、本文12、22–29、122–127、192–198頁。[公式2.0.2 XSD](https://www.building-smart.or.jp/wp-content/uploads/2026/04/ST-Bridge_v202.zip)の同名要素・attributeGroupに照合しています。
 
 <div class="impl-ref">
 
-**実装参照**：取り込みは `sepika_io::stbridge::import::rebar::parse_rebar`（`crates/sepika-io/src/stbridge/import/rebar.rs`）が配筋を読み、`sepika_io::stbridge::import::assemble::build_sections`（`crates/sepika-io/src/stbridge/import/assemble.rs`）が断面を組み立てます。
+**実装参照**：`StbRebarArrangement` / `Model::stb_rebar_diagnostics`（`crates/sepika-core/src/model/stb_rebar.rs`）、`StrengthInputs`（`crates/sepika-io/src/stbridge/import/strength.rs`）、`strength_export::section`（`crates/sepika-io/src/stbridge/strength_export.rs`）。
 
 </div>
 
@@ -224,7 +235,7 @@ ST-Bridge の主筋径は `D_main` の 1 種類だけなので、X 方向と Y �
 - 断面の回転角（`rotate`）がない場合は 0 とする
 - ブレースの `feature_brace` がない場合は引張専用とする
 - 断面参照（`id_section`）が `-1` または未指定の場合は、断面を持たない部材として取り込む
-- 配筋を持たない RC・SRC 断面は、本数・径・ピッチをすべて 0 とした無筋相当の配筋で補う
+- 配筋要素がないRC・SRC断面は未入力として保持する。標準の必須配筋属性の欠落を本数・径・ピッチ0で補って出力しない
 - 形鋼参照を解決できない鋼・CFT・SRC 断面は、断面性能を 0 とした断面として残す
 - 支点を 1 つも持たないモデルは、最下レベルで柱脚が付く節点をピン支点にする
   （[支点の自動設定](./02_ST-Bridge_形式.md#支点の自動設定取り込み時)）
