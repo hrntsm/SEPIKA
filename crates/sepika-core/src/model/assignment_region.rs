@@ -1,6 +1,6 @@
 //! 支持部材で囲まれた床板・壁版の割当領域。
 
-use super::{ElementKind, Model, SlabShape, WallPlateShape};
+use super::{Model, SlabShape, WallPlateShape};
 use crate::error::CoreError;
 use crate::ids::{
     ElemId, FloorPlateAssignmentRegionId, NodeId, SecondaryMemberId, SlabId,
@@ -522,7 +522,7 @@ fn floor_support_is_valid(model: &Model, support: SupportMemberId) -> bool {
     match support {
         SupportMemberId::Primary(elem) => model
             .element(elem)
-            .is_some_and(|element| element.kind == ElementKind::Beam),
+            .is_some_and(|element| element.kind.is_primary_frame_support()),
         SupportMemberId::Secondary(id) => model
             .beams()
             .any(|beam| beam.id == id && matches!(beam.ends, SecondaryMemberEnds::Supported(_))),
@@ -536,7 +536,7 @@ fn wall_support_is_valid(model: &Model, support: SupportMemberId) -> bool {
     match support {
         SupportMemberId::Primary(elem) => model
             .element(elem)
-            .is_some_and(|element| element.kind == ElementKind::Beam),
+            .is_some_and(|element| element.kind.is_primary_frame_support()),
         SupportMemberId::Secondary(id) => model
             .posts()
             .chain(model.beams())
@@ -959,7 +959,7 @@ fn floor_support_segments_at_level(
 ) -> (Vec<SupportMemberSegment>, Vec<SupportMemberSegment>) {
     let mut girders = Vec::new();
     for e in &model.elements {
-        if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
+        if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
             continue;
         }
         let (Some(a), Some(b)) = (model.node(e.nodes[0]), model.node(e.nodes[1])) else {
@@ -1017,7 +1017,7 @@ fn wall_support_segments_on_plane(
     };
     let mut primaries = Vec::new();
     for e in &model.elements {
-        if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
+        if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
             continue;
         }
         let (Some(a), Some(b)) = (
@@ -1188,7 +1188,7 @@ impl Model {
     fn horizontal_beam_levels(&self) -> Vec<f64> {
         let mut levels: Vec<f64> = Vec::new();
         for e in &self.elements {
-            if e.kind != super::ElementKind::Beam || e.nodes.len() != 2 {
+            if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
                 continue;
             }
             let (Some(a), Some(b)) = (self.node(e.nodes[0]), self.node(e.nodes[1])) else {

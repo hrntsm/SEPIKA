@@ -6,7 +6,7 @@
 //!
 //! # 生成規則
 //!
-//! 1. **対象**は水平な 2 節点の梁要素（[`ElementKind::Beam`]）のみ。両端の Z 差が
+//! 1. **対象**は水平な 2 節点の梁要素（Beam・Fiber・MultiSpring）のみ。両端の Z 差が
 //!    [`crate::geom::LEVEL_TOL_MM`] 以内のものを水平とみなす。柱・ブレース・壁・二次部材は対象にしない
 //!    （床領域の境界は大梁であるという定義による）。
 //! 2. **レベルごと**に分けて面を求める。同じ Z（[`crate::geom::LEVEL_TOL_MM`] 以内）の梁を 1 つの
@@ -36,7 +36,9 @@ use super::{scan_faces, Edge};
 use crate::geom::polygon;
 use crate::geom::{vec3, LEVEL_TOL_MM, MEMBER_AXIS_TOL_MM};
 use crate::ids::{ElemId, NodeId};
-use crate::model::{ElementKind, Model};
+#[cfg(test)]
+use crate::model::ElementKind;
+use crate::model::Model;
 
 /// 面走査の対象とする梁の最小長さ [mm]。これ未満は方位角が定まらないため除外する。
 const MIN_EDGE_LEN_MM: f64 = 1.0;
@@ -224,7 +226,7 @@ fn segments_touch(p1: [f64; 2], p2: [f64; 2], q1: [f64; 2], q2: [f64; 2]) -> boo
 fn horizontal_beams_by_level(model: &Model) -> Vec<(f64, Vec<Edge>)> {
     let mut buckets: Vec<(f64, Vec<Edge>)> = Vec::new();
     for e in &model.elements {
-        if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
+        if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
             continue;
         }
         let (Some(na), Some(nb)) = (

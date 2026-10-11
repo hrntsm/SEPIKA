@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [主架構支持の解析表現不変性_Issue597_2026-10.md](主架構支持の解析表現不変性_Issue597_2026-10.md) | 明示Beam/Fiber/MSの床壁境界・割当・荷重合力/一次モーメント・編集/Undo/実OVIKA | 🔶（直接Verification、freshレビュー・最終head全CIは後続） |
 | [未割当線材のSTB出力拒否_Issue625_2026-10.md](未割当線材のSTB出力拒否_Issue625_2026-10.md) | 両公開export・実Appの未割当拒否／状態保持／明示割当回復、正常5部材の独立属性 | 🔶（直接Verification、固定公式XSD取得403・全文未検証） |
 | [外部ID入力拒否_Issue603_2026-10.md](外部ID入力拒否_Issue603_2026-10.md) | MCP/手書き/serde・STB全文書・境界/省略・正常編集/Undo | 🔶（入口Verification、freshレビュー・最終head全CIは後続） |
 | [二次CFT入口拒否_Issue539_2026-10.md](二次CFT入口拒否_Issue539_2026-10.md) | 共通用途・raw保存読込・App状態保持・数量/解析入口・正常主柱対照 | 🔶（入口Verification、freshレビュー・最終head全CIは後続） |
@@ -213,6 +214,7 @@
 | 10a | 地震重量鮮度・共通準備 | sepika-core / sepika-load / sepika-job / sepika-app / sepika-mcp | weight_preparation.rs / prepare.rs / actions/loads.rs / period.rs / server.rs | [Issue439の実入口試験表](地震重量の鮮度と共通準備_Issue439_2026-10.md#独立期待値と直接試験) | 横断 | 🔶（入口Verification、法適用・実測は別） |
 | 11 | 床荷重分割 | sepika-load / sepika-solver | floor/{mod,polygon}.rs / statics/analysis/tests.rs | `polygon::verification::*` / `distribution_verification::*` / `floor::tests::*` / `test_model_issues_warns_floating_plate`（正当な水平全周支持床の警告と解析前チェック）。幾何Verification済み（台形は[Issue438検証](凸台形の独立幾何と格子差_Issue438_2026-10.md)）、実験Validation未実施 | P2 | 🔶 |
 | 11a | 壁・間柱の自重支持先 | sepika-load / sepika-app | wall_plate_load.rs / cascade.rs | `wall_plate_load::tests`・`vertical_post_uses_explicit_end_shares`・`明示負担率で密度直接集計とdl集計の階重量が一致する` | [検証記録](壁版の支持範囲判定_2026-09.md) | 🔶（実測照合は未実施） |
+| 11b | 主架構支持の解析表現不変性 | sepika-core / sepika-load / sepika-job / sepika-edit / sepika-io / sepika-app | element.rs / region_gen / assignment_region.rs / model/secondary.rs / load/secondary.rs | [Issue597の独立期待値と実入口](主架構支持の解析表現不変性_Issue597_2026-10.md#実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終head全CI後続） |
 | 12 | 荷重組合せ・検定対象 | sepika-core / sepika-job / sepika-app / sepika-mcp | load_combo.rs、design_q0.rs、app/tests.rs、tests.rs | [荷重状態の検証対応](荷重状態と検定対象_Issue487_2026-10.md#直接検証の対応) | P2 | 🔶（原文再取得・Validation未） |
 | 13 | 許容応力度設計 | sepika-design-jp | allowable_stress.rs | `test_beam_check_bending_rect_section_hand_calc` 他 | P3 | ✅ |
 | 13a | 大梁必要横補剛箇所数（参考） | sepika-design-jp / sepika-app / sepika-mcp | steel/lateral_bracing.rs・member_design_check.rs・app/tests.rs・tests.rs | [Issue488直接受入](大梁横補剛参考数_Issue488_2026-10.md#直接試験) | 横断 | 🔶（参考式Verification、実配置・性能・Validation未） |
