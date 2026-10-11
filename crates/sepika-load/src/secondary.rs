@@ -702,6 +702,27 @@ mod beam_tributary_tests {
         assert!(matches!(w, Some(x) if (x - 1500.0).abs() < 1e-6), "{w:?}");
     }
 
+    #[test]
+    fn issue561_skewed_floor_keeps_coordinate_projection_fallback() {
+        let mut model = Model {
+            nodes: vec![
+                node(0, 0., 0.),
+                node(1, 1000., 0.),
+                node(2, 1500., 1000.),
+                node(3, 500., 1000.),
+            ],
+            ..Default::default()
+        };
+        add_rect_slab(&mut model, [0, 1, 2, 3]);
+        assert!(crate::floor::slab_dimensions(&model, &model.slabs[0]).is_none());
+        for nodes in [[NodeId(0), NodeId(1)], [NodeId(1), NodeId(0)]] {
+            assert_eq!(
+                beam_edge_tributary_width(&model, nodes[0], nodes[1]),
+                Some(500.)
+            );
+        }
+    }
+
     /// T 字取り付き: 片側は 1 枚（幅 3000）、反対側は途中の節点で 2 枚に割れている
     /// （幅 3000 の帯が 2 枚。それぞれの境界はこの小梁の一部区間としか重ならない）。
     /// 負担幅は「割れた側の合計幅の半分」＋「割れていない側の幅の半分」

@@ -608,6 +608,18 @@ fn actual_slab_entry_diagnostics_and_support_errors() {
     model.floor_assignment_regions.regions[0].boundary[0].support =
         SupportMemberId::Primary(ElemId(u32::MAX));
     assert!(distribute_slab_resolved(&model, &slab, 0.).is_err());
+    for invalid in [&missing, &nonfinite, &invalid_span, &model] {
+        for w in [0., 0.003] {
+            let direct = distribute_slab_w_with_diagnostics(invalid, &slab, w, Default::default())
+                .unwrap_err();
+            assert!(matches!(direct, FloorDistributionError::InvalidBoundary(_)));
+            assert!(!direct.to_string().is_empty());
+            assert_eq!(
+                distribute_slab_resolved(invalid, &slab, w).unwrap_err(),
+                direct
+            );
+        }
+    }
     let mut region =
         sepika_core::model::FloorRegion::new(sepika_core::ids::FloorRegionId(0), Vec::new());
     region.slab_ids = vec![sepika_core::ids::SlabId(u32::MAX)];
@@ -619,6 +631,15 @@ fn enclosed_geometry_errors_precede_rectangle_and_zero_load_dispatch() {
     use crate::floor::{distribute_slab_resolved, distribute_slab_w, FloorDistributionError};
     use sepika_core::model::DistributionMethod;
     let cases = [
+        (
+            vec![
+                [0., 0., 0.],
+                [1000., 1000., 0.],
+                [0., 1000., 0.],
+                [1000., 0., 0.],
+            ],
+            false,
+        ),
         (
             vec![
                 [0., 0., 0.],
@@ -639,7 +660,10 @@ fn enclosed_geometry_errors_precede_rectangle_and_zero_load_dispatch() {
         ),
     ];
     for (coords, unsupported) in cases {
-        assert!(crate::floor::slab_dimensions_of(&coords).is_some());
+        assert_eq!(
+            crate::floor::slab_dimensions_of(&coords).is_some(),
+            unsupported
+        );
         let direct = integrate_polygon(&coords, &[0, 1, 2, 3], Default::default()).unwrap_err();
         assert_eq!(
             matches!(direct, PolygonDistributionError::Unsupported(_)),

@@ -786,6 +786,90 @@ mod tests {
         model
     }
 
+    #[test]
+    fn issue561_gravity_auto_loads_preserve_true_area_and_support_edges() {
+        use sepika_load::floor::{
+            distribute_slab_resolved, distribute_slab_w_with_diagnostics, LoadTarget,
+        };
+        for (points, area_mm2, polygon) in [
+            (
+                [[0., 0.], [1000., 0.], [1500., 1000.], [500., 1000.]],
+                1e6,
+                true,
+            ),
+            (
+                [[0., 0.], [4000., 0.], [4000., 3000.], [0., 3000.]],
+                12e6,
+                false,
+            ),
+        ] {
+            for angle in [0_f64, std::f64::consts::PI / 6.] {
+                for support_reverse in [false, true] {
+                    let mut model = make_square_slab_model();
+                    for (node, [x, y]) in model.nodes.iter_mut().zip(points) {
+                        node.coord = [
+                            x * angle.cos() - y * angle.sin() + 1e6,
+                            x * angle.sin() + y * angle.cos() - 2e6,
+                            0.,
+                        ];
+                    }
+                    if support_reverse {
+                        for element in &mut model.elements {
+                            element.nodes.reverse();
+                        }
+                        for region in &mut model.floor_assignment_regions.regions {
+                            for edge in &mut region.boundary {
+                                edge.span = [1. - edge.span[0], 1. - edge.span[1]];
+                            }
+                        }
+                    }
+                    model.slabs[0].plate.loads[0].value = 0.003;
+                    resolve_massless_slab_sections(&mut model);
+                    let result = distribute_slab_w_with_diagnostics(
+                        &model,
+                        &model.slabs[0],
+                        0.003,
+                        Default::default(),
+                    )
+                    .unwrap();
+                    assert_eq!(result.polygon.is_some(), polygon);
+                    if let Some(d) = result.polygon {
+                        assert!((d.polygon_area_mm2 - area_mm2).abs() < 1e-5);
+                    }
+                    let resolved =
+                        distribute_slab_resolved(&model, &model.slabs[0], 0.003).unwrap();
+                    assert!(
+                        (resolved.iter().map(|l| l.cmq.q_i + l.cmq.q_j).sum::<f64>()
+                            - area_mm2 * 0.003)
+                            .abs()
+                            < 1e-6
+                    );
+                    assert!(resolved
+                        .iter()
+                        .all(|l| matches!(l.target, LoadTarget::Span { .. })));
+                    let gravity = compute_gravity_auto_load_cases(&model).unwrap();
+                    let dl = gravity
+                        .cases
+                        .iter()
+                        .find(|c| c.name == DL_CASE_NAME)
+                        .unwrap();
+                    let mut force_n = 0.;
+                    for load in &dl.member {
+                        assert!(model.elements.iter().any(|e| e.id == load.elem));
+                        force_n += match load.kind {
+                            sepika_core::model::MemberLoadKind::Distributed { a, b, w1, w2 } => {
+                                (b - a) * (w1 + w2) / 2.
+                            }
+                            sepika_core::model::MemberLoadKind::Point { p, .. } => p,
+                        };
+                    }
+                    force_n += dl.nodal.iter().map(|l| -l.values[2]).sum::<f64>();
+                    assert!((force_n.abs() - area_mm2 * 0.003).abs() < 1e-6, "{force_n}");
+                }
+            }
+        }
+    }
+
     fn tip_model() -> Model {
         let node = |id, x| Node {
             id: NodeId(id),
