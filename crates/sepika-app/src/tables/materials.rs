@@ -66,6 +66,10 @@ fn young_editable(category: MaterialCategory, concrete_class: ConcreteClass) -> 
 pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
     use crate::table_util::{self, Col};
 
+    if app.ui.scoped.reset_material_inputs {
+        clear_material_inputs(ui);
+        app.ui.scoped.reset_material_inputs = false;
+    }
     let presets = material_presets();
     let id_preset_draft = egui::Id::new("material_preset_draft");
     let mut draft = ui
@@ -360,6 +364,14 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                     let editable = field != MaterialField::Young
                         || young_editable(mat.category, mat.concrete_class);
                     let cell_id = material_cell_id(mat_id, field, material_id_revision);
+                    ui.data_mut(|d| {
+                        let cells = d.get_temp_mut_or_default::<Vec<egui::Id>>(egui::Id::new(
+                            "material_cell_ids",
+                        ));
+                        if !cells.contains(&cell_id) {
+                            cells.push(cell_id);
+                        }
+                    });
                     let mut buf = ui
                         .data(|d| d.get_temp::<String>(cell_id))
                         .unwrap_or_else(|| current.clone());
@@ -451,6 +463,27 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
         }
     }
     apply_pending_actions(app, pending_focus, pending_delete);
+}
+
+/// load_model が UI scoped を破棄した後、材料表に属する temp だけを破棄する。
+fn clear_material_inputs(ui: &mut egui::Ui) {
+    let registry = egui::Id::new("material_cell_ids");
+    let cells = ui.data(|d| d.get_temp::<Vec<egui::Id>>(registry).unwrap_or_default());
+    for cell in &cells {
+        ui.memory_mut(|m| m.surrender_focus(*cell));
+    }
+    ui.data_mut(|d| {
+        for cell in cells {
+            d.remove::<String>(cell);
+            d.remove::<bool>(cell.with("changed"));
+        }
+        d.remove::<Vec<egui::Id>>(registry);
+        d.remove::<(sepika_core::ids::MaterialId, MaterialField, u64)>(egui::Id::new(
+            "material_active_field",
+        ));
+        d.remove::<[String; 7]>(egui::Id::new("material_custom_draft"));
+        d.remove::<PresetDraft>(egui::Id::new("material_preset_draft"));
+    });
 }
 
 pub(super) fn material_cell_id(

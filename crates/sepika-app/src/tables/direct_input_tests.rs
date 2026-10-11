@@ -65,7 +65,8 @@ const INVALID: [&str; 12] = [
     "NaN", "nan", "inf", "-inf", "Infinity", "∞", "1e309", "-1e309", "abc", "=1+2", "1,234",
     "10 mm",
 ];
-fn material_draft(ctx: &egui::Context, values: [&str; 6]) {
+fn material_draft(ctx: &egui::Context, app: &mut App, values: [&str; 6]) {
+    frame(ctx, app, true, vec![]);
     let mut draft: [String; 7] = Default::default();
     draft[0] = "direct".into();
     for (i, v) in values.iter().enumerate() {
@@ -268,7 +269,11 @@ fn issue546_real_node_add_matrix_preserves_redo_results_and_draft() {
 fn issue546_real_material_add_matrix_is_atomic_and_preserves_redo() {
     let ctx = egui::Context::default();
     let mut app = ready_app();
-    material_draft(&ctx, [" 2.05e5 ", "0.3", "7.85e-9", "24", "235", "1.1"]);
+    material_draft(
+        &ctx,
+        &mut app,
+        [" 2.05e5 ", "0.3", "7.85e-9", "24", "235", "1.1"],
+    );
     click_text(&ctx, &mut app, true, "+ 追加", true);
     let m = app.core.model.materials.last().unwrap();
     assert_eq!(
@@ -284,7 +289,7 @@ fn issue546_real_material_add_matrix_is_atomic_and_preserves_redo() {
         for invalid in INVALID {
             let mut values = ["205000", "0.3", "7.85e-9", "24", "235", "1.1"];
             values[k] = invalid;
-            material_draft(&ctx, values);
+            material_draft(&ctx, &mut app, values);
             click_text(&ctx, &mut app, true, "+ 追加", true);
             assert_eq!(snapshot(&app), before, "{k}: {invalid}");
             assert_eq!(
@@ -297,7 +302,7 @@ fn issue546_real_material_add_matrix_is_atomic_and_preserves_redo() {
     for k in 0..3 {
         let mut values = ["205000", "0.3", "7.85e-9", "", "", ""];
         values[k] = "  ";
-        material_draft(&ctx, values);
+        material_draft(&ctx, &mut app, values);
         click_text(&ctx, &mut app, true, "+ 追加", true);
         assert_eq!(snapshot(&app), before);
     }
@@ -383,7 +388,7 @@ fn issue546_finite_controls_through_real_add_and_single_edit() {
     for text in [" 1e3 ", "0", "-0", "-2.5", "5e-324"] {
         let ctx = egui::Context::default();
         let mut app = App::default();
-        material_draft(&ctx, [text, text, text, text, text, text]);
+        material_draft(&ctx, &mut app, [text, text, text, text, text, text]);
         click_text(&ctx, &mut app, true, "+ 追加", true);
         let value = text.trim().parse::<f64>().unwrap();
         let m = &app.core.model.materials[0];
@@ -413,7 +418,7 @@ fn issue546_finite_controls_through_real_add_and_single_edit() {
     }
     let ctx = egui::Context::default();
     let mut app = App::default();
-    material_draft(&ctx, ["205000", "0.3", "7.85e-9", "  ", "", ""]);
+    material_draft(&ctx, &mut app, ["205000", "0.3", "7.85e-9", "  ", "", ""]);
     click_text(&ctx, &mut app, true, "+ 追加", true);
     assert_eq!(app.core.model.materials[0].fc, None);
     for field in [Fc, Fy, StrengthFactor] {
@@ -491,7 +496,7 @@ fn issue546_real_pending_text_edit_rechecks_deletion_and_category_change() {
     use sepika_edit::MaterialField::Young;
     let ctx = egui::Context::default();
     let mut app = App::default();
-    material_draft(&ctx, ["205000", "0.3", "7.85e-9", "", "", ""]);
+    material_draft(&ctx, &mut app, ["205000", "0.3", "7.85e-9", "", "", ""]);
     click_text(&ctx, &mut app, true, "+ 追加", true);
     begin_cell_edit(&ctx, &mut app, Young, "203000");
     app.core.model.materials[0].category = sepika_core::model::MaterialCategory::Concrete;
@@ -547,7 +552,7 @@ fn issue546_real_signed_zero_changes_all_fields_with_undo_redo() {
     use sepika_edit::MaterialField::*;
     let ctx = egui::Context::default();
     let mut app = App::default();
-    material_draft(&ctx, ["0", "0", "0", "0", "0", "0"]);
+    material_draft(&ctx, &mut app, ["0", "0", "0", "0", "0", "0"]);
     click_text(&ctx, &mut app, true, "+ 追加", true);
     for field in [Young, Poisson, Density, Fc, Fy, StrengthFactor] {
         for text in ["-0", "+0"] {
@@ -582,7 +587,7 @@ fn issue546_real_id_reassignment_never_applies_an_old_draft_to_another_material(
         let ctx = egui::Context::default();
         let mut app = App::default();
         for (name, young) in [("A", "100"), ("B", "200"), ("C", "300")] {
-            material_draft(&ctx, [young, "0.3", "7.85e-9", "", "", ""]);
+            material_draft(&ctx, &mut app, [young, "0.3", "7.85e-9", "", "", ""]);
             ctx.data_mut(|d| {
                 let id = egui::Id::new("material_custom_draft");
                 let mut draft = d.get_temp::<[String; 7]>(id).unwrap();
@@ -637,5 +642,70 @@ fn issue546_real_id_reassignment_never_applies_an_old_draft_to_another_material(
         lose_focus(&ctx, &mut app);
         assert_eq!(app.core.model.materials[0].young, 250.0);
         assert_eq!(app.core.model.materials[1].young, 300.0);
+    }
+}
+
+#[test]
+fn issue546_real_model_switch_discards_material_inputs_only() {
+    use sepika_core::ids::MaterialId;
+    use sepika_edit::{DeleteMaterial, MaterialField::Young};
+    for (new_model, id_change) in [(false, false), (false, true), (true, false), (true, true)] {
+        for draft in ["abc", "150"] {
+            let ctx = egui::Context::default();
+            let mut app = App::default();
+            let mut old = crate::sample::portal_frame();
+            old.materials[0].young = 100.0;
+            old.materials.push(old.materials[0].clone());
+            old.materials.last_mut().unwrap().id = MaterialId(old.materials.len() as u32 - 1);
+            assert!(app.load_model(old));
+            // Keep a rejected old-revision draft as well as the active current cell.
+            begin_cell_edit(&ctx, &mut app, Young, "abc");
+            lose_focus(&ctx, &mut app);
+            let original = super::materials::material_cell_id(MaterialId(0), Young, 0);
+            if id_change {
+                let last = MaterialId(app.core.model.materials.len() as u32 - 1);
+                assert!(app.apply_model_edit(Box::new(DeleteMaterial { id: last })));
+            }
+            begin_cell_edit(&ctx, &mut app, Young, draft);
+            if draft == "abc" {
+                lose_focus(&ctx, &mut app);
+            }
+            let current = super::materials::material_cell_id(
+                MaterialId(0),
+                Young,
+                app.ui.scoped.material_id_revision,
+            );
+            material_draft(&ctx, &mut app, ["123", "0.3", "1", "", "", ""]);
+            let unrelated = egui::Id::new("unrelated_table_draft");
+            ctx.data_mut(|d| d.insert_temp(unrelated, String::from("keep")));
+            if new_model {
+                assert!(app.load_model(sepika_core::Model::with_default_load_cases()));
+                frame(&ctx, &mut app, true, vec![]);
+                material_draft(&ctx, &mut app, ["200", "0.3", "1", "", "", ""]);
+                click_text(&ctx, &mut app, true, "+ 追加", true);
+            } else {
+                let mut replacement = crate::sample::portal_frame();
+                replacement.materials[0].young = 200.0;
+                assert!(app.load_model(replacement));
+            }
+            let before = snapshot(&app);
+            lose_focus(&ctx, &mut app);
+            frame(&ctx, &mut app, true, vec![]);
+            assert_eq!(snapshot(&app), before);
+            assert_eq!(app.core.model.materials[0].young, 200.0);
+            for cell in [original, current] {
+                assert!(ctx.data(|d| d.get_temp::<String>(cell)).is_none());
+                assert!(ctx
+                    .data(|d| d.get_temp::<bool>(cell.with("changed")))
+                    .is_none());
+            }
+            assert_eq!(
+                ctx.data(|d| d.get_temp::<String>(unrelated)).as_deref(),
+                Some("keep")
+            );
+            begin_cell_edit(&ctx, &mut app, Young, "250");
+            lose_focus(&ctx, &mut app);
+            assert_eq!(app.core.model.materials[0].young, 250.0);
+        }
     }
 }
