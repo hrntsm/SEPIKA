@@ -74,7 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
-| [節点材料の直接有限入力_Issue546_2026-10.md](節点材料の直接有限入力_Issue546_2026-10.md) | 節点・材料直接追加／単一失焦／有限判定と履歴・強度元指定保持 | 🔶（直接egui Verification、review修正後edit201件、モデル切替含む追加eguiは新head CI後続） |
+| [節点材料の直接有限入力_Issue546_2026-10.md](節点材料の直接有限入力_Issue546_2026-10.md) | 節点・材料直接追加／単一失焦／有限判定と履歴・強度元指定保持 | 🔶（直接egui Verification、review修正後edit201件、モデル切替・失焦表示含む追加eguiは新head CI後続） |
 | [矩形床の直交分類_Issue561_2026-10.md](矩形床の直交分類_Issue561_2026-10.md) | 閉合/直交/面積、斜め床真面積・支持辺対応、App適用・OVIKA11/5 | 🔶（直接幾何Verification、実験Validation・freshレビュー・最終head全CIは後続） |
 | [固定距離部材荷重の支間内検証_Issue635_2026-10.md](固定距離部材荷重の支間内検証_Issue635_2026-10.md) | 固定位置・区間の共通拒否／追加更新／座標・コピー／正しいhashの不正OVIKA／GUI・MCP | 🔶（入力境界Verification、freshレビュー・最終head全CIは後続） |
 | [主架構支持の解析表現不変性_Issue597_2026-10.md](主架構支持の解析表現不変性_Issue597_2026-10.md) | 明示Beam/Fiber/MSの床壁境界・割当・荷重合力/一次モーメント・編集/Undo/実OVIKA | 🔶（直接Verification、freshレビュー・最終head全CIは後続） |
