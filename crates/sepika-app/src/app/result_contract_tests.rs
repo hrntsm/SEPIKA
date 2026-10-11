@@ -145,6 +145,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-frame-support-representation", Some(8), "旧契約"),
         ("old-signed-reactions", Some(9), "旧契約"),
         ("old-skew-rectangle", Some(10), "旧契約"),
+        ("old-fixed-distance-extents", Some(11), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -776,4 +777,68 @@ fn ovika_current_selected_input_missing_or_mismatched_is_excluded_without_losing
         .member_checks
         .is_empty());
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn issue635_invalid_correct_hash_project_keeps_app_model_and_undo() {
+    use sepika_core::model::{MemberLoad, MemberLoadKind};
+    use sha2::{Digest, Sha256};
+    use std::io::Write;
+    let mut app = calculated();
+    let mut invalid = app.core.model.clone();
+    let elem = invalid.elements[0].id;
+    let length_mm = invalid.member_length(&invalid.elements[0]);
+    invalid.load_cases[0].member.push(MemberLoad::manual(
+        elem,
+        [0.0, 0.0, -1.0],
+        MemberLoadKind::Point {
+            a: length_mm + 0.5,
+            p: 1.0,
+        },
+    ));
+    let bytes = rmp_serde::to_vec_named(&invalid).unwrap();
+    let settings = b"{}";
+    let hash = |b: &[u8]| format!("{:x}", Sha256::digest(b));
+    let manifest = serde_json::json!({"schema_version":1,"units":"internal: N-mm-s","created_by":"independent-635-fixture","entries":[{"name":"model.msgpack","sha256":hash(&bytes)},{"name":"settings.json","sha256":hash(settings)}]});
+    let path = std::env::temp_dir().join(format!(
+        "sepika635-app-invalid-{}.ovika",
+        std::process::id()
+    ));
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+    let options = zip::write::FileOptions::<()>::default();
+    for (name, data) in [
+        ("manifest.json", serde_json::to_vec(&manifest).unwrap()),
+        ("model.msgpack", bytes),
+        ("settings.json", settings.to_vec()),
+    ] {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(&data).unwrap();
+    }
+    zip.finish().unwrap();
+    let before = format!("{:?}", app.core.model);
+    let revision = app.core.scoped.undo.revision();
+    let analysis_version = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .analysis_contract_version;
+    app.open_project_from(path);
+    assert_eq!(format!("{:?}", app.core.model), before);
+    assert_eq!(app.core.scoped.undo.revision(), revision);
+    assert_eq!(
+        app.core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .analysis_contract_version,
+        analysis_version
+    );
+    let reason = app.core.scoped.last_error.as_ref().unwrap();
+    assert!(
+        reason.contains("member[") && reason.contains("部材") && reason.contains("mm"),
+        "{reason}"
+    );
 }

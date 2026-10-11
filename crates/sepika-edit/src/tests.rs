@@ -5486,6 +5486,34 @@ fn test_copy_story_fits_member_load_to_target_length() {
         },
     ));
 
+    for kind in [
+        MemberLoadKind::Point { a: 3500.0, p: 0.0 },
+        MemberLoadKind::Point { a: 3500.5, p: 1.0 },
+        MemberLoadKind::Point { a: 3501.5, p: 1.0 },
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 3500.0,
+            w1: 1.0,
+            w2: -1.0,
+        },
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 3500.5,
+            w1: 1.0,
+            w2: -1.0,
+        },
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 3501.5,
+            w1: 0.0,
+            w2: 0.0,
+        },
+    ] {
+        model.load_cases[0]
+            .member
+            .push(MemberLoad::manual(c2, [1.0, 0.0, 0.0], kind));
+    }
+
     let cmd = CopyStory {
         from: StoryId(1),
         to: vec![StoryId(2)],
@@ -5496,9 +5524,11 @@ fn test_copy_story_fits_member_load_to_target_length() {
         overwrite: true,
     };
     let report = cmd.preview(&model);
-    assert_eq!(report.loads_copied, 2, "収まる 2 件だけ配る");
-    assert_eq!(report.loads_unfit, 1, "材長に収まらない 1 件は配らない");
+    assert_eq!(report.loads_copied, 4, "端点と固定分布は保持する");
+    assert_eq!(report.loads_unfit, 5, "+0.5/+1.5 mm は点・分布とも配らない");
+    assert!(report.summary().contains("5"));
 
+    let before = model.clone();
     let mut stack = UndoStack::new();
     assert!(stack.run(&mut model, Box::new(cmd)));
     let copied: Vec<&MemberLoad> = model.load_cases[0]
@@ -5506,7 +5536,7 @@ fn test_copy_story_fits_member_load_to_target_length() {
         .iter()
         .filter(|l| l.elem == c3)
         .collect();
-    assert_eq!(copied.len(), 2);
+    assert_eq!(copied.len(), 4);
     // 全長載荷は 3500 へ合う。
     assert!(copied.iter().any(|l| matches!(
         l.kind,
@@ -5518,9 +5548,14 @@ fn test_copy_story_fits_member_load_to_target_length() {
         .any(|l| matches!(l.kind, MemberLoadKind::Point { a, .. } if (a - 2000.0).abs() < 1e-9)));
     // 載荷区間が材長を超える荷重は残らない。
     assert!(copied.iter().all(|l| match l.kind {
-        MemberLoadKind::Point { a, .. } => a <= 3500.0 + 1.0,
-        MemberLoadKind::Distributed { b, .. } => b <= 3500.0 + 1.0,
+        MemberLoadKind::Point { a, .. } => a <= 3500.0,
+        MemberLoadKind::Distributed { b, .. } => b <= 3500.0,
     }));
+    let after = model.clone();
+    stack.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&before));
+    stack.redo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&after));
 }
 
 /// 同じ構面のブレースと大梁を、材端の XY だけでは区別できない。
@@ -8379,7 +8414,14 @@ mod member_load_coordinate_contract {
             let reason = undo.last_error().unwrap();
             assert!(reason.contains("荷重ケース 0 (追加)"));
             assert!(reason.contains("member[") && reason.contains("部材 0"));
-            assert!(reason.contains("保持できません"));
+            assert!(
+                reason.contains(if coord == [0.0, 0.0, 0.0] {
+                    "全長追従の材長が非正または非有限"
+                } else {
+                    "分布区間 [1000, 3000] mm"
+                }),
+                "{reason}"
+            );
             let inverse = SetNodeCoord {
                 node: NodeId(1),
                 coord,
@@ -8893,4 +8935,285 @@ fn secondary_cft_assignment_placement_and_shape_changes_leave_model_and_undo_unc
             }
         }
     }
+}
+
+mod fixed_distance_input_contract {
+    use super::*;
+    use sepika_core::model::{LoadCase, LoadCaseKind, MemberLoad, MemberLoadKind};
+
+    fn model() -> Model {
+        let mut model = seeded_model(2, 1);
+        model.nodes[1].coord = [6000.0, 0.0, 0.0];
+        model.load_cases = vec![LoadCase {
+            id: LoadCaseId(0),
+            name: "635対照".into(),
+            kind: LoadCaseKind::Other,
+            nodal: vec![],
+            member: vec![],
+        }];
+        model
+    }
+
+    #[test]
+    fn issue635_add_set_and_model_validation_share_strict_position_bounds() {
+        let points = [
+            -1.0,
+            0.0,
+            3000.0,
+            6000.0,
+            6000.5,
+            6001.5,
+            7000.0,
+            f64::NAN,
+            f64::INFINITY,
+        ];
+        let point_expected = [false, true, true, true, false, false, false, false, false];
+        let intervals = [
+            (-2000.0, -1000.0),
+            (-1000.0, 1000.0),
+            (5000.0, 7000.0),
+            (7000.0, 8000.0),
+            (0.0, 6000.0),
+            (1000.0, 3000.0),
+            (1000.0, 1000.0),
+            (3000.0, 1000.0),
+            (1000.0, 1000.0 + 1e-10),
+            (0.0, 6000.5),
+            (0.0, 6001.5),
+            (f64::NAN, 3000.0),
+            (0.0, f64::INFINITY),
+        ];
+        let interval_expected = [
+            false, false, false, false, true, true, false, false, true, false, false, false, false,
+        ];
+        let kinds = points
+            .into_iter()
+            .zip(point_expected)
+            .map(|(a, ok)| (MemberLoadKind::Point { a, p: 0.0 }, ok))
+            .chain(
+                intervals
+                    .into_iter()
+                    .zip(interval_expected)
+                    .map(|((a, b), ok)| {
+                        (
+                            MemberLoadKind::Distributed {
+                                a,
+                                b,
+                                w1: 1.0,
+                                w2: -1.0,
+                            },
+                            ok,
+                        )
+                    }),
+            );
+        for (kind, expected) in kinds {
+            let load = MemberLoad::manual(ElemId(0), [0.0, 0.0, -1.0], kind);
+            assert_eq!(
+                load.validate_extent(6000.0).is_ok(),
+                expected,
+                "{:?}",
+                load.kind
+            );
+            let mut raw = model();
+            raw.load_cases[0].member.push(load.clone());
+            assert_eq!(raw.validate().is_ok(), expected, "{:?}", load.kind);
+            if !expected {
+                let reason = raw.validate_member_load_extents().unwrap_err();
+                assert!(
+                    reason.contains("荷重ケース 0 (635対照) member[0] 部材 0"),
+                    "{reason}"
+                );
+                assert!(reason.contains("mm"), "{reason}");
+            }
+            let mut model = model();
+            let mut undo = UndoStack::new();
+            let valid = MemberLoad::manual(
+                ElemId(0),
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Point { a: 3000.0, p: 1.0 },
+            );
+            assert!(undo.run(
+                &mut model,
+                Box::new(AddMemberLoad {
+                    lc: LoadCaseId(0),
+                    load: valid
+                })
+            ));
+            undo.undo(&mut model);
+            let before = format!("{model:?}");
+            let revision = undo.revision();
+            assert_eq!(
+                undo.run(
+                    &mut model,
+                    Box::new(AddMemberLoad {
+                        lc: LoadCaseId(0),
+                        load: load.clone()
+                    })
+                ),
+                expected
+            );
+            if !expected {
+                assert_eq!(format!("{model:?}"), before);
+                assert_eq!(undo.revision(), revision);
+                assert!(undo.can_redo());
+                assert!(!undo.can_undo());
+                let reason = undo.last_error().unwrap();
+                assert!(
+                    reason.contains("member[0] 部材 0") && reason.contains("mm"),
+                    "{reason}"
+                );
+                undo.redo(&mut model);
+            }
+            let before = format!("{model:?}");
+            let revision = undo.revision();
+            assert_eq!(
+                undo.run(
+                    &mut model,
+                    Box::new(SetMemberLoad {
+                        lc: LoadCaseId(0),
+                        index: 0,
+                        load
+                    })
+                ),
+                expected
+            );
+            if !expected {
+                assert_eq!(format!("{model:?}"), before);
+                assert_eq!(undo.revision(), revision);
+            }
+        }
+    }
+
+    #[test]
+    fn issue635_single_and_composite_shortening_reject_half_millimetre_overrun() {
+        for overshoot_mm in [0.5, 1.5] {
+            for composite in [false, true] {
+                let mut model = model();
+                model.load_cases[0].member.push(MemberLoad::manual(
+                    ElemId(0),
+                    [0.0, 0.0, -1.0],
+                    MemberLoadKind::Point { a: 6000.0, p: 1.0 },
+                ));
+                let command: Box<dyn EditCommand> = if composite {
+                    Box::new(CompositeCommand {
+                        label: "短縮".into(),
+                        children: vec![
+                            Box::new(SetNodeCoord {
+                                node: NodeId(0),
+                                coord: [1000.0, 0.0, 0.0],
+                            }),
+                            Box::new(SetNodeCoord {
+                                node: NodeId(1),
+                                coord: [7000.0 - overshoot_mm, 0.0, 0.0],
+                            }),
+                        ],
+                    })
+                } else {
+                    Box::new(SetNodeCoord {
+                        node: NodeId(1),
+                        coord: [6000.0 - overshoot_mm, 0.0, 0.0],
+                    })
+                };
+                let before = format!("{model:?}");
+                let mut undo = UndoStack::new();
+                assert!(!undo.run(&mut model, command));
+                assert_eq!(format!("{model:?}"), before);
+                assert_eq!(undo.revision(), 0);
+                assert!(undo.last_error().unwrap().contains("member[0] 部材 0"));
+            }
+        }
+    }
+}
+
+#[test]
+fn issue635_copy_to_6000mm_keeps_exact_endpoints_and_skips_point_and_interval_overruns() {
+    use sepika_core::frame_gen::{frame_model, FrameSpec};
+    use sepika_core::ids::StoryId;
+    use sepika_core::model::{MemberLoad, MemberLoadKind};
+    let mut model = frame_model(&FrameSpec {
+        story_heights: vec![7000.0, 6000.0],
+        ..Default::default()
+    })
+    .unwrap();
+    assign_node_stories(&mut model);
+    let column = |story| {
+        model
+            .elements
+            .iter()
+            .find(|e| {
+                model.member_story(e) == Some(story)
+                    && e.nodes.len() == 2
+                    && model.nodes[e.nodes[0].index()].coord[0] == 0.0
+                    && model.nodes[e.nodes[0].index()].coord[1] == 0.0
+                    && model.nodes[e.nodes[1].index()].coord[0] == 0.0
+                    && model.nodes[e.nodes[1].index()].coord[1] == 0.0
+            })
+            .unwrap()
+            .id
+    };
+    let source = column(StoryId(1));
+    let target = column(StoryId(2));
+    assert_eq!(model.member_length(model.element(source).unwrap()), 7000.0);
+    assert_eq!(model.member_length(model.element(target).unwrap()), 6000.0);
+    for endpoint_mm in [6000.0, 6000.5, 6001.5] {
+        for kind in [
+            MemberLoadKind::Point {
+                a: endpoint_mm,
+                p: 0.0,
+            },
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: endpoint_mm,
+                w1: 1.0,
+                w2: -1.0,
+            },
+        ] {
+            model.load_cases[0]
+                .member
+                .push(MemberLoad::manual(source, [1.0, 0.0, 0.0], kind));
+        }
+    }
+    assert!(model.validate().is_ok());
+    let before = model.clone();
+    let cmd = CopyStory {
+        from: StoryId(1),
+        to: vec![StoryId(2)],
+        targets: CopyTargets {
+            loads: true,
+            ..Default::default()
+        },
+        overwrite: true,
+    };
+    let report = cmd.preview(&model);
+    assert_eq!(report.loads_copied, 2);
+    assert_eq!(report.loads_unfit, 4);
+    assert!(report
+        .summary()
+        .contains("材長に収まらず配れなかった荷重 4 件"));
+    assert!(model.eq_ignoring_dofmap(&before));
+    let mut undo = UndoStack::new();
+    assert!(undo.run(&mut model, Box::new(cmd)));
+    let copied: Vec<_> = model.load_cases[0]
+        .member
+        .iter()
+        .filter(|l| l.elem == target)
+        .collect();
+    assert_eq!(copied.len(), 2);
+    assert!(copied
+        .iter()
+        .any(|l| matches!(l.kind, MemberLoadKind::Point { a: 6000.0, p: 0.0 })));
+    assert!(copied.iter().any(|l| matches!(
+        l.kind,
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 6000.0,
+            w1: 1.0,
+            w2: -1.0
+        }
+    )));
+    let after = model.clone();
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&before));
+    undo.redo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&after));
 }

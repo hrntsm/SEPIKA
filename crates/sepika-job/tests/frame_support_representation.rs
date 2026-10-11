@@ -110,6 +110,7 @@ fn 明示beam_fiber_ms混在は準備後も同じ版荷重と合力一次モー�
                 reference_loads = Some((nodal, member));
             }
             prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
+            model.validate_member_load_extents().unwrap();
             fixture::assert_geometry(&model, wall);
             assert_eq!(
                 (
@@ -214,6 +215,7 @@ fn 中間アンカーの両端支持二次材と二分割版は全解析表現�
                 model.wall_assignment_regions.clone(),
             );
             prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
+            model.validate_member_load_extents().unwrap();
             assert_eq!(
                 model.secondary_member(SecondaryMemberId(0)).unwrap().ends,
                 SecondaryMemberEnds::Supported(anchors)

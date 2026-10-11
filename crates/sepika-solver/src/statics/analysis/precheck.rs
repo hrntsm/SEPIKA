@@ -20,11 +20,6 @@ pub enum IssueTargets {
     Nodes(Vec<NodeId>),
 }
 
-/// 載荷区間が材長を超えているとみなす余裕 [mm]。
-///
-/// 全長載荷は `b = L` で入力されるため、丸め誤差で僅かに超えた分は不備としない。
-const LOAD_EXTENT_TOL_MM: f64 = 1.0;
-
 /// 不備の重大度。
 ///
 /// 診断（[`model_issues`]）は解析を止める不備と、解析は通るが入力の意図を
@@ -1177,40 +1172,6 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             &no_slab_material,
             "断面タブで床の断面へ材料を割り当て、板厚を持つ形状にしてください。",
         )));
-    }
-
-    {
-        use sepika_core::model::MemberLoadKind;
-        let mut over: Vec<u32> = Vec::new();
-        for lc in &model.load_cases {
-            for ml in &lc.member {
-                let Some(elem) = model.elements.get(ml.elem.index()) else {
-                    continue;
-                };
-                let l = model.member_length(elem);
-                if l <= 0.0 {
-                    continue;
-                }
-                let end = match ml.kind {
-                    MemberLoadKind::Point { a, .. } => a,
-                    MemberLoadKind::Distributed { b, .. } => b,
-                };
-                if end > l + LOAD_EXTENT_TOL_MM {
-                    over.push(ml.elem.0);
-                }
-            }
-        }
-        over.sort_unstable();
-        over.dedup();
-        if !over.is_empty() {
-            issues.push(ModelIssue::model(id_list_message(
-                "載荷区間が材長を超える部材荷重があります",
-                "部材 #",
-                &over,
-                "等価節点力の積分が材外へ及び、節点力と固定端内力が誤ります。\
-                 荷重タブで載荷位置を材長の内側へ直してください。",
-            )));
-        }
     }
 
     {

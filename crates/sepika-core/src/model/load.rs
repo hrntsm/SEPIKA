@@ -129,11 +129,25 @@ impl MemberLoad {
         }
     }
 
-    /// 全長追従と分布諸元の整合を検証する。固定距離は検証対象外。
-    /// 全長追従は材長 [mm] が非正・非有限、または指定が矛盾すれば失敗する。
+    /// 材長・位置 [mm] と作用区分を検証する。固定距離は支間内、分布は a < b が必要。
+    /// 材長は有限かつ 1e-9 mm より大きく、全長追従は利用者入力の全長等分布に限る。
     pub fn validate_extent(&self, length_mm: f64) -> Result<(), String> {
         if self.extent == MemberLoadExtent::FixedDistance {
-            return Ok(());
+            if !length_mm.is_finite() || length_mm <= 1e-9 {
+                return Err(format!("材長 L={length_mm} mm が非有限または 1e-9 mm 以下のため荷重区間を保持できません"));
+            }
+            return match self.kind {
+                MemberLoadKind::Point { a, .. }
+                    if a.is_finite() && a >= 0.0 && a <= length_mm => Ok(()),
+                MemberLoadKind::Point { a, .. } => Err(format!(
+                    "集中荷重位置 a={a} mm が材長 {length_mm} mm の範囲外または非有限です"
+                )),
+                MemberLoadKind::Distributed { a, b, .. }
+                    if a.is_finite() && b.is_finite() && a >= 0.0 && a < b && b <= length_mm => Ok(()),
+                MemberLoadKind::Distributed { a, b, .. } => Err(format!(
+                    "分布区間 [{a}, {b}] mm を材長 {length_mm} mm で保持できません（有限な 0≤a<b≤L が必要です）"
+                )),
+            };
         }
         if self.source != LoadSource::Manual {
             return Err("全長追従は利用者入力荷重にのみ指定できます".into());
@@ -459,7 +473,7 @@ impl LoadCfg {
 }
 
 impl Model {
-    /// 全長追従の属性・諸元を検証する。不整合は荷重ケース・部材荷重添字を付けて返す。
+    /// 部材荷重の位置・作用区分を検証する。不整合は荷重ケース・部材荷重添字・対象部材を付けて返す。
     pub fn validate_member_load_extents(&self) -> Result<(), String> {
         for case in &self.load_cases {
             for (index, load) in case.member.iter().enumerate() {
@@ -481,6 +495,33 @@ impl Model {
 #[cfg(test)]
 mod extent_tests {
     use super::*;
+
+    #[test]
+    fn issue635_fixed_distance_rejects_invalid_span_without_restricting_intensity_or_small_intervals(
+    ) {
+        let load = MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Point { a: 0.0, p: 0.0 },
+        );
+        for length_mm in [f64::NAN, f64::INFINITY, -1.0, 0.0, 0.5e-9, 1e-9] {
+            assert!(load.validate_extent(length_mm).is_err(), "L={length_mm} mm");
+        }
+        assert!(load.validate_extent(1.1e-9).is_ok());
+        for (w1, w2) in [(0.0, 0.0), (1.0, -1.0)] {
+            let load = MemberLoad::manual(
+                ElemId(0),
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: 1e-10,
+                    w1,
+                    w2,
+                },
+            );
+            assert!(load.validate_extent(6000.0).is_ok());
+        }
+    }
 
     #[test]
     fn missing_extent_keeps_fixed_distance_even_for_equal_intensity_full_span() {

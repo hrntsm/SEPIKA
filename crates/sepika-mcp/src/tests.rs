@@ -3941,3 +3941,73 @@ async fn secondary_cft_mcp_tool_returns_unavailable_without_totals() {
     drop(server);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn issue635_existing_mcp_analysis_rejects_fixed_distance_and_preserves_model() {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::{LoadCase, LoadCaseKind, MemberLoad, MemberLoadKind};
+    let mut model = rc_column_model();
+    model.nodes[1].coord = [0.0, 0.0, 6000.0];
+    let case_id = LoadCaseId(model.load_cases.len() as u32);
+    model.load_cases.push(LoadCase {
+        id: case_id,
+        name: "635対照".into(),
+        kind: LoadCaseKind::Other,
+        nodal: vec![],
+        member: vec![],
+    });
+    let params = JobParams {
+        load_case: Some(case_id.0),
+        ..Default::default()
+    };
+    for (a, b, expected) in [
+        (1000.0, 3000.0, true),
+        (0.0, 6000.0, true),
+        (7000.0, 8000.0, false),
+        (-1000.0, 1000.0, false),
+        (0.0, 6000.5, false),
+        (0.0, 6001.5, false),
+    ] {
+        model.load_cases[case_id.index()].member = vec![MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Distributed {
+                a,
+                b,
+                w1: 1.0,
+                w2: -1.0,
+            },
+        )];
+        let before = format!("{model:?}");
+        let result = compute_job(&model, JobKind::LinearStatic, &params);
+        assert_eq!(
+            result.is_ok(),
+            expected,
+            "[{a},{b}] mm: {:?}",
+            result.as_ref().err().map(|e| e.to_string())
+        );
+        if !expected {
+            let reason = result.err().unwrap().to_string();
+            assert!(
+                reason.contains("635対照")
+                    && reason.contains("member[0] 部材 0")
+                    && reason.contains("mm"),
+                "{reason}"
+            );
+        }
+        assert_eq!(format!("{model:?}"), before);
+    }
+    let mut state = ServerState::with_fs_store(
+        model,
+        std::env::temp_dir().join(format!("sepika635-mcp-{}", std::process::id())),
+    )
+    .unwrap();
+    for command in ["AddMemberLoad", "SetMemberLoad", "SetNodeCoord"] {
+        let result = apply_edit(&mut state, &serde_json::json!({"command":command}));
+        let reason = result.unwrap_err();
+        assert!(
+            reason.contains(&format!("未対応の command: {command}")),
+            "{reason}"
+        );
+    }
+}

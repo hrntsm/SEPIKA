@@ -1273,27 +1273,22 @@ fn copy_secondary(
 
 /// 部材荷重を複製先の材長へ合わせる。合わせられない場合は `None`。
 fn fit_member_load(
-    kind: sepika_core::model::MemberLoadKind,
-    extent: sepika_core::model::MemberLoadExtent,
+    load: &sepika_core::model::MemberLoad,
     dst_len: f64,
 ) -> Option<sepika_core::model::MemberLoadKind> {
-    use sepika_core::model::MemberLoadKind;
-    match kind {
-        MemberLoadKind::Point { a, p } => {
-            (a <= dst_len + PLAN_TOL_MM).then_some(MemberLoadKind::Point { a, p })
-        }
-        MemberLoadKind::Distributed { a, b, w1, w2 } => {
-            if extent == sepika_core::model::MemberLoadExtent::FullLengthUniform {
-                return Some(MemberLoadKind::Distributed {
-                    a: 0.0,
-                    b: dst_len,
-                    w1,
-                    w2,
-                });
-            }
-            (b <= dst_len + PLAN_TOL_MM).then_some(MemberLoadKind::Distributed { a, b, w1, w2 })
+    let mut candidate = load.clone();
+    if candidate.extent == sepika_core::model::MemberLoadExtent::FullLengthUniform {
+        if let sepika_core::model::MemberLoadKind::Distributed { w1, w2, .. } = candidate.kind {
+            candidate.kind = sepika_core::model::MemberLoadKind::Distributed {
+                a: 0.0,
+                b: dst_len,
+                w1,
+                w2,
+            };
         }
     }
+    candidate.validate_extent(dst_len).ok()?;
+    Some(candidate.kind)
 }
 
 /// 荷重ケースの節点荷重・部材荷重を配る。
@@ -1350,7 +1345,7 @@ fn copy_case_loads(
             let Some(&(e, _src_len, dst_len)) = elem_map.get(&ml.elem) else {
                 continue;
             };
-            match fit_member_load(ml.kind.clone(), ml.extent, dst_len) {
+            match fit_member_load(ml, dst_len) {
                 Some(kind) => add_member.push(sepika_core::model::MemberLoad {
                     elem: e,
                     kind,
