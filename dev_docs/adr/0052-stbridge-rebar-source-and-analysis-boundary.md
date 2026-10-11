@@ -16,3 +16,5 @@ References:
 - [Issue #507](https://github.com/hrntsm/SEPIKA/issues/507)
 - [ADR-0051](0051-stbridge-strength-input-and-section-material.md)
 - [直接検証と未検証境界](../v_and_v/標準配筋_Issue507_2026-10.md)
+
+数値/booleanのXML空白は意味解釈時にだけ処理する。rawの元字句は保持し、共通Applyのtrue/false/0/1と個別優先・partial指定を維持する。enum/stringの許可範囲は変更しない。
