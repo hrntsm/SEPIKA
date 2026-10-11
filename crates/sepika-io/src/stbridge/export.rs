@@ -62,7 +62,7 @@ pub fn export_stbridge(model: &Model) -> Result<String, StbError> {
 
 /// 内部モデルを標準 ST-Bridge 2.0.2 XML 文字列へ出力し、[`ExportReport`] も返す。
 ///
-/// 表現不能な配筋はエラー、円形 RC 梁の `StbSecRaw` フォールバック等は警告として報告する。
+/// 断面未割当の線材・表現不能な配筋はエラー、円形 RC 梁の `StbSecRaw` フォールバック等は警告として報告する。
 pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportReport), StbError> {
     let mut output_model = model.clone();
     output_model
@@ -450,8 +450,9 @@ fn members_body(
                 let sec = e
                     .section
                     .map(|s| role_map.get(&s.0).copied().unwrap_or(s.0))
-                    .map(|v| v as i64)
-                    .unwrap_or(-1);
+                    .ok_or_else(|| StbError::Unmappable(format!(
+                        "主架構部材 ElemId({}): 断面未割当のため必須の断面参照を出力できません。適切な断面を割り当てて再出力してください。", e.id.0
+                    )))?;
                 let rot = rotate_of(e, n0.coord, n1.coord);
                 let ks = kind_structure(model, e);
                 if is_col {
@@ -496,8 +497,10 @@ fn members_body(
             ElementKind::Brace { tension_only } if e.nodes.len() == 2 => {
                 let sec = e
                     .section
-                    .map(|s| brace_map.get(&s.0).copied().unwrap_or(s.0) as i64)
-                    .unwrap_or(-1);
+                    .map(|s| brace_map.get(&s.0).copied().unwrap_or(s.0))
+                    .ok_or_else(|| StbError::Unmappable(format!(
+                        "ブレース ElemId({}): 断面未割当のため必須の断面参照を出力できません。適切な断面を割り当てて再出力してください。", e.id.0
+                    )))?;
                 let feature = if tension_only {
                     "TENSION"
                 } else {
@@ -528,9 +531,17 @@ fn members_body(
                     sepika_core::model::SecondaryMemberKind::Beam => beam_map,
                     sepika_core::model::SecondaryMemberKind::Post => col_map,
                 };
-                role_map.get(&s.0).copied().unwrap_or(s.0) as i64
+                role_map.get(&s.0).copied().unwrap_or(s.0)
             })
-            .unwrap_or(-1);
+            .ok_or_else(|| {
+                let kind = match sm.kind {
+                    sepika_core::model::SecondaryMemberKind::Beam => "小梁",
+                    sepika_core::model::SecondaryMemberKind::Post => "間柱",
+                };
+                StbError::Unmappable(format!(
+                    "{kind} SecondaryMemberId({}) 名称「{}」: 断面未割当のため必須の断面参照を出力できません。適切な断面を割り当てて再出力してください。", sm.id.0, sm.name
+                ))
+            })?;
         let ks = model
             .secondary_material(sm)
             .map(|m| {
@@ -701,13 +712,9 @@ fn members_body(
     Ok(body)
 }
 
-/// 断面参照属性値。負（未参照）は -1、そうでなければ +1 した positiveInteger。
-fn sec_ref(sec_internal: i64) -> String {
-    if sec_internal < 0 {
-        "-1".to_string()
-    } else {
-        format!("{}", sec_internal as u32 + 1)
-    }
+/// 割当済み断面の内部 ID を ST-Bridge の参照 ID に変換する。
+fn sec_ref(sec_internal: u32) -> u32 {
+    sid(sec_internal)
 }
 
 /// 端部接合条件（FIX/PIN）。
