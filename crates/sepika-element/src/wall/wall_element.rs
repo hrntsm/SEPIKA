@@ -236,7 +236,6 @@ impl WallElement {
                 .unwrap_or_else(|| young / (2.0 * (1.0 + mat.poisson)))
                 * stiffness_scale,
             a: area * rebar_factor,
-            a_mass: area,
             iy: lw * t.powi(3) / 12.0,
             iz: t * lw.powi(3) / 12.0 * rebar_factor,
             j: lw * t.powi(3) / 3.0,
@@ -247,7 +246,6 @@ impl WallElement {
                     .unwrap_or_else(|| young / (2.0 * (1.0 + mat.poisson))),
             as_z: r * area / KAPPA_RC,
             length: h,
-            density: mat.density,
             mass_properties: section_mass_properties,
             mass_properties_error: (!rc_mass_properties_valid)
                 .then(|| "RC壁の整合質量には正の Fc が必要です".to_string()),
@@ -447,7 +445,6 @@ impl WallElement {
             col.nodes,
             col.length,
             col.axis,
-            col.density,
             col.mass_properties,
             col.e,
             col.g,
@@ -1854,7 +1851,10 @@ mod tests {
         let n = sepika_core::section_shape::E_STEEL / ec;
         let expected = 150.0 * 4000.0 * (1.0 + (n - 1.0) * 0.0025);
         assert!((wall.column.a - expected).abs() < 1e-6);
-        assert!((wall.column.a_mass - 150.0 * 4000.0).abs() < 1e-9);
+        assert!(
+            (wall.column.mass_properties.mass_per_length - 24.0 / 9.80665e9 * 150.0 * 4000.0).abs()
+                < 1e-12
+        );
     }
 
     /// 側柱があるとせん断断面に算入され、I 形の形状係数 κ が用いられる。

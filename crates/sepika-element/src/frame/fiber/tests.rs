@@ -234,14 +234,12 @@ fn make_test_beam_element(as_val: f64) -> crate::frame::beam::BeamElement {
         e: 205000.0,
         g: 78846.15,
         a: 20000.0,
-        a_mass: 20000.0,
         iy: 16666666.66666667,
         iz: 66666666.66666667,
         j: 0.0,
         as_y: as_val,
         as_z: as_val,
         length: 3000.0,
-        density: 0.0,
         mass_properties: sepika_core::model::SectionMassProperties::default(),
         mass_properties_error: None,
         nodes: [NodeId(0), NodeId(1)],
@@ -491,14 +489,7 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
         let mass_beam = beam.mass_matrix(crate::behavior::MassOption::Consistent);
         let mass_fiber = fiber.mass_matrix(crate::behavior::MassOption::Consistent);
         let lumped_fiber = fiber.mass_matrix(crate::behavior::MassOption::Lumped);
-        let expected_lumped_mass = fiber.density
-            * fiber.gauss_points[0]
-                .section
-                .fibers
-                .iter()
-                .map(|fiber| fiber.area)
-                .sum::<f64>()
-            * fiber.length;
+        let expected_lumped_mass = beam.mass_properties.total_mass(beam.length);
         assert_relative_eq!(
             lumped_fiber.get(0, 0) * 2.0,
             expected_lumped_mass,
@@ -1751,7 +1742,7 @@ fn test_torsional_stiffness_and_internal_force() {
 }
 
 #[test]
-fn 不正な質量特性でもfiberはlumpedで生成できconsistentで失敗する() {
+fn 不正な質量特性でもfiberは静的用に生成でき両質量形式で失敗する() {
     let mut model = build_test_model(Some(78846.15));
     model.materials[0].density = 2.4e-9;
     model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::RcColumnRect {
@@ -1778,15 +1769,14 @@ fn 不正な質量特性でもfiberはlumpedで生成できconsistentで失敗�
         AnalysisKind::Incremental,
     );
     fiber.mass_properties_error = Some("断面形状が不正です".into());
-    assert!(fiber
-        .mass_matrix(crate::behavior::MassOption::Lumped)
-        .data
-        .iter()
-        .all(|v| v.is_finite()));
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        fiber.mass_matrix(crate::behavior::MassOption::Consistent)
-    }));
-    assert!(result.is_err());
+    for opt in [
+        crate::behavior::MassOption::Lumped,
+        crate::behavior::MassOption::Consistent,
+    ] {
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fiber.mass_matrix(opt)));
+        assert!(result.is_err());
+    }
 }
 
 #[test]
@@ -2069,7 +2059,7 @@ fn test_fiber_elastic_stiffness_matches_timoshenko_beam_element() {
 
     let mut be = make_test_beam_element(as_y_elem);
     be.a = area;
-    be.a_mass = area;
+
     be.iy = iy_elem;
     be.iz = iz_elem;
     be.j = j;
@@ -2826,7 +2816,7 @@ fn 剛域ありの弾性剛性は軸以外が弾性梁と厳密一致する() {
 
     let mut be = make_test_beam_element(as_y_elem);
     be.a = area;
-    be.a_mass = area;
+
     be.iy = iy_elem;
     be.iz = iz_elem;
     be.j = j;
@@ -3101,7 +3091,7 @@ fn 材端ピンの弾性剛性が弾性梁と一致する() {
 
     let mut be = make_test_beam_element(as_y_elem);
     be.a = area;
-    be.a_mass = area;
+
     be.iy = iy_elem;
     be.iz = iz_elem;
     be.j = j;
@@ -3709,7 +3699,7 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
     let beam = BeamElement::try_new(data, &model).unwrap();
     let expected_d = [5130576000.0, 30629959872000.0, 150579426048000.0];
     assert_eq!(beam.a, 250272.0);
-    assert_eq!(beam.a_mass, 180000.0);
+    assert!((beam.mass_properties.total_mass(beam.length) - 1.3766168875202032).abs() < 1e-12);
     assert_ne!(beam.iz, model.sections[0].iy);
 
     let full = FiberBeam::try_new(
@@ -3872,6 +3862,36 @@ fn src_nonlinear_entries_reject_invalid_materials_instead_of_provisional_propert
                 )
             }))
             .is_err());
+        }
+    }
+}
+
+#[test]
+fn fiber分割数とgauss積分形式はsrcの両質量形式の算定元にならない() {
+    let model = src_analysis_ratio_model();
+    let data = &model.elements[0];
+    for (nw, nd) in [(2, 5), (6, 10), (12, 20)] {
+        let fiber = FiberBeam::build_plastic_zone(
+            data,
+            &model,
+            300.0,
+            nw,
+            nd,
+            StrengthBasis::Nominal,
+            AnalysisKind::Incremental,
+        );
+        for opt in [
+            crate::behavior::MassOption::Lumped,
+            crate::behavior::MassOption::Consistent,
+        ] {
+            let matrix = fiber.mass_matrix(opt);
+            for d in 0..3 {
+                let total = matrix.get(d, d)
+                    + matrix.get(d, d + 6)
+                    + matrix.get(d + 6, d)
+                    + matrix.get(d + 6, d + 6);
+                assert!((total - 1.3766168875202032).abs() < 1e-10);
+            }
         }
     }
 }

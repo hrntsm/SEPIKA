@@ -74,9 +74,7 @@ pub fn linear_time_history_with_state(
     use_kg: bool,
     record_every: Option<usize>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
-    model
-        .validate_damper_mass_placement()
-        .map_err(SolveError::InvalidInput)?;
+    crate::common::assemble::validate_global_mass_inputs(model)?;
     sepika_math::parallelism::apply_to_faer();
 
     let dt = resolve_dt(newmark.dt, wave)?;
@@ -146,9 +144,7 @@ pub fn linear_time_history_from_state(
     use_kg: bool,
     record_every: Option<usize>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
-    model
-        .validate_damper_mass_placement()
-        .map_err(SolveError::InvalidInput)?;
+    crate::common::assemble::validate_global_mass_inputs(model)?;
     sepika_math::parallelism::apply_to_faer();
 
     let dt = resolve_dt(newmark.dt, wave)?;

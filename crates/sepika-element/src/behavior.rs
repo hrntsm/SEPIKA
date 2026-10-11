@@ -276,6 +276,7 @@ pub trait ElementBehavior: Send + Sync {
     fn update_state(&mut self, _du: &LocalVec, _commit: bool, _ctx: &Ctx) {}
     /// 質量行列を**全体系**で返す。
     /// 回転不変でない整合質量は `M_global = Rᵀ M_local R` の変換を済ませること。
+    /// Beam/Fiber/MS の共通質量特性が未解決なら両形式でpanicする。公開組立は要素ID付きエラーを返す。
     fn mass_matrix(&self, opt: MassOption) -> LocalMat;
     /// 節点変位から部材内力分布を復元する（線形解析の内力回収）。
     ///

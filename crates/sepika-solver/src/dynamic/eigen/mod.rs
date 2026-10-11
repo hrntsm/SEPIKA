@@ -36,9 +36,7 @@ pub fn solve_eigen(
     reducer: &Reducer,
     n_modes: usize,
 ) -> Result<ModalResult, SolveError> {
-    model
-        .validate_damper_mass_placement()
-        .map_err(SolveError::InvalidInput)?;
+    crate::common::assemble::validate_global_mass_inputs(model)?;
     if reducer.n_indep == 0 || n_modes == 0 {
         return Ok(ModalResult {
             omega2: vec![],
