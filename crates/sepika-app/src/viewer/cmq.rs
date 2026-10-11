@@ -525,6 +525,28 @@ mod tests {
         Node,
     };
 
+    #[test]
+    fn signed_cmq_projected_loads_close_both_simple_beam_ends() {
+        let kind = MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 6000.0,
+            w1: 1.0,
+            w2: -1.0,
+        };
+        let loads = [project_load(kind, [0.0, 0.0, -1.0], [0.0, 0.0, 1.0])];
+        assert_eq!(sum_simple_reactions(&loads, 6000.0), (1000.0, -1000.0));
+        for (x, m) in [
+            (0.0, 0.0),
+            (1500.0, 562500.0),
+            (4500.0, -562500.0),
+            (6000.0, 0.0),
+        ] {
+            assert!(
+                (sepika_load::floor::simple_beam_moment_at(&loads, 6000.0, x) - m).abs() < 1e-6
+            );
+        }
+    }
+
     fn mk_node(id: u32, x: f64, y: f64, z: f64) -> Node {
         Node {
             id: NodeId(id),

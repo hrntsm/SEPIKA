@@ -143,6 +143,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-auto-solver", Some(6), "旧契約"),
         ("old-steel-grade-recognition", Some(7), "旧契約"),
         ("old-frame-support-representation", Some(8), "旧契約"),
+        ("old-signed-reactions", Some(9), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -256,6 +257,7 @@ fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_
     for (name, version) in [
         ("design-missing", None),
         ("design-old", Some(0)),
+        ("design-old-signed-reactions", Some(3)),
         ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
     ] {
         let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);
