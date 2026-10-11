@@ -968,7 +968,7 @@ pub fn build_preparation_csv(app: &App) -> String {
 /// 数量積算の CSV 文字列を生成する（GUI 非依存）。
 ///
 /// 部位別の概算数量
-/// （[`sepika_design_jp::quantity::compute_quantity_takeoff`]）を、
+/// （[`sepika_design_jp::quantity::try_compute_quantity_takeoff`]）を、
 /// 部位別・階別・鉄骨種類別・鉄筋径別・明細・注記のセクションに整形する。
 pub fn build_quantity_csv(model: &Model) -> String {
     use sepika_design_jp::quantity::{try_compute_quantity_takeoff, QuantityCfg};

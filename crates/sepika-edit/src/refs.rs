@@ -80,6 +80,13 @@ pub(crate) fn plate_section_ref_ok(model: &Model, id: Option<SectionId>) -> bool
             .is_none_or(|section| !section.is_cft())
 }
 
+pub(crate) fn secondary_section_ref_ok(model: &Model, id: Option<SectionId>) -> bool {
+    section_ref_ok(model, id)
+        && id
+            .and_then(|sid| model.sections.get(sid.index()))
+            .is_none_or(|section| section.secondary_member_use_allowed())
+}
+
 /// 未割当（`None`）も可の材料参照が妥当か。
 pub(crate) fn material_ref_ok(model: &Model, id: Option<MaterialId>) -> bool {
     id.is_none_or(|m| material_exists(model, m))

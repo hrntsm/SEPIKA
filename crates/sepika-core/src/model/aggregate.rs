@@ -1745,7 +1745,31 @@ impl Model {
         }
     }
 
-    /// 二次部材 1 件の断面参照が実在することを検証する。
+    /// 領域内・未割当の全小梁・間柱の断面用途を検証する。
+    pub fn validate_secondary_section_usage(&self) -> Result<(), crate::error::CoreError> {
+        for sm in self.beams().chain(self.posts()) {
+            if let Some(section) = sm.section.and_then(|sid| self.sections.get(sid.index())) {
+                Self::validate_secondary_section_use(sm, section)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// 二次部材の断面用途が不正な場合、部材 ID・種別・断面 ID と理由を返す。
+    pub fn validate_secondary_section_use(
+        sm: &SecondaryMember,
+        section: &Section,
+    ) -> Result<(), crate::error::CoreError> {
+        if !section.secondary_member_use_allowed() {
+            return Err(crate::error::CoreError::InvalidInput(format!(
+                "SecondaryMemberId({}) {:?} -> SectionId({}): 二次部材（小梁・間柱）に CFT 断面は使用できません。CFT は主架構の柱専用です",
+                sm.id.0, sm.kind, section.id.0
+            )));
+        }
+        Ok(())
+    }
+
+    /// 二次部材 1 件の断面参照と用途を検証する。
     pub fn validate_secondary_member(
         sm: &SecondaryMember,
         label: &str,
@@ -1759,6 +1783,7 @@ impl Model {
                     sid.0
                 )));
             }
+            Self::validate_secondary_section_use(sm, &sections[sid.index()])?;
         }
         Ok(())
     }

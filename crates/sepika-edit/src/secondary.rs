@@ -8,15 +8,10 @@ use sepika_core::model::{
 use std::collections::HashSet;
 
 fn secondary_member_ok(model: &Model, sm: &SecondaryMember) -> bool {
-    crate::refs::plate_section_ref_ok(model, sm.section)
+    crate::refs::secondary_section_ref_ok(model, sm.section)
         && model
             .secondary_member_axis(sm)
             .is_some_and(|(_, _, len)| len > 1e-9)
-}
-
-fn cft_section(model: &Model, id: Option<SectionId>) -> bool {
-    id.and_then(|sid| model.sections.get(sid.index()))
-        .is_some_and(|section| section.is_cft())
 }
 
 fn beams_ok(beams: &[SecondaryMember]) -> bool {
@@ -265,7 +260,6 @@ impl EditCommand for SetFloorRegionSecondaryBeams {
         }
         if !beams_ok(&self.beams)
             || !self.beams.iter().all(|sm| secondary_member_ok(model, sm))
-            || !self.beams.iter().all(|sm| !cft_section(model, sm.section))
             || !unique_ids(&self.beams)
         {
             return Box::new(Noop);
@@ -313,7 +307,7 @@ impl EditCommand for SetFloorRegionBeamSection {
         if self.index >= model.floor_regions[ri].secondary_beams.len() {
             return Box::new(Noop);
         }
-        if !crate::refs::plate_section_ref_ok(model, self.section) {
+        if !crate::refs::secondary_section_ref_ok(model, self.section) {
             return Box::new(Noop);
         }
         let old = model.floor_regions[ri].secondary_beams[self.index].section;
@@ -400,7 +394,6 @@ impl EditCommand for SetWallRegionPosts {
         }
         if !posts_ok(&self.posts)
             || !self.posts.iter().all(|sm| secondary_member_ok(model, sm))
-            || !self.posts.iter().all(|sm| !cft_section(model, sm.section))
             || !unique_ids(&self.posts)
         {
             return Box::new(Noop);
@@ -445,7 +438,7 @@ impl EditCommand for SetWallRegionPostSection {
         if self.index >= model.wall_regions[ri].posts.len() {
             return Box::new(Noop);
         }
-        if !crate::refs::plate_section_ref_ok(model, self.section) {
+        if !crate::refs::secondary_section_ref_ok(model, self.section) {
             return Box::new(Noop);
         }
         let old = model.wall_regions[ri].posts[self.index].section;
@@ -692,7 +685,7 @@ impl EditCommand for PlaceSecondaryMember {
     }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         if !self.parent.accepts(self.kind)
-            || !crate::refs::plate_section_ref_ok(model, self.section)
+            || !crate::refs::secondary_section_ref_ok(model, self.section)
         {
             return Box::new(Noop);
         }

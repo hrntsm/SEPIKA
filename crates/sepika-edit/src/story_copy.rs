@@ -807,7 +807,11 @@ fn copy_sections(
             continue;
         };
         let current = secondary_at(model, slot).and_then(|sm| sm.section);
-        if (cmd.overwrite || current.is_none()) && cft_section(model, src_sec) {
+        if (cmd.overwrite || current.is_none())
+            && src_sec
+                .and_then(|sid| model.sections.get(sid.index()))
+                .is_some_and(|section| !section.secondary_member_use_allowed())
+        {
             report.sections_rejected += 1;
             continue;
         }
@@ -822,7 +826,7 @@ fn copy_sections(
         ) else {
             continue;
         };
-        if !crate::refs::plate_section_ref_ok(model, next) {
+        if !crate::refs::secondary_section_ref_ok(model, next) {
             report.sections_rejected += 1;
             continue;
         }
@@ -1219,7 +1223,10 @@ fn copy_secondary(
             report.skipped += 1;
             continue;
         };
-        let rejected_section = cft_section(model, sm.section);
+        let rejected_section = sm
+            .section
+            .and_then(|sid| model.sections.get(sid.index()))
+            .is_some_and(|section| !section.secondary_member_use_allowed());
         if rejected_section {
             report.sections_rejected += 1;
         }

@@ -119,6 +119,9 @@ pub fn pushover_analysis_recording(
     arc_length_dl: f64,
     ductility_method: DuctilityMethod,
 ) -> Result<PushoverResult, String> {
+    model
+        .validate_secondary_section_usage()
+        .map_err(|e| e.to_string())?;
     let n_active = dofmap.n_active();
     if n_active == 0 {
         return Err("no active DOF".into());

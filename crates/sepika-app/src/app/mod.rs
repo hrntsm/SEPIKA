@@ -2510,3 +2510,6 @@ mod assignment_identity_tests;
 pub(crate) mod design_input_tests;
 #[cfg(test)]
 mod result_contract_tests;
+
+#[cfg(test)]
+mod secondary_cft_tests;

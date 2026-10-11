@@ -418,10 +418,11 @@ fn test_wall_weight_reaches_dl_load_case() {
 #[test]
 fn test_split_wall_plates_are_counted_in_quantity() {
     let model = wall_post_model();
-    let takeoff = sepika_design_jp::quantity::compute_quantity_takeoff(
+    let takeoff = sepika_design_jp::quantity::try_compute_quantity_takeoff(
         &model,
         &sepika_design_jp::quantity::QuantityCfg::default(),
-    );
+    )
+    .unwrap();
     let wall_m3: f64 = takeoff
         .items
         .iter()

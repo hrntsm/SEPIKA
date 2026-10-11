@@ -1,7 +1,7 @@
 //! 部位別の数量算定式（概算数量の拾い出し規則）。
 //!
 //! 入力は内部単位系（mm）、出力も mm 系（mm³ / mm² / mm / 個所）。
-//! 単位換算（m³・m²・t）は呼び出し側（[`super::compute_quantity_takeoff`]）で行う。
+//! 単位換算（m³・m²・t）は呼び出し側（[`super::try_compute_quantity_takeoff`]）で行う。
 //!
 //! - [`Haunch`] — 梁端ハンチ寸法
 //! - [`girder_concrete_volume`] — 大梁・基礎梁のコンクリート体積
@@ -16,7 +16,7 @@
 /// 梁端ハンチの寸法（ハンチ端の全幅 Bi・全せい Di とハンチ長さ Li）[mm]。
 ///
 /// 寸法は部材付帯情報（`Model::member_detail_attrs` のハンチ長・せい増分・
-/// 幅増分。剛性には影響しない）から、走査側（`super::compute_quantity_takeoff`）
+/// 幅増分。剛性には影響しない）から、走査側（`super::try_compute_quantity_takeoff`）
 /// が基準断面 B×D への増分を全幅・全せいへ換算して渡す（未入力は `None`）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Haunch {

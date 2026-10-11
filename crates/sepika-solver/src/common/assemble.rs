@@ -72,6 +72,9 @@ pub(crate) fn validate_global_mass_inputs(
     model: &Model,
 ) -> Result<(), sepika_math::solver::SolveError> {
     model
+        .validate_secondary_section_usage()
+        .map_err(|e| sepika_math::solver::SolveError::InvalidInput(e.to_string()))?;
+    model
         .validate_damper_mass_placement()
         .map_err(sepika_math::solver::SolveError::InvalidInput)?;
     model
