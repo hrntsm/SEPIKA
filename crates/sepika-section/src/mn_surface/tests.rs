@@ -343,3 +343,311 @@ fn test_inconsistent_column_rebar_returns_err() {
     );
     assert!(result.is_err(), "不正配筋は Err を返す: {result:?}");
 }
+
+fn src552_shape() -> SectionShape {
+    SectionShape::SrcColumnRect {
+        b: 300.0,
+        d: 600.0,
+        rebar: RcRectColumnRebar {
+            main_dia: 0.0,
+            x: vec![],
+            y: vec![],
+            cover: 40.0,
+            hoop: RectColumnHoop {
+                dia: 0.0,
+                pitch: 100.0,
+                legs_x: 0,
+                legs_y: 0,
+            },
+        },
+        steel_height: 400.0,
+        steel_width: 200.0,
+        steel_web_thick: 8.0,
+        steel_flange_thick: 12.0,
+    }
+}
+
+#[test]
+fn src552_independent_area_centroid_inertia_and_elastic_oracle() {
+    let shape = src552_shape();
+    let ring = AnnulusRes {
+        n_theta: 48,
+        n_r_thin: 4,
+        n_r_solid: 12,
+    };
+    let mut previous = [f64::INFINITY; 4];
+    for target in [150.0, 37.5, 30.0, 15.0, 7.5, 3.75] {
+        let fibers = plastic_fibers_at(&shape, &StrengthParams::default(), target, ring).unwrap();
+        let mut errors = [0.0; 4];
+        for (i, (region, area, iy, iz)) in [
+            (
+                FiberRegion::Concrete,
+                172192.0,
+                5183851349.333333,
+                1333983957.3333333,
+            ),
+            (
+                FiberRegion::Steel,
+                7808.0,
+                216148650.6666667,
+                16016042.6666667,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let selected: Vec<_> = fibers.iter().filter(|f| f.region == region).collect();
+            assert_relative_eq!(
+                selected.iter().map(|f| f.area).sum::<f64>(),
+                area,
+                max_relative = 1e-10
+            );
+            for moment in [
+                selected.iter().map(|f| f.area * f.y).sum::<f64>(),
+                selected.iter().map(|f| f.area * f.z).sum::<f64>(),
+            ] {
+                assert!(moment.abs() / (area * 600.0) < 1e-10);
+            }
+            let actual_iy = selected.iter().map(|f| f.area * f.z.powi(2)).sum::<f64>();
+            let actual_iz = selected.iter().map(|f| f.area * f.y.powi(2)).sum::<f64>();
+            errors[2 * i] = (actual_iy / iy - 1.0).abs();
+            errors[2 * i + 1] = (actual_iz / iz - 1.0).abs();
+        }
+        for (error, old) in errors.into_iter().zip(previous) {
+            assert!(error <= old + 1e-12);
+        }
+        previous = errors;
+        let ea: f64 = fibers
+            .iter()
+            .map(|f| {
+                f.area
+                    * if f.region == FiberRegion::Concrete {
+                        20500.0
+                    } else {
+                        205000.0
+                    }
+            })
+            .sum();
+        let ei: f64 = fibers
+            .iter()
+            .map(|f| {
+                f.area
+                    * f.z.powi(2)
+                    * if f.region == FiberRegion::Concrete {
+                        20500.0
+                    } else {
+                        205000.0
+                    }
+            })
+            .sum();
+        assert_relative_eq!(ea, 5130576000.0, max_relative = 1e-10);
+        assert_relative_eq!(ea * 1e-4, 513057.6, max_relative = 1e-10);
+        assert_relative_eq!(529064.0 - ea * 1e-4, 16006.4, max_relative = 1e-10);
+        assert_relative_eq!(axial_capacity(&fibers).0, -5967488.0, max_relative = 1e-10);
+        println!(
+            "SRC552 target={target} I relative errors={errors:?}, EI error={}",
+            (ei / 150579426048000.0 - 1.0).abs()
+        );
+        if target == 3.75 {
+            assert!(errors.iter().all(|e| *e < 0.001));
+            assert_relative_eq!(ei, 150579426048000.0, max_relative = 0.001);
+        }
+    }
+}
+
+#[test]
+fn src552_mn_mphi_and_discrete_rebar_use_corrected_regions() {
+    let mut shape = src552_shape();
+    for kind in [YieldModelKind::MultiFiber, YieldModelKind::MultiSpring] {
+        let fibers = plastic_fibers(&shape, &StrengthParams::default(), kind).unwrap();
+        assert_relative_eq!(
+            fibers.iter().map(|f| f.area).sum::<f64>(),
+            180000.0,
+            max_relative = 1e-10
+        );
+        let surface = build_surface(&fibers, kind, 8, 16);
+        for p in &surface.grid[8] {
+            assert_relative_eq!(p[0], -5967488.0, max_relative = 1e-10);
+        }
+        assert!(m_phi_curve(&fibers, 1.0, 0.0, 0.0, 20).is_some());
+    }
+    if let SectionShape::SrcColumnRect { rebar, .. } = &mut shape {
+        rebar.main_dia = 20.0;
+        rebar.x = vec![2];
+        rebar.y = vec![2];
+    }
+    let fibers = plastic_fibers(
+        &shape,
+        &StrengthParams::default(),
+        YieldModelKind::MultiFiber,
+    )
+    .unwrap();
+    let bars: Vec<_> = fibers
+        .iter()
+        .filter(|f| f.region == FiberRegion::Rebar)
+        .collect();
+    assert_eq!(bars.len(), 4);
+    for f in &bars {
+        assert_eq!(f.y.abs(), 100.0);
+        assert_eq!(f.z.abs(), 250.0);
+    }
+    let ar = 4.0 * sepika_core::section_shape::one_bar_area(20.0);
+    assert_relative_eq!(
+        fibers.iter().map(|f| f.area).sum::<f64>(),
+        180000.0 + ar,
+        max_relative = 1e-10
+    );
+}
+
+#[test]
+fn src552_rejects_invalid_geometry_material_and_bar_interference() {
+    let valid = src552_shape();
+    for value in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        for index in 0..6 {
+            let mut shape = valid.clone();
+            if let SectionShape::SrcColumnRect {
+                b,
+                d,
+                steel_height,
+                steel_width,
+                steel_web_thick,
+                steel_flange_thick,
+                ..
+            } = &mut shape
+            {
+                *[
+                    b,
+                    d,
+                    steel_height,
+                    steel_width,
+                    steel_web_thick,
+                    steel_flange_thick,
+                ][index] = value;
+            }
+            assert!(shape.validate_rebar().is_err());
+            assert!(plastic_fibers(
+                &shape,
+                &StrengthParams::default(),
+                YieldModelKind::MultiFiber
+            )
+            .is_err());
+        }
+    }
+    for index in 0..3 {
+        let mut strength = StrengthParams::default();
+        *[
+            &mut strength.concrete_fc,
+            &mut strength.steel_fy,
+            &mut strength.steel_e,
+        ][index] = f64::NAN;
+        assert!(plastic_fibers(&valid, &strength, YieldModelKind::MultiFiber).is_err());
+    }
+    let mut shape = valid;
+    if let SectionShape::SrcColumnRect {
+        rebar,
+        steel_height,
+        ..
+    } = &mut shape
+    {
+        rebar.main_dia = 20.0;
+        rebar.x = vec![2];
+        rebar.y = vec![2];
+        *steel_height = 485.0;
+    }
+    let error = shape.validate_rebar().unwrap_err().to_string();
+    assert!(error.contains("主筋1") && error.contains("干渉"), "{error}");
+    assert!(plastic_fibers(
+        &shape,
+        &StrengthParams::default(),
+        YieldModelKind::MultiSpring
+    )
+    .is_err());
+}
+
+#[test]
+fn src552_rebar_strength_overlap_and_outside_are_rejected() {
+    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar};
+    let mut shape = SectionShape::SrcBeamRect {
+        b: 300.0,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: 20.0,
+            top: vec![2],
+            bottom: vec![2],
+            cover: 40.0,
+            stirrup: BeamStirrup {
+                dia: 0.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+        steel_height: 400.0,
+        steel_width: 200.0,
+        steel_web_thick: 8.0,
+        steel_flange_thick: 12.0,
+    };
+    let strength = StrengthParams {
+        rebar_fy: f64::NAN,
+        ..Default::default()
+    };
+    assert!(plastic_fibers(&shape, &strength, YieldModelKind::MultiFiber).is_err());
+    if let SectionShape::SrcBeamRect { rebar, .. } = &mut shape {
+        rebar.top = vec![];
+        rebar.bottom = vec![];
+    }
+    assert!(plastic_fibers(&shape, &strength, YieldModelKind::MultiFiber).is_ok());
+    for (count, cover) in [(20, 40.0), (2, 310.0)] {
+        if let SectionShape::SrcBeamRect { rebar, .. } = &mut shape {
+            rebar.top = vec![count];
+            rebar.cover = cover;
+        }
+        assert!(shape.validate_rebar().is_err());
+        assert!(plastic_fibers(
+            &shape,
+            &StrengthParams::default(),
+            YieldModelKind::MultiSpring
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn src552_h_containment_plate_topology_and_target_are_required() {
+    let valid = src552_shape();
+    let ring = AnnulusRes {
+        n_theta: 48,
+        n_r_thin: 4,
+        n_r_solid: 12,
+    };
+    for target in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert!(plastic_fibers_at(&valid, &StrengthParams::default(), target, ring).is_err());
+    }
+    for (width, height, tw, tf) in [
+        (301.0, 400.0, 8.0, 12.0),
+        (200.0, 601.0, 8.0, 12.0),
+        (200.0, 400.0, 201.0, 12.0),
+        (200.0, 400.0, 8.0, 200.0),
+    ] {
+        let mut shape = valid.clone();
+        if let SectionShape::SrcColumnRect {
+            steel_width,
+            steel_height,
+            steel_web_thick,
+            steel_flange_thick,
+            ..
+        } = &mut shape
+        {
+            *steel_width = width;
+            *steel_height = height;
+            *steel_web_thick = tw;
+            *steel_flange_thick = tf;
+        }
+        assert!(shape.validate_rebar().is_err());
+        assert!(plastic_fibers_at(&shape, &StrengthParams::default(), 10.0, ring).is_err());
+    }
+    let mut shape = valid;
+    if let SectionShape::SrcColumnRect { b, .. } = &mut shape {
+        *b = f64::MAX;
+    }
+    assert!(plastic_fibers_at(&shape, &StrengthParams::default(), 10.0, ring).is_err());
+}

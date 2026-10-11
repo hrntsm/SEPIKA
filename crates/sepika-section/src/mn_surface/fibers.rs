@@ -165,6 +165,43 @@ fn mesh_h_plates(
     mesh_rect(fibers, [0.0, 0.0], web_thick, hw, target, mat);
 }
 
+fn mesh_src_concrete(
+    fibers: &mut Vec<PlasticFiber>,
+    outer: [f64; 2],
+    h: [f64; 4],
+    target: f64,
+    mat: FiberMat,
+) {
+    let [b, d] = outer;
+    let [height, width, tw, tf] = h;
+    for sign in [-1.0, 1.0] {
+        mesh_rect(
+            fibers,
+            [0.0, sign * (d + height) / 4.0],
+            b,
+            (d - height) / 2.0,
+            target,
+            mat,
+        );
+        mesh_rect(
+            fibers,
+            [sign * (b + width) / 4.0, 0.0],
+            (b - width) / 2.0,
+            height,
+            target,
+            mat,
+        );
+        mesh_rect(
+            fibers,
+            [sign * (width + tw) / 4.0, 0.0],
+            (width - tw) / 2.0,
+            height - 2.0 * tf,
+            target,
+            mat,
+        );
+    }
+}
+
 /// 箱形の 4 枚板をメッシュ化して追加する。
 fn mesh_box_plates(
     fibers: &mut Vec<PlasticFiber>,
@@ -522,6 +559,29 @@ pub fn plastic_fibers_at(
     shape
         .rounded_steel_properties()
         .map_err(RebarGeometryError::SectionGeometry)?;
+    shape.validate_src_geometry()?;
+    if matches!(
+        shape,
+        SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
+    ) {
+        for value in [strength.concrete_fc, strength.steel_fy, strength.steel_e] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(RebarGeometryError::SectionGeometry(
+                    "SRCのFc・鉄骨fy・Eは正の有限値が必要です".into(),
+                ));
+            }
+        }
+    }
+    let src_has_rebar = match shape {
+        SectionShape::SrcBeamRect { rebar, .. } => !rebar.is_unset(),
+        SectionShape::SrcColumnRect { rebar, .. } => !rebar.is_unset(),
+        _ => false,
+    };
+    if src_has_rebar && (!strength.rebar_fy.is_finite() || strength.rebar_fy <= 0.0) {
+        return Err(RebarGeometryError::SectionGeometry(
+            "SRC主筋fyは正の有限値が必要です".into(),
+        ));
+    }
     let fy = strength.steel_fy;
     let fc = strength.concrete_fc;
     let steel = FiberMat {
@@ -794,7 +854,18 @@ pub fn plastic_fibers_at(
             steel_web_thick,
             steel_flange_thick,
         } => {
-            mesh_rect(&mut fibers, [0.0, 0.0], b, d, target, conc);
+            mesh_src_concrete(
+                &mut fibers,
+                [b, d],
+                [
+                    steel_height,
+                    steel_width,
+                    steel_web_thick,
+                    steel_flange_thick,
+                ],
+                target,
+                conc,
+            );
             let positions = rebar.bar_positions(b, d)?;
             rebar_fibers_from_points(
                 &mut fibers,
@@ -822,7 +893,18 @@ pub fn plastic_fibers_at(
             steel_web_thick,
             steel_flange_thick,
         } => {
-            mesh_rect(&mut fibers, [0.0, 0.0], b, d, target, conc);
+            mesh_src_concrete(
+                &mut fibers,
+                [b, d],
+                [
+                    steel_height,
+                    steel_width,
+                    steel_web_thick,
+                    steel_flange_thick,
+                ],
+                target,
+                conc,
+            );
             let positions = rebar.bar_positions(b, d)?;
             rebar_fibers_from_points(
                 &mut fibers,
@@ -918,6 +1000,50 @@ pub fn plastic_fibers_at(
         return Err(RebarGeometryError::SectionGeometry(
             "ファイバーの面積・図心を有限値で算定できません。寸法と分割を確認してください".into(),
         ));
+    }
+    if matches!(
+        shape,
+        SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
+    ) {
+        let mut total_i = [0.0; 2];
+        for region in [FiberRegion::Concrete, FiberRegion::Steel] {
+            let sums =
+                fibers
+                    .iter()
+                    .filter(|f| f.region == region)
+                    .fold([0.0; 5], |mut sums, f| {
+                        sums[0] += f.area;
+                        sums[1] += f.area * f.y;
+                        sums[2] += f.area * f.z;
+                        sums[3] += f.area * f.y.powi(2);
+                        sums[4] += f.area * f.z.powi(2);
+                        sums
+                    });
+            if sums.iter().any(|v| !v.is_finite()) || sums[0] <= 0.0 {
+                return Err(RebarGeometryError::SectionGeometry(
+                    "SRCの生成材料面積・一次/二次モーメントが不正です".into(),
+                ));
+            }
+            total_i[0] += sums[3];
+            total_i[1] += sums[4];
+        }
+        let stiffness = fibers.iter().fold([0.0; 3], |mut stiffness, f| {
+            let ea = f.young * f.area;
+            stiffness[0] += ea;
+            stiffness[1] += ea * f.y.powi(2);
+            stiffness[2] += ea * f.z.powi(2);
+            stiffness
+        });
+        if stiffness.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+            return Err(RebarGeometryError::SectionGeometry(
+                "SRCの生成断面EA/EIは正の有限値が必要です".into(),
+            ));
+        }
+        if total_i.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+            return Err(RebarGeometryError::SectionGeometry(
+                "SRCの生成断面Iは正の有限値が必要です".into(),
+            ));
+        }
     }
     Ok(fibers)
 }
