@@ -548,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn out_of_span_cmq_keeps_existing_projected_reactions() {
+    fn out_of_span_cmq_uses_original_interval_without_centroid_clamp() {
         let kind = MemberLoadKind::Distributed {
             a: 7000.0,
             b: 8000.0,
@@ -556,11 +556,16 @@ mod tests {
             w2: 1.0,
         };
         let loads = [project_load(kind, [0.0, 0.0, -1.0], [0.0, 0.0, 1.0])];
-        assert_eq!(sum_simple_reactions(&loads, 6000.0), (0.0, 1000.0));
-        for x in [0.0, 1500.0, 4500.0, 6000.0] {
+        assert_eq!(sum_simple_reactions(&loads, 6000.0), (-250.0, 1250.0));
+        for (x, m) in [
+            (0.0, 0.0),
+            (1500.0, -375000.0),
+            (4500.0, -1125000.0),
+            (6000.0, -1500000.0),
+        ] {
             assert_eq!(
                 sepika_load::floor::simple_beam_moment_at(&loads, 6000.0, x),
-                0.0
+                m
             );
         }
     }

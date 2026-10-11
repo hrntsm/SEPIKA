@@ -61,8 +61,8 @@ pub(crate) fn fem_trapezoid(w0: f64, a: f64, b: f64, l: f64) -> Cmq {
 }
 
 /// 単純梁の符号付き反力 [N] を (i端, j端) の順で返す。位置・支間は [mm]。
-/// 点位置は支間内へ制限する。分布は原区間を用い、a<0またはb>支間の場合だけ既存の重心閾値・反力比制限を保つ。
-/// 区間長≤1e−9は0。正常区間では符号付き反力比を制限しない。
+/// 点位置は支間内へ制限し、分布は原区間を用いる。区間長≤1e−9は0。
+/// 反力比は制限しない。正常域外の物理的妥当性は保証しない。
 /// 支間は非負を前提とし、1e−9以下なら合力を半分ずつ返す。負支間の点荷重はpanicする。
 pub fn simple_reactions(load: &MemberLoadKind, l: f64) -> (f64, f64) {
     let (total, first_moment) = match *load {
@@ -73,16 +73,6 @@ pub fn simple_reactions(load: &MemberLoadKind, l: f64) -> (f64, f64) {
                 return (0.0, 0.0);
             }
             let total = (w1 + w2) / 2.0 * h;
-            if l > 1e-9 && (a < 0.0 || b > l) {
-                // 支間外の入力は今回の数学保証域ではなく、既存の配分を保持する。
-                let xbar = if (w1 + w2).abs() < 1e-12 {
-                    a + h / 2.0
-                } else {
-                    a + h * (w1 + 2.0 * w2) / (3.0 * (w1 + w2))
-                };
-                let t = (xbar / l).clamp(0.0, 1.0);
-                return (total * (1.0 - t), total * t);
-            }
             (total, a * total + h * h * (w1 + 2.0 * w2) / 6.0)
         }
     };
