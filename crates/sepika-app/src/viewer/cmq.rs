@@ -547,6 +547,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn out_of_span_cmq_keeps_existing_projected_reactions() {
+        let kind = MemberLoadKind::Distributed {
+            a: 7000.0,
+            b: 8000.0,
+            w1: 1.0,
+            w2: 1.0,
+        };
+        let loads = [project_load(kind, [0.0, 0.0, -1.0], [0.0, 0.0, 1.0])];
+        assert_eq!(sum_simple_reactions(&loads, 6000.0), (0.0, 1000.0));
+        for x in [0.0, 1500.0, 4500.0, 6000.0] {
+            assert_eq!(
+                sepika_load::floor::simple_beam_moment_at(&loads, 6000.0, x),
+                0.0
+            );
+        }
+    }
+
     fn mk_node(id: u32, x: f64, y: f64, z: f64) -> Node {
         Node {
             id: NodeId(id),

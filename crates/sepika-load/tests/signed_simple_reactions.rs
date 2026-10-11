@@ -198,3 +198,23 @@ fn signed_point_superposition_and_floor_range_adapter() {
 fn negative_span_point_keeps_existing_floor_adapter_panic() {
     simple_reactions(&MemberLoadKind::Point { a: 0.0, p: 1000.0 }, -1.0);
 }
+
+#[test]
+fn out_of_span_distributions_keep_existing_floor_adapter_values() {
+    // 域外値は既存配分の回帰。正常域の独立静力学受入とは分ける。
+    for (a, b, w1, w2, expected_i, expected_j, tolerance_n) in [
+        (7000.0, 8000.0, 1.0, 1.0, 0.0, 1000.0, 1e-9),
+        (-2000.0, -1000.0, 1.0, 1.0, 1000.0, 0.0, 1e-9),
+        (-2000.0, 1000.0, 1.0, 1.0, 3000.0, 0.0, 1e-9),
+        (5000.0, 8000.0, 1.0, 1.0, 0.0, 3000.0, 1e-9),
+        (-1000.0, 7000.0, 1.0, 1.0, 4000.0, 4000.0, 1e-9),
+        (-1000.0, 7000.0, 1.0, -1.0, 0.0, 0.0, 1e-9),
+        (-1000.0, 7000.0, 1e-13, 0.0, 2e-10, 2e-10, 1e-24),
+        (7000.0, 8000.0, 1e-13, 0.0, 0.0, 5e-11, 1e-24),
+        (-2000.0, 1000.0, 1e-13, 0.0, 1.5e-10, 0.0, 1e-24),
+    ] {
+        let (ri, rj) = simple_reactions(&MemberLoadKind::Distributed { a, b, w1, w2 }, 6000.0);
+        close(ri, expected_i, tolerance_n);
+        close(rj, expected_j, tolerance_n);
+    }
+}
