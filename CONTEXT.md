@@ -291,7 +291,7 @@ CFT 断面の鋼管の内法で囲まれたコンクリート。鉄筋を持た�
 階生成が節点の物理質量相当重量 `node_mass_equiv` の全量（質量方式に依らない）から算定して `Story` に保存する、質点系解析用の層質量データ。物理質量相当重量・質量重心・質量重心まわりの回転慣性 J を持つ。未算定は `None` で、質点系解析は設計重量へフォールバックせずエラーとする（[ADR-0035](dev_docs/adr/0035-lumped-mass-physical-mass.md)）。
 
 **断面質量特性（SectionMassProperties）**:
-整合質量が用いる、線材断面の材料領域から積分した単位長さ当たり質量と、断面 y 軸・z 軸まわりの単位長さ当たり質量二次モーメント。Lumped は Beam の density×a_mass、Fiber の density×ΣAf を質量源とし、CFT の density は鋼管・コアの総質量と合計面積から求めた等価密度を用いる。
+線材断面の幾何と採用密度を共通resolverで解決した、単位長さ当たり質量と断面 y 軸・z 軸まわりの単位長さ当たり質量二次モーメント。Lumped・Consistent の両形式が同じ SectionMassProperties を用い、ファイバーの応力積分面積・材料履歴とは独立に算定する。
 
 **ダンパーの直接入力総重量**:
 ダンパーとしてモデル化した範囲の支持部・付加重量も含む総重量 W [N]。別にモデル化する支持部の重量は含まない（実装済みの判断は [ADR-0040](dev_docs/adr/0040-damper-total-weight-and-mass-source.md)）。
