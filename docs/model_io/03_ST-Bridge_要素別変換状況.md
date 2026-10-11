@@ -247,3 +247,5 @@ ST-Bridge 2.0.2 の圧延 H・Box は正の `r` が必須です。
 **実装参照**：既定値の適用は `sepika_io::stbridge::import`（`crates/sepika-io/src/stbridge/import/{parser.rs, assemble.rs}`）が担い、支点の自動設定は `sepika_io::stbridge::import::assemble::auto_assign_supports` が行います。
 
 </div>
+
+標準配筋の未対応診断は部材だけでなく、配筋を使うRC/SRC接合部・PCa水平接合面・耐震壁側柱でも理由付きで検定を止めます。実際に使う断面だけを対象にし、未使用断面や鋼材だけのパネルへ広げません。SRC柱・梁の標準出力は採用XSDの子順（図形、配筋、鉄骨図形）を守り、全文XSDと原配筋の意味往復を別検証しています。
