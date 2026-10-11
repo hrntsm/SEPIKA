@@ -92,9 +92,7 @@ pub fn nonlinear_time_history_analysis(
     initial_vel: &[f64],
     cfg: NonlinearThCfg,
 ) -> Result<ResponseResult, SolveError> {
-    model
-        .validate_damper_mass_placement()
-        .map_err(SolveError::InvalidInput)?;
+    crate::common::assemble::validate_global_mass_inputs(model)?;
     sepika_math::parallelism::apply_to_faer();
 
     sepika_element::factory::ensure_nonlinear_input_with_basis(

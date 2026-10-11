@@ -67,21 +67,51 @@ pub fn add_support_spring_diag(model: &Model, dofmap: &DofMap, triplets: &mut Ve
     }
 }
 
-/// 全体質量行列を組み立てる。
-/// 質量源は「部材密度による要素質量」と「節点集中質量（`Node::mass`）」の 2 つで、
-/// どちらを算入するかはモデルの質量方式（`Model::mass_method`）に従う。
-/// ダンパー入力・配置・生成質量の反映が不正な場合は `InvalidInput` を返す。
-pub fn assemble_global_m(
+/// 要素質量を採用する線材・壁の共通質量入力を、生成前に対象ID付きで診断する。
+pub(crate) fn validate_global_mass_inputs(
     model: &Model,
-    dofmap: &DofMap,
-    opt: sepika_element::behavior::MassOption,
-) -> Result<SparseColMat<usize, f64>, sepika_math::solver::SolveError> {
+) -> Result<(), sepika_math::solver::SolveError> {
     model
         .validate_damper_mass_placement()
         .map_err(sepika_math::solver::SolveError::InvalidInput)?;
     model
         .validate_wall_weight_generation()
         .map_err(sepika_math::solver::SolveError::InvalidInput)?;
+    if model.mass_method != sepika_core::model::MassMethod::LumpedOnly {
+        for elem in &model.elements {
+            if model.uses_damper_total_weight(elem) {
+                continue;
+            }
+            if matches!(
+                elem.kind,
+                ElementKind::Wall
+                    | ElementKind::Beam
+                    | ElementKind::Fiber
+                    | ElementKind::MultiSpring
+                    | ElementKind::Brace { .. }
+            ) {
+                model.element_mass_properties(elem).map_err(|reason| {
+                    sepika_math::solver::SolveError::InvalidInput(format!(
+                        "要素 ID {} の質量特性: {reason}",
+                        elem.id.0
+                    ))
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 全体質量行列を組み立てる。
+/// 質量源は「部材密度による要素質量」と「節点集中質量（`Node::mass`）」の 2 つで、
+/// どちらを算入するかはモデルの質量方式（`Model::mass_method`）に従う。
+/// 要素の共通質量特性・ダンパー入力・配置・生成質量が不正なら `InvalidInput` を返す。
+pub fn assemble_global_m(
+    model: &Model,
+    dofmap: &DofMap,
+    opt: sepika_element::behavior::MassOption,
+) -> Result<SparseColMat<usize, f64>, sepika_math::solver::SolveError> {
+    validate_global_mass_inputs(model)?;
     let mut all_triplets = Vec::new();
     if model.mass_method != sepika_core::model::MassMethod::LumpedOnly {
         for elem in &model.elements {

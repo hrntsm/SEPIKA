@@ -11256,7 +11256,7 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
     let beam = BeamElement::try_new(&elem, &model).unwrap();
     assert_eq!(beam.a, p.area_ax);
     assert_eq!(beam.iz, p.iy);
-    assert_eq!(beam.a_mass, 180000.0);
+    assert!((beam.mass_properties.mass_per_length - 25.0 / 9.80665e9 * 180000.0).abs() < 1e-12);
     assert!((beam.e * beam.iz - 150579426048000.0).abs() < 0.1);
     let mut app = App::default();
     app.load_model(model.clone());

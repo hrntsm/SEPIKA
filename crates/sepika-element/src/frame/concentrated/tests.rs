@@ -10,14 +10,12 @@ fn make_test_beam() -> crate::frame::beam::BeamElement {
         e: 205000.0,
         g: 78846.15,
         a: 80000.0,
-        a_mass: 80000.0,
         iy: 1.0666667e9,
         iz: 1.0666667e9,
         j: 0.0,
         as_y: 66666.67,
         as_z: 66666.67,
         length: 3000.0,
-        density: 0.0,
         mass_properties: sepika_core::model::SectionMassProperties::default(),
         mass_properties_error: None,
         nodes: [NodeId(0), NodeId(1)],
@@ -238,10 +236,7 @@ fn test_condense_springs_zero_stiffness() {
 fn test_consistent_mass_uses_initial_end_spring_stiffness_after_yield() {
     let mut elastic = make_test_beam();
     elastic.mass_properties = sepika_core::model::SectionMassProperties::uniform(
-        2.4e-9,
-        elastic.a_mass,
-        elastic.iz,
-        elastic.iy,
+        2.4e-9, elastic.a, elastic.iz, elastic.iy,
     );
     let mut elem = ConcentratedSpringBeam::new_one_component(
         elastic,
@@ -267,7 +262,7 @@ fn test_consistent_mass_uses_initial_end_spring_stiffness_after_yield() {
     let mut beam_before = make_test_beam();
     beam_before.mass_properties = sepika_core::model::SectionMassProperties::uniform(
         2.4e-9,
-        beam_before.a_mass,
+        beam_before.a,
         beam_before.iz,
         beam_before.iy,
     );

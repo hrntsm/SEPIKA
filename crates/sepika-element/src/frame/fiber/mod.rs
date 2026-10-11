@@ -597,7 +597,6 @@ pub struct FiberBeam {
     pub flex_length: f64,
     pub nodes: [NodeId; 2],
     pub gauss_points: Vec<GaussPoint>,
-    pub density: f64,
     pub mass_properties: SectionMassProperties,
     pub mass_properties_error: Option<String>,
     /// ねじり定数 J [mm⁴]。
@@ -665,7 +664,6 @@ impl FiberBeam {
         } else {
             sec.map(|s| s.j).unwrap_or(0.0)
         };
-        let density = beam_props.density;
         let e = beam_props.e;
         let g = beam_props.g;
         let sec_iy = beam_props.iz;
@@ -738,7 +736,6 @@ impl FiberBeam {
             trial_int,
             nodes: [data.nodes[0], data.nodes[1]],
             gauss_points,
-            density,
             mass_properties: beam_props.mass_properties,
             mass_properties_error: beam_props.mass_properties_error,
             torsion_j,
@@ -801,7 +798,6 @@ impl FiberBeam {
         nodes: [NodeId; 2],
         length: f64,
         axis: crate::transform::LocalFrame,
-        density: f64,
         mass_properties: SectionMassProperties,
         e: f64,
         g: f64,
@@ -844,7 +840,6 @@ impl FiberBeam {
             trial_int: SmallVec::new(),
             nodes,
             gauss_points,
-            density,
             mass_properties,
             mass_properties_error: None,
             torsion_j,
@@ -1588,26 +1583,17 @@ impl ElementBehavior for FiberBeam {
     }
 
     fn mass_matrix(&self, opt: MassOption) -> LocalMat {
+        let mass_properties = self
+            .mass_properties_error
+            .as_ref()
+            .map_or(self.mass_properties, |error| {
+                panic!("質量特性を解決できません: {error}")
+            });
         match opt {
-            MassOption::Lumped => crate::frame::prismatic::lumped_mass(
-                self.density
-                    * self.gauss_points.first().map_or(0.0, |point| {
-                        point
-                            .section
-                            .fibers
-                            .iter()
-                            .map(|fiber| fiber.area)
-                            .sum::<f64>()
-                    })
-                    * self.length,
-            ),
+            MassOption::Lumped => {
+                crate::frame::prismatic::lumped_mass(mass_properties.total_mass(self.length))
+            }
             MassOption::Consistent => {
-                let mass_properties = self
-                    .mass_properties_error
-                    .as_ref()
-                    .map_or(self.mass_properties, |error| {
-                        panic!("質量特性を解決できません: {error}")
-                    });
                 let flex = crate::frame::prismatic::consistent_mass_timoshenko(
                     mass_properties,
                     self.flex_length,

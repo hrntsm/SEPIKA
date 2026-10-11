@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [共通断面質量_Issue594_2026-10.md](共通断面質量_Issue594_2026-10.md) | 両質量形式・幾何/採用密度・直接/公開診断・旧契約2成果 | 🔶（ローカルVerification、freshレビュー・最終head全CI後続、Validation未） |
 | [標準配筋_Issue507_2026-10.md](標準配筋_Issue507_2026-10.md) | 原配筋・役割/pos/適用、標準出力、OVIKA/編集/解析ゲート | 🔶（製品検証中、原図幾何・最終head全CI未） |
 | [標準鋼材名の厳密解決_Issue590_2026-10.md](標準鋼材名の厳密解決_Issue590_2026-10.md) | strict名称・標準物性/F・公開STB未知名/明示物性/native | 🔶（名称Verification、種類別F原典全照合・Validation・最終head全CI未） |
 | [大梁横補剛参考数_Issue488_2026-10.md](大梁横補剛参考数_Issue488_2026-10.md) | 材種・H断面・柱間全長/group・支配区間・GUI/MCP参考状態 | 🔶（参考式Verification、配置/性能・Validationは未対応） |
@@ -183,6 +184,7 @@
 | 1 | ティモシェンコ梁 | sepika-element | beam.rs | `test_phi_zero_converges_to_bernoulli`（Bernoulli 極限。軸 EA/L・ねじり GJ/L を含む 12×12 成分。テスト再編により旧 `test_beam_axial_stiffness`・`test_beam_torsion_stiffness` を統合）, `test_torsion_not_stiffened_by_rigid_zone`（剛域ありでもねじりは GJ/L のまま） | P1 | ✅ |
 | 1b | SRC解析用弾性係数比 | sepika-core / sepika-element / sepika-solver / sepika-app / sepika-design-jp | section_shape/composite.rs, frame/beam/stiffness_factors.rs, app/preparation.rs | `src_analysis_ratio_matches_independent_rectangular_h_section` / `src_loaded_and_edited_materials_never_use_provisional_analysis_properties` / `src_invalid_ec_and_poisson_are_analysis_errors` / `allowable_bending_ratio_boundaries_are_separate_from_analysis_ratio` | 横断 | 🔶（原本全式/実験未） |
 | 1a | 線材の整合質量 | sepika-core / sepika-element / sepika-solver | model/mass.rs, frame/prismatic.rs, frame/rigid_arm.rs, beam/behavior.rs, fiber/mod.rs, frame/truss.rs, dynamic/eigen/tests.rs | 材料領域入口・共通実装・`rigid_zone_mass`・`transform_mass`・Beam/Fiber/Truss 質量入口・座標変換。Truss の受入 P2 回帰は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md)。Fiber の非線形 factory 生成は確認済みだが、solver の固有値組立は線形 `BeamElement` 経路であり、Fiber 固有値は未検証。対応テストと条件は [整合質量_2026-09.md](整合質量_2026-09.md) の追跡表を正とする | P1/P2 | 🔶（Kbb 特異時の失敗経路・Fiber 固有値未検証を含む。Truss P2 回帰は検証済み） |
+| 1c | 共通断面質量（両行列形式） | sepika-core / sepika-element / sepika-solver / sepika-app | mass.rs・beam/fiber・assemble.rs・result_contract.rs | [Issue594独立oracleと入口](共通断面質量_Issue594_2026-10.md) | 横断 | 🔶（Verification、全CI・freshレビュー後続、Validation未） |
 | 1b | 明示線材自重・ダンパー総重量 | sepika-core / sepika-load / sepika-solver / sepika-job / sepika-edit / sepika-app / sepika-io | story_gen/tests.rs, tests/weight_mass.rs, tests/damper_mass_errors.rs, dynamic/lumped_mass/model.rs・job/lumped_mass.rs, load_case.rs・edit/tests.rs, app/tests.rs, model/tests.rs, ovika.rs | [Issue #422 検証](明示線材とダンパー総重量_Issue422_2026-10.md) のテスト対応表。実M・両方式・重量／配置・ゼロ追加・公開フレーム／質点系入口・undo／保存を含む | P1/P2 | ✅（Verification） |
 | 2 | 剛域あり梁 | sepika-element | beam.rs | `test_apply_auto_rigid_zones_and_manual_protection`, `test_auto_rigid_zone_only_when_all_members_are_rc`（自動剛域の適用と手動端の保護・適用条件。テスト再編により旧 `test_auto_rigid_zone_standard_formula` を統合） | P1 | 🔶 |
 | 3 | 端部ばね（ピン・半剛） | sepika-element | beam.rs | `test_pinned_end_rotation_stiffness_exactly_zero`（テスト再編により旧 `test_pinned_end_releases_moment` を統合） | P1 | 🔶 |

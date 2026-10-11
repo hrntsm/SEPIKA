@@ -225,44 +225,18 @@ impl BeamElement {
             Ok(properties) => (properties, None),
             Err(error) => (Default::default(), Some(error)),
         };
-        let (density, a_mass) = if sec.is_cft() {
-            if let Some(error) = &mass_properties_error {
-                return Err(error.clone());
-            }
-            let shape = sec.shape.as_ref().ok_or("CFT の形状が未設定です")?;
-            let core = shape
-                .try_cft_core_props()?
-                .ok_or("CFT コアを解決できません")?;
-            let area = shape.try_calc_area()? + core.area;
-            (mass_properties.mass_per_length / area, area)
-        } else {
-            let area = match &sec.shape {
-                Some(
-                    shape @ (SectionShape::SteelH {
-                        root_r: Some(_), ..
-                    }
-                    | SectionShape::SteelBox {
-                        corner_r: Some(_), ..
-                    }),
-                ) => shape.try_calc_area()?,
-                _ => sec.resolved_area()?,
-            };
-            (mat.density, area)
-        };
 
         Ok(Self {
             id: data.id,
             e,
             g,
             a: a_stiff,
-            a_mass,
             iy,
             iz,
             j,
             as_y,
             as_z,
             length: len,
-            density,
             mass_properties,
             mass_properties_error,
             nodes: [n0, n1],

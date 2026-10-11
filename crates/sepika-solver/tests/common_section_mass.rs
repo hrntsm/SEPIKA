@@ -1,0 +1,715 @@
+use sepika_core::dof::{Dof6Mask, DofMap};
+use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
+use sepika_core::model::{
+    AnalysisKind, ElementData, ElementKind, EndCondition, ForceRegime, LoadCase, LoadCaseKind,
+    LocalAxis, MassMethod, Material, MaterialCategory, Model, Node, Section,
+};
+use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+use sepika_element::behavior::{Ctx, ElementBehavior, LocalMat, LocalVec, MassOption};
+use sepika_element::factory::StrengthBasis;
+use sepika_element::frame::{
+    beam::BeamElement, fiber::FiberBeam, multi_spring::MultiSpringElement,
+};
+use sepika_math::solver::SolveError;
+use sepika_solver::common::{assemble::assemble_global_m, constraint::Reducer};
+use sepika_solver::dynamic::damping::{Damping, DampingAccumulation};
+use sepika_solver::dynamic::eigen::solve_eigen;
+use sepika_solver::dynamic::timehistory::{
+    linear_time_history_analysis, nonlinear_time_history_analysis, GroundMotion, NewmarkCfg,
+    NonlinearThCfg,
+};
+
+const LENGTH_MM: f64 = 3000.0;
+const SRC_MASS_T: f64 = 1.3766168875202032;
+
+fn rebar(count: u32) -> RcRectColumnRebar {
+    RcRectColumnRebar {
+        main_dia: if count == 0 { 0.0 } else { 19.0 },
+        x: if count == 0 { vec![] } else { vec![count] },
+        y: if count == 0 { vec![] } else { vec![count] },
+        cover: 40.0,
+        hoop: RectColumnHoop {
+            dia: 10.0,
+            pitch: 100.0,
+            legs_x: 2,
+            legs_y: 2,
+        },
+    }
+}
+
+fn src(count: u32, steel_height: f64) -> SectionShape {
+    SectionShape::SrcColumnRect {
+        b: 300.0,
+        d: 600.0,
+        rebar: rebar(count),
+        steel_height,
+        steel_width: 100.0,
+        steel_web_thick: 6.0,
+        steel_flange_thick: 9.0,
+    }
+}
+
+fn fixture(shape: Option<SectionShape>, category: MaterialCategory) -> Model {
+    let mut section = shape.map_or_else(
+        || Section {
+            area: 12345.0,
+            width: 300.0,
+            depth: 600.0,
+            iy: 8.0e8,
+            iz: 2.0e8,
+            j: 1.0e6,
+            as_y: 10000.0,
+            as_z: 10000.0,
+            ..Section::zero(SectionId(0), "保存AとbDが異なる".into())
+        },
+        |shape| shape.to_section(SectionId(0), "独立質量fixture".into()),
+    );
+    section.material = Some(MaterialId(0));
+    section.rebar_material = Some(MaterialId(1));
+    section.shear_rebar_material = Some(MaterialId(1));
+    section.steel_material = Some(MaterialId(2));
+    let material = |id, category, density, young, fc, fy| Material {
+        id: MaterialId(id),
+        name: format!("material-{id}"),
+        category,
+        density,
+        young,
+        poisson: 0.3,
+        fc,
+        fy,
+        shear: None,
+        strength_factor: None,
+        concrete_class: Default::default(),
+    };
+    Model {
+        nodes: [[0.0, 0.0, 0.0], [LENGTH_MM, 0.0, 0.0]]
+            .into_iter()
+            .enumerate()
+            .map(|(i, coord)| Node {
+                id: NodeId(i as u32),
+                coord,
+                restraint: Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            })
+            .collect(),
+        elements: vec![ElementData {
+            id: ElemId(0),
+            kind: ElementKind::Beam,
+            nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 1.0, 0.0],
+            },
+            end_cond: [EndCondition::Fixed; 2],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        }],
+        sections: vec![section],
+        materials: vec![
+            material(
+                0,
+                category,
+                if category == MaterialCategory::Steel {
+                    7.85e-9
+                } else {
+                    2.4e-9
+                },
+                205000.0,
+                if category == MaterialCategory::Steel {
+                    None
+                } else {
+                    Some(24.0)
+                },
+                Some(235.0),
+            ),
+            material(
+                1,
+                MaterialCategory::Rebar,
+                7.85e-9,
+                200000.0,
+                None,
+                Some(400.0),
+            ),
+            material(
+                2,
+                MaterialCategory::Steel,
+                7.85e-9,
+                205000.0,
+                None,
+                Some(235.0),
+            ),
+        ],
+        ..Default::default()
+    }
+}
+
+fn assert_mass(matrix: &LocalMat, expected_t: f64, opt: MassOption) {
+    for d in 0..3 {
+        let translation = matrix.get(d, d)
+            + matrix.get(d, d + 6)
+            + matrix.get(d + 6, d)
+            + matrix.get(d + 6, d + 6);
+        assert!(
+            (translation - expected_t).abs() < 1e-10,
+            "direction {d}: {translation} vs {expected_t}"
+        );
+        if matches!(opt, MassOption::Lumped) {
+            assert!((matrix.get(d, d) - expected_t / 2.0).abs() < 1e-12);
+            assert!((matrix.get(d + 6, d + 6) - expected_t / 2.0).abs() < 1e-12);
+            assert_eq!(matrix.get(d + 3, d + 3), 0.0);
+            assert_eq!(matrix.get(d + 9, d + 9), 0.0);
+        }
+    }
+}
+
+fn verify_direct_and_public(model: &Model, mass_t: f64) {
+    let data = &model.elements[0];
+    let beam = BeamElement::try_new(data, model).unwrap();
+    let fiber = FiberBeam::try_new(
+        data,
+        model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    )
+    .unwrap_or_else(|reason| panic!("{:?}: {reason}", model.sections[0].shape));
+    let ms = MultiSpringElement::new(
+        data,
+        model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    );
+    for opt in [MassOption::Lumped, MassOption::Consistent] {
+        for elem in [&beam as &dyn ElementBehavior, &fiber, &ms] {
+            assert_mass(&elem.mass_matrix(opt), mass_t, opt);
+        }
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let mut model = model.clone();
+            model.elements[0].kind = kind;
+            let dofmap = DofMap::build(&model);
+            let global = assemble_global_m(&model, &dofmap, opt).unwrap().to_dense();
+            for d in 0..3 {
+                let indices = [
+                    dofmap.active(d).unwrap() as usize,
+                    dofmap.active(d + 6).unwrap() as usize,
+                ];
+                let total: f64 = indices
+                    .iter()
+                    .flat_map(|&i| indices.iter().map(move |&j| (i, j)))
+                    .map(|(i, j)| global[(i, j)])
+                    .sum();
+                assert!((total - mass_t).abs() < 1e-10);
+            }
+        }
+    }
+}
+
+#[test]
+fn geometry_and_adopted_density_are_independent_mass_oracles_for_all_frame_forms() {
+    let s = fixture(
+        Some(SectionShape::SteelFlatBar {
+            width: 200.0,
+            thick: 20.0,
+        }),
+        MaterialCategory::Steel,
+    );
+    verify_direct_and_public(&s, 4000.0 * 7.85e-9 * LENGTH_MM);
+    let rc = fixture(
+        Some(SectionShape::RcColumnRect {
+            b: 300.0,
+            d: 600.0,
+            rebar: rebar(4),
+        }),
+        MaterialCategory::Concrete,
+    );
+    verify_direct_and_public(&rc, 180000.0 * 24.0 / 9.80665e9 * LENGTH_MM);
+    let src = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+    verify_direct_and_public(&src, SRC_MASS_T);
+    assert!((SRC_MASS_T - 1.296).abs() > 0.01);
+    assert!((SRC_MASS_T - 1.3522176).abs() > 0.01);
+    for thick in [10.0, 20.0] {
+        let cft = fixture(
+            Some(SectionShape::CftBox {
+                height: 600.0,
+                width: 300.0,
+                thick,
+                corner_r: Some(0.0),
+            }),
+            MaterialCategory::Concrete,
+        );
+        let core_area = (600.0 - 2.0 * thick) * (300.0 - 2.0 * thick);
+        let steel_area = 180000.0 - core_area;
+        let mass_t = (steel_area * 7.85e-9 + core_area * 23.0 / 9.80665e9) * LENGTH_MM;
+        verify_direct_and_public(&cft, mass_t);
+    }
+    let shapeless = fixture(None, MaterialCategory::Steel);
+    verify_direct_and_public(&shapeless, 12345.0 * 7.85e-9 * LENGTH_MM);
+}
+
+#[test]
+fn reinforcement_and_src_steel_area_do_not_change_inclusive_mass() {
+    for count in [0, 2, 4] {
+        let rc = fixture(
+            Some(SectionShape::RcColumnRect {
+                b: 300.0,
+                d: 600.0,
+                rebar: rebar(count),
+            }),
+            MaterialCategory::Concrete,
+        );
+        verify_direct_and_public(&rc, 180000.0 * 24.0 / 9.80665e9 * LENGTH_MM);
+        for h in [200.0, 400.0] {
+            verify_direct_and_public(
+                &fixture(Some(src(count, h)), MaterialCategory::Concrete),
+                SRC_MASS_T,
+            );
+        }
+    }
+}
+
+#[test]
+fn fiber_gauss_points_tangents_history_and_missing_mesh_do_not_supply_mass() {
+    let model = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+    let data = &model.elements[0];
+    let mut fiber = FiberBeam::new(
+        data,
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    );
+    let ctx = Ctx { model: &model };
+    let before = [
+        fiber.mass_matrix(MassOption::Lumped),
+        fiber.mass_matrix(MassOption::Consistent),
+    ];
+    fiber.update_state(
+        &LocalVec {
+            data: smallvec::smallvec![
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0, -0.01
+            ],
+        },
+        true,
+        &ctx,
+    );
+    for gp in &mut fiber.gauss_points {
+        gp.xi = 0.0;
+        gp.weight = 100.0;
+        gp.trial_stress.fill(1.0e8);
+        gp.trial_et.fill(0.0);
+        for fiber in &mut gp.section.fibers {
+            fiber.area *= 100.0;
+        }
+        for material in &mut gp.mats {
+            material.trial(0.2);
+            material.commit();
+        }
+    }
+    for (i, opt) in [MassOption::Lumped, MassOption::Consistent]
+        .into_iter()
+        .enumerate()
+    {
+        assert_eq!(fiber.mass_matrix(opt).data, before[i].data);
+    }
+    fiber.gauss_points.clear();
+    let mut ms = MultiSpringElement::new(
+        data,
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    );
+    ms.inner.gauss_points.clear();
+    ms.springs.clear();
+    for opt in [MassOption::Lumped, MassOption::Consistent] {
+        assert_mass(&fiber.mass_matrix(opt), SRC_MASS_T, opt);
+        assert_mass(&ms.mass_matrix(opt), SRC_MASS_T, opt);
+    }
+}
+
+#[test]
+fn global_mass_projects_fixed_dofs_and_adds_node_mass() {
+    let mut model = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+    model.nodes[0].restraint = Dof6Mask::FIXED;
+    model.nodes[1].mass = Some([0.1, 0.2, 0.3, 0.0, 0.0, 0.0]);
+    let dofmap = DofMap::build(&model);
+    let global = assemble_global_m(&model, &dofmap, MassOption::Lumped)
+        .unwrap()
+        .to_dense();
+    for d in 0..3 {
+        let active = dofmap.active(6 + d).unwrap() as usize;
+        assert!((global[(active, active)] - SRC_MASS_T / 2.0 - 0.1 * (d + 1) as f64).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn both_mass_options_reject_invalid_density_with_element_id_and_lumped_only_bypasses_it() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+        ElementKind::Brace {
+            tension_only: false,
+        },
+    ] {
+        for density in [-1.0, f64::NAN, f64::INFINITY] {
+            let mut model = fixture(None, MaterialCategory::Steel);
+            model.elements[0].kind = kind;
+            model.materials[0].density = density;
+            let dofmap = DofMap::build(&model);
+            for opt in [MassOption::Lumped, MassOption::Consistent] {
+                let error = assemble_global_m(&model, &dofmap, opt).unwrap_err();
+                assert!(matches!(error, SolveError::InvalidInput(_)));
+                let reason = error.to_string();
+                assert!(
+                    reason.contains("要素 ID 0") && reason.contains("密度"),
+                    "{reason}"
+                );
+            }
+            model.mass_method = MassMethod::LumpedOnly;
+            assert!(assemble_global_m(&model, &dofmap, MassOption::Lumped).is_ok());
+            assert!(assemble_global_m(&model, &dofmap, MassOption::Consistent).is_ok());
+        }
+    }
+    let mut zero = fixture(None, MaterialCategory::Steel);
+    zero.materials[0].density = 0.0;
+    verify_direct_and_public(&zero, 0.0);
+}
+
+fn constrained(model: &mut Model) {
+    model.nodes[0].restraint = Dof6Mask::FIXED;
+    model.load_cases.push(LoadCase {
+        id: LoadCaseId(0),
+        name: "質量不要".into(),
+        kind: LoadCaseKind::Dead,
+        nodal: vec![],
+        member: vec![],
+    });
+}
+
+#[test]
+fn cft_mass_only_failure_allows_static_but_public_dynamic_analyses_return_diagnostics() {
+    let mut model = fixture(
+        Some(SectionShape::CftBox {
+            height: 600.0,
+            width: 300.0,
+            thick: 10.0,
+            corner_r: Some(0.0),
+        }),
+        MaterialCategory::Concrete,
+    );
+    constrained(&mut model);
+    model.materials[0].density = f64::NAN;
+    assert!(BeamElement::try_new(&model.elements[0], &model).is_ok());
+    assert!(sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(0)).is_ok());
+    assert_public_dynamic_mass_error(&model);
+}
+
+fn assert_public_dynamic_mass_error(model: &Model) {
+    let dofmap = DofMap::build(model);
+    let reducer = Reducer::build(model, &dofmap);
+    let check = |error: SolveError| {
+        assert!(matches!(error, SolveError::InvalidInput(_)));
+        assert!(error.to_string().contains("要素 ID 0"), "{error}");
+    };
+    check(solve_eigen(model, &dofmap, &reducer, 1).unwrap_err());
+    let wave = GroundMotion {
+        dt: 0.01,
+        accel_x: vec![0.0; 3],
+        accel_y: None,
+        accel_theta: None,
+    };
+    let newmark = NewmarkCfg::average_accel();
+    let damping = Damping::Rayleigh {
+        h1: 0.02,
+        w1: 1.0,
+        h2: 0.02,
+        w2: 2.0,
+    };
+    let init = vec![0.0; reducer.n_indep];
+    check(
+        linear_time_history_analysis(
+            model, &dofmap, &reducer, &wave, &newmark, &damping, &init, &init, false, None,
+        )
+        .unwrap_err(),
+    );
+    check(
+        nonlinear_time_history_analysis(
+            model,
+            &dofmap,
+            &reducer,
+            &wave,
+            &newmark,
+            &damping,
+            DampingAccumulation::default(),
+            &init,
+            &init,
+            NonlinearThCfg::default(),
+        )
+        .unwrap_err(),
+    );
+}
+
+#[test]
+fn angled_rotated_rigid_and_released_members_preserve_geometry_mass() {
+    let mut model = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+    model.nodes[1].coord = [1000.0, 2000.0, 2000.0];
+    model.elements[0].local_axis.ref_vector = [0.2, 0.7, -0.3];
+    model.elements[0].rigid_zone.length_i = 200.0;
+    model.elements[0].rigid_zone.length_j = 300.0;
+    for condition in [
+        EndCondition::Fixed,
+        EndCondition::Pinned,
+        EndCondition::SemiRigid { k_theta: 2.0e8 },
+    ] {
+        model.elements[0].end_cond[0] = condition;
+        verify_direct_and_public(&model, SRC_MASS_T);
+    }
+}
+
+#[test]
+fn direct_mass_api_retains_errors_instead_of_density_or_zero_fallbacks() {
+    let mut model = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+    model.materials[0].density = f64::NAN;
+    let data = &model.elements[0];
+    let beam = BeamElement::try_new(data, &model).unwrap();
+    let fiber = FiberBeam::try_new(
+        data,
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    )
+    .unwrap();
+    let ms = MultiSpringElement::new(
+        data,
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+    );
+    for elem in [&beam as &dyn ElementBehavior, &fiber, &ms] {
+        for opt in [MassOption::Lumped, MassOption::Consistent] {
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| elem.mass_matrix(opt)));
+            assert!(result.is_err());
+        }
+    }
+}
+
+#[test]
+fn public_mass_rejects_invalid_dimensions_radii_and_required_materials_before_factory() {
+    for mutation in 0..5 {
+        let mut model = fixture(
+            Some(SectionShape::CftBox {
+                height: 600.0,
+                width: 300.0,
+                thick: 10.0,
+                corner_r: Some(0.0),
+            }),
+            MaterialCategory::Concrete,
+        );
+        match mutation {
+            0 => {
+                if let Some(SectionShape::CftBox { thick, .. }) = &mut model.sections[0].shape {
+                    *thick = 200.0;
+                }
+            }
+            1 => {
+                if let Some(SectionShape::CftBox { corner_r, .. }) = &mut model.sections[0].shape {
+                    *corner_r = None;
+                }
+            }
+            2 => model.sections[0].steel_material = None,
+            3 => model.materials[0].fc = None,
+            _ => model.sections[0].material = None,
+        }
+        let dofmap = DofMap::build(&model);
+        for opt in [MassOption::Lumped, MassOption::Consistent] {
+            let error = assemble_global_m(&model, &dofmap, opt).unwrap_err();
+            assert!(matches!(error, SolveError::InvalidInput(_)));
+            assert!(error.to_string().contains("要素 ID 0"));
+        }
+        assert_public_dynamic_mass_error(&model);
+    }
+}
+
+#[test]
+fn public_eigen_and_timehistories_use_projected_common_mass_for_elastic_axial_response() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = fixture(None, MaterialCategory::Steel);
+        model.elements[0].kind = kind;
+        model.sections[0].area = 20000.0;
+        model.sections[0].width = 100.0;
+        model.sections[0].depth = 200.0;
+        model.nodes[0].restraint = Dof6Mask::FIXED;
+        model.nodes[1].restraint = Dof6Mask(0b111110);
+        let dofmap = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &dofmap);
+        let mass_t = 20000.0 * 7.85e-9 * LENGTH_MM / 3.0;
+        let stiffness_n_mm = 205000.0 * 20000.0 / LENGTH_MM;
+        let omega_sq = stiffness_n_mm / mass_t;
+        let eigen = solve_eigen(&model, &dofmap, &reducer, 1).unwrap();
+        assert!((eigen.omega2[0] / omega_sq - 1.0).abs() < 1e-10);
+        let dt = 0.0001;
+        let wave = GroundMotion {
+            dt,
+            accel_x: vec![0.0; 2],
+            accel_y: None,
+            accel_theta: None,
+        };
+        let newmark = NewmarkCfg::average_accel();
+        let damping = Damping::Rayleigh {
+            h1: 0.0,
+            w1: 1.0,
+            h2: 0.0,
+            w2: 2.0,
+        };
+        let u0 = [0.001];
+        let v0 = [0.0];
+        // 一自由度平均加速度法の自由振動2step理論解。
+        let step_cos = (1.0 - omega_sq * dt * dt / 4.0) / (1.0 + omega_sq * dt * dt / 4.0);
+        let expected = u0[0] * (2.0 * step_cos * step_cos - 1.0);
+        let linear = linear_time_history_analysis(
+            &model,
+            &dofmap,
+            &reducer,
+            &wave,
+            &newmark,
+            &damping,
+            &u0,
+            &v0,
+            false,
+            Some(1),
+        )
+        .unwrap();
+        let nonlinear = nonlinear_time_history_analysis(
+            &model,
+            &dofmap,
+            &reducer,
+            &wave,
+            &newmark,
+            &damping,
+            DampingAccumulation::default(),
+            &u0,
+            &v0,
+            NonlinearThCfg {
+                apply_long_term: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for result in [linear, nonlinear] {
+            assert_eq!(result.non_converged_steps, 0);
+            let recording = result.recording.unwrap();
+            let last = recording.node_disp.last().unwrap()[1][0];
+            assert!((last - expected).abs() < 1e-10, "{last} vs {expected}");
+        }
+    }
+}
+
+#[test]
+fn beam_delegates_share_both_mass_forms_and_reject_the_same_resolver_failure() {
+    use sepika_element::frame::concentrated::ConcentratedSpringBeam;
+    use sepika_element::frame::panel_offset::{PanelEnd, PanelOffsetMember};
+    use sepika_element::wall::side_column::{InPlaneReleasedColumn, ReleaseAxis};
+    use sepika_material::uniaxial::Bilinear;
+    for invalid in [false, true] {
+        let mut model = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+        if invalid {
+            model.materials[0].density = f64::NAN;
+        }
+        let beam = BeamElement::try_new(&model.elements[0], &model).unwrap();
+        let elements: Vec<Box<dyn ElementBehavior>> = vec![
+            Box::new(InPlaneReleasedColumn::new(
+                beam.clone(),
+                ReleaseAxis::LocalY,
+            )),
+            Box::new(PanelOffsetMember::new(
+                Box::new(beam.clone()),
+                [
+                    Some(PanelEnd {
+                        node: NodeId(0),
+                        zeta: -0.5,
+                    }),
+                    None,
+                ],
+            )),
+            Box::new(ConcentratedSpringBeam::new_one_component(
+                beam,
+                Box::new(Bilinear::new(1.0e12, 1.0e20, 0.01)),
+                Box::new(Bilinear::new(1.0e12, 1.0e20, 0.01)),
+            )),
+        ];
+        for element in elements {
+            for opt in [MassOption::Lumped, MassOption::Consistent] {
+                if invalid {
+                    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                        || element.mass_matrix(opt)
+                    ))
+                    .is_err());
+                } else {
+                    assert_mass(&element.mass_matrix(opt), SRC_MASS_T, opt);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn src_physical_self_weight_shares_inertial_mass_while_design_dl_distribution_is_preserved() {
+    use sepika_core::model::{LoadCfg, MemberLoadKind};
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+        model.elements[0].kind = kind;
+        let (nodal, member) =
+            sepika_load::self_weight::self_weight_case_content(&model, &LoadCfg::default())
+                .unwrap();
+        assert!(nodal.is_empty());
+        assert_eq!(member.len(), 1);
+        assert_eq!(member[0].dir, [0.0, 0.0, -1.0]);
+        let MemberLoadKind::Distributed { a, b, w1, w2 } = member[0].kind else {
+            panic!("水平線材の等分布自重を期待する")
+        };
+        assert_eq!(a, 0.0);
+        assert_eq!(b, LENGTH_MM);
+        assert!((w1 - 4.2364728).abs() < 1e-12 && (w2 - 4.2364728).abs() < 1e-12);
+        for node in &mut model.nodes {
+            node.coord[2] = 3000.0;
+        }
+        model.nodes.push(Node {
+            id: NodeId(2),
+            coord: [0.0, 0.0, 0.0],
+            restraint: Dof6Mask::FREE,
+            mass: None,
+            story: None,
+            support_spring: None,
+        });
+        let generated = sepika_load::story_gen::generate_stories_with_opts(
+            &model,
+            &[],
+            true,
+            MassMethod::CorrectedLumped,
+        )
+        .unwrap();
+        let physical_n: f64 = generated
+            .stories
+            .iter()
+            .filter_map(|story| story.dynamic_mass)
+            .map(|mass| mass.mass_equiv_weight_n)
+            .sum();
+        assert!((physical_n - 13500.0).abs() < 1e-8);
+        assert!((physical_n / 9806.65 - SRC_MASS_T).abs() < 1e-12);
+    }
+}

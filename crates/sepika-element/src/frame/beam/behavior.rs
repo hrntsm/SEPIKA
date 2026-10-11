@@ -28,17 +28,17 @@ impl ElementBehavior for BeamElement {
     crate::behavior::elastic_disp_behavior!(BeamElement, 12);
 
     fn mass_matrix(&self, opt: MassOption) -> LocalMat {
+        let mass_properties = self
+            .mass_properties_error
+            .as_ref()
+            .map_or(self.mass_properties, |error| {
+                panic!("質量特性を解決できません: {error}")
+            });
         match opt {
             MassOption::Lumped => {
-                crate::frame::prismatic::lumped_mass(self.density * self.a_mass * self.length)
+                crate::frame::prismatic::lumped_mass(mass_properties.total_mass(self.length))
             }
             MassOption::Consistent => {
-                let mass_properties = self
-                    .mass_properties_error
-                    .as_ref()
-                    .map_or(self.mass_properties, |error| {
-                        panic!("質量特性を解決できません: {error}")
-                    });
                 let (li, lj) = self.rigid_lengths();
                 let flex_length = self.length - li - lj;
                 let phi_y = if flex_length > 0.0 && self.g > 0.0 && self.as_z > 0.0 {

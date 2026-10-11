@@ -1,4 +1,4 @@
-# Beam と Fiber の整合質量は共通の断面質量特性から算定する
+# Beam・Fiber・MultiSpring の両質量形式は共通の断面質量特性から算定する
 
 Status: accepted
 
@@ -6,33 +6,35 @@ Status: accepted
 
 RC/SRC の質量は、`Material.fc` と `ConcreteClass` からそれぞれ γRC/γSRC を求め、総断面の面積・断面二次モーメントへ一様に適用する。鉄筋・内蔵鉄骨の実体積置換および密度の別加算は行わない。RC 壁・床版では、設定されたせん断補強筋材料も γRC に含まれるものとして質量計算では無視する。Fc 未設定は入力エラーとする。したがって Fc により標準単位体積重量は変化する。
 
-Beam と Fiber の整合質量は、断面の材料領域から求めた `SectionMassProperties` を共通の入力とし、`squid_n_element::frame::prismatic::consistent_mass_timoshenko` で算定する。質量特性は単位長さ当たり質量と断面 y 軸・z 軸まわりの質量二次モーメントを持つ。CFT は鋼管と充填コンクリートが幾何的に別領域であるため、鋼管は `Material.density`、充填部は Fc と ConcreteClass による γC を使う。
+Beam・Fiber・MultiSpringとその委譲要素の集中質量・整合質量は、既存resolverが幾何と採用密度から求める `SectionMassProperties` を唯一の共通入力とする。集中質量は単位長さ質量×既存算定長を各端各並進へ半分ずつ分配し、回転0を保持する。整合質量は `sepika_element::frame::prismatic::consistent_mass_timoshenko` で算定する。質量特性は単位長さ当たり質量と断面 y 軸・z 軸まわりの質量二次モーメントを持つ。CFT は鋼管と充填コンクリートが幾何的に別領域であるため、鋼管は `Material.density`、充填部は Fc と ConcreteClass による γC を使う。
 
 材軸まわりの回転慣性には、ねじり剛性 `GJ/L` のねじり定数 `J` ではなく、質量用極二次モーメント `Ip = Iy + Iz` を用いる。剛域を含む場合は、可撓部の質量を剛体アームで変換し、剛域の分布質量を加えて部材全長の質量を保存する。端部解放がある場合も、剛性側と同じ拡大自由度で質量を組み、初期弾性剛性から固定した `S=-Kbb^-1 Kba`, `R=[I;S]` により `M=Rᵀ Mbar R` として縮約する。回転ばねは無質量とする。
 
-質量特性の解決は主材料の検証だけを行い、主筋・せん断補強筋・SRC 内蔵鉄骨の未設定や区分不正を理由に停止しない。要素生成時に解決できない場合はエラーを要素へ保持し、静的解析と Lumped 質量を停止させない。Consistent 質量要求時は不正特性を明示的に失敗させる。
+RC/SRCの質量特性は主材料を検証し、主筋・せん断補強筋・SRC 内蔵鉄骨の未設定や区分不正を理由に停止しない。CFTの鋼管材料は質量算定でも必須とする。質量だけの不備は要素へ保持し、質量不要の静的計算を停止させない（CFTを含む）。両質量形式の直接API要求では保持した理由付きpanicとし、公開全体組立・固有値・線形/非線形時刻歴はfactoryや剛性生成の前に参加要素の共通質量入力を検証して要素ID付き `InvalidInput` を返す。内部infallible trait全体の変更はしない。必要な幾何・剛性材料の不備まで許容しない。
 
 ## 背景と理由
 
-従来は Beam が密度・幾何断面積とねじり定数から質量を作り、Fiber はファイバー面積の総和から質量を作っていたため、同じ断面でも整合質量の入力と回転自由度が一致しなかった。材料領域を質量の正本とすることで、RC・SRC・CFT の材料置換と断面回転慣性を要素種別から分離する。
+従来は Beam が密度・幾何断面積とねじり定数から質量を作り、Fiber はファイバー面積の総和から質量を作っていたため、同じ断面でも整合質量の入力と回転自由度が一致しなかった。材料領域を質量の正本とすることで、断面の幾何・採用密度と断面回転慣性を要素種別から分離する。
 
 ねじり定数はせん断応力に対するねじり剛性の量であり、質量回転慣性の量ではない。開断面では両者の差が大きくなりうるため、質量積分から得られる極二次モーメントを使う。
 
 ## 影響
 
-- `MassOption::Lumped` は Beam の `density × a_mass × L`、Fiber の `density × Σfiber.area × L` という既存契約を維持する。`SectionMassProperties` は `MassOption::Consistent` のみに使う。
-- 自重は主材料の密度（RC/SRC は標準 γ、CFT は鋼管と充填コンクリート）から算定し、床版自重も整合質量の resolver とは分離する。ただし鋼材の固定荷重は設計用単位体積重量 78.5 kN/m³ を用い、物理質量密度 7.85 t/m³ とは分離する（[ADR-0033](0033-steel-design-weight-vs-physical-mass.md)）。
+- `MassOption::Lumped` も共通質量特性を使う。旧density/a_massフィールドとFiber raw-partsの密度引数を除去し、質量源の再選択・ファイバー面積依存を残さない。
+- 線材の物理質量相当自重と慣性質量は、同じ既存resolverの単位長さ質量を使う。支持先・階帯・算定長の分配処理は維持する。ただし鋼材の固定荷重は設計用単位体積重量 78.5 kN/m³ を用い、物理質量密度 7.85 t/m³ とは分離する（[ADR-0033](0033-steel-design-weight-vs-physical-mass.md)）。
 - `MassOption::Consistent` を使う固有値解析・時刻歴解析では、Beam と Fiber の質量行列および材軸回転慣性が変わる。
 - 端部解放の質量縮約は Beam/Fiber で共通化し、Fiber は塑性状態の接線剛性を使わない。
 - `Kbb` が特異な端部解放では、解放なし質量へフォールバックせず、Beam/Fiber とも明示的に失敗する。
-- 形状を持たない断面は、主材料の密度と `Section` の断面諸元へフォールバックする。
+- 形状を持たない断面は、保存A・Iy・Izと主材料密度を正本にする。幅×せい・未生成ファイバーへのfallbackはしない。明示の正当な0を許容し、不正/未解決の0代用はしない。
+- `MassMethod::LumpedOnly` は節点質量のみの質量源選択であり、`MassOption::Lumped` と異なる。要素質量を使わない場合は参加要素の質量検証を要求しない。
+- #587に従い解析契約版を2から3へ更新し、#507を含む版2の旧解析成果を再利用しない。検定契約版2は更新しない。
 - 材料領域質量、標準 Fc/SD 材料、Beam/Fiber 一致、剛域質量保存、軸振動および純ねじり固有値をテストで検証する。
 
 ## 関連
 
-- `crates/squid-n-core/src/model/mass.rs`
-- `crates/squid-n-element/src/frame/prismatic.rs`
-- `crates/squid-n-element/src/frame/beam/behavior.rs`
-- `crates/squid-n-element/src/frame/fiber/mod.rs`
+- `crates/sepika-core/src/model/mass.rs`
+- `crates/sepika-element/src/frame/prismatic.rs`
+- `crates/sepika-element/src/frame/beam/behavior.rs`
+- `crates/sepika-element/src/frame/fiber/mod.rs`
 - `docs/calc_basis/04_要素剛性/01_ティモシェンコ梁要素.md`
 - `docs/calc_basis/04_要素剛性/09_非線形梁要素のモデル化.md`

@@ -12,14 +12,12 @@ fn make_test_beam() -> BeamElement {
         e: 205000.0,
         g: 78846.15,
         a: 80000.0,
-        a_mass: 80000.0,
         iy: 1.0666667e9,
         iz: 1.0666667e9,
         j: 0.0,
         as_y: 66666.67,
         as_z: 66666.67,
         length: 3000.0,
-        density: 0.0,
         mass_properties: SectionMassProperties::default(),
         mass_properties_error: None,
         nodes: [NodeId(0), NodeId(1)],
@@ -206,7 +204,12 @@ fn test_beam_new_src_cft_composite_props() {
             .abs()
             < 1e-6
     );
-    assert!((src_beam.a_mass - 360_000.0).abs() < 1e-9);
+    assert!(
+        (src_beam.mass_properties.total_mass(src_beam.length)
+            - 25.0 / 9.80665e9 * 360_000.0 * 3000.0)
+            .abs()
+            < 1e-9
+    );
 
     let cft_beam = BeamElement::new(&make_elem(1), &model);
     let pc = cft_shape
@@ -269,7 +272,7 @@ fn test_beam_new_src_cft_composite_props() {
         let beam = BeamElement::new(&make_elem(sec), &model);
         let mass = beam.mass_matrix(MassOption::Lumped);
         let nodal_mass = mass.get(0, 0) + mass.get(6, 6);
-        assert!((nodal_mass - beam.density * beam.a_mass * beam.length).abs() < 1e-9);
+        assert!((nodal_mass - beam.mass_properties.total_mass(beam.length)).abs() < 1e-9);
     }
     model.materials[1].density = 7.85e-9;
     model.sections[1] = Section {
@@ -316,7 +319,8 @@ fn test_beam_new_src_cft_composite_props() {
     assert!((beam.e - ec).abs() < 1e-9);
     let mass = beam.mass_matrix(MassOption::Lumped);
     assert!(
-        (mass.get(0, 0) + mass.get(6, 6) - beam.density * beam.a_mass * beam.length).abs() < 1e-9
+        (mass.get(0, 0) + mass.get(6, 6) - beam.mass_properties.total_mass(beam.length)).abs()
+            < 1e-9
     );
 
     model.sections[0] = SectionShape::RcColumnCircle {
@@ -1716,8 +1720,8 @@ fn test_beam_new_wall_girder_bottom_edge_scales_stiffness() {
         beam_no_wall.a
     );
     assert!(
-        (beam_with_wall.a_mass - beam_no_wall.a_mass).abs() < 1e-9,
-        "a_massは変更されないはず"
+        beam_with_wall.mass_properties == beam_no_wall.mass_properties,
+        "質量特性は変更されないはず"
     );
 }
 
