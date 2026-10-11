@@ -181,7 +181,8 @@ impl EditCommand for SetMaterialField {
                 .unwrap_or_else(|| "未指定Fc".into());
             model.replace_stb_material_grade(self.id, &grade);
         }
-        if model.materials[idx] == material_before
+        if old.map(f64::to_bits) == self.value.map(f64::to_bits)
+            && model.materials[idx] == material_before
             && model.stb_strengths == strength_input
             && model.source_stories == strength_stories
         {

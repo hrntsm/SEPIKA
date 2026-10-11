@@ -246,18 +246,30 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
     ui.separator();
 
     let active_id = egui::Id::new("material_active_field");
-    if let Some((id, field)) =
-        ui.data(|d| d.get_temp::<(sepika_core::ids::MaterialId, MaterialField)>(active_id))
+    let material_id_revision = app.ui.scoped.material_id_revision;
+    if let Some((id, field, revision)) =
+        ui.data(|d| d.get_temp::<(sepika_core::ids::MaterialId, MaterialField, u64)>(active_id))
     {
-        if app
-            .core
-            .model
-            .materials
-            .get(id.index())
-            .is_none_or(|m| m.id != id)
+        if revision != material_id_revision
+            || app
+                .core
+                .model
+                .materials
+                .get(id.index())
+                .is_none_or(|m| m.id != id)
         {
-            app.report_error(format!("材料 {} {:?}: 参照不明", id.0, field));
-            ui.data_mut(|d| d.remove::<(sepika_core::ids::MaterialId, MaterialField)>(active_id));
+            let cell_id = material_cell_id(id, field, revision);
+            let draft = ui
+                .data(|d| d.get_temp::<String>(cell_id))
+                .unwrap_or_default();
+            app.report_error(format!(
+                "材料 {} {:?}: 参照不明（保留入力: {draft}）",
+                id.0, field
+            ));
+            ui.memory_mut(|m| m.surrender_focus(cell_id));
+            ui.data_mut(|d| {
+                d.remove::<(sepika_core::ids::MaterialId, MaterialField, u64)>(active_id)
+            });
         }
     }
     let n = app.core.model.materials.len();
@@ -347,7 +359,7 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                 row.col(|ui| {
                     let editable = field != MaterialField::Young
                         || young_editable(mat.category, mat.concrete_class);
-                    let cell_id = egui::Id::new(("mat_cell", mat_id.0, field as u8));
+                    let cell_id = material_cell_id(mat_id, field, material_id_revision);
                     let mut buf = ui
                         .data(|d| d.get_temp::<String>(cell_id))
                         .unwrap_or_else(|| current.clone());
@@ -380,7 +392,9 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                         );
                     }
                     if resp.has_focus() {
-                        ui.data_mut(|d| d.insert_temp(active_id, (mat_id, field)));
+                        ui.data_mut(|d| {
+                            d.insert_temp(active_id, (mat_id, field, material_id_revision))
+                        });
                     }
                     let dirty_id = cell_id.with("changed");
                     if resp.changed() {
@@ -427,16 +441,24 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
         }));
     }
     if let Some((id, field, text)) = pending_field {
-        ui.data_mut(|d| d.remove::<(sepika_core::ids::MaterialId, MaterialField)>(active_id));
+        ui.data_mut(|d| d.remove::<(sepika_core::ids::MaterialId, MaterialField, u64)>(active_id));
         if apply_material_text(app, id, field, &text).is_ok() {
             ui.data_mut(|d| {
-                let cell_id = egui::Id::new(("mat_cell", id.0, field as u8));
+                let cell_id = material_cell_id(id, field, material_id_revision);
                 d.remove::<String>(cell_id);
                 d.remove::<bool>(cell_id.with("changed"));
             });
         }
     }
     apply_pending_actions(app, pending_focus, pending_delete);
+}
+
+pub(super) fn material_cell_id(
+    id: sepika_core::ids::MaterialId,
+    field: MaterialField,
+    revision: u64,
+) -> egui::Id {
+    egui::Id::new(("mat_cell", revision, id.0, field as u8))
 }
 
 fn parse_material_draft(draft: &[String; 7]) -> Result<[Option<f64>; 6], String> {

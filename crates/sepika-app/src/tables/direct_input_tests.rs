@@ -166,7 +166,17 @@ fn begin_cell_edit(
     field: sepika_edit::MaterialField,
     text: &str,
 ) {
-    let id = egui::Id::new(("mat_cell", 0u32, field as u8));
+    begin_material_cell_edit(ctx, app, sepika_core::ids::MaterialId(0), field, text);
+}
+fn begin_material_cell_edit(
+    ctx: &egui::Context,
+    app: &mut App,
+    material_id: sepika_core::ids::MaterialId,
+    field: sepika_edit::MaterialField,
+    text: &str,
+) {
+    let id =
+        super::materials::material_cell_id(material_id, field, app.ui.scoped.material_id_revision);
     frame(ctx, app, true, vec![]);
     let resp = ctx.read_response(id).expect("実材料TextEdit");
     let pos = resp.rect.center();
@@ -311,8 +321,12 @@ fn issue546_real_single_text_edit_matrix_retains_draft_and_redo() {
             edit_cell(&ctx, &mut app, field, invalid);
             assert_eq!(snapshot(&app), before, "{field:?}: {invalid}");
             assert_eq!(
-                ctx.data(|d| d.get_temp::<String>(egui::Id::new(("mat_cell", 0u32, field as u8))))
-                    .as_deref(),
+                ctx.data(|d| d.get_temp::<String>(super::materials::material_cell_id(
+                    sepika_core::ids::MaterialId(0),
+                    field,
+                    app.ui.scoped.material_id_revision
+                )))
+                .as_deref(),
                 Some(invalid)
             );
             assert!(app
@@ -495,8 +509,12 @@ fn issue546_real_pending_text_edit_rechecks_deletion_and_category_change() {
         .unwrap()
         .contains("編集不可"));
     assert_eq!(
-        ctx.data(|d| d.get_temp::<String>(egui::Id::new(("mat_cell", 0u32, Young as u8))))
-            .as_deref(),
+        ctx.data(|d| d.get_temp::<String>(super::materials::material_cell_id(
+            sepika_core::ids::MaterialId(0),
+            Young,
+            app.ui.scoped.material_id_revision
+        )))
+        .as_deref(),
         Some("203000")
     );
     app.core.model.materials[0].category = sepika_core::model::MaterialCategory::Steel;
@@ -514,8 +532,110 @@ fn issue546_real_pending_text_edit_rechecks_deletion_and_category_change() {
         .unwrap()
         .contains("参照不明"));
     assert_eq!(
-        ctx.data(|d| d.get_temp::<String>(egui::Id::new(("mat_cell", 0u32, Young as u8))))
-            .as_deref(),
+        ctx.data(|d| d.get_temp::<String>(super::materials::material_cell_id(
+            sepika_core::ids::MaterialId(0),
+            Young,
+            app.ui.scoped.material_id_revision
+        )))
+        .as_deref(),
         Some("202000")
     );
+}
+
+#[test]
+fn issue546_real_signed_zero_changes_all_fields_with_undo_redo() {
+    use sepika_edit::MaterialField::*;
+    let ctx = egui::Context::default();
+    let mut app = App::default();
+    material_draft(&ctx, ["0", "0", "0", "0", "0", "0"]);
+    click_text(&ctx, &mut app, true, "+ 追加", true);
+    for field in [Young, Poisson, Density, Fc, Fy, StrengthFactor] {
+        for text in ["-0", "+0"] {
+            let before = rmp_serde::to_vec_named(&app.core.model).unwrap();
+            let revision = app.core.scoped.undo.revision();
+            edit_cell(&ctx, &mut app, field, text);
+            let expected = if text == "-0" { -0.0f64 } else { 0.0 };
+            assert_eq!(
+                material_value(&app, field).unwrap().to_bits(),
+                expected.to_bits()
+            );
+            assert_eq!(app.core.scoped.undo.revision(), revision + 1);
+            let after = rmp_serde::to_vec_named(&app.core.model).unwrap();
+            assert_ne!(after, before);
+            app.undo_action();
+            assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), before);
+            app.redo_action();
+            assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), after);
+        }
+        fresh(&mut app);
+        let before = snapshot(&app);
+        edit_cell(&ctx, &mut app, field, " 0.0e0 ");
+        assert_eq!(snapshot(&app), before);
+    }
+}
+
+#[test]
+fn issue546_real_id_reassignment_never_applies_an_old_draft_to_another_material() {
+    use sepika_core::ids::MaterialId;
+    use sepika_edit::{DeleteMaterial, MaterialField::Young};
+    for (target, deleted) in [(0u32, 0u32), (1, 0)] {
+        let ctx = egui::Context::default();
+        let mut app = App::default();
+        for (name, young) in [("A", "100"), ("B", "200"), ("C", "300")] {
+            material_draft(&ctx, [young, "0.3", "7.85e-9", "", "", ""]);
+            ctx.data_mut(|d| {
+                let id = egui::Id::new("material_custom_draft");
+                let mut draft = d.get_temp::<[String; 7]>(id).unwrap();
+                draft[0] = name.into();
+                d.insert_temp(id, draft);
+            });
+            click_text(&ctx, &mut app, true, "+ 追加", true);
+        }
+        let old_cell = super::materials::material_cell_id(
+            MaterialId(target),
+            Young,
+            app.ui.scoped.material_id_revision,
+        );
+        begin_material_cell_edit(&ctx, &mut app, MaterialId(target), Young, "150");
+        assert!(app.apply_model_edit(Box::new(DeleteMaterial {
+            id: MaterialId(deleted)
+        })));
+        fresh(&mut app);
+        let before = snapshot(&app);
+        lose_focus(&ctx, &mut app);
+        frame(&ctx, &mut app, true, vec![]);
+        assert_eq!(snapshot(&app), before);
+        assert!(app
+            .core
+            .scoped
+            .last_error
+            .as_ref()
+            .unwrap()
+            .contains("参照不明"));
+        assert_eq!(
+            ctx.data(|d| d.get_temp::<String>(old_cell)).as_deref(),
+            Some("150")
+        );
+        assert_eq!(
+            ctx.data(|d| d.get_temp::<bool>(old_cell.with("changed"))),
+            Some(true)
+        );
+        assert_eq!(app.core.model.materials[0].young, 200.0);
+        assert_eq!(app.core.model.materials[1].young, 300.0);
+        app.undo_action();
+        frame(&ctx, &mut app, true, vec![]);
+        fresh(&mut app);
+        let before = snapshot(&app);
+        lose_focus(&ctx, &mut app);
+        assert_eq!(snapshot(&app), before);
+        assert!(app.core.scoped.undo.can_redo());
+        app.redo_action();
+        frame(&ctx, &mut app, true, vec![]);
+        assert_eq!(app.core.model.materials[0].young, 200.0);
+        assert_eq!(app.core.model.materials[1].young, 300.0);
+        begin_material_cell_edit(&ctx, &mut app, MaterialId(0), Young, "250");
+        lose_focus(&ctx, &mut app);
+        assert_eq!(app.core.model.materials[0].young, 250.0);
+        assert_eq!(app.core.model.materials[1].young, 300.0);
+    }
 }

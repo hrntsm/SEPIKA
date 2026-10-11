@@ -9316,3 +9316,72 @@ fn issue546_material_commands_reject_nonfinite_and_preserve_history() {
     undo.redo(&mut model);
     assert_eq!(model.materials[0].young, 204000.0);
 }
+
+#[test]
+fn issue546_signed_zero_is_a_material_change_but_same_bits_are_noop() {
+    fn bits(model: &Model, field: MaterialField) -> u64 {
+        let m = &model.materials[0];
+        match field {
+            MaterialField::Young => m.young,
+            MaterialField::Poisson => m.poisson,
+            MaterialField::Density => m.density,
+            MaterialField::Fc => m.fc.unwrap(),
+            MaterialField::Fy => m.fy.unwrap(),
+            MaterialField::StrengthFactor => m.strength_factor.unwrap(),
+        }
+        .to_bits()
+    }
+    let mut model = empty_model();
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(AddMaterial {
+            name: "zero".into(),
+            category: MaterialCategory::Steel,
+            young: 0.0,
+            poisson: 0.0,
+            density: 0.0,
+            fc: Some(0.0),
+            fy: Some(0.0),
+            strength_factor: Some(0.0),
+            concrete_class: Default::default()
+        })
+    ));
+    for field in [
+        MaterialField::Young,
+        MaterialField::Poisson,
+        MaterialField::Density,
+        MaterialField::Fc,
+        MaterialField::Fy,
+        MaterialField::StrengthFactor,
+    ] {
+        for value in [-0.0, 0.0] {
+            let before = model.clone();
+            let revision = undo.revision();
+            assert!(undo.run(
+                &mut model,
+                Box::new(SetMaterialField {
+                    id: MaterialId(0),
+                    field,
+                    value: Some(value)
+                })
+            ));
+            assert_eq!(undo.revision(), revision + 1);
+            let after = model.clone();
+            undo.undo(&mut model);
+            assert!(model.eq_ignoring_dofmap(&before));
+            assert_eq!(bits(&model, field), bits(&before, field));
+            undo.redo(&mut model);
+            assert!(model.eq_ignoring_dofmap(&after));
+            assert_eq!(bits(&model, field), value.to_bits());
+            assert!(!undo.run(
+                &mut model,
+                Box::new(SetMaterialField {
+                    id: MaterialId(0),
+                    field,
+                    value: Some(value)
+                })
+            ));
+        }
+    }
+}
