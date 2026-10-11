@@ -171,7 +171,7 @@ impl Model {
             return true;
         }
         self.elements.iter().any(|e| {
-            if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
+            if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
                 return false;
             }
             let (Some(a), Some(b)) = (self.node(e.nodes[0]), self.node(e.nodes[1])) else {
@@ -394,7 +394,7 @@ impl Model {
 
     /// 節点 `node` が取り付く支持部材と材軸位置を解決する。`exclude` の二次部材は除く。
     ///
-    /// 主架構の 2 節点 `Beam` を要素 ID 昇順で調べ、材軸上（端点を含む）にあれば
+    /// 主架構支持材（Beam・Fiber・MultiSpring）の2節点材を要素 ID 昇順で調べ、材軸上（端点を含む）にあれば
     /// その要素を優先する。無ければ他の二次部材の内法に載るものを安定 ID 昇順で調べる。
     /// いずれも距離 `MEMBER_AXIS_TOL_MM` [mm] 以内で最も近い候補を採る。
     pub fn resolve_point_anchor(
@@ -405,7 +405,7 @@ impl Model {
         let tol = crate::geom::MEMBER_AXIS_TOL_MM;
         let mut primary: Option<(f64, SecondaryMemberAnchor)> = None;
         for e in &self.elements {
-            if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
+            if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
                 continue;
             }
             let (Some(a), Some(b)) = (self.node(e.nodes[0]), self.node(e.nodes[1])) else {

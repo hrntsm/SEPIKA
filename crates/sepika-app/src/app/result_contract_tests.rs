@@ -142,6 +142,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-zero-increment", Some(5), "旧契約"),
         ("old-auto-solver", Some(6), "旧契約"),
         ("old-steel-grade-recognition", Some(7), "旧契約"),
+        ("old-frame-support-representation", Some(8), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {

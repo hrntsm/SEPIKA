@@ -7,12 +7,14 @@
 //! **中間集中荷重**（`MemberLoadKind::Point`。大梁の CMQ）へ変換する。
 
 use sepika_core::ids::ElemId;
-use sepika_core::model::{ElementKind, MemberLoad, MemberLoadKind, Model, NodalLoad};
+#[cfg(test)]
+use sepika_core::model::ElementKind;
+use sepika_core::model::{MemberLoad, MemberLoadKind, Model, NodalLoad};
 
 #[cfg(test)]
 use sepika_core::ids::NodeId;
 
-/// 節点が大梁のスパン上にあるかを判定する側が候補とする 2 節点 `Beam` 要素
+/// 節点が大梁のスパン上にあるかを判定する側が候補とする 2 節点の主架構支持材（Beam・Fiber・MultiSpring）
 /// （要素独立な幾何のみ。ダングリング参照は除外済み）。判定のたびに `model.elements` を
 /// 走査し直す（かつ節点座標を都度引き直す）のを避け、呼び出し 1 回につき 1 度だけ
 /// 構築して使い回すための中間表現。`resolve_nodal_to_primary` と
@@ -23,14 +25,14 @@ pub(crate) struct BeamSpanCandidate {
     b: [f64; 3],
 }
 
-/// `model` から `beam_span_position` の対象となる 2 節点 `Beam` 要素の候補列
+/// `model` から `beam_span_position` の対象となる 2 節点の主架構支持材（Beam・Fiber・MultiSpring）の候補列
 /// （端点座標つき）を集める。ダングリング参照（未検証モデルで節点が見つからない
 /// 要素）はここで読み飛ばす（この要素だけを除外し、他要素の探索は継続する。
 /// 元の `beam_span_position` の「1 要素の不整合で全体を打ち切らない」挙動を保つ）。
 pub(crate) fn beam_span_candidates(model: &Model) -> Vec<BeamSpanCandidate> {
     let mut out = Vec::new();
     for e in &model.elements {
-        if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
+        if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
             continue;
         }
         let (Some(node_a), Some(node_b)) = (

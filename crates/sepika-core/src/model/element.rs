@@ -49,6 +49,11 @@ pub enum ElementKind {
 }
 
 impl ElementKind {
+    /// 床・壁の物理的な主架構支持材を表す解析種別。用途・節点数・幾何の条件は呼出側で判定する。
+    pub fn is_primary_frame_support(self) -> bool {
+        matches!(self, Self::Beam | Self::Fiber | Self::MultiSpring)
+    }
+
     /// 自重の柱梁接続・仕上げ・被覆を扱う線材種別か（ブレースを除く）。
     pub fn is_weight_frame(self) -> bool {
         matches!(self, Self::Beam | Self::Fiber | Self::MultiSpring)

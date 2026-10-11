@@ -8,7 +8,7 @@
 //!
 //! # 生成規則
 //!
-//! 1. **鉛直構面の候補**は、全柱（`ElementKind::Beam` のうち
+//! 1. **鉛直構面の候補**は、全柱（Beam・Fiber・MultiSpring のうち
 //!    [`crate::geom::is_vertical_pair`] を満たすもの）の柱脚位置（XY）から作る。
 //!    柱位置を [`crate::geom::MEMBER_AXIS_TOL_MM`] 以内で重複排除したうえで全ペアから
 //!    直線を作り、既に見つかっている直線と同一とみなせるものは統合する。
@@ -17,7 +17,7 @@
 //!    で行う。** 角度の許容差は直線が長いほど遠方での位置ずれが拡大するため使わない。
 //!    例えば 0.5° の角度許容差は 50m 先で 436mm のずれになり、10mm の許容差としては粗すぎる。
 //! 2. **各直線に乗る部材**は、両端の XY 射影が直線から `MEMBER_AXIS_TOL_MM` 以内にある
-//!    `ElementKind::Beam` の要素（柱・梁の区別、鉛直・水平・斜めの区別は問わない）。
+//!    Beam・Fiber・MultiSpring の要素（柱・梁の区別、鉛直・水平・斜めの区別は問わない）。
 //!    ブレース・壁要素・二次部材・パネルゾーンは対象にしない。
 //! 3. **面走査**は直線ごとに、局所座標 `(s, z)`（s=直線に沿った位置、z=グローバル Z）へ
 //!    射影して行う（[`super::scan_faces`]、床と共通のエンジン）。1 本の直線は建物の
@@ -52,7 +52,9 @@
 use super::{scan_faces, Edge};
 use crate::geom::{is_vertical_pair, MEMBER_AXIS_TOL_MM};
 use crate::ids::{ElemId, NodeId};
-use crate::model::{ElementKind, Model};
+#[cfg(test)]
+use crate::model::ElementKind;
+use crate::model::Model;
 use std::collections::HashMap;
 
 /// 局所座標 `(s, z)` での部材の最小長さ [mm]。3 次元長さではなく射影後の長さで判定する
@@ -162,7 +164,7 @@ pub struct WallRegionBoundaryScan {
     pub unclosed: usize,
 }
 
-/// 柱・梁（`ElementKind::Beam`）が囲む鉛直構面内の閉領域を検出する。
+/// 柱・梁（Beam・Fiber・MultiSpring）が囲む鉛直構面内の閉領域を検出する。
 ///
 /// モデルは変更しない。生成規則はモジュールドキュメントを参照。
 pub fn scan_wall_region_boundaries(model: &Model) -> WallRegionBoundaryScan {
@@ -325,7 +327,7 @@ fn centroid(pts: &[[f64; 2]]) -> [f64; 2] {
 fn column_footprints(model: &Model) -> Vec<[f64; 2]> {
     let mut pts: Vec<[f64; 2]> = Vec::new();
     for e in &model.elements {
-        if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
+        if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
             continue;
         }
         let (Some(a), Some(b)) = (
@@ -387,12 +389,12 @@ fn dist2(a: [f64; 2], b: [f64; 2]) -> f64 {
     (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)
 }
 
-/// 直線 `(origin, direction)` に乗る `ElementKind::Beam` を辺として集める。
+/// 直線 `(origin, direction)` に乗る主架構支持材（Beam・Fiber・MultiSpring）を辺として集める。
 /// 両端の XY 射影が直線から `MEMBER_AXIS_TOL_MM` 以内にあるものを対象とする。
 fn members_on_plane(model: &Model, origin: [f64; 2], direction: [f64; 2]) -> Vec<Edge> {
     let mut edges = Vec::new();
     for e in &model.elements {
-        if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
+        if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
             continue;
         }
         let (Some(a), Some(b)) = (
