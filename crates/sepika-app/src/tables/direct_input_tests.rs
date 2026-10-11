@@ -799,3 +799,71 @@ fn issue546_real_unchanged_blur_tracks_undo_redo_and_other_edits() {
         Some("abc")
     );
 }
+
+#[test]
+fn issue546_real_nonfinite_repair_undo_redo_restores_original_model() {
+    use sepika_core::model::{SourceStory, SourceStoryKind, StbCommonStrength};
+    use sepika_edit::MaterialField::*;
+    for field in [Young, Poisson, Density, Fc, Fy, StrengthFactor] {
+        for old in [
+            f64::from_bits(0x7ff8_0000_0000_0123),
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            let ctx = egui::Context::default();
+            let mut app = App::default();
+            app.core.model.stb_strengths.common = Some(StbCommonStrength {
+                project_name: "repair".into(),
+                app_name: "STB".into(),
+                app_version: "2".into(),
+                strength_concrete: Some("Fc24".into()),
+                reinforcement: vec![],
+            });
+            app.core.model.source_stories.push(SourceStory {
+                id: 1,
+                guid: None,
+                name: "1F".into(),
+                height: 0.0,
+                kind: SourceStoryKind::General,
+                kind_from_native: false,
+                id_dependence: None,
+                strength_concrete: None,
+                node_ids: vec![],
+            });
+            app.core.model.prepare_stb_strength_materials();
+            app.core.model.materials[0].concrete_class =
+                sepika_core::units::ConcreteClass::UserDefined;
+            let m = &mut app.core.model.materials[0];
+            match field {
+                Young => m.young = old,
+                Poisson => m.poisson = old,
+                Density => m.density = old,
+                Fc => m.fc = Some(old),
+                Fy => m.fy = Some(old),
+                StrengthFactor => m.strength_factor = Some(old),
+            }
+            let before = rmp_serde::to_vec_named(&app.core.model).unwrap();
+            edit_cell(&ctx, &mut app, field, "204000");
+            assert_eq!(material_value(&app, field), Some(204000.0));
+            let after = rmp_serde::to_vec_named(&app.core.model).unwrap();
+            app.undo_action();
+            assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), before);
+            assert_eq!(
+                material_value(&app, field).unwrap().to_bits(),
+                old.to_bits()
+            );
+            assert_eq!(app.core.model.source_stories[0].strength_concrete, None);
+            app.redo_action();
+            assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), after);
+            if field == Density {
+                app.core.model.materials[0].young = f64::NAN;
+            } else {
+                app.core.model.materials[0].density = f64::NAN;
+            }
+            fresh(&mut app);
+            let unchanged = snapshot(&app);
+            edit_cell(&ctx, &mut app, field, " 2.04e5 ");
+            assert_eq!(snapshot(&app), unchanged);
+        }
+    }
+}
