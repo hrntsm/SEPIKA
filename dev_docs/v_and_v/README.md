@@ -105,6 +105,7 @@
 | [明示線材とダンパー総重量_Issue422_2026-10.md](明示線材とダンパー総重量_Issue422_2026-10.md) | 線材重量同等性、実M、重量／配置／動的質量の記録集合の完全性と反映値、公開フレーム・質点系InvalidInput、GUI・undo・保存 | ✅（Scope内 Verification。二次部材支持解決はScope外の残課題） |
 | [フィレット_角R_断面整合_Issue413_2026-10.md](フィレット_角R_断面整合_Issue413_2026-10.md) | H・角形 CFT の領域性能、公開耐力・実要素、重量質量、項目別算定元、設計ゲートと公開結果。受入 P2 の Truss 質量源の回帰を含む | ✅ |
 | [鋼材名の厳密な強度割増認識_Issue599_2026-10.md](鋼材名の厳密な強度割増認識_Issue599_2026-10.md) | 対応済名称と自動割増・factory/曲げ/せん断・旧解析版7のOVIKA失効 | 🔶（直接Verification、freshレビュー・最終CIは後続） |
+| [符号付き単純梁反力_Issue633_2026-10.md](符号付き単純梁反力_Issue633_2026-10.md) | 床／story／elementの符号付き反力・独立積分・利用側・adapter・旧成果失効 | 🔶（直接Verification、原本／Validation・freshレビュー・最終CIは後続） |
 | [保存成果の計算契約版_Issue587_2026-10.md](保存成果の計算契約版_Issue587_2026-10.md) | OVIKA解析/検定版・実入力・部分再実行・GUI/CSV・直接床板/小梁 | 🔶（直接Verification、freshレビュー・最終全構成は後続。MCP別ストアは#589） |
 | [静的検定の生成入力_Issue602_2026-10.md](静的検定の生成入力_Issue602_2026-10.md) | 同版の検定入力・部分解析非復活・独立0.8→1.6・GUI/CSV/OVIKA/Undo/失敗 | 🔶（直接Verification、freshレビュー・最終全CIは進行担当が確認） |
 | [OVIKA_named_MessagePack_2026-10.md](OVIKA_named_MessagePack_2026-10.md) | 4 payload の named 保存・復元、順序独立・default・破損・モデル検証、実 STB モデル単体の codec 時間と最終 OVIKA サイズ | ✅ |
@@ -253,6 +254,7 @@
 | 37 | 二次CFTの全入口拒否 | sepika-core / sepika-edit / sepika-io / sepika-app / sepika-design-jp / sepika-solver / sepika-mcp | model/aggregate・section、ovika、quantity、actions/io、precheck | [Issue539の直接入口と正常対照](二次CFT入口拒否_Issue539_2026-10.md#直接入口と観測) | 横断 | 🔶（入口Verification、最終headゲートは後続） |
 | 36a | 直接線形求解 | sepika-math / sepika-solver / sepika-core / sepika-app | cholesky・lu・solver・statics/analysis/linear・result_contract_tests | [Issue598独立期待値と実入口](直接線形求解_Issue598_2026-10.md#独立期待値と実入口) | 横断 | 🔶（Verification、実験Validation・最終headゲート未） |
 | 36 | 静的設定の公開経路一致 | sepika-solver / sepika-element / sepika-job / sepika-app / sepika-mcp | statics/linear、statics/analysis、factory、compute、actions/linear_static、tests | [Issue595の直接入口と回帰](静的設定採用_Issue595_2026-10.md#直接入口と回帰) | 横断 | 🔶（Verification、Validation・最終headゲート未） |
+| 633 | 符号付き単純梁反力 | sepika-load / sepika-element / sepika-app | floor/fem.rs・story_gen/reactions.rs・frame/member_load.rs・viewer/cmq.rs | [Issue633の独立値・公開入口](符号付き単純梁反力_Issue633_2026-10.md#独立verification) | 横断 | 🔶（直接Verification、原本／Validation・最終CIは後続） |
 
 凡例: ✅ 実装済み・🔶 一部実装（要拡張）・❌ 未実装・対象外（採用しない）。
 壁横筋βs・参考骨格の単体/GUI共通/MCP実ジョブ検証は[Issue503検証](壁横筋入力と終局割線骨格_Issue503_2026-10.md)を参照（Verification ✅、実験Validation 🔶）。
