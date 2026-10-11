@@ -412,12 +412,20 @@ pub fn materials_table(ui: &mut egui::Ui, app: &mut App) {
                     if resp.changed() {
                         ui.data_mut(|d| d.insert_temp(dirty_id, true));
                     }
-                    if resp.lost_focus()
-                        && ui.data(|d| d.get_temp::<bool>(dirty_id).unwrap_or(false))
-                    {
+                    let dirty = ui.data(|d| d.get_temp::<bool>(dirty_id).unwrap_or(false));
+                    if resp.lost_focus() && dirty {
                         pending_field = Some((mat_id, field, buf.clone()));
                     }
-                    if resp.has_focus() || ui.data(|d| d.get_temp::<String>(cell_id).is_some()) {
+                    if resp.lost_focus() && !dirty {
+                        // 無変更の表示キャッシュはUndo/Redoや別入口の更新を隠さない。
+                        // 拒否された変更ドラフトはdirtyのまま保持する。
+                        ui.data_mut(|d| {
+                            d.remove::<String>(cell_id);
+                            d.remove::<bool>(dirty_id);
+                        });
+                    } else if resp.has_focus()
+                        || ui.data(|d| d.get_temp::<String>(cell_id).is_some())
+                    {
                         ui.data_mut(|d| d.insert_temp(cell_id, buf));
                     }
                 });

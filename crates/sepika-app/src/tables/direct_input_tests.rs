@@ -709,3 +709,93 @@ fn issue546_real_model_switch_discards_material_inputs_only() {
         }
     }
 }
+
+#[test]
+fn issue546_real_unchanged_blur_tracks_undo_redo_and_other_edits() {
+    use sepika_core::ids::MaterialId;
+    use sepika_edit::{MaterialField::Young, SetMaterialField};
+    let ctx = egui::Context::default();
+    let mut app = App::default();
+    material_draft(&ctx, &mut app, ["205000", "0.3", "1", "", "", ""]);
+    click_text(&ctx, &mut app, true, "+ 追加", true);
+    edit_cell(&ctx, &mut app, Young, "204000");
+    for expected in [205000.0, 204000.0, 203000.0] {
+        let id = super::materials::material_cell_id(
+            MaterialId(0),
+            Young,
+            app.ui.scoped.material_id_revision,
+        );
+        frame(&ctx, &mut app, true, vec![]);
+        let pos = ctx.read_response(id).unwrap().rect.center();
+        for pressed in [true, false] {
+            frame(
+                &ctx,
+                &mut app,
+                true,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        let before = snapshot(&app);
+        lose_focus(&ctx, &mut app);
+        assert_eq!(snapshot(&app), before);
+        assert!(ctx.data(|d| d.get_temp::<String>(id)).is_none());
+        match expected as u32 {
+            205000 => app.undo_action(),
+            204000 => app.redo_action(),
+            _ => assert!(app.apply_model_edit(Box::new(SetMaterialField {
+                id: MaterialId(0),
+                field: Young,
+                value: Some(expected),
+            }))),
+        }
+        assert_eq!(app.core.model.materials[0].young, expected);
+        let out = frame(&ctx, &mut app, true, vec![]);
+        let rect = ctx.read_response(id).unwrap().rect;
+        assert!(
+            out.shapes.iter().any(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) =>
+                    text.galley.job.text == expected.to_string()
+                        && rect.intersects(text.visual_bounding_rect()),
+                _ => false,
+            }),
+            "current model value must be displayed"
+        );
+    }
+    // An unchanged revisit of a rejected draft must still retain that draft.
+    edit_cell(&ctx, &mut app, Young, "abc");
+    let id = super::materials::material_cell_id(
+        MaterialId(0),
+        Young,
+        app.ui.scoped.material_id_revision,
+    );
+    let before = snapshot(&app);
+    frame(&ctx, &mut app, true, vec![]);
+    let pos = ctx.read_response(id).unwrap().rect.center();
+    for pressed in [true, false] {
+        frame(
+            &ctx,
+            &mut app,
+            true,
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+    }
+    lose_focus(&ctx, &mut app);
+    assert_eq!(snapshot(&app), before);
+    assert_eq!(
+        ctx.data(|d| d.get_temp::<String>(id)).as_deref(),
+        Some("abc")
+    );
+}
