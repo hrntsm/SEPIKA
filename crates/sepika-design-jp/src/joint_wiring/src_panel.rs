@@ -9,6 +9,7 @@ use sepika_core::section_shape::SectionShape;
 
 /// SRC 造柱梁接合部（パネルゾーン）の検定を `out` へ追加する。
 pub(super) fn check_src_panel(
+    model: &sepika_core::model::Model,
     cols: &[&MemberInfo<'_>],
     beams: &[&MemberInfo<'_>],
     nid: NodeId,
@@ -20,6 +21,32 @@ pub(super) fn check_src_panel(
             && c.mat.fc.unwrap_or(0.0) > 0.0
     });
     if let Some(col) = src_col {
+        // SRCパネル寸法は選択柱と先頭のRC/SRC梁の配筋重心を消費する。
+        // その他の接続梁は内力だけを渡す。
+        let beam0 = beams[0];
+        let rebar_sections = std::iter::once(col.sec.id).chain(
+            (!beam0.kind.is_steel_like()
+                && matches!(
+                    beam0.sec.shape,
+                    Some(
+                        SectionShape::RcBeamRect { .. }
+                            | SectionShape::SrcBeamRect { .. }
+                            | SectionShape::RcColumnRect { .. }
+                            | SectionShape::SrcColumnRect { .. }
+                    )
+                ))
+            .then_some(beam0.sec.id),
+        );
+        for section in rebar_sections {
+            if let Err(reason) = model.ensure_stb_rebar_supported(section) {
+                out.push((
+                    nid,
+                    "柱梁接合部(SRC)".into(),
+                    CheckOutcome::Skipped { reason },
+                ));
+                return;
+            }
+        }
         let col_steel = match col.sec.shape {
             Some(SectionShape::SrcColumnRect {
                 steel_height,

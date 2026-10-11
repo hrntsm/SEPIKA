@@ -514,3 +514,37 @@ fn standard_column_x_counts_vertical_rows_and_native_export_inverts_the_mapping(
     assert_eq!(model.sections[0].shape, again.sections[0].shape);
     save_supplemental_output("native_column_direction", &output);
 }
+
+#[test]
+fn src_standard_column_and_beam_rebar_ovika_roundtrip_preserves_schema_child_order() {
+    let model = import_stbridge(&fixture("supplemental/src_column_beam")).unwrap();
+    model.ensure_stb_rebar_supported(SectionId(0)).unwrap();
+    model.ensure_stb_rebar_supported(SectionId(1)).unwrap();
+    let path = std::env::temp_dir().join(format!("sepika507-src-{}.ovika", std::process::id()));
+    crate::ovika::save_ovika(&path, &model, crate::ovika::OvikaExtras::default()).unwrap();
+    let saved = crate::ovika::load_ovika(&path).unwrap().model;
+    let output = export_stbridge(&saved).unwrap();
+    for family in ["Column", "Beam"] {
+        let section = output
+            .split(&format!("<StbSec{family}_SRC "))
+            .nth(1)
+            .unwrap()
+            .split(&format!("</StbSec{family}_SRC>"))
+            .next()
+            .unwrap();
+        assert!(
+            section
+                .find(&format!("<StbSecBarArrangement{family}_SRC"))
+                .unwrap()
+                < section
+                    .find(&format!("<StbSecSteelFigure{family}_SRC"))
+                    .unwrap(),
+            "採用XSDは配筋→鉄骨図形の順"
+        );
+    }
+    let again = import_stbridge(&output).unwrap();
+    assert_eq!(model.stb_strengths, again.stb_strengths);
+    assert_eq!(model.sections, again.sections);
+    save_supplemental_output("src_column_beam", &output);
+    std::fs::remove_file(path).unwrap();
+}

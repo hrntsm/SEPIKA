@@ -381,15 +381,11 @@ pub fn run_member_design_checks(
                 .collect()
         });
 
-    member_checks.extend(
-        crate::rc::horizontal_joint::collect_pca_checks(
-            model,
-            &mf_slices,
-            options.term == LoadTerm::Long,
-        )
-        .into_iter()
-        .map(|(id, pos, cr)| (id, pos, CheckOutcome::Checked(cr))),
-    );
+    member_checks.extend(crate::rc::horizontal_joint::collect_pca_checks(
+        model,
+        &mf_slices,
+        options.term == LoadTerm::Long,
+    ));
 
     let joint_checks = crate::joint_wiring::collect_joint_checks_impl(
         model,

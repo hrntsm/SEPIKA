@@ -853,10 +853,10 @@ fn src_section(
              \x20       <{fig_wrap}>\n\
              \x20         {fig_body}\n\
              \x20       </{fig_wrap}>\n\
+             {rebar_arrangement}\
              \x20       <{steel_wrap}>\n\
              {steel_reference}\n\
              \x20       </{steel_wrap}>\n\
-             {rebar_arrangement}\
              \x20     </{elem}>\n",
             elem = elem,
             id = id,

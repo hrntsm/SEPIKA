@@ -116,7 +116,7 @@ pub fn collect_pca_checks(
     model: &Model,
     member_forces: &[(ElemId, crate::joint_wiring::ForcesAt<'_>)],
     long_term: bool,
-) -> Vec<(ElemId, f64, CheckResult)> {
+) -> Vec<(ElemId, f64, crate::CheckOutcome)> {
     let mut out = Vec::new();
 
     for attr in &model.pca_attrs {
@@ -132,9 +132,12 @@ pub fn collect_pca_checks(
         let Some(shape) = sec.shape.as_ref() else {
             continue;
         };
-        let Some((b, d, d_eff, at)) = pca_section_geometry(shape) else {
+        if !matches!(
+            shape,
+            SectionShape::RcBeamRect { .. } | SectionShape::RcColumnRect { .. }
+        ) {
             continue;
-        };
+        }
         let Some(mat) = model.element_material(elem) else {
             continue;
         };
@@ -149,6 +152,21 @@ pub fn collect_pca_checks(
             continue;
         }
 
+        if let Err(reason) = model.ensure_stb_rebar_supported(sec.id) {
+            for pos in [0.0, 1.0] {
+                out.push((
+                    attr.elem,
+                    pos,
+                    crate::CheckOutcome::Skipped {
+                        reason: reason.clone(),
+                    },
+                ));
+            }
+            continue;
+        }
+        let Some((b, d, d_eff, at)) = pca_section_geometry(shape) else {
+            continue;
+        };
         let i = b * d.powi(3) / 12.0;
         let yj = attr.joint_depth_from_top;
         if yj <= 0.0 || yj >= d {
@@ -190,7 +208,11 @@ pub fn collect_pca_checks(
                 pw_total: attr.pw_joint,
                 sigma_y: attr.sigma_y_joint,
             };
-            out.push((attr.elem, *pos, pca_horizontal_joint_service(&service_inp)));
+            out.push((
+                attr.elem,
+                *pos,
+                crate::CheckOutcome::Checked(pca_horizontal_joint_service(&service_inp)),
+            ));
 
             let delta_t = if long_term {
                 let m_end = f_end[5];
@@ -206,7 +228,7 @@ pub fn collect_pca_checks(
                 attr.pw_joint,
                 attr.sigma_y_joint,
             );
-            out.push((attr.elem, *pos, ultimate));
+            out.push((attr.elem, *pos, crate::CheckOutcome::Checked(ultimate)));
         }
     }
 
@@ -436,7 +458,10 @@ mod tests {
         ];
         let member_forces = vec![(ElemId(0), forces.as_slice())];
 
-        let results = collect_pca_checks(&model, &member_forces, false);
+        let results: Vec<_> = collect_pca_checks(&model, &member_forces, false)
+            .into_iter()
+            .map(|(id, pos, outcome)| (id, pos, outcome.unwrap_checked()))
+            .collect();
         assert_eq!(results.len(), 4, "2端部×(使用限界・終局限界)=4行のはず");
 
         let service_rows: Vec<&(ElemId, f64, CheckResult)> = results
@@ -479,7 +504,10 @@ mod tests {
             (1.0, [0.0, 200_000.0, 0.0, 0.0, 0.0, 80.0e6]),
         ];
         let member_forces = vec![(ElemId(0), forces.as_slice())];
-        let results = collect_pca_checks(&model, &member_forces, false);
+        let results: Vec<_> = collect_pca_checks(&model, &member_forces, false)
+            .into_iter()
+            .map(|(id, pos, outcome)| (id, pos, outcome.unwrap_checked()))
+            .collect();
         assert_eq!(results.len(), 4, "2端部×(使用限界・終局限界)=4行のはず");
 
         let s_y = 400.0 * 150.0 * (700.0 - 150.0) / 2.0;

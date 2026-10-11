@@ -281,6 +281,92 @@ fn clear_error(app: &mut App) {
     app.core.scoped.last_error = None;
 }
 
+/// 公開原本とかぶり属性を保持した、解析用の明示派生fixture。
+/// 従来の計算幾何はcover40 + D13 + D25/2 = center65.5を使っていた。
+/// FB1だけは横芯間を満たすcenter51とし、共通既定なしで個別位置を適用する。
+fn analysis_fixture_path() -> std::path::PathBuf {
+    static PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| {
+        let mut xml = std::fs::read_to_string(fixture_path()).unwrap();
+        assert_eq!(xml.matches("<StbSecBarArrangementBeam_RC").count(), 4);
+        xml = xml.replace("<StbSecBarArrangementBeam_RC", "<StbSecBarArrangementBeam_RC center_top=\"65.5\" center_bottom=\"65.5\" center_side=\"65.5\"");
+        // FB1は幅300/D25×4本で中心65.5では芯間56.33<最小62.5となる。
+        // この解析派生だけ中心51（芯間66）を明示し、原本は変更しない。
+        let fb1 = xml.find("<StbSecBeam_RC id=\"26\" name=\"FB1\"").unwrap();
+        let end = fb1 + xml[fb1..].find("</StbSecBeam_RC>").unwrap();
+        let corrected = xml[fb1..end].replace("65.5", "51");
+        xml.replace_range(fb1..end, &corrected);
+        let common = xml.find("<StbCommon ").unwrap();
+        let close = common + xml[common..].find("/>").unwrap();
+        xml.replace_range(close..close + 2, "><StbApplyConditionsList><StbBeam_RC_RebarPositionApply set_default=\"false\"/></StbApplyConditionsList></StbCommon>");
+        let path = test_tmp().join("model.stb");
+        std::fs::write(&path, xml).unwrap();
+        path
+    }).clone()
+}
+
+#[test]
+fn original_fixture_retains_unresolved_positions_and_analysis_derivative_is_explicit() {
+    let original = std::fs::read_to_string(fixture_path()).unwrap();
+    let original_model = sepika_io::stbridge::import_stbridge(&original).unwrap();
+    assert!(original_model
+        .stb_rebar_analysis_diagnostics()
+        .iter()
+        .any(|m| m.contains("主筋中心位置")));
+    let derivative = std::fs::read_to_string(analysis_fixture_path()).unwrap();
+    let supported = sepika_io::stbridge::import_stbridge(&derivative).unwrap();
+    assert!(
+        supported.stb_rebar_analysis_diagnostics().is_empty(),
+        "{:?}; shape={:?}",
+        supported.stb_rebar_analysis_diagnostics(),
+        supported.sections[25].shape
+    );
+    let mut expected_sections = original_model.sections.clone();
+    let Some(sepika_core::section_shape::SectionShape::RcBeamRect { b, d, rebar }) =
+        &mut expected_sections[25].shape
+    else {
+        panic!("FB1は矩形RC梁");
+    };
+    assert_eq!((*b, *d), (300.0, 1800.0));
+    assert_eq!(
+        (rebar.main_dia, rebar.stirrup.dia, rebar.cover),
+        (25.0, 13.0, 0.0)
+    );
+    // 独立な芯間計算。径・本数・外形を変えず、中心だけで配置を成立させる。
+    let minimum = rebar.main_dia + (1.5 * rebar.main_dia).max(25.0);
+    let spaces = f64::from(rebar.top[0] - 1);
+    assert!((*b - 2.0 * 65.5) / spaces < minimum);
+    assert!((*b - 2.0 * 51.0) / spaces >= minimum);
+    rebar.cover = 51.0 - 13.0 - 25.0 / 2.0;
+    for id in [8, 16, 24] {
+        let Some(sepika_core::section_shape::SectionShape::RcBeamRect { rebar, .. }) =
+            &mut expected_sections[id].shape
+        else {
+            panic!("残る3断面も矩形RC梁");
+        };
+        assert_eq!(rebar.cover, 0.0, "原本のApplyなし位置は非適用");
+        rebar.cover = 65.5 - 13.0 - 25.0 / 2.0;
+    }
+    assert_eq!(
+        expected_sections, supported.sections,
+        "明示した4断面の配筋中心以外の断面・材料・外形を保持する"
+    );
+    assert_eq!(original_model.materials, supported.materials);
+    assert_eq!(original_model.elements, supported.elements);
+    assert_eq!(original_model.load_cases, supported.load_cases);
+    assert_eq!(std::fs::read_to_string(fixture_path()).unwrap(), original);
+    let mut app = App::default();
+    app.import_stbridge_from(fixture_path());
+    clear_error(&mut app);
+    app.run_preparation();
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .is_some_and(|message| message.contains("主筋中心位置")));
+}
+
 /// フィクスチャを取り込んだ `App`。
 ///
 /// ST-Bridge 取り込みは、欠落属性の要約や支点の自動設定といった**注意**も
@@ -292,7 +378,7 @@ fn imported() -> App {
     let mut app = App::default();
     // 解析結果の完全再現性を確保する（スナップショット比較の前提）。
     app.core.analysis_cfg.threads = 1;
-    app.import_stbridge_from(fixture_path());
+    app.import_stbridge_from(analysis_fixture_path());
     if let Some(e) = &app.core.scoped.last_error {
         assert!(
             e.starts_with('⚠'),

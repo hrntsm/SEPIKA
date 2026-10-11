@@ -2181,3 +2181,102 @@ fn panel_505_plane_demands_and_skips_survive_order_ends_and_direct_moments() {
         assert_eq!(format!("{checks:?}"), format!("{reversed:?}"));
     }
 }
+
+#[test]
+fn standard_rebar507_wall_public_entries_gate_only_consumed_side_columns() {
+    use sepika_core::model::{StbRebarArrangement, StbRebarElement, StbSectionStrength};
+    let mut model = wall_with_columns_model();
+    let wall_force = [(0.0, [-1_000_000.0, 800_000.0, 0.0, 0.0, 0.0, 1.0e9])];
+    let col_force = [(0.0, [-500_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])];
+    let forces = [
+        (ElemId(0), wall_force.as_slice()),
+        (ElemId(3), col_force.as_slice()),
+        (ElemId(4), col_force.as_slice()),
+    ];
+    let baseline = collect_joint_checks(&model, &forces, LoadTerm::Short);
+    assert!(baseline
+        .iter()
+        .filter(|(_, label, _)| label.starts_with("耐震壁"))
+        .all(|(_, _, c)| matches!(c, CheckOutcome::Checked(_))));
+    let position = StbRebarElement {
+        element: "StbSecBarColumn_RC_RectSame".into(),
+        attributes: [
+            ("D_main", "D22"),
+            ("D_band", "D10"),
+            ("N_main_X_1st", "4"),
+            ("N_main_Y_1st", "4"),
+            ("N_main_total", "12"),
+            ("N_band_direction_X", "2"),
+            ("N_band_direction_Y", "2"),
+            ("pitch_band", "100"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.into(), v.into()))
+        .collect(),
+    };
+    let mut raw = StbRebarArrangement {
+        container: StbRebarElement {
+            element: "StbSecBarArrangementColumn_RC".into(),
+            attributes: [
+                ("kind_corner", "DIR_X"),
+                ("center_start_X", "71"),
+                ("center_end_X", "71"),
+                ("center_start_Y", "71"),
+                ("center_end_Y", "71"),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect(),
+        },
+        positions: vec![position.clone()],
+        auxiliary: vec![],
+        projected_effective: vec![],
+        projected_shape: model.sections[1].shape.clone(),
+    };
+    model.stb_strengths.apply_conditions.push(StbRebarElement {
+        element: "StbColumn_RC_RebarPositionApply".into(),
+        attributes: [("set_default".into(), "false".into())].into(),
+    });
+    raw.projected_effective.push(StbRebarElement {
+        element: position.element.clone(),
+        attributes: raw.effective_attributes(&position, &model.stb_strengths.apply_conditions),
+    });
+    let record = StbSectionStrength {
+        section: SectionId(2),
+        native_rebar: false,
+        rebar: Some(raw),
+        concrete: None,
+        native_material: None,
+        reinforcement: vec![],
+        steel: vec![],
+    };
+    let mut unused = model.sections[1].clone();
+    unused.id = SectionId(2);
+    model.sections.push(unused);
+    model.stb_strengths.sections.push(record);
+    // 未使用の未解決断面は、壁の両検定の数値へ影響させない。
+    let unaffected = collect_joint_checks(&model, &forces, LoadTerm::Short);
+    assert_eq!(format!("{unaffected:?}"), format!("{baseline:?}"));
+    model.stb_strengths.sections[0].section = SectionId(1);
+    for provided in [forces.as_slice(), &forces[..1]] {
+        let checks = collect_joint_checks(&model, provided, LoadTerm::Short);
+        let nonlinear = checks
+            .iter()
+            .find(|(_, label, _)| label == "耐震壁(RC)せん断非線形")
+            .unwrap();
+        assert!(
+            matches!(&nonlinear.2, CheckOutcome::Skipped { reason } if reason.contains("kind_corner"))
+        );
+        if provided.len() == forces.len() {
+            let allowable = checks
+                .iter()
+                .find(|(_, label, _)| label == "耐震壁(RC)")
+                .unwrap();
+            assert!(
+                matches!(&allowable.2, CheckOutcome::Skipped { reason } if reason.contains("kind_corner"))
+            );
+        }
+    }
+    let records = collect_wall_design_checks(&model, &forces, LoadTerm::Short, None, "507");
+    assert!(records.iter().all(|record| matches!(&record.outcome, CheckOutcome::Skipped { reason } if reason.contains("kind_corner"))));
+}
