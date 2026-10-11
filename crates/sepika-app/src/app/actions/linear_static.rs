@@ -653,16 +653,24 @@ impl App {
                 && remap(self.ui.scoped.nav.focus_result).is_none();
         self.core.scoped.last_static = remap(self.core.scoped.last_static);
         self.ui.scoped.nav.focus_result = remap(self.ui.scoped.nav.focus_result);
+        let excluded_input = |key: &ResultInputKey| match key {
+            ResultInputKey::Static(key) => excluded.0.contains(key),
+            ResultInputKey::Combo(name) => excluded.1.contains(name),
+            _ => false,
+        };
+        let invalid_design = bundle.design_source.as_ref().is_some_and(excluded_input);
         bundle.statics.retain(|(key, _)| !excluded.0.contains(key));
         bundle.combos.retain(|(name, _)| !excluded.1.contains(name));
+        bundle.input_records.retain(|(key, _)| !excluded_input(key));
         if invalid_display {
             bundle.member_forces.clear();
             bundle.panel_moments.clear();
-            bundle.member_checks.clear();
-            bundle.joint_checks.clear();
-            bundle.wall_checks.clear();
-            bundle.beam_checks.clear();
-            bundle.slab_checks.clear();
+        }
+        if invalid_display || invalid_design {
+            bundle.clear_design_results();
+        }
+        if !bundle.has_analysis_results() {
+            bundle.analysis_contract_version = None;
         }
     }
 
@@ -1059,5 +1067,219 @@ mod tests {
         assert!(bundle.member_checks.is_empty());
         assert!(app.core.scoped.last_static.is_none());
         assert!(app.ui.scoped.nav.focus_result.is_none());
+    }
+}
+
+#[cfg(test)]
+mod static595_tests {
+    use super::*;
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../test_fixtures/static595.rs"
+    ));
+
+    fn settings_app(kind: sepika_core::model::ElementKind) -> App {
+        let mut model = scalar_model(kind);
+        model.stress_cfg.no_long_axial_column = true;
+        model.stress_cfg.no_long_axial_brace = true;
+        model.stress_cfg.tension_only_iteration = true;
+        let mut app = App::default();
+        app.load_model(model);
+        app
+    }
+
+    fn assert_response(app: &App, factor: f64) {
+        let result = &app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .statics
+            .iter()
+            .find(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(0)))
+            .unwrap()
+            .1;
+        let expected_u = -1000.0 / (200000.0 + factor * 200000.0);
+        let expected_n = factor * 200000.0 * expected_u;
+        assert!((result.disp[1][2] / expected_u - 1.0).abs() < 1e-10);
+        assert!((result.member_forces[0].1.at[0].1[0] / expected_n - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn gui_sync_background_single_and_batch_adopt_static_settings() {
+        use sepika_core::model::ElementKind;
+        for kind in [
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+            ElementKind::Brace { tension_only: true },
+        ] {
+            let factor = if matches!(kind, ElementKind::Brace { .. }) {
+                1e-12
+            } else {
+                1e-6
+            };
+            for mode in 0..4 {
+                let mut app = settings_app(kind);
+                match mode {
+                    0 => app.run_linear_static(LoadCaseId(0)),
+                    1 => {
+                        app.start_linear_static_job(LoadCaseId(0));
+                        crate::app::tests::wait_for_job(&mut app);
+                    }
+                    2 => app.run_static_all(),
+                    _ => {
+                        app.start_static_all_job();
+                        crate::app::tests::wait_for_job(&mut app);
+                    }
+                }
+                assert!(
+                    app.core.scoped.last_error.is_none(),
+                    "{:?}",
+                    app.core.scoped.last_error
+                );
+                assert_response(&app, factor);
+            }
+        }
+    }
+
+    #[test]
+    fn gui_tension_case_superposition_remains_unchecked() {
+        use sepika_core::model::{LoadCaseKind, LoadCombination};
+        let mut app = settings_app(sepika_core::model::ElementKind::Brace { tension_only: true });
+        let mut live = app.core.model.load_cases[0].clone();
+        live.id = LoadCaseId(1);
+        live.kind = LoadCaseKind::Live;
+        live.nodal[0].values[2] = 1000.0;
+        app.core.model.load_cases.push(live);
+        app.core.model.combinations.push(LoadCombination {
+            name: "G+P".into(),
+            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)],
+        });
+        app.run_combination(0);
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert!(!bundle.member_checks.is_empty());
+        assert!(bundle.member_checks.iter().flat_map(|row| &row.positions).all(|row| matches!(&row.outcome, sepika_design_jp::CheckOutcome::Skipped { reason } if reason.contains("引張専用ブレースの別ケース合成"))));
+    }
+}
+
+#[cfg(test)]
+mod static595_failure_tests {
+    use super::static595_tests::cycling_brace_model;
+    use super::*;
+
+    #[test]
+    fn gui_actual_nonconvergence_single_batch_background_and_save_do_not_revive_success() {
+        for mode in 0..4 {
+            let mut model = cycling_brace_model();
+            let mut zero = model.load_cases[0].clone();
+            zero.id = LoadCaseId(1);
+            zero.name = "zero".into();
+            zero.nodal.clear();
+            model.load_cases.push(zero);
+            model.stress_cfg.tension_only_iteration = false;
+            let mut app = App::default();
+            app.load_model(model);
+            app.run_linear_static(LoadCaseId(0));
+            assert!(app
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .statics
+                .iter()
+                .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(0))));
+            app.run_linear_static(LoadCaseId(1));
+            app.select_displayed_result(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0))));
+            let failed = StaticCaseKey::User(LoadCaseId(0));
+            let old_bundle = app.core.scoped.results.as_ref().unwrap();
+            assert_eq!(
+                old_bundle.design_source,
+                Some(ResultInputKey::Static(failed))
+            );
+            assert!(old_bundle.has_design_results());
+            let retained_input = app
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .input_records
+                .iter()
+                .find(|(key, _)| *key == ResultInputKey::Static(StaticCaseKey::User(LoadCaseId(1))))
+                .unwrap()
+                .clone();
+            app.core.model.stress_cfg.tension_only_iteration = true;
+            match mode {
+                0 => app.run_linear_static(LoadCaseId(0)),
+                1 => {
+                    app.start_linear_static_job(LoadCaseId(0));
+                    crate::app::tests::wait_for_job(&mut app);
+                }
+                2 => app.run_static_all(),
+                _ => {
+                    app.start_static_all_job();
+                    crate::app::tests::wait_for_job(&mut app);
+                }
+            }
+            let error = app.core.scoped.last_error.as_ref().unwrap();
+            assert!(
+                error.contains("cycling-braces") && error.contains("50"),
+                "{error}"
+            );
+            let bundle = app.core.scoped.results.as_ref().unwrap();
+            assert_ne!(bundle.design_source, Some(ResultInputKey::Static(failed)));
+            assert!(!bundle.statics.iter().any(|(key, _)| *key == failed));
+            assert!(!bundle
+                .input_records
+                .iter()
+                .any(|(key, _)| *key == ResultInputKey::Static(failed)));
+            assert!(bundle
+                .statics
+                .iter()
+                .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(1))));
+            if mode < 2 {
+                assert!(bundle.input_records.contains(&retained_input));
+                assert!(!bundle.has_design_results());
+                assert!(bundle.design_contract_version.is_none());
+                assert!(!bundle
+                    .input_records
+                    .iter()
+                    .any(|(key, _)| *key == ResultInputKey::Design));
+            }
+            app.run_linear_static(LoadCaseId(1));
+            assert!(app.core.scoped.last_error.is_none());
+            assert!(!app
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .statics
+                .iter()
+                .any(|(key, _)| *key == failed));
+            let path = std::env::temp_dir().join(format!(
+                "sepika-595-cycle-{}-{mode}.ovika",
+                std::process::id()
+            ));
+            app.save_project_to(path.clone());
+            assert!(app.core.scoped.last_error.is_none());
+            let mut loaded = App::default();
+            loaded.open_project_from(path.clone());
+            assert!(loaded.core.scoped.last_error.is_none());
+            let bundle = loaded.core.scoped.results.as_ref().unwrap();
+            assert_ne!(bundle.design_source, Some(ResultInputKey::Static(failed)));
+            assert!(!bundle.statics.iter().any(|(key, _)| *key == failed));
+            assert!(!bundle
+                .input_records
+                .iter()
+                .any(|(key, _)| *key == ResultInputKey::Static(failed)));
+            assert_ne!(
+                loaded.core.scoped.last_static,
+                Some(StaticKey::Case(failed))
+            );
+            std::fs::remove_file(path).unwrap();
+        }
     }
 }

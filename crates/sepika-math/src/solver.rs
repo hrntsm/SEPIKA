@@ -14,7 +14,7 @@ pub trait LinearSolver: Send + Sync {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum SolveError {
     #[error("not factorized yet")]
     NotFactorized,

@@ -523,3 +523,46 @@ mod seismic_guard_tests {
         assert!(!missing_seismic_horizontal_load(&cases[3]));
     }
 }
+
+#[cfg(test)]
+mod static_settings_tests {
+    use super::*;
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../test_fixtures/static595.rs"
+    ));
+
+    #[test]
+    fn production_job_propagates_case_nonconvergence() {
+        let error = compute_linear_static(cycling_brace_model(), LoadCaseId(0)).unwrap_err();
+        assert!(
+            matches!(error, JobError::Solve(message) if message.contains("NonConvergence") && message.contains("cycling-braces") && message.contains("ID 0") && message.contains("50"))
+        );
+    }
+
+    #[test]
+    fn production_static_job_adopts_column_and_brace_settings() {
+        use sepika_core::model::ElementKind;
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+            ElementKind::Brace { tension_only: true },
+        ] {
+            let mut model = scalar_model(kind);
+            model.stress_cfg.no_long_axial_column = true;
+            model.stress_cfg.no_long_axial_brace = true;
+            model.stress_cfg.tension_only_iteration = true;
+            let factor = if matches!(kind, ElementKind::Brace { .. }) {
+                1e-12
+            } else {
+                1e-6
+            };
+            let expected_u = -1000.0 / (200000.0 + factor * 200000.0);
+            let expected_n = factor * 200000.0 * expected_u;
+            let result = compute_linear_static(model, LoadCaseId(0)).unwrap();
+            assert!((result.disp[1][2] / expected_u - 1.0).abs() < 1e-10);
+            assert!((result.member_forces[0].1.at[0].1[0] / expected_n - 1.0).abs() < 1e-10);
+        }
+    }
+}

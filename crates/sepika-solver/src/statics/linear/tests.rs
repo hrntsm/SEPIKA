@@ -1916,3 +1916,229 @@ fn test_ensure_line_member_forces_detects_missing() {
         .to_string();
     assert!(err.contains('2'), "欠落した部材 ID が示されていない: {err}");
 }
+
+fn scalar_axial_model(kind: ElementKind, column: bool) -> Model {
+    let mut model = column_with_parallel_vertical_brace();
+    model.elements.truncate(1);
+    model.elements[0].kind = kind;
+    model.nodes[1].coord[2] = 1000.0;
+    model.nodes[1].restraint = Dof6Mask(0b111011);
+    model.nodes[1].support_spring = Some([0.0, 0.0, 200000.0, 0.0, 0.0, 0.0]);
+    model.nodes[1].mass = Some([1.0; 6]);
+    model.sections[0].area = 1000.0;
+    model.sections[0].frame_use = Some(if column {
+        FrameSectionUse::Column
+    } else {
+        FrameSectionUse::Girder
+    });
+    model.materials[0].young = 200000.0;
+    model.load_cases[0].nodal[0].values[2] = -1000.0;
+    if matches!(kind, ElementKind::Brace { .. }) {
+        model.sections[0].frame_use = Some(FrameSectionUse::Brace);
+    } else if !column {
+        model.nodes[1].coord = [1000.0, 0.0, 0.0];
+        model.nodes[1].restraint = Dof6Mask(0b111110);
+        model.nodes[1].support_spring = Some([200000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+        model.load_cases[0].nodal[0].values = [-1000.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    }
+    model
+}
+
+fn assert_scalar_response(result: &StaticOnce, force: f64, factor: f64) {
+    let expected_u = force / (200000.0 + factor * 200000.0);
+    let expected_n = factor * 200000.0 * expected_u;
+    assert!((result.disp[1][..3].iter().sum::<f64>() / expected_u - 1.0).abs() < 1e-10);
+    assert!(
+        (axial_force(result, ElemId(0)) / expected_n - 1.0).abs() < 1e-10,
+        "N={} expected {}",
+        axial_force(result, ElemId(0)),
+        expected_n
+    );
+}
+
+#[test]
+fn static_public_paths_adopt_all_column_kinds_and_load_classifications() {
+    use crate::statics::analysis::Analysis;
+    use sepika_core::model::LoadCaseKind::*;
+    for elem_kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for column in [true, false] {
+            for enabled in [false, true] {
+                let mut model = scalar_axial_model(elem_kind, column);
+                model.stress_cfg.no_long_axial_column = enabled;
+                for (i, kind) in [Dead, Live, Snow, Other, LiveSeismic, Wind, Seismic]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let mut case = model.load_cases[0].clone();
+                    case.id = LoadCaseId(i as u32 + 1);
+                    case.kind = kind;
+                    case.name = format!("{kind:?}");
+                    if i == 0 {
+                        model.load_cases.clear();
+                    }
+                    model.load_cases.push(case);
+                }
+                let analysis = Analysis::prepare(&model).unwrap();
+                let order = [
+                    LoadCaseId(1),
+                    LoadCaseId(7),
+                    LoadCaseId(1),
+                    LoadCaseId(2),
+                    LoadCaseId(3),
+                    LoadCaseId(4),
+                    LoadCaseId(5),
+                    LoadCaseId(6),
+                ];
+                let batch = analysis.linear_static_batch(&order);
+                for (id, batched) in order.iter().zip(batch) {
+                    let kind = model
+                        .load_cases
+                        .iter()
+                        .find(|case| case.id == *id)
+                        .unwrap()
+                        .kind;
+                    let factor = if enabled && column && matches!(kind, Dead | Live | Snow | Other)
+                    {
+                        1e-6
+                    } else {
+                        1.0
+                    };
+                    for result in [
+                        linear_static_once(&model, *id).unwrap(),
+                        analysis.linear_static(*id).unwrap(),
+                        batched.unwrap(),
+                    ] {
+                        assert_scalar_response(&result, -1000.0, factor);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn brace_settings_product_order_and_case_response_superposition() {
+    use crate::statics::analysis::Analysis;
+    use sepika_core::model::{LoadCaseKind, LoadCombination};
+    for long_disabled in [false, true] {
+        for tension_iteration in [false, true] {
+            for tension_only in [false, true] {
+                let mut model = scalar_axial_model(ElementKind::Brace { tension_only }, false);
+                model.stress_cfg.no_long_axial_brace = long_disabled;
+                model.stress_cfg.tension_only_iteration = tension_iteration;
+                for (id, kind, force) in [
+                    (1, LoadCaseKind::Dead, -1000.0),
+                    (2, LoadCaseKind::Dead, 1000.0),
+                    (3, LoadCaseKind::Seismic, -1000.0),
+                ] {
+                    let mut case = model.load_cases[0].clone();
+                    case.id = LoadCaseId(id);
+                    case.kind = kind;
+                    case.nodal[0].values[2] = force;
+                    if id == 1 {
+                        model.load_cases.clear();
+                    }
+                    model.load_cases.push(case);
+                }
+                let analysis = Analysis::prepare(&model).unwrap();
+                for id in [1, 2, 3, 1, 2, 1] {
+                    let force = if id == 2 { 1000.0 } else { -1000.0 };
+                    let beta = if long_disabled && id != 3 { 1e-6 } else { 1.0 };
+                    let active = if tension_iteration && tension_only && force < 0.0 {
+                        1e-6
+                    } else {
+                        1.0
+                    };
+                    for result in [
+                        linear_static_once(&model, LoadCaseId(id)).unwrap(),
+                        analysis.linear_static(LoadCaseId(id)).unwrap(),
+                    ] {
+                        assert_scalar_response(&result, force, beta * active);
+                    }
+                }
+                let combo = LoadCombination {
+                    name: "compression+tension".into(),
+                    terms: vec![(LoadCaseId(1), 1.0), (LoadCaseId(2), 1.0)],
+                };
+                let result = analysis.linear_combination(&combo).unwrap();
+                let beta = if long_disabled { 1e-6 } else { 1.0 };
+                let compression = if tension_iteration && tension_only {
+                    1e-6
+                } else {
+                    1.0
+                };
+                let expected_u = -1000.0 / (200000.0 + beta * compression * 200000.0)
+                    + 1000.0 / (200000.0 + beta * 200000.0);
+                let expected_n = beta
+                    * compression
+                    * 200000.0
+                    * (-1000.0 / (200000.0 + beta * compression * 200000.0))
+                    + beta * 200000.0 * (1000.0 / (200000.0 + beta * 200000.0));
+                if tension_iteration && tension_only {
+                    assert!((result.disp[1][2] / expected_u - 1.0).abs() < 1e-9);
+                    assert!((axial_force(&result, ElemId(0)) / expected_n - 1.0).abs() < 1e-9);
+                } else {
+                    assert_eq!(result.disp[1][2], 0.0);
+                    assert_eq!(axial_force(&result, ElemId(0)), 0.0);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn active_set_requires_unchanged_set_and_reports_case_and_limit() {
+    for (force, limit, success) in [
+        (-1000.0, 1, false),
+        (-1000.0, 2, true),
+        (1000.0, 1, true),
+        (0.0, 1, true),
+    ] {
+        let mut model = scalar_axial_model(ElementKind::Brace { tension_only: true }, false);
+        model.stress_cfg.tension_only_iteration = true;
+        model.stress_cfg.no_long_axial_brace = true;
+        model.load_cases[0].name = "scalar-limit".into();
+        model.load_cases[0].nodal[0].values[2] = force;
+        let dofmap = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &dofmap);
+        let f_free = assemble_global_f(&model, &dofmap, LoadCaseId(1));
+        let result = solve_static_case(
+            &model,
+            &dofmap,
+            &reducer,
+            &model.load_cases[0],
+            &f_free,
+            None,
+            limit,
+        );
+        if success {
+            let result = result.unwrap();
+            if force != 0.0 {
+                assert_scalar_response(&result, force, if force < 0.0 { 1e-12 } else { 1e-6 });
+            } else {
+                assert_eq!(result.disp[1][2], 0.0);
+            }
+        } else {
+            assert!(
+                matches!(result, Err(SolveError::NonConvergence(message)) if message.contains("scalar-limit") && message.contains("ID 1") && message.contains("上限 1"))
+            );
+        }
+    }
+}
+
+#[test]
+fn static_adoption_does_not_change_baseline_eigenvalues() {
+    use crate::statics::analysis::Analysis;
+    let mut model = scalar_axial_model(ElementKind::Brace { tension_only: true }, false);
+    let expected = Analysis::prepare(&model).unwrap().eigen(1).unwrap().omega2;
+    model.stress_cfg.no_long_axial_brace = true;
+    model.stress_cfg.tension_only_iteration = true;
+    let analysis = Analysis::prepare(&model).unwrap();
+    analysis.linear_static(LoadCaseId(1)).unwrap();
+    assert_eq!(analysis.eigen(1).unwrap().omega2, expected);
+}

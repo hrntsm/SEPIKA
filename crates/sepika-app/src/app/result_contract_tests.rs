@@ -138,6 +138,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old", Some(0), "旧契約"),
         ("old-section-mass", Some(2), "旧契約"),
         ("old-src-overlap", Some(3), "旧契約"),
+        ("old-static-settings", Some(4), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {

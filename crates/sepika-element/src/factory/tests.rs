@@ -1060,3 +1060,57 @@ fn test_steel_beam_flexural_spring_buckling_degrades() {
         "buckling degradation: last M ({m_last}) must fall below peak ({m_max})"
     );
 }
+
+#[test]
+fn axial_factor_preserves_nonaxial_stiffness_and_mass() {
+    let mut model = make_diaphragm_model();
+    model.materials[0].density = 7.85e-9;
+    let ctx = crate::behavior::Ctx { model: &model };
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let data = ElementData {
+            id: ElemId(0),
+            kind,
+            nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 1.0, 0.0],
+            },
+            end_cond: [EndCondition::Fixed; 2],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        };
+        let normal = build_behavior(&data, &model);
+        let reduced = build_behavior_with_axial_factor(&data, &model, 1e-6);
+        let kn = normal.tangent_stiffness(&ctx);
+        let kr = reduced.tangent_stiffness(&ctx);
+        for i in 0..12 {
+            for j in 0..12 {
+                let expected = kn.get(i, j)
+                    * if [0, 6].contains(&i) && [0, 6].contains(&j) {
+                        1e-6
+                    } else {
+                        1.0
+                    };
+                assert!((kr.get(i, j) - expected).abs() <= expected.abs() * 1e-12);
+            }
+        }
+        for option in [
+            crate::behavior::MassOption::Lumped,
+            crate::behavior::MassOption::Consistent,
+        ] {
+            let mn = normal.mass_matrix(option);
+            let mr = reduced.mass_matrix(option);
+            for i in 0..12 {
+                for j in 0..12 {
+                    assert_eq!(mn.get(i, j), mr.get(i, j));
+                }
+            }
+        }
+    }
+}

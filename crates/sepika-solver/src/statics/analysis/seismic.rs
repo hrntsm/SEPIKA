@@ -255,7 +255,7 @@ impl Analysis<'_> {
         }
 
         let f_free = self.assemble_f_free_from_nodal(&lc.nodal);
-        self.solve_and_recover(&f_free, &[])
+        self.solve_and_recover(&lc, &f_free)
     }
 
     /// 地震荷重ケース構築に用いる設計用固有周期 T [s] を算定する。
@@ -331,7 +331,7 @@ impl Analysis<'_> {
         }
 
         let f_free = self.assemble_f_free_from_nodal(&lc.nodal);
-        self.solve_and_recover(&f_free, &[])
+        self.solve_and_recover(&lc, &f_free)
     }
 }
 
@@ -559,7 +559,7 @@ pub fn build_seismic_load_case_from_model(
     };
 
     let mut lc = sepika_core::model::LoadCase {
-        kind: Default::default(),
+        kind: sepika_core::model::LoadCaseKind::Seismic,
         id: lc_id,
         name: format!("seismic_{:?}_{:?}", dir, mode),
         nodal: Vec::new(),
