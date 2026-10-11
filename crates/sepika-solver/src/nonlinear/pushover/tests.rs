@@ -2597,6 +2597,63 @@ fn test_compute_hinge_thresholds_steel_strength_factor_resolution() {
     );
 }
 
+#[test]
+fn steel_grade_recognition_agrees_in_factory_hinge_and_shear_consumers() {
+    use sepika_element::factory::{build_hinge_view, StrengthBasis};
+    for (name, automatic_fy) in [
+        ("未知鋼材", 200.0),
+        ("SN400-custom", 200.0),
+        ("SM400YA", 200.0),
+        ("sn400b", 200.0),
+        ("SN400B", 220.0),
+        (" \tSN400B\n ", 220.0),
+        ("SA440", 210.0),
+        (" SA440 ", 210.0),
+        ("TMCP440", 210.0),
+        (" TMCP440 ", 210.0),
+    ] {
+        for (factor, expected_fy) in [(None, automatic_fy), (Some(1.07), 214.0)] {
+            let mut model = steel_hinge_model(name, 200.0, factor);
+            model.elements[0].kind = ElementKind::Beam;
+            model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+            model.sections[0].iy = 5_000_000.0;
+            model.sections[0].iz = 5_000_000.0;
+            model.sections[0].as_y = 1000.0;
+            model.sections[0].as_z = 2000.0;
+            let expected_moment = expected_fy * 100_000.0;
+            let hinge = &compute_hinge_thresholds(&model)[0];
+            assert!(
+                (hinge.my - expected_moment).abs() < 1e-7,
+                "{name:?} {factor:?}"
+            );
+            let shear = &compute_shear_yield_thresholds(&model)[0];
+            assert!((shear.y.qy(0.0) - expected_fy * 2000.0 / 3.0_f64.sqrt()).abs() < 1e-7);
+            assert!((shear.z.qy(0.0) - expected_fy * 1000.0 / 3.0_f64.sqrt()).abs() < 1e-7);
+            for (basis, moment) in [
+                (StrengthBasis::Nominal, 20_000_000.0),
+                (StrengthBasis::MaterialStrength, expected_moment),
+            ] {
+                let view = build_hinge_view(
+                    &model.elements[0],
+                    &model,
+                    basis,
+                    sepika_core::model::AnalysisKind::Incremental,
+                    0.0,
+                    8,
+                    8,
+                )
+                .unwrap();
+                let points = view.backbone.unwrap();
+                assert!(
+                    (points[1][1] - moment).abs() < 1e-7,
+                    "factory {name:?} {factor:?} {basis:?}"
+                );
+            }
+            assert_eq!(model.materials[0].fy, Some(200.0));
+        }
+    }
+}
+
 /// RC 矩形断面 + 配筋情報を持つ片持ち柱モデル（fy 未設定＝既定345）を作る。
 fn rc_hinge_model() -> (
     Model,

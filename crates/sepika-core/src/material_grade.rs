@@ -115,21 +115,16 @@ pub fn cft_steel_f_value(mat: &crate::model::Material, thickness: f64) -> Option
 /// 材料強度の基準強度は表の数値の 1.1 倍以下（JIS 規格品・大臣認定品）、
 /// ただし 590N 級（SA440・TMCP440。HBL®440/G440 等の認定条件）は 1.05 倍以下と
 /// できる規定（H12 建告第2464号の運用・各認定条件）に基づく。
+/// 対応済み名称のみ解決し、前後空白は除き、大小文字は区別する。
 /// 名称から鋼材グレードを解決できない材料（直接入力材料）は割増しない（1.0）。
 ///
 /// 本係数は保有水平耐力計算（プッシュオーバー）の部材耐力算定にのみ用い、
 /// 許容応力度計算（一次設計）には適用しない。
 pub fn steel_material_strength_factor(name: &str) -> f64 {
-    let Some(grade) = STEEL_GRADES
-        .iter()
-        .filter(|g| name.starts_with(*g))
-        .max_by_key(|g| g.len())
-    else {
-        return 1.0;
-    };
-    match *grade {
-        "SA440" | "TMCP440" => 1.05,
-        _ => 1.1,
+    match steel_grade_base(name) {
+        Some("SA440" | "TMCP440") => 1.05,
+        Some(_) => 1.1,
+        None => 1.0,
     }
 }
 
@@ -581,6 +576,16 @@ mod tests {
                 assert_eq!(properties.fc, None, "{input:?}");
                 assert_eq!(properties.fy, Some(le40), "{input:?}");
                 assert_eq!(steel_f_value_prefix(&input, 40.), Some(le40), "{input:?}");
+                let expected_factor = if matches!(name, "SA440" | "TMCP440") {
+                    1.05
+                } else {
+                    1.1
+                };
+                assert_eq!(
+                    steel_material_strength_factor(&input),
+                    expected_factor,
+                    "{input:?}"
+                );
                 assert_eq!(
                     steel_f_value_prefix(&input, 40.001),
                     Some(gt40),
@@ -593,6 +598,8 @@ mod tests {
     #[test]
     fn unsupported_steel_names_do_not_restore_stock_properties_or_f_values() {
         for name in [
+            "SN400-custom",
+            "sn400b",
             "SM400YA",
             "SM400YB",
             "SM400XYZ",
@@ -628,6 +635,7 @@ mod tests {
                 crate::standard_material::standard_material_properties(name).is_none(),
                 "{name:?}"
             );
+            assert_eq!(steel_material_strength_factor(name), 1.0, "{name:?}");
             for thickness in [40., 40.001] {
                 assert_eq!(steel_f_value_prefix(name, thickness), None, "{name:?}");
             }
@@ -703,6 +711,23 @@ mod tests {
             concrete_class: Default::default(),
             strength_factor: factor,
         };
+        for name in [
+            "SN400B",
+            " SN400B ",
+            "SA440",
+            " SA440 ",
+            "TMCP440",
+            " TMCP440 ",
+            "SN400-custom",
+            "SM400YA",
+            "sn400b",
+            "未知鋼材",
+        ] {
+            let mut mat = mk(name, Some(1.07));
+            mat.fy = Some(200.0);
+            assert_eq!(material_strength_factor_steel(&mat), 1.07, "{name:?}");
+            assert_eq!(mat.fy, Some(200.0));
+        }
         // 鋼材文脈: 名称から自動判定。
         assert_eq!(material_strength_factor_steel(&mk("SS400", None)), 1.1);
         assert_eq!(material_strength_factor_steel(&mk("SA440", None)), 1.05);
