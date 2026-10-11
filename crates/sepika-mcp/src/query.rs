@@ -1,4 +1,4 @@
-//! モデルの照会（JSON 出力・クエリ・解析）関数。
+//! モデルの照会（JSON 出力・クエリ・数量積算）関数。
 
 use super::*;
 
@@ -313,21 +313,4 @@ pub fn quantity_takeoff_json(model: &Model, group_by: Option<&str>) -> serde_jso
         "totals": totals_json(&q.totals()),
         "notes": q.notes,
     })
-}
-
-/// 解析の実処理（feature 非依存・テスト可能）。
-pub fn analyze_model(model: &Model) -> Result<String, String> {
-    let mut model = model.clone();
-    sepika_job::prepare::apply_rigid_zones_and_panels(&mut model);
-    let Some(lc_id) = model.load_cases.first().map(|lc| lc.id) else {
-        return Err("荷重ケースがありません".into());
-    };
-    let result =
-        sepika_job::compute::compute_linear_static(model, lc_id).map_err(|e| e.to_string())?;
-    Ok(serde_json::to_string(&result.disp).unwrap_or_default())
-}
-
-/// `analyze_model` の `ServerState` 経由の薄いラッパ。
-pub fn analyze(state: &mut ServerState) -> Result<String, String> {
-    analyze_model(&state.model)
 }
