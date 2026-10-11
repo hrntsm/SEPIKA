@@ -103,6 +103,9 @@ pub struct OvikaContents {
 /// モデルと派生データを .ovika へ保存する。
 pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result<(), IoError> {
     model
+        .validate_secondary_section_usage()
+        .map_err(|e| IoError::Decode(e.to_string()))?;
+    model
         .validate_member_load_extents()
         .map_err(IoError::Decode)?;
     let tmp_path = path.with_extension("ovika.tmp");
@@ -253,6 +256,9 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
         .validate_attached_slabs()
         .map_err(|e| IoError::Decode(e.to_string()))?;
 
+    model
+        .validate_secondary_section_usage()
+        .map_err(|e| IoError::Decode(e.to_string()))?;
     model
         .validate_member_load_extents()
         .map_err(IoError::Decode)?;

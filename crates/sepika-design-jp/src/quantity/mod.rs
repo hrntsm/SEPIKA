@@ -7,7 +7,7 @@
 //! 考慮しない（各部位共通事項）。
 //!
 //! - [`QuantityCfg`] — 積算の設定（定着長さ係数・鉄筋比等）
-//! - [`compute_quantity_takeoff`] — モデル全体の数量集計
+//! - [`try_compute_quantity_takeoff`] — モデル全体の数量集計
 //! - [`QuantityTakeoff`] / [`MemberQuantity`] — 集計結果
 //! - [`member`] — 部位別の算定式（純関数）
 //! - [`rebar`] — 鉄筋の単位質量
@@ -430,12 +430,16 @@ fn validate_circular_rc_posts(model: &Model) -> Result<(), String> {
     Ok(())
 }
 
-/// 必要な材料領域・床接触が未知、不正または適用対象外の場合は理由付きエラー。未参照断面の未入力は許容する。
+/// 二次 CFT、必要な材料領域・床接触が未知、不正または適用対象外の場合は理由付きエラー。
+/// 壁版は内部で展開して集計する。未参照断面の未入力は許容する。
 /// 円形RC間柱の直径・解決実長 [mm] が有限かつ正でない場合は部材 ID と原因を返す。
 pub fn try_compute_quantity_takeoff(
     model: &Model,
     cfg: &QuantityCfg,
 ) -> Result<QuantityTakeoff, String> {
+    model
+        .validate_secondary_section_usage()
+        .map_err(|e| e.to_string())?;
     validate_circular_rc_posts(model)?;
     let contacts = contact::Contacts::from_model(model)?;
     let ids: HashSet<_> = model
@@ -521,20 +525,6 @@ impl Ctx<'_> {
             BeamBarEnd::Exterior { l2 }
         }
     }
-}
-
-/// モデル全体の数量を集計する（部位別の概算数量）。
-///
-/// 壁の解析要素（`ElementKind::Wall`）は入力の正である `model` には存在しない
-/// 生成物（D5）のため、内部で壁展開モデル
-/// （[`sepika_load::wall_expand::expand_wall_elements`]）を組み立てて数量拾いを
-/// 行う（呼び出し元に展開を要求しない。忘れると壁の数量が積算から静かに
-/// 消えるため。自重算定 `enumerate_self_weight` と同じ理由・同じパターン）。
-/// 円形RC間柱の寸法・床接触入力が不正または未確定の場合は panic。診断には `try_compute_quantity_takeoff` を用いる。
-pub fn compute_quantity_takeoff(model: &Model, cfg: &QuantityCfg) -> QuantityTakeoff {
-    validate_circular_rc_posts(model).expect("円形RC間柱の数量を算定できません");
-    let contacts = contact::Contacts::from_model(model).expect("梁と床の接触面を解決できません");
-    compute_quantity_takeoff_validated(model, cfg, &contacts)
 }
 
 fn compute_quantity_takeoff_validated(

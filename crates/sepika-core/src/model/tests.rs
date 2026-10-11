@@ -1972,3 +1972,62 @@ fn seismic_generation_snapshot_id_visits_keep_keys_stale_and_drop_deleted_node_o
         .automatic_master_restraints
         .is_empty());
 }
+
+#[test]
+fn secondary_cft_is_rejected_for_both_kinds_and_locations_even_with_column_use() {
+    use crate::section_shape::SectionShape;
+    for shape in [
+        SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 10.0,
+            corner_r: Some(0.0),
+        },
+        SectionShape::CftPipe {
+            outer_dia: 400.0,
+            thick: 10.0,
+        },
+    ] {
+        for kind in [SecondaryMemberKind::Beam, SecondaryMemberKind::Post] {
+            for assigned in [false, true] {
+                let mut model = Model::default();
+                let mut section = shape.clone().to_section(SectionId(0), "CFT".into());
+                section.frame_use = Some(FrameSectionUse::Column);
+                model.sections.push(section);
+                let mut sm = test_secondary(kind, 539, "禁止二次CFT");
+                sm.section = Some(SectionId(0));
+                assert!(!model.sections[0].secondary_member_use_allowed());
+                let single = Model::validate_secondary_member(&sm, "test", &model.sections)
+                    .unwrap_err()
+                    .to_string();
+                match (kind, assigned) {
+                    (SecondaryMemberKind::Beam, false) => model.unassigned_beams.push(sm),
+                    (SecondaryMemberKind::Post, false) => model.unassigned_posts.push(sm),
+                    (SecondaryMemberKind::Beam, true) => {
+                        let mut r = FloorRegion::new(FloorRegionId(0), vec![]);
+                        r.secondary_beams.push(sm);
+                        model.floor_regions.push(r);
+                    }
+                    (SecondaryMemberKind::Post, true) => {
+                        let mut r = WallRegion::new(WallRegionId(0), vec![]);
+                        r.posts.push(sm);
+                        model.wall_regions.push(r);
+                    }
+                }
+                for error in [
+                    single,
+                    model
+                        .validate_secondary_section_usage()
+                        .unwrap_err()
+                        .to_string(),
+                    model.validate().unwrap_err().to_string(),
+                ] {
+                    assert!(error.contains("SecondaryMemberId(539)"), "{error}");
+                    assert!(error.contains(&format!("{kind:?}")), "{error}");
+                    assert!(error.contains("SectionId(0)"), "{error}");
+                    assert!(error.contains("CFT"), "{error}");
+                }
+            }
+        }
+    }
+}

@@ -192,7 +192,7 @@ fn rc_portal_model() -> Model {
 #[test]
 fn test_rc_portal_categories_and_concrete() {
     let model = rc_portal_model();
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     assert_eq!(q.items.len(), 4);
 
     let cols: Vec<_> = q
@@ -291,7 +291,7 @@ fn test_unset_frame_use_is_not_counted_as_beam() {
     let mut model = rc_portal_model();
     model.sections[0].frame_use = None;
 
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     assert_eq!(
         q.items
             .iter()
@@ -308,7 +308,7 @@ fn test_unset_frame_use_is_not_counted_as_beam() {
 #[test]
 fn test_rc_girder_main_bars_and_stirrups() {
     let model = rc_portal_model();
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let girder = q
         .items
         .iter()
@@ -341,7 +341,7 @@ fn test_rc_girder_main_bars_and_stirrups() {
 #[test]
 fn test_rc_column_rebar() {
     let model = rc_portal_model();
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let col = q
         .items
         .iter()
@@ -396,7 +396,7 @@ fn test_girder_formwork_slab_deduction() {
         );
     }
 
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let girder = q
         .items
         .iter()
@@ -415,7 +415,7 @@ fn test_beam_by_ratio() {
     model.nodes.push(node(5, 2_000.0, 3_000.0, 3_500.0));
     model.elements.push(line_elem(4, 4, 5, 0));
 
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let beam = q
         .items
         .iter()
@@ -454,7 +454,7 @@ fn test_steel_member_weight() {
     // 大梁を S 断面へ差し替え。
     model.elements[2].section = Some(SectionId(2));
 
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let girder = q
         .items
         .iter()
@@ -489,7 +489,7 @@ fn test_brace_length_and_weight() {
     };
     model.elements.push(brace);
 
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let br = q
         .items
         .iter()
@@ -524,7 +524,7 @@ fn test_slab_quantity() {
         },
     );
 
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let slab = q
         .items
         .iter()
@@ -568,7 +568,7 @@ fn test_wall_quantity_with_opening() {
         finish_intensity: 0.0,
     });
 
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let w = q
         .items
         .iter()
@@ -583,7 +583,7 @@ fn test_wall_quantity_with_opening() {
     assert!(w.rebar_weight_t() > 0.0);
 }
 
-/// `compute_quantity_takeoff` が壁展開モデルを見ていることの回帰テスト
+/// `try_compute_quantity_takeoff` が壁展開モデルを見ていることの回帰テスト
 /// （申し送り §5.15）。壁の解析要素（`ElementKind::Wall`）は入力の正である
 /// `Model`（`WallPlate`＋`WallRegion` 経由）には存在しない生成物（D5）のため、
 /// 内部で壁展開しないと `MemberCategory::Wall` の数量が一切集計されない
@@ -628,7 +628,7 @@ fn test_wall_quantity_via_wall_plate_is_included() {
     // 入力モデル自体には壁の解析要素は一切ない（D5）。
     assert!(model.elements.iter().all(|e| e.kind != ElementKind::Wall));
 
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let w = q.items.iter().find(|i| i.category == MemberCategory::Wall);
     assert!(
         w.is_some(),
@@ -680,7 +680,7 @@ fn test_attached_wall_plate_quantity_is_included_as_misc_wall() {
     });
     assert!(model.elements.iter().all(|e| e.kind != ElementKind::Wall));
 
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let items: Vec<_> = q
         .items
         .iter()
@@ -717,7 +717,7 @@ fn test_haunch_from_member_detail() {
         haunch_j: None,
         joints: vec![],
     });
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let g = q
         .items
         .iter()
@@ -757,7 +757,7 @@ fn test_haunch_from_member_detail() {
         haunch_j: Some(haunch),
         joints: vec![],
     });
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let fg = q
         .items
         .iter()
@@ -777,7 +777,8 @@ fn test_haunch_from_member_detail() {
 }
 
 fn girder_formwork(model: &Model) -> f64 {
-    compute_quantity_takeoff(model, &QuantityCfg::default())
+    try_compute_quantity_takeoff(model, &QuantityCfg::default())
+        .unwrap()
         .items
         .iter()
         .find(|i| i.elem == Some(ElemId(2)) && i.category == MemberCategory::Girder)
@@ -860,7 +861,7 @@ fn test_new_rc_beam_rebar_uses_layer_counts() {
         .to_section(SectionId(0), "RCB-400x800".to_string()),
     );
 
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let girder = q
         .items
         .iter()
@@ -918,7 +919,7 @@ fn test_new_rc_rect_column_rebar_uses_layer_counts() {
         .to_section(SectionId(1), "RCC-700x700".to_string()),
     );
 
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let col = q
         .items
         .iter()
@@ -967,7 +968,7 @@ fn test_new_rc_circle_column_rebar_uses_total_count() {
         .to_section(SectionId(1), "RD-700".to_string()),
     );
 
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let col = q
         .items
         .iter()
@@ -1039,7 +1040,7 @@ fn test_new_rc_rebar_unset_yields_zero_without_panic() {
         .to_section(SectionId(1), "RCC".to_string()),
     );
 
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     assert!(
         q.items.iter().all(|i| i.rebar_weight_t() == 0.0),
         "未入力の新型は鉄筋重量 0"
@@ -1065,7 +1066,7 @@ fn test_new_rc_rebar_unset_yields_zero_without_panic() {
         }
         .to_section(SectionId(1), "RD".to_string()),
     );
-    let q = compute_quantity_takeoff(&model, &QuantityCfg::default());
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     assert!(q
         .items
         .iter()
@@ -1203,11 +1204,6 @@ fn circular_rc_post_invalid_geometry_reports_id_and_cause() {
         let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
         assert!(error.contains("SecondaryMemberId(448)"), "{error}");
         assert!(error.contains("実長 L"), "{error}");
-        assert!(std::panic::catch_unwind(|| compute_quantity_takeoff(
-            &model,
-            &QuantityCfg::default()
-        ))
-        .is_err());
     }
 }
 
@@ -1258,40 +1254,23 @@ fn secondary_rectangular_and_steel_paths_are_preserved() {
             model.unassigned_posts = std::mem::take(&mut model.unassigned_beams);
             model.unassigned_posts[0].kind = kind;
         }
-        for (shape, expected_structure, expected_weight_t) in [
-            (
-                SectionShape::SteelH {
-                    root_r: Some(0.0),
-                    height: 400.0,
-                    width: 200.0,
-                    web_thick: 8.0,
-                    flange_thick: 13.0,
-                },
-                StructureKind::S,
-                0.1929216,
-            ),
-            (
-                SectionShape::CftBox {
-                    height: 400.0,
-                    width: 400.0,
-                    thick: 10.0,
-                    corner_r: Some(0.0),
-                },
-                StructureKind::Cft,
-                0.36738,
-            ),
-        ] {
-            let mut section = shape.to_section(SectionId(0), "鋼材".into());
-            section.material = Some(MaterialId(0));
-            model.sections[0] = section;
-            model.materials[0] = steel_material(0);
-            let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
-            assert_eq!(q.items[0].structure, expected_structure);
-            assert_eq!(q.items[0].concrete_m3, 0.0);
-            assert_eq!(q.items[0].formwork_m2, 0.0);
-            assert!((q.items[0].steel.as_ref().unwrap().length_m - 3.0).abs() < 1e-9);
-            assert!((q.items[0].steel.as_ref().unwrap().weight_t - expected_weight_t).abs() < 1e-9);
-        }
+        let shape = SectionShape::SteelH {
+            root_r: Some(0.0),
+            height: 400.0,
+            width: 200.0,
+            web_thick: 8.0,
+            flange_thick: 13.0,
+        };
+        let mut section = shape.to_section(SectionId(0), "鋼材".into());
+        section.material = Some(MaterialId(0));
+        model.sections[0] = section;
+        model.materials[0] = steel_material(0);
+        let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+        assert_eq!(q.items[0].structure, StructureKind::S);
+        assert_eq!(q.items[0].concrete_m3, 0.0);
+        assert_eq!(q.items[0].formwork_m2, 0.0);
+        assert!((q.items[0].steel.as_ref().unwrap().length_m - 3.0).abs() < 1e-9);
+        assert!((q.items[0].steel.as_ref().unwrap().weight_t - 0.1929216).abs() < 1e-9);
     }
 }
 

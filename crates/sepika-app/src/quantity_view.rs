@@ -1,6 +1,6 @@
 //! 数量積算ビュー（設計タブ「数量積算」）。
 //!
-//! モデルから [`sepika_design_jp::quantity::compute_quantity_takeoff`] で
+//! モデルから [`sepika_design_jp::quantity::try_compute_quantity_takeoff`] で
 //! 概算数量（コンクリート体積・型枠面積・鉄筋重量・鉄骨重量・鉄筋継手個所数）
 //! を集計し、部位別・階別・明細・鉄骨種類別・鉄筋径別に表示する。
 //! CSV エクスポート（[`crate::summary::build_quantity_csv`]）にも対応する。

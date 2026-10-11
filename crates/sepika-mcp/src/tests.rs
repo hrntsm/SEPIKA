@@ -3843,3 +3843,101 @@ fn static595_mcp_tension_case_superposition_remains_unchecked() {
         .unwrap()
         .contains("引張専用ブレースの別ケース合成"));
 }
+
+#[test]
+fn secondary_cft_quantity_is_unavailable_for_all_kinds_shapes_and_locations() {
+    use sepika_core::ids::{FloorRegionId, SecondaryMemberId, WallRegionId};
+    use sepika_core::model::{FloorRegion, SecondaryMember, SecondaryMemberKind, WallRegion};
+    use sepika_core::section_shape::SectionShape;
+    for shape in [
+        SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 10.0,
+            corner_r: Some(0.0),
+        },
+        SectionShape::CftPipe {
+            outer_dia: 400.0,
+            thick: 10.0,
+        },
+    ] {
+        for kind in [SecondaryMemberKind::Beam, SecondaryMemberKind::Post] {
+            for assigned in [false, true] {
+                let mut model = sepika_core::Model::default();
+                let mut section = shape.clone().to_section(SectionId(0), "CFT".into());
+                section.frame_use = Some(FrameSectionUse::Column);
+                model.sections.push(section);
+                let sm = SecondaryMember {
+                    id: SecondaryMemberId(539),
+                    kind,
+                    section: Some(SectionId(0)),
+                    ..Default::default()
+                };
+                match (kind, assigned) {
+                    (SecondaryMemberKind::Beam, false) => model.unassigned_beams.push(sm),
+                    (SecondaryMemberKind::Post, false) => model.unassigned_posts.push(sm),
+                    (SecondaryMemberKind::Beam, true) => {
+                        let mut r = FloorRegion::new(FloorRegionId(0), vec![]);
+                        r.secondary_beams.push(sm);
+                        model.floor_regions.push(r);
+                    }
+                    (SecondaryMemberKind::Post, true) => {
+                        let mut r = WallRegion::new(WallRegionId(0), vec![]);
+                        r.posts.push(sm);
+                        model.wall_regions.push(r);
+                    }
+                }
+                for grouping in [None, Some("detail"), Some("story"), Some("category")] {
+                    let result = quantity_takeoff_json(&model, grouping);
+                    assert_eq!(result["status"], "unavailable");
+                    assert!(result["totals"].is_null());
+                    let reason = result["reason"].as_str().unwrap();
+                    assert!(reason.contains("SecondaryMemberId(539)"), "{reason}");
+                    assert!(reason.contains(&format!("{kind:?}")), "{reason}");
+                    assert!(reason.contains("SectionId(0)"), "{reason}");
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "mcp")]
+#[tokio::test]
+async fn secondary_cft_mcp_tool_returns_unavailable_without_totals() {
+    use crate::server::{QuantityTakeoffArgs, SepikaServer};
+    use rmcp::handler::server::wrapper::Parameters;
+    let mut model = sepika_core::Model::default();
+    let mut section = sepika_core::section_shape::SectionShape::CftPipe {
+        outer_dia: 400.0,
+        thick: 10.0,
+    }
+    .to_section(SectionId(0), "禁止CFT".into());
+    section.frame_use = Some(FrameSectionUse::Column);
+    model.sections.push(section);
+    model
+        .unassigned_posts
+        .push(sepika_core::model::SecondaryMember {
+            id: sepika_core::ids::SecondaryMemberId(539),
+            kind: sepika_core::model::SecondaryMemberKind::Post,
+            section: Some(SectionId(0)),
+            ..Default::default()
+        });
+    let dir = std::env::temp_dir().join(format!("sepika539-mcp-{}", std::process::id()));
+    let server = SepikaServer::new(ServerState::with_fs_store(model, &dir).unwrap());
+    let result = server
+        .quantity_takeoff(Parameters(QuantityTakeoffArgs {
+            group_by: Some("detail".into()),
+        }))
+        .await
+        .unwrap();
+    let text = &result.content[0].raw.as_text().unwrap().text;
+    let value: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(value["status"], "unavailable");
+    assert!(value["totals"].is_null());
+    assert!(value["reason"]
+        .as_str()
+        .unwrap()
+        .contains("SecondaryMemberId(539)"));
+    drop(server);
+    std::fs::remove_dir_all(dir).unwrap();
+}

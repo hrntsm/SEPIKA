@@ -120,7 +120,9 @@ pub fn frame_wizard_window(ctx: &egui::Context, app: &mut App) {
     if generate {
         match sepika_core::frame_gen::frame_model(&app.ui.view.frame_wizard.spec) {
             Ok(model) => {
-                app.load_model(model);
+                if !app.load_model(model) {
+                    return;
+                }
                 app.ui.view.frame_wizard.open = false;
                 app.report_notice("架構を作成しました。断面タブで断面を割り当ててください");
             }

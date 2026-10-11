@@ -148,7 +148,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     if let Err(e) = model.validate() {
         if matches!(e, sepika_core::error::CoreError::InvalidInput(_)) {
             issues.push(ModelIssue::model(format!(
-                "モデル検証エラー: {e}。荷重計算条件を修正してください。"
+                "モデル検証エラー: {e}。入力条件を修正してください。"
             )));
             return issues;
         }
@@ -718,38 +718,12 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     }
 
     {
-        let cft_secondary = model
-            .beams()
-            .chain(model.posts())
-            .filter(|sm| {
-                sm.section
-                    .and_then(|sid| model.sections.get(sid.index()))
-                    .and_then(|s| s.shape.as_ref())
-                    .is_some_and(|sh| {
-                        matches!(
-                            sh,
-                            SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
-                        )
-                    })
-            })
-            .count();
-        if cft_secondary != 0 {
-            let ids: Vec<u32> = model
-                .beams()
-                .chain(model.posts())
-                .filter(|sm| {
-                    sm.section
-                        .and_then(|sid| model.sections.get(sid.index()))
-                        .is_some_and(|section| section.is_cft())
-                })
-                .map(|sm| sm.id.0)
-                .collect();
-            issues.push(ModelIssue::model(id_list_message(
-                "二次部材（小梁・間柱）に CFT 断面が割り当てられています",
-                "ID ",
-                &ids,
-                "CFT は柱専用です。断面を鋼材または RC に変更してください。",
-            )));
+        for sm in model.beams().chain(model.posts()) {
+            if let Some(section) = sm.section.and_then(|sid| model.sections.get(sid.index())) {
+                if let Err(error) = Model::validate_secondary_section_use(sm, section) {
+                    issues.push(ModelIssue::model(error.to_string()));
+                }
+            }
         }
         let cft_slabs: Vec<u32> = model
             .slabs

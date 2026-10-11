@@ -215,6 +215,11 @@ impl Section {
         )
     }
 
+    /// 小梁・間柱には CFT 断面を割り当てられない（柱用途でも禁止）。
+    pub fn secondary_member_use_allowed(&self) -> bool {
+        !self.is_cft()
+    }
+
     pub fn cft_frame_use_allowed(&self) -> bool {
         !self.is_cft() || self.frame_use == Some(FrameSectionUse::Column)
     }

@@ -242,19 +242,15 @@ impl EditCommand for EditSectionShape {
         if idx >= model.sections.len() || model.sections[idx].id != self.section {
             return Box::new(Noop);
         }
+        let candidate = sepika_core::model::Section {
+            shape: Some(self.new_shape.clone()),
+            frame_use: self.frame_use,
+            ..model.sections[idx].clone()
+        };
         if (non_frame && self.frame_use.is_some())
             || !section_use_is_valid(model, self.section, self.frame_use)
-            || !(sepika_core::model::Section {
-                shape: Some(self.new_shape.clone()),
-                frame_use: self.frame_use,
-                ..model.sections[idx].clone()
-            })
-            .cft_frame_use_allowed()
-            || (matches!(
-                &self.new_shape,
-                sepika_section::shape::SectionShape::CftBox { .. }
-                    | sepika_section::shape::SectionShape::CftPipe { .. }
-            ) && !cft_section_references_are_valid(model, self.section))
+            || !candidate.cft_frame_use_allowed()
+            || (candidate.is_cft() && !cft_section_references_are_valid(model, &candidate))
         {
             return Box::new(Noop);
         }
@@ -363,7 +359,8 @@ impl EditCommand for EditSectionShape {
     }
 }
 
-fn cft_section_references_are_valid(model: &Model, section_id: SectionId) -> bool {
+fn cft_section_references_are_valid(model: &Model, section: &sepika_core::model::Section) -> bool {
+    let section_id = section.id;
     model
         .elements
         .iter()
@@ -379,7 +376,8 @@ fn cft_section_references_are_valid(model: &Model, section_id: SectionId) -> boo
         && model
             .beams()
             .chain(model.posts())
-            .all(|member| member.section != Some(section_id))
+            .filter(|member| member.section == Some(section_id))
+            .all(|member| Model::validate_secondary_section_use(member, section).is_ok())
         && !model
             .slabs
             .iter()

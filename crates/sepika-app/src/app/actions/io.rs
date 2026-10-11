@@ -26,12 +26,18 @@ impl App {
     ///
     /// 自動生成荷重ケース名（「床荷重(自動)」「自重(自動)」等）は
     /// 標準ケース名（DL・LL(架構用)・LL(地震用)）へ移行する。
-    pub fn load_model(&mut self, mut model: sepika_core::model::Model) {
+    /// 二次 CFT は差し替え前に拒否し、通知して `false` を返す。
+    pub fn load_model(&mut self, mut model: sepika_core::model::Model) -> bool {
+        if let Err(error) = model.validate_secondary_section_usage() {
+            self.report_error(format!("読込モデルの検証エラー: {error}"));
+            return false;
+        }
         model.migrate_legacy_auto_load_cases();
         self.core.model = model;
         self.core.scoped = ModelScoped::default();
         self.ui.scoped = UiModelScoped::default();
         self.sync_node_edit();
+        true
     }
 
     /// 作成モード（梁・壁・スラブ）とその選択バッファをすべて解除する。
@@ -264,7 +270,9 @@ impl App {
                     self.report_error(format!("読込モデルの検証エラー: {:?}", e));
                     return;
                 }
-                self.load_model(contents.model);
+                if !self.load_model(contents.model) {
+                    return;
+                }
                 if let Some(saved) = self.decode_on_load::<SavedAnalysisSettings>(
                     contents.analysis_settings,
                     "解析タブの設定値",
@@ -451,7 +459,9 @@ impl App {
                         model.combinations = sepika_core::model::default_combinations();
                     }
                 }
-                self.load_model(model);
+                if !self.load_model(model) {
+                    return;
+                }
                 self.log_attribute_dispositions(&report);
                 let mut lines: Vec<String> = report
                     .warnings

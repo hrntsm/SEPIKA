@@ -161,6 +161,9 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
 
 /// 不存在の荷重ケース ID は、拘束状態・解析経路に関係なく ID を含む `SolveError::InvalidInput` を返す。
 pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, SolveError> {
+    model
+        .validate_secondary_section_usage()
+        .map_err(|e| SolveError::InvalidInput(e.to_string()))?;
     let load_case = model
         .load_cases
         .iter()

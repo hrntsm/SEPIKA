@@ -36,4 +36,6 @@ sha2 = { workspace = true }
 rmp-serde = { workspace = true }
 
 [dev-dependencies]
+zip = { workspace = true }
+serde_json = { workspace = true }
 insta = { workspace = true }

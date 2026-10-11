@@ -8794,3 +8794,103 @@ fn supplied_rc_depth_edit_preserves_shape_geometry_and_other_properties() {
     stack.undo(&mut model);
     assert_eq!(model.sections[0], original);
 }
+
+#[test]
+fn secondary_cft_assignment_placement_and_shape_changes_leave_model_and_undo_unchanged() {
+    use sepika_core::model::{
+        FrameSectionUse, SecondaryMemberAnchor, SecondaryMemberEnds, SecondaryMemberKind,
+        SupportMemberId, WallRegion,
+    };
+    use sepika_core::section_shape::SectionShape;
+    for shape in [
+        SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 10.0,
+            corner_r: Some(0.0),
+        },
+        SectionShape::CftPipe {
+            outer_dia: 400.0,
+            thick: 10.0,
+        },
+    ] {
+        for kind in [SecondaryMemberKind::Beam, SecondaryMemberKind::Post] {
+            for assigned in [false, true] {
+                let mut model = sm_base_model();
+                let mut section = shape.clone().to_section(SectionId(1), "CFT".into());
+                section.frame_use = Some(FrameSectionUse::Column);
+                model.sections.push(section);
+                let mut sm = make_sm(539, kind);
+                sm.section = Some(SectionId(0));
+                match (kind, assigned) {
+                    (SecondaryMemberKind::Beam, false) => model.unassigned_beams.push(sm),
+                    (SecondaryMemberKind::Post, false) => model.unassigned_posts.push(sm),
+                    (SecondaryMemberKind::Beam, true) => {
+                        let mut r = FloorRegion::new(FloorRegionId(0), vec![]);
+                        r.secondary_beams.push(sm);
+                        model.floor_regions.push(r);
+                    }
+                    (SecondaryMemberKind::Post, true) => {
+                        let mut r = WallRegion::new(WallRegionId(0), vec![]);
+                        r.posts.push(sm);
+                        model.wall_regions.push(r);
+                    }
+                }
+                let before = model.clone();
+                let mut stack = UndoStack::new();
+                let mut commands: Vec<Box<dyn EditCommand>> = vec![
+                    Box::new(EditSectionShape {
+                        section: SectionId(0),
+                        new_shape: shape.clone(),
+                        frame_use: Some(FrameSectionUse::Column),
+                    }),
+                    Box::new(PlaceSecondaryMember {
+                        parent: SecondaryParent::Unassigned,
+                        kind,
+                        ends: SecondaryMemberEnds::Supported([
+                            SecondaryMemberAnchor {
+                                support: SupportMemberId::Primary(ElemId(0)),
+                                position: 0.0,
+                            },
+                            SecondaryMemberAnchor {
+                                support: SupportMemberId::Primary(ElemId(0)),
+                                position: 1.0,
+                            },
+                        ]),
+                        section: Some(SectionId(1)),
+                        name: "禁止二次CFT".into(),
+                    }),
+                ];
+                if assigned {
+                    commands.push(match kind {
+                        SecondaryMemberKind::Beam => Box::new(SetFloorRegionBeamSection {
+                            region: FloorRegionId(0),
+                            index: 0,
+                            section: Some(SectionId(1)),
+                        }),
+                        SecondaryMemberKind::Post => Box::new(SetWallRegionPostSection {
+                            region: WallRegionId(0),
+                            index: 0,
+                            section: Some(SectionId(1)),
+                        }),
+                    });
+                } else {
+                    let candidate = sepika_core::model::SecondaryMember {
+                        section: Some(SectionId(1)),
+                        ..make_sm(540, kind)
+                    };
+                    commands.push(match kind {
+                        SecondaryMemberKind::Beam => Box::new(AddUnassignedBeam { sm: candidate }),
+                        SecondaryMemberKind::Post => Box::new(AddUnassignedPost { sm: candidate }),
+                    });
+                }
+                for command in commands {
+                    assert!(!stack.run(&mut model, command));
+                    assert!(model.eq_ignoring_dofmap(&before));
+                    assert_eq!(stack.revision(), 0);
+                    assert!(!stack.can_undo());
+                }
+            }
+        }
+    }
+}
