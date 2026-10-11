@@ -1442,7 +1442,7 @@ pub(super) fn precheck_model(model: &Model) -> Result<(), SolveError> {
 }
 
 /// 剛性行列の分解に失敗した（特異・非正定値）ときの診断メッセージ。
-pub(super) fn singular_diagnosis(model: &Model) -> String {
+pub(crate) fn singular_diagnosis(model: &Model) -> String {
     let n_restrained = model.nodes.iter().filter(|n| n.restraint.0 != 0).count();
     format!(
         "剛性行列が特異(非正定値)です。構造が機構(不安定)になっている可能性があります。\

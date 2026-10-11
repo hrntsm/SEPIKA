@@ -87,9 +87,16 @@ impl StaticStiffness {
         }
         add_support_spring_diag(model, dofmap, &mut triplets);
         let k_free = assemble_csc(dofmap.n_active(), triplets);
-        let mut solver = make_solver(SolverBackend::Auto);
+        let mut solver = make_solver(SolverBackend::DirectSparseCholesky);
         if reducer.n_indep > 0 {
-            solver.factorize(&reducer.reduce_k(&k_free))?;
+            solver
+                .factorize(&reducer.reduce_k(&k_free))
+                .map_err(|error| match error {
+                    SolveError::NotPositiveDefinite => SolveError::InvalidInput(
+                        crate::statics::analysis::precheck::singular_diagnosis(model),
+                    ),
+                    other => other,
+                })?;
         }
         Ok(Self { solver, behaviors })
     }
@@ -288,7 +295,7 @@ fn solve_tension_only_iterative(
     let f_red = reducer.reduce_f(f_free);
     let mut k_free_cache = CscCache::new();
     let mut k_red_cache = CscCache::new();
-    let mut solver = make_solver(SolverBackend::Auto);
+    let mut solver = make_solver(SolverBackend::DirectSparseCholesky);
 
     let mut active = vec![true; braces.len()];
 
@@ -298,7 +305,12 @@ fn solve_tension_only_iterative(
         let k_free = k_free_cache.assemble(n_active, &triplets);
         let k_red = reducer.reduce_k_cached(&k_free, &mut k_red_cache);
 
-        solver.factorize(&k_red)?;
+        solver.factorize(&k_red).map_err(|error| match error {
+            SolveError::NotPositiveDefinite => SolveError::InvalidInput(
+                crate::statics::analysis::precheck::singular_diagnosis(model),
+            ),
+            other => other,
+        })?;
         let u_indep = solver.solve(&f_red)?;
         let u_free = reducer.expand_u(&u_indep);
 

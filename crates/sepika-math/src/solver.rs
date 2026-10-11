@@ -36,12 +36,6 @@ pub enum SolveError {
 pub enum SolverBackend {
     DirectSparseCholesky,
     DirectSparseLu,
-    IterativePcg {
-        tol: f64,
-        max_iter: usize,
-    },
-    /// 自由度数に応じて疎 Cholesky / PCG を自動選択する。PCG 非収束時は疎 Cholesky へフォールバックする。
-    Auto,
 }
 
 /// 因子分解済みソルバに単一 RHS 列を与えて解く共通処理（内部用）。
@@ -117,33 +111,19 @@ impl SparsityPattern {
 pub fn make_solver(backend: SolverBackend) -> Box<dyn LinearSolver> {
     match backend {
         SolverBackend::DirectSparseCholesky => Box::new(crate::cholesky::CholeskySolver::default()),
-        SolverBackend::IterativePcg { tol, max_iter } => {
-            Box::new(crate::pcg::PcgSolver::new(tol, max_iter))
-        }
         SolverBackend::DirectSparseLu => Box::new(crate::lu::LuSolver::default()),
-        SolverBackend::Auto => Box::new(crate::auto::AutoSolver::default()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auto::AutoSolver;
     use crate::sparse::{assemble_csc, Triplet};
 
     fn solvers() -> Vec<(&'static str, Box<dyn LinearSolver>)> {
         vec![
             ("Cholesky", make_solver(SolverBackend::DirectSparseCholesky)),
             ("LU", make_solver(SolverBackend::DirectSparseLu)),
-            (
-                "PCG",
-                make_solver(SolverBackend::IterativePcg {
-                    tol: 1e-12,
-                    max_iter: 10,
-                }),
-            ),
-            ("Auto/direct", make_solver(SolverBackend::Auto)),
-            ("Auto/PCG", Box::new(AutoSolver::with_params(0, 1e-12, 10))),
         ]
     }
 

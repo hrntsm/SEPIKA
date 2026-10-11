@@ -97,7 +97,7 @@ impl<'m> Analysis<'m> {
                 model,
                 dofmap,
                 reducer: Reducer::empty(),
-                solver: make_solver(SolverBackend::Auto),
+                solver: make_solver(SolverBackend::DirectSparseCholesky),
                 n_indep: 0,
                 semi_precise_t: std::sync::OnceLock::new(),
                 f_free_cache: HashMap::new(),
@@ -111,7 +111,7 @@ impl<'m> Analysis<'m> {
         let n_indep = reducer.n_indep;
         let k_red = reducer.reduce_k(&k_free);
 
-        let mut solver = make_solver(SolverBackend::Auto);
+        let mut solver = make_solver(SolverBackend::DirectSparseCholesky);
         if n_indep > 0 {
             solver.factorize(&k_red).map_err(|e| match e {
                 SolveError::NotPositiveDefinite => {
@@ -191,29 +191,19 @@ impl<'m> Analysis<'m> {
         self.solve_and_recover(load_case, &self.f_free_cache[&lc])
     }
 
-    /// 通常は `prepare` で分解済みの `self.solver`（縮約後剛性行列 K_red の分解）を
-    /// そのまま再利用する（[`eigen::solve_eigen_with_solver`] 参照）。
-    /// 例外は [`Self::eigen_solver_dispatch`] を参照。
+    /// 準備済みの基準剛性の分解を再利用し、指定数の固有モードを返す。
     pub fn eigen(&self, n_modes: usize) -> Result<ModalResult, SolveError> {
         self.eigen_solver_dispatch(n_modes)
     }
 
-    /// 固有値解析に使うソルバの振り分け。
-    /// `prepare` の `self.solver` は `SolverBackend::Auto` で生成しており、縮約後
-    /// 自由度数が [`sepika_math::auto::AUTO_ITERATIVE_MIN_DOF`] 以上のモデルでは
-    /// f32 精度の反復法（PCG）が選ばれるため、固有値解析専用に直接法で分解し直す。
     pub(crate) fn eigen_solver_dispatch(&self, n_modes: usize) -> Result<ModalResult, SolveError> {
-        if self.n_indep >= sepika_math::auto::AUTO_ITERATIVE_MIN_DOF {
-            eigen::solve_eigen(self.model, &self.dofmap, &self.reducer, n_modes)
-        } else {
-            eigen::solve_eigen_with_solver(
-                self.model,
-                &self.dofmap,
-                &self.reducer,
-                n_modes,
-                &*self.solver,
-            )
-        }
+        eigen::solve_eigen_with_solver(
+            self.model,
+            &self.dofmap,
+            &self.reducer,
+            n_modes,
+            &*self.solver,
+        )
     }
 
     /// 複数の荷重ケースを一括で解く。固定剛性は採用条件が一致するケースで共有する。

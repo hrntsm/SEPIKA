@@ -140,6 +140,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-src-overlap", Some(3), "旧契約"),
         ("old-static-settings", Some(4), "旧契約"),
         ("old-zero-increment", Some(5), "旧契約"),
+        ("old-auto-solver", Some(6), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -173,28 +174,36 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
 }
 
 #[test]
-fn ovika_analysis_five_is_unavailable_until_explicit_reanalysis() {
+fn ovika_old_analysis_is_unavailable_until_explicit_reanalysis() {
     let app = calculated();
-    let (mut loaded, path) = restore(
-        &app,
-        Some(5),
-        Some(DESIGN_CONTRACT_VERSION),
-        "zero-increment-recovery",
-    );
-    let old = loaded.core.scoped.results.as_ref().unwrap();
-    assert!(!old.has_analysis_results() && !old.has_design_results());
-    assert!(loaded.core.scoped.staleness.results_stale);
-    loaded.run_linear_static(LoadCaseId(0));
-    assert!(loaded.core.scoped.last_error.is_none());
-    let recovered = loaded.core.scoped.results.as_ref().unwrap();
-    assert!(recovered.has_analysis_results() && recovered.has_design_results());
-    assert_eq!(recovered.analysis_contract_version, Some(6));
-    assert_eq!(recovered.design_contract_version, Some(3));
-    assert_eq!(
-        recovered.statics[0].1.disp,
-        app.core.scoped.results.as_ref().unwrap().statics[0].1.disp
-    );
-    std::fs::remove_file(path).unwrap();
+    for version in [5, 6] {
+        let (mut loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("old-analysis-{version}-recovery"),
+        );
+        let old = loaded.core.scoped.results.as_ref().unwrap();
+        assert!(!old.has_analysis_results() && !old.has_design_results());
+        assert!(loaded.core.scoped.staleness.results_stale);
+        loaded.run_linear_static(LoadCaseId(0));
+        assert!(loaded.core.scoped.last_error.is_none());
+        let recovered = loaded.core.scoped.results.as_ref().unwrap();
+        assert!(recovered.has_analysis_results() && recovered.has_design_results());
+        assert_eq!(
+            recovered.analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
+        assert_eq!(
+            recovered.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        assert_eq!(
+            recovered.statics[0].1.disp,
+            app.core.scoped.results.as_ref().unwrap().statics[0].1.disp
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 }
 
 #[test]

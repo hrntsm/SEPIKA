@@ -58,6 +58,47 @@ mod tests {
     use super::*;
     use crate::sparse::{assemble_csc, Triplet};
 
+    #[test]
+    fn indefinite_matrix_preserves_lu_contract() {
+        let k = assemble_csc(
+            2,
+            vec![
+                Triplet {
+                    row: 0,
+                    col: 0,
+                    val: 1.0,
+                },
+                Triplet {
+                    row: 0,
+                    col: 1,
+                    val: 2.0,
+                },
+                Triplet {
+                    row: 1,
+                    col: 0,
+                    val: 2.0,
+                },
+                Triplet {
+                    row: 1,
+                    col: 1,
+                    val: 1.0,
+                },
+            ],
+        );
+        let mut solver = LuSolver::default();
+        solver.factorize(&k).unwrap();
+        for rhs in [[3.0, 3.0], [0.0, 0.0]] {
+            let x = solver.solve(&rhs).unwrap();
+            let mut out = Vec::new();
+            solver.solve_into(&rhs, &mut out).unwrap();
+            assert_eq!(x, out);
+            for value in x {
+                assert!(value.is_finite());
+                approx::assert_relative_eq!(value, rhs[0] / 3.0, max_relative = 1.0e-9);
+            }
+        }
+    }
+
     /// 非対称行列も解ける（Cholesky では対象外のケース）。
     #[test]
     fn test_lu_unsymmetric() {
