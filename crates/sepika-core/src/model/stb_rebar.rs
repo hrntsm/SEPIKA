@@ -2,6 +2,21 @@
 use super::*;
 use std::collections::BTreeMap;
 
+/// XML Schemaの数値・booleanに適用するXML空白のcollapse。
+/// 内部空白は数値/boolean字句に許されないため、解析器で拒否する。
+/// xs:stringや列挙属性、保存用の原字句には適用しない。
+pub fn stb_numeric_lexical(value: &str) -> &str {
+    value.trim_matches([' ', '\t', '\r', '\n'])
+}
+
+pub fn stb_boolean_value(value: &str) -> Option<bool> {
+    match stb_numeric_lexical(value) {
+        "true" | "1" => Some(true),
+        "false" | "0" => Some(false),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StbRebarElement {
     pub element: String,
@@ -63,10 +78,12 @@ impl StbRebarArrangement {
                 }
                 continue;
             };
-            if matches!(
-                condition.attributes.get("set_default").map(String::as_str),
-                Some("true" | "1")
-            ) {
+            if condition
+                .attributes
+                .get("set_default")
+                .and_then(|v| stb_boolean_value(v))
+                == Some(true)
+            {
                 for (key, value) in &condition.attributes {
                     if key == "set_default" {
                         continue;
@@ -98,11 +115,31 @@ impl StbRebarArrangement {
                 }
             }
         }
+        for (key, value) in &mut result {
+            if key.starts_with("N_")
+                || key.starts_with("pitch_")
+                || key.starts_with("center")
+                || key.starts_with("depth_cover")
+                || key.starts_with("interval")
+                || key.starts_with("length_to_center")
+                || key.starts_with("length_bar_")
+            {
+                *value = stb_numeric_lexical(value).to_owned();
+            }
+        }
         result
     }
 
     /// 必須値・正の本数・位置の一意性を検査する。XSD検証とは独立した意味検査。
     pub fn validate_standard(&self) -> Result<(), String> {
+        if self
+            .container
+            .attributes
+            .get("isSpiral")
+            .is_some_and(|v| stb_boolean_value(v).is_none())
+        {
+            return Err("isSpiralが不正です".into());
+        }
         let first = self.positions.first().ok_or("配筋部位がありません")?;
         let tag = &first.element;
         let expected: &[&str] = if tag.ends_with("_StartEnd") {
@@ -171,7 +208,9 @@ impl StbRebarArrangement {
                     return Err(format!("{key} が空です"));
                 }
                 if key.starts_with("N_") && {
-                    let integer = value.trim().strip_prefix('+').unwrap_or(value.trim());
+                    let integer = stb_numeric_lexical(value)
+                        .strip_prefix('+')
+                        .unwrap_or(stb_numeric_lexical(value));
                     integer.is_empty()
                         || !integer.bytes().all(|b| b.is_ascii_digit())
                         || !integer.bytes().any(|b| b != b'0')
@@ -179,14 +218,16 @@ impl StbRebarArrangement {
                     return Err(format!("{key} は正の整数が必要です"));
                 }
                 if key.starts_with("pitch_")
-                    && !value.parse::<f64>().is_ok_and(|n| n.is_finite() && n > 0.0)
+                    && !stb_numeric_lexical(value)
+                        .parse::<f64>()
+                        .is_ok_and(|n| n.is_finite() && n > 0.0)
                 {
                     return Err(format!("{key} は正の長さが必要です"));
                 }
             }
             if !beam && !circle {
                 if let Some(total) = self.known_main_total(part) {
-                    let declared: u64 = part.attributes["N_main_total"]
+                    let declared: u64 = stb_numeric_lexical(&part.attributes["N_main_total"])
                         .parse()
                         .map_err(|_| "N_main_total が不正")?;
                     if total != declared {
@@ -213,7 +254,7 @@ impl StbRebarArrangement {
                 .filter_map(|stage| {
                     part.attributes
                         .get(&format!("N_main_{direction}_{stage}"))
-                        .map(|value| value.parse::<u32>().ok())
+                        .map(|value| stb_numeric_lexical(value).parse::<u32>().ok())
                 })
                 .collect()
         };
@@ -324,10 +365,13 @@ impl Model {
                     "{prefix}: kind_cornerの寄せ配置は現解析モデルで表現できません"
                 ));
             }
-            if matches!(
-                raw.container.attributes.get("isSpiral").map(String::as_str),
-                Some("true" | "1")
-            ) {
+            if raw
+                .container
+                .attributes
+                .get("isSpiral")
+                .and_then(|v| stb_boolean_value(v))
+                == Some(true)
+            {
                 errors.push(format!(
                     "{prefix}: スパイラル帯筋は現解析モデルで表現できません"
                 ));
@@ -512,7 +556,12 @@ impl Model {
                         **key == format!("N_{part}") || key.starts_with(&format!("N_{part}_"))
                     })
                     .filter(|(key, _)| !key.ends_with("_total"))
-                    .filter_map(|(key, value)| value.parse().ok().map(|value| (key.clone(), value)))
+                    .filter_map(|(key, value)| {
+                        stb_numeric_lexical(value)
+                            .parse()
+                            .ok()
+                            .map(|value| (key.clone(), value))
+                    })
                     .collect();
                 if original.is_none()
                     && counts.is_empty()
@@ -577,12 +626,16 @@ impl Model {
                     center_mm: attrs
                         .iter()
                         .filter(|(k, _)| k.starts_with("center_"))
-                        .filter_map(|(k, v)| v.parse().ok().map(|n| (k.clone(), n)))
+                        .filter_map(|(k, v)| {
+                            stb_numeric_lexical(v).parse().ok().map(|n| (k.clone(), n))
+                        })
                         .collect(),
                     cover_mm: attrs
                         .iter()
                         .filter(|(k, _)| k.starts_with("depth_cover_"))
-                        .filter_map(|(k, v)| v.parse().ok().map(|n| (k.clone(), n)))
+                        .filter_map(|(k, v)| {
+                            stb_numeric_lexical(v).parse().ok().map(|n| (k.clone(), n))
+                        })
                         .collect(),
                     unresolved_position: points.is_none().then(|| {
                         if applied {

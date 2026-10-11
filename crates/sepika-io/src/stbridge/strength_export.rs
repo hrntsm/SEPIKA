@@ -148,9 +148,16 @@ fn attributes(
             r.strength.clone(),
         ));
     }
+    let preserve_raw_whitespace = input.rebar.is_some() && tag.starts_with("StbSecBar");
     let mut result = BytesStart::new(tag);
     for (key, value) in &pairs {
-        result.push_attribute((key.as_str(), value.as_str()));
+        if preserve_raw_whitespace {
+            // 原配筋のタブ/CR/LFは文字参照にし、XML属性正規化による字句変化を防ぐ。
+            let escaped = super::export::esc(value);
+            result.push_attribute((key.as_bytes(), escaped.as_bytes()));
+        } else {
+            result.push_attribute((key.as_str(), value.as_str()));
+        }
     }
     Ok(result.into_owned())
 }

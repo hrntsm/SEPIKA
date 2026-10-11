@@ -548,3 +548,253 @@ fn src_standard_column_and_beam_rebar_ovika_roundtrip_preserves_schema_child_ord
     save_supplemental_output("src_column_beam", &output);
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn standard_numeric_and_boolean_whitespace_preserves_raw_and_semantics() {
+    fn padded(xml: &str) -> String {
+        let tokens: Vec<_> = xml.split('"').collect();
+        let mut out = String::new();
+        for (i, token) in tokens.iter().enumerate() {
+            let key = if i % 2 == 1 {
+                tokens[i - 1]
+                    .split_whitespace()
+                    .last()
+                    .unwrap_or("")
+                    .trim_end_matches('=')
+            } else {
+                ""
+            };
+            let numeric = key.starts_with("N_")
+                || key.starts_with("pitch_")
+                || key.starts_with("center")
+                || key.starts_with("depth_cover")
+                || key.starts_with("interval")
+                || key.starts_with("length_to_center")
+                || key.starts_with("length_bar_");
+            if i > 0 {
+                out.push('"');
+            }
+            if numeric {
+                out.push_str(&format!("  {token}  "));
+            } else {
+                out.push_str(token);
+            }
+        }
+        out.replace("set_default=\"true\"", "set_default=\" true \"")
+    }
+    for name in [
+        "normal_same",
+        "supplemental/circle_same",
+        "supplemental/src_column_beam",
+    ] {
+        let plain = fixture(name).replace("<StbSecBarArrangementBeam_RC>", "<StbSecBarArrangementBeam_RC interval=\"25\" center_interval=\"50\" length_bar_start=\"100\" length_bar_end=\"100\">");
+        let xml = padded(&plain);
+        let normal = import_stbridge(&plain).unwrap();
+        let model = import_stbridge(&xml).unwrap();
+        assert_eq!(normal.sections, model.sections);
+        assert_eq!(
+            normal.stb_rebar_analysis_diagnostics(),
+            model.stb_rebar_analysis_diagnostics()
+        );
+        for section in &model.sections {
+            assert_eq!(
+                normal.stb_rebar_roles(section.id),
+                model.stb_rebar_roles(section.id)
+            );
+        }
+        let raw = model
+            .stb_strengths
+            .sections
+            .iter()
+            .find_map(|s| s.rebar.as_ref())
+            .unwrap();
+        assert!(raw.positions[0]
+            .attributes
+            .iter()
+            .any(|(k, v)| k.starts_with("N_") && v.starts_with("  ")));
+        let path =
+            std::env::temp_dir().join(format!("rebar507-lexical-{}.ovika", std::process::id()));
+        crate::ovika::save_ovika(&path, &model, crate::ovika::OvikaExtras::default()).unwrap();
+        let saved = crate::ovika::load_ovika(&path).unwrap().model;
+        assert_eq!(model.stb_strengths, saved.stb_strengths);
+        let output = export_stbridge(&saved).unwrap();
+        let again = import_stbridge(&output).unwrap();
+        assert_eq!(saved.stb_strengths, again.stb_strengths);
+        assert_eq!(saved.sections, again.sections);
+        save_supplemental_output(&format!("lexical_{}", name.replace('/', "_")), &output);
+        if let Ok(dir) = std::env::var("SEPIKA_REBAR507_OUTPUT") {
+            std::fs::write(
+                std::path::Path::new(&dir)
+                    .join(format!("lexical_input_{}.stb", name.replace('/', "_"))),
+                &xml,
+            )
+            .unwrap();
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn apply_boolean_lexical_defaults_and_individual_precedence_remain_distinct() {
+    let source = fixture("supplemental/circle_same");
+    let conditions = "<StbBeam_RC_BarWebApply set_default=\"true\" D_web=\"D10\" N_web=\" 2 \"/><StbBeam_RC_BarSpacingApply set_default=\"true\" D_bar_spacing=\"D10\" N_bar_spacing=\" 1 \" pitch_bar_spacing=\" 200 \"/>";
+    let source = source.replace(
+        "</StbApplyConditionsList>",
+        &format!("{conditions}</StbApplyConditionsList>"),
+    );
+    for (lexical, enabled) in [
+        (" true ", true),
+        (" 1 ", true),
+        (" false ", false),
+        (" 0 ", false),
+    ] {
+        let xml = source.replace(
+            "set_default=\"true\"",
+            &format!("set_default=\"{lexical}\""),
+        );
+        let model = import_stbridge(&xml).unwrap();
+        let baseline = import_stbridge(&source.replace(
+            "set_default=\"true\"",
+            if enabled {
+                "set_default=\"true\""
+            } else {
+                "set_default=\"false\""
+            },
+        ))
+        .unwrap();
+        assert_eq!(model.sections, baseline.sections);
+        assert_eq!(
+            model.stb_rebar_roles(SectionId(1)),
+            baseline.stb_rebar_roles(SectionId(1))
+        );
+        assert_eq!(
+            model.stb_strengths.apply_conditions[0].attributes["set_default"],
+            lexical
+        );
+        let roles = model.stb_rebar_roles(SectionId(1));
+        assert_eq!(roles.iter().any(|r| r.part == "web"), enabled);
+        if enabled {
+            assert_eq!(
+                roles.iter().find(|r| r.part == "web").unwrap().counts["N_web"],
+                2
+            );
+        }
+        let explicit = xml.replace("N_stirrup=\"2\"", "N_stirrup=\"2\" D_web=\"D13\" N_web=\" 3 \" D_bar_spacing=\"D13\" N_bar_spacing=\" 2 \" pitch_bar_spacing=\" 150 \"");
+        let individual = import_stbridge(&explicit).unwrap();
+        let roles = individual.stb_rebar_roles(SectionId(1));
+        assert_eq!(
+            roles.iter().find(|r| r.part == "web").unwrap().counts["N_web"],
+            3
+        );
+        assert_eq!(
+            roles
+                .iter()
+                .find(|r| r.part == "bar_spacing")
+                .unwrap()
+                .pitch_mm,
+            Some(150.0)
+        );
+        let partial = import_stbridge(&xml.replace(" D_web=\"D10\"", "")).unwrap();
+        if enabled {
+            let role = partial
+                .stb_rebar_roles(SectionId(1))
+                .into_iter()
+                .find(|r| r.part == "web")
+                .unwrap();
+            assert!(role.diameter.is_none());
+            assert!(role.strength.is_err());
+        }
+        let output = export_stbridge(&individual).unwrap();
+        assert_eq!(
+            individual.stb_strengths,
+            import_stbridge(&output).unwrap().stb_strengths
+        );
+        save_supplemental_output(&format!("lexical_apply_{}", lexical.trim()), &output);
+    }
+    for (lexical, enabled) in [
+        (" true ", true),
+        (" 1 ", true),
+        (" false ", false),
+        (" 0 ", false),
+    ] {
+        let circle = fixture("supplemental/circle_same");
+        let xml = circle.replace(
+            "<StbSecBarArrangementColumn_RC>",
+            &format!("<StbSecBarArrangementColumn_RC isSpiral=\"{lexical}\">"),
+        );
+        let model = import_stbridge(&xml).unwrap();
+        assert_eq!(
+            model.ensure_stb_rebar_supported(SectionId(0)).is_err(),
+            enabled
+        );
+        assert_eq!(
+            model.stb_strengths.sections[0]
+                .rebar
+                .as_ref()
+                .unwrap()
+                .container
+                .attributes["isSpiral"],
+            lexical
+        );
+        assert_eq!(
+            model.stb_strengths,
+            import_stbridge(&export_stbridge(&model).unwrap())
+                .unwrap()
+                .stb_strengths
+        );
+    }
+    for invalid in [" TRUE ", " 2 ", "tr ue", "\u{a0}true\u{a0}"] {
+        assert!(import_stbridge(&source.replace(
+            "set_default=\"true\"",
+            &format!("set_default=\"{invalid}\"")
+        ))
+        .is_err());
+    }
+    let xml_spaces = source
+        .replace(
+            "set_default=\"true\"",
+            "set_default=\"&#x9;true&#xD;&#xA;\"",
+        )
+        .replace("center=\"51\"", "center=\"&#x9;51&#xD;&#xA;\"");
+    let xml_spaces = xml_spaces
+        .replace("N_stirrup=\"2\"", "N_stirrup=\"&#x9;2&#xD;&#xA;\"")
+        .replace(
+            "pitch_stirrup=\"100\"",
+            "pitch_stirrup=\"&#x9;100&#xD;&#xA;\"",
+        );
+    let model = import_stbridge(&xml_spaces).unwrap();
+    let baseline = import_stbridge(&source).unwrap();
+    assert_eq!(model.sections, baseline.sections);
+    assert_eq!(
+        model.stb_rebar_roles(SectionId(1)),
+        baseline.stb_rebar_roles(SectionId(1))
+    );
+    assert_eq!(
+        model.stb_strengths.apply_conditions[0].attributes["set_default"],
+        "\ttrue\r\n"
+    );
+    assert_eq!(
+        model.stb_strengths,
+        import_stbridge(&export_stbridge(&model).unwrap())
+            .unwrap()
+            .stb_strengths,
+        "XML文字参照のタブ/CR/LFも配筋属性値として往復する"
+    );
+    save_supplemental_output("lexical_controls", &export_stbridge(&model).unwrap());
+    assert!(
+        import_stbridge(
+            &fixture("normal_StartEnd_reverse_xml_order")
+                .replace("pos=\"START\"", "pos=\" START \"")
+        )
+        .is_err(),
+        "列挙の許可範囲は緩めない"
+    );
+    let standard = fixture("normal_same");
+    assert!(
+        import_stbridge(&standard.replace("N_main_total=\"24\"", "N_main_total=\"2 4\"")).is_err()
+    );
+    assert!(import_stbridge(
+        &standard.replace("N_main_total=\"24\"", "N_main_total=\"\u{a0}24\u{a0}\"")
+    )
+    .is_err());
+}

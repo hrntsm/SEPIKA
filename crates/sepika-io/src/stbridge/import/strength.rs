@@ -207,10 +207,12 @@ impl StrengthInputs {
         };
         if tag.starts_with("Stb") && tag.ends_with("Apply") {
             let raw = raw_element();
-            if !matches!(
-                raw.attributes.get("set_default").map(String::as_str),
-                Some("true" | "false" | "0" | "1")
-            ) {
+            if raw
+                .attributes
+                .get("set_default")
+                .and_then(|v| sepika_core::model::stb_boolean_value(v))
+                .is_none()
+            {
                 return Err(StbError::Parse(format!(
                     "{tag}: set_defaultが不正または欠落"
                 )));
