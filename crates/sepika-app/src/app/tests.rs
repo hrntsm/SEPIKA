@@ -2844,7 +2844,7 @@ fn test_export_and_import_stbridge_roundtrip() {
 }
 
 #[test]
-fn test_export_stbridge_reports_warnings_as_notice() {
+fn test_export_stbridge_rejects_fourth_stage_without_overwriting_file() {
     let dir = test_tmp().join("sepika_app_test_stbridge_warning");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("warning.stb");
@@ -2874,17 +2874,20 @@ fn test_export_stbridge_reports_warnings_as_notice() {
             },
         });
     app.load_model(model);
+    std::fs::write(&path, "existing output").unwrap();
     app.export_stbridge_to(path.clone());
-
-    let notice = app.core.scoped.last_notice.as_deref().unwrap_or("");
-    assert!(notice.contains("ST-Bridge書出: "), "{notice}");
+    let error = app.core.scoped.last_error.as_deref().unwrap();
+    assert!(
+        error.contains("ST-Bridge書出エラー") && error.contains("標準段数"),
+        "{error}"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "existing output");
     assert!(app
         .core
         .log
         .entries
         .iter()
-        .any(|entry| entry.message == notice));
-    assert!(path.exists());
+        .any(|entry| entry.message == error));
     std::fs::remove_file(&path).ok();
 }
 
@@ -12427,7 +12430,7 @@ fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_reta
     assert!(csv.contains("検定不能") && csv.contains("上位置差=50"));
     assert!(!old.member_forces.is_empty());
     let mut old_contract_checked = old.clone();
-    old_contract_checked.design_contract_version = Some(0);
+    old_contract_checked.design_contract_version = Some(1);
     save(&path, &staggered, old_contract_checked);
     reopened.open_project_from(path.clone());
     let rejected = reopened.core.scoped.results.as_ref().unwrap();
@@ -12528,7 +12531,7 @@ fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_reta
         gated.joint_checks.len()
     );
     let mut old_gated = gated.clone();
-    old_gated.analysis_contract_version = Some(0);
+    old_gated.analysis_contract_version = Some(1);
     save(&path, &current.core.model, old_gated);
     reopened.open_project_from(path.clone());
     assert!(reopened.core.scoped.staleness.results_stale);
@@ -12680,4 +12683,192 @@ fn lateral_bracing_gui_invalid_group_reference_keeps_bending_and_shear() {
             assert_eq!(result.components.len(), 2);
         }
     }
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn standard_rebar507_edit_undo_save_and_result_generation_preserve_source() {
+    let xml = include_str!("../../../sepika-io/tests/fixtures/rebar507/normal_same.stb");
+    let mut app = App::default();
+    app.load_model(sepika_io::stbridge::import_stbridge(xml).unwrap());
+    let before = app.core.model.clone();
+    let key = result_validity::ResultInputKey::Modal;
+    let generation = app.result_input(&key);
+    let mut shape = app.core.model.sections[1].shape.clone().unwrap();
+    if let sepika_core::section_shape::SectionShape::RcBeamRect { rebar, .. } = &mut shape {
+        rebar.top = vec![3];
+    }
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::EditSectionShape {
+            section: SectionId(1),
+            new_shape: shape,
+            frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
+        }));
+    app.apply_pending_story_command();
+    assert!(app.core.model.stb_strengths.sections[1].rebar.is_none());
+    assert!(app.core.model.stb_strengths.sections[1]
+        .reinforcement
+        .is_empty());
+    assert_ne!(generation, app.result_input(&key));
+    let changed = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
+    assert!(changed.contains("N_main_top_1st=\"3\""));
+    assert!(!changed.contains("D_2nd_main"));
+    app.undo_action();
+    assert!(before.eq_ignoring_dofmap(&app.core.model));
+    assert_eq!(generation, app.result_input(&key));
+    app.redo_action();
+    assert!(app.core.model.stb_strengths.sections[1].rebar.is_none());
+    let path = test_tmp().join("507-edit-rebar.ovika");
+    app.save_project_to(path.clone());
+    let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
+    assert!(restored.stb_strengths.sections[1].rebar.is_none());
+    assert!(restored.eq_ignoring_dofmap(&app.core.model));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn standard_rebar507_gui_pointer_apply_undo_and_save() {
+    fn text_position(shape: &egui::epaint::Shape, needle: &str) -> Option<egui::Pos2> {
+        match shape {
+            egui::epaint::Shape::Text(text) if text.galley.text().contains(needle) => {
+                Some(text.pos + text.galley.size() * 0.5)
+            }
+            egui::epaint::Shape::Vec(parts) => parts.iter().find_map(|p| text_position(p, needle)),
+            _ => None,
+        }
+    }
+    let mut app = App::default();
+    app.load_model(
+        sepika_io::stbridge::import_stbridge(include_str!(
+            "../../../sepika-io/tests/fixtures/rebar507/normal_same.stb"
+        ))
+        .unwrap(),
+    );
+    let before = app.core.model.clone();
+    app.ui.scoped.nav.focus_section = Some(SectionId(1));
+    app.ui.scoped.section_draft = crate::section_editor::SectionEditorDraft {
+        kind: crate::section_editor::ShapeKind::RcBeamRect,
+        synced_focus: Some(SectionId(1)),
+        name: before.sections[1].name.clone(),
+        rc_b: 400.0,
+        rc_d: 700.0,
+        main_dia: 22.0,
+        main_top: vec![3],
+        main_bottom: vec![3],
+        cover: 40.0,
+        shear_dia: 10.0,
+        shear_pitch: 100.0,
+        shear_legs: 2,
+        ..Default::default()
+    };
+    let key = result_validity::ResultInputKey::Modal;
+    let generation = app.result_input(&key);
+    let context = egui::Context::default();
+    let rendered = context.run_ui(Default::default(), |ui| {
+        crate::section_editor::section_editor_panel(ui, &mut app)
+    });
+    let button = rendered
+        .shapes
+        .iter()
+        .find_map(|s| text_position(&s.shape, "選択断面へ適用"))
+        .unwrap();
+    for pressed in [true, false] {
+        let _ = context.run_ui(
+            egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(button),
+                    egui::Event::PointerButton {
+                        pos: button,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+                ..Default::default()
+            },
+            |ui| crate::section_editor::section_editor_panel(ui, &mut app),
+        );
+    }
+    assert!(app.core.model.stb_strengths.sections[1].rebar.is_none());
+    assert_ne!(generation, app.result_input(&key));
+    let xml = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
+    assert!(xml.contains("N_main_top_1st=\"3\""));
+    assert!(!xml.contains("D_2nd_main"));
+    app.undo_action();
+    assert!(before.eq_ignoring_dofmap(&app.core.model));
+    assert_eq!(generation, app.result_input(&key));
+    app.redo_action();
+    let path = test_tmp().join("507-gui-pointer.ovika");
+    app.save_project_to(path.clone());
+    assert!(sepika_io::ovika::load_ovika(&path)
+        .unwrap()
+        .model
+        .eq_ignoring_dofmap(&app.core.model));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn standard_rebar507_geometry_only_section_accepts_new_rebar_and_undo() {
+    let mut xml =
+        include_str!("../../../sepika-io/tests/fixtures/rebar507/normal_same.stb").to_string();
+    let start = xml.find("<StbSecBarArrangementBeam_RC>").unwrap();
+    let end = xml.find("</StbSecBarArrangementBeam_RC>").unwrap()
+        + "</StbSecBarArrangementBeam_RC>".len();
+    xml.replace_range(start..end, "");
+    let mut app = App::default();
+    app.load_model(sepika_io::stbridge::import_stbridge(&xml).unwrap());
+    let before = app.core.model.clone();
+    let mut shape = before.sections[1].shape.clone().unwrap();
+    if let sepika_core::section_shape::SectionShape::RcBeamRect { rebar, .. } = &mut shape {
+        rebar.main_dia = 22.0;
+        rebar.top = vec![3];
+        rebar.bottom = vec![3];
+        rebar.cover = 40.0;
+        rebar.stirrup = sepika_core::section_shape::BeamStirrup {
+            dia: 10.0,
+            pitch: 100.0,
+            legs: 2,
+        };
+    }
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::EditSectionShape {
+            section: SectionId(1),
+            new_shape: shape,
+            frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
+        }));
+    app.apply_pending_story_command();
+    let exported = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
+    assert!(exported.contains("N_main_top_1st=\"3\""));
+    let restored = sepika_io::stbridge::import_stbridge(&exported).unwrap();
+    restored.ensure_stb_rebar_supported(SectionId(1)).unwrap();
+    app.undo_action();
+    assert!(before.eq_ignoring_dofmap(&app.core.model));
+    let exported = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
+    assert!(!exported.contains("<StbSecBarArrangementBeam_RC>"));
+}
+
+#[test]
+fn standard_rebar507_import_notice_reports_center_priority_without_refusing_preparation() {
+    let xml=include_str!("../../../sepika-io/tests/fixtures/rebar507/supplemental/circle_same.stb").replace("center_top_bottom=\"51\" center_side=\"51\"", "center_top_bottom=\"51\" center_side=\"51\" depth_cover_top_bottom=\"40\" depth_cover_side=\"40\"");
+    let path = std::env::temp_dir().join(format!("rebar507-notice-gui-{}.stb", std::process::id()));
+    std::fs::write(&path, xml).unwrap();
+    let mut app = App::default();
+    app.import_stbridge_from(path.clone());
+    let notice = app.core.scoped.last_error.as_ref().unwrap();
+    assert!(notice.starts_with('⚠') && notice.contains("採用あき=30 mm"));
+    assert!(app.core.model.stb_strength_diagnostics().is_empty());
+    app.core.scoped.last_error = None;
+    app.run_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "非blocking通知が準備計算を妨げない: {:?}",
+        app.core.scoped.last_error
+    );
+    std::fs::remove_file(path).unwrap();
 }

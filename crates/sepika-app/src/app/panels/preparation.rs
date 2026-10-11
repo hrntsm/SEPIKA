@@ -520,7 +520,13 @@ impl App {
                         }
                     }
                 }
-                for message in self.core.model.stb_strength_diagnostics() {
+                for message in self
+                    .core
+                    .model
+                    .stb_strength_diagnostics()
+                    .into_iter()
+                    .chain(self.core.model.stb_rebar_notices())
+                {
                     ui.colored_label(crate::theme::WARN_TEXT, message);
                 }
             });

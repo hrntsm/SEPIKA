@@ -58,8 +58,12 @@ pub struct StbSteelStrength {
     pub strength: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StbSectionStrength {
+    #[serde(default)]
+    pub native_rebar: bool,
+    #[serde(default)]
+    pub rebar: Option<StbRebarArrangement>,
     pub section: SectionId,
     pub concrete: Option<String>,
     #[serde(default)]
@@ -87,8 +91,10 @@ pub struct StbMemberStrength {
     pub concrete: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StbStrengthInput {
+    #[serde(default)]
+    pub apply_conditions: Vec<StbRebarElement>,
     pub common: Option<StbCommonStrength>,
     pub sections: Vec<StbSectionStrength>,
     pub members: Vec<StbMemberStrength>,
@@ -540,7 +546,7 @@ impl Model {
     }
 
     pub fn stb_strength_diagnostics(&self) -> Vec<String> {
-        let mut errors = Vec::new();
+        let mut errors = self.stb_rebar_analysis_diagnostics();
         if let Some(common) = &self.stb_strengths.common {
             for (i, bar) in common.reinforcement.iter().enumerate() {
                 if common.reinforcement[..i]
@@ -605,6 +611,23 @@ impl Model {
                 }
             }
             for input in &section.reinforcement {
+                if matches!(input.part.as_str(), "web" | "bar_spacing")
+                    && section.rebar.as_ref().is_some_and(|raw| {
+                        raw.positions
+                            .iter()
+                            .find(|p| {
+                                p.element == input.element
+                                    && p.attributes.get("pos") == input.position.as_ref()
+                            })
+                            .is_some_and(|p| {
+                                let attrs = raw
+                                    .effective_attributes(p, &self.stb_strengths.apply_conditions);
+                                !attrs.contains_key(&format!("D_{}", input.part))
+                            })
+                    })
+                {
+                    continue;
+                }
                 if let Err(reason) = self.resolve_stb_rebar(input) {
                     errors.push(format!(
                         "断面 {} / {} / {}: {reason}",

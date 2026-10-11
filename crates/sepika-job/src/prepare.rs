@@ -74,6 +74,10 @@ pub fn prepare_model(
     design_period: Option<f64>,
     initialize_stories: bool,
 ) -> Result<PrepareReport, JobError> {
+    let rebar_errors = model.stb_rebar_analysis_diagnostics();
+    if !rebar_errors.is_empty() {
+        return Err(JobError::InvalidInput(rebar_errors.join("; ")));
+    }
     let mut work = model.clone();
     let _ = work.anchorize_secondary_members();
     work.rebuild_assignment_regions()

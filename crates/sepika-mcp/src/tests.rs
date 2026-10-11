@@ -3188,7 +3188,13 @@ fn stb_strength_raw_steel_edit_updates_src_s_and_secondary_consumers() {
             325.,
         ),
     ] {
-        let mut model = sepika_io::stbridge::import_stbridge(xml).unwrap();
+        // 強度編集の正常系は主筋中心を明示する。元のcover-only入力の
+        // 保存・解析不可は標準配筋の受入試験で別に確認する。
+        let xml = xml.replace(
+            "depth_cover_top=\"50.0\" depth_cover_bottom=\"50.0\"",
+            "center_top=\"50.0\" center_bottom=\"50.0\" center_side=\"50.0\"",
+        );
+        let mut model = sepika_io::stbridge::import_stbridge(&xml).unwrap();
         let section = model.elements[member].section.unwrap();
         if index == 1 {
             model.unassigned_beams.push(SecondaryMember {
@@ -3477,4 +3483,281 @@ fn lateral_bracing_mcp_invalid_group_reference_is_retained_without_fallback() {
             .contains("連続"));
     }
     assert_eq!(summary["n_skipped"], 0);
+}
+
+#[test]
+fn standard_rebar507_query_reports_preserved_source_and_unsupported_analysis() {
+    let model = sepika_io::stbridge::import_stbridge(include_str!(
+        "../../sepika-io/tests/fixtures/rebar507/normal_ThreeTypes_reverse_xml_order.stb"
+    ))
+    .unwrap();
+    let raw = query_model(&model, "stb_strengths", None);
+    assert_eq!(
+        raw[0]["sections"][1]["rebar"]["positions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    let expected = model.stb_strength_diagnostics();
+    let report = query_model(&model, "strength_diagnostics", None);
+    assert_eq!(report.len(), expected.len());
+    assert!(report
+        .iter()
+        .any(|r| r["message"].as_str().unwrap().contains("位置別配筋")));
+    let beam = model
+        .elements
+        .iter()
+        .find(|e| e.section == Some(sepika_core::ids::SectionId(1)))
+        .unwrap();
+    let checks = sepika_design_jp::run_member_design_checks(
+        &model,
+        &[(
+            beam.id,
+            sepika_element::frame::beam::MemberForces {
+                at: vec![(0.0, [0.0; 6])],
+            },
+        )],
+        &[],
+        &Default::default(),
+    );
+    assert!(matches!(
+        &checks.member_checks[0].2,
+        sepika_design_jp::CheckOutcome::Skipped { reason } if reason.contains("位置別配筋")
+    ));
+    let mut beam_only = model.clone();
+    beam_only.elements.retain(|e| e.id == beam.id);
+    let error = sepika_design_jp::ultimate::collect_rc_ultimate_checks(
+        &beam_only,
+        &[],
+        &Default::default(),
+    )
+    .unwrap_err();
+    assert!(error.contains("位置別配筋"));
+    let mut candidate = model;
+    let error = sepika_job::prepare_model_for_analysis(
+        &mut candidate,
+        &sepika_job::AnalysisSettings::default(),
+        None,
+    )
+    .err()
+    .unwrap()
+    .to_string();
+    assert!(error.contains("位置別配筋"));
+    candidate.elements.clear();
+    assert!(sepika_job::prepare_model_for_analysis(
+        &mut candidate,
+        &sepika_job::AnalysisSettings::default(),
+        None
+    )
+    .is_ok());
+}
+
+#[test]
+fn standard_rebar507_joint_public_entries_gate_consumed_sections_and_preserve_normal_ratios() {
+    use sepika_core::ids::{ElemId, NodeId, SectionId};
+    use sepika_design_jp::{CheckOutcome, LoadTerm};
+    let source =
+        include_str!("../../sepika-io/tests/fixtures/rebar507/supplemental/circle_same.stb");
+    let normal = sepika_io::stbridge::import_stbridge(source).unwrap();
+    let zero = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+    let direct = |model: &Model| {
+        let forces: Vec<_> = model
+            .elements
+            .iter()
+            .map(|e| (e.id, zero.as_slice()))
+            .collect();
+        let short =
+            sepika_design_jp::joint_wiring::collect_joint_checks(model, &forces, LoadTerm::Short);
+        let with_long = sepika_design_jp::joint_wiring::collect_joint_checks_with_long(
+            model,
+            &forces,
+            Some(&forces),
+            &[],
+            LoadTerm::Short,
+        );
+        assert_eq!(
+            serde_json::to_value(&short).unwrap(),
+            serde_json::to_value(with_long).unwrap()
+        );
+        short
+    };
+    let baseline = direct(&normal);
+    assert_eq!(baseline.len(), 2);
+    assert_eq!(checked_ratio507(&baseline[0].2), 0.0);
+    // 独立期待: D22/SD345が7本、L字形κ=.4、φ=.85、Fc30、bj450、Dj600。
+    // 柱せん断0の終局比を製品計算関数を呼ばずに算出する。
+    let tension = std::f64::consts::PI * 22.0_f64.powi(2) / 4.0 * 7.0 * 345.0;
+    let capacity = 0.4 * 0.85 * (0.8 * 30.0_f64.powf(0.7)) * 450.0 * 600.0;
+    let expected = tension / capacity;
+    assert!((checked_ratio507(&baseline[1].2) - expected).abs() < 1e-12);
+    let secondary = source.replace("N_main_top_1st=\"4\"", "N_main_top_1st=\"4\" D_2nd_main=\"D13\" strength_2nd_main=\"SD345\" N_2nd_main_top_1st=\"2\"");
+    for (input, reason) in [
+        (secondary.as_str(), "副主筋"),
+        (
+            source.replace("N_band=\"2\"", "N_band=\"3\"").as_str(),
+            "2脚",
+        ),
+    ] {
+        let unsupported = sepika_io::stbridge::import_stbridge(input).unwrap();
+        let forces: Vec<_> = unsupported
+            .elements
+            .iter()
+            .map(|e| {
+                (
+                    e.id,
+                    sepika_element::frame::beam::MemberForces { at: zero.to_vec() },
+                )
+            })
+            .collect();
+        let aggregate = sepika_design_jp::run_member_design_checks(
+            &unsupported,
+            &forces,
+            &[],
+            &Default::default(),
+        );
+        for checks in [direct(&unsupported), aggregate.joint_checks] {
+            assert_eq!(checks.len(), 2);
+            assert!(checks.iter().all(|(_, _, result)| matches!(result, CheckOutcome::Skipped { reason: message } if message.contains(reason))));
+        }
+    }
+    // 未使用断面と別の節点につく梁の配筋は、この接合部へ持ち込まない。
+    let unsupported = sepika_io::stbridge::import_stbridge(&secondary).unwrap();
+    let mut unrelated = normal.clone();
+    let mut section = unsupported.sections[1].clone();
+    section.id = SectionId(2);
+    unrelated.sections.push(section);
+    let mut record = unsupported.stb_strengths.sections[1].clone();
+    record.section = SectionId(2);
+    unrelated.stb_strengths.sections.push(record);
+    assert_eq!(
+        serde_json::to_value(direct(&unrelated)).unwrap(),
+        serde_json::to_value(&baseline).unwrap()
+    );
+    for (id, x) in [(3, 0.0), (4, 6000.0)] {
+        let mut node = normal.nodes[2].clone();
+        node.id = NodeId(id);
+        node.coord = [x, 10000.0, 3000.0];
+        unrelated.nodes.push(node);
+    }
+    let mut beam = normal.elements[1].clone();
+    beam.id = ElemId(2);
+    beam.section = Some(SectionId(2));
+    beam.nodes = [NodeId(3), NodeId(4)].into_iter().collect();
+    unrelated.elements.push(beam);
+    assert_eq!(
+        serde_json::to_value(direct(&unrelated)).unwrap(),
+        serde_json::to_value(&baseline).unwrap()
+    );
+}
+
+#[test]
+fn standard_rebar507_src_panel_and_pca_public_entries_reject_consumed_unresolved_rebar() {
+    use sepika_core::ids::{ElemId, SectionId};
+    use sepika_design_jp::{CheckOutcome, LoadTerm};
+    let source = include_str!("../../sepika-io/tests/fixtures/rebar507/supplemental/src_joint.stb");
+    let zero = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+    let joint = |model: &Model| {
+        let forces: Vec<_> = model
+            .elements
+            .iter()
+            .map(|e| (e.id, zero.as_slice()))
+            .collect();
+        sepika_design_jp::joint_wiring::collect_joint_checks(model, &forces, LoadTerm::Short)
+    };
+    let normal = sepika_io::stbridge::import_stbridge(source).unwrap();
+    let checks = joint(&normal);
+    assert_eq!(checks.len(), 1);
+    assert_eq!(checks[0].1, "柱梁接合部(SRC)");
+    assert_eq!(checked_ratio507(&checks[0].2), 0.0);
+    for (name, input, reason) in [
+        ("src_joint_secondary", source.replace("N_main_top_1st=\"4\"", "N_main_top_1st=\"4\" D_2nd_main=\"D13\" strength_2nd_main=\"SD345\" N_2nd_main_top_1st=\"2\""), "副主筋"),
+        ("src_joint_corner", source.replace("<StbSecBarArrangementColumn_SRC>", "<StbSecBarArrangementColumn_SRC kind_corner=\"DIR_X\">"), "kind_corner"),
+    ] {
+        let model = sepika_io::stbridge::import_stbridge(&input).unwrap();
+        let result = joint(&model);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(&result[0].2, CheckOutcome::Skipped { reason: message } if message.contains(reason)));
+        let output = sepika_io::stbridge::export_stbridge(&model).unwrap();
+        let again = sepika_io::stbridge::import_stbridge(&output).unwrap();
+        assert_eq!(model.stb_strengths, again.stb_strengths);
+        if let Ok(dir) = std::env::var("SEPIKA_REBAR507_OUTPUT") {
+            let path = std::path::Path::new(&dir).join("supplemental");
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(path.join(format!("{name}.stb")), output).unwrap();
+        }
+    }
+    let src_beam_source =
+        include_str!("../../sepika-io/tests/fixtures/rebar507/supplemental/src_column_beam.stb");
+    let src_beam_normal = sepika_io::stbridge::import_stbridge(src_beam_source).unwrap();
+    assert_eq!(checked_ratio507(&joint(&src_beam_normal)[0].2), 0.0);
+    let src_beam_extra = sepika_io::stbridge::import_stbridge(&src_beam_source.replace("N_main_top_1st=\"4\"", "N_main_top_1st=\"4\" D_2nd_main=\"D13\" strength_2nd_main=\"SD345\" N_2nd_main_top_1st=\"2\"")).unwrap();
+    assert!(
+        matches!(&joint(&src_beam_extra)[0].2, CheckOutcome::Skipped { reason } if reason.contains("副主筋"))
+    );
+    let mut pca = normal;
+    pca.pca_attrs.push(sepika_core::model::PcaGirderAttr {
+        elem: ElemId(1),
+        mu: 0.6,
+        pw_joint: 0.008,
+        sigma_y_joint: 345.0,
+        joint_depth_from_top: 150.0,
+    });
+    let forces = [(ElemId(1), zero.as_slice())];
+    let supported =
+        sepika_design_jp::rc::horizontal_joint::collect_pca_checks(&pca, &forces, false);
+    assert_eq!(supported.len(), 4);
+    assert!(supported
+        .iter()
+        .all(|(_, _, c)| matches!(c, CheckOutcome::Checked(_))));
+    let mut unsupported = sepika_io::stbridge::import_stbridge(&source.replace("N_main_top_1st=\"4\"", "N_main_top_1st=\"4\" D_2nd_main=\"D13\" strength_2nd_main=\"SD345\" N_2nd_main_top_1st=\"2\"")).unwrap();
+    unsupported.pca_attrs = pca.pca_attrs;
+    let skipped =
+        sepika_design_jp::rc::horizontal_joint::collect_pca_checks(&unsupported, &forces, false);
+    assert_eq!(skipped.len(), 2);
+    assert!(skipped.iter().all(
+        |(_, _, c)| matches!(c, CheckOutcome::Skipped { reason } if reason.contains("副主筋"))
+    ));
+    let aggregate = sepika_design_jp::run_member_design_checks(
+        &unsupported,
+        &[(
+            ElemId(1),
+            sepika_element::frame::beam::MemberForces { at: zero.to_vec() },
+        )],
+        &[],
+        &Default::default(),
+    );
+    assert!(aggregate
+        .member_checks
+        .iter()
+        .filter(|(id, _, _)| *id == ElemId(1))
+        .all(
+            |(_, _, c)| matches!(c, CheckOutcome::Skipped { reason } if reason.contains("副主筋"))
+        ));
+    unsupported
+        .ensure_stb_rebar_supported(SectionId(1))
+        .unwrap_err();
+}
+
+fn checked_ratio507(outcome: &sepika_design_jp::CheckOutcome) -> f64 {
+    match outcome {
+        sepika_design_jp::CheckOutcome::Checked(result) => result.ratio(),
+        other => panic!("検定実施を期待: {other:?}"),
+    }
+}
+
+#[test]
+fn rebar_cover_center_notice_query_is_nonblocking_and_distinct_from_strength_errors() {
+    let xml=include_str!("../../sepika-io/tests/fixtures/rebar507/supplemental/circle_same.stb").replace("center_top_bottom=\"51\" center_side=\"51\"", "center_top_bottom=\"51\" center_side=\"51\" depth_cover_top_bottom=\"40\" depth_cover_side=\"40\"");
+    let model = sepika_io::stbridge::import_stbridge(&xml).unwrap();
+    let notices = query_model(&model, "rebar_notices", None);
+    assert_eq!(notices.len(), 3);
+    for row in notices {
+        assert_eq!(row["blocking"], false);
+        assert!(row["message"].as_str().unwrap().contains("採用あき=30 mm"));
+    }
+    assert!(query_model(&model, "strength_diagnostics", None).is_empty());
+    model
+        .ensure_stb_rebar_supported(sepika_core::ids::SectionId(1))
+        .unwrap();
 }

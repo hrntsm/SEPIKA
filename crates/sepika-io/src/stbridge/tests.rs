@@ -849,9 +849,12 @@ fn test_standard_roundtrip_rc_column_rect_stages_legs() {
 
     let xml = export_stbridge(&m).unwrap();
     assert!(xml.contains("<StbSecColumn_RC "), "RC 柱要素: {xml}");
-    assert!(xml.contains("N_main_X_1st=\"4\""), "{xml}");
-    assert!(xml.contains("N_main_X_2nd=\"3\""), "X 方向 2 段目: {xml}");
-    assert!(xml.contains("N_main_Y_1st=\"5\""), "Y 方向: {xml}");
+    assert!(xml.contains("N_main_Y_1st=\"4\""), "{xml}");
+    assert!(
+        xml.contains("N_main_Y_2nd=\"3\""),
+        "標準Yの水平列 2 段目: {xml}"
+    );
+    assert!(xml.contains("N_main_X_1st=\"5\""), "標準Xの垂直列: {xml}");
     assert!(xml.contains("N_band_direction_X=\"3\""), "X 脚数: {xml}");
     assert!(xml.contains("N_band_direction_Y=\"2\""), "Y 脚数: {xml}");
     let back = import_stbridge(&xml).expect("import");
@@ -918,27 +921,11 @@ fn test_standard_export_warns_on_fourth_rebar_stage() {
     push_section(&mut m, shape.to_section(SectionId(0), "G1".into()));
     m.elements.push(member(0, false, 0)); // 梁
 
-    let (xml, report) = export_stbridge_with_report(&m).expect("export");
-    assert!(xml.contains("N_main_top_3rd=\"2\""), "{xml}");
+    let error = export_stbridge_with_report(&m).unwrap_err().to_string();
     assert!(
-        !xml.contains("N_main_top_4th"),
-        "4 段目は書き出さない: {xml}"
+        error.contains("断面 0") && error.contains("標準段数"),
+        "{error}"
     );
-    let joined = report.warnings.join(" | ");
-    assert!(
-        joined.contains("4 段目以降"),
-        "切り捨てを警告する: {joined}"
-    );
-    assert!(joined.contains("G1"), "断面名を含む: {joined}");
-    assert!(joined.contains("4 段目 1 本"), "段と本数を含む: {joined}");
-
-    let back = import_stbridge(&xml).expect("import");
-    match &back.sections[0].shape {
-        Some(SectionShape::RcBeamRect { rebar, .. }) => {
-            assert_eq!(rebar.top, vec![4, 3, 2], "3 段目までを取り込む");
-        }
-        other => panic!("RcBeamRect を期待: {other:?}"),
-    }
 }
 
 /// 円形 RC 柱を梁位置に使うと ST-Bridge に梁用の円形図形がないため
@@ -1036,9 +1023,9 @@ fn test_standard_export_src_column_rect_stages() {
 
     let xml = export_stbridge(&m).unwrap();
     assert!(xml.contains("<StbSecColumn_SRC "), "SRC 柱要素: {xml}");
-    assert!(xml.contains("N_main_X_1st=\"4\""), "{xml}");
-    assert!(xml.contains("N_main_X_2nd=\"3\""), "{xml}");
-    assert!(xml.contains("N_main_Y_1st=\"5\""), "{xml}");
+    assert!(xml.contains("N_main_Y_1st=\"4\""), "{xml}");
+    assert!(xml.contains("N_main_Y_2nd=\"3\""), "{xml}");
+    assert!(xml.contains("N_main_X_1st=\"5\""), "{xml}");
     assert!(xml.contains("N_band_direction_X=\"3\""), "{xml}");
     assert!(xml.contains("N_band_direction_Y=\"2\""), "{xml}");
     let back = import_stbridge(&xml).expect("import");
@@ -1394,7 +1381,7 @@ fn test_import_rc_rebar_third_party_names() {
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="600" width_Y="600"/></StbSecFigureColumn_RC>
       <StbSecBarArrangementColumn_RC>
-        <StbSecBarColumn_RC_RectSame N_main_X_1st="4" N_main_Y_1st="3" D_main="D22" D_band="D10" pitch_band="100"/>
+        <StbSecBarColumn_RC_RectSame N_main_X_1st="4" N_main_Y_1st="3" N_main_total="10" D_main="D22" D_band="D10" pitch_band="100" N_band_direction_X="2" N_band_direction_Y="2"/>
       </StbSecBarArrangementColumn_RC>
     </StbSecColumn_RC>
   </StbSections>
@@ -1402,8 +1389,8 @@ fn test_import_rc_rebar_third_party_names() {
     let m = import_stbridge(xml).expect("import");
     match &m.sections[0].shape {
         Some(SectionShape::RcColumnRect { rebar, .. }) => {
-            assert_eq!(rebar.x, vec![4]);
-            assert_eq!(rebar.y, vec![3]);
+            assert_eq!(rebar.x, vec![3]);
+            assert_eq!(rebar.y, vec![4]);
             assert_eq!(rebar.main_dia, 22.0, "呼び名 D22 → 22mm");
             assert_eq!(rebar.hoop.dia, 10.0, "呼び名 D10 → 10mm");
             assert_eq!(rebar.hoop.pitch, 100.0);
@@ -1422,7 +1409,7 @@ fn test_import_rc_rebar_layered_counts() {
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="700" width_Y="700"/></StbSecFigureColumn_RC>
       <StbSecBarArrangementColumn_RC>
-        <StbSecBarColumn_RC_RectSame N_main_X_1st="4" N_main_X_2nd="3" N_main_Y_1st="5" D_main="D25" D_band="D13" pitch_band="100"/>
+        <StbSecBarColumn_RC_RectSame N_main_X_1st="4" N_main_X_2nd="3" N_main_Y_1st="5" N_main_total="16" D_main="D25" D_band="D13" pitch_band="100" N_band_direction_X="2" N_band_direction_Y="2"/>
       </StbSecBarArrangementColumn_RC>
     </StbSecColumn_RC>
   </StbSections>
@@ -1430,8 +1417,8 @@ fn test_import_rc_rebar_layered_counts() {
     let m = import_stbridge(xml).expect("import");
     match &m.sections[0].shape {
         Some(SectionShape::RcColumnRect { rebar, .. }) => {
-            assert_eq!(rebar.x, vec![4, 3], "X 方向は段別の本数を保持 (合算しない)");
-            assert_eq!(rebar.y, vec![5], "Y 方向は 1 段目のみ");
+            assert_eq!(rebar.x, vec![5], "標準Yは上下の水平列");
+            assert_eq!(rebar.y, vec![4, 3], "標準Xは左右の垂直列で段別本数を保持");
             assert_eq!(rebar.main_dia, 25.0, "呼び名 D25 → 25mm");
         }
         other => panic!("RcColumnRect を期待: {other:?}"),
@@ -1476,7 +1463,7 @@ fn test_import_rc_rect_column_hoop_legs() {
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="800" width_Y="600"/></StbSecFigureColumn_RC>
       <StbSecBarArrangementColumn_RC>
-        <StbSecBarColumn_RC_RectSame N_main_X_1st="4" N_main_Y_1st="3" D_main="D22" D_band="D10" pitch_band="100" N_band_direction_X="3" N_band_direction_Y="2"/>
+        <StbSecBarColumn_RC_RectSame N_main_X_1st="4" N_main_Y_1st="3" N_main_total="10" D_main="D22" D_band="D10" pitch_band="100" N_band_direction_X="3" N_band_direction_Y="2"/>
       </StbSecBarArrangementColumn_RC>
     </StbSecColumn_RC>
   </StbSections>
@@ -1484,8 +1471,8 @@ fn test_import_rc_rect_column_hoop_legs() {
     let m = import_stbridge(xml).expect("import");
     match &m.sections[0].shape {
         Some(SectionShape::RcColumnRect { rebar, .. }) => {
-            assert_eq!(rebar.x, vec![4]);
-            assert_eq!(rebar.y, vec![3]);
+            assert_eq!(rebar.x, vec![3]);
+            assert_eq!(rebar.y, vec![4]);
             assert_eq!(rebar.hoop.legs_x, 3, "X 方向の脚数");
             assert_eq!(rebar.hoop.legs_y, 2, "Y 方向の脚数");
         }
@@ -1502,7 +1489,7 @@ fn test_import_rc_circle_column_total_count() {
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Circle D="800"/></StbSecFigureColumn_RC>
       <StbSecBarArrangementColumn_RC>
-        <StbSecBarColumn_RC_CircleSame N_main="8" D_main="D25" D_band="D13" pitch_band="100"/>
+        <StbSecBarColumn_RC_CircleSame N_main="8" N_band="2" D_main="D25" D_band="D13" pitch_band="100"/>
       </StbSecBarArrangementColumn_RC>
     </StbSecColumn_RC>
   </StbSections>
@@ -1530,13 +1517,13 @@ fn test_import_rc_kind_preserved() {
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="600" width_Y="600"/></StbSecFigureColumn_RC>
       <StbSecBarArrangementColumn_RC>
-        <StbSecBarColumn_RC_RectSame N_main_X_1st="4" N_main_Y_1st="4" D_main="D22"/>
+        <StbSecBarColumn_RC_RectSame N_main_X_1st="4" N_main_Y_1st="4" N_main_total="12" D_main="D22" D_band="D10" pitch_band="100" N_band_direction_X="2" N_band_direction_Y="2"/>
       </StbSecBarArrangementColumn_RC>
     </StbSecColumn_RC>
     <StbSecBeam_RC id="1" name="G">
       <StbSecFigureBeam_RC><StbSecBeam_RC_Straight width="400" depth="700"/></StbSecFigureBeam_RC>
       <StbSecBarArrangementBeam_RC>
-        <StbSecBarBeam_RC_Same N_main_top_1st="3" N_main_bottom_1st="3" D_main="D22"/>
+        <StbSecBarBeam_RC_Same N_main_top_1st="3" N_main_bottom_1st="3" D_main="D22" D_stirrup="D10" pitch_stirrup="100" N_stirrup="2"/>
       </StbSecBarArrangementBeam_RC>
     </StbSecBeam_RC>
   </StbSections>
@@ -1564,7 +1551,7 @@ fn test_import_rc_circle_beam_unsupported() {
     <StbSecBeam_RC id="0" name="GB">
       <StbSecFigureBeam_RC><StbSecColumn_RC_Circle D="600"/></StbSecFigureBeam_RC>
       <StbSecBarArrangementBeam_RC>
-        <StbSecBarBeam_RC_Same N_main_top_1st="3" N_main_bottom_1st="3" D_main="D22"/>
+        <StbSecBarBeam_RC_Same N_main_top_1st="3" N_main_bottom_1st="3" D_main="D22" D_stirrup="D10" pitch_stirrup="100" N_stirrup="2"/>
       </StbSecBarArrangementBeam_RC>
     </StbSecBeam_RC>
   </StbSections>
@@ -1592,28 +1579,8 @@ fn test_import_rc_rebar_warns_on_limit() {
     </StbSecColumn_RC>
   </StbSections>
 </StbModel></ST_BRIDGE>"#;
-    let (m, report) = import_stbridge_with_report(xml).expect("import");
-    match &m.sections[0].shape {
-        Some(SectionShape::RcColumnRect { rebar, .. }) => {
-            assert_eq!(
-                rebar.x,
-                vec![4, 3, 2, 1],
-                "4 段目以降も合算せず段の列として保持"
-            );
-            assert_eq!(rebar.main_dia, 25.0, "異径は D_main を採用");
-        }
-        other => panic!("RcColumnRect を期待: {other:?}"),
-    }
-    assert!(
-        report.warnings.iter().any(|w| w.contains("4 段目以降")),
-        "4 段目以降を警告する: {:?}",
-        report.warnings
-    );
-    assert!(
-        report.warnings.iter().any(|w| w.contains("主筋径が複数")),
-        "異径混在を警告する: {:?}",
-        report.warnings
-    );
+    let error = import_stbridge_with_report(xml).unwrap_err().to_string();
+    assert!(error.contains("断面 0"), "{error}");
 }
 
 /// 実 ST-Bridge の鋼管形鋼ライブラリ名（`StbSecRoll-Pipe`）を取り込み、鋼管柱の
@@ -2050,10 +2017,13 @@ fn test_standard_roundtrip_src_column() {
     );
     assert!(xml.contains("<StbSecRoll-H "), "内蔵鉄骨の形鋼ライブラリ");
     assert!(
-        xml.contains("N_main_X_1st=\"4\""),
-        "X 方向の段別本数: {xml}"
+        xml.contains("N_main_Y_1st=\"4\""),
+        "標準Yの水平列の段別本数: {xml}"
     );
-    assert!(xml.contains("N_main_Y_1st=\"3\""), "Y 方向の本数: {xml}");
+    assert!(
+        xml.contains("N_main_X_1st=\"3\""),
+        "標準Xの垂直列の本数: {xml}"
+    );
     let back = import_stbridge(&xml).expect("import");
     assert_eq!(
         back.element_steel_material(&back.elements[0]).unwrap().name,

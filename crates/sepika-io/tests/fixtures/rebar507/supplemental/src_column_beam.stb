@@ -1,0 +1,31 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="independent" app_name="research_fixture" app_version="1"><StbApplyConditionsList><StbColumn_SRC_RebarPositionApply set_default="true" center="51"/><StbBeam_SRC_RebarPositionApply set_default="true" center_top_bottom="51" center_side="51"/></StbApplyConditionsList></StbCommon>
+  <StbModel>
+    <StbNodes>
+      <StbNode id="1" X="0" Y="0" Z="0" kind="ON_COLUMN"/>
+      <StbNode id="2" X="0" Y="0" Z="3000" kind="ON_COLUMN"/>
+      <StbNode id="3" X="6000" Y="0" Z="3000" kind="ON_GIRDER"/>
+    </StbNodes>
+    <StbMembers>
+      <StbColumns>
+        <StbColumn id="1" name="C" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="SRC"/>
+      </StbColumns>
+      <StbGirders>
+        <StbGirder id="1" name="G" id_node_start="2" id_node_end="3" id_section="2" kind_structure="SRC" isFoundation="false"/>
+      </StbGirders>
+    </StbMembers>
+    <StbSections>
+      <StbSecColumn_SRC id="1" name="C1" strength_concrete="Fc30">
+        <StbSecFigureColumn_SRC><StbSecColumn_SRC_Rect width_X="600" width_Y="600"/></StbSecFigureColumn_SRC><StbSecBarArrangementColumn_SRC><StbSecBarColumn_SRC_RectSame D_main="D22" strength_main="SD345" D_band="D10" strength_band="SD295A" N_main_X_1st="4" N_main_Y_1st="4" N_main_total="12" N_band_direction_X="2" N_band_direction_Y="2" pitch_band="100"/></StbSecBarArrangementColumn_SRC><StbSecSteelFigureColumn_SRC><StbSecSteelColumn_SRC_Same><StbSecColumn_SRC_SameShapeH shape="H-400x200x8x13r13" direction_type="H" strength_main="SN400B"/></StbSecSteelColumn_SRC_Same></StbSecSteelFigureColumn_SRC></StbSecColumn_SRC>
+      <StbSecBeam_SRC id="2" name="G1" strength_concrete="Fc24">
+        <StbSecFigureBeam_SRC>
+          <StbSecBeam_SRC_Straight width="300" depth="600"/>
+        </StbSecFigureBeam_SRC>
+        <StbSecBarArrangementBeam_SRC>
+          <StbSecBarBeam_SRC_Same D_main="D22" strength_main="SD345" N_main_top_1st="4" N_main_bottom_1st="3" D_stirrup="D10" strength_stirrup="SD295A" N_stirrup="2" pitch_stirrup="100"/>
+        </StbSecBarArrangementBeam_SRC><StbSecSteelFigureBeam_SRC><StbSecSteelBeam_SRC_Straight shape="H-400x200x8x13r13" strength_main="SN400B"/></StbSecSteelFigureBeam_SRC>
+      </StbSecBeam_SRC>
+    <StbSecSteel><StbSecRoll-H name="H-400x200x8x13r13" type="H" A="400" B="200" t1="8" t2="13" r="13"/></StbSecSteel></StbSections>
+  </StbModel>
+</ST_BRIDGE>

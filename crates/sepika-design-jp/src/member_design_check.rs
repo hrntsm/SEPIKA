@@ -161,7 +161,10 @@ pub fn run_member_design_checks(
         let (Some(sec), Some(mat)) = (sec, mat) else {
             continue;
         };
-        if let Err(reason) = sec.ensure_properties_resolved() {
+        if let Err(reason) = model
+            .ensure_stb_rebar_supported(sec.id)
+            .and_then(|()| sec.ensure_properties_resolved())
+        {
             for (pos, _) in &mf.at {
                 member_checks.push((
                     *elem_id,
@@ -378,15 +381,11 @@ pub fn run_member_design_checks(
                 .collect()
         });
 
-    member_checks.extend(
-        crate::rc::horizontal_joint::collect_pca_checks(
-            model,
-            &mf_slices,
-            options.term == LoadTerm::Long,
-        )
-        .into_iter()
-        .map(|(id, pos, cr)| (id, pos, CheckOutcome::Checked(cr))),
-    );
+    member_checks.extend(crate::rc::horizontal_joint::collect_pca_checks(
+        model,
+        &mf_slices,
+        options.term == LoadTerm::Long,
+    ));
 
     let joint_checks = crate::joint_wiring::collect_joint_checks_impl(
         model,

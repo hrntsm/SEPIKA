@@ -298,8 +298,64 @@ impl EditCommand for EditSectionShape {
         new_sec.rebar_material = old.rebar_material;
         new_sec.shear_rebar_material = old.shear_rebar_material;
         new_sec.steel_material = old.steel_material;
+        let input = model.stb_strengths.clone();
+        use sepika_core::section_shape::SectionShape;
+        let entered = match &self.new_shape {
+            SectionShape::RcBeamRect { rebar, .. } | SectionShape::SrcBeamRect { rebar, .. } => {
+                !rebar.is_unset()
+                    || [
+                        rebar.main_dia,
+                        rebar.cover,
+                        rebar.stirrup.dia,
+                        rebar.stirrup.pitch,
+                    ]
+                    .iter()
+                    .any(|n| *n != 0.0)
+                    || rebar.stirrup.legs != 0
+            }
+            SectionShape::RcColumnRect { rebar, .. }
+            | SectionShape::SrcColumnRect { rebar, .. } => {
+                !rebar.is_unset()
+                    || [
+                        rebar.main_dia,
+                        rebar.cover,
+                        rebar.hoop.dia,
+                        rebar.hoop.pitch,
+                    ]
+                    .iter()
+                    .any(|n| *n != 0.0)
+                    || rebar.hoop.legs_x != 0
+                    || rebar.hoop.legs_y != 0
+            }
+            SectionShape::RcColumnCircle { rebar, .. } => {
+                !rebar.is_unset()
+                    || [
+                        rebar.main_dia,
+                        rebar.cover,
+                        rebar.hoop.dia,
+                        rebar.hoop.pitch,
+                    ]
+                    .iter()
+                    .any(|n| *n != 0.0)
+            }
+            _ => false,
+        };
+        if let Some(source) = model
+            .stb_strengths
+            .sections
+            .iter_mut()
+            .find(|s| s.section == self.section && (s.rebar.is_some() || entered))
+        {
+            source.rebar = None;
+            source.native_rebar = true;
+            source.reinforcement.clear();
+        }
         model.sections[idx] = new_sec;
-        Box::new(RestoreSection { old })
+        Box::new(crate::strength::RestoreStrengthInput {
+            input,
+            inverse: Box::new(RestoreSection { old }),
+            stories: model.source_stories.clone(),
+        })
     }
 
     fn label(&self) -> &str {

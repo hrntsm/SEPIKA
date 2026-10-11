@@ -1,6 +1,7 @@
 //! ST-Bridge の配筋（`StbSecBarArrangement*`）属性の解析（best-effort）。
 
 use super::xml::Attrs;
+use sepika_core::model::stb_numeric_lexical;
 use sepika_core::section_shape::{
     BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar,
     RectColumnHoop,
@@ -63,21 +64,20 @@ pub(super) fn default_circle_column_rebar() -> RcCircleColumnRebar {
 /// 鉄筋径の文字列を mm へ解釈する。数値ならそのまま、`D22`/`D10` のような呼び名は
 /// 先頭の `D`/`d` を除いた数値を径とする（best-effort。厳密な JIS 公称径ではない）。
 fn parse_bar_dia(v: &str) -> Option<f64> {
-    if let Ok(x) = v.parse::<f64>() {
-        return Some(x);
-    }
     let t = v.trim();
-    if let Some(rest) = t.strip_prefix(['D', 'd']) {
-        return rest.trim().parse::<f64>().ok();
-    }
-    None
+    t.strip_prefix(['D', 'd'])
+        .unwrap_or(t)
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|x| x.is_finite() && *x > 0.0)
 }
 
 /// 候補キーのいずれかから f64 を取る（欠落は 0）。
 fn attr_f64(a: &Attrs, keys: &[&str]) -> f64 {
     for k in keys {
         if let Some(v) = a.get(k) {
-            if let Ok(x) = v.parse::<f64>() {
+            if let Ok(x) = stb_numeric_lexical(v).parse::<f64>() {
                 return x;
             }
         }
@@ -101,7 +101,7 @@ fn attr_dia(a: &Attrs, keys: &[&str]) -> f64 {
 fn attr_u32(a: &Attrs, keys: &[&str]) -> u32 {
     for k in keys {
         if let Some(v) = a.get(k) {
-            if let Ok(x) = v.parse::<u32>() {
+            if let Ok(x) = stb_numeric_lexical(v).parse::<u32>() {
                 return x;
             }
         }
@@ -128,20 +128,35 @@ fn stage_counts(a: &Attrs, prefixes: &[&str]) -> Vec<u32> {
     for name in a.names() {
         for p in prefixes {
             if let Some(n) = ordinal_stage(name, p) {
-                if let Some(x) = a.get(name).and_then(|v| v.parse::<u32>().ok()) {
+                if let Some(x) = a
+                    .get(name)
+                    .and_then(|v| stb_numeric_lexical(v).parse::<u32>().ok())
+                {
                     found.push((n, x));
                 }
             }
         }
     }
     found.sort_by_key(|(n, _)| *n);
-    found.into_iter().map(|(_, x)| x).collect()
+    let last = found.last().map(|(n, _)| *n).unwrap_or(0);
+    (1..=last)
+        .map(|stage| {
+            found
+                .iter()
+                .find(|(n, _)| *n == stage)
+                .map(|(_, count)| *count)
+                .unwrap_or(0)
+        })
+        .collect()
 }
 
 /// 段別属性のない合算本数を 1 段として扱う（見つからなければ空）。
 fn total_as_stage(a: &Attrs, keys: &[&str]) -> Vec<u32> {
     for k in keys {
-        if let Some(x) = a.get(k).and_then(|v| v.parse::<u32>().ok()) {
+        if let Some(x) = a
+            .get(k)
+            .and_then(|v| stb_numeric_lexical(v).parse::<u32>().ok())
+        {
             if x > 0 {
                 return vec![x];
             }
@@ -241,7 +256,7 @@ pub(super) fn parse_beam_rebar(a: &Attrs) -> (RcBeamRebar, RebarGrades, Vec<Stri
     }
     let stage_count = top.len().max(bottom.len());
     push_limit_warnings(a, stage_count, &mut warnings);
-    let rebar = RcBeamRebar {
+    let mut rebar = RcBeamRebar {
         main_dia: attr_dia(
             a,
             &[
@@ -272,6 +287,15 @@ pub(super) fn parse_beam_rebar(a: &Attrs) -> (RcBeamRebar, RebarGrades, Vec<Stri
             ),
         },
     };
+    if let Some(center) = ["center_top", "center_bottom", "center_side"]
+        .iter()
+        .find_map(|k| {
+            a.get(k)
+                .and_then(|v| stb_numeric_lexical(v).parse::<f64>().ok())
+        })
+    {
+        rebar.cover = center - rebar.stirrup.dia - rebar.main_dia / 2.0;
+    }
     (rebar, parse_grades(a), warnings)
 }
 
@@ -281,11 +305,12 @@ pub(super) fn parse_beam_rebar(a: &Attrs) -> (RcBeamRebar, RebarGrades, Vec<Stri
 /// 段数が 3 を超える・主筋径が混在する・独自の段間隔属性がある場合は警告を返す。
 pub(super) fn parse_rect_column_rebar(a: &Attrs) -> (RcRectColumnRebar, RebarGrades, Vec<String>) {
     let mut warnings = Vec::new();
-    let mut x = stage_counts(a, &["N_main_X_"]);
+    // Standard X counts the vertical side rows; Rc.x counts horizontal rows.
+    let mut x = stage_counts(a, &["N_main_Y_"]);
     if x.is_empty() {
         x = total_as_stage(a, &["count_main_X", "N_main_X"]);
     }
-    let mut y = stage_counts(a, &["N_main_Y_"]);
+    let mut y = stage_counts(a, &["N_main_X_"]);
     if y.is_empty() {
         y = total_as_stage(a, &["count_main_Y", "N_main_Y"]);
     }
@@ -300,7 +325,7 @@ pub(super) fn parse_rect_column_rebar(a: &Attrs) -> (RcRectColumnRebar, RebarGra
             legs_x
         }
     };
-    let rebar = RcRectColumnRebar {
+    let mut rebar = RcRectColumnRebar {
         main_dia: attr_dia(
             a,
             &[
@@ -332,6 +357,19 @@ pub(super) fn parse_rect_column_rebar(a: &Attrs) -> (RcRectColumnRebar, RebarGra
             legs_y,
         },
     };
+    if let Some(center) = [
+        "center_start_X",
+        "center_end_X",
+        "center_start_Y",
+        "center_end_Y",
+    ]
+    .iter()
+    .find_map(|k| {
+        a.get(k)
+            .and_then(|v| stb_numeric_lexical(v).parse::<f64>().ok())
+    }) {
+        rebar.cover = center - rebar.hoop.dia - rebar.main_dia / 2.0;
+    }
     (rebar, parse_grades(a), warnings)
 }
 
@@ -345,7 +383,7 @@ pub(super) fn parse_circle_column_rebar(
     let x = stage_counts(a, &["N_main_X_"]);
     let y = stage_counts(a, &["N_main_Y_"]);
     push_limit_warnings(a, x.len().max(y.len()), &mut warnings);
-    let rebar = RcCircleColumnRebar {
+    let mut rebar = RcCircleColumnRebar {
         main_dia: attr_dia(a, &["D_main", "dia_main", "dia_main_X", "D_main_X"]),
         count: circle_main_count(a),
         cover: attr_f64(
@@ -364,12 +402,28 @@ pub(super) fn parse_circle_column_rebar(
             pitch: attr_f64(a, &["pitch_band", "pitch_hoop"]),
         },
     };
+    if let Some(center) = [
+        "center_start_X",
+        "center_end_X",
+        "center_start_Y",
+        "center_end_Y",
+    ]
+    .iter()
+    .find_map(|k| {
+        a.get(k)
+            .and_then(|v| stb_numeric_lexical(v).parse::<f64>().ok())
+    }) {
+        rebar.cover = center - rebar.hoop.dia - rebar.main_dia / 2.0;
+    }
     (rebar, parse_grades(a), warnings)
 }
 
 /// 円形柱の主筋全本数。`N_main` を優先し、なければ `N_main_X_*` を合算する。
 fn circle_main_count(a: &Attrs) -> u32 {
-    if let Some(x) = a.get("N_main").and_then(|v| v.parse::<u32>().ok()) {
+    if let Some(x) = a
+        .get("N_main")
+        .and_then(|v| stb_numeric_lexical(v).parse::<u32>().ok())
+    {
         return x;
     }
     let x: u32 = stage_counts(a, &["N_main_X_"]).iter().sum();

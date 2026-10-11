@@ -63,6 +63,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0051](0051-stbridge-strength-input-and-section-material.md) | accepted | ST-Bridgeの元強度指定と断面材料を分離する |
 
+| [0052](0052-stbridge-rebar-source-and-analysis-boundary.md) | proposed | 標準配筋の元入力と解析用配筋を分離する |
+
 ## 規約
 
 - ADR にするのは「後から覆すコストが高い」「背景を知らないと意外に見える」「実際のトレードオフがあった」の 3 条件をすべて満たす**現在有効な判断**だけ。単なる実装手順・容易に変えられる選択・未実装の計画・自明な判断は書かない。

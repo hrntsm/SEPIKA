@@ -376,6 +376,9 @@ pub fn collect_rc_ultimate_checks(
                     | SectionShape::RcColumnCircle { .. }
             )
         );
+        if is_rc {
+            model.ensure_stb_rebar_supported(sec.id)?;
+        }
         let Some(mat) = model.element_material(elem) else {
             if is_rc {
                 return Err(format!("部材 ID {} の材料が未設定です", elem.id.0));

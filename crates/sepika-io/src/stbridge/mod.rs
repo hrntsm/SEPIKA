@@ -80,3 +80,6 @@ mod tests;
 
 #[cfg(test)]
 mod strength_tests;
+
+#[cfg(test)]
+mod rebar_tests;

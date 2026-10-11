@@ -62,8 +62,7 @@ pub fn export_stbridge(model: &Model) -> Result<String, StbError> {
 
 /// 内部モデルを標準 ST-Bridge 2.0.2 XML 文字列へ出力し、[`ExportReport`] も返す。
 ///
-/// 標準スキーマの表現限界による近似・切り捨て（主筋の 4 段目以降、円形 RC 梁の
-/// `StbSecRaw` フォールバックなど）は警告として報告する。
+/// 表現不能な配筋はエラー、円形 RC 梁の `StbSecRaw` フォールバック等は警告として報告する。
 pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportReport), StbError> {
     let mut output_model = model.clone();
     output_model
@@ -157,6 +156,61 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
          xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"{STB_VERSION}\">\n"
     ));
 
+    let mut apply_conditions = model.stb_strengths.apply_conditions.clone();
+    for section in &model.sections {
+        let source = model
+            .stb_strengths
+            .sections
+            .iter()
+            .find(|s| s.section == section.id);
+        if source
+            .is_some_and(|s| s.rebar.is_some() || (!s.native_rebar && s.reinforcement.is_empty()))
+        {
+            continue;
+        }
+        use sepika_core::section_shape::SectionShape;
+        let family = match section.shape.as_ref() {
+            Some(SectionShape::RcBeamRect { .. }) => "Beam_RC",
+            Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. }) => {
+                "Column_RC"
+            }
+            Some(SectionShape::SrcBeamRect { .. }) => "Beam_SRC",
+            Some(SectionShape::SrcColumnRect { .. }) => "Column_SRC",
+            _ => continue,
+        };
+        let element = format!("Stb{family}_RebarPositionApply");
+        if !apply_conditions.iter().any(|a| a.element == element) {
+            if model
+                .stb_strengths
+                .sections
+                .iter()
+                .filter_map(|s| s.rebar.as_ref())
+                .any(|r| {
+                    r.family() == family
+                        && r.container
+                            .attributes
+                            .keys()
+                            .chain(r.positions.iter().flat_map(|p| p.attributes.keys()))
+                            .any(|k| {
+                                k.starts_with("depth_cover")
+                                    || k.starts_with("center")
+                                    || k.starts_with("interval")
+                            })
+                })
+            {
+                return Err(StbError::Unmappable(format!(
+                    "断面 {}: 新規配筋のApply条件が保存済み非適用属性を変更します",
+                    section.id.0
+                )));
+            }
+            apply_conditions.push(sepika_core::model::StbRebarElement {
+                element,
+                attributes: [("set_default".into(), "false".into())]
+                    .into_iter()
+                    .collect(),
+            });
+        }
+    }
     if let Some(common) = &model.stb_strengths.common {
         s.push_str(&format!(
             "  <StbCommon project_name=\"{}\" app_name=\"{}\" app_version=\"{}\"{}",
@@ -169,23 +223,48 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
                 .map(|g| format!(" strength_concrete=\"{}\"", esc(g)))
                 .unwrap_or_default()
         ));
-        if common.reinforcement.is_empty() {
+        if common.reinforcement.is_empty() && apply_conditions.is_empty() {
             s.push_str("/>\n");
         } else {
-            s.push_str(">\n    <StbReinforcementStrengthList>\n");
-            for r in &common.reinforcement {
-                s.push_str(&format!(
-                    "      <StbReinforcementStrength D=\"{}\" strength=\"{}\"/>\n",
-                    esc(&r.diameter),
-                    esc(&r.strength)
-                ));
+            s.push_str(">\n");
+            if !common.reinforcement.is_empty() {
+                s.push_str("    <StbReinforcementStrengthList>\n");
+                for r in &common.reinforcement {
+                    s.push_str(&format!(
+                        "      <StbReinforcementStrength D=\"{}\" strength=\"{}\"/>\n",
+                        esc(&r.diameter),
+                        esc(&r.strength)
+                    ));
+                }
+                s.push_str("    </StbReinforcementStrengthList>\n");
             }
-            s.push_str("    </StbReinforcementStrengthList>\n  </StbCommon>\n");
+            if !apply_conditions.is_empty() {
+                s.push_str("    <StbApplyConditionsList>\n");
+                for condition in &apply_conditions {
+                    s.push_str(&super::strength_export::raw_element(condition));
+                    s.push('\n');
+                }
+                s.push_str("    </StbApplyConditionsList>\n");
+            }
+            s.push_str("  </StbCommon>\n");
         }
-    } else {
+    } else if apply_conditions.is_empty() {
         s.push_str(
             "  <StbCommon project_name=\"SEPIKA\" app_name=\"SEPIKA\" app_version=\"0.0.1\"/>\n",
         );
+    } else {
+        s.push_str(
+            "  <StbCommon project_name=\"SEPIKA\" app_name=\"SEPIKA\" app_version=\"0.0.1\">\n",
+        );
+        if !apply_conditions.is_empty() {
+            s.push_str("    <StbApplyConditionsList>\n");
+            for condition in &apply_conditions {
+                s.push_str(&super::strength_export::raw_element(condition));
+                s.push('\n');
+            }
+            s.push_str("    </StbApplyConditionsList>\n");
+        }
+        s.push_str("  </StbCommon>\n");
     }
 
     s.push_str("  <StbModel>\n");
