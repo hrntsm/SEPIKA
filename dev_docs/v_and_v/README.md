@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [未割当線材のSTB出力拒否_Issue625_2026-10.md](未割当線材のSTB出力拒否_Issue625_2026-10.md) | 両公開export・実Appの未割当拒否／状態保持／明示割当回復、正常5部材の独立属性 | 🔶（直接Verification、固定公式XSD取得403・全文未検証） |
 | [外部ID入力拒否_Issue603_2026-10.md](外部ID入力拒否_Issue603_2026-10.md) | MCP/手書き/serde・STB全文書・境界/省略・正常編集/Undo | 🔶（入口Verification、freshレビュー・最終head全CIは後続） |
 | [二次CFT入口拒否_Issue539_2026-10.md](二次CFT入口拒否_Issue539_2026-10.md) | 共通用途・raw保存読込・App状態保持・数量/解析入口・正常主柱対照 | 🔶（入口Verification、freshレビュー・最終head全CIは後続） |
 | [直接線形求解_Issue598_2026-10.md](直接線形求解_Issue598_2026-10.md) | Cholesky適用・独立f64残差・LU別契約・52,920DOF前後実測・OVIKA旧6失効 | 🔶（Verification、一試行実測、Validation・freshレビュー・最終head全CIは後続） |
@@ -226,7 +227,7 @@
 | 20 | ファイバ断面（M–φ 積分） | sepika-section / sepika-core / sepika-element | fiber.rs, mn_surface/fibers.rs, section_shape/rounded.rs | `test_section_*`、`rounded_tests`、`rounded_beam_fiber_*`。フィレット・角Rの領域、公開耐力、両質量モードの証拠は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md) | P4 | ✅（指定形状の細分化照合。通常配置の一般精度保証ではない） |
 | 21 | 参考骨格算定（M–φ→M–θ） | sepika-skeleton | tests.rs | `test_rc_skeleton_*`, `shear_*`, `explicit_pullout_*`, `positive_reference_composition_*`, `rc_builder_rejects_*` | P4 / #436 | 🔶（単位・拒否契約検証済み） |
 | 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 🔶 |
-| 23 | ST-Bridge 入出力 | sepika-io | stbridge.rs | `test_roundtrip_*`、`source_story`（[原階所属](原階所属_Issue497_2026-10.md)） | P8 | 🔶 |
+| 23 | ST-Bridge 入出力 | sepika-io | stbridge.rs | [Issue625直接入口と正常対照](未割当線材のSTB出力拒否_Issue625_2026-10.md#独立期待値と直接入口)、 `test_roundtrip_*`、`source_story`（[原階所属](原階所属_Issue497_2026-10.md)） | P8 | 🔶 |
 | 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*`、`source_story_*`（[原階所属](原階所属_Issue497_2026-10.md)。MCP `model_edit` は原階所属・壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |
 | 24a | 割当領域の同一性・孤立版診断 | sepika-core / sepika-edit / sepika-job / sepika-app / sepika-mcp | model/assignment_region.rs、secondary.rs、node_member.rs、prepare.rs | [Issue506検証](割当領域同一性_Issue506_2026-10.md)の独立fixtureと実入口 | #506 | ✅（状態契約Verification） |
 | 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*` | P7 | 🔶 |
