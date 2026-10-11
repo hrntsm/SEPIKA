@@ -12852,3 +12852,23 @@ fn standard_rebar507_geometry_only_section_accepts_new_rebar_and_undo() {
     let exported = sepika_io::stbridge::export_stbridge(&app.core.model).unwrap();
     assert!(!exported.contains("<StbSecBarArrangementBeam_RC>"));
 }
+
+#[test]
+fn standard_rebar507_import_notice_reports_center_priority_without_refusing_preparation() {
+    let xml=include_str!("../../../sepika-io/tests/fixtures/rebar507/supplemental/circle_same.stb").replace("center_top_bottom=\"51\" center_side=\"51\"", "center_top_bottom=\"51\" center_side=\"51\" depth_cover_top_bottom=\"40\" depth_cover_side=\"40\"");
+    let path = std::env::temp_dir().join(format!("rebar507-notice-gui-{}.stb", std::process::id()));
+    std::fs::write(&path, xml).unwrap();
+    let mut app = App::default();
+    app.import_stbridge_from(path.clone());
+    let notice = app.core.scoped.last_error.as_ref().unwrap();
+    assert!(notice.starts_with('⚠') && notice.contains("採用あき=30 mm"));
+    assert!(app.core.model.stb_strength_diagnostics().is_empty());
+    app.core.scoped.last_error = None;
+    app.run_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "非blocking通知が準備計算を妨げない: {:?}",
+        app.core.scoped.last_error
+    );
+    std::fs::remove_file(path).unwrap();
+}

@@ -11,6 +11,7 @@ pub fn query_model(model: &Model, kind: &str, filter: Option<&str>) -> Vec<serde
     use serde_json::json;
     let items: Vec<serde_json::Value> = match kind {
         "stb_strengths" => vec![serde_json::to_value(&model.stb_strengths).unwrap()],
+        "rebar_notices" => model.stb_rebar_notices().into_iter().map(|message| json!({"message":message,"blocking":false})).collect(),
         "strength_diagnostics" => model.stb_strength_diagnostics().into_iter().map(|message| json!({"message":message})).collect(),
         "resolved_strengths" => model.stb_strengths.members.iter().map(|input| json!({"target":input.target,"result":model.resolve_stb_concrete(input)})).collect(),
         "source_stories" => model.source_stories.iter().map(|s| serde_json::to_value(s).unwrap()).collect(),

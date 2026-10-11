@@ -3745,3 +3745,19 @@ fn checked_ratio507(outcome: &sepika_design_jp::CheckOutcome) -> f64 {
         other => panic!("検定実施を期待: {other:?}"),
     }
 }
+
+#[test]
+fn rebar_cover_center_notice_query_is_nonblocking_and_distinct_from_strength_errors() {
+    let xml=include_str!("../../sepika-io/tests/fixtures/rebar507/supplemental/circle_same.stb").replace("center_top_bottom=\"51\" center_side=\"51\"", "center_top_bottom=\"51\" center_side=\"51\" depth_cover_top_bottom=\"40\" depth_cover_side=\"40\"");
+    let model = sepika_io::stbridge::import_stbridge(&xml).unwrap();
+    let notices = query_model(&model, "rebar_notices", None);
+    assert_eq!(notices.len(), 3);
+    for row in notices {
+        assert_eq!(row["blocking"], false);
+        assert!(row["message"].as_str().unwrap().contains("採用あき=30 mm"));
+    }
+    assert!(query_model(&model, "strength_diagnostics", None).is_empty());
+    model
+        .ensure_stb_rebar_supported(sepika_core::ids::SectionId(1))
+        .unwrap();
+}

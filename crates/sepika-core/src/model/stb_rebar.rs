@@ -279,6 +279,64 @@ impl StbRebarArrangement {
 }
 
 impl Model {
+    /// centerで解決した際の指定coverとの不整合。計算拒否理由には含めない。
+    pub fn stb_rebar_notices(&self) -> Vec<String> {
+        let mut notices = Vec::new();
+        for input in &self.stb_strengths.sections {
+            let Some(raw) = &input.rebar else {
+                continue;
+            };
+            let beam = raw.family().starts_with("Beam");
+            let sides: &[&str] = if beam {
+                &["top", "bottom", "side"]
+            } else {
+                &["start_X", "end_X", "start_Y", "end_Y"]
+            };
+            for position in &raw.positions {
+                let attrs =
+                    raw.effective_attributes(position, &self.stb_strengths.apply_conditions);
+                let diameter = |key: &str| {
+                    attrs
+                        .get(key)
+                        .and_then(|value| {
+                            value.strip_prefix('D').unwrap_or(value).parse::<f64>().ok()
+                        })
+                        .filter(|d| d.is_finite() && *d > 0.0)
+                };
+                let (Some(main), Some(shear)) = (
+                    diameter("D_main"),
+                    diameter(if beam { "D_stirrup" } else { "D_band" }),
+                ) else {
+                    continue;
+                };
+                let number = |key: &str| {
+                    attrs
+                        .get(key)
+                        .and_then(|v| v.parse::<f64>().ok())
+                        .filter(|v| v.is_finite() && *v > 0.0)
+                };
+                for side in sides {
+                    let (Some(cover), Some(center)) = (
+                        number(&format!("depth_cover_{side}")),
+                        number(&format!("center_{side}")),
+                    ) else {
+                        continue;
+                    };
+                    let adopted = center - shear - main / 2.0;
+                    if (cover - adopted).abs() > 1e-6 {
+                        let pos = position
+                            .attributes
+                            .get("pos")
+                            .map(String::as_str)
+                            .unwrap_or(&position.element);
+                        notices.push(format!("断面 {} / {pos} / {side}: cover/centerの幾何的不整合。指定depth_cover_{side}={cover} mm、center_{side}={center} mm。center優先で採用あき={adopted} mm（主筋径{main} mm、外周補強筋径{shear} mm）", input.section.0));
+                    }
+                }
+            }
+        }
+        notices
+    }
+
     pub fn stb_rebar_analysis_diagnostics(&self) -> Vec<String> {
         let used: Vec<_> = self
             .elements

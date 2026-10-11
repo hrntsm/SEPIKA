@@ -798,3 +798,65 @@ fn apply_boolean_lexical_defaults_and_individual_precedence_remain_distinct() {
     )
     .is_err());
 }
+
+#[test]
+fn applied_cover_center_mismatch_is_preserved_and_reported_without_blocking() {
+    let source = fixture("supplemental/circle_same");
+    let common = source.replace("center_top_bottom=\"51\" center_side=\"51\"", "center_top_bottom=\"51\" center_side=\"51\" depth_cover_top_bottom=\"40\" depth_cover_side=\"40\"");
+    let individual = |xml: &str, center: &str, cover: &str| {
+        xml.replace("<StbSecBarArrangementBeam_RC>", &format!("<StbSecBarArrangementBeam_RC center_top=\"{center}\" center_bottom=\"{center}\" center_side=\"{center}\" depth_cover_top=\"{cover}\" depth_cover_bottom=\"{cover}\" depth_cover_side=\"{cover}\">"))
+    };
+    let disabled = common.replace(
+        "StbBeam_RC_RebarPositionApply set_default=\"true\"",
+        "StbBeam_RC_RebarPositionApply set_default=\"false\"",
+    );
+    for (name, xml, notices, supported) in [
+        ("common", common.clone(), 3, true),
+        ("false_no_individual", disabled.clone(), 0, false),
+        ("false_individual", individual(&disabled,"51","40"), 3, true),
+        ("individual_override", individual(&common,"61","40"), 0, true),
+        ("cover_override", individual(&common.replace("=\"40\"", "=\"50\""),"51","40"), 3, true),
+        ("consistent", individual(&source,"51","30"), 0, true),
+        ("partial", source.replace("<StbSecBarArrangementBeam_RC>", "<StbSecBarArrangementBeam_RC depth_cover_top=\"40\">"), 1, true),
+        ("unknown_main", individual(&source,"51","40").replace("D_main=\"D22\"","D_main=\"UNKNOWN\""), 0, false),
+        ("unknown_shear", individual(&source,"51","40").replace("D_stirrup=\"D10\"","D_stirrup=\"D0\""), 0, false),
+        ("no_apply", individual(&source,"51","40").replace("<StbBeam_RC_RebarPositionApply set_default=\"true\" center_top_bottom=\"51\" center_side=\"51\"/>",""), 0, false),
+    ] {
+        let (model, report) = import_stbridge_with_report(&xml).unwrap();
+        let messages = model.stb_rebar_notices();
+        assert_eq!(messages.len(), notices, "{name}: {messages:?}");
+        assert_eq!(model.ensure_stb_rebar_supported(SectionId(1)).is_ok(),supported,"{name}");
+        if notices > 0 {
+            for message in &messages {
+                assert!(message.contains("断面 1 /") && message.contains("指定depth_cover_") && message.contains("=40 mm") && message.contains("center_") && message.contains("=51 mm") && message.contains("採用あき=30 mm"), "{name}: {message}");
+                assert!(report.warnings.contains(message));
+            }
+            assert!(model.stb_strength_diagnostics().is_empty(), "通知を解析拒否へ混ぜない");
+            let Some(SectionShape::RcBeamRect { rebar, .. })=&model.sections[1].shape else {panic!()};
+            assert_eq!(rebar.cover,30.0,"center優先の採用あき");
+        }
+        let path=std::env::temp_dir().join(format!("rebar507-notice-{}-{name}.ovika",std::process::id()));
+        crate::ovika::save_ovika(&path,&model,crate::ovika::OvikaExtras::default()).unwrap();
+        let saved=crate::ovika::load_ovika(&path).unwrap().model;
+        assert_eq!(model.stb_strengths,saved.stb_strengths);
+        let output=export_stbridge(&saved).unwrap();
+        let again=import_stbridge(&output).unwrap();
+        assert_eq!(model.stb_strengths,again.stb_strengths);
+        assert_eq!(messages,again.stb_rebar_notices());
+        if name=="common" {save_supplemental_output("cover_center_notice",&output);}
+        std::fs::remove_file(path).unwrap();
+    }
+    let src = fixture("supplemental/src_column_beam").replace(
+        "StbColumn_SRC_RebarPositionApply set_default=\"true\" center=\"51\"",
+        "StbColumn_SRC_RebarPositionApply set_default=\"true\" center=\"51\" depth_cover=\"40\"",
+    );
+    let model = import_stbridge(&src).unwrap();
+    assert_eq!(model.stb_rebar_notices().len(), 4);
+    model.ensure_stb_rebar_supported(SectionId(0)).unwrap();
+    for side in ["start_X", "end_X", "start_Y", "end_Y"] {
+        assert!(model
+            .stb_rebar_notices()
+            .iter()
+            .any(|n| n.contains(&format!("/ {side}:"))));
+    }
+}

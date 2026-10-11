@@ -473,6 +473,7 @@ impl StrengthInputs {
         }
         model.prepare_stb_strength_materials();
         warnings.extend(model.stb_strength_diagnostics());
+        warnings.extend(model.stb_rebar_notices());
         Ok(())
     }
 }
