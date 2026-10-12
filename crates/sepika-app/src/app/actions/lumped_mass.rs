@@ -56,6 +56,10 @@ impl App {
         if !self.begin_analysis_job() {
             return;
         }
+        if let Err(error) = self.require_lumped_prerequisites() {
+            self.report_error(error);
+            return;
+        }
         let model = self.core.model.clone();
         let cfg = self.core.analysis_cfg;
         let (res_x, res_y, po_x, po_y) = self.lumped_static_and_pushover();
@@ -77,6 +81,44 @@ impl App {
         if let Some(job) = self.core.scoped.job.as_mut() {
             job.jump_on_success = Some((Tab::Results, ResultsView::LumpedMass));
         }
+    }
+
+    fn require_lumped_prerequisites(&self) -> Result<(), String> {
+        use sepika_solver::dynamic::lumped_mass::StickDim;
+        let cfg = self.core.analysis_cfg;
+        let dirs: &[SeismicDir] = if cfg.lumped_dim == StickDim::Spatial {
+            &[SeismicDir::X, SeismicDir::Y]
+        } else {
+            std::slice::from_ref(&cfg.lumped_dir)
+        };
+        for &dir in dirs {
+            if cfg.lumped_dim == StickDim::Spatial || !cfg.lumped_nonlinear {
+                if self
+                    .core
+                    .scoped
+                    .results
+                    .as_ref()
+                    .and_then(|r| r.seismic(dir))
+                    .is_none()
+                {
+                    return Err(format!("地震静的 {dir:?} の結果がありません。地震静的 {dir:?} を再実行してください。"));
+                }
+                self.require_result_input(ResultInputKey::Static(StaticCaseKey::Seismic(dir)))?;
+            }
+            if cfg.lumped_nonlinear {
+                let result = self
+                    .core
+                    .scoped
+                    .results
+                    .as_ref()
+                    .and_then(|r| r.pushover_for_dir(dir));
+                if result.is_none() {
+                    return Err(format!("増分解析 {dir:?} の結果がありません。増分解析 {dir:?} を再実行してください。"));
+                }
+                self.require_result_input(ResultInputKey::Pushover(dir))?;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn apply_lumped_mass_result(&mut self, res: Result<LumpedMassResult, String>) {
@@ -173,5 +215,444 @@ impl App {
             self.core.scoped.lumped_wave_library_selection = name;
             self.core.scoped.lumped_wave_library_selected_sha256 = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sepika_core::{dof::Dof6Mask, ids::NodeId, model::FrameSectionUse};
+    use sepika_solver::dynamic::lumped_mass::{LumpedStiffnessSource, StickDim};
+
+    fn start_eigen(app: &mut App) {
+        #[cfg(feature = "gui")]
+        app.request_analysis(PendingAnalysis::LumpedMassEigen);
+        #[cfg(not(feature = "gui"))]
+        app.start_lumped_mass_eigen_job();
+    }
+
+    fn start_static(app: &mut App, dir: SeismicDir) {
+        #[cfg(feature = "gui")]
+        app.request_analysis(PendingAnalysis::StaticTarget(StaticTarget::Case(
+            app.seismic_case_id(dir).unwrap(),
+        )));
+        #[cfg(not(feature = "gui"))]
+        app.start_seismic_job(dir);
+    }
+
+    fn cantilever_app() -> App {
+        let mut model = crate::sample::portal_frame();
+        model.nodes.truncate(2);
+        model.nodes[1].coord = [0.0, 0.0, 3000.0];
+        model.nodes[1].restraint = Dof6Mask::FREE;
+        model.elements.truncate(1);
+        model.elements[0].nodes = [NodeId(0), NodeId(1)].into_iter().collect();
+        model.sections = vec![sepika_section::shape::SectionShape::SteelFlatBar {
+            width: 300.0,
+            thick: 300.0,
+        }
+        .to_section(sepika_core::ids::SectionId(0), "片持柱".into())];
+        model.sections[0].frame_use = Some(FrameSectionUse::Column);
+        model.sections[0].material = Some(model.materials[0].id);
+        model.materials[0].name = "独立検証用鋼材".into();
+        model.materials[0].young = 200_000.0;
+        model.materials[0].poisson = 0.3;
+        model.materials[0].shear = None;
+        model.load_cases.clear();
+        let mut app = App::default();
+        app.load_model(model);
+        app.core.analysis_cfg.threads = 1;
+        app.core.analysis_cfg.ai_mode = AiMode::Approx;
+        app.core.analysis_cfg.lumped_dim = StickDim::Planar;
+        app.core.analysis_cfg.lumped_stiffness = LumpedStiffnessSource::StoryQd;
+        app.core.analysis_cfg.lumped_dir = SeismicDir::X;
+        app.core.analysis_cfg.lumped_nonlinear = false;
+        app.generate_stories_action();
+        app.core.model.stories[1].weight_override = Some(100_000.0);
+        app.generate_stories_action();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app
+    }
+
+    #[test]
+    fn lumped_story_qd_gui_rejects_static_before_young_modulus_edit() {
+        let mut app = cantilever_app();
+        start_static(&mut app, SeismicDir::X);
+        crate::app::tests::wait_for_job(&mut app);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let mass_before = app.core.model.layers()[0]
+            .dynamic_mass
+            .unwrap()
+            .mass_equiv_weight_n
+            / sepika_core::units::GRAVITY_MM_S2;
+        let sec = &app.core.model.sections[0];
+        assert_eq!(sec.iy, 675_000_000.0);
+        assert_eq!(sec.iz, 675_000_000.0);
+        assert_eq!(sec.as_y, 75_000.0);
+        assert_eq!(sec.as_z, 75_000.0);
+        assert!((mass_before - 1.05975).abs() < 1e-12);
+        assert_eq!(app.core.model.elements[0].rigid_zone.length_i, 0.0);
+        assert_eq!(app.core.model.elements[0].rigid_zone.length_j, 0.0);
+        assert_eq!(app.core.model.elements[0].rigid_zone.panel_offset_i, 0.0);
+        assert_eq!(app.core.model.elements[0].rigid_zone.panel_offset_j, 0.0);
+        assert!((app.core.model.materials[0].shear_modulus() - 76_923.076_923_076_92).abs() < 1e-9);
+        let reference = sepika_solver::nonlinear::pushover::story_reference_node(
+            &app.core.model,
+            &app.core.model.stories[1],
+        )
+        .unwrap();
+        assert_eq!(
+            app.core.model.nodes[reference.index()].coord,
+            app.core.model.nodes[1].coord
+        );
+        assert!(app
+            .core
+            .model
+            .diaphragms_of(app.core.model.stories[1].id)
+            .any(|dia| dia.master == reference && dia.slaves.contains(&NodeId(1))));
+        println!("fixture: L=3000 mm E=200000 N/mm2 nu=0.3 Iy={} Iz={} AsY={} AsZ={} mass={} N*s2/mm rigid_zone={:?}", sec.iy, sec.iz, sec.as_y, sec.as_z, mass_before, app.core.model.elements[0].rigid_zone);
+        start_eigen(&mut app);
+        crate::app::tests::wait_for_job(&mut app);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let initial = app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .lumped
+            .as_ref()
+            .unwrap();
+        assert!((initial.model.stories[0].skeleton.k1 - 14_883.905_536_812_86).abs() < 1e-7);
+        assert!((initial.modal.period[0] - 0.053_017_974_078_015_15).abs() < 1e-12);
+        let period_before = initial.modal.period[0];
+        let results_before = bincode::serialize(app.core.scoped.results.as_ref().unwrap()).unwrap();
+        app.core.model.materials[0].young *= 0.5;
+        start_eigen(&mut app);
+        assert_eq!(
+            app.core.model.layers()[0]
+                .dynamic_mass
+                .unwrap()
+                .mass_equiv_weight_n
+                / sepika_core::units::GRAVITY_MM_S2,
+            mass_before
+        );
+        assert!(
+            app.core.scoped.job.is_none(),
+            "E変更前のStaticで質点系ジョブを開始した"
+        );
+        let error = app.core.scoped.last_error.as_deref().unwrap();
+        assert!(
+            error.contains("地震静的 X") && error.contains("再実行"),
+            "{error}"
+        );
+        assert_eq!(
+            bincode::serialize(app.core.scoped.results.as_ref().unwrap()).unwrap(),
+            results_before
+        );
+        start_static(&mut app, SeismicDir::X);
+        crate::app::tests::wait_for_job(&mut app);
+        start_eigen(&mut app);
+        crate::app::tests::wait_for_job(&mut app);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let recovered = app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .lumped
+            .as_ref()
+            .unwrap();
+        assert_eq!(recovered.model.stories[0].mass, mass_before);
+        assert!((recovered.model.stories[0].skeleton.k1 - 7_441.952_768_406_43).abs() < 1e-7);
+        assert!((recovered.modal.period[0] - 0.074_978_737_990_674_23).abs() < 1e-12);
+        assert!((recovered.modal.period[0] / period_before - 2.0_f64.sqrt()).abs() < 1e-12);
+    }
+
+    fn portal_app() -> App {
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        app.core.analysis_cfg.threads = 1;
+        app.core.analysis_cfg.ai_mode = AiMode::Approx;
+        app.core.analysis_cfg.push_steps = 10;
+        app.generate_stories_action();
+        for dir in [SeismicDir::X, SeismicDir::Y] {
+            app.run_seismic(dir);
+            app.core.analysis_cfg.push_dir = dir;
+            app.run_pushover();
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+        }
+        app
+    }
+
+    fn remove_slot(bundle: &mut ResultsBundle, key: &ResultInputKey) {
+        match key {
+            ResultInputKey::Static(key) => bundle.statics.retain(|(k, _)| k != key),
+            ResultInputKey::Pushover(SeismicDir::X) => bundle.pushover_x = None,
+            ResultInputKey::Pushover(SeismicDir::Y) => bundle.pushover_y = None,
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn lumped_actual_dependencies_accept_only_required_current_results() {
+        let mut app = portal_app();
+        let all_results = app.core.scoped.results.as_ref().unwrap().clone();
+        for source in [
+            LumpedStiffnessSource::ColumnKi,
+            LumpedStiffnessSource::StoryQd,
+        ] {
+            for dim in [StickDim::Planar, StickDim::Spatial] {
+                for nonlinear in [false, true] {
+                    for dir in [SeismicDir::X, SeismicDir::Y] {
+                        app.core.analysis_cfg.lumped_stiffness = source;
+                        app.core.analysis_cfg.lumped_dim = dim;
+                        app.core.analysis_cfg.lumped_nonlinear = nonlinear;
+                        app.core.analysis_cfg.lumped_dir = dir;
+                        let required: Vec<_> = [
+                            ResultInputKey::Static(StaticCaseKey::Seismic(SeismicDir::X)),
+                            ResultInputKey::Static(StaticCaseKey::Seismic(SeismicDir::Y)),
+                            ResultInputKey::Pushover(SeismicDir::X),
+                            ResultInputKey::Pushover(SeismicDir::Y),
+                        ]
+                        .into_iter()
+                        .filter(|key| match key {
+                            ResultInputKey::Static(StaticCaseKey::Seismic(d)) => {
+                                dim == StickDim::Spatial || (!nonlinear && *d == dir)
+                            }
+                            ResultInputKey::Pushover(d) => {
+                                nonlinear && (dim == StickDim::Spatial || *d == dir)
+                            }
+                            _ => unreachable!(),
+                        })
+                        .collect();
+                        let mut bundle = all_results.clone();
+                        for key in &all_results
+                            .input_records
+                            .iter()
+                            .map(|(k, _)| k.clone())
+                            .collect::<Vec<_>>()
+                        {
+                            if matches!(
+                                key,
+                                ResultInputKey::Static(_) | ResultInputKey::Pushover(_)
+                            ) && !required.contains(key)
+                            {
+                                remove_slot(&mut bundle, key);
+                                bundle.input_records.retain(|(k, _)| k != key);
+                            }
+                        }
+                        app.core.scoped.results = Some(bundle.clone());
+                        start_eigen(&mut app);
+                        assert!(
+                            app.core.scoped.job.is_some(),
+                            "{source:?}/{dim:?}/{nonlinear}/{dir:?}: {:?}",
+                            app.core.scoped.last_error
+                        );
+                        crate::app::tests::wait_for_job(&mut app);
+                        assert!(
+                            app.core.scoped.last_error.is_none(),
+                            "{source:?}/{dim:?}/{nonlinear}/{dir:?}: {:?}",
+                            app.core.scoped.last_error
+                        );
+                        assert!(!app
+                            .core
+                            .scoped
+                            .results
+                            .as_ref()
+                            .unwrap()
+                            .lumped
+                            .as_ref()
+                            .unwrap()
+                            .modal
+                            .period
+                            .is_empty());
+                        for key in &required {
+                            for fault in 0..3 {
+                                let mut bad = bundle.clone();
+                                match fault {
+                                    0 => remove_slot(&mut bad, key),
+                                    1 => bad.input_records.retain(|(k, _)| k != key),
+                                    _ => {
+                                        bad.input_records
+                                            .iter_mut()
+                                            .find(|(k, _)| k == key)
+                                            .unwrap()
+                                            .1 = vec![0]
+                                    }
+                                }
+                                let before = bincode::serialize(&bad).unwrap();
+                                app.core.scoped.results = Some(bad);
+                                start_eigen(&mut app);
+                                assert!(
+                                    app.core.scoped.job.is_none(),
+                                    "{source:?}/{dim:?}/{nonlinear}/{dir:?}/{key:?}/{fault}"
+                                );
+                                let error = app.core.scoped.last_error.as_deref().unwrap();
+                                let label = match key {
+                                    ResultInputKey::Static(StaticCaseKey::Seismic(d)) => {
+                                        format!("地震静的 {d:?}")
+                                    }
+                                    ResultInputKey::Pushover(d) => format!("増分解析 {d:?}"),
+                                    _ => unreachable!(),
+                                };
+                                assert!(
+                                    error.contains(&label) && error.contains("再実行"),
+                                    "{error}"
+                                );
+                                assert_eq!(
+                                    bincode::serialize(app.core.scoped.results.as_ref().unwrap())
+                                        .unwrap(),
+                                    before
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lumped_edits_require_reanalysis_but_display_and_lumped_settings_do_not() {
+        let mut app = cantilever_app();
+        app.run_seismic(SeismicDir::X);
+        let model = app.core.model.clone();
+        let cfg = app.core.analysis_cfg;
+        let bundle = app.core.scoped.results.as_ref().unwrap().clone();
+        for edit in 0..6 {
+            app.core.model = model.clone();
+            app.core.analysis_cfg = cfg;
+            app.core.scoped.results = Some(bundle.clone());
+            match edit {
+                0 => app.core.model.materials[0].young *= 0.9,
+                1 => app.core.model.nodes[1].coord[0] += 100.0,
+                2 => app.core.model.materials[0].density *= 0.9,
+                3 => app.core.model.stories[1].weight_override = Some(90_000.0),
+                4 => {
+                    app.core.model.load_cases[0]
+                        .nodal
+                        .push(sepika_core::model::NodalLoad::manual(
+                            NodeId(1),
+                            [100.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        ))
+                }
+                _ => app.core.analysis_cfg.c0 = 0.3,
+            }
+            start_eigen(&mut app);
+            assert!(app.core.scoped.job.is_none(), "edit={edit}");
+            assert!(app
+                .core
+                .scoped
+                .last_error
+                .as_deref()
+                .unwrap()
+                .contains("再実行"));
+            assert!(
+                app.core.scoped.results.as_ref().unwrap().input_records == bundle.input_records,
+                "edit={edit}: {:?}",
+                app.core.scoped.last_error
+            );
+        }
+        app.core.model = model;
+        app.core.analysis_cfg = cfg;
+        app.core.scoped.results = Some(bundle);
+        app.ui.view.active_tab = Tab::Results;
+        app.core.analysis_cfg.lumped_n_modes = 1;
+        app.core.analysis_cfg.lumped_th_dt = 0.02;
+        start_eigen(&mut app);
+        crate::app::tests::wait_for_job(&mut app);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+    }
+
+    #[test]
+    fn lumped_job_edit_failure_and_cancellation_keep_previous_results() {
+        let mut app = cantilever_app();
+        app.run_seismic(SeismicDir::X);
+        start_eigen(&mut app);
+        crate::app::tests::wait_for_job(&mut app);
+        let before = bincode::serialize(app.core.scoped.results.as_ref().unwrap()).unwrap();
+        start_eigen(&mut app);
+        app.core.model.materials[0].young *= 0.5;
+        crate::app::tests::wait_for_job(&mut app);
+        assert!(app
+            .core
+            .scoped
+            .last_error
+            .as_deref()
+            .unwrap()
+            .contains("旧入力の解析結果を破棄"));
+        assert_eq!(
+            bincode::serialize(app.core.scoped.results.as_ref().unwrap()).unwrap(),
+            before
+        );
+        app.core.model.materials[0].young *= 2.0;
+        app.start_lumped_mass_th_job(vec![]);
+        crate::app::tests::wait_for_job(&mut app);
+        assert!(app.core.scoped.last_error.is_some());
+        assert_eq!(
+            bincode::serialize(app.core.scoped.results.as_ref().unwrap()).unwrap(),
+            before
+        );
+        start_eigen(&mut app);
+        assert!(app.core.scoped.job.take().is_some());
+        assert!(!app.poll_job());
+        assert_eq!(
+            bincode::serialize(app.core.scoped.results.as_ref().unwrap()).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn lumped_nonlinear_rejects_changed_pushover_settings() {
+        let mut app = portal_app();
+        app.core.analysis_cfg.lumped_dim = StickDim::Planar;
+        app.core.analysis_cfg.lumped_nonlinear = true;
+        app.core.analysis_cfg.lumped_dir = SeismicDir::X;
+        let before = app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .input_records
+            .clone();
+        app.core.analysis_cfg.push_steps += 1;
+        start_eigen(&mut app);
+        assert!(app.core.scoped.job.is_none());
+        let error = app.core.scoped.last_error.as_deref().unwrap();
+        assert!(
+            error.contains("増分解析 X") && error.contains("再実行"),
+            "{error}"
+        );
+        assert_eq!(
+            app.core.scoped.results.as_ref().unwrap().input_records,
+            before
+        );
     }
 }

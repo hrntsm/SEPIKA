@@ -239,18 +239,32 @@ fn design602_partial_analysis_never_certifies_old_design() {
                 }
                 3 => {
                     app.start_lumped_mass_eigen_job();
-                    super::tests::wait_for_job(&mut app);
+                    if app.core.scoped.job.is_some() {
+                        super::tests::wait_for_job(&mut app);
+                    }
                 }
                 _ => {
                     app.start_lumped_mass_th_job(vec![0.0; 3]);
-                    super::tests::wait_for_job(&mut app);
+                    if app.core.scoped.job.is_some() {
+                        super::tests::wait_for_job(&mut app);
+                    }
                 }
             }
             assert!(
-                app.core.scoped.last_error.is_none(),
+                app.core.scoped.last_error.is_none() == !(run >= 3 && edited),
                 "run={run} edited={edited}: {:?}",
                 app.core.scoped.last_error
             );
+            if run >= 3 && edited {
+                assert!(app.core.scoped.job.is_none());
+                assert!(app
+                    .core
+                    .scoped
+                    .last_error
+                    .as_deref()
+                    .unwrap()
+                    .contains("再実行"));
+            }
             assert_eq!(app.require_design_input().is_ok(), !edited, "run={run}");
             assert_eq!(
                 app.core
