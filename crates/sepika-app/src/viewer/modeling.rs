@@ -67,14 +67,8 @@ pub(super) enum ModelClass {
     Wall,
     /// フレーム内雑壁（耐震壁不成立。剛性を周辺の柱・梁へ算入する）。
     WallMisc,
-    /// 荷重のみの壁版（解析要素にならず、周辺部材への剛性算入もされない）。
-    /// 自重だけが荷重へ流れる。
-    ///
-    /// 該当するのは、板厚を引けない壁版（断面未割当・板厚のない断面）、床領域に
-    /// 取り付く自立壁（周辺の柱梁に取り付いておらず剛性を渡す相手がいない）、
-    /// 取付き線が梁の全長を覆わない取り付く壁版、境界が 4 節点でない囲まれた壁版
-    /// である（`sepika_element::wall::misc_wall` の収集条件）。
-    WallPlateLoadOnly,
+    /// 剛性算入なしの壁版（壁エレメントにならず、周辺部材への剛性算入対象外）。
+    WallPlateNoStiffness,
     /// 仕口パネル（柱梁接合部パネル）。
     Panel,
     /// トラス／軸材（ブレースなど軸剛性のみ）。
@@ -94,7 +88,7 @@ impl ModelClass {
             ModelClass::SideColumnPin => theme::HILITE_PURPLE,
             ModelClass::Wall => Color32::from_rgb(0x25, 0x63, 0xEB),
             ModelClass::WallMisc => theme::SECONDARY_AMBER,
-            ModelClass::WallPlateLoadOnly => Color32::from_rgb(0x78, 0x71, 0x6C),
+            ModelClass::WallPlateNoStiffness => Color32::from_rgb(0x78, 0x71, 0x6C),
             ModelClass::Panel => Color32::from_rgb(0x6D, 0x28, 0xD9),
             ModelClass::Truss => Color32::from_rgb(0x0D, 0x94, 0x88),
             ModelClass::Other => theme::GRAY_300,
@@ -109,8 +103,8 @@ impl ModelClass {
             ModelClass::Fiber => "ファイバー(分布塑性)",
             ModelClass::SideColumnPin => "側柱(面内両端ピン)",
             ModelClass::Wall => "壁エレメント",
-            ModelClass::WallMisc => "雑壁(周辺部材へ剛性算入)",
-            ModelClass::WallPlateLoadOnly => "荷重のみ(剛性に算入しない)",
+            ModelClass::WallMisc => "フレーム内雑壁(周辺部材へ剛性算入)",
+            ModelClass::WallPlateNoStiffness => "剛性算入なしの壁版",
             ModelClass::Panel => "仕口パネル",
             ModelClass::Truss => "トラス/軸材",
             ModelClass::Other => "その他(バネ/免震/ダンパー)",
@@ -467,15 +461,8 @@ pub(super) fn draw_modeling(
     draw_legend(painter, analysis, &present, &sym);
 }
 
-/// 解析要素にならない壁版を、剛性算入の有無で描き分ける。
-///
-/// 壁版は入力なので、解析要素になるか否かにかかわらず図に出す。要素になる壁版は
-/// 上の要素ループが壁エレメントとして描くため、ここでは扱わない。
-///
-/// 分類は 2 つある。フレーム内雑壁として周辺の柱・梁へ剛性算入される壁版
-/// （[`sepika_element::wall::misc_wall::misc_stiffness_wall_plates`]）と、剛性へ一切
-/// 効かない壁版である。**算入されるかは剛性算入が実際に見ている収集結果から引く**
-/// ので、図と解析が食い違わない。
+/// 壁エレメントにならない壁版を、フレーム内雑壁と剛性算入なしの壁版に描き分ける。
+/// 周辺部材への剛性算入対象をフレーム内雑壁として描く。
 fn draw_wall_plates_modeling(
     painter: &egui::Painter,
     app: &App,
@@ -510,7 +497,7 @@ fn draw_wall_plates_modeling(
         let class = if misc.contains(&plate.id) {
             ModelClass::WallMisc
         } else {
-            ModelClass::WallPlateLoadOnly
+            ModelClass::WallPlateNoStiffness
         };
         if !present.contains(&class) {
             present.push(class);
@@ -1631,6 +1618,107 @@ mod tests {
             classify(&wall, &model, ModelingAnalysis::Static),
             ModelClass::WallMisc
         );
+    }
+
+    #[test]
+    fn 壁版idごとのモデル化分類と色は剛性算入の有無を保持する() {
+        use sepika_core::ids::WallPlateId;
+        use sepika_core::model::{LoadTransfer, RegionAnchor, WallPlate, WallPlateShape};
+
+        let (mut model, _) = wall_model(100.0);
+        model.wall_plates = [
+            (0, Some(SectionId(0)), [0.0, 1.0]),
+            (1, None, [0.0, 1.0]),
+            (2, Some(SectionId(0)), [0.0, 0.5]),
+        ]
+        .into_iter()
+        .map(|(id, section, span)| WallPlate {
+            id: WallPlateId(id),
+            shape: WallPlateShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(0), NodeId(1)],
+                    span,
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: Some([1000.0, 1000.0]),
+            },
+            section,
+            self_weight_shares: vec![],
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: vec![],
+            loads: vec![],
+            slit: Default::default(),
+            dl_support: None,
+        })
+        .collect();
+        assert_eq!(
+            sepika_element::wall::misc_wall::misc_stiffness_wall_plates(&model),
+            vec![WallPlateId(0)]
+        );
+
+        let mut app = App::default();
+        app.ui.view.show_floor_secondary = true;
+        let camera = super::super::CameraState::default();
+        let projector = Projector::new([0.0; 3], &camera, 0.1, [300.0, 300.0]);
+        let coords: Vec<_> = model.nodes.iter().map(|node| node.coord).collect();
+        for (id, expected_class, expected_color, expected_label) in [
+            (
+                0,
+                ModelClass::WallMisc,
+                egui::Color32::from_rgb(0xD9, 0x77, 0x06),
+                "フレーム内雑壁(周辺部材へ剛性算入)",
+            ),
+            (
+                1,
+                ModelClass::WallPlateNoStiffness,
+                egui::Color32::from_rgb(0x78, 0x71, 0x6C),
+                "剛性算入なしの壁版",
+            ),
+            (
+                2,
+                ModelClass::WallPlateNoStiffness,
+                egui::Color32::from_rgb(0x78, 0x71, 0x6C),
+                "剛性算入なしの壁版",
+            ),
+        ] {
+            let mut input = model.clone();
+            input
+                .wall_plates
+                .retain(|plate| plate.id == WallPlateId(id));
+            let ctx = egui::Context::default();
+            let mut present = Vec::new();
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let painter = ui.ctx().layer_painter(egui::LayerId::background());
+                draw_wall_plates_modeling(
+                    &painter,
+                    &app,
+                    &input,
+                    &coords,
+                    &projector,
+                    super::super::FrameFilter::default(),
+                    &mut present,
+                );
+            });
+            assert_eq!(present, vec![expected_class], "壁版{id}");
+            assert_eq!(present[0].label(), expected_label, "壁版{id}");
+            let outline_colors: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| {
+                    if let egui::Shape::LineSegment { stroke, .. } = &shape.shape {
+                        Some(stroke.color)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert!(!outline_colors.is_empty(), "壁版{id}の輪郭");
+            assert!(
+                outline_colors.iter().all(|color| *color == expected_color),
+                "壁版{id}の色"
+            );
+        }
     }
 
     /// 上下辺の大梁が一方でも欠けた壁は、板厚が足りていても雑壁として描く。
