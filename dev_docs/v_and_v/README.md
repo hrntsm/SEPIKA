@@ -104,7 +104,8 @@
 | [目的別確定層力_Issue442_2026-10.md](目的別確定層力_Issue442_2026-10.md) | 目的別run／step、符号付き層切断面、外力累積・支持ばね、壁側柱、GUI共通入口・MCP・保存・帳票 | ✅（Scope内Verification。一般配置・実験Validation・現行法全網羅は未完） |
 | [RC梁αyと追加端ばね_Issue523_2026-10.md](RC梁αyと追加端ばね_Issue523_2026-10.md) | 採用分岐、T方向別数値、総角と追加角、明示基準の実factory・GUI・解析入口 | 🔶（Scope内Verification。原典完全照合・実験Validation・T全解析接続は未完） |
 | [地震力標準式と適用診断_Issue486_2026-10.md](地震力標準式と適用診断_Issue486_2026-10.md) | 標準地震力・Qud/増分標準接続・共通GL/入力/適用診断・GUI/MCP入口と失敗理由 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |
-| [原階所属_Issue497_2026-10.md](原階所属_Issue497_2026-10.md) | 原階保存・編集・Fc供給・公開fixture意味的往復・採用2.0.2全XML schema・GUI/MCP入力世代 | ✅（原階/節点Scope。全構造モデルの標準出力は#507/#550に残る） |
+| [原階所属_Issue497_2026-10.md](原階所属_Issue497_2026-10.md) | 原階保存・編集・Fc供給・公開fixture意味的往復・採用2.0.2全XML schema・GUI/MCP入力世代 | ✅（原階/節点Scope。鋼ブレース文字子はIssue550記録、配筋はIssue507記録で別検証） |
+| [鋼ブレースXML文字子_Issue550_2026-10.md](鋼ブレースXML文字子_Issue550_2026-10.md) | 最小鋼ブレース公開export全文の公式2.0.2 XSD成功・文字子negative2件・属性escape・公開importの独立意味照合 | ✅（Scope内Verification。最終headレビュー/全CIはPRゲート） |
 | [参照骨格の部材角単位_Issue436_2026-10.md](参照骨格の部材角単位_Issue436_2026-10.md) | 正側参考骨格のQ/Ks・明示s/z・不正/未対応拒否・利用側比較 | 🔶（単位契約Verification済み、モデル一般精度・全履歴・実験未） |
 | [耐震壁_未検定_Issue495_2026-10.md](耐震壁_未検定_Issue495_2026-10.md) | 壁版候補・case・種別別未検定とスリット／自重対象外、不正入力、GUI・MCP・CSV・保存 | 🔶（状態契約のVerification。純鋼板国内式・実験Validationは未対応） |
 | [壁の確定ステップ応答_Issue443_2026-10.md](壁の確定ステップ応答_Issue443_2026-10.md) | 壁単体Qw/Qdir・基準点付き24成分F/M・実要素N/M・弦変形・確定履歴・GUI/MCP/CSV/保存・設計拒否 | ✅（Scope内Verification。材料γ・壁用イベント・系全体集計・実験Validationは未対応） |
@@ -240,7 +241,7 @@
 | 20 | ファイバ断面（M–φ 積分） | sepika-section / sepika-core / sepika-element | fiber.rs, mn_surface/fibers.rs, section_shape/rounded.rs | `test_section_*`、`rounded_tests`、`rounded_beam_fiber_*`。フィレット・角Rの領域、公開耐力、両質量モードの証拠は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md) | P4 | ✅（指定形状の細分化照合。通常配置の一般精度保証ではない） |
 | 21 | 参考骨格算定（M–φ→M–θ） | sepika-skeleton | tests.rs | `test_rc_skeleton_*`, `shear_*`, `explicit_pullout_*`, `positive_reference_composition_*`, `rc_builder_rejects_*` | P4 / #436 | 🔶（単位・拒否契約検証済み） |
 | 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 🔶 |
-| 23 | ST-Bridge 入出力 | sepika-io | stbridge.rs | [Issue625直接入口と正常対照](未割当線材のSTB出力拒否_Issue625_2026-10.md#独立期待値と直接入口)、 `test_roundtrip_*`、`source_story`（[原階所属](原階所属_Issue497_2026-10.md)） | P8 | 🔶 |
+| 23 | ST-Bridge 入出力 | sepika-io | stbridge/mod.rs、tests/stbridge_brace_content.rs | [Issue625直接入口と正常対照](未割当線材のSTB出力拒否_Issue625_2026-10.md#独立期待値と直接入口)、 `test_roundtrip_*`、`source_story`（[原階所属](原階所属_Issue497_2026-10.md)）、[Issue550全文XSD・意味照合](鋼ブレースXML文字子_Issue550_2026-10.md#独立fixtureと公開入口) | P8 | 🔶（鋼ブレース文字子の限定Verificationは✅） |
 | 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*`、`source_story_*`（[原階所属](原階所属_Issue497_2026-10.md)。MCP `model_edit` は原階所属・壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |
 | 24a | 割当領域の同一性・孤立版診断 | sepika-core / sepika-edit / sepika-job / sepika-app / sepika-mcp | model/assignment_region.rs、secondary.rs、node_member.rs、prepare.rs | [Issue506検証](割当領域同一性_Issue506_2026-10.md)の独立fixtureと実入口 | #506 | ✅（状態契約Verification） |
 | 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*` | P7 | 🔶 |
