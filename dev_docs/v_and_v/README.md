@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [リップ溝形の幾何成立条件_Issue544_2026-10.md](リップ溝形の幾何成立条件_Issue544_2026-10.md) | 5矩形境界・独立総性能/質量・生成/保存/編集/GUI/MCP・両質量方式の公開動的Result入口 | 🔶（Windows直接Verification成功、自動App/egui・実MCP・公開solver成功、修正後freshレビュー修正必須なし、手動GUI・実製品Validation・最終docs commit/CIは後続） |
 | [主架構線材の2節点入力_Issue562_2026-10.md](主架構線材の2節点入力_Issue562_2026-10.md) | 対象4kindの共通節点数・編集/I/O/数量/共有準備/solver/GUI/MCP入口と状態不変 | 🔶（Windows入口・自動App/egui・MCP Verification成功、手動GUI未実施、最終headレビュー・全CIは後続） |
 | [節点材料の直接有限入力_Issue546_2026-10.md](節点材料の直接有限入力_Issue546_2026-10.md) | 節点・材料直接追加／単一失焦／有限判定と履歴・強度元指定保持 | 🔶（直接egui Verification、review修正後edit202件、既存値修正Undo含む追加eguiは新head CI後続） |
 | [矩形床の直交分類_Issue561_2026-10.md](矩形床の直交分類_Issue561_2026-10.md) | 閉合/直交/面積、斜め床真面積・支持辺対応、App適用・OVIKA11/5 | 🔶（直接幾何Verification、実験Validation・freshレビュー・最終head全CIは後続） |
@@ -252,7 +253,7 @@
 | 32a | OVIKA保存成果の計算契約 | sepika-core / sepika-app | result_contract.rs・result_validity.rs・actions/design・result_contract_tests.rs | [Issue587の実OVIKA・実入口](保存成果の計算契約版_Issue587_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終全構成は後続） |
 | 32b | 静的検定の生成入力 | sepika-core / sepika-app | result_validity.rs・actions/design/check.rs・design_input_tests.rs | [Issue602の独立数値・実入口](静的検定の生成入力_Issue602_2026-10.md#実入口と観測) | 横断 | 🔶（直接Verification、freshレビュー・最終全CIは後続） |
 | 32 | OVIKA の named MessagePack 永続化 | sepika-io / sepika-app | ovika.rs, tests/full_model.rs | `saved_model_fields_are_named_and_order_independent` / `ovika_roundtrip_preserves_model_and_results` 他。default・破損・復元モデル検証とモデル単体のサイズ・codec 比較は [検証記録](OVIKA_named_MessagePack_2026-10.md) を参照 | 横断 | ✅ |
-| 33 | 単一リップ溝形材の未検定 | sepika-design-jp / sepika-app | steel/lip_channel.rs、tests/lip_channel.rs、viewer/check_ratio.rs | `steel::lip_channel::tests::*` / `lip_channel_*`。詳細は[検証記録](リップ溝形材_未検定_Issue509_2026-10.md) | 横断 | 🔶（未検定契約のみ） |
+| 33 | 単一リップ溝形材の未検定 | sepika-design-jp / sepika-app | steel/lip_channel.rs、tests/lip_channel.rs、viewer/check_ratio.rs | `steel::lip_channel::tests::*` / `lip_channel_*`。詳細は[未検定](リップ溝形材_未検定_Issue509_2026-10.md)と[幾何成立](リップ溝形の幾何成立条件_Issue544_2026-10.md)の記録 | 横断 | 🔶（未検定契約・幾何入力Verification。耐力Validation未） |
 | 34 | RC鉄筋比の単位・分母 | sepika-core / sepika-element / sepika-design-jp / sepika-solver | rc_capacity.rs、factory/{springs,input_check}.rs、rc/beam_nonlinear.rs、pushover/shear_yield.rs | [Issue #435の直接回帰表](RC鉄筋比契約_Issue435_2026-10.md#独立fixtureと直接回帰) | 横断 | 🔶（契約Verification、T形解析・原著照合・Validationは残る） |
 | 35 | 耐震壁の未検定状態 | sepika-design-jp / sepika-app / sepika-mcp | wall_check.rs、joint_wiring/tests.rs、tests/wall_check_status.rs、viewer/check_ratio.rs、job/design_check.rs | `wall_status_*` / `wall_tooltip_real_egui_*` / `wall_ng_real_egui_*` / `wall_output_assembly_*`。[Issue495検証](耐震壁_未検定_Issue495_2026-10.md) | 横断 | 🔶（状態契約のみ） |
 | 38 | 外部ID入力拒否 | sepika-mcp / sepika-io | edit、server、stbridge/import・export | [Issue603の直接入口](外部ID入力拒否_Issue603_2026-10.md#直接入口と観測) | 横断 | 🔶（入口Verification、最終headゲートは後続） |
