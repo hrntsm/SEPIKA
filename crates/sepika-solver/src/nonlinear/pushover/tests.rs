@@ -2175,7 +2175,7 @@ fn test_compute_shear_yield_thresholds_rc_rect_uses_rigid_zone_reduced_clear_spa
         ..Default::default()
     };
     let (model, rebar, b, d) = rc_column_model_with_rigid_zone(rigid_zone);
-    let thresholds = compute_shear_yield_thresholds(&model);
+    let thresholds = compute_shear_yield_thresholds(&model).unwrap();
     let th = &thresholds[0];
 
     let expected_clear_span = 2400.0;
@@ -2228,7 +2228,7 @@ fn test_compute_shear_yield_thresholds_rc_rect_falls_back_when_rigid_zone_exceed
         ..Default::default()
     };
     let (model, rebar, b, d) = rc_column_model_with_rigid_zone(rigid_zone);
-    let thresholds = compute_shear_yield_thresholds(&model);
+    let thresholds = compute_shear_yield_thresholds(&model).unwrap();
     let th = &thresholds[0];
 
     let qsu_y_handcalc = rc_qsu_simple(&RcCapacityInput {
@@ -2423,7 +2423,7 @@ impl ElementBehavior for FixedForceBehavior {
 #[test]
 fn test_track_shear_yield_axial_compression_raises_qy_end_to_end() {
     let (model, _rebar, b, d) = rc_column_model_with_rigid_zone(RigidZone::default());
-    let thresholds = compute_shear_yield_thresholds(&model);
+    let thresholds = compute_shear_yield_thresholds(&model).unwrap();
     let (input, gross_area) = match &thresholds[0].z {
         DirThreshold::RcArakawa {
             input, gross_area, ..
@@ -2626,7 +2626,7 @@ fn steel_grade_recognition_agrees_in_factory_hinge_and_shear_consumers() {
                 (hinge.my - expected_moment).abs() < 1e-7,
                 "{name:?} {factor:?}"
             );
-            let shear = &compute_shear_yield_thresholds(&model)[0];
+            let shear = &compute_shear_yield_thresholds(&model).unwrap()[0];
             assert!((shear.y.qy(0.0) - expected_fy * 2000.0 / 3.0_f64.sqrt()).abs() < 1e-7);
             assert!((shear.z.qy(0.0) - expected_fy * 1000.0 / 3.0_f64.sqrt()).abs() < 1e-7);
             for (basis, moment) in [
@@ -4130,4 +4130,45 @@ fn assert_wall_committed_history(result: &PushoverResult) {
         .is_err());
     assert!(result.hinges.iter().all(|h| h.elem != ElemId(0)));
     assert!(result.shear_yields.iter().all(|e| e.elem != ElemId(0)));
+}
+
+#[test]
+fn sm520_src_shear_thresholds_reject_each_out_of_range_plate_without_fy_or_infinite_threshold_rescue(
+) {
+    for name in ["SM520", "SM520B", "SM520C"] {
+        for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
+            for (tw, tf) in [(100.001, 80.0), (80.0, 100.001)] {
+                let (mut model, rebar, b, d) = rc_column_model_with_rigid_zone(Default::default());
+                let shape = SectionShape::SrcColumnRect {
+                    b,
+                    d,
+                    rebar,
+                    steel_height: 400.0,
+                    steel_width: 200.0,
+                    steel_web_thick: tw,
+                    steel_flange_thick: tf,
+                };
+                model.sections[0].shape = Some(shape);
+                model.sections[0].steel_material = Some(MaterialId(3));
+                let mut steel = model.materials[1].clone();
+                steel.id = MaterialId(3);
+                steel.name = name.into();
+                steel.category = MaterialCategory::Steel;
+                steel.fy = fy;
+                model.materials.push(steel);
+                let reason = compute_shear_yield_thresholds(&model).err().unwrap();
+                assert!(
+                    reason.contains("適用範囲") && reason.contains("せん断降伏耐力"),
+                    "{reason}"
+                );
+                assert!(sepika_element::factory::ensure_nonlinear_input(&model)
+                    .unwrap_err()
+                    .contains("適用範囲"));
+                if fy.is_some() {
+                    model.materials[3].name = "任意鋼材".into();
+                    assert!(compute_shear_yield_thresholds(&model).is_ok());
+                }
+            }
+        }
+    }
 }

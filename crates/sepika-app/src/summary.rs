@@ -890,10 +890,12 @@ pub fn build_preparation_csv(app: &App) -> String {
     }
 
     if !p.width_thickness.is_empty() {
-        out.push_str("\n[幅厚比・部材ランク]\n断面ID,断面,用途,材料,部材数,最大幅厚比,ランク\n");
+        out.push_str(
+            "\n[幅厚比・部材ランク]\n断面ID,断面,用途,材料,部材数,最大幅厚比,ランク,未算定理由\n",
+        );
         for r in &p.width_thickness {
             out.push_str(&format!(
-                "{},{},{},{},{},{},{}\n",
+                "{},{},{},{},{},{},{},{}\n",
                 r.section.0,
                 r.section_name,
                 steel_member_use_label(r.member_use),
@@ -901,6 +903,7 @@ pub fn build_preparation_csv(app: &App) -> String {
                 r.n_elements,
                 r.max_ratio.map(|v| format!("{:.2}", v)).unwrap_or_default(),
                 r.rank.map(member_rank_label).unwrap_or("判定不可"),
+                r.reason.as_deref().unwrap_or(""),
             ));
         }
     }

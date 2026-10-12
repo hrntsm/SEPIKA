@@ -481,6 +481,11 @@ pub fn validate_cft_steel_materials(model: &Model) -> Result<(), String> {
                 elem.id.0
             ));
         };
+        if let Some(reason) =
+            sepika_core::material_grade::steel_f_value_issue(&material.name, thickness)
+        {
+            return Err(format!("CFT要素 {}: {reason}", elem.id.0));
+        }
         if sepika_core::material_grade::cft_steel_f_value(material, thickness).is_none() {
             return Err(format!(
                 "CFT要素 {} の鋼管材料から F 値を解決できません",

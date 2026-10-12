@@ -291,8 +291,35 @@ pub(crate) fn effective_clear_span(raw_length: f64, rigid_zone: &RigidZone) -> f
     rigid_zone.flexible_length_from(raw_length)
 }
 
-pub(crate) fn compute_shear_yield_thresholds(model: &Model) -> Vec<ShearThreshold> {
-    model
+pub(crate) fn compute_shear_yield_thresholds(model: &Model) -> Result<Vec<ShearThreshold>, String> {
+    for elem in &model.elements {
+        if let (
+            Some(
+                SectionShape::SrcBeamRect {
+                    steel_web_thick,
+                    steel_flange_thick,
+                    ..
+                }
+                | SectionShape::SrcColumnRect {
+                    steel_web_thick,
+                    steel_flange_thick,
+                    ..
+                },
+            ),
+            Some(mat),
+        ) = (
+            model.element_section(elem).and_then(|s| s.shape.as_ref()),
+            model.element_steel_material(elem),
+        ) {
+            for t in [*steel_web_thick, *steel_flange_thick] {
+                if let Some(reason) = sepika_core::material_grade::steel_f_value_issue(&mat.name, t)
+                {
+                    return Err(format!("部材 ID {} のせん断降伏耐力: {reason}", elem.id.0));
+                }
+            }
+        }
+    }
+    Ok(model
         .elements
         .iter()
         .map(|elem| {
@@ -311,7 +338,7 @@ pub(crate) fn compute_shear_yield_thresholds(model: &Model) -> Vec<ShearThreshol
                 z: build_dir_threshold(as_y, mats, sec, ShearDir::Z, clear_span),
             }
         })
-        .collect()
+        .collect())
 }
 
 /// せん断降伏イベントの追跡（曲げとは独立の判定）。

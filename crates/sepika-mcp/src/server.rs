@@ -1547,6 +1547,64 @@ mod tests {
         }
     }
     include!("server_lifecycle_tests.rs");
+    #[tokio::test]
+    async fn sm520_design_job_keeps_out_of_range_summary_after_force_retrieval_and_recalculation() {
+        for name in ["SM520", "SM520B", "SM520C"] {
+            for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
+                let mut model = cantilever_with_load_case();
+                model.materials[0].name = name.into();
+                model.materials[0].fy = fy;
+                model.sections[0].thickness = Some(100.001);
+                let dir = test_store_dir(&format!("sm520-{name}-{fy:?}"));
+                let server = SepikaServer::new(make_state(model, &dir));
+                let static_job = server
+                    .analysis_run(Parameters(run_args(JobKind::LinearStatic)))
+                    .await
+                    .unwrap();
+                let status = wait_for_terminal(&server, &extract_job_id(&static_job)).await;
+                let _ = done_summary(&status);
+                for _ in 0..2 {
+                    let job = server
+                        .analysis_run(Parameters(run_args(JobKind::DesignCheck)))
+                        .await
+                        .unwrap();
+                    let status = wait_for_terminal(&server, &extract_job_id(&job)).await;
+                    let summary = done_summary(&status);
+                    assert!(summary["n_checks"].as_u64().unwrap() > 0);
+                    assert_eq!(summary["n_checks"], summary["n_skipped"]);
+                    assert_eq!(summary["all_checked_and_ok"], false);
+                    assert_eq!(summary["all_members_checked_and_ok"], false);
+                    assert!(summary["member_skipped"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .all(|row| row["reason"].as_str().unwrap().contains("適用範囲")));
+                    let forces = server
+                        .result_get(Parameters(ResultGetArgs {
+                            case: 1,
+                            kind: "MemberForce".into(),
+                            node_ids: None,
+                            member_ids: None,
+                            step_range: None,
+                        }))
+                        .await
+                        .unwrap();
+                    let rows: serde_json::Value =
+                        serde_json::from_str(&forces.content[0].raw.as_text().unwrap().text)
+                            .unwrap();
+                    assert!(!rows["rows"].as_array().unwrap().is_empty());
+                }
+                let stored_model = server.state.lock().await.model.clone();
+                let reopened = SepikaServer::new(make_state(stored_model, &dir));
+                let job = reopened
+                    .analysis_run(Parameters(run_args(JobKind::DesignCheck)))
+                    .await
+                    .unwrap();
+                let status = wait_for_terminal(&reopened, &extract_job_id(&job)).await;
+                assert_eq!(done_summary(&status)["all_members_checked_and_ok"], false);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -106,6 +106,11 @@ pub fn collect_cft_ultimate_checks(
             SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. } => thick,
             _ => 0.0,
         };
+        if let Some(reason) =
+            sepika_core::material_grade::steel_f_value_issue(&steel_mat.name, thick)
+        {
+            return Err(format!("CFT 部材 {}: {reason}", elem.id.0));
+        }
         let fy = sepika_core::material_grade::cft_steel_f_value(steel_mat, thick)
             .ok_or_else(|| format!("CFT 部材 {} の鋼管 F 値が未設定または不正です", elem.id.0))?;
         let lk = model.member_length(elem);

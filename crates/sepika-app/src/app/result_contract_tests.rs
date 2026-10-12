@@ -845,22 +845,175 @@ fn issue635_invalid_correct_hash_project_keeps_app_model_and_undo() {
 }
 
 #[test]
-fn lip_channel_geometry_analysis_contract13_expires_and14_keeps_results() {
-    assert_eq!(ANALYSIS_CONTRACT_VERSION, 14);
-    assert_eq!(DESIGN_CONTRACT_VERSION, 5);
+fn lip_channel_geometry_old_contracts_expire_and_current_keeps_results() {
+    assert_eq!(ANALYSIS_CONTRACT_VERSION, 15);
+    assert_eq!(DESIGN_CONTRACT_VERSION, 6);
     let app = calculated();
-    for (version, keep) in [(13, false), (14, true)] {
+    for (version, keep) in [(13, false), (14, false), (15, true)] {
         let (loaded, path) = restore(
             &app,
             Some(version),
-            Some(5),
+            Some(DESIGN_CONTRACT_VERSION),
             &format!("lip544-contract-{version}"),
         );
         let bundle = loaded.core.scoped.results.as_ref().unwrap();
         assert_eq!(bundle.has_analysis_results(), keep);
         if keep {
-            assert_eq!(bundle.analysis_contract_version, Some(14));
+            assert_eq!(bundle.analysis_contract_version, Some(15));
         }
         std::fs::remove_file(path).unwrap();
+    }
+}
+
+fn sm520_app(thickness: f64, fy: Option<f64>) -> App {
+    let mut model = crate::sample::portal_frame();
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    for mat in &mut model.materials {
+        mat.name = "SM520B".into();
+        mat.fy = fy;
+    }
+    for sec in &mut model.sections {
+        let shape = sepika_core::section_shape::SectionShape::SteelH {
+            height: 1000.0,
+            width: 400.0,
+            web_thick: 80.0,
+            flange_thick: thickness,
+            root_r: Some(0.0),
+        };
+        let mut replacement = shape.to_section(sec.id, sec.name.clone());
+        replacement.frame_use = sec.frame_use;
+        replacement.material = sec.material;
+        *sec = replacement;
+    }
+    let mut app = App::default();
+    app.load_model(model);
+    app.core.analysis_cfg.threads = 1;
+    app.run_preparation();
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app
+}
+#[test]
+fn sm520_gui_recheck_save_read_report_and_holding_keep_out_of_range_reasons() {
+    use sepika_design_jp::CheckOutcome;
+    for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
+        let mut app = sm520_app(100.001, fy);
+        for _ in 0..2 {
+            app.run_design_check();
+            let checks = &app.core.scoped.results.as_ref().unwrap().member_checks;
+            assert!(!checks.is_empty());
+            assert!(checks.iter().flat_map(|m| &m.positions).all(|p| matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))));
+            let report = crate::summary::build_report_csv(&app);
+            assert!(
+                report.contains("適用範囲") && report.contains("検定不能"),
+                "{report}"
+            );
+        }
+        for auto in [false, true] {
+            app.core.design_rank_auto = auto;
+            assert!(app
+                .compute_holding_capacity()
+                .err()
+                .unwrap()
+                .contains("適用範囲"));
+            assert!(app.core.scoped.ds_rank_fallback_stories.is_empty());
+        }
+        app.run_preparation();
+        assert!(crate::summary::build_preparation_csv(&app).contains("適用範囲"));
+        app.run_linear_static(LoadCaseId(0));
+        let path = std::env::temp_dir().join(format!(
+            "sepika-629-current-{}-{:?}.ovika",
+            std::process::id(),
+            fy
+        ));
+        app.save_project_to(path.clone());
+        let mut loaded = App::default();
+        loaded.open_project_from(path.clone());
+        assert!(crate::summary::build_report_csv(&loaded).contains("適用範囲"));
+        loaded.select_displayed_result(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0))));
+        assert!(crate::summary::build_report_csv(&loaded).contains("適用範囲"));
+        loaded.run_linear_static(LoadCaseId(0));
+        assert!(loaded.core.scoped.results.as_ref().unwrap().member_checks.iter().flat_map(|m| &m.positions).all(|p| matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))));
+        std::fs::remove_file(path).unwrap();
+    }
+}
+#[test]
+fn sm520_old_335_and_out_of_range_success_expire_without_save_or_display_reauthentication() {
+    use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
+    for t in [80.0, 100.001] {
+        let mut app = sm520_app(t, Some(335.0));
+        for position in app
+            .core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .member_checks
+            .iter_mut()
+            .flat_map(|m| &mut m.positions)
+        {
+            position.outcome = CheckOutcome::Checked(CheckResult {
+                basis: "旧SM520成功335".into(),
+                detail: String::new(),
+                components: vec![CheckComponent {
+                    kind: CheckKind::Axial,
+                    ratio: 0.5,
+                    detail: "F=335".into(),
+                }],
+            });
+        }
+        for (analysis, design, keeps_analysis) in [(14, 5, false), (15, 5, true)] {
+            let (mut loaded, path) = restore(
+                &app,
+                Some(analysis),
+                Some(design),
+                &format!("sm520-{t}-{analysis}-{design}"),
+            );
+            assert_eq!(
+                loaded
+                    .core
+                    .scoped
+                    .results
+                    .as_ref()
+                    .unwrap()
+                    .has_analysis_results(),
+                keeps_analysis
+            );
+            assert!(!loaded
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .has_design_results());
+            loaded.select_displayed_result(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0))));
+            loaded.save_project_to(path.clone());
+            let mut reopened = App::default();
+            reopened.open_project_from(path.clone());
+            assert!(!reopened
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .is_some_and(|r| r.has_design_results()));
+            assert!(!crate::summary::build_report_csv(&reopened).contains("旧SM520成功335"));
+            if keeps_analysis {
+                reopened.run_design_check();
+            } else {
+                reopened.run_linear_static(LoadCaseId(0));
+            }
+            let bundle = reopened.core.scoped.results.as_ref().unwrap();
+            assert_eq!(bundle.analysis_contract_version, Some(15));
+            assert_eq!(bundle.design_contract_version, Some(6));
+            assert!(bundle.has_design_results());
+            if t > 100.0 {
+                assert!(bundle.member_checks.iter().flat_map(|m| &m.positions).all(|p| matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))));
+            }
+            std::fs::remove_file(path).unwrap();
+        }
     }
 }

@@ -508,6 +508,23 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         ));
     }
 
+    for elem in &model.elements {
+        let Some(section) = model.element_section(elem) else {
+            continue;
+        };
+        let Some(SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. }) =
+            section.shape.as_ref()
+        else {
+            continue;
+        };
+        let Some(mat) = model.element_steel_material(elem) else {
+            continue;
+        };
+        if let Some(reason) = sepika_core::material_grade::steel_f_value_issue(&mat.name, *thick) {
+            issues.push(ModelIssue::members("CFT 断面の基準強度適用範囲外", "ID ", vec![elem.id], &reason,
+                "SM520 系列は有効板厚 100 mm 以下で指定してください。範囲外を明示 fy で補完できません。"));
+        }
+    }
     let invalid_cft_steel: Vec<ElemId> = model
         .elements
         .iter()
@@ -541,7 +558,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             "ID ",
             invalid_cft_steel,
             "鋼管材料が未設定、鋼種名・板厚から F 値を解決できない、または fy が不正です",
-            "Section.steel_material に鋼材材料を設定し、鋼種名と実板厚または正の有限値 fy を指定してください。",
+            "Section.steel_material に鋼材材料を設定し、鋼種名と実板厚または正の有限値 fy を指定してください。SM520 系列の適用範囲外は明示 fy でも補完できません。",
         ));
     }
 

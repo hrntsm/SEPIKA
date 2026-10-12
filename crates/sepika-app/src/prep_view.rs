@@ -812,7 +812,13 @@ fn width_thickness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                         ui.colored_label(crate::theme::BEST_YELLOW, member_rank_label(rank))
                     }
                     Some(rank) => ui.label(member_rank_label(rank)),
-                    None => ui.colored_label(crate::theme::GRAY_600, "判定不可"),
+                    None => ui
+                        .colored_label(crate::theme::GRAY_600, "判定不可")
+                        .on_hover_text(
+                            r.reason
+                                .as_deref()
+                                .unwrap_or("対象外または断面寸法が不正です"),
+                        ),
                 };
             });
         },

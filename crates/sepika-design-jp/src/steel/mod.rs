@@ -213,6 +213,9 @@ impl DesignCheck for SteelDesign {
             }
         }
         let t = plate_thickness(sec);
+        if let Some(reason) = sepika_core::material_grade::steel_f_value_issue(&mat.name, t) {
+            return CheckOutcome::Skipped { reason };
+        }
         let f = steel_f_value_prefix(&mat.name, t)
             .or(mat.fy)
             .unwrap_or(235.0);
@@ -412,5 +415,80 @@ pub(crate) mod test_support {
             flange_thick: tf,
         };
         shape.to_section(SectionId(0), format!("H-{}x{}x{}x{}", h, b, tw, tf))
+    }
+}
+
+#[cfg(test)]
+mod sm520_tests {
+    use super::*;
+    use crate::LoadTerm;
+    use test_support::{h_section, mat, rect_section};
+    fn forces() -> MemberForcesAt {
+        MemberForcesAt {
+            pos: 0.5,
+            n: 2_200_000.0,
+            qy: 0.0,
+            qz: 0.0,
+            my: 0.0,
+            mz: 0.0,
+        }
+    }
+    #[test]
+    fn sm520_out_of_range_is_skipped_for_every_steel_member_and_explicit_fy() {
+        let sec = h_section(1000.0, 400.0, 100.001, 80.0);
+        for name in ["SM520", "SM520B", "SM520C"] {
+            for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
+                let mut material = mat(name);
+                material.fy = fy;
+                for kind in [MemberKind::Brace, MemberKind::Girder, MemberKind::Column] {
+                    let ctx = DesignCtx {
+                        kind,
+                        ..Default::default()
+                    };
+                    assert!(
+                        matches!(SteelDesign.check(&forces(), &sec, &material, &ctx), CheckOutcome::Skipped { reason } if reason.contains("適用範囲") && reason.contains("100.001"))
+                    );
+                }
+                if fy.is_some() {
+                    material.name = "任意鋼材".into();
+                    assert!(matches!(
+                        SteelDesign.check(
+                            &forces(),
+                            &sec,
+                            &material,
+                            &DesignCtx {
+                                kind: MemberKind::Brace,
+                                ..Default::default()
+                            }
+                        ),
+                        CheckOutcome::Checked(_)
+                    ));
+                }
+            }
+        }
+    }
+    #[test]
+    fn sm520_325_fails_fixed_tension_demand_which_335_passes() {
+        let mut sec = rect_section(100.0, 100.0, "固定面積ブレース");
+        sec.thickness = Some(80.0);
+        let ctx = DesignCtx {
+            kind: MemberKind::Brace,
+            term: LoadTerm::Long,
+            ..Default::default()
+        };
+        let checked = SteelDesign
+            .check(&forces(), &sec, &mat("SM520B"), &ctx)
+            .unwrap_checked();
+        assert!((checked.ratio() - 1.0153846153846153).abs() < 1e-12);
+        assert!(!checked.ok());
+        let mut old = mat("任意鋼材");
+        old.fy = Some(335.0);
+        let old_checked = SteelDesign
+            .check(&forces(), &sec, &old, &ctx)
+            .unwrap_checked();
+        assert!((old_checked.ratio() - 0.9850746268656716).abs() < 1e-12);
+        assert!(old_checked.ok());
+        assert!((2_200_000.0 / checked.ratio() - 2_166_666.6666666665).abs() < 1e-8);
+        assert!((2_200_000.0 / old_checked.ratio() - 2_233_333.3333333335).abs() < 1e-8);
     }
 }

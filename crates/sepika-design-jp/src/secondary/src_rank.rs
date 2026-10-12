@@ -62,7 +62,7 @@ pub fn src_wall_type(shear_failure: bool) -> MemberRank {
 /// - `n_ult`: メカニズム時の軸方向力 [N]（**圧縮正**。引張は 0 として扱う）。
 ///
 /// SRC 矩形（[`SectionShape::SrcColumnRect`]）以外の
-/// 形状は `None`。
+/// 形状、または SM520 系列の板厚が適用範囲外の場合は `None`。
 pub fn src_column_rank_ratios(
     shape: &SectionShape,
     steel_grade: &str,
@@ -102,6 +102,9 @@ pub fn src_column_rank_ratios(
         return None;
     }
     if sh <= 0.0 || sb <= 0.0 || tw <= 0.0 || tf <= 0.0 || sh <= 2.0 * tf {
+        return None;
+    }
+    if sepika_core::material_grade::steel_f_value_issue(steel_grade, tw.max(tf)).is_some() {
         return None;
     }
     let s_f = crate::steel::steel_f_value_prefix(steel_grade, tf).unwrap_or(235.0);
@@ -286,5 +289,25 @@ mod tests {
             steel_flange_thick: 13.0,
         };
         assert!(src_column_rank_ratios(&shape, "SN400B", 24.0, 345.0, 2_000_000.0).is_none());
+    }
+    #[test]
+    fn sm520_src_rank_does_not_restore_235_or_partial_concrete_strength() {
+        for (tw, tf) in [(100.001, 80.0), (80.0, 100.001)] {
+            let mut shape = sample_src_shape();
+            if let SectionShape::SrcColumnRect {
+                steel_web_thick,
+                steel_flange_thick,
+                ..
+            } = &mut shape
+            {
+                *steel_web_thick = tw;
+                *steel_flange_thick = tf;
+            }
+            for name in ["SM520", "SM520B", "SM520C"] {
+                assert!(src_column_rank_ratios(&shape, name, 24.0, 345.0, 0.0).is_none());
+            }
+            assert!(src_column_rank_ratios(&shape, "SM490", 24.0, 345.0, 0.0).is_some());
+            assert!(src_column_rank_ratios(&shape, "任意鋼材", 24.0, 345.0, 0.0).is_some());
+        }
     }
 }
