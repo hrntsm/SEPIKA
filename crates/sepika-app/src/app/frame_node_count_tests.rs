@@ -319,7 +319,10 @@ fn frame_two_nodes_ovika_roundtrip_keeps_independent_quantity_and_support_axis()
     sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
     let saved = sepika_io::ovika::load_ovika(&path).unwrap().model;
     assert!(saved.eq_ignoring_dofmap(&model));
-    assert_eq!(saved.support_member_axis(SupportMemberId::Primary(ElemId(0))), axis);
+    assert_eq!(
+        saved.support_member_axis(SupportMemberId::Primary(ElemId(0))),
+        axis
+    );
     for source in [&model, &saved] {
         let quantity = try_compute_quantity_takeoff(source, &QuantityCfg::default()).unwrap();
         assert_eq!(quantity.items.len(), 1);
