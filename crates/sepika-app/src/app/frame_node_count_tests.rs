@@ -263,3 +263,68 @@ fn frame_node_counts_gui_member_button_creates_two_nodes_and_undo_redo_restores(
     );
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn frame_two_nodes_ovika_roundtrip_keeps_independent_quantity_and_support_axis() {
+    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
+    use sepika_design_jp::quantity::{try_compute_quantity_takeoff, QuantityCfg};
+
+    let mut model = crate::sample::portal_frame();
+    model.nodes.truncate(2);
+    let mut element = model.elements[2].clone();
+    element.id = ElemId(0);
+    element.nodes = vec![NodeId(0), NodeId(1)].into();
+    element.section = Some(sepika_core::ids::SectionId(0));
+    model.elements = vec![element];
+    model.load_cases.clear();
+    model.combinations.clear();
+    let mut section = SectionShape::RcBeamRect {
+        b: 300.0,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: 25.0,
+            top: vec![4],
+            bottom: vec![4],
+            cover: 40.0,
+            stirrup: BeamStirrup {
+                dia: 10.0,
+                pitch: 200.0,
+                legs: 2,
+            },
+        },
+    }
+    .to_section(sepika_core::ids::SectionId(0), "G562".into());
+    section.frame_use = Some(FrameSectionUse::Girder);
+    section.material = Some(sepika_core::ids::MaterialId(0));
+    section.rebar_material = Some(sepika_core::ids::MaterialId(1));
+    section.shear_rebar_material = Some(sepika_core::ids::MaterialId(1));
+    model.sections = vec![section];
+    let mut rebar = model.materials[0].clone();
+    rebar.id = sepika_core::ids::MaterialId(1);
+    rebar.name = "SD345".into();
+    rebar.category = MaterialCategory::Rebar;
+    rebar.fy = Some(345.0);
+    model.materials[0].name = "Fc24".into();
+    model.materials[0].category = MaterialCategory::Concrete;
+    model.materials[0].fc = Some(24.0);
+    model.materials[0].fy = None;
+    model.materials[0].young = 22_700.0;
+    model.materials[0].poisson = 0.2;
+    model.materials[0].density = 2.4e-9;
+    model.materials.push(rebar);
+    model.validate().unwrap();
+    let axis = model.support_member_axis(SupportMemberId::Primary(ElemId(0)));
+    assert_eq!(axis, Some(([0.0; 3], [6000.0, 0.0, 0.0])));
+    let path = test_tmp().join("frame562-normal-quantity.ovika");
+    sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+    let saved = sepika_io::ovika::load_ovika(&path).unwrap().model;
+    assert!(saved.eq_ignoring_dofmap(&model));
+    assert_eq!(saved.support_member_axis(SupportMemberId::Primary(ElemId(0))), axis);
+    for source in [&model, &saved] {
+        let quantity = try_compute_quantity_takeoff(source, &QuantityCfg::default()).unwrap();
+        assert_eq!(quantity.items.len(), 1);
+        assert!((quantity.items[0].concrete_m3 - 1.08).abs() < 1e-9);
+        assert!((quantity.items[0].formwork_m2 - 9.0).abs() < 1e-9);
+    }
+    std::fs::remove_file(path).unwrap();
+}
