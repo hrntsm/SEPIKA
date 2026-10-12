@@ -172,6 +172,9 @@ pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, S
         .validate_frame_node_counts()
         .map_err(|e| SolveError::InvalidInput(e.to_string()))?;
     model
+        .validate_lip_channels()
+        .map_err(|e| SolveError::InvalidInput(e.to_string()))?;
+    model
         .validate_secondary_section_usage()
         .map_err(|e| SolveError::InvalidInput(e.to_string()))?;
     let load_case = model

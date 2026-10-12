@@ -162,8 +162,9 @@ impl EditCommand for AddSectionShape {
         if (!non_frame && self.frame_use.is_none()) || (non_frame && self.frame_use.is_some()) {
             return Box::new(Noop);
         }
-        let Ok(mut candidate) = self.shape.try_to_section(self.new_id, self.name.clone()) else {
-            return Box::new(Noop);
+        let mut candidate = match self.shape.try_to_section(self.new_id, self.name.clone()) {
+            Ok(candidate) => candidate,
+            Err(reason) => return Box::new(crate::RejectedEdit(reason)),
         };
         if self.shape.validate_surface_radius().is_err() {
             return Box::new(Noop);
@@ -282,11 +283,12 @@ impl EditCommand for EditSectionShape {
             model.sections[idx] = updated;
             return Box::new(RestoreSection { old });
         }
-        let Ok(mut new_sec) = self
+        let mut new_sec = match self
             .new_shape
             .try_to_section(self.section, old.name.clone())
-        else {
-            return Box::new(Noop);
+        {
+            Ok(section) => section,
+            Err(reason) => return Box::new(crate::RejectedEdit(reason)),
         };
         new_sec.floor = old.floor.clone();
         new_sec.frame_use = self.frame_use;

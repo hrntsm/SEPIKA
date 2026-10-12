@@ -151,13 +151,14 @@ fn lip_channel_invalid_geometry_is_rejected_by_existing_mass_input() {
         (150.0, 75.0, 1.0, 2.3),
         (150.0, 75.0, 149.0, 2.3),
     ] {
-        let sec = SectionShape::SteelLipChannel {
+        let mut sec = model.sections[0].clone();
+        sec.name = "不正リップ".into();
+        sec.shape = Some(SectionShape::SteelLipChannel {
             height,
             width,
             lip,
             thick,
-        }
-        .to_section(SectionId(0), "不正リップ".into());
+        });
         assert!(SectionMassProperties::try_from_section(
             &sec,
             Some(&model.materials[0]),
@@ -272,4 +273,67 @@ fn mixed_egui_design_table_counts_only_checked_positions_as_checked() {
     );
     assert!(text.contains("OK"), "{text}");
     assert!(text.contains("検定不能"), "{text}");
+}
+
+#[test]
+fn lip_channel_geometry_shared_mass_and_beam_fiber_ms_reject_without_fallback() {
+    use sepika_core::model::{AnalysisKind, ElementKind, SectionMassProperties};
+    use sepika_element::frame::{
+        beam::BeamElement, fiber::FiberBeam, multi_spring::MultiSpringElement,
+    };
+    let mut model = lip_model();
+    let material = model.element_material(&model.elements[0]).unwrap();
+    let section = &model.sections[0];
+    let mass =
+        SectionMassProperties::try_from_section(section, Some(material), None, None, None).unwrap();
+    assert!((mass.mass_per_length - 5.972594e-6).abs() < 1e-15);
+    assert!((mass.total_mass(3000.0) - 0.017917782).abs() < 1e-12);
+    for lip in [75.0, 80.0, 100.0] {
+        model.sections[0].shape = Some(SectionShape::SteelLipChannel {
+            height: 150.0,
+            width: 75.0,
+            lip,
+            thick: 2.3,
+        });
+        model.sections[0].property_basis = Default::default();
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let mut element = model
+                .elements
+                .iter()
+                .find(|e| e.section == Some(SectionId(0)))
+                .unwrap()
+                .clone();
+            element.kind = kind;
+            assert!(model
+                .element_mass_properties(&element)
+                .unwrap_err()
+                .contains("H=150"));
+            assert!(BeamElement::try_new(&element, &model)
+                .err()
+                .unwrap()
+                .contains("H=150"));
+            assert!(FiberBeam::try_new(
+                &element,
+                &model,
+                sepika_element::factory::StrengthBasis::default(),
+                AnalysisKind::Incremental
+            )
+            .err()
+            .unwrap()
+            .contains("H=150"));
+            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                MultiSpringElement::new(
+                    &element,
+                    &model,
+                    sepika_element::factory::StrengthBasis::default(),
+                    AnalysisKind::Incremental,
+                )
+            }))
+            .is_err());
+        }
+    }
 }

@@ -243,6 +243,16 @@ fn wall_plate_node_refs(model: &Model, plate: &WallPlate) -> Vec<NodeId> {
 }
 
 impl Model {
+    /// モデル内のリップ溝形の寸法と性能を検証する。他形状は対象外。
+    pub fn validate_lip_channels(&self) -> Result<(), crate::error::CoreError> {
+        for section in &self.sections {
+            section
+                .validate_lip_channel()
+                .map_err(crate::error::CoreError::InvalidInput)?;
+        }
+        Ok(())
+    }
+
     /// 主架構線材の対応節点数を検査する。参照先と幾何の検査は含まない。
     pub fn validate_frame_node_counts(&self) -> Result<(), crate::error::CoreError> {
         for element in &self.elements {
@@ -255,6 +265,7 @@ impl Model {
         use crate::error::CoreError;
 
         self.validate_frame_node_counts()?;
+        self.validate_lip_channels()?;
         self.validate_attached_slabs()?;
         let mut strength_sections = std::collections::HashSet::new();
         let mut strength_targets = Vec::new();

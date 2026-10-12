@@ -4011,3 +4011,33 @@ fn issue635_existing_mcp_analysis_rejects_fixed_distance_and_preserves_model() {
         );
     }
 }
+
+#[test]
+fn lip_channel_geometry_mcp_query_analysis_and_quantity_report_reason() {
+    use sepika_core::section_shape::SectionShape;
+    let mut model = rc_column_model();
+    model.sections[0].shape = Some(SectionShape::SteelLipChannel {
+        height: 150.0,
+        width: 75.0,
+        lip: 100.0,
+        thick: 2.3,
+    });
+    model.sections[0].name = "LC544".into();
+    model.sections[0].property_basis = Default::default();
+    let before = format!("{model:?}");
+    let reason = model.validate_lip_channels().unwrap_err().to_string();
+    let items = query_model(&model, "sections", None);
+    assert!(items[0]["unavailable_reason"]
+        .as_str()
+        .unwrap()
+        .contains("H=150"));
+    let error = compute_job(&model, JobKind::LinearStatic, &JobParams::default())
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains(&reason), "{error}");
+    let quantity = quantity_takeoff_json(&model, None);
+    assert_eq!(quantity["status"], "unavailable");
+    assert!(quantity["totals"].is_null());
+    assert!(quantity["reason"].as_str().unwrap().contains(&reason));
+    assert_eq!(format!("{model:?}"), before);
+}

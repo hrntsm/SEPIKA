@@ -8,14 +8,67 @@ use super::geometry::{
 use super::types::SectionShape;
 
 impl SectionShape {
+    /// 単一・直角・一様厚リップ溝形の寸法 [mm] と総断面性能を検証する。
+    /// 他形状には適用しない。不成立寸法・非有限性能は理由付きエラー。
+    pub fn validate_lip_channel(&self) -> Result<(), String> {
+        let Self::SteelLipChannel {
+            height,
+            width,
+            lip,
+            thick,
+        } = *self
+        else {
+            return Ok(());
+        };
+        let error = |reason: &str| {
+            format!("リップ溝形 H={height}, B={width}, C={lip}, t={thick} mm: {reason}")
+        };
+        if [height, width, lip, thick]
+            .into_iter()
+            .any(|v| !v.is_finite() || v <= 0.0)
+        {
+            return Err(error("H/B/C/t は有限な正値が必要です"));
+        }
+        if lip <= thick {
+            return Err(error("C > t が必要です（リップ高さが不成立）"));
+        }
+        if lip >= height / 2.0 {
+            return Err(error(if lip == height / 2.0 {
+                "上下リップが接触します（C < H/2 が必要）"
+            } else {
+                "上下リップが重複します（C < H/2 が必要）"
+            }));
+        }
+        if thick >= width / 2.0 {
+            return Err(error(
+                "ウェブとリップが接触または重複します（t < B/2 が必要）",
+            ));
+        }
+        for (name, value) in [
+            ("A", self.rectangular_area()),
+            ("Iy", self.rectangular_iy()),
+            ("Iz", self.rectangular_iz()),
+            ("J", self.rectangular_j()),
+            ("Zp", self.rectangular_plastic_modulus_strong().unwrap()),
+            ("Asy", 2.0 * (width - thick) * thick),
+            ("Asz", super::geometry::h_web_shear_area(height, thick)),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(error(&format!("{name} の算定値が有限な正値ではありません")));
+            }
+        }
+        Ok(())
+    }
+
     /// 断面積 [mm²]。算定不能なら panic。入力値の検証には `try_calc_area` を用いる。
     pub fn calc_area(&self) -> f64 {
         self.try_calc_area()
             .unwrap_or_else(|error| panic!("{error}"))
     }
 
-    /// 断面積 [mm²]。必要なフィレット半径・角Rが未知・不正ならエラー。
+    /// 断面積 [mm²]。必要なフィレット半径・角Rが未知・不正、またはリップ溝形が不成立・算定不能ならエラー。
     pub fn try_calc_area(&self) -> Result<f64, String> {
+        self.validate_lip_channel()?;
         Ok(match self.rounded_steel_properties()? {
             Some(p) => p.area,
             None => self.rectangular_area(),
@@ -123,8 +176,9 @@ impl SectionShape {
             .unwrap_or_else(|error| panic!("{error}"))
     }
 
-    /// 強軸の塑性断面係数 [mm³]。必要なフィレット半径・角Rが未知・不正ならエラー。
+    /// 強軸の塑性断面係数 [mm³]。必要なフィレット半径・角Rが未知・不正、またはリップ溝形が不成立・算定不能ならエラー。
     pub fn try_plastic_modulus_strong(&self) -> Result<Option<f64>, String> {
+        self.validate_lip_channel()?;
         if matches!(self, Self::CftBox { .. } | Self::CftPipe { .. }) {
             return Ok(None);
         }
@@ -223,8 +277,9 @@ impl SectionShape {
         self.try_calc_iy().unwrap_or_else(|error| panic!("{error}"))
     }
 
-    /// y 軸まわりの断面二次モーメント [mm⁴]。必要なフィレット半径・角Rが未知・不正ならエラー。
+    /// y 軸まわりの断面二次モーメント [mm⁴]。必要なフィレット半径・角Rが未知・不正、またはリップ溝形が不成立・算定不能ならエラー。
     pub fn try_calc_iy(&self) -> Result<f64, String> {
+        self.validate_lip_channel()?;
         Ok(match self.rounded_steel_properties()? {
             Some(p) => p.iy,
             None => self.rectangular_iy(),
@@ -396,8 +451,9 @@ impl SectionShape {
         self.try_calc_iz().unwrap_or_else(|error| panic!("{error}"))
     }
 
-    /// z 軸まわりの断面二次モーメント [mm⁴]。必要なフィレット半径・角Rが未知・不正ならエラー。
+    /// z 軸まわりの断面二次モーメント [mm⁴]。必要なフィレット半径・角Rが未知・不正、またはリップ溝形が不成立・算定不能ならエラー。
     pub fn try_calc_iz(&self) -> Result<f64, String> {
+        self.validate_lip_channel()?;
         Ok(match self.rounded_steel_properties()? {
             Some(p) => p.iz,
             None => self.rectangular_iz(),
@@ -545,8 +601,14 @@ impl SectionShape {
         }
     }
 
-    /// Torsional constant J [mm⁴].
+    /// ねじり定数 J [mm⁴]。不成立のリップ溝形は panic。
     pub fn calc_j(&self) -> f64 {
+        self.validate_lip_channel()
+            .unwrap_or_else(|error| panic!("{error}"));
+        self.rectangular_j()
+    }
+
+    fn rectangular_j(&self) -> f64 {
         match *self {
             SectionShape::SteelH {
                 height,

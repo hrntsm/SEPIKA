@@ -32,6 +32,10 @@ impl App {
             self.report_error(format!("読込モデルの検証エラー: {error}"));
             return false;
         }
+        if let Err(error) = model.validate_lip_channels() {
+            self.report_error(format!("読込モデルの検証エラー: {error}"));
+            return false;
+        }
         if let Err(error) = model.validate_secondary_section_usage() {
             self.report_error(format!("読込モデルの検証エラー: {error}"));
             return false;

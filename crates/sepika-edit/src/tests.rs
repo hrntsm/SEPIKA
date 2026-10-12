@@ -9530,3 +9530,62 @@ fn add_member_rejects_frame_node_counts_without_changing_model_or_history() {
         assert!(stack.can_undo() && !stack.can_redo());
     }
 }
+
+#[test]
+fn lip_channel_geometry_edit_rejection_preserves_model_revision_and_redo() {
+    use sepika_core::section_shape::SectionShape;
+    let shape = |lip| SectionShape::SteelLipChannel {
+        height: 150.0,
+        width: 75.0,
+        lip,
+        thick: 2.3,
+    };
+    let mut model = Model::default();
+    let mut section = shape(20.0).to_section(SectionId(0), "LC544".into());
+    section.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+    model.sections.push(section);
+    let initial = model.clone();
+    let mut stack = UndoStack::new();
+    assert!(stack.run(
+        &mut model,
+        Box::new(EditSectionShape {
+            section: SectionId(0),
+            new_shape: shape(30.0),
+            frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
+        })
+    ));
+    let edited = model.clone();
+    stack.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&initial));
+    let revision = stack.revision();
+    for lip in [75.0, 75.001, 80.0, 100.0] {
+        for command in [
+            Box::new(EditSectionShape {
+                section: SectionId(0),
+                new_shape: shape(lip),
+                frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
+            }) as Box<dyn EditCommand>,
+            Box::new(AddSectionShape {
+                new_id: SectionId(1),
+                name: "bad544".into(),
+                floor: None,
+                shape: shape(lip),
+                frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
+            }),
+        ] {
+            assert!(!stack.run(&mut model, command));
+            let reason = stack.last_error().unwrap();
+            assert!(
+                reason.contains("H=150") && reason.contains("C="),
+                "{reason}"
+            );
+            assert!(model.eq_ignoring_dofmap(&initial));
+            assert_eq!(stack.revision(), revision);
+            assert!(stack.can_redo() && !stack.can_undo());
+        }
+    }
+    stack.redo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&edited));
+    stack.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&initial));
+}

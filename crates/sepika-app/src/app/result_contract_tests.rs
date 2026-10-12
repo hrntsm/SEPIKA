@@ -843,3 +843,24 @@ fn issue635_invalid_correct_hash_project_keeps_app_model_and_undo() {
         "{reason}"
     );
 }
+
+#[test]
+fn lip_channel_geometry_analysis_contract13_expires_and14_keeps_results() {
+    assert_eq!(ANALYSIS_CONTRACT_VERSION, 14);
+    assert_eq!(DESIGN_CONTRACT_VERSION, 5);
+    let app = calculated();
+    for (version, keep) in [(13, false), (14, true)] {
+        let (loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(5),
+            &format!("lip544-contract-{version}"),
+        );
+        let bundle = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(bundle.has_analysis_results(), keep);
+        if keep {
+            assert_eq!(bundle.analysis_contract_version, Some(14));
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+}

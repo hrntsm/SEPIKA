@@ -710,6 +710,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lip_channel_geometry_actual_mcp_tools_report_reason_without_results() {
+        use sepika_core::section_shape::SectionShape;
+        let mut model = cantilever_with_load_case();
+        model.sections[0].shape = Some(SectionShape::SteelLipChannel {
+            height: 150.0,
+            width: 75.0,
+            lip: 100.0,
+            thick: 2.3,
+        });
+        model.sections[0].name = "LC544".into();
+        let reason = model.validate_lip_channels().unwrap_err().to_string();
+        let before = format!("{model:?}");
+        let dir = test_store_dir("lip544");
+        let server = SepikaServer::new(make_state(model, &dir));
+        let result = server
+            .model_query(Parameters(QueryArgs {
+                kind: "sections".into(),
+                filter: None,
+            }))
+            .await
+            .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+        assert!(value["items"][0]["unavailable_reason"]
+            .as_str()
+            .unwrap()
+            .contains("H=150"));
+        let result = server
+            .quantity_takeoff(Parameters(QuantityTakeoffArgs { group_by: None }))
+            .await
+            .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+        assert_eq!(value["status"], "unavailable");
+        assert!(value["totals"].is_null());
+        assert_eq!(value["reason"], reason);
+        let result = server
+            .analysis_run(Parameters(run_args(JobKind::LinearStatic)))
+            .await
+            .unwrap();
+        match wait_for_terminal(&server, &extract_job_id(&result)).await {
+            JobStatus::Failed { error, kind } => {
+                assert!(error.contains(&reason), "{error}");
+                assert_eq!(kind, "invalid_input");
+            }
+            other => panic!("{other:?}"),
+        }
+        let state = server.state.lock().await;
+        assert_eq!(format!("{:?}", state.model), before);
+        assert!(state.results.manifest().entries.is_empty());
+    }
+    #[tokio::test]
     async fn test_analysis_run_fails_without_load_case() {
         let dir = test_store_dir("linear_static_no_case");
         let server = SepikaServer::new(make_state(cantilever_without_load_case(), &dir));

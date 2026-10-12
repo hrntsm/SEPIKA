@@ -77,6 +77,9 @@ pub fn prepare_model(
     model
         .validate_frame_node_counts()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
+    model
+        .validate_lip_channels()
+        .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     let rebar_errors = model.stb_rebar_analysis_diagnostics();
     if !rebar_errors.is_empty() {
         return Err(JobError::InvalidInput(rebar_errors.join("; ")));
@@ -263,6 +266,36 @@ mod tests {
     };
     use sepika_core::section_shape::SectionShape;
 
+    #[test]
+    fn lip_channel_geometry_stops_prepare_before_mutating_input() {
+        let mut model = Model::default();
+        model.sections.push(
+            SectionShape::SteelLipChannel {
+                height: 150.0,
+                width: 75.0,
+                lip: 20.0,
+                thick: 2.3,
+            }
+            .to_section(SectionId(0), "LC544".into()),
+        );
+        model.load_cases = sepika_core::model::default_load_cases();
+        model.generated_masters.push(NodeId(544));
+        model.sections[0].shape = Some(SectionShape::SteelLipChannel {
+            height: 150.0,
+            width: 75.0,
+            lip: 100.0,
+            thick: 2.3,
+        });
+        let before = format!("{model:?}");
+        let reason = model.validate_lip_channels().unwrap_err().to_string();
+        for initialize in [true, false] {
+            let error = prepare_model(&mut model, &AnalysisSettings::default(), None, initialize)
+                .err()
+                .unwrap();
+            assert!(error.to_string().contains(&reason));
+            assert_eq!(format!("{model:?}"), before);
+        }
+    }
     #[test]
     fn frame_node_counts_stop_prepare_before_mutating_input() {
         for kind in [

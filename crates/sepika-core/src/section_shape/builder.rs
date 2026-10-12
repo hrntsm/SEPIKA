@@ -14,15 +14,18 @@ impl SectionShape {
             .unwrap_or_else(|error| panic!("断面性能を算定できません: {error}"))
     }
 
-    /// 形状から断面を生成する。必要なフィレット半径・角Rが未知・不正ならエラー。
+    /// 形状から断面を生成する。必要なフィレット半径・角Rが未知・不正、またはリップ溝形が不成立・算定不能ならエラー。
     pub fn try_to_section(&self, id: SectionId, name: String) -> Result<Section, String> {
-        Ok(self.build_section(
-            id,
-            name,
-            self.try_calc_area()?,
-            self.try_calc_iy()?,
-            self.try_calc_iz()?,
-        ))
+        let result = (|| {
+            Ok(self.build_section(
+                id,
+                name.clone(),
+                self.try_calc_area()?,
+                self.try_calc_iy()?,
+                self.try_calc_iz()?,
+            ))
+        })();
+        result.map_err(|error: String| format!("断面 {}「{}」: {error}", id.0, name))
     }
 
     /// 未知のフィレット半径・角Rを保持して入力する。A・Iy・Iz は明示的な未算定区分となる。

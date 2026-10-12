@@ -102,7 +102,42 @@ impl SectionPropertyBasis {
 pub type SectionKey<'a> = (&'a str, Option<&'a str>);
 
 impl Section {
+    /// リップ溝形の寸法と性能を検証する。他形状・形状なし断面は対象外。
+    pub fn validate_lip_channel(&self) -> Result<(), String> {
+        let Some(
+            shape @ crate::section_shape::SectionShape::SteelLipChannel {
+                height,
+                width,
+                lip,
+                thick,
+            },
+        ) = &self.shape
+        else {
+            return Ok(());
+        };
+        let check = || {
+            shape.validate_lip_channel()?;
+            for (name, value) in [
+                ("A", self.area),
+                ("Iy", self.iy),
+                ("Iz", self.iz),
+                ("J", self.j),
+                ("せい", self.depth),
+                ("幅", self.width),
+                ("Asy", self.as_y),
+                ("Asz", self.as_z),
+            ] {
+                if !value.is_finite() || value < 0.0 {
+                    return Err(format!("リップ溝形 H={height}, B={width}, C={lip}, t={thick} mm: {name} は有限な非負値が必要です"));
+                }
+            }
+            Ok(())
+        };
+        check().map_err(|reason| format!("断面 {}「{}」: {reason}", self.id.0, self.name))
+    }
+
     pub fn ensure_properties_resolved(&self) -> Result<(), String> {
+        self.validate_lip_channel()?;
         let basis = self.property_basis;
         for (name, value) in [
             ("A", self.area),
@@ -148,6 +183,7 @@ impl Section {
     }
 
     pub fn resolved_area(&self) -> Result<f64, String> {
+        self.validate_lip_channel()?;
         if !self.area.is_finite() || self.area < 0.0 {
             return Err(format!(
                 "断面「{}」の A は有限な非負値が必要です",
