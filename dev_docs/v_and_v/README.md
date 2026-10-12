@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [弧長法削除と既存増分回帰_Issue433_2026-10.md](弧長法削除と既存増分回帰_Issue433_2026-10.md) | 弧長専用実装/API/試験/導線削除、既存荷重増分・変位制御の回帰 | 🔶（限定Verification、freshレビュー・最終headゲートは後続） |
 | [SM520告示基準強度と範囲外拒否_Issue629_2026-10.md](SM520告示基準強度と範囲外拒否_Issue629_2026-10.md) | 告示3区分・100 mm超非補完・現役実入口・OVIKA15/6 | 🔶（直接Verification、正式JIS全製品/Validation・freshレビュー・最終head CIは後続） |
 | [質点系先行成果鮮度_Issue612_2026-10.md](質点系先行成果鮮度_Issue612_2026-10.md) | GUI 実依存の存在・入力一致、限定片持柱の独立 K/T、状態保持 | 🔶（自動入口 Verification、手動 GUI・freshレビュー・最終head CI は後続） |
 | [リップ溝形の幾何成立条件_Issue544_2026-10.md](リップ溝形の幾何成立条件_Issue544_2026-10.md) | 5矩形境界・独立総性能/質量・生成/保存/編集/GUI/MCP・両質量方式の公開動的Result入口 | 🔶（Windows直接Verification成功、自動App/egui・実MCP・公開solver成功、修正後freshレビュー修正必須なし、手動GUI・実製品Validation・最終docs commit/CIは後続） |
@@ -231,7 +232,7 @@
 | 13c | SM520告示Fと範囲外拒否 | sepika-core / design-jp / element / solver / app / mcp | sm520境界・現役caller実入口・result_contract_tests | [Issue629の固定期待値と実入口](SM520告示基準強度と範囲外拒否_Issue629_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、Validation・最終head CIは後続） |
 | 13b | 標準鋼材名の厳密解決 | sepika-core / sepika-io | material_grade.rs・standard_material.rs・stbridge/strength_tests.rs | [Issue590の独立表・公開STB入口](標準鋼材名の厳密解決_Issue590_2026-10.md#独立期待値と実入口) | 横断 | 🔶（名称Verification、種類別F全照合・Validation未） |
 | 14 | 保有耐力 | sepika-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
-| 15 | プッシュオーバー | sepika-solver | pushover.rs | — | P5 | 🔶 |
+| 15 | プッシュオーバー | sepika-solver / sepika-job / sepika-app / sepika-mcp | nonlinear/pushover/driver.rs・tests.rs / compute.rs | [Issue433既存増分回帰](弧長法削除と既存増分回帰_Issue433_2026-10.md#既存回帰と観測) | P5 | 🔶（弧長削除Verification、4方向等は未検証） |
 | 15a | 壁単体の確定step応答 | sepika-solver / sepika-app / sepika-job / sepika-mcp | nonlinear/pushover/wall_response.rs・tests.rs, tests/wall_model.rs, ultimate_demand.rs, job/pushover.rs | [Issue443検証](壁の確定ステップ応答_Issue443_2026-10.md)の試験対応表 | — | ✅（Scope内Verification） |
 | 15b | 目的別確定層力 | sepika-solver / sepika-app / sepika-mcp | story_response.rs・result_validity.rs・job/pushover.rs | [Issue442検証](目的別確定層力_Issue442_2026-10.md) | — | ✅（Scope内Verification） |
 | 16 | 壁（TVLEM） | sepika-element | — | — | P5.5 | 対象外 |
