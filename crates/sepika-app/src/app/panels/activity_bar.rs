@@ -165,6 +165,8 @@ fn activity_icon_button(
             egui::Color32::WHITE,
         );
     }
+    #[cfg(test)]
+    tests::observe(ui, &response, hover_text);
     response.on_hover_text(hover_text)
 }
 
@@ -205,105 +207,61 @@ impl App {
 
     /// 右アクティビティバー（インスペクタ・準備計算・各解析パネル）。
     pub(crate) fn right_activity_bar(&mut self, ui: &mut egui::Ui) {
-        ui.vertical(|ui| {
-            let is_inspector_active =
-                self.ui.view.right_dock_open && self.ui.view.right_panel == RightPanel::Inspector;
-            if activity_icon_button(
-                ui,
-                ActivityGlyph::Inspector,
-                is_inspector_active,
-                ActivityAccentEdge::Right,
-                "インスペクタ",
-            )
-            .clicked()
-                && toggle_dock_icon(&mut self.ui.view.right_dock_open, is_inspector_active)
-            {
-                self.ui.view.right_panel = RightPanel::Inspector;
-            }
-            let is_prep_active =
-                self.ui.view.right_dock_open && self.ui.view.right_panel == RightPanel::Preparation;
-            if activity_icon_button(
-                ui,
-                ActivityGlyph::Preparation,
-                is_prep_active,
-                ActivityAccentEdge::Right,
-                "① 準備計算",
-            )
-            .clicked()
-                && toggle_dock_icon(&mut self.ui.view.right_dock_open, is_prep_active)
-            {
-                self.ui.view.right_panel = RightPanel::Preparation;
-            }
-            let is_static_active =
-                self.ui.view.right_dock_open && self.ui.view.right_panel == RightPanel::Static;
-            if activity_icon_button(
-                ui,
-                ActivityGlyph::Static,
-                is_static_active,
-                ActivityAccentEdge::Right,
-                "静的解析",
-            )
-            .clicked()
-                && toggle_dock_icon(&mut self.ui.view.right_dock_open, is_static_active)
-            {
-                self.ui.view.right_panel = RightPanel::Static;
-            }
-            let is_eigen_active =
-                self.ui.view.right_dock_open && self.ui.view.right_panel == RightPanel::Eigen;
-            if activity_icon_button(
-                ui,
-                ActivityGlyph::Eigen,
-                is_eigen_active,
-                ActivityAccentEdge::Right,
-                "固有値",
-            )
-            .clicked()
-                && toggle_dock_icon(&mut self.ui.view.right_dock_open, is_eigen_active)
-            {
-                self.ui.view.right_panel = RightPanel::Eigen;
-            }
-            let is_pushover_active =
-                self.ui.view.right_dock_open && self.ui.view.right_panel == RightPanel::Pushover;
-            if activity_icon_button(
-                ui,
-                ActivityGlyph::Pushover,
-                is_pushover_active,
-                ActivityAccentEdge::Right,
-                "増分解析",
-            )
-            .clicked()
-                && toggle_dock_icon(&mut self.ui.view.right_dock_open, is_pushover_active)
-            {
-                self.ui.view.right_panel = RightPanel::Pushover;
-            }
-            let is_th_active =
-                self.ui.view.right_dock_open && self.ui.view.right_panel == RightPanel::TimeHistory;
-            if activity_icon_button(
-                ui,
-                ActivityGlyph::TimeHistory,
-                is_th_active,
-                ActivityAccentEdge::Right,
-                "時刻歴応答",
-            )
-            .clicked()
-                && toggle_dock_icon(&mut self.ui.view.right_dock_open, is_th_active)
-            {
-                self.ui.view.right_panel = RightPanel::TimeHistory;
-            }
-            let is_lm_active =
-                self.ui.view.right_dock_open && self.ui.view.right_panel == RightPanel::LumpedMass;
-            if activity_icon_button(
-                ui,
-                ActivityGlyph::LumpedMass,
-                is_lm_active,
-                ActivityAccentEdge::Right,
-                "質点系",
-            )
-            .clicked()
-                && toggle_dock_icon(&mut self.ui.view.right_dock_open, is_lm_active)
-            {
-                self.ui.view.right_panel = RightPanel::LumpedMass;
-            }
-        });
+        let selection_id = ui.make_persistent_id("right_activity_selection");
+        let selected = self.ui.view.right_panel;
+        let selection_changed = ui
+            .ctx()
+            .data(|data| data.get_temp::<RightPanel>(selection_id) != Some(selected));
+        let parent_rect = ui.available_rect_before_wrap();
+        let _scroll = egui::ScrollArea::vertical()
+            .id_salt("right_activity_scroll")
+            .max_height(parent_rect.height())
+            .min_scrolled_height(0.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for (panel, glyph, label) in [
+                    (
+                        RightPanel::Inspector,
+                        ActivityGlyph::Inspector,
+                        "インスペクタ",
+                    ),
+                    (
+                        RightPanel::Preparation,
+                        ActivityGlyph::Preparation,
+                        "① 準備計算",
+                    ),
+                    (RightPanel::Static, ActivityGlyph::Static, "静的解析"),
+                    (RightPanel::Eigen, ActivityGlyph::Eigen, "固有値"),
+                    (RightPanel::Pushover, ActivityGlyph::Pushover, "増分解析"),
+                    (
+                        RightPanel::TimeHistory,
+                        ActivityGlyph::TimeHistory,
+                        "時刻歴応答",
+                    ),
+                    (RightPanel::LumpedMass, ActivityGlyph::LumpedMass, "質点系"),
+                ] {
+                    let active = self.ui.view.right_dock_open && self.ui.view.right_panel == panel;
+                    let response =
+                        activity_icon_button(ui, glyph, active, ActivityAccentEdge::Right, label);
+                    if (selection_changed && selected == panel) || response.gained_focus() {
+                        response.scroll_to_me(None);
+                    }
+                    if response.clicked()
+                        && toggle_dock_icon(&mut self.ui.view.right_dock_open, active)
+                    {
+                        if selected != panel {
+                            response.scroll_to_me(None);
+                        }
+                        self.ui.view.right_panel = panel;
+                    }
+                }
+            });
+        #[cfg(test)]
+        tests::observe_scroll(ui.ctx(), parent_rect, &_scroll);
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(selection_id, self.ui.view.right_panel));
     }
 }
+
+#[cfg(test)]
+mod tests;
