@@ -164,18 +164,8 @@ fn run_pushover(rigid: f64, seismic_weight: f64, steps: usize) -> PushoverResult
     let model = portal_frame(rigid, seismic_weight);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
-    pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        steps,
-        0.0,
-        false,
-        false,
-        0.0,
-    )
-    .expect("pushover should run end-to-end")
+    pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, steps, 0.0, false)
+        .expect("pushover should run end-to-end")
 }
 
 /// 剛域を考慮したプッシュオーバーでも崩壊機構が成立し、Ds の機構補正が

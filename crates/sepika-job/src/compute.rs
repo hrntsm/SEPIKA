@@ -170,8 +170,6 @@ pub fn compute_pushover(
         cfg.push_control,
         cfg.push_apply_long_term,
         false,
-        false,
-        0.0,
         cfg.ductility_method,
     )
     .map_err(|e| JobError::Convergence(e.to_string()))?;

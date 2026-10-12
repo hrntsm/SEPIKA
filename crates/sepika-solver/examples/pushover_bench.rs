@@ -142,8 +142,6 @@ fn run_case(control: PushoverControl) -> (f64, PushoverResult) {
         control,
         true,  // apply_long_term
         false, // use_kg
-        false, // use_arc_length
-        0.0,
         DuctilityMethod::default(),
     )
     .expect("pushover should converge");

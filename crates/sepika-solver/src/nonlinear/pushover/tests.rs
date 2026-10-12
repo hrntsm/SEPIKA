@@ -130,18 +130,8 @@ fn test_pushover_single_column_forms_hinge() {
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
 
-    let result = pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        20,
-        0.0,
-        false,
-        false,
-        0.0,
-    )
-    .expect("pushover should run end-to-end");
+    let result = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 20, 0.0, false)
+        .expect("pushover should run end-to-end");
 
     // パイプライン全体が収束ステップを生成していること。
     assert!(
@@ -240,18 +230,8 @@ fn test_pushover_load_control_endpoint_is_mesh_independent() {
         let model = single_column_model(235.0, 80_000.0);
         let dofmap = DofMap::build(&model);
         let reducer = Reducer::build(&model, &dofmap);
-        let result = pushover_analysis(
-            &model,
-            &dofmap,
-            &reducer,
-            SeismicDir::X,
-            steps,
-            0.0,
-            false,
-            false,
-            0.0,
-        )
-        .expect("pushover should run end-to-end");
+        let result = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, steps, 0.0, false)
+            .expect("pushover should run end-to-end");
         let last = result.capacity_curve.last().unwrap();
         (last.roof_disp, last.base_shear)
     };
@@ -322,35 +302,14 @@ fn test_pushover_stops_when_concrete_strength_unset() {
 
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
-    let err = pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        10,
-        0.0,
-        false,
-        false,
-        0.0,
-    )
-    .expect_err("Fc 未設定の RC 部材があれば解析を停止すべき");
+    let err = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 10, 0.0, false)
+        .expect_err("Fc 未設定の RC 部材があれば解析を停止すべき");
     assert!(err.contains("Fc"), "{}", err);
 
     // Fc を設定すれば解析は通る（チェックが恒常的に解析を妨げないこと）。
     model.materials[0].fc = Some(24.0);
     assert!(
-        pushover_analysis(
-            &model,
-            &dofmap,
-            &reducer,
-            SeismicDir::X,
-            10,
-            0.0,
-            false,
-            false,
-            0.0,
-        )
-        .is_ok(),
+        pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 10, 0.0, false,).is_ok(),
         "Fc を設定すれば解析できるべき"
     );
 }
@@ -361,17 +320,7 @@ fn test_pushover_requires_seismic_weight() {
     let model = single_column_model(235.0, 0.0);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
-    let result = pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        10,
-        0.0,
-        false,
-        false,
-        0.0,
-    );
+    let result = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 10, 0.0, false);
     assert!(
         result.is_err(),
         "should error when no seismic weight defined"
@@ -453,18 +402,8 @@ fn test_pushover_support_spring_affects_k_and_f_int() {
         let model = spring_column_model(kx, support_kx, weight);
         let dofmap = DofMap::build(&model);
         let reducer = Reducer::build(&model, &dofmap);
-        let result = pushover_analysis(
-            &model,
-            &dofmap,
-            &reducer,
-            SeismicDir::X,
-            4,
-            0.0,
-            false,
-            false,
-            0.0,
-        )
-        .expect("linear spring pushover should converge every step");
+        let result = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 4, 0.0, false)
+            .expect("linear spring pushover should converge every step");
         let last = result.capacity_curve.last().expect("at least one step");
         (last.roof_disp, last.base_shear)
     };
@@ -505,85 +444,6 @@ fn test_pushover_support_spring_affects_k_and_f_int() {
 }
 
 #[test]
-fn test_pushover_arc_length_respects_termination_target() {
-    // 弧長法フェーズも終了目標を判定すること。目標を十分小さく取れば、荷重制御か
-    // 変位制御の時点で目標へ達し、弧長法フェーズは 1 ステップも回さない。
-    let model = single_column_model(235.0, 80_000.0);
-    let dofmap = DofMap::build(&model);
-    let reducer = Reducer::build(&model, &dofmap);
-    let run = |use_arc_length: bool| {
-        pushover_analysis_recording(
-            &model,
-            &dofmap,
-            &reducer,
-            SeismicDir::X,
-            10,
-            PushoverTarget::from_max_disp(5.0), // 早く到達する小さな目標
-            PushoverControl::Phased,
-            false,
-            false,
-            use_arc_length,
-            1.0,
-            DuctilityMethod::default(),
-        )
-        .expect("pushover should run")
-    };
-    let without_arc = run(false);
-    let with_arc = run(true);
-
-    assert_eq!(
-        with_arc.termination,
-        PushoverTermination::TargetReached,
-        "小さな目標なので目標到達で終了するはず"
-    );
-    // 目標到達後に弧長法が追加ステップを積んでいないこと。積んでいれば
-    // 性能曲線の長さが弧長法の有無で変わる。
-    assert_eq!(
-        with_arc.capacity_curve.len(),
-        without_arc.capacity_curve.len(),
-        "目標到達済みなら弧長法フェーズは追加ステップを積まない"
-    );
-    assert_eq!(
-        with_arc.qu, without_arc.qu,
-        "追加ステップがないため Qu も一致する"
-    );
-}
-
-#[test]
-fn test_pushover_arc_length_runs_when_target_disabled() {
-    // 終了目標を無効にした場合は弧長法フェーズが走ること
-    // （目標なしの解析まで止めてしまっていないことの確認）。
-    let model = single_column_model(235.0, 80_000.0);
-    let dofmap = DofMap::build(&model);
-    let reducer = Reducer::build(&model, &dofmap);
-    let run = |use_arc_length: bool| {
-        pushover_analysis_recording(
-            &model,
-            &dofmap,
-            &reducer,
-            SeismicDir::X,
-            10,
-            PushoverTarget::from_max_disp(0.0), // 0 以下は判定なし（目標無効）
-            PushoverControl::Phased,
-            false,
-            false,
-            use_arc_length,
-            1.0,
-            DuctilityMethod::default(),
-        )
-        .expect("pushover should run")
-    };
-    let without_arc = run(false);
-    let with_arc = run(true);
-    assert!(
-        with_arc.capacity_curve.len() > without_arc.capacity_curve.len(),
-        "目標が無効なら弧長法フェーズがステップを追加する: {} vs {}",
-        with_arc.capacity_curve.len(),
-        without_arc.capacity_curve.len()
-    );
-}
-
-#[test]
 fn test_pushover_computes_member_ductility() {
     // 変位制御で十分に押し込み、ファイバ柱の部材塑性率 μ が算定されること
     // （降伏方式では降伏曲率が基点、降伏後 μ≥1 が報告される）。
@@ -600,8 +460,6 @@ fn test_pushover_computes_member_ductility() {
         PushoverControl::default(),
         true,
         false,
-        false,
-        0.0,
         DuctilityMethod::FirstYield,
     )
     .expect("pushover should run");
@@ -636,8 +494,6 @@ fn test_pushover_ductility_method_selection_changes_reference() {
             PushoverControl::default(),
             true,
             false,
-            false,
-            0.0,
             method,
         )
         .expect("pushover should run");
@@ -1240,18 +1096,8 @@ fn test_portal_frame_collapse_load() {
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
 
-    let result = pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        80,
-        0.0,
-        false,
-        false,
-        0.0,
-    )
-    .expect("pushover should run end-to-end");
+    let result = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 80, 0.0, false)
+        .expect("pushover should run end-to-end");
 
     // 柱両端の降伏ヒンジが実際に形成されていること（運動学的機構: r+1=4）。
     let yielded_hinges = result
@@ -2012,18 +1858,8 @@ fn run_pushover_has_shear_yield(as_y: f64, as_z: f64) -> bool {
     let model = single_column_model_with_shear_yz(235.0, 80_000.0, as_y, as_z);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
-    let result = pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        20,
-        0.0,
-        false,
-        false,
-        0.0,
-    )
-    .expect("pushover should run end-to-end");
+    let result = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 20, 0.0, false)
+        .expect("pushover should run end-to-end");
     !result.shear_yields.is_empty()
 }
 
@@ -2806,8 +2642,6 @@ fn test_pushover_displacement_control_reaches_target_and_exceeds_design_load() {
         n_steps,
         0.0,
         false,
-        false,
-        0.0,
     )
     .expect("load control run");
 
@@ -2819,8 +2653,6 @@ fn test_pushover_displacement_control_reaches_target_and_exceeds_design_load() {
         n_steps,
         max_disp,
         false,
-        false,
-        0.0,
     )
     .expect("displacement control run");
 
@@ -2919,8 +2751,6 @@ fn test_pushover_elastic_curve_monotonic_across_phase_switch() {
         // 目標変位とし、変位制御フェーズが必ず実行されるようにする。
         300.0,
         false,
-        false,
-        0.0,
     )
     .expect("pushover should run");
 
@@ -2985,8 +2815,6 @@ fn test_pushover_load_only_extends_beyond_design_level() {
         PushoverControl::LoadOnly,
         true,
         false,
-        false,
-        0.0,
         DuctilityMethod::default(),
     )
     .expect("pushover should run");
@@ -3057,8 +2885,6 @@ fn test_pushover_long_term_preload_sets_initial_axial_state() {
         PushoverControl::default(),
         true,
         false,
-        false,
-        0.0,
         DuctilityMethod::default(),
     )
     .expect("pushover should run");
@@ -3105,8 +2931,6 @@ fn test_pushover_long_term_preload_sets_initial_axial_state() {
         PushoverControl::default(),
         false,
         false,
-        false,
-        0.0,
         DuctilityMethod::default(),
     )
     .expect("pushover should run");
@@ -3132,8 +2956,6 @@ fn test_pushover_load_only_without_target_stops_at_lambda_1() {
         PushoverControl::LoadOnly,
         true,
         false,
-        false,
-        0.0,
         DuctilityMethod::default(),
     )
     .expect("pushover should run");
@@ -3256,18 +3078,8 @@ fn run_rigid_zone_pushover(rigid: f64) -> PushoverResult {
     let model = portal_frame_rigid_zone_model(235.0, 600_000.0, rigid);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
-    pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        100,
-        0.0,
-        false,
-        false,
-        0.0,
-    )
-    .expect("pushover should run end-to-end")
+    pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 100, 0.0, false)
+        .expect("pushover should run end-to-end")
 }
 
 /// 系レベル V&V: 剛域つき門形フレームの 3 保証を、剛域なし・ありの 2 解析（1 fixture）
@@ -3393,8 +3205,6 @@ fn test_pushover_drift_angle_target_forms_hinge_with_stiffness_reduction() {
         PushoverControl::default(),
         true,
         false,
-        false,
-        0.0,
         DuctilityMethod::default(),
     )
     .expect("pushover should run");
@@ -3464,8 +3274,6 @@ fn test_pushover_both_targets_stop_at_earlier_one() {
         PushoverControl::default(),
         true,
         false,
-        false,
-        0.0,
         DuctilityMethod::default(),
     )
     .expect("pushover should run");
@@ -3499,8 +3307,6 @@ fn test_pushover_drift_angle_target_runs_with_multi_spring() {
         PushoverControl::default(),
         true,
         false,
-        false,
-        0.0,
         DuctilityMethod::default(),
     )
     .expect("MS 柱の増分解析が完走すること");
@@ -3684,8 +3490,6 @@ fn test_pushover_drift_angle_target_runs_with_wall_element() {
         PushoverControl::default(),
         true,
         false,
-        false,
-        0.0,
         DuctilityMethod::default(),
     )
     .expect("耐震壁モデルの増分解析が完走すること");
@@ -3736,8 +3540,6 @@ fn test_pushover_fiber_hinge_softens_at_drift_target() {
         PushoverControl::default(),
         true,
         false,
-        false,
-        0.0,
         DuctilityMethod::default(),
     )
     .expect("fiber pushover should run");
@@ -3796,8 +3598,6 @@ fn test_pushover_wall_flexural_yield_softens() {
         PushoverControl::default(),
         true,
         false,
-        false,
-        0.0,
         DuctilityMethod::default(),
     )
     .expect("細長壁の増分解析が完走すること");
@@ -3841,18 +3641,8 @@ fn test_pushover_singular_tangent_reports_dof_diagnosis() {
     model.nodes[1].restraint = Dof6Mask::FREE;
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
-    let err = pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        10,
-        50.0,
-        false,
-        false,
-        0.0,
-    )
-    .expect_err("特異なモデルは診断付きで停止する");
+    let err = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 10, 50.0, false)
+        .expect_err("特異なモデルは診断付きで停止する");
     assert!(
         err.contains("剛性がありません") && err.contains("節点 1"),
         "自由度を名指しした診断になっていない: {err}"
@@ -3881,8 +3671,6 @@ fn test_pushover_unconverged_load_control_reports_reason() {
         PushoverControl::Phased,
         false,
         false,
-        false,
-        0.0,
         DuctilityMethod::default(),
     )
     .expect_err("1 ステップも確定しないなら空の結果を返さず停止する");
@@ -3902,36 +3690,16 @@ fn pushover_standard_load_rejects_invalid_weight_and_unverified_penthouse() {
         let model = spring_column_model(1000.0, None, weight);
         let dofmap = DofMap::build(&model);
         let reducer = Reducer::build(&model, &dofmap);
-        let error = pushover_analysis(
-            &model,
-            &dofmap,
-            &reducer,
-            SeismicDir::X,
-            4,
-            0.0,
-            false,
-            false,
-            0.0,
-        )
-        .unwrap_err();
+        let error =
+            pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 4, 0.0, false).unwrap_err();
         assert!(error.contains("重量"), "{error}");
     }
     let mut model = spring_column_model(1000.0, None, 100_000.0);
     model.stories[1].level_kind = sepika_core::model::StoryLevelKind::Penthouse { k: 1.0 };
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
-    let error = pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        4,
-        0.0,
-        false,
-        false,
-        0.0,
-    )
-    .unwrap_err();
+    let error =
+        pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 4, 0.0, false).unwrap_err();
     assert!(error.contains("未検証"), "{error}");
 }
 
@@ -3955,18 +3723,8 @@ fn pushover_standard_basement_load_preserves_hand_resultant() {
     model.elements.push(element);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
-    let result = pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        4,
-        0.0,
-        false,
-        false,
-        0.0,
-    )
-    .unwrap();
+    let result =
+        pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 4, 0.0, false).unwrap();
     let last = result.capacity_curve.last().unwrap();
     assert!(
         (last.base_shear - 30_000.0).abs() < 1e-6,
@@ -3999,18 +3757,8 @@ fn pushover_standard_basement_load_preserves_hand_resultant() {
     }
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
-    let result = pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        4,
-        0.0,
-        false,
-        false,
-        0.0,
-    )
-    .unwrap();
+    let result =
+        pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 4, 0.0, false).unwrap();
     // 主系統14kN＋指定Ci副系統9kN＋地下10kN。
     assert!((result.capacity_curve.last().unwrap().base_shear - 33_000.0).abs() < 1e-6);
 }
@@ -4051,49 +3799,21 @@ fn pushover_rejects_inconsistent_common_ground_from_basement_depths() {
     }
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
-    let result = pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        4,
-        0.0,
-        false,
-        false,
-        0.0,
-    )
-    .unwrap();
+    let result =
+        pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 4, 0.0, false).unwrap();
     assert!((result.capacity_curve.last().unwrap().base_shear - 57_750.0).abs() < 1e-6);
     model.stories[1].level_kind = sepika_core::model::StoryLevelKind::Basement { depth_mm: 9000.0 };
-    assert!(pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        4,
-        0.0,
-        false,
-        false,
-        0.0
-    )
-    .unwrap_err()
-    .contains("GL"));
+    assert!(
+        pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 4, 0.0, false,)
+            .unwrap_err()
+            .contains("GL")
+    );
     model.stories[1].level_kind = sepika_core::model::StoryLevelKind::Basement { depth_mm: 6000.0 };
     model.stories[3].elevation = 15_000.0;
     model.stories[4].elevation = 30_000.0;
     model.stories[3].structure = sepika_core::model::StoryStructure::S;
-    let result = pushover_analysis(
-        &model,
-        &dofmap,
-        &reducer,
-        SeismicDir::X,
-        4,
-        0.0,
-        false,
-        false,
-        0.0,
-    )
-    .unwrap();
+    let result =
+        pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 4, 0.0, false).unwrap();
     assert!((result.capacity_curve.last().unwrap().base_shear - 57_250.0).abs() < 1e-6);
 }
 

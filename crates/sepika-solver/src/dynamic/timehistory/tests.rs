@@ -2174,8 +2174,6 @@ fn rc_reference_actual_entries_use_material_strength_for_pushover_and_nominal_fo
             2,
             0.0,
             false,
-            false,
-            0.0,
         )
         .unwrap_err();
         assert!(reason.contains("My"), "{reason}");

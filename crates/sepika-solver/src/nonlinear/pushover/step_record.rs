@@ -47,7 +47,7 @@ pub(super) struct StepRecorder<'a> {
     ductility_method: DuctilityMethod,
     /// 部材ごとの塑性率トラッカー（最大応答曲率を保持する）。
     ductility_trackers: Vec<DuctilityTracker>,
-    /// 記録用の通し番号。長期載荷→荷重制御→変位制御→弧長法で連番とし、
+    /// 記録用の通し番号。長期載荷→荷重制御→変位制御で連番とし、
     /// **確定したステップにのみ**採番する。`capacity_curve`・`steps` の並びと
     /// ヒンジ・せん断降伏イベントの `step` を対応付ける単調キーになる。
     step_no: u32,

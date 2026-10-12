@@ -1,7 +1,7 @@
 //! プッシュオーバー解析の司令塔。
 //!
 //! - [`pushover_analysis`] — 既存 API（節点変位を記録しない薄いラッパー）
-//! - [`pushover_analysis_recording`] — 長期載荷・荷重制御・変位制御・弧長法の各
+//! - [`pushover_analysis_recording`] — 長期載荷・荷重制御・変位制御の各
 //!   フェーズを実行し、崩壊機構・部材別応答を集約する本体
 //!
 //! 確定ステップに残す記録（性能曲線・ヒンジ・せん断降伏・部材応答履歴・塑性率）は
@@ -23,7 +23,6 @@ use crate::common::elem_loop::apply_du_trial;
 use crate::common::newton::{l2_norm, STATIC_NEWTON};
 use crate::common::tangent::{add_support_spring_f_int, assemble_k_cached, compute_f_int};
 use crate::common::transaction::StateSnapshot;
-use crate::nonlinear::arc_length::ArcLengthSolver;
 use crate::statics::analysis::{
     build_seismic_load_case_from_model, building_height_mm, steel_height_ratio, SeismicCfg,
     SeismicDir,
@@ -83,8 +82,6 @@ pub fn pushover_analysis(
     max_steps: usize,
     max_disp: f64,
     use_kg: bool,
-    use_arc_length: bool,
-    arc_length_dl: f64,
 ) -> Result<PushoverResult, String> {
     pushover_analysis_recording(
         model,
@@ -96,8 +93,6 @@ pub fn pushover_analysis(
         PushoverControl::default(),
         true,
         use_kg,
-        use_arc_length,
-        arc_length_dl,
         DuctilityMethod::default(),
     )
 }
@@ -115,8 +110,6 @@ pub fn pushover_analysis_recording(
     control: PushoverControl,
     apply_long_term: bool,
     use_kg: bool,
-    use_arc_length: bool,
-    arc_length_dl: f64,
     ductility_method: DuctilityMethod,
 ) -> Result<PushoverResult, String> {
     model
@@ -502,95 +495,6 @@ pub fn pushover_analysis_recording(
                     break;
                 }
             }
-        }
-    }
-
-    if use_arc_length && matches!(control, PushoverControl::Phased) && !target_reached {
-        let arc_solver = ArcLengthSolver::new(arc_length_dl);
-        let mut prev_du: Vec<f64> = Vec::new();
-        let mut arc_lambda = if lambda > 0.0 { lambda } else { 1.0 };
-
-        for _step in 0..20 {
-            let snap = StateSnapshot::capture(&behaviors);
-            let k_free = assemble_k_cached(model, dofmap, &behaviors, use_kg, &mut st.k_free_cache);
-            let k_red = reducer.reduce_k_cached(&k_free, &mut st.k_red_cache);
-
-            if st.solver.factorize(&k_red).is_err() {
-                snap.restore(&mut behaviors);
-                phase_outcome = PushoverTermination::TangentSingular {
-                    phase: "弧長法".into(),
-                    load_factor: arc_lambda,
-                };
-                break;
-            }
-
-            let mut cum_du = vec![0.0; n_active];
-            let result = {
-                let model_ref: &Model = model;
-                let behaviors_ref = &mut behaviors;
-                let total_disp_ref: &Vec<f64> = &total_disp;
-                let st_ref = &mut st;
-                arc_solver.step(
-                    &q,
-                    &mut |r: &[f64], out: &mut Vec<f64>| -> Result<(), String> {
-                        reducer.reduce_f_into(r, &mut st_ref.r_red);
-                        st_ref
-                            .solver
-                            .solve_into(&st_ref.r_red, &mut st_ref.du_red)
-                            .map_err(|e| format!("{:?}", e))?;
-                        reducer.expand_u_into(&st_ref.du_red, out);
-                        Ok(())
-                    },
-                    &mut |delta_u: &[f64]| -> Result<Vec<f64>, String> {
-                        apply_du_trial(model_ref, dofmap, behaviors_ref, delta_u);
-                        for (acc, &d) in cum_du.iter_mut().zip(delta_u.iter()) {
-                            *acc += d;
-                        }
-                        let mut f_int = compute_f_int(model_ref, dofmap, behaviors_ref);
-                        let u_trial: Vec<f64> = total_disp_ref
-                            .iter()
-                            .zip(cum_du.iter())
-                            .map(|(&t, &c)| t + c)
-                            .collect();
-                        add_support_spring_f_int(model_ref, dofmap, &u_trial, &mut f_int);
-                        Ok(f_int
-                            .iter()
-                            .zip(f0.iter())
-                            .map(|(&fi, &f0i)| fi - f0i)
-                            .collect())
-                    },
-                    &prev_du,
-                    arc_lambda,
-                )
-            };
-
-            match result {
-                Ok(step_result) if step_result.converged => {
-                    for b in behaviors.iter_mut() {
-                        b.commit_state();
-                    }
-                    for (&du, td) in step_result.du.iter().zip(total_disp.iter_mut()) {
-                        *td += du;
-                    }
-                    arc_lambda += step_result.dlambda;
-                    prev_du = step_result.du;
-
-                    let rec = recorder.record(arc_lambda, model, dofmap, &behaviors, &total_disp);
-                    if target.reached(rec.roof, rec.drift_angle) {
-                        target_reached = true;
-                        break;
-                    }
-                }
-                _ => {
-                    snap.restore(&mut behaviors);
-                    phase_outcome = PushoverTermination::NonConvergence {
-                        phase: "弧長法".into(),
-                        load_factor: arc_lambda,
-                    };
-                    break;
-                }
-            }
-            phase_outcome = PushoverTermination::ScheduleCompleted;
         }
     }
 
