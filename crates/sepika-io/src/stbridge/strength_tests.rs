@@ -742,3 +742,20 @@ fn frame_two_nodes_stbridge_and_ovika_roundtrip_preserve_strength_sources_and_ax
     );
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn frame_stbridge_import_rejects_repeated_node_ids_with_shared_diagnostic() {
+    let xml = column(Some("Fc36"), Some("Fc30"), Some("Fc27"), Some("Fc24"))
+        .replace("id_node_top=\"2\"", "id_node_top=\"1\"");
+    for error in [
+        import_stbridge(&xml).unwrap_err(),
+        import_stbridge_with_report(&xml).unwrap_err(),
+    ] {
+        let StbError::Unmappable(reason) = error else {
+            panic!("{error}");
+        };
+        assert!(reason.contains("ElemId(0)") && reason.contains("kind=Beam"));
+        assert!(reason.contains("実節点数=2") && reason.contains("期待節点数=2"));
+        assert!(reason.contains("異なる2節点") && reason.contains("[NodeId(0), NodeId(0)]"));
+    }
+}

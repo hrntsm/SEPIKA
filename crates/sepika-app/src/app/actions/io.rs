@@ -26,8 +26,12 @@ impl App {
     ///
     /// 自動生成荷重ケース名（「床荷重(自動)」「自重(自動)」等）は
     /// 標準ケース名（DL・LL(架構用)・LL(地震用)）へ移行する。
-    /// 二次 CFT は差し替え前に拒否し、通知して `false` を返す。
+    /// 不正な主架構節点数と二次 CFT は差し替え前に拒否し、通知して `false` を返す。
     pub fn load_model(&mut self, mut model: sepika_core::model::Model) -> bool {
+        if let Err(error) = model.validate_frame_node_counts() {
+            self.report_error(format!("読込モデルの検証エラー: {error}"));
+            return false;
+        }
         if let Err(error) = model.validate_secondary_section_usage() {
             self.report_error(format!("読込モデルの検証エラー: {error}"));
             return false;

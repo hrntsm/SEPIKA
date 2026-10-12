@@ -1,6 +1,11 @@
 use super::*;
-use sepika_core::ids::*;
 use sepika_core::model::*;
+
+fn test_tmp() -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!("sepika-frame562-{}", std::process::id()));
+    std::fs::create_dir_all(&path).unwrap();
+    path
+}
 
 fn kinds() -> [ElementKind; 4] {
     [
