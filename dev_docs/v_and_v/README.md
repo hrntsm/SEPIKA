@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [質点系先行成果鮮度_Issue612_2026-10.md](質点系先行成果鮮度_Issue612_2026-10.md) | GUI 実依存の存在・入力一致、限定片持柱の独立 K/T、状態保持 | 🔶（自動入口 Verification、手動 GUI・freshレビュー・最終head CI は後続） |
 | [リップ溝形の幾何成立条件_Issue544_2026-10.md](リップ溝形の幾何成立条件_Issue544_2026-10.md) | 5矩形境界・独立総性能/質量・生成/保存/編集/GUI/MCP・両質量方式の公開動的Result入口 | 🔶（Windows直接Verification成功、自動App/egui・実MCP・公開solver成功、修正後freshレビュー修正必須なし、手動GUI・実製品Validation・最終docs commit/CIは後続） |
 | [主架構線材の2節点入力_Issue562_2026-10.md](主架構線材の2節点入力_Issue562_2026-10.md) | 対象4kindの共通節点数・編集/I/O/数量/共有準備/solver/GUI/MCP入口と状態不変 | 🔶（Windows入口・自動App/egui・MCP Verification成功、手動GUI未実施、最終headレビュー・全CIは後続） |
 | [節点材料の直接有限入力_Issue546_2026-10.md](節点材料の直接有限入力_Issue546_2026-10.md) | 節点・材料直接追加／単一失焦／有限判定と履歴・強度元指定保持 | 🔶（直接egui Verification、review修正後edit202件、既存値修正Undo含む追加eguiは新head CI後続） |
@@ -197,6 +198,7 @@
 
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
+| 1d | 質点系先行成果鮮度 | sepika-app | app/actions/lumped_mass.rs | [Issue612検証](質点系先行成果鮮度_Issue612_2026-10.md)：実成果存在・入力一致、限定片持柱独立 K/T、拒否/失敗/取消保持 | P1/P2 | 🔶（自動入口 Verification、手動 GUI 未） |
 | 1 | ティモシェンコ梁 | sepika-element | beam.rs | `test_phi_zero_converges_to_bernoulli`（Bernoulli 極限。軸 EA/L・ねじり GJ/L を含む 12×12 成分。テスト再編により旧 `test_beam_axial_stiffness`・`test_beam_torsion_stiffness` を統合）, `test_torsion_not_stiffened_by_rigid_zone`（剛域ありでもねじりは GJ/L のまま） | P1 | ✅ |
 | 1b | SRC解析用弾性係数比 | sepika-core / sepika-element / sepika-solver / sepika-app / sepika-design-jp | section_shape/composite.rs, frame/beam/stiffness_factors.rs, app/preparation.rs | `src_analysis_ratio_matches_independent_rectangular_h_section` / `src_loaded_and_edited_materials_never_use_provisional_analysis_properties` / `src_invalid_ec_and_poisson_are_analysis_errors` / `allowable_bending_ratio_boundaries_are_separate_from_analysis_ratio` | 横断 | 🔶（原本全式/実験未） |
 | 1a | 線材の整合質量 | sepika-core / sepika-element / sepika-solver | model/mass.rs, frame/prismatic.rs, frame/rigid_arm.rs, beam/behavior.rs, fiber/mod.rs, frame/truss.rs, dynamic/eigen/tests.rs | 材料領域入口・共通実装・`rigid_zone_mass`・`transform_mass`・Beam/Fiber/Truss 質量入口・座標変換。Truss の受入 P2 回帰は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md)。Fiber の非線形 factory 生成は確認済みだが、solver の固有値組立は線形 `BeamElement` 経路であり、Fiber 固有値は未検証。対応テストと条件は [整合質量_2026-09.md](整合質量_2026-09.md) の追跡表を正とする | P1/P2 | 🔶（Kbb 特異時の失敗経路・Fiber 固有値未検証を含む。Truss P2 回帰は検証済み） |
