@@ -4793,3 +4793,34 @@ fn assigned_members_625_preserve_independent_xml_fields_and_shape_none() {
         );
     }
 }
+
+#[test]
+fn frame_node_counts_export_rejects_instead_of_dropping_members() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+        ElementKind::Brace {
+            tension_only: false,
+        },
+    ] {
+        for nodes in [
+            vec![],
+            vec![NodeId(0)],
+            vec![NodeId(0), NodeId(2), NodeId(1)],
+            vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+            vec![NodeId(0), NodeId(0)],
+        ] {
+            let mut model = representative_model();
+            model.elements[0].kind = kind;
+            model.elements[0].nodes = nodes.into();
+            let expected = model.validate_frame_node_counts().unwrap_err().to_string();
+            assert!(
+                matches!(export_stbridge_with_report(&model), Err(StbError::Unmappable(reason)) if reason == expected)
+            );
+            assert!(
+                matches!(export_stbridge(&model), Err(StbError::Unmappable(reason)) if reason == expected)
+            );
+        }
+    }
+}

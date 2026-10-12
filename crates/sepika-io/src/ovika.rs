@@ -103,6 +103,9 @@ pub struct OvikaContents {
 /// モデルと派生データを .ovika へ保存する。
 pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result<(), IoError> {
     model
+        .validate_frame_node_counts()
+        .map_err(|e| IoError::Decode(e.to_string()))?;
+    model
         .validate_secondary_section_usage()
         .map_err(|e| IoError::Decode(e.to_string()))?;
     model
@@ -252,6 +255,9 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
 
     let model: Model =
         rmp_serde::from_slice(&model_data).map_err(|e| IoError::Decode(e.to_string()))?;
+    model
+        .validate_frame_node_counts()
+        .map_err(|e| IoError::Decode(e.to_string()))?;
     model
         .validate_attached_slabs()
         .map_err(|e| IoError::Decode(e.to_string()))?;
@@ -461,6 +467,77 @@ mod tests {
         let loaded = load_ovika(&path).unwrap().model;
         assert!(model.eq_ignoring_dofmap(&loaded));
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn frame_node_counts_reject_save_without_overwrite_and_correct_hash_load() {
+        for (kind_index, kind) in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+            ElementKind::Brace {
+                tension_only: false,
+            },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut model = make_3node_model();
+            model.elements.push(ElementData {
+                id: ElemId(0),
+                kind,
+                nodes: vec![NodeId(0), NodeId(1)].into(),
+                section: None,
+                local_axis: LocalAxis {
+                    ref_vector: [0.0, 0.0, 1.0],
+                },
+                end_cond: [EndCondition::Fixed; 2],
+                force_regime: ForceRegime::Auto,
+                rigid_zone: Default::default(),
+                plastic_zone: None,
+                spring: None,
+            });
+            let path = crate::test_util::test_tmp().join(format!("issue562-{kind_index}.ovika"));
+            save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+            let original = std::fs::read(&path).unwrap();
+            load_ovika(&path).unwrap();
+            for nodes in [
+                vec![],
+                vec![NodeId(0)],
+                vec![NodeId(0), NodeId(2), NodeId(1)],
+                vec![NodeId(0), NodeId(1), NodeId(2), NodeId(0)],
+                vec![NodeId(0), NodeId(0)],
+            ] {
+                model.elements[0].nodes = nodes.into();
+                let reason = model.validate_frame_node_counts().unwrap_err().to_string();
+                assert!(
+                    matches!(save_ovika(&path, &model, OvikaExtras::default()), Err(IoError::Decode(message)) if message == reason)
+                );
+                assert_eq!(std::fs::read(&path).unwrap(), original);
+                let bytes = rmp_serde::to_vec_named(&model).unwrap();
+                let settings = b"{}";
+                let manifest = Manifest {
+                    schema_version: CURRENT_SCHEMA_VERSION,
+                    units: "internal: N-mm-s".into(),
+                    created_by: "independent-562-fixture".into(),
+                    entries: vec![
+                        crate::manifest::EntryHash {
+                            name: "model.msgpack".into(),
+                            sha256: sha256_of(&bytes),
+                        },
+                        crate::manifest::EntryHash {
+                            name: "settings.json".into(),
+                            sha256: sha256_of(settings),
+                        },
+                    ],
+                };
+                let invalid_path = path.with_extension("invalid.ovika");
+                write_zip_with_manifest(&invalid_path, &manifest, &bytes, settings);
+                assert!(
+                    matches!(load_ovika(&invalid_path), Err(IoError::Decode(message)) if message == reason)
+                );
+            }
+        }
     }
 
     fn make_3node_model() -> Model {

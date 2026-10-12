@@ -651,6 +651,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn frame_node_counts_mcp_tools_reject_without_mutating_model_or_results() {
+        use sepika_core::ids::NodeId;
+        use sepika_core::model::ElementKind;
+        for (kind_index, kind) in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+            ElementKind::Brace {
+                tension_only: false,
+            },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for nodes in [
+                vec![],
+                vec![NodeId(0)],
+                vec![NodeId(0), NodeId(2), NodeId(1)],
+                vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+                vec![NodeId(0), NodeId(0)],
+            ] {
+                let mut model = cantilever_with_load_case();
+                model.elements[0].kind = kind;
+                model.elements[0].nodes = nodes.into();
+                let reason = model.validate_frame_node_counts().unwrap_err().to_string();
+                let before = format!("{model:?}");
+                let dir = test_store_dir(&format!(
+                    "frame562-{kind_index}-{}",
+                    model.elements[0].nodes.len()
+                ));
+                let server = SepikaServer::new(make_state(model, &dir));
+                let result = server
+                    .quantity_takeoff(Parameters(QuantityTakeoffArgs { group_by: None }))
+                    .await
+                    .unwrap();
+                let value: serde_json::Value =
+                    serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+                assert_eq!(value["status"], "unavailable");
+                assert!(value["totals"].is_null());
+                assert_eq!(value["reason"], reason);
+                let result = server
+                    .analysis_run(Parameters(run_args(JobKind::LinearStatic)))
+                    .await
+                    .unwrap();
+                match wait_for_terminal(&server, &extract_job_id(&result)).await {
+                    JobStatus::Failed { error, kind } => {
+                        assert!(error.contains(&reason), "{error}");
+                        assert_eq!(kind, "invalid_input");
+                    }
+                    other => panic!("{other:?}"),
+                }
+                let state = server.state.lock().await;
+                assert_eq!(format!("{:?}", state.model), before);
+                assert!(state.results.manifest().entries.is_empty());
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn test_analysis_run_fails_without_load_case() {
         let dir = test_store_dir("linear_static_no_case");
         let server = SepikaServer::new(make_state(cantilever_without_load_case(), &dir));

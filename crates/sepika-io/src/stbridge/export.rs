@@ -64,6 +64,9 @@ pub fn export_stbridge(model: &Model) -> Result<String, StbError> {
 ///
 /// 断面未割当の線材・表現不能な配筋はエラー、円形 RC 梁の `StbSecRaw` フォールバック等は警告として報告する。
 pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportReport), StbError> {
+    model
+        .validate_frame_node_counts()
+        .map_err(|e| StbError::Unmappable(e.to_string()))?;
     let mut output_model = model.clone();
     output_model
         .assign_stb_node_ids()

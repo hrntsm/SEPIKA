@@ -48,7 +48,7 @@ fn secondary_model(shape: SectionShape, kind: SecondaryMemberKind, assigned: boo
 }
 
 // 正規保存入口を迂回し、ハッシュ整合のある不正モデルを読込入口へ渡す必要がある。
-fn write_invalid_container(path: &std::path::Path, model: &Model) {
+pub(super) fn write_invalid_container(path: &std::path::Path, model: &Model) {
     use sha2::{Digest, Sha256};
     use std::io::Write;
     let model_bytes = rmp_serde::to_vec_named(model).unwrap();

@@ -465,6 +465,9 @@ impl EditCommand for AddMember {
         if let Err(reason) = model.validate_assignment_region_identity() {
             return Box::new(RejectedEdit(reason));
         }
+        if let Err(error) = self.elem.validate_frame_node_count() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
         if !crate::refs::new_elem_ok(model, &self.elem)
             || !crate::refs::frame_element_section_ref_ok(model, &self.elem, self.elem.section)
         {

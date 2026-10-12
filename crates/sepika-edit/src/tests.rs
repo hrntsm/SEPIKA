@@ -9480,3 +9480,53 @@ fn issue546_repairs_nonfinite_material_values_restore_bits_and_strength_input() 
         }
     }
 }
+
+#[test]
+fn add_member_rejects_frame_node_counts_without_changing_model_or_history() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+        ElementKind::Brace { tension_only: true },
+    ] {
+        let mut model = seeded_model(4, 1);
+        let mut stack = UndoStack::new();
+        assert!(stack.run(&mut model, Box::new(DeleteMember { id: ElemId(0) })));
+        let snapshot = format!("{model:?}");
+        let revision = stack.revision();
+        for nodes in [
+            vec![],
+            vec![NodeId(0)],
+            vec![NodeId(0), NodeId(2), NodeId(1)],
+            vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+            vec![NodeId(0), NodeId(0)],
+        ] {
+            let mut elem = seeded_model(2, 1).elements.remove(0);
+            elem.kind = kind;
+            elem.nodes = nodes.into();
+            let reason = elem.validate_frame_node_count().unwrap_err().to_string();
+            assert!(!stack.run(&mut model, Box::new(AddMember { elem })));
+            assert_eq!(stack.last_error(), Some(reason.as_str()));
+            assert_eq!(format!("{model:?}"), snapshot);
+            assert_eq!(stack.revision(), revision);
+            assert!(stack.can_undo() && !stack.can_redo());
+        }
+        stack.undo(&mut model);
+        assert!(!stack.can_undo() && stack.can_redo());
+        let restored = format!("{model:?}");
+        let revision = stack.revision();
+        let mut elem = seeded_model(2, 1).elements.remove(0);
+        elem.id = ElemId(model.elements.len() as u32);
+        elem.kind = kind;
+        elem.nodes = vec![NodeId(0), NodeId(2), NodeId(1)].into();
+        let reason = elem.validate_frame_node_count().unwrap_err().to_string();
+        assert!(!stack.run(&mut model, Box::new(AddMember { elem })));
+        assert_eq!(stack.last_error(), Some(reason.as_str()));
+        assert_eq!(format!("{model:?}"), restored);
+        assert_eq!(stack.revision(), revision);
+        assert!(!stack.can_undo() && stack.can_redo());
+        stack.redo(&mut model);
+        assert_eq!(format!("{model:?}"), snapshot);
+        assert!(stack.can_undo() && !stack.can_redo());
+    }
+}

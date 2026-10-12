@@ -1678,11 +1678,11 @@ fn beam_contact_three_node_primary_is_unavailable_without_negative_quantity() {
             tip_loads: vec![],
         });
     }
-    assert!(model.validate().is_ok());
+    assert!(model.validate().is_err());
     for _ in 0..2 {
         let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
         assert!(
-            reason.contains("Primary(ElemId(0))") && reason.contains("2節点以外"),
+            reason.contains("ElemId(0)") && reason.contains("実節点数=3"),
             "{reason}"
         );
         model.elements[0].nodes.reverse();
@@ -1691,7 +1691,11 @@ fn beam_contact_three_node_primary_is_unavailable_without_negative_quantity() {
     assert!((contact_formwork(&model) - 1.8).abs() <= 1e-9);
     model.slabs.clear();
     model.elements[0].nodes = [NodeId(0), NodeId(2), NodeId(1)].into_iter().collect();
-    assert!((contact_formwork(&model) - 4.5).abs() <= 1e-9);
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("実節点数=3")
+    );
 }
 
 #[test]
@@ -1863,5 +1867,72 @@ fn beam_contact_uses_shape_dimensions_and_rejects_nonfinite_formwork() {
                 .unwrap_err()
                 .contains("内法区間")
         );
+    }
+}
+
+#[test]
+fn frame_node_counts_reject_direct_quantity_and_normal_two_nodes_have_independent_totals() {
+    let base = contact_model();
+    let q = try_compute_quantity_takeoff(&base, &QuantityCfg::default()).unwrap();
+    assert!((q.items[0].concrete_m3 - 1.08).abs() < 1e-9);
+    assert!((q.items[0].formwork_m2 - 9.0).abs() < 1e-9);
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+        ElementKind::Brace {
+            tension_only: false,
+        },
+    ] {
+        for nodes in [
+            vec![],
+            vec![NodeId(0)],
+            vec![NodeId(0), NodeId(2), NodeId(1)],
+            vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+            vec![NodeId(0), NodeId(0)],
+        ] {
+            let mut model = base.clone();
+            model.elements[0].kind = kind;
+            model.elements[0].nodes = nodes.into();
+            assert_eq!(
+                try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err(),
+                model.validate_frame_node_counts().unwrap_err().to_string()
+            );
+        }
+    }
+}
+
+#[test]
+fn three_node_reproduction_is_rejected_with_or_without_floor_and_collinear_boundary() {
+    for floor in [false, true] {
+        for boundary in [false, true] {
+            for reversed in [false, true] {
+                let mut model = contact_model();
+                model.nodes.push(node(2, 3000.0, 0.0, 3000.0));
+                if floor {
+                    contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3000.0);
+                }
+                if boundary {
+                    let mut edge = line_elem(1, 0, 1, 0);
+                    edge.section = None;
+                    model.elements.push(edge);
+                }
+                model.elements[0].nodes = if reversed {
+                    vec![NodeId(1), NodeId(2), NodeId(0)]
+                } else {
+                    vec![NodeId(0), NodeId(2), NodeId(1)]
+                }
+                .into();
+                let reason = model.validate_frame_node_counts().unwrap_err().to_string();
+                assert_eq!(model.validate().unwrap_err().to_string(), reason);
+                assert_eq!(
+                    try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err(),
+                    reason
+                );
+                assert!(model
+                    .support_member_axis(sepika_core::model::SupportMemberId::Primary(ElemId(0)))
+                    .is_none());
+            }
+        }
     }
 }

@@ -301,6 +301,9 @@ pub fn import_stbridge_with_report(xml: &str) -> Result<(Model, ImportReport), S
     let parsed = parser::parse(xml)?;
     let (model, report) = assemble::assemble(parsed)?;
     model
+        .validate_frame_node_counts()
+        .map_err(|e| StbError::Unmappable(e.to_string()))?;
+    model
         .validate_attached_slabs()
         .map_err(|e| StbError::InvalidAttachedSlab(e.to_string()))?;
     Ok((model, report))

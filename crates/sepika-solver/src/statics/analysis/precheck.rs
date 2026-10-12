@@ -122,6 +122,9 @@ fn support_label(support: sepika_core::model::SupportMemberId) -> String {
 /// 先頭のモデル検証（[`Model::validate`]）が失敗したときは、その 1 件だけを返して
 /// 打ち切る。
 pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
+    if let Err(error) = model.validate_frame_node_counts() {
+        return vec![ModelIssue::model(error.to_string())];
+    }
     let source_issues = model
         .source_story_diagnostics()
         .into_iter()

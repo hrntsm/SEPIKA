@@ -2031,3 +2031,143 @@ fn secondary_cft_is_rejected_for_both_kinds_and_locations_even_with_column_use()
         }
     }
 }
+
+#[test]
+fn frame_node_count_matrix_and_support_axes() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+        ElementKind::Brace {
+            tension_only: false,
+        },
+    ] {
+        for count in 0..=4 {
+            let mut model = Model::default();
+            for i in 0..4 {
+                model.nodes.push(Node {
+                    id: NodeId(i),
+                    coord: [i as f64 * 3000.0, 0.0, 0.0],
+                    restraint: Dof6Mask::FREE,
+                    mass: None,
+                    story: None,
+                    support_spring: None,
+                });
+            }
+            model.elements.push(ElementData {
+                id: ElemId(0),
+                kind,
+                nodes: (0..count).map(NodeId).collect(),
+                section: None,
+                local_axis: LocalAxis {
+                    ref_vector: [0.0, 0.0, 1.0],
+                },
+                end_cond: [EndCondition::Fixed; 2],
+                force_regime: ForceRegime::Auto,
+                rigid_zone: Default::default(),
+                plastic_zone: None,
+                spring: None,
+            });
+            if count == 2 {
+                model.validate().unwrap();
+                assert_eq!(
+                    model.support_member_axis(SupportMemberId::Primary(ElemId(0))),
+                    Some(([0.0; 3], [3000.0, 0.0, 0.0]))
+                );
+            } else {
+                let reason = model.validate_frame_node_counts().unwrap_err().to_string();
+                assert_eq!(model.validate().unwrap_err().to_string(), reason);
+                assert!(
+                    reason.contains("ElemId(0)")
+                        && reason.contains(&format!("kind={kind:?}"))
+                        && reason.contains(&format!("実節点数={count}"))
+                        && reason.contains("期待節点数=2")
+                        && reason.contains("入力NodeId列=")
+                );
+                assert!(model
+                    .support_member_axis(SupportMemberId::Primary(ElemId(0)))
+                    .is_none());
+            }
+            model.elements[0].nodes = [NodeId(0), NodeId(0)].into_iter().collect();
+            assert!(model
+                .validate_frame_node_counts()
+                .unwrap_err()
+                .to_string()
+                .contains("異なる2節点"));
+            model.elements[0].nodes = [NodeId(0), NodeId(1)].into_iter().collect();
+            model.nodes[1].coord = model.nodes[0].coord;
+            model.validate_frame_node_counts().unwrap();
+        }
+    }
+    for kind in [
+        ElementKind::Shell,
+        ElementKind::Wall,
+        ElementKind::PanelZone,
+        ElementKind::NodalSpring,
+        ElementKind::Isolator,
+        ElementKind::Damper,
+    ] {
+        let element = ElementData {
+            id: ElemId(0),
+            kind,
+            nodes: (0..4).map(NodeId).collect(),
+            section: None,
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 0.0, 1.0],
+            },
+            end_cond: [EndCondition::Fixed; 2],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        };
+        element.validate_frame_node_count().unwrap();
+    }
+}
+
+#[test]
+fn frame_node_guard_keeps_four_node_area_elements_and_distinct_zero_length_springs() {
+    let mut model = Model {
+        nodes: (0..4)
+            .map(|i| Node {
+                id: NodeId(i),
+                coord: [
+                    if i % 2 == 0 { 0.0 } else { 1000.0 },
+                    if i < 2 { 0.0 } else { 1000.0 },
+                    0.0,
+                ],
+                restraint: Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let mut element = ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Shell,
+        nodes: (0..4).map(NodeId).collect(),
+        section: None,
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed; 2],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    };
+    for kind in [ElementKind::Shell, ElementKind::Wall] {
+        element.kind = kind;
+        model.elements = vec![element.clone()];
+        model.validate().unwrap();
+    }
+    model.nodes[1].coord = model.nodes[0].coord;
+    element.nodes = vec![NodeId(0), NodeId(1)].into();
+    for kind in [ElementKind::NodalSpring, ElementKind::Isolator] {
+        element.kind = kind;
+        model.elements = vec![element.clone()];
+        model.validate().unwrap();
+    }
+}

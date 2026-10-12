@@ -74,6 +74,9 @@ pub fn prepare_model(
     design_period: Option<f64>,
     initialize_stories: bool,
 ) -> Result<PrepareReport, JobError> {
+    model
+        .validate_frame_node_counts()
+        .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     let rebar_errors = model.stb_rebar_analysis_diagnostics();
     if !rebar_errors.is_empty() {
         return Err(JobError::InvalidInput(rebar_errors.join("; ")));
@@ -259,6 +262,59 @@ mod tests {
         SlabPlate,
     };
     use sepika_core::section_shape::SectionShape;
+
+    #[test]
+    fn frame_node_counts_stop_prepare_before_mutating_input() {
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+            ElementKind::Brace {
+                tension_only: false,
+            },
+        ] {
+            for nodes in [
+                vec![],
+                vec![NodeId(0)],
+                vec![NodeId(0), NodeId(2), NodeId(1)],
+                vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+                vec![NodeId(0), NodeId(0)],
+            ] {
+                let mut model = Model {
+                    nodes: vec![
+                        node(0, 0.0, 0.0),
+                        node(1, 6000.0, 0.0),
+                        node(2, 3000.0, 0.0),
+                    ],
+                    ..Default::default()
+                };
+                let mut element = beam(0, 0, 1);
+                element.kind = kind;
+                element.nodes = nodes.into();
+                model.elements.push(element);
+                model.load_cases = sepika_core::model::default_load_cases();
+                model.load_cases[0]
+                    .nodal
+                    .push(sepika_core::model::NodalLoad::auto(NodeId(1), [1.0; 6]));
+                model.generated_masters.push(NodeId(2));
+                model.seismic_weight_generation =
+                    Some(sepika_core::model::SeismicWeightGeneration {
+                        input_key: vec![1, 2],
+                        output_key: vec![3, 4],
+                        calculated_weights: vec![(sepika_core::ids::StoryId(0), 1234.0)],
+                        automatic_diaphragms: vec![],
+                        automatic_master_restraints: vec![(NodeId(2), Default::default())],
+                    });
+                let before = format!("{model:?}");
+                let reason = model.validate_frame_node_counts().unwrap_err().to_string();
+                let error = prepare_model(&mut model, &AnalysisSettings::default(), None, true)
+                    .err()
+                    .unwrap();
+                assert!(error.to_string().contains(&reason));
+                assert_eq!(format!("{model:?}"), before);
+            }
+        }
+    }
 
     fn node(id: u32, x: f64, y: f64) -> Node {
         Node {
