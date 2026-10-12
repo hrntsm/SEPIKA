@@ -428,10 +428,10 @@ fn steel_beam(id: u32, sec: &Section, figure: &str, strength: &str) -> String {
 fn steel_brace(id: u32, sec: &Section, figure: &str, strength: &str) -> String {
     let id = sid(id);
     format!(
-        "      <StbSecBrace_S id=\"{}\" name=\"{}\"{}>\n\\
-         \x20       <StbSecSteelFigureBrace_S>\n\\
-         \x20         <StbSecSteelBrace_S_Same shape=\"{}\"{}/>\n\\
-         \x20       </StbSecSteelFigureBrace_S>\n\\
+        "      <StbSecBrace_S id=\"{}\" name=\"{}\"{}>\n\
+         \x20       <StbSecSteelFigureBrace_S>\n\
+         \x20         <StbSecSteelBrace_S_Same shape=\"{}\"{}/>\n\
+         \x20       </StbSecSteelFigureBrace_S>\n\
          \x20     </StbSecBrace_S>\n",
         id,
         esc(&sec.name),
