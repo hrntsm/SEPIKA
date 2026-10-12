@@ -654,14 +654,17 @@ mod tests {
     async fn frame_node_counts_mcp_tools_reject_without_mutating_model_or_results() {
         use sepika_core::ids::NodeId;
         use sepika_core::model::ElementKind;
-        for kind in [
+        for (kind_index, kind) in [
             ElementKind::Beam,
             ElementKind::Fiber,
             ElementKind::MultiSpring,
             ElementKind::Brace {
                 tension_only: false,
             },
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             for nodes in [
                 vec![],
                 vec![NodeId(0)],
@@ -675,7 +678,7 @@ mod tests {
                 let reason = model.validate_frame_node_counts().unwrap_err().to_string();
                 let before = format!("{model:?}");
                 let dir = test_store_dir(&format!(
-                    "frame562-{kind:?}-{}",
+                    "frame562-{kind_index}-{}",
                     model.elements[0].nodes.len()
                 ));
                 let server = SepikaServer::new(make_state(model, &dir));

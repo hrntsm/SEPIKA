@@ -37,7 +37,7 @@ fn frame_node_counts_public_solver_csv_and_app_open_preserve_state() {
     let preparation = rmp_serde::to_vec_named(&app.core.scoped.preparation).unwrap();
     let revision = app.core.scoped.undo.revision();
     let generation = app.result_input(&result_validity::ResultInputKey::Modal);
-    for kind in kinds() {
+    for (kind_index, kind) in kinds().into_iter().enumerate() {
         for nodes in [
             vec![],
             vec![NodeId(0)],
@@ -66,7 +66,7 @@ fn frame_node_counts_public_solver_csv_and_app_open_preserve_state() {
             let csv = crate::summary::build_quantity_csv(&model);
             assert!(csv.contains("[数量積算 未算定]") && csv.contains(&reason));
             let path = test_tmp().join(format!(
-                "frame562-{kind:?}-{}.ovika",
+                "frame562-{kind_index}-{}.ovika",
                 model.elements[0].nodes.len()
             ));
             super::secondary_cft_tests::write_invalid_container(&path, &model);
@@ -144,10 +144,11 @@ fn frame_node_counts_app_member_creation_reports_rejection_without_staling_resul
     elem.id = ElemId(app.core.model.elements.len() as u32);
     elem.section = None;
     assert!(app.apply_model_edit(Box::new(sepika_edit::AddMember { elem })));
+    let added = rmp_serde::to_vec_named(&app.core.model).unwrap();
     app.undo_action();
     assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), before);
     app.redo_action();
-    assert_eq!(app.core.model.elements.len(), 4);
+    assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), added);
 }
 
 #[cfg(feature = "gui")]

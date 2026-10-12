@@ -471,14 +471,17 @@ mod tests {
 
     #[test]
     fn frame_node_counts_reject_save_without_overwrite_and_correct_hash_load() {
-        for kind in [
+        for (kind_index, kind) in [
             ElementKind::Beam,
             ElementKind::Fiber,
             ElementKind::MultiSpring,
             ElementKind::Brace {
                 tension_only: false,
             },
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let mut model = make_3node_model();
             model.elements.push(ElementData {
                 id: ElemId(0),
@@ -494,7 +497,7 @@ mod tests {
                 plastic_zone: None,
                 spring: None,
             });
-            let path = crate::test_util::test_tmp().join(format!("issue562-{kind:?}.ovika"));
+            let path = crate::test_util::test_tmp().join(format!("issue562-{kind_index}.ovika"));
             save_ovika(&path, &model, OvikaExtras::default()).unwrap();
             let original = std::fs::read(&path).unwrap();
             load_ovika(&path).unwrap();
