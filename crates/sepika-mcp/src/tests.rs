@@ -2900,7 +2900,7 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
     boundary.nodes = [NodeId(0), NodeId(1)].into_iter().collect();
     boundary.section = None;
     model.elements.push(boundary);
-    assert!(model.validate().is_ok());
+    assert!(model.validate().is_err());
     for _ in 0..2 {
         cases.push((model.clone(), "ElemId(0): kind=Beam, 実節点数=3"));
         model.elements[0].nodes.reverse();
