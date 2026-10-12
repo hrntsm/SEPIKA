@@ -67,6 +67,9 @@ pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportRepor
     model
         .validate_frame_node_counts()
         .map_err(|e| StbError::Unmappable(e.to_string()))?;
+    model
+        .validate_lip_channels()
+        .map_err(|e| StbError::Unmappable(e.to_string()))?;
     let mut output_model = model.clone();
     output_model
         .assign_stb_node_ids()

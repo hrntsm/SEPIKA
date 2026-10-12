@@ -463,11 +463,15 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
             SectionId(app.core.model.sections.len() as u32),
             draft.name.clone(),
         );
-        if let Ok(sec) = sec {
+        if let Ok(sec) = &sec {
             ui.label(format!(
             "算定: A = {:.3e} mm²   Iy = {:.3e} mm⁴   Iz = {:.3e} mm⁴   J = {:.3e} mm⁴",
             sec.area, sec.iy, sec.iz, sec.j
             ));
+        }
+
+        if let Err(error) = &sec {
+            ui.colored_label(egui::Color32::RED, format!("断面算定エラー: {error}"));
         }
 
         ui.separator();
@@ -504,17 +508,19 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
         }
 
         ui.horizontal(|ui| {
-            let can_add = key_free_for_add && !draft.name.trim().is_empty() && rebar_validation.is_ok();
+            let can_add = key_free_for_add && !draft.name.trim().is_empty() && rebar_validation.is_ok() && sec.is_ok();
             let add_resp = ui.add_enabled(can_add, egui::Button::new("+ 追加"));
             if !can_add {
                 add_resp.on_hover_text(if draft.name.trim().is_empty() {
                     "符号を入力してください".to_string()
+                } else if let Err(error) = &sec {
+                    error.clone()
                 } else {
                     format!("符号＋階「{key_label}」の断面が既にあります。符号か階を変えてください")
                 });
             } else if add_resp.clicked() {
                 predicted_id = SectionId(app.core.model.sections.len() as u32);
-                app.core.scoped.undo.run(
+                let applied = app.core.scoped.undo.run(
                     &mut app.core.model,
                     Box::new(AddSectionShape {
                         shape: shape.clone(),
@@ -525,13 +531,15 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                             .then_some(draft.frame_use),
                     }),
                 );
-                app.core.scoped.staleness.mark_edited();
-                let n = app.core.model.sections.len();
-                draft.name = format!("断面{}", n + 1);
+                if applied {
+                    app.core.scoped.staleness.mark_edited();
+                    let n = app.core.model.sections.len();
+                    draft.name = format!("断面{}", n + 1);
+                }
             }
             ui.separator();
 
-            let apply_resp = ui.add_enabled(focus.is_some() && rebar_validation.is_ok(), egui::Button::new("✏ 選択断面へ適用"));
+            let apply_resp = ui.add_enabled(focus.is_some() && rebar_validation.is_ok() && sec.is_ok(), egui::Button::new("✏ 選択断面へ適用"));
             match focus {
                 Some(idx) => {
                     let sid = app.core.model.sections[idx].id;
@@ -547,7 +555,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
 （この断面を使う全 {used} 部材に波及。符号と階は維持されます）"
                     ));
                     if apply_resp.clicked() {
-                        app.core.scoped.undo.run(
+                        let applied = app.core.scoped.undo.run(
                             &mut app.core.model,
                             Box::new(EditSectionShape {
                                 section: sid,
@@ -556,7 +564,9 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                                     .then_some(draft.frame_use),
                             }),
                         );
-                        app.core.scoped.staleness.mark_edited();
+                        if applied {
+                            app.core.scoped.staleness.mark_edited();
+                        }
                     }
                     let can_rename = key_free_for_rename && !draft.name.trim().is_empty();
                     let rename_resp =

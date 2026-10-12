@@ -2142,3 +2142,53 @@ fn static_adoption_does_not_change_baseline_eigenvalues() {
     analysis.linear_static(LoadCaseId(1)).unwrap();
     assert_eq!(analysis.eigen(1).unwrap().omega2, expected);
 }
+
+#[test]
+fn lip_channel_geometry_public_linear_result_rejects_beam_fiber_ms_without_panic() {
+    use sepika_core::section_shape::SectionShape;
+    let mut failures = vec![];
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for lip in [75.0, 80.0, 100.0] {
+            for fully_fixed in [false, true] {
+                let mut model = ss_beam(3000.0, vec![]);
+                model.elements[0].kind = kind;
+                model.sections[0].name = "LC544".into();
+                model.sections[0].shape = Some(SectionShape::SteelLipChannel {
+                    height: 150.0,
+                    width: 75.0,
+                    lip,
+                    thick: 2.3,
+                });
+                if fully_fixed {
+                    for node in &mut model.nodes {
+                        node.restraint = Dof6Mask::FIXED;
+                    }
+                }
+                let before = format!("{model:?}");
+                let reason = model.validate_lip_channels().unwrap_err().to_string();
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    linear_static_once(&model, LoadCaseId(1))
+                })) {
+                    Ok(Err(SolveError::InvalidInput(error))) => {
+                        assert!(error.contains(&reason), "{error}")
+                    }
+                    Ok(Err(error)) => {
+                        failures.push(format!("{kind:?}/C{lip}/fixed{fully_fixed}: {error}"))
+                    }
+                    Ok(Ok(_)) => failures.push(format!(
+                        "{kind:?}/C{lip}/fixed{fully_fixed}: 不成立形状で成功"
+                    )),
+                    Err(_) => failures.push(format!(
+                        "{kind:?}/C{lip}/fixed{fully_fixed}: Result入口でpanic"
+                    )),
+                }
+                assert_eq!(format!("{model:?}"), before);
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("; "));
+}

@@ -2526,3 +2526,6 @@ mod secondary_cft_tests;
 
 #[cfg(all(test, feature = "gui"))]
 mod frame_node_count_tests;
+
+#[cfg(all(test, feature = "gui"))]
+mod lip_channel_geometry_tests;

@@ -57,6 +57,7 @@ impl SectionMassProperties {
         shear_rebar: Option<&Material>,
         steel: Option<&Material>,
     ) -> Result<Self, String> {
+        section.validate_lip_channel()?;
         validate_section_materials(section, main, rebar, shear_rebar, steel)?;
 
         validate_section_geometry(section)?;
@@ -462,23 +463,7 @@ fn validate_section_geometry(section: &Section) -> Result<(), String> {
             relation("upper_width >= web_thick", *upper_width >= *web_thick)?;
             relation("lower_width >= web_thick", *lower_width >= *web_thick)?;
         }
-        SectionShape::SteelLipChannel {
-            height,
-            width,
-            lip,
-            thick,
-        } => {
-            dimensions.extend([
-                ("height", *height),
-                ("width", *width),
-                ("lip", *lip),
-                ("thick", *thick),
-            ]);
-            relation("height > 2 * thick", *height > 2.0 * *thick)?;
-            relation("width > thick", *width > *thick)?;
-            relation("lip > thick", *lip > *thick)?;
-            relation("height > lip + thick", *height > *lip + *thick)?;
-        }
+        SectionShape::SteelLipChannel { .. } => {}
         SectionShape::RcBeamRect { b, d, .. }
         | SectionShape::RcColumnRect { b, d, .. }
         | SectionShape::SrcBeamRect { b, d, .. }

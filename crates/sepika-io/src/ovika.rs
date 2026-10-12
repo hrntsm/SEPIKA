@@ -106,6 +106,9 @@ pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result
         .validate_frame_node_counts()
         .map_err(|e| IoError::Decode(e.to_string()))?;
     model
+        .validate_lip_channels()
+        .map_err(|e| IoError::Decode(e.to_string()))?;
+    model
         .validate_secondary_section_usage()
         .map_err(|e| IoError::Decode(e.to_string()))?;
     model
@@ -257,6 +260,9 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
         rmp_serde::from_slice(&model_data).map_err(|e| IoError::Decode(e.to_string()))?;
     model
         .validate_frame_node_counts()
+        .map_err(|e| IoError::Decode(e.to_string()))?;
+    model
+        .validate_lip_channels()
         .map_err(|e| IoError::Decode(e.to_string()))?;
     model
         .validate_attached_slabs()
@@ -540,6 +546,62 @@ mod tests {
         }
     }
 
+    #[test]
+    fn lip_channel_geometry_save_preserves_bytes_and_correct_hash_load_rejects() {
+        use sepika_core::ids::SectionId;
+        use sepika_core::section_shape::SectionShape;
+        let mut model = Model::default();
+        model.sections.push(
+            SectionShape::SteelLipChannel {
+                height: 150.0,
+                width: 75.0,
+                lip: 20.0,
+                thick: 2.3,
+            }
+            .to_section(SectionId(0), "LC544".into()),
+        );
+        let path = crate::test_util::test_tmp().join("lip-channel544.ovika");
+        save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+        assert!(model.eq_ignoring_dofmap(&load_ovika(&path).unwrap().model));
+        let original = std::fs::read(&path).unwrap();
+        for lip in [75.0, 75.001, 80.0, 100.0] {
+            model.sections[0].shape = Some(SectionShape::SteelLipChannel {
+                height: 150.0,
+                width: 75.0,
+                lip,
+                thick: 2.3,
+            });
+            model.sections[0].property_basis = Default::default();
+            let reason = model.validate_lip_channels().unwrap_err().to_string();
+            assert!(matches!(save_ovika(&path, &model, OvikaExtras::default()),
+                Err(IoError::Decode(message)) if message == reason));
+            assert_eq!(std::fs::read(&path).unwrap(), original);
+            let bytes = rmp_serde::to_vec_named(&model).unwrap();
+            let settings = b"{}";
+            let manifest = Manifest {
+                schema_version: CURRENT_SCHEMA_VERSION,
+                units: "internal: N-mm-s".into(),
+                created_by: "independent-544-fixture".into(),
+                entries: vec![
+                    crate::manifest::EntryHash {
+                        name: "model.msgpack".into(),
+                        sha256: sha256_of(&bytes),
+                    },
+                    crate::manifest::EntryHash {
+                        name: "settings.json".into(),
+                        sha256: sha256_of(settings),
+                    },
+                ],
+            };
+            let invalid = path.with_extension("invalid.ovika");
+            write_zip_with_manifest(&invalid, &manifest, &bytes, settings);
+            assert!(
+                matches!(load_ovika(&invalid), Err(IoError::Decode(message)) if message == reason)
+            );
+            std::fs::remove_file(invalid).unwrap();
+        }
+        std::fs::remove_file(path).unwrap();
+    }
     fn make_3node_model() -> Model {
         Model {
             nodes: vec![
