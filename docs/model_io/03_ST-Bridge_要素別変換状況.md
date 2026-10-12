@@ -97,6 +97,15 @@ Post（間柱）が `StbSecColumn_*`、Brace（ブレース）が `StbSecBrace_*
 `StbSecBeam_S`、Brace（ブレース）の鋼断面が `StbSecBrace_S` になります。
 二次部材（小梁・間柱）だけが使う断面は、それぞれ梁用・柱用として書き出します。
 
+鋼ブレースの一様断面は、`StbSecBrace_S` → `StbSecSteelFigureBrace_S` →
+`StbSecSteelBrace_S_Same` の要素で表し、形鋼参照 `shape` と材料名 `strength_main` を保持します。
+断面要素間の文字はXML空白（空白・タブ・CR・LF）だけとし、断面名の `&`・引用符をエスケープして、
+名称中のバックスラッシュも保持します。名称中の文字と要素間の文字は区別します。
+根拠は[公式2.0.2 XSD](https://www.building-smart.or.jp/wp-content/uploads/2026/04/ST-Bridge_v202.zip)の
+同名要素（`mixed` を指定しない複合型）と
+[W3C XML Schema Part 1 §3.4.4](https://www.w3.org/TR/xmlschema-1/#cvc-complex-type)のelement-only契約です。
+この限定モデルのSchema適合は、全STB要素の適合や構造計算の妥当性確認を意味しません。
+
 | 形鋼要素 | 取り込み | 書き出し | 内部形状・備考 |
 |---|:--:|:--:|---|
 | `StbSecRoll-H` | ✅ | ✅ | `SteelH` のルート半径 `r` を保持。書き出しには既知の正半径が必要 |
