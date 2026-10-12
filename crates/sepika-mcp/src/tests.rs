@@ -684,10 +684,15 @@ fn test_job_registry_lifecycle() {
     let mut reg = JobRegistry::new();
     let id = reg.register(JobKind::LinearStatic);
     assert!(matches!(reg.get(&id).unwrap().status, JobStatus::Queued));
-    reg.update(&id, JobStatus::Running { progress: 0.5 });
+    reg.update(
+        &id,
+        JobStatus::Running {
+            progress: Some(0.5),
+        },
+    );
     assert!(matches!(
         reg.get(&id).unwrap().status,
-        JobStatus::Running { progress } if (progress - 0.5).abs() < 1e-6
+        JobStatus::Running { progress: Some(progress) } if (progress - 0.5).abs() < 1e-6
     ));
     reg.update(
         &id,
@@ -762,7 +767,7 @@ fn test_apply_edit_set_wall_plate_slit() {
     let mut state = ServerState {
         model: sample_model(),
         undo: sepika_edit::UndoStack::new(),
-        jobs: JobRegistry::new(),
+        jobs: std::sync::Arc::new(std::sync::Mutex::new(JobRegistry::new())),
         results: sepika_io::results::FsResultStore::open(
             std::env::temp_dir().join(format!("sepika-test-{}/mcp_slit_test", std::process::id())),
         )
@@ -868,7 +873,7 @@ fn test_apply_edit_wall_plate_region_assignment() {
     let mut state = ServerState {
         model,
         undo: sepika_edit::UndoStack::new(),
-        jobs: JobRegistry::new(),
+        jobs: std::sync::Arc::new(std::sync::Mutex::new(JobRegistry::new())),
         results: sepika_io::results::FsResultStore::open(std::env::temp_dir().join(format!(
             "sepika-test-{}/mcp_wall_assign",
             std::process::id()
@@ -912,7 +917,7 @@ fn test_apply_edit_noop_unknown_node() {
     let mut state = ServerState {
         model: sample_model(),
         undo: sepika_edit::UndoStack::new(),
-        jobs: JobRegistry::new(),
+        jobs: std::sync::Arc::new(std::sync::Mutex::new(JobRegistry::new())),
         results: sepika_io::results::FsResultStore::open(
             std::env::temp_dir().join(format!("sepika-test-{}/mcp_edit_noop", std::process::id())),
         )
@@ -1010,7 +1015,7 @@ fn test_apply_edit_assign_slab_to_floor_plate_region() {
     let mut state = ServerState {
         model,
         undo: sepika_edit::UndoStack::new(),
-        jobs: JobRegistry::new(),
+        jobs: std::sync::Arc::new(std::sync::Mutex::new(JobRegistry::new())),
         results: sepika_io::results::FsResultStore::open(std::env::temp_dir().join(format!(
             "sepika-test-{}/mcp_edit_assign_slab",
             std::process::id()
@@ -1080,7 +1085,7 @@ fn four_node_edit_state(name: &str) -> ServerState {
             ..Default::default()
         },
         undo: sepika_edit::UndoStack::new(),
-        jobs: JobRegistry::new(),
+        jobs: std::sync::Arc::new(std::sync::Mutex::new(JobRegistry::new())),
         results: sepika_io::results::FsResultStore::open(std::env::temp_dir().join(format!(
             "sepika-test-{}/mcp_edit_{name}",
             std::process::id()
@@ -4040,4 +4045,40 @@ fn lip_channel_geometry_mcp_query_analysis_and_quantity_report_reason() {
     assert!(quantity["totals"].is_null());
     assert!(quantity["reason"].as_str().unwrap().contains(&reason));
     assert_eq!(format!("{model:?}"), before);
+}
+
+#[test]
+fn running_progress_json_and_schema_distinguish_unmeasured_from_zero() {
+    let unknown = JobStatus::Running { progress: None };
+    let measured = JobStatus::Running {
+        progress: Some(0.0),
+    };
+    assert_eq!(
+        serde_json::to_value(&unknown).unwrap(),
+        serde_json::json!({"Running": {"progress": null}})
+    );
+    assert_eq!(
+        serde_json::to_value(&measured).unwrap(),
+        serde_json::json!({"Running": {"progress": 0.0}})
+    );
+    assert!(matches!(
+        serde_json::from_value::<JobStatus>(serde_json::to_value(unknown).unwrap()).unwrap(),
+        JobStatus::Running { progress: None }
+    ));
+    assert!(matches!(
+        serde_json::from_value::<JobStatus>(serde_json::to_value(measured).unwrap()).unwrap(),
+        JobStatus::Running {
+            progress: Some(0.0)
+        }
+    ));
+    let schema = serde_json::to_value(schemars::schema_for!(JobStatus)).unwrap();
+    let variants = schema["oneOf"].as_array().unwrap();
+    let running = variants
+        .iter()
+        .find(|v| v["properties"].get("Running").is_some())
+        .unwrap();
+    assert_eq!(
+        running["properties"]["Running"]["properties"]["progress"]["type"],
+        serde_json::json!(["number", "null"])
+    );
 }

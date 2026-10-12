@@ -21,16 +21,63 @@ pub fn persist_job_outcome(
     store: &mut sepika_io::results::FsResultStore,
     outcome: JobOutcome,
 ) -> Result<String, String> {
+    #[cfg(not(test))]
     let result = persist_job_outcome_inner(store, outcome);
+    #[cfg(test)]
+    let result = persist_job_outcome_inner(store, outcome, None);
     if result.is_err() {
         store.discard_pending();
     }
     result
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SavePoint {
+    Write(u32, sepika_io::results::ResultKind),
+    Finish(u32, sepika_io::results::ResultKind),
+    Sync,
+}
+
+#[cfg(test)]
+pub(crate) type SaveHook = std::sync::Arc<dyn Fn(SavePoint) -> std::io::Result<()> + Send + Sync>;
+
+#[cfg(all(test, feature = "mcp"))]
+pub(crate) fn persist_job_outcome_with_hook(
+    store: &mut sepika_io::results::FsResultStore,
+    outcome: JobOutcome,
+    hook: Option<&SaveHook>,
+) -> Result<String, String> {
+    let result = persist_job_outcome_inner(store, outcome, hook);
+    if result.is_err() {
+        store.discard_pending();
+    }
+    result
+}
+#[cfg(test)]
+struct TestResultWriter {
+    inner: Box<dyn sepika_io::results::ResultWriter>,
+    case: u32,
+    kind: sepika_io::results::ResultKind,
+    hook: SaveHook,
+}
+
+#[cfg(test)]
+impl sepika_io::results::ResultWriter for TestResultWriter {
+    fn write_rows(&mut self, batch: &arrow::record_batch::RecordBatch) -> std::io::Result<()> {
+        (self.hook)(SavePoint::Write(self.case, self.kind))?;
+        self.inner.write_rows(batch)
+    }
+
+    fn finish(self: Box<Self>) -> std::io::Result<()> {
+        (self.hook)(SavePoint::Finish(self.case, self.kind))?;
+        self.inner.finish()
+    }
+}
 fn persist_job_outcome_inner(
     store: &mut sepika_io::results::FsResultStore,
     outcome: JobOutcome,
+    #[cfg(test)] hook: Option<&SaveHook>,
 ) -> Result<String, String> {
     use sepika_io::results::{member_force_batch, modal_batch, nodal_disp_batch, ResultKind};
 
@@ -40,13 +87,27 @@ fn persist_job_outcome_inner(
         case: u32,
         kind: ResultKind,
         batch: Result<arrow::record_batch::RecordBatch, arrow::error::ArrowError>,
+        #[cfg(test)] hook: Option<&SaveHook>,
     ) -> Result<(), String> {
         let batch = batch.map_err(|e| format!("結果バッチの生成に失敗: {e}"))?;
-        let mut w = store
+        let w = store
             .writer(case, kind)
             .map_err(|e| format!("結果ストアの書き込み開始に失敗: {e}"))?;
+        #[cfg(not(test))]
+        let mut w = w;
+        #[cfg(test)]
+        let mut w: Box<dyn sepika_io::results::ResultWriter> = match hook {
+            Some(hook) => Box::new(TestResultWriter {
+                inner: w,
+                case,
+                kind,
+                hook: hook.clone(),
+            }),
+            None => w,
+        };
         w.write_rows(&batch)
             .map_err(|e| format!("結果ストアへの書き込みに失敗: {e}"))?;
+
         w.finish()
             .map_err(|e| format!("結果ストアの書き込み完了に失敗: {e}"))?;
         Ok(())
@@ -66,6 +127,8 @@ fn persist_job_outcome_inner(
                 case,
                 ResultKind::NodalDisp,
                 nodal_disp_batch(&node_ids, &disp),
+                #[cfg(test)]
+                hook,
             )?;
             kinds.push("NodalDisp");
             if !member_force_rows.is_empty() {
@@ -74,8 +137,15 @@ fn persist_job_outcome_inner(
                     case,
                     ResultKind::MemberForce,
                     member_force_batch(&member_force_rows),
+                    #[cfg(test)]
+                    hook,
                 )?;
                 kinds.push("MemberForce");
+            }
+            #[cfg(test)]
+            if let Some(hook) = hook {
+                hook(SavePoint::Sync)
+                    .map_err(|e| format!("結果マニフェストの永続化に失敗: {e}"))?;
             }
             store
                 .sync()
@@ -115,8 +185,15 @@ fn persist_job_outcome_inner(
                     case,
                     ResultKind::MemberForce,
                     member_force_batch(&member_force_rows),
+                    #[cfg(test)]
+                    hook,
                 )?;
                 kinds.push("MemberForce");
+            }
+            #[cfg(test)]
+            if let Some(hook) = hook {
+                hook(SavePoint::Sync)
+                    .map_err(|e| format!("結果マニフェストの永続化に失敗: {e}"))?;
             }
             store
                 .sync()
@@ -139,7 +216,14 @@ fn persist_job_outcome_inner(
                 case,
                 ResultKind::Modal,
                 modal_batch(&period, &omega2, &participation, &effective_mass),
+                #[cfg(test)]
+                hook,
             )?;
+            #[cfg(test)]
+            if let Some(hook) = hook {
+                hook(SavePoint::Sync)
+                    .map_err(|e| format!("結果マニフェストの永続化に失敗: {e}"))?;
+            }
             store
                 .sync()
                 .map_err(|e| format!("結果マニフェストの永続化に失敗: {e}"))?;

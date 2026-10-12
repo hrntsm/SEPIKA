@@ -12,14 +12,33 @@ use tokio::sync::Mutex;
 #[derive(Clone)]
 pub struct SepikaServer {
     state: Arc<Mutex<ServerState>>,
+    jobs: Arc<std::sync::Mutex<JobRegistry>>,
+    #[cfg(test)]
+    before_save: Option<Arc<dyn Fn() + Send + Sync>>,
+    #[cfg(test)]
+    before_compute: Option<Arc<dyn Fn() + Send + Sync>>,
+    #[cfg(test)]
+    save_hook: Option<super::persist::SaveHook>,
+    #[cfg(test)]
+    after_save: Option<Arc<dyn Fn() + Send + Sync>>,
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
 
 impl SepikaServer {
     pub fn new(state: ServerState) -> Self {
+        let jobs = state.jobs.clone();
         Self {
             state: Arc::new(Mutex::new(state)),
+            jobs,
+            #[cfg(test)]
+            before_save: None,
+            #[cfg(test)]
+            before_compute: None,
+            #[cfg(test)]
+            save_hook: None,
+            #[cfg(test)]
+            after_save: None,
             tool_router: Self::tool_router(),
         }
     }
@@ -72,60 +91,100 @@ impl SepikaServer {
         let kind = args.kind;
 
         let (id, model) = {
-            let mut st = self.state.lock().await;
-            let id = st.jobs.register(kind);
-            st.jobs.update(&id, JobStatus::Running { progress: 0.0 });
+            let st = self.state.lock().await;
+            let id = {
+                let mut jobs = st.jobs.lock().unwrap();
+                let id = jobs.register(kind);
+                jobs.update(&id, JobStatus::Running { progress: None });
+                id
+            };
             (id, st.model.clone())
         };
 
         let state = self.state.clone();
+        let jobs = self.jobs.clone();
         let job_id = id.clone();
+        #[cfg(test)]
+        let before_save = self.before_save.clone();
+        #[cfg(test)]
+        let before_compute = self.before_compute.clone();
+        #[cfg(test)]
+        let save_hook = self.save_hook.clone();
+        #[cfg(test)]
+        let after_save = self.after_save.clone();
         tokio::spawn(async move {
-            let outcome =
-                tokio::task::spawn_blocking(move || super::compute_job(&model, kind, &params))
-                    .await;
-            match outcome {
+            let outcome = tokio::task::spawn_blocking(move || {
+                #[cfg(test)]
+                if let Some(hook) = before_compute {
+                    hook();
+                }
+                super::compute_job(&model, kind, &params)
+            })
+            .await;
+            let failure = match outcome {
                 Ok(Ok(job_outcome)) => {
-                    let mut st = state.lock().await;
-                    match super::persist_job_outcome(&mut st.results, job_outcome) {
-                        Ok(summary) => st.jobs.update(
-                            &job_id,
-                            JobStatus::Done {
+                    let save_id = job_id.clone();
+                    let saved = tokio::task::spawn_blocking(move || {
+                        let mut st = state.blocking_lock();
+                        let saved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            #[cfg(test)]
+                            if let Some(hook) = before_save {
+                                hook();
+                            }
+                            #[cfg(not(test))]
+                            {
+                                super::persist_job_outcome(&mut st.results, job_outcome)
+                            }
+                            #[cfg(test)]
+                            {
+                                super::persist::persist_job_outcome_with_hook(
+                                    &mut st.results,
+                                    job_outcome,
+                                    save_hook.as_ref(),
+                                )
+                            }
+                        }));
+                        let status = match saved {
+                            Ok(Ok(summary)) => JobStatus::Done {
                                 result_ref: summary,
                             },
-                        ),
-                        Err(e) => st.jobs.update(
-                            &job_id,
-                            JobStatus::Failed {
+                            Ok(Err(e)) => JobStatus::Failed {
                                 error: format!("解析は完了しましたが結果の保存に失敗しました: {e}"),
                                 kind: "internal".to_string(),
                             },
-                        ),
-                    }
+                            Err(_) => {
+                                st.results.discard_pending();
+                                JobStatus::Failed {
+                                    error: "結果保存タスクが異常終了しました".to_string(),
+                                    kind: "internal".to_string(),
+                                }
+                            }
+                        };
+                        #[cfg(test)]
+                        if let Some(hook) = after_save {
+                            hook();
+                        }
+                        st.jobs.lock().unwrap().update(&save_id, status);
+                    })
+                    .await;
+                    saved.err().map(|e| JobStatus::Failed {
+                        error: format!("結果保存タスクが異常終了しました: {e}"),
+                        kind: "internal".to_string(),
+                    })
                 }
-                Ok(Err(e)) => {
-                    let mut st = state.lock().await;
-                    st.jobs.update(
-                        &job_id,
-                        JobStatus::Failed {
-                            error: e.to_string(),
-                            kind: e.kind().to_string(),
-                        },
-                    );
-                }
-                Err(join_err) => {
-                    let mut st = state.lock().await;
-                    st.jobs.update(
-                        &job_id,
-                        JobStatus::Failed {
-                            error: format!("解析タスクが異常終了しました: {join_err}"),
-                            kind: "internal".to_string(),
-                        },
-                    );
-                }
+                Ok(Err(e)) => Some(JobStatus::Failed {
+                    error: e.to_string(),
+                    kind: e.kind().to_string(),
+                }),
+                Err(join_err) => Some(JobStatus::Failed {
+                    error: format!("解析タスクが異常終了しました: {join_err}"),
+                    kind: "internal".to_string(),
+                }),
+            };
+            if let Some(status) = failure {
+                jobs.lock().unwrap().update(&job_id, status);
             }
         });
-
         Ok(CallToolResult::success(vec![Content::json(
             serde_json::json!({ "job_id": id }),
         )?]))
@@ -166,10 +225,9 @@ impl SepikaServer {
         &self,
         Parameters(args): Parameters<AnalysisStatusArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let st = self.state.lock().await;
-        let job = st.jobs.get(&args.job_id);
+        let job = self.jobs.lock().unwrap().get(&args.job_id).cloned();
         match job {
-            Some(j) => Ok(CallToolResult::success(vec![Content::json(j)?])),
+            Some(j) => Ok(CallToolResult::success(vec![Content::json(&j)?])),
             None => Err(ErrorData::invalid_params("job not found", None)),
         }
     }
@@ -625,8 +683,8 @@ mod tests {
     async fn wait_for_terminal(server: &SepikaServer, job_id: &str) -> JobStatus {
         for _ in 0..400 {
             {
-                let st = server.state.lock().await;
-                if let Some(job) = st.jobs.get(job_id) {
+                let jobs = server.jobs.lock().unwrap();
+                if let Some(job) = jobs.get(job_id) {
                     match &job.status {
                         JobStatus::Done { .. } | JobStatus::Failed { .. } => {
                             return job.status.clone();
@@ -640,7 +698,47 @@ mod tests {
         panic!("job did not reach a terminal state in time");
     }
 
-    /// `Done` 状態の `result_ref`（サマリ JSON 文字列）を取り出してパースする。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn saving_status_responds_before_save_release() {
+        let dir = test_store_dir("saving_status");
+        let mut server = SepikaServer::new(make_state(cantilever_with_load_case(), &dir));
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let entered_tx = std::sync::Mutex::new(Some(entered_tx));
+        let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let worker_gate = gate.clone();
+        server.before_save = Some(Arc::new(move || {
+            entered_tx.lock().unwrap().take().unwrap().send(()).unwrap();
+            let (lock, wake) = &*worker_gate;
+            let guard = lock.lock().unwrap();
+            drop(wake.wait_while(guard, |released| !*released).unwrap());
+        }));
+        let run = server
+            .analysis_run(Parameters(run_args(JobKind::LinearStatic)))
+            .await
+            .unwrap();
+        let id = extract_job_id(&run);
+        tokio::time::timeout(Duration::from_secs(5), entered_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        let status = tokio::time::timeout(
+            Duration::from_millis(250),
+            server.analysis_status(Parameters(AnalysisStatusArgs { job_id: id.clone() })),
+        )
+        .await;
+        let (lock, wake) = &*gate;
+        *lock.lock().unwrap() = true;
+        wake.notify_all();
+        let status = status.expect("保存終了前に公開statusが応答する").unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(&status.content[0].raw.as_text().unwrap().text).unwrap();
+        assert!(value["status"]["Running"]["progress"].is_null(), "{value}");
+        assert!(matches!(
+            wait_for_terminal(&server, &id).await,
+            JobStatus::Done { .. }
+        ));
+    }
+
     fn done_summary(status: &JobStatus) -> serde_json::Value {
         match status {
             JobStatus::Done { result_ref } => {
@@ -1448,6 +1546,7 @@ mod tests {
             assert!(matches!(status, JobStatus::Done { .. }), "{status:?}");
         }
     }
+    include!("server_lifecycle_tests.rs");
 }
 
 #[cfg(test)]

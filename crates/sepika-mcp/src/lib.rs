@@ -10,7 +10,8 @@ pub type JobId = String;
 pub enum JobStatus {
     Queued,
     Running {
-        progress: f32,
+        /// 未計測は None、実測 0% は Some(0.0)。
+        progress: Option<f32>,
     },
     Done {
         result_ref: String,
@@ -80,7 +81,7 @@ impl JobRegistry {
 pub struct ServerState {
     pub model: Model,
     pub undo: UndoStack,
-    pub jobs: JobRegistry,
+    pub jobs: std::sync::Arc<std::sync::Mutex<JobRegistry>>,
     pub results: sepika_io::results::FsResultStore,
 }
 
@@ -90,7 +91,7 @@ impl ServerState {
         Ok(Self {
             model,
             undo: UndoStack::new(),
-            jobs: JobRegistry::new(),
+            jobs: std::sync::Arc::new(std::sync::Mutex::new(JobRegistry::new())),
             results: sepika_io::results::FsResultStore::open(dir)?,
         })
     }
