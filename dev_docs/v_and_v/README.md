@@ -74,7 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
-| [主架構線材の2節点入力_Issue562_2026-10.md](主架構線材の2節点入力_Issue562_2026-10.md) | 対象4kindの共通節点数・編集/I/O/数量/共有準備/solver/GUI/MCP入口と状態不変 | 🔶（入口Verification実行中、freshレビュー・最終head全CIは後続） |
+| [主架構線材の2節点入力_Issue562_2026-10.md](主架構線材の2節点入力_Issue562_2026-10.md) | 対象4kindの共通節点数・編集/I/O/数量/共有準備/solver/GUI/MCP入口と状態不変 | 🔶（入口Verification一部成功、GUI/追加修正はCI待ち、freshレビュー・最終head全CIは後続） |
 | [節点材料の直接有限入力_Issue546_2026-10.md](節点材料の直接有限入力_Issue546_2026-10.md) | 節点・材料直接追加／単一失焦／有限判定と履歴・強度元指定保持 | 🔶（直接egui Verification、review修正後edit202件、既存値修正Undo含む追加eguiは新head CI後続） |
 | [矩形床の直交分類_Issue561_2026-10.md](矩形床の直交分類_Issue561_2026-10.md) | 閉合/直交/面積、斜め床真面積・支持辺対応、App適用・OVIKA11/5 | 🔶（直接幾何Verification、実験Validation・freshレビュー・最終head全CIは後続） |
 | [固定距離部材荷重の支間内検証_Issue635_2026-10.md](固定距離部材荷重の支間内検証_Issue635_2026-10.md) | 固定位置・区間の共通拒否／追加更新／座標・コピー／正しいhashの不正OVIKA／GUI・MCP | 🔶（入力境界Verification、freshレビュー・最終head全CIは後続） |
@@ -240,7 +240,7 @@
 | 24a | 割当領域の同一性・孤立版診断 | sepika-core / sepika-edit / sepika-job / sepika-app / sepika-mcp | model/assignment_region.rs、secondary.rs、node_member.rs、prepare.rs | [Issue506検証](割当領域同一性_Issue506_2026-10.md)の独立fixtureと実入口 | #506 | ✅（状態契約Verification） |
 | 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*` | P7 | 🔶 |
 | 26 | 数量積算（部位別のコンクリート・型枠・鉄筋・鉄骨・継手個所） | sepika-design-jp | quantity/{mod,member,rebar}.rs | `quantity::member::tests::*`（手計算照合）/`quantity::tests::*`（走査・分類）/`summary::tests::test_quantity_csv_from_sample_model`（CSV 一気通貫）/`test_quantity_takeoff_json_column`（MCP） | 横断 | 🔶 |
-| 26b | 主架構線材の2節点入力 | sepika-core / sepika-edit / sepika-io / sepika-job / sepika-solver / sepika-design-jp / sepika-app / sepika-mcp | model/element・aggregate、refs、ovika、prepare、precheck | [Issue562のkind×節点数×入口matrix](主架構線材の2節点入力_Issue562_2026-10.md#独立期待値と入口matrix) | 横断 | 🔶（入口Verification実行中、最終headゲート後続） |
+| 26b | 主架構線材の2節点入力 | sepika-core / sepika-edit / sepika-io / sepika-job / sepika-solver / sepika-design-jp / sepika-app / sepika-mcp | model/element・aggregate、refs、ovika、prepare、precheck | [Issue562のkind×節点数×入口matrix](主架構線材の2節点入力_Issue562_2026-10.md#独立期待値と入口matrix) | 横断 | 🔶（入口Verification一部成功、GUI/追加修正はCI待ち、最終headゲート後続） |
 | 26a | 梁型枠の床接触控除 | sepika-design-jp / sepika-app / sepika-mcp | quantity/contact.rs・tests.rs、tests/beam_contact_quantity.rs | [Issue451検証](梁型枠接触和集合_Issue451_2026-10.md)の独立期待値・診断・実入口対応表 | 横断 | 🔶（限定Verification、一般形状・実施工未検証） |
 | 27b | 鋼材名の自動強度割増認識 | sepika-core / sepika-element / sepika-solver / sepika-app | material_grade.rs・factory/hinge_view.rs・pushover/tests.rs・result_contract_tests.rs | [Issue599の独立閾値・実入口](鋼材名の厳密な強度割増認識_Issue599_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終CIは後続） |
 | 27a | ST-Bridge標準強度と省略 | sepika-core / sepika-io / sepika-edit / sepika-app / sepika-mcp | model/strength.rs、stbridge/strength_tests.rs、app/tests.rs、tests.rs | [Issue520の直接回帰表](標準強度_Issue520_2026-10.md#独立期待値と入口) | 横断 | ✅（Scope内Verification） |
