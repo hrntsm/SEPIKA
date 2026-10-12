@@ -81,12 +81,12 @@ impl<'a> StepRecorder<'a> {
         dir: SeismicDir,
         heights: &'a [f64],
         ductility_method: DuctilityMethod,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, String> {
+        Ok(Self {
             dir,
             heights,
             hinge_thresholds: compute_hinge_thresholds(model),
-            shear_thresholds: compute_shear_yield_thresholds(model),
+            shear_thresholds: compute_shear_yield_thresholds(model)?,
             ductility_refs: compute_ductility_refs(model),
             ductility_method,
             ductility_trackers: vec![DuctilityTracker::default(); model.elements.len()],
@@ -101,7 +101,7 @@ impl<'a> StepRecorder<'a> {
             reference_external: vec![],
             constant_external: vec![],
             confirmed_history: vec![],
-        }
+        })
     }
 
     /// 確定したステップを 1 つ記録する。

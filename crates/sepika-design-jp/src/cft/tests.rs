@@ -641,3 +641,123 @@ fn test_cft_box_seismic_qd_none_uses_raw_shear() {
     let r = design.check(&forces, &sec, &mat, &ctx).unwrap_checked();
     assert!((r.ratio() - 0.4).abs() < 1e-3, "ratio={}", r.ratio());
 }
+
+#[test]
+fn sm520_out_of_range_cft_primary_and_direct_checks_keep_reason_for_every_fy() {
+    let material = make_material(24.0, "Fc24");
+    for name in ["SM520", "SM520B", "SM520C"] {
+        for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
+            let mut ctx = ctx_column(LoadTerm::Long);
+            let steel = ctx.steel_material.as_mut().unwrap();
+            steel.name = name.into();
+            steel.fy = fy;
+            for sec in [
+                cft_box_section(1000.0, 1000.0, 100.001),
+                cft_pipe_section(1000.0, 100.001),
+            ] {
+                assert!(
+                    matches!(CftDesign.check(&zero_forces(), &sec, &material, &ctx), CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))
+                );
+            }
+            let steel = ctx.steel_material.as_ref().unwrap();
+            assert!(cft_box_check(
+                &zero_forces(),
+                steel,
+                &ctx,
+                &SectionShape::CftBox {
+                    height: 1000.0,
+                    width: 1000.0,
+                    thick: 100.001,
+                    corner_r: Some(0.0)
+                },
+                24.0
+            )
+            .unwrap_err()
+            .contains("適用範囲"));
+            assert!(
+                cft_pipe_check(&zero_forces(), steel, &ctx, 1000.0, 100.001, 24.0)
+                    .unwrap_err()
+                    .contains("適用範囲")
+            );
+        }
+    }
+}
+
+#[test]
+fn sm520_cft_public_precheck_weight_and_ultimate_entries_reject_every_explicit_fy() {
+    use sepika_core::dof::Dof6Mask;
+    use sepika_core::ids::{ElemId, NodeId};
+    use sepika_core::model::{
+        ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Model,
+        Node,
+    };
+    for name in ["SM520", "SM520B", "SM520C"] {
+        for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
+            for shape in [
+                SectionShape::CftBox {
+                    height: 1000.0,
+                    width: 1000.0,
+                    thick: 100.001,
+                    corner_r: Some(0.0),
+                },
+                SectionShape::CftPipe {
+                    outer_dia: 1000.0,
+                    thick: 100.001,
+                },
+            ] {
+                let mut steel = make_material_no_fc(name);
+                steel.id = MaterialId(1);
+                steel.fy = fy;
+                let mut sec = make_section(shape);
+                sec.frame_use = Some(FrameSectionUse::Column);
+                sec.material = Some(MaterialId(0));
+                sec.steel_material = Some(MaterialId(1));
+                let model = Model {
+                    materials: vec![make_material(24.0, "Fc24"), steel],
+                    sections: vec![sec],
+                    nodes: [
+                        ([0.0, 0.0, 0.0], Dof6Mask::FIXED),
+                        ([0.0, 0.0, 3000.0], Dof6Mask::FREE),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (coord, restraint))| Node {
+                        id: NodeId(i as u32),
+                        coord,
+                        restraint,
+                        mass: None,
+                        story: None,
+                        support_spring: None,
+                    })
+                    .collect(),
+                    elements: vec![ElementData {
+                        id: ElemId(0),
+                        kind: ElementKind::Beam,
+                        nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
+                        section: Some(SectionId(0)),
+                        local_axis: LocalAxis {
+                            ref_vector: [1.0, 0.0, 0.0],
+                        },
+                        end_cond: [EndCondition::Fixed; 2],
+                        force_regime: ForceRegime::Auto,
+                        rigid_zone: Default::default(),
+                        plastic_zone: None,
+                        spring: None,
+                    }],
+                    ..Default::default()
+                };
+                assert!(sepika_solver::statics::analysis::Analysis::prepare(&model)
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("適用範囲"));
+                assert!(sepika_load::story_gen::validate_cft_steel_materials(&model)
+                    .unwrap_err()
+                    .contains("適用範囲"));
+                assert!(crate::ultimate::collect_cft_ultimate_checks(&model, &[])
+                    .unwrap_err()
+                    .contains("適用範囲"));
+            }
+        }
+    }
+}

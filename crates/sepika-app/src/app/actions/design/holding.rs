@@ -34,6 +34,43 @@ impl App {
         self.core.scoped.ds_beta_u_unavailable = false;
         self.core.scoped.ds_rank_fallback_stories.clear();
         self.apply_rigid_zones_for_analysis();
+        for elem in &self.core.model.elements {
+            if !matches!(
+                elem.kind,
+                sepika_core::model::ElementKind::Beam
+                    | sepika_core::model::ElementKind::Fiber
+                    | sepika_core::model::ElementKind::MultiSpring
+                    | sepika_core::model::ElementKind::Brace { .. }
+            ) {
+                continue;
+            }
+            let Some(sec) = self.core.model.element_section(elem) else {
+                continue;
+            };
+            let material = if sec.shape.as_ref().is_some_and(|s| {
+                matches!(
+                    s,
+                    SectionShape::SrcBeamRect { .. }
+                        | SectionShape::SrcColumnRect { .. }
+                        | SectionShape::CftBox { .. }
+                        | SectionShape::CftPipe { .. }
+                )
+            }) {
+                self.core.model.element_steel_material(elem)
+            } else if elem_is_steel(elem, &self.core.model) {
+                self.core.model.element_material(elem)
+            } else {
+                None
+            };
+            if let Some(reason) = material.and_then(|m| {
+                sepika_core::material_grade::steel_f_value_issue(
+                    &m.name,
+                    sepika_design_jp::material_strength::plate_thickness(sec),
+                )
+            }) {
+                return Err(format!("部材 {:?}・断面 {:?}: {reason}", elem.id, sec.id));
+            }
+        }
 
         if self.core.model.stories.is_empty() {
             return Err(
@@ -349,6 +386,17 @@ impl App {
                         "壁要素 {:?}: 鋼板壁のランク判定は未対応です",
                         elem.id
                     ));
+                }
+                let thickness = sepika_design_jp::material_strength::plate_thickness(sec);
+                let grade = if elem_steel {
+                    mat.name.as_str()
+                } else {
+                    steel_grade.as_str()
+                };
+                if let Some(reason) =
+                    sepika_core::material_grade::steel_f_value_issue(grade, thickness)
+                {
+                    return Err(format!("部材 {:?}・断面 {:?}: {reason}", elem.id, sec.id));
                 }
                 let rank = if is_brace_elem && elem_steel {
                     let len = model.member_length(elem);

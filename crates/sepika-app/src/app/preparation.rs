@@ -310,6 +310,8 @@ pub struct PrepWidthThicknessRow {
     pub max_ratio: Option<f64>,
     /// 幅厚比による部材ランク（FA〜FD）。判定できない形状は `None`。
     pub rank: Option<sepika_design_jp::secondary::holding_capacity::MemberRank>,
+    /// 鋼材 F の適用範囲外でランクを算定できない理由。
+    pub reason: Option<String>,
 }
 
 /// 材料由来の等価断面性能を算定できず、鋼管のみで評価した CFT 部材の種別。
@@ -853,6 +855,10 @@ impl App {
                 n_elements: 1,
                 max_ratio: max_width_thickness(shape),
                 rank: super::steel_width_thickness_rank(shape, member_use, &mat.name),
+                reason: sepika_core::material_grade::steel_f_value_issue(
+                    &mat.name,
+                    sepika_design_jp::material_strength::plate_thickness(sec),
+                ),
             });
         }
         rows

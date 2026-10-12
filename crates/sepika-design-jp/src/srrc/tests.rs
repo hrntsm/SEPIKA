@@ -1009,3 +1009,61 @@ fn test_src_new_types_unset_rebar_skip() {
         CheckOutcome::Checked(_) => panic!("未入力柱配筋は Skipped のはず"),
     }
 }
+
+#[test]
+fn sm520_out_of_range_src_beam_and_column_do_not_restore_partial_rc_capacity() {
+    let material = make_material(24.0, "Fc24");
+    let forces = MemberForcesAt {
+        pos: 0.5,
+        n: 0.0,
+        qy: 0.0,
+        qz: 0.0,
+        my: 0.0,
+        mz: 0.0,
+    };
+    for name in ["SM520", "SM520B", "SM520C"] {
+        for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
+            let mut steel = make_material_no_fc(name);
+            steel.fy = fy;
+            let mut rebar = make_material_no_fc("SD345");
+            rebar.fy = Some(345.0);
+            let mut shear = make_material_no_fc("SD295");
+            shear.fy = Some(295.0);
+            for kind in [MemberKind::Column, MemberKind::Girder] {
+                let shape = if kind == MemberKind::Column {
+                    src_rect_shape(
+                        1500.0, 1500.0, 8, 22.0, 2, 40.0, 10.0, 100.0, 2, 1000.0, 400.0, 100.001,
+                        80.0,
+                    )
+                } else {
+                    src_beam_rect_shape(
+                        1500.0,
+                        1500.0,
+                        22.0,
+                        vec![4],
+                        vec![4],
+                        40.0,
+                        10.0,
+                        100.0,
+                        2,
+                        1000.0,
+                        400.0,
+                        100.001,
+                        80.0,
+                    )
+                };
+                let sec = shape.to_section(SectionId(0), "SRC範囲外".into());
+                let ctx = DesignCtx {
+                    kind,
+                    steel_material: Some(steel.clone()),
+                    rebar_material: Some(rebar.clone()),
+                    shear_rebar_material: Some(shear.clone()),
+                    ..Default::default()
+                };
+                assert!(
+                    matches!(SrcDesign.check(&forces, &sec, &material, &ctx), CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))
+                );
+            }
+        }
+    }
+}

@@ -164,6 +164,7 @@ pub(super) fn check_walls(
         let mut sum_col_depth = 0.0;
         let mut nonlinear_issue = (mat.concrete_class != sepika_core::units::ConcreteClass::Normal)
             .then(|| "通常コンクリート以外の参考骨格は未対応です".to_string());
+        let mut steel_strength_issue = None;
         let mut column_geometry = [None; 2];
         let wall_geometry = sepika_core::model::wall_element_geometry(elem, model);
         if !wall_geometry.as_ref().is_some_and(|geometry| {
@@ -218,6 +219,13 @@ pub(super) fn check_walls(
                     let as_web =
                         (steel_web_thick * (steel_height - 2.0 * steel_flange_thick)).max(0.0);
                     let steel_name = m.steel_mat.map(|mm| mm.name.as_str()).unwrap_or("");
+                    if let Some(reason) = sepika_core::material_grade::steel_f_value_issue(
+                        steel_name,
+                        steel_flange_thick.max(steel_web_thick),
+                    ) {
+                        steel_strength_issue = Some(reason);
+                        continue;
+                    }
                     let f = crate::steel::steel_f_value_prefix(
                         steel_name,
                         steel_flange_thick.max(steel_web_thick),
@@ -355,6 +363,10 @@ pub(super) fn check_walls(
             q_design,
             long_term: term == LoadTerm::Long,
         };
+        if let Some(reason) = steel_strength_issue {
+            allowable_issue = Some(reason.clone());
+            nonlinear_issue = Some(reason);
+        }
         let outcome = match allowable_issue {
             Some(msg) => CheckOutcome::Skipped {
                 reason: format!("耐震壁 ID {} の{}", elem.id.0, msg),

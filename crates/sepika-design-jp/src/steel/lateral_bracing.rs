@@ -57,6 +57,11 @@ fn class_coefficient(name: &str) -> Result<f64, String> {
 }
 
 fn count(length: f64, sec: &Section, mat: &Material) -> Result<(u32, f64), String> {
+    if let Some(reason) =
+        sepika_core::material_grade::steel_f_value_issue(&mat.name, super::plate_thickness(sec))
+    {
+        return Err(reason);
+    }
     let coefficient = class_coefficient(&mat.name)?;
     if mat.category != MaterialCategory::Steel || sec.frame_use != Some(FrameSectionUse::Girder) {
         return Err("明示した鋼材・大梁用途が必要です".into());
@@ -719,5 +724,23 @@ mod tests {
         assert_eq!(resolve_lateral_bracing_reference(&m, ElemId(0)), reference);
         m.steel_design_attrs[0].lb_direct = Some((100.0, 200.0, 300.0));
         assert_eq!(resolve_lateral_bracing_reference(&m, ElemId(0)), reference);
+    }
+    #[test]
+    fn sm520_out_of_range_lateral_bracing_public_resolver_keeps_reason_before_fy_fallback() {
+        for name in ["SM520", "SM520B", "SM520C"] {
+            for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
+                let mut model = model(false);
+                model.materials[0].name = name.into();
+                model.materials[0].fy = fy;
+                model.sections[0].shape = Some(SectionShape::SteelH {
+                    height: 1000.0,
+                    width: 400.0,
+                    web_thick: 100.001,
+                    flange_thick: 80.0,
+                    root_r: Some(0.0),
+                });
+                unavailable(&model, "適用範囲");
+            }
+        }
     }
 }

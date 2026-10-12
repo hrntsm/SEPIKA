@@ -118,11 +118,17 @@ pub(crate) fn resolve_fiber_yield(
         ) => {
             let thick = *steel_flange_thick;
             model.element_steel_material(data).and_then(|m| {
+                if sepika_core::material_grade::steel_f_value_issue(&m.name, thick).is_some() {
+                    return None;
+                }
                 sepika_core::material_grade::steel_f_value_prefix(&m.name, thick).or(m.fy)
             })
         }
         Some(SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. }) => {
             model.element_steel_material(data).and_then(|m| {
+                if sepika_core::material_grade::steel_f_value_issue(&m.name, *thick).is_some() {
+                    return None;
+                }
                 sepika_core::material_grade::steel_f_value_prefix(&m.name, *thick).or(m.fy)
             })
         }
@@ -240,6 +246,25 @@ pub(crate) fn resolve_steel_fiber_fy(
     steel_mat: Option<&sepika_core::model::Material>,
     mat_fy: Option<f64>,
 ) -> Option<f64> {
+    let thickness = match shape {
+        Some(
+            SectionShape::SrcBeamRect {
+                steel_flange_thick, ..
+            }
+            | SectionShape::SrcColumnRect {
+                steel_flange_thick, ..
+            },
+        ) => Some(*steel_flange_thick),
+        Some(SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. }) => {
+            Some(*thick)
+        }
+        _ => None,
+    };
+    if let (Some(m), Some(t)) = (steel_mat, thickness) {
+        if sepika_core::material_grade::steel_f_value_issue(&m.name, t).is_some() {
+            return None;
+        }
+    }
     match shape {
         Some(
             SectionShape::SrcBeamRect {
@@ -256,6 +281,9 @@ pub(crate) fn resolve_steel_fiber_fy(
             .or(mat_fy),
         Some(SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. }) => steel_mat
             .and_then(|m| {
+                if sepika_core::material_grade::steel_f_value_issue(&m.name, *thick).is_some() {
+                    return None;
+                }
                 sepika_core::material_grade::steel_f_value_prefix(&m.name, *thick).or(m.fy)
             })
             .or(mat_fy),

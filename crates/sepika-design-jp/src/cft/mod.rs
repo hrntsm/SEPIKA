@@ -236,8 +236,10 @@ fn cft_box_check(
     let long_term = ctx.term == LoadTerm::Long;
     let fc_allow = concrete_allowable_compression(fc_raw, long_term);
 
-    let f_value = sepika_core::material_grade::cft_steel_f_value(mat, thick)
-        .expect("CFT 鋼管材料は解析前に検証済み");
+    let f_value = sepika_core::material_grade::cft_steel_f_value(mat, thick).ok_or_else(|| {
+        sepika_core::material_grade::steel_f_value_issue(&mat.name, thick)
+            .unwrap_or_else(|| "CFT 鋼管材料の F 値が未設定または不正です".into())
+    })?;
     let sa = geometry.area;
     let sz_z = geometry.iy * 2.0 / height;
     let sz_y = geometry.iz * 2.0 / width;
@@ -353,8 +355,10 @@ fn cft_pipe_check(
     let long_term = ctx.term == LoadTerm::Long;
     let fc_allow = concrete_allowable_compression(fc_raw, long_term);
 
-    let f_value = sepika_core::material_grade::cft_steel_f_value(mat, thick)
-        .expect("CFT 鋼管材料は解析前に検証済み");
+    let f_value = sepika_core::material_grade::cft_steel_f_value(mat, thick).ok_or_else(|| {
+        sepika_core::material_grade::steel_f_value_issue(&mat.name, thick)
+            .unwrap_or_else(|| "CFT 鋼管材料の F 値が未設定または不正です".into())
+    })?;
     let (sa, sz) = cft_pipe_steel_props(outer_dia, thick);
     let shape = SectionShape::CftPipe { outer_dia, thick };
     let iy = shape.calc_iy();
@@ -469,6 +473,11 @@ impl DesignCheck for CftDesign {
             }
             _ => 0.0,
         };
+        if let Some(reason) =
+            sepika_core::material_grade::steel_f_value_issue(&steel_mat.name, thick)
+        {
+            return CheckOutcome::Skipped { reason };
+        }
         if sepika_core::material_grade::cft_steel_f_value(steel_mat, thick).is_none() {
             return CheckOutcome::Skipped {
                 reason: "CFT検定: 鋼管材料の鋼種名・板厚または fy が不正です".to_string(),

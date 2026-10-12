@@ -40,14 +40,9 @@ pub const STEEL_GRADES: &[&str] = &[
     "BCP235", "BCP325", "TMCP325", "TMCP355", "TMCP385", "TMCP440", "SA440", "LY100", "LY225",
 ];
 
-/// 鋼材の基準強度 F [N/mm²]（完全一致、板厚 [mm] 区分対応。H12 建告第2464号ほか）。
-///
-/// JIS 規格品は厚さ 40mm 以下 / 40mm 超の 2 区分（SM520 を含む）。大臣認定品（BCR/BCP・TMCP・SA440・LY）は
-/// 板厚区分を持たない。100mm を超える板厚は規定がないため最終区分値を
-/// そのまま用いる（非保守的になり得るため実運用では要確認）。
-///
-/// 戻り値は F 値。長期許容引張・圧縮・曲げ `ft = F/1.5`、
-/// 長期許容せん断 `fs = F/(1.5·√3)`。短期は長期の 1.5 倍（=F, F/√3）。
+/// 鋼材の基準強度 F [N/mm²]。板厚は mm で指定する。
+/// SM520 は有効厚さ 100 mm 以下の 3 区分を返し、範囲外は `None`。
+/// その他の対応鋼種・認定品の板厚区分は鋼種ごとに適用する。
 pub fn steel_f_value(grade: &str, thickness: f64) -> Option<f64> {
     match grade {
         "SS400" | "SM400" | "SN400" | "STK400" | "STKN400" | "STKR400" | "SNR400" | "SSC400"
@@ -56,7 +51,16 @@ pub fn steel_f_value(grade: &str, thickness: f64) -> Option<f64> {
         "SM490" | "SN490" | "STK490" | "STKN490" | "STKR490" | "SNR490" => {
             Some(bucket2(thickness, 325.0, 295.0))
         }
-        "SM520" => Some(bucket2(thickness, 355.0, 335.0)),
+        "SM520" if thickness.is_finite() && thickness > 0.0 && thickness <= 100.0 => {
+            Some(if thickness <= 40.0 {
+                355.0
+            } else if thickness <= 75.0 {
+                335.0
+            } else {
+                325.0
+            })
+        }
+        "SM520" => None,
         "BCR295" => Some(295.0),
         "BCR235" => Some(235.0),
         "BCP235" => Some(235.0),
@@ -97,11 +101,20 @@ pub fn steel_f_value_prefix(name: &str, thickness: f64) -> Option<f64> {
     steel_grade_base(name).and_then(|grade| steel_f_value(grade, thickness))
 }
 
-/// CFT 鋼管材料の F 値を解決する。鋼材区分でない材料、または直接入力した
-/// `fy` が正の有限値でない材料は解決不能とする。`fy` が未指定の場合は
-/// 材料名と実板厚の鋼種表から解決する。
+/// 対応済み SM520 系列の板厚 [mm] が適用範囲外の場合に、未算定理由を返す。
+/// 未知の名称と他鋼種は `None`。
+pub fn steel_f_value_issue(name: &str, thickness: f64) -> Option<String> {
+    (steel_grade_base(name) == Some("SM520")
+        && (!thickness.is_finite() || thickness <= 0.0 || thickness > 100.0))
+        .then(|| format!("鋼材「{}」の板厚 {thickness} mm は SM520 系列の基準強度 F の適用範囲（0 < t ≤ 100 mm）外です。明示 fy や既定強度では補完できません", name.trim()))
+}
+
+/// CFT 鋼管材料の F [N/mm²] を材料名と板厚 [mm] から解決し、未知名は明示 fy を用いる。
+/// 非鋼材・非正または非有限の明示 fy・SM520 系列の適用範囲外は `None`。
 pub fn cft_steel_f_value(mat: &crate::model::Material, thickness: f64) -> Option<f64> {
-    if mat.category != crate::model::MaterialCategory::Steel {
+    if mat.category != crate::model::MaterialCategory::Steel
+        || steel_f_value_issue(&mat.name, thickness).is_some()
+    {
         return None;
     }
     if mat.fy.is_some_and(|fy| !fy.is_finite() || fy <= 0.0) {
@@ -496,7 +509,7 @@ mod tests {
     }
 
     /// 板厚 40mm 超の低減（JIS 規格品）と、TMCP・SA440・LY・BCR/BCP が
-    /// 板厚によらず一定であることを確認する。SM520 は 40mm 超が板厚によらず 335 であること。
+    /// 板厚によらず一定であることを確認する。SM520 は 75mm 超で 325 へ低減する。
     #[test]
     fn test_steel_f_value_gt40() {
         assert_eq!(steel_f_value("SS400", 41.0), Some(215.0));
@@ -504,8 +517,8 @@ mod tests {
         assert_eq!(steel_f_value("SN490", 41.0), Some(295.0));
         assert_eq!(steel_f_value("SM520", 41.0), Some(335.0));
         assert_eq!(steel_f_value("SM520", 75.0), Some(335.0));
-        assert_eq!(steel_f_value("SM520", 76.0), Some(335.0));
-        assert_eq!(steel_f_value("SM520", 100.0), Some(335.0));
+        assert_eq!(steel_f_value("SM520", 76.0), Some(325.0));
+        assert_eq!(steel_f_value("SM520", 100.0), Some(325.0));
         for g in [
             "TMCP325", "TMCP355", "TMCP385", "TMCP440", "SA440", "BCR295", "LY225",
         ] {
@@ -928,5 +941,57 @@ mod tests {
             assert_eq!(p.category, MaterialCategory::Concrete);
             assert!((p.density - rho_rc).abs() < 1e-18, "{name}");
         }
+    }
+}
+
+#[cfg(test)]
+mod sm520_contract_tests {
+    use super::*;
+    #[test]
+    fn sm520_notice_boundaries_and_invalid_thickness_are_fixed() {
+        for name in ["SM520", "SM520B", "SM520C", " SM520B "] {
+            for (t, expected) in [
+                (40.0, Some(355.0)),
+                (40.001, Some(335.0)),
+                (75.0, Some(335.0)),
+                (75.001, Some(325.0)),
+                (100.0, Some(325.0)),
+                (100.001, None),
+            ] {
+                assert_eq!(steel_f_value_prefix(name, t), expected, "{name} t={t}");
+            }
+            for t in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                assert_eq!(steel_f_value_prefix(name, t), None);
+                assert!(steel_f_value_issue(name, t).unwrap().contains("適用範囲"));
+            }
+        }
+    }
+    #[test]
+    fn cft_explicit_fy_cannot_restore_out_of_range_sm520_but_unknown_names_keep_direct_input() {
+        for name in ["SM520", "SM520B", "SM520C", " SM520C "] {
+            for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
+                let steel = crate::model::Material {
+                    id: crate::ids::MaterialId(0),
+                    name: name.into(),
+                    category: MaterialCategory::Steel,
+                    young: 205000.0,
+                    poisson: 0.3,
+                    density: 7.85e-9,
+                    shear: None,
+                    fc: None,
+                    fy,
+                    concrete_class: Default::default(),
+                    strength_factor: None,
+                };
+                assert_eq!(cft_steel_f_value(&steel, 100.001), None);
+                let mut unknown = steel.clone();
+                unknown.name = "未知材種".into();
+                assert_eq!(cft_steel_f_value(&unknown, 100.001), fy);
+                unknown.name = "sm520b".into();
+                assert_eq!(cft_steel_f_value(&unknown, 100.001), fy);
+            }
+        }
+        assert_eq!(steel_f_value_prefix("SS400", 100.001), Some(215.0));
+        assert_eq!(steel_f_value_prefix("SM490", 100.001), Some(295.0));
     }
 }

@@ -2280,3 +2280,39 @@ fn standard_rebar507_wall_public_entries_gate_only_consumed_side_columns() {
     let records = collect_wall_design_checks(&model, &forces, LoadTerm::Short, None, "507");
     assert!(records.iter().all(|record| matches!(&record.outcome, CheckOutcome::Skipped { reason } if reason.contains("kind_corner"))));
 }
+
+#[test]
+fn sm520_wall_side_column_out_of_range_is_not_dropped_from_allowable_and_reference_outputs() {
+    for name in ["SM520", "SM520B", "SM520C"] {
+        for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
+            let mut model = wall_with_columns_model();
+            let mut steel = model.materials[1].clone();
+            steel.id = MaterialId(2);
+            steel.name = name.into();
+            steel.category = MaterialCategory::Steel;
+            steel.fy = fy;
+            model.materials.push(steel);
+            let Some(SectionShape::RcColumnRect { b, d, rebar }) = model.sections[1].shape.clone()
+            else {
+                unreachable!()
+            };
+            model.sections[1].shape = Some(SectionShape::SrcColumnRect {
+                b,
+                d,
+                rebar,
+                steel_height: 400.0,
+                steel_width: 200.0,
+                steel_web_thick: 100.001,
+                steel_flange_thick: 80.0,
+            });
+            model.sections[1].steel_material = Some(MaterialId(2));
+            let checks = all_wall_outcomes(&model);
+            let wall: Vec<_> = checks
+                .iter()
+                .filter(|(_, label, _)| label.starts_with("耐震壁"))
+                .collect();
+            assert_eq!(wall.len(), 2);
+            assert!(wall.iter().all(|(_,_,c)| matches!(c, CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))), "{wall:?}");
+        }
+    }
+}

@@ -38,6 +38,26 @@ pub(super) fn check_cold_formed(
         })
         .collect();
     if !cf_cols.is_empty() {
+        for beam in beams.iter().filter(|b| b.kind.is_steel_like()) {
+            if let Some(SectionShape::SteelH {
+                web_thick,
+                flange_thick,
+                ..
+            }) = beam.sec.shape
+            {
+                if let Some(reason) = sepika_core::material_grade::steel_f_value_issue(
+                    &beam.mat.name,
+                    web_thick.max(flange_thick),
+                ) {
+                    out.push((
+                        nid,
+                        "冷間成形耐力比".into(),
+                        CheckOutcome::Skipped { reason },
+                    ));
+                    return;
+                }
+            }
+        }
         let long_end_n = |c: &MemberInfo, nid: NodeId| -> Option<f64> {
             let list = long_member_forces?;
             let (_, forces) = list.iter().find(|(id, _)| *id == c.elem.id)?;
@@ -149,6 +169,77 @@ pub(super) fn check_cold_formed(
                     "冷間成形耐力比".to_string(),
                     CheckOutcome::Checked(cold_formed_column_ratio_check(&inp)),
                 ));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod sm520_tests {
+    use super::*;
+    use sepika_core::ids::SectionId;
+    use sepika_core::model::{
+        ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis,
+    };
+    #[test]
+    fn out_of_range_h_beam_does_not_disappear_from_cold_formed_capacity_sum() {
+        let make_elem = |id, nodes: [NodeId; 2]| ElementData {
+            id: ElemId(id),
+            kind: ElementKind::Beam,
+            nodes: nodes.into_iter().collect(),
+            section: Some(SectionId(id)),
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 1.0, 0.0],
+            },
+            end_cond: [EndCondition::Fixed; 2],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        };
+        let column = make_elem(0, [NodeId(0), NodeId(1)]);
+        let beam = make_elem(1, [NodeId(1), NodeId(2)]);
+        let good_beam = make_elem(2, [NodeId(1), NodeId(3)]);
+        let mut csec = SectionShape::SteelBox {
+            height: 1000.0,
+            width: 1000.0,
+            thick: 20.0,
+            corner_r: Some(0.0),
+        }
+        .to_section(SectionId(0), "BCR柱".into());
+        csec.frame_use = Some(FrameSectionUse::Column);
+        let bsec = crate::steel::test_support::h_section(1000.0, 400.0, 100.001, 80.0);
+        let good_sec = crate::steel::test_support::h_section(1000.0, 400.0, 20.0, 20.0);
+        let cmat = crate::steel::test_support::mat("BCR295");
+        let good_mat = crate::steel::test_support::mat("SS400");
+        let f = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+        for name in ["SM520", "SM520B", "SM520C"] {
+            for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
+                let mut bmat = crate::steel::test_support::mat(name);
+                bmat.fy = fy;
+                let make_info = |elem, sec, mat, member_kind| MemberInfo {
+                    elem,
+                    sec,
+                    mat,
+                    rebar_mat: None,
+                    shear_mat: None,
+                    steel_mat: None,
+                    forces: &f,
+                    kind: sepika_core::structure_kind::StructureKind::S,
+                    member_kind,
+                    length: 3000.0,
+                };
+                let col = make_info(&column, &csec, &cmat, crate::MemberKind::Column);
+                let bad = make_info(&beam, &bsec, &bmat, crate::MemberKind::Girder);
+                let good = make_info(&good_beam, &good_sec, &good_mat, crate::MemberKind::Girder);
+                for beams in [vec![&bad], vec![&bad, &good]] {
+                    let mut out = vec![];
+                    check_cold_formed(&[&col], &beams, NodeId(1), None, &mut out);
+                    assert_eq!(out.len(), 1);
+                    assert!(
+                        matches!(&out[0].2, CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))
+                    );
+                }
             }
         }
     }

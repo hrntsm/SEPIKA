@@ -272,12 +272,33 @@ fn is_490_class(grade_name: &str, thickness: f64) -> bool {
 ///
 /// # 戻り値
 /// 対象外の形状、または板厚が 0 以下・内法寸法が負になる不正な寸法の場合は
-/// `None`。各板要素の幅厚比が FC 限界も超える場合は `FD`。
+/// `None`。SM520 系列の板厚が適用範囲外の場合も `None`。FC 限界を超える場合は `FD`。
 pub fn s_member_rank_by_kihon(
     shape: &SectionShape,
     member_use: SteelMemberUse,
     grade_name: &str,
 ) -> Option<MemberRank> {
+    let thickness = match *shape {
+        SectionShape::SteelH {
+            web_thick,
+            flange_thick,
+            ..
+        } => web_thick.max(flange_thick),
+        SectionShape::SteelBuiltH {
+            web_thick,
+            upper_thick,
+            lower_thick,
+            ..
+        } => web_thick.max(upper_thick).max(lower_thick),
+        SectionShape::SteelBox { thick, .. }
+        | SectionShape::SteelPipe { thick, .. }
+        | SectionShape::CftBox { thick, .. }
+        | SectionShape::CftPipe { thick, .. } => thick,
+        _ => 40.0,
+    };
+    if sepika_core::material_grade::steel_f_value_issue(grade_name, thickness).is_some() {
+        return None;
+    }
     match *shape {
         SectionShape::SteelH {
             height,
@@ -378,5 +399,59 @@ pub fn s_member_rank_by_kihon(
         | SectionShape::SrcColumnRect { .. }
         | SectionShape::RcWall { .. }
         | SectionShape::RcSlab { .. } => None,
+    }
+}
+
+#[cfg(test)]
+mod sm520_tests {
+    use super::*;
+    #[test]
+    fn sm520_out_of_range_shape_cannot_receive_a_steel_rank() {
+        let shapes = [
+            SectionShape::SteelH {
+                height: 1000.0,
+                width: 400.0,
+                web_thick: 100.001,
+                flange_thick: 80.0,
+                root_r: Some(0.0),
+            },
+            SectionShape::SteelBuiltH {
+                height: 1000.0,
+                upper_width: 400.0,
+                lower_width: 400.0,
+                upper_thick: 100.001,
+                lower_thick: 80.0,
+                web_thick: 80.0,
+            },
+            SectionShape::SteelBox {
+                height: 1000.0,
+                width: 1000.0,
+                thick: 100.001,
+                corner_r: Some(0.0),
+            },
+            SectionShape::SteelPipe {
+                outer_dia: 1000.0,
+                thick: 100.001,
+            },
+            SectionShape::CftBox {
+                height: 1000.0,
+                width: 1000.0,
+                thick: 100.001,
+                corner_r: Some(0.0),
+            },
+            SectionShape::CftPipe {
+                outer_dia: 1000.0,
+                thick: 100.001,
+            },
+        ];
+        for shape in shapes {
+            for usage in [SteelMemberUse::Column, SteelMemberUse::Beam] {
+                for name in ["SM520", "SM520B", "SM520C"] {
+                    assert_eq!(s_member_rank_by_kihon(&shape, usage, name), None);
+                }
+                assert!(s_member_rank_by_kihon(&shape, usage, "SM490").is_some());
+                assert!(s_member_rank_by_kihon(&shape, usage, "任意鋼材").is_some());
+            }
+        }
     }
 }

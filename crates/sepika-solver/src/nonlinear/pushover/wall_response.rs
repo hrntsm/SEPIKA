@@ -591,7 +591,8 @@ mod tests {
             SeismicDir::X,
             &[3000.0],
             super::super::types::DuctilityMethod::default(),
-        );
+        )
+        .unwrap();
         recorder.record(0.0, &m, &map, &b, &u);
         b[0].update_state(&delta, false, &ctx);
         b[0].commit_state();

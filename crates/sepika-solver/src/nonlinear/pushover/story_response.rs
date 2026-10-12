@@ -687,7 +687,8 @@ mod tests {
                 SeismicDir::X,
                 &heights,
                 Default::default(),
-            );
+            )
+            .unwrap();
             recorder.reference_external = vec![0.0; map.n_active()];
             recorder.reference_external[map.active(6).unwrap() as usize] = 100_000.0;
             recorder.reference_external[map.active(12).unwrap() as usize] = 50_000.0;

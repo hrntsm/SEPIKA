@@ -1133,4 +1133,75 @@ mod tests {
         assert_eq!(view.model, AnalysisHingeModel::Fiber);
         assert!(view.mn_surface.is_none());
     }
+    #[test]
+    fn sm520_fiber_rejects_explicit_steel_and_main_fy_before_surface_generation() {
+        for name in ["SM520", "SM520B", "SM520C"] {
+            for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
+                let mut src = src_shape();
+                if let SectionShape::SrcColumnRect {
+                    steel_flange_thick, ..
+                } = &mut src
+                {
+                    *steel_flange_thick = 100.001;
+                }
+                for shape in [
+                    src,
+                    SectionShape::CftBox {
+                        height: 1000.0,
+                        width: 1000.0,
+                        thick: 100.001,
+                        corner_r: Some(0.0),
+                    },
+                    SectionShape::CftPipe {
+                        outer_dia: 1000.0,
+                        thick: 100.001,
+                    },
+                ] {
+                    let mut model = make_model(Some(shape), Some(24.0));
+                    model.materials[0].category = MaterialCategory::Concrete;
+                    model.materials[0].fy = Some(999.0);
+                    let mut steel = model.materials[0].clone();
+                    steel.id = MaterialId(1);
+                    steel.name = name.into();
+                    steel.category = MaterialCategory::Steel;
+                    steel.fy = fy;
+                    let mut rebar = steel.clone();
+                    rebar.id = MaterialId(2);
+                    rebar.name = "SD345".into();
+                    rebar.category = MaterialCategory::Rebar;
+                    rebar.fy = Some(345.0);
+                    model.materials.extend([steel, rebar]);
+                    model.sections[0].steel_material = Some(MaterialId(1));
+                    model.sections[0].rebar_material = Some(MaterialId(2));
+                    model.sections[0].shear_rebar_material = Some(MaterialId(2));
+                    let data = elem(ElementKind::Fiber, [NodeId(0), NodeId(2)]);
+                    model.elements.push(data.clone());
+                    assert!(resolve_fiber_yield(&model, &data).steel.is_none());
+                    assert!(crate::frame::fiber::resolve_steel_fiber_fy(
+                        model.sections[0].shape.as_ref(),
+                        Some(&model.materials[1]),
+                        Some(999.0)
+                    )
+                    .is_none());
+                    let reason = crate::factory::ensure_nonlinear_input(&model).unwrap_err();
+                    assert!(reason.contains("適用範囲"), "{reason}");
+                    assert!(analysis_plastic_fibers(
+                        &data,
+                        &model,
+                        StrengthBasis::Nominal,
+                        AnalysisKind::Incremental,
+                        12,
+                        20
+                    )
+                    .unwrap()
+                    .is_none());
+                    if fy.is_some() {
+                        model.materials[1].name = "任意鋼材".into();
+                        assert_eq!(resolve_fiber_yield(&model, &data).steel, fy);
+                        assert!(crate::factory::ensure_nonlinear_input(&model).is_ok());
+                    }
+                }
+            }
+        }
+    }
 }

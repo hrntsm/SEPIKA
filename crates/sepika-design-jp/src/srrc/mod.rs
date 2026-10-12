@@ -351,6 +351,24 @@ impl DesignCheck for SrcDesign {
             };
         };
         let steel_grade = steel_mat.name.as_str();
+        let thickness = match shape {
+            SectionShape::SrcBeamRect {
+                steel_web_thick,
+                steel_flange_thick,
+                ..
+            }
+            | SectionShape::SrcColumnRect {
+                steel_web_thick,
+                steel_flange_thick,
+                ..
+            } => steel_web_thick.max(*steel_flange_thick),
+            _ => unreachable!(),
+        };
+        if let Some(reason) =
+            sepika_core::material_grade::steel_f_value_issue(steel_grade, thickness)
+        {
+            return CheckOutcome::Skipped { reason };
+        }
 
         let cr = match shape {
             SectionShape::SrcBeamRect {

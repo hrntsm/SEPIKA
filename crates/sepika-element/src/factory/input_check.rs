@@ -336,6 +336,29 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
         ) {
             return Some(format!("部材 ID {} の{}", data.id.0, msg));
         }
+        if let (Some(shape), Some(steel_mat)) = (fiber_shape, model.element_steel_material(data)) {
+            let thickness = match shape {
+                SectionShape::SrcBeamRect {
+                    steel_web_thick,
+                    steel_flange_thick,
+                    ..
+                }
+                | SectionShape::SrcColumnRect {
+                    steel_web_thick,
+                    steel_flange_thick,
+                    ..
+                } => Some(steel_web_thick.max(*steel_flange_thick)),
+                SectionShape::CftBox { thick, .. } | SectionShape::CftPipe { thick, .. } => {
+                    Some(*thick)
+                }
+                _ => None,
+            };
+            if let Some(reason) = thickness
+                .and_then(|t| sepika_core::material_grade::steel_f_value_issue(&steel_mat.name, t))
+            {
+                return Some(format!("部材 ID {}: {reason}", data.id.0));
+            }
+        }
         if fiber_shape.is_some_and(shape_has_steel_fiber_region)
             && !crate::frame::fiber::resolve_steel_fiber_fy(
                 fiber_shape,
