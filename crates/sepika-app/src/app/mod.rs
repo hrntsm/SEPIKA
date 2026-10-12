@@ -1958,6 +1958,85 @@ pub(crate) const SHORTCUT_SAVE_AS: egui::KeyboardShortcut = egui::KeyboardShortc
 );
 
 #[cfg(feature = "gui")]
+impl App {
+    fn file_menu(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("ファイル", |ui| {
+            if ui.button("📄 新規").clicked() {
+                self.load_model(sepika_core::model::Model::with_default_load_cases());
+                ui.close();
+            }
+            if ui.button("📐 新規（架構ウィザード）…").clicked() {
+                self.ui.view.frame_wizard.open = true;
+                ui.close();
+            }
+            if ui.button("🏠 サンプル(門型ラーメン)").clicked() {
+                self.load_model(crate::sample::portal_frame());
+                ui.close();
+            }
+            ui.separator();
+            if ui.button("📂 開く…").clicked() {
+                self.open_project_dialog();
+                ui.close();
+            }
+            let save_btn = egui::Button::new("💾 保存")
+                .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_SAVE));
+            if ui.add(save_btn).clicked() {
+                self.save_project_dialog(false);
+                ui.close();
+            }
+            let save_as_btn = egui::Button::new("💾 名前を付けて保存…")
+                .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_SAVE_AS));
+            if ui.add(save_as_btn).clicked() {
+                self.save_project_dialog(true);
+                ui.close();
+            }
+            ui.separator();
+            if ui
+                .button("📥 ST-Bridge 読込…")
+                .on_hover_text(
+                    "ST-Bridge 2.0 サブセット（節点・部材・断面・材料・節点荷重）。支点・部材荷重・組合せは含まれません",
+                )
+                .clicked()
+            {
+                self.import_stbridge_dialog();
+                ui.close();
+            }
+            if ui
+                .button("📤 ST-Bridge 書出（開発中）…")
+                .on_hover_text(
+                     "標準 ST-Bridge 2.0.2（StbSecColumn_S 等＋形鋼ライブラリ）で書き出す。BIM・他ソフト向け。材料はグレード名で表し、支点・荷重・材料の E/ν は含まれません（完全一致の保存は .ovika）",
+                )
+                .clicked()
+            {
+                self.export_stbridge_dialog();
+                ui.close();
+            }
+            ui.scope(|ui| {
+                ui.set_max_width(360.0);
+                ui.add(
+                    egui::Label::new(
+                        "ST-Bridge書き出しは開発中です。一部の形状・属性・断面性能を正しく出力できない場合があります。出力内容は利用先で確認してください。モデルの保存にはOVIKAを使用してください。",
+                    )
+                    .wrap(),
+                );
+            });
+            ui.separator();
+            if ui
+                .button("🌊 波形を保存…")
+                .on_hover_text(
+                    "時刻歴応答解析の入力波形（CSV）を波形ライブラリへコピーします。\
+                     プロジェクトをまたいで使い回せます（.ovika には波形の実体は含まれません）",
+                )
+                .clicked()
+            {
+                self.register_wave_to_library_dialog();
+                ui.close();
+            }
+        });
+    }
+}
+
+#[cfg(feature = "gui")]
 impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         crate::theme::BLUE_200.to_normalized_gamma_f32()
@@ -2138,109 +2217,50 @@ impl eframe::App for App {
         egui::Panel::top("top_toolbar")
             .frame(crate::theme::toolbar_frame())
             .show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.menu_button("ファイル", |ui| {
-                    if ui.button("📄 新規").clicked() {
-                        self.load_model(sepika_core::model::Model::with_default_load_cases());
-                        ui.close();
-                    }
-                    if ui.button("📐 新規（架構ウィザード）…").clicked() {
-                        self.ui.view.frame_wizard.open = true;
-                        ui.close();
-                    }
-                    if ui.button("🏠 サンプル(門型ラーメン)").clicked() {
-                        self.load_model(crate::sample::portal_frame());
-                        ui.close();
+                ui.horizontal(|ui| {
+                    self.file_menu(ui);
+                    ui.separator();
+                    let tabs = [
+                        ("モデル", Tab::Model),
+                        ("荷重", Tab::Loads),
+                        ("解析", Tab::Analysis),
+                        ("結果", Tab::Results),
+                        ("設計", Tab::Design),
+                        ("レポート", Tab::Report),
+                    ];
+                    for (label, tab) in &tabs {
+                        let selected = self.ui.view.active_tab == *tab;
+                        let stale_marker = match *tab {
+                            Tab::Results | Tab::Design
+                                if self.core.scoped.staleness.results_stale =>
+                            {
+                                "⚠"
+                            }
+                            _ => "",
+                        };
+                        let label_str = format!("{} {}", label, stale_marker);
+                        if ui.selectable_label(selected, label_str).clicked() && !selected {
+                            self.ui.view.active_tab = *tab;
+                            self.apply_tab_preset(*tab);
+                        }
                     }
                     ui.separator();
-                    if ui.button("📂 開く…").clicked() {
-                        self.open_project_dialog();
-                        ui.close();
-                    }
-                    let save_btn = egui::Button::new("💾 保存")
-                        .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_SAVE));
-                    if ui.add(save_btn).clicked() {
-                        self.save_project_dialog(false);
-                        ui.close();
-                    }
-                    let save_as_btn = egui::Button::new("💾 名前を付けて保存…")
-                        .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_SAVE_AS));
-                    if ui.add(save_as_btn).clicked() {
-                        self.save_project_dialog(true);
-                        ui.close();
-                    }
-                    ui.separator();
+                    let can_undo = self.core.scoped.undo.can_undo();
+                    let can_redo = self.core.scoped.undo.can_redo();
                     if ui
-                        .button("📥 ST-Bridge 読込…")
-                        .on_hover_text(
-                            "ST-Bridge 2.0 サブセット（節点・部材・断面・材料・節点荷重）。支点・部材荷重・組合せは含まれません",
-                        )
+                        .add_enabled(can_undo, egui::Button::new("↶ Undo"))
                         .clicked()
                     {
-                        self.import_stbridge_dialog();
-                        ui.close();
+                        self.undo_action();
                     }
                     if ui
-                        .button("📤 ST-Bridge 書出…")
-                        .on_hover_text(
-                             "標準 ST-Bridge 2.0.2（StbSecColumn_S 等＋形鋼ライブラリ）で書き出す。BIM・他ソフト向け。材料はグレード名で表し、支点・荷重・材料の E/ν は含まれません（完全一致の保存は .ovika）",
-                        )
+                        .add_enabled(can_redo, egui::Button::new("↷ Redo"))
                         .clicked()
                     {
-                        self.export_stbridge_dialog();
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui
-                        .button("🌊 波形を保存…")
-                        .on_hover_text(
-                            "時刻歴応答解析の入力波形（CSV）を波形ライブラリへコピーします。\
-                             プロジェクトをまたいで使い回せます（.ovika には波形の実体は含まれません）",
-                        )
-                        .clicked()
-                    {
-                        self.register_wave_to_library_dialog();
-                        ui.close();
+                        self.redo_action();
                     }
                 });
-                ui.separator();
-                let tabs = [
-                    ("モデル", Tab::Model),
-                    ("荷重", Tab::Loads),
-                    ("解析", Tab::Analysis),
-                    ("結果", Tab::Results),
-                    ("設計", Tab::Design),
-                    ("レポート", Tab::Report),
-                ];
-                for (label, tab) in &tabs {
-                    let selected = self.ui.view.active_tab == *tab;
-                    let stale_marker = match *tab {
-                        Tab::Results | Tab::Design if self.core.scoped.staleness.results_stale => "⚠",
-                        _ => "",
-                    };
-                    let label_str = format!("{} {}", label, stale_marker);
-                    if ui.selectable_label(selected, label_str).clicked() && !selected {
-                        self.ui.view.active_tab = *tab;
-                        self.apply_tab_preset(*tab);
-                    }
-                }
-                ui.separator();
-                let can_undo = self.core.scoped.undo.can_undo();
-                let can_redo = self.core.scoped.undo.can_redo();
-                if ui
-                    .add_enabled(can_undo, egui::Button::new("↶ Undo"))
-                    .clicked()
-                {
-                    self.undo_action();
-                }
-                if ui
-                    .add_enabled(can_redo, egui::Button::new("↷ Redo"))
-                    .clicked()
-                {
-                    self.redo_action();
-                }
             });
-        });
 
         egui::Panel::bottom("status_bar")
             .exact_size(ui.text_style_height(&egui::TextStyle::Body) + 8.0)

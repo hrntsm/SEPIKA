@@ -2801,6 +2801,8 @@ fn test_export_and_import_stbridge_roundtrip() {
 
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
+    app.core.scoped.project_path = Some(dir.join("original.ovika"));
+    app.core.scoped.staleness.unsaved_changes = true;
     let original = app.core.model.clone();
     app.export_stbridge_to(path.clone());
     assert!(
@@ -2808,6 +2810,16 @@ fn test_export_and_import_stbridge_roundtrip() {
         "{:?}",
         app.core.scoped.last_error
     );
+
+    assert_eq!(
+        rmp_serde::to_vec_named(&app.core.model).unwrap(),
+        rmp_serde::to_vec_named(&original).unwrap()
+    );
+    assert_eq!(
+        app.core.scoped.project_path,
+        Some(dir.join("original.ovika"))
+    );
+    assert!(app.core.scoped.staleness.unsaved_changes);
 
     let mut app2 = App::default();
     app2.import_stbridge_from(path.clone());
@@ -13063,5 +13075,145 @@ fn unassigned_member_625_app_export_preserves_files_state_and_recovers_by_assign
         );
         std::fs::remove_file(absent).unwrap();
         std::fs::remove_file(existing).unwrap();
+    }
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn stbridge647_file_menu_renders_notice_before_export_and_closes_without_state_changes() {
+    fn text_rect(shape: &egui::Shape, needle: &str) -> Option<egui::Rect> {
+        match shape {
+            egui::Shape::Text(text) if text.galley.text().contains(needle) => {
+                Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+            }
+            egui::Shape::Vec(parts) => parts.iter().find_map(|part| text_rect(part, needle)),
+            _ => None,
+        }
+    }
+
+    for width in [640.0, 1280.0] {
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        app.core.scoped.project_path = Some(std::path::PathBuf::from("existing.ovika"));
+        app.core.scoped.staleness.unsaved_changes = true;
+        app.report_error("既存の通知");
+        let model_before = rmp_serde::to_vec_named(&app.core.model).unwrap();
+        let log_before: Vec<_> = app
+            .core
+            .log
+            .entries
+            .iter()
+            .map(|entry| (entry.elapsed, entry.level, entry.message.clone()))
+            .collect();
+        let context = egui::Context::default();
+        install_japanese_fonts(&context);
+        crate::theme::apply_theme(&context);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 720.0));
+        let frame = |app: &mut App, events| {
+            context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.horizontal(|ui| app.file_menu(ui));
+                },
+            )
+        };
+        frame(&mut app, vec![]);
+        let closed = frame(&mut app, vec![]);
+        let menu_pos = closed
+            .shapes
+            .iter()
+            .find_map(|clipped| text_rect(&clipped.shape, "ファイル"))
+            .unwrap()
+            .center();
+        assert!(!closed
+            .shapes
+            .iter()
+            .any(|clipped| text_rect(&clipped.shape, "開発中").is_some()));
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                vec![
+                    egui::Event::PointerMoved(menu_pos),
+                    egui::Event::PointerButton {
+                        pos: menu_pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        frame(&mut app, vec![]);
+        let opened = frame(&mut app, vec![]);
+        let visible_rect = |needle| {
+            opened
+                .shapes
+                .iter()
+                .find_map(|clipped| {
+                    text_rect(&clipped.shape, needle).inspect(|&rect| {
+                        assert!(
+                            clipped.clip_rect.contains_rect(rect),
+                            "クリップ内: {needle}"
+                        );
+                        assert!(screen.contains_rect(rect), "画面内: {needle}");
+                    })
+                })
+                .unwrap_or_else(|| panic!("操作前に描画: {needle}"))
+        };
+        let export = visible_rect("ST-Bridge 書出（開発中）");
+        visible_rect("ST-Bridge 読込");
+        visible_rect("名前を付けて保存");
+        let notice = visible_rect("ST-Bridge書き出しは開発中です");
+        assert!(notice.top() >= export.bottom());
+        assert!(notice.width() <= 360.0);
+        for expected in [
+            "形状・属性・断面性能を正しく出力できない場合",
+            "出力内容は利用先で確認してください",
+            "モデルの保存にはOVIKAを使用してください",
+        ] {
+            visible_rect(expected);
+        }
+        let outside = egui::pos2(width - 10.0, 710.0);
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                vec![
+                    egui::Event::PointerMoved(outside),
+                    egui::Event::PointerButton {
+                        pos: outside,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        let closed = frame(&mut app, vec![]);
+        assert!(!closed
+            .shapes
+            .iter()
+            .any(|clipped| text_rect(&clipped.shape, "開発中").is_some()));
+        assert_eq!(
+            rmp_serde::to_vec_named(&app.core.model).unwrap(),
+            model_before
+        );
+        assert_eq!(
+            app.core.scoped.project_path.as_deref(),
+            Some(std::path::Path::new("existing.ovika"))
+        );
+        assert!(app.core.scoped.staleness.unsaved_changes);
+        assert_eq!(app.core.scoped.last_error.as_deref(), Some("既存の通知"));
+        let log_after: Vec<_> = app
+            .core
+            .log
+            .entries
+            .iter()
+            .map(|entry| (entry.elapsed, entry.level, entry.message.clone()))
+            .collect();
+        assert_eq!(log_after, log_before);
     }
 }
