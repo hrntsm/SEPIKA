@@ -243,9 +243,18 @@ fn wall_plate_node_refs(model: &Model, plate: &WallPlate) -> Vec<NodeId> {
 }
 
 impl Model {
+    /// 主架構線材の対応節点数を検査する。参照先と幾何の検査は含まない。
+    pub fn validate_frame_node_counts(&self) -> Result<(), crate::error::CoreError> {
+        for element in &self.elements {
+            element.validate_frame_node_count()?;
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), crate::error::CoreError> {
         use crate::error::CoreError;
 
+        self.validate_frame_node_counts()?;
         self.validate_attached_slabs()?;
         let mut strength_sections = std::collections::HashSet::new();
         let mut strength_targets = Vec::new();
@@ -1010,7 +1019,7 @@ impl Model {
         match id {
             SupportMemberId::Primary(elem) => {
                 let e = self.element(elem)?;
-                if e.nodes.len() < 2 {
+                if e.validate_frame_node_count().is_err() || e.nodes.len() < 2 {
                     return None;
                 }
                 let a = self.node(*e.nodes.first()?)?.coord;

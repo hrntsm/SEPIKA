@@ -95,7 +95,8 @@ pub(crate) fn material_ref_ok(model: &Model, id: Option<MaterialId>) -> bool {
 /// 追加する部材が [`Model::validate`](sepika_core::model::Model::validate) を
 /// 通る形か（ID が末尾の添字と一致し、参照する節点・断面が実在するか）。
 pub(crate) fn new_elem_ok(model: &Model, elem: &sepika_core::model::ElementData) -> bool {
-    elem.id.index() == model.elements.len()
+    elem.validate_frame_node_count().is_ok()
+        && elem.id.index() == model.elements.len()
         && elem.nodes.iter().all(|&n| node_exists(model, n))
         && section_ref_ok(model, elem.section)
 }

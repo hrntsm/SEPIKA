@@ -308,3 +308,23 @@ pub struct ElementData {
     #[serde(default)]
     pub spring: Option<[f64; 6]>,
 }
+
+impl ElementData {
+    /// 主架構線材は異なる2節点を必要とし、不正時は入力列を含む診断を返す。
+    pub fn validate_frame_node_count(&self) -> Result<(), crate::error::CoreError> {
+        if matches!(
+            self.kind,
+            ElementKind::Beam
+                | ElementKind::Fiber
+                | ElementKind::MultiSpring
+                | ElementKind::Brace { .. }
+        ) && (self.nodes.len() != 2 || self.nodes[0] == self.nodes[1])
+        {
+            return Err(crate::error::CoreError::InvalidInput(format!(
+                "ElemId({}): kind={:?}, 実節点数={}, 期待節点数=2（異なる2節点が必要）, 入力NodeId列={:?}",
+                self.id.0, self.kind, self.nodes.len(), self.nodes
+            )));
+        }
+        Ok(())
+    }
+}

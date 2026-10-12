@@ -1758,8 +1758,6 @@ mod tests {
         model.rebuild_floor_assignment_regions();
         assert_eq!(model.validate(), Ok(()));
 
-        // 中央節点を持つ 3 節点梁。`support_member_axis` は先頭・末尾で材軸を
-        // 解決するが、荷重解決は 2 節点以外を扱わない。
         model.elements.push(crate::model::ElementData {
             id: ElemId(4),
             kind: crate::model::ElementKind::Beam,
@@ -1780,8 +1778,8 @@ mod tests {
         model.floor_assignment_regions.regions[0].boundary[0].support =
             SupportMemberId::Primary(ElemId(4));
         assert!(
-            matches!(model.validate(), Err(CoreError::DanglingRef(_))),
-            "3 節点以上の支持部材を拒否する"
+            matches!(model.validate(), Err(CoreError::InvalidInput(reason)) if reason.contains("ElemId(4)") && reason.contains("実節点数=3")),
+            "3 節点以上の支持部材を派生領域の検査より前に拒否する"
         );
     }
 

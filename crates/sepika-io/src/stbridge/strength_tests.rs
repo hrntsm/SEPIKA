@@ -1,4 +1,5 @@
 use super::*;
+use sepika_core::ids::ElemId;
 use sepika_core::model::*;
 
 fn column(
@@ -705,4 +706,39 @@ fn explicit_unknown_src_steel_keeps_all_properties_and_native_override() {
     assert_eq!(resolved.grade, "SM400YA");
     assert_eq!(resolved.value, 177.);
     assert!(resolved.native_override);
+}
+
+#[test]
+fn frame_two_nodes_stbridge_and_ovika_roundtrip_preserve_strength_sources_and_axis() {
+    let model = import_stbridge(&column(
+        Some("Fc36"),
+        Some("Fc30"),
+        Some("Fc27"),
+        Some("Fc24"),
+    ))
+    .unwrap();
+    model.validate_frame_node_counts().unwrap();
+    let axis = model
+        .support_member_axis(SupportMemberId::Primary(ElemId(0)))
+        .unwrap();
+    assert_eq!(axis, ([0.0; 3], [0.0, 0.0, 3000.0]));
+    let (xml, _) = export_stbridge_with_report(&model).unwrap();
+    let again = import_stbridge(&xml).unwrap();
+    assert_eq!(again.elements[0].nodes.len(), 2);
+    assert_eq!(again.stb_strengths, model.stb_strengths);
+    assert_eq!(again.source_stories, model.source_stories);
+    assert_eq!(
+        again.support_member_axis(SupportMemberId::Primary(ElemId(0))),
+        Some(axis)
+    );
+    let path = crate::test_util::test_tmp().join("frame562-strength-roundtrip.ovika");
+    crate::ovika::save_ovika(&path, &again, Default::default()).unwrap();
+    let saved = crate::ovika::load_ovika(&path).unwrap().model;
+    assert_eq!(saved.stb_strengths, model.stb_strengths);
+    assert_eq!(saved.source_stories, model.source_stories);
+    assert_eq!(
+        saved.support_member_axis(SupportMemberId::Primary(ElemId(0))),
+        Some(axis)
+    );
+    std::fs::remove_file(path).unwrap();
 }
