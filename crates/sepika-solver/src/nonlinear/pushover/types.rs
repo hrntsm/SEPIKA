@@ -58,7 +58,7 @@ impl PushoverTarget {
 
 /// 増分解析がどのように終了したか。
 ///
-/// 複数フェーズ（荷重制御→変位制御→弧長法）を経る場合は、目標到達が最優先、
+/// 複数フェーズ（荷重制御→変位制御）を経る場合は、目標到達が最優先、
 /// それ以外は**最後に実行されたフェーズの終了理由**を記録する。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Default)]
 pub enum PushoverTermination {
@@ -70,19 +70,19 @@ pub enum PushoverTermination {
         /// 到達した荷重係数。
         lambda: f64,
     },
-    /// 押込みスケジュール（変位制御の上限変位・弧長法の最大ステップ数）を
+    /// 押込みスケジュール（変位制御の上限変位）を
     /// 完了して終了した（目標判定は未成立）。
     ScheduleCompleted,
     /// 増分半減を尽くしても釣合い反復が収束せず打ち切った。
     /// **Qu が過小評価の可能性がある**（目標未到達のまま性能曲線が途切れている）。
     NonConvergence {
-        /// 打ち切ったフェーズ（"荷重制御"・"変位制御"・"弧長法"）。
+        /// 打ち切ったフェーズ（"荷重制御"・"変位制御"）。
         phase: String,
         /// 打ち切り時点の確定済み荷重係数。
         load_factor: f64,
     },
     /// 接線剛性の分解が失敗（崩壊機構の形成・耐力喪失による特異化）して
-    /// 打ち切った。弧長法フェーズでは耐力喪失の終了判定として期待される終了。
+    /// 打ち切った。
     TangentSingular {
         /// 打ち切ったフェーズ。
         phase: String,
@@ -131,11 +131,11 @@ impl PushoverTermination {
 /// Ai 分布の比例荷重パターン λ·q で共通し、λ の決め方だけが異なる。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PushoverControl {
-    /// 荷重制御（λ=1 まで）→変位制御→弧長法（オプション）の段階切替（既定）。
+    /// 荷重制御（λ=1 まで）→変位制御の段階切替（既定）。
     /// 耐力ピーク（崩壊機構形成）を変位制御で通過し、頭打ち・低下も追跡できる。
     #[default]
     Phased,
-    /// 荷重増分のみ。変位制御・弧長法へは移行せず、
+    /// 荷重増分のみ。変位制御へは移行せず、
     /// 終了目標が有効な場合は λ=1 を超えて同じ刻みで荷重増分を継続する。
     LoadOnly,
 }

@@ -123,8 +123,6 @@ fn secondary_cft_public_entries_reject_all_kinds_shapes_and_locations() {
                     1,
                     1.0,
                     false,
-                    false,
-                    1.0,
                 )
                 .unwrap_err();
                 assert!(error.contains("SecondaryMemberId(539)"), "{error}");

@@ -5,7 +5,7 @@
 //! - [`add_support_spring_f_int`] — 支点ばね（`Node::support_spring`）の内力寄与
 //!
 //! 要素の**現在の状態**（`&[Box<dyn ElementBehavior>]`）から組み立てる経路であり、
-//! Newton 反復を回す解析はすべてここを通る（増分解析・弧長法・非線形時刻歴）。
+//! Newton 反復を回す解析はすべてここを通る（増分解析・非線形時刻歴）。
 //! モデルから毎回要素を組み直す線形経路は [`super::assemble`] にある。
 
 use crate::common::assemble::support_spring_terms;
