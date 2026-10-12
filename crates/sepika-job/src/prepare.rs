@@ -280,12 +280,14 @@ mod tests {
                 vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
                 vec![NodeId(0), NodeId(0)],
             ] {
-                let mut model = Model::default();
-                model.nodes = vec![
-                    node(0, 0.0, 0.0),
-                    node(1, 6000.0, 0.0),
-                    node(2, 3000.0, 0.0),
-                ];
+                let mut model = Model {
+                    nodes: vec![
+                        node(0, 0.0, 0.0),
+                        node(1, 6000.0, 0.0),
+                        node(2, 3000.0, 0.0),
+                    ],
+                    ..Default::default()
+                };
                 let mut element = beam(0, 0, 1);
                 element.kind = kind;
                 element.nodes = nodes.into();

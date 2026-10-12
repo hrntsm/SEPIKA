@@ -2127,21 +2127,23 @@ fn frame_node_count_matrix_and_support_axes() {
 
 #[test]
 fn frame_node_guard_keeps_four_node_area_elements_and_distinct_zero_length_springs() {
-    let mut model = Model::default();
-    model.nodes = (0..4)
-        .map(|i| Node {
-            id: NodeId(i),
-            coord: [
-                if i % 2 == 0 { 0.0 } else { 1000.0 },
-                if i < 2 { 0.0 } else { 1000.0 },
-                0.0,
-            ],
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        })
-        .collect();
+    let mut model = Model {
+        nodes: (0..4)
+            .map(|i| Node {
+                id: NodeId(i),
+                coord: [
+                    if i % 2 == 0 { 0.0 } else { 1000.0 },
+                    if i < 2 { 0.0 } else { 1000.0 },
+                    0.0,
+                ],
+                restraint: Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            })
+            .collect(),
+        ..Default::default()
+    };
     let mut element = ElementData {
         id: ElemId(0),
         kind: ElementKind::Shell,
