@@ -713,3 +713,246 @@ fn src_physical_self_weight_shares_inertial_mass_while_design_dl_distribution_is
         assert!((physical_n / 9806.65 - SRC_MASS_T).abs() < 1e-12);
     }
 }
+
+#[test]
+fn lip_channel_geometry_dynamic_results_reject_all_mass_methods_before_early_success() {
+    use sepika_math::solver::{make_solver, SolverBackend};
+    use sepika_math::sparse::{assemble_csc, Triplet};
+    use sepika_solver::dynamic::eigen::solve_eigen_with_solver;
+    use sepika_solver::dynamic::timehistory::{
+        linear_time_history_from_state, linear_time_history_with_state, TimeStepState,
+    };
+
+    let mut failures = vec![];
+    for mass_method in [MassMethod::LumpedOnly, MassMethod::CorrectedLumped] {
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            for lip in [75.0, 80.0, 100.0] {
+                for fixed in [false, true] {
+                    let mut model = fixture(
+                        Some(SectionShape::SteelLipChannel {
+                            height: 150.0,
+                            width: 75.0,
+                            lip: 20.0,
+                            thick: 2.3,
+                        }),
+                        MaterialCategory::Steel,
+                    );
+                    model.mass_method = mass_method;
+                    model.elements[0].kind = kind;
+                    model.sections[0].name = "LC544".into();
+                    model.sections[0].shape = Some(SectionShape::SteelLipChannel {
+                        height: 150.0,
+                        width: 75.0,
+                        lip,
+                        thick: 2.3,
+                    });
+                    model.nodes[0].restraint = Dof6Mask::FIXED;
+                    for node in &mut model.nodes {
+                        node.mass = Some([1.0; 6]);
+                        if fixed {
+                            node.restraint = Dof6Mask::FIXED;
+                        }
+                    }
+                    let dofmap = DofMap::build(&model);
+                    let reducer = Reducer::build(&model, &dofmap);
+                    let n = reducer.n_indep.max(1);
+                    let mut solver = make_solver(SolverBackend::DirectSparseCholesky);
+                    solver
+                        .factorize(&assemble_csc(
+                            n,
+                            (0..n)
+                                .map(|i| Triplet {
+                                    row: i,
+                                    col: i,
+                                    val: 1.0,
+                                })
+                                .collect(),
+                        ))
+                        .unwrap();
+                    let wave = GroundMotion {
+                        dt: 0.01,
+                        accel_x: vec![0.0, 0.0],
+                        accel_y: None,
+                        accel_theta: None,
+                    };
+                    let newmark = NewmarkCfg {
+                        dt: 0.01,
+                        ..NewmarkCfg::average_accel()
+                    };
+                    let damping = Damping::MassProportional {
+                        h: 0.05,
+                        omega: 1.0,
+                    };
+                    let state = TimeStepState {
+                        step: 0,
+                        time: 0.0,
+                        disp_red: vec![0.0; reducer.n_indep],
+                        vel_red: vec![0.0; reducer.n_indep],
+                        accel_red: vec![0.0; reducer.n_indep],
+                    };
+                    let before = format!("{model:?}");
+                    let reason = model.validate_lip_channels().unwrap_err().to_string();
+                    let mut check =
+                        |entry: &str, outcome: std::thread::Result<Result<(), SolveError>>| {
+                            match outcome {
+                            Ok(Err(SolveError::InvalidInput(error))) if error == reason => {}
+                            Ok(Err(error)) => failures.push(format!("{mass_method:?}/{kind:?}/C{lip}/fixed{fixed}/{entry}: {error}")),
+                            Ok(Ok(())) => failures.push(format!("{mass_method:?}/{kind:?}/C{lip}/fixed{fixed}/{entry}: 不成立形状で成功")),
+                            Err(_) => failures.push(format!("{mass_method:?}/{kind:?}/C{lip}/fixed{fixed}/{entry}: Result入口でpanic")),
+                        }
+                        };
+                    check(
+                        "assemble_global_m",
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            assemble_global_m(&model, &dofmap, MassOption::Consistent).map(|_| ())
+                        })),
+                    );
+                    for n_modes in [0, 1] {
+                        check(
+                            &format!("solve_eigen({n_modes})"),
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                solve_eigen(&model, &dofmap, &reducer, n_modes).map(|_| ())
+                            })),
+                        );
+                    }
+                    check(
+                        "solve_eigen_with_solver",
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            solve_eigen_with_solver(&model, &dofmap, &reducer, 1, solver.as_ref())
+                                .map(|_| ())
+                        })),
+                    );
+                    check(
+                        "linear_time_history_analysis",
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            linear_time_history_analysis(
+                                &model,
+                                &dofmap,
+                                &reducer,
+                                &wave,
+                                &newmark,
+                                &damping,
+                                &[],
+                                &[],
+                                false,
+                                None,
+                            )
+                            .map(|_| ())
+                        })),
+                    );
+                    check(
+                        "linear_time_history_with_state",
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            linear_time_history_with_state(
+                                &model,
+                                &dofmap,
+                                &reducer,
+                                &wave,
+                                &newmark,
+                                &damping,
+                                &[],
+                                &[],
+                                false,
+                                None,
+                            )
+                            .map(|_| ())
+                        })),
+                    );
+                    check(
+                        "linear_time_history_from_state",
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            linear_time_history_from_state(
+                                &model, &dofmap, &reducer, &wave, &newmark, &damping, &state,
+                                false, None,
+                            )
+                            .map(|_| ())
+                        })),
+                    );
+                    check(
+                        "nonlinear_time_history_analysis",
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            nonlinear_time_history_analysis(
+                                &model,
+                                &dofmap,
+                                &reducer,
+                                &wave,
+                                &newmark,
+                                &damping,
+                                DampingAccumulation::default(),
+                                &[],
+                                &[],
+                                NonlinearThCfg {
+                                    apply_long_term: false,
+                                    ..Default::default()
+                                },
+                            )
+                            .map(|_| ())
+                        })),
+                    );
+                    assert_eq!(format!("{model:?}"), before);
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("; "));
+    for mass_method in [MassMethod::LumpedOnly, MassMethod::CorrectedLumped] {
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let mut model = fixture(
+                Some(SectionShape::SteelLipChannel {
+                    height: 150.0,
+                    width: 75.0,
+                    lip: 20.0,
+                    thick: 2.3,
+                }),
+                MaterialCategory::Steel,
+            );
+            model.mass_method = mass_method;
+            model.elements[0].kind = kind;
+            model.nodes[0].restraint = Dof6Mask::FIXED;
+            model.nodes[1].mass = Some([1.0; 6]);
+            let dofmap = DofMap::build(&model);
+            let reducer = Reducer::build(&model, &dofmap);
+            let before = format!("{model:?}");
+            assert!(assemble_global_m(&model, &dofmap, MassOption::Consistent).is_ok());
+            let modal = solve_eigen(&model, &dofmap, &reducer, 1).unwrap();
+            assert_eq!(modal.period.len(), 1);
+            assert!(modal.period[0].is_finite() && modal.period[0] > 0.0);
+            let wave = GroundMotion {
+                dt: 0.01,
+                accel_x: vec![0.0, 0.0],
+                accel_y: None,
+                accel_theta: None,
+            };
+            let newmark = NewmarkCfg {
+                dt: 0.01,
+                ..NewmarkCfg::average_accel()
+            };
+            let damping = Damping::MassProportional {
+                h: 0.05,
+                omega: 1.0,
+            };
+            assert!(linear_time_history_analysis(
+                &model,
+                &dofmap,
+                &reducer,
+                &wave,
+                &newmark,
+                &damping,
+                &[],
+                &[],
+                false,
+                None
+            )
+            .is_ok());
+            assert_eq!(format!("{model:?}"), before);
+        }
+    }
+}
