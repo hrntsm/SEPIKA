@@ -275,6 +275,14 @@ impl Model {
             .iter()
             .filter(|r| r.part == part)
             .collect();
+        if matches!(part, "vertical" | "horizontal")
+            && inputs.iter().any(|input| {
+                input.position.is_some()
+                    || input.native_material != inputs.first().unwrap().native_material
+            })
+        {
+            return None;
+        }
         let resolved = self.resolve_stb_rebar(inputs.first()?).ok()?;
         if inputs.iter().any(|input| {
             self.resolve_stb_rebar(input)

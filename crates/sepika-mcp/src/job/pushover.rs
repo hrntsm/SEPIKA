@@ -122,6 +122,7 @@ mod tests {
             thickness: 180.0,
             ps: 0.002,
             pwh_ratio: Some(0.002),
+            pwv_ratio: Some(0.002),
         }
         .to_section(SectionId(2), "壁".into());
         section.material = Some(MaterialId(0));
@@ -156,6 +157,45 @@ mod tests {
         let upper_floor = model.stories.last_mut().unwrap();
         upper_floor.weight_override = Some(500_000.0);
         upper_floor.seismic_weight = Some(500_000.0);
+        for missing_vertical in [false, true] {
+            let mut missing = model.clone();
+            if missing_vertical {
+                if let Some(sepika_core::section_shape::SectionShape::RcWall {
+                    pwv_ratio, ..
+                }) = &mut missing.sections[2].shape
+                {
+                    *pwv_ratio = None;
+                }
+            } else {
+                missing.sections[2].shear_rebar_material = None;
+            }
+            sepika_core::wall_region_rebuild::rebuild_wall_regions(&mut missing);
+            let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&missing);
+            let wall = expanded
+                .elements
+                .iter()
+                .find(|e| e.kind == sepika_core::model::ElementKind::Wall)
+                .unwrap();
+            let reason =
+                sepika_element::wall::wall_element::WallElement::wall_shear_capacity_issue(
+                    wall,
+                    &expanded,
+                    sepika_element::factory::StrengthBasis::MaterialStrength,
+                )
+                .unwrap();
+            let error = compute_pushover_job(
+                missing,
+                &JobParams {
+                    steps: 3,
+                    max_disp: Some(1.0),
+                    ..Default::default()
+                },
+            )
+            .err()
+            .unwrap()
+            .to_string();
+            assert!(error.contains(&reason), "{error} / {reason}");
+        }
         let outcome = compute_pushover_job(
             model,
             &JobParams {

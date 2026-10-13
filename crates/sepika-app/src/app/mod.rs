@@ -2549,3 +2549,6 @@ mod frame_node_count_tests;
 
 #[cfg(all(test, feature = "gui"))]
 mod lip_channel_geometry_tests;
+
+#[cfg(all(test, feature = "gui"))]
+mod rc_wall_direction_tests;

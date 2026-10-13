@@ -299,4 +299,30 @@ mod tests {
         capped.pwh_ratio = 0.012;
         assert!((wall_shear_ultimate(&over) - wall_shear_ultimate(&capped)).abs() < 1e-6);
     }
+    #[test]
+    fn horizontal_term_matches_independent_force_and_single_thickness_conversion() {
+        let mut input = sample();
+        input.te = 200.0;
+        input.t = 200.0;
+        input.d_wall = 4000.0;
+        input.dc_compression = 600.0;
+        input.pwh_ratio = 0.002;
+        input.sigma_wh = 0.0;
+        let concrete = wall_shear_ultimate(&input);
+        for (ratio, fy, force_n) in [
+            (0.002, 295.0, 422751.059098319),
+            (0.006, 295.0, 732226.313311841),
+            (0.002, 345.0, 457175.810855354),
+        ] {
+            input.pwh_ratio = ratio;
+            input.sigma_wh = fy;
+            assert!((wall_shear_ultimate(&input) - concrete - force_n).abs() < 1e-8);
+        }
+        input.pwh_ratio = 0.002;
+        input.sigma_wh = 0.0;
+        input.te = 300.0;
+        let concrete = wall_shear_ultimate(&input);
+        input.sigma_wh = 295.0;
+        assert!((wall_shear_ultimate(&input) - concrete - 517762.1915060282).abs() < 1e-8);
+    }
 }

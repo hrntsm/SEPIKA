@@ -1220,6 +1220,7 @@ mod tests {
         let shape = SectionShape::RcWall {
             thickness: 200.0,
             pwh_ratio: None,
+            pwv_ratio: None,
             ps: 0.0025,
         };
         let section = shape.to_section(SectionId(0), "W".into());
@@ -1242,6 +1243,7 @@ mod tests {
             SectionShape::RcWall {
                 thickness: 200.0,
                 pwh_ratio: None,
+                pwv_ratio: None,
                 ps: 0.0025,
             },
             SectionShape::RcSlab { thickness: 150.0 },
@@ -1659,6 +1661,7 @@ mod tests {
             SectionShape::RcWall {
                 thickness: 150.0,
                 pwh_ratio: None,
+                pwv_ratio: None,
                 ps: 0.0025,
             },
             SectionShape::RcSlab { thickness: 150.0 },
@@ -1918,6 +1921,7 @@ mod tests {
         let wall = SectionShape::RcWall {
             thickness: 150.0,
             pwh_ratio: None,
+            pwv_ratio: None,
             ps: 0.0025,
         }
         .to_section(SectionId(0), "RC壁".into());

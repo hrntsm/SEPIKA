@@ -65,6 +65,7 @@ pub struct SectionEditorDraft {
     pub shear_legs_y: u32,
     pub wall_ps: f64,
     pub wall_pwh_ratio: Option<f64>,
+    pub wall_pwv_ratio: Option<f64>,
 }
 
 impl Default for SectionEditorDraft {
@@ -107,6 +108,7 @@ impl Default for SectionEditorDraft {
             shear_legs_y: 2,
             wall_ps: 0.0025,
             wall_pwh_ratio: None,
+            wall_pwv_ratio: None,
         }
     }
 }
@@ -435,12 +437,19 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                     ui.add(egui::DragValue::new(&mut draft.wall_ps).speed(0.0001));
                 });
                 let mut known = draft.wall_pwh_ratio.is_some();
-                ui.label("参考骨格用横筋比（数量・解析には未反映）");
+                ui.label("解析用方向別筋比（数量は直交最小筋比 ps を使用）");
                 if ui.checkbox(&mut known, "横筋比を指定（実壁厚基準）").changed() {
                     draft.wall_pwh_ratio = known.then_some(0.0);
                 }
                 if let Some(pwh) = &mut draft.wall_pwh_ratio {
                     ui.add(egui::DragValue::new(pwh).speed(0.0001));
+                }
+                let mut known = draft.wall_pwv_ratio.is_some();
+                if ui.checkbox(&mut known, "縦筋比を指定（実壁厚・壁長基準）").changed() {
+                    draft.wall_pwv_ratio = known.then_some(0.0);
+                }
+                if let Some(pwv) = &mut draft.wall_pwv_ratio {
+                    ui.add(egui::DragValue::new(pwv).speed(0.0001));
                 }
             }
             ShapeKind::RcSlab => {
@@ -922,12 +931,14 @@ fn sync_wall_shape(draft: &mut SectionEditorDraft, shape: &SectionShape) {
         thickness,
         ps,
         pwh_ratio,
+        pwv_ratio,
     } = shape
     {
         draft.kind = ShapeKind::RcWall;
         draft.thick = *thickness;
         draft.wall_ps = *ps;
         draft.wall_pwh_ratio = *pwh_ratio;
+        draft.wall_pwv_ratio = *pwv_ratio;
     }
 }
 
@@ -1034,6 +1045,7 @@ fn build_shape(d: &SectionEditorDraft) -> SectionShape {
             thickness: d.thick,
             ps: d.wall_ps,
             pwh_ratio: d.wall_pwh_ratio,
+            pwv_ratio: d.wall_pwv_ratio,
         },
     }
 }
@@ -1100,6 +1112,7 @@ mod tests {
             thickness: 180.0,
             ps: 0.002,
             pwh_ratio: Some(0.006),
+            pwv_ratio: Some(0.002),
         };
         let mut draft = SectionEditorDraft::default();
         sync_wall_shape(&mut draft, &shape);
@@ -1110,6 +1123,7 @@ mod tests {
             SectionShape::RcWall {
                 ps: 0.002,
                 pwh_ratio: None,
+                pwv_ratio: Some(0.002),
                 ..
             }
         ));

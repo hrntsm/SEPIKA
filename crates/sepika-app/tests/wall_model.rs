@@ -220,12 +220,13 @@ fn wall_bay_model() -> Model {
         thickness: Some(150.0),
         shape: Some(SectionShape::RcWall {
             thickness: 150.0,
-            pwh_ratio: None,
+            pwh_ratio: Some(0.0025),
+            pwv_ratio: Some(0.0025),
             ps: 0.0025,
         }),
         material: Some(MaterialId(1)),
-        rebar_material: None,
-        shear_rebar_material: None,
+        rebar_material: Some(MaterialId(2)),
+        shear_rebar_material: Some(MaterialId(2)),
         steel_material: None,
         property_basis: Default::default(),
     });
@@ -349,12 +350,13 @@ fn wall_bay_model() -> Model {
         thickness: Some(120.0),
         shape: Some(SectionShape::RcWall {
             thickness: 120.0,
-            pwh_ratio: None,
+            pwh_ratio: Some(0.0025),
+            pwv_ratio: Some(0.0025),
             ps: 0.0025,
         }),
         material: Some(MaterialId(1)),
-        rebar_material: None,
-        shear_rebar_material: None,
+        rebar_material: Some(MaterialId(2)),
+        shear_rebar_material: Some(MaterialId(2)),
         steel_material: None,
         property_basis: Default::default(),
     });
@@ -490,6 +492,20 @@ fn wall_bay_model() -> Model {
         model.set_member_hysteresis(id, sepika_core::model::HysteresisModel::Standard);
     }
 
+    let mut vertical = model.materials[2].clone();
+    vertical.id = MaterialId(3);
+    vertical.strength_factor = Some(1.0);
+    let mut horizontal = vertical.clone();
+    horizontal.id = MaterialId(4);
+    horizontal.name = "SD295A".into();
+    horizontal.fy = Some(295.0);
+    model.materials.extend([vertical, horizontal]);
+    for section in &mut model.sections {
+        if matches!(section.shape, Some(SectionShape::RcWall { .. })) {
+            section.rebar_material = Some(MaterialId(3));
+            section.shear_rebar_material = Some(MaterialId(4));
+        }
+    }
     model
 }
 
@@ -1395,7 +1411,8 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
     section.shape = Some(SectionShape::RcWall {
         thickness: 150.0,
         ps: 0.012,
-        pwh_ratio: None,
+        pwh_ratio: Some(0.012),
+        pwv_ratio: Some(0.012),
     });
     let c = std::f64::consts::FRAC_1_SQRT_2;
     for node in &mut app.core.model.nodes {
@@ -1432,8 +1449,11 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
     let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
     let elem = expanded.element(elem_id).unwrap();
     let qu = sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(
-        elem, &expanded,
-    );
+        elem,
+        &expanded,
+        sepika_element::factory::StrengthBasis::Nominal,
+    )
+    .unwrap();
     let geom = sepika_core::model::wall_element_geometry(elem, &expanded).unwrap();
     let r2 = sepika_element::wall::wall_element::WallElement::opening_strength_reduction(
         elem, &expanded,

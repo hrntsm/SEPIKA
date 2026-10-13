@@ -57,7 +57,7 @@ pub fn wall_column_fiber_lp(data: &ElementData, model: &Model) -> Option<f64> {
     if !crate::wall::misc_wall::wall_is_seismic(data, model) {
         return None;
     }
-    if WallElement::shear_capacity_of(data, model) <= 0.0 {
+    if WallElement::shear_capacity_of(data, model).ok()? <= 0.0 {
         return None;
     }
     let geom = wall_element_geometry(data, model)?;
@@ -124,8 +124,9 @@ struct WallShearGeometry {
     lw: f64,
     /// 壁の上下梁中心間高さ h [mm]
     h: f64,
-    /// 壁筋比 ps（小数）
-    ps: f64,
+    /// 実壁厚に対する横筋比（小数）。
+    pwh_ratio: f64,
+    pwv_ratio: f64,
     /// 側柱外面間の全長 [mm]。
     d_wall: f64,
     /// 圧縮側柱の壁長方向せい [mm]。
@@ -138,6 +139,117 @@ struct WallShearGeometry {
     sigma_wh: f64,
     /// 開口寸法 `(l0, h0)` [mm]（無開口は `None`）
     opening: Option<(f64, f64)>,
+}
+
+fn wall_input_error(data: &ElementData, role: &str, reason: impl std::fmt::Display) -> String {
+    format!(
+        "RC壁 要素ID {}・断面ID {:?} の{role}: {reason}",
+        data.id.0,
+        data.section.map(|s| s.0)
+    )
+}
+
+fn wall_direction_ratio(data: &ElementData, model: &Model, vertical: bool) -> Result<f64, String> {
+    let role = if vertical { "縦筋比" } else { "横筋比" };
+    let value = match model.element_section(data).and_then(|s| s.shape.as_ref()) {
+        Some(SectionShape::RcWall {
+            pwv_ratio,
+            pwh_ratio,
+            ..
+        }) => {
+            if vertical {
+                *pwv_ratio
+            } else {
+                *pwh_ratio
+            }
+        }
+        _ => None,
+    };
+    value.filter(|v| v.is_finite() && *v >= 0.0).ok_or_else(|| {
+        wall_input_error(
+            data,
+            role,
+            "明示した有限な非負値が必要です（psから補完できません）",
+        )
+    })
+}
+
+fn wall_rebar_strength(
+    data: &ElementData,
+    model: &Model,
+    vertical: bool,
+    basis: crate::factory::StrengthBasis,
+) -> Result<f64, String> {
+    let role = if vertical {
+        "縦筋材料"
+    } else {
+        "横筋材料"
+    };
+    let mat = if vertical {
+        model.element_rebar_material(data)
+    } else {
+        model.element_shear_rebar_material(data)
+    }
+    .ok_or_else(|| {
+        wall_input_error(
+            data,
+            role,
+            "材料参照が未設定・破損、または元部位の方向を解決できません",
+        )
+    })?;
+    if model
+        .materials
+        .get(mat.id.index())
+        .is_none_or(|stored| !std::ptr::eq(stored, mat))
+    {
+        return Err(wall_input_error(
+            data,
+            role,
+            format!("材料ID {}の参照が破損しています", mat.id.0),
+        ));
+    }
+    let supported = if vertical {
+        sepika_core::standard_material::rebar_grade_strength(&mat.name).is_some()
+    } else {
+        sepika_core::material_grade::is_supported_shear_rebar_grade(&mat.name)
+    };
+    if mat.category != sepika_core::model::MaterialCategory::Rebar || !supported {
+        return Err(wall_input_error(
+            data,
+            role,
+            format!(
+                "材料ID {}「{}」は対応する鉄筋材種ではありません",
+                mat.id.0, mat.name
+            ),
+        ));
+    }
+    let fy = mat
+        .fy
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .ok_or_else(|| {
+            wall_input_error(
+                data,
+                role,
+                format!(
+                    "材料ID {}「{}」のfyは明示した有限正値が必要です",
+                    mat.id.0, mat.name
+                ),
+            )
+        })?;
+    let factor = if vertical {
+        basis.rebar_factor(Some(mat))
+    } else {
+        1.0
+    };
+    let value = fy * factor;
+    if !factor.is_finite() || factor <= 0.0 || !value.is_finite() || value <= 0.0 {
+        return Err(wall_input_error(
+            data,
+            role,
+            format!("材料ID {}の強度倍率は有限正値が必要です", mat.id.0),
+        ));
+    }
+    Ok(value)
 }
 
 impl WallElement {
@@ -367,42 +479,53 @@ impl WallElement {
         })
     }
 
-    /// 壁柱の軸・曲げをファイバー断面（コンクリート格子＋縦筋の等価分散配置）の
-    /// 壁柱の軸・曲げをファイバー断面の弾塑性評価に切り替える。
-    /// コンクリート強度 Fc がない等でファイバー断面を組めない場合は弾性のまま返す。
+    /// 壁柱の軸・曲げを、明示縦筋の等価分散配置によるファイバー断面へ切り替える。
+    /// 必要な縦筋比・縦筋材料・コンクリート材料が不足する場合は理由を返す。
     pub(crate) fn with_fiber_flexure(
         mut self,
         data: &ElementData,
         model: &Model,
         basis: crate::factory::StrengthBasis,
         kind: sepika_core::model::AnalysisKind,
-    ) -> Self {
-        let Some(geom) = wall_element_geometry(data, model) else {
-            return self;
+    ) -> Result<Self, String> {
+        let geom = wall_element_geometry(data, model)
+            .ok_or_else(|| wall_input_error(data, "幾何", "壁寸法を解決できません"))?;
+        let mat = model.element_material(data).ok_or_else(|| {
+            wall_input_error(data, "コンクリート材料", "材料参照が未設定・破損です")
+        })?;
+        if mat.category != sepika_core::model::MaterialCategory::Concrete {
+            return Err(wall_input_error(
+                data,
+                "コンクリート材料",
+                "コンクリート材種が必要です",
+            ));
+        }
+        let fc = mat
+            .fc
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .ok_or_else(|| wall_input_error(data, "コンクリート材料", "有限正Fcが必要です"))?;
+        let t = match model.element_section(data).and_then(|s| s.shape.as_ref()) {
+            Some(SectionShape::RcWall { thickness, .. }) => *thickness,
+            _ => return Err(wall_input_error(data, "断面", "明示RC壁形状が必要です")),
         };
-        let Some(mat) = model.element_material(data) else {
-            return self;
-        };
-        let Some(fc) = mat.fc.filter(|v| *v > 0.0) else {
-            return self;
-        };
-        let sec = data.section.and_then(|sid| model.sections.get(sid.index()));
-        let (t, ps) = match sec.and_then(|s| s.shape.as_ref()) {
-            Some(SectionShape::RcWall { thickness, ps, .. }) => (*thickness, *ps),
-            _ => match sec.map(|s| s.thickness.unwrap_or(s.width)) {
-                Some(t) if t > 0.0 => (t, 0.0025),
-                _ => return self,
-            },
-        };
+        let pwv_ratio = wall_direction_ratio(data, model, true)?;
+        let rebar_fy = wall_rebar_strength(data, model, true, basis)?;
         let lw = 0.5 * (geom.lw_bottom + geom.lw_top);
         let h = self.column.length;
-        if t <= 0.0 || lw <= 0.0 || h <= 0.0 {
-            return self;
+        if !t.is_finite() || t <= 0.0 || lw <= 0.0 || h <= 0.0 {
+            return Err(wall_input_error(
+                data,
+                "幾何",
+                "有限正の壁厚・壁長・高さが必要です",
+            ));
         }
 
+        let rebar_factor = 1.0 + (E_STEEL / mat.young - 1.0) * pwv_ratio;
+        self.column.a = t * lw * rebar_factor;
+        self.column.iz = t * lw.powi(3) / 12.0 * rebar_factor;
+        self.column.local_stiffness_cache = std::sync::OnceLock::new();
         let nw = 4;
         let nd = 20;
-        let rebar_fy = 345.0 * basis.rebar_factor(Some(mat));
         let concrete_rule = crate::factory::resolve_wall_concrete_hysteresis(data, model, kind);
         let make_section = || {
             let (mut section, mut mats) = crate::frame::fiber::build_gauss_fibers(
@@ -421,8 +544,8 @@ impl WallElement {
                 concrete_rule,
             )
             .expect("形状なしの壁ファイバは実配筋を要求しない");
-            if ps > 0.0 {
-                let a_each = ps * t * lw / nd as f64;
+            if pwv_ratio > 0.0 {
+                let a_each = pwv_ratio * t * lw / nd as f64;
                 for i in 0..nd {
                     let y = ((i as f64 + 0.5) / nd as f64 - 0.5) * lw;
                     section.fibers.push(sepika_section::fiber::Fiber {
@@ -464,7 +587,7 @@ impl WallElement {
         fiber.trial_int = smallvec::smallvec![0.0; 2];
         fiber.committed_int = smallvec::smallvec![0.0; 2];
         self.fiber_column = Some(fiber);
-        self
+        Ok(self)
     }
 
     /// 耐震壁の面内せん断終局強度 Qu [N]（荒川mean式系）。
@@ -477,7 +600,8 @@ impl WallElement {
             te,
             lw,
             h,
-            ps,
+            pwh_ratio,
+            pwv_ratio,
             d_wall,
             dc_compression,
             col_main_at,
@@ -498,7 +622,7 @@ impl WallElement {
         let at = if has_side_column {
             col_main_at
         } else {
-            ps.max(0.0) * te * d_eff
+            pwv_ratio * t * lw
         };
         if at <= 0.0 {
             return 0.0;
@@ -512,7 +636,7 @@ impl WallElement {
                 dc_compression,
                 tension_column_at: at,
                 sigma_wh,
-                pwh_ratio: ps.max(0.0),
+                pwh_ratio,
                 sigma_0: 0.0,
                 shear_span_ratio: h / d_wall,
                 opening: opening.map(|(l0, h0)| (l0, h0, h, lw)),
@@ -531,28 +655,50 @@ impl WallElement {
     }
 
     /// 正負のせん断終局耐力の小さい値 [N]。算定可否の判定と方向未指定の表示用。
-    pub fn shear_capacity_of(data: &ElementData, model: &Model) -> f64 {
-        let qu = Self::directional_shear_capacity_of(data, model);
-        qu[0].min(qu[1])
+    pub fn shear_capacity_of(data: &ElementData, model: &Model) -> Result<f64, String> {
+        let qu = Self::directional_shear_capacity_of(
+            data,
+            model,
+            crate::factory::StrengthBasis::Nominal,
+        )?;
+        Ok(qu[0].min(qu[1]))
     }
 
-    /// 壁下辺a→b方向の正載荷・負載荷の終局せん断耐力 [N]。算定不能は0。
-    pub fn directional_shear_capacity_of(data: &ElementData, model: &Model) -> [f64; 2] {
+    /// 壁下辺a→b方向の正・負載荷の終局せん断耐力 [N]。必要入力不足は理由を返す。
+    pub fn directional_shear_capacity_of(
+        data: &ElementData,
+        model: &Model,
+        basis: crate::factory::StrengthBasis,
+    ) -> Result<[f64; 2], String> {
         let Some(geom) = wall_element_geometry(data, model) else {
-            return [0.0; 2];
+            return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
         };
+        if model.element_section(data).is_none() {
+            return Err(wall_input_error(data, "断面", "断面が設定されていません"));
+        }
         if !crate::wall::misc_wall::is_rc_wall(data, model) {
-            return [Self::steel_shear_capacity_of(data, model); 2];
+            return Ok([Self::steel_shear_capacity_of(data, model); 2]);
         }
         let Some(sec) = model.element_section(data) else {
-            return [0.0; 2];
+            return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
         };
-        let (t, ps) = match &sec.shape {
-            Some(SectionShape::RcWall { thickness, ps, .. }) => (*thickness, (*ps).max(0.0)),
-            _ => (sec.thickness.unwrap_or(sec.width), 0.0),
+        if Some(sec.id) != data.section {
+            return Err(wall_input_error(data, "断面", "参照IDが破損しています"));
+        }
+        let t = match sec.shape.as_ref() {
+            Some(SectionShape::RcWall { thickness, .. }) => *thickness,
+            _ => return Err(wall_input_error(data, "断面", "明示RC壁形状が必要です")),
         };
+        let pwh_ratio = wall_direction_ratio(data, model, false)?;
+        let fc = model
+            .element_material(data)
+            .filter(|m| m.category == sepika_core::model::MaterialCategory::Concrete)
+            .and_then(|m| m.fc)
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .ok_or_else(|| wall_input_error(data, "コンクリート材料", "有限正Fcが必要です"))?;
+
         let Ok(section) = super::shear_section::WallSection::new(data, model) else {
-            return [0.0; 2];
+            return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
         };
         let mut at = [0.0; 2];
         let mut depth = [0.0; 2];
@@ -562,37 +708,38 @@ impl WallElement {
                     .element_section(&model.elements[col.element_index])
                     .and_then(|sec| sec.shape.as_ref())
                 else {
-                    return [0.0; 2];
+                    return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
                 };
                 let Some(area) = side_column_main_area(shape) else {
-                    return [0.0; 2];
+                    return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
                 };
                 at[side] = area;
                 if at[side] <= 0.0 {
-                    return [0.0; 2];
+                    return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
                 }
                 depth[side] = col.extent[1] - col.extent[0];
             }
         }
         let d_wall = geom.lw + depth.iter().sum::<f64>() / 2.0;
         let Ok(properties) = section.properties() else {
-            return [0.0; 2];
+            return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
         };
         let te = (properties.area_mm2 / d_wall).min(1.5 * t);
-        let shear_mat = model.element_shear_rebar_material(data);
-        if sepika_core::material_grade::shear_rebar_material_issue(shear_mat).is_some() {
-            return [0.0; 2];
-        }
-        let sigma_wh = sepika_core::material_grade::shear_rebar_yield_strength(shear_mat)
-            .unwrap_or(sepika_core::material_grade::SHEAR_REBAR_DEFAULT_FY);
-        std::array::from_fn(|tension| {
+        let sigma_wh = wall_rebar_strength(data, model, false, basis)?;
+        let pwv_ratio = if section.columns.iter().any(Option::is_none) {
+            wall_direction_ratio(data, model, true)?
+        } else {
+            0.0
+        };
+        let qu = std::array::from_fn(|tension| {
             Self::shear_capacity(&WallShearGeometry {
-                fc: model.element_material(data).and_then(|m| m.fc),
+                fc: Some(fc),
                 t,
                 te,
                 lw: geom.lw,
                 h: geom.h,
-                ps,
+                pwh_ratio,
+                pwv_ratio,
                 d_wall,
                 dc_compression: depth[1 - tension],
                 col_main_at: at[tension],
@@ -600,7 +747,15 @@ impl WallElement {
                 sigma_wh,
                 opening: wall_opening_equiv_dims(data, model),
             })
-        })
+        });
+        if qu.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+            return Err(wall_input_error(
+                data,
+                "せん断耐力",
+                "採用式の必要成分・寸法・配筋・開口条件が不成立です",
+            ));
+        }
+        Ok(qu)
     }
 
     /// 鋼板耐震壁の面内せん断終局強度 Qy [N]。
@@ -633,7 +788,11 @@ impl WallElement {
     }
 
     /// RC壁の耐力式を適用できない側柱・配筋・材料・幾何の不備を返す。
-    pub fn wall_shear_capacity_issue(data: &ElementData, model: &Model) -> Option<String> {
+    pub fn wall_shear_capacity_issue(
+        data: &ElementData,
+        model: &Model,
+        basis: crate::factory::StrengthBasis,
+    ) -> Option<String> {
         if !matches!(data.kind, sepika_core::model::ElementKind::Wall) {
             return None;
         }
@@ -650,6 +809,14 @@ impl WallElement {
         if !crate::wall::misc_wall::wall_is_seismic(data, model) {
             return None;
         }
+        if crate::wall::misc_wall::is_rc_wall(data, model) {
+            return Self::directional_shear_capacity_of(data, model, basis)
+                .and_then(|_| {
+                    wall_direction_ratio(data, model, true)?;
+                    wall_rebar_strength(data, model, true, basis)
+                })
+                .err();
+        }
         let Some(sec) = data.section.and_then(|sid| model.sections.get(sid.index())) else {
             return Some(format!(
                 "耐震壁 ID {} に断面が設定されていません。\
@@ -658,10 +825,7 @@ impl WallElement {
                 data.id.0
             ));
         };
-        let (t, ps) = match &sec.shape {
-            Some(SectionShape::RcWall { thickness, ps, .. }) => (*thickness, (*ps).max(0.0)),
-            _ => (sec.thickness.unwrap_or(sec.width), 0.0),
-        };
+        let t = sec.thickness.unwrap_or(sec.width);
         if t <= 0.0 {
             return Some(format!(
                 "耐震壁 ID {} の断面「{}」の壁厚が 0 以下です。\
@@ -696,60 +860,6 @@ impl WallElement {
                 ));
             }
             return None;
-        }
-        match mat.fc {
-            None => {
-                return Some(format!(
-                    "耐震壁 ID {} の材料「{}」にコンクリート強度 Fc が設定されていません。\
-                     保有水平耐力計算では耐震壁の終局せん断強度が必要です。材料タブで Fc を設定してください。",
-                    data.id.0, mat.name
-                ));
-            }
-            Some(fc) if !fc.is_finite() || fc <= 0.0 => {
-                return Some(format!(
-                    "耐震壁 ID {} の材料「{}」のコンクリート強度 Fc が {} で 0 以下または非有限値です。\
-                     保有水平耐力計算では耐震壁の終局せん断強度が必要です。材料タブで Fc を設定してください。",
-                    data.id.0, mat.name, fc
-                ));
-            }
-            Some(_) => {}
-        }
-
-        if let Some(msg) = sepika_core::material_grade::shear_rebar_material_issue(
-            model.element_shear_rebar_material(data),
-        ) {
-            return Some(format!("耐震壁 ID {} の{}", data.id.0, msg));
-        }
-
-        let section = match super::shear_section::WallSection::new(data, model) {
-            Ok(section) => section,
-            Err(reason) => return Some(reason),
-        };
-        let has_side_column = section.columns.iter().any(Option::is_some);
-        for column in section.columns.iter().flatten() {
-            let shape = model
-                .element_section(&model.elements[column.element_index])
-                .and_then(|sec| sec.shape.as_ref());
-            match shape.and_then(side_column_main_area) {
-                Some(area) if area > 0.0 => {}
-                _ => return Some(format!("耐震壁 ID {} の側柱の終局せん断耐力を算定できません。現在のRC耐力式は主筋を明示したRC矩形・円形側柱に適用します。SRC・CFT・鋼材側柱の弾性断面計算とは適用範囲が異なります。", data.id.0)),
-            }
-        }
-        if !has_side_column && ps <= 0.0 {
-            return Some(format!(
-                "耐震壁 ID {} は側柱（付帯柱）がなく、かつ壁筋比 ps が 0 です。\
-                 断面タブで壁筋比を設定してください。\
-                 保有水平耐力計算では壁筋比から耐震壁の等価引張鉄筋比 pte を算定します。",
-                data.id.0
-            ));
-        }
-        if Self::shear_capacity_of(data, model) <= 0.0 {
-            return Some(format!(
-                "耐震壁 ID {} の終局せん断強度 Qu を算定できません（算定結果が 0 以下）。\
-                 壁の寸法・壁筋比・側柱の配筋・開口寸法の入力を確認してください。\
-                 保有水平耐力計算では Qu が定まらない壁を弾性として扱えません。",
-                data.id.0
-            ));
         }
         None
     }
@@ -1390,6 +1500,26 @@ fn levi_civita(i: usize, j: usize, k: usize) -> f64 {
 }
 
 #[cfg(test)]
+fn explicit_wall_test_rebar(model: &mut Model) {
+    let id = sepika_core::ids::MaterialId(model.materials.len() as u32);
+    model.materials.push(sepika_core::model::Material {
+        id,
+        name: "SD345".into(),
+        category: sepika_core::model::MaterialCategory::Rebar,
+        young: E_STEEL,
+        poisson: 0.3,
+        density: 7.85e-9,
+        shear: None,
+        fc: None,
+        fy: Some(345.0),
+        strength_factor: Some(1.0),
+        concrete_class: Default::default(),
+    });
+    model.sections[0].rebar_material = Some(id);
+    model.sections[0].shear_rebar_material = Some(id);
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use sepika_core::dof::Dof6Mask;
@@ -1410,7 +1540,8 @@ mod tests {
         };
         let shape = SectionShape::RcWall {
             thickness: 150.0,
-            pwh_ratio: None,
+            pwh_ratio: Some(0.0025),
+            pwv_ratio: Some(0.0025),
             ps: 0.0025,
         };
         let model = Model {
@@ -1455,6 +1586,8 @@ mod tests {
         };
         let mut model = model;
         crate::wall::add_surrounding_frame(&mut model, &data);
+        let mut model = model;
+        explicit_wall_test_rebar(&mut model);
         (model, data)
     }
 
@@ -1695,12 +1828,14 @@ mod tests {
         let (model, data) = make_wall_model();
         let mut wall = WallElement::try_new(&data, &model).unwrap();
         if nonlinear {
-            wall = wall.with_fiber_flexure(
-                &data,
-                &model,
-                crate::factory::StrengthBasis::MaterialStrength,
-                sepika_core::model::AnalysisKind::Incremental,
-            );
+            wall = wall
+                .with_fiber_flexure(
+                    &data,
+                    &model,
+                    crate::factory::StrengthBasis::MaterialStrength,
+                    sepika_core::model::AnalysisKind::Incremental,
+                )
+                .unwrap();
             assert!(wall.fiber_column.is_some());
         }
         let k = wall.stiffness_24(&Ctx { model: &model });
@@ -2041,7 +2176,8 @@ mod geometry_tests {
     fn wall_with(coords: [[f64; 3]; 4], order: [u32; 4]) -> (Model, ElementData) {
         let shape = SectionShape::RcWall {
             thickness: 150.0,
-            pwh_ratio: None,
+            pwh_ratio: Some(0.0025),
+            pwv_ratio: Some(0.0025),
             ps: 0.0025,
         };
         let model = Model {
@@ -2074,6 +2210,8 @@ mod geometry_tests {
             plastic_zone: None,
             spring: None,
         };
+        let mut model = model;
+        explicit_wall_test_rebar(&mut model);
         (model, data)
     }
 
@@ -2150,7 +2288,8 @@ mod shear_yield_tests {
     fn wall_model() -> (Model, ElementData) {
         let shape = SectionShape::RcWall {
             thickness: 200.0,
-            pwh_ratio: None,
+            pwh_ratio: Some(0.0025),
+            pwv_ratio: Some(0.0025),
             ps: 0.0025,
         };
         let mk = |id: u32, c: [f64; 3]| Node {
@@ -2203,60 +2342,55 @@ mod shear_yield_tests {
         };
         let mut model = model;
         crate::wall::add_surrounding_frame(&mut model, &data);
+        let mut model = model;
+        explicit_wall_test_rebar(&mut model);
         (model, data)
     }
 
-    /// 壁横筋の材料（`SectionShape` によらず断面の `shear_rebar_material`）から
-    /// σwh を解決することを確認する。
-    ///
-    /// - 未割当は SD295 相当（295 N/mm²）を既定とする
-    /// - SD295 を明示的に割り当てても未割当と同じ Qu になる
-    /// - SD390 を割り当てると σwh が上がり Qu が増える
-    /// - 未対応グレード（KH785）を割り当てると Qu は算定不能（0）になる
     #[test]
-    fn test_wall_qu_uses_section_shear_rebar_material() {
-        let rebar = |id: u32, name: &str, fy: f64| Material {
-            strength_factor: None,
-            concrete_class: Default::default(),
-            id: MaterialId(id),
-            name: name.into(),
-            category: MaterialCategory::Rebar,
-            young: 205000.0,
-            poisson: 0.3,
-            density: 7.85e-9,
-            shear: None,
-            fc: None,
-            fy: Some(fy),
-        };
+    fn wall_shear_material_requires_explicit_supported_rebar_and_finite_positive_fy() {
         let (mut model, data) = wall_model();
-        let qu_unassigned = WallElement::shear_capacity_of(&data, &model);
-        assert!(qu_unassigned > 0.0, "Qu が算定できるはず");
-
-        model.materials.push(rebar(1, "SD295A", 295.0));
-        model.materials.push(rebar(2, "SD390", 390.0));
-        model.materials.push(rebar(3, "KH785", 785.0));
-
-        model.sections[0].shear_rebar_material = Some(MaterialId(1));
-        let qu_sd295 = WallElement::shear_capacity_of(&data, &model);
-        assert!(
-            (qu_sd295 - qu_unassigned).abs() < 1e-6,
-            "未割当の既定は SD295 相当のはず: {qu_unassigned:.6e} vs {qu_sd295:.6e}"
-        );
-
-        model.sections[0].shear_rebar_material = Some(MaterialId(2));
-        let qu_sd390 = WallElement::shear_capacity_of(&data, &model);
-        assert!(
-            qu_sd390 > qu_sd295,
-            "SD390 の Qu {qu_sd390:.6e} が SD295 の Qu {qu_sd295:.6e} を超えていない"
-        );
-
-        model.sections[0].shear_rebar_material = Some(MaterialId(3));
-        let qu_kh785 = WallElement::shear_capacity_of(&data, &model);
-        assert_eq!(qu_kh785, 0.0, "未対応グレードの Qu は算定不能");
-        assert!(
-            WallElement::wall_shear_capacity_issue(&data, &model).is_some(),
-            "未対応グレードは入力不備として報告されるはず"
-        );
+        let rebar_id = model.sections[0].shear_rebar_material.unwrap();
+        for fy in [
+            None,
+            Some(0.0),
+            Some(-1.0),
+            Some(f64::NAN),
+            Some(f64::INFINITY),
+            Some(f64::NEG_INFINITY),
+        ] {
+            model.materials[rebar_id.index()].fy = fy;
+            let reason = WallElement::shear_capacity_of(&data, &model).unwrap_err();
+            assert!(
+                reason.contains("横筋材料")
+                    && reason.contains("要素ID 0")
+                    && reason.contains("断面ID Some(0)")
+            );
+            assert_eq!(
+                WallElement::wall_shear_capacity_issue(
+                    &data,
+                    &model,
+                    crate::factory::StrengthBasis::Nominal
+                )
+                .unwrap(),
+                reason
+            );
+        }
+        model.materials[rebar_id.index()].fy = Some(295.0);
+        model.materials[rebar_id.index()].name = "SD295A".into();
+        let qu295 = WallElement::shear_capacity_of(&data, &model).unwrap();
+        model.materials[rebar_id.index()].fy = Some(345.0);
+        let qu345 = WallElement::shear_capacity_of(&data, &model).unwrap();
+        assert!(qu345 > qu295);
+        model.materials[rebar_id.index()].name = "KH785".into();
+        assert!(WallElement::shear_capacity_of(&data, &model).is_err());
+        model.materials[rebar_id.index()].name = "SD295A".into();
+        model.materials[rebar_id.index()].category = MaterialCategory::Steel;
+        assert!(WallElement::shear_capacity_of(&data, &model).is_err());
+        for assignment in [None, Some(MaterialId(999))] {
+            model.sections[0].shear_rebar_material = assignment;
+            assert!(WallElement::shear_capacity_of(&data, &model).is_err());
+        }
     }
 
     /// 対応グレード（SR235）でも fy 未設定なら Qu は算定不能（0）・入力不備とし、
@@ -2264,8 +2398,8 @@ mod shear_yield_tests {
     #[test]
     fn test_wall_qu_requires_fy_for_supported_grade() {
         let (mut model, data) = wall_model();
-        model.materials.push(Material {
-            strength_factor: None,
+        model.materials[1] = Material {
+            strength_factor: Some(1.0),
             concrete_class: Default::default(),
             id: MaterialId(1),
             name: "SR235".into(),
@@ -2276,18 +2410,27 @@ mod shear_yield_tests {
             shear: None,
             fc: None,
             fy: None,
-        });
+        };
         model.sections[0].shear_rebar_material = Some(MaterialId(1));
 
-        assert_eq!(WallElement::shear_capacity_of(&data, &model), 0.0);
-        let issue =
-            WallElement::wall_shear_capacity_issue(&data, &model).expect("fy 未設定は入力不備");
+        assert!(WallElement::shear_capacity_of(&data, &model).is_err());
+        let issue = WallElement::wall_shear_capacity_issue(
+            &data,
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+        )
+        .expect("fy 未設定は入力不備");
         assert!(issue.contains("SR235") && issue.contains("fy"), "{issue}");
 
         model.materials[1].fy = Some(235.0);
-        assert!(WallElement::shear_capacity_of(&data, &model) > 0.0);
+        assert!(WallElement::shear_capacity_of(&data, &model).unwrap() > 0.0);
         assert!(
-            WallElement::wall_shear_capacity_issue(&data, &model).is_none(),
+            WallElement::wall_shear_capacity_issue(
+                &data,
+                &model,
+                crate::factory::StrengthBasis::Nominal
+            )
+            .is_none(),
             "fy 設定時は入力不備なし"
         );
     }
@@ -2297,7 +2440,7 @@ mod shear_yield_tests {
     #[test]
     fn test_wall_shear_yields_at_ultimate_strength() {
         let (model, data) = wall_model();
-        let qu = WallElement::shear_capacity_of(&data, &model);
+        let qu = WallElement::shear_capacity_of(&data, &model).unwrap();
         assert!(qu > 0.0, "Qu が算定できるはず");
 
         let mut b = crate::factory::build_nonlinear_behavior(
@@ -2343,7 +2486,7 @@ mod shear_yield_tests {
     #[test]
     fn test_wall_shear_hysteresis_is_max_point_oriented() {
         let (model, data) = wall_model();
-        let qu = WallElement::shear_capacity_of(&data, &model);
+        let qu = WallElement::shear_capacity_of(&data, &model).unwrap();
         assert!(qu > 0.0);
         let mut b = crate::factory::build_nonlinear_behavior(
             &data,
@@ -2452,7 +2595,8 @@ mod capacity_issue_tests {
         let shape = SectionShape::RcWall {
             thickness: 200.0,
             ps,
-            pwh_ratio: None,
+            pwh_ratio: Some(ps),
+            pwv_ratio: Some(ps),
         };
         let mk = |id: u32, c: [f64; 3]| Node {
             id: NodeId(id),
@@ -2536,6 +2680,8 @@ mod capacity_issue_tests {
             }],
             ..Default::default()
         };
+        let mut model = model;
+        explicit_wall_test_rebar(&mut model);
         (model, wall)
     }
 
@@ -2598,7 +2744,12 @@ mod capacity_issue_tests {
             .find(|e| e.id == ElemId(4))
             .unwrap()
             .section = Some(SectionId(2));
-        let qu = WallElement::directional_shear_capacity_of(&wall, &model);
+        let qu = WallElement::directional_shear_capacity_of(
+            &wall,
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+        )
+        .unwrap();
         assert!(qu[1] > qu[0] && qu[0] > 0.0, "{qu:?}");
         for mode in 0..3 {
             let limits = if mode == 2 { qu.map(|q| q * 0.001) } else { qu };
@@ -2609,12 +2760,14 @@ mod capacity_issue_tests {
                 element = element.with_shear_hysteresis(HysteresisModel::MaxPointOriented);
             }
             if mode == 2 {
-                element = element.with_fiber_flexure(
-                    &wall,
-                    &model,
-                    crate::factory::StrengthBasis::Nominal,
-                    crate::factory::AnalysisKind::Incremental,
-                );
+                element = element
+                    .with_fiber_flexure(
+                        &wall,
+                        &model,
+                        crate::factory::StrengthBasis::Nominal,
+                        crate::factory::AnalysisKind::Incremental,
+                    )
+                    .unwrap();
                 assert!(element.fiber_column.is_some());
             }
             let ctx = Ctx { model: &model };
@@ -2653,7 +2806,12 @@ mod capacity_issue_tests {
             .unwrap();
         model.elements[left].section = Some(SectionId(2));
         model.elements[right].section = Some(SectionId(1));
-        let reversed = WallElement::directional_shear_capacity_of(&wall, &model);
+        let reversed = WallElement::directional_shear_capacity_of(
+            &wall,
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+        )
+        .unwrap();
         assert_eq!(qu, [reversed[1], reversed[0]]);
     }
 
@@ -2661,35 +2819,57 @@ mod capacity_issue_tests {
     #[test]
     fn test_no_issue_when_side_column_rebar_available() {
         let (model, wall) = model_with(Some(rc_col(true)), 0.0025);
-        assert_eq!(WallElement::wall_shear_capacity_issue(&wall, &model), None);
-        assert!(WallElement::shear_capacity_of(&wall, &model) > 0.0);
+        assert_eq!(
+            WallElement::wall_shear_capacity_issue(
+                &wall,
+                &model,
+                crate::factory::StrengthBasis::Nominal
+            ),
+            None
+        );
+        assert!(WallElement::shear_capacity_of(&wall, &model).unwrap() > 0.0);
     }
 
     /// 側柱はあるのに主筋が取得できない＝断面設定の不備。壁筋比で代替せずエラーとする。
     #[test]
     fn test_issue_when_side_column_has_no_main_rebar() {
         let (model, wall) = model_with(Some(rc_col(false)), 0.0025);
-        let issue = WallElement::wall_shear_capacity_issue(&wall, &model)
-            .expect("側柱主筋がなければ不備として検出されるべき");
+        let issue = WallElement::wall_shear_capacity_issue(
+            &wall,
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+        )
+        .expect("側柱主筋がなければ不備として検出されるべき");
         assert!(issue.contains("側柱"), "{}", issue);
-        assert_eq!(WallElement::shear_capacity_of(&wall, &model), 0.0);
+        assert!(WallElement::shear_capacity_of(&wall, &model).is_err());
     }
 
     /// 側柱がない壁（壁のみの耐震壁）は不備ではなく、壁筋比から pte を算定する。
     #[test]
     fn test_no_side_column_uses_wall_rebar_ratio() {
         let (model, wall) = model_with(None, 0.0025);
-        assert_eq!(WallElement::wall_shear_capacity_issue(&wall, &model), None);
-        assert!(WallElement::shear_capacity_of(&wall, &model) > 0.0);
+        assert_eq!(
+            WallElement::wall_shear_capacity_issue(
+                &wall,
+                &model,
+                crate::factory::StrengthBasis::Nominal
+            ),
+            None
+        );
+        assert!(WallElement::shear_capacity_of(&wall, &model).unwrap() > 0.0);
     }
 
     /// 側柱も壁筋比もなければ pte を算定できないため不備とする。
     #[test]
     fn test_issue_when_no_side_column_and_no_wall_rebar() {
         let (model, wall) = model_with(None, 0.0);
-        let issue = WallElement::wall_shear_capacity_issue(&wall, &model)
-            .expect("側柱も壁筋もなければ不備");
-        assert!(issue.contains("壁筋比"), "{}", issue);
+        let issue = WallElement::wall_shear_capacity_issue(
+            &wall,
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+        )
+        .expect("側柱も壁筋もなければ不備");
+        assert!(issue.contains("不成立"), "{}", issue);
     }
 
     /// コンクリート強度 Fc が未設定の壁は不備として検出する。
@@ -2698,9 +2878,14 @@ mod capacity_issue_tests {
     fn test_issue_when_fc_unset() {
         let (mut model, wall) = model_with(None, 0.0025);
         model.materials[0].fc = None;
-        let issue = WallElement::wall_shear_capacity_issue(&wall, &model).expect("Fc 未設定は不備");
+        let issue = WallElement::wall_shear_capacity_issue(
+            &wall,
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+        )
+        .expect("Fc 未設定は不備");
         assert!(issue.contains("Fc"), "{}", issue);
-        assert_eq!(WallElement::shear_capacity_of(&wall, &model), 0.0);
+        assert!(WallElement::shear_capacity_of(&wall, &model).is_err());
     }
 
     /// Fc が 0 以下または非有限値でも Qu を算定できないため不備とする（未設定と同じ扱い）。
@@ -2708,9 +2893,14 @@ mod capacity_issue_tests {
     fn test_issue_when_fc_not_positive() {
         let (mut model, wall) = model_with(None, 0.0025);
         model.materials[0].fc = Some(0.0);
-        let issue = WallElement::wall_shear_capacity_issue(&wall, &model).expect("Fc<=0 は不備");
+        let issue = WallElement::wall_shear_capacity_issue(
+            &wall,
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+        )
+        .expect("Fc<=0 は不備");
         assert!(issue.contains("Fc"), "{}", issue);
-        assert_eq!(WallElement::shear_capacity_of(&wall, &model), 0.0);
+        assert!(WallElement::shear_capacity_of(&wall, &model).is_err());
     }
 
     /// 断面に材料が割り当てられていない壁も不備とする（Fc を参照できない）。
@@ -2718,10 +2908,14 @@ mod capacity_issue_tests {
     fn test_issue_when_material_missing() {
         let (mut model, wall) = model_with(None, 0.0025);
         model.sections[0].material = None;
-        let issue =
-            WallElement::wall_shear_capacity_issue(&wall, &model).expect("材料未設定は不備");
-        assert!(issue.contains("材料が設定されていません"), "{}", issue);
-        assert_eq!(WallElement::shear_capacity_of(&wall, &model), 0.0);
+        let issue = WallElement::wall_shear_capacity_issue(
+            &wall,
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+        )
+        .expect("材料未設定は不備");
+        assert!(issue.contains("コンクリート材料"), "{}", issue);
+        assert!(WallElement::shear_capacity_of(&wall, &model).is_err());
     }
 
     /// 断面が割り当てられていない壁も不備とする（壁厚・壁筋比を参照できない）。
@@ -2729,10 +2923,14 @@ mod capacity_issue_tests {
     fn test_issue_when_section_missing() {
         let (model, mut wall) = model_with(None, 0.0025);
         wall.section = None;
-        let issue =
-            WallElement::wall_shear_capacity_issue(&wall, &model).expect("断面未設定は不備");
+        let issue = WallElement::wall_shear_capacity_issue(
+            &wall,
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+        )
+        .expect("断面未設定は不備");
         assert!(issue.contains("断面が設定されていません"), "{}", issue);
-        assert_eq!(WallElement::shear_capacity_of(&wall, &model), 0.0);
+        assert!(WallElement::shear_capacity_of(&wall, &model).is_err());
     }
 
     /// 4 節点を与えているのに幾何が退化した壁（下辺の 2 節点が同一座標）は、
@@ -2741,8 +2939,12 @@ mod capacity_issue_tests {
     fn test_issue_when_wall_element_cannot_be_built() {
         let (mut model, wall) = model_with(None, 0.0025);
         model.nodes[1].coord = model.nodes[0].coord;
-        let issue = WallElement::wall_shear_capacity_issue(&wall, &model)
-            .expect("壁エレメントを構築できない壁は不備");
+        let issue = WallElement::wall_shear_capacity_issue(
+            &wall,
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+        )
+        .expect("壁エレメントを構築できない壁は不備");
         assert!(
             issue.contains("壁エレメントとして構築できません"),
             "{}",
@@ -2783,10 +2985,19 @@ mod capacity_issue_tests {
         );
 
         assert_eq!(
-            WallElement::wall_shear_capacity_issue(&wall_new, &model_new),
+            WallElement::wall_shear_capacity_issue(
+                &wall_new,
+                &model_new,
+                crate::factory::StrengthBasis::Nominal
+            ),
             None
         );
-        let new_qu = WallElement::directional_shear_capacity_of(&wall_new, &model_new);
+        let new_qu = WallElement::directional_shear_capacity_of(
+            &wall_new,
+            &model_new,
+            crate::factory::StrengthBasis::Nominal,
+        )
+        .unwrap();
         assert!(new_qu[0] > 0.0 && new_qu[1] > 0.0, "{new_qu:?}");
     }
 
@@ -2810,6 +3021,8 @@ mod capacity_issue_tests {
             strength_factor: None,
         });
         model.sections[1].steel_material = Some(MaterialId(1));
+        let mut model = model;
+        explicit_wall_test_rebar(&mut model);
         (model, wall)
     }
 
@@ -2837,10 +3050,266 @@ mod capacity_issue_tests {
             steel_flange_thick: 20.0,
         };
         let (model, wall) = model_with_src_side_column(shape);
-        let issue = WallElement::wall_shear_capacity_issue(&wall, &model)
-            .expect("SRC側柱はRC耐力式の適用外として拒否する");
+        let issue = WallElement::wall_shear_capacity_issue(
+            &wall,
+            &model,
+            crate::factory::StrengthBasis::Nominal,
+        )
+        .expect("SRC側柱はRC耐力式の適用外として拒否する");
         assert!(issue.contains("SRC"), "{}", issue);
-        assert!(issue.contains("適用範囲"), "{}", issue);
-        assert_eq!(WallElement::shear_capacity_of(&wall, &model), 0.0);
+        assert!(issue.contains("適用外"), "{}", issue);
+        assert!(WallElement::shear_capacity_of(&wall, &model).is_err());
+    }
+    fn directional_fixture() -> (Model, ElementData) {
+        let (mut model, wall) = model_with(Some(rc_col(true)), 0.0025);
+        if let Some(SectionShape::RcWall {
+            pwh_ratio,
+            pwv_ratio,
+            ..
+        }) = model.sections[0].shape.as_mut()
+        {
+            *pwh_ratio = Some(0.002);
+            *pwv_ratio = Some(0.006);
+        }
+        let mut transverse = model.materials[1].clone();
+        transverse.id = MaterialId(2);
+        transverse.name = "SD295A".into();
+        transverse.fy = Some(295.0);
+        model.materials.push(transverse);
+        model.sections[0].shear_rebar_material = Some(MaterialId(2));
+        (model, wall)
+    }
+
+    #[test]
+    fn vertical_fibers_use_explicit_area_fy_and_own_strength_factor() {
+        let (mut model, wall) = directional_fixture();
+        for (factor, expected_fy, expected_yield_force) in [
+            (Some(1.0), 345.0, 1_656_000.0),
+            (Some(1.2), 414.0, 1_987_200.0),
+            (None, 379.5, 1_821_600.0),
+        ] {
+            model.materials[0].strength_factor = Some(8.0);
+            model.materials[1].strength_factor = factor;
+            let element = WallElement::try_new(&wall, &model)
+                .unwrap()
+                .with_fiber_flexure(
+                    &wall,
+                    &model,
+                    crate::factory::StrengthBasis::MaterialStrength,
+                    sepika_core::model::AnalysisKind::Incremental,
+                )
+                .unwrap();
+            let fiber = element.fiber_column.unwrap();
+            for point in &fiber.gauss_points {
+                let bars: Vec<_> = point
+                    .section
+                    .fibers
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, f)| f.material == 1)
+                    .collect();
+                assert_eq!(bars.len(), 20);
+                let mut area = 0.0;
+                let mut yield_force = 0.0;
+                for (index, bar) in bars {
+                    assert!((bar.area - 240.0).abs() < 1e-10);
+                    let material: sepika_material::MenegottoPinto =
+                        bincode::deserialize(&point.mats[index].serialize_state()).unwrap();
+                    assert!((material.fy - expected_fy).abs() < 1e-10);
+                    area += bar.area;
+                    yield_force += bar.area * material.fy;
+                }
+                assert!((area - 4800.0).abs() < 1e-10);
+                assert!((yield_force - expected_yield_force).abs() < 1e-8);
+            }
+        }
+    }
+
+    #[test]
+    fn direct_directional_capacity_preserves_unscaled_transverse_strength() {
+        let (mut model, wall) = directional_fixture();
+        if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut model.sections[0].shape {
+            *pwh_ratio = Some(0.0);
+        }
+        let basis = crate::factory::StrengthBasis::MaterialStrength;
+        let concrete = WallElement::directional_shear_capacity_of(&wall, &model, basis).unwrap();
+        if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut model.sections[0].shape {
+            *pwh_ratio = Some(0.002);
+        }
+        for factor in [None, Some(1.0), Some(1.2)] {
+            model.materials[2].strength_factor = factor;
+            let expected = 601723.6279664652;
+            let capacity =
+                WallElement::directional_shear_capacity_of(&wall, &model, basis).unwrap();
+            for direction in 0..2 {
+                assert!((capacity[direction] - concrete[direction] - expected).abs() < 1e-8);
+            }
+        }
+    }
+
+    #[test]
+    fn transverse_and_vertical_inputs_are_independent_and_missing_is_not_zero() {
+        let (mut model, wall) = directional_fixture();
+        let basis = crate::factory::StrengthBasis::Nominal;
+        let qu = WallElement::directional_shear_capacity_of(&wall, &model, basis).unwrap();
+        let linear_mass = WallElement::try_new(&wall, &model).unwrap().mass_total;
+        if let Some(SectionShape::RcWall { pwv_ratio, .. }) = model.sections[0].shape.as_mut() {
+            *pwv_ratio = None;
+        }
+        assert_eq!(
+            WallElement::directional_shear_capacity_of(&wall, &model, basis).unwrap(),
+            qu
+        );
+        let fiber = WallElement::try_new(&wall, &model)
+            .unwrap()
+            .with_fiber_flexure(
+                &wall,
+                &model,
+                basis,
+                sepika_core::model::AnalysisKind::Incremental,
+            );
+        let reason = fiber.err().unwrap();
+        assert_eq!(
+            WallElement::wall_shear_capacity_issue(&wall, &model, basis).unwrap(),
+            reason
+        );
+        assert!(reason.contains("縦筋比"));
+        for value in [Some(0.0), Some(0.002), Some(0.006)] {
+            if let Some(SectionShape::RcWall { pwv_ratio, .. }) = model.sections[0].shape.as_mut() {
+                *pwv_ratio = value;
+            }
+            assert_eq!(
+                WallElement::directional_shear_capacity_of(&wall, &model, basis).unwrap(),
+                qu
+            );
+            let element = WallElement::try_new(&wall, &model)
+                .unwrap()
+                .with_fiber_flexure(
+                    &wall,
+                    &model,
+                    basis,
+                    sepika_core::model::AnalysisKind::Incremental,
+                )
+                .unwrap();
+            assert_eq!(element.mass_total, linear_mass);
+            assert!(element.fiber_column.is_some());
+        }
+        if let Some(SectionShape::RcWall { pwh_ratio, .. }) = model.sections[0].shape.as_mut() {
+            *pwh_ratio = Some(0.0);
+        }
+        assert!(WallElement::directional_shear_capacity_of(&wall, &model, basis).is_ok());
+        if let Some(SectionShape::RcWall { pwh_ratio, .. }) = model.sections[0].shape.as_mut() {
+            *pwh_ratio = None;
+        }
+        assert!(
+            WallElement::directional_shear_capacity_of(&wall, &model, basis)
+                .unwrap_err()
+                .contains("横筋比")
+        );
+    }
+
+    #[test]
+    fn nonlinear_reference_stiffness_and_shear_spring_use_vertical_ratio_before_cache() {
+        let (mut model, wall) = directional_fixture();
+        let basis = crate::factory::StrengthBasis::Nominal;
+        let qu = WallElement::directional_shear_capacity_of(&wall, &model, basis).unwrap();
+        let build = |model: &Model| {
+            let element = WallElement::try_new(&wall, model).unwrap();
+            element.column.local_stiffness();
+            element
+                .with_fiber_flexure(
+                    &wall,
+                    model,
+                    basis,
+                    sepika_core::model::AnalysisKind::Incremental,
+                )
+                .unwrap()
+                .with_shear_capacity(qu)
+                .with_shear_hysteresis(HysteresisModel::MaxPointOriented)
+        };
+        let first = build(&model);
+        if let Some(SectionShape::RcWall { ps, .. }) = model.sections[0].shape.as_mut() {
+            *ps = 0.02;
+        }
+        let changed_quantity_ratio = build(&model);
+        assert_eq!(first.column.a, changed_quantity_ratio.column.a);
+        assert_eq!(first.column.iz, changed_quantity_ratio.column.iz);
+        assert_eq!(first.shear_k0, changed_quantity_ratio.shear_k0);
+        if let Some(SectionShape::RcWall { pwv_ratio, .. }) = model.sections[0].shape.as_mut() {
+            *pwv_ratio = Some(0.002);
+        }
+        let changed_vertical = build(&model);
+        assert_ne!(first.column.a, changed_vertical.column.a);
+        assert_ne!(first.column.iz, changed_vertical.column.iz);
+        assert_ne!(first.shear_k0, changed_vertical.shear_k0);
+    }
+    #[test]
+    fn vertical_inputs_reject_invalid_strength_ratio_category_and_factor() {
+        let (mut model, wall) = directional_fixture();
+        for fy in [
+            None,
+            Some(0.0),
+            Some(-1.0),
+            Some(f64::NAN),
+            Some(f64::INFINITY),
+            Some(f64::NEG_INFINITY),
+        ] {
+            model.materials[1].fy = fy;
+            assert!(wall_rebar_strength(
+                &wall,
+                &model,
+                true,
+                crate::factory::StrengthBasis::Nominal
+            )
+            .unwrap_err()
+            .contains("縦筋材料"));
+        }
+        model.materials[1].fy = Some(345.0);
+        for factor in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            model.materials[1].strength_factor = Some(factor);
+            assert!(wall_rebar_strength(
+                &wall,
+                &model,
+                true,
+                crate::factory::StrengthBasis::MaterialStrength
+            )
+            .unwrap_err()
+            .contains("強度倍率"));
+        }
+        model.materials[1].strength_factor = Some(1.0);
+        model.materials[1].name = "任意345".into();
+        assert!(
+            wall_rebar_strength(&wall, &model, true, crate::factory::StrengthBasis::Nominal)
+                .is_err()
+        );
+        model.materials[1].name = "SD345".into();
+        model.materials[1].category = MaterialCategory::Steel;
+        assert!(
+            wall_rebar_strength(&wall, &model, true, crate::factory::StrengthBasis::Nominal)
+                .is_err()
+        );
+        for vertical in [false, true] {
+            for value in [
+                None,
+                Some(-0.002),
+                Some(f64::NAN),
+                Some(f64::INFINITY),
+                Some(f64::NEG_INFINITY),
+            ] {
+                if let Some(SectionShape::RcWall {
+                    pwh_ratio,
+                    pwv_ratio,
+                    ..
+                }) = &mut model.sections[0].shape
+                {
+                    if vertical {
+                        *pwv_ratio = value;
+                    } else {
+                        *pwh_ratio = value;
+                    }
+                }
+                assert!(wall_direction_ratio(&wall, &model, vertical).is_err());
+            }
+        }
     }
 }

@@ -140,7 +140,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-src-overlap", Some(3), "旧契約"),
         ("old-static-settings", Some(4), "旧契約"),
         ("old-zero-increment", Some(5), "旧契約"),
-        ("old-auto-solver", Some(6), "旧契約"),
+        ("old-auto-solver", Some(DESIGN_CONTRACT_VERSION), "旧契約"),
         ("old-steel-grade-recognition", Some(7), "旧契約"),
         ("old-frame-support-representation", Some(8), "旧契約"),
         ("old-signed-reactions", Some(9), "旧契約"),
@@ -846,10 +846,13 @@ fn issue635_invalid_correct_hash_project_keeps_app_model_and_undo() {
 
 #[test]
 fn lip_channel_geometry_old_contracts_expire_and_current_keeps_results() {
-    assert_eq!(ANALYSIS_CONTRACT_VERSION, 15);
-    assert_eq!(DESIGN_CONTRACT_VERSION, 6);
     let app = calculated();
-    for (version, keep) in [(13, false), (14, false), (15, true)] {
+    for (version, keep) in [
+        (13, false),
+        (14, false),
+        (15, false),
+        (ANALYSIS_CONTRACT_VERSION, true),
+    ] {
         let (loaded, path) = restore(
             &app,
             Some(version),
@@ -859,7 +862,10 @@ fn lip_channel_geometry_old_contracts_expire_and_current_keeps_results() {
         let bundle = loaded.core.scoped.results.as_ref().unwrap();
         assert_eq!(bundle.has_analysis_results(), keep);
         if keep {
-            assert_eq!(bundle.analysis_contract_version, Some(15));
+            assert_eq!(
+                bundle.analysis_contract_version,
+                Some(ANALYSIS_CONTRACT_VERSION)
+            );
         }
         std::fs::remove_file(path).unwrap();
     }
@@ -966,7 +972,9 @@ fn sm520_old_335_and_out_of_range_success_expire_without_save_or_display_reauthe
                 }],
             });
         }
-        for (analysis, design, keeps_analysis) in [(14, 5, false), (15, 5, true)] {
+        for (analysis, design, keeps_analysis) in
+            [(14, 5, false), (ANALYSIS_CONTRACT_VERSION, 5, true)]
+        {
             let (mut loaded, path) = restore(
                 &app,
                 Some(analysis),
@@ -1007,8 +1015,14 @@ fn sm520_old_335_and_out_of_range_success_expire_without_save_or_display_reauthe
                 reopened.run_linear_static(LoadCaseId(0));
             }
             let bundle = reopened.core.scoped.results.as_ref().unwrap();
-            assert_eq!(bundle.analysis_contract_version, Some(15));
-            assert_eq!(bundle.design_contract_version, Some(6));
+            assert_eq!(
+                bundle.analysis_contract_version,
+                Some(ANALYSIS_CONTRACT_VERSION)
+            );
+            assert_eq!(
+                bundle.design_contract_version,
+                Some(DESIGN_CONTRACT_VERSION)
+            );
             assert!(bundle.has_design_results());
             if t > 100.0 {
                 assert!(bundle.member_checks.iter().flat_map(|m| &m.positions).all(|p| matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))));

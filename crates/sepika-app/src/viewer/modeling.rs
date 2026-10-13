@@ -777,7 +777,8 @@ fn draw_wall_element(
     draw_wall_column(painter, bc, tc, lp_ratio, color, sym);
 
     if analysis == ModelingAnalysis::Incremental
-        && sepika_element::wall::wall_element::WallElement::shear_capacity_of(elem, model) > 0.0
+        && sepika_element::wall::wall_element::WallElement::shear_capacity_of(elem, model)
+            .is_ok_and(|qu| qu > 0.0)
     {
         draw_shear_spring(painter, bc, tc, PARALLEL_OFFSET, color);
         sym.wall_shear = true;
@@ -1187,19 +1188,22 @@ fn show_wall_modeling_detail(
             ui.label(format!("塑性化域 Lp={lp:.0} mm（0.5·lw）／中央弾性"));
         }
         None => {
-            ui.label("軸・曲げ: 弾性（ファイバー断面を組めない）");
+            ui.label("軸・曲げ: 未構築（必要入力を確認してください）");
         }
     }
-    let qu =
-        sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(elem, model);
-    if qu.iter().all(|q| *q > 0.0) {
+    let qu = sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(
+        elem,
+        model,
+        sepika_element::factory::StrengthBasis::Nominal,
+    );
+    if let Ok(qu) = qu {
         ui.label(format!(
             "面内せん断: 正 Qu={:.0} kN／負 Qu={:.0} kN",
             force_kn(qu[0]),
             force_kn(qu[1])
         ));
     } else {
-        ui.label("面内せん断: 弾性（Qu を算定できない）");
+        ui.label(format!("面内せん断: 非線形解析不可（{}）", qu.unwrap_err()));
     }
 }
 
@@ -1580,6 +1584,7 @@ mod tests {
         let shape = SectionShape::RcWall {
             thickness,
             pwh_ratio: None,
+            pwv_ratio: None,
             ps: 0.0025,
         };
         let model = Model {

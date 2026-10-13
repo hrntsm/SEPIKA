@@ -262,9 +262,18 @@ pub fn build_nonlinear_behavior(
         )),
         ElementKind::Brace { .. } => Box::new(crate::frame::truss::TrussElement::new(data, model)),
         ElementKind::Wall => {
-            let qu =
-                crate::wall::wall_element::WallElement::directional_shear_capacity_of(data, model);
-            if qu.iter().any(|q| *q <= 0.0) {
+            let rc_wall = crate::wall::misc_wall::is_rc_wall(data, model);
+            if rc_wall && !crate::wall::misc_wall::wall_is_seismic(data, model) {
+                return build_behavior(data, model);
+            }
+            let qu = match crate::wall::wall_element::WallElement::directional_shear_capacity_of(
+                data, model, basis,
+            ) {
+                Ok(qu) => qu,
+                Err(reason) if rc_wall => panic!("{reason}"),
+                Err(_) => return build_behavior(data, model),
+            };
+            if !rc_wall && qu.iter().any(|q| *q <= 0.0) {
                 return build_behavior(data, model);
             }
             let stiffness_scale = if crate::wall::misc_wall::wall_is_seismic(data, model) {
@@ -278,17 +287,20 @@ pub fn build_nonlinear_behavior(
                 stiffness_scale,
             ) {
                 Some(panel) => {
-                    let panel = panel
-                        .with_shear_capacity(qu)
-                        .with_shear_hysteresis(resolve_wall_shear_hysteresis(data, model, kind));
-                    let panel = if stiffness_scale >= 1.0 {
-                        panel.with_fiber_flexure(data, model, basis, kind)
+                    let panel = if stiffness_scale >= 1.0 && rc_wall {
+                        panel
+                            .with_fiber_flexure(data, model, basis, kind)
+                            .unwrap_or_else(|reason| panic!("{reason}"))
                     } else {
                         panel
                     };
+                    let panel = panel
+                        .with_shear_capacity(qu)
+                        .with_shear_hysteresis(resolve_wall_shear_hysteresis(data, model, kind));
                     Box::new(panel)
                 }
-                None => build_behavior(data, model),
+                None if !rc_wall => build_behavior(data, model),
+                None => panic!("壁要素ID {}を生成できません", data.id.0),
             }
         }
         ElementKind::PanelZone => {

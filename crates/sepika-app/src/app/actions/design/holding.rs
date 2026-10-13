@@ -474,7 +474,7 @@ impl App {
                     src_column_rank(n_n0, smo_m0, shear_yield_elems.contains(&elem.id))
                 } else if let Some(SectionShape::RcWall { thickness, .. }) = sec.shape.as_ref() {
                     if wall_has_src_boundary_column(elem, model) {
-                        let capacities = sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(elem, model);
+                        let capacities = sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(elem, model, sepika_element::factory::StrengthBasis::MaterialStrength)?;
                         let wall = po
                             .wall_response_at(elem.id, ds_step)
                             .map_err(|reason| reason.description().to_string())?;
@@ -510,7 +510,7 @@ impl App {
                         else {
                             return Err(format!("壁要素 {:?}: τu/Fc の入力が不正です", elem.id));
                         };
-                        let capacities = sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(elem, model);
+                        let capacities = sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(elem, model, sepika_element::factory::StrengthBasis::MaterialStrength)?;
                         let wall = po
                             .wall_response_at(elem.id, ds_step)
                             .map_err(|reason| reason.description().to_string())?;

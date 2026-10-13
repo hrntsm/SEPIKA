@@ -206,6 +206,21 @@ fn prepare_work_model(
     if let Some(warning) = model.unset_plate_assignment_warning() {
         notices.push(warning);
     }
+    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(model);
+    notices.extend(
+        expanded
+            .elements
+            .iter()
+            .filter(|elem| elem.kind == sepika_core::model::ElementKind::Wall)
+            .filter_map(|elem| {
+                sepika_element::wall::wall_element::WallElement::wall_shear_capacity_issue(
+                    elem,
+                    &expanded,
+                    sepika_element::factory::StrengthBasis::MaterialStrength,
+                )
+            })
+            .map(|reason| format!("非線形解析不可: {reason}")),
+    );
     Ok(PrepareReport {
         panels,
         notices,
@@ -654,6 +669,7 @@ mod tests {
         let mut wall_sec = SectionShape::RcWall {
             thickness: 150.0,
             pwh_ratio: None,
+            pwv_ratio: None,
             ps: 0.0025,
         }
         .to_section(wall_section_id(), "耐震壁 t150".into());

@@ -26,6 +26,7 @@ fn fixture() -> App {
         thickness: 180.0,
         ps: 0.006,
         pwh_ratio: Some(0.006),
+        pwv_ratio: None,
     }
     .to_section(SectionId(2), "RC壁".into());
     rc.material = Some(MaterialId(1));

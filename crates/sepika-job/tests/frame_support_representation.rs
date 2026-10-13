@@ -41,6 +41,7 @@ fn set_plate_section(model: &mut Model, wall: bool) {
             thickness: 100.,
             ps: 0.002,
             pwh_ratio: None,
+            pwv_ratio: None,
         }
     } else {
         sepika_core::section_shape::SectionShape::RcSlab { thickness: 100. }

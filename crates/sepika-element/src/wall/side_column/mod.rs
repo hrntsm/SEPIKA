@@ -271,6 +271,7 @@ mod tests {
         let wall_shape = SectionShape::RcWall {
             thickness: 150.0,
             pwh_ratio: None,
+            pwv_ratio: None,
             ps: 0.0025,
         };
         Model {

@@ -924,11 +924,13 @@ fn test_edit_rc_wall_section_shape_with_wall_reference() {
     let old_shape = sepika_section::shape::SectionShape::RcWall {
         thickness: 180.0,
         pwh_ratio: None,
+        pwv_ratio: None,
         ps: 0.0,
     };
     let new_shape = sepika_section::shape::SectionShape::RcWall {
         thickness: 220.0,
         pwh_ratio: None,
+        pwv_ratio: None,
         ps: 0.0,
     };
     let mut model = empty_model();
