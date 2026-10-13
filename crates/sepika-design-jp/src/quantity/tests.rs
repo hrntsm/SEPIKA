@@ -545,6 +545,7 @@ fn test_wall_quantity_with_opening() {
     let shape = SectionShape::RcWall {
         thickness: 200.0,
         pwh_ratio: None,
+        pwv_ratio: None,
         ps: 0.0025,
     };
     let sec = shape.to_section(SectionId(2), "W20".to_string());
@@ -597,6 +598,7 @@ fn test_wall_quantity_via_wall_plate_is_included() {
     let shape = SectionShape::RcWall {
         thickness: 200.0,
         pwh_ratio: None,
+        pwv_ratio: None,
         ps: 0.0025,
     };
     let sec = shape.to_section(SectionId(2), "W20".to_string());
@@ -654,6 +656,7 @@ fn test_attached_wall_plate_quantity_is_included_as_misc_wall() {
     let shape = SectionShape::RcWall {
         thickness: 150.0,
         pwh_ratio: None,
+        pwv_ratio: None,
         ps: 0.0,
     };
     let sec = shape.to_section(SectionId(2), "W15".to_string());

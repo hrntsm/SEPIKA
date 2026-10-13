@@ -57,6 +57,7 @@ fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>)
         shape: Some(SectionShape::RcWall {
             thickness,
             pwh_ratio: Some(0.006),
+            pwv_ratio: None,
             ps: 0.006,
         }),
         // 材料は断面が持つ。壁筋（縦筋・横筋）は SD345。

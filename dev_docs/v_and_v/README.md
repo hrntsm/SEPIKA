@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [RC壁方向別入力_Issue535_2026-10.md](RC壁方向別入力_Issue535_2026-10.md) | 方向比・材料役割・物理壁Fc/再ID・GUI保存/Undo/失効・MCP開始拒否 | 🔶（入力Verification、手動GUI/実験Validation未） |
 | [STB書出の開発中表示_Issue647_2026-10.md](STB書出の開発中表示_Issue647_2026-10.md) | 実ファイルメニューの操作前表示・閉鎖時状態保持・既存入出力回帰 | 🔶（自動描画・既存入出力Verification成功、手動native取消・最終headゲートは後続） |
 | [弧長法削除と既存増分回帰_Issue433_2026-10.md](弧長法削除と既存増分回帰_Issue433_2026-10.md) | 弧長専用実装/API/試験/導線削除、既存荷重増分・変位制御の回帰 | 🔶（限定Verification、freshレビュー・最終headゲートは後続） |
 | [SM520告示基準強度と範囲外拒否_Issue629_2026-10.md](SM520告示基準強度と範囲外拒否_Issue629_2026-10.md) | 告示3区分・100 mm超非補完・現役実入口・OVIKA15/6 | 🔶（直接Verification、正式JIS全製品/Validation・freshレビュー・最終head CIは後続） |
@@ -326,3 +327,5 @@
 ## SRC材料領域の共通入口
 
 [Issue552](SRC材料領域_Issue552_2026-10.md)の`src552_*`試験は、共通材料生成・実要素・OVIKA編集/保存・MN表示cacheと準備診断を対応づける。限定幾何のVerificationであり、SRC全履歴則のValidationは未実施。
+
+RC壁の方向入力・材料役割の横断入口は[Issue535検証](RC壁方向別入力_Issue535_2026-10.md)のelement/GUI/MCP fixtureを参照する（🔶、入力VerificationとValidationを区別）。

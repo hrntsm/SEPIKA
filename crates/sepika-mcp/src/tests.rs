@@ -1598,6 +1598,7 @@ fn wall_horizontal_input_survives_ovika_and_mcp_design_reports_missing_assignmen
         thickness: 180.0,
         ps: 0.002,
         pwh_ratio: Some(0.006),
+        pwv_ratio: None,
     }
     .to_section(SectionId(2), "壁".into());
     section.material = Some(MaterialId(0));

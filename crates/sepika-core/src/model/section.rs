@@ -337,6 +337,11 @@ impl Model {
     /// 要素の主材料（弾性剛性 E・ν と自重の密度を決める材料）。
     /// 断面が未割当、または断面が材料を持たない場合は `None`。
     pub fn element_material(&self, elem: &ElementData) -> Option<&Material> {
+        if elem.kind == ElementKind::Wall {
+            if let Some(origin) = self.generated_wall_origins.get(&elem.id) {
+                return self.wall_plate_material(self.wall_plate(*origin)?);
+            }
+        }
         if self
             .stb_strengths
             .members
@@ -390,6 +395,20 @@ impl Model {
 
     /// 要素の主筋材料（RC・SRC 断面のみ）。
     pub fn element_rebar_material(&self, elem: &ElementData) -> Option<&Material> {
+        if matches!(
+            self.element_section(elem)?.shape,
+            Some(crate::section_shape::SectionShape::RcWall { .. })
+        ) {
+            if self.stb_strengths.sections.iter().any(|s| {
+                Some(s.section) == elem.section
+                    && s.reinforcement.iter().any(|r| r.part == "vertical")
+            }) {
+                return self.stb_rebar_material(elem.section?, "vertical");
+            }
+            return self
+                .materials
+                .get(self.element_section(elem)?.rebar_material?.index());
+        }
         if self.stb_strengths.sections.iter().any(|s| {
             Some(s.section) == elem.section && s.reinforcement.iter().any(|r| r.part == "main")
         }) {
@@ -401,6 +420,20 @@ impl Model {
 
     /// 要素のせん断補強筋材料（RC・SRC 断面のみ）。
     pub fn element_shear_rebar_material(&self, elem: &ElementData) -> Option<&Material> {
+        if matches!(
+            self.element_section(elem)?.shape,
+            Some(crate::section_shape::SectionShape::RcWall { .. })
+        ) {
+            if self.stb_strengths.sections.iter().any(|s| {
+                Some(s.section) == elem.section
+                    && s.reinforcement.iter().any(|r| r.part == "horizontal")
+            }) {
+                return self.stb_rebar_material(elem.section?, "horizontal");
+            }
+            return self
+                .materials
+                .get(self.element_section(elem)?.shear_rebar_material?.index());
+        }
         if let Some(input) = self
             .stb_strengths
             .sections

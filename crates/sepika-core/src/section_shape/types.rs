@@ -118,11 +118,12 @@ pub enum SectionShape {
     ///
     /// `thickness`: 壁板厚 [mm]、`ps`: 壁板の直交する各方向のせん断補強筋比の
     /// うち小さい方（小数。例 0.0025）。`pwh_ratio` は実壁厚に対する横筋比。
-    /// 横筋比が不明の場合は `None` とし、最小比から推定しない。
+    /// `pwv_ratio`: 縦筋面積/(実壁厚×壁長) の小数。方向比の未知は `None`、最小比から推定しない。
     RcWall {
         thickness: f64,
         ps: f64,
         pwh_ratio: Option<f64>,
+        pwv_ratio: Option<f64>,
     },
     /// RC スラブ（床）。
     ///

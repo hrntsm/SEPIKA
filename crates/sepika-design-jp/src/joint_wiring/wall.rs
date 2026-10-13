@@ -31,6 +31,7 @@ pub(super) fn check_walls(
             thickness,
             ps,
             pwh_ratio,
+            ..
         }) = sec.shape
         else {
             continue;

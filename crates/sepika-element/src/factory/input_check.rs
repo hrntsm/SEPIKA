@@ -53,9 +53,9 @@ fn nonlinear_input_issues_with_basis(
             continue;
         }
         let issue = match elem.kind {
-            ElementKind::Wall => {
-                crate::wall::wall_element::WallElement::wall_shear_capacity_issue(elem, model)
-            }
+            ElementKind::Wall => crate::wall::wall_element::WallElement::wall_shear_capacity_issue(
+                elem, model, basis,
+            ),
             ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
                 member_strength_issue(elem, model).or_else(|| {
                     super::springs::rc_reference_issue(

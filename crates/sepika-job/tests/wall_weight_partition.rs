@@ -38,6 +38,7 @@ fn fixture(top: f64) -> Model {
     let mut section = SectionShape::RcWall {
         thickness: 200.0,
         pwh_ratio: None,
+        pwv_ratio: None,
         ps: 0.0025,
     }
     .to_section(SectionId(0), "壁".into());
@@ -744,6 +745,7 @@ fn generated_wall_origin_preserves_plate_identity_and_deduplicates_assignments()
     section.shape = Some(SectionShape::RcWall {
         thickness: 100.0,
         pwh_ratio: None,
+        pwv_ratio: None,
         ps: 0.0025,
     });
     model.sections.push(section);

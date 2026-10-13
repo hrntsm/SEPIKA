@@ -642,7 +642,9 @@ mod tests {
             sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(
                 &m.elements[0],
                 &m,
-            );
+                sepika_element::factory::StrengthBasis::Nominal,
+            )
+            .unwrap();
         assert!(
             capacities[1] > capacities[0] && capacities[0] > 0.0,
             "{capacities:?}"
@@ -652,7 +654,9 @@ mod tests {
             sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(
                 &m.elements[0],
                 &m,
-            );
+                sepika_element::factory::StrengthBasis::Nominal,
+            )
+            .unwrap();
         assert_eq!(capacities, [reversed[1], reversed[0]]);
         for n in &mut m.nodes {
             let [x, y, z] = n.coord;
@@ -662,7 +666,9 @@ mod tests {
             sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(
                 &m.elements[0],
                 &m,
-            );
+                sepika_element::factory::StrengthBasis::Nominal,
+            )
+            .unwrap();
         assert_eq!(reversed, rotated);
     }
 

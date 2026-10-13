@@ -86,6 +86,10 @@ impl EditCommand for SetSectionMaterial {
                 .shape
                 .as_ref()
                 .is_some_and(|shape| !shape.is_concrete_like());
+        let wall = matches!(
+            model.sections[idx].shape,
+            Some(sepika_core::section_shape::SectionShape::RcWall { .. })
+        );
         let source_snapshot = model.stb_strengths.clone();
         let source_stories = model.source_stories.clone();
         let grade = self
@@ -123,16 +127,27 @@ impl EditCommand for SetSectionMaterial {
                     input.native_material = self.material;
                 }
                 SectionMaterialRole::Rebar => {
+                    let part = if wall { "vertical" } else { "main" };
+                    if wall && self.material.is_none() {
+                        input.reinforcement.retain(|bar| bar.part != part);
+                    }
                     for bar in &mut input.reinforcement {
-                        if bar.part == "main" {
+                        if bar.part == part {
                             bar.strength = grade.clone();
                             bar.native_material = self.material;
                         }
                     }
                 }
                 SectionMaterialRole::ShearRebar => {
+                    if wall && self.material.is_none() {
+                        input.reinforcement.retain(|bar| bar.part != "horizontal");
+                    }
                     for bar in &mut input.reinforcement {
-                        if matches!(bar.part.as_str(), "band" | "stirrup") {
+                        if if wall {
+                            bar.part == "horizontal"
+                        } else {
+                            matches!(bar.part.as_str(), "band" | "stirrup")
+                        } {
                             bar.strength = grade.clone();
                             bar.native_material = self.material;
                         }

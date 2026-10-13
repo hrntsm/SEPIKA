@@ -1892,6 +1892,7 @@ fn test_beam_new_misc_wall_wing_augments_column_inplane_stiffness() {
     let wall_shape = SectionShape::RcWall {
         thickness: 150.0,
         pwh_ratio: None,
+        pwv_ratio: None,
         ps: 0.0025,
     };
     let mat = Material {
@@ -2059,6 +2060,7 @@ fn test_beam_new_misc_wall_strip_augments_girder_iy_without_100x() {
     let wall_shape = SectionShape::RcWall {
         thickness: 150.0,
         pwh_ratio: None,
+        pwv_ratio: None,
         ps: 0.0025,
     };
     let mat = Material {
@@ -2254,6 +2256,7 @@ fn test_column_face_slit_drops_wing_wall_but_keeps_girder_strip() {
     let wall_shape = SectionShape::RcWall {
         thickness: 150.0,
         pwh_ratio: None,
+        pwv_ratio: None,
         ps: 0.0025,
     };
     let mat = Material {
@@ -2483,6 +2486,7 @@ fn test_beam_new_seismic_wall_no_misc_wall_augmentation() {
     let wall_shape = SectionShape::RcWall {
         thickness: 150.0,
         pwh_ratio: None,
+        pwv_ratio: None,
         ps: 0.0025,
     };
     let mat = Material {
@@ -2868,6 +2872,7 @@ fn test_misc_wall_wing_eccentricity_is_independent_of_wall_node_order() {
     let wall_shape = SectionShape::RcWall {
         thickness: 150.0,
         pwh_ratio: None,
+        pwv_ratio: None,
         ps: 0.0025,
     };
     let mat = Material {
