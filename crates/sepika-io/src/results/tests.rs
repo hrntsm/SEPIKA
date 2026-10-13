@@ -194,7 +194,7 @@ fn test_fs_result_store_writer_manifest_and_reopen() {
     {
         let mut store = FsResultStore::open(&dir).unwrap();
         {
-            let mut writer = store.writer(1, ResultKind::NodalDisp).unwrap();
+            let mut writer = store.writer(1, ResultKind::NodalDisp, None).unwrap();
             let batch = nodal_disp_batch(
                 &[1, 2, 3],
                 &[
@@ -241,14 +241,14 @@ fn test_fs_result_store_discard_pending_drops_partial_results() {
     // 失敗経路。かつては writer() が自動 sync して 1 種別目が manifest へ吸収され、
     // discard_pending で巻き戻せなかった）。
     {
-        let mut writer = store.writer(1, ResultKind::NodalDisp).unwrap();
+        let mut writer = store.writer(1, ResultKind::NodalDisp, None).unwrap();
         let batch = nodal_disp_batch(&[1], &[[0.1; 6]]).unwrap();
         writer.write_rows(&batch).unwrap();
         writer.finish().unwrap();
     }
     {
         // 2 種別目のライタ取得（この時点で 1 種別目が manifest へ漏れてはならない）。
-        let _writer = store.writer(1, ResultKind::MemberForce).unwrap();
+        let _writer = store.writer(1, ResultKind::MemberForce, None).unwrap();
         // finish せず drop ＝ 書き込み失敗の想定。
     }
     store.discard_pending();
@@ -260,7 +260,7 @@ fn test_fs_result_store_discard_pending_drops_partial_results() {
 
     // 破棄後の正常な書き込みは通常どおり manifest へ反映される。
     {
-        let mut writer = store.writer(2, ResultKind::NodalDisp).unwrap();
+        let mut writer = store.writer(2, ResultKind::NodalDisp, None).unwrap();
         let batch = nodal_disp_batch(&[1, 2], &[[0.1; 6], [0.2; 6]]).unwrap();
         writer.write_rows(&batch).unwrap();
         writer.finish().unwrap();
@@ -279,7 +279,7 @@ fn test_fs_result_store_rewrite_dedup() {
     let mut store = FsResultStore::open(&dir).unwrap();
 
     for rows in [2usize, 4usize] {
-        let mut writer = store.writer(1, ResultKind::NodalDisp).unwrap();
+        let mut writer = store.writer(1, ResultKind::NodalDisp, None).unwrap();
         let ids: Vec<u32> = (0..rows as u32).collect();
         let disp: Vec<[f64; 6]> = vec![[0.0; 6]; rows];
         let batch = nodal_disp_batch(&ids, &disp).unwrap();
@@ -301,7 +301,7 @@ fn test_fs_result_store_query_node_filter() {
     let _ = std::fs::remove_dir_all(&dir);
     let mut store = FsResultStore::open(&dir).unwrap();
     {
-        let mut writer = store.writer(1, ResultKind::NodalDisp).unwrap();
+        let mut writer = store.writer(1, ResultKind::NodalDisp, None).unwrap();
         let batch = nodal_disp_batch(&[1, 2, 3], &[[0.1; 6], [0.2; 6], [0.3; 6]]).unwrap();
         writer.write_rows(&batch).unwrap();
         writer.finish().unwrap();
@@ -335,7 +335,7 @@ fn test_fs_result_store_time_history_step_range_query() {
     let _ = std::fs::remove_dir_all(&dir);
     let mut store = FsResultStore::open(&dir).unwrap();
     {
-        let mut writer = store.writer(1, ResultKind::TimeHistory).unwrap();
+        let mut writer = store.writer(1, ResultKind::TimeHistory, None).unwrap();
         for s in 0..3u64 {
             let batch =
                 time_history_batch(s, s as f64 * 0.1, &[1, 2], &[[0.1; 6], [0.2; 6]]).unwrap();
@@ -370,12 +370,12 @@ fn test_fs_result_store_time_history_step_range_query() {
 }
 
 #[test]
-fn test_fs_result_store_query_ignores_manifest_path() {
+fn test_fs_result_store_query_rejects_file_outside_store() {
     let dir = crate::test_util::test_tmp().join("p8_fsrs_traversal");
     let _ = std::fs::remove_dir_all(&dir);
     let mut store = FsResultStore::open(&dir).unwrap();
     {
-        let mut writer = store.writer(1, ResultKind::NodalDisp).unwrap();
+        let mut writer = store.writer(1, ResultKind::NodalDisp, None).unwrap();
         let batch = nodal_disp_batch(&[1, 2, 3], &[[0.1; 6], [0.2; 6], [0.3; 6]]).unwrap();
         writer.write_rows(&batch).unwrap();
         writer.finish().unwrap();
@@ -400,7 +400,7 @@ fn test_fs_result_store_query_ignores_manifest_path() {
     drop(store);
 
     let store = FsResultStore::open(&dir).unwrap();
-    let result = store
+    assert!(store
         .query(&ResultQuery {
             case: 1,
             kind: ResultKind::NodalDisp,
@@ -408,16 +408,7 @@ fn test_fs_result_store_query_ignores_manifest_path() {
             member_filter: None,
             step_range: None,
         })
-        .unwrap();
-    assert_eq!(result.batch.num_rows(), 3);
-    let node_col = result
-        .batch
-        .column(0)
-        .as_any()
-        .downcast_ref::<UInt32Array>()
-        .unwrap();
-    assert!(node_col.values().iter().all(|&id| id != 999));
-
+        .is_err());
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_file(&evil_path);
 }

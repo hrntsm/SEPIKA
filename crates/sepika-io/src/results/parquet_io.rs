@@ -17,6 +17,10 @@ pub struct ParquetWriter {
 impl ParquetWriter {
     pub fn create(path: &str, schema: Arc<Schema>) -> parquet::errors::Result<Self> {
         let file = File::create(path)?;
+        Self::from_file(file, schema)
+    }
+
+    pub(crate) fn from_file(file: File, schema: Arc<Schema>) -> parquet::errors::Result<Self> {
         let props = WriterProperties::builder()
             .set_max_row_group_row_count(Some(64 * 1024))
             .build();

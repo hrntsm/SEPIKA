@@ -42,6 +42,58 @@ impl Drop for ReleaseGate {
     }
 }
 
+#[tokio::test]
+async fn zero_requested_eigen_modes_remain_known_after_publication_and_reopen() {
+    let dir = test_store_dir("provenance-zero-modes");
+    let model = cantilever_with_load_case();
+    let server = SepikaServer::new(make_state(model.clone(), &dir));
+    let mut args = run_args(JobKind::Eigen);
+    args.n_modes = Some(0);
+    let run = server.analysis_run(Parameters(args)).await.unwrap();
+    let id = extract_job_id(&run);
+    let summary = done_summary(&wait_for_terminal(&server, &id).await);
+    assert_eq!(summary["n_modes"], 0);
+    assert_eq!(summary["store"]["persisted"], true);
+    assert_eq!(summary["store"]["entries"][0]["rows"], 0);
+    assert_eq!(summary["store"]["entries"][0]["provenance"]["conditions"]["n_modes"], 0);
+
+    for reopened in [false, true] {
+        let reopened_server = SepikaServer::new(make_state(model.clone(), &dir));
+        let selected = if reopened { &reopened_server } else { &server };
+        let got = selected.result_get(Parameters(ResultGetArgs {
+            case: 0, kind: "Modal".into(), node_ids: None, member_ids: None, step_range: None,
+        })).await.unwrap();
+        let value = response_json(&got);
+        assert_eq!(value["status"], "current");
+        assert_eq!(value["rows"], serde_json::json!([]));
+        assert_eq!(value["truncated"], false);
+        assert_eq!(value["entry"], summary["store"]["entries"][0]);
+        assert_eq!(value["current_scope"], "model_input_only");
+    }
+
+    let original = std::fs::read(dir.join("manifest.json")).unwrap();
+    let entry_path = summary["store"]["entries"][0]["path"].as_str().unwrap();
+    let original_bytes = std::fs::read(entry_path).unwrap();
+    for condition in [None, Some(serde_json::Value::Null), Some(serde_json::json!("unknown"))] {
+        let mut manifest: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        let conditions = manifest["entries"][0]["provenance"]["conditions"].as_object_mut().unwrap();
+        match condition {
+            Some(value) => { conditions.insert("n_modes".into(), value); },
+            None => { conditions.remove("n_modes"); },
+        }
+        std::fs::write(dir.join("manifest.json"), serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let unknown = SepikaServer::new(make_state(model.clone(), &dir));
+        let got = unknown.result_get(Parameters(ResultGetArgs {
+            case: 0, kind: "Modal".into(), node_ids: None, member_ids: None, step_range: None,
+        })).await.unwrap();
+        let value = response_json(&got);
+        assert_eq!(value["status"], "unavailable");
+        assert_eq!(value["reason"], "unknown_provenance");
+        assert!(value.get("rows").is_none());
+        assert_eq!(std::fs::read(entry_path).unwrap(), original_bytes);
+    }
+}
+
 fn response_json(result: &CallToolResult) -> serde_json::Value {
     serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap()
 }
@@ -141,6 +193,7 @@ async fn saving_multithread_status_and_state_exclusion() {
 #[tokio::test]
 async fn saving_failure_and_panic_discard_pending_before_next_job() {
     for (point, panic) in [
+        (SavePoint::Start(1, ResultKind::NodalDisp), false),
         (SavePoint::Write(1, ResultKind::MemberForce), false),
         (SavePoint::Finish(1, ResultKind::MemberForce), false),
         (SavePoint::Sync, false),
@@ -148,6 +201,13 @@ async fn saving_failure_and_panic_discard_pending_before_next_job() {
     ] {
         let dir = test_store_dir(&format!("save-fail-{point:?}-{panic}"));
         let mut server = SepikaServer::new(make_state(cantilever_with_load_case(), &dir));
+        let previous_run = server.analysis_run(Parameters(run_args(JobKind::LinearStatic))).await.unwrap();
+        let previous_id = extract_job_id(&previous_run);
+        done_summary(&wait_for_terminal(&server, &previous_id).await);
+        let previous_manifest = std::fs::read(dir.join("manifest.json")).unwrap();
+        let previous_files: Vec<_> = server.state.lock().await.results.manifest().entries.iter()
+            .map(|entry| (entry.path.clone(), std::fs::read(&entry.path).unwrap())).collect();
+        server.state.lock().await.model.load_cases[0].nodal[0].values[2] *= 2.0;
         server.save_hook = Some(Arc::new(move |actual| {
             if actual == point {
                 assert!(!panic, "保存worker異常終了の注入");
@@ -165,14 +225,9 @@ async fn saving_failure_and_panic_discard_pending_before_next_job() {
             matches!(status, JobStatus::Failed { ref kind, .. } if kind == "internal"),
             "{status:?}"
         );
-        assert!(server
-            .state
-            .lock()
-            .await
-            .results
-            .manifest()
-            .entries
-            .is_empty());
+        assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), previous_manifest);
+        for (path, bytes) in &previous_files { assert_eq!(std::fs::read(path).unwrap(), *bytes); }
+        assert_eq!(server.state.lock().await.results.manifest().entries.len(), 2);
         assert!(public_status(&server, &id).await["status"]
             .get("Failed")
             .is_some());
@@ -187,8 +242,8 @@ async fn saving_failure_and_panic_discard_pending_before_next_job() {
         let summary = done_summary(&wait_for_terminal(&server, &next_id).await);
         assert_eq!(summary["store"]["kinds"], serde_json::json!(["Modal"]));
         let reopened = sepika_io::results::FsResultStore::open(&dir).unwrap();
-        assert_eq!(reopened.manifest().entries.len(), 1);
-        assert_eq!(reopened.manifest().entries[0].kind, ResultKind::Modal);
+        assert_eq!(reopened.manifest().entries.len(), 3);
+        assert_eq!(reopened.manifest().entries[2].kind, ResultKind::Modal);
     }
 }
 
@@ -197,12 +252,12 @@ async fn saving_real_writer_and_manifest_failures_are_failed() {
     for manifest in [false, true] {
         let dir = test_store_dir(&format!("save-real-fail-{manifest}"));
         let server = SepikaServer::new(make_state(cantilever_with_load_case(), &dir));
-        std::fs::create_dir_all(dir.join(if manifest {
-            "manifest.json"
+        if manifest {
+            std::fs::create_dir_all(dir.join("manifest.json")).unwrap();
         } else {
-            "case1-MemberForce.parquet"
-        }))
-        .unwrap();
+            std::fs::remove_dir(&dir).unwrap();
+            std::fs::write(&dir, "writer開始失敗").unwrap();
+        }
         let run = server
             .analysis_run(Parameters(run_args(JobKind::LinearStatic)))
             .await
@@ -315,9 +370,10 @@ async fn saving_computed_snapshot_survives_live_model_edit() {
     let expected = compute_job(&model, JobKind::LinearStatic, &JobParams::default()).unwrap();
     let expected_dir = test_store_dir("save-snapshot-expected");
     let mut expected_store = sepika_io::results::FsResultStore::open(&expected_dir).unwrap();
+    let source = JobParams::default().result_provenance(&model, JobKind::LinearStatic, "expected").unwrap();
     let expected_summary: serde_json::Value =
-        serde_json::from_str(&persist_job_outcome(&mut expected_store, expected).unwrap()).unwrap();
-    let expected_rows = result_get_json(&expected_store, 1, "NodalDisp", None, None, None).unwrap();
+        serde_json::from_str(&persist_job_outcome(&mut expected_store, expected, &source).unwrap()).unwrap();
+    let expected_rows = result_get_json(&expected_store, &model, 1, "NodalDisp", None, None, None).unwrap();
     let mut server = SepikaServer::new(make_state(model, &dir));
     let (gate, entered) = SaveGate::new();
     let release = ReleaseGate(gate.clone());
@@ -338,14 +394,65 @@ async fn saving_computed_snapshot_survives_live_model_edit() {
     }
     drop(release);
     let summary = done_summary(&wait_for_terminal(&server, &id).await);
-    assert_eq!(summary, expected_summary);
+    let normalize = |mut value: serde_json::Value| {
+        for entry in value["store"]["entries"].as_array_mut().unwrap() {
+            entry["path"] = "公開path".into();
+            entry["provenance"]["run"] = "実行識別".into();
+        }
+        value
+    };
+    assert_eq!(normalize(summary), normalize(expected_summary));
     let st = server.state.lock().await;
     assert_eq!(st.model.nodes[1].coord[0], 2000.0);
     assert!(st.model.load_cases.is_empty());
     assert_eq!(
-        result_get_json(&st.results, 1, "NodalDisp", None, None, None).unwrap(),
-        expected_rows
+        result_get_json(&st.results, &st.model, 1, "NodalDisp", None, None, None).unwrap()["rows"],
+        expected_rows["rows"]
     );
+    let stale = result_get_json(&st.results, &st.model, 1, "NodalDisp", Some(vec![1]), None, None).unwrap();
+    assert_eq!(stale["status"], "stale");
+    assert_eq!(stale["entry"]["provenance"]["input_sha256"], source.input_sha256);
+    assert_eq!(stale["rows"].as_array().unwrap().len(), 1);
+    let reopened = sepika_io::results::FsResultStore::open(&dir).unwrap();
+    assert_eq!(result_get_json(&reopened, &st.model, 1, "NodalDisp", None, None, None).unwrap()["status"], "stale");
+}
+
+#[tokio::test]
+async fn result_public_api_keeps_old_snapshot_and_distinguishes_restarted_job_ids() {
+    let dir = test_store_dir("provenance-restart");
+    let model = cantilever_with_load_case();
+    let server = SepikaServer::new(make_state(model.clone(), &dir));
+    let run = server.analysis_run(Parameters(run_args(JobKind::LinearStatic))).await.unwrap();
+    let old_id = extract_job_id(&run);
+    let old_summary = done_summary(&wait_for_terminal(&server, &old_id).await);
+    let old_entry = old_summary["store"]["entries"][0].clone();
+    let old_bytes = std::fs::read(old_entry["path"].as_str().unwrap()).unwrap();
+    let mut edited = model;
+    edited.nodes[1].coord[0] = 2000.0;
+    let restarted = SepikaServer::new(make_state(edited, &dir));
+    let got = restarted.result_get(Parameters(ResultGetArgs {
+        case: 1, kind: "NodalDisp".into(), node_ids: Some(vec![1]), member_ids: None, step_range: None,
+    })).await.unwrap();
+    assert_eq!(response_json(&got)["status"], "stale");
+    assert_eq!(response_json(&got)["entry"], old_entry);
+    let run = restarted.analysis_run(Parameters(run_args(JobKind::Eigen))).await.unwrap();
+    let new_id = extract_job_id(&run);
+    assert_eq!(new_id, old_id);
+    let new_summary = done_summary(&wait_for_terminal(&restarted, &new_id).await);
+    assert_ne!(new_summary["store"]["entries"][0]["provenance"]["run"], old_entry["provenance"]["run"]);
+    assert_eq!(std::fs::read(old_entry["path"].as_str().unwrap()).unwrap(), old_bytes);
+    let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+    manifest["entries"][0].as_object_mut().unwrap().remove("provenance");
+    std::fs::write(dir.join("manifest.json"), serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let unknown = SepikaServer::new(make_state(restarted.state.lock().await.model.clone(), &dir));
+    let got = unknown.result_get(Parameters(ResultGetArgs {
+        case: 1, kind: "NodalDisp".into(), node_ids: None, member_ids: None, step_range: None,
+    })).await.unwrap();
+    let result = response_json(&got);
+    assert_eq!(result["status"], "unavailable");
+    assert_eq!(result["reason"], "unknown_provenance");
+    assert_eq!(result["action"], "analysis_run");
+    assert!(result.get("rows").is_none());
 }
 
 #[tokio::test]

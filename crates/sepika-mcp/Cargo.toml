@@ -38,6 +38,7 @@ arrow = { workspace = true }
 schemars = "1"
 tokio = { workspace = true, optional = true }
 serde = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 smallvec = { workspace = true }

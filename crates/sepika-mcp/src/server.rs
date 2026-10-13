@@ -90,17 +90,21 @@ impl SepikaServer {
             .map_err(|e| ErrorData::invalid_params(e, None))?;
         let kind = args.kind;
 
-        let (id, model) = {
+        let (id, model, mut source) = {
             let st = self.state.lock().await;
+            let model = st.model.clone();
+            let source = params
+                .result_provenance(&model, kind, "")
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
             let id = {
                 let mut jobs = st.jobs.lock().unwrap();
                 let id = jobs.register(kind);
                 jobs.update(&id, JobStatus::Running { progress: None });
                 id
             };
-            (id, st.model.clone())
+            (id, model, source)
         };
-
+        source.run.push_str(&id);
         let state = self.state.clone();
         let jobs = self.jobs.clone();
         let job_id = id.clone();
@@ -133,13 +137,14 @@ impl SepikaServer {
                             }
                             #[cfg(not(test))]
                             {
-                                super::persist_job_outcome(&mut st.results, job_outcome)
+                                super::persist_job_outcome(&mut st.results, job_outcome, &source)
                             }
                             #[cfg(test)]
                             {
                                 super::persist::persist_job_outcome_with_hook(
                                     &mut st.results,
                                     job_outcome,
+                                    &source,
                                     save_hook.as_ref(),
                                 )
                             }
@@ -209,6 +214,7 @@ impl SepikaServer {
         let st = self.state.lock().await;
         let result = super::result_get_json(
             &st.results,
+            &st.model,
             args.case,
             &args.kind,
             args.node_ids.clone(),
@@ -1080,7 +1086,11 @@ mod tests {
             reopened.state.lock().await.results.manifest().entries.len(),
             4
         );
-        for (case, disp, force) in originals {
+        for (case, mut disp, mut force) in originals {
+            assert_eq!(disp["status"], "current");
+            assert_eq!(force["status"], "current");
+            disp["status"] = "stale".into();
+            force["status"] = "stale".into();
             assert_eq!(get(&server, case, "NodalDisp").await, disp);
             assert_eq!(get(&server, case, "MemberForce").await, force);
             assert_eq!(get(&reopened, case, "NodalDisp").await, disp);

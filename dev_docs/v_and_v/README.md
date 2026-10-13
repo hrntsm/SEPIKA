@@ -117,6 +117,7 @@
 | [鋼材名の厳密な強度割増認識_Issue599_2026-10.md](鋼材名の厳密な強度割増認識_Issue599_2026-10.md) | 対応済名称と自動割増・factory/曲げ/せん断・旧解析版7のOVIKA失効 | 🔶（直接Verification、freshレビュー・最終CIは後続） |
 | [符号付き単純梁反力_Issue633_2026-10.md](符号付き単純梁反力_Issue633_2026-10.md) | 床／story／elementの符号付き反力・独立積分・利用側・adapter・旧成果失効 | 🔶（直接Verification、原本／Validation・freshレビュー・最終CIは後続） |
 | [保存成果の計算契約版_Issue587_2026-10.md](保存成果の計算契約版_Issue587_2026-10.md) | OVIKA解析/検定版・実入力・部分再実行・GUI/CSV・直接床板/小梁 | 🔶（直接Verification、freshレビュー・最終全構成は後続。MCP別ストアは#589） |
+| [MCP保存成果の生成元_Issue589_2026-10.md](MCP保存成果の生成元_Issue589_2026-10.md) | 静的/固有値の開始入力・契約版・公開path/hash・stale・保存失敗保持 | 🔶（直接Verification、freshレビュー・最終SHA/CIは親担当が記録） |
 | [静的検定の生成入力_Issue602_2026-10.md](静的検定の生成入力_Issue602_2026-10.md) | 同版の検定入力・部分解析非復活・独立0.8→1.6・GUI/CSV/OVIKA/Undo/失敗 | 🔶（直接Verification、freshレビュー・最終全CIは進行担当が確認） |
 | [OVIKA_named_MessagePack_2026-10.md](OVIKA_named_MessagePack_2026-10.md) | 4 payload の named 保存・復元、順序独立・default・破損・モデル検証、実 STB モデル単体の codec 時間と最終 OVIKA サイズ | ✅ |
 | [壁版の支持範囲判定_2026-09.md](壁版の支持範囲判定_2026-09.md) | 壁の支持辺・間柱端部の負担率の明示入力、部分支持・支持梁重複の診断 | 🔶 |
@@ -258,6 +259,7 @@
 | 30 | 壁版の要素生成判定と可視化 | sepika-core / sepika-load / sepika-app | model/wall_plate.rs, wall_expand.rs, viewer/scene.rs | `test_becomes_element_agrees_with_generated_elements` / `test_becomes_element_requires_section` / `test_boundary_coords_with_uses_supplied_coords` / `囲まれた壁版は境界節点が全て構面上にあるときだけ描く` / `取り付く壁版は取付き先の節点で構面を判定する` | 横断 | ☑ |
 | 31 | Fc>60 の NewRC 外挿 | sepika-material / sepika-element | newrc.rs, uniaxial/concrete_cyclic.rs, frame/fiber/mod.rs | Fc≤60 の材料 E 反映を維持し、Fc>60 の NewRC 固有 Ec 外挿、構成則選択・圧縮包絡線・ファイバー生成・3履歴則の応答をコードテストで照合済み。実験・原典適用範囲外の妥当性確認は未実施（詳細は [NewRC高強度コンクリート外挿_2026-09.md](NewRC高強度コンクリート外挿_2026-09.md)） | 横断 | 🔶 |
 | 32a | OVIKA保存成果の計算契約 | sepika-core / sepika-app | result_contract.rs・result_validity.rs・actions/design・result_contract_tests.rs | [Issue587の実OVIKA・実入口](保存成果の計算契約版_Issue587_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終全構成は後続） |
+| 32b | MCP保存成果の生成元と公開 | sepika-core / sepika-io / sepika-mcp | results/fs_store.rs・persist.rs・server_lifecycle_tests.rs | [Issue589の独立期待状態と実入口](MCP保存成果の生成元_Issue589_2026-10.md#独立期待状態と実入口) | 横断 | 🔶（直接Verification、最終SHA/レビュー/CIは後続） |
 | 32b | 静的検定の生成入力 | sepika-core / sepika-app | result_validity.rs・actions/design/check.rs・design_input_tests.rs | [Issue602の独立数値・実入口](静的検定の生成入力_Issue602_2026-10.md#実入口と観測) | 横断 | 🔶（直接Verification、freshレビュー・最終全CIは後続） |
 | 32 | OVIKA の named MessagePack 永続化 | sepika-io / sepika-app | ovika.rs, tests/full_model.rs | `saved_model_fields_are_named_and_order_independent` / `ovika_roundtrip_preserves_model_and_results` 他。default・破損・復元モデル検証とモデル単体のサイズ・codec 比較は [検証記録](OVIKA_named_MessagePack_2026-10.md) を参照 | 横断 | ✅ |
 | 33 | 単一リップ溝形材の未検定 | sepika-design-jp / sepika-app | steel/lip_channel.rs、tests/lip_channel.rs、viewer/check_ratio.rs | `steel::lip_channel::tests::*` / `lip_channel_*`。詳細は[未検定](リップ溝形材_未検定_Issue509_2026-10.md)と[幾何成立](リップ溝形の幾何成立条件_Issue544_2026-10.md)の記録 | 横断 | 🔶（未検定契約・幾何入力Verification。耐力Validation未） |

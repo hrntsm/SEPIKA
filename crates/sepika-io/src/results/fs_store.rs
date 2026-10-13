@@ -6,34 +6,11 @@ use std::sync::{Arc, Mutex};
 use super::{
     member_force_schema, modal_schema, nodal_disp_schema, read_all, read_time_history_range,
     time_history_schema, CaseId, ParquetWriter, ResultBatch, ResultEntry, ResultKind,
-    ResultManifest, ResultQuery, ResultStore, ResultWriter,
+    ResultManifest, ResultProvenance, ResultQuery, ResultStore, ResultWriter,
 };
 
-/// ディレクトリ配下に Parquet ファイルとマニフェスト(manifest.json)を置く結果ストア。
-///
-/// ファイル名は `case{case}-{kind:?}.parquet`(例: `case1-NodalDisp.parquet`)。
-///
-/// ## マニフェスト同期の設計
-/// `ResultWriter::finish` は `Box<Self>` を consume するため、ライタ単体からは
-/// ストア本体(`&mut FsResultStore`)へ直接書き戻すことができない。そこで:
-/// - ライタは `Arc<Mutex<Vec<ResultEntry>>>`(`pending`)の clone を保持し、
-///   `finish` 時にはそこへエントリを push するだけに留める。
-/// - ストア本体は `pending` を drain して `ResultManifest` 本体へ吸収し、
-///   manifest.json へ永続化する `sync(&mut self)` を持つ。`sync()` は
-///   呼び出し側がジョブの全書き込み成功後に明示的に呼ぶコミット点であり、
-///   `writer()` は自動で `sync()` しない。
-/// - 途中失敗したジョブは `sync()` を呼ばず [`Self::discard_pending`] で
-///   保留分を破棄すること。
-///
-/// ## query の対応範囲(素朴な実装)
-/// - `NodalDisp` / `MemberForce` / `Modal`: 全行読み出し後にフィルタを適用する。
-///   `Modal` には node/member の概念がないためフィルタは無視する。
-/// - `TimeHistory`: 既存の `read_time_history_range` を利用し、`step_range` /
-///   `node_filter` に対応する(`member_filter` は概念がないため無視)。
-/// - `Story` はスキーマ関数が未実装のため `writer()` / `query()` ともに
-///   `Err(Unsupported)` を返す。
-/// - `query` はマニフェストに該当エントリがない場合・IO 失敗時に `Err` を返す
-///   (panic しない)。
+/// finish 済みの結果を sync で公開し、選択 entry のファイルを照会する。
+/// sync の失敗時は既存の公開 entry とファイルを保持する。
 pub struct FsResultStore {
     dir: PathBuf,
     manifest_path: PathBuf,
@@ -46,6 +23,7 @@ impl FsResultStore {
     pub fn open(dir: impl Into<PathBuf>) -> std::io::Result<Self> {
         let dir = dir.into();
         std::fs::create_dir_all(&dir)?;
+        let dir = dir.canonicalize()?;
         let manifest_path = dir.join("manifest.json");
         let manifest = if manifest_path.exists() {
             let data = std::fs::read_to_string(&manifest_path)?;
@@ -61,14 +39,7 @@ impl FsResultStore {
         })
     }
 
-    fn file_path(&self, case: CaseId, kind: ResultKind) -> PathBuf {
-        self.dir.join(format!("case{case}-{kind:?}.parquet"))
-    }
-
-    /// finish 済みライタが積んだ保留エントリを manifest 本体へ吸収し、manifest.json
-    /// へ永続化する。同一 case+kind のエントリは上書きする。
-    ///
-    /// 永続化に成功したときだけメモリ上の manifest へ反映する。失敗時は保留へ戻して Err を返す。
+    /// 同一 case/kind の保留成果をまとめて公開する。失敗時は公開済み成果を保持する。
     pub fn sync(&mut self) -> std::io::Result<()> {
         let drained: Vec<ResultEntry> = {
             let mut pending = self
@@ -93,7 +64,15 @@ impl FsResultStore {
             }
         }
         let data = serde_json::to_string_pretty(&new_manifest).map_err(std::io::Error::other)?;
-        if let Err(e) = std::fs::write(&self.manifest_path, data) {
+        let publish = (|| {
+            use std::io::Write;
+            let mut file = tempfile::NamedTempFile::new_in(&self.dir)?;
+            file.write_all(data.as_bytes())?;
+            file.as_file().sync_all()?;
+            file.persist(&self.manifest_path).map_err(|e| e.error)?;
+            Ok::<(), std::io::Error>(())
+        })();
+        if let Err(e) = publish {
             if let Ok(mut pending) = self.pending.lock() {
                 for entry in drained {
                     pending.push(entry);
@@ -148,6 +127,8 @@ struct FsResultWriter {
     kind: ResultKind,
     path: String,
     pending: Arc<Mutex<Vec<ResultEntry>>>,
+    provenance: Option<ResultProvenance>,
+    temporary_path: tempfile::TempPath,
 }
 
 impl ResultWriter for FsResultWriter {
@@ -164,8 +145,16 @@ impl ResultWriter for FsResultWriter {
             kind,
             path,
             pending,
+            provenance,
+            temporary_path,
         } = *self;
         Box::new(inner).finish()?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)?
+            .sync_all()?;
+        let sha256 = Some(file_sha256(&path)?);
+        temporary_path.keep().map_err(|e| e.error)?;
         pending
             .lock()
             .map_err(|_| std::io::Error::other("pending mutex poisoned"))?
@@ -174,15 +163,20 @@ impl ResultWriter for FsResultWriter {
                 kind,
                 rows,
                 path,
+                provenance,
+                sha256,
             });
         Ok(())
     }
 }
 
 impl ResultStore for FsResultStore {
-    fn writer(&mut self, case: CaseId, kind: ResultKind) -> std::io::Result<Box<dyn ResultWriter>> {
-        let path = self.file_path(case, kind);
-        let path_str = path.to_string_lossy().into_owned();
+    fn writer(
+        &mut self,
+        case: CaseId,
+        kind: ResultKind,
+        provenance: Option<ResultProvenance>,
+    ) -> std::io::Result<Box<dyn ResultWriter>> {
         let schema = match kind {
             ResultKind::NodalDisp => nodal_disp_schema(),
             ResultKind::MemberForce => member_force_schema(),
@@ -195,34 +189,53 @@ impl ResultStore for FsResultStore {
                 ));
             }
         };
-        let inner = ParquetWriter::create(&path_str, schema).map_err(std::io::Error::other)?;
+        let temporary = tempfile::Builder::new()
+            .prefix(&format!("case{case}-{kind:?}-"))
+            .suffix(".parquet")
+            .tempfile_in(&self.dir)?;
+        let (file, temporary_path) = temporary.into_parts();
+        let path_str = temporary_path.to_string_lossy().into_owned();
+        let inner = ParquetWriter::from_file(file, schema).map_err(std::io::Error::other)?;
         Ok(Box::new(FsResultWriter {
             inner,
             rows: 0,
             case,
             kind,
             path: path_str,
+            provenance,
+            temporary_path,
             pending: Arc::clone(&self.pending),
         }))
     }
 
     fn query(&self, q: &ResultQuery) -> std::io::Result<ResultBatch> {
-        if !self
+        let entry = self
             .manifest
             .entries
             .iter()
-            .any(|e| e.case == q.case && e.kind == q.kind)
-        {
+            .find(|e| e.case == q.case && e.kind == q.kind)
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "結果エントリがありません")
+            })?;
+        if std::path::Path::new(&entry.path).canonicalize()?.parent() != Some(self.dir.as_path()) {
             return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!(
-                    "manifest に case={} kind={:?} のエントリがありません",
-                    q.case, q.kind
-                ),
+                std::io::ErrorKind::InvalidData,
+                "公開ファイルは結果ディレクトリ内である必要があります",
             ));
         }
-        let path = self.file_path(q.case, q.kind);
-        let path = path.to_string_lossy();
+        let expected = entry.sha256.as_ref().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "公開ファイルのhashがありません",
+            )
+        })?;
+        if file_sha256(&entry.path)? != *expected {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "公開ファイルのhashが一致しません",
+            ));
+        }
+        let path = entry.path.as_str();
 
         match q.kind {
             ResultKind::TimeHistory => {
@@ -230,14 +243,14 @@ impl ResultStore for FsResultStore {
                     .node_filter
                     .as_ref()
                     .map(|ids| ids.iter().map(|n| n.0).collect());
-                let batches = read_time_history_range(&path, q.step_range, node_ids.as_deref())
+                let batches = read_time_history_range(path, q.step_range, node_ids.as_deref())
                     .map_err(std::io::Error::other)?;
                 let batch = arrow::compute::concat_batches(&time_history_schema(), &batches)
                     .map_err(std::io::Error::other)?;
                 Ok(ResultBatch { batch })
             }
             ResultKind::NodalDisp => {
-                let mut batches = read_all(&path).map_err(std::io::Error::other)?;
+                let mut batches = read_all(path).map_err(std::io::Error::other)?;
                 if let Some(ids) = &q.node_filter {
                     let ids: Vec<u32> = ids.iter().map(|n| n.0).collect();
                     batches = filter_by_u32_column(batches, 0, &ids)?;
@@ -247,7 +260,7 @@ impl ResultStore for FsResultStore {
                 Ok(ResultBatch { batch })
             }
             ResultKind::MemberForce => {
-                let mut batches = read_all(&path).map_err(std::io::Error::other)?;
+                let mut batches = read_all(path).map_err(std::io::Error::other)?;
                 if let Some(ids) = &q.member_filter {
                     let ids: Vec<u32> = ids.iter().map(|e| e.0).collect();
                     batches = filter_by_u32_column(batches, 0, &ids)?;
@@ -257,7 +270,7 @@ impl ResultStore for FsResultStore {
                 Ok(ResultBatch { batch })
             }
             ResultKind::Modal => {
-                let batches = read_all(&path).map_err(std::io::Error::other)?;
+                let batches = read_all(path).map_err(std::io::Error::other)?;
                 let batch = arrow::compute::concat_batches(&modal_schema(), &batches)
                     .map_err(std::io::Error::other)?;
                 Ok(ResultBatch { batch })
@@ -271,5 +284,70 @@ impl ResultStore for FsResultStore {
 
     fn manifest(&self) -> &ResultManifest {
         &self.manifest
+    }
+}
+
+/// ファイルの全 bytes を対象に SHA-256 を返す。
+pub fn file_sha256(path: impl AsRef<std::path::Path>) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manifest_publish_failure_preserves_previous_entry_and_file_on_disk() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = FsResultStore::open(directory.path()).unwrap();
+        for value in [3.0, 9.0] {
+            let mut writer = store.writer(1, ResultKind::NodalDisp, None).unwrap();
+            writer
+                .write_rows(&super::super::nodal_disp_batch(&[1], &[[value; 6]]).unwrap())
+                .unwrap();
+            writer.finish().unwrap();
+            if value == 3.0 {
+                store.sync().unwrap();
+            }
+        }
+        let old_entry = store.manifest().entries[0].clone();
+        let old_bytes = std::fs::read(&old_entry.path).unwrap();
+        let old_manifest = std::fs::read(&store.manifest_path).unwrap();
+        let original_manifest_path = store.manifest_path.clone();
+        store.manifest_path = directory.path().join("publish-blocker");
+        std::fs::create_dir(&store.manifest_path).unwrap();
+        assert!(store.sync().is_err());
+        store.discard_pending();
+        assert_eq!(store.manifest().entries[0].path, old_entry.path);
+        assert_eq!(std::fs::read(original_manifest_path).unwrap(), old_manifest);
+        assert_eq!(std::fs::read(&old_entry.path).unwrap(), old_bytes);
+        let reopened = FsResultStore::open(directory.path()).unwrap();
+        assert_eq!(reopened.manifest().entries[0].path, old_entry.path);
+        assert_eq!(
+            reopened
+                .query(&ResultQuery {
+                    case: 1,
+                    kind: ResultKind::NodalDisp,
+                    node_filter: None,
+                    member_filter: None,
+                    step_range: None
+                })
+                .unwrap()
+                .batch
+                .num_rows(),
+            1
+        );
     }
 }
