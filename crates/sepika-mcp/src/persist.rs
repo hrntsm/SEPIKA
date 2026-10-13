@@ -354,9 +354,7 @@ fn complete_conditions(source: &sepika_io::results::ResultProvenance, case: u32)
             "Eigen" => {
                 case == 0
                     && conditions["target"]["case"] == 0
-                    && conditions["n_modes"]
-                        .as_u64()
-                        .is_some_and(|count| count > 0)
+                    && conditions["n_modes"].as_u64().is_some()
             }
             "DesignCheck" => {
                 conditions["target"]["source"] == "single_case"

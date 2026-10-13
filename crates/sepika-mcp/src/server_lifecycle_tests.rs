@@ -42,6 +42,58 @@ impl Drop for ReleaseGate {
     }
 }
 
+#[tokio::test]
+async fn zero_requested_eigen_modes_remain_known_after_publication_and_reopen() {
+    let dir = test_store_dir("provenance-zero-modes");
+    let model = cantilever_with_load_case();
+    let server = SepikaServer::new(make_state(model.clone(), &dir));
+    let mut args = run_args(JobKind::Eigen);
+    args.n_modes = Some(0);
+    let run = server.analysis_run(Parameters(args)).await.unwrap();
+    let id = extract_job_id(&run);
+    let summary = done_summary(&wait_for_terminal(&server, &id).await);
+    assert_eq!(summary["n_modes"], 0);
+    assert_eq!(summary["store"]["persisted"], true);
+    assert_eq!(summary["store"]["entries"][0]["rows"], 0);
+    assert_eq!(summary["store"]["entries"][0]["provenance"]["conditions"]["n_modes"], 0);
+
+    for reopened in [false, true] {
+        let reopened_server = SepikaServer::new(make_state(model.clone(), &dir));
+        let selected = if reopened { &reopened_server } else { &server };
+        let got = selected.result_get(Parameters(ResultGetArgs {
+            case: 0, kind: "Modal".into(), node_ids: None, member_ids: None, step_range: None,
+        })).await.unwrap();
+        let value = response_json(&got);
+        assert_eq!(value["status"], "current");
+        assert_eq!(value["rows"], serde_json::json!([]));
+        assert_eq!(value["truncated"], false);
+        assert_eq!(value["entry"], summary["store"]["entries"][0]);
+        assert_eq!(value["current_scope"], "model_input_only");
+    }
+
+    let original = std::fs::read(dir.join("manifest.json")).unwrap();
+    let entry_path = summary["store"]["entries"][0]["path"].as_str().unwrap();
+    let original_bytes = std::fs::read(entry_path).unwrap();
+    for condition in [None, Some(serde_json::Value::Null), Some(serde_json::json!("unknown"))] {
+        let mut manifest: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        let conditions = manifest["entries"][0]["provenance"]["conditions"].as_object_mut().unwrap();
+        match condition {
+            Some(value) => { conditions.insert("n_modes".into(), value); },
+            None => { conditions.remove("n_modes"); },
+        }
+        std::fs::write(dir.join("manifest.json"), serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let unknown = SepikaServer::new(make_state(model.clone(), &dir));
+        let got = unknown.result_get(Parameters(ResultGetArgs {
+            case: 0, kind: "Modal".into(), node_ids: None, member_ids: None, step_range: None,
+        })).await.unwrap();
+        let value = response_json(&got);
+        assert_eq!(value["status"], "unavailable");
+        assert_eq!(value["reason"], "unknown_provenance");
+        assert!(value.get("rows").is_none());
+        assert_eq!(std::fs::read(entry_path).unwrap(), original_bytes);
+    }
+}
+
 fn response_json(result: &CallToolResult) -> serde_json::Value {
     serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap()
 }
