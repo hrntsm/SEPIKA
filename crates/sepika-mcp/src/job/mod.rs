@@ -87,6 +87,31 @@ impl Default for JobParams {
 }
 
 impl JobParams {
+    #[cfg(any(feature = "mcp", test))]
+    pub(crate) fn result_provenance(
+        &self,
+        model: &Model,
+        kind: JobKind,
+        job_id: &str,
+    ) -> std::io::Result<sepika_io::results::ResultProvenance> {
+        Ok(sepika_io::results::ResultProvenance {
+            run: format!("{}:{job_id}", uuid::Uuid::new_v4()),
+            job_kind: format!("{kind:?}"),
+            input_sha256: sepika_io::results::model_input_sha256(model)?,
+            conditions: serde_json::json!({
+                "preparation": {"z": self.z, "soil": self.soil, "c0": self.c0, "ai_mode": self.ai_mode},
+                "design_period_s": self.design_period,
+                "n_modes": (kind == JobKind::Eigen).then_some(self.n_modes),
+            }),
+            analysis_contract_version: Some(
+                sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION,
+            ),
+            design_contract_version: (kind == JobKind::DesignCheck)
+                .then_some(sepika_core::result_contract::DESIGN_CONTRACT_VERSION),
+            schema_version: Some(sepika_io::results::RESULT_SCHEMA_VERSION),
+        })
+    }
+
     /// 解析前処理（荷重自動同期）に渡す `AnalysisSettings` を組み立てる。
     pub(crate) fn analysis_settings_for_prepare(&self) -> AnalysisSettings {
         AnalysisSettings {

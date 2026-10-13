@@ -327,11 +327,7 @@ impl App {
     }
 
     fn calculation_model(&self) -> sepika_core::model::Model {
-        let mut model = self.core.model.clone();
-        model.axes.clear();
-        model.vibration_cases.clear();
-        model.lumped_vibration_cases.clear();
-        model
+        self.core.model.calculation_model()
     }
 
     pub(super) fn result_input(&self, key: &ResultInputKey) -> Vec<u8> {
