@@ -9,7 +9,7 @@
 /// 1 本の柱（鉛直部材）の、平面位置と方向別水平剛性（D値）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ColumnStiffness {
-    /// 柱の平面位置 (x, y) [mm]。
+    /// 柱の平面位置 (x, y) `[mm]`。
     pub pos: [f64; 2],
     /// X 加力方向の水平剛性 Dx [N/mm]。
     pub dx: f64,
@@ -20,8 +20,8 @@ pub struct ColumnStiffness {
 /// 武藤 D 値の閉形式。加力方向ごとに呼ぶ。
 ///
 /// - `e`: ヤング係数 [N/mm²]
-/// - `ic`: 加力方向の柱断面二次モーメント [mm⁴]
-/// - `h`: 階高（柱長）[mm]
+/// - `ic`: 加力方向の柱断面二次モーメント `[mm⁴]`
+/// - `h`: 階高（柱長）`[mm]`
 /// - `sum_beam_stiffness_ratio`: 柱頭・柱脚に取り付く、加力方向に効く梁の剛比 ΣKb（= Σ Ib/Lb）
 /// - `first_story`: 最下階（柱脚固定）なら true。一般階は false。
 ///
@@ -69,9 +69,9 @@ pub fn center_of_rigidity(cols: &[ColumnStiffness]) -> [f64; 2] {
 /// 偏心率の算定結果（X 加力・Y 加力）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Eccentricity {
-    /// 偏心距離 ex = |Xg − Xs| [mm]。
+    /// 偏心距離 ex = |Xg − Xs| `[mm]`。
     pub ex: f64,
-    /// 偏心距離 ey = |Yg − Ys| [mm]。
+    /// 偏心距離 ey = |Yg − Ys| `[mm]`。
     pub ey: f64,
     /// ねじり剛性 KR = Σ(Dx·ȳ²) + Σ(Dy·x̄²)（剛心まわり）。
     pub kr: f64,

@@ -20,7 +20,7 @@ pub struct EvaluationPoint {
     pub direction: SeismicDir,
     pub step: u32,
     pub selection_reason: String,
-    /// 部材群判定用の耐力 [N]。同時点の負担力とは別の設計入力。
+    /// 部材群判定用の耐力 `[N]`。同時点の負担力とは別の設計入力。
     pub member_capacities_n: Vec<(ElemId, f64)>,
 }
 
@@ -31,7 +31,7 @@ pub enum ForceGroup {
     Frame,
 }
 
-/// 物理要素を一度だけ計上した符号付き上側材端力 [N]。
+/// 物理要素を一度だけ計上した符号付き上側材端力 `[N]`。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CutForce {
     pub elem: ElemId,

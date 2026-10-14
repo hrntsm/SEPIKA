@@ -41,7 +41,7 @@ pub enum WallPlateShape {
     /// 主架構・床領域に取り付く領域（パラペット・腰壁・垂れ壁・自立壁）。
     ///
     /// [`RegionAnchor::Line`] の場合、`extent` は「立ち上がり高さ」
-    /// `[d_i, d_j]`（区間の始端側・終端側の高さ [mm]）で、床側（跳ね出し長さ）とは
+    /// `[d_i, d_j]`（区間の始端側・終端側の高さ `[mm]`）で、床側（跳ね出し長さ）とは
     /// 張り出す向きが異なる（床は取付き線の左向き法線方向、壁は鉛直上向き）。
     /// [`RegionAnchor::FloorRegion`] の場合も同じ意味（`extent` は高さ、`nodes` は
     /// 壁自体の平面上の始点・終点）。[`RegionAnchor::Point`] は壁の取付き先としては
@@ -81,12 +81,12 @@ pub struct WallPlate {
     /// チェックが止める。モジュール doc 参照）。
     #[serde(default)]
     pub section: Option<SectionId>,
-    /// 開口面積の合計 [mm²]（[`super::WallAttr::opening_area`] の後継）。
+    /// 開口面積の合計 `[mm²]`（[`super::WallAttr::opening_area`] の後継）。
     /// `openings`（個別開口）が非空の場合はそちらの面積和を優先し、本フィールドは
     /// 無視される（[`WallPlate::total_opening_area`] 参照）。
     #[serde(default)]
     pub opening_area: f64,
-    /// 開口部（サッシ等）の重量 [N]（[`super::WallAttr::opening_weight`] の後継）。
+    /// 開口部（サッシ等）の重量 `[N]`（[`super::WallAttr::opening_weight`] の後継）。
     /// 開口面積控除後の自重に加算する。
     #[serde(default)]
     pub opening_weight: f64,
@@ -216,7 +216,7 @@ impl WallPlate {
         }
     }
 
-    /// 境界多角形の座標列 [mm]（4 点）。取り付く壁版は取付き先と張り出し量
+    /// 境界多角形の座標列 `[mm]`（4 点）。取り付く壁版は取付き先と張り出し量
     /// （鉛直上向きの高さ）から算出する。囲まれた壁版は割当領域の支持部材材軸から
     /// 解決する。節点が引けない、または壁の取付き先として使わない組み合わせ
     /// （`RegionAnchor::Point`）の場合は `None`。
@@ -232,7 +232,7 @@ impl WallPlate {
         }
     }
 
-    /// 境界多角形の座標列 [mm] を、節点座標の引き方を差し替えて求める。
+    /// 境界多角形の座標列 `[mm]` を、節点座標の引き方を差し替えて求める。
     ///
     /// [`WallPlate::boundary_coords`] はモデルの節点座標をそのまま使うが、変形図・
     /// モード形・時刻歴は**変形後の節点座標**で描く必要がある。形状の組み立て方
@@ -296,7 +296,7 @@ impl WallPlate {
         ])
     }
 
-    /// 壁版の面積 [mm²]。囲まれた壁版は [`crate::geom::polygon::area_3d`]（ニューエル）。
+    /// 壁版の面積 `[mm²]`。囲まれた壁版は [`crate::geom::polygon::area_3d`]（ニューエル）。
     /// 取り付く壁版は底辺長 × ∫|立ち上がり高さ|（[`crate::geom::abs_lerp_integral`]）。
     /// 4 点多角形にすると、両端で高さが符号反転する壁は自己交差（蝶ネクタイ）になり、
     /// Newell の面積が打ち消されて 0 近くになる（自重が黙って消える危険側）。
@@ -323,7 +323,7 @@ impl WallPlate {
         }
     }
 
-    /// 開口の合計面積 [mm²]。個別開口 `openings` が非空ならその面積和、
+    /// 開口の合計面積 `[mm²]`。個別開口 `openings` が非空ならその面積和、
     /// 空なら `opening_area` を返す（`WallAttr::total_opening_area` と同じ規約。
     /// 全消費側はこのメソッドを経由すること）。
     pub fn total_opening_area(&self) -> f64 {
@@ -495,7 +495,7 @@ impl Model {
         plate.section.and_then(|sid| self.sections.get(sid.index()))
     }
 
-    /// 壁版の板厚 [mm]（断面の [`Section::thickness`]。[`Model::slab_plate_thickness`]
+    /// 壁版の板厚 `[mm]`（断面の [`Section::thickness`]。[`Model::slab_plate_thickness`]
     /// と同じ規約）。断面未割当、または断面が板厚を持たない場合は `None`。
     pub fn wall_plate_thickness(&self, plate: &WallPlate) -> Option<f64> {
         self.wall_plate_section(plate)
@@ -518,7 +518,7 @@ impl Model {
             .and_then(|mid| self.materials.get(mid.index()))
     }
 
-    /// 取り付く壁版の立ち上がり高さ `[d_i, d_j]` [mm]。
+    /// 取り付く壁版の立ち上がり高さ `[d_i, d_j]` `[mm]`。
     ///
     /// `extent` が `Some` ならその値をそのまま返す。`None`（＝階高いっぱい）は、
     /// 壁の下端から**直上の階レベル**までの高さへ解決する
@@ -549,7 +549,7 @@ impl Model {
         Some([h, h])
     }
 
-    /// レベル `z` [mm] から**直上の階レベル**までの高さ [mm]。
+    /// レベル `z` `[mm]` から**直上の階レベル**までの高さ `[mm]`。
     ///
     /// 階レベルは床レベル列（[`Story::elevation`]）なので、`z` より上にある最も低い
     /// 階レベルとの差がその位置の階高になる。`z` と同じレベルの階は、床そのもので
@@ -565,7 +565,7 @@ impl Model {
             .map(|e| e - z)
     }
 
-    /// 壁版の自重 [N]。躯体（開口控除後の正味面積 × 板厚 × 主材料の設計単位体積重量）
+    /// 壁版の自重 `[N]`。躯体（開口控除後の正味面積 × 板厚 × 主材料の設計単位体積重量）
     /// ＋ 仕上げ・増打ち（正味面積 × [`WallPlate::finish_intensity`]）
     /// ＋ 開口部（サッシ等）の重量。
     ///
@@ -581,7 +581,7 @@ impl Model {
         self.wall_plate_self_weight_with(plate, model_for_area, false)
     }
 
-    /// 壁版の物理質量相当の重量 [N]（質量行列・動的解析用）。躯体の単位体積重量だけ
+    /// 壁版の物理質量相当の重量 `[N]`（質量行列・動的解析用）。躯体の単位体積重量だけ
     /// RC壁はSectionMassPropertiesの標準RC密度、その他は保存物理密度を使い、仕上げ等は設計と同じ。
     pub fn wall_plate_physical_weight(
         &self,

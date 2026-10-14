@@ -1,15 +1,15 @@
 //! 4節点シェル要素（MITC4）。責務ごとにサブモジュール分割。
 //!
-//! - [`resultants`] — 断面力・コンター用データ構造
-//! - [`frame`] — 要素ローカル直交フレームと回転変換
-//! - [`shape`] — 形状関数・ヤコビアン・ガウス積分点
-//! - [`constitutive`] — 構成則 D 行列（膜・曲げ・せん断）
-//! - [`geom`] — 要素面積などの幾何量
-//! - [`element`] — [`ShellElement`] 本体と生成・ローカル座標
-//! - [`bmatrix`] — B 行列（膜・曲げ・MITC4 せん断）
-//! - [`stiffness`] — 剛性行列とドリリング安定化
-//! - [`recovery`] — 断面力回復・コンター外挿
-//! - [`element_behavior`] — [`ElementBehavior`](crate::behavior::ElementBehavior) 実装
+//! - `resultants` — 断面力・コンター用データ構造
+//! - `frame` — 要素ローカル直交フレームと回転変換
+//! - `shape` — 形状関数・ヤコビアン・ガウス積分点
+//! - `constitutive` — 構成則 D 行列（膜・曲げ・せん断）
+//! - `geom` — 要素面積などの幾何量
+//! - `element` — [`ShellElement`] 本体と生成・ローカル座標
+//! - `bmatrix` — B 行列（膜・曲げ・MITC4 せん断）
+//! - `stiffness` — 剛性行列とドリリング安定化
+//! - `recovery` — 断面力回復・コンター外挿
+//! - `element_behavior` — [`ElementBehavior`](crate::behavior::ElementBehavior) 実装
 
 #[cfg(test)]
 use crate::behavior::LocalMat;

@@ -8,7 +8,7 @@ use sepika_core::section_shape::SectionShape;
 use super::section_props::axis_props_from_shape;
 use crate::ultimate::rc_props::RcDirection;
 
-/// モーメント 2 次曲線分布の M=0 となる端部からの距離（近い方）[mm]。
+/// モーメント 2 次曲線分布の M=0 となる端部からの距離（近い方）`[mm]`。
 /// 実数解が (0, L) にない場合は None。
 pub fn moment_zero_distance(m1: f64, m2: f64, m0: f64, l: f64) -> Option<f64> {
     if l <= 0.0 {
@@ -39,14 +39,14 @@ pub fn moment_zero_distance(m1: f64, m2: f64, m0: f64, l: f64) -> Option<f64> {
 
 /// PCa 水平接合面の使用限界状態の検討の入力。
 pub struct PcaServiceInput {
-    /// 部材断面に作用するせん断力 Q [N]。
+    /// 部材断面に作用するせん断力 Q `[N]`。
     pub q: f64,
     /// 水平接合面より外側（断面縁側）のコンクリートの、図心位置からの
-    /// 断面一次モーメント Sy [mm³]。
+    /// 断面一次モーメント Sy `[mm³]`。
     pub s_y: f64,
-    /// 断面二次モーメント I [mm⁴]（応力計算で用いる値と同じ）。
+    /// 断面二次モーメント I `[mm⁴]`（応力計算で用いる値と同じ）。
     pub i: f64,
-    /// 接合面の幅（梁幅）b [mm]。
+    /// 接合面の幅（梁幅）b `[mm]`。
     pub b: f64,
     /// 水平接合面の摩擦係数 μ。
     pub mu: f64,

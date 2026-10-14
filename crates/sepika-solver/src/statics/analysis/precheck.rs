@@ -3,7 +3,7 @@
 //! よくあるモデリングミス（節点・部材・拘束の欠如、断面/材料未割当、孤立節点）を
 //! 特異行列エラーの前に検出し、「何をすれば直るか」を含む日本語メッセージで返す。
 //!
-//! 判定の本体は [`model_issues`] にあり、解析前チェック [`precheck_model`] と
+//! 判定の本体は [`model_issues`] にあり、解析前チェック `precheck_model` と
 //! UI のモデル整合性チェック（診断タブ）はどちらもこれを呼ぶ。
 
 use sepika_core::ids::{ElemId, MaterialId, NodeId};
@@ -27,7 +27,7 @@ pub enum IssueTargets {
 /// 止めるのは [`IssueSeverity::Error`] だけに限るために区別する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IssueSeverity {
-    /// 解析が成立しない不備。解析前チェック（[`precheck_model`]）はこれで止める。
+    /// 解析が成立しない不備。解析前チェック（`precheck_model`）はこれで止める。
     Error,
     /// 解析は成立するが、入力の取り違えである可能性が高いもの。
     /// 診断タブには警告として並べ、解析は止めない。
@@ -117,7 +117,7 @@ fn support_label(support: sepika_core::model::SupportMemberId) -> String {
 /// 解析を妨げるモデルの不備をすべて集める。
 ///
 /// 返す順は「モデル検証 → モデル全体の欠落 → 部材の入力不備 → 節点参照の不整合」で、
-/// [`precheck_model`] はこの先頭 1 件をエラーにする。
+/// `precheck_model` はこの先頭 1 件をエラーにする。
 ///
 /// 先頭のモデル検証（[`Model::validate`]）が失敗したときは、その 1 件だけを返して
 /// 打ち切る。

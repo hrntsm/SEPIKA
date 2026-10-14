@@ -244,7 +244,7 @@ pub fn contains_including_boundary(poly: &[[f64; 2]], p: [f64; 2]) -> bool {
     on_boundary(poly, p) || ray_crossing(poly, p)
 }
 
-/// 点 `p` が多角形の内部、または辺から `tol` [mm] 以内にあるか。
+/// 点 `p` が多角形の内部、または辺から `tol` `[mm]` 以内にあるか。
 ///
 /// [`contains_including_boundary`] の辺上許容差を呼び出し側が指定する版。既定の
 /// [`BOUNDARY_TOL_MM`] より広い帯を境界として扱いたい用途（支持端が親領域の境界上に

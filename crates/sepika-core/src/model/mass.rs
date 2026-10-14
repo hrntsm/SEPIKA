@@ -33,7 +33,7 @@ impl SectionMassProperties {
         self.rotary_inertia_y_per_length + self.rotary_inertia_z_per_length
     }
 
-    /// 指定長さの総質量 [t]。
+    /// 指定長さの総質量 `[t]`。
     pub fn total_mass(self, length: f64) -> f64 {
         self.mass_per_length.max(0.0) * length.max(0.0)
     }
@@ -495,7 +495,7 @@ pub struct DamperMassGeneration {
     pub dynamic_masses: Vec<(crate::ids::StoryId, Option<super::StoryDynamicMass>)>,
 }
 
-/// ダンパーとして重量を置換した部材と材端配置。重量は [N]、座標は [mm]。
+/// ダンパーとして重量を置換した部材と材端配置。重量は `[N]`、座標は `[mm]`。
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DamperMassInput {
     pub elem: crate::ids::ElemId,
@@ -513,7 +513,7 @@ pub struct DamperMassPlacement {
     pub constraints: Vec<super::Constraint>,
 }
 
-/// 質量配置に関係する節点の位置 [mm] と拘束。
+/// 質量配置に関係する節点の位置 `[mm]` と拘束。
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MassPlacementNode {
     pub id: crate::ids::NodeId,

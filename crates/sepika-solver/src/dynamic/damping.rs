@@ -31,7 +31,7 @@ pub enum Damping {
     /// モード別減衰。各モードに独立の減衰比 h_i を与える。
     /// C = Σ_i 2·h_i·ω_i·(M φ_i)(M φ_i)ᵀ（質量正規化モード）。
     Modal { modes: Vec<ModalDampingMode> },
-    /// 瞬間剛性比例・h1 一定。C = 2·h1/ω1·[S]。
+    /// 瞬間剛性比例・h1 一定。C = 2·h1/ω1·`[S]`。
     /// 非線形解析では ω1 を毎ステップ更新する。
     TangentStiffnessConstantH { h1: f64, omega1e: f64 },
 }
@@ -39,9 +39,9 @@ pub enum Damping {
 /// 剛性比例減衰がどの剛性を基準にするか。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StiffnessKind {
-    /// 初期剛性比例（[C]=α1[Se]、α1=2h/ω）。
+    /// 初期剛性比例（`[C]`=α1`[Se]`、α1=2h/ω）。
     Initial,
-    /// 瞬間（接線）剛性比例（α1 一定。[C]=α1[S]）。
+    /// 瞬間（接線）剛性比例（α1 一定。`[C]`=α1`[S]`）。
     Tangent,
 }
 

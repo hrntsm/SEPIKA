@@ -23,14 +23,14 @@ pub struct CftUltimateCheck {
     pub elem: ElemId,
     /// 柱分類（短柱/中柱/長柱）。
     pub class: CftColumnClass,
-    /// 軸圧縮終局耐力 Ncu [N]。
+    /// 軸圧縮終局耐力 Ncu `[N]`。
     pub ncu: f64,
-    /// 軸引張終局耐力 Ntu [N]。
+    /// 軸引張終局耐力 Ntu `[N]`。
     pub ntu: f64,
     /// 設計軸力における N-M 相互作用の終局曲げ耐力 Mu [N·mm]
     /// （柱分類に応じて短柱／中柱／長柱の式を用いる）。
     pub mu_nm: Result<f64, String>,
-    /// 設計軸力 [N]（圧縮正）。
+    /// 設計軸力 `[N]`（圧縮正）。
     pub n_design: f64,
     /// 軸余裕度（圧縮 Ncu/N、引張 Ntu/|N|。N=0 は `f64::INFINITY`）。
     pub axial_margin: f64,
@@ -71,7 +71,7 @@ fn cft_section_props(shape: &SectionShape) -> Result<Option<CftSectionProps>, St
 /// モデルの CFT 柱（`CftBox`/`CftPipe`）について軸終局検定を一括実行する
 /// （CFT指針）。
 ///
-/// - `axial_by_elem`: 設計軸力 [N]（**圧縮正**）。なければ軸力 0（安全側）。
+/// - `axial_by_elem`: 設計軸力 `[N]`（**圧縮正**）。なければ軸力 0（安全側）。
 /// - 座屈長さ lk は部材の幾何長（K=1 相当）を用いる。鋼管の降伏強さ Fy は
 ///   `Section.steel_material` の材料名・板厚または有効な fy から解決し、ヤング係数は
 ///   205000 N/mm²（鋼）を用いる。Fc は材料の `fc`（未設定はスキップ）。
@@ -189,8 +189,8 @@ pub fn collect_cft_ultimate_checks(
 /// CFT 柱の N-M 相互作用による終局曲げ耐力 `Mu(N)` [N·mm]（CFT指針。
 /// 柱分類（短柱／中柱・長柱）に応じた式を選択する）。
 ///
-/// - `n_design`: 設計軸力 [N]（**圧縮正**）。
-/// - `fy`: 鋼管の降伏強さ（F 値）[N/mm²]、`lk`: 座屈長さ [mm]。
+/// - `n_design`: 設計軸力 `[N]`（**圧縮正**）。
+/// - `fy`: 鋼管の降伏強さ（F 値）[N/mm²]、`lk`: 座屈長さ `[mm]`。
 /// - `weak_axis`: 角形で幅方向（弱軸）まわりの曲げを評価する場合 true
 ///   （円形は同値。柱分類・軸終局は断面代表せい `d_section` のまま評価する近似）。
 ///

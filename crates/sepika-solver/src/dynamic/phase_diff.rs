@@ -4,11 +4,11 @@
 
 /// 位相遅れ時間 `t = (L·sinθ)/Vs`（多点位相差入力、構造力学）。
 ///
-/// - `l_m`: 矩形基礎の長さ L [m]（位相遅れ方向 X なら Lx、Y なら Ly）。
+/// - `l_m`: 矩形基礎の長さ L `[m]`（位相遅れ方向 X なら Lx、Y なら Ly）。
 /// - `theta_deg`: 入射角 θ [°]。
 /// - `vs_m_s`: せん断波速度 Vs [m/s]。
 ///
-/// 返り値は位相遅れ時間 [s]（`Vs<=0` は 0）。
+/// 返り値は位相遅れ時間 `[s]`（`Vs<=0` は 0）。
 pub fn phase_lag_time(l_m: f64, theta_deg: f64, vs_m_s: f64) -> f64 {
     if vs_m_s <= 0.0 {
         return 0.0;
@@ -21,7 +21,7 @@ pub fn phase_lag_time(l_m: f64, theta_deg: f64, vs_m_s: f64) -> f64 {
 ///
 /// `θ̈(k) = (base[k] − base[k − shift]) / l_mm`,  `shift = round(lag_s/dt)`。
 ///
-/// `base` は並進加速度 [mm/s²]、`l_mm` は基礎長さ [mm]（並進加速度と同じ長さ単位）。
+/// `base` は並進加速度 [mm/s²]、`l_mm` は基礎長さ `[mm]`（並進加速度と同じ長さ単位）。
 /// `shift=0` や `l_mm<=0` の場合はゼロ列を返す。
 pub fn torsional_accel_series(base: &[f64], dt: f64, lag_s: f64, l_mm: f64) -> Vec<f64> {
     let n = base.len();

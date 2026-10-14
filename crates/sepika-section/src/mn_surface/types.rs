@@ -3,11 +3,11 @@
 /// 全塑性計算用のファイバ（またはバネ）。
 #[derive(Clone, Debug)]
 pub struct PlasticFiber {
-    /// 断面内 y 座標 [mm]
+    /// 断面内 y 座標 `[mm]`
     pub y: f64,
-    /// 断面内 z 座標 [mm]
+    /// 断面内 z 座標 `[mm]`
     pub z: f64,
-    /// 負担断面積 [mm²]
+    /// 負担断面積 `[mm²]`
     pub area: f64,
     /// 引張限界応力 [N/mm²]（≥0。コンクリートは 0）
     pub sigma_t: f64,

@@ -41,10 +41,10 @@
 //!
 //! 責務ごとに以下のサブモジュールへ分割している。
 //!
-//! - [`geom`] — 幾何ユーティリティ（面積・距離・鉛直判定）
-//! - [`self_weight_calc`] — 自重（線材・壁・シェル・ダンパー）の列挙と算定
-//! - [`reactions`] — 単純支持梁の静定反力
-//! - [`generate`] — 階生成の本体（[`generate_stories_multi`] ほか）
+//! - `geom` — 幾何ユーティリティ（面積・距離・鉛直判定）
+//! - `self_weight_calc` — 自重（線材・壁・シェル・ダンパー）の列挙と算定
+//! - `reactions` — 単純支持梁の静定反力
+//! - `generate` — 階生成の本体（[`generate_stories_multi`] ほか）
 
 use sepika_core::dof::{Dof, Dof6Mask};
 use sepika_core::ids::{LoadCaseId, NodeId, StoryId};

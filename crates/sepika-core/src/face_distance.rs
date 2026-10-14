@@ -98,7 +98,7 @@ fn checked_interval(label: &str, len: f64, deductions: [f64; 2]) -> Result<[f64;
     Ok([i, len - j])
 }
 
-/// 大梁自重専用の柱面間区間 [mm]。接続柱の距離が複数ある端では最小を採る。
+/// 大梁自重専用の柱面間区間 `[mm]`。接続柱の距離が複数ある端では最小を採る。
 /// 剛域用の `face_distances` には影響しない。
 pub fn girder_self_weight_interval(model: &Model, elem: &ElementData) -> Result<[f64; 2], String> {
     let label = format!("大梁 {}", elem.id.0);
@@ -158,7 +158,7 @@ pub fn girder_self_weight_interval(model: &Model, elem: &ElementData) -> Result<
     checked_interval(&label, vec3::dist(a, b), deductions)
 }
 
-/// 二次部材の自重作用区間 [mm]。間柱・Detached は芯々区間を保持する。
+/// 二次部材の自重作用区間 `[mm]`。間柱・Detached は芯々区間を保持する。
 /// 小梁の断面方向は鉛直を材軸直交面へ投影して決める。
 pub fn secondary_self_weight_interval(
     model: &Model,
@@ -259,7 +259,7 @@ fn face_at(
     d_max / 2.0
 }
 
-/// モデルの全要素について、両端の柱フェース距離 `[i 端, j 端]` [mm] を求める。
+/// モデルの全要素について、両端の柱フェース距離 `[i 端, j 端]` `[mm]` を求める。
 ///
 /// 添字は `model.elements` の並びと一致する。Beam 以外の要素と、節点が 2 つ
 /// 未満の要素は `[0.0, 0.0]`。
@@ -284,7 +284,7 @@ pub fn face_distances(model: &Model) -> Vec<[f64; 2]> {
         .collect()
 }
 
-/// 壁実領域に面する支持材の図心から外側フェースまで [mm]。断面方向・形状不足はエラー。
+/// 壁実領域に面する支持材の図心から外側フェースまで `[mm]`。断面方向・形状不足はエラー。
 pub fn wall_support_face(
     model: &Model,
     support: SupportMemberId,

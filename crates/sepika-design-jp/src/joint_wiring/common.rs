@@ -5,7 +5,7 @@ use sepika_core::ids::NodeId;
 use sepika_core::model::{ElementData, Material, Section};
 use sepika_core::structure_kind::StructureKind;
 
-/// 1 部材分の内力（評価位置と [N,Qy,Qz,Mx,My,Mz]）。
+/// 1 部材分の内力（評価位置と `[N,Qy,Qz,Mx,My,Mz]`）。
 pub type ForcesAt<'a> = &'a [(f64, [f64; 6])];
 
 /// 収集済みの部材情報。

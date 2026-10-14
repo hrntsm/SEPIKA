@@ -4,12 +4,12 @@
 //! 構造規定（2007年版建築物の構造関係技術基準解説書 P.626-627,629-630）に準じて
 //! 算定する。本プログラムでは圧縮軸力を正、引張軸力を負と表す。
 
-/// RC 柱の軸終局耐力（圧縮・引張）[N]。
+/// RC 柱の軸終局耐力（圧縮・引張）`[N]`。
 #[derive(Clone, Copy, Debug)]
 pub struct RcAxialUltimate {
-    /// 軸圧縮強度 Nuc = b·D·Fc [N]（圧縮正）。
+    /// 軸圧縮強度 Nuc = b·D·Fc `[N]`（圧縮正）。
     pub nuc: f64,
-    /// 軸引張強度 Nut = −ag·σy [N]（引張負）。
+    /// 軸引張強度 Nut = −ag·σy `[N]`（引張負）。
     pub nut: f64,
 }
 
@@ -19,7 +19,7 @@ pub struct RcAxialUltimate {
 /// Nuc = b·D·Fc          （軸圧縮強度、圧縮正）
 /// Nut = −ag·σy          （軸引張強度、引張負）
 /// ```
-/// - `b`,`d`: 柱の幅・せい [mm]、`fc`: Fc [N/mm²]、`ag`: 全主筋断面積 [mm²]、
+/// - `b`,`d`: 柱の幅・せい `[mm]`、`fc`: Fc [N/mm²]、`ag`: 全主筋断面積 `[mm²]`、
 ///   `sigma_y`: 主筋降伏強度 [N/mm²]。
 /// - 不正入力（いずれかが負）は 0 にクランプして評価する。
 pub fn rc_column_axial_ultimate(b: f64, d: f64, fc: f64, ag: f64, sigma_y: f64) -> RcAxialUltimate {

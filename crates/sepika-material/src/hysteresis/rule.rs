@@ -60,7 +60,7 @@ pub enum HysteresisRule {
 
 impl HysteresisRule {
     /// スケルトン包絡線上の (力, 接線剛性) を返す。符号対称を仮定。
-    /// 変形は θ [rad] または δ [mm]、力は [N·mm] または [N]。
+    /// 変形は θ `[rad]` または δ `[mm]`、力は [N·mm] または `[N]`。
     pub fn skeleton_with_degradation(&self, theta: f64, degrade_factor: f64) -> (f64, f64) {
         match *self {
             HysteresisRule::Takeda {

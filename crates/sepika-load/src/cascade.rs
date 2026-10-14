@@ -37,7 +37,7 @@ pub type SecondaryKey = SecondaryMemberId;
 pub enum SupportAt {
     /// 主架構（要素が接続する節点、または大梁のスパン上）。逐次伝達の終端。
     Primary,
-    /// 別の二次部材の内部。逐次伝達を 1 段進める。`a` は受け側の材軸上の位置 [mm]
+    /// 別の二次部材の内部。逐次伝達を 1 段進める。`a` は受け側の材軸上の位置 `[mm]`
     /// （受け側の材軸始端からの距離）。
     Secondary { key: SecondaryKey, a: f64 },
     /// 自由端（片持ちの自由端）。荷重はこの端から出ていかない。
@@ -51,14 +51,14 @@ pub enum SupportAt {
 pub struct TransferredMember {
     /// 二次部材の安定 ID。
     pub member: SecondaryMemberId,
-    /// 両端座標 [mm]（端番号順。片持ちは支持端 0・自由端 1）。
+    /// 両端座標 `[mm]`（端番号順。片持ちは支持端 0・自由端 1）。
     pub end_points: [[f64; 3]; 2],
-    /// 支持間距離 [mm]。
+    /// 支持間距離 `[mm]`。
     pub span: f64,
     /// この部材が受け持つ全荷重（材軸局所。端 0 を原点とする）。
     /// 床分配の辺荷重・自重・架け側から渡された集中荷重の重ね合わせ。
     pub member_loads: Vec<MemberLoadKind>,
-    /// 両端反力 [N]（下向きの荷重に対して正）。`end_points` と同じ並び。
+    /// 両端反力 `[N]`（下向きの荷重に対して正）。`end_points` と同じ並び。
     pub reactions: [f64; 2],
     /// 各端の支持相手。`end_points` と同じ並び。
     pub supports: [SupportAt; 2],

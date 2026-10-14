@@ -109,7 +109,7 @@ pub fn member_orientation(model: &Model, elem: &ElementData) -> Option<MemberOri
     }
 }
 
-/// 接合部が占める領域の半寸法 [mm]。
+/// 接合部が占める領域の半寸法 `[mm]`。
 ///
 /// 部材は節点そのものではなく、パネルの面で接合する。その面までの距離が
 /// パネル分のオフセットになる。
@@ -129,14 +129,14 @@ pub fn member_orientation(model: &Model, elem: &ElementData) -> Option<MemberOri
 /// はりのオフセットが直交ばりのせいで決まることがない。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PanelHalfExtent {
-    /// 柱せいの最大値の 1/2 [mm]（＝はりのオフセット、パネルの水平半寸法）。
+    /// 柱せいの最大値の 1/2 `[mm]`（＝はりのオフセット、パネルの水平半寸法）。
     pub column_half: f64,
-    /// はりせいの最大値の 1/2 [mm]（＝柱のオフセット、パネルの鉛直半寸法）。
+    /// はりせいの最大値の 1/2 `[mm]`（＝柱のオフセット、パネルの鉛直半寸法）。
     pub beam_half: f64,
 }
 
 impl PanelHalfExtent {
-    /// 向き `orientation` の部材が接合する面までのオフセット [mm]。
+    /// 向き `orientation` の部材が接合する面までのオフセット `[mm]`。
     pub fn offset_for(&self, orientation: MemberOrientation) -> f64 {
         match orientation {
             MemberOrientation::Beam => self.column_half,
@@ -192,9 +192,9 @@ pub enum PanelShapeKind {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PanelGeometry {
     pub kind: PanelShapeKind,
-    /// 柱せい方向のパネル寸法 `dc` [mm]（H 形・角形は板厚中心間、円形は径 − 板厚）。
+    /// 柱せい方向のパネル寸法 `dc` `[mm]`（H 形・角形は板厚中心間、円形は径 − 板厚）。
     pub dc: f64,
-    /// パネル板厚 `tp` [mm]。
+    /// パネル板厚 `tp` `[mm]`。
     pub tp: f64,
     /// 充填コンクリートを持つ柱（CFT）か。
     ///
@@ -287,7 +287,7 @@ impl PanelGeometry {
         }
     }
 
-    /// パネルの実効体積 `Ve` [mm³]（`db` は梁フランジ板厚中心間距離）。
+    /// パネルの実効体積 `Ve` `[mm³]`（`db` は梁フランジ板厚中心間距離）。
     ///
     /// - H 形: `Ve = dc・db・tp`（ウェブ 1 枚）
     /// - 角形・円形: `Ve = 2・dc・db・tp`（ウェブ 2 枚相当）
@@ -310,9 +310,9 @@ impl PanelGeometry {
 pub struct PanelJoint {
     /// 諸元を採った柱の断面区分・`dc`・`tp`。
     pub geometry: PanelGeometry,
-    /// 梁フランジ板厚中心間距離 `db` [mm]（取り付くはりの最大）。
+    /// 梁フランジ板厚中心間距離 `db` `[mm]`（取り付くはりの最大）。
     pub db: f64,
-    /// 実効体積 `Ve` [mm³]。
+    /// 実効体積 `Ve` `[mm³]`。
     pub ve: f64,
     /// 諸元を採った柱の要素 ID（軸力比 `n`・基準強度 `F` の解決に用いる）。
     pub column: ElemId,
@@ -324,10 +324,10 @@ pub struct PanelJoint {
     pub has_filled_column: bool,
 }
 
-/// 局所座標のフランジ位置比較用公差 [mm]。閉区間で比較する。
+/// 局所座標のフランジ位置比較用公差 `[mm]`。閉区間で比較する。
 pub const FLANGE_POSITION_TOL_MM: f64 = 1e-6;
 
-/// 接合部を原点とする上・下フランジ板厚中心位置 [mm]。
+/// 接合部を原点とする上・下フランジ板厚中心位置 `[mm]`。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeamFlangePositions {
     pub upper: f64,
@@ -361,14 +361,14 @@ impl BeamFlangePositions {
     }
 }
 
-/// 上下両方の局所位置差 [mm] が公差内なら標準形式。非有限値は対象外。
+/// 上下両方の局所位置差 `[mm]` が公差内なら標準形式。非有限値は対象外。
 pub fn standard_flange_differences(upper_difference: f64, lower_difference: f64) -> bool {
     [upper_difference, lower_difference]
         .iter()
         .all(|v| v.is_finite() && v.abs() <= FLANGE_POSITION_TOL_MM)
 }
 
-/// 同一検討面の梁。材軸は接合部から外向き、位置は接合部原点 [mm]。
+/// 同一検討面の梁。材軸は接合部から外向き、位置は接合部原点 `[mm]`。
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelPlaneBeam {
     pub element: ElemId,
@@ -669,14 +669,14 @@ pub fn resolve_panel_joint<'a>(
     }))
 }
 
-/// 梁の幾何解決 [mm] とパネル式適用の状態。保存断面諸元の代用は行わない。
+/// 梁の幾何解決 `[mm]` とパネル式適用の状態。保存断面諸元の代用は行わない。
 #[derive(Clone, Debug, PartialEq)]
 pub struct BeamPanelProperties {
     pub depth: Result<f64, String>,
     pub applicability: Result<(), String>,
 }
 
-/// 梁のフランジ板厚中心間距離 [mm] と式の適用可否を別々に返す。
+/// 梁のフランジ板厚中心間距離 `[mm]` と式の適用可否を別々に返す。
 pub fn beam_panel_properties(sec: &Section) -> BeamPanelProperties {
     let applicability = match sec.shape {
         Some(SectionShape::SteelH { .. } | SectionShape::SteelBuiltH { .. }) => Ok(()),
@@ -688,7 +688,7 @@ pub fn beam_panel_properties(sec: &Section) -> BeamPanelProperties {
     }
 }
 
-/// 形状寸法から梁フランジ板厚中心間距離 `db` [mm] を返す。
+/// 形状寸法から梁フランジ板厚中心間距離 `db` `[mm]` を返す。
 /// 不正寸法・未定義のフランジ対は理由付きエラー。式適用可否は別途確認する。
 pub fn beam_panel_depth(sec: &Section) -> Result<f64, String> {
     let (height, upper, lower, dimensions) = match sec.shape {

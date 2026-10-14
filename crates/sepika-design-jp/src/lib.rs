@@ -126,17 +126,17 @@ pub(crate) fn ratio_or_large(m: f64, ma: f64) -> f64 {
 /// `QD = QL + Qsn／QL + Qw` は組合せ解析の弾性せん断力そのものに一致する
 /// ため、本文脈は地震時組合せでのみ与えることを想定する。
 pub struct SeismicQd {
-    /// 長期（G+P）の部材内力（評価位置, [N,Qy,Qz,Mx,My,Mz]）。
+    /// 長期（G+P）の部材内力（評価位置, `[N,Qy,Qz,Mx,My,Mz]`）。
     /// 当該部材の長期組合せ解析結果をそのまま渡す。
     pub long_at: Vec<(f64, [f64; 6])>,
     /// 水平荷重時せん断力の割増係数 n（柱は 1.5 以上。既定 1.5）。QD2 用。
     pub n_factor: f64,
     /// メカニズム側（QD1）の割増係数 n_mech（マニュアルの n2。既定 1.0）。
     pub n_mechanism: f64,
-    /// 両端支持とした長期せん断力 Q0 [N]（絶対値）。梁の QD1 に用いる。
+    /// 両端支持とした長期せん断力 Q0 `[N]`（絶対値）。梁の QD1 に用いる。
     /// `None` のときは `QL` で代替する。
     pub q_simple: Option<f64>,
-    /// 内法長さ l′／h′（剛域控除後）[mm]。0 以下なら QD1 は省略する。
+    /// 内法長さ l′／h′（剛域控除後）`[mm]`。0 以下なら QD1 は省略する。
     pub clear_length: f64,
     /// QD の決定方法。
     pub method: QdMethod,
@@ -145,8 +145,8 @@ pub struct SeismicQd {
 /// ある評価位置 1 点の内力。
 ///
 /// 単位は以下に統一する（プログラム全体と共通）:
-/// - `n`: 軸力 [N]（**引張を正、圧縮を負**とする）
-/// - `qy`, `qz`: 部材局所 y/z 方向のせん断力 [N]
+/// - `n`: 軸力 `[N]`（**引張を正、圧縮を負**とする）
+/// - `qy`, `qz`: 部材局所 y/z 方向のせん断力 `[N]`
 /// - `my`, `mz`: 部材局所 y/z 軸まわりの曲げモーメント [N·mm]
 ///   （`mz` が強軸まわり＝`Section.iy` に対応する曲げ、`my` が弱軸まわり）
 /// - `pos`: 部材軸方向の無次元位置 (0.0=始端, 1.0=終端)
@@ -324,17 +324,17 @@ pub struct DesignCtx {
     pub steel_material: Option<sepika_core::model::Material>,
     pub term: LoadTerm,
     pub kind: MemberKind,
-    /// 部材長 [mm]。座屈長さ lk・横座屈長さ lb の既定値として用いる。
+    /// 部材長 `[mm]`。座屈長さ lk・横座屈長さ lb の既定値として用いる。
     pub length: f64,
-    /// 剛域（フェイス）控除後の内法長 [mm]。RC 梁の長期たわみスパン L に用いる。
+    /// 剛域（フェイス）控除後の内法長 `[mm]`。RC 梁の長期たわみスパン L に用いる。
     /// None のときは [`Self::length`]（幾何長）で代替する。
     pub clear_length: Option<f64>,
-    /// 圧縮フランジの支点間距離（横座屈長さ）lb [mm]。None なら `length`。
+    /// 圧縮フランジの支点間距離（横座屈長さ）lb `[mm]`。None なら `length`。
     pub lb: Option<f64>,
-    /// 強軸まわり座屈長さ lk_y [mm]（断面二次半径 i_y=√(Iy/A) と対）。
+    /// 強軸まわり座屈長さ lk_y `[mm]`（断面二次半径 i_y=√(Iy/A) と対）。
     /// None なら `length`（座屈長さ係数 K=1 相当）。[`effective_slenderness`] 参照。
     pub lk_y: Option<f64>,
-    /// 弱軸まわり座屈長さ lk_z [mm]（断面二次半径 i_z=√(Iz/A) と対）。
+    /// 弱軸まわり座屈長さ lk_z `[mm]`（断面二次半径 i_z=√(Iz/A) と対）。
     /// None なら `length`（座屈長さ係数 K=1 相当）。[`effective_slenderness`] 参照。
     pub lk_z: Option<f64>,
     /// せん断スパン比 M/(Q·d) 算定用の部材代表値 `(|Mz|max, 対応する |Qy|)`

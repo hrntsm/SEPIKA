@@ -23,8 +23,8 @@ pub struct RcAlphaEvaluation {
     pub design_applicability: Result<(), CoreError>,
 }
 
-/// 寸法[mm]・引張筋[mm²]・材料比nから方向別αyを評価する。
-/// 上端T形のみ、明示したコンクリート幾何IT[mm⁴]に対するI0/IT補正を適用する。
+/// 寸法`[mm]`・引張筋`[mm²]`・材料比nから方向別αyを評価する。
+/// 上端T形のみ、明示したコンクリート幾何IT`[mm⁴]`に対するI0/IT補正を適用する。
 #[allow(clippy::too_many_arguments)]
 pub fn rc_beam_alpha_evaluation(
     b_mm: f64,
@@ -80,10 +80,10 @@ pub fn rc_beam_alpha_evaluation(
     Ok(RcAlphaEvaluation { alpha_y, research_input_range, design_applicability: Err(CoreError::InvalidInput("採用分岐の1987原典と対象実験Validationは未確認です。数式評価・資料域内を設計適用合格と扱いません".into())) })
 }
 
-/// 三角形曲げ分布の明示条件。逆対称形のLは剛域控除後の柔部材長[mm]。
+/// 三角形曲げ分布の明示条件。逆対称形のLは剛域控除後の柔部材長`[mm]`。
 #[derive(Clone, Copy, Debug)]
 pub enum RcBeamMomentDiagram {
-    /// 一定せん断・端から反曲点までの三角形分布。区間長[mm]内に反曲点が必要。
+    /// 一定せん断・端から反曲点までの三角形分布。区間長`[mm]`内に反曲点が必要。
     Triangle {
         moment_nmm: f64,
         shear_n: f64,
@@ -99,7 +99,7 @@ pub enum RcBeamMomentDiagram {
 }
 
 impl RcBeamMomentDiagram {
-    /// せん断スパンa[mm]。Q=0・反曲点区間外・非三角形は理由付きエラー。
+    /// せん断スパンa`[mm]`。Q=0・反曲点区間外・非三角形は理由付きエラー。
     pub fn shear_span_mm(self) -> Result<f64, CoreError> {
         let a = match self {
             Self::Triangle {
@@ -155,7 +155,7 @@ impl RcBeamMomentDiagram {
     }
 }
 
-/// 同一基準の総降伏部材角[rad]と追加端ばね割線柔性[rad/(N·mm)]。
+/// 同一基準の総降伏部材角`[rad]`と追加端ばね割線柔性[rad/(N·mm)]。
 #[derive(Clone, Debug)]
 pub struct RcBeamYieldEvaluation {
     pub elastic_rotation_rad: f64,

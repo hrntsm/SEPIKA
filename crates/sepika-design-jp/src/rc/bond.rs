@@ -16,7 +16,7 @@ pub struct Bond1991Result {
 
 /// RC 梁付着の断面検定（RC 規準 1991 方式）: `τa = Q/(φ・j) ≦ fa`。
 /// `top_bar`: 上端筋なら true（fa が低減される）。
-/// `phi`: 引張鉄筋の周長総和 Σφ [mm]。
+/// `phi`: 引張鉄筋の周長総和 Σφ `[mm]`。
 pub fn rc_beam_bond_check_1991(
     q_abs: f64,
     j: f64,
@@ -56,13 +56,13 @@ pub(crate) fn rc_beam_bond_check_1991_with_rebar(
 pub struct BondCheckResult {
     /// 検定比 = ldb / ld。
     pub ratio: f64,
-    /// 付着長さ ld [mm]（カットオフ無しを仮定した表値）。
+    /// 付着長さ ld `[mm]`（カットオフ無しを仮定した表値）。
     pub ld: f64,
-    /// 必要付着長さ ldb [mm]。
+    /// 必要付着長さ ldb `[mm]`。
     pub ldb: f64,
     /// 付着割裂の検討用係数 K。
     pub k: f64,
-    /// 横補強筋効果を表す換算長さ W [mm]。
+    /// 横補強筋効果を表す換算長さ W `[mm]`。
     pub w: f64,
     /// 付着許容応力度 fb [N/mm²]。
     pub fb: f64,

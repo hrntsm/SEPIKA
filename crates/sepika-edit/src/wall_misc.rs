@@ -374,9 +374,9 @@ impl EditCommand for SetFloorRegionName {
 }
 
 /// 取り付く床板（片持ちスラブ・バルコニー・出隅）の追加。末尾に追加する。
-/// 逆操作は末尾の床板削除（[`DeleteSlabEntity`]）。
+/// 逆操作は末尾の床板削除（[`crate::DeleteSlab`]）。
 ///
-/// 張り出し量 [mm] は符号付きで、取付き線 `nodes[0]`→`nodes[1]` の左側を正とする。
+/// 張り出し量 `[mm]` は符号付きで、取付き線 `nodes[0]`→`nodes[1]` の左側を正とする。
 /// 不正な取付き参照・幾何・支持先はモデルを変更せず、床板 ID と理由付きで拒否する。
 pub struct AddAttachedSlab {
     pub anchor: sepika_core::model::RegionAnchor,
@@ -413,7 +413,7 @@ impl EditCommand for AddAttachedSlab {
     }
 }
 
-/// 取り付く床板の張り出し量 `extent` [mm] を変更する。逆操作は変更前の値への復元。
+/// 取り付く床板の張り出し量 `extent` `[mm]` を変更する。逆操作は変更前の値への復元。
 /// 対象が取り付く床板でない、存在しない `SlabId` は Noop。
 /// 不正な幾何・支持先はモデルを変更せず、床板 ID と理由付きで拒否する。
 pub struct SetAttachedExtent {
@@ -1003,7 +1003,7 @@ impl EditCommand for SetAttachedWallPlateExtent {
 }
 
 /// 取り付く壁版の取付き先（`anchor`）変更。逆操作は変更前の値への復元。
-/// 対象が取り付く壁版でない、存在しない `WallPlateId`、および [`wall_anchor_ok`]
+/// 対象が取り付く壁版でない、存在しない `WallPlateId`、および `wall_anchor_ok`
 /// に落ちる場合は Noop。
 pub struct SetAttachedWallPlateAnchor {
     pub id: WallPlateId,

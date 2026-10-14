@@ -91,13 +91,13 @@ pub(crate) fn dir_ductility(drift: &StickDirPeaks, d1x: &[f64], d1y: &[f64]) -> 
 /// 質点系（せん断型）時刻歴応答解析の結果。
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct StickResponse {
-    /// 時刻列 [s]。
+    /// 時刻列 `[s]`。
     pub time: Vec<f64>,
-    /// 最上階（頂部）質点の加振方向変位時刻歴 [mm]（質量重心）。
+    /// 最上階（頂部）質点の加振方向変位時刻歴 `[mm]`（質量重心）。
     pub roof_disp: Vec<f64>,
-    /// 各層の最大層間変形 [mm]（下層→上層）。水平合成 √(δx²+δy²) の時刻歴最大。
+    /// 各層の最大層間変形 `[mm]`（下層→上層）。水平合成 √(δx²+δy²) の時刻歴最大。
     pub story_peak_drift: Vec<f64>,
-    /// 各層の最大層せん断力 [N]。水平合成 √(Qx²+Qy²) の時刻歴最大。
+    /// 各層の最大層せん断力 `[N]`。水平合成 √(Qx²+Qy²) の時刻歴最大。
     pub story_peak_shear: Vec<f64>,
     /// 各層の最大塑性率。並進ばねが経験した `max(μx, μy)`（δ1≤0 の方向は 0）。
     pub story_ductility: Vec<f64>,
@@ -106,10 +106,10 @@ pub struct StickResponse {
     /// 各時刻の層変位 [Ux, Uy, θz]（下層→上層）。3D 再生と 2D の加力方向変位に使う。
     #[serde(default)]
     pub floor_disp: Vec<Vec<[f64; 3]>>,
-    /// 層間変形の方向内訳 [mm]。
+    /// 層間変形の方向内訳 `[mm]`。
     #[serde(default)]
     pub drift_dir: StickDirPeaks,
-    /// 層せん断の方向内訳 [N]。
+    /// 層せん断の方向内訳 `[N]`。
     #[serde(default)]
     pub shear_dir: StickDirPeaks,
     /// 塑性率の方向内訳。
@@ -133,7 +133,7 @@ impl StickResponse {
         }
     }
 
-    /// 頂部（最上階質量重心）の方向別最大変位 [mm]。
+    /// 頂部（最上階質量重心）の方向別最大変位 `[mm]`。
     pub fn roof_dir_peaks(&self) -> (f64, f64, f64, f64) {
         let mut p = StickDirPeaks::zeros(1);
         let mut max = 0.0_f64;
@@ -242,7 +242,7 @@ pub(crate) fn story_spring(sk: &StoryTrilinear) -> HysteresisMaterial {
 /// Newton-Raphson）。せん断型多質点系の復元力特性（各層トリリニア、構造力学）。
 ///
 /// - `lm`: 串団子モデル（各層の質量・トリリニア骨格）。
-/// - `accel`: 地動加速度 [mm/s²]。`dt`: 刻み [s]。`h`: 減衰定数（初期剛性比例）。
+/// - `accel`: 地動加速度 [mm/s²]。`dt`: 刻み `[s]`。`h`: 減衰定数（初期剛性比例）。
 ///
 /// 各層の復元力は最大点指向型トリリニア。減衰は初期剛性比例
 /// `C=(2h/ω1)·K_init`（ω1=1 次固有円振動数）。

@@ -17,7 +17,7 @@ pub struct SPanelInput {
     /// 柱断面から解決したパネル諸元（寸法 `dc`・板厚 `tp`・断面区分）。
     /// CFT も対象に含める（鋼管部を S 造と同じ式で評価する）。
     pub geometry: PanelGeometry,
-    /// 梁フランジ板厚中心間距離 db [mm]。
+    /// 梁フランジ板厚中心間距離 db `[mm]`。
     pub db: f64,
     /// パネルの降伏強さ F 値 [N/mm²]。
     pub fy: f64,
@@ -27,9 +27,9 @@ pub struct SPanelInput {
     pub beam_moment_left: f64,
     /// 右梁フェイスモーメント [N·mm]（符号付き）。
     pub beam_moment_right: f64,
-    /// 上柱せん断力 [N]。
+    /// 上柱せん断力 `[N]`。
     pub col_shear_upper: f64,
-    /// 下柱せん断力 [N]。
+    /// 下柱せん断力 `[N]`。
     pub col_shear_lower: f64,
     /// 設計用パネルモーメント `pM` [N·mm] を直接与える場合の値。
     ///

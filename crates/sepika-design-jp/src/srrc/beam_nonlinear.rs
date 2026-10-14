@@ -6,19 +6,19 @@
 /// SRC 梁せん断終局の算定入力（累加式 Qu=rQu+sQu 共通）。
 #[derive(Clone, Copy, Debug)]
 pub struct SrcBeamShearInput {
-    /// 梁幅 b [mm]。
+    /// 梁幅 b `[mm]`。
     pub b: f64,
-    /// RC 部分の応力中心間距離 rj [mm]。
+    /// RC 部分の応力中心間距離 rj `[mm]`。
     pub rj: f64,
-    /// 梁の有効せい rd [mm]。
+    /// 梁の有効せい rd `[mm]`。
     pub rd: f64,
     /// せん断補強筋比 rpw（小数）。
     pub rpw: f64,
     /// せん断補強筋の材料強度 rwσy [N/mm²]。
     pub rw_sigma_y: f64,
-    /// 鉄骨フランジ位置のコンクリート有効幅 b' [mm]。
+    /// 鉄骨フランジ位置のコンクリート有効幅 b' `[mm]`。
     pub b_prime: f64,
-    /// せん断力方向の鉄骨ウェブ断面積 sAw [mm²]。
+    /// せん断力方向の鉄骨ウェブ断面積 sAw `[mm²]`。
     pub s_aw: f64,
     /// 鉄骨ウェブの材料強度 sσy [N/mm²]。
     pub s_sigma_y: f64,
@@ -26,13 +26,13 @@ pub struct SrcBeamShearInput {
     pub fc: f64,
     /// 鉄骨部分の両端全塑性モーメントの和 ΣsMu [N·mm]（sQu2=ΣsMu/l'）。
     pub sum_s_mu: f64,
-    /// 内法スパン l' [mm]。
+    /// 内法スパン l' `[mm]`。
     pub clear_span: f64,
     /// せん断スパン比 M/(Q·rd)。
     pub m_over_qrd: f64,
 }
 
-/// SRC 梁せん断終局強度 Qu [N]（構造関係技術基準解説書式）。
+/// SRC 梁せん断終局強度 Qu `[N]`（構造関係技術基準解説書式）。
 ///
 /// ```text
 /// Qu = rQu + sQu
@@ -61,7 +61,7 @@ pub fn src_beam_shear_ultimate_tech_standard(inp: &SrcBeamShearInput) -> f64 {
     (rqu + squ).max(0.0)
 }
 
-/// SRC 梁せん断終局強度 Qu [N]（SRC 規準式）。
+/// SRC 梁せん断終局強度 Qu `[N]`（SRC 規準式）。
 ///
 /// 技術基準解説書式との差異:
 /// - `rQu1 = b·rj·(0.5·α·fs + 0.5·rpw·rwσy)`（fs 係数が 0.5·α）
@@ -92,11 +92,11 @@ pub fn src_beam_shear_ultimate_src_standard(inp: &SrcBeamShearInput) -> f64 {
 pub struct SrcNonSolidWebShearInput {
     /// コンクリート設計基準強度 Fc [N/mm²]。
     pub fc: f64,
-    /// 梁の有効幅 be [mm]（= ΣAg/D、スラブ断面積を加算した全断面積/全せい）。
+    /// 梁の有効幅 be `[mm]`（= ΣAg/D、スラブ断面積を加算した全断面積/全せい）。
     pub be: f64,
-    /// 全せい D [mm]（応力中心間距離 j = 0.8·D）。
+    /// 全せい D `[mm]`（応力中心間距離 j = 0.8·D）。
     pub d_full: f64,
-    /// 有効せい d [mm]（せん断スパン比 M/(Q·d) 用）。
+    /// 有効せい d `[mm]`（せん断スパン比 M/(Q·d) 用）。
     pub d_eff: f64,
     /// 引張鉄筋比 rpt [%]。
     pub rpt: f64,
@@ -114,21 +114,21 @@ pub struct SrcNonSolidWebShearInput {
     pub s_band_sigma_y: f64,
     /// せん断スパン比 M/(Q·d)（適用範囲 1.0〜3.0 にクランプ）。
     pub m_over_qd: f64,
-    /// RC 部分の応力中心間距離 rj [mm]（ラチス材のみ）。
+    /// RC 部分の応力中心間距離 rj `[mm]`（ラチス材のみ）。
     pub rj: f64,
-    /// ラチス材 1 本の断面積 DA [mm²]（ラチス材のみ）。
+    /// ラチス材 1 本の断面積 DA `[mm²]`（ラチス材のみ）。
     pub lattice_area: f64,
     /// ラチス材の降伏点強度 sσy [N/mm²]（ラチス材のみ）。
     pub lattice_sigma_y: f64,
-    /// ラチス材と材軸のなす角 θ [rad]（ラチス材のみ）。
+    /// ラチス材と材軸のなす角 θ `[rad]`（ラチス材のみ）。
     pub lattice_angle: f64,
     /// 鉄骨部分の全塑性モーメント sM0 [N·mm]（ラチス材の sQu 用）。
     pub s_m0: f64,
-    /// 内法長さ h0 [mm]（ラチス材の sQu = 2·sM0/h0 用）。
+    /// 内法長さ h0 `[mm]`（ラチス材の sQu = 2·sM0/h0 用）。
     pub clear_span: f64,
 }
 
-/// 非充腹 SRC 梁（**格子材**）のせん断終局強度 Qsu [N]（荒川mean式系）。
+/// 非充腹 SRC 梁（**格子材**）のせん断終局強度 Qsu `[N]`（荒川mean式系）。
 ///
 /// ```text
 /// Qsu = { 0.053·pt^0.23·kcs·(18+Fc)/(M/(Q·d)+0.12) + 0.85·√(rpw·rσwy)
@@ -153,7 +153,7 @@ pub fn src_beam_shear_grid(inp: &SrcNonSolidWebShearInput) -> f64 {
     (concrete + hoop) * inp.be * j
 }
 
-/// 非充腹 SRC 梁（**ラチス材**）のせん断終局強度 Qsu [N]（荒川mean式系）。
+/// 非充腹 SRC 梁（**ラチス材**）のせん断終局強度 Qsu `[N]`（荒川mean式系）。
 ///
 /// ```text
 /// Qsu = { 0.053·rpt^0.23·kcs·(18+Fc)/(M/(Q·d)+0.12) + 0.85·√(rpw·rσwy) }·be·rj + sQu

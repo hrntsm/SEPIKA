@@ -15,11 +15,11 @@ use crate::app::{App, ResultsBundle, StaticCaseKey, StaticKey};
 #[derive(Clone, Debug)]
 pub struct StoryMetric {
     pub name: String,
-    /// 階高 [mm]
+    /// 階高 `[mm]`
     pub height: f64,
-    /// 層間変位 [mm]（加力方向）
+    /// 層間変位 `[mm]`（加力方向）
     pub drift: f64,
-    /// 層間変形角 [rad]
+    /// 層間変形角 `[rad]`
     pub drift_angle: f64,
     /// 層間変形角の制限値の分母（令82条の2。原則 200、緩和時 120。
     /// `Model::stress_cfg.drift_limit_denom`）

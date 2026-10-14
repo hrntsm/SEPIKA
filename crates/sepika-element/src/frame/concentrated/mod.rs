@@ -16,12 +16,12 @@ pub enum SpringModel {
 pub struct MnInteraction {
     /// N=0 での降伏モーメント [N·mm]。
     pub my0: f64,
-    /// 軸許容耐力 [N]（正値。`new` で 1 N 以上へクランプする）。
+    /// 軸許容耐力 `[N]`（正値。`new` で 1 N 以上へクランプする）。
     pub n_allow: f64,
 }
 
 impl MnInteraction {
-    /// 軸許容耐力 `n_allow` [N] を正値（1 N 以上）へクランプして構築する。
+    /// 軸許容耐力 `n_allow` `[N]` を正値（1 N 以上）へクランプして構築する。
     pub fn new(my0: f64, n_allow: f64) -> Self {
         MnInteraction {
             my0,
@@ -29,7 +29,7 @@ impl MnInteraction {
         }
     }
 
-    /// 軸力 `axial_force` [N]（引張正）に対する曲げ許容モーメント [N·mm]。
+    /// 軸力 `axial_force` `[N]`（引張正）に対する曲げ許容モーメント [N·mm]。
     /// `my0·(1 − |N|/N許容)`、下限は `0.02·my0`。
     pub fn moment_limit(&self, axial_force: f64) -> f64 {
         (self.my0 * (1.0 - axial_force.abs() / self.n_allow)).max(0.02 * self.my0)

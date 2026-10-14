@@ -12,23 +12,23 @@
 /// UI 一律指定 Rp（[`UltimateShearOptions::rp`]）を用いる。
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MemberDemand {
-    /// 設計軸力 [N]（**圧縮正**）。柱の Mu・軸余裕度に用いる。
+    /// 設計軸力 `[N]`（**圧縮正**）。柱の Mu・軸余裕度に用いる。
     pub n_axial: f64,
     /// 強軸（せい方向）まわりの設計用曲げモーメント Mmx [N·mm]（符号は内部で abs）。
     pub mz: f64,
     /// 弱軸（幅方向）まわりの設計用曲げモーメント Mmy [N·mm]（符号は内部で abs）。
     pub my: f64,
-    /// 設計用せん断力 Qm [N]（プッシュオーバー応答の強軸せん断。`Some` のとき
+    /// 設計用せん断力 Qm `[N]`（プッシュオーバー応答の強軸せん断。`Some` のとき
     /// `Qmu = 上限強度倍率·|Qm|` として両端ヒンジ略算（2·Mu/内法）を置き換える）。
     pub shear: Option<f64>,
-    /// 弱軸の設計用せん断力 Qmy [N]（プッシュオーバー応答の弱軸せん断。`Some` のとき
+    /// 弱軸の設計用せん断力 Qmy `[N]`（プッシュオーバー応答の弱軸せん断。`Some` のとき
     /// 2 軸せん断余裕度の弱軸需要 `Qmuy = 上限強度倍率·|Qmy|`（両端ヒンジ略算 2·Muy/内法
     /// を置き換える）に用いる。2 軸せん断を検定しない場合は無視される）。
     pub shear_weak: Option<f64>,
-    /// 部材別のヒンジ回転角 Rp [rad]（プッシュオーバー終局時の部材変形角）。`Some`
+    /// 部材別のヒンジ回転角 Rp `[rad]`（プッシュオーバー終局時の部材変形角）。`Some`
     /// のとき ν・cotφ・μ・tanθ に用いる Rp を [`UltimateShearOptions::rp`] から置き換える。
     pub rp: Option<f64>,
-    /// 長期せん断力 QL [N]（絶対値で扱う）。`Some` のとき梁のせん断・付着余裕率の
+    /// 長期せん断力 QL `[N]`（絶対値で扱う）。`Some` のとき梁のせん断・付着余裕率の
     /// 分子を `(Qsu − QL)`・`(Qbu − QL)` とする（余裕率
     /// `(Qsu−QL)/Qmu ≥ 1.0` の定義。`None` は QL=0 扱い）。
     pub q_long: Option<f64>,
@@ -85,7 +85,7 @@ pub enum ShearMethod {
 /// 終局検定（塑性理論式）の算定オプション。
 #[derive(Clone, Debug)]
 pub struct UltimateShearOptions {
-    /// 終局限界状態でのヒンジ領域の回転角 Rp [rad]（ν・cotφ に用いる。既定 0）。
+    /// 終局限界状態でのヒンジ領域の回転角 Rp `[rad]`（ν・cotφ に用いる。既定 0）。
     pub rp: f64,
     /// 軽量コンクリートを使用する場合 true（せん断終局耐力を 0.9 倍に低減）。
     pub lightweight: bool,
@@ -97,7 +97,7 @@ pub struct UltimateShearOptions {
     /// 付着割裂の検定を含める場合 true。
     pub include_bond: bool,
     /// 終局せん断強度の算定方法（既定 塑性理論式）。靭性指針式を選ぶと Qsu 列に
-    /// Vu=min(Vu1,Vu2,Vu3)（[`rc_shear_ductility`]）を用いる。
+    /// Vu=min(Vu1,Vu2,Vu3)（[`crate::ultimate::rc_shear_ductility`]）を用いる。
     pub shear_method: ShearMethod,
     /// 柱のせん断を 2 軸せん断として検定する場合 true（採用応力：RC のみ
     /// 指定により 2 軸せん断）。両軸の Qmu/Qsu を相互作用式

@@ -268,7 +268,7 @@ fn is_490_class(grade_name: &str, thickness: f64) -> bool {
 /// `grade_name`（例 "SN400B", "SM490A", "BCR295"）は前方一致で判定する。
 /// - `BCR295`/`BCP235`/`BCP325`/`STKR400`/`STKR490` は角形鋼管専用の行。
 /// - それ以外は [`crate::steel::steel_f_value_prefix`] の F 値により
-///   400N/mm²級／490N/mm²級を判定する（詳細は [`is_490_class`]）。
+///   400N/mm²級／490N/mm²級を判定する（詳細は `is_490_class`）。
 ///
 /// # 戻り値
 /// 対象外の形状、または板厚が 0 以下・内法寸法が負になる不正な寸法の場合は

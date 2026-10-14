@@ -6,7 +6,7 @@ use super::fem::fem_uniform;
 use super::geometry::edge_len;
 use super::types::{push_edge, BeamLoad, LoadShape};
 
-/// 格子寸法 [mm]、局所境界箱からの位相 [ピッチ比]、資源上限と辺別要求誤差 [mm²]。
+/// 格子寸法 `[mm]`、局所境界箱からの位相 `[ピッチ比]`、資源上限と辺別要求誤差 `[mm²]`。
 #[derive(Clone, Copy, Debug)]
 pub struct PolygonIntegrationOptions {
     pub cell_size_mm: f64,
@@ -26,7 +26,7 @@ impl Default for PolygonIntegrationOptions {
     }
 }
 
-/// 辺順の負担面積と絶対誤差上界 [mm²]。精度未指定時も上界を返す。
+/// 辺順の負担面積と絶対誤差上界 `[mm²]`。精度未指定時も上界を返す。
 #[derive(Clone, Debug)]
 pub struct PolygonDistribution {
     pub edge_areas_mm2: Vec<f64>,
@@ -278,7 +278,7 @@ fn nearest(poly: &[Point], p: Point, epsilon: f64) -> (Vec<f64>, Vec<usize>) {
     (distances, winners)
 }
 
-/// 座標 [mm] と全周支持辺のインデックスを受け、局所格子で辺負担面積を積分する。
+/// 座標 `[mm]` と全周支持辺のインデックスを受け、局所格子で辺負担面積を積分する。
 /// 開口を含む複数輪郭・自由辺・支持欠落は未対応。要求精度未達はエラー。
 pub fn integrate_polygon(
     coords: &[[f64; 3]],

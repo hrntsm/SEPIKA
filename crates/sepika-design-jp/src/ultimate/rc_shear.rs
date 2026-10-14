@@ -18,7 +18,7 @@ pub fn plastic_nu0(fc: f64) -> f64 {
     (0.7 - fc / 200.0).max(0.0)
 }
 
-/// 終局限界状態のヒンジ回転角 `Rp` [rad] に応じたコンクリート圧縮強度の
+/// 終局限界状態のヒンジ回転角 `Rp` `[rad]` に応じたコンクリート圧縮強度の
 /// 有効係数 `ν`（靭性保証型耐震設計指針 塑性理論式）。
 ///
 /// ```text
@@ -63,7 +63,7 @@ pub fn plastic_cot_phi(rp: f64) -> f64 {
 
 /// アーチ機構の係数 `k1 = (√((L/D)² + 1) − (L/D)) / 2`（靭性保証型耐震設計指針）。
 ///
-/// `L`: 内法長さ、`D`: 部材せい [mm]。`D ≤ 0` の不正入力は 0 を返す。
+/// `L`: 内法長さ、`D`: 部材せい `[mm]`。`D ≤ 0` の不正入力は 0 を返す。
 pub fn plastic_k1(l_clear: f64, d_full: f64) -> f64 {
     if d_full <= 0.0 || l_clear < 0.0 {
         return 0.0;
@@ -87,28 +87,28 @@ pub fn plastic_k2(pw: f64, sigma_wy: f64, nu: f64, fc: f64) -> f64 {
 /// 塑性理論式による終局せん断強度 `Qsu` の算定入力（靭性保証型耐震設計指針）。
 #[derive(Clone, Copy, Debug)]
 pub struct RcPlasticShearInput {
-    /// 部材幅 b [mm]。
+    /// 部材幅 b `[mm]`。
     pub b: f64,
-    /// 部材せい D [mm]。
+    /// 部材せい D `[mm]`。
     pub d_full: f64,
-    /// 主筋の重心間距離 jt [mm]（トラス機構。通常 7/8·d 相当）。
+    /// 主筋の重心間距離 jt `[mm]`（トラス機構。通常 7/8·d 相当）。
     pub jt: f64,
     /// せん断補強筋比 pw（小数、= aw·組数/(b·ピッチ)）。
     pub pw: f64,
     /// せん断補強筋の降伏強度算定用強度 σwy [N/mm²]。
     pub sigma_wy: f64,
-    /// 内法長さ L [mm]（アーチ機構の k1 に用いる）。
+    /// 内法長さ L `[mm]`（アーチ機構の k1 に用いる）。
     pub l_clear: f64,
     /// コンクリートの設計基準強度 Fc [N/mm²]。
     pub fc: f64,
-    /// 終局限界状態でのヒンジ領域の回転角 Rp [rad]（ν・cotφ に用いる）。
+    /// 終局限界状態でのヒンジ領域の回転角 Rp `[rad]`（ν・cotφ に用いる）。
     /// 塑性化前の終局強度を評価する場合は 0 を与える（cotφ=2.0, ν=ν0）。
     pub rp: f64,
     /// 軽量コンクリートを使用する場合 true（せん断終局耐力を 0.9 倍に低減）。
     pub lightweight: bool,
 }
 
-/// 塑性理論式による終局せん断強度 `Qsu` [N]（靭性保証型耐震設計指針）。
+/// 塑性理論式による終局せん断強度 `Qsu` `[N]`（靭性保証型耐震設計指針）。
 ///
 /// ```text
 /// Qsu = b·jt·pw·σwy·cotφ + k1·(1−k2)·b·D·ν·Fc
@@ -149,27 +149,27 @@ pub fn rc_shear_qsu_plastic(inp: &RcPlasticShearInput) -> f64 {
 /// 付着割裂による終局せん断耐力 `Qbu` の算定入力（靭性保証型耐震設計指針）。
 #[derive(Clone, Copy, Debug)]
 pub struct RcBondSplitInput {
-    /// 部材幅 b [mm]。
+    /// 部材幅 b `[mm]`。
     pub b: f64,
-    /// 部材せい D [mm]。
+    /// 部材せい D `[mm]`。
     pub d_full: f64,
-    /// 主筋の重心間距離 jt [mm]。
+    /// 主筋の重心間距離 jt `[mm]`。
     pub jt: f64,
     /// 1 段目主筋の付着信頼強度 τbu [N/mm²]（[`bond_reliable_strength_deformed`]）。
     pub tau_bu: f64,
-    /// 引張鉄筋の周長和 Σφ [mm]（2 段筋・寄筋を含める）。
+    /// 引張鉄筋の周長和 Σφ `[mm]`（2 段筋・寄筋を含める）。
     pub sum_phi: f64,
-    /// 内法長さ L [mm]（アーチ機構の k1 に用いる）。
+    /// 内法長さ L `[mm]`（アーチ機構の k1 に用いる）。
     pub l_clear: f64,
     /// コンクリートの設計基準強度 Fc [N/mm²]。
     pub fc: f64,
-    /// 終局限界状態でのヒンジ領域の回転角 Rp [rad]（ν に用いる）。
+    /// 終局限界状態でのヒンジ領域の回転角 Rp `[rad]`（ν に用いる）。
     pub rp: f64,
     /// 軽量コンクリートを使用する場合 true（0.9 倍低減）。
     pub lightweight: bool,
 }
 
-/// 付着割裂によって決定する終局せん断耐力 `Qbu` [N]（靭性保証型耐震設計指針）。
+/// 付着割裂によって決定する終局せん断耐力 `Qbu` `[N]`（靭性保証型耐震設計指針）。
 ///
 /// ```text
 /// Qbu = jt·τbu·Σφ + k1·(1−k3)·b·D·ν·Fc
@@ -208,19 +208,19 @@ pub fn rc_shear_qbu_bond(inp: &RcBondSplitInput) -> f64 {
 pub struct BondStrengthInput {
     /// コンクリートの設計基準強度 Fc [N/mm²]。
     pub fc: f64,
-    /// 部材幅 b [mm]。
+    /// 部材幅 b `[mm]`。
     pub b: f64,
-    /// 1 段目主筋径（呼び名）db1 [mm]。
+    /// 1 段目主筋径（呼び名）db1 `[mm]`。
     pub db1: f64,
     /// 外側一列の引張鉄筋の本数 N。
     pub n_bars: u32,
-    /// 主筋の側面かぶり Cs [mm]。
+    /// 主筋の側面かぶり Cs `[mm]`。
     pub cover_side: f64,
-    /// 主筋の底面（上面）かぶり Cb [mm]。
+    /// 主筋の底面（上面）かぶり Cb `[mm]`。
     pub cover_bottom: f64,
-    /// せん断補強筋 1 組の断面積 aw [mm²]（kst 用）。
+    /// せん断補強筋 1 組の断面積 aw `[mm²]`（kst 用）。
     pub hoop_area: f64,
-    /// せん断補強筋ピッチ x [mm]（kst 用）。
+    /// せん断補強筋ピッチ x `[mm]`（kst 用）。
     pub hoop_pitch: f64,
     /// せん断補強筋比 pw（小数、kst 用）。
     pub pw: f64,

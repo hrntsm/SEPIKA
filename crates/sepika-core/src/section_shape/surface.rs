@@ -62,7 +62,7 @@ impl SectionShape {
         }
     }
 
-    /// 吹きつけ被覆の実外周 [mm]。半径未知・不正寸法・未対応形状はエラー。
+    /// 吹きつけ被覆の実外周 `[mm]`。半径未知・不正寸法・未対応形状はエラー。
     pub fn coating_surface_perimeter(&self) -> Result<f64, String> {
         self.validate_surface_radius()?;
         let unknown = || "被覆外周に必要な半径が未知です".to_string();
@@ -134,7 +134,7 @@ impl SectionShape {
         Ok(p)
     }
 
-    /// 成形版被覆の包絡周長 [mm]。矩形・円形の包絡を用い、未対応形状はエラー。
+    /// 成形版被覆の包絡周長 `[mm]`。矩形・円形の包絡を用い、未対応形状はエラー。
     pub fn coating_envelope_perimeter(&self) -> Result<f64, String> {
         self.validate_surface_radius()?;
         let p = match *self {

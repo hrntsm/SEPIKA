@@ -20,12 +20,12 @@ use super::*;
 /// なるため検定位置に追加する。
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Haunch {
-    /// ハンチ長 [mm]（柱フェース（`RigidZone::face_i/j`）から部材内側へ測る）。
+    /// ハンチ長 `[mm]`（柱フェース（`RigidZone::face_i/j`）から部材内側へ測る）。
     pub length: f64,
-    /// せい増分 [mm]（鉛直ハンチ。フェース位置での基準断面せいへの増分。0=なし）。
+    /// せい増分 `[mm]`（鉛直ハンチ。フェース位置での基準断面せいへの増分。0=なし）。
     #[serde(default)]
     pub depth_increase: f64,
-    /// 幅増分 [mm]（水平ハンチ。フェース位置での基準断面幅への増分。0=なし）。
+    /// 幅増分 `[mm]`（水平ハンチ。フェース位置での基準断面幅への増分。0=なし）。
     #[serde(default)]
     pub width_increase: f64,
 }
@@ -47,7 +47,7 @@ pub enum JointKind {
 /// 行うため検定位置に追加し、数量上は継手箇所数・種別の集計に用いる。
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MemberJoint {
-    /// 始端（i 端）節点芯からの距離 [mm]。
+    /// 始端（i 端）節点芯からの距離 `[mm]`。
     pub distance: f64,
     /// 継手の種別（現場／工場）。
     #[serde(default)]

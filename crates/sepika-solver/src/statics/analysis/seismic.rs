@@ -16,7 +16,7 @@ pub fn base_elevation(model: &Model) -> f64 {
     model.base_elevation()
 }
 
-/// 地盤面（GL）レベル [mm] を求める。
+/// 地盤面（GL）レベル `[mm]` を求める。
 /// 地下階（`StoryLevelKind::Basement`）が定義されているモデルでは、
 /// 各地下階の「床レベル + 地盤面からの深さ depth_mm」から GL を復元する
 /// （標準地震力入口は各階の共通 GL を検証する。純数値取得は最大値）。
@@ -37,7 +37,7 @@ pub fn ground_elevation(model: &Model) -> f64 {
     }
 }
 
-/// 各地下床の標高と地盤面からの深さ [mm] が、共通 GL を示すことを検証する。
+/// 各地下床の標高と地盤面からの深さ `[mm]` が、共通 GL を示すことを検証する。
 pub fn validate_basement_ground(model: &Model) -> Result<(), SolveError> {
     let mut basement_gl_min = f64::INFINITY;
     let mut basement_gl_max = f64::NEG_INFINITY;
@@ -62,7 +62,7 @@ pub fn validate_basement_ground(model: &Model) -> Result<(), SolveError> {
     Ok(())
 }
 
-/// 建築物の高さ h [mm]（略算周期 T = h(0.02+0.01α) の h。令88条・
+/// 建築物の高さ h `[mm]`（略算周期 T = h(0.02+0.01α) の h。令88条・
 /// 昭和55年建設省告示第1793号）。
 ///
 /// GL（[`ground_elevation`]）から、PH（塔屋）階を除く最上の一般階の
@@ -258,7 +258,7 @@ impl Analysis<'_> {
         self.solve_and_recover(&lc, &f_free)
     }
 
-    /// 地震荷重ケース構築に用いる設計用固有周期 T [s] を算定する。
+    /// 地震荷重ケース構築に用いる設計用固有周期 T `[s]` を算定する。
     ///
     /// - `AiMode::Approx`: 略算式 T = h(0.02+0.01α)（令88条・昭和55年建設省
     ///   告示第1793号）。h は建築物の高さ（GL〜PH 階を除く最上階。地下深さ・
@@ -306,7 +306,7 @@ impl Analysis<'_> {
         self.build_seismic_load_case_with_period(cfg, t)
     }
 
-    /// 設計用固有周期 T [s]（[`Self::seismic_period`] 参照）を受け取り、
+    /// 設計用固有周期 T `[s]`（[`Self::seismic_period`] 参照）を受け取り、
     /// Ai 分布・階水平力の算定から荷重ケース構築までを行う。
     pub fn build_seismic_load_case_with_period(
         &self,
@@ -634,7 +634,7 @@ pub fn build_seismic_load_case_from_model(
 }
 
 impl Analysis<'_> {
-    /// 各節点の地震静的水平力の大きさ P [N]（`model.nodes` と同順）。
+    /// 各節点の地震静的水平力の大きさ P `[N]`（`model.nodes` と同順）。
     /// 主軸の計算 `tan2Θ = −Pᵗ(uy+vx)/Pᵗ(vy−ux)` の P ベクトル用
     /// （Ai 分布は加力方向によらないため、X・Y 加力とも同じ分布）。
     pub fn seismic_nodal_force_magnitudes(&self, cfg: SeismicCfg) -> Result<Vec<f64>, SolveError> {

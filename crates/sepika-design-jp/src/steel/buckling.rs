@@ -301,9 +301,9 @@ fn g_ratio_axis_at(
 ///
 /// 対象柱の局所軸（[`LocalFrame::from_nodes`]、`rot=[ex,ey,ez]`）の `ey`
 /// （強軸曲げのたわみ方向）・`ez`（弱軸曲げのたわみ方向）それぞれについて
-/// [`g_ratio_axis_at`] で軸別の G を求め、`sway_buckling_k` に渡す
+/// `g_ratio_axis_at` で軸別の G を求め、`sway_buckling_k` に渡す
 /// （モジュール doc の「軸別評価」節参照）。評価方向の水平投影が縮退する軸は、
-/// 方向を区別しない集計（[`g_ratio_at_with_index`]、
+/// 方向を区別しない集計（`g_ratio_at_with_index`、
 /// [`steel_column_k_with_index`] と同じ値）にフォールバックする。
 ///
 /// 断面用途に基づく設計上の部材種別が柱でない、または線材でない場合は None。

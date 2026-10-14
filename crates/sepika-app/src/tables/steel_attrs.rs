@@ -32,17 +32,17 @@ pub struct SteelAttrDraft {
     pub joint_web_loss: String,
     /// スカラップ欠損率 αw [%] の入力バッファ（空欄=0）。
     pub scallop_web_loss: String,
-    /// 横座屈長さ lb 直接入力・始端 [mm] の入力バッファ（空欄=自動）。
+    /// 横座屈長さ lb 直接入力・始端 `[mm]` の入力バッファ（空欄=自動）。
     pub lb_start: String,
-    /// 横座屈長さ lb 直接入力・中央 [mm] の入力バッファ（空欄=自動）。
+    /// 横座屈長さ lb 直接入力・中央 `[mm]` の入力バッファ（空欄=自動）。
     pub lb_mid: String,
-    /// 横座屈長さ lb 直接入力・終端 [mm] の入力バッファ（空欄=自動）。
+    /// 横座屈長さ lb 直接入力・終端 `[mm]` の入力バッファ（空欄=自動）。
     pub lb_end: String,
     /// 等間隔横補剛の本数の入力バッファ（空欄=なし）。
     pub lateral_brace_count: String,
-    /// 強軸まわり座屈長さ lk_y の直接入力 [mm]（空欄=自動算定）。
+    /// 強軸まわり座屈長さ lk_y の直接入力 `[mm]`（空欄=自動算定）。
     pub lk_y_direct: String,
-    /// 弱軸まわり座屈長さ lk_z の直接入力 [mm]（空欄=自動算定）。
+    /// 弱軸まわり座屈長さ lk_z の直接入力 `[mm]`（空欄=自動算定）。
     pub lk_z_direct: String,
     /// 横座屈修正係数 C の直接入力（空欄=自動算定）。
     pub c_direct: String,

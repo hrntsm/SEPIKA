@@ -68,7 +68,7 @@ impl NodalSpringElement {
     }
 
     /// 局所座標系での 12×12 剛性行列。
-    /// 各自由度 d（0..6）について K[d][d]=+k, K[d+6][d+6]=+k, K[d][d+6]=K[d+6][d]=-k。
+    /// 各自由度 d（0..6）について `K[d][d]=+k, K[d+6][d+6]=+k, K[d][d+6]=K[d+6][d]=-k`。
     pub fn local_stiffness(&self) -> LocalMat {
         let mut m = LocalMat::zeros(12);
         for (d, &kd) in self.k.iter().enumerate() {

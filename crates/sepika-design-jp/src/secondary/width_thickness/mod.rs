@@ -4,8 +4,8 @@
 //! 簡易判定）に対し、本モジュールは構造規定の表そのものを実装した正式版。
 //!
 //! # モジュール構成
-//! - [`ratio`] — 鋼断面の代表最大幅厚比の算定（[`max_width_thickness`]）。
-//! - [`member_rank`] — 構造規定の幅厚比表による S 部材ランク判定（[`s_member_rank_by_kihon`]）。
+//! - `ratio` — 鋼断面の代表最大幅厚比の算定（[`max_width_thickness`]）。
+//! - `member_rank` — 構造規定の幅厚比表による S 部材ランク判定（[`s_member_rank_by_kihon`]）。
 
 mod member_rank;
 mod ratio;

@@ -5,13 +5,13 @@ use crate::LoadTerm;
 use sepika_core::model::Section;
 use sepika_core::section_shape::SectionShape;
 
-/// 鋼材の F 値 [N/mm²]（完全一致、板厚 [mm] 区分対応）。
+/// 鋼材の F 値 [N/mm²]（完全一致、板厚 `[mm]` 区分対応）。
 pub use sepika_core::material_grade::steel_f_value;
 
-/// 鋼材の F 値 [N/mm²]（前方一致、板厚 [mm] 区分対応）。
+/// 鋼材の F 値 [N/mm²]（前方一致、板厚 `[mm]` 区分対応）。
 pub use sepika_core::material_grade::steel_f_value_prefix;
 
-/// F 値の板厚区分判定に用いる最大板厚 [mm]。
+/// F 値の板厚区分判定に用いる最大板厚 `[mm]`。
 ///
 /// `Section.shape` があれば形状の最大板厚、なければ `Section.thickness`、
 /// いずれもなければ 40mm 以下区分として扱う。

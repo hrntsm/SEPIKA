@@ -51,7 +51,7 @@ pub struct Model {
     /// 動的解析の質量モデルの方式（[`MassMethod`]）。
     #[serde(default)]
     pub mass_method: MassMethod,
-    /// 剛性計算用の床スラブ厚 [mm]（建物全体で一律。スラブ協力幅による梁剛性
+    /// 剛性計算用の床スラブ厚 `[mm]`（建物全体で一律。スラブ協力幅による梁剛性
     /// 増大の算定に用いる。RC 規準）。0 以下でスラブ協力幅による梁剛性増大を無効化（既定）。
     #[serde(default)]
     pub slab_thickness: f64,
@@ -993,7 +993,7 @@ impl Model {
         Ok(())
     }
 
-    /// 支持部材の材軸を `(始端座標, 終端座標)` [mm] で返す。引けない場合は `None`。
+    /// 支持部材の材軸を `(始端座標, 終端座標)` `[mm]` で返す。引けない場合は `None`。
     ///
     /// 主架構は 2 節点要素の両端節点、二次部材は支持端アンカーを再帰的に解決する。
     /// 片持ち二次部材の自由端は親構面内ベクトルで表され、構面の基底をモデルが
@@ -1003,7 +1003,7 @@ impl Model {
         self.support_member_axis_inner(id, &mut visiting)
     }
 
-    /// アンカーが指す支持部材材軸上の点 [mm] を返す。支持部材が引けない場合は `None`。
+    /// アンカーが指す支持部材材軸上の点 `[mm]` を返す。支持部材が引けない場合は `None`。
     pub fn anchor_point(&self, anchor: SecondaryMemberAnchor) -> Option<[f64; 3]> {
         let mut visiting = std::collections::HashSet::new();
         self.anchor_point_inner(anchor, &mut visiting)
@@ -1132,8 +1132,8 @@ impl Model {
     /// 節点 `id` が床領域・床板・壁領域・壁版・二次部材・拘束・節点荷重の
     /// いずれかから参照されているか。
     ///
-    /// [`Model::node_referenced_outside_elements`]（sepika-edit の節点削除ガード）と
-    /// [`crate::region_rebuild::node_has_structural_ref`]（節点削除判定）が
+    /// `Model::node_referenced_outside_elements`（sepika-edit の節点削除ガード）と
+    /// `crate::region_rebuild::node_has_structural_ref`（節点削除判定）が
     /// この判定を共有する。両者が異なるのは、前者が追加で見る `stories`
     /// （利用者の節点削除を防ぐ）と、後者が追加で見る節点自身の支点・質量・
     /// 剛床マスター（`stories`/`axes` は意図的に除外）だけである。
@@ -2281,7 +2281,7 @@ mod node_reference_tests {
 pub struct SeismicWeightGeneration {
     pub input_key: Vec<u8>,
     pub output_key: Vec<u8>,
-    /// 階 ID と自動算定重量 [N]。採用重量の手入力とは別に保持する。
+    /// 階 ID と自動算定重量 `[N]`。採用重量の手入力とは別に保持する。
     pub calculated_weights: Vec<(StoryId, f64)>,
     #[serde(default)]
     pub automatic_diaphragms: Vec<Constraint>,

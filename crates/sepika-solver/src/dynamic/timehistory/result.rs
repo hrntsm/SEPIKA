@@ -49,11 +49,11 @@ pub struct ResponseHistory {
     pub node: Option<sepika_core::ids::NodeId>,
     /// 記録方向が Y なら true（X なら false）。
     pub record_dir_y: bool,
-    /// 記録節点の記録方向相対変位 [mm]。
+    /// 記録節点の記録方向相対変位 `[mm]`。
     pub node_disp: Vec<f64>,
-    /// ベースシア(記録方向) [N]（全慣性力の合計、符号付き）。
+    /// ベースシア(記録方向) `[N]`（全慣性力の合計、符号付き）。
     pub base_shear: Vec<f64>,
-    /// 最上階の層間変形角 [rad]（符号付き。階が未定義なら 0）。
+    /// 最上階の層間変形角 `[rad]`（符号付き。階が未定義なら 0）。
     pub top_drift_angle: Vec<f64>,
 }
 
@@ -77,7 +77,7 @@ pub struct TimeStepState {
 pub struct ThRecording {
     /// 記録間引き係数（`record_every` ステップごとに 1 フレーム記録）。
     pub record_every: usize,
-    /// 記録フレームの時刻 [s]。
+    /// 記録フレームの時刻 `[s]`。
     pub frame_time: Vec<f64>,
     /// フレームごとの全節点変位（展開後の全自由度、node 順 `[ux,uy,uz,rx,ry,rz]`。
     /// 拘束・剛床従属自由度を含む相対変位、単位 mm・rad）。`[frame][node_idx]`。
@@ -102,10 +102,10 @@ pub struct ThRecording {
 pub struct StoryResponse {
     /// 階リスト（記録対象、下→上。`model.stories` と同じ並び）。
     pub stories: Vec<sepika_core::ids::StoryId>,
-    /// 階ごとの地震用重量 [N]（`Story::seismic_weight`。層せん断力係数 Ci の
+    /// 階ごとの地震用重量 `[N]`（`Story::seismic_weight`。層せん断力係数 Ci の
     /// 分母 ΣWj に用いる）。
     pub story_weight: Vec<f64>,
-    /// フレームごとの層せん断力 [N]（慣性力ベース: 当該層以上に属する節点の
+    /// フレームごとの層せん断力 `[N]`（慣性力ベース: 当該層以上に属する節点の
     /// Σ質量·(相対加速度＋地動加速度)、符号は加振方向の符号規約に合わせ
     /// `ResponseHistory::base_shear` と同じ）。`[frame][story]`。
     pub story_shear: Vec<Vec<f64>>,
@@ -114,7 +114,7 @@ pub struct StoryResponse {
     pub floor_accel: Vec<Vec<f64>>,
     /// フレームごとの階速度（相対）[mm/s]。`[frame][story]`。
     pub floor_vel: Vec<Vec<f64>>,
-    /// フレームごとの階変位（相対）[mm]。`[frame][story]`。
+    /// フレームごとの階変位（相対）`[mm]`。`[frame][story]`。
     pub floor_disp: Vec<Vec<f64>>,
     /// 層せん断力係数の最大値 `Ci = max|Qi| / Σ(j≧i) Wj`（全ステップの最大値、
     /// 間引きなし）。`[story]`。

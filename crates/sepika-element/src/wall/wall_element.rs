@@ -51,7 +51,7 @@ pub struct WallElement {
 
 pub use sepika_core::model::{wall_element_geometry, WallElementGeometry};
 
-/// 増分解析で壁柱がファイバー化されるときの塑性化域長 Lp [mm]。
+/// 増分解析で壁柱がファイバー化されるときの塑性化域長 Lp `[mm]`。
 /// ファイバー化されない壁（耐震壁不成立・Qu を算定できない・Fc 未設定など）は `None`。
 pub fn wall_column_fiber_lp(data: &ElementData, model: &Model) -> Option<f64> {
     if !crate::wall::misc_wall::wall_is_seismic(data, model) {
@@ -808,7 +808,7 @@ impl WallElement {
         Ok(inputs)
     }
 
-    /// 鋼板耐震壁の面内せん断終局強度 Qy [N]。
+    /// 鋼板耐震壁の面内せん断終局強度 Qy `[N]`。
     ///
     /// 鋼板のせん断降伏で決まるものとし、von Mises の降伏条件による純せん断の
     /// 降伏せん断応力度 τy = F/√3 を全断面 t·lw に乗じる。

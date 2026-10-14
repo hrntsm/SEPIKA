@@ -103,7 +103,7 @@ pub fn rc_beam_reference_input_issue(
 }
 
 /// [`nonlinear_input_issues`] が不備を検出した場合に、解析を停止するための
-/// エラーメッセージ（先頭 [`MAX_LISTED`] 件＋残件数）を返す。
+/// エラーメッセージ（先頭 `MAX_LISTED` 件＋残件数）を返す。
 pub fn ensure_nonlinear_input(model: &Model) -> Result<(), String> {
     ensure_nonlinear_input_for_kind(model, sepika_core::model::AnalysisKind::Incremental)
 }

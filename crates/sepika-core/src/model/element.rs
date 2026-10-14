@@ -179,7 +179,7 @@ pub struct RigidZone {
     pub length_j: f64,
     pub source_i: ZoneSource,
     pub source_j: ZoneSource,
-    /// 柱フェース距離 [mm]（節点→フェース、= 接合する直交部材せい/2）。
+    /// 柱フェース距離 `[mm]`（節点→フェース、= 接合する直交部材せい/2）。
     ///
     /// **`None` は「まだ算定していない」を表す**（直交材がなくフェース距離が
     /// 0 の端は `Some(0.0)`）。両者を 0 で混同すると、算定前に読んだ側が
@@ -194,17 +194,17 @@ pub struct RigidZone {
     /// [`Self::clear_span_from`]（計算用）を使うこと。
     #[serde(default)]
     pub face_i: Option<f64>,
-    /// 柱フェース距離 [mm]（j端）。意味は `face_i` と同様。
+    /// 柱フェース距離 `[mm]`（j端）。意味は `face_i` と同様。
     #[serde(default)]
     pub face_j: Option<f64>,
-    /// 仕口パネル分のオフセット [mm]（i 端）。パネルがない端は 0。
+    /// 仕口パネル分のオフセット `[mm]`（i 端）。パネルがない端は 0。
     ///
     /// 剛域長 `length_i` とは**別に保持する**。剛域の自動算定
     /// （`apply_auto_rigid_zones`）は `Auto` 端の `length_i` を無条件に再算定するため、
     /// 同じ場所へ入れると解析経路によってオフセットが消える。
     #[serde(default)]
     pub panel_offset_i: f64,
-    /// 仕口パネル分のオフセット [mm]（j 端）。意味は `panel_offset_i` と同様。
+    /// 仕口パネル分のオフセット `[mm]`（j 端）。意味は `panel_offset_i` と同様。
     #[serde(default)]
     pub panel_offset_j: f64,
 }
@@ -225,7 +225,7 @@ impl Default for RigidZone {
 }
 
 impl RigidZone {
-    /// i 端の柱フェース距離 [mm]。**未算定は 0 として扱う**。
+    /// i 端の柱フェース距離 `[mm]`。**未算定は 0 として扱う**。
     ///
     /// 一覧表示・図など、未算定でも破綻しない用途にだけ使うこと。計算には
     /// [`Self::clear_span_from`] を使い、未算定を検出できるようにする。
@@ -233,12 +233,12 @@ impl RigidZone {
         self.face_i.unwrap_or(0.0)
     }
 
-    /// j 端の柱フェース距離 [mm]。意味は [`Self::face_i_or_zero`] と同様。
+    /// j 端の柱フェース距離 `[mm]`。意味は [`Self::face_i_or_zero`] と同様。
     pub fn face_j_or_zero(&self) -> f64 {
         self.face_j.unwrap_or(0.0)
     }
 
-    /// 節点間長 `geom_len` から両端の柱フェース距離を差し引いた**内法長** [mm]。
+    /// 節点間長 `geom_len` から両端の柱フェース距離を差し引いた**内法長** `[mm]`。
     ///
     /// 両端とも算定済みのときだけ `Some` を返す。未算定（`None`）のまま
     /// 節点間長で代用すると、RC/SRC 梁の自重・数量・終局耐力が過大になるため、
@@ -253,7 +253,7 @@ impl RigidZone {
         self.face_i.is_some() && self.face_j.is_some()
     }
 
-    /// 節点間長 `geom_len` から両端剛体アーム長を控除した**可撓長** [mm]。
+    /// 節点間長 `geom_len` から両端剛体アーム長を控除した**可撓長** `[mm]`。
     ///
     /// `geom_len − rigid_length_i − rigid_length_j`。控除後が実質 0 以下
     /// （1e-6 mm 以下）の異常入力では `geom_len` へフォールバックする
@@ -270,7 +270,7 @@ impl RigidZone {
         }
     }
 
-    /// i 端の剛体アーム長 [mm]（剛域長と仕口パネル分オフセットの大きい方）。
+    /// i 端の剛体アーム長 `[mm]`（剛域長と仕口パネル分オフセットの大きい方）。
     ///
     /// 可撓長の控除・剛域変換・幾何剛性・せん断降伏の内法高さ・座屈長さの剛度比は、
     /// いずれもこの値を用いる。
@@ -278,7 +278,7 @@ impl RigidZone {
         self.length_i.max(self.panel_offset_i)
     }
 
-    /// j 端の剛体アーム長 [mm]。意味は [`Self::rigid_length_i`] と同様。
+    /// j 端の剛体アーム長 `[mm]`。意味は [`Self::rigid_length_i`] と同様。
     pub fn rigid_length_j(&self) -> f64 {
         self.length_j.max(self.panel_offset_j)
     }
@@ -296,7 +296,7 @@ pub struct ElementData {
     /// 部材端の剛域。
     #[serde(default)]
     pub rigid_zone: RigidZone,
-    /// 塑性化領域長さ Lp [mm]（None = 塑性化域を考慮しない）。
+    /// 塑性化領域長さ Lp `[mm]`（None = 塑性化域を考慮しない）。
     #[serde(default)]
     pub plastic_zone: Option<f64>,
     /// 節点バネ要素（`ElementKind::NodalSpring`）の局所軸バネ定数

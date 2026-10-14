@@ -60,10 +60,10 @@ pub enum SecondaryMemberEnds {
     Supported([SecondaryMemberAnchor; 2]),
     Cantilever {
         support: SecondaryMemberAnchor,
-        /// 支持端から自由端への親構面内ベクトル [mm]。
+        /// 支持端から自由端への親構面内ベクトル `[mm]`。
         free_end_vector: [f64; 2],
     },
-    /// 支持部材アンカーへ解決できなかった両端の座標 [mm]。重量・材軸長を欠落させない
+    /// 支持部材アンカーへ解決できなかった両端の座標 `[mm]`。重量・材軸長を欠落させない
     /// ため生座標を保持し、荷重の伝達はせず解析前チェックでエラーにする。
     Detached([[f64; 3]; 2]),
 }
@@ -85,9 +85,9 @@ pub struct SupportMemberSegment {
     pub support: SupportMemberId,
     /// `start` と `end` に対応する支持部材材軸上の無次元位置。
     pub axis_span: [f64; 2],
-    /// 親構面の 2D 座標 [mm]。
+    /// 親構面の 2D 座標 `[mm]`。
     pub start: [f64; 2],
-    /// 親構面の 2D 座標 [mm]。
+    /// 親構面の 2D 座標 `[mm]`。
     pub end: [f64; 2],
 }
 
@@ -948,7 +948,7 @@ pub struct SameKindSupportOverlap {
     pub first: SupportMemberId,
     /// 重なる 2 つの支持部材（ID 順に正規化した大きい側）。
     pub second: SupportMemberId,
-    /// 重なり区間の中点 [mm]（3 次元）。
+    /// 重なり区間の中点 `[mm]`（3 次元）。
     pub midpoint: [f64; 3],
 }
 
@@ -1479,7 +1479,7 @@ impl Model {
         ))
     }
 
-    /// 割当領域境界の頂点座標 [mm] を辺順に返す。末尾は先頭へ戻るため重複させない。
+    /// 割当領域境界の頂点座標 `[mm]` を辺順に返す。末尾は先頭へ戻るため重複させない。
     /// 境界が空、または支持部材の材軸を解決できない辺があれば `None`。
     pub fn assignment_region_boundary_coords(
         &self,
@@ -1516,7 +1516,7 @@ impl Model {
         Some(coords)
     }
 
-    /// 床板割当領域 ID から境界の頂点座標 [mm] を解決する。領域が無ければ `None`。
+    /// 床板割当領域 ID から境界の頂点座標 `[mm]` を解決する。領域が無ければ `None`。
     pub fn floor_assignment_region_coords(
         &self,
         id: FloorPlateAssignmentRegionId,
@@ -1542,7 +1542,7 @@ impl Model {
         Some(nodes)
     }
 
-    /// 壁版割当領域 ID から境界の頂点座標 [mm] を解決する。領域が無ければ `None`。
+    /// 壁版割当領域 ID から境界の頂点座標 `[mm]` を解決する。領域が無ければ `None`。
     pub fn wall_assignment_region_coords(
         &self,
         id: WallPlateAssignmentRegionId,

@@ -9,11 +9,11 @@ use crate::story_response::{
 #[derive(Clone, Default)]
 pub struct TimeHistoryData {
     pub time: Vec<f64>,
-    /// 記録節点の X 方向相対変位 [mm]
+    /// 記録節点の X 方向相対変位 `[mm]`
     pub node_disp: Vec<f64>,
-    /// ベースシア(X) [N]
+    /// ベースシア(X) `[N]`
     pub story_shear: Vec<f64>,
-    /// 最上階の層間変形角 [rad]
+    /// 最上階の層間変形角 `[rad]`
     pub story_drift_angle: Vec<f64>,
     /// 記録節点
     pub node: Option<sepika_core::ids::NodeId>,

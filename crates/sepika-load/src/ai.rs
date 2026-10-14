@@ -20,7 +20,7 @@ pub struct AiDistribution {
     pub clamped_negative_pi: bool,
 }
 
-/// 正の有限周期 T、Tc [s] の標準式を返す。入力・適用可否は検証しない。
+/// 正の有限周期 T、Tc `[s]` の標準式を返す。入力・適用可否は検証しない。
 pub fn rt(t: f64, tc: f64) -> f64 {
     if t < tc {
         1.0
@@ -66,7 +66,7 @@ fn ai_of_alpha(alpha: f64, t_factor: f64) -> f64 {
     }
 }
 
-/// 下層から上層への重量 [N] と周期 [s] の参考数値分布。入力・適用可否は検証しない。
+/// 下層から上層への重量 `[N]` と周期 `[s]` の参考数値分布。入力・適用可否は検証しない。
 /// αi=0の退化処理や負Piクランプを標準式への適合として採用しないこと。
 pub fn ai_distribution(
     stories_weight_bottom_to_top: &[f64],
@@ -116,10 +116,10 @@ pub fn approx_t(height_m: f64, steel_ratio: f64) -> f64 {
 
 /// [`seismic_shear_distribution`] への入力層データ。
 pub struct StorySeismicSpec {
-    /// 当該層のうち主系統（Ai 分布に従う剛床）が負担する地震用重量 Wi [N]。
+    /// 当該層のうち主系統（Ai 分布に従う剛床）が負担する地震用重量 Wi `[N]`。
     /// 層せん断力 Qi = Ci・ΣWj の重量にはこちらを用いる。
     pub weight: f64,
-    /// α・Ai・Ci の算定に用いる階全体の地震用重量 [N]。
+    /// α・Ai・Ci の算定に用いる階全体の地震用重量 `[N]`。
     /// 「主剛床は全剛床の場合の Ci に従って層せん断力を計算する」規定に対応し、
     /// 副剛床（Ci 直接入力）の重量も**含めた**値を渡す。副剛床がない通常の階では
     /// `weight` と同値。

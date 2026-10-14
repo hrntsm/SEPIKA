@@ -12,15 +12,15 @@ use sepika_core::units::ConcreteClass;
 
 /// 耐震壁の側柱（壁の両側または片側に取り付く柱）の諸元。
 pub struct WallSideColumn {
-    /// 柱幅 b [mm]。
+    /// 柱幅 b `[mm]`。
     pub b: f64,
-    /// 柱の有効せい d [mm]。
+    /// 柱の有効せい d `[mm]`。
     pub d_eff: f64,
     /// 柱の帯筋比 pw。
     pub pw: f64,
     /// 帯筋の短期許容引張応力度 [N/mm²]。
     pub w_ft: f64,
-    /// SRC 側柱の内蔵鉄骨によるせん断負担分 `sfs・As` [N]（RC 側柱・鉄骨なしは
+    /// SRC 側柱の内蔵鉄骨によるせん断負担分 `sfs・As` `[N]`（RC 側柱・鉄骨なしは
     /// 0.0）。`sfs`: 鉄骨の許容せん断応力度、`As`: 側柱内蔵鉄骨のせん断断面積
     /// （ウェブ全せい×ウェブ厚）。[`rc_wall_shear_check`] の `Qc` に単純加算する
     /// （下記 doc 参照）。
@@ -29,11 +29,11 @@ pub struct WallSideColumn {
 
 /// RC 造耐震壁のせん断検定の入力。
 pub struct RcWallInput {
-    /// 壁厚 t [mm]。
+    /// 壁厚 t `[mm]`。
     pub t: f64,
-    /// 柱中心間の壁全せい L [mm]。
+    /// 柱中心間の壁全せい L `[mm]`。
     pub l: f64,
-    /// 壁板内法長さ l′ [mm]。
+    /// 壁板内法長さ l′ `[mm]`。
     pub l_clear: f64,
     /// コンクリート設計基準強度 Fc [N/mm²]。
     pub fc: f64,
@@ -48,7 +48,7 @@ pub struct RcWallInput {
     /// 開口寸法 `(l0, h0, h, l)`。`l0`,`h0`: 開口幅・開口高さ、`h`,`l`: 壁板の
     /// 梁中心間高さ・柱中心間の壁全せい。`None` の場合は無開口（低減係数 r=1）。
     pub opening: Option<(f64, f64, f64, f64)>,
-    /// 設計用せん断力 QD [N]。
+    /// 設計用せん断力 QD `[N]`。
     pub q_design: f64,
     /// 長期荷重時の検定かどうか（`true`=長期、`false`=短期）。
     pub long_term: bool,

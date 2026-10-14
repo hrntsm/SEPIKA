@@ -65,7 +65,7 @@ impl HingeView {
 
 /// 解析で実際に使用した非線形特性を返す。
 ///
-/// `axial_force_compression_positive` [N] は材端集中ばねの N-M 線形相関に用いる
+/// `axial_force_compression_positive` `[N]` は材端集中ばねの N-M 線形相関に用いる
 /// 軸力。`MnInteraction::moment_limit` は絶対値のみを使うため引張正・圧縮正の
 /// 別は問わない。`n_alpha`・`n_beta` は N-M 曲面の経線・周方向分割数。
 pub fn build_hinge_view(

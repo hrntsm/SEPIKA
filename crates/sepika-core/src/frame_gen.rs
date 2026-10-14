@@ -17,7 +17,7 @@
 //! **床だけは断面と材料を作る。** 床は解析対象の部材ではなく、解析上は荷重
 //! （自重・積載）としてのみ効く二次部材である。板厚さえ決めれば断面が確定し、
 //! 材料は自重を決める入力にすぎないので、部材に既定を与えることの危険とは別問題になる。
-//! 板厚と自重は断面からしか解決できず（[`crate::model::Model::slab_thickness_of`]）、
+//! 板厚と自重は断面からしか解決できず（[`crate::model::Model::slab_plate_thickness`]）、
 //! 断面や材料が無い床は解析前チェックが止めてしまうため、`S15` の断面 1 枚と
 //! [`FrameSpec::slab_concrete`] のコンクリート 1 つを作り、全階の床へ割り当てる。
 
@@ -33,21 +33,21 @@ use crate::model::{
     SupportBoundary, SupportMemberId,
 };
 
-/// 同一の格子線とみなす座標差 [mm]（[`crate::axis_gen::AXIS_TOL_MM`] と同値）。
+/// 同一の格子線とみなす座標差 `[mm]`（[`crate::axis_gen::AXIS_TOL_MM`] と同値）。
 pub const GRID_TOL_MM: f64 = crate::axis_gen::AXIS_TOL_MM;
 
 /// 立体グリッド。平面の格子線（X 方向・Y 方向の通り芯の位置）と、鉛直の格子面
 /// （基部を含む階レベル）で構成する。
 ///
-/// 通り芯は識別のためのデータであり構造計算には用いない（[`crate::model::axis`]）。
+/// 通り芯は識別のためのデータであり構造計算には用いない（[`crate::model::Axis`]）。
 /// 本構造体もその位置づけを引き継ぎ、**モデリングの下敷き**としてのみ使う。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SpaceGrid {
-    /// X 方向の通りの位置（グローバル X 座標 [mm]。昇順・重複なし）と通り名。
+    /// X 方向の通りの位置（グローバル X 座標 `[mm]`。昇順・重複なし）と通り名。
     pub x_lines: Vec<GridLine>,
-    /// Y 方向の通りの位置（グローバル Y 座標 [mm]。昇順・重複なし）と通り名。
+    /// Y 方向の通りの位置（グローバル Y 座標 `[mm]`。昇順・重複なし）と通り名。
     pub y_lines: Vec<GridLine>,
-    /// レベル（グローバル Z 座標 [mm]。昇順・重複なし）と階名。
+    /// レベル（グローバル Z 座標 `[mm]`。昇順・重複なし）と階名。
     /// 先頭は基部（[`Model::base_elevation`]）で、階名は `GL` とする。
     pub levels: Vec<GridLevel>,
 }
@@ -56,7 +56,7 @@ pub struct SpaceGrid {
 #[derive(Clone, Debug, PartialEq)]
 pub struct GridLine {
     pub name: String,
-    /// グローバル座標 [mm]（X 方向の通りは X 座標、Y 方向の通りは Y 座標）。
+    /// グローバル座標 `[mm]`（X 方向の通りは X 座標、Y 方向の通りは Y 座標）。
     pub coord: f64,
 }
 
@@ -64,7 +64,7 @@ pub struct GridLine {
 #[derive(Clone, Debug, PartialEq)]
 pub struct GridLevel {
     pub name: String,
-    /// 標高 [mm]。
+    /// 標高 `[mm]`。
     pub elevation: f64,
     /// 対応する階。基部レベルは `None`。
     pub story: Option<StoryId>,
@@ -197,15 +197,15 @@ impl BaseSupport {
 /// 架構作成ウィザードの入力。
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameSpec {
-    /// 平面の原点 `(x, y)` [mm]。1 本目の通りの位置になる。
+    /// 平面の原点 `(x, y)` `[mm]`。1 本目の通りの位置になる。
     pub origin: [f64; 2],
-    /// 基部の標高 [mm]。最下レベル（柱脚）になる。
+    /// 基部の標高 `[mm]`。最下レベル（柱脚）になる。
     pub base_elevation: f64,
-    /// X 方向のスパン [mm]（要素数 ＝ 通りの本数 − 1）。空なら通り 1 本。
+    /// X 方向のスパン `[mm]`（要素数 ＝ 通りの本数 − 1）。空なら通り 1 本。
     pub x_spans: Vec<f64>,
-    /// Y 方向のスパン [mm]（同上）。
+    /// Y 方向のスパン `[mm]`（同上）。
     pub y_spans: Vec<f64>,
-    /// 下から順の階高 [mm]（要素数 ＝ 生成する**層**の数）。
+    /// 下から順の階高 `[mm]`（要素数 ＝ 生成する**層**の数）。
     pub story_heights: Vec<f64>,
     /// 階（床）の名前。**要素数は `story_heights` より 1 つ多く**、先頭が基部の
     /// 床の名前である（階は床であり、床レベルは層より 1 つ多いため）。
@@ -223,7 +223,7 @@ pub struct FrameSpec {
     pub with_slabs: bool,
     /// 床の室用途（積載荷重プリセット）。
     pub slab_usage: Option<SlabUsage>,
-    /// 床の板厚 [mm]（断面 [`SLAB_SECTION_NAME`] の板厚になる）。
+    /// 床の板厚 `[mm]`（断面 [`SLAB_SECTION_NAME`] の板厚になる）。
     pub slab_thickness: f64,
     /// 床のコンクリートのグレード名（[`material_presets`] の名称。既定は
     /// [`DEFAULT_SLAB_CONCRETE`]）。この材料を 1 つ作り、床の断面へ割り当てる。
@@ -258,17 +258,17 @@ impl Default for FrameSpec {
 }
 
 impl FrameSpec {
-    /// X 方向の通りの座標 [mm]（原点から各スパンを積み上げる）。
+    /// X 方向の通りの座標 `[mm]`（原点から各スパンを積み上げる）。
     pub fn x_coords(&self) -> Vec<f64> {
         accumulate(self.origin[0], &self.x_spans)
     }
 
-    /// Y 方向の通りの座標 [mm]。
+    /// Y 方向の通りの座標 `[mm]`。
     pub fn y_coords(&self) -> Vec<f64> {
         accumulate(self.origin[1], &self.y_spans)
     }
 
-    /// 基部を含むレベル [mm]（先頭が基部）。
+    /// 基部を含むレベル `[mm]`（先頭が基部）。
     pub fn levels(&self) -> Vec<f64> {
         accumulate(self.base_elevation, &self.story_heights)
     }

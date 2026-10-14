@@ -283,7 +283,7 @@ pub struct AnalysisRunArgs {
     pub dir: Option<String>,
     /// 最大ステップ数（既定 50）。
     pub steps: Option<usize>,
-    /// 目標変位 [mm]。
+    /// 目標変位 `[mm]`。
     pub max_disp: Option<f64>,
     /// 目標最大層間変形角の分母 n（既定 150）。
     pub max_drift_denom: Option<f64>,
@@ -291,11 +291,11 @@ pub struct AnalysisRunArgs {
     pub ds_step: Option<u32>,
     /// 保有耐力比較に明示採用する確定 step（0 始まり、未指定は未判定）。
     pub capacity_step: Option<u32>,
-    /// サンプル波の時間刻み [s]（既定 0.01）。
+    /// サンプル波の時間刻み `[s]`（既定 0.01）。
     pub dt: Option<f64>,
-    /// サンプル波の継続時間 [s]（既定 2.0）。
+    /// サンプル波の継続時間 `[s]`（既定 2.0）。
     pub duration: Option<f64>,
-    /// サンプル波の周期 [s]（既定 0.5）。
+    /// サンプル波の周期 `[s]`（既定 0.5）。
     pub period: Option<f64>,
     /// サンプル波の振幅 [mm/s²]（既定 1000）。
     pub amp: Option<f64>,
@@ -307,7 +307,7 @@ pub struct AnalysisRunArgs {
     pub c0: Option<f64>,
     /// Ai 算定法 `"Approx"`/`"SemiPrecise"`（既定 `"Approx"`）。
     pub ai_mode: Option<String>,
-    /// 参考の固有周期 T [s]。数値指定は告示精算の適用証拠にならず、SemiPrecise の標準地震力は未対応。
+    /// 参考の固有周期 T `[s]`。数値指定は告示精算の適用証拠にならず、SemiPrecise の標準地震力は未対応。
     pub design_period: Option<f64>,
 }
 

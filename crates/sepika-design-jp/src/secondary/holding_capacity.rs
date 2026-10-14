@@ -177,7 +177,7 @@ pub fn check_holding_capacity(
     }
 }
 
-/// 明示採用した同一状態の層力 [N]・層間変位 [mm] で判定する。
+/// 明示採用した同一状態の層力 `[N]`・層間変位 `[mm]` で判定する。
 /// 全層の入力長・有限性・正の階高が必要。欠損や不正値は Err。
 #[allow(clippy::too_many_arguments)]
 pub fn check_holding_capacity_at_state(

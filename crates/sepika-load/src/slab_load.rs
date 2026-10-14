@@ -453,7 +453,7 @@ pub fn slab_load_case_content(
     (nodal, member)
 }
 
-/// 材料密度から床板本体の物理重量 [N] を支持部材へ分配する。
+/// 材料密度から床板本体の物理重量 `[N]` を支持部材へ分配する。
 /// 設計単位重量の採用可否とは独立。参照・密度・形状・二次部材の支持異常はエラー。
 pub fn physical_self_weight_loads(
     model: &Model,

@@ -45,7 +45,7 @@ pub struct NonlinearThCfg {
     /// ないモデルでは何もしない。
     pub apply_long_term: bool,
     /// 詳細記録（[`super::ThRecording`]）の間引き係数。`None` は自動決定
-    /// （記録フレーム数が概ね 1000 になるよう [`super::recording::auto_record_every`] で調整）。
+    /// （記録フレーム数が概ね 1000 になるよう `super::recording::auto_record_every` で調整）。
     pub record_every: Option<usize>,
 }
 

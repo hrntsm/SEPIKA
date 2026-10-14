@@ -20,7 +20,7 @@ pub enum WallWeightGenerationMode {
     GravityCasesOnly,
 }
 
-/// 重量用途ごとの総量 [N]。配分未算定でも総量は保持する。
+/// 重量用途ごとの総量 `[N]`。配分未算定でも総量は保持する。
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WallWeightTotals {
     pub design_n: f64,
@@ -434,7 +434,7 @@ impl Model {
 }
 
 impl WallWeight {
-    /// 水平帯`[lower,upper]` [mm]との交差重量 [N]。位置不足はID付きエラー。
+    /// 水平帯`[lower,upper]` `[mm]`との交差重量 `[N]`。位置不足はID付きエラー。
     pub fn band(&self, lower: f64, upper: f64) -> Result<WallWeightTotals, String> {
         if let Some(reason) = &self.partition_issue {
             return Err(format!("壁版 {}: 階配分未算定（{reason}）", self.plate.0));
@@ -661,7 +661,7 @@ fn wall_story_weights_close(a: &WallStoryWeight, b: &WallStoryWeight) -> bool {
 }
 
 impl WallWeight {
-    /// 実領域の取付き水平軸への射影。各区間の局所x両端[mm]と設計線荷重[N/mm]。
+    /// 実領域の取付き水平軸への射影。各区間の局所x両端`[mm]`と設計線荷重[N/mm]。
     /// 多角形頂点・開口の境界で分けるため区間内の強度は正確に線形となる。
     pub fn projected_design_line_loads(&self) -> Result<Vec<[f64; 4]>, String> {
         if let Some(reason) = &self.partition_issue {
@@ -729,7 +729,7 @@ impl WallWeight {
         }
         Ok(loads)
     }
-    /// 取付き水平区間との交差設計重量[N]。床領域へのDL伝達割合にも用いる。
+    /// 取付き水平区間との交差設計重量`[N]`。床領域へのDL伝達割合にも用いる。
     pub fn design_weight_between_x(&self, lower: f64, upper: f64) -> Result<f64, String> {
         let mut total = 0.0;
         for [a, b, w1, w2] in self.projected_design_line_loads()? {

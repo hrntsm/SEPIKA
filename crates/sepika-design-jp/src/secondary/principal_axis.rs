@@ -7,7 +7,7 @@
 use sepika_core::model::Model;
 use sepika_solver::statics::linear::StaticOnce;
 
-/// 主軸角 Θ [rad]。`tan2Θ = −Pᵗ(uy+vx) / Pᵗ(vy−ux)` を `atan2` で解く。
+/// 主軸角 Θ `[rad]`。`tan2Θ = −Pᵗ(uy+vx) / Pᵗ(vy−ux)` を `atan2` で解く。
 ///
 /// 各ベクトルは同一節点順で対応していること。全体が等方（分母分子とも 0）の
 /// 場合は 0 を返す（任意の方向が主軸）。返り値は (−π/4, π/4] を中心とする
@@ -22,7 +22,7 @@ pub fn principal_axis_angle(p: &[f64], ux: &[f64], vx: &[f64], uy: &[f64], vy: &
     0.5 * num.atan2(den)
 }
 
-/// X・Y 加力の弾性解析結果から主軸角 Θ [rad] を求める。
+/// X・Y 加力の弾性解析結果から主軸角 Θ `[rad]` を求める。
 ///
 /// `p` は各節点の水平力の大きさ（`model.nodes` と同順。X 加力・Y 加力とも
 /// 同じ分布で作用させた前提。載荷しない節点は 0）。

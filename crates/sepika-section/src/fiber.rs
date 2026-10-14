@@ -1,6 +1,6 @@
 use sepika_material::UniaxialMaterial;
 
-/// ファイバ（断面小片）。単位: `y`,`z` [mm], `area` [mm²]。
+/// ファイバ（断面小片）。単位: `y`,`z` `[mm]`, `area` `[mm²]`。
 /// `material` は材料種別の参照タグ。状態は `mats[fiber_index]` が持つ。
 pub struct Fiber {
     pub y: f64,
@@ -14,14 +14,14 @@ pub struct FiberSection {
     pub fibers: Vec<Fiber>,
 }
 
-/// 断面ひずみ（平面保持）。`eps0` [無次元], `ky`,`kz` [1/mm]。
+/// 断面ひずみ（平面保持）。`eps0` `[無次元]`, `ky`,`kz` [1/mm]。
 pub struct SectionStrain {
     pub eps0: f64,
     pub ky: f64,
     pub kz: f64,
 }
 
-/// 断面力（N, My, Mz）。`n` [N], `my`,`mz` [N·mm]。
+/// 断面力（N, My, Mz）。`n` `[N]`, `my`,`mz` [N·mm]。
 pub struct SectionForce {
     pub n: f64,
     pub my: f64,

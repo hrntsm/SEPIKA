@@ -94,14 +94,14 @@ pub(crate) fn steel_grade_base(name: &str) -> Option<&'static str> {
     })
 }
 
-/// 鋼材の基準強度 F [N/mm²]（板厚 [mm] 区分対応）。
+/// 鋼材の基準強度 F [N/mm²]（板厚 `[mm]` 区分対応）。
 /// 対応済みの分類名・種別記号付き名称のみ解決し、任意の前方一致は行わない。
 /// 前後空白は除き、大小文字は区別する。未知の名称は `None`。
 pub fn steel_f_value_prefix(name: &str, thickness: f64) -> Option<f64> {
     steel_grade_base(name).and_then(|grade| steel_f_value(grade, thickness))
 }
 
-/// 対応済み SM520 系列の板厚 [mm] が適用範囲外の場合に、未算定理由を返す。
+/// 対応済み SM520 系列の板厚 `[mm]` が適用範囲外の場合に、未算定理由を返す。
 /// 未知の名称と他鋼種は `None`。
 pub fn steel_f_value_issue(name: &str, thickness: f64) -> Option<String> {
     (steel_grade_base(name) == Some("SM520")
@@ -109,7 +109,7 @@ pub fn steel_f_value_issue(name: &str, thickness: f64) -> Option<String> {
         .then(|| format!("鋼材「{}」の板厚 {thickness} mm は SM520 系列の基準強度 F の適用範囲（0 < t ≤ 100 mm）外です。明示 fy や既定強度では補完できません", name.trim()))
 }
 
-/// CFT 鋼管材料の F [N/mm²] を材料名と板厚 [mm] から解決し、未知名は明示 fy を用いる。
+/// CFT 鋼管材料の F [N/mm²] を材料名と板厚 `[mm]` から解決し、未知名は明示 fy を用いる。
 /// 非鋼材・非正または非有限の明示 fy・SM520 系列の適用範囲外は `None`。
 pub fn cft_steel_f_value(mat: &crate::model::Material, thickness: f64) -> Option<f64> {
     if mat.category != crate::model::MaterialCategory::Steel
@@ -283,7 +283,7 @@ pub const MAIN_REBAR_GRADES: &[&str] = &["SD295A", "SD295B", "SD345", "SD390", "
 ///
 /// 数値は**呼び名の数値**であり、用途別配筋の径フィールドはこの値で保持する
 /// （許容応力度の径依存判定（`dia >= 29.0` ＝ D29 以上）と単位を揃えるため。
-/// 公称直径 [mm] ではない）。
+/// 公称直径 `[mm]` ではない）。
 pub const REBAR_NOMINAL_SIZES: &[f64] = &[
     10.0, 13.0, 16.0, 19.0, 22.0, 25.0, 29.0, 32.0, 35.0, 38.0, 41.0,
 ];

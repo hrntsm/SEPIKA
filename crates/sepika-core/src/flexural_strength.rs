@@ -22,7 +22,7 @@ impl FlexuralStrengthFactors {
     };
 }
 
-/// 断面の弾性断面係数 Ze [mm³]。
+/// 断面の弾性断面係数 Ze `[mm³]`。
 pub fn section_elastic_modulus(sec: &Section) -> f64 {
     let depth = sec.depth.max(sec.width);
     let i_gross = sec.iz.max(sec.iy);

@@ -39,7 +39,7 @@ pub fn ductility_nu(fc: f64, rp: f64) -> f64 {
 ///          0.9·D/(2L)        （L/D ≥ 1.5, 6.4.10）
 ///          (√(L²+D²) − L)/D  （L/D < 1.5, 6.4.11） }
 /// ```
-/// `L`: クリアスパン長さ、`D`: 部材せい [mm]。`D ≤ 0` または `L ≤ 0` の不正入力は 0。
+/// `L`: クリアスパン長さ、`D`: 部材せい `[mm]`。`D ≤ 0` または `L ≤ 0` の不正入力は 0。
 ///
 /// (6.4.11) の平方根内は `L²+D²`。境界 `L/D=1.5` で (6.4.10) と連続する。
 pub fn arch_tan_theta(l_clear: f64, d_full: f64, tensile_axial: bool) -> f64 {
@@ -60,7 +60,7 @@ pub fn arch_tan_theta(l_clear: f64, d_full: f64, tensile_axial: bool) -> f64 {
 /// トラス機構の有効係数 `λ = 1 − s/(2·je) − bs/(4·je)`（AIJ 靭性指針 6.4.8）。
 ///
 /// `bs = be/(Ns+1)`（6.4.9、`Ns`＝中子筋の本数）。`s`＝横補強筋間隔、`je`＝トラス機構
-/// 有効せい、`be`＝トラス機構有効幅 [mm]。`je ≤ 0` の不正入力は 0 を返す。結果は
+/// 有効せい、`be`＝トラス機構有効幅 `[mm]`。`je ≤ 0` の不正入力は 0 を返す。結果は
 /// `[0, 1]` にクランプする（横補強筋が密なほど 1 に近づく）。
 pub fn truss_lambda(s: f64, je: f64, be: f64, n_s: u32) -> f64 {
     if je <= 0.0 {
@@ -73,27 +73,27 @@ pub fn truss_lambda(s: f64, je: f64, be: f64, n_s: u32) -> f64 {
 /// 靭性指針式による終局せん断信頼強度 `Vu` の算定入力（AIJ 靭性指針 6.4）。
 #[derive(Clone, Copy, Debug)]
 pub struct RcDuctilityShearInput {
-    /// 部材幅 b [mm]（アーチ機構の断面 `b·D/2` に用いる）。
+    /// 部材幅 b `[mm]`（アーチ機構の断面 `b·D/2` に用いる）。
     pub b: f64,
-    /// 部材せい D [mm]（アーチ機構・tanθ に用いる）。
+    /// 部材せい D `[mm]`（アーチ機構・tanθ に用いる）。
     pub d_full: f64,
-    /// トラス機構に関与する断面の有効幅 be [mm]（外側横補強筋の芯々間隔）。
+    /// トラス機構に関与する断面の有効幅 be `[mm]`（外側横補強筋の芯々間隔）。
     pub be: f64,
-    /// トラス機構に関与する断面の有効せい je [mm]。
+    /// トラス機構に関与する断面の有効せい je `[mm]`。
     pub je: f64,
     /// 有効横補強筋比 pwe（小数、= aw/(be·s)）。トラス機構に用いる。
     pub pwe: f64,
     /// 横補強筋の信頼強度 σwy [N/mm²]。
     pub sigma_wy: f64,
-    /// 横補強筋の間隔 s [mm]（λ に用いる）。
+    /// 横補強筋の間隔 s `[mm]`（λ に用いる）。
     pub s: f64,
     /// 中子筋の本数 Ns（λ の bs=be/(Ns+1) に用いる）。
     pub n_s: u32,
-    /// クリアスパン長さ L [mm]（tanθ に用いる）。
+    /// クリアスパン長さ L `[mm]`（tanθ に用いる）。
     pub l_clear: f64,
     /// コンクリートの圧縮強度 σB [N/mm²]。
     pub fc: f64,
-    /// 終局限界状態でのヒンジ領域の回転角 Rp [rad]（μ・ν に用いる）。
+    /// 終局限界状態でのヒンジ領域の回転角 Rp `[rad]`（μ・ν に用いる）。
     pub rp: f64,
     /// 引張軸力を受ける柱の場合 true（tanθ=0、アーチ機構を無効化）。
     pub tensile_axial: bool,
@@ -101,7 +101,7 @@ pub struct RcDuctilityShearInput {
     pub lightweight: bool,
 }
 
-/// 靭性指針式による終局せん断信頼強度 `Vu = min(Vu1, Vu2, Vu3)` [N]（AIJ 靭性指針 6.4）。
+/// 靭性指針式による終局せん断信頼強度 `Vu = min(Vu1, Vu2, Vu3)` `[N]`（AIJ 靭性指針 6.4）。
 ///
 /// ```text
 /// Vu1 = μ·pwe·σwy·be·je + (ν·σB − 5·pwe·σwy/λ)·(b·D/2)·tanθ        (6.4.1)
@@ -171,31 +171,31 @@ pub fn bond_force_tx(
 /// 付着破壊の影響を考慮した終局せん断信頼強度 `Vbu` の算定入力（AIJ 靭性指針 6.8）。
 #[derive(Clone, Copy, Debug)]
 pub struct RcVbuInput {
-    /// 部材幅 b [mm]。
+    /// 部材幅 b `[mm]`。
     pub b: f64,
-    /// 部材せい D [mm]。
+    /// 部材せい D `[mm]`。
     pub d_full: f64,
-    /// トラス機構に関与する断面の有効幅 be [mm]。
+    /// トラス機構に関与する断面の有効幅 be `[mm]`。
     pub be: f64,
-    /// トラス機構に関与する断面の有効せい je [mm]。
+    /// トラス機構に関与する断面の有効せい je `[mm]`。
     pub je: f64,
     /// 1 段目主筋の付着信頼強度 τbu [N/mm²]。
     pub tau_bu: f64,
-    /// 1 段目主筋の周長合計 Σφ1 [mm]。
+    /// 1 段目主筋の周長合計 Σφ1 `[mm]`。
     pub sum_phi1: f64,
     /// 2 段目主筋の付着信頼強度 τbu2 [N/mm²]（ない場合 0）。
     pub tau_bu2: f64,
-    /// 2 段目主筋の周長合計 Σφ2 [mm]（ない場合 0）。
+    /// 2 段目主筋の周長合計 Σφ2 `[mm]`（ない場合 0）。
     pub sum_phi2: f64,
-    /// 横補強筋の間隔 s [mm]（λ に用いる）。
+    /// 横補強筋の間隔 s `[mm]`（λ に用いる）。
     pub s: f64,
     /// 中子筋の本数 Ns（λ に用いる）。
     pub n_s: u32,
-    /// クリアスパン長さ L [mm]（tanθ に用いる）。
+    /// クリアスパン長さ L `[mm]`（tanθ に用いる）。
     pub l_clear: f64,
     /// コンクリートの圧縮強度 σB [N/mm²]。
     pub fc: f64,
-    /// 終局限界状態でのヒンジ領域の回転角 Rp [rad]（ν・Tx に用いる）。
+    /// 終局限界状態でのヒンジ領域の回転角 Rp `[rad]`（ν・Tx に用いる）。
     pub rp: f64,
     /// 引張軸力を受ける柱の場合 true（tanθ=0）。
     pub tensile_axial: bool,
@@ -205,7 +205,7 @@ pub struct RcVbuInput {
     pub lightweight: bool,
 }
 
-/// 付着破壊の影響を考慮した終局せん断信頼強度 `Vbu = min(Vbu1, Vbu2)` [N]
+/// 付着破壊の影響を考慮した終局せん断信頼強度 `Vbu = min(Vbu1, Vbu2)` `[N]`
 /// （AIJ 靭性指針 6.8）。
 ///
 /// ```text

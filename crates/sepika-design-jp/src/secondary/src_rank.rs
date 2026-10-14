@@ -59,7 +59,7 @@ pub fn src_wall_type(shear_failure: bool) -> MemberRank {
 ///
 /// - `fc`: コンクリート強度 [N/mm²]（0 以下は算定不能で `None`）。
 /// - `rebar_sy`: 主筋の降伏強度 σy [N/mm²]（0 以下は算定不能で `None`）。
-/// - `n_ult`: メカニズム時の軸方向力 [N]（**圧縮正**。引張は 0 として扱う）。
+/// - `n_ult`: メカニズム時の軸方向力 `[N]`（**圧縮正**。引張は 0 として扱う）。
 ///
 /// SRC 矩形（[`SectionShape::SrcColumnRect`]）以外の
 /// 形状、または SM520 系列の板厚が適用範囲外の場合は `None`。

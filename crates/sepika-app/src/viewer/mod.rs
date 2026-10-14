@@ -94,7 +94,7 @@ pub enum ModelingAnalysis {
 /// 応力図（[`ViewMode::Force`]）で表示できる成分。
 ///
 /// 部材内力ベクトル `[N, Qy, Qz, Mx, My, Mz]` の 6 成分に 1 対 1 で対応し、
-/// 列挙順＝内力ベクトルの添字である（[`Self::force_index`]）。
+/// 列挙順＝内力ベクトルの添字である（`Self::force_index`）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ForceComponent {
     /// 軸力 N（引張正）
@@ -286,7 +286,7 @@ pub enum CmqComponent {
 
 /// CMQ 図で表示する軸（局所 ey 面＝強軸／ez 面＝弱軸）。
 ///
-/// 応力図の強軸(Qy・Mz)・弱軸(Qz・My)の区別（[`ForceComponent::plane`]）と同じ面を指す。
+/// 応力図の強軸(Qy・Mz)・弱軸(Qz・My)の区別（`ForceComponent::plane`）と同じ面を指す。
 /// `MemberLoad.dir`（世界座標）をこの面へ投影した成分から C/M/Q を計算する
 /// （`draw_cmq_diagram`）。両方 ON のときは同一スケールで重ねて描く（応力図の
 /// 同単位成分の共有スケールと同じ規約）。既定は強軸のみ（直交グリッド・ひねりの

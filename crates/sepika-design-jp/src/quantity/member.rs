@@ -13,22 +13,22 @@
 //! - [`beam_concrete_volume`] / [`beam_formwork_area`] — 小梁
 //! - [`wall_bar_length`] — 壁筋（横筋・縦筋）総長さ
 
-/// 梁端ハンチの寸法（ハンチ端の全幅 Bi・全せい Di とハンチ長さ Li）[mm]。
+/// 梁端ハンチの寸法（ハンチ端の全幅 Bi・全せい Di とハンチ長さ Li）`[mm]`。
 ///
 /// 寸法は部材付帯情報（`Model::member_detail_attrs` のハンチ長・せい増分・
 /// 幅増分。剛性には影響しない）から、走査側（`super::try_compute_quantity_takeoff`）
 /// が基準断面 B×D への増分を全幅・全せいへ換算して渡す（未入力は `None`）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Haunch {
-    /// ハンチ端の幅 Bi [mm]。
+    /// ハンチ端の幅 Bi `[mm]`。
     pub b: f64,
-    /// ハンチ端のせい Di [mm]。
+    /// ハンチ端のせい Di `[mm]`。
     pub d: f64,
-    /// ハンチ長さ Li [mm]。
+    /// ハンチ長さ Li `[mm]`。
     pub len: f64,
 }
 
-/// 大梁・基礎梁のコンクリート体積 [mm³]。
+/// 大梁・基礎梁のコンクリート体積 `[mm³]`。
 ///
 /// - ハンチなし: `B×D×L`
 /// - ハンチ付き: `B×D×L + [(B+Bi)×(D+Di)]×Li/4 + [(B+Bj)×(D+Dj)]×Lj/4`
@@ -48,7 +48,7 @@ pub fn girder_concrete_volume(
     v
 }
 
-/// 大梁の型枠面積 [mm²]（両側スラブ厚が等しい場合の式）。
+/// 大梁の型枠面積 `[mm²]`（両側スラブ厚が等しい場合の式）。
 ///
 /// `(D×L + (Di−D)/2×Li + (Dj−D)/2×Lj)×2 + B×L + (Bi−B)/2×Li + (Bj−B)/2×Lj`
 ///
@@ -76,7 +76,7 @@ pub fn girder_formwork_area(
     area
 }
 
-/// 基礎梁の型枠面積 [mm²]。
+/// 基礎梁の型枠面積 `[mm²]`。
 ///
 /// `D×L + (Di−D)/2×Li + (Dj−D)/2×Lj + B×L + (Bi−B)×Li + (Bj−B)×Lj`
 ///
@@ -103,12 +103,12 @@ pub fn foundation_girder_formwork_area(
 pub enum BeamBarEnd {
     /// 外端（外柱へ定着）: 延長 = 定着長さ L2。
     Exterior {
-        /// 定着長さ L2 [mm]。
+        /// 定着長さ L2 `[mm]`。
         l2: f64,
     },
     /// 内端（内柱を通し）: 延長 = 柱せいの半分 Dc/2。
     Interior {
-        /// 柱せいの半分 Dc/2 [mm]。
+        /// 柱せいの半分 Dc/2 `[mm]`。
         half_dc: f64,
     },
 }
@@ -123,7 +123,7 @@ impl BeamBarEnd {
     }
 }
 
-/// 大梁主筋 1 本の長さ [mm]（1 断面＝全断面配筋の場合）。
+/// 大梁主筋 1 本の長さ `[mm]`（1 断面＝全断面配筋の場合）。
 ///
 /// 主筋長さの算定タイプ:
 /// - タイプ7（外端-内端）: `L = Lo + L2 + Dc/2`
@@ -137,7 +137,7 @@ pub fn girder_main_bar_length(lo: f64, end_i: BeamBarEnd, end_j: BeamBarEnd) -> 
     lo + end_i.extension() + end_j.extension()
 }
 
-/// スターラップ一組の長さ [mm]: `2×B + n×D`（n: 一組のスターラップ本数）。
+/// スターラップ一組の長さ `[mm]`: `2×B + n×D`（n: 一組のスターラップ本数）。
 pub fn stirrup_set_length(b: f64, d: f64, legs: u32) -> f64 {
     2.0 * b + legs as f64 * d
 }
@@ -167,33 +167,33 @@ pub fn column_joint_count(h: f64) -> f64 {
     1.0 + (h / 7_000.0).floor()
 }
 
-/// 柱のコンクリート体積 [mm³]: `Dx×Dy×H`（H: 床上〜床上の柱長さ）。
+/// 柱のコンクリート体積 `[mm³]`: `Dx×Dy×H`（H: 床上〜床上の柱長さ）。
 pub fn column_concrete_volume(dx: f64, dy: f64, h: f64) -> f64 {
     dx * dy * h
 }
 
-/// 柱の型枠面積 [mm²]: `2×(Dx+Dy)×H`。
+/// 柱の型枠面積 `[mm²]`: `2×(Dx+Dy)×H`。
 pub fn column_formwork_area(dx: f64, dy: f64, h: f64) -> f64 {
     2.0 * (dx + dy) * h
 }
 
-/// 柱フープ一組の長さ [mm]: `nx×Dx + ny×Dy`
+/// 柱フープ一組の長さ `[mm]`: `nx×Dx + ny×Dy`
 /// （nx/ny: X/Y 方向一組のフープ本数）。
 pub fn hoop_set_length(dx: f64, dy: f64, nx: u32, ny: u32) -> f64 {
     nx as f64 * dx + ny as f64 * dy
 }
 
-/// 小梁のコンクリート体積 [mm³]: `B×D×L`。
+/// 小梁のコンクリート体積 `[mm³]`: `B×D×L`。
 pub fn beam_concrete_volume(b: f64, d: f64, l: f64) -> f64 {
     b * d * l
 }
 
-/// 小梁の型枠面積 [mm²]: `(B+2×D)×L`。
+/// 小梁の型枠面積 `[mm²]`: `(B+2×D)×L`。
 pub fn beam_formwork_area(b: f64, d: f64, l: f64) -> f64 {
     (b + 2.0 * d) * l
 }
 
-/// 壁筋（横筋または縦筋）の総長さ [mm]。
+/// 壁筋（横筋または縦筋）の総長さ `[mm]`。
 ///
 /// - 横筋: `(L+2S)×W`（W: 横筋本数 = 壁高さ/ピッチ × 配筋列数）
 /// - 縦筋: `(H+2S)×h`（h: 縦筋本数 = 壁長さ/ピッチ × 配筋列数）
@@ -203,12 +203,12 @@ pub fn beam_formwork_area(b: f64, d: f64, l: f64) -> f64 {
 pub fn wall_bar_length(span: f64, s: f64, count: f64) -> f64 {
     (span + 2.0 * s) * count
 }
-/// 円形柱の体積 [mm³]。直径・長さ [mm] は有限かつ正を前提とする。
+/// 円形柱の体積 `[mm³]`。直径・長さ `[mm]` は有限かつ正を前提とする。
 pub fn circle_column_concrete_volume(diameter_mm: f64, length_mm: f64) -> f64 {
     std::f64::consts::PI * diameter_mm * diameter_mm / 4.0 * length_mm
 }
 
-/// 円形柱の側面型枠面積 [mm²]。直径・長さ [mm] は有限かつ正を前提とする。
+/// 円形柱の側面型枠面積 `[mm²]`。直径・長さ `[mm]` は有限かつ正を前提とする。
 pub fn circle_column_formwork_area(diameter_mm: f64, length_mm: f64) -> f64 {
     std::f64::consts::PI * diameter_mm * length_mm
 }

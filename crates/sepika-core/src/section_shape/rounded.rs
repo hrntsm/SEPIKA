@@ -1,7 +1,7 @@
 use super::SectionShape;
 use std::f64::consts::PI;
 
-/// 材料領域の幾何性能。A [mm²]、Iy・Iz [mm⁴]、Zp [mm³]。
+/// 材料領域の幾何性能。A `[mm²]`、Iy・Iz `[mm⁴]`、Zp `[mm³]`。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RoundedSectionProperties {
     pub area: f64,

@@ -37,7 +37,7 @@ pub struct SectionEditorDraft {
     pub tw: f64,
     pub tf: f64,
     pub t: f64,
-    /// H のフィレット半径、角形鋼管・角形 CFT の角R [mm]。None は未知。
+    /// H のフィレット半径、角形鋼管・角形 CFT の角R `[mm]`。None は未知。
     pub r: Option<f64>,
     pub lip: f64,
     pub upper_width: f64,

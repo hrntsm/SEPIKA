@@ -33,7 +33,7 @@ pub struct SlabDraft {
     pub attached_nodes: [Option<NodeId>; 2],
     /// 取り付き先を点（柱）にするか。false は線（取付き線）。
     pub attached_point: bool,
-    /// 張り出し量の入力文字列 [mm]（線: 始端側・終端側、点: X 方向・Y 方向）。
+    /// 張り出し量の入力文字列 `[mm]`（線: 始端側・終端側、点: X 方向・Y 方向）。
     pub attached_extent: [String; 2],
     /// 取付き線に載る領域の荷重の出口。
     pub attached_transfer: sepika_core::model::LoadTransfer,

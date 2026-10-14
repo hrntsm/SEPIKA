@@ -66,16 +66,16 @@ pub fn mm_s_to_m_s(v: f64) -> f64 {
 /// 層応答分布グラフの表示項目（横軸に取る量）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum StoryResponseKind {
-    /// 層せん断力 [kN]（層量、階段状）
+    /// 層せん断力 `[kN]`（層量、階段状）
     #[default]
     Shear,
     /// 層せん断力係数 Ci [-]（層量、階段状）
     ShearCoeff,
-    /// 階絶対加速度 [gal]（階量、点＋折れ線）
+    /// 階絶対加速度 `[gal]`（階量、点＋折れ線）
     Accel,
     /// 階速度(相対) [m/s]（階量、点＋折れ線）
     Vel,
-    /// 階変位(相対) [mm]（階量、点＋折れ線）
+    /// 階変位(相対) `[mm]`（階量、点＋折れ線）
     Disp,
 }
 

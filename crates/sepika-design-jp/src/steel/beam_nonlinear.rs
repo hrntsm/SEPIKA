@@ -2,7 +2,7 @@
 //! 復元力特性）。
 //!
 //! # 位置付け
-//! [`super::beam`] が許容応力度検定（横座屈を考慮した fb）を扱うのに対し、本モジュールは
+//! `crate::steel::beam` が許容応力度検定（横座屈を考慮した fb）を扱うのに対し、本モジュールは
 //! 非線形解析の材端バネの骨格諸元（バイリニア）を算定する純関数群である。
 //! 曲げは全塑性 Mp と横座屈 Mcr、軸は降伏軸力 Nu。
 //!
@@ -58,7 +58,7 @@ pub fn steel_beam_lateral_buckling_moment(zp: f64, sigma_y: f64, lb: f64, h: f64
     steel_beam_lateral_buckling_ratio(lb, h, af, sigma_y) * mp
 }
 
-/// 鉄骨梁の軸降伏耐力 Nu [N] = Af·σfy + Aw·σwy（引張・圧縮共通）。
+/// 鉄骨梁の軸降伏耐力 Nu `[N]` = Af·σfy + Aw·σwy（引張・圧縮共通）。
 /// `af_total`: 全フランジ断面積、`aw`: ウェブ断面積。
 pub fn steel_beam_axial_yield(af_total: f64, sigma_fy: f64, aw: f64, sigma_wy: f64) -> f64 {
     af_total.max(0.0) * sigma_fy.max(0.0) + aw.max(0.0) * sigma_wy.max(0.0)
@@ -67,15 +67,15 @@ pub fn steel_beam_axial_yield(af_total: f64, sigma_fy: f64, aw: f64, sigma_wy: f
 /// H 形鋼断面の非線形諸元（強軸曲げ）。
 #[derive(Clone, Copy, Debug)]
 pub struct SteelHProps {
-    /// 塑性断面係数 Zp（強軸）[mm³]。
+    /// 塑性断面係数 Zp（強軸）`[mm³]`。
     pub zp: f64,
-    /// 梁せい H [mm]。
+    /// 梁せい H `[mm]`。
     pub h: f64,
-    /// 圧縮フランジ断面積 Af=b·tf [mm²]（Mcr 用）。
+    /// 圧縮フランジ断面積 Af=b·tf `[mm²]`（Mcr 用）。
     pub af_compression: f64,
-    /// 全フランジ断面積 2·b·tf [mm²]（Nu 用）。
+    /// 全フランジ断面積 2·b·tf `[mm²]`（Nu 用）。
     pub af_total: f64,
-    /// ウェブ断面積 (H−2tf)·tw [mm²]（Nu 用）。
+    /// ウェブ断面積 (H−2tf)·tw `[mm²]`（Nu 用）。
     pub aw: f64,
 }
 

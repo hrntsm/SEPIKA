@@ -11,13 +11,13 @@
 /// 小梁（単純梁・片持ち梁）の設計結果。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BeamDesignResult {
-    /// スパン（支持間距離）[mm]。
+    /// スパン（支持間距離）`[mm]`。
     pub span: f64,
     /// 代表等分布荷重 w [N/mm]（合計荷重 / スパン。表示用であり検定には使わない）。
     pub w: f64,
     /// 最大曲げモーメント [N·mm]。
     pub m_max: f64,
-    /// 最大せん断力 [N]。
+    /// 最大せん断力 `[N]`。
     pub q_max: f64,
     /// 曲げ応力度 σ = M/Z [N/mm²]。
     pub sigma: f64,
@@ -25,7 +25,7 @@ pub struct BeamDesignResult {
     pub sigma_allow: f64,
     /// 曲げ検定比 σ/σ_allow。
     pub bending_ratio: f64,
-    /// たわみ [mm]（等分布なら 5wL⁴/(384EI)。二次部材は数値積分）。
+    /// たわみ `[mm]`（等分布なら 5wL⁴/(384EI)。二次部材は数値積分）。
     pub deflection: f64,
     /// たわみ比 δ/L。
     pub deflection_span_ratio: f64,
@@ -138,15 +138,15 @@ pub fn beam_unchecked(span: f64) -> BeamDesignResult {
 /// スラブ（一方向）の設計結果。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SlabDesignResult {
-    /// 設計スパン（短辺）[mm]。
+    /// 設計スパン（短辺）`[mm]`。
     pub span: f64,
     /// 面荷重 w [N/mm²]。
     pub w: f64,
     /// 単位幅あたり設計曲げモーメント M = wL²/coef [N·mm/mm]。
     pub moment: f64,
-    /// 板厚 t [mm]。
+    /// 板厚 t `[mm]`。
     pub thickness: f64,
-    /// 有効せい d = t − かぶり [mm]。
+    /// 有効せい d = t − かぶり `[mm]`。
     pub effective_depth: f64,
     /// 単位幅あたり必要引張鉄筋量 As [mm²/mm]。
     pub as_req_per_mm: f64,
@@ -156,9 +156,9 @@ pub struct SlabDesignResult {
 
 /// スラブを一方向版として設計し、設計曲げモーメントと必要鉄筋量を算定する。
 ///
-/// - `span`: 設計スパン（短辺）[mm]、`w`: 面荷重 [N/mm²]。
+/// - `span`: 設計スパン（短辺）`[mm]`、`w`: 面荷重 [N/mm²]。
 /// - `moment_coef`: 曲げモーメント係数（M = wL²/coef。単純支持=8、連続端=10 等）。
-/// - `thickness`: 板厚 [mm]、`cover`: 圧縮縁から鉄筋重心までのかぶり [mm]。
+/// - `thickness`: 板厚 `[mm]`、`cover`: 圧縮縁から鉄筋重心までのかぶり `[mm]`。
 /// - `ft_rebar`: 鉄筋の許容引張応力度 [N/mm²]（長期）、`j_ratio`: 応力中心距離比 j（≒7/8）。
 ///
 /// 必要鉄筋量 As = M / (ft · j · d)。有効せい d が 0 以下なら As=0。
@@ -197,7 +197,7 @@ pub const STEEL_YOUNG: f64 = 205_000.0;
 pub const STEEL_F_DEFAULT: f64 = 235.0;
 /// たわみ制限の既定分母（δ/L ≤ 1/250）。
 pub const DEFLECTION_LIMIT_DENOM: f64 = 250.0;
-/// スラブ設計の既定かぶり [mm]（圧縮縁〜鉄筋重心）。
+/// スラブ設計の既定かぶり `[mm]`（圧縮縁〜鉄筋重心）。
 pub const SLAB_DEFAULT_COVER: f64 = 30.0;
 /// スラブ設計の既定 j 比（応力中心距離 / 有効せい）。
 pub const SLAB_J_RATIO: f64 = 7.0 / 8.0;

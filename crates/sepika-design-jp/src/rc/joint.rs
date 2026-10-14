@@ -45,21 +45,21 @@ pub struct RcJointInput {
     pub fc: f64,
     /// コンクリート種類（軽量1種・2種は許容せん断応力度を 0.9 倍）。
     pub concrete_class: ConcreteClass,
-    /// 柱せい D [mm]（検定する加力方向の柱せい）。
+    /// 柱せい D `[mm]`（検定する加力方向の柱せい）。
     pub col_depth: f64,
-    /// 柱幅 [mm]（加力方向と直交する方向の柱幅）。
+    /// 柱幅 `[mm]`（加力方向と直交する方向の柱幅）。
     pub col_width: f64,
-    /// 大梁幅 bb [mm]。
+    /// 大梁幅 bb `[mm]`。
     pub beam_width: f64,
-    /// 大梁の応力中心間距離 j [mm]。
+    /// 大梁の応力中心間距離 j `[mm]`。
     pub beam_j: f64,
     /// 接合部に取り付く大梁端モーメントの絶対値和 ΣM [N·mm]。
     pub sum_beam_moments: f64,
-    /// 柱の設計用せん断力 QD [N]（上下柱の平均値でよい）。
+    /// 柱の設計用せん断力 QD `[N]`（上下柱の平均値でよい）。
     pub col_shear: f64,
-    /// 柱の平均階高 cH [mm]。
+    /// 柱の平均階高 cH `[mm]`。
     pub col_height: f64,
-    /// 大梁の平均スパン Lb [mm]。
+    /// 大梁の平均スパン Lb `[mm]`。
     pub beam_span: f64,
 }
 

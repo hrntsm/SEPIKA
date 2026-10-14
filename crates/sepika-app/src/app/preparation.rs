@@ -113,13 +113,13 @@ pub struct PrepSummary {
     pub n_supports: usize,
     /// 剛床（ダイアフラム）の総数。
     pub n_diaphragms: usize,
-    /// 地盤面（GL）標高 [mm]。
+    /// 地盤面（GL）標高 `[mm]`。
     pub ground_elevation: f64,
-    /// 建築物の高さ h [mm]（GL から PH 階を除く最上階の床レベルまで）。
+    /// 建築物の高さ h `[mm]`（GL から PH 階を除く最上階の床レベルまで）。
     pub height_mm: f64,
     /// 略算周期の鉄骨造高さ比 α。
     pub steel_height_ratio: f64,
-    /// 地震用重量の総和 ΣW [N]。
+    /// 地震用重量の総和 ΣW `[N]`。
     pub total_seismic_weight: f64,
     /// 質量モデルの方式。
     pub mass_method: sepika_core::model::MassMethod,
@@ -130,20 +130,20 @@ pub struct PrepSummary {
 pub struct PrepStoryRow {
     pub wall_weights: Vec<sepika_core::model::WallStoryWeight>,
     pub name: String,
-    /// 床レベル [mm]（モデル座標）。
+    /// 床レベル `[mm]`（モデル座標）。
     pub elevation: f64,
-    /// 階高 [mm]（直下階との差。最下階は GL からの高さ）。
+    /// 階高 `[mm]`（直下階との差。最下階は GL からの高さ）。
     pub height: f64,
     /// その階に属する節点数。
     pub n_nodes: usize,
     /// その階の剛床（ダイアフラム）数。
     pub n_diaphragms: usize,
-    /// 地震用重量 Wi [N]（未設定は 0）。
+    /// 地震用重量 Wi `[N]`（未設定は 0）。
     pub weight: f64,
-    /// 自動算定重量 [N]。未算定・陳腐化は `None`。
+    /// 自動算定重量 `[N]`。未算定・陳腐化は `None`。
     #[serde(default)]
     pub calculated_weight: Option<f64>,
-    /// 当該階以上の累積地震用重量 ΣWj [N]。
+    /// 当該階以上の累積地震用重量 ΣWj `[N]`。
     pub cumulative_weight: f64,
     pub structure: StoryStructure,
     pub level_kind: StoryLevelKind,
@@ -152,11 +152,11 @@ pub struct PrepStoryRow {
 /// 地震力（Ai 分布）の算定諸元と層ごとの結果。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PrepSeismic {
-    /// 設計用一次固有周期 T [s]。
+    /// 設計用一次固有周期 T `[s]`。
     pub t: f64,
     /// T の算定法（略算／精算）。
     pub t_mode: AiMode,
-    /// 地盤種別に応じた Tc [s]。
+    /// 地盤種別に応じた Tc `[s]`。
     pub tc: f64,
     /// 振動特性係数 Rt。
     pub rt: f64,
@@ -165,7 +165,7 @@ pub struct PrepSeismic {
     pub soil: sepika_load::ai::SoilClass,
     /// 層ごとの結果（`stories` と同順＝下階→上階）。
     pub rows: Vec<PrepSeismicRow>,
-    /// 基部せん断力 Q1 [N]（最下層の Qi）。
+    /// 基部せん断力 Q1 `[N]`（最下層の Qi）。
     pub base_shear: f64,
     /// Pi の算定で負値が現れ 0 へクランプしたか（重量分布の異常シグナル）。
     pub clamped_negative_pi: bool,
@@ -175,9 +175,9 @@ pub struct PrepSeismic {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PrepSeismicRow {
     pub name: String,
-    /// 当該階の地震用重量 Wi [N]。
+    /// 当該階の地震用重量 Wi `[N]`。
     pub weight: f64,
-    /// 当該階以上の累積地震用重量 ΣWj [N]。
+    /// 当該階以上の累積地震用重量 ΣWj `[N]`。
     pub cumulative_weight: f64,
     /// 重量比 αi。
     pub alpha: f64,
@@ -185,9 +185,9 @@ pub struct PrepSeismicRow {
     pub ai: f64,
     /// 層せん断力係数 Ci（PH 階は震度 k、地下階は水平震度 K）。
     pub ci: f64,
-    /// 層せん断力 Qi [N]。
+    /// 層せん断力 Qi `[N]`。
     pub qi: f64,
-    /// 層の水平外力 Pi [N]。
+    /// 層の水平外力 Pi `[N]`。
     pub pi: f64,
     pub level_kind: StoryLevelKind,
 }
@@ -215,13 +215,13 @@ pub struct PrepTorsionSkipRow {
 pub struct PrepPanelRow {
     /// 接合部の節点。
     pub node: NodeId,
-    /// 柱せい方向のパネル寸法 dc [mm]。
+    /// 柱せい方向のパネル寸法 dc `[mm]`。
     pub dc: f64,
-    /// 梁フランジ板厚中心間距離 db [mm]。
+    /// 梁フランジ板厚中心間距離 db `[mm]`。
     pub db: f64,
-    /// パネル板厚 tp [mm]。
+    /// パネル板厚 tp `[mm]`。
     pub tp: f64,
-    /// 実効体積 Ve [mm³]。
+    /// 実効体積 Ve `[mm³]`。
     pub ve: f64,
     /// パネルせん断剛性 Kxp = Kyp = G・Ve [N·mm/rad]。
     pub k_panel: f64,
@@ -235,21 +235,21 @@ pub struct PrepRigidZoneRow {
     pub kind: sepika_design_jp::MemberKind,
     pub node_i: NodeId,
     pub node_j: NodeId,
-    /// 材長 L [mm]（節点間距離）。
+    /// 材長 L `[mm]`（節点間距離）。
     pub length: f64,
-    /// i 端・j 端の剛域長 λ [mm]。
+    /// i 端・j 端の剛域長 λ `[mm]`。
     pub zone_i: f64,
     pub zone_j: f64,
     pub source_i: ZoneSource,
     pub source_j: ZoneSource,
-    /// i 端・j 端の柱フェース距離 [mm]（危険断面位置の基準）。
+    /// i 端・j 端の柱フェース距離 `[mm]`（危険断面位置の基準）。
     pub face_i: f64,
     pub face_j: f64,
-    /// i 端・j 端の仕口パネル分オフセット [mm]（パネルがない端は 0）。
+    /// i 端・j 端の仕口パネル分オフセット `[mm]`（パネルがない端は 0）。
     /// 剛域長とは別の量で、剛体アーム長は両者の大きい方になる。
     pub panel_offset_i: f64,
     pub panel_offset_j: f64,
-    /// 可とう長 L' = L − 剛体アーム長 [mm]（剛域長とパネルオフセットの大きい方を控除）。
+    /// 可とう長 L' = L − 剛体アーム長 `[mm]`（剛域長とパネルオフセットの大きい方を控除）。
     pub clear_length: f64,
     /// 剛域比（剛体アーム長の合計）/ L。
     pub ratio: f64,
@@ -270,20 +270,20 @@ pub struct PrepSectionRow {
     pub shape_label: Option<String>,
     /// この断面を割り当てられた部材の数。
     pub n_elements: usize,
-    /// 断面積 A [mm²]。
+    /// 断面積 A `[mm²]`。
     pub area: Option<f64>,
-    /// 断面二次モーメント Iy・Iz [mm⁴]（y=強軸まわり）。
+    /// 断面二次モーメント Iy・Iz `[mm⁴]`（y=強軸まわり）。
     pub iy: Option<f64>,
     pub iz: Option<f64>,
-    /// ねじり定数 J [mm⁴]。
+    /// ねじり定数 J `[mm⁴]`。
     pub j: f64,
-    /// せん断有効断面積 Asy・Asz [mm²]。
+    /// せん断有効断面積 Asy・Asz `[mm²]`。
     pub as_y: f64,
     pub as_z: f64,
-    /// せい D・幅 B [mm]。
+    /// せい D・幅 B `[mm]`。
     pub depth: f64,
     pub width: f64,
-    /// 断面二次半径 iy・iz [mm]（√(I/A)。座屈長さ比の確認用）。
+    /// 断面二次半径 iy・iz `[mm]`（√(I/A)。座屈長さ比の確認用）。
     pub ry: Option<f64>,
     pub rz: Option<f64>,
     pub unavailable_reason: Option<String>,
@@ -347,10 +347,10 @@ pub struct PrepMemberStiffnessRow {
     /// 元断面の A・Iy（強軸）[mm²・mm⁴]。等価換算・割増しとの比較用。
     pub section_area: f64,
     pub section_iy: f64,
-    /// 割増し・等価換算をすべて適用した後の強軸曲げ剛性用 I [mm⁴]。
+    /// 割増し・等価換算をすべて適用した後の強軸曲げ剛性用 I `[mm⁴]`。
     /// 元断面 Iy に対する比が「実際に効いている総増大率」になる。
     pub effective_iy: f64,
-    /// 同じく軸剛性用の断面積 [mm²]。
+    /// 同じく軸剛性用の断面積 `[mm²]`。
     pub effective_area: f64,
 }
 
@@ -358,14 +358,14 @@ pub struct PrepMemberStiffnessRow {
 /// 保存・表示用の写し）。
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PrepCompositeProps {
-    /// 軸剛性用断面積 [mm²]。
+    /// 軸剛性用断面積 `[mm²]`。
     pub area_ax: f64,
-    /// 強軸・弱軸の断面二次モーメント [mm⁴]。
+    /// 強軸・弱軸の断面二次モーメント `[mm⁴]`。
     pub iy: f64,
     pub iz: f64,
-    /// ねじり定数 [mm⁴]。
+    /// ねじり定数 `[mm⁴]`。
     pub j: f64,
-    /// せん断有効断面積 [mm²]。
+    /// せん断有効断面積 `[mm²]`。
     pub as_y: f64,
     pub as_z: f64,
 }
@@ -377,7 +377,7 @@ pub struct PrepLoadCaseRow {
     pub kind: LoadCaseKind,
     pub n_nodal: usize,
     pub n_member: usize,
-    /// 節点荷重・部材荷重を合わせた全体座標系の合力 [N]。
+    /// 節点荷重・部材荷重を合わせた全体座標系の合力 `[N]`。
     /// 部材荷重の合力は集中荷重 p、分布荷重は (w1+w2)/2·(b−a) を作用方向へ投影して
     /// 積算する（等価節点力に置換する前の外力の総和であり、支点反力と釣り合う）。
     pub sum_force: [f64; 3],

@@ -16,7 +16,7 @@
 //! # 材料（グレード名）
 //! ST-Bridge 2.0 の `StbModel` は材料テーブル（E・ν・密度）を持たない。日本の構造材料は
 //! 法令・JIS で規格化されており、グレード名（`Fc21`・`SN400B`・`SD345` 等）が決まれば物性は
-//! 一意に定まる。import はグレード名から標準材料表（[`import`] の `material_std`）で物性を
+//! 一意に定まる。import はグレード名から標準材料表（`import` の `material_std`）で物性を
 //! 復元し、export は断面へグレード名（鋼 `strength_main`、コンクリート `strength_concrete`）を
 //! 付す。材料の E/ν や節点荷重など幾何スコープ外は往復しない（完全一致は `.ovika`）。
 //!
@@ -30,9 +30,9 @@
 //!   書き出しは平行芯（`StbParallelAxes`）のみ。
 //!
 //! # モジュール構成（1 ファイル 1 責務）
-//! - [`export`] — 直列化（内部モデル → 標準 ST-Bridge XML）。
-//! - [`section_std`] — 標準断面要素の直列化。
-//! - [`import`] — パース（ST-Bridge XML → 内部モデル）。
+//! - `export` — 直列化（内部モデル → 標準 ST-Bridge XML）。
+//! - `section_std` — 標準断面要素の直列化。
+//! - `import` — パース（ST-Bridge XML → 内部モデル）。
 //! - `tests` — 入出力の統合テスト（`#[cfg(test)]`）。
 
 mod export;
