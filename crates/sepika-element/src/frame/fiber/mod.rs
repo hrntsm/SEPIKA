@@ -10,7 +10,7 @@ use sepika_section::mn_surface::StrengthParams;
 use smallvec::SmallVec;
 use std::any::Any;
 
-/// 塑性化域長 Lp [mm] を部材長 `l` [mm] に対して有効な範囲へクランプする。
+/// 塑性化域長 Lp `[mm]` を部材長 `l` `[mm]` に対して有効な範囲へクランプする。
 /// 各端 45% を上限、1e-6·L を下限とする。
 pub fn clamp_plastic_zone(lp: f64, l: f64) -> f64 {
     lp.clamp(1.0e-6 * l, 0.45 * l)
@@ -540,7 +540,7 @@ struct FiberBeamCheckpointLegacy {
 /// 塑性増分ヒンジの定義と状態。
 #[derive(Clone)]
 pub struct HingeState {
-    /// 塑性化域長 Lp [mm]。
+    /// 塑性化域長 Lp `[mm]`。
     pub lp: f64,
     pub k_el: LocalMat,
     /// 公称弾性 D 対角 [EA, E·Iy_elem, E·Iz_elem]。
@@ -616,18 +616,18 @@ impl GaussPoint {
 
 /// ファイバー梁要素。
 pub struct FiberBeam {
-    /// 節点間長 L [mm]。
+    /// 節点間長 L `[mm]`。
     pub length: f64,
-    /// 材端の剛域長 λi, λj [mm]。
+    /// 材端の剛域長 λi, λj `[mm]`。
     pub rigid_i: f64,
     pub rigid_j: f64,
-    /// 可撓長 L' = `length` − λi − λj [mm]。
+    /// 可撓長 L' = `length` − λi − λj `[mm]`。
     pub flex_length: f64,
     pub nodes: [NodeId; 2],
     pub gauss_points: Vec<GaussPoint>,
     pub mass_properties: SectionMassProperties,
     pub mass_properties_error: Option<String>,
-    /// ねじり定数 J [mm⁴]。
+    /// ねじり定数 J `[mm⁴]`。
     pub torsion_j: f64,
     /// せん断弾性係数 G [N/mm²]。
     pub g: f64,

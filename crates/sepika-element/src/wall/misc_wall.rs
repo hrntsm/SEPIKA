@@ -286,7 +286,7 @@ pub(crate) fn collect_misc_walls(model: &Model) -> Vec<InFrameMiscWallGeometry> 
 }
 
 /// フレーム内雑壁として周辺部材の断面性能へ剛性算入される壁版の一覧。
-/// [`collect_misc_walls`] の収集結果から引く。
+/// `collect_misc_walls` の収集結果から引く。
 pub fn misc_stiffness_wall_plates(model: &Model) -> Vec<sepika_core::ids::WallPlateId> {
     collect_misc_walls(model)
         .into_iter()

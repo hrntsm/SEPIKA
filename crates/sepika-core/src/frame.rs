@@ -12,7 +12,7 @@ use crate::geom::{best_fit_plane_normal, is_vertical_pair};
 use crate::ids::StoryId;
 use crate::model::{ElementKind, Model};
 
-/// 通り上とみなす、通りからの離れの許容差 [mm]。
+/// 通り上とみなす、通りからの離れの許容差 `[mm]`。
 /// 通り芯の生成（[`crate::axis_gen::AXIS_TOL_MM`]）と同じ値を使う。
 pub const FRAME_TOL_MM: f64 = crate::axis_gen::AXIS_TOL_MM;
 

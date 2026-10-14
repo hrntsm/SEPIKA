@@ -20,15 +20,15 @@ pub enum MultiOpeningMode {
 
 /// 壁の個別開口（耐震壁の複数開口の取り扱い。RC 規準）。
 ///
-/// 寸法は壁面内で定義する: `width`=壁長さ方向の開口長さ l0 [mm]、
-/// `height`=壁高さ方向の開口高さ h0 [mm]。
+/// 寸法は壁面内で定義する: `width`=壁長さ方向の開口長さ l0 `[mm]`、
+/// `height`=壁高さ方向の開口高さ h0 `[mm]`。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WallOpening {
-    /// 開口長さ l0 [mm]（壁長さ方向）。
+    /// 開口長さ l0 `[mm]`（壁長さ方向）。
     pub width: f64,
-    /// 開口高さ h0 [mm]（壁高さ方向）。
+    /// 開口高さ h0 `[mm]`（壁高さ方向）。
     pub height: f64,
-    /// 開口左下の位置 [mm]（壁面内: [壁始端からの水平距離, 壁下端からの高さ]）。
+    /// 開口左下の位置 `[mm]`（壁面内: [壁始端からの水平距離, 壁下端からの高さ]）。
     /// 壁自重の実領域控除・階帯積分と包絡開口に用いる。Noneは位置不定で、
     /// 成分総量が算定可能でも階配分は未算定となる。
     #[serde(default)]
@@ -36,7 +36,7 @@ pub struct WallOpening {
 }
 
 impl WallOpening {
-    /// 開口面積 [mm²]。
+    /// 開口面積 `[mm²]`。
     pub fn area(&self) -> f64 {
         (self.width * self.height).max(0.0)
     }
@@ -88,12 +88,12 @@ impl WallOpening {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WallAttr {
     pub elem: ElemId,
-    /// 開口面積の合計 [mm²]。壁自重から ρ·t·開口面積·g を控除する。
+    /// 開口面積の合計 `[mm²]`。壁自重から ρ·t·開口面積·g を控除する。
     /// `openings`（個別開口）が非空の場合はそちらの面積和を優先し、
     /// 本フィールドは無視される（`total_opening_area` 参照）。
     #[serde(default)]
     pub opening_area: f64,
-    /// 開口部（サッシ等）の重量 [N]。控除後に加算する。
+    /// 開口部（サッシ等）の重量 `[N]`。控除後に加算する。
     #[serde(default)]
     pub opening_weight: f64,
     /// 耐震スリット。
@@ -108,7 +108,7 @@ pub struct WallAttr {
 }
 
 impl WallAttr {
-    /// 開口の合計面積 [mm²]。個別開口 `openings` が非空ならその面積和、
+    /// 開口の合計面積 `[mm²]`。個別開口 `openings` が非空ならその面積和、
     /// 空なら `opening_area` を返す（全消費側はこのメソッドを経由すること）。
     pub fn total_opening_area(&self) -> f64 {
         if self.openings.is_empty() {
@@ -130,7 +130,7 @@ impl WallAttr {
         Self::dims_of(&self.openings_for_mode(mode))
     }
 
-    /// 複数開口の取り扱い（`mode`）適用後の開口合計面積 [mm²]。
+    /// 複数開口の取り扱い（`mode`）適用後の開口合計面積 `[mm²]`。
     /// 包絡モードでは包絡矩形の面積となるため、生の面積和
     /// （`total_opening_area`、自重控除用）とは異なり得る。
     pub fn total_opening_area_for(&self, mode: MultiOpeningMode) -> f64 {
@@ -228,16 +228,16 @@ pub struct SteelDesignAttr {
     /// スカラップによるウェブ欠損率 αw [%]（端部断面に適用）
     #[serde(default)]
     pub scallop_web_loss: f64,
-    /// 横座屈長さの直接入力 (始端, 中央, 終端) [mm]（None=自動）
+    /// 横座屈長さの直接入力 (始端, 中央, 終端) `[mm]`（None=自動）
     #[serde(default)]
     pub lb_direct: Option<(f64, f64, f64)>,
     /// 等間隔横補剛の本数（lb 自動計算: lb = L/(n+1)）
     #[serde(default)]
     pub lateral_brace_count: Option<u32>,
-    /// 強軸まわり座屈長さの直接入力 lk_y [mm]（None=自動算定）
+    /// 強軸まわり座屈長さの直接入力 lk_y `[mm]`（None=自動算定）
     #[serde(default)]
     pub lk_y_direct: Option<f64>,
-    /// 弱軸まわり座屈長さの直接入力 lk_z [mm]（None=自動算定）
+    /// 弱軸まわり座屈長さの直接入力 lk_z `[mm]`（None=自動算定）
     #[serde(default)]
     pub lk_z_direct: Option<f64>,
     /// 横座屈修正係数 C の直接入力（None=自動算定）。
@@ -267,11 +267,11 @@ impl SteelDesignAttr {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BrbAttr {
     pub elem: ElemId,
-    /// 短期許容軸力 [N]（メーカー値）
+    /// 短期許容軸力 `[N]`（メーカー値）
     pub allowable_axial_short: f64,
-    /// 限界座屈長さ [mm]（メーカー値）
+    /// 限界座屈長さ `[mm]`（メーカー値）
     pub critical_length: f64,
-    /// 座屈長さ低減距離 L1 [mm]（= (L1上+L1下)/2）
+    /// 座屈長さ低減距離 L1 `[mm]`（= (L1上+L1下)/2）
     #[serde(default)]
     pub length_reduction: f64,
 }
@@ -306,24 +306,24 @@ pub struct IsolatorProps {
     pub k1: f64,
     /// 水平二次剛性 K2 [N/mm]（積層ゴム系バイリニア。すべり支承は 0）。
     pub k2: f64,
-    /// 降伏（特性）耐力 Qd [N]（積層ゴム系バイリニア）。すべり支承は 0。
+    /// 降伏（特性）耐力 Qd `[N]`（積層ゴム系バイリニア）。すべり支承は 0。
     pub qd: f64,
     /// 鉛直剛性 Kv [N/mm]。
     pub kv: f64,
     /// 摩擦係数 μ（すべり支承。Qmax=μ·N）。
     pub mu: f64,
-    /// 長期軸力 N [N]（摩擦力算定用、圧縮正）。
+    /// 長期軸力 N `[N]`（摩擦力算定用、圧縮正）。
     pub n_long: f64,
     /// マルチシアスプリング本数 n（既定 8、天然ゴム系 2。表示・低減率照合用）。
     pub n_springs: u32,
-    /// ゴム総厚 H [mm]（歪 γ=δ/H の算定用。0 以下で歪依存を無効化）。
+    /// ゴム総厚 H `[mm]`（歪 γ=δ/H の算定用。0 以下で歪依存を無効化）。
     #[serde(default)]
     pub total_rubber_thickness: f64,
     /// 二次剛性の歪依存係数 CKd(γ)=c0+c1·γ+c2·γ²（K2(γ)=K2·CKd(γ)）。
-    /// 既定 [1,0,0]（歪依存なし）。LRB・高減衰ゴムの歪依存（各免震部材の製品技術資料）。
+    /// 既定 `[1,0,0]`（歪依存なし）。LRB・高減衰ゴムの歪依存（各免震部材の製品技術資料）。
     #[serde(default = "default_ckd_gamma")]
     pub ckd_gamma: [f64; 3],
-    /// 特性耐力の歪依存係数 CQd(γ)=c0+c1·γ+c2·γ²（Qd(γ)=Qd·CQd(γ)）。既定 [1,0,0]。
+    /// 特性耐力の歪依存係数 CQd(γ)=c0+c1·γ+c2·γ²（Qd(γ)=Qd·CQd(γ)）。既定 `[1,0,0]`。
     #[serde(default = "default_cqd_gamma")]
     pub cqd_gamma: [f64; 3],
 }
@@ -390,7 +390,7 @@ pub struct DamperProps {
     pub c0: f64,
     /// 速度指数 α（1.0 で線形粘性。マクスウェルのみ）。
     pub alpha: f64,
-    /// 降伏軸力 qy [N]（履歴型のみ）。
+    /// 降伏軸力 qy `[N]`（履歴型のみ）。
     #[serde(default = "default_damper_qy")]
     pub qy: f64,
     /// 第2剛性比 k2/k1（履歴型のみ）。
@@ -453,11 +453,11 @@ pub struct PcaGirderAttr {
     pub pw_joint: f64,
     /// 補強筋の降伏強度 σy [N/mm²]
     pub sigma_y_joint: f64,
-    /// 接合面の位置: 断面上端からの距離 [mm]（例: 後打ちスラブ厚）
+    /// 接合面の位置: 断面上端からの距離 `[mm]`（例: 後打ちスラブ厚）
     pub joint_depth_from_top: f64,
 }
 
-/// 壁の芯々面積へ乗じる内法係数。寸法は境界辺順の柱梁の幅・せい [mm]。
+/// 壁の芯々面積へ乗じる内法係数。寸法は境界辺順の柱梁の幅・せい `[mm]`。
 /// 4節点以外は1、辺の断面が不明ならその辺の控除は0とする。
 pub fn wall_clear_area_factor(pts: &[[f64; 3]], edge_dimensions: &[Option<[f64; 2]>; 4]) -> f64 {
     if pts.len() != 4 {

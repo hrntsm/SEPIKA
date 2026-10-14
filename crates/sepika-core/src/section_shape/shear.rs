@@ -48,7 +48,7 @@ pub fn wall_rectangular_section_properties(
     Some(properties)
 }
 
-/// 連続する区間の（長さ、幅）[mm]から断面性能を求める。図心は最初の区間始点からの距離。
+/// 連続する区間の（長さ、幅）`[mm]`から断面性能を求める。図心は最初の区間始点からの距離。
 /// 同一材料・幅方向対称の断面を前提とし、Q²/bの区分積分でせん断有効断面積を求める。
 /// 空列・非正または非有限の寸法・算定不能な性能値はNone。
 pub fn strip_section_properties(strips: &[[f64; 2]]) -> Option<StripSectionProperties> {

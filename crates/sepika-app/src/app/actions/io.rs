@@ -74,7 +74,7 @@ impl App {
     /// 解析結果を同梱しないときは、振動荷重ケースもモデルから外して書く
     /// （結果のない空ケースがナビに残らないようにする。メモリ上のケースは残す）。
     ///
-    /// 解析結果の直列化サイズが [`SAVE_RECORDING_CONFIRM_BYTES`] を超え、かつ
+    /// 解析結果の直列化サイズが `SAVE_RECORDING_CONFIRM_BYTES` を超え、かつ
     /// 時刻歴の詳細記録（`ThRecording`）を含む場合は、保存せずに確認保留
     /// （`pending_save_recording`）をセットして戻る。確認ダイアログの選択に
     /// 応じて [`Self::save_project_to_opts`] が `Some(true)`（含めて保存）／

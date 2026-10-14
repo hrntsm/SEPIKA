@@ -12,30 +12,30 @@ const KGF_TO_N: f64 = sepika_core::units::GRAVITY_MM_S2 / 1000.0;
 
 /// RC 造耐震壁のせん断トリリニア算定の入力。
 ///
-/// 単位は SI 系（長さ [mm]・面積 [mm²]・応力 [N/mm²]・軸力 [N]）で統一する。
+/// 単位は SI 系（長さ `[mm]`・面積 `[mm²]`・応力 [N/mm²]・軸力 `[N]`）で統一する。
 #[derive(Clone, Copy, Debug)]
 pub struct WallShearTrilinearInput {
     /// 採用するRC壁終局せん断耐力の算定方式。
     pub method: sepika_core::model::RcWallShearMethod,
-    /// 壁高さ（上下梁中心間）[mm]。
+    /// 壁高さ（上下梁中心間）`[mm]`。
     pub wall_height_mm: f64,
-    /// 壁長さ（側柱中心間）[mm]。
+    /// 壁長さ（側柱中心間）`[mm]`。
     pub wall_length_mm: f64,
     /// コンクリート設計基準強度 Fc [N/mm²]。
     pub fc: f64,
-    /// 壁体断面積 Aw [mm²]（側柱＋壁板の軸断面積。Qc・σ0 の基準面積）。
+    /// 壁体断面積 Aw `[mm²]`（側柱＋壁板の軸断面積。Qc・σ0 の基準面積）。
     pub aw: f64,
-    /// 引張側最端の柱 1 本の主筋量 [mm²]（pg = 100·この値/Aw [%]）。
+    /// 引張側最端の柱 1 本の主筋量 `[mm²]`（pg = 100·この値/Aw [%]）。
     pub tension_column_main_area: f64,
-    /// 等価壁厚 te [mm]（I 形断面を等価長方形に置換した幅。壁厚 t の 1.5 倍以下）。
+    /// 等価壁厚 te `[mm]`（I 形断面を等価長方形に置換した幅。壁厚 t の 1.5 倍以下）。
     pub te: f64,
-    /// 壁厚 t [mm]（pwh = Pwh·t/te の換算に用いる）。
+    /// 壁厚 t `[mm]`（pwh = Pwh·t/te の換算に用いる）。
     pub t: f64,
-    /// 付帯柱を含めた耐震壁の全長 D [mm]。
+    /// 付帯柱を含めた耐震壁の全長 D `[mm]`。
     pub d_wall: f64,
-    /// 圧縮側柱のせい Dc [mm]（有効せい d = D − Dc/2）。
+    /// 圧縮側柱のせい Dc `[mm]`（有効せい d = D − Dc/2）。
     pub dc_compression: f64,
-    /// 引張側柱の主筋断面積 at [mm²]（pte = 100·at/(te·d) の分子）。
+    /// 引張側柱の主筋断面積 at `[mm²]`（pte = 100·at/(te·d) の分子）。
     pub tension_column_at: f64,
     /// 水平せん断補強筋（横筋）の材料強度 σwh [N/mm²]。
     pub sigma_wh: f64,
@@ -45,16 +45,16 @@ pub struct WallShearTrilinearInput {
     pub sigma_0: f64,
     /// せん断スパン比 M/(QD)。骨格では有限の正値が必須。
     pub shear_span_ratio: f64,
-    /// 開口 (幅, 高さ, 壁高さ, 柱心距離) [mm]。骨格は None のみ対応。
+    /// 開口 (幅, 高さ, 壁高さ, 柱心距離) `[mm]`。骨格は None のみ対応。
     pub opening: Option<(f64, f64, f64, f64)>,
 }
 
 /// 純せん断のひび割れ・終局点の耐力と終局割線剛性比。
 #[derive(Clone, Copy, Debug)]
 pub struct WallShearTrilinear {
-    /// ひび割れ耐力 [N]。
+    /// ひび割れ耐力 `[N]`。
     pub qc: f64,
-    /// 終局耐力 [N]。
+    /// 終局耐力 `[N]`。
     pub qu: f64,
     /// 終局点の割線剛性/純せん断初期剛性。
     pub beta_s: f64,
@@ -63,7 +63,7 @@ pub struct WallShearTrilinear {
 }
 
 impl WallShearTrilinear {
-    /// 純せん断の初期剛性 [N] に対する (せん断角, Q [N])。不正な剛性・骨格はエラー。
+    /// 純せん断の初期剛性 `[N]` に対する (せん断角, Q `[N]`)。不正な剛性・骨格はエラー。
     pub fn skeleton_points(&self, k_elastic: f64) -> Result<[(f64, f64); 3], String> {
         if !k_elastic.is_finite() || k_elastic <= 0.0 {
             return Err("純せん断初期剛性は有限の正値が必要です".into());
@@ -85,7 +85,7 @@ impl WallShearTrilinear {
         Ok([(0.0, 0.0), (gamma_c, self.qc), (gamma_u, self.qu)])
     }
 
-    /// G [N/mm²]・せん断有効面積 [mm²]・高さ [mm] に対する (せん断変位 [mm], Q [N])。
+    /// G [N/mm²]・せん断有効面積 `[mm²]`・高さ `[mm]` に対する (せん断変位 `[mm]`, Q `[N]`)。
     /// 面積は形状係数を反映済みの純せん断成分。曲げ柔性を含めない。不正入力はエラー。
     pub fn displacement_points(
         &self,
@@ -103,7 +103,7 @@ impl WallShearTrilinear {
     }
 }
 
-/// せん断ひび割れ耐力 [N]。Fc [N/mm²]・Aw [mm²]・側柱主筋面積 [mm²] を用いる。
+/// せん断ひび割れ耐力 `[N]`。Fc [N/mm²]・Aw `[mm²]`・側柱主筋面積 `[mm²]` を用いる。
 /// FcまたはAwが非正の場合は0。
 pub fn wall_shear_crack(inp: &WallShearTrilinearInput) -> f64 {
     if inp.fc <= 0.0 || inp.aw <= 0.0 {
@@ -143,7 +143,7 @@ pub fn wall_shear_opening_reduction(opening: Option<(f64, f64, f64, f64)>) -> f6
     sepika_core::rc_wall_capacity::wall_opening_reduction_strength(opening)
 }
 
-/// 終局せん断耐力 [N]。横筋比は実壁厚基準で入力し、耐力式で等価壁厚換算する。
+/// 終局せん断耐力 `[N]`。横筋比は実壁厚基準で入力し、耐力式で等価壁厚換算する。
 /// 開口低減を含む耐力単体評価。骨格の適用条件は一括算定入口で別途検査する。
 pub fn wall_shear_ultimate(inp: &WallShearTrilinearInput) -> f64 {
     sepika_core::rc_wall_capacity::wall_shear_ultimate(

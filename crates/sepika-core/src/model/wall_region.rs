@@ -37,7 +37,7 @@ impl WallRegion {
         }
     }
 
-    /// 境界多角形の座標列 [mm]。節点が引けない場合は `None`。
+    /// 境界多角形の座標列 `[mm]`。節点が引けない場合は `None`。
     pub fn boundary_coords(&self, model: &Model) -> Option<Vec<[f64; 3]>> {
         self.boundary
             .iter()
@@ -56,7 +56,7 @@ impl WallRegion {
         self.boundary.first().copied()
     }
 
-    /// 境界の面積 [mm²]。座標が引けない場合は 0。
+    /// 境界の面積 `[mm²]`。座標が引けない場合は 0。
     pub fn area(&self, model: &Model) -> f64 {
         self.boundary_coords(model)
             .map(|pts| crate::geom::polygon::area_3d(&pts))
@@ -73,7 +73,7 @@ impl Model {
         }
     }
 
-    /// 壁領域の境界多角形の内側（境界を除く）に点 `p` [mm] があるか。
+    /// 壁領域の境界多角形の内側（境界を除く）に点 `p` `[mm]` があるか。
     /// 境界座標・構面が引けない場合は `false`。
     pub fn wall_region_contains_point(&self, id: WallRegionId, p: [f64; 3]) -> bool {
         use crate::geom::vec3;
@@ -87,7 +87,7 @@ impl Model {
     }
 
     /// 壁領域の境界多角形の内側または境界上（[`crate::geom::MEMBER_AXIS_TOL_MM`] 以内）に
-    /// 点 `p` [mm] があるか。境界座標・構面が引けない場合は `false`。
+    /// 点 `p` `[mm]` があるか。境界座標・構面が引けない場合は `false`。
     pub fn wall_region_contains_point_including_boundary(
         &self,
         id: WallRegionId,

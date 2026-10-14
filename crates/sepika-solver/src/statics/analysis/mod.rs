@@ -1,7 +1,7 @@
 //! 静的解析のファサード [`Analysis`]。
 //!
 //! 基準剛性の分解を固有値・周期と共有し、静的解析はケース種別・応力設定を採用する。
-//! 地震荷重の生成は [`seismic`]、設定型は [`config`]、入力検証は [`precheck`] が受け持つ。
+//! 地震荷重の生成は `seismic`、設定型は `config`、入力検証は [`precheck`] が受け持つ。
 
 use crate::common::assemble::{assemble_global_f, assemble_global_k};
 use crate::common::constraint::Reducer;

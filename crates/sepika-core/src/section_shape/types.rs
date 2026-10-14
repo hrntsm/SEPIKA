@@ -13,7 +13,7 @@ pub enum SectionShape {
         width: f64,
         web_thick: f64,
         flange_thick: f64,
-        /// フィレット半径 [mm]。None は未知、Some(0) は明示した直角。
+        /// フィレット半径 `[mm]`。None は未知、Some(0) は明示した直角。
         root_r: Option<f64>,
     },
     /// Steel rectangular hollow section / box (角形鋼管).
@@ -21,7 +21,7 @@ pub enum SectionShape {
         height: f64,
         width: f64,
         thick: f64,
-        /// 角R [mm]。None は未知、Some(0) は明示した直角。
+        /// 角R `[mm]`。None は未知、Some(0) は明示した直角。
         corner_r: Option<f64>,
     },
     /// Steel L‑angle (山形鋼).
@@ -44,12 +44,12 @@ pub enum SectionShape {
     SteelPipe { outer_dia: f64, thick: f64 },
     /// Steel flat bar / plate (平鋼・鋼板). 中実矩形。
     ///
-    /// `width`: 幅 B [mm]（Z 方向）、`thick`: 板厚 t [mm]（Y 方向＝せい）。
+    /// `width`: 幅 B `[mm]`（Z 方向）、`thick`: 板厚 t `[mm]`（Y 方向＝せい）。
     /// 部材のせい/幅の向きは局所座標（`ref_vector`）で与える。
     SteelFlatBar { width: f64, thick: f64 },
     /// Steel solid round bar (中実丸鋼).
     ///
-    /// `dia`: 直径 D [mm]。
+    /// `dia`: 直径 D `[mm]`。
     SteelRoundBar { dia: f64 },
     /// Steel welded built-up H with unequal flanges (非対称組立 H 形鋼). `StbSecBuild-H`。
     ///
@@ -66,15 +66,15 @@ pub enum SectionShape {
     },
     /// Steel cold-formed lipped channel (リップ溝形鋼). `StbSecRoll-LipC`。
     ///
-    /// `height`: せい H [mm]（Y 方向）、`width`: フランジ幅 B [mm]（Z 方向。ウェブ外面〜
-    /// フランジ先端）、`lip`: リップ長 C [mm]（Y 方向）、`thick`: 板厚 t [mm]（全要素一様）。
+    /// `height`: せい H `[mm]`（Y 方向）、`width`: フランジ幅 B `[mm]`（Z 方向。ウェブ外面〜
+    /// フランジ先端）、`lip`: リップ長 C `[mm]`（Y 方向）、`thick`: 板厚 t `[mm]`（全要素一様）。
     SteelLipChannel {
         height: f64,
         width: f64,
         lip: f64,
         thick: f64,
     },
-    /// RC 梁（実配筋）。`b`: 幅 [mm], `d`: せい [mm]。
+    /// RC 梁（実配筋）。`b`: 幅 `[mm]`, `d`: せい `[mm]`。
     RcBeamRect { b: f64, d: f64, rebar: RcBeamRebar },
     /// RC 矩形柱（実配筋）。
     RcColumnRect {
@@ -109,14 +109,14 @@ pub enum SectionShape {
         height: f64,
         width: f64,
         thick: f64,
-        /// 角R [mm]。None は未知、Some(0) は明示した直角。
+        /// 角R `[mm]`。None は未知、Some(0) は明示した直角。
         corner_r: Option<f64>,
     },
     /// CFT 円形（円形鋼管 + 充填コンクリート）。
     CftPipe { outer_dia: f64, thick: f64 },
     /// RC 耐震壁（壁エレメント用）。
     ///
-    /// `thickness`: 壁板厚 [mm]、`ps`: 壁板の直交する各方向のせん断補強筋比の
+    /// `thickness`: 壁板厚 `[mm]`、`ps`: 壁板の直交する各方向のせん断補強筋比の
     /// うち小さい方（小数。例 0.0025）。`pwh_ratio` は実壁厚に対する横筋比。
     /// `pwv_ratio`: 縦筋面積/(実壁厚×壁長) の小数。方向比の未知は `None`、最小比から推定しない。
     RcWall {
@@ -127,7 +127,7 @@ pub enum SectionShape {
     },
     /// RC スラブ（床）。
     ///
-    /// `thickness`: 板厚 [mm]。
+    /// `thickness`: 板厚 `[mm]`。
     RcSlab { thickness: f64 },
 }
 
@@ -278,17 +278,17 @@ impl SectionShape {
     }
 }
 
-/// 主筋 1 本あたりの断面積 [mm²]。
+/// 主筋 1 本あたりの断面積 `[mm²]`。
 pub fn one_bar_area(dia: f64) -> f64 {
     let r = dia / 2.0;
     std::f64::consts::PI * r * r
 }
 
-/// 主筋セットの総断面積 [mm²]。
+/// 主筋セットの総断面積 `[mm²]`。
 /// RC 梁の実配筋。
 ///
-/// `main_dia`: 主筋径 [mm]（全段共通）。`top`/`bottom`: 上端筋・下端筋の
-/// かぶり側から内側へ数えた段別本数。`cover`: かぶり [mm]。`stirrup`: あばら筋。
+/// `main_dia`: 主筋径 `[mm]`（全段共通）。`top`/`bottom`: 上端筋・下端筋の
+/// かぶり側から内側へ数えた段別本数。`cover`: かぶり `[mm]`。`stirrup`: あばら筋。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RcBeamRebar {
     pub main_dia: f64,
@@ -307,9 +307,9 @@ impl RcBeamRebar {
 
 /// RC 矩形柱の実配筋。
 ///
-/// `main_dia`: 主筋径 [mm]（全段共通）。`x`/`y`: X 方向・Y 方向の段別本数。
+/// `main_dia`: 主筋径 `[mm]`（全段共通）。`x`/`y`: X 方向・Y 方向の段別本数。
 /// 各段は断面中心対称な 2 本の配筋線を 1 段とし、本数は片側 1 線あたり。
-/// `cover`: かぶり [mm]。`hoop`: 帯筋。
+/// `cover`: かぶり `[mm]`。`hoop`: 帯筋。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RcRectColumnRebar {
     pub main_dia: f64,
@@ -328,8 +328,8 @@ impl RcRectColumnRebar {
 
 /// RC 円形柱の実配筋。
 ///
-/// `main_dia`: 主筋径 [mm]。`count`: 主筋総本数（円周上へ等間隔配置）。
-/// `cover`: かぶり [mm]。`hoop`: 帯筋。
+/// `main_dia`: 主筋径 `[mm]`。`count`: 主筋総本数（円周上へ等間隔配置）。
+/// `cover`: かぶり `[mm]`。`hoop`: 帯筋。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RcCircleColumnRebar {
     pub main_dia: f64,
@@ -347,7 +347,7 @@ impl RcCircleColumnRebar {
 
 /// RC 梁のあばら筋。
 ///
-/// `dia`: 径 [mm]。`pitch`: 間隔 [mm]。`legs`: 脚数。
+/// `dia`: 径 `[mm]`。`pitch`: 間隔 `[mm]`。`legs`: 脚数。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BeamStirrup {
     pub dia: f64,
@@ -357,7 +357,7 @@ pub struct BeamStirrup {
 
 /// RC 矩形柱の帯筋。
 ///
-/// `dia`: 径 [mm]。`pitch`: 間隔 [mm]。`legs_x`/`legs_y`: X 方向・Y 方向の脚数。
+/// `dia`: 径 `[mm]`。`pitch`: 間隔 `[mm]`。`legs_x`/`legs_y`: X 方向・Y 方向の脚数。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RectColumnHoop {
     pub dia: f64,
@@ -368,7 +368,7 @@ pub struct RectColumnHoop {
 
 /// RC 円形柱の帯筋。
 ///
-/// `dia`: 径 [mm]。`pitch`: 間隔 [mm]。
+/// `dia`: 径 `[mm]`。`pitch`: 間隔 `[mm]`。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CircleColumnHoop {
     pub dia: f64,
@@ -377,7 +377,7 @@ pub struct CircleColumnHoop {
 
 /// 主筋 1 本の断面内座標。
 ///
-/// `x`: 幅 b 方向 [mm]、`y`: せい d 方向 [mm]。断面中心を原点とする。
+/// `x`: 幅 b 方向 `[mm]`、`y`: せい d 方向 `[mm]`。断面中心を原点とする。
 /// 段別配筋から都度生成する派生値であり、モデルへは保存しない。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RebarPoint {

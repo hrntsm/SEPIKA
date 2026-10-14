@@ -18,11 +18,11 @@ pub enum RectEdge {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SteelSide {
     pub count: usize,
-    /// 主筋面積 [mm²]。
+    /// 主筋面積 `[mm²]`。
     pub area_mm2: f64,
-    /// その面側の縁から重心までの距離 dt [mm]。
+    /// その面側の縁から重心までの距離 dt `[mm]`。
     pub centroid_from_edge_mm: f64,
-    /// 対向縁から重心までの距離（有効せい）[mm]。
+    /// 対向縁から重心までの距離（有効せい）`[mm]`。
     pub effective_depth_mm: f64,
 }
 
@@ -192,7 +192,7 @@ fn line_bar_coords(
 }
 
 impl RcBeamRebar {
-    /// 実鉄筋座標 [mm] を生成する。未入力（`is_unset`）なら空。
+    /// 実鉄筋座標 `[mm]` を生成する。未入力（`is_unset`）なら空。
     ///
     /// 生成できない配置は [`RebarGeometryError`] を返す。
     pub fn bar_positions(&self, b: f64, d: f64) -> Result<Vec<RebarPoint>, RebarGeometryError> {
@@ -279,47 +279,47 @@ impl RcBeamRebar {
 }
 
 impl RcBeamRebar {
-    /// 上端筋の段別面積 [mm²]。未入力なら空。
+    /// 上端筋の段別面積 `[mm²]`。未入力なら空。
     pub fn layer_areas_top(&self) -> Vec<f64> {
         layer_areas(&self.top, self.main_dia)
     }
 
-    /// 下端筋の段別面積 [mm²]。未入力なら空。
+    /// 下端筋の段別面積 `[mm²]`。未入力なら空。
     pub fn layer_areas_bottom(&self) -> Vec<f64> {
         layer_areas(&self.bottom, self.main_dia)
     }
 
-    /// 上端筋の総面積 [mm²]。
+    /// 上端筋の総面積 `[mm²]`。
     pub fn top_area(&self) -> f64 {
         self.layer_areas_top().iter().sum()
     }
 
-    /// 下端筋の総面積 [mm²]。
+    /// 下端筋の総面積 `[mm²]`。
     pub fn bottom_area(&self) -> f64 {
         self.layer_areas_bottom().iter().sum()
     }
 
-    /// 上端筋の縁からの重心距離 dt [mm]。主筋がなければ 0。
+    /// 上端筋の縁からの重心距離 dt `[mm]`。主筋がなければ 0。
     pub fn top_centroid_from_edge(&self) -> f64 {
         centroid_from_edge(&self.top, self.main_dia, self.cover, self.stirrup.dia)
     }
 
-    /// 下端筋の縁からの重心距離 dt [mm]。主筋がなければ 0。
+    /// 下端筋の縁からの重心距離 dt `[mm]`。主筋がなければ 0。
     pub fn bottom_centroid_from_edge(&self) -> f64 {
         centroid_from_edge(&self.bottom, self.main_dia, self.cover, self.stirrup.dia)
     }
 
-    /// 上端筋側の有効せい d − dt [mm]。
+    /// 上端筋側の有効せい d − dt `[mm]`。
     pub fn top_effective_depth(&self, d: f64) -> f64 {
         d - self.top_centroid_from_edge()
     }
 
-    /// 下端筋側の有効せい d − dt [mm]。
+    /// 下端筋側の有効せい d − dt `[mm]`。
     pub fn bottom_effective_depth(&self, d: f64) -> f64 {
         d - self.bottom_centroid_from_edge()
     }
 
-    /// 上下主筋の総面積 [mm²]。
+    /// 上下主筋の総面積 `[mm²]`。
     pub fn total_main_area(&self) -> f64 {
         let count: usize = self
             .top
@@ -347,7 +347,7 @@ impl RcBeamRebar {
         }
     }
 
-    /// あばら筋 1 組（`legs` 本）の断面積 Aw [mm²]。
+    /// あばら筋 1 組（`legs` 本）の断面積 Aw `[mm²]`。
     pub fn aw_mm2(&self) -> f64 {
         self.stirrup.legs as f64 * one_bar_area(self.stirrup.dia)
     }
@@ -362,7 +362,7 @@ impl RcBeamRebar {
 }
 
 impl RcRectColumnRebar {
-    /// 実鉄筋座標 [mm] を生成する。未入力（`is_unset`）なら空。
+    /// 実鉄筋座標 `[mm]` を生成する。未入力（`is_unset`）なら空。
     ///
     /// 生成できない配置は [`RebarGeometryError`] を返す。
     pub fn bar_positions(&self, b: f64, d: f64) -> Result<Vec<RebarPoint>, RebarGeometryError> {
@@ -486,7 +486,7 @@ impl RcRectColumnRebar {
 }
 
 impl RcRectColumnRebar {
-    /// 重複のない実鉄筋本数を主筋総面積へ換算した値 [mm²]。未入力なら 0。
+    /// 重複のない実鉄筋本数を主筋総面積へ換算した値 `[mm²]`。未入力なら 0。
     pub fn total_main_area(&self) -> f64 {
         let nx = self.x.len();
         let ny = self.y.len();
@@ -496,22 +496,22 @@ impl RcRectColumnRebar {
         unique as f64 * one_bar_area(self.main_dia)
     }
 
-    /// X 方向段に載る主筋の総面積 [mm²]（`2・Σx・A1`）。未入力なら 0。
+    /// X 方向段に載る主筋の総面積 `[mm²]`（`2・Σx・A1`）。未入力なら 0。
     pub fn x_direction_area_mm2(&self) -> f64 {
         2.0 * self.x.iter().map(|&c| c as f64).sum::<f64>() * one_bar_area(self.main_dia)
     }
 
-    /// Y 方向段に載る主筋の総面積 [mm²]（`2・Σy・A1`）。未入力なら 0。
+    /// Y 方向段に載る主筋の総面積 `[mm²]`（`2・Σy・A1`）。未入力なら 0。
     pub fn y_direction_area_mm2(&self) -> f64 {
         2.0 * self.y.iter().map(|&c| c as f64).sum::<f64>() * one_bar_area(self.main_dia)
     }
 
-    /// X 方向の帯筋 1 組（`legs_x` 本）の断面積 Aw [mm²]。
+    /// X 方向の帯筋 1 組（`legs_x` 本）の断面積 Aw `[mm²]`。
     pub fn aw_x_mm2(&self) -> f64 {
         self.hoop.legs_x as f64 * one_bar_area(self.hoop.dia)
     }
 
-    /// Y 方向の帯筋 1 組（`legs_y` 本）の断面積 Aw [mm²]。
+    /// Y 方向の帯筋 1 組（`legs_y` 本）の断面積 Aw `[mm²]`。
     pub fn aw_y_mm2(&self) -> f64 {
         self.hoop.legs_y as f64 * one_bar_area(self.hoop.dia)
     }
@@ -519,7 +519,7 @@ impl RcRectColumnRebar {
     /// 指定した辺の最外段 1 列の主筋諸元。未入力（`is_unset`）なら全項目 0。
     ///
     /// `Top`/`Bottom` は `x` の最外段を `d` で、`Left`/`Right` は `y` の最外段を `b` で評価する。
-    /// 重心距離はかぶり + 帯筋径 + 主筋径/2 [mm]、有効せいは辺長からその距離を引いた値 [mm]。
+    /// 重心距離はかぶり + 帯筋径 + 主筋径/2 `[mm]`、有効せいは辺長からその距離を引いた値 `[mm]`。
     pub fn edge_steel(&self, edge: RectEdge, b: f64, d: f64) -> SteelSide {
         if self.is_unset() {
             return SteelSide {
@@ -545,7 +545,7 @@ impl RcRectColumnRebar {
 }
 
 impl RcCircleColumnRebar {
-    /// 実鉄筋座標 [mm] を生成する。未入力（`is_unset`）なら空。
+    /// 実鉄筋座標 `[mm]` を生成する。未入力（`is_unset`）なら空。
     ///
     /// 生成できない配置は [`RebarGeometryError`] を返す。
     pub fn bar_positions(&self, d: f64) -> Result<Vec<RebarPoint>, RebarGeometryError> {
@@ -592,17 +592,17 @@ impl RcCircleColumnRebar {
 }
 
 impl RcCircleColumnRebar {
-    /// 主筋総本数 [本]。
+    /// 主筋総本数 `[本]`。
     pub fn main_count(&self) -> u32 {
         self.count
     }
 
-    /// 主筋総面積 [mm²]。
+    /// 主筋総面積 `[mm²]`。
     pub fn total_main_area(&self) -> f64 {
         self.count as f64 * one_bar_area(self.main_dia)
     }
 
-    /// 等価正方形断面の辺長 [mm]（`sqrt(π・d²/4)`）。`d<=0` は 0。
+    /// 等価正方形断面の辺長 `[mm]`（`sqrt(π・d²/4)`）。`d<=0` は 0。
     pub fn equivalent_square_side_mm(&self, d: f64) -> f64 {
         if d <= 0.0 {
             return 0.0;
@@ -610,7 +610,7 @@ impl RcCircleColumnRebar {
         (std::f64::consts::PI * d * d / 4.0).sqrt()
     }
 
-    /// 引張側 1 辺の鉄筋量 [mm²]（全主筋量の 1/4）。未入力なら 0。
+    /// 引張側 1 辺の鉄筋量 `[mm²]`（全主筋量の 1/4）。未入力なら 0。
     pub fn equivalent_tension_area_mm2(&self) -> f64 {
         if self.is_unset() {
             return 0.0;
@@ -618,7 +618,7 @@ impl RcCircleColumnRebar {
         self.total_main_area() / 4.0
     }
 
-    /// 等価正方形断面の有効せい [mm]（辺長 − かぶり − 帯筋径 − 主筋径/2）。主筋なし・0 未満は 0。
+    /// 等価正方形断面の有効せい `[mm]`（辺長 − かぶり − 帯筋径 − 主筋径/2）。主筋なし・0 未満は 0。
     pub fn equivalent_effective_depth_mm(&self, d: f64) -> f64 {
         if self.is_unset() {
             return 0.0;
@@ -627,7 +627,7 @@ impl RcCircleColumnRebar {
         (self.equivalent_square_side_mm(d) - k0).max(0.0)
     }
 
-    /// 円形帯筋 1 組（閉鎖フープ、検討方向あたり 2 本）の断面積 Aw [mm²]。未入力なら 0。
+    /// 円形帯筋 1 組（閉鎖フープ、検討方向あたり 2 本）の断面積 Aw `[mm²]`。未入力なら 0。
     pub fn aw_mm2(&self) -> f64 {
         if self.is_unset() {
             return 0.0;

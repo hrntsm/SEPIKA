@@ -31,7 +31,7 @@ use sepika_math::sparse::sparse_matvec;
 /// 自由振動（地震波なし）の場合は `wave.accel_x` をゼロ埋めして呼ぶ。
 /// `newmark.dt == 0.0` のときは `wave.dt` を採用する。
 /// `record_every` は詳細記録（[`super::ThRecording`]）の間引き係数。`None` は
-/// 自動決定（[`super::recording::auto_record_every`]）。
+/// 自動決定（`super::recording::auto_record_every`）。
 #[allow(clippy::too_many_arguments)]
 pub fn linear_time_history_analysis(
     model: &Model,

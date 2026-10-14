@@ -18,9 +18,9 @@ use crate::{CheckComponent, CheckKind, CheckResult};
 
 /// 冷間成形角形鋼管柱の柱梁耐力比チェックの入力。
 pub struct ColdFormedInput {
-    /// 上柱の塑性断面係数 Zp [mm³]。
+    /// 上柱の塑性断面係数 Zp `[mm³]`。
     pub zp_col_upper: f64,
-    /// 下柱の塑性断面係数 Zp [mm³]。
+    /// 下柱の塑性断面係数 Zp `[mm³]`。
     pub zp_col_lower: f64,
     /// 上柱の基準強度 F [N/mm²]。
     pub f_col_upper: f64,
@@ -94,13 +94,13 @@ fn nu_factor(n: f64) -> f64 {
     }
 }
 
-/// 角形鋼管の塑性断面係数 Zp [mm³]（中空矩形断面、軸まわり曲げ）。
+/// 角形鋼管の塑性断面係数 Zp `[mm³]`（中空矩形断面、軸まわり曲げ）。
 ///
 /// `Zp = b・h²/4 − (b − 2t)・(h − 2t)²/4`
 ///
-/// - `h`: 曲げ軸方向のせい [mm]
-/// - `b`: 曲げ軸と直交する方向の幅 [mm]
-/// - `t`: 管厚 [mm]
+/// - `h`: 曲げ軸方向のせい `[mm]`
+/// - `b`: 曲げ軸と直交する方向の幅 `[mm]`
+/// - `t`: 管厚 `[mm]`
 pub fn box_zp(h: f64, b: f64, t: f64) -> f64 {
     b * h * h / 4.0 - (b - 2.0 * t) * (h - 2.0 * t) * (h - 2.0 * t) / 4.0
 }

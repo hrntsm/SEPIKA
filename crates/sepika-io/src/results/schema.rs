@@ -60,7 +60,7 @@ pub fn member_force_schema() -> Arc<Schema> {
 }
 
 /// 部材内力（評価位置別）を RecordBatch 化する。
-/// `rows`: (要素ID, 評価位置 0..1, [N,Qy,Qz,Mx,My,Mz])
+/// `rows`: (要素ID, 評価位置 0..1, `[N,Qy,Qz,Mx,My,Mz]`)
 pub fn member_force_batch(rows: &[(u32, f64, [f64; 6])]) -> arrow::error::Result<RecordBatch> {
     let n = rows.len();
     let mut elem = Vec::with_capacity(n);

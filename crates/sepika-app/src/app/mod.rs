@@ -157,7 +157,7 @@ pub enum StaticTarget {
 }
 
 /// 未設定の割当領域の確認待ちになっている解析実行。利用者が続行を選んだら
-/// [`App::resume_pending_analysis`] が同じ解析を起動し直す。
+/// `App::resume_pending_analysis` が同じ解析を起動し直す。
 pub enum PendingAnalysis {
     /// 静的解析の単体実行（荷重ケースまたは荷重組合せ）。
     StaticTarget(StaticTarget),
@@ -848,7 +848,7 @@ pub struct AppCore {
     /// 告示「耐力壁の種別」表は壁式構造で限界値が厳しい（τu/Fc: WA 0.1・WB 0.125・
     /// WC 0.15）。既定は false（壁式構造以外: WA 0.20・WB 0.25）。
     pub wall_structure: bool,
-    /// 終局検定（靭性保証型耐震設計指針）のヒンジ回転角 Rp [rad]（ν・cotφ 用。既定 0）。
+    /// 終局検定（靭性保証型耐震設計指針）のヒンジ回転角 Rp `[rad]`（ν・cotφ 用。既定 0）。
     pub ultimate_rp: f64,
     /// 終局検定で軽量コンクリートのせん断終局耐力 0.9 倍低減を適用するか。
     pub ultimate_lightweight: bool,
@@ -932,7 +932,7 @@ pub struct ModelScoped {
     /// stale 警告なしに表示される（受信側 `Receiver` の破棄だけでよい。ワーカー
     /// スレッドの送信は失敗して静かに終了する）。
     pub job: Option<AnalysisJob>,
-    /// 保存サイズ超過時の保存保留（保存先パス, 解析結果の直列化サイズ [MB]）。
+    /// 保存サイズ超過時の保存保留（保存先パス, 解析結果の直列化サイズ `[MB]`）。
     /// セットされている間は「時刻歴の詳細記録を保存に含めますか？」の確認
     /// ダイアログを表示し、選択に応じて含めて保存／除外して保存／キャンセル。
     ///
@@ -1119,7 +1119,7 @@ pub struct UiModelScoped {
     /// 時刻歴モードの再生中フラグ（ON でフレームを自動で進める）。
     #[cfg(feature = "gui")]
     pub th_playing: bool,
-    /// 時刻歴モードの再生経過時刻 [s]（`ThRecording::frame_time` に基づき現在
+    /// 時刻歴モードの再生経過時刻 `[s]`（`ThRecording::frame_time` に基づき現在
     /// フレームを決定する。スライダー操作時は選択フレームの時刻に同期する）。
     #[cfg(feature = "gui")]
     pub th_play_time: f64,

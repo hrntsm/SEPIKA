@@ -132,7 +132,7 @@ impl SteelBuckling {
 
     /// 骨格（モーメント-回転）の折れ点
     /// `[[0,0],[θy,mp],[θu,mu],[θstatic,mu],[θres,mu_res*mu]]`
-    /// （`θy = mp/k1`、回転角 [rad]）。
+    /// （`θy = mp/k1`、回転角 `[rad]`）。
     pub fn skeleton_points(&self) -> Vec<[f64; 2]> {
         let theta_y = self.mp / self.k1;
         vec![

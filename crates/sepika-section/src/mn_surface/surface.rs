@@ -8,9 +8,9 @@ pub struct MnSurface {
     pub kind: YieldModelKind,
     /// (n_alpha+1) × n_beta の格子点 [N, My, Mz]（周方向は j=0 と j=n_beta が接続）
     pub grid: Vec<Vec<[f64; 3]>>,
-    /// 圧縮軸耐力 [N]（負値）
+    /// 圧縮軸耐力 `[N]`（負値）
     pub n_comp: f64,
-    /// 引張軸耐力 [N]（正値）
+    /// 引張軸耐力 `[N]`（正値）
     pub n_tens: f64,
     /// N=0 での y 軸まわり全塑性モーメント [N·mm]
     pub mp_y: f64,

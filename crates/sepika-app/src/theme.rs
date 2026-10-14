@@ -88,7 +88,7 @@ pub fn lighten(c: Color32, t: f32) -> Color32 {
 /// セル内の文字が枠線に接して窮屈に見えるため、視認性のために少し余裕を持たせる。
 const TABLE_ROW_PADDING_PX: f32 = 3.0;
 
-/// テーブルの標準行高。本文フォントの行高＋ [`TABLE_ROW_PADDING_PX`]。
+/// テーブルの標準行高。本文フォントの行高＋ `TABLE_ROW_PADDING_PX`。
 /// 固定 px 値（旧 18px 等）では日本語フォントの行高（Body 13pt で約 19px）に足りず
 /// 文字の下側が見切れるため、実測から算定する。ヘッダにも同じ値を使う。
 pub fn table_row_height(ui: &egui::Ui) -> f32 {

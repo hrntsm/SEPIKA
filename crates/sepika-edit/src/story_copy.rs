@@ -50,7 +50,7 @@ use sepika_core::model::{
 };
 use std::collections::{HashMap, HashSet};
 
-/// 同じ平面位置とみなす座標差 [mm]。
+/// 同じ平面位置とみなす座標差 `[mm]`。
 pub const PLAN_TOL_MM: f64 = 1.0;
 
 /// 複製する対象。ダイアログのチェックボックスに対応する。

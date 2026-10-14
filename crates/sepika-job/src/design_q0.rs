@@ -154,7 +154,7 @@ where
     })
 }
 
-/// 選択重力termsの部材荷重からQD1専用Q0 [N] を算定する。FEMのQLとは区別する。
+/// 選択重力termsの部材荷重からQD1専用Q0 `[N]` を算定する。FEMのQLとは区別する。
 pub fn simple_beam_q0_by_terms(model: &Model, terms: &[(LoadCaseId, f64)]) -> HashMap<ElemId, f64> {
     let mut map = HashMap::new();
     for (id, factor) in terms {
@@ -165,7 +165,7 @@ pub fn simple_beam_q0_by_terms(model: &Model, terms: &[(LoadCaseId, f64)]) -> Ha
     map
 }
 
-/// 1 荷重ケースの部材荷重から、単純梁支持の端部せん断 Q0 [N] を算定する。
+/// 1 荷重ケースの部材荷重から、単純梁支持の端部せん断 Q0 `[N]` を算定する。
 /// Q0 は両端反力の大きい方。
 pub fn simple_beam_q0_by_elem(model: &Model, lc: LoadCaseId) -> HashMap<ElemId, f64> {
     let mut acc: HashMap<ElemId, (f64, f64)> = HashMap::new();
@@ -231,7 +231,7 @@ pub fn simple_beam_q0_by_elem(model: &Model, lc: LoadCaseId) -> HashMap<ElemId, 
         .collect()
 }
 
-/// 検定用G+Pの部材荷重からQD1専用の単純梁Q0 [N] を加算する。FEMのQLとは異なる。
+/// 検定用G+Pの部材荷重からQD1専用の単純梁Q0 `[N]` を加算する。FEMのQLとは異なる。
 pub fn simple_beam_q0_by_gravity_cases(model: &Model) -> HashMap<ElemId, f64> {
     let mut map: HashMap<ElemId, f64> = HashMap::new();
     for lc in gravity_case_ids_for_design(model) {

@@ -29,7 +29,7 @@
 //!
 //! 生成した壁要素ごとに、由来する `WallPlate` の開口・スリットを写した
 //! `WallAttr` を壁展開モデルの `wall_attrs` へ合成して積む。既存の壁消費者
-//! （自重算定 [`crate::story_gen::self_weight_calc`]、開口低減・剛性
+//! （自重算定 `crate::story_gen::self_weight_calc`、開口低減・剛性
 //! （`sepika_element::factory::wall_opening`）、偏心率の雑壁剛性、数量拾い等、
 //! 現時点で 9 箇所ほど）はいずれも `model.wall_attrs.iter().find(|a| a.elem ==
 //! data.id)` という同じ形の参照を持つ。壁展開モデルにこの合成 `wall_attrs` を

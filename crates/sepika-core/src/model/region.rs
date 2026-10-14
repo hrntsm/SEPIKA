@@ -88,7 +88,7 @@ impl Model {
             .find(|r| r.secondary_beams.iter().any(|j| j.id == id))
     }
 
-    /// 床領域の境界多角形の内側（境界を除く）に点 `p` [mm] があるか。
+    /// 床領域の境界多角形の内側（境界を除く）に点 `p` `[mm]` があるか。
     /// 境界座標やレベルが引けない場合は `false`。
     pub fn floor_region_contains_point(&self, id: FloorRegionId, p: [f64; 3]) -> bool {
         let Some((poly, z)) = self.floor_region_polygon(id) else {
@@ -101,7 +101,7 @@ impl Model {
     }
 
     /// 床領域の境界多角形の内側または境界上（[`crate::geom::MEMBER_AXIS_TOL_MM`] 以内）に
-    /// 点 `p` [mm] があるか。境界座標やレベルが引けない場合は `false`。
+    /// 点 `p` `[mm]` があるか。境界座標やレベルが引けない場合は `false`。
     pub fn floor_region_contains_point_including_boundary(
         &self,
         id: FloorRegionId,
@@ -144,7 +144,7 @@ impl FloorRegion {
         }
     }
 
-    /// 境界多角形の座標列 [mm]。節点が引けない場合は `None`。
+    /// 境界多角形の座標列 `[mm]`。節点が引けない場合は `None`。
     pub fn boundary_coords(&self, model: &Model) -> Option<Vec<[f64; 3]>> {
         self.boundary
             .iter()
@@ -163,7 +163,7 @@ impl FloorRegion {
         self.boundary.first().copied()
     }
 
-    /// 領域のレベル Z [mm]（境界座標の Z の平均）。境界が引けなければ `None`。
+    /// 領域のレベル Z `[mm]`（境界座標の Z の平均）。境界が引けなければ `None`。
     pub fn level(&self, model: &Model) -> Option<f64> {
         let coords = self.boundary_coords(model)?;
         if coords.is_empty() {

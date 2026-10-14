@@ -64,7 +64,7 @@ impl EditCommand for RestoreAssignmentTopology {
     }
 }
 
-/// 節点座標 [mm] と全長追従の区間を変更する。Manual荷重を保持できない最終座標は編集全体を拒否する。
+/// 節点座標 `[mm]` と全長追従の区間を変更する。Manual荷重を保持できない最終座標は編集全体を拒否する。
 pub struct SetNodeCoord {
     pub node: NodeId,
     pub coord: [f64; 3],

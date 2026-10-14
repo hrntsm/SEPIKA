@@ -20,9 +20,9 @@ use super::story_columns::story_columns;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ColumnDrift {
     pub elem: ElemId,
-    /// 柱頭の平面位置 (x, y) [mm]。
+    /// 柱頭の平面位置 (x, y) `[mm]`。
     pub pos: [f64; 2],
-    /// 層間変位 δ = |上端床変位 − 下端床変位| [mm]（加力方向の水平成分）。
+    /// 層間変位 δ = |上端床変位 − 下端床変位| `[mm]`（加力方向の水平成分）。
     pub drift: f64,
 }
 
@@ -71,7 +71,7 @@ pub fn column_drifts(
     out
 }
 
-/// 当該層の柱の層間変位の最大値 `max(δ1, δ2, …, δn)` [mm]（層間変形角の式の分子）。
+/// 当該層の柱の層間変位の最大値 `max(δ1, δ2, …, δn)` `[mm]`（層間変形角の式の分子）。
 /// 柱がない（または全て斜め柱の）層は `None`。
 pub fn max_column_drift(
     model: &Model,
@@ -84,7 +84,7 @@ pub fn max_column_drift(
         .max_by(|a, b| a.drift.total_cmp(&b.drift))
 }
 
-/// 当該層の重心位置の水平変位 [mm]（加力方向）。
+/// 当該層の重心位置の水平変位 `[mm]`（加力方向）。
 ///
 /// 剛床の並進＋回転を仮定すると質量重み付き平均変位は重心位置の変位に一致する
 /// （u_i = u_g + θ×(r_i − r_g) の質量加重平均は u_g）。質量未定義の節点は重み 0、
@@ -108,7 +108,7 @@ pub fn cog_horizontal_disp(model: &Model, disp: &[[f64; 6]], dir: usize, story: 
     }
 }
 
-/// 全層の「重心位置の層間変位」δg [mm]（下層→上層順）。
+/// 全層の「重心位置の層間変位」δg `[mm]`（下層→上層順）。
 /// `iδg = 上端の階の重心位置変位 − 下端の階の重心位置変位`。
 ///
 /// 最下層の下端は基部の階であり、その**実変位**を用いる。基部を変位 0 と

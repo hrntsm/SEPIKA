@@ -37,18 +37,18 @@ pub struct JobParams {
     pub dir: JobDir,
     /// 最大ステップ数。
     pub steps: usize,
-    /// 目標変位 [mm]。
+    /// 目標変位 `[mm]`。
     pub max_disp: Option<f64>,
     /// 目標最大層間変形角の分母 n（既定 150）。
     pub max_drift_denom: Option<f64>,
     /// 明示する Ds 判定 / 保有耐力比較の確定 step。未指定は未判定。
     pub ds_step: Option<u32>,
     pub capacity_step: Option<u32>,
-    /// サンプル波の時間刻み [s]。
+    /// サンプル波の時間刻み `[s]`。
     pub dt: f64,
-    /// サンプル波の継続時間 [s]。
+    /// サンプル波の継続時間 `[s]`。
     pub duration: f64,
-    /// サンプル波の周期 [s]。
+    /// サンプル波の周期 `[s]`。
     pub period: f64,
     /// サンプル波の振幅 [mm/s²]。
     pub amp: f64,
@@ -60,7 +60,7 @@ pub struct JobParams {
     pub c0: f64,
     /// Ai 算定法。
     pub ai_mode: AiMode,
-    /// 精算時の設計用基本周期 T [s]。
+    /// 精算時の設計用基本周期 T `[s]`。
     pub design_period: Option<f64>,
 }
 

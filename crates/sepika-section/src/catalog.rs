@@ -61,23 +61,23 @@ pub struct CatalogEntry {
     pub family: String,
     /// CSV の `name` 列（例: "H-400x200x9x12x13"）。
     pub name: String,
-    /// せい／外径 [mm]
+    /// せい／外径 `[mm]`
     pub depth: f64,
-    /// 幅 [mm]（丸鋼管は外径と同じ）
+    /// 幅 `[mm]`（丸鋼管は外径と同じ）
     pub width: f64,
-    /// 断面積 [mm²]
+    /// 断面積 `[mm²]`
     pub area: f64,
-    /// せん断断面積（y方向せん断＝弱軸曲げ Iz 用）[mm²]
+    /// せん断断面積（y方向せん断＝弱軸曲げ Iz 用）`[mm²]`
     pub as_y: f64,
-    /// せん断断面積（z方向せん断＝強軸曲げ Iy 用。H形ではウェブ）[mm²]
+    /// せん断断面積（z方向せん断＝強軸曲げ Iy 用。H形ではウェブ）`[mm²]`
     pub as_z: f64,
-    /// 強軸断面二次モーメント [mm⁴]
+    /// 強軸断面二次モーメント `[mm⁴]`
     pub iy: f64,
-    /// 弱軸断面二次モーメント [mm⁴]
+    /// 弱軸断面二次モーメント `[mm⁴]`
     pub iz: f64,
-    /// ねじり定数 [mm⁴]
+    /// ねじり定数 `[mm⁴]`
     pub j: f64,
-    /// H のフィレット半径、Box の角R [mm]。
+    /// H のフィレット半径、Box の角R `[mm]`。
     pub radius: Option<f64>,
 }
 

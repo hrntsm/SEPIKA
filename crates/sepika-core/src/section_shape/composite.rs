@@ -15,7 +15,7 @@ use super::types::SectionShape;
 /// 等価値。質量算定用の断面積（`calc_area`）とは区別して用いること。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CompositeProps {
-    /// 軸剛性用断面積 [mm²]
+    /// 軸剛性用断面積 `[mm²]`
     pub area_ax: f64,
     pub iy: f64,
     pub iz: f64,
@@ -175,17 +175,17 @@ impl SectionShape {
 /// 片方だけ式を直せば静かに食い違うため、算定はここ 1 か所に置く。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CftCoreProps {
-    /// 内法幅 [mm]（角形は `幅 − 2t`、円形は内法径 `外径 − 2t`）。
+    /// 内法幅 `[mm]`（角形は `幅 − 2t`、円形は内法径 `外径 − 2t`）。
     pub inner_width: f64,
-    /// 内法せい [mm]（角形は `せい − 2t`、円形は内法径）。
+    /// 内法せい `[mm]`（角形は `せい − 2t`、円形は内法径）。
     pub inner_height: f64,
-    /// 充填コンクリートの断面積 [mm²]。
+    /// 充填コンクリートの断面積 `[mm²]`。
     pub area: f64,
-    /// 強軸（せい方向まわり）の断面二次モーメント [mm⁴]。
+    /// 強軸（せい方向まわり）の断面二次モーメント `[mm⁴]`。
     pub iy: f64,
-    /// 弱軸（幅方向まわり）の断面二次モーメント [mm⁴]。円形は `iy` と同値。
+    /// 弱軸（幅方向まわり）の断面二次モーメント `[mm⁴]`。円形は `iy` と同値。
     pub iz: f64,
-    /// St.Venant ねじり定数 [mm⁴]。
+    /// St.Venant ねじり定数 `[mm⁴]`。
     pub j: f64,
 }
 

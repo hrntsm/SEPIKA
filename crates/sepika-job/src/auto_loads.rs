@@ -15,7 +15,7 @@ use sepika_solver::statics::analysis::{self, AiMode, SeismicDir};
 
 use crate::settings::AnalysisSettings;
 
-/// 先端辺の線荷重 [N/mm] を、ケース ID ごとの実梁区間 [mm] の等分布荷重に変換する。
+/// 先端辺の線荷重 [N/mm] を、ケース ID ごとの実梁区間 `[mm]` の等分布荷重に変換する。
 /// 不正な取付き幾何・参照・支持先は共通の床板 ID と理由付きで拒否する。
 pub fn compute_tip_loads(
     model: &Model,

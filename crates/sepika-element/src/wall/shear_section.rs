@@ -312,7 +312,7 @@ fn wall_intersections(p: Primitive, [a, b]: [f64; 2], thickness: f64) -> Vec<f64
     result
 }
 
-/// 壁と側柱の重複を控除した面内せん断剛性 [N]。入力不備・積分未収束は理由を返す。
+/// 壁と側柱の重複を控除した面内せん断剛性 `[N]`。入力不備・積分未収束は理由を返す。
 pub fn wall_shear_rigidity(data: &ElementData, model: &Model) -> Result<f64, String> {
     WallSection::new(data, model)?
         .properties()

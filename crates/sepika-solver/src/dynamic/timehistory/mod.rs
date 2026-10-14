@@ -4,13 +4,13 @@
 //! 基盤一様加振（相対変位形式）: `M·ü + C·u̇ + K·u = −M·r·ẍg(t)`。
 //!
 //! 責務ごとにサブモジュールへ分割している:
-//! - [`config`] — 入力設定（NewmarkCfg / GroundMotion）
-//! - [`result`] — 結果型（ResponseResult / ResponseHistory / TimeStepState）
-//! - [`common`] — 積分スキーム共通の下位ルーチン
-//! - [`history`] — 代表応答記録・層間変形角集計
-//! - [`recording`] — 詳細記録（[`ThRecording`]）の組立（層別集計・部材内力包絡・間引き）
-//! - [`linear`] — 線形時刻歴（Newmark-β 法）
-//! - [`nonlinear`] — 非線形時刻歴（Newton 反復 + commit/rollback）
+//! - `config` — 入力設定（NewmarkCfg / GroundMotion）
+//! - `result` — 結果型（ResponseResult / ResponseHistory / TimeStepState）
+//! - `common` — 積分スキーム共通の下位ルーチン
+//! - `history` — 代表応答記録・層間変形角集計
+//! - `recording` — 詳細記録（[`ThRecording`]）の組立（層別集計・部材内力包絡・間引き）
+//! - `linear` — 線形時刻歴（Newmark-β 法）
+//! - `nonlinear` — 非線形時刻歴（Newton 反復 + commit/rollback）
 
 mod common;
 mod config;

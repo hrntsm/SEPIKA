@@ -59,9 +59,9 @@ impl LumpedStiffnessSource {
 pub struct StorySpatial {
     /// 回転慣性 J [t·mm²]（質量重心まわり。物理質量分布から直接算定）。
     pub j: f64,
-    /// 質量重心 (x, y) [mm]。
+    /// 質量重心 (x, y) `[mm]`。
     pub mass_xy: [f64; 2],
-    /// 剛心 (x, y) [mm]。
+    /// 剛心 (x, y) `[mm]`。
     pub rigidity_xy: [f64; 2],
     /// X 方向初期剛性 [N/mm]。
     pub k1_x: f64,
@@ -80,7 +80,7 @@ pub struct StorySpatial {
 pub struct StoryTrilinear {
     /// 初期剛性 K1 [N/mm]。
     pub k1: f64,
-    /// 第1折点 (δ1[mm], Q1[N])。
+    /// 第1折点 (δ1`[mm]`, Q1`[N]`)。
     pub d1: f64,
     pub q1: f64,
     /// 第2折点 (δ2, Q2)。
@@ -130,9 +130,9 @@ impl StoryTrilinear {
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StoryStick {
     pub story: StoryId,
-    /// 質量 [t]（= 物理質量相当重量 / g）。
+    /// 質量 `[t]`（= 物理質量相当重量 / g）。
     pub mass: f64,
-    /// 階高 [mm]。
+    /// 階高 `[mm]`。
     pub height: f64,
     /// 層の復元力特性（トリリニア）。
     pub skeleton: StoryTrilinear,

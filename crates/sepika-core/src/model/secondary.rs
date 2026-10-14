@@ -135,11 +135,11 @@ fn point_on_axis_interior(p: [f64; 3], a: [f64; 3], b: [f64; 3], tol: f64) -> Op
 pub struct SecondaryBeamAxis {
     /// 対応する二次部材の安定 ID。
     pub member: SecondaryMemberId,
-    /// 材軸始端の座標 [mm]。
+    /// 材軸始端の座標 `[mm]`。
     pub a: [f64; 3],
-    /// 材軸終端の座標 [mm]。
+    /// 材軸終端の座標 `[mm]`。
     pub b: [f64; 3],
-    /// 材軸長さ [mm]。
+    /// 材軸長さ `[mm]`。
     pub len: f64,
     /// 端部支持条件（`a`→`b` の順）。
     pub end_support: [EndSupport; 2],
@@ -207,7 +207,7 @@ impl Model {
         out
     }
 
-    /// 二次部材の両端座標 [mm] を端番号順に返す。片持ちは支持端（0）と自由端（1）。
+    /// 二次部材の両端座標 `[mm]` を端番号順に返す。片持ちは支持端（0）と自由端（1）。
     /// 支持端アンカーや片持ち自由端の構面が解決できなければ `None`。
     pub fn secondary_member_end_points(
         &self,
@@ -276,7 +276,7 @@ impl Model {
         found
     }
 
-    /// 二次部材の材軸 `(始端座標, 終端座標, 材軸長さ)` [mm] を返す。
+    /// 二次部材の材軸 `(始端座標, 終端座標, 材軸長さ)` `[mm]` を返す。
     ///
     /// [`SecondaryMember::ends`] の支持部材アンカー（片持ちは支持端と自由端ベクトル）
     /// から解決する。
@@ -396,7 +396,7 @@ impl Model {
     ///
     /// 主架構支持材（Beam・Fiber・MultiSpring）の2節点材を要素 ID 昇順で調べ、材軸上（端点を含む）にあれば
     /// その要素を優先する。無ければ他の二次部材の内法に載るものを安定 ID 昇順で調べる。
-    /// いずれも距離 `MEMBER_AXIS_TOL_MM` [mm] 以内で最も近い候補を採る。
+    /// いずれも距離 `MEMBER_AXIS_TOL_MM` `[mm]` 以内で最も近い候補を採る。
     pub fn resolve_point_anchor(
         &self,
         p: [f64; 3],
@@ -449,7 +449,7 @@ impl Model {
         secondary.map(|(_, anchor)| anchor)
     }
 
-    /// 端点座標 [mm] と端部支持条件から、両端を取付き位置表現へ解決する。支持端は
+    /// 端点座標 `[mm]` と端部支持条件から、両端を取付き位置表現へ解決する。支持端は
     /// [`Self::resolve_point_anchor`] でアンカーへ、自由端は支持端を基準とした親構面内
     /// ベクトル（[`SecondaryMemberEnds::Cantilever`]）へ変換する。支持端のアンカーを
     /// 解決できない部材は生座標の [`SecondaryMemberEnds::Detached`] を返す

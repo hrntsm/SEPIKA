@@ -7,11 +7,11 @@ use sepika_section::fiber::FiberSection;
 /// 配筋情報（RC）。
 #[derive(Clone, Debug)]
 pub struct Reinforcement {
-    /// 主筋の位置（y, z）[mm] と断面積 [mm²] のリスト
+    /// 主筋の位置（y, z）`[mm]` と断面積 `[mm²]` のリスト
     pub main_bars: Vec<(f64, f64, f64)>,
-    /// 帯筋ピッチ [mm]
+    /// 帯筋ピッチ `[mm]`
     pub hoop_pitch: f64,
-    /// 帯筋1本の断面積 [mm²]
+    /// 帯筋1本の断面積 `[mm²]`
     pub hoop_area: f64,
 }
 
@@ -80,11 +80,11 @@ impl Default for MemberSkeleton {
 /// スケルトン算定の制御パラメータ。
 #[derive(Clone, Copy, Debug)]
 pub struct SkeletonOptions {
-    /// 部材長 [mm]
+    /// 部材長 `[mm]`
     pub span: f64,
     /// 反曲点比（M-φ→M-θ 用）
     pub inflection_ratio: f64,
-    /// 想定軸力 [N]
+    /// 想定軸力 `[N]`
     pub n_axial: f64,
     /// 武田モデルの除荷剛性低下指数 α
     pub alpha: f64,

@@ -25,19 +25,19 @@ pub struct MemberDetailDraft {
     pub synced_for: Option<ElemId>,
     /// i 端ハンチの有無。
     pub haunch_i_enabled: bool,
-    /// i 端ハンチ長 [mm] の入力バッファ。
+    /// i 端ハンチ長 `[mm]` の入力バッファ。
     pub haunch_i_length: String,
-    /// i 端ハンチのせい増分 [mm] の入力バッファ（空欄可、既定 0）。
+    /// i 端ハンチのせい増分 `[mm]` の入力バッファ（空欄可、既定 0）。
     pub haunch_i_depth: String,
-    /// i 端ハンチの幅増分 [mm] の入力バッファ（空欄可、既定 0）。
+    /// i 端ハンチの幅増分 `[mm]` の入力バッファ（空欄可、既定 0）。
     pub haunch_i_width: String,
     /// j 端ハンチの有無。
     pub haunch_j_enabled: bool,
-    /// j 端ハンチ長 [mm] の入力バッファ。
+    /// j 端ハンチ長 `[mm]` の入力バッファ。
     pub haunch_j_length: String,
-    /// j 端ハンチのせい増分 [mm] の入力バッファ（空欄可、既定 0）。
+    /// j 端ハンチのせい増分 `[mm]` の入力バッファ（空欄可、既定 0）。
     pub haunch_j_depth: String,
-    /// j 端ハンチの幅増分 [mm] の入力バッファ（空欄可、既定 0）。
+    /// j 端ハンチの幅増分 `[mm]` の入力バッファ（空欄可、既定 0）。
     pub haunch_j_width: String,
     /// 継手一覧の入力バッファ（1行1件または「,」区切り、`距離` または
     /// `距離/種別`。種別省略時は現場継手）。

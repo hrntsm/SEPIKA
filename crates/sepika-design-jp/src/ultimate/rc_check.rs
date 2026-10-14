@@ -28,11 +28,11 @@ pub struct UltimateCheck {
     pub kind: MemberKind,
     /// 曲げ終局強度 Mu [N·mm]。
     pub mu: f64,
-    /// 両端ヒンジ時せん断力 Qmu = 上限強度倍率·2·Mu/内法 [N]。
+    /// 両端ヒンジ時せん断力 Qmu = 上限強度倍率·2·Mu/内法 `[N]`。
     pub qmu: f64,
-    /// 塑性理論式による終局せん断強度 Qsu [N]。
+    /// 塑性理論式による終局せん断強度 Qsu `[N]`。
     pub qsu: f64,
-    /// 付着割裂による終局せん断耐力 Qbu [N]（`include_bond=false` なら 0）。
+    /// 付着割裂による終局せん断耐力 Qbu `[N]`（`include_bond=false` なら 0）。
     pub qbu: f64,
     /// せん断余裕度 Qsu/Qmu（強軸）。
     pub shear_margin: f64,

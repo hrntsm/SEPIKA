@@ -2,22 +2,22 @@
 
 use crate::model::RcWallShearMethod;
 
-/// 耐震壁の終局せん断強度算定の入力（SI 系: 長さ [mm]・面積 [mm²]・応力 [N/mm²]）。
+/// 耐震壁の終局せん断強度算定の入力（SI 系: 長さ `[mm]`・面積 `[mm²]`・応力 [N/mm²]）。
 #[derive(Clone, Copy, Debug)]
 pub struct RcWallShearInput {
     /// 採用する終局せん断耐力の算定方式。
     pub method: RcWallShearMethod,
     /// コンクリート設計基準強度 Fc [N/mm²]。
     pub fc: f64,
-    /// 等価壁厚 te [mm]（I 形断面を等価長方形に置換した幅。壁厚 t の 1.5 倍以下）。
+    /// 等価壁厚 te `[mm]`（I 形断面を等価長方形に置換した幅。壁厚 t の 1.5 倍以下）。
     pub te: f64,
-    /// 壁厚 t [mm]（pwh = Pwh·t/te の換算に用いる）。
+    /// 壁厚 t `[mm]`（pwh = Pwh·t/te の換算に用いる）。
     pub t: f64,
-    /// 付帯柱を含めた耐震壁の全長 D [mm]。
+    /// 付帯柱を含めた耐震壁の全長 D `[mm]`。
     pub d_wall: f64,
-    /// 圧縮側柱のせい Dc [mm]（有効せい d = D − Dc/2）。付帯柱がない場合は 0。
+    /// 圧縮側柱のせい Dc `[mm]`（有効せい d = D − Dc/2）。付帯柱がない場合は 0。
     pub dc_compression: f64,
-    /// 引張側柱の主筋断面積 at [mm²]（pte = 100·at/(te·d) の分子）。
+    /// 引張側柱の主筋断面積 at `[mm²]`（pte = 100·at/(te·d) の分子）。
     pub tension_column_at: f64,
     /// 水平せん断補強筋（横筋）の材料強度 σwh [N/mm²]。
     pub sigma_wh: f64,
@@ -73,7 +73,7 @@ pub fn wall_opening_reduction_stiffness(r0: f64) -> f64 {
     (1.0 - 1.25 * r0.max(0.0)).max(0.0)
 }
 
-/// 指定方式によるRC壁の終局せん断耐力 Qu [N]。
+/// 指定方式によるRC壁の終局せん断耐力 Qu `[N]`。
 /// Fc・te・D・主筋面積・有効せいが非正の場合は0。適用条件は各consumerで検査する。
 pub fn wall_shear_ultimate(inp: &RcWallShearInput) -> f64 {
     let d = inp.d_wall - inp.dc_compression / 2.0;

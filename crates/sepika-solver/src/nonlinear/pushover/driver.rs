@@ -72,7 +72,7 @@ impl SolverState {
 }
 
 /// 増分解析（プッシュオーバー解析）。
-/// `max_disp` は目標変位 [mm] のみの終了判定に変換して本体へ渡すラッパー。
+/// `max_disp` は目標変位 `[mm]` のみの終了判定に変換して本体へ渡すラッパー。
 #[allow(clippy::too_many_arguments)]
 pub fn pushover_analysis(
     model: &Model,

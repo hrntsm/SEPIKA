@@ -63,7 +63,7 @@ pub struct SectionGeometry {
 }
 
 impl SectionGeometry {
-    /// 図心基準の実断面を指定方向へ投影した外側範囲 [mm]。空洞は除外する。
+    /// 図心基準の実断面を指定方向へ投影した外側範囲 `[mm]`。空洞は除外する。
     pub fn projected_range(&self, direction: [f64; 2]) -> Result<[f64; 2], String> {
         let norm = direction[0].hypot(direction[1]);
         if !norm.is_finite() || norm <= 1e-12 {
@@ -92,7 +92,7 @@ impl SectionGeometry {
         Ok(range)
     }
 
-    /// 図心を通る方向ベクトルに沿った外側フェースまでの距離 [mm]。
+    /// 図心を通る方向ベクトルに沿った外側フェースまでの距離 `[mm]`。
     /// 空洞・内側材料境界は除外し、正方向の最外交点を返す。
     pub fn face_distance(&self, direction: [f64; 2]) -> Result<f64, String> {
         let norm = direction[0].hypot(direction[1]);

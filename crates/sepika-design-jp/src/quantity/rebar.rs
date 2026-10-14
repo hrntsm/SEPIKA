@@ -1,7 +1,7 @@
 //! 異形棒鋼（鉄筋）の呼び径と単位質量。
 //!
 //! - [`rebar_unit_mass_kg_per_m`] — 呼び径ごとの単位質量 [kg/m]
-//! - [`rebar_weight_t`] — 鉄筋長さ → 重量 [t] の換算
+//! - [`rebar_weight_t`] — 鉄筋長さ → 重量 `[t]` の換算
 
 /// 異形棒鋼の単位質量表 (呼び径 [mm], 単位質量 [kg/m])（JIS G 3112）。
 const UNIT_MASS_TABLE: &[(f64, f64)] = &[
@@ -19,7 +19,7 @@ const UNIT_MASS_TABLE: &[(f64, f64)] = &[
     (51.0, 15.9),
 ];
 
-/// 呼び径 `dia` [mm] の異形棒鋼の単位質量 [kg/m]。
+/// 呼び径 `dia` `[mm]` の異形棒鋼の単位質量 [kg/m]。
 ///
 /// JIS G 3112 の単位質量表（D10〜D51）から呼び径 ±1mm 以内の一致を探し、
 /// 表にない径（呼び径の中間径等）は公称断面積
@@ -34,7 +34,7 @@ pub fn rebar_unit_mass_kg_per_m(dia: f64) -> f64 {
         * (sepika_core::units::STEEL_UNIT_WEIGHT_TAKEOFF_T_M3 * 1e-3)
 }
 
-/// 鉄筋の総長さ [mm] × 呼び径 [mm] → 重量 [t]。
+/// 鉄筋の総長さ `[mm]` × 呼び径 `[mm]` → 重量 `[t]`。
 pub fn rebar_weight_t(total_length_mm: f64, dia: f64) -> f64 {
     rebar_unit_mass_kg_per_m(dia) * (total_length_mm / 1_000.0) / 1_000.0
 }

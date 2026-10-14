@@ -42,7 +42,7 @@ pub fn multi_shear_strength_reduction(n: u32) -> f64 {
     }
 }
 
-/// 摩擦ばね（弾性すべり支承）の最大摩擦力 Qmax [N] = μ·N。
+/// 摩擦ばね（弾性すべり支承）の最大摩擦力 Qmax `[N]` = μ·N。
 /// `N`（長期軸力、圧縮正）が負（引張・浮上り）の場合は 0（摩擦力を生じない）。
 pub fn friction_max_force(mu: f64, axial_n: f64) -> f64 {
     mu.max(0.0) * axial_n.max(0.0)

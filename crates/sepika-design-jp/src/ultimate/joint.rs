@@ -39,15 +39,15 @@ pub struct RcJointUltimateInput {
     pub phi: f64,
     /// コンクリートの設計基準強度 Fc [N/mm²]（Fj の算定に用いる）。
     pub fc: f64,
-    /// 接合部有効幅 bj [mm]（= bb + ba1 + ba2）。
+    /// 接合部有効幅 bj `[mm]`（= bb + ba1 + ba2）。
     pub bj: f64,
-    /// 下側柱せい Dj [mm]。
+    /// 下側柱せい Dj `[mm]`。
     pub dj: f64,
-    /// 上端鉄筋引張力 T [N]（スラブ筋を含む）。
+    /// 上端鉄筋引張力 T `[N]`（スラブ筋を含む）。
     pub t_top: f64,
-    /// 下端鉄筋引張力 T′ [N]。
+    /// 下端鉄筋引張力 T′ `[N]`。
     pub t_bottom: f64,
-    /// 上下柱の存在せん断力の平均 Qcu [N]。
+    /// 上下柱の存在せん断力の平均 Qcu `[N]`。
     pub qcu: f64,
     /// 接合部せん断力の割増率 α（既定 1.0）。
     pub alpha: f64,
@@ -56,9 +56,9 @@ pub struct RcJointUltimateInput {
 /// RC 柱梁接合部の終局検定の結果。
 #[derive(Clone, Copy, Debug)]
 pub struct RcJointUltimateResult {
-    /// 形状から計算される終局せん断耐力 Vju [N]。
+    /// 形状から計算される終局せん断耐力 Vju `[N]`。
     pub vju: f64,
-    /// 設計用接合部せん断力 Qdu [N]。
+    /// 設計用接合部せん断力 Qdu `[N]`。
     pub qdu: f64,
     /// 余裕率 Vju/Qdu（≥ 1.0 で OK）。`Qdu ≤ 0` のときは `f64::INFINITY`。
     pub margin: f64,

@@ -9,7 +9,7 @@ pub struct RcCapacityInput {
     pub d: f64,
     /// 引張側主筋の総断面積 at \[mm²\]（片側）
     pub at: f64,
-    /// 有効せい d_e \[mm\]（= D − dt。dt は [`crate::rc_rebar_geom::tension_dt`] と同規約）
+    /// 有効せい d_e \[mm\]（= D − dt。dt は [`crate::rc_rebar_geom::SteelSide::centroid_from_edge_mm`] と同規約）
     pub d_eff: f64,
     /// 主筋降伏強度 σy \[N/mm²\]
     pub sigma_y: f64,
@@ -27,7 +27,7 @@ pub struct RcCapacityInput {
     pub sigma_0: f64,
 }
 
-/// αy 用の断面・引張方向。T形では有効幅 B [mm] と協力スラブ筋面積 [mm²] を明示する。
+/// αy 用の断面・引張方向。T形では有効幅 B `[mm]` と協力スラブ筋面積 `[mm²]` を明示する。
 #[derive(Clone, Copy, Debug)]
 pub enum RcAlphaSection {
     Rectangular,
@@ -47,7 +47,7 @@ pub struct RcRebarRatios {
     pub pt_shear_percent: f64,
 }
 
-/// b・D・d [mm]、片側主筋 at [mm²]から方向別鉄筋比を生成する。
+/// b・D・d `[mm]`、片側主筋 at `[mm²]`から方向別鉄筋比を生成する。
 /// 非有限・非正値、d>D、不正なT形入力は入力エラー。I0/IT補正は適用しない。
 pub fn rc_rebar_ratios(
     b_mm: f64,
@@ -211,7 +211,7 @@ pub fn rc_qsu_simple(inp: &RcCapacityInput) -> f64 {
     (concrete_term + hoop_term + axial_term) * inp.b * j
 }
 
-/// 幾何・配筋の入力診断後にせん断終局耐力 [N] を算定する。
+/// 幾何・配筋の入力診断後にせん断終局耐力 `[N]` を算定する。
 /// b・D・d・at の不正値はゼロへ置換せず入力エラー。pt は幾何から内部生成する。
 pub fn rc_qsu_simple_checked(inp: &RcCapacityInput) -> Result<f64, crate::error::CoreError> {
     rc_rebar_ratios(inp.b, inp.d, inp.d_eff, inp.at, RcAlphaSection::Rectangular)?;

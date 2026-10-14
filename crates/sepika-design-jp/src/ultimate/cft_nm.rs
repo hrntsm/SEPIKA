@@ -16,15 +16,15 @@ use std::f64::consts::PI;
 pub struct CftBendingInput {
     /// 円形断面なら true（角型なら false）。
     pub circular: bool,
-    /// 鋼管のせい D [mm]（円形は外径）。
+    /// 鋼管のせい D `[mm]`（円形は外径）。
     pub d_steel: f64,
-    /// 鋼管の幅 B [mm]（円形は外径と同値）。
+    /// 鋼管の幅 B `[mm]`（円形は外径と同値）。
     pub b_steel: f64,
-    /// コンクリートのせい cD [mm]（= D − 2t）。
+    /// コンクリートのせい cD `[mm]`（= D − 2t）。
     pub c_d: f64,
-    /// コンクリートの幅 cB [mm]（円形は cD と同値）。
+    /// コンクリートの幅 cB `[mm]`（円形は cD と同値）。
     pub c_b: f64,
-    /// 鋼管の板厚 t [mm]。
+    /// 鋼管の板厚 t `[mm]`。
     pub t: f64,
     /// コンクリートの設計基準強度 Fc [N/mm²]。
     pub fc: f64,
@@ -84,10 +84,10 @@ fn nu_mu_at(inp: &CftBendingInput, p: f64) -> (f64, f64) {
 
 /// CFT **短柱**の N-M 相互作用による終局曲げ耐力 `Mu` [N·mm]（CFT 指針）。
 ///
-/// `n_design`: 設計軸力 [N]（**圧縮正**）。`ncu1`: 短柱の軸圧縮終局耐力 [N]、
-/// `ntu`: 軸引張終局耐力の**大きさ** [N]（引張は −ntu に対応）。
+/// `n_design`: 設計軸力 `[N]`（**圧縮正**）。`ncu1`: 短柱の軸圧縮終局耐力 `[N]`、
+/// `ntu`: 軸引張終局耐力の**大きさ** `[N]`（引張は −ntu に対応）。
 ///
-/// 中立軸をパラメータとする耐力曲線（角形 xn∈[0,cD]、円形 θ∈[0,π]）を軸力に整合させて
+/// 中立軸をパラメータとする耐力曲線（角形 xn∈`[0,cD]`、円形 θ∈`[0,π]`）を軸力に整合させて
 /// Mu を求め、曲線の N 範囲外（中立軸がコンクリート断面外）は端点と (Ncu1, 0)・(−Ntu, 0) を
 /// 直線補間する。不正入力（せい・板厚・Fc・Fy のいずれか 0 以下）は 0.0。
 pub fn cft_short_column_mu(inp: &CftBendingInput, n_design: f64, ncu1: f64, ntu: f64) -> f64 {
@@ -145,15 +145,15 @@ pub struct CftLongMediumInput {
     pub bending: CftBendingInput,
     /// 長柱なら true（座屈長さが断面せいの 12 倍超）、中柱なら false。
     pub is_long: bool,
-    /// 充填コンクリートの座屈軸耐力 cNcr [N]（[`super::cft::cft_concrete_buckling_axial`]）。
+    /// 充填コンクリートの座屈軸耐力 cNcr `[N]`（[`super::cft::cft_concrete_buckling_axial`]）。
     pub c_ncr: f64,
     /// 充填コンクリートの規準化細長比 cλ1（[`super::cft::cft_concrete_slenderness`]）。
     pub c_lambda1: f64,
-    /// 座屈補助軸力 Nk [N]（[`cft_nk`]）。
+    /// 座屈補助軸力 Nk `[N]`（[`cft_nk`]）。
     pub nk: f64,
-    /// 当該分類の軸圧縮終局耐力 [N]（中柱 Ncu2 / 長柱 Ncu3。Case2 の線形補間に用いる）。
+    /// 当該分類の軸圧縮終局耐力 `[N]`（中柱 Ncu2 / 長柱 Ncu3。Case2 の線形補間に用いる）。
     pub ncu_axial: f64,
-    /// 軸引張終局耐力の大きさ Ntu [N]。
+    /// 軸引張終局耐力の大きさ Ntu `[N]`。
     pub ntu: f64,
 }
 

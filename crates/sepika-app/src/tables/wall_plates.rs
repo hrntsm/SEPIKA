@@ -61,9 +61,9 @@ pub struct WallPlateDraft {
     pub target: Option<WallPlateId>,
     /// バッファを初期化した対象（`target` と異なれば model 値で再同期する）。
     pub synced_for: Option<WallPlateId>,
-    /// 開口面積 [mm²] の入力バッファ（`openings` が空の場合のみ有効）。
+    /// 開口面積 `[mm²]` の入力バッファ（`openings` が空の場合のみ有効）。
     pub opening_area: String,
-    /// 開口部重量 [N] の入力バッファ。
+    /// 開口部重量 `[N]` の入力バッファ。
     pub opening_weight: String,
     /// 耐震スリット（4 辺）。柱際の添字は `WallPlate::column_face_nodes` の並び。
     pub slit: sepika_core::model::WallSlit,
@@ -80,7 +80,7 @@ pub struct WallPlateDraft {
     pub add_to_floor_region: bool,
     /// 追加フォーム: 取付き線の両端、または自立壁の始点・終点。
     pub add_nodes: [Option<NodeId>; 2],
-    /// 追加フォーム: 立ち上がり高さ [mm]（始端側・終端側。負なら垂れ壁）。
+    /// 追加フォーム: 立ち上がり高さ `[mm]`（始端側・終端側。負なら垂れ壁）。
     pub add_extent: [String; 2],
     /// 追加フォーム: 高さを階高いっぱいにするか（自立壁のみ）。
     pub add_story_height: bool,

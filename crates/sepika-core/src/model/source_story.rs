@@ -40,7 +40,7 @@ pub struct SourceStoryNode {
     pub node: Option<NodeId>,
 }
 
-/// height は GL から意匠 FL までの高さ [mm]。節点 Z と同一とは限らない。
+/// height は GL から意匠 FL までの高さ `[mm]`。節点 Z と同一とは限らない。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SourceStory {
     pub id: u32,

@@ -28,10 +28,10 @@
 
 use super::*;
 
-/// 剛床のレベル許容差 [mm]。剛床のスレーブ節点は「階のレベルからこの範囲内に
+/// 剛床のレベル許容差 `[mm]`。剛床のスレーブ節点は「階のレベルからこの範囲内に
 /// ある節点」とする（[`Model::on_diaphragm_level`]）。
 ///
-/// 階への帰属（[`Model::story_of_elevation`]）が**区間**であるのに対し、剛床への
+/// 階への帰属（[`crate::model::Model::story_at`]）が**区間**であるのに対し、剛床への
 /// 帰属は**床面**である。中間高さの節点（柱の分割点・階高の途中に取り付く梁）は
 /// 階には属するが剛床には入らない。面内剛体として拘束してよいのは同一床面の
 /// 節点だけであり、中間節点を含めると存在しない水平剛性が生じるためである。
@@ -63,7 +63,7 @@ pub struct DiaphragmRef<'a> {
     pub story: StoryId,
     pub master: NodeId,
     pub slaves: &'a [NodeId],
-    /// この剛床が負担する地震用重量 [N]。多剛床の階では層の水平力 Pi を
+    /// この剛床が負担する地震用重量 `[N]`。多剛床の階では層の水平力 Pi を
     /// 剛床ごとの重量比で分配するために用いる（多剛床の設計用せん断力。
     /// 令88条・昭55建告1793号）。None は未算定（階に単一剛床なら層重量全量）。
     pub weight: Option<f64>,
@@ -157,16 +157,16 @@ pub enum StoryLevelKind {
     /// 塔屋（PH）階。層せん断力 Qi = k·ΣWj（k は 0.5〜1.0 の指定震度）。
     Penthouse { k: f64 },
     /// 地下階。Qi = Q(i+1) + K·Wi、K = 0.1·(1 − H/40)·Z
-    /// （H は地盤面からの深さ depth_mm [mm] を m 換算した値、20m 超は 20m）。
+    /// （H は地盤面からの深さ depth_mm `[mm]` を m 換算した値、20m 超は 20m）。
     Basement { depth_mm: f64 },
 }
 
 /// 層の動的質量（物理質量相当）。階生成が節点ごとの物理質量相当重量から一括算定する。
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StoryDynamicMass {
-    /// 物理質量相当重量 [N]（質量方式に依らない全量。Σ node_mass_equiv）。
+    /// 物理質量相当重量 `[N]`（質量方式に依らない全量。Σ node_mass_equiv）。
     pub mass_equiv_weight_n: f64,
-    /// 質量重心 (x, y) [mm]。
+    /// 質量重心 (x, y) `[mm]`。
     pub center_xy_mm: [f64; 2],
     /// 質量重心まわりの回転慣性 [t·mm²]。
     pub inertia_t_mm2: f64,
@@ -182,7 +182,7 @@ pub struct StoryLumpedMass {
     pub mass_method: MassMethod,
     /// 節点質量6成分 [t, t, t, t·mm², t·mm², t·mm²]。無質量は `None`。
     pub mass: Option<[f64; 6]>,
-    /// この階へ配分したダンパー入力総重量 [N]（重力ケースのみ方式でも入力を記録）。
+    /// この階へ配分したダンパー入力総重量 `[N]`（重力ケースのみ方式でも入力を記録）。
     pub damper_weight_n: f64,
 }
 
@@ -264,16 +264,16 @@ pub struct Story {
     pub id: StoryId,
     /// 階名（`2F`・`PH1` など）。利用者が決める自由文字列で、階の識別に用いる。
     pub name: String,
-    /// 階のレベル [mm]。**その階が代表する床のレベル**であり、階への帰属区間の
-    /// 上端でもある（[`Model::story_of_elevation`]）。
+    /// 階のレベル `[mm]`。**その階が代表する床のレベル**であり、階への帰属区間の
+    /// 上端でもある（[`crate::model::Model::story_at`]）。
     pub elevation: f64,
-    /// この階に属する節点（準備計算が [`Model::story_of_elevation`] で埋める）。
+    /// この階に属する節点（準備計算が [`crate::model::Model::story_at`] で埋める）。
     pub node_ids: Vec<NodeId>,
-    /// 設計に用いる地震用重量 [N]。準備計算の階生成が自動算定値を書き込むが、
+    /// 設計に用いる地震用重量 `[N]`。準備計算の階生成が自動算定値を書き込むが、
     /// [`Self::weight_override`] が `Some` の場合はその手入力値が入る
     /// （解析・設計側はこのフィールドだけを読めばよい）。
     pub seismic_weight: Option<f64>,
-    /// 地震用重量の手入力値 [N]。`Some` のときは準備計算で階を再生成しても
+    /// 地震用重量の手入力値 `[N]`。`Some` のときは準備計算で階を再生成しても
     /// 保持され、[`Self::seismic_weight`] へ優先して反映される。`None` は
     /// 自動算定値をそのまま用いる。フィールド無しは手入力なし扱い。
     #[serde(default)]
@@ -329,15 +329,15 @@ pub struct Layer {
     pub bottom: StoryId,
     /// 上端の階（床）。層の重量・所属節点・階種別はこの階が持つ。
     pub top: StoryId,
-    /// 層の高さ（階高）[mm]。
+    /// 層の高さ（階高）`[mm]`。
     pub height: f64,
-    /// 下端床の標高 [mm]。
+    /// 下端床の標高 `[mm]`。
     pub bottom_elevation: f64,
-    /// 上端床の標高 [mm]。
+    /// 上端床の標高 `[mm]`。
     pub top_elevation: f64,
     /// 層の種別（一般/PH/地下）。
     pub level_kind: StoryLevelKind,
-    /// 設計に用いる地震用重量 [N]（未算定なら `None`）。
+    /// 設計に用いる地震用重量 `[N]`（未算定なら `None`）。
     pub weight: Option<f64>,
     /// 層に属する節点（＝上端床の所属節点）。
     pub node_ids: Vec<NodeId>,
@@ -396,7 +396,7 @@ impl Model {
         self.stories.len().saturating_sub(1)
     }
 
-    /// 建物の基部レベル [mm]（`elevation` の基準 0）。**幾何としての基部**。
+    /// 建物の基部レベル `[mm]`（`elevation` の基準 0）。**幾何としての基部**。
     ///
     /// 全構造節点（`generated_masters` ＝階生成が作る剛床代表節点を除く）の最小 Z
     /// 座標を基部とする。剛床代表節点は慣性力重心に置かれる仮想節点であり、実際の
@@ -423,7 +423,7 @@ impl Model {
         }
     }
 
-    /// 各階への帰属区間 `(下端, 上端]` [mm]（[`Self::stories`] と同順・同長）。
+    /// 各階への帰属区間 `(下端, 上端]` `[mm]`（[`Self::stories`] と同順・同長）。
     ///
     /// 下端は直下階のレベル、上端は当該階のレベルである。**下端は含まず上端を含む**
     /// ため、床レベルちょうどの節点はその階に属し、中間高さの節点は直上の階に属する。
@@ -459,7 +459,7 @@ impl Model {
             .collect()
     }
 
-    /// レベル `z` [mm] が属する階を、[`Self::story_spans`] の区間列から引く。
+    /// レベル `z` `[mm]` が属する階を、[`Self::story_spans`] の区間列から引く。
     ///
     /// 階への帰属は**区間**である。中間高さの節点や段差床の節点も、区間に入れば
     /// 当該階に属する。剛床への帰属とは規則が異なる（[`Self::on_diaphragm_level`]）。
@@ -489,7 +489,7 @@ impl Model {
             .collect()
     }
 
-    /// レベル `z` [mm] が階 `story` の床面上にあるか（剛床のスレーブ判定）。
+    /// レベル `z` `[mm]` が階 `story` の床面上にあるか（剛床のスレーブ判定）。
     ///
     /// 判定は階のレベルからの差が [`DIAPHRAGM_LEVEL_TOL_MM`] 以内かどうかで、
     /// 階への帰属（区間）とは規則が異なる。

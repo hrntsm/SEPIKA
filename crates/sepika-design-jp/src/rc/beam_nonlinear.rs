@@ -8,7 +8,7 @@ pub fn rc_beam_crack_moment(fc: f64, ze: f64) -> f64 {
     sepika_core::rc_capacity::rc_crack_moment(fc, ze)
 }
 
-/// RC 梁のせん断ひび割れ強度 Qc [N]。
+/// RC 梁のせん断ひび割れ強度 Qc `[N]`。
 /// 不正入力（Fc・b・j のいずれかが 0 以下）は 0.0。
 pub fn rc_beam_shear_crack(fc: f64, m_over_qd: f64, b: f64, j: f64) -> f64 {
     if fc <= 0.0 || b <= 0.0 || j <= 0.0 {
@@ -17,7 +17,7 @@ pub fn rc_beam_shear_crack(fc: f64, m_over_qd: f64, b: f64, j: f64) -> f64 {
     (0.061 * (fc + 49.0) / (m_over_qd.max(0.0) + 1.7)) * b * j
 }
 
-/// RC 梁の軸復元力特性（引張ひび割れ・引張降伏・圧縮降伏）[N]。
+/// RC 梁の軸復元力特性（引張ひび割れ・引張降伏・圧縮降伏）`[N]`。
 #[derive(Clone, Copy, Debug)]
 pub struct RcAxial {
     pub tension_crack: f64,
@@ -47,20 +47,20 @@ pub fn rc_beam_axial(fc: f64, ac: f64, at: f64, sigma_y: f64) -> RcAxial {
 pub struct RcBeamBendingInput {
     /// コンクリート設計基準強度 Fc [N/mm²]。
     pub fc: f64,
-    /// 引張側断面係数 Ze [mm³]（鉄筋考慮、Ie/(D−g) 等。Mc 用）。
+    /// 引張側断面係数 Ze `[mm³]`（鉄筋考慮、Ie/(D−g) 等。Mc 用）。
     pub ze: f64,
-    /// 引張鉄筋断面積 at [mm²]（片側）。
+    /// 引張鉄筋断面積 at `[mm²]`（片側）。
     pub at: f64,
     /// αy 用の引張鉄筋比 at/(bD)（小数、1% は 0.01）。
     /// T形は明示した引張方向の仮想断面で生成し、せん断用百分率を渡さない。
     pub pt: f64,
-    /// 有効せい d [mm]。
+    /// 有効せい d `[mm]`。
     pub d_eff: f64,
-    /// 全せい D [mm]（αy の d/D 用）。
+    /// 全せい D `[mm]`（αy の d/D 用）。
     pub d_full: f64,
     /// 主筋降伏強度 σy [N/mm²]。
     pub sigma_y: f64,
-    /// 明示した三角形曲げ分布のせん断スパン a = abs(M/Q) [mm]（αy の a/D 用）。
+    /// 明示した三角形曲げ分布のせん断スパン a = abs(M/Q) `[mm]`（αy の a/D 用）。
     pub a_shear_span: f64,
     /// 鉄筋ヤング係数 Es [N/mm²]。
     pub es: f64,

@@ -60,7 +60,7 @@ enum Branch {
 }
 
 /// 履歴則パラメータ + 状態を持つ `UniaxialMaterial`。
-/// `theta` は M-θ では回転角[rad]、Q-δ では変位[mm]。
+/// `theta` は M-θ では回転角`[rad]`、Q-δ では変位`[mm]`。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct HysteresisMaterial {
     pub rule: HysteresisRule,

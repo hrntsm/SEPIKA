@@ -6,16 +6,16 @@
 //! （フック・余長・継手長さ・開口補強筋・接合部プレート等）は
 //! 考慮しない（各部位共通事項）。
 //!
-//! - [`QuantityCfg`] — 積算の設定（定着長さ係数・鉄筋比等）
-//! - [`try_compute_quantity_takeoff`] — モデル全体の数量集計
-//! - [`QuantityTakeoff`] / [`MemberQuantity`] — 集計結果
-//! - [`member`] — 部位別の算定式（純関数）
-//! - [`rebar`] — 鉄筋の単位質量
+//! - [`crate::quantity::QuantityCfg`] — 積算の設定（定着長さ係数・鉄筋比等）
+//! - [`crate::quantity::try_compute_quantity_takeoff`] — モデル全体の数量集計
+//! - [`crate::quantity::QuantityTakeoff`] / [`crate::quantity::MemberQuantity`] — 集計結果
+//! - [`crate::quantity::member`] — 部位別の算定式（純関数）
+//! - [`crate::quantity::rebar`] — 鉄筋の単位質量
 //!
 //! ## 単位
 //!
 //! モデルの内部単位系は N-mm-s だが、集計結果は実務慣用単位で持つ:
-//! コンクリート体積 [m³]・型枠面積 [m²]・鉄筋/鉄骨重量 [t]・長さ [m]。
+//! コンクリート体積 `[m³]`・型枠面積 `[m²]`・鉄筋/鉄骨重量 `[t]`・長さ `[m]`。
 //! 鉄骨重量は `W = L×A×7.85`（鉄骨単位重量 7.85 t/m³ 固定。
 //! 各部位共通事項）による。
 
@@ -55,7 +55,7 @@ const LEVEL_TOL_MM: f64 = 10.0;
 pub struct QuantityCfg {
     /// 主筋・壁筋の定着長さ係数（L2・S = 係数×呼び径。既定 35d）。
     pub anchorage_dia_factor: f64,
-    /// 壁筋の仮定呼び径 [mm]（壁の配筋はせん断補強筋比 ps のみ保持する
+    /// 壁筋の仮定呼び径 `[mm]`（壁の配筋はせん断補強筋比 ps のみ保持する
     /// ため、定着長さ S=35d の算定に用いる仮定径。既定 D10）。
     pub assumed_wall_bar_dia: f64,
     /// 小梁主筋の鉄筋比（コンクリート体積比。既定 0.8%）。
@@ -161,11 +161,11 @@ impl RebarUsage {
 #[derive(Clone, Debug)]
 pub struct RebarItem {
     pub usage: RebarUsage,
-    /// 呼び径 [mm]。鉄筋比による概算（床・小梁）は None。
+    /// 呼び径 `[mm]`。鉄筋比による概算（床・小梁）は None。
     pub dia: Option<f64>,
-    /// 総長さ [m]（鉄筋比による概算は 0）。
+    /// 総長さ `[m]`（鉄筋比による概算は 0）。
     pub total_length_m: f64,
-    /// 重量 [t]。
+    /// 重量 `[t]`。
     pub weight_t: f64,
 }
 
@@ -174,9 +174,9 @@ pub struct RebarItem {
 pub struct SteelItem {
     /// 断面名（種類別集計のキー）。
     pub section_name: String,
-    /// 長さ [m]。
+    /// 長さ `[m]`。
     pub length_m: f64,
-    /// 重量 [t]（W = L×A×7.85）。
+    /// 重量 `[t]`（W = L×A×7.85）。
     pub weight_t: f64,
 }
 
@@ -193,9 +193,9 @@ pub struct MemberQuantity {
     pub story: String,
     pub category: MemberCategory,
     pub structure: StructureKind,
-    /// コンクリート体積 [m³]。
+    /// コンクリート体積 `[m³]`。
     pub concrete_m3: f64,
-    /// 型枠面積 [m²]。
+    /// 型枠面積 `[m²]`。
     pub formwork_m2: f64,
     /// 鉄筋数量（用途別）。
     pub rebar: Vec<RebarItem>,
@@ -206,12 +206,12 @@ pub struct MemberQuantity {
 }
 
 impl MemberQuantity {
-    /// 鉄筋重量の合計 [t]。
+    /// 鉄筋重量の合計 `[t]`。
     pub fn rebar_weight_t(&self) -> f64 {
         self.rebar.iter().map(|r| r.weight_t).sum::<f64>() + 0.0
     }
 
-    /// 鉄骨重量 [t]（なければ 0）。
+    /// 鉄骨重量 `[t]`（なければ 0）。
     pub fn steel_weight_t(&self) -> f64 {
         self.steel.as_ref().map(|s| s.weight_t).unwrap_or(0.0)
     }
@@ -432,7 +432,7 @@ fn validate_circular_rc_posts(model: &Model) -> Result<(), String> {
 
 /// 二次 CFT、必要な材料領域・床接触が未知、不正または適用対象外の場合は理由付きエラー。
 /// 壁版は内部で展開して集計する。未参照断面の未入力は許容する。
-/// 円形RC間柱の直径・解決実長 [mm] が有限かつ正でない場合は部材 ID と原因を返す。
+/// 円形RC間柱の直径・解決実長 `[mm]` が有限かつ正でない場合は部材 ID と原因を返す。
 pub fn try_compute_quantity_takeoff(
     model: &Model,
     cfg: &QuantityCfg,

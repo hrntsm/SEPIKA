@@ -510,7 +510,7 @@ pub fn plastic_fibers(
     plastic_fibers_at(shape, strength, target, ring)
 }
 
-/// 断面外形の最大寸法 [mm]（目標ファイバ寸法の基準）。
+/// 断面外形の最大寸法 `[mm]`（目標ファイバ寸法の基準）。
 pub fn max_dimension(shape: &SectionShape) -> f64 {
     match *shape {
         SectionShape::SteelH { height, width, .. }
@@ -541,7 +541,7 @@ pub fn max_dimension(shape: &SectionShape) -> f64 {
     }
 }
 
-/// 目標ファイバ寸法 `target` [mm] と円環解像度 `ring` を明示して配置を生成する。
+/// 目標ファイバ寸法 `target` `[mm]` と円環解像度 `ring` を明示して配置を生成する。
 /// [`plastic_fibers`]（MN 曲面・M-φ 用）と要素ファイバ生成
 /// （`sepika-element` の `build_gauss_fibers`）が同じ配置規則を共用するための実体。
 /// 実配筋を生成できない場合は [`RebarGeometryError`] を返す。

@@ -23,7 +23,7 @@ pub struct WallEdgeShare {
     pub support: SupportMemberId,
     /// 支持部材材軸上の無次元区間（割当領域の境界が持つ値）。
     pub span: [f64; 2],
-    /// この辺が受け持つ重量 [N]（下向きを正）。
+    /// この辺が受け持つ重量 `[N]`（下向きを正）。
     pub total: f64,
 }
 
@@ -393,7 +393,7 @@ fn push_primary_share(model: &Model, loads: &mut Vec<BeamLoad>, share: &WallEdge
     });
 }
 
-/// 壁版と二次部材のDL支持反力相当量 [N] を節点へ加算する。
+/// 壁版と二次部材のDL支持反力相当量 `[N]` を節点へ加算する。
 /// 壁の地震用階重量では使用せず、共通実領域の水平帯積分を使う。
 pub fn accumulate_wall_and_secondary_dl_weight(
     model: &Model,

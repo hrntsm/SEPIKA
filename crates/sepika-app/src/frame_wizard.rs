@@ -21,10 +21,10 @@ use sepika_core::model::{MaterialCategory, SlabUsage};
 pub struct FrameWizardState {
     pub open: bool,
     pub spec: FrameSpec,
-    /// 等スパン一括入力の「本数」と「スパン [mm]」。
+    /// 等スパン一括入力の「本数」と「スパン `[mm]`」。
     pub bulk_x: (usize, f64),
     pub bulk_y: (usize, f64),
-    /// 等階高一括入力の「階数」と「階高 [mm]」。
+    /// 等階高一括入力の「階数」と「階高 `[mm]`」。
     pub bulk_story: (usize, f64),
 }
 

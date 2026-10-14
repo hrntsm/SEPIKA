@@ -32,7 +32,7 @@ use crate::{
 /// 所属する分割梁要素の検定文脈へ上書きする。合成ロジックは [`crate::girder_group::girder_group_overrides`]。
 #[derive(Clone, Debug, PartialEq)]
 pub struct GirderGroupContextOverride {
-    /// 一本部材の全長 L [mm]（分割部材長の総和）。
+    /// 一本部材の全長 L `[mm]`（分割部材長の総和）。
     pub length: f64,
     /// 一本部材両端の強軸曲げ `(M_i端, M_j端)` [N·mm]。
     pub end_moments_z: Option<(f64, f64)>,
@@ -40,7 +40,7 @@ pub struct GirderGroupContextOverride {
     pub mid_moment_z: Option<f64>,
     /// グループ内 |Mz| 最大位置の `(|M|, |Q|)`（せん断スパン比の代表値）。
     pub shear_span: Option<(f64, f64)>,
-    /// 一本部材の内法長（両外端の剛域控除後）[mm]。
+    /// 一本部材の内法長（両外端の剛域控除後）`[mm]`。
     pub clear_length: f64,
 }
 
@@ -64,7 +64,7 @@ pub struct MemberDesignCheckOptions<'a> {
     pub qd_method: QdMethod,
     /// 地震時短期 QD 用の長期（DL+LL 等）内力。None なら QD 割増なし。
     pub long_member_forces: Option<&'a [(ElemId, MemberForces)]>,
-    /// 梁 QD1 用の単純梁せん断 Q0 [N]（部材 ID → 絶対値）。RC/SRC梁のQD1で不足すれば未検定。
+    /// 梁 QD1 用の単純梁せん断 Q0 `[N]`（部材 ID → 絶対値）。RC/SRC梁のQD1で不足すれば未検定。
     pub q_simple_by_elem: Option<&'a HashMap<ElemId, f64>>,
     /// 一本部材グループの検定文脈上書き（梁のみ適用）。None なら部材単体の値を用いる。
     pub girder_group_overrides: Option<&'a HashMap<ElemId, GirderGroupContextOverride>>,

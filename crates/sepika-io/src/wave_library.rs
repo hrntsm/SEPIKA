@@ -32,7 +32,7 @@ pub fn wave_library_dir() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("sepika").join("waves"))
 }
 
-/// ライブラリ内の波形ファイル名一覧（拡張子が [`WAVE_EXTENSIONS`] のもの、
+/// ライブラリ内の波形ファイル名一覧（拡張子が `WAVE_EXTENSIONS` のもの、
 /// ファイル名昇順）。ディレクトリが存在しない場合は空を返す（未作成＝未登録として
 /// 扱い、エラーにはしない。初回起動時に常に空でエラーになるのを避けるため）。
 pub fn list_wave_library(dir: &Path) -> io::Result<Vec<String>> {

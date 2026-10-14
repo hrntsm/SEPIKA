@@ -24,7 +24,7 @@ pub struct LoadCfgDraft {
     pub extra_value: String,
     /// 仕上げ面重量の追加フォーム: 値 [N/mm²]。
     pub finish_value: String,
-    /// ダンパー諸元の追加フォーム: モデル化範囲の総重量 [N]。
+    /// ダンパー諸元の追加フォーム: モデル化範囲の総重量 `[N]`。
     pub damper_weight: String,
     /// 各追加フォームで選択中の部材（付加線重量/仕上げ/ダンパー共用）。
     pub sel_elem: Option<ElemId>,

@@ -12,7 +12,7 @@ pub enum Constraint {
         story: StoryId,
         master: NodeId,
         slaves: Vec<NodeId>,
-        /// この剛床が負担する地震用重量 [N]。None は未算定。
+        /// この剛床が負担する地震用重量 `[N]`。None は未算定。
         #[serde(default)]
         weight: Option<f64>,
         /// 副剛床の層せん断力係数 Ci の直接入力。水平力 = ci_override × 剛床重量として作用する。

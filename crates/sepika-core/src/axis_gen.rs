@@ -30,7 +30,7 @@ use crate::geom::is_vertical_pair;
 use crate::ids::NodeId;
 use crate::model::{Axis, AxisGroup, AxisGroupKind, AxisPlanDir, AxisSource, ElementKind, Model};
 
-/// 同一の通りとみなす離れの差 [mm]。
+/// 同一の通りとみなす離れの差 `[mm]`。
 pub const AXIS_TOL_MM: f64 = 1.0;
 
 /// 新設する X 方向グループの名前と方向角 [度]（芯線は Y 軸に平行、離れは +X 向き）。

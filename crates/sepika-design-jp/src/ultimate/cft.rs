@@ -102,15 +102,15 @@ pub fn cft_concrete_buckling_axial(c_inertia: f64, c_area: f64, fc: f64, lk: f64
 pub struct CftAxialInput {
     /// 円形断面なら true（角型なら false）。ξ の判定に用いる。
     pub circular: bool,
-    /// 断面せい D [mm]（柱分類 lk/D に用いる）。
+    /// 断面せい D `[mm]`（柱分類 lk/D に用いる）。
     pub d_section: f64,
-    /// 充填コンクリートの断面積 cA [mm²]。
+    /// 充填コンクリートの断面積 cA `[mm²]`。
     pub c_area: f64,
-    /// 鋼管の断面積 sA [mm²]。
+    /// 鋼管の断面積 sA `[mm²]`。
     pub s_area: f64,
-    /// 充填コンクリートの断面二次モーメント cI [mm⁴]（座屈細長比 cλ 用、弱軸）。
+    /// 充填コンクリートの断面二次モーメント cI `[mm⁴]`（座屈細長比 cλ 用、弱軸）。
     pub c_inertia: f64,
-    /// 鋼管の断面二次モーメント sI [mm⁴]（座屈細長比 sλ・オイラー荷重用、弱軸）。
+    /// 鋼管の断面二次モーメント sI `[mm⁴]`（座屈細長比 sλ・オイラー荷重用、弱軸）。
     pub s_inertia: f64,
     /// コンクリートの設計基準強度 Fc [N/mm²]。
     pub fc: f64,
@@ -118,18 +118,18 @@ pub struct CftAxialInput {
     pub fy: f64,
     /// 鋼管のヤング係数 sE [N/mm²]。
     pub s_young: f64,
-    /// 座屈長さ lk [mm]。
+    /// 座屈長さ lk `[mm]`。
     pub lk: f64,
 }
 
-/// CFT 柱の軸終局耐力の結果 [N]。
+/// CFT 柱の軸終局耐力の結果 `[N]`。
 #[derive(Clone, Copy, Debug)]
 pub struct CftAxialUltimate {
     /// 柱分類。
     pub class: CftColumnClass,
-    /// 軸圧縮終局耐力 Ncu [N]（分類に応じて Ncu1/Ncu2/Ncu3）。
+    /// 軸圧縮終局耐力 Ncu `[N]`（分類に応じて Ncu1/Ncu2/Ncu3）。
     pub ncu: f64,
-    /// 軸引張終局耐力 Ntu [N]（引張正の絶対値。Ntu = sA·Fy）。
+    /// 軸引張終局耐力 Ntu `[N]`（引張正の絶対値。Ntu = sA·Fy）。
     pub ntu: f64,
 }
 

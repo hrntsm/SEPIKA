@@ -60,11 +60,11 @@ pub struct FiberSectionState {
 /// ファイバー 1 本の状態（断面内位置・ひずみ・降伏比。[`FiberSectionState`] の要素）。
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FiberStateSample {
-    /// 断面内位置（要素局所 y）[mm]。
+    /// 断面内位置（要素局所 y）`[mm]`。
     pub y: f64,
-    /// 断面内位置（要素局所 z）[mm]。
+    /// 断面内位置（要素局所 z）`[mm]`。
     pub z: f64,
-    /// ファイバー断面積 [mm²]。
+    /// ファイバー断面積 `[mm²]`。
     pub area: f64,
     /// 軸ひずみ（引張正）。
     pub strain: f64,
@@ -321,12 +321,12 @@ pub trait ElementBehavior: Send + Sync {
     fn fiber_section_states(&self) -> Option<Vec<FiberSectionState>> {
         None
     }
-    /// 材端集中ばねの確定した端ばね変形 [rad]（[i端, j端]、局所 z まわり）。
+    /// 材端集中ばねの確定した端ばね変形 `[rad]`（[i端, j端]、局所 z まわり）。
     /// 端ばねを持たない要素は `None`。
     fn end_spring_rotations(&self) -> Option<[f64; 2]> {
         None
     }
-    /// 時刻歴解析の時間刻み Δt [s] を要素へ通知する。
+    /// 時刻歴解析の時間刻み Δt `[s]` を要素へ通知する。
     /// `dt<=0` では減衰要素は不活性となる。対応しない要素は何もしない。
     fn set_time_step(&mut self, _dt: f64) {}
 }

@@ -15,9 +15,9 @@ use super::core::ColumnStiffness;
 /// 雑壁 1 枚の等価水平剛性 `Kw' = n·Aw'·ΣKc/ΣAc`。
 ///
 /// - `n`: 雑壁の剛性を柱の剛性から求める場合の係数（入力値）
-/// - `aw`: 雑壁の断面積 Aw' [mm²]
+/// - `aw`: 雑壁の断面積 Aw' `[mm²]`
 /// - `sum_kc`: 当該階の柱の剛性の和 ΣKc
-/// - `sum_ac`: 当該階の柱の断面積の和 ΣAc [mm²]（0 の場合は Kw' = 0）
+/// - `sum_ac`: 当該階の柱の断面積の和 ΣAc `[mm²]`（0 の場合は Kw' = 0）
 pub fn misc_wall_stiffness(n: f64, aw: f64, sum_kc: f64, sum_ac: f64) -> f64 {
     if sum_ac <= 0.0 {
         return 0.0;
@@ -25,7 +25,7 @@ pub fn misc_wall_stiffness(n: f64, aw: f64, sum_kc: f64, sum_ac: f64) -> f64 {
     n * aw * sum_kc / sum_ac
 }
 
-/// 当該層の柱の断面積の和 ΣAc [mm²]。
+/// 当該層の柱の断面積の和 ΣAc `[mm²]`。
 pub fn sum_column_area(model: &Model, story: StoryId) -> f64 {
     let mut sum = 0.0;
     crate::secondary::eccentricity_analysis::for_each_story_column(
@@ -96,7 +96,7 @@ fn self_standing_stiffness(model: &Model, plate: &WallPlate) -> Option<SelfStand
 ///
 /// - n 係数は `Model::stress_cfg.misc_wall_n`（`None` なら雑壁剛性を考慮しない）
 /// - 帰属層: 壁の中間高さ z が（直下層 elevation, 当該層 elevation] に入る壁
-/// - `Aw' = 壁の平面長さ × 構造厚`（[`self_standing_stiffness`] の対象外は無視）
+/// - `Aw' = 壁の平面長さ × 構造厚`（`self_standing_stiffness` の対象外は無視）
 /// - 方向別に `Kw'x = n·Aw'·ΣKc,x/ΣAc`, `Kw'y = n·Aw'·ΣKc,y/ΣAc` を求め、
 ///   壁面内方向の方向余弦 (cx, cy) で `dx = Kw'x·cx²`, `dy = Kw'y·cy²` として
 ///   壁の平面中点に置く。ΣAc = 0 の場合は Kw' = 0（0 除算回避）。

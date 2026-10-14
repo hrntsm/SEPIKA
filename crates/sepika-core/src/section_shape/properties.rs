@@ -8,7 +8,7 @@ use super::geometry::{
 use super::types::SectionShape;
 
 impl SectionShape {
-    /// 単一・直角・一様厚リップ溝形の寸法 [mm] と総断面性能を検証する。
+    /// 単一・直角・一様厚リップ溝形の寸法 `[mm]` と総断面性能を検証する。
     /// 他形状には適用しない。不成立寸法・非有限性能は理由付きエラー。
     pub fn validate_lip_channel(&self) -> Result<(), String> {
         let Self::SteelLipChannel {
@@ -60,13 +60,13 @@ impl SectionShape {
         Ok(())
     }
 
-    /// 断面積 [mm²]。算定不能なら panic。入力値の検証には `try_calc_area` を用いる。
+    /// 断面積 `[mm²]`。算定不能なら panic。入力値の検証には `try_calc_area` を用いる。
     pub fn calc_area(&self) -> f64 {
         self.try_calc_area()
             .unwrap_or_else(|error| panic!("{error}"))
     }
 
-    /// 断面積 [mm²]。必要なフィレット半径・角Rが未知・不正、またはリップ溝形が不成立・算定不能ならエラー。
+    /// 断面積 `[mm²]`。必要なフィレット半径・角Rが未知・不正、またはリップ溝形が不成立・算定不能ならエラー。
     pub fn try_calc_area(&self) -> Result<f64, String> {
         self.validate_lip_channel()?;
         Ok(match self.rounded_steel_properties()? {
@@ -163,11 +163,11 @@ impl SectionShape {
         }
     }
 
-    /// 鉄骨断面の塑性断面係数 Zp [mm³]（強軸）。RC・SRC・CFT・不明形状は `None`
+    /// 鉄骨断面の塑性断面係数 Zp `[mm³]`（強軸）。RC・SRC・CFT・不明形状は `None`
     /// を返す（鉄骨梁の全塑性モーメント Mp=Zp·σy の算定に用いる。材料力学）。
     ///
     /// H・箱・パイプ・中実丸鋼は閉形式、それ以外は矩形分解から等面積軸まわりで
-    /// 積分する（[`plastic_modulus_strips`]）。軸は [`calc_iy`](Self::calc_iy) と
+    /// 積分する（`plastic_modulus_strips`）。軸は [`calc_iy`](Self::calc_iy) と
     /// **同一**（山形鋼は図心を通る幾何軸で、主軸ではない。Ze と軸を揃えるため
     /// 意図的にこの定義を採る。主軸まわりで扱うには断面相乗モーメント Iyz を
     /// 断面データに持たせて二軸連成を解く必要がある）。
@@ -176,7 +176,7 @@ impl SectionShape {
             .unwrap_or_else(|error| panic!("{error}"))
     }
 
-    /// 強軸の塑性断面係数 [mm³]。必要なフィレット半径・角Rが未知・不正、またはリップ溝形が不成立・算定不能ならエラー。
+    /// 強軸の塑性断面係数 `[mm³]`。必要なフィレット半径・角Rが未知・不正、またはリップ溝形が不成立・算定不能ならエラー。
     pub fn try_plastic_modulus_strong(&self) -> Result<Option<f64>, String> {
         self.validate_lip_channel()?;
         if matches!(self, Self::CftBox { .. } | Self::CftPipe { .. }) {
@@ -271,13 +271,13 @@ impl SectionShape {
         }
     }
 
-    /// 局所 y 軸まわりの断面二次モーメント [mm⁴]。
+    /// 局所 y 軸まわりの断面二次モーメント `[mm⁴]`。
     /// 算定不能なら panic。入力値の検証には `try_calc_iy` を用いる。
     pub fn calc_iy(&self) -> f64 {
         self.try_calc_iy().unwrap_or_else(|error| panic!("{error}"))
     }
 
-    /// y 軸まわりの断面二次モーメント [mm⁴]。必要なフィレット半径・角Rが未知・不正、またはリップ溝形が不成立・算定不能ならエラー。
+    /// y 軸まわりの断面二次モーメント `[mm⁴]`。必要なフィレット半径・角Rが未知・不正、またはリップ溝形が不成立・算定不能ならエラー。
     pub fn try_calc_iy(&self) -> Result<f64, String> {
         self.validate_lip_channel()?;
         Ok(match self.rounded_steel_properties()? {
@@ -445,13 +445,13 @@ impl SectionShape {
         }
     }
 
-    /// 局所 z 軸まわりの断面二次モーメント [mm⁴]。
+    /// 局所 z 軸まわりの断面二次モーメント `[mm⁴]`。
     /// 算定不能なら panic。入力値の検証には `try_calc_iz` を用いる。
     pub fn calc_iz(&self) -> f64 {
         self.try_calc_iz().unwrap_or_else(|error| panic!("{error}"))
     }
 
-    /// z 軸まわりの断面二次モーメント [mm⁴]。必要なフィレット半径・角Rが未知・不正、またはリップ溝形が不成立・算定不能ならエラー。
+    /// z 軸まわりの断面二次モーメント `[mm⁴]`。必要なフィレット半径・角Rが未知・不正、またはリップ溝形が不成立・算定不能ならエラー。
     pub fn try_calc_iz(&self) -> Result<f64, String> {
         self.validate_lip_channel()?;
         Ok(match self.rounded_steel_properties()? {
@@ -601,7 +601,7 @@ impl SectionShape {
         }
     }
 
-    /// ねじり定数 J [mm⁴]。不成立のリップ溝形は panic。
+    /// ねじり定数 J `[mm⁴]`。不成立のリップ溝形は panic。
     pub fn calc_j(&self) -> f64 {
         self.validate_lip_channel()
             .unwrap_or_else(|error| panic!("{error}"));
@@ -708,7 +708,7 @@ impl SectionShape {
         }
     }
 
-    /// 形状だけからの軸剛性用面積 [mm²]。SRC は暫定比 `N_S_EQ` を使う。
+    /// 形状だけからの軸剛性用面積 `[mm²]`。SRC は暫定比 `N_S_EQ` を使う。
     /// SRC 解析は材料検証済みの等価性能を要し、この値へ代替しない。
     /// 質量用の実面積 `calc_area` と区別する。他形状は `calc_area` と同値。
     pub fn calc_axial_stiffness_area(&self) -> f64 {

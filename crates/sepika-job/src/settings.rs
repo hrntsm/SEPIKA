@@ -15,15 +15,15 @@ pub struct AnalysisSettings {
     pub z: f64,
     pub soil: sepika_load::ai::SoilClass,
     pub c0: f64,
-    /// 増分解析（プッシュオーバー）: 方向・最大ステップ・目標変位 [mm]
+    /// 増分解析（プッシュオーバー）: 方向・最大ステップ・目標変位 `[mm]`
     pub push_dir: SeismicDir,
     pub push_steps: usize,
     pub push_max_disp: f64,
-    /// 増分解析: 目標変位[mm]による終了判定を使うか。
+    /// 増分解析: 目標変位`[mm]`による終了判定を使うか。
     pub push_use_max_disp: bool,
     /// 増分解析: 目標最大層間変形角による終了判定を使うか。
     pub push_use_drift_angle: bool,
-    /// 増分解析: 目標最大層間変形角の分母 n（角度は 1/n [rad]）。
+    /// 増分解析: 目標最大層間変形角の分母 n（角度は 1/n `[rad]`）。
     pub push_drift_denom: f64,
     /// 増分解析: 塑性率（ductility）の算定方式（構造力学）。
     pub ductility_method: sepika_solver::nonlinear::pushover::DuctilityMethod,
@@ -37,7 +37,7 @@ pub struct AnalysisSettings {
     pub lumped_secant_ratio: f64,
     /// 時刻歴: 減衰比
     pub th_damping: f64,
-    /// 時刻歴サンプル波: 刻み [s]・継続時間 [s]・周期 [s]・振幅 [mm/s²]
+    /// 時刻歴サンプル波: 刻み `[s]`・継続時間 `[s]`・周期 `[s]`・振幅 [mm/s²]
     pub th_dt: f64,
     pub th_duration: f64,
     pub th_period: f64,
@@ -63,7 +63,7 @@ pub struct AnalysisSettings {
     pub phase_diff_enabled: bool,
     /// せん断波速度 Vs [m/s]。
     pub phase_diff_vs: f64,
-    /// 矩形基礎長さ L [m]。
+    /// 矩形基礎長さ L `[m]`。
     pub phase_diff_length_m: f64,
     /// 入射角 θ [°]。
     pub phase_diff_incidence_deg: f64,
@@ -103,13 +103,13 @@ pub struct AnalysisSettings {
     /// 質点系時刻歴の減衰比（既定 0.02）。
     #[serde(default = "default_lumped_th_damping")]
     pub lumped_th_damping: f64,
-    /// 質点系時刻歴のサンプル波刻み [s]（既定 0.01）。
+    /// 質点系時刻歴のサンプル波刻み `[s]`（既定 0.01）。
     #[serde(default = "default_lumped_th_dt")]
     pub lumped_th_dt: f64,
-    /// 質点系時刻歴のサンプル波継続時間 [s]（既定 10）。
+    /// 質点系時刻歴のサンプル波継続時間 `[s]`（既定 10）。
     #[serde(default = "default_lumped_th_duration")]
     pub lumped_th_duration: f64,
-    /// 質点系時刻歴のサンプル波周期 [s]（既定 0.5）。
+    /// 質点系時刻歴のサンプル波周期 `[s]`（既定 0.5）。
     #[serde(default = "default_lumped_th_period")]
     pub lumped_th_period: f64,
     /// 質点系時刻歴のサンプル波振幅 [mm/s²]（既定 1000）。

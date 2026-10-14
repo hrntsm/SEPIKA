@@ -62,13 +62,13 @@ pub struct PanelZone {
     pub node: NodeId,
     /// 諸元未算定の理由。剛パネルへの数値的代用を算定成功と扱わない。
     pub resolution_error: Option<String>,
-    /// 柱せい方向のパネル寸法 `dc` [mm]。
+    /// 柱せい方向のパネル寸法 `dc` `[mm]`。
     pub dc: f64,
-    /// 梁フランジ板厚中心間距離 `db` [mm]。
+    /// 梁フランジ板厚中心間距離 `db` `[mm]`。
     pub db: f64,
-    /// パネル板厚 `tp` [mm]。
+    /// パネル板厚 `tp` `[mm]`。
     pub tp: f64,
-    /// パネルの実効体積 `Ve` [mm³]。
+    /// パネルの実効体積 `Ve` `[mm³]`。
     pub ve: f64,
     /// パネルの形状係数 κ。
     pub kappa: f64,
@@ -78,7 +78,7 @@ pub struct PanelZone {
     pub fy: f64,
     /// パネルせん断剛性 `Kxp = Kyp = G・Ve` [N·mm/rad]。
     pub k_panel: f64,
-    /// パネル部材座標系の回転角 θ [rad]（基準座標系 X-Y 平面内）。
+    /// パネル部材座標系の回転角 θ `[rad]`（基準座標系 X-Y 平面内）。
     pub theta: f64,
     /// 軸力比 `n = 0` における降伏モーメント `pMy0 = (Ve/κ)・Fy/√3` [N·mm]。
     pub pmy0: f64,

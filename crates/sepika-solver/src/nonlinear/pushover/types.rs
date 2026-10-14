@@ -14,9 +14,9 @@ use sepika_core::ids::ElemId;
 /// 変位増分を打ち切る。両方 `None` の場合は荷重制御（λ=1）までで終了する。
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PushoverTarget {
-    /// 目標最大変位 [mm]（頂部＝最上階マスター節点の加力方向変位）。`None` は判定しない。
+    /// 目標最大変位 `[mm]`（頂部＝最上階マスター節点の加力方向変位）。`None` は判定しない。
     pub max_disp: Option<f64>,
-    /// 目標最大層間変形角 [rad]（全層の最大値、例: 1/150）。`None` は判定しない。
+    /// 目標最大層間変形角 `[rad]`（全層の最大値、例: 1/150）。`None` は判定しない。
     pub max_drift_angle: Option<f64>,
 }
 
@@ -215,19 +215,19 @@ pub struct PushoverMemberResponse {
     pub m_strong: f64,
     /// 弱軸（局所 y 軸まわり My）の設計用曲げモーメント [N·mm]（両端の最大絶対値）。
     pub m_weak: f64,
-    /// 強軸曲げに伴う設計用せん断力 Vy [N]（局所 y 方向、両端の最大絶対値）。
+    /// 強軸曲げに伴う設計用せん断力 Vy `[N]`（局所 y 方向、両端の最大絶対値）。
     pub shear_strong: f64,
-    /// 弱軸曲げに伴う設計用せん断力 Vz [N]（局所 z 方向、両端の最大絶対値）。
+    /// 弱軸曲げに伴う設計用せん断力 Vz `[N]`（局所 z 方向、両端の最大絶対値）。
     pub shear_weak: f64,
-    /// 部材軸力 [N]（**圧縮正**、両端のうち圧縮側の代表値）。
+    /// 部材軸力 `[N]`（**圧縮正**、両端のうち圧縮側の代表値）。
     pub axial: f64,
-    /// 終局時の部材変形角 Rp [rad]（弦回転角＝層間変形角相当の近似）。
+    /// 終局時の部材変形角 Rp `[rad]`（弦回転角＝層間変形角相当の近似）。
     pub rp: f64,
-    /// 終局時に部材が負担する**加力方向の水平力** [N]（材端力の載荷方向成分の
+    /// 終局時に部材が負担する**加力方向の水平力** `[N]`（材端力の載荷方向成分の
     /// 両端最大絶対値）。告示の βu（耐力壁・筋かいの水平耐力の和を保有水平耐力で
     /// 除した数値）の分子を、耐力壁・筋かい部材について集計するために用いる。
     pub horizontal_force: f64,
-    /// 壁下辺a→bを正とする壁の面内せん断力 [N]。壁以外はNone。
+    /// 壁下辺a→bを正とする壁の面内せん断力 `[N]`。壁以外はNone。
     pub wall_shear_signed: Option<f64>,
 }
 
@@ -245,7 +245,7 @@ pub struct MemberHistory {
 /// 結ぶ直線）からの材端回転で、M-θ 曲線・N-M 相関図の応答経路の描画に用いる。
 #[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct MemberStepState {
-    /// 軸力 [N]（圧縮正、引張は負値）。
+    /// 軸力 `[N]`（圧縮正、引張は負値）。
     pub n: f32,
     /// i 端の局所曲げモーメント My（弱軸まわり）[N·mm]。
     pub my_i: f32,
@@ -255,18 +255,18 @@ pub struct MemberStepState {
     pub my_j: f32,
     /// j 端の局所曲げモーメント Mz [N·mm]。
     pub mz_j: f32,
-    /// i 端の弦からの材端回転（局所 y まわり）[rad]。
+    /// i 端の弦からの材端回転（局所 y まわり）`[rad]`。
     pub ry_i: f32,
-    /// i 端の弦からの材端回転（局所 z まわり）[rad]。
+    /// i 端の弦からの材端回転（局所 z まわり）`[rad]`。
     pub rz_i: f32,
-    /// j 端の弦からの材端回転（局所 y まわり）[rad]。
+    /// j 端の弦からの材端回転（局所 y まわり）`[rad]`。
     pub ry_j: f32,
-    /// j 端の弦からの材端回転（局所 z まわり）[rad]。
+    /// j 端の弦からの材端回転（局所 z まわり）`[rad]`。
     pub rz_j: f32,
-    /// i 端の材端集中ばねのばね変形（局所 z まわり）[rad]。
+    /// i 端の材端集中ばねのばね変形（局所 z まわり）`[rad]`。
     /// 端ばねを持たない要素は 0。
     pub spring_rz_i: f32,
-    /// j 端の材端集中ばねのばね変形（局所 z まわり）[rad]。
+    /// j 端の材端集中ばねのばね変形（局所 z まわり）`[rad]`。
     /// 端ばねを持たない要素は 0。
     pub spring_rz_j: f32,
 }
@@ -298,7 +298,7 @@ pub struct PushoverResult {
     /// せん断降伏イベント履歴。
     pub shear_yields: Vec<ShearYieldEvent>,
     pub mechanism: MechanismType,
-    /// 性能曲線上の最大ベースシア [N]。保有耐力比較の採用点とは独立。
+    /// 性能曲線上の最大ベースシア `[N]`。保有耐力比較の採用点とは独立。
     pub qu: f64,
     /// 最終確定ステップ時の部材別応答。ステップが 1 つも確定しなかった場合は空。
     pub member_response: Vec<PushoverMemberResponse>,

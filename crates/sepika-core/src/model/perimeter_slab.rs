@@ -1,6 +1,6 @@
 use super::*;
 
-/// 荷重計算と表示が共有する外周スラブの派生形状 [mm]。
+/// 荷重計算と表示が共有する外周スラブの派生形状 `[mm]`。
 #[derive(Clone, Debug, PartialEq)]
 pub struct PerimeterSlab {
     pub beam: ElemId,

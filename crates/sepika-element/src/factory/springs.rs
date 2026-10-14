@@ -13,7 +13,7 @@ use super::regime::is_column_member;
 use super::StrengthBasis;
 use crate::frame::concentrated::MnInteraction;
 
-/// 端部塑性化域モデルの塑性化域長 Lp [mm]。
+/// 端部塑性化域モデルの塑性化域長 Lp `[mm]`。
 pub fn plastic_zone_length(data: &ElementData, model: &Model) -> f64 {
     let depth = data
         .section

@@ -6,7 +6,7 @@ use sepika_core::model::{wall_element_geometry, ElementKind, Model};
 use sepika_element::behavior::{Ctx, ElementBehavior};
 use sepika_element::frame::beam::MemberForces;
 
-/// 力 [N]・モーメント [Nmm] は全体座標、基準点は未変形座標 [mm]。
+/// 力 `[N]`・モーメント `[Nmm]` は全体座標、基準点は未変形座標 `[mm]`。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WallResultant {
     pub origin_mm: [f64; 3],
@@ -14,7 +14,7 @@ pub struct WallResultant {
     pub moment_nmm: [f64; 3],
 }
 impl WallResultant {
-    /// 同じ力系を新しい基準点 [mm] へ移す。
+    /// 同じ力系を新しい基準点 `[mm]` へ移す。
     pub fn at_origin(&self, origin_mm: [f64; 3]) -> Self {
         let arm = std::array::from_fn(|d| self.origin_mm[d] - origin_mm[d]);
         let shift = cross(arm, self.force_n);

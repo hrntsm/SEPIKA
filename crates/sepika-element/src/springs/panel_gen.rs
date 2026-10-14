@@ -47,13 +47,13 @@ use sepika_core::panel_zone::{
 pub struct GeneratedPanel {
     /// 接合部の節点。
     pub node: NodeId,
-    /// 柱せい方向のパネル寸法 `dc` [mm]。
+    /// 柱せい方向のパネル寸法 `dc` `[mm]`。
     pub dc: f64,
-    /// 梁フランジ板厚中心間距離 `db` [mm]。
+    /// 梁フランジ板厚中心間距離 `db` `[mm]`。
     pub db: f64,
-    /// パネル板厚 `tp` [mm]。
+    /// パネル板厚 `tp` `[mm]`。
     pub tp: f64,
-    /// 実効体積 `Ve` [mm³]。
+    /// 実効体積 `Ve` `[mm³]`。
     pub ve: f64,
     /// パネルせん断剛性 `Kxp = Kyp = G・Ve` [N·mm/rad]。
     pub k_panel: f64,

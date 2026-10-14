@@ -21,8 +21,8 @@ use sepika_core::model::BrbAttr;
 ///
 /// 軸力検定比と座屈長さ検定比の大きい方を総合検定比とする。
 /// 長期は短期許容軸力の 1/1.5 を用いる。
-/// `n_design` は部材軸力 [N]（符号は問わず絶対値で評価する）、
-/// `member_length` は芯材全長 [mm]。
+/// `n_design` は部材軸力 `[N]`（符号は問わず絶対値で評価する）、
+/// `member_length` は芯材全長 `[mm]`。
 pub fn brb_check(
     attr: &BrbAttr,
     n_design: f64,

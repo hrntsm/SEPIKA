@@ -27,7 +27,7 @@ pub struct SecondaryMemberDraft {
     pub pos_b: String,
     /// 端 B を自由端（片持ち）にするか。
     pub free_end: bool,
-    /// 片持ちの自由端ベクトル。小梁は `[dx, dy]`、間柱は `[構面内 s, z]` [mm]。
+    /// 片持ちの自由端ベクトル。小梁は `[dx, dy]`、間柱は `[構面内 s, z]` `[mm]`。
     pub free_vector: [String; 2],
     pub section: Option<SectionId>,
     pub name: String,

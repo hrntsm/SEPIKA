@@ -4,7 +4,7 @@
 //! 出典: J.B. Mander, M.J.N. Priestley, R. Park, "Theoretical Stress-Strain Model
 //! for Confined Concrete", Journal of Structural Engineering, ASCE, 114(8), 1988。
 //!
-//! 単位規約: 応力 [N/mm²]、長さ [mm]、ひずみは無次元。
+//! 単位規約: 応力 [N/mm²]、長さ `[mm]`、ひずみは無次元。
 //! 圧縮を正の大きさで扱う（fco > 0, eps_co > 0 のように、圧縮側の値を正で表す）。
 
 /// Mander 包絡線のパラメータ（圧縮側、大きさ表記）。
@@ -50,13 +50,13 @@ pub fn confined_params(fco: f64, eps_co: f64, fl_eff: f64) -> ManderParams {
 /// 円形断面の横拘束筋データ。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CircularHoop {
-    /// コア径 ds [mm]。
+    /// コア径 ds `[mm]`。
     pub ds: f64,
-    /// フープのピッチ s [mm]。
+    /// フープのピッチ s `[mm]`。
     pub s: f64,
-    /// フープの純間隔 s' [mm]。
+    /// フープの純間隔 s' `[mm]`。
     pub s_clear: f64,
-    /// フープ 1 本の断面積 Asp [mm²]。
+    /// フープ 1 本の断面積 Asp `[mm²]`。
     pub asp: f64,
     /// フープの降伏強度 fyh [N/mm²]。
     pub fyh: f64,
@@ -89,23 +89,23 @@ pub fn circular_effective_lateral_stress(h: &CircularHoop) -> f64 {
 /// 矩形断面の横拘束筋データ。
 #[derive(Clone, Debug, PartialEq)]
 pub struct RectangularHoop {
-    /// コア幅 bc [mm]。
+    /// コア幅 bc `[mm]`。
     pub bc: f64,
-    /// コアせい dc [mm]。
+    /// コアせい dc `[mm]`。
     pub dc: f64,
-    /// フープのピッチ s [mm]。
+    /// フープのピッチ s `[mm]`。
     pub s: f64,
-    /// フープの純間隔 s' [mm]。
+    /// フープの純間隔 s' `[mm]`。
     pub s_clear: f64,
-    /// x 方向に有効な脚断面積合計 Asx [mm²]。
+    /// x 方向に有効な脚断面積合計 Asx `[mm²]`。
     pub asx: f64,
-    /// y 方向に有効な脚断面積合計 Asy [mm²]。
+    /// y 方向に有効な脚断面積合計 Asy `[mm²]`。
     pub asy: f64,
     /// フープ降伏強度 fyh [N/mm²]。
     pub fyh: f64,
     /// コア面積に対する主筋比 ρcc。
     pub rho_cc: f64,
-    /// 隣接主筋間の純間隔 wi [mm] のリスト。
+    /// 隣接主筋間の純間隔 wi `[mm]` のリスト。
     pub w_clear: Vec<f64>,
 }
 

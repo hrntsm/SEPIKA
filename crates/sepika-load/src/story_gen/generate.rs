@@ -9,7 +9,7 @@ use std::ops::Add;
 #[derive(Clone, Debug, PartialEq)]
 pub struct StoryGenResult {
     pub wall_weight_generation: sepika_core::model::WallWeightGenerationMode,
-    /// 階 ID と自動算定重量 [N]。手入力採用値とは独立。
+    /// 階 ID と自動算定重量 `[N]`。手入力採用値とは独立。
     pub calculated_weights: Vec<(StoryId, f64)>,
     /// 下から順の階（基部レベルは含まない）。
     pub stories: Vec<Story>,
@@ -45,7 +45,7 @@ pub struct StoryGenResult {
 ///   最下階（基部の床）だけは下端を含む点区間で、柱脚・基礎梁の節点が属する
 /// - **剛床のスレーブは床面のみ**（階のレベル ±[`DIAPHRAGM_LEVEL_TOL_MM`]）。
 ///   床面に節点がない階は剛床を持たない
-/// - 代表節点の拘束は [`master_restraint`] がスレーブの可動性から決める
+/// - 代表節点の拘束は `master_restraint` がスレーブの可動性から決める
 /// - 前回生成した剛床代表節点（`model.generated_masters`）は構造節点の
 ///   クラスタリング対象から除外する（再生成時に過去の代表節点を混ぜない）
 /// - 各階の剛床代表節点は、その階の全構造節点の慣性力重心（重量重み付き重心）に

@@ -30,7 +30,7 @@ pub fn span_node_key(a: NodeId, b: NodeId) -> (NodeId, NodeId) {
 
 /// 分配結果 1 件の線荷重形状を、小梁スパン上の [`MemberLoadKind`] 列へ変換する。
 ///
-/// `len` は支持間距離 [mm]。`flip` が true のとき、荷重作用位置をスパン終端から見た
+/// `len` は支持間距離 `[mm]`。`flip` が true のとき、荷重作用位置をスパン終端から見た
 /// 座標へ鏡映する（分配側の `Span.nodes` 順と二次部材の `nodes` 順が逆のとき）。
 pub fn load_shape_to_member_loads(shape: &LoadShape, len: f64, flip: bool) -> Vec<MemberLoadKind> {
     if len <= 1e-9 {
@@ -207,9 +207,9 @@ fn simple_beam_max_deflection(
 pub struct BeamExtremes {
     /// 最大曲げモーメント [N·mm]（絶対値）。
     pub m_max: f64,
-    /// 最大せん断力 [N]（絶対値）。
+    /// 最大せん断力 `[N]`（絶対値）。
     pub q_max: f64,
-    /// 最大たわみ [mm]（絶対値）。
+    /// 最大たわみ `[mm]`（絶対値）。
     pub deflection: f64,
     /// 表示用の等価等分布線荷重 [N/mm]（合計荷重 / スパン）。
     pub w_equiv: f64,
@@ -440,7 +440,7 @@ fn map_loads_onto_axis(
         .collect()
 }
 
-/// 分配荷重が材軸を覆う長さの合計 [mm]（重なりは結合）。集中荷重は区間 0。
+/// 分配荷重が材軸を覆う長さの合計 `[mm]`（重なりは結合）。集中荷重は区間 0。
 pub fn covered_length_of_loads(loads: &[MemberLoadKind], span: f64) -> f64 {
     if span <= 1e-9 {
         return 0.0;
@@ -643,7 +643,7 @@ pub fn beam_mass_equiv_udl(
     Ok((w > 0.0).then_some(w))
 }
 
-/// 全床領域の [`distribute_region`] 出力から、実部材化していない小梁へ荷重を載せる。
+/// 全床領域の [`crate::floor::distribute_region`] 出力から、実部材化していない小梁へ荷重を載せる。
 ///
 /// 床板境界の `Span` は、両端が小梁材軸上にあれば（節点対の完全一致を要求しない）
 /// その小梁の局所座標へ写して重ねる。部分区間 `t` も同じ。大梁材軸上の `Span` は除外する

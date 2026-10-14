@@ -20,7 +20,7 @@ pub fn concrete_young_modulus_gamma(fc: f64, gamma_kn_m3: f64) -> f64 {
     3.35e4 * (gamma_kn_m3 / 24.0).powi(2) * (fc / 60.0).powf(1.0 / 3.0)
 }
 
-/// 平面I形断面のせん断形状係数を区分多項式の積分で求める。寸法は [mm]。
+/// 平面I形断面のせん断形状係数を区分多項式の積分で求める。寸法は `[mm]`。
 /// 引数は全せい・片側フランジせい・フランジ幅・ウェブ幅の順。
 /// 非有限・非正の全せい/幅、側柱なし、フランジ幅が壁厚以下なら1.2を返す。
 pub fn wall_shear_shape_factor_isection(d_total: f64, dc_each: f64, bc: f64, t: f64) -> f64 {

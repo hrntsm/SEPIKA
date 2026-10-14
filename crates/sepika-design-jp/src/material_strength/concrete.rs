@@ -44,7 +44,7 @@ pub fn concrete_allowable_shear_class(fc: f64, class: ConcreteClass, long_term: 
     concrete_allowable_shear(fc, long_term) * concrete_class_factor(class)
 }
 
-/// 断面算定用のヤング係数比 n [無次元]（Fc に応じた区分値）。
+/// 断面算定用のヤング係数比 n `[無次元]`（Fc に応じた区分値）。
 pub fn young_ratio_n(fc: f64) -> f64 {
     if fc <= 27.0 {
         15.0

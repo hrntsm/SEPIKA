@@ -64,17 +64,17 @@ impl NodalLoad {
 }
 
 /// 部材（梁）荷重の種別。位置・強度はすべて部材ローカル x 軸（i→j）に沿った
-/// 距離 [mm] と強度で与える。作用方向は `MemberLoad::dir`（全体座標）で指定する。
+/// 距離 `[mm]` と強度で与える。作用方向は `MemberLoad::dir`（全体座標）で指定する。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum MemberLoadKind {
-    /// 中間集中荷重: i 端から距離 `a` [mm] の位置に大きさ `p` [N]。
+    /// 中間集中荷重: i 端から距離 `a` `[mm]` の位置に大きさ `p` `[N]`。
     Point { a: f64, p: f64 },
     /// 区間分布荷重: [`a`, `b`] 区間に強度 `w1`→`w2` [N/mm] の線形分布。
     /// 等分布は `w1 == w2`、全長は `a = 0, b = L`、三角形は端の強度を 0 にする。
     Distributed { a: f64, b: f64, w1: f64, w2: f64 },
 }
 
-/// 部材荷重の区間指定。既定は i 端からの固定距離 [mm]。
+/// 部材荷重の区間指定。既定は i 端からの固定距離 `[mm]`。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum MemberLoadExtent {
     #[default]
@@ -90,7 +90,7 @@ pub struct MemberLoad {
     pub elem: ElemId,
     pub dir: [f64; 3],
     pub kind: MemberLoadKind,
-    /// 全長追従か、i 端からの固定距離 [mm] か。省略時は固定距離。
+    /// 全長追従か、i 端からの固定距離 `[mm]` か。省略時は固定距離。
     #[serde(default)]
     pub extent: MemberLoadExtent,
     /// 利用者が付けた荷重の名称。空文字は無名（[`NodalLoad::name`] と同じ規約）。
@@ -112,7 +112,7 @@ impl MemberLoad {
         }
     }
 
-    /// 全長等分布を作る。材長 [mm] と強度 [N/mm] を与え、方向は全体座標で保持する。
+    /// 全長等分布を作る。材長 `[mm]` と強度 [N/mm] を与え、方向は全体座標で保持する。
     pub fn full_length_uniform(elem: ElemId, dir: [f64; 3], length_mm: f64, w: f64) -> Self {
         Self {
             extent: MemberLoadExtent::FullLengthUniform,
@@ -129,7 +129,7 @@ impl MemberLoad {
         }
     }
 
-    /// 材長・位置 [mm] と作用区分を検証する。固定距離は支間内、分布は a < b が必要。
+    /// 材長・位置 `[mm]` と作用区分を検証する。固定距離は支間内、分布は a < b が必要。
     /// 材長は有限かつ 1e-9 mm より大きく、全長追従は利用者入力の全長等分布に限る。
     pub fn validate_extent(&self, length_mm: f64) -> Result<(), String> {
         if self.extent == MemberLoadExtent::FixedDistance {
@@ -370,7 +370,7 @@ pub fn default_combinations() -> Vec<LoadCombination> {
 #[serde(deny_unknown_fields)]
 pub struct DamperSpec {
     pub elem: ElemId,
-    /// 総重量 [N]（有限・非負）。範囲内の支持部・付加重量を含み、別モデルの支持部を除く。
+    /// 総重量 `[N]`（有限・非負）。範囲内の支持部・付加重量を含み、別モデルの支持部を除く。
     pub total_weight: f64,
 }
 

@@ -24,18 +24,18 @@ pub struct SrcPanelInput {
     pub concrete_class: ConcreteClass,
     /// 長期荷重時の検定かどうか（`true`=長期、`false`=短期）。
     pub long_term: bool,
-    /// 柱幅 Cb [mm]。
+    /// 柱幅 Cb `[mm]`。
     pub col_width: f64,
-    /// 梁幅 Bb [mm]（`beam_is_steel=true` の場合は未使用）。
+    /// 梁幅 Bb `[mm]`（`beam_is_steel=true` の場合は未使用）。
     pub beam_width: f64,
-    /// 梁の上下主筋間距離 mBd [mm]（`beam_is_steel=true` の場合は梁鉄骨の
+    /// 梁の上下主筋間距離 mBd `[mm]`（`beam_is_steel=true` の場合は梁鉄骨の
     /// フランジ重心間距離 sBd を渡す）。
     pub m_bd: f64,
-    /// 柱の左右主筋間距離 mCd [mm]。
+    /// 柱の左右主筋間距離 mCd `[mm]`。
     pub m_cd: f64,
-    /// 接合部鉄骨ウェブ厚 Jtw [mm]（鉄骨なし=0）。
+    /// 接合部鉄骨ウェブ厚 Jtw `[mm]`（鉄骨なし=0）。
     pub j_tw: f64,
-    /// 柱鉄骨のフランジ重心間距離 sCd [mm]。
+    /// 柱鉄骨のフランジ重心間距離 sCd `[mm]`。
     pub s_cd: f64,
     /// 梁が S 造かどうか（`m_bd` に mBd〔SRC/RC〕か sBd〔S〕のどちらが
     /// 渡っているかを示す情報。cV = Cb・m_bd・mCd は両者共通で beam_width は

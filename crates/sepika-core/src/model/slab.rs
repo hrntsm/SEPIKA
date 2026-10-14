@@ -101,7 +101,7 @@ pub enum SlabShape {
     Attached {
         /// 取付き先。荷重の出口は取付き先の種類ごとに決まる（[`RegionAnchor`] 参照）。
         anchor: RegionAnchor,
-        /// 張り出し量 [mm]。意味は取付き先の種類で決まる（[`RegionAnchor`] 参照）。
+        /// 張り出し量 `[mm]`。意味は取付き先の種類で決まる（[`RegionAnchor`] 参照）。
         extent: [f64; 2],
     },
 }
@@ -148,7 +148,7 @@ impl Slab {
         }
     }
 
-    /// 境界多角形の座標列 [mm]。取り付く床板は取付き先と張り出し量から算出する。
+    /// 境界多角形の座標列 `[mm]`。取り付く床板は取付き先と張り出し量から算出する。
     /// 囲まれた床板は割当領域の支持部材材軸から解決する。引けない場合は `None`。
     pub fn boundary_coords(&self, model: &Model) -> Option<Vec<[f64; 3]>> {
         match self.shape {
@@ -162,7 +162,7 @@ impl Slab {
         }
     }
 
-    /// 境界多角形の座標列 [mm] を、節点座標の引き方を差し替えて求める。
+    /// 境界多角形の座標列 `[mm]` を、節点座標の引き方を差し替えて求める。
     ///
     /// [`Slab::boundary_coords`] はモデルの節点座標をそのまま使うが、変形図・
     /// モード形・時刻歴は**変形後の節点座標**で描く必要がある。形状の組み立て方
@@ -262,7 +262,7 @@ impl Slab {
         }
     }
 
-    /// 床板のレベル Z [mm]（境界座標の Z の平均）。境界が引けなければ `None`。
+    /// 床板のレベル Z `[mm]`（境界座標の Z の平均）。境界が引けなければ `None`。
     pub fn level(&self, model: &Model) -> Option<f64> {
         let coords = self.boundary_coords(model)?;
         if coords.is_empty() {
@@ -297,7 +297,7 @@ impl Slab {
         self.plate.usage
     }
 
-    /// 取り付く床板の設計スパン [mm]（張り出し量の絶対値の大きい方）。
+    /// 取り付く床板の設計スパン `[mm]`（張り出し量の絶対値の大きい方）。
     /// 大梁または小梁で囲まれた床板、値が非有限、または 0 以下のときは `None`。
     pub fn attached_design_span(&self) -> Option<f64> {
         match &self.shape {
@@ -334,7 +334,7 @@ impl Model {
             .and_then(|sid| self.sections.get(sid.index()))
     }
 
-    /// 版の板厚 [mm]。断面の [`Section::thickness`] をそのまま返す。
+    /// 版の板厚 `[mm]`。断面の [`Section::thickness`] をそのまま返す。
     ///
     /// 断面が未割当、または断面が板厚を持たない（板状でない形状を割り当てた）場合は `None`。
     /// **建物一律の [`Model::slab_thickness`] へは退かない**。あちらは「剛性計算に見込む
