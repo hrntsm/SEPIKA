@@ -282,11 +282,43 @@ fn assemble_design_check_summary(
 
 #[cfg(test)]
 mod tests {
+    use super::super::rc_wall534_fixture as crack_fixture;
     use super::super::rc_wall617_fixture as fixture;
     use super::*;
     use sepika_core::ids::{ElemId, NodeId, WallPlateId};
     use sepika_design_jp::wall_check::{WallCheck, WallCheckKind, WallSkipKind};
     use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
+
+    #[test]
+    fn mcp_design_crack_points_match_independent_fixture_in_json() {
+        let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
+            &crack_fixture::input_model(fixture::input_model()),
+            &JobParams {
+                load_case: Some(0),
+                ..Default::default()
+            },
+        )
+        .unwrap() else {
+            panic!()
+        };
+        let checks: Vec<WallCheck> =
+            serde_json::from_value(summary["wall_checks"].clone()).unwrap();
+        let reference = checks
+            .iter()
+            .find(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+            .unwrap();
+        assert!(
+            matches!(reference.outcome, CheckOutcome::Checked(_)),
+            "{:?}",
+            reference
+        );
+        crack_fixture::assert_reference(reference.reference_skeleton.as_ref().unwrap());
+        assert!(checks
+            .iter()
+            .filter(|w| w.kind == WallCheckKind::AllowableShear)
+            .all(|w| w.reference_skeleton.is_none()));
+    }
+
     #[test]
     fn mcp_rc_wall_static_case_and_combo_preserve_solved_batch_and_face_state() {
         use sepika_core::ids::LoadCaseId;
@@ -419,6 +451,7 @@ mod tests {
             node: Some(NodeId(0)),
             case: "case:5".into(),
             kind: WallCheckKind::AllowableShear,
+            reference_skeleton: None,
             shear_method: None,
             seismic_target: true,
             skip_kind: why,

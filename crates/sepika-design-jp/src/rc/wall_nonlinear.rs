@@ -1,18 +1,11 @@
 //! RC 造耐震壁の**せん断非線形特性（トリリニア）**。
 //!
-//! 非線形解析で用いるせん断ばねの骨格曲線（トリリニア）を算定する。
-//! 原点・ひび割れ・終局の3点を求める。入力は SI 系で受け取り、
-//! Qc の評価は内部で工学単位系へ換算する。
-
-/// 単位換算: 1 kgf/cm² = 0.0980665 N/mm²。N/mm² → kgf/cm² は逆数を乗じる。
-const NMM2_TO_KGFCM2: f64 = 1.0 / 0.0980665;
-/// 単位換算: 1 kgf = 1 kg × 標準重力加速度 g [m/s²] = 9.80665 N。
-/// g の情報源は `sepika_core::units`（内部単位系の mm/s² から m/s² へ換算）。
-const KGF_TO_N: f64 = sepika_core::units::GRAVITY_MM_S2 / 1000.0;
+//! 実解析要素へ接続されない純せん断参考骨格を算定する。
+//! 長さ `[mm]`、面積 `[mm²]`、応力 `[N/mm²]`、力 `[N]` を用いる。
 
 /// RC 造耐震壁のせん断トリリニア算定の入力。
 ///
-/// 単位は SI 系（長さ `[mm]`・面積 `[mm²]`・応力 [N/mm²]・軸力 `[N]`）で統一する。
+/// 単位は SI 系（長さ `[mm]`・面積 `[mm²]`・応力 `[N/mm²]`・軸力 `[N]`）で統一する。
 #[derive(Clone, Copy, Debug)]
 pub struct WallShearTrilinearInput {
     /// 採用するRC壁終局せん断耐力の算定方式。
@@ -21,12 +14,8 @@ pub struct WallShearTrilinearInput {
     pub wall_height_mm: f64,
     /// 壁長さ（側柱中心間）`[mm]`。
     pub wall_length_mm: f64,
-    /// コンクリート設計基準強度 Fc [N/mm²]。
+    /// コンクリート設計基準強度 Fc `[N/mm²]`。
     pub fc: f64,
-    /// 壁体断面積 Aw `[mm²]`（側柱＋壁板の軸断面積。Qc・σ0 の基準面積）。
-    pub aw: f64,
-    /// 引張側最端の柱 1 本の主筋量 `[mm²]`（pg = 100·この値/Aw [%]）。
-    pub tension_column_main_area: f64,
     /// 等価壁厚 te `[mm]`（I 形断面を等価長方形に置換した幅。壁厚 t の 1.5 倍以下）。
     pub te: f64,
     /// 壁厚 t `[mm]`（pwh = Pwh·t/te の換算に用いる）。
@@ -37,11 +26,11 @@ pub struct WallShearTrilinearInput {
     pub dc_compression: f64,
     /// 引張側柱の主筋断面積 at `[mm²]`（pte = 100·at/(te·d) の分子）。
     pub tension_column_at: f64,
-    /// 水平せん断補強筋（横筋）の材料強度 σwh [N/mm²]。
+    /// 水平せん断補強筋（横筋）の材料強度 σwh `[N/mm²]`。
     pub sigma_wh: f64,
     /// 実壁厚に対する横筋比（小数）。βsでは等価壁厚へ換算しない。
     pub pwh_ratio: f64,
-    /// 平均圧縮軸応力度 [N/mm²]。
+    /// 平均圧縮軸応力度 `[N/mm²]`。
     pub sigma_0: f64,
     /// せん断スパン比 M/(QD)。骨格では有限の正値が必須。
     pub shear_span_ratio: f64,
@@ -85,7 +74,7 @@ impl WallShearTrilinear {
         Ok([(0.0, 0.0), (gamma_c, self.qc), (gamma_u, self.qu)])
     }
 
-    /// G [N/mm²]・せん断有効面積 `[mm²]`・高さ `[mm]` に対する (せん断変位 `[mm]`, Q `[N]`)。
+    /// G `[N/mm²]`・せん断有効面積 `[mm²]`・高さ `[mm]` に対する (せん断変位 `[mm]`, Q `[N]`)。
     /// 面積は形状係数を反映済みの純せん断成分。曲げ柔性を含めない。不正入力はエラー。
     pub fn displacement_points(
         &self,
@@ -103,20 +92,27 @@ impl WallShearTrilinear {
     }
 }
 
-/// せん断ひび割れ耐力 `[N]`。Fc [N/mm²]・Aw `[mm²]`・側柱主筋面積 `[mm²]` を用いる。
-/// FcまたはAwが非正の場合は0。
-pub fn wall_shear_crack(inp: &WallShearTrilinearInput) -> f64 {
-    if inp.fc <= 0.0 || inp.aw <= 0.0 {
-        return 0.0;
+/// 無開口壁のせん断ひび割れ耐力 `[N]`。Fc `[N/mm²]`・実壁厚/柱心距離 `[mm]` を用いる。
+/// 有開口・非有限値・非正値・面積や耐力のoverflowはエラー。
+pub fn wall_shear_crack(inp: &WallShearTrilinearInput) -> Result<f64, String> {
+    if inp.opening.is_some() {
+        return Err("有開口壁のQc用開口低減率が未確定のため参考骨格は未対応です".into());
     }
-    let fc_kgf = inp.fc * NMM2_TO_KGFCM2;
-    let aw_cm2 = inp.aw / 100.0;
-    let pg_pct = 100.0 * inp.tension_column_main_area.max(0.0) / inp.aw;
-    let qc_kgf = (0.043 * pg_pct + 0.051) * fc_kgf * aw_cm2;
-    qc_kgf * KGF_TO_N
+    if [inp.fc, inp.t, inp.wall_length_mm]
+        .iter()
+        .any(|v| !v.is_finite() || *v <= 0.0)
+    {
+        return Err("Qc用のFc・実壁厚・柱心距離は有限の正値が必要です".into());
+    }
+    let aw_qc_mm2 = inp.t * inp.wall_length_mm;
+    let qc_n = 0.1 * inp.fc * aw_qc_mm2;
+    if !aw_qc_mm2.is_finite() || aw_qc_mm2 <= 0.0 || !qc_n.is_finite() || qc_n <= 0.0 {
+        return Err("Qc用壁板面積・ひび割れ耐力を有限の正値として算定できません".into());
+    }
+    Ok(qc_n)
 }
 
-/// 横筋比（実壁厚基準）・横筋降伏強度/Fc [N/mm²] から終局割線剛性比を求める。
+/// 横筋比（実壁厚基準）・横筋降伏強度/Fc `[N/mm²]` から終局割線剛性比を求める。
 /// 強度は有限正、比は有限かつ 0〜0.015。Fc の原研究範囲外はエラー。
 pub fn wall_shear_beta_s(inp: &WallShearTrilinearInput) -> Result<f64, String> {
     if !inp.fc.is_finite() || !(170.0 * 0.0980665..=280.0 * 0.0980665).contains(&inp.fc) {
@@ -166,6 +162,7 @@ pub fn wall_shear_ultimate(inp: &WallShearTrilinearInput) -> f64 {
 
 /// 無開口壁の Qc・βs・Qu を算定する。不正入力・Qc≥Qu はエラー。
 pub fn wall_shear_trilinear(inp: &WallShearTrilinearInput) -> Result<WallShearTrilinear, String> {
+    let qc = wall_shear_crack(inp)?;
     let beta_s = wall_shear_beta_s(inp)?;
     if !inp.wall_height_mm.is_finite()
         || !inp.wall_length_mm.is_finite()
@@ -175,12 +172,7 @@ pub fn wall_shear_trilinear(inp: &WallShearTrilinearInput) -> Result<WallShearTr
     {
         return Err("壁高さ/壁長が原研究範囲 0.33〜1.63 外です".into());
     }
-    if inp.opening.is_some() {
-        return Err("有開口壁のせん断トリリニア骨格は未対応です".into());
-    }
     if [
-        inp.aw,
-        inp.tension_column_main_area,
         inp.te,
         inp.t,
         inp.d_wall,
@@ -197,7 +189,6 @@ pub fn wall_shear_trilinear(inp: &WallShearTrilinearInput) -> Result<WallShearTr
         return Err("せん断スパン比 M/(QD) が有限の正値ではありません".into());
     }
     let qu = wall_shear_ultimate(inp);
-    let qc = wall_shear_crack(inp);
     if !qu.is_finite() || !qc.is_finite() || qc <= 0.0 || qu <= qc {
         return Err("Qc < Qu を満たさないためせん断トリリニア骨格を算定できません".into());
     }
@@ -218,8 +209,6 @@ mod tests {
             wall_height_mm: 3000.0,
             wall_length_mm: 4000.0,
             fc: 24.0,
-            aw: 1_440_000.0,
-            tension_column_main_area: 3097.0,
             te: 180.0,
             t: 180.0,
             d_wall: 4600.0,
@@ -281,14 +270,23 @@ mod tests {
         }
     }
     #[test]
-    fn crack_force_matches_independent_unit_conversion() {
-        assert!((wall_shear_crack(&base_input()) - 2_082_170.4).abs() < 1e-6);
+    fn crack_force_uses_real_wall_thickness_and_column_center_length() {
+        let mut input = base_input();
+        input.t = 200.0;
+        input.wall_length_mm = 4200.0;
+        assert!((wall_shear_crack(&input).unwrap() - 2_016_000.0).abs() < 1e-6);
+        input.te = 300.0;
+        input.tension_column_at = 100_000.0;
+        input.sigma_0 = 5.0;
+        input.pwh_ratio = 0.015;
+        assert!((wall_shear_crack(&input).unwrap() - 2_016_000.0).abs() < 1e-6);
+        input.wall_length_mm = 2100.0;
+        assert!((wall_shear_crack(&input).unwrap() - 1_008_000.0).abs() < 1e-6);
     }
     #[test]
     fn full_shear_skeleton_matches_independent_hand_calculation() {
         let mut input = base_input();
         input.fc = 17.0;
-        input.aw = 1_332_000.0;
         input.te = 270.0;
         input.pwh_ratio = 0.015;
         let properties = sepika_core::section_shape::wall_rectangular_section_properties(
@@ -300,14 +298,70 @@ mod tests {
         assert_eq!(properties.area, 1_332_000.0);
         assert!((properties.shear_area - 783_187.0050213936).abs() < 1e-6);
         let tri = wall_shear_trilinear(&input).unwrap();
-        assert!((tri.qc - 1_381_234.7).abs() < 1e-6);
+        assert!((tri.qc - 1_224_000.0).abs() < 1e-6);
         assert!((tri.qu - 2_443_056.1431899336).abs() < 1e-6);
         assert!((tri.beta_s - 0.25973529411764706).abs() < 1e-12);
         let points = tri
             .displacement_points(10_000.0, properties.shear_area, 3000.0)
             .unwrap();
-        assert!((points[1].0 - 0.5290823358192479).abs() < 1e-12);
+        assert!((points[1].0 - 0.4688535402728873).abs() < 1e-12);
         assert!((points[2].0 - 3.602950218988746).abs() < 1e-12);
+    }
+
+    #[test]
+    fn invalid_crack_inputs_and_overflow_are_reasoned_errors() {
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            for field in 0..3 {
+                let mut input = base_input();
+                match field {
+                    0 => input.fc = bad,
+                    1 => input.t = bad,
+                    _ => input.wall_length_mm = bad,
+                }
+                assert!(
+                    matches!(wall_shear_crack(&input), Err(reason) if reason.contains("有限の正値"))
+                );
+                assert!(wall_shear_trilinear(&input).is_err());
+            }
+        }
+        for (t, l, fc) in [(f64::MAX, 2.0, 24.0), (1e200, 1e100, 1e100)] {
+            let mut input = base_input();
+            input.t = t;
+            input.wall_length_mm = l;
+            input.fc = fc;
+            assert!(
+                matches!(wall_shear_crack(&input), Err(reason) if reason.contains("算定できません"))
+            );
+        }
+        let mut input = base_input();
+        input.opening = Some((200.0, 200.0, 3000.0, 4000.0));
+        assert!(
+            matches!(wall_shear_crack(&input), Err(reason) if reason.contains("Qc用開口低減率が未確定"))
+        );
+    }
+
+    #[test]
+    fn invalid_capacity_stiffness_and_reversed_points_have_no_zero_skeleton() {
+        let valid = WallShearTrilinear {
+            qc: 2_016_000.0,
+            qu: 4_000_000.0,
+            beta_s: 0.15130833333333333,
+            r_opening: 1.0,
+        };
+        for qu in [0.0, 2_016_000.0, 1_000_000.0, f64::NAN, f64::INFINITY] {
+            assert!(WallShearTrilinear { qu, ..valid }
+                .skeleton_points(3e9)
+                .is_err());
+        }
+        for beta_s in [0.0, -0.1, 1.0, 2.0, f64::NAN, f64::INFINITY] {
+            assert!(WallShearTrilinear { beta_s, ..valid }
+                .skeleton_points(3e9)
+                .is_err());
+        }
+        for stiffness in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::MIN_POSITIVE] {
+            assert!(valid.skeleton_points(stiffness).is_err());
+        }
+        assert!(valid.displacement_points(f64::MAX, 2.0, 1.0).is_err());
     }
 
     #[test]
@@ -316,7 +370,7 @@ mod tests {
         input.opening = Some((200.0, 200.0, 3000.0, 4000.0));
         assert!(wall_shear_trilinear(&input).is_err());
         input.opening = None;
-        input.tension_column_main_area = 1e6;
+        input.t = 1e6;
         assert!(wall_shear_trilinear(&input).is_err());
     }
 

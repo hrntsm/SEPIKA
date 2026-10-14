@@ -399,6 +399,7 @@ pub async fn run_stdio_server(state: ServerState) -> Result<(), Box<dyn std::err
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::job::rc_wall534_fixture as crack_fixture;
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, StoryId};
     use sepika_core::model::{
@@ -702,6 +703,61 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("job did not reach a terminal state in time");
+    }
+
+    #[tokio::test]
+    async fn public_mcp_crack_reference_matches_independent_points_and_opening_skip() {
+        use sepika_design_jp::{
+            wall_check::{WallCheck, WallCheckKind},
+            CheckOutcome,
+        };
+        let dir = test_store_dir("534-crack-reference");
+        let model = crack_fixture::input_model(crate::job::rc_wall617_fixture::input_model());
+        let server = SepikaServer::new(make_state(model.clone(), &dir));
+        let result = server
+            .analysis_run(Parameters(run_args(JobKind::DesignCheck)))
+            .await
+            .unwrap();
+        let summary = done_summary(&wait_for_terminal(&server, &extract_job_id(&result)).await);
+        let checks: Vec<WallCheck> =
+            serde_json::from_value(summary["wall_checks"].clone()).unwrap();
+        let reference = checks
+            .iter()
+            .find(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+            .unwrap();
+        assert!(
+            matches!(reference.outcome, CheckOutcome::Checked(_)),
+            "{:?}",
+            reference
+        );
+        crack_fixture::assert_reference(reference.reference_skeleton.as_ref().unwrap());
+        {
+            let mut state = server.state.lock().await;
+            state.model.wall_plates[0]
+                .openings
+                .push(sepika_core::model::WallOpening {
+                    width: 200.0,
+                    height: 200.0,
+                    offset: None,
+                });
+        }
+        let result = server
+            .analysis_run(Parameters(run_args(JobKind::DesignCheck)))
+            .await
+            .unwrap();
+        let summary = done_summary(&wait_for_terminal(&server, &extract_job_id(&result)).await);
+        let checks: Vec<WallCheck> =
+            serde_json::from_value(summary["wall_checks"].clone()).unwrap();
+        let reference = checks
+            .iter()
+            .find(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+            .unwrap();
+        assert!(
+            matches!(&reference.outcome, CheckOutcome::Skipped { reason } if reason.contains("Qc用開口低減率が未確定")),
+            "{:?}",
+            reference
+        );
+        assert!(reference.reference_skeleton.is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

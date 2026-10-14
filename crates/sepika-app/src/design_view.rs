@@ -1168,6 +1168,41 @@ pub(crate) fn wall_checks_ui(
             check.skip_kind.map(|kind| kind.label()).unwrap_or(""),
             reason
         ));
+        if let sepika_design_jp::CheckOutcome::Checked(result) = &check.outcome {
+            for component in &result.components {
+                ui.label(&component.detail);
+            }
+        }
+        if let Some(skeleton) = &check.reference_skeleton {
+            egui::CollapsingHeader::new(format!("{} / Q–δ・Q–γ参考骨格", check.label()))
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.label(format!(
+                        "Qc用Aw={:.1} mm² / 第2区間剛性={:.3} N/mm（実解析要素へは接続しません）",
+                        skeleton.aw_qc_mm2, skeleton.second_stiffness_n_per_mm
+                    ));
+                    for (name, x_label, points) in [
+                        ("Q–δ", "純せん断変位 δ [mm]", &skeleton.displacement_points),
+                        ("Q–γ", "純せん断角 γ [rad]", &skeleton.angle_points),
+                    ] {
+                        egui_plot::Plot::new((check.label(), name))
+                            .height(180.0)
+                            .x_axis_label(x_label)
+                            .y_axis_label("せん断力 Q [kN]")
+                            .show(ui, |plot| {
+                                plot.line(egui_plot::Line::new(
+                                    name,
+                                    egui_plot::PlotPoints::from(
+                                        points
+                                            .iter()
+                                            .map(|(x, q)| [*x, q / 1000.0])
+                                            .collect::<Vec<_>>(),
+                                    ),
+                                ))
+                            });
+                    }
+                });
+        }
     }
 }
 

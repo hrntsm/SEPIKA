@@ -106,6 +106,7 @@ impl MemberDesignCheckReport {
         }
         for row in &mut self.wall_checks {
             if matches!(row.outcome, CheckOutcome::Checked(_)) {
+                row.reference_skeleton = None;
                 row.outcome = skipped();
                 row.skip_kind = Some(crate::wall_check::WallSkipKind::MissingInput);
             }

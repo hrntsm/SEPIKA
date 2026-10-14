@@ -3,11 +3,13 @@
 use super::common::{ForcesAt, MemberInfo};
 use crate::rc::wall::{rc_wall_shear_check, RcWallInput, WallSideColumn};
 use crate::rc::wall_nonlinear::{wall_shear_trilinear, WallShearTrilinearInput};
+use crate::wall_check::WallShearReference;
 use crate::wall_opening::equivalent_opening;
 use crate::{CheckComponent, CheckKind, CheckOutcome, CheckResult, LoadTerm};
 use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::model::{ElementKind, Model};
 use sepika_core::section_shape::SectionShape;
+use std::collections::HashMap;
 
 /// 耐震壁（Wall 要素 × RcWall 形状）のせん断検定を一括で `out` へ追加する。
 pub(super) fn check_walls(
@@ -18,10 +20,11 @@ pub(super) fn check_walls(
     members: &[MemberInfo<'_>],
     term: LoadTerm,
     out: &mut Vec<(NodeId, String, CheckOutcome)>,
-) {
+) -> HashMap<ElemId, WallShearReference> {
+    let mut skeletons = HashMap::new();
     for &(id, forces) in member_forces {
         let first = out.len();
-        check_walls_selected(
+        skeletons.extend(check_walls_selected(
             model,
             &[(id, forces)],
             reference_batch,
@@ -29,7 +32,7 @@ pub(super) fn check_walls(
             members,
             term,
             out,
-        );
+        ));
         let Some(method) = model
             .element(id)
             .and_then(|elem| reference_shear_method(model, model.element_section(elem)))
@@ -48,6 +51,7 @@ pub(super) fn check_walls(
             }
         }
     }
+    skeletons
 }
 
 fn check_walls_selected(
@@ -58,7 +62,8 @@ fn check_walls_selected(
     members: &[MemberInfo<'_>],
     term: LoadTerm,
     out: &mut Vec<(NodeId, String, CheckOutcome)>,
-) {
+) -> HashMap<ElemId, WallShearReference> {
+    let mut skeletons = HashMap::new();
     for (eid, forces) in member_forces {
         let Some(elem) = model.element(*eid) else {
             continue;
@@ -114,6 +119,18 @@ fn check_walls_selected(
                 out.push((elem.nodes[0], label.into(), CheckOutcome::Skipped {
                     reason: format!("耐震壁 ID {} のコンクリート材料 ID {} の Fc が欠落または有限の正値ではありません", elem.id.0, mat.id.0),
                 }));
+            }
+            continue;
+        }
+        if !thickness.is_finite() || thickness <= 0.0 {
+            for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
+                out.push((
+                    elem.nodes[0],
+                    label.into(),
+                    CheckOutcome::Skipped {
+                        reason: format!("耐震壁 ID {} の実壁厚は有限の正値が必要です", elem.id.0),
+                    },
+                ));
             }
             continue;
         }
@@ -418,6 +435,19 @@ fn check_walls_selected(
         };
         out.push((elem.nodes[0], "耐震壁(RC)".into(), outcome));
 
+        if l0p > 1e-9 && h0p > 1e-9 {
+            out.push((
+                elem.nodes[0],
+                "耐震壁(RC)せん断非線形".into(),
+                CheckOutcome::Skipped {
+                    reason: format!(
+                        "耐震壁 ID {} の有開口壁のQc用開口低減率が未確定のため参考骨格は未対応です",
+                        elem.id.0
+                    ),
+                },
+            ));
+            continue;
+        }
         let Some(sigma_wh) = sigma_wh else {
             continue;
         };
@@ -459,7 +489,7 @@ fn check_walls_selected(
             thickness,
             column_geometry,
         );
-        let aw = section_properties.map(|p| p.area).unwrap_or(0.0);
+        let qu_physical_area_mm2 = section_properties.map(|p| p.area).unwrap_or(0.0);
         let shear_area_mm2 = section_properties.map(|p| p.shear_area).unwrap_or(0.0);
         if let Some(msg) = nonlinear_issue {
             out.push((
@@ -472,8 +502,8 @@ fn check_walls_selected(
             continue;
         }
         let d_wall = l + reference_column_depth / 2.0;
-        if col_main_area_max > 0.0 && aw > 0.0 && d_wall > 0.0 {
-            let te = (aw / d_wall).clamp(thickness, 1.5 * thickness);
+        if col_main_area_max > 0.0 && qu_physical_area_mm2 > 0.0 && d_wall > 0.0 {
+            let te = (qu_physical_area_mm2 / d_wall).clamp(thickness, 1.5 * thickness);
             let resolved = (|| {
                 let face = sepika_element::wall::static_face::StaticWallFace::new(elem, model)?;
                 let cases: Vec<_> = match selected_terms {
@@ -533,8 +563,6 @@ fn check_walls_selected(
                 wall_height_mm: h,
                 wall_length_mm: l,
                 fc,
-                aw,
-                tension_column_main_area: col_main_area_max,
                 te,
                 t: thickness,
                 d_wall,
@@ -577,6 +605,32 @@ fn check_walls_selected(
                     continue;
                 }
             };
+            let angle_points = points.map(|(delta_mm, q_n)| (delta_mm / h, q_n));
+            let second_stiffness_n_per_mm = (tri.qu - tri.qc) / (points[2].0 - points[1].0);
+            if angle_points.iter().any(|(gamma, _)| !gamma.is_finite())
+                || !second_stiffness_n_per_mm.is_finite()
+                || second_stiffness_n_per_mm <= 0.0
+            {
+                out.push((
+                    elem.nodes[0],
+                    "耐震壁(RC)せん断非線形".into(),
+                    CheckOutcome::Skipped {
+                        reason: "参考骨格のせん断角・第2区間剛性が有限の有効値ではありません"
+                            .into(),
+                    },
+                ));
+                continue;
+            }
+            skeletons.insert(
+                elem.id,
+                crate::wall_check::WallShearReference {
+                    aw_qc_mm2: thickness * l,
+                    displacement_points: points,
+                    angle_points,
+                    beta_s: tri.beta_s,
+                    second_stiffness_n_per_mm,
+                },
+            );
             let ratio = q_design / tri.qu;
             let detail = format!(
                 "Qc={:.1} kN, βs={:.3}, Qu={:.1} kN, r={:.3}, QD={:.1} kN, δc={:.4} mm, δu={:.4} mm（純せん断の参考骨格）, Nface={:.1} kN, Mface={:.1} kNm, Qface={:.1} kN, A={:.1} mm²",
@@ -615,6 +669,7 @@ fn check_walls_selected(
             ));
         }
     }
+    skeletons
 }
 
 fn side_column_section_is_parallel(
@@ -742,7 +797,10 @@ pub(super) fn collect_wall_design_checks(
     for (plate_id, elem) in candidates {
         let plate = plate_id.and_then(|id| model.wall_plate(id));
         let input_invalid = elem
-            .is_some_and(|e| sepika_core::model::wall_element_geometry(e, model).is_none())
+            .and_then(|e| model.element_section(e))
+            .and_then(|s| s.shape.as_ref())
+            .is_some_and(|shape| matches!(shape, SectionShape::RcWall { thickness, .. } if !thickness.is_finite() || *thickness <= 0.0))
+            || elem.is_some_and(|e| sepika_core::model::wall_element_geometry(e, model).is_none())
             || elem
                 .and_then(|e| model.element_section(e))
                 .and_then(|s| s.thickness)
@@ -811,7 +869,7 @@ pub(super) fn collect_wall_design_checks(
             }
         };
         let mut computed = Vec::new();
-        if issue.is_none() {
+        let mut skeletons = if issue.is_none() {
             let e = elem.unwrap();
             check_walls(
                 model,
@@ -821,8 +879,10 @@ pub(super) fn collect_wall_design_checks(
                 members,
                 term,
                 &mut computed,
-            );
-        }
+            )
+        } else {
+            HashMap::new()
+        };
         for kind in [
             WallCheckKind::AllowableShear,
             WallCheckKind::ReferenceSkeleton,
@@ -901,6 +961,13 @@ pub(super) fn collect_wall_design_checks(
                     .flatten(),
                 seismic_target,
                 skip_kind,
+                reference_skeleton: if kind == WallCheckKind::ReferenceSkeleton
+                    && matches!(outcome, CheckOutcome::Checked(_))
+                {
+                    elem.and_then(|e| skeletons.remove(&e.id))
+                } else {
+                    None
+                },
                 outcome,
             });
         }

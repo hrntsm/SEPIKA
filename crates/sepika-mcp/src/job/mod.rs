@@ -13,8 +13,11 @@ mod time_history;
 mod ultimate;
 
 #[cfg(test)]
+#[path = "../../../../test_fixtures/rc_wall534.rs"]
+pub(crate) mod rc_wall534_fixture;
+#[cfg(test)]
 #[path = "../../../../test_fixtures/rc_wall617.rs"]
-mod rc_wall617_fixture;
+pub(crate) mod rc_wall617_fixture;
 
 use design_check::compute_design_check_job;
 use eigen::compute_eigen_job;

@@ -2554,4 +2554,6 @@ mod lip_channel_geometry_tests;
 mod rc_wall_direction_tests;
 
 #[cfg(test)]
+mod rc_wall534_tests;
+#[cfg(test)]
 pub(crate) mod rc_wall617_tests;
