@@ -1,6 +1,6 @@
 use super::*;
 #[path = "../../../../test_fixtures/rc_wall617.rs"]
-mod fixture;
+pub(crate) mod fixture;
 
 fn ready() -> App {
     let mut app = App::default();

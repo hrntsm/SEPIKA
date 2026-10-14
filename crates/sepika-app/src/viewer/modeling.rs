@@ -1196,9 +1196,16 @@ fn show_wall_modeling_detail(
     }
     let qu = app.adopted_wall_capacity(elem, model, modeling_analysis);
     if let Ok(qu) = qu {
+        let label = if sepika_element::wall::misc_wall::is_rc_wall(elem, model) {
+            format!(
+                "面内せん断（{}）",
+                model.stress_cfg.rc_wall_shear_method.label()
+            )
+        } else {
+            "面内せん断".to_string()
+        };
         ui.label(format!(
-            "面内せん断（{}）: 正 Qu={:.0} kN／負 Qu={:.0} kN",
-            model.stress_cfg.rc_wall_shear_method.label(),
+            "{label}: 正 Qu={:.0} kN／負 Qu={:.0} kN",
             force_kn(qu[0]),
             force_kn(qu[1])
         ));
@@ -1298,6 +1305,80 @@ mod tests {
     use sepika_core::model::{ForceRegime, FrameSectionUse, LocalAxis, RigidZone};
     use sepika_core::section_shape::SectionShape;
     use smallvec::smallvec;
+
+    fn rendered_wall_detail(app: &App, model: &Model, wall: &ElementData) -> Vec<String> {
+        let context = egui::Context::default();
+        crate::app::install_japanese_fonts(&context);
+        let output = context.run_ui(Default::default(), |ui| {
+            show_wall_modeling_detail(ui, app, model, ModelingAnalysis::Incremental, wall);
+        });
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(value) => Some(value.galley.text().to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn wall_modeling_detail_labels_rc_methods_and_keeps_steel_capacity_untagged() {
+        use sepika_core::model::RcWallShearMethod::{ArakawaMean, ArakawaMin};
+        for method in [ArakawaMin, ArakawaMean] {
+            let mut app = App::default();
+            app.load_model(crate::app::rc_wall617_tests::fixture::input_model());
+            app.core.model.stress_cfg.rc_wall_shear_method = method;
+            app.core.analysis_cfg.push_steps = 2;
+            app.core.analysis_cfg.push_use_max_disp = true;
+            app.core.analysis_cfg.push_use_drift_angle = false;
+            app.core.analysis_cfg.push_max_disp = 0.2;
+            app.run_preparation();
+            app.run_pushover();
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            let (model, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+            let wall = model
+                .elements
+                .iter()
+                .find(|e| e.kind == ElementKind::Wall)
+                .unwrap();
+            let text = rendered_wall_detail(&app, &model, wall);
+            assert!(
+                text.iter()
+                    .any(|text| text
+                        .starts_with(&format!("面内せん断（{}）: 正 Qu=", method.label()))),
+                "{text:?}"
+            );
+        }
+        let (mut model, wall) = wall_model(6.0);
+        model.sections[0].shape = None;
+        model.sections[0].material = Some(MaterialId(0));
+        model
+            .materials
+            .push(crate::sample::portal_frame().materials[0].clone());
+        let expected_capacity_n = 3_256_255.518229489;
+        for method in [ArakawaMin, ArakawaMean] {
+            model.stress_cfg.rc_wall_shear_method = method;
+            let app = App::default();
+            let capacity = app
+                .adopted_wall_capacity(&wall, &model, ModelingAnalysis::Incremental)
+                .unwrap();
+            for value in capacity {
+                assert!((value - expected_capacity_n).abs() < 1e-6);
+            }
+            let text = rendered_wall_detail(&app, &model, &wall);
+            assert!(
+                text.iter()
+                    .any(|text| text == "面内せん断: 正 Qu=3256 kN／負 Qu=3256 kN"),
+                "{text:?}"
+            );
+            assert!(text.iter().all(|text| !text.contains("荒川")), "{text:?}");
+        }
+    }
 
     /// 指定した種別・フォースレジームの 2 節点部材を作る（テスト用の最小構成）。
     fn elem(kind: ElementKind, regime: ForceRegime) -> ElementData {

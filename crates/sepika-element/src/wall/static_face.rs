@@ -312,7 +312,7 @@ impl StaticWallFace {
 
 #[cfg(test)]
 #[path = "../../../../test_fixtures/rc_wall617.rs"]
-mod fixture;
+pub(super) mod fixture;
 
 #[cfg(test)]
 mod tests {

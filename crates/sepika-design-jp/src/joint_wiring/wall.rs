@@ -19,24 +19,32 @@ pub(super) fn check_walls(
     term: LoadTerm,
     out: &mut Vec<(NodeId, String, CheckOutcome)>,
 ) {
-    let first = out.len();
-    check_walls_selected(
-        model,
-        member_forces,
-        reference_batch,
-        selected_terms,
-        members,
-        term,
-        out,
-    );
-    for (_, label, outcome) in &mut out[first..] {
-        if label.ends_with("せん断非線形") {
-            let method = model.stress_cfg.rc_wall_shear_method.label();
-            match outcome {
-                CheckOutcome::Checked(result) => {
-                    result.basis = format!("{}（{method}）", result.basis)
+    for &(id, forces) in member_forces {
+        let first = out.len();
+        check_walls_selected(
+            model,
+            &[(id, forces)],
+            reference_batch,
+            selected_terms,
+            members,
+            term,
+            out,
+        );
+        let Some(method) = model
+            .element(id)
+            .and_then(|elem| reference_shear_method(model, model.element_section(elem)))
+        else {
+            continue;
+        };
+        let method = method.label();
+        for (_, label, outcome) in &mut out[first..] {
+            if label.ends_with("せん断非線形") {
+                match outcome {
+                    CheckOutcome::Checked(result) => {
+                        result.basis = format!("{}（{method}）", result.basis)
+                    }
+                    CheckOutcome::Skipped { reason } => *reason = format!("{method}: {reason}"),
                 }
-                CheckOutcome::Skipped { reason } => *reason = format!("{method}: {reason}"),
             }
         }
     }
@@ -691,6 +699,24 @@ fn wall_side_column_props(shape: Option<&SectionShape>) -> Option<(f64, f64, f64
     }
 }
 
+fn reference_shear_method(
+    model: &Model,
+    section: Option<&sepika_core::model::Section>,
+) -> Option<sepika_core::model::RcWallShearMethod> {
+    section
+        .filter(|section| {
+            matches!(section.shape, Some(SectionShape::RcWall { .. }))
+                && section.steel_material.is_none()
+                && section
+                    .material
+                    .and_then(|id| model.materials.get(id.index()).filter(|m| m.id == id))
+                    .is_none_or(|material| {
+                        material.category == sepika_core::model::MaterialCategory::Concrete
+                    })
+        })
+        .map(|_| model.stress_cfg.rc_wall_shear_method)
+}
+
 pub(super) fn collect_wall_design_checks(
     model: &Model,
     forces: &[(ElemId, ForcesAt<'_>)],
@@ -871,7 +897,8 @@ pub(super) fn collect_wall_design_checks(
                 case: case.into(),
                 kind,
                 shear_method: (kind == WallCheckKind::ReferenceSkeleton)
-                    .then_some(model.stress_cfg.rc_wall_shear_method),
+                    .then(|| reference_shear_method(model, section))
+                    .flatten(),
                 seismic_target,
                 skip_kind,
                 outcome,

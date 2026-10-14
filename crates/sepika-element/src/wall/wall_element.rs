@@ -3375,8 +3375,7 @@ mod capacity_issue_tests {
 }
 
 #[cfg(test)]
-#[path = "../../../../test_fixtures/rc_wall617.rs"]
-mod rc_wall572_fixture;
+use super::static_face::fixture as rc_wall572_fixture;
 
 #[cfg(test)]
 mod wall_method_tests {
