@@ -40,16 +40,16 @@ solver独立値の照合は相対1e-8（基準値の絶対値と1の大きい方
 
 | 完了条件 | 現時点の証拠 | 残る確認 |
 | --- | --- | --- |
-| 1 同一バッチ壁脚M/Q/N・極値混用除去 | element人工入力・design同一face試験・App/MCP実case/combo | fresh独立レビュー・最終head CI |
-| 2 中央/側柱所有・腕長・Q・物理A | 独立人工入力、実Analysis切断面釣合い | fresh独立レビュー・最終head CI |
-| 3 一度の符号付きface輸送・位置/端順 | element6試験 | fresh独立レビュー・最終head CI |
-| 4 App/MCP静的バッチ・旧入力・不足診断 | 実case/combo同一バッチ、App側柱欠落・正常許容維持・旧入力拒否、MCP不正case/Fiber拒否 | fresh独立レビュー・最終head CI |
-| 5 G/±Ew荷重合成・active-set直接求解 | solver6試験（filter全7は既存1を含む） | fresh独立レビュー・最終head CI |
-| 6 OFF/空G/分布N/斜め/局所分岐/拒否 | solver上記fixture | fresh独立レビュー・最終head CI |
-| 7 Ds/モデル化表示の採用run Qu | 採用Qu配列完全一致・欠落/NaN/旧入力拒否、実Dsの採用Qu依存・旧TH拒否 | fresh独立レビュー・最終head CI |
-| 8 生成前失敗・状態/台帳非汚染・固定/一回 | 全壁原子性・Model/台帳不変・履歴数と下記実経路 | fresh独立レビュー・最終head CI |
-| 9 App/MCP増分・App非線形TH・対象外維持 | App6試験、MCP86試験（線形TH追加）、GUI純鋼板5試験 | fresh独立レビュー・最終head CI |
-| 10 docs/語彙/ADR/V&Vと共通完了手順 | 本レポート・索引・製品文書・CONTEXT・対象source SHA・文書checks | freshレビュー、親監査、最終head全適用CI、merge |
+| 1 同一バッチ壁脚M/Q/N・極値混用除去 | element人工入力・design同一face試験・App/MCP実case/combo | 親監査・最終head CI |
+| 2 中央/側柱所有・腕長・Q・物理A | 独立人工入力、実Analysis切断面釣合い | 親監査・最終head CI |
+| 3 一度の符号付きface輸送・位置/端順 | element6試験 | 親監査・最終head CI |
+| 4 App/MCP静的バッチ・旧入力・不足診断 | 実case/combo同一バッチ、App側柱欠落・正常許容維持・旧入力拒否、MCP不正case/Fiber拒否 | 親監査・最終head CI |
+| 5 G/±Ew荷重合成・active-set直接求解 | solver6試験（filter全7は既存1を含む） | 親監査・最終head CI |
+| 6 OFF/空G/分布N/斜め/局所分岐/拒否 | solver上記fixture | 親監査・最終head CI |
+| 7 Ds/モデル化表示の採用run Qu | 採用Qu配列完全一致・欠落/NaN/旧入力拒否、実Dsの採用Qu依存・旧TH拒否 | 親監査・最終head CI |
+| 8 生成前失敗・状態/台帳非汚染・固定/一回 | 全壁原子性・Model/台帳不変・履歴数と下記実経路 | 親監査・最終head CI |
+| 9 App/MCP増分・App非線形TH・対象外維持 | App6試験、MCP86試験（線形TH追加）、GUI純鋼板5試験 | 親監査・最終head CI |
+| 10 docs/語彙/ADR/V&Vと共通完了手順 | 本レポート・索引・製品文書・CONTEXT・対象source SHA・文書checks | 親監査、最終head全適用CI、merge |
 
 App3試験は静的台帳不変、採用Qu保存、THのmodel A→B→旧Aの表示拒否と入力記録の個別保持・OVIKA再読込、背景増分/TH計算中の入力編集で結果反映を拒否する。MCP増分は同じjob条件の直接solver run Quへ照合し、参照応答を結果として公開しない。自動App/MCP関数入口であり、手動GUI画面操作・外部MCPクライアント操作は未実施である。
 
@@ -121,6 +121,24 @@ default testsは既知一件CLI除外後に完走し、関連feature testsも成
 
 通常API docには既存の単位リンク・私有module参照等の警告が残る。default構成のクレート別件数はcore305、material18、element50、solver86、design301、load53、section22、edit7、skeleton6、IO11、job14、MCP5、App47。feature構成の直接生成対象はIO11、MCP10、App78である。新単位8件の位置（factory190、static_face10、WallElement659、TH result13、pushover types277）に警告はなく、同じファイルの既存警告（factory5〜9の私有module、WallElement54/807、pushover typesの既存単位等）と区別した。`-D warnings`試行の失敗を通常buildの成功で置き換えず、既存警告は[Issue #654](https://github.com/hrntsm/SEPIKA/issues/654)で追跡する。
 
+## 独立レビューの結果
+
+2026-10-14、独立Reviewerが基点 `5b7860b8a477c6a97e63a2a5a033d2323520a31c` からレビュー対象head `90f7eff36fba7bec8934c1bb9c8f4e7927b8e70b` までの変更を確認し、Status done・必須指摘なしとした。Issue原本の完了条件10項目、計算仕様・実入口・失敗契約・適用限界を照合した。対象コードSHAは冒頭の `61775a2d0c045caef0bcef6f54952d07da881269` から変更していない。
+
+独立Reviewerは株式会社ストラクチャー本文95/PDF98とUnion PDF4の原画像および両PDFのSHA-256を自身でも照合した。これは引用規準原典全文や実験Validationの確認を意味しない。
+
+| 独立実行の範囲 | 成功数 | TEMPログ |
+| --- | --- | --- |
+| coreの独立容量算術 | 1 | `sepika617-independent-core.log` |
+| elementの同一face・符号・不足・直接factory | 6 | `sepika617-independent-element.log` |
+| solverのwall_reference（本件6＋既存1） | 7 | `sepika617-independent-solver.log` |
+| designの同一face参考骨格・正常許容維持 | 1 | `sepika617-independent-design.log` |
+| App GUIの静的case/combo・採用Qu・Ds/表示・状態保持 | 6 | `sepika617-independent-app.log` |
+| MCPのRC壁実入口 | 2 | `sepika617-independent-mcp.log` |
+| MCPの対象外線形時刻歴 | 1 | `sepika617-independent-mcp-linear.log` |
+
+合計24件はすべて成功し、文書担当もログの成功summaryを確認した。これらの限定再実行を全workspaceの無除外成功や最終CI成功と読み替えない。親監査・最終head全適用CI・mergeはまだ後続ゲートである。
+
 ## 未検証・適用限界
 
-引用原典全文、実験の破壊・反転履歴・動的応答・全適用域Validation、中央と側柱の解析軸断面重複を含む軸剛性理論の妥当性は未確認。限定入口のVerificationをこれらのValidationへ拡張しない。手動GUIと外部MCP接続、fresh独立レビュー・親監査・最終head CIは後続ゲートである。
+引用原典全文、実験の破壊・反転履歴・動的応答・全適用域Validation、中央と側柱の解析軸断面重複を含む軸剛性理論の妥当性は未確認。限定入口のVerificationをこれらのValidationへ拡張しない。手動GUIと外部MCP接続、親監査・最終head CI・mergeは後続ゲートである。
