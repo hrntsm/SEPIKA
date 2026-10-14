@@ -352,17 +352,30 @@ mod tests {
         assert_eq!(state.moment_nmm, -1.29e9);
         assert_eq!(state.physical_area_mm2, 1_332_000.0);
         assert_eq!(state.depth_mm, 4600.0);
-        let m = fixture::expanded_model();
-        let qu = super::super::wall_element::WallElement::directional_shear_capacity_at_reference(
-            &m.elements[4],
-            &m,
-            crate::factory::StrengthBasis::Nominal,
-            state.compression_n,
-            [6450.0 / 4600.0; 2],
-        )
-        .unwrap();
-        assert!((qu[0] - 2_006_534.471365995).abs() < 1e-6);
-        assert_eq!(qu[0], qu[1]);
+        let mut m = fixture::expanded_model();
+        for (method, expected) in [
+            (
+                sepika_core::model::RcWallShearMethod::ArakawaMin,
+                2_006_534.471365995,
+            ),
+            (
+                sepika_core::model::RcWallShearMethod::ArakawaMean,
+                2_676_420.1354640694,
+            ),
+        ] {
+            m.stress_cfg.rc_wall_shear_method = method;
+            let qu =
+                super::super::wall_element::WallElement::directional_shear_capacity_at_reference(
+                    &m.elements[4],
+                    &m,
+                    crate::factory::StrengthBasis::Nominal,
+                    state.compression_n,
+                    [6450.0 / 4600.0; 2],
+                )
+                .unwrap();
+            assert!((qu[0] - expected).abs() < 1e-6);
+            assert_eq!(qu[0], qu[1]);
+        }
     }
     #[test]
     fn rotation_end_order_and_sign_changes_preserve_physical_state() {

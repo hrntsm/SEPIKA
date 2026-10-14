@@ -19,6 +19,38 @@ pub(super) fn check_walls(
     term: LoadTerm,
     out: &mut Vec<(NodeId, String, CheckOutcome)>,
 ) {
+    let first = out.len();
+    check_walls_selected(
+        model,
+        member_forces,
+        reference_batch,
+        selected_terms,
+        members,
+        term,
+        out,
+    );
+    for (_, label, outcome) in &mut out[first..] {
+        if label.ends_with("せん断非線形") {
+            let method = model.stress_cfg.rc_wall_shear_method.label();
+            match outcome {
+                CheckOutcome::Checked(result) => {
+                    result.basis = format!("{}（{method}）", result.basis)
+                }
+                CheckOutcome::Skipped { reason } => *reason = format!("{method}: {reason}"),
+            }
+        }
+    }
+}
+
+fn check_walls_selected(
+    model: &Model,
+    member_forces: &[(ElemId, ForcesAt<'_>)],
+    reference_batch: &[(ElemId, ForcesAt<'_>)],
+    selected_terms: Option<&[(sepika_core::ids::LoadCaseId, f64)]>,
+    members: &[MemberInfo<'_>],
+    term: LoadTerm,
+    out: &mut Vec<(NodeId, String, CheckOutcome)>,
+) {
     for (eid, forces) in member_forces {
         let Some(elem) = model.element(*eid) else {
             continue;
@@ -489,6 +521,7 @@ pub(super) fn check_walls(
             let shear_span_ratio =
                 (state.moment_nmm.abs() / (state.shear_n.abs() * state.depth_mm)).clamp(1.0, 3.0);
             let tri_inp = WallShearTrilinearInput {
+                method: model.stress_cfg.rc_wall_shear_method,
                 wall_height_mm: h,
                 wall_length_mm: l,
                 fc,
@@ -837,6 +870,8 @@ pub(super) fn collect_wall_design_checks(
                 }),
                 case: case.into(),
                 kind,
+                shear_method: (kind == WallCheckKind::ReferenceSkeleton)
+                    .then_some(model.stress_cfg.rc_wall_shear_method),
                 seismic_target,
                 skip_kind,
                 outcome,

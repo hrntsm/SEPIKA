@@ -12,6 +12,8 @@
 pub struct ResponseResult {
     /// 非線形runで初期ばねに採用した壁別の局所正負Qu `[N]`。線形解析は空。
     pub wall_capacities: Vec<(sepika_core::ids::ElemId, [f64; 2])>,
+    /// 開始時Modelで固定したRC壁終局せん断耐力方式。
+    pub rc_wall_shear_method: sepika_core::model::RcWallShearMethod,
     pub time: Vec<f64>,
     pub peak_disp: Vec<[f64; 6]>,
     pub story_drift_angle: Vec<f64>,

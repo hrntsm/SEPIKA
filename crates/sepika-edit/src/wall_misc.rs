@@ -1193,3 +1193,19 @@ impl EditCommand for SetSlabSection {
         "床板断面変更"
     }
 }
+
+/// 建物共通のRC壁終局せん断耐力方式を変更する。逆操作は変更前の方式へ復元する。
+pub struct SetRcWallShearMethod {
+    pub method: sepika_core::model::RcWallShearMethod,
+}
+
+impl EditCommand for SetRcWallShearMethod {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let old = std::mem::replace(&mut model.stress_cfg.rc_wall_shear_method, self.method);
+        Box::new(Self { method: old })
+    }
+
+    fn label(&self) -> &str {
+        "RC壁終局せん断耐力方式変更"
+    }
+}

@@ -288,6 +288,7 @@ pub(crate) fn empty_response(
 ) -> ResponseResult {
     ResponseResult {
         wall_capacities: Vec::new(),
+        rc_wall_shear_method: model.stress_cfg.rc_wall_shear_method,
         non_converged_steps: 0,
         time: vec![],
         peak_disp: vec![[0.0; 6]; model.nodes.len()],

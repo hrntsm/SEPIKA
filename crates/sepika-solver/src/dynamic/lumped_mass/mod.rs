@@ -333,6 +333,7 @@ mod tests {
         ];
         let pushover = crate::nonlinear::pushover::PushoverResult {
             wall_capacities: Vec::new(),
+            rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
             steps,
             wall_history: None,
             wall_run: None,
@@ -411,6 +412,7 @@ mod tests {
         };
         let pushover = crate::nonlinear::pushover::PushoverResult {
             wall_capacities: Vec::new(),
+            rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
             steps: Vec::new(),
             wall_history: None,
             wall_run: None,
@@ -461,6 +463,7 @@ mod tests {
         };
         let pushover = crate::nonlinear::pushover::PushoverResult {
             wall_capacities: Vec::new(),
+            rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
             steps: Vec::new(),
             wall_history: None,
             wall_run: None,

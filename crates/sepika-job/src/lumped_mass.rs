@@ -657,6 +657,7 @@ mod tests {
     fn empty_pushover() -> PushoverResult {
         PushoverResult {
             wall_capacities: Vec::new(),
+            rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
             steps: Vec::new(),
             wall_history: None,
             wall_run: None,

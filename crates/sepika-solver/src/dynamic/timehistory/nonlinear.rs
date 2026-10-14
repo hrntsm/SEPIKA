@@ -522,6 +522,7 @@ pub fn nonlinear_time_history_analysis(
 
     Ok(ResponseResult {
         wall_capacities,
+        rc_wall_shear_method: model.stress_cfg.rc_wall_shear_method,
         non_converged_steps,
         time,
         peak_disp,

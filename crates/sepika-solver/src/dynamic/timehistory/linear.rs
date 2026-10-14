@@ -464,6 +464,7 @@ fn run_steps(
     Ok((
         ResponseResult {
             wall_capacities: Vec::new(),
+            rc_wall_shear_method: model.stress_cfg.rc_wall_shear_method,
             non_converged_steps: 0,
             time,
             peak_disp,

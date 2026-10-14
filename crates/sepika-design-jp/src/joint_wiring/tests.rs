@@ -1758,6 +1758,7 @@ fn reference_skeleton_uses_same_face_total_state_and_keeps_allowable_check_on_mi
     use crate::wall_check::WallCheckKind;
     use sepika_element::frame::beam::MemberForces;
     let mut m = rc_wall617_fixture::expanded_model();
+    m.stress_cfg.rc_wall_shear_method = sepika_core::model::RcWallShearMethod::ArakawaMin;
     if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut m.sections[2].shape {
         *pwh_ratio = Some(0.006);
     }
@@ -1803,8 +1804,33 @@ fn reference_skeleton_uses_same_face_total_state_and_keeps_allowable_check_on_mi
         assert!(detail.contains(expected), "{detail}");
     }
     assert!((check.ratio() - 200_000.0 / 2_178_659.633_619_86).abs() < 1e-12);
+    assert_eq!(
+        reference.shear_method,
+        Some(sepika_core::model::RcWallShearMethod::ArakawaMin)
+    );
+    m.stress_cfg.rc_wall_shear_method = sepika_core::model::RcWallShearMethod::ArakawaMean;
+    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default());
+    let reference = report
+        .wall_checks
+        .iter()
+        .find(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+        .unwrap();
+    let CheckOutcome::Checked(check) = &reference.outcome else {
+        panic!("{:?}", reference.outcome)
+    };
+    assert_eq!(
+        reference.shear_method,
+        Some(sepika_core::model::RcWallShearMethod::ArakawaMean)
+    );
+    assert!((check.ratio() - 200_000.0 / 2_848_545.297717935).abs() < 1e-12);
+    assert!(check.basis.contains("荒川mean"));
     forces.pop();
     let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default());
+    assert!(report
+        .wall_checks
+        .iter()
+        .filter(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+        .all(|w| w.shear_method == Some(sepika_core::model::RcWallShearMethod::ArakawaMean)));
     assert!(report.wall_checks.iter().any(|w| w.kind == WallCheckKind::ReferenceSkeleton && matches!(&w.outcome, CheckOutcome::Skipped { reason } if reason.contains("部材 ID 1"))));
     assert!(report
         .wall_checks

@@ -44,6 +44,8 @@ pub struct WallCheck {
     pub node: Option<NodeId>,
     pub case: String,
     pub kind: WallCheckKind,
+    /// 参考骨格の採用方式。許容せん断ではNone。
+    pub shear_method: Option<sepika_core::model::RcWallShearMethod>,
     pub seismic_target: bool,
     pub skip_kind: Option<WallSkipKind>,
     pub outcome: CheckOutcome,
@@ -59,7 +61,10 @@ impl WallCheck {
                 .map(|id| id.0.to_string())
                 .unwrap_or_else(|| "-".into()),
             self.case,
-            self.kind.label()
+            self.shear_method.map_or_else(
+                || self.kind.label().to_string(),
+                |method| format!("{}（{}）", self.kind.label(), method.label()),
+            )
         )
     }
 }

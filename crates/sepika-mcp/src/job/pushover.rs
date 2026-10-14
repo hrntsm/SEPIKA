@@ -79,6 +79,7 @@ fn pushover_summary(
         "n_steps": result.steps.len(),
         "wall_run": result.wall_run,
         "wall_capacities_n": result.wall_capacities,
+        "rc_wall_shear_method": result.rc_wall_shear_method,
         "wall_history": result.wall_history,
         "confirmed_history": result.confirmed_history,
         "steps": result.steps,
@@ -100,37 +101,57 @@ mod tests {
     use sepika_solver::nonlinear::pushover::wall_response::WallUnavailableReason;
     #[test]
     fn mcp_rc_wall_initial_capacity_matches_same_job_run_without_reference_publication() {
-        let mut m = rc_wall617_fixture::input_model();
-        let before = serde_json::to_vec(&m).unwrap();
-        let params = JobParams {
-            steps: 2,
-            max_disp: Some(0.2),
-            ..Default::default()
-        };
-        let JobOutcome::Pushover { summary } = compute_pushover_job(m.clone(), &params).unwrap()
-        else {
-            panic!()
-        };
-        assert_eq!(serde_json::to_vec(&m).unwrap(), before);
-        let cfg: sepika_job::AnalysisSettings =
-            serde_json::from_value(summary["analysis_conditions"].clone()).unwrap();
-        sepika_job::prepare::prepare_model_for_analysis(
-            &mut m,
-            &params.analysis_settings_for_prepare(),
-            params.design_period,
-        )
-        .unwrap();
-        let direct = sepika_job::compute::compute_pushover(m, cfg).unwrap();
-        assert_eq!(
-            summary["wall_capacities_n"],
-            serde_json::to_value(&direct.wall_capacities).unwrap()
-        );
-        assert_eq!(direct.wall_capacities.len(), 1);
-        assert!(direct.wall_capacities[0]
-            .1
-            .iter()
-            .all(|q| q.is_finite() && *q > 0.0));
-        assert!(summary.get("statics").is_none());
+        for method in [
+            sepika_core::model::RcWallShearMethod::ArakawaMean,
+            sepika_core::model::RcWallShearMethod::ArakawaMin,
+        ] {
+            let mut m = rc_wall617_fixture::input_model();
+            m.stress_cfg.rc_wall_shear_method = method;
+            let before = serde_json::to_vec(&m).unwrap();
+            let params = JobParams {
+                steps: 2,
+                max_disp: Some(0.2),
+                ..Default::default()
+            };
+            let JobOutcome::Pushover { summary } =
+                compute_pushover_job(m.clone(), &params).unwrap()
+            else {
+                panic!()
+            };
+            assert_eq!(serde_json::to_vec(&m).unwrap(), before);
+            let cfg: sepika_job::AnalysisSettings =
+                serde_json::from_value(summary["analysis_conditions"].clone()).unwrap();
+            sepika_job::prepare::prepare_model_for_analysis(
+                &mut m,
+                &params.analysis_settings_for_prepare(),
+                params.design_period,
+            )
+            .unwrap();
+            let direct = sepika_job::compute::compute_pushover(m, cfg).unwrap();
+            assert_eq!(
+                summary["wall_capacities_n"],
+                serde_json::to_value(&direct.wall_capacities).unwrap()
+            );
+            assert_eq!(direct.wall_capacities.len(), 1);
+            assert!(direct.wall_capacities[0]
+                .1
+                .iter()
+                .all(|q| q.is_finite() && *q > 0.0));
+            assert!(summary.get("statics").is_none());
+            assert_eq!(
+                summary["rc_wall_shear_method"],
+                serde_json::to_value(method).unwrap()
+            );
+            assert_eq!(direct.rc_wall_shear_method, method);
+            let mut missing = rc_wall617_fixture::input_model();
+            missing.stress_cfg.rc_wall_shear_method = method;
+            missing.sections[2].shear_rebar_material = None;
+            let error = compute_pushover_job(missing, &params)
+                .err()
+                .expect("不足材料は未算定")
+                .to_string();
+            assert!(error.contains(method.label()), "{error}");
+        }
     }
     #[test]
     fn mcp_wall_history_has_plate_run_input_and_null_distinct_from_zero() {
@@ -294,7 +315,7 @@ mod tests {
             );
         }
         let mut result:sepika_solver::nonlinear::pushover::PushoverResult=serde_json::from_value(serde_json::json!({
-            "wall_capacities":[],"steps":[],"capacity_curve":[],"hinges":[],"shear_yields":[],"mechanism":"Partial","qu":0.0,"member_response":[],
+            "wall_capacities":[],"rc_wall_shear_method":"ArakawaMean","steps":[],"capacity_curve":[],"hinges":[],"shear_yields":[],"mechanism":"Partial","qu":0.0,"member_response":[],
             "wall_history":records,"wall_run":summary["wall_run"]
         })).unwrap();
         result.qu = 150_000.0;

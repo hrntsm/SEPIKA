@@ -1197,7 +1197,8 @@ fn show_wall_modeling_detail(
     let qu = app.adopted_wall_capacity(elem, model, modeling_analysis);
     if let Ok(qu) = qu {
         ui.label(format!(
-            "面内せん断: 正 Qu={:.0} kN／負 Qu={:.0} kN",
+            "面内せん断（{}）: 正 Qu={:.0} kN／負 Qu={:.0} kN",
+            model.stress_cfg.rc_wall_shear_method.label(),
             force_kn(qu[0]),
             force_kn(qu[1])
         ));
