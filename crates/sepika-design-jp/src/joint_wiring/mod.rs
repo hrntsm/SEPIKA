@@ -81,7 +81,15 @@ pub(crate) fn collect_joint_checks_impl(
     let members = member_infos(model, member_forces);
 
     if include_walls {
-        wall::check_walls(model, member_forces, &members, term, &mut out);
+        wall::check_walls(
+            model,
+            member_forces,
+            member_forces,
+            None,
+            &members,
+            term,
+            &mut out,
+        );
     }
 
     for (ni, node) in model.nodes.iter().enumerate() {
@@ -166,7 +174,16 @@ pub fn collect_wall_design_checks(
     term: LoadTerm,
     index: Option<&sepika_load::wall_expand::WallExpansionIndex>,
     case: &str,
+    load_terms: Option<&[(sepika_core::ids::LoadCaseId, f64)]>,
 ) -> Vec<crate::wall_check::WallCheck> {
     let members = member_infos(model, member_forces);
-    wall::collect_wall_design_checks(model, member_forces, &members, term, index, case)
+    wall::collect_wall_design_checks(
+        model,
+        member_forces,
+        &members,
+        term,
+        index,
+        case,
+        load_terms,
+    )
 }

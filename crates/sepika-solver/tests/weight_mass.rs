@@ -220,6 +220,7 @@ fn beam由来の非線形fiberでも元断面の質量を維持する() {
         &model,
         StrengthBasis::Nominal,
         AnalysisKind::TimeHistory,
+        None,
     );
     let dofmap = DofMap::build(&model);
     let dofs = behavior.global_dofs(&dofmap);
@@ -496,6 +497,7 @@ fn assert_public_mass_error(model: &Model) {
 fn sample_pushover() -> sepika_solver::nonlinear::pushover::PushoverResult {
     use sepika_solver::nonlinear::pushover::{CapacityPoint, MechanismType, PushoverResult};
     PushoverResult {
+        wall_capacities: Vec::new(),
         steps: vec![],
         wall_history: None,
         wall_run: None,

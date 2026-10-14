@@ -218,6 +218,7 @@ fn assert_lumped_input_error(model: &Model) {
 fn sample_pushover() -> sepika_solver::nonlinear::pushover::PushoverResult {
     use sepika_solver::nonlinear::pushover::{CapacityPoint, MechanismType, PushoverResult};
     PushoverResult {
+        wall_capacities: Vec::new(),
         steps: vec![],
         wall_history: None,
         wall_run: None,

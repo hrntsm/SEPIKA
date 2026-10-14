@@ -287,6 +287,7 @@ pub(crate) fn empty_response(
     applied_long_term: bool,
 ) -> ResponseResult {
     ResponseResult {
+        wall_capacities: Vec::new(),
         non_converged_steps: 0,
         time: vec![],
         peak_disp: vec![[0.0; 6]; model.nodes.len()],

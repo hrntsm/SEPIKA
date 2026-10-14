@@ -43,3 +43,42 @@ pub(crate) fn compute_time_history_job(
     attach_prepare_notices(&mut summary, notices);
     Ok(JobOutcome::TimeHistory { summary })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::rc_wall617_fixture as fixture;
+    use super::*;
+    #[test]
+    fn linear_mcp_time_history_does_not_require_rc_wall_capacity() {
+        let mut model = fixture::input_model();
+        if let Some(sepika_core::section_shape::SectionShape::RcWall { pwh_ratio, .. }) =
+            &mut model.sections[2].shape
+        {
+            *pwh_ratio = None;
+        }
+        let params = JobParams {
+            duration: 0.04,
+            ..Default::default()
+        };
+        let JobOutcome::TimeHistory { summary } =
+            compute_time_history_job(&model, &params).unwrap()
+        else {
+            panic!()
+        };
+        assert!(summary["n_steps"].as_u64().unwrap() > 0);
+        assert!(summary.get("wall_capacities_n").is_none());
+        let (work, _) = model_prepared_for_analysis(&model, &params).unwrap();
+        let cfg = sepika_job::AnalysisSettings {
+            th_duration: 0.04,
+            ..Default::default()
+        };
+        let direct = sepika_job::compute::compute_time_history(
+            work,
+            cfg,
+            sepika_job::sample_ground_motion(&cfg),
+        )
+        .unwrap();
+        assert!(!direct.nonlinear);
+        assert!(direct.wall_capacities.is_empty());
+    }
+}

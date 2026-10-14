@@ -279,6 +279,7 @@ mod tests {
             &model,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
+            None,
         );
         let ctx = Ctx { model: &model };
         let du = LocalVec {
@@ -303,6 +304,7 @@ mod tests {
             &model,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
+            None,
         );
         let mut new_behaviors: Vec<Box<dyn ElementBehavior>> = vec![new_behavior];
 
@@ -414,6 +416,7 @@ mod tests {
             &model_a,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
+            None,
         );
         let dir = crate::test_util::test_tmp().join("cp_hash_mismatch_test");
         let _ = std::fs::remove_dir_all(&dir);
@@ -427,6 +430,7 @@ mod tests {
             &model_b,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
+            None,
         );
         let mut new_behaviors: Vec<Box<dyn ElementBehavior>> = vec![new_behavior];
 

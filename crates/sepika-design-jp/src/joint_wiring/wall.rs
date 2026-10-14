@@ -13,6 +13,8 @@ use sepika_core::section_shape::SectionShape;
 pub(super) fn check_walls(
     model: &Model,
     member_forces: &[(ElemId, ForcesAt<'_>)],
+    reference_batch: &[(ElemId, ForcesAt<'_>)],
+    selected_terms: Option<&[(sepika_core::ids::LoadCaseId, f64)]>,
     members: &[MemberInfo<'_>],
     term: LoadTerm,
     out: &mut Vec<(NodeId, String, CheckOutcome)>,
@@ -432,21 +434,60 @@ pub(super) fn check_walls(
         let d_wall = l + reference_column_depth / 2.0;
         if col_main_area_max > 0.0 && aw > 0.0 && d_wall > 0.0 {
             let te = (aw / d_wall).clamp(thickness, 1.5 * thickness);
-            let n_comp = forces.iter().map(|(_, f)| -f[0]).fold(0.0_f64, f64::max);
-            let sigma_0 = n_comp / aw;
-            let shear_span_ratio = forces
-                .iter()
-                .max_by(|a, b| {
-                    a.1[5]
-                        .abs()
-                        .partial_cmp(&b.1[5].abs())
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .and_then(|(_, f)| {
-                    let q = f[1].abs().max(f[2].abs());
-                    (q > 1e-6).then(|| f[5].abs() / q / d_wall)
-                })
-                .unwrap_or_else(|| h / (2.0 * d_wall));
+            let resolved = (|| {
+                let face = sepika_element::wall::static_face::StaticWallFace::new(elem, model)?;
+                let cases: Vec<_> = match selected_terms {
+                    Some(terms) => terms
+                        .iter()
+                        .filter(|(_, factor)| *factor != 0.0)
+                        .map(|(id, factor)| {
+                            if !factor.is_finite() {
+                                return Err("参照荷重係数が非有限です".to_string());
+                            }
+                            model
+                                .load_cases
+                                .iter()
+                                .find(|c| c.id == *id)
+                                .cloned()
+                                .ok_or_else(|| "参照荷重ケースが不足しています".to_string())
+                        })
+                        .collect::<Result<_, _>>()?,
+                    None => model.load_cases.clone(),
+                };
+                face.ensure_loads(&cases, false)?;
+                let state = face.recover(reference_batch)?;
+                if state.shear_n == 0.0 {
+                    return Err(format!(
+                        "壁 ID {}: 壁脚faceのQ=0でM/(QD)が未解決です",
+                        elem.id.0
+                    ));
+                }
+                Ok(state)
+            })();
+            let state = match resolved {
+                Ok(state) => state,
+                Err(reason) => {
+                    out.push((
+                        elem.nodes[0],
+                        "耐震壁(RC)せん断非線形".into(),
+                        CheckOutcome::Skipped { reason },
+                    ));
+                    continue;
+                }
+            };
+            let sigma_0 = state.compression_n / state.physical_area_mm2;
+            if !sigma_0.is_finite() || !(0.0..=0.4 * fc).contains(&sigma_0) {
+                out.push((
+                    elem.nodes[0],
+                    "耐震壁(RC)せん断非線形".into(),
+                    CheckOutcome::Skipped {
+                        reason: format!("壁 ID {}: 壁脚faceの圧縮正N/Aが適用範囲外です", elem.id.0),
+                    },
+                ));
+                continue;
+            }
+            let shear_span_ratio =
+                (state.moment_nmm.abs() / (state.shear_n.abs() * state.depth_mm)).clamp(1.0, 3.0);
             let tri_inp = WallShearTrilinearInput {
                 wall_height_mm: h,
                 wall_length_mm: l,
@@ -497,14 +538,15 @@ pub(super) fn check_walls(
             };
             let ratio = q_design / tri.qu;
             let detail = format!(
-                "Qc={:.1} kN, βs={:.3}, Qu={:.1} kN, r={:.3}, QD={:.1} kN, δc={:.4} mm, δu={:.4} mm（純せん断の参考骨格）",
+                "Qc={:.1} kN, βs={:.3}, Qu={:.1} kN, r={:.3}, QD={:.1} kN, δc={:.4} mm, δu={:.4} mm（純せん断の参考骨格）, Nface={:.1} kN, Mface={:.1} kNm, Qface={:.1} kN, A={:.1} mm²",
                 tri.qc / 1000.0,
                 tri.beta_s,
                 tri.qu / 1000.0,
                 tri.r_opening,
                 q_design / 1000.0,
                 points[1].0,
-                points[2].0
+                points[2].0,
+                state.compression_n / 1000.0, state.moment_nmm / 1e6, state.shear_n / 1000.0, state.physical_area_mm2
             );
             out.push((
                 elem.nodes[0],
@@ -623,6 +665,7 @@ pub(super) fn collect_wall_design_checks(
     term: LoadTerm,
     index: Option<&sepika_load::wall_expand::WallExpansionIndex>,
     case: &str,
+    load_terms: Option<&[(sepika_core::ids::LoadCaseId, f64)]>,
 ) -> Vec<crate::wall_check::WallCheck> {
     use crate::wall_check::{WallCheck, WallCheckKind, WallSkipKind};
     let mut out = Vec::new();
@@ -714,6 +757,8 @@ pub(super) fn collect_wall_design_checks(
             check_walls(
                 model,
                 &[(e.id, response.unwrap())],
+                forces,
+                load_terms,
                 members,
                 term,
                 &mut computed,
@@ -756,6 +801,9 @@ pub(super) fn collect_wall_design_checks(
                         });
                         let why = if let Some(why) = required_material_issue {
                             why
+                        } else if reason.contains("応答不足") || reason.contains("face応答が不足")
+                        {
+                            WallSkipKind::MissingResponse
                         } else if reason.contains("未割当")
                             || reason.contains("未入力")
                             || reason.contains("不足")

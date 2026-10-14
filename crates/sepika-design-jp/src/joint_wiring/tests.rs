@@ -587,6 +587,21 @@ fn wall_with_columns_model() -> Model {
             ref_vector: [1.0, 0.0, 0.0],
         };
     }
+    let mut beam_section = model.sections[1].clone();
+    beam_section.id = SectionId(2);
+    beam_section.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+    model.sections.push(beam_section);
+    for e in &mut model.elements {
+        if e.nodes.len() == 2
+            && model.nodes[e.nodes[0].index()].coord[2] == model.nodes[e.nodes[1].index()].coord[2]
+        {
+            e.section = Some(SectionId(2));
+        }
+        if [ElemId(3), ElemId(4)].contains(&e.id) {
+            e.rigid_zone.face_i = Some(300.0);
+            e.rigid_zone.face_j = Some(300.0);
+        }
+    }
     model.materials[0].fc = Some(17.0);
     if let Some(SectionShape::RcWall { ps, pwh_ratio, .. }) = &mut model.sections[0].shape {
         *ps = 0.002;
@@ -599,7 +614,7 @@ fn wall_with_columns_model() -> Model {
 fn wall_with_side_columns_emits_reference_skeleton_and_missing_columns_are_skipped() {
     let mut model = wall_with_columns_model();
     let forces: [(f64, [f64; 6]); 1] = [(0.0, [-1_000_000.0, 800_000.0, 0.0, 0.0, 0.0, 1.0e9])];
-    let col_forces: [(f64, [f64; 6]); 1] = [(0.0, [-500_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])];
+    let col_forces: [(f64, [f64; 6]); 1] = [(0.1, [-500_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])];
     let member_forces = vec![
         (ElemId(0), forces.as_slice()),
         (ElemId(3), col_forces.as_slice()),
@@ -1148,7 +1163,7 @@ fn src_cross_panel_new_types_emits_check() {
 
 fn all_wall_outcomes(model: &Model) -> Vec<(NodeId, String, CheckOutcome)> {
     let forces = [(0.0, [-1_000_000.0, 800_000.0, 0.0, 0.0, 0.0, 1.0e9])];
-    let columns = [(0.0, [0.0; 6])];
+    let columns = [(0.1, [0.0; 6])];
     collect_joint_checks(
         model,
         &[
@@ -1417,7 +1432,7 @@ fn actual_side_column_missing_inputs_are_not_removed_from_reference_section() {
         ] {
             let mut model = wall_with_columns_model();
             let mut section = model.sections[1].clone();
-            section.id = SectionId(2);
+            section.id = SectionId(3);
             if missing == "主材なし" {
                 section.material = None;
             } else if missing == "主材不解決" {
@@ -1434,7 +1449,7 @@ fn actual_side_column_missing_inputs_are_not_removed_from_reference_section() {
                 .section = match missing {
                 "断面なし" => None,
                 "断面不解決" => Some(SectionId(999)),
-                _ => Some(SectionId(2)),
+                _ => Some(SectionId(3)),
             };
             let checks = all_wall_outcomes(&model);
             let outcome = &checks
@@ -1465,7 +1480,7 @@ fn mixed_side_column_concrete_and_asymmetric_sections_are_outside_reference_scop
         for change in ["軽量", "主筋", "断面寸法"] {
             let mut model = wall_with_columns_model();
             let mut section = model.sections[1].clone();
-            section.id = SectionId(2);
+            section.id = SectionId(3);
             if change == "軽量" {
                 let mut material = model.materials[0].clone();
                 material.id = MaterialId(2);
@@ -1486,7 +1501,7 @@ fn mixed_side_column_concrete_and_asymmetric_sections_are_outside_reference_scop
                 .iter_mut()
                 .find(|e| e.id == column_id)
                 .unwrap()
-                .section = Some(SectionId(2));
+                .section = Some(SectionId(3));
             let checks = all_wall_outcomes(&model);
             assert!(
                 matches!(&checks.iter().find(|(_, label, _)| label == "耐震壁(RC)せん断非線形").unwrap().2,
@@ -1499,26 +1514,27 @@ fn mixed_side_column_concrete_and_asymmetric_sections_are_outside_reference_scop
 }
 
 #[test]
-fn reference_section_resolves_actual_columns_without_column_force_rows() {
+fn reference_requires_side_column_response_and_preserves_allowable_entry() {
     let model = wall_with_columns_model();
     let normal = all_wall_outcomes(&model);
+    assert!(matches!(
+        &normal
+            .iter()
+            .find(|(_, l, _)| l.ends_with("せん断非線形"))
+            .unwrap()
+            .2,
+        CheckOutcome::Checked(_)
+    ));
     let rows = [(0.0, [-1_000_000.0, 800_000.0, 0.0, 0.0, 0.0, 1.0e9])];
     let wall_only = collect_joint_checks(&model, &[(ElemId(0), &rows)], LoadTerm::Short);
-    let reference = |checks: &[(NodeId, String, CheckOutcome)]| {
-        format!(
-            "{:?}",
-            checks
-                .iter()
-                .find(|(_, label, _)| label == "耐震壁(RC)せん断非線形")
-                .unwrap()
-                .2
-        )
-    };
-    assert_eq!(reference(&normal), reference(&wall_only));
+    assert!(
+        matches!(&wall_only.iter().find(|(_, l, _)| l.ends_with("せん断非線形")).unwrap().2,
+        CheckOutcome::Skipped { reason } if reason.contains("応答不足"))
+    );
     assert!(matches!(
         &wall_only
             .iter()
-            .find(|(_, label, _)| label == "耐震壁(RC)せん断非線形")
+            .find(|(_, l, _)| l == "耐震壁(RC)")
             .unwrap()
             .2,
         CheckOutcome::Checked(_)
@@ -1609,16 +1625,16 @@ fn status_wall_model() -> (Model, sepika_load::wall_expand::WallExpansionIndex) 
     steel.name = "SN400B".into();
     model.materials.push(steel);
     let mut steel_sec = model.sections[0].clone();
-    steel_sec.id = SectionId(2);
+    steel_sec.id = SectionId(3);
     steel_sec.shape = None;
     steel_sec.thickness = Some(6.0);
     steel_sec.material = Some(MaterialId(2));
     model.sections.push(steel_sec);
     let mut missing = model.sections[0].clone();
-    missing.id = SectionId(3);
+    missing.id = SectionId(4);
     missing.material = None;
     model.sections.push(missing);
-    for section in [0, 2, 3] {
+    for section in [0, 3, 4] {
         model.add_enclosed_wall_plate_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             WallPlate {
@@ -1723,10 +1739,78 @@ fn wall_status_candidates_keep_plate_case_kind_and_independent_counts() {
         .filter(|w| w.plate.unwrap().0 == 2)
         .all(|w| w.skip_kind == Some(WallSkipKind::MissingInput)));
     let s = WallCheckSummary::from_checks(&report.wall_checks);
+    assert!(report
+        .wall_checks
+        .iter()
+        .filter(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+        .all(|w| w.skip_kind.is_some()));
     assert_eq!(
         (s.n_walls, s.n_checks, s.n_ok_walls, s.n_skipped_walls),
-        (3, 6, 1, 2)
+        (3, 6, 0, 3)
     );
+}
+
+#[path = "../../../../test_fixtures/rc_wall617.rs"]
+mod rc_wall617_fixture;
+
+#[test]
+fn reference_skeleton_uses_same_face_total_state_and_keeps_allowable_check_on_missing_side() {
+    use crate::wall_check::WallCheckKind;
+    use sepika_element::frame::beam::MemberForces;
+    let mut m = rc_wall617_fixture::expanded_model();
+    if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut m.sections[2].shape {
+        *pwh_ratio = Some(0.006);
+    }
+    let mut forces = vec![
+        (
+            ElemId(4),
+            MemberForces {
+                at: vec![
+                    (0.0, [-400_000.0, 200_000.0, 0.0, 0.0, 0.0, -1.75e9]),
+                    (0.5, [-9e9, 200_000.0, 0.0, 0.0, 0.0, 9e15]),
+                ],
+            },
+        ),
+        (
+            ElemId(0),
+            MemberForces {
+                at: vec![(0.1, [-300_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+            },
+        ),
+        (
+            ElemId(1),
+            MemberForces {
+                at: vec![(0.1, [-500_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
+            },
+        ),
+    ];
+    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default());
+    let reference = report
+        .wall_checks
+        .iter()
+        .find(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+        .unwrap();
+    let CheckOutcome::Checked(check) = &reference.outcome else {
+        panic!("{:?}", reference.outcome)
+    };
+    let detail = &check.components[0].detail;
+    for expected in [
+        "Nface=1200.0 kN",
+        "Mface=-1290.0 kNm",
+        "Qface=200.0 kN",
+        "A=1332000.0 mm²",
+    ] {
+        assert!(detail.contains(expected), "{detail}");
+    }
+    assert!((check.ratio() - 200_000.0 / 2_178_659.633_619_86).abs() < 1e-12);
+    forces.pop();
+    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default());
+    assert!(report.wall_checks.iter().any(|w| w.kind == WallCheckKind::ReferenceSkeleton && matches!(&w.outcome, CheckOutcome::Skipped { reason } if reason.contains("部材 ID 1"))));
+    assert!(report
+        .wall_checks
+        .iter()
+        .any(|w| w.kind == WallCheckKind::AllowableShear
+            && matches!(w.outcome, CheckOutcome::Checked(_))));
 }
 
 #[test]
@@ -1742,8 +1826,14 @@ fn wall_status_missing_empty_invalid_response_and_self_weight_are_distinct() {
             .iter()
             .map(|(id, f)| (*id, f.as_slice()))
             .collect();
-        let checks =
-            collect_wall_design_checks(&model, &refs, LoadTerm::Short, Some(&index), "case:4");
+        let checks = collect_wall_design_checks(
+            &model,
+            &refs,
+            LoadTerm::Short,
+            Some(&index),
+            "case:4",
+            None,
+        );
         assert!(checks
             .iter()
             .filter(|w| w.elem == Some(rc))
@@ -1757,6 +1847,7 @@ fn wall_status_missing_empty_invalid_response_and_self_weight_are_distinct() {
         LoadTerm::Short,
         Some(&index),
         "case:4",
+        None,
     );
     assert!(checks
         .iter()
@@ -1769,7 +1860,8 @@ fn wall_status_missing_empty_invalid_response_and_self_weight_are_distinct() {
         .unwrap()
         .slit
         .beam_face[0] = true;
-    let checks = collect_wall_design_checks(&model, &[], LoadTerm::Short, Some(&index), "case:4");
+    let checks =
+        collect_wall_design_checks(&model, &[], LoadTerm::Short, Some(&index), "case:4", None);
     assert!(checks
         .iter()
         .filter(|w| w.elem == Some(rc))
@@ -1792,7 +1884,7 @@ fn wall_status_slit_stays_outside_with_or_without_section() {
         source.wall_plates[0].section = section;
         let (model, index, _) = sepika_load::wall_expand::expand_wall_elements(&source);
         let checks =
-            collect_wall_design_checks(&model, &[], LoadTerm::Short, Some(&index), "case:0");
+            collect_wall_design_checks(&model, &[], LoadTerm::Short, Some(&index), "case:0", None);
         assert_eq!(checks.len(), 2);
         assert!(checks
             .iter()
@@ -1843,6 +1935,7 @@ fn wall_status_slit_stays_outside_with_invalid_thickness_and_plate_or_attr() {
                 LoadTerm::Short,
                 (slit_source != "attr").then_some(&index),
                 "case:0",
+                None,
             );
             assert_eq!(checks.len(), 2);
             let expected_kind = if thickness > 0.0 {
@@ -1887,7 +1980,8 @@ fn wall_status_ungenerated_missing_section_and_attached_weight_only_remain_visib
         extent: Some([500.0, 500.0]),
     };
     let (model, index, _) = sepika_load::wall_expand::expand_wall_elements(&expanded);
-    let checks = collect_wall_design_checks(&model, &[], LoadTerm::Long, Some(&index), "case:0");
+    let checks =
+        collect_wall_design_checks(&model, &[], LoadTerm::Long, Some(&index), "case:0", None);
     assert!(checks
         .iter()
         .filter(|w| w.plate.unwrap().0 == 0)
@@ -1923,6 +2017,7 @@ fn wall_status_missing_invalid_fc_src_and_shape_applicability_are_distinct() {
             LoadTerm::Long,
             Some(&index),
             "case:0",
+            None,
         );
         assert!(checks
             .iter()
@@ -1942,6 +2037,7 @@ fn wall_status_missing_invalid_fc_src_and_shape_applicability_are_distinct() {
             LoadTerm::Short,
             Some(&index),
             "case:0",
+            None,
         );
         assert!(checks
             .iter()
@@ -1956,6 +2052,7 @@ fn wall_status_missing_invalid_fc_src_and_shape_applicability_are_distinct() {
         LoadTerm::Long,
         Some(&index),
         "case:0",
+        None,
     );
     assert!(checks
         .iter()
@@ -1969,6 +2066,7 @@ fn wall_status_missing_invalid_fc_src_and_shape_applicability_are_distinct() {
         LoadTerm::Long,
         Some(&index),
         "case:0",
+        None,
     );
     assert!(checks
         .iter()
@@ -1982,6 +2080,7 @@ fn wall_status_missing_invalid_fc_src_and_shape_applicability_are_distinct() {
         LoadTerm::Long,
         Some(&index),
         "case:0",
+        None,
     );
     assert!(checks
         .iter()
@@ -2188,7 +2287,7 @@ fn standard_rebar507_wall_public_entries_gate_only_consumed_side_columns() {
     use sepika_core::model::{StbRebarArrangement, StbRebarElement, StbSectionStrength};
     let mut model = wall_with_columns_model();
     let wall_force = [(0.0, [-1_000_000.0, 800_000.0, 0.0, 0.0, 0.0, 1.0e9])];
-    let col_force = [(0.0, [-500_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])];
+    let col_force = [(0.1, [-500_000.0, 0.0, 0.0, 0.0, 0.0, 0.0])];
     let forces = [
         (ElemId(0), wall_force.as_slice()),
         (ElemId(3), col_force.as_slice()),
@@ -2243,7 +2342,7 @@ fn standard_rebar507_wall_public_entries_gate_only_consumed_side_columns() {
         attributes: raw.effective_attributes(&position, &model.stb_strengths.apply_conditions),
     });
     let record = StbSectionStrength {
-        section: SectionId(2),
+        section: SectionId(3),
         native_rebar: false,
         rebar: Some(raw),
         concrete: None,
@@ -2252,7 +2351,7 @@ fn standard_rebar507_wall_public_entries_gate_only_consumed_side_columns() {
         steel: vec![],
     };
     let mut unused = model.sections[1].clone();
-    unused.id = SectionId(2);
+    unused.id = SectionId(3);
     model.sections.push(unused);
     model.stb_strengths.sections.push(record);
     // 未使用の未解決断面は、壁の両検定の数値へ影響させない。
@@ -2278,7 +2377,7 @@ fn standard_rebar507_wall_public_entries_gate_only_consumed_side_columns() {
             );
         }
     }
-    let records = collect_wall_design_checks(&model, &forces, LoadTerm::Short, None, "507");
+    let records = collect_wall_design_checks(&model, &forces, LoadTerm::Short, None, "507", None);
     assert!(records.iter().all(|record| matches!(&record.outcome, CheckOutcome::Skipped { reason } if reason.contains("kind_corner"))));
 }
 

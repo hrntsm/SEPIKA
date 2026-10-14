@@ -10,6 +10,8 @@
 /// 時系列の全量は結果I/Oへストリーミングし、メモリに全保持しない。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ResponseResult {
+    /// 非線形runで初期ばねに採用した壁別の局所正負Qu `[N]`。線形解析は空。
+    pub wall_capacities: Vec<(sepika_core::ids::ElemId, [f64; 2])>,
     pub time: Vec<f64>,
     pub peak_disp: Vec<[f64; 6]>,
     pub story_drift_angle: Vec<f64>,

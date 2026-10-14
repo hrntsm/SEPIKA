@@ -656,6 +656,7 @@ mod tests {
 
     fn empty_pushover() -> PushoverResult {
         PushoverResult {
+            wall_capacities: Vec::new(),
             steps: Vec::new(),
             wall_history: None,
             wall_run: None,

@@ -140,6 +140,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn independent_600_by_180_capacity_arithmetic_is_distinct_from_square_column_entry() {
+        let input = RcWallShearInput {
+            fc: 24.0,
+            te: 180.0,
+            t: 180.0,
+            d_wall: 4600.0,
+            dc_compression: 600.0,
+            tension_column_at: 3097.0,
+            sigma_wh: 295.0,
+            pwh_ratio: 0.004,
+            sigma_0: 1.0,
+            shear_span_ratio: 6450.0 / 4600.0,
+            opening: None,
+        };
+        assert!((wall_shear_ultimate(&input) - 1_495_316.044904383).abs() < 1e-6);
+    }
+
     /// 開口低減（耐力用）は r2 = 1 − max(r0, l0/lw, h0/h)。
     /// 剛性用の r1 = 1 − 1.25·r0 とは別式であることを固定する。
     #[test]

@@ -528,6 +528,46 @@ fn wall_bay_app() -> App {
     app
 }
 
+fn unperforated_wall_bay_app() -> App {
+    let mut app = wall_bay_app();
+    let plate = &mut app.core.model.wall_plates[0];
+    plate.openings.clear();
+    assert_eq!(plate.opening_area, 0.0);
+    assert_eq!(plate.opening_weight, 0.0);
+    app
+}
+
+#[test]
+fn nonlinear_opening_wall_refuses_job_without_publishing_partial_results() {
+    for time_history in [false, true] {
+        let mut app = wall_bay_app();
+        app.run_preparation();
+        app.run_static_all();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let before = serde_json::to_vec(&app.core.scoped.results).unwrap();
+        if time_history {
+            app.core.analysis_cfg.th_nonlinear = true;
+            app.core.analysis_cfg.th_duration = 0.04;
+            app.run_time_history_sample();
+        } else {
+            app.run_pushover();
+        }
+        let error = app.core.scoped.last_error.as_ref().unwrap();
+        assert!(
+            error.contains("壁 ID 16") && error.contains("開口壁は未対応"),
+            "{error}"
+        );
+        assert_eq!(
+            serde_json::to_vec(&app.core.scoped.results).unwrap(),
+            before
+        );
+    }
+}
+
 /// GUI診断（`App::run_diagnostics`）が壁展開モデル（D5・dig Q4）を見ていることの回帰
 /// テスト。壁要素は `run_diagnostics` の内部で `expand_wall_elements` により初めて
 /// `model.elements` へ現れるため、この展開が壊れる（または元の `self.model` を渡す
@@ -1088,7 +1128,7 @@ fn test_region_gen_wall_finds_all_four_faces() {
 /// （`holding.rs` 参照）。これはエラーにならないため、値の変化でしか検出できない。
 #[test]
 fn snapshot_wall_ds_group_and_holding_capacity() {
-    let mut app = wall_bay_app();
+    let mut app = unperforated_wall_bay_app();
     app.run_preparation();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1124,7 +1164,7 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
     assert_eq!(holding.stories.len(), 1, "本フィクスチャは 1 層");
     let s = &holding.stories[0];
     let fillet_area_m2 = (4.0 - std::f64::consts::PI) * 0.013_f64.powi(2);
-    let wall_upper_weight_kn = (3.7 * 1.3 - 0.9 * 0.2) * 0.15 * 23.53596;
+    let wall_upper_weight_kn = 3.7 * 1.3 * 0.15 * 23.53596;
     let columns_upper_weight_kn =
         2.0 * 0.3 * 0.3 * 3.0 * 23.53596 / 2.0 + (0.0117 + fillet_area_m2) * 3.0 * 78.5;
     let roof_girders_weight_kn =
@@ -1200,7 +1240,7 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
 /// はこの分岐を一度も通らないため検知できない（§5.15 未検証一覧参照）。
 #[test]
 fn test_holding_capacity_auto_rank_detects_wall() {
-    let mut app = wall_bay_app();
+    let mut app = unperforated_wall_bay_app();
     app.run_preparation();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1241,7 +1281,7 @@ fn test_holding_capacity_auto_rank_detects_wall() {
 #[test]
 fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_input() {
     use sepika_solver::nonlinear::pushover::wall_response::WallUnavailableReason;
-    let mut app = wall_bay_app();
+    let mut app = unperforated_wall_bay_app();
     app.run_preparation();
     app.run_static_all();
     app.run_pushover();
@@ -1402,7 +1442,7 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
 
 #[test]
 fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
-    let mut app = wall_bay_app();
+    let mut app = unperforated_wall_bay_app();
     app.core.analysis_cfg.push_use_drift_angle = false;
     app.core.analysis_cfg.push_use_max_disp = true;
     app.core.analysis_cfg.push_max_disp = 1.0;
@@ -1448,12 +1488,12 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
     let elem_id = last.elem;
     let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
     let elem = expanded.element(elem_id).unwrap();
-    let qu = sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(
-        elem,
-        &expanded,
-        sepika_element::factory::StrengthBasis::Nominal,
-    )
-    .unwrap();
+    let qu = po
+        .wall_capacities
+        .iter()
+        .find(|(id, _)| *id == elem_id)
+        .unwrap()
+        .1;
     let geom = sepika_core::model::wall_element_geometry(elem, &expanded).unwrap();
     let r2 = sepika_element::wall::wall_element::WallElement::opening_strength_reduction(
         elem, &expanded,

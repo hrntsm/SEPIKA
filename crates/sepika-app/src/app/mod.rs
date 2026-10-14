@@ -2552,3 +2552,6 @@ mod lip_channel_geometry_tests;
 
 #[cfg(all(test, feature = "gui"))]
 mod rc_wall_direction_tests;
+
+#[cfg(test)]
+mod rc_wall617_tests;

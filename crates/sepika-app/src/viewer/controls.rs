@@ -115,6 +115,11 @@ pub(super) fn view_controls(ui: &mut egui::Ui, app: &mut App) {
                 ModelingAnalysis::Incremental,
                 "増分解析(弾塑性)",
             );
+            ui.selectable_value(
+                &mut modeling_analysis,
+                ModelingAnalysis::TimeHistory,
+                "非線形時刻歴",
+            );
             ui.separator();
             ui.add_enabled(
                 false,

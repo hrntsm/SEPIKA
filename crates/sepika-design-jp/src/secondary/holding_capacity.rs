@@ -392,6 +392,7 @@ mod tests {
     fn pushover_with_qu(story_shear: Vec<f64>, story_drift: Vec<f64>) -> PushoverResult {
         use sepika_solver::nonlinear::pushover::{CapacityPoint, MechanismType};
         PushoverResult {
+            wall_capacities: Vec::new(),
             steps: vec![],
             wall_history: None,
             wall_run: None,
@@ -424,6 +425,7 @@ mod tests {
         use sepika_solver::nonlinear::pushover::{CapacityPoint, MechanismType};
         // 1層。層せん断は 100 → 150(ピーク) → 120(劣化) と推移。
         let pushover = PushoverResult {
+            wall_capacities: Vec::new(),
             steps: vec![],
             wall_history: None,
             wall_run: None,

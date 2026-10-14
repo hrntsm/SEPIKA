@@ -187,11 +187,14 @@ impl StrengthBasis {
 /// 時刻歴応答解析は [`StrengthBasis::Nominal`]、
 /// 保有水平耐力計算は [`StrengthBasis::MaterialStrength`] を渡す。
 /// RC矩形梁の集中ばね入力が不正・不足なら診断文付きでpanicする。
+/// RC耐震壁の `wall_capacity` には事前解決した局所正負の順のQu `[N]` の有限正値を渡す。
+/// RC耐震壁で値が欠落・不正の場合は、壁IDを含む診断文付きでpanicする。
 pub fn build_nonlinear_behavior(
     data: &ElementData,
     model: &Model,
     basis: StrengthBasis,
     kind: AnalysisKind,
+    wall_capacity: Option<[f64; 2]>,
 ) -> Box<dyn ElementBehavior> {
     if let Some(issue) = springs::rc_reference_target_issue(data, model) {
         panic!("部材 ID {} のRC梁基準接続: {issue}", data.id.0);
@@ -266,12 +269,18 @@ pub fn build_nonlinear_behavior(
             if rc_wall && !crate::wall::misc_wall::wall_is_seismic(data, model) {
                 return build_behavior(data, model);
             }
-            let qu = match crate::wall::wall_element::WallElement::directional_shear_capacity_of(
-                data, model, basis,
-            ) {
-                Ok(qu) => qu,
-                Err(reason) if rc_wall => panic!("{reason}"),
-                Err(_) => return build_behavior(data, model),
+            let qu = if rc_wall {
+                let qu = wall_capacity.unwrap_or_else(|| {
+                    panic!("壁 ID {}: runの静的一次参照Quが未解決です", data.id.0)
+                });
+                assert!(
+                    qu.iter().all(|v| v.is_finite() && *v > 0.0),
+                    "壁 ID {}: runのQuは有限正値が必要です",
+                    data.id.0
+                );
+                qu
+            } else {
+                [crate::wall::wall_element::WallElement::steel_shear_capacity_of(data, model); 2]
             };
             if !rc_wall && qu.iter().any(|q| *q <= 0.0) {
                 return build_behavior(data, model);

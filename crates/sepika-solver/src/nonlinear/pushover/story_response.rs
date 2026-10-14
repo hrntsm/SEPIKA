@@ -437,6 +437,7 @@ mod tests {
             input_unavailable: None,
         };
         let mut po = PushoverResult {
+            wall_capacities: Vec::new(),
             steps: vec![],
             wall_history: None,
             wall_run: Some(run),
