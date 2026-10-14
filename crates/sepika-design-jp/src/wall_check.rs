@@ -36,6 +36,21 @@ impl WallSkipKind {
     }
 }
 
+/// 実解析へ接続しない純せん断参考骨格。点は原点・ひび割れ・終局の順。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct WallShearReference {
+    /// Qc用の実壁厚×柱心距離 `[mm²]`。
+    pub aw_qc_mm2: f64,
+    /// (純せん断変位 `[mm]`, せん断力 `[N]`)。
+    pub displacement_points: [(f64, f64); 3],
+    /// (純せん断角 `[rad]`, せん断力 `[N]`)。
+    pub angle_points: [(f64, f64); 3],
+    /// 終局割線剛性/純せん断初期剛性。
+    pub beta_s: f64,
+    /// ひび割れ点と終局点の間の区間剛性 `[N/mm]`。
+    pub second_stiffness_n_per_mm: f64,
+}
+
 /// `seismic_target=false` は自重・雑壁のみの対象外であり、未検定耐震壁の集計へ含めない。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WallCheck {
@@ -49,6 +64,8 @@ pub struct WallCheck {
     pub seismic_target: bool,
     pub skip_kind: Option<WallSkipKind>,
     pub outcome: CheckOutcome,
+    /// 成立した参考骨格のみ保持し、未算定・許容せん断ではNone。
+    pub reference_skeleton: Option<WallShearReference>,
 }
 impl WallCheck {
     pub fn label(&self) -> String {

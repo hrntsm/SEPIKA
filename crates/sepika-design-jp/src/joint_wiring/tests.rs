@@ -2512,3 +2512,148 @@ fn sm520_wall_side_column_out_of_range_is_not_dropped_from_allowable_and_referen
         }
     }
 }
+
+#[path = "../../../../test_fixtures/rc_wall534.rs"]
+mod rc_wall534_fixture;
+
+#[test]
+fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
+    use sepika_element::frame::beam::MemberForces;
+    let input = rc_wall534_fixture::input_model(rc_wall617_fixture::input_model());
+    let (mut model, index, _) = sepika_load::wall_expand::expand_wall_elements(&input);
+    let wall = model
+        .elements
+        .iter()
+        .find(|e| e.kind == ElementKind::Wall)
+        .unwrap();
+    let forces = vec![
+        (
+            wall.id,
+            MemberForces {
+                at: vec![(0.0, [0.0, 100_000.0, 0.0, 0.0, 0.0, 0.0])],
+            },
+        ),
+        (
+            ElemId(0),
+            MemberForces {
+                at: vec![(0.1, [-6_025_275.701739306, 0.0, 0.0, 0.0, 0.0, 0.0])],
+            },
+        ),
+        (
+            ElemId(1),
+            MemberForces {
+                at: vec![(0.1, [-6_025_275.701739306, 0.0, 0.0, 0.0, 0.0, 0.0])],
+            },
+        ),
+    ];
+    let report = crate::run_member_design_checks(
+        &model,
+        &forces,
+        &[],
+        &crate::MemberDesignCheckOptions {
+            wall_index: Some(&index),
+            wall_case: "case:0",
+            ..Default::default()
+        },
+    );
+    let reference = report
+        .wall_checks
+        .iter()
+        .find(|w| w.kind == crate::wall_check::WallCheckKind::ReferenceSkeleton)
+        .unwrap();
+    assert!(
+        matches!(reference.outcome, CheckOutcome::Checked(_)),
+        "{:?}",
+        reference
+    );
+    rc_wall534_fixture::assert_reference(reference.reference_skeleton.as_ref().unwrap());
+    assert!(report
+        .wall_checks
+        .iter()
+        .filter(|w| w.kind == crate::wall_check::WallCheckKind::AllowableShear)
+        .all(|w| w.reference_skeleton.is_none()));
+    for change_rebar in [false, true] {
+        if let Some(SectionShape::RcColumnRect { b, d, rebar }) = &mut model.sections[0].shape {
+            if change_rebar {
+                rebar.x = vec![6];
+                rebar.y = vec![5];
+            } else {
+                *b = 800.0;
+                *d = 800.0;
+            }
+        }
+        let report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+        let skeleton = report
+            .wall_checks
+            .iter()
+            .find_map(|w| w.reference_skeleton.as_ref())
+            .unwrap();
+        assert!((skeleton.aw_qc_mm2 - 840_000.0).abs() < 1e-6);
+        assert!((skeleton.displacement_points[1].1 - 2_016_000.0).abs() < 1e-6);
+    }
+    let mut valid_report =
+        crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+    assert!(valid_report
+        .wall_checks
+        .iter()
+        .any(|w| w.reference_skeleton.is_some()));
+    valid_report.skip_for_load_state("荷重状態不足");
+    assert!(valid_report
+        .wall_checks
+        .iter()
+        .all(|w| w.reference_skeleton.is_none()));
+    model.wall_attrs[0].openings.push(WallOpening {
+        width: 200.0,
+        height: 200.0,
+        offset: None,
+    });
+    let mut report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+    let reference = report
+        .wall_checks
+        .iter()
+        .find(|w| w.kind == crate::wall_check::WallCheckKind::ReferenceSkeleton)
+        .unwrap();
+    assert!(
+        matches!(&reference.outcome, CheckOutcome::Skipped {reason} if reason.contains("Qc用開口低減率が未確定")),
+        "{:?}",
+        reference
+    );
+    assert!(reference.reference_skeleton.is_none());
+    report.skip_for_load_state("荷重状態不足");
+    assert!(report
+        .wall_checks
+        .iter()
+        .all(|w| w.reference_skeleton.is_none()));
+    model.wall_attrs[0].openings.clear();
+    for bad_fc in [
+        None,
+        Some(0.0),
+        Some(-1.0),
+        Some(f64::NAN),
+        Some(f64::INFINITY),
+    ] {
+        model.materials[0].fc = bad_fc;
+        let report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+        assert!(report
+            .wall_checks
+            .iter()
+            .all(|w| w.reference_skeleton.is_none()));
+        assert!(report.wall_checks.iter().any(
+            |w| matches!(&w.outcome, CheckOutcome::Skipped { reason } if reason.contains("Fc"))
+        ));
+    }
+    model.materials[0].fc = Some(24.0);
+    for bad_t in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        if let Some(SectionShape::RcWall { thickness, .. }) = &mut model.sections[2].shape {
+            *thickness = bad_t;
+        }
+        let report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+        assert!(report
+            .wall_checks
+            .iter()
+            .all(|w| w.reference_skeleton.is_none()));
+        assert!(report.wall_checks.iter().any(
+            |w| matches!(&w.outcome, CheckOutcome::Skipped { reason } if reason.contains("不正"))
+        ));
+    }
+}
