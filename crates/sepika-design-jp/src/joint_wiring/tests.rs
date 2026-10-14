@@ -1663,6 +1663,76 @@ fn status_wall_model() -> (Model, sepika_load::wall_expand::WallExpansionIndex) 
 }
 
 #[test]
+fn reference_method_identifies_rc_success_and_missing_inputs_but_not_steel_or_src() {
+    use crate::wall_check::WallCheckKind;
+    use sepika_core::model::RcWallShearMethod::{ArakawaMean, ArakawaMin};
+    use sepika_element::frame::beam::MemberForces;
+    for method in [ArakawaMin, ArakawaMean] {
+        for kind in ["RC", "主材不足", "横筋不足", "純鋼板", "SRC"] {
+            let mut model = wall_with_columns_model();
+            model.stress_cfg.rc_wall_shear_method = method;
+            match kind {
+                "主材不足" => model.sections[0].material = None,
+                "横筋不足" => model.sections[0].shear_rebar_material = None,
+                "純鋼板" => {
+                    model.sections[0].shape = None;
+                    model.materials[0].category = MaterialCategory::Steel;
+                }
+                "SRC" => model.sections[0].steel_material = Some(MaterialId(1)),
+                _ => (),
+            }
+            let forces = vec![
+                (
+                    ElemId(0),
+                    MemberForces {
+                        at: vec![(0.0, [-1_000_000.0, 800_000.0, 0.0, 0.0, 0.0, 1.0e9])],
+                    },
+                ),
+                (
+                    ElemId(3),
+                    MemberForces {
+                        at: vec![(0.1, [0.0; 6])],
+                    },
+                ),
+                (
+                    ElemId(4),
+                    MemberForces {
+                        at: vec![(0.1, [0.0; 6])],
+                    },
+                ),
+            ];
+            let report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+            let reference = report
+                .wall_checks
+                .iter()
+                .find(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+                .unwrap();
+            if matches!(kind, "純鋼板" | "SRC") {
+                assert_eq!(reference.shear_method, None, "{kind}: {reference:?}");
+                assert!(!reference.label().contains("荒川"));
+                let CheckOutcome::Skipped { reason } = &reference.outcome else {
+                    panic!("{reference:?}")
+                };
+                assert!(!reason.contains("荒川"), "{reason}");
+            } else {
+                assert_eq!(
+                    reference.shear_method,
+                    Some(method),
+                    "{kind}: {reference:?}"
+                );
+                assert!(reference.label().contains(method.label()));
+                if kind == "RC" {
+                    assert!(
+                        matches!(&reference.outcome, CheckOutcome::Checked(check) if check.basis.contains(method.label())),
+                        "{reference:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn wall_status_candidates_keep_plate_case_kind_and_independent_counts() {
     use crate::wall_check::{WallCheckKind, WallCheckSummary, WallSkipKind};
     use sepika_element::frame::beam::MemberForces;
@@ -1758,6 +1828,7 @@ fn reference_skeleton_uses_same_face_total_state_and_keeps_allowable_check_on_mi
     use crate::wall_check::WallCheckKind;
     use sepika_element::frame::beam::MemberForces;
     let mut m = rc_wall617_fixture::expanded_model();
+    m.stress_cfg.rc_wall_shear_method = sepika_core::model::RcWallShearMethod::ArakawaMin;
     if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut m.sections[2].shape {
         *pwh_ratio = Some(0.006);
     }
@@ -1803,8 +1874,33 @@ fn reference_skeleton_uses_same_face_total_state_and_keeps_allowable_check_on_mi
         assert!(detail.contains(expected), "{detail}");
     }
     assert!((check.ratio() - 200_000.0 / 2_178_659.633_619_86).abs() < 1e-12);
+    assert_eq!(
+        reference.shear_method,
+        Some(sepika_core::model::RcWallShearMethod::ArakawaMin)
+    );
+    m.stress_cfg.rc_wall_shear_method = sepika_core::model::RcWallShearMethod::ArakawaMean;
+    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default());
+    let reference = report
+        .wall_checks
+        .iter()
+        .find(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+        .unwrap();
+    let CheckOutcome::Checked(check) = &reference.outcome else {
+        panic!("{:?}", reference.outcome)
+    };
+    assert_eq!(
+        reference.shear_method,
+        Some(sepika_core::model::RcWallShearMethod::ArakawaMean)
+    );
+    assert!((check.ratio() - 200_000.0 / 2_848_545.297717935).abs() < 1e-12);
+    assert!(check.basis.contains("荒川mean"));
     forces.pop();
     let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default());
+    assert!(report
+        .wall_checks
+        .iter()
+        .filter(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+        .all(|w| w.shear_method == Some(sepika_core::model::RcWallShearMethod::ArakawaMean)));
     assert!(report.wall_checks.iter().any(|w| w.kind == WallCheckKind::ReferenceSkeleton && matches!(&w.outcome, CheckOutcome::Skipped { reason } if reason.contains("部材 ID 1"))));
     assert!(report
         .wall_checks

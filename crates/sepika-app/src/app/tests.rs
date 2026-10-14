@@ -2342,6 +2342,7 @@ fn test_legacy_pushover_deserialize_migrates_to_slot() {
     let legacy = ResultsBundle {
         pushover: Some(sepika_solver::nonlinear::pushover::PushoverResult {
             wall_capacities: Vec::new(),
+            rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
             steps: vec![],
             wall_history: None,
             wall_run: None,
@@ -10592,6 +10593,7 @@ fn dummy_static_once() -> sepika_solver::statics::linear::StaticOnce {
 fn dummy_pushover(qu: f64) -> sepika_solver::nonlinear::pushover::PushoverResult {
     sepika_solver::nonlinear::pushover::PushoverResult {
         wall_capacities: Vec::new(),
+        rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
         steps: vec![],
         wall_history: None,
         wall_run: None,
@@ -10631,6 +10633,7 @@ fn dummy_lumped(
 fn dummy_th(time: Vec<f64>) -> sepika_solver::dynamic::timehistory::ResponseResult {
     sepika_solver::dynamic::timehistory::ResponseResult {
         wall_capacities: Vec::new(),
+        rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
         time,
         peak_disp: vec![],
         story_drift_angle: vec![],
@@ -10661,6 +10664,7 @@ fn test_build_result_tree_sections_and_labels() {
     let s = dummy_static_once();
     let th_res = sepika_solver::dynamic::timehistory::ResponseResult {
         wall_capacities: Vec::new(),
+        rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
         time: vec![0.0],
         peak_disp: vec![],
         story_drift_angle: vec![],
@@ -10703,6 +10707,7 @@ fn test_build_result_tree_sections_and_labels() {
         }),
         pushover_x: Some(sepika_solver::nonlinear::pushover::PushoverResult {
             wall_capacities: Vec::new(),
+            rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
             steps: vec![],
             wall_history: None,
             wall_run: None,

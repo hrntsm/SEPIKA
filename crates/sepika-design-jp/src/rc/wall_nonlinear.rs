@@ -15,6 +15,8 @@ const KGF_TO_N: f64 = sepika_core::units::GRAVITY_MM_S2 / 1000.0;
 /// 単位は SI 系（長さ [mm]・面積 [mm²]・応力 [N/mm²]・軸力 [N]）で統一する。
 #[derive(Clone, Copy, Debug)]
 pub struct WallShearTrilinearInput {
+    /// 採用するRC壁終局せん断耐力の算定方式。
+    pub method: sepika_core::model::RcWallShearMethod,
     /// 壁高さ（上下梁中心間）[mm]。
     pub wall_height_mm: f64,
     /// 壁長さ（側柱中心間）[mm]。
@@ -146,6 +148,7 @@ pub fn wall_shear_opening_reduction(opening: Option<(f64, f64, f64, f64)>) -> f6
 pub fn wall_shear_ultimate(inp: &WallShearTrilinearInput) -> f64 {
     sepika_core::rc_wall_capacity::wall_shear_ultimate(
         &sepika_core::rc_wall_capacity::RcWallShearInput {
+            method: inp.method,
             fc: inp.fc,
             te: inp.te,
             t: inp.t,
@@ -211,6 +214,7 @@ mod tests {
     use super::*;
     fn base_input() -> WallShearTrilinearInput {
         WallShearTrilinearInput {
+            method: sepika_core::model::RcWallShearMethod::ArakawaMin,
             wall_height_mm: 3000.0,
             wall_length_mm: 4000.0,
             fc: 24.0,

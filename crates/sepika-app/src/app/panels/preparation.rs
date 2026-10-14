@@ -276,6 +276,24 @@ impl App {
             .default_open(false)
             .id_salt("as_calc_cfg")
             .show(ui, |ui| {
+                use sepika_core::model::RcWallShearMethod;
+                let previous = self.core.model.stress_cfg.rc_wall_shear_method;
+                let mut method = previous;
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("RC壁の終局せん断耐力:");
+                    egui::ComboBox::from_id_salt("rc_wall_shear_method")
+                        .selected_text(method.label())
+                        .show_ui(ui, |ui| {
+                            for value in [
+                                RcWallShearMethod::ArakawaMin,
+                                RcWallShearMethod::ArakawaMean,
+                            ] {
+                                ui.selectable_value(&mut method, value, value.label());
+                            }
+                        });
+                });
+                self.set_rc_wall_shear_method(method);
+
                 ui.horizontal_wrapped(|ui| {
                     use sepika_core::model::MassMethod;
                     ui.label("質量方式:");
@@ -995,5 +1013,83 @@ mod tests {
         let display = standard_floor_load_to_display(0.005);
         assert_eq!(display, 5.0);
         assert_eq!(standard_floor_load_to_internal(display), 0.005);
+    }
+}
+
+#[cfg(test)]
+mod wall_method_tests {
+    use super::*;
+    use sepika_core::model::RcWallShearMethod::{ArakawaMean, ArakawaMin};
+
+    fn text_center(shape: &egui::Shape, text: &str) -> Option<egui::Pos2> {
+        match shape {
+            egui::Shape::Text(value) if value.galley.text() == text => {
+                Some(value.visual_bounding_rect().center())
+            }
+            egui::Shape::Vec(values) => values.iter().find_map(|s| text_center(s, text)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn calculation_condition_combobox_selects_both_methods_and_undo_restores_default() {
+        let mut app = App::default();
+        let context = egui::Context::default();
+        crate::app::install_japanese_fonts(&context);
+        let frame = |app: &mut App, events| {
+            context.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.calc_condition_section(ui),
+            )
+        };
+        let click = |app: &mut App, pos| {
+            for pressed in [true, false] {
+                frame(
+                    app,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+        };
+        let position = |output: &egui::FullOutput, text| {
+            output
+                .shapes
+                .iter()
+                .find_map(|s| text_center(&s.shape, text))
+                .unwrap_or_else(|| panic!("描画なし: {text}"))
+        };
+        frame(&mut app, vec![]);
+        let closed = frame(&mut app, vec![]);
+        click(&mut app, position(&closed, "計算条件"));
+        frame(&mut app, vec![]);
+        let open = frame(&mut app, vec![]);
+        click(&mut app, position(&open, "荒川mean"));
+        frame(&mut app, vec![]);
+        let combo = frame(&mut app, vec![]);
+        position(&combo, "荒川mean");
+        click(&mut app, position(&combo, "荒川min"));
+        assert_eq!(app.core.model.stress_cfg.rc_wall_shear_method, ArakawaMin);
+        assert!(app.core.scoped.staleness.results_stale);
+        app.undo_action();
+        assert_eq!(app.core.model.stress_cfg.rc_wall_shear_method, ArakawaMean);
+        app.redo_action();
+        assert_eq!(app.core.model.stress_cfg.rc_wall_shear_method, ArakawaMin);
+        frame(&mut app, vec![]);
+        let selected = frame(&mut app, vec![]);
+        click(&mut app, position(&selected, "荒川min"));
+        frame(&mut app, vec![]);
+        let combo = frame(&mut app, vec![]);
+        click(&mut app, position(&combo, "荒川mean"));
+        assert_eq!(app.core.model.stress_cfg.rc_wall_shear_method, ArakawaMean);
     }
 }

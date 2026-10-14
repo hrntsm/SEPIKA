@@ -419,6 +419,7 @@ mod tests {
             node: Some(NodeId(0)),
             case: "case:5".into(),
             kind: WallCheckKind::AllowableShear,
+            shear_method: None,
             seismic_target: true,
             skip_kind: why,
             outcome,

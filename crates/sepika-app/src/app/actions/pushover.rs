@@ -5,6 +5,20 @@
 use super::*;
 
 impl App {
+    #[cfg(any(feature = "gui", test))]
+    pub(crate) fn set_rc_wall_shear_method(
+        &mut self,
+        method: sepika_core::model::RcWallShearMethod,
+    ) {
+        if method != self.core.model.stress_cfg.rc_wall_shear_method {
+            self.core.scoped.undo.run(
+                &mut self.core.model,
+                Box::new(sepika_edit::SetRcWallShearMethod { method }),
+            );
+            self.core.scoped.staleness.mark_edited();
+        }
+    }
+
     #[cfg(feature = "gui")]
     pub(crate) fn adopted_wall_capacity(
         &self,

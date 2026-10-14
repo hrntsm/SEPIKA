@@ -1509,6 +1509,7 @@ mod tests {
             node: Some(NodeId(0)),
             case: "case:0".into(),
             kind: WallCheckKind::AllowableShear,
+            shear_method: None,
             seismic_target: true,
             skip_kind: None,
             outcome: checked(
@@ -1565,6 +1566,7 @@ mod tests {
                 node: Some(NodeId(0)),
                 case: "combo:2:DL+E".into(),
                 kind: WallCheckKind::AllowableShear,
+                shear_method: None,
                 seismic_target: true,
                 skip_kind: Some(WallSkipKind::NotImplemented),
                 outcome: skipped("純鋼板の国内検定式未確定"),

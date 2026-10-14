@@ -498,6 +498,7 @@ fn sample_pushover() -> sepika_solver::nonlinear::pushover::PushoverResult {
     use sepika_solver::nonlinear::pushover::{CapacityPoint, MechanismType, PushoverResult};
     PushoverResult {
         wall_capacities: Vec::new(),
+        rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
         steps: vec![],
         wall_history: None,
         wall_run: None,

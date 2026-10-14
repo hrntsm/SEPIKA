@@ -16,6 +16,19 @@ pub(crate) fn resolve(
     apply_long_term: bool,
     basis: StrengthBasis,
 ) -> Result<Vec<(ElemId, [f64; 2])>, String> {
+    resolve_inputs(model, apply_long_term, basis).map_err(|reason| {
+        format!(
+            "RC壁 {}: {reason}",
+            model.stress_cfg.rc_wall_shear_method.label()
+        )
+    })
+}
+
+fn resolve_inputs(
+    model: &Model,
+    apply_long_term: bool,
+    basis: StrengthBasis,
+) -> Result<Vec<(ElemId, [f64; 2])>, String> {
     let walls: Vec<_> = model
         .elements
         .iter()

@@ -276,6 +276,8 @@ pub struct MemberStepState {
 pub struct PushoverResult {
     /// このrunで初期ばねに採用した壁別の局所正負Qu `[N]`。
     pub wall_capacities: Vec<(ElemId, [f64; 2])>,
+    /// 開始時Modelで固定したRC壁終局せん断耐力方式。
+    pub rc_wall_shear_method: sepika_core::model::RcWallShearMethod,
     pub steps: Vec<PushoverStep>,
     /// 壁要素単体の確定ステップ応答。未記録の旧結果は None。
     #[serde(default)]

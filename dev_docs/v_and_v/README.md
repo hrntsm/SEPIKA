@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [RC壁せん断耐力方式_Issue572_2026-10.md](RC壁せん断耐力方式_Issue572_2026-10.md) | 建物共通min/mean・両consumer・開始時固定・採用run値・保存/Undo/失効・対象材種の方式識別 | 🔶（独立算術/原本照合、最終Windows広域回帰・関連feature・Clippy成功、fresh独立レビュー修正必須0。既存#645除外、CI・Validation後続） |
 | [RC壁同一faceと初期耐力_Issue617_2026-10.md](RC壁同一faceと初期耐力_Issue617_2026-10.md) | 同一face全体M/Q/N・物理A・静的一次参照・run採用Quと入力一致 | 🔶（独立算術/人工入力/実求解・App/MCP/Ds/表示とローカルchecks、既知#645除外を区別。独立レビュー指摘なし、親監査/CI・Validation未） |
 | [RC壁方向別入力_Issue535_2026-10.md](RC壁方向別入力_Issue535_2026-10.md) | 方向比・材料役割・物理壁Fc/再ID・GUI保存/Undo/失効・MCP開始拒否 | 🔶（入力Verification、手動GUI/実験Validation未） |
 | [STB書出の開発中表示_Issue647_2026-10.md](STB書出の開発中表示_Issue647_2026-10.md) | 実ファイルメニューの操作前表示・閉鎖時状態保持・既存入出力回帰 | 🔶（自動描画・既存入出力Verification成功、手動native取消・最終headゲートは後続） |
@@ -332,3 +333,5 @@
 RC壁の方向入力・材料役割の横断入口は[Issue535検証](RC壁方向別入力_Issue535_2026-10.md)のelement/GUI/MCP fixtureを参照する（🔶、入力VerificationとValidationを区別）。
 
 RC壁の同一face内力・初期耐力の横断入口は[Issue617検証](RC壁同一faceと初期耐力_Issue617_2026-10.md)の`wall/static_face.rs`・`nonlinear/wall_reference.rs`・`joint_wiring/tests.rs`・App/MCP fixtureを参照する（🔶、独立算術・人工断面力・実求解・実入口を区別）。
+
+RC壁の二方式とGUI/採用run値/失効の横断入口は[Issue572検証](RC壁せん断耐力方式_Issue572_2026-10.md)を参照する。独立算術と実入口を区別する。

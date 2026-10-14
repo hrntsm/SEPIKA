@@ -563,6 +563,7 @@ pub fn pushover_analysis_recording(
     };
     Ok(PushoverResult {
         wall_capacities,
+        rc_wall_shear_method: model.stress_cfg.rc_wall_shear_method,
         steps: recorded.steps,
         wall_history: Some(recorded.wall_history),
         wall_run: Some(recorded.run),

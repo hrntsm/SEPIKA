@@ -1189,6 +1189,27 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
         s.qud
     );
     let source = app.core.scoped.holding_capacity_source.as_ref().unwrap();
+    let po = app.displayed_pushover().unwrap();
+    assert_eq!(
+        po.rc_wall_shear_method,
+        sepika_core::model::RcWallShearMethod::ArakawaMean
+    );
+    assert_eq!(po.wall_capacities.len(), 1);
+    // t=150、D=4300、左右300角/6-D22、A=735000、N=35745.859859942386、λ=1の独立算術値。
+    let expected_wall_capacity_n = 1_717_735.845549596;
+    for capacity_n in po.wall_capacities[0].1 {
+        assert!((capacity_n - expected_wall_capacity_n).abs() < 1e-6);
+    }
+    let capacity_force = &source.capacity_forces[0];
+    let point = po.capacity_evaluation.as_ref().unwrap();
+    let step = &po.steps[point.step as usize];
+    assert!((capacity_force.reference_n - 0.2 * expected_weight_n).abs() < 1e-6);
+    assert!((capacity_force.external_n - step.load_factor * 0.2 * expected_weight_n).abs() < 1e-6);
+    assert!((capacity_force.wall_n - expected_wall_capacity_n).abs() < 1e-6);
+    assert_eq!(capacity_force.brace_n, 0.0);
+    assert!(capacity_force.frame_n > 0.0);
+    assert!((s.qu - capacity_force.wall_n - capacity_force.frame_n).abs() < 1e-6);
+    assert!((s.qu - capacity_force.external_n).abs() <= capacity_force.tolerance_n);
     assert!(source.ds_forces[0].beta_u > 0.7);
     assert!(matches!(
         source.ds_mechanism,

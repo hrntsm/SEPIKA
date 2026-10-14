@@ -393,6 +393,7 @@ mod tests {
         use sepika_solver::nonlinear::pushover::{CapacityPoint, MechanismType};
         PushoverResult {
             wall_capacities: Vec::new(),
+            rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
             steps: vec![],
             wall_history: None,
             wall_run: None,
@@ -426,6 +427,7 @@ mod tests {
         // 1層。層せん断は 100 → 150(ピーク) → 120(劣化) と推移。
         let pushover = PushoverResult {
             wall_capacities: Vec::new(),
+            rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
             steps: vec![],
             wall_history: None,
             wall_run: None,

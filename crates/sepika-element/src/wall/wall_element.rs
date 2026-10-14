@@ -113,6 +113,7 @@ fn side_column_main_area(shape: &SectionShape) -> Option<f64> {
 
 /// 耐震壁の幾何・配筋・材料。
 struct WallShearGeometry {
+    method: sepika_core::model::RcWallShearMethod,
     /// コンクリート設計基準強度 Fc [N/mm²]（未設定は `None`）
     fc: Option<f64>,
     /// 壁厚 t [mm]
@@ -590,11 +591,12 @@ impl WallElement {
         Ok(self)
     }
 
-    /// 耐震壁の面内せん断終局強度 Qu [N]（荒川mean式系）。
+    /// 選択方式による耐震壁の面内せん断終局強度 Qu [N]。
     /// 開口低減は耐力用 r2 = 1−max(r0, l0/lw, h0/h)（剛性用 r1 = 1−1.25·r0 とは別式）。
     /// 算定できない場合（Fc 未設定など）は 0.0 を返す。
     fn shear_capacity(inp: &WallShearGeometry) -> f64 {
         let &WallShearGeometry {
+            method,
             fc,
             t,
             te,
@@ -631,6 +633,7 @@ impl WallElement {
         }
         sepika_core::rc_wall_capacity::wall_shear_ultimate(
             &sepika_core::rc_wall_capacity::RcWallShearInput {
+                method,
                 fc,
                 te,
                 t,
@@ -771,6 +774,7 @@ impl WallElement {
             0.0
         };
         let inputs = std::array::from_fn(|tension| WallShearGeometry {
+            method: model.stress_cfg.rc_wall_shear_method,
             fc: Some(fc),
             t,
             te,
@@ -3366,6 +3370,102 @@ mod capacity_issue_tests {
                 }
                 assert!(wall_direction_ratio(&wall, &model, vertical).is_err());
             }
+        }
+    }
+}
+
+#[cfg(test)]
+use super::static_face::fixture as rc_wall572_fixture;
+
+#[cfg(test)]
+mod wall_method_tests {
+    use super::*;
+    use crate::factory::StrengthBasis;
+    use sepika_core::model::RcWallShearMethod::{ArakawaMean, ArakawaMin};
+
+    #[test]
+    fn selected_method_reaches_both_directions_with_real_area_and_limited_te() {
+        assert_eq!(
+            rc_wall572_fixture::input_model()
+                .stress_cfg
+                .rc_wall_shear_method,
+            ArakawaMean
+        );
+        let mut model = rc_wall572_fixture::expanded_model();
+        let wall = model.elements[4].clone();
+        for (method, expected) in [
+            (ArakawaMin, 2_006_534.4713659945),
+            (ArakawaMean, 2_676_420.1354640694),
+        ] {
+            model.stress_cfg.rc_wall_shear_method = method;
+            let qu = WallElement::directional_shear_capacity_at_reference(
+                &wall,
+                &model,
+                StrengthBasis::Nominal,
+                1_200_000.0,
+                [6450.0 / 4600.0; 2],
+            )
+            .unwrap();
+            for value in qu {
+                assert!((value - expected).abs() < 1e-6, "{method:?}: {value}");
+            }
+            let zero = WallElement::directional_shear_capacity_at_reference(
+                &wall,
+                &model,
+                StrengthBasis::Nominal,
+                0.0,
+                [6450.0 / 4600.0; 2],
+            )
+            .unwrap();
+            assert!((qu[0] - zero[0] - 91_520.27027027027).abs() < 1e-6);
+            for n in [-1.0, 0.4 * 24.0 * 1_332_000.0 + 1.0, f64::NAN] {
+                assert!(WallElement::directional_shear_capacity_at_reference(
+                    &wall,
+                    &model,
+                    StrengthBasis::Nominal,
+                    n,
+                    [6450.0 / 4600.0; 2]
+                )
+                .is_err());
+            }
+            for ratios in [[f64::NAN, 1.0], [1.0, f64::INFINITY], [-1.0, 1.0]] {
+                assert!(WallElement::directional_shear_capacity_at_reference(
+                    &wall,
+                    &model,
+                    StrengthBasis::Nominal,
+                    0.0,
+                    ratios
+                )
+                .is_err());
+            }
+            let low = WallElement::directional_shear_capacity_at_reference(
+                &wall,
+                &model,
+                StrengthBasis::Nominal,
+                0.0,
+                [0.1, 1.0],
+            )
+            .unwrap();
+            assert_eq!(low[0], low[1]);
+            let high = WallElement::directional_shear_capacity_at_reference(
+                &wall,
+                &model,
+                StrengthBasis::Nominal,
+                0.0,
+                [3.0, 9.0],
+            )
+            .unwrap();
+            assert_eq!(high[0], high[1]);
+            let mut missing = model.clone();
+            missing.sections[2].shear_rebar_material = None;
+            assert!(WallElement::directional_shear_capacity_at_reference(
+                &wall,
+                &missing,
+                StrengthBasis::Nominal,
+                0.0,
+                [1.0; 2]
+            )
+            .is_err());
         }
     }
 }

@@ -1,19 +1,12 @@
-//! RC 造耐震壁の終局せん断強度 Qu と開口低減率（非線形解析・保有水平耐力用）。
-//!
-//! # 位置付け
-//! `sepika-element`（Layer 3）・`sepika-solver`（Layer 4）は
-//! `sepika-design-jp`（Layer 5）に依存できない（循環依存になる）ため、耐震壁の
-//! せん断終局強度の本体を Layer 0 の本モジュールへ置く。
-//!
-//! # 準拠する規準・出典
-//! - 終局せん断強度 Qu（荒川mean式系・耐震壁）: 2007年版建築物の構造関係技術基準
-//!   解説書 P.281-282, 638-639／日本建築学会「鉄筋コンクリート終局強度設計に関する
-//!   資料」P.132。
-//! - 開口低減率 r（**耐力用**）: 同 資料 P.132、平19国交告第594号第1。
+//! RC壁の終局せん断耐力と開口低減率。
+
+use crate::model::RcWallShearMethod;
 
 /// 耐震壁の終局せん断強度算定の入力（SI 系: 長さ [mm]・面積 [mm²]・応力 [N/mm²]）。
 #[derive(Clone, Copy, Debug)]
 pub struct RcWallShearInput {
+    /// 採用する終局せん断耐力の算定方式。
+    pub method: RcWallShearMethod,
     /// コンクリート設計基準強度 Fc [N/mm²]。
     pub fc: f64,
     /// 等価壁厚 te [mm]（I 形断面を等価長方形に置換した幅。壁厚 t の 1.5 倍以下）。
@@ -80,18 +73,8 @@ pub fn wall_opening_reduction_stiffness(r0: f64) -> f64 {
     (1.0 - 1.25 * r0.max(0.0)).max(0.0)
 }
 
-/// 耐震壁の終局せん断強度 Qu [N]（荒川mean式系）。
-///
-/// ```text
-/// Qu = { k·pte^0.23·(Fc+18)/denom + 0.85·√(σwh·pwh) + 0.1·σ0 }·te·j·r
-/// ```
-/// - `k = 0.053`、`denom = M/(Q·D)+0.12`
-/// - `pte = 100·at/(te·d)` \[%\]（等価引張鉄筋比）、`d = D − Dc/2`、`j = 7/8·d`
-/// - `M/(Q·D)` は適用範囲 1.0〜3.0 にクランプ、`pwh` は 1.2% 上限、
-///   `σ0` は 0〜0.4Fc にクランプ（引張は 0）
-/// - 開口低減 r は**耐力用** [`wall_opening_reduction_strength`] を乗じる
-///
-/// 不正入力（Fc・te・D・at のいずれかが 0 以下、または d ≤ 0）は 0.0 を返す。
+/// 指定方式によるRC壁の終局せん断耐力 Qu [N]。
+/// Fc・te・D・主筋面積・有効せいが非正の場合は0。適用条件は各consumerで検査する。
 pub fn wall_shear_ultimate(inp: &RcWallShearInput) -> f64 {
     let d = inp.d_wall - inp.dc_compression / 2.0;
     if inp.fc <= 0.0
@@ -105,13 +88,15 @@ pub fn wall_shear_ultimate(inp: &RcWallShearInput) -> f64 {
     let pte = 100.0 * inp.tension_column_at / (inp.te * d);
     let j = 7.0 / 8.0 * d;
     let shear_span_ratio = inp.shear_span_ratio.clamp(1.0, 3.0);
-    let k = 0.053;
     let pwh = if inp.te > 0.0 {
         (inp.pwh_ratio.max(0.0) * inp.t / inp.te).min(0.012)
     } else {
         0.0
     };
-    let denom = shear_span_ratio + 0.12;
+    let (k, denom) = match inp.method {
+        RcWallShearMethod::ArakawaMin => (0.053, shear_span_ratio + 0.12),
+        RcWallShearMethod::ArakawaMean => (0.068, (shear_span_ratio + 0.12).sqrt()),
+    };
     let concrete_term = k * pte.powf(0.23) * (inp.fc + 18.0) / denom;
     let hoop_term = 0.85 * (pwh * inp.sigma_wh).max(0.0).sqrt();
     let sigma_0 = inp.sigma_0.clamp(0.0, 0.4 * inp.fc);
@@ -126,6 +111,7 @@ mod tests {
 
     fn sample() -> RcWallShearInput {
         RcWallShearInput {
+            method: RcWallShearMethod::ArakawaMin,
             fc: 24.0,
             te: 200.0,
             t: 200.0,
@@ -142,7 +128,8 @@ mod tests {
 
     #[test]
     fn independent_600_by_180_capacity_arithmetic_is_distinct_from_square_column_entry() {
-        let input = RcWallShearInput {
+        let mut input = RcWallShearInput {
+            method: RcWallShearMethod::ArakawaMin,
             fc: 24.0,
             te: 180.0,
             t: 180.0,
@@ -156,6 +143,8 @@ mod tests {
             opening: None,
         };
         assert!((wall_shear_ultimate(&input) - 1_495_316.044904383).abs() < 1e-6);
+        input.method = RcWallShearMethod::ArakawaMean;
+        assert!((wall_shear_ultimate(&input) - 1_962_988.493518).abs() < 1e-6);
     }
 
     /// 開口低減（耐力用）は r2 = 1 − max(r0, l0/lw, h0/h)。
@@ -266,6 +255,7 @@ mod tests {
     #[test]
     fn test_qu_matches_handcalc_with_dc_and_axial() {
         let inp = RcWallShearInput {
+            method: RcWallShearMethod::ArakawaMin,
             fc: 24.0,
             te: 180.0,
             t: 180.0,
