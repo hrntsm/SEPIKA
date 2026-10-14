@@ -554,7 +554,9 @@ pub use camera::CameraState;
 pub use deform::TimeHistoryScaleCache;
 
 pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
+    app.prepare_coordinate_edit_view();
     controls::view_controls(ui, app);
+    app.prepare_coordinate_edit_view();
     let mode = app.ui.view.view_mode;
     let mode_idx = app.ui.scoped.view_mode_idx;
 
@@ -571,8 +573,11 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
 
     ui.separator();
 
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), ui.available_height()),
+    let (_, rect) = ui.allocate_space(egui::vec2(ui.available_width(), ui.available_height()));
+    // 表示モードで先行する操作行が変わるため、自動 ID では切替直後のクリックを失う。
+    let response = ui.interact(
+        rect,
+        ui.id().with("model_viewer"),
         egui::Sense::click_and_drag(),
     );
 

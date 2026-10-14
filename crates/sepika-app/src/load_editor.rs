@@ -635,6 +635,7 @@ impl App {
         if begin_pick {
             editor.begin_pick();
             self.ui.scoped.load_editor = Some(editor);
+            self.prepare_coordinate_edit_view();
             return;
         }
         if close {
