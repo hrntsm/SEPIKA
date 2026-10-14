@@ -3321,10 +3321,6 @@ fn test_pushover_drift_angle_target_runs_with_multi_spring() {
 /// 耐震壁（壁エレメントモデル）1 枚の 1 層モデル。下辺 2 節点固定、
 /// 上辺 2 節点を剛床（マスター NodeId(3)）で束ねる。面外・回転自由度は
 /// 壁エレメントが剛性を持たないため拘束する。
-fn wall_story_model(seismic_weight: f64) -> Model {
-    wall_story_model_with(4000.0, seismic_weight)
-}
-
 /// 壁長 lw を指定できる版（曲げ支配の細長壁の検証用）。
 ///
 /// 耐震壁は四周を柱・梁に囲まれた壁を対象とする（`misc_wall::wall_is_seismic`）ため、
@@ -3472,13 +3468,51 @@ pub(super) fn wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
     }
 }
 
+fn prepared_wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
+    let mut model = wall_story_model_with(lw, seismic_weight);
+    model.stories[0].node_ids = vec![NodeId(0), NodeId(1)];
+    for node in &mut model.nodes[..2] {
+        node.story = Some(StoryId(0));
+    }
+    for node in &mut model.nodes[2..] {
+        node.story = Some(StoryId(1));
+        node.restraint = Dof6Mask(0b111000);
+    }
+    model.sections[1].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    let mut girder = model.sections[1].clone();
+    girder.id = SectionId(2);
+    girder.name = "RC梁600x600".into();
+    girder.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+    model.sections.push(girder);
+    for id in [ElemId(1), ElemId(2)] {
+        model
+            .elements
+            .iter_mut()
+            .find(|e| e.id == id)
+            .unwrap()
+            .section = Some(SectionId(2));
+    }
+    sepika_element::frame::beam::apply_auto_rigid_zones(&mut model, &Default::default());
+    let face = sepika_core::face_distance::wall_support_face(
+        &model,
+        sepika_core::model::SupportMemberId::Primary(ElemId(1)),
+        [0.0, 0.0, 1.0],
+    )
+    .unwrap();
+    assert!(face > 0.0);
+    for id in [ElemId(3), ElemId(4)] {
+        assert_eq!(model.element(id).unwrap().rigid_zone.face_i, Some(face));
+    }
+    model
+}
+
 /// 耐震壁（壁エレメント）モデルでも既定目標（層間変形角 1/150）の増分解析が
 /// 完走し、せん断終局強度 Qu で頭打ち（剛性低下）した後に目標到達で
 /// 打ち切られること。λ=1 のベースシア（0.2W=20kN）は壁の Qu を大きく下回る
 /// 重量とし、頭打ちは変位制御側で起こす。
 #[test]
 fn test_pushover_drift_angle_target_runs_with_wall_element() {
-    let model = wall_story_model(100_000.0);
+    let model = prepared_wall_story_model_with(4000.0, 100_000.0);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
     let result = pushover_analysis_recording(
@@ -3586,7 +3620,7 @@ fn test_pushover_fiber_hinge_softens_at_drift_target() {
 /// 曲げ降伏し、目標層間変形角 1/150 到達までに接線剛性が実際に低下すること。
 #[test]
 fn test_pushover_wall_flexural_yield_softens() {
-    let model = wall_story_model_with(1000.0, 30_000.0);
+    let model = prepared_wall_story_model_with(1000.0, 30_000.0);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
     let result = pushover_analysis_recording(

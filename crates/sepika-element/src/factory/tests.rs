@@ -207,6 +207,7 @@ fn test_build_nonlinear_behavior_concentrated_spring_uses_spring_beam() {
         &model,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
+        None,
     );
     let snap = behavior.snapshot_state();
     let is_spring = snap
@@ -246,6 +247,7 @@ fn test_build_nonlinear_behavior_fiber_uses_fiber_beam() {
         &model,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
+        None,
     );
     let snap = behavior.snapshot_state();
     let is_fiber = snap
@@ -353,6 +355,7 @@ fn test_build_behavior_brace_uses_full_truss_stiffness() {
         &model,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
+        None,
     )
     .tangent_stiffness(&ctx);
     assert!(
@@ -1139,6 +1142,7 @@ fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_histo
         &model,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
+        None,
     );
     let ctx = crate::behavior::Ctx { model: &model };
     type Snapshot = (

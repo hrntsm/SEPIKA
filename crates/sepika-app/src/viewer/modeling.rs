@@ -146,7 +146,7 @@ pub(super) fn classify_with(
             }
             match analysis {
                 ModelingAnalysis::Static => ModelClass::Elastic,
-                ModelingAnalysis::Incremental => {
+                ModelingAnalysis::Incremental | ModelingAnalysis::TimeHistory => {
                     if data.kind == ElementKind::Fiber {
                         ModelClass::Fiber
                     } else {
@@ -160,7 +160,9 @@ pub(super) fn classify_with(
         }
         ElementKind::MultiSpring => match analysis {
             ModelingAnalysis::Static => ModelClass::Elastic,
-            ModelingAnalysis::Incremental => ModelClass::ConcentratedPlastic,
+            ModelingAnalysis::Incremental | ModelingAnalysis::TimeHistory => {
+                ModelClass::ConcentratedPlastic
+            }
         },
         ElementKind::Wall => {
             if wall_is_seismic(data, model) {
@@ -421,6 +423,7 @@ pub(super) fn draw_modeling(
                 proj,
                 elem,
                 analysis,
+                app.adopted_wall_capacity(elem, model, analysis).ok(),
                 class.color(),
                 &mut sym,
             ),
@@ -715,6 +718,7 @@ fn draw_wall_element(
     proj: &Projector,
     elem: &ElementData,
     analysis: ModelingAnalysis,
+    adopted_capacity: Option<[f64; 2]>,
     color: egui::Color32,
     sym: &mut Symbols,
 ) {
@@ -768,7 +772,7 @@ fn draw_wall_element(
 
     let bc = proj.project(vec3::add(g.bottom_center, vec3::scale(ez, inset)));
     let tc = proj.project(vec3::add(g.top_center, vec3::scale(ez, -inset)));
-    let lp_ratio = if analysis == ModelingAnalysis::Incremental && g.h > 1e-9 {
+    let lp_ratio = if analysis != ModelingAnalysis::Static && g.h > 1e-9 {
         sepika_element::wall::wall_element::wall_column_fiber_lp(elem, model)
             .map(|lp| (lp / g.h) as f32)
     } else {
@@ -776,10 +780,7 @@ fn draw_wall_element(
     };
     draw_wall_column(painter, bc, tc, lp_ratio, color, sym);
 
-    if analysis == ModelingAnalysis::Incremental
-        && sepika_element::wall::wall_element::WallElement::shear_capacity_of(elem, model)
-            .is_ok_and(|qu| qu > 0.0)
-    {
+    if analysis != ModelingAnalysis::Static && adopted_capacity.is_some() {
         draw_shear_spring(painter, bc, tc, PARALLEL_OFFSET, color);
         sym.wall_shear = true;
     }
@@ -1029,6 +1030,7 @@ fn draw_legend(
     let title = match analysis {
         ModelingAnalysis::Static => "モデル化（静解析＝弾性）",
         ModelingAnalysis::Incremental => "モデル化（増分解析＝弾塑性）",
+        ModelingAnalysis::TimeHistory => "モデル化（非線形時刻歴）",
     };
     painter.text(
         egui::pos2(x0, y),
@@ -1170,6 +1172,7 @@ fn draw_legend(
 /// ここではその根拠となる数値を並べる。
 fn show_wall_modeling_detail(
     ui: &mut egui::Ui,
+    app: &App,
     model: &Model,
     modeling_analysis: ModelingAnalysis,
     elem: &ElementData,
@@ -1179,7 +1182,7 @@ fn show_wall_modeling_detail(
         return;
     };
     ui.label(format!("壁長 lw={:.0} mm ／ 壁高 h={:.0} mm", g.lw, g.h));
-    if modeling_analysis != ModelingAnalysis::Incremental {
+    if modeling_analysis == ModelingAnalysis::Static {
         return;
     }
     match sepika_element::wall::wall_element::wall_column_fiber_lp(elem, model) {
@@ -1191,11 +1194,7 @@ fn show_wall_modeling_detail(
             ui.label("軸・曲げ: 未構築（必要入力を確認してください）");
         }
     }
-    let qu = sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(
-        elem,
-        model,
-        sepika_element::factory::StrengthBasis::Nominal,
-    );
+    let qu = app.adopted_wall_capacity(elem, model, modeling_analysis);
     if let Ok(qu) = qu {
         ui.label(format!(
             "面内せん断: 正 Qu={:.0} kN／負 Qu={:.0} kN",
@@ -1203,7 +1202,7 @@ fn show_wall_modeling_detail(
             force_kn(qu[1])
         ));
     } else {
-        ui.label(format!("面内せん断: 非線形解析不可（{}）", qu.unwrap_err()));
+        ui.label(format!("面内せん断: 初期Qu未解決（{}）", qu.unwrap_err()));
     }
 }
 
@@ -1236,7 +1235,7 @@ pub(super) fn show_modeling_tooltip(
             ui.label(format!("部材 #{}", elem_id.0));
             ui.colored_label(class.color(), class.label());
             if class == ModelClass::Wall {
-                show_wall_modeling_detail(ui, model, app.ui.view.modeling_analysis, elem);
+                show_wall_modeling_detail(ui, app, model, app.ui.view.modeling_analysis, elem);
                 return;
             }
             if is_wall_girder(elem, model, &seismic_wall_nodes(model)) {

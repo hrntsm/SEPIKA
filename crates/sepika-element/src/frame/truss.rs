@@ -289,6 +289,7 @@ mod tests {
                     &model,
                     crate::factory::StrengthBasis::Nominal,
                     crate::factory::AnalysisKind::Incremental,
+                    None,
                 );
                 assert_total_mass(nonlinear.as_ref(), expected);
                 eprintln!("{shape:?}, 編集寸法={radius}, 保護A={supplied_area}, 共通質量={expected:.15e} t");

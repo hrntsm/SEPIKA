@@ -1,0 +1,431 @@
+use super::*;
+#[path = "../../../../test_fixtures/rc_wall617.rs"]
+mod fixture;
+
+fn ready() -> App {
+    let mut app = App::default();
+    app.load_model(fixture::input_model());
+    app.core.analysis_cfg.push_steps = 2;
+    app.core.analysis_cfg.push_use_max_disp = true;
+    app.core.analysis_cfg.push_use_drift_angle = false;
+    app.core.analysis_cfg.push_max_disp = 0.2;
+    app.core.analysis_cfg.th_nonlinear = true;
+    app.core.analysis_cfg.th_duration = 0.04;
+    app.run_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app
+}
+
+fn ledger(app: &App) -> Vec<u8> {
+    let r = app.core.scoped.results.as_ref().unwrap();
+    serde_json::to_vec(&(&r.statics, &r.combos)).unwrap()
+}
+
+#[test]
+fn pushover_and_time_history_preserve_static_ledger_and_store_run_capacity() {
+    let mut app = ready();
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let before = ledger(&app);
+    app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert_eq!(ledger(&app), before);
+    let po = app.displayed_pushover().unwrap();
+    assert_eq!(po.wall_capacities.len(), 1);
+    assert!(po.wall_capacities[0]
+        .1
+        .iter()
+        .all(|q| q.is_finite() && *q > 0.0));
+    let capacities = po.wall_capacities.clone();
+    assert_eq!(po.wall_history.as_ref().unwrap().len(), po.steps.len());
+    app.run_time_history_sample();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert_eq!(ledger(&app), before);
+    let th = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .time_history
+        .as_ref()
+        .unwrap();
+    assert!(th.nonlinear && th.applied_long_term);
+    assert_eq!(th.wall_capacities, capacities);
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn time_history_case_keeps_own_capacity_and_input_across_save_and_model_changes() {
+    use crate::viewer::ModelingAnalysis;
+    let mut app = ready();
+    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let wall = expanded
+        .elements
+        .iter()
+        .find(|e| e.kind == sepika_core::model::ElementKind::Wall)
+        .unwrap();
+    assert!(app
+        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
+        .is_err());
+    app.core.scoped.wave_library_selection = Some("caseA".into());
+    app.run_time_history_sample();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let a = app.core.scoped.view_vibration_case.unwrap();
+    let qa = app
+        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
+        .unwrap();
+    app.core.model.materials[2].fy = Some(345.0);
+    app.core.scoped.wave_library_selection = Some("caseB".into());
+    app.run_time_history_sample();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let b = app.core.scoped.view_vibration_case.unwrap();
+    assert_ne!(a, b);
+    let qb = app
+        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
+        .unwrap();
+    assert!(qb[0] > qa[0]);
+    app.core.scoped.view_vibration_case = Some(a);
+    assert!(app
+        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
+        .is_err());
+    app.core.scoped.view_vibration_case = Some(b);
+    let path =
+        std::env::temp_dir().join(format!("sepika617-th-cases-{}.ovika", std::process::id()));
+    app.save_project_to(path.clone());
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    std::fs::remove_file(path).unwrap();
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    assert_eq!(
+        loaded
+            .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
+            .unwrap(),
+        qb
+    );
+    loaded.core.scoped.view_vibration_case = Some(a);
+    assert!(loaded
+        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
+        .is_err());
+    let r = loaded
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .time_histories
+        .iter()
+        .find(|(id, _)| *id == a)
+        .unwrap();
+    assert_eq!(r.1.wall_capacities[0].1, qa);
+}
+
+#[test]
+fn background_nonlinear_jobs_reject_results_after_input_edit() {
+    for th in [false, true] {
+        let mut app = ready();
+        if th {
+            app.start_time_history_job(App::sample_wave(&app.core.analysis_cfg));
+        } else {
+            app.start_pushover_job();
+        }
+        assert!(app.core.scoped.job.is_some());
+        app.core.model.materials[2].fy = Some(345.0);
+        super::tests::wait_for_job(&mut app);
+        assert!(app.core.scoped.last_error.is_some());
+        assert!(app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .is_none_or(|r| r.pushover.is_none() && r.time_history.is_none()));
+    }
+}
+
+#[test]
+fn selected_static_case_and_combo_reach_common_face_and_reject_missing_or_old_results() {
+    use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination, NodalLoad};
+    use sepika_design_jp::{wall_check::WallCheckKind, CheckOutcome};
+    let mut app = ready();
+    if let Some(sepika_core::section_shape::SectionShape::RcWall { pwh_ratio, .. }) =
+        &mut app.core.model.sections[2].shape
+    {
+        *pwh_ratio = Some(0.006);
+    }
+    app.core.model.load_cases.push(LoadCase {
+        id: LoadCaseId(20),
+        name: "独立水平P".into(),
+        kind: LoadCaseKind::Live,
+        nodal: vec![NodalLoad::manual(
+            NodeId(2),
+            [100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        )],
+        member: Vec::new(),
+    });
+    app.core.model.combinations.push(LoadCombination {
+        name: "617同一バッチ".into(),
+        terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(20), 1.0)],
+    });
+    let index = app.core.model.combinations.len() - 1;
+    for combination in [false, true] {
+        if combination {
+            app.run_combination(index);
+        } else {
+            app.run_linear_static(LoadCaseId(20));
+        }
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+        let wall = expanded
+            .elements
+            .iter()
+            .find(|e| e.kind == sepika_core::model::ElementKind::Wall)
+            .unwrap();
+        let result = app.core.scoped.results.as_ref().unwrap();
+        let batch: Vec<_> = result
+            .member_forces
+            .iter()
+            .map(|(id, f)| (*id, f.at.as_slice()))
+            .collect();
+        let face = sepika_element::wall::static_face::StaticWallFace::new(wall, &expanded)
+            .unwrap()
+            .recover(&batch)
+            .unwrap();
+        assert_eq!(face.physical_area_mm2, 1_332_000.0);
+        assert!((face.shear_n.abs() - 100_000.0).abs() < 1e-6);
+        let check = result
+            .wall_checks
+            .iter()
+            .find(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+            .unwrap();
+        assert!(check
+            .case
+            .contains(if combination { "combo:" } else { "case:20" }));
+        let CheckOutcome::Checked(output) = &check.outcome else {
+            panic!("{:?}", check)
+        };
+        let detail = &output.components[0].detail;
+        for expected in [
+            format!("Nface={:.1} kN", face.compression_n / 1000.0),
+            format!("Mface={:.1} kNm", face.moment_nmm / 1e6),
+            format!("Qface={:.1} kN", face.shear_n / 1000.0),
+        ] {
+            assert!(detail.contains(&expected), "{detail}");
+        }
+    }
+    app.core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .member_forces
+        .retain(|(id, _)| *id != ElemId(1));
+    app.run_design_check();
+    let checks = &app.core.scoped.results.as_ref().unwrap().wall_checks;
+    assert!(checks.iter().any(|w| w.kind == WallCheckKind::ReferenceSkeleton && matches!(&w.outcome, CheckOutcome::Skipped {reason} if reason.contains("部材 ID 1"))));
+    assert!(checks
+        .iter()
+        .any(|w| w.kind == WallCheckKind::AllowableShear
+            && matches!(w.outcome, CheckOutcome::Checked(_))));
+    app.core.model.materials[2].fy = Some(345.0);
+    app.run_design_check();
+    assert!(app.core.scoped.last_error.is_some());
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .wall_checks
+        .is_empty());
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn incremental_modeling_reads_adopted_run_numbers_and_rejects_missing_invalid_or_old_capacity() {
+    use crate::viewer::ModelingAnalysis;
+    let mut app = ready();
+    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let wall = expanded
+        .elements
+        .iter()
+        .find(|e| e.kind == sepika_core::model::ElementKind::Wall)
+        .unwrap();
+    assert!(app
+        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+        .is_err());
+    app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let before = ledger(&app);
+    let expected = app.displayed_pushover().unwrap().wall_capacities[0].1;
+    assert_eq!(
+        app.adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+            .unwrap(),
+        expected
+    );
+    assert_eq!(ledger(&app), before);
+    let bundle = app.core.scoped.results.as_mut().unwrap();
+    for po in [&mut bundle.pushover, &mut bundle.pushover_x]
+        .into_iter()
+        .flatten()
+    {
+        po.wall_capacities.clear();
+    }
+    assert!(app
+        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+        .unwrap_err()
+        .contains("未解決"));
+    let bundle = app.core.scoped.results.as_mut().unwrap();
+    for po in [&mut bundle.pushover, &mut bundle.pushover_x]
+        .into_iter()
+        .flatten()
+    {
+        po.wall_capacities.push((wall.id, [f64::NAN, expected[1]]));
+    }
+    assert!(app
+        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+        .unwrap_err()
+        .contains("不正"));
+    app.core.model.materials[2].fy = Some(345.0);
+    assert!(app
+        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+        .is_err());
+}
+
+#[test]
+fn holding_capacity_requires_same_run_wall_capacity_and_current_input() {
+    let mut app = ready();
+    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
+    let mut beam = SectionShape::RcBeamRect {
+        b: 600.0,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: 22.0,
+            top: vec![4],
+            bottom: vec![4],
+            cover: 40.0,
+            stirrup: BeamStirrup {
+                dia: 10.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    }
+    .to_section(SectionId(1), "RC梁".into());
+    beam.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+    beam.material = app.core.model.sections[1].material;
+    beam.rebar_material = app.core.model.sections[1].rebar_material;
+    beam.shear_rebar_material = app.core.model.sections[1].shear_rebar_material;
+    app.core.model.sections[1] = beam;
+    app.run_preparation();
+    app.run_seismic(SeismicDir::X);
+    app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    super::tests::select_holding_points(&mut app);
+    app.core.design_rank_auto = true;
+    let valid = app.compute_holding_capacity();
+    assert!(valid.is_ok(), "{:?}", valid.err());
+    let before = ledger(&app);
+    let po = app.displayed_pushover().unwrap();
+    let wall_id = po.wall_capacities[0].0;
+    let qw = po
+        .wall_response_at(wall_id, po.ds_evaluation.as_ref().unwrap().step)
+        .unwrap()
+        .qw_n;
+    assert!(qw.abs() > 0.0);
+    let branch = usize::from(qw < 0.0);
+    let mut ranks = Vec::new();
+    for demand_ratio in [0.98, 1.0] {
+        let bundle = app.core.scoped.results.as_mut().unwrap();
+        for po in [&mut bundle.pushover, &mut bundle.pushover_x]
+            .into_iter()
+            .flatten()
+        {
+            let qu = &mut po
+                .wall_capacities
+                .iter_mut()
+                .find(|(id, _)| *id == wall_id)
+                .unwrap()
+                .1;
+            qu[branch] = qw.abs() / demand_ratio;
+        }
+        let (result, _) = app
+            .compute_holding_capacity()
+            .unwrap_or_else(|reason| panic!("{reason}"));
+        ranks.push(
+            result
+                .member_ranks
+                .iter()
+                .find(|(id, _)| *id == wall_id)
+                .unwrap()
+                .1,
+        );
+    }
+    assert_eq!(
+        ranks,
+        vec![
+            sepika_design_jp::secondary::holding_capacity::MemberRank::FA,
+            sepika_design_jp::secondary::holding_capacity::MemberRank::FD
+        ]
+    );
+    assert_eq!(ledger(&app), before);
+    let bundle = app.core.scoped.results.as_mut().unwrap();
+    for po in [&mut bundle.pushover, &mut bundle.pushover_x]
+        .into_iter()
+        .flatten()
+    {
+        po.wall_capacities.clear();
+    }
+    let missing = app
+        .compute_holding_capacity()
+        .err()
+        .expect("採用Qu欠落は未算定");
+    assert!(missing.contains("初期Quが未解決"), "{missing}");
+    assert_eq!(ledger(&app), before);
+    app.core.model.materials[2].fy = Some(345.0);
+    assert!(app.compute_holding_capacity().is_err());
+}

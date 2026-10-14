@@ -9,6 +9,7 @@ pub(crate) enum ResultInputKey {
     Pushover(SeismicDir),
     Modal,
     Design,
+    TimeHistory(VibrationCaseId),
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -351,6 +352,9 @@ impl App {
             threads: cfg.threads,
             ..Default::default()
         };
+        if matches!(key, ResultInputKey::TimeHistory(_)) {
+            relevant = cfg;
+        }
         if let ResultInputKey::Pushover(dir) = key {
             relevant.push_dir = *dir;
             relevant.push_steps = cfg.push_steps;
@@ -409,7 +413,9 @@ impl App {
                             .any(|case| case.id == *id && is_standard_seismic_case(case))
                     })
                 }),
-            ResultInputKey::Modal | ResultInputKey::Design => false,
+            ResultInputKey::Modal | ResultInputKey::Design | ResultInputKey::TimeHistory(_) => {
+                false
+            }
         };
         depends_on_seismic
             .then(|| {
@@ -587,6 +593,7 @@ impl App {
             ResultInputKey::Pushover(dir) => format!("増分解析 {dir:?}"),
             ResultInputKey::Modal => "固有値解析".into(),
             ResultInputKey::Design => "検定".into(),
+            ResultInputKey::TimeHistory(id) => format!("時刻歴解析 {}", id.0),
         };
         let input = self
             .core

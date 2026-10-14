@@ -274,6 +274,8 @@ pub struct MemberStepState {
 /// プッシュオーバー解析結果
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PushoverResult {
+    /// このrunで初期ばねに採用した壁別の局所正負Qu `[N]`。
+    pub wall_capacities: Vec<(ElemId, [f64; 2])>,
     pub steps: Vec<PushoverStep>,
     /// 壁要素単体の確定ステップ応答。未記録の旧結果は None。
     #[serde(default)]

@@ -928,6 +928,7 @@ mod tests {
                 &model,
                 sepika_element::factory::StrengthBasis::Nominal,
                 AnalysisKind::Incremental,
+                None,
             );
         }
         let expected_as = 7328.0;

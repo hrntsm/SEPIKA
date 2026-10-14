@@ -81,8 +81,14 @@ fn capacity(model: &Model) -> [f64; 2] {
         .iter()
         .find(|e| e.kind == ElementKind::Wall)
         .unwrap();
-    WallElement::directional_shear_capacity_of(wall, &expanded, StrengthBasis::MaterialStrength)
-        .unwrap()
+    WallElement::directional_shear_capacity_at_reference(
+        wall,
+        &expanded,
+        StrengthBasis::MaterialStrength,
+        0.0,
+        [1.0; 2],
+    )
+    .unwrap()
 }
 
 #[test]
@@ -260,10 +266,12 @@ fn preparation_and_pushover_report_the_same_missing_wall_direction() {
         .iter()
         .find(|e| e.kind == ElementKind::Wall)
         .unwrap();
-    assert!(WallElement::directional_shear_capacity_of(
+    assert!(WallElement::directional_shear_capacity_at_reference(
         wall,
         &expanded,
-        StrengthBasis::MaterialStrength
+        StrengthBasis::MaterialStrength,
+        0.0,
+        [1.0; 2]
     )
     .is_ok());
     let reason =
@@ -366,8 +374,14 @@ fn same_section_wall_member_fc_and_direction_materials_survive_expansion_and_ren
                 Some(295.0)
             );
             capacities.push(
-                WallElement::directional_shear_capacity_of(elem, &expanded, StrengthBasis::Nominal)
-                    .unwrap(),
+                WallElement::directional_shear_capacity_at_reference(
+                    elem,
+                    &expanded,
+                    StrengthBasis::Nominal,
+                    0.0,
+                    [1.0; 2],
+                )
+                .unwrap(),
             );
         }
         assert!(capacities[0][0] > capacities[1][0]);
@@ -421,10 +435,12 @@ fn wall_stb_parts_and_positions_require_explicit_direction_roles() {
             .iter()
             .find(|e| e.kind == ElementKind::Wall)
             .unwrap();
-        assert!(WallElement::directional_shear_capacity_of(
+        assert!(WallElement::directional_shear_capacity_at_reference(
             wall,
             &expanded,
-            StrengthBasis::Nominal
+            StrengthBasis::Nominal,
+            0.0,
+            [1.0; 2]
         )
         .unwrap_err()
         .contains("横筋材料"));
@@ -445,10 +461,12 @@ fn wall_stb_parts_and_positions_require_explicit_direction_roles() {
         .iter()
         .find(|e| e.kind == ElementKind::Wall)
         .unwrap();
-    assert!(WallElement::directional_shear_capacity_of(
+    assert!(WallElement::directional_shear_capacity_at_reference(
         wall,
         &expanded,
-        StrengthBasis::MaterialStrength
+        StrengthBasis::MaterialStrength,
+        0.0,
+        [1.0; 2]
     )
     .unwrap_err()
     .contains("横筋材料"));
@@ -523,6 +541,7 @@ fn explicitly_nonseismic_rc_wall_keeps_elastic_mode_without_directional_inputs()
         &expanded,
         StrengthBasis::MaterialStrength,
         sepika_core::model::AnalysisKind::Incremental,
+        None,
     );
     let ctx = sepika_element::behavior::Ctx { model: &expanded };
     let expected = linear.tangent_stiffness(&ctx);

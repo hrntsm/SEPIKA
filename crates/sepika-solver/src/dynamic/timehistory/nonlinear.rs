@@ -117,7 +117,13 @@ pub fn nonlinear_time_history_analysis(
         return Ok(empty_response(model, true, cfg.apply_long_term));
     }
 
-    let mut behaviors = build_behaviors(model);
+    let wall_capacities = crate::nonlinear::wall_reference::resolve(
+        model,
+        cfg.apply_long_term,
+        StrengthBasis::Nominal,
+    )
+    .map_err(SolveError::InvalidInput)?;
+    let mut behaviors = build_behaviors(model, &wall_capacities);
     for b in behaviors.iter_mut() {
         b.set_time_step(dt);
     }
@@ -515,6 +521,7 @@ pub fn nonlinear_time_history_analysis(
         .collect();
 
     Ok(ResponseResult {
+        wall_capacities,
         non_converged_steps,
         time,
         peak_disp,
@@ -706,7 +713,10 @@ fn newton_static_converge(
     Ok(None)
 }
 
-fn build_behaviors(model: &Model) -> Vec<Box<dyn sepika_element::behavior::ElementBehavior>> {
+fn build_behaviors(
+    model: &Model,
+    wall_capacities: &[(sepika_core::ids::ElemId, [f64; 2])],
+) -> Vec<Box<dyn sepika_element::behavior::ElementBehavior>> {
     let mut behaviors = Vec::new();
     for elem in &model.elements {
         let b = build_nonlinear_behavior(
@@ -714,6 +724,10 @@ fn build_behaviors(model: &Model) -> Vec<Box<dyn sepika_element::behavior::Eleme
             model,
             StrengthBasis::Nominal,
             sepika_element::factory::AnalysisKind::TimeHistory,
+            wall_capacities
+                .iter()
+                .find(|(id, _)| *id == elem.id)
+                .map(|(_, q)| *q),
         );
         behaviors.push(b);
     }

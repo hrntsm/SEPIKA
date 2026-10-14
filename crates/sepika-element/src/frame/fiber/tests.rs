@@ -3760,6 +3760,7 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
             &model,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
+            None,
         );
         let k = behavior.tangent_stiffness(&ctx);
         assert_relative_eq!(
@@ -3782,6 +3783,7 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
         &model,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
+        None,
     );
     let snapshot = behavior.snapshot_state();
     let state = snapshot
@@ -3859,6 +3861,7 @@ fn src_nonlinear_entries_reject_invalid_materials_instead_of_provisional_propert
                     &model,
                     StrengthBasis::Nominal,
                     AnalysisKind::Incremental,
+                    None,
                 )
             }))
             .is_err());

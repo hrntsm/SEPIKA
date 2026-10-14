@@ -12,6 +12,10 @@ mod pushover;
 mod time_history;
 mod ultimate;
 
+#[cfg(test)]
+#[path = "../../../../test_fixtures/rc_wall617.rs"]
+mod rc_wall617_fixture;
+
 use design_check::compute_design_check_job;
 use eigen::compute_eigen_job;
 use linear_static::compute_linear_static_job;

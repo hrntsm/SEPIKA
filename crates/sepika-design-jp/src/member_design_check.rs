@@ -53,6 +53,9 @@ pub struct MemberDesignCheckOptions<'a> {
     pub wall_index: Option<&'a sepika_load::wall_expand::WallExpansionIndex>,
     /// 検定する荷重ケース・組合せの既存キー。
     pub wall_case: &'a str,
+    /// 同じ応力バッチを生成した荷重terms。ケース文字列からは推定しない。
+    /// Noneではモデルの全load_casesの未対応部材荷重を保守的に検査する。
+    pub wall_load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
     /// RC 短期許容せん断力で損傷制御式（2/3·α）を使うか。
     pub rc_damage_control: bool,
     /// RC 梁付着検定の方式（既定は 1999）。
@@ -402,6 +405,7 @@ pub fn run_member_design_checks(
         options.term,
         options.wall_index,
         options.wall_case,
+        options.wall_load_terms,
     );
     MemberDesignCheckReport {
         member_checks,

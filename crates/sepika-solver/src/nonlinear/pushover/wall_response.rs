@@ -639,11 +639,10 @@ mod tests {
         m.sections.push(strong);
         m.elements[4].section = Some(sepika_core::ids::SectionId(2));
         let capacities =
-            sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(
+            sepika_element::wall::wall_element::WallElement::directional_shear_capacity_at_reference(
                 &m.elements[0],
                 &m,
-                sepika_element::factory::StrengthBasis::Nominal,
-            )
+                sepika_element::factory::StrengthBasis::Nominal, 0.0, [1.0; 2],)
             .unwrap();
         assert!(
             capacities[1] > capacities[0] && capacities[0] > 0.0,
@@ -651,11 +650,10 @@ mod tests {
         );
         m.elements[0].nodes.swap(0, 1);
         let reversed =
-            sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(
+            sepika_element::wall::wall_element::WallElement::directional_shear_capacity_at_reference(
                 &m.elements[0],
                 &m,
-                sepika_element::factory::StrengthBasis::Nominal,
-            )
+                sepika_element::factory::StrengthBasis::Nominal, 0.0, [1.0; 2],)
             .unwrap();
         assert_eq!(capacities, [reversed[1], reversed[0]]);
         for n in &mut m.nodes {
@@ -663,11 +661,10 @@ mod tests {
             n.coord = [-y, x, z];
         }
         let rotated =
-            sepika_element::wall::wall_element::WallElement::directional_shear_capacity_of(
+            sepika_element::wall::wall_element::WallElement::directional_shear_capacity_at_reference(
                 &m.elements[0],
                 &m,
-                sepika_element::factory::StrengthBasis::Nominal,
-            )
+                sepika_element::factory::StrengthBasis::Nominal, 0.0, [1.0; 2],)
             .unwrap();
         assert_eq!(reversed, rotated);
     }

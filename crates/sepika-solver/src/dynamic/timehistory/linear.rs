@@ -463,6 +463,7 @@ fn run_steps(
 
     Ok((
         ResponseResult {
+            wall_capacities: Vec::new(),
             non_converged_steps: 0,
             time,
             peak_disp,

@@ -5,6 +5,69 @@
 use super::*;
 
 impl App {
+    #[cfg(feature = "gui")]
+    pub(crate) fn adopted_wall_capacity(
+        &self,
+        elem: &sepika_core::model::ElementData,
+        model: &sepika_core::model::Model,
+        analysis: crate::viewer::ModelingAnalysis,
+    ) -> Result<[f64; 2], String> {
+        if !sepika_element::wall::misc_wall::is_rc_wall(elem, model) {
+            let qu = sepika_element::wall::wall_element::WallElement::steel_shear_capacity_of(
+                elem, model,
+            );
+            return if qu.is_finite() && qu > 0.0 {
+                Ok([qu; 2])
+            } else {
+                Err("鋼板壁耐力が未解決です".into())
+            };
+        }
+        let capacities = match analysis {
+            crate::viewer::ModelingAnalysis::Incremental => {
+                let dir = self.core.scoped.pushover_view_dir;
+                self.require_result_input(ResultInputKey::Pushover(dir))?;
+                &self
+                    .pushover_for(dir)
+                    .ok_or("採用増分runがありません")?
+                    .wall_capacities
+            }
+            crate::viewer::ModelingAnalysis::TimeHistory => {
+                let case = self
+                    .core
+                    .scoped
+                    .view_vibration_case
+                    .ok_or("表示する非線形時刻歴ケースが未選択です")?;
+                self.require_result_input(ResultInputKey::TimeHistory(case))?;
+                let result = self
+                    .core
+                    .scoped
+                    .results
+                    .as_ref()
+                    .and_then(|r| {
+                        r.time_histories
+                            .iter()
+                            .find(|(id, _)| *id == case)
+                            .map(|(_, r)| r)
+                    })
+                    .filter(|r| r.nonlinear)
+                    .ok_or("採用非線形時刻歴runがありません")?;
+                &result.wall_capacities
+            }
+            crate::viewer::ModelingAnalysis::Static => {
+                return Err("線形静解析に初期Quはありません".into())
+            }
+        };
+        let qu = capacities
+            .iter()
+            .find(|(id, _)| *id == elem.id)
+            .map(|(_, qu)| *qu)
+            .ok_or("採用runの初期Quが未解決です")?;
+        if qu.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+            return Err("採用runの初期Quが不正です".into());
+        }
+        Ok(qu)
+    }
+
     /// 方向別スロットの増分解析結果を返す。
     pub fn pushover_for(
         &self,

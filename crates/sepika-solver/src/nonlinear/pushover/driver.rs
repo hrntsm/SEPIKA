@@ -135,6 +135,11 @@ pub fn pushover_analysis_recording(
         .collect();
     sepika_element::factory::ensure_rc_beam_reference_loads(model, &active_cases)?;
 
+    let wall_capacities = crate::nonlinear::wall_reference::resolve(
+        model,
+        apply_long_term,
+        StrengthBasis::MaterialStrength,
+    )?;
     let mut behaviors: Vec<Box<dyn ElementBehavior>> = Vec::new();
     for elem in &model.elements {
         let b = build_nonlinear_behavior(
@@ -142,6 +147,10 @@ pub fn pushover_analysis_recording(
             model,
             StrengthBasis::MaterialStrength,
             sepika_element::factory::AnalysisKind::Incremental,
+            wall_capacities
+                .iter()
+                .find(|(id, _)| *id == elem.id)
+                .map(|(_, q)| *q),
         );
         behaviors.push(b);
     }
@@ -553,6 +562,7 @@ pub fn pushover_analysis_recording(
         phase_outcome
     };
     Ok(PushoverResult {
+        wall_capacities,
         steps: recorded.steps,
         wall_history: Some(recorded.wall_history),
         wall_run: Some(recorded.run),

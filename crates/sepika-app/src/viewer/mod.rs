@@ -87,6 +87,8 @@ pub enum ModelingAnalysis {
     Static,
     /// 増分解析（弾塑性）: 降伏を考慮し、ファイバー要素と材端集中塑性を使い分ける。
     Incremental,
+    /// 非線形時刻歴で実際に採用したモデルと初期Quを表示する。
+    TimeHistory,
 }
 
 /// 応力図（[`ViewMode::Force`]）で表示できる成分。

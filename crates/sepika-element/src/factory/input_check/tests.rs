@@ -559,6 +559,7 @@ fn public_generation_diagnostic_for_kind(
             model,
             crate::factory::StrengthBasis::Nominal,
             kind,
+            None,
         )
     });
     *result
@@ -627,6 +628,7 @@ fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
         &model,
         crate::factory::StrengthBasis::Nominal,
         sepika_core::model::AnalysisKind::Incremental,
+        None,
     );
 }
 
@@ -679,6 +681,7 @@ fn src_stiffness_errors_reach_nonlinear_input_diagnostics_and_public_factories()
             &model,
             crate::factory::StrengthBasis::Nominal,
             sepika_core::model::AnalysisKind::Incremental,
+            None,
         );
         for field in ["Ec", "Fc", "nu"] {
             let bad_values = if field == "nu" {
@@ -772,6 +775,7 @@ fn actual_rc_factory_connects_additional_angle_and_publishes_both_backbones() {
         &model,
         crate::factory::StrengthBasis::Nominal,
         AnalysisKind::Incremental,
+        None,
     );
     let reference = crate::factory::build_hinge_view(
         data,
@@ -1098,6 +1102,7 @@ fn unspecified_rc_basis_preserves_the_existing_fiber_path() {
                 &model,
                 crate::factory::StrengthBasis::Nominal,
                 kind,
+                None,
             );
         }
     }
@@ -1139,6 +1144,7 @@ fn rc_reference_backbone_diagnostics_follow_the_actual_strength_basis() {
             &model,
             StrengthBasis::Nominal,
             AnalysisKind::TimeHistory,
+            None,
         );
         let reason = ensure_nonlinear_input_with_basis(
             &model,
@@ -1156,6 +1162,7 @@ fn rc_reference_backbone_diagnostics_follow_the_actual_strength_basis() {
                 &model,
                 StrengthBasis::MaterialStrength,
                 AnalysisKind::Incremental,
+                None,
             )
         });
         let factory_reason = *result.err().unwrap().downcast::<String>().unwrap();

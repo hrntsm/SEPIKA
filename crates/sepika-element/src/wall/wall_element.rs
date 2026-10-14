@@ -57,9 +57,7 @@ pub fn wall_column_fiber_lp(data: &ElementData, model: &Model) -> Option<f64> {
     if !crate::wall::misc_wall::wall_is_seismic(data, model) {
         return None;
     }
-    if WallElement::shear_capacity_of(data, model).ok()? <= 0.0 {
-        return None;
-    }
+    WallElement::shear_inputs(data, model, crate::factory::StrengthBasis::Nominal).ok()?;
     let geom = wall_element_geometry(data, model)?;
     model.element_material(data)?.fc.filter(|fc| *fc > 0.0)?;
     let sec = data.section.and_then(|sid| model.sections.get(sid.index()));
@@ -120,6 +118,8 @@ struct WallShearGeometry {
     /// 壁厚 t [mm]
     t: f64,
     te: f64,
+    sigma_0: f64,
+    shear_span_ratio: f64,
     /// 付帯柱中心間距離 lw [mm]
     lw: f64,
     /// 壁の上下梁中心間高さ h [mm]
@@ -598,6 +598,8 @@ impl WallElement {
             fc,
             t,
             te,
+            sigma_0,
+            shear_span_ratio,
             lw,
             h,
             pwh_ratio,
@@ -637,8 +639,8 @@ impl WallElement {
                 tension_column_at: at,
                 sigma_wh,
                 pwh_ratio,
-                sigma_0: 0.0,
-                shear_span_ratio: h / d_wall,
+                sigma_0,
+                shear_span_ratio,
                 opening: opening.map(|(l0, h0)| (l0, h0, h, lw)),
             },
         )
@@ -654,22 +656,59 @@ impl WallElement {
         sepika_core::rc_wall_capacity::wall_opening_reduction_strength(opening)
     }
 
-    /// 正負のせん断終局耐力の小さい値 [N]。算定可否の判定と方向未指定の表示用。
-    pub fn shear_capacity_of(data: &ElementData, model: &Model) -> Result<f64, String> {
-        let qu = Self::directional_shear_capacity_of(
-            data,
-            model,
-            crate::factory::StrengthBasis::Nominal,
-        )?;
-        Ok(qu[0].min(qu[1]))
-    }
-
-    /// 壁下辺a→b方向の正・負載荷の終局せん断耐力 [N]。必要入力不足は理由を返す。
-    pub fn directional_shear_capacity_of(
+    /// 静的一次参照の圧縮正N `[N]`と局所正負のM/(QD)からQu `[N]`を求める。
+    /// 参照の欠落・非有限・引張N・0.4Fcを超える圧縮は理由付きで拒否する。
+    pub fn directional_shear_capacity_at_reference(
         data: &ElementData,
         model: &Model,
         basis: crate::factory::StrengthBasis,
+        compression_n: f64,
+        span_ratios: [f64; 2],
     ) -> Result<[f64; 2], String> {
+        if model.element_section(data).is_none() || wall_element_geometry(data, model).is_none() {
+            return Err(wall_input_error(
+                data,
+                "断面・幾何",
+                "必要入力が不足しています",
+            ));
+        }
+        if !crate::wall::misc_wall::is_rc_wall(data, model) {
+            return Ok([Self::steel_shear_capacity_of(data, model); 2]);
+        }
+        let mut inputs = Self::shear_inputs(data, model, basis)?;
+        let properties = super::shear_section::WallSection::new(data, model)?.properties()?;
+        let fc = inputs[0].fc.ok_or("Fcが不足しています")?;
+        let sigma_0 = compression_n / properties.area_mm2;
+        if !sigma_0.is_finite()
+            || !(0.0..=0.4 * fc).contains(&sigma_0)
+            || span_ratios.iter().any(|v| !v.is_finite() || *v < 0.0)
+        {
+            return Err(wall_input_error(
+                data,
+                "静的一次参照",
+                "NまたはM/(QD)が適用範囲外・非有限です",
+            ));
+        }
+        let qu = std::array::from_fn(|branch| {
+            inputs[branch].sigma_0 = sigma_0;
+            inputs[branch].shear_span_ratio = span_ratios[branch];
+            Self::shear_capacity(&inputs[branch])
+        });
+        if qu.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+            return Err(wall_input_error(
+                data,
+                "せん断耐力",
+                "全局所分岐のQuは有限正値が必要です",
+            ));
+        }
+        Ok(qu)
+    }
+
+    fn shear_inputs(
+        data: &ElementData,
+        model: &Model,
+        basis: crate::factory::StrengthBasis,
+    ) -> Result<[WallShearGeometry; 2], String> {
         let Some(geom) = wall_element_geometry(data, model) else {
             return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
         };
@@ -677,7 +716,7 @@ impl WallElement {
             return Err(wall_input_error(data, "断面", "断面が設定されていません"));
         }
         if !crate::wall::misc_wall::is_rc_wall(data, model) {
-            return Ok([Self::steel_shear_capacity_of(data, model); 2]);
+            return Err(wall_input_error(data, "断面", "RC壁以外は対象外です"));
         }
         let Some(sec) = model.element_section(data) else {
             return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
@@ -731,31 +770,38 @@ impl WallElement {
         } else {
             0.0
         };
-        let qu = std::array::from_fn(|tension| {
-            Self::shear_capacity(&WallShearGeometry {
-                fc: Some(fc),
-                t,
-                te,
-                lw: geom.lw,
-                h: geom.h,
-                pwh_ratio,
-                pwv_ratio,
-                d_wall,
-                dc_compression: depth[1 - tension],
-                col_main_at: at[tension],
-                has_side_column: section.columns[tension].is_some(),
-                sigma_wh,
-                opening: wall_opening_equiv_dims(data, model),
-            })
+        let inputs = std::array::from_fn(|tension| WallShearGeometry {
+            fc: Some(fc),
+            t,
+            te,
+            sigma_0: 0.0,
+            shear_span_ratio: 0.0,
+            lw: geom.lw,
+            h: geom.h,
+            pwh_ratio,
+            pwv_ratio,
+            d_wall,
+            dc_compression: depth[1 - tension],
+            col_main_at: at[tension],
+            has_side_column: section.columns[tension].is_some(),
+            sigma_wh,
+            opening: wall_opening_equiv_dims(data, model),
         });
-        if qu.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+        if inputs.iter().any(|input| {
+            let at = if input.has_side_column {
+                input.col_main_at
+            } else {
+                input.pwv_ratio * input.t * input.lw
+            };
+            !at.is_finite() || at <= 0.0 || input.d_wall - input.dc_compression / 2.0 <= 0.0
+        }) {
             return Err(wall_input_error(
                 data,
                 "せん断耐力",
-                "採用式の必要成分・寸法・配筋・開口条件が不成立です",
+                "主筋量または有効断面の必要入力が不成立です",
             ));
         }
-        Ok(qu)
+        Ok(inputs)
     }
 
     /// 鋼板耐震壁の面内せん断終局強度 Qy [N]。
@@ -810,7 +856,7 @@ impl WallElement {
             return None;
         }
         if crate::wall::misc_wall::is_rc_wall(data, model) {
-            return Self::directional_shear_capacity_of(data, model, basis)
+            return Self::shear_inputs(data, model, basis)
                 .and_then(|_| {
                     wall_direction_ratio(data, model, true)?;
                     wall_rebar_strength(data, model, true, basis)
@@ -1517,6 +1563,23 @@ fn explicit_wall_test_rebar(model: &mut Model) {
     });
     model.sections[0].rebar_material = Some(id);
     model.sections[0].shear_rebar_material = Some(id);
+}
+
+#[cfg(test)]
+fn fixture_directional_capacity(
+    data: &sepika_core::model::ElementData,
+    model: &sepika_core::model::Model,
+    basis: crate::factory::StrengthBasis,
+) -> Result<[f64; 2], String> {
+    WallElement::directional_shear_capacity_at_reference(data, model, basis, 0.0, [1.0; 2])
+}
+#[cfg(test)]
+fn fixture_capacity(
+    data: &sepika_core::model::ElementData,
+    model: &sepika_core::model::Model,
+) -> Result<f64, String> {
+    fixture_directional_capacity(data, model, crate::factory::StrengthBasis::Nominal)
+        .map(|q| q[0].min(q[1]))
 }
 
 #[cfg(test)]
@@ -2360,7 +2423,7 @@ mod shear_yield_tests {
             Some(f64::NEG_INFINITY),
         ] {
             model.materials[rebar_id.index()].fy = fy;
-            let reason = WallElement::shear_capacity_of(&data, &model).unwrap_err();
+            let reason = fixture_capacity(&data, &model).unwrap_err();
             assert!(
                 reason.contains("横筋材料")
                     && reason.contains("要素ID 0")
@@ -2378,18 +2441,18 @@ mod shear_yield_tests {
         }
         model.materials[rebar_id.index()].fy = Some(295.0);
         model.materials[rebar_id.index()].name = "SD295A".into();
-        let qu295 = WallElement::shear_capacity_of(&data, &model).unwrap();
+        let qu295 = fixture_capacity(&data, &model).unwrap();
         model.materials[rebar_id.index()].fy = Some(345.0);
-        let qu345 = WallElement::shear_capacity_of(&data, &model).unwrap();
+        let qu345 = fixture_capacity(&data, &model).unwrap();
         assert!(qu345 > qu295);
         model.materials[rebar_id.index()].name = "KH785".into();
-        assert!(WallElement::shear_capacity_of(&data, &model).is_err());
+        assert!(fixture_capacity(&data, &model).is_err());
         model.materials[rebar_id.index()].name = "SD295A".into();
         model.materials[rebar_id.index()].category = MaterialCategory::Steel;
-        assert!(WallElement::shear_capacity_of(&data, &model).is_err());
+        assert!(fixture_capacity(&data, &model).is_err());
         for assignment in [None, Some(MaterialId(999))] {
             model.sections[0].shear_rebar_material = assignment;
-            assert!(WallElement::shear_capacity_of(&data, &model).is_err());
+            assert!(fixture_capacity(&data, &model).is_err());
         }
     }
 
@@ -2413,7 +2476,7 @@ mod shear_yield_tests {
         };
         model.sections[0].shear_rebar_material = Some(MaterialId(1));
 
-        assert!(WallElement::shear_capacity_of(&data, &model).is_err());
+        assert!(fixture_capacity(&data, &model).is_err());
         let issue = WallElement::wall_shear_capacity_issue(
             &data,
             &model,
@@ -2423,7 +2486,7 @@ mod shear_yield_tests {
         assert!(issue.contains("SR235") && issue.contains("fy"), "{issue}");
 
         model.materials[1].fy = Some(235.0);
-        assert!(WallElement::shear_capacity_of(&data, &model).unwrap() > 0.0);
+        assert!(fixture_capacity(&data, &model).unwrap() > 0.0);
         assert!(
             WallElement::wall_shear_capacity_issue(
                 &data,
@@ -2440,7 +2503,7 @@ mod shear_yield_tests {
     #[test]
     fn test_wall_shear_yields_at_ultimate_strength() {
         let (model, data) = wall_model();
-        let qu = WallElement::shear_capacity_of(&data, &model).unwrap();
+        let qu = fixture_capacity(&data, &model).unwrap();
         assert!(qu > 0.0, "Qu が算定できるはず");
 
         let mut b = crate::factory::build_nonlinear_behavior(
@@ -2448,6 +2511,7 @@ mod shear_yield_tests {
             &model,
             crate::factory::StrengthBasis::MaterialStrength,
             crate::factory::AnalysisKind::Incremental,
+            Some([qu; 2]),
         );
         let ctx = Ctx { model: &model };
         let mut max_q: f64 = 0.0;
@@ -2486,13 +2550,14 @@ mod shear_yield_tests {
     #[test]
     fn test_wall_shear_hysteresis_is_max_point_oriented() {
         let (model, data) = wall_model();
-        let qu = WallElement::shear_capacity_of(&data, &model).unwrap();
+        let qu = fixture_capacity(&data, &model).unwrap();
         assert!(qu > 0.0);
         let mut b = crate::factory::build_nonlinear_behavior(
             &data,
             &model,
             crate::factory::StrengthBasis::MaterialStrength,
             crate::factory::AnalysisKind::TimeHistory,
+            Some([qu; 2]),
         );
         let ctx = Ctx { model: &model };
         let push = |b: &mut Box<dyn ElementBehavior>, d: f64| -> f64 {
@@ -2744,12 +2809,9 @@ mod capacity_issue_tests {
             .find(|e| e.id == ElemId(4))
             .unwrap()
             .section = Some(SectionId(2));
-        let qu = WallElement::directional_shear_capacity_of(
-            &wall,
-            &model,
-            crate::factory::StrengthBasis::Nominal,
-        )
-        .unwrap();
+        let qu =
+            fixture_directional_capacity(&wall, &model, crate::factory::StrengthBasis::Nominal)
+                .unwrap();
         assert!(qu[1] > qu[0] && qu[0] > 0.0, "{qu:?}");
         for mode in 0..3 {
             let limits = if mode == 2 { qu.map(|q| q * 0.001) } else { qu };
@@ -2806,12 +2868,9 @@ mod capacity_issue_tests {
             .unwrap();
         model.elements[left].section = Some(SectionId(2));
         model.elements[right].section = Some(SectionId(1));
-        let reversed = WallElement::directional_shear_capacity_of(
-            &wall,
-            &model,
-            crate::factory::StrengthBasis::Nominal,
-        )
-        .unwrap();
+        let reversed =
+            fixture_directional_capacity(&wall, &model, crate::factory::StrengthBasis::Nominal)
+                .unwrap();
         assert_eq!(qu, [reversed[1], reversed[0]]);
     }
 
@@ -2827,7 +2886,7 @@ mod capacity_issue_tests {
             ),
             None
         );
-        assert!(WallElement::shear_capacity_of(&wall, &model).unwrap() > 0.0);
+        assert!(fixture_capacity(&wall, &model).unwrap() > 0.0);
     }
 
     /// 側柱はあるのに主筋が取得できない＝断面設定の不備。壁筋比で代替せずエラーとする。
@@ -2841,7 +2900,7 @@ mod capacity_issue_tests {
         )
         .expect("側柱主筋がなければ不備として検出されるべき");
         assert!(issue.contains("側柱"), "{}", issue);
-        assert!(WallElement::shear_capacity_of(&wall, &model).is_err());
+        assert!(fixture_capacity(&wall, &model).is_err());
     }
 
     /// 側柱がない壁（壁のみの耐震壁）は不備ではなく、壁筋比から pte を算定する。
@@ -2856,7 +2915,7 @@ mod capacity_issue_tests {
             ),
             None
         );
-        assert!(WallElement::shear_capacity_of(&wall, &model).unwrap() > 0.0);
+        assert!(fixture_capacity(&wall, &model).unwrap() > 0.0);
     }
 
     /// 側柱も壁筋比もなければ pte を算定できないため不備とする。
@@ -2885,7 +2944,7 @@ mod capacity_issue_tests {
         )
         .expect("Fc 未設定は不備");
         assert!(issue.contains("Fc"), "{}", issue);
-        assert!(WallElement::shear_capacity_of(&wall, &model).is_err());
+        assert!(fixture_capacity(&wall, &model).is_err());
     }
 
     /// Fc が 0 以下または非有限値でも Qu を算定できないため不備とする（未設定と同じ扱い）。
@@ -2900,7 +2959,7 @@ mod capacity_issue_tests {
         )
         .expect("Fc<=0 は不備");
         assert!(issue.contains("Fc"), "{}", issue);
-        assert!(WallElement::shear_capacity_of(&wall, &model).is_err());
+        assert!(fixture_capacity(&wall, &model).is_err());
     }
 
     /// 断面に材料が割り当てられていない壁も不備とする（Fc を参照できない）。
@@ -2915,7 +2974,7 @@ mod capacity_issue_tests {
         )
         .expect("材料未設定は不備");
         assert!(issue.contains("コンクリート材料"), "{}", issue);
-        assert!(WallElement::shear_capacity_of(&wall, &model).is_err());
+        assert!(fixture_capacity(&wall, &model).is_err());
     }
 
     /// 断面が割り当てられていない壁も不備とする（壁厚・壁筋比を参照できない）。
@@ -2930,7 +2989,7 @@ mod capacity_issue_tests {
         )
         .expect("断面未設定は不備");
         assert!(issue.contains("断面が設定されていません"), "{}", issue);
-        assert!(WallElement::shear_capacity_of(&wall, &model).is_err());
+        assert!(fixture_capacity(&wall, &model).is_err());
     }
 
     /// 4 節点を与えているのに幾何が退化した壁（下辺の 2 節点が同一座標）は、
@@ -2992,7 +3051,7 @@ mod capacity_issue_tests {
             ),
             None
         );
-        let new_qu = WallElement::directional_shear_capacity_of(
+        let new_qu = fixture_directional_capacity(
             &wall_new,
             &model_new,
             crate::factory::StrengthBasis::Nominal,
@@ -3058,7 +3117,7 @@ mod capacity_issue_tests {
         .expect("SRC側柱はRC耐力式の適用外として拒否する");
         assert!(issue.contains("SRC"), "{}", issue);
         assert!(issue.contains("適用外"), "{}", issue);
-        assert!(WallElement::shear_capacity_of(&wall, &model).is_err());
+        assert!(fixture_capacity(&wall, &model).is_err());
     }
     fn directional_fixture() -> (Model, ElementData) {
         let (mut model, wall) = model_with(Some(rc_col(true)), 0.0025);
@@ -3132,15 +3191,14 @@ mod capacity_issue_tests {
             *pwh_ratio = Some(0.0);
         }
         let basis = crate::factory::StrengthBasis::MaterialStrength;
-        let concrete = WallElement::directional_shear_capacity_of(&wall, &model, basis).unwrap();
+        let concrete = fixture_directional_capacity(&wall, &model, basis).unwrap();
         if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut model.sections[0].shape {
             *pwh_ratio = Some(0.002);
         }
         for factor in [None, Some(1.0), Some(1.2)] {
             model.materials[2].strength_factor = factor;
             let expected = 601723.6279664652;
-            let capacity =
-                WallElement::directional_shear_capacity_of(&wall, &model, basis).unwrap();
+            let capacity = fixture_directional_capacity(&wall, &model, basis).unwrap();
             for direction in 0..2 {
                 assert!((capacity[direction] - concrete[direction] - expected).abs() < 1e-8);
             }
@@ -3151,13 +3209,13 @@ mod capacity_issue_tests {
     fn transverse_and_vertical_inputs_are_independent_and_missing_is_not_zero() {
         let (mut model, wall) = directional_fixture();
         let basis = crate::factory::StrengthBasis::Nominal;
-        let qu = WallElement::directional_shear_capacity_of(&wall, &model, basis).unwrap();
+        let qu = fixture_directional_capacity(&wall, &model, basis).unwrap();
         let linear_mass = WallElement::try_new(&wall, &model).unwrap().mass_total;
         if let Some(SectionShape::RcWall { pwv_ratio, .. }) = model.sections[0].shape.as_mut() {
             *pwv_ratio = None;
         }
         assert_eq!(
-            WallElement::directional_shear_capacity_of(&wall, &model, basis).unwrap(),
+            fixture_directional_capacity(&wall, &model, basis).unwrap(),
             qu
         );
         let fiber = WallElement::try_new(&wall, &model)
@@ -3179,7 +3237,7 @@ mod capacity_issue_tests {
                 *pwv_ratio = value;
             }
             assert_eq!(
-                WallElement::directional_shear_capacity_of(&wall, &model, basis).unwrap(),
+                fixture_directional_capacity(&wall, &model, basis).unwrap(),
                 qu
             );
             let element = WallElement::try_new(&wall, &model)
@@ -3197,22 +3255,20 @@ mod capacity_issue_tests {
         if let Some(SectionShape::RcWall { pwh_ratio, .. }) = model.sections[0].shape.as_mut() {
             *pwh_ratio = Some(0.0);
         }
-        assert!(WallElement::directional_shear_capacity_of(&wall, &model, basis).is_ok());
+        assert!(fixture_directional_capacity(&wall, &model, basis).is_ok());
         if let Some(SectionShape::RcWall { pwh_ratio, .. }) = model.sections[0].shape.as_mut() {
             *pwh_ratio = None;
         }
-        assert!(
-            WallElement::directional_shear_capacity_of(&wall, &model, basis)
-                .unwrap_err()
-                .contains("横筋比")
-        );
+        assert!(fixture_directional_capacity(&wall, &model, basis)
+            .unwrap_err()
+            .contains("横筋比"));
     }
 
     #[test]
     fn nonlinear_reference_stiffness_and_shear_spring_use_vertical_ratio_before_cache() {
         let (mut model, wall) = directional_fixture();
         let basis = crate::factory::StrengthBasis::Nominal;
-        let qu = WallElement::directional_shear_capacity_of(&wall, &model, basis).unwrap();
+        let qu = fixture_directional_capacity(&wall, &model, basis).unwrap();
         let build = |model: &Model| {
             let element = WallElement::try_new(&wall, model).unwrap();
             element.column.local_stiffness();

@@ -332,6 +332,7 @@ mod tests {
             },
         ];
         let pushover = crate::nonlinear::pushover::PushoverResult {
+            wall_capacities: Vec::new(),
             steps,
             wall_history: None,
             wall_run: None,
@@ -409,6 +410,7 @@ mod tests {
             ..Default::default()
         };
         let pushover = crate::nonlinear::pushover::PushoverResult {
+            wall_capacities: Vec::new(),
             steps: Vec::new(),
             wall_history: None,
             wall_run: None,
@@ -458,6 +460,7 @@ mod tests {
             fireproof: Default::default(),
         };
         let pushover = crate::nonlinear::pushover::PushoverResult {
+            wall_capacities: Vec::new(),
             steps: Vec::new(),
             wall_history: None,
             wall_run: None,
