@@ -69,6 +69,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0054](0054-mcp-result-publication-provenance.md) | accepted | MCP 保存成果の開始入力・計算契約と公開ファイルを結び付ける |
 
+| [0055](0055-rc-wall-static-face-and-initial-capacity.md) | accepted | RC壁の同一face内力とrun初期耐力を分離する |
+
 ## 規約
 
 - ADR にするのは「後から覆すコストが高い」「背景を知らないと意外に見える」「実際のトレードオフがあった」の 3 条件をすべて満たす**現在有効な判断**だけ。単なる実装手順・容易に変えられる選択・未実装の計画・自明な判断は書かない。
