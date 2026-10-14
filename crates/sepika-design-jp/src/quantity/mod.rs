@@ -28,7 +28,7 @@ mod tests;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use sepika_core::ids::{ElemId, SlabId};
+use sepika_core::ids::{ElemId, SectionId, SlabId, WallPlateId};
 use sepika_core::model::{
     ElementData, ElementKind, Model, RegionAnchor, SecondaryMember, SecondaryMemberKind, Section,
     Slab, WallPlate, WallPlateShape,
@@ -50,33 +50,7 @@ const STEEL_UNIT_WEIGHT_T_PER_MM3: f64 = STEEL_UNIT_WEIGHT_T_PER_M3 * 1e-9;
 /// 「同一レベル」とみなす標高差 [mm]（基礎梁レベルの判定用）。
 const LEVEL_TOL_MM: f64 = 10.0;
 
-/// 数量積算の設定。
-#[derive(Clone, Copy, Debug)]
-pub struct QuantityCfg {
-    /// 主筋・壁筋の定着長さ係数（L2・S = 係数×呼び径。既定 35d）。
-    pub anchorage_dia_factor: f64,
-    /// 壁筋の仮定呼び径 `[mm]`（壁の配筋はせん断補強筋比 ps のみ保持する
-    /// ため、定着長さ S=35d の算定に用いる仮定径。既定 D10）。
-    pub assumed_wall_bar_dia: f64,
-    /// 小梁主筋の鉄筋比（コンクリート体積比。既定 0.8%）。
-    pub beam_main_ratio: f64,
-    /// 小梁スターラップの鉄筋比（既定 0.1%）。
-    pub beam_stirrup_ratio: f64,
-    /// 床・片持ち床の鉄筋比（既定 1.0%）。
-    pub slab_rebar_ratio: f64,
-}
-
-impl Default for QuantityCfg {
-    fn default() -> Self {
-        Self {
-            anchorage_dia_factor: 35.0,
-            assumed_wall_bar_dia: 10.0,
-            beam_main_ratio: 0.008,
-            beam_stirrup_ratio: 0.001,
-            slab_rebar_ratio: 0.01,
-        }
-    }
-}
+pub use sepika_core::model::QuantityCfg;
 
 /// 部位分類。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -121,7 +95,7 @@ impl MemberCategory {
 pub use sepika_core::structure_kind::StructureKind;
 
 /// 鉄筋の用途分類。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
 pub enum RebarUsage {
     /// 柱・梁の主筋。
     MainBar,
@@ -180,11 +154,66 @@ pub struct SteelItem {
     pub weight_t: f64,
 }
 
+/// 未算定鉄筋の理由の種別。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RebarIssueKind {
+    Missing,
+    Invalid,
+    Unsupported,
+}
+
+/// 未算定対象の ID・方向・理由。算定済み数量には加算しない。
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct RebarIssue {
+    pub elem: Option<ElemId>,
+    pub wall_plate: Option<WallPlateId>,
+    pub section: Option<SectionId>,
+    pub usage: RebarUsage,
+    pub kind: RebarIssueKind,
+    pub reason: String,
+}
+impl RebarIssue {
+    /// 対象 ID と方向を含む利用者向け診断。
+    pub fn description(&self) -> String {
+        format!(
+            "要素 {:?} / 壁版 {:?} / 断面 {:?} / {}: {}",
+            self.elem.map(|id| id.0),
+            self.wall_plate.map(|id| id.0),
+            self.section.map(|id| id.0),
+            self.usage.label(),
+            self.reason
+        )
+    }
+}
+
+/// 鉄筋数量の完全性。完全でも実配筋との照合を意味しない。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuantityStatus {
+    Empty,
+    Complete,
+    Incomplete,
+}
+impl QuantityStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Empty => "対象なし",
+            Self::Complete => "算定済み概算",
+            Self::Incomplete => "不完全小計",
+        }
+    }
+}
+
 /// 部材（またはスラブ・雑壁）1 件分の数量。
 #[derive(Clone, Debug)]
 pub struct MemberQuantity {
     /// 対象要素（スラブ・雑壁は None）。
     pub elem: Option<ElemId>,
+    /// 元の壁版。直接入力された要素は None。
+    pub wall_plate: Option<WallPlateId>,
+    /// 算定対象の断面 ID。
+    pub section: Option<SectionId>,
     /// 対象床板（部材・雑壁は None）。
     pub slab: Option<SlabId>,
     /// 符号（断面名等）。
@@ -199,6 +228,8 @@ pub struct MemberQuantity {
     pub formwork_m2: f64,
     /// 鉄筋数量（用途別）。
     pub rebar: Vec<RebarItem>,
+    /// 未算定方向と理由。空なら対象鉄筋は算定済み概算。
+    pub rebar_issues: Vec<RebarIssue>,
     /// 鉄骨数量（S・SRC・CFT・ブレース）。
     pub steel: Option<SteelItem>,
     /// 鉄筋継手個所数（圧接個所数の集計。柱・大梁・基礎梁）。
@@ -206,7 +237,14 @@ pub struct MemberQuantity {
 }
 
 impl MemberQuantity {
-    /// 鉄筋重量の合計 `[t]`。
+    pub fn rebar_status(&self) -> QuantityStatus {
+        if self.rebar_issues.is_empty() {
+            QuantityStatus::Complete
+        } else {
+            QuantityStatus::Incomplete
+        }
+    }
+    /// 算定済み鉄筋重量の小計 `[t]`。完全性は `rebar_status` を併用する。
     pub fn rebar_weight_t(&self) -> f64 {
         self.rebar.iter().map(|r| r.weight_t).sum::<f64>() + 0.0
     }
@@ -218,17 +256,31 @@ impl MemberQuantity {
 }
 
 /// 数量の小計（コンクリート・型枠・鉄筋・鉄骨・継手）。
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct QuantityTotals {
+    pub member_count: usize,
+    pub rebar_issues: Vec<RebarIssue>,
     pub concrete_m3: f64,
     pub formwork_m2: f64,
+    /// 算定済み鉄筋重量の小計 `[t]`。完全性は `rebar_status` を併用する。
     pub rebar_t: f64,
     pub steel_t: f64,
     pub rebar_joints: f64,
 }
 
 impl QuantityTotals {
+    pub fn rebar_status(&self) -> QuantityStatus {
+        if self.member_count == 0 {
+            QuantityStatus::Empty
+        } else if self.rebar_issues.is_empty() {
+            QuantityStatus::Complete
+        } else {
+            QuantityStatus::Incomplete
+        }
+    }
     fn add(&mut self, it: &MemberQuantity) {
+        self.member_count += 1;
+        self.rebar_issues.extend(it.rebar_issues.clone());
         self.concrete_m3 += it.concrete_m3;
         self.formwork_m2 += it.formwork_m2;
         self.rebar_t += it.rebar_weight_t();
@@ -247,7 +299,7 @@ pub struct QuantityTakeoff {
 }
 
 impl QuantityTakeoff {
-    /// 全体合計。
+    /// 全体の算定済み小計。未算定理由と対象なしの状態を保持する。
     pub fn totals(&self) -> QuantityTotals {
         let mut t = QuantityTotals::default();
         for it in &self.items {
@@ -278,10 +330,25 @@ impl QuantityTakeoff {
         order
             .into_iter()
             .map(|k| {
-                let v = map[&k];
+                let v = map.remove(&k).unwrap();
                 (k, v)
             })
             .collect()
+    }
+
+    /// 構造種別の小計。
+    pub fn totals_by_structure(&self) -> Vec<(StructureKind, QuantityTotals)> {
+        let mut rows: Vec<(StructureKind, QuantityTotals)> = Vec::new();
+        for it in &self.items {
+            if let Some((_, t)) = rows.iter_mut().find(|(k, _)| *k == it.structure) {
+                t.add(it);
+            } else {
+                let mut t = QuantityTotals::default();
+                t.add(it);
+                rows.push((it.structure, t));
+            }
+        }
+        rows
     }
 
     /// 鉄骨の種類別（断面名別）長さ・重量集計。
@@ -624,7 +691,12 @@ fn compute_quantity_takeoff_validated(
     }
 
     for plate in &model.wall_plates {
-        if !plate.is_attached() && model.wall_plate_becomes_element(plate) {
+        if !plate.is_attached()
+            && model
+                .generated_wall_origins
+                .values()
+                .any(|id| *id == plate.id)
+        {
             continue;
         }
         if let Some(item) = wall_plate_quantity(&ctx, plate) {
@@ -638,19 +710,39 @@ fn compute_quantity_takeoff_validated(
         }
     }
 
-    out.notes = build_notes(model);
+    if !cfg.anchorage_dia_factor.is_finite() || cfg.anchorage_dia_factor < 0.0 {
+        for item in &mut out.items {
+            if item.rebar.iter().any(|r| r.usage == RebarUsage::MainBar)
+                && matches!(
+                    item.category,
+                    MemberCategory::Girder | MemberCategory::FoundationGirder
+                )
+            {
+                item.rebar.retain(|r| r.usage != RebarUsage::MainBar);
+                item.rebar_issues.push(RebarIssue {
+                    elem: item.elem,
+                    wall_plate: item.wall_plate,
+                    section: item.section,
+                    usage: RebarUsage::MainBar,
+                    kind: RebarIssueKind::Invalid,
+                    reason: "定着係数は有限・非負が必要".into(),
+                });
+            }
+        }
+    }
+    out.notes = build_notes(model, cfg);
     out
 }
 
 /// 前提・未対応事項の注記を組み立てる。
-fn build_notes(model: &Model) -> Vec<String> {
+fn build_notes(model: &Model, cfg: &QuantityCfg) -> Vec<String> {
     let mut notes = vec![
         "鉄筋のフック・余長・重ね継手長さ・溶接継手長さは考慮しない（各部位共通事項）。".to_string(),
         "SRC のコンクリート体積は鉄骨体積を差し引かずに計算する（各部位共通事項）。".to_string(),
         "鉄骨重量は W=L×A×7.85（単位重量 7.85t/m³ 固定）による。".to_string(),
         "主筋は全長 1 断面（全断面）配筋として算定する（カットオフ筋の +15d は対象外）。".to_string(),
         "梁の腹筋・幅止筋は段数情報がモデルにないため計上しない。".to_string(),
-        "壁筋はせん断補強筋比 ps による等価換算（仮定径 D10・定着 S=35d）。開口部補強筋は考慮しない。".to_string(),
+        format!("壁筋は明示方向比（全厚内の両面合計）による概算。仮定径 {} mm・定着係数 {}。面積 πd²/4 と呼び径表の単位質量で換算する。開口欠損・開口補強・端部配置は詳細に反映せず、実配筋数量の照合済みではない。", cfg.assumed_wall_bar_dia, cfg.anchorage_dia_factor),
         "基礎フーチングはモデルに定義がないため計上しない。".to_string(),
         "梁端ハンチは部材付帯情報（ハンチ長・せい増分・幅増分）から平均断面×ハンチ長で加算する（未入力の部材はハンチなし）。".to_string(),
         "鉄筋継手は個所数（圧接個所数）として集計する（梁 0.5 個所/本＋5m 毎 0.5、柱 1 個所/本＋7m 毎 1）。".to_string(),
@@ -694,6 +786,8 @@ fn secondary_member_quantity(ctx: &Ctx, sm: &SecondaryMember) -> Option<MemberQu
     let mut item = MemberQuantity {
         elem: None,
         slab: None,
+        wall_plate: None,
+        section: Some(sec.id),
         label: if sm.name.is_empty() {
             sec.name.clone()
         } else {
@@ -705,6 +799,7 @@ fn secondary_member_quantity(ctx: &Ctx, sm: &SecondaryMember) -> Option<MemberQu
         concrete_m3: 0.0,
         formwork_m2: 0.0,
         rebar: Vec::new(),
+        rebar_issues: Vec::new(),
         steel: None,
         rebar_joints: 0.0,
     };
@@ -889,6 +984,8 @@ fn column_quantity(
     let mut item = MemberQuantity {
         elem: Some(elem.id),
         slab: None,
+        wall_plate: None,
+        section: Some(sec.id),
         label: sec.name.clone(),
         story,
         category: MemberCategory::Column,
@@ -896,6 +993,7 @@ fn column_quantity(
         concrete_m3: 0.0,
         formwork_m2: 0.0,
         rebar: Vec::new(),
+        rebar_issues: Vec::new(),
         steel: None,
         rebar_joints: 0.0,
     };
@@ -1004,6 +1102,8 @@ fn beam_quantity(
     let mut item = MemberQuantity {
         elem: Some(elem.id),
         slab: None,
+        wall_plate: None,
+        section: Some(sec.id),
         label: sec.name.clone(),
         story: ctx.story_name(ni),
         category,
@@ -1011,6 +1111,7 @@ fn beam_quantity(
         concrete_m3: 0.0,
         formwork_m2: 0.0,
         rebar: Vec::new(),
+        rebar_issues: Vec::new(),
         steel: None,
         rebar_joints: 0.0,
     };
@@ -1165,6 +1266,8 @@ fn brace_quantity(ctx: &Ctx, elem: &ElementData) -> Option<MemberQuantity> {
     let mut item = MemberQuantity {
         elem: Some(elem.id),
         slab: None,
+        wall_plate: None,
+        section: Some(sec.id),
         label: sec.name.clone(),
         story: ctx.story_name(lower),
         category: MemberCategory::Brace,
@@ -1172,6 +1275,7 @@ fn brace_quantity(ctx: &Ctx, elem: &ElementData) -> Option<MemberQuantity> {
         concrete_m3: 0.0,
         formwork_m2: 0.0,
         rebar: Vec::new(),
+        rebar_issues: Vec::new(),
         steel: None,
         rebar_joints: 0.0,
     };
@@ -1248,13 +1352,15 @@ fn wall_clear_dims(model: &Model, elem: &ElementData, pts: &[[f64; 3]]) -> Optio
 fn wall_quantity(ctx: &Ctx, elem: &ElementData) -> Option<MemberQuantity> {
     let model = ctx.model;
     let sec = model.sections.get(elem.section?.index())?;
-    let (t, ps) = match sec.shape.as_ref() {
-        Some(SectionShape::RcWall { thickness, ps, .. }) => (*thickness, *ps),
-        _ => (sec.thickness?, 0.0),
+    let (t, pwh, pwv) = match sec.shape.as_ref() {
+        Some(SectionShape::RcWall {
+            thickness,
+            pwh_ratio,
+            pwv_ratio,
+            ..
+        }) => (*thickness, *pwh_ratio, *pwv_ratio),
+        _ => (sec.thickness.unwrap_or(f64::NAN), None, None),
     };
-    if t <= 0.0 {
-        return None;
-    }
     let pts: Vec<[f64; 3]> = elem
         .nodes
         .iter()
@@ -1298,34 +1404,87 @@ fn wall_quantity(ctx: &Ctx, elem: &ElementData) -> Option<MemberQuantity> {
     let mut item = MemberQuantity {
         elem: Some(elem.id),
         slab: None,
+        wall_plate: None,
+        section: Some(sec.id),
         label: sec.name.clone(),
         story: ctx.story_name(lower),
         category: MemberCategory::Wall,
         structure: StructureKind::Rc,
-        concrete_m3: net_area * t * 1e-9,
+        concrete_m3: if t.is_finite() && t > 0.0 && net_area.is_finite() {
+            net_area * t * 1e-9
+        } else {
+            0.0
+        },
         formwork_m2: net_area * 2.0 * 1e-6,
         rebar: Vec::new(),
+        rebar_issues: Vec::new(),
         steel: None,
         rebar_joints: 0.0,
     };
 
-    if ps > 0.0 && l_clear > 0.0 && h_clear > 0.0 {
-        let dia = ctx.cfg.assumed_wall_bar_dia;
-        let s = ctx.cfg.anchorage_dia_factor * dia;
-        let one = sepika_core::section_shape::one_bar_area(dia);
-        for (usage, span, other) in [
-            (RebarUsage::WallHorizontal, l_clear, h_clear),
-            (RebarUsage::WallVertical, h_clear, l_clear),
-        ] {
-            let count = ps * t * other / one;
-            let total_len = member::wall_bar_length(span, s, count);
-            item.rebar.push(RebarItem {
+    item.wall_plate = model.generated_wall_origins.get(&elem.id).copied();
+    let dia_mm = ctx.cfg.assumed_wall_bar_dia;
+    let anchorage_factor = ctx.cfg.anchorage_dia_factor;
+    for (usage, ratio, span_mm, other_mm) in [
+        (RebarUsage::WallHorizontal, pwh, l_clear, h_clear),
+        (RebarUsage::WallVertical, pwv, h_clear, l_clear),
+    ] {
+        let issue = match ratio {
+            None => Some((RebarIssueKind::Missing, "方向筋比が未入力")),
+            Some(r) if !r.is_finite() || r < 0.0 => {
+                Some((RebarIssueKind::Invalid, "方向筋比は有限・非負が必要"))
+            }
+            _ if !t.is_finite() || t <= 0.0 => {
+                Some((RebarIssueKind::Invalid, "壁厚は有限・正が必要"))
+            }
+            _ if pts.iter().flatten().any(|v| !v.is_finite())
+                || !span_mm.is_finite()
+                || span_mm <= 0.0
+                || !other_mm.is_finite()
+                || other_mm <= 0.0 =>
+            {
+                Some((RebarIssueKind::Invalid, "算定内法寸法は有限・正が必要"))
+            }
+            _ if !dia_mm.is_finite() || dia_mm <= 0.0 => {
+                Some((RebarIssueKind::Invalid, "仮定径は有限・正が必要"))
+            }
+            _ if !anchorage_factor.is_finite() || anchorage_factor < 0.0 => {
+                Some((RebarIssueKind::Invalid, "定着係数は有限・非負が必要"))
+            }
+            _ => None,
+        };
+        if let Some((kind, reason)) = issue {
+            item.rebar_issues.push(RebarIssue {
+                elem: item.elem,
+                wall_plate: item.wall_plate,
+                section: item.section,
                 usage,
-                dia: Some(dia),
-                total_length_m: total_len / 1_000.0,
-                weight_t: rebar::rebar_weight_t(total_len, dia),
+                kind,
+                reason: reason.into(),
             });
+            continue;
         }
+        let count =
+            ratio.unwrap() * t * other_mm / sepika_core::section_shape::one_bar_area(dia_mm);
+        let total_len_mm = member::wall_bar_length(span_mm, anchorage_factor * dia_mm, count);
+        let weight_t = rebar::rebar_weight_t(total_len_mm, dia_mm);
+        if !total_len_mm.is_finite() || !weight_t.is_finite() {
+            item.rebar_issues.push(RebarIssue {
+                elem: item.elem,
+                wall_plate: item.wall_plate,
+                section: item.section,
+                usage,
+                kind: RebarIssueKind::Invalid,
+                reason: "数量換算結果が非有限".into(),
+            });
+            continue;
+        }
+        item.rebar.push(RebarItem {
+            usage,
+            dia: Some(dia_mm),
+            total_length_m: total_len_mm / 1000.0,
+            weight_t,
+        });
     }
     Some(item)
 }
@@ -1341,45 +1500,79 @@ fn wall_plate_quantity(ctx: &Ctx, plate: &WallPlate) -> Option<MemberQuantity> {
     let model = ctx.model;
     let anchor_nodes: Vec<sepika_core::ids::NodeId> = match &plate.shape {
         WallPlateShape::Attached { anchor, .. } => match anchor {
-            RegionAnchor::Line { nodes, .. } => nodes.to_vec(),
-            RegionAnchor::FloorRegion { nodes, .. } => nodes.to_vec(),
-            RegionAnchor::Point(_) => return None,
+            RegionAnchor::Line { nodes, .. } | RegionAnchor::FloorRegion { nodes, .. } => {
+                nodes.to_vec()
+            }
+            RegionAnchor::Point(node) => vec![*node],
         },
         WallPlateShape::Enclosed => plate.boundary_nodes(model).unwrap_or_default(),
     };
-    if anchor_nodes.is_empty() {
-        return None;
-    }
-    let sec = model.wall_plate_section(plate)?;
-    let t = model.wall_plate_thickness(plate)?;
-    let pts = plate.boundary_coords(model)?;
-    if pts.len() < 3 {
-        return None;
-    }
-    let area = polygon_area_3d(&pts);
-    let net_area = (area - plate.total_opening_area()).max(0.0);
-
-    let lower = anchor_nodes
+    let sec = model.wall_plate_section(plate);
+    let t_mm = sec.and_then(|s| match &s.shape {
+        Some(SectionShape::RcWall { thickness, .. }) => Some(*thickness),
+        _ => s.thickness,
+    });
+    let pts = plate.boundary_coords(model).unwrap_or_default();
+    let area_mm2 = if pts.len() >= 3 {
+        polygon_area_3d(&pts)
+    } else {
+        0.0
+    };
+    let valid_geometry = pts.len() >= 3
+        && pts.iter().flatten().all(|v| v.is_finite())
+        && area_mm2.is_finite()
+        && area_mm2 > 0.0;
+    let net_area_mm2 = if valid_geometry {
+        (area_mm2 - plate.total_opening_area()).max(0.0)
+    } else {
+        0.0
+    };
+    let story = anchor_nodes
         .iter()
-        .map(|n| n.index())
-        .filter(|i| model.nodes.get(*i).is_some())
-        .min_by(|&a, &b| {
-            model.nodes[a].coord[2]
-                .partial_cmp(&model.nodes[b].coord[2])
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .unwrap_or(anchor_nodes[0].index());
-
+        .filter_map(|id| model.nodes.get(id.index()))
+        .min_by(|a, b| a.coord[2].total_cmp(&b.coord[2]))
+        .map(|n| ctx.story_name(n.id.index()))
+        .unwrap_or_else(|| "-".into());
+    let (kind, reason) = if sec.is_none() {
+        (RebarIssueKind::Missing, "壁版の断面が未解決")
+    } else if t_mm.is_none() {
+        (RebarIssueKind::Missing, "壁版の壁厚が未入力")
+    } else if t_mm.is_some_and(|t| !t.is_finite() || t <= 0.0) {
+        (RebarIssueKind::Invalid, "壁厚は有限・正が必要")
+    } else if !valid_geometry {
+        (
+            RebarIssueKind::Invalid,
+            "壁版の算定寸法・境界が未解決または不正",
+        )
+    } else {
+        (RebarIssueKind::Unsupported, "壁版の鉄筋積算は未実装")
+    };
     Some(MemberQuantity {
         elem: None,
         slab: None,
-        label: sec.name.clone(),
-        story: ctx.story_name(lower),
+        wall_plate: Some(plate.id),
+        section: plate.section,
+        label: sec.map(|s| s.name.clone()).unwrap_or_else(|| "-".into()),
+        story,
         category: MemberCategory::MiscWall,
         structure: StructureKind::Rc,
-        concrete_m3: net_area * t * 1e-9,
-        formwork_m2: net_area * 2.0 * 1e-6,
+        concrete_m3: t_mm
+            .filter(|t| t.is_finite() && *t > 0.0)
+            .map(|t| net_area_mm2 * t * 1e-9)
+            .unwrap_or(0.0),
+        formwork_m2: net_area_mm2 * 2.0 * 1e-6,
         rebar: Vec::new(),
+        rebar_issues: [RebarUsage::WallHorizontal, RebarUsage::WallVertical]
+            .into_iter()
+            .map(|usage| RebarIssue {
+                elem: None,
+                wall_plate: Some(plate.id),
+                section: plate.section,
+                usage,
+                kind,
+                reason: reason.into(),
+            })
+            .collect(),
         steel: None,
         rebar_joints: 0.0,
     })
@@ -1405,6 +1598,8 @@ fn slab_quantity(ctx: &Ctx, slab: &Slab) -> Option<MemberQuantity> {
     let mut item = MemberQuantity {
         elem: None,
         slab: Some(slab.id),
+        wall_plate: None,
+        section: slab.section(),
         label: format!("S{}", slab.id.0),
         story: slab
             .reference_node(model)
@@ -1415,6 +1610,7 @@ fn slab_quantity(ctx: &Ctx, slab: &Slab) -> Option<MemberQuantity> {
         concrete_m3: vol_m3,
         formwork_m2: area * 1e-6,
         rebar: Vec::new(),
+        rebar_issues: Vec::new(),
         steel: None,
         rebar_joints: 0.0,
     };

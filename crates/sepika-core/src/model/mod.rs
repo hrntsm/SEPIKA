@@ -61,3 +61,6 @@ mod tests;
 
 mod stb_rebar;
 pub use stb_rebar::*;
+
+mod quantity;
+pub use quantity::QuantityCfg;

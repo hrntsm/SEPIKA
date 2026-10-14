@@ -14,6 +14,11 @@ pub struct CompositeCommand {
 }
 
 impl EditCommand for CompositeCommand {
+    fn affects_calculation(&self) -> bool {
+        self.children
+            .iter()
+            .any(|child| child.affects_calculation())
+    }
     fn changes_assignment_boundaries(&self) -> bool {
         self.children
             .iter()

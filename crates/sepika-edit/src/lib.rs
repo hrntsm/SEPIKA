@@ -15,6 +15,10 @@ pub enum IdChange {
 /// コマンドはモデルデータの断片のみを保持するプレーンな構造体であり、
 /// 全実装が自然に `Send` を満たす。
 pub trait EditCommand: Send {
+    /// 解析・検定の計算入力を変更する編集か。
+    fn affects_calculation(&self) -> bool {
+        true
+    }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand>;
     fn label(&self) -> &str;
     /// この逆コマンドを生成した編集の ID 変更を、適用順に返す。材料・断面の挿入・削除がなければ空。
@@ -50,6 +54,9 @@ struct RestoreStbNodeIdentities {
 }
 
 impl EditCommand for RestoreStbNodeIdentities {
+    fn affects_calculation(&self) -> bool {
+        self.command.affects_calculation()
+    }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let identities = model.stb_node_ids.clone();
         let command = self.command.apply(model);
@@ -78,6 +85,9 @@ fn with_id_changes(command: Box<dyn EditCommand>, changes: Vec<IdChange>) -> Box
 }
 
 impl EditCommand for CommandWithIdChanges {
+    fn affects_calculation(&self) -> bool {
+        self.command.affects_calculation()
+    }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         self.command.apply(model)
     }
@@ -146,6 +156,7 @@ pub struct UndoStack {
     revision: u64,
     last_error: Option<String>,
     id_changes: Vec<IdChange>,
+    affects_calculation: bool,
 }
 
 impl UndoStack {
@@ -157,6 +168,7 @@ impl UndoStack {
             revision: 0,
             last_error: None,
             id_changes: Vec::new(),
+            affects_calculation: true,
         }
     }
 
@@ -168,6 +180,7 @@ impl UndoStack {
             revision: 0,
             last_error: None,
             id_changes: Vec::new(),
+            affects_calculation: true,
         }
     }
 
@@ -199,6 +212,7 @@ impl UndoStack {
             self.last_error = Some(reason);
             return false;
         }
+        let affects_calculation = cmd.affects_calculation();
         let inv = cmd.apply(&mut candidate);
         if let Some(reason) = inv.rejection() {
             self.last_error = Some(reason.to_owned());
@@ -224,6 +238,7 @@ impl UndoStack {
             identities: model.stb_node_ids.clone(),
         });
         *model = candidate;
+        self.affects_calculation = affects_calculation;
         self.id_changes = inv.inverse_id_changes();
         self.done.push(inv);
         if self.done.len() > self.max_undo {
@@ -267,6 +282,7 @@ impl UndoStack {
     pub fn undo(&mut self, model: &mut Model) {
         self.id_changes.clear();
         if let Some(cmd) = self.done.pop() {
+            self.affects_calculation = cmd.affects_calculation();
             let redo_cmd = cmd.apply(model);
             self.id_changes = redo_cmd.inverse_id_changes();
             self.undone.push(redo_cmd);
@@ -285,6 +301,7 @@ impl UndoStack {
             return;
         }
         let mut candidate = model.clone();
+        let affects_calculation = cmd.affects_calculation();
         let undo_cmd = cmd.apply(&mut candidate);
         if let Some(reason) = undo_cmd.rejection() {
             self.last_error = Some(format!("モデル・履歴は未更新: {reason}"));
@@ -302,10 +319,16 @@ impl UndoStack {
             return;
         }
         *model = candidate;
+        self.affects_calculation = affects_calculation;
         self.undone.pop();
         self.id_changes = undo_cmd.inverse_id_changes();
         self.done.push(undo_cmd);
         self.revision += 1;
+    }
+
+    /// 直前に確定した編集が解析・検定の計算入力を変更したか。
+    pub fn affects_calculation(&self) -> bool {
+        self.affects_calculation
     }
 
     pub fn can_undo(&self) -> bool {
@@ -523,3 +546,20 @@ mod tests;
 
 mod strength;
 pub use strength::{SetSourceStoryConcreteStrength, SetStbStrengths};
+
+/// 数量設定の全置換。解析入力を変更せず、逆操作は以前の数量設定へ戻す。
+pub struct SetQuantityCfg {
+    pub cfg: sepika_core::model::QuantityCfg,
+}
+impl EditCommand for SetQuantityCfg {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let cfg = std::mem::replace(&mut model.quantity_cfg, self.cfg);
+        Box::new(Self { cfg })
+    }
+    fn label(&self) -> &str {
+        "数量設定の変更"
+    }
+    fn affects_calculation(&self) -> bool {
+        false
+    }
+}

@@ -544,8 +544,8 @@ fn test_wall_quantity_with_opening() {
     // 柱・梁で囲まれた 4 節点壁（節点 0-1-3-2）。
     let shape = SectionShape::RcWall {
         thickness: 200.0,
-        pwh_ratio: None,
-        pwv_ratio: None,
+        pwh_ratio: Some(0.0025),
+        pwv_ratio: Some(0.0025),
         ps: 0.0025,
     };
     let sec = shape.to_section(SectionId(2), "W20".to_string());
@@ -700,6 +700,13 @@ fn test_attached_wall_plate_quantity_is_included_as_misc_wall() {
         items[0].concrete_m3,
         expected_m3
     );
+    assert_eq!(items[0].rebar_status(), QuantityStatus::Incomplete);
+    assert_eq!(items[0].rebar_issues.len(), 2);
+    assert!(items[0]
+        .rebar_issues
+        .iter()
+        .all(|i| i.kind == RebarIssueKind::Unsupported && i.wall_plate == Some(WallPlateId(0))));
+    assert_eq!(q.totals().rebar_status(), QuantityStatus::Incomplete);
 }
 
 /// 大梁（i 端ハンチ）・基礎梁（両端ハンチ）のハンチが部材付帯情報から
@@ -1938,4 +1945,239 @@ fn three_node_reproduction_is_rejected_with_or_without_floor_and_collinear_bound
             }
         }
     }
+}
+
+fn directional_wall_quantity_fixture() -> Model {
+    let mut model = rc_portal_model();
+    model.nodes[1].coord[0] = 4700.0;
+    model.nodes[3].coord[0] = 4700.0;
+    model.nodes[2].coord[2] = 3800.0;
+    model.nodes[3].coord[2] = 3800.0;
+    let mut section = SectionShape::RcWall {
+        thickness: 200.0,
+        ps: 0.002,
+        pwh_ratio: Some(0.006),
+        pwv_ratio: Some(0.002),
+    }
+    .to_section(SectionId(2), "W20".into());
+    section.material = Some(MaterialId(0));
+    model.sections.push(section);
+    model.add_enclosed_wall_plate_from_nodes(
+        &[NodeId(0), NodeId(1), NodeId(3), NodeId(2)],
+        sepika_core::model::WallPlate {
+            id: WallPlateId(0),
+            shape: WallPlateShape::Enclosed,
+            section: Some(SectionId(2)),
+            dl_support: None,
+            self_weight_shares: vec![],
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: vec![],
+            loads: vec![],
+            slit: Default::default(),
+        },
+    );
+    model.wall_regions.push(sepika_core::model::WallRegion {
+        id: sepika_core::ids::WallRegionId(0),
+        name: "壁領域".into(),
+        boundary: vec![NodeId(0), NodeId(1), NodeId(3), NodeId(2)],
+        wall_plate_ids: vec![WallPlateId(0)],
+        posts: vec![],
+    });
+    model
+}
+fn directional_wall(q: &QuantityTakeoff) -> &MemberQuantity {
+    q.items
+        .iter()
+        .find(|it| it.category == MemberCategory::Wall)
+        .unwrap()
+}
+
+#[test]
+fn directional_wall_quantity_matches_independent_clear_dimension_arithmetic() {
+    let mut model = directional_wall_quantity_fixture();
+    let q = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+    let w = directional_wall(&q);
+    assert_eq!(w.wall_plate, Some(WallPlateId(0)));
+    assert_eq!(w.section, Some(SectionId(2)));
+    assert_eq!(w.rebar_status(), QuantityStatus::Complete);
+    assert!((w.concrete_m3 - 2.4).abs() < 1e-12);
+    for (usage, length_m, weight_t) in [
+        (RebarUsage::WallHorizontal, 215.432130969, 0.120641993343),
+        (RebarUsage::WallVertical, 75.3757810483, 0.0422104373871),
+    ] {
+        let r = w.rebar.iter().find(|r| r.usage == usage).unwrap();
+        assert!((r.total_length_m - length_m).abs() < 1e-9);
+        assert!((r.weight_t - weight_t).abs() < 1e-12);
+    }
+    if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut model.sections[2].shape {
+        *pwh_ratio = Some(0.002);
+    }
+    let equal = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+    let w = directional_wall(&equal);
+    assert!((w.rebar[0].total_length_m - 71.8107103231).abs() < 1e-9);
+    assert!((w.rebar[1].total_length_m - 75.3757810483).abs() < 1e-9);
+    assert!((w.rebar[0].weight_t - 0.0402139977809).abs() < 1e-12);
+}
+
+#[test]
+fn missing_wall_directions_keep_known_quantity_and_every_subtotal_reason() {
+    let mut model = directional_wall_quantity_fixture();
+    for (horizontal, vertical, known, missing) in [
+        (Some(0.006), None, 1, 1),
+        (None, Some(0.002), 1, 1),
+        (None, None, 0, 2),
+        (Some(0.0), Some(0.0), 2, 0),
+    ] {
+        model.sections[2].shape = Some(SectionShape::RcWall {
+            thickness: 200.0,
+            ps: 0.006,
+            pwh_ratio: horizontal,
+            pwv_ratio: vertical,
+        });
+        let q = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+        let w = directional_wall(&q);
+        assert_eq!(w.rebar.len(), known);
+        assert_eq!(w.rebar_issues.len(), missing);
+        assert!((w.concrete_m3 - 2.4).abs() < 1e-12);
+        if missing > 0 {
+            for t in std::iter::once(q.totals())
+                .chain(
+                    q.totals_by_category()
+                        .into_iter()
+                        .filter(|(k, _)| *k == MemberCategory::Wall)
+                        .map(|(_, t)| t),
+                )
+                .chain(q.totals_by_story().into_iter().map(|(_, t)| t))
+                .chain(q.totals_by_structure().into_iter().map(|(_, t)| t))
+            {
+                assert_eq!(t.rebar_status(), QuantityStatus::Incomplete);
+                assert_eq!(t.rebar_issues, w.rebar_issues);
+            }
+            for i in &w.rebar_issues {
+                assert_eq!(i.kind, RebarIssueKind::Missing);
+                assert_eq!(i.wall_plate, Some(WallPlateId(0)));
+                assert_eq!(i.section, Some(SectionId(2)));
+                assert!(i.elem.is_some());
+            }
+        } else {
+            assert_eq!(w.rebar_status(), QuantityStatus::Complete);
+            assert_eq!(w.rebar_weight_t(), 0.0);
+        }
+    }
+    assert_eq!(
+        QuantityTakeoff::default().totals().rebar_status(),
+        QuantityStatus::Empty
+    );
+}
+
+#[test]
+fn invalid_wall_ratios_and_quantity_settings_are_unavailable_instead_of_zero() {
+    for invalid in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut model = directional_wall_quantity_fixture();
+        if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut model.sections[2].shape {
+            *pwh_ratio = Some(invalid);
+        }
+        let q = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+        let w = directional_wall(&q);
+        assert_eq!(w.rebar.len(), 1);
+        assert_eq!(w.rebar[0].usage, RebarUsage::WallVertical);
+        assert_eq!(w.rebar_issues[0].kind, RebarIssueKind::Invalid);
+        assert_eq!(w.rebar_issues[0].usage, RebarUsage::WallHorizontal);
+    }
+    for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut model = directional_wall_quantity_fixture();
+        model.quantity_cfg.assumed_wall_bar_dia = invalid;
+        let q = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+        let w = directional_wall(&q);
+        assert!(w.rebar.is_empty());
+        assert_eq!(w.rebar_issues.len(), 2);
+        assert!(w.rebar_issues.iter().all(|i| i.reason.contains("仮定径")));
+    }
+    for invalid in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut model = directional_wall_quantity_fixture();
+        model.quantity_cfg.anchorage_dia_factor = invalid;
+        let q = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+        let w = directional_wall(&q);
+        assert!(w.rebar.is_empty());
+        assert_eq!(w.rebar_issues.len(), 2);
+        assert!(w.rebar_issues.iter().all(|i| i.reason.contains("定着係数")));
+    }
+}
+
+#[test]
+fn directional_wall_quantity_uses_saved_assumptions_without_requiring_strength_materials() {
+    let mut model = directional_wall_quantity_fixture();
+    model.materials[0].fc = None;
+    model.materials[1].fy = None;
+    model.sections[2].rebar_material = None;
+    model.sections[2].shear_rebar_material = None;
+    model.quantity_cfg.assumed_wall_bar_dia = 13.0;
+    model.quantity_cfg.anchorage_dia_factor = 40.0;
+    let q = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+    let w = directional_wall(&q);
+    assert_eq!(w.rebar_status(), QuantityStatus::Complete);
+    assert!((w.rebar[0].total_length_m - 136.696202956656).abs() < 1e-9);
+    assert!((w.rebar[0].weight_t - 0.136012721941872).abs() < 1e-12);
+    assert!((w.rebar[1].total_length_m - 48.6995290956692).abs() < 1e-9);
+    assert!((w.rebar[1].weight_t - 0.0484560314501908).abs() < 1e-12);
+    assert!(q
+        .notes
+        .iter()
+        .any(|n| n.contains("13 mm") && n.contains("定着係数 40")));
+}
+
+#[test]
+fn invalid_wall_thickness_or_dimensions_keeps_reasons_without_ps_fallback() {
+    for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut model = directional_wall_quantity_fixture();
+        if let Some(SectionShape::RcWall { thickness, .. }) = &mut model.sections[2].shape {
+            *thickness = invalid;
+        }
+        let q = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+        let w = directional_wall(&q);
+        assert!(w.rebar.is_empty());
+        assert_eq!(w.rebar_issues.len(), 2);
+        assert!(w
+            .rebar_issues
+            .iter()
+            .all(|i| i.kind == RebarIssueKind::Invalid && i.reason.contains("壁厚")));
+    }
+    let mut model = directional_wall_quantity_fixture();
+    for node in &mut model.nodes {
+        if node.coord[2] > 0.0 {
+            node.coord[2] = 800.0;
+        }
+    }
+    let q = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+    let w = directional_wall(&q);
+    assert!(w.rebar.is_empty());
+    assert!(w.rebar_issues.iter().all(|i| i.reason.contains("内法寸法")));
+    let mut model = directional_wall_quantity_fixture();
+    model.quantity_cfg.anchorage_dia_factor = 0.0;
+    let q = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+    let w = directional_wall(&q);
+    assert_eq!(w.rebar_status(), QuantityStatus::Complete);
+    assert!((w.rebar[0].total_length_m - 183.346494441863).abs() < 1e-9);
+}
+
+#[test]
+fn unresolved_wall_plate_geometry_is_incomplete_instead_of_disappearing() {
+    let mut model = directional_wall_quantity_fixture();
+    for node in &mut model.nodes {
+        node.coord[2] = 0.0;
+    }
+    let q = try_compute_quantity_takeoff(&model, &model.quantity_cfg).unwrap();
+    let item = q
+        .items
+        .iter()
+        .find(|it| it.wall_plate == Some(WallPlateId(0)))
+        .unwrap();
+    assert_eq!(item.rebar_status(), QuantityStatus::Incomplete);
+    assert_eq!(item.rebar_issues.len(), 2);
+    assert!(item
+        .rebar_issues
+        .iter()
+        .all(|i| i.reason.contains("境界") && i.kind == RebarIssueKind::Invalid));
+    assert_eq!(q.totals().rebar_status(), QuantityStatus::Incomplete);
 }

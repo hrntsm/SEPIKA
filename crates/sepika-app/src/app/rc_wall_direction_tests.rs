@@ -152,7 +152,7 @@ fn gui_direction_edit_save_undo_and_material_edit_invalidate_previous_analysis()
     .unwrap()
     .totals();
     assert_eq!(quantity_before.concrete_m3, quantity_after.concrete_m3);
-    assert_eq!(quantity_before.rebar_t, quantity_after.rebar_t);
+    assert_ne!(quantity_before.rebar_t, quantity_after.rebar_t);
     assert_eq!(quantity_before.formwork_m2, quantity_after.formwork_m2);
     app.undo_action();
     assert_eq!(app.core.model.sections[2].shape.as_ref(), Some(&before));
@@ -558,4 +558,293 @@ fn explicitly_nonseismic_rc_wall_keeps_elastic_mode_without_directional_inputs()
         app.core.scoped.last_error
     );
     assert!(!app.displayed_pushover().unwrap().steps.is_empty());
+}
+
+fn quantity_fixture() -> Model {
+    let mut model = fixture();
+    for node in &mut model.nodes {
+        if node.coord[0] > 0.0 {
+            node.coord[0] = 4600.0;
+        }
+        if node.coord[2] > 0.0 {
+            node.coord[2] = 3600.0;
+        }
+    }
+    model.load_cases[0].member = vec![sepika_core::model::MemberLoad::full_length_uniform(
+        ElemId(2),
+        [0.0, 0.0, -1.0],
+        4600.0,
+        10.0,
+    )];
+    model
+}
+fn wall_quantity(model: &Model) -> sepika_design_jp::quantity::MemberQuantity {
+    sepika_design_jp::quantity::try_compute_quantity_takeoff(model, &model.quantity_cfg)
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|it| it.category == sepika_design_jp::quantity::MemberCategory::Wall)
+        .unwrap()
+}
+fn quantity_panel_text(app: &mut App) -> String {
+    let context = egui::Context::default();
+    let mut rendered = String::new();
+    for _ in 0..3 {
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(4000.0, 4000.0),
+                )),
+                ..Default::default()
+            },
+            |ui| crate::quantity_view::quantity_panel(ui, app),
+        );
+        fn text(shape: &egui::Shape, out: &mut String) {
+            match shape {
+                egui::Shape::Text(t) => {
+                    out.push_str(t.galley.text());
+                    out.push('\n');
+                }
+                egui::Shape::Vec(parts) => {
+                    for part in parts {
+                        text(part, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for shape in output.shapes {
+            text(&shape.shape, &mut rendered);
+        }
+    }
+    rendered
+}
+
+#[test]
+fn directional_wall_quantity_model_edit_csv_gui_and_ovika_keep_independent_values_and_missing_state(
+) {
+    use sepika_design_jp::quantity::{QuantityStatus, RebarUsage};
+    let mut app = App::default();
+    app.load_model(quantity_fixture());
+    let before = wall_quantity(&app.core.model);
+    assert!((before.rebar[0].total_length_m - 215.432130969).abs() < 1e-9);
+    assert!((before.rebar[1].total_length_m - 75.3757810483).abs() < 1e-9);
+    let csv = crate::summary::build_quantity_csv(&app.core.model);
+    assert!(csv.contains("壁横筋,10,215.432131,0.120642,算定済み概算"));
+    assert!(csv.contains("壁縦筋,10,75.375781,0.042210,算定済み概算"));
+    let csv_path =
+        std::env::temp_dir().join(format!("sepika536-quantity-{}.csv", std::process::id()));
+    std::fs::write(&csv_path, &csv).unwrap();
+    assert_eq!(std::fs::read_to_string(&csv_path).unwrap(), csv);
+    std::fs::remove_file(csv_path).unwrap();
+    let panel = quantity_panel_text(&mut app);
+    assert!(
+        panel.contains("壁横筋: 215.432131 m / 0.120642 t"),
+        "{panel}"
+    );
+    assert!(panel.contains("壁縦筋: 75.375781 m / 0.042210 t"));
+    for value in [Some(0.002), None, Some(0.006), None, Some(0.0)] {
+        let shape = SectionShape::RcWall {
+            thickness: 200.0,
+            ps: 0.002,
+            pwh_ratio: value,
+            pwv_ratio: Some(0.002),
+        };
+        assert!(
+            app.apply_model_edit(Box::new(sepika_edit::EditSectionShape {
+                section: SectionId(2),
+                new_shape: shape,
+                frame_use: None
+            }))
+        );
+        let after = wall_quantity(&app.core.model);
+        let vertical = after
+            .rebar
+            .iter()
+            .find(|r| r.usage == RebarUsage::WallVertical)
+            .unwrap();
+        assert_eq!(vertical.total_length_m, before.rebar[1].total_length_m);
+        assert_eq!(vertical.weight_t, before.rebar[1].weight_t);
+        if value.is_none() {
+            assert_eq!(after.rebar_status(), QuantityStatus::Incomplete);
+            assert_eq!(after.rebar_issues[0].wall_plate, Some(WallPlateId(0)));
+            assert_eq!(after.rebar_issues[0].section, Some(SectionId(2)));
+            let csv = crate::summary::build_quantity_csv(&app.core.model);
+            assert!(
+                csv.contains("不完全小計")
+                    && csv.contains("壁横筋")
+                    && csv.contains("方向筋比が未入力")
+            );
+            for grouping in [
+                crate::quantity_view::QuantityGrouping::ByCategory,
+                crate::quantity_view::QuantityGrouping::ByStory,
+                crate::quantity_view::QuantityGrouping::ByStructure,
+                crate::quantity_view::QuantityGrouping::Detail,
+                crate::quantity_view::QuantityGrouping::RebarByDia,
+            ] {
+                app.ui.view.quantity_view.grouping = grouping;
+                let text = quantity_panel_text(&mut app);
+                assert!(
+                    text.contains("不完全小計")
+                        && text.contains("壁横筋")
+                        && text.contains("方向筋比が未入力"),
+                    "{text}"
+                );
+            }
+        } else {
+            assert_eq!(after.rebar_status(), QuantityStatus::Complete);
+        }
+    }
+    app.undo_action();
+    assert_eq!(
+        wall_quantity(&app.core.model).rebar_status(),
+        QuantityStatus::Incomplete
+    );
+    app.redo_action();
+    let zero = wall_quantity(&app.core.model);
+    assert_eq!(zero.rebar_status(), QuantityStatus::Complete);
+    assert_eq!(zero.rebar[0].weight_t, 0.0);
+    let path =
+        std::env::temp_dir().join(format!("sepika536-direction-{}.ovika", std::process::id()));
+    app.save_project_to(path.clone());
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(
+        wall_quantity(&loaded.core.model).rebar[1].weight_t,
+        before.rebar[1].weight_t
+    );
+    assert_eq!(wall_quantity(&loaded.core.model).rebar[0].weight_t, 0.0);
+}
+
+#[test]
+fn quantity_setting_edit_undo_redo_save_preserves_rc_mass_response_and_current_result_inputs() {
+    let mut app = App::default();
+    app.load_model(quantity_fixture());
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert!(app.require_selected_static_input().is_ok());
+    let job_input = app.job_input();
+    let weight_input = sepika_job::weight_preparation::weight_input_key(
+        &app.core.model,
+        app.core.model.mass_method,
+    );
+    let weight = app
+        .core
+        .model
+        .wall_weight(&app.core.model.wall_plates[0])
+        .unwrap()
+        .totals;
+    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let elem = expanded
+        .elements
+        .iter()
+        .find(|e| e.kind == ElementKind::Wall)
+        .unwrap();
+    let mass = sepika_element::factory::build_behavior(elem, &expanded)
+        .mass_matrix(sepika_element::behavior::MassOption::Lumped);
+    let cfg = sepika_core::model::QuantityCfg {
+        assumed_wall_bar_dia: 13.0,
+        anchorage_dia_factor: 40.0,
+        ..Default::default()
+    };
+    assert!(
+        app.apply_model_edit(Box::new(sepika_edit::CompositeCommand {
+            label: "数量仮定変更".into(),
+            children: vec![Box::new(sepika_edit::SetQuantityCfg { cfg })]
+        }))
+    );
+    assert!(app.core.scoped.staleness.unsaved_changes);
+    assert!(!app.core.scoped.staleness.results_stale);
+    assert!(!app.core.scoped.staleness.preparation_stale);
+    assert!(app.require_selected_static_input().is_ok());
+    assert_eq!(app.job_input(), job_input);
+    assert_eq!(
+        sepika_job::weight_preparation::weight_input_key(
+            &app.core.model,
+            app.core.model.mass_method
+        ),
+        weight_input
+    );
+    let changed = wall_quantity(&app.core.model);
+    assert!((changed.rebar[0].total_length_m - 136.696202956656).abs() < 1e-9);
+    assert!((changed.rebar[1].weight_t - 0.0484560314501908).abs() < 1e-12);
+    assert_eq!(
+        app.core
+            .model
+            .wall_weight(&app.core.model.wall_plates[0])
+            .unwrap()
+            .totals,
+        weight
+    );
+    let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
+    let elem = expanded
+        .elements
+        .iter()
+        .find(|e| e.kind == ElementKind::Wall)
+        .unwrap();
+    let after = sepika_element::factory::build_behavior(elem, &expanded)
+        .mass_matrix(sepika_element::behavior::MassOption::Lumped);
+    for i in 0..24 {
+        for j in 0..24 {
+            assert_eq!(mass.get(i, j), after.get(i, j));
+        }
+    }
+    app.undo_action();
+    assert!(app.require_selected_static_input().is_ok());
+    assert!(!app.core.scoped.staleness.results_stale);
+    assert!((wall_quantity(&app.core.model).rebar[0].weight_t - 0.120641993343).abs() < 1e-12);
+    app.redo_action();
+    assert!(app.require_selected_static_input().is_ok());
+    assert!(!app.core.scoped.staleness.results_stale);
+    assert_eq!(app.core.model.quantity_cfg, cfg);
+    let response = app.core.scoped.results.as_ref().unwrap().statics[0]
+        .1
+        .disp
+        .clone();
+    assert!(response.iter().flatten().any(|v| v.abs() > 0.0));
+    app.run_linear_static(LoadCaseId(0));
+    assert_eq!(
+        app.core.scoped.results.as_ref().unwrap().statics[0].1.disp,
+        response
+    );
+    let path =
+        std::env::temp_dir().join(format!("sepika536-settings-{}.ovika", std::process::id()));
+    app.save_project_to(path.clone());
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(loaded.core.model.quantity_cfg, cfg);
+    assert_eq!(
+        wall_quantity(&loaded.core.model).rebar[0].weight_t,
+        changed.rebar[0].weight_t
+    );
+    assert!(loaded.require_selected_static_input().is_ok());
+}
+
+#[test]
+fn current_schema_ps_only_model_keeps_missing_directions_after_ovika_read() {
+    let mut value = serde_json::to_value(quantity_fixture()).unwrap();
+    let wall = value["sections"][2]["shape"]["RcWall"]
+        .as_object_mut()
+        .unwrap();
+    wall.remove("pwh_ratio");
+    wall.remove("pwv_ratio");
+    let model: Model = serde_json::from_value(value).unwrap();
+    let path = std::env::temp_dir().join(format!("sepika536-ps-only-{}.ovika", std::process::id()));
+    sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
+    let loaded = sepika_io::ovika::load_ovika(&path).unwrap().model;
+    std::fs::remove_file(path).unwrap();
+    let w = wall_quantity(&loaded);
+    assert!(w.rebar.is_empty());
+    assert_eq!(w.rebar_issues.len(), 2);
+    assert_eq!(
+        w.rebar_status(),
+        sepika_design_jp::quantity::QuantityStatus::Incomplete
+    );
 }

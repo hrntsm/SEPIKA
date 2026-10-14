@@ -18,7 +18,11 @@ impl App {
             self.remap_model_focus();
             self.clear_geometry_selection();
             self.ui.scoped.boundary_node = None;
-            self.core.scoped.staleness.mark_edited();
+            if self.core.scoped.undo.affects_calculation() {
+                self.core.scoped.staleness.mark_edited();
+            } else {
+                self.core.scoped.staleness.mark_non_calc_edited();
+            }
         }
     }
 
@@ -36,7 +40,11 @@ impl App {
             self.remap_model_focus();
             self.clear_geometry_selection();
             self.ui.scoped.boundary_node = None;
-            self.core.scoped.staleness.mark_edited();
+            if self.core.scoped.undo.affects_calculation() {
+                self.core.scoped.staleness.mark_edited();
+            } else {
+                self.core.scoped.staleness.mark_non_calc_edited();
+            }
         }
     }
 

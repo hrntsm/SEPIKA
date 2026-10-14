@@ -74,8 +74,8 @@ fn circular_post_quantity_csv_uses_shared_takeoff_and_reports_invalid_geometry()
     assert!((q.totals().concrete_m3 - 0.3769911184).abs() < 1e-9);
     assert!((q.totals().formwork_m2 - 3.7699111843).abs() < 1e-9);
     let csv = sepika_app::summary::build_quantity_csv(&model);
-    assert!(csv.contains("柱,0.38,3.77,"), "{csv}");
-    assert!(csv.contains("間柱符号,0.377,3.77,"), "{csv}");
+    assert!(csv.contains("\"柱\",0.377,3.77,"), "{csv}");
+    assert!(csv.contains("\"間柱符号\",0.377,3.77,"), "{csv}");
     if let Some(SectionShape::RcColumnCircle { d, .. }) = &mut model.sections[0].shape {
         *d = f64::NAN;
     }
@@ -83,6 +83,9 @@ fn circular_post_quantity_csv_uses_shared_takeoff_and_reports_invalid_geometry()
     assert!(csv.starts_with("[数量積算 未算定]"), "{csv}");
     assert!(csv.contains("SecondaryMemberId(448)"), "{csv}");
     assert!(csv.contains("直径 D"), "{csv}");
+    for section in ["[数量積算 明細]", "[数量積算 部位別]", "[数量積算 全体]"] {
+        assert!(!csv.contains(section), "{csv}");
+    }
 }
 
 #[cfg(feature = "gui")]

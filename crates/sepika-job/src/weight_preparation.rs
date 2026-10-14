@@ -11,6 +11,7 @@ pub fn weight_input_key(model: &Model, mass_method: sepika_core::model::MassMeth
     input.wall_weight_generation = None;
     input.generated_wall_origins.clear();
     input.axes.clear();
+    input.quantity_cfg = Default::default();
     input.stb_node_ids.clear();
     input.vibration_cases.clear();
     input.lumped_vibration_cases.clear();

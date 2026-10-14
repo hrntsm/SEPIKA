@@ -110,7 +110,11 @@ impl App {
                 self.clear_generated_member_selection();
             }
             self.remap_model_focus();
-            self.core.scoped.staleness.mark_edited();
+            if self.core.scoped.undo.affects_calculation() {
+                self.core.scoped.staleness.mark_edited();
+            } else {
+                self.core.scoped.staleness.mark_non_calc_edited();
+            }
         }
         applied
     }
