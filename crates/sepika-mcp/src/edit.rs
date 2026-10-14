@@ -46,6 +46,16 @@ pub fn parse_edit_command(value: &serde_json::Value) -> Result<Box<dyn EditComma
         .and_then(|v| v.as_str())
         .ok_or("command が必要です")?;
     match command {
+        "EditSectionShape" => {
+            let section = parse_optional_section_id(value.get("section"))?.ok_or("section が必要です")?;
+            let new_shape = serde_json::from_value(value.get("new_shape").ok_or("new_shape が必要です")?.clone()).map_err(|e| e.to_string())?;
+            let frame_use = value.get("frame_use").map(|v|serde_json::from_value(v.clone())).transpose().map_err(|e|e.to_string())?.flatten();
+            Ok(Box::new(sepika_edit::EditSectionShape { section, new_shape, frame_use }))
+        }
+        "SetQuantityCfg" => {
+            let cfg = serde_json::from_value(value.get("cfg").ok_or("cfg が必要です")?.clone()).map_err(|e| e.to_string())?;
+            Ok(Box::new(sepika_edit::SetQuantityCfg { cfg }))
+        }
         "SetStbStrengths" => {
             let input=serde_json::from_value(value.get("input").ok_or("input が必要です")?.clone()).map_err(|e| e.to_string())?;
             Ok(Box::new(sepika_edit::SetStbStrengths { input }))

@@ -231,10 +231,10 @@ pub fn query_model(model: &Model, kind: &str, filter: Option<&str>) -> Vec<serde
 
 /// 数量積算（feature 非依存・テスト可能）。
 pub fn quantity_takeoff_json(model: &Model, group_by: Option<&str>) -> serde_json::Value {
-    use sepika_design_jp::quantity::{try_compute_quantity_takeoff, QuantityCfg, QuantityTotals};
+    use sepika_design_jp::quantity::{try_compute_quantity_takeoff, QuantityTotals};
     use serde_json::json;
 
-    let q = match try_compute_quantity_takeoff(model, &QuantityCfg::default()) {
+    let q = match try_compute_quantity_takeoff(model, &model.quantity_cfg) {
         Ok(q) => q,
         Err(reason) => return json!({ "status": "unavailable", "reason": reason, "totals": null }),
     };
@@ -243,6 +243,8 @@ pub fn quantity_takeoff_json(model: &Model, group_by: Option<&str>) -> serde_jso
             "concrete_m3": t.concrete_m3,
             "formwork_m2": t.formwork_m2,
             "rebar_t": t.rebar_t,
+            "rebar_status": t.rebar_status(),
+            "rebar_issues": t.rebar_issues,
             "steel_t": t.steel_t,
             "rebar_joints": t.rebar_joints,
         })
@@ -257,6 +259,7 @@ pub fn quantity_takeoff_json(model: &Model, group_by: Option<&str>) -> serde_jso
                 v
             })
             .collect(),
+        "structure" => q.totals_by_structure().iter().map(|(k,t)| { let mut v=totals_json(t); v["structure"]=json!(k.label()); v }).collect(),
         "steel" => q
             .steel_by_section()
             .iter()
@@ -286,6 +289,11 @@ pub fn quantity_takeoff_json(model: &Model, group_by: Option<&str>) -> serde_jso
                 json!({
                     "elem": it.elem.map(|e| e.0),
                     "slab": it.slab.map(|s| s.0),
+                    "wall_plate": it.wall_plate.map(|i|i.0),
+                    "section": it.section.map(|i|i.0),
+                    "rebar_status": it.rebar_status(),
+                    "rebar_issues": it.rebar_issues,
+                    "rebar": it.rebar.iter().map(|r| json!({"usage":r.usage,"direction":r.usage.label(),"dia_mm":r.dia,"length_m":r.total_length_m,"weight_t":r.weight_t,"status":"complete"})).collect::<Vec<_>>(),
                     "label": it.label,
                     "story": it.story,
                     "category": it.category.label(),
@@ -309,6 +317,7 @@ pub fn quantity_takeoff_json(model: &Model, group_by: Option<&str>) -> serde_jso
             .collect(),
     };
     json!({
+        "status": q.totals().rebar_status(),
         "rows": rows,
         "totals": totals_json(&q.totals()),
         "notes": q.notes,

@@ -22,6 +22,9 @@ pub struct ElemAttrs {
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Model {
+    /// 数量積算専用の設定。解析・検定の計算入力には含めない。
+    #[serde(default)]
+    pub quantity_cfg: QuantityCfg,
     pub nodes: Vec<Node>,
     pub elements: Vec<ElementData>,
     pub sections: Vec<Section>,
@@ -1203,17 +1206,19 @@ impl Model {
         }
     }
 
-    /// 通り芯と保存波形設定を除いた計算入力照合用のモデルを返す。
+    /// 通り芯・保存波形設定・数量設定を除いた計算入力照合用のモデルを返す。
     pub fn calculation_model(&self) -> Self {
         let mut model = self.clone();
         model.axes.clear();
+        model.quantity_cfg = QuantityCfg::default();
         model.vibration_cases.clear();
         model.lumped_vibration_cases.clear();
         model
     }
 
     pub fn eq_ignoring_dofmap(&self, other: &Self) -> bool {
-        self.nodes == other.nodes
+        self.quantity_cfg == other.quantity_cfg
+            && self.nodes == other.nodes
             && self.elements == other.elements
             && self.sections == other.sections
             && self.materials == other.materials

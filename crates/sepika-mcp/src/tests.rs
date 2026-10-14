@@ -4083,3 +4083,187 @@ fn running_progress_json_and_schema_distinguish_unmeasured_from_zero() {
         serde_json::json!(["number", "null"])
     );
 }
+
+fn directional_quantity_mcp_fixture() -> Model {
+    use sepika_core::section_shape::SectionShape;
+    let mut model = rc_column_model();
+    model.nodes[1].coord[2] = 3600.0;
+    let mut bottom = model.nodes[0].clone();
+    bottom.id = NodeId(2);
+    bottom.coord = [4600.0, 0.0, 0.0];
+    let mut top = model.nodes[1].clone();
+    top.id = NodeId(3);
+    top.coord = [4600.0, 0.0, 3600.0];
+    model.nodes.extend([bottom, top]);
+    let mut girder = model.sections[0].clone();
+    girder.id = SectionId(1);
+    girder.name = "梁".into();
+    girder.frame_use = Some(FrameSectionUse::Girder);
+    model.sections.push(girder);
+    for (id, nodes, section) in [(1, [0, 2], 1), (2, [1, 3], 1), (3, [2, 3], 0)] {
+        let mut element = model.elements[0].clone();
+        element.id = ElemId(id);
+        element.nodes = nodes.map(NodeId).into_iter().collect();
+        element.section = Some(SectionId(section));
+        element.local_axis.ref_vector = [0.0, 1.0, 0.0];
+        model.elements.push(element);
+    }
+    let mut section = SectionShape::RcWall {
+        thickness: 200.0,
+        ps: 0.002,
+        pwh_ratio: Some(0.006),
+        pwv_ratio: Some(0.002),
+    }
+    .to_section(SectionId(2), "壁".into());
+    section.material = Some(MaterialId(0));
+    section.rebar_material = Some(MaterialId(1));
+    section.shear_rebar_material = None;
+    model.sections.push(section);
+    model.add_enclosed_wall_plate_from_nodes(
+        &[NodeId(0), NodeId(2), NodeId(3), NodeId(1)],
+        sepika_core::model::WallPlate {
+            id: sepika_core::ids::WallPlateId(0),
+            shape: sepika_core::model::WallPlateShape::Enclosed,
+            section: Some(SectionId(2)),
+            dl_support: Some(sepika_core::model::WallDlSupport::LowerBeam),
+            self_weight_shares: vec![],
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: vec![],
+            loads: vec![],
+            slit: Default::default(),
+        },
+    );
+    model.wall_regions.push(sepika_core::model::WallRegion {
+        id: sepika_core::ids::WallRegionId(0),
+        name: "数量壁".into(),
+        boundary: vec![NodeId(0), NodeId(2), NodeId(3), NodeId(1)],
+        wall_plate_ids: vec![sepika_core::ids::WallPlateId(0)],
+        posts: vec![],
+    });
+    model
+}
+
+#[test]
+fn directional_wall_quantity_mcp_edit_and_all_groupings_preserve_partial_reasons_and_saved_settings(
+) {
+    let dir = std::env::temp_dir().join(format!("sepika536-mcp-query-{}", std::process::id()));
+    let mut state = ServerState::with_fs_store(directional_quantity_mcp_fixture(), &dir).unwrap();
+    let value = quantity_takeoff_json(&state.model, Some("detail"));
+    let wall = value["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["category"] == "壁")
+        .unwrap();
+    assert_eq!(wall["wall_plate"], 0);
+    assert_eq!(wall["section"], 2);
+    assert_eq!(wall["rebar_status"], "complete");
+    assert!((wall["rebar"][0]["length_m"].as_f64().unwrap() - 215.432130969).abs() < 1e-9);
+    assert!((wall["rebar"][1]["weight_t"].as_f64().unwrap() - 0.0422104373871).abs() < 1e-12);
+    let cfg = sepika_core::model::QuantityCfg {
+        assumed_wall_bar_dia: 13.0,
+        anchorage_dia_factor: 40.0,
+        ..Default::default()
+    };
+    apply_edit(
+        &mut state,
+        &serde_json::json!({"command":"SetQuantityCfg","cfg":cfg}),
+    )
+    .unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "sepika536-mcp-settings-{}.ovika",
+        std::process::id()
+    ));
+    sepika_io::ovika::save_ovika(&path, &state.model, Default::default()).unwrap();
+    state.model = sepika_io::ovika::load_ovika(&path).unwrap().model;
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(state.model.quantity_cfg, cfg);
+    let value = quantity_takeoff_json(&state.model, Some("detail"));
+    let wall = value["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["category"] == "壁")
+        .unwrap();
+    assert!((wall["rebar"][0]["weight_t"].as_f64().unwrap() - 0.136012721941872).abs() < 1e-12);
+    for ratio in [None, Some(0.006), None, Some(0.0)] {
+        apply_edit(&mut state,&serde_json::json!({"command":"EditSectionShape","section":2,"new_shape":{"RcWall":{"thickness":200.0,"ps":0.002,"pwh_ratio":ratio,"pwv_ratio":0.002}}})).unwrap();
+        for group in ["category", "story", "structure", "detail", "rebar", "steel"] {
+            let v = quantity_takeoff_json(&state.model, Some(group));
+            if ratio.is_none() {
+                assert_eq!(v["status"], "incomplete");
+                assert_eq!(v["totals"]["rebar_issues"][0]["wall_plate"], 0);
+                assert_eq!(v["totals"]["rebar_issues"][0]["section"], 2);
+                assert_eq!(v["totals"]["rebar_issues"][0]["usage"], "WallHorizontal");
+                assert_eq!(v["totals"]["rebar_issues"][0]["kind"], "missing");
+                assert!(v["totals"]["rebar_issues"][0]["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("未入力"));
+            } else {
+                assert_eq!(v["status"], "complete");
+                assert!(v["totals"]["rebar_issues"].as_array().unwrap().is_empty());
+            }
+        }
+    }
+    state.undo.undo(&mut state.model);
+    assert_eq!(
+        quantity_takeoff_json(&state.model, None)["status"],
+        "incomplete"
+    );
+    state.undo.redo(&mut state.model);
+    assert_eq!(
+        quantity_takeoff_json(&state.model, None)["status"],
+        "complete"
+    );
+    assert_eq!(
+        quantity_takeoff_json(&Model::default(), None)["status"],
+        "empty"
+    );
+    drop(state);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(feature = "mcp")]
+#[tokio::test]
+async fn directional_wall_quantity_actual_mcp_tools_edit_settings_and_report_missing_direction() {
+    use crate::server::{EditArgs, QuantityTakeoffArgs, SepikaServer};
+    use rmcp::handler::server::wrapper::Parameters;
+    let dir = std::env::temp_dir().join(format!("sepika536-mcp-tool-{}", std::process::id()));
+    let server = SepikaServer::new(
+        ServerState::with_fs_store(directional_quantity_mcp_fixture(), &dir).unwrap(),
+    );
+    let shape = serde_json::json!({"command":"EditSectionShape","section":2,"new_shape":{"RcWall":{"thickness":200.0,"ps":0.002,"pwh_ratio":0.006,"pwv_ratio":null}}});
+    server
+        .model_edit(Parameters(EditArgs { body: shape }))
+        .await
+        .unwrap();
+    let cfg = serde_json::json!({"command":"SetQuantityCfg","cfg":{"assumed_wall_bar_dia":13.0,"anchorage_dia_factor":40.0,"beam_main_ratio":0.008,"beam_stirrup_ratio":0.001,"slab_rebar_ratio":0.01}});
+    server
+        .model_edit(Parameters(EditArgs { body: cfg }))
+        .await
+        .unwrap();
+    let result = server
+        .quantity_takeoff(Parameters(QuantityTakeoffArgs {
+            group_by: Some("detail".into()),
+        }))
+        .await
+        .unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&result.content[0].raw.as_text().unwrap().text).unwrap();
+    assert_eq!(v["status"], "incomplete");
+    let w = v["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["category"] == "壁")
+        .unwrap();
+    assert_eq!(w["rebar_issues"][0]["usage"], "WallVertical");
+    assert_eq!(w["rebar_issues"][0]["wall_plate"], 0);
+    assert_eq!(w["rebar_issues"][0]["section"], 2);
+    assert!((w["rebar"][0]["length_m"].as_f64().unwrap() - 136.696202956656).abs() < 1e-9);
+    assert!((w["rebar"][0]["weight_t"].as_f64().unwrap() - 0.136012721941872).abs() < 1e-12);
+    drop(server);
+    std::fs::remove_dir_all(dir).unwrap();
+}

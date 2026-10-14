@@ -974,98 +974,135 @@ pub fn build_preparation_csv(app: &App) -> String {
 /// （[`sepika_design_jp::quantity::try_compute_quantity_takeoff`]）を、
 /// 部位別・階別・鉄骨種類別・鉄筋径別・明細・注記のセクションに整形する。
 pub fn build_quantity_csv(model: &Model) -> String {
-    use sepika_design_jp::quantity::{try_compute_quantity_takeoff, QuantityCfg};
-
-    let q = match try_compute_quantity_takeoff(model, &QuantityCfg::default()) {
-        Ok(q) => q,
-        Err(reason) => return format!("[数量積算 未算定]\n理由\n{reason}\n"),
-    };
-    let mut out = String::new();
-    if q.items.is_empty() {
-        return out;
+    use sepika_design_jp::quantity::{try_compute_quantity_takeoff, QuantityTotals};
+    fn csv_cell(value: &str) -> String {
+        format!("\"{}\"", value.replace('"', "\"\""))
     }
-
-    out.push_str(
-        "\n[数量積算 部位別]\n部位,コンクリート[m3],型枠[m2],鉄筋[t],鉄骨[t],鉄筋継手[個所]\n",
-    );
-    for (cat, t) in q.totals_by_category() {
+    fn subtotal(out: &mut String, name: &str, t: &QuantityTotals) {
         out.push_str(&format!(
-            "{},{:.2},{:.2},{:.3},{:.3},{:.1}\n",
-            cat.label(),
+            "{},{:.3},{:.2},{:.6},{:.4},{:.1},{},{}\n",
+            csv_cell(name),
             t.concrete_m3,
             t.formwork_m2,
             t.rebar_t,
             t.steel_t,
-            t.rebar_joints
+            t.rebar_joints,
+            t.rebar_status().label(),
+            csv_cell(
+                &t.rebar_issues
+                    .iter()
+                    .map(|i| i.description())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
         ));
     }
-    let totals = q.totals();
-    out.push_str(&format!(
-        "合計,{:.2},{:.2},{:.3},{:.3},{:.1}\n",
-        totals.concrete_m3, totals.formwork_m2, totals.rebar_t, totals.steel_t, totals.rebar_joints
-    ));
-
-    out.push_str(
-        "\n[数量積算 階別]\n階,コンクリート[m3],型枠[m2],鉄筋[t],鉄骨[t],鉄筋継手[個所]\n",
-    );
-    for (story, t) in q.totals_by_story() {
+    let q = match try_compute_quantity_takeoff(model, &model.quantity_cfg) {
+        Ok(q) => q,
+        Err(reason) => return format!("[数量積算 未算定]\n理由\n{}\n", csv_cell(&reason)),
+    };
+    let mut out = String::new();
+    for (heading, rows) in [
+        (
+            "部位別",
+            q.totals_by_category()
+                .into_iter()
+                .map(|(k, t)| (k.label().to_string(), t))
+                .collect::<Vec<_>>(),
+        ),
+        ("階別", q.totals_by_story()),
+        (
+            "構造別",
+            q.totals_by_structure()
+                .into_iter()
+                .map(|(k, t)| (k.label().to_string(), t))
+                .collect(),
+        ),
+    ] {
+        out.push_str(&format!("\n[数量積算 {heading}]\n分類,コンクリート[m3],型枠[m2],鉄筋[t],鉄骨[t],鉄筋継手[個所],鉄筋状態,未算定理由\n"));
+        for (key, t) in rows {
+            subtotal(&mut out, &key, &t);
+        }
+    }
+    out.push_str("\n[数量積算 全体]\n分類,コンクリート[m3],型枠[m2],鉄筋[t],鉄骨[t],鉄筋継手[個所],鉄筋状態,未算定理由\n");
+    subtotal(&mut out, "合計", &q.totals());
+    out.push_str("\n[数量積算 鉄骨種類別]\n断面,長さ[m],重量[t]\n");
+    for s in q.steel_by_section() {
         out.push_str(&format!(
-            "{},{:.2},{:.2},{:.3},{:.3},{:.1}\n",
-            story, t.concrete_m3, t.formwork_m2, t.rebar_t, t.steel_t, t.rebar_joints
+            "{},{:.2},{:.3}\n",
+            csv_cell(&s.section_name),
+            s.length_m,
+            s.weight_t
         ));
     }
-
-    let steel = q.steel_by_section();
-    if !steel.is_empty() {
-        out.push_str("\n[数量積算 鉄骨種類別]\n断面,長さ[m],重量[t]\n");
-        for s in steel {
-            out.push_str(&format!(
-                "{},{:.2},{:.3}\n",
-                s.section_name, s.length_m, s.weight_t
-            ));
-        }
+    out.push_str("\n[数量積算 鉄筋径別]\n呼び径,長さ[m],重量[t],鉄筋状態\n");
+    for (dia, len, w) in q.rebar_by_dia() {
+        out.push_str(&format!(
+            "{dia},{len:.6},{w:.6},{}\n",
+            q.totals().rebar_status().label()
+        ));
     }
-
-    let rebar = q.rebar_by_dia();
-    if !rebar.is_empty() {
-        out.push_str("\n[数量積算 鉄筋径別]\n呼び径,長さ[m],重量[t]\n");
-        for (dia, len, w) in rebar {
-            let name = if dia > 0.0 {
-                format!("D{:.0}", dia)
-            } else {
-                "(鉄筋比概算)".to_string()
-            };
-            out.push_str(&format!("{},{:.1},{:.3}\n", name, len, w));
-        }
-    }
-
-    out.push_str(
-        "\n[数量積算 明細]\nID,階,部位,構造,符号,コンクリート[m3],型枠[m2],鉄筋[t],鉄骨[t],鉄筋継手[個所]\n",
-    );
+    out.push_str("\n[数量積算 明細]\nID,壁版ID,断面ID,階,部位,構造,符号,コンクリート[m3],型枠[m2],鉄筋[t],鉄骨[t],鉄筋継手[個所],鉄筋状態,未算定理由\n");
     for it in &q.items {
         let id = it
             .elem
             .map(|e| e.0.to_string())
             .or_else(|| it.slab.map(|s| format!("S{}", s.0)))
-            .unwrap_or_else(|| "-".to_string());
+            .unwrap_or_default();
         out.push_str(&format!(
-            "{},{},{},{},{},{:.3},{:.2},{:.4},{:.4},{:.1}\n",
+            "{},{},{},{},{},{},{},{:.3},{:.2},{:.6},{:.4},{:.1},{},{}\n",
             id,
-            it.story,
+            it.wall_plate.map(|i| i.0.to_string()).unwrap_or_default(),
+            it.section.map(|i| i.0.to_string()).unwrap_or_default(),
+            csv_cell(&it.story),
             it.category.label(),
             it.structure.label(),
-            it.label,
+            csv_cell(&it.label),
             it.concrete_m3,
             it.formwork_m2,
             it.rebar_weight_t(),
             it.steel_weight_t(),
-            it.rebar_joints
+            it.rebar_joints,
+            it.rebar_status().label(),
+            csv_cell(
+                &it.rebar_issues
+                    .iter()
+                    .map(|i| i.description())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
         ));
     }
-
+    out.push_str(
+        "\n[数量積算 鉄筋方向別]\n要素ID,壁版ID,断面ID,方向,呼び径[mm],長さ[m],重量[t],状態,理由\n",
+    );
+    for it in &q.items {
+        let ids = format!(
+            "{},{},{}",
+            it.elem.map(|i| i.0.to_string()).unwrap_or_default(),
+            it.wall_plate.map(|i| i.0.to_string()).unwrap_or_default(),
+            it.section.map(|i| i.0.to_string()).unwrap_or_default()
+        );
+        for r in &it.rebar {
+            out.push_str(&format!(
+                "{ids},{},{},{:.6},{:.6},算定済み概算,\n",
+                r.usage.label(),
+                r.dia.map(|d| d.to_string()).unwrap_or_default(),
+                r.total_length_m,
+                r.weight_t
+            ));
+        }
+        for i in &it.rebar_issues {
+            out.push_str(&format!(
+                "{ids},{},,,,未算定,{}\n",
+                i.usage.label(),
+                csv_cell(&i.description())
+            ));
+        }
+    }
     out.push_str("\n[数量積算 注記]\n");
     for n in &q.notes {
-        out.push_str(&format!("{}\n", n));
+        out.push_str(&format!("{}\n", csv_cell(n)));
     }
     out
 }

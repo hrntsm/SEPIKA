@@ -6,7 +6,7 @@
 //! CSV エクスポート（[`crate::summary::build_quantity_csv`]）にも対応する。
 
 use crate::table_util::Col;
-use sepika_design_jp::quantity::{try_compute_quantity_takeoff, QuantityCfg, QuantityTotals};
+use sepika_design_jp::quantity::{try_compute_quantity_takeoff, QuantityTotals};
 
 use crate::app::App;
 
@@ -18,6 +18,7 @@ pub enum QuantityGrouping {
     ByCategory,
     /// 階別の小計。
     ByStory,
+    ByStructure,
     /// 部材ごとの明細。
     Detail,
     /// 鉄骨の種類別（断面名別）長さ・重量。
@@ -34,7 +35,24 @@ pub struct QuantityViewState {
 
 /// 数量積算パネルの描画。
 pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
-    let takeoff = match try_compute_quantity_takeoff(&app.core.model, &QuantityCfg::default()) {
+    let mut cfg = app.core.model.quantity_cfg;
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label("壁筋仮定径 [mm]");
+        changed |= ui
+            .add(egui::DragValue::new(&mut cfg.assumed_wall_bar_dia).speed(1.0))
+            .changed();
+        ui.label("定着係数 [径倍]");
+        changed |= ui
+            .add(egui::DragValue::new(&mut cfg.anchorage_dia_factor).speed(1.0))
+            .changed();
+    });
+    if changed {
+        app.apply_model_edit(Box::new(sepika_edit::SetQuantityCfg { cfg }));
+    }
+
+    let takeoff = match try_compute_quantity_takeoff(&app.core.model, &app.core.model.quantity_cfg)
+    {
         Ok(takeoff) => takeoff,
         Err(reason) => {
             ui.colored_label(
@@ -57,6 +75,7 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
         for (g, label) in [
             (QuantityGrouping::ByCategory, "部位別"),
             (QuantityGrouping::ByStory, "階別"),
+            (QuantityGrouping::ByStructure, "構造別"),
             (QuantityGrouping::Detail, "明細"),
             (QuantityGrouping::SteelBySection, "鉄骨種類別"),
             (QuantityGrouping::RebarByDia, "鉄筋径別"),
@@ -93,7 +112,11 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
         ui.separator();
         ui.label(format!("型枠 {:.1} m²", totals.formwork_m2));
         ui.separator();
-        ui.label(format!("鉄筋 {:.2} t", totals.rebar_t));
+        ui.label(format!(
+            "鉄筋 {:.2} t ({})",
+            totals.rebar_t,
+            totals.rebar_status().label()
+        ));
         ui.separator();
         ui.label(format!("鉄骨 {:.2} t", totals.steel_t));
         ui.separator();
@@ -110,14 +133,26 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
                     ui,
                     "部位",
                     rows.iter()
-                        .map(|(c, t)| (c.label().to_string(), *t))
+                        .map(|(c, t)| (c.label().to_string(), t.clone()))
                         .collect(),
-                    totals,
+                    totals.clone(),
                 );
             }
             QuantityGrouping::ByStory => {
                 let rows = takeoff.totals_by_story();
-                totals_table(ui, "階", rows, totals);
+                totals_table(ui, "階", rows, totals.clone());
+            }
+            QuantityGrouping::ByStructure => {
+                totals_table(
+                    ui,
+                    "構造",
+                    takeoff
+                        .totals_by_structure()
+                        .into_iter()
+                        .map(|(k, t)| (k.label().to_string(), t))
+                        .collect(),
+                    totals.clone(),
+                );
             }
             QuantityGrouping::SteelBySection => {
                 let rows = takeoff.steel_by_section();
@@ -235,7 +270,18 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
                             ui.label(format!("{:.2}", it.formwork_m2));
                         });
                         row.col(|ui| {
-                            ui.label(format!("{:.4}", it.rebar_weight_t()));
+                            ui.label(format!(
+                                "{:.4} ({})",
+                                it.rebar_weight_t(),
+                                it.rebar_status().label()
+                            ))
+                            .on_hover_text(
+                                it.rebar_issues
+                                    .iter()
+                                    .map(|i| i.description())
+                                    .collect::<Vec<_>>()
+                                    .join("\n"),
+                            );
                         });
                         row.col(|ui| {
                             ui.label(format!("{:.4}", it.steel_weight_t()));
@@ -249,6 +295,35 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
         }
 
         ui.add_space(8.0);
+        ui.label("鉄筋方向別（概算・実配筋未照合）");
+        for it in &takeoff.items {
+            if it.category != sepika_design_jp::quantity::MemberCategory::Wall
+                && it.category != sepika_design_jp::quantity::MemberCategory::MiscWall
+            {
+                continue;
+            }
+            let ids = format!(
+                "要素 {:?} / 壁版 {:?} / 断面 {:?}",
+                it.elem.map(|i| i.0),
+                it.wall_plate.map(|i| i.0),
+                it.section.map(|i| i.0)
+            );
+            for r in &it.rebar {
+                ui.label(format!(
+                    "{ids} / {}: {:.6} m / {:.6} t / 算定済み概算",
+                    r.usage.label(),
+                    r.total_length_m,
+                    r.weight_t
+                ));
+            }
+            for i in &it.rebar_issues {
+                ui.colored_label(
+                    crate::theme::ERROR_RED,
+                    format!("未算定: {}", i.description()),
+                );
+            }
+        }
+
         egui::CollapsingHeader::new("注記（算定の前提・未対応事項）")
             .default_open(false)
             .show(ui, |ui| {
@@ -297,7 +372,14 @@ fn totals_table(
                     ui.label(format!("{:.2}", t.formwork_m2));
                 });
                 row.col(|ui| {
-                    ui.label(format!("{:.3}", t.rebar_t));
+                    ui.label(format!("{:.3} ({})", t.rebar_t, t.rebar_status().label()))
+                        .on_hover_text(
+                            t.rebar_issues
+                                .iter()
+                                .map(|i| i.description())
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        );
                 });
                 row.col(|ui| {
                     ui.label(format!("{:.3}", t.steel_t));
@@ -316,7 +398,19 @@ fn totals_table(
                     ui.strong(format!("{:.2}", totals.formwork_m2));
                 });
                 row.col(|ui| {
-                    ui.strong(format!("{:.3}", totals.rebar_t));
+                    ui.strong(format!(
+                        "{:.3} ({})",
+                        totals.rebar_t,
+                        totals.rebar_status().label()
+                    ))
+                    .on_hover_text(
+                        totals
+                            .rebar_issues
+                            .iter()
+                            .map(|i| i.description())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    );
                 });
                 row.col(|ui| {
                     ui.strong(format!("{:.3}", totals.steel_t));

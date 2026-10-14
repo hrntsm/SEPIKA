@@ -95,20 +95,23 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
 fn beam_contact_quantity_csv_preserves_union_and_diagnostics() {
     for model in beam_contact_narrow_fixtures() {
         let csv = sepika_app::summary::build_quantity_csv(&model);
-        assert!(csv.contains("G451,1.080,8.10,"), "{csv}");
+        assert!(csv.contains("\"G451\",1.080,8.10,"), "{csv}");
     }
     let no_plate = sepika_app::summary::build_quantity_csv(&beam_contact_no_plate_fixture());
-    assert!(no_plate.contains("G451,1.080,8.40,"), "{no_plate}");
+    assert!(no_plate.contains("\"G451\",1.080,8.40,"), "{no_plate}");
     let model = beam_contact_fixture();
     let csv = sepika_app::summary::build_quantity_csv(&model);
-    assert!(csv.contains("G451,1.080,7.50,"), "{csv}");
+    assert!(csv.contains("\"G451\",1.080,7.50,"), "{csv}");
     for (invalid, expected_reason) in beam_contact_invalid_cases() {
         let csv = sepika_app::summary::build_quantity_csv(&invalid);
         assert!(
-            csv.contains("数量積算 未算定") && csv.contains(expected_reason),
+            csv.starts_with("[数量積算 未算定]\n理由\n") && csv.contains(expected_reason),
             "{csv}"
         );
-        assert!(!csv.contains("G451,"), "{csv}");
+        for section in ["[数量積算 明細]", "[数量積算 部位別]", "[数量積算 全体]"]
+        {
+            assert!(!csv.contains(section), "{csv}");
+        }
     }
 }
 
