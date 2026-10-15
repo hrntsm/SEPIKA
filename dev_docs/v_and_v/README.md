@@ -74,6 +74,7 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [CMQのM成分塗り分割_Issue500_2026-10.md](CMQのM成分塗り分割_Issue500_2026-10.md) | サンプルを保持した塗り分割・独立面積・本番描画・数値と状態の保持 | 🔶（独立算術・自動描画・App広域回帰・両Clippy・strict Rustdoc成功。手動GUI・最終headゲートは後続） |
 | [未変形編集入力_Issue475_2026-10.md](未変形編集入力_Issue475_2026-10.md) | 編集開始直後の未変形pick／snap、既存入口とモデル・履歴・結果の保持 | 🔶（独立算術・自動egui 7件・広域回帰成功。手動GUIと最終headゲートは後続） |
 | [RC壁せん断耐力方式_Issue572_2026-10.md](RC壁せん断耐力方式_Issue572_2026-10.md) | 建物共通min/mean・両consumer・開始時固定・採用run値・保存/Undo/失効・対象材種の方式識別 | 🔶（独立算術/原本照合、最終Windows広域回帰・関連feature・Clippy成功、fresh独立レビュー修正必須0。既存#645除外、CI・Validation後続） |
 | [RC壁同一faceと初期耐力_Issue617_2026-10.md](RC壁同一faceと初期耐力_Issue617_2026-10.md) | 同一face全体M/Q/N・物理A・静的一次参照・run採用Quと入力一致 | 🔶（独立算術/人工入力/実求解・App/MCP/Ds/表示とローカルchecks、既知#645除外を区別。独立レビュー指摘なし、親監査/CI・Validation未） |
@@ -279,6 +280,7 @@
 | 633 | 符号付き単純梁反力 | sepika-load / sepika-element / sepika-app | floor/fem.rs・story_gen/reactions.rs・frame/member_load.rs・viewer/cmq.rs | [Issue633の独立値・公開入口](符号付き単純梁反力_Issue633_2026-10.md#独立verification) | 横断 | 🔶（直接Verification、原本／Validation・最終CIは後続） |
 | 546 | 節点・材料直接入力の有限判定 | sepika-app / sepika-edit | tables/nodes.rs・tables/materials.rs・section_material/material.rs | [直接入力matrix](節点材料の直接有限入力_Issue546_2026-10.md#独立期待値と実入口) | GUI／編集 | 🔶（直接Verification、最終head CI後続） |
 | 475 | 未変形座標による編集入力 | sepika-app | app/coordinate_edit_tests.rs・app/panels/draw_tools.rs・load_editor.rs | [独立期待値と実入口](未変形編集入力_Issue475_2026-10.md#独立期待値と実入口) | GUI／編集 | 🔶（自動Verification成功、手動GUI・最終headゲートは後続） |
+| 500 | CMQ の M 成分の塗り分割 | sepika-app | viewer/cmq.rs・viewer/diagram.rs | [独立期待値と実入口](CMQのM成分塗り分割_Issue500_2026-10.md#独立期待値と実入口) | GUI／表示 | 🔶（Scope内Verification成功、手動GUI・最終headゲートは後続） |
 | 635 | 固定距離部材荷重の支間内検証 | sepika-core / sepika-edit / sepika-solver / sepika-io / sepika-app / sepika-mcp / sepika-job | model/load.rs・node_member.rs・story_copy.rs・precheck.rs | [Issue635の独立受入と実入口](固定距離部材荷重の支間内検証_Issue635_2026-10.md#独立期待値と実入口) | 横断 | 🔶（入力境界Verification、最終headゲートは後続） |
 
 凡例: ✅ 実装済み・🔶 一部実装（要拡張）・❌ 未実装・対象外（採用しない）。
