@@ -2533,6 +2533,9 @@ mod tests;
 #[cfg(all(test, feature = "gui"))]
 mod focus_id_remap_tests;
 
+#[cfg(all(test, feature = "gui"))]
+mod coordinate_edit_tests;
+
 #[cfg(test)]
 mod assignment_identity_tests;
 

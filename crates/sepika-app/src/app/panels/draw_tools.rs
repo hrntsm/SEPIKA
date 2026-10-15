@@ -5,6 +5,30 @@
 use super::*;
 
 impl App {
+    pub(crate) fn prepare_coordinate_edit_view(&mut self) {
+        if !(self.ui.scoped.beam_draw_mode
+            || self.ui.scoped.wall_draw_mode
+            || self.ui.scoped.slab_draw_mode
+            || self.ui.scoped.beam_place_mode
+            || self.ui.scoped.post_place_mode
+            || self.load_pick_active())
+        {
+            return;
+        }
+        use crate::viewer::ViewMode;
+        if matches!(
+            self.ui.view.view_mode,
+            ViewMode::Deformed
+                | ViewMode::Mode
+                | ViewMode::TimeHistory
+                | ViewMode::LumpedMode
+                | ViewMode::LumpedTimeHistory
+        ) {
+            self.ui.view.view_mode = ViewMode::Shape;
+        }
+        self.ui.view.overlay_deform = false;
+    }
+
     /// 左ドック「作成」パネル：梁・壁・スラブ作成モードの切替と断面割当 UI。
     /// いずれもビューア（3D クリック）と連動する状態（`beam_draw_mode` 等）を操作する。
     pub(crate) fn draw_tools_panel(&mut self, ui: &mut egui::Ui) {
@@ -149,6 +173,8 @@ impl App {
                 }
             }
         });
+
+        self.prepare_coordinate_edit_view();
 
         let focus_id: Option<sepika_core::ids::ElemId> = self.ui.scoped.selection.active_member();
         let elem_info: Option<(sepika_core::ids::ElemId, Option<SectionId>)> =
