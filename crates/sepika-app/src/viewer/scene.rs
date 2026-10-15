@@ -174,6 +174,27 @@ fn draw_slab_polygon(
     proj: &Projector,
     triangles: Option<&[[usize; 3]]>,
 ) {
+    draw_triangulated_plate_polygon(
+        painter,
+        coords,
+        proj,
+        triangles,
+        theme::translucent(theme::BEST_YELLOW, PLATE_FILL_ALPHA),
+        egui::Stroke::new(
+            1.5_f32,
+            theme::translucent(theme::BEST_YELLOW, PLATE_STROKE_ALPHA),
+        ),
+    );
+}
+
+fn draw_triangulated_plate_polygon(
+    painter: &egui::Painter,
+    coords: &[[f64; 3]],
+    proj: &Projector,
+    triangles: Option<&[[usize; 3]]>,
+    fill: egui::Color32,
+    stroke: egui::Stroke,
+) {
     let poly: Vec<_> = coords
         .iter()
         .map(|p| {
@@ -191,20 +212,13 @@ fn draw_slab_polygon(
     }) {
         let mut mesh = egui::Mesh::default();
         for p in &poly {
-            mesh.colored_vertex(
-                p.unwrap(),
-                theme::translucent(theme::BEST_YELLOW, PLATE_FILL_ALPHA),
-            );
+            mesh.colored_vertex(p.unwrap(), fill);
         }
         for &[a, b, c] in triangles {
             mesh.add_triangle(a as u32, b as u32, c as u32);
         }
         painter.add(egui::Shape::mesh(mesh));
     }
-    let stroke = egui::Stroke::new(
-        1.5_f32,
-        theme::translucent(theme::BEST_YELLOW, PLATE_STROKE_ALPHA),
-    );
     if let Some(mut closed) = poly.iter().copied().collect::<Option<Vec<_>>>() {
         closed.push(closed[0]);
         painter.extend(egui::Shape::dashed_line(
@@ -583,12 +597,17 @@ pub(super) fn draw_mode_rest_ghost(
     painter: &egui::Painter,
     app: &App,
     model: &sepika_core::model::Model,
+    proj: &Projector,
+    deform_scale: f64,
     pts_rest: &[egui::Pos2],
     node_visible: &[bool],
     filter: FrameFilter,
     show_secondary: bool,
     show_sections: bool,
 ) {
+    if !deform_scale.is_finite() || deform_scale.abs() <= 1e-12 {
+        return;
+    }
     const DASH: f32 = 6.0;
     const GAP: f32 = 4.0;
     const LINE_A: u8 = 90;
@@ -646,6 +665,54 @@ pub(super) fn draw_mode_rest_ghost(
     }
 
     if show_secondary {
+        for slab in &app.core.model.slabs {
+            if !slab_visible_on_frame(&app.core.model, slab, filter) {
+                continue;
+            }
+            let Some(coords) = slab.boundary_coords(&app.core.model) else {
+                continue;
+            };
+            let triangles = slab_fill_triangles(&app.core.model, slab);
+            draw_triangulated_plate_polygon(
+                painter,
+                &coords,
+                proj,
+                triangles.as_deref(),
+                theme::translucent(theme::BEST_YELLOW, FILL_A),
+                egui::Stroke::new(stroke_w, theme::translucent(theme::BEST_YELLOW, LINE_A)),
+            );
+        }
+        for plate in &app.core.model.wall_plates {
+            if app.core.model.wall_plate_becomes_element(plate)
+                || !wall_plate_visible_on_frame(&app.core.model, plate, filter)
+            {
+                continue;
+            }
+            let Some(coords) = plate.boundary_coords(&app.core.model) else {
+                continue;
+            };
+            let poly: Option<Vec<_>> = coords
+                .iter()
+                .map(|p| {
+                    p.iter()
+                        .all(|v| v.is_finite())
+                        .then(|| proj.project(*p))
+                        .filter(|p| p.is_finite())
+                })
+                .collect();
+            let Some(mut poly) = poly.filter(|p| p.len() >= 3) else {
+                continue;
+            };
+            if plate_fill_is_valid(&app.core.model, plate) {
+                painter.add(egui::Shape::convex_polygon(
+                    poly.clone(),
+                    theme::translucent(theme::DATA_BLUE, FILL_A),
+                    egui::Stroke::NONE,
+                ));
+            }
+            poly.push(poly[0]);
+            painter.extend(egui::Shape::dashed_line(&poly, stroke, DASH, GAP));
+        }
         let sec = egui::Stroke::new(
             if show_sections { 1.0_f32 } else { 1.5_f32 },
             theme::translucent(theme::SECONDARY_AMBER, LINE_A),
@@ -894,6 +961,502 @@ mod tests {
 
     fn model_coords(app: &App) -> Vec<[f64; 3]> {
         app.core.model.nodes.iter().map(|n| n.coord).collect()
+    }
+
+    fn mode_plate_fixture() -> App {
+        use sepika_core::ids::{SectionId, WallRegionId};
+        use sepika_core::model::{Section, WallRegion};
+        let mut app = slab_app(&[[0.0, 0.0, 3000.0]], Some([1000.0, 2000.0]));
+        app.core.model.slabs[0].shape = SlabShape::Attached {
+            anchor: RegionAnchor::Point(NodeId(0)),
+            extent: [1000.0, 2000.0],
+        };
+        let mut add_nodes = |points: &[[f64; 3]]| {
+            points
+                .iter()
+                .map(|&coord| {
+                    let id = NodeId(app.core.model.nodes.len() as u32);
+                    app.core.model.nodes.push(Node {
+                        id,
+                        coord,
+                        restraint: Default::default(),
+                        mass: None,
+                        story: None,
+                        support_spring: None,
+                    });
+                    id
+                })
+                .collect::<Vec<_>>()
+        };
+        let floor = add_nodes(&[
+            [4000.0, 0.0, 3000.0],
+            [6000.0, 0.0, 3000.0],
+            [6000.0, 2000.0, 3000.0],
+            [4000.0, 2000.0, 3000.0],
+        ]);
+        let line = add_nodes(&[[8000.0, 0.0, 3000.0], [10000.0, 0.0, 3000.0]]);
+        let wall = add_nodes(&[[12000.0, 0.0, 0.0], [14000.0, 0.0, 0.0]]);
+        let enclosed = add_nodes(&[
+            [16000.0, 0.0, 0.0],
+            [18000.0, 0.0, 0.0],
+            [18000.0, 0.0, 3000.0],
+            [16000.0, 0.0, 3000.0],
+        ]);
+        let structural = add_nodes(&[
+            [20000.0, 0.0, 0.0],
+            [22000.0, 0.0, 0.0],
+            [22000.0, 0.0, 3000.0],
+            [20000.0, 0.0, 3000.0],
+        ]);
+        app.core
+            .model
+            .add_enclosed_slab_from_nodes(&floor, SlabPlate::default());
+        app.core.model.slabs.push(Slab {
+            id: SlabId(2),
+            shape: SlabShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [line[0], line[1]],
+                    span: [0.0, 1.0],
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: [1000.0; 2],
+            },
+            plate: SlabPlate::default(),
+            tip_loads: Vec::new(),
+        });
+        let mut attached = enclosed_plate();
+        attached.shape = sepika_core::model::WallPlateShape::Attached {
+            anchor: RegionAnchor::Line {
+                nodes: [wall[0], wall[1]],
+                span: [0.0, 1.0],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: Some([1000.0; 2]),
+        };
+        app.core.model.wall_plates.push(attached);
+        app.core
+            .model
+            .add_enclosed_wall_plate_from_nodes(&enclosed, enclosed_plate());
+        app.core.model.sections.push(Section {
+            id: SectionId(0),
+            name: "壁".into(),
+            frame_use: None,
+            floor: None,
+            area: 450000.0,
+            iy: 1.0,
+            iz: 1.0,
+            j: 1.0,
+            depth: 3000.0,
+            width: 150.0,
+            as_y: 1.0,
+            as_z: 1.0,
+            panel_thickness: None,
+            thickness: Some(150.0),
+            shape: None,
+            material: None,
+            rebar_material: None,
+            shear_rebar_material: None,
+            steel_material: None,
+            property_basis: Default::default(),
+        });
+        let mut plate = enclosed_plate();
+        plate.section = Some(SectionId(0));
+        let id = app
+            .core
+            .model
+            .add_enclosed_wall_plate_from_nodes(&structural, plate);
+        app.core.model.wall_regions.push(WallRegion {
+            id: WallRegionId(0),
+            name: String::new(),
+            boundary: structural,
+            wall_plate_ids: vec![id],
+            posts: Vec::new(),
+        });
+        app
+    }
+
+    fn paint_mode_ghost(
+        app: &App,
+        scale: f64,
+        show_secondary: bool,
+        filter: FrameFilter,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(egui::LayerId::background());
+            let cam = CameraState::default();
+            let proj = Projector::new([0.0; 3], &cam, 0.1, [0.0; 2]);
+            let pts: Vec<_> = model_coords(app).iter().map(|&p| proj.project(p)).collect();
+            let model = super::super::wall_expanded_view_model(&app.core.model);
+            draw_mode_rest_ghost(
+                &painter,
+                app,
+                &model,
+                &proj,
+                scale,
+                &pts,
+                &vec![false; pts.len()],
+                filter,
+                show_secondary,
+                false,
+            );
+        })
+        .shapes
+    }
+
+    fn filled_plate_points(
+        shapes: &[egui::epaint::ClippedShape],
+        alpha: u8,
+    ) -> Vec<Vec<egui::Pos2>> {
+        shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Mesh(m)
+                    if m.vertices.first().is_some_and(|v| {
+                        v.color == theme::translucent(theme::BEST_YELLOW, alpha)
+                    }) =>
+                {
+                    Some(m.vertices.iter().map(|v| v.pos).collect())
+                }
+                egui::Shape::Path(p) if p.fill == theme::translucent(theme::DATA_BLUE, alpha) => {
+                    Some(p.points.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn mode_rest_input_plates_keep_each_input_boundary_once_for_both_signs_and_axes() {
+        let app = mode_plate_fixture();
+        let model = super::super::wall_expanded_view_model(&app.core.model);
+        let wall = model
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Wall)
+            .unwrap();
+        assert!(model
+            .elements
+            .iter()
+            .any(|e| e.id.0 == app.core.model.slabs[0].id.0));
+        assert!(model
+            .elements
+            .iter()
+            .any(|e| e.id.0 == app.core.model.wall_plates[0].id.0));
+        assert_ne!(wall.id.0, app.core.model.wall_plates[2].id.0);
+        assert!(app
+            .core
+            .model
+            .wall_plate_becomes_element(&app.core.model.wall_plates[2]));
+        let expected = [
+            vec![
+                [0.0, 0.0, 3000.0],
+                [1000.0, 0.0, 3000.0],
+                [1000.0, 2000.0, 3000.0],
+                [0.0, 2000.0, 3000.0],
+            ],
+            vec![
+                [4000.0, 0.0, 3000.0],
+                [6000.0, 0.0, 3000.0],
+                [6000.0, 2000.0, 3000.0],
+                [4000.0, 2000.0, 3000.0],
+            ],
+            vec![
+                [8000.0, 0.0, 3000.0],
+                [10000.0, 0.0, 3000.0],
+                [10000.0, 1000.0, 3000.0],
+                [8000.0, 1000.0, 3000.0],
+            ],
+            vec![
+                [12000.0, 0.0, 0.0],
+                [14000.0, 0.0, 0.0],
+                [14000.0, 0.0, 1000.0],
+                [12000.0, 0.0, 1000.0],
+            ],
+            vec![
+                [16000.0, 0.0, 0.0],
+                [18000.0, 0.0, 0.0],
+                [18000.0, 0.0, 3000.0],
+                [16000.0, 0.0, 3000.0],
+            ],
+            vec![
+                [20000.0, 0.0, 0.0],
+                [22000.0, 0.0, 0.0],
+                [22000.0, 0.0, 3000.0],
+                [20000.0, 0.0, 3000.0],
+            ],
+        ];
+        let cam = CameraState::default();
+        let proj = Projector::new([0.0; 3], &cam, 0.1, [0.0; 2]);
+        for axis in 0..2 {
+            for scale in [0.0, 1.0, -1.0, 100.0] {
+                let mut disp = vec![[0.0; 6]; app.core.model.nodes.len()];
+                for d in &mut disp {
+                    d[axis] = 1.0;
+                }
+                let coords: Vec<_> = app
+                    .core
+                    .model
+                    .nodes
+                    .iter()
+                    .zip(disp)
+                    .map(|(n, d)| std::array::from_fn(|i| n.coord[i] + d[i] * scale))
+                    .collect();
+                let deformed = paint_slabs(&app, &coords, CameraState::default().rot);
+                assert_eq!(slab_meshes(&deformed).len(), 3);
+                let shapes = paint_mode_ghost(&app, scale, true, FrameFilter::default());
+                let polygons = filled_plate_points(&shapes, 55);
+                if scale == 0.0 {
+                    assert!(shapes.is_empty());
+                    continue;
+                }
+                assert_eq!(polygons.len(), expected.len());
+                for (input, boundary) in expected.iter().enumerate() {
+                    let points: Vec<_> = boundary.iter().map(|&p| proj.project(p)).collect();
+                    assert_eq!(
+                        polygons.iter().filter(|p| **p == points).count(),
+                        1,
+                        "input {input}, axis {axis}, scale {scale}"
+                    );
+                }
+                assert!(shapes.iter().any(|s| matches!(&s.shape,
+                    egui::Shape::LineSegment { stroke, .. } if
+                    stroke.color == theme::translucent(theme::BEST_YELLOW, 90))));
+            }
+        }
+    }
+
+    #[test]
+    fn mode_rest_plate_filters_and_floor_toggle_share_the_input_visibility() {
+        let app = mode_plate_fixture();
+        let hidden = paint_mode_ghost(&app, 1.0, false, FrameFilter::default());
+        assert_eq!(filled_plate_points(&hidden, 55).len(), 1);
+        let no_nodes = vec![false; app.core.model.nodes.len()];
+        let no_elements = [false];
+        assert!(paint_mode_ghost(
+            &app,
+            1.0,
+            true,
+            FrameFilter {
+                elem_on: Some(&no_elements),
+                node_on: Some(&no_nodes),
+            }
+        )
+        .is_empty());
+        let mut node_on = no_nodes;
+        node_on[0] = true;
+        let shapes = paint_mode_ghost(
+            &app,
+            1.0,
+            true,
+            FrameFilter {
+                elem_on: Some(&no_elements),
+                node_on: Some(&node_on),
+            },
+        );
+        assert_eq!(filled_plate_points(&shapes, 55).len(), 1);
+        node_on[5] = true;
+        node_on[7] = true;
+        let shapes = paint_mode_ghost(
+            &app,
+            1.0,
+            true,
+            FrameFilter {
+                elem_on: Some(&no_elements),
+                node_on: Some(&node_on),
+            },
+        );
+        assert_eq!(filled_plate_points(&shapes, 55).len(), 3);
+    }
+
+    #[test]
+    fn mode_rest_invalid_slabs_and_sign_reversing_wall_keep_outlines_without_fill() {
+        let mut app = slab_app(
+            &[
+                [0.0, 0.0, 3000.0],
+                [4000.0, 4000.0, 3000.0],
+                [0.0, 4000.0, 3000.0],
+                [4000.0, 0.0, 3000.0],
+            ],
+            None,
+        );
+        let shapes = paint_mode_ghost(&app, 1.0, true, FrameFilter::default());
+        assert!(filled_plate_points(&shapes, 55).is_empty());
+        assert!(!shapes.is_empty());
+        let mut attached = mode_plate_fixture();
+        if let sepika_core::model::WallPlateShape::Attached { extent, .. } =
+            &mut attached.core.model.wall_plates[0].shape
+        {
+            *extent = Some([1000.0, -1000.0]);
+        }
+        let shapes = paint_mode_ghost(&attached, 1.0, true, FrameFilter::default());
+        assert_eq!(filled_plate_points(&shapes, 55).len(), 5);
+        for bad in [f64::NAN, f64::INFINITY, f64::MAX] {
+            app.core.model.nodes[1].coord[0] = bad;
+            let shapes = paint_mode_ghost(&app, 1.0, true, FrameFilter::default());
+            assert!(filled_plate_points(&shapes, 55).is_empty());
+            assert!(shapes
+                .iter()
+                .all(|s| s.shape.visual_bounding_rect().is_finite()));
+        }
+    }
+
+    fn paint_viewer(app: &mut App) -> Vec<egui::epaint::ClippedShape> {
+        egui::Context::default()
+            .run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1600.0, 1200.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| super::super::viewer_panel(ui, app),
+            )
+            .shapes
+    }
+
+    #[test]
+    fn mode_rest_viewer_gating_and_input_nodes_preserve_model_undo_results_and_saved_content() {
+        use super::super::ViewMode;
+        use crate::app::ResultsBundle;
+        use sepika_core::frame::FrameTarget;
+        use sepika_core::ids::StoryId;
+        use sepika_core::model::{Axis, AxisGroup, AxisGroupKind, AxisSource};
+        use sepika_solver::dynamic::eigen::ModalResult;
+        let mut app = mode_plate_fixture();
+        app.core.model.axes.push(AxisGroup {
+            name: "入力点".into(),
+            kind: AxisGroupKind::Other,
+            axes: vec![Axis {
+                name: "支持点のみ".into(),
+                distance: None,
+                nodes: vec![NodeId(0)],
+                source: AxisSource::Manual,
+            }],
+        });
+        for (id, elevation) in [(0, 0.0), (1, 3000.0)] {
+            app.core.model.stories.push(
+                serde_json::from_value(serde_json::json!({
+                    "id": id, "name": format!("階{id}"), "elevation": elevation, "node_ids": []
+                }))
+                .unwrap(),
+            );
+        }
+        assert!(!sepika_core::dof::structural_nodes(&app.core.model)[0]);
+        let mut node_shapes = Vec::new();
+        for axis in 0..2 {
+            let mut disp = vec![[0.0; 6]; app.core.model.nodes.len()];
+            for d in &mut disp[13..] {
+                d[axis] = 1.0;
+            }
+            assert_eq!(disp[0], [0.0; 6]);
+            node_shapes.push(disp);
+        }
+        app.core.scoped.results = Some(ResultsBundle {
+            modal: Some(ModalResult {
+                omega2: vec![1.0; 2],
+                period: vec![1.0; 2],
+                shapes: vec![vec![1.0]; 2],
+                node_shapes,
+                participation: vec![[1.0; 3]; 2],
+                effective_mass: vec![[1.0; 3]; 2],
+            }),
+            ..Default::default()
+        });
+        app.ui.view.view_mode = ViewMode::Mode;
+        app.ui.view.show_floor_secondary = true;
+        app.ui.view.show_sections = false;
+        let input = bincode::serialize(&app.core.model).unwrap();
+        let results = bincode::serialize(&app.core.scoped.results).unwrap();
+        let staleness = format!("{:?}", app.core.scoped.staleness);
+        let undo = (
+            app.core.scoped.undo.revision(),
+            app.core.scoped.undo.can_undo(),
+            app.core.scoped.undo.can_redo(),
+        );
+        let saved_model = rmp_serde::to_vec_named(&app.core.model).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("sepika467-viewer-{}.ovika", std::process::id()));
+        let save_contents = |app: &App| {
+            let results = rmp_serde::to_vec_named(&app.core.scoped.results).unwrap();
+            sepika_io::ovika::save_ovika(
+                &path,
+                &app.core.model,
+                sepika_io::ovika::OvikaExtras {
+                    results: Some(&results),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            use std::io::Read;
+            let mut archive = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+            ["model.msgpack", "results.msgpack"].map(|name| {
+                let mut bytes = Vec::new();
+                archive
+                    .by_name(name)
+                    .unwrap()
+                    .read_to_end(&mut bytes)
+                    .unwrap();
+                bytes
+            })
+        };
+        let saved_contents = save_contents(&app);
+        for axis in 0..2 {
+            app.ui.scoped.view_mode_idx = axis;
+            for factor in [0.1, 1.0, 10.0] {
+                app.ui.view.deform_scale_factor = factor;
+                let shapes = paint_viewer(&mut app);
+                assert_eq!(
+                    filled_plate_points(&shapes, 55).len(),
+                    6,
+                    "axis {axis}, factor {factor}"
+                );
+                assert_eq!(
+                    slab_meshes(&shapes)
+                        .iter()
+                        .filter(
+                            |m| m.vertices[0].color == theme::translucent(theme::BEST_YELLOW, 28)
+                        )
+                        .count(),
+                    3
+                );
+            }
+        }
+        app.ui.view.show_floor_secondary = false;
+        assert_eq!(filled_plate_points(&paint_viewer(&mut app), 55).len(), 1);
+        app.ui.view.show_floor_secondary = true;
+        app.ui.scoped.frame_target = Some(FrameTarget::Axis { group: 0, axis: 0 });
+        assert_eq!(filled_plate_points(&paint_viewer(&mut app), 55).len(), 1);
+        app.ui.scoped.frame_target = Some(FrameTarget::Story(StoryId(1)));
+        assert_eq!(filled_plate_points(&paint_viewer(&mut app), 55).len(), 3);
+        app.ui.scoped.frame_target = None;
+        app.ui.view.view_mode = ViewMode::Shape;
+        assert!(filled_plate_points(&paint_viewer(&mut app), 55).is_empty());
+        app.ui.view.view_mode = ViewMode::Mode;
+        let retained = app.core.scoped.results.take();
+        assert!(filled_plate_points(&paint_viewer(&mut app), 55).is_empty());
+        app.core.scoped.results = retained;
+        assert_eq!(bincode::serialize(&app.core.model).unwrap(), input);
+        assert_eq!(
+            bincode::serialize(&app.core.scoped.results).unwrap(),
+            results
+        );
+        assert_eq!(format!("{:?}", app.core.scoped.staleness), staleness);
+        assert_eq!(
+            (
+                app.core.scoped.undo.revision(),
+                app.core.scoped.undo.can_undo(),
+                app.core.scoped.undo.can_redo()
+            ),
+            undo
+        );
+        assert_eq!(
+            rmp_serde::to_vec_named(&app.core.model).unwrap(),
+            saved_model
+        );
+        assert_eq!(save_contents(&app), saved_contents);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
