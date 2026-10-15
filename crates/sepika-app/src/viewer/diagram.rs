@@ -139,18 +139,16 @@ pub(crate) fn moment_curve_samples(
     out
 }
 
-/// `(xi, val)` のサンプル列から、塗りつぶし用の凸ポリゴン列を作る（純粋関数）。
-///
-/// 隣接サンプル区間ごとに `subdiv` 分割し、各細分区間を「材軸上の2点（val=0）＋
-/// 張り出し点2点」の台形として返す。区間内で符号が反転する場合は、線形補間で
-/// ゼロ交差 `xc = x0 + (x1-x0)*v0/(v0-v1)` を求めて2つの三角形（それぞれ片側符号
-/// のみ）に分割する。戻り値の各ポリゴンは xi 昇順の点列で、値の符号は単一
-/// （片側符号のみ、または境界でちょうど 0）になる。
-///
-/// `samples` は呼び出し側の保険として関数内で xi 昇順にソートする。
+/// `(xi, val)` を xi 昇順に並べ、隣接線形区間を `subdiv.max(1)` 等分した片側符号の凸領域を返す。
+/// 符号反転は線形ゼロ交差で分け、全ゼロ・ゼロ長区間は除く。
+/// 2点未満または非有限な xi・値を含む入力には空を返す。
 pub(crate) fn diagram_fill_polygons(samples: &[(f64, f64)], subdiv: usize) -> Vec<Vec<(f64, f64)>> {
     let subdiv = subdiv.max(1);
-    if samples.len() < 2 {
+    if samples.len() < 2
+        || samples
+            .iter()
+            .any(|&(xi, val)| !xi.is_finite() || !val.is_finite())
+    {
         return Vec::new();
     }
     let mut sorted = samples.to_vec();
@@ -177,13 +175,16 @@ pub(crate) fn diagram_fill_polygons(samples: &[(f64, f64)], subdiv: usize) -> Ve
 /// 同符号（またはどちらか一方が 0）なら台形 1 つ、符号反転ならゼロ交差で
 /// 2 つの三角形に分割する。両端が 0（面積なし）の場合は何も積まない。
 fn push_segment_fill(x0: f64, v0: f64, x1: f64, v1: f64, out: &mut Vec<Vec<(f64, f64)>>) {
-    if v0 == 0.0 && v1 == 0.0 {
+    if ![x0, v0, x1, v1].into_iter().all(f64::is_finite) || x1 <= x0 || (v0 == 0.0 && v1 == 0.0) {
         return;
     }
     if (v0 >= 0.0 && v1 >= 0.0) || (v0 <= 0.0 && v1 <= 0.0) {
         out.push(vec![(x0, 0.0), (x0, v0), (x1, v1), (x1, 0.0)]);
     } else {
         let xc = x0 + (x1 - x0) * v0 / (v0 - v1);
+        if !xc.is_finite() || xc <= x0 || xc >= x1 {
+            return;
+        }
         out.push(vec![(x0, 0.0), (x0, v0), (xc, 0.0)]);
         out.push(vec![(xc, 0.0), (x1, v1), (x1, 0.0)]);
     }
@@ -699,6 +700,74 @@ fn draw_force_legend(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn polygon_area(poly: &[(f64, f64)]) -> f64 {
+        poly.iter()
+            .zip(poly.iter().cycle().skip(1))
+            .take(poly.len())
+            .map(|(&(x, y), &(u, v))| x * v - u * y)
+            .sum::<f64>()
+            .abs()
+            / 2.0
+    }
+
+    #[test]
+    fn diagram_fill_polygons_crossing_has_exact_half_unit_triangles() {
+        let polys = diagram_fill_polygons(&[(0.0, 2.0), (1.0, -2.0)], 1);
+        assert_eq!(
+            polys,
+            vec![
+                vec![(0.0, 0.0), (0.0, 2.0), (0.5, 0.0)],
+                vec![(0.5, 0.0), (1.0, -2.0), (1.0, 0.0)],
+            ]
+        );
+        assert_eq!(
+            polys
+                .iter()
+                .map(|poly| polygon_area(poly))
+                .collect::<Vec<_>>(),
+            vec![0.5, 0.5]
+        );
+        assert_eq!(
+            polys.iter().map(|poly| polygon_area(poly)).sum::<f64>(),
+            1.0
+        );
+    }
+
+    #[test]
+    fn diagram_fill_polygons_keeps_four_single_sign_regions_between_zero_samples() {
+        let polys = diagram_fill_polygons(
+            &[
+                (0.0, 0.0),
+                (0.25, 1.0),
+                (0.5, 0.0),
+                (0.75, -1.0),
+                (1.0, 0.0),
+            ],
+            1,
+        );
+        assert_eq!(polys.len(), 4);
+        for (index, poly) in polys.iter().enumerate() {
+            assert_eq!(polygon_area(poly), 0.125);
+            assert!(poly
+                .iter()
+                .all(|&(_, v)| if index < 2 { v >= 0.0 } else { v <= 0.0 }));
+        }
+        assert!(diagram_fill_polygons(&[(0.0, 0.0), (0.5, 0.0), (1.0, 0.0)], 1).is_empty());
+    }
+
+    #[test]
+    fn diagram_fill_polygons_rejects_nonfinite_samples_and_zero_length_intervals() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(diagram_fill_polygons(&[(0.0, 1.0), (bad, 2.0), (1.0, 1.0)], 1).is_empty());
+            assert!(diagram_fill_polygons(&[(0.0, 1.0), (0.5, bad), (1.0, 1.0)], 1).is_empty());
+        }
+        assert!(diagram_fill_polygons(&[(0.5, 1.0), (0.5, -1.0)], 1).is_empty());
+        assert_eq!(
+            diagram_fill_polygons(&[(0.0, 1.0), (0.0, 1.0), (1.0, 1.0)], 1).len(),
+            1
+        );
+    }
 
     /// 単調増加（同符号）の区間は、各細分区間が台形（材軸2点＋張り出し2点）になり、
     /// 符号は常に非負（片側符号のみ）であることを確認する。

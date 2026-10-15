@@ -426,29 +426,63 @@ pub(super) fn draw_cmq_diagram(
             CmqComponent::M => {
                 let xis = cmq_m_sample_xis(&t.loads, t.l);
                 let mut val_max = 0.0_f64;
-                let samples: Vec<(f64, [f64; 3])> = xis
+                let samples: Vec<(f64, f64)> = xis
                     .into_iter()
                     .map(|xi| {
                         let val =
                             sepika_load::floor::simple_beam_moment_at(&t.loads, t.l, xi * t.l);
                         val_max = val_max.max(val.abs());
-                        let base3 = [
-                            p_i[0] + (p_j[0] - p_i[0]) * xi,
-                            p_i[1] + (p_j[1] - p_i[1]) * xi,
-                            p_i[2] + (p_j[2] - p_i[2]) * xi,
-                        ];
-                        (val, base3)
+                        (xi, val)
                     })
                     .collect();
                 let peak_px = (60.0 * val_max / max_m.max(1e-12)) as f32;
-                if peak_px < diagram::MIN_DIAGRAM_PX {
+                if peak_px < diagram::MIN_DIAGRAM_PX
+                    || samples
+                        .iter()
+                        .any(|&(xi, val)| !xi.is_finite() || !val.is_finite())
+                {
                     continue;
+                }
+                let project_sample = |(xi, val): (f64, f64)| {
+                    let base3 = [
+                        p_i[0] + (p_j[0] - p_i[0]) * xi,
+                        p_i[1] + (p_j[1] - p_i[1]) * xi,
+                        p_i[2] + (p_j[2] - p_i[2]) * xi,
+                    ];
+                    proj.project_offset(base3, ey, -val * m_amp)
+                };
+                let projected: Vec<_> = samples.iter().copied().map(project_sample).collect();
+                if !p0.is_finite() || !p1.is_finite() || projected.iter().any(|pt| !pt.is_finite())
+                {
+                    continue;
+                }
+                for poly in diagram::diagram_fill_polygons(&samples, 1) {
+                    let points: Vec<_> = poly.into_iter().map(project_sample).collect();
+                    if points.iter().any(|pt| !pt.is_finite()) {
+                        continue;
+                    }
+                    let origin = points[0];
+                    let area_twice: f64 = points[1..]
+                        .windows(2)
+                        .map(|edge| {
+                            let a = edge[0] - origin;
+                            let b = edge[1] - origin;
+                            a.x as f64 * b.y as f64 - a.y as f64 * b.x as f64
+                        })
+                        .sum();
+                    if area_twice == 0.0 || !area_twice.is_finite() {
+                        continue;
+                    }
+                    painter.add(egui::Shape::convex_polygon(
+                        points,
+                        theme::translucent(theme::HILITE_PURPLE, fill_alpha),
+                        egui::Stroke::NONE,
+                    ));
                 }
                 let mut m_poly = Vec::with_capacity(samples.len() + 2);
                 m_poly.push(p0);
                 let mut last = p0;
-                for (val, base3) in samples {
-                    let pt = proj.project_offset(base3, ey, -val * m_amp);
+                for pt in projected {
                     if (pt.x - last.x).hypot(pt.y - last.y) < diagram::MIN_SEGMENT_PX {
                         continue;
                     }
@@ -456,12 +490,13 @@ pub(super) fn draw_cmq_diagram(
                     m_poly.push(pt);
                 }
                 m_poly.push(p1);
-                paint_diagram_polygon(
-                    painter,
+                painter.add(egui::Shape::line(
                     m_poly,
-                    theme::translucent(theme::HILITE_PURPLE, fill_alpha),
-                    theme::translucent(theme::HILITE_PURPLE, stroke_alpha),
-                );
+                    egui::Stroke::new(
+                        1.5_f32,
+                        theme::translucent(theme::HILITE_PURPLE, stroke_alpha),
+                    ),
+                ));
             }
             CmqComponent::Q => {
                 let (q_i, q_j) = sum_simple_reactions(&t.loads, t.l);
@@ -601,6 +636,369 @@ mod tests {
             kind: ElementKind::Wall,
             ..mk_beam(id, i, j, [1.0, 0.0, 0.0])
         }
+    }
+
+    fn drawing_app(loads: Vec<MemberLoadKind>, reverse: bool, plane: DiagramPlane) -> App {
+        let mut app = App::default();
+        app.ui.view.cmq_component = CmqComponent::M;
+        app.ui.view.cmq_axes = CmqAxes {
+            ey: plane == DiagramPlane::Ey,
+            ez: plane == DiagramPlane::Ez,
+        };
+        let ref_vec = if plane == DiagramPlane::Ey {
+            [0.0, 1.0, 0.0]
+        } else {
+            [0.0, 0.0, 1.0]
+        };
+        app.core.model = Model {
+            nodes: vec![mk_node(0, 0.0, 0.0, 0.0), mk_node(1, 1000.0, 0.0, 0.0)],
+            elements: vec![mk_beam(0, u32::from(reverse), u32::from(!reverse), ref_vec)],
+            load_cases: vec![LoadCase {
+                id: sepika_core::ids::LoadCaseId(0),
+                name: "CMQ fixture".into(),
+                kind: LoadCaseKind::Dead,
+                nodal: Vec::new(),
+                member: loads
+                    .into_iter()
+                    .map(|load| MemberLoad::manual(ElemId(0), [0.0, -1.0, 0.0], load))
+                    .collect(),
+            }],
+            ..Default::default()
+        };
+        app
+    }
+
+    fn draw_paths(app: &App, scale: f32) -> Vec<egui::epaint::PathShape> {
+        let ctx = egui::Context::default();
+        let camera = super::super::CameraState {
+            rot: [1.0, 0.0, 0.0, 0.0],
+            ..Default::default()
+        };
+        let proj = Projector::new([0.0; 3], &camera, scale, [100.0, 100.0]);
+        let coords: Vec<_> = app.core.model.nodes.iter().map(|node| node.coord).collect();
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            draw_cmq_diagram(
+                &ui.ctx().layer_painter(egui::LayerId::background()),
+                app,
+                &coords,
+                &proj,
+                FrameFilter::default(),
+                None,
+            );
+        })
+        .shapes
+        .into_iter()
+        .filter_map(|shape| match shape.shape {
+            egui::Shape::Path(path) => Some(path),
+            _ => None,
+        })
+        .collect()
+    }
+
+    fn assert_fill_inside_sampled_outline(paths: &[egui::epaint::PathShape]) {
+        let outlines: Vec<_> = paths.iter().filter(|path| !path.closed).collect();
+        assert_eq!(outlines.len(), 1);
+        let outline = outlines[0];
+        let mut filled_area = 0.0_f64;
+        for fill in paths.iter().filter(|path| path.closed) {
+            assert_eq!(fill.stroke, egui::epaint::PathStroke::NONE);
+            assert!(fill.points.iter().all(|p| p.is_finite()));
+            let mut signed_sides = Vec::new();
+            for edge in fill
+                .points
+                .iter()
+                .zip(fill.points.iter().cycle().skip(1))
+                .take(fill.points.len())
+            {
+                let a = edge.0;
+                let b = edge.1;
+                for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                    let p = *a + (*b - *a) * fraction;
+                    let ordinate = outline
+                        .points
+                        .windows(2)
+                        .find_map(|segment| {
+                            let [u, v] = [segment[0], segment[1]];
+                            if (u.x - v.x).abs() < 1e-5
+                                || p.x < u.x.min(v.x) - 1e-4
+                                || p.x > u.x.max(v.x) + 1e-4
+                            {
+                                return None;
+                            }
+                            Some(u.y + (v.y - u.y) * (p.x - u.x) / (v.x - u.x))
+                        })
+                        .expect("塗りの点は輪郭の材軸区間内");
+                    assert!(
+                        p.y >= 100.0_f32.min(ordinate) - 2e-4
+                            && p.y <= 100.0_f32.max(ordinate) + 2e-4,
+                        "輪郭外の塗り: {p:?}, ordinate={ordinate}"
+                    );
+                }
+                if (a.y - 100.0).abs() > 1e-4 {
+                    signed_sides.push(a.y > 100.0);
+                }
+            }
+            assert!(signed_sides.iter().all(|side| *side == signed_sides[0]));
+            let area = fill
+                .points
+                .iter()
+                .zip(fill.points.iter().cycle().skip(1))
+                .take(fill.points.len())
+                .map(|(a, b)| a.x as f64 * b.y as f64 - a.y as f64 * b.x as f64)
+                .sum::<f64>()
+                .abs()
+                / 2.0;
+            assert!(area > 0.0);
+            filled_area += area;
+        }
+        let curve_area = outline
+            .points
+            .windows(2)
+            .map(|edge| {
+                let a = (edge[0].y - 100.0).abs() as f64;
+                let b = (edge[1].y - 100.0).abs() as f64;
+                let dx = (edge[1].x - edge[0].x).abs() as f64;
+                if (edge[0].y - 100.0) * (edge[1].y - 100.0) < 0.0 {
+                    dx * (a * a + b * b) / (2.0 * (a + b))
+                } else {
+                    dx * (a + b) / 2.0
+                }
+            })
+            .sum::<f64>();
+        assert!(
+            (filled_area - curve_area).abs() < 0.01,
+            "fill={filled_area} outline={curve_area}"
+        );
+    }
+
+    #[test]
+    fn cmq_m_drawing_keeps_fill_inside_positive_signed_nonconvex_and_reversed_outlines() {
+        let udl = MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 1000.0,
+            w1: 0.01,
+            w2: 0.01,
+        };
+        let signed = MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 1000.0,
+            w1: 0.01,
+            w2: -0.01,
+        };
+        let fixtures = [
+            vec![udl.clone()],
+            vec![signed],
+            vec![udl, MemberLoadKind::Point { a: 370.0, p: -10.0 }],
+            vec![
+                MemberLoadKind::Point { a: 200.0, p: 10.0 },
+                MemberLoadKind::Point { a: 400.0, p: -20.0 },
+                MemberLoadKind::Point { a: 600.0, p: 20.0 },
+                MemberLoadKind::Point { a: 800.0, p: -10.0 },
+            ],
+        ];
+        for loads in fixtures {
+            for reverse in [false, true] {
+                for plane in [DiagramPlane::Ey, DiagramPlane::Ez] {
+                    let app = drawing_app(loads.clone(), reverse, plane);
+                    let paths = draw_paths(&app, 0.5);
+                    assert!(paths.iter().filter(|path| path.closed).count() >= 32);
+                    assert_fill_inside_sampled_outline(&paths);
+                    let alpha = if plane == DiagramPlane::Ey {
+                        (60, 255)
+                    } else {
+                        (30, 128)
+                    };
+                    for path in &paths {
+                        if path.closed {
+                            assert_eq!(
+                                path.fill,
+                                theme::translucent(theme::HILITE_PURPLE, alpha.0)
+                            );
+                        } else {
+                            assert_eq!(
+                                path.stroke.color,
+                                egui::epaint::ColorMode::Solid(theme::translucent(
+                                    theme::HILITE_PURPLE,
+                                    alpha.1
+                                ))
+                            );
+                            assert_eq!(path.stroke.width, 1.5);
+                        }
+                    }
+                    if loads
+                        .iter()
+                        .any(|load| matches!(load, MemberLoadKind::Point { a: 370.0, .. }))
+                    {
+                        let point_x = if reverse { 415.0 } else { 285.0 };
+                        assert!(paths
+                            .iter()
+                            .find(|path| !path.closed)
+                            .unwrap()
+                            .points
+                            .iter()
+                            .any(|p| (p.x - point_x).abs() < 1e-4));
+                    }
+                    if loads.len() == 4 {
+                        let outline = paths.iter().find(|path| !path.closed).unwrap();
+                        for (x_mm, y_px) in
+                            [(200.0, 120.0), (400.0, 40.0), (600.0, 160.0), (800.0, 80.0)]
+                        {
+                            let x_px = 100.0 + 0.5 * if reverse { 1000.0 - x_mm } else { x_mm };
+                            assert!(outline
+                                .points
+                                .iter()
+                                .any(|p| (p.x - x_px).abs() < 1e-4 && (p.y - y_px).abs() < 1e-4));
+                        }
+                        for x_px in [225.0, 350.0, 475.0] {
+                            assert!(paths.iter().filter(|path| path.closed).any(|path| path
+                                .points
+                                .iter()
+                                .any(|p| (p.x - x_px).abs() < 1e-4 && p.y == 100.0)));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cmq_m_drawing_preserves_closed_form_ordinates_and_single_outline() {
+        let app = drawing_app(
+            vec![MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 1000.0,
+                w1: 0.01,
+                w2: 0.01,
+            }],
+            false,
+            DiagramPlane::Ey,
+        );
+        let paths = draw_paths(&app, 0.5);
+        let outline = paths.iter().find(|path| !path.closed).unwrap();
+        let mut expected = vec![egui::pos2(100.0, 100.0)];
+        for k in 1..=32 {
+            let xi = k as f32 / 32.0;
+            expected.push(egui::pos2(
+                100.0 + 500.0 * xi,
+                100.0 + 240.0 * xi * (1.0 - xi),
+            ));
+        }
+        expected.push(egui::pos2(600.0, 100.0));
+        assert_eq!(outline.points, expected);
+        assert_eq!(paths.iter().filter(|path| path.closed).count(), 32);
+    }
+
+    #[test]
+    fn cmq_m_drawing_rejects_zero_nonfinite_and_collapsed_fill() {
+        let load = MemberLoadKind::Point { a: 370.0, p: 10.0 };
+        for p in [0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let app = drawing_app(
+                vec![MemberLoadKind::Point { a: 370.0, p }],
+                false,
+                DiagramPlane::Ey,
+            );
+            assert!(draw_paths(&app, 0.5).is_empty());
+        }
+        for a in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let app = drawing_app(
+                vec![MemberLoadKind::Point { a, p: 10.0 }],
+                false,
+                DiagramPlane::Ey,
+            );
+            assert!(draw_paths(&app, 0.5).iter().all(|p| !p.closed));
+        }
+        let app = drawing_app(vec![load.clone()], false, DiagramPlane::Ey);
+        for scale in [f32::NAN, f32::INFINITY, 0.0] {
+            assert!(draw_paths(&app, scale).is_empty());
+        }
+        let mut zero_length = drawing_app(vec![load.clone()], false, DiagramPlane::Ey);
+        zero_length.core.model.nodes[1].coord = [0.0; 3];
+        assert!(draw_paths(&zero_length, 0.5).is_empty());
+        let mut edge_on = drawing_app(vec![load], false, DiagramPlane::Ey);
+        edge_on.core.model.elements[0].local_axis.ref_vector = [0.0, 0.0, 1.0];
+        edge_on.core.model.load_cases[0].member[0].dir = [0.0, 0.0, -1.0];
+        assert!(draw_paths(&edge_on, 0.5).iter().all(|p| !p.closed));
+    }
+
+    #[test]
+    fn cmq_drawing_preserves_model_loads_end_moments_saved_results_and_undo_history() {
+        let loads = vec![
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 1000.0,
+                w1: 0.01,
+                w2: -0.01,
+            },
+            MemberLoadKind::Point { a: 370.0, p: -10.0 },
+        ];
+        let mut app = drawing_app(loads.clone(), false, DiagramPlane::Ey);
+        for coord in [[2000.0, 0.0, 0.0], [3000.0, 0.0, 0.0]] {
+            assert!(app.core.scoped.undo.run(
+                &mut app.core.model,
+                Box::new(sepika_edit::AddNode {
+                    coord,
+                    restraint: Default::default()
+                })
+            ));
+        }
+        app.core.scoped.undo.undo(&mut app.core.model);
+        assert!(app.core.scoped.undo.can_undo());
+        assert!(app.core.scoped.undo.can_redo());
+        let mut result = serde_json::to_value(crate::app::ResultsBundle::default()).unwrap();
+        result["input_records"] = serde_json::json!([["Modal", [5, 0, 0]]]);
+        app.core.scoped.results = Some(serde_json::from_value(result).unwrap());
+        app.core.scoped.results.as_mut().unwrap().member_forces = vec![(
+            ElemId(0),
+            sepika_element::frame::beam::MemberForces {
+                at: vec![(0.0, [1.0; 6]), (1.0, [2.0; 6])],
+            },
+        )];
+        let before_model = bincode::serialize(&app.core.model).unwrap();
+        let before_results = bincode::serialize(&app.core.scoped.results).unwrap();
+        let before_undo = (
+            app.core.scoped.undo.revision(),
+            app.core.scoped.undo.undo_label().map(str::to_owned),
+            app.core.scoped.undo.redo_label().map(str::to_owned),
+        );
+        let before_c = sum_fixed_end_moments(&loads, 1000.0);
+        let before_q = sum_simple_reactions(&loads, 1000.0);
+        let before_m = sepika_load::floor::simple_beam_moment_at(&loads, 1000.0, 370.0);
+        for (component, color) in [
+            (CmqComponent::C, theme::DATA_BLUE),
+            (CmqComponent::M, theme::HILITE_PURPLE),
+            (CmqComponent::Q, theme::GOOD_GREEN),
+        ] {
+            app.ui.view.cmq_component = component;
+            let paths = draw_paths(&app, 0.5);
+            assert!(!paths.is_empty());
+            assert_eq!(paths.iter().filter(|p| !p.closed).count(), 1);
+            for path in &paths {
+                if path.closed {
+                    assert_eq!(path.fill, theme::translucent(color, 60));
+                } else {
+                    assert_eq!(path.stroke.color, egui::epaint::ColorMode::Solid(color));
+                }
+            }
+        }
+        assert_eq!(bincode::serialize(&app.core.model).unwrap(), before_model);
+        assert_eq!(
+            bincode::serialize(&app.core.scoped.results).unwrap(),
+            before_results
+        );
+        assert_eq!(
+            (
+                app.core.scoped.undo.revision(),
+                app.core.scoped.undo.undo_label().map(str::to_owned),
+                app.core.scoped.undo.redo_label().map(str::to_owned)
+            ),
+            before_undo
+        );
+        assert_eq!(sum_fixed_end_moments(&loads, 1000.0), before_c);
+        assert_eq!(sum_simple_reactions(&loads, 1000.0), before_q);
+        assert_eq!(
+            sepika_load::floor::simple_beam_moment_at(&loads, 1000.0, 370.0),
+            before_m
+        );
     }
 
     // `ElementKind` は柱・梁を区別しない（幾何で決まる。`sepika_core::frame::is_column`
