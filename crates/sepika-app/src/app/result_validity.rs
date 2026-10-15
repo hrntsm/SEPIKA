@@ -168,6 +168,7 @@ impl App {
             self.core.scoped.staleness.last_run = None;
             self.core.scoped.holding_capacity_source = None;
             self.core.scoped.ds_beta_u_by_story.clear();
+            self.core.scoped.ds_wall_details.clear();
             self.core.scoped.ds_beta_u_unavailable = false;
             self.core.scoped.ds_rank_fallback_stories.clear();
         } else if let Some(bundle) = self.core.scoped.results.as_mut() {

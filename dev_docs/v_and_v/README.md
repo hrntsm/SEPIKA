@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [単独RC壁Ds応力度と側柱寸法_Issue619_2026-10.md](単独RC壁Ds応力度と側柱寸法_Issue619_2026-10.md) | 柱心間距離によるDs応力度・両側柱寸法・既存評価点／Q・理由付き未算定 | 🔶（独立値・Source焦点Verification成功、広域検証・手動GUI／Validation・最終ゲートは別確認） |
 | [時刻歴時間軸_Issue610_2026-10.md](時刻歴時間軸_Issue610_2026-10.md) | 入力瞬時値・初期釣合い・N−1積分・間引き・checkpoint・既存入口と保存失効 | 🔶（独立fixture・境界・自動GUI/MCP・保存失効・文書Verification成功。手動GUI／Validation・正式ゲートは別確認） |
 | [時刻歴の実入力と結果所属_Issue611_2026-10.md](時刻歴の実入力と結果所属_Issue611_2026-10.md) | 立体・質点系の実波形／実効設定・開始対象・保存所属と拒否時状態保持 | 🔶（固定結果・実ファイル本体・保存の受入。モデル条件結合修正後GUI14＋既存617成功、default全体・広域再検査・native操作・Validation・正式ゲートは別確認） |
 | [CMQのM成分塗り分割_Issue500_2026-10.md](CMQのM成分塗り分割_Issue500_2026-10.md) | サンプルを保持した塗り分割・独立面積・本番描画・数値と状態の保持 | 🔶（独立算術・自動描画・App広域回帰・両Clippy・strict Rustdoc成功。手動GUI未実施。最終ゲートは[PR #662](https://github.com/hrntsm/SEPIKA/pull/662)） |
@@ -242,6 +243,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
+| 619 | 単独RC壁のDs応力度と側柱寸法 | sepika-design-jp / sepika-app / sepika-core | secondary/ds_group.rs・actions/design/holding.rs・result_contract.rs | [独立期待値と実入口](単独RC壁Ds応力度と側柱寸法_Issue619_2026-10.md#独立期待値と試験への対応) | 横断 | 🔶（Source焦点Verification成功、広域・Validation・最終ゲート別確認） |
 | 1d | 質点系先行成果鮮度 | sepika-app | app/actions/lumped_mass.rs | [Issue612検証](質点系先行成果鮮度_Issue612_2026-10.md)：実成果存在・入力一致、限定片持柱独立 K/T、拒否/失敗/取消保持 | P1/P2 | 🔶（自動入口 Verification、手動 GUI 未） |
 | 1 | ティモシェンコ梁 | sepika-element | beam.rs | `test_phi_zero_converges_to_bernoulli`（Bernoulli 極限。軸 EA/L・ねじり GJ/L を含む 12×12 成分。テスト再編により旧 `test_beam_axial_stiffness`・`test_beam_torsion_stiffness` を統合）, `test_torsion_not_stiffened_by_rigid_zone`（剛域ありでもねじりは GJ/L のまま） | P1 | ✅ |
 | 1b | SRC解析用弾性係数比 | sepika-core / sepika-element / sepika-solver / sepika-app / sepika-design-jp | section_shape/composite.rs, frame/beam/stiffness_factors.rs, app/preparation.rs | `src_analysis_ratio_matches_independent_rectangular_h_section` / `src_loaded_and_edited_materials_never_use_provisional_analysis_properties` / `src_invalid_ec_and_poisson_are_analysis_errors` / `allowable_bending_ratio_boundaries_are_separate_from_analysis_ratio` | 横断 | 🔶（原本全式/実験未） |
