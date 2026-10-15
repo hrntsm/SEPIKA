@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [RC専用断面の板参照境界_Issue677_2026-10.md](RC専用断面の板参照境界_Issue677_2026-10.md) | RC梁/柱専用3型の床板・壁版参照境界、正常板対照・編集/保存/解析/数量 | 🔶（App正常4/拒否12条件・既存6試験・不正OVIKA27条件・MCP公開JSON3試験default/feature成功。広域・最終ゲートは後続） |
 | [RC断面の専用用途_Issue674_2026-10.md](RC断面の専用用途_Issue674_2026-10.md) | RC梁/柱専用用途・逆用途拒否と原子性・正常3型の共有/None・数量/標準STB/OVIKA | 🔶（Edit/OVIKA・正常6条件/MCP4試験Verification成功、広域・正式最終ゲートは後続） |
 | [非節点二次部材数量_Issue557_2026-10.md](非節点二次部材数量_Issue557_2026-10.md) | 二次部材の実長・階未確定・SM識別・厳密な実材集約・材料と編集保存 | 🔶（最終直接55・App4/MCP3・編集保存・最終広域default2044/feature1235・両Clippy/strictDoc・文書検査成功。nativeGUI/transport/Validation・最終ゲート未確認） |
 | [RC梁Q0の符号付き端反力合成_Issue600_2026-10.md](RC梁Q0の符号付き端反力合成_Issue600_2026-10.md) | local Qy・端別係数合成・0/不足・公開入口・旧検定失効 | 🔶（Source直接・追加受入8・旧11保存・関連default/feature・両Clippy/strictDoc成功。MCP絶対Q0非公開、手動GUI/Validation・正式レビュー/最終CIは未確認） |
@@ -247,6 +248,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
+| 677 | RC専用断面の板参照境界 | sepika-core / sepika-edit / sepika-io / sepika-solver / sepika-app / sepika-mcp | model/section・aggregate、refs・wall_misc、ovika、tests/rc_section_purpose・rc_plate_section_purpose | [独立期待値と実入口](RC専用断面の板参照境界_Issue677_2026-10.md#修正後の独立期待値と実入口) | 横断 | 🔶（App/IO・MCP公開JSON3試験成功、広域・最終ゲート後続） |
 | 674 | RC断面の専用用途 | sepika-core / sepika-edit / sepika-io / sepika-solver / sepika-app / sepika-mcp | model/section・aggregate、ovika、tests/rc_section_purpose | [独立期待値と実入口](RC断面の専用用途_Issue674_2026-10.md#独立期待値と実入口) | 横断 | 🔶（Edit/OVIKA・正常6条件/MCP4試験成功、広域・最終ゲート後続） |
 | 619 | 単独RC壁のDs応力度と側柱寸法 | sepika-design-jp / sepika-app / sepika-core | secondary/ds_group.rs・actions/design/holding.rs・result_contract.rs | [独立期待値と実入口](単独RC壁Ds応力度と側柱寸法_Issue619_2026-10.md#独立期待値と試験への対応) | 横断 | 🔶（Source焦点Verification成功、広域・Validation・最終ゲート別確認） |
 | 28a | 鉛直Column支持の小梁自重 | sepika-core / sepika-edit / sepika-load | face_distance.rs, tests/column_support_faces.rs | [Issue423の独立値・公開入口・全5Done](鉛直柱支持小梁の自重フェース_Issue423_2026-10.md) | 横断 | 🔶（公開8試験/MassEquiv節点加算/旧20保存回帰Verification、Validation未実施） |

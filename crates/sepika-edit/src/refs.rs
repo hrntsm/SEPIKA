@@ -83,6 +83,16 @@ pub(crate) fn plate_section_ref_ok(model: &Model, id: Option<SectionId>) -> bool
             .is_none_or(|section| !section.is_cft())
 }
 
+pub(crate) fn rc_plate_section_error(
+    model: &Model,
+    id: Option<SectionId>,
+    plate: impl std::fmt::Debug,
+) -> Option<String> {
+    id.and_then(|sid| model.section(sid))
+        .and_then(|section| section.validate_rc_plate_use().err())
+        .map(|reason| format!("{plate:?}: {reason}"))
+}
+
 pub(crate) fn secondary_section_ref_ok(model: &Model, id: Option<SectionId>) -> bool {
     section_ref_ok(model, id)
         && id

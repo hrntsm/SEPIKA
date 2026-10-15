@@ -391,3 +391,252 @@ fn rc_circle_column_section_is_shared_by_column_and_post() {
 fn rc_circle_column_post_section_keeps_no_frame_use() {
     assert_normal_path(RcKind::CircleColumn, false, "circle-none");
 }
+
+fn plate_model(wall: bool, numeric: bool) -> Model {
+    let (mut model, _) = normal_model(
+        if wall {
+            RcKind::RectColumn
+        } else {
+            RcKind::Beam
+        },
+        false,
+    );
+    model
+        .floor_regions
+        .iter_mut()
+        .for_each(|region| region.secondary_beams.clear());
+    model
+        .wall_regions
+        .iter_mut()
+        .for_each(|region| region.posts.clear());
+    model.rebuild_assignment_regions().unwrap();
+    let mut plate_section = if wall {
+        SectionShape::RcWall {
+            thickness: 180.0,
+            ps: 0.0025,
+            pwh_ratio: Some(0.0025),
+            pwv_ratio: Some(0.0025),
+        }
+        .to_section(SectionId(3), "板".into())
+    } else {
+        SectionShape::RcSlab { thickness: 180.0 }.to_section(SectionId(3), "板".into())
+    };
+    plate_section.material = Some(MaterialId(0));
+    if numeric {
+        plate_section.shape = None;
+    }
+    model.sections.push(plate_section);
+    let mut stack = UndoStack::new();
+    let command: Box<dyn sepika_edit::EditCommand> = if wall {
+        Box::new(sepika_edit::AssignWallPlateToRegion {
+            region: model.wall_assignment_regions.regions[0].id,
+            section: Some(SectionId(3)),
+            opening_area: 0.0,
+            opening_weight: 0.0,
+        })
+    } else {
+        Box::new(sepika_edit::AssignSlabToFloorPlateRegion {
+            region: model.floor_assignment_regions.regions[0].id,
+            plate: SlabPlate {
+                section: Some(SectionId(3)),
+                ..Default::default()
+            },
+        })
+    };
+    assert!(stack.run(&mut model, command), "{:?}", stack.last_error());
+    if wall {
+        model.wall_plates[0].self_weight_shares = vec![1.0, 0.0, 0.0, 0.0];
+    }
+    model.validate().unwrap();
+    model
+}
+
+fn plate_section_command(wall: bool, id: Option<SectionId>) -> Box<dyn sepika_edit::EditCommand> {
+    if wall {
+        Box::new(sepika_edit::SetWallPlateSection {
+            id: WallPlateId(0),
+            section: id,
+        })
+    } else {
+        Box::new(sepika_edit::SetSlabSection {
+            id: SlabId(0),
+            section: id,
+        })
+    }
+}
+
+fn assert_plate_reason(error: &str, wall: bool, kind: RcKind, section_id: u32) {
+    let plate = if wall { "WallPlateId(0)" } else { "SlabId(0)" };
+    let reason = if matches!(kind, RcKind::Beam) {
+        "RC 梁用断面は大梁・小梁専用"
+    } else {
+        "RC 柱用断面は柱・間柱専用"
+    };
+    assert!(
+        error.contains(plate)
+            && error.contains(&format!("SectionId({section_id})"))
+            && error.contains(reason),
+        "{error}"
+    );
+}
+
+#[test]
+fn normal_rc_and_numeric_plates_keep_edit_roundtrip_prepare_and_quantity() {
+    for wall in [false, true] {
+        for numeric in [false, true] {
+            let mut model = plate_model(wall, numeric);
+            let mut stack = UndoStack::new();
+            assert!(stack.run(&mut model, plate_section_command(wall, None)));
+            model.validate().unwrap();
+            let missing_errors: Vec<_> = model_issues(&model)
+                .into_iter()
+                .filter(|i| i.severity == IssueSeverity::Error)
+                .map(|i| i.message)
+                .collect();
+            if wall {
+                assert!(missing_errors.is_empty(), "{missing_errors:?}");
+                Analysis::prepare(&model).unwrap();
+            } else {
+                assert!(!missing_errors.is_empty());
+                assert!(Analysis::prepare(&model).is_err());
+            }
+            let unassigned_path = std::env::temp_dir().join(format!(
+                "sepika677-unassigned-{}-{wall}-{numeric}.ovika",
+                std::process::id()
+            ));
+            save_ovika(&unassigned_path, &model, OvikaExtras::default()).unwrap();
+            let unassigned = load_ovika(&unassigned_path).unwrap().model;
+            assert!(unassigned.eq_ignoring_dofmap(&model));
+            std::fs::remove_file(unassigned_path).unwrap();
+            assert!(stack.run(&mut model, plate_section_command(wall, Some(SectionId(3)))));
+            model.validate().unwrap();
+            let path = std::env::temp_dir().join(format!(
+                "sepika677-normal-{}-{wall}-{numeric}.ovika",
+                std::process::id()
+            ));
+            save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+            let loaded = load_ovika(&path).unwrap().model;
+            std::fs::remove_file(path).unwrap();
+            assert_eq!(
+                serde_json::to_value(&model).unwrap(),
+                serde_json::to_value(&loaded).unwrap()
+            );
+            let errors: Vec<_> = model_issues(&loaded)
+                .into_iter()
+                .filter(|i| i.severity == IssueSeverity::Error)
+                .map(|i| i.message)
+                .collect();
+            assert!(
+                errors.is_empty(),
+                "wall={wall} numeric={numeric} {errors:?}"
+            );
+            Analysis::prepare(&loaded).unwrap();
+            sepika_design_jp::quantity::try_compute_quantity_takeoff(&loaded, &Default::default())
+                .unwrap();
+            let thickness = if wall {
+                loaded.sections[3].thickness.unwrap()
+            } else {
+                loaded.slab_plate_thickness(&loaded.slabs[0]).unwrap()
+            };
+            assert_eq!(thickness, 180.0);
+        }
+    }
+}
+
+#[test]
+fn rc_frame_sections_reject_plate_assignment_and_shape_edit_without_state_changes() {
+    for wall in [false, true] {
+        for numeric in [false, true] {
+            for kind in [RcKind::Beam, RcKind::RectColumn, RcKind::CircleColumn] {
+                let mut model = plate_model(wall, numeric);
+                model.sections.push(section(kind, SectionId(4), 0.0, None));
+                for (command, expected_id) in [
+                    (plate_section_command(wall, Some(SectionId(4))), 4),
+                    (
+                        Box::new(EditSectionShape {
+                            section: SectionId(3),
+                            new_shape: kind.shape(0.0),
+                            frame_use: None,
+                        }) as Box<dyn sepika_edit::EditCommand>,
+                        3,
+                    ),
+                ] {
+                    let mut actual = model.clone();
+                    let mut direct = model.clone();
+                    let inverse = command.apply(&mut direct);
+                    assert_plate_reason(inverse.rejection().unwrap(), wall, kind, expected_id);
+                    assert!(direct.eq_ignoring_dofmap(&model));
+                    let mut stack = UndoStack::new();
+                    assert!(stack.run(
+                        &mut actual,
+                        Box::new(sepika_edit::SetSectionName {
+                            id: SectionId(3),
+                            name: "履歴".into(),
+                            floor: None
+                        })
+                    ));
+                    stack.undo(&mut actual);
+                    let before = actual.clone();
+                    let revision = stack.revision();
+                    let redo = stack.redo_label().map(str::to_owned);
+                    assert!(!stack.run(&mut actual, command));
+                    assert_plate_reason(stack.last_error().unwrap(), wall, kind, expected_id);
+                    assert!(actual.eq_ignoring_dofmap(&before));
+                    assert_eq!(stack.revision(), revision);
+                    assert_eq!(stack.redo_label(), redo.as_deref());
+                    assert!(!stack.can_undo());
+                    assert!(stack.id_changes().is_empty());
+                }
+                let mut malformed = model.clone();
+                if wall {
+                    malformed.wall_plates[0].section = Some(SectionId(4));
+                } else {
+                    malformed.slabs[0].plate.section = Some(SectionId(4));
+                }
+                assert_plate_reason(
+                    &malformed.validate().unwrap_err().to_string(),
+                    wall,
+                    kind,
+                    4,
+                );
+                let issues = model_issues(&malformed);
+                assert!(issues
+                    .iter()
+                    .any(|issue| issue.severity == IssueSeverity::Error
+                        && issue.message.contains("専用")));
+                assert_plate_reason(
+                    &Analysis::prepare(&malformed).err().unwrap().to_string(),
+                    wall,
+                    kind,
+                    4,
+                );
+                assert_plate_reason(
+                    &sepika_design_jp::quantity::try_compute_quantity_takeoff(
+                        &malformed,
+                        &Default::default(),
+                    )
+                    .unwrap_err(),
+                    wall,
+                    kind,
+                    4,
+                );
+                let path = std::env::temp_dir().join(format!(
+                    "sepika677-reject-{}-{wall}-{numeric}.ovika",
+                    std::process::id()
+                ));
+                save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+                let original = std::fs::read(&path).unwrap();
+                assert_plate_reason(
+                    &save_ovika(&path, &malformed, OvikaExtras::default())
+                        .unwrap_err()
+                        .to_string(),
+                    wall,
+                    kind,
+                    4,
+                );
+                assert_eq!(std::fs::read(&path).unwrap(), original);
+                std::fs::remove_file(path).unwrap();
+            }
+        }
+    }
+}

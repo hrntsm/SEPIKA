@@ -374,7 +374,7 @@ mod tests {
             rc_purpose_shapes().into_iter().enumerate()
         {
             shape.validate_rebar().unwrap();
-            for mode in 0..5 {
+            for mode in 0..9 {
                 let mut model = make_3node_model();
                 let mut section = shape.clone().to_section(SectionId(0), "RC用途検証".into());
                 section.frame_use = if mode == 0 {
@@ -389,7 +389,32 @@ mod tests {
                     None
                 };
                 model.sections.push(section);
-                if mode != 0 {
+                if mode >= 5 {
+                    if mode <= 6 {
+                        model.slabs.push(Slab {
+                            id: SlabId(0),
+                            shape: SlabShape::Enclosed,
+                            plate: SlabPlate {
+                                section: Some(SectionId(0)),
+                                ..Default::default()
+                            },
+                            tip_loads: Vec::new(),
+                        });
+                    } else {
+                        model.wall_plates.push(WallPlate {
+                            id: WallPlateId(0),
+                            shape: WallPlateShape::Enclosed,
+                            section: Some(SectionId(0)),
+                            self_weight_shares: Vec::new(),
+                            opening_area: 0.0,
+                            opening_weight: 0.0,
+                            openings: Vec::new(),
+                            loads: Vec::new(),
+                            slit: Default::default(),
+                            dl_support: None,
+                        });
+                    }
+                } else if mode != 0 {
                     let sm = SecondaryMember {
                         id: SecondaryMemberId(674),
                         kind: wrong_kind,
@@ -413,9 +438,19 @@ mod tests {
                         }
                     }
                 }
+                let expected = |message: &str| {
+                    message.contains(reason)
+                        && (mode < 5
+                            || (message.contains("SectionId(0)")
+                                && message.contains(if mode <= 6 {
+                                    "SlabId(0)"
+                                } else {
+                                    "WallPlateId(0)"
+                                })))
+                };
                 let before = model.clone();
                 assert!(
-                    matches!(save_ovika(&path, &model, OvikaExtras::default()), Err(IoError::Decode(message)) if message.contains(reason)),
+                    matches!(save_ovika(&path, &model, OvikaExtras::default()), Err(IoError::Decode(message)) if expected(&message)),
                     "shape={index} mode={mode}"
                 );
                 assert_eq!(std::fs::read(&path).unwrap(), original);
@@ -441,7 +476,7 @@ mod tests {
                     path.with_file_name(format!("rc-purpose-invalid-{index}-{mode}.ovika"));
                 write_zip_with_manifest(&invalid_path, &manifest, &bytes, settings);
                 assert!(
-                    matches!(load_ovika(&invalid_path), Err(IoError::Decode(message)) if message.contains(reason)),
+                    matches!(load_ovika(&invalid_path), Err(IoError::Decode(message)) if expected(&message)),
                     "shape={index} mode={mode}"
                 );
             }

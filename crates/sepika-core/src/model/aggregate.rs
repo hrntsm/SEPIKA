@@ -1780,7 +1780,7 @@ impl Model {
         }
     }
 
-    /// RC 専用型の用途と、主架構・領域内外の二次部材からの参照を検証する。
+    /// RC 専用型の用途と、主架構・二次部材・床板・壁版からの参照を検証する。
     pub fn validate_rc_section_usage(&self) -> Result<(), crate::error::CoreError> {
         use crate::error::CoreError;
         let mut sections_by_id = std::collections::HashMap::with_capacity(self.sections.len());
@@ -1817,6 +1817,20 @@ impl Model {
                     })?;
             }
         }
+        for slab in &self.slabs {
+            if let Some(section) = slab.plate.section.and_then(section_for_id) {
+                section.validate_rc_plate_use().map_err(|reason| {
+                    CoreError::InvalidInput(format!("SlabId({}): {reason}", slab.id.0))
+                })?;
+            }
+        }
+        for plate in &self.wall_plates {
+            if let Some(section) = plate.section.and_then(section_for_id) {
+                section.validate_rc_plate_use().map_err(|reason| {
+                    CoreError::InvalidInput(format!("WallPlateId({}): {reason}", plate.id.0))
+                })?;
+            }
+        }
         Ok(())
     }
 
@@ -1845,6 +1859,24 @@ impl Model {
                 .map_err(|reason| {
                     format!("SecondaryMemberId({}) {:?}: {reason}", sm.id.0, sm.kind)
                 })?;
+        }
+        for slab in self
+            .slabs
+            .iter()
+            .filter(|slab| slab.plate.section == Some(section.id))
+        {
+            section
+                .validate_rc_plate_use()
+                .map_err(|reason| format!("SlabId({}): {reason}", slab.id.0))?;
+        }
+        for plate in self
+            .wall_plates
+            .iter()
+            .filter(|plate| plate.section == Some(section.id))
+        {
+            section
+                .validate_rc_plate_use()
+                .map_err(|reason| format!("WallPlateId({}): {reason}", plate.id.0))?;
         }
         Ok(())
     }
