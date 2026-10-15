@@ -32,6 +32,9 @@ pub struct VibrationCase {
     pub id: VibrationCaseId,
     pub name: String,
     pub wave_name: String,
+    /// 実波形と実効解析条件の識別。欠落した成果は再実行を要する。
+    #[serde(default)]
+    pub input_identity: Option<String>,
     pub dir: VibrationThDir,
     pub nonlinear: bool,
 }
@@ -42,6 +45,9 @@ pub struct LumpedVibrationCase {
     pub id: LumpedVibrationCaseId,
     pub name: String,
     pub wave_name: String,
+    /// 実波形と実効解析条件の識別。欠落した成果は再実行を要する。
+    #[serde(default)]
+    pub input_identity: Option<String>,
     pub dir: LumpedVibrationDir,
     pub nonlinear: bool,
     pub dim: LumpedVibrationDim,
@@ -128,16 +134,22 @@ fn next_lumped_vibration_case_id(cases: &[LumpedVibrationCase]) -> LumpedVibrati
 }
 
 impl super::Model {
-    /// 同名の立体振動ケースがあれば ID を維持して属性を更新し、なければ追加する。
+    /// 入力識別が一致する立体振動ケースの ID を維持し、なければ追加する。
     pub fn upsert_vibration_case(
         &mut self,
         wave_name: String,
         dir: VibrationThDir,
         nonlinear: bool,
+        input_identity: Option<String>,
     ) -> VibrationCaseId {
         let name = spatial_vibration_case_name(&wave_name, dir, nonlinear);
-        if let Some(pos) = self.vibration_cases.iter().position(|c| c.name == name) {
+        if let Some(pos) = self
+            .vibration_cases
+            .iter()
+            .position(|c| input_identity.is_some() && c.input_identity == input_identity)
+        {
             let id = self.vibration_cases[pos].id;
+            self.vibration_cases[pos].name = name;
             self.vibration_cases[pos].wave_name = wave_name;
             self.vibration_cases[pos].dir = dir;
             self.vibration_cases[pos].nonlinear = nonlinear;
@@ -148,27 +160,30 @@ impl super::Model {
             id,
             name,
             wave_name,
+            input_identity,
             dir,
             nonlinear,
         });
         id
     }
 
-    /// 同名の質点系振動ケースがあれば ID を維持して属性を更新し、なければ追加する。
+    /// 入力識別が一致する質点系振動ケースの ID を維持し、なければ追加する。
     pub fn upsert_lumped_vibration_case(
         &mut self,
         wave_name: String,
         dir: LumpedVibrationDir,
         nonlinear: bool,
         dim: LumpedVibrationDim,
+        input_identity: Option<String>,
     ) -> LumpedVibrationCaseId {
         let name = lumped_vibration_case_name(&wave_name, dir, nonlinear, dim);
         if let Some(pos) = self
             .lumped_vibration_cases
             .iter()
-            .position(|c| c.name == name)
+            .position(|c| input_identity.is_some() && c.input_identity == input_identity)
         {
             let id = self.lumped_vibration_cases[pos].id;
+            self.lumped_vibration_cases[pos].name = name;
             self.lumped_vibration_cases[pos].wave_name = wave_name;
             self.lumped_vibration_cases[pos].dir = dir;
             self.lumped_vibration_cases[pos].nonlinear = nonlinear;
@@ -180,6 +195,7 @@ impl super::Model {
             id,
             name,
             wave_name,
+            input_identity,
             dir,
             nonlinear,
             dim,
@@ -231,19 +247,39 @@ mod tests {
     }
 
     #[test]
-    fn upsert_vibration_case_preserves_id_on_same_name() {
+    fn upsert_vibration_case_preserves_id_for_same_input_identity() {
         let mut model = super::super::Model::default();
-        let id1 = model.upsert_vibration_case("サンプル".into(), VibrationThDir::X, false);
-        let id2 = model.upsert_vibration_case("サンプル".into(), VibrationThDir::X, false);
+        let id1 = model.upsert_vibration_case(
+            "サンプル".into(),
+            VibrationThDir::X,
+            false,
+            Some("fixture".into()),
+        );
+        let id2 = model.upsert_vibration_case(
+            "サンプル".into(),
+            VibrationThDir::X,
+            false,
+            Some("fixture".into()),
+        );
         assert_eq!(id1, id2);
         assert_eq!(model.vibration_cases.len(), 1);
     }
 
     #[test]
-    fn upsert_vibration_case_distinct_names_get_distinct_ids() {
+    fn upsert_vibration_case_distinguishes_input_identity_with_same_name() {
         let mut model = super::super::Model::default();
-        let id1 = model.upsert_vibration_case("サンプル".into(), VibrationThDir::X, false);
-        let id2 = model.upsert_vibration_case("サンプル".into(), VibrationThDir::Y, false);
+        let id1 = model.upsert_vibration_case(
+            "サンプル".into(),
+            VibrationThDir::X,
+            false,
+            Some("fixture".into()),
+        );
+        let id2 = model.upsert_vibration_case(
+            "サンプル".into(),
+            VibrationThDir::X,
+            false,
+            Some("fixture-y".into()),
+        );
         assert_ne!(id1, id2);
         assert_eq!(model.vibration_cases.len(), 2);
     }

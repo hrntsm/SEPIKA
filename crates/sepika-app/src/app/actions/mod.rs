@@ -423,8 +423,12 @@ impl App {
                 match result {
                     JobResult::Pushover(res) => self.apply_pushover_result(*res),
                     JobResult::Modal(res) => self.apply_eigen_result(res),
-                    JobResult::TimeHistory(res) => self.apply_time_history_result(*res),
-                    JobResult::LumpedMass(res) => self.apply_lumped_mass_result(*res),
+                    JobResult::TimeHistory(res, source) => {
+                        self.apply_time_history_result(*res, *source)
+                    }
+                    JobResult::LumpedMass(res, source) => {
+                        self.apply_lumped_mass_result(*res, source.map(|s| *s))
+                    }
                     JobResult::StaticCase { key, res } => self.apply_static_case_result(key, res),
                     JobResult::Combo { name, res } => self.apply_combo_result(name, res),
                     JobResult::StaticAll {
@@ -645,9 +649,11 @@ impl App {
             PendingAnalysis::StaticAll => self.start_static_all_job(),
             PendingAnalysis::Eigen(n_modes) => self.start_eigen_job(n_modes),
             PendingAnalysis::Pushover => self.start_pushover_job(),
-            PendingAnalysis::TimeHistory(wave) => self.start_time_history_job(*wave),
+            PendingAnalysis::TimeHistory(input) => self.start_time_history_input_job(*input),
             PendingAnalysis::LumpedMassEigen => self.start_lumped_mass_eigen_job(),
-            PendingAnalysis::LumpedMassTimeHistory(accel) => self.start_lumped_mass_th_job(accel),
+            PendingAnalysis::LumpedMassTimeHistory(input) => {
+                self.start_lumped_mass_th_input_job(*input)
+            }
         }
     }
 }

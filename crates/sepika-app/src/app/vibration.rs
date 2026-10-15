@@ -27,23 +27,69 @@ pub(crate) fn lumped_vibration_dim_from_stick(dim: StickDim) -> LumpedVibrationD
     }
 }
 
+pub(crate) fn vibration_identity(value: &impl serde::Serialize) -> String {
+    use sha2::{Digest, Sha256};
+    format!(
+        "{:x}",
+        Sha256::digest(bincode::serialize(value).expect("時刻歴入力の直列化"))
+    )
+}
+
+pub(crate) fn vibration_settings(cfg: AnalysisSettings, lumped: bool) -> AnalysisSettings {
+    let mut relevant = AnalysisSettings::default();
+    if lumped {
+        relevant.lumped_dim = cfg.lumped_dim;
+        relevant.lumped_stiffness = cfg.lumped_stiffness;
+        relevant.lumped_dir = cfg.lumped_dir;
+        relevant.lumped_nonlinear = cfg.lumped_nonlinear;
+        relevant.lumped_secant_ratio = cfg.lumped_secant_ratio;
+        relevant.lumped_n_modes = cfg.lumped_n_modes;
+        relevant.lumped_th_dt = cfg.lumped_th_dt;
+        relevant.lumped_th_damping = cfg.lumped_th_damping;
+    } else {
+        relevant.th_dir = cfg.th_dir;
+        relevant.th_damping = cfg.th_damping;
+        relevant.th_damping_model = cfg.th_damping_model;
+        relevant.th_h2 = cfg.th_h2;
+        relevant.th_nonlinear = cfg.th_nonlinear;
+        relevant.th_apply_long_term = cfg.th_apply_long_term;
+        relevant.th_max_iter = cfg.th_max_iter;
+        relevant.th_tol = cfg.th_tol;
+        relevant.th_record_every = cfg.th_record_every;
+        relevant.phase_diff_enabled = cfg.phase_diff_enabled;
+        relevant.phase_diff_vs = cfg.phase_diff_vs;
+        relevant.phase_diff_length_m = cfg.phase_diff_length_m;
+        relevant.phase_diff_incidence_deg = cfg.phase_diff_incidence_deg;
+        relevant.phase_diff_dir_y = cfg.phase_diff_dir_y;
+    }
+    relevant
+}
+
 impl App {
-    /// 立体時刻歴実行時の波形表示名（サンプル波は「サンプル」）。
-    pub(crate) fn spatial_th_wave_name(&self) -> String {
-        self.core
-            .scoped
-            .wave_library_selection
-            .clone()
-            .unwrap_or_else(|| "サンプル".to_string())
+    pub(crate) fn time_history_identity(&self, analysis_identity: &str) -> String {
+        vibration_identity(&(analysis_identity, self.core.model.calculation_model()))
     }
 
-    /// 質点系時刻歴実行時の波形表示名。
-    pub(crate) fn lumped_th_wave_name(&self) -> String {
-        self.core
-            .scoped
-            .lumped_wave_library_selection
-            .clone()
-            .unwrap_or_else(|| "サンプル".to_string())
+    pub(crate) fn bind_time_history_source(&self, source: &mut TimeHistorySource, lumped: bool) {
+        let identity = self.time_history_identity(&source.analysis_identity);
+        if source.identity != identity || source.target.is_none() {
+            source.target = if lumped {
+                self.core
+                    .model
+                    .lumped_vibration_cases
+                    .iter()
+                    .find(|c| c.input_identity.as_ref() == Some(&identity))
+                    .map(|c| c.id.0)
+            } else {
+                self.core
+                    .model
+                    .vibration_cases
+                    .iter()
+                    .find(|c| c.input_identity.as_ref() == Some(&identity))
+                    .map(|c| c.id.0)
+            };
+        }
+        source.identity = identity;
     }
 
     /// 立体時刻歴の表示窓口を切り替える（`time_history_data` も更新）。
@@ -359,7 +405,7 @@ impl ResultsBundle {
         let Some(th) = self.time_history.take() else {
             return;
         };
-        let id = model.upsert_vibration_case(wave_name.to_string(), dir, nonlinear);
+        let id = model.upsert_vibration_case(wave_name.to_string(), dir, nonlinear, None);
         self.time_histories.push((id, th.clone()));
         self.time_history = Some(th);
     }
@@ -385,7 +431,13 @@ impl ResultsBundle {
             return;
         };
         if lumped.response.is_some() {
-            let id = model.upsert_lumped_vibration_case(wave_name.to_string(), dir, nonlinear, dim);
+            let id = model.upsert_lumped_vibration_case(
+                wave_name.to_string(),
+                dir,
+                nonlinear,
+                dim,
+                None,
+            );
             self.lumped_results.push((id, lumped.clone()));
             self.lumped = Some(lumped);
         } else {

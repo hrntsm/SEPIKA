@@ -10,6 +10,14 @@ pub(crate) enum ResultInputKey {
     Modal,
     Design,
     TimeHistory(VibrationCaseId),
+    LumpedTimeHistory(sepika_core::ids::LumpedVibrationCaseId),
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct VibrationResultInput {
+    model: sepika_core::model::Model,
+    analysis_identity: String,
+    identity: String,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -352,9 +360,6 @@ impl App {
             threads: cfg.threads,
             ..Default::default()
         };
-        if matches!(key, ResultInputKey::TimeHistory(_)) {
-            relevant = cfg;
-        }
         if let ResultInputKey::Pushover(dir) = key {
             relevant.push_dir = *dir;
             relevant.push_steps = cfg.push_steps;
@@ -382,8 +387,27 @@ impl App {
                 .load_cases
                 .retain(|case| !is_standard_seismic_case(case));
         }
-        bincode::serialize(&(model, relevant, self.result_generation_period(key, cfg)))
-            .expect("計算入力の直列化")
+        if matches!(
+            key,
+            ResultInputKey::TimeHistory(_) | ResultInputKey::LumpedTimeHistory(_)
+        ) {
+            let input = self
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .and_then(|bundle| bundle.input_records.iter().find(|(saved, _)| saved == key))
+                .and_then(|(_, input)| bincode::deserialize::<VibrationResultInput>(input).ok());
+            input
+                .map(|mut input| {
+                    input.model = model;
+                    bincode::serialize(&input).expect("時刻歴入力の直列化")
+                })
+                .unwrap_or_default()
+        } else {
+            bincode::serialize(&(model, relevant, self.result_generation_period(key, cfg)))
+                .expect("計算入力の直列化")
+        }
     }
 
     fn result_generation_period(&self, key: &ResultInputKey, cfg: AnalysisSettings) -> Option<f64> {
@@ -413,9 +437,10 @@ impl App {
                             .any(|case| case.id == *id && is_standard_seismic_case(case))
                     })
                 }),
-            ResultInputKey::Modal | ResultInputKey::Design | ResultInputKey::TimeHistory(_) => {
-                false
-            }
+            ResultInputKey::Modal
+            | ResultInputKey::Design
+            | ResultInputKey::TimeHistory(_)
+            | ResultInputKey::LumpedTimeHistory(_) => false,
         };
         depends_on_seismic
             .then(|| {
@@ -546,6 +571,96 @@ impl App {
         self.core.scoped.results.as_ref()
     }
 
+    pub(crate) fn vibration_result_input(&self, source: &TimeHistorySource) -> Vec<u8> {
+        bincode::serialize(&VibrationResultInput {
+            model: self.calculation_model(),
+            analysis_identity: source.analysis_identity.clone(),
+            identity: source.identity.clone(),
+        })
+        .expect("時刻歴生成入力の直列化")
+    }
+
+    fn vibration_result_input_is_valid(&self, key: &ResultInputKey, current_model: bool) -> bool {
+        let identity = match key {
+            ResultInputKey::TimeHistory(id) => self
+                .core
+                .model
+                .vibration_cases
+                .iter()
+                .find(|c| c.id == *id)
+                .and_then(|c| c.input_identity.as_ref()),
+            ResultInputKey::LumpedTimeHistory(id) => self
+                .core
+                .model
+                .lumped_vibration_cases
+                .iter()
+                .find(|c| c.id == *id)
+                .and_then(|c| c.input_identity.as_ref()),
+            _ => return false,
+        };
+        let Some(identity) = identity else {
+            return false;
+        };
+        let Some(bundle) = self.core.scoped.results.as_ref() else {
+            return false;
+        };
+        if bundle.analysis_contract_version != Some(ANALYSIS_CONTRACT_VERSION) {
+            return false;
+        }
+        let Some((_, input_bytes)) = bundle.input_records.iter().find(|(saved, _)| saved == key)
+        else {
+            return false;
+        };
+        let Ok(input) = bincode::deserialize::<VibrationResultInput>(input_bytes) else {
+            return false;
+        };
+        bincode::serialize(&input).unwrap() == *input_bytes
+            && input.identity == *identity
+            && input.identity
+                == crate::app::vibration::vibration_identity(&(
+                    &input.analysis_identity,
+                    &input.model,
+                ))
+            && (!current_model
+                || bincode::serialize(&input.model).unwrap()
+                    == bincode::serialize(&self.calculation_model()).unwrap())
+    }
+
+    pub(super) fn filter_vibration_results(&self, bundle: &mut ResultsBundle) -> bool {
+        let before = (bundle.time_histories.len(), bundle.lumped_results.len());
+        bundle.time_histories.retain(|(id, _)| {
+            self.vibration_result_input_is_valid(&ResultInputKey::TimeHistory(*id), false)
+        });
+        bundle.lumped_results.retain(|(id, _)| {
+            self.vibration_result_input_is_valid(&ResultInputKey::LumpedTimeHistory(*id), false)
+        });
+        let spatial_ids: Vec<_> = bundle.time_histories.iter().map(|(id, _)| *id).collect();
+        let lumped_ids: Vec<_> = bundle.lumped_results.iter().map(|(id, _)| *id).collect();
+        bundle.input_records.retain(|(key, _)| match key {
+            ResultInputKey::TimeHistory(id) => spatial_ids.contains(id),
+            ResultInputKey::LumpedTimeHistory(id) => lumped_ids.contains(id),
+            _ => true,
+        });
+        if self
+            .core
+            .scoped
+            .view_vibration_case
+            .is_none_or(|id| !spatial_ids.contains(&id))
+        {
+            bundle.time_history = None;
+        }
+        if bundle.lumped.as_ref().is_some_and(|r| r.response.is_some())
+            && self
+                .core
+                .scoped
+                .view_lumped_vibration_case
+                .is_none_or(|id| !lumped_ids.contains(&id))
+        {
+            bundle.lumped = None;
+        }
+        before != (bundle.time_histories.len(), bundle.lumped_results.len())
+    }
+
     pub(super) fn job_input(&self) -> Vec<u8> {
         let period = matches!(self.core.analysis_cfg.ai_mode, AiMode::SemiPrecise)
             .then(|| self.design_seismic_period().ok())
@@ -586,6 +701,16 @@ impl App {
                 return Err(reason);
             }
         }
+        if matches!(
+            key,
+            ResultInputKey::TimeHistory(_) | ResultInputKey::LumpedTimeHistory(_)
+        ) {
+            return if self.vibration_result_input_is_valid(&key, true) {
+                Ok(())
+            } else {
+                Err("時刻歴結果の生成入力が欠落または入力識別・現在のモデルと不一致です。再実行してください。".into())
+            };
+        }
         let label = match &key {
             ResultInputKey::Static(StaticCaseKey::Seismic(dir)) => format!("地震静的 {dir:?}"),
             ResultInputKey::Static(StaticCaseKey::User(id)) => format!("静的荷重ケース {id:?}"),
@@ -594,6 +719,7 @@ impl App {
             ResultInputKey::Modal => "固有値解析".into(),
             ResultInputKey::Design => "検定".into(),
             ResultInputKey::TimeHistory(id) => format!("時刻歴解析 {}", id.0),
+            ResultInputKey::LumpedTimeHistory(id) => format!("質点系時刻歴解析 {}", id.0),
         };
         let input = self
             .core

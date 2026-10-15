@@ -150,6 +150,7 @@ impl App {
                     if self.require_design_input().is_err() {
                         saved.clear_design_results();
                     }
+                    self.filter_vibration_results(&mut saved);
                     saved
                 },
                 last_static: self.core.scoped.last_static,
@@ -407,6 +408,24 @@ impl App {
                         self.core.scoped.staleness.design_stale =
                             self.require_design_input().is_err();
                     }
+                    let mut bundle = self.core.scoped.results.as_ref().unwrap().clone();
+                    self.core.scoped.view_vibration_case = saved.view_vibration_case;
+                    self.core.scoped.view_lumped_vibration_case = saved.view_lumped_vibration_case;
+                    let rejected = self.filter_vibration_results(&mut bundle);
+                    if rejected {
+                        self.report_notice("保存時刻歴の入力識別が欠落または不一致のため、該当結果を復元しませんでした。時刻歴解析を再実行してください。");
+                    }
+                    let only_historical_vibration = (!bundle.time_histories.is_empty()
+                        || !bundle.lumped_results.is_empty())
+                        && !bundle.input_records.iter().any(|(key, _)| {
+                            *key != ResultInputKey::Design
+                                && self.require_result_input(key.clone()).is_ok()
+                        });
+                    if !bundle.has_analysis_results() || only_historical_vibration {
+                        self.core.scoped.staleness.results_stale = true;
+                        self.core.scoped.staleness.last_run = None;
+                    }
+                    self.core.scoped.results = Some(bundle);
                     self.hydrate_saved_vibration_views(
                         saved.view_vibration_case,
                         saved.view_lumped_vibration_case,

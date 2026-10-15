@@ -168,11 +168,28 @@ pub enum PendingAnalysis {
     /// 増分解析。
     Pushover,
     /// 時刻歴応答解析（入力波）。
-    TimeHistory(Box<sepika_solver::dynamic::timehistory::GroundMotion>),
+    TimeHistory(Box<TimeHistoryInput<sepika_solver::dynamic::timehistory::GroundMotion>>),
     /// 質点系固有値。
     LumpedMassEigen,
     /// 質点系時刻歴（入力加速度列）。
-    LumpedMassTimeHistory(Vec<f64>),
+    LumpedMassTimeHistory(Box<TimeHistoryInput<Vec<f64>>>),
+}
+
+/// 生成済み波形と、その生成・実行条件。
+pub struct TimeHistoryInput<T> {
+    pub(crate) data: T,
+    pub(crate) source: TimeHistorySource,
+}
+
+/// 時刻歴成果の入力識別と開始時の対象ケース。
+#[derive(Clone)]
+pub struct TimeHistorySource {
+    pub(crate) cfg: AnalysisSettings,
+    pub(crate) wave_name: String,
+    pub(crate) identity: String,
+    pub(crate) analysis_identity: String,
+    pub(crate) dependency_identity: Option<String>,
+    pub(crate) target: Option<u32>,
 }
 
 /// 3D ビューでクリックした割当領域（床板・壁版の割当ダイアログの対象）。
@@ -627,9 +644,15 @@ pub enum JobResult {
     /// 固有値解析（モード数は起動時の `analysis_cfg.n_modes`）。
     Modal(Result<sepika_solver::dynamic::eigen::ModalResult, String>),
     /// 時刻歴応答解析。`ResponseResult` は詳細記録を含み大きいため Box で運ぶ。
-    TimeHistory(Box<Result<sepika_solver::dynamic::timehistory::ResponseResult, String>>),
+    TimeHistory(
+        Box<Result<sepika_solver::dynamic::timehistory::ResponseResult, String>>,
+        Box<TimeHistorySource>,
+    ),
     /// 質点系（固有値・時刻歴）。方向別ピークを含み大きいため Box で運ぶ。
-    LumpedMass(Box<Result<sepika_solver::dynamic::lumped_mass::LumpedMassResult, String>>),
+    LumpedMass(
+        Box<Result<sepika_solver::dynamic::lumped_mass::LumpedMassResult, String>>,
+        Option<Box<TimeHistorySource>>,
+    ),
     /// 線形静的・地震静的(Ai)（`StaticCaseKey` で結果格納先を区別）。
     StaticCase {
         key: StaticCaseKey,
@@ -2560,3 +2583,6 @@ mod rc_wall_direction_tests;
 mod rc_wall534_tests;
 #[cfg(test)]
 pub(crate) mod rc_wall617_tests;
+
+#[cfg(test)]
+mod vibration_ownership_tests;

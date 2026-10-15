@@ -172,22 +172,15 @@ impl App {
         }
     }
 
-    /// 波形ライブラリ内の `name` を読み、保存先ディレクトリと内容を返す。
-    ///
-    /// 保存先を特定できない・ファイルを読めない場合は利用者へ通知して `None`。
-    /// 呼び出し側は実行時点の SHA-256 を `wave_library::wave_sha256` で算定する
-    /// のに同じディレクトリを要するため、内容と一緒に返す。
+    /// 指定ディレクトリ内の波形を読み、失敗は通知して `None` を返す。
     #[cfg(feature = "gui")]
     pub(crate) fn read_wave_library_file(
         &mut self,
+        dir: &std::path::Path,
         name: &str,
-    ) -> Option<(std::path::PathBuf, String)> {
-        let Some(dir) = sepika_io::wave_library::wave_library_dir() else {
-            self.report_error("波形ライブラリの保存先を特定できませんでした。".to_string());
-            return None;
-        };
+    ) -> Option<String> {
         match std::fs::read_to_string(dir.join(name)) {
-            Ok(content) => Some((dir, content)),
+            Ok(content) => Some(content),
             Err(e) => {
                 self.report_error(format!("波形読込エラー: {e}"));
                 None
@@ -220,10 +213,22 @@ impl App {
     /// 次回読込時の内容検証に使われる）。
     #[cfg(feature = "gui")]
     pub fn run_time_history_from_library(&mut self) {
+        if self.core.scoped.wave_library_selection.is_none() {
+            return;
+        }
+        let Some(dir) = sepika_io::wave_library::wave_library_dir() else {
+            self.report_error("波形ライブラリの保存先を特定できませんでした。".to_string());
+            return;
+        };
+        self.run_time_history_from_library_in(&dir);
+    }
+
+    #[cfg(feature = "gui")]
+    pub(crate) fn run_time_history_from_library_in(&mut self, dir: &std::path::Path) {
         let Some(name) = self.core.scoped.wave_library_selection.clone() else {
             return;
         };
-        let Some((dir, content)) = self.read_wave_library_file(&name) else {
+        let Some(content) = self.read_wave_library_file(dir, &name) else {
             return;
         };
         let cfg = self.core.analysis_cfg;
@@ -231,7 +236,8 @@ impl App {
             return;
         };
         self.core.scoped.wave_library_selected_sha256 =
-            sepika_io::wave_library::wave_sha256(&dir, &name).ok();
-        self.request_analysis(PendingAnalysis::TimeHistory(Box::new(wave)));
+            sepika_io::wave_library::wave_sha256(dir, &name).ok();
+        let input = self.time_history_input(wave, name);
+        self.request_analysis(PendingAnalysis::TimeHistory(Box::new(input)));
     }
 }
