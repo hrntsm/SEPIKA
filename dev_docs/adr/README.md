@@ -45,7 +45,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0038](0038-cantilever-slab-tip-load-transfer.md) | accepted | 片持ちスラブの先端荷重は取付き梁へ力のみ等分布伝達する |
 | [0039](0039-section-property-basis.md) | accepted | 断面性能の算定元を項目別に区別し、フィレット半径・角Rの編集時の更新を分ける |
 | [0040](0040-damper-total-weight-and-mass-source.md) | accepted | ダンパーはモデル化範囲の総重量を直接入力し、断面由来質量を置き換える |
-| [0041](0041-holding-result-input-validity.md) | accepted | 保有水平耐力に採用する結果ごとに生成入力を照合する |
+| [0041](0041-holding-result-input-validity.md) | accepted | 保有水平耐力に採用する結果ごとに生成入力を照合する（検定・時刻歴の入力所属にも適用） |
 
 | [0042](0042-attached-slab-validation-and-support-resolution.md) | accepted | 取り付く床板の幾何と支持先を入力境界で共通検査する |
 
