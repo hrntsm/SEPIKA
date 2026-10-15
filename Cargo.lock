@@ -4729,6 +4729,7 @@ version = "0.0.1"
 dependencies = [
  "schemars 0.8.22",
  "sepika-core",
+ "sepika-load",
  "sepika-section",
  "serde",
  "smallvec",
