@@ -44,15 +44,61 @@ impl App {
 
     /// 質点系固有値（時刻歴なし）をバックグラウンドで実行する。
     pub fn start_lumped_mass_eigen_job(&mut self) {
-        self.start_lumped_mass_job(None, "質点系固有値");
+        self.start_lumped_mass_job(None, None, "質点系固有値");
     }
 
     /// 質点系時刻歴をバックグラウンドで実行する（固有値も同時に算定する）。
     pub fn start_lumped_mass_th_job(&mut self, accel: Vec<f64>) {
-        self.start_lumped_mass_job(Some(accel), "質点系時刻歴");
+        let input = self.lumped_time_history_input(accel, "入力波".into());
+        self.start_lumped_mass_th_input_job(input);
     }
 
-    fn start_lumped_mass_job(&mut self, accel: Option<Vec<f64>>, label: &'static str) {
+    pub(crate) fn lumped_time_history_input(
+        &self,
+        accel: Vec<f64>,
+        wave_name: String,
+    ) -> TimeHistoryInput<Vec<f64>> {
+        let cfg = self.core.analysis_cfg;
+        let dependency_identity = self.lumped_prerequisite_identity();
+        let analysis_identity = crate::app::vibration::vibration_identity(&(
+            &accel,
+            crate::app::vibration::vibration_settings(cfg, true),
+            &dependency_identity,
+        ));
+        let identity = self.time_history_identity(&analysis_identity);
+        let target = self
+            .core
+            .model
+            .lumped_vibration_cases
+            .iter()
+            .find(|c| c.input_identity.as_ref() == Some(&identity))
+            .map(|c| c.id.0);
+        TimeHistoryInput {
+            data: accel,
+            source: TimeHistorySource {
+                cfg,
+                wave_name,
+                identity,
+                analysis_identity,
+                dependency_identity: Some(dependency_identity),
+                target,
+            },
+        }
+    }
+
+    pub(crate) fn start_lumped_mass_th_input_job(&mut self, input: TimeHistoryInput<Vec<f64>>) {
+        if !self.time_history_source_is_unchanged(&input.source) {
+            return;
+        }
+        self.start_lumped_mass_job(Some(input.data), Some(input.source), "質点系時刻歴");
+    }
+
+    fn start_lumped_mass_job(
+        &mut self,
+        accel: Option<Vec<f64>>,
+        mut source: Option<TimeHistorySource>,
+        label: &'static str,
+    ) {
         if !self.begin_analysis_job() {
             return;
         }
@@ -60,22 +106,34 @@ impl App {
             self.report_error(error);
             return;
         }
+        if source.as_ref().is_some_and(|source| {
+            source.dependency_identity.as_ref() != Some(&self.lumped_prerequisite_identity())
+        }) {
+            self.report_error("波形生成後に質点系が使う静的・増分結果の生成入力が変更されたため起動できません。波形を生成・読込し直してください。");
+            return;
+        }
+        if let Some(source) = source.as_mut() {
+            self.bind_time_history_source(source, true);
+        }
         let model = self.core.model.clone();
         let cfg = self.core.analysis_cfg;
         let (res_x, res_y, po_x, po_y) = self.lumped_static_and_pushover();
         self.spawn_analysis_job(label, move || {
-            JobResult::LumpedMass(Box::new(Self::run_compute(|| {
-                sepika_job::compute::compute_lumped_mass(
-                    model,
-                    cfg,
-                    res_x,
-                    res_y,
-                    po_x,
-                    po_y,
-                    accel.as_deref(),
-                )
-                .map_err(|e| e.to_string())
-            })))
+            JobResult::LumpedMass(
+                Box::new(Self::run_compute(|| {
+                    sepika_job::compute::compute_lumped_mass(
+                        model,
+                        cfg,
+                        res_x,
+                        res_y,
+                        po_x,
+                        po_y,
+                        accel.as_deref(),
+                    )
+                    .map_err(|e| e.to_string())
+                })),
+                source.map(Box::new),
+            )
         });
         #[cfg(feature = "gui")]
         if let Some(job) = self.core.scoped.job.as_mut() {
@@ -83,7 +141,7 @@ impl App {
         }
     }
 
-    fn require_lumped_prerequisites(&self) -> Result<(), String> {
+    fn lumped_prerequisite_keys(&self) -> Vec<ResultInputKey> {
         use sepika_solver::dynamic::lumped_mass::StickDim;
         let cfg = self.core.analysis_cfg;
         let dirs: &[SeismicDir] = if cfg.lumped_dim == StickDim::Spatial {
@@ -91,50 +149,109 @@ impl App {
         } else {
             std::slice::from_ref(&cfg.lumped_dir)
         };
+        let mut keys = Vec::new();
         for &dir in dirs {
             if cfg.lumped_dim == StickDim::Spatial || !cfg.lumped_nonlinear {
-                if self
-                    .core
-                    .scoped
-                    .results
-                    .as_ref()
-                    .and_then(|r| r.seismic(dir))
-                    .is_none()
-                {
-                    return Err(format!("地震静的 {dir:?} の結果がありません。地震静的 {dir:?} を再実行してください。"));
-                }
-                self.require_result_input(ResultInputKey::Static(StaticCaseKey::Seismic(dir)))?;
+                keys.push(ResultInputKey::Static(StaticCaseKey::Seismic(dir)));
             }
             if cfg.lumped_nonlinear {
-                let result = self
-                    .core
-                    .scoped
-                    .results
-                    .as_ref()
-                    .and_then(|r| r.pushover_for_dir(dir));
-                if result.is_none() {
-                    return Err(format!("増分解析 {dir:?} の結果がありません。増分解析 {dir:?} を再実行してください。"));
-                }
-                self.require_result_input(ResultInputKey::Pushover(dir))?;
+                keys.push(ResultInputKey::Pushover(dir));
             }
+        }
+        keys
+    }
+
+    fn lumped_prerequisite_identity(&self) -> String {
+        let inputs: Vec<_> = self
+            .lumped_prerequisite_keys()
+            .into_iter()
+            .map(|key| {
+                let input = self.core.scoped.results.as_ref().and_then(|bundle| {
+                    bundle
+                        .input_records
+                        .iter()
+                        .find(|(saved, _)| *saved == key)
+                        .map(|(_, input)| input.as_slice())
+                });
+                (key, input)
+            })
+            .collect();
+        crate::app::vibration::vibration_identity(&inputs)
+    }
+
+    fn require_lumped_prerequisites(&self) -> Result<(), String> {
+        for key in self.lumped_prerequisite_keys() {
+            let (exists, label) = match key {
+                ResultInputKey::Static(StaticCaseKey::Seismic(dir)) => (
+                    self.core
+                        .scoped
+                        .results
+                        .as_ref()
+                        .and_then(|r| r.seismic(dir))
+                        .is_some(),
+                    format!("地震静的 {dir:?}"),
+                ),
+                ResultInputKey::Pushover(dir) => (
+                    self.core
+                        .scoped
+                        .results
+                        .as_ref()
+                        .and_then(|r| r.pushover_for_dir(dir))
+                        .is_some(),
+                    format!("増分解析 {dir:?}"),
+                ),
+                _ => unreachable!(),
+            };
+            if !exists {
+                return Err(format!(
+                    "{label} の結果がありません。{label} を再実行してください。"
+                ));
+            }
+            self.require_result_input(key)?;
         }
         Ok(())
     }
 
-    pub(crate) fn apply_lumped_mass_result(&mut self, res: Result<LumpedMassResult, String>) {
+    pub(crate) fn apply_lumped_mass_result(
+        &mut self,
+        res: Result<LumpedMassResult, String>,
+        source: Option<TimeHistorySource>,
+    ) {
         match res {
             Ok(result) => {
-                let mut bundle = self.take_results_for_analysis();
-                if result.response.is_some() {
-                    let wave_name = self.lumped_th_wave_name();
-                    let dir = lumped_vibration_dir_from_seismic(self.core.analysis_cfg.lumped_dir);
-                    let dim = lumped_vibration_dim_from_stick(result.model.dim);
-                    let case_id = self.core.model.upsert_lumped_vibration_case(
-                        wave_name,
-                        dir,
-                        self.core.analysis_cfg.lumped_nonlinear,
-                        dim,
+                if result.response.is_some() && source.is_none() {
+                    self.report_error(
+                        "質点系時刻歴の入力識別情報がありません。再実行してください。",
                     );
+                    return;
+                }
+                if source.as_ref().is_some_and(|s| {
+                    s.target.is_some_and(|id| {
+                        !self
+                            .core
+                            .model
+                            .lumped_vibration_cases
+                            .iter()
+                            .any(|c| c.id.0 == id && c.input_identity.as_ref() == Some(&s.identity))
+                    })
+                }) {
+                    self.report_error("開始時の質点系振動ケースが存在しないか入力識別が変更されたため、解析結果を破棄しました。");
+                    return;
+                }
+                let mut bundle = self.take_results_for_analysis();
+                if let Some(source) = source {
+                    let input = self.vibration_result_input(&source);
+                    let dir = lumped_vibration_dir_from_seismic(source.cfg.lumped_dir);
+                    let dim = lumped_vibration_dim_from_stick(source.cfg.lumped_dim);
+                    let case_id = self.core.model.upsert_lumped_vibration_case(
+                        source.wave_name,
+                        dir,
+                        source.cfg.lumped_nonlinear,
+                        dim,
+                        Some(source.identity),
+                    );
+                    let key = ResultInputKey::LumpedTimeHistory(case_id);
+                    bundle.record_input(key, input);
                     bundle.upsert_lumped_result(case_id, result.clone());
                     self.core.scoped.results = Some(bundle);
                     self.set_lumped_mass_view(Some(case_id), &result);
@@ -174,10 +291,11 @@ impl App {
         let wave = sepika_job::sample_lumped_ground_motion(&self.core.analysis_cfg);
         match sepika_job::lumped_accel_from_wave(&wave, self.core.analysis_cfg.lumped_dir) {
             Ok(accel) => {
+                let input = self.lumped_time_history_input(accel, "サンプル".into());
                 #[cfg(feature = "gui")]
-                self.request_analysis(PendingAnalysis::LumpedMassTimeHistory(accel));
+                self.request_analysis(PendingAnalysis::LumpedMassTimeHistory(Box::new(input)));
                 #[cfg(not(feature = "gui"))]
-                self.start_lumped_mass_th_job(accel);
+                self.start_lumped_mass_th_input_job(input);
             }
             Err(e) => self.report_error(e),
         }
@@ -186,10 +304,22 @@ impl App {
     /// 波形ライブラリの選択波形で質点系時刻歴を開始する。
     #[cfg(feature = "gui")]
     pub fn start_lumped_mass_library_th_job(&mut self) {
+        if self.core.scoped.lumped_wave_library_selection.is_none() {
+            return;
+        }
+        let Some(dir) = sepika_io::wave_library::wave_library_dir() else {
+            self.report_error("波形ライブラリの保存先を特定できませんでした。".to_string());
+            return;
+        };
+        self.start_lumped_mass_library_th_job_in(&dir);
+    }
+
+    #[cfg(feature = "gui")]
+    pub(crate) fn start_lumped_mass_library_th_job_in(&mut self, dir: &std::path::Path) {
         let Some(name) = self.core.scoped.lumped_wave_library_selection.clone() else {
             return;
         };
-        let Some((dir, content)) = self.read_wave_library_file(&name) else {
+        let Some(content) = self.read_wave_library_file(dir, &name) else {
             return;
         };
         let mut cfg = self.core.analysis_cfg;
@@ -202,9 +332,12 @@ impl App {
             return;
         };
         self.core.scoped.lumped_wave_library_selected_sha256 =
-            sepika_io::wave_library::wave_sha256(&dir, &name).ok();
+            sepika_io::wave_library::wave_sha256(dir, &name).ok();
         match sepika_job::lumped_accel_from_wave(&wave, self.core.analysis_cfg.lumped_dir) {
-            Ok(accel) => self.request_analysis(PendingAnalysis::LumpedMassTimeHistory(accel)),
+            Ok(accel) => {
+                let input = self.lumped_time_history_input(accel, name);
+                self.request_analysis(PendingAnalysis::LumpedMassTimeHistory(Box::new(input)));
+            }
             Err(e) => self.report_error(e),
         }
     }

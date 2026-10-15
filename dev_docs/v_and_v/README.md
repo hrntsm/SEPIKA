@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [時刻歴の実入力と結果所属_Issue611_2026-10.md](時刻歴の実入力と結果所属_Issue611_2026-10.md) | 立体・質点系の実波形／実効設定・開始対象・保存所属と拒否時状態保持 | 🔶（固定結果・実ファイル本体・保存の受入。モデル条件結合修正後GUI14＋既存617成功、default全体・広域再検査・native操作・Validation・正式ゲートは別確認） |
 | [CMQのM成分塗り分割_Issue500_2026-10.md](CMQのM成分塗り分割_Issue500_2026-10.md) | サンプルを保持した塗り分割・独立面積・本番描画・数値と状態の保持 | 🔶（独立算術・自動描画・App広域回帰・両Clippy・strict Rustdoc成功。手動GUI未実施。最終ゲートは[PR #662](https://github.com/hrntsm/SEPIKA/pull/662)） |
 | [未変形編集入力_Issue475_2026-10.md](未変形編集入力_Issue475_2026-10.md) | 編集開始直後の未変形pick／snap、既存入口とモデル・履歴・結果の保持 | 🔶（独立算術・自動egui 7件・広域回帰成功。手動GUI未実施。最終ゲートは[PR #661](https://github.com/hrntsm/SEPIKA/pull/661)） |
 | [RC壁せん断耐力方式_Issue572_2026-10.md](RC壁せん断耐力方式_Issue572_2026-10.md) | 建物共通min/mean・両consumer・開始時固定・採用run値・保存/Undo/失効・対象材種の方式識別 | 🔶（独立算術/原本照合、最終Windows広域回帰・関連feature・Clippy成功、fresh独立レビュー修正必須0。既存#645除外、Validation未実施。最終ゲートは[PR #656](https://github.com/hrntsm/SEPIKA/pull/656)） |
@@ -276,6 +277,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 15b | 目的別確定層力 | sepika-solver / sepika-app / sepika-mcp | story_response.rs・result_validity.rs・job/pushover.rs | [Issue442検証](目的別確定層力_Issue442_2026-10.md) | — | ✅（Scope内Verification） |
 | 16 | 壁（TVLEM） | sepika-element | — | — | P5.5 | 対象外 |
 | 17 | 時刻歴 | sepika-solver | timehistory.rs | — | P6 | ❌ |
+| 17a | GUI 時刻歴の実入力と結果所属 | sepika-core / sepika-app | model/vibration.rs・app/actions/time_history.rs・lumped_mass.rs・result_validity.rs | [Issue611受入表](時刻歴の実入力と結果所属_Issue611_2026-10.md#受入対応表) | 横断 | 🔶（修正後GUI14＋既存617の入口Verification、広域再検査・native操作・Validation未） |
 | 18 | 一軸履歴則（Concrete/Bilinear/MP） | sepika-material | uniaxial.rs | `test_concrete_*`/`test_bilinear_*`/`test_menegotto_pinto_*` | P4 | ✅ |
 | 19 | 部材履歴則（武田・原点指向・スリップ） | sepika-material | hysteresis.rs | `tests/hysteresis_snapshots.rs`/`tests/uniaxial_snapshots.rs`、`zero_increment_*`と実factory/壁/質点系solver（[Issue596検証](ゼロ増分履歴保持_Issue596_2026-10.md)） | P4 | 🔶（ゼロ増分Verification済み、全履歴Validation未） |
 | 20 | ファイバ断面（M–φ 積分） | sepika-section / sepika-core / sepika-element | fiber.rs, mn_surface/fibers.rs, section_shape/rounded.rs | `test_section_*`、`rounded_tests`、`rounded_beam_fiber_*`。フィレット・角Rの領域、公開耐力、両質量モードの証拠は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md) | P4 | ✅（指定形状の細分化照合。通常配置の一般精度保証ではない） |

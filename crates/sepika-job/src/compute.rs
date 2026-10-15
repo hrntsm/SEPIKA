@@ -120,7 +120,7 @@ pub fn compute_seismic(
 
 /// 位相差入力（ねじれ加振）を `wave` へ付加する。
 /// `phase_diff_enabled` が false なら `wave` をそのまま返す。
-fn apply_phase_diff(
+pub fn effective_time_history_wave(
     cfg: &AnalysisSettings,
     mut wave: sepika_solver::dynamic::timehistory::GroundMotion,
 ) -> sepika_solver::dynamic::timehistory::GroundMotion {
@@ -194,7 +194,7 @@ pub fn compute_time_history(
     model
         .validate_damper_mass_placement()
         .map_err(JobError::InvalidInput)?;
-    let wave = apply_phase_diff(&cfg, wave);
+    let wave = effective_time_history_wave(&cfg, wave);
     let model = expand_walls(model);
     let analysis = Analysis::prepare(&model).map_err(|e| JobError::Prepare(e.to_string()))?;
     let damping = match cfg.th_damping_model {

@@ -1,27 +1,75 @@
 //! 時刻歴応答解析。
-//!
-//! `actions` からの構造分割。アルゴリズム変更は行わない。
 
 use super::*;
 use crate::app::vibration::vibration_th_dir_from_th;
 
 impl App {
-    /// `compute_time_history` の結果を適用する
-    /// （振動ケース upsert・結果スロット更新・表示窓口更新）。
-    pub(super) fn apply_time_history_result(
+    pub(crate) fn time_history_input(
+        &self,
+        wave: sepika_solver::dynamic::timehistory::GroundMotion,
+        wave_name: String,
+    ) -> TimeHistoryInput<sepika_solver::dynamic::timehistory::GroundMotion> {
+        let cfg = self.core.analysis_cfg;
+        let effective = sepika_job::compute::effective_time_history_wave(
+            &cfg,
+            sepika_solver::dynamic::timehistory::GroundMotion {
+                dt: wave.dt,
+                accel_x: wave.accel_x.clone(),
+                accel_y: wave.accel_y.clone(),
+                accel_theta: wave.accel_theta.clone(),
+            },
+        );
+        let analysis_identity = crate::app::vibration::vibration_identity(&(
+            effective.dt,
+            &effective.accel_x,
+            &effective.accel_y,
+            &effective.accel_theta,
+            crate::app::vibration::vibration_settings(cfg, false),
+        ));
+        let identity = self.time_history_identity(&analysis_identity);
+        let target = self
+            .core
+            .model
+            .vibration_cases
+            .iter()
+            .find(|c| c.input_identity.as_ref() == Some(&identity))
+            .map(|c| c.id.0);
+        TimeHistoryInput {
+            data: wave,
+            source: TimeHistorySource {
+                cfg,
+                wave_name,
+                identity,
+                analysis_identity,
+                dependency_identity: None,
+                target,
+            },
+        }
+    }
+
+    pub(crate) fn apply_time_history_result(
         &mut self,
         res: Result<sepika_solver::dynamic::timehistory::ResponseResult, String>,
+        source: TimeHistorySource,
     ) {
         match res {
             Ok(res) => {
-                let wave_name = self.spatial_th_wave_name();
-                let dir = vibration_th_dir_from_th(self.core.analysis_cfg.th_dir);
-                let nonlinear = self.core.analysis_cfg.th_nonlinear;
-                let case_id = self
-                    .core
-                    .model
-                    .upsert_vibration_case(wave_name, dir, nonlinear);
-                let input = self.result_input(&ResultInputKey::TimeHistory(case_id));
+                if source.target.is_some_and(|id| {
+                    !self.core.model.vibration_cases.iter().any(|c| {
+                        c.id.0 == id && c.input_identity.as_ref() == Some(&source.identity)
+                    })
+                }) {
+                    self.report_error("開始時の振動ケースが存在しないか入力識別が変更されたため、解析結果を破棄しました。");
+                    return;
+                }
+                let input = self.vibration_result_input(&source);
+                let dir = vibration_th_dir_from_th(source.cfg.th_dir);
+                let case_id = self.core.model.upsert_vibration_case(
+                    source.wave_name,
+                    dir,
+                    source.cfg.th_nonlinear,
+                    Some(source.identity),
+                );
                 let mut bundle = self.take_results_for_analysis();
                 bundle.record_input(ResultInputKey::TimeHistory(case_id), input);
                 bundle.upsert_time_history(case_id, res.clone());
@@ -35,48 +83,74 @@ impl App {
         }
     }
 
-    /// 時刻歴応答解析を実行する。線形/非線形・減衰・積分条件は `analysis_cfg` に従う。
+    /// 入力波による時刻歴応答解析を実行する。表示名は「入力波」。
     pub fn run_time_history(&mut self, wave: sepika_solver::dynamic::timehistory::GroundMotion) {
+        let input = self.time_history_input(wave, "入力波".into());
+        self.run_time_history_input(input);
+    }
+
+    fn run_time_history_input(
+        &mut self,
+        mut input: TimeHistoryInput<sepika_solver::dynamic::timehistory::GroundMotion>,
+    ) {
         if !self.begin_analysis() {
             return;
         }
-        if self.core.analysis_cfg.th_nonlinear {
+        self.bind_time_history_source(&mut input.source, false);
+        if input.source.cfg.th_nonlinear {
             self.notice_steel_seismic_walls();
         }
         let res = sepika_job::compute::compute_time_history(
             self.core.model.clone(),
-            self.core.analysis_cfg,
-            wave,
+            input.source.cfg,
+            input.data,
         )
         .map_err(|e| e.to_string());
-        self.apply_time_history_result(res);
+        self.apply_time_history_result(res, input.source);
     }
 
-    /// 時刻歴応答解析をバックグラウンドスレッドで実行する。
-    /// UI スレッドをブロックしないよう重い解析を逃がす。
-    /// 既にジョブが実行中の場合は何もしない（last_error に案内文を設定）。
+    /// 入力波による時刻歴をバックグラウンドで実行する。実行中なら起動しない。
     pub fn start_time_history_job(
         &mut self,
         wave: sepika_solver::dynamic::timehistory::GroundMotion,
     ) {
+        let input = self.time_history_input(wave, "入力波".into());
+        self.start_time_history_input_job(input);
+    }
+
+    pub(crate) fn start_time_history_input_job(
+        &mut self,
+        input: TimeHistoryInput<sepika_solver::dynamic::timehistory::GroundMotion>,
+    ) {
+        if !self.time_history_source_is_unchanged(&input.source) {
+            return;
+        }
         if !self.begin_analysis_job() {
             return;
         }
-        if self.core.analysis_cfg.th_nonlinear {
+        let TimeHistoryInput {
+            data: wave,
+            mut source,
+        } = input;
+        self.bind_time_history_source(&mut source, false);
+        if source.cfg.th_nonlinear {
             self.notice_steel_seismic_walls();
         }
         let model = self.core.model.clone();
-        let cfg = self.core.analysis_cfg;
+        let cfg = source.cfg;
         let label = if cfg.th_nonlinear {
             "時刻歴応答(非線形)"
         } else {
             "時刻歴応答(線形)"
         };
         self.spawn_analysis_job(label, move || {
-            JobResult::TimeHistory(Box::new(Self::run_compute(|| {
-                sepika_job::compute::compute_time_history(model, cfg, wave)
-                    .map_err(|e| e.to_string())
-            })))
+            JobResult::TimeHistory(
+                Box::new(Self::run_compute(|| {
+                    sepika_job::compute::compute_time_history(model, cfg, wave)
+                        .map_err(|e| e.to_string())
+                })),
+                Box::new(source),
+            )
         });
         #[cfg(feature = "gui")]
         if let Some(job) = self.core.scoped.job.as_mut() {
@@ -84,8 +158,16 @@ impl App {
         }
     }
 
-    /// 正弦減衰のサンプル地震波を `cfg` から組み立てる
-    /// （外部波形ファイルなしで機能を試せる導線。同期実行・ジョブ実行の双方で使う）。
+    pub(crate) fn time_history_source_is_unchanged(&mut self, source: &TimeHistorySource) -> bool {
+        if bincode::serialize(&source.cfg).unwrap()
+            != bincode::serialize(&self.core.analysis_cfg).unwrap()
+        {
+            self.report_error("波形生成後に計算設定が変更されたため起動できません。波形を生成・読込し直してください。");
+            return false;
+        }
+        true
+    }
+
     pub(crate) fn sample_wave(
         cfg: &AnalysisSettings,
     ) -> sepika_solver::dynamic::timehistory::GroundMotion {
@@ -96,6 +178,7 @@ impl App {
     pub fn run_time_history_sample(&mut self) {
         self.apply_parallelism_setting();
         let wave = Self::sample_wave(&self.core.analysis_cfg);
-        self.run_time_history(wave);
+        let input = self.time_history_input(wave, "サンプル".into());
+        self.run_time_history_input(input);
     }
 }

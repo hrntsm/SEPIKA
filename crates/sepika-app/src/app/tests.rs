@@ -333,7 +333,7 @@ fn source_story_gui_membership_edit_invalidates_input_and_undo_restores_it() {
 /// `std::env::temp_dir()` 直下へ固定名で書き込むと、同一マシンで並行する
 /// 別プロセスのテスト実行と衝突するため、プロセスごとに一意なサブディレクトリを
 /// 介する（同一プロセス内はテストごとの固有ファイル名で分離する）。
-fn test_tmp() -> std::path::PathBuf {
+pub(super) fn test_tmp() -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("sepika-test-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&d);
     d
@@ -6368,16 +6368,19 @@ fn request_analysis_preparation_failure_deletes_only_static_targets() {
             2 => PendingAnalysis::StaticAll,
             3 => PendingAnalysis::Eigen(1),
             4 => PendingAnalysis::Pushover,
-            5 => PendingAnalysis::TimeHistory(Box::new(
+            5 => PendingAnalysis::TimeHistory(Box::new(app.time_history_input(
                 sepika_solver::dynamic::timehistory::GroundMotion {
                     dt: 0.01,
                     accel_x: vec![0.0],
                     accel_y: None,
                     accel_theta: None,
                 },
-            )),
+                "サンプル".into(),
+            ))),
             6 => PendingAnalysis::LumpedMassEigen,
-            _ => PendingAnalysis::LumpedMassTimeHistory(vec![0.0]),
+            _ => PendingAnalysis::LumpedMassTimeHistory(Box::new(
+                app.lumped_time_history_input(vec![0.0], "サンプル".into()),
+            )),
         };
         app.request_analysis(pending);
         assert!(app
@@ -10613,7 +10616,7 @@ fn dummy_pushover(qu: f64) -> sepika_solver::nonlinear::pushover::PushoverResult
     }
 }
 
-fn dummy_lumped(
+pub(super) fn dummy_lumped(
     period: f64,
     with_response: bool,
 ) -> sepika_solver::dynamic::lumped_mass::LumpedMassResult {
@@ -10630,7 +10633,7 @@ fn dummy_lumped(
     }
 }
 
-fn dummy_th(time: Vec<f64>) -> sepika_solver::dynamic::timehistory::ResponseResult {
+pub(super) fn dummy_th(time: Vec<f64>) -> sepika_solver::dynamic::timehistory::ResponseResult {
     sepika_solver::dynamic::timehistory::ResponseResult {
         wall_capacities: Vec::new(),
         rc_wall_shear_method: sepika_core::model::RcWallShearMethod::default(),
@@ -10653,12 +10656,13 @@ fn test_build_result_tree_sections_and_labels() {
     use sepika_solver::statics::analysis::SeismicDir;
 
     let mut model = sepika_core::model::Model::default();
-    let th_id = model.upsert_vibration_case("サンプル".into(), VibrationThDir::X, false);
+    let th_id = model.upsert_vibration_case("サンプル".into(), VibrationThDir::X, false, None);
     let lumped_id = model.upsert_lumped_vibration_case(
         "サンプル".into(),
         LumpedVibrationDir::X,
         false,
         LumpedVibrationDim::Planar,
+        None,
     );
 
     let s = dummy_static_once();
@@ -10801,7 +10805,7 @@ fn test_time_history_upsert_replaces_result_by_case_id() {
     use sepika_core::model::VibrationThDir;
 
     let mut model = sepika_core::model::Model::default();
-    let id1 = model.upsert_vibration_case("サンプル".into(), VibrationThDir::X, false);
+    let id1 = model.upsert_vibration_case("サンプル".into(), VibrationThDir::X, false, None);
     let mut bundle = ResultsBundle::default();
     bundle.upsert_time_history(id1, dummy_th(vec![0.0]));
     bundle.upsert_time_history(id1, dummy_th(vec![0.0, 1.0]));
@@ -10809,7 +10813,7 @@ fn test_time_history_upsert_replaces_result_by_case_id() {
     assert_eq!(bundle.time_histories[0].1.time.len(), 2, "結果は置き換わる");
 
     // ID が違えば別スロットになる。
-    let id_y = model.upsert_vibration_case("サンプル".into(), VibrationThDir::Y, false);
+    let id_y = model.upsert_vibration_case("サンプル".into(), VibrationThDir::Y, false, None);
     bundle.upsert_time_history(id_y, dummy_th(vec![0.0]));
     assert_eq!(bundle.time_histories.len(), 2);
 }
@@ -10938,7 +10942,7 @@ fn test_lumped_eigen_only_clears_stick_response() {
         },
         ..Default::default()
     };
-    app.apply_lumped_mass_result(Ok(dummy_lumped(0.4, false)));
+    app.apply_lumped_mass_result(Ok(dummy_lumped(0.4, false)), None);
     assert!(app.core.scoped.stick_response.is_none());
     assert!(app
         .core
@@ -11014,13 +11018,13 @@ fn test_prune_orphan_vibration_cases() {
     let mut app = App::default();
     app.core
         .model
-        .upsert_vibration_case("サンプル".into(), VibrationThDir::X, false);
+        .upsert_vibration_case("サンプル".into(), VibrationThDir::X, false, None);
     assert_eq!(app.core.model.vibration_cases.len(), 1);
     app.prune_orphan_vibration_cases();
     assert!(app.core.model.vibration_cases.is_empty());
 
     let mut model = sepika_core::model::Model::default();
-    let id = model.upsert_vibration_case("サンプル".into(), VibrationThDir::X, false);
+    let id = model.upsert_vibration_case("サンプル".into(), VibrationThDir::X, false, None);
     let mut app = App {
         core: AppCore {
             model,
@@ -11170,7 +11174,7 @@ fn test_hydrate_saved_vibration_views_fills_graph_data() {
     use sepika_core::model::VibrationThDir;
 
     let mut model = sepika_core::model::Model::default();
-    let id = model.upsert_vibration_case("サンプル".into(), VibrationThDir::X, false);
+    let id = model.upsert_vibration_case("サンプル".into(), VibrationThDir::X, false, None);
     let th = dummy_th(vec![0.0, 0.1, 0.2]);
     let mut app = App {
         core: AppCore {

@@ -558,7 +558,8 @@ impl App {
                 .clicked()
             {
                 let wave = Self::sample_wave(&self.core.analysis_cfg);
-                self.request_analysis(PendingAnalysis::TimeHistory(Box::new(wave)));
+                let input = self.time_history_input(wave, "サンプル".into());
+                self.request_analysis(PendingAnalysis::TimeHistory(Box::new(input)));
             }
             if ui
                 .add_enabled(!running, egui::Button::new("📂 波形CSVを開いて実行…"))
@@ -630,7 +631,11 @@ impl App {
         else {
             return;
         };
-        let content = match std::fs::read_to_string(&path) {
+        self.run_time_history_from_csv_path(&path);
+    }
+
+    pub(crate) fn run_time_history_from_csv_path(&mut self, path: &std::path::Path) {
+        let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(e) => {
                 self.report_error(format!("波形読込エラー: {}", e));
@@ -641,7 +646,13 @@ impl App {
         let Some(wave) = self.ground_motion_or_report(&cfg, &content) else {
             return;
         };
-        self.request_analysis(PendingAnalysis::TimeHistory(Box::new(wave)));
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let input = self.time_history_input(wave, name);
+        self.request_analysis(PendingAnalysis::TimeHistory(Box::new(input)));
     }
 
     /// 右ドック「質点系」パネル。
