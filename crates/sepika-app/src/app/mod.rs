@@ -2567,6 +2567,8 @@ mod assignment_identity_tests;
 #[cfg(test)]
 pub(crate) mod design_input_tests;
 #[cfg(test)]
+mod member_load_direction_acceptance_tests;
+#[cfg(test)]
 mod result_contract_tests;
 
 #[cfg(test)]

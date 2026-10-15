@@ -499,6 +499,92 @@ mod tests {
     }
 
     #[test]
+    fn analysis22_missing_future24_and_current23_control_analysis_and_design13_rows() {
+        assert_eq!(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION, 23);
+        assert_eq!(sepika_core::result_contract::DESIGN_CONTRACT_VERSION, 13);
+        let model = Model::default();
+        for kind in [JobKind::LinearStatic, JobKind::DesignCheck] {
+            let dir = test_dir("member-load-direction-contract");
+            let mut store = sepika_io::results::FsResultStore::open(&dir).unwrap();
+            let outcome = if kind == JobKind::DesignCheck {
+                JobOutcome::DesignCheck {
+                    case: Some(1),
+                    member_force_rows: vec![(9, 0.0, [12.5; 6])],
+                    summary: serde_json::json!({"load_target": {"source": "single_case", "requested_case": 1, "terms": [[1, 1.0]]}}),
+                }
+            } else {
+                static_outcome(12.5)
+            };
+            persist_job_outcome(&mut store, outcome, &source(&model, kind)).unwrap();
+            let original = serde_json::to_value(store.manifest()).unwrap();
+            let files: Vec<_> = store
+                .manifest()
+                .entries
+                .iter()
+                .map(|entry| (entry.path.clone(), std::fs::read(&entry.path).unwrap()))
+                .collect();
+            drop(store);
+            for (version, reason) in [
+                (Some(22), "old_contract"),
+                (None, "unknown_provenance"),
+                (Some(24), "unsupported_contract"),
+                (Some(23), "current"),
+            ] {
+                let mut manifest = original.clone();
+                for entry in manifest["entries"].as_array_mut().unwrap() {
+                    if kind == JobKind::DesignCheck {
+                        assert_eq!(entry["provenance"]["design_contract_version"], 13);
+                    }
+                    let provenance = entry["provenance"].as_object_mut().unwrap();
+                    match version {
+                        Some(version) => {
+                            provenance.insert("analysis_contract_version".into(), version.into());
+                        }
+                        None => {
+                            provenance.remove("analysis_contract_version");
+                        }
+                    }
+                }
+                let serialized = serde_json::to_vec(&manifest).unwrap();
+                std::fs::write(dir.join("manifest.json"), &serialized).unwrap();
+                let mut reopened = sepika_io::results::FsResultStore::open(&dir).unwrap();
+                let result = get(&reopened, &model, "MemberForce");
+                if reason == "current" {
+                    assert_eq!(result["status"], "current");
+                    assert_eq!(result["rows"][0]["n"], 12.5);
+                } else {
+                    assert_eq!(result["status"], "unavailable");
+                    assert_eq!(result["reason"], reason);
+                    assert!(result.get("rows").is_none());
+                }
+                reopened.sync().unwrap();
+                assert_eq!(
+                    std::fs::read(dir.join("manifest.json")).unwrap(),
+                    serialized
+                );
+                for (path, bytes) in &files {
+                    assert_eq!(&std::fs::read(path).unwrap(), bytes);
+                }
+                if let Some(evidence_dir) = std::env::var_os("SEPIKA687_EVIDENCE_DIR") {
+                    let evidence_dir = std::path::PathBuf::from(evidence_dir);
+                    std::fs::create_dir_all(&evidence_dir).unwrap();
+                    let label = format!("{kind:?}-analysis{version:?}");
+                    std::fs::write(
+                        evidence_dir.join(format!("{label}-manifest.json")),
+                        &serialized,
+                    )
+                    .unwrap();
+                    std::fs::write(
+                        evidence_dir.join(format!("{label}-response.json")),
+                        serde_json::to_vec_pretty(&result).unwrap(),
+                    )
+                    .unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
     fn manifest_contract_versions_and_missing_metadata_reopen_without_restamping() {
         let model = Model::default();
         let dir = test_dir("versions");

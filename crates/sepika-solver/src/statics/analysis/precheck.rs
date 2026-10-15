@@ -132,6 +132,9 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     use sepika_core::model::ElementKind;
 
     let mut issues: Vec<_> = source_issues.into_iter().map(ModelIssue::model).collect();
+    if let Err(error) = model.validate_member_load_directions() {
+        issues.push(ModelIssue::model(error));
+    }
     issues.extend(
         model
             .source_story_assignment_diagnostics()

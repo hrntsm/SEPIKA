@@ -72,21 +72,34 @@ fn signed_q0_gui_nonstandard_live_factor_remains_reasoned_unchecked() {
 }
 
 #[test]
-fn signed_q0_gui_missing_repaired_missing_never_revives_saved_success() {
+fn signed_q0_gui_invalid_direction_repaired_invalid_never_revives_saved_success() {
     let mut app = app();
+    app.run_combination(0);
+    assert!(app.core.scoped.last_error.is_none());
+    assert!(shear_demand(&app) > 1000.0);
+    assert!(crate::summary::build_report_csv(&app).contains(",OK"));
     for valid in [false, true, false] {
         app.core.model.load_cases[0].member[0].dir =
             if valid { [0.0, 0.0, -1.0] } else { [0.0; 3] };
+        app.core.scoped.staleness.mark_edited();
+        assert!(app.require_selected_static_input().is_err());
+        assert!(app.current_design_results().is_none());
+        assert!(!crate::summary::build_report_csv(&app).contains(",OK"));
+        let before = rmp_serde::to_vec_named(&app.core.model).unwrap();
         app.run_combination(0);
         if valid {
+            assert!(app.core.scoped.last_error.is_none());
             assert!(shear_demand(&app) > 1000.0);
         } else {
-            let checks = &app.core.scoped.results.as_ref().unwrap().member_checks;
-            assert!(!checks.is_empty());
-            assert!(checks.iter().flat_map(|m| &m.positions).all(|p| matches!(
-                &p.outcome,
-                sepika_design_jp::CheckOutcome::Skipped { reason } if reason.contains("Q0")
-            )));
+            let reason = app.core.scoped.last_error.as_deref().unwrap();
+            for token in ["荷重ケース 0", "任意名称", "member[0]", "部材 0", "正規化"]
+            {
+                assert!(reason.contains(token), "{reason}");
+            }
+            assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), before);
+            assert!(app.require_selected_static_input().is_err());
+            assert!(app.current_static().is_none());
+            assert!(app.current_design_results().is_none());
             assert!(!crate::summary::build_report_csv(&app).contains(",OK"));
         }
     }

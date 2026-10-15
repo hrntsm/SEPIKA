@@ -58,6 +58,7 @@ pub fn apply_rigid_zones_and_panels(
 }
 
 /// 解析前処理を一括で行う（剛域・仕口パネル・荷重ケースの自動同期）。
+/// 全ケースの部材荷重方向が不正なら、モデルを変更せずエラーを返す。
 pub fn prepare_model_for_analysis(
     model: &mut Model,
     settings: &AnalysisSettings,
@@ -68,12 +69,16 @@ pub fn prepare_model_for_analysis(
 
 /// 明示準備では階未定義時に床レベルを初期化し、解析直前では既存階を保持する。
 /// 地震力算定不能は旧 Auto EX/EY を両方除去し、独立した重力解析を許す。
+/// 全ケースの部材荷重方向が不正なら、モデルを変更せずエラーを返す。
 pub fn prepare_model(
     model: &mut Model,
     settings: &AnalysisSettings,
     design_period: Option<f64>,
     initialize_stories: bool,
 ) -> Result<PrepareReport, JobError> {
+    model
+        .validate_member_load_directions()
+        .map_err(JobError::InvalidInput)?;
     model
         .validate_frame_node_counts()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;

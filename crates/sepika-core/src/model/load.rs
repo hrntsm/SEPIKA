@@ -85,6 +85,7 @@ pub enum MemberLoadExtent {
 
 /// 部材に作用する荷重。`dir` は全体座標系での作用方向（内部で正規化）。
 /// 既定の重力方向は `[0.0, 0.0, -1.0]`。
+/// 計算には有限成分と、有限かつ 1e-12 以上の平方和平方根ノルムが必要。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MemberLoad {
     pub elem: ElemId,
@@ -100,6 +101,22 @@ pub struct MemberLoad {
 }
 
 impl MemberLoad {
+    /// 全体座標の方向成分が有限で、平方和平方根のノルムが有限かつ 1e-12 以上か検証する。
+    /// 強度によらず検査し、方向は書き換えない。
+    pub fn validate_direction(&self) -> Result<(), String> {
+        if !self.dir.iter().all(|component| component.is_finite()) {
+            return Err("部材荷重の作用方向に非有限成分があります".into());
+        }
+        let norm = crate::geom::vec3::norm(self.dir);
+        if !norm.is_finite() {
+            return Err("部材荷重の作用方向のノルムが非有限です".into());
+        }
+        if norm < 1e-12 {
+            return Err("部材荷重の作用方向のノルムが 1e-12 未満で正規化できません".into());
+        }
+        Ok(())
+    }
+
     /// 利用者入力の部材荷重（名称なし）を作る。
     pub fn manual(elem: ElemId, dir: [f64; 3], kind: MemberLoadKind) -> Self {
         Self {
@@ -473,6 +490,22 @@ impl LoadCfg {
 }
 
 impl Model {
+    /// 全荷重ケースの部材荷重方向を計算用に検証する。失敗はケース・荷重・部材を付けて返す。
+    /// 荷重の強度・生成元・解析対象ケースの選択によらず検査し、入力は変更しない。
+    pub fn validate_member_load_directions(&self) -> Result<(), String> {
+        for case in &self.load_cases {
+            for (index, load) in case.member.iter().enumerate() {
+                load.validate_direction().map_err(|reason| {
+                    format!(
+                        "荷重ケース {} ({}) member[{}] ({}) 部材 {}: {}",
+                        case.id.0, case.name, index, load.name, load.elem.0, reason
+                    )
+                })?;
+            }
+        }
+        Ok(())
+    }
+
     /// 部材荷重の位置・作用区分を検証する。不整合は荷重ケース・部材荷重添字・対象部材を付けて返す。
     pub fn validate_member_load_extents(&self) -> Result<(), String> {
         for case in &self.load_cases {
@@ -489,6 +522,92 @@ impl Model {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod direction_tests {
+    use super::*;
+
+    #[test]
+    fn direction_domain_is_independent_of_load_kind_intensity_and_source() {
+        for kind in [
+            MemberLoadKind::Point { a: 0.0, p: 0.0 },
+            MemberLoadKind::Point { a: 0.0, p: 100.0 },
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 1.0,
+                w1: 0.0,
+                w2: 0.0,
+            },
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 1.0,
+                w1: 7.0,
+                w2: -7.0,
+            },
+        ] {
+            for source in [
+                LoadSource::Manual,
+                LoadSource::Auto,
+                LoadSource::SlabTip,
+                LoadSource::WallSelfWeight,
+            ] {
+                for (dir, valid) in [
+                    ([0.0, 0.0, -1.0], true),
+                    ([0.0, 3.0, -4.0], true),
+                    ([1e-10, 0.0, -2.0], true),
+                    ([1e-12, 0.0, 0.0], true),
+                    ([f64::from_bits(1e-12_f64.to_bits() + 1), 0.0, 0.0], true),
+                    ([f64::from_bits(1e-12_f64.to_bits() - 1), 0.0, 0.0], false),
+                    ([0.0; 3], false),
+                    ([1e-13, 0.0, 0.0], false),
+                    ([1e-300, 0.0, 0.0], false),
+                    ([1e300, 0.0, 0.0], false),
+                    ([f64::NAN, 1.0, 0.0], false),
+                    ([0.0, f64::INFINITY, 1.0], false),
+                    ([1.0, 0.0, f64::NEG_INFINITY], false),
+                ] {
+                    let mut load = MemberLoad::manual(ElemId(0), dir, kind.clone());
+                    load.source = source;
+                    let before = format!("{load:?}");
+                    assert_eq!(load.validate_direction().is_ok(), valid, "{load:?}");
+                    assert_eq!(format!("{load:?}"), before);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn model_direction_failure_identifies_case_member_index_name_and_element() {
+        let mut model = Model::default();
+        assert!(model.validate_member_load_directions().is_ok());
+        let valid = MemberLoad::manual(
+            ElemId(4),
+            [0.0, 0.0, -2.0],
+            MemberLoadKind::Point { a: 1.0, p: 0.0 },
+        );
+        let mut invalid = valid.clone();
+        invalid.dir = [0.0; 3];
+        invalid.name = "手入力P".into();
+        model.load_cases = vec![LoadCase {
+            id: LoadCaseId(8),
+            name: "非選択ケース".into(),
+            nodal: vec![],
+            member: vec![valid, invalid],
+            kind: LoadCaseKind::Other,
+        }];
+        let error = model.validate_member_load_directions().unwrap_err();
+        for token in [
+            "荷重ケース 8",
+            "非選択ケース",
+            "member[1]",
+            "手入力P",
+            "部材 4",
+            "1e-12 未満",
+        ] {
+            assert!(error.contains(token), "{error}");
+        }
     }
 }
 

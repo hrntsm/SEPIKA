@@ -67,10 +67,13 @@ pub fn add_support_spring_diag(model: &Model, dofmap: &DofMap, triplets: &mut Ve
     }
 }
 
-/// リップ溝形の成立条件と、要素質量採用時の線材・壁の質量入力を生成前に対象ID付きで検証する。
+/// 全ケースの部材荷重方向・断面適用条件と、線材・壁の質量入力を生成前に対象ID付きで検証する。
 pub(crate) fn validate_global_mass_inputs(
     model: &Model,
 ) -> Result<(), sepika_math::solver::SolveError> {
+    model
+        .validate_member_load_directions()
+        .map_err(sepika_math::solver::SolveError::InvalidInput)?;
     model
         .validate_lip_channels()
         .map_err(|e| sepika_math::solver::SolveError::InvalidInput(e.to_string()))?;
