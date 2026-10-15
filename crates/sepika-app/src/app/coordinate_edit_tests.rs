@@ -8,7 +8,7 @@ use sepika_core::ids::{ElemId, LoadCaseId, NodeId};
 use sepika_core::model::*;
 
 fn app() -> App {
-    let axes = frame_model(&FrameSpec {
+    let mut axes = frame_model(&FrameSpec {
         x_spans: vec![6000.0],
         y_spans: vec![6000.0],
         with_slabs: false,
@@ -16,6 +16,10 @@ fn app() -> App {
     })
     .unwrap()
     .axes;
+    axes[0].axes[0].nodes = vec![NodeId(0), NodeId(2)];
+    axes[0].axes[1].nodes = vec![NodeId(1), NodeId(3)];
+    axes[1].axes[0].nodes = vec![NodeId(0), NodeId(1)];
+    axes[1].axes[1].nodes = vec![NodeId(2), NodeId(3)];
     let mut model = Model {
         axes,
         ..Default::default()
@@ -58,7 +62,7 @@ fn app() -> App {
         });
     }
     let mut app = App::default();
-    app.load_model(model);
+    assert!(app.load_model(model), "{:?}", app.core.scoped.last_error);
     app.ui.view.camera.snap_to_direction([0.0, 0.0, 1.0]);
     app.ui.view.show_supports = false;
     app.ui.view.show_beam_interpolation = false;

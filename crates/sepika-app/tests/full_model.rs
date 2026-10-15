@@ -2024,11 +2024,38 @@ fn ovika_corrupt_optional_payloads_report_notices() {
 #[test]
 fn ovika_invalid_restored_model_is_not_installed() {
     let mut app = imported();
-    app.core.model.nodes.push(app.core.model.nodes[0].clone());
-    assert!(app.core.model.validate().is_err());
+    let section_id = app
+        .core
+        .model
+        .elements
+        .iter()
+        .filter(|element| {
+            matches!(
+                element.kind,
+                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+            )
+        })
+        .filter_map(|element| element.section)
+        .find(|id| {
+            app.core
+                .model
+                .section(*id)
+                .is_some_and(|section| section.rc_frame_use().is_none())
+        })
+        .expect("主架構に割り当てた非RC断面");
+    app.core.model.sections[section_id.index()].frame_use = None;
+    assert!(app
+        .core
+        .model
+        .validate()
+        .unwrap_err()
+        .to_string()
+        .contains("主架構断面用途が未設定"));
     let path = test_tmp().join("invalid_restored_model.ovika");
     app.save_project_to(path.clone());
-    assert_no_error(&app, "検証前のモデル保存");
+    assert_no_error(&app, "未完成モデルの保存");
+    assert!(sepika_io::ovika::load_ovika(&path).is_ok());
+    let original_file = std::fs::read(&path).unwrap();
     let mut reopened = App::default();
     let original = reopened.core.model.clone();
     reopened.open_project_from(path.clone());
@@ -2041,6 +2068,7 @@ fn ovika_invalid_restored_model_is_not_installed() {
         .contains("読込モデルの検証エラー"));
     assert!(original.eq_ignoring_dofmap(&reopened.core.model));
     assert!(reopened.core.scoped.project_path.is_none());
+    assert_eq!(std::fs::read(&path).unwrap(), original_file);
     std::fs::remove_file(path).unwrap();
 }
 

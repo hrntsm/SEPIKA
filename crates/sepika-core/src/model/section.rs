@@ -397,9 +397,9 @@ pub fn section_key_taken(sections: &[Section], key: SectionKey<'_>, skip: Option
 }
 
 impl Model {
-    /// 要素の断面。
+    /// 要素の断面を [`Self::section`] と同じ優先順で返す。未割当・参照先欠落は `None`。
     pub fn element_section(&self, elem: &ElementData) -> Option<&Section> {
-        self.sections.get(elem.section?.index())
+        self.section(elem.section?)
     }
 
     /// 要素の主材料（弾性剛性 E・ν と自重の密度を決める材料）。

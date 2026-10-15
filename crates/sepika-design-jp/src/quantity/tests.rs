@@ -1944,7 +1944,7 @@ fn three_node_reproduction_is_rejected_with_or_without_floor_and_collinear_bound
                     contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3000.0);
                 }
                 if boundary {
-                    let mut edge = line_elem(1, 0, 1, 0);
+                    let mut edge = line_elem(model.elements.len() as u32, 0, 1, 0);
                     edge.section = None;
                     model.elements.push(edge);
                 }
