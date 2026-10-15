@@ -891,6 +891,46 @@ fn lip_channel_geometry_old_contracts_expire_and_current_keeps_results() {
     }
 }
 
+#[test]
+fn cft_case2_design12_expires_while_analysis21_survives_and_design13_can_be_recomputed() {
+    assert_eq!(ANALYSIS_CONTRACT_VERSION, 21);
+    assert_eq!(DESIGN_CONTRACT_VERSION, 13);
+    let app = super::tests::cft_long_case2_app(4_000_000.0);
+    let original = app.core.scoped.results.as_ref().unwrap();
+    assert!(original.has_design_results());
+    let (mut loaded, path) = restore(&app, Some(21), Some(12), "cft-case2-design12");
+    let bundle = loaded.core.scoped.results.as_ref().unwrap();
+    assert_eq!(bundle.statics[0].1.disp, original.statics[0].1.disp);
+    assert_eq!(bundle.member_forces, original.member_forces);
+    assert_eq!(bundle.analysis_contract_version, Some(21));
+    assert!(!bundle.has_design_results());
+    assert!(loaded.core.scoped.staleness.design_stale);
+    assert!(!loaded.core.scoped.staleness.results_stale);
+    loaded.select_displayed_result(app.core.scoped.last_static.unwrap());
+    loaded.core.scoped.staleness.mark_fresh();
+    loaded.save_project_to(path.clone());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(reopened.core.scoped.last_error.is_none());
+    let saved = reopened.core.scoped.results.as_ref().unwrap();
+    assert_eq!(saved.analysis_contract_version, Some(21));
+    assert!(!saved.has_design_results());
+    assert_eq!(saved.design_contract_version, None);
+    reopened.run_design_check();
+    assert!(
+        reopened.core.scoped.last_error.is_none(),
+        "{:?}",
+        reopened.core.scoped.last_error
+    );
+    let recalculated = reopened.core.scoped.results.as_ref().unwrap();
+    assert_eq!(recalculated.design_contract_version, Some(13));
+    assert!(recalculated.has_design_results());
+    assert_eq!(recalculated.member_forces, original.member_forces);
+    let rows = reopened.compute_cft_ultimate_checks().unwrap();
+    assert!((rows[0].mu_nm.as_ref().unwrap() - 450_915_163.991_432_7).abs() < 0.1);
+    std::fs::remove_file(path).unwrap();
+}
+
 fn sm520_app(thickness: f64, fy: Option<f64>) -> App {
     let mut model = crate::sample::portal_frame();
     model.panel_zone = sepika_core::model::PanelZoneMode::None;

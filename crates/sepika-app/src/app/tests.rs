@@ -9833,6 +9833,85 @@ fn cft_ultimate_app_keeps_axial_result_and_rounded_mu_reason() {
     }
 }
 
+pub(super) fn cft_long_case2_app(n_compression_n: f64) -> App {
+    use sepika_core::model::{MaterialCategory, NodalLoad};
+    use sepika_core::section_shape::SectionShape;
+    let mut model = crate::sample::portal_frame();
+    model.nodes = vec![model.nodes[0].clone(), model.nodes[2].clone()];
+    model.nodes[1].id = NodeId(1);
+    model.nodes[1].coord = [0.0, 0.0, 7200.0];
+    model.elements.truncate(1);
+    model.elements[0].nodes = [NodeId(0), NodeId(1)].into_iter().collect();
+    model.materials[0].fy = Some(235.0);
+    let mut concrete = model.materials[0].clone();
+    concrete.id = MaterialId(1);
+    concrete.name = "Fc30".into();
+    concrete.category = MaterialCategory::Concrete;
+    concrete.young = 25000.0;
+    concrete.poisson = 0.2;
+    concrete.density = 2.4e-9;
+    concrete.fc = Some(30.0);
+    concrete.fy = None;
+    model.materials.push(concrete);
+    model.sections = vec![sepika_core::model::Section {
+        frame_use: Some(sepika_core::model::FrameSectionUse::Column),
+        material: Some(MaterialId(1)),
+        steel_material: Some(MaterialId(0)),
+        ..SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        }
+        .to_section(SectionId(0), "CFT400長柱Case2".into())
+    }];
+    model.load_cases.truncate(1);
+    model.load_cases[0].kind = sepika_core::model::LoadCaseKind::Other;
+    model.load_cases[0].name = "指定軸力".into();
+    model.load_cases[0].member.clear();
+    model.load_cases[0].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [0.0, 0.0, -n_compression_n, 0.0, 0.0, 0.0],
+    )];
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    let mut app = App::default();
+    app.load_model(model);
+    app.core.analysis_cfg.threads = 1;
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app
+}
+
+#[test]
+fn cft_long_case2_app_exposes_calculated_mu_and_axial_failure_reason() {
+    for (n_n, axial_ok) in [(4_000_000.0, true), (8_000_000.0, false)] {
+        let mut app = cft_long_case2_app(n_n);
+        let rows = app.compute_cft_ultimate_checks().unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(
+            row.class,
+            sepika_design_jp::ultimate::cft::CftColumnClass::Long
+        );
+        assert!((row.n_design - n_n).abs() < 0.01, "{}", row.n_design);
+        assert!((row.ncu - 7_468_425.346_669_381).abs() < 0.01);
+        assert_eq!(row.ok, axial_ok);
+        if axial_ok {
+            assert!((row.mu_nm.as_ref().unwrap() - 450_915_163.991_432_7).abs() < 0.1);
+            assert!(!row.detail.contains("未算定"));
+        } else {
+            let reason = row.mu_nm.as_ref().unwrap_err();
+            assert!(reason.contains("軸NG"));
+            assert!(row.detail.contains("未算定") && row.detail.contains(reason));
+            assert!(row.axial_margin < 1.0);
+        }
+    }
+}
+
 /// 解析結果はプロジェクトファイル（.ovika）へ保存され、読込で復元される。
 /// 復元できた場合は再計算不要（stale でない）扱いになる。
 #[test]

@@ -30,7 +30,7 @@ mod rc_strength;
 pub use cft::{
     cft_axial_ultimate, cft_column_class, cft_concrete_buckling_axial,
     cft_concrete_buckling_stress, cft_concrete_slenderness, cft_ncu1, CftAxialInput,
-    CftAxialUltimate, CftColumnClass,
+    CftAxialUltimate, CftColumnClass, CftLongBuckling,
 };
 pub use cft_nm::{
     cft_long_medium_column_mu, cft_nk, cft_short_column_mu, CftBendingInput, CftLongMediumInput,

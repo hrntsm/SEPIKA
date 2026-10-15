@@ -605,6 +605,73 @@ pub(crate) fn rc_column_model() -> Model {
     }
 }
 
+pub(crate) fn cft_long_case2_model(n_compression_n: f64) -> Model {
+    use sepika_core::section_shape::SectionShape;
+    let mut model = rc_column_model();
+    model.nodes[1].coord[2] = 7200.0;
+    model.materials[0].fc = Some(30.0);
+    model.materials[0].young = 25000.0;
+    model.materials[1].category = MaterialCategory::Steel;
+    model.materials[1].name = "SN400B".into();
+    model.materials[1].fy = Some(235.0);
+    model.sections[0] = Section {
+        frame_use: Some(FrameSectionUse::Column),
+        material: Some(MaterialId(0)),
+        steel_material: Some(MaterialId(1)),
+        ..SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        }
+        .to_section(SectionId(0), "CFT400長柱Case2".into())
+    };
+    model.load_cases[0].nodal = vec![sepika_core::model::NodalLoad::manual(
+        NodeId(1),
+        [0.0, 0.0, -n_compression_n, 0.0, 0.0, 0.0],
+    )];
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    model
+}
+
+pub(crate) fn assert_cft_long_case2_summary(summary: &serde_json::Value, axial_ok: bool) {
+    assert_eq!(summary["n_cft_checks"], 1);
+    assert_eq!(summary["n_cft_axial_ng"], u64::from(!axial_ok));
+    assert_eq!(summary["n_cft_mu_unavailable"], u64::from(!axial_ok));
+    assert_eq!(summary["all_checks_calculated_and_ok"], axial_ok);
+    let row = &summary["cft_members"][0];
+    assert_eq!(row["class"], "Long");
+    assert_eq!(row["axial_ok"], axial_ok);
+    assert!((row["ncu"].as_f64().unwrap() - 7_468_425.346_669_381).abs() < 0.01);
+    if axial_ok {
+        assert!((row["n_design"].as_f64().unwrap() - 4_000_000.0).abs() < 0.01);
+        assert!((row["mu_nm"].as_f64().unwrap() - 450_915_163.991_432_7).abs() < 0.1);
+        assert!(row["mu_nm_unavailable_reason"].is_null());
+    } else {
+        assert!((row["n_design"].as_f64().unwrap() - 8_000_000.0).abs() < 0.01);
+        assert!(row["mu_nm"].is_null());
+        assert!(row["mu_nm_unavailable_reason"]
+            .as_str()
+            .unwrap()
+            .contains("軸NG"));
+        assert!(row["axial_margin"].as_f64().unwrap() < 1.0);
+    }
+}
+
+#[test]
+fn cft_long_case2_job_reports_independent_mu_and_never_passes_axial_overload() {
+    for (n_n, ok) in [(4_000_000.0, true), (8_000_000.0, false)] {
+        let params = JobParams {
+            load_case: Some(0),
+            ..Default::default()
+        };
+        match compute_job(&cft_long_case2_model(n_n), JobKind::UltimateCheck, &params).unwrap() {
+            JobOutcome::UltimateCheck { summary } => assert_cft_long_case2_summary(&summary, ok),
+            _ => panic!("終局検定の結果が必要"),
+        }
+    }
+}
+
 #[test]
 fn test_compute_ultimate_check_job() {
     let model = rc_column_model();

@@ -151,32 +151,31 @@ pub struct CftLongMediumInput {
     pub c_lambda1: f64,
     /// 座屈補助軸力 Nk `[N]`（[`cft_nk`]）。
     pub nk: f64,
-    /// 当該分類の軸圧縮終局耐力 `[N]`（中柱 Ncu2 / 長柱 Ncu3。Case2 の線形補間に用いる）。
+    /// 同一検討軸・座屈長さの鋼管座屈軸耐力 sNcr `[N]`。
+    pub s_ncr: f64,
+    /// 同一検討軸・座屈長さの鋼管単体オイラー荷重 sNE `[N]`。
+    pub s_ne: f64,
+    /// 当該分類の軸圧縮終局耐力 `[N]`（中柱・長方形長柱の線形補間に用いる）。
     pub ncu_axial: f64,
     /// 軸引張終局耐力の大きさ Ntu `[N]`。
     pub ntu: f64,
 }
 
-/// CFT **中柱・長柱**の N-M 相互作用による終局曲げ耐力 `Mu` [N·mm]
-/// （CFT 指針、長柱 / 中柱）。
-///
-/// ```text
-/// R    = (1 − cNcu/Nk)^(1/CM)         （CM=1、長柱の曲げ低減。0 未満は 0）
-/// sMu0 = 鋼管の曲げのみ終局耐力       （円形 4r2²t·Fy / 角形 B·t(D−t)Fy + t·cD²/2·Fy）
-/// cMu  = max(0, 4·cN/(0.9cNcr)·(1 − cN/(0.9cNcr))·cMmax)
-/// cMmax= Cb/(Cb + cλ1²)·cMmax0,  Cb = 0.923 − 0.0045·Fc
-/// cMmax0 = Fc·cD³/8（角形） / Fc·cD³/12（円形）
-/// Case1 (N ≤ cNcr):  Mu = cMu(N) + sMu0·R
-/// Case2 (N > cNcr):
-///   長柱・円形: θ = π/2 + (N−cNcr)/(4r2t·Fy), Mu = 4r2²t·sinθ·Fy·R
-///   中柱・角形長柱: Mu = sMu0·(1 − (N−cNcu)/(Ncu−cNcu))·R   （Ncu = Ncu2/Ncu3）
-/// ```
-/// 中立軸がコンクリート断面外（N < 0）は (0, sMu0·R) と (−Ntu, 0) を直線補間する。
-/// 不正入力（せい・板厚・Fc・Fy のいずれか 0 以下）は 0.0。
-pub fn cft_long_medium_column_mu(inp: &CftLongMediumInput, n_design: f64) -> f64 {
+/// 中柱・長柱の終局曲げ耐力 `[N·mm]`。軸力 `[N]` は圧縮正。
+/// 正方形長柱の Case2 は鋼管の座屈・オイラー荷重を別々に用いる。
+/// Case2 の無効荷重・非有限値・純圧縮限界超過は理由付きエラー。
+pub fn cft_long_medium_column_mu(inp: &CftLongMediumInput, n_design: f64) -> Result<f64, String> {
     let b = &inp.bending;
-    if b.d_steel <= 0.0 || b.c_d <= 0.0 || b.t <= 0.0 || b.fc <= 0.0 || b.fy <= 0.0 {
-        return 0.0;
+    if !n_design.is_finite()
+        || ![b.d_steel, b.b_steel, b.c_d, b.c_b, b.t, b.fc, b.fy]
+            .into_iter()
+            .all(|v| v.is_finite() && v > 0.0)
+        || 2.0 * b.t >= b.d_steel
+        || 2.0 * b.t >= b.b_steel
+        || !inp.c_ncr.is_finite()
+        || inp.c_ncr < 0.0
+    {
+        return Err("CFT 終局 N–M の断面寸法・材料強度が不正です".into());
     }
     let r_factor = if inp.nk.is_finite() && inp.nk > 0.0 {
         (1.0 - inp.c_ncr / inp.nk).max(0.0)
@@ -189,6 +188,9 @@ pub fn cft_long_medium_column_mu(inp: &CftLongMediumInput, n_design: f64) -> f64
     } else {
         b.b_steel * b.t * (b.d_steel - b.t) * b.fy + b.t * b.c_d * b.c_d / 2.0 * b.fy
     };
+    if inp.is_long && !b.circular && b.d_steel == b.b_steel && n_design > inp.c_ncr {
+        return cft_square_long_case2_mu(inp.c_ncr, inp.s_ncr, inp.s_ne, inp.nk, s_mu0, n_design);
+    }
     let cb = 0.923 - 0.0045 * b.fc;
     let cmmax0 = if b.circular {
         b.fc * b.c_d.powi(3) / 12.0
@@ -209,7 +211,7 @@ pub fn cft_long_medium_column_mu(inp: &CftLongMediumInput, n_design: f64) -> f64
         (4.0 * cn / c_ncr09 * (1.0 - cn / c_ncr09) * cmmax).max(0.0)
     };
 
-    if n_design < 0.0 {
+    let mu = if n_design < 0.0 {
         let mu0 = s_mu0 * r_factor;
         let n_tension = -inp.ntu;
         if 0.0 > n_tension {
@@ -223,7 +225,7 @@ pub fn cft_long_medium_column_mu(inp: &CftLongMediumInput, n_design: f64) -> f64
         let r2 = (b.d_steel - b.t) / 2.0;
         let denom = 4.0 * r2 * b.t * b.fy;
         if denom <= 0.0 {
-            return 0.0;
+            return Ok(0.0);
         }
         let theta = (PI / 2.0 + (n_design - inp.c_ncr) / denom).min(PI);
         (4.0 * r2 * r2 * b.t * theta.sin() * b.fy * r_factor).max(0.0)
@@ -234,11 +236,134 @@ pub fn cft_long_medium_column_mu(inp: &CftLongMediumInput, n_design: f64) -> f64
         } else {
             0.0
         }
-    }
+    };
+    Ok(mu)
 }
+
+fn cft_square_long_case2_mu(
+    c_ncr: f64,
+    s_ncr: f64,
+    s_ne: f64,
+    nk: f64,
+    s_mu0: f64,
+    n: f64,
+) -> Result<f64, String> {
+    if ![c_ncr, s_ncr, s_ne, nk, s_mu0, n]
+        .into_iter()
+        .all(|v| v.is_finite() && v > 0.0)
+        || s_ncr > s_ne
+        || c_ncr >= nk
+    {
+        return Err(
+            "正方形 CFT 長柱 Case2 の座屈荷重・曲げ耐力が無効です（sNcr≤sNE、cNcr<Nk が必要）"
+                .into(),
+        );
+    }
+    let delta_n = n - c_ncr;
+    if delta_n <= 0.0 {
+        return Err("正方形 CFT 長柱 Case2 は N>cNcr が必要です".into());
+    }
+    if n > c_ncr + s_ncr {
+        return Err("正方形 CFT 長柱の軸圧縮終局耐力を超えています（軸NG）".into());
+    }
+    if n == c_ncr + s_ncr {
+        return Ok(0.0);
+    }
+    Ok((1.0 - delta_n / s_ncr) * (1.0 - delta_n / s_ne) * (1.0 - c_ncr / nk) * s_mu0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn square_long_case2_independent_30_knm_fixture_and_limits() {
+        let mu = |n, ne, nk| cft_square_long_case2_mu(1e6, 2e6, ne, nk, 100e6, n).unwrap();
+        assert!((mu(2e6, 4e6, 5e6) - 30e6).abs() < 1e-6);
+        let fixture = CftLongMediumInput {
+            bending: CftBendingInput {
+                circular: false,
+                d_steel: 2.0,
+                b_steel: 2.0,
+                c_d: 1.0,
+                c_b: 1.0,
+                t: 0.5,
+                fc: 30.0,
+                fy: 400e6 / 7.0,
+            },
+            is_long: true,
+            c_ncr: 1e6,
+            c_lambda1: 1.0,
+            nk: 5e6,
+            s_ncr: 2e6,
+            s_ne: 4e6,
+            ncu_axial: 3e6,
+            ntu: 2e6,
+        };
+        assert!((cft_long_medium_column_mu(&fixture, 2e6).unwrap() - 30e6).abs() < 1e-6);
+        assert_eq!(mu(3e6, 4e6, 5e6), 0.0);
+        assert!((mu(2e6, 1e20, 5e6) - 40e6).abs() < 1e-5);
+        assert!(mu(2e6, 4e6, 1e6 + 1e-3) < 0.04);
+        assert!(
+            cft_square_long_case2_mu(1e6, 2e6, 4e6, 5e6, 100e6, 3e6 + 1.0)
+                .unwrap_err()
+                .contains("軸NG")
+        );
+        assert!(cft_square_long_case2_mu(1e6, 2e6, 4e6, 5e6, 100e6, 10e6).is_err());
+        for (sn, ne, nk, n) in [
+            (2e6, 4e6, 1e6, 2e6),
+            (2e6, 1e6, 5e6, 2e6),
+            (0.0, 4e6, 5e6, 2e6),
+            (2e6, f64::INFINITY, 5e6, 2e6),
+            (2e6, 4e6, 5e6, f64::NAN),
+        ] {
+            assert!(cft_square_long_case2_mu(1e6, sn, ne, nk, 100e6, n).is_err());
+        }
+    }
+
+    #[test]
+    fn unrelated_cases_keep_their_existing_formulas_without_steel_case2_inputs() {
+        for (circular, is_long, rectangular, n) in [
+            (false, false, false, 4e6),
+            (true, true, false, 4e6),
+            (false, true, true, 4e6),
+            (false, true, false, 0.0),
+            (false, true, false, -1e6),
+        ] {
+            let (mut inp, _, _) = long_input(circular, is_long);
+            if rectangular {
+                inp.bending.b_steel = 300.0;
+                inp.bending.c_b = 276.0;
+            }
+            let before = cft_long_medium_column_mu(&inp, n).unwrap();
+            inp.s_ne = f64::NAN;
+            inp.s_ncr = f64::NAN;
+            assert_eq!(cft_long_medium_column_mu(&inp, n).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn square_long_case2_uses_steel_loads_independently_of_concrete_slenderness() {
+        let (mut inp, _, _) = long_input(false, true);
+        inp.c_ncr = 1e6;
+        inp.s_ncr = 2e6;
+        inp.s_ne = 4e6;
+        inp.nk = 5e6;
+        let mu = cft_long_medium_column_mu(&inp, 2e6).unwrap();
+        inp.c_lambda1 = 100.0;
+        assert_eq!(cft_long_medium_column_mu(&inp, 2e6).unwrap(), mu);
+        inp.ncu_axial = 100e6;
+        assert_eq!(cft_long_medium_column_mu(&inp, 2e6).unwrap(), mu);
+        inp.s_ne = 2e6;
+        assert!((cft_long_medium_column_mu(&inp, 2e6).unwrap() / mu - 2.0 / 3.0).abs() < 1e-12);
+        inp.s_ne = 4e6;
+        let at = cft_long_medium_column_mu(&inp, 1e6).unwrap();
+        assert!((cft_long_medium_column_mu(&inp, 1e6 - 1e-3).unwrap() - at).abs() < 1.0);
+        assert!((cft_long_medium_column_mu(&inp, 1e6 + 1e-3).unwrap() - at).abs() < 1.0);
+        assert_eq!(cft_long_medium_column_mu(&inp, -inp.ntu).unwrap(), 0.0);
+        assert!(cft_long_medium_column_mu(&inp, -0.5 * inp.ntu).unwrap() > 0.0);
+        assert!(cft_long_medium_column_mu(&inp, f64::NAN).is_err());
+    }
 
     /// 角形 CFT-□400×400×12, Fc=30, Fy=325。cD=cB=376。
     fn box_input() -> CftBendingInput {
@@ -384,6 +509,8 @@ mod tests {
                 c_ncr,
                 c_lambda1: 1.0,
                 nk,
+                s_ncr: ncu_axial - c_ncr,
+                s_ne: 2.0 * ncu_axial,
                 ncu_axial,
                 ntu,
             },
@@ -397,8 +524,8 @@ mod tests {
         // Case1/Case2 の境界 N=cNcr で連続（いずれも sMu0·R）。
         for (circular, is_long) in [(true, true), (false, true), (false, false), (true, false)] {
             let (inp, c_ncr, _) = long_input(circular, is_long);
-            let lo = cft_long_medium_column_mu(&inp, c_ncr - 1.0);
-            let hi = cft_long_medium_column_mu(&inp, c_ncr + 1.0);
+            let lo = cft_long_medium_column_mu(&inp, c_ncr - 1.0).unwrap();
+            let hi = cft_long_medium_column_mu(&inp, c_ncr + 1.0).unwrap();
             assert!(
                 (lo - hi).abs() / hi.max(1.0) < 1e-2,
                 "境界不連続 circular={circular} is_long={is_long}: lo={lo} hi={hi}"
@@ -410,9 +537,9 @@ mod tests {
     fn test_cft_long_medium_mu_endpoints_and_reduction() {
         let (inp, _, ntu) = long_input(true, true);
         // 中心引張 N=−Ntu で Mu→0。
-        assert!(cft_long_medium_column_mu(&inp, -ntu).abs() < 1e-3);
+        assert!(cft_long_medium_column_mu(&inp, -ntu).unwrap().abs() < 1e-3);
         // 圧縮側で Mu 正。
-        assert!(cft_long_medium_column_mu(&inp, 0.3 * inp.ncu_axial) > 0.0);
+        assert!(cft_long_medium_column_mu(&inp, 0.3 * inp.ncu_axial).unwrap() > 0.0);
         // Nk を小さくする（座屈が厳しい）と R が下がり Mu が減少する。
         let mut stiff = inp;
         stiff.nk = 10.0 * inp.c_ncr; // R 大
@@ -420,7 +547,8 @@ mod tests {
         slender.nk = 1.2 * inp.c_ncr; // R 小
         let n = 0.2 * inp.c_ncr;
         assert!(
-            cft_long_medium_column_mu(&slender, n) < cft_long_medium_column_mu(&stiff, n),
+            cft_long_medium_column_mu(&slender, n).unwrap()
+                < cft_long_medium_column_mu(&stiff, n).unwrap(),
             "細長い方が Mu 小のはず"
         );
     }
@@ -436,7 +564,7 @@ mod tests {
         let short = cft_short_column_mu(&inp, 0.3 * ncu1, ncu1, ntu);
 
         let (med_inp, _, _) = long_input(false, false);
-        let medium = cft_long_medium_column_mu(&med_inp, 0.3 * med_inp.ncu_axial);
+        let medium = cft_long_medium_column_mu(&med_inp, 0.3 * med_inp.ncu_axial).unwrap();
         assert!(
             medium > 0.0 && medium < short,
             "medium={medium} short={short}"

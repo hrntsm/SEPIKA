@@ -249,6 +249,13 @@ pub fn cft_mu_nm(
         lk,
     };
     let r = cft_axial_ultimate(&inp);
+    let square_long_case2 = !circular
+        && bd == bb
+        && r.class == CftColumnClass::Long
+        && n_design > r.long_buckling.unwrap().c_ncr;
+    if square_long_case2 && (fc > 58.8399 || lk / d_section > 30.0) {
+        return Err("正方形 CFT 長柱 Case2 の適用域外です（Fc≤58.8399 N/mm²、12<Lk/D≤30）".into());
+    }
     let bending = CftBendingInput {
         circular,
         d_steel: bd,
@@ -265,14 +272,135 @@ pub fn cft_mu_nm(
             &CftLongMediumInput {
                 bending,
                 is_long: r.class == CftColumnClass::Long,
-                c_ncr: cft_concrete_buckling_axial(c_inertia, c_area, fc, lk),
+                c_ncr: r.long_buckling.map_or_else(
+                    || cft_concrete_buckling_axial(c_inertia, c_area, fc, lk),
+                    |b| b.c_ncr,
+                ),
                 c_lambda1: cft_concrete_slenderness(c_inertia, c_area, fc, lk),
                 nk: cft_nk(c_inertia, s_inertia, 205000.0, fc, lk),
+                s_ncr: r.long_buckling.map_or(0.0, |b| b.s_ncr),
+                s_ne: r.long_buckling.map_or(0.0, |b| b.s_ne),
                 ncu_axial: r.ncu,
                 ntu: r.ntu,
             },
             n_design,
-        ),
+        )?,
     };
     Ok(mu)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn square() -> SectionShape {
+        SectionShape::CftBox {
+            height: 150.0,
+            width: 150.0,
+            thick: 4.5,
+            corner_r: Some(0.0),
+        }
+    }
+
+    #[test]
+    fn square_long_case2_matches_independent_si_section_fixture_on_both_axes() {
+        let shape = square();
+        // □150×150×4.5: Zp=142944.75 mm³。独立SI算術の期待値。
+        for (lk, n, expected) in [
+            (2700.0, 774319.9534426274, 12313672.630184587),
+            (3600.0, 638951.2112984662, 10447057.35256648),
+            (4500.0, 526199.2457856721, 8897541.725737186),
+        ] {
+            for weak in [false, true] {
+                let mu = cft_mu_nm(&shape, 30.0, 235.0, n, lk, weak).unwrap();
+                assert!((mu - expected).abs() < 1e-6, "Lk={lk} Mu={mu}");
+            }
+        }
+        let (_, _, ca, sa, ci, si) = cft_section_props(&shape).unwrap().unwrap();
+        let inp = cft::CftAxialInput {
+            circular: false,
+            d_section: 150.0,
+            c_area: ca,
+            s_area: sa,
+            c_inertia: ci,
+            s_inertia: si,
+            fc: 30.0,
+            fy: 235.0,
+            s_young: 205000.0,
+            lk: 2700.0,
+        };
+        let r = cft_axial_ultimate(&inp);
+        let b = r.long_buckling.unwrap();
+        assert!((b.c_ncr - 498392.5925098732).abs() < 1e-6);
+        assert!((b.s_ncr - 551854.7218655085).abs() < 1e-6);
+        assert!((b.s_ne - 2567151.6840979215).abs() < 1e-6);
+        let nk = cft_nk(ci, si, 205000.0, 30.0, 2700.0);
+        assert!((nk - 2790869.6916305753).abs() < 1e-6);
+        assert!(nk > b.s_ne);
+        assert_eq!(
+            cft_mu_nm(&shape, 30.0, 235.0, r.ncu, 2700.0, false).unwrap(),
+            0.0
+        );
+        assert!(cft_mu_nm(&shape, 30.0, 235.0, r.ncu + 1.0, 2700.0, false)
+            .unwrap_err()
+            .contains("軸NG"));
+    }
+
+    #[test]
+    fn cft_class_boundaries_keep_short_medium_and_select_new_long_case2() {
+        // 短柱は軸力から中立軸を代数解、中柱は既存補間、長柱は採用二因子の独立期待値。
+        for (lk, expected) in [
+            (599.999, 29222996.52334515),
+            (600.0, 29222996.52334515),
+            (600.001, 22231713.50932128),
+            (1799.999, 19009636.698280655),
+            (1800.0, 19009632.58977959),
+            (1800.001, 18256000.34281963),
+        ] {
+            assert!(
+                (cft_mu_nm(&square(), 30.0, 235.0, 800000.0, lk, false).unwrap() - expected).abs()
+                    < 1e-5,
+                "Lk={lk}"
+            );
+        }
+    }
+
+    #[test]
+    fn square_long_case2_reports_range_and_invalid_geometry_without_extending_other_cases() {
+        let shape = square();
+        for (fc, lk) in [(58.84, 2700.0), (30.0, 4500.001)] {
+            assert!(cft_mu_nm(&shape, fc, 235.0, 1e6, lk, false)
+                .unwrap_err()
+                .contains("適用域外"));
+            assert!(cft_mu_nm(&shape, fc, 235.0, 0.0, lk, false).is_ok());
+            assert!(cft_mu_nm(&shape, fc, 235.0, -1e5, lk, false).is_ok());
+        }
+        for corner_r in [None, Some(1.0)] {
+            let bad = SectionShape::CftBox {
+                height: 150.0,
+                width: 150.0,
+                thick: 4.5,
+                corner_r,
+            };
+            assert!(cft_mu_nm(&bad, 30.0, 235.0, 8e5, 2700.0, false)
+                .unwrap_err()
+                .contains("角R"));
+        }
+        for bad in [
+            SectionShape::CftBox {
+                height: 150.0,
+                width: 150.0,
+                thick: 75.0,
+                corner_r: Some(0.0),
+            },
+            SectionShape::CftBox {
+                height: f64::NAN,
+                width: 150.0,
+                thick: 4.5,
+                corner_r: Some(0.0),
+            },
+        ] {
+            assert!(cft_mu_nm(&bad, 30.0, 235.0, 8e5, 2700.0, false).is_err());
+        }
+    }
 }

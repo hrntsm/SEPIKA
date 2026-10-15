@@ -254,10 +254,10 @@ fn cft_box_check(
     let c_b_y = c_d_z;
     let c_d_y = c_b_z;
 
-    let c_area = shape
+    let c_core = shape
         .try_cft_core_props()?
-        .ok_or("角形 CFT のコア性能を解決できません")?
-        .area;
+        .ok_or("角形 CFT のコア性能を解決できません")?;
+    let c_area = c_core.area;
     let cnc = c_area * fc_allow;
 
     let n_design = -forces.n;
@@ -294,6 +294,18 @@ fn cft_box_check(
         let lk_z = ctx.lk_z.unwrap_or(ctx.length);
         let mu_z = crate::ultimate::cft_mu_nm(shape, fc_raw, f_value, n_design, lk_y, false)?;
         let mu_y = crate::ultimate::cft_mu_nm(shape, fc_raw, f_value, n_design, lk_z, true)?;
+        if height == width
+            && [(lk_y, mu_z), (lk_z, mu_y)].into_iter().any(|(lk, mu)| {
+                lk > 12.0 * height
+                    && mu == 0.0
+                    && n_design
+                        > crate::ultimate::cft_concrete_buckling_axial(
+                            c_core.iy, c_area, fc_raw, lk,
+                        )
+            })
+        {
+            return Err("正方形 CFT 長柱の純圧縮限界で Mu=0 のため QD1/min を算定できません。QD2 へ自動切替しません".into());
+        }
         (2.0 * mu_z, 2.0 * mu_y)
     } else {
         (0.0, 0.0)

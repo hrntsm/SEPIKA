@@ -24,7 +24,7 @@ pub fn q_long_map_from_member_forces(
 
 /// 静的内力から終局検定用の部材需要を組み立てる。
 ///
-/// 軸力は始端値（圧縮正）、曲げは部材内の最大絶対値を採用する。
+/// 軸力は引張正の始端値を圧縮正へ変換し、曲げは部材内の最大絶対値を採用する。
 /// `q_long_by_elem` は `None` なら未設定。
 pub fn member_demand_from_static_forces(
     member_forces: &[(ElemId, MemberForces)],
@@ -33,7 +33,7 @@ pub fn member_demand_from_static_forces(
     member_forces
         .iter()
         .filter_map(|(id, mf)| {
-            let n_axial = mf.at.first().map(|(_, f)| f[0])?;
+            let n_axial = mf.at.first().map(|(_, f)| -f[0])?;
             let mz = mf.at.iter().map(|(_, f)| f[5].abs()).fold(0.0, f64::max);
             let my = mf.at.iter().map(|(_, f)| f[4].abs()).fold(0.0, f64::max);
             Some((
@@ -120,7 +120,7 @@ mod tests {
         let demand = member_demand_from_static_forces(&forces, None);
         assert_eq!(demand.len(), 1);
         let (_, d) = &demand[0];
-        assert!((d.n_axial - 1000.0).abs() < 1e-12);
+        assert!((d.n_axial + 1000.0).abs() < 1e-12);
         assert!((d.mz - 2.0e6).abs() < 1e-6);
         assert!(d.q_long.is_none());
     }
@@ -135,6 +135,123 @@ mod tests {
         let demand = member_demand_from_static_forces(&forces, Some(&ql));
         let (_, d) = &demand[0];
         assert_eq!(d.q_long, Some(50_000.0));
+    }
+
+    #[test]
+    fn static_axial_demand_converts_compression_tension_and_zero_once() {
+        for (raw, expected) in [(-150000.0, 150000.0), (150000.0, -150000.0), (0.0, 0.0)] {
+            let forces = [(ElemId(0), mf(&[(0.0, raw, 0.0, 0.0), (1.0, raw, 0.0, 0.0)]))];
+            assert_eq!(
+                member_demand_from_static_forces(&forces, None)[0].1.n_axial,
+                expected
+            );
+        }
+    }
+
+    fn axial_column(
+        force_z: f64,
+        reverse_nodes: bool,
+        ref_vector: [f64; 3],
+    ) -> sepika_core::model::Model {
+        use sepika_core::dof::Dof6Mask;
+        use sepika_core::ids::{LoadCaseId, MaterialId, NodeId, SectionId};
+        use sepika_core::model::*;
+        let mut section = Section::zero(SectionId(0), "軸力対照".into());
+        section.frame_use = Some(FrameSectionUse::Column);
+        section.material = Some(MaterialId(0));
+        section.area = 1000.0;
+        section.iy = 1e7;
+        section.iz = 1e7;
+        section.j = 1e6;
+        section.as_y = 800.0;
+        section.as_z = 800.0;
+        section.depth = 100.0;
+        section.width = 100.0;
+        let mut nodes = vec![NodeId(0), NodeId(1)];
+        if reverse_nodes {
+            nodes.reverse();
+        }
+        Model {
+            nodes: vec![
+                Node {
+                    id: NodeId(0),
+                    coord: [0.0; 3],
+                    restraint: Dof6Mask::FIXED,
+                    mass: None,
+                    story: None,
+                    support_spring: None,
+                },
+                Node {
+                    id: NodeId(1),
+                    coord: [0.0, 0.0, 3000.0],
+                    restraint: Dof6Mask::FREE,
+                    mass: None,
+                    story: None,
+                    support_spring: None,
+                },
+            ],
+            elements: vec![ElementData {
+                id: ElemId(0),
+                kind: ElementKind::Beam,
+                nodes: nodes.into(),
+                section: Some(SectionId(0)),
+                local_axis: LocalAxis { ref_vector },
+                end_cond: [EndCondition::Fixed; 2],
+                force_regime: ForceRegime::Auto,
+                rigid_zone: Default::default(),
+                plastic_zone: None,
+                spring: None,
+            }],
+            sections: vec![section],
+            materials: vec![Material {
+                id: MaterialId(0),
+                name: "鋼".into(),
+                category: MaterialCategory::Steel,
+                young: 200000.0,
+                poisson: 0.3,
+                density: 0.0,
+                shear: None,
+                fc: None,
+                fy: Some(235.0),
+                strength_factor: None,
+                concrete_class: Default::default(),
+            }],
+            load_cases: vec![LoadCase {
+                id: LoadCaseId(0),
+                name: "鉛直軸力".into(),
+                kind: LoadCaseKind::Dead,
+                nodal: vec![NodalLoad::manual(
+                    NodeId(1),
+                    [0.0, 0.0, force_z, 0.0, 0.0, 0.0],
+                )],
+                member: vec![],
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn solved_column_axial_demand_keeps_physical_sign_when_node_order_or_local_axes_change() {
+        use sepika_core::ids::LoadCaseId;
+        for load_z in [-150000.0, 150000.0, 0.0] {
+            for reverse in [false, true] {
+                for ref_vector in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
+                    let result = crate::compute::compute_linear_static(
+                        axial_column(load_z, reverse, ref_vector),
+                        LoadCaseId(0),
+                    )
+                    .unwrap();
+                    for (_, forces) in &result.member_forces {
+                        for (_, values) in &forces.at {
+                            assert!((values[0] - load_z).abs() < 1e-6);
+                        }
+                    }
+                    let demand = member_demand_from_static_forces(&result.member_forces, None);
+                    assert_eq!(demand.len(), 1);
+                    assert!((demand[0].1.n_axial + load_z).abs() < 1e-6);
+                }
+            }
+        }
     }
 
     #[test]
@@ -163,6 +280,15 @@ mod tests {
         assert_eq!(*id, ElemId(3));
         assert!((d.n_axial - 2000.0).abs() < 1e-12);
         assert_eq!(d.q_long, Some(8_000.0));
+        for axial in [-2000.0, 0.0, 2000.0] {
+            let signed = [PushoverMemberResponse { axial, ..resp[0] }];
+            assert_eq!(
+                member_demand_from_pushover(&signed, None).unwrap()[0]
+                    .1
+                    .n_axial,
+                axial
+            );
+        }
     }
 }
 
