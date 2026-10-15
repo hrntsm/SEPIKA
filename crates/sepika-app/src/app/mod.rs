@@ -1693,7 +1693,7 @@ use sepika_core::geom::is_vertical_pair;
 /// 本関数は表示用の集計のみを提供する）。
 ///
 /// 柱の判定は `ElementKind::Beam` の部材のうち両端節点の水平距離が 1mm 未満
-/// （鉛直材）のものとする。所属階は `Node.story`（`ApplyStories`/階の自動生成で
+/// （鉛直材）のものとする。所属階は `Node.story`（階の自動生成で
 /// 設定される）を用いるため、階が未生成のモデルでは全部材が 0 層扱いになる。
 pub fn column_live_load_factors(model: &sepika_core::model::Model) -> Vec<(ElemId, usize, f64)> {
     use sepika_core::model::ElementKind;

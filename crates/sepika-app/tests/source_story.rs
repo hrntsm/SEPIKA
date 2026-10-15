@@ -23,18 +23,15 @@ fn model() -> Model {
 
 fn prepare(model: &mut Model, undo: &mut UndoStack) {
     let g = sepika_load::story_gen::generate_stories(model, None).unwrap();
+    let mut prepared = model.clone();
+    sepika_job::weight_preparation::apply_generated_weights(
+        &mut prepared,
+        g,
+        MassMethod::default(),
+    );
     assert!(undo.run(
         model,
-        Box::new(sepika_edit::ApplyStories {
-            wall_weight_generation: g.wall_weight_generation,
-            damper_mass_generation: g.damper_mass_generation,
-            stories: g.stories,
-            node_story: g.node_story,
-            constraints: g.constraints,
-            rep_nodes: g.rep_nodes,
-            generated_masters: g.generated_masters,
-            mass_method: MassMethod::default(),
-        })
+        Box::new(sepika_edit::ApplyPreparedModel { prepared })
     ));
 }
 
