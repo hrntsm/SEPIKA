@@ -286,6 +286,14 @@ impl Section {
         format!("SectionId({}): {reason}", self.id.0)
     }
 
+    /// RC 梁・柱の専用型は床板・壁版へ割り当てられない。他型は制限しない。
+    pub fn validate_rc_plate_use(&self) -> Result<(), String> {
+        if self.rc_frame_use().is_some() {
+            return Err(self.rc_purpose_error());
+        }
+        Ok(())
+    }
+
     /// RC 専用型を主架構に参照する場合、対応用途を持つ曲げフレームに限る。
     pub fn validate_rc_element_use(&self, kind: ElementKind) -> Result<(), String> {
         if let Some(expected) = self.rc_frame_use() {

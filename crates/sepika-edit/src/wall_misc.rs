@@ -388,6 +388,13 @@ impl EditCommand for AddAttachedSlab {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         use sepika_core::model::{Slab, SlabShape};
 
+        if let Some(reason) = crate::refs::rc_plate_section_error(
+            model,
+            self.plate.section,
+            SlabId(model.slabs.len() as u32),
+        ) {
+            return Box::new(RejectedEdit(reason));
+        }
         if !crate::refs::plate_section_ref_ok(model, self.plate.section) {
             return Box::new(Noop);
         }
@@ -748,6 +755,13 @@ impl EditCommand for AddAttachedWallPlate {
         if !wall_extent_ok(&self.anchor, self.extent) {
             return Box::new(Noop);
         }
+        if let Some(reason) = crate::refs::rc_plate_section_error(
+            model,
+            self.section,
+            WallPlateId(model.wall_plates.len() as u32),
+        ) {
+            return Box::new(RejectedEdit(reason));
+        }
         if !crate::refs::plate_section_ref_ok(model, self.section) {
             return Box::new(Noop);
         }
@@ -791,6 +805,13 @@ impl EditCommand for AssignWallPlateToRegion {
         };
         if region.assignment.plate().is_some() {
             return Box::new(Noop);
+        }
+        if let Some(reason) = crate::refs::rc_plate_section_error(
+            model,
+            self.section,
+            WallPlateId(model.wall_plates.len() as u32),
+        ) {
+            return Box::new(RejectedEdit(reason));
         }
         if !crate::refs::plate_section_ref_ok(model, self.section) {
             return Box::new(Noop);
@@ -1061,6 +1082,9 @@ impl EditCommand for SetWallPlateSection {
         if idx >= model.wall_plates.len() || model.wall_plates[idx].id != self.id {
             return Box::new(Noop);
         }
+        if let Some(reason) = crate::refs::rc_plate_section_error(model, self.section, self.id) {
+            return Box::new(RejectedEdit(reason));
+        }
         if !crate::refs::plate_section_ref_ok(model, self.section) {
             return Box::new(Noop);
         }
@@ -1177,6 +1201,9 @@ impl EditCommand for SetSlabSection {
         let idx = self.id.index();
         if idx >= model.slabs.len() || model.slabs[idx].id != self.id {
             return Box::new(Noop);
+        }
+        if let Some(reason) = crate::refs::rc_plate_section_error(model, self.section, self.id) {
+            return Box::new(RejectedEdit(reason));
         }
         if !crate::refs::plate_section_ref_ok(model, self.section) {
             return Box::new(Noop);

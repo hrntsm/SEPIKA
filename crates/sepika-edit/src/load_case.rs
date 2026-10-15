@@ -288,6 +288,13 @@ impl EditCommand for AssignSlabToFloorPlateRegion {
         if region.assignment.plate().is_some() {
             return Box::new(Noop);
         }
+        if let Some(reason) = crate::refs::rc_plate_section_error(
+            model,
+            self.plate.section,
+            SlabId(model.slabs.len() as u32),
+        ) {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         if !crate::refs::plate_section_ref_ok(model, self.plate.section) {
             return Box::new(Noop);
         }
