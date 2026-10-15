@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [部材荷重方向の計算入口拒否_Issue687_2026-10.md](部材荷重方向の計算入口拒否_Issue687_2026-10.md) | Point/Distributedの方向境界・有効0/相殺/直交、共通計算入口と入力/成果保持 | 🔶（変更前41ケースと先行MCP9call、変更後core等970・App21＋通知追補4・MCP13試験/20call、保存失効を確認。横断初回2失敗後のApp局所344成功・途中失敗保持。横断1720/関連feature1272・IO191とfeature Clippy/strictDoc成功。最終fmt/default Clippy成功、文書/正式ゲート未確認、native/transport/Validation未実施） |
 | [階一括適用API整理_Issue684_2026-10.md](階一括適用API整理_Issue684_2026-10.md) | 旧公開APIの記録寿命、現用App生成・正順Undo/Redo・正常stale保持の直接対照 | 🔶（調査27／恒久16状態を区別。通常665/GUI1151・静的/文書成功、初回失敗保持。正式ゲート未確認） |
 | [内部参照検査境界_Issue681_2026-10.md](内部参照検査境界_Issue681_2026-10.md) | 階・拘束・節点荷重・生成記録の存在検査、保存/解析/生成とApp拒否時保持 | 🔶（Source6・App受入/編集9、是正後workspace3422/feature1265/IO191成功。初回失敗保持、静的/最終ゲートは記録時点未確認） |
 | [OVIKA参照ID整合性_Issue678_2026-10.md](OVIKA参照ID整合性_Issue678_2026-10.md) | 未完成保存と構造参照拒否、公開断面選択、安定二次ID・失敗時保持 | 🔶（前後41・core/IO・App4件・workspace3414成功、版据置採用。最終ゲート最新状態は[#678](https://github.com/hrntsm/SEPIKA/issues/678)） |
@@ -251,6 +252,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
+| 687 | 部材荷重方向の計算入口拒否 | sepika-core / sepika-solver / sepika-job / sepika-app / sepika-mcp | model/load.rs、statics/analysis/tests.rs、job/tests/member_load_direction.rs、member_load_direction_acceptance_tests.rs、mcp/tests/member_load_direction.rs、persist.rs | [直接回帰](部材荷重方向の計算入口拒否_Issue687_2026-10.md#変更後の共通入口と直接回帰)・[App](部材荷重方向の計算入口拒否_Issue687_2026-10.md#変更後のapp公開actionundoovika)・[MCP](部材荷重方向の計算入口拒否_Issue687_2026-10.md#変更後のmcp公開job保存成果) | 横断 | 🔶（方向拒否・正常値・保持/Undo/保存と旧成果失効を確認。構成/追補の重複を独立件数へ足さない。横断1720/feature1272・IO191を記録（記法修正前snapshot）。最終fmt/default Clippy成功、文書/正式ゲート未確認） |
 | 684 | 階一括適用API整理 | sepika-edit / sepika-app / sepika-job | testsのapply_prepared_model、tests/story_application_lifecycle・source_story、actions/loads、weight_preparation | [直接観測結果](階一括適用API整理_Issue684_2026-10.md#直接観測結果)・[是正後の恒久回帰と直接検証](階一括適用API整理_Issue684_2026-10.md#是正後の恒久回帰と直接検証) | 横断 | 🔶（旧API廃止、通常665/GUI1151・静的/文書成功。初回失敗保持。正式ゲート/手動GUI/外部利用未確認） |
 | 681 | 内部参照検査境界 | sepika-core / sepika-io / sepika-load / sepika-solver / sepika-app / sepika-edit | model/aggregate、story_gen/generate、tests/reference_boundaries・ovika_reference_boundaries・generated_master_references、app/reference_identity_acceptance_tests | [恒久回帰と独立期待契約](内部参照検査境界_Issue681_2026-10.md#恒久回帰と独立期待契約)・[App拒否と保持](内部参照検査境界_Issue681_2026-10.md#app-の拒否と保持) | 横断 | 🔶（是正後広域成功と初回失敗を区別。1.99.1初期化構文是正後focused6/対象Clippy成功。全体静的/最終ゲートは記録時点未確認、手動GUI/Validation未） |
 | 677 | RC専用断面の板参照境界 | sepika-core / sepika-edit / sepika-io / sepika-solver / sepika-app / sepika-mcp | model/section・aggregate、refs・wall_misc、ovika、tests/rc_section_purpose・rc_plate_section_purpose | [独立期待値と実入口](RC専用断面の板参照境界_Issue677_2026-10.md#修正後の独立期待値と実入口) | 横断 | 🔶（App/IO・MCP公開JSON3試験成功、広域・最終ゲート後続） |
