@@ -8,6 +8,36 @@
 - 未検証・一部検証の項目は [未検証一覧.md](未検証一覧.md) に反映し、完了した項目は一覧から除く。
 - PR 作成前に、PR 本文の残課題と一覧の内容を一致させる。
 
+## 記録時点と最終ゲート
+
+各レポートの試験値・件数・独立期待値・未実施範囲は、記載した実行時点の履歴証拠として保持する。
+「後続」「未完了」もその記録時点の状態であり、現在の開発課題の状態はGitHub Issueを参照する。
+独立レビュー・親監査・最終head CI・mergeの最新証拠は公開PRで確認し、索引から参照する。
+PR作成前のコミットへ、そのPRの将来のCI成功・mergeを予記しない。
+索引の🔶は実装・GUI・Validation等の残る範囲を表し、関連Issueの開発作業が未完了であることを一律には意味しない。
+
+今回のループの対象について、2026-10-15に各Issueの完了記録、PRの独立レビュー・親監査記録、
+最終headとの一致、CI全5ジョブ・全ステップとdocs build全ステップの成功、merge済みを照合した。
+docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成功とは扱わない。
+各レポートのローカル失敗・CLI除外・未実施範囲は、このCI成功で取り消さない。
+
+| Issue | 最終ゲート・完了記録のPR | 最終head | CI | docs build |
+| --- | --- | --- | --- | --- |
+| [#629](https://github.com/hrntsm/SEPIKA/issues/629) | [PR #646](https://github.com/hrntsm/SEPIKA/pull/646) | `b36d2b44` | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38246625228) | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38246625277) |
+| [#550](https://github.com/hrntsm/SEPIKA/issues/550) | [PR #648](https://github.com/hrntsm/SEPIKA/pull/648) | `c0660d3b` | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38253749196) | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38253749042) |
+| [#433](https://github.com/hrntsm/SEPIKA/issues/433) | [PR #649](https://github.com/hrntsm/SEPIKA/pull/649) | `ec878cb5` | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38313640429) | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38313640446) |
+| [#647](https://github.com/hrntsm/SEPIKA/issues/647) | [PR #650](https://github.com/hrntsm/SEPIKA/pull/650) | `9339ab5c` | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38318340297) | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38318340343) |
+| [#589](https://github.com/hrntsm/SEPIKA/issues/589) | [PR #651](https://github.com/hrntsm/SEPIKA/pull/651) | `2a1fec94` | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38415406271) | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38415404959) |
+| [#535](https://github.com/hrntsm/SEPIKA/issues/535) | [PR #653](https://github.com/hrntsm/SEPIKA/pull/653) | `c66ddf46` | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38428431951) | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38428431710) |
+| [#617](https://github.com/hrntsm/SEPIKA/issues/617) | [PR #655](https://github.com/hrntsm/SEPIKA/pull/655) | `f00d9d4a` | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38563484411) | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38563484442) |
+| [#572](https://github.com/hrntsm/SEPIKA/issues/572) | [PR #656](https://github.com/hrntsm/SEPIKA/pull/656) | `bd007199` | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38580224172) | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38580224235) |
+| [#534](https://github.com/hrntsm/SEPIKA/issues/534) | [PR #658](https://github.com/hrntsm/SEPIKA/pull/658) | `c3e1c3d8` | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38602388828) | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38602388840) |
+| [#536](https://github.com/hrntsm/SEPIKA/issues/536) | [PR #659](https://github.com/hrntsm/SEPIKA/pull/659) | `d8d1161e` | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38650324159) | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38650324040) |
+| [#475](https://github.com/hrntsm/SEPIKA/issues/475) | [PR #661](https://github.com/hrntsm/SEPIKA/pull/661) | `dc2b0331` | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38656317464) | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38656317463) |
+| [#500](https://github.com/hrntsm/SEPIKA/issues/500) | [PR #662](https://github.com/hrntsm/SEPIKA/pull/662) | `e89c1e08` | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38660349205) | [成功](https://github.com/hrntsm/SEPIKA/actions/runs/38660349252) |
+
+既存Rustdoc警告の後続対応 [#654](https://github.com/hrntsm/SEPIKA/issues/654) も [PR #657](https://github.com/hrntsm/SEPIKA/pull/657) で完了済み（[CI成功](https://github.com/hrntsm/SEPIKA/actions/runs/38588087499)、[docs build成功](https://github.com/hrntsm/SEPIKA/actions/runs/38588087778)）。#617・#572当時の通常生成時の警告やstrict試行失敗の記録は保持する。
+
 ## クイックリンク
 
 | 一覧 | 内容 |
@@ -74,14 +104,14 @@
 
 | レポート | 対象 | 状態 |
 |---|---|---|
-| [CMQのM成分塗り分割_Issue500_2026-10.md](CMQのM成分塗り分割_Issue500_2026-10.md) | サンプルを保持した塗り分割・独立面積・本番描画・数値と状態の保持 | 🔶（独立算術・自動描画・App広域回帰・両Clippy・strict Rustdoc成功。手動GUI・最終headゲートは後続） |
-| [未変形編集入力_Issue475_2026-10.md](未変形編集入力_Issue475_2026-10.md) | 編集開始直後の未変形pick／snap、既存入口とモデル・履歴・結果の保持 | 🔶（独立算術・自動egui 7件・広域回帰成功。手動GUIと最終headゲートは後続） |
-| [RC壁せん断耐力方式_Issue572_2026-10.md](RC壁せん断耐力方式_Issue572_2026-10.md) | 建物共通min/mean・両consumer・開始時固定・採用run値・保存/Undo/失効・対象材種の方式識別 | 🔶（独立算術/原本照合、最終Windows広域回帰・関連feature・Clippy成功、fresh独立レビュー修正必須0。既存#645除外、CI・Validation後続） |
-| [RC壁同一faceと初期耐力_Issue617_2026-10.md](RC壁同一faceと初期耐力_Issue617_2026-10.md) | 同一face全体M/Q/N・物理A・静的一次参照・run採用Quと入力一致 | 🔶（独立算術/人工入力/実求解・App/MCP/Ds/表示とローカルchecks、既知#645除外を区別。独立レビュー指摘なし、親監査/CI・Validation未） |
+| [CMQのM成分塗り分割_Issue500_2026-10.md](CMQのM成分塗り分割_Issue500_2026-10.md) | サンプルを保持した塗り分割・独立面積・本番描画・数値と状態の保持 | 🔶（独立算術・自動描画・App広域回帰・両Clippy・strict Rustdoc成功。手動GUI未実施。最終ゲートは[PR #662](https://github.com/hrntsm/SEPIKA/pull/662)） |
+| [未変形編集入力_Issue475_2026-10.md](未変形編集入力_Issue475_2026-10.md) | 編集開始直後の未変形pick／snap、既存入口とモデル・履歴・結果の保持 | 🔶（独立算術・自動egui 7件・広域回帰成功。手動GUI未実施。最終ゲートは[PR #661](https://github.com/hrntsm/SEPIKA/pull/661)） |
+| [RC壁せん断耐力方式_Issue572_2026-10.md](RC壁せん断耐力方式_Issue572_2026-10.md) | 建物共通min/mean・両consumer・開始時固定・採用run値・保存/Undo/失効・対象材種の方式識別 | 🔶（独立算術/原本照合、最終Windows広域回帰・関連feature・Clippy成功、fresh独立レビュー修正必須0。既存#645除外、Validation未実施。最終ゲートは[PR #656](https://github.com/hrntsm/SEPIKA/pull/656)） |
+| [RC壁同一faceと初期耐力_Issue617_2026-10.md](RC壁同一faceと初期耐力_Issue617_2026-10.md) | 同一face全体M/Q/N・物理A・静的一次参照・run採用Quと入力一致 | 🔶（独立算術/人工入力/実求解・App/MCP/Ds/表示とローカルchecks、既知#645除外を区別。独立レビュー指摘なし、Validation未実施。最終ゲートは[PR #655](https://github.com/hrntsm/SEPIKA/pull/655)） |
 | [RC壁方向別入力_Issue535_2026-10.md](RC壁方向別入力_Issue535_2026-10.md) | 方向比・材料役割・物理壁Fc/再ID・GUI保存/Undo/失効・MCP開始拒否 | 🔶（入力Verification、手動GUI/実験Validation未） |
-| [STB書出の開発中表示_Issue647_2026-10.md](STB書出の開発中表示_Issue647_2026-10.md) | 実ファイルメニューの操作前表示・閉鎖時状態保持・既存入出力回帰 | 🔶（自動描画・既存入出力Verification成功、手動native取消・最終headゲートは後続） |
-| [弧長法削除と既存増分回帰_Issue433_2026-10.md](弧長法削除と既存増分回帰_Issue433_2026-10.md) | 弧長専用実装/API/試験/導線削除、既存荷重増分・変位制御の回帰 | 🔶（限定Verification、freshレビュー・最終headゲートは後続） |
-| [SM520告示基準強度と範囲外拒否_Issue629_2026-10.md](SM520告示基準強度と範囲外拒否_Issue629_2026-10.md) | 告示3区分・100 mm超非補完・現役実入口・OVIKA15/6 | 🔶（直接Verification、正式JIS全製品/Validation・freshレビュー・最終head CIは後続） |
+| [STB書出の開発中表示_Issue647_2026-10.md](STB書出の開発中表示_Issue647_2026-10.md) | 実ファイルメニューの操作前表示・閉鎖時状態保持・既存入出力回帰 | 🔶（自動描画・既存入出力Verification成功、手動native取消未実施。最終ゲートは[PR #650](https://github.com/hrntsm/SEPIKA/pull/650)） |
+| [弧長法削除と既存増分回帰_Issue433_2026-10.md](弧長法削除と既存増分回帰_Issue433_2026-10.md) | 弧長専用実装/API/試験/導線削除、既存荷重増分・変位制御の回帰 | 🔶（限定Verification。最終ゲートは[PR #649](https://github.com/hrntsm/SEPIKA/pull/649)） |
+| [SM520告示基準強度と範囲外拒否_Issue629_2026-10.md](SM520告示基準強度と範囲外拒否_Issue629_2026-10.md) | 告示3区分・100 mm超非補完・現役実入口・OVIKA15/6 | 🔶（直接Verification、正式JIS全製品/Validation未確認。最終ゲートは[PR #646](https://github.com/hrntsm/SEPIKA/pull/646)） |
 | [質点系先行成果鮮度_Issue612_2026-10.md](質点系先行成果鮮度_Issue612_2026-10.md) | GUI 実依存の存在・入力一致、限定片持柱の独立 K/T、状態保持 | 🔶（自動入口 Verification、手動 GUI・freshレビュー・最終head CI は後続） |
 | [リップ溝形の幾何成立条件_Issue544_2026-10.md](リップ溝形の幾何成立条件_Issue544_2026-10.md) | 5矩形境界・独立総性能/質量・生成/保存/編集/GUI/MCP・両質量方式の公開動的Result入口 | 🔶（Windows直接Verification成功、自動App/egui・実MCP・公開solver成功、修正後freshレビュー修正必須なし、手動GUI・実製品Validation・最終docs commit/CIは後続） |
 | [主架構線材の2節点入力_Issue562_2026-10.md](主架構線材の2節点入力_Issue562_2026-10.md) | 対象4kindの共通節点数・編集/I/O/数量/共有準備/solver/GUI/MCP入口と状態不変 | 🔶（Windows入口・自動App/egui・MCP Verification成功、手動GUI未実施、最終headレビュー・全CIは後続） |
@@ -112,7 +142,7 @@
 | [RC梁αyと追加端ばね_Issue523_2026-10.md](RC梁αyと追加端ばね_Issue523_2026-10.md) | 採用分岐、T方向別数値、総角と追加角、明示基準の実factory・GUI・解析入口 | 🔶（Scope内Verification。原典完全照合・実験Validation・T全解析接続は未完） |
 | [地震力標準式と適用診断_Issue486_2026-10.md](地震力標準式と適用診断_Issue486_2026-10.md) | 標準地震力・Qud/増分標準接続・共通GL/入力/適用診断・GUI/MCP入口と失敗理由 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |
 | [原階所属_Issue497_2026-10.md](原階所属_Issue497_2026-10.md) | 原階保存・編集・Fc供給・公開fixture意味的往復・採用2.0.2全XML schema・GUI/MCP入力世代 | ✅（原階/節点Scope。鋼ブレース文字子はIssue550記録、配筋はIssue507記録で別検証） |
-| [鋼ブレースXML文字子_Issue550_2026-10.md](鋼ブレースXML文字子_Issue550_2026-10.md) | 最小鋼ブレース公開export全文の公式2.0.2 XSD成功・文字子negative2件・属性escape・公開importの独立意味照合 | ✅（Scope内Verification。最終headレビュー/全CIはPRゲート） |
+| [鋼ブレースXML文字子_Issue550_2026-10.md](鋼ブレースXML文字子_Issue550_2026-10.md) | 最小鋼ブレース公開export全文の公式2.0.2 XSD成功・文字子negative2件・属性escape・公開importの独立意味照合 | ✅（Scope内Verification。最終ゲートは[PR #648](https://github.com/hrntsm/SEPIKA/pull/648)） |
 | [参照骨格の部材角単位_Issue436_2026-10.md](参照骨格の部材角単位_Issue436_2026-10.md) | 正側参考骨格のQ/Ks・明示s/z・不正/未対応拒否・利用側比較 | 🔶（単位契約Verification済み、モデル一般精度・全履歴・実験未） |
 | [耐震壁_未検定_Issue495_2026-10.md](耐震壁_未検定_Issue495_2026-10.md) | 壁版候補・case・種別別未検定とスリット／自重対象外、不正入力、GUI・MCP・CSV・保存 | 🔶（状態契約のVerification。純鋼板国内式・実験Validationは未対応） |
 | [壁の確定ステップ応答_Issue443_2026-10.md](壁の確定ステップ応答_Issue443_2026-10.md) | 壁単体Qw/Qdir・基準点付き24成分F/M・実要素N/M・弦変形・確定履歴・GUI/MCP/CSV/保存・設計拒否 | ✅（Scope内Verification。材料γ・壁用イベント・系全体集計・実験Validationは未対応） |
@@ -122,7 +152,7 @@
 | [鋼材名の厳密な強度割増認識_Issue599_2026-10.md](鋼材名の厳密な強度割増認識_Issue599_2026-10.md) | 対応済名称と自動割増・factory/曲げ/せん断・旧解析版7のOVIKA失効 | 🔶（直接Verification、freshレビュー・最終CIは後続） |
 | [符号付き単純梁反力_Issue633_2026-10.md](符号付き単純梁反力_Issue633_2026-10.md) | 床／story／elementの符号付き反力・独立積分・利用側・adapter・旧成果失効 | 🔶（直接Verification、原本／Validation・freshレビュー・最終CIは後続） |
 | [保存成果の計算契約版_Issue587_2026-10.md](保存成果の計算契約版_Issue587_2026-10.md) | OVIKA解析/検定版・実入力・部分再実行・GUI/CSV・直接床板/小梁 | 🔶（直接Verification、freshレビュー・最終全構成は後続。MCP別ストアは#589） |
-| [MCP保存成果の生成元_Issue589_2026-10.md](MCP保存成果の生成元_Issue589_2026-10.md) | 静的/固有値の開始入力・契約版・公開path/hash・stale・保存失敗保持 | 🔶（直接Verification、freshレビュー・最終SHA/CIは親担当が記録） |
+| [MCP保存成果の生成元_Issue589_2026-10.md](MCP保存成果の生成元_Issue589_2026-10.md) | 静的/固有値の開始入力・契約版・公開path/hash・stale・保存失敗保持 | 🔶（直接Verification、最終ゲートは[PR #651](https://github.com/hrntsm/SEPIKA/pull/651)） |
 | [静的検定の生成入力_Issue602_2026-10.md](静的検定の生成入力_Issue602_2026-10.md) | 同版の検定入力・部分解析非復活・独立0.8→1.6・GUI/CSV/OVIKA/Undo/失敗 | 🔶（直接Verification、freshレビュー・最終全CIは進行担当が確認） |
 | [OVIKA_named_MessagePack_2026-10.md](OVIKA_named_MessagePack_2026-10.md) | 4 payload の named 保存・復元、順序独立・default・破損・モデル検証、実 STB モデル単体の codec 時間と最終 OVIKA サイズ | ✅ |
 | [壁版の支持範囲判定_2026-09.md](壁版の支持範囲判定_2026-09.md) | 壁の支持辺・間柱端部の負担率の明示入力、部分支持・支持梁重複の診断 | 🔶 |
@@ -144,7 +174,7 @@
 | [非線形動的解析_参照実装照合.md](非線形動的解析_参照実装照合.md) | 07 非線形動的 | 🔶 | UI/IO 経路整備 |
 | [梁型枠接触和集合_Issue451_2026-10.md](梁型枠接触和集合_Issue451_2026-10.md) | 水平一定矩形梁の左右別接触和集合・公開数量入口。実施工Validationは未実施 | 🔶 |
 | [数量積算_参照実装照合.md](数量積算_参照実装照合.md) | 数量積算 | 🔶 | モデル制約による C 節 |
-| [RC壁方向別数量_Issue536_2026-10.md](RC壁方向別数量_Issue536_2026-10.md) | 明示方向筋・不完全小計・共有数量設定保存と解析入力境界 | 🔶（独立算術・自動実入口・Windows広域回帰成功、Validation・最終headゲートは未実施） |
+| [RC壁方向別数量_Issue536_2026-10.md](RC壁方向別数量_Issue536_2026-10.md) | 明示方向筋・不完全小計・共有数量設定保存と解析入力境界 | 🔶（独立算術・自動実入口・Windows広域回帰成功、Validation未実施。最終ゲートは[PR #659](https://github.com/hrntsm/SEPIKA/pull/659)） |
 
 ### 原典・論文・資料照合
 
@@ -168,7 +198,7 @@
 | [解析コア_敵対的レビュー_2026-07.md](解析コア_敵対的レビュー_2026-07.md) | 静解析・固有値・増分解析 | 🔶 |
 | [壁断面統一と正負別せん断耐力_2026-09.md](壁断面統一と正負別せん断耐力_2026-09.md) | 材料別実幅・SRC/CFT・任意角度・正負別壁ばね、PR #277統合後の回帰結果 | 🔶（数値検証済み・実験照合未） |
 | [壁横筋入力と終局割線骨格_Issue503_2026-10.md](壁横筋入力と終局割線骨格_Issue503_2026-10.md) | 明示横筋入力・成分別不足診断・終局割線接続のVerification、新規実験Validation未実施 | 🔶 |
-| [RC壁ひび割れ耐力_Issue534_2026-10.md](RC壁ひび割れ耐力_Issue534_2026-10.md) | 無開口Qcの式・壁板面積・独立算術、直接一括／GUI／公開MCP・保存失効のVerification | 🔶（Scope内Verification成功、実験Validation・最終head CIは未確認） |
+| [RC壁ひび割れ耐力_Issue534_2026-10.md](RC壁ひび割れ耐力_Issue534_2026-10.md) | 無開口Qcの式・壁板面積・独立算術、直接一括／GUI／公開MCP・保存失効のVerification | 🔶（Scope内Verification成功、実験Validation未実施。最終ゲートは[PR #658](https://github.com/hrntsm/SEPIKA/pull/658)） |
 | [耐震壁_敵対的レビュー_2026-07.md](耐震壁_敵対的レビュー_2026-07.md) | 壁エレメントの再現試験・独立算式照合・追加回帰検証（判断と途中履歴はADR・申し送りを参照） | 🔶 |
 | [保有水平耐力_プッシュオーバー_敵対的レビュー_2026-07.md](保有水平耐力_プッシュオーバー_敵対的レビュー_2026-07.md) | ルート3 PO | 🔶 |
 | [材端集中ばね梁_定式化レビュー_2026-07.md](材端集中ばね梁_定式化レビュー_2026-07.md) | ConcentratedSpringBeam | 🔶 |
@@ -238,7 +268,7 @@
 | 12 | 荷重組合せ・検定対象 | sepika-core / sepika-job / sepika-app / sepika-mcp | load_combo.rs、design_q0.rs、app/tests.rs、tests.rs | [荷重状態の検証対応](荷重状態と検定対象_Issue487_2026-10.md#直接検証の対応) | P2 | 🔶（原文再取得・Validation未） |
 | 13 | 許容応力度設計 | sepika-design-jp | allowable_stress.rs | `test_beam_check_bending_rect_section_hand_calc` 他 | P3 | ✅ |
 | 13a | 大梁必要横補剛箇所数（参考） | sepika-design-jp / sepika-app / sepika-mcp | steel/lateral_bracing.rs・member_design_check.rs・app/tests.rs・tests.rs | [Issue488直接受入](大梁横補剛参考数_Issue488_2026-10.md#直接試験) | 横断 | 🔶（参考式Verification、実配置・性能・Validation未） |
-| 13c | SM520告示Fと範囲外拒否 | sepika-core / design-jp / element / solver / app / mcp | sm520境界・現役caller実入口・result_contract_tests | [Issue629の固定期待値と実入口](SM520告示基準強度と範囲外拒否_Issue629_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、Validation・最終head CIは後続） |
+| 13c | SM520告示Fと範囲外拒否 | sepika-core / design-jp / element / solver / app / mcp | sm520境界・現役caller実入口・result_contract_tests | [Issue629の固定期待値と実入口](SM520告示基準強度と範囲外拒否_Issue629_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、Validation未実施。最終ゲートは[PR #646](https://github.com/hrntsm/SEPIKA/pull/646)） |
 | 13b | 標準鋼材名の厳密解決 | sepika-core / sepika-io | material_grade.rs・standard_material.rs・stbridge/strength_tests.rs | [Issue590の独立表・公開STB入口](標準鋼材名の厳密解決_Issue590_2026-10.md#独立期待値と実入口) | 横断 | 🔶（名称Verification、種類別F全照合・Validation未） |
 | 14 | 保有耐力 | sepika-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
 | 15 | プッシュオーバー | sepika-solver / sepika-job / sepika-app / sepika-mcp | nonlinear/pushover/driver.rs・tests.rs / compute.rs | [Issue433既存増分回帰](弧長法削除と既存増分回帰_Issue433_2026-10.md#既存回帰と観測) | P5 | 🔶（弧長削除Verification、4方向等は未検証） |
@@ -267,7 +297,7 @@
 | 30 | 壁版の要素生成判定と可視化 | sepika-core / sepika-load / sepika-app | model/wall_plate.rs, wall_expand.rs, viewer/scene.rs | `test_becomes_element_agrees_with_generated_elements` / `test_becomes_element_requires_section` / `test_boundary_coords_with_uses_supplied_coords` / `囲まれた壁版は境界節点が全て構面上にあるときだけ描く` / `取り付く壁版は取付き先の節点で構面を判定する` | 横断 | ☑ |
 | 31 | Fc>60 の NewRC 外挿 | sepika-material / sepika-element | newrc.rs, uniaxial/concrete_cyclic.rs, frame/fiber/mod.rs | Fc≤60 の材料 E 反映を維持し、Fc>60 の NewRC 固有 Ec 外挿、構成則選択・圧縮包絡線・ファイバー生成・3履歴則の応答をコードテストで照合済み。実験・原典適用範囲外の妥当性確認は未実施（詳細は [NewRC高強度コンクリート外挿_2026-09.md](NewRC高強度コンクリート外挿_2026-09.md)） | 横断 | 🔶 |
 | 32a | OVIKA保存成果の計算契約 | sepika-core / sepika-app | result_contract.rs・result_validity.rs・actions/design・result_contract_tests.rs | [Issue587の実OVIKA・実入口](保存成果の計算契約版_Issue587_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終全構成は後続） |
-| 32b | MCP保存成果の生成元と公開 | sepika-core / sepika-io / sepika-mcp | results/fs_store.rs・persist.rs・server_lifecycle_tests.rs | [Issue589の独立期待状態と実入口](MCP保存成果の生成元_Issue589_2026-10.md#独立期待状態と実入口) | 横断 | 🔶（直接Verification、最終SHA/レビュー/CIは後続） |
+| 32b | MCP保存成果の生成元と公開 | sepika-core / sepika-io / sepika-mcp | results/fs_store.rs・persist.rs・server_lifecycle_tests.rs | [Issue589の独立期待状態と実入口](MCP保存成果の生成元_Issue589_2026-10.md#独立期待状態と実入口) | 横断 | 🔶（直接Verification。最終ゲートは[PR #651](https://github.com/hrntsm/SEPIKA/pull/651)） |
 | 32b | 静的検定の生成入力 | sepika-core / sepika-app | result_validity.rs・actions/design/check.rs・design_input_tests.rs | [Issue602の独立数値・実入口](静的検定の生成入力_Issue602_2026-10.md#実入口と観測) | 横断 | 🔶（直接Verification、freshレビュー・最終全CIは後続） |
 | 32 | OVIKA の named MessagePack 永続化 | sepika-io / sepika-app | ovika.rs, tests/full_model.rs | `saved_model_fields_are_named_and_order_independent` / `ovika_roundtrip_preserves_model_and_results` 他。default・破損・復元モデル検証とモデル単体のサイズ・codec 比較は [検証記録](OVIKA_named_MessagePack_2026-10.md) を参照 | 横断 | ✅ |
 | 33 | 単一リップ溝形材の未検定 | sepika-design-jp / sepika-app | steel/lip_channel.rs、tests/lip_channel.rs、viewer/check_ratio.rs | `steel::lip_channel::tests::*` / `lip_channel_*`。詳細は[未検定](リップ溝形材_未検定_Issue509_2026-10.md)と[幾何成立](リップ溝形の幾何成立条件_Issue544_2026-10.md)の記録 | 横断 | 🔶（未検定契約・幾何入力Verification。耐力Validation未） |
@@ -279,13 +309,13 @@
 | 36 | 静的設定の公開経路一致 | sepika-solver / sepika-element / sepika-job / sepika-app / sepika-mcp | statics/linear、statics/analysis、factory、compute、actions/linear_static、tests | [Issue595の直接入口と回帰](静的設定採用_Issue595_2026-10.md#直接入口と回帰) | 横断 | 🔶（Verification、Validation・最終headゲート未） |
 | 633 | 符号付き単純梁反力 | sepika-load / sepika-element / sepika-app | floor/fem.rs・story_gen/reactions.rs・frame/member_load.rs・viewer/cmq.rs | [Issue633の独立値・公開入口](符号付き単純梁反力_Issue633_2026-10.md#独立verification) | 横断 | 🔶（直接Verification、原本／Validation・最終CIは後続） |
 | 546 | 節点・材料直接入力の有限判定 | sepika-app / sepika-edit | tables/nodes.rs・tables/materials.rs・section_material/material.rs | [直接入力matrix](節点材料の直接有限入力_Issue546_2026-10.md#独立期待値と実入口) | GUI／編集 | 🔶（直接Verification、最終head CI後続） |
-| 475 | 未変形座標による編集入力 | sepika-app | app/coordinate_edit_tests.rs・app/panels/draw_tools.rs・load_editor.rs | [独立期待値と実入口](未変形編集入力_Issue475_2026-10.md#独立期待値と実入口) | GUI／編集 | 🔶（自動Verification成功、手動GUI・最終headゲートは後続） |
-| 500 | CMQ の M 成分の塗り分割 | sepika-app | viewer/cmq.rs・viewer/diagram.rs | [独立期待値と実入口](CMQのM成分塗り分割_Issue500_2026-10.md#独立期待値と実入口) | GUI／表示 | 🔶（Scope内Verification成功、手動GUI・最終headゲートは後続） |
+| 475 | 未変形座標による編集入力 | sepika-app | app/coordinate_edit_tests.rs・app/panels/draw_tools.rs・load_editor.rs | [独立期待値と実入口](未変形編集入力_Issue475_2026-10.md#独立期待値と実入口) | GUI／編集 | 🔶（自動Verification成功、手動GUI未実施。最終ゲートは[PR #661](https://github.com/hrntsm/SEPIKA/pull/661)） |
+| 500 | CMQ の M 成分の塗り分割 | sepika-app | viewer/cmq.rs・viewer/diagram.rs | [独立期待値と実入口](CMQのM成分塗り分割_Issue500_2026-10.md#独立期待値と実入口) | GUI／表示 | 🔶（Scope内Verification成功、手動GUI未実施。最終ゲートは[PR #662](https://github.com/hrntsm/SEPIKA/pull/662)） |
 | 635 | 固定距離部材荷重の支間内検証 | sepika-core / sepika-edit / sepika-solver / sepika-io / sepika-app / sepika-mcp / sepika-job | model/load.rs・node_member.rs・story_copy.rs・precheck.rs | [Issue635の独立受入と実入口](固定距離部材荷重の支間内検証_Issue635_2026-10.md#独立期待値と実入口) | 横断 | 🔶（入力境界Verification、最終headゲートは後続） |
 
-凡例: ✅ 実装済み・🔶 一部実装（要拡張）・❌ 未実装・対象外（採用しない）。
+凡例: ✅ 記載範囲は完了・🔶 未実装または未検証の範囲が残る・❌ 未実装・対象外（採用しない）。
 壁横筋βs・参考骨格の単体/GUI共通/MCP実ジョブ検証は[Issue503検証](壁横筋入力と終局割線骨格_Issue503_2026-10.md)を参照（Verification ✅、実験Validation 🔶）。
-無開口Qc・面積の是正後の独立算術／直接一括・GUI・公開MCP入口と編集保存失効は[Issue534検証](RC壁ひび割れ耐力_Issue534_2026-10.md)を参照（Scope内Verification成功、実験Validation・最終head CIは未確認）。Issue503の旧Qc値から今回の成功を推定しない。
+無開口Qc・面積の是正後の独立算術／直接一括・GUI・公開MCP入口と編集保存失効は[Issue534検証](RC壁ひび割れ耐力_Issue534_2026-10.md)を参照（Scope内Verification成功、実験Validation未実施。最終ゲートは[PR #658](https://github.com/hrntsm/SEPIKA/pull/658)）。Issue503の旧Qc値から今回の成功を推定しない。
 
 #16 壁（TVLEM）は採用しない（[ADR 0013](../adr/0013-adopt-wall-element-model.md)）。耐震壁は壁エレメント置換モデルとして検証する（下表 #29・#30 と[未検証一覧 §3](未検証一覧.md)）。
 
