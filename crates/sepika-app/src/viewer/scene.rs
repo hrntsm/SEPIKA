@@ -112,7 +112,7 @@ const PLATE_FILL_ALPHA: u8 = 28;
 /// 同・輪郭の不透明度。
 const PLATE_STROKE_ALPHA: u8 = 220;
 
-/// 荷重分配オブジェクトの多角形（淡い半透明フィル＋破線の輪郭）を 1 枚描く。
+/// 要素にならない壁版の多角形（淡い半透明フィル＋破線の輪郭）を 1 枚描く。
 ///
 /// 床板と要素にならない壁版で書式を共有する。**線種が「解析要素かどうか」を、
 /// 色が「床か壁か」を表す**規約であり、実部材（実線・濃い塗り）と弁別できる。
@@ -144,6 +144,86 @@ fn draw_load_plate_polygon(
     ));
 }
 
+fn slab_fill_triangles(
+    model: &sepika_core::Model,
+    slab: &sepika_core::model::Slab,
+) -> Option<Vec<[usize; 3]>> {
+    use sepika_core::geom::polygon;
+    model.validate_attached_slab_geometry(slab).ok()?;
+    let boundary = slab.boundary_coords(model)?;
+    if !boundary.iter().flatten().all(|v| v.is_finite()) {
+        return None;
+    }
+    let origin = *boundary.first()?;
+    let xy: Vec<_> = boundary
+        .iter()
+        .map(|p| [p[0] - origin[0], p[1] - origin[1]])
+        .collect();
+    let (lo, hi) = polygon::bounding_box(&xy);
+    let scale_mm = (hi[0] - lo[0]).max(hi[1] - lo[1]);
+    let area_mm2 = polygon::area(&xy);
+    if !area_mm2.is_finite() || area_mm2 <= scale_mm * scale_mm * polygon::DEGENERATE_AREA_REL {
+        return None;
+    }
+    polygon::triangulate_simple(&xy).ok()
+}
+
+fn draw_slab_polygon(
+    painter: &egui::Painter,
+    coords: &[[f64; 3]],
+    proj: &Projector,
+    triangles: Option<&[[usize; 3]]>,
+) {
+    let poly: Vec<_> = coords
+        .iter()
+        .map(|p| {
+            p.iter()
+                .all(|v| v.is_finite())
+                .then(|| proj.project(*p))
+                .filter(|p| p.is_finite())
+        })
+        .collect();
+    if poly.len() < 2 {
+        return;
+    }
+    if let Some(triangles) = triangles.filter(|triangles| {
+        poly.iter().all(Option::is_some) && triangles.iter().flatten().all(|&i| i < poly.len())
+    }) {
+        let mut mesh = egui::Mesh::default();
+        for p in &poly {
+            mesh.colored_vertex(
+                p.unwrap(),
+                theme::translucent(theme::BEST_YELLOW, PLATE_FILL_ALPHA),
+            );
+        }
+        for &[a, b, c] in triangles {
+            mesh.add_triangle(a as u32, b as u32, c as u32);
+        }
+        painter.add(egui::Shape::mesh(mesh));
+    }
+    let stroke = egui::Stroke::new(
+        1.5_f32,
+        theme::translucent(theme::BEST_YELLOW, PLATE_STROKE_ALPHA),
+    );
+    if let Some(mut closed) = poly.iter().copied().collect::<Option<Vec<_>>>() {
+        closed.push(closed[0]);
+        painter.extend(egui::Shape::dashed_line(
+            &closed, stroke, PLATE_DASH, PLATE_GAP,
+        ));
+    } else {
+        for i in 0..poly.len() {
+            if let (Some(a), Some(b)) = (poly[i], poly[(i + 1) % poly.len()]) {
+                painter.extend(egui::Shape::dashed_line(
+                    &[a, b],
+                    stroke,
+                    PLATE_DASH,
+                    PLATE_GAP,
+                ));
+            }
+        }
+    }
+}
+
 /// 床板（版）の輪郭・塗り。大梁または小梁で囲まれた床板と、取り付く床板の両方を描く。
 /// 二次部材（小梁・間柱）は実部材と同じ経路（`draw_mode_rest_ghost` の二次部材
 /// ブロック）で別途描画する。
@@ -167,7 +247,8 @@ pub(super) fn draw_slabs(
         else {
             continue;
         };
-        draw_load_plate_polygon(painter, &coords, proj, theme::BEST_YELLOW, true);
+        let triangles = slab_fill_triangles(&app.core.model, slab);
+        draw_slab_polygon(painter, &coords, proj, triangles.as_deref());
     }
     if let Ok(perimeters) = sepika_core::model::perimeter_slabs(&app.core.model) {
         for perimeter in perimeters {
@@ -179,7 +260,13 @@ pub(super) fn draw_slabs(
             else {
                 continue;
             };
+            if !boundary.iter().flatten().all(|v| v.is_finite()) {
+                continue;
+            }
             let coords = boundary.map(|p| proj.project(p));
+            if !coords.iter().all(|p| p.is_finite()) {
+                continue;
+            }
             let mut closed = coords.to_vec();
             closed.push(closed[0]);
             painter.add(egui::Shape::convex_polygon(
@@ -715,6 +802,367 @@ pub(super) fn draw_axis_gadget(painter: &egui::Painter, cam: &CameraState) {
 mod tests {
     use super::*;
     use sepika_core::model::ElementKind;
+
+    use sepika_core::ids::{NodeId, SlabId};
+    use sepika_core::model::{LoadTransfer, Node, RegionAnchor, Slab, SlabPlate, SlabShape};
+
+    fn slab_app(points: &[[f64; 3]], attached_extent: Option<[f64; 2]>) -> App {
+        let mut app = App::default();
+        app.core.model.nodes = points
+            .iter()
+            .enumerate()
+            .map(|(i, &coord)| Node {
+                id: NodeId(i as u32),
+                coord,
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            })
+            .collect();
+        if let Some(extent) = attached_extent {
+            app.core.model.slabs.push(Slab {
+                id: SlabId(0),
+                shape: SlabShape::Attached {
+                    anchor: RegionAnchor::Line {
+                        nodes: [NodeId(0), NodeId(1)],
+                        span: [0.25, 0.75],
+                        transfer: LoadTransfer::Anchor,
+                    },
+                    extent,
+                },
+                plate: SlabPlate::default(),
+                tip_loads: Vec::new(),
+            });
+        } else {
+            let nodes: Vec<_> = app.core.model.nodes.iter().map(|n| n.id).collect();
+            app.core
+                .model
+                .add_enclosed_slab_from_nodes(&nodes, SlabPlate::default());
+        }
+        app
+    }
+
+    fn paint_slabs(
+        app: &App,
+        coords: &[[f64; 3]],
+        rot: [f32; 4],
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let ctx = egui::Context::default();
+        let cam = CameraState {
+            rot,
+            ..Default::default()
+        };
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(egui::LayerId::background());
+            let proj = Projector::new([0.0; 3], &cam, 0.1, [0.0; 2]);
+            draw_slabs(
+                &painter,
+                app,
+                FrameFilter {
+                    elem_on: None,
+                    node_on: None,
+                },
+                &proj,
+                coords,
+            );
+        })
+        .shapes
+    }
+
+    fn slab_meshes(shapes: &[egui::epaint::ClippedShape]) -> Vec<&egui::Mesh> {
+        shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Mesh(m) => Some(m.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn mesh_area_mm2(mesh: &egui::Mesh) -> f64 {
+        mesh.indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|t| {
+                let [a, b, c] = [t[0], t[1], t[2]].map(|i| mesh.vertices[i as usize].pos);
+                f64::from(((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)).abs()) * 50.0
+            })
+            .sum()
+    }
+
+    fn model_coords(app: &App) -> Vec<[f64; 3]> {
+        app.core.model.nodes.iter().map(|n| n.coord).collect()
+    }
+
+    #[test]
+    fn slab_line_fill_observes_input_geometry_and_keeps_support_rejection() {
+        for (extent, area, vertices) in [
+            ([1000.0, -1000.0], 0.0, 0),
+            ([1000.0; 2], 2_000_000.0, 4),
+            ([0.0, 1000.0], 1_000_000.0, 3),
+            ([1000.0, 0.0], 1_000_000.0, 3),
+        ] {
+            let app = slab_app(&[[0.0; 3], [4000.0, 0.0, 0.0]], Some(extent));
+            let model = &app.core.model;
+            let slab = &model.slabs[0];
+            assert!(model.validate_attached_slab(slab).is_err());
+            assert!(model.attached_slab_supports(slab).is_err());
+            assert_eq!(
+                model.validate_attached_slab_geometry(slab).is_ok(),
+                area > 0.0
+            );
+            let shapes = paint_slabs(&app, &model_coords(&app), [1.0, 0.0, 0.0, 0.0]);
+            let meshes = slab_meshes(&shapes);
+            assert!(shapes.len() > meshes.len());
+            if area == 0.0 {
+                assert!(meshes.is_empty());
+            } else {
+                assert_eq!(meshes.len(), 1);
+                assert_eq!(meshes[0].vertices.len(), vertices);
+                assert!((mesh_area_mm2(meshes[0]) - area).abs() < 0.1);
+                assert!(meshes[0]
+                    .vertices
+                    .iter()
+                    .all(|v| v.color == theme::translucent(theme::BEST_YELLOW, 28)));
+            }
+            assert!(shapes.iter().any(|s| match &s.shape {
+                egui::Shape::LineSegment { stroke, .. } =>
+                    stroke.width == 1.5
+                        && stroke.color == theme::translucent(theme::BEST_YELLOW, 220),
+                _ => false,
+            }));
+        }
+    }
+
+    #[test]
+    fn slab_convex_and_concave_fill_cover_the_input_and_leave_the_notch_empty() {
+        for points in [
+            vec![
+                [0.0, 0.0, 0.0],
+                [4000.0, 0.0, 0.0],
+                [4000.0, 1000.0, 0.0],
+                [0.0, 1000.0, 0.0],
+            ],
+            vec![
+                [0.0, 0.0, 0.0],
+                [4000.0, 0.0, 0.0],
+                [4000.0, 1000.0, 0.0],
+                [1000.0, 1000.0, 0.0],
+                [1000.0, 4000.0, 0.0],
+                [0.0, 4000.0, 0.0],
+            ],
+        ] {
+            for reverse in [false, true] {
+                let mut points = points.clone();
+                if reverse {
+                    points.reverse();
+                }
+                let app = slab_app(&points, None);
+                let shapes = paint_slabs(&app, &points, [1.0, 0.0, 0.0, 0.0]);
+                let meshes = slab_meshes(&shapes);
+                assert_eq!(meshes.len(), 1);
+                let expected = if points.len() == 4 {
+                    4_000_000.0
+                } else {
+                    7_000_000.0
+                };
+                assert!((mesh_area_mm2(meshes[0]) - expected).abs() < 0.1);
+                if points.len() == 6 {
+                    for t in meshes[0].indices.as_chunks::<3>().0 {
+                        let xy = t
+                            .iter()
+                            .map(|&i| {
+                                let p = meshes[0].vertices[i as usize].pos;
+                                [f64::from(p.x) * 10.0, -f64::from(p.y) * 10.0]
+                            })
+                            .collect::<Vec<_>>();
+                        assert!(!sepika_core::geom::polygon::contains_including_boundary(
+                            &xy,
+                            [2000.0, 2000.0]
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_slab_boundaries_keep_their_original_finite_edges_without_fill() {
+        for points in [
+            vec![
+                [0.0, 0.0, 0.0],
+                [4000.0, 4000.0, 0.0],
+                [0.0, 4000.0, 0.0],
+                [4000.0, 0.0, 0.0],
+            ],
+            vec![
+                [0.0, 0.0, 0.0],
+                [4000.0, 3000.0, 0.0],
+                [0.0, 4000.0, 0.0],
+                [3000.0, 0.0, 0.0],
+            ],
+            vec![
+                [0.0, 0.0, 0.0],
+                [4000.0, 0.0, 0.0],
+                [4000.0, 0.0, 0.0],
+                [0.0, 4000.0, 0.0],
+            ],
+            vec![[0.0, 0.0, 0.0], [2000.0, 0.0, 0.0], [4000.0, 0.0, 0.0]],
+        ] {
+            let app = slab_app(&points, None);
+            let shapes = paint_slabs(&app, &points, [1.0, 0.0, 0.0, 0.0]);
+            assert!(slab_meshes(&shapes).is_empty());
+            let segments: Vec<_> = shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::LineSegment { points, .. } => Some(points),
+                    _ => None,
+                })
+                .collect();
+            assert!(!segments.is_empty());
+            let xy: Vec<_> = points.iter().map(|p| [p[0], p[1]]).collect();
+            for segment in segments {
+                assert!(xy.iter().enumerate().any(|(i, &a)| {
+                    let b = xy[(i + 1) % xy.len()];
+                    segment.iter().all(|p| {
+                        sepika_core::geom::polygon::point_segment_dist(
+                            [f64::from(p.x) * 10.0, -f64::from(p.y) * 10.0],
+                            a,
+                            b,
+                        ) < 0.01
+                    })
+                }));
+            }
+        }
+    }
+
+    #[test]
+    fn slab_fill_indices_are_stable_under_rotation_deformation_and_edge_collapse() {
+        for extent in [[1000.0, -1000.0], [1000.0; 2], [0.0, 1000.0], [1000.0, 0.0]] {
+            let mut app = slab_app(&[[0.0; 3], [4000.0, 0.0, 1000.0]], Some(extent));
+            let slabs = std::mem::take(&mut app.core.model.slabs);
+            for coord in [[5000.0, 0.0, 0.0], [6000.0, 0.0, 0.0]] {
+                assert!(app.core.scoped.undo.run(
+                    &mut app.core.model,
+                    Box::new(sepika_edit::AddNode {
+                        coord,
+                        restraint: Default::default(),
+                    })
+                ));
+            }
+            app.core.scoped.undo.undo(&mut app.core.model);
+            app.core.model.slabs = slabs;
+            assert!(app.core.scoped.undo.can_undo());
+            assert!(app.core.scoped.undo.can_redo());
+            let labels = (
+                app.core.scoped.undo.undo_label().map(str::to_owned),
+                app.core.scoped.undo.redo_label().map(str::to_owned),
+            );
+            app.core.scoped.results = Some(crate::app::ResultsBundle {
+                analysis_contract_version: Some(17),
+                panel_moments: vec![(NodeId(0), [123.0, 456.0])],
+                ..Default::default()
+            });
+            app.certify_design_fixture();
+            assert!(!app
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .input_records
+                .is_empty());
+            app.core.scoped.project_path = Some("test.ovika".into());
+            let results = bincode::serialize(&app.core.scoped.results).unwrap();
+            let revision = app.core.scoped.undo.revision();
+            let input = bincode::serialize(&app.core.model).unwrap();
+            let state = format!("{:?}", app.core.scoped.staleness);
+            let undo = (
+                app.core.scoped.undo.can_undo(),
+                app.core.scoped.undo.can_redo(),
+            );
+            let original = paint_slabs(&app, &model_coords(&app), [1.0, 0.0, 0.0, 0.0]);
+            let original_indices = slab_meshes(&original).first().map(|m| m.indices.clone());
+            for coords in [
+                vec![[9000.0, 4000.0, -500.0], [9000.0, 4000.000000001, 500.0]],
+                vec![[9000.0, 4000.0, -500.0], [500.0, -3000.0, 1500.0]],
+            ] {
+                for rot in [
+                    [1.0, 0.0, 0.0, 0.0],
+                    CameraState::default().rot,
+                    [0.70710677, 0.70710677, 0.0, 0.0],
+                ] {
+                    let shapes = paint_slabs(&app, &coords, rot);
+                    assert_eq!(
+                        slab_meshes(&shapes).first().map(|m| m.indices.clone()),
+                        original_indices
+                    );
+                }
+            }
+            assert_eq!(bincode::serialize(&app.core.model).unwrap(), input);
+            assert_eq!(app.core.model.slabs[0].id, SlabId(0));
+            assert_eq!(format!("{:?}", app.core.scoped.staleness), state);
+            assert_eq!(
+                (
+                    app.core.scoped.undo.can_undo(),
+                    app.core.scoped.undo.can_redo()
+                ),
+                undo
+            );
+            assert_eq!(
+                bincode::serialize(&app.core.scoped.results).unwrap(),
+                results
+            );
+            assert_eq!(app.core.scoped.undo.revision(), revision);
+            assert_eq!(
+                (
+                    app.core.scoped.undo.undo_label().map(str::to_owned),
+                    app.core.scoped.undo.redo_label().map(str::to_owned)
+                ),
+                labels
+            );
+            assert_eq!(
+                app.core.scoped.project_path.as_deref(),
+                Some(std::path::Path::new("test.ovika"))
+            );
+        }
+    }
+
+    #[test]
+    fn slab_nonfinite_model_display_and_projection_never_reach_painter() {
+        let mut app = slab_app(
+            &[
+                [0.0, 0.0, 0.0],
+                [4000.0, 0.0, 0.0],
+                [4000.0, 4000.0, 0.0],
+                [0.0, 4000.0, 0.0],
+            ],
+            None,
+        );
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX] {
+            let mut coords = model_coords(&app);
+            coords[1][0] = bad;
+            let shapes = paint_slabs(&app, &coords, [1.0, 0.0, 0.0, 0.0]);
+            assert!(slab_meshes(&shapes).is_empty());
+            assert!(!shapes.is_empty());
+            for s in &shapes {
+                assert!(s.shape.visual_bounding_rect().is_finite());
+                if let egui::Shape::LineSegment { points, .. } = &s.shape {
+                    assert!(points.iter().all(|p| p.x == 0.0 || p.y == -400.0));
+                }
+            }
+            app.core.model.nodes[1].coord[0] = bad;
+            assert!(slab_fill_triangles(&app.core.model, &app.core.model.slabs[0]).is_none());
+            let shapes = paint_slabs(&app, &coords, [1.0, 0.0, 0.0, 0.0]);
+            assert!(slab_meshes(&shapes).is_empty());
+            assert!(shapes
+                .iter()
+                .all(|s| s.shape.visual_bounding_rect().is_finite()));
+            app.core.model.nodes[1].coord[0] = 4000.0;
+        }
+    }
 
     fn enclosed_plate() -> sepika_core::model::WallPlate {
         sepika_core::model::WallPlate {
