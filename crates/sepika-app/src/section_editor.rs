@@ -503,6 +503,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
         };
 
         if !matches!(draft.kind, ShapeKind::RcSlab | ShapeKind::RcWall) {
+            let allowed_use = sec.as_ref().ok().and_then(|section| section.rc_frame_use());
             egui::ComboBox::from_label("主架構用途")
                 .selected_text(match draft.frame_use {
                     FrameSectionUse::Girder => "梁",
@@ -510,18 +511,37 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                     FrameSectionUse::Brace => "ブレース",
                 })
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Girder, "梁");
-                    ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Column, "柱");
-                    ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Brace, "ブレース");
+                    if allowed_use.is_none_or(|usage| usage == FrameSectionUse::Girder) {
+                        ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Girder, "梁");
+                    }
+                    if allowed_use.is_none_or(|usage| usage == FrameSectionUse::Column) {
+                        ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Column, "柱");
+                    }
+                    if allowed_use.is_none_or(|usage| usage == FrameSectionUse::Brace) {
+                        ui.selectable_value(&mut draft.frame_use, FrameSectionUse::Brace, "ブレース");
+                    }
                 });
         }
 
+        let purpose_validation = sec.as_ref().ok().map(|section| {
+            let mut candidate = section.clone();
+            candidate.frame_use = Some(draft.frame_use);
+            candidate.validate_rc_frame_use().map_err(|_| {
+                "RC 梁型は梁、RC 柱型は柱の主架構用途を選択してください".to_owned()
+            })
+        }).unwrap_or(Ok(()));
+        if let Err(reason) = &purpose_validation {
+            ui.colored_label(egui::Color32::RED, reason);
+        }
+
         ui.horizontal(|ui| {
-            let can_add = key_free_for_add && !draft.name.trim().is_empty() && rebar_validation.is_ok() && sec.is_ok();
+            let can_add = purpose_validation.is_ok() && key_free_for_add && !draft.name.trim().is_empty() && rebar_validation.is_ok() && sec.is_ok();
             let add_resp = ui.add_enabled(can_add, egui::Button::new("+ 追加"));
             if !can_add {
                 add_resp.on_hover_text(if draft.name.trim().is_empty() {
                     "符号を入力してください".to_string()
+                } else if let Err(reason) = &purpose_validation {
+                    reason.clone()
                 } else if let Err(error) = &sec {
                     error.clone()
                 } else {
@@ -548,7 +568,7 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
             }
             ui.separator();
 
-            let apply_resp = ui.add_enabled(focus.is_some() && rebar_validation.is_ok() && sec.is_ok(), egui::Button::new("✏ 選択断面へ適用"));
+            let apply_resp = ui.add_enabled(purpose_validation.is_ok() && focus.is_some() && rebar_validation.is_ok() && sec.is_ok(), egui::Button::new("✏ 選択断面へ適用"));
             match focus {
                 Some(idx) => {
                     let sid = app.core.model.sections[idx].id;

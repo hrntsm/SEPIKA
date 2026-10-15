@@ -2144,6 +2144,7 @@ fn rc_reference_actual_entries_use_material_strength_for_pushover_and_nominal_fo
         },
     }
     .to_section(SectionId(0), "RC基準".into());
+    section.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
     section.material = Some(MaterialId(0));
     section.rebar_material = Some(MaterialId(1));
     section.shear_rebar_material = Some(MaterialId(1));

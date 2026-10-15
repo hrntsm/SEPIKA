@@ -566,23 +566,22 @@ fn test_model_issues_errors_on_invalid_cft_fc() {
 #[test]
 fn test_model_issues_errors_on_invalid_rc_material() {
     use super::precheck::{model_issues, IssueSeverity, IssueTargets};
-    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
 
     for fc in [None, Some(0.0), Some(f64::NAN)] {
         let mut model = make_cantilever_model();
-        model.sections[0].shape = Some(SectionShape::RcColumnRect {
+        model.sections[0].shape = Some(SectionShape::RcBeamRect {
             b: 600.0,
             d: 600.0,
-            rebar: RcRectColumnRebar {
+            rebar: RcBeamRebar {
                 main_dia: 22.0,
-                x: vec![8],
-                y: vec![8],
+                top: vec![8],
+                bottom: vec![8],
                 cover: 50.0,
-                hoop: RectColumnHoop {
+                stirrup: BeamStirrup {
                     dia: 10.0,
                     pitch: 100.0,
-                    legs_x: 2,
-                    legs_y: 2,
+                    legs: 2,
                 },
             },
         });

@@ -484,6 +484,25 @@ fn rc_steel_src_secondary_members_keep_edit_save_quantity_and_prepare_contract()
                     sepika_edit::SecondaryParent::Wall(WallRegionId(0))
                 }
             };
+            let shape = if idx == 1 && kind == SecondaryMemberKind::Beam {
+                SectionShape::RcBeamRect {
+                    b: 400.0,
+                    d: 400.0,
+                    rebar: sepika_core::section_shape::RcBeamRebar {
+                        main_dia: 0.0,
+                        top: vec![],
+                        bottom: vec![],
+                        cover: 0.0,
+                        stirrup: sepika_core::section_shape::BeamStirrup {
+                            dia: 0.0,
+                            pitch: 0.0,
+                            legs: 0,
+                        },
+                    },
+                }
+            } else {
+                shape.clone()
+            };
             let mut section = shape.to_section(SectionId(2), "正常二次材".into());
             section.material = Some(MaterialId(if idx == 0 { 0 } else { 1 }));
             if idx == 2 {

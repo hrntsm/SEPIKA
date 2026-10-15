@@ -244,6 +244,9 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
     auto_assign_supports(&mut model, &mut notes);
 
     strengths.apply(&mut model, &mut warnings)?;
+    model
+        .validate_rc_section_usage()
+        .map_err(|e| StbError::Unmappable(e.to_string()))?;
     let attributes = attr_dispositions(attr_usage);
     Ok((
         model,

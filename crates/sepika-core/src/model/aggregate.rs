@@ -268,6 +268,7 @@ impl Model {
         use crate::error::CoreError;
 
         self.validate_frame_node_counts()?;
+        self.validate_rc_section_usage()?;
         self.validate_lip_channels()?;
         self.validate_attached_slabs()?;
         let mut strength_sections = std::collections::HashSet::new();
@@ -1779,6 +1780,75 @@ impl Model {
         }
     }
 
+    /// RC 専用型の用途と、主架構・領域内外の二次部材からの参照を検証する。
+    pub fn validate_rc_section_usage(&self) -> Result<(), crate::error::CoreError> {
+        use crate::error::CoreError;
+        let mut sections_by_id = std::collections::HashMap::with_capacity(self.sections.len());
+        for section in &self.sections {
+            section
+                .validate_rc_frame_use()
+                .map_err(CoreError::InvalidInput)?;
+            sections_by_id.entry(section.id).or_insert(section);
+        }
+        let section_for_id = |id: SectionId| {
+            self.sections
+                .get(id.index())
+                .filter(|section| section.id == id)
+                .or_else(|| sections_by_id.get(&id).copied())
+        };
+        for element in &self.elements {
+            if let Some(section) = element.section.and_then(section_for_id) {
+                section
+                    .validate_rc_element_use(element.kind)
+                    .map_err(|reason| {
+                        CoreError::InvalidInput(format!("ElemId({}): {reason}", element.id.0))
+                    })?;
+            }
+        }
+        for sm in self.beams().chain(self.posts()) {
+            if let Some(section) = sm.section.and_then(section_for_id) {
+                section
+                    .validate_rc_secondary_use(sm.kind)
+                    .map_err(|reason| {
+                        CoreError::InvalidInput(format!(
+                            "SecondaryMemberId({}) {:?}: {reason}",
+                            sm.id.0, sm.kind
+                        ))
+                    })?;
+            }
+        }
+        Ok(())
+    }
+
+    /// 指定した RC 断面候補の用途と既存参照を検証する。他型は制限しない。
+    pub fn validate_rc_section_references(&self, section: &Section) -> Result<(), String> {
+        section.validate_rc_frame_use()?;
+        if section.rc_frame_use().is_none() {
+            return Ok(());
+        }
+        for element in self
+            .elements
+            .iter()
+            .filter(|e| e.section == Some(section.id))
+        {
+            section
+                .validate_rc_element_use(element.kind)
+                .map_err(|reason| format!("ElemId({}): {reason}", element.id.0))?;
+        }
+        for sm in self
+            .beams()
+            .chain(self.posts())
+            .filter(|sm| sm.section == Some(section.id))
+        {
+            section
+                .validate_rc_secondary_use(sm.kind)
+                .map_err(|reason| {
+                    format!("SecondaryMemberId({}) {:?}: {reason}", sm.id.0, sm.kind)
+                })?;
+        }
+        Ok(())
+    }
+
     /// 領域内・未割当の全小梁・間柱の断面用途を検証する。
     pub fn validate_secondary_section_usage(&self) -> Result<(), crate::error::CoreError> {
         for sm in self.beams().chain(self.posts()) {
@@ -1794,6 +1864,14 @@ impl Model {
         sm: &SecondaryMember,
         section: &Section,
     ) -> Result<(), crate::error::CoreError> {
+        section
+            .validate_rc_secondary_use(sm.kind)
+            .map_err(|reason| {
+                crate::error::CoreError::InvalidInput(format!(
+                    "SecondaryMemberId({}) {:?}: {reason}",
+                    sm.id.0, sm.kind
+                ))
+            })?;
         if !section.secondary_member_use_allowed() {
             return Err(crate::error::CoreError::InvalidInput(format!(
                 "SecondaryMemberId({}) {:?} -> SectionId({}): 二次部材（小梁・間柱）に CFT 断面は使用できません。CFT は主架構の柱専用です",

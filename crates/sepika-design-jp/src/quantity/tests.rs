@@ -287,8 +287,9 @@ fn test_rc_portal_categories_and_concrete() {
 }
 
 #[test]
-fn test_unset_frame_use_is_not_counted_as_beam() {
+fn test_unset_frame_use_of_supplied_section_is_not_counted_as_beam() {
     let mut model = rc_portal_model();
+    model.sections[0].shape = None;
     model.sections[0].frame_use = None;
 
     let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
@@ -303,6 +304,19 @@ fn test_unset_frame_use_is_not_counted_as_beam() {
         item.category,
         MemberCategory::Girder | MemberCategory::FoundationGirder
     )));
+}
+
+#[test]
+fn rc_primary_missing_frame_use_rejects_quantity_with_section_reason() {
+    let mut model = rc_portal_model();
+    model.sections[0].frame_use = None;
+    let before = model.clone();
+    let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+    assert!(
+        error.contains("SectionId(0)") && error.contains("RC 梁用断面"),
+        "{error}"
+    );
+    assert!(model.eq_ignoring_dofmap(&before));
 }
 
 #[test]
@@ -2463,6 +2477,7 @@ fn nonnodal_secondary_materialization_requires_unique_full_pair_section_use_and_
         let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
         assert!(error.contains("557") && error.contains("一致"), "{error}");
         model.elements[2].section = Some(SectionId(0));
+        model.sections[0].shape = None;
         model.sections[0].frame_use = Some(FrameSectionUse::Column);
         assert!(
             try_compute_quantity_takeoff(&model, &QuantityCfg::default())

@@ -17,6 +17,11 @@ impl EditCommand for SetElementSection {
         if idx >= model.elements.len() || model.elements[idx].id != self.elem {
             return Box::new(Noop);
         }
+        if let Some(reason) =
+            crate::refs::rc_element_section_error(model, &model.elements[idx], self.section)
+        {
+            return Box::new(RejectedEdit(reason));
+        }
         if !crate::refs::frame_element_section_ref_ok(model, &model.elements[idx], self.section) {
             return Box::new(Noop);
         }

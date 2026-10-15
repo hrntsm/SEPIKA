@@ -2171,3 +2171,227 @@ fn frame_node_guard_keeps_four_node_area_elements_and_distinct_zero_length_sprin
         model.validate().unwrap();
     }
 }
+
+mod rc_section_reference_resolution {
+    use super::*;
+    use crate::section_shape::*;
+
+    fn purpose_shapes() -> Vec<(
+        SectionShape,
+        FrameSectionUse,
+        SecondaryMemberKind,
+        &'static str,
+    )> {
+        vec![
+            (
+                SectionShape::RcBeamRect {
+                    b: 300.0,
+                    d: 500.0,
+                    rebar: RcBeamRebar {
+                        main_dia: 22.0,
+                        top: vec![3],
+                        bottom: vec![4],
+                        cover: 40.0,
+                        stirrup: BeamStirrup {
+                            dia: 10.0,
+                            pitch: 150.0,
+                            legs: 2,
+                        },
+                    },
+                },
+                FrameSectionUse::Girder,
+                SecondaryMemberKind::Post,
+                "RC 梁用断面は大梁・小梁専用",
+            ),
+            (
+                SectionShape::RcColumnRect {
+                    b: 600.0,
+                    d: 600.0,
+                    rebar: RcRectColumnRebar {
+                        main_dia: 19.0,
+                        x: vec![4],
+                        y: vec![4],
+                        cover: 40.0,
+                        hoop: RectColumnHoop {
+                            dia: 10.0,
+                            pitch: 150.0,
+                            legs_x: 2,
+                            legs_y: 2,
+                        },
+                    },
+                },
+                FrameSectionUse::Column,
+                SecondaryMemberKind::Beam,
+                "RC 柱用断面は柱・間柱専用",
+            ),
+            (
+                SectionShape::RcColumnCircle {
+                    d: 600.0,
+                    rebar: RcCircleColumnRebar {
+                        main_dia: 19.0,
+                        count: 12,
+                        cover: 40.0,
+                        hoop: CircleColumnHoop {
+                            dia: 10.0,
+                            pitch: 150.0,
+                        },
+                    },
+                },
+                FrameSectionUse::Column,
+                SecondaryMemberKind::Beam,
+                "RC 柱用断面は柱・間柱専用",
+            ),
+        ]
+    }
+
+    fn secondary_model(section: Section, kind: SecondaryMemberKind, assigned: bool) -> Model {
+        let mut sm = test_secondary(kind, 674, "用途参照検証");
+        sm.section = Some(section.id);
+        let mut model = Model {
+            sections: vec![section],
+            ..Default::default()
+        };
+        match (kind, assigned) {
+            (SecondaryMemberKind::Beam, false) => model.unassigned_beams.push(sm),
+            (SecondaryMemberKind::Post, false) => model.unassigned_posts.push(sm),
+            (SecondaryMemberKind::Beam, true) => {
+                let mut region = FloorRegion::new(FloorRegionId(0), vec![]);
+                region.secondary_beams.push(sm);
+                model.floor_regions.push(region);
+            }
+            (SecondaryMemberKind::Post, true) => {
+                let mut region = WallRegion::new(WallRegionId(0), vec![]);
+                region.posts.push(sm);
+                model.wall_regions.push(region);
+            }
+        }
+        model
+    }
+
+    #[test]
+    fn noncanonical_ids_do_not_hide_inverse_secondary_rc_purposes() {
+        for (shape, _, wrong_kind, reason) in purpose_shapes() {
+            shape.validate_rebar().unwrap();
+            for id in [SectionId(7), SectionId(1)] {
+                for assigned in [false, true] {
+                    let section = shape.to_section(id, "RC".into());
+                    let mut model = secondary_model(section.clone(), wrong_kind, assigned);
+                    if id == SectionId(1) {
+                        model
+                            .sections
+                            .push(Section::zero(SectionId(9), "別ID".into()));
+                    }
+                    assert_eq!(model.section(id), Some(&section));
+                    let before = model.clone();
+                    let error = model.validate_rc_section_usage().unwrap_err().to_string();
+                    assert!(
+                        error.contains("SecondaryMemberId(674)")
+                            && error.contains(&format!("SectionId({})", id.0))
+                            && error.contains(reason),
+                        "{error}"
+                    );
+                    assert!(model.eq_ignoring_dofmap(&before));
+                    let normal_kind = match wrong_kind {
+                        SecondaryMemberKind::Beam => SecondaryMemberKind::Post,
+                        SecondaryMemberKind::Post => SecondaryMemberKind::Beam,
+                    };
+                    let mut normal = secondary_model(section, normal_kind, assigned);
+                    if id == SectionId(1) {
+                        normal
+                            .sections
+                            .push(Section::zero(SectionId(9), "別ID".into()));
+                    }
+                    assert!(normal.validate_rc_section_usage().is_ok());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn noncanonical_primary_rc_sections_keep_none_and_brace_rejection() {
+        for (shape, correct_use, _, reason) in purpose_shapes() {
+            for kind in [
+                ElementKind::Beam,
+                ElementKind::Brace {
+                    tension_only: false,
+                },
+            ] {
+                let mut section = shape.to_section(SectionId(7), "RC".into());
+                if matches!(kind, ElementKind::Brace { .. }) {
+                    section.frame_use = Some(correct_use);
+                }
+                let model = Model {
+                    sections: vec![section],
+                    elements: vec![ElementData {
+                        id: ElemId(674),
+                        kind,
+                        section: Some(SectionId(7)),
+                        nodes: [NodeId(0), NodeId(1)].into_iter().collect(),
+                        local_axis: LocalAxis {
+                            ref_vector: [0.0, 0.0, 1.0],
+                        },
+                        end_cond: [EndCondition::Fixed; 2],
+                        force_regime: ForceRegime::Auto,
+                        rigid_zone: Default::default(),
+                        plastic_zone: None,
+                        spring: None,
+                    }],
+                    ..Default::default()
+                };
+                let before = model.clone();
+                let error = model.validate_rc_section_usage().unwrap_err().to_string();
+                assert!(
+                    error.contains("ElemId(674)")
+                        && error.contains("SectionId(7)")
+                        && error.contains(reason),
+                    "{error}"
+                );
+                assert!(model.eq_ignoring_dofmap(&before));
+            }
+        }
+    }
+
+    #[test]
+    fn duplicate_section_ids_use_canonical_then_first_fallback_like_section_lookup() {
+        let (shape, _, _, _) = purpose_shapes().remove(0);
+        for (id, rc_first, reject) in [
+            (1, true, false),
+            (1, false, true),
+            (7, true, true),
+            (7, false, false),
+        ] {
+            let rc = shape.to_section(SectionId(id), "RC梁".into());
+            let general = Section::zero(SectionId(id), "直接入力".into());
+            let mut model = secondary_model(rc.clone(), SecondaryMemberKind::Post, false);
+            model.sections = if rc_first {
+                vec![rc, general]
+            } else {
+                vec![general, rc]
+            };
+            assert_eq!(
+                model.section(SectionId(id)).unwrap().shape.is_some(),
+                reject
+            );
+            let before = model.clone();
+            let result = model.validate_rc_section_usage();
+            if reject {
+                let error = result.unwrap_err().to_string();
+                assert!(
+                    error.contains("RC 梁用断面") && error.contains("SecondaryMemberId(674)"),
+                    "{error}"
+                );
+            } else {
+                assert!(result.is_ok(), "{result:?}");
+            }
+            assert!(model.eq_ignoring_dofmap(&before));
+        }
+        let mut general = secondary_model(
+            Section::zero(SectionId(7), "直接入力".into()),
+            SecondaryMemberKind::Post,
+            false,
+        );
+        general.unassigned_posts[0].section = Some(SectionId(99));
+        assert!(general.section(SectionId(99)).is_none());
+        assert!(general.validate_rc_section_usage().is_ok());
+    }
+}

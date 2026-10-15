@@ -225,6 +225,10 @@ impl UndoStack {
             self.last_error = Some(format!("モデルは未更新: {reason}"));
             return false;
         }
+        if let Err(error) = candidate.validate_rc_section_usage() {
+            self.last_error = Some(error.to_string());
+            return false;
+        }
         if let Err(error) = candidate.validate_attached_slabs() {
             self.last_error = Some(error.to_string());
             return false;
@@ -312,6 +316,10 @@ impl UndoStack {
         }
         if let Err(reason) = candidate.validate_assignment_region_identity() {
             self.last_error = Some(format!("モデル・履歴は未更新: {reason}"));
+            return;
+        }
+        if let Err(error) = candidate.validate_rc_section_usage() {
+            self.last_error = Some(format!("モデル・履歴は未更新: {error}"));
             return;
         }
         if let Err(error) = candidate.validate_attached_slabs() {

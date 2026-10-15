@@ -2655,6 +2655,7 @@ mod tests {
         use sepika_core::model::RcBeamReference;
         let mut app = App::default();
         app.core.model = key_test_model_rc();
+        app.core.model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
         app.core.model.elements.push(key_test_elem(
             ElementKind::Beam,
             ForceRegime::AxialBendingInteract,

@@ -468,6 +468,11 @@ impl EditCommand for AddMember {
         if let Err(error) = self.elem.validate_frame_node_count() {
             return Box::new(RejectedEdit(error.to_string()));
         }
+        if let Some(reason) =
+            crate::refs::rc_element_section_error(model, &self.elem, self.elem.section)
+        {
+            return Box::new(RejectedEdit(reason));
+        }
         if !crate::refs::new_elem_ok(model, &self.elem)
             || !crate::refs::frame_element_section_ref_ok(model, &self.elem, self.elem.section)
         {
@@ -538,6 +543,11 @@ pub struct AddDamper {
 
 impl EditCommand for AddDamper {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Some(reason) =
+            crate::refs::rc_element_section_error(model, &self.elem, self.elem.section)
+        {
+            return Box::new(RejectedEdit(reason));
+        }
         if !crate::refs::new_elem_ok(model, &self.elem)
             || !crate::refs::frame_element_section_ref_ok(model, &self.elem, self.elem.section)
         {
@@ -566,6 +576,11 @@ pub struct AddIsolator {
 
 impl EditCommand for AddIsolator {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Some(reason) =
+            crate::refs::rc_element_section_error(model, &self.elem, self.elem.section)
+        {
+            return Box::new(RejectedEdit(reason));
+        }
         if !crate::refs::new_elem_ok(model, &self.elem)
             || !crate::refs::frame_element_section_ref_ok(model, &self.elem, self.elem.section)
         {

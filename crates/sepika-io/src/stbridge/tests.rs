@@ -1003,34 +1003,25 @@ fn test_standard_export_warns_on_fourth_rebar_stage() {
     );
 }
 
-/// 円形 RC 柱を梁位置に使うと ST-Bridge に梁用の円形図形がないため
-/// `StbSecRaw` へフォールバックし、その旨を export 警告へ出す。
 #[test]
-fn test_standard_export_warns_circle_beam_raw() {
-    let mut m = frame_nodes();
+fn rc_circle_girder_export_is_rejected_without_shape_conversion() {
+    let mut model = frame_nodes();
     let shape = SectionShape::RcColumnCircle {
         d: 700.0,
         rebar: circle_rebar_distinct(8),
     };
-    let mut sec = shape.to_section(SectionId(0), "RCB".into());
-    sec.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
-    push_section(&mut m, sec);
-    m.elements.push(member(0, false, 0)); // 梁
-
-    let (xml, report) = export_stbridge_with_report(&m).expect("export");
-    assert!(xml.contains("<StbSecRaw "), "円形梁は StbSecRaw: {xml}");
+    shape.validate_rebar().unwrap();
+    let mut section = shape.to_section(SectionId(0), "RCB".into());
+    section.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+    push_section(&mut model, section);
+    model.elements.push(member(0, false, 0));
+    let before = model.clone();
+    let error = export_stbridge_with_report(&model).unwrap_err().to_string();
     assert!(
-        !xml.contains("<StbSecBeam_RC "),
-        "梁用の円形図形は出さない: {xml}"
+        error.contains("SectionId(0)") && error.contains("RC 柱用断面は柱・間柱専用"),
+        "{error}"
     );
-    assert!(
-        report
-            .warnings
-            .iter()
-            .any(|w| w.contains("RC 円形梁") && w.contains("RCB")),
-        "円形梁のフォールバックを警告する: {:?}",
-        report.warnings
-    );
+    assert!(model.eq_ignoring_dofmap(&before));
 }
 
 /// 標準モード: 実配筋型の SRC 梁（`SrcBeamRect`）も RC 部分を段別本数で書き出す。
@@ -2160,11 +2151,8 @@ fn test_standard_roundtrip_src_beam() {
     assert_eq!(back.sections[0].shape, m.sections[0].shape, "SRC 梁が往復");
 }
 
-/// ST-Bridge に梁用要素がない形状（CFT・円形 RC）を梁に使うと StbSecRaw へ
-/// フォールバックし、形状・配筋は失われるが弾性物性は残り、検証は通る
-/// （ドキュメント化された既知の挙動）。
 #[test]
-fn test_standard_unsupported_beam_shapes_fall_back_to_raw() {
+fn test_standard_unsupported_cft_beam_shape_falls_back_to_raw() {
     let mut m = frame_nodes();
     let cft = SectionShape::CftBox {
         corner_r: Some(32.0),
@@ -2175,34 +2163,21 @@ fn test_standard_unsupported_beam_shapes_fall_back_to_raw() {
     let mut cft_sec = cft.to_section(SectionId(0), "CB".into());
     cft_sec.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
     push_section(&mut m, cft_sec);
-    let rc_circle = SectionShape::RcColumnCircle {
-        d: 700.0,
-        rebar: circle_rebar_distinct(8),
-    };
-    let mut rc_sec = rc_circle.to_section(SectionId(1), "RCB".into());
-    rc_sec.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
-    push_section(&mut m, rc_sec);
     m.elements.push(member(0, false, 0)); // CFT 梁
-    m.elements.push(member(1, false, 1)); // 円形 RC 梁
 
     let xml = export_stbridge(&m).unwrap();
     assert_eq!(
         xml.matches("<StbSecRaw ").count(),
-        2,
-        "2 形状とも Raw にフォールバック: {xml}"
+        1,
+        "CFT は Raw にフォールバック: {xml}"
     );
     let back = import_stbridge(&xml).expect("import");
     assert!(back.validate().is_ok(), "{:?}", back.validate());
-    for (i, label) in ["CFT 梁", "円形 RC 梁"].iter().enumerate() {
-        assert!(
-            back.sections[i].shape.is_none(),
-            "{label} は形状が往復しない"
-        );
-        assert_eq!(
-            back.sections[i].area, m.sections[i].area,
-            "{label} の物性は残る"
-        );
-    }
+    assert!(back.sections[0].shape.is_none(), "CFT 梁は形状が往復しない");
+    assert_eq!(
+        back.sections[0].area, m.sections[0].area,
+        "CFT 梁の物性は残る"
+    );
 }
 
 /// 形鋼ライブラリが断面要素より後ろに現れても解決できる（順序非依存）。
@@ -3448,25 +3423,46 @@ fn test_import_stbbeam_as_secondary_member() {
 }
 
 #[test]
-fn test_import_uses_member_context_for_section_usage() {
-    let definitions = [
-        r#"<StbSecColumn_RC id="0" name="C"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="500" width_Y="500"/></StbSecFigureColumn_RC></StbSecColumn_RC>"#,
-        r#"<StbSecRaw id="0" name="C" kind="COLUMN" area="1" iy="1" iz="1" j="1"/>"#,
-    ];
-    for definition in definitions {
+fn test_import_uses_member_context_without_reinterpreting_rc_purpose_types() {
+    let column = r#"<StbSecColumn_RC id="0" name="C"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="500" width_Y="500"/></StbSecFigureColumn_RC></StbSecColumn_RC>"#;
+    let raw = r#"<StbSecRaw id="0" name="C" kind="COLUMN" area="1" iy="1" iz="1" j="1"/>"#;
+    for (definition, member_tag, expected) in [
+        (column, "Girder", None),
+        (
+            column,
+            "Column",
+            Some(sepika_core::model::FrameSectionUse::Column),
+        ),
+        (
+            raw,
+            "Girder",
+            Some(sepika_core::model::FrameSectionUse::Girder),
+        ),
+    ] {
+        let node_attributes = if member_tag == "Column" {
+            r#"id_node_bottom="0" id_node_top="1""#
+        } else {
+            r#"id_node_start="0" id_node_end="1""#
+        };
         let xml = format!(
             r#"<?xml version="1.0"?>
 <ST_BRIDGE version="2.0.0"><StbModel>
   <StbNodes><StbNode id="0" X="0" Y="0" Z="0"/><StbNode id="1" X="0" Y="0" Z="3000"/></StbNodes>
   <StbSections>{definition}</StbSections>
-  <StbMembers><StbGirders><StbGirder id="0" id_node_start="0" id_node_end="1" id_section="0"/></StbGirders></StbMembers>
+  <StbMembers><Stb{member_tag}s><Stb{member_tag} id="0" {node_attributes} id_section="0"/></Stb{member_tag}s></StbMembers>
 </StbModel></ST_BRIDGE>"#
         );
-        let model = import_stbridge(&xml).expect("断面定義タグではなく部材文脈で用途を決める");
-        assert_eq!(
-            model.sections[0].frame_use,
-            Some(sepika_core::model::FrameSectionUse::Girder)
-        );
+        if let Some(expected) = expected {
+            let model = import_stbridge(&xml).unwrap();
+            assert_eq!(model.sections[0].frame_use, Some(expected));
+            assert_eq!(model.sections[0].shape.is_some(), member_tag == "Column");
+        } else {
+            let error = import_stbridge(&xml).unwrap_err().to_string();
+            assert!(
+                error.contains("SectionId(0)") && error.contains("RC 柱用断面は柱・間柱専用"),
+                "{error}"
+            );
+        }
     }
 }
 

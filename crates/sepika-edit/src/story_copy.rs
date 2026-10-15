@@ -337,8 +337,15 @@ impl EditCommand for CopyStory {
         if !self.targets.any() {
             return Box::new(Noop);
         }
+        if let Err(error) = model.validate_rc_section_usage() {
+            return Box::new(crate::RejectedEdit(error.to_string()));
+        }
         let before = model.clone();
         let report = copy_into(model, self);
+        if let Err(error) = model.validate_rc_section_usage() {
+            *model = before;
+            return Box::new(crate::RejectedEdit(error.to_string()));
+        }
         if !report.changed() {
             *model = before;
             return Box::new(Noop);

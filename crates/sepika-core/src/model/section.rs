@@ -256,6 +256,66 @@ impl Section {
         !self.is_cft()
     }
 
+    /// RC 専用型の主架構用途。その他の型は用途を限定しない。
+    pub fn rc_frame_use(&self) -> Option<FrameSectionUse> {
+        use crate::section_shape::SectionShape;
+        match self.shape {
+            Some(SectionShape::RcBeamRect { .. }) => Some(FrameSectionUse::Girder),
+            Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. }) => {
+                Some(FrameSectionUse::Column)
+            }
+            _ => None,
+        }
+    }
+
+    /// RC 専用型と明示した主架構用途の不一致を拒否する。未使用・二次専用の未設定は許容する。
+    pub fn validate_rc_frame_use(&self) -> Result<(), String> {
+        if let Some(expected) = self.rc_frame_use() {
+            if self.frame_use.is_some_and(|usage| usage != expected) {
+                return Err(self.rc_purpose_error());
+            }
+        }
+        Ok(())
+    }
+
+    fn rc_purpose_error(&self) -> String {
+        let reason = match self.rc_frame_use() {
+            Some(FrameSectionUse::Girder) => "RC 梁用断面は大梁・小梁専用です",
+            _ => "RC 柱用断面は柱・間柱専用です",
+        };
+        format!("SectionId({}): {reason}", self.id.0)
+    }
+
+    /// RC 専用型を主架構に参照する場合、対応用途を持つ曲げフレームに限る。
+    pub fn validate_rc_element_use(&self, kind: ElementKind) -> Result<(), String> {
+        if let Some(expected) = self.rc_frame_use() {
+            if self.frame_use != Some(expected)
+                || !matches!(
+                    kind,
+                    ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+                )
+            {
+                return Err(self.rc_purpose_error());
+            }
+        }
+        Ok(())
+    }
+
+    /// RC 梁型は小梁、RC 柱型は間柱に限る。二次専用断面の主架構用途は未設定でもよい。
+    pub fn validate_rc_secondary_use(&self, kind: SecondaryMemberKind) -> Result<(), String> {
+        self.validate_rc_frame_use()?;
+        if let Some(expected) = self.rc_frame_use() {
+            let actual = match kind {
+                SecondaryMemberKind::Beam => FrameSectionUse::Girder,
+                SecondaryMemberKind::Post => FrameSectionUse::Column,
+            };
+            if expected != actual {
+                return Err(self.rc_purpose_error());
+            }
+        }
+        Ok(())
+    }
+
     pub fn cft_frame_use_allowed(&self) -> bool {
         !self.is_cft() || self.frame_use == Some(FrameSectionUse::Column)
     }

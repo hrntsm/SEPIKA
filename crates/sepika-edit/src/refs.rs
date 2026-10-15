@@ -57,6 +57,9 @@ pub(crate) fn frame_element_section_ref_ok(
         && id
             .and_then(|sid| model.sections.get(sid.index()))
             .is_none_or(|section| {
+                if section.validate_rc_element_use(element.kind).is_err() {
+                    return false;
+                }
                 if !section.is_cft() {
                     return true;
                 }
@@ -99,4 +102,23 @@ pub(crate) fn new_elem_ok(model: &Model, elem: &sepika_core::model::ElementData)
         && elem.id.index() == model.elements.len()
         && elem.nodes.iter().all(|&n| node_exists(model, n))
         && section_ref_ok(model, elem.section)
+}
+
+pub(crate) fn rc_element_section_error(
+    model: &Model,
+    element: &ElementData,
+    id: Option<SectionId>,
+) -> Option<String> {
+    id.and_then(|sid| model.section(sid))
+        .and_then(|section| section.validate_rc_element_use(element.kind).err())
+        .map(|reason| format!("ElemId({}): {reason}", element.id.0))
+}
+
+pub(crate) fn rc_secondary_section_error(
+    model: &Model,
+    kind: sepika_core::model::SecondaryMemberKind,
+    id: Option<SectionId>,
+) -> Option<String> {
+    id.and_then(|sid| model.section(sid))
+        .and_then(|section| section.validate_rc_secondary_use(kind).err())
 }

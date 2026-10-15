@@ -62,10 +62,13 @@ pub fn export_stbridge(model: &Model) -> Result<String, StbError> {
 
 /// 内部モデルを標準 ST-Bridge 2.0.2 XML 文字列へ出力し、[`ExportReport`] も返す。
 ///
-/// 断面未割当の線材・表現不能な配筋はエラー、円形 RC 梁の `StbSecRaw` フォールバック等は警告として報告する。
+/// 断面未割当の線材・用途不一致の RC 専用型・表現不能な配筋はエラーとして報告する。
 pub fn export_stbridge_with_report(model: &Model) -> Result<(String, ExportReport), StbError> {
     model
         .validate_frame_node_counts()
+        .map_err(|e| StbError::Unmappable(e.to_string()))?;
+    model
+        .validate_rc_section_usage()
         .map_err(|e| StbError::Unmappable(e.to_string()))?;
     model
         .validate_lip_channels()

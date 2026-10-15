@@ -113,6 +113,9 @@ pub fn pushover_analysis_recording(
     ductility_method: DuctilityMethod,
 ) -> Result<PushoverResult, String> {
     model
+        .validate_rc_section_usage()
+        .map_err(|e| e.to_string())?;
+    model
         .validate_secondary_section_usage()
         .map_err(|e| e.to_string())?;
     let n_active = dofmap.n_active();

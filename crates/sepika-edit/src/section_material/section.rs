@@ -170,6 +170,9 @@ impl EditCommand for AddSectionShape {
             return Box::new(Noop);
         }
         candidate.frame_use = self.frame_use;
+        if let Err(reason) = candidate.validate_rc_frame_use() {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         if !candidate.cft_frame_use_allowed() {
             return Box::new(Noop);
         }
@@ -248,6 +251,9 @@ impl EditCommand for EditSectionShape {
             frame_use: self.frame_use,
             ..model.sections[idx].clone()
         };
+        if let Err(reason) = model.validate_rc_section_references(&candidate) {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         if (non_frame && self.frame_use.is_some())
             || !section_use_is_valid(model, self.section, self.frame_use)
             || !candidate.cft_frame_use_allowed()
@@ -479,6 +485,9 @@ pub struct AddCatalogSection {
 impl EditCommand for AddCatalogSection {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
         let mut sec = self.section.clone();
+        if let Err(reason) = sec.validate_rc_frame_use() {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         if !sec.cft_frame_use_allowed()
             || sepika_core::model::section_key_taken(&model.sections, sec.key(), None)
         {
