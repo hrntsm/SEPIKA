@@ -1282,13 +1282,19 @@ fn issue561_rectangle_classification_thresholds_and_finiteness() {
             expected,
             "closure {ratio}"
         );
-        let mut orthogonal = rectangle;
-        orthogonal[3] = [ratio, (1. - ratio * ratio).sqrt(), 0.];
-        orthogonal[2] = [1. + ratio, orthogonal[3][1], 0.];
+    }
+    // 保存座標の高精度幾何で、正規化内積が許容値の内側・直近の内側・外側となる入力。
+    // 名目 x から単位長を逆算すると、丸めた座標では内積の包含境界を保証できない。
+    for (x, y, expected) in [
+        (0.999e-6, 0.999999999999501, true),
+        (1e-6, 0.9999999999995001, true),
+        (1.001e-6, 0.999999999999499, false),
+    ] {
+        let orthogonal = [[0., 0., 0.], [1., 0., 0.], [1. + x, y, 0.], [x, y, 0.]];
         assert_eq!(
             slab_dimensions_of(&orthogonal).is_some(),
             expected,
-            "dot {ratio}"
+            "dot x={x} y={y}"
         );
     }
     let height = 0.0018503595246113951;
@@ -1349,6 +1355,60 @@ fn issue561_rectangle_classification_thresholds_and_finiteness() {
         [-1e308, 1., 0.],
     ];
     assert!(slab_dimensions_of(&overflowing_difference).is_none());
+}
+
+#[test]
+fn issue645_boundary_fixture_preserves_load_resultant_and_xy_first_moments() {
+    let pts = [
+        (0., 0.),
+        (1., 0.),
+        (1.000001, 0.9999999999995001),
+        (1e-6, 0.9999999999995001),
+    ];
+    // 保存座標の多角形に対する面積・面積一次モーメントを100桁で独立評価した値。
+    let expected = [0.9999999999995001, 0.5000004999997499, 0.49999999999950007];
+    for (method, direction) in [
+        (DistributionMethod::TriTrapezoid, None),
+        (DistributionMethod::TributaryArea, None),
+        (DistributionMethod::OneWay, Some(OneWayDir::X)),
+        (DistributionMethod::OneWay, Some(OneWayDir::Y)),
+    ] {
+        let slab = Slab {
+            id: sepika_core::ids::SlabId(0),
+            shape: SlabShape::Enclosed,
+            plate: SlabPlate {
+                method,
+                one_way: direction,
+                ..Default::default()
+            },
+            tip_loads: Vec::new(),
+        };
+        let coords = pts.map(|(x, y)| [x, y, 0.]);
+        let (lx, ly) = slab_dimensions_of(&coords).expect("許容境界の内側の入力");
+        let mut loads = Vec::new();
+        super::rect::distribute_rect(&slab, &coords, lx, ly, 1., &mut loads).unwrap();
+        let mut actual = [0.; 3];
+        for load in loads {
+            let LoadTarget::Edge(edge) = load.target else {
+                panic!("境界辺への荷重");
+            };
+            assert!(matches!(
+                load.shape,
+                LoadShape::Uniform { .. } | LoadShape::Triangle { .. }
+            ));
+            let force = load.cmq.q_i + load.cmq.q_j;
+            let (a, b) = (pts[edge], pts[(edge + 1) % 4]);
+            actual[0] += force;
+            actual[1] += force * (a.0 + b.0) / 2.;
+            actual[2] += force * (a.1 + b.1) / 2.;
+        }
+        for (actual, expected) in actual.into_iter().zip(expected) {
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "{method:?} {direction:?}: {actual} != {expected}"
+            );
+        }
+    }
 }
 
 fn issue561_halfplane_areas_m2(vertices: [[f64; 2]; 4]) -> [f64; 4] {
