@@ -140,8 +140,17 @@ fn source_story_mcp_edit_query_diagnostics_and_snapshot_match_shared_command() {
     std::fs::remove_dir_all(directory).unwrap();
 }
 
+fn column_stories() -> Vec<sepika_core::model::Story> {
+    serde_json::from_value(serde_json::json!([
+        {"id": 0, "name": "1F", "elevation": 0.0, "node_ids": [0], "seismic_weight": null},
+        {"id": 1, "name": "2F", "elevation": 3000.0, "node_ids": [1], "seismic_weight": null}
+    ]))
+    .unwrap()
+}
+
 fn sample_model() -> Model {
     Model {
+        stories: column_stories(),
         nodes: vec![
             Node {
                 id: NodeId(0),
@@ -156,7 +165,7 @@ fn sample_model() -> Model {
                 coord: [0.0, 0.0, 3000.0],
                 restraint: sepika_core::dof::Dof6Mask::FREE,
                 mass: None,
-                story: Some(sepika_core::ids::StoryId(0)),
+                story: Some(sepika_core::ids::StoryId(1)),
                 support_spring: None,
             },
         ],
@@ -397,7 +406,7 @@ fn test_query_model_nodes() {
     let items = query_model(&m, "node", None);
     assert_eq!(items.len(), 2);
     assert_eq!(items[0]["id"], 0);
-    assert_eq!(items[1]["story"], 0);
+    assert_eq!(items[1]["story"], 1);
 }
 
 #[test]
@@ -546,6 +555,7 @@ pub(crate) fn rc_column_model() -> Model {
         rebar,
     };
     Model {
+        stories: column_stories(),
         nodes: vec![
             Node {
                 id: NodeId(0),
@@ -560,7 +570,7 @@ pub(crate) fn rc_column_model() -> Model {
                 coord: [0.0, 0.0, 3000.0],
                 restraint: sepika_core::dof::Dof6Mask::FREE,
                 mass: None,
-                story: Some(sepika_core::ids::StoryId(0)),
+                story: Some(sepika_core::ids::StoryId(1)),
                 support_spring: None,
             },
         ],
@@ -635,6 +645,7 @@ pub(crate) fn cft_long_case2_model(n_compression_n: f64) -> Model {
     use sepika_core::section_shape::SectionShape;
     let mut model = rc_column_model();
     model.nodes[1].coord[2] = 7200.0;
+    model.stories[1].elevation = 7200.0;
     model.materials[0].fc = Some(30.0);
     model.materials[0].young = 25000.0;
     model.materials[1].category = MaterialCategory::Steel;
@@ -2495,6 +2506,13 @@ fn mcp_eigen_rejects_unknown_wall_band_and_refreshes_valid_edits_before_solving(
             slit: Default::default(),
         },
     );
+    model.stories.clear();
+    for node in &mut model.nodes {
+        node.story = None;
+    }
+    model
+        .validate_reference_ids()
+        .expect("未生成モデルの参照整合");
     let params = crate::job::JobParams::default();
     let error = match crate::job::compute_job(&model, crate::JobKind::Eigen, &params) {
         Err(error) => error.to_string(),
@@ -4055,6 +4073,10 @@ fn issue635_existing_mcp_analysis_rejects_fixed_distance_and_preserves_model() {
     use sepika_core::model::{LoadCase, LoadCaseKind, MemberLoad, MemberLoadKind};
     let mut model = rc_column_model();
     model.nodes[1].coord = [0.0, 0.0, 6000.0];
+    model.stories[1].elevation = 6000.0;
+    model
+        .validate_reference_ids()
+        .expect("部材荷重モデルの参照整合");
     let case_id = LoadCaseId(model.load_cases.len() as u32);
     model.load_cases.push(LoadCase {
         id: case_id,

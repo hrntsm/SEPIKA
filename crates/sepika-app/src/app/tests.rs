@@ -1690,7 +1690,9 @@ fn tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results() {
     app.run_seismic(SeismicDir::X);
     assert!(app.core.scoped.last_error.is_none());
 
-    app.core.model.stories.clear();
+    let restore_stories = remove_upper_stories(&mut app.core.model);
+    let deletion_revision = app.core.scoped.undo.revision();
+    let deleted_nodes = app.core.model.nodes.clone();
     app.run_seismic(SeismicDir::X);
     assert!(app
         .core
@@ -1723,16 +1725,49 @@ fn tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results() {
         Some(StaticKey::Case(StaticCaseKey::Seismic(SeismicDir::X)))
     );
 
+    let recovery_load =
+        sepika_core::model::NodalLoad::manual(NodeId(2), [100.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
     app.core.model.load_cases[ex.index()]
         .nodal
-        .push(sepika_core::model::NodalLoad::manual(
-            NodeId(2),
-            [100.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        ));
+        .push(recovery_load.clone());
     app.run_seismic(SeismicDir::X);
     assert!(app.core.scoped.last_error.is_some());
     app.run_combination(0);
     assert!(app.core.scoped.last_error.is_some());
+    let prepared_revision = app.core.scoped.undo.revision();
+    let preparation_edits = prepared_revision - deletion_revision;
+    for _ in 0..preparation_edits {
+        assert!(app.core.scoped.undo.can_undo());
+        app.core.scoped.undo.undo(&mut app.core.model);
+    }
+    assert_eq!(
+        app.core.scoped.undo.revision(),
+        prepared_revision + preparation_edits
+    );
+    assert_eq!(app.core.model.nodes, deleted_nodes);
+    for restore in restore_stories.into_iter().rev() {
+        restore.apply(&mut app.core.model);
+    }
+    app.core
+        .model
+        .validate_reference_ids()
+        .expect("階復元後の参照整合");
+    if !app.core.model.load_cases[ex.index()]
+        .nodal
+        .contains(&recovery_load)
+    {
+        app.core.model.load_cases[ex.index()]
+            .nodal
+            .push(recovery_load.clone());
+    }
+    assert_eq!(
+        app.core.model.load_cases[ex.index()]
+            .nodal
+            .iter()
+            .filter(|load| **load == recovery_load)
+            .count(),
+        1
+    );
     app.generate_stories_action();
     app.sync_auto_load_cases_action();
     assert!(app.core.model.load_cases[ex.index()]
@@ -1740,6 +1775,11 @@ fn tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results() {
         .iter()
         .any(|l| l.source == LoadSource::Auto));
     app.run_static_all();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "復元後解析: {:?}",
+        app.core.scoped.last_error
+    );
     assert!(app
         .core
         .scoped
@@ -1748,7 +1788,7 @@ fn tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results() {
         .unwrap()
         .seismic(SeismicDir::X)
         .is_some());
-    app.core.model.stories.clear();
+    let _ = remove_upper_stories(&mut app.core.model);
     app.core.model.load_cases[ex.index()]
         .nodal
         .retain(|l| l.source != LoadSource::Manual);
@@ -4128,6 +4168,21 @@ fn cmq_display_load_case_falls_back_to_first_case() {
     assert_eq!(app.cmq_display_load_case().unwrap().name, "DL");
 }
 
+fn remove_upper_stories(
+    model: &mut sepika_core::model::Model,
+) -> Vec<Box<dyn sepika_edit::EditCommand>> {
+    use sepika_edit::EditCommand;
+    let mut restore = Vec::new();
+    while model.stories.len() > 1 {
+        let story = model.stories.last().unwrap().id;
+        let previous_count = model.stories.len();
+        restore.push(sepika_edit::DeleteStory { story }.apply(model));
+        assert_eq!(model.stories.len(), previous_count - 1);
+    }
+    model.validate_reference_ids().expect("階削除後の参照整合");
+    restore
+}
+
 /// 正方形スラブ（4000×4000）+ 外周4本の梁を持つモデル
 /// （`make_slab_test_model` の正方形版。正方形は `TriTrapezoid` で全辺
 /// 三角形分布になるためスラブ→荷重ケース同期の検算がしやすい）。
@@ -4204,8 +4259,16 @@ pub(super) fn make_square_slab_test_model() -> sepika_core::model::Model {
         weight: None,
         ci_override: None,
     };
+    model.stories.push(
+        serde_json::from_value(serde_json::json!({
+            "id": 0, "name": "1F", "elevation": 0.0,
+            "node_ids": [0, 1, 2, 3], "seismic_weight": null
+        }))
+        .unwrap(),
+    );
     model.floor_regions.push(region);
     model.constraints.push(diaphragm);
+    model.validate_reference_ids().expect("床モデルの参照整合");
     model
 }
 
@@ -5402,6 +5465,13 @@ fn test_floor_design_checks_secondary_beam_uses_same_level_slab() {
         r.secondary_beams.push(beam);
         r
     });
+    model.stories.push(
+        serde_json::from_value(serde_json::json!({
+            "id": 1, "name": "2F", "elevation": Z_UPPER,
+            "node_ids": [4, 5, 6, 7, 8, 9], "seismic_weight": null
+        }))
+        .unwrap(),
+    );
     // 上階床領域にも剛床を置く（小梁の分配 Span 検定の前提）。
     model
         .constraints
@@ -6893,7 +6963,7 @@ fn tip_ex_ey_failure_invalidates_previous_case_combo_and_display() {
             .member_forces
             .is_empty());
         app.core.model.load_cases[2].nodal.clear();
-        app.core.model.stories.clear();
+        let _ = remove_upper_stories(&mut app.core.model);
         match path % 4 {
             0 => app.run_static_target(StaticTarget::Case(LoadCaseId(2))),
             1 => {
@@ -7082,7 +7152,7 @@ fn test_batch_removes_old_combo_when_tip_ex_fails_after_empty_ey() {
 
     app.core.model.load_cases[2].nodal.clear();
     app.core.model.load_cases[3].nodal.clear();
-    app.core.model.stories.clear();
+    let _ = remove_upper_stories(&mut app.core.model);
     app.run_static_all();
     let bundle = app.core.scoped.results.as_ref().unwrap();
     assert!(app.core.model.load_cases[2].nodal.is_empty());

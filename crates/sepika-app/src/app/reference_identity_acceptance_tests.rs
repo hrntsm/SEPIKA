@@ -1,5 +1,5 @@
 use super::*;
-use sepika_core::ids::{WallPlateAssignmentRegionId, WallPlateId};
+use sepika_core::ids::{StoryId, WallPlateAssignmentRegionId, WallPlateId};
 use sepika_core::model::*;
 
 fn path(label: &str) -> std::path::PathBuf {
@@ -253,5 +253,367 @@ fn reference_identity_wall_plate_without_parent_wall_region_keeps_stable_assignm
     sepika_io::ovika::save_ovika(&file, &model, Default::default()).unwrap();
     let loaded = sepika_io::ovika::load_ovika(&file).unwrap().model;
     assert_eq!(bytes(&loaded), bytes(&model));
+    std::fs::remove_file(file).unwrap();
+}
+
+#[derive(Clone, Copy, Debug)]
+enum InternalReference {
+    NodeStory,
+    StoryNode,
+    DiaphragmStory,
+    DiaphragmMaster,
+    DiaphragmSlave,
+    LinkMaster,
+    LinkSlave,
+    MpcMaster,
+    MpcTerm,
+    ManualLoad,
+    AutoLoad,
+    GeneratedMaster,
+    CalculatedStory,
+    RecordedDiaphragmStory,
+    RecordedDiaphragmMaster,
+    RecordedDiaphragmSlave,
+    RecordedLinkMaster,
+    RecordedLinkSlave,
+    RecordedMpcMaster,
+    RecordedMpcTerm,
+    RecordedRestraint,
+}
+
+impl InternalReference {
+    const ALL: [Self; 21] = [
+        Self::NodeStory,
+        Self::StoryNode,
+        Self::DiaphragmStory,
+        Self::DiaphragmMaster,
+        Self::DiaphragmSlave,
+        Self::LinkMaster,
+        Self::LinkSlave,
+        Self::MpcMaster,
+        Self::MpcTerm,
+        Self::ManualLoad,
+        Self::AutoLoad,
+        Self::GeneratedMaster,
+        Self::CalculatedStory,
+        Self::RecordedDiaphragmStory,
+        Self::RecordedDiaphragmMaster,
+        Self::RecordedDiaphragmSlave,
+        Self::RecordedLinkMaster,
+        Self::RecordedLinkSlave,
+        Self::RecordedMpcMaster,
+        Self::RecordedMpcTerm,
+        Self::RecordedRestraint,
+    ];
+
+    fn target_kind(self) -> &'static str {
+        match self {
+            Self::NodeStory
+            | Self::DiaphragmStory
+            | Self::CalculatedStory
+            | Self::RecordedDiaphragmStory => "Story",
+            _ => "Node",
+        }
+    }
+
+    fn model(self, mut model: Model, absent: Option<u32>) -> Model {
+        use sepika_core::dof::{Dof, Dof6Mask};
+        model.stories.push(Story {
+            id: StoryId(0),
+            name: "基部".into(),
+            elevation: 0.,
+            node_ids: vec![],
+            seismic_weight: None,
+            weight_override: None,
+            dynamic_mass: None,
+            standard_floor_load: None,
+            column_finish_area_weight: 0.,
+            fireproof: Default::default(),
+            wall_weights: vec![],
+            level_kind: Default::default(),
+            structure: Default::default(),
+        });
+        let master = NodeId(absent.unwrap_or(0));
+        let slave = NodeId(absent.unwrap_or(1));
+        let story = StoryId(absent.unwrap_or(0));
+        let mut record = SeismicWeightGeneration {
+            input_key: vec![],
+            output_key: vec![],
+            calculated_weights: vec![],
+            automatic_diaphragms: vec![],
+            automatic_master_restraints: vec![],
+        };
+        match self {
+            Self::NodeStory => model.nodes[0].story = Some(story),
+            Self::StoryNode => model.stories[0].node_ids = vec![master],
+            Self::DiaphragmStory => model.constraints.push(Constraint::rigid_diaphragm(
+                story,
+                NodeId(0),
+                vec![NodeId(1)],
+            )),
+            Self::DiaphragmMaster => model.constraints.push(Constraint::rigid_diaphragm(
+                StoryId(0),
+                master,
+                vec![NodeId(1)],
+            )),
+            Self::DiaphragmSlave => model.constraints.push(Constraint::rigid_diaphragm(
+                StoryId(0),
+                NodeId(0),
+                vec![slave],
+            )),
+            Self::LinkMaster | Self::LinkSlave => model.constraints.push(Constraint::RigidLink {
+                master: if matches!(self, Self::LinkMaster) {
+                    master
+                } else {
+                    NodeId(0)
+                },
+                slaves: vec![if matches!(self, Self::LinkSlave) {
+                    slave
+                } else {
+                    NodeId(1)
+                }],
+                dofs: Dof6Mask::FIXED,
+            }),
+            Self::MpcMaster | Self::MpcTerm => model.constraints.push(Constraint::Mpc {
+                master: if matches!(self, Self::MpcMaster) {
+                    master
+                } else {
+                    NodeId(0)
+                },
+                terms: vec![(
+                    if matches!(self, Self::MpcTerm) {
+                        slave
+                    } else {
+                        NodeId(1)
+                    },
+                    Dof::Ux,
+                    1.,
+                )],
+            }),
+            Self::ManualLoad => model.load_cases[0]
+                .nodal
+                .push(NodalLoad::manual(master, [1.; 6])),
+            Self::AutoLoad => model.load_cases[0]
+                .nodal
+                .push(NodalLoad::auto(master, [1.; 6])),
+            Self::GeneratedMaster => model.generated_masters = vec![master],
+            Self::CalculatedStory => record.calculated_weights = vec![(story, 100.)],
+            Self::RecordedDiaphragmStory => {
+                record
+                    .automatic_diaphragms
+                    .push(Constraint::rigid_diaphragm(
+                        story,
+                        NodeId(0),
+                        vec![NodeId(1)],
+                    ))
+            }
+            Self::RecordedDiaphragmMaster => {
+                record
+                    .automatic_diaphragms
+                    .push(Constraint::rigid_diaphragm(
+                        StoryId(0),
+                        master,
+                        vec![NodeId(1)],
+                    ))
+            }
+            Self::RecordedDiaphragmSlave => {
+                record
+                    .automatic_diaphragms
+                    .push(Constraint::rigid_diaphragm(
+                        StoryId(0),
+                        NodeId(0),
+                        vec![slave],
+                    ))
+            }
+            Self::RecordedLinkMaster | Self::RecordedLinkSlave => {
+                record.automatic_diaphragms.push(Constraint::RigidLink {
+                    master: if matches!(self, Self::RecordedLinkMaster) {
+                        master
+                    } else {
+                        NodeId(0)
+                    },
+                    slaves: vec![if matches!(self, Self::RecordedLinkSlave) {
+                        slave
+                    } else {
+                        NodeId(1)
+                    }],
+                    dofs: Dof6Mask::FIXED,
+                })
+            }
+            Self::RecordedMpcMaster | Self::RecordedMpcTerm => {
+                record.automatic_diaphragms.push(Constraint::Mpc {
+                    master: if matches!(self, Self::RecordedMpcMaster) {
+                        master
+                    } else {
+                        NodeId(0)
+                    },
+                    terms: vec![(
+                        if matches!(self, Self::RecordedMpcTerm) {
+                            slave
+                        } else {
+                            NodeId(1)
+                        },
+                        Dof::Ux,
+                        1.,
+                    )],
+                })
+            }
+            Self::RecordedRestraint => {
+                record.automatic_master_restraints = vec![(master, Dof6Mask::FIXED)]
+            }
+        }
+        if matches!(
+            self,
+            Self::CalculatedStory
+                | Self::RecordedDiaphragmStory
+                | Self::RecordedDiaphragmMaster
+                | Self::RecordedDiaphragmSlave
+                | Self::RecordedLinkMaster
+                | Self::RecordedLinkSlave
+                | Self::RecordedMpcMaster
+                | Self::RecordedMpcTerm
+                | Self::RecordedRestraint
+        ) {
+            model.seismic_weight_generation = Some(record);
+        }
+        model
+    }
+}
+
+#[test]
+fn internal_reference_app_entries_accept_existing_targets_and_preserve_rejected_state_and_files() {
+    for reference in InternalReference::ALL {
+        let normal = reference.model(crate::sample::portal_frame(), None);
+        let mut control = App::default();
+        assert!(
+            control.load_model(normal.clone()),
+            "{reference:?}: {:?}",
+            control.core.scoped.last_error
+        );
+        let normal_file = path(&format!("681-normal-{reference:?}"));
+        control.save_project_to_opts(normal_file.clone(), Some(false));
+        assert!(
+            control.core.scoped.last_error.is_none(),
+            "{reference:?}: {:?}",
+            control.core.scoped.last_error
+        );
+        control.open_project_from(normal_file.clone());
+        assert!(
+            control.core.scoped.last_error.is_none(),
+            "{reference:?}: {:?}",
+            control.core.scoped.last_error
+        );
+        assert_eq!(bytes(&control.core.model), bytes(&normal), "{reference:?}");
+        std::fs::remove_file(normal_file).unwrap();
+
+        let next_absent = if reference.target_kind() == "Story" {
+            1
+        } else {
+            4
+        };
+        for absent in [next_absent, u32::MAX] {
+            let invalid = reference.model(crate::sample::portal_frame(), Some(absent));
+            let input = path(&format!("681-input-{reference:?}-{absent}"));
+            super::secondary_cft_tests::write_invalid_container(&input, &invalid);
+            let input_bytes = std::fs::read(&input).unwrap();
+            let output = path(&format!("681-output-{reference:?}-{absent}"));
+            sepika_io::ovika::save_ovika(&output, &normal, Default::default()).unwrap();
+            let output_bytes = std::fs::read(&output).unwrap();
+            let mut app = existing_app();
+            let before_load = retained(&app);
+            for open_file in [false, true] {
+                if open_file {
+                    app.open_project_from(input.clone());
+                } else {
+                    assert!(!app.load_model(invalid.clone()), "{reference:?}/{absent}");
+                }
+                let error = app.core.scoped.last_error.as_ref().unwrap();
+                assert!(
+                    error.contains(&format!("-> {} {absent}", reference.target_kind())),
+                    "{reference:?}: {error}"
+                );
+                assert_eq!(retained(&app), before_load, "{reference:?}/{absent}");
+                assert_eq!(std::fs::read(&input).unwrap(), input_bytes);
+                assert_eq!(std::fs::read(&output).unwrap(), output_bytes);
+            }
+
+            app.core.model = reference.model(app.core.model.clone(), Some(absent));
+            let bundle = app.core.scoped.results.as_mut().unwrap();
+            bundle.pushover = Some(pushover(11.));
+            bundle.pushover_y = Some(pushover(33.));
+            app.core.scoped.pushover_view_dir = SeismicDir::Y;
+            let before_save = retained(&app);
+            app.save_project_to_opts(output.clone(), Some(false));
+            let error = app.core.scoped.last_error.as_ref().unwrap();
+            assert!(
+                error.contains(&format!("-> {} {absent}", reference.target_kind())),
+                "{reference:?}: {error}"
+            );
+            assert_eq!(retained(&app), before_save, "{reference:?}/{absent}");
+            assert_eq!(std::fs::read(&input).unwrap(), input_bytes);
+            assert_eq!(std::fs::read(&output).unwrap(), output_bytes);
+
+            app.core.scoped.undo.undo(&mut app.core.model);
+            assert_eq!(app.core.model.nodes[0].coord[0], 0.);
+            app.core.scoped.undo.redo(&mut app.core.model);
+            assert_eq!(bytes(&app.core.model), before_save.model);
+            app.core.scoped.undo.redo(&mut app.core.model);
+            assert_eq!(app.core.model.nodes[0].coord[0], -200.);
+            std::fs::remove_file(input).unwrap();
+            std::fs::remove_file(output).unwrap();
+        }
+    }
+}
+
+#[test]
+fn internal_reference_app_roundtrip_keeps_stale_generation_and_inactive_owner() {
+    use sepika_core::dof::Dof6Mask;
+    let mut model = InternalReference::CalculatedStory.model(crate::sample::portal_frame(), None);
+    let owner = NodeId(model.nodes.len() as u32);
+    model.nodes.push(Node {
+        id: owner,
+        coord: [0., 0., 3500.],
+        restraint: Dof6Mask::FIXED,
+        mass: None,
+        story: None,
+        support_spring: None,
+    });
+    model.generated_masters = vec![owner];
+    model.stories[0].seismic_weight = Some(200.);
+    model.constraints.push(Constraint::rigid_diaphragm(
+        StoryId(0),
+        NodeId(0),
+        vec![NodeId(1)],
+    ));
+    let record = model.seismic_weight_generation.as_mut().unwrap();
+    record.input_key = vec![255];
+    record.output_key = vec![254];
+    record.automatic_diaphragms = vec![Constraint::rigid_diaphragm(
+        StoryId(0),
+        owner,
+        vec![NodeId(1)],
+    )];
+    record.automatic_master_restraints = vec![(owner, Dof6Mask::FREE)];
+    assert!(!model.is_automatic_seismic_diaphragm(&model.constraints[0]));
+    assert!(!model.is_automatic_seismic_master_restraint(owner));
+    let expected = bytes(&model);
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    let file = path("681-stale-record-inactive-owner");
+    app.save_project_to_opts(file.clone(), Some(false));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert_eq!(bytes(&app.core.model), expected);
+    let mut reopened = existing_app();
+    reopened.open_project_from(file.clone());
+    assert!(
+        reopened.core.scoped.last_error.is_none(),
+        "{:?}",
+        reopened.core.scoped.last_error
+    );
+    assert_eq!(bytes(&reopened.core.model), expected);
     std::fs::remove_file(file).unwrap();
 }

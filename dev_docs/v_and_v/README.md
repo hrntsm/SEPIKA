@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [内部参照検査境界_Issue681_2026-10.md](内部参照検査境界_Issue681_2026-10.md) | 階・拘束・節点荷重・生成記録の存在検査、保存/解析/生成とApp拒否時保持 | 🔶（Source6・App受入/編集9、是正後workspace3422/feature1265/IO191成功。初回失敗保持、静的/最終ゲートは記録時点未確認） |
 | [OVIKA参照ID整合性_Issue678_2026-10.md](OVIKA参照ID整合性_Issue678_2026-10.md) | 未完成保存と構造参照拒否、公開断面選択、安定二次ID・失敗時保持 | 🔶（前後41・core/IO・App4件・workspace3414成功、版据置採用。最終ゲート最新状態は[#678](https://github.com/hrntsm/SEPIKA/issues/678)） |
 | [RC専用断面の板参照境界_Issue677_2026-10.md](RC専用断面の板参照境界_Issue677_2026-10.md) | RC梁/柱専用3型の床板・壁版参照境界、正常板対照・編集/保存/解析/数量 | 🔶（App正常4/拒否12条件・既存6試験・不正OVIKA27条件・MCP公開JSON3試験default/feature成功。広域・最終ゲートは後続） |
 | [RC断面の専用用途_Issue674_2026-10.md](RC断面の専用用途_Issue674_2026-10.md) | RC梁/柱専用用途・逆用途拒否と原子性・正常3型の共有/None・数量/標準STB/OVIKA | 🔶（Edit/OVIKA・正常6条件/MCP4試験Verification成功、広域・正式最終ゲートは後続） |
@@ -249,6 +250,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
+| 681 | 内部参照検査境界 | sepika-core / sepika-io / sepika-load / sepika-solver / sepika-app / sepika-edit | model/aggregate、story_gen/generate、tests/reference_boundaries・ovika_reference_boundaries・generated_master_references、app/reference_identity_acceptance_tests | [恒久回帰と独立期待契約](内部参照検査境界_Issue681_2026-10.md#恒久回帰と独立期待契約)・[App拒否と保持](内部参照検査境界_Issue681_2026-10.md#app-の拒否と保持) | 横断 | 🔶（是正後広域成功と初回失敗を区別。1.99.1初期化構文是正後focused6/対象Clippy成功。全体静的/最終ゲートは記録時点未確認、手動GUI/Validation未） |
 | 677 | RC専用断面の板参照境界 | sepika-core / sepika-edit / sepika-io / sepika-solver / sepika-app / sepika-mcp | model/section・aggregate、refs・wall_misc、ovika、tests/rc_section_purpose・rc_plate_section_purpose | [独立期待値と実入口](RC専用断面の板参照境界_Issue677_2026-10.md#修正後の独立期待値と実入口) | 横断 | 🔶（App/IO・MCP公開JSON3試験成功、広域・最終ゲート後続） |
 | 678 | OVIKA参照ID整合性 | sepika-core / sepika-io / sepika-app | model/aggregate・section・tests、ovika_reference_tests、actions/io・reference_identity_acceptance_tests | [前後実観測と恒久回帰](OVIKA参照ID整合性_Issue678_2026-10.md#修正前後の実観測) | 横断 | 🔶（前後41・App4件・workspace3414成功。記録時点と[#678の最終ゲート](https://github.com/hrntsm/SEPIKA/issues/678)を区別） |
 | 674 | RC断面の専用用途 | sepika-core / sepika-edit / sepika-io / sepika-solver / sepika-app / sepika-mcp | model/section・aggregate、ovika、tests/rc_section_purpose | [独立期待値と実入口](RC断面の専用用途_Issue674_2026-10.md#独立期待値と実入口) | 横断 | 🔶（Edit/OVIKA・正常6条件/MCP4試験成功、広域・最終ゲート後続） |
