@@ -696,3 +696,50 @@ fn enclosed_geometry_errors_precede_rectangle_and_zero_load_dispatch() {
         }
     }
 }
+
+#[test]
+fn display_triangulation_does_not_relax_load_polygon_rejections() {
+    for coords in [
+        vec![
+            [0.0, 0.0, 0.0],
+            [4000.0, 3000.0, 0.0],
+            [0.0, 4000.0, 0.0],
+            [3000.0, 0.0, 0.0],
+        ],
+        vec![
+            [0.0, 0.0, 0.0],
+            [4000.0, 0.0, 0.0],
+            [4000.0, 0.0, 0.0],
+            [0.0, 4000.0, 0.0],
+        ],
+        vec![[0.0, 0.0, 0.0], [2000.0, 0.0, 0.0], [4000.0, 0.0, 0.0]],
+        vec![[0.0, 0.0, 0.0], [f64::NAN, 0.0, 0.0], [0.0, 4000.0, 0.0]],
+        vec![
+            [0.0, 0.0, 0.0],
+            [f64::INFINITY, 0.0, 0.0],
+            [0.0, 4000.0, 0.0],
+        ],
+    ] {
+        let edges: Vec<_> = (0..coords.len()).collect();
+        assert!(matches!(
+            integrate_polygon(&coords, &edges, Default::default()),
+            Err(PolygonDistributionError::InvalidInput(_))
+        ));
+    }
+    let sloped = [[0.0, 0.0, 0.0], [4000.0, 0.0, 1000.0], [0.0, 4000.0, 0.0]];
+    assert_eq!(
+        integrate_polygon(&sloped, &[0, 1, 2], Default::default()).unwrap_err(),
+        PolygonDistributionError::Unsupported("水平床以外".into())
+    );
+    let large: Vec<_> = (0..257)
+        .map(|i| {
+            let angle = std::f64::consts::TAU * f64::from(i) / 257.0;
+            [4000.0 * angle.cos(), 4000.0 * angle.sin(), 0.0]
+        })
+        .collect();
+    let edges: Vec<_> = (0..257).collect();
+    assert_eq!(
+        integrate_polygon(&large, &edges, Default::default()).unwrap_err(),
+        PolygonDistributionError::Unsupported("境界頂点数が256を超える".into())
+    );
+}

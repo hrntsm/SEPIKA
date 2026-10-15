@@ -18,6 +18,10 @@
 //!   傾いた壁・シェルの自重はこちらを使う。投影面積は傾きのぶんだけ小さく出るため、
 //!   自重に投影面積を用いると重量を過小評価する**危険側**になる。
 
+mod simple;
+
+pub use simple::{triangulate_simple, validate_simple};
+
 /// 辺上とみなす、点から辺までの距離の上限 \[mm\]。
 ///
 /// [`contains_excluding_boundary`]・[`contains_including_boundary`] が共有する。

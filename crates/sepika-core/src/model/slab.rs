@@ -168,6 +168,7 @@ impl Slab {
     /// モード形・時刻歴は**変形後の節点座標**で描く必要がある。形状の組み立て方
     /// （取付き線の内挿・左向き法線への張り出し）は同じなので、座標の引き方だけを
     /// 差し替えられるようにして実装を 1 つに保つ。
+    /// 線取付きの重なる端点はモデル座標で整理し、表示座標でも同じ頂点順・対応を保つ。
     pub fn boundary_coords_with(
         &self,
         model: &Model,
@@ -180,40 +181,44 @@ impl Slab {
             }
             SlabShape::Attached { anchor, extent } => match anchor {
                 RegionAnchor::Line { nodes, span, .. } => {
-                    let a = coord_of(nodes[0])?;
-                    let b = coord_of(nodes[1])?;
-                    let lerp = |t: f64| {
-                        [
-                            a[0] + (b[0] - a[0]) * t,
-                            a[1] + (b[1] - a[1]) * t,
-                            a[2] + (b[2] - a[2]) * t,
-                        ]
+                    let boundary = |a: [f64; 3], b: [f64; 3]| {
+                        let lerp = |t: f64| std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t);
+                        let p0: [f64; 3] = lerp(span[0].clamp(0.0, 1.0));
+                        let p1: [f64; 3] = lerp(span[1].clamp(0.0, 1.0));
+                        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                        let len = (dx * dx + dy * dy).sqrt();
+                        if len <= f64::EPSILON {
+                            return None;
+                        }
+                        let n = [-dy / len, dx / len];
+                        Some([
+                            p0,
+                            p1,
+                            [p1[0] + n[0] * extent[1], p1[1] + n[1] * extent[1], p1[2]],
+                            [p0[0] + n[0] * extent[0], p0[1] + n[1] * extent[0], p0[2]],
+                        ])
                     };
-                    let p0 = lerp(span[0].clamp(0.0, 1.0));
-                    let p1 = lerp(span[1].clamp(0.0, 1.0));
-                    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-                    let len = (dx * dx + dy * dy).sqrt();
-                    if len <= f64::EPSILON {
-                        return None;
-                    }
-                    let n = [-dy / len, dx / len];
-                    let mut boundary = vec![
-                        p0,
-                        p1,
-                        [p1[0] + n[0] * extent[1], p1[1] + n[1] * extent[1], p1[2]],
-                        [p0[0] + n[0] * extent[0], p0[1] + n[1] * extent[0], p0[2]],
-                    ];
-                    boundary.dedup_by(|a, b| {
-                        crate::geom::vec3::dist(*a, *b) <= crate::geom::vec3::ZERO_TOL
-                    });
-                    if boundary.len() > 2
-                        && crate::geom::vec3::dist(boundary[0], *boundary.last()?)
+                    let model_boundary = boundary(
+                        model.nodes.get(nodes[0].index())?.coord,
+                        model.nodes.get(nodes[1].index())?.coord,
+                    )?;
+                    let display_boundary = boundary(coord_of(nodes[0])?, coord_of(nodes[1])?)?;
+                    let mut indices: Vec<_> = (0..4).collect();
+                    indices.dedup_by(|a, b| {
+                        crate::geom::vec3::dist(model_boundary[*a], model_boundary[*b])
                             <= crate::geom::vec3::ZERO_TOL
+                    });
+                    if indices.len() > 2
+                        && crate::geom::vec3::dist(
+                            model_boundary[indices[0]],
+                            model_boundary[*indices.last()?],
+                        ) <= crate::geom::vec3::ZERO_TOL
                     {
-                        boundary.pop();
+                        indices.pop();
                     }
-                    Some(boundary)
+                    Some(indices.into_iter().map(|i| display_boundary[i]).collect())
                 }
+
                 RegionAnchor::Point(nid) => {
                     let p = coord_of(*nid)?;
                     Some(vec![

@@ -112,7 +112,8 @@ impl Model {
         Ok(())
     }
 
-    fn validate_attached_slab_geometry(&self, slab: &Slab) -> Result<(), CoreError> {
+    /// 取り付く床板の入力幾何（mm、XY 正面積）を検査する。支持先は検査せず、囲まれた床板は対象外。
+    pub fn validate_attached_slab_geometry(&self, slab: &Slab) -> Result<(), CoreError> {
         let SlabShape::Attached { anchor, extent } = slab.shape else {
             return Ok(());
         };
