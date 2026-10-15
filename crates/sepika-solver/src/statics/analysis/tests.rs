@@ -165,7 +165,7 @@ fn test_prepare_reports_diagnostics() {
         slaves: vec![NodeId(1)],
         dofs: Dof6Mask::FIXED,
     });
-    expect(&model, "存在しない節点");
+    expect(&model, "constraints[0] RigidLink.master -> Node 99");
 
     // As=0 は片側だけでもエラー。
     let mut model = make_cantilever_model();

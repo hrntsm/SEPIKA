@@ -265,7 +265,7 @@ impl Model {
     }
 
     /// 節点・要素・断面・材料・階・床/壁領域・床板/壁版の添字 ID と、
-    /// 主架構・二次部材・版・領域・通り芯・一本部材の節点/断面/材料/版/要素参照を検査する。
+    /// 主架構・二次部材・版・領域・通り芯・一本部材・階・拘束・節点荷重・生成記録の参照を検査する。
     /// 二次部材 ID は一意性だけを要求し、未割当 `None`・用途・幾何・入力完成度は検査しない。
     pub fn validate_reference_ids(&self) -> Result<(), crate::error::CoreError> {
         use crate::error::CoreError;
@@ -329,6 +329,92 @@ impl Model {
             |s| s.id.index(),
             |s| s.id.0,
         )?;
+        let check_node = |owner: &str, id: NodeId| {
+            if self.nodes.get(id.index()).is_none_or(|node| node.id != id) {
+                return Err(CoreError::DanglingRef(format!("{owner} -> Node {}", id.0)));
+            }
+            Ok(())
+        };
+        let check_story = |owner: &str, id: StoryId| {
+            if self
+                .stories
+                .get(id.index())
+                .is_none_or(|story| story.id != id)
+            {
+                return Err(CoreError::DanglingRef(format!("{owner} -> Story {}", id.0)));
+            }
+            Ok(())
+        };
+        let check_constraint = |owner: &str, constraint: &Constraint| {
+            match constraint {
+                Constraint::RigidDiaphragm {
+                    story,
+                    master,
+                    slaves,
+                    ..
+                } => {
+                    check_story(&format!("{owner} RigidDiaphragm.story"), *story)?;
+                    check_node(&format!("{owner} RigidDiaphragm.master"), *master)?;
+                    for (index, &slave) in slaves.iter().enumerate() {
+                        check_node(&format!("{owner} RigidDiaphragm.slaves[{index}]"), slave)?;
+                    }
+                }
+                Constraint::RigidLink { master, slaves, .. } => {
+                    check_node(&format!("{owner} RigidLink.master"), *master)?;
+                    for (index, &slave) in slaves.iter().enumerate() {
+                        check_node(&format!("{owner} RigidLink.slaves[{index}]"), slave)?;
+                    }
+                }
+                Constraint::Mpc { master, terms } => {
+                    check_node(&format!("{owner} Mpc.master"), *master)?;
+                    for (index, &(node, _, _)) in terms.iter().enumerate() {
+                        check_node(&format!("{owner} Mpc.terms[{index}]"), node)?;
+                    }
+                }
+            }
+            Ok::<(), CoreError>(())
+        };
+        for node in &self.nodes {
+            if let Some(story) = node.story {
+                check_story(&format!("Node {}.story", node.id.0), story)?;
+            }
+        }
+        for story in &self.stories {
+            for (index, &node) in story.node_ids.iter().enumerate() {
+                check_node(&format!("Story {}.node_ids[{index}]", story.id.0), node)?;
+            }
+        }
+        for (index, constraint) in self.constraints.iter().enumerate() {
+            check_constraint(&format!("constraints[{index}]"), constraint)?;
+        }
+        for case in &self.load_cases {
+            for (index, load) in case.nodal.iter().enumerate() {
+                check_node(&format!("LoadCase {}.nodal[{index}]", case.id.0), load.node)?;
+            }
+        }
+        for (index, &node) in self.generated_masters.iter().enumerate() {
+            check_node(&format!("generated_masters[{index}]"), node)?;
+        }
+        if let Some(record) = &self.seismic_weight_generation {
+            for (index, &(story, _)) in record.calculated_weights.iter().enumerate() {
+                check_story(
+                    &format!("SeismicWeightGeneration.calculated_weights[{index}]"),
+                    story,
+                )?;
+            }
+            for (index, constraint) in record.automatic_diaphragms.iter().enumerate() {
+                check_constraint(
+                    &format!("SeismicWeightGeneration.automatic_diaphragms[{index}]"),
+                    constraint,
+                )?;
+            }
+            for (index, &(node, _)) in record.automatic_master_restraints.iter().enumerate() {
+                check_node(
+                    &format!("SeismicWeightGeneration.automatic_master_restraints[{index}]"),
+                    node,
+                )?;
+            }
+        }
         for group in &self.axes {
             for axis in &group.axes {
                 for &nid in &axis.nodes {
