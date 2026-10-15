@@ -2,6 +2,94 @@ use super::*;
 use crate::dof::Dof6Mask;
 use crate::model::MaterialCategory;
 
+#[test]
+fn element_section_uses_canonical_id_then_first_matching_id() {
+    let mut model = two_node_model(&[[0.; 3], [1000., 0., 0.]]);
+    push_element_beam(&mut model, 0, 0, 1);
+    for (ids, reference, expected) in [
+        (vec![0], Some(0), Some(0)),
+        (vec![7], Some(7), Some(0)),
+        (vec![1, 9], Some(1), Some(0)),
+        (vec![1, 1], Some(1), Some(1)),
+        (vec![7, 7], Some(7), Some(0)),
+        (vec![0], Some(7), None),
+        (vec![0], None, None),
+    ] {
+        model.sections = ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| Section::zero(SectionId(*id), format!("断面{i}")))
+            .collect();
+        model.elements[0].section = reference.map(SectionId);
+        assert_eq!(
+            model
+                .element_section(&model.elements[0])
+                .map(|section| section.name.as_str()),
+            expected.map(|i| model.sections[i].name.as_str())
+        );
+    }
+}
+
+#[test]
+fn secondary_purpose_selects_canonical_then_first_fallback_section_without_wrong_slot_rejection() {
+    use crate::section_shape::*;
+    let rc = SectionShape::RcBeamRect {
+        b: 300.,
+        d: 500.,
+        rebar: RcBeamRebar {
+            main_dia: 22.,
+            top: vec![3],
+            bottom: vec![4],
+            cover: 40.,
+            stirrup: BeamStirrup {
+                dia: 10.,
+                pitch: 150.,
+                legs: 2,
+            },
+        },
+    };
+    for (id, rc_first, rejected) in [
+        (1, true, false),
+        (1, false, true),
+        (7, true, true),
+        (7, false, false),
+    ] {
+        let typed = rc.to_section(SectionId(id), "RC梁".into());
+        let numeric = Section::zero(SectionId(id), "直接入力".into());
+        let mut model = Model {
+            sections: if rc_first {
+                vec![typed, numeric]
+            } else {
+                vec![numeric, typed]
+            },
+            ..Default::default()
+        };
+        let mut member = test_secondary(SecondaryMemberKind::Post, 674, "間柱");
+        member.section = Some(SectionId(id));
+        model.unassigned_posts.push(member);
+        let before = model.clone();
+        let result = model.validate_secondary_section_usage();
+        assert_eq!(result.is_err(), rejected);
+        if let Err(error) = result {
+            assert!(error.to_string().contains("SecondaryMemberId(674)"));
+            assert!(error.to_string().contains("RC 梁用断面"));
+        }
+        assert!(model.eq_ignoring_dofmap(&before));
+    }
+    let mut model = Model {
+        sections: vec![
+            Section::zero(SectionId(1), "直接入力".into()),
+            rc.to_section(SectionId(9), "無関係なRC梁".into()),
+        ],
+        ..Default::default()
+    };
+    let mut member = test_secondary(SecondaryMemberKind::Post, 674, "間柱");
+    member.section = Some(SectionId(1));
+    model.unassigned_posts.push(member);
+    assert!(model.validate_secondary_section_usage().is_ok());
+    assert!(model.validate_reference_ids().is_err());
+}
+
 /// 形状を持たない二次部材（生座標は原点）。ID・種別の検証用。
 fn test_secondary(kind: SecondaryMemberKind, id: u32, name: &str) -> SecondaryMember {
     SecondaryMember {

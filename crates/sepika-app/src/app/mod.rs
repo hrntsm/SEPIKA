@@ -2575,6 +2575,9 @@ pub(crate) mod signed_q0_acceptance_tests;
 #[cfg(test)]
 mod secondary_cft_tests;
 
+#[cfg(test)]
+mod reference_identity_acceptance_tests;
+
 #[cfg(all(test, feature = "gui"))]
 mod frame_node_count_tests;
 

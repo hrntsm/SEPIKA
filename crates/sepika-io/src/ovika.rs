@@ -101,7 +101,11 @@ pub struct OvikaContents {
 }
 
 /// モデルと派生データを .ovika へ保存する。
+/// [`Model::validate_reference_ids`] の不整合は書込前に拒否し、モデルを変更しない。
 pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result<(), IoError> {
+    model
+        .validate_reference_ids()
+        .map_err(|e| IoError::Decode(e.to_string()))?;
     model
         .validate_frame_node_counts()
         .map_err(|e| IoError::Decode(e.to_string()))?;
@@ -220,6 +224,7 @@ fn sync_parent_dir(_path: &Path) -> std::io::Result<()> {
 /// モデルと、同梱されていれば付随データ（準備計算の結果・解析結果・解析タブの
 /// 設定値）を読み込む。該当エントリを持たないファイル（それらが最新でない状態で
 /// 保存したプロジェクト）では [`OvikaContents`] の該当項目が `None` になる。
+/// [`Model::validate_reference_ids`] の不整合は、付随データを返す前に拒否する。
 pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
     let f = std::fs::File::open(path)?;
     let mut archive = zip::ZipArchive::new(f).map_err(|e| IoError::Zip(e.to_string()))?;
@@ -261,6 +266,9 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
 
     let model: Model =
         rmp_serde::from_slice(&model_data).map_err(|e| IoError::Decode(e.to_string()))?;
+    model
+        .validate_reference_ids()
+        .map_err(|e| IoError::Decode(e.to_string()))?;
     model
         .validate_frame_node_counts()
         .map_err(|e| IoError::Decode(e.to_string()))?;
@@ -484,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    fn noncanonical_rc_secondary_uses_reject_save_and_correctly_hashed_load() {
+    fn noncanonical_secondary_ids_reject_persistence_while_rc_purpose_is_inspectable() {
         let path = crate::test_util::test_tmp().join("rc-purpose-noncanonical-preserved.ovika");
         save_ovika(&path, &Model::default(), OvikaExtras::default()).unwrap();
         let original = std::fs::read(&path).unwrap();
@@ -530,6 +538,13 @@ mod tests {
                             && message.contains("SecondaryMemberId(674)")
                             && message.contains(&format!("SectionId({})", id.0))
                     };
+                    assert!(expected(
+                        &model.validate_rc_section_usage().unwrap_err().to_string()
+                    ));
+                    let expected = |message: &str| {
+                        message.contains("sections[0]")
+                            && message.contains(&format!("SectionId({})", id.0))
+                    };
                     assert!(
                         matches!(save_ovika(&path, &model, OvikaExtras::default()), Err(IoError::Decode(message)) if expected(&message))
                     );
@@ -566,11 +581,11 @@ mod tests {
             }
         }
         let general = Model {
-            sections: vec![Section::zero(SectionId(7), "直接入力".into())],
+            sections: vec![Section::zero(SectionId(0), "直接入力".into())],
             unassigned_posts: vec![SecondaryMember {
                 id: SecondaryMemberId(674),
                 kind: SecondaryMemberKind::Post,
-                section: Some(SectionId(7)),
+                section: Some(SectionId(0)),
                 ..SecondaryMember::default()
             }],
             ..Default::default()
@@ -1658,3 +1673,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 }
+
+#[cfg(test)]
+#[path = "ovika_reference_tests.rs"]
+mod reference_tests;

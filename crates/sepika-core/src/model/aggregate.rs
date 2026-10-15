@@ -264,10 +264,243 @@ impl Model {
         Ok(())
     }
 
+    /// 節点・要素・断面・材料・階・床/壁領域・床板/壁版の添字 ID と、
+    /// 主架構・二次部材・版・領域・通り芯・一本部材の節点/断面/材料/版/要素参照を検査する。
+    /// 二次部材 ID は一意性だけを要求し、未割当 `None`・用途・幾何・入力完成度は検査しない。
+    pub fn validate_reference_ids(&self) -> Result<(), crate::error::CoreError> {
+        use crate::error::CoreError;
+
+        check_id_consistency(&self.nodes, "nodes", "NodeId", |n| n.id.index(), |n| n.id.0)?;
+        for (i, elem) in self.elements.iter().enumerate() {
+            if elem.id.index() != i {
+                return Err(CoreError::IndexMismatch(format!(
+                    "elements[{}] has ElemId({})",
+                    i, elem.id.0
+                )));
+            }
+        }
+
+        let mut seen_elems = std::collections::HashSet::new();
+        for elem in &self.elements {
+            if !seen_elems.insert(elem.id) {
+                return Err(CoreError::DuplicateId(format!("ElemId({})", elem.id.0)));
+            }
+            for &nid in &elem.nodes {
+                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Elem {} -> Node {}",
+                        elem.id.0, nid.0
+                    )));
+                }
+            }
+            if let Some(sid) = elem.section {
+                if sid.index() >= self.sections.len() || self.sections[sid.index()].id != sid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Elem {} -> Section {}",
+                        elem.id.0, sid.0
+                    )));
+                }
+            }
+        }
+
+        for sec in &self.sections {
+            for (role, mid) in [
+                ("Material", sec.material),
+                ("RebarMaterial", sec.rebar_material),
+                ("ShearRebarMaterial", sec.shear_rebar_material),
+                ("SteelMaterial", sec.steel_material),
+            ] {
+                if let Some(mid) = mid {
+                    if mid.index() >= self.materials.len() || self.materials[mid.index()].id != mid
+                    {
+                        return Err(CoreError::DanglingRef(format!(
+                            "Section {} -> {role} {}",
+                            sec.id.0, mid.0
+                        )));
+                    }
+                }
+            }
+        }
+
+        check_id_consistency(
+            &self.stories,
+            "stories",
+            "StoryId",
+            |s| s.id.index(),
+            |s| s.id.0,
+        )?;
+        for group in &self.axes {
+            for axis in &group.axes {
+                for &nid in &axis.nodes {
+                    if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
+                        return Err(CoreError::DanglingRef(format!(
+                            "Axis {}/{} -> Node {}",
+                            group.name, axis.name, nid.0
+                        )));
+                    }
+                }
+            }
+        }
+        check_id_consistency(
+            &self.floor_regions,
+            "floor_regions",
+            "FloorRegionId",
+            |s| s.id.index(),
+            |s| s.id.0,
+        )?;
+        for region in &self.floor_regions {
+            for &nid in &region.boundary {
+                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "FloorRegion {} -> Node {}",
+                        region.id.0, nid.0
+                    )));
+                }
+            }
+            for &sid in &region.slab_ids {
+                if sid.index() >= self.slabs.len() || self.slabs[sid.index()].id != sid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "FloorRegion {} -> Slab {}",
+                        region.id.0, sid.0
+                    )));
+                }
+            }
+        }
+        check_id_consistency(&self.slabs, "slabs", "SlabId", |s| s.id.index(), |s| s.id.0)?;
+        check_id_consistency(
+            &self.wall_plates,
+            "wall_plates",
+            "WallPlateId",
+            |p| p.id.index(),
+            |p| p.id.0,
+        )?;
+        check_id_consistency(
+            &self.wall_regions,
+            "wall_regions",
+            "WallRegionId",
+            |r| r.id.index(),
+            |r| r.id.0,
+        )?;
+        for region in &self.wall_regions {
+            for &pid in &region.wall_plate_ids {
+                if pid.index() >= self.wall_plates.len() || self.wall_plates[pid.index()].id != pid
+                {
+                    return Err(CoreError::DanglingRef(format!(
+                        "WallRegion {} -> WallPlate {}",
+                        region.id.0, pid.0
+                    )));
+                }
+            }
+        }
+        for region in &self.wall_regions {
+            for &nid in &region.boundary {
+                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "WallRegion {} -> Node {}",
+                        region.id.0, nid.0
+                    )));
+                }
+            }
+        }
+        for slab in &self.slabs {
+            for nid in slab_node_refs(self, slab) {
+                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Slab {} -> Node {}",
+                        slab.id.0, nid.0
+                    )));
+                }
+            }
+            if let Some(sid) = slab.section() {
+                if sid.index() >= self.sections.len() || self.sections[sid.index()].id != sid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Slab {} -> Section {}",
+                        slab.id.0, sid.0
+                    )));
+                }
+            }
+        }
+        for plate in &self.wall_plates {
+            for nid in wall_plate_node_refs(self, plate) {
+                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "WallPlate {} -> Node {}",
+                        plate.id.0, nid.0
+                    )));
+                }
+            }
+            if let Some(sid) = plate.section {
+                if sid.index() >= self.sections.len() || self.sections[sid.index()].id != sid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "WallPlate {} -> Section {}",
+                        plate.id.0, sid.0
+                    )));
+                }
+            }
+        }
+        check_id_consistency(
+            &self.sections,
+            "sections",
+            "SectionId",
+            |s| s.id.index(),
+            |s| s.id.0,
+        )?;
+        check_id_consistency(
+            &self.materials,
+            "materials",
+            "MaterialId",
+            |m| m.id.index(),
+            |m| m.id.0,
+        )?;
+
+        for sm in self.beams().chain(self.posts()) {
+            if let Some(sid) = sm.section {
+                if self
+                    .sections
+                    .get(sid.index())
+                    .is_none_or(|section| section.id != sid)
+                {
+                    return Err(CoreError::DanglingRef(format!(
+                        "SecondaryMemberId({}) {:?} -> Section {}",
+                        sm.id.0, sm.kind, sid.0
+                    )));
+                }
+            }
+        }
+
+        {
+            use std::collections::HashSet;
+            let mut seen_ids = HashSet::new();
+            for sm in self.beams().chain(self.posts()) {
+                if !seen_ids.insert(sm.id) {
+                    return Err(CoreError::DanglingRef(format!(
+                        "二次部材の安定 ID が重複しています（{:?}）",
+                        sm.id
+                    )));
+                }
+            }
+        }
+
+        for (gi, group) in self.girder_groups.iter().enumerate() {
+            for &eid in group {
+                if eid.index() >= self.elements.len() || self.elements[eid.index()].id != eid {
+                    return Err(CoreError::DanglingRef(format!(
+                        "GirderGroup {} -> Elem {}",
+                        gi, eid.0
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), crate::error::CoreError> {
         use crate::error::CoreError;
 
+        self.validate_reference_ids()?;
         self.validate_frame_node_counts()?;
+        self.validate_secondary_section_usage()?;
         self.validate_rc_section_usage()?;
         self.validate_lip_channels()?;
         self.validate_attached_slabs()?;
@@ -350,7 +583,6 @@ impl Model {
         self.validate_member_load_extents()
             .map_err(CoreError::InvalidInput)?;
 
-        check_id_consistency(&self.nodes, "nodes", "NodeId", |n| n.id.index(), |n| n.id.0)?;
         let mut stb_ids = std::collections::HashSet::new();
         let mut stb_nodes = std::collections::HashSet::new();
         for identity in &self.stb_node_ids {
@@ -383,36 +615,7 @@ impl Model {
         self.validate_damper_weights()
             .map_err(CoreError::InvalidInput)?;
 
-        for (i, elem) in self.elements.iter().enumerate() {
-            if elem.id.index() != i {
-                return Err(CoreError::IndexMismatch(format!(
-                    "elements[{}] has ElemId({})",
-                    i, elem.id.0
-                )));
-            }
-        }
-
-        let mut seen_elems = std::collections::HashSet::new();
         for elem in &self.elements {
-            if !seen_elems.insert(elem.id) {
-                return Err(CoreError::DuplicateId(format!("ElemId({})", elem.id.0)));
-            }
-            for &nid in &elem.nodes {
-                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
-                    return Err(CoreError::DanglingRef(format!(
-                        "Elem {} -> Node {}",
-                        elem.id.0, nid.0
-                    )));
-                }
-            }
-            if let Some(sid) = elem.section {
-                if sid.index() >= self.sections.len() || self.sections[sid.index()].id != sid {
-                    return Err(CoreError::DanglingRef(format!(
-                        "Elem {} -> Section {}",
-                        elem.id.0, sid.0
-                    )));
-                }
-            }
             if matches!(
                 elem.kind,
                 ElementKind::Beam
@@ -464,32 +667,6 @@ impl Model {
             }
         }
 
-        for sec in &self.sections {
-            for (role, mid) in [
-                ("Material", sec.material),
-                ("RebarMaterial", sec.rebar_material),
-                ("ShearRebarMaterial", sec.shear_rebar_material),
-                ("SteelMaterial", sec.steel_material),
-            ] {
-                if let Some(mid) = mid {
-                    if mid.index() >= self.materials.len() || self.materials[mid.index()].id != mid
-                    {
-                        return Err(CoreError::DanglingRef(format!(
-                            "Section {} -> {role} {}",
-                            sec.id.0, mid.0
-                        )));
-                    }
-                }
-            }
-        }
-
-        check_id_consistency(
-            &self.stories,
-            "stories",
-            "StoryId",
-            |s| s.id.index(),
-            |s| s.id.0,
-        )?;
         for pair in self.stories.windows(2) {
             if pair[1].elevation < pair[0].elevation {
                 return Err(CoreError::DanglingRef(format!(
@@ -497,43 +674,6 @@ impl Model {
                     pair[1].id.0, pair[1].name, pair[1].elevation,
                     pair[0].id.0, pair[0].name, pair[0].elevation,
                 )));
-            }
-        }
-        for group in &self.axes {
-            for axis in &group.axes {
-                for &nid in &axis.nodes {
-                    if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
-                        return Err(CoreError::DanglingRef(format!(
-                            "Axis {}/{} -> Node {}",
-                            group.name, axis.name, nid.0
-                        )));
-                    }
-                }
-            }
-        }
-        check_id_consistency(
-            &self.floor_regions,
-            "floor_regions",
-            "FloorRegionId",
-            |s| s.id.index(),
-            |s| s.id.0,
-        )?;
-        for region in &self.floor_regions {
-            for &nid in &region.boundary {
-                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
-                    return Err(CoreError::DanglingRef(format!(
-                        "FloorRegion {} -> Node {}",
-                        region.id.0, nid.0
-                    )));
-                }
-            }
-            for &sid in &region.slab_ids {
-                if sid.index() >= self.slabs.len() || self.slabs[sid.index()].id != sid {
-                    return Err(CoreError::DanglingRef(format!(
-                        "FloorRegion {} -> Slab {}",
-                        region.id.0, sid.0
-                    )));
-                }
             }
         }
         {
@@ -553,21 +693,6 @@ impl Model {
                 }
             }
         }
-        check_id_consistency(&self.slabs, "slabs", "SlabId", |s| s.id.index(), |s| s.id.0)?;
-        check_id_consistency(
-            &self.wall_plates,
-            "wall_plates",
-            "WallPlateId",
-            |p| p.id.index(),
-            |p| p.id.0,
-        )?;
-        check_id_consistency(
-            &self.wall_regions,
-            "wall_regions",
-            "WallRegionId",
-            |r| r.id.index(),
-            |r| r.id.0,
-        )?;
         {
             let mut owner: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
             for region in &self.wall_regions {
@@ -576,14 +701,6 @@ impl Model {
                     if !seen_here.insert(pid) {
                         return Err(CoreError::DuplicateId(format!(
                             "WallRegion {} wall_plate_ids has WallPlateId({})",
-                            region.id.0, pid.0
-                        )));
-                    }
-                    if pid.index() >= self.wall_plates.len()
-                        || self.wall_plates[pid.index()].id != pid
-                    {
-                        return Err(CoreError::DanglingRef(format!(
-                            "WallRegion {} -> WallPlate {}",
                             region.id.0, pid.0
                         )));
                     }
@@ -596,16 +713,6 @@ impl Model {
                         }
                     }
                     owner.insert(pid.0, region.id.0);
-                }
-            }
-        }
-        for region in &self.wall_regions {
-            for &nid in &region.boundary {
-                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
-                    return Err(CoreError::DanglingRef(format!(
-                        "WallRegion {} -> Node {}",
-                        region.id.0, nid.0
-                    )));
                 }
             }
         }
@@ -649,64 +756,8 @@ impl Model {
                 }
             }
         }
-        for slab in &self.slabs {
-            for nid in slab_node_refs(self, slab) {
-                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
-                    return Err(CoreError::DanglingRef(format!(
-                        "Slab {} -> Node {}",
-                        slab.id.0, nid.0
-                    )));
-                }
-            }
-            if let Some(sid) = slab.section() {
-                if sid.index() >= self.sections.len() || self.sections[sid.index()].id != sid {
-                    return Err(CoreError::DanglingRef(format!(
-                        "Slab {} -> Section {}",
-                        slab.id.0, sid.0
-                    )));
-                }
-            }
-        }
-        for plate in &self.wall_plates {
-            for nid in wall_plate_node_refs(self, plate) {
-                if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
-                    return Err(CoreError::DanglingRef(format!(
-                        "WallPlate {} -> Node {}",
-                        plate.id.0, nid.0
-                    )));
-                }
-            }
-            if let Some(sid) = plate.section {
-                if sid.index() >= self.sections.len() || self.sections[sid.index()].id != sid {
-                    return Err(CoreError::DanglingRef(format!(
-                        "WallPlate {} -> Section {}",
-                        plate.id.0, sid.0
-                    )));
-                }
-            }
-        }
-        check_id_consistency(
-            &self.sections,
-            "sections",
-            "SectionId",
-            |s| s.id.index(),
-            |s| s.id.0,
-        )?;
-        check_id_consistency(
-            &self.materials,
-            "materials",
-            "MaterialId",
-            |m| m.id.index(),
-            |m| m.id.0,
-        )?;
-
-        for (ri, region) in self.floor_regions.iter().enumerate() {
+        for region in &self.floor_regions {
             for (ji, sm) in region.secondary_beams.iter().enumerate() {
-                Self::validate_secondary_member(
-                    sm,
-                    &format!("FloorRegion {ri} secondary_beams[{ji}]"),
-                    &self.sections,
-                )?;
                 if sm.kind != SecondaryMemberKind::Beam {
                     return Err(CoreError::DanglingRef(format!(
                         "FloorRegion {} secondary_beams[{ji}] は Beam でない",
@@ -716,20 +767,14 @@ impl Model {
             }
         }
         for (i, sm) in self.unassigned_beams.iter().enumerate() {
-            Self::validate_secondary_member(sm, &format!("unassigned_beams[{i}]"), &self.sections)?;
             if sm.kind != SecondaryMemberKind::Beam {
                 return Err(CoreError::DanglingRef(format!(
                     "unassigned_beams[{i}] は Beam でない"
                 )));
             }
         }
-        for (ri, region) in self.wall_regions.iter().enumerate() {
+        for region in &self.wall_regions {
             for (pi, sm) in region.posts.iter().enumerate() {
-                Self::validate_secondary_member(
-                    sm,
-                    &format!("WallRegion {ri} posts[{pi}]"),
-                    &self.sections,
-                )?;
                 if sm.kind != SecondaryMemberKind::Post {
                     return Err(CoreError::DanglingRef(format!(
                         "WallRegion {} posts[{pi}] は Post でない",
@@ -739,24 +784,10 @@ impl Model {
             }
         }
         for (i, sm) in self.unassigned_posts.iter().enumerate() {
-            Self::validate_secondary_member(sm, &format!("unassigned_posts[{i}]"), &self.sections)?;
             if sm.kind != SecondaryMemberKind::Post {
                 return Err(CoreError::DanglingRef(format!(
                     "unassigned_posts[{i}] は Post でない"
                 )));
-            }
-        }
-
-        {
-            use std::collections::HashSet;
-            let mut seen_ids = HashSet::new();
-            for sm in self.beams().chain(self.posts()) {
-                if !seen_ids.insert(sm.id) {
-                    return Err(CoreError::DanglingRef(format!(
-                        "二次部材の安定 ID が重複しています（{:?}）",
-                        sm.id
-                    )));
-                }
             }
         }
 
@@ -886,17 +917,6 @@ impl Model {
             }
         }
 
-        for (gi, group) in self.girder_groups.iter().enumerate() {
-            for &eid in group {
-                if eid.index() >= self.elements.len() || self.elements[eid.index()].id != eid {
-                    return Err(CoreError::DanglingRef(format!(
-                        "GirderGroup {} -> Elem {}",
-                        gi, eid.0
-                    )));
-                }
-            }
-        }
-
         Ok(())
     }
 
@@ -924,13 +944,8 @@ impl Model {
         }
     }
 
-    /// 断面 ID から断面を引く。存在しなければ `None`。
-    /// 引き方は [`Model::node`] と同じ（`sections[i].id == SectionId(i)`）。
-    ///
-    /// この不変条件は [`Model::validate`] が要素・二次部材からの参照ごとに
-    /// 検証しており（`sections[sid.index()].id != sid` をダングリング参照として弾く）、
-    /// [`Model::element_section`] も添字で引いている。ID から断面を引くところは
-    /// 常にこのメソッドを使う。
+    /// 断面 ID から断面を引く。添字位置の同 ID を優先し、なければ同 ID の先頭を返す。
+    /// 存在しなければ `None`。保存可能な添字 ID・参照の整合性は [`Self::validate_reference_ids`] で検査する。
     pub fn section(&self, id: SectionId) -> Option<&Section> {
         match self.sections.get(id.index()) {
             Some(s) if s.id == id => Some(s),
@@ -1882,9 +1897,19 @@ impl Model {
     }
 
     /// 領域内・未割当の全小梁・間柱の断面用途を検証する。
+    /// 断面は [`Self::section`] と同じ優先順で解決し、未割当・参照先欠落は検査しない。
     pub fn validate_secondary_section_usage(&self) -> Result<(), crate::error::CoreError> {
+        let mut sections_by_id = std::collections::HashMap::with_capacity(self.sections.len());
+        for section in &self.sections {
+            sections_by_id.entry(section.id).or_insert(section);
+        }
         for sm in self.beams().chain(self.posts()) {
-            if let Some(section) = sm.section.and_then(|sid| self.sections.get(sid.index())) {
+            if let Some(section) = sm.section.and_then(|sid| {
+                self.sections
+                    .get(sid.index())
+                    .filter(|section| section.id == sid)
+                    .or_else(|| sections_by_id.get(&sid).copied())
+            }) {
                 Self::validate_secondary_section_use(sm, section)?;
             }
         }

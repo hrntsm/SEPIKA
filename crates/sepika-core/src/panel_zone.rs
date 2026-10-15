@@ -1183,6 +1183,7 @@ mod tests {
             let mut m = joint_model(h_beam(), 600.0, h_col());
             m.nodes.push(node(3, [0.0, 0.0, 6000.0]));
             let mut thin_sec = sec(thin.clone(), 400.0, None);
+            thin_sec.id = SectionId(2);
             thin_sec.frame_use = Some(FrameSectionUse::Column);
             m.sections.push(thin_sec);
             let upper = member(2, 0, 3, 2);
