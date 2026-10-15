@@ -1577,3 +1577,145 @@ fn issue561_product_entry_preserves_geometry_loads_and_physical_edges() {
         println!("Issue561 polygon={polygon} independent_area_m2={} edge_areas_m2={expected_m2:?} observed_reference_mm2_and_bounds={reference:?} checked_variants=128", expected_m2.iter().sum::<f64>());
     }
 }
+
+#[test]
+fn issue645_windows_profile_probe() {
+    fn emit(label: &str, r: f64, c: [[f64; 3]; 4]) {
+        println!("BEGIN {label}");
+        let result = slab_dimensions_of(&std::hint::black_box(c));
+        println!(
+            "CASE {label} product_accept={} product_result={result:?}",
+            result.is_some()
+        );
+        let mut values = vec![
+            ("r".to_string(), r),
+            ("sqrt_regenerated".to_string(), (1. - r * r).sqrt()),
+            ("tolerance".to_string(), 1e-6),
+            ("min_length_threshold".to_string(), 1e-9),
+        ];
+        for (e, p) in c.iter().enumerate() {
+            for (i, x) in p.iter().enumerate() {
+                values.push((format!("p{e}_{i}"), *x));
+            }
+        }
+        let local: [[f64; 3]; 4] =
+            std::array::from_fn(|e| sepika_core::geom::vec3::sub(c[e], c[0]));
+        let u = local[1];
+        let v = local[3];
+        let norm = |p: [f64; 3]| p[0].hypot(p[1]).hypot(p[2]);
+        let lx = norm(u);
+        let ly = norm(v);
+        let closure = norm(std::array::from_fn(|i| local[2][i] - u[i] - v[i])) / lx.max(ly);
+        let dot = (0..3).map(|i| (u[i] / lx) * (v[i] / ly)).sum::<f64>().abs();
+        let av: [f64; 3] = std::array::from_fn(|i| {
+            let j = (i + 1) % 3;
+            let k = (i + 2) % 3;
+            (0..4)
+                .map(|e| local[e][j] * local[(e + 1) % 4][k] - local[e][k] * local[(e + 1) % 4][j])
+                .sum::<f64>()
+                / 2.
+        });
+        let area = norm(av);
+        let rectangle_area = lx * ly;
+        let area_error = (area - rectangle_area).abs() / area;
+        let min_edge = (0..4)
+            .map(|e| norm(std::array::from_fn(|i| c[(e + 1) % 4][i] - c[e][i])))
+            .fold(f64::INFINITY, f64::min);
+        values.extend([
+            ("lx".into(), lx),
+            ("ly".into(), ly),
+            ("dot".into(), dot),
+            ("closure".into(), closure),
+            ("area".into(), area),
+            ("rectangle_area".into(), rectangle_area),
+            ("area_error".into(), area_error),
+            ("min_edge".into(), min_edge),
+            ("min_dimension".into(), lx.min(ly)),
+        ]);
+        for (name, x) in values {
+            println!("VALUE {label} {name} {x:.20e} {:016x}", x.to_bits());
+        }
+        println!(
+            "DIAGNOSTIC_ONLY {label} length_pass={} closure_pass={} dot_pass={} area_pass={}",
+            lx > 1e-9 && ly > 1e-9,
+            closure <= 1e-6,
+            dot <= 1e-6,
+            area > 0. && area_error <= 1e-6
+        );
+    }
+    let triples = [
+        (
+            0x3eb0c2ac1dbbe3d8_u64,
+            0x3fefffffffffee71_u64,
+            0x3ff000010c2ac1dc_u64,
+        ),
+        (0x3eb0c6f7a0b5ed8d, 0x3fefffffffffee68, 0x3ff000010c6f7a0b),
+        (0x3eb0cb4323aff743, 0x3fefffffffffee5f, 0x3ff000010cb4323b),
+    ];
+    for (n, nominal) in [0.999e-6_f64, 1e-6, 1.001e-6].into_iter().enumerate() {
+        let r = std::hint::black_box(nominal);
+        let y = (1. - r * r).sqrt();
+        let c = [[0., 0., 0.], [1., 0., 0.], [1. + r, y, 0.], [r, y, 0.]];
+        let (rb, yb, xb) = triples[n];
+        println!(
+            "REGEN_BITS_MATCH case={n} r={} y={} p2x={}",
+            r.to_bits() == rb,
+            y.to_bits() == yb,
+            c[2][0].to_bits() == xb
+        );
+        emit(&format!("A_regenerated_{n}"), r, c);
+        let bits = [
+            [0, 0, 0],
+            [0x3ff0000000000000, 0, 0],
+            [xb, yb, 0],
+            [rb, yb, 0],
+        ];
+        emit(
+            &format!("B_fixed_{n}"),
+            f64::from_bits(rb),
+            bits.map(|p| p.map(f64::from_bits)),
+        );
+        if n == 1 {
+            let mut regenerated_candidate = c;
+            regenerated_candidate[2][1] = y.next_up();
+            regenerated_candidate[3][1] = y.next_up();
+            println!(
+                "REGEN_CANDIDATE_BITS_MATCH y={}",
+                y.next_up().to_bits() == 0x3fefffffffffee69
+            );
+            emit("A_regenerated_middle_y_up", r, regenerated_candidate);
+            let mut candidate = bits;
+            candidate[2][1] = 0x3fefffffffffee69;
+            candidate[3][1] = 0x3fefffffffffee69;
+            emit(
+                "B_fixed_middle_y_up",
+                f64::from_bits(rb),
+                candidate.map(|p| p.map(f64::from_bits)),
+            );
+        }
+    }
+    let rectangle = [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]];
+    for (n, r) in [0.999e-6, 1e-6, 1.001e-6].into_iter().enumerate() {
+        let mut c = rectangle;
+        c[2][2] = r;
+        emit(&format!("closure_{n}"), r, c);
+    }
+    let height = 0.0018503595246113951;
+    let top = 0.001850363225334145_f64;
+    for (n, t) in [top.next_down(), top, top.next_up()]
+        .into_iter()
+        .enumerate()
+    {
+        let mut c = rectangle;
+        c[3][1] = height;
+        c[2][1] = t;
+        emit(&format!("area_{n}"), t, c);
+    }
+    for (n, l) in [0.999e-9, 1e-9, 1.001e-9].into_iter().enumerate() {
+        emit(
+            &format!("length_{n}"),
+            l,
+            [[0., 0., 0.], [l, 0., 0.], [l, 1., 0.], [0., 1., 0.]],
+        );
+    }
+}

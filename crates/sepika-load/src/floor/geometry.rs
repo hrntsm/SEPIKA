@@ -36,6 +36,12 @@ pub fn slab_dimensions_of(coords: &[[f64; 3]]) -> Option<(f64, f64)> {
     let norm = |p: [f64; 3]| p[0].hypot(p[1]).hypot(p[2]);
     let lx = norm(u);
     let ly = norm(v);
+    #[cfg(test)]
+    eprintln!(
+        "INTERNAL_LENGTH lx={lx:.20e}/{:016x} ly={ly:.20e}/{:016x}",
+        lx.to_bits(),
+        ly.to_bits()
+    );
     if !lx.is_finite() || !ly.is_finite() || lx <= 1e-9 || ly <= 1e-9 {
         return None;
     }
@@ -52,6 +58,19 @@ pub fn slab_dimensions_of(coords: &[[f64; 3]]) -> Option<(f64, f64)> {
     let area = norm(area_vector);
     let rectangle_area = lx * ly;
     let area_error = (area - rectangle_area).abs() / area;
+    #[cfg(test)]
+    for (name, value) in [
+        ("closure", closure),
+        ("dot", dot),
+        ("area", area),
+        ("rectangle_area", rectangle_area),
+        ("area_error", area_error),
+    ] {
+        eprintln!(
+            "INTERNAL_VALUE {name} {value:.20e} {:016x}",
+            value.to_bits()
+        );
+    }
     if !closure.is_finite()
         || closure > 1e-6
         || !dot.is_finite()

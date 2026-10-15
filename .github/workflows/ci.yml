@@ -22,6 +22,27 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: 一時診断（#645 Linux・Windows 同版比較）
+        shell: bash
+        env:
+          RUSTFLAGS: ""
+          CARGO_ENCODED_RUSTFLAGS: ""
+          RUSTUP_TOOLCHAIN: "1.99.0"
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.99.0 --profile minimal
+          rustc -vV | tee "$RUNNER_TEMP/issue645-rustc-version.txt"
+          grep -Fx 'release: 1.99.0' "$RUNNER_TEMP/issue645-rustc-version.txt"
+          grep -Fx 'commit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4' "$RUNNER_TEMP/issue645-rustc-version.txt"
+          grep -Fx 'LLVM version: 23.1.1' "$RUNNER_TEMP/issue645-rustc-version.txt"
+          grep -Fx 'host: x86_64-unknown-linux-gnu' "$RUNNER_TEMP/issue645-rustc-version.txt"
+          cargo -V
+          rustc --print cfg
+          git rev-parse HEAD
+          printf 'GITHUB_SHA=%s\n' "$GITHUB_SHA"
+          env | sort | grep -E '^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|RUSTUP_TOOLCHAIN|CARGO_PROFILE_|CARGO_BUILD_|RUSTC=|RUSTC_WRAPPER=|RUSTC_WORKSPACE_WRAPPER=)' || true
+          sha256sum Cargo.toml Cargo.lock crates/sepika-load/Cargo.toml crates/sepika-load/src/floor/mod.rs crates/sepika-load/src/floor/geometry.rs crates/sepika-load/src/floor/tests.rs crates/sepika-core/src/geom/vec3.rs
+          cargo test -p sepika-load --lib --locked -vv floor::tests::issue645_windows_profile_probe -- --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/issue645-linux-probe.log"
       - name: テスト実行
         run: cargo test --workspace --locked
       # mcp / gui は非デフォルト feature のため --workspace では検証されない。
