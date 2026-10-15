@@ -618,6 +618,114 @@ fn test_cft_box_seismic_qd1_governs_when_smaller() {
     );
 }
 
+#[test]
+fn square_long_case2_qd1_min_use_independent_moments_and_ignore_analysis_concrete_e() {
+    let sec = cft_box_section(150.0, 150.0, 4.5);
+    let mut mat = make_material(30.0, "Fc30");
+    let forces = MemberForcesAt {
+        n: -774319.9534426274,
+        qy: 7500.0,
+        qz: 7500.0,
+        ..zero_forces()
+    };
+    let mut ctx = ctx_column(LoadTerm::Short);
+    ctx.length = 2700.0;
+    ctx.seismic_qd = Some(crate::SeismicQd {
+        long_at: vec![(0.0, [0.0, 5000.0, 5000.0, 0.0, 0.0, 0.0])],
+        n_factor: 1.5,
+        n_mechanism: 1.0,
+        q_simple: None,
+        clear_length: 3000.0,
+        method: crate::QdMethod::Qd1,
+    });
+    // 独立断面fixtureのMu=12313672.630184587 NmmからQD1=8209.115086789725 N。
+    // QD2=8750 N。旧線形式のQD1=9197.721675236742 NではminはQD2だった。
+    let s_qa = 1269.0 * steel_fs(235.0, LoadTerm::Short);
+    for (method, expected_q) in [
+        (crate::QdMethod::Qd1, 8209.115086789725),
+        (crate::QdMethod::Min, 8209.115086789725),
+        (crate::QdMethod::Qd2, 8750.0),
+    ] {
+        ctx.seismic_qd.as_mut().unwrap().method = method;
+        for e in [1000.0, 30000.0, 100000.0] {
+            mat.young = e;
+            let r = CftDesign.check(&forces, &sec, &mat, &ctx).unwrap_checked();
+            let shear = r
+                .components
+                .iter()
+                .find(|c| c.kind == CheckKind::Shear)
+                .unwrap();
+            assert!((shear.ratio - expected_q / s_qa).abs() < 1e-12);
+        }
+    }
+    ctx.seismic_qd.as_mut().unwrap().method = crate::QdMethod::Qd1;
+    for (ly, lz) in [(2700.0, 3600.0), (3600.0, 2700.0)] {
+        ctx.lk_y = Some(ly);
+        ctx.lk_z = Some(lz);
+        let forces = MemberForcesAt {
+            n: -800000.0,
+            ..forces
+        };
+        let r = CftDesign.check(&forces, &sec, &mat, &ctx).unwrap_checked();
+        let shear = r
+            .components
+            .iter()
+            .find(|c| c.kind == CheckKind::Shear)
+            .unwrap();
+        assert!((shear.ratio - (11042494.831563761 / 1500.0) / s_qa).abs() < 1e-12);
+    }
+    for (ly, lz) in [(2700.0, 4500.001), (4500.001, 2700.0)] {
+        ctx.lk_y = Some(ly);
+        ctx.lk_z = Some(lz);
+        assert!(
+            matches!(CftDesign.check(&forces, &sec, &mat, &ctx), CheckOutcome::Skipped { reason } if reason.contains("適用域外"))
+        );
+    }
+}
+
+#[test]
+fn square_long_case2_compression_end_does_not_fall_back_from_qd1_or_min() {
+    let sec = cft_box_section(150.0, 150.0, 4.5);
+    let mat = make_material(30.0, "Fc30");
+    let inp = crate::ultimate::CftAxialInput {
+        circular: false,
+        d_section: 150.0,
+        c_area: 19881.0,
+        s_area: 2619.0,
+        c_inertia: 32937846.75,
+        s_inertia: 9249653.25,
+        fc: 30.0,
+        fy: 235.0,
+        s_young: 205000.0,
+        lk: 2700.0,
+    };
+    let ncu = crate::ultimate::cft_axial_ultimate(&inp).ncu;
+    for method in [crate::QdMethod::Qd1, crate::QdMethod::Min] {
+        let mut ctx = ctx_column(LoadTerm::Short);
+        ctx.length = 2700.0;
+        ctx.seismic_qd = Some(crate::SeismicQd {
+            long_at: vec![(0.0, [0.0; 6])],
+            n_factor: 1.5,
+            n_mechanism: 1.0,
+            q_simple: None,
+            clear_length: 3000.0,
+            method,
+        });
+        for (n, reason) in [(ncu, "Mu=0"), (ncu + 1.0, "軸NG")] {
+            let forces = MemberForcesAt {
+                n: -n,
+                qy: 7500.0,
+                ..zero_forces()
+            };
+            let outcome = CftDesign.check(&forces, &sec, &mat, &ctx);
+            assert!(
+                matches!(&outcome, CheckOutcome::Skipped { reason:r } if r.contains(reason)),
+                "N={n}, {outcome:?}"
+            );
+        }
+    }
+}
+
 /// ctx.seismic_qd が None のときは CFT も解析せん断力の
 /// ままとなる（回帰確認）。
 #[test]

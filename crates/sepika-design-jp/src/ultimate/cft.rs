@@ -131,6 +131,19 @@ pub struct CftAxialUltimate {
     pub ncu: f64,
     /// 軸引張終局耐力 Ntu `[N]`（引張正の絶対値。Ntu = sA·Fy）。
     pub ntu: f64,
+    /// 同一座屈長さの長柱成分。短柱・中柱では `None`。
+    pub long_buckling: Option<CftLongBuckling>,
+}
+
+/// 同一断面・座屈長さにおける長柱の座屈軸力 `[N]`。
+#[derive(Clone, Copy, Debug)]
+pub struct CftLongBuckling {
+    /// コンクリートの座屈軸耐力 `[N]`。
+    pub c_ncr: f64,
+    /// 鋼管の座屈軸耐力 `[N]`。
+    pub s_ncr: f64,
+    /// 鋼管単体のオイラー荷重 `[N]`。
+    pub s_ne: f64,
 }
 
 /// 短柱の軸圧縮終局耐力 `Ncu1 = cNc + (1+ξ)·sNc`（CFT 指針）。
@@ -142,24 +155,13 @@ pub fn cft_ncu1(inp: &CftAxialInput) -> f64 {
     (cnc + (1.0 + xi) * snc).max(0.0)
 }
 
-/// 長柱（または `lk` を明示指定した中柱補間用）の軸圧縮終局耐力
-/// `Ncu3 = cNcr + sNcr`（CFT 指針）を、座屈長さ `lk` で算定する。
-///
-/// - `cNcr = cσcr·cA`、`cλ1 = cλ/π·√εu`、`cλ = lk/ci`、`ci = √(cI/cA)`。
-/// - `sNcr = { sNy (sλ1<0.3); (1−0.545(sλ1−0.3))·sNy (0.3≤sλ1<1.3); sNE/1.3 (sλ1≥1.3) }`、
-///   `sNy = sA·Fy`、`sλ1 = sλ/π·√(Fy/sE)`、`sλ = lk/si`、`si = √(sI/sA)`、
-///   `sNE = π²·sE·sI/lk²`。分岐条件は鋼管細長比 `sλ1` で評価する。
-fn cft_ncu3_at_lk(inp: &CftAxialInput, lk: f64) -> f64 {
-    if lk <= 0.0 {
-        return cft_ncu1(inp);
-    }
+/// 正の座屈長さ `lk` [mm] における長柱の各座屈軸力 [N]。
+fn cft_ncu3_at_lk(inp: &CftAxialInput, lk: f64) -> CftLongBuckling {
     let c_ncr = cft_concrete_buckling_axial(inp.c_inertia, inp.c_area, inp.fc, lk);
+    let s_ne = std::f64::consts::PI.powi(2) * inp.s_young * inp.s_inertia / (lk * lk);
     let s_ncr = if inp.s_area > 0.0 && inp.s_inertia > 0.0 && inp.s_young > 0.0 {
-        let si = (inp.s_inertia / inp.s_area).sqrt();
-        let s_lambda = if si > 0.0 { lk / si } else { 0.0 };
-        let s_lambda1 = s_lambda / std::f64::consts::PI * (inp.fy / inp.s_young).sqrt();
         let s_ny = inp.s_area * inp.fy;
-        let s_ne = std::f64::consts::PI.powi(2) * inp.s_young * inp.s_inertia / (lk * lk);
+        let s_lambda1 = (s_ny / s_ne).sqrt();
         if s_lambda1 < 0.3 {
             s_ny
         } else if s_lambda1 < 1.3 {
@@ -170,7 +172,7 @@ fn cft_ncu3_at_lk(inp: &CftAxialInput, lk: f64) -> f64 {
     } else {
         0.0
     };
-    (c_ncr + s_ncr).max(0.0)
+    CftLongBuckling { c_ncr, s_ncr, s_ne }
 }
 
 /// CFT 柱の軸終局耐力（圧縮 Ncu・引張 Ntu）を算定する（CFT 指針）。
@@ -185,12 +187,17 @@ fn cft_ncu3_at_lk(inp: &CftAxialInput, lk: f64) -> f64 {
 /// 引張低減係数は `β2 = 1.0`（鋼管全断面降伏）とする。
 pub fn cft_axial_ultimate(inp: &CftAxialInput) -> CftAxialUltimate {
     let class = cft_column_class(inp.lk, inp.d_section);
+    let long_buckling = (class == CftColumnClass::Long).then(|| cft_ncu3_at_lk(inp, inp.lk));
     let ncu = match class {
         CftColumnClass::Short => cft_ncu1(inp),
-        CftColumnClass::Long => cft_ncu3_at_lk(inp, inp.lk),
+        CftColumnClass::Long => {
+            let b = long_buckling.unwrap();
+            (b.c_ncr + b.s_ncr).max(0.0)
+        }
         CftColumnClass::Medium => {
             let ncu1 = cft_ncu1(inp);
-            let ncu3_at_12 = cft_ncu3_at_lk(inp, 12.0 * inp.d_section);
+            let b = cft_ncu3_at_lk(inp, 12.0 * inp.d_section);
+            let ncu3_at_12 = (b.c_ncr + b.s_ncr).max(0.0);
             let ld = if inp.d_section > 0.0 {
                 inp.lk / inp.d_section
             } else {
@@ -200,12 +207,44 @@ pub fn cft_axial_ultimate(inp: &CftAxialInput) -> CftAxialUltimate {
         }
     };
     let ntu = (inp.s_area.max(0.0) * inp.fy.max(0.0)).max(0.0);
-    CftAxialUltimate { class, ncu, ntu }
+    CftAxialUltimate {
+        class,
+        ncu,
+        ntu,
+        long_buckling,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn steel_buckling_preserves_both_slenderness_boundaries() {
+        for (lambda, expected) in [
+            (0.3 - 1e-8, 1.0),
+            (0.3, 1.0),
+            (0.3 + 1e-8, 0.99999999455),
+            (1.3 - 1e-8, 0.45500000545),
+            (1.3, 1000.0 / 2197.0),
+            (1.3 + 1e-8, 0.45516612863695255),
+        ] {
+            let mut inp = box_input(1.0);
+            inp.s_area = 1.0;
+            inp.fy = 1.0;
+            inp.s_young = 1.0 / std::f64::consts::PI.powi(2);
+            inp.s_inertia = 1.0 / (lambda * lambda);
+            let b = cft_ncu3_at_lk(&inp, 1.0);
+            assert!(
+                (b.s_ncr - expected).abs() < 1e-12,
+                "λ={lambda}: {}",
+                b.s_ncr
+            );
+            inp.c_inertia *= 1e-3;
+            inp.fc = 58.0;
+            assert_eq!(cft_ncu3_at_lk(&inp, 1.0).s_ncr, b.s_ncr);
+        }
+    }
 
     #[test]
     fn test_cft_column_class() {

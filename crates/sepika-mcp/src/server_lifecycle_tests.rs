@@ -3,6 +3,44 @@ use sepika_io::results::ResultKind;
 use std::future::Future;
 use std::task::Poll;
 
+#[tokio::test]
+async fn cft_long_case2_public_job_keeps_calculated_and_unavailable_diagnostics() {
+    for (n_n, ok) in [(4_000_000.0, true), (8_000_000.0, false)] {
+        let dir = test_store_dir(&format!("cft325-case2-{n_n}"));
+        let model = crate::tests::cft_long_case2_model(n_n);
+        let server = SepikaServer::new(make_state(model.clone(), &dir));
+        let mut args = run_args(JobKind::UltimateCheck);
+        args.load_case = Some(0);
+        let run = server.analysis_run(Parameters(args)).await.unwrap();
+        let id = extract_job_id(&run);
+        let summary = done_summary(&wait_for_terminal(&server, &id).await);
+        crate::tests::assert_cft_long_case2_summary(&summary, ok);
+        let published = public_status(&server, &id).await;
+        let published_summary: serde_json::Value =
+            serde_json::from_str(published["status"]["Done"]["result_ref"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(published_summary, summary);
+        assert!(summary.get("store").is_none());
+        assert!(server
+            .state
+            .lock()
+            .await
+            .results
+            .manifest()
+            .entries
+            .is_empty());
+        let reopened = SepikaServer::new(make_state(model, &dir));
+        assert!(reopened
+            .state
+            .lock()
+            .await
+            .results
+            .manifest()
+            .entries
+            .is_empty());
+    }
+}
+
 struct SaveGate {
     entered: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     released: std::sync::Mutex<bool>,

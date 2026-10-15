@@ -175,7 +175,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [応力解析_参照実装照合.md](応力解析_参照実装照合.md) | 03 応力解析 | 🔶 | 制振間柱等 |
 | [断面検定_参照実装照合.md](断面検定_参照実装照合.md) | 04 断面検定 | 🔶 | C 節に残置項目 |
 | [非線形モデル_参照実装照合.md](非線形モデル_参照実装照合.md) | 05 非線形モデル | 🔶 | 免震 UI・分割ロジック等 |
-| [終局検定_参照実装照合.md](終局検定_参照実装照合.md) | 06 終局検定 | 🔶 | Vu・二軸曲げ等 |
+| [終局検定_参照実装照合.md](終局検定_参照実装照合.md) | 06 終局検定、§6-c 正方形CFT長柱Case2（#325） | 🔶（一次画像/独立期待値、Source式・core・共有静的符号是正job、修正後App/MCP6件の成功証拠を受領。RC影響あり。手動GUI/外部transport・規準本文・Validation未確認、広検証/正式レビューは後続） | #565他残契約は未完。Vu・二軸曲げ等 |
 | [ゼロ増分履歴保持_Issue596_2026-10.md](ゼロ増分履歴保持_Issue596_2026-10.md) | 同点trial/probe/commitの全履歴・独立応答、実集中ばね/非対称壁/1D・spatial時刻歴、解析5の実OVIKA失効と明示回復 | 🔶（代表入口Verification、実験Validation未） |
 | [非線形動的解析_参照実装照合.md](非線形動的解析_参照実装照合.md) | 07 非線形動的 | 🔶 | UI/IO 経路整備 |
 | [梁型枠接触和集合_Issue451_2026-10.md](梁型枠接触和集合_Issue451_2026-10.md) | 水平一定矩形梁の左右別接触和集合・公開数量入口。実施工Validationは未実施 | 🔶 |
@@ -294,7 +294,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 23 | ST-Bridge 入出力 | sepika-io | stbridge/mod.rs、tests/stbridge_brace_content.rs | [Issue625直接入口と正常対照](未割当線材のSTB出力拒否_Issue625_2026-10.md#独立期待値と直接入口)、 [Issue647実描画・既存入口](STB書出の開発中表示_Issue647_2026-10.md#直接検証と観測)、 `test_roundtrip_*`、`source_story`（[原階所属](原階所属_Issue497_2026-10.md)）、[Issue550全文XSD・意味照合](鋼ブレースXML文字子_Issue550_2026-10.md#独立fixtureと公開入口) | P8 | 🔶（鋼ブレース文字子の限定Verificationは✅） |
 | 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*`、`source_story_*`（[原階所属](原階所属_Issue497_2026-10.md)。MCP `model_edit` は原階所属・壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |
 | 24a | 割当領域の同一性・孤立版診断 | sepika-core / sepika-edit / sepika-job / sepika-app / sepika-mcp | model/assignment_region.rs、secondary.rs、node_member.rs、prepare.rs | [Issue506検証](割当領域同一性_Issue506_2026-10.md)の独立fixtureと実入口 | #506 | ✅（状態契約Verification） |
-| 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*` | P7 | 🔶 |
+| 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*`、Case2の証拠区分は[§6-c](終局検定_参照実装照合.md#6-c-cft-中柱長柱の-n-m-相互作用) | P7 | 🔶 |
 | 26 | 数量積算（部位別のコンクリート・型枠・鉄筋・鉄骨・継手個所） | sepika-design-jp | quantity/{mod,member,rebar}.rs | `quantity::member::tests::*`（手計算照合）/`quantity::tests::*`（走査・分類）/`summary::tests::test_quantity_csv_from_sample_model`（CSV 一気通貫）/`test_quantity_takeoff_json_column`（MCP） | 横断 | 🔶 |
 | 26c | 非節点二次部材の数量 | sepika-design-jp / sepika-app / sepika-mcp / sepika-edit / sepika-io | quantity・quantity_view・summary・query・secondary・ovika | [Issue557の元6受入と実入口](非節点二次部材数量_Issue557_2026-10.md#元の受入6項目と実入口) | 横断 | 🔶（自動実入口・広域Verification成功、nativeGUI/transport/Validation未） |
 | 26b | RC壁方向別数量・共有設定 | sepika-core / sepika-edit / sepika-design-jp / sepika-app / sepika-io / sepika-mcp | quantity・quantity_view・summary・query・model・ovika | [Issue536の独立期待値と実入口](RC壁方向別数量_Issue536_2026-10.md#実入口試験への対応) | 横断 | 🔶（Scope内Verification成功、Validation未実施） |
