@@ -22,7 +22,10 @@ impl Contacts {
         self.areas.get(&support).copied().unwrap_or(0.0)
     }
 
-    pub(super) fn from_model(model: &Model) -> Result<Self, String> {
+    pub(super) fn from_model(
+        model: &Model,
+        secondary: &HashMap<sepika_core::ids::SecondaryMemberId, super::SecondaryQuantity>,
+    ) -> Result<Self, String> {
         let mut rectangles: HashMap<SupportMemberId, [Vec<Rect>; 2]> = HashMap::new();
         for region in &model.floor_assignment_regions.regions {
             match region.assignment {
@@ -72,10 +75,10 @@ impl Contacts {
                         let side = usize::from((edge.span[1] - edge.span[0]) * winding < 0.0);
                         add_contact(
                             model,
+                            secondary,
                             edge.support,
                             edge.span,
-                            slab_z,
-                            horizontal,
+                            (slab_z, horizontal),
                             side,
                             &mut rectangles,
                         )?;
@@ -129,10 +132,10 @@ impl Contacts {
                         for (span, side) in local_contact_spans(&pts, a, b, i, span) {
                             add_contact(
                                 model,
+                                secondary,
                                 support,
                                 span,
-                                slab_z,
-                                horizontal,
+                                (slab_z, horizontal),
                                 side,
                                 &mut rectangles,
                             )?;
@@ -251,13 +254,24 @@ fn support_section(model: &Model, support: SupportMemberId) -> Result<Option<&Se
 
 fn add_contact(
     model: &Model,
+    secondary: &HashMap<sepika_core::ids::SecondaryMemberId, super::SecondaryQuantity>,
     support: SupportMemberId,
     span: [f64; 2],
-    slab_z: [f64; 2],
-    horizontal: bool,
+    (slab_z, horizontal): ([f64; 2], bool),
     side: usize,
     out: &mut HashMap<SupportMemberId, [Vec<Rect>; 2]>,
 ) -> Result<(), String> {
+    let (support, span, side) = match support {
+        SupportMemberId::Secondary(id) => match secondary[&id].materialized {
+            Some((elem, reverse)) => (
+                SupportMemberId::Primary(elem),
+                if reverse { span.map(|s| 1.0 - s) } else { span },
+                if reverse { 1 - side } else { side },
+            ),
+            None => (support, span, side),
+        },
+        _ => (support, span, side),
+    };
     let (a, b) = model
         .support_member_axis(support)
         .ok_or_else(|| format!("支持材 {support:?}: 材軸の参照が不明です"))?;
@@ -352,22 +366,6 @@ fn add_contact(
             return Err(format!(
                 "支持材 {support:?}: 2節点以外の主架構梁の接触型枠は未対応です"
             ));
-        }
-    }
-    if let SupportMemberId::Secondary(id) = support {
-        if let Some(sm) = model.beams().find(|m| m.id == id) {
-            if !model.secondary_member_materialized(sm)
-                && [a, b].iter().any(|p| {
-                    !model
-                        .nodes
-                        .iter()
-                        .any(|n| sepika_core::geom::vec3::dist(n.coord, *p) <= MEMBER_AXIS_TOL_MM)
-                })
-            {
-                return Err(format!(
-                    "支持材 {support:?}: 実節点にない端点を持つ二次小梁の接触数量は未対応です"
-                ));
-            }
         }
     }
     if !horizontal {

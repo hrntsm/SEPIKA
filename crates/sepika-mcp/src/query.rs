@@ -289,6 +289,7 @@ pub fn quantity_takeoff_json(model: &Model, group_by: Option<&str>) -> serde_jso
                 json!({
                     "elem": it.elem.map(|e| e.0),
                     "slab": it.slab.map(|s| s.0),
+                    "secondary_member": it.secondary.map(|s| s.0),
                     "wall_plate": it.wall_plate.map(|i|i.0),
                     "section": it.section.map(|i|i.0),
                     "rebar_status": it.rebar_status(),

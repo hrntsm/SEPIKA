@@ -1048,6 +1048,7 @@ pub fn build_quantity_csv(model: &Model) -> String {
             .elem
             .map(|e| e.0.to_string())
             .or_else(|| it.slab.map(|s| format!("S{}", s.0)))
+            .or_else(|| it.secondary.map(|s| format!("SM{}", s.0)))
             .unwrap_or_default();
         out.push_str(&format!(
             "{},{},{},{},{},{},{},{:.3},{:.2},{:.6},{:.4},{:.1},{},{}\n",

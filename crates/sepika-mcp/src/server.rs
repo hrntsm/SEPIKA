@@ -1676,3 +1676,7 @@ mod tests {
 #[cfg(test)]
 #[path = "server_external_ids.rs"]
 mod external_id_tests;
+
+#[cfg(test)]
+#[path = "nonnodal_quantity_acceptance_tests.rs"]
+mod nonnodal_quantity_acceptance_tests;

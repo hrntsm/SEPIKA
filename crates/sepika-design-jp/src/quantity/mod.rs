@@ -28,10 +28,10 @@ mod tests;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use sepika_core::ids::{ElemId, SectionId, SlabId, WallPlateId};
+use sepika_core::ids::{ElemId, SecondaryMemberId, SectionId, SlabId, StoryId, WallPlateId};
 use sepika_core::model::{
-    ElementData, ElementKind, Model, RegionAnchor, SecondaryMember, SecondaryMemberKind, Section,
-    Slab, WallPlate, WallPlateShape,
+    ElementData, ElementKind, Model, RegionAnchor, SecondaryMember, SecondaryMemberEnds,
+    SecondaryMemberKind, Section, Slab, SupportMemberId, WallPlate, WallPlateShape,
 };
 use sepika_core::section_shape::{
     RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar, SectionShape,
@@ -55,13 +55,13 @@ pub use sepika_core::model::QuantityCfg;
 /// 部位分類。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MemberCategory {
-    /// 基礎梁（最下層レベルの水平梁）。
+    /// 基礎梁（最下層レベルで柱に取り付く大梁用途の線材）。
     FoundationGirder,
     /// 柱。
     Column,
-    /// 大梁（柱に取り付く水平梁）。
+    /// 大梁（柱に取り付く大梁用途の線材）。
     Girder,
-    /// 小梁（柱に取り付かない水平梁）。
+    /// 小梁（二次小梁、または柱に取り付かない大梁用途の線材）。
     Beam,
     /// 床（一般スラブ）。
     Slab,
@@ -210,6 +210,8 @@ impl QuantityStatus {
 pub struct MemberQuantity {
     /// 対象要素（スラブ・雑壁は None）。
     pub elem: Option<ElemId>,
+    /// 対象二次部材。実部材へ集約した明細は None。
+    pub secondary: Option<SecondaryMemberId>,
     /// 元の壁版。直接入力された要素は None。
     pub wall_plate: Option<WallPlateId>,
     /// 算定対象の断面 ID。
@@ -396,8 +398,7 @@ impl QuantityTakeoff {
 /// 2 点間距離 [mm]。算定の情報源は `sepika-core` に置く。
 use sepika_core::geom::vec3::dist as dist3;
 
-/// 鉛直材（柱）判定。判定規則の情報源は `sepika-core` に置く
-/// （仕上げ周長式・柱脚梁せい付加・通り芯の自動生成と同一規則）。
+/// 主架構線材の明示用途（柱・大梁・ブレース）。
 use sepika_core::model::FrameSectionUse;
 
 /// 平面多角形（3D 座標）の面積 [mm²]。算定の情報源は `sepika-core` に置く。
@@ -497,6 +498,200 @@ fn validate_circular_rc_posts(model: &Model) -> Result<(), String> {
     Ok(())
 }
 
+struct SecondaryQuantity {
+    materialized: Option<(ElemId, bool)>,
+    story: Option<StoryId>,
+}
+
+fn secondary_story(
+    model: &Model,
+    sm: &SecondaryMember,
+    visiting: &mut HashSet<SecondaryMemberId>,
+) -> Result<Option<StoryId>, String> {
+    if !visiting.insert(sm.id) {
+        return Err(format!("{:?}: 階帰属の支持参照が循環しています", sm.id));
+    }
+    let result = (|| {
+        let (a, b) = model.secondary_member_end_points(sm).ok_or_else(|| {
+            format!(
+                "{:?}: 端点または支持参照を解決できません（循環を含む）",
+                sm.id
+            )
+        })?;
+        let lower = usize::from(a[2] > b[2]);
+        let p = [a, b][lower];
+        let stories: HashSet<_> = model
+            .nodes
+            .iter()
+            .filter(|n| dist3(n.coord, p) <= sepika_core::geom::MEMBER_AXIS_TOL_MM)
+            .filter_map(|n| n.story)
+            .filter(|id| model.stories.get(id.index()).is_some())
+            .collect();
+        if stories.len() == 1 {
+            return Ok(stories.into_iter().next());
+        }
+        let anchor = match sm.ends {
+            SecondaryMemberEnds::Supported(anchors) => Some(anchors[lower]),
+            SecondaryMemberEnds::Cantilever { support, .. } if lower == 0 => Some(support),
+            _ => None,
+        };
+        let Some(anchor) = anchor else {
+            return Ok(None);
+        };
+        match anchor.support {
+            SupportMemberId::Primary(id) => {
+                let Some(elem) = model.element(id).filter(|e| e.nodes.len() == 2) else {
+                    return Ok(None);
+                };
+                let story = |i| {
+                    model
+                        .node(elem.nodes[i])
+                        .and_then(|n| n.story)
+                        .filter(|id| model.stories.get(id.index()).is_some())
+                };
+                Ok(story(0).filter(|id| Some(*id) == story(1)))
+            }
+            SupportMemberId::Secondary(id) => {
+                let support = model
+                    .secondary_member(id)
+                    .ok_or_else(|| format!("{:?}: 支持二次部材 {id:?} が不明です", sm.id))?;
+                secondary_story(model, support, visiting)
+            }
+        }
+    })();
+    visiting.remove(&sm.id);
+    result
+}
+
+fn resolve_secondary_quantities(
+    model: &Model,
+) -> Result<HashMap<SecondaryMemberId, SecondaryQuantity>, String> {
+    let mut resolved = HashMap::new();
+    let mut materialized_ids = HashSet::new();
+    for sm in model.beams().chain(model.posts()) {
+        let error = |reason| format!("{:?}: {reason}", sm.id);
+        let sec = sm
+            .section
+            .and_then(|id| model.sections.get(id.index()))
+            .ok_or_else(|| {
+                error(format!(
+                    "断面 {:?} の参照が不明または未設定です",
+                    sm.section
+                ))
+            })?;
+        let mat = model
+            .secondary_material(sm)
+            .ok_or_else(|| error("主材料の参照が未設定または不明です".to_string()))?;
+        let steel = if model
+            .stb_strengths
+            .sections
+            .iter()
+            .any(|input| input.section == sec.id && !input.steel.is_empty())
+        {
+            model.stb_steel_material(sec.id)
+        } else {
+            sec.steel_material
+                .and_then(|id| model.materials.get(id.index()))
+        };
+        sepika_core::model::SectionMassProperties::try_from_section(
+            sec,
+            Some(mat),
+            model.secondary_rebar_material(sm),
+            model.secondary_shear_rebar_material(sm),
+            steel,
+        )
+        .map_err(error)?;
+        if sec.shape.is_none()
+            && mat.category == sepika_core::model::MaterialCategory::Concrete
+            && [sec.width, sec.depth]
+                .iter()
+                .any(|v| !v.is_finite() || *v <= 0.0)
+        {
+            return Err(error(
+                "断面幅・せい [mm] は有限かつ正である必要があります".into(),
+            ));
+        }
+        let area = quantity_area(sec).map_err(error)?;
+        if !area.is_finite() || area <= 0.0 {
+            return Err(error("断面積は有限かつ正である必要があります".into()));
+        }
+        let (a, b) = model
+            .secondary_member_end_points(sm)
+            .ok_or_else(|| error("端点または支持参照を解決できません（循環を含む）".into()))?;
+        let length_mm = dist3(a, b);
+        if a.iter().chain(b.iter()).any(|v| !v.is_finite())
+            || !length_mm.is_finite()
+            || length_mm <= 0.0
+        {
+            return Err(error(
+                "解決端点間実長 L [mm] は有限かつ正である必要があります".into(),
+            ));
+        }
+        let equal = |p, q| dist3(p, q) <= sepika_core::geom::MEMBER_AXIS_TOL_MM;
+        let candidates: Vec<_> = model
+            .elements
+            .iter()
+            .filter_map(|e| {
+                if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
+                    return None;
+                }
+                let (p, q) = (model.node(e.nodes[0])?.coord, model.node(e.nodes[1])?.coord);
+                if equal(a, p) && equal(b, q) {
+                    Some((e, false))
+                } else if equal(a, q) && equal(b, p) {
+                    Some((e, true))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let materialized = match candidates.as_slice() {
+            [] => None,
+            [(elem, reverse)] => {
+                let expected_use = match sm.kind {
+                    SecondaryMemberKind::Beam => FrameSectionUse::Girder,
+                    SecondaryMemberKind::Post => FrameSectionUse::Column,
+                };
+                if elem.section != Some(sec.id)
+                    || sec.frame_use != Some(expected_use)
+                    || model.element_material(elem).map(|m| m.id) != Some(mat.id)
+                {
+                    return Err(error(format!(
+                        "対応実材 {:?} の種別・用途・断面・解決材料が一致しません",
+                        elem.id
+                    )));
+                }
+                if !materialized_ids.insert(elem.id) {
+                    return Err(error(format!(
+                        "対応実材 {:?} を複数の二次部材が参照しています",
+                        elem.id
+                    )));
+                }
+                Some((elem.id, *reverse))
+            }
+            _ => {
+                return Err(error(format!(
+                    "対応実材が複数あります: {:?}",
+                    candidates.iter().map(|(e, _)| e.id).collect::<Vec<_>>()
+                )))
+            }
+        };
+        if resolved
+            .insert(
+                sm.id,
+                SecondaryQuantity {
+                    materialized,
+                    story: secondary_story(model, sm, &mut HashSet::new())?,
+                },
+            )
+            .is_some()
+        {
+            return Err(error("二次部材IDが重複しています".into()));
+        }
+    }
+    Ok(resolved)
+}
+
 /// 二次 CFT、必要な材料領域・床接触が未知、不正または適用対象外の場合は理由付きエラー。
 /// 壁版は内部で展開して集計する。未参照断面の未入力は許容する。
 /// 円形RC間柱の直径・解決実長 `[mm]` が有限かつ正でない場合は部材 ID と原因を返す。
@@ -510,9 +705,10 @@ pub fn try_compute_quantity_takeoff(
     model
         .validate_secondary_section_usage()
         .map_err(|e| e.to_string())?;
-    model.validate_lip_channels().map_err(|e| e.to_string())?;
     validate_circular_rc_posts(model)?;
-    let contacts = contact::Contacts::from_model(model)?;
+    let secondary = resolve_secondary_quantities(model)?;
+    model.validate_lip_channels().map_err(|e| e.to_string())?;
+    let contacts = contact::Contacts::from_model(model, &secondary)?;
     let ids: HashSet<_> = model
         .elements
         .iter()
@@ -541,16 +737,40 @@ pub fn try_compute_quantity_takeoff(
                 .try_cft_core_props()?;
         }
     }
-    Ok(compute_quantity_takeoff_validated(model, cfg, &contacts))
+    let mut out = compute_quantity_takeoff_validated(model, cfg, &contacts, &secondary);
+    for sm in model.beams().chain(model.posts()) {
+        let item = out
+            .items
+            .iter_mut()
+            .find(|item| match secondary[&sm.id].materialized {
+                Some((elem, _)) => item.elem == Some(elem),
+                None => item.secondary == Some(sm.id),
+            })
+            .ok_or_else(|| format!("{:?}: 数量明細を解決できません", sm.id))?;
+        item.story = secondary[&sm.id]
+            .story
+            .map(|id| model.stories[id.index()].name.clone())
+            .unwrap_or_else(|| "-".into());
+        if !item.concrete_m3.is_finite()
+            || !item.formwork_m2.is_finite()
+            || !item.steel_weight_t().is_finite()
+            || !item.rebar_weight_t().is_finite()
+            || !item.rebar_joints.is_finite()
+        {
+            return Err(format!("{:?}: 数量が有限範囲を超えています", sm.id));
+        }
+    }
+    Ok(out)
 }
 
 /// モデル走査用の前処理データ。
 struct Ctx<'a> {
     model: &'a Model,
     cfg: &'a QuantityCfg,
-    /// 鉛直材（柱）が取り付く節点集合（大梁/小梁の分類用）。
+    /// 柱用途の線材が取り付く節点集合（大梁/小梁の分類用）。
     column_nodes: HashSet<usize>,
     contacts: &'a contact::Contacts,
+    secondary: &'a HashMap<SecondaryMemberId, SecondaryQuantity>,
     /// 節点 index → その節点に取り付く水平梁（elem index, 節点から見た
     /// 梁の伸びる向きの単位ベクトル xy）。主筋の外端・内端判定
     /// （梁の連続性）に用いる。
@@ -602,6 +822,7 @@ fn compute_quantity_takeoff_validated(
     model: &Model,
     cfg: &QuantityCfg,
     contacts: &contact::Contacts,
+    secondary: &HashMap<SecondaryMemberId, SecondaryQuantity>,
 ) -> QuantityTakeoff {
     let expanded_storage;
     let model: &Model = if sepika_load::wall_expand::model_has_wall_plates_to_expand(model) {
@@ -657,6 +878,7 @@ fn compute_quantity_takeoff_validated(
         cfg,
         column_nodes,
         contacts,
+        secondary,
         beams_at_node,
         min_z,
     };
@@ -731,6 +953,12 @@ fn compute_quantity_takeoff_validated(
         }
     }
     out.notes = build_notes(model, cfg);
+    for sm in model.beams().chain(model.posts()) {
+        if secondary[&sm.id].story.is_none() {
+            out.notes
+                .push(format!("{:?}: 階帰属未確定（数量は階 - に計上）", sm.id));
+        }
+    }
     out
 }
 
@@ -746,7 +974,7 @@ fn build_notes(model: &Model, cfg: &QuantityCfg) -> Vec<String> {
         "基礎フーチングはモデルに定義がないため計上しない。".to_string(),
         "梁端ハンチは部材付帯情報（ハンチ長・せい増分・幅増分）から平均断面×ハンチ長で加算する（未入力の部材はハンチなし）。".to_string(),
         "鉄筋継手は個所数（圧接個所数）として集計する（梁 0.5 個所/本＋5m 毎 0.5、柱 1 個所/本＋7m 毎 1）。".to_string(),
-        "二次部材の小梁・間柱も数量に含める。同じ両端を持つ実部材の小梁・間柱は線材側のみ数え、二次部材側では重複計上しない。".to_string(),
+        "二次部材の小梁・間柱は解決端点間の実長で数量に含める。完全端点対・用途・断面・解決材料が一致する一意の実材がある場合は線材側へ集約する。".to_string(),
         "鉄骨継手（部材付帯情報の継手位置）は位置・種別の保持のみで、プレート・ボルト重量は計上しない。".to_string(),
     ];
     if !model.slabs.is_empty() {
@@ -761,29 +989,26 @@ fn build_notes(model: &Model, cfg: &QuantityCfg) -> Vec<String> {
 /// 解析要素ではない二次部材（小梁・間柱）の数量。実部材化済みの二次部材は線材側で数える。
 fn secondary_member_quantity(ctx: &Ctx, sm: &SecondaryMember) -> Option<MemberQuantity> {
     let model = ctx.model;
-    if model.secondary_member_materialized(sm) {
+    let resolved = &ctx.secondary[&sm.id];
+    if resolved.materialized.is_some() {
         return None;
     }
     let sec = model.sections.get(sm.section?.index())?;
     let mat = model.secondary_material(sm)?;
     let (ci, cj) = model.secondary_member_end_points(sm)?;
-    let tol = sepika_core::geom::MEMBER_AXIS_TOL_MM;
-    let find = |p: [f64; 3]| model.nodes.iter().position(|n| dist3(n.coord, p) <= tol);
-    let (Some(ni), Some(nj)) = (find(ci), find(cj)) else {
-        return None;
-    };
     let len = dist3(ci, cj);
-    if len <= 0.0 {
-        return None;
-    }
     let structure = sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category));
     let category = if sm.kind == SecondaryMemberKind::Post {
         MemberCategory::Column
     } else {
         MemberCategory::Beam
     };
-    let story = ctx.story_name(if ci[2] <= cj[2] { ni } else { nj });
+    let story = resolved
+        .story
+        .map(|id| model.stories[id.index()].name.clone())
+        .unwrap_or_else(|| "-".into());
     let mut item = MemberQuantity {
+        secondary: Some(sm.id),
         elem: None,
         slab: None,
         wall_plate: None,
@@ -982,6 +1207,7 @@ fn column_quantity(
     let story = ctx.story_name(lower);
 
     let mut item = MemberQuantity {
+        secondary: None,
         elem: Some(elem.id),
         slab: None,
         wall_plate: None,
@@ -1100,6 +1326,7 @@ fn beam_quantity(
     };
 
     let mut item = MemberQuantity {
+        secondary: None,
         elem: Some(elem.id),
         slab: None,
         wall_plate: None,
@@ -1264,6 +1491,7 @@ fn brace_quantity(ctx: &Ctx, elem: &ElementData) -> Option<MemberQuantity> {
     let lower = if ci[2] <= cj[2] { ni } else { nj };
 
     let mut item = MemberQuantity {
+        secondary: None,
         elem: Some(elem.id),
         slab: None,
         wall_plate: None,
@@ -1402,6 +1630,7 @@ fn wall_quantity(ctx: &Ctx, elem: &ElementData) -> Option<MemberQuantity> {
         .unwrap_or(elem.nodes[0].index());
 
     let mut item = MemberQuantity {
+        secondary: None,
         elem: Some(elem.id),
         slab: None,
         wall_plate: None,
@@ -1548,6 +1777,7 @@ fn wall_plate_quantity(ctx: &Ctx, plate: &WallPlate) -> Option<MemberQuantity> {
         (RebarIssueKind::Unsupported, "壁版の鉄筋積算は未実装")
     };
     Some(MemberQuantity {
+        secondary: None,
         elem: None,
         slab: None,
         wall_plate: Some(plate.id),
@@ -1596,6 +1826,7 @@ fn slab_quantity(ctx: &Ctx, slab: &Slab) -> Option<MemberQuantity> {
     let vol_m3 = vol * 1e-9;
 
     let mut item = MemberQuantity {
+        secondary: None,
         elem: None,
         slab: Some(slab.id),
         wall_plate: None,
