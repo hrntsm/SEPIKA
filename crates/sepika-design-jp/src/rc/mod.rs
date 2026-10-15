@@ -142,6 +142,30 @@ impl DesignCheck for RcDesign {
             };
         }
 
+        if matches!(shape, SectionShape::RcBeamRect { .. })
+            && ctx.seismic_qd.as_ref().is_some_and(|qd| {
+                !qd.long_at
+                    .iter()
+                    .find(|(p, _)| (p - forces.pos).abs() < 1e-6)
+                    .is_some_and(|(p, f)| p.is_finite() && f.iter().all(|v| v.is_finite()))
+            })
+        {
+            return CheckOutcome::Skipped {
+                reason: "設計用せん断力に必要な重力参照内力が不足しています".into(),
+            };
+        }
+
+        if matches!(shape, SectionShape::RcBeamRect { .. })
+            && ctx.seismic_qd.as_ref().is_some_and(|qd| {
+                qd.method != crate::QdMethod::Qd2
+                    && !qd.q_simple.is_some_and(|q| q.is_finite() && q >= 0.0)
+            })
+        {
+            return CheckOutcome::Skipped {
+                reason: "QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません".into(),
+            };
+        }
+
         let cr = if matches!(shape, SectionShape::RcBeamRect { .. }) {
             beam::beam_check(forces, sec, mat, ctx, shape, fc_raw)
         } else if matches!(

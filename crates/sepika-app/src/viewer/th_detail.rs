@@ -739,6 +739,33 @@ fn draw_peak_check(
                 method: app.core.analysis_cfg.qd_method,
             })
     });
+    if wire_qd
+        && matches!(
+            sec.shape,
+            Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
+        )
+        && sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category))
+            == sepika_core::structure_kind::StructureKind::Rc
+        && seismic_qd.as_ref().is_none_or(|qd| {
+            qd.long_at.is_empty()
+                || !qd
+                    .long_at
+                    .iter()
+                    .all(|(p, f)| p.is_finite() && f.iter().all(|v| v.is_finite()))
+                || peak
+                    .at
+                    .iter()
+                    .any(|(p, _)| !qd.long_at.iter().any(|(q, _)| (p - q).abs() < 1e-6))
+        })
+    {
+        let outcome = sepika_design_jp::CheckOutcome::Skipped {
+            reason: "設計用せん断力に必要な重力参照内力が不足しています".into(),
+        };
+        for (pos, _) in &peak.at {
+            draw_outcome_row(ui, *pos, &outcome);
+        }
+        return;
+    }
     let column_sum_my = if kind == MemberKind::Column && seismic_qd.is_some() {
         let n_at = |mf: &MemberForces, end: usize| {
             let target = if end == 0 { 0.0 } else { 1.0 };
@@ -852,6 +879,10 @@ fn draw_outcome_row(ui: &mut egui::Ui, pos: f64, outcome: &CheckOutcome) {
         }
     });
 }
+#[cfg(test)]
+#[path = "signed_q0_acceptance_tests.rs"]
+mod signed_q0_acceptance_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
