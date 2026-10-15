@@ -203,19 +203,57 @@ pub fn rc_wall_shear_brittle(horizontal_force: f64, qu: f64) -> bool {
 }
 
 /// RC 耐力壁の平均せん断応力度比 τu/Fc。
-/// 有効断面または fc が 0 以下のときは None。
+/// Q `[N]` は符号付き、壁厚・側柱心間距離は `[mm]`、Fc は `[N/mm²]`。
+/// Q の非有限値、寸法・Fc の非正値／非有限値、算定結果の非有限値は None。
 pub fn rc_wall_tau_over_fc(
     horizontal_force: f64,
     thickness: f64,
-    wall_len: f64,
-    r2: f64,
+    column_center_distance: f64,
     fc: f64,
 ) -> Option<f64> {
-    let area = thickness * wall_len * r2;
-    if area <= 0.0 || fc <= 0.0 {
+    if !horizontal_force.is_finite()
+        || [thickness, column_center_distance, fc]
+            .iter()
+            .any(|v| !v.is_finite() || *v <= 0.0)
+    {
         return None;
     }
-    Some((horizontal_force / area) / fc)
+    let denominator = thickness * column_center_distance * fc;
+    let ratio = horizontal_force.abs() / denominator;
+    (denominator.is_finite() && denominator > 0.0 && ratio.is_finite()).then_some(ratio)
+}
+
+/// 側柱断面積 `[mm²]`・最小径 `[mm]` が内法寸法・壁厚 `[mm]` に対して適格かを返す。
+/// 寸法の非正値／非有限値、閾値の非有限値は None。閾値との等号は適格。
+pub fn rc_wall_side_column_eligible(
+    clear_length_mm: f64,
+    clear_height_mm: f64,
+    thickness_mm: f64,
+    column_area_mm2: f64,
+    column_min_diameter_mm: f64,
+) -> Option<bool> {
+    if [
+        clear_length_mm,
+        clear_height_mm,
+        thickness_mm,
+        column_area_mm2,
+        column_min_diameter_mm,
+    ]
+    .iter()
+    .any(|v| !v.is_finite() || *v <= 0.0)
+    {
+        return None;
+    }
+    let st = clear_length_mm.min(clear_height_mm) * thickness_mm;
+    let twice_thickness_mm = 2.0 * thickness_mm;
+    if !st.is_finite() || st <= 0.0 || !twice_thickness_mm.is_finite() {
+        return None;
+    }
+    Some(
+        column_area_mm2 >= st / 2.0
+            && column_min_diameter_mm >= (st / 3.0).sqrt()
+            && column_min_diameter_mm >= twice_thickness_mm,
+    )
 }
 
 /// RC 耐力壁の種別（告示「耐力壁の種別」表）。
@@ -364,15 +402,83 @@ mod tests {
     }
 
     #[test]
-    fn test_rc_wall_tau_over_fc_with_r2() {
-        let h = 1_000_000.0;
-        let t = 150.0;
-        let lw = 4000.0;
-        let fc = 24.0;
-        let tau_no = rc_wall_tau_over_fc(h, t, lw, 1.0, fc).unwrap();
-        let tau_r2 = rc_wall_tau_over_fc(h, t, lw, 0.5, fc).unwrap();
-        assert!((tau_r2 - 2.0 * tau_no).abs() < 1e-9);
-        assert!(rc_wall_tau_over_fc(h, t, lw, 0.0, fc).is_none());
+    fn rc_wall_independent_stress_and_normal_table_boundaries() {
+        assert_eq!(
+            rc_wall_tau_over_fc(3e6, 200.0, 3000.0, 24.0),
+            Some(5.0 / 24.0)
+        );
+        for q in [-1e6, 1e6] {
+            assert!(
+                (rc_wall_tau_over_fc(q, 200.0, 3000.0, 24.0).unwrap() - 1.0 / 14.4).abs() < 1e-15
+            );
+        }
+        for (q, rank) in [
+            (2_880_000.0 - 1.0, MemberRank::FA),
+            (2_880_000.0, MemberRank::FA),
+            (2_880_000.0 + 1.0, MemberRank::FB),
+            (3_600_000.0 - 1.0, MemberRank::FB),
+            (3_600_000.0, MemberRank::FB),
+            (3_600_000.0 + 1.0, MemberRank::FC),
+            (3e6, MemberRank::FB),
+        ] {
+            assert_eq!(
+                rc_wall_type(
+                    rc_wall_tau_over_fc(q, 200.0, 3000.0, 24.0).unwrap(),
+                    false,
+                    false
+                ),
+                rank
+            );
+        }
+        assert_eq!(rc_wall_tau_over_fc(0.0, 200.0, 3000.0, 24.0), Some(0.0));
+        for value in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(rc_wall_tau_over_fc(1e6, value, 3000.0, 24.0).is_none());
+            assert!(rc_wall_tau_over_fc(1e6, 200.0, value, 24.0).is_none());
+            assert!(rc_wall_tau_over_fc(1e6, 200.0, 3000.0, value).is_none());
+        }
+        for q in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(rc_wall_tau_over_fc(q, 200.0, 3000.0, 24.0).is_none());
+        }
+    }
+
+    #[test]
+    fn rc_wall_side_column_dimension_boundaries_are_independent() {
+        for (height, eligible) in [
+            (1500.0, true),
+            (1600.0 - 1.0, true),
+            (1600.0, true),
+            (1600.0 + 1.0, false),
+            (2400.0, false),
+        ] {
+            assert_eq!(
+                rc_wall_side_column_eligible(2600.0, height, 200.0, 160000.0, 400.0),
+                Some(eligible)
+            );
+        }
+        // st=300000 では最小径条件より2t条件が支配する。
+        for (diameter, eligible) in [(399.0, false), (400.0, true), (401.0, true)] {
+            assert_eq!(
+                rc_wall_side_column_eligible(2600.0, 1500.0, 200.0, 200000.0, diameter),
+                Some(eligible)
+            );
+        }
+        // st=480000、sqrt(st/3)=400 > 2t=200。面積条件は非支配。
+        for (diameter, eligible) in [(399.0, false), (400.0, true), (401.0, true)] {
+            assert_eq!(
+                rc_wall_side_column_eligible(4800.0, 4800.0, 100.0, 300000.0, diameter),
+                Some(eligible)
+            );
+        }
+        for value in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for index in 0..5 {
+                let mut input = [2600.0, 1500.0, 200.0, 160000.0, 400.0];
+                input[index] = value;
+                assert!(rc_wall_side_column_eligible(
+                    input[0], input[1], input[2], input[3], input[4]
+                )
+                .is_none());
+            }
+        }
     }
 
     #[test]

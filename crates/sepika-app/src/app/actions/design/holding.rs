@@ -1,5 +1,196 @@
 use super::super::*;
 
+#[derive(Debug)]
+struct RcWallDsGeometry {
+    plate: sepika_core::ids::WallPlateId,
+    clear_length_mm: f64,
+    clear_height_mm: f64,
+    columns: [(ElemId, f64, f64); 2],
+}
+
+fn rc_wall_ds_geometry(
+    wall: &sepika_core::model::ElementData,
+    model: &sepika_core::model::Model,
+    plate_id: Option<sepika_core::ids::WallPlateId>,
+) -> Result<RcWallDsGeometry, String> {
+    use sepika_core::model::{MaterialCategory, SupportMemberId};
+    use sepika_core::section_shape::SectionShape;
+    let plate_id = plate_id.ok_or("壁版の対応が不明です")?;
+    let plate = model.wall_plate(plate_id).ok_or("壁版が未解決です")?;
+    if !plate.openings.is_empty() || plate.opening_area != 0.0 {
+        return Err(format!(
+            "壁版 ID {}: 開口付きのDs判定は未対応です",
+            plate_id.0
+        ));
+    }
+    let parent = model
+        .wall_regions
+        .iter()
+        .find(|r| r.wall_plate_ids.contains(&plate_id))
+        .ok_or("壁領域が未解決です")?;
+    if parent.wall_plate_ids.as_slice() != [plate_id] || !model.wall_plate_covers_region(plate) {
+        return Err(format!(
+            "壁版 ID {}: 単独壁と壁単体Qの負担範囲を確認できません",
+            plate_id.0
+        ));
+    }
+    let assignment = model
+        .wall_plate_assignment_region(plate_id)
+        .ok_or("壁版割当領域が未解決です")?;
+    let g = sepika_core::model::wall_element_geometry(wall, model).ok_or("壁幾何が不正です")?;
+    let points =
+        [g.bottom[0], g.bottom[1], g.top[1], g.top[0]].map(|id| model.nodes[id.index()].coord);
+    if points.iter().flatten().any(|v| !v.is_finite()) {
+        return Err("壁の座標が非有限です".into());
+    }
+    if points[0][2] != points[1][2]
+        || points[2][2] != points[3][2]
+        || !(0..2)
+            .all(|axis| points[0][axis] == points[3][axis] && points[1][axis] == points[2][axis])
+    {
+        return Err("矩形・同一鉛直面以外の壁は未対応です".into());
+    }
+    let nodes = [g.bottom[0], g.bottom[1], g.top[1], g.top[0]];
+    let mut supports = Vec::new();
+    for i in 0..4 {
+        let candidates: Vec<_> = assignment
+            .boundary
+            .iter()
+            .filter_map(|edge| {
+                let SupportMemberId::Primary(id) = edge.support else {
+                    return None;
+                };
+                let e = model.element(id)?;
+                (e.nodes.len() == 2
+                    && e.nodes.contains(&nodes[i])
+                    && e.nodes.contains(&nodes[(i + 1) % 4]))
+                .then_some(e)
+            })
+            .collect();
+        if candidates.len() != 1 {
+            return Err("周辺の主架構支持材を一意に解決できません".into());
+        }
+        supports.push(candidates[0]);
+    }
+    let mut columns = [(ElemId(0), 0.0, 0.0); 2];
+    for (side, edge_index) in [3, 1].into_iter().enumerate() {
+        let column = supports[edge_index];
+        if sepika_design_jp::MemberKind::of_element(column, model)
+            != sepika_design_jp::MemberKind::Column
+        {
+            return Err(format!("側柱 ID {}: 柱用途を確認できません", column.id.0));
+        }
+        for other in model
+            .wall_assignment_regions
+            .regions
+            .iter()
+            .filter(|r| r.id != assignment.id)
+        {
+            let Some(other_plate) = other.assignment.plate() else {
+                continue;
+            };
+            if parent.wall_plate_ids.contains(&other_plate) {
+                continue;
+            }
+            if other
+                .boundary
+                .iter()
+                .any(|e| e.support == SupportMemberId::Primary(column.id))
+            {
+                return Err(format!(
+                    "壁版 ID {}・側柱 ID {}: 壁版 ID {}と共有する側柱は未対応です",
+                    plate_id.0, column.id.0, other_plate.0
+                ));
+            }
+        }
+        let section = model
+            .element_section(column)
+            .ok_or("側柱の断面が未設定です")?;
+        let material = model
+            .element_material(column)
+            .ok_or("側柱の材料が未設定です")?;
+        if material.category != MaterialCategory::Concrete
+            || material.fc.filter(|v| v.is_finite() && *v > 0.0).is_none()
+        {
+            return Err(format!("側柱 ID {}: RC材料またはFcが不正です", column.id.0));
+        }
+        let (area, diameter) = match section.shape.as_ref() {
+            Some(SectionShape::RcColumnRect { b, d, .. })
+                if [*b, *d].iter().all(|v| v.is_finite() && *v > 0.0) =>
+            {
+                (b * d, b.min(*d))
+            }
+            Some(SectionShape::RcColumnCircle { d, .. }) if d.is_finite() && *d > 0.0 => {
+                (std::f64::consts::PI * d * d / 4.0, *d)
+            }
+            _ => {
+                return Err(format!(
+                    "側柱 ID {}: RC柱の実断面寸法が不明または未対応です",
+                    column.id.0
+                ))
+            }
+        };
+        columns[side] = (column.id, area, diameter);
+    }
+    let mut faces = [0.0; 4];
+    for i in 0..4 {
+        let section = model
+            .element_section(supports[i])
+            .ok_or("周辺材断面が未設定です")?;
+        if ![section.width, section.depth]
+            .iter()
+            .all(|v| v.is_finite() && *v > 0.0)
+        {
+            return Err(format!(
+                "周辺材 ID {}: 実断面寸法が不正です",
+                supports[i].id.0
+            ));
+        }
+        let material = model
+            .element_material(supports[i])
+            .ok_or("周辺材材料が未設定です")?;
+        if material.category != MaterialCategory::Concrete
+            || material.fc.filter(|v| v.is_finite() && *v > 0.0).is_none()
+        {
+            return Err(format!(
+                "周辺材 ID {}: RC材料またはFcが不正です",
+                supports[i].id.0
+            ));
+        }
+        let direction = match i {
+            0 => [0.0, 0.0, 1.0],
+            1 => g.ex_bottom.map(|v| -v),
+            2 => [0.0, 0.0, -1.0],
+            _ => g.ex_bottom,
+        };
+        faces[i] = sepika_core::face_distance::wall_support_face(
+            model,
+            SupportMemberId::Primary(supports[i].id),
+            direction,
+        )?;
+        if !faces[i].is_finite() || faces[i] <= 0.0 {
+            return Err(format!(
+                "周辺材 ID {}: 実フェース距離が不正です",
+                supports[i].id.0
+            ));
+        }
+    }
+    let clear_length_mm = g.lw - faces[1] - faces[3];
+    let clear_height_mm = points[3][2] - points[0][2] - faces[0] - faces[2];
+    if ![clear_length_mm, clear_height_mm]
+        .iter()
+        .all(|v| v.is_finite() && *v > 0.0)
+    {
+        return Err("壁板の内法寸法が非正または非有限です".into());
+    }
+    Ok(RcWallDsGeometry {
+        plate: plate_id,
+        clear_length_mm,
+        clear_height_mm,
+        columns,
+    })
+}
+
 impl App {
     /// 保有水平耐力の層別判定を行う。前提データが不足していれば Err(案内文)。
     ///
@@ -33,6 +224,7 @@ impl App {
         self.core.scoped.ds_beta_u_by_story.clear();
         self.core.scoped.ds_beta_u_unavailable = false;
         self.core.scoped.ds_rank_fallback_stories.clear();
+        self.core.scoped.ds_wall_details.clear();
         self.apply_rigid_zones_for_analysis();
         for elem in &self.core.model.elements {
             if !matches!(
@@ -316,13 +508,16 @@ impl App {
             let mut per_story: Vec<Vec<MemberRank>> = vec![Vec::new(); n_stories];
             let mut computed: Vec<(ElemId, MemberRank)> = Vec::new();
             let expanded_storage;
+            let wall_index;
             let model: &sepika_core::model::Model =
                 if sepika_load::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
-                    let (expanded, _wall_index, _wall_report) =
+                    let (expanded, index, _wall_report) =
                         sepika_load::wall_expand::expand_wall_elements(&self.core.model);
+                    wall_index = index;
                     expanded_storage = expanded;
                     &expanded_storage
                 } else {
+                    wall_index = Default::default();
                     &self.core.model
                 };
             for elem in &model.elements {
@@ -342,9 +537,15 @@ impl App {
                     continue;
                 }
                 let Some(sec) = elem.section.and_then(|sid| model.sections.get(sid.index())) else {
+                    if matches!(elem.kind, sepika_core::model::ElementKind::Wall) {
+                        return Err(format!("壁要素 {:?}: 断面が未設定です", elem.id));
+                    }
                     continue;
                 };
                 let Some(mat) = model.element_material(elem) else {
+                    if matches!(elem.kind, sepika_core::model::ElementKind::Wall) {
+                        return Err(format!("壁要素 {:?}: 材料が未設定です", elem.id));
+                    }
                     if elem
                         .section
                         .and_then(|sid| model.sections.get(sid.index()))
@@ -495,6 +696,9 @@ impl App {
                         let shear_failure = wall.qw_n.abs() >= 0.99 * qu;
                         sepika_design_jp::secondary::src_rank::src_wall_type(shear_failure)
                     } else {
+                        if mat.category != sepika_core::model::MaterialCategory::Concrete {
+                            return Err(format!("壁要素 {:?}: RC材料を確認できません", elem.id));
+                        }
                         let fc = mat
                             .fc
                             .filter(|v| v.is_finite() && *v > 0.0)
@@ -507,13 +711,11 @@ impl App {
                         let wgeom =
                             sepika_element::wall::wall_element::wall_element_geometry(elem, model)
                                 .ok_or_else(|| format!("壁要素 {:?}: 壁幾何が不正です", elem.id))?;
-                        let wall_len = wgeom.lw;
-                        let r2 =
-                            sepika_element::wall::wall_element::WallElement::opening_strength_reduction(
-                                elem, model,
-                            );
+                        let geometry =
+                            rc_wall_ds_geometry(elem, model, wall_index.plate_of(elem.id))
+                                .map_err(|reason| format!("壁要素 {:?}: {reason}", elem.id))?;
                         let Some(tau_over_fc) =
-                            rc_wall_tau_over_fc(wall.qw_n.abs(), *thickness, wall_len, r2, fc)
+                            rc_wall_tau_over_fc(wall.qw_n, *thickness, wgeom.lw, fc)
                         else {
                             return Err(format!("壁要素 {:?}: τu/Fc の入力が不正です", elem.id));
                         };
@@ -536,7 +738,31 @@ impl App {
                             ));
                         }
                         let brittle = rc_wall_shear_brittle(wall.qw_n.abs(), qu);
-                        let wall_structure = self.core.wall_structure;
+                        let eligible = geometry.columns.map(|(_, area, diameter)| {
+                            sepika_design_jp::secondary::ds_group::rc_wall_side_column_eligible(
+                                geometry.clear_length_mm,
+                                geometry.clear_height_mm,
+                                *thickness,
+                                area,
+                                diameter,
+                            )
+                            .ok_or_else(|| {
+                                format!("壁要素 {:?}: 側柱寸法条件の入力が不正です", elem.id)
+                            })
+                        });
+                        let [left, right] = eligible;
+                        let eligible = [left?, right?];
+                        let wall_structure = self.core.wall_structure || eligible.contains(&false);
+                        self.core.scoped.ds_wall_details.push(format!(
+                            "壁 ID {} / 壁版 ID {}: Q_Ds={:.3} N, t={:.3} mm, l_cc={:.3} mm, Fc={:.3} N/mm², τu/Fc={:.9}; 内法 {:.3}×{:.3} mm; 側柱 ID {} (Ac={:.3} mm², 最小径={:.3} mm): {} / ID {} (Ac={:.3} mm², 最小径={:.3} mm): {}; 適用表: {}。2015年版引用（日本建築防災協会 2024年3月報告書 本文44頁）",
+                            elem.id.0, geometry.plate.0, wall.qw_n, thickness, wgeom.lw, fc, tau_over_fc,
+                            geometry.clear_length_mm, geometry.clear_height_mm,
+                            geometry.columns[0].0.0, geometry.columns[0].1, geometry.columns[0].2,
+                            if eligible[0] { "適格" } else { "寸法不足" },
+                            geometry.columns[1].0.0, geometry.columns[1].1, geometry.columns[1].2,
+                            if eligible[1] { "適格" } else { "寸法不足" },
+                            if wall_structure { "壁式構造用" } else { "通常" },
+                        ));
                         rc_wall_type(tau_over_fc, wall_structure, brittle)
                     }
                 } else if let Some(SectionShape::RcBeamRect { b, d, rebar }) = sec.shape.as_ref() {
@@ -1062,6 +1288,271 @@ mod tests {
     use sepika_core::section_shape::{BeamStirrup, RcBeamRebar};
     use sepika_design_jp::secondary::holding_capacity::MemberRank;
     use sepika_design_jp::secondary::member_rank::worst_rank;
+
+    fn single_wall_619_model(clear_height_mm: f64) -> sepika_core::model::Model {
+        use sepika_core::section_shape::SectionShape;
+        let mut model = crate::app::rc_wall617_tests::fixture::input_model();
+        for node in &mut model.nodes {
+            if node.coord[0] == 4000.0 {
+                node.coord[0] = 3000.0;
+            }
+            if node.coord[2] == 3000.0 {
+                node.coord[2] = clear_height_mm + 400.0;
+            }
+        }
+        model.stories[1].elevation = clear_height_mm + 400.0;
+        let column_rebar = match model.sections[0].shape.clone().unwrap() {
+            SectionShape::RcColumnRect { rebar, .. } => rebar,
+            _ => unreachable!(),
+        };
+        let shapes = [
+            SectionShape::RcColumnRect {
+                b: 400.0,
+                d: 400.0,
+                rebar: column_rebar,
+            },
+            SectionShape::RcBeamRect {
+                b: 400.0,
+                d: 400.0,
+                rebar: RcBeamRebar {
+                    main_dia: 22.0,
+                    top: vec![4],
+                    bottom: vec![4],
+                    cover: 40.0,
+                    stirrup: BeamStirrup {
+                        dia: 10.0,
+                        pitch: 100.0,
+                        legs: 2,
+                    },
+                },
+            },
+            SectionShape::RcWall {
+                thickness: 200.0,
+                ps: 0.002,
+                pwh_ratio: Some(0.004),
+                pwv_ratio: Some(0.002),
+            },
+        ];
+        for (section, shape) in model.sections.iter_mut().zip(shapes) {
+            let old = section.clone();
+            *section = shape.to_section(old.id, old.name);
+            section.frame_use = old.frame_use;
+            section.material = old.material;
+            section.rebar_material = old.rebar_material;
+            section.shear_rebar_material = old.shear_rebar_material;
+        }
+        model
+    }
+
+    fn wall_619_geometry(model: &sepika_core::model::Model) -> Result<RcWallDsGeometry, String> {
+        let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(model);
+        let id = index.generated_elem_ids().next().unwrap();
+        rc_wall_ds_geometry(expanded.element(id).unwrap(), &expanded, index.plate_of(id))
+    }
+
+    #[test]
+    fn rc_wall_619_real_support_faces_and_side_columns_select_table_without_changing_stress() {
+        use sepika_design_jp::secondary::ds_group::{
+            rc_wall_side_column_eligible, rc_wall_tau_over_fc, rc_wall_type,
+        };
+        for (height, eligible, rank) in [
+            (1500.0, true, MemberRank::FB),
+            (1600.0, true, MemberRank::FB),
+            (2400.0, false, MemberRank::FD),
+        ] {
+            let model = single_wall_619_model(height);
+            let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+            let id = index.generated_elem_ids().next().unwrap();
+            let wall = expanded.element(id).unwrap();
+            let center = sepika_core::model::wall_element_geometry(wall, &expanded)
+                .unwrap()
+                .lw;
+            let geometry = rc_wall_ds_geometry(wall, &expanded, index.plate_of(id)).unwrap();
+            assert_eq!(center, 3000.0);
+            assert_eq!(
+                (geometry.clear_length_mm, geometry.clear_height_mm),
+                (2600.0, height)
+            );
+            assert_eq!(
+                geometry.columns,
+                [(ElemId(0), 160000.0, 400.0), (ElemId(1), 160000.0, 400.0)]
+            );
+            let eligibility = geometry.columns.map(|(_, area, diameter)| {
+                rc_wall_side_column_eligible(2600.0, height, 200.0, area, diameter).unwrap()
+            });
+            assert_eq!(eligibility, [eligible; 2]);
+            let ratio = rc_wall_tau_over_fc(3e6, 200.0, center, 24.0).unwrap();
+            assert_eq!(ratio, 5.0 / 24.0);
+            assert_eq!(
+                rc_wall_type(ratio, eligibility.contains(&false), false),
+                rank
+            );
+        }
+        let mut model = single_wall_619_model(1500.0);
+        let mut small = model.sections[0].clone();
+        small.id = sepika_core::ids::SectionId(3);
+        small.shape = Some(sepika_core::section_shape::SectionShape::RcColumnRect {
+            b: 390.0,
+            d: 400.0,
+            rebar: match small.shape.unwrap() {
+                sepika_core::section_shape::SectionShape::RcColumnRect { rebar, .. } => rebar,
+                _ => unreachable!(),
+            },
+        });
+        small.width = 390.0;
+        model.sections.push(small);
+        model.elements[1].section = Some(sepika_core::ids::SectionId(3));
+        let geometry = wall_619_geometry(&model).unwrap();
+        let eligibility = geometry.columns.map(|(_, area, diameter)| {
+            rc_wall_side_column_eligible(
+                geometry.clear_length_mm,
+                geometry.clear_height_mm,
+                200.0,
+                area,
+                diameter,
+            )
+            .unwrap()
+        });
+        assert_eq!(eligibility, [true, false]);
+        assert_eq!(
+            rc_wall_type(5.0 / 24.0, eligibility.contains(&false), false),
+            MemberRank::FD
+        );
+    }
+
+    #[test]
+    fn rc_wall_619_rejects_unknown_opening_shared_and_invalid_geometry_with_reason() {
+        let mut model = single_wall_619_model(1500.0);
+        let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        let id = index.generated_elem_ids().next().unwrap();
+        assert!(
+            rc_wall_ds_geometry(expanded.element(id).unwrap(), &expanded, None)
+                .unwrap_err()
+                .contains("壁版の対応が不明")
+        );
+        model.wall_plates[0].opening_area = 1.0;
+        assert!(wall_619_geometry(&model)
+            .unwrap_err()
+            .contains("壁版 ID 0: 開口付き"));
+        model.wall_plates[0].opening_area = 0.0;
+        model.sections[0].width = f64::NAN;
+        assert!(wall_619_geometry(&model).unwrap_err().contains("不正"));
+        let mut model = single_wall_619_model(1500.0);
+        model.nodes[3].coord[1] = 1.0;
+        assert!(wall_619_geometry(&model)
+            .unwrap_err()
+            .contains("同一鉛直面"));
+        for endpoint in [[6000.0, 0.0], [3000.0, 3000.0]] {
+            let mut model = single_wall_619_model(1500.0);
+            for (id, z) in [(4, 0.0), (5, 1900.0)] {
+                let mut node = model.nodes[if z == 0.0 { 1 } else { 3 }].clone();
+                node.id = sepika_core::ids::NodeId(id);
+                node.coord = [endpoint[0], endpoint[1], z];
+                model.nodes.push(node);
+            }
+            for (id, source, nodes) in [(4, 1, [4, 5]), (5, 3, [1, 4]), (6, 2, [3, 5])] {
+                let mut member = model.elements[source].clone();
+                member.id = ElemId(id);
+                member.nodes = nodes.map(sepika_core::ids::NodeId).into_iter().collect();
+                model.elements.push(member);
+            }
+            let boundary = [1, 4, 5, 3].map(sepika_core::ids::NodeId).to_vec();
+            let plate = model.wall_plates[0].clone();
+            let other_plate = model.add_enclosed_wall_plate_from_nodes(&boundary, plate);
+            model.wall_regions.push(sepika_core::model::WallRegion {
+                id: sepika_core::ids::WallRegionId(1),
+                name: "共有側柱を持つ壁".into(),
+                boundary,
+                wall_plate_ids: vec![other_plate],
+                posts: Vec::new(),
+            });
+            let error = wall_619_geometry(&model).unwrap_err();
+            assert!(
+                error.contains("側柱 ID 1") && error.contains("共有する側柱"),
+                "{error}"
+            );
+        }
+        let mut model = single_wall_619_model(1500.0);
+        model.wall_regions[0]
+            .wall_plate_ids
+            .push(sepika_core::ids::WallPlateId(1));
+        assert!(wall_619_geometry(&model)
+            .unwrap_err()
+            .contains("Qの負担範囲を確認できません"));
+    }
+
+    #[test]
+    fn rc_wall_619_existing_ds_entry_uses_adopted_run_wall_response_and_reports_inputs() {
+        let mut app = App::default();
+        app.load_model(single_wall_619_model(1500.0));
+        app.core.analysis_cfg.push_steps = 2;
+        app.core.analysis_cfg.push_use_max_disp = true;
+        app.core.analysis_cfg.push_use_drift_angle = false;
+        app.core.analysis_cfg.push_max_disp = 0.2;
+        app.run_preparation();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app.run_seismic(SeismicDir::X);
+        app.run_pushover();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        crate::app::tests::select_holding_points(&mut app);
+        app.core.design_rank_auto = true;
+        let po = app.displayed_pushover().unwrap();
+        let point = po.ds_evaluation.as_ref().unwrap();
+        let wall_id = po.wall_capacities[0].0;
+        let qw_n = po.wall_response_at(wall_id, point.step).unwrap().qw_n;
+        assert!(qw_n.is_finite() && qw_n.abs() > 0.0);
+        let result = app.compute_holding_capacity().unwrap().0;
+        assert!(result.member_ranks.iter().any(|(id, _)| *id == wall_id));
+        let detail = &app.core.scoped.ds_wall_details[0];
+        assert!(detail.contains(&format!("Q_Ds={qw_n:.3}")), "{detail}");
+        assert!(
+            detail.contains("t=200.000 mm, l_cc=3000.000 mm, Fc=24.000 N/mm²"),
+            "{detail}"
+        );
+        assert!(detail.contains("内法 2600.000×1500.000 mm"), "{detail}");
+        assert!(
+            detail.contains("適用表: 通常") && detail.contains("2015年版引用"),
+            "{detail}"
+        );
+        assert!(
+            detail.contains(&format!("τu/Fc={:.9}", qw_n.abs() / 14_400_000.0)),
+            "{detail}"
+        );
+        let valid_results = app.core.scoped.results.clone();
+        for mismatch in 0..4 {
+            app.core.scoped.results = valid_results.clone();
+            let bundle = app.core.scoped.results.as_mut().unwrap();
+            for po in [&mut bundle.pushover, &mut bundle.pushover_x]
+                .into_iter()
+                .flatten()
+            {
+                let point = po.ds_evaluation.as_mut().unwrap();
+                match mismatch {
+                    0 => point.run_id.push_str("other"),
+                    1 => point.input_generation.push(0),
+                    2 => point.direction = SeismicDir::Y,
+                    _ => point.step = u32::MAX,
+                }
+            }
+            assert!(
+                app.compute_holding_capacity().is_err(),
+                "mismatch={mismatch}"
+            );
+            assert!(app.core.scoped.ds_wall_details.is_empty());
+        }
+        app.core.scoped.results = valid_results;
+        app.core.model.materials[0].fc = Some(25.0);
+        assert!(app.compute_holding_capacity().is_err());
+        assert!(app.core.scoped.ds_wall_details.is_empty());
+    }
 
     fn rebar() -> RcBeamRebar {
         RcBeamRebar {

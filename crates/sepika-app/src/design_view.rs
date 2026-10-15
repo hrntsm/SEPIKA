@@ -778,6 +778,16 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                     ),
                 );
             }
+            if !app.core.scoped.ds_wall_details.is_empty() {
+                ui.label("RC耐力壁: τu/Fc = |Q_Ds| / (t × l_cc × Fc)、s = min(内法長さ, 内法高さ)。側柱は Ac ≥ st/2、最小径 ≥ √(st/3) かつ ≥ 2t を両側で満たすと適格です。");
+                ui.hyperlink_to(
+                    "採用根拠: 2015年版の公開引用（報告書 本文44頁）",
+                    "https://www.kenchiku-bosai.or.jp/files/2025/04/r5houkoku20250417.pdf#page=46",
+                );
+            }
+            for detail in &app.core.scoped.ds_wall_details {
+                ui.label(detail);
+            }
             if app.core.scoped.ds_beta_u_unavailable {
                 ui.colored_label(
                     crate::theme::SECONDARY_AMBER,

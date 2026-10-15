@@ -976,6 +976,7 @@ pub struct ModelScoped {
     /// 直近の保有水平耐力算定で用いた層別 βu（耐力壁・筋かいの水平耐力比）。
     /// `compute_holding_capacity` が設定する（表示用）。
     pub ds_beta_u_by_story: Vec<f64>,
+    pub ds_wall_details: Vec<String>,
     pub holding_capacity_source: Option<HoldingCapacitySource>,
     /// 架構種別が耐力壁付き／筋かい付きなのに耐力壁・筋かいを検出できず、βu を
     /// 算定できなかったため架構種別別 Ds 表へフォールバックしたか（表示用）。
@@ -1052,6 +1053,7 @@ impl Default for ModelScoped {
             diagnostics: Vec::new(),
             preparation: None,
             ds_beta_u_by_story: Vec::new(),
+            ds_wall_details: Vec::new(),
             holding_capacity_source: None,
             ds_beta_u_unavailable: false,
             ds_rank_fallback_stories: Vec::new(),
