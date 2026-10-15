@@ -351,7 +351,19 @@ pub fn run_member_design_checks(
                     .q_simple_by_elem
                     .and_then(|q| q.get(elem_id))
                     .is_none();
-            let mut outcome = if missing_q0 {
+            let missing_rc_gravity = options.long_member_forces.is_some()
+                && ctx.seismic_qd.is_none()
+                && matches!(
+                    sec.shape,
+                    Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
+                )
+                && sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category))
+                    == sepika_core::structure_kind::StructureKind::Rc;
+            let mut outcome = if missing_rc_gravity {
+                CheckOutcome::Skipped {
+                    reason: "設計用せん断力に必要な重力参照内力が不足しています".into(),
+                }
+            } else if missing_q0 {
                 CheckOutcome::Skipped {
                     reason: "QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません".into(),
                 }

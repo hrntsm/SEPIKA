@@ -284,6 +284,7 @@ fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_
         ("design-old", Some(0)),
         ("design-old-signed-reactions", Some(3)),
         ("design-old-skew-rectangle", Some(4)),
+        ("design-old-rc-q0", Some(11)),
         ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
     ] {
         let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);

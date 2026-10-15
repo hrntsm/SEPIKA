@@ -2570,6 +2570,9 @@ pub(crate) mod design_input_tests;
 mod result_contract_tests;
 
 #[cfg(test)]
+pub(crate) mod signed_q0_acceptance_tests;
+
+#[cfg(test)]
 mod secondary_cft_tests;
 
 #[cfg(all(test, feature = "gui"))]

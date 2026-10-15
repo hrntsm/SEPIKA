@@ -9,6 +9,8 @@ mod design_check;
 mod eigen;
 mod linear_static;
 mod pushover;
+#[cfg(test)]
+mod signed_q0_acceptance_tests;
 mod time_history;
 mod ultimate;
 

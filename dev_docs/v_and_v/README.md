@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [RC梁Q0の符号付き端反力合成_Issue600_2026-10.md](RC梁Q0の符号付き端反力合成_Issue600_2026-10.md) | local Qy・端別係数合成・0/不足・公開入口・旧検定失効 | 🔶（Source直接・追加受入8・旧11保存・関連default/feature・両Clippy/strictDoc成功。MCP絶対Q0非公開、手動GUI/Validation・正式レビュー/最終CIは未確認） |
 | [単独RC壁Ds応力度と側柱寸法_Issue619_2026-10.md](単独RC壁Ds応力度と側柱寸法_Issue619_2026-10.md) | 柱心間距離によるDs応力度・両側柱寸法・既存評価点／Q・理由付き未算定 | 🔶（独立値・Source焦点Verification成功、広域検証・手動GUI／Validation・最終ゲートは別確認） |
 | [鉛直柱支持小梁の自重フェース_Issue423_2026-10.md](鉛直柱支持小梁の自重フェース_Issue423_2026-10.md) | 最外外側面・有限柱閉区間・角丸CftBox・設計DLと芯々断面質量の分離 | 🔶（公開8試験・MassEquiv節点加算・旧Analysis20保存回帰4件・文書検査成功。全形状/手動GUI/Validationと最終ゲートは別確認） |
 | [時刻歴時間軸_Issue610_2026-10.md](時刻歴時間軸_Issue610_2026-10.md) | 入力瞬時値・初期釣合い・N−1積分・間引き・checkpoint・既存入口と保存失効 | 🔶（独立fixture・境界・自動GUI/MCP・保存失効・文書Verification成功。手動GUI／Validation・正式ゲートは別確認） |
@@ -315,6 +316,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 37 | 二次CFTの全入口拒否 | sepika-core / sepika-edit / sepika-io / sepika-app / sepika-design-jp / sepika-solver / sepika-mcp | model/aggregate・section、ovika、quantity、actions/io、precheck | [Issue539の直接入口と正常対照](二次CFT入口拒否_Issue539_2026-10.md#直接入口と観測) | 横断 | 🔶（入口Verification、最終headゲートは後続） |
 | 36a | 直接線形求解 | sepika-math / sepika-solver / sepika-core / sepika-app | cholesky・lu・solver・statics/analysis/linear・result_contract_tests | [Issue598独立期待値と実入口](直接線形求解_Issue598_2026-10.md#独立期待値と実入口) | 横断 | 🔶（Verification、実験Validation・最終headゲート未） |
 | 36 | 静的設定の公開経路一致 | sepika-solver / sepika-element / sepika-job / sepika-app / sepika-mcp | statics/linear、statics/analysis、factory、compute、actions/linear_static、tests | [Issue595の直接入口と回帰](静的設定採用_Issue595_2026-10.md#直接入口と回帰) | 横断 | 🔶（Verification、Validation・最終headゲート未） |
+| 600 | RC梁Q0の符号付き端反力合成 | sepika-job / sepika-design-jp / sepika-app / sepika-mcp | design_q0.rs・rc/beam.rs・th_detail.rs | [Issue600の受入対応](RC梁Q0の符号付き端反力合成_Issue600_2026-10.md#接続保存受入の対応) | 横断 | 🔶（直接/追加受入・保存・関連構成Verification成功、手動GUI/Validation・最終ゲート未確認） |
 | 633 | 符号付き単純梁反力 | sepika-load / sepika-element / sepika-app | floor/fem.rs・story_gen/reactions.rs・frame/member_load.rs・viewer/cmq.rs | [Issue633の独立値・公開入口](符号付き単純梁反力_Issue633_2026-10.md#独立verification) | 横断 | 🔶（直接Verification、原本／Validation・最終CIは後続） |
 | 546 | 節点・材料直接入力の有限判定 | sepika-app / sepika-edit | tables/nodes.rs・tables/materials.rs・section_material/material.rs | [直接入力matrix](節点材料の直接有限入力_Issue546_2026-10.md#独立期待値と実入口) | GUI／編集 | 🔶（直接Verification、最終head CI後続） |
 | 475 | 未変形座標による編集入力 | sepika-app | app/coordinate_edit_tests.rs・app/panels/draw_tools.rs・load_editor.rs | [独立期待値と実入口](未変形編集入力_Issue475_2026-10.md#独立期待値と実入口) | GUI／編集 | 🔶（自動Verification成功、手動GUI未実施。最終ゲートは[PR #661](https://github.com/hrntsm/SEPIKA/pull/661)） |
