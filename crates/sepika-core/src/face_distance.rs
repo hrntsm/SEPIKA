@@ -37,12 +37,6 @@ fn section_geometry(sec: &Section) -> Result<SectionGeometry, String> {
         )
     })?;
     match shape {
-        crate::section_shape::SectionShape::CftBox { height, width, .. } => {
-            SectionGeometry::of(&crate::section_shape::SectionShape::SteelFlatBar {
-                width: *width,
-                thick: *height,
-            })
-        }
         crate::section_shape::SectionShape::CftPipe { outer_dia, .. } => {
             SectionGeometry::of(&crate::section_shape::SectionShape::SteelRoundBar {
                 dia: *outer_dia,
@@ -160,6 +154,7 @@ pub fn girder_self_weight_interval(model: &Model, elem: &ElementData) -> Result<
 
 /// 二次部材の自重作用区間 `[mm]`。間柱・Detached は芯々区間を保持する。
 /// 小梁の断面方向は鉛直を材軸直交面へ投影して決める。
+/// 鉛直 Column の最外側面交点が支持柱の有限閉区間外ならエラー。
 pub fn secondary_self_weight_interval(
     model: &Model,
     member: &SecondaryMember,
@@ -218,16 +213,32 @@ pub fn secondary_self_weight_interval(
         })?;
         let support_axis = axis_direction(sa, sb)?;
         let inward = vec3::scale(direction, if end == 0 { 1.0 } else { -1.0 });
-        deductions[end] = if section.width == 0.0 && section.depth == 0.0 {
-            Ok(0.0)
-        } else if support_axis[0].hypot(support_axis[1]) <= 1e-12 {
-            section_face(section, support_axis, reference, inward)
+        let column = matches!(anchor.support, SupportMemberId::Primary(_))
+            && section.frame_use == Some(FrameSectionUse::Column);
+        deductions[end] = if column {
+            if sa[0] != sb[0] || sa[1] != sb[1] {
+                Err("傾斜柱の支持側面には対応していません".into())
+            } else {
+                section_face(section, support_axis, reference, inward).and_then(|distance| {
+                    let origin = if end == 0 { a } else { b };
+                    let height_mm = origin[2] + distance * inward[2];
+                    if height_mm < sa[2].min(sb[2]) || height_mm > sa[2].max(sb[2]) {
+                        Err(format!(
+                            "最外側面交点の高さ {height_mm} mm が支持柱の有限区間 [{}, {}] mm の外です",
+                            sa[2].min(sb[2]), sa[2].max(sb[2])
+                        ))
+                    } else {
+                        Ok(distance)
+                    }
+                })
+            }
         } else {
             beam_projected_face(section, support_axis, reference, inward)
         }
         .map_err(|error| format!("{label} の端 {end}・支持材 {:?}: {error}", anchor.support))?;
     }
     checked_interval(&label, len, deductions)
+        .map_err(|error| format!("{error}（支持端 {:?}）", member.ends))
 }
 
 /// 節点 `node` で対象部材と概ね直交する Beam 要素の最大せいの半分 [mm]。

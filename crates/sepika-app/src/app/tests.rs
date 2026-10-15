@@ -11110,6 +11110,7 @@ fn rounded_partial_supplied_story_action_does_not_apply_dl_mass_or_success() {
     use sepika_core::section_shape::SectionShape;
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
+    let original_girder_section = app.core.model.elements.last().unwrap().section;
     let id = SectionId(app.core.model.sections.len() as u32);
     let mut sec = SectionShape::SteelH {
         height: 400.0,
@@ -11135,7 +11136,7 @@ fn rounded_partial_supplied_story_action_does_not_apply_dl_mass_or_success() {
     assert!(app.core.scoped.results.is_none());
     assert!(app.core.scoped.auto_load_sync_hash.is_none());
     assert!(sepika_solver::statics::analysis::Analysis::prepare(&app.core.model).is_err());
-    app.core.model.elements.last_mut().unwrap().section = before.elements[0].section;
+    app.core.model.elements.last_mut().unwrap().section = original_girder_section;
     for original in [2, 3] {
         let mut node = app.core.model.nodes[original].clone();
         node.id = NodeId(app.core.model.nodes.len() as u32);
@@ -11143,6 +11144,10 @@ fn rounded_partial_supplied_story_action_does_not_apply_dl_mass_or_success() {
         app.core.model.nodes.push(node);
     }
     let mut support = app.core.model.elements.last().unwrap().clone();
+    assert_eq!(
+        app.core.model.element_section(&support).unwrap().frame_use,
+        Some(sepika_core::model::FrameSectionUse::Girder)
+    );
     support.id = ElemId(3);
     support.nodes = [NodeId(4), NodeId(5)].into_iter().collect();
     app.core.model.elements.push(support);

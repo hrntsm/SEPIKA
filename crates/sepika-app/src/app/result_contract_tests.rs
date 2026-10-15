@@ -148,6 +148,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-fixed-distance-extents", Some(11), "旧契約"),
         ("old-frame-node-counts", Some(12), "旧契約"),
         ("old-time-history-timeline", Some(19), "旧契約"),
+        ("old-column-self-weight-faces", Some(20), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -186,7 +187,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
 #[test]
 fn ovika_old_analysis_is_unavailable_until_explicit_reanalysis() {
     let app = calculated();
-    for version in [5, 6, 7] {
+    for version in [5, 6, 7, 20] {
         let (mut loaded, path) = restore(
             &app,
             Some(version),
@@ -196,6 +197,23 @@ fn ovika_old_analysis_is_unavailable_until_explicit_reanalysis() {
         let old = loaded.core.scoped.results.as_ref().unwrap();
         assert!(!old.has_analysis_results() && !old.has_design_results());
         assert!(loaded.core.scoped.staleness.results_stale);
+        loaded.select_displayed_result(app.core.scoped.last_static.unwrap());
+        loaded.core.scoped.staleness.mark_fresh();
+        assert!(loaded.require_selected_static_input().is_err());
+        assert!(!crate::summary::build_report_csv(&loaded).contains("全適合"));
+        loaded.save_project_to(path.clone());
+        assert!(loaded.core.scoped.last_error.is_none());
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        assert!(reopened.core.scoped.last_error.is_none());
+        let unavailable = reopened.core.scoped.results.as_ref().unwrap();
+        assert!(!unavailable.has_analysis_results() && !unavailable.has_design_results());
+        assert_ne!(
+            unavailable.analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
+        assert!(reopened.require_selected_static_input().is_err());
+        loaded = reopened;
         loaded.run_linear_static(LoadCaseId(0));
         assert!(loaded.core.scoped.last_error.is_none());
         let recovered = loaded.core.scoped.results.as_ref().unwrap();

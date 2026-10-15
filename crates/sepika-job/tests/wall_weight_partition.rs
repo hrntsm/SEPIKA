@@ -566,6 +566,27 @@ fn enclosed_secondary_beam_receives_all_dl_before_reaction_cascade() {
         WallDlSupport::HeightMidpoint,
     ] {
         let mut model = fixture(6000.0);
+        let mut steel = model.materials[0].clone();
+        steel.id = MaterialId(1);
+        steel.name = "SN400B".into();
+        steel.category = MaterialCategory::Steel;
+        steel.young = 205000.0;
+        steel.poisson = 0.3;
+        steel.density = 7.85e-9;
+        steel.fc = None;
+        steel.fy = Some(235.0);
+        model.materials.push(steel);
+        let mut column = SectionShape::SteelFlatBar {
+            width: 400.0,
+            thick: 400.0,
+        }
+        .to_section(SectionId(2), "鋼支持柱".into());
+        column.frame_use = Some(FrameSectionUse::Column);
+        column.material = Some(MaterialId(1));
+        model.sections.push(column);
+        for index in [1, 3] {
+            model.elements[index].section = Some(SectionId(2));
+        }
         model.wall_plates[0].dl_support = Some(mode);
         model.wall_plates[0].openings = vec![opening(1000.0, 2000.0)];
         model.nodes.push(Node {
@@ -614,7 +635,16 @@ fn enclosed_secondary_beam_receives_all_dl_before_reaction_cascade() {
         )
         .unwrap();
         assert!(cascade.unresolved.is_empty() && cascade.cyclic.is_empty());
+        for reaction in cascade.members[&key].reactions {
+            close(reaction, 24000.0);
+        }
         let (nodes, members) = cascade.primary_loads(&model);
+        assert!(members.is_empty());
+        assert_eq!(nodes.len(), 2);
+        for ((node, load), expected_node) in nodes.iter().zip([NodeId(0), NodeId(1)]) {
+            assert_eq!(*node, expected_node);
+            close(*load, 24000.0);
+        }
         close(
             nodes.iter().map(|(_, w)| w).sum::<f64>()
                 + members.iter().map(|p| p.cmq.q_i + p.cmq.q_j).sum::<f64>(),

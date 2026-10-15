@@ -10,3 +10,6 @@ sepika-section = { path = "../sepika-section" }
 serde = { workspace = true }
 schemars = { workspace = true }
 smallvec = { workspace = true }
+
+[dev-dependencies]
+sepika-load = { path = "../sepika-load" }
