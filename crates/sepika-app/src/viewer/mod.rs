@@ -794,7 +794,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         );
     }
 
-    if !lumped_only && mode == ViewMode::Mode && deform_scale_actual > 1e-12 {
+    if !lumped_only && mode == ViewMode::Mode {
         let pts_rest: Vec<egui::Pos2> = app
             .core
             .model
@@ -806,6 +806,8 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
             &painter,
             app,
             &display_model,
+            &proj,
+            deform_scale_actual,
             &pts_rest,
             &node_visible,
             filter,
