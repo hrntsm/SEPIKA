@@ -197,7 +197,7 @@ pub(crate) struct ThRecorder {
 }
 
 impl ThRecorder {
-    /// `n_steps` は解析の全ステップ数（地震波のサンプル数）。`record_every` が
+    /// `n_steps` は解析の全積分区間数（地震波のサンプル数 − 1）。`record_every` が
     /// `None` の場合は [`auto_record_every`] で自動決定する。`n_elems` は
     /// `model.elements.len()`（部材内力包絡の初期化用）。
     pub(crate) fn new(
@@ -451,7 +451,10 @@ impl ThRecorder {
         Self::update_peak_abs(&mut self.peak_floor_disp_x, &disp_x);
         Self::update_peak_abs(&mut self.peak_floor_disp_y, &disp_y);
 
-        if step.is_multiple_of(self.record_every as u64) || step == self.n_steps {
+        if self.frame_time.is_empty()
+            || step.is_multiple_of(self.record_every as u64)
+            || step == self.n_steps
+        {
             self.frame_time.push(time);
             self.node_disp.push(expand_node_disp(model, dofmap, u_free));
             self.member_forces

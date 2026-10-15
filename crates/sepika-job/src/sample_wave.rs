@@ -36,10 +36,11 @@ pub fn build_ground_motion(
 }
 
 /// 正弦減衰のサンプル地震波を `cfg` から組み立てる。
+/// 正の有限な継続時間・刻み `[s]` を要求し、ceil(duration/dt)+1 点を返す。
 pub fn sample_ground_motion(
     cfg: &AnalysisSettings,
-) -> sepika_solver::dynamic::timehistory::GroundMotion {
-    let n = ((cfg.th_duration / cfg.th_dt).ceil() as usize).max(2);
+) -> crate::JobResult<sepika_solver::dynamic::timehistory::GroundMotion> {
+    let n = sample_point_count(cfg.th_duration, cfg.th_dt)?;
     let omega = 2.0 * std::f64::consts::PI / cfg.th_period.max(1e-6);
     let accel: Vec<f64> = (0..n)
         .map(|i| {
@@ -47,14 +48,15 @@ pub fn sample_ground_motion(
             cfg.th_amp * (omega * t).sin() * (-0.3 * t).exp()
         })
         .collect();
-    build_ground_motion(cfg.th_dt, cfg.th_dir, accel)
+    Ok(build_ground_motion(cfg.th_dt, cfg.th_dir, accel))
 }
 
 /// 質点系時刻歴用の正弦減衰サンプル波。
+/// 正の有限な継続時間・刻み `[s]` を要求し、ceil(duration/dt)+1 点を返す。
 pub fn sample_lumped_ground_motion(
     cfg: &AnalysisSettings,
-) -> sepika_solver::dynamic::timehistory::GroundMotion {
-    let n = ((cfg.lumped_th_duration / cfg.lumped_th_dt).ceil() as usize).max(2);
+) -> crate::JobResult<sepika_solver::dynamic::timehistory::GroundMotion> {
+    let n = sample_point_count(cfg.lumped_th_duration, cfg.lumped_th_dt)?;
     let omega = 2.0 * std::f64::consts::PI / cfg.lumped_th_period.max(1e-6);
     let accel: Vec<f64> = (0..n)
         .map(|i| {
@@ -66,7 +68,22 @@ pub fn sample_lumped_ground_motion(
         SeismicDir::X => ThDir::X,
         SeismicDir::Y => ThDir::Y,
     };
-    build_ground_motion(cfg.lumped_th_dt, dir, accel)
+    Ok(build_ground_motion(cfg.lumped_th_dt, dir, accel))
+}
+
+fn sample_point_count(duration_s: f64, dt_s: f64) -> crate::JobResult<usize> {
+    if !duration_s.is_finite() || duration_s <= 0.0 || !dt_s.is_finite() || dt_s <= 0.0 {
+        return Err(crate::JobError::InvalidInput(
+            "サンプル波の継続時間と時間刻みには正の有限値を指定してください。".into(),
+        ));
+    }
+    let intervals = (duration_s / dt_s).ceil().max(1.0);
+    if !intervals.is_finite() || intervals >= (isize::MAX as usize / size_of::<f64>()) as f64 {
+        return Err(crate::JobError::InvalidInput(
+            "サンプル波の点数が大きすぎます。".into(),
+        ));
+    }
+    Ok(intervals as usize + 1)
 }
 
 /// 質点系時刻歴に渡す地動加速度列（加振方向の成分）。
@@ -120,10 +137,55 @@ mod tests {
             th_dir: ThDir::Y,
             ..Default::default()
         };
-        let wave = sample_ground_motion(&cfg);
+        let wave = sample_ground_motion(&cfg).unwrap();
         assert_eq!(wave.dt, 0.02);
-        assert_eq!(wave.accel_x, vec![0.0; 2]);
-        assert_eq!(wave.accel_y.as_ref().map(|v| v.len()), Some(2));
+        assert_eq!(wave.accel_x, vec![0.0; 3]);
+        assert_eq!(wave.accel_y.as_ref().map(|v| v.len()), Some(3));
+    }
+
+    #[test]
+    fn sample_duration_rounds_up_intervals_and_includes_both_endpoints() {
+        for (duration, points) in [(0.04, 3), (0.05, 4), (0.01, 2)] {
+            let cfg = AnalysisSettings {
+                th_duration: duration,
+                th_dt: 0.02,
+                lumped_th_duration: duration,
+                lumped_th_dt: 0.02,
+                ..Default::default()
+            };
+            for wave in [
+                sample_ground_motion(&cfg).unwrap(),
+                sample_lumped_ground_motion(&cfg).unwrap(),
+            ] {
+                assert_eq!(wave.accel_x.len(), points);
+                assert!((points - 1) as f64 * wave.dt >= duration);
+                assert_eq!(wave.accel_x[0], 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn sample_rejects_invalid_duration_and_dt_before_generation() {
+        for invalid in [0.0, -0.01, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for invalid_dt in [false, true] {
+                let mut cfg = AnalysisSettings::default();
+                if invalid_dt {
+                    cfg.th_dt = invalid;
+                    cfg.lumped_th_dt = invalid;
+                } else {
+                    cfg.th_duration = invalid;
+                    cfg.lumped_th_duration = invalid;
+                }
+                assert!(matches!(
+                    sample_ground_motion(&cfg),
+                    Err(crate::JobError::InvalidInput(_))
+                ));
+                assert!(matches!(
+                    sample_lumped_ground_motion(&cfg),
+                    Err(crate::JobError::InvalidInput(_))
+                ));
+            }
+        }
     }
 
     #[test]

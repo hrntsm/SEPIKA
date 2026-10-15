@@ -158,7 +158,7 @@ fn background_nonlinear_jobs_reject_results_after_input_edit() {
     for th in [false, true] {
         let mut app = ready();
         if th {
-            app.start_time_history_job(App::sample_wave(&app.core.analysis_cfg));
+            app.start_time_history_job(App::sample_wave(&app.core.analysis_cfg).unwrap());
         } else {
             app.start_pushover_job();
         }
@@ -548,7 +548,7 @@ fn wall_method_default_runs_save_undo_and_reject_old_results_and_jobs() {
     for th in [false, true] {
         let mut app = ready();
         if th {
-            app.start_time_history_job(App::sample_wave(&app.core.analysis_cfg));
+            app.start_time_history_job(App::sample_wave(&app.core.analysis_cfg).unwrap());
         } else {
             app.start_pushover_job();
         }

@@ -25,6 +25,9 @@ pub struct Checkpoint {
     pub state: StateBlob,
 }
 
+/// 読込を受理するチェックポイントの版。
+pub const CHECKPOINT_SCHEMA_VERSION: u32 = 2;
+
 const CHECKPOINT_DIR: &str = "checkpoint";
 const CHECKPOINT_FILE: &str = "checkpoint.bin";
 const CHECKPOINT_TMP: &str = "checkpoint.tmp";
@@ -50,6 +53,7 @@ pub fn save_checkpoint(dir: &Path, cp: &Checkpoint) -> io::Result<()> {
 }
 
 /// チェックポイントを高速バイナリ形式から読み込む。
+/// 版が `CHECKPOINT_SCHEMA_VERSION` と異なる場合は `InvalidData` を返す。
 ///
 /// 復号は `with_limit` 付きで行い、破損・改竄ファイルの過大な長さ前置による
 /// メモリ枯渇（DoS）を防ぐ。エンコードは `bincode::serialize` と互換の
@@ -58,11 +62,18 @@ pub fn load_checkpoint(dir: &Path) -> io::Result<Checkpoint> {
     use bincode::Options;
     let path = dir.join(CHECKPOINT_DIR).join(CHECKPOINT_FILE);
     let bytes = std::fs::read(&path)?;
-    bincode::DefaultOptions::new()
+    let cp: Checkpoint = bincode::DefaultOptions::new()
         .with_fixint_encoding()
         .with_limit(MAX_CHECKPOINT_BYTES)
         .deserialize(&bytes)
-        .map_err(io::Error::other)
+        .map_err(io::Error::other)?;
+    if cp.schema_version != CHECKPOINT_SCHEMA_VERSION {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "チェックポイントの版が一致しません。再計算してください。",
+        ));
+    }
+    Ok(cp)
 }
 
 /// チェックポイントの model_hash と期待値が一致するか検証する。
@@ -101,7 +112,7 @@ pub fn save_nonlinear_checkpoint(
     let model_hash = compute_model_hash(model);
     let element_states: Vec<Vec<u8>> = behaviors.iter().map(|b| b.serialize_checkpoint()).collect();
     let cp = Checkpoint {
-        schema_version: 1,
+        schema_version: CHECKPOINT_SCHEMA_VERSION,
         model_hash,
         step,
         time,
@@ -138,7 +149,7 @@ mod tests {
 
     fn make_checkpoint(model_hash: &str, step: u64) -> Checkpoint {
         Checkpoint {
-            schema_version: 1,
+            schema_version: CHECKPOINT_SCHEMA_VERSION,
             model_hash: model_hash.to_string(),
             step,
             time: step as f64 * 0.01,
@@ -163,6 +174,18 @@ mod tests {
         assert_eq!(loaded, cp);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn checkpoint_from_previous_time_contract_is_rejected() {
+        let dir = crate::test_util::test_tmp().join("cp_old_time_contract");
+        let mut cp = make_checkpoint("abc123", 2);
+        cp.schema_version = 1;
+        save_checkpoint(&dir, &cp).unwrap();
+        assert_eq!(
+            load_checkpoint(&dir).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 
     #[test]

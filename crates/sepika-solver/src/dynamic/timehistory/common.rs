@@ -188,9 +188,9 @@ pub(crate) fn mass_accel_free_into(
 /// 時刻歴の時間刻み [s] を決める。設定値が正ならそれを、さもなくば波形の刻みを使う。
 pub(crate) fn resolve_dt(cfg_dt: f64, wave: &GroundMotion) -> Result<f64, SolveError> {
     let dt = if cfg_dt > 0.0 { cfg_dt } else { wave.dt };
-    if dt <= 0.0 {
+    if !dt.is_finite() || dt <= 0.0 || wave.accel_x.is_empty() {
         return Err(SolveError::Backend(
-            "time history: dt must be positive".into(),
+            "時刻歴には正の有限な時間刻みと1点以上の入力が必要です。".into(),
         ));
     }
     Ok(dt)

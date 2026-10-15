@@ -252,7 +252,7 @@ pub(crate) fn lumped_mass_time_history_spatial(
     h: f64,
 ) -> StickResponse {
     let n = lm.stories.len();
-    if n == 0 || dt <= 0.0 || accel.is_empty() || !lm.is_spatial() {
+    if n == 0 || !dt.is_finite() || dt <= 0.0 || accel.is_empty() || !lm.is_spatial() {
         return StickResponse::empty(n);
     }
     let mass = match mass_diag(lm) {
@@ -287,6 +287,9 @@ pub(crate) fn lumped_mass_time_history_spatial(
     let mut u = vec![0.0; nd];
     let mut v = vec![0.0; nd];
     let mut a = vec![0.0; nd];
+    for i in 0..n {
+        a[3 * i + dir_idx] = -accel[0];
+    }
     let mut time = Vec::with_capacity(accel.len());
     let mut roof = Vec::with_capacity(accel.len());
     let mut floor_disp = Vec::with_capacity(accel.len());
@@ -297,7 +300,11 @@ pub(crate) fn lumped_mass_time_history_spatial(
     let mut non_converged_steps = 0usize;
     let mut peak_force_scale = 0.0_f64;
 
-    for (step, &ag) in accel.iter().enumerate() {
+    time.push(0.0);
+    roof.push(0.0);
+    floor_disp.push(vec![[0.0; 3]; n]);
+
+    for (step, &ag) in accel.iter().enumerate().skip(1) {
         let mut p = vec![0.0; nd];
         for i in 0..n {
             p[3 * i + dir_idx] = -mass[3 * i + dir_idx] * ag;

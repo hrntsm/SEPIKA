@@ -25,7 +25,7 @@ pub(crate) fn compute_time_history_job(
         },
         ..Default::default()
     };
-    let wave = sepika_job::sample_ground_motion(&cfg);
+    let wave = sepika_job::sample_ground_motion(&cfg)?;
 
     let result = sepika_job::compute::compute_time_history(work, cfg, wave)?;
 
@@ -38,7 +38,9 @@ pub(crate) fn compute_time_history_job(
         "kind": "TimeHistory",
         "peak_disp": peak_disp,
         "record_dir_y": result.history.record_dir_y,
-        "n_steps": result.time.len(),
+        "n_steps": result.time.len().saturating_sub(1),
+        "n_points": result.time.len(),
+        "end_time": result.time.last().copied(),
     });
     attach_prepare_notices(&mut summary, notices);
     Ok(JobOutcome::TimeHistory { summary })
@@ -65,7 +67,9 @@ mod tests {
         else {
             panic!()
         };
-        assert!(summary["n_steps"].as_u64().unwrap() > 0);
+        assert_eq!(summary["n_steps"], 4);
+        assert_eq!(summary["n_points"], 5);
+        assert_eq!(summary["end_time"], 0.04);
         assert!(summary.get("wall_capacities_n").is_none());
         let (work, _) = model_prepared_for_analysis(&model, &params).unwrap();
         let cfg = sepika_job::AnalysisSettings {
@@ -75,10 +79,34 @@ mod tests {
         let direct = sepika_job::compute::compute_time_history(
             work,
             cfg,
-            sepika_job::sample_ground_motion(&cfg),
+            sepika_job::sample_ground_motion(&cfg).unwrap(),
         )
         .unwrap();
         assert!(!direct.nonlinear);
         assert!(direct.wall_capacities.is_empty());
+    }
+
+    #[test]
+    fn mcp_time_history_rejects_invalid_sample_duration_and_dt() {
+        let model = fixture::input_model();
+        for params in [
+            JobParams {
+                duration: 0.0,
+                ..Default::default()
+            },
+            JobParams {
+                dt: 0.0,
+                ..Default::default()
+            },
+            JobParams {
+                duration: f64::INFINITY,
+                ..Default::default()
+            },
+        ] {
+            assert!(matches!(
+                compute_time_history_job(&model, &params),
+                Err(JobError::InvalidInput(_))
+            ));
+        }
     }
 }

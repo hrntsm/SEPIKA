@@ -2029,6 +2029,67 @@ fn test_parse_wave_csv_errors() {
     assert!(parse_wave_csv("10.0,5.0\n", ThDir::Xy).is_err());
 }
 
+#[test]
+fn time_history_sample_and_csv_entries_preserve_instantaneous_sample_times() {
+    let mut app = App::default();
+    app.load_model(crate::sample::portal_frame());
+    app.core.analysis_cfg.th_dt = 0.02;
+    app.core.analysis_cfg.th_duration = 0.05;
+    app.run_time_history_sample();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let th = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .time_history
+        .as_ref()
+        .unwrap();
+    assert_eq!(th.time, vec![0.0, 0.02, 0.04, 0.06]);
+    assert_eq!(th.recording.as_ref().unwrap().frame_time, th.time);
+    let (accel, _) = parse_wave_csv("10\n0\n", ThDir::X).unwrap();
+    app.run_time_history(sepika_job::build_ground_motion(0.02, ThDir::X, accel));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let th = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .time_history
+        .as_ref()
+        .unwrap();
+    assert_eq!(th.time, vec![0.0, 0.02]);
+    assert!(th.recording.as_ref().unwrap().node_disp[0]
+        .iter()
+        .all(|d| *d == [0.0; 6]));
+}
+
+#[test]
+fn time_history_sample_entries_report_invalid_time_settings_before_starting_a_job() {
+    for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let mut app = App::default();
+        app.core.analysis_cfg.th_duration = invalid;
+        app.run_time_history_sample();
+        assert!(app.core.scoped.last_error.is_some());
+        assert!(app.core.scoped.job.is_none());
+        app.core.scoped.last_error = None;
+        app.core.analysis_cfg.lumped_th_dt = invalid;
+        app.start_lumped_mass_sample_th_job();
+        assert!(app.core.scoped.last_error.is_some());
+        assert!(app.core.scoped.job.is_none());
+    }
+}
+
 /// 等質量等剛性のせん断モデル（軸ばねの直列、Ux 方向のみ自由、`n` 層）。
 /// portal_frame は平面骨組で弱軸・面外方向の縮約後自由度が多く、
 /// 固有値解析(部分空間反復)が n_modes=2 で不安定になりやすいため、
@@ -2465,7 +2526,7 @@ fn test_async_time_history_job_flow() {
     let mut app = App::default();
     app.load_model(crate::sample::portal_frame());
     app.core.analysis_cfg.th_duration = 2.0;
-    let wave = App::sample_wave(&app.core.analysis_cfg);
+    let wave = App::sample_wave(&app.core.analysis_cfg).unwrap();
 
     app.start_time_history_job(wave);
     assert!(app.core.scoped.job.is_some());
@@ -2501,7 +2562,7 @@ fn test_async_time_history_job_flow() {
     app.generate_stories_action();
     app.core.analysis_cfg.th_nonlinear = true;
     app.core.analysis_cfg.th_duration = 1.0;
-    app.start_time_history_job(App::sample_wave(&app.core.analysis_cfg));
+    app.start_time_history_job(App::sample_wave(&app.core.analysis_cfg).unwrap());
     assert_eq!(
         app.core.scoped.job.as_ref().unwrap().label,
         "時刻歴応答(非線形)"
@@ -2525,7 +2586,7 @@ fn test_start_job_while_running_is_rejected() {
     assert!(app.core.scoped.job.is_some());
 
     // 実行中に再度 start しても2つ目は無視され、job は上書きされない。
-    app.start_time_history_job(App::sample_wave(&app.core.analysis_cfg));
+    app.start_time_history_job(App::sample_wave(&app.core.analysis_cfg).unwrap());
     assert!(app.core.scoped.job.is_some());
     assert_eq!(app.core.scoped.job.as_ref().unwrap().label, "増分解析");
 

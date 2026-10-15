@@ -223,7 +223,7 @@ pub fn nonlinear_time_history_analysis(
     }
     let mut a = solve_initial_accel(&m_red, &rhs_a0, n_indep)?;
 
-    let n_steps = wave.accel_x.len();
+    let n_steps = wave.accel_x.len() - 1;
     let mut u_free = vec![0.0f64; n_free];
     let mut v_free = vec![0.0f64; n_free];
     let mut a_free = vec![0.0f64; n_free];
@@ -318,7 +318,7 @@ pub fn nonlinear_time_history_analysis(
     for n in 0..n_steps {
         let t_next = (n + 1) as f64 * dt;
 
-        infl.force_at_into(wave, n, &mut p_free_buf);
+        infl.force_at_into(wave, n + 1, &mut p_free_buf);
         reducer.reduce_f_into(&p_free_buf, &mut p_dyn_red_buf);
         let p_dyn_red = &p_dyn_red_buf;
         for i in 0..n_indep {

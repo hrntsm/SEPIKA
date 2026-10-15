@@ -125,7 +125,7 @@ pub fn linear_time_history_with_state(
 
 /// チェックポイントから線形時刻歴を再開する。
 /// `state.step` の次のステップから `wave` の終端まで進める。
-/// `wave` は全ステップ分の地震波（先頭から）。`state.step` 以降を使用する。
+/// `wave` は全ステップ分の地震波（先頭から）。`state.step + 1` 以降を更新に使用する。
 ///
 /// 戻り値の `ResponseResult` は**再開区間のみ**の部分記録である
 /// （`time`・`history`・`recording`・`peak_disp`・`story_drift_angle` いずれも
@@ -150,7 +150,11 @@ pub fn linear_time_history_from_state(
     let dt = resolve_dt(newmark.dt, wave)?;
 
     let n_indep = reducer.n_indep;
-    if n_indep == 0 || state.disp_red.len() != n_indep {
+    if n_indep == 0
+        || state.disp_red.len() != n_indep
+        || state.vel_red.len() != n_indep
+        || state.accel_red.len() != n_indep
+    {
         return Err(SolveError::Backend(
             "time history restart: state dimension mismatch".into(),
         ));
@@ -247,7 +251,7 @@ impl LinearSetup {
 
 /// 時刻歴ステップを `start_step` から `wave` の終端まで進める内部関数。
 /// `start_step` は既に確定した状態（u, v, a は step `start_step` の値）。
-/// 次のステップ `start_step` → `start_step+1` は `wave[start_step]` を使う。
+/// 次のステップ `start_step` → `start_step+1` は `wave[start_step + 1]` を使う。
 #[allow(clippy::too_many_arguments)]
 fn run_steps(
     model: &Model,
@@ -302,19 +306,19 @@ fn run_steps(
     let mut story_drift_angle = vec![0.0f64; model.layer_count()];
     update_story_drift(model, dofmap, &u_free, &mut story_drift_angle);
 
-    let mut time = Vec::with_capacity(wave.accel_x.len() - start_step as usize + 1);
+    let n_steps = wave.accel_x.len() - 1;
+    if start_step > n_steps as u64 {
+        return Err(SolveError::InvalidInput(
+            "再開ステップが波形の終端を超えています。".into(),
+        ));
+    }
+    let mut time = Vec::with_capacity(n_steps - start_step as usize + 1);
     time.push(start_step as f64 * dt);
 
     let mut ma_free = vec![0.0f64; n_free];
     mass_accel_free_into(m_free, &a_free, &mut ma_free);
 
-    let mut recorder = ThRecorder::new(
-        model,
-        dofmap,
-        wave.accel_x.len(),
-        model.elements.len(),
-        record_every,
-    );
+    let mut recorder = ThRecorder::new(model, dofmap, n_steps, model.elements.len(), record_every);
     let xg_x_init = wave
         .accel_x
         .get(start_step as usize)
@@ -382,9 +386,9 @@ fn run_steps(
     let mut p_eff_buf = vec![0.0f64; n_indep];
     let mut u_next_buf = vec![0.0f64; n_indep];
 
-    for n in start_step as usize..wave.accel_x.len() {
+    for n in start_step as usize..n_steps {
         let t_next = (n + 1) as f64 * dt;
-        infl.force_at_into(wave, n, &mut p_free_buf);
+        infl.force_at_into(wave, n + 1, &mut p_free_buf);
         reducer.reduce_f_into(&p_free_buf, &mut p_red_buf);
 
         for i in 0..n_indep {
@@ -449,7 +453,7 @@ fn run_steps(
         );
     }
 
-    let final_step = wave.accel_x.len() as u64;
+    let final_step = n_steps as u64;
     let final_time = final_step as f64 * dt;
     let final_state = TimeStepState {
         step: final_step,

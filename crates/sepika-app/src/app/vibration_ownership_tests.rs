@@ -70,7 +70,7 @@ fn time_history_ownership_sample_amplitude_changes_actual_input_and_preserves_ot
     for lumped in [false, true] {
         let make = |app: &App| {
             if lumped {
-                let wave = sepika_job::sample_lumped_ground_motion(&app.core.analysis_cfg);
+                let wave = sepika_job::sample_lumped_ground_motion(&app.core.analysis_cfg).unwrap();
                 let accel =
                     sepika_job::lumped_accel_from_wave(&wave, app.core.analysis_cfg.lumped_dir)
                         .unwrap();
@@ -78,7 +78,7 @@ fn time_history_ownership_sample_amplitude_changes_actual_input_and_preserves_ot
                     .source
             } else {
                 app.time_history_input(
-                    App::sample_wave(&app.core.analysis_cfg),
+                    App::sample_wave(&app.core.analysis_cfg).unwrap(),
                     "同名サンプル".into(),
                 )
                 .source
@@ -86,9 +86,9 @@ fn time_history_ownership_sample_amplitude_changes_actual_input_and_preserves_ot
         };
         let before = make(&app);
         let wave_before = if lumped {
-            sepika_job::sample_lumped_ground_motion(&app.core.analysis_cfg)
+            sepika_job::sample_lumped_ground_motion(&app.core.analysis_cfg).unwrap()
         } else {
-            App::sample_wave(&app.core.analysis_cfg)
+            App::sample_wave(&app.core.analysis_cfg).unwrap()
         };
         if lumped {
             app.core.analysis_cfg.lumped_th_amp *= 2.0;
@@ -96,9 +96,9 @@ fn time_history_ownership_sample_amplitude_changes_actual_input_and_preserves_ot
             app.core.analysis_cfg.th_amp *= 2.0;
         }
         let wave_after = if lumped {
-            sepika_job::sample_lumped_ground_motion(&app.core.analysis_cfg)
+            sepika_job::sample_lumped_ground_motion(&app.core.analysis_cfg).unwrap()
         } else {
-            App::sample_wave(&app.core.analysis_cfg)
+            App::sample_wave(&app.core.analysis_cfg).unwrap()
         };
         assert!(wave_before.accel_x.iter().any(|a| a.abs() > 0.0));
         assert_eq!(
@@ -1138,6 +1138,10 @@ fn time_history_ownership_asynchronous_sample_entries_preserve_selected_existing
     use sepika_solver::dynamic::lumped_mass::{LumpedStiffnessSource, StickDim};
     for lumped in [false, true] {
         let mut app = ownership_portal();
+        app.core.analysis_cfg.th_dt = 0.02;
+        app.core.analysis_cfg.th_duration = 0.05;
+        app.core.analysis_cfg.lumped_th_dt = 0.02;
+        app.core.analysis_cfg.lumped_th_duration = 0.05;
         app.core.analysis_cfg.ai_mode = AiMode::Approx;
         app.core.analysis_cfg.lumped_dim = StickDim::Planar;
         app.core.analysis_cfg.lumped_stiffness = LumpedStiffnessSource::StoryQd;
@@ -1173,6 +1177,21 @@ fn time_history_ownership_asynchronous_sample_entries_preserve_selected_existing
             );
             assert_eq!(app.core.model.lumped_vibration_cases.len(), 2);
             assert_eq!(app.core.model.lumped_vibration_cases[0], a);
+            let current_id = app.core.model.lumped_vibration_cases[1].id;
+            assert_eq!(
+                app.core
+                    .scoped
+                    .results
+                    .as_ref()
+                    .unwrap()
+                    .lumped_result_for(current_id)
+                    .unwrap()
+                    .response
+                    .as_ref()
+                    .unwrap()
+                    .time,
+                vec![0.0, 0.02, 0.04, 0.06]
+            );
             assert_eq!(
                 app.core.model.lumped_vibration_cases[1].wave_name,
                 "サンプル"
@@ -1194,8 +1213,10 @@ fn time_history_ownership_asynchronous_sample_entries_preserve_selected_existing
             app.apply_time_history_result(Ok(ownership_result(77.0)), input.source);
             let a = app.core.model.vibration_cases[0].clone();
             app.core.scoped.wave_library_selection = Some("A.csv".into());
-            let input =
-                app.time_history_input(App::sample_wave(&app.core.analysis_cfg), "サンプル".into());
+            let input = app.time_history_input(
+                App::sample_wave(&app.core.analysis_cfg).unwrap(),
+                "サンプル".into(),
+            );
             #[cfg(feature = "gui")]
             {
                 app.request_analysis(PendingAnalysis::TimeHistory(Box::new(input)));
@@ -1219,6 +1240,18 @@ fn time_history_ownership_asynchronous_sample_entries_preserve_selected_existing
             );
             assert_eq!(app.core.model.vibration_cases.len(), 2);
             assert_eq!(app.core.model.vibration_cases[0], a);
+            let current_id = app.core.model.vibration_cases[1].id;
+            assert_eq!(
+                app.core
+                    .scoped
+                    .results
+                    .as_ref()
+                    .unwrap()
+                    .time_history_for(current_id)
+                    .unwrap()
+                    .time,
+                vec![0.0, 0.02, 0.04, 0.06]
+            );
             assert_eq!(app.core.model.vibration_cases[1].wave_name, "サンプル");
             assert_eq!(
                 app.core
