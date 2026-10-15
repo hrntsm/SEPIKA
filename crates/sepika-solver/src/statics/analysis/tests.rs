@@ -110,6 +110,279 @@ fn make_cantilever_model() -> Model {
     }
 }
 
+fn direction_model(loads: Vec<MemberLoad>) -> Model {
+    let mut model = make_cantilever_model();
+    model.load_cases = vec![LoadCase {
+        id: LoadCaseId(0),
+        name: "方向対照".into(),
+        nodal: vec![],
+        member: loads,
+        kind: Default::default(),
+    }];
+    model.combinations.clear();
+    model
+}
+
+#[test]
+fn member_load_directions_reject_before_solve_even_with_zero_intensity_and_all_dofs_fixed() {
+    for kind in [
+        MemberLoadKind::Point { a: 250.0, p: 100.0 },
+        MemberLoadKind::Point { a: 250.0, p: 0.0 },
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 1000.0,
+            w1: 7.0,
+            w2: 7.0,
+        },
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 1000.0,
+            w1: 0.0,
+            w2: 0.0,
+        },
+    ] {
+        for dir in [
+            [0.0; 3],
+            [1e-13, 0.0, 0.0],
+            [1e-300, 0.0, 0.0],
+            [1e300, 0.0, 0.0],
+            [f64::from_bits(1e-12_f64.to_bits() - 1), 0.0, 0.0],
+            [f64::NAN, 0.0, 0.0],
+            [0.0, f64::INFINITY, 0.0],
+            [0.0, 0.0, f64::NEG_INFINITY],
+        ] {
+            for all_fixed in [false, true] {
+                let mut load = MemberLoad::manual(ElemId(0), dir, kind.clone());
+                load.name = "保持する荷重".into();
+                let mut model = direction_model(vec![load]);
+                if all_fixed {
+                    model.nodes[1].restraint = Dof6Mask::FIXED;
+                }
+                assert!(model.validate().is_ok(), "未完成入力の保存契約を維持する");
+                let before = format!("{model:?}");
+                let error = Analysis::prepare(&model)
+                    .err()
+                    .expect("不正方向は解析を拒否する")
+                    .to_string();
+                let Err(direct_error) =
+                    crate::statics::linear::linear_static_once(&model, LoadCaseId(0))
+                else {
+                    panic!("公開静解析も方向不備を拒否する");
+                };
+                assert_eq!(direct_error.to_string(), error);
+                for token in [
+                    "荷重ケース 0",
+                    "方向対照",
+                    "member[0]",
+                    "保持する荷重",
+                    "部材 0",
+                    "作用方向",
+                ] {
+                    assert!(error.contains(token), "{error}");
+                }
+                assert!(precheck::model_issues(&model)
+                    .iter()
+                    .any(|issue| issue.message.contains("作用方向")
+                        && issue.severity == precheck::IssueSeverity::Error));
+                assert_eq!(format!("{model:?}"), before);
+            }
+        }
+    }
+}
+
+#[test]
+fn defined_member_load_directions_preserve_equilibrium_and_zero_effect_cases() {
+    for (kind, force_n, moment_nmm) in [
+        (MemberLoadKind::Point { a: 250.0, p: 100.0 }, 100.0, 25000.0),
+        (
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 1000.0,
+                w1: 7.0,
+                w2: 7.0,
+            },
+            7000.0,
+            3500000.0,
+        ),
+    ] {
+        for dir in [
+            [0.0, 0.0, -1.0],
+            [0.0, 0.0, -2.0],
+            [0.0, 3.0, -4.0],
+            [0.0, 0.0, -1e-12],
+            [0.0, 0.0, -f64::from_bits(1e-12_f64.to_bits() + 1)],
+            [1e-10, 0.0, -2.0],
+            [0.0, 2.0, 0.0],
+            [2.0, 0.0, 0.0],
+        ] {
+            let load = MemberLoad::manual(ElemId(0), dir, kind.clone());
+            let model = direction_model(vec![load]);
+            let result = Analysis::prepare(&model)
+                .unwrap()
+                .linear_static(LoadCaseId(0))
+                .unwrap();
+            let direct = crate::statics::linear::linear_static_once(&model, LoadCaseId(0)).unwrap();
+            assert_eq!(direct.disp, result.disp);
+            assert_eq!(direct.member_forces[0].1.at, result.member_forces[0].1.at);
+            let f = result.member_forces[0].1.at[0].1;
+            let axial = dir == [2.0, 0.0, 0.0];
+            assert!(
+                (f[0].hypot(f[1]).hypot(f[2]) - force_n).abs() < 1e-6,
+                "{dir:?}: {f:?}"
+            );
+            assert!(
+                (f[4].hypot(f[5]) - if axial { 0.0 } else { moment_nmm }).abs() < 1e-5,
+                "{dir:?}: {f:?}"
+            );
+            assert!(result.disp.iter().flatten().all(|x| x.is_finite()));
+            assert_eq!(model.load_cases[0].member[0].dir, dir);
+        }
+        let down = MemberLoad::manual(ElemId(0), [0.0, 0.0, -2.0], kind.clone());
+        let up = MemberLoad::manual(ElemId(0), [0.0, 0.0, 1.0], kind);
+        let model = direction_model(vec![down, up]);
+        let result = Analysis::prepare(&model)
+            .unwrap()
+            .linear_static(LoadCaseId(0))
+            .unwrap();
+        assert!(result.disp.iter().flatten().all(|x| x.abs() < 1e-10));
+        assert!(result.member_forces[0]
+            .1
+            .at
+            .iter()
+            .flat_map(|(_, f)| f)
+            .all(|x| x.abs() < 1e-6));
+    }
+    for loads in [
+        vec![],
+        vec![MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -2.0],
+            MemberLoadKind::Point { a: 250.0, p: 0.0 },
+        )],
+        vec![MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -2.0],
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 1000.0,
+                w1: 0.0,
+                w2: 0.0,
+            },
+        )],
+    ] {
+        let result = Analysis::prepare(&direction_model(loads))
+            .unwrap()
+            .linear_static(LoadCaseId(0))
+            .unwrap();
+        assert!(result.disp.iter().flatten().all(|x| x.abs() < 1e-10));
+    }
+    let signed = MemberLoad::manual(
+        ElemId(0),
+        [0.0, 0.0, -2.0],
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 1000.0,
+            w1: 7.0,
+            w2: -7.0,
+        },
+    );
+    let result = Analysis::prepare(&direction_model(vec![signed]))
+        .unwrap()
+        .linear_static(LoadCaseId(0))
+        .unwrap();
+    let f = result.member_forces[0].1.at[0].1;
+    assert!(f[1].hypot(f[2]) < 1e-6);
+    assert!((f[4].hypot(f[5]) - 1166666.6666666667).abs() < 1e-5);
+}
+
+#[test]
+fn public_dynamic_and_pushover_entries_reject_direction_before_early_returns() {
+    use crate::common::constraint::Reducer;
+    use crate::dynamic::{damping::Damping, eigen::solve_eigen, timehistory::*};
+    use sepika_core::dof::DofMap;
+    for kind in [
+        MemberLoadKind::Point { a: 250.0, p: 100.0 },
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 1000.0,
+            w1: 7.0,
+            w2: 7.0,
+        },
+    ] {
+        for all_fixed in [false, true] {
+            let mut model =
+                direction_model(vec![MemberLoad::manual(ElemId(0), [0.0; 3], kind.clone())]);
+            if all_fixed {
+                model.nodes[1].restraint = Dof6Mask::FIXED;
+            }
+            let dofmap = DofMap::build(&model);
+            let reducer = Reducer::build(&model, &dofmap);
+            let wave = GroundMotion {
+                dt: 0.01,
+                accel_x: vec![0.0],
+                accel_y: None,
+                accel_theta: None,
+            };
+            let newmark = NewmarkCfg::average_accel();
+            let damping = Damping::MassProportional { h: 0.0, omega: 1.0 };
+            let initial = vec![0.0; reducer.n_indep];
+            let errors = [
+                {
+                    let Err(error) = solve_eigen(&model, &dofmap, &reducer, 0) else {
+                        panic!("固有値入口も全ケースを検査する");
+                    };
+                    error.to_string()
+                },
+                {
+                    let Err(error) = linear_time_history_analysis(
+                        &model, &dofmap, &reducer, &wave, &newmark, &damping, &initial, &initial,
+                        false, None,
+                    ) else {
+                        panic!("線形時刻歴入口も全ケースを検査する");
+                    };
+                    error.to_string()
+                },
+                {
+                    let Err(error) = nonlinear_time_history_analysis(
+                        &model,
+                        &dofmap,
+                        &reducer,
+                        &wave,
+                        &newmark,
+                        &damping,
+                        Default::default(),
+                        &initial,
+                        &initial,
+                        NonlinearThCfg::default(),
+                    ) else {
+                        panic!("非線形時刻歴は長期載荷前に拒否する");
+                    };
+                    error.to_string()
+                },
+                {
+                    let Err(error) = crate::nonlinear::pushover::pushover_analysis(
+                        &model,
+                        &dofmap,
+                        &reducer,
+                        SeismicDir::X,
+                        1,
+                        1.0,
+                        false,
+                    ) else {
+                        panic!("増分解析は長期載荷前に拒否する");
+                    };
+                    error
+                },
+            ];
+            for error in errors {
+                for token in ["荷重ケース 0", "member[0]", "部材 0", "作用方向"] {
+                    assert!(error.contains(token), "{error}");
+                }
+            }
+        }
+    }
+}
+
 /// 解析前チェックの入口 `Analysis::prepare` が、代表的な入力不備を日本語の
 /// エラーとして返すこと（診断の生成自体は `model_issues` 側の各テストで検証する）。
 ///

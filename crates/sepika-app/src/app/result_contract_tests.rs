@@ -149,6 +149,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-frame-node-counts", Some(12), "旧契約"),
         ("old-time-history-timeline", Some(19), "旧契約"),
         ("old-column-self-weight-faces", Some(20), "旧契約"),
+        ("old-member-load-direction", Some(22), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -187,7 +188,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
 #[test]
 fn ovika_old_analysis_is_unavailable_until_explicit_reanalysis() {
     let app = calculated();
-    for version in [5, 6, 7, 20] {
+    for version in [5, 6, 7, 20, 22] {
         let (mut loaded, path) = restore(
             &app,
             Some(version),
@@ -214,6 +215,11 @@ fn ovika_old_analysis_is_unavailable_until_explicit_reanalysis() {
         );
         assert!(reopened.require_selected_static_input().is_err());
         loaded = reopened;
+        loaded.run_design_check();
+        let design_only = loaded.core.scoped.results.as_ref().unwrap();
+        assert!(!design_only.has_analysis_results());
+        assert!(design_only.member_forces.is_empty() && design_only.member_checks.is_empty());
+        assert!(loaded.require_selected_static_input().is_err());
         loaded.run_linear_static(LoadCaseId(0));
         assert!(loaded.core.scoped.last_error.is_none());
         let recovered = loaded.core.scoped.results.as_ref().unwrap();
@@ -893,7 +899,7 @@ fn lip_channel_geometry_old_contracts_expire_and_current_keeps_results() {
 
 #[test]
 fn cft_case2_design12_expires_while_current_analysis_survives_and_design13_can_be_recomputed() {
-    assert_eq!(ANALYSIS_CONTRACT_VERSION, 22);
+    assert_eq!(ANALYSIS_CONTRACT_VERSION, 23);
     assert_eq!(DESIGN_CONTRACT_VERSION, 13);
     let app = super::tests::cft_long_case2_app(4_000_000.0);
     let original = app.core.scoped.results.as_ref().unwrap();

@@ -167,7 +167,11 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
 }
 
 /// 不存在の荷重ケース ID は、拘束状態・解析経路に関係なく ID を含む `SolveError::InvalidInput` を返す。
+/// 全ケースの不正な部材荷重方向は、強度・拘束状態によらず `SolveError::InvalidInput` を返す。
 pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, SolveError> {
+    model
+        .validate_member_load_directions()
+        .map_err(SolveError::InvalidInput)?;
     model
         .validate_frame_node_counts()
         .map_err(|e| SolveError::InvalidInput(e.to_string()))?;

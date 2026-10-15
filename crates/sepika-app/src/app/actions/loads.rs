@@ -214,9 +214,7 @@ impl App {
                 self.core.scoped.auto_load_sync_hash = Some(self.compute_auto_load_sync_hash());
             }
             Err(error) => {
-                self.report_notice(
-                    "EX/EY を再生成できないため旧 Auto 水平力を両方向とも除去しました。",
-                );
+                self.report_notice("解析前処理に失敗したため、荷重を再生成できない状態です。");
                 self.report_error(error.to_string());
             }
         }
