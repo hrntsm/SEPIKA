@@ -2930,7 +2930,11 @@ fn test_export_stbridge_rejects_fourth_stage_without_overwriting_file() {
     let section_id = model
         .elements
         .iter()
-        .find(|element| element.kind == sepika_core::model::ElementKind::Beam)
+        .find(|element| {
+            model.element_section(element).is_some_and(|section| {
+                section.frame_use == Some(sepika_core::model::FrameSectionUse::Girder)
+            })
+        })
         .and_then(|element| element.section)
         .expect("梁断面");
     model.sections[section_id.index()].shape =
@@ -8204,7 +8208,7 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
     for index in [0, 2] {
         model.sections[index].rebar_material = Some(MaterialId(1));
         model.sections[index].shear_rebar_material = Some(MaterialId(1));
-        model.sections[index].shape =
+        model.sections[index].shape = if index == 0 {
             Some(sepika_core::section_shape::SectionShape::RcColumnRect {
                 b: 400.0,
                 d: 600.0,
@@ -8220,7 +8224,24 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
                         legs_y: 2,
                     },
                 },
-            });
+            })
+        } else {
+            Some(sepika_core::section_shape::SectionShape::RcBeamRect {
+                b: 400.0,
+                d: 600.0,
+                rebar: sepika_core::section_shape::RcBeamRebar {
+                    main_dia: 22.0,
+                    top: vec![],
+                    bottom: vec![],
+                    cover: 40.0,
+                    stirrup: sepika_core::section_shape::BeamStirrup {
+                        dia: 10.0,
+                        pitch: 100.0,
+                        legs: 2,
+                    },
+                },
+            })
+        };
     }
     model.rebuild_floor_assignment_regions();
     let first = model

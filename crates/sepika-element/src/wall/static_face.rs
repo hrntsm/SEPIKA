@@ -466,7 +466,7 @@ mod tests {
         m.nodes.push(node);
         let mut section = m.sections[1].clone();
         section.id = sepika_core::ids::SectionId(3);
-        let Some(SectionShape::RcColumnRect { d, .. }) = &mut section.shape else {
+        let Some(SectionShape::RcBeamRect { d, .. }) = &mut section.shape else {
             panic!()
         };
         *d = 1000.0;

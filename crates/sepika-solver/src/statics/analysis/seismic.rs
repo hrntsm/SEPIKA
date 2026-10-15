@@ -347,6 +347,9 @@ pub fn seismic_distribution_for_model(
     t: f64,
 ) -> Result<sepika_load::ai::AiDistribution, SolveError> {
     model
+        .validate_rc_section_usage()
+        .map_err(|e| sepika_math::solver::SolveError::InvalidInput(e.to_string()))?;
+    model
         .validate_secondary_section_usage()
         .map_err(|e| sepika_math::solver::SolveError::InvalidInput(e.to_string()))?;
     let SeismicCfg {

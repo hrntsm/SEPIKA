@@ -703,6 +703,9 @@ pub fn try_compute_quantity_takeoff(
         .validate_frame_node_counts()
         .map_err(|e| e.to_string())?;
     model
+        .validate_rc_section_usage()
+        .map_err(|e| e.to_string())?;
+    model
         .validate_secondary_section_usage()
         .map_err(|e| e.to_string())?;
     validate_circular_rc_posts(model)?;

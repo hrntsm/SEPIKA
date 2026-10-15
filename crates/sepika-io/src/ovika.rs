@@ -109,6 +109,9 @@ pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result
         .validate_lip_channels()
         .map_err(|e| IoError::Decode(e.to_string()))?;
     model
+        .validate_rc_section_usage()
+        .map_err(|e| IoError::Decode(e.to_string()))?;
+    model
         .validate_secondary_section_usage()
         .map_err(|e| IoError::Decode(e.to_string()))?;
     model
@@ -269,6 +272,9 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
         .map_err(|e| IoError::Decode(e.to_string()))?;
 
     model
+        .validate_rc_section_usage()
+        .map_err(|e| IoError::Decode(e.to_string()))?;
+    model
         .validate_secondary_section_usage()
         .map_err(|e| IoError::Decode(e.to_string()))?;
     model
@@ -289,7 +295,255 @@ mod tests {
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::*;
     use sepika_core::model::*;
-    use sepika_core::section_shape::SectionShape;
+    use sepika_core::section_shape::*;
+
+    fn rc_purpose_shapes() -> Vec<(
+        SectionShape,
+        FrameSectionUse,
+        SecondaryMemberKind,
+        &'static str,
+    )> {
+        vec![
+            (
+                SectionShape::RcBeamRect {
+                    b: 300.0,
+                    d: 500.0,
+                    rebar: RcBeamRebar {
+                        main_dia: 22.0,
+                        top: vec![3],
+                        bottom: vec![4],
+                        cover: 40.0,
+                        stirrup: BeamStirrup {
+                            dia: 10.0,
+                            pitch: 150.0,
+                            legs: 2,
+                        },
+                    },
+                },
+                FrameSectionUse::Girder,
+                SecondaryMemberKind::Post,
+                "RC 梁用断面は大梁・小梁専用",
+            ),
+            (
+                SectionShape::RcColumnRect {
+                    b: 600.0,
+                    d: 600.0,
+                    rebar: RcRectColumnRebar {
+                        main_dia: 19.0,
+                        x: vec![4],
+                        y: vec![4],
+                        cover: 40.0,
+                        hoop: RectColumnHoop {
+                            dia: 10.0,
+                            pitch: 150.0,
+                            legs_x: 2,
+                            legs_y: 2,
+                        },
+                    },
+                },
+                FrameSectionUse::Column,
+                SecondaryMemberKind::Beam,
+                "RC 柱用断面は柱・間柱専用",
+            ),
+            (
+                SectionShape::RcColumnCircle {
+                    d: 600.0,
+                    rebar: RcCircleColumnRebar {
+                        main_dia: 19.0,
+                        count: 12,
+                        cover: 40.0,
+                        hoop: CircleColumnHoop {
+                            dia: 10.0,
+                            pitch: 150.0,
+                        },
+                    },
+                },
+                FrameSectionUse::Column,
+                SecondaryMemberKind::Beam,
+                "RC 柱用断面は柱・間柱専用",
+            ),
+        ]
+    }
+
+    #[test]
+    fn rc_purpose_rejects_save_and_correctly_hashed_load_without_overwriting_existing_file() {
+        let path = crate::test_util::test_tmp().join("rc-purpose-preserved.ovika");
+        save_ovika(&path, &make_3node_model(), OvikaExtras::default()).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        for (index, (shape, correct, wrong_kind, reason)) in
+            rc_purpose_shapes().into_iter().enumerate()
+        {
+            shape.validate_rebar().unwrap();
+            for mode in 0..5 {
+                let mut model = make_3node_model();
+                let mut section = shape.clone().to_section(SectionId(0), "RC用途検証".into());
+                section.frame_use = if mode == 0 {
+                    Some(if correct == FrameSectionUse::Girder {
+                        FrameSectionUse::Column
+                    } else {
+                        FrameSectionUse::Girder
+                    })
+                } else if mode % 2 == 0 {
+                    Some(correct)
+                } else {
+                    None
+                };
+                model.sections.push(section);
+                if mode != 0 {
+                    let sm = SecondaryMember {
+                        id: SecondaryMemberId(674),
+                        kind: wrong_kind,
+                        ends: SecondaryMemberEnds::Detached([[0.0; 3], [1000.0, 0.0, 0.0]]),
+                        section: Some(SectionId(0)),
+                        name: "逆用途".into(),
+                        gravity_end_shares: None,
+                    };
+                    match (wrong_kind, mode <= 2) {
+                        (SecondaryMemberKind::Beam, true) => model.unassigned_beams.push(sm),
+                        (SecondaryMemberKind::Post, true) => model.unassigned_posts.push(sm),
+                        (SecondaryMemberKind::Beam, false) => {
+                            let mut region = FloorRegion::new(FloorRegionId(0), vec![]);
+                            region.secondary_beams.push(sm);
+                            model.floor_regions.push(region);
+                        }
+                        (SecondaryMemberKind::Post, false) => {
+                            let mut region = WallRegion::new(WallRegionId(0), vec![]);
+                            region.posts.push(sm);
+                            model.wall_regions.push(region);
+                        }
+                    }
+                }
+                let before = model.clone();
+                assert!(
+                    matches!(save_ovika(&path, &model, OvikaExtras::default()), Err(IoError::Decode(message)) if message.contains(reason)),
+                    "shape={index} mode={mode}"
+                );
+                assert_eq!(std::fs::read(&path).unwrap(), original);
+                assert!(model.eq_ignoring_dofmap(&before));
+                let bytes = rmp_serde::to_vec_named(&model).unwrap();
+                let settings = b"{}";
+                let manifest = Manifest {
+                    schema_version: CURRENT_SCHEMA_VERSION,
+                    units: "internal: N-mm-s".into(),
+                    created_by: "rc-purpose-fixture".into(),
+                    entries: vec![
+                        crate::manifest::EntryHash {
+                            name: "model.msgpack".into(),
+                            sha256: sha256_of(&bytes),
+                        },
+                        crate::manifest::EntryHash {
+                            name: "settings.json".into(),
+                            sha256: sha256_of(settings),
+                        },
+                    ],
+                };
+                let invalid_path =
+                    path.with_file_name(format!("rc-purpose-invalid-{index}-{mode}.ovika"));
+                write_zip_with_manifest(&invalid_path, &manifest, &bytes, settings);
+                assert!(
+                    matches!(load_ovika(&invalid_path), Err(IoError::Decode(message)) if message.contains(reason)),
+                    "shape={index} mode={mode}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn noncanonical_rc_secondary_uses_reject_save_and_correctly_hashed_load() {
+        let path = crate::test_util::test_tmp().join("rc-purpose-noncanonical-preserved.ovika");
+        save_ovika(&path, &Model::default(), OvikaExtras::default()).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        for (index, (shape, _, wrong_kind, reason)) in rc_purpose_shapes().into_iter().enumerate() {
+            shape.validate_rebar().unwrap();
+            for id in [SectionId(7), SectionId(1)] {
+                for assigned in [false, true] {
+                    let section = shape.clone().to_section(id, "RC用途".into());
+                    let mut model = Model {
+                        sections: vec![section],
+                        ..Default::default()
+                    };
+                    if id == SectionId(1) {
+                        model
+                            .sections
+                            .push(Section::zero(SectionId(9), "別ID".into()));
+                    }
+                    let sm = SecondaryMember {
+                        id: SecondaryMemberId(674),
+                        kind: wrong_kind,
+                        ends: SecondaryMemberEnds::Detached([[0.0; 3], [1000.0, 0.0, 0.0]]),
+                        section: Some(id),
+                        name: "逆用途".into(),
+                        gravity_end_shares: None,
+                    };
+                    match (wrong_kind, assigned) {
+                        (SecondaryMemberKind::Beam, false) => model.unassigned_beams.push(sm),
+                        (SecondaryMemberKind::Post, false) => model.unassigned_posts.push(sm),
+                        (SecondaryMemberKind::Beam, true) => {
+                            let mut region = FloorRegion::new(FloorRegionId(0), vec![]);
+                            region.secondary_beams.push(sm);
+                            model.floor_regions.push(region);
+                        }
+                        (SecondaryMemberKind::Post, true) => {
+                            let mut region = WallRegion::new(WallRegionId(0), vec![]);
+                            region.posts.push(sm);
+                            model.wall_regions.push(region);
+                        }
+                    }
+                    let before = model.clone();
+                    let expected = |message: &str| {
+                        message.contains(reason)
+                            && message.contains("SecondaryMemberId(674)")
+                            && message.contains(&format!("SectionId({})", id.0))
+                    };
+                    assert!(
+                        matches!(save_ovika(&path, &model, OvikaExtras::default()), Err(IoError::Decode(message)) if expected(&message))
+                    );
+                    assert_eq!(std::fs::read(&path).unwrap(), original);
+                    assert!(model.eq_ignoring_dofmap(&before));
+                    let bytes = rmp_serde::to_vec_named(&model).unwrap();
+                    let settings = b"{}";
+                    let manifest = Manifest {
+                        schema_version: CURRENT_SCHEMA_VERSION,
+                        units: "internal: N-mm-s".into(),
+                        created_by: "rc-purpose-noncanonical-fixture".into(),
+                        entries: vec![
+                            crate::manifest::EntryHash {
+                                name: "model.msgpack".into(),
+                                sha256: sha256_of(&bytes),
+                            },
+                            crate::manifest::EntryHash {
+                                name: "settings.json".into(),
+                                sha256: sha256_of(settings),
+                            },
+                        ],
+                    };
+                    let invalid_path = path.with_file_name(format!(
+                        "rc-purpose-noncanonical-{index}-{}-{assigned}.ovika",
+                        id.0
+                    ));
+                    write_zip_with_manifest(&invalid_path, &manifest, &bytes, settings);
+                    let container = std::fs::read(&invalid_path).unwrap();
+                    assert!(
+                        matches!(load_ovika(&invalid_path), Err(IoError::Decode(message)) if expected(&message))
+                    );
+                    assert_eq!(std::fs::read(&invalid_path).unwrap(), container);
+                }
+            }
+        }
+        let general = Model {
+            sections: vec![Section::zero(SectionId(7), "直接入力".into())],
+            unassigned_posts: vec![SecondaryMember {
+                id: SecondaryMemberId(674),
+                kind: SecondaryMemberKind::Post,
+                section: Some(SectionId(7)),
+                ..SecondaryMember::default()
+            }],
+            ..Default::default()
+        };
+        save_ovika(&path, &general, OvikaExtras::default()).unwrap();
+        let loaded = load_ovika(&path).unwrap().model;
+        assert!(loaded.eq_ignoring_dofmap(&general));
+    }
 
     #[test]
     fn issue635_save_and_correctly_hashed_load_reject_invalid_fixed_distance() {

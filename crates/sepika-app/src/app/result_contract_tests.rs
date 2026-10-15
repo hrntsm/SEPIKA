@@ -892,17 +892,25 @@ fn lip_channel_geometry_old_contracts_expire_and_current_keeps_results() {
 }
 
 #[test]
-fn cft_case2_design12_expires_while_analysis21_survives_and_design13_can_be_recomputed() {
-    assert_eq!(ANALYSIS_CONTRACT_VERSION, 21);
+fn cft_case2_design12_expires_while_current_analysis_survives_and_design13_can_be_recomputed() {
+    assert_eq!(ANALYSIS_CONTRACT_VERSION, 22);
     assert_eq!(DESIGN_CONTRACT_VERSION, 13);
     let app = super::tests::cft_long_case2_app(4_000_000.0);
     let original = app.core.scoped.results.as_ref().unwrap();
     assert!(original.has_design_results());
-    let (mut loaded, path) = restore(&app, Some(21), Some(12), "cft-case2-design12");
+    let (mut loaded, path) = restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(12),
+        "cft-case2-design12",
+    );
     let bundle = loaded.core.scoped.results.as_ref().unwrap();
     assert_eq!(bundle.statics[0].1.disp, original.statics[0].1.disp);
     assert_eq!(bundle.member_forces, original.member_forces);
-    assert_eq!(bundle.analysis_contract_version, Some(21));
+    assert_eq!(
+        bundle.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
     assert!(!bundle.has_design_results());
     assert!(loaded.core.scoped.staleness.design_stale);
     assert!(!loaded.core.scoped.staleness.results_stale);
@@ -913,7 +921,10 @@ fn cft_case2_design12_expires_while_analysis21_survives_and_design13_can_be_reco
     reopened.open_project_from(path.clone());
     assert!(reopened.core.scoped.last_error.is_none());
     let saved = reopened.core.scoped.results.as_ref().unwrap();
-    assert_eq!(saved.analysis_contract_version, Some(21));
+    assert_eq!(
+        saved.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
     assert!(!saved.has_design_results());
     assert_eq!(saved.design_contract_version, None);
     reopened.run_design_check();

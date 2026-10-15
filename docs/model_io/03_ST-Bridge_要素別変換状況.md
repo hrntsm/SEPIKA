@@ -158,7 +158,7 @@ ST-Bridge 2.0.2 の圧延 H・Box は正の `r` が必須です。
 | ST-Bridge 要素 | 取り込み | 書き出し | 往復・備考 |
 |---|:--:|:--:|---|
 | `StbSecColumn_RC`（`_Rect` / `_Circle`） | ✅ | ✅ | RC 矩形柱・円形柱（`RcColumnRect`/`RcColumnCircle`）＋配筋 |
-| `StbSecBeam_RC`（`_Straight`） | ✅ | ✅ | RC 矩形梁（`RcBeamRect`）＋配筋。円形梁は ST-Bridge に図形がなく `StbSecRaw` へフォールバック（警告を出す） |
+| `StbSecBeam_RC`（`_Straight`） | ✅ | ✅ | RC 矩形梁（`RcBeamRect`）＋配筋。大梁・小梁専用。RC 柱型の梁利用と円形 RC 梁は非対応で、主架構線材・小梁・間柱の用途不整合は入出力時に拒否する |
 | `StbSecBarArrangement*`（配筋） | ✅ | ⚠️ | RC/SRC梁・柱の元部位・pos・標準属性・省略を保存。現解析型へ表現できない配置は計算不可。新規・編集済み配筋の標準出力は必須値と段数を検査する |
 | `StbSecColumn_CFT`（＋充填鋼管） | ✅ | ⚠️ | CFT 角形・円形（`CftBox`/`CftPipe`）。**`FrameSectionUse::Column` の主架構柱だけ**に使用でき、床板・壁版・`StbBeam` 等の二次部材には使用しない。用途不一致の既存参照や未参照断面は解析前チェックで ID・件数を示してエラーにする。書き出しで不正用途の部材が参照する場合は `StbSecRaw` へ |
 | `StbSecColumn_SRC` / `StbSecBeam_SRC` | ✅ | ✅ | SRC 矩形（`SrcColumnRect`/`SrcBeamRect`）＋内蔵鉄骨（H 形鋼）＋配筋＋鋼種 `strength_steel` |

@@ -30,6 +30,9 @@ impl EditCommand for CompositeCommand {
         if inverse.rejection().is_some() {
             return inverse;
         }
+        if let Err(error) = candidate.validate_rc_section_usage() {
+            return Box::new(crate::RejectedEdit(error.to_string()));
+        }
         if let Err(error) = candidate.validate_attached_slabs() {
             return Box::new(crate::RejectedEdit(error.to_string()));
         }

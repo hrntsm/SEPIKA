@@ -75,6 +75,9 @@ pub(crate) fn validate_global_mass_inputs(
         .validate_lip_channels()
         .map_err(|e| sepika_math::solver::SolveError::InvalidInput(e.to_string()))?;
     model
+        .validate_rc_section_usage()
+        .map_err(|e| sepika_math::solver::SolveError::InvalidInput(e.to_string()))?;
+    model
         .validate_secondary_section_usage()
         .map_err(|e| sepika_math::solver::SolveError::InvalidInput(e.to_string()))?;
     model

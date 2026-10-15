@@ -339,7 +339,7 @@ fn linear_static_job_rejects_ex_without_seismic_horizontal_load() {
     let mut model = rc_column_model();
     model.load_cases.clear();
     model.nodes[1].coord = [3000.0, 0.0, 0.0];
-    model.sections[0].frame_use = Some(FrameSectionUse::Girder);
+    model.sections[0] = rc_girder_section(SectionId(0), "G600");
     model.load_cases.push(LoadCase {
         id: LoadCaseId(0),
         name: sepika_core::model::EX_CASE_NAME.into(),
@@ -495,6 +495,32 @@ fn test_query_model_elements_with_member_detail() {
     assert_eq!(joints.len(), 1);
     assert_eq!(joints[0]["distance"], 1000.0);
     assert_eq!(joints[0]["kind"], "Shop");
+}
+
+pub(crate) fn rc_girder_section(id: SectionId, name: &str) -> Section {
+    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
+    Section {
+        material: Some(MaterialId(0)),
+        rebar_material: Some(MaterialId(1)),
+        shear_rebar_material: Some(MaterialId(1)),
+        frame_use: Some(FrameSectionUse::Girder),
+        ..SectionShape::RcBeamRect {
+            b: 600.0,
+            d: 600.0,
+            rebar: RcBeamRebar {
+                main_dia: 25.0,
+                top: vec![8],
+                bottom: vec![8],
+                cover: 40.0,
+                stirrup: BeamStirrup {
+                    dia: 10.0,
+                    pitch: 100.0,
+                    legs: 2,
+                },
+            },
+        }
+        .to_section(id, name.into())
+    }
 }
 
 /// RC 矩形の片持ち柱モデル（終局検定ジョブ用）。長期荷重ケース 1 つ。
@@ -1648,11 +1674,7 @@ fn wall_horizontal_input_survives_ovika_and_mcp_design_reports_missing_assignmen
     top.id = NodeId(3);
     top.coord = [4000.0, 0.0, 3000.0];
     model.nodes.extend([bottom, top]);
-    let mut girder = model.sections[0].clone();
-    girder.id = SectionId(1);
-    girder.name = "梁".into();
-    girder.frame_use = Some(FrameSectionUse::Girder);
-    model.sections.push(girder);
+    model.sections.push(rc_girder_section(SectionId(1), "梁"));
     for (id, nodes, section) in [(1, [0, 2], 1), (2, [1, 3], 1), (3, [2, 3], 0)] {
         let mut element = model.elements[0].clone();
         element.id = ElemId(id);
@@ -2792,15 +2814,27 @@ fn load_state_mcp_automatic_gravity_uses_frame_live_and_rejects_any_failed_gravi
 }
 
 #[test]
-fn load_state_rc_girder_missing_q0_is_skipped_instead_of_fem_ql_substitution() {
+fn load_state_direct_rc_girder_missing_q0_is_skipped_while_typed_beam_accepts_valid_zero() {
     let mut model = load_state_contract_model();
     model.nodes[1].coord = [3000.0, 0.0, 0.0];
     model.elements[0].local_axis.ref_vector = [0.0, 0.0, 1.0];
-    model.sections[0].frame_use = Some(FrameSectionUse::Girder);
+    model.sections[0] = rc_girder_section(SectionId(0), "G600");
     let params = JobParams {
         load_combination: Some(3),
         ..Default::default()
     };
+    let JobOutcome::DesignCheck { summary, .. } =
+        compute_job(&model, JobKind::DesignCheck, &params).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(summary["all_checked_and_ok"], true);
+    assert!(!summary["member_skipped"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["reason"].as_str().unwrap().contains("QD1用")));
+    model.sections[0].shape = None;
     let JobOutcome::DesignCheck { summary, .. } =
         compute_job(&model, JobKind::DesignCheck, &params).unwrap()
     else {
@@ -4162,11 +4196,7 @@ fn directional_quantity_mcp_fixture() -> Model {
     top.id = NodeId(3);
     top.coord = [4600.0, 0.0, 3600.0];
     model.nodes.extend([bottom, top]);
-    let mut girder = model.sections[0].clone();
-    girder.id = SectionId(1);
-    girder.name = "梁".into();
-    girder.frame_use = Some(FrameSectionUse::Girder);
-    model.sections.push(girder);
+    model.sections.push(rc_girder_section(SectionId(1), "梁"));
     for (id, nodes, section) in [(1, [0, 2], 1), (2, [1, 3], 1), (3, [2, 3], 0)] {
         let mut element = model.elements[0].clone();
         element.id = ElemId(id);

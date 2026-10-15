@@ -266,6 +266,7 @@ fn test_pushover_stops_when_concrete_strength_unset() {
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
 
     let mut model = single_column_model(235.0, 80_000.0);
+    model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
     model.sections[0].shape = Some(SectionShape::RcColumnRect {
         b: 400.0,
         d: 400.0,
@@ -3482,15 +3483,31 @@ fn prepared_wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
     let mut girder = model.sections[1].clone();
     girder.id = SectionId(2);
     girder.name = "RC梁600x600".into();
+    girder.shape = Some(sepika_core::section_shape::SectionShape::RcBeamRect {
+        b: 600.0,
+        d: 600.0,
+        rebar: sepika_core::section_shape::RcBeamRebar {
+            main_dia: 22.0,
+            top: vec![8],
+            bottom: vec![8],
+            cover: 50.0,
+            stirrup: sepika_core::section_shape::BeamStirrup {
+                dia: 10.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    });
     girder.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
     model.sections.push(girder);
     for id in [ElemId(1), ElemId(2)] {
-        model
+        let element = model
             .elements
             .iter_mut()
-            .find(|e| e.id == id)
-            .unwrap()
-            .section = Some(SectionId(2));
+            .find(|element| element.id == id)
+            .unwrap();
+        element.section = Some(SectionId(2));
+        element.force_regime = sepika_core::model::ForceRegime::AxialBendingInteract;
     }
     sepika_element::frame::beam::apply_auto_rigid_zones(&mut model, &Default::default());
     let face = sepika_core::face_distance::wall_support_face(

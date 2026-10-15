@@ -163,10 +163,9 @@ mod tests {
         top.id = NodeId(3);
         top.coord = [4000.0, 0.0, 3000.0];
         model.nodes.extend([bottom, top]);
-        let mut girder = model.sections[0].clone();
-        girder.id = SectionId(1);
-        girder.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
-        model.sections.push(girder);
+        model
+            .sections
+            .push(crate::tests::rc_girder_section(SectionId(1), "梁"));
         for (id, nodes, section) in [(1, [0, 2], 1), (2, [1, 3], 1), (3, [2, 3], 0)] {
             let mut e = model.elements[0].clone();
             e.id = ElemId(id);
@@ -174,6 +173,14 @@ mod tests {
             e.section = Some(SectionId(section));
             e.local_axis.ref_vector = [0.0, 1.0, 0.0];
             model.elements.push(e);
+        }
+        for id in [ElemId(1), ElemId(2)] {
+            model
+                .elements
+                .iter_mut()
+                .find(|element| element.id == id)
+                .unwrap()
+                .force_regime = sepika_core::model::ForceRegime::AxialBendingInteract;
         }
         let mut section = sepika_core::section_shape::SectionShape::RcWall {
             thickness: 180.0,

@@ -3,7 +3,9 @@ use sepika_core::ids::WallPlateId;
 use sepika_core::model::{
     ElementKind, MaterialCategory, Model, StbGradeMaterial, StbMemberStrength, StrengthTarget,
 };
-use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+use sepika_core::section_shape::{
+    BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
+};
 use sepika_element::factory::StrengthBasis;
 use sepika_element::wall::wall_element::WallElement;
 
@@ -33,7 +35,7 @@ fn fixture() -> Model {
     horizontal.name = "SD295A".into();
     horizontal.fy = Some(295.0);
     model.materials.extend([vertical, horizontal]);
-    let frame = SectionShape::RcColumnRect {
+    let column = SectionShape::RcColumnRect {
         b: 600.0,
         d: 600.0,
         rebar: RcRectColumnRebar {
@@ -49,17 +51,32 @@ fn fixture() -> Model {
             },
         },
     };
+    let beam = SectionShape::RcBeamRect {
+        b: 600.0,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: 22.0,
+            top: vec![8],
+            bottom: vec![8],
+            cover: 50.0,
+            stirrup: BeamStirrup {
+                dia: 10.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    };
     for index in 0..3 {
         let old = &model.sections[index];
-        let shape = if index == 2 {
-            SectionShape::RcWall {
+        let shape = match index {
+            0 => column.clone(),
+            1 => beam.clone(),
+            _ => SectionShape::RcWall {
                 thickness: 200.0,
                 ps: 0.0025,
                 pwh_ratio: Some(0.006),
                 pwv_ratio: Some(0.002),
-            }
-        } else {
-            frame.clone()
+            },
         };
         let mut section = shape.to_section(old.id, old.name.clone());
         section.frame_use = old.frame_use;

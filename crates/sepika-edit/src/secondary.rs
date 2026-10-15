@@ -71,6 +71,11 @@ pub struct AddUnassignedBeam {
 
 impl EditCommand for AddUnassignedBeam {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Some(reason) =
+            crate::refs::rc_secondary_section_error(model, self.sm.kind, self.sm.section)
+        {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         if self.sm.kind != SecondaryMemberKind::Beam || !secondary_member_ok(model, &self.sm) {
             return Box::new(Noop);
         }
@@ -145,6 +150,11 @@ pub struct AddUnassignedPost {
 
 impl EditCommand for AddUnassignedPost {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Some(reason) =
+            crate::refs::rc_secondary_section_error(model, self.sm.kind, self.sm.section)
+        {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         if self.sm.kind != SecondaryMemberKind::Post || !secondary_member_ok(model, &self.sm) {
             return Box::new(Noop);
         }
@@ -254,6 +264,13 @@ impl EditCommand for RestoreFloorRegionSecondaryBeams {
 
 impl EditCommand for SetFloorRegionSecondaryBeams {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        for sm in &self.beams {
+            if let Some(reason) =
+                crate::refs::rc_secondary_section_error(model, sm.kind, sm.section)
+            {
+                return Box::new(crate::RejectedEdit(reason));
+            }
+        }
         let idx = self.region.index();
         if idx >= model.floor_regions.len() || model.floor_regions[idx].id != self.region {
             return Box::new(Noop);
@@ -300,6 +317,11 @@ pub struct SetFloorRegionBeamSection {
 
 impl EditCommand for SetFloorRegionBeamSection {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Some(reason) =
+            crate::refs::rc_secondary_section_error(model, SecondaryMemberKind::Beam, self.section)
+        {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         let ri = self.region.index();
         if ri >= model.floor_regions.len() || model.floor_regions[ri].id != self.region {
             return Box::new(Noop);
@@ -388,6 +410,13 @@ impl EditCommand for RestoreWallRegionPosts {
 
 impl EditCommand for SetWallRegionPosts {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        for sm in &self.posts {
+            if let Some(reason) =
+                crate::refs::rc_secondary_section_error(model, sm.kind, sm.section)
+            {
+                return Box::new(crate::RejectedEdit(reason));
+            }
+        }
         let idx = self.region.index();
         if idx >= model.wall_regions.len() || model.wall_regions[idx].id != self.region {
             return Box::new(Noop);
@@ -431,6 +460,11 @@ pub struct SetWallRegionPostSection {
 
 impl EditCommand for SetWallRegionPostSection {
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Some(reason) =
+            crate::refs::rc_secondary_section_error(model, SecondaryMemberKind::Post, self.section)
+        {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         let ri = self.region.index();
         if ri >= model.wall_regions.len() || model.wall_regions[ri].id != self.region {
             return Box::new(Noop);
@@ -684,6 +718,11 @@ impl EditCommand for PlaceSecondaryMember {
         true
     }
     fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if let Some(reason) =
+            crate::refs::rc_secondary_section_error(model, self.kind, self.section)
+        {
+            return Box::new(crate::RejectedEdit(reason));
+        }
         if !self.parent.accepts(self.kind)
             || !crate::refs::secondary_section_ref_ok(model, self.section)
         {

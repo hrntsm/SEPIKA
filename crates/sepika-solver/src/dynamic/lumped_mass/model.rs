@@ -318,6 +318,9 @@ pub fn build_lumped_mass_model(
     secant_ratio: f64,
 ) -> Result<LumpedMassModel, SolveError> {
     model
+        .validate_rc_section_usage()
+        .map_err(|e| sepika_math::solver::SolveError::InvalidInput(e.to_string()))?;
+    model
         .validate_secondary_section_usage()
         .map_err(|e| sepika_math::solver::SolveError::InvalidInput(e.to_string()))?;
     model

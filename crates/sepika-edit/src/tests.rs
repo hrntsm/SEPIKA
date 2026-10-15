@@ -9591,3 +9591,292 @@ fn lip_channel_geometry_edit_rejection_preserves_model_revision_and_redo() {
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&initial));
 }
+
+mod rc_section_purpose {
+    use super::*;
+    use sepika_core::model::{FrameSectionUse, SecondaryMemberKind, WallRegion};
+    use sepika_core::section_shape::*;
+
+    fn shapes() -> Vec<(
+        SectionShape,
+        FrameSectionUse,
+        SecondaryMemberKind,
+        &'static str,
+    )> {
+        vec![
+            (
+                SectionShape::RcBeamRect {
+                    b: 300.0,
+                    d: 500.0,
+                    rebar: RcBeamRebar {
+                        main_dia: 22.0,
+                        top: vec![3],
+                        bottom: vec![4],
+                        cover: 40.0,
+                        stirrup: BeamStirrup {
+                            dia: 10.0,
+                            pitch: 150.0,
+                            legs: 2,
+                        },
+                    },
+                },
+                FrameSectionUse::Girder,
+                SecondaryMemberKind::Post,
+                "RC 梁用断面は大梁・小梁専用",
+            ),
+            (
+                SectionShape::RcColumnRect {
+                    b: 600.0,
+                    d: 600.0,
+                    rebar: RcRectColumnRebar {
+                        main_dia: 19.0,
+                        x: vec![4],
+                        y: vec![4],
+                        cover: 40.0,
+                        hoop: RectColumnHoop {
+                            dia: 10.0,
+                            pitch: 150.0,
+                            legs_x: 2,
+                            legs_y: 2,
+                        },
+                    },
+                },
+                FrameSectionUse::Column,
+                SecondaryMemberKind::Beam,
+                "RC 柱用断面は柱・間柱専用",
+            ),
+            (
+                SectionShape::RcColumnCircle {
+                    d: 600.0,
+                    rebar: RcCircleColumnRebar {
+                        main_dia: 19.0,
+                        count: 12,
+                        cover: 40.0,
+                        hoop: CircleColumnHoop {
+                            dia: 10.0,
+                            pitch: 150.0,
+                        },
+                    },
+                },
+                FrameSectionUse::Column,
+                SecondaryMemberKind::Beam,
+                "RC 柱用断面は柱・間柱専用",
+            ),
+        ]
+    }
+
+    fn reject_unchanged(model: &Model, command: Box<dyn EditCommand>, reason: &str) {
+        let mut actual = model.clone();
+        let mut stack = UndoStack::new();
+        assert!(stack.run(
+            &mut actual,
+            Box::new(SetSectionName {
+                id: SectionId(0),
+                name: "履歴対照".into(),
+                floor: None,
+            })
+        ));
+        stack.undo(&mut actual);
+        let before = actual.clone();
+        let revision = stack.revision();
+        let redo = stack.redo_label().map(str::to_owned);
+        assert!(!stack.run(&mut actual, command));
+        assert!(
+            stack
+                .last_error()
+                .is_some_and(|error| error.contains(reason)),
+            "{:?}",
+            stack.last_error()
+        );
+        assert!(actual.eq_ignoring_dofmap(&before));
+        assert_eq!(stack.revision(), revision);
+        assert_eq!(stack.redo_label(), redo.as_deref());
+        assert!(!stack.can_undo());
+        assert!(stack.id_changes().is_empty());
+    }
+
+    #[test]
+    fn rc_shape_creation_and_edit_reject_incompatible_explicit_frame_use() {
+        for (shape, correct, _, reason) in shapes() {
+            shape.validate_rebar().unwrap();
+            for wrong in [
+                FrameSectionUse::Girder,
+                FrameSectionUse::Column,
+                FrameSectionUse::Brace,
+            ]
+            .into_iter()
+            .filter(|usage| *usage != correct)
+            {
+                let mut model = seeded_model(2, 0);
+                model.sections.push(bare_section(SectionId(0), None));
+                reject_unchanged(
+                    &model,
+                    Box::new(AddSectionShape {
+                        shape: shape.clone(),
+                        new_id: SectionId(1),
+                        name: "RC".into(),
+                        floor: None,
+                        frame_use: Some(wrong),
+                    }),
+                    reason,
+                );
+                reject_unchanged(
+                    &model,
+                    Box::new(EditSectionShape {
+                        section: SectionId(0),
+                        new_shape: shape.clone(),
+                        frame_use: Some(wrong),
+                    }),
+                    reason,
+                );
+                let mut section = shape.clone().to_section(SectionId(1), "RCカタログ".into());
+                section.frame_use = Some(wrong);
+                reject_unchanged(&model, Box::new(AddCatalogSection { section }), reason);
+            }
+        }
+    }
+
+    #[test]
+    fn rc_secondary_inverse_kinds_reject_creation_assignment_and_referenced_shape_edit() {
+        for (shape, correct, wrong_kind, reason) in shapes() {
+            for usage in [None, Some(correct)] {
+                for assigned in [false, true] {
+                    let mut model = sm_base_model();
+                    model.sections.push(bare_section(SectionId(0), None));
+                    let mut section = shape.clone().to_section(SectionId(1), "RC".into());
+                    section.frame_use = usage;
+                    model.sections.push(section);
+                    let mut sm = make_sm(1, wrong_kind);
+                    sm.section = Some(SectionId(0));
+                    match (wrong_kind, assigned) {
+                        (SecondaryMemberKind::Beam, false) => {
+                            model.unassigned_beams.push(sm.clone())
+                        }
+                        (SecondaryMemberKind::Post, false) => {
+                            model.unassigned_posts.push(sm.clone())
+                        }
+                        (SecondaryMemberKind::Beam, true) => {
+                            let mut region = FloorRegion::new(FloorRegionId(0), vec![]);
+                            region.secondary_beams.push(sm.clone());
+                            model.floor_regions.push(region);
+                        }
+                        (SecondaryMemberKind::Post, true) => {
+                            let mut region = WallRegion::new(WallRegionId(0), vec![]);
+                            region.posts.push(sm.clone());
+                            model.wall_regions.push(region);
+                        }
+                    }
+                    let mut candidate = sm.clone();
+                    candidate.id = SecondaryMemberId(2);
+                    candidate.section = Some(SectionId(1));
+                    let mut commands: Vec<Box<dyn EditCommand>> = vec![
+                        Box::new(EditSectionShape {
+                            section: SectionId(0),
+                            new_shape: shape.clone(),
+                            frame_use: usage,
+                        }),
+                        Box::new(PlaceSecondaryMember {
+                            parent: SecondaryParent::Unassigned,
+                            kind: wrong_kind,
+                            ends: candidate.ends,
+                            section: candidate.section,
+                            name: "逆用途".into(),
+                        }),
+                    ];
+                    commands.push(match wrong_kind {
+                        SecondaryMemberKind::Beam => Box::new(AddUnassignedBeam {
+                            sm: candidate.clone(),
+                        }),
+                        SecondaryMemberKind::Post => Box::new(AddUnassignedPost {
+                            sm: candidate.clone(),
+                        }),
+                    });
+                    if assigned {
+                        commands.push(match wrong_kind {
+                            SecondaryMemberKind::Beam => Box::new(SetFloorRegionBeamSection {
+                                region: FloorRegionId(0),
+                                index: 0,
+                                section: Some(SectionId(1)),
+                            }),
+                            SecondaryMemberKind::Post => Box::new(SetWallRegionPostSection {
+                                region: WallRegionId(0),
+                                index: 0,
+                                section: Some(SectionId(1)),
+                            }),
+                        });
+                        commands.push(match wrong_kind {
+                            SecondaryMemberKind::Beam => Box::new(SetFloorRegionSecondaryBeams {
+                                region: FloorRegionId(0),
+                                beams: vec![candidate],
+                            }),
+                            SecondaryMemberKind::Post => Box::new(SetWallRegionPosts {
+                                region: WallRegionId(0),
+                                posts: vec![candidate],
+                            }),
+                        });
+                    }
+                    for command in commands {
+                        reject_unchanged(&model, command, reason);
+                    }
+                    let mut malformed = model.clone();
+                    let target = match wrong_kind {
+                        SecondaryMemberKind::Beam if assigned => {
+                            &mut malformed.floor_regions[0].secondary_beams[0]
+                        }
+                        SecondaryMemberKind::Post if assigned => {
+                            &mut malformed.wall_regions[0].posts[0]
+                        }
+                        SecondaryMemberKind::Beam => &mut malformed.unassigned_beams[0],
+                        SecondaryMemberKind::Post => &mut malformed.unassigned_posts[0],
+                    };
+                    target.section = Some(SectionId(1));
+                    let error = malformed.validate().unwrap_err().to_string();
+                    assert!(
+                        error.contains(reason)
+                            && error.contains("SecondaryMemberId(1)")
+                            && error.contains("SectionId(1)"),
+                        "{error}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rc_primary_inverse_use_is_rejected_before_member_creation_or_assignment() {
+        for (shape, correct, _, reason) in shapes() {
+            let wrong = if correct == FrameSectionUse::Column {
+                FrameSectionUse::Girder
+            } else {
+                FrameSectionUse::Column
+            };
+            let mut model = seeded_model(2, 1);
+            model.sections.push(bare_section(SectionId(0), None));
+            let mut section = shape.to_section(SectionId(1), "逆用途".into());
+            section.frame_use = Some(wrong);
+            model.sections.push(section);
+            let mut element = model.elements[0].clone();
+            element.id = ElemId(1);
+            element.section = Some(SectionId(1));
+            for command in [
+                Box::new(AddMember { elem: element }) as Box<dyn EditCommand>,
+                Box::new(SetElementSection {
+                    elem: ElemId(0),
+                    section: Some(SectionId(1)),
+                }),
+            ] {
+                let mut actual = model.clone();
+                let inverse = command.apply(&mut actual);
+                assert!(inverse
+                    .rejection()
+                    .is_some_and(|error| error.contains(reason)));
+                assert!(actual.eq_ignoring_dofmap(&model));
+            }
+            let error = model.validate_rc_section_usage().unwrap_err().to_string();
+            assert!(
+                error.contains(reason) && error.contains("SectionId(1)"),
+                "{error}"
+            );
+        }
+    }
+}

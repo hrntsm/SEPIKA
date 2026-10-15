@@ -64,6 +64,13 @@ fn fixture(shape: Option<SectionShape>, category: MaterialCategory) -> Model {
         },
         |shape| shape.to_section(SectionId(0), "独立質量fixture".into()),
     );
+    section.frame_use = match section.shape {
+        Some(SectionShape::RcBeamRect { .. }) => Some(sepika_core::model::FrameSectionUse::Girder),
+        Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. }) => {
+            Some(sepika_core::model::FrameSectionUse::Column)
+        }
+        _ => section.frame_use,
+    };
     section.material = Some(MaterialId(0));
     section.rebar_material = Some(MaterialId(1));
     section.shear_rebar_material = Some(MaterialId(1));

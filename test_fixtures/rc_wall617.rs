@@ -1,7 +1,9 @@
 use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, StoryId};
 use sepika_core::model::*;
-use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+use sepika_core::section_shape::{
+    BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
+};
 
 pub fn expanded_model() -> Model {
     let mut model = Model {
@@ -79,13 +81,28 @@ pub fn expanded_model() -> Model {
             },
         },
     };
+    let beam = SectionShape::RcBeamRect {
+        b: 600.0,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: 22.0,
+            top: vec![4],
+            bottom: vec![4],
+            cover: 40.0,
+            stirrup: BeamStirrup {
+                dia: 10.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    };
     let wall = SectionShape::RcWall {
         thickness: 180.0,
         ps: 0.002,
         pwh_ratio: Some(0.004),
         pwv_ratio: Some(0.002),
     };
-    for (i, shape) in [column.clone(), column, wall].into_iter().enumerate() {
+    for (i, shape) in [column, beam, wall].into_iter().enumerate() {
         let mut section = shape.to_section(SectionId(i as u32), format!("S{i}"));
         section.frame_use = match i {
             0 => Some(FrameSectionUse::Column),
