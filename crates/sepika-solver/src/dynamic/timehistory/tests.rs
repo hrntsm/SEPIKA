@@ -1,5 +1,7 @@
 use super::*;
 
+mod timeline;
+
 use crate::common::constraint::Reducer;
 use crate::dynamic::damping::{Damping, DampingAccumulation, StiffnessKind};
 use sepika_core::dof::{Dof6Mask, DofMap};
@@ -178,7 +180,7 @@ fn sdof_model_y() -> Model {
 fn zero_wave(dt: f64, n_steps: usize) -> GroundMotion {
     GroundMotion {
         dt,
-        accel_x: vec![0.0; n_steps],
+        accel_x: vec![0.0; n_steps + 1],
         accel_y: None,
         accel_theta: None,
     }
@@ -1170,7 +1172,7 @@ fn test_nonlinear_time_history_convergence() {
     );
     assert_eq!(
         result2.time.len(),
-        wave.accel_x.len() + 1,
+        wave.accel_x.len(),
         "不収束でも全ステップ解く"
     );
     assert!(

@@ -561,7 +561,7 @@ fn public_eigen_and_timehistories_use_projected_common_mass_for_elastic_axial_re
         let dt = 0.0001;
         let wave = GroundMotion {
             dt,
-            accel_x: vec![0.0; 2],
+            accel_x: vec![0.0; 3],
             accel_y: None,
             accel_theta: None,
         };
@@ -608,6 +608,7 @@ fn public_eigen_and_timehistories_use_projected_common_mass_for_elastic_axial_re
         .unwrap();
         for result in [linear, nonlinear] {
             assert_eq!(result.non_converged_steps, 0);
+            assert_eq!(result.time, vec![0.0, dt, 2.0 * dt]);
             let recording = result.recording.unwrap();
             let last = recording.node_disp.last().unwrap()[1][0];
             assert!((last - expected).abs() < 1e-10, "{last} vs {expected}");

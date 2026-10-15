@@ -557,9 +557,13 @@ impl App {
                 .on_hover_text("正弦減衰波を生成して時刻歴解析を実行します")
                 .clicked()
             {
-                let wave = Self::sample_wave(&self.core.analysis_cfg);
-                let input = self.time_history_input(wave, "サンプル".into());
-                self.request_analysis(PendingAnalysis::TimeHistory(Box::new(input)));
+                match Self::sample_wave(&self.core.analysis_cfg) {
+                    Ok(wave) => {
+                        let input = self.time_history_input(wave, "サンプル".into());
+                        self.request_analysis(PendingAnalysis::TimeHistory(Box::new(input)));
+                    }
+                    Err(e) => self.report_error(e.to_string()),
+                }
             }
             if ui
                 .add_enabled(!running, egui::Button::new("📂 波形CSVを開いて実行…"))

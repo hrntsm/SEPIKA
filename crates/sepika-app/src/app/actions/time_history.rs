@@ -170,14 +170,20 @@ impl App {
 
     pub(crate) fn sample_wave(
         cfg: &AnalysisSettings,
-    ) -> sepika_solver::dynamic::timehistory::GroundMotion {
+    ) -> sepika_job::JobResult<sepika_solver::dynamic::timehistory::GroundMotion> {
         sepika_job::sample_ground_motion(cfg)
     }
 
     /// 正弦減衰のサンプル地震波を生成して時刻歴解析を実行する（同期）。
     pub fn run_time_history_sample(&mut self) {
         self.apply_parallelism_setting();
-        let wave = Self::sample_wave(&self.core.analysis_cfg);
+        let wave = match Self::sample_wave(&self.core.analysis_cfg) {
+            Ok(wave) => wave,
+            Err(e) => {
+                self.report_error(e.to_string());
+                return;
+            }
+        };
         let input = self.time_history_input(wave, "サンプル".into());
         self.run_time_history_input(input);
     }

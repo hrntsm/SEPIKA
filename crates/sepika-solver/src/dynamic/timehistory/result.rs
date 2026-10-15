@@ -58,6 +58,7 @@ pub struct ResponseHistory {
 }
 
 /// 時刻歴応答の1時点の状態（縮約空間）。チェックポイント／再開で使用。
+/// `step` は確定済み積分数、`time` は step×dt `[s]`。u/v/a は相対応答（並進は mm 系、回転は rad 系）。
 #[derive(Clone, serde::Serialize, serde::Deserialize, PartialEq, Debug)]
 pub struct TimeStepState {
     pub step: u64,
@@ -69,7 +70,7 @@ pub struct TimeStepState {
 
 /// 時刻歴応答の詳細記録（3D アニメーション・層応答グラフ・部材履歴用）。
 ///
-/// `record_every` ステップごとに 1 フレームだけ間引いて記録する。
+/// 開始確定点・絶対 step の `record_every` 倍・最終確定点を記録する。
 /// ピーク系の各フィールドは全ステップで更新し、間引かない。
 ///
 /// 節点順・要素順は、それぞれ解析時の `model.nodes` / `model.elements` の添字順に一致する。

@@ -30,7 +30,8 @@ impl NewmarkCfg {
 }
 
 /// 地動加速度入力（基盤一様加振）。水平1〜2方向。
-/// `dt` はサンプリング間隔。`accel_x`/`accel_y` は同長さの時系列。
+/// `dt` はサンプリング間隔 `[s]`。N 点は時刻 0..(N−1)dt の瞬時値 [mm/s²]。
+/// `accel_x`/`accel_y` は同長さとし、空入力は拒否、1 点は初期状態のみを返す。
 /// `accel_theta` は位相差入力によるねじれ地動加速度 [rad/s²]（鉛直軸まわり。
 /// `None` はねじれ加振なし）。
 pub struct GroundMotion {

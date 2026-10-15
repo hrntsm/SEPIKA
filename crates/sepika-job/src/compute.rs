@@ -374,9 +374,9 @@ pub fn compute_lumped_mass(
                 "質点系時刻歴の地動加速度が空です".into(),
             ));
         }
-        if cfg.lumped_th_dt <= 0.0 {
+        if !cfg.lumped_th_dt.is_finite() || cfg.lumped_th_dt <= 0.0 {
             return Err(JobError::InvalidInput(
-                "質点系時刻歴の時間刻み dt が 0 以下です".into(),
+                "質点系時刻歴の時間刻み dt には正の有限値を指定してください".into(),
             ));
         }
         let resp = sepika_solver::dynamic::lumped_mass::lumped_mass_time_history(

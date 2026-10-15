@@ -70,7 +70,7 @@ fn 時刻歴の同期非同期と線形非線形と対象有無で鋼板壁注�
                 }
                 app.core.analysis_cfg.th_nonlinear = nonlinear;
                 app.core.analysis_cfg.th_duration = 0.05;
-                let wave = App::sample_wave(&app.core.analysis_cfg);
+                let wave = App::sample_wave(&app.core.analysis_cfg).unwrap();
                 if background {
                     app.start_time_history_job(wave);
                     assert!(
@@ -127,7 +127,7 @@ fn 非線形時刻歴の再起動で再通知し準備注意を消さない() {
         app.core.analysis_cfg.ai_mode = AiMode::SemiPrecise;
         app.core.analysis_cfg.th_duration = 0.05;
         for count in 1..=2 {
-            let wave = App::sample_wave(&app.core.analysis_cfg);
+            let wave = App::sample_wave(&app.core.analysis_cfg).unwrap();
             if background {
                 app.start_time_history_job(wave);
                 super::tests::wait_for_job(&mut app);
@@ -155,7 +155,7 @@ fn 鋼板壁注意と時刻歴計算エラーをともに保持する() {
         let mut app = App::default();
         app.load_model(steel_wall_model());
         app.core.analysis_cfg.th_nonlinear = true;
-        let mut wave = App::sample_wave(&app.core.analysis_cfg);
+        let mut wave = App::sample_wave(&app.core.analysis_cfg).unwrap();
         wave.dt = 0.0;
         if background {
             app.start_time_history_job(wave);

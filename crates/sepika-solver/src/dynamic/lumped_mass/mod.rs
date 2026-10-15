@@ -50,7 +50,7 @@ mod tests {
             q3: 30.0,
         };
         // m=1、dt=1、減衰0のNewmark釣合いで、変位[-.03,-.03,-.04]に対応する加速度。
-        let acceleration = [25.12, 24.64, 30.64];
+        let acceleration = [0.0, 25.12, 24.64, 30.64];
         for dim in [StickDim::Planar, StickDim::Spatial] {
             for dir in [SeismicDir::X, SeismicDir::Y] {
                 let lm = LumpedMassModel {
@@ -82,7 +82,8 @@ mod tests {
                 };
                 let response = lumped_mass_time_history(&lm, &acceleration, 1.0, 0.0);
                 assert_eq!(response.non_converged_steps, 0);
-                for (got, expected) in response.roof_disp.iter().zip([-0.03, -0.03, -0.04]) {
+                assert_eq!(response.roof_disp.len(), 4);
+                for (got, expected) in response.roof_disp.iter().zip([0.0, -0.03, -0.03, -0.04]) {
                     assert!((got - expected).abs() < 1e-10, "{dim:?}/{dir:?}: {got}");
                 }
                 assert!((response.story_peak_shear[0] - 30.0).abs() < 1e-8);
@@ -92,6 +93,60 @@ mod tests {
                 };
                 assert!((active[0] - 30.0).abs() < 1e-8);
                 assert_eq!(inactive[0], 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn instantaneous_samples_match_independent_newmark_in_planar_spatial_and_xy() {
+        for dim in [StickDim::Planar, StickDim::Spatial] {
+            for dir in [SeismicDir::X, SeismicDir::Y] {
+                let mut lm = LumpedMassModel::from_stories(
+                    LumpedMassType::EquivalentShear,
+                    vec![StoryStick {
+                        story: StoryId(0),
+                        mass: 1.0,
+                        height: 3000.0,
+                        skeleton: StoryTrilinear::elastic(40.0),
+                    }],
+                );
+                lm.dir = dir;
+                lm.dim = dim;
+                if dim == StickDim::Spatial {
+                    lm.spatial = vec![StorySpatial {
+                        j: 1.0,
+                        mass_xy: [0.0; 2],
+                        rigidity_xy: [0.0; 2],
+                        k1_x: 40.0,
+                        k1_y: 40.0,
+                        kr: 40.0,
+                        skeleton_x: StoryTrilinear::elastic(40.0),
+                        skeleton_y: StoryTrilinear::elastic(40.0),
+                    }];
+                }
+                for (input, expected) in [
+                    (
+                        vec![0.0, 100.0, 0.0],
+                        vec![0.0, -100.0 / 440.0, -0.8264462809917356],
+                    ),
+                    (vec![100.0, 0.0], vec![0.0, -100.0 / 440.0]),
+                    (vec![100.0], vec![0.0]),
+                    (vec![0.0, 0.0], vec![0.0, 0.0]),
+                ] {
+                    let result = lumped_mass_time_history(&lm, &input, 0.1, 0.0);
+                    assert_eq!(result.time.len(), input.len());
+                    assert_eq!(result.non_converged_steps, 0);
+                    for (i, &u) in expected.iter().enumerate() {
+                        assert_eq!(result.time[i], i as f64 * 0.1);
+                        assert!(
+                            (result.roof_disp[i] - u).abs() <= 1e-9,
+                            "{dim:?}/{dir:?}: {i}"
+                        );
+                        let d = if dir == SeismicDir::X { 0 } else { 1 };
+                        assert!((result.floor_disp[i][0][d] - u).abs() <= 1e-9);
+                    }
+                }
+                assert!(lumped_mass_time_history(&lm, &[], 0.1, 0.0).time.is_empty());
             }
         }
     }

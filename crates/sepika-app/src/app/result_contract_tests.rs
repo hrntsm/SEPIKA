@@ -147,6 +147,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-skew-rectangle", Some(10), "旧契約"),
         ("old-fixed-distance-extents", Some(11), "旧契約"),
         ("old-frame-node-counts", Some(12), "旧契約"),
+        ("old-time-history-timeline", Some(19), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {

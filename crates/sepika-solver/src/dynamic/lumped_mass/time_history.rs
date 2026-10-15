@@ -253,7 +253,7 @@ pub fn lumped_mass_time_history(
     h: f64,
 ) -> StickResponse {
     let n = lm.stories.len();
-    if n == 0 || dt <= 0.0 || accel.is_empty() {
+    if n == 0 || !dt.is_finite() || dt <= 0.0 || accel.is_empty() {
         return StickResponse::empty(n);
     }
     if lm.is_spatial() {
@@ -277,7 +277,7 @@ pub fn lumped_mass_time_history(
 
     let mut u = vec![0.0; n];
     let mut v = vec![0.0; n];
-    let mut a = vec![0.0; n];
+    let mut a = vec![-accel[0]; n];
 
     let mut time: Vec<f64> = Vec::with_capacity(accel.len());
     let mut roof: Vec<f64> = Vec::with_capacity(accel.len());
@@ -292,7 +292,11 @@ pub fn lumped_mass_time_history(
     let mut non_converged_steps = 0usize;
     let mut peak_force_scale = 0.0_f64;
 
-    for (step, &ag) in accel.iter().enumerate() {
+    time.push(0.0);
+    roof.push(0.0);
+    floor_disp.push(vec![[0.0; 3]; n]);
+
+    for (step, &ag) in accel.iter().enumerate().skip(1) {
         let p: Vec<f64> = mass.iter().map(|&mi| -mi * ag).collect();
         let u_prev = u.clone();
         let v_prev = v.clone();

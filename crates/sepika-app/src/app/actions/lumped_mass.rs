@@ -288,7 +288,13 @@ impl App {
 
     /// 質点系サンプル波で時刻歴を開始する。
     pub fn start_lumped_mass_sample_th_job(&mut self) {
-        let wave = sepika_job::sample_lumped_ground_motion(&self.core.analysis_cfg);
+        let wave = match sepika_job::sample_lumped_ground_motion(&self.core.analysis_cfg) {
+            Ok(wave) => wave,
+            Err(e) => {
+                self.report_error(e.to_string());
+                return;
+            }
+        };
         match sepika_job::lumped_accel_from_wave(&wave, self.core.analysis_cfg.lumped_dir) {
             Ok(accel) => {
                 let input = self.lumped_time_history_input(accel, "サンプル".into());
