@@ -247,6 +247,7 @@ pub fn quantity_panel(ui: &mut egui::Ui, app: &mut App) {
                                 ui.label(
                                     it.slab
                                         .map(|s| format!("S{}", s.0))
+                                        .or_else(|| it.secondary.map(|s| format!("SM{}", s.0)))
                                         .unwrap_or_else(|| "-".to_string()),
                                 );
                             }

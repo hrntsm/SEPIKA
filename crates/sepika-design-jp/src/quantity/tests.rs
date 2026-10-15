@@ -1285,15 +1285,19 @@ fn secondary_rectangular_and_steel_paths_are_preserved() {
 }
 
 #[test]
-fn circular_rc_post_missing_endpoint_nodes_keeps_existing_exclusion() {
+fn circular_rc_post_without_endpoint_nodes_keeps_quantity_and_reports_unknown_story() {
     let mut model = circular_rc_post_model([0.0, 0.0, 3000.0]);
     model.nodes.clear();
-    assert!(
-        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
-            .unwrap()
-            .items
-            .is_empty()
-    );
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+    assert!((q.items[0].concrete_m3 - 0.376991118430775).abs() < 1e-12);
+    assert!((q.items[0].formwork_m2 - 3.76991118430775).abs() < 1e-12);
+    assert_eq!(q.items[0].secondary, Some(SecondaryMemberId(448)));
+    assert_eq!(q.items[0].story, "-");
+    assert!(q
+        .notes
+        .iter()
+        .any(|n| n.contains("SecondaryMemberId(448)") && n.contains("階帰属未確定")));
+    assert_eq!(q.totals_by_story()[0].0, "-");
 }
 
 fn contact_model() -> Model {
@@ -1733,7 +1737,7 @@ fn beam_contact_unknown_beam_section_is_unavailable() {
         let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
         assert!(
             reason.contains(if support_secondary {
-                "Secondary(SecondaryMemberId(451))"
+                "SecondaryMemberId(451)"
             } else {
                 "Primary(ElemId(0))"
             }),
@@ -1801,7 +1805,7 @@ fn beam_contact_uses_shared_mm_tolerance_and_ignores_unrelated_slope() {
 }
 
 #[test]
-fn beam_contact_non_nodal_secondary_is_unavailable_materialized_is_counted_once() {
+fn beam_contact_non_nodal_secondary_is_counted_and_materialized_is_counted_once() {
     use sepika_core::ids::SecondaryMemberId;
     use sepika_core::model::SecondaryMemberEnds;
     let mut model = contact_model();
@@ -1829,11 +1833,14 @@ fn beam_contact_non_nodal_secondary_is_unavailable_materialized_is_counted_once(
         gravity_end_shares: None,
     });
     contact_slab(&mut model, [1000.0, 3000.0], 1.0, 150.0, 3000.0);
-    let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
-    assert!(
-        reason.contains("SecondaryMemberId(451)") && reason.contains("実節点"),
-        "{reason}"
-    );
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+    let beam = q
+        .items
+        .iter()
+        .find(|i| i.secondary == Some(SecondaryMemberId(451)))
+        .unwrap();
+    assert!((beam.concrete_m3 - 1.08).abs() < 1e-12);
+    assert!((beam.formwork_m2 - 8.7).abs() < 1e-12);
 }
 
 #[test]
@@ -2180,4 +2187,484 @@ fn unresolved_wall_plate_geometry_is_incomplete_instead_of_disappearing() {
         .iter()
         .all(|i| i.reason.contains("境界") && i.kind == RebarIssueKind::Invalid));
     assert_eq!(q.totals().rebar_status(), QuantityStatus::Incomplete);
+}
+
+fn nonnodal_beam_model() -> Model {
+    use sepika_core::model::{SecondaryMemberAnchor, SecondaryMemberEnds, SupportMemberId};
+    let mut model = circular_rc_post_model([0.0, 0.0, 3000.0]);
+    model.unassigned_posts.clear();
+    model.nodes = vec![
+        node(0, 0.0, 0.0, 3000.0),
+        node(1, 3000.0, 0.0, 3000.0),
+        node(2, 0.0, 3000.0, 3000.0),
+        node(3, 3000.0, 3000.0, 3000.0),
+    ];
+    for n in &mut model.nodes {
+        n.story = Some(StoryId(0));
+    }
+    model.sections[0] = with_rc_materials(
+        SectionShape::RcBeamRect {
+            b: 300.0,
+            d: 600.0,
+            rebar: rc_beam_rebar(),
+        }
+        .to_section(SectionId(0), "B300x600".into()),
+    );
+    model.elements = vec![line_elem(0, 0, 1, 0), line_elem(1, 2, 3, 0)];
+    model.unassigned_beams.push(SecondaryMember {
+        id: SecondaryMemberId(557),
+        kind: SecondaryMemberKind::Beam,
+        ends: SecondaryMemberEnds::Supported([0, 1].map(|id| SecondaryMemberAnchor {
+            support: SupportMemberId::Primary(ElemId(id)),
+            position: 0.5,
+        })),
+        section: Some(SectionId(0)),
+        name: "小梁557".into(),
+        gravity_end_shares: None,
+    });
+    model
+}
+
+fn secondary_557(q: &QuantityTakeoff) -> &MemberQuantity {
+    q.items
+        .iter()
+        .find(|i| i.secondary == Some(SecondaryMemberId(557)))
+        .unwrap()
+}
+
+#[test]
+fn nonnodal_beam_three_end_modes_and_node_addition_preserve_independent_quantities() {
+    use sepika_core::model::SecondaryMemberEnds;
+    let base = nonnodal_beam_model();
+    let support = base.unassigned_beams[0].ends.anchors()[0];
+    for ends in [
+        base.unassigned_beams[0].ends,
+        SecondaryMemberEnds::Cantilever {
+            support,
+            free_end_vector: [0.0, 3000.0],
+        },
+        SecondaryMemberEnds::Detached([[1500.0, 0.0, 3000.0], [1500.0, 3000.0, 3000.0]]),
+        SecondaryMemberEnds::Detached([[1500.0, 3000.0, 3000.0], [1500.0, 0.0, 3000.0]]),
+    ] {
+        let mut model = base.clone();
+        model.unassigned_beams[0].ends = ends;
+        for node_count in 0..=2 {
+            let before = format!("{model:?}");
+            let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+            assert_eq!(format!("{model:?}"), before);
+            let item = secondary_557(&q);
+            assert!((item.concrete_m3 - 0.54).abs() < 1e-12);
+            assert!((item.formwork_m2 - 4.5).abs() < 1e-12);
+            assert_eq!(item.elem, None);
+            assert_eq!(item.label, "小梁557");
+            if node_count < 2 {
+                let mut added = node(
+                    4 + node_count,
+                    1500.0,
+                    3000.0 * f64::from(node_count),
+                    3000.0,
+                );
+                added.story = Some(StoryId(0));
+                model.nodes.push(added);
+            }
+        }
+        model.unassigned_beams[0].name.clear();
+        assert_eq!(
+            secondary_557(&try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap())
+                .label,
+            "B300x600"
+        );
+    }
+}
+
+#[test]
+fn nonnodal_rectangular_post_and_supplied_steel_area_use_actual_sloping_length() {
+    use sepika_core::model::SecondaryMemberEnds;
+    for end in [[0.0, 0.0, 3000.0], [1800.0, 0.0, 2400.0]] {
+        let mut model = circular_rc_post_model(end);
+        model.nodes.clear();
+        let SectionShape::RcColumnRect { rebar, .. } = rc_column_section(0).shape.unwrap() else {
+            unreachable!()
+        };
+        model.sections[0] = with_rc_materials(
+            SectionShape::RcColumnRect {
+                b: 300.0,
+                d: 400.0,
+                rebar,
+            }
+            .to_section(SectionId(0), "Post".into()),
+        );
+        let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+        assert!((q.items[0].concrete_m3 - 0.36).abs() < 1e-12);
+        assert!((q.items[0].formwork_m2 - 4.2).abs() < 1e-12);
+    }
+    let mut model = nonnodal_beam_model();
+    model.sections[0].shape = None;
+    model.sections[0].area = 10000.0;
+    model.sections[0].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
+    model.materials[0] = steel_material(0);
+    let support = model.unassigned_beams[0].ends.anchors()[0];
+    for ends in [
+        model.unassigned_beams[0].ends,
+        SecondaryMemberEnds::Cantilever {
+            support,
+            free_end_vector: [0.0, 3000.0],
+        },
+        SecondaryMemberEnds::Detached([[1500.0, 0.0, 3000.0], [1500.0, 3000.0, 3000.0]]),
+    ] {
+        model.unassigned_beams[0].ends = ends;
+        let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+        let steel = secondary_557(&q).steel.as_ref().unwrap();
+        assert_eq!(steel.length_m, 3.0);
+        assert!((steel.weight_t - 0.2355).abs() < 1e-12);
+    }
+    model.sections[0].material = None;
+    let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+    assert!(
+        error.contains("SecondaryMemberId(557)") && error.contains("材料"),
+        "{error}"
+    );
+}
+
+#[test]
+fn nonnodal_secondary_invalid_references_and_geometry_never_disappear() {
+    use sepika_core::model::{SecondaryMemberEnds, SupportMemberId};
+    let base = nonnodal_beam_model();
+    for section in [None, Some(SectionId(999))] {
+        let mut model = base.clone();
+        model.unassigned_beams[0].section = section;
+        assert!(
+            try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+                .unwrap_err()
+                .contains("SecondaryMemberId(557)")
+        );
+    }
+    let mut model = base.clone();
+    model.sections[0].material = Some(MaterialId(999));
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("SecondaryMemberId(557)")
+    );
+    for coord in [
+        [1500.0, 0.0, 3000.0],
+        [f64::NAN, 0.0, 3000.0],
+        [f64::INFINITY, 0.0, 3000.0],
+    ] {
+        let mut model = base.clone();
+        model.unassigned_beams[0].ends =
+            SecondaryMemberEnds::Detached([[1500.0, 0.0, 3000.0], coord]);
+        let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+        assert!(
+            error.contains("SecondaryMemberId(557)") && error.contains("実長"),
+            "{error}"
+        );
+    }
+    for support in [
+        SupportMemberId::Primary(ElemId(999)),
+        SupportMemberId::Secondary(SecondaryMemberId(557)),
+    ] {
+        let mut model = base.clone();
+        let mut anchors = [model.unassigned_beams[0].ends.anchors()[0]; 2];
+        anchors[0].support = support;
+        model.unassigned_beams[0].ends = SecondaryMemberEnds::Supported(anchors);
+        let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+        assert!(
+            error.contains("SecondaryMemberId(557)") && error.contains("端点"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn nonnodal_secondary_story_priority_conflict_and_recursive_support_preserve_quantity() {
+    use sepika_core::model::{SecondaryMemberAnchor, SecondaryMemberEnds, SupportMemberId};
+    let mut model = nonnodal_beam_model();
+    assert_eq!(
+        secondary_557(&try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap())
+            .story,
+        "1F"
+    );
+    let mut story = model.stories[0].clone();
+    story.id = StoryId(1);
+    story.name = "2F".into();
+    model.stories.push(story);
+    let mut near = node(4, 1500.0, 0.0, 3000.0);
+    near.story = Some(StoryId(1));
+    model.nodes.push(near);
+    assert_eq!(
+        secondary_557(&try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap())
+            .story,
+        "2F"
+    );
+    let mut near = node(5, 1500.0, 0.0, 3000.0);
+    near.story = Some(StoryId(0));
+    model.nodes.push(near);
+    assert_eq!(
+        secondary_557(&try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap())
+            .story,
+        "1F"
+    );
+    model.nodes[1].story = Some(StoryId(1));
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+    assert_eq!(secondary_557(&q).story, "-");
+    assert!((secondary_557(&q).concrete_m3 - 0.54).abs() < 1e-12);
+    assert!(q
+        .notes
+        .iter()
+        .any(|n| n.contains("557") && n.contains("階帰属未確定")));
+    model.nodes.truncate(4);
+    model.nodes[1].story = Some(StoryId(0));
+    let parent = model.unassigned_beams[0].clone();
+    model.unassigned_beams[0].id = SecondaryMemberId(558);
+    model.unassigned_beams.push(SecondaryMember {
+        ends: SecondaryMemberEnds::Cantilever {
+            support: SecondaryMemberAnchor {
+                support: SupportMemberId::Secondary(SecondaryMemberId(558)),
+                position: 0.5,
+            },
+            free_end_vector: [1500.0, 0.0],
+        },
+        ..parent
+    });
+    assert_eq!(
+        secondary_557(&try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap())
+            .story,
+        "1F"
+    );
+}
+
+#[test]
+fn nonnodal_secondary_materialization_requires_unique_full_pair_section_use_and_material() {
+    let base = nonnodal_beam_model();
+    for reverse in [false, true] {
+        let mut model = base.clone();
+        model.nodes.extend([
+            node(4, 1500.0, 0.0, 3000.0),
+            node(5, 1500.0, 3000.0, 3000.0),
+        ]);
+        model.elements.push(if reverse {
+            line_elem(2, 5, 4, 0)
+        } else {
+            line_elem(2, 4, 5, 0)
+        });
+        let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+        assert_eq!(q.items.iter().filter(|i| i.secondary.is_some()).count(), 0);
+        assert_eq!(q.items.len(), 3);
+        model.elements.push(line_elem(3, 4, 5, 0));
+        let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+        assert!(error.contains("557") && error.contains("複数"), "{error}");
+        model.elements.pop();
+        let mut other = model.sections[0].clone();
+        other.id = SectionId(1);
+        other.name = "異断面".into();
+        model.sections.push(other);
+        model.elements[2].section = Some(SectionId(1));
+        let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+        assert!(error.contains("557") && error.contains("一致"), "{error}");
+        model.elements[2].section = Some(SectionId(0));
+        model.sections[0].frame_use = Some(FrameSectionUse::Column);
+        assert!(
+            try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+                .unwrap_err()
+                .contains("557")
+        );
+    }
+}
+
+#[test]
+fn secondary_overflow_is_id_error_before_and_after_materialization() {
+    for materialized in [false, true] {
+        let mut model = nonnodal_beam_model();
+        model.sections[0].shape = None;
+        model.sections[0].area = 1e306;
+        model.sections[0].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
+        model.materials[0] = steel_material(0);
+        model.materials[0].density = 0.0;
+        if materialized {
+            model.nodes.extend([
+                node(4, 1500.0, 0.0, 3000.0),
+                node(5, 1500.0, 3000.0, 3000.0),
+            ]);
+            model.elements.push(line_elem(2, 4, 5, 0));
+        }
+        let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+        assert!(
+            error.contains("SecondaryMemberId(557)") && error.contains("有限範囲"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn nonnodal_secondary_stb_member_strength_is_preserved_and_material_mismatch_is_rejected() {
+    use sepika_core::model::{StbGradeMaterial, StbMemberStrength, StrengthTarget};
+    let mut model = nonnodal_beam_model();
+    let mut fc30 = rc_material(2);
+    fc30.name = "Fc30".into();
+    fc30.fc = Some(30.0);
+    model.materials.push(fc30);
+    model.stb_strengths.materials = vec![
+        StbGradeMaterial {
+            grade: "Fc24".into(),
+            material: MaterialId(0),
+        },
+        StbGradeMaterial {
+            grade: "Fc30".into(),
+            material: MaterialId(2),
+        },
+    ];
+    model.stb_strengths.members.push(StbMemberStrength {
+        target: StrengthTarget::Secondary(SecondaryMemberId(557)),
+        node: NodeId(0),
+        node_order: vec![NodeId(0)],
+        concrete: Some("Fc30".into()),
+    });
+    for nodes in [false, true] {
+        if nodes {
+            model.nodes.extend([
+                node(4, 1500.0, 0.0, 3000.0),
+                node(5, 1500.0, 3000.0, 3000.0),
+            ]);
+        }
+        let before = format!("{model:?}");
+        assert_eq!(
+            model
+                .secondary_material(&model.unassigned_beams[0])
+                .unwrap()
+                .fc,
+            Some(30.0)
+        );
+        let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+        assert!((secondary_557(&q).concrete_m3 - 0.54).abs() < 1e-12);
+        assert!((secondary_557(&q).formwork_m2 - 4.5).abs() < 1e-12);
+        assert_eq!(format!("{model:?}"), before);
+    }
+    model.elements.push(line_elem(2, 4, 5, 0));
+    let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+    assert!(
+        error.contains("557") && error.contains("解決材料"),
+        "{error}"
+    );
+    model.stb_strengths.members.push(StbMemberStrength {
+        target: StrengthTarget::Element(ElemId(2)),
+        node: NodeId(0),
+        node_order: vec![NodeId(0)],
+        concrete: Some("Fc30".into()),
+    });
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+    assert_eq!(q.items.len(), 3);
+    assert!(q.items.iter().all(|i| i.secondary.is_none()));
+}
+
+#[test]
+fn materialized_secondary_contact_reversal_uses_same_union_as_primary() {
+    for reverse in [false, true] {
+        let mut model = contact_model();
+        contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
+        let before = contact_formwork(&model);
+        let mut ends = [[0.0, 0.0, 3000.0], [6000.0, 0.0, 3000.0]];
+        if reverse {
+            ends.reverse();
+        }
+        model.unassigned_beams.push(SecondaryMember {
+            id: SecondaryMemberId(557),
+            kind: SecondaryMemberKind::Beam,
+            ends: sepika_core::model::SecondaryMemberEnds::Detached(ends),
+            section: Some(SectionId(0)),
+            name: "contact557".into(),
+            gravity_end_shares: None,
+        });
+        assert!((contact_formwork(&model) - before).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn materialized_secondary_story_uses_unique_support_instead_of_first_nearby_node() {
+    let mut model = nonnodal_beam_model();
+    model.nodes.extend([
+        node(4, 1500.0, 0.0, 3000.0),
+        node(5, 1500.0, 3000.0, 3000.0),
+    ]);
+    model.elements.push(line_elem(2, 4, 5, 0));
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+    assert_eq!(
+        q.items
+            .iter()
+            .find(|i| i.elem == Some(ElemId(2)))
+            .unwrap()
+            .story,
+        "1F"
+    );
+    let mut story = model.stories[0].clone();
+    story.id = StoryId(1);
+    story.name = "2F".into();
+    model.stories.push(story);
+    for order in [[StoryId(0), StoryId(1)], [StoryId(1), StoryId(0)]] {
+        let mut model = model.clone();
+        model.nodes[4].story = Some(order[0]);
+        let mut near = node(6, 1500.0, 0.0, 3000.0);
+        near.story = Some(order[1]);
+        model.nodes.push(near);
+        model.nodes[1].story = Some(StoryId(1));
+        let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+        assert_eq!(
+            q.items
+                .iter()
+                .find(|i| i.elem == Some(ElemId(2)))
+                .unwrap()
+                .story,
+            "-"
+        );
+        assert!(q
+            .notes
+            .iter()
+            .any(|n| n.contains("557") && n.contains("階帰属未確定")));
+    }
+}
+
+#[test]
+fn secondary_invalid_lip_channel_reports_member_id_and_dimension_cause() {
+    for thick in [0.0, -2.0, f64::NAN] {
+        let mut model = nonnodal_beam_model();
+        model.sections[0].shape = Some(SectionShape::SteelLipChannel {
+            height: 200.0,
+            width: 75.0,
+            lip: 20.0,
+            thick,
+        });
+        model.materials[0] = steel_material(0);
+        let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+        assert!(error.contains("SecondaryMemberId(557)"), "{error}");
+        assert!(error.contains("H/B/C/t"), "{error}");
+    }
+}
+
+#[test]
+fn invalid_lip_channel_is_rejected_for_primary_and_unreferenced_sections() {
+    for referenced in [false, true] {
+        let mut model = nonnodal_beam_model();
+        let section_id = if referenced {
+            SectionId(0)
+        } else {
+            SectionId(1)
+        };
+        if referenced {
+            model.unassigned_beams.clear();
+        } else {
+            let mut section = model.sections[0].clone();
+            section.id = section_id;
+            section.name = "未参照不正リップ溝形".into();
+            model.sections.push(section);
+        }
+        model.sections[section_id.index()].shape = Some(SectionShape::SteelLipChannel {
+            height: 200.0,
+            width: 75.0,
+            lip: 20.0,
+            thick: 0.0,
+        });
+        let error = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+        assert!(error.contains(&format!("断面 {}", section_id.0)), "{error}");
+        assert!(error.contains("H/B/C/t"), "{error}");
+    }
 }

@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [非節点二次部材数量_Issue557_2026-10.md](非節点二次部材数量_Issue557_2026-10.md) | 二次部材の実長・階未確定・SM識別・厳密な実材集約・材料と編集保存 | 🔶（最終直接55・App4/MCP3・編集保存・最終広域default2044/feature1235・両Clippy/strictDoc・文書検査成功。nativeGUI/transport/Validation・最終ゲート未確認） |
 | [RC梁Q0の符号付き端反力合成_Issue600_2026-10.md](RC梁Q0の符号付き端反力合成_Issue600_2026-10.md) | local Qy・端別係数合成・0/不足・公開入口・旧検定失効 | 🔶（Source直接・追加受入8・旧11保存・関連default/feature・両Clippy/strictDoc成功。MCP絶対Q0非公開、手動GUI/Validation・正式レビュー/最終CIは未確認） |
 | [単独RC壁Ds応力度と側柱寸法_Issue619_2026-10.md](単独RC壁Ds応力度と側柱寸法_Issue619_2026-10.md) | 柱心間距離によるDs応力度・両側柱寸法・既存評価点／Q・理由付き未算定 | 🔶（独立値・Source焦点Verification成功、広域検証・手動GUI／Validation・最終ゲートは別確認） |
 | [鉛直柱支持小梁の自重フェース_Issue423_2026-10.md](鉛直柱支持小梁の自重フェース_Issue423_2026-10.md) | 最外外側面・有限柱閉区間・角丸CftBox・設計DLと芯々断面質量の分離 | 🔶（公開8試験・MassEquiv節点加算・旧Analysis20保存回帰4件・文書検査成功。全形状/手動GUI/Validationと最終ゲートは別確認） |
@@ -295,6 +296,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 24a | 割当領域の同一性・孤立版診断 | sepika-core / sepika-edit / sepika-job / sepika-app / sepika-mcp | model/assignment_region.rs、secondary.rs、node_member.rs、prepare.rs | [Issue506検証](割当領域同一性_Issue506_2026-10.md)の独立fixtureと実入口 | #506 | ✅（状態契約Verification） |
 | 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*` | P7 | 🔶 |
 | 26 | 数量積算（部位別のコンクリート・型枠・鉄筋・鉄骨・継手個所） | sepika-design-jp | quantity/{mod,member,rebar}.rs | `quantity::member::tests::*`（手計算照合）/`quantity::tests::*`（走査・分類）/`summary::tests::test_quantity_csv_from_sample_model`（CSV 一気通貫）/`test_quantity_takeoff_json_column`（MCP） | 横断 | 🔶 |
+| 26c | 非節点二次部材の数量 | sepika-design-jp / sepika-app / sepika-mcp / sepika-edit / sepika-io | quantity・quantity_view・summary・query・secondary・ovika | [Issue557の元6受入と実入口](非節点二次部材数量_Issue557_2026-10.md#元の受入6項目と実入口) | 横断 | 🔶（自動実入口・広域Verification成功、nativeGUI/transport/Validation未） |
 | 26b | RC壁方向別数量・共有設定 | sepika-core / sepika-edit / sepika-design-jp / sepika-app / sepika-io / sepika-mcp | quantity・quantity_view・summary・query・model・ovika | [Issue536の独立期待値と実入口](RC壁方向別数量_Issue536_2026-10.md#実入口試験への対応) | 横断 | 🔶（Scope内Verification成功、Validation未実施） |
 | 26b | 主架構線材の2節点入力 | sepika-core / sepika-edit / sepika-io / sepika-job / sepika-solver / sepika-design-jp / sepika-app / sepika-mcp | model/element・aggregate、refs、ovika、prepare、precheck・linear/mod | [Issue562のkind×節点数×入口matrix](主架構線材の2節点入力_Issue562_2026-10.md#独立期待値と入口matrix) | 横断 | 🔶（Windows入口・自動App/egui・MCP Verification成功、手動GUI未実施、最終headゲート後続） |
 | 26a | 梁型枠の床接触控除 | sepika-design-jp / sepika-app / sepika-mcp | quantity/contact.rs・tests.rs、tests/beam_contact_quantity.rs | [Issue451検証](梁型枠接触和集合_Issue451_2026-10.md)の独立期待値・診断・実入口対応表 | 横断 | 🔶（限定Verification、一般形状・実施工未検証） |
