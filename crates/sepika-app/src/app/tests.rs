@@ -1914,7 +1914,7 @@ fn test_manual_load_in_auto_case_survives_sync() {
 
 /// 剛床代表節点は慣性力重心に自動生成される。再度自動生成しても
 /// 既存の代表節点を再利用するため節点数が増えないことを確認する
-/// （story_gen + edit の統合: `generate_stories` → `ApplyStories` の往復）。
+/// （story_gen + edit の統合: 階の生成 → `ApplyPreparedModel` の往復）。
 #[test]
 fn test_generate_stories_action_reuses_rep_node_on_regenerate() {
     let mut app = App::default();
@@ -6271,7 +6271,7 @@ fn test_column_live_load_factors_three_story() {
 
 /// 準備計算は冪等: モデルが変わっていなければ 2 回目以降の実行で undo 履歴を積まず、
 /// 解析結果を stale にもしない（毎回階を再生成する構成でも、実質的な差分がなければ
-/// `ApplyStories` を発行しない）。
+/// 準備計算を採用しない）。
 #[test]
 fn test_run_preparation_is_idempotent() {
     let mut app = App::default();

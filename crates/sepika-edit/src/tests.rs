@@ -2392,11 +2392,8 @@ fn test_set_story_weight_invalid_id_is_noop() {
     assert_eq!(model.stories[0].seismic_weight, Some(999.0));
 }
 
-/// `ApplyStories` が剛床代表節点(`rep_nodes`/`generated_masters`)込みで適用され、
-/// undo で節点数・`generated_masters`・stories・constraints が完全に元へ戻ること
-/// （`eq_ignoring_dofmap` で比較）。redo も確認する。
 #[test]
-fn test_apply_stories_roundtrip_with_generated_masters() {
+fn test_apply_prepared_model_roundtrip_with_generated_masters_and_records() {
     use sepika_core::dof::Dof;
     use sepika_core::model::{Constraint, Story};
 
@@ -2426,51 +2423,62 @@ fn test_apply_stories_roundtrip_with_generated_masters() {
         story: Some(StoryId(0)),
         support_spring: None,
     };
-    let cmd = ApplyStories {
-        wall_weight_generation: sepika_core::model::WallWeightGenerationMode::Geometry,
-        damper_mass_generation: Default::default(),
-        stories: vec![Story {
-            wall_weights: Vec::new(),
-            level_kind: Default::default(),
-            structure: Default::default(),
-            id: StoryId(0),
-            name: "1F".into(),
-            elevation: 3000.0,
-            node_ids: vec![NodeId(0), NodeId(1)],
-            seismic_weight: Some(1000.0),
-            weight_override: None,
-            dynamic_mass: None,
-            standard_floor_load: None,
-            column_finish_area_weight: 0.0,
-            fireproof: Default::default(),
-        }],
-        node_story: vec![Some(StoryId(0)), Some(StoryId(0))],
-        constraints: vec![Constraint::rigid_diaphragm(
-            StoryId(0),
-            NodeId(2),
-            vec![NodeId(0), NodeId(1)],
-        )],
-        rep_nodes: vec![rep_node],
-        generated_masters: vec![NodeId(2)],
-        mass_method: Default::default(),
+    let constraint = Constraint::rigid_diaphragm(StoryId(0), NodeId(2), vec![NodeId(0), NodeId(1)]);
+    let generation = sepika_core::model::SeismicWeightGeneration {
+        input_key: vec![1],
+        output_key: vec![2],
+        calculated_weights: vec![(StoryId(0), 1000.0)],
+        automatic_diaphragms: vec![constraint.clone()],
+        automatic_master_restraints: vec![(NodeId(2), rep_restraint)],
     };
+    let mut prepared = before.clone();
+    prepared.nodes[0].story = Some(StoryId(0));
+    prepared.nodes[1].story = Some(StoryId(0));
+    prepared.nodes.push(rep_node);
+    prepared.stories = vec![Story {
+        wall_weights: Vec::new(),
+        level_kind: Default::default(),
+        structure: Default::default(),
+        id: StoryId(0),
+        name: "1F".into(),
+        elevation: 3000.0,
+        node_ids: vec![NodeId(0), NodeId(1)],
+        seismic_weight: Some(1000.0),
+        weight_override: None,
+        dynamic_mass: None,
+        standard_floor_load: None,
+        column_finish_area_weight: 0.0,
+        fireproof: Default::default(),
+    }];
+    prepared.constraints = vec![constraint];
+    prepared.generated_masters = vec![NodeId(2)];
+    prepared.wall_weight_generation = Some(sepika_core::model::WallWeightGenerationMode::Geometry);
+    prepared.damper_mass_generation = Some(Default::default());
+    prepared.seismic_weight_generation = Some(generation.clone());
+    prepared.assign_stb_node_ids().unwrap();
+    let applied = prepared.clone();
+    assert!(stack.run(&mut model, Box::new(ApplyPreparedModel { prepared })));
+    assert!(model.eq_ignoring_dofmap(&applied));
 
-    stack.run(&mut model, Box::new(cmd));
     assert_eq!(model.nodes.len(), 3);
     assert_eq!(model.generated_masters, vec![NodeId(2)]);
     assert_eq!(model.damper_mass_generation, Some(Default::default()));
     assert_eq!(model.stories.len(), 1);
     assert_eq!(model.constraints.len(), 1);
+    assert_eq!(model.seismic_weight_generation, Some(generation.clone()));
     assert!(model.validate().is_ok());
 
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
     assert!(model.generated_masters.is_empty());
     assert!(model.damper_mass_generation.is_none());
+    assert!(model.seismic_weight_generation.is_none());
     assert!(model.stories.is_empty());
     assert!(model.validate().is_ok());
 
     stack.redo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&applied));
+    assert_eq!(model.seismic_weight_generation, Some(generation));
     assert_eq!(model.nodes.len(), 3);
     assert_eq!(model.generated_masters, vec![NodeId(2)]);
     assert_eq!(model.damper_mass_generation, Some(Default::default()));
@@ -2478,38 +2486,17 @@ fn test_apply_stories_roundtrip_with_generated_masters() {
     assert_eq!(model.constraints.len(), 1);
 }
 
-/// `ApplyStories` が `model.mass_method` を設定し、undo で変更前の値へ復元されること。
 #[test]
-fn test_apply_stories_sets_and_restores_mass_method() {
+fn test_apply_prepared_model_sets_and_restores_mass_method() {
     use sepika_core::model::MassMethod;
 
     let mut model = empty_model();
-    for i in 0..2u32 {
-        model.nodes.push(Node {
-            id: NodeId(i),
-            coord: [i as f64 * 1000.0, 0.0, 3000.0],
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        });
-    }
-    // 変更前は既定（CorrectedLumped）。
     assert_eq!(model.mass_method, MassMethod::CorrectedLumped);
     let mut stack = UndoStack::new();
+    let mut prepared = model.clone();
+    prepared.mass_method = MassMethod::LumpedOnly;
 
-    let cmd = ApplyStories {
-        wall_weight_generation: sepika_core::model::WallWeightGenerationMode::Geometry,
-        damper_mass_generation: Default::default(),
-        stories: vec![],
-        node_story: vec![None, None],
-        constraints: vec![],
-        rep_nodes: vec![],
-        generated_masters: vec![],
-        mass_method: MassMethod::LumpedOnly,
-    };
-
-    stack.run(&mut model, Box::new(cmd));
+    assert!(stack.run(&mut model, Box::new(ApplyPreparedModel { prepared })));
     assert_eq!(model.mass_method, MassMethod::LumpedOnly);
 
     stack.undo(&mut model);

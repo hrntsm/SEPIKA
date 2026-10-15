@@ -1,35 +1,16 @@
-//! AD-HOC PERF PROBE -- measures where wall-clock time goes inside
-//! `App::generate_stories_action` (crates/sepika-app/src/app/actions/mod.rs,
-//! ~line 255) on synthetic large regular-frame models. Kept for manual runs;
-//! the test is `#[ignore]`d and not part of the normal test suite.
+//! 大規模な規則架構の準備処理を公開 API で段階別に測る手動診断。
+//! `#[ignore]` のため通常のテスト実行では計測しない。
 //!
-//! `generate_stories_action` has 5 stages:
-//!   1. sync_gravity_load_cases_action
-//!   2. sepika_load::story_gen::generate_stories_with_opts
-//!   3. undo.run(ApplyStories)
-//!   4. apply_rigid_zones_for_analysis (== sepika_element::frame::beam::apply_auto_rigid_zones)
-//!   5. sync_seismic_load_cases_action
+//! 1. 重力荷重ケース同期
+//! 2. 階生成
+//! 3. 作業コピーへの生成結果反映と `ApplyPreparedModel` の採用
+//! 4. 自動剛域
+//! 5. 地震荷重ケース同期
 //!
-//! Stages 1/2/3/5 use methods/functions that are already `pub` on `App` /
-//! `sepika_load`, so they are called directly (not re-implemented). Stage 4's
-//! `App::apply_rigid_zones_for_analysis` calls
-//! `sepika_job::prepare::apply_rigid_zones_and_panels`, which since the
-//! wall-展開順序 fix (dev_docs/v_and_v/剛域算定の壁展開順序不整合_2026-08.md)
-//! first checks `sepika_load::wall_expand::model_has_wall_plates_to_expand`
-//! and only takes the wall-expansion branch when the model actually has
-//! walls. The synthetic models generated below have none, so that guard
-//! always takes the cheap branch and this probe calls the public
-//! `sepika_element::frame::beam::apply_auto_rigid_zones` directly instead (which is
-//! byte-for-byte what the guard's false-branch does for these models). This
-//! measurement therefore does **not** cover the wall-expansion branch's cost
-//! — it is out of scope for this probe, not verified equivalent for
-//! wall-bearing models. The two private free functions that stage 2 needs as inputs
-//! (`gravity_cases_for_seismic_weight`, `density_self_weight_for_stories` in
-//! crates/sepika-app/src/app/mod.rs) are trivial selection logic over
-//! `model.load_cases`; they are inlined verbatim below using the *public*
-//! `DL_CASE_NAME` / `LL_FRAME_CASE_NAME` / `SELF_WEIGHT_AUTO_LOAD_CASE_NAME`
-//! constants re-exported by `sepika_app::app`, so no private items are
-//! touched anywhere in this file.
+//! 現用 App の準備処理全体を再現する計測ではない。壁のない合成モデルで
+//! 公開の自動剛域 API を直接呼び、重力荷重ケースの選択も本診断で行う。
+//! 段階3にはコピーと生成記録の反映を含むため、過去の部分適用の計測値とは
+//! 同条件で比較できない。
 //!
 //! Run (release, single-threaded so wall time is not muddied by test
 //! parallelism; timings are printed via --nocapture):
@@ -303,20 +284,12 @@ fn timed_generate_stories(app: &mut App) -> [std::time::Duration; 5] {
     .expect("story generation should succeed on a well-formed grid model");
     let d2 = t0.elapsed();
 
-    // --- stage 3: undo.run(ApplyStories) (pub `undo` field + pub `ApplyStories`) ---
     let t0 = Instant::now();
+    let mut prepared = app.core.model.clone();
+    sepika_job::weight_preparation::apply_generated_weights(&mut prepared, gen, mass_method);
     app.core.scoped.undo.run(
         &mut app.core.model,
-        Box::new(sepika_edit::ApplyStories {
-            wall_weight_generation: gen.wall_weight_generation,
-            damper_mass_generation: gen.damper_mass_generation,
-            stories: gen.stories,
-            node_story: gen.node_story,
-            constraints: gen.constraints,
-            rep_nodes: gen.rep_nodes,
-            generated_masters: gen.generated_masters,
-            mass_method,
-        }),
+        Box::new(sepika_edit::ApplyPreparedModel { prepared }),
     );
     let d3 = t0.elapsed();
     app.core.scoped.staleness.mark_edited();
@@ -426,7 +399,7 @@ fn run_case(label: &str, nx: usize, ny: usize, n_stories: usize, with_slabs: boo
         fmt_ms(stages[1])
     );
     println!(
-        "  [3] undo.run(ApplyStories)                : {}",
+        "  [3] clone + weights + ApplyPreparedModel : {}",
         fmt_ms(stages[2])
     );
     println!(
