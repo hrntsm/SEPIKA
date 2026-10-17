@@ -2599,3 +2599,6 @@ mod vibration_ownership_tests;
 
 #[cfg(all(test, feature = "gui"))]
 mod nonnodal_quantity_acceptance_tests;
+
+#[cfg(test)]
+mod src_ql_acceptance_tests;

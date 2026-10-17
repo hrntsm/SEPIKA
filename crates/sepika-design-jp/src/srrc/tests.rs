@@ -1067,3 +1067,346 @@ fn sm520_out_of_range_src_beam_and_column_do_not_restore_partial_rc_capacity() {
         }
     }
 }
+
+fn gravity_contract_beam_section() -> Section {
+    make_section(src_beam_rect_shape(
+        400.0,
+        700.0,
+        22.0,
+        vec![3],
+        vec![3],
+        40.0,
+        10.0,
+        100.0,
+        2,
+        500.0,
+        200.0,
+        9.0,
+        14.0,
+    ))
+}
+
+fn gravity_contract_qd(method: crate::QdMethod, ql_n: f64) -> SeismicQd {
+    SeismicQd {
+        long_at: vec![(0.0, [0.0, ql_n, 0.0, 0.0, 0.0, 0.0])],
+        n_factor: 1.5,
+        n_mechanism: 1.0,
+        q_simple: None,
+        clear_length: 6000.0,
+        method,
+    }
+}
+
+#[test]
+fn src_beam_qd_uses_ql_independently_of_q0_for_every_method() {
+    let section = gravity_contract_beam_section();
+    let material = make_material(24.0, "Fc24");
+    let forces = MemberForcesAt {
+        qy: 110_000.0,
+        mz: 210_000_000.0,
+        ..zero_forces()
+    };
+    for method in [
+        crate::QdMethod::Qd1,
+        crate::QdMethod::Qd2,
+        crate::QdMethod::Min,
+    ] {
+        let mut ctx = ctx_beam(LoadTerm::Short);
+        ctx.seismic_qd = Some(gravity_contract_qd(method, 100_000.0));
+        let baseline = SrcDesign
+            .check(&forces, &section, &material, &ctx)
+            .unwrap_checked();
+        let shear = baseline
+            .components
+            .iter()
+            .find(|c| c.kind == crate::CheckKind::Shear)
+            .unwrap();
+        assert!((shear.ratio - 0.347593221267).abs() < 1e-10);
+        assert!(shear.detail.contains("構造規定方式"));
+        assert!(shear.detail.contains("sQ=200337.9 N"));
+        let expected_rc = if method == crate::QdMethod::Qd1 {
+            "rQ=103435.2 N"
+        } else {
+            "rQ=0.0 N"
+        };
+        assert!(shear.detail.contains(expected_rc), "{}", shear.detail);
+        for q0 in [
+            None,
+            Some(0.0),
+            Some(75_000.0),
+            Some(150_000.0),
+            Some(f64::NAN),
+        ] {
+            ctx.seismic_qd.as_mut().unwrap().q_simple = q0;
+            let result = SrcDesign
+                .check(&forces, &section, &material, &ctx)
+                .unwrap_checked();
+            assert_eq!(result.components, baseline.components);
+        }
+        ctx.seismic_qd.as_mut().unwrap().long_at[0].1[1] = -100_000.0;
+        assert_eq!(
+            SrcDesign
+                .check(&forces, &section, &material, &ctx)
+                .unwrap_checked()
+                .components,
+            baseline.components
+        );
+        ctx.seismic_qd.as_mut().unwrap().long_at[0].1[1] = 0.0;
+        let zero = SrcDesign
+            .check(&forces, &section, &material, &ctx)
+            .unwrap_checked();
+        let shear = zero
+            .components
+            .iter()
+            .find(|c| c.kind == crate::CheckKind::Shear)
+            .unwrap();
+        assert!(shear.detail.contains("sQ=128351.2 N"));
+        assert!(shear.detail.contains("構造規定方式"));
+        let expected_rc = if method == crate::QdMethod::Qd1 {
+            "rQ=75421.9 N"
+        } else {
+            "rQ=0.0 N"
+        };
+        assert!(shear.detail.contains(expected_rc));
+    }
+}
+
+#[test]
+fn src_beam_qd_requires_finite_ql_at_the_evaluation_position() {
+    let section = gravity_contract_beam_section();
+    let material = make_material(24.0, "Fc24");
+    for method in [
+        crate::QdMethod::Qd1,
+        crate::QdMethod::Qd2,
+        crate::QdMethod::Min,
+    ] {
+        let mut ctx = ctx_beam(LoadTerm::Short);
+        ctx.seismic_qd = Some(gravity_contract_qd(method, 100_000.0));
+        for long_at in [
+            vec![],
+            vec![(0.5, [0.0; 6])],
+            vec![(1.1e-6, [0.0; 6])],
+            vec![(f64::NAN, [0.0; 6])],
+            vec![(0.0, [0.0, f64::NAN, 0.0, 0.0, 0.0, 0.0])],
+            vec![(0.0, [0.0, f64::INFINITY, 0.0, 0.0, 0.0, 0.0])],
+            vec![(0.0, [0.0, f64::NEG_INFINITY, 0.0, 0.0, 0.0, 0.0])],
+        ] {
+            ctx.seismic_qd.as_mut().unwrap().long_at = long_at;
+            assert!(
+                matches!(SrcDesign.check(&zero_forces(), &section, &material, &ctx), CheckOutcome::Skipped { reason } if reason.contains("QL"))
+            );
+        }
+        ctx.seismic_qd.as_mut().unwrap().long_at = vec![(
+            0.5e-6,
+            [f64::NAN, 0.0, f64::NAN, f64::NAN, f64::NAN, f64::NAN],
+        )];
+        assert!(matches!(
+            SrcDesign.check(&zero_forces(), &section, &material, &ctx),
+            CheckOutcome::Checked(_)
+        ));
+        for pos in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let forces = MemberForcesAt {
+                pos,
+                ..zero_forces()
+            };
+            assert!(
+                matches!(SrcDesign.check(&forces, &section, &material, &ctx), CheckOutcome::Skipped { reason } if reason.contains("QL"))
+            );
+        }
+    }
+    for term in [LoadTerm::Long, LoadTerm::Short] {
+        assert!(matches!(
+            SrcDesign.check(&zero_forces(), &section, &material, &ctx_beam(term)),
+            CheckOutcome::Checked(_)
+        ));
+    }
+}
+
+#[test]
+fn src_beam_public_runner_rejects_requested_gravity_gaps_without_reviving_results() {
+    use crate::member_design_check::{run_member_design_checks, MemberDesignCheckOptions};
+    use sepika_core::ids::{ElemId, NodeId};
+    use sepika_core::model::{
+        ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Model,
+        Node,
+    };
+    use sepika_element::frame::beam::MemberForces;
+    use std::collections::HashMap;
+
+    let mut section = gravity_contract_beam_section();
+    section.material = Some(MaterialId(0));
+    section.rebar_material = Some(MaterialId(1));
+    section.shear_rebar_material = Some(MaterialId(1));
+    section.steel_material = Some(MaterialId(2));
+    section.frame_use = Some(FrameSectionUse::Girder);
+    let model = Model {
+        nodes: [0.0, 6000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, x)| Node {
+                id: NodeId(i as u32),
+                coord: [x, 0.0, 0.0],
+                restraint: Default::default(),
+                mass: None,
+                story: None,
+                support_spring: None,
+            })
+            .collect(),
+        sections: vec![section],
+        materials: vec![
+            make_material(24.0, "Fc24"),
+            make_rebar_material("SD345", 345.0),
+            make_steel_material("SN400B"),
+        ],
+        elements: vec![ElementData {
+            id: ElemId(0),
+            kind: ElementKind::Beam,
+            nodes: [NodeId(0), NodeId(1)].into_iter().collect(),
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis {
+                ref_vector: [0.0, 0.0, 1.0],
+            },
+            end_cond: [EndCondition::Fixed; 2],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        }],
+        ..Default::default()
+    };
+    let positions = [0.0, 0.05, 0.5, 5600.0 / 6000.0, 1.0];
+    let short = vec![(
+        ElemId(0),
+        MemberForces {
+            at: positions
+                .into_iter()
+                .map(|p| (p, [0.0, 110_000.0, 0.0, 0.0, 0.0, 210_000_000.0]))
+                .collect(),
+        },
+    )];
+    let complete = vec![(
+        ElemId(0),
+        MemberForces {
+            at: positions
+                .into_iter()
+                .map(|p| (p, [0.0, 100_000.0, 0.0, 0.0, 0.0, 150_000_000.0]))
+                .collect(),
+        },
+    )];
+    let empty = vec![];
+    let absent = vec![(ElemId(99), complete[0].1.clone())];
+    let q0 = HashMap::from([(ElemId(0), 75_000.0)]);
+    for method in [
+        crate::QdMethod::Qd1,
+        crate::QdMethod::Qd2,
+        crate::QdMethod::Min,
+    ] {
+        for (long, checked) in [
+            (&complete, true),
+            (&empty, false),
+            (&complete, true),
+            (&absent, false),
+        ] {
+            let report = run_member_design_checks(
+                &model,
+                &short,
+                &[],
+                &MemberDesignCheckOptions {
+                    term: LoadTerm::Short,
+                    qd_method: method,
+                    long_member_forces: Some(long),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(report.member_checks.len(), 3);
+            for (_, _, outcome) in &report.member_checks {
+                if checked {
+                    assert!(matches!(outcome, CheckOutcome::Checked(_)), "{outcome:?}");
+                } else {
+                    assert!(
+                        matches!(outcome,CheckOutcome::Skipped { reason } if reason.contains("重力参照"))
+                    );
+                }
+            }
+        }
+        let without_q0 = run_member_design_checks(
+            &model,
+            &short,
+            &[],
+            &MemberDesignCheckOptions {
+                term: LoadTerm::Short,
+                qd_method: method,
+                long_member_forces: Some(&complete),
+                ..Default::default()
+            },
+        );
+        let with_q0 = run_member_design_checks(
+            &model,
+            &short,
+            &[],
+            &MemberDesignCheckOptions {
+                term: LoadTerm::Short,
+                qd_method: method,
+                long_member_forces: Some(&complete),
+                q_simple_by_elem: Some(&q0),
+                ..Default::default()
+            },
+        );
+        for (without, with) in without_q0.member_checks.iter().zip(&with_q0.member_checks) {
+            let (CheckOutcome::Checked(a), CheckOutcome::Checked(b)) = (&without.2, &with.2) else {
+                panic!("正常参照は検定可能");
+            };
+            assert_eq!(a.components, b.components);
+        }
+        let mut faced = model.clone();
+        faced.elements[0].rigid_zone.face_i = Some(300.0);
+        faced.elements[0].rigid_zone.face_j = Some(400.0);
+        let mut partial = complete.clone();
+        partial[0].1.at.retain(|(p, _)| *p != 0.05);
+        for (long, missing_face) in [
+            (&complete, false),
+            (&partial, true),
+            (&complete, false),
+            (&partial, true),
+        ] {
+            let report = run_member_design_checks(
+                &faced,
+                &short,
+                &[],
+                &MemberDesignCheckOptions {
+                    term: LoadTerm::Short,
+                    qd_method: method,
+                    long_member_forces: Some(long),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                report
+                    .member_checks
+                    .iter()
+                    .map(|(_, p, _)| *p)
+                    .collect::<Vec<_>>(),
+                vec![0.05, 0.5, 5600.0 / 6000.0]
+            );
+            for (_, pos, outcome) in &report.member_checks {
+                if missing_face && *pos == 0.05 {
+                    assert!(
+                        matches!(outcome,CheckOutcome::Skipped { reason } if reason.contains("QL"))
+                    );
+                } else {
+                    let CheckOutcome::Checked(result) = outcome else {
+                        panic!("{outcome:?}");
+                    };
+                    if *pos == 0.05 {
+                        let shear = result
+                            .components
+                            .iter()
+                            .find(|c| c.kind == crate::CheckKind::Shear)
+                            .unwrap();
+                        assert!((shear.ratio - 0.377005608081).abs() < 1e-10);
+                    }
+                }
+            }
+        }
+    }
+}

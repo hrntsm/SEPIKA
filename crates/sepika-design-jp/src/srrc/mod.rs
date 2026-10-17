@@ -386,6 +386,19 @@ impl DesignCheck for SrcDesign {
                             .to_string(),
                     };
                 }
+                if let Some(qd) = &ctx.seismic_qd {
+                    if !forces.pos.is_finite()
+                        || !qd
+                            .long_at
+                            .iter()
+                            .find(|(pos, _)| (pos - forces.pos).abs() < 1e-6)
+                            .is_some_and(|(_, values)| values[1].is_finite())
+                    {
+                        return CheckOutcome::Skipped {
+                            reason: "SRC検定: 設計用せん断力に必要な同位置の重力参照せん断力QLが不足または非有限です".into(),
+                        };
+                    }
+                }
                 if rebar.is_unset() {
                     return CheckOutcome::Skipped {
                         reason: "SRC検定: 配筋が未入力です".to_string(),

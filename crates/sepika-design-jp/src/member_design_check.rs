@@ -64,7 +64,7 @@ pub struct MemberDesignCheckOptions<'a> {
     pub qd_method: QdMethod,
     /// 地震時短期 QD 用の長期（DL+LL 等）内力。None なら QD 割増なし。
     pub long_member_forces: Option<&'a [(ElemId, MemberForces)]>,
-    /// 梁 QD1 用の単純梁せん断 Q0 `[N]`（部材 ID → 絶対値）。RC/SRC梁のQD1で不足すれば未検定。
+    /// RC 梁 QD1 用の単純梁せん断 Q0 `[N]`（部材 ID → 絶対値）。RC梁のQD1で不足すれば未検定。
     pub q_simple_by_elem: Option<&'a HashMap<ElemId, f64>>,
     /// 一本部材グループの検定文脈上書き（梁のみ適用）。None なら部材単体の値を用いる。
     pub girder_group_overrides: Option<&'a HashMap<ElemId, GirderGroupContextOverride>>,
@@ -345,21 +345,30 @@ pub fn run_member_design_checks(
                 && matches!(
                     sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category)),
                     sepika_core::structure_kind::StructureKind::Rc
-                        | sepika_core::structure_kind::StructureKind::Src
                 )
                 && options
                     .q_simple_by_elem
                     .and_then(|q| q.get(elem_id))
                     .is_none();
-            let missing_rc_gravity = options.long_member_forces.is_some()
+            let missing_gravity = options.long_member_forces.is_some()
                 && ctx.seismic_qd.is_none()
-                && matches!(
+                && (matches!(
                     sec.shape,
                     Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
-                )
-                && sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category))
-                    == sepika_core::structure_kind::StructureKind::Rc;
-            let mut outcome = if missing_rc_gravity {
+                ) && sepika_core::structure_kind::structure_kind_of(
+                    Some(sec),
+                    Some(mat.category),
+                ) == sepika_core::structure_kind::StructureKind::Rc
+                    || kind == MemberKind::Girder
+                        && matches!(
+                            sec.shape,
+                            Some(sepika_core::section_shape::SectionShape::SrcBeamRect { .. })
+                        )
+                        && sepika_core::structure_kind::structure_kind_of(
+                            Some(sec),
+                            Some(mat.category),
+                        ) == sepika_core::structure_kind::StructureKind::Src);
+            let mut outcome = if missing_gravity {
                 CheckOutcome::Skipped {
                     reason: "設計用せん断力に必要な重力参照内力が不足しています".into(),
                 }
