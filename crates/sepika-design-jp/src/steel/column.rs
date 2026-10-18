@@ -102,12 +102,20 @@ pub(crate) fn check_column(
         (sigma_t, ratio, "引張+曲げ: σt/ft+ΣσB/fb")
     };
 
-    let (as_y, _as_z) = shear_area_2d(shape, sec, tf, tw);
+    let (as_y, as_z) = shear_area_2d(shape, sec, tf, tw);
+    let (ay, az) = if matches!(
+        sec.shape,
+        Some(sepika_core::section_shape::SectionShape::SteelBox { .. })
+    ) {
+        (as_y, as_z)
+    } else {
+        (safe_denom(as_y), safe_denom(as_z))
+    };
+    let tau_y = forces.qy.abs() / ay;
+    let tau_z = forces.qz.abs() / az;
     let tau = match shape {
-        ShapeCategory::H | ShapeCategory::Box => forces.qy.abs() / safe_denom(as_y),
-        ShapeCategory::Pipe | ShapeCategory::Other => {
-            (forces.qy.powi(2) + forces.qz.powi(2)).sqrt() / safe_denom(as_y)
-        }
+        ShapeCategory::Pipe => (forces.qy.powi(2) + forces.qz.powi(2)).sqrt() / safe_denom(as_y),
+        _ => tau_y + tau_z,
     };
     let sigma_total = match shape {
         ShapeCategory::H => axial_stress + sigma_bx * (h - 2.0 * tf).max(0.0) / safe_denom(h),
@@ -130,10 +138,17 @@ pub(crate) fn check_column(
 fbY={:.4} N/mm², λ={:.3}, 軸曲げ比={:.4}",
         axial_stress, sigma_bx, sigma_by, fc_val, fb_strong, fb_weak, lambda, ratio_axial_bend,
     );
-    let shear_detail = format!(
-        "τ={:.4} N/mm², fs={:.4} N/mm², せん断比={:.4}",
-        tau, fs_val, ratio_shear
-    );
+    let shear_detail = if shape == ShapeCategory::Pipe {
+        format!(
+            "τ={:.4} N/mm², fs={:.4} N/mm², せん断比={:.4}",
+            tau, fs_val, ratio_shear
+        )
+    } else {
+        format!(
+            "τy={:.4} N/mm², τz={:.4} N/mm², τ={:.4} N/mm², fs={:.4} N/mm², せん断比={:.4}",
+            tau_y, tau_z, tau, fs_val, ratio_shear
+        )
+    };
     let detail = String::new();
 
     let components = vec![
@@ -307,8 +322,13 @@ mod tests {
     #[test]
     fn test_column_shear_von_mises_hand_calc() {
         // 純せん断（N=0, M=0）で von Mises 式 sqrt(3)*τ/ft と τ/fs を手計算照合。
-        let mut sec = rect_section(300.0, 300.0, "BOX-300x300x12");
-        sec.thickness = Some(12.0);
+        let sec = sepika_core::section_shape::SectionShape::SteelBox {
+            height: 300.0,
+            width: 300.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        }
+        .to_section(sepika_core::ids::SectionId(0), "BOX-300x300x12".into());
         let mat_v = mat("SN400");
         let forces = MemberForcesAt {
             pos: 0.0,
@@ -328,7 +348,6 @@ mod tests {
             .check(&forces, &sec, &mat_v, &ctx)
             .unwrap_checked();
 
-        // 角形: 梁と共用のせん断有効断面積 Ay=2t(H−2t)（角部直角。r 未入力）。
         let ay = 2.0 * 12.0 * (300.0 - 2.0 * 12.0);
         let tau = 300_000.0_f64.abs() / ay;
         let ft = steel_ft(235.0, LoadTerm::Long);
@@ -349,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_column_length_zero_ignores_buckling() {
-        let sec = rect_section(300.0, 300.0, "BOX-300x300x16");
+        let sec = rect_section(300.0, 300.0, "一般断面");
         let mat_v = mat("SN400");
         let forces = MemberForcesAt {
             pos: 0.0,
