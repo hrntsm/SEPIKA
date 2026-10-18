@@ -11,7 +11,9 @@ on:
   pull_request:
     branches: [main]
 
-# 同一 PR への新しい push 時に、進行中の古い実行をキャンセルする。
+# 同一 PR への新しい push 時に、進行中の古い実行をキャンセルする。main への連続 push でも
+# 先行実行がキャンセルされうるが、キャンセルされた回のキャッシュ保存は行われず、次回の
+# main 実行が生成・更新するため実害はない。
 # 品質ゲートは PR で実施する。main への push ではテストジョブをキャッシュ生成用のビルドに
 # 限定し（テスト実行なし）、docs デプロイ（docs.yml）は別 workflow で実行する。
 concurrency:
@@ -40,6 +42,10 @@ jobs:
         id: rust-cache
       # main で復元したキャッシュが完全一致なら依存は揃っており、同一キーへの再保存は
       # できない（キャッシュは上書き不可）ためビルドをスキップする。PR では常に実行する。
+      # キーは Cargo.lock / Cargo.toml / rustc 版 / キー対象 env 値で決まり、ci.yml の
+      # コマンド・feature 指定の変更では変わらない。その場合も main は exact hit で
+      # スキップし、キャッシュ更新は次にキーが変わる時まで遅延する（PR 側で不足分を
+      # コンパイルするため正しさは維持される）。
       - name: テスト実行
         if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo test --workspace --locked $TEST_BUILD_ONLY_ARGS
