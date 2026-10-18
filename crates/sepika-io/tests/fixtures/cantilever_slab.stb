@@ -15,7 +15,7 @@
     </StbSecSteel>
     <StbSecSlab_RC id="7" name="S1">
       <StbSecFigureSlab_RC>
-        <StbSecSlab_RC_Straight thickness="150"/>
+        <StbSecSlab_RC_Straight depth="150"/>
       </StbSecFigureSlab_RC>
     </StbSecSlab_RC>
   </StbSections>

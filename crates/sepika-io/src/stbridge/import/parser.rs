@@ -15,7 +15,7 @@ use super::xml::{
 };
 use super::{
     PendingMember, PendingMemberKind, PendingSec, PendingSecKind, PendingSecondary, RawAxis,
-    RawAxisGroup, RawLoadCase, RawMaterial, RawNode, RawSlab, RawStory, RawWall, SecMatRef,
+    RawAxisGroup, RawLoadCase, RawNode, RawSlab, RawStory, RawWall, SecMatRef,
 };
 use sepika_core::model::FrameSectionUse;
 use sepika_core::section_shape::{
@@ -213,7 +213,6 @@ pub(super) struct StbParser {
     pub(super) container_stack: Vec<String>,
     pub(super) raw_nodes: Vec<RawNode>,
     pub(super) raw_stories: Vec<RawStory>,
-    pub(super) raw_materials: Vec<RawMaterial>,
     pub(super) raw_load_cases: Vec<RawLoadCase>,
     pub(super) pending_secs: Vec<PendingSec>,
     pub(super) pending_members: Vec<PendingMember>,
@@ -382,51 +381,22 @@ impl StbParser {
                 });
                 self.in_story = true;
             }
-            "StbMaterial" => {
-                self.raw_materials.push(RawMaterial {
-                    file_id: get_u32(a, "id")?,
-                    name: a.get("name").cloned().unwrap_or_default(),
-                    young: get_f64(a, "young")?,
-                    poisson: get_f64(a, "poisson")?,
-                    density: get_f64(a, "density")?,
-                    shear: get_opt_f64(a, "shear"),
-                    fc: get_opt_f64(a, "fc"),
-                    fy: get_opt_f64(a, "fy"),
-                });
-            }
             _ => return Ok(false),
         }
         Ok(true)
     }
 
-    /// 断面（Raw・鋼・RC・CFT・SRC・スラブ・壁・配筋・形鋼ライブラリ）の
+    /// 断面（鋼・RC・CFT・SRC・スラブ・壁・配筋・形鋼ライブラリ）の
     /// 開始要素を処理する。担当タグなら true。
     fn start_section(&mut self, tag: &str, a: &Attrs) -> Result<bool, StbError> {
         match tag {
-            "StbSecRaw" => {
-                self.pending_secs.push(PendingSec {
-                    file_id: get_u32(a, "id")?,
-                    name: a.get("name").cloned().unwrap_or_default(),
-                    floor: floor_of(a),
-                    kind: PendingSecKind::Raw {
-                        area: get_f64(a, "area")?,
-                        iy: get_f64(a, "iy")?,
-                        iz: get_f64(a, "iz")?,
-                        j: get_f64(a, "j")?,
-                        depth: get_f64(a, "depth").unwrap_or(0.0),
-                        width: get_f64(a, "width").unwrap_or(0.0),
-                    },
-                    mat: None,
-                    grades: Default::default(),
-                });
-            }
             "StbSecColumn_S" | "StbSecBeam_S" | "StbSecBrace_S" => {
                 self.cur = CurSec::Steel {
                     file_id: get_u32(a, "id")?,
                     name: a.get("name").cloned().unwrap_or_default(),
                     floor: floor_of(a),
                     shape_name: None,
-                    grade: a.get("strength_main").cloned(),
+                    grade: None,
                 };
             }
             t if t.starts_with("StbSecSteelColumn_")
@@ -434,12 +404,7 @@ impl StbParser {
                 || t.starts_with("StbSecSteelBrace_")
                 || t.starts_with("StbSecColumn_SRC_SameShape") =>
             {
-                let sname = a
-                    .get("shape")
-                    .or_else(|| a.get("shape_start"))
-                    .or_else(|| a.get("shape_center"))
-                    .or_else(|| a.get("shape_main"))
-                    .cloned();
+                let sname = a.get("shape").cloned();
                 let gr = if matches!(&self.cur, CurSec::Cft { .. }) {
                     a.get("strength").cloned()
                 } else {
@@ -503,8 +468,8 @@ impl StbParser {
                 if let CurSec::Rc { geom, .. } = &mut self.cur {
                     if geom.is_none() {
                         *geom = Some(RcGeom::Rect {
-                            b: get_f64_any(a, &["width_X", "width_x"])?,
-                            d: get_f64_any(a, &["width_Y", "width_y"])?,
+                            b: get_f64(a, "width_X")?,
+                            d: get_f64(a, "width_Y")?,
                         });
                     }
                 }
@@ -513,7 +478,7 @@ impl StbParser {
                 if let CurSec::Rc { geom, .. } = &mut self.cur {
                     if geom.is_none() {
                         *geom = Some(RcGeom::Circle {
-                            d: get_f64_any(a, &["D", "d"])?,
+                            d: get_f64(a, "D")?,
                         });
                     }
                 }
@@ -522,8 +487,8 @@ impl StbParser {
                 if let CurSec::Rc { geom, .. } = &mut self.cur {
                     if geom.is_none() {
                         *geom = Some(RcGeom::Rect {
-                            b: get_f64_any(a, &["width", "width_X"])?,
-                            d: get_f64_any(a, &["depth", "width_Y"])?,
+                            b: get_f64(a, "width")?,
+                            d: get_f64(a, "depth")?,
                         });
                     }
                 }
@@ -554,31 +519,21 @@ impl StbParser {
                     rebar_grades: Default::default(),
                     rebar_cover: None,
                     steel_name: None,
-                    grade: a
-                        .get("strength_steel")
-                        .or_else(|| a.get("strength_main_S"))
-                        .cloned()
-                        .unwrap_or_default(),
+                    grade: String::new(),
                     mat: sec_mat_ref_of(a)?,
                 };
             }
             "StbSecColumn_SRC_Rect" => {
                 if let CurSec::Src { geom, .. } = &mut self.cur {
                     if geom.is_none() {
-                        *geom = Some((
-                            get_f64_any(a, &["width_X", "width_x"])?,
-                            get_f64_any(a, &["width_Y", "width_y"])?,
-                        ));
+                        *geom = Some((get_f64(a, "width_X")?, get_f64(a, "width_Y")?));
                     }
                 }
             }
             "StbSecBeam_SRC_Straight" => {
                 if let CurSec::Src { geom, .. } = &mut self.cur {
                     if geom.is_none() {
-                        *geom = Some((
-                            get_f64_any(a, &["width", "width_X"])?,
-                            get_f64_any(a, &["depth", "width_Y"])?,
-                        ));
+                        *geom = Some((get_f64(a, "width")?, get_f64(a, "depth")?));
                     }
                 }
             }
@@ -613,21 +568,20 @@ impl StbParser {
                 }
                 self.warnings.extend(new_warnings);
             }
-            t if t.starts_with("StbSecBarArrangement") => {
-                if let Ok(c) = get_f64_any(
-                    a,
+            "StbSecBarArrangementBeam_RC"
+            | "StbSecBarArrangementBeam_SRC"
+            | "StbSecBarArrangementColumn_RC"
+            | "StbSecBarArrangementColumn_SRC" => {
+                let keys: &[&str] = if tag.contains("Beam") {
+                    &["depth_cover_top", "depth_cover_bottom"]
+                } else {
                     &[
-                        "depth_cover",
-                        "depth_cover_top",
-                        "depth_cover_bottom",
-                        "depth_cover_start",
                         "depth_cover_start_X",
                         "depth_cover_end_X",
                         "depth_cover_start_Y",
-                        "cover",
-                        "kaburi",
-                    ],
-                ) {
+                    ]
+                };
+                if let Ok(c) = get_f64_any(a, keys) {
                     match &mut self.cur {
                         CurSec::Rc { rebar_cover, .. } => *rebar_cover = Some(c),
                         CurSec::Src { rebar_cover, .. } => *rebar_cover = Some(c),
@@ -635,8 +589,6 @@ impl StbParser {
                     }
                 }
             }
-            t if t.starts_with("StbSecBarArrangementBeam_SRC")
-                || t.starts_with("StbSecBarArrangementColumn_SRC") => {}
             t if t.starts_with("StbSecBarColumn_") || t.starts_with("StbSecBarBeam_") => {
                 let mut new_warnings = Vec::new();
                 match &mut self.cur {
@@ -691,7 +643,7 @@ impl StbParser {
             "StbSecSlab_RC" | "StbSecSlabDeck" => {
                 self.cur = CurSec::Slab {
                     file_id: get_u32(a, "id")?,
-                    thickness: get_f64_any(a, &["depth", "thickness", "t", "D"]).ok(),
+                    thickness: None,
                     name: a.get("name").cloned().filter(|v| !v.is_empty()),
                     floor: a.get("floor").cloned().filter(|v| !v.is_empty()),
                     concrete: a
@@ -700,27 +652,20 @@ impl StbParser {
                         .filter(|v| !v.is_empty()),
                 };
             }
-            "StbSecSlab_RC_Straight"
-            | "StbSecFigureSlab_RC"
-            | "StbSecSlabDeckStraight"
-            | "StbSecFigureSlabDeck" => {
+            "StbSecSlab_RC_Straight" | "StbSecSlabDeckStraight" => {
                 if let CurSec::Slab { thickness, .. } = &mut self.cur {
-                    *thickness = get_f64_any(a, &["depth", "thickness", "t", "D"])
-                        .ok()
-                        .or(*thickness);
+                    *thickness = get_f64(a, "depth").ok().or(*thickness);
                 }
             }
             "StbSecWall_RC" => {
                 self.cur = CurSec::Wall {
                     file_id: get_u32(a, "id")?,
-                    thickness: get_f64_any(a, &["thickness", "t", "depth", "D"]).ok(),
+                    thickness: None,
                 };
             }
-            "StbSecWall_RC_Straight" | "StbSecFigureWall_RC" => {
+            "StbSecWall_RC_Straight" => {
                 if let CurSec::Wall { thickness, .. } = &mut self.cur {
-                    *thickness = get_f64_any(a, &["thickness", "t", "depth", "D"])
-                        .ok()
-                        .or(*thickness);
+                    *thickness = get_f64(a, "t").ok().or(*thickness);
                 }
             }
             _ => return Ok(false),
@@ -838,7 +783,6 @@ impl StbParser {
                 self.cur_wall = Some(RawWall {
                     strength_index: self.strengths.current_member_index(),
                     section_fid: get_opt_u32(a, "id_section")?,
-                    material_fid: get_opt_u32(a, "id_material")?,
                     boundary: Vec::new(),
                 });
             }
@@ -1202,7 +1146,6 @@ fn make_member(
     kind: PendingMemberKind,
 ) -> Result<PendingMember, StbError> {
     let section = get_opt_u32(a, "id_section")?;
-    let material = get_opt_u32(a, "id_material")?;
     let rotate = get_f64(a, "rotate").unwrap_or(0.0);
     let end_cond = [
         end_condition_of(a, &["condition_bottom", "condition_start"]),
@@ -1214,7 +1157,6 @@ fn make_member(
         n_i,
         n_j,
         section,
-        material,
         rotate,
         end_cond,
         source_usage: FrameSectionUse::Girder,
@@ -1233,14 +1175,12 @@ fn make_secondary(
     strength_index: Option<usize>,
 ) -> Result<PendingSecondary, StbError> {
     let section = get_opt_u32(a, "id_section")?;
-    let material = get_opt_u32(a, "id_material")?;
     Ok(PendingSecondary {
         strength_index,
         kind,
         n_i,
         n_j,
         section,
-        material,
         name: a.get("name").cloned().unwrap_or_default(),
     })
 }
@@ -1311,7 +1251,7 @@ fn rc_is_circle(tag: &str, geom: Option<&RcGeom>) -> bool {
     matches!(geom, Some(RcGeom::Circle { .. }))
 }
 
-/// 配筋コンテナ側のかぶり [mm] を、配筋子要素側のかぶり未入力（0）にだけ補う。
+/// 配筋のかぶり [mm] が未設定（0）の場合だけコンテナの値を補う。
 fn apply_cover(cover: &mut f64, rebar_cover: Option<f64>) {
     if *cover == 0.0 {
         if let Some(c) = rebar_cover {
@@ -1320,20 +1260,10 @@ fn apply_cover(cover: &mut f64, rebar_cover: Option<f64>) {
     }
 }
 
-/// RC/SRC/CFT 断面のコンクリート材料参照。数値 id（`id_material` 系）を優先し、
-/// なければ ST-Bridge 標準のグレード名 `strength_concrete`（`Fc21` 等）を採る。
+/// コンクリートのグレード名を取得する。
 fn sec_mat_ref_of(a: &Attrs) -> Result<Option<SecMatRef>, StbError> {
-    let mut id = None;
-    for key in ["id_material", "id_material_concrete", "id_material_rc"] {
-        let specified = get_opt_u32(a, key)?;
-        if id.is_none() {
-            id = specified;
-        }
-    }
-    Ok(id.map(SecMatRef::Id).or_else(|| {
-        a.get("strength_concrete")
-            .filter(|s| !s.is_empty())
-            .cloned()
-            .map(SecMatRef::Grade)
-    }))
+    Ok(a.get("strength_concrete")
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .map(SecMatRef::Grade))
 }

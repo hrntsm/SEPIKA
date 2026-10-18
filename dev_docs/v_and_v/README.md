@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [STB標準入力限定_Issue660_2026-10.md](STB標準入力限定_Issue660_2026-10.md) | 旧独自入力互換の撤去・固定XSD照合・両公開import参照不正・内部/OVIKA保持 | 🔶（IO200・App GUI lib837・Clippy・文書検査成功、独立レビュー必須指摘なし。追加feature回帰1292成功/1失敗、共有fixture補正後App統合3成功、App試験移行後対象6成功。全体再実行・親最終監査・最終ゲート未確認） |
 | [終局需要の重力契約_Issue565_2026-10.md](終局需要の重力契約_Issue565_2026-10.md) | 静的G/Pframe terms・確定増分総応答・RC/CFT不足伝播・鮮度、原5Doneの対応 | 🔶（App実RC/CFT・直接collector・物理柱・旧run混在拒否/回復を確認。default合成3468、最終関連feature1287/io195成功、Clippy/Rustdoc/fmt/文書検証成功。手動GUI・正式ゲート・Validation未確認） |
 | [用途別せん断面積と二方向検定_Issue417_2026-10.md](用途別せん断面積と二方向検定_Issue417_2026-10.md) | H/Box/Otherの剛性As・検定Ad、二方向比/τsum、CFT規約差、未算定と検定15資格 | 🔶（最終design623・Windows関連lib1558成功/既存ignore1、Clippy/strictDoc/fmt・文書検査/build成功。Q2前App349/core493/GUI831は別snapshot。正式ゲート・物理Validationは別確認） |
 | [SRC梁のQL参照完全性_Issue671_2026-10.md](SRC梁のQL参照完全性_Issue671_2026-10.md) | SRC梁のQL/Q0・分担・位置・QD選択と必要参照、検定版14/解析版23の独立資格 | 🔶（変更後core/design1128成功・App346成功。変更前Sourceと停止前MCP延べ17実行の履歴を分離。MCP専用受入は今回対象外。Windows横断・正式静的/文書検証成功、独立レビュー等の最終ゲート・Validation未確認） |
@@ -313,6 +314,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 21 | 参考骨格算定（M–φ→M–θ） | sepika-skeleton | tests.rs | `test_rc_skeleton_*`, `shear_*`, `explicit_pullout_*`, `positive_reference_composition_*`, `rc_builder_rejects_*` | P4 / #436 | 🔶（単位・拒否契約検証済み） |
 | 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 🔶 |
 | 23 | ST-Bridge 入出力 | sepika-io | stbridge/mod.rs、tests/stbridge_brace_content.rs | [Issue625直接入口と正常対照](未割当線材のSTB出力拒否_Issue625_2026-10.md#独立期待値と直接入口)、 [Issue647実描画・既存入口](STB書出の開発中表示_Issue647_2026-10.md#直接検証と観測)、 `test_roundtrip_*`、`source_story`（[原階所属](原階所属_Issue497_2026-10.md)）、[Issue550全文XSD・意味照合](鋼ブレースXML文字子_Issue550_2026-10.md#独立fixtureと公開入口) | P8 | 🔶（鋼ブレース文字子の限定Verificationは✅） |
+| 23a | STB標準入力限定 | sepika-io / sepika-app | stbridge/import、tests/stbridge_standard_input.rs、tests/stbridge_standard_rebar.rs、reference_identity_acceptance_tests.rs | [Issue660の独立入力と観測契約](STB標準入力限定_Issue660_2026-10.md#独立入力と観測契約) | 横断 | 🔶（両入口直接10・IO200・App lib837・文書検査成功。追加feature回帰1失敗後、App試験移行対象6成功。全体再実行・親最終監査・最終ゲート未確認） |
 | 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*`、`source_story_*`（[原階所属](原階所属_Issue497_2026-10.md)。MCP `model_edit` は原階所属・壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |
 | 24a | 割当領域の同一性・孤立版診断 | sepika-core / sepika-edit / sepika-job / sepika-app / sepika-mcp | model/assignment_region.rs、secondary.rs、node_member.rs、prepare.rs | [Issue506検証](割当領域同一性_Issue506_2026-10.md)の独立fixtureと実入口 | #506 | ✅（状態契約Verification） |
 | 25 | 終局検定（塑性 Qsu・付着 Qbu・軸 Nuc/Nut・2軸せん断・接合部 Vju/Qdu・CFT 軸終局+N-M） | sepika-design-jp | ultimate/{rc_shear,rc_axial,joint,cft,cft_nm,mod}.rs | `test_rc_shear_qsu_plastic_*`/`test_rc_joint_ultimate_*`/`test_cft_*`/`test_cft_short_column_mu_*`/`test_biaxial_*`/`test_collect_*_ultimate_checks_*`、Case2の証拠区分は[§6-c](終局検定_参照実装照合.md#6-c-cft-中柱長柱の-n-m-相互作用) | P7 | 🔶 |

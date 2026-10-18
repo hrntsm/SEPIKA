@@ -253,21 +253,6 @@ fn unresolved_required_diameter_is_preserved_and_never_treated_as_unreinforced()
     }
 }
 
-#[test]
-fn standard_rebar_fourth_and_later_source_stages_are_rejected() {
-    for stage in ["4th", "5th"] {
-        let xml = fixture("normal_same").replace(
-            "N_main_top_1st=\"4\"",
-            &format!("N_main_top_1st=\"4\" N_main_top_{stage}=\"1\""),
-        );
-        let error = import_stbridge(&xml).unwrap_err().to_string();
-        assert!(
-            error.contains("断面 1") && error.contains("標準段数"),
-            "{error}"
-        );
-    }
-}
-
 fn save_supplemental_output(name: &str, xml: &str) {
     if let Ok(output) = std::env::var("SEPIKA_REBAR507_OUTPUT") {
         let path = std::path::Path::new(&output).join("supplemental");

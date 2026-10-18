@@ -76,6 +76,38 @@ fn existing_app() -> App {
 }
 
 #[test]
+fn standard_stbridge_bad_references_preserve_app_model_history_results_and_generation() {
+    let source = include_str!("../../../sepika-io/tests/fixtures/strength_src.stb");
+    assert!(sepika_io::stbridge::import_stbridge(source).is_ok());
+    let mut app = existing_app();
+    let before = retained(&app);
+    for (label, original, invalid, reference) in [
+        ("node", "id_node_top=\"2\"", "id_node_top=\"99\"", "99"),
+        ("section", "id_section=\"1\"", "id_section=\"99\"", "99"),
+        ("steel", "shape=\"H1\"", "shape=\"MISSING\"", "MISSING"),
+    ] {
+        let file = path(&format!("stbridge660-{label}")).with_extension("stb");
+        let xml = source.replace(original, invalid);
+        std::fs::write(&file, &xml).unwrap();
+        app.import_stbridge_from(file.clone());
+        let reason = app.core.scoped.last_error.as_ref().unwrap();
+        assert!(
+            reason.contains("ST-Bridge読込エラー") && reason.contains(reference),
+            "{reason}"
+        );
+        assert_eq!(retained(&app), before, "{label}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), xml);
+        std::fs::remove_file(file).unwrap();
+    }
+    app.core.scoped.undo.undo(&mut app.core.model);
+    assert_eq!(app.core.model.nodes[0].coord[0], 0.);
+    app.core.scoped.undo.redo(&mut app.core.model);
+    assert_eq!(bytes(&app.core.model), before.model);
+    app.core.scoped.undo.redo(&mut app.core.model);
+    assert_eq!(app.core.model.nodes[0].coord[0], -200.);
+}
+
+#[test]
 fn reference_identity_rejected_load_and_correct_hash_open_preserve_app_state_and_history() {
     let mut app = existing_app();
     let before = retained(&app);

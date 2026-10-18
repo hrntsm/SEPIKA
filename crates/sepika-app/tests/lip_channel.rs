@@ -37,7 +37,7 @@ fn reason(model: &Model) -> String {
 }
 
 #[test]
-fn lip_channel_ovika_and_stbridge_regenerate_unsupported_reason_and_gross_properties() {
+fn lip_channel_internal_edit_and_ovika_preserve_unsupported_reason_and_gross_properties() {
     let model = lip_model();
     model.validate().unwrap();
     let path = std::env::temp_dir().join(format!("sepika509_{}.ovika", std::process::id()));
@@ -54,8 +54,19 @@ fn lip_channel_ovika_and_stbridge_regenerate_unsupported_reason_and_gross_proper
     let saved = sepika_io::ovika::load_ovika(&path).unwrap().model;
     let xml = sepika_io::stbridge::export_stbridge(&model).unwrap();
     assert!(xml.contains("<StbSecRoll-LipC "));
-    let stb = sepika_io::stbridge::import_stbridge(&xml).unwrap();
-    for back in [&saved, &stb] {
+    let mut edited = sample::portal_frame();
+    let mut undo = sepika_edit::UndoStack::new();
+    for section in &model.sections {
+        assert!(undo.run(
+            &mut edited,
+            Box::new(sepika_edit::EditSectionShape {
+                section: section.id,
+                new_shape: section.shape.clone().unwrap(),
+                frame_use: section.frame_use,
+            })
+        ));
+    }
+    for back in [&saved, &edited] {
         back.validate().unwrap();
         let a = &model.sections[0];
         let b = &back.sections[0];

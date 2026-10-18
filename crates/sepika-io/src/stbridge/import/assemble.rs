@@ -5,8 +5,7 @@ use super::parser::SrcRebarData;
 use super::parser::{RawSlabSection, StbParser};
 use super::{
     material_std, ImportReport, PendingMember, PendingMemberKind, PendingSec, PendingSecKind,
-    PendingSecondary, RawAxisGroup, RawLoadCase, RawMaterial, RawNode, RawSlab, RawStory, RawWall,
-    SecMatRef,
+    PendingSecondary, RawAxisGroup, RawLoadCase, RawNode, RawSlab, RawStory, RawWall, SecMatRef,
 };
 use sepika_core::ids::{
     ElemId, FloorPlateAssignmentRegionId, LoadCaseId, MaterialId, NodeId, SectionId, SlabId,
@@ -31,7 +30,6 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         attr_usage,
         raw_nodes,
         raw_stories,
-        raw_materials,
         raw_load_cases,
         pending_secs,
         pending_members,
@@ -49,7 +47,6 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
 
     let node_index = build_index(raw_nodes.iter().map(|n| n.file_id));
     let story_index = build_index(raw_stories.iter().map(|s| s.file_id));
-    let material_index = build_index(raw_materials.iter().map(|m| m.file_id));
 
     check_unique_ids("StbNode", raw_nodes.iter().map(|n| n.file_id), &node_index)?;
     check_unique_ids(
@@ -57,24 +54,12 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         raw_stories.iter().map(|s| s.file_id),
         &story_index,
     )?;
-    check_unique_ids(
-        "StbMaterial/StbSecColumn_S ほか材料",
-        raw_materials.iter().map(|m| m.file_id),
-        &material_index,
-    )?;
-
     build_nodes_and_stories(&mut model, raw_nodes, raw_stories, &node_index);
     warnings.extend(model.source_story_diagnostics());
     build_axes(&mut model, raw_axis_groups, &node_index);
 
     let mut guessed_categories: Vec<String> = Vec::new();
-    build_materials(
-        &mut model,
-        raw_materials,
-        &material_index,
-        &pending_secs,
-        &mut guessed_categories,
-    )?;
+    build_materials(&mut model, &pending_secs, &mut guessed_categories)?;
 
     let mut notes: Vec<String> = Vec::new();
 
@@ -83,33 +68,26 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &mut model,
         pending_secs,
         &steel_lib,
-        &material_index,
         &mut warnings,
         &mut notes,
         &section_uses,
         &mut strengths,
     )?;
 
-    let mut stats = LinkStats::default();
     build_members(
         &mut model,
         pending_members,
         &node_index,
         &section_index,
-        &material_index,
-        &mut stats,
         &mut strengths,
-    );
+    )?;
     let (n_beams, n_posts) = build_secondaries(
         &mut model,
         pending_secondaries,
         &node_index,
         &section_index,
-        &material_index,
-        &mut stats,
         &mut strengths,
-    );
-    stats.push_warnings(&mut warnings);
+    )?;
 
     let (pending_slabs, slab_section_count) = build_slabs(
         &mut model,
@@ -118,16 +96,15 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &node_index,
         &mut warnings,
         &mut strengths,
-    );
+    )?;
     let pending_walls = build_walls(
         &mut model,
         raw_walls,
         &wall_sec_thickness,
         &node_index,
-        &material_index,
         &mut warnings,
         &mut strengths,
-    );
+    )?;
     let anchorize = model.anchorize_secondary_members();
     model.rebuild_floor_assignment_regions();
     assign_imported_slabs(&mut model, pending_slabs, &mut strengths)?;
@@ -419,33 +396,9 @@ fn build_axes(
 /// 材料を id 正規化して格納し、断面のグレード名参照を標準材料表から材料として補う。
 fn build_materials(
     model: &mut Model,
-    mut raw_materials: Vec<RawMaterial>,
-    material_index: &HashMap<u32, u32>,
     pending_secs: &[PendingSec],
     guessed_categories: &mut Vec<String>,
 ) -> Result<(), StbError> {
-    raw_materials.sort_by_key(|m| m.file_id);
-    for m in raw_materials {
-        let category = resolve_material_category(&m.name, m.fc, m.fy, guessed_categories);
-        model.materials.push(Material {
-            strength_factor: None,
-            concrete_class: if category == MaterialCategory::Concrete {
-                sepika_core::units::ConcreteClass::UserDefined
-            } else {
-                Default::default()
-            },
-            id: MaterialId(material_index[&m.file_id]),
-            name: m.name,
-            category,
-            young: m.young,
-            poisson: m.poisson,
-            density: m.density,
-            shear: m.shear,
-            fc: m.fc,
-            fy: m.fy,
-        });
-    }
-
     {
         use std::collections::HashSet;
         let mut existing: HashSet<String> =
@@ -485,128 +438,22 @@ fn build_materials(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn raw_concrete(density: f64, fc: Option<f64>) -> RawMaterial {
-        RawMaterial {
-            file_id: 1,
-            name: "Fc24".to_string(),
-            young: 1.0,
-            poisson: 0.2,
-            density,
-            shear: None,
-            fc,
-            fy: None,
-        }
-    }
-
-    #[test]
-    fn direct_concrete_preserves_explicit_young() {
-        let density = sepika_core::units::to_internal::mass_density_from_unit_weight_kn_m3(25.0);
-        let mut model = Model::default();
-        let mut guessed = Vec::new();
-        build_materials(
-            &mut model,
-            vec![raw_concrete(density, Some(24.0))],
-            &HashMap::from([(1, 0)]),
-            &[],
-            &mut guessed,
-        )
-        .expect("valid concrete material");
-
-        assert_eq!(model.materials[0].young, 1.0);
-        assert_eq!(
-            model.materials[0].concrete_class,
-            sepika_core::units::ConcreteClass::UserDefined
-        );
-    }
-}
-
-/// 断面側の材料参照を、部材への伝播用に解決する。
-#[derive(Default)]
-struct LinkStats {
-    /// 存在しない節点を参照しスキップした部材数。
-    skipped_members: u32,
-    /// 存在しない断面を参照し断面リンクを外した部材数。
-    dangling_section: u32,
-    /// 存在しない材料を参照し材料リンクを外した部材数。
-    dangling_material: u32,
-    /// 断面に既に付いている材料と違う材料を指した部材数。
-    conflicting_material: u32,
-}
-
-impl LinkStats {
-    /// 集計した参照解決の失敗を警告メッセージへ変換する。
-    fn push_warnings(&self, warnings: &mut Vec<String>) {
-        if self.skipped_members > 0 {
-            warnings.push(format!(
-                "存在しない節点を参照する部材を {} 件スキップしました",
-                self.skipped_members
-            ));
-        }
-        if self.dangling_section > 0 {
-            warnings.push(format!(
-                "存在しない断面を参照する部材が {} 件あり、断面リンクを外しました",
-                self.dangling_section
-            ));
-        }
-        if self.dangling_material > 0 {
-            warnings.push(format!(
-                "存在しない材料を参照する部材が {} 件あり、材料リンクを外しました",
-                self.dangling_material
-            ));
-        }
-        if self.conflicting_material > 0 {
-            warnings.push(format!(
-                "同じ断面を参照する部材が別々の材料を指しています（{} 件）。\
-                 材料は断面が持つため先に解決した材料を採りました。\
-                 違う材料を使う部材は断面を分けてください",
-                self.conflicting_material
-            ));
-        }
-    }
-}
-
 /// 部材（柱・大梁・ブレース）を格納する。
 fn build_members(
     model: &mut Model,
     pending_members: Vec<PendingMember>,
     node_index: &HashMap<u32, u32>,
     section_index: &HashMap<u32, u32>,
-    material_index: &HashMap<u32, u32>,
-    stats: &mut LinkStats,
     strengths: &mut super::strength::StrengthInputs,
-) {
+) -> Result<(), StbError> {
     for m in pending_members {
         let (Some(&ni), Some(&nj)) = (node_index.get(&m.n_i), node_index.get(&m.n_j)) else {
-            stats.skipped_members += 1;
-            continue;
+            return Err(StbError::Unmappable(format!(
+                "部材の節点参照を解決できません: {} -> {}",
+                m.n_i, m.n_j
+            )));
         };
-        let section = m.section.and_then(|fid| match section_index.get(&fid) {
-            Some(&idx) => Some(SectionId(idx)),
-            None => {
-                stats.dangling_section += 1;
-                None
-            }
-        });
-        if let Some(fid) = m.material {
-            match material_index.get(&fid) {
-                Some(&idx) => {
-                    if let Some(sec) = section.and_then(|sid| model.sections.get_mut(sid.index())) {
-                        match sec.material {
-                            Some(existing) if existing != MaterialId(idx) => {
-                                stats.conflicting_material += 1;
-                            }
-                            Some(_) => {}
-                            None => sec.material = Some(MaterialId(idx)),
-                        }
-                    }
-                }
-                None => stats.dangling_material += 1,
-            }
-        }
+        let section = Some(resolve_frame_section(m.section, section_index)?);
         let id = ElemId(model.elements.len() as u32);
         let (kind, end_cond) = match m.kind {
             PendingMemberKind::Girder => (ElementKind::Beam, m.end_cond),
@@ -637,6 +484,7 @@ fn build_members(
             spring: None,
         });
     }
+    Ok(())
 }
 
 /// 二次部材（小梁・間柱）を未割当リストへ格納する。
@@ -645,40 +493,18 @@ fn build_secondaries(
     pending_secondaries: Vec<PendingSecondary>,
     node_index: &HashMap<u32, u32>,
     section_index: &HashMap<u32, u32>,
-    material_index: &HashMap<u32, u32>,
-    stats: &mut LinkStats,
     strengths: &mut super::strength::StrengthInputs,
-) -> (usize, usize) {
+) -> Result<(usize, usize), StbError> {
     let mut n_beams = 0usize;
     let mut n_posts = 0usize;
     for s in pending_secondaries {
         let (Some(&ni), Some(&nj)) = (node_index.get(&s.n_i), node_index.get(&s.n_j)) else {
-            stats.skipped_members += 1;
-            continue;
+            return Err(StbError::Unmappable(format!(
+                "二次部材の節点参照を解決できません: {} -> {}",
+                s.n_i, s.n_j
+            )));
         };
-        let section = s.section.and_then(|fid| match section_index.get(&fid) {
-            Some(&idx) => Some(SectionId(idx)),
-            None => {
-                stats.dangling_section += 1;
-                None
-            }
-        });
-        if let Some(fid) = s.material {
-            match material_index.get(&fid) {
-                Some(&idx) => {
-                    if let Some(sec) = section.and_then(|sid| model.sections.get_mut(sid.index())) {
-                        match sec.material {
-                            Some(existing) if existing != MaterialId(idx) => {
-                                stats.conflicting_material += 1;
-                            }
-                            Some(_) => {}
-                            None => sec.material = Some(MaterialId(idx)),
-                        }
-                    }
-                }
-                None => stats.dangling_material += 1,
-            }
-        }
+        let section = Some(resolve_frame_section(s.section, section_index)?);
         let sm = sepika_core::model::SecondaryMember {
             id: model.alloc_secondary_member_id(),
             gravity_end_shares: None,
@@ -705,7 +531,17 @@ fn build_secondaries(
             }
         }
     }
-    (n_beams, n_posts)
+    Ok((n_beams, n_posts))
+}
+
+fn resolve_frame_section(
+    file_id: Option<u32>,
+    section_index: &HashMap<u32, u32>,
+) -> Result<SectionId, StbError> {
+    file_id
+        .and_then(|fid| section_index.get(&fid).copied())
+        .map(SectionId)
+        .ok_or_else(|| StbError::Unmappable(format!("部材の断面参照を解決できません: {file_id:?}")))
 }
 
 /// 割当領域へ結びつける前のスラブ（境界節点と版仕様）。
@@ -724,26 +560,32 @@ fn build_slabs(
     node_index: &HashMap<u32, u32>,
     warnings: &mut Vec<String>,
     strengths: &mut super::strength::StrengthInputs,
-) -> (Vec<PendingSlab>, usize) {
-    let mut skipped_slabs = 0u32;
+) -> Result<(Vec<PendingSlab>, usize), StbError> {
     let mut sec_of_file: HashMap<u32, SectionId> = HashMap::new();
     let mut slab_section_count = 0usize;
     let mut pending = Vec::new();
     for rs in raw_slabs {
         let mut boundary = Vec::with_capacity(rs.boundary.len());
-        let mut resolved = true;
         for fid in &rs.boundary {
             match node_index.get(fid) {
                 Some(&ni) => boundary.push(NodeId(ni)),
                 None => {
-                    resolved = false;
-                    break;
+                    return Err(StbError::Unmappable(format!(
+                        "スラブの境界節点参照を解決できません: {fid}"
+                    )));
                 }
             }
         }
-        if !resolved || boundary.len() < 3 {
-            skipped_slabs += 1;
+        if boundary.len() < 3 {
+            warnings.push("境界頂点数が不足するスラブをスキップしました".into());
             continue;
+        }
+        if let Some(fid) = rs.section_fid {
+            if !slab_secs.contains_key(&fid) {
+                return Err(StbError::Unmappable(format!(
+                    "スラブの断面参照を解決できません: {fid}"
+                )));
+            }
         }
         let section = rs.section_fid.and_then(|fid| {
             let raw = slab_secs.get(&fid)?;
@@ -769,12 +611,7 @@ fn build_slabs(
             },
         });
     }
-    if skipped_slabs > 0 {
-        warnings.push(format!(
-            "境界節点が解決できない、または頂点数が不足するスラブを {skipped_slabs} 件スキップしました"
-        ));
-    }
-    (pending, slab_section_count)
+    Ok((pending, slab_section_count))
 }
 
 /// 取り込んだスラブを、覆う床板割当領域ごとの床板へ分割して割り当てる。
@@ -1167,29 +1004,34 @@ fn build_walls(
     raw_walls: Vec<RawWall>,
     wall_sec_thickness: &HashMap<u32, f64>,
     node_index: &HashMap<u32, u32>,
-    material_index: &HashMap<u32, u32>,
     warnings: &mut Vec<String>,
     strengths: &mut super::strength::StrengthInputs,
-) -> Vec<PendingWall> {
-    let mut skipped_walls = 0u32;
+) -> Result<Vec<PendingWall>, StbError> {
     let mut no_section_walls = 0u32;
     let mut pending = Vec::new();
     let mut wall_sections: HashMap<u32, SectionId> = HashMap::new();
     for rw in raw_walls {
         let mut boundary: Vec<NodeId> = Vec::with_capacity(rw.boundary.len());
-        let mut resolved = true;
         for fid in &rw.boundary {
             match node_index.get(fid) {
                 Some(&ni) => boundary.push(NodeId(ni)),
                 None => {
-                    resolved = false;
-                    break;
+                    return Err(StbError::Unmappable(format!(
+                        "壁の境界節点参照を解決できません: {fid}"
+                    )));
                 }
             }
         }
-        if !resolved || boundary.len() < 3 {
-            skipped_walls += 1;
+        if boundary.len() < 3 {
+            warnings.push("境界頂点数が不足する壁をスキップしました".into());
             continue;
+        }
+        if let Some(fid) = rw.section_fid {
+            if !wall_sec_thickness.contains_key(&fid) {
+                return Err(StbError::Unmappable(format!(
+                    "壁の断面参照を解決できません: {fid}"
+                )));
+            }
         }
         let section = rw
             .section_fid
@@ -1215,17 +1057,6 @@ fn build_walls(
                 wall_sections.insert(rw.section_fid.unwrap(), sid);
                 sid
             });
-        if let Some(mid) = rw
-            .material_fid
-            .and_then(|fid| material_index.get(&fid).copied())
-            .map(MaterialId)
-        {
-            if let Some(sec) = section.and_then(|sid| model.sections.get_mut(sid.index())) {
-                if sec.material.is_none() {
-                    sec.material = Some(mid);
-                }
-            }
-        }
         if section.is_none() {
             no_section_walls += 1;
         }
@@ -1235,18 +1066,13 @@ fn build_walls(
             section,
         });
     }
-    if skipped_walls > 0 {
-        warnings.push(format!(
-            "境界節点が解決できない、または頂点数が不足する壁を {skipped_walls} 件スキップしました"
-        ));
-    }
     if no_section_walls > 0 {
         warnings.push(format!(
             "断面未割当の壁版を {no_section_walls} 枚取り込みました。\
              解析要素としては生成しません"
         ));
     }
-    pending
+    Ok(pending)
 }
 
 /// 取り込んだ壁を、境界が一致する壁版割当領域へ割り当てる。
@@ -1575,7 +1401,6 @@ fn build_sections(
     model: &mut Model,
     mut pending: Vec<PendingSec>,
     steel_lib: &HashMap<String, SectionShape>,
-    material_index: &HashMap<u32, u32>,
     warnings: &mut Vec<String>,
     notes: &mut Vec<String>,
     section_uses: &HashMap<u32, FrameSectionUse>,
@@ -1592,35 +1417,6 @@ fn build_sections(
         let floor = ps.floor.clone();
         let new_id = SectionId(model.sections.len() as u32);
         let section = match ps.kind {
-            PendingSecKind::Raw {
-                area,
-                iy,
-                iz,
-                j,
-                depth,
-                width,
-            } => Section {
-                id: new_id,
-                name: ps.name,
-                frame_use: section_uses.get(&file_id).copied(),
-                area,
-                iy,
-                iz,
-                j,
-                depth,
-                width,
-                as_y: 0.0,
-                as_z: 0.0,
-                floor: None,
-                panel_thickness: None,
-                thickness: None,
-                shape: None,
-                material: None,
-                rebar_material: None,
-                shear_rebar_material: None,
-                steel_material: None,
-                property_basis: Default::default(),
-            },
             PendingSecKind::Shape(shape) => {
                 let mut section = shape
                     .input_section(new_id, ps.name)
@@ -1629,7 +1425,10 @@ fn build_sections(
                 section
             }
             PendingSecKind::SteelRef(shape_name) => {
-                match shape_name.and_then(|nm| steel_lib.get(&nm).cloned()) {
+                match shape_name
+                    .as_deref()
+                    .and_then(|nm| steel_lib.get(nm).cloned())
+                {
                     Some(shape) => {
                         let mut section = shape
                             .input_section(new_id, ps.name)
@@ -1638,19 +1437,18 @@ fn build_sections(
                         section
                     }
                     None => {
-                        warnings.push(format!(
-                            "鋼断面 (name=\"{}\") の形鋼参照を解決できず物性ゼロで取り込みました",
-                            ps.name
-                        ));
-                        let mut section = Section::zero(new_id, ps.name);
-                        section.frame_use = section_uses.get(&file_id).copied();
-                        section
+                        return Err(StbError::Unmappable(format!(
+                            "鋼断面 (id={file_id}, name=\"{}\") の形鋼参照「{}」を解決できません",
+                            ps.name,
+                            shape_name.as_deref().unwrap_or("未指定")
+                        )))
                     }
                 }
             }
             PendingSecKind::CftRef(steel_name) => {
                 let cft = steel_name
-                    .and_then(|nm| steel_lib.get(&nm).cloned())
+                    .as_deref()
+                    .and_then(|nm| steel_lib.get(nm).cloned())
                     .and_then(|s| match s {
                         SectionShape::SteelBox {
                             height,
@@ -1673,11 +1471,11 @@ fn build_sections(
                         .input_section(new_id, ps.name)
                         .map_err(StbError::Unmappable)?,
                     None => {
-                        warnings.push(format!(
-                            "CFT 断面 (name=\"{}\") の充填鋼管参照を解決できず物性ゼロで取り込みました",
-                            ps.name
-                        ));
-                        Section::zero(new_id, ps.name)
+                        return Err(StbError::Unmappable(format!(
+                        "CFT 断面 (id={file_id}, name=\"{}\") の充填鋼管参照「{}」を解決できません",
+                        ps.name,
+                        steel_name.as_deref().unwrap_or("未指定")
+                    )))
                     }
                 }
             }
@@ -1688,7 +1486,8 @@ fn build_sections(
                 steel_name,
             } => {
                 let steel_dims = steel_name
-                    .and_then(|nm| steel_lib.get(&nm).cloned())
+                    .as_deref()
+                    .and_then(|nm| steel_lib.get(nm).cloned())
                     .and_then(|s| match s {
                         SectionShape::SteelH {
                             height,
@@ -1709,13 +1508,13 @@ fn build_sections(
                         }
                         _ => None,
                     });
-                if steel_dims.is_none() {
-                    warnings.push(format!(
-                        "SRC 断面 (name=\"{}\") の内蔵鉄骨参照を解決できず鉄骨寸法ゼロで取り込みました",
-                        ps.name
-                    ));
-                }
-                let (sh, sw, sweb, sfl) = steel_dims.unwrap_or((0.0, 0.0, 0.0, 0.0));
+                let (sh, sw, sweb, sfl) = steel_dims.ok_or_else(|| {
+                    StbError::Unmappable(format!(
+                        "SRC 断面 (id={file_id}, name=\"{}\") の内蔵鉄骨参照「{}」を解決できません",
+                        ps.name,
+                        steel_name.as_deref().unwrap_or("未指定")
+                    ))
+                })?;
                 let steel = (sh, sw, sweb, sfl);
                 match rebar {
                     SrcRebarData::Beam(rebar) => SectionShape::SrcBeamRect {
@@ -1743,10 +1542,7 @@ fn build_sections(
         let mut section = section;
         section.frame_use = section_uses.get(&file_id).copied();
         section.floor = floor;
-        section.material = ps
-            .mat
-            .as_ref()
-            .and_then(|r| resolve_sec_material(model, r, material_index));
+        section.material = ps.mat.as_ref().and_then(|r| resolve_sec_material(model, r));
         section.rebar_material =
             ps.grades.main_rebar.as_deref().and_then(|g| {
                 find_or_create_bar_material(model, g, MaterialCategory::Rebar, notes)
@@ -1896,13 +1692,8 @@ fn ref_vector_from_rotate(p_i: [f64; 3], p_j: [f64; 3], rotate_deg: f64) -> [f64
 }
 
 /// 断面側の材料参照（数値 id またはグレード名）を `MaterialId` へ解決する。
-fn resolve_sec_material(
-    model: &Model,
-    r: &SecMatRef,
-    material_index: &HashMap<u32, u32>,
-) -> Option<MaterialId> {
+fn resolve_sec_material(model: &Model, r: &SecMatRef) -> Option<MaterialId> {
     match r {
-        SecMatRef::Id(mid) => material_index.get(mid).copied().map(MaterialId),
         SecMatRef::Grade(name) => model
             .materials
             .iter()
