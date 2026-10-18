@@ -515,7 +515,7 @@ fn qualified_numeric_section_id_is_rejected_without_silent_strength_binding() {
 }
 
 #[test]
-fn wall_last_node_and_explicit_member_omission_roundtrip() {
+fn wall_last_node_and_explicit_member_omission_survive_native_roundtrip_and_export() {
     let source = include_str!("../../tests/fixtures/strength_wall.stb");
     for (member, expected) in [(None, 27.), (Some("Fc36"), 36.)] {
         let source = if let Some(member) = member {
@@ -535,7 +535,27 @@ fn wall_last_node_and_explicit_member_omission_roundtrip() {
         model.source_stories.reverse();
         model.prepare_stb_strength_materials();
         let output = export_stbridge(&model).unwrap();
-        let again = import_stbridge(&output).unwrap();
+        let wall = output
+            .split("<StbWall ")
+            .nth(1)
+            .unwrap()
+            .split('>')
+            .next()
+            .unwrap();
+        if let Some(member) = member {
+            assert!(
+                wall.contains(&format!("strength_concrete=\"{member}\"")),
+                "{wall}"
+            );
+        } else {
+            assert!(!wall.contains("strength_concrete="), "{wall}");
+        }
+        let path = crate::test_util::test_tmp().join(format!("wall660-{}.ovika", expected));
+        crate::ovika::save_ovika(&path, &model, crate::ovika::OvikaExtras::default()).unwrap();
+        let again = crate::ovika::load_ovika(&path).unwrap().model;
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(again.stb_strengths, model.stb_strengths);
+        assert_eq!(again.source_stories, model.source_stories);
         assert_eq!(
             again.stb_strengths.members[0].concrete,
             member.map(str::to_owned)
@@ -641,13 +661,16 @@ fn unknown_src_steel_grades_keep_metadata_without_stock_strength_or_mapping() {
 }
 
 #[test]
-fn explicit_unknown_src_steel_keeps_all_properties_and_native_override() {
-    let xml = include_str!("../../tests/fixtures/strength_src.stb")
-        .replace("SN490B", "SM400YA")
-        .replace("<StbModel>", r#"<StbModel><StbMaterials><StbMaterial id="7" name="SM400YA" young="123456" poisson="0.27" density="6.1e-9" shear="45678" fy="177"/></StbMaterials>"#);
+fn edited_unknown_src_steel_keeps_all_properties_and_native_override() {
+    let xml = include_str!("../../tests/fixtures/strength_src.stb").replace("SN490B", "SM400YA");
     let (mut model, report) = import_stbridge_with_report(&xml).unwrap();
     let steel_id = model.sections[0].steel_material.unwrap();
-    assert_eq!(steel_id, model.materials[0].id);
+    let steel = &mut model.materials[steel_id.index()];
+    steel.young = 123456.;
+    steel.poisson = 0.27;
+    steel.density = 6.1e-9;
+    steel.shear = Some(45678.);
+    steel.fy = Some(177.);
     let steel = &model.materials[steel_id.index()];
     assert_eq!(steel.name, "SM400YA");
     assert_eq!(steel.category, MaterialCategory::Steel);
@@ -704,6 +727,17 @@ fn explicit_unknown_src_steel_keeps_all_properties_and_native_override() {
         .resolve_stb_steel(&model.stb_strengths.sections[0].steel[0])
         .unwrap();
     assert_eq!(resolved.grade, "SM400YA");
+    assert_eq!(resolved.value, 177.);
+    assert!(resolved.native_override);
+    let path = crate::test_util::test_tmp().join("src660-edited-strength.ovika");
+    crate::ovika::save_ovika(&path, &model, crate::ovika::OvikaExtras::default()).unwrap();
+    let again = crate::ovika::load_ovika(&path).unwrap().model;
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(again.materials, model.materials);
+    assert_eq!(again.stb_strengths, model.stb_strengths);
+    let resolved = again
+        .resolve_stb_steel(&again.stb_strengths.sections[0].steel[0])
+        .unwrap();
     assert_eq!(resolved.value, 177.);
     assert!(resolved.native_override);
 }

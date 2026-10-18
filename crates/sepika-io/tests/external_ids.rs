@@ -36,10 +36,7 @@ fn stb_whole_document_rejects_invalid_present_member_reference_and_source_ids() 
         } else {
             r#"id_node_start="0" id_node_end="1""#
         };
-        for field in ["id_section", "id_material", "id"] {
-            if tag == "StbSlab" && field == "id_material" {
-                continue;
-            }
+        for field in ["id_section", "id"] {
             for invalid in [
                 "4294967296",
                 "18446744073709551615",
@@ -63,42 +60,12 @@ fn stb_whole_document_rejects_invalid_present_member_reference_and_source_ids() 
 }
 
 #[test]
-fn stb_section_material_invalid_id_never_falls_back_to_another_alias_or_grade() {
-    for tag in [
-        "StbSecColumn_RC",
-        "StbSecBeam_RC",
-        "StbSecColumn_SRC",
-        "StbSecBeam_SRC",
-        "StbSecColumn_CFT",
-    ] {
-        for field in ["id_material", "id_material_concrete", "id_material_rc"] {
-            for invalid in ["4294967296", "-1", "0.5", "1.0", "abc", "", "null"] {
-                let mut attributes = format!(r#"{field}="{invalid}" strength_concrete="Fc21""#);
-                for alias in ["id_material", "id_material_concrete", "id_material_rc"] {
-                    if alias != field {
-                        attributes.push_str(&format!(r#" {alias}="0""#));
-                    }
-                }
-                assert_rejected(
-                    &document(&format!(r#"<{tag} id="0" {attributes}/>"#)),
-                    field,
-                );
-            }
-        }
-    }
-}
-
-#[test]
 fn stb_required_definition_and_endpoint_ids_reject_missing_or_invalid_values() {
     for (tag, field, other) in [
         ("StbNode", "id", r#"X="0" Y="0" Z="0""#),
-        (
-            "StbMaterial",
-            "id",
-            r#"young="205000" poisson="0.3" density="0""#,
-        ),
         ("StbSecColumn_S", "id", ""),
         ("StbSecBeam_S", "id", ""),
+        ("StbSecBrace_S", "id", ""),
         ("StbSecColumn_RC", "id", ""),
         ("StbSecBeam_RC", "id", ""),
         ("StbSecColumn_SRC", "id", ""),
@@ -107,9 +74,15 @@ fn stb_required_definition_and_endpoint_ids_reject_missing_or_invalid_values() {
         ("StbSecSlab_RC", "id", ""),
         ("StbSecWall_RC", "id", ""),
         ("StbColumn", "id_node_bottom", r#"id="0" id_node_top="1""#),
+        ("StbColumn", "id_node_top", r#"id="0" id_node_bottom="1""#),
         ("StbGirder", "id_node_start", r#"id="0" id_node_end="1""#),
+        ("StbGirder", "id_node_end", r#"id="0" id_node_start="1""#),
+        ("StbBrace", "id_node_start", r#"id="0" id_node_end="1""#),
+        ("StbBrace", "id_node_end", r#"id="0" id_node_start="1""#),
         ("StbBeam", "id_node_start", r#"id="0" id_node_end="1""#),
+        ("StbBeam", "id_node_end", r#"id="0" id_node_start="1""#),
         ("StbPost", "id_node_bottom", r#"id="0" id_node_top="1""#),
+        ("StbPost", "id_node_top", r#"id="0" id_node_bottom="1""#),
     ] {
         let xml = document(&format!("<{tag} {other}/>"));
         for result in [
@@ -156,52 +129,54 @@ fn stb_boundary_node_reference_tokens_are_not_silently_discarded() {
     }
 }
 
-#[test]
-fn stb_optional_ids_accept_omission_and_full_u32_range() {
-    for source_id in ["", r#"id="0""#, r#"id="4294967295""#] {
-        let xml = document(&format!(
-            r#"<StbColumn {source_id} id_node_bottom="0" id_node_top="1"/>"#
-        ))
-        .replace("StbNode id=\"0\"", "StbNode id=\"2\"")
-        .replace("id_node_bottom=\"0\"", "id_node_bottom=\"2\"");
-        let model = import_stbridge(&xml).unwrap();
-        assert_eq!(model.elements.len(), 1);
-        assert!(model.elements[0].section.is_none());
-    }
-    for value in [0_u32, u32::MAX] {
-        let xml = format!(
-            r#"<ST_BRIDGE version="2.0.2"><StbModel><StbNodes><StbNode id="{value}" X="0" Y="0" Z="0"/><StbNode id="1" X="0" Y="0" Z="3000"/></StbNodes><StbColumn id_node_bottom="{value}" id_node_top="1" id_section="{value}" id_material="{value}"/></StbModel></ST_BRIDGE>"#
-        );
-        let model = import_stbridge_with_report(&xml).unwrap().0;
-        assert_eq!(model.elements.len(), 1);
-        assert_eq!(
-            model
-                .stb_node_ids
-                .iter()
-                .find(|identity| identity.node == model.elements[0].nodes[0])
-                .unwrap()
-                .id,
-            value
-        );
-    }
+fn steel_column_section(id: u32) -> String {
+    format!(
+        r#"<StbSections><StbSecColumn_S id="{id}" name="C603" kind_column="COLUMN"><StbSecSteelFigureColumn_S><StbSecSteelColumn_S_Same shape="H603" strength_main="SN400B"/></StbSecSteelFigureColumn_S></StbSecColumn_S><StbSecSteel><StbSecRoll-H name="H603" type="H" A="300" B="150" t1="6.5" t2="9" r="0"/></StbSecSteel></StbSections>"#
+    )
 }
 
 #[test]
-fn stb_full_range_definitions_and_references_resolve_to_the_same_section_and_material() {
-    for value in [0_u32, u32::MAX] {
+fn stb_member_source_id_parser_accepts_omission_and_u32_boundaries_with_resolved_section() {
+    for source_id in ["", r#"id="0""#, r#"id="4294967295""#] {
         let xml = document(&format!(
-            r#"
-<StbMaterial id="{value}" name="SN400B" young="205000" poisson="0.3" density="0"/>
-<StbSecColumn_S id="{value}" name="C603"><StbSecSteelFigureColumn_S><StbSecSteelColumn_S_Same shape="H603"/></StbSecSteelFigureColumn_S></StbSecColumn_S>
-<StbSecSteel><StbSecRoll-H name="H603" type="H" A="300" B="150" t1="6.5" t2="9" r="0"/></StbSecSteel>
-<StbColumn id="{value}" id_node_bottom="0" id_node_top="1" id_section="{value}" id_material="{value}"/>
-"#
+            r#"{}<StbMembers><StbColumns><StbColumn {source_id} id_node_bottom="0" id_node_top="1" id_section="2"/></StbColumns></StbMembers>"#,
+            steel_column_section(2),
         ));
         for model in [
             import_stbridge(&xml).unwrap(),
             import_stbridge_with_report(&xml).unwrap().0,
         ] {
+            assert_eq!(model.elements.len(), 1);
+            assert_eq!(
+                model.element_section(&model.elements[0]).unwrap().name,
+                "C603"
+            );
+        }
+    }
+}
+
+#[test]
+fn stb_u32_parser_boundary_ids_resolve_to_the_same_section_and_grade_material() {
+    for value in [0_u32, u32::MAX] {
+        let xml = document(&format!(
+            r#"{}<StbMembers><StbColumns><StbColumn id="{value}" id_node_bottom="{value}" id_node_top="1" id_section="{value}"/></StbColumns></StbMembers>"#,
+            steel_column_section(value),
+        ))
+        .replace("StbNode id=\"0\"", &format!("StbNode id=\"{value}\""));
+        for model in [
+            import_stbridge(&xml).unwrap(),
+            import_stbridge_with_report(&xml).unwrap().0,
+        ] {
             assert_eq!(model.sections.len(), 1);
+            assert_eq!(
+                model
+                    .stb_node_ids
+                    .iter()
+                    .find(|identity| identity.node == model.elements[0].nodes[0])
+                    .unwrap()
+                    .id,
+                value,
+            );
             let section = model.element_section(&model.elements[0]).unwrap();
             assert_eq!(section.name, "C603");
             let material = &model.materials[section.material.unwrap().index()];
@@ -212,7 +187,7 @@ fn stb_full_range_definitions_and_references_resolve_to_the_same_section_and_mat
 }
 
 #[test]
-fn stb_plate_section_definitions_and_references_match_at_zero_and_u32_max() {
+fn stb_plate_section_parser_boundary_ids_resolve_at_zero_and_u32_max() {
     for value in [0_u32, u32::MAX] {
         let wall = include_str!("fixtures/strength_wall.stb")
             .replace("id_section=\"3\"", &format!("id_section=\"{value}\""))

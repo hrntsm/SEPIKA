@@ -180,29 +180,31 @@ impl StrengthInputs {
                     });
                 }
             }
-            // 非標準SRC属性の入力を拒否せず保持するが、出力先は標準の鋼材子要素とする。
-            if matches!(tag, "StbSecColumn_SRC" | "StbSecBeam_SRC") {
-                if let Some(grade) = a.get("strength_steel").or_else(|| a.get("strength_main_S")) {
-                    let element = if tag == "StbSecColumn_SRC" {
-                        "StbSecColumn_SRC_SameShapeH"
-                    } else {
-                        "StbSecSteelBeam_SRC_Straight"
-                    };
-                    self.sections[index].steel.push(StbSteelStrength {
-                        native_material: None,
-                        element: element.into(),
-                        part: "main".into(),
-                        position: None,
-                        strength: grade.clone(),
-                    });
-                }
-            }
         }
         let raw_element = || StbRebarElement {
             element: tag.into(),
             attributes: a
                 .names()
                 .into_iter()
+                .filter(|key| {
+                    !matches!(
+                        tag,
+                        "StbSecBarColumn_RC_RectSame"
+                            | "StbSecBarColumn_RC_RectNotSame"
+                            | "StbSecBarColumn_RC_CircleSame"
+                            | "StbSecBarColumn_RC_CircleNotSame"
+                            | "StbSecBarColumn_SRC_RectSame"
+                            | "StbSecBarColumn_SRC_RectNotSame"
+                            | "StbSecBarColumn_SRC_CircleSame"
+                            | "StbSecBarColumn_SRC_CircleNotSame"
+                            | "StbSecBarBeam_RC_Same"
+                            | "StbSecBarBeam_RC_ThreeTypes"
+                            | "StbSecBarBeam_RC_StartEnd"
+                            | "StbSecBarBeam_SRC_Same"
+                            | "StbSecBarBeam_SRC_ThreeTypes"
+                            | "StbSecBarBeam_SRC_StartEnd"
+                    ) || !(key.starts_with("depth_cover") || key.starts_with("center"))
+                })
                 .map(|key| (key.to_owned(), a.get(key).unwrap().clone()))
                 .collect(),
         };

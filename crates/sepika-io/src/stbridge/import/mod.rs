@@ -6,7 +6,6 @@
 //! 形鋼ライブラリ（`StbSecSteel`）を解釈する。形鋼名から内部の [`SectionShape`] を復元し、
 //! 断面性能を再算定する。材料は断面のグレード名（鋼 `strength_main`、RC/SRC/CFT の
 //! `strength_concrete`）から標準材料表（[`material_std`]）で物性へ解決する。
-//! 後方互換のため、Squid-n が過去に書き出した物性直持ち `StbSecRaw` も読み取れる。
 //!
 //! 標準断面は柱用（`StbSecColumn_*`）と梁用（`StbSecBeam_*`）に型分けされ、柱・梁共有断面の
 //! 分割などで断面 id が文書順に整列しないことがある。取り込み後に断面 id を整列・再採番し、
@@ -30,10 +29,9 @@ mod strength;
 mod xml;
 
 /// 断面が持つ材料参照（ST-Bridge は材料を断面側に持つ）。
-/// 数値 id（RC/CFT/SRC の `id_material`）または材料名（鋼の `strength_main` グレード）。
+/// コンクリート・鋼のグレード名。
 #[derive(Clone)]
 enum SecMatRef {
-    Id(u32),
     Grade(String),
 }
 
@@ -64,15 +62,6 @@ struct SecGrades {
 }
 
 enum PendingSecKind {
-    /// 物性直持ち（`StbSecRaw`）。
-    Raw {
-        area: f64,
-        iy: f64,
-        iz: f64,
-        j: f64,
-        depth: f64,
-        width: f64,
-    },
     /// 形状が確定済み（RC 図形など）。
     Shape(SectionShape),
     /// 形鋼ライブラリ参照（後で名前解決する鋼断面）。
@@ -102,7 +91,6 @@ struct PendingMember {
     n_i: u32,
     n_j: u32,
     section: Option<u32>,
-    material: Option<u32>,
     /// 部材軸まわりの断面回転角 [deg]（ST-Bridge `rotate`）。ref_vector は節点座標が
     /// 揃う構築時に軸と `rotate` から算出する。
     rotate: f64,
@@ -122,7 +110,6 @@ struct PendingSecondary {
     n_i: u32,
     n_j: u32,
     section: Option<u32>,
-    material: Option<u32>,
     name: String,
 }
 
@@ -146,18 +133,6 @@ struct RawStory {
     node_ids: Vec<u32>,
 }
 
-/// 取り込み途中の材料（id 正規化前）。
-struct RawMaterial {
-    file_id: u32,
-    name: String,
-    young: f64,
-    poisson: f64,
-    density: f64,
-    shear: Option<f64>,
-    fc: Option<f64>,
-    fy: Option<f64>,
-}
-
 /// 取り込み途中の荷重ケース（節点参照は file id）。
 struct RawLoadCase {
     name: String,
@@ -178,8 +153,6 @@ struct RawWall {
     strength_index: Option<usize>,
     /// 断面参照（`id_section`。`StbSecWall_RC` の file id）。負値/未指定は `None`。
     section_fid: Option<u32>,
-    /// 材料参照（`id_material`）。負値/未指定は `None`。
-    material_fid: Option<u32>,
     /// 境界節点ループ（`StbNodeIdOrder`。file node id 列）。
     boundary: Vec<u32>,
 }
