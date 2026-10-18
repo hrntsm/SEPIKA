@@ -1,6 +1,10 @@
 # SRC/CFT の等価断面剛性は材料由来 ns を通常とし、算定不能時は N_S_EQ=15 へフォールバックして通知する
 
-Status: accepted
+Status: partially superseded by ADR-0062
+
+[ADR 0062](0062-cft-core-torsion-resolution.md) は、本 ADR の CFT 材料不正時に鋼管のみへフォールバックする判断を置き換える。
+CFT の不正材料・未確定の数値計算は理由付きエラーとし、成功として扱わない。SRC に関する判断は維持する。
+以下の本文は、この置換前の判断の記録として保持する。
 
 ## 決定
 

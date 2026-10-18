@@ -1,0 +1,21 @@
+{
+  "actual_fresh_diagnostic_calls": 4,
+  "aliases_without_solve": 2,
+  "args": [
+    "C:\\Users\\hiroa\\Desktop\\ikkan\\target\\release\\examples\\cft_torsion_profile.exe",
+    "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\known-first-observed",
+    "known"
+  ],
+  "diagnostic_cache": "公開診断は毎回fresh。aliasは求解せず、時間標本から除外",
+  "finished_unix_seconds": 1792324986.167965,
+  "labels": 3,
+  "memory": "外側OS計測を参照。runner内でRSSやfactorfillを推定しない",
+  "mode": "known",
+  "os_cold_reset": false,
+  "pid": 25636,
+  "process_order": "各labelで反復ごとに通常向き、H/B交換の順",
+  "process_wall_seconds": 4.3632776,
+  "records": 6,
+  "successful_fresh_solves": 4,
+  "unresolved_fresh_solves": 0
+}

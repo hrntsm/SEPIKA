@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "C:\Users\hiroa\AppData\Local\Temp\sepika416-h-box-reference\audit.py", line 6, in <module>
+    from sectionproperties.pre import utils
+ImportError: cannot import name 'utils' from 'sectionproperties.pre' (C:\Users\hiroa\AppData\Local\Temp\sepika416-reference-environment\venv\Lib\site-packages\sectionproperties\pre\__init__.py)

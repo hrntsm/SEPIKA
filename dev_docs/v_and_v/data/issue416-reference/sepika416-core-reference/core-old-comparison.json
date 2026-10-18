@@ -1,0 +1,47 @@
+[
+  {
+    "box_H_mm": 400,
+    "box_B_mm": 300,
+    "wall_t_mm": 12,
+    "outer_radius_mm": 0,
+    "core_depth_ref_y_mm": 376,
+    "core_width_ref_x_mm": 276,
+    "core_radius_mm": 0,
+    "reference_j_mm4": 1449158972.0810955,
+    "old_rectangle_j_mm4": 1445977928.85345,
+    "reference_minus_old_mm4": 3181043.227645397,
+    "reference_minus_old_over_old": 0.0021999251607994607,
+    "sign": "positive",
+    "source_row_index": 2
+  },
+  {
+    "box_H_mm": 400,
+    "box_B_mm": 300,
+    "wall_t_mm": 12,
+    "outer_radius_mm": 12,
+    "core_depth_ref_y_mm": 376,
+    "core_width_ref_x_mm": 276,
+    "core_radius_mm": 0,
+    "reference_j_mm4": 1449158972.0810955,
+    "old_rectangle_j_mm4": 1445977928.85345,
+    "reference_minus_old_mm4": 3181043.227645397,
+    "reference_minus_old_over_old": 0.0021999251607994607,
+    "sign": "positive",
+    "source_row_index": 2
+  },
+  {
+    "box_H_mm": 400,
+    "box_B_mm": 300,
+    "wall_t_mm": 12,
+    "outer_radius_mm": 30,
+    "core_depth_ref_y_mm": 376,
+    "core_width_ref_x_mm": 276,
+    "core_radius_mm": 18,
+    "reference_j_mm4": 1448741968.108572,
+    "old_rectangle_j_mm4": 1445977928.85345,
+    "reference_minus_old_mm4": 2764039.2551219463,
+    "reference_minus_old_over_old": 0.0019115362689620153,
+    "sign": "positive",
+    "source_row_index": 11
+  }
+]

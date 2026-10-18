@@ -1,0 +1,14 @@
+[
+  {
+    "row_index": 11,
+    "shape": "Core_r18",
+    "mesh_sha256": "93dbc614c665fafa66d6e50036f614e1c83b42918b66780c51b6591c4d884ddc",
+    "mesh_generated": false,
+    "source_j_mm4": 1448741968.108572,
+    "reloaded_j_mm4": 1448741968.108572,
+    "exact_j_equal": true,
+    "signed_relative_j_difference": 0.0,
+    "original_relative_residual": 9.234158383517402e-14,
+    "total_seconds": 2.5140414999914356
+  }
+]

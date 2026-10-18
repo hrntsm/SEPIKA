@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "C:\Users\hiroa\AppData\Local\Temp\sepika416-h-box-reference\audit.py", line 49, in <module>
+    digest=hashlib.sha256(s.mesh_nodes.tobytes()+s.mesh_elements.tobytes()).hexdigest();assert digest==row['mesh_sha256']
+                                                                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

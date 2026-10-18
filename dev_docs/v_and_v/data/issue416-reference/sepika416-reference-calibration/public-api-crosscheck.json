@@ -1,0 +1,18 @@
+[
+  {
+    "shape": "ellipse_2_1",
+    "area": 0.0005,
+    "j_public_api": 5.0225124290467935,
+    "j_runner": 5.0225124290467935,
+    "relative_difference": 0.0,
+    "full_warping_seconds": 0.389940699969884
+  },
+  {
+    "shape": "rectangle_10_1",
+    "area": 3.125e-05,
+    "j_public_api": 3.123254811196203,
+    "j_runner": 3.123254811196203,
+    "relative_difference": 0.0,
+    "full_warping_seconds": 1.608462599979248
+  }
+]

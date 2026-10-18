@@ -1,0 +1,11 @@
+{
+  "rows": 12,
+  "all_series_passed": true,
+  "max_original_relative_residual": 9.234158383517402e-14,
+  "total_compute_seconds": 22.197216700122226,
+  "min_compute_seconds": 0.3299057999975048,
+  "max_compute_seconds": 5.665687600034289,
+  "max_nodes": 21250,
+  "max_triangles": 10383,
+  "max_triangle_area_relative_error": 8.881784197001252e-16
+}

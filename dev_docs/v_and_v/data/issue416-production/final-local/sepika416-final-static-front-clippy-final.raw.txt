@@ -1,0 +1,7 @@
+    Checking sepika-design-jp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-design-jp)
+    Checking sepika-io v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-io)
+    Checking sepika-solver v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-solver)
+    Checking sepika-job v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-job)
+    Checking sepika-app v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-app)
+    Checking sepika-mcp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-mcp)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 8.43s

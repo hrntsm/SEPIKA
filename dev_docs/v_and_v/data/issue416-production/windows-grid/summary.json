@@ -1,0 +1,416 @@
+{
+  "runs": {
+    "extreme-first": {
+      "manifest": {
+        "actual_fresh_diagnostic_calls": 2,
+        "aliases_without_solve": 0,
+        "args": [
+          "C:\\Users\\hiroa\\Desktop\\ikkan\\target\\release\\examples\\cft_torsion_profile.exe",
+          "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\extreme-first",
+          "grid",
+          "72",
+          "73"
+        ],
+        "diagnostic_cache": "公開診断は毎回fresh。aliasは求解せず、時間標本から除外",
+        "finished_unix_seconds": 1792324996.623787,
+        "labels": 1,
+        "memory": "外側OS計測を参照。runner内でRSSやfactorfillを推定しない",
+        "mode": "grid",
+        "os_cold_reset": false,
+        "pid": 20604,
+        "process_order": "各labelで反復ごとに通常向き、H/B交換の順",
+        "process_wall_seconds": 1.1499634,
+        "records": 2,
+        "successful_fresh_solves": 2,
+        "unresolved_fresh_solves": 0
+      },
+      "process": {
+        "pid": 20604,
+        "exit_code": 0,
+        "end_utc": "2026-10-18T12:03:16.6382907Z",
+        "external_process_wall_seconds": 1.2094195,
+        "peak_working_set_bytes": 74399744,
+        "peak_paged_memory_bytes": 298319872,
+        "observed_total_processor_seconds": 1.890625,
+        "memory_contract": "Maximum observed OS PeakWorkingSet64 and PeakPagedMemorySize64, polled every 100ms while alive. These are process-lifetime high-water marks as observed, not case increments or factor fill. The last sub-100ms interval is not guaranteed sampled."
+      },
+      "status_counts": {
+        "success": 2
+      },
+      "fresh_wall_seconds": {
+        "min": 0.5604829,
+        "median": 0.5613395999999999,
+        "max": 0.5621963,
+        "sum": 1.1226791999999999
+      },
+      "full_level_count": 14,
+      "max_relative_residual": 1.1968441497804065e-12,
+      "max_vertices": 86368,
+      "max_triangles": 171359,
+      "max_free_dofs": 84993,
+      "max_nnz": 591871,
+      "max_swap_relative_difference": 2.5405897918773235e-07,
+      "accepted_area_denominator_counts": {
+        "524288": 2
+      },
+      "accepted_quarter_n_counts": {
+        "16": 2
+      },
+      "failures": [],
+      "source_changed_since_run": [],
+      "executable_sha256": "C8EAA0D20F13674D3824649BCE970955FEAB4476391A0BA195942985C226B19F",
+      "first_fresh_call": {
+        "label": "hb4_bt10_rzero",
+        "swapped": false,
+        "repetition": 0,
+        "wall_seconds": 0.5621963,
+        "j_mm4": 4555795095.791873,
+        "status": "success"
+      }
+    },
+    "grid96": {
+      "manifest": {
+        "actual_fresh_diagnostic_calls": 160,
+        "aliases_without_solve": 32,
+        "args": [
+          "C:\\Users\\hiroa\\Desktop\\ikkan\\target\\release\\examples\\cft_torsion_profile.exe",
+          "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\grid96",
+          "grid",
+          "0",
+          "96"
+        ],
+        "diagnostic_cache": "公開診断は毎回fresh。aliasは求解せず、時間標本から除外",
+        "finished_unix_seconds": 1792325230.2161303,
+        "labels": 96,
+        "memory": "外側OS計測を参照。runner内でRSSやfactorfillを推定しない",
+        "mode": "grid",
+        "os_cold_reset": false,
+        "pid": 16416,
+        "process_order": "各labelで反復ごとに通常向き、H/B交換の順",
+        "process_wall_seconds": 217.0072496,
+        "records": 192,
+        "successful_fresh_solves": 160,
+        "unresolved_fresh_solves": 0
+      },
+      "process": {
+        "pid": 16416,
+        "exit_code": 0,
+        "end_utc": "2026-10-18T12:07:10.2488055Z",
+        "external_process_wall_seconds": 217.0873245,
+        "peak_working_set_bytes": 115716096,
+        "peak_paged_memory_bytes": 356732928,
+        "observed_total_processor_seconds": 334.765625,
+        "memory_contract": "Maximum observed OS PeakWorkingSet64 and PeakPagedMemorySize64, polled every 100ms while alive. These are process-lifetime high-water marks as observed, not case increments or factor fill. The last sub-100ms interval is not guaranteed sampled."
+      },
+      "status_counts": {
+        "success": 160
+      },
+      "fresh_wall_seconds": {
+        "min": 0.2959134,
+        "median": 1.04364275,
+        "max": 2.9833642,
+        "sum": 215.2122828
+      },
+      "full_level_count": 2658,
+      "max_relative_residual": 3.3955117686952227e-12,
+      "max_vertices": 102996,
+      "max_triangles": 204434,
+      "max_free_dofs": 101482,
+      "max_nnz": 707290,
+      "max_swap_relative_difference": 8.089819157897082e-07,
+      "accepted_area_denominator_counts": {
+        "131072": 86,
+        "32768": 34,
+        "524288": 40
+      },
+      "accepted_quarter_n_counts": {
+        "16": 32,
+        "64": 96,
+        "128": 32
+      },
+      "failures": [],
+      "source_changed_since_run": [],
+      "executable_sha256": "C8EAA0D20F13674D3824649BCE970955FEAB4476391A0BA195942985C226B19F",
+      "first_fresh_call": {
+        "label": "hb1_bt10_rzero",
+        "swapped": false,
+        "repetition": 0,
+        "wall_seconds": 0.6888232,
+        "j_mm4": 466388720.53657544,
+        "status": "success"
+      }
+    },
+    "known-first-observed": {
+      "manifest": {
+        "actual_fresh_diagnostic_calls": 4,
+        "aliases_without_solve": 2,
+        "args": [
+          "C:\\Users\\hiroa\\Desktop\\ikkan\\target\\release\\examples\\cft_torsion_profile.exe",
+          "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\known-first-observed",
+          "known"
+        ],
+        "diagnostic_cache": "公開診断は毎回fresh。aliasは求解せず、時間標本から除外",
+        "finished_unix_seconds": 1792324986.167965,
+        "labels": 3,
+        "memory": "外側OS計測を参照。runner内でRSSやfactorfillを推定しない",
+        "mode": "known",
+        "os_cold_reset": false,
+        "pid": 25636,
+        "process_order": "各labelで反復ごとに通常向き、H/B交換の順",
+        "process_wall_seconds": 4.3632776,
+        "records": 6,
+        "successful_fresh_solves": 4,
+        "unresolved_fresh_solves": 0
+      },
+      "process": {
+        "pid": 25636,
+        "exit_code": 0,
+        "end_utc": "2026-10-18T12:03:06.1993766Z",
+        "external_process_wall_seconds": 4.5484261,
+        "peak_working_set_bytes": 69898240,
+        "peak_paged_memory_bytes": 315551744,
+        "observed_total_processor_seconds": 7.375,
+        "memory_contract": "Maximum observed OS PeakWorkingSet64 and PeakPagedMemorySize64, polled every 100ms while alive. These are process-lifetime high-water marks as observed, not case increments or factor fill. The last sub-100ms interval is not guaranteed sampled."
+      },
+      "status_counts": {
+        "success": 4
+      },
+      "fresh_wall_seconds": {
+        "min": 0.5214301,
+        "median": 1.0248587,
+        "max": 1.740217,
+        "sum": 4.3113645
+      },
+      "full_level_count": 48,
+      "max_relative_residual": 2.380649274886469e-12,
+      "max_vertices": 75277,
+      "max_triangles": 149416,
+      "max_free_dofs": 74141,
+      "max_nnz": 516723,
+      "max_swap_relative_difference": 5.106215028582994e-07,
+      "accepted_area_denominator_counts": {
+        "131072": 4
+      },
+      "accepted_quarter_n_counts": {
+        "16": 2,
+        "64": 2
+      },
+      "failures": [],
+      "source_changed_since_run": [],
+      "executable_sha256": "C8EAA0D20F13674D3824649BCE970955FEAB4476391A0BA195942985C226B19F",
+      "first_fresh_call": {
+        "label": "known_400x300x12_r0",
+        "swapped": false,
+        "repetition": 0,
+        "wall_seconds": 0.5214301,
+        "j_mm4": 1449105537.0919018,
+        "status": "success"
+      }
+    },
+    "repeat-extreme-rectangle": {
+      "manifest": {
+        "actual_fresh_diagnostic_calls": 6,
+        "aliases_without_solve": 0,
+        "args": [
+          "C:\\Users\\hiroa\\Desktop\\ikkan\\target\\release\\examples\\cft_torsion_profile.exe",
+          "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rectangle",
+          "repeat",
+          "72",
+          "3"
+        ],
+        "diagnostic_cache": "公開診断は毎回fresh。aliasは求解せず、時間標本から除外",
+        "finished_unix_seconds": 1792325246.9396882,
+        "labels": 1,
+        "memory": "外側OS計測を参照。runner内でRSSやfactorfillを推定しない",
+        "mode": "repeat",
+        "os_cold_reset": false,
+        "pid": 20488,
+        "process_order": "各labelで反復ごとに通常向き、H/B交換の順",
+        "process_wall_seconds": 3.7236318,
+        "records": 6,
+        "successful_fresh_solves": 6,
+        "unresolved_fresh_solves": 0
+      },
+      "process": {
+        "pid": 20488,
+        "exit_code": 0,
+        "end_utc": "2026-10-18T12:07:26.9640986Z",
+        "external_process_wall_seconds": 3.7826438,
+        "peak_working_set_bytes": 75509760,
+        "peak_paged_memory_bytes": 299769856,
+        "observed_total_processor_seconds": 6.703125,
+        "memory_contract": "Maximum observed OS PeakWorkingSet64 and PeakPagedMemorySize64, polled every 100ms while alive. These are process-lifetime high-water marks as observed, not case increments or factor fill. The last sub-100ms interval is not guaranteed sampled."
+      },
+      "status_counts": {
+        "success": 6
+      },
+      "fresh_wall_seconds": {
+        "min": 0.5089047,
+        "median": 0.5659033499999999,
+        "max": 0.8267784,
+        "sum": 3.6427715000000003
+      },
+      "full_level_count": 42,
+      "max_relative_residual": 1.1968441497804065e-12,
+      "max_vertices": 86368,
+      "max_triangles": 171359,
+      "max_free_dofs": 84993,
+      "max_nnz": 591871,
+      "max_swap_relative_difference": 2.5405897918773235e-07,
+      "accepted_area_denominator_counts": {
+        "524288": 6
+      },
+      "accepted_quarter_n_counts": {
+        "16": 6
+      },
+      "failures": [],
+      "source_changed_since_run": [],
+      "executable_sha256": "C8EAA0D20F13674D3824649BCE970955FEAB4476391A0BA195942985C226B19F",
+      "first_fresh_call": {
+        "label": "hb4_bt10_rzero",
+        "swapped": false,
+        "repetition": 0,
+        "wall_seconds": 0.5618565,
+        "j_mm4": 4555795095.791873,
+        "status": "success"
+      }
+    },
+    "repeat-extreme-rounded": {
+      "manifest": {
+        "actual_fresh_diagnostic_calls": 6,
+        "aliases_without_solve": 0,
+        "args": [
+          "C:\\Users\\hiroa\\Desktop\\ikkan\\target\\release\\examples\\cft_torsion_profile.exe",
+          "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rounded",
+          "repeat",
+          "95",
+          "3"
+        ],
+        "diagnostic_cache": "公開診断は毎回fresh。aliasは求解せず、時間標本から除外",
+        "finished_unix_seconds": 1792325261.9338603,
+        "labels": 1,
+        "memory": "外側OS計測を参照。runner内でRSSやfactorfillを推定しない",
+        "mode": "repeat",
+        "os_cold_reset": false,
+        "pid": 28060,
+        "process_order": "各labelで反復ごとに通常向き、H/B交換の順",
+        "process_wall_seconds": 13.6911984,
+        "records": 6,
+        "successful_fresh_solves": 6,
+        "unresolved_fresh_solves": 0
+      },
+      "process": {
+        "pid": 28060,
+        "exit_code": 0,
+        "end_utc": "2026-10-18T12:07:41.9599517Z",
+        "external_process_wall_seconds": 13.7514972,
+        "peak_working_set_bytes": 83968000,
+        "peak_paged_memory_bytes": 330162176,
+        "observed_total_processor_seconds": 21.5,
+        "memory_contract": "Maximum observed OS PeakWorkingSet64 and PeakPagedMemorySize64, polled every 100ms while alive. These are process-lifetime high-water marks as observed, not case increments or factor fill. The last sub-100ms interval is not guaranteed sampled."
+      },
+      "status_counts": {
+        "success": 6
+      },
+      "fresh_wall_seconds": {
+        "min": 1.8671569,
+        "median": 2.3627025,
+        "max": 2.4665646,
+        "sum": 13.5882235
+      },
+      "full_level_count": 126,
+      "max_relative_residual": 1.5653900846500695e-12,
+      "max_vertices": 95347,
+      "max_triangles": 189329,
+      "max_free_dofs": 93988,
+      "max_nnz": 655030,
+      "max_swap_relative_difference": 1.3172663881899638e-07,
+      "accepted_area_denominator_counts": {
+        "524288": 6
+      },
+      "accepted_quarter_n_counts": {
+        "64": 6
+      },
+      "failures": [],
+      "source_changed_since_run": [],
+      "executable_sha256": "C8EAA0D20F13674D3824649BCE970955FEAB4476391A0BA195942985C226B19F",
+      "first_fresh_call": {
+        "label": "hb4_bt100_rupper",
+        "swapped": false,
+        "repetition": 0,
+        "wall_seconds": 1.8671569,
+        "j_mm4": 8145788388.010892,
+        "status": "success"
+      }
+    },
+    "repeat-square-rounded": {
+      "manifest": {
+        "actual_fresh_diagnostic_calls": 6,
+        "aliases_without_solve": 0,
+        "args": [
+          "C:\\Users\\hiroa\\Desktop\\ikkan\\target\\release\\examples\\cft_torsion_profile.exe",
+          "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-square-rounded",
+          "repeat",
+          "3",
+          "3"
+        ],
+        "diagnostic_cache": "公開診断は毎回fresh。aliasは求解せず、時間標本から除外",
+        "finished_unix_seconds": 1792325241.9317617,
+        "labels": 1,
+        "memory": "外側OS計測を参照。runner内でRSSやfactorfillを推定しない",
+        "mode": "repeat",
+        "os_cold_reset": false,
+        "pid": 28944,
+        "process_order": "各labelで反復ごとに通常向き、H/B交換の順",
+        "process_wall_seconds": 2.8061617,
+        "records": 6,
+        "successful_fresh_solves": 6,
+        "unresolved_fresh_solves": 0
+      },
+      "process": {
+        "pid": 28944,
+        "exit_code": 0,
+        "end_utc": "2026-10-18T12:07:21.9585433Z",
+        "external_process_wall_seconds": 2.881341,
+        "peak_working_set_bytes": 27557888,
+        "peak_paged_memory_bytes": 251531264,
+        "observed_total_processor_seconds": 5.5,
+        "memory_contract": "Maximum observed OS PeakWorkingSet64 and PeakPagedMemorySize64, polled every 100ms while alive. These are process-lifetime high-water marks as observed, not case increments or factor fill. The last sub-100ms interval is not guaranteed sampled."
+      },
+      "status_counts": {
+        "success": 6
+      },
+      "fresh_wall_seconds": {
+        "min": 0.4139694,
+        "median": 0.45262355,
+        "max": 0.4908428,
+        "sum": 2.7050035
+      },
+      "full_level_count": 90,
+      "max_relative_residual": 8.570627818526976e-13,
+      "max_vertices": 24954,
+      "max_triangles": 49299,
+      "max_free_dofs": 24352,
+      "max_nnz": 169302,
+      "max_swap_relative_difference": 0,
+      "accepted_area_denominator_counts": {
+        "32768": 6
+      },
+      "accepted_quarter_n_counts": {
+        "64": 6
+      },
+      "failures": [],
+      "source_changed_since_run": [],
+      "executable_sha256": "C8EAA0D20F13674D3824649BCE970955FEAB4476391A0BA195942985C226B19F",
+      "first_fresh_call": {
+        "label": "hb1_bt10_r2_5t",
+        "swapped": false,
+        "repetition": 0,
+        "wall_seconds": 0.4549287,
+        "j_mm4": 458701360.5545956,
+        "status": "success"
+      }
+    }
+  },
+  "quality_audit_violations": []
+}

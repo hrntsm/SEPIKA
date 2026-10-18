@@ -1,0 +1,197 @@
+[
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\actual-transforms-13080-1792324457676634200\\combined.json",
+    "bytes": 1455733,
+    "sha256": "9F9909B818F1E533AA35458547326F9718061759217B076F1B8BA5640A4947A2"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\actual-transforms-13080-1792324457676634200\\original.json",
+    "bytes": 1494420,
+    "sha256": "3A4E380E89F8C96CE41CBB82852C14A4F3788D07CE8023CE35936158EA6B7CAE"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\actual-transforms-13080-1792324457676634200\\rotate-pi-2.json",
+    "bytes": 1499431,
+    "sha256": "BA057BF9533E9E804132F549B98DBF67A675EDE15AFB40160772D35BC5DAB4A0"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\actual-transforms-13080-1792324457676634200\\rotate-pi-7.json",
+    "bytes": 1506128,
+    "sha256": "2A4F89808AC32843DE433721794434EC5A17DDE98821E9F8EBCBC5324FC1D75E"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\actual-transforms-13080-1792324457676634200\\rows.jsonl",
+    "bytes": 5245,
+    "sha256": "6A37AFF8FEB6E28E51BCFBE5CE406E7C57B7F6C7730921165997DC2C016866C0"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\actual-transforms-13080-1792324457676634200\\scale-0.1.json",
+    "bytes": 1537282,
+    "sha256": "53938FEEF7E3065E57FC7EE334BB285A2F3FB81D066E74A4CA02B2FFC456BCDA"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\actual-transforms-13080-1792324457676634200\\scale-10.json",
+    "bytes": 1455627,
+    "sha256": "B6F4DFA8F055FD5AAFEA1DF960F69C85D0B8705BD7E2795C2A05C08EF780E295"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\actual-transforms-13080-1792324457676634200\\scale-1000.json",
+    "bytes": 1446667,
+    "sha256": "2DF07A24B7C3CCE0BCA86E120205CEBA66D2132A6F67E80DB6AB362B38B256DF"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\actual-transforms-13080-1792324457676634200\\translate.json",
+    "bytes": 1445978,
+    "sha256": "5E88DB3EC52B2B3B0CB460456F810EF5091F4D33366E376A42071ED7D5C363B1"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-2-n128-d131072.json",
+    "bytes": 3260366,
+    "sha256": "9BD9E7EFEB8125CA53B1BE4318A125737EE600C58DD39CCD8FF3A1FBC1820FC5"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-2-n128-d2048.json",
+    "bytes": 110572,
+    "sha256": "8322C986616B5A1D9A66999B36B0172163FA9F066570BD879B62C4CACA9A4DB4"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-2-n128-d32768.json",
+    "bytes": 781584,
+    "sha256": "05A350C7F335C4A5772921CC84B41D90478AA98D225AF75F5048707D39F10B1D"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-2-n128-d8192.json",
+    "bytes": 233755,
+    "sha256": "17DE7A8D9E8DACCC8DA127A1D74B5817D1681D13FC27FCAA36F0A551DADA836A"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-2-n32-d131072.json",
+    "bytes": 3233244,
+    "sha256": "9F8CEA84AC3A860D84440176626B93F4E157B81BBF9E4CB08BFB6AE7389E1EB6"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-2-n32-d2048.json",
+    "bytes": 49119,
+    "sha256": "A9F15AFE7FA95CA22804D50CBA82E7220581B0A1AEA96856A78E38FA3A56D9EA"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-2-n32-d32768.json",
+    "bytes": 767656,
+    "sha256": "263B3152D29C098EB41B1BA3E6285F69541A3EBB51DECA074507045BAF637F17"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-2-n32-d8192.json",
+    "bytes": 190762,
+    "sha256": "5A4EB0369C1F44AAD40E97EE2D7EB494EA2A0FE1955F38317E948C1F6754D5A0"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-2-n64-d131072.json",
+    "bytes": 3255480,
+    "sha256": "1DBD62008CECF19BF662DA1C33AC28C3A19A53C0E526245D5C15C753742F3F7F"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-2-n64-d2048.json",
+    "bytes": 65086,
+    "sha256": "5083543956CAAA265025BA4AB5862EDCD49DC274C2C45E30544028D2AD0BD22E"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-2-n64-d32768.json",
+    "bytes": 768621,
+    "sha256": "E83A49FDD202D717D3C40B6F2ED5C7BDEF23B6C313C8605A5595E9CA29FE4F98"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-2-n64-d8192.json",
+    "bytes": 196839,
+    "sha256": "3C5FBEA80CDCD26FDD6E8B343885E2427210305E7A8D433256A67F60E9B97D98"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n128-d131072.json",
+    "bytes": 1616494,
+    "sha256": "DD77E5790BDD5AFDFC0FB11016AA0ACA82A2802E01D74F94D90F7705512E217C"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n128-d2048.json",
+    "bytes": 91704,
+    "sha256": "AF467FAD9C63BDC33C664C2681730D9A1B02796ECA3FB337DB6362286ADBC42B"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n128-d32768.json",
+    "bytes": 406509,
+    "sha256": "316C70ACE99EAFCACEA31A1056144EFB9F8DB5E933D4EE614ADEA62064E29B34"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n128-d524288.json",
+    "bytes": 6606215,
+    "sha256": "31E5A9ED9FFE5102D86FED40CDBF0DB9B4BF7FF76167050561C510208A1CAF22"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n128-d8192.json",
+    "bytes": 142506,
+    "sha256": "FC65AA58A62C2AC7B3A63820644652C090F4864BF81FBE189AC7A1B25F33D94D"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n32-d131072.json",
+    "bytes": 1611070,
+    "sha256": "59D99594E9FB25C522B7521B6A55DCBF7C5A815071563E9B9CEAB7C78C469B68"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n32-d2048.json",
+    "bytes": 28365,
+    "sha256": "C2B85B395E9EAAA98015149A7C217C8DE82C7DEC84B6AF7A3ACBDE832A4472FE"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n32-d32768.json",
+    "bytes": 386399,
+    "sha256": "F2DD64BD7BD374D813CCC5397131B20C354D4790BC0EC54340FD6D1F407FF7A2"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n32-d524288.json",
+    "bytes": 6577418,
+    "sha256": "39E177DA91A263F879578746E174348047A60B2910FA1A5DA431DC10358313AB"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n32-d8192.json",
+    "bytes": 94822,
+    "sha256": "B4779AA135B021972FB52C3039410568A4112C48AA7F5E9A69AB5E4A1F21F46E"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n64-d131072.json",
+    "bytes": 1606154,
+    "sha256": "7CDF1041ABC3F952CADF59C4C8502E464789EF041E45DC06B1D86FA300F5A05C"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n64-d2048.json",
+    "bytes": 45745,
+    "sha256": "536A0A480413DDB60EAC90C33DA2BE10AACBF6F21639CF05D67D4E61E631E576"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n64-d32768.json",
+    "bytes": 390361,
+    "sha256": "4906BDFFE759FC82C2A220810E7CA17D33CB3ABC22970CAA0EEBB360E77C62BE"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n64-d524288.json",
+    "bytes": 6578655,
+    "sha256": "DB5A359B649B252DF1D2301EFC9F1936BD79035391F497DF6013F4706F5F1A19"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\ellipse-4-n64-d8192.json",
+    "bytes": 103481,
+    "sha256": "DF604951425697629F13E06E1DE37941B93C6F6528D510D9152C72A04F0BA44A"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\rows.jsonl",
+    "bytes": 23484,
+    "sha256": "7A12970BA54538D454F1A6ADDB4165AC42379E904B57DAC2704A0CF4D7B1BF59"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\rectangle-series-13080-1792324460625236900\\rows.jsonl",
+    "bytes": 10965,
+    "sha256": "1B46E94EAF28AD0165118DEC965644F0429F8581203180A2764CE92EEE24639C"
+  },
+  {
+    "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\radius-limits-13080-1792324462895151300\\rows.jsonl",
+    "bytes": 73354,
+    "sha256": "AE909A242192E7383E816AA30AFABC6840DAAB9F5FB360A2218B0099EDE56F52"
+  }
+]

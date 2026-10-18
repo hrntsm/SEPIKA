@@ -1,0 +1,32 @@
+   Compiling sepika-app v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-app)
+    Finished `test` profile [optimized + debuginfo] target(s) in 5.77s
+     Running tests\wall_check_status.rs (target\debug\deps\wall_check_status-3851bf2cc7aa3f0c.exe)
+
+running 2 tests
+test wall_status_real_egui_design_table_shows_counts_and_reasons ... ok
+test wall_status_app_csv_save_and_recalculation_keep_keys_and_none ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+
+     Running tests\wall_model.rs (target\debug\deps\wall_model-9a2601e11a12bab6.exe)
+
+running 16 tests
+test rc_girder_self_weight_uses_columns_not_orthogonal_steel_girders ... ok
+test test_region_gen_wall_finds_all_four_faces ... ok
+test test_wall_element_changes_eigen_period ... ok
+test test_wall_frame_mismatch_appears_in_gui_diagnostics ... ok
+test nonlinear_opening_wall_refuses_job_without_publishing_partial_results ... ok
+test undefined_side_column_shape_is_an_input_error ... ok
+test wall_analysis_preserves_side_column_shapes_with_long_axial_cut ... ok
+test test_wall_shear_check_appears_after_run_design_check ... ok
+test diagonal_wall_design_consumes_distinct_local_and_load_direction_shear ... ok
+test wall_fixture_weight_change_is_the_independent_fillet_area_increment ... ok
+test circular_side_column_shear_section_runs_analysis ... ok
+test snapshot_wall_bay_scalars ... ok
+test rotated_src_and_cft_side_columns_run_linear_analysis ... ok
+test test_holding_capacity_auto_rank_detects_wall ... ok
+test snapshot_wall_ds_group_and_holding_capacity ... ok
+test wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_input ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.76s
+

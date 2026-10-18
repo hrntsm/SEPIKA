@@ -1,0 +1,147 @@
+[
+  {
+    "shape": "ellipse_2_1",
+    "series": "boundary_fixed_area",
+    "levels": 3,
+    "all_relative_changes": [
+      0.0006022416665567409,
+      0.0001505887618805882
+    ],
+    "last_two_changes": [
+      0.0006022416665567409,
+      0.0001505887618805882
+    ],
+    "j_final": 5.026295921720061,
+    "exact_j": 5.026548245743669,
+    "final_signed_relative_error": -5.01982695224612e-05,
+    "distinct_meshes": true,
+    "passed": true
+  },
+  {
+    "shape": "ellipse_2_1",
+    "series": "internal_fixed_polygon",
+    "levels": 3,
+    "all_relative_changes": [
+      4.771071521729434e-15,
+      3.1807143478196125e-15
+    ],
+    "last_two_changes": [
+      4.771071521729434e-15,
+      3.1807143478196125e-15
+    ],
+    "j_final": 5.026295921720077,
+    "exact_j": 5.026548245743669,
+    "final_signed_relative_error": -5.019826951935258e-05,
+    "distinct_meshes": true,
+    "passed": true
+  },
+  {
+    "shape": "ellipse_4_1",
+    "series": "boundary_fixed_area",
+    "levels": 3,
+    "all_relative_changes": [
+      0.0006022416662294943,
+      0.000150588762333708
+    ],
+    "last_two_changes": [
+      0.0006022416662294943,
+      0.000150588762333708
+    ],
+    "j_final": 11.82657863933781,
+    "exact_j": 11.82717234292628,
+    "final_signed_relative_error": -5.019826981933484e-05,
+    "distinct_meshes": true,
+    "passed": true
+  },
+  {
+    "shape": "ellipse_4_1",
+    "series": "internal_fixed_polygon",
+    "levels": 3,
+    "all_relative_changes": [
+      9.61282558452438e-15,
+      6.008015990327701e-15
+    ],
+    "last_two_changes": [
+      9.61282558452438e-15,
+      6.008015990327701e-15
+    ],
+    "j_final": 11.826578639337882,
+    "exact_j": 11.82717234292628,
+    "final_signed_relative_error": -5.0198269813339635e-05,
+    "distinct_meshes": true,
+    "passed": true
+  },
+  {
+    "shape": "rectangle_1_1",
+    "series": "internal_fixed_polygon",
+    "levels": 3,
+    "all_relative_changes": [
+      1.0118604526609427e-05,
+      7.372302411082191e-07
+    ],
+    "last_two_changes": [
+      1.0118604526609427e-05,
+      7.372302411082191e-07
+    ],
+    "j_final": 0.14057702311104067,
+    "exact_j": 0.14057701496206415,
+    "final_signed_relative_error": 5.796805768731872e-08,
+    "distinct_meshes": true,
+    "passed": true
+  },
+  {
+    "shape": "rectangle_2_1",
+    "series": "internal_fixed_polygon",
+    "levels": 3,
+    "all_relative_changes": [
+      5.192424831364192e-05,
+      3.6762832088790113e-06
+    ],
+    "last_two_changes": [
+      5.192424831364192e-05,
+      3.6762832088790113e-06
+    ],
+    "j_final": 0.45736347401628036,
+    "exact_j": 0.4573633542609812,
+    "final_signed_relative_error": 2.6183842249949407e-07,
+    "distinct_meshes": true,
+    "passed": true
+  },
+  {
+    "shape": "rectangle_4_1",
+    "series": "internal_fixed_polygon",
+    "levels": 3,
+    "all_relative_changes": [
+      0.0002332512515186468,
+      1.6322726697280097e-05
+    ],
+    "last_two_changes": [
+      0.0002332512515186468,
+      1.6322726697280097e-05
+    ],
+    "j_final": 1.1232534911469187,
+    "exact_j": 1.1232518332851882,
+    "final_signed_relative_error": 1.4759483861759293e-06,
+    "distinct_meshes": true,
+    "passed": true
+  },
+  {
+    "shape": "rectangle_10_1",
+    "series": "internal_fixed_polygon",
+    "levels": 4,
+    "all_relative_changes": [
+      0.005398184161654701,
+      0.00020081567567191498,
+      2.015364035340733e-05
+    ],
+    "last_two_changes": [
+      0.00020081567567191498,
+      2.015364035340733e-05
+    ],
+    "j_final": 3.123254811196203,
+    "exact_j": 3.123250374716399,
+    "final_signed_relative_error": 1.4204688294494616e-06,
+    "distinct_meshes": true,
+    "passed": true
+  }
+]

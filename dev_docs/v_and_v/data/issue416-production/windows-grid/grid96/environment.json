@@ -1,0 +1,133 @@
+{
+  "start_utc": "2026-10-18T12:03:31.8285560Z",
+  "os_cold_reset": false,
+  "compile_excluded": true,
+  "os": {
+    "Caption": "Microsoft Windows 11 Pro",
+    "Version": "10.0.26300",
+    "BuildNumber": "26300",
+    "OSArchitecture": "64-bit",
+    "TotalVisibleMemorySize": 33017652,
+    "FreePhysicalMemory": 15708276
+  },
+  "cpu": [
+    {
+      "Name": "Intel(R) Core(TM) Ultra 7 258V",
+      "NumberOfCores": 8,
+      "NumberOfLogicalProcessors": 8,
+      "MaxClockSpeed": 2200
+    }
+  ],
+  "computer": {
+    "TotalPhysicalMemory": 33810075648
+  },
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\r\nbinary: rustc\r\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\r\ncommit-date: 2026-10-13\r\nhost: x86_64-pc-windows-msvc\r\nrelease: 1.99.1\r\nLLVM version: 23.1.1\r\n",
+  "executable_sha256": "C8EAA0D20F13674D3824649BCE970955FEAB4476391A0BA195942985C226B19F",
+  "memory_contract": "Maximum observed OS PeakWorkingSet64 and PeakPagedMemorySize64, polled every 100ms while alive. These are process-lifetime high-water marks as observed, not case increments or factor fill. The last sub-100ms interval is not guaranteed sampled.",
+  "source_sha256": [
+    {
+      "path": "Cargo.lock",
+      "sha256": "1BE57639C1FA38BBE79D86C4EA2D922EE8E0F3A2BD889D500A688796B42315D3"
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "72C276451B1958A5F72B73C5528B104687512285C942B7DA6984217A70460FD1"
+    },
+    {
+      "path": "crates/sepika-core/Cargo.toml",
+      "sha256": "E65618DC06298035BA03AB95ABD846FCA250375363F8A5D8D234ED0FCD641FBF"
+    },
+    {
+      "path": "crates/sepika-core/examples/cft_torsion_profile.rs",
+      "sha256": "2EDB44E3B91B5A766275BB89C395EC99C7FB3251F66E5AFB566633387D195629"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\builder.rs",
+      "sha256": "394DB4031C159BEFB9249C4E3AF0186605608FD4D9C07265B5934DF88EF8A74D"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\composite.rs",
+      "sha256": "2E71627EA8E9B44154ECAD487E2A4317202F85EBAA09C36A5C64C1F81497827E"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\constants.rs",
+      "sha256": "E2E817EA01FF2A11DA0B463426FF0B990E9CF81BE291E65C7453AC6772E200FB"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\face_geometry.rs",
+      "sha256": "686B562370DBC936C4EB35943DF5533BCD03CB26DFBE3A36993B081D78FF078C"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\geometry.rs",
+      "sha256": "51162B3585AC9931C34C239A2F92CE11B5AD4AC09818DA2C383ACB5FD7E7E3F7"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\label.rs",
+      "sha256": "177F62C13A910AF3C70453142AA926E109F72BB4FC8977E119EFF038F5095BF3"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\material.rs",
+      "sha256": "1850866C9342370798DD4A385F1D14CAA1638408E253C1ECFA3F006BC2CF04D9"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\mod.rs",
+      "sha256": "979C830670C44AFCB5442FE904885B82C1EC723B66BBFBE1E0F56132B009CEF0"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\properties.rs",
+      "sha256": "9152C8EB6BD167D5BB7C94B2518573650AADB5C6C8374F2C68E3FF656B33DFAA"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\rounded.rs",
+      "sha256": "5B3397DBB2C830BF9B99CDF10EE42A9BA6FF64373C88599EE4F2026656C58091"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\shear.rs",
+      "sha256": "30F88049B8B2A5D6CA00060A11D3C2E9511F086C6A1D1E5BB1F00CAA5BE43B93"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\surface.rs",
+      "sha256": "86ED0AD643111497BAFB73511FC69E4636ACF9A905555FA060B62678B123A09F"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\tests.rs",
+      "sha256": "500EFF949A19A6558791E564810F45AAAA3EAA217C20CE94772BEC125768A38A"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\types.rs",
+      "sha256": "A48B0F7BB9C8DE4086BD34D7CAED2317AF1B5AFD56EE0F251028D7D320866487"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\core_torsion\\cache.rs",
+      "sha256": "906DD10BDB197D7052D0E69D788581C3230AF789F85EE965D1E017A6F7086C6B"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\core_torsion\\controller_tests.rs",
+      "sha256": "599CD0A25224F1F3D50A31AA1811B44A01A6C68A66BDA4330C10715090C258B9"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\core_torsion\\controller.rs",
+      "sha256": "165A34D320272C8E438AB70DE8A5193C08A22A238DC8F33A09F9CE1CB61230EC"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\core_torsion\\mesh.rs",
+      "sha256": "B5AF18E0260D59B3CAAD3440EB4C2EFB00595F1E1BA05B9ECB5C776385E988A2"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\core_torsion\\mod.rs",
+      "sha256": "A3942DD13BC4C7971DC215988B086927A66C8684020D77B11EF669A5B2849548"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\core_torsion\\p1_tests.rs",
+      "sha256": "E9656CC2ECDD4E598A5AFA11F728B92CAB044C8FBEB74806D0D55EA5FE0D4206"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\core_torsion\\p1.rs",
+      "sha256": "0742BFD872BC53F24375D9459BEB470CA62EDF244A90B9F530547C16FF4913BF"
+    },
+    {
+      "path": "crates\\sepika-core\\src\\section_shape\\core_torsion\\verification_tests.rs",
+      "sha256": "5DCE52AFBDC58C96A78BEB7D3816ADDFF804BB36A9233C888F50ECD1593B876F"
+    }
+  ]
+}

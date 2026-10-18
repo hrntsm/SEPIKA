@@ -1,0 +1,169 @@
+{
+  "recorded": "2026-10-18",
+  "kind": "final local validation chronology; not final-head full-workspace zero-failure evidence",
+  "commands": [
+    {
+      "raw": "sepika416-final-workspace-test-no-fail-fast.raw.txt",
+      "command": "cargo test --workspace --locked --no-fail-fast",
+      "exit_code": 101,
+      "note": "Full collection before the final two fixture basis corrections; includes 2 math doctests.",
+      "passed": 3587,
+      "failed": 2,
+      "ignored": 4
+    },
+    {
+      "raw": "sepika416-edit-pending-fixture-all.raw.txt",
+      "command": "cargo test -p sepika-edit --locked",
+      "exit_code": 0,
+      "note": "207 unit plus 20 integration; after unknown-radius fixture contract correction.",
+      "passed": 227,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "raw": "sepika416-portable-mesh-direct.raw.txt",
+      "command": "cargo test -p sepika-core --locked core_torsion::mesh",
+      "exit_code": 0,
+      "note": "After portable same-platform comparison tests; no numerical threshold changes.",
+      "passed": 11,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "raw": "sepika416-portable-controller-direct.raw.txt",
+      "command": "cargo test -p sepika-core --locked core_torsion::controller",
+      "exit_code": 0,
+      "note": "After portable same-platform comparison tests; no numerical threshold changes.",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "raw": "sepika416-job-mcp-supplied-wall-all.raw.txt",
+      "command": "cargo test -p sepika-job --locked --test wall_weight_partition",
+      "exit_code": 0,
+      "note": "After explicit Supplied J basis for retained shape-free fixture values.",
+      "passed": 20,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "raw": "sepika416-job-mcp-supplied-mcp-all.raw.txt",
+      "command": "cargo test -p sepika-mcp --lib --locked",
+      "exit_code": 0,
+      "note": "Default feature configuration; after explicit Supplied J basis for retained fixture values.",
+      "passed": 94,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "raw": "sepika416-final-static-front-clippy-final.raw.txt",
+      "command": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+      "exit_code": 0,
+      "note": "After mechanical Err guard and fixed-array zip corrections."
+    },
+    {
+      "raw": "sepika416-final-static-front-check-deps.raw.txt",
+      "command": "cargo run -p xtask -- check-deps",
+      "exit_code": 0,
+      "note": "51 upstream checks; command as recorded by owner."
+    },
+    {
+      "raw": "sepika416-job-supplied-fixture-tests.raw.txt",
+      "command": "cargo test -p sepika-job --locked --test slab_physical_mass --test high_density_steel --test member_load_direction",
+      "exit_code": 0,
+      "passed": 12,
+      "failed": 0,
+      "ignored": 0,
+      "note": "After shared high-density fixture Supplied J basis correction; before later full workspace collection."
+    },
+    {
+      "raw": "sepika416-job-supplied-fixture-density.raw.txt",
+      "command": "cargo test -p sepika-job --locked --test steel_slab_density",
+      "exit_code": 0,
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0,
+      "note": "After shared high-density fixture Supplied J basis correction; before later full workspace collection."
+    },
+    {
+      "raw": "sepika416-final-back-edit-radius.raw.txt",
+      "command": "cargo test -p sepika-edit --locked radius_edit_updates_only_shape_properties_and_restores_basis",
+      "exit_code": 0,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "suites": 4
+    },
+    {
+      "raw": "sepika416-final-back-feature-tests.raw.txt",
+      "command": "cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked",
+      "exit_code": 0,
+      "passed": 1328,
+      "failed": 0,
+      "ignored": 3,
+      "suites": 38
+    },
+    {
+      "raw": "sepika416-final-back-feature-clippy.raw.txt",
+      "command": "cargo clippy -p sepika-mcp -p sepika-app -p sepika-io --all-targets --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "raw": "sepika416-final-back-io-default-tests.raw.txt",
+      "command": "cargo test -p sepika-io --locked",
+      "exit_code": 0,
+      "passed": 229,
+      "failed": 0,
+      "ignored": 2,
+      "suites": 13
+    },
+    {
+      "raw": "sepika416-final-back-gui-no-parquet-check.raw.txt",
+      "command": "cargo check -p sepika-app --features sepika-app/gui --locked",
+      "exit_code": 0
+    },
+    {
+      "raw": "sepika416-final-back-check-docs.raw.txt",
+      "command": "cargo run -p xtask -- check-docs",
+      "exit_code": 0
+    },
+    {
+      "raw": "sepika416-final-back-mdbook-build.raw.txt",
+      "command": "mdbook build",
+      "exit_code": 0
+    },
+    {
+      "raw": "sepika416-final-back-mdbook-version.raw.txt",
+      "command": "mdbook --version",
+      "exit_code": 0
+    },
+    {
+      "raw": "sepika416-final-back-rustdoc.raw.txt",
+      "command": "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps --locked",
+      "exit_code": 101
+    },
+    {
+      "raw": "sepika416-final-back-rustdoc-after-unit-fix.raw.txt",
+      "command": "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps --locked",
+      "exit_code": 0
+    },
+    {
+      "raw": "sepika416-final-back-fmt-after-unit-fix.raw.txt",
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0
+    }
+  ],
+  "scope_notes": [
+    "Existing calibration and formal Windows timing raw/source hashes describe their recorded runs before later formatting, test-only and mechanical lint changes. They are not asserted to match later source bytes.",
+    "No numerical model, tolerance, or performance remeasurement is introduced by this evidence update.",
+    "Initial fail-fast workspace runs observed 1862 pass/1 fail/2 ignored and then 2656 pass/1 fail/4 ignored; their original raw remains in TEMP and is not copied here.",
+    "The collected full workspace run still had 2 failed targets. Their subsequent complete target reruns passed 20 and 94 tests, respectively; these reruns are not a new full-workspace run and overlapping direct tests are not added.",
+    "Final fmt exit0 is reported by the static-front owner handoff. Its named final raw file was absent at packaging; no nonexistent raw is linked.",
+    "Back-half feature/configuration, docs and API checks completed as listed. PR, CI and merge are not claimed.",
+    "Initial rustdoc exit101 arose from 8 bracketed units recognized as intra-doc links. Only those Rustdoc units in composite.rs were changed to inline code, followed by successful warning-denied workspace doc generation. Original failure raw retained.",
+    "mdbook local v0.5.4 differs from CI-pinned v0.4.52; local build success is not the CI result.",
+    "Final fmt after the Rustdoc-only correction has an actually captured zero-byte raw plus original command/timestamps/exit/SHA metadata. This does not fabricate the absent earlier static-front raw.",
+    "Suite counts overlap earlier regression and direct executions; no cross-configuration grand total is asserted."
+  ]
+}

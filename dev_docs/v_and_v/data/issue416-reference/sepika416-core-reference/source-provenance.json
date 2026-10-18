@@ -1,0 +1,13 @@
+{
+  "adapted_from": [
+    {
+      "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\runner.py",
+      "sha256": "c691078f2b2df43d8497686d341e5c5df7737065ffabcbe6f719a3cd5c576377"
+    },
+    {
+      "path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\reload_savedmesh.py",
+      "sha256": "1ee9071f7de49618e71c4dfad2724ccd41b7d2a156e9c3453bb5289fcb5420f7"
+    }
+  ],
+  "changes": "core-only explicit Shapely contour; ell376; core smooth geometric audits; 12 fixed settings; no production code import"
+}

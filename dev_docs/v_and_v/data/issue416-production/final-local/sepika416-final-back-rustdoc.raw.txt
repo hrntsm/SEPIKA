@@ -1,0 +1,94 @@
+    Checking gemm-common v0.19.0
+    Checking sepika-material v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-material)
+    Checking arrow-array v59.0.0
+ Documenting sepika-material v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-material)
+ Documenting xtask v0.0.1 (C:\Users\hiroa\Desktop\ikkan\xtask)
+    Checking gemm-f32 v0.19.0
+    Checking gemm-f64 v0.19.0
+    Checking gemm-c64 v0.19.0
+    Checking gemm-c32 v0.19.0
+    Checking gemm v0.19.0
+    Checking faer v0.24.0
+    Checking arrow-select v59.0.0
+    Checking arrow-arith v59.0.0
+    Checking arrow-row v59.0.0
+    Checking arrow-ord v59.0.0
+    Checking arrow-ipc v59.0.0
+    Checking arrow-string v59.0.0
+    Checking arrow-cast v59.0.0
+    Checking parquet v59.0.0
+    Checking arrow-csv v59.0.0
+    Checking arrow-json v59.0.0
+    Checking arrow v59.0.0
+    Checking sepika-core v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-core)
+    Checking sepika-math v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-math)
+ Documenting sepika-core v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-core)
+ Documenting sepika-math v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-math)
+error: unresolved link to `mm⁴`
+   --> crates\sepika-core\src\section_shape\composite.rs:124:57
+    |
+124 |     /// CFTの鋼管基準等価性能。Es・実Gs・Fc [N/mm²]、γc [kN/m³]、鋼管Js [mm⁴] は有限正。
+    |                                                                          ^^^ no item named `mm⁴` in scope
+    |
+    = help: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+    = note: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(rustdoc::broken_intra_doc_links)]`
+
+error: unresolved link to `mm`
+   --> crates\sepika-core\src\section_shape\composite.rs:238:14
+    |
+238 |     /// 内法幅 [mm]。円形は内法径。
+    |                 ^^ no item named `mm` in scope
+    |
+    = help: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+error: unresolved link to `mm`
+   --> crates\sepika-core\src\section_shape\composite.rs:240:15
+    |
+240 |     /// 内法せい [mm]。円形は内法径。
+    |                   ^^ no item named `mm` in scope
+    |
+    = help: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+error: unresolved link to `mm²`
+   --> crates\sepika-core\src\section_shape\composite.rs:242:14
+    |
+242 |     /// 断面積 [mm²]。
+    |                 ^^^ no item named `mm²` in scope
+    |
+    = help: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+error: unresolved link to `mm⁴`
+   --> crates\sepika-core\src\section_shape\composite.rs:244:22
+    |
+244 |     /// 強軸断面二次モーメント [mm⁴]。
+    |                                 ^^^ no item named `mm⁴` in scope
+    |
+    = help: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+error: unresolved link to `mm⁴`
+   --> crates\sepika-core\src\section_shape\composite.rs:246:22
+    |
+246 |     /// 弱軸断面二次モーメント [mm⁴]。
+    |                                 ^^^ no item named `mm⁴` in scope
+    |
+    = help: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+error: unresolved link to `mm⁴`
+   --> crates\sepika-core\src\section_shape\composite.rs:258:30
+    |
+258 |     /// コア単体のSt.Venantねじり定数 [mm⁴]。
+    |                                        ^^^ no item named `mm⁴` in scope
+    |
+    = help: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+error: unresolved link to `mm⁴`
+   --> crates\sepika-core\src\section_shape\composite.rs:316:19
+    |
+316 |     /// CFTコア単体J [mm⁴]を毎回算定し、数値解では全品質履歴を返す。
+    |                       ^^^ no item named `mm⁴` in scope
+    |
+    = help: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+
+error: could not document `sepika-core`
+warning: build failed, waiting for other jobs to finish...

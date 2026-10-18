@@ -1,0 +1,1592 @@
+   Compiling arrow-array v59.0.0
+   Compiling spade v2.15.1
+   Compiling naga v29.0.3
+   Compiling sepika-core v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-core)
+   Compiling arrow-select v59.0.0
+   Compiling arrow-arith v59.0.0
+   Compiling arrow-row v59.0.0
+   Compiling arrow-ord v59.0.0
+   Compiling sepika-section v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-section)
+   Compiling sepika-element v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-element)
+   Compiling arrow-cast v59.0.0
+   Compiling arrow-ipc v59.0.0
+   Compiling arrow-csv v59.0.0
+   Compiling arrow-json v59.0.0
+   Compiling arrow-string v59.0.0
+   Compiling arrow v59.0.0
+   Compiling parquet v59.0.0
+   Compiling sepika-load v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-load)
+   Compiling sepika-io v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-io)
+   Compiling sepika-solver v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-solver)
+   Compiling sepika-design-jp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-design-jp)
+   Compiling sepika-job v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-job)
+   Compiling sepika-edit v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-edit)
+   Compiling wgpu-naga-bridge v29.0.3
+   Compiling wgpu-hal v29.0.3
+   Compiling wgpu-core-deps-windows-linux-android v29.0.3
+   Compiling wgpu-core v29.0.3
+   Compiling sepika-mcp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-mcp)
+   Compiling wgpu v29.0.3
+   Compiling egui-wgpu v0.34.3
+   Compiling eframe v0.34.3
+   Compiling sepika-app v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-app)
+    Finished `test` profile [optimized + debuginfo] target(s) in 7m 34s
+     Running unittests src\lib.rs (target\debug\deps\sepika_app-f5f119f699ecee18.exe)
+
+running 843 tests
+test app::actions::design::holding::tests::新型_rc柱の不正形状と未設定配筋は識別情報付きで失敗する ... ok
+test app::actions::design::holding::tests::新型_rc円形柱は実径と二方向せん断応答の最悪ランクを採用する ... ok
+test app::actions::design::holding::tests::新型_rc柱の未設定配筋は識別情報付きで失敗する ... ok
+test app::actions::design::holding::tests::新型_rc梁の上下引張側を個別評価する ... ok
+test app::actions::design::holding::tests::新型_rc梁の不正入力は識別情報付きで失敗する ... ok
+test app::actions::design::holding::tests::rc_wall_619_real_support_faces_and_side_columns_select_table_without_changing_stress ... ok
+test app::actions::design::holding::tests::新型_rc矩形柱は帯筋ピッチ非正でpwゼロとしてランク付けする ... ok
+test app::actions::design::holding::tests::rc_wall_619_rejects_unknown_opening_shared_and_invalid_geometry_with_reason ... ok
+test app::actions::design::holding::tests::新型_rc矩形柱は二方向の断面算定ランクの最悪値を採用する ... ok
+test app::actions::design::period::tests::precise_period_requires_existing_modal_input_record ... ok
+test app::actions::design::ultimate::tests::static_ultimate_requires_all_selected_current_case_results_without_fallback ... ok
+test app::actions::design::ultimate::tests::selected_static_gravity_rejects_missing_identity_changed_terms_and_old_contract ... ok
+test app::actions::design::ultimate::tests::pushover_ultimate_adopts_confirmed_capacity_step_and_never_static_fallback ... ok
+test app::actions::linear_static::static595_tests::gui_tension_case_superposition_remains_unchecked ... ok
+test app::actions::design::ultimate::tests::saved_gravity_selection_and_terms_edits_undo_redo_cannot_reuse_changed_inputs ... ok
+test app::actions::linear_static::tests::batch_exclusion_removes_non_seismic_case_and_dependencies ... ok
+test app::actions::linear_static::tests::batch_partial_success_and_all_failure_remove_only_failed_targets ... ok
+test app::actions::linear_static::tests::batch_solver_preparation_failure_removes_execution_targets_only ... ok
+test app::actions::linear_static::tests::case_failure_removes_unexecuted_dependencies_and_selected_cache ... ok
+test app::actions::linear_static::tests::combo_failure_only_removes_that_combo_and_remaps_retained_selection ... ok
+test app::actions::linear_static::tests::excluded_tip_results_clear_selected_cache_even_without_new_success ... ok
+test app::actions::loads::tests::one_direction_failure_rejects_both_and_keeps_unrelated_results ... ok
+test app::actions::design::holding::tests::rc_wall_619_existing_ds_entry_uses_adopted_run_wall_response_and_reports_inputs ... ok
+test app::actions::lumped_mass::tests::lumped_edits_require_reanalysis_but_display_and_lumped_settings_do_not ... ok
+test app::actions::lumped_mass::tests::lumped_nonlinear_rejects_changed_pushover_settings ... ok
+test app::actions::lumped_mass::tests::lumped_job_edit_failure_and_cancellation_keep_previous_results ... ok
+test app::actions::linear_static::static595_tests::gui_sync_background_single_and_batch_adopt_static_settings ... ok
+test app::assignment_identity_tests::gui_noop_redoはモデル履歴と選択を更新しない ... ok
+test app::assignment_identity_tests::gui_redo拒否は理由を表示しモデル履歴と選択を維持し正常再試行できる ... ok
+test app::assignment_identity_tests::guiは境界衝突の拒否理由と未更新を表示し確認待ちにも履歴にも積まない ... ok
+test app::assignment_identity_tests::guiは除去確認キャンセルで未更新とし確認後に一undoで全入力へ戻す ... ok
+test app::assignment_identity_tests::一般準備の候補拒否は支持再推定もauto_ex生成記録強度入力も確定しない ... ok
+test app::assignment_identity_tests::主架構一覧削除と節点移動は確認前とキャンセルで未更新とし確認後の一undoで荷重を戻す ... ok
+test app::assignment_identity_tests::準備計算は孤立版を表示し領域と入力荷重を未更新にする ... ok
+test app::actions::linear_static::static595_failure_tests::gui_actual_nonconvergence_single_batch_background_and_save_do_not_revive_success ... ok
+test app::assignment_identity_tests::節点グリッドの非平面貼付は旧版荷重を診断して未更新としguiにも理由を表示する ... ok
+test app::coordinate_edit_tests::completed_beam_keeps_model_coordinates_and_marks_existing_results_stale ... ok
+test app::actions::lumped_mass::tests::lumped_story_qd_gui_rejects_static_before_young_modulus_edit ... ok
+test app::coordinate_edit_tests::every_creation_palette_entry_clears_deformation_when_started ... ok
+test app::coordinate_edit_tests::load_modal_begin_pick_and_escape_keep_model_history_and_results ... ok
+test app::coordinate_edit_tests::result_browsing_still_selects_member_at_deformed_position ... ok
+test app::coordinate_edit_tests::switching_to_deformation_during_edit_is_cleared_before_the_next_pick ... ok
+test app::coordinate_edit_tests::secondary_placement_starts_with_undeformed_parent_and_support_axis ... ok
+test app::design_input_tests::design602_combo_source_and_independent_selected_display ... ok
+test app::coordinate_edit_tests::beam_first_frame_uses_model_node_at_every_display_factor_and_case ... ok
+test app::design_input_tests::design602_missing_or_mismatched_design_and_source_proof_stays_unavailable ... ok
+test app::design_input_tests::design602_actual_table_hides_old_ratios_after_th ... ok
+test app::design_input_tests::design602_pending_analysis_and_save_cancel_keep_old_input_unavailable ... ok
+test app::design_input_tests::design602_failed_analysis_and_rejected_job_do_not_make_design_current ... ok
+test app::design_input_tests::design602_same_input_metadata_conditions_missing_and_failure ... ok
+test app::focus_id_remap_tests::ナビゲータで開いた材料断面は表削除後も同じ実体を表示する ... ok
+test app::focus_id_remap_tests::上位削除と参照中拒否とnoopは開いた対象を維持する ... ok
+test app::focus_id_remap_tests::下位削除とundo_redoは同じ材料と断面を開く ... ok
+test app::focus_id_remap_tests::削除後に開いた別の実体はundoで維持する ... ok
+test app::focus_id_remap_tests::実際の材料断面表の削除ボタンで開いた実体を維持する ... ok
+test app::design_input_tests::design602_pure_bending_th_save_undo_and_explicit_recheck ... ok
+test app::focus_id_remap_tests::準備計算の生成壁選択解除はundo挿入後の材料断面を範囲外へ移さない ... ok
+test app::focus_id_remap_tests::準備計算の生成壁選択解除は材料断面の削除情報を再適用しない ... ok
+test app::focus_id_remap_tests::自身削除で解除した対象はundoでも自動で開かない ... ok
+test app::focus_id_remap_tests::表の同フレームで開く対象も成功した削除に追従する ... ok
+test app::focus_id_remap_tests::複数削除は同じ最終実体へ移り途中で対象を取り違えない ... ok
+test app::focus_id_remap_tests::複製した部材断面をundoで削除したとき開いた対象を解除する ... ok
+test app::frame_node_count_tests::frame_node_counts_app_member_creation_reports_rejection_without_staling_results ... ok
+test app::frame_node_count_tests::frame_node_counts_gui_quantity_renders_same_reason_without_totals ... ok
+test app::frame_node_count_tests::frame_node_counts_gui_member_button_creates_two_nodes_and_undo_redo_restores ... ok
+test app::actions::pushover::tests::増分解析の打切り注意は鋼板壁注意を消さない ... ok
+test app::frame_node_count_tests::frame_two_nodes_ovika_roundtrip_keeps_independent_quantity_and_support_axis ... ok
+test app::design_input_tests::design602_partial_analysis_never_certifies_old_design ... ok
+test app::lip_channel_geometry_tests::lip_channel_geometry_app_load_and_edit_preserve_results_and_redo ... ok
+test app::member_load_direction_acceptance_tests::direction_gate_keeps_existing_auto_horizontal_loads_and_records_actual_notice ... ok
+test app::lip_channel_geometry_tests::lip_channel_geometry_egui_form_reports_reason_and_preserves_disabled_draft ... ok
+test app::nav_loads::tests::blocked_deletion_keeps_the_open_load_editor ... ok
+test app::nav_loads::tests::deleting_a_load_case_closes_the_open_load_editor ... ok
+test app::member_load_direction_acceptance_tests::public_app_actions_reject_bad_direction_and_undo_redo_never_restore_old_ok ... ok
+test app::nav_model::tests::floored_secondary_sections_stay_in_floor_group ... ok
+test app::nav_model::tests::material_category_groups_uses_fixed_ui_order ... ok
+test app::nav_model::tests::secondary_group_comes_before_no_floor_group ... ok
+test app::nav_model::tests::secondary_referenced_sections_go_to_secondary_group ... ok
+test app::nav_model::tests::section_floor_groups_collects_story_and_unmatched_floors ... ok
+test app::nav_model::tests::section_floor_groups_keeps_unmatched_floors_in_first_seen_order ... ok
+test app::nav_model::tests::section_floor_groups_omits_empty_story_groups ... ok
+test app::nav_model::tests::section_floor_groups_orders_story_floors_top_to_bottom ... ok
+test app::nonnodal_quantity_acceptance_tests::nonnodal557_app_stb_member_fc30_survives_movement_undo_and_ovika ... ok
+test app::nonnodal_quantity_acceptance_tests::nonnodal557_app_supported_edits_undo_redo_and_ovika_preserve_quantities ... ok
+test app::nonnodal_quantity_acceptance_tests::nonnodal557_gui_and_csv_keep_unknown_story_quantity_and_section_label ... ok
+test app::member_load_direction_acceptance_tests::finite_zero_point_and_distributed_direction_save_open_and_repair_without_data_loss ... ok
+test app::nonnodal_quantity_acceptance_tests::nonnodal557_gui_csv_and_common_entry_preserve_id_quantity_and_model ... ok
+test app::panels::activity_bar::tests::right_activity_bar_clicking_partly_clipped_icon_reveals_entire_selection ... ok
+test app::panels::activity_bar::tests::right_activity_bar_low_window_reaches_last_icon_with_wheel ... ok
+test app::frame_node_count_tests::frame_node_counts_public_solver_csv_and_app_open_preserve_state ... ok
+test app::panels::navigator::tests::group_selection_requires_whole_nonempty_set ... ok
+test app::panels::preparation::tests::標準床荷重の表示入力変換は面荷重の単位に従う ... ok
+test app::panels::preparation::tests::階一覧の列定義は行セルの生成順に対応する ... ok
+test app::panels::preparation::wall_method_tests::calculation_condition_combobox_selects_both_methods_and_undo_restores_default ... ok
+test app::actions::lumped_mass::tests::lumped_actual_dependencies_accept_only_required_current_results ... ok
+test app::preparation::tests::cft_preparation_distinguishes_supplied_steel_j_from_composite_j_and_actual_steel_g ... ok
+test app::preparation::tests::pending_j_keeps_geometry_weight_and_explicit_unavailable_values ... ok
+test app::preparation::tests::preparation_and_report_use_current_shape_j_and_preserve_supplied_j ... ok
+test app::preparation::tests::preparation_mixed_structure_period_counts_only_height_above_ground ... ok
+test app::rc_wall534_tests::crack_fc_edit_retains_axial_applicability_limit_after_reanalysis ... ok
+test app::panels::activity_bar::tests::right_activity_bar_selection_focus_resize_and_manual_position_are_independent ... ok
+test app::rc_wall534_tests::crack_reference_input_edits_undo_redo_and_save_never_reauthenticate_old_results ... ok
+test app::rc_wall534_tests::gui_design_crack_points_match_independent_fixture_and_saved_component ... ok
+test app::rc_wall534_tests::gui_wall_check_draws_crack_force_and_both_reference_axes ... ok
+test app::rc_wall534_tests::opening_edit_crack_invalidates_saved_reference_and_recalculation_keeps_reasoned_skip ... ok
+test app::rc_wall534_tests::saved_crack_reference_with_previous_design_contract_is_unavailable ... ok
+test app::rc_wall617_tests::holding_capacity_requires_same_run_wall_capacity_and_current_input ... ok
+test app::rc_wall617_tests::background_nonlinear_jobs_reject_results_after_input_edit ... ok
+test app::rc_wall617_tests::incremental_modeling_reads_adopted_run_numbers_and_rejects_missing_invalid_or_old_capacity ... ok
+test app::rc_wall617_tests::selected_static_case_and_combo_reach_common_face_and_reject_missing_or_old_results ... ok
+test app::rc_wall617_tests::pushover_and_time_history_preserve_static_ledger_and_store_run_capacity ... ok
+test app::rc_wall617_tests::time_history_case_keeps_own_capacity_and_input_across_save_and_model_changes ... ok
+test app::rc_wall617_tests::wall_method_modeling_uses_selected_run_and_no_display_recalculation ... ok
+test app::rc_wall_direction_tests::current_schema_ps_only_model_keeps_missing_directions_after_ovika_read ... ok
+test app::preparation::tests::cft_numerical_failure_keeps_preparation_geometry_and_weight_without_steel_only_stiffness ... ok
+test app::rc_wall_direction_tests::directional_wall_quantity_model_edit_csv_gui_and_ovika_keep_independent_values_and_missing_state ... ok
+test app::rc_wall617_tests::wall_method_default_runs_save_undo_and_reject_old_results_and_jobs ... ok
+test app::rc_wall_direction_tests::preparation_and_pushover_report_the_same_missing_wall_direction ... ok
+test app::rc_wall_direction_tests::explicitly_nonseismic_rc_wall_keeps_elastic_mode_without_directional_inputs ... ok
+test app::rc_wall_direction_tests::quantity_setting_edit_undo_redo_save_preserves_rc_mass_response_and_current_result_inputs ... ok
+test app::rc_wall_direction_tests::same_section_wall_member_fc_and_direction_materials_survive_expansion_and_renumbering ... ok
+test app::rc_wall_direction_tests::wall_stb_parts_and_positions_require_explicit_direction_roles ... ok
+test app::reference_identity_acceptance_tests::internal_reference_app_roundtrip_keeps_stale_generation_and_inactive_owner ... ok
+test app::reference_identity_acceptance_tests::qualified_series_app_import_binds_column_and_girder_to_their_own_fc ... ok
+test app::rc_wall_direction_tests::gui_direction_edit_save_undo_and_material_edit_invalidate_previous_analysis ... ok
+test app::reference_identity_acceptance_tests::qualified_series_import_failures_preserve_app_state_history_and_files ... ok
+test app::reference_identity_acceptance_tests::reference_identity_incomplete_models_save_and_load_without_gui_completion_requirements ... ok
+test app::reference_identity_acceptance_tests::reference_identity_rejected_load_and_correct_hash_open_preserve_app_state_and_history ... ok
+test app::reference_identity_acceptance_tests::reference_identity_save_rejection_precedes_result_sync_and_preserves_existing_file ... ok
+test app::reference_identity_acceptance_tests::reference_identity_wall_plate_without_parent_wall_region_keeps_stable_assignment_id ... ok
+test app::reference_identity_acceptance_tests::standard_stbridge_bad_references_preserve_app_model_history_results_and_generation ... ok
+test app::result_contract_tests::empty_bundle_is_not_an_unknown_result_and_direct_floor_design_survives_stale_state ... ok
+test app::result_contract_tests::gui_reports_old_contract_and_explicit_recheck_button_recovers_without_reanalysis ... ok
+test app::result_contract_tests::issue635_invalid_correct_hash_project_keeps_app_model_and_undo ... ok
+test app::actions::design::ultimate::rc_cft_tests::actual_rc_cft_confirmed_run_reaches_app_checks_without_ql_addition_or_fallback ... ok
+test app::actions::design::ultimate::rc_cft_tests::actual_rc_cft_static_frame_terms_reach_app_checks_with_signed_equilibrium ... ok
+test app::result_contract_tests::lip_channel_geometry_old_contracts_expire_and_current_keeps_results ... ok
+test app::result_contract_tests::old_analysis_is_excluded_before_partial_success_or_failure_without_restamping_other_runs ... ok
+test app::actions::design::ultimate::rc_cft_tests::actual_rc_cft_saved_static_results_reject_changed_terms_and_keep_tension_sign ... ok
+test app::result_contract_tests::ovika_current_selected_input_missing_or_mismatched_is_excluded_without_losing_other_runs ... ok
+test app::result_contract_tests::selected_case_and_saved_combo_name_require_matching_input_but_ignore_display_axes ... ok
+test app::result_contract_tests::ovika_old_analysis_is_unavailable_until_explicit_reanalysis ... ok
+test app::result_contract_tests::sm520_gui_recheck_save_read_report_and_holding_keep_out_of_range_reasons ... ok
+test app::result_contract_tests::ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_results ... ok
+test app::result_validity::purpose_tests::guiは壁負担率適用後のdsと目的ごとの部材応答変形stepを表示する ... ok
+test app::result_contract_tests::ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_mark_fresh_restamping ... ok
+test app::result_validity::purpose_tests::共通入口は目的別点の未指定を法定既定点で埋めない ... ok
+test app::result_validity::purpose_tests::gui未採用でもピークは解析経過と表示し自動耐力未入力は手動切替を妨げない ... ok
+test app::result_validity::purpose_tests::手動ランクは未使用の自動耐力入力を検査せず自動ランクは不正入力を拒否する ... ok
+test app::result_contract_tests::sm520_old_335_and_out_of_range_success_expire_without_save_or_display_reauthentication ... ok
+test app::result_validity::purpose_tests::目的別run条件の差を許容し同時点の独立期待値と保存帳票を維持する ... ok
+test app::result_validity::purpose_tests::目的別外力分布条件差は許容し標準名の手入力地震力と他荷重変更を拒否する ... ok
+test app::panels::activity_bar::tests::right_activity_bar_full_app_layout_routes_wheel_without_editing_inputs ... ok
+test app::result_validity::purpose_tests::拒否した層力の数値と採用識別を共通入口csvとguiへ保持する ... ok
+test app::result_validity::tests::入力識別欠落の復元結果は判定に使えない ... ok
+test app::result_validity::tests::剛域反映で変化した入力も判定前に検査する ... ok
+test app::result_validity::tests::各計算入力の編集後は保有耐力判定が無効になる ... ok
+test app::result_validity::purpose_tests::目的別run保持後もモデル材料荷重変更と識別欠落を拒否する ... ok
+test app::result_validity::tests::必要耐力用地震力は未検証精算塔屋と指定_ci副剛床を拒否する ... ok
+test app::result_validity::tests::地下_qudは上部_c0一のせん断力と地下震度重量を加算する ... ok
+test app::result_validity::tests::採用点は層最大値へ暗黙変換せず同じ確定状態を記録する ... ok
+test app::result_validity::tests::時刻歴だけ再実行しても旧増分結果を最新にしない ... ok
+test app::result_validity::tests::材料編集後に静的解析だけ再実行しても旧増分結果は使えない ... ok
+test app::result_validity::tests::方向不足と他方向の旧結果は代用しない ... ok
+test app::result_validity::tests::略算_qudは固有値の参考周期があっても独立略算値を採用する ... ok
+test app::result_validity::tests::略算周期での固有値更新は地震結果の入力識別を変えない ... ok
+test app::result_validity::tests::略算_qudは固有値に依存せず偏心精算の静的結果は入力一致を要求する ... ok
+test app::result_validity::tests::表示ステップと表示選択と表示専用通り芯の変更は利用を維持する ... ok
+test app::result_validity::tests::精算周期は固有値を再解析しても標準地震結果として採用しない ... ok
+test app::result_validity::tests::計算中編集の旧ジョブ結果は破棄される ... ok
+test app::secondary_cft_tests::secondary_cft_gui_quantity_shows_reason_without_totals ... ok
+test app::shear_area_acceptance_tests::constructed_cantilever_keeps_supplied_stiffness_area ... ok
+test app::result_validity::tests::長期軸力の精算に使う組合せも再解析が必要になる ... ok
+test app::shear_area_acceptance_tests::constructed_cantilever_matches_independent_bending_plus_shear_in_both_directions ... ok
+test app::signed_q0_acceptance_tests::signed_q0_gui_invalid_direction_repaired_invalid_never_revives_saved_success ... ok
+test app::signed_q0_acceptance_tests::signed_q0_gui_nonstandard_live_factor_remains_reasoned_unchecked ... ok
+test app::signed_q0_acceptance_tests::signed_q0_gui_selected_combination_observes_independent_end_reactions ... ok
+test app::shear_area_acceptance_tests::unsupported_box_keeps_input_and_skipped_outcomes_through_recheck_save_and_report ... ok
+test app::src_ql_acceptance_tests::public_src_actions_check_real_ql_and_valid_empty_gravity_without_q0 ... ok
+test app::steel_wall_notice_tests::共通通知は明示壁と生成壁を集約しrcとsrc内蔵鋼板と要素にならない版を除外する ... ok
+test app::secondary_cft_tests::rc_steel_src_secondary_members_keep_edit_save_quantity_and_prepare_contract ... ok
+test app::panels::activity_bar::tests::right_activity_bar_all_icons_pointer_tooltip_and_keyboard_at_each_scale ... ok
+test app::secondary_cft_tests::secondary_cft_public_entries_reject_all_kinds_shapes_and_locations ... ok
+test app::reference_identity_acceptance_tests::internal_reference_app_entries_accept_existing_targets_and_preserve_rejected_state_and_files ... ok
+test app::tests::activity_svgs_rasterize ... ok
+test app::tests::ai_failure_without_tip_loads_clears_old_auto_results_but_keeps_manual ... ok
+test app::src_ql_acceptance_tests::src_ovika_design_contracts_keep_current_analysis_and_require_explicit_recheck ... ok
+test app::tests::analysis_tab_preset_opens_preparation ... ok
+test app::tests::cft_long_case2_app_exposes_calculated_mu_and_axial_failure_reason ... ok
+test app::tests::cmq_display_load_case_falls_back_to_first_case ... ok
+test app::tests::edited_density_finish_and_seismic_live_refresh_real_ex_without_preparation_button ... ok
+test app::tests::freshness_preparation_undo_and_saved_output_tampering_are_detected ... ok
+test app::tests::grid_headless::test_grid_clear_cells_and_undo ... ok
+test app::tests::grid_headless::test_grid_delete_referenced_row_is_rejected ... ok
+test app::tests::grid_headless::test_grid_delete_rows_single_undo_restores_ids ... ok
+test app::tests::grid_headless::test_grid_empty_commit_is_no_change ... ok
+test app::tests::grid_headless::test_grid_invalid_commit_is_rejected ... ok
+test app::tests::grid_headless::test_grid_paste_composite_single_undo_restores_appended_rows ... ok
+test app::tests::grid_headless::test_grid_paste_into_empty_model ... ok
+test app::tests::grid_headless::test_grid_paste_reject_leaves_model_untouched ... ok
+test app::tests::grid_headless::test_grid_placeholder_commit_appends_row ... ok
+test app::tests::gui_node_paste_rejects_attached_slab_geometry_atomically ... ok
+test app::tests::high_density_steel_gui_preparation_sync_rejects_and_undo_recovers ... ok
+test app::tests::issue561_floor_design_checks_skip_skew_and_preserve_rotated_rectangle ... ok
+test app::steel_wall_notice_tests::増分解析の同期非同期でも生成鋼板壁注意を維持する ... ok
+test app::tests::known_ai_failure_is_cleared_even_when_gravity_computation_fails ... ok
+test app::tests::lateral_bracing_gui_entry_uses_column_span_for_panel_on_off_and_keeps_existing_checks ... ok
+test app::tests::lateral_bracing_gui_invalid_group_reference_keeps_bending_and_shear ... ok
+test app::tests::ordinary_node_edits_and_preparation_keep_geometry_selection ... ok
+test app::steel_wall_notice_tests::鋼板壁注意と時刻歴計算エラーをともに保持する ... ok
+test app::tests::preparation_rebuild_clears_generated_wall_selection_only ... ok
+test app::tests::preparation_seismic_invalid_coefficient_is_not_a_zero_result ... ok
+test app::tests::load_state_gui_actual_checks_selection_and_saved_terms_keep_n_q_m_and_duration ... ok
+test app::tests::preparation_wall_rebuild_preserves_assigned_boundary_and_node_selection ... ok
+test app::tests::public_node_deletion_and_undo_remap_automatic_master_and_slave_snapshots ... ok
+test app::tests::rejected_prepared_model_never_leaves_old_auto_seismic_loads_usable ... ok
+test app::tests::rejected_support_deletion_preserves_preparation_and_result_validity ... ok
+test app::tests::request_analysis_preparation_failure_deletes_only_static_targets ... ok
+test app::tests::rounded_partial_supplied_story_action_does_not_apply_dl_mass_or_success ... ok
+test app::tests::public_story_insertion_keeps_automatic_weight_origin_and_manual_edits_through_undo ... ok
+test app::tests::source_story_empty_table_gui_kind_edit_does_not_create_source ... ok
+test app::tests::source_story_gui_membership_edit_invalidates_input_and_undo_restores_it ... ok
+test app::tests::source_story_imported_kinds_close_levels_and_explicit_edit_correspondence ... ok
+test app::tests::source_story_missing_ambiguous_mapping_rejects_and_generated_base_has_no_source ... ok
+test app::tests::panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_retained ... ok
+test app::tests::standard_rebar507_edit_undo_save_and_result_generation_preserve_source ... ok
+test app::tests::standard_rebar507_geometry_only_section_accepts_new_rebar_and_undo ... ok
+test app::tests::source_story_native_kind_gui_export_save_undo_and_initialization_order ... ok
+test app::tests::standard_rebar507_import_notice_reports_center_priority_without_refusing_preparation ... ok
+test app::tests::standard_rebar507_gui_pointer_apply_undo_and_save ... ok
+test app::tests::stb_strength_gui_edit_transaction_changes_result_input_and_restores_omission ... ok
+test app::tests::stb_strength_gui_raw_src_grade_edit_updates_material_and_result_input ... ok
+test app::tests::stbridge647_file_menu_renders_notice_before_export_and_closes_without_state_changes ... ok
+test app::tests::test_analysis_ensures_preparation_without_generating_stories ... ok
+test app::tests::static_failure_paths_delete_only_execution_targets ... ok
+test app::tests::test_analysis_runs_with_non_structural_nodes_on_base_floor ... ok
+test app::tests::test_apply_static_result_updates_focus_result ... ok
+test app::tests::test_async_combination_job_flow ... ok
+test app::tests::test_async_linear_static_job_flow ... ok
+test app::tests::test_async_seismic_job_flow ... ok
+test app::tests::test_async_static_all_job_flow ... ok
+test app::tests::test_async_pushover_job_flow ... ok
+test app::tests::test_attached_cantilever_slab_check_coef_2 ... ok
+test app::tests::test_attached_point_slab_check_coef_2 ... ok
+test app::tests::test_attached_trapezoid_slab_check_survives_none_dimensions ... ok
+test app::tests::test_auto_generate_combinations_from_kinds ... ok
+test app::tests::test_auto_generate_combinations_heavy_snow ... ok
+test app::tests::test_auto_generate_combinations_missing_dead_or_live_is_error ... ok
+test app::tests::test_auto_generate_combinations_uses_standard_case_names ... ok
+test app::tests::src_loaded_and_edited_materials_never_use_provisional_analysis_properties ... ok
+test app::tests::test_batch_removes_old_combo_when_tip_ex_fails_after_empty_ey ... ok
+test app::tests::test_build_preparation_csv ... ok
+test app::tests::test_build_result_tree_empty_or_static_only ... ok
+test app::tests::test_build_result_tree_legacy_pushover_only ... ok
+test app::tests::test_cancel_pending_analysis_does_not_acknowledge ... ok
+test app::tests::test_build_result_tree_sections_and_labels ... ok
+test app::tests::test_column_live_load_factors_three_story ... ok
+test app::tests::test_combination_flow ... ok
+test app::tests::test_compute_ultimate_checks_rc_frame ... ok
+test app::tests::test_current_static_priority ... ok
+test app::tests::test_diagnostics_errors_agree_with_analysis_precheck ... ok
+test app::tests::test_elem_is_steel_follows_material_category ... ok
+test app::tests::test_event_log_caps_entries ... ok
+test app::tests::test_export_and_import_stbridge_roundtrip ... ok
+test app::tests::test_export_stbridge_rejects_fourth_stage_without_overwriting_file ... ok
+test app::tests::test_floor_design_checks_beam_uses_beam_live_load ... ok
+test app::tests::test_floor_design_checks_cantilever_beam ... ok
+test app::tests::test_floor_design_checks_secondary_beam_on_shared_edge_averages_width ... ok
+test app::tests::test_floor_design_checks_secondary_beam_on_slab_edge ... ok
+test app::tests::test_floor_design_checks_secondary_beam_uses_same_level_slab ... ok
+test app::tests::test_floor_design_checks_secondary_beam_without_section_is_unchecked ... ok
+test app::tests::test_async_time_history_job_flow ... ok
+test app::tests::test_floor_design_checks_slab ... ok
+test app::tests::test_floor_design_skips_materialized_beam ... ok
+test app::tests::test_generate_axes_action_does_not_stale_results ... ok
+test app::tests::test_generate_stories_action_reuses_rep_node_on_regenerate ... ok
+test app::tests::test_floor_design_checks_secondary_member_beam_high_density_steel ... ok
+test app::tests::test_generate_stories_seismic_weight_no_double_count ... ok
+test app::tests::test_generate_stories_syncs_ex_ey_cases ... ok
+test app::tests::test_geometry_selection_transitions_and_model_reset ... ok
+test app::tests::test_generated_ai_and_tip_load_are_both_used_by_single_ex_analysis ... ok
+test app::tests::test_geometry_undo_redo_and_context ... ok
+test app::tests::test_holding_capacity_flow ... ok
+test app::tests::test_holding_capacity_rank_auto_from_width_thickness ... ok
+test app::tests::test_holding_capacity_rank_auto_rejects_missing_rank ... ok
+test app::tests::test_holding_capacity_rank_auto_rc_rect_from_shape ... ok
+test app::tests::test_hydrate_saved_vibration_views_fills_graph_data ... ok
+test app::tests::test_import_stbridge_then_run_dl_succeeds ... ok
+test app::tests::test_import_stbridge_with_loads_keeps_file_cases ... ok
+test app::tests::test_holding_capacity_rejects_declared_brace_when_undetected ... ok
+test app::tests::test_legacy_pushover_deserialize_migrates_to_slot ... ok
+test app::tests::test_load_model_keeps_view_settings ... ok
+test app::tests::test_load_model_migrates_legacy_case_names ... ok
+test app::tests::test_load_model_resets_model_bound_core_state ... ok
+test app::tests::test_load_model_resets_model_bound_ui_state ... ok
+test app::tests::test_load_model_resets_model_derived_state ... ok
+test app::tests::test_load_model_resets_preparation ... ok
+test app::tests::test_log_clear_and_diagnostics_recheck ... ok
+test app::tests::test_lumped_eigen_only_clears_stick_response ... ok
+test app::tests::test_manual_load_in_auto_case_survives_sync ... ok
+test app::tests::test_mark_edited_marks_preparation_and_diagnostics_stale ... ok
+test app::tests::test_member_material_groups_excludes_generated_panel_zones ... ok
+test app::tests::test_migrate_legacy_lumped_uses_wave_name ... ok
+test app::tests::test_migrate_legacy_time_history_only ... ok
+test app::tests::test_missing_tip_beam_stops_reanalysis_and_removes_result ... ok
+test app::tests::test_needs_recording_confirm_threshold ... ok
+test app::tests::test_load_case_job_routes_standard_lateral_cases ... ok
+test app::tests::test_nonlinear_time_history_flow_records_story_response ... ok
+test app::tests::test_nonlinear_time_history_with_long_term_flow ... ok
+test app::tests::test_open_missing_files_set_error ... ok
+test app::tests::test_parse_wave_csv_errors ... ok
+test app::tests::test_parse_wave_csv_single_column_x_or_y ... ok
+test app::tests::test_parse_wave_csv_xy_two_columns ... ok
+test app::tests::test_pending_story_command_one_per_frame_and_undo_redo ... ok
+test app::tests::test_prep_sections_count_slab_reference ... ok
+test app::tests::test_preparation_ai_matches_synced_seismic_case ... ok
+test app::tests::test_preparation_generates_panel_zones ... ok
+test app::tests::test_preparation_lists_no_torsion_skip_for_portal_frame ... ok
+test app::tests::test_preparation_lists_rigid_zones ... ok
+test app::tests::test_preparation_lists_section_properties ... ok
+test app::tests::test_preparation_lists_torsion_skip_for_unrestrained_column_base ... ok
+test app::tests::test_preparation_lists_width_thickness ... ok
+test app::tests::test_preparation_member_stiffness_empty_for_plain_model ... ok
+test app::tests::test_open_legacy_project_without_analysis_settings_syncs_mass_method ... ok
+test app::result_contract_tests::cft_case2_design12_expires_while_current_analysis_survives_and_design_can_be_recomputed ... ok
+test app::tests::test_preparation_rejects_cft_with_zero_core ... ok
+test app::tests::test_preparation_rejects_cft_without_fc ... ok
+test app::tests::test_preparation_persisted_in_project_file ... ok
+test app::tests::test_preparation_rejects_src_without_fc ... ok
+test app::tests::test_preparation_torsion_disabled_reports_no_rows ... ok
+test app::tests::test_preparation_without_stories_reports_notes ... ok
+test app::tests::test_prune_orphan_vibration_cases ... ok
+test app::tests::test_preparation_semiprecise_without_eigen_reports_note ... ok
+test app::tests::test_rc_capacity_input_from_rect_uses_main_x ... ok
+test app::tests::test_rc_sigma_0_from_compression_axial_force ... ok
+test app::tests::test_rc_sigma_0_prefers_gravity_load_case_over_last_static ... ok
+test app::tests::test_report_error_updates_last_error_log_and_bottom_tab ... ok
+test app::tests::test_request_analysis_waits_for_unset_region_confirmation ... ok
+test app::tests::test_pushover_x_y_slots_and_view_dir ... ok
+test app::tests::test_rigid_floor_beam_has_forces_and_checks ... ok
+test app::tests::test_results_persisted_in_project_file ... ok
+test app::tests::test_run_design_check_empty_model ... ok
+test app::tests::test_run_combination_errors_on_empty_seismic_case ... ok
+test app::tests::test_run_design_check_includes_member_detail_positions ... ok
+test app::tests::test_run_design_check_filters_to_design_positions ... ok
+test app::tests::test_run_diagnostics_flags_missing_support ... ok
+test app::tests::test_run_diagnostics_flags_unassigned_section_and_material ... ok
+test app::tests::test_run_diagnostics_ignores_generated_panel_zones ... ok
+test app::tests::test_run_preparation_continues_when_story_generation_fails ... ok
+test app::tests::test_run_linear_static_applies_auto_rigid_zones ... ok
+test app::tests::test_run_preparation_is_idempotent ... ok
+test app::tests::test_run_preparation_populates_result ... ok
+test app::tests::test_run_preparation_refreshes_diagnostics_even_if_not_stale ... ok
+test app::tests::test_run_preparation_regenerates_stories_keeping_manual_input ... ok
+test app::tests::test_run_static_all_combo_is_linear_sum_of_cases ... ok
+test app::tests::test_run_static_all_without_combos_solves_load_cases_or_errors ... ok
+test app::tests::test_save_recording_confirmation_cancel_and_error ... ok
+test app::tests::test_secondary_beam_subdivided_slab_dl_cmq_and_solve ... ok
+test app::tests::test_seismic_flow_requires_then_uses_stories ... ok
+test app::tests::test_save_and_open_project_roundtrip ... ok
+test app::tests::test_select_lumped_eigen_mode_switches_spatial_view ... ok
+test app::tests::test_set_pushover_view_dir_keeps_window_when_slot_missing ... ok
+test app::tests::test_set_wave_library_selection_clears_hash_only_on_change ... ok
+test app::tests::test_slab_design_span_respects_one_way ... ok
+test app::tests::test_select_displayed_result_switches_forces_and_term ... ok
+test app::steel_wall_notice_tests::時刻歴の同期非同期と線形非線形と対象有無で鋼板壁注意を切り替える ... ok
+test app::steel_wall_notice_tests::非線形時刻歴の再起動で再通知し準備注意を消さない ... ok
+test app::tests::test_stale_preparation_not_persisted ... ok
+test app::tests::test_stale_results_not_persisted ... ok
+test app::tests::test_stale_save_omits_vibration_cases ... ok
+test app::tests::test_sync_gravity_dl_includes_self_weight_and_slab ... ok
+test app::tests::test_sync_gravity_load_cases_action_separates_dead_and_live ... ok
+test app::tests::test_sync_gravity_load_cases_action_square_slab_triangle_distribution ... ok
+test app::tests::test_sync_seismic_approx_mode_syncs_ex_ey_without_eigen ... ok
+test app::tests::test_story_shear_layer0_matches_history_base_shear ... ok
+test app::tests::test_sync_seismic_semiprecise_without_eigen_sets_notice_and_skips ... ok
+test app::tests::test_time_history_and_pushover_run_preparation ... ok
+test app::tests::test_time_history_apply_clears_stale ... ok
+test app::tests::test_time_history_does_not_stale_static_results ... ok
+test app::tests::test_time_history_rayleigh_requires_two_modes ... ok
+test app::tests::test_time_history_upsert_replaces_result_by_case_id ... ok
+test app::tests::test_time_history_rayleigh ... ok
+test app::tests::test_start_job_while_running_is_rejected ... ok
+test app::tests::test_time_history_y_direction_flow ... ok
+test app::tests::test_wall_has_src_boundary_column ... ok
+test app::tests::time_history_sample_and_csv_entries_preserve_instantaneous_sample_times ... ok
+test app::tests::time_history_sample_entries_report_invalid_time_settings_before_starting_a_job ... ok
+test app::tests::test_tip_seismic_sync_and_job_use_same_load_case ... ok
+test app::tests::test_tip_only_seismic_rejected_in_single_combo_and_batch ... ok
+test app::tests::tip_load_sync_merges_into_ex_and_custom_case_without_losing_manual ... ok
+test app::tests::toggle_dock_icon_closes_when_active_opens_otherwise ... ok
+test app::tests::tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results ... ok
+test app::tests::unassigned_member_625_app_export_preserves_files_state_and_recovers_by_assignment ... ok
+test app::tests::ゼロ重量指定追加で重量が同じでも階生成記録を更新する ... ok
+test app::tests::ダンパー総重量はgui共通同期経路の再実行でも増殖しない ... ok
+test app::tests::tip_ex_ey_failure_invalidates_previous_case_combo_and_display ... ok
+test app::vibration_ownership_tests::lumped_time_history_ownership_tracks_converted_acceleration_and_settings ... ok
+test app::tests::test_time_history_recording_saved_and_optional_exclusion ... ok
+test app::vibration_ownership_tests::time_history_ownership_csv_parser_keeps_effective_arrays_and_source_name ... ok
+test app::vibration_ownership_tests::time_history_ownership_asynchronous_sample_entries_preserve_selected_existing_case ... ok
+test app::vibration_ownership_tests::time_history_ownership_fixed_results_follow_input_and_keep_one_slot ... ok
+test app::vibration_ownership_tests::time_history_ownership_pending_freezes_input_and_rejects_setting_changes_or_cancel ... ok
+test app::tests::wall_opening_edit_undo_and_preparation_refresh_independent_band_weight ... ok
+test app::vibration_ownership_tests::time_history_ownership_real_request_cancellation_preserves_both_result_kinds ... ok
+test app::vibration_ownership_tests::time_history_ownership_rejection_failure_and_disconnection_preserve_results ... ok
+test app::vibration_ownership_tests::time_history_ownership_same_name_distinguishes_samples_dt_and_scale ... ok
+test app::vibration_ownership_tests::time_history_ownership_sample_amplitude_changes_actual_input_and_preserves_other_settings ... ok
+test app::vibration_ownership_tests::time_history_ownership_sample_entry_ignores_selected_library_name ... ok
+test app::vibration_ownership_tests::time_history_ownership_real_request_waits_then_runs_original_input_after_selection_change ... ok
+test damper_def_editor::tests::test_damper_summary_hysteretic ... ok
+test damper_def_editor::tests::test_damper_summary_maxwell_with_relief ... ok
+test damper_def_editor::tests::test_damper_summary_maxwell_without_relief ... ok
+test damper_def_editor::tests::test_edit_target_still_matches ... ok
+test damper_def_editor::tests::test_remap_edit_index_after_delete ... ok
+test design_view::tests::section_jump_replaces_other_member_detail ... ok
+test grid::tests::test_begin_edit_collapses_to_anchor ... ok
+test grid::tests::test_clamp_selection_after_row_removal ... ok
+test grid::tests::test_click_moves_anchor_and_collapses ... ok
+test grid::tests::test_click_out_of_range_is_clamped ... ok
+test grid::tests::test_deactivate_keeps_anchor_and_move_restores ... ok
+test grid::tests::test_drag_moves_cursor_only ... ok
+test grid::tests::test_empty_grid_selection_methods_are_noop ... ok
+test grid::tests::test_move_cursor_collapses_selection ... ok
+test grid::tests::test_move_cursor_extend_moves_cursor_side ... ok
+test grid::tests::test_move_cursor_saturates_at_edges ... ok
+test grid::tests::test_parse_tsv_absorbs_crlf_and_trailing_newlines ... ok
+test grid::tests::test_parse_tsv_basic ... ok
+test grid::tests::test_parse_tsv_keeps_empty_cells ... ok
+test grid::tests::test_plan_paste_counts_extra_rows ... ok
+test grid::tests::test_plan_paste_normal ... ok
+test grid::tests::test_plan_paste_rejects_column_overflow ... ok
+test app::vibration_ownership_tests::time_history_ownership_existing_file_handlers_keep_read_payload_name_and_original_case ... ok
+test grid::tests::test_plan_paste_rejects_validation_failures_listing_all ... ok
+test grid::tests::test_plan_paste_skips_empty_cells ... ok
+test grid::tests::test_plan_paste_validate_receives_target_coords ... ok
+test grid::tests::test_rect_to_tsv ... ok
+test grid::tests::test_rect_to_tsv_row_col_and_all_selection ... ok
+test grid::tests::test_select_all ... ok
+test grid::tests::test_select_col_and_extend_spans_all_rows ... ok
+test grid::tests::test_select_row_and_extend_spans_all_cols ... ok
+test grid::tests::test_shift_click_extends_without_moving_anchor ... ok
+test grid::tests::test_plan_paste_rejects_oversized_block ... ok
+test grid::tests::test_tile_block_ragged_rows_fill_with_empty ... ok
+test grid::tests::test_tile_block_returns_original_when_not_expanding ... ok
+test grid::tests::test_tile_block_tiles_both_axes ... ok
+test grid::widget::tests::row_header_drag_to_placeholder_notifies_range ... ok
+test grid::widget::tests::row_header_placeholder_alone_is_independent_but_can_anchor_real_range ... ok
+test load_editor::tests::cancel_pick_restores_direction_together_with_target ... ok
+test load_editor::tests::commit_derives_direction_from_target_not_draft ... ok
+test grid::widget::tests::row_header_shift_click_to_placeholder_notifies_range ... ok
+test load_editor::tests::commit_rejects_stale_edit_target ... ok
+test load_editor::tests::commit_uses_axis_direction_for_brace ... ok
+test load_editor::tests::existing_arbitrary_and_nearly_axis_directions_survive_edit_and_target_selection ... ok
+test load_editor::tests::fixed_uniform_full_span_opens_as_fixed_and_keeps_its_interval_on_commit ... ok
+test load_editor::tests::grid_paste_moves_both_ends_and_rejects_invalid_final_shortening_without_stale_change ... ok
+test load_editor::tests::full_length_creation_edit_and_coordinate_change_preserve_intent_and_resultant ... ok
+test load_editor::tests::issue635_gui_confirmation_rejects_invalid_add_and_set_without_changing_state ... ok
+test load_editor::tests::rotating_brace_then_reopening_and_committing_preserves_saved_global_direction ... ok
+test mn_view::tests::cache_is_rebuilt_when_shape_changes_at_same_index ... ok
+test mn_view::tests::cache_is_reused_when_nothing_changes ... ok
+test sample::tests::test_portal_frame_solves ... ok
+test section_editor::tests::test_build_shape_rc_kinds_keep_real_rebar ... ok
+test section_editor::tests::test_build_shape_steel_box_wires_corner_r ... ok
+test section_editor::tests::test_build_shape_steel_h_uses_draft_fields ... ok
+test section_editor::tests::test_build_shape_surface_radius_states ... ok
+test section_editor::tests::test_edit_section_shape_via_undo_recomputes_and_reverts ... ok
+test section_editor::tests::test_to_section_preview_matches_drafted_shape ... ok
+test section_editor::tests::wall_edit_preserves_explicit_horizontal_ratio ... ok
+test story_response::tests::test_acceleration_display_is_gal ... ok
+test story_response::tests::test_floor_points_shape ... ok
+test story_response::tests::test_hover_story_index ... ok
+test story_response::tests::test_story_absmax ... ok
+test story_response::tests::test_story_axis_label ... ok
+test story_response::tests::test_story_display_names ... ok
+test story_response::tests::test_story_step_points_shape ... ok
+test summary::tests::panel_505_csv_keeps_incomplete_and_checked_planes_separate ... ok
+test summary::tests::test_drift_limit_denom_relaxation ... ok
+test summary::tests::test_quantity_csv_from_sample_model ... ok
+test summary::tests::test_report_and_metrics_from_sample_flow ... ok
+test summary::tests::test_report_csv_records_unset_assignment_regions ... ok
+test summary::tests::test_report_without_results ... ok
+test mn_view::tests::src552_ovika_edit_reload_and_display_share_material_regions ... ok
+test table_util::tests::column_widens_for_long_header ... ok
+test table_util::tests::id_column_fits_five_digits ... ok
+test table_util::tests::test_fmt_section_prop_keeps_significant_digits ... ok
+test tables::direct_input_tests::issue546_real_duplicate_confirmation_rechecks_finite_pending_coordinate ... ok
+test app::vibration_ownership_tests::lumped_time_history_ownership_distinguishes_current_pushover_generation_conditions ... ok
+test app::vibration_ownership_tests::time_history_ownership_save_reload_and_invalid_identity_are_not_recertified ... ok
+test tables::direct_input_tests::issue546_real_id_reassignment_never_applies_an_old_draft_to_another_material ... ok
+test tables::direct_input_tests::issue546_real_node_add_matrix_preserves_redo_results_and_draft ... ok
+test tables::direct_input_tests::issue546_real_model_switch_discards_material_inputs_only ... ok
+test tables::direct_input_tests::issue546_real_pending_text_edit_rechecks_deletion_and_category_change ... ok
+test tables::direct_input_tests::issue546_finite_controls_through_real_add_and_single_edit ... ok
+test tables::direct_input_tests::issue546_real_signed_zero_changes_all_fields_with_undo_redo ... ok
+test tables::direct_input_tests::issue546_real_material_add_matrix_is_atomic_and_preserves_redo ... ok
+test tables::direct_input_tests::issue546_real_stb_strength_loss_focus_and_standard_e_contract ... ok
+test tables::load_cfg::tests::部材別仕上げの選択はrc_src柱だけを除外し追加荷重の選択は残す ... ok
+test tables::materials::tests::imported_standard_concrete_young_is_not_editable ... ok
+test tables::materials::tests::issue546_commit_rechecks_target_and_standard_e_without_consuming_redo ... ok
+test tables::materials::tests::issue546_strength_origin_clear_is_semantic_and_undo_restores_omissions ... ok
+test tables::materials::tests::standard_concrete_young_is_not_editable_but_direct_input_is ... ok
+test tables::materials::tests::standard_rc_and_src_have_same_concrete_young_modulus ... ok
+test tables::materials::tests::test_apply_src_toggle_uses_gamma_src ... ok
+test tables::member_details::tests::test_format_joints_empty ... ok
+test tables::member_details::tests::test_format_joints_roundtrip ... ok
+test tables::member_details::tests::test_parse_haunch_all_fields ... ok
+test tables::member_details::tests::test_parse_haunch_disabled_is_none ... ok
+test tables::member_details::tests::test_parse_haunch_optional_fields_default_zero ... ok
+test tables::direct_input_tests::issue546_real_unchanged_blur_tracks_undo_redo_and_other_edits ... ok
+test tables::member_details::tests::test_parse_haunch_rejects_non_numeric_optional_fields ... ok
+test tables::member_details::tests::test_parse_haunch_rejects_non_positive_or_invalid_length ... ok
+test tables::member_details::tests::test_parse_joints_comma_separated_with_kind ... ok
+test tables::member_details::tests::test_parse_joints_defaults_to_site ... ok
+test tables::member_details::tests::test_parse_joints_empty_is_empty_vec ... ok
+test tables::member_details::tests::test_parse_joints_newline_separated_english_kind ... ok
+test tables::member_details::tests::test_parse_joints_rejects_invalid_distance ... ok
+test tables::member_details::tests::test_parse_joints_rejects_invalid_kind ... ok
+test tables::members::tests::generated_wall_hysteresis_is_not_editable ... ok
+test tables::members::tests::members_table_view_borrows_without_wall_plates ... ok
+test tables::members::tests::members_table_view_includes_generated_walls ... ok
+test tables::members::tests::test_resolve_damper_def_selection_clears_when_deleted ... ok
+test tables::members::tests::isolators_table_remove_clears_boundary_target_after_node_ids_shift ... ok
+test tables::members::tests::test_resolve_damper_def_selection_follows_by_name_after_earlier_delete ... ok
+test tables::members::tests::test_resolve_damper_def_selection_none_stays_none ... ok
+test tables::members::tests::test_resolve_damper_def_selection_unchanged_when_still_valid ... ok
+test tables::nodes::tests::boundary_edit_tracks_external_node_without_selecting_default_or_cell ... ok
+test tables::nodes::tests::node_deletion_invalidates_local_boundary_target ... ok
+test tables::nodes::tests::grid_cell_and_boundary_default_render_do_not_override_geometry_selection ... ok
+test tables::nodes::tests::rejected_point_slab_support_removal_preserves_model_history_selection_and_validity ... ok
+test tables::nodes::tests::row_header_range_uses_real_node_ids_and_anchor ... ok
+test tables::nodes::tests::row_header_selection_replaces_boundary_edit_target ... ok
+test tables::nodes::tests::test_find_support_isolator_none_when_ground_node_selected ... ok
+test tables::nodes::tests::test_find_support_isolator_none_when_not_placed ... ok
+test tables::nodes::tests::test_isolator_support_section_remove_button_command ... ok
+test tables::nodes::tests::test_place_support_isolator_then_find_support_isolator ... ok
+test tables::nodes::tests::test_set_node_support_spring_via_undo ... ok
+test tables::secondary::tests::両端支持は支持支持にのみ一致する ... ok
+test tables::secondary::tests::支持未解決はどの端部候補にも一致しない ... ok
+test tables::secondary::tests::支持部材候補は親領域内の材軸に絞る ... ok
+test tables::secondary::tests::片持ちは正規化後の組合せの両方に一致する ... ok
+test tables::sections::tests::new_rc_and_src_shapes_expose_material_roles ... ok
+test tables::slabs::tip_load_tests::attached_creation_distinguishes_missing_input_from_invalid_complete_candidate ... ok
+test tables::slabs::tip_load_tests::existing_attached_boundary_candidates_report_common_rejection_and_preserve_state ... ok
+test tables::slabs::tip_load_tests::gui_shows_tip_controls_only_for_line_anchor_transfer ... ok
+test tables::slabs::tip_load_tests::valid_line_and_point_creation_candidates_are_added ... ok
+test tables::steel_attrs::tests::test_desc_helpers ... ok
+test tables::steel_attrs::tests::test_parse_brace_count_empty_is_none ... ok
+test tables::steel_attrs::tests::test_parse_brace_count_rejects_non_integer ... ok
+test tables::steel_attrs::tests::test_parse_brace_count_valid ... ok
+test tables::steel_attrs::tests::test_parse_lb_direct_all_empty_is_none ... ok
+test tables::steel_attrs::tests::test_parse_lb_direct_all_filled ... ok
+test tables::steel_attrs::tests::test_parse_lb_direct_partial_is_error ... ok
+test tables::steel_attrs::tests::test_parse_lb_direct_rejects_non_numeric ... ok
+test tables::steel_attrs::tests::test_parse_lk_direct_empty_is_none ... ok
+test tables::steel_attrs::tests::test_parse_lk_direct_rejects_non_positive_or_invalid ... ok
+test tables::steel_attrs::tests::test_parse_lk_direct_valid ... ok
+test tables::steel_attrs::tests::test_parse_loss_percent_empty_is_zero ... ok
+test tables::direct_input_tests::issue546_real_nonfinite_repair_undo_redo_restores_original_model ... ok
+test tables::steel_attrs::tests::test_parse_loss_percent_rejects_non_numeric ... ok
+test tables::wall_plates::tests::inspector_section_usage_and_highlight_include_generated_wall ... ok
+test tables::wall_plates::tests::region_unassignment_clears_selection_before_generated_id_is_reused ... ok
+test tables::wall_plates::tests::rejected_section_change_preserves_generated_selection_and_active ... ok
+test tables::wall_plates::tests::section_change_clears_generated_selection_before_ids_shift ... ok
+test tables::wall_plates::tests::section_change_preserves_other_wall_and_active ... ok
+test tables::wall_plates::tests::section_change_preserves_selected_wall_and_active ... ok
+test tables::wall_plates::tests::test_format_openings_empty ... ok
+test tables::wall_plates::tests::test_format_openings_roundtrip ... ok
+test tables::wall_plates::tests::test_not_element_reason_distinguishes_causes ... ok
+test tables::wall_plates::tests::test_parse_openings_comma_separated_with_offset ... ok
+test tables::wall_plates::tests::test_parse_openings_empty_is_empty_vec ... ok
+test tables::wall_plates::tests::test_parse_openings_newline_separated ... ok
+test tables::slabs::tip_load_tests::attached_creation_reports_common_diagnostic_and_preserves_state_on_rejection ... ok
+test tables::wall_plates::tests::test_parse_openings_rejects_malformed_offset ... ok
+test tables::wall_plates::tests::test_parse_openings_rejects_missing_x_separator ... ok
+test tables::wall_plates::tests::test_parse_openings_rejects_non_numeric ... ok
+test tables::wall_plates::tests::test_parse_openings_rejects_non_positive_dims ... ok
+test theme::tests::check_ratio_color_clamps_negative ... ok
+test tables::wall_plates::tests::test_parse_openings_tolerates_whitespace_and_uppercase_x ... ok
+test theme::tests::check_ratio_color_is_gradient_below_caution ... ok
+test theme::tests::colormap_blue_white_red_midpoint_is_white ... ok
+test theme::tests::check_ratio_color_matches_status_color_at_boundaries ... ok
+test theme::tests::colormap_sample_clamps_out_of_range ... ok
+test viewer::camera::tests::ドラッグ回転を繰り返しても鉛直軸は傾かない ... ok
+test viewer::camera::tests::俯仰は真上と真下でクランプされる ... ok
+test viewer::camera::tests::既定ビューで鉛直軸は画面上で縦 ... ok
+test viewer::check_ratio::tests::available_check_kinds_empty_input ... ok
+test viewer::check_ratio::tests::available_check_kinds_excludes_absent_kinds ... ok
+test viewer::check_ratio::tests::available_check_kinds_returns_present_kinds_in_definition_order ... ok
+test viewer::check_ratio::tests::build_tooltip_rows_builds_table ... ok
+test viewer::check_ratio::tests::build_tooltip_rows_empty_positions ... ok
+test app::secondary_cft_tests::primary_cft_column_keeps_independent_quantity_and_edit_save_prepare_contract ... ok
+test viewer::check_ratio::tests::build_tooltip_rows_skipped_position ... ok
+test viewer::check_ratio::tests::dominant_kind_picks_max_component ... ok
+test viewer::check_ratio::tests::elem_check_positions_filters_by_elem_id ... ok
+test viewer::check_ratio::tests::elem_check_positions_unknown_elem_returns_empty ... ok
+test viewer::check_ratio::tests::lip_channel_tooltip_retains_all_unchecked_items_without_ratio_columns ... ok
+test viewer::check_ratio::tests::max_ratio_by_elem_all_ok_stays_ok ... ok
+test viewer::check_ratio::tests::max_ratio_by_elem_empty_input ... ok
+test viewer::check_ratio::tests::max_ratio_by_elem_ng_propagates ... ok
+test viewer::check_ratio::tests::max_ratio_by_elem_none_is_excluded ... ok
+test viewer::check_ratio::tests::max_ratio_by_elem_picks_max_ratio ... ok
+test viewer::check_ratio::tests::max_ratio_by_elem_separates_by_id ... ok
+test viewer::check_ratio::tests::max_ratio_by_node_empty_input ... ok
+test viewer::check_ratio::tests::max_ratio_by_node_picks_max_and_propagates_ng ... ok
+test viewer::check_ratio::tests::max_ratio_by_node_separates_by_id ... ok
+test viewer::check_ratio::tests::mid_label_text_with_dominant ... ok
+test viewer::check_ratio::tests::mid_label_text_without_dominant ... ok
+test viewer::check_ratio::tests::panel_505_joint_marker_does_not_hide_one_skipped_plane ... ok
+test viewer::check_ratio::tests::pick_nearest_checked_node_ignores_unchecked_nodes ... ok
+test viewer::check_ratio::tests::pick_nearest_checked_node_without_results ... ok
+test viewer::check_ratio::tests::design602_actual_ratio_drawing_and_tooltip_hide_old_values ... ok
+test viewer::check_ratio::tests::ratio_for_filter_kind_absent_returns_none ... ok
+test viewer::check_ratio::tests::ratio_for_filter_kind_multiple_same_kind_picks_max ... ok
+test viewer::check_ratio::tests::ratio_for_filter_kind_picks_matching_component ... ok
+test viewer::check_ratio::tests::ratio_for_filter_skipped_returns_none ... ok
+test viewer::check_ratio::tests::ratio_for_filter_max_returns_ratio_and_ok ... ok
+test viewer::check_ratio::tests::should_label_all_shows_every_ratio ... ok
+test viewer::check_ratio::tests::should_label_only_at_or_above_threshold_by_default ... ok
+test viewer::check_ratio::tests::unsupported_box_has_no_success_ratio_or_tooltip_value ... ok
+test ultimate_view::tests::source_note_follows_nonfinal_confirmed_adoption_without_legacy_display_response ... ok
+test viewer::check_ratio::tests::wall_tooltip_real_egui_keeps_two_walls_on_same_node_and_empty_max ... ok
+test viewer::cmq::tests::cmq_m_drawing_preserves_closed_form_ordinates_and_single_outline ... ok
+test viewer::cmq::tests::cmq_drawing_preserves_model_loads_end_moments_saved_results_and_undo_history ... ok
+test viewer::cmq::tests::group_member_loads_by_elem_merges_any_source_and_excludes_non_beam_kind ... ok
+test viewer::cmq::tests::is_gravity_auto_case_name_matches_only_member_bearing_auto_cases ... ok
+test viewer::cmq::tests::out_of_span_cmq_uses_original_interval_without_centroid_clamp ... ok
+test viewer::cmq::tests::plane_alpha_scale_dims_weak_axis_relative_to_strong_axis ... ok
+test viewer::cmq::tests::project_load_degenerate_dir_contributes_zero ... ok
+test viewer::cmq::tests::project_load_normalizes_non_unit_dir ... ok
+test viewer::check_ratio::tests::wall_ng_real_egui_legend_matches_ratio_filter ... ok
+test viewer::cmq::tests::project_load_preserves_legacy_sign_for_default_horizontal_beam_under_gravity ... ok
+test viewer::cmq::tests::project_load_splits_into_orthogonal_components ... ok
+test viewer::cmq::tests::project_load_zero_when_orthogonal ... ok
+test viewer::cmq::tests::selected_axis_label_reflects_current_selection ... ok
+test viewer::cmq::tests::signed_cmq_projected_loads_close_both_simple_beam_ends ... ok
+test viewer::deform::tests::主架構に接続する節点の変位は補間で変更されない ... ok
+test viewer::deform::tests::主架構の線材がなければ未参照節点の変位はゼロのまま ... ok
+test viewer::deform::tests::二次部材の連鎖でも主架構に近い側から順に追従する ... ok
+test viewer::deform::tests::内部たわみオフの表示倍率はbox基準に手動係数を掛ける ... ok
+test viewer::deform::tests::内部たわみオンは梁スパン上限で倍率が制限される ... ok
+test viewer::deform::tests::剛床マスターの鉛直変位はスレーブ平均で補完される ... ok
+test viewer::deform::tests::剛床マスター節点の変位は補間で上書きされない ... ok
+test viewer::deform::tests::変位ゼロなら梁スケール上限は無し ... ok
+test viewer::deform::tests::変形曲線の端部は節点変位に一致する ... ok
+test viewer::deform::tests::大梁に直付きしない二次部材の先端は接続先を辿って追従する ... ok
+test viewer::deform::tests::大梁スパン中間の未参照節点は内部たわみオフで線形補間になる ... ok
+test viewer::deform::tests::大梁スパン中間の未参照節点は梁のエルミート変位で追従する ... ok
+test viewer::deform::tests::梁の内部たわみで変形スケール上限が算定される ... ok
+test viewer::deform::tests::梁上の未参照節点は梁の描画曲線に厳密一致する ... ok
+test viewer::deform::tests::梁変形後曲線の端点は節点変位に一致し中央は弦から外れる ... ok
+test viewer::deform::tests::梁軸から外れた未参照節点も最寄り線分の射影位置で補間される ... ok
+test viewer::deform::tests::端部回転で中央がたわむ ... ok
+test viewer::deform::tests::表示倍率は変位なし又は全ゼロでゼロ ... ok
+test viewer::diagram::component_tests::all_zero_group_is_not_drawn ... ok
+test viewer::diagram::component_tests::force_component_index_matches_declaration_order ... ok
+test viewer::diagram::component_tests::force_component_planes_pair_bending_and_shear ... ok
+test viewer::diagram::component_tests::force_component_units_are_kn_based ... ok
+test viewer::diagram::component_tests::my_is_plotted_with_flipped_sign_and_qz_gradient ... ok
+test viewer::diagram::component_tests::negligible_component_is_not_drawn ... ok
+test viewer::diagram::component_tests::presets_select_expected_components ... ok
+test viewer::diagram::component_tests::shared_scale_different_unit_groups_are_independent ... ok
+test viewer::cmq::tests::cmq_m_drawing_rejects_zero_nonfinite_and_collapsed_fill ... ok
+test viewer::diagram::component_tests::shared_scale_force_group_uses_max_of_selected ... ok
+test viewer::diagram::component_tests::shared_scale_insignificant_force_component_gets_zero ... ok
+test viewer::diagram::component_tests::shared_scale_moment_group_uses_max_of_selected ... ok
+test viewer::diagram::component_tests::shared_scale_single_component_uses_own_max ... ok
+test viewer::diagram::component_tests::small_but_real_component_is_still_drawn ... ok
+test viewer::diagram::component_tests::toggling_flags_changes_selection_in_index_order ... ok
+test viewer::diagram::tests::contour_color_normalizes_force_for_selected_colormap ... ok
+test viewer::diagram::tests::diagram_fill_polygons_crossing_has_exact_half_unit_triangles ... ok
+test viewer::diagram::tests::diagram_fill_polygons_keeps_four_single_sign_regions_between_zero_samples ... ok
+test viewer::diagram::tests::diagram_fill_polygons_multi_segment_each_poly_single_sign ... ok
+test viewer::diagram::tests::diagram_fill_polygons_needs_at_least_two_samples ... ok
+test viewer::diagram::tests::diagram_fill_polygons_rejects_nonfinite_samples_and_zero_length_intervals ... ok
+test viewer::diagram::tests::diagram_fill_polygons_same_sign_is_trapezoids ... ok
+test viewer::diagram::tests::diagram_fill_polygons_sign_change_splits_at_zero_crossing ... ok
+test viewer::diagram::tests::diagram_fill_polygons_sorts_unsorted_input ... ok
+test viewer::diagram::tests::moment_curve_samples_keeps_linear_field_straight ... ok
+test viewer::diagram::tests::moment_curve_samples_midspan_point_load_stays_piecewise_linear ... ok
+test viewer::diagram::tests::moment_curve_samples_passes_through_short_input ... ok
+test viewer::diagram::tests::moment_curve_samples_preserves_sample_values ... ok
+test viewer::diagram::tests::moment_curve_samples_reproduces_udl_parabola ... ok
+test viewer::diagram::tests::wall_force_axis_uses_midpoints_not_first_two_nodes ... ok
+test viewer::cmq::tests::cmq_m_drawing_keeps_fill_inside_positive_signed_nonconvex_and_reversed_outlines ... ok
+test viewer::frame_filter_tests::in_plane_offset_flattens_out_of_plane_direction ... ok
+test viewer::frame_filter_tests::in_plane_offset_keeps_direction_for_members_piercing_the_frame ... ok
+test viewer::frame_filter_tests::frame_limits_to_members_on_it ... ok
+test viewer::frame_filter_tests::no_frame_shows_everything ... ok
+test viewer::frame_view::tests::skewed_frame_keeps_z_up ... ok
+test viewer::frame_view::tests::story_frame_faces_from_above ... ok
+test viewer::frame_view::tests::x_axis_frame_faces_with_y_right_and_z_up ... ok
+test viewer::frame_view::tests::y_axis_frame_faces_with_x_right_and_z_up ... ok
+test viewer::hinge::tests::aggregate_hinges_dedups_same_elem_and_end ... ok
+test viewer::hinge::tests::aggregate_hinges_empty_input ... ok
+test viewer::hinge::tests::aggregate_hinges_keeps_min_step_as_first_step ... ok
+test viewer::hinge::tests::aggregate_hinges_picks_highest_level_and_max_ductility ... ok
+test viewer::hinge::tests::aggregate_hinges_separates_by_elem ... ok
+test viewer::hinge::tests::aggregate_hinges_separates_by_end ... ok
+test viewer::hinge::tests::concentrated_backbone_follows_axial_force ... ok
+test viewer::hinge::tests::concentrated_history_rule_has_no_mn_linear_and_no_nm_plot ... ok
+test viewer::hinge::tests::concentrated_backbone_reduces_under_tension ... ok
+test viewer::hinge::tests::dominant_bend_axis_z_picks_larger_axis ... ok
+test viewer::hinge::tests::dominant_bend_axis_z_picks_weak_axis_when_larger ... ok
+test viewer::hinge::tests::dominant_bend_axis_z_ties_favor_strong_axis ... ok
+test viewer::hinge::tests::extract_mn_meridian_strong_axis_uses_mz ... ok
+test viewer::hinge::tests::extract_mn_meridian_skips_out_of_range_rows ... ok
+test viewer::hinge::tests::effective_bend_dir_z_forces_strong_axis_for_concentrated_spring ... ok
+test viewer::hinge::tests::extract_mn_meridian_weak_axis_flips_n_sign ... ok
+test viewer::hinge::tests::fiber_category_elastic ... ok
+test viewer::hinge::tests::fiber_category_tension_yield ... ok
+test viewer::hinge::tests::fiber_category_compression_yield ... ok
+test viewer::hinge::tests::fiber_frame_outline_asymmetric_channel_aligns_with_fibers ... ok
+test viewer::hinge::tests::hinge_view_cache_reuses_only_matching_key ... ok
+test viewer::hinge::tests::fiber_frame_outline_steel_box_has_outer_and_inner ... ok
+test viewer::hinge::tests::fiber_frame_outline_steel_box_fibers_lie_between_outer_and_inner ... ok
+test viewer::hinge::tests::hinge_view_key_changes_with_element_geometry ... ok
+test viewer::hinge::tests::hinge_view_key_changes_with_result_generation_same_step_count ... ok
+test viewer::hinge::tests::hinge_view_key_changes_with_rigid_diaphragm_toggle ... ok
+test viewer::hinge::tests::hinge_view_key_changes_with_section_material_and_hysteresis ... ok
+test viewer::hinge::tests::hinge_view_key_changes_with_step ... ok
+test viewer::hinge::tests::hinge_view_key_changes_with_wall_side_column_toggle ... ok
+test viewer::hinge::tests::hinge_view_key_ignores_non_display_fields_for_fiber ... ok
+test viewer::hinge::tests::hinge_view_key_ignores_step_for_non_concentrated ... ok
+test viewer::hinge::tests::hinge_view_key_includes_concentrated_display_fields_only ... ok
+test viewer::hinge::tests::hinge_view_key_treats_force_regime_via_resolved_branch ... ok
+test viewer::hinge::tests::hinge_view_key_uses_step_for_degenerate_concentrated_spring_with_history_rule ... ok
+test viewer::hinge::tests::hinge_view_key_uses_step_for_history_rule_concentrated_spring ... ok
+test viewer::hinge::tests::m_theta_axis_label_matches_axis ... ok
+test viewer::hinge::tests::hinge_view_resolves_wall_side_column_with_expanded_model ... ok
+test viewer::hinge::tests::m_theta_series_empty_input ... ok
+test viewer::hinge::tests::m_theta_series_extracts_strong_axis_abs_values ... ok
+test viewer::hinge::tests::m_theta_series_extracts_weak_axis_when_selected ... ok
+test viewer::hinge::tests::m_theta_series_uses_spring_rotation_for_concentrated_spring ... ok
+test viewer::hinge::tests::mn_beta_columns_strong_axis ... ok
+test viewer::hinge::tests::mn_beta_columns_weak_axis ... ok
+test viewer::hinge::tests::mn_unavailable_message_distinguishes_input_shortage_from_history_rule ... ok
+test viewer::hinge::tests::mn_display_matches_element_model_kind ... ok
+test viewer::hinge::tests::n_m_response_path_empty_input_returns_origin_only ... ok
+test viewer::hinge::tests::n_m_response_path_keeps_tension_signed ... ok
+test viewer::hinge::tests::n_m_response_path_picks_larger_end_signed ... ok
+test viewer::hinge::tests::n_m_response_path_prepends_origin ... ok
+test viewer::hinge::tests::n_m_response_path_uses_weak_axis_when_selected ... ok
+test viewer::hinge::tests::n_my_mz_response_path_3d_prepends_origin_and_picks_larger_end ... ok
+test viewer::hinge::tests::pick_fiber_section_empty_input ... ok
+test viewer::hinge::tests::pick_fiber_section_i_end_picks_min_xi ... ok
+test viewer::hinge::tests::pick_fiber_section_j_end_picks_max_xi ... ok
+test viewer::hinge::tests::rc_reference_cache_tracks_property_basis_and_slab_diagnostics_while_stale ... ok
+test viewer::hinge::tests::rc_reference_cache_tracks_release_haunch_and_column_diagnostics_while_stale ... ok
+test viewer::hinge::tests::section_outline_centroid_of_centered_square_is_origin ... ok
+test viewer::hinge::tests::section_outline_centroid_of_offset_rect_matches_geometric_center ... ok
+test viewer::hinge::tests::set_pushover_view_dir_clears_hinge_view_cache ... ok
+test viewer::hinge::tests::rc_reference_cache_tracks_fiber_basis_edits_and_undo_while_already_stale ... ok
+test viewer::input::selection_tests::secondary_placement_clears_wall_selection_before_generated_id_reuse ... ok
+test viewer::lumped::tests::align_xy_to_mean_collapses_plan_to_centroid ... ok
+test viewer::lumped::tests::mass_marker_radius_scales_with_sqrt_mass ... ok
+test viewer::mn_draw::tests::surface_refs_は圧縮側と引張側の絶対値が大きい方を軸力基準に採る ... ok
+test viewer::input::selection_tests::secondary_placement_preserves_primary_member_and_node_selection ... ok
+test viewer::mn_draw::tests::surface_refs_は耐力が0でも1_0を下回らない ... ok
+test viewer::mn_draw::tests::to_world_は格子点の並びを画面の並びへ入れ替える ... ok
+test viewer::mn_draw::tests::view_scaleは短辺基準で既定ズーム3_0のとき短辺の0_32倍になる ... ok
+test viewer::modeling::tests::test_brace_panel_other_classes ... ok
+test viewer::modeling::tests::test_incremental_beam_regime_split ... ok
+test viewer::modeling::tests::test_multispring_class_by_analysis ... ok
+test viewer::input::selection_tests::node_coordinate_edit_clears_only_generated_selection_before_id_reuse ... ok
+test viewer::modeling::tests::test_panel_beam_axes_has_one_entry_per_frame_plane ... ok
+test viewer::modeling::tests::test_panel_half_extent_from_member_depths ... ok
+test viewer::modeling::tests::test_panel_half_extent_without_sections ... ok
+test viewer::modeling::tests::test_static_beam_is_elastic ... ok
+test viewer::modeling::tests::test_wall_seismic_vs_misc ... ok
+test viewer::modeling::tests::上下辺の大梁が欠けた壁は雑壁として描く ... ok
+test viewer::modeling::tests::可とう区間は要素側の剛域解決と一致する ... ok
+test viewer::modeling::tests::側柱がなくても耐震壁として描く ... ok
+test viewer::modeling::tests::塑性化域長は要素生成の既定と一致する ... ok
+test viewer::modeling::tests::壁の上下大梁だけを付帯梁として判定する ... ok
+test viewer::modeling::tests::端部塑性化域モデルの判定は増分解析のファイバーとmsのみ ... ok
+test viewer::pick::tests::point_in_polygon_detects_interior ... ok
+test viewer::modeling::tests::壁版idごとのモデル化分類と色は剛性算入の有無を保持する ... ok
+test viewer::pick::tests::polygon_interior_beats_nearby_segment ... ok
+test viewer::pick::tests::割当領域の内側だけをピックする ... ok
+test viewer::playback::th_playback_tests::advance_play_time_cases ... ok
+test viewer::pick::tests::親領域と支持部材アンカーをピックする ... ok
+test viewer::playback::th_playback_tests::frame_at_time_cases ... ok
+test viewer::scene::tests::invalid_slab_boundaries_keep_their_original_finite_edges_without_fill ... ok
+test viewer::scene::tests::mode_rest_invalid_slabs_and_sign_reversing_wall_keep_outlines_without_fill ... ok
+test viewer::scene::tests::mode_rest_plate_filters_and_floor_toggle_share_the_input_visibility ... ok
+test viewer::scene::tests::mode_rest_input_plates_keep_each_input_boundary_once_for_both_signs_and_axes ... ok
+test viewer::scene::tests::slab_convex_and_concave_fill_cover_the_input_and_leave_the_notch_empty ... ok
+test tables::direct_input_tests::issue546_real_single_text_edit_matrix_retains_draft_and_redo ... ok
+test viewer::scene::tests::slab_line_fill_observes_input_geometry_and_keeps_support_rejection ... ok
+test viewer::input::selection_tests::secondary_list_edits_clear_only_generated_member_selection ... ok
+test viewer::scene::tests::仕口パネルと面要素は部材線として描かない ... ok
+test viewer::scene::tests::slab_fill_indices_are_stable_under_rotation_deformation_and_edge_collapse ... ok
+test viewer::scene::tests::取り付く壁版は取付き先の節点で構面を判定する ... ok
+test viewer::scene::tests::slab_nonfinite_model_display_and_projection_never_reach_painter ... ok
+test viewer::scene::tests::囲まれた壁版は境界節点が全て構面上にあるときだけ描く ... ok
+test viewer::scene::tests::外周スラブは大梁フィルタと変形後座標を使い輪郭を閉じる ... ok
+test viewer::scene::tests::符号反転する取り付く壁版は塗らない ... ok
+test viewer::scene::tests::要素の描き方は種別ごとに一意に決まる ... ok
+test viewer::space_grid::tests::test_beam_between_existing_nodes ... ok
+test viewer::space_grid::tests::test_grid_point_creates_node_in_one_undo ... ok
+test viewer::space_grid::tests::test_grid_point_reuses_existing_node ... ok
+test viewer::space_grid::tests::test_has_grid ... ok
+test viewer::space_grid::tests::test_same_point_is_rejected ... ok
+test viewer::support::tests::supports_follow_toggle_in_frame_view ... ok
+test viewer::support::tests::supports_hidden_in_lumped_view_even_when_toggle_on ... ok
+test viewer::space_grid::tests::test_vertical_member_uses_x_reference ... ok
+test viewer::support_symbols::tests::isolator_marker_geometry_is_centered_and_drawable ... ok
+test viewer::support_symbols::tests::spiral_fracs_remain_finite_and_cover_radius ... ok
+test viewer::support_symbols::tests::support_isolators_excludes_both_fixed_or_both_free ... ok
+test viewer::support_symbols::tests::support_isolators_excludes_non_zero_length ... ok
+test viewer::support_symbols::tests::support_isolators_finds_target_when_other_side_fixed ... ok
+test viewer::support_symbols::tests::zigzag_points_preserve_endpoints_and_remain_drawable ... ok
+test viewer::support_symbols::tests::support_isolators_order_independent ... ok
+test viewer::th_detail::tests::axial_relative_disp_elongation_positive ... ok
+test viewer::th_detail::tests::axial_relative_disp_rigid_translation_is_zero ... ok
+test viewer::th_detail::tests::axial_relative_disp_transverse_disp_ignored ... ok
+test viewer::th_detail::signed_q0_acceptance_tests::signed_q0_th_detail_steel_still_checks_without_rc_gravity_input ... ok
+test viewer::th_detail::tests::axial_relative_disp_zero_length_returns_zero ... ok
+test viewer::th_detail::tests::beam_end_rotations_matching_chord_cancels ... ok
+test viewer::th_detail::tests::beam_end_rotations_pure_end_rotation ... ok
+test viewer::th_detail::tests::beam_end_rotations_rigid_translation_is_zero ... ok
+test viewer::th_detail::tests::default_axial_component_isolator_is_shear_horizontal_loop ... ok
+test viewer::th_detail::tests::flexural_points_i_end_slope_is_positive_for_elastic_cantilever ... ok
+test viewer::th_detail::tests::loop_kind_of_classifies_axial_and_flexural ... ok
+test viewer::th_detail::tests::zero_length_local_frame_isolator_axis_is_vertical ... ok
+test viewer::th_detail::tests::zero_length_local_frame_nodal_spring_is_identity ... ok
+test viewer::th_detail::tests::zero_length_relative_disp_isolator_shear_y ... ok
+test viewer::viewcube::tests::コーナーの当たり判定半径内のクリックはコーナーが優先される ... ok
+test viewer::viewcube::tests::コーナークリックのスナップで視線がその頂点方向を向く ... ok
+test viewer::viewcube::tests::可視コーナーの近傍クリックはコーナーが面より優先される ... ok
+test viewer::viewcube::tests::可視面の中心をクリックするとその面にヒットする ... ok
+test viewer::viewcube::tests::真上真下へのスナップは正対する ... ok
+test viewer::viewcube::tests::裏側の面にはヒットしない ... ok
+test viewer::viewcube::tests::面クリックのスナップで視線がその面の正面を向く ... ok
+test viewer::wall_expanded_view_model_tests::member_axis_endpoints_uses_wall_column_midpoints ... ok
+test viewer::wall_expanded_view_model_tests::no_wall_plates_borrows_without_cloning ... ok
+test viewer::th_detail::signed_q0_acceptance_tests::signed_q0_th_detail_missing_repaired_missing_does_not_render_ordinary_check ... ok
+test viewer::wall_expanded_view_model_tests::wall_plates_expand_into_wall_elements ... ok
+test viewer::scene::tests::mode_rest_viewer_gating_and_input_nodes_preserve_model_undo_results_and_saved_content ... ok
+test viewer::modeling::tests::wall_modeling_detail_labels_rc_methods_and_keeps_steel_capacity_untagged ... ok
+test app::tests::cft_ultimate_app_keeps_axial_result_and_rounded_mu_reason ... ok
+test app::tests::test_compute_cft_ultimate_checks ... ok
+test app::tests::test_preparation_member_stiffness_reports_composite_props ... ok
+
+test result: ok. 843 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.53s
+
+     Running unittests src\main.rs (target\debug\deps\sepika-a81b831c4229a43e.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\attached_slab_import.rs (target\debug\deps\attached_slab_import-3b15dfeed2fabfbd.exe)
+
+running 3 tests
+test imported_boundary_rectangle_preserves_support_interval_area_and_actual_load_resultant ... ok
+test existing_merge_preserves_same_geometry_support_intervals_and_actual_resultant ... ok
+test existing_split_preserves_same_geometry_support_intervals_and_actual_resultant ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\beam_contact_quantity.rs (target\debug\deps\beam_contact_quantity-2e1f828f2035a3f1.exe)
+
+running 2 tests
+test beam_contact_quantity_csv_preserves_union_and_diagnostics ... ok
+test beam_contact_quantity_gui_renders_union_and_unavailable_reason ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests\circular_post_quantity.rs (target\debug\deps\circular_post_quantity-167bb594b79cfc00.exe)
+
+running 2 tests
+test circular_post_quantity_csv_uses_shared_takeoff_and_reports_invalid_geometry ... ok
+test circular_post_quantity_gui_panel_uses_shared_takeoff ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\full_model.rs (target\debug\deps\full_model-51ef01c252449680.exe)
+
+running 37 tests
+test floor_regions_and_slabs_are_consistent ... ok
+test import_anchorizes_secondary_members ... ok
+test import_builds_expected_model ... ok
+test import_populates_wall_regions_from_region_gen ... ok
+test gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results ... ok
+test import_preserves_stbridge_slab_area_and_weight ... ok
+test diagnostics_are_clean ... ok
+test ovika_corrupt_optional_payloads_report_notices ... ok
+test original_fixture_retains_unresolved_positions_and_analysis_derivative_is_explicit ... ok
+test ovika_reads_defaulted_settings_fields ... ok
+test ovika_invalid_restored_model_is_not_installed ... ok
+test imported_t_beams_stop_pushover_and_nonlinear_time_history ... ok
+test dead_load_transfers_to_column_bases ... ok
+test combination_is_linear_sum_of_load_cases ... ok
+test eigen_returns_descending_positive_periods ... ok
+test panel_505_real_fixture_retains_standard_joints_and_skips_only_staggered_planes ... ok
+test preparation_computes_stories_and_seismic_forces ... ok
+test rc_reference_rejects_only_member_loads_applied_in_the_current_analysis ... ok
+test region_gen_finds_wall_bounded_regions ... ok
+test beam_design_checks_cover_imported_secondary_members ... ok
+test design_check_covers_every_member ... ok
+test preparation_is_idempotent ... ok
+test slab_floor_load_reaches_primary_frame ... ok
+test pushover_reaches_ultimate_state ... ok
+test rounded_fixture_properties_and_weight_are_independently_integrated ... ok
+test seismic_static_produces_monotonic_story_displacement ... ok
+test stbridge_roundtrip_is_reanalyzable ... ok
+test static_all_solves_every_case_and_combination ... ok
+test ovika_roundtrip_preserves_model_and_results ... ok
+test story_metrics_computed_for_every_layer ... ok
+test wall_regions_survive_save_reopen_reprepare ... ok
+test time_history_linear_runs ... ok
+test time_history_nonlinear_runs ... ok
+test steel_portal_holding_capacity_and_imported_rc_ultimate_checks ... ok
+test snapshot_key_scalars ... ok
+test time_history_nonlinear_long_duration_has_no_false_non_convergence ... ok
+test rectangular_rc_decay_tail_has_no_false_non_convergence ... ok
+
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.48s
+
+     Running tests\lip_channel.rs (target\debug\deps\lip_channel-296cd0e68d1edcb7.exe)
+
+running 6 tests
+test lip_channel_invalid_geometry_is_rejected_by_existing_mass_input ... ok
+test lip_channel_egui_design_table_displays_unchecked_reason ... ok
+test lip_channel_geometry_shared_mass_and_beam_fiber_ms_reject_without_fallback ... ok
+test mixed_egui_design_table_counts_only_checked_positions_as_checked ... ok
+test lip_channel_internal_edit_and_ovika_preserve_unsupported_reason_and_gross_properties ... ok
+test lip_channel_actual_member_checks_and_report_remain_unchecked ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\load_state_report.rs (target\debug\deps\load_state_report-532bc1e941aa1323.exe)
+
+running 1 test
+test load_state_csv_keeps_selected_target_terms_duration_and_floor_scope ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests\perf_probe.rs (target\debug\deps\perf_probe-1a4725044820ccfe.exe)
+
+running 1 test
+test perf_probe_generate_stories_action ... ignored, perf probe, not a correctness test -- run explicitly with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\rc_section_purpose.rs (target\debug\deps\rc_section_purpose-416765f905c55c56.exe)
+
+running 8 tests
+test rc_beam_section_is_shared_by_girder_and_secondary_beam ... ok
+test rc_circle_column_section_is_shared_by_column_and_post ... ok
+test rc_rect_column_post_section_keeps_no_frame_use ... ok
+test rc_circle_column_post_section_keeps_no_frame_use ... ok
+test rc_beam_secondary_section_keeps_no_frame_use ... ok
+test rc_rect_column_section_is_shared_by_column_and_post ... ok
+test normal_rc_and_numeric_plates_keep_edit_roundtrip_prepare_and_quantity ... ok
+test rc_frame_sections_reject_plate_assignment_and_shape_edit_without_state_changes ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests\slab_physical_mass.rs (target\debug\deps\slab_physical_mass-7fe8d26cb4636605.exe)
+
+running 1 test
+test density_thickness_reference_edit_undo_and_preparation_keep_physical_mass_current ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\source_story.rs (target\debug\deps\source_story-a169a7d8d6e4ed2c.exe)
+
+running 13 tests
+test source_conflicts_diagnose_independent_story_processing_and_resolve_upper_fc ... ok
+test native_first_delete_keeps_existing_export_ids_and_undo_restores_unassigned_table ... ok
+test source_duplicate_height_dependency_missing_self_cycle_and_unknown_nodes_are_rejected ... ok
+test native_story_delete_preserves_source_ids_and_restores_uninitialized_tables ... ok
+test source_new_story_ids_and_guid_survive_height_order_changes_and_undo ... ok
+test source_membership_delete_undo_redo_and_new_ids_survive_internal_renumbering ... ok
+test public_source_fixture_roundtrip_preserves_original_attributes_and_identity ... ok
+test main_native_model_without_source_fields_keeps_messagepack_export_fallback ... ok
+test source_required_attributes_and_lower_priority_fc_are_checked_when_selected ... ok
+test source_stories_prepare_twice_move_export_and_fc_reference_are_invariant ... ok
+test source_native_save_and_calculation_snapshot_preserve_the_explicit_table ... ok
+test empty_import_and_last_source_delete_stay_empty_through_edit_prepare_save_and_undo ... ok
+test native_first_story_edit_preserves_both_membership_forms_and_conflict_diagnostics ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests\story_application_lifecycle.rs (target\debug\deps\story_application_lifecycle-12a8148cbdb76d62.exe)
+
+running 2 tests
+test stale_records_with_existing_ids_and_manual_settings_survive_adoption_and_regeneration ... ok
+test app_generation_story_reduction_and_ordered_undo_redo_restore_complete_models ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests\wall_check_status.rs (target\debug\deps\wall_check_status-ac733bf57c54767d.exe)
+
+running 2 tests
+test wall_status_real_egui_design_table_shows_counts_and_reasons ... ok
+test wall_status_app_csv_save_and_recalculation_keep_keys_and_none ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+     Running tests\wall_model.rs (target\debug\deps\wall_model-dcdec7a173bb14fd.exe)
+
+running 16 tests
+test rc_girder_self_weight_uses_columns_not_orthogonal_steel_girders ... ok
+test test_region_gen_wall_finds_all_four_faces ... ok
+test test_wall_element_changes_eigen_period ... ok
+test test_wall_frame_mismatch_appears_in_gui_diagnostics ... ok
+test nonlinear_opening_wall_refuses_job_without_publishing_partial_results ... ok
+test undefined_side_column_shape_is_an_input_error ... ok
+test test_wall_shear_check_appears_after_run_design_check ... ok
+test wall_analysis_preserves_side_column_shapes_with_long_axial_cut ... ok
+test diagonal_wall_design_consumes_distinct_local_and_load_direction_shear ... ok
+test wall_fixture_weight_change_is_the_independent_fillet_area_increment ... ok
+test circular_side_column_shear_section_runs_analysis ... ok
+test snapshot_wall_bay_scalars ... ok
+test rotated_src_and_cft_side_columns_run_linear_analysis ... ok
+test test_holding_capacity_auto_rank_detects_wall ... ok
+test snapshot_wall_ds_group_and_holding_capacity ... ok
+test wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_input ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.05s
+
+     Running tests\wall_post_model.rs (target\debug\deps\wall_post_model-002396173bd9de23.exe)
+
+running 9 tests
+test test_split_wall_plates_are_drawn_as_wall_plates ... ok
+test test_split_wall_plates_do_not_become_elements ... ok
+test test_wall_weight_is_split_between_columns_and_post ... ok
+test test_split_wall_plates_are_counted_in_quantity ... ok
+test test_wall_weight_reaches_story_seismic_weight ... ok
+test 明示負担率で密度直接集計とdl集計の階重量が一致する ... ok
+test test_wall_weight_reaches_dl_load_case ... ok
+test test_post_appears_as_unchecked_row ... ok
+test test_wall_weight_reaches_column_axial_force ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\lib.rs (target\debug\deps\sepika_io-ce8eba817e2c022f.exe)
+
+running 189 tests
+test checkpoint::tests::test_model_hash_mismatch_rejected ... ok
+test ovika::tests::actual_entry_bytes_stop_at_one_byte_above_limit ... ok
+test checkpoint::tests::test_load_nonexistent_returns_error ... ok
+test checkpoint::tests::checkpoint_from_previous_time_contract_is_rejected ... ok
+test checkpoint::tests::test_checkpoint_save_load_roundtrip ... ok
+test ovika::tests::entry_size_limit_accepts_boundary_and_rejects_larger_header ... ok
+test checkpoint::tests::test_nonlinear_checkpoint_hash_mismatch ... ok
+test checkpoint::tests::test_nonlinear_checkpoint_roundtrip ... ok
+test ovika::tests::corrupt_model_with_matching_hash_returns_decode_error ... ok
+test ovika::tests::full_length_and_fixed_extent_roundtrip_without_numeric_inference ... ok
+test ovika::tests::false_entry_size_is_rejected_by_zip_reader ... ok
+test ovika::tests::measure_real_model_msgpack ... ignored, 実モデルの codec 比較計測。release・単独で実行する
+test ovika::tests::named_node_reads_added_default_field ... ok
+test ovika::tests::load_rejects_attached_slab_with_common_geometry_diagnostic ... ok
+test ovika::tests::malformed_zip_is_rejected_without_changing_input ... ok
+test ovika::tests::property_basis_roundtrip_keeps_individual_inputs_and_radius_updates ... ok
+test ovika::tests::issue635_save_and_correctly_hashed_load_reject_invalid_fixed_distance ... ok
+test ovika::tests::saved_model_fields_are_named_and_order_independent ... ok
+test ovika::tests::lip_channel_geometry_save_preserves_bytes_and_correct_hash_load_rejects ... ok
+test ovika::tests::surface_radii_ovika_roundtrip ... ok
+test ovika::tests::test_load_without_optional_entries ... ok
+test ovika::tests::test_hash_mismatch ... ok
+test ovika::tests::test_manifest_missing_required_entry_rejected ... ok
+test ovika::tests::test_rejects_unsupported_versions ... ok
+test ovika::tests::test_roundtrip_preserves_optional_entries ... ok
+test ovika::tests::test_roundtrip_preserves_rich_model ... ok
+test ovika::tests::wall_weight_generation_mode_and_dl_choice_roundtrip_and_old_default ... ok
+test ovika::tests::tip_load_roundtrip ... ok
+test ovika::tests::指定なし生成記録の保存往復は未生成と区別する ... ok
+test results::tests::test_fs_result_store_query_node_filter ... ok
+test results::tests::test_fs_result_store_discard_pending_drops_partial_results ... ok
+test results::fs_store::tests::manifest_publish_failure_preserves_previous_entry_and_file_on_disk ... ok
+test results::tests::test_fs_result_store_time_history_step_range_query ... ok
+test results::tests::test_fs_result_store_query_rejects_file_outside_store ... ok
+test results::tests::test_fs_result_store_rewrite_dedup ... ok
+test ovika::tests::noncanonical_secondary_ids_reject_persistence_while_rc_purpose_is_inspectable ... ok
+test results::tests::test_time_history_schema_and_batch_layout ... ok
+test results::tests::test_modal_roundtrip_partial ... ok
+test results::tests::test_fs_result_store_writer_manifest_and_reopen ... ok
+test results::tests::test_time_history_write_read_and_node_filter ... ok
+test stbridge::import::material_std::tests::test_resolve_grade_concrete_uses_fc_dependent_unit_weight ... ok
+test stbridge::import::material_std::tests::test_resolve_grade_rebar_and_concrete ... ok
+test stbridge::import::material_std::tests::test_resolve_grade_sn490_is_325 ... ok
+test stbridge::import::material_std::tests::test_resolve_grade_steel_mass_density ... ok
+test stbridge::import::material_std::tests::test_resolve_grade_wires_to_core ... ok
+test stbridge::rebar_tests::apply_conditions_absence_false_and_partial_true_do_not_invent_values ... ok
+test results::tests::test_parquet_roundtrip_basic_schemas ... ok
+test stbridge::rebar_tests::common_apply_roles_resolve_effective_counts_diameters_and_strength_without_filling_raw ... ok
+test stbridge::rebar_tests::apply_boolean_lexical_defaults_and_individual_precedence_remain_distinct ... ok
+test ovika::tests::frame_node_counts_reject_save_without_overwrite_and_correct_hash_load ... ok
+test stbridge::rebar_tests::native_circle_exports_explicit_band_count_and_remains_supported ... ok
+test stbridge::rebar_tests::explicit_center_takes_priority_without_overwriting_original_cover_or_omission ... ok
+test stbridge::rebar_tests::standard_column_x_counts_vertical_rows_and_native_export_inverts_the_mapping ... ok
+test stbridge::rebar_tests::circle_band_count_is_required_preserved_and_gated_before_reduction ... ok
+test stbridge::rebar_tests::standard_rebar_invalid_values_and_semantics_are_rejected ... ok
+test stbridge::rebar_tests::src_standard_column_and_beam_rebar_ovika_roundtrip_preserves_schema_child_order ... ok
+test stbridge::rebar_tests::standard_roles_positions_and_omissions_remain_distinct ... ok
+test stbridge::rebar_tests::standard_unrepresentable_geometry_is_preserved_and_unused_sections_do_not_block_analysis ... ok
+test stbridge::rebar_tests::third_party_unmodified_known_invalid_common_is_rejected ... ok
+test stbridge::rebar_tests::unresolved_required_diameter_is_preserved_and_never_treated_as_unreinforced ... ok
+test stbridge::strength_tests::concrete_priority_omissions_and_unknown_upper_are_independent ... ok
+test stbridge::strength_tests::designated_original_node_survives_order_level_and_prepare_changes ... ok
+test stbridge::strength_tests::diameter_and_individual_strength_keep_all_parts_separate ... ok
+test stbridge::rebar_tests::standard_numeric_and_boolean_whitespace_preserves_raw_and_semantics ... ok
+test stbridge::strength_tests::exact_member_and_section_binding_keeps_coincident_members_distinct ... ok
+test ovika::reference_tests::indexed_ids_and_existing_reference_families_are_checked_before_persistence ... ok
+test stbridge::rebar_tests::unresolved_standard_topology_is_saved_instead_of_rejected_by_an_unproved_total_formula ... ok
+test stbridge::strength_tests::frame_stbridge_import_rejects_repeated_node_ids_with_shared_diagnostic ... ok
+test stbridge::strength_tests::qualified_numeric_section_id_keeps_column_strength_separate_from_beam ... ok
+test stbridge::strength_tests::edited_unknown_src_steel_keeps_all_properties_and_native_override ... ok
+test stbridge::strength_tests::split_slab_export_starts_at_original_strength_node_and_keeps_omission ... ok
+test stbridge::strength_tests::frame_two_nodes_stbridge_and_ovika_roundtrip_preserve_strength_sources_and_axis ... ok
+test stbridge::strength_tests::ovika_preserves_raw_omission_and_arbitrary_properties ... ok
+test stbridge::strength_tests::story_competition_does_not_block_upper_strength ... ok
+test stbridge::strength_tests::src_standard_steel_child_survives_and_numeric_override_is_not_exported_as_grade ... ok
+test stbridge::strength_tests::unknown_present_grade_never_uses_known_lower_grade ... ok
+test stbridge::strength_tests::unknown_src_steel_grades_keep_metadata_without_stock_strength_or_mapping ... ok
+test stbridge::strength_tests::split_slab_keeps_original_first_node_supply_and_refuses_unrepresentable_export ... ok
+test stbridge::tests::frame_node_counts_export_rejects_instead_of_dropping_members ... ok
+test stbridge::tests::assigned_members_625_preserve_independent_xml_fields_and_shape_none ... ok
+test stbridge::tests::rc_circle_girder_export_is_rejected_without_shape_conversion ... ok
+test stbridge::tests::h_radii_roundtrip_and_missing_radius_stays_unknown ... ok
+test stbridge::tests::surface_radius_export_rejects_unknown_zero_and_invalid ... ok
+test stbridge::tests::test_export_errors_when_secondary_has_no_end_node ... ok
+test stbridge::tests::test_export_rejects_beam_section_with_brace_use ... ok
+test stbridge::tests::test_export_post_only_uses_column_section ... ok
+test stbridge::tests::test_export_secondary_post_uses_column_section_map ... ok
+test stbridge::tests::test_export_skips_plateless_and_attached_orphan_sections ... ok
+test stbridge::tests::test_export_strips_illegal_control_chars ... ok
+test stbridge::tests::test_import_auto_fixes_base_level_supports ... ok
+test stbridge::rebar_tests::standard_rebar_research_cases_use_product_import_and_ovika_roundtrip ... ok
+test stbridge::tests::test_import_auto_support_excludes_beam_only_base_nodes ... ok
+test stbridge::tests::test_import_box_without_r_attr_is_corner_r_zero ... ok
+test stbridge::tests::test_import_cantilever_slab_becomes_attached ... ok
+test stbridge::rebar_tests::applied_cover_center_mismatch_is_preserved_and_reported_without_blocking ... ok
+test stbridge::tests::test_import_cft_without_strength_keeps_section_unresolved ... ok
+test stbridge::tests::test_import_does_not_merge_sections_with_different_materials ... ok
+test stbridge::tests::test_import_converts_unenclosed_parapet_to_attached_wall_plate ... ok
+test stbridge::tests::test_import_cft_separates_concrete_and_steel_materials ... ok
+test stbridge::tests::test_import_duplicate_node_id_is_error ... ok
+test stbridge::tests::test_import_errors_when_slab_area_stays_unassigned ... ok
+test stbridge::tests::test_import_enclosed_frame_with_slab_folds_to_one_region ... ok
+test stbridge::tests::test_import_keeps_section_floor ... ok
+test stbridge::tests::test_import_export_parallel_axes ... ok
+test stbridge::tests::test_import_merges_identical_duplicate_sections ... ok
+test stbridge::tests::test_import_normalizes_noncontiguous_ids ... ok
+test stbridge::tests::test_import_propagates_steel_grade_material_to_member ... ok
+test stbridge::tests::test_import_propagates_rc_material_to_member ... ok
+test stbridge::tests::test_import_non_parallel_axes_as_other ... ok
+test stbridge::tests::test_import_rc_beam_rebar_stages ... ok
+test stbridge::tests::test_import_rc_circle_beam_unsupported ... ok
+test stbridge::tests::test_import_rc_circle_column_total_count ... ok
+test stbridge::tests::test_import_rc_rebar_third_party_names ... ok
+test stbridge::tests::test_import_rc_rebar_layered_counts ... ok
+test stbridge::tests::test_import_rc_kind_preserved ... ok
+test stbridge::tests::test_import_rc_without_bar_arrangement_uses_default ... ok
+test stbridge::tests::test_import_rc_rect_column_hoop_legs ... ok
+test stbridge::tests::test_import_rejects_unresolved_steel_ref ... ok
+test stbridge::tests::test_import_rejects_dangling_section_ref ... ok
+test stbridge::tests::test_import_renames_conflicting_duplicate_sections ... ok
+test stbridge::tests::test_import_report_lists_unsupported_elements ... ok
+test stbridge::tests::test_import_report_unknown_elements_are_reported ... ok
+test stbridge::tests::test_import_renames_same_name_sections_from_different_families ... ok
+test stbridge::tests::test_import_reports_attribute_dispositions ... ok
+test stbridge::tests::test_import_slab_node_order_cdata_and_self_closing_window ... ok
+test stbridge::tests::test_import_sorts_stories_by_elevation ... ok
+test stbridge::tests::test_import_slab_with_node_order_and_thickness ... ok
+test stbridge::tests::test_import_slab_section_and_self_weight ... ok
+test stbridge::tests::test_import_stbbeam_as_secondary_member ... ok
+test stbridge::tests::test_import_splits_slab_across_assignment_regions ... ok
+test stbridge::tests::test_import_stbpost_bottom_top ... ok
+test stbridge::tests::test_import_stbsecbrace_s ... ok
+test stbridge::tests::test_import_steel_pipe_library ... ok
+test stbridge::tests::test_import_symmetric_build_h_is_steel_h ... ok
+test stbridge::tests::test_import_uses_member_context_without_reinterpreting_rc_purpose_types ... ok
+test stbridge::tests::test_import_wall_with_node_order_and_thickness ... ok
+test stbridge::tests::test_non_quad_wall_plate_roundtrip_export_import ... ok
+test stbridge::tests::test_import_without_walls_rebuilds_wall_assignment_regions ... ok
+test stbridge::tests::test_reject_unsupported_version ... ok
+test stbridge::tests::test_roundtrip_brace ... ok
+test stbridge::strength_tests::wall_last_node_and_explicit_member_omission_survive_native_roundtrip_and_export ... ok
+test stbridge::tests::test_roundtrip_semantic ... ok
+test stbridge::tests::test_read_stbridge_file_shift_jis ... ok
+test stbridge::tests::test_roundtrip_twice_stable ... ok
+test stbridge::tests::test_secondary_members_roundtrip ... ok
+test stbridge::tests::test_standard_export_built_h ... ok
+test stbridge::tests::test_standard_export_flat_bar ... ok
+test stbridge::tests::test_slab_roundtrip_export_import ... ok
+test stbridge::tests::test_slab_shared_section_does_not_multiply_on_roundtrip ... ok
+test stbridge::tests::test_self_closing_slab_does_not_steal_wall_nodes ... ok
+test stbridge::tests::test_standard_export_lip_channel ... ok
+test stbridge::tests::test_standard_export_round_bar ... ok
+test stbridge::tests::test_standard_export_shared_rc_rect_rebar_and_reject_cross_family_reference ... ok
+test stbridge::tests::test_standard_export_src_column_rect_stages ... ok
+test stbridge::tests::test_standard_export_warns_on_fourth_rebar_stage ... ok
+test stbridge::tests::test_standard_import_recovers_split_shared_section ... ok
+test stbridge::tests::test_standard_import_roundtrip_steel_and_rc ... ok
+test stbridge::tests::test_standard_export_src_beam_rect_stages ... ok
+test stbridge::tests::test_standard_mode_fallback_raw_for_shapeless ... ok
+test stbridge::tests::test_standard_mode_rc_beam ... ok
+test stbridge::tests::test_standard_import_steel_library_order_independent ... ok
+test stbridge::tests::test_standard_mode_steel_column ... ok
+test stbridge::tests::test_standard_mode_shared_section_split ... ok
+test stbridge::tests::test_standard_roundtrip_cft_pipe ... ok
+test stbridge::tests::test_standard_roundtrip_cft_box ... ok
+test ovika::tests::rc_purpose_rejects_save_and_correctly_hashed_load_without_overwriting_existing_file ... ok
+test stbridge::tests::test_read_stbridge_file_utf8_bom ... ok
+test stbridge::tests::test_standard_roundtrip_rc_rebar_without_shear_material ... ok
+test stbridge::tests::test_standard_roundtrip_shear_rebar_material_with_control_chars ... ok
+test stbridge::tests::test_standard_roundtrip_src_beam ... ok
+test stbridge::tests::test_standard_roundtrip_src_column ... ok
+test stbridge::tests::test_standard_roundtrip_steel_box_distinct_corner_r ... ok
+test stbridge::tests::test_standard_roundtrip_rc_column_rect_stages_legs ... ok
+test stbridge::tests::test_standard_roundtrip_rc_circle_column_rebar ... ok
+test stbridge::tests::test_standard_roundtrip_rc_beam_rect_stages ... ok
+test stbridge::tests::test_standard_roundtrip_rc_beam_rebar ... ok
+test stbridge::tests::test_standard_unsupported_cft_beam_shape_falls_back_to_raw ... ok
+test stbridge::tests::test_standard_roundtrip_rc_column_circle_count ... ok
+test stbridge::tests::test_standard_writes_section_material ... ok
+test wave_library::tests::test_list_empty_when_dir_absent ... ok
+test stbridge::tests::test_standard_roundtrip_rc_rebar_non_integer ... ok
+test stbridge::tests::unassigned_primary_members_625_reject_both_exports_and_recover_by_assignment ... ok
+test stbridge::tests::unassigned_secondary_members_625_reject_detached_and_region_exports_then_recover ... ok
+test wave_library::tests::test_list_filters_non_wave_extensions_and_sorts ... ok
+test wave_library::tests::test_register_creates_dir_and_copies ... ok
+test wave_library::tests::test_wave_sha256_matches_direct_hash ... ok
+test stbridge::tests::test_wall_roundtrip_export_import ... ok
+test wave_library::tests::test_register_overwrites_same_name ... ok
+test ovika::reference_tests::all_member_locations_reject_noncanonical_section_references_and_keep_incomplete_models ... ok
+
+test result: ok. 188 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.47s
+
+     Running tests\cft_torsion_roundtrip.rs (target\debug\deps\cft_torsion_roundtrip-637f59f46aea0f90.exe)
+
+running 2 tests
+test current_ovika_preserves_h_box_radius_basis_supplied_j_and_shape_resolution ... ok
+test current_ovika_preserves_cft_steel_j_and_actual_steel_g_in_beam_and_fiber ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.38s
+
+     Running tests\external_ids.rs (target\debug\deps\external_ids-8c78ec59397b86fd.exe)
+
+running 8 tests
+test stb_negative_section_reference_is_rejected_for_all_linear_member_types ... ok
+test stb_post_invalid_or_missing_required_endpoint_never_uses_another_alias ... ok
+test stb_u32_parser_boundary_ids_resolve_to_the_same_section_and_grade_material ... ok
+test stb_member_source_id_parser_accepts_omission_and_u32_boundaries_with_resolved_section ... ok
+test stb_boundary_node_reference_tokens_are_not_silently_discarded ... ok
+test stb_plate_section_parser_boundary_ids_resolve_at_zero_and_u32_max ... ok
+test stb_whole_document_rejects_invalid_present_member_reference_and_source_ids ... ok
+test stb_required_definition_and_endpoint_ids_reject_missing_or_invalid_values ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\frame_support_representation.rs (target\debug\deps\frame_support_representation-6a0d0426326a41d0.exe)
+
+running 1 test
+test 明示解析表現の床壁版支持境界は実ovika保存読込再構築で保持する ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests\lip_channel_geometry.rs (target\debug\deps\lip_channel_geometry-5b286aa1ff75a0ed.exe)
+
+running 1 test
+test lip_channel_geometry_ovika_roundtrip_and_public_save_export_rejection ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\ovika_reference_boundaries.rs (target\debug\deps\ovika_reference_boundaries-35109286e686859d.exe)
+
+running 1 test
+test save_and_independent_load_reject_missing_targets_and_preserve_input ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.70s
+
+     Running tests\stbridge_brace_content.rs (target\debug\deps\stbridge_brace_content-7435219722abae66.exe)
+
+running 3 tests
+test write_public_brace_exports_for_external_xsd ... ignored, 公式XSD外部検証用。SEPIKA_BRACE_XSD_OUTPUTに出力ディレクトリを指定する
+test steel_brace_export_preserves_escaped_attribute_characters ... ok
+test steel_brace_export_has_only_xml_whitespace_between_children ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\stbridge_namespace.rs (target\debug\deps\stbridge_namespace-a117910e04a367fa.exe)
+
+running 9 tests
+test root_without_adopted_namespace_is_rejected ... ok
+test child_default_namespace_removal_and_prefix_rebinding_are_rejected ... ok
+test foreign_known_element_and_foreign_wrapper_are_rejected_before_adopted_children ... ok
+test unbound_element_and_attribute_prefixes_are_rejected ... ok
+test extension_payload_still_rejects_foreign_elements_and_unbound_attributes ... ok
+test bound_attribute_qname_is_not_used_as_unqualified_id ... ok
+test schema_invalid_known_elements_inside_extension_are_not_dispatched ... ok
+test adopted_default_prefix_alias_and_same_uri_redeclaration_preserve_column_strength ... ok
+test explicit_extension_structure_and_attribute_text_do_not_change_model_or_strength ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\stbridge_section_reference_boundaries.rs (target\debug\deps\stbridge_section_reference_boundaries-8cad7131b855897a.exe)
+
+running 6 tests
+test brace_rc_and_src_report_unsupported_kind_without_inventing_a_section_family ... ok
+test a_defined_undefined_section_stays_unsupported_for_columns_posts_girders_and_beams ... ok
+test brace_and_wall_never_fall_back_to_another_series_with_the_same_id ... ok
+test brace_and_wall_bind_their_own_sections_materials_and_strength_targets ... ok
+test every_member_tag_reports_source_kind_requested_family_and_section_id ... ok
+test all_nineteen_concrete_series_reject_normalized_duplicates_before_shape_support ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\stbridge_section_series.rs (target\debug\deps\stbridge_section_series-1953f459849c9ed4.exe)
+
+running 12 tests
+test missing_invalid_and_unsupported_structure_kind_have_distinct_reasons ... ok
+test normalized_duplicate_ids_are_rejected_within_the_same_concrete_series ... ok
+test missing_requested_family_never_uses_another_family_with_the_same_id ... ok
+test precast_is_rejected_as_unsupported_even_when_rc_and_deck_share_its_id ... ok
+test column_post_and_girder_beam_share_their_concrete_section_series ... ok
+test section_definition_and_reference_outside_u32_are_rejected ... ok
+test concrete_steel_src_and_cft_columns_and_beams_resolve_their_specific_series ... ok
+test independent_column_and_girder_with_same_numeric_id_keep_their_own_fc ... ok
+test sparse_original_ids_and_leading_zero_references_keep_their_own_fc ... ok
+test same_name_same_shape_sections_with_different_fc_stay_distinct ... ok
+test slab_rc_and_deck_with_same_id_keep_thickness_and_concrete_binding ... ok
+test ovika_preserves_binding_after_actual_internal_section_and_element_renumbering ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests\stbridge_standard_input.rs (target\debug\deps\stbridge_standard_input-c56ef50afbfeeb4c.exe)
+
+running 6 tests
+test ordinary_secondary_missing_references_fail_at_both_entrances ... ok
+test standard_rc_dimensions_and_grade_survive_without_custom_material_ids ... ok
+test standard_steel_input_resolves_shape_material_and_sparse_references ... ok
+test ordinary_slab_and_wall_reference_errors_fail_at_both_entrances ... ok
+test ordinary_missing_node_section_and_shape_references_fail_at_both_entrances ... ok
+test standard_build_h_and_pipe_dimensions_are_preserved ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\stbridge_standard_rebar.rs (target\debug\deps\stbridge_standard_rebar-ddcc5e8cca118824.exe)
+
+running 4 tests
+test misplaced_child_cover_and_center_do_not_supply_geometry_or_metadata ... ok
+test standard_rc_src_rebar_and_grade_priority_reach_both_public_imports ... ok
+test internal_material_and_strength_edits_survive_ovika ... ok
+test standard_container_positions_and_apply_conditions_survive_ovika ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+
+     Running unittests src\lib.rs (target\debug\deps\sepika_mcp-ac4d03fc64eefc71.exe)
+
+running 130 tests
+test job::design_check::tests::panel_505_mcp_summary_retains_skipped_plane_and_denies_all_ok ... ok
+test job::design_check::tests::wall_output_assembly_keeps_independent_status_keys_counts_and_null_max ... ok
+test job::signed_q0_acceptance_tests::signed_q0_mcp_missing_repaired_missing_never_reports_success ... ok
+test job::signed_q0_acceptance_tests::signed_q0_mcp_nonstandard_live_factor_is_reasoned_unchecked_and_steel_needs_no_q0 ... ok
+test job::signed_q0_acceptance_tests::signed_q0_mcp_saved_and_automatic_selection_preserve_case_partition ... ok
+test job::design_check::tests::mcp_design_crack_points_match_independent_fixture_in_json ... ok
+test job::time_history::tests::mcp_time_history_rejects_invalid_sample_duration_and_dt ... ok
+test job::design_check::tests::mcp_rc_wall_static_case_and_combo_preserve_solved_batch_and_face_state ... ok
+test job::time_history::tests::linear_mcp_time_history_does_not_require_rc_wall_capacity ... ok
+test job::pushover::tests::mcp_wall_history_has_plate_run_input_and_null_distinct_from_zero ... ok
+test persist::tests::manifest_contract_versions_and_missing_metadata_reopen_without_restamping ... ok
+test server::external_id_tests::actual_model_edit_body_rejects_overflow_without_mutation_and_normal_edit_undo_restores ... ok
+test persist::tests::load_state_combination_inline_forces_report_truncation_without_store_entries ... ok
+test server::nonnodal_quantity_acceptance_tests::nonnodal557_mcp_handler_groups_keep_secondary_identity_and_unavailable ... ok
+test server::nonnodal_quantity_acceptance_tests::nonnodal557_mcp_handler_retains_unknown_story_and_fallback_label ... ok
+test server::nonnodal_quantity_acceptance_tests::nonnodal557_mcp_supported_edit_handler_undo_redo_and_save_roundtrip ... ok
+test persist::tests::another_kind_and_model_in_same_directory_never_restamp_or_merge_old_runs ... ok
+test server::tests::lip_channel_geometry_actual_mcp_tools_report_reason_without_results ... ok
+test persist::tests::selected_entry_path_hash_conditions_and_model_input_control_retrieval ... ok
+test job::pushover::tests::mcp_rc_wall_initial_capacity_matches_same_job_run_without_reference_publication ... ok
+test server::tests::mixed_structure_basement_mcp_standard_load_matches_above_ground_period ... ok
+test persist::tests::failed_write_finish_or_sync_keeps_previous_published_metadata_and_bytes ... ok
+test server::tests::public_mcp_crack_reference_matches_independent_points_and_opening_skip ... ok
+test persist::tests::analysis22_23_24_25_missing_future27_and_current26_control_analysis_and_design18_rows ... ok
+test server::tests::saving_compute_worker_panic_reaches_failed ... ok
+test server::tests::saving_computed_snapshot_survives_live_model_edit ... ok
+test server::tests::result_public_api_keeps_old_snapshot_and_distinguishes_restarted_job_ids ... ok
+test server::tests::load_state_combination_jobs_preserve_single_case_store_and_return_their_own_forces ... ok
+test server::tests::public_mcp_high_density_steel_rejects_existing_design_load_case_and_recovers ... ok
+test server::tests::public_mcp_ex_uses_edited_density_finish_and_seismic_live_without_prepare_button ... ok
+test server::tests::saving_current_thread_status_and_state_exclusion ... ok
+test server::tests::saving_multithread_status_and_state_exclusion ... ok
+test server::tests::saving_concurrent_jobs_keep_their_ids_summaries_and_exclusive_store ... ok
+test server::tests::saving_status_responds_before_save_release ... ok
+test server::tests::test_analysis_run_fails_without_load_case ... ok
+test server::tests::saving_real_writer_and_manifest_failures_are_failed ... ok
+test server::tests::test_analysis_run_semi_precise_without_design_period_completes ... ok
+test server::tests::test_design_check_job_reports_ng_count ... ok
+test server::tests::test_eigen_job_persists_and_result_get_modal ... ok
+test server::tests::test_linear_static_job_persists_and_result_get_filters_nodes ... ok
+test server::tests::test_result_get_missing_case_is_invalid_params ... ok
+test server::tests::test_to_job_params_parses_seismic_settings ... ok
+test server::tests::test_pushover_job_completes_with_max_base_shear_in_summary ... ok
+test tests::attached_slab_mcp_rejects_creation_extent_and_anchor_with_common_diagnostic ... ok
+test tests::beam_contact_quantity_mcp_preserves_union_and_diagnostics ... ok
+test tests::beam_contact_quantity_mcp_tool_returns_verified_rows_and_unavailable_reasons ... ok
+test tests::circular_post_quantity_headless_preserves_values_and_diagnostics ... ok
+test tests::directional_wall_quantity_actual_mcp_tools_edit_settings_and_report_missing_direction ... ok
+test tests::directional_wall_quantity_mcp_edit_and_all_groupings_preserve_partial_reasons_and_saved_settings ... ok
+test server::tests::zero_requested_eigen_modes_remain_known_after_publication_and_reopen ... ok
+test tests::lateral_bracing_mcp_invalid_group_reference_is_retained_without_fallback ... ok
+test tests::issue635_existing_mcp_analysis_rejects_fixed_distance_and_preserves_model ... ok
+test tests::linear_static_job_rejects_ex_without_seismic_horizontal_load ... ok
+test tests::lip_channel_geometry_mcp_query_analysis_and_quantity_report_reason ... ok
+test tests::lateral_bracing_mcp_job_preserves_typed_reference_and_member_checks ... ok
+test tests::load_state_direct_rc_girder_missing_q0_is_skipped_while_typed_beam_accepts_valid_zero ... ok
+test server::tests::frame_node_counts_mcp_tools_reject_without_mutating_model_or_results ... ok
+test tests::load_state_mcp_automatic_gravity_uses_frame_live_and_rejects_any_failed_gravity ... ok
+test tests::load_state_mcp_single_unknown_and_invalid_target_are_never_passed ... ok
+test tests::mcp_eigen_rejects_unknown_wall_band_and_refreshes_valid_edits_before_solving ... ok
+test tests::loaded_full_length_intent_survives_mcp_preparation_and_linear_analysis ... ok
+test tests::pending_geometry_queries_and_quantity_are_not_reported_as_zero ... ok
+test tests::rebar_cover_center_notice_query_is_nonblocking_and_distinct_from_strength_errors ... ok
+test tests::load_state_saved_mcp_job_keeps_independent_n_q_m_values_and_duration ... ok
+test tests::running_progress_json_and_schema_distinguish_unmeasured_from_zero ... ok
+test tests::secondary_cft_quantity_is_unavailable_for_all_kinds_shapes_and_locations ... ok
+test tests::secondary_cft_mcp_tool_returns_unavailable_without_totals ... ok
+test tests::source_story_empty_table_mcp_kind_edit_preserves_empty_table_and_undo ... ok
+test tests::source_story_mcp_edit_query_diagnostics_and_snapshot_match_shared_command ... ok
+test tests::standard_rebar507_joint_public_entries_gate_consumed_sections_and_preserve_normal_ratios ... ok
+test tests::source_story_native_kind_mcp_matches_gui_command_and_preserves_imported_kinds ... ok
+test tests::standard_rebar507_query_reports_preserved_source_and_unsupported_analysis ... ok
+test tests::static595_mcp_linear_static_job_adopts_column_and_tension_settings ... ok
+test tests::standard_rebar507_src_panel_and_pca_public_entries_reject_consumed_unresolved_rebar ... ok
+test tests::static595_mcp_static_and_required_design_cases_reject_real_nonconvergence ... ok
+test tests::static595_mcp_tension_case_superposition_remains_unchecked ... ok
+test tests::stb_strength_incompatible_steel_parts_do_not_supply_a_single_material ... ok
+test tests::stb_strength_material_fy_edit_keeps_raw_grade_and_refuses_numeric_loss ... ok
+test tests::stb_strength_native_concrete_assignment_does_not_generate_materials_and_undo_is_complete ... ok
+test tests::stb_strength_mcp_edits_diagnostics_and_undo_use_resolved_material ... ok
+test tests::stb_strength_native_name_and_numeric_edits_keep_grade_value_consistent ... ok
+test tests::stb_strength_raw_steel_edit_keeps_explicit_native_override_separate ... ok
+test tests::stb_strength_native_rebar_and_shear_assignment_preserve_individual_roles ... ok
+test tests::stb_strength_raw_steel_edit_updates_src_s_and_secondary_consumers ... ok
+test tests::stb_strength_src_fy_edit_preserves_grade_and_undo_redo ... ok
+test tests::stb_strength_s_main_assignment_changes_steel_without_concrete_attribute ... ok
+test tests::stb_strength_wall_delete_first_middle_last_restores_raw_targets_and_values ... ok
+test tests::test_apply_edit_add_attached_slab_flat_and_plate ... ok
+test tests::test_apply_edit_add_attached_wall_plate ... ok
+test tests::test_apply_edit_assign_slab_to_floor_plate_region ... ok
+test tests::stb_strength_src_steel_assignment_adopts_material_and_restores_input ... ok
+test tests::test_apply_edit_nested_body_wrapper ... ok
+test tests::test_apply_edit_noop_unknown_node ... ok
+test tests::test_apply_edit_place_secondary_member ... ok
+test tests::test_apply_edit_set_floor_region_name ... ok
+test tests::test_apply_edit_set_wall_plate_slit ... ok
+test server::tests::saving_failure_and_panic_discard_pending_before_next_job ... ok
+test tests::test_apply_edit_wall_plate_region_assignment ... ok
+test tests::test_compute_design_check_job_default_positions ... ok
+test tests::test_compute_design_check_job_member_detail_joint ... ok
+test tests::test_compute_ultimate_check_job_rejects_incomplete_rc_gravity_demand ... ok
+test tests::test_mcp_set_post_gravity_end_shares ... ok
+test tests::test_job_registry_lifecycle ... ok
+test tests::test_parse_place_secondary_member ... ok
+test tests::test_parse_rejects_legacy_secondary_beam_ids_key ... ok
+test tests::test_parse_rejects_obsolete_set_floor_region_beams ... ok
+test tests::test_parse_rejects_obsolete_set_slab_secondary_beam_ids ... ok
+test tests::test_parse_requires_end_support ... ok
+test tests::test_parse_requires_place_secondary_member_parent ... ok
+test tests::test_parse_requires_secondary_beams_array ... ok
+test tests::test_parse_requires_unassigned_beam_body ... ok
+test tests::test_parse_requires_wall_region_posts ... ok
+test tests::test_parse_set_secondary_member_end_support ... ok
+test tests::test_parse_set_secondary_member_ends ... ok
+test tests::test_quantity_takeoff_json_column ... ok
+test tests::test_query_model_elements_and_sections ... ok
+test tests::test_query_model_elements_with_member_detail ... ok
+test tests::test_query_model_filter ... ok
+test tests::test_query_model_nodes ... ok
+test tests::test_query_model_sections_expose_frame_use ... ok
+test tests::test_query_model_sections_expose_materials ... ok
+test tests::test_query_model_slabs_and_floor_regions ... ok
+test tests::test_query_model_unknown_kind ... ok
+test tests::test_query_model_wall_plates ... ok
+test tests::wall_horizontal_input_survives_ovika_and_mcp_design_reports_missing_assignment ... ok
+test server::tests::seismic_mcp_rejects_invalid_c0_and_unsupported_refined_period ... ok
+test server::tests::sm520_design_job_keeps_out_of_range_summary_after_force_retrieval_and_recalculation ... ok
+test server::tests::cft_long_case2_public_job_keeps_calculated_and_unavailable_diagnostics ... ok
+test tests::cft_long_case2_job_reports_independent_mu_and_never_passes_axial_overload ... ok
+test tests::rounded_cft_jobs_publish_unavailable_reasons_without_claiming_pass ... ok
+
+test result: ok. 130 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.67s
+
+     Running unittests src\main.rs (target\debug\deps\sepika_mcp-60d03ee14fd0ad6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\assignment_identity.rs (target\debug\deps\assignment_identity-1cfdaeb37876cdd8.exe)
+
+running 1 test
+test mcpは版荷重除去の確認前にはモデル履歴を更新せず確認後に一undoで戻せる ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests\external_ids.rs (target\debug\deps\external_ids-e73a329ca294d666.exe)
+
+running 4 tests
+test optional_sections_distinguish_absence_and_null_from_invalid_specification ... ok
+test nested_serde_ids_reject_invalid_values_in_secondary_members_anchors_and_plate_sections ... ok
+test handwritten_and_serde_ids_share_integer_type_and_u32_bounds ... ok
+test rejected_edit_preserves_slab_zero_assignments_and_undo_redo ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\member_load_direction.rs (target\debug\deps\member_load_direction-910c2b1e9d5a4ed5.exe)
+
+running 1 test
+test public_job_rejects_both_load_directions_after_success_and_recovers_only_after_repair ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\rc_plate_section_purpose.rs (target\debug\deps\rc_plate_section_purpose-3323fa2aab30627e.exe)
+
+running 3 tests
+test mcpの正常rc板と数値断面と未割当は床壁の設定と割当と取付追加を許可する ... ok
+test mcpの床壁参照中断面編集はrc専用三型への変更を理由付き拒否する ... ok
+test mcpの床壁断面設定と割当と取付追加はrc専用三型を理由付き拒否し状態を保持する ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests\rc_section_purpose.rs (target\debug\deps\rc_section_purpose-a98c254f8fd8ba0a.exe)
+
+running 4 tests
+test mcpの主架構断面編集は逆用途三型を理由付き拒否しredoとモデルを保持する ... ok
+test mcpは二次専用none断面の参照中逆型変更も理由付き拒否する ... ok
+test mcpの正常三型は同型共有と二次用途未設定で配置と参照中編集を許可する ... ok
+test mcpの配置と領域参照更新は逆用途三型を理由付き拒否する ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests sepika_app
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests sepika_io
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests sepika_mcp
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

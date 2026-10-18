@@ -1,0 +1,13 @@
+{
+  "h_calculated": 356762.6666666667,
+  "h_fixed": 356762.6666666667,
+  "box30_pm_fixed": 1310.79644737231,
+  "box30_am_fixed": 111249.55736846772,
+  "box30_j_fixed": 453213215.4428274,
+  "box30_extra_fixed": 453968234.19651383,
+  "H_signed_relative_arithmetic_error": 0.0,
+  "Box30_pm_signed_relative_arithmetic_error": 0.0,
+  "Box30_Am_signed_relative_arithmetic_error": 0.0,
+  "Box30_J_signed_relative_arithmetic_error": 0.0,
+  "Box30_extra_signed_relative_arithmetic_error": 0.0
+}

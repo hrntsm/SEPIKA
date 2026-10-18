@@ -1,0 +1,57 @@
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.28s
+     Running unittests src\lib.rs (target\debug\deps\sepika_core-f079367c1fe62d0c.exe)
+
+running 8 tests
+test section_shape::core_torsion::controller::tests::invalid_dimensions_and_normalization_underflow_preserve_failure_contract ... ok
+test section_shape::core_torsion::controller::tests::resource_failure_on_added_stage_keeps_original_six_completed_stages ... ok
+test section_shape::core_torsion::controller::tests::finite_limits_return_unconfirmed_with_completed_history_and_failed_settings ... ok
+test section_shape::core_torsion::controller::tests::fourth_aspect_rectangle_converges_on_seventh_stage_without_relaxing_quality ... ok
+test section_shape::core_torsion::controller::tests::tenth_aspect_rectangle_converges_with_actual_free_dofs_and_bounded_history ... ok
+test section_shape::core_torsion::controller::tests::physical_scaling_is_fourth_power_and_restoration_failure_retains_history ... ok
+test section_shape::core_torsion::controller::tests::rectangle_and_circle_agree_with_independent_exact_values_within_point_one_percent ... ok
+test section_shape::core_torsion::controller::tests::rounded_rectangle_has_separate_internal_and_boundary_histories ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 521 filtered out; finished in 6.10s
+
+     Running tests\cft_core_j_reuse_contract.rs (target\debug\deps\cft_core_j_reuse_contract-84796a97c7c21d99.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\cft_torsion_contract.rs (target\debug\deps\cft_torsion_contract-5bae3095a92d7b15.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests\frame_support_representation.rs (target\debug\deps\frame_support_representation-81b9e1dbc9c2ff92.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\lip_channel_geometry.rs (target\debug\deps\lip_channel_geometry-f0b1aabafe7fdf17.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\perf_probe.rs (target\debug\deps\perf_probe-3c161178a3bdd655.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\reference_boundaries.rs (target\debug\deps\reference_boundaries-c2b5796aa0737159.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\torsion_property_contract.rs (target\debug\deps\torsion_property_contract-c6c881bf9bba2495.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

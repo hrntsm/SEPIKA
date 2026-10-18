@@ -1,0 +1,37 @@
+   Compiling sepika-section v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-section)
+   Compiling sepika-load v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-load)
+   Compiling sepika-element v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-element)
+   Compiling sepika-solver v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-solver)
+   Compiling sepika-design-jp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-design-jp)
+   Compiling sepika-job v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-job)
+    Finished `test` profile [optimized + debuginfo] target(s) in 17.54s
+     Running tests\high_density_steel.rs (target\debug\deps\high_density_steel-545d04e7f0ae49b9.exe)
+
+running 3 tests
+test unused_high_density_and_rebar_do_not_block_common_preparation ... ok
+test high_density_rejects_real_preparation_and_old_dl_seismic_then_recovers ... ok
+test real_preparation_boundary_and_invalid_density_keep_separate_diagnostics ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\member_load_direction.rs (target\debug\deps\member_load_direction-36792b8ea995030c.exe)
+
+running 2 tests
+test valid_nonunit_zero_and_opposing_manual_loads_survive_preparation ... ok
+test invalid_direction_rejects_all_cases_before_manual_auto_or_weight_mutation ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\slab_physical_mass.rs (target\debug\deps\slab_physical_mass-81a457fbc91846b8.exe)
+
+running 7 tests
+test density_derived_physical_distribution_is_independent_of_design_adoption ... ok
+test stb_resolved_material_and_all_material_density_validation_apply_to_physical_mass ... ok
+test attached_tip_gravity_load_is_not_replaced_with_slab_density ... ok
+test partial_attached_support_preserves_density_volume_total_and_invalid_inputs_fail ... ok
+test generated_slab_mass_reaches_existing_planar_dynamic_model ... ok
+test finish_live_load_and_shared_material_are_preserved_once ... ok
+test one_cubic_metre_slab_replaces_design_weight_once_for_both_shapes_and_mass_methods ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,74 @@
+[
+  {
+    "shape": "Core_r0",
+    "series": "internal_fixed_polygon",
+    "boundary_segments_per_quadrant": 0,
+    "normalized_max_area_setting": 0.002
+  },
+  {
+    "shape": "Core_r0",
+    "series": "internal_fixed_polygon",
+    "boundary_segments_per_quadrant": 0,
+    "normalized_max_area_setting": 0.0005
+  },
+  {
+    "shape": "Core_r0",
+    "series": "internal_fixed_polygon",
+    "boundary_segments_per_quadrant": 0,
+    "normalized_max_area_setting": 0.000125
+  },
+  {
+    "shape": "Core_r18",
+    "series": "internal_fixed_polygon",
+    "boundary_segments_per_quadrant": 16,
+    "normalized_max_area_setting": 0.002
+  },
+  {
+    "shape": "Core_r18",
+    "series": "internal_fixed_polygon",
+    "boundary_segments_per_quadrant": 16,
+    "normalized_max_area_setting": 0.0005
+  },
+  {
+    "shape": "Core_r18",
+    "series": "internal_fixed_polygon",
+    "boundary_segments_per_quadrant": 16,
+    "normalized_max_area_setting": 0.000125
+  },
+  {
+    "shape": "Core_r18",
+    "series": "internal_fixed_polygon",
+    "boundary_segments_per_quadrant": 32,
+    "normalized_max_area_setting": 0.002
+  },
+  {
+    "shape": "Core_r18",
+    "series": "internal_fixed_polygon",
+    "boundary_segments_per_quadrant": 32,
+    "normalized_max_area_setting": 0.0005
+  },
+  {
+    "shape": "Core_r18",
+    "series": "internal_fixed_polygon",
+    "boundary_segments_per_quadrant": 32,
+    "normalized_max_area_setting": 0.000125
+  },
+  {
+    "shape": "Core_r18",
+    "series": "internal_fixed_polygon",
+    "boundary_segments_per_quadrant": 64,
+    "normalized_max_area_setting": 0.002
+  },
+  {
+    "shape": "Core_r18",
+    "series": "internal_fixed_polygon",
+    "boundary_segments_per_quadrant": 64,
+    "normalized_max_area_setting": 0.0005
+  },
+  {
+    "shape": "Core_r18",
+    "series": "internal_fixed_polygon",
+    "boundary_segments_per_quadrant": 64,
+    "normalized_max_area_setting": 0.000125
+  }
+]

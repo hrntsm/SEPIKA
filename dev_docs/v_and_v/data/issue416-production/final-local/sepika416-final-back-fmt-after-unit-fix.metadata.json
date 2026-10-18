@@ -1,0 +1,10 @@
+{
+  "Command": "cargo fmt --all -- --check",
+  "Cwd": "C:\\Users\\hiroa\\Desktop\\ikkan",
+  "Started": "2026-10-18T22:03:42.4159402+09:00",
+  "Finished": "2026-10-18T22:03:45.7881764+09:00",
+  "ExitCode": 0,
+  "Raw": "C:\\Users\\hiroa\\AppData\\Local\\Temp/sepika416-final-back-fmt-after-unit-fix.raw.txt",
+  "RawSize": 0,
+  "RawSha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+}

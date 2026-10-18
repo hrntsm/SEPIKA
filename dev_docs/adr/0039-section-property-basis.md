@@ -29,6 +29,10 @@ undo/redo と OVIKA の保存・読込でも、この項目別の算定元区分
 ねじり定数 J の算定方法自体の見直しは [#416](https://github.com/hrntsm/SEPIKA/issues/416)、鋼材せん断面積の算定方法自体の見直しは [#417](https://github.com/hrntsm/SEPIKA/issues/417) に分離します。
 本 ADR では、これらの算定方法や適用範囲を拡大しません。
 
+J の解決と半径編集時の扱いは [ADR 0062](0062-cft-core-torsion-resolution.md) で具体化します。
+形状由来の J も再評価し、算定できなければ理由付き未算定とします。供給された J を保持する判断は維持します。
+A・I が更新可能でも J だけが未算定になり得るため、半径編集を A・I の更新と J の無条件保持として扱いません。
+
 ## 角丸 CFT の規準設計の分離
 
 ユーザー回答 Q11 A により、正の角Rの規準設計仕様を [#418](https://github.com/hrntsm/SEPIKA/issues/418) へ分離します。

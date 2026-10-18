@@ -1,0 +1,12 @@
+{
+  "rows": 31,
+  "series": 8,
+  "old_mesh_hash_matches": 17,
+  "old_j_exact_matches": 18,
+  "max_abs_j_relative_difference": 3.42230688232803e-11,
+  "max_original_relative_residual": 1.1693629397682814e-12,
+  "max_augmented_relative_residual": 1.169363468037354e-12,
+  "all_counts_and_extreme_areas_equal": true,
+  "total_compute_seconds": 62.47622970008524,
+  "quality_passed": true
+}
