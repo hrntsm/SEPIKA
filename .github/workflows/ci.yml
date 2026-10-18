@@ -1,21 +1,14 @@
 name: CI
 
-# main への push では、テスト用依存ビルドキャッシュ（Swatinem/rust-cache、job id=test）の
-# 生成・更新のためにテストジョブを実行する。GitHub Actions のキャッシュは base ブランチから
-# PR へ復元できる一方、PR（merge ref）で保存したキャッシュはその PR からしか復元できない。
-# そのため main 側でキャッシュを作り、新規 PR の初回実行から復元できるようにする。
-# 品質ゲート（テスト実行・静的解析・ビルド確認）は従来どおり PR で実施する。
 on:
+  # main への push は、新規 PR が復元するテスト用キャッシュ（rust-cache、job id=test）の
+  # 生成・更新のため。品質ゲート（テスト実行・静的解析）は PR でのみ実施する。
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
-# 同一 PR への新しい push 時に、進行中の古い実行をキャンセルする。main への連続 push でも
-# 先行実行がキャンセルされうるが、キャンセルされた回のキャッシュ保存は行われず、次回の
-# main 実行が生成・更新するため実害はない。
-# 品質ゲートは PR で実施する。main への push ではテストジョブをキャッシュ生成用のビルドに
-# 限定し（テスト実行なし）、docs デプロイ（docs.yml）は別 workflow で実行する。
+# 同一 PR への新しい push 時に、進行中の古い実行をキャンセルする。
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -23,12 +16,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
-  # main（push）ではキャッシュ生成に必要なビルドまでとし、テストの実行は PR に限定する。
-  # --no-run はテストバイナリの実行だけを止め、依存のコンパイル内容・feature・profile は
-  # PR 実行と同一で、キャッシュの再利用対象は変わらない。
-  # 変数名は rust-cache がキャッシュキー（環境ハッシュ）に含める接頭辞
-  # （CARGO / RUST / CC / CFLAGS / CXX / CMAKE）を避ける。接頭辞があると値が main と PR で
-  # 異なるためキャッシュキーが一致しなくなる。
+  # main では --no-run（テスト実行のみ省略。ビルド内容は PR と同一）。変数名は rust-cache が
+  # キーに含める接頭辞（CARGO / RUST / CC / CFLAGS / CXX / CMAKE）を避ける（main と PR で値が
+  # 異なるとキーが食い違うため）。
   TEST_BUILD_ONLY_ARGS: ${{ github.event_name == 'push' && '--no-run' || '' }}
 
 jobs:
@@ -40,12 +30,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         id: rust-cache
-      # main で復元したキャッシュが完全一致なら依存は揃っており、同一キーへの再保存は
-      # できない（キャッシュは上書き不可）ためビルドをスキップする。PR では常に実行する。
-      # キーは Cargo.lock / Cargo.toml / rustc 版 / キー対象 env 値で決まり、ci.yml の
-      # コマンド・feature 指定の変更では変わらない。その場合も main は exact hit で
-      # スキップし、キャッシュ更新は次にキーが変わる時まで遅延する（PR 側で不足分を
-      # コンパイルするため正しさは維持される）。
+      # 完全一致で復元できた場合、同一キーへは再保存できない（キャッシュは上書き不可）ためスキップする。
       - name: テスト実行
         if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo test --workspace --locked $TEST_BUILD_ONLY_ARGS
@@ -75,7 +60,6 @@ jobs:
 
   clippy:
     name: Clippy静的解析
-    # 品質ゲートは PR のみ。main への push ではテストジョブのみ実行する。
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
