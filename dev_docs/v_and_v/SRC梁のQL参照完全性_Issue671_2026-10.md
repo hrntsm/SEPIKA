@@ -193,3 +193,20 @@ summaryはrun14まで、最終fmt run15はfinal reportで確認した。初回ru
 - 内法・係数・材料等の全一般validatorやSRC柱/CFTの仕様変更は行わない。既存CFTのF235記述矛盾は #601 の追跡を維持し、本件へ混ぜない。
 
 未確認は[未検証一覧](未検証一覧.md#src梁のql参照完全性671)で追跡し、開発完了の現在状態は元Issueと後続PRを正とする。
+
+## 先行依存是正との統合検証
+
+2026-10-18 JST、先行#690 / [PR #691](https://github.com/hrntsm/SEPIKA/pull/691)の通常merge後のmain `8830361c3c58eb3247b059a62efbda45ee6e3558`を、本件のhead `de3a376c6222fc2cca0ea4189bb1df036da86807`へ通常merge中の作業ツリーで確認した。先行PRの[CI](https://github.com/hrntsm/SEPIKA/actions/runs/39081211066)・[docs build](https://github.com/hrntsm/SEPIKA/actions/runs/39081210979)は成功。親のTEMP `sepika690-main-proof.json`ではmain/origin main一致、先行8blob一致、cleanを確認した。本節の4実行時点では本件の統合commitは未作成で、HEADは`de3a376c`、MERGE_HEADは`8830361c`だった。
+
+V&Vの2索引の衝突は両Issueの行・節を併存させて解消した。先行変更のzip9.0.5・従来8feature明示・PPMdなし、OVIKAの4GiB制限・2呼出元・4境界試験を保持し、本件の検定契約14/解析契約23と組み合わせて次の利用側を再検証した。
+
+| run | コマンド | 結果 |
+| --- | --- | --- |
+| 01 | `cargo test -p sepika-app --lib --locked` | 346成功/0ignored。SRC公開actions・OVIKA旧検定失効/明示再検定と既存CFT再計算を含む |
+| 02 | `cargo test -p sepika-io --locked` | 195成功/既存2ignored。先行4境界試験と既存STB試験を含む |
+| 03 | `cargo test -p sepika-design-jp src_beam_ --locked` | 19成功/0ignored。QL/Q0独立値・位置と有限性・公開runnerの不足非復活を含む |
+| 04 | `cargo test -p sepika-mcp --lib analysis22_missing_future24_and_current23_control_analysis_and_design14_rows --locked` | 既存保存試験1成功/0ignored。MCP専用の新規受入は追加していない |
+
+全4runはexit0、rustc/cargo1.99.1、`RUSTFLAGS`・`CARGO_TARGET_DIR`・`RUSTUP_TOOLCHAIN`は未設定。構成・試験間の重複を独立仕様数として合算しない。4run全体の前後でRust/Cargo/JSON対象649ファイルのSHA256はすべて一致し、source manifest SHA256も前後とも`F6797DF4071C5E6D36E76113CD5A3D635704FBB200AA2596C217AB5C6C9ECBF3`だった。各本人handleのexit0終端、残存ownhandle0・Cargo/rustc/rustdoc process0を確認した。
+
+証拠はTEMP `sepika671-integration-20261018/`の各run `command.txt`・`raw.txt`・`result.json`、`environment.json`・`toolchain.txt`・`source-before.json`・`source-after.json`・`source-and-ownership-proof.json`に保持した。本節は実行後の文書追補で、過去runのraw/件数/SHAを変更していない。統合後のfresh独立レビュー、本件最終headの全適用CI/docs build・通常merge/main反映は本追記時点未確認で、先行PRの成功や今回の関連検証で置き換えない。上記の未確認・対象外範囲も維持する。
