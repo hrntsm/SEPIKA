@@ -861,7 +861,7 @@ pub fn build_preparation_csv(app: &App) -> String {
         );
         for r in &p.sections {
             out.push_str(&format!(
-                "{},{},{},{},{:.1},{:.1},{},{},{},{:.4e},{:.1},{:.1},{},{},{},{},{}\n",
+                "{},{},{},{},{:.1},{:.1},{},{},{},{},{:.1},{:.1},{},{},{},{},{}\n",
                 r.section.0,
                 r.name,
                 r.shape_label.as_deref().unwrap_or("数値直入力"),
@@ -875,7 +875,8 @@ pub fn build_preparation_csv(app: &App) -> String {
                     .unwrap_or_else(|| "未算定".into()),
                 r.iz.map(|v| format!("{v:.4e}"))
                     .unwrap_or_else(|| "未算定".into()),
-                r.j,
+                r.j.map(|v| format!("{v:.4e}"))
+                    .unwrap_or_else(|| "未算定".into()),
                 r.as_y,
                 r.as_z,
                 r.ry.map(|v| format!("{v:.2}"))
@@ -915,13 +916,13 @@ pub fn build_preparation_csv(app: &App) -> String {
             p.member_stiffness_candidates
         ));
         out.push_str(
-            "部材ID,種別,断面,材料,スラブ増大率,壁上下梁倍率,元A[mm2],元Iy[mm4],実効A[mm2],実効Iy[mm4],総増大率,等価Aax[mm2],等価Iy[mm4],等価Iz[mm4],等価J[mm4],等価Asy[mm2],等価Asz[mm2]\n",
+            "部材ID,種別,断面,材料,スラブ増大率,壁上下梁倍率,元A[mm2],元Iy[mm4],実効A[mm2],実効Iy[mm4],総増大率,等価Aax[mm2],等価Iy[mm4],等価Iz[mm4],等価J[mm4],等価Asy[mm2],等価Asz[mm2],未算定理由\n",
         );
         for r in &p.member_stiffness {
             let c = r.composite;
             let fmt = |v: Option<f64>| v.map(|x| format!("{:.4e}", x)).unwrap_or_default();
             out.push_str(&format!(
-                "{},{},{},{},{:.4},{:.1},{:.1},{:.4e},{:.1},{:.4e},{},{},{},{},{},{},{}\n",
+                "{},{},{},{},{:.4},{:.1},{:.1},{:.4e},{},{},{},{},{},{},{},{},{},{}\n",
                 r.elem.0,
                 member_kind_label(r.kind),
                 r.section_name,
@@ -930,19 +931,23 @@ pub fn build_preparation_csv(app: &App) -> String {
                 r.wall_girder_factor,
                 r.section_area,
                 r.section_iy,
-                r.effective_area,
-                r.effective_iy,
-                if r.section_iy > 0.0 {
-                    format!("{:.4}", r.effective_iy / r.section_iy)
-                } else {
-                    String::new()
-                },
+                r.effective_area
+                    .map(|v| format!("{v:.1}"))
+                    .unwrap_or_else(|| "未算定".into()),
+                r.effective_iy
+                    .map(|v| format!("{v:.4e}"))
+                    .unwrap_or_else(|| "未算定".into()),
+                r.effective_iy
+                    .filter(|_| r.section_iy > 0.0)
+                    .map(|v| format!("{:.4}", v / r.section_iy))
+                    .unwrap_or_default(),
                 fmt(c.map(|c| c.area_ax)),
                 fmt(c.map(|c| c.iy)),
                 fmt(c.map(|c| c.iz)),
                 fmt(c.map(|c| c.j)),
                 fmt(c.map(|c| c.as_y)),
                 fmt(c.map(|c| c.as_z)),
+                r.unavailable_reason.as_deref().unwrap_or(""),
             ));
         }
     }

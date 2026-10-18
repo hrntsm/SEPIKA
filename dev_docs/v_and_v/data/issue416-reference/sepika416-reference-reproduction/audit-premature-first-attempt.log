@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "C:\Users\hiroa\AppData\Local\Temp/sepika416-reference-reproduction/audit.py", line 5, in <module>
+    assert len(rows)==len(old)==31
+           ^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

@@ -1,0 +1,7 @@
+call_id,label,swapped,repetition,kind,alias_of,status,j_mm4,wall_seconds,levels,swap_relative_difference
+0,known_400x300x12_r0,false,0,fresh_diagnostic,,success,1449105537.0919018,0.5214301,6,
+1,known_400x300x12_r0,true,0,fresh_diagnostic,,success,1449106277.0363488,0.5744297,6,0.0000005106215028582994
+2,known_400x300x12_r12,false,0,alias_no_solve,0,success,1449105537.0919018,,0,
+3,known_400x300x12_r12,true,0,alias_no_solve,1,success,1449106277.0363488,,0,0.0000005106215028582994
+4,known_400x300x12_r30,false,0,fresh_diagnostic,,success,1448692541.1923993,1.4752877,18,
+5,known_400x300x12_r30,true,0,fresh_diagnostic,,success,1448692426.452021,1.740217,18,0.0000000792027121665484

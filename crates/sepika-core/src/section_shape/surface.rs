@@ -236,7 +236,7 @@ mod tests {
         assert!(h(Some(96.1)).validate_surface_radius().is_err());
     }
     #[test]
-    fn フィレット半径と角rは幾何性能を更新しjは維持する() {
+    fn フィレット半径と角rは幾何性能を更新しboxのjにも反映する() {
         for (a, b) in [
             (h(Some(0.0)), h(Some(13.0))),
             (boxes(Some(0.0))[0].clone(), boxes(Some(30.0))[0].clone()),
@@ -245,12 +245,15 @@ mod tests {
             assert_ne!(a.calc_area(), b.calc_area());
             assert_ne!(a.calc_iy(), b.calc_iy());
             assert_ne!(a.calc_iz(), b.calc_iz());
-            assert_eq!(a.calc_j(), b.calc_j());
+            if matches!(a, SectionShape::SteelH { .. }) {
+                assert_eq!(a.calc_j(), b.calc_j());
+            } else {
+                assert_ne!(a.calc_j(), b.calc_j());
+            }
             if let (Some(a), Some(b)) = (a.cft_core_props(), b.cft_core_props()) {
                 assert_ne!(a.area, b.area);
                 assert_ne!(a.iy, b.iy);
                 assert_ne!(a.iz, b.iz);
-                assert_eq!(a.j, b.j);
             }
         }
     }

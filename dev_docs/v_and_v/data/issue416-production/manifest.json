@@ -1,0 +1,606 @@
+{
+  "recorded": "2026-10-18",
+  "kind": "byte-preserved original copies; summaries/CSV were derived in original runs",
+  "files": [
+    {
+      "path": "audit-final-calibration.ps1",
+      "bytes": 3962,
+      "sha256": "0FDB033F10C4FD26FF3E62E3547B911F88450E9DB33CA7395ECACB7133E52FA5",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\audit-final-calibration.ps1",
+      "source_sha256": "0FDB033F10C4FD26FF3E62E3547B911F88450E9DB33CA7395ECACB7133E52FA5"
+    },
+    {
+      "path": "final-calibration-levels.csv",
+      "bytes": 57760,
+      "sha256": "B01604FFD971A4D27F73A19CA328E07048406ED440C20E6A3DA0EB90D66E86BD",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\final-calibration-levels.csv",
+      "source_sha256": "B01604FFD971A4D27F73A19CA328E07048406ED440C20E6A3DA0EB90D66E86BD"
+    },
+    {
+      "path": "final-calibration-metadata.json",
+      "bytes": 1288,
+      "sha256": "792A7866B930147C5ECF12F18BABE01388AA66B476A37373E8B12BF8158892A4",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\final-calibration-metadata.json",
+      "source_sha256": "792A7866B930147C5ECF12F18BABE01388AA66B476A37373E8B12BF8158892A4"
+    },
+    {
+      "path": "final-calibration-raw-sha256.json",
+      "bytes": 10261,
+      "sha256": "A364E8FCA3E668151930D89132C08CE64684ABF32C274E8675D0A31FFAB3D458",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\final-calibration-raw-sha256.json",
+      "source_sha256": "A364E8FCA3E668151930D89132C08CE64684ABF32C274E8675D0A31FFAB3D458"
+    },
+    {
+      "path": "final-calibration-run.log",
+      "bytes": 1429,
+      "sha256": "4D950F463CDD5D86A6689418BD3089C3D6DB00B00A4B37D51AA5B6E1CA68DA98",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\final-calibration-run.log",
+      "source_sha256": "4D950F463CDD5D86A6689418BD3089C3D6DB00B00A4B37D51AA5B6E1CA68DA98"
+    },
+    {
+      "path": "final-calibration-summary.json",
+      "bytes": 16635,
+      "sha256": "9EBBAFE081A98CF513C65251727C2FDF59E0B1CDA9440EF76B6D49EEB3699A88",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\final-calibration-summary.json",
+      "source_sha256": "9EBBAFE081A98CF513C65251727C2FDF59E0B1CDA9440EF76B6D49EEB3699A88"
+    },
+    {
+      "path": "actual-transforms-13080-1792324457676634200/rows.jsonl",
+      "bytes": 5245,
+      "sha256": "6A37AFF8FEB6E28E51BCFBE5CE406E7C57B7F6C7730921165997DC2C016866C0",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\actual-transforms-13080-1792324457676634200\\rows.jsonl",
+      "source_sha256": "6A37AFF8FEB6E28E51BCFBE5CE406E7C57B7F6C7730921165997DC2C016866C0"
+    },
+    {
+      "path": "ellipses-13080-1792324458245382100/rows.jsonl",
+      "bytes": 23484,
+      "sha256": "7A12970BA54538D454F1A6ADDB4165AC42379E904B57DAC2704A0CF4D7B1BF59",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100\\rows.jsonl",
+      "source_sha256": "7A12970BA54538D454F1A6ADDB4165AC42379E904B57DAC2704A0CF4D7B1BF59"
+    },
+    {
+      "path": "radius-limits-13080-1792324462895151300/rows.jsonl",
+      "bytes": 73354,
+      "sha256": "AE909A242192E7383E816AA30AFABC6840DAAB9F5FB360A2218B0099EDE56F52",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\radius-limits-13080-1792324462895151300\\rows.jsonl",
+      "source_sha256": "AE909A242192E7383E816AA30AFABC6840DAAB9F5FB360A2218B0099EDE56F52"
+    },
+    {
+      "path": "rectangle-series-13080-1792324460625236900/rows.jsonl",
+      "bytes": 10965,
+      "sha256": "1B46E94EAF28AD0165118DEC965644F0429F8581203180A2764CE92EEE24639C",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\rectangle-series-13080-1792324460625236900\\rows.jsonl",
+      "source_sha256": "1B46E94EAF28AD0165118DEC965644F0429F8581203180A2764CE92EEE24639C"
+    },
+    {
+      "path": "windows-grid/additional-summary.json",
+      "bytes": 4682,
+      "sha256": "81896D3A4D0F65FDC510C814E0384507BB1D8EE7C0C29D245369A0D361A4F339",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\additional-summary.json",
+      "source_sha256": "81896D3A4D0F65FDC510C814E0384507BB1D8EE7C0C29D245369A0D361A4F339"
+    },
+    {
+      "path": "windows-grid/additional-summary.py",
+      "bytes": 2032,
+      "sha256": "876492EC261799D247189606A2B7DB2E13679E4EBCBF967F4A564634647242C8",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\additional-summary.py",
+      "source_sha256": "876492EC261799D247189606A2B7DB2E13679E4EBCBF967F4A564634647242C8"
+    },
+    {
+      "path": "windows-grid/artifact-sha256.json",
+      "bytes": 11016,
+      "sha256": "4566035607F027017F2F8FBD597DF7977F1BCDA2C9DFF6BB8FBDE67FC512A667",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\artifact-sha256.json",
+      "source_sha256": "4566035607F027017F2F8FBD597DF7977F1BCDA2C9DFF6BB8FBDE67FC512A667"
+    },
+    {
+      "path": "windows-grid/build-and-initial-cim.txt",
+      "bytes": 680,
+      "sha256": "C78390EFC184ED6D37D81212883941C2DFCEE2AC3967D5DCA6BC169C0B41CBA2",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\build-and-initial-cim.txt",
+      "source_sha256": "C78390EFC184ED6D37D81212883941C2DFCEE2AC3967D5DCA6BC169C0B41CBA2"
+    },
+    {
+      "path": "windows-grid/result-report.txt",
+      "bytes": 5836,
+      "sha256": "92EB0CF4FFA596CDBB449AB64164A150FECEA409394061893BA710F4605631A1",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\result-report.txt",
+      "source_sha256": "92EB0CF4FFA596CDBB449AB64164A150FECEA409394061893BA710F4605631A1"
+    },
+    {
+      "path": "windows-grid/run-profile.ps1",
+      "bytes": 3402,
+      "sha256": "3C5F7E627B10B37BF47C5464D11F57B7F21F121244375486662A897DD8EE5E00",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\run-profile.ps1",
+      "source_sha256": "3C5F7E627B10B37BF47C5464D11F57B7F21F121244375486662A897DD8EE5E00"
+    },
+    {
+      "path": "windows-grid/summarize.py",
+      "bytes": 5214,
+      "sha256": "C389001C48970573A97879F5E01789ACD8729F19CB83D499146BB8413823E3DB",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\summarize.py",
+      "source_sha256": "C389001C48970573A97879F5E01789ACD8729F19CB83D499146BB8413823E3DB"
+    },
+    {
+      "path": "windows-grid/summary.json",
+      "bytes": 15960,
+      "sha256": "C1E36162E0074736B0D57ED0ADCAA076CD4724B87B6DC6651A53CBAC06CE0241",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\summary.json",
+      "source_sha256": "C1E36162E0074736B0D57ED0ADCAA076CD4724B87B6DC6651A53CBAC06CE0241"
+    },
+    {
+      "path": "windows-grid/extreme-first/calls.csv",
+      "bytes": 293,
+      "sha256": "499AB97C2407A43643B856497BE6E95BCB002151073536D6443536B6ABD91D8C",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\extreme-first\\calls.csv",
+      "source_sha256": "499AB97C2407A43643B856497BE6E95BCB002151073536D6443536B6ABD91D8C"
+    },
+    {
+      "path": "windows-grid/extreme-first/calls.jsonl",
+      "bytes": 11428,
+      "sha256": "11A9EC17961D80280D54AE5EB4D6CFF1C5E8E6AEA152DCCB326C15706C7811E2",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\extreme-first\\calls.jsonl",
+      "source_sha256": "11A9EC17961D80280D54AE5EB4D6CFF1C5E8E6AEA152DCCB326C15706C7811E2"
+    },
+    {
+      "path": "windows-grid/extreme-first/environment.json",
+      "bytes": 5611,
+      "sha256": "B8CC56466EDE03AE8E5AA459A84AD0693E98D0331679232E246FD04D4FDA31FE",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\extreme-first\\environment.json",
+      "source_sha256": "B8CC56466EDE03AE8E5AA459A84AD0693E98D0331679232E246FD04D4FDA31FE"
+    },
+    {
+      "path": "windows-grid/extreme-first/manifest.json",
+      "bytes": 805,
+      "sha256": "1B1E0BAD24C0064E599E20C6305063E6571B71B0ABEDC45C877407CE6E757B57",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\extreme-first\\manifest.json",
+      "source_sha256": "1B1E0BAD24C0064E599E20C6305063E6571B71B0ABEDC45C877407CE6E757B57"
+    },
+    {
+      "path": "windows-grid/extreme-first/process.json",
+      "bytes": 532,
+      "sha256": "A66BE8EFBD56319A5CC6B6974DE2201654F0C826FB9B89CA9BB89FCB3BB5E608",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\extreme-first\\process.json",
+      "source_sha256": "A66BE8EFBD56319A5CC6B6974DE2201654F0C826FB9B89CA9BB89FCB3BB5E608"
+    },
+    {
+      "path": "windows-grid/extreme-first/stderr.txt",
+      "bytes": 109,
+      "sha256": "035CAF48005807996CDCFF82EB9388E2CEEAF0185F5C97C18D8DC1992C4471C8",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\extreme-first\\stderr.txt",
+      "source_sha256": "035CAF48005807996CDCFF82EB9388E2CEEAF0185F5C97C18D8DC1992C4471C8"
+    },
+    {
+      "path": "windows-grid/extreme-first/stdout.txt",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\extreme-first\\stdout.txt",
+      "source_sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "path": "windows-grid/grid96/calls.csv",
+      "bytes": 18158,
+      "sha256": "5D5330F61861F80B6DB6E38E438FD7F342A4B1EAF1AD80BB589D426097A05111",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\grid96\\calls.csv",
+      "source_sha256": "5D5330F61861F80B6DB6E38E438FD7F342A4B1EAF1AD80BB589D426097A05111"
+    },
+    {
+      "path": "windows-grid/grid96/calls.jsonl",
+      "bytes": 2073366,
+      "sha256": "7F34CD7FD56369587CC6C574B925E04274F7CB5621773F494EA83557651EADC3",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\grid96\\calls.jsonl",
+      "source_sha256": "7F34CD7FD56369587CC6C574B925E04274F7CB5621773F494EA83557651EADC3"
+    },
+    {
+      "path": "windows-grid/grid96/environment.json",
+      "bytes": 5611,
+      "sha256": "A59172EB44D7AD26B5E6FC867661479A1122D6B922B33DA4DE7F75B87D747AE1",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\grid96\\environment.json",
+      "source_sha256": "A59172EB44D7AD26B5E6FC867661479A1122D6B922B33DA4DE7F75B87D747AE1"
+    },
+    {
+      "path": "windows-grid/grid96/manifest.json",
+      "bytes": 808,
+      "sha256": "66DA0526F31BFFE7EE666DFA0FDB87AF3F7947C89006B5D9D5064F6E70BA1C12",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\grid96\\manifest.json",
+      "source_sha256": "66DA0526F31BFFE7EE666DFA0FDB87AF3F7947C89006B5D9D5064F6E70BA1C12"
+    },
+    {
+      "path": "windows-grid/grid96/process.json",
+      "bytes": 537,
+      "sha256": "F803D633B14DF2B1F4D070C9D8A937DCA744C199CB199BC73F55A8889DFCA7AA",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\grid96\\process.json",
+      "source_sha256": "F803D633B14DF2B1F4D070C9D8A937DCA744C199CB199BC73F55A8889DFCA7AA"
+    },
+    {
+      "path": "windows-grid/grid96/stderr.txt",
+      "bytes": 9390,
+      "sha256": "542D603E42CC7CC7775728EFE7D35C5E888A087290BA113A99DFF75769F4E682",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\grid96\\stderr.txt",
+      "source_sha256": "542D603E42CC7CC7775728EFE7D35C5E888A087290BA113A99DFF75769F4E682"
+    },
+    {
+      "path": "windows-grid/grid96/stdout.txt",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\grid96\\stdout.txt",
+      "source_sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "path": "windows-grid/known-first-observed/calls.csv",
+      "bytes": 686,
+      "sha256": "0FAB18211D713AEA1C617F529B9C4D04DDBC9D544516495AD3E4F70ABFEFF5D7",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\known-first-observed\\calls.csv",
+      "source_sha256": "0FAB18211D713AEA1C617F529B9C4D04DDBC9D544516495AD3E4F70ABFEFF5D7"
+    },
+    {
+      "path": "windows-grid/known-first-observed/calls.jsonl",
+      "bytes": 38871,
+      "sha256": "DD7559765EACB04DA46534158F94A456054D7C1EEBF80134AF6C81D499546C93",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\known-first-observed\\calls.jsonl",
+      "source_sha256": "DD7559765EACB04DA46534158F94A456054D7C1EEBF80134AF6C81D499546C93"
+    },
+    {
+      "path": "windows-grid/known-first-observed/environment.json",
+      "bytes": 5611,
+      "sha256": "BD25E4E2DB138CAB462527386826BCF930EED6988E5C9A02F654A07460A74479",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\known-first-observed\\environment.json",
+      "source_sha256": "BD25E4E2DB138CAB462527386826BCF930EED6988E5C9A02F654A07460A74479"
+    },
+    {
+      "path": "windows-grid/known-first-observed/manifest.json",
+      "bytes": 794,
+      "sha256": "778648C63AC6A6FFD9AD8D5FE18E077FD82B70859D2FAAB456C0DB89A8E72B37",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\known-first-observed\\manifest.json",
+      "source_sha256": "778648C63AC6A6FFD9AD8D5FE18E077FD82B70859D2FAAB456C0DB89A8E72B37"
+    },
+    {
+      "path": "windows-grid/known-first-observed/process.json",
+      "bytes": 529,
+      "sha256": "D781024F15DF9C024F02BC6F79C0A0D0AC7BD2F51950BB60ED3A22E0FC74239D",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\known-first-observed\\process.json",
+      "source_sha256": "D781024F15DF9C024F02BC6F79C0A0D0AC7BD2F51950BB60ED3A22E0FC74239D"
+    },
+    {
+      "path": "windows-grid/known-first-observed/stderr.txt",
+      "bytes": 240,
+      "sha256": "6C7516CC9EEA145FDDC148084DBBCB83EB528B37325DCD68A44C393C71668023",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\known-first-observed\\stderr.txt",
+      "source_sha256": "6C7516CC9EEA145FDDC148084DBBCB83EB528B37325DCD68A44C393C71668023"
+    },
+    {
+      "path": "windows-grid/known-first-observed/stdout.txt",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\known-first-observed\\stdout.txt",
+      "source_sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rectangle/calls.csv",
+      "bytes": 669,
+      "sha256": "87B3747D0E8079F1E16C062594E4C17E7BCC48EB81D86240A35BE60DA278624E",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rectangle\\calls.csv",
+      "source_sha256": "87B3747D0E8079F1E16C062594E4C17E7BCC48EB81D86240A35BE60DA278624E"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rectangle/calls.jsonl",
+      "bytes": 34291,
+      "sha256": "C01DFFE0644CFFFBF393F4671E5E64244180B1F093C4306CE016B9A3CC39AC9B",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rectangle\\calls.jsonl",
+      "source_sha256": "C01DFFE0644CFFFBF393F4671E5E64244180B1F093C4306CE016B9A3CC39AC9B"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rectangle/environment.json",
+      "bytes": 5611,
+      "sha256": "4531ED680BFB3BA2244743465979140E01F0D4C1DFDC5B15978702C5AF189F54",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rectangle\\environment.json",
+      "source_sha256": "4531ED680BFB3BA2244743465979140E01F0D4C1DFDC5B15978702C5AF189F54"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rectangle/manifest.json",
+      "bytes": 820,
+      "sha256": "3804E55708CCF784D73D34D1ED67C2E77B63784E4530410A2B659DDC5464D466",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rectangle\\manifest.json",
+      "source_sha256": "3804E55708CCF784D73D34D1ED67C2E77B63784E4530410A2B659DDC5464D466"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rectangle/process.json",
+      "bytes": 532,
+      "sha256": "9F0462FD71DE614D81ACD49420DC2365C9FACAE7F74143862A9F501B81D9011E",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rectangle\\process.json",
+      "source_sha256": "9F0462FD71DE614D81ACD49420DC2365C9FACAE7F74143862A9F501B81D9011E"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rectangle/stderr.txt",
+      "bytes": 327,
+      "sha256": "9B8E833B4961D7304AFD7B1916A7A79DF64A8A3BBB4463203B69520BCEBAAB6E",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rectangle\\stderr.txt",
+      "source_sha256": "9B8E833B4961D7304AFD7B1916A7A79DF64A8A3BBB4463203B69520BCEBAAB6E"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rectangle/stdout.txt",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rectangle\\stdout.txt",
+      "source_sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rounded/calls.csv",
+      "bytes": 687,
+      "sha256": "8C71108787F8CBB324D282121E33D6CE7A6933F9278A6E9AB2EC6A018C942087",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rounded\\calls.csv",
+      "source_sha256": "8C71108787F8CBB324D282121E33D6CE7A6933F9278A6E9AB2EC6A018C942087"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rounded/calls.jsonl",
+      "bytes": 96670,
+      "sha256": "784D5918E7517BC7157FC476A011B24AADDB4FB204D45BECEE4B953CD91CF72D",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rounded\\calls.jsonl",
+      "source_sha256": "784D5918E7517BC7157FC476A011B24AADDB4FB204D45BECEE4B953CD91CF72D"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rounded/environment.json",
+      "bytes": 5611,
+      "sha256": "F0586A6576CE270DE9A040C1ECF5E619A4451C2BEF38D91E91365DAE355BEC50",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rounded\\environment.json",
+      "source_sha256": "F0586A6576CE270DE9A040C1ECF5E619A4451C2BEF38D91E91365DAE355BEC50"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rounded/manifest.json",
+      "bytes": 819,
+      "sha256": "8774B6E197BC4E37B4398617F081D3268AF8BC075F8E14255745F4C0BBF09FF7",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rounded\\manifest.json",
+      "source_sha256": "8774B6E197BC4E37B4398617F081D3268AF8BC075F8E14255745F4C0BBF09FF7"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rounded/process.json",
+      "bytes": 529,
+      "sha256": "272D0A60B9E95F643BB2C0D89875E0271AD3FCA732A397EC6D40050F7D3D37E6",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rounded\\process.json",
+      "source_sha256": "272D0A60B9E95F643BB2C0D89875E0271AD3FCA732A397EC6D40050F7D3D37E6"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rounded/stderr.txt",
+      "bytes": 339,
+      "sha256": "2AE76F1958DB8E6CB9682625CFC4AE16F3E87D9AEB063135C46BF9666BBDBE82",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rounded\\stderr.txt",
+      "source_sha256": "2AE76F1958DB8E6CB9682625CFC4AE16F3E87D9AEB063135C46BF9666BBDBE82"
+    },
+    {
+      "path": "windows-grid/repeat-extreme-rounded/stdout.txt",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-extreme-rounded\\stdout.txt",
+      "source_sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "path": "windows-grid/repeat-square-rounded/calls.csv",
+      "bytes": 603,
+      "sha256": "F69A4A85CAD5DD78C4E7C1EE53FDA174AFF66FAB9CDBCFE4C4302C15ACDBD5CB",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-square-rounded\\calls.csv",
+      "source_sha256": "F69A4A85CAD5DD78C4E7C1EE53FDA174AFF66FAB9CDBCFE4C4302C15ACDBD5CB"
+    },
+    {
+      "path": "windows-grid/repeat-square-rounded/calls.jsonl",
+      "bytes": 69719,
+      "sha256": "D1509D54238DE3B1B5721FC3AE60C3480EE40E97DDDF5006F66C80BE456C58EA",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-square-rounded\\calls.jsonl",
+      "source_sha256": "D1509D54238DE3B1B5721FC3AE60C3480EE40E97DDDF5006F66C80BE456C58EA"
+    },
+    {
+      "path": "windows-grid/repeat-square-rounded/environment.json",
+      "bytes": 5611,
+      "sha256": "EB85897C488535A91DEAD5FDAF2DA515247D48D2703B1458C34E854B8F0EFD3C",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-square-rounded\\environment.json",
+      "source_sha256": "EB85897C488535A91DEAD5FDAF2DA515247D48D2703B1458C34E854B8F0EFD3C"
+    },
+    {
+      "path": "windows-grid/repeat-square-rounded/manifest.json",
+      "bytes": 816,
+      "sha256": "5601D16E9ED7989450C0ED6F740B3AE0E4B8C94176DAC8E7019CBACA2BB7F489",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-square-rounded\\manifest.json",
+      "source_sha256": "5601D16E9ED7989450C0ED6F740B3AE0E4B8C94176DAC8E7019CBACA2BB7F489"
+    },
+    {
+      "path": "windows-grid/repeat-square-rounded/process.json",
+      "bytes": 526,
+      "sha256": "89BF2034D5626ADA9808CCA34EBCE1DB8021FDFC1A2F89CCC26BF3FEA54402F3",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-square-rounded\\process.json",
+      "source_sha256": "89BF2034D5626ADA9808CCA34EBCE1DB8021FDFC1A2F89CCC26BF3FEA54402F3"
+    },
+    {
+      "path": "windows-grid/repeat-square-rounded/stderr.txt",
+      "bytes": 327,
+      "sha256": "5CE0DDE56EFF7D0AD9BE26DE866E487040A5EDE5B5A80A9505061C9E6DA24F78",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-square-rounded\\stderr.txt",
+      "source_sha256": "5CE0DDE56EFF7D0AD9BE26DE866E487040A5EDE5B5A80A9505061C9E6DA24F78"
+    },
+    {
+      "path": "windows-grid/repeat-square-rounded/stdout.txt",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-production-grid\\repeat-square-rounded\\stdout.txt",
+      "source_sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "path": "app-final/sepika416-app-wall-integrations-after-fixtures.raw.txt",
+      "bytes": 1797,
+      "sha256": "D20F4F8BD17E39A5CE2428D01CB66880AE1636FAD73ACB4F4978170494E9A400",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-app-wall-integrations-after-fixtures.raw.txt",
+      "source_sha256": "D20F4F8BD17E39A5CE2428D01CB66880AE1636FAD73ACB4F4978170494E9A400"
+    },
+    {
+      "path": "app-final/sepika416-app-all-tests-final-fixtures.raw.txt",
+      "bytes": 88420,
+      "sha256": "C1E59E23EFA8B4B66B1D96547F34830EBAFF411EB19C5C89F3E1318C22F1CB0D",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-app-all-tests-final-fixtures.raw.txt",
+      "source_sha256": "C1E59E23EFA8B4B66B1D96547F34830EBAFF411EB19C5C89F3E1318C22F1CB0D"
+    },
+    {
+      "path": "final-local/sepika416-final-workspace-test-no-fail-fast.raw.txt",
+      "bytes": 328279,
+      "sha256": "D77DB8BAF0D5CFAFA739504E2A212B52AE1A2C9BAA821A68B12D1AE1A5CA0B5D",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-workspace-test-no-fail-fast.raw.txt",
+      "source_sha256": "D77DB8BAF0D5CFAFA739504E2A212B52AE1A2C9BAA821A68B12D1AE1A5CA0B5D"
+    },
+    {
+      "path": "final-local/sepika416-edit-pending-fixture-all.raw.txt",
+      "bytes": 18426,
+      "sha256": "705F025FEE8C3EAC65664A350BACD4FA8BFF0AF4248016F74792695CC7248ED7",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-edit-pending-fixture-all.raw.txt",
+      "source_sha256": "705F025FEE8C3EAC65664A350BACD4FA8BFF0AF4248016F74792695CC7248ED7"
+    },
+    {
+      "path": "final-local/sepika416-portable-mesh-direct.raw.txt",
+      "bytes": 3184,
+      "sha256": "76F587334D0CCB60CDD4790681CEE9B7F2DB9A41A68306199FD69CFA36644B82",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-portable-mesh-direct.raw.txt",
+      "source_sha256": "76F587334D0CCB60CDD4790681CEE9B7F2DB9A41A68306199FD69CFA36644B82"
+    },
+    {
+      "path": "final-local/sepika416-portable-controller-direct.raw.txt",
+      "bytes": 2938,
+      "sha256": "E6FC7ED88BF7F1B909FEC0FF8B3052B5B9662531886080ABC05D16BAB90C1C62",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-portable-controller-direct.raw.txt",
+      "source_sha256": "E6FC7ED88BF7F1B909FEC0FF8B3052B5B9662531886080ABC05D16BAB90C1C62"
+    },
+    {
+      "path": "final-local/sepika416-job-mcp-supplied-wall-all.raw.txt",
+      "bytes": 1887,
+      "sha256": "842A03BFA62325C959DE5C31348AA25999B8D0A015C4BC6CEB085EE7D258520D",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-job-mcp-supplied-wall-all.raw.txt",
+      "source_sha256": "842A03BFA62325C959DE5C31348AA25999B8D0A015C4BC6CEB085EE7D258520D"
+    },
+    {
+      "path": "final-local/sepika416-job-mcp-supplied-mcp-all.raw.txt",
+      "bytes": 8067,
+      "sha256": "B0956C721694AB67A5EF4029749AA313F9AA1CCBA9ABCEC678760BDEFFC3C1FC",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-job-mcp-supplied-mcp-all.raw.txt",
+      "source_sha256": "B0956C721694AB67A5EF4029749AA313F9AA1CCBA9ABCEC678760BDEFFC3C1FC"
+    },
+    {
+      "path": "final-local/sepika416-final-static-front-clippy-final.raw.txt",
+      "bytes": 573,
+      "sha256": "9464B07BF91AED0C3D100E87C0764959A437B76BE07BA31F84882A191BC8684A",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-static-front-clippy-final.raw.txt",
+      "source_sha256": "9464B07BF91AED0C3D100E87C0764959A437B76BE07BA31F84882A191BC8684A"
+    },
+    {
+      "path": "final-local/sepika416-final-static-front-check-deps.raw.txt",
+      "bytes": 172,
+      "sha256": "B6635142676ABDD89EDDA68DF0F04C1E1B8E5881668AD902EB5913DE11F7170F",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-static-front-check-deps.raw.txt",
+      "source_sha256": "B6635142676ABDD89EDDA68DF0F04C1E1B8E5881668AD902EB5913DE11F7170F"
+    },
+    {
+      "path": "final-local/sepika416-job-supplied-fixture-tests.raw.txt",
+      "bytes": 2250,
+      "sha256": "05020A8C7CB1B609795864810E9597BCA3D7E60C395FE18A7B709CFBC9CC6AAF",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-job-supplied-fixture-tests.raw.txt",
+      "source_sha256": "05020A8C7CB1B609795864810E9597BCA3D7E60C395FE18A7B709CFBC9CC6AAF"
+    },
+    {
+      "path": "final-local/sepika416-job-supplied-fixture-density.raw.txt",
+      "bytes": 893,
+      "sha256": "67E64309732A90435A5A9A2BBD8CE320F2EF0E5F0E256E899BA4ED44192114C9",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-job-supplied-fixture-density.raw.txt",
+      "source_sha256": "67E64309732A90435A5A9A2BBD8CE320F2EF0E5F0E256E899BA4ED44192114C9"
+    },
+    {
+      "path": "final-local/sepika416-final-back-edit-radius.raw.txt",
+      "bytes": 1386,
+      "sha256": "4EAA1F40DEEAEA7A8F7107AB3D43114C384E93DE9D4D9FF471CF23DF0F464FA2",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-back-edit-radius.raw.txt",
+      "source_sha256": "4EAA1F40DEEAEA7A8F7107AB3D43114C384E93DE9D4D9FF471CF23DF0F464FA2"
+    },
+    {
+      "path": "final-local/sepika416-final-back-feature-tests.raw.txt",
+      "bytes": 126965,
+      "sha256": "A85D4A7955E42BE5C90F3B5808B2885DB1C37EE1CDA098AEDABC69CBFE2D0F30",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-back-feature-tests.raw.txt",
+      "source_sha256": "A85D4A7955E42BE5C90F3B5808B2885DB1C37EE1CDA098AEDABC69CBFE2D0F30"
+    },
+    {
+      "path": "final-local/sepika416-final-back-feature-clippy.raw.txt",
+      "bytes": 1894,
+      "sha256": "6F94395C23C1C39FD5A0E5AEF27300F8C191370CB24308E2588A68DA7C44FEAD",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-back-feature-clippy.raw.txt",
+      "source_sha256": "6F94395C23C1C39FD5A0E5AEF27300F8C191370CB24308E2588A68DA7C44FEAD"
+    },
+    {
+      "path": "final-local/sepika416-final-back-io-default-tests.raw.txt",
+      "bytes": 22394,
+      "sha256": "505A72017E4981A6E83FF097CC1745E8CCC9532DCB300DC9E936A6EEE0D4DC34",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-back-io-default-tests.raw.txt",
+      "source_sha256": "505A72017E4981A6E83FF097CC1745E8CCC9532DCB300DC9E936A6EEE0D4DC34"
+    },
+    {
+      "path": "final-local/sepika416-final-back-gui-no-parquet-check.raw.txt",
+      "bytes": 1224,
+      "sha256": "B75917EF3BFF119D62965C4D9891E482DCF8EFCB7C430C60A6FFED5EF2D23F9D",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-back-gui-no-parquet-check.raw.txt",
+      "source_sha256": "B75917EF3BFF119D62965C4D9891E482DCF8EFCB7C430C60A6FFED5EF2D23F9D"
+    },
+    {
+      "path": "final-local/sepika416-final-back-check-docs.raw.txt",
+      "bytes": 182,
+      "sha256": "39825490A591EB9FE4E4DEF35B1B00CE98E3C04BF334280E639787BAB59D45D0",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-back-check-docs.raw.txt",
+      "source_sha256": "39825490A591EB9FE4E4DEF35B1B00CE98E3C04BF334280E639787BAB59D45D0"
+    },
+    {
+      "path": "final-local/sepika416-final-back-mdbook-build.raw.txt",
+      "bytes": 129,
+      "sha256": "779C57399C0DBFFFF202CFACFCBAD86DCCF5D6229D5FD51A3C8CA24F795D277E",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-back-mdbook-build.raw.txt",
+      "source_sha256": "779C57399C0DBFFFF202CFACFCBAD86DCCF5D6229D5FD51A3C8CA24F795D277E"
+    },
+    {
+      "path": "final-local/sepika416-final-back-mdbook-version.raw.txt",
+      "bytes": 15,
+      "sha256": "5330BB37155A4E90012F550AE68004CDE68316778BD1E1D3BA92A125E8D5011B",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-back-mdbook-version.raw.txt",
+      "source_sha256": "5330BB37155A4E90012F550AE68004CDE68316778BD1E1D3BA92A125E8D5011B"
+    },
+    {
+      "path": "final-local/sepika416-final-back-rustdoc.raw.txt",
+      "bytes": 4177,
+      "sha256": "85083AB23A0E5C4EB8DB89A65BFA96C843CF1B44351CA880B25018542E3C9DD2",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-back-rustdoc.raw.txt",
+      "source_sha256": "85083AB23A0E5C4EB8DB89A65BFA96C843CF1B44351CA880B25018542E3C9DD2"
+    },
+    {
+      "path": "final-local/sepika416-final-back-rustdoc-after-unit-fix.raw.txt",
+      "bytes": 1954,
+      "sha256": "5C13E3481A9D94542EEF3F985AD59D93614D1D3E6CE2C3B1D2C81457802B626C",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-back-rustdoc-after-unit-fix.raw.txt",
+      "source_sha256": "5C13E3481A9D94542EEF3F985AD59D93614D1D3E6CE2C3B1D2C81457802B626C"
+    },
+    {
+      "path": "final-local/sepika416-final-back-fmt-after-unit-fix.raw.txt",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-back-fmt-after-unit-fix.raw.txt",
+      "source_sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "path": "final-local/sepika416-final-back-fmt-after-unit-fix.metadata.json",
+      "bytes": 417,
+      "sha256": "C17B0C35D782A5C8D243C5B6CABB82BB043115FBC6E63753061926199AF1C34F",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-final-back-fmt-after-unit-fix.metadata.json",
+      "source_sha256": "C17B0C35D782A5C8D243C5B6CABB82BB043115FBC6E63753061926199AF1C34F"
+    }
+  ],
+  "authored_derivatives": [
+    {
+      "path": "app-final/metadata.json",
+      "sha256": "D020193165BC7F881DF17BD794E3967A826C8B513BDF4F09FBDDF4E87EFEB9FD",
+      "basis": "App fixture owner final handoff and copied raw; contains no grid/calibration totals"
+    },
+    {
+      "path": "final-local/metadata.json",
+      "sha256": "DD5201C774716013F5531C66EF0799630501C40B00F44913733AF8A5719D1C3E",
+      "basis": "Final validation and fixture/static-front owner handoffs plus byte-preserved raw; chronology and limits explicit"
+    }
+  ]
+}

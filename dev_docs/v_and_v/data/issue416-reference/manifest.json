@@ -1,0 +1,688 @@
+{
+  "format_version": 1,
+  "recorded_date": "2026-10-18",
+  "scope": "独立二次要素そり参照の原本コピーと派生metadata。package収載時の数値再求解はない。",
+  "axis_mapping": {
+    "correct": "(x_ref,y_ref)=(SEPIKA element local z,y)",
+    "raw_core_wrong_metadata_preserved": true,
+    "numerical_values_and_mesh_unchanged": true
+  },
+  "historical_artifact_manifests": "各phase artifact-sha256.jsonは当時の全文対象manifest。NPZ/source/log/report等に未収載対象があり、このpackageの完全性manifestとして使用しない。",
+  "excluded": [
+    "NPZ mesh arrays",
+    "venv",
+    "vendor source/API全文・理論本文・論文",
+    "install-report full metadata/descriptions",
+    "通常実行raw log全文",
+    "report本文（別writer管理）"
+  ],
+  "reproduction_limits": {
+    "new_venv_lock_rebuild_verified": false,
+    "packaged_runners_resolved_again": false,
+    "original_audits_complete_from_package": false,
+    "saved_mesh_reload_without_original_npz": false,
+    "production_grid_measured_by_package": false,
+    "issue416_all_six_done": false
+  },
+  "files": [
+    {
+      "path": ".gitattributes",
+      "kind": "new-byte-preservation-attributes",
+      "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da",
+      "bytes": 8
+    },
+    {
+      "path": "README.md",
+      "kind": "new-package-documentation",
+      "sha256": "aaa35dc70117bd1eb9110b5cf8199695b72d3a789add9c7c58c1aceb56a68ce6",
+      "bytes": 5201
+    },
+    {
+      "path": "distribution-provenance.json",
+      "kind": "derived-metadata-extraction",
+      "sha256": "f41759d386c15fc51c6f60adf5cbdf81395554ba9d7ddc7a40cdd03d2baa7039",
+      "bytes": 22220,
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-environment\\install-report.json",
+      "source_sha256": "59979122f40f9a25b1a57ed636d90fc826e4dbc7084e1676790583a884e819c9",
+      "transformation": "install[].metadata name/version/license expression/files/classifiers/first line; download_info URL/SHA256 only; no vendor body/source"
+    },
+    {
+      "path": "package_verify.py",
+      "kind": "new-non-solver-verifier",
+      "sha256": "4bbb6a2b5677166060aeb4ac99a532ec2bec22d832ecc1cbd2bd2651d966bef2",
+      "bytes": 5142
+    },
+    {
+      "path": "sepika416-core-reference/artifact-sha256-before-axis-correction.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\artifact-sha256-before-axis-correction.json",
+      "source_sha256": "4cd37a6579254877dbf40bda4eaf943e3daadbd9e0613ae75e378504af04106a",
+      "sha256": "4cd37a6579254877dbf40bda4eaf943e3daadbd9e0613ae75e378504af04106a",
+      "bytes": 4050
+    },
+    {
+      "path": "sepika416-core-reference/artifact-sha256.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\artifact-sha256.json",
+      "source_sha256": "c939120a72ad20438de32b6daa0d383637a94e22f3372f301e3425a288597723",
+      "sha256": "c939120a72ad20438de32b6daa0d383637a94e22f3372f301e3425a288597723",
+      "bytes": 5354
+    },
+    {
+      "path": "sepika416-core-reference/audit.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\audit.py",
+      "source_sha256": "f178cdcc677fde643520fbb4f91176af9abf794f920bc34653cc7bd10a676ec7",
+      "sha256": "f178cdcc677fde643520fbb4f91176af9abf794f920bc34653cc7bd10a676ec7",
+      "bytes": 5943
+    },
+    {
+      "path": "sepika416-core-reference/audited-results.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\audited-results.json",
+      "source_sha256": "ef432db046b36faa8e2194d6b2f6c434438a9d2b51d9ec88a5a5c6d76ecf4396",
+      "sha256": "ef432db046b36faa8e2194d6b2f6c434438a9d2b51d9ec88a5a5c6d76ecf4396",
+      "bytes": 146868
+    },
+    {
+      "path": "sepika416-core-reference/axis-correction-verification-first-attempt.log",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\axis-correction-verification-first-attempt.log",
+      "source_sha256": "652311173089f1afbe1802987c1ac4303fc94ce960e5cc71ee39c058aa3623c7",
+      "sha256": "652311173089f1afbe1802987c1ac4303fc94ce960e5cc71ee39c058aa3623c7",
+      "bytes": 380
+    },
+    {
+      "path": "sepika416-core-reference/axis-mapping-correction.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\axis-mapping-correction.json",
+      "source_sha256": "e9add48d3b978ab554370e075b90fc5ad6b563761f43a06869bb05ba23d63ae4",
+      "sha256": "e9add48d3b978ab554370e075b90fc5ad6b563761f43a06869bb05ba23d63ae4",
+      "bytes": 4102
+    },
+    {
+      "path": "sepika416-core-reference/core-old-comparison.csv",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\core-old-comparison.csv",
+      "source_sha256": "68424fc27e0e7c8c6ba190d68daedbf0fe030c66f9c0e59af05332d61b4ff417",
+      "sha256": "68424fc27e0e7c8c6ba190d68daedbf0fe030c66f9c0e59af05332d61b4ff417",
+      "bytes": 548
+    },
+    {
+      "path": "sepika416-core-reference/core-old-comparison.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\core-old-comparison.json",
+      "source_sha256": "e157c31ca9e2779639811b45ae307083aeddb7e4919f037ce9b4c0659ce89c03",
+      "sha256": "e157c31ca9e2779639811b45ae307083aeddb7e4919f037ce9b4c0659ce89c03",
+      "bytes": 1354
+    },
+    {
+      "path": "sepika416-core-reference/correct_axis_mapping.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\correct_axis_mapping.py",
+      "source_sha256": "b25e16a2a1040540f69e8481bc45a3723114c0b492373b8c03bb0646e6936bde",
+      "sha256": "b25e16a2a1040540f69e8481bc45a3723114c0b492373b8c03bb0646e6936bde",
+      "bytes": 5595
+    },
+    {
+      "path": "sepika416-core-reference/corrected-metadata-results.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\corrected-metadata-results.json",
+      "source_sha256": "70f5c09a4a501d267f7b2c6b01c4222ee7450f64243898f2d40979b9e0a037f4",
+      "sha256": "70f5c09a4a501d267f7b2c6b01c4222ee7450f64243898f2d40979b9e0a037f4",
+      "bytes": 147708
+    },
+    {
+      "path": "sepika416-core-reference/environment-after.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\environment-after.json",
+      "source_sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "bytes": 804
+    },
+    {
+      "path": "sepika416-core-reference/environment-before.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\environment-before.json",
+      "source_sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "bytes": 804
+    },
+    {
+      "path": "sepika416-core-reference/environment-final.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\environment-final.json",
+      "source_sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "bytes": 804
+    },
+    {
+      "path": "sepika416-core-reference/facts.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\facts.json",
+      "source_sha256": "1ea6826f43b379b4e6cc44882c45ac11cbb7254604a1bbd79035bd617302e5a0",
+      "sha256": "1ea6826f43b379b4e6cc44882c45ac11cbb7254604a1bbd79035bd617302e5a0",
+      "bytes": 359
+    },
+    {
+      "path": "sepika416-core-reference/previous-reproduction-evidence-unchanged.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\previous-reproduction-evidence-unchanged.json",
+      "source_sha256": "df980d7f85416e43f096ad1060847e395e10570306e2443da7baf792de474a2d",
+      "sha256": "df980d7f85416e43f096ad1060847e395e10570306e2443da7baf792de474a2d",
+      "bytes": 2049
+    },
+    {
+      "path": "sepika416-core-reference/rectangle-series.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\rectangle-series.json",
+      "source_sha256": "b76c0a575d1401f1b03e666170c79fe2138e2b85e697377feef6ac1d3123ebce",
+      "sha256": "b76c0a575d1401f1b03e666170c79fe2138e2b85e697377feef6ac1d3123ebce",
+      "bytes": 457
+    },
+    {
+      "path": "sepika416-core-reference/reload_savedmesh.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\reload_savedmesh.py",
+      "source_sha256": "524d7454d18178fb51a071c8a5826fa28258072e1af9deec55494e20bdde8a77",
+      "sha256": "524d7454d18178fb51a071c8a5826fa28258072e1af9deec55494e20bdde8a77",
+      "bytes": 1831
+    },
+    {
+      "path": "sepika416-core-reference/results.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\results.json",
+      "source_sha256": "4179b1c3dd03f4df0d3091c1e0088bf3b5fe3e4cbbfb90e5877a3e3e61c1f3ee",
+      "sha256": "4179b1c3dd03f4df0d3091c1e0088bf3b5fe3e4cbbfb90e5877a3e3e61c1f3ee",
+      "bytes": 143497
+    },
+    {
+      "path": "sepika416-core-reference/runner.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\runner.py",
+      "source_sha256": "19065099ed65d72d359a225e8438bfa1300cef467bf5024edefd270eb069162a",
+      "sha256": "19065099ed65d72d359a225e8438bfa1300cef467bf5024edefd270eb069162a",
+      "bytes": 6569
+    },
+    {
+      "path": "sepika416-core-reference/runtime.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\runtime.json",
+      "source_sha256": "69b76ec3b93aa42cd78ba55efbcc81795c3220548c76b361d5a30061c0b2f6c4",
+      "sha256": "69b76ec3b93aa42cd78ba55efbcc81795c3220548c76b361d5a30061c0b2f6c4",
+      "bytes": 461
+    },
+    {
+      "path": "sepika416-core-reference/savedmesh-reload-checks.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\savedmesh-reload-checks.json",
+      "source_sha256": "176b28644431b106ec35898f8badc0293ec36c96b84daefb30d829e0a25b4eb9",
+      "sha256": "176b28644431b106ec35898f8badc0293ec36c96b84daefb30d829e0a25b4eb9",
+      "bytes": 431
+    },
+    {
+      "path": "sepika416-core-reference/settings.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\settings.json",
+      "source_sha256": "0adf6541b4801fb9601fe2a3d1d99887b744f6e6c7617135ae2d22efa9a11681",
+      "sha256": "0adf6541b4801fb9601fe2a3d1d99887b744f6e6c7617135ae2d22efa9a11681",
+      "bytes": 1969
+    },
+    {
+      "path": "sepika416-core-reference/source-provenance.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\source-provenance.json",
+      "source_sha256": "83f04d9847be1267d024e93e204e444c3ec4a1adbb44360a44fbe8ca29f7d662",
+      "sha256": "83f04d9847be1267d024e93e204e444c3ec4a1adbb44360a44fbe8ca29f7d662",
+      "bytes": 577
+    },
+    {
+      "path": "sepika416-core-reference/summary.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-core-reference\\summary.json",
+      "source_sha256": "45cd76a34d70d518244ae62190c79711520d7ef4102c455ce756942d953c2d00",
+      "sha256": "45cd76a34d70d518244ae62190c79711520d7ef4102c455ce756942d953c2d00",
+      "bytes": 1767
+    },
+    {
+      "path": "sepika416-h-box-reference/arithmetic.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\arithmetic.json",
+      "source_sha256": "e34963d5bba5cf1ad3737ce1454737597a116471e3489b10277321454374273a",
+      "sha256": "e34963d5bba5cf1ad3737ce1454737597a116471e3489b10277321454374273a",
+      "bytes": 497
+    },
+    {
+      "path": "sepika416-h-box-reference/artifact-sha256.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\artifact-sha256.json",
+      "source_sha256": "77126d9297d7c9690bcdbdd861e9c9da8b072fa22b10eb9386332814b542c4e6",
+      "sha256": "77126d9297d7c9690bcdbdd861e9c9da8b072fa22b10eb9386332814b542c4e6",
+      "bytes": 5808
+    },
+    {
+      "path": "sepika416-h-box-reference/audit-import-failure.log",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\audit-import-failure.log",
+      "source_sha256": "53e988c1b5e02d80310c35dbb78c53c7fb7de60b0e321d7511a4611375449911",
+      "sha256": "53e988c1b5e02d80310c35dbb78c53c7fb7de60b0e321d7511a4611375449911",
+      "bytes": 376
+    },
+    {
+      "path": "sepika416-h-box-reference/audit.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\audit.py",
+      "source_sha256": "7b1f6a46609d48fe393d0a46aed6d0054819dfc74c8e78931875340a6c1424f6",
+      "sha256": "7b1f6a46609d48fe393d0a46aed6d0054819dfc74c8e78931875340a6c1424f6",
+      "bytes": 5540
+    },
+    {
+      "path": "sepika416-h-box-reference/comparisons.csv",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\comparisons.csv",
+      "source_sha256": "fab6646dbd3fce1d77e7c7358e0a8223cc33e2038202be9fb1d8a638ba72de7a",
+      "sha256": "fab6646dbd3fce1d77e7c7358e0a8223cc33e2038202be9fb1d8a638ba72de7a",
+      "bytes": 1080
+    },
+    {
+      "path": "sepika416-h-box-reference/comparisons.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\comparisons.json",
+      "source_sha256": "3f04ac3a689fd635b52a8693d656203555ff6b79da6596c606345deb1f9cd505",
+      "sha256": "3f04ac3a689fd635b52a8693d656203555ff6b79da6596c606345deb1f9cd505",
+      "bytes": 2495
+    },
+    {
+      "path": "sepika416-h-box-reference/environment-evidence-unchanged.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\environment-evidence-unchanged.json",
+      "source_sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "bytes": 804
+    },
+    {
+      "path": "sepika416-h-box-reference/first-attempt-failures.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\first-attempt-failures.json",
+      "source_sha256": "b208f164e7f671d8f128a75206e0c7e06c15e5f04be32ff39227b8861700cce5",
+      "sha256": "b208f164e7f671d8f128a75206e0c7e06c15e5f04be32ff39227b8861700cce5",
+      "bytes": 24639
+    },
+    {
+      "path": "sepika416-h-box-reference/mesh-facts-supplement.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\mesh-facts-supplement.json",
+      "source_sha256": "e4d3236fa7b744e976f994b47a02d49701b914e514db01d2937a0599bdced0a4",
+      "sha256": "e4d3236fa7b744e976f994b47a02d49701b914e514db01d2937a0599bdced0a4",
+      "bytes": 19627
+    },
+    {
+      "path": "sepika416-h-box-reference/mesh-reconstruction-audit.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\mesh-reconstruction-audit.json",
+      "source_sha256": "04b7861cf7a30d87318ecdd2940e71bc5e818149ea0b4c2fac9b5e8068dac617",
+      "sha256": "04b7861cf7a30d87318ecdd2940e71bc5e818149ea0b4c2fac9b5e8068dac617",
+      "bytes": 7879
+    },
+    {
+      "path": "sepika416-h-box-reference/mesh-reconstruction-hash-failure.log",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\mesh-reconstruction-hash-failure.log",
+      "source_sha256": "f330eafc3be5b84b7bc0e5ec1cd711a32bf93d1c5d0fad0a0f1c0462cf9c99dd",
+      "sha256": "f330eafc3be5b84b7bc0e5ec1cd711a32bf93d1c5d0fad0a0f1c0462cf9c99dd",
+      "bytes": 399
+    },
+    {
+      "path": "sepika416-h-box-reference/refine.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\refine.py",
+      "source_sha256": "e3ad426a9caaf315ad34dee156e21570eda4f5513a50f21aa20fb2920cab9ab3",
+      "sha256": "e3ad426a9caaf315ad34dee156e21570eda4f5513a50f21aa20fb2920cab9ab3",
+      "bytes": 421
+    },
+    {
+      "path": "sepika416-h-box-reference/results.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\results.json",
+      "source_sha256": "d478423ed22cbb3d532a02adcf4e3940d123552952fdd93bbb4fe74e6fe921f6",
+      "sha256": "d478423ed22cbb3d532a02adcf4e3940d123552952fdd93bbb4fe74e6fe921f6",
+      "bytes": 60995
+    },
+    {
+      "path": "sepika416-h-box-reference/runner.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\runner.py",
+      "source_sha256": "5bb55648e47564c29aef0f89596155f24c7ee68ffeafe9024f020d989692abcc",
+      "sha256": "5bb55648e47564c29aef0f89596155f24c7ee68ffeafe9024f020d989692abcc",
+      "bytes": 6759
+    },
+    {
+      "path": "sepika416-h-box-reference/runtime.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\runtime.json",
+      "source_sha256": "681976d2eb48d16d6bf4bcc2ea7daf8594037cf47854a6ffbb59e8459c35a82a",
+      "sha256": "681976d2eb48d16d6bf4bcc2ea7daf8594037cf47854a6ffbb59e8459c35a82a",
+      "bytes": 439
+    },
+    {
+      "path": "sepika416-h-box-reference/summary.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-h-box-reference\\summary.json",
+      "source_sha256": "2ffea08599f00b9ae935d39d6e18b88db72a56bcc36af4cc07e6195b2fed5706",
+      "sha256": "2ffea08599f00b9ae935d39d6e18b88db72a56bcc36af4cc07e6195b2fed5706",
+      "bytes": 2104
+    },
+    {
+      "path": "sepika416-reference-calibration/all-results.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-calibration\\all-results.json",
+      "source_sha256": "d1216c8f73185027e36ae18fa934f94215aabfe0df954086fb7ebf10d0a49d34",
+      "sha256": "d1216c8f73185027e36ae18fa934f94215aabfe0df954086fb7ebf10d0a49d34",
+      "bytes": 44179
+    },
+    {
+      "path": "sepika416-reference-calibration/artifact-sha256.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-calibration\\artifact-sha256.json",
+      "source_sha256": "e3f11ccba31b2a4fa6c61245ae0dd6cb8161aad1a74b110a6af75802059420f5",
+      "sha256": "e3f11ccba31b2a4fa6c61245ae0dd6cb8161aad1a74b110a6af75802059420f5",
+      "bytes": 1924
+    },
+    {
+      "path": "sepika416-reference-calibration/audit.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-calibration\\audit.py",
+      "source_sha256": "a983f4d2041bc50bd792295a5598ccf15bec5c1ea769a18341158198657f579c",
+      "sha256": "a983f4d2041bc50bd792295a5598ccf15bec5c1ea769a18341158198657f579c",
+      "bytes": 9195
+    },
+    {
+      "path": "sepika416-reference-calibration/environment-evidence-unchanged.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-calibration\\environment-evidence-unchanged.json",
+      "source_sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "bytes": 804
+    },
+    {
+      "path": "sepika416-reference-calibration/public-api-crosscheck.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-calibration\\public-api-crosscheck.json",
+      "source_sha256": "51bf3083b6af6cb75a83e6aa1616c7b9b5cf98e1775d745238eaecdaaa22a7f7",
+      "sha256": "51bf3083b6af6cb75a83e6aa1616c7b9b5cf98e1775d745238eaecdaaa22a7f7",
+      "bytes": 445
+    },
+    {
+      "path": "sepika416-reference-calibration/public_crosscheck.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-calibration\\public_crosscheck.py",
+      "source_sha256": "66c82e0a03ed153a828eeef3263fd6c24e70ba7da49d6976c6be334d063df76c",
+      "sha256": "66c82e0a03ed153a828eeef3263fd6c24e70ba7da49d6976c6be334d063df76c",
+      "bytes": 1295
+    },
+    {
+      "path": "sepika416-reference-calibration/refine.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-calibration\\refine.py",
+      "source_sha256": "655293db093a9005106ffafc2cb46a380683c86c6a346cb795d24789f0a437ad",
+      "sha256": "655293db093a9005106ffafc2cb46a380683c86c6a346cb795d24789f0a437ad",
+      "bytes": 4797
+    },
+    {
+      "path": "sepika416-reference-calibration/refinement/results.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-calibration\\refinement\\results.json",
+      "source_sha256": "bb4f76b4ede46c1a213b206ec50d42b1ef7b3ad0b3bc2eaf1cdfd7922caee1b8",
+      "sha256": "bb4f76b4ede46c1a213b206ec50d42b1ef7b3ad0b3bc2eaf1cdfd7922caee1b8",
+      "bytes": 1776
+    },
+    {
+      "path": "sepika416-reference-calibration/results.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-calibration\\results.json",
+      "source_sha256": "ac18334d248d039cd5953aa98007567e47fcf61a0451db47c962d9d293be671d",
+      "sha256": "ac18334d248d039cd5953aa98007567e47fcf61a0451db47c962d9d293be671d",
+      "bytes": 42231
+    },
+    {
+      "path": "sepika416-reference-calibration/runner.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-calibration\\runner.py",
+      "source_sha256": "fc0c892565c71e780490484da793610c1ea7504a4c2a35b6730a8d537486ceba",
+      "sha256": "fc0c892565c71e780490484da793610c1ea7504a4c2a35b6730a8d537486ceba",
+      "bytes": 5294
+    },
+    {
+      "path": "sepika416-reference-calibration/runtime.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-calibration\\runtime.json",
+      "source_sha256": "47261838e6b6d3e8cc431d094b641a8f1310f90858aa3c3e6e4e08332048f8c0",
+      "sha256": "47261838e6b6d3e8cc431d094b641a8f1310f90858aa3c3e6e4e08332048f8c0",
+      "bytes": 265
+    },
+    {
+      "path": "sepika416-reference-calibration/summary.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-calibration\\summary.json",
+      "source_sha256": "036539349a4512cde1d126c40c27bdd6d19644fb84b167d35f06b5375348f423",
+      "sha256": "036539349a4512cde1d126c40c27bdd6d19644fb84b167d35f06b5375348f423",
+      "bytes": 3818
+    },
+    {
+      "path": "sepika416-reference-environment/artifact-sha256.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-environment\\artifact-sha256.json",
+      "source_sha256": "52a4f4763fbbf38de5b97b70ad0d223611d0082475d580044afe76ce1dad0ce5",
+      "sha256": "52a4f4763fbbf38de5b97b70ad0d223611d0082475d580044afe76ce1dad0ce5",
+      "bytes": 2416
+    },
+    {
+      "path": "sepika416-reference-environment/bootstrap_metadata.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-environment\\bootstrap_metadata.py",
+      "source_sha256": "ca76e5a7fc1f6e8a6c3acbc6a32f630e89354b38cbada29be6f5133a3d37c5f8",
+      "sha256": "ca76e5a7fc1f6e8a6c3acbc6a32f630e89354b38cbada29be6f5133a3d37c5f8",
+      "bytes": 2356
+    },
+    {
+      "path": "sepika416-reference-environment/calibrate.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-environment\\calibrate.py",
+      "source_sha256": "5b2a251ba2612d582362e08f665422ff969337742943a9ea916f0e209413fd6e",
+      "sha256": "5b2a251ba2612d582362e08f665422ff969337742943a9ea916f0e209413fd6e",
+      "bytes": 2601
+    },
+    {
+      "path": "sepika416-reference-environment/calibration-first-attempt.log",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-environment\\calibration-first-attempt.log",
+      "source_sha256": "fc5a3db4ba2bbfb16c50f38219745f9dae5173e05b6329cb40067f2433af2252",
+      "sha256": "fc5a3db4ba2bbfb16c50f38219745f9dae5173e05b6329cb40067f2433af2252",
+      "bytes": 1728
+    },
+    {
+      "path": "sepika416-reference-environment/calibration-results.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-environment\\calibration-results.json",
+      "source_sha256": "a040aebcf9e9b418d747e959be62a42c0484b677e4d3b1437ab203c1235b59cd",
+      "sha256": "a040aebcf9e9b418d747e959be62a42c0484b677e4d3b1437ab203c1235b59cd",
+      "bytes": 5375
+    },
+    {
+      "path": "sepika416-reference-environment/environment.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-environment\\environment.json",
+      "source_sha256": "f97b4dc8f37372d42e82065f259de942184e91f4bb5fb979ffe02e96ba35d1e9",
+      "sha256": "f97b4dc8f37372d42e82065f259de942184e91f4bb5fb979ffe02e96ba35d1e9",
+      "bytes": 1397
+    },
+    {
+      "path": "sepika416-reference-environment/freeze.txt",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-environment\\freeze.txt",
+      "source_sha256": "b98e058b8a6f1317817ce8493d181ba3addf441aa6301a0a9bf2378059490f91",
+      "sha256": "b98e058b8a6f1317817ce8493d181ba3addf441aa6301a0a9bf2378059490f91",
+      "bytes": 738
+    },
+    {
+      "path": "sepika416-reference-environment/pip-check.log",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-environment\\pip-check.log",
+      "source_sha256": "672aec65a45bed50e70229c70934a7eebf0462595c459b83023027645d57cccf",
+      "sha256": "672aec65a45bed50e70229c70934a7eebf0462595c459b83023027645d57cccf",
+      "bytes": 31
+    },
+    {
+      "path": "sepika416-reference-environment/primary-sources.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-environment\\primary-sources.json",
+      "source_sha256": "496b913ec1d7a3f5552fb045e1fe478d382b757e287a7b6dc20f44430830c9ac",
+      "sha256": "496b913ec1d7a3f5552fb045e1fe478d382b757e287a7b6dc20f44430830c9ac",
+      "bytes": 1191
+    },
+    {
+      "path": "sepika416-reference-environment/requirements-hashed.lock",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-environment\\requirements-hashed.lock",
+      "source_sha256": "8a38db902eaa3e72410971a0aff4921dfda6c8587d9d39a740b74361714344ec",
+      "sha256": "8a38db902eaa3e72410971a0aff4921dfda6c8587d9d39a740b74361714344ec",
+      "bytes": 3727
+    },
+    {
+      "path": "sepika416-reference-reproduction/artifact-sha256.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\artifact-sha256.json",
+      "source_sha256": "7a4c8f06c4faff7da4e412b7aec7baf35fc93543d850f06fc639dca6af75fb24",
+      "sha256": "7a4c8f06c4faff7da4e412b7aec7baf35fc93543d850f06fc639dca6af75fb24",
+      "bytes": 6017
+    },
+    {
+      "path": "sepika416-reference-reproduction/audit-premature-first-attempt.log",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\audit-premature-first-attempt.log",
+      "source_sha256": "a6b806287095ea1799b3bc166e342e329e1b4fa5069bfbcaa719566d15defca5",
+      "sha256": "a6b806287095ea1799b3bc166e342e329e1b4fa5069bfbcaa719566d15defca5",
+      "bytes": 231
+    },
+    {
+      "path": "sepika416-reference-reproduction/audit.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\audit.py",
+      "source_sha256": "3ba065524fe44a6fbeb281afb61d278009c2fc364854e6ffb8e6e7bf28fd2c64",
+      "sha256": "3ba065524fe44a6fbeb281afb61d278009c2fc364854e6ffb8e6e7bf28fd2c64",
+      "bytes": 5020
+    },
+    {
+      "path": "sepika416-reference-reproduction/environment-after.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\environment-after.json",
+      "source_sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "bytes": 804
+    },
+    {
+      "path": "sepika416-reference-reproduction/environment-before.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\environment-before.json",
+      "source_sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "bytes": 804
+    },
+    {
+      "path": "sepika416-reference-reproduction/environment-final.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\environment-final.json",
+      "source_sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "sha256": "bd07240f53cabe6fb93f50cb3a622ba3e200d8a3de818e722c7c19e672ca53de",
+      "bytes": 804
+    },
+    {
+      "path": "sepika416-reference-reproduction/facts.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\facts.json",
+      "source_sha256": "cdb866026f27aab835df1910318b049ccc59c4e75bb38e6bf344801efaf869f2",
+      "sha256": "cdb866026f27aab835df1910318b049ccc59c4e75bb38e6bf344801efaf869f2",
+      "bytes": 397
+    },
+    {
+      "path": "sepika416-reference-reproduction/old-new-comparison.csv",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\old-new-comparison.csv",
+      "source_sha256": "a63bccbc0108f232db7eea2edd6f3392f4184870a881f57cae89373c01a0a123",
+      "sha256": "a63bccbc0108f232db7eea2edd6f3392f4184870a881f57cae89373c01a0a123",
+      "bytes": 9216
+    },
+    {
+      "path": "sepika416-reference-reproduction/old-new-comparison.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\old-new-comparison.json",
+      "source_sha256": "78705c684ed1171f79f6f74e012cc2742293e7a4ab8cd7a866195e06775c94cc",
+      "sha256": "78705c684ed1171f79f6f74e012cc2742293e7a4ab8cd7a866195e06775c94cc",
+      "bytes": 28855
+    },
+    {
+      "path": "sepika416-reference-reproduction/original-evidence-unchanged.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\original-evidence-unchanged.json",
+      "source_sha256": "a59ed5d03f9659a755ea39cdc5bef5f59646888317d6f9462c51dba50d3c9434",
+      "sha256": "a59ed5d03f9659a755ea39cdc5bef5f59646888317d6f9462c51dba50d3c9434",
+      "bytes": 1878
+    },
+    {
+      "path": "sepika416-reference-reproduction/reload_savedmesh.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\reload_savedmesh.py",
+      "source_sha256": "1ee9071f7de49618e71c4dfad2724ccd41b7d2a156e9c3453bb5289fcb5420f7",
+      "sha256": "1ee9071f7de49618e71c4dfad2724ccd41b7d2a156e9c3453bb5289fcb5420f7",
+      "bytes": 1806
+    },
+    {
+      "path": "sepika416-reference-reproduction/results.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\results.json",
+      "source_sha256": "fdae66e54d1c31193da6f9449d55fe920b198ebcfd5e1eeb9a422fc7a3c5d696",
+      "sha256": "fdae66e54d1c31193da6f9449d55fe920b198ebcfd5e1eeb9a422fc7a3c5d696",
+      "bytes": 81074
+    },
+    {
+      "path": "sepika416-reference-reproduction/runner.py",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\runner.py",
+      "source_sha256": "c691078f2b2df43d8497686d341e5c5df7737065ffabcbe6f719a3cd5c576377",
+      "sha256": "c691078f2b2df43d8497686d341e5c5df7737065ffabcbe6f719a3cd5c576377",
+      "bytes": 8046
+    },
+    {
+      "path": "sepika416-reference-reproduction/runtime.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\runtime.json",
+      "source_sha256": "ecc58ea9499e872fd288a37718b709059f58b643858e27543b13080b1b96c184",
+      "sha256": "ecc58ea9499e872fd288a37718b709059f58b643858e27543b13080b1b96c184",
+      "bytes": 387
+    },
+    {
+      "path": "sepika416-reference-reproduction/savedmesh-reload-checks.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\savedmesh-reload-checks.json",
+      "source_sha256": "1f9d999177df183d3c900cb67bfafbd8c36f0c9b2d4ccae7478ba367d78d6add",
+      "sha256": "1f9d999177df183d3c900cb67bfafbd8c36f0c9b2d4ccae7478ba367d78d6add",
+      "bytes": 858
+    },
+    {
+      "path": "sepika416-reference-reproduction/settings.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\settings.json",
+      "source_sha256": "183d6fd7207a273c2caf5f05d8494f27cd586307f9e4389f7bc1cda22e8f2ded",
+      "sha256": "183d6fd7207a273c2caf5f05d8494f27cd586307f9e4389f7bc1cda22e8f2ded",
+      "bytes": 5123
+    },
+    {
+      "path": "sepika416-reference-reproduction/summary.json",
+      "kind": "byte-identical-copy",
+      "source_path": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-reference-reproduction\\summary.json",
+      "source_sha256": "b22cdbb5c427a838e0b34793b1ca7cb4e6c48afb76f8b9c04d9dfeada0074744",
+      "sha256": "b22cdbb5c427a838e0b34793b1ca7cb4e6c48afb76f8b9c04d9dfeada0074744",
+      "bytes": 3633
+    }
+  ]
+}

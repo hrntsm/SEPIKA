@@ -1,0 +1,10 @@
+{
+  "width_long_mm": 376.0,
+  "depth_short_mm": 276.0,
+  "j_series_mm4": 1449158780.0841777,
+  "last_odd_N": 215,
+  "absolute_tail_bound_mm4": 0.1419884792592635,
+  "relative_tail_bound": 9.797993236532423e-11,
+  "tail_proof": "sum odd n>N tanh(c*n)/n^5 <= sum integers n>N 1/n^5 <= integral_N^infinity x^-5 dx = 1/(4*N^4); multiplied by prefactor; floating point rounding not bounded",
+  "reference_signed_relative_error": 1.3248853081293532e-07
+}

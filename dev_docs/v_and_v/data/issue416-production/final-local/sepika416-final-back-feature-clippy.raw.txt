@@ -1,0 +1,36 @@
+    Checking arrow-array v59.0.0
+    Checking spade v2.15.1
+    Checking sepika-material v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-material)
+    Checking sepika-math v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-math)
+    Checking zip v9.0.5
+    Checking sepika-core v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-core)
+    Checking naga v29.0.3
+    Checking arrow-select v59.0.0
+    Checking arrow-arith v59.0.0
+    Checking arrow-row v59.0.0
+    Checking arrow-ord v59.0.0
+    Checking arrow-ipc v59.0.0
+    Checking arrow-string v59.0.0
+    Checking arrow-cast v59.0.0
+    Checking parquet v59.0.0
+    Checking arrow-csv v59.0.0
+    Checking arrow-json v59.0.0
+    Checking arrow v59.0.0
+    Checking wgpu-naga-bridge v29.0.3
+    Checking wgpu-hal v29.0.3
+    Checking sepika-section v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-section)
+    Checking sepika-load v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-load)
+    Checking sepika-element v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-element)
+    Checking sepika-edit v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-edit)
+    Checking sepika-io v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-io)
+    Checking sepika-solver v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-solver)
+    Checking wgpu-core-deps-windows-linux-android v29.0.3
+    Checking wgpu-core v29.0.3
+    Checking sepika-design-jp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-design-jp)
+    Checking sepika-job v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-job)
+    Checking wgpu v29.0.3
+    Checking sepika-mcp v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-mcp)
+    Checking egui-wgpu v0.34.3
+    Checking eframe v0.34.3
+    Checking sepika-app v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-app)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 34.21s

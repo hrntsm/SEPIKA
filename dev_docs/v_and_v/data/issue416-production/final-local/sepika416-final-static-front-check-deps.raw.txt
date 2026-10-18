@@ -1,0 +1,3 @@
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.33s
+     Running `target\debug\xtask.exe check-deps`
+All dependency directions OK (51 upstream checks)

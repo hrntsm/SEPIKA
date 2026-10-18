@@ -1,0 +1,3 @@
+call_id,label,swapped,repetition,kind,alias_of,status,j_mm4,wall_seconds,levels,swap_relative_difference
+0,hb4_bt10_rzero,false,0,fresh_diagnostic,,success,4555795095.791873,0.5621963,7,
+1,hb4_bt10_rzero,true,0,fresh_diagnostic,,success,4555796253.232525,0.5604829,7,0.00000025405897918773235

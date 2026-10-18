@@ -24,3 +24,6 @@ pub(crate) use forces::member_forces_from_end_forces;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod torsion_contract_tests;

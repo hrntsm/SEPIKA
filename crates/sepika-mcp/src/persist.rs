@@ -499,9 +499,9 @@ mod tests {
     }
 
     #[test]
-    fn analysis22_23_24_missing_future26_and_current25_control_analysis_and_design17_rows() {
-        assert_eq!(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION, 25);
-        assert_eq!(sepika_core::result_contract::DESIGN_CONTRACT_VERSION, 17);
+    fn analysis22_23_24_25_missing_future27_and_current26_control_analysis_and_design18_rows() {
+        assert_eq!(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION, 26);
+        assert_eq!(sepika_core::result_contract::DESIGN_CONTRACT_VERSION, 18);
         let model = Model::default();
         for kind in [JobKind::LinearStatic, JobKind::DesignCheck] {
             let dir = test_dir("member-load-direction-contract");
@@ -524,20 +524,39 @@ mod tests {
                 .map(|entry| (entry.path.clone(), std::fs::read(&entry.path).unwrap()))
                 .collect();
             drop(store);
-            for (version, reason) in [
-                (Some(22), "old_contract"),
-                (Some(23), "old_contract"),
-                (Some(24), "old_contract"),
-                (None, "unknown_provenance"),
-                (Some(26), "unsupported_contract"),
-                (Some(25), "current"),
-            ] {
+            let mut cases = vec![
+                (Some(22), Some(18), "old_contract"),
+                (Some(23), Some(18), "old_contract"),
+                (Some(24), Some(18), "old_contract"),
+                (Some(25), Some(18), "old_contract"),
+                (None, Some(18), "unknown_provenance"),
+                (Some(27), Some(18), "unsupported_contract"),
+                (Some(26), Some(18), "current"),
+            ];
+            if kind == JobKind::DesignCheck {
+                cases.extend([
+                    (Some(26), Some(17), "old_contract"),
+                    (Some(26), Some(19), "unsupported_contract"),
+                    (Some(26), None, "unknown_provenance"),
+                ]);
+            }
+            for (version, design_version, reason) in cases {
                 let mut manifest = original.clone();
                 for entry in manifest["entries"].as_array_mut().unwrap() {
                     if kind == JobKind::DesignCheck {
-                        assert_eq!(entry["provenance"]["design_contract_version"], 17);
+                        assert_eq!(entry["provenance"]["design_contract_version"], 18);
                     }
                     let provenance = entry["provenance"].as_object_mut().unwrap();
+                    if kind == JobKind::DesignCheck {
+                        match design_version {
+                            Some(version) => {
+                                provenance.insert("design_contract_version".into(), version.into());
+                            }
+                            None => {
+                                provenance.remove("design_contract_version");
+                            }
+                        }
+                    }
                     match version {
                         Some(version) => {
                             provenance.insert("analysis_contract_version".into(), version.into());
@@ -570,7 +589,7 @@ mod tests {
                 if let Some(evidence_dir) = std::env::var_os("SEPIKA687_EVIDENCE_DIR") {
                     let evidence_dir = std::path::PathBuf::from(evidence_dir);
                     std::fs::create_dir_all(&evidence_dir).unwrap();
-                    let label = format!("{kind:?}-analysis{version:?}");
+                    let label = format!("{kind:?}-analysis{version:?}-design{design_version:?}");
                     std::fs::write(
                         evidence_dir.join(format!("{label}-manifest.json")),
                         &serialized,

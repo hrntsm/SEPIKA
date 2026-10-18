@@ -1,0 +1,10 @@
+{
+  "pid": 20604,
+  "exit_code": 0,
+  "end_utc": "2026-10-18T12:03:16.6382907Z",
+  "external_process_wall_seconds": 1.2094195,
+  "peak_working_set_bytes": 74399744,
+  "peak_paged_memory_bytes": 298319872,
+  "observed_total_processor_seconds": 1.890625,
+  "memory_contract": "Maximum observed OS PeakWorkingSet64 and PeakPagedMemorySize64, polled every 100ms while alive. These are process-lifetime high-water marks as observed, not case increments or factor fill. The last sub-100ms interval is not guaranteed sampled."
+}

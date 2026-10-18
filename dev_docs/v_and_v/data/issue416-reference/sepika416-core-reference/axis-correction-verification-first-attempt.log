@@ -1,0 +1,2 @@
+軸訂正後のread-only検証初回で、axis-mapping-correction.json（UTF-8、日本語を含む）を既定cp932としてread_text()したためUnicodeDecodeError。数値計算・raw変更なし。検証をencoding='utf-8-sig'指定へ直して再実行する。
+Traceback: UnicodeDecodeError: 'cp932' codec can't decode byte 0x85 in position 49: illegal multibyte sequence

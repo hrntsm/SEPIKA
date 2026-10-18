@@ -1,0 +1,87 @@
+{
+  "Core_r0_internal": {
+    "row_indices": [
+      0,
+      1,
+      2
+    ],
+    "relative_changes": [
+      2.2973641833584638e-05,
+      1.431634297255872e-06
+    ],
+    "last_two_relative_changes": [
+      2.2973641833584638e-05,
+      1.431634297255872e-06
+    ],
+    "final_j_mm4": 1449158972.0810955,
+    "passed": true
+  },
+  "Core_r18_n16_internal": {
+    "row_indices": [
+      3,
+      4,
+      5
+    ],
+    "relative_changes": [
+      6.595408751030887e-06,
+      6.38709102025221e-07
+    ],
+    "last_two_relative_changes": [
+      6.595408751030887e-06,
+      6.38709102025221e-07
+    ],
+    "final_j_mm4": 1448737682.837398,
+    "passed": true
+  },
+  "Core_r18_n32_internal": {
+    "row_indices": [
+      6,
+      7,
+      8
+    ],
+    "relative_changes": [
+      7.513275746152482e-06,
+      6.291629074920708e-07
+    ],
+    "last_two_relative_changes": [
+      7.513275746152482e-06,
+      6.291629074920708e-07
+    ],
+    "final_j_mm4": 1448741108.904362,
+    "passed": true
+  },
+  "Core_r18_n64_internal": {
+    "row_indices": [
+      9,
+      10,
+      11
+    ],
+    "relative_changes": [
+      7.244881518173656e-06,
+      6.049562403015507e-07
+    ],
+    "last_two_relative_changes": [
+      7.244881518173656e-06,
+      6.049562403015507e-07
+    ],
+    "final_j_mm4": 1448741968.108572,
+    "passed": true
+  },
+  "Core_r18_boundary_common_area": {
+    "row_indices": [
+      5,
+      8,
+      11
+    ],
+    "relative_changes": [
+      2.3648579741773774e-06,
+      5.930691792995417e-07
+    ],
+    "last_two_relative_changes": [
+      2.3648579741773774e-06,
+      5.930691792995417e-07
+    ],
+    "final_j_mm4": 1448741968.108572,
+    "passed": true
+  }
+}

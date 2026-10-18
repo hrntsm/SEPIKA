@@ -613,6 +613,7 @@ fn test_wall_frame_mismatch_appears_in_gui_diagnostics() {
 fn undefined_side_column_shape_is_an_input_error() {
     let mut app = wall_bay_app();
     app.core.model.sections[3].shape = None;
+    app.core.model.sections[3].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     app.run_diagnostics();
     assert!(app
         .core

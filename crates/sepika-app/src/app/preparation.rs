@@ -257,8 +257,7 @@ pub struct PrepRigidZoneRow {
 
 /// 断面性能 1 行（弾性解析に用いる断面諸量）。
 ///
-/// 値は `Section` が保持する解析入力そのもの（形状定義から `to_section` で
-/// 生成されたもの、またはカタログ数値の直入力）であり、ここで再計算はしない。
+/// J は算定元に従って解決し、未算定は理由とともに保持する。CFT の J は鋼管単体値。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PrepSectionRow {
     pub section: SectionId,
@@ -275,8 +274,8 @@ pub struct PrepSectionRow {
     /// 断面二次モーメント Iy・Iz `[mm⁴]`（y=強軸まわり）。
     pub iy: Option<f64>,
     pub iz: Option<f64>,
-    /// ねじり定数 J `[mm⁴]`。
-    pub j: f64,
+    /// ねじり定数 J `[mm⁴]`。未算定は `None`。CFT は鋼管単体値。
+    pub j: Option<f64>,
     /// せん断有効断面積 Asy・Asz `[mm²]`。
     pub as_y: f64,
     pub as_z: f64,
@@ -314,20 +313,13 @@ pub struct PrepWidthThicknessRow {
     pub reason: Option<String>,
 }
 
-/// 材料由来の等価断面性能を算定できず、鋼管のみで評価した CFT 部材の種別。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum CompositeFallbackKind {
-    /// CFT: 充填コンクリートを無視し、鋼管のみで評価した。
-    CftSteelOnly,
-}
-
 /// 部材単位の剛性割増し・SRC/CFT 等価断面 1 行。
 ///
 /// 断面性能の表（断面単位）では表せない、**部材ごとに決まる**剛性の割増しを示す。
 /// 値は [`sepika_element::frame::beam::stiffness_breakdown`] ・
 /// [`sepika_element::frame::beam::composite_props_of`] を通した、要素構築が実際に
 /// 適用するものと同じ算定結果。
-/// SRC の算定不能は準備計算を停止し、CFT の既定評価種別を `composite_fallback` に持つ。
+/// SRC の算定不能は準備計算を停止する。CFT は未確定理由を保持する。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PrepMemberStiffnessRow {
     pub elem: ElemId,
@@ -341,17 +333,16 @@ pub struct PrepMemberStiffnessRow {
     pub wall_girder_factor: f64,
     /// SRC/CFT 等価断面性能（対象外・算定不能なら `None`）。
     pub composite: Option<PrepCompositeProps>,
-    /// 材料由来の等価断面性能を算定できず、既定値で剛性を評価した種別。
-    /// 等価断面性能を算定できた場合・対象外形状は `None`。
-    pub composite_fallback: Option<CompositeFallbackKind>,
+    /// 剛性が未確定の理由。算定できた場合は `None`。
+    pub unavailable_reason: Option<String>,
     /// 元断面の A・Iy（強軸）[mm²・mm⁴]。等価換算・割増しとの比較用。
     pub section_area: f64,
     pub section_iy: f64,
     /// 割増し・等価換算をすべて適用した後の強軸曲げ剛性用 I `[mm⁴]`。
     /// 元断面 Iy に対する比が「実際に効いている総増大率」になる。
-    pub effective_iy: f64,
+    pub effective_iy: Option<f64>,
     /// 同じく軸剛性用の断面積 `[mm²]`。
-    pub effective_area: f64,
+    pub effective_area: Option<f64>,
 }
 
 /// SRC/CFT の等価断面性能（[`sepika_core::section_shape::CompositeProps`] の
@@ -459,7 +450,7 @@ impl App {
         let (seismic, seismic_note) = self.build_prep_seismic();
         let (rigid_zones, rigid_zone_candidates) = self.build_prep_rigid_zones();
         let (member_stiffness, member_stiffness_candidates) = self.build_prep_member_stiffness()?;
-        let torsion_skipped = self.build_prep_torsion_skipped();
+        let torsion_skipped = self.build_prep_torsion_skipped(&member_stiffness);
         Ok(PreparationResult {
             computed_at: SystemTime::now(),
             summary: self.build_prep_summary(),
@@ -713,26 +704,32 @@ impl App {
     /// 部材（[`sepika_element::frame::beam::TorsionReleaseSkip::UnrestrainedRotation`]）
     /// だけを載せる。ねじり剛性をもともと持たない部材は、解放してもしなくても
     /// 剛性が 0 で設計上の影響がないため対象外とする。
-    fn build_prep_torsion_skipped(&self) -> Vec<PrepTorsionSkipRow> {
+    fn build_prep_torsion_skipped(
+        &self,
+        stiffness: &[PrepMemberStiffnessRow],
+    ) -> Vec<PrepTorsionSkipRow> {
         use sepika_element::frame::beam::TorsionReleaseSkip;
         let model = &self.core.model;
+        let unavailable: std::collections::HashSet<_> = stiffness
+            .iter()
+            .filter(|row| row.unavailable_reason.is_some())
+            .map(|row| row.elem)
+            .collect();
         let mut rows = Vec::new();
         for e in &model.elements {
+            if unavailable.contains(&e.id) {
+                continue;
+            }
             let Some(TorsionReleaseSkip::UnrestrainedRotation { node }) =
                 sepika_element::frame::beam::i_end_torsion_release_skip(e, model)
             else {
                 continue;
             };
-            let j = e
-                .section
-                .and_then(|sid| model.sections.get(sid.index()))
-                .map(|s| s.j)
-                .unwrap_or(0.0);
-            let g = model
-                .element_material(e)
-                .map(|m| m.shear_modulus())
-                .unwrap_or(0.0);
-            if j <= 0.0 || g <= 0.0 {
+            let Ok(beam) = sepika_element::frame::beam::BeamElement::try_new(e, model) else {
+                continue;
+            };
+            let gj = beam.g * beam.j;
+            if !gj.is_finite() || gj <= 0.0 {
                 continue;
             }
             rows.push(PrepTorsionSkipRow {
@@ -797,7 +794,7 @@ impl App {
                     area,
                     iy,
                     iz,
-                    j: sec.j,
+                    j: sec.resolved_j().ok(),
                     as_y: sec.as_y,
                     as_z: sec.as_z,
                     depth: sec.depth,
@@ -935,55 +932,73 @@ impl App {
         }
 
         let mut rows = Vec::new();
+        let mut cft_props = std::collections::HashMap::new();
         for e in &model.elements {
             if !matches!(e.kind, ElementKind::Beam) || e.nodes.len() < 2 {
                 continue;
             }
-            let (Some(sec), Some(mat)) = (
-                e.section.and_then(|sid| model.sections.get(sid.index())),
-                model.element_material(e),
-            ) else {
+            let Some(sec) = model.element_section(e) else {
                 continue;
             };
-            if sec.ensure_properties_resolved().is_err()
-                || sec
-                    .shape
-                    .as_ref()
-                    .is_some_and(|shape| shape.try_cft_core_props().is_err())
-            {
+            let is_cft = matches!(
+                sec.shape.as_ref(),
+                Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. })
+            );
+            if !is_cft && sec.ensure_properties_resolved().is_err() {
                 continue;
             }
             let factors = sepika_element::frame::beam::stiffness_breakdown(model, e)?;
-            let composite = sepika_element::frame::beam::composite_props_of(model, e)?;
-            let fallback = if composite.is_none() {
-                match sec
-                    .shape
-                    .as_ref()
-                    .and_then(sepika_core::structure_kind::shape_composite_kind)
-                {
-                    Some(sepika_core::structure_kind::StructureKind::Cft) => {
-                        Some(CompositeFallbackKind::CftSteelOnly)
-                    }
-                    _ => None,
-                }
+            let resolved_composite = if is_cft {
+                let key = (
+                    sec.id,
+                    model.element_material(e).map(std::ptr::from_ref),
+                    model.element_steel_material(e).map(std::ptr::from_ref),
+                );
+                let (source_elem, result) = cft_props.entry(key).or_insert_with(|| {
+                    (
+                        e.id,
+                        sepika_element::frame::beam::composite_props_of(model, e),
+                    )
+                });
+                result.clone().map_err(|reason| {
+                    reason.replacen(
+                        &format!("部材 ID {} ", source_elem.0),
+                        &format!("部材 ID {} ", e.id.0),
+                        1,
+                    )
+                })
             } else {
-                None
+                sepika_element::frame::beam::composite_props_of(model, e)
             };
-            let base_iy = composite.map(|p| p.iy).unwrap_or(sec.iy);
+            let (composite, unavailable_reason) = match resolved_composite {
+                Ok(composite) => (composite, None),
+                Err(error) if is_cft => (None, Some(error)),
+                Err(error) => return Err(error),
+            };
+            let base_iy = composite.map_or(sec.iy, |p| p.iy);
             let base_area = composite.map_or(sec.area, |p| p.area_ax);
             if factors.slab == 1.0
                 && factors.wall_girder == 1.0
                 && composite.is_none()
-                && fallback.is_none()
+                && unavailable_reason.is_none()
                 && base_area == sec.area
             {
                 continue;
             }
+            let effective_iy = unavailable_reason
+                .is_none()
+                .then_some(base_iy * factors.slab * factors.wall_girder);
+            let effective_area = unavailable_reason
+                .is_none()
+                .then_some(base_area * factors.wall_girder);
             rows.push(PrepMemberStiffnessRow {
                 elem: e.id,
                 kind: sepika_design_jp::MemberKind::of_element(e, model),
                 section_name: sec.name.clone(),
-                material: mat.name.clone(),
+                material: model
+                    .element_material(e)
+                    .map(|m| m.name.clone())
+                    .unwrap_or_else(|| "未割当".into()),
                 slab_factor: factors.slab,
                 wall_girder_factor: factors.wall_girder,
                 composite: composite.map(|p| PrepCompositeProps {
@@ -994,11 +1009,11 @@ impl App {
                     as_y: p.as_y,
                     as_z: p.as_z,
                 }),
-                composite_fallback: fallback,
+                unavailable_reason,
                 section_area: sec.area,
                 section_iy: sec.iy,
-                effective_iy: base_iy * factors.slab * factors.wall_girder,
-                effective_area: base_area * factors.wall_girder,
+                effective_iy,
+                effective_area,
             });
         }
         Ok((rows, candidates))
@@ -1172,6 +1187,229 @@ pub fn ai_mode_label(m: AiMode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sepika_core::model::{MaterialCategory, PropertyBasis};
+    use sepika_core::section_shape::SectionShape;
+
+    fn section_app(shape: SectionShape, cft: bool) -> App {
+        let mut model = crate::sample::portal_frame();
+        let previous = model.sections[0].clone();
+        model.sections[0] = shape
+            .input_section(SectionId(0), "J観測断面".into())
+            .unwrap();
+        model.sections[0].material = previous.material;
+        model.sections[0].frame_use = previous.frame_use;
+        if cft {
+            let mut concrete = model.materials[0].clone();
+            concrete.id = MaterialId(model.materials.len() as u32);
+            concrete.category = MaterialCategory::Concrete;
+            concrete.fc = Some(36.0);
+            concrete.fy = None;
+            concrete.young = sepika_core::section_shape::concrete_young_modulus(36.0);
+            concrete.poisson = 0.2;
+            concrete.shear = None;
+            concrete.density = 2.4e-9;
+            model.sections[0].material = Some(concrete.id);
+            model.sections[0].steel_material = Some(MaterialId(0));
+            model.materials.push(concrete);
+        }
+        let mut app = App::default();
+        assert!(app.load_model(model));
+        app
+    }
+
+    #[test]
+    fn preparation_and_report_use_current_shape_j_and_preserve_supplied_j() {
+        let mut app = section_app(
+            SectionShape::SteelBox {
+                height: 400.0,
+                width: 300.0,
+                thick: 12.0,
+                corner_r: Some(30.0),
+            },
+            false,
+        );
+        app.core.model.sections[0].j = 999_000_000.0;
+        app.run_preparation();
+        let row = &app.core.scoped.preparation.as_ref().unwrap().sections[0];
+        assert!((row.j.unwrap() - 453_213_215.442_827_4).abs() < 1e-6);
+        assert_eq!(app.core.model.sections[0].j, 999_000_000.0);
+        let csv = crate::summary::build_preparation_csv(&app);
+        let line = csv
+            .lines()
+            .find(|line| line.starts_with("0,J観測断面,"))
+            .unwrap();
+        assert_eq!(line.split(',').nth(9), Some("4.5321e8"));
+        app.core.model.sections[0].property_basis.j = PropertyBasis::Supplied;
+        app.run_preparation();
+        assert_eq!(
+            app.core.scoped.preparation.as_ref().unwrap().sections[0].j,
+            Some(999_000_000.0)
+        );
+    }
+
+    #[test]
+    fn pending_j_keeps_geometry_weight_and_explicit_unavailable_values() {
+        let mut app = section_app(
+            SectionShape::CftBox {
+                height: 400.0,
+                width: 300.0,
+                thick: 12.0,
+                corner_r: Some(6.0),
+            },
+            true,
+        );
+        assert_eq!(
+            app.core.model.sections[0].property_basis.j,
+            PropertyBasis::PendingShape
+        );
+        app.core.model.sections[0].j = 987.0;
+        app.run_preparation();
+        let prep = app
+            .core
+            .scoped
+            .preparation
+            .as_ref()
+            .expect("J未算定でも準備結果を保持する");
+        let section = &prep.sections[0];
+        assert!(section.area.unwrap() > 0.0);
+        assert!(section.iy.unwrap() > 0.0);
+        assert!(section.iz.unwrap() > 0.0);
+        assert_eq!(section.j, None);
+        assert!(section.unavailable_reason.is_some());
+        assert!(prep.summary.total_seismic_weight > 0.0);
+        let rows: Vec<_> = prep
+            .member_stiffness
+            .iter()
+            .filter(|r| r.section_name == "J観測断面")
+            .collect();
+        assert!(!rows.is_empty());
+        for row in rows {
+            assert!(row.composite.is_none());
+            assert_eq!(row.effective_area, None);
+            assert_eq!(row.effective_iy, None);
+            assert!(row.unavailable_reason.as_ref().unwrap().contains("J"));
+        }
+        let json = serde_json::to_value(section).unwrap();
+        assert!(json["j"].is_null());
+        let csv = crate::summary::build_preparation_csv(&app);
+        let line = csv
+            .lines()
+            .find(|line| line.starts_with("0,J観測断面,"))
+            .unwrap();
+        assert_eq!(line.split(',').nth(9), Some("未算定"));
+    }
+
+    #[test]
+    fn cft_numerical_failure_keeps_preparation_geometry_and_weight_without_steel_only_stiffness() {
+        let shape = SectionShape::CftBox {
+            height: 400.0,
+            width: 1e-9,
+            thick: 1e-10,
+            corner_r: Some(0.0),
+        };
+        let failure = shape.try_cft_core_torsion().unwrap_err();
+        let mut app = section_app(shape, true);
+        app.core.model.sections[0].property_basis.j = PropertyBasis::Supplied;
+        app.core.model.sections[0].j = 1e8;
+        app.run_preparation();
+        let prep = app
+            .core
+            .scoped
+            .preparation
+            .as_ref()
+            .expect("コア数値失敗で準備結果を失わない");
+        assert_eq!(prep.sections[0].j, Some(1e8));
+        assert!(prep.sections[0].area.unwrap() > 0.0);
+        assert!(prep.summary.total_seismic_weight > 0.0);
+        let rows: Vec<_> = prep
+            .member_stiffness
+            .iter()
+            .filter(|r| r.section_name == "J観測断面")
+            .collect();
+        assert_eq!(
+            rows.len(),
+            app.core
+                .model
+                .elements
+                .iter()
+                .filter(|e| e.section == Some(SectionId(0)))
+                .count()
+        );
+        for row in rows {
+            assert!(row.composite.is_none());
+            assert_eq!(row.effective_area, None);
+            assert_eq!(row.effective_iy, None);
+            let reason = row.unavailable_reason.as_ref().unwrap();
+            assert!(reason.contains(&failure.reason), "{reason}");
+            assert!(
+                reason.contains(&format!("部材 ID {} ", row.elem.0)),
+                "{reason}"
+            );
+        }
+        let csv = crate::summary::build_preparation_csv(&app);
+        assert!(csv.contains(&failure.reason));
+        assert!(!csv.contains("鋼管のみ"));
+    }
+
+    #[test]
+    fn cft_preparation_distinguishes_supplied_steel_j_from_composite_j_and_actual_steel_g() {
+        let mut app = section_app(
+            SectionShape::CftPipe {
+                outer_dia: 400.0,
+                thick: 12.0,
+            },
+            true,
+        );
+        let js = 123_000_000.0;
+        app.core.model.sections[0].property_basis.j = PropertyBasis::Supplied;
+        app.core.model.sections[0].j = js;
+        let mut equivalent_j = Vec::new();
+        for gs in [40_000.0, 80_000.0] {
+            app.core.model.materials[0].shear = Some(gs);
+            app.run_preparation();
+            let prep = app.core.scoped.preparation.as_ref().unwrap();
+            assert_eq!(prep.sections[0].j, Some(js));
+            let row = prep
+                .member_stiffness
+                .iter()
+                .find(|r| r.section_name == "J観測断面")
+                .unwrap();
+            assert!(row.unavailable_reason.is_none());
+            let composite = row.composite.unwrap();
+            assert!(composite.j > js);
+            let elem = app
+                .core
+                .model
+                .elements
+                .iter()
+                .find(|e| e.id == row.elem)
+                .unwrap();
+            let beam =
+                sepika_element::frame::beam::BeamElement::try_new(elem, &app.core.model).unwrap();
+            assert_eq!(beam.g, gs);
+            assert_eq!(beam.j, composite.j);
+            equivalent_j.push(composite.j);
+        }
+        assert!(((equivalent_j[0] - js) / (equivalent_j[1] - js) - 2.0).abs() < 1e-12);
+        assert_eq!(app.core.model.sections[0].j, js);
+        app.core.model.materials[0].shear = Some(0.0);
+        app.run_preparation();
+        let row = app
+            .core
+            .scoped
+            .preparation
+            .as_ref()
+            .unwrap()
+            .member_stiffness
+            .iter()
+            .find(|r| r.section_name == "J観測断面")
+            .unwrap();
+        assert!(row.composite.is_none());
+        assert!(row.unavailable_reason.is_some());
+        assert_eq!(row.effective_iy, None);
+        assert_eq!(row.effective_area, None);
+    }
+
     #[test]
     fn preparation_mixed_structure_period_counts_only_height_above_ground() {
         let mut app = App::default();

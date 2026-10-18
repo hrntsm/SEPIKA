@@ -1,0 +1,16 @@
+   Compiling sepika-core v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-core)
+    Finished `release` profile [optimized] target(s) in 3m 10s
+     Running unittests src\lib.rs (target\release\deps\sepika_core-fc2f3d726168c9eb.exe)
+
+running 4 tests
+test section_shape::core_torsion::verification_tests::actual_fine_mesh_coordinates_preserve_j_under_rigid_motion_and_scale_to_fourth_power ... calibration evidence: C:\Users\hiroa\AppData\Local\Temp\sepika416-numeric-calibration\actual-transforms-13080-1792324457676634200
+ok
+test section_shape::core_torsion::verification_tests::ellipses_have_separate_boundary_and_internal_convergence_and_point_one_percent_accuracy ... calibration evidence: C:\Users\hiroa\AppData\Local\Temp\sepika416-numeric-calibration\ellipses-13080-1792324458245382100
+ok
+test section_shape::core_torsion::verification_tests::elongated_rectangles_agree_with_tail_bounded_independent_series ... calibration evidence: C:\Users\hiroa\AppData\Local\Temp\sepika416-numeric-calibration\rectangle-series-13080-1792324460625236900
+ok
+test section_shape::core_torsion::verification_tests::positive_small_radii_approach_rectangle_and_half_side_radii_approach_circle ... calibration evidence: C:\Users\hiroa\AppData\Local\Temp\sepika416-numeric-calibration\radius-limits-13080-1792324462895151300
+ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 525 filtered out; finished in 11.75s
+

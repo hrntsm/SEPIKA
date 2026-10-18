@@ -1,0 +1,32 @@
+[
+  {
+    "file": "pypi-3.10.2.json",
+    "url": "https://pypi.org/pypi/sectionproperties/3.10.2/json",
+    "sha256": "dfc15cec31ea36af18ffff7ee80e7979cb44124a186902bb52350f12812adb05",
+    "status": "ok"
+  },
+  {
+    "file": "pyproject-v3.10.2.toml",
+    "url": "https://raw.githubusercontent.com/robbievanleeuwen/section-properties/v3.10.2/pyproject.toml",
+    "sha256": "838c458cb665453728d120b552a29a7b0f15e895b2d46a9ee1c34089129dd5a4",
+    "status": "ok"
+  },
+  {
+    "file": "release-v3.10.2.json",
+    "url": "https://api.github.com/repos/robbievanleeuwen/section-properties/releases/tags/v3.10.2",
+    "sha256": "5cc65ea29326c2fa7ab214adec3d31cbf30af5a27e00a52caa1045fe5f42677d",
+    "status": "ok"
+  },
+  {
+    "file": "primary-theory.html",
+    "url": "https://sectionproperties.readthedocs.io/en/stable/user_guide/theory.html",
+    "status": "failed",
+    "reason": "HTTP Error 403: Forbidden"
+  },
+  {
+    "file": "primary-circle.html",
+    "url": "https://sectionproperties.readthedocs.io/en/stable/gen/sectionproperties.pre.library.primitive_sections.circular_section.html",
+    "status": "failed",
+    "reason": "HTTP Error 403: Forbidden"
+  }
+]

@@ -1,0 +1,314 @@
+   Compiling sepika-core v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-core)
+   Compiling sepika-section v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-section)
+   Compiling sepika-element v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-element)
+   Compiling sepika-io v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-io)
+    Finished `test` profile [optimized + debuginfo] target(s) in 1m 36s
+     Running unittests src\lib.rs (target\debug\deps\sepika_io-f8a18e269b076579.exe)
+
+running 178 tests
+test checkpoint::tests::test_model_hash_mismatch_rejected ... ok
+test ovika::tests::actual_entry_bytes_stop_at_one_byte_above_limit ... ok
+test checkpoint::tests::test_load_nonexistent_returns_error ... ok
+test checkpoint::tests::checkpoint_from_previous_time_contract_is_rejected ... ok
+test ovika::tests::entry_size_limit_accepts_boundary_and_rejects_larger_header ... ok
+test checkpoint::tests::test_checkpoint_save_load_roundtrip ... ok
+test checkpoint::tests::test_nonlinear_checkpoint_roundtrip ... ok
+test checkpoint::tests::test_nonlinear_checkpoint_hash_mismatch ... ok
+test ovika::tests::corrupt_model_with_matching_hash_returns_decode_error ... ok
+test ovika::tests::full_length_and_fixed_extent_roundtrip_without_numeric_inference ... ok
+test ovika::tests::malformed_zip_is_rejected_without_changing_input ... ok
+test ovika::tests::measure_real_model_msgpack ... ignored, 実モデルの codec 比較計測。release・単独で実行する
+test ovika::tests::load_rejects_attached_slab_with_common_geometry_diagnostic ... ok
+test ovika::tests::named_node_reads_added_default_field ... ok
+test ovika::tests::false_entry_size_is_rejected_by_zip_reader ... ok
+test ovika::tests::property_basis_roundtrip_keeps_individual_inputs_and_radius_updates ... ok
+test ovika::tests::issue635_save_and_correctly_hashed_load_reject_invalid_fixed_distance ... ok
+test ovika::tests::saved_model_fields_are_named_and_order_independent ... ok
+test ovika::tests::lip_channel_geometry_save_preserves_bytes_and_correct_hash_load_rejects ... ok
+test ovika::tests::test_load_without_optional_entries ... ok
+test ovika::tests::surface_radii_ovika_roundtrip ... ok
+test ovika::tests::test_hash_mismatch ... ok
+test ovika::tests::test_manifest_missing_required_entry_rejected ... ok
+test ovika::tests::test_roundtrip_preserves_rich_model ... ok
+test ovika::tests::test_roundtrip_preserves_optional_entries ... ok
+test ovika::tests::test_rejects_unsupported_versions ... ok
+test ovika::tests::tip_load_roundtrip ... ok
+test stbridge::import::material_std::tests::test_resolve_grade_concrete_uses_fc_dependent_unit_weight ... ok
+test ovika::tests::wall_weight_generation_mode_and_dl_choice_roundtrip_and_old_default ... ok
+test stbridge::import::material_std::tests::test_resolve_grade_rebar_and_concrete ... ok
+test stbridge::import::material_std::tests::test_resolve_grade_sn490_is_325 ... ok
+test stbridge::import::material_std::tests::test_resolve_grade_steel_mass_density ... ok
+test stbridge::import::material_std::tests::test_resolve_grade_wires_to_core ... ok
+test ovika::tests::指定なし生成記録の保存往復は未生成と区別する ... ok
+test stbridge::rebar_tests::apply_conditions_absence_false_and_partial_true_do_not_invent_values ... ok
+test stbridge::rebar_tests::apply_boolean_lexical_defaults_and_individual_precedence_remain_distinct ... ok
+test stbridge::rebar_tests::common_apply_roles_resolve_effective_counts_diameters_and_strength_without_filling_raw ... ok
+test stbridge::rebar_tests::explicit_center_takes_priority_without_overwriting_original_cover_or_omission ... ok
+test stbridge::rebar_tests::circle_band_count_is_required_preserved_and_gated_before_reduction ... ok
+test stbridge::rebar_tests::native_circle_exports_explicit_band_count_and_remains_supported ... ok
+test stbridge::rebar_tests::standard_column_x_counts_vertical_rows_and_native_export_inverts_the_mapping ... ok
+test ovika::tests::noncanonical_secondary_ids_reject_persistence_while_rc_purpose_is_inspectable ... ok
+test stbridge::rebar_tests::src_standard_column_and_beam_rebar_ovika_roundtrip_preserves_schema_child_order ... ok
+test stbridge::rebar_tests::standard_rebar_invalid_values_and_semantics_are_rejected ... ok
+test stbridge::rebar_tests::standard_roles_positions_and_omissions_remain_distinct ... ok
+test stbridge::rebar_tests::standard_unrepresentable_geometry_is_preserved_and_unused_sections_do_not_block_analysis ... ok
+test stbridge::rebar_tests::third_party_unmodified_known_invalid_common_is_rejected ... ok
+test stbridge::rebar_tests::unresolved_required_diameter_is_preserved_and_never_treated_as_unreinforced ... ok
+test stbridge::rebar_tests::standard_numeric_and_boolean_whitespace_preserves_raw_and_semantics ... ok
+test stbridge::rebar_tests::applied_cover_center_mismatch_is_preserved_and_reported_without_blocking ... ok
+test stbridge::strength_tests::concrete_priority_omissions_and_unknown_upper_are_independent ... ok
+test stbridge::strength_tests::designated_original_node_survives_order_level_and_prepare_changes ... ok
+test stbridge::strength_tests::diameter_and_individual_strength_keep_all_parts_separate ... ok
+test ovika::tests::frame_node_counts_reject_save_without_overwrite_and_correct_hash_load ... ok
+test stbridge::strength_tests::exact_member_and_section_binding_keeps_coincident_members_distinct ... ok
+test stbridge::strength_tests::frame_stbridge_import_rejects_repeated_node_ids_with_shared_diagnostic ... ok
+test stbridge::rebar_tests::unresolved_standard_topology_is_saved_instead_of_rejected_by_an_unproved_total_formula ... ok
+test stbridge::strength_tests::edited_unknown_src_steel_keeps_all_properties_and_native_override ... ok
+test stbridge::strength_tests::qualified_numeric_section_id_keeps_column_strength_separate_from_beam ... ok
+test stbridge::strength_tests::frame_two_nodes_stbridge_and_ovika_roundtrip_preserve_strength_sources_and_axis ... ok
+test stbridge::rebar_tests::standard_rebar_research_cases_use_product_import_and_ovika_roundtrip ... ok
+test stbridge::strength_tests::split_slab_keeps_original_first_node_supply_and_refuses_unrepresentable_export ... ok
+test stbridge::strength_tests::ovika_preserves_raw_omission_and_arbitrary_properties ... ok
+test stbridge::strength_tests::src_standard_steel_child_survives_and_numeric_override_is_not_exported_as_grade ... ok
+test stbridge::strength_tests::story_competition_does_not_block_upper_strength ... ok
+test stbridge::strength_tests::split_slab_export_starts_at_original_strength_node_and_keeps_omission ... ok
+test stbridge::strength_tests::unknown_present_grade_never_uses_known_lower_grade ... ok
+test stbridge::strength_tests::unknown_src_steel_grades_keep_metadata_without_stock_strength_or_mapping ... ok
+test stbridge::tests::assigned_members_625_preserve_independent_xml_fields_and_shape_none ... ok
+test stbridge::tests::frame_node_counts_export_rejects_instead_of_dropping_members ... ok
+test stbridge::tests::h_radii_roundtrip_and_missing_radius_stays_unknown ... ok
+test stbridge::tests::rc_circle_girder_export_is_rejected_without_shape_conversion ... ok
+test stbridge::tests::surface_radius_export_rejects_unknown_zero_and_invalid ... ok
+test stbridge::tests::test_export_errors_when_secondary_has_no_end_node ... ok
+test stbridge::tests::test_export_post_only_uses_column_section ... ok
+test stbridge::tests::test_export_rejects_beam_section_with_brace_use ... ok
+test stbridge::tests::test_export_secondary_post_uses_column_section_map ... ok
+test stbridge::tests::test_export_strips_illegal_control_chars ... ok
+test stbridge::tests::test_export_skips_plateless_and_attached_orphan_sections ... ok
+test stbridge::tests::test_import_auto_fixes_base_level_supports ... ok
+test stbridge::tests::test_import_auto_support_excludes_beam_only_base_nodes ... ok
+test stbridge::tests::test_import_box_without_r_attr_is_corner_r_zero ... ok
+test stbridge::tests::test_import_cantilever_slab_becomes_attached ... ok
+test stbridge::tests::test_import_cft_separates_concrete_and_steel_materials ... ok
+test stbridge::tests::test_import_cft_without_strength_keeps_section_unresolved ... ok
+test stbridge::tests::test_import_converts_unenclosed_parapet_to_attached_wall_plate ... ok
+test stbridge::tests::test_import_does_not_merge_sections_with_different_materials ... ok
+test stbridge::tests::test_import_duplicate_node_id_is_error ... ok
+test ovika::tests::rc_purpose_rejects_save_and_correctly_hashed_load_without_overwriting_existing_file ... ok
+test stbridge::tests::test_import_enclosed_frame_with_slab_folds_to_one_region ... ok
+test stbridge::tests::test_import_errors_when_slab_area_stays_unassigned ... ok
+test stbridge::tests::test_import_export_parallel_axes ... ok
+test stbridge::tests::test_import_merges_identical_duplicate_sections ... ok
+test stbridge::tests::test_import_keeps_section_floor ... ok
+test stbridge::tests::test_import_non_parallel_axes_as_other ... ok
+test stbridge::tests::test_import_propagates_rc_material_to_member ... ok
+test stbridge::tests::test_import_normalizes_noncontiguous_ids ... ok
+test stbridge::tests::test_import_propagates_steel_grade_material_to_member ... ok
+test stbridge::tests::test_import_rc_circle_beam_unsupported ... ok
+test stbridge::tests::test_import_rc_beam_rebar_stages ... ok
+test stbridge::tests::test_import_rc_circle_column_total_count ... ok
+test stbridge::tests::test_import_rc_kind_preserved ... ok
+test stbridge::tests::test_import_rc_rebar_layered_counts ... ok
+test stbridge::tests::test_import_rc_without_bar_arrangement_uses_default ... ok
+test stbridge::tests::test_import_rc_rebar_third_party_names ... ok
+test stbridge::tests::test_import_rc_rect_column_hoop_legs ... ok
+test stbridge::tests::test_import_rejects_dangling_section_ref ... ok
+test stbridge::tests::test_import_rejects_unresolved_steel_ref ... ok
+test stbridge::tests::test_import_renames_conflicting_duplicate_sections ... ok
+test stbridge::tests::test_import_renames_same_name_sections_from_different_families ... ok
+test stbridge::tests::test_import_report_lists_unsupported_elements ... ok
+test stbridge::tests::test_import_report_unknown_elements_are_reported ... ok
+test stbridge::tests::test_import_reports_attribute_dispositions ... ok
+test stbridge::tests::test_import_slab_section_and_self_weight ... ok
+test stbridge::tests::test_import_slab_node_order_cdata_and_self_closing_window ... ok
+test stbridge::tests::test_import_slab_with_node_order_and_thickness ... ok
+test stbridge::tests::test_import_sorts_stories_by_elevation ... ok
+test stbridge::tests::test_import_splits_slab_across_assignment_regions ... ok
+test stbridge::tests::test_import_stbpost_bottom_top ... ok
+test stbridge::tests::test_import_stbsecbrace_s ... ok
+test stbridge::tests::test_import_stbbeam_as_secondary_member ... ok
+test stbridge::tests::test_import_steel_pipe_library ... ok
+test stbridge::tests::test_import_uses_member_context_without_reinterpreting_rc_purpose_types ... ok
+test stbridge::tests::test_import_symmetric_build_h_is_steel_h ... ok
+test stbridge::tests::test_import_wall_with_node_order_and_thickness ... ok
+test stbridge::tests::test_non_quad_wall_plate_roundtrip_export_import ... ok
+test stbridge::tests::test_import_without_walls_rebuilds_wall_assignment_regions ... ok
+test stbridge::strength_tests::wall_last_node_and_explicit_member_omission_survive_native_roundtrip_and_export ... ok
+test stbridge::tests::test_reject_unsupported_version ... ok
+test stbridge::tests::test_roundtrip_semantic ... ok
+test stbridge::tests::test_roundtrip_brace ... ok
+test stbridge::tests::test_roundtrip_twice_stable ... ok
+test stbridge::tests::test_secondary_members_roundtrip ... ok
+test stbridge::tests::test_self_closing_slab_does_not_steal_wall_nodes ... ok
+test stbridge::tests::test_read_stbridge_file_shift_jis ... ok
+test stbridge::tests::test_slab_roundtrip_export_import ... ok
+test stbridge::tests::test_standard_export_built_h ... ok
+test stbridge::tests::test_standard_export_lip_channel ... ok
+test stbridge::tests::test_standard_export_flat_bar ... ok
+test stbridge::tests::test_slab_shared_section_does_not_multiply_on_roundtrip ... ok
+test stbridge::tests::test_standard_export_round_bar ... ok
+test stbridge::tests::test_standard_export_shared_rc_rect_rebar_and_reject_cross_family_reference ... ok
+test stbridge::tests::test_standard_export_src_beam_rect_stages ... ok
+test stbridge::tests::test_standard_export_src_column_rect_stages ... ok
+test stbridge::tests::test_standard_export_warns_on_fourth_rebar_stage ... ok
+test stbridge::tests::test_standard_import_recovers_split_shared_section ... ok
+test stbridge::tests::test_standard_import_roundtrip_steel_and_rc ... ok
+test stbridge::tests::test_standard_mode_fallback_raw_for_shapeless ... ok
+test stbridge::tests::test_standard_import_steel_library_order_independent ... ok
+test stbridge::tests::test_standard_mode_rc_beam ... ok
+test stbridge::tests::test_standard_mode_steel_column ... ok
+test stbridge::tests::test_standard_mode_shared_section_split ... ok
+test stbridge::tests::test_standard_roundtrip_cft_box ... ok
+test stbridge::tests::test_standard_roundtrip_cft_pipe ... ok
+test stbridge::tests::test_read_stbridge_file_utf8_bom ... ok
+test stbridge::tests::test_standard_roundtrip_rc_circle_column_rebar ... ok
+test stbridge::tests::test_standard_roundtrip_rc_beam_rebar ... ok
+test stbridge::tests::test_standard_roundtrip_rc_column_rect_stages_legs ... ok
+test stbridge::tests::test_standard_roundtrip_shear_rebar_material_with_control_chars ... ok
+test stbridge::tests::test_standard_roundtrip_rc_rebar_without_shear_material ... ok
+test ovika::reference_tests::indexed_ids_and_existing_reference_families_are_checked_before_persistence ... ok
+test stbridge::tests::test_standard_roundtrip_rc_beam_rect_stages ... ok
+test stbridge::tests::test_standard_roundtrip_src_beam ... ok
+test stbridge::tests::test_standard_roundtrip_src_column ... ok
+test stbridge::tests::test_standard_unsupported_cft_beam_shape_falls_back_to_raw ... ok
+test stbridge::tests::test_standard_writes_section_material ... ok
+test stbridge::tests::test_standard_roundtrip_steel_box_distinct_corner_r ... ok
+test wave_library::tests::test_list_empty_when_dir_absent ... ok
+test stbridge::tests::test_standard_roundtrip_rc_rebar_non_integer ... ok
+test stbridge::tests::unassigned_primary_members_625_reject_both_exports_and_recover_by_assignment ... ok
+test stbridge::tests::unassigned_secondary_members_625_reject_detached_and_region_exports_then_recover ... ok
+test stbridge::tests::test_standard_roundtrip_rc_column_circle_count ... ok
+test wave_library::tests::test_list_filters_non_wave_extensions_and_sorts ... ok
+test wave_library::tests::test_wave_sha256_matches_direct_hash ... ok
+test wave_library::tests::test_register_creates_dir_and_copies ... ok
+test stbridge::tests::test_wall_roundtrip_export_import ... ok
+test wave_library::tests::test_register_overwrites_same_name ... ok
+test ovika::reference_tests::all_member_locations_reject_noncanonical_section_references_and_keep_incomplete_models ... ok
+
+test result: ok. 177 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.52s
+
+     Running tests\cft_torsion_roundtrip.rs (target\debug\deps\cft_torsion_roundtrip-f385be0ce1b1c8b5.exe)
+
+running 2 tests
+test current_ovika_preserves_h_box_radius_basis_supplied_j_and_shape_resolution ... ok
+test current_ovika_preserves_cft_steel_j_and_actual_steel_g_in_beam_and_fiber ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.51s
+
+     Running tests\external_ids.rs (target\debug\deps\external_ids-370a2b1c4d3d167e.exe)
+
+running 8 tests
+     Running tests\frame_support_representation.rs (target\debug\deps\frame_support_representation-b508dd82503d286a.exe)
+test stb_negative_section_reference_is_rejected_for_all_linear_member_types ... ok
+test stb_post_invalid_or_missing_required_endpoint_never_uses_another_alias ... ok
+test stb_u32_parser_boundary_ids_resolve_to_the_same_section_and_grade_material ... ok
+test stb_boundary_node_reference_tokens_are_not_silently_discarded ... ok
+test stb_member_source_id_parser_accepts_omission_and_u32_boundaries_with_resolved_section ... ok
+test stb_plate_section_parser_boundary_ids_resolve_at_zero_and_u32_max ... ok
+test stb_whole_document_rejects_invalid_present_member_reference_and_source_ids ... ok
+test stb_required_definition_and_endpoint_ids_reject_missing_or_invalid_values ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 1 test
+test 明示解析表現の床壁版支持境界は実ovika保存読込再構築で保持する ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests\lip_channel_geometry.rs (target\debug\deps\lip_channel_geometry-3ae8fe1f560d2358.exe)
+
+running 1 test
+test lip_channel_geometry_ovika_roundtrip_and_public_save_export_rejection ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\ovika_reference_boundaries.rs (target\debug\deps\ovika_reference_boundaries-371ca01f04272b45.exe)
+
+running 1 test
+test save_and_independent_load_reject_missing_targets_and_preserve_input ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.76s
+
+     Running tests\stbridge_brace_content.rs (target\debug\deps\stbridge_brace_content-43b3b3c03bc644f9.exe)
+
+running 3 tests
+test write_public_brace_exports_for_external_xsd ... ignored, 公式XSD外部検証用。SEPIKA_BRACE_XSD_OUTPUTに出力ディレクトリを指定する
+test steel_brace_export_has_only_xml_whitespace_between_children ... ok
+test steel_brace_export_preserves_escaped_attribute_characters ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\stbridge_namespace.rs (target\debug\deps\stbridge_namespace-1c1b5b54e031658c.exe)
+
+running 9 tests
+test root_without_adopted_namespace_is_rejected ... ok
+test child_default_namespace_removal_and_prefix_rebinding_are_rejected ... ok
+test foreign_known_element_and_foreign_wrapper_are_rejected_before_adopted_children ... ok
+test extension_payload_still_rejects_foreign_elements_and_unbound_attributes ... ok
+test unbound_element_and_attribute_prefixes_are_rejected ... ok
+test bound_attribute_qname_is_not_used_as_unqualified_id ... ok
+test schema_invalid_known_elements_inside_extension_are_not_dispatched ... ok
+test adopted_default_prefix_alias_and_same_uri_redeclaration_preserve_column_strength ... ok
+test explicit_extension_structure_and_attribute_text_do_not_change_model_or_strength ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\stbridge_section_reference_boundaries.rs (target\debug\deps\stbridge_section_reference_boundaries-af07d752f735be52.exe)
+
+running 6 tests
+test brace_rc_and_src_report_unsupported_kind_without_inventing_a_section_family ... ok
+test a_defined_undefined_section_stays_unsupported_for_columns_posts_girders_and_beams ... ok
+test brace_and_wall_never_fall_back_to_another_series_with_the_same_id ... ok
+test brace_and_wall_bind_their_own_sections_materials_and_strength_targets ... ok
+test every_member_tag_reports_source_kind_requested_family_and_section_id ... ok
+test all_nineteen_concrete_series_reject_normalized_duplicates_before_shape_support ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\stbridge_section_series.rs (target\debug\deps\stbridge_section_series-72835ec34f932772.exe)
+
+running 12 tests
+test normalized_duplicate_ids_are_rejected_within_the_same_concrete_series ... ok
+test precast_is_rejected_as_unsupported_even_when_rc_and_deck_share_its_id ... ok
+test missing_requested_family_never_uses_another_family_with_the_same_id ... ok
+test missing_invalid_and_unsupported_structure_kind_have_distinct_reasons ... ok
+test section_definition_and_reference_outside_u32_are_rejected ... ok
+test column_post_and_girder_beam_share_their_concrete_section_series ... ok
+test slab_rc_and_deck_with_same_id_keep_thickness_and_concrete_binding ... ok
+test concrete_steel_src_and_cft_columns_and_beams_resolve_their_specific_series ... ok
+test same_name_same_shape_sections_with_different_fc_stay_distinct ... ok
+test independent_column_and_girder_with_same_numeric_id_keep_their_own_fc ... ok
+test sparse_original_ids_and_leading_zero_references_keep_their_own_fc ... ok
+test ovika_preserves_binding_after_actual_internal_section_and_element_renumbering ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\stbridge_standard_input.rs (target\debug\deps\stbridge_standard_input-c2bcb0077ec33801.exe)
+
+running 6 tests
+test ordinary_secondary_missing_references_fail_at_both_entrances ... ok
+test ordinary_missing_node_section_and_shape_references_fail_at_both_entrances ... ok
+test ordinary_slab_and_wall_reference_errors_fail_at_both_entrances ... ok
+test standard_rc_dimensions_and_grade_survive_without_custom_material_ids ... ok
+test standard_steel_input_resolves_shape_material_and_sparse_references ... ok
+test standard_build_h_and_pipe_dimensions_are_preserved ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\stbridge_standard_rebar.rs (target\debug\deps\stbridge_standard_rebar-98cde447dfa4bfb5.exe)
+
+running 4 tests
+test misplaced_child_cover_and_center_do_not_supply_geometry_or_metadata ... ok
+test standard_rc_src_rebar_and_grade_priority_reach_both_public_imports ... ok
+test internal_material_and_strength_edits_survive_ovika ... ok
+test standard_container_positions_and_apply_conditions_survive_ovika ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+   Doc-tests sepika_io
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -121,14 +121,16 @@ impl Section {
                 ("A", self.area),
                 ("Iy", self.iy),
                 ("Iz", self.iz),
-                ("J", self.j),
+                ("J", self.resolved_j()?),
                 ("せい", self.depth),
                 ("幅", self.width),
                 ("Asy", self.as_y),
                 ("Asz", self.as_z),
             ] {
                 if !value.is_finite() || value < 0.0 {
-                    return Err(format!("リップ溝形 H={height}, B={width}, C={lip}, t={thick} mm: {name} は有限な非負値が必要です"));
+                    return Err(format!(
+                        "リップ溝形 H={height}, B={width}, C={lip}, t={thick} mm: {name} は有限な非負値が必要です"
+                    ));
                 }
             }
             Ok(())
@@ -143,7 +145,7 @@ impl Section {
             ("A", self.area),
             ("Iy", self.iy),
             ("Iz", self.iz),
-            ("J", self.j),
+            ("J", self.resolved_j()?),
             ("せい", self.depth),
             ("幅", self.width),
             ("Asy", self.as_y),
@@ -182,6 +184,35 @@ impl Section {
         Ok(())
     }
 
+    /// ねじり定数 J `[mm⁴]`。供給値を優先し、形状算定では現在の形状を用いる。
+    /// 未算定・形状欠落・適用域外・不正な供給値はエラー。CFT は鋼管単体の値。
+    pub fn resolved_j(&self) -> Result<f64, String> {
+        let error = |reason| format!("断面 {}「{}」の J: {reason}", self.id.0, self.name);
+        match self.property_basis.j {
+            PropertyBasis::Supplied => {
+                if self.j.is_finite() && self.j >= 0.0 {
+                    Ok(self.j)
+                } else {
+                    Err(error("供給値は有限な非負値が必要です".into()))
+                }
+            }
+            PropertyBasis::Shape => self
+                .shape
+                .as_ref()
+                .ok_or_else(|| error("形状が未設定です".into()))?
+                .try_calc_j()
+                .map_err(error),
+            PropertyBasis::PendingShape => {
+                let reason = self
+                    .shape
+                    .as_ref()
+                    .and_then(|shape| shape.try_calc_j().err())
+                    .unwrap_or_else(|| "形状性能が未算定です".into());
+                Err(error(format!("未算定です。{reason}")))
+            }
+        }
+    }
+
     pub fn resolved_area(&self) -> Result<f64, String> {
         self.validate_lip_channel()?;
         if !self.area.is_finite() || self.area < 0.0 {
@@ -205,8 +236,9 @@ impl Section {
         Ok(self.area)
     }
 
-    /// フィレット半径・角Rを変更し、形状算定の A・Iy・Iz だけを更新する。
-    /// 算定不能なら元の断面を変更せずエラー。材料・用途・階と入力性能は維持する。
+    /// フィレット半径・角Rを変更し、形状算定の A・Iy・Iz・J を更新する。
+    /// 未知半径・J の適用域外は未算定として保持し、不正な半径・寸法はエラー。
+    /// 材料・用途・階と供給性能は維持する。
     pub fn with_surface_radius(&self, radius_mm: Option<f64>) -> Result<Self, String> {
         use crate::section_shape::SectionShape;
         let mut result = self.clone();
@@ -222,20 +254,50 @@ impl Section {
         let basis = self.property_basis;
         let derived = |source| source != PropertyBasis::Supplied;
         if [basis.area, basis.iy, basis.iz].into_iter().any(derived) {
-            let p = shape
-                .rounded_steel_properties()?
-                .ok_or("鋼材性能の算定対象ではありません")?;
-            if derived(basis.area) {
-                result.area = p.area;
-                result.property_basis.area = PropertyBasis::Shape;
+            let p = match shape.rounded_steel_properties() {
+                Err(error) if radius_mm.is_some() => return Err(error),
+                properties => properties,
+            };
+            for (source, value, result_basis, resolved) in [
+                (
+                    basis.area,
+                    &mut result.area,
+                    &mut result.property_basis.area,
+                    p.as_ref().ok().and_then(|p| p.as_ref()).map(|p| p.area),
+                ),
+                (
+                    basis.iy,
+                    &mut result.iy,
+                    &mut result.property_basis.iy,
+                    p.as_ref().ok().and_then(|p| p.as_ref()).map(|p| p.iy),
+                ),
+                (
+                    basis.iz,
+                    &mut result.iz,
+                    &mut result.property_basis.iz,
+                    p.as_ref().ok().and_then(|p| p.as_ref()).map(|p| p.iz),
+                ),
+            ] {
+                if derived(source) {
+                    *value = resolved.unwrap_or(0.0);
+                    *result_basis = if resolved.is_some() {
+                        PropertyBasis::Shape
+                    } else {
+                        PropertyBasis::PendingShape
+                    };
+                }
             }
-            if derived(basis.iy) {
-                result.iy = p.iy;
-                result.property_basis.iy = PropertyBasis::Shape;
-            }
-            if derived(basis.iz) {
-                result.iz = p.iz;
-                result.property_basis.iz = PropertyBasis::Shape;
+        }
+        if derived(basis.j) {
+            match shape.try_calc_j() {
+                Ok(j) => {
+                    result.j = j;
+                    result.property_basis.j = PropertyBasis::Shape;
+                }
+                Err(_) => {
+                    result.j = 0.0;
+                    result.property_basis.j = PropertyBasis::PendingShape;
+                }
             }
         }
         Ok(result)

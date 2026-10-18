@@ -1,0 +1,7 @@
+call_id,label,swapped,repetition,kind,alias_of,status,j_mm4,wall_seconds,levels,swap_relative_difference
+0,hb1_bt10_r2_5t,false,0,fresh_diagnostic,,success,458701360.5545956,0.4549287,15,
+1,hb1_bt10_r2_5t,true,0,fresh_diagnostic,,success,458701360.5545956,0.4548443,15,0
+2,hb1_bt10_r2_5t,false,1,fresh_diagnostic,,success,458701360.5545956,0.4908428,15,
+3,hb1_bt10_r2_5t,true,1,fresh_diagnostic,,success,458701360.5545956,0.4400155,15,0
+4,hb1_bt10_r2_5t,false,2,fresh_diagnostic,,success,458701360.5545956,0.4504028,15,
+5,hb1_bt10_r2_5t,true,2,fresh_diagnostic,,success,458701360.5545956,0.4139694,15,0

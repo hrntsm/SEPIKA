@@ -1,0 +1,179 @@
+{
+  "extreme-first": {
+    "phase_sums_seconds": {
+      "mesh_seconds": 0.2915656,
+      "assembly_seconds": 0.3014557,
+      "factorization_seconds": 0.4986903,
+      "solve_seconds": 0.0167658
+    },
+    "max_internal_last2_change": 0.0008327538393318094,
+    "max_boundary_last2_change": null,
+    "by_outer_aspect": {
+      "4.0": 2
+    },
+    "max_inner_aspect_ratio": 4.75,
+    "slowest_call": {
+      "label": "hb4_bt10_rzero",
+      "swapped": false,
+      "repetition": 0,
+      "wall_seconds": 0.5621963,
+      "j_mm4": 4555795095.791873
+    }
+  },
+  "grid96": {
+    "phase_sums_seconds": {
+      "mesh_seconds": 63.3059851,
+      "assembly_seconds": 63.6780446,
+      "factorization_seconds": 82.4087713,
+      "solve_seconds": 3.4561251
+    },
+    "max_internal_last2_change": 0.0009480575648664715,
+    "max_boundary_last2_change": 0.0008140493495791994,
+    "by_outer_aspect": {
+      "1.0": 40,
+      "1.3333333333333333": 40,
+      "2.0": 40,
+      "4.0": 40
+    },
+    "max_inner_aspect_ratio": 4.75,
+    "slowest_call": {
+      "label": "hb1_bt50_rt_plus",
+      "swapped": true,
+      "repetition": 0,
+      "wall_seconds": 2.9833642,
+      "j_mm4": 967104170.9479531
+    }
+  },
+  "known-first-observed": {
+    "phase_sums_seconds": {
+      "mesh_seconds": 1.1841905,
+      "assembly_seconds": 1.1551914,
+      "factorization_seconds": 1.8404546,
+      "solve_seconds": 0.0740328
+    },
+    "max_internal_last2_change": 0.00044274386356525923,
+    "max_boundary_last2_change": 2.703934076522579e-06,
+    "by_outer_aspect": {
+      "1.3333333333333333": 4
+    },
+    "max_inner_aspect_ratio": 1.3623188405797102,
+    "slowest_call": {
+      "label": "known_400x300x12_r30",
+      "swapped": true,
+      "repetition": 0,
+      "wall_seconds": 1.740217,
+      "j_mm4": 1448692426.452021
+    }
+  },
+  "repeat-extreme-rectangle": {
+    "phase_sums_seconds": {
+      "mesh_seconds": 0.96345,
+      "assembly_seconds": 0.9996967,
+      "factorization_seconds": 1.58253,
+      "solve_seconds": 0.0527343
+    },
+    "max_internal_last2_change": 0.0008327538393318094,
+    "max_boundary_last2_change": null,
+    "by_outer_aspect": {
+      "4.0": 6
+    },
+    "max_inner_aspect_ratio": 4.75,
+    "slowest_call": {
+      "label": "hb4_bt10_rzero",
+      "swapped": true,
+      "repetition": 2,
+      "wall_seconds": 0.8267784,
+      "j_mm4": 4555796253.232525
+    },
+    "direction_repeat_j_identical": {
+      "False": true,
+      "True": true
+    },
+    "first_process_call_and_same_process_repeats_seconds": {
+      "False": [
+        0.5618565,
+        0.5699502,
+        0.6645678
+      ],
+      "True": [
+        0.5089047,
+        0.5107139,
+        0.8267784
+      ]
+    }
+  },
+  "repeat-extreme-rounded": {
+    "phase_sums_seconds": {
+      "mesh_seconds": 3.9561403,
+      "assembly_seconds": 3.9755417,
+      "factorization_seconds": 5.2636528,
+      "solve_seconds": 0.2238681
+    },
+    "max_internal_last2_change": 0.0005046817230677968,
+    "max_boundary_last2_change": 0.0003110581384995831,
+    "by_outer_aspect": {
+      "4.0": 6
+    },
+    "max_inner_aspect_ratio": 4.061224489795919,
+    "slowest_call": {
+      "label": "hb4_bt100_rupper",
+      "swapped": false,
+      "repetition": 2,
+      "wall_seconds": 2.4665646,
+      "j_mm4": 8145788388.010892
+    },
+    "direction_repeat_j_identical": {
+      "False": true,
+      "True": true
+    },
+    "first_process_call_and_same_process_repeats_seconds": {
+      "False": [
+        1.8671569,
+        2.4179775,
+        2.4665646
+      ],
+      "True": [
+        2.1111195,
+        2.3419097,
+        2.3834953
+      ]
+    }
+  },
+  "repeat-square-rounded": {
+    "phase_sums_seconds": {
+      "mesh_seconds": 0.7859872,
+      "assembly_seconds": 0.6018357,
+      "factorization_seconds": 1.236467,
+      "solve_seconds": 0.0387095
+    },
+    "max_internal_last2_change": 0.0007867531698530877,
+    "max_boundary_last2_change": 0.0001280062954250596,
+    "by_outer_aspect": {
+      "1.0": 6
+    },
+    "max_inner_aspect_ratio": 1.0,
+    "slowest_call": {
+      "label": "hb1_bt10_r2_5t",
+      "swapped": false,
+      "repetition": 1,
+      "wall_seconds": 0.4908428,
+      "j_mm4": 458701360.5545956
+    },
+    "direction_repeat_j_identical": {
+      "False": true,
+      "True": true
+    },
+    "first_process_call_and_same_process_repeats_seconds": {
+      "False": [
+        0.4549287,
+        0.4908428,
+        0.4504028
+      ],
+      "True": [
+        0.4548443,
+        0.4400155,
+        0.4139694
+      ]
+    }
+  }
+}

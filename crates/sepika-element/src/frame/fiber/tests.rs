@@ -326,6 +326,7 @@ fn 有効断面性能を使うbeamとfiberのphiと整合質量が一致する()
         width: 180.0,
         thick: 12.0,
     });
+    model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Shape;
     model.sections[0].material = Some(MaterialId(1));
     model.sections[0].steel_material = Some(MaterialId(0));
     model.materials.push(Material {
@@ -412,6 +413,7 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
     ] {
         let mut model = build_test_model(Some(78846.15));
         model.sections[0].shape = Some(shape);
+        model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Shape;
         model.sections[0].material =
             Some(MaterialId(if main_category == MaterialCategory::Steel {
                 0
@@ -720,6 +722,7 @@ fn 端部解放質量はbeamとfiberで一致し剛体並進質量を保存す�
         let mut model = build_test_model(Some(78846.15));
         model.materials[0].density = density;
         model.sections[0].j = 1.0e8;
+        model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
         model.sections[0].as_y = 15000.0;
         model.sections[0].as_z = 15000.0;
         model.elements[0].end_cond = [end_condition, EndCondition::Fixed];
@@ -1209,6 +1212,7 @@ fn make_steel_fiber_with_fy(fy: Option<f64>) -> FiberBeam {
 fn make_torsion_fiber_beam(g: f64, j: f64) -> FiberBeam {
     let mut model = build_test_model(Some(g));
     model.sections[0].j = j;
+    model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     FiberBeam::new(
         &model.elements[0],
         &model,
@@ -1789,6 +1793,7 @@ fn fiberの純ねじり行列は質量極二次モーメントを使う() {
     let length: f64 = 3000.0;
     let mut model = build_test_model(Some(g));
     model.sections[0].j = j;
+    model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     model.sections[0].iy = iy;
     model.sections[0].iz = iz;
     model.materials[0].density = density;
@@ -2043,6 +2048,7 @@ fn test_fiber_elastic_stiffness_matches_timoshenko_beam_element() {
     model.sections[0].as_z = as_y_elem;
     model.sections[0].as_y = as_z_elem;
     model.sections[0].j = j;
+    model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
 
     let mut fiber = FiberBeam::new(
         &model.elements[0],
@@ -2799,6 +2805,7 @@ fn 剛域ありの弾性剛性は軸以外が弾性梁と厳密一致する() {
     model.sections[0].as_z = as_y_elem;
     model.sections[0].as_y = as_z_elem;
     model.sections[0].j = j;
+    model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
 
     let ctx = Ctx { model: &model };
     let zero = LocalVec {
@@ -3084,6 +3091,7 @@ fn 材端ピンの弾性剛性が弾性梁と一致する() {
     model.sections[0].as_z = as_y_elem;
     model.sections[0].as_y = as_z_elem;
     model.sections[0].j = j;
+    model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
 
     let ctx = Ctx { model: &model };
     let fiber = elastic_fiber(&model);
@@ -3377,6 +3385,7 @@ fn 降伏後もピン端のモーメント解放が保たれる() {
 fn ねじり剛性がない部材はrxを解放しない() {
     let mut model = build_release_model([EndCondition::Pinned, EndCondition::Pinned]);
     model.sections[0].j = 0.0;
+    model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     let fb = FiberBeam::new(
         &model.elements[0],
         &model,
@@ -3391,6 +3400,7 @@ fn ねじり剛性がない部材はrxを解放しない() {
     assert_eq!(fb.releases.len(), 4);
 
     model.sections[0].j = 1.0e6;
+    model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     let fb = FiberBeam::new(
         &model.elements[0],
         &model,

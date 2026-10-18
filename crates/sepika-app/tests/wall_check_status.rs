@@ -36,6 +36,7 @@ fn fixture() -> App {
     let mut steel = rc.clone();
     steel.id = SectionId(3);
     steel.shape = None;
+    steel.property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     steel.material = Some(MaterialId(0));
     steel.thickness = Some(6.0);
     model.sections.push(steel);

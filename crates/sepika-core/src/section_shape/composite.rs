@@ -5,6 +5,9 @@
 //! - [`SectionShape::cft_equivalent_props`] — CFT の等価断面性能
 
 use super::constants::{E_STEEL, KAPPA_RC, NU_CONCRETE, NU_STEEL};
+use super::core_torsion::{
+    reused_rounded_rect_core_j, rounded_rect_core_torsion, CoreTorsionError, CoreTorsionSolution,
+};
 use super::geometry::{h_web_shear_area, rect_torsion_j};
 use super::material::concrete_young_modulus_gamma;
 use super::types::SectionShape;
@@ -87,7 +90,6 @@ impl SectionShape {
             props.area_ax,
             props.iy,
             props.iz,
-            props.j,
             props.as_y,
             props.as_z,
             ec * props.area_ax,
@@ -104,143 +106,262 @@ impl SectionShape {
         Ok(Some(props))
     }
 
-    /// CFT 断面（CftBox/CftPipe）の等価断面性能を鋼管基準で算定する
-    /// （各種合成構造設計指針: SRC 柱に準じる累加（CFT もこれに準じる）を鋼基準の
-    /// 1/n 換算で適用。J は S 柱の J=(sG/cG)·sJ+cJ を鋼基準 J=sJ+cJ/ngs に換算）。
-    ///
-    /// `es`/`nu_s`: 要素材料（鋼管）のヤング係数・ポアソン比、
-    /// `fc`: 充填コンクリート強度（`Material.fc`）、`gamma_c`: 無筋コンクリートの気乾単位体積重量。
-    /// νc=0.2 とする。
-    /// CftBox/CftPipe 以外、または Ec≤0 では None（鋼管のみの既定値へ
-    /// フォールバック）。
+    /// CFT の鋼管基準等価性能。材料不正・コアJ未確定ならpanicする。
+    /// Es・実Gs・FcはN/mm²、γcはkN/m³、供給鋼管Jsはmm⁴。
     pub fn cft_equivalent_props(
         &self,
         es: f64,
         nu_s: f64,
+        gs_mpa: f64,
         fc: f64,
         gamma_c: f64,
+        steel_j_mm4: f64,
     ) -> Option<CompositeProps> {
-        self.try_cft_equivalent_props(es, nu_s, fc, gamma_c)
+        self.try_cft_equivalent_props(es, nu_s, gs_mpa, fc, gamma_c, steel_j_mm4)
             .unwrap_or_else(|error| panic!("{error}"))
     }
 
-    /// CFT の材料由来の等価性能。必要な角Rが未知・不正ならエラー。
+    /// CFTの鋼管基準等価性能。Es・実Gs・Fc [N/mm²]、γc [kN/m³]、鋼管Js `[mm⁴]` は有限正。
+    /// −1 < νs < 0.5を要する。対象外のみ`Ok(None)`、材料・幾何・コアJ未確定はエラー。
     pub fn try_cft_equivalent_props(
         &self,
         es: f64,
         nu_s: f64,
+        gs_mpa: f64,
         fc: f64,
         gamma_c: f64,
+        steel_j_mm4: f64,
     ) -> Result<Option<CompositeProps>, String> {
-        let Some(core) = self.try_cft_core_props()? else {
+        if !matches!(self, Self::CftBox { .. } | Self::CftPipe { .. }) {
             return Ok(None);
-        };
+        }
+        for (name, value) in [
+            ("Es", es),
+            ("Fc", fc),
+            ("γc", gamma_c),
+            ("鋼管Js", steel_j_mm4),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(format!("CFT の {name} は正の有限値が必要です"));
+            }
+        }
+        if !nu_s.is_finite() || nu_s <= -1.0 || nu_s >= 0.5 {
+            return Err("CFT の νs は有限値かつ −1 < νs < 0.5 が必要です".into());
+        }
+        if !gs_mpa.is_finite() || gs_mpa <= 0.0 {
+            return Err("CFT の Gs は正の有限値が必要です".into());
+        }
         let ec = concrete_young_modulus_gamma(fc, gamma_c);
-        if !ec.is_finite() || ec <= 0.0 || !es.is_finite() || es <= 0.0 || !nu_s.is_finite() {
-            return Ok(None);
+        if !ec.is_finite() || ec <= 0.0 {
+            return Err("CFT の Ec は正の有限値が必要です".into());
         }
-        if core.area <= 0.0 {
-            return Ok(None);
-        }
+        let gs = gs_mpa;
+        let gc = ec / (2.0 * (1.0 + NU_CONCRETE));
         let n = es / ec;
-        let ngs = n * (1.0 + NU_CONCRETE) / (1.0 + nu_s);
-        if !n.is_finite() || !ngs.is_finite() || ngs <= 0.0 {
-            return Ok(None);
+        let ngs = gs / gc;
+        if [gs, gc, n, ngs, 1.0 / n, 1.0 / ngs]
+            .into_iter()
+            .any(|v| !v.is_finite() || v <= 0.0)
+        {
+            return Err("CFT の解析用弾性係数・換算比が正の有限値ではありません".into());
         }
+        let core = self.try_cft_core_props()?.expect("CFT コア幾何");
+        let steel_area = self.try_calc_area()?;
+        let steel_iy = self.try_calc_iy()?;
+        let steel_iz = self.try_calc_iz()?;
         let (s_as_y, s_as_z) = match *self {
-            SectionShape::CftBox { thick: t, .. } => {
+            Self::CftBox { thick: t, .. } => {
                 (2.0 * t * core.inner_width, 2.0 * t * core.inner_height)
             }
-            SectionShape::CftPipe { .. } => {
-                let a = self.calc_area() / 2.0;
-                (a, a)
-            }
-            _ => unreachable!("cft_core_props が Some を返した非 CFT 断面"),
+            Self::CftPipe { .. } => (steel_area / 2.0, steel_area / 2.0),
+            _ => unreachable!("CFT コア幾何"),
         };
-        Ok(Some(CompositeProps {
-            area_ax: self.try_calc_area()? + core.area / n,
-            iy: self.try_calc_iy()? + core.iy / n,
-            iz: self.try_calc_iz()? + core.iz / n,
-            j: self.calc_j() + core.j / ngs,
+        let mut props = CompositeProps {
+            area_ax: steel_area + core.area / n,
+            iy: steel_iy + core.iy / n,
+            iz: steel_iz + core.iz / n,
+            j: steel_j_mm4,
             as_y: s_as_y + core.area / KAPPA_RC / ngs,
             as_z: s_as_z + core.area / KAPPA_RC / ngs,
-        }))
+        };
+        validate_cft_non_torsional_stiffness(props, es, gs)?;
+        if !(gs * steel_j_mm4).is_finite() {
+            return Err("CFT の鋼管ねじり剛性が有限値ではありません".into());
+        }
+        let (_, _, inner_r_mm) = self.cft_core_dimensions()?.expect("CFT コア幾何");
+        let core_j_mm4 = if let Some(inner_r_mm) = inner_r_mm {
+            reused_rounded_rect_core_j(core.inner_width, core.inner_height, inner_r_mm)?
+        } else {
+            self.try_cft_core_torsion()
+                .map_err(|error| error.to_string())?
+                .expect("CFT コアJ")
+                .j_mm4()
+        };
+        props.j += core_j_mm4 / ngs;
+        if [props.j, gs * props.j]
+            .into_iter()
+            .any(|v| !v.is_finite() || v <= 0.0)
+        {
+            return Err("CFT の等価Jまたはねじり剛性が正の有限値ではありません".into());
+        }
+        Ok(Some(props))
     }
 }
 
-/// CFT 断面の**充填コンクリート部分**（鋼管の内法で囲まれる部分）の諸元。
-///
-/// 剛性側（[`SectionShape::cft_equivalent_props`]。等価断面性能の累加）と
-/// 耐力側（`sepika-design-jp` の CFT 軸終局検定）が同じ値を使うために切り出す。
-/// 片方だけ式を直せば静かに食い違うため、算定はここ 1 か所に置く。
+fn validate_cft_non_torsional_stiffness(
+    props: CompositeProps,
+    es: f64,
+    gs: f64,
+) -> Result<(), String> {
+    for value in [
+        props.area_ax,
+        props.iy,
+        props.iz,
+        props.as_y,
+        props.as_z,
+        es * props.area_ax,
+        es * props.iy,
+        es * props.iz,
+        gs * props.as_y,
+        gs * props.as_z,
+    ] {
+        if !value.is_finite() || value <= 0.0 {
+            return Err("CFT の等価断面性能または必要剛性が正の有限値ではありません".into());
+        }
+    }
+    Ok(())
+}
+
+/// CFT充填コンクリートの幾何性能。ねじり性能を含まない。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CftCoreProps {
-    /// 内法幅 `[mm]`（角形は `幅 − 2t`、円形は内法径 `外径 − 2t`）。
+    /// 内法幅 `[mm]`。円形は内法径。
     pub inner_width: f64,
-    /// 内法せい `[mm]`（角形は `せい − 2t`、円形は内法径）。
+    /// 内法せい `[mm]`。円形は内法径。
     pub inner_height: f64,
-    /// 充填コンクリートの断面積 `[mm²]`。
+    /// 断面積 `[mm²]`。
     pub area: f64,
-    /// 強軸（せい方向まわり）の断面二次モーメント `[mm⁴]`。
+    /// 強軸断面二次モーメント `[mm⁴]`。
     pub iy: f64,
-    /// 弱軸（幅方向まわり）の断面二次モーメント `[mm⁴]`。円形は `iy` と同値。
+    /// 弱軸断面二次モーメント `[mm⁴]`。
     pub iz: f64,
-    /// St.Venant ねじり定数 `[mm⁴]`。
-    pub j: f64,
+}
+
+/// CFTコア単体の自由ねじり性能。円の解析値と数値解の品質診断を区別する。
+#[derive(Debug)]
+pub enum CftCoreTorsion {
+    AnalyticCircle { j_mm4: f64 },
+    Numerical(CoreTorsionSolution),
+}
+
+impl CftCoreTorsion {
+    /// コア単体のSt.Venantねじり定数 `[mm⁴]`。
+    pub fn j_mm4(&self) -> f64 {
+        match self {
+            Self::AnalyticCircle { j_mm4 } => *j_mm4,
+            Self::Numerical(solution) => solution.j_mm4,
+        }
+    }
+}
+
+fn core_input_error(reason: String) -> CoreTorsionError {
+    CoreTorsionError {
+        reason,
+        levels: Vec::new(),
+        failed_attempt: None,
+        total_seconds: 0.0,
+    }
 }
 
 impl SectionShape {
-    /// CFT の充填コンクリート性能。対象外は `None`。
-    /// 必要な角Rが未知・不正なら panic。入力値の検証には `try_cft_core_props` を用いる。
+    /// CFTコア幾何性能。対象外は`None`、必要寸法・角Rが不正ならpanicする。
     pub fn cft_core_props(&self) -> Option<CftCoreProps> {
         self.try_cft_core_props()
             .unwrap_or_else(|error| panic!("{error}"))
     }
 
-    /// CFT コア性能。必要な角Rが未知・不正ならエラー。対象外は `Ok(None)`。
+    /// CFTコア幾何性能。対象外のみ`Ok(None)`、必要寸法・角Rが未知・不正ならエラー。
     pub fn try_cft_core_props(&self) -> Result<Option<CftCoreProps>, String> {
-        let rounded = self.rounded_core_properties()?;
-        let mut core = self.rectangular_cft_core_props();
-        if let (Some(p), Some(core)) = (rounded, &mut core) {
-            core.area = p.area;
-            core.iy = p.iy;
-            core.iz = p.iz;
+        let Some((b, h, r)) = self.cft_core_dimensions()? else {
+            return Ok(None);
+        };
+        let core = if r.is_some() {
+            let p = self.rounded_core_properties()?.expect("角形CFTコア");
+            CftCoreProps {
+                inner_width: b,
+                inner_height: h,
+                area: p.area,
+                iy: p.iy,
+                iz: p.iz,
+            }
+        } else {
+            let i = std::f64::consts::PI * b.powi(4) / 64.0;
+            CftCoreProps {
+                inner_width: b,
+                inner_height: h,
+                area: std::f64::consts::PI * b * b / 4.0,
+                iy: i,
+                iz: i,
+            }
+        };
+        if [core.area, core.iy, core.iz]
+            .into_iter()
+            .any(|v| !v.is_finite() || v <= 0.0)
+        {
+            return Err("CFT コア幾何性能が正の有限値ではありません".into());
         }
-        Ok(core)
+        Ok(Some(core))
     }
 
-    fn rectangular_cft_core_props(&self) -> Option<CftCoreProps> {
+    /// CFTコア単体J `[mm⁴]`を毎回算定し、数値解では全品質履歴を返す。
+    /// 対象外のみ`Ok(None)`。必要寸法・角R不正や数値未確定は履歴付きエラー。
+    pub fn try_cft_core_torsion(&self) -> Result<Option<CftCoreTorsion>, CoreTorsionError> {
+        let Some((b, h, r)) = self.cft_core_dimensions().map_err(core_input_error)? else {
+            return Ok(None);
+        };
+        if let Some(r) = r {
+            rounded_rect_core_torsion(b, h, r)
+                .map(|solution| Some(CftCoreTorsion::Numerical(solution)))
+        } else {
+            let j_mm4 = std::f64::consts::PI * b.powi(4) / 32.0;
+            if !j_mm4.is_finite() || j_mm4 <= 0.0 {
+                return Err(core_input_error(
+                    "CFT 円形コアJが正の有限値ではありません".into(),
+                ));
+            }
+            Ok(Some(CftCoreTorsion::AnalyticCircle { j_mm4 }))
+        }
+    }
+
+    fn cft_core_dimensions(&self) -> Result<Option<(f64, f64, Option<f64>)>, String> {
         match *self {
-            SectionShape::CftBox {
-                height: h,
-                width: w,
-                thick: t,
-                ..
+            Self::CftBox {
+                height,
+                width,
+                thick,
+                corner_r,
             } => {
-                let bi = (w - 2.0 * t).max(0.0);
-                let hi = (h - 2.0 * t).max(0.0);
-                Some(CftCoreProps {
-                    inner_width: bi,
-                    inner_height: hi,
-                    area: bi * hi,
-                    iy: bi * hi.powi(3) / 12.0,
-                    iz: hi * bi.powi(3) / 12.0,
-                    j: rect_torsion_j(bi, hi),
-                })
+                self.validate_surface_radius()?;
+                let ro = corner_r.ok_or("CFT コア領域の算定に必要な角Rが未知です")?;
+                Ok(Some((
+                    width - 2.0 * thick,
+                    height - 2.0 * thick,
+                    Some((ro - thick).max(0.0)),
+                )))
             }
-            SectionShape::CftPipe { outer_dia, thick } => {
-                let di = (outer_dia - 2.0 * thick).max(0.0);
-                let i = std::f64::consts::PI * di.powi(4) / 64.0;
-                Some(CftCoreProps {
-                    inner_width: di,
-                    inner_height: di,
-                    area: std::f64::consts::PI * di * di / 4.0,
-                    iy: i,
-                    iz: i,
-                    j: std::f64::consts::PI * di.powi(4) / 32.0,
-                })
+            Self::CftPipe { outer_dia, thick } => {
+                if !outer_dia.is_finite()
+                    || !thick.is_finite()
+                    || outer_dia <= 0.0
+                    || thick <= 0.0
+                    || outer_dia <= 2.0 * thick
+                {
+                    return Err("CFT 円形コアの外径・板厚は有限正かつ外径 > 2tが必要です".into());
+                }
+                let d = outer_dia - 2.0 * thick;
+                Ok(Some((d, d, None)))
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 }

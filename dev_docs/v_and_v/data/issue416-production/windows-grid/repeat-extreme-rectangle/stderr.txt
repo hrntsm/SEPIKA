@@ -1,0 +1,6 @@
+call=0 label=hb4_bt10_rzero swapped=false repetition=0
+call=1 label=hb4_bt10_rzero swapped=true repetition=0
+call=2 label=hb4_bt10_rzero swapped=false repetition=1
+call=3 label=hb4_bt10_rzero swapped=true repetition=1
+call=4 label=hb4_bt10_rzero swapped=false repetition=2
+call=5 label=hb4_bt10_rzero swapped=true repetition=2

@@ -683,14 +683,19 @@ impl FiberBeam {
         let width = sec.map(|s| s.width).unwrap_or(0.0);
         let depth = sec.map(|s| s.depth).unwrap_or(0.0);
         let beam_props = crate::frame::beam::BeamElement::try_new(data, model)?;
-        let is_src = sec
+        let composite_kind = sec
             .and_then(|s| s.shape.as_ref())
-            .and_then(sepika_core::structure_kind::shape_composite_kind)
-            == Some(sepika_core::structure_kind::StructureKind::Src);
-        let torsion_j = if is_src {
+            .and_then(sepika_core::structure_kind::shape_composite_kind);
+        let torsion_j = if matches!(
+            composite_kind,
+            Some(
+                sepika_core::structure_kind::StructureKind::Src
+                    | sepika_core::structure_kind::StructureKind::Cft
+            )
+        ) {
             beam_props.j
         } else {
-            sec.map(|s| s.j).unwrap_or(0.0)
+            sec.map(|s| s.resolved_j()).transpose()?.unwrap_or(0.0)
         };
         let e = beam_props.e;
         let g = beam_props.g;

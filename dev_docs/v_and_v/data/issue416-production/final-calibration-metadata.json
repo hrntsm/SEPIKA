@@ -1,0 +1,28 @@
+{
+  "time_utc": "2026-10-18T11:51:24.9533191Z",
+  "command": "cargo test -p sepika-core --lib --release --locked verification_tests -- --nocapture --test-threads=1",
+  "os": "Microsoft Windows NT 10.0.26300.0",
+  "processor_count": 8,
+  "hashes": [
+    {
+      "Path": "C:\\Users\\hiroa\\Desktop\\ikkan\\crates\\sepika-core\\src\\section_shape\\core_torsion\\verification_tests.rs",
+      "Hash": "5DCE52AFBDC58C96A78BEB7D3816ADDFF804BB36A9233C888F50ECD1593B876F"
+    },
+    {
+      "Path": "C:\\Users\\hiroa\\Desktop\\ikkan\\crates\\sepika-core\\src\\section_shape\\core_torsion\\controller.rs",
+      "Hash": "165A34D320272C8E438AB70DE8A5193C08A22A238DC8F33A09F9CE1CB61230EC"
+    },
+    {
+      "Path": "C:\\Users\\hiroa\\Desktop\\ikkan\\crates\\sepika-core\\src\\section_shape\\core_torsion\\mesh.rs",
+      "Hash": "B5AF18E0260D59B3CAAD3440EB4C2EFB00595F1E1BA05B9ECB5C776385E988A2"
+    },
+    {
+      "Path": "C:\\Users\\hiroa\\Desktop\\ikkan\\crates\\sepika-core\\src\\section_shape\\core_torsion\\p1.rs",
+      "Hash": "0742BFD872BC53F24375D9459BEB470CA62EDF244A90B9F530547C16FF4913BF"
+    },
+    {
+      "Path": "C:\\Users\\hiroa\\Desktop\\ikkan\\Cargo.lock",
+      "Hash": "1BE57639C1FA38BBE79D86C4EA2D922EE8E0F3A2BD889D500A688796B42315D3"
+    }
+  ]
+}

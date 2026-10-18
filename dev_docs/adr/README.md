@@ -33,7 +33,7 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0025](0025-consistent-mass-section-properties.md) | accepted | Beam と Fiber の整合質量は共通の断面質量特性から算定する |
 | [0026](0026-current-spec-single-source-docs.md) | accepted | 現在仕様の正本は docs とし、フェーズ実装仕様書を置かない |
 | [0027](0027-calc-docs-use-code-units.md) | accepted | 計算根拠の単位表記は法令・規準の単位に従う |
-| [0028](0028-src-cft-ns-material-or-fallback.md) | accepted | SRC/CFT の等価断面剛性は材料由来 ns を通常とし、算定不能時は N_S_EQ=15 へフォールバックして通知する |
+| [0028](0028-src-cft-ns-material-or-fallback.md) | partially superseded by ADR-0062 | SRC/CFT の等価断面剛性は材料由来 ns を通常とし、算定不能時は N_S_EQ=15 へフォールバックして通知する |
 | [0029](0029-live-load-four-purposes.md) | accepted | 積載荷重を床用・小梁用・大梁用・地震力用の 4 区分とする |
 | [0030](0030-cft-steel-allowable-stress-fixed-young.md) | accepted | CFT の鋼管部分の許容応力度は固定ヤング係数 E_STEEL で算定する |
 | [0031](0031-withdraw-high-strength-shear-reinforcement.md) | accepted | 高強度せん断補強筋の製品別対応を撤回する |
@@ -82,6 +82,8 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 | [0060](0060-steel-directional-shear-ratio-sum.md) | accepted | 鋼柱・鋼梁の二方向せん断は方向別検定比の和を採用する |
 
 | [0061](0061-ultimate-gravity-demand-modes.md) | accepted | 終局需要を静的ヒンジ略算と初期重力を含む確定総応答に分ける |
+
+| [0062](0062-cft-core-torsion-resolution.md) | accepted | 断面 J の算定元を解決し、CFT コアの数値ねじりを幾何性能から分離する |
 
 ## 規約
 

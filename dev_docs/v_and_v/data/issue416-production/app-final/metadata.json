@@ -1,0 +1,27 @@
+{
+  "recorded": "2026-10-18",
+  "evidence_source": "sepika416-app-fixture-contracts-handoff.txt final integration fixture correction and verification",
+  "scope": "App GUI fixture correction final verification only; numeric calibration and grid counts excluded",
+  "commands": [
+    {
+      "command": "cargo test -p sepika-app --features gui --locked --test wall_check_status --test wall_model",
+      "exit_code": 0,
+      "passed": 18,
+      "failed": 0,
+      "raw": "sepika416-app-wall-integrations-after-fixtures.raw.txt",
+      "relation": "selected direct rerun; contained in final full regression, do not add to 945"
+    },
+    {
+      "command": "cargo test -p sepika-app --features gui --locked --no-fail-fast",
+      "exit_code": 0,
+      "unit_passed": 843,
+      "integration_passed": 102,
+      "passed": 945,
+      "failed": 0,
+      "existing_ignored": 1,
+      "doc_tests": 0,
+      "raw": "sepika416-app-all-tests-final-fixtures.raw.txt"
+    }
+  ],
+  "limitations": "Recorded commands/counts and exit codes from completed owner handoff and raw; no new execution or final source snapshot certification by V&V writer."
+}

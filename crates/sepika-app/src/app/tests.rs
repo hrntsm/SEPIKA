@@ -3530,6 +3530,7 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
     // 全断面の形状情報を外し、幅厚比・RC 略算のいずれも算定不能にする。
     for sec in &mut app.core.model.sections {
         sec.shape = None;
+        sec.property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     }
     app.run_seismic(SeismicDir::X);
     app.run_pushover();
@@ -9661,7 +9662,7 @@ fn test_preparation_lists_section_properties() {
         assert_eq!(row.area, Some(sec.area));
         assert_eq!(row.iy, Some(sec.iy));
         assert_eq!(row.iz, Some(sec.iz));
-        assert_eq!(row.j, sec.j);
+        assert_eq!(row.j, sec.resolved_j().ok());
         assert!(row.shape_label.is_some(), "形状定義を持つ断面");
         assert!(row.n_elements > 0, "サンプルは全断面が使われている");
         // 断面二次半径 i = √(I/A)。
@@ -9873,8 +9874,8 @@ fn test_preparation_member_stiffness_reports_composite_props() {
     // 割増しはないので実効値＝等価換算値。
     assert_eq!(row.slab_factor, 1.0);
     assert_eq!(row.wall_girder_factor, 1.0);
-    assert_eq!(row.effective_iy, c.iy);
-    assert_eq!(row.effective_area, c.area_ax);
+    assert_eq!(row.effective_iy, Some(c.iy));
+    assert_eq!(row.effective_area, Some(c.area_ax));
 
     // 要素構築が用いる等価換算と一致する（表示と解析入力の一致）。
     let elem = app
@@ -11754,8 +11755,8 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
         .iter()
         .find(|r| r.elem == elem.id)
         .unwrap();
-    assert_eq!(row.effective_area, p.area_ax);
-    assert_eq!(row.effective_iy, p.iy);
+    assert_eq!(row.effective_area, Some(p.area_ax));
+    assert_eq!(row.effective_iy, Some(p.iy));
 
     let mut preparation_edits = UndoStack::new();
     preparation_edits.run(

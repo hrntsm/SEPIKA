@@ -1,0 +1,515 @@
+{
+  "directories": [
+    "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\actual-transforms-13080-1792324457676634200",
+    "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100",
+    "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\rectangle-series-13080-1792324460625236900",
+    "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\radius-limits-13080-1792324462895151300"
+  ],
+  "tests_passed": true,
+  "runs": [
+    {
+      "directory": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\actual-transforms-13080-1792324457676634200",
+      "levels": 0,
+      "mesh_files": 8,
+      "summaries": [
+        {
+          "area_limit": 3.0517578125E-05,
+          "area_sum": 0.7365824570458281,
+          "assembly_seconds": 0.0189543,
+          "boundary_edges": 611,
+          "factorization_seconds": 0.0334069,
+          "free_dofs": 18556,
+          "j": 0.07558189205826649,
+          "label": "original",
+          "max_actual_area": 3.0516015443068317E-05,
+          "mesh_seconds": 0.0242617,
+          "min_angle_rad": 0.4363626671120163,
+          "min_area_edge_ratio": 0.27580889576843276,
+          "min_signed_double_area": 1.0131065296774005E-05,
+          "n": 64,
+          "nnz": 128810,
+          "original_boundary_segments": 260,
+          "polygon_area": 0.7365824570458241,
+          "relative_error": 0.0,
+          "relative_residual": 6.222345365969199E-13,
+          "solve_seconds": 0.0012679,
+          "triangles": 37721,
+          "vertices": 19167
+        },
+        {
+          "angle": 0.4487989505128276,
+          "area_limit": 3.0517578125E-05,
+          "area_sum": 0.7365824570458283,
+          "assembly_seconds": 0.0184833,
+          "boundary_edges": 611,
+          "factorization_seconds": 0.0266614,
+          "free_dofs": 18556,
+          "j": 0.0755818920582666,
+          "label": "rotate-pi-7",
+          "max_actual_area": 3.0516015443068364E-05,
+          "mesh_seconds": 0.0,
+          "min_angle_rad": 0.43636266711201405,
+          "min_area_edge_ratio": 0.27580889576842965,
+          "min_signed_double_area": 1.0131065296773874E-05,
+          "n": 64,
+          "nnz": 128810,
+          "original_boundary_segments": 260,
+          "relative_error": 1.5543122344752192E-15,
+          "relative_residual": 6.251892200748589E-13,
+          "scale": 1.0,
+          "solve_seconds": 0.0012188,
+          "status": "solved",
+          "translation": [
+            0.0,
+            0.0
+          ],
+          "triangles": 37721,
+          "vertices": 19167
+        },
+        {
+          "angle": 1.5707963267948966,
+          "area_limit": 3.0517578125E-05,
+          "area_sum": 0.7365824570458281,
+          "assembly_seconds": 0.0181509,
+          "boundary_edges": 611,
+          "factorization_seconds": 0.0431023,
+          "free_dofs": 18556,
+          "j": 0.07558189205826663,
+          "label": "rotate-pi-2",
+          "max_actual_area": 3.0516015443068317E-05,
+          "mesh_seconds": 0.0,
+          "min_angle_rad": 0.4363626671120163,
+          "min_area_edge_ratio": 0.27580889576843276,
+          "min_signed_double_area": 1.0131065296774005E-05,
+          "n": 64,
+          "nnz": 128810,
+          "original_boundary_segments": 260,
+          "relative_error": 1.7763568394002505E-15,
+          "relative_residual": 6.170755461550765E-13,
+          "scale": 1.0,
+          "solve_seconds": 0.0013327,
+          "status": "solved",
+          "translation": [
+            0.0,
+            0.0
+          ],
+          "triangles": 37721,
+          "vertices": 19167
+        },
+        {
+          "angle": 0.0,
+          "area_limit": 3.0517578125E-05,
+          "area_sum": 0.7365824570458294,
+          "assembly_seconds": 0.0186225,
+          "boundary_edges": 611,
+          "factorization_seconds": 0.0425564,
+          "free_dofs": 18556,
+          "j": 0.07558189205826601,
+          "label": "translate",
+          "max_actual_area": 3.0516015443062455E-05,
+          "mesh_seconds": 0.0,
+          "min_angle_rad": 0.43636266711202226,
+          "min_area_edge_ratio": 0.27580889576837686,
+          "min_signed_double_area": 1.0131065296772458E-05,
+          "n": 64,
+          "nnz": 128810,
+          "original_boundary_segments": 260,
+          "relative_error": 6.217248937900877E-15,
+          "relative_residual": 6.162442828527524E-13,
+          "scale": 1.0,
+          "solve_seconds": 0.0013564,
+          "status": "solved",
+          "translation": [
+            13.0,
+            -7.0
+          ],
+          "triangles": 37721,
+          "vertices": 19167
+        },
+        {
+          "angle": 0.4487989505128276,
+          "area_limit": 3.0517578125E-05,
+          "area_sum": 0.7365824570458281,
+          "assembly_seconds": 0.018168,
+          "boundary_edges": 611,
+          "factorization_seconds": 0.0404827,
+          "free_dofs": 18556,
+          "j": 0.07558189205826667,
+          "label": "combined",
+          "max_actual_area": 3.051601544306595E-05,
+          "mesh_seconds": 0.0,
+          "min_angle_rad": 0.43636266711205485,
+          "min_area_edge_ratio": 0.27580889576828105,
+          "min_signed_double_area": 1.0131065296772263E-05,
+          "n": 64,
+          "nnz": 128810,
+          "original_boundary_segments": 260,
+          "relative_error": 2.4424906541753444E-15,
+          "relative_residual": 6.120124383615122E-13,
+          "scale": 1.0,
+          "solve_seconds": 0.0012001,
+          "status": "solved",
+          "translation": [
+            13.0,
+            -7.0
+          ],
+          "triangles": 37721,
+          "vertices": 19167
+        },
+        {
+          "angle": 0.0,
+          "area_limit": 3.0517578125000006E-07,
+          "area_sum": 0.007365824570458216,
+          "assembly_seconds": 0.0182521,
+          "boundary_edges": 611,
+          "factorization_seconds": 0.0264071,
+          "free_dofs": 18556,
+          "j": 7.558189205826662E-06,
+          "label": "scale-0.1",
+          "max_actual_area": 3.051601544306821E-07,
+          "mesh_seconds": 0.0,
+          "min_angle_rad": 0.4363626671120159,
+          "min_area_edge_ratio": 0.2758088957684286,
+          "min_signed_double_area": 1.0131065296773809E-07,
+          "n": 64,
+          "nnz": 128810,
+          "original_boundary_segments": 260,
+          "relative_error": 1.3322676295501878E-15,
+          "relative_residual": 6.072412700090425E-13,
+          "scale": 0.1,
+          "solve_seconds": 0.0011914,
+          "status": "solved",
+          "translation": [
+            0.0,
+            0.0
+          ],
+          "triangles": 37721,
+          "vertices": 19167
+        },
+        {
+          "angle": 0.0,
+          "area_limit": 0.0030517578125,
+          "area_sum": 73.65824570458187,
+          "assembly_seconds": 0.0183621,
+          "boundary_edges": 611,
+          "factorization_seconds": 0.034826,
+          "free_dofs": 18556,
+          "j": 755.8189205826645,
+          "label": "scale-10",
+          "max_actual_area": 0.0030516015443068367,
+          "mesh_seconds": 0.0,
+          "min_angle_rad": 0.4363626671120163,
+          "min_area_edge_ratio": 0.27580889576843354,
+          "min_signed_double_area": 0.0010131065296774243,
+          "n": 64,
+          "nnz": 128810,
+          "original_boundary_segments": 260,
+          "relative_error": 3.3306690738754696E-16,
+          "relative_residual": 6.225821006006131E-13,
+          "scale": 10.0,
+          "solve_seconds": 0.0013542,
+          "status": "solved",
+          "translation": [
+            0.0,
+            0.0
+          ],
+          "triangles": 37721,
+          "vertices": 19167
+        },
+        {
+          "angle": 0.0,
+          "area_limit": 30.517578125,
+          "area_sum": 736582.4570458223,
+          "assembly_seconds": 0.0188391,
+          "boundary_edges": 611,
+          "factorization_seconds": 0.0379571,
+          "free_dofs": 18556,
+          "j": 75581892058.26671,
+          "label": "scale-1000",
+          "max_actual_area": 30.516015443068227,
+          "mesh_seconds": 0.0,
+          "min_angle_rad": 0.43636266711201166,
+          "min_area_edge_ratio": 0.2758088957684306,
+          "min_signed_double_area": 10.131065296774047,
+          "n": 64,
+          "nnz": 128810,
+          "original_boundary_segments": 260,
+          "relative_error": 2.886579864025407E-15,
+          "relative_residual": 6.219228466002485E-13,
+          "scale": 1000.0,
+          "solve_seconds": 0.0013524,
+          "status": "solved",
+          "translation": [
+            0.0,
+            0.0
+          ],
+          "triangles": 37721,
+          "vertices": 19167
+        }
+      ]
+    },
+    {
+      "directory": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\ellipses-13080-1792324458245382100",
+      "levels": 27,
+      "mesh_files": 27,
+      "summaries": [
+        {
+          "boundary_changes": [
+            0.0006066672493025972,
+            0.00015120404342492254
+          ],
+          "exact": 0.019634954084936207,
+          "internal_changes": [
+            [
+              0.0005124995683523094,
+              0.00012729560850706465
+            ],
+            [
+              0.0005014280677256112,
+              0.0001265342480016887
+            ],
+            [
+              0.00047293194006159335,
+              0.00012674759322211195
+            ]
+          ],
+          "ratio": 2.0,
+          "relative_error": 9.238331112249032E-05
+        },
+        {
+          "boundary_changes": [
+            0.0006040812941110217,
+            0.0001512009807529538
+          ],
+          "exact": 0.0028874932477847364,
+          "internal_changes": [
+            [
+              0.0006283873528884751,
+              0.00015622308695964433
+            ],
+            [
+              0.0006281740453167382,
+              0.00015612643310854624
+            ],
+            [
+              0.0006340537305222864,
+              0.0001560565782711659
+            ]
+          ],
+          "ratio": 4.0,
+          "relative_error": 0.00010249573281828628
+        }
+      ]
+    },
+    {
+      "directory": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\rectangle-series-13080-1792324460625236900",
+      "levels": 15,
+      "mesh_files": 0,
+      "summaries": [
+        {
+          "expected": 0.004387702473770266,
+          "last_odd": 147,
+          "ratio": 4.0,
+          "tail_bound": 4.373824116538286E-13
+        },
+        {
+          "ratio": 4.0,
+          "reason": null,
+          "status": "solved"
+        },
+        {
+          "internal_changes": [
+            0.0006423832350331076,
+            0.00015745792261730523
+          ],
+          "ratio": 4.0,
+          "relative_error": 5.158995037679581E-05,
+          "total_seconds": 0.8172171
+        },
+        {
+          "expected": 0.00031232503747163996,
+          "last_odd": 115,
+          "ratio": 10.0,
+          "tail_bound": 2.989367149994701E-14
+        },
+        {
+          "ratio": 10.0,
+          "reason": null,
+          "status": "solved"
+        },
+        {
+          "internal_changes": [
+            0.0008457934887134582,
+            0.0002149510718036771
+          ],
+          "ratio": 10.0,
+          "relative_error": 7.18993786448241E-05,
+          "total_seconds": 1.4409531
+        }
+      ]
+    },
+    {
+      "directory": "C:\\Users\\hiroa\\AppData\\Local\\Temp\\sepika416-numeric-calibration\\radius-limits-13080-1792324462895151300",
+      "levels": 102,
+      "mesh_files": 0,
+      "summaries": [
+        {
+          "last_odd": 217,
+          "rectangle_expected": 0.07613041362492058,
+          "tail_bound": 7.460651217317968E-12
+        },
+        {
+          "accepted_level": 5,
+          "b": 1.0,
+          "boundary_changes": null,
+          "h": 0.75,
+          "internal_changes": [
+            0.0004538425923451683,
+            0.00010853865936897763
+          ],
+          "j_hat": 0.07612770369939788,
+          "j_mm4": 0.07612770369939788,
+          "label": "small-r-0",
+          "length_scale_mm": 1.0,
+          "r": 0.0,
+          "status": "solved",
+          "total_seconds": 0.665397
+        },
+        {
+          "radius": 0.0,
+          "relative_rectangle_error": 3.559583343459849E-05
+        },
+        {
+          "accepted_level": 17,
+          "b": 1.0,
+          "boundary_changes": [
+            1.1633490926656139E-07,
+            7.044015002565614E-08
+          ],
+          "h": 0.75,
+          "internal_changes": [
+            0.0004106879868353607,
+            0.00010435473188308013
+          ],
+          "j_hat": 0.07612774988246766,
+          "j_mm4": 0.07612774988246766,
+          "label": "small-r-0.00000075",
+          "length_scale_mm": 1.0,
+          "r": 7.5E-07,
+          "status": "solved",
+          "total_seconds": 2.0157339
+        },
+        {
+          "radius": 7.5E-07,
+          "relative_rectangle_error": 3.498920242361869E-05
+        },
+        {
+          "accepted_level": 17,
+          "b": 1.0,
+          "boundary_changes": [
+            2.3328452145802573E-07,
+            3.2166830719457717E-07
+          ],
+          "h": 0.75,
+          "internal_changes": [
+            0.0004067207903257292,
+            0.00010385811722234942
+          ],
+          "j_hat": 0.07612775512517392,
+          "j_mm4": 0.07612775512517392,
+          "label": "small-r-0.00075",
+          "length_scale_mm": 1.0,
+          "r": 0.00075,
+          "status": "solved",
+          "total_seconds": 1.9502850999999999
+        },
+        {
+          "radius": 0.00075,
+          "relative_rectangle_error": 3.4920337616428654E-05
+        },
+        {
+          "accepted_level": 19,
+          "b": 1.0,
+          "boundary_changes": [
+            0.0005768427113359195,
+            0.0001438433860644049
+          ],
+          "h": 1.0,
+          "internal_changes": [
+            0.0004424036838365898,
+            0.00011890507558127442
+          ],
+          "j_hat": 0.10029322590785755,
+          "j_mm4": 0.10029322590785755,
+          "label": "circle-limit-r-0.49",
+          "length_scale_mm": 1.0,
+          "r": 0.49,
+          "status": "solved",
+          "total_seconds": 0.6182025
+        },
+        {
+          "circle_exact": 0.09817477042468103,
+          "radius": 0.49,
+          "relative_circle_difference": 0.02157841035953112
+        },
+        {
+          "accepted_level": 19,
+          "b": 1.0,
+          "boundary_changes": [
+            0.0006049407823395065,
+            0.00015118653557936706
+          ],
+          "h": 1.0,
+          "internal_changes": [
+            0.00042443407993534367,
+            0.00011972757443877689
+          ],
+          "j_hat": 0.09838025616472477,
+          "j_mm4": 0.09838025616472477,
+          "label": "circle-limit-r-0.499",
+          "length_scale_mm": 1.0,
+          "r": 0.499,
+          "status": "solved",
+          "total_seconds": 0.6355845
+        },
+        {
+          "circle_exact": 0.09817477042468103,
+          "radius": 0.499,
+          "relative_circle_difference": 0.0020930605608229236
+        },
+        {
+          "accepted_level": 19,
+          "b": 1.0,
+          "boundary_changes": [
+            0.0006083176140051552,
+            0.00015192825669203266
+          ],
+          "h": 1.0,
+          "internal_changes": [
+            0.0004358068852248954,
+            0.00012029981364160854
+          ],
+          "j_hat": 0.09816584088343268,
+          "j_mm4": 0.09816584088343268,
+          "label": "circle-limit-r-0.5",
+          "length_scale_mm": 1.0,
+          "r": 0.5,
+          "status": "solved",
+          "total_seconds": 0.6335444
+        },
+        {
+          "circle_exact": 0.09817477042468103,
+          "radius": 0.5,
+          "relative_circle_difference": 9.095556027005625E-05
+        }
+      ]
+    }
+  ],
+  "level_count": 144,
+  "max_relative_residual": 2.4345474952414684E-12,
+  "max_vertices": 163679.0,
+  "max_triangles": 324879.0,
+  "max_free_dofs": 161202.0,
+  "max_nnz": 1122914.0,
+  "all_levels_quality": true
+}

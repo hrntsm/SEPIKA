@@ -1,0 +1,7 @@
+call_id,label,swapped,repetition,kind,alias_of,status,j_mm4,wall_seconds,levels,swap_relative_difference
+0,hb4_bt100_rupper,false,0,fresh_diagnostic,,success,8145788388.010892,1.8671569,21,
+1,hb4_bt100_rupper,true,0,fresh_diagnostic,,success,8145787314.993567,2.1111195,21,0.00000013172663881899638
+2,hb4_bt100_rupper,false,1,fresh_diagnostic,,success,8145788388.010892,2.4179775,21,
+3,hb4_bt100_rupper,true,1,fresh_diagnostic,,success,8145787314.993567,2.3419097,21,0.00000013172663881899638
+4,hb4_bt100_rupper,false,2,fresh_diagnostic,,success,8145788388.010892,2.4665646,21,
+5,hb4_bt100_rupper,true,2,fresh_diagnostic,,success,8145787314.993567,2.3834953,21,0.00000013172663881899638

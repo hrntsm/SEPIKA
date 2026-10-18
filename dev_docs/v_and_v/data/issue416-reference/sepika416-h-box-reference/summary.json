@@ -1,0 +1,80 @@
+{
+  "H_r0": {
+    "internal_steps": 5,
+    "internal_relative_changes": [
+      0.006974084314368104,
+      0.0014663999801204437,
+      0.0005823930648070339,
+      0.00021163549116007965
+    ],
+    "boundary_steps": 0,
+    "boundary_relative_changes": [],
+    "j_reference_mm4": 350359.7682968262,
+    "final_nodes": 85172,
+    "final_triangles": 41529,
+    "final_seconds": 21.232312499952968
+  },
+  "H_r13": {
+    "internal_steps": 4,
+    "internal_relative_changes": [
+      0.0030397940048171785,
+      0.0004511246680442507,
+      3.986486955034304e-05
+    ],
+    "boundary_steps": 3,
+    "boundary_relative_changes": [
+      0.0004547294799276188,
+      0.00011349266332845444
+    ],
+    "j_reference_mm4": 396742.89180271496,
+    "final_nodes": 24359,
+    "final_triangles": 11528,
+    "final_seconds": 3.916008200030774
+  },
+  "Box_r0": {
+    "internal_steps": 4,
+    "internal_relative_changes": [
+      0.0010285604658835247,
+      0.00040637745322453345,
+      0.00012235224804785732
+    ],
+    "boundary_steps": 0,
+    "boundary_relative_changes": [],
+    "j_reference_mm4": 450713218.05022466,
+    "final_nodes": 43000,
+    "final_triangles": 20572,
+    "final_seconds": 5.761609799985308
+  },
+  "Box_r12": {
+    "internal_steps": 3,
+    "internal_relative_changes": [
+      0.00010450050284684074,
+      0.00030343676802328757
+    ],
+    "boundary_steps": 3,
+    "boundary_relative_changes": [
+      1.0860722771147832e-05,
+      4.985169519500389e-07
+    ],
+    "j_reference_mm4": 450197971.30457586,
+    "final_nodes": 13559,
+    "final_triangles": 6189,
+    "final_seconds": 1.400237100024242
+  },
+  "Box_r30": {
+    "internal_steps": 3,
+    "internal_relative_changes": [
+      2.538602432505555e-08,
+      1.1213009468477654e-07
+    ],
+    "boundary_steps": 3,
+    "boundary_relative_changes": [
+      5.1065019733697945e-05,
+      1.262401748858646e-05
+    ],
+    "j_reference_mm4": 454648390.58093673,
+    "final_nodes": 15282,
+    "final_triangles": 6994,
+    "final_seconds": 1.6135998000390828
+  }
+}

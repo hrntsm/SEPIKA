@@ -1,0 +1,68 @@
+[
+  {
+    "shape": "H_r0",
+    "reference_j_mm4": 350359.7682968262,
+    "model_j_mm4": 356762.6666666667,
+    "extra_term_model_j_mm4": null,
+    "model_minus_reference_relative": 0.018275210081814874,
+    "reference_minus_model_relative": -0.017947220850389245,
+    "model_twist_minus_reference_relative": -0.017947220850389245,
+    "rm_mm": null,
+    "pm_mm": null,
+    "am_mm2": null
+  },
+  {
+    "shape": "H_r13",
+    "reference_j_mm4": 396742.89180271496,
+    "model_j_mm4": 356762.6666666667,
+    "extra_term_model_j_mm4": null,
+    "model_minus_reference_relative": -0.10077111893394408,
+    "reference_minus_model_relative": 0.11206392616580296,
+    "model_twist_minus_reference_relative": 0.11206392616580296,
+    "rm_mm": null,
+    "pm_mm": null,
+    "am_mm2": null
+  },
+  {
+    "shape": "Box_r0",
+    "reference_j_mm4": 450713218.05022466,
+    "model_j_mm4": 443315557.4911243,
+    "extra_term_model_j_mm4": 444094309.4911243,
+    "model_minus_reference_relative": -0.01641323187969168,
+    "reference_minus_model_relative": 0.016687121473846434,
+    "model_twist_minus_reference_relative": 0.016687121473846434,
+    "rm_mm": 0,
+    "pm_mm": 1352.0,
+    "am_mm2": 111744.0,
+    "extra_minus_reference_relative": -0.014685410354135287,
+    "addition_relative_to_centerline": 0.0017566538932385356
+  },
+  {
+    "shape": "Box_r12",
+    "reference_j_mm4": 450197971.30457586,
+    "model_j_mm4": 446472065.3793934,
+    "extra_term_model_j_mm4": 447244884.067815,
+    "model_minus_reference_relative": -0.008276149966614854,
+    "reference_minus_model_relative": 0.008345216227618524,
+    "model_twist_minus_reference_relative": 0.008345216227618524,
+    "rm_mm": 6.0,
+    "pm_mm": 1341.6991118430776,
+    "am_mm2": 111713.09733552924,
+    "extra_minus_reference_relative": -0.00655953030664147,
+    "addition_relative_to_centerline": 0.0017309452222165067
+  },
+  {
+    "shape": "Box_r30",
+    "reference_j_mm4": 454648390.58093673,
+    "model_j_mm4": 453213215.4428274,
+    "extra_term_model_j_mm4": 453968234.19651383,
+    "model_minus_reference_relative": -0.0031566704465301187,
+    "reference_minus_model_relative": 0.0031666665693035334,
+    "model_twist_minus_reference_relative": 0.0031666665693035334,
+    "rm_mm": 24.0,
+    "pm_mm": 1310.79644737231,
+    "am_mm2": 111249.55736846772,
+    "extra_minus_reference_relative": -0.001496005261458877,
+    "addition_relative_to_centerline": 0.0016659239579956964
+  }
+]

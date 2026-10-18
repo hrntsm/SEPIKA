@@ -296,7 +296,7 @@ pub fn stiffness_breakdown(
     Ok(breakdown_with(model, data, sec, mat.young, is_horizontal))
 }
 
-/// SRC/CFT 等価性能。対象外は `Ok(None)`、SRC の材料不正は理由付きエラー。
+/// SRC/CFT 等価性能。対象外は `Ok(None)`、材料や断面性能の不正は理由付きエラー。
 pub fn composite_props_of(
     model: &Model,
     data: &sepika_core::model::ElementData,
@@ -312,12 +312,18 @@ pub fn composite_props_of(
             shape,
             sepika_core::section_shape::SectionShape::SrcBeamRect { .. }
                 | sepika_core::section_shape::SectionShape::SrcColumnRect { .. }
+                | sepika_core::section_shape::SectionShape::CftBox { .. }
+                | sepika_core::section_shape::SectionShape::CftPipe { .. }
         ) {
-            return Err("SRC の主材料が未割当です".into());
+            return Err(format!(
+                "部材 ID {} の断面「{}」の SRC/CFT 主材料が未割当です",
+                data.id.0, sec.name
+            ));
         }
         return Ok(None);
     };
-    composite_props_with(shape, mat, model.element_steel_material(data))
+    composite_props_with(sec, mat, model.element_steel_material(data))
+        .map_err(|error| format!("部材 ID {} の断面「{}」: {error}", data.id.0, sec.name))
 }
 
 pub(super) fn validate_composite_material(
@@ -362,11 +368,14 @@ pub(super) fn validate_composite_material(
 }
 
 pub(super) fn composite_props_with(
-    shape: &sepika_core::section_shape::SectionShape,
+    sec: &sepika_core::model::Section,
     mat: &sepika_core::model::Material,
     steel: Option<&sepika_core::model::Material>,
 ) -> Result<Option<sepika_core::section_shape::CompositeProps>, String> {
     use sepika_core::section_shape::SectionShape;
+    let Some(shape) = sec.shape.as_ref() else {
+        return Ok(None);
+    };
     match shape {
         SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. } => {
             if !mat.fc.is_some_and(|fc| fc.is_finite() && fc > 0.0) {
@@ -384,18 +393,24 @@ pub(super) fn composite_props_with(
             }
             Ok(props)
         }
-        SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => Ok(mat.fc.and_then(|fc| {
-            if !fc.is_finite() || fc <= 0.0 {
-                return None;
-            }
+        SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => {
+            validate_composite_material(shape, mat, steel)?;
+            let fc = mat.fc.ok_or_else(|| "CFT の Fc が未設定です".to_string())?;
             let gamma_c = sepika_core::units::concrete_unit_weight_kn_m3(
                 fc,
                 mat.concrete_class,
                 sepika_core::units::ConcreteComposition::Plain,
             );
-            let steel = steel?;
-            shape.cft_equivalent_props(steel.young, steel.poisson, fc, gamma_c)
-        })),
+            let steel = steel.ok_or_else(|| "CFT 断面の鋼管材料が未設定です".to_string())?;
+            shape.try_cft_equivalent_props(
+                steel.young,
+                steel.poisson,
+                steel.shear_modulus(),
+                fc,
+                gamma_c,
+                sec.resolved_j()?,
+            )
+        }
         _ => Ok(None),
     }
 }

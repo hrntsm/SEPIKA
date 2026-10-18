@@ -9,6 +9,9 @@ serde     = { workspace = true }
 smallvec  = { workspace = true }
 thiserror = { workspace = true }
 i_overlay = { workspace = true }
+spade     = { workspace = true }
+faer      = { workspace = true }
+lru       = { workspace = true }
 
 [dev-dependencies]
 approx      = { workspace = true }

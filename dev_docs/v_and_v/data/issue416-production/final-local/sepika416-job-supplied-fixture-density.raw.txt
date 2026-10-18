@@ -1,0 +1,14 @@
+   Compiling sepika-job v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-job)
+    Finished `test` profile [optimized + debuginfo] target(s) in 2.02s
+     Running tests\steel_slab_density.rs (target\debug\deps\steel_slab_density-8e69c23ea20850cb.exe)
+
+running 6 tests
+test steel_slab_design_guard_uses_stb_material_priority_without_section_fallback ... ok
+test steel_slab_missing_references_and_geometry_keep_their_diagnostics ... ok
+test steel_slab_one_cubic_metre_design_and_independent_physical_distribution ... ok
+test steel_slab_density_boundary_invalid_inputs_unused_shared_and_finish ... ok
+test steel_slab_synced_story_entry_rejects_high_density_but_cases_only_remains_independent ... ok
+test steel_slab_preparation_invalidates_old_auto_preserves_manual_and_recovers ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

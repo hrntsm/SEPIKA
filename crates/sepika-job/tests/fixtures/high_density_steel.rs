@@ -4,7 +4,7 @@ mod seismic {
 }
 
 pub fn steel_frame() -> sepika_core::model::Model {
-    use sepika_core::model::MaterialCategory;
+    use sepika_core::model::{MaterialCategory, PropertyBasis};
     let mut model = seismic::two_storeys();
     model.materials[0].category = MaterialCategory::Steel;
     model.materials[0].name = "SN400B".into();
@@ -14,6 +14,7 @@ pub fn steel_frame() -> sepika_core::model::Model {
     model.materials[0].fy = Some(235.0);
     for section in &mut model.sections[..2] {
         section.shape = None;
+        section.property_basis.j = PropertyBasis::Supplied;
         section.rebar_material = None;
         section.shear_rebar_material = None;
     }

@@ -1,0 +1,61 @@
+   Compiling sepika-core v0.0.1 (C:\Users\hiroa\Desktop\ikkan\crates\sepika-core)
+    Finished `test` profile [optimized + debuginfo] target(s) in 53.47s
+     Running unittests src\lib.rs (target\debug\deps\sepika_core-f079367c1fe62d0c.exe)
+
+running 11 tests
+test section_shape::core_torsion::mesh::tests::invalid_dimensions_and_settings_return_reasons ... ok
+test section_shape::core_torsion::mesh::tests::audit_rejects_reversed_degenerate_and_uncovered_meshes ... ok
+test section_shape::core_torsion::mesh::tests::duplicate_clockwise_and_conflicting_contours_are_rejected ... ok
+test section_shape::core_torsion::mesh::tests::incomplete_refinement_and_triangle_cap_are_errors ... ok
+test section_shape::core_torsion::mesh::tests::elongated_coarse_rectangle_gains_free_nodes_without_changing_its_domain ... ok
+test section_shape::core_torsion::mesh::tests::test_only_ellipse_and_actual_rigid_transform_use_the_same_mesher ... ok
+test section_shape::core_torsion::mesh::tests::half_side_endpoints_remove_only_identical_tangencies ... ok
+test section_shape::core_torsion::mesh::tests::rectangle_refinement_preserves_domain_and_changes_mesh ... ok
+test section_shape::core_torsion::mesh::tests::positive_small_radius_is_retained_in_boundary_series ... ok
+test section_shape::core_torsion::mesh::tests::arcs_retain_all_tangents_and_internal_refinement_keeps_chords ... ok
+test section_shape::core_torsion::mesh::tests::existing_interior_node_meshes_keep_the_original_refinement ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 518 filtered out; finished in 0.01s
+
+     Running tests\cft_core_j_reuse_contract.rs (target\debug\deps\cft_core_j_reuse_contract-84796a97c7c21d99.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\cft_torsion_contract.rs (target\debug\deps\cft_torsion_contract-5bae3095a92d7b15.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests\frame_support_representation.rs (target\debug\deps\frame_support_representation-81b9e1dbc9c2ff92.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\lip_channel_geometry.rs (target\debug\deps\lip_channel_geometry-f0b1aabafe7fdf17.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\perf_probe.rs (target\debug\deps\perf_probe-3c161178a3bdd655.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\reference_boundaries.rs (target\debug\deps\reference_boundaries-c2b5796aa0737159.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\torsion_property_contract.rs (target\debug\deps\torsion_property_contract-c6c881bf9bba2495.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

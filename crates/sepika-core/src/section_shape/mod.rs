@@ -14,6 +14,7 @@
 mod builder;
 mod composite;
 mod constants;
+mod core_torsion;
 pub mod face_geometry;
 mod geometry;
 mod label;
@@ -27,8 +28,11 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use composite::{CftCoreProps, CompositeProps};
+pub use composite::{CftCoreProps, CftCoreTorsion, CompositeProps};
 pub use constants::{E_STEEL, KAPPA_RC, N_S_EQ};
+pub use core_torsion::{
+    CoreTorsionAttempt, CoreTorsionError, CoreTorsionLevel, CoreTorsionSolution,
+};
 pub use material::{
     concrete_young_modulus, concrete_young_modulus_gamma, wall_shear_shape_factor_isection,
 };

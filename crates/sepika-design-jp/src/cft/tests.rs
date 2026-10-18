@@ -84,7 +84,9 @@ fn rounded_cft_gate_distinguishes_core_steel_and_qd_methods() {
                 thick: 10.0,
                 corner_r: Some(r),
             };
-            let section = make_section(shape.clone());
+            let section = shape
+                .input_section(SectionId(0), "test".into())
+                .expect("J未算定でもCFT耐力検定用の幾何を入力できる");
             let mat = make_material(24.0, "Fc24");
             for method in [
                 crate::QdMethod::Qd1,

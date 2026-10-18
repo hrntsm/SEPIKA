@@ -1,0 +1,27 @@
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.29s
+     Running tests\wall_weight_partition.rs (target\debug\deps\wall_weight_partition-310c37e312871c62.exe)
+
+running 20 tests
+test asymmetric_real_faces_separate_wall_midpoint_from_floor_midpoint ... ok
+test enclosed_secondary_beam_receives_all_dl_before_reaction_cascade ... ok
+test attached_waist_hanging_parapet_and_partial_trapezoid_use_geometry_bands ... ok
+test complete_three_side_slit_overrides_dl_but_never_story_bands ... ok
+test high_density_steel_wall_rejects_all_design_routes_but_preserves_physical_weight ... ok
+test generated_wall_origin_preserves_plate_identity_and_deduplicates_assignments ... ok
+test equal_dl_total_but_changed_opening_position_requires_fresh_story_bands ... ok
+test attached_sign_reversal_openings_use_all_components_and_union ... ok
+test invalid_geometry_and_nonfinite_input_are_diagnostics ... ok
+test native_wall_without_physical_plate_is_explicitly_unavailable_for_weight ... ok
+test independent_opening_and_multistory_volumes ... ok
+test rc_standard_physical_density_is_not_replaced_by_saved_density ... ok
+test rotated_trapezoid_and_arbitrary_edges_keep_independent_geometry ... ok
+test resolved_arbitrary_dl_rates_obey_slit_edges_and_mode_exclusion ... ok
+test enclosed_partial_beam_spans_and_midspan_posts_support_all_dl_modes ... ok
+test unknown_positions_keep_totals_and_block_required_partition ... ok
+test wall_generation_outputs_are_excluded_from_input_key_and_tampering_is_refreshed ... ok
+test dl_selection_and_double_sync_leave_geometric_story_weight_unchanged ... ok
+test nonrectangular_slits_require_every_specified_role_but_preserve_resolved_beams ... ok
+test real_assembly_preserves_physical_wall_mass_in_both_routes_and_methods ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

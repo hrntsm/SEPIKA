@@ -1,0 +1,7 @@
+Initial invocation (sandbox): run-profile.ps1 -OutputName known-first -Mode known
+Result: exit 1 before executable start, at Get-CimInstance Win32_OperatingSystem, Access denied.
+No actual solve occurred. Empty known-first directory preserved.
+Read-only require_escalated CIM query succeeded. Unmodified wrapper and executable then executed with require_escalated for environment access. No auto-review rejection occurred.
+Release build: cargo build -p sepika-core --example cft_torsion_profile --release --locked
+Result: exit 0, Finished release profile [optimized] target(s) in 38.96s.
+No source modifications were needed. Build is excluded from all reported runtime measures.

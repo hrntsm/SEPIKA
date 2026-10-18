@@ -1,0 +1,37 @@
+Status: done (限定されたproduction-grid実測。原Issue416の全6Done/CI/merge完了を意味しない)
+
+Windows release公開CFT診断の実測結果
+96labelsは外寸短辺300mm、H/B=1,4/3,2,4、短辺/t=10,20,50,100、ro=0,t,t*(1+1e-6),2.5t,150*(1-1e-6),150mm。両向き192records、160fresh診断すべて成功、32alias、未確定0。最大実内法比4.75。各向きのro0/t同一coreはexact f64bits同値によりaliasを記録して求解を省略し、fresh時間標本へ含めていない。正方形のH/B交換は別fresh求解した。
+
+grid96 fresh full-call wall: 最小0.2959134秒、中央値1.04364275秒、最大2.9833642秒、合計215.2122828秒。プロセス実測217.0873245秒。初回call hb1_bt10_rzero/通常向き0.6888232秒。最大時間はhb1_bt50_rt_plus/交換向き。コンパイル38.96秒は全runtime統計から除外した。
+2658完了levels、全level最大相対残差3.3955117686952227e-12、最大V102996/T204434/DOF101482/nnz707290。採用末尾2変化の最大は内部0.0009480575648664715、境界0.0008140493495791994。H/B交換相対差最大8.089819157897082e-7。品質/上限監査違反0。採用面積分母32768:34calls、131072:86calls、524288:40calls。採用四分円分割16:32calls、64:96calls、128:32calls。ro0には境界系列の架空levelsを作っていない。
+全level合計phase時間: mesh63.3059851秒、assembly63.6780446秒、factorization82.4087713秒、solve3.4561251秒。fullcall wallとの差にはその他処理と計測区間の違いを含む。推定factorfillを実測nnz/メモリとして記載していない。
+
+既知400x300x12の通常向きコアJ [mm4]: ro0=1,449,105,537.0919018、ro12=同一core alias、ro30=1,448,692,541.1923993。交換向きはro0/12=1,449,106,277.0363488、ro30=1,448,692,426.452021。元の矩形近似/独立参照との比較と最終repo VV収載は別writerの担当。
+初期代表端点hb4_bt10_rzero (実内法240x1140mm、比4.75) は別process両向きfresh成功、各7levels、wall0.5621963/0.5604829秒。
+
+代表fresh反復: square-rounded=label3(hb1_bt10_r2_5t)、extreme-rectangle=label72(hb4_bt10_rzero)、extreme-rounded=label95(hb4_bt100_rupper)。各形状は別processで通常/交換を交互に3反復、各方向3fresh、計18freshすべて成功。directionごとのJは3回とも完全一致。通常向きのprocess初回→同process反復2回のwall秒:
+ square-rounded: 0.4549287,0.4908428,0.4504028
+ extreme-rectangle: 0.5618565,0.5699502,0.6645678
+ extreme-rounded: 1.8671569,2.4179775,2.4665646
+交換向きは各processで第2/4/6call。詳細calls.csv/JSONLを正とする。初回をOS coldとは呼ばない。公開診断のみ使用しprivate64形状cache hitを測っていない。
+既知・初期代表・grid・反復の全6process合計は184fresh診断、34alias、218records、2978levels、全fresh成功。採用品質/物理域/caps/ソースの変更なし。
+
+環境: Microsoft Windows11 Pro、10.0.26300 build26300、64bit。Intel Core Ultra7 258V、8core/8logical、MaxClockSpeed2200MHz(CIM表示値、計測中実周波数ではない)。物理RAM33,810,075,648bytes。rustc1.99.1(58cf8f9c3 2026-10-13)、x86_64-pc-windows-msvc、LLVM23.1.1。release profile optimized/thinLTO/codegen-units1。Cargo.lock/source全hashとexe hashは各environment.json、再現snapshotはsource-snapshot。exe SHA256 C8EAA0D20F13674D3824649BCE970955FEAB4476391A0BA195942985C226B19F。測定後の全run sourcehash再照合は変化0。
+
+OSメモリ: grid processの最大観測PeakWorkingSet64=115,716,096bytes、PeakPagedMemorySize64=356,732,928bytes。OSのprocess生涯high-water値を100ms間隔にpollし、その観測最大を採用した。ケースごとの増分でもfactorfillでもない。最後の100ms未満の区間で生じたpeakを必ず捕捉したとは主張しない。PeakWorkingSetはWindows working setの観測値。RAM推定値への読み替えなし。OS cold resetなし。他のCargo/重い検証をrootが止めている間の測定だが一般OS backgroundまで制御したと主張しない。
+
+初回sandboxのCIMはAccess deniedで求解前に停止、空のknown-first directoryを保持した。その後read-only require_escalated CIM照会成功、wrapper無変更のまま昇格実行で実測した。拒否の原文/位置とbuild結果はbuild-and-initial-cim.txt。automatic approval rejectionは発生していない。
+
+再現: cargo build -p sepika-core --example cft_torsion_profile --release --locked
+実行: run-profile.ps1 -OutputName 任意未使用名 -Mode grid -ModeArgs @('0','96')
+反復: -Mode repeat -ModeArgs @('3','3') / @('72','3') / @('95','3')
+既知: -Mode known
+CIMにアクセスできるWindows環境が必要。TEMP集約はpython summarize.py、python additional-summary.py。
+
+raw path base: C:/Users/hiroa/AppData/Local/Temp/sepika416-production-grid/
+各run directories: known-first-observed, extreme-first, grid96, repeat-square-rounded, repeat-extreme-rectangle, repeat-extreme-rounded。
+各run内calls.jsonl(全品質/各level全field/失敗理由とfailed_attemptの項目), calls.csv(索引), manifest.json(実solve数), environment.json(OS/compiler/sourcehash), process.json(OSmemory/wall), stdout.txt, stderr.txt。
+未確定は今回は0件なのでfailed_attemptは全件null。runnerは未確定時に理由/全完了levels/failed_attemptを出力するが、このgrid成功から他形状の成功を保証しない。
+summary.jsonは全run集計と品質監査、additional-summary.jsonはphase/変化/反復集計、artifact-sha256.jsonはartifactチェックサム、source-snapshotは再現source。
+Cargo/実solve exclusiveはrootへ解放済み。以後軽い集約のみ。Git/GH操作なし、repo source変更なし(既存example初稿のままbuild成功)。

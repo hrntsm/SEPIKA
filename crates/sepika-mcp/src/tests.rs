@@ -2897,6 +2897,7 @@ fn load_state_direct_rc_girder_missing_q0_is_skipped_while_typed_beam_accepts_va
         .iter()
         .any(|row| row["reason"].as_str().unwrap().contains("QD1用")));
     model.sections[0].shape = None;
+    model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     let JobOutcome::DesignCheck { summary, .. } =
         compute_job(&model, JobKind::DesignCheck, &params).unwrap()
     else {

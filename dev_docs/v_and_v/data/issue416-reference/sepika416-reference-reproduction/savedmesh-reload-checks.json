@@ -1,0 +1,26 @@
+[
+  {
+    "row_index": 26,
+    "shape": "H_r13",
+    "mesh_sha256": "eaa9fee75b9e4a04cea23de6635b757f4dcf81f65bda9b620202036d2af50553",
+    "mesh_generated": false,
+    "source_j_mm4": 396742.8918004057,
+    "reloaded_j_mm4": 396742.8918004057,
+    "exact_j_equal": true,
+    "signed_relative_j_difference": 0.0,
+    "original_relative_residual": 3.8396115582044605e-13,
+    "total_seconds": 2.8436802999931388
+  },
+  {
+    "row_index": 20,
+    "shape": "Box_r30",
+    "mesh_sha256": "4be49e266ced73d48b6facf4cc40292c018cfed8eb2cad6bcfb1659339f0913f",
+    "mesh_generated": false,
+    "source_j_mm4": 454648390.58093685,
+    "reloaded_j_mm4": 454648390.58093685,
+    "exact_j_equal": true,
+    "signed_relative_j_difference": 0.0,
+    "original_relative_residual": 5.885324058342894e-14,
+    "total_seconds": 1.6185942000010982
+  }
+]

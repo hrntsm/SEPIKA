@@ -1,0 +1,258 @@
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.29s
+     Running unittests src\lib.rs (target\debug\deps\sepika_edit-9dd77715998ba3f6.exe)
+
+running 207 tests
+test secondary::tests::壁領域外の支持部材へアンカーした間柱配置は拒否する ... ok
+test secondary::tests::存在しない支持部材を指す配置は拒否する ... ok
+test secondary::tests::支持が決まらない配置は拒否する ... ok
+test secondary::tests::壁領域内の支持部材へアンカーした間柱配置は成功する ... ok
+test secondary::tests::大梁削除で孤児化した床板は取り除かれvalidateが通る ... ok
+test secondary::tests::二次部材の端部を移動すると割当領域が再構築される ... ok
+test secondary::tests::二次部材の削除で領域が統合される ... ok
+test secondary::tests::片持ち間柱は自由端が解決できなくても支持端が親領域にあれば配置できる ... ok
+test secondary::tests::床領域へ小梁を配置すると割当領域が分割される ... ok
+test secondary::tests::版あり領域の分割で版が除去され新領域は未設定 ... ok
+test secondary::tests::親領域外の支持部材へアンカーした配置は拒否する ... ok
+test secondary::tests::親領域内の支持部材へアンカーした配置は成功する ... ok
+test tests::add_delete_unassigned_beam ... ok
+test secondary::tests::親領域外へ支持端を動かす端部移動は拒否する ... ok
+test tests::add_unassigned_beam_accepts_steel_section ... ok
+test tests::add_unassigned_beam_rejects_duplicate_endpoints ... ok
+test tests::add_unassigned_post_rejects_cft_section ... ok
+test tests::add_member_rejects_horizontal_cft_but_allows_column_and_unassigned ... ok
+test tests::add_unassigned_beam_rejects_cft_section ... ok
+test tests::fixed_distance_input_contract::issue635_single_and_composite_shortening_reject_half_millimetre_overrun ... ok
+test tests::attached_slab_rejection_preserves_model_and_undo_redo_history ... ok
+test tests::issue546_material_commands_reject_nonfinite_and_preserve_history ... ok
+test tests::id変更情報は受理した複合操作の順序だけを表す ... ok
+test tests::add_member_rejects_frame_node_counts_without_changing_model_or_history ... ok
+test tests::issue546_signed_zero_is_a_material_change_but_same_bits_are_noop ... ok
+test tests::issue546_repairs_nonfinite_material_values_restore_bits_and_strength_input ... ok
+test tests::lip_channel_geometry_edit_rejection_preserves_model_revision_and_redo ... ok
+test tests::fixed_distance_input_contract::issue635_add_set_and_model_validation_share_strict_position_bounds ... ok
+test tests::member_load_coordinate_contract::every_loaded_member_sharing_the_edited_node_follows_without_touching_fixed_loads ... ok
+test tests::member_load_coordinate_contract::equal_intensity_fixed_full_span_and_point_are_not_inferred_as_following ... ok
+test tests::member_load_coordinate_contract::invalid_composite_final_candidate_is_rejected_as_a_whole ... ok
+test tests::member_load_coordinate_contract::extension_keeps_intensity_identity_direction_and_undoes_as_one_edit ... ok
+test tests::member_load_coordinate_contract::point_and_trapezoid_positions_are_preserved_and_invalid_shortening_has_identity ... ok
+test tests::member_load_coordinate_contract::invalid_shortening_and_zero_length_preserve_model_and_history ... ok
+test tests::member_load_coordinate_contract::rotation_keeps_global_direction_and_fixed_load_positions ... ok
+test tests::issue635_copy_to_6000mm_keeps_exact_endpoints_and_skips_point_and_interval_overruns ... ok
+test tests::member_load_coordinate_contract::translation_validates_final_coordinates_even_when_intermediate_member_is_zero_length ... ok
+test tests::place_secondary_member_accepts_steel_section ... ok
+test tests::place_secondary_member_rejects_cft_section ... ok
+test tests::radius_edit_updates_only_shape_properties_and_restores_basis ... ok
+test tests::rc_reference_selection_undo_redo_preserves_hysteresis ... ok
+test tests::rc_section_purpose::rc_primary_inverse_use_is_rejected_before_member_creation_or_assignment ... ok
+test tests::set_element_section_allows_column_cft_for_horizontal_and_inclined_beam ... ok
+test tests::secondary_cft_assignment_placement_and_shape_changes_leave_model_and_undo_unchanged ... ok
+test tests::set_element_section_rejects_cft_for_non_column_use_or_kind ... ok
+test tests::set_floor_region_beam_section ... ok
+test tests::rc_section_purpose::rc_shape_creation_and_edit_reject_incompatible_explicit_frame_use ... ok
+test tests::set_floor_region_beam_section_rejects_cft ... ok
+test tests::set_floor_region_secondary_beams_empty_moves_to_unassigned ... ok
+test tests::rc_section_purpose::rc_secondary_inverse_kinds_reject_creation_assignment_and_referenced_shape_edit ... ok
+test tests::set_floor_region_secondary_beams_rejects_cft_section ... ok
+test tests::set_floor_region_secondary_beams_rejects_post ... ok
+test tests::set_floor_region_secondary_beams_roundtrip ... ok
+test tests::set_secondary_member_end_support_applies_and_undoes ... ok
+test tests::set_secondary_member_end_support_is_noop_for_unknown_member ... ok
+test tests::set_secondary_member_end_support_recovers_detached ... ok
+test tests::set_wall_region_post_section_accepts_steel ... ok
+test tests::set_wall_region_post_section_rejects_cft ... ok
+test tests::set_wall_region_posts_roundtrip ... ok
+test tests::set_wall_region_posts_rejects_cft_section ... ok
+test tests::standard_concrete_young_cannot_be_changed_but_direct_material_can ... ok
+test tests::steel_and_rebar_young_remain_editable ... ok
+test tests::supplied_rc_depth_edit_preserves_shape_geometry_and_other_properties ... ok
+test tests::surface_radius_edit_preserves_properties_and_undo ... ok
+test tests::test_add_attached_slab_sectionless_extent_1000_roundtrip ... ok
+test tests::story_fireproof_edit_undo_and_story_insertion ... ok
+test tests::test_add_attached_slab_roundtrip ... ok
+test tests::test_add_attached_wall_plate_roundtrip ... ok
+test tests::test_add_catalog_section_rejects_duplicate_key ... ok
+test tests::test_add_attached_wall_plate_floor_region_anchor_roundtrip ... ok
+test tests::test_add_damper_creates_element_and_attr_roundtrip ... ok
+test tests::test_add_delete_combination_roundtrip ... ok
+test tests::test_add_delete_load_case_roundtrip ... ok
+test tests::test_add_delete_material_roundtrip ... ok
+test tests::test_add_delete_member_load_roundtrip ... ok
+test tests::test_add_isolator_creates_element_and_attr_roundtrip ... ok
+test tests::test_add_isolator_id_mismatch_is_noop ... ok
+test tests::test_add_node_id_equals_index ... ok
+test tests::test_add_delete_member_roundtrip ... ok
+test tests::test_add_node_roundtrip ... ok
+test tests::test_add_section_shape_rejects_duplicate_key ... ok
+test tests::test_add_section_shape_roundtrip ... ok
+test tests::test_add_story_inserts_in_elevation_order_and_renumbers ... ok
+test tests::test_apply_prepared_model_roundtrip_with_generated_masters_and_records ... ok
+test tests::test_apply_prepared_model_sets_and_restores_mass_method ... ok
+test tests::test_auto_loads_reject_edit_and_delete ... ok
+test tests::test_assign_slab_rejects_dangling_refs ... ok
+test tests::test_base_story_level_and_deletion_are_guarded ... ok
+test tests::test_assign_and_unset_slab_roundtrip ... ok
+test tests::test_clear_story_weight_override_keeps_auto_value ... ok
+test tests::test_commands_reject_dangling_references ... ok
+test tests::test_composite_delete_nodes_descending_roundtrip ... ok
+test tests::test_composite_paste_roundtrip ... ok
+test tests::test_copy_story_counts_midspan_secondary_as_skipped ... ok
+test tests::test_copy_story_counts_new_slabs_once_with_deletion ... ok
+test tests::test_copy_story_matches_across_rounding_boundary ... ok
+test tests::test_copy_story_keeps_sectionless_enclosed_slab ... ok
+test tests::test_copy_story_distinguishes_brace_from_girder ... ok
+test tests::test_copy_story_assigns_sections_with_target_floor_name ... ok
+test tests::test_copy_story_counts_new_slabs_once ... ok
+test tests::test_copy_story_fits_member_load_to_target_length ... ok
+test tests::test_copy_story_overwrite_keeps_slabs_outside_source_plan ... ok
+test tests::test_copy_story_rejects_cft_slab_section_and_reports_it ... ok
+test tests::test_copy_story_overwrite_cft_slab_clears_existing_section_idempotently ... ok
+test tests::test_copy_story_overwrite_mirrors_absence ... ok
+test tests::test_copy_story_rejects_resolved_cft_for_primary_target ... ok
+test tests::test_copy_story_rejects_horizontal_primary_cft ... ok
+test tests::test_copy_story_rejects_secondary_cft ... ok
+test tests::test_copy_story_remaps_slab_section_to_target_floor ... ok
+test tests::test_copy_story_reports_mismatched_existing_section ... ok
+test tests::test_copy_story_secondary_creates_unassigned_beam ... ok
+test tests::test_copy_story_reuses_no_plate_region ... ok
+test tests::test_damper_def_add_update_remove_roundtrip ... ok
+test tests::test_damper_def_removal_does_not_affect_assigned_member ... ok
+test tests::test_copy_story_skips_attached_slabs ... ok
+test tests::test_delete_add_section_roundtrip ... ok
+test tests::test_delete_combination_out_of_range_is_noop ... ok
+test tests::test_delete_combination_roundtrip_restores_position ... ok
+test tests::test_copy_story_replaces_loads_instead_of_stacking ... ok
+test tests::test_delete_leftover_generated_master_roundtrip ... ok
+test tests::test_copy_story_slab_copy_does_not_touch_floor_regions ... ok
+test tests::test_delete_load_case_referenced_by_combo_is_noop ... ok
+test tests::test_copy_story_without_overwrite_keeps_existing ... ok
+test tests::test_delete_material_in_use_is_noop ... ok
+test tests::test_delete_material_middle_renumbers ... ok
+test tests::test_delete_member_restores_member_detail_attr ... ok
+test tests::test_delete_member_middle_renumbers_and_roundtrips ... ok
+test tests::test_delete_member_cascades_girder_groups_and_restores ... ok
+test tests::test_delete_member_shifts_and_restores_side_table_attrs ... ok
+test tests::test_delete_member_undo_preserves_member_load_order ... ok
+test tests::test_delete_node_in_use_is_noop ... ok
+test tests::test_delete_node_middle_renumbers_and_roundtrips ... ok
+test tests::test_delete_node_used_by_wall_region_boundary_is_noop ... ok
+test tests::test_delete_section_in_use_is_noop_and_renumbers ... ok
+test tests::test_delete_section_material_shift_and_guard_secondary_refs ... ok
+test tests::test_delete_section_referenced_by_beam ... ok
+test tests::test_delete_slab_middle_renumbers_and_roundtrips ... ok
+test tests::test_delete_slab_out_of_range_is_noop ... ok
+test tests::test_delete_story_keeps_nodes_and_drops_its_diaphragm ... ok
+test tests::test_delete_wall_plate_cascades_region_ids_and_undoes ... ok
+test tests::test_duplicate_section_for_member_roundtrip ... ok
+test tests::test_edit_rc_slab_section_shape_with_shell_reference ... ok
+test tests::test_duplicate_section_no_section_noop ... ok
+test tests::test_edit_rc_wall_section_shape_with_wall_reference ... ok
+test tests::test_edit_section_shape_keeps_name_and_floor ... ok
+test tests::test_edit_section_shape_invalid_id_noop ... ok
+test tests::test_edit_section_shape_roundtrip ... ok
+test tests::test_edit_section_shape_rejects_cft_for_non_target_element_reference ... ok
+test tests::test_edit_section_shape_rejects_use_change_for_references ... ok
+test tests::test_failed_command_keeps_redo_history ... ok
+test tests::test_nodal_loads_are_indexed_and_allow_duplicates_per_node ... ok
+test tests::test_place_support_isolator_invalid_node_is_noop ... ok
+test tests::test_place_support_isolator_roundtrip ... ok
+test tests::test_plate_section_commands_reject_cft ... ok
+test tests::test_remove_member_detail_attr_missing_is_noop ... ok
+test tests::test_remove_steel_design_attr_missing_is_noop ... ok
+test tests::test_remove_support_isolator_noop_when_not_support_isolator ... ok
+test tests::test_remove_support_isolator_roundtrip ... ok
+test tests::test_set_damper_props_roundtrip ... ok
+test tests::test_set_attached_wall_plate_extent_and_anchor_noop ... ok
+test tests::test_set_attached_extent_and_anchor_noop ... ok
+test tests::test_set_floor_region_name_roundtrip ... ok
+test tests::test_set_load_case_kind_invalid_id_is_noop ... ok
+test tests::test_set_load_case_kind_roundtrip ... ok
+test tests::test_set_load_cfg_roundtrip ... ok
+test tests::test_set_material_strength_factor_roundtrip ... ok
+test tests::test_set_material_field_roundtrip ... ok
+test tests::test_set_member_detail_attr_add_replace_and_remove_roundtrip ... ok
+test tests::test_set_member_hysteresis_roundtrip ... ok
+test tests::test_set_member_hysteresis_th_roundtrip ... ok
+test tests::test_set_multi_opening_mode_roundtrip ... ok
+test tests::test_set_multi_opening_mode_same_value_is_symmetric ... ok
+test tests::test_set_node_coord_invalid_id_is_noop ... ok
+test tests::test_set_node_coord_roundtrip ... ok
+test tests::test_set_node_restraint_invalid_id_is_noop ... ok
+test tests::test_set_node_restraint_roundtrip ... ok
+test tests::test_set_node_support_spring_invalid_id_is_noop ... ok
+test tests::test_set_node_support_spring_clamps_negative_to_zero ... ok
+test tests::test_set_node_support_spring_roundtrip ... ok
+test tests::test_set_section_material_on_missing_section_is_noop ... ok
+test tests::test_set_section_material_roundtrip_for_every_role ... ok
+test tests::test_set_slab_section_roundtrip ... ok
+test tests::test_set_section_name_rejects_duplicate_key ... ok
+test tests::test_set_story_level_kind_roundtrip ... ok
+test tests::test_set_steel_design_attr_add_replace_and_remove_roundtrip ... ok
+test tests::test_set_story_level_resorts_and_renumbers ... ok
+test tests::test_set_story_weight_invalid_id_is_noop ... ok
+test tests::test_set_slab_section_sets_and_clears_section ... ok
+test tests::test_set_wall_plate_attrs_missing_id_is_noop ... ok
+test tests::test_set_wall_plate_attrs_roundtrip ... ok
+test tests::test_set_story_weight_roundtrip ... ok
+test tests::test_set_wall_plate_section_roundtrip_and_rejects_dangling ... ok
+test tests::test_slab_section_reference_is_guarded_and_shifted ... ok
+test tests::test_sync_slab_loads_marks_content_as_auto ... ok
+test tests::test_stale_story_commands_are_noop ... ok
+test tests::test_sync_slab_loads_to_case_creates_new_case ... ok
+test tests::test_sync_slab_loads_to_case_keeps_manual_and_replaces_auto ... ok
+test tests::test_validate_detects_dangling_girder_group ... ok
+test tests::test_unset_wall_plate_region_restores_wall_region_membership ... ok
+test tests::test_unset_floor_region_restores_floor_region_membership ... ok
+test tests::test_wall_plate_region_assignment_roundtrip ... ok
+test tests::先端荷重の編集検証と取り消し ... ok
+test tests::荷重ケース削除は先端荷重参照を取り消し可能な形で更新する ... ok
+test tests::複合編集全体を拒否した場合はid変更も履歴も確定しない ... ok
+test tests::間柱端部負担率を設定し取り消せる ... ok
+test tests::階コピーの断面復元は末尾の挿入削除情報を返す ... ok
+test tests::階共通柱仕上げの編集と階操作は設定を保持してundoできる ... ok
+
+test result: ok. 207 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\assignment_identity.rs (target\debug\deps\assignment_identity-b9259165e9b24f7c.exe)
+
+running 11 tests
+test コマンド拒否redoはstb復元ラッパー越しに理由を伝え候補と履歴を確定しない ... ok
+test noop_redoは候補変更を確定せず履歴とrevisionを保持する ... ok
+test 主架構節点の直接編集も既存境界衝突を原子的に拒否する ... ok
+test 同じ支持区間の構面内節点移動は確認なしで版idと入力荷重を保持する ... ok
+test 明示分割の診断と旧版除去は一undoで全入力へ戻りredoで同じidになる ... ok
+test 明示編集が取り除く既存孤立版も確認対象から落とさない ... ok
+test 既存キー衝突と重複版は直接編集とundo入口で全状態と履歴を保持する ... ok
+test 拒否redoは床壁の衝突と重複版でモデル両履歴ラベルrevisionを保持し修正後に再試行できる ... ok
+test 主架構追加削除と非平面節点移動は旧版荷重を診断し一undoとredoで全入力を復元する ... ok
+test 確認できない入口は支持境界変更の版荷重消失を拒否しredo履歴も保持する ... ok
+test 版あり二領域の明示統合は二版の入力荷重を診断して一undoで復元する ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\column_support_faces.rs (target\debug\deps\column_support_faces-c97a356551b9cd3b.exe)
+
+running 8 tests
+test 角丸cftの共通大梁と壁フェースも実外角を使い未知角rを推定しない ... ok
+test 水平大梁支持はhウェブ交点でなく既存の投影フランジを使う ... ok
+test 角丸cft柱は実外角を保持し矩形置換と材料界面を採らない ... ok
+test 平行小梁と形状欠落を支持id付きで拒否し寸法ゼロでも実形状は使う ... ok
+test 矩形柱の傾斜小梁は実交点と設計自重を保ち上下有限区間外を拒否する ... ok
+test 回転h柱は近いウェブでなく最外フランジを採りその点の有限高さを検査する ... ok
+test 円形と矩形の水平閉端と円形の傾斜は回転に依存せず実外面を使う ... ok
+test 鋼管とcft円柱は空洞内面と材料界面を除外する ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\frame_support_representation.rs (target\debug\deps\frame_support_representation-08c7c637bf89fcb5.exe)
+
+running 1 test
+test 明示解析表現の床壁は節点編集再構築undo_redoで版と支持区間を保持する ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests sepika_edit
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
