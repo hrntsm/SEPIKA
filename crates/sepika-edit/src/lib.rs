@@ -465,65 +465,6 @@ macro_rules! id_indexed_delete_insert {
     };
 }
 
-/// ID を持たない（配列添字のみで管理され他データから参照されない）エンティティの
-/// 「削除／再挿入」コマンド対を生成するマクロ。ID 再採番は不要のため、
-/// index の範囲チェックと remove／insert のみを行う。
-macro_rules! indexed_delete_insert {
-    (
-        $(#[$del_meta:meta])*
-        $delete:ident,
-        $(#[$ins_meta:meta])*
-        $insert:ident,
-        entity = $ent_ty:ty,
-        vec = $vecf:ident,
-        field = $field:ident,
-        del_label = $dl:literal,
-        ins_label = $il:literal $(,)?
-    ) => {
-        $(#[$del_meta])*
-        pub struct $delete {
-            pub index: usize,
-        }
-
-        impl EditCommand for $delete {
-            fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-                if self.index >= model.$vecf.len() {
-                    return Box::new(Noop);
-                }
-                let removed = model.$vecf.remove(self.index);
-                Box::new($insert {
-                    index: self.index,
-                    $field: removed,
-                })
-            }
-
-            fn label(&self) -> &str {
-                $dl
-            }
-        }
-
-        $(#[$ins_meta])*
-        pub struct $insert {
-            pub index: usize,
-            pub $field: $ent_ty,
-        }
-
-        impl EditCommand for $insert {
-            fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-                if self.index > model.$vecf.len() {
-                    return Box::new(Noop);
-                }
-                model.$vecf.insert(self.index, self.$field.clone());
-                Box::new($delete { index: self.index })
-            }
-
-            fn label(&self) -> &str {
-                $il
-            }
-        }
-    };
-}
-
 mod axis;
 mod composite;
 mod load_case;

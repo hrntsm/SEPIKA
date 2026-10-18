@@ -648,6 +648,34 @@ mod tests {
         }
     }
 
+    fn pushover_model_with_saved_gravity() -> Model {
+        use sepika_core::model::{LoadCaseKind, LoadCombination, DL_CASE_NAME};
+
+        let mut model = pushover_model();
+        model.load_cases = vec![
+            LoadCase {
+                id: LoadCaseId(0),
+                name: DL_CASE_NAME.into(),
+                kind: LoadCaseKind::Dead,
+                nodal: Vec::new(),
+                member: Vec::new(),
+            },
+            LoadCase {
+                id: LoadCaseId(1),
+                name: "P=0".into(),
+                kind: LoadCaseKind::Live,
+                nodal: Vec::new(),
+                member: Vec::new(),
+            },
+        ];
+        model.combinations.push(LoadCombination {
+            name: "G+P".into(),
+            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)],
+        });
+        model.ultimate_gravity_combination = Some(model.combinations.len() - 1);
+        model
+    }
+
     /// `AnalysisRunArgs` を最小限のフィールド指定で組み立てる
     /// （他は全て既定値=None）。
     fn run_args(kind: JobKind) -> AnalysisRunArgs {
@@ -1190,7 +1218,7 @@ mod tests {
     #[tokio::test]
     async fn test_pushover_job_completes_with_max_base_shear_in_summary() {
         let dir = test_store_dir("pushover_basic");
-        let server = SepikaServer::new(make_state(pushover_model(), &dir));
+        let server = SepikaServer::new(make_state(pushover_model_with_saved_gravity(), &dir));
         let mut args = run_args(JobKind::Pushover);
         // 既定(steps=50, 目標層間変形角1/150)だと機構形成後に特異行列となり得るため
         // (sepika-solver 側の同種テストと同じ配慮)、目標変位を明示して小さめの値にする。
@@ -1200,6 +1228,10 @@ mod tests {
         let job_id = extract_job_id(&result);
         let status = wait_for_terminal(&server, &job_id).await;
         let summary = done_summary(&status);
+        assert_eq!(
+            summary["wall_run"]["gravity_terms"],
+            serde_json::json!([[0, 1.0], [1, 1.0]])
+        );
         assert!(summary["max_base_shear_kN"].as_f64().unwrap() > 0.0);
         assert!(
             summary.get("store").is_none(),
@@ -1273,7 +1305,7 @@ mod tests {
     async fn test_analysis_run_semi_precise_without_design_period_completes() {
         // ジョブは完了し、サマリ JSON に notices が載ることを確認する。
         let dir = test_store_dir("semi_precise_no_t");
-        let server = SepikaServer::new(make_state(pushover_model(), &dir));
+        let server = SepikaServer::new(make_state(pushover_model_with_saved_gravity(), &dir));
         let mut args = run_args(JobKind::Pushover);
         args.steps = Some(10);
         args.max_disp = Some(30.0);
@@ -1286,6 +1318,10 @@ mod tests {
             panic!("SemiPrecise without design_period should still complete: {status:?}");
         };
         let summary: serde_json::Value = serde_json::from_str(&result_ref).expect("summary JSON");
+        assert_eq!(
+            summary["wall_run"]["gravity_terms"],
+            serde_json::json!([[0, 1.0], [1, 1.0]])
+        );
         let notices = summary["notices"]
             .as_array()
             .expect("notices がサマリに載ること");

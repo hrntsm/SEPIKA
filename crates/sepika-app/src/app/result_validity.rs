@@ -749,7 +749,9 @@ mod tests {
 
     fn ready() -> App {
         let mut app = App::default();
-        app.load_model(crate::sample::portal_frame());
+        app.load_model(crate::app::tests::with_explicit_pushover_gravity(
+            crate::sample::portal_frame(),
+        ));
         app.core.analysis_cfg.threads = 1;
         app.core.analysis_cfg.push_steps = 3;
         app.generate_stories_action();
@@ -995,24 +997,8 @@ mod tests {
     #[test]
     fn 長期軸力の精算に使う組合せも再解析が必要になる() {
         let mut app = ready();
-        let p = LoadCaseId(app.core.model.load_cases.len() as u32);
-        app.core
-            .model
-            .load_cases
-            .push(sepika_core::model::LoadCase {
-                id: p,
-                name: "P=0".into(),
-                kind: sepika_core::model::LoadCaseKind::Live,
-                nodal: vec![],
-                member: vec![],
-            });
-        app.core
-            .model
-            .combinations
-            .push(sepika_core::model::LoadCombination {
-                name: "長期".into(),
-                terms: vec![(LoadCaseId(0), 1.0), (p, 1.0)],
-            });
+        let index = app.core.model.ultimate_gravity_combination.unwrap();
+        app.core.model.combinations[index].name = "長期".into();
         app.run_static_all();
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
@@ -1229,7 +1215,9 @@ mod purpose_tests {
     use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
     fn ready() -> App {
         let mut app = App::default();
-        app.load_model(crate::sample::portal_frame());
+        app.load_model(crate::app::tests::with_explicit_pushover_gravity(
+            crate::sample::portal_frame(),
+        ));
         app.core.analysis_cfg.threads = 1;
         app.core.analysis_cfg.push_steps = 3;
         app.core.analysis_cfg.push_use_max_disp = true;

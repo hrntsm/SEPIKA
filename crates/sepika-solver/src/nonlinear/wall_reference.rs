@@ -24,6 +24,35 @@ pub(crate) fn resolve(
     })
 }
 
+pub(crate) fn resolve_with_gravity_terms(
+    model: &Model,
+    terms: &[(LoadCaseId, f64)],
+    basis: StrengthBasis,
+) -> Result<Vec<(ElemId, [f64; 2])>, String> {
+    use sepika_core::model::MemberLoadKind;
+    let mut work = model.clone();
+    work.load_cases
+        .retain(|case| terms.iter().any(|(id, _)| *id == case.id) || !case.kind.is_long_term());
+    for case in &mut work.load_cases {
+        let Some((_, factor)) = terms.iter().find(|(id, _)| *id == case.id) else {
+            continue;
+        };
+        for load in &mut case.nodal {
+            load.values = load.values.map(|value| value * factor);
+        }
+        for load in &mut case.member {
+            match &mut load.kind {
+                MemberLoadKind::Point { p, .. } => *p *= factor,
+                MemberLoadKind::Distributed { w1, w2, .. } => {
+                    *w1 *= factor;
+                    *w2 *= factor;
+                }
+            }
+        }
+    }
+    resolve(&work, !terms.is_empty(), basis)
+}
+
 fn resolve_inputs(
     model: &Model,
     apply_long_term: bool,

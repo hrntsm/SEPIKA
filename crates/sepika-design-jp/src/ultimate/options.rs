@@ -4,14 +4,19 @@
 //! - [`ShearMethod`] — 終局せん断強度の算定方法（塑性理論式 / 靭性指針式）。
 //! - [`UltimateShearOptions`] — 終局検定（塑性理論式）の算定オプション。
 
-/// 部材の設計用需要（終局検定の入力）。**圧縮を正**とする軸力と、強軸・弱軸まわりの
-/// 設計用曲げモーメント（応答値。二軸曲げ余裕度に用いる）。
-///
-/// `shear`・`rp` は**プッシュオーバー応答からの直接反映**（[`MemberDemand::from_pushover`]）
-/// に用いる任意項目で、`None`（既定）のときは両端ヒンジ `Qmu=2·Mu/内法` と
-/// UI 一律指定 Rp（[`UltimateShearOptions::rp`]）を用いる。
+/// 終局需要の評価方式。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UltimateDemandMode {
+    #[default]
+    StaticHinge,
+    ConfirmedTotal,
+}
+
+/// 圧縮正の軸力 `[N]`、曲げ `[N·mm]` と方式を持つ終局需要。
+/// 静的ヒンジ需要は完全なQLを要し、確定総応答はQLを追加しない。
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MemberDemand {
+    pub mode: UltimateDemandMode,
     /// 設計軸力 `[N]`（**圧縮正**）。柱の Mu・軸余裕度に用いる。
     pub n_axial: f64,
     /// 強軸（せい方向）まわりの設計用曲げモーメント Mmx [N·mm]（符号は内部で abs）。
@@ -19,18 +24,14 @@ pub struct MemberDemand {
     /// 弱軸（幅方向）まわりの設計用曲げモーメント Mmy [N·mm]（符号は内部で abs）。
     pub my: f64,
     /// 設計用せん断力 Qm `[N]`（プッシュオーバー応答の強軸せん断。`Some` のとき
-    /// `Qmu = 上限強度倍率·|Qm|` として両端ヒンジ略算（2·Mu/内法）を置き換える）。
+    /// 確定総応答モードで `Qmu = |Qm|` として採用する。上限強度倍率は1のみ対応）。
     pub shear: Option<f64>,
-    /// 弱軸の設計用せん断力 Qmy `[N]`（プッシュオーバー応答の弱軸せん断。`Some` のとき
-    /// 2 軸せん断余裕度の弱軸需要 `Qmuy = 上限強度倍率·|Qmy|`（両端ヒンジ略算 2·Muy/内法
-    /// を置き換える）に用いる。2 軸せん断を検定しない場合は無視される）。
+    /// 弱軸の確定総せん断力 `[N]`。総応答モードで `Qmuy = |Qmy|` として採用する。
     pub shear_weak: Option<f64>,
     /// 部材別のヒンジ回転角 Rp `[rad]`（プッシュオーバー終局時の部材変形角）。`Some`
     /// のとき ν・cotφ・μ・tanθ に用いる Rp を [`UltimateShearOptions::rp`] から置き換える。
     pub rp: Option<f64>,
-    /// 長期せん断力 QL `[N]`（絶対値で扱う）。`Some` のとき梁のせん断・付着余裕率の
-    /// 分子を `(Qsu − QL)`・`(Qbu − QL)` とする（余裕率
-    /// `(Qsu−QL)/Qmu ≥ 1.0` の定義。`None` は QL=0 扱い）。
+    /// 長期せん断力 QL `[N]`。静的ヒンジでは必須、確定総応答では `None`（追加なし）。
     pub q_long: Option<f64>,
 }
 
@@ -38,6 +39,7 @@ impl MemberDemand {
     /// 軸力のみ（曲げ・せん断需要 0、Rp は UI 一律指定に従う）の需要を作る。
     pub fn axial(n_axial: f64) -> Self {
         Self {
+            mode: UltimateDemandMode::StaticHinge,
             n_axial,
             mz: 0.0,
             my: 0.0,
@@ -61,6 +63,7 @@ impl MemberDemand {
         rp: f64,
     ) -> Self {
         Self {
+            mode: UltimateDemandMode::ConfirmedTotal,
             n_axial,
             mz,
             my,

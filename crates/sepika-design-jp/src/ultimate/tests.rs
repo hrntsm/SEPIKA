@@ -150,7 +150,7 @@ fn frame_element(id: u32, sec: u32, n0: u32, n1: u32) -> ElementData {
 }
 
 /// 1 柱（鉛直）+ 1 梁（水平）のモデル。
-fn column_and_beam_model() -> Model {
+pub(super) fn column_and_beam_model() -> Model {
     let nodes = vec![
         node(0, [0.0, 0.0, 0.0]),
         node(1, [0.0, 0.0, 3000.0]),    // 柱: 鉛直
@@ -166,6 +166,9 @@ fn column_and_beam_model() -> Model {
         frame_element(1, 1, 1, 2), // 梁
     ];
     Model {
+        load_cases: sepika_core::model::default_load_cases(),
+        combinations: sepika_core::model::default_combinations(),
+        ultimate_gravity_combination: Some(0),
         nodes,
         elements,
         sections,
@@ -179,7 +182,22 @@ fn test_collect_rc_ultimate_checks_column_and_beam() {
     let model = column_and_beam_model();
     let opts = UltimateShearOptions::default();
     // 柱に圧縮軸力 2000kN。
-    let axial = vec![(ElemId(0), MemberDemand::axial(2_000_000.0))];
+    let axial = vec![
+        (
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(2_000_000.0)
+            },
+        ),
+        (
+            ElemId(1),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+    ];
     let checks = collect_rc_ultimate_checks(&model, &axial, &opts).unwrap();
     assert_eq!(checks.len(), 2, "柱・梁の 2 部材が検定される");
 
@@ -208,6 +226,22 @@ fn test_collect_rc_ultimate_checks_column_and_beam() {
 /// 材料の `fy` が効き、対応グレードで `fy` 未設定は入力不備として停止する。
 #[test]
 fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
+    let demand = [
+        (
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+        (
+            ElemId(1),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+    ];
     let opts = UltimateShearOptions::default();
     // 梁断面（要素 1）の σwy だけを変えた Qsu の手計算値を返す。
     let qsu_with_sigma_wy = |model: &Model, sigma_wy: f64| -> f64 {
@@ -248,7 +282,7 @@ fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
 
     // 標準ケース（fy=345）では材料の fy=345 が σwy に効く。
     let model = model_with_shear_fy(Some(345.0));
-    let checks = collect_rc_ultimate_checks(&model, &[], &opts).unwrap();
+    let checks = collect_rc_ultimate_checks(&model, &demand, &opts).unwrap();
     let beam = checks.iter().find(|c| c.elem == ElemId(1)).unwrap();
     let qsu_345 = qsu_with_sigma_wy(&model, 345.0);
     assert!(
@@ -259,7 +293,7 @@ fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
 
     // 材料名の数値が同じでも fy が異なれば fy が効く（fy=490）。
     let model_490 = model_with_shear_fy(Some(490.0));
-    let checks_490 = collect_rc_ultimate_checks(&model_490, &[], &opts).unwrap();
+    let checks_490 = collect_rc_ultimate_checks(&model_490, &demand, &opts).unwrap();
     let beam_490 = checks_490.iter().find(|c| c.elem == ElemId(1)).unwrap();
     let qsu_490 = qsu_with_sigma_wy(&model_490, 490.0);
     assert!(
@@ -271,7 +305,7 @@ fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
 
     // 対応グレードでも fy 未設定は入力不備として停止する（既定 295 で代替しない）。
     let model_none = model_with_shear_fy(None);
-    let err = collect_rc_ultimate_checks(&model_none, &[], &opts).unwrap_err();
+    let err = collect_rc_ultimate_checks(&model_none, &demand, &opts).unwrap_err();
     assert!(err.contains("fy"), "{err}");
     assert!(err.contains("部材 ID 1"), "{err}");
 }
@@ -280,6 +314,22 @@ fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
 /// （既定 295 で評価すると σwy が 235→295 に増える危険側）。fy を設定すれば算定できる。
 #[test]
 fn test_ultimate_sr235_requires_fy() {
+    let demand = [
+        (
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+        (
+            ElemId(1),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+    ];
     let opts = UltimateShearOptions::default();
     let model_with_shear = |name: &str, fy: Option<f64>| -> Model {
         let mut model = column_and_beam_model();
@@ -294,11 +344,13 @@ fn test_ultimate_sr235_requires_fy() {
         model
     };
 
-    let err = collect_rc_ultimate_checks(&model_with_shear("SR235", None), &[], &opts).unwrap_err();
+    let err =
+        collect_rc_ultimate_checks(&model_with_shear("SR235", None), &demand, &opts).unwrap_err();
     assert!(err.contains("SR235") && err.contains("fy"), "{err}");
 
     let checks =
-        collect_rc_ultimate_checks(&model_with_shear("SR235", Some(235.0)), &[], &opts).unwrap();
+        collect_rc_ultimate_checks(&model_with_shear("SR235", Some(235.0)), &demand, &opts)
+            .unwrap();
     let beam = checks.iter().find(|c| c.elem == ElemId(1)).unwrap();
     assert!(beam.qsu > 0.0);
 }
@@ -318,7 +370,27 @@ fn test_ultimate_unknown_sd295_is_unsupported() {
         });
         let shear_id = MaterialId(model.materials.len() as u32 - 1);
         model.sections[1].shear_rebar_material = Some(shear_id);
-        let err = collect_rc_ultimate_checks(&model, &[], &opts).unwrap_err();
+        let err = collect_rc_ultimate_checks(
+            &model,
+            &[
+                (
+                    ElemId(0),
+                    MemberDemand {
+                        q_long: Some(0.0),
+                        ..MemberDemand::axial(0.0)
+                    },
+                ),
+                (
+                    ElemId(1),
+                    MemberDemand {
+                        q_long: Some(0.0),
+                        ..MemberDemand::axial(0.0)
+                    },
+                ),
+            ],
+            &opts,
+        )
+        .unwrap_err();
         assert!(err.contains(name), "{name}: {err}");
         assert!(err.contains("未対応"), "{name}: {err}");
     }
@@ -328,13 +400,22 @@ fn test_ultimate_unknown_sd295_is_unsupported() {
 fn test_ultimate_check_ql_subtraction_and_unsupported_error() {
     // 余裕率の QL 控除は `q_long` のみで行う。
     let ql = 50_000.0;
-    let demand = vec![(
-        ElemId(1),
-        MemberDemand {
-            q_long: Some(ql),
-            ..MemberDemand::axial(0.0)
-        },
-    )];
+    let demand = vec![
+        (
+            ElemId(1),
+            MemberDemand {
+                q_long: Some(ql),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+        (
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+    ];
     let opts = UltimateShearOptions::default();
 
     // 普通強度（SD345）: QL 控除。
@@ -365,13 +446,30 @@ fn test_ultimate_check_ql_subtraction_and_unsupported_error() {
 /// 算定オプション（軽量コンクリートの低減・付着検定の省略）が機能する。
 #[test]
 fn test_ultimate_check_option_flags() {
+    let demand = [
+        (
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+        (
+            ElemId(1),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+    ];
     let model = column_and_beam_model();
 
     // 軽量コンクリートは Qsu・Qbu を 0.9 倍に低減する。
-    let std = collect_rc_ultimate_checks(&model, &[], &UltimateShearOptions::default()).unwrap();
+    let std =
+        collect_rc_ultimate_checks(&model, &demand, &UltimateShearOptions::default()).unwrap();
     let lw = collect_rc_ultimate_checks(
         &model,
-        &[],
+        &demand,
         &UltimateShearOptions {
             lightweight: true,
             ..Default::default()
@@ -386,7 +484,7 @@ fn test_ultimate_check_option_flags() {
     // 付着検定を省略すると Qbu=0・付着余裕度は無限大。
     let no_bond = collect_rc_ultimate_checks(
         &model,
-        &[],
+        &demand,
         &UltimateShearOptions {
             include_bond: false,
             ..Default::default()
@@ -404,7 +502,18 @@ fn test_ultimate_check_skips_non_rc() {
     // 鋼断面（shape=None 相当）は検定対象外。
     let mut model = column_and_beam_model();
     model.sections[0].shape = None;
-    let checks = collect_rc_ultimate_checks(&model, &[], &UltimateShearOptions::default()).unwrap();
+    let checks = collect_rc_ultimate_checks(
+        &model,
+        &[(
+            ElemId(1),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        )],
+        &UltimateShearOptions::default(),
+    )
+    .unwrap();
     // 柱がスキップされ梁のみ。
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0].elem, ElemId(1));
@@ -427,7 +536,22 @@ fn test_biaxial_margin_handcalc() {
 #[test]
 fn test_ultimate_check_biaxial_shear() {
     let model = column_and_beam_model();
-    let axial = vec![(ElemId(0), MemberDemand::axial(2_000_000.0))];
+    let axial = vec![
+        (
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(2_000_000.0)
+            },
+        ),
+        (
+            ElemId(1),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+    ];
     let uni = collect_rc_ultimate_checks(&model, &axial, &UltimateShearOptions::default()).unwrap();
     let bi = collect_rc_ultimate_checks(
         &model,
@@ -459,15 +583,25 @@ fn test_ultimate_check_biaxial_shear() {
 fn test_ultimate_check_biaxial_bending() {
     let model = column_and_beam_model();
     // 柱に軸力＋強軸/弱軸の設計用曲げ需要を与える。
-    let demand = vec![(
-        ElemId(0),
-        MemberDemand {
-            n_axial: 1_500_000.0,
-            mz: 2.0e8,
-            my: 1.0e8,
-            ..Default::default()
-        },
-    )];
+    let demand = vec![
+        (
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                n_axial: 1_500_000.0,
+                mz: 2.0e8,
+                my: 1.0e8,
+                ..Default::default()
+            },
+        ),
+        (
+            ElemId(1),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+    ];
     let uni =
         collect_rc_ultimate_checks(&model, &demand, &UltimateShearOptions::default()).unwrap();
     let bi = collect_rc_ultimate_checks(
@@ -491,7 +625,22 @@ fn test_ultimate_check_biaxial_bending() {
     let rx = 2.0e8 / col_bi.mu;
     assert!(rx > 0.0);
     // 需要 0 なら無限大。
-    let zero_demand = vec![(ElemId(0), MemberDemand::axial(1_500_000.0))];
+    let zero_demand = vec![
+        (
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(1_500_000.0)
+            },
+        ),
+        (
+            ElemId(1),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+    ];
     let z = collect_rc_ultimate_checks(
         &model,
         &zero_demand,
@@ -511,12 +660,28 @@ fn test_ultimate_check_biaxial_bending() {
 /// 終局せん断強度に靭性指針式 Vu を選択するオプションが機能する。
 #[test]
 fn test_ultimate_check_shear_method_ductility() {
+    let demand = [
+        (
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+        (
+            ElemId(1),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+    ];
     let model = column_and_beam_model();
     let plastic =
-        collect_rc_ultimate_checks(&model, &[], &UltimateShearOptions::default()).unwrap();
+        collect_rc_ultimate_checks(&model, &demand, &UltimateShearOptions::default()).unwrap();
     let ductility = collect_rc_ultimate_checks(
         &model,
-        &[],
+        &demand,
         &UltimateShearOptions {
             shear_method: ShearMethod::Ductility,
             ..Default::default()
@@ -558,10 +723,16 @@ fn test_ultimate_check_pushover_demand() {
 
     // (1) 設計用せん断力 Qm を直接反映すると Qmu は 2·Mu/内法 ではなく Qm になる。
     let qm = 123_456.0_f64;
-    let demand = vec![(
-        ElemId(0),
-        MemberDemand::from_pushover(1_000_000.0, 1.0e8, 5.0e7, qm, 0.0, 0.0),
-    )];
+    let demand = vec![
+        (
+            ElemId(0),
+            MemberDemand::from_pushover(1_000_000.0, 1.0e8, 5.0e7, qm, 0.0, 0.0),
+        ),
+        (
+            ElemId(1),
+            MemberDemand::from_pushover(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        ),
+    ];
     let checks =
         collect_rc_ultimate_checks(&model, &demand, &UltimateShearOptions::default()).unwrap();
     let col = checks.iter().find(|c| c.elem == ElemId(0)).unwrap();
@@ -574,14 +745,26 @@ fn test_ultimate_check_pushover_demand() {
     );
 
     // (2) 部材別 Rp を上げると（塑性理論式）柱の Qsu は低下する（ν・cotφ 低減）。
-    let d_rp0 = vec![(
-        ElemId(0),
-        MemberDemand::from_pushover(1_000_000.0, 1.0e8, 5.0e7, qm, 0.0, 0.0),
-    )];
-    let d_rp3 = vec![(
-        ElemId(0),
-        MemberDemand::from_pushover(1_000_000.0, 1.0e8, 5.0e7, qm, 0.0, 0.03),
-    )];
+    let d_rp0 = vec![
+        (
+            ElemId(0),
+            MemberDemand::from_pushover(1_000_000.0, 1.0e8, 5.0e7, qm, 0.0, 0.0),
+        ),
+        (
+            ElemId(1),
+            MemberDemand::from_pushover(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        ),
+    ];
+    let d_rp3 = vec![
+        (
+            ElemId(0),
+            MemberDemand::from_pushover(1_000_000.0, 1.0e8, 5.0e7, qm, 0.0, 0.03),
+        ),
+        (
+            ElemId(1),
+            MemberDemand::from_pushover(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        ),
+    ];
     let c0 = collect_rc_ultimate_checks(&model, &d_rp0, &UltimateShearOptions::default()).unwrap();
     let c3 = collect_rc_ultimate_checks(&model, &d_rp3, &UltimateShearOptions::default()).unwrap();
     let q0 = c0.iter().find(|c| c.elem == ElemId(0)).unwrap().qsu;
@@ -592,7 +775,22 @@ fn test_ultimate_check_pushover_demand() {
     );
 
     // (3) shear/rp 未指定（axial のみ）は Qmu=2·Mu/内法（Qm 直接反映なし）。
-    let d_axial = vec![(ElemId(0), MemberDemand::axial(1_000_000.0))];
+    let d_axial = vec![
+        (
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(1_000_000.0)
+            },
+        ),
+        (
+            ElemId(1),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        ),
+    ];
     let ca =
         collect_rc_ultimate_checks(&model, &d_axial, &UltimateShearOptions::default()).unwrap();
     let col_a = ca.iter().find(|c| c.elem == ElemId(0)).unwrap();
@@ -608,14 +806,26 @@ fn test_ultimate_check_pushover_demand() {
         ..Default::default()
     };
     let qm = 200_000.0_f64;
-    let small = vec![(
-        ElemId(0),
-        MemberDemand::from_pushover(1_000_000.0, 0.0, 0.0, qm, 10_000.0, 0.0),
-    )];
-    let large = vec![(
-        ElemId(0),
-        MemberDemand::from_pushover(1_000_000.0, 0.0, 0.0, qm, 400_000.0, 0.0),
-    )];
+    let small = vec![
+        (
+            ElemId(0),
+            MemberDemand::from_pushover(1_000_000.0, 0.0, 0.0, qm, 10_000.0, 0.0),
+        ),
+        (
+            ElemId(1),
+            MemberDemand::from_pushover(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        ),
+    ];
+    let large = vec![
+        (
+            ElemId(0),
+            MemberDemand::from_pushover(1_000_000.0, 0.0, 0.0, qm, 400_000.0, 0.0),
+        ),
+        (
+            ElemId(1),
+            MemberDemand::from_pushover(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        ),
+    ];
     let cs = collect_rc_ultimate_checks(&model, &small, &opts).unwrap();
     let cl = collect_rc_ultimate_checks(&model, &large, &opts).unwrap();
     let ms = cs
@@ -695,6 +905,9 @@ fn test_collect_cft_ultimate_checks() {
         strength_factor: None,
     };
     let model = Model {
+        load_cases: sepika_core::model::default_load_cases(),
+        combinations: sepika_core::model::default_combinations(),
+        ultimate_gravity_combination: Some(0),
         nodes: vec![node(0, [0.0, 0.0, 0.0]), node(1, [0.0, 0.0, 3000.0])],
         sections: vec![sec],
         materials: vec![mat, steel],
@@ -756,6 +969,9 @@ fn single_shape_model(shape: SectionShape, b: f64, d: f64, horizontal: bool) -> 
         vec![node(0, [0.0, 0.0, 0.0]), node(1, [0.0, 0.0, 3000.0])]
     };
     Model {
+        load_cases: sepika_core::model::default_load_cases(),
+        combinations: sepika_core::model::default_combinations(),
+        ultimate_gravity_combination: Some(0),
         nodes,
         sections: vec![sec],
         materials: vec![material()],
@@ -825,21 +1041,54 @@ fn test_ultimate_check_new_rc_shapes_supported() {
     let opts = UltimateShearOptions::default();
 
     let beam = single_shape_model(beam_rect_shape(), 400.0, 600.0, true);
-    let checks = collect_rc_ultimate_checks(&beam, &[], &opts).unwrap();
+    let checks = collect_rc_ultimate_checks(
+        &beam,
+        &[(
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        )],
+        &opts,
+    )
+    .unwrap();
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0].kind, MemberKind::Girder);
     assert!(checks[0].mu > 0.0 && checks[0].qsu > 0.0 && checks[0].qmu > 0.0);
     assert!(checks[0].axial.is_none());
 
     let column = single_shape_model(column_rect_shape(), 600.0, 700.0, false);
-    let checks = collect_rc_ultimate_checks(&column, &[], &opts).unwrap();
+    let checks = collect_rc_ultimate_checks(
+        &column,
+        &[(
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        )],
+        &opts,
+    )
+    .unwrap();
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0].kind, MemberKind::Column);
     assert!(checks[0].mu > 0.0 && checks[0].qsu > 0.0 && checks[0].qmu > 0.0);
     assert!(checks[0].axial.is_some());
 
     let circle = single_shape_model(column_circle_shape(), 600.0, 600.0, false);
-    let checks = collect_rc_ultimate_checks(&circle, &[], &opts).unwrap();
+    let checks = collect_rc_ultimate_checks(
+        &circle,
+        &[(
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        )],
+        &opts,
+    )
+    .unwrap();
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0].kind, MemberKind::Column);
     assert!(checks[0].mu > 0.0 && checks[0].qsu > 0.0 && checks[0].qmu > 0.0);
@@ -868,7 +1117,18 @@ fn test_ultimate_inconsistent_rebar_errors() {
         },
     };
     let model = single_shape_model(shape, 600.0, 700.0, false);
-    let err = collect_rc_ultimate_checks(&model, &[], &opts).unwrap_err();
+    let err = collect_rc_ultimate_checks(
+        &model,
+        &[(
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        )],
+        &opts,
+    )
+    .unwrap_err();
     assert!(err.contains("部材 ID 0"), "{err}");
     assert!(err.contains("配筋形状"), "{err}");
 }
@@ -880,7 +1140,18 @@ fn test_ultimate_new_columns_mu_matches_handcalc() {
     let a22 = std::f64::consts::PI * (22.0_f64 / 2.0).powi(2);
 
     let column = single_shape_model(column_rect_shape(), 600.0, 700.0, false);
-    let checks = collect_rc_ultimate_checks(&column, &[], &opts).unwrap();
+    let checks = collect_rc_ultimate_checks(
+        &column,
+        &[(
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        )],
+        &opts,
+    )
+    .unwrap();
     let at = 3.0 * a22;
     let expected = 0.8 * at * 345.0 * 700.0;
     assert!(
@@ -890,7 +1161,18 @@ fn test_ultimate_new_columns_mu_matches_handcalc() {
     );
 
     let circle = single_shape_model(column_circle_shape(), 600.0, 600.0, false);
-    let checks = collect_rc_ultimate_checks(&circle, &[], &opts).unwrap();
+    let checks = collect_rc_ultimate_checks(
+        &circle,
+        &[(
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(0.0),
+                ..MemberDemand::axial(0.0)
+            },
+        )],
+        &opts,
+    )
+    .unwrap();
     let side = (std::f64::consts::PI * 600.0 * 600.0 / 4.0).sqrt();
     let at = 2.0 * a22;
     let expected = 0.8 * at * 345.0 * side;
@@ -910,6 +1192,7 @@ fn test_ultimate_beam_rect_tension_side_affects_mu() {
     let top_demand = vec![(
         ElemId(0),
         MemberDemand {
+            q_long: Some(0.0),
             mz: -1.0e8,
             ..Default::default()
         },
@@ -917,6 +1200,7 @@ fn test_ultimate_beam_rect_tension_side_affects_mu() {
     let bottom_demand = vec![(
         ElemId(0),
         MemberDemand {
+            q_long: Some(0.0),
             mz: 1.0e8,
             ..Default::default()
         },
@@ -942,6 +1226,7 @@ fn test_ultimate_beam_rect_top_tension_reduces_qbu() {
     let top_demand = vec![(
         ElemId(0),
         MemberDemand {
+            q_long: Some(0.0),
             mz: -1.0e8,
             ..Default::default()
         },
@@ -949,6 +1234,7 @@ fn test_ultimate_beam_rect_top_tension_reduces_qbu() {
     let bottom_demand = vec![(
         ElemId(0),
         MemberDemand {
+            q_long: Some(0.0),
             mz: 1.0e8,
             ..Default::default()
         },

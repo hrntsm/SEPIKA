@@ -20,6 +20,7 @@ pub mod rc_shear;
 pub mod rc_shear_ductility;
 
 mod cft_check;
+mod demand_diagnostic;
 mod geometry;
 mod options;
 mod rc_check;
@@ -50,9 +51,12 @@ pub use rc_shear_ductility::{
 };
 
 pub use cft_check::{cft_mu_nm, collect_cft_ultimate_checks, CftUltimateCheck};
-pub use options::{MemberDemand, ShearMethod, UltimateShearOptions};
+pub use options::{MemberDemand, ShearMethod, UltimateDemandMode, UltimateShearOptions};
 pub use rc_check::{collect_rc_ultimate_checks, UltimateCheck};
 pub use rc_strength::biaxial_margin;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod gravity_demand_contract_tests;

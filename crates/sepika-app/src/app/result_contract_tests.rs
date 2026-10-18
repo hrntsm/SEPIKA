@@ -5,7 +5,7 @@ fn calculated() -> App {
     let mut app = App::default();
     let mut model = crate::sample::portal_frame();
     model.panel_zone = sepika_core::model::PanelZoneMode::None;
-    app.load_model(model);
+    app.load_model(crate::app::tests::with_explicit_pushover_gravity(model));
     app.core.analysis_cfg.threads = 1;
     app.run_linear_static(LoadCaseId(0));
     assert!(
@@ -140,7 +140,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-src-overlap", Some(3), "旧契約"),
         ("old-static-settings", Some(4), "旧契約"),
         ("old-zero-increment", Some(5), "旧契約"),
-        ("old-auto-solver", Some(DESIGN_CONTRACT_VERSION), "旧契約"),
+        ("old-auto-solver", Some(6), "旧契約"),
         ("old-steel-grade-recognition", Some(7), "旧契約"),
         ("old-frame-support-representation", Some(8), "旧契約"),
         ("old-signed-reactions", Some(9), "旧契約"),
@@ -150,6 +150,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-time-history-timeline", Some(19), "旧契約"),
         ("old-column-self-weight-faces", Some(20), "旧契約"),
         ("old-member-load-direction", Some(22), "旧契約"),
+        ("old-gravity-run-provenance", Some(23), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -356,6 +357,7 @@ fn selected_case_and_saved_combo_name_require_matching_input_but_ignore_display_
     for combo in [false, true] {
         for missing in [false, true] {
             let mut app = calculated();
+            let combo_index = app.core.model.combinations.len();
             if combo {
                 app.core
                     .model
@@ -364,8 +366,14 @@ fn selected_case_and_saved_combo_name_require_matching_input_but_ignore_display_
                         name: "照合対象".into(),
                         terms: vec![(LoadCaseId(0), 1.0)],
                     });
-                app.run_combination(0);
-                assert_eq!(app.core.scoped.last_static, Some(StaticKey::Combo(0)));
+                app.run_combination(combo_index);
+                let Some(StaticKey::Combo(result_index)) = app.core.scoped.last_static else {
+                    panic!("保存組合せの解析結果が選択されていません");
+                };
+                assert_eq!(
+                    app.core.scoped.results.as_ref().unwrap().combos[result_index].0,
+                    "照合対象"
+                );
             }
             if missing {
                 app.core
@@ -402,7 +410,7 @@ fn selected_case_and_saved_combo_name_require_matching_input_but_ignore_display_
                 .member_checks
                 .is_empty());
             if combo {
-                app.run_combination(0);
+                app.run_combination(combo_index);
             } else {
                 app.run_linear_static(LoadCaseId(0));
             }
@@ -898,9 +906,9 @@ fn lip_channel_geometry_old_contracts_expire_and_current_keeps_results() {
 }
 
 #[test]
-fn cft_case2_design12_expires_while_current_analysis_survives_and_design15_can_be_recomputed() {
-    assert_eq!(ANALYSIS_CONTRACT_VERSION, 23);
-    assert_eq!(DESIGN_CONTRACT_VERSION, 15);
+fn cft_case2_design12_expires_while_current_analysis_survives_and_design16_can_be_recomputed() {
+    assert_eq!(ANALYSIS_CONTRACT_VERSION, 24);
+    assert_eq!(DESIGN_CONTRACT_VERSION, 16);
     let app = super::tests::cft_long_case2_app(4_000_000.0);
     let original = app.core.scoped.results.as_ref().unwrap();
     assert!(original.has_design_results());
@@ -940,7 +948,7 @@ fn cft_case2_design12_expires_while_current_analysis_survives_and_design15_can_b
         reopened.core.scoped.last_error
     );
     let recalculated = reopened.core.scoped.results.as_ref().unwrap();
-    assert_eq!(recalculated.design_contract_version, Some(15));
+    assert_eq!(recalculated.design_contract_version, Some(16));
     assert!(recalculated.has_design_results());
     assert_eq!(recalculated.member_forces, original.member_forces);
     let rows = reopened.compute_cft_ultimate_checks().unwrap();

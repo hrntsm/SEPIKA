@@ -346,18 +346,8 @@ fn check_member(
     }))
 }
 
-/// モデルの RC梁・矩形柱・円形柱について終局検定（塑性理論式）を一括実行する。
-///
-/// - `demand_by_elem`: 部材の設計用需要（[`MemberDemand`]：圧縮正の軸力と強軸/弱軸の
-///   設計用曲げモーメント）。柱の Mu・軸余裕度・2 軸曲げ余裕度に用いる。該当 ID がない
-///   部材は需要 0（安全側）で評価する。軸力は長期（G+P）静的、曲げ需要は当該組合せの
-///   応答値を渡すことを想定する。
-/// - 対象外（RC用途別断面以外・断面未解決・形状不明の材料未解決）の部材は
-///   結果に含めない。
-/// - 検定対象の RC梁・矩形柱・円形柱で Fc 未設定・Fc/断面寸法不正・主筋降伏強度未解決・配筋不整合・
-///   有効せい ≤ 0 の場合は、部材 ID を含む理由を `Err` で返す。
-/// - 検定対象の部材でせん断補強筋に未対応グレードまたは `fy` 未設定がある場合は、
-///   部材 ID と是正内容を含む理由を `Err` で返す。
+/// RC梁・柱の終局検定。必要部材の需要・QL・確定総応答の条件が不足すればエラーを返す。
+/// 対象外断面は除外し、対象部材の材料・配筋・寸法不足は部材ID付きで返す。
 pub fn collect_rc_ultimate_checks(
     model: &Model,
     demand_by_elem: &[(ElemId, MemberDemand)],
@@ -385,12 +375,67 @@ pub fn collect_rc_ultimate_checks(
             }
             continue;
         };
-        let demand = demand_by_elem
+        if !is_rc {
+            continue;
+        }
+        let diagnose = |reason| super::demand_diagnostic::demand_diagnostic(model, elem.id, reason);
+        sepika_core::load_combo::ultimate_gravity_terms(model)
+            .map_err(|reason| diagnose(format!("RC部材 ID {}: {reason}", elem.id.0)))?;
+        let mut demands = demand_by_elem.iter().filter(|(id, _)| *id == elem.id);
+        let demand = demands.next().map(|(_, d)| *d).ok_or_else(|| {
+            diagnose(format!(
+                "ultimate_demand_missing: RC部材 ID {} の長期架構用需要が不足しています",
+                elem.id.0
+            ))
+        })?;
+        if demands.next().is_some() {
+            return Err(diagnose(format!(
+                "ultimate_demand_duplicate: RC部材 ID {} の需要が重複しています",
+                elem.id.0
+            )));
+        }
+        if [demand.n_axial, demand.mz, demand.my]
             .iter()
-            .find(|(id, _)| *id == elem.id)
-            .map(|(_, d)| *d)
-            .unwrap_or_default();
-        if let Some(check) = check_member(elem, sec, mat, model, demand, opts)? {
+            .any(|v| !v.is_finite())
+            || [demand.shear, demand.shear_weak, demand.rp, demand.q_long]
+                .into_iter()
+                .flatten()
+                .any(|v| !v.is_finite())
+        {
+            return Err(diagnose(format!(
+                "ultimate_demand_nonfinite: RC部材 ID {} の需要が非有限です",
+                elem.id.0
+            )));
+        }
+        match demand.mode {
+            super::options::UltimateDemandMode::StaticHinge
+                if demand.q_long.is_none()
+                    || demand.shear.is_some()
+                    || demand.shear_weak.is_some() =>
+            {
+                return Err(diagnose(format!(
+                    "ultimate_gravity_missing: RC部材 ID {} の静的N/M/QL参照が不完全です",
+                    elem.id.0
+                )));
+            }
+            super::options::UltimateDemandMode::ConfirmedTotal
+                if demand.shear.is_none()
+                    || demand.shear_weak.is_none()
+                    || demand.rp.is_none()
+                    || demand.q_long.is_some()
+                    || opts.upper_strength_factor != 1.0 =>
+            {
+                return Err(diagnose(format!("ultimate_total_unsupported: RC部材 ID {} の確定総応答は追加QLなし・倍率1の完全な応答が必要です", elem.id.0)));
+            }
+            _ => {}
+        }
+        if let Some(mut check) = check_member(elem, sec, mat, model, demand, opts)? {
+            check.detail = format!(
+                "mode={:?}, gravity_terms={:?}; {}",
+                demand.mode,
+                sepika_core::load_combo::ultimate_gravity_terms(model)?,
+                check.detail
+            );
             out.push(check);
         }
     }

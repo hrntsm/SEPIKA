@@ -42,5 +42,6 @@ pub use sample_wave::{
 };
 pub use settings::AnalysisSettings;
 pub use ultimate_demand::{
-    member_demand_from_pushover, member_demand_from_static_forces, q_long_map_from_member_forces,
+    complete_ultimate_static_demand, member_demand_from_pushover, member_demand_from_static_forces,
+    q_long_map_from_member_forces,
 };

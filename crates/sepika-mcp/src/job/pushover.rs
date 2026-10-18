@@ -97,15 +97,47 @@ fn pushover_summary(
 mod tests {
     use super::super::rc_wall617_fixture;
     use super::*;
-    use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId, WallPlateId};
+    use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, WallPlateId};
     use sepika_solver::nonlinear::pushover::wall_response::WallUnavailableReason;
+
+    fn with_saved_gravity(mut model: Model) -> Model {
+        use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination, DL_CASE_NAME};
+
+        model.load_cases.extend([
+            LoadCase {
+                id: LoadCaseId(1),
+                name: "P=0".into(),
+                kind: LoadCaseKind::Live,
+                nodal: Vec::new(),
+                member: Vec::new(),
+            },
+            LoadCase {
+                id: LoadCaseId(2),
+                name: DL_CASE_NAME.into(),
+                kind: LoadCaseKind::Dead,
+                nodal: Vec::new(),
+                member: Vec::new(),
+            },
+        ]);
+        model.combinations.push(LoadCombination {
+            name: "G+P".into(),
+            terms: vec![
+                (LoadCaseId(0), 1.0),
+                (LoadCaseId(1), 1.0),
+                (LoadCaseId(2), 1.0),
+            ],
+        });
+        model.ultimate_gravity_combination = Some(model.combinations.len() - 1);
+        model
+    }
+
     #[test]
     fn mcp_rc_wall_initial_capacity_matches_same_job_run_without_reference_publication() {
         for method in [
             sepika_core::model::RcWallShearMethod::ArakawaMean,
             sepika_core::model::RcWallShearMethod::ArakawaMin,
         ] {
-            let mut m = rc_wall617_fixture::input_model();
+            let mut m = with_saved_gravity(rc_wall617_fixture::input_model());
             m.stress_cfg.rc_wall_shear_method = method;
             let before = serde_json::to_vec(&m).unwrap();
             let params = JobParams {
@@ -127,7 +159,21 @@ mod tests {
                 params.design_period,
             )
             .unwrap();
+            assert_eq!(m.load_cases[2].id, LoadCaseId(2));
+            assert_eq!(m.load_cases[2].name, sepika_core::model::DL_CASE_NAME);
+            assert!(
+                !m.load_cases[2].nodal.is_empty() || !m.load_cases[2].member.is_empty(),
+                "初期載荷には生成したDL自重も保持する"
+            );
             let direct = sepika_job::compute::compute_pushover(m, cfg).unwrap();
+            assert_eq!(
+                direct.wall_run.as_ref().unwrap().gravity_terms,
+                vec![
+                    (LoadCaseId(0), 1.0),
+                    (LoadCaseId(1), 1.0),
+                    (LoadCaseId(2), 1.0),
+                ]
+            );
             assert_eq!(
                 summary["wall_capacities_n"],
                 serde_json::to_value(&direct.wall_capacities).unwrap()
@@ -143,7 +189,7 @@ mod tests {
                 serde_json::to_value(method).unwrap()
             );
             assert_eq!(direct.rc_wall_shear_method, method);
-            let mut missing = rc_wall617_fixture::input_model();
+            let mut missing = with_saved_gravity(rc_wall617_fixture::input_model());
             missing.stress_cfg.rc_wall_shear_method = method;
             missing.sections[2].shear_rebar_material = None;
             let error = compute_pushover_job(missing, &params)
@@ -155,7 +201,7 @@ mod tests {
     }
     #[test]
     fn mcp_wall_history_has_plate_run_input_and_null_distinct_from_zero() {
-        let mut model = crate::tests::rc_column_model();
+        let mut model = with_saved_gravity(crate::tests::rc_column_model());
         let mut bottom = model.nodes[0].clone();
         bottom.id = NodeId(2);
         bottom.coord = [4000.0, 0.0, 0.0];
@@ -276,6 +322,10 @@ mod tests {
         };
         assert!(summary["wall_run"]["input_generation"].is_array());
         assert!(summary["wall_run"]["run_id"].is_string());
+        assert_eq!(
+            summary["wall_run"]["gravity_terms"],
+            serde_json::json!([[0, 1.0], [1, 1.0], [2, 1.0]])
+        );
         assert_eq!(summary["ds_evaluation"]["step"], 1);
         assert_eq!(summary["capacity_evaluation"]["step"], 1);
         assert_eq!(summary["ds_evaluation"]["purpose"], "Ds");

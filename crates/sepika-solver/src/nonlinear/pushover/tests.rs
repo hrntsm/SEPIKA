@@ -33,6 +33,9 @@ fn base_story(node_ids: Vec<NodeId>) -> Story {
 /// エンドツーエンドで動作することを検証する。
 fn single_column_model(fy: f64, seismic_weight: f64) -> Model {
     Model {
+        load_cases: sepika_core::model::default_load_cases(),
+        combinations: sepika_core::model::default_combinations(),
+        ultimate_gravity_combination: Some(0),
         nodes: vec![
             Node {
                 id: NodeId(0),
@@ -336,6 +339,9 @@ fn test_pushover_requires_seismic_weight() {
 /// （局所軸の回転を気にせず手計算と直接比較できる）。
 fn spring_column_model(kx: f64, support_kx: Option<f64>, seismic_weight: f64) -> Model {
     Model {
+        load_cases: sepika_core::model::default_load_cases(),
+        combinations: sepika_core::model::default_combinations(),
+        ultimate_gravity_combination: Some(0),
         nodes: vec![
             Node {
                 id: NodeId(0),
@@ -558,6 +564,9 @@ pub(super) fn two_story_model() -> Model {
         fy: Some(235.0),
     };
     Model {
+        load_cases: sepika_core::model::default_load_cases(),
+        combinations: sepika_core::model::default_combinations(),
+        ultimate_gravity_combination: Some(0),
         nodes: vec![
             Node {
                 id: NodeId(0),
@@ -945,6 +954,9 @@ fn test_determine_mechanism_overall() {
 
 fn portal_frame_model(fy: f64, seismic_weight: f64) -> Model {
     Model {
+        load_cases: sepika_core::model::default_load_cases(),
+        combinations: sepika_core::model::default_combinations(),
+        ultimate_gravity_combination: Some(0),
         nodes: vec![
             Node {
                 id: NodeId(0),
@@ -2862,18 +2874,11 @@ fn test_pushover_load_only_extends_beyond_design_level() {
 /// まま水平増分が進む（N-M 応答経路が長期点から始まる）、の 3 点。
 #[test]
 fn test_pushover_long_term_preload_sets_initial_axial_state() {
-    use sepika_core::ids::LoadCaseId;
-    use sepika_core::model::{LoadCase, LoadCaseKind, NodalLoad};
+    use sepika_core::model::NodalLoad;
 
     let mut model = single_column_model(235.0, 80_000.0);
     let p = 50_000.0;
-    model.load_cases.push(LoadCase {
-        id: LoadCaseId(0),
-        name: "DL".into(),
-        nodal: vec![NodalLoad::manual(NodeId(1), [0.0, 0.0, -p, 0.0, 0.0, 0.0])],
-        member: vec![],
-        kind: LoadCaseKind::Dead,
-    });
+    model.load_cases[0].nodal = vec![NodalLoad::manual(NodeId(1), [0.0, 0.0, -p, 0.0, 0.0, 0.0])];
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
     let result = pushover_analysis_recording(
@@ -3374,6 +3379,9 @@ pub(super) fn wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
         spring: None,
     };
     Model {
+        load_cases: sepika_core::model::default_load_cases(),
+        combinations: sepika_core::model::default_combinations(),
+        ultimate_gravity_combination: Some(0),
         nodes: vec![
             make_node(0, [0.0, 0.0, 0.0], Dof6Mask::FIXED, None),
             make_node(1, [lw, 0.0, 0.0], Dof6Mask::FIXED, None),

@@ -33,7 +33,9 @@ fn ownership_job(app: &mut App, result: Option<JobResult>) {
 
 fn ownership_portal() -> App {
     let mut app = App::default();
-    app.load_model(crate::sample::portal_frame());
+    app.load_model(crate::app::tests::with_explicit_pushover_gravity(
+        crate::sample::portal_frame(),
+    ));
     app.core.analysis_cfg.threads = 1;
     app.core.analysis_cfg.th_duration = 0.06;
     app.core.analysis_cfg.th_dt = 0.02;
@@ -51,7 +53,7 @@ fn ownership_unset_portal() -> App {
     base.nodes = [NodeId(0), NodeId(1)].into_iter().collect();
     model.elements.push(base);
     let mut app = ownership_portal();
-    app.load_model(model);
+    app.load_model(crate::app::tests::with_explicit_pushover_gravity(model));
     app.generate_stories_action();
     app.ensure_preparation();
     assert!(

@@ -104,6 +104,8 @@ pub struct WallStepResponse {
 /// 解析実行ごとの識別。入力世代はGUI/MCPの既存入力照合データで識別する。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WallRunIdentity {
+    pub gravity_terms: Vec<(sepika_core::ids::LoadCaseId, f64)>,
+    pub gravity_applied: bool,
     pub run_id: String,
     pub input_generation: Option<Vec<u8>>,
     pub input_unavailable: Option<WallUnavailableReason>,
@@ -117,6 +119,8 @@ impl WallRunIdentity {
             .expect("解析実行時刻")
             .as_nanos();
         Self {
+            gravity_terms: Vec::new(),
+            gravity_applied: false,
             run_id: format!("{time}-{}", SEQUENCE.fetch_add(1, Ordering::Relaxed)),
             input_generation: None,
             input_unavailable: Some(WallUnavailableReason::InputIdentityNotRecorded),

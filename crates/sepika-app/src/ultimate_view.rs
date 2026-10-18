@@ -18,10 +18,65 @@ fn margin_color(margin: f64) -> egui::Color32 {
     }
 }
 
+fn demand_source_note(app: &App) -> Result<String, String> {
+    app.ultimate_demand_by_elem()?;
+    if !app.core.ultimate_use_pushover {
+        return Ok("静的重力参照: N/M/QL は保存長期組合せの応力、Rp は一律指定。両端ヒンジ略算は全体の保有水平耐力判定を完了しません".into());
+    }
+    let direction = app.core.scoped.pushover_view_dir;
+    let point = app
+        .pushover_for(direction)
+        .and_then(|run| run.capacity_evaluation.as_ref())
+        .ok_or("確定総応答の採用方向・stepが未指定です")?;
+    Ok(format!("確定総応答: {:?}方向・採用step={} のN/M/Q/Rp（同一runの初期重力を含む）。倍率1、総QへQLを追加しません", point.direction, point.step))
+}
+
 /// 終局検定表を描画する（設計タブ「終局検定」サブビュー）。
 pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
     ui.strong("終局検定（塑性理論式による終局せん断・付着余裕度）");
     ui.add_space(4.0);
+    let mut selection = app.core.model.ultimate_gravity_combination;
+    egui::ComboBox::from_id_salt("ultimate_gravity_combination")
+        .selected_text(
+            selection
+                .and_then(|i| app.core.model.combinations.get(i))
+                .map(|c| c.name.as_str())
+                .unwrap_or("長期架構用組合せを選択"),
+        )
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut selection, None, "未指定（未検定）");
+            for (index, combo) in app.core.model.combinations.iter().enumerate() {
+                ui.selectable_value(&mut selection, Some(index), &combo.name);
+            }
+        });
+    if selection != app.core.model.ultimate_gravity_combination {
+        app.core.scoped.undo.run(
+            &mut app.core.model,
+            Box::new(sepika_edit::SetUltimateGravityCombination { index: selection }),
+        );
+        app.core.scoped.staleness.mark_edited();
+    }
+    if let Ok(terms) = sepika_core::load_combo::ultimate_gravity_terms(&app.core.model) {
+        let sources = terms
+            .iter()
+            .map(|(id, factor)| {
+                let name = app
+                    .core
+                    .model
+                    .load_cases
+                    .iter()
+                    .find(|case| case.id == *id)
+                    .map(|case| case.name.as_str())
+                    .unwrap_or("不明");
+                format!("{factor} × {name} (case {})", id.0)
+            })
+            .collect::<Vec<_>>()
+            .join(" + ");
+        ui.label(format!("長期架構用: {sources}"));
+    }
+    ui.label(
+        demand_source_note(app).unwrap_or_else(|reason| format!("需要由来は未検定: {reason}")),
+    );
 
     ui.horizontal(|ui| {
         ui.label("ヒンジ回転角 Rp:");
@@ -91,24 +146,15 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             "設計用応力・Rp を増分解析応答から反映",
         )
         .on_hover_text(
-            "終局時の設計用せん断 Qmu・需要曲げ・軸力・部材別 Rp を増分解析\
-             最終ステップの部材別応答から直接反映します。未実行時は静的応答＋UI 一律 Rp \
-             にフォールバックします。",
+            "設計用せん断 Qmu・需要曲げ・軸力・部材別 Rp を、明示した採用stepの\
+             確定総応答から直接反映します。不足時は未検定です。",
         );
         if app.core.ultimate_use_pushover {
-            let has_po = app
-                .displayed_pushover()
-                .map(|p| {
-                    sepika_job::member_demand_from_pushover(&p.member_response, None).is_some()
-                })
-                .unwrap_or(false);
+            let has_po = app.ultimate_demand_by_elem().is_ok();
             if has_po {
                 ui.colored_label(crate::theme::GOOD_GREEN, "● 応答反映中");
             } else {
-                ui.colored_label(
-                    crate::theme::GRAY_600,
-                    "（増分解析未実行 → 静的応答で代替）",
-                );
+                ui.colored_label(crate::theme::GRAY_600, "（確定総応答が不足・未検定）");
             }
         }
     });
@@ -129,7 +175,10 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                 if ng > 0 {
                     ui.colored_label(crate::theme::ERROR_RED, format!("NG {} 本", ng));
                 } else {
-                    ui.colored_label(crate::theme::GOOD_GREEN, "全部材 OK");
+                    ui.colored_label(
+                        crate::theme::GOOD_GREEN,
+                        "対象部材の限定検定 OK（全体判定は未完了）",
+                    );
                 }
             });
             ui.add_space(4.0);
@@ -214,22 +263,17 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             } else {
                 ("Qsu=塑性理論式の終局せん断強度", "Qbu=付着割裂耐力")
             };
-            let using_po = app.core.ultimate_use_pushover
-                && app
-                    .displayed_pushover()
-                    .map(|p| {
-                        sepika_job::member_demand_from_pushover(&p.member_response, None).is_some()
-                    })
-                    .unwrap_or(false);
-            let demand_note = if using_po {
-                "Qmu・需要曲げ・軸力・Rp は増分解析終局応答（部材別）を直接反映"
+            let source = demand_source_note(app)
+                .unwrap_or_else(|reason| format!("需要由来は未検定: {reason}"));
+            let shear_demand = if app.core.ultimate_use_pushover {
+                "Qmu は採用stepの確定総せん断力の絶対値"
             } else {
-                "Qmu=上限強度倍率·2·Mu/内法（両端ヒンジ）、需要曲げ・軸力は静的応答、Rp は一律指定"
+                "Qmu=上限強度倍率·2·Mu/内法（両端ヒンジ）"
             };
             ui.colored_label(
                 crate::theme::GRAY_600,
                 format!(
-                    "{demand_note}。{shear_note}、{bond_note}。\
+                    "{source}。{shear_demand}。{shear_note}、{bond_note}。\
                      余裕度<1.0（赤）はせん断・付着が曲げ降伏に先行することを示す。\
                      対象は RC梁・RC矩形柱・RC円形柱。"
                 ),
@@ -311,10 +355,12 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                 },
             );
             ui.add_space(4.0);
+            let source = demand_source_note(app)
+                .unwrap_or_else(|reason| format!("需要由来は未検定: {reason}"));
             ui.colored_label(
                 crate::theme::GRAY_600,
-                "Ncu=軸圧縮終局耐力（短柱=cNc+(1+ξ)sNc、長柱=座屈耐力、中柱=線形補間）、\
-                 Ntu=軸引張終局耐力（sA·Fy）。N は長期軸力（圧縮正）。座屈長さは幾何長（K=1）。",
+                format!("Ncu=軸圧縮終局耐力（短柱=cNc+(1+ξ)sNc、長柱=座屈耐力、中柱=線形補間）、\
+                 Ntu=軸引張終局耐力（sA·Fy）。N は採用需要の軸力（圧縮正）。{source}。座屈長さは幾何長（K=1）。"),
             );
         }
     }
@@ -327,5 +373,77 @@ fn cft_class_label(class: sepika_design_jp::ultimate::CftColumnClass) -> &'stati
         CftColumnClass::Short => "短柱",
         CftColumnClass::Medium => "中柱",
         CftColumnClass::Long => "長柱",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination};
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+    use sepika_solver::statics::analysis::SeismicDir;
+
+    #[test]
+    fn source_note_follows_nonfinal_confirmed_adoption_without_legacy_display_response() {
+        let mut model = crate::sample::portal_frame();
+        model.load_cases.push(LoadCase {
+            id: LoadCaseId(2),
+            name: "明示P0".into(),
+            kind: LoadCaseKind::Live,
+            nodal: vec![],
+            member: vec![],
+        });
+        model.combinations = vec![LoadCombination {
+            name: "保存架構用".into(),
+            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(2), 1.0)],
+        }];
+        model.ultimate_gravity_combination = Some(0);
+        let mut app = App::default();
+        app.load_model(model);
+        app.core.analysis_cfg.threads = 1;
+        app.generate_stories_action();
+        app.run_seismic(SeismicDir::X);
+        app.core.analysis_cfg.push_steps = 3;
+        app.run_pushover();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app.core.ultimate_use_pushover = true;
+        app.core.ultimate_upper_factor = 1.0;
+        let bundle = app.core.scoped.results.as_mut().unwrap();
+        let run = bundle.pushover_x.as_mut().unwrap();
+        let history = run.confirmed_history.as_ref().unwrap();
+        assert!(history.len() >= 3);
+        let step = history[1].step;
+        assert_ne!(step, history.last().unwrap().step);
+        run.capacity_evaluation = Some(
+            run.evaluation_point(
+                EvaluationPurpose::HoldingCapacity,
+                SeismicDir::X,
+                step,
+                "表示説明回帰の非最終採用点".into(),
+            )
+            .unwrap(),
+        );
+        let adopted = demand_source_note(&app).unwrap();
+        assert!(adopted.contains("X方向"), "{adopted}");
+        assert!(adopted.contains(&format!("step={step}")), "{adopted}");
+        assert!(adopted.contains("確定総応答"), "{adopted}");
+        assert!(!adopted.contains("終局応答"), "{adopted}");
+        let bundle = app.core.scoped.results.as_mut().unwrap();
+        let run = bundle.pushover_x.as_mut().unwrap();
+        run.member_response.clear();
+        let mut display_alias = run.clone();
+        display_alias
+            .capacity_evaluation
+            .as_mut()
+            .unwrap()
+            .direction = SeismicDir::Y;
+        bundle.pushover = Some(display_alias);
+        assert_eq!(demand_source_note(&app).unwrap(), adopted);
+        println!("ultimate source note: {adopted}");
     }
 }

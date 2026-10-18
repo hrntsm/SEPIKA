@@ -201,7 +201,7 @@ fn design602_partial_analysis_never_certifies_old_design() {
             let mut model = crate::sample::portal_frame();
             model.panel_zone = sepika_core::model::PanelZoneMode::None;
             let mut app = App::default();
-            app.load_model(model);
+            app.load_model(crate::app::tests::with_explicit_pushover_gravity(model));
             app.generate_stories_action();
             app.core.analysis_cfg.threads = 1;
             app.core.analysis_cfg.push_steps = 2;

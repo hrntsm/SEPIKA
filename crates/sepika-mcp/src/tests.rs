@@ -286,6 +286,24 @@ fn pending_geometry_queries_and_quantity_are_not_reported_as_zero() {
 fn rounded_cft_jobs_publish_unavailable_reasons_without_claiming_pass() {
     use sepika_core::section_shape::SectionShape;
     let mut model = rc_column_model();
+    model.load_cases.push(sepika_core::model::LoadCase {
+        id: sepika_core::ids::LoadCaseId(1),
+        name: "P=0".into(),
+        kind: sepika_core::model::LoadCaseKind::Live,
+        nodal: Vec::new(),
+        member: Vec::new(),
+    });
+    model
+        .combinations
+        .push(sepika_core::model::LoadCombination {
+            name: "G+P".into(),
+            terms: vec![
+                (sepika_core::ids::LoadCaseId(0), 1.0),
+                (sepika_core::ids::LoadCaseId(1), 1.0),
+            ],
+        });
+    model.ultimate_gravity_combination = Some(model.combinations.len() - 1);
+
     let mut steel = model.materials[0].clone();
     steel.id = MaterialId(model.materials.len() as u32);
     steel.name = "SN400B".into();
@@ -628,7 +646,7 @@ pub(crate) fn rc_column_model() -> Model {
             spring: None,
         }],
         load_cases: vec![LoadCase {
-            kind: Default::default(),
+            kind: sepika_core::model::LoadCaseKind::Dead,
             id: sepika_core::ids::LoadCaseId(0),
             name: "長期".into(),
             nodal: vec![NodalLoad::manual(
@@ -644,6 +662,24 @@ pub(crate) fn rc_column_model() -> Model {
 pub(crate) fn cft_long_case2_model(n_compression_n: f64) -> Model {
     use sepika_core::section_shape::SectionShape;
     let mut model = rc_column_model();
+    model.load_cases.push(sepika_core::model::LoadCase {
+        id: sepika_core::ids::LoadCaseId(1),
+        name: "P=0".into(),
+        kind: sepika_core::model::LoadCaseKind::Live,
+        nodal: Vec::new(),
+        member: Vec::new(),
+    });
+    model
+        .combinations
+        .push(sepika_core::model::LoadCombination {
+            name: "G+P".into(),
+            terms: vec![
+                (sepika_core::ids::LoadCaseId(0), 1.0),
+                (sepika_core::ids::LoadCaseId(1), 1.0),
+            ],
+        });
+    model.ultimate_gravity_combination = Some(model.combinations.len() - 1);
+
     model.nodes[1].coord[2] = 7200.0;
     model.stories[1].elevation = 7200.0;
     model.materials[0].fc = Some(30.0);
@@ -710,25 +746,33 @@ fn cft_long_case2_job_reports_independent_mu_and_never_passes_axial_overload() {
 }
 
 #[test]
-fn test_compute_ultimate_check_job() {
-    let model = rc_column_model();
-    let outcome = compute_job(&model, JobKind::UltimateCheck, &JobParams::default())
-        .expect("終局検定ジョブは成功するはず");
-    match outcome {
-        JobOutcome::UltimateCheck { summary } => {
-            assert_eq!(summary["kind"], "UltimateCheck");
-            assert_eq!(summary["n_checks"], 1);
-            // 柱 1 本のせん断余裕度・耐力が算定されている。
-            let members = summary["members"].as_array().expect("members 配列");
-            assert_eq!(members.len(), 1);
-            assert!(members[0]["qsu"].as_f64().unwrap() > 0.0);
-            assert!(members[0]["shear_margin"].as_f64().unwrap() > 0.0);
-            // CFT 集計キーが存在する（本モデルは CFT 柱なしなので 0）。
-            assert_eq!(summary["n_cft_checks"], 0);
-            assert!(summary["cft_members"].is_array());
-        }
-        _ => panic!("expected UltimateCheck outcome"),
-    }
+fn test_compute_ultimate_check_job_rejects_incomplete_rc_gravity_demand() {
+    let mut model = rc_column_model();
+    model.load_cases.push(sepika_core::model::LoadCase {
+        id: sepika_core::ids::LoadCaseId(1),
+        name: "P=0".into(),
+        kind: sepika_core::model::LoadCaseKind::Live,
+        nodal: Vec::new(),
+        member: Vec::new(),
+    });
+    model
+        .combinations
+        .push(sepika_core::model::LoadCombination {
+            name: "G+P".into(),
+            terms: vec![
+                (sepika_core::ids::LoadCaseId(0), 1.0),
+                (sepika_core::ids::LoadCaseId(1), 1.0),
+            ],
+        });
+    model.ultimate_gravity_combination = Some(model.combinations.len() - 1);
+
+    let error = compute_job(&model, JobKind::UltimateCheck, &JobParams::default())
+        .err()
+        .expect("QL未設定のRC終局需要は拒否する");
+    let reason = error.to_string();
+    assert!(reason.contains("ultimate_gravity_missing"), "{reason}");
+    assert!(reason.contains("member=0"), "{reason}");
+    assert!(reason.contains("purpose=frame_long"), "{reason}");
 }
 
 /// DesignCheck ジョブは既定では危険断面位置（柱フェイス [face=0 につき節点芯]・

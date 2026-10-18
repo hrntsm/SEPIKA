@@ -50,6 +50,10 @@ use sepika_core::dof::Dof6Mask;
 use sepika_core::model::ElementKind;
 use sepika_solver::statics::analysis::SeismicDir;
 
+#[path = "support/frame_gravity.rs"]
+mod frame_gravity;
+use frame_gravity::select_frame_gravity;
+
 // ===================== フィクスチャと共通ヘルパー =====================
 
 /// 固定フィクスチャ（実建物の ST-Bridge）のパス。
@@ -394,6 +398,7 @@ fn prepared() -> App {
     let mut app = imported();
     app.run_preparation();
     assert_no_error(&app, "準備計算");
+    select_frame_gravity(&mut app.core.model);
     app
 }
 
@@ -405,6 +410,16 @@ fn analyzed() -> App {
     app.run_eigen(app.core.analysis_cfg.n_modes);
     assert_no_error(&app, "固有値解析");
     app
+}
+
+fn analyze_ultimate_gravity(app: &mut App) {
+    select_frame_gravity(&mut app.core.model);
+    let terms = sepika_core::load_combo::ultimate_gravity_terms(&app.core.model)
+        .expect("架構用長期重力の入力契約");
+    for (case, _) in terms {
+        app.run_linear_static(case);
+        assert_no_error(app, "終局検定用の架構用長期重力解析");
+    }
 }
 
 /// 既存鋼門型の断面・材料を使う床なし4層（各3500 mm）・1スパン6000 mmの独立fixture。
@@ -461,6 +476,7 @@ fn prepared_steel_portal(four_story: bool) -> App {
     app.generate_stories_action();
     app.run_preparation();
     assert_no_error(&app, "鋼構造サンプルの準備計算");
+    select_frame_gravity(&mut app.core.model);
     assert!(app.core.model.slabs.is_empty());
     sepika_element::factory::ensure_nonlinear_input(&app.core.model)
         .expect("鋼構造サンプルの非線形入力");
@@ -1552,6 +1568,7 @@ fn steel_portal_holding_capacity_and_imported_rc_ultimate_checks() {
             .join("\n")
     );
     let mut app = analyzed();
+    analyze_ultimate_gravity(&mut app);
     let ultimate = app
         .compute_ultimate_checks()
         .expect("終局検定が算定できるはず");
@@ -2686,6 +2703,7 @@ fn snapshot_key_scalars() {
     assert!(app.core.scoped.results.as_ref().unwrap().pushover.is_none());
     line("pushover.input", "T形梁の情報不足により停止".into());
     clear_error(&mut app);
+    analyze_ultimate_gravity(&mut app);
     line(
         "ultimate.checks",
         app.compute_ultimate_checks()
@@ -2910,6 +2928,7 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     let prep = app.core.scoped.preparation.as_ref().unwrap();
     assert!(prep.seismic_note.is_none(), "{:?}", prep.seismic_note);
     assert!((prep.seismic.as_ref().unwrap().rows[0].qi - 57_750.0).abs() < 1e-8);
+    select_frame_gravity(&mut app.core.model);
     app.run_seismic(sepika_solver::statics::analysis::SeismicDir::X);
     assert_no_error(&app, "整合GLの地震静的");
     app.run_pushover();
