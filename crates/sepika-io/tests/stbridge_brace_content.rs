@@ -94,14 +94,12 @@ fn assert_element_only_content(xml: &str) {
             Event::End(_) => {
                 parents.pop().unwrap();
             }
-            Event::Text(e) if target => assert!(e
-                .as_ref()
-                .iter()
-                .all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n'))),
-            Event::CData(e) if target => assert!(e
-                .as_ref()
-                .iter()
-                .all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n'))),
+            Event::Text(e) if target => {
+                assert!(e.iter().all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n')))
+            }
+            Event::CData(e) if target => {
+                assert!(e.iter().all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n')))
+            }
             Event::GeneralRef(_) if target => panic!("断面の文字子に参照が存在する"),
             Event::Eof => break,
             _ => {}

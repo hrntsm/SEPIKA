@@ -42,18 +42,27 @@ fn sha256_of(data: &[u8]) -> String {
 fn read_entry_capped(
     archive: &mut zip::ZipArchive<std::fs::File>,
     name: &str,
+    max_uncompressed_bytes: u64,
 ) -> Result<Vec<u8>, IoError> {
     let mut zf = archive
         .by_name(name)
         .map_err(|e| IoError::Zip(format!("missing entry {}: {}", name, e)))?;
-    if zf.size() > MAX_ENTRY_UNCOMPRESSED {
+    if zf.size() > max_uncompressed_bytes {
         return Err(IoError::EntryTooLarge(name.to_string()));
     }
+    read_entry_bytes_capped(&mut zf, name, max_uncompressed_bytes)
+}
+
+fn read_entry_bytes_capped(
+    reader: impl Read,
+    name: &str,
+    max_uncompressed_bytes: u64,
+) -> Result<Vec<u8>, IoError> {
     let mut data = Vec::new();
-    let read = (&mut zf)
-        .take(MAX_ENTRY_UNCOMPRESSED + 1)
+    let read = reader
+        .take(max_uncompressed_bytes + 1)
         .read_to_end(&mut data)?;
-    if read as u64 > MAX_ENTRY_UNCOMPRESSED {
+    if read as u64 > max_uncompressed_bytes {
         return Err(IoError::EntryTooLarge(name.to_string()));
     }
     Ok(data)
@@ -229,7 +238,7 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
     let f = std::fs::File::open(path)?;
     let mut archive = zip::ZipArchive::new(f).map_err(|e| IoError::Zip(e.to_string()))?;
 
-    let manifest_bytes = read_entry_capped(&mut archive, "manifest.json")?;
+    let manifest_bytes = read_entry_capped(&mut archive, "manifest.json", MAX_ENTRY_UNCOMPRESSED)?;
     let manifest: Manifest =
         serde_json::from_slice(&manifest_bytes).map_err(|e| IoError::Decode(e.to_string()))?;
 
@@ -248,7 +257,7 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
     let mut results = None;
     let mut analysis_settings = None;
     for entry in &manifest.entries {
-        let data = read_entry_capped(&mut archive, &entry.name)?;
+        let data = read_entry_capped(&mut archive, &entry.name, MAX_ENTRY_UNCOMPRESSED)?;
         let actual_hash = sha256_of(&data);
         if actual_hash != entry.sha256 {
             return Err(IoError::HashMismatch(entry.name.clone()));
@@ -1347,7 +1356,7 @@ mod tests {
         let file = std::fs::File::open(&path).unwrap();
         let archive = zip::ZipArchive::new(file).unwrap();
         assert_eq!(
-            archive.file_names().collect::<Vec<_>>(),
+            archive.file_names().collect::<Result<Vec<_>, _>>().unwrap(),
             ["manifest.json", "model.msgpack", "settings.json"]
         );
 
@@ -1475,6 +1484,89 @@ mod tests {
         let loaded = load_ovika(&path).unwrap().model;
         assert_eq!(loaded.slabs[0].tip_loads, model.slabs[0].tip_loads);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn malformed_zip_is_rejected_without_changing_input() {
+        let path = crate::test_util::test_tmp().join("malformed_archive.ovika");
+        let bytes = b"this is not a ZIP archive";
+        std::fs::write(&path, bytes).unwrap();
+
+        assert!(matches!(load_ovika(&path), Err(IoError::Zip(_))));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn entry_size_limit_accepts_boundary_and_rejects_larger_header() {
+        let path = crate::test_util::test_tmp().join("entry_header_limit.ovika");
+        let mut writer = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        writer
+            .start_file("payload", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"12345678").unwrap();
+        writer.finish().unwrap();
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+
+        assert_eq!(
+            read_entry_capped(&mut archive, "payload", 8).unwrap(),
+            b"12345678"
+        );
+        assert!(matches!(
+            read_entry_capped(&mut archive, "payload", 7),
+            Err(IoError::EntryTooLarge(name)) if name == "payload"
+        ));
+        drop(archive);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn false_entry_size_is_rejected_by_zip_reader() {
+        let path = crate::test_util::test_tmp().join("entry_actual_limit.ovika");
+        let mut writer = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        writer
+            .start_file(
+                "payload",
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated),
+            )
+            .unwrap();
+        writer.write_all(&[b'x'; 64]).unwrap();
+        writer.finish().unwrap();
+        let mut bytes = std::fs::read(&path).unwrap();
+        let central = bytes
+            .windows(4)
+            .position(|signature| signature == b"PK\x01\x02")
+            .unwrap();
+        // ZIP の中央ディレクトリの展開サイズは先頭から24 byte目の4 byte。
+        // 正しい申告値のままではヘッダー検査で拒否され、ZIP reader の虚偽申告検査に到達しない。
+        bytes[central + 24..central + 28].copy_from_slice(&1u32.to_le_bytes());
+        std::fs::write(&path, bytes).unwrap();
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+        assert_eq!(archive.by_name("payload").unwrap().size(), 1);
+
+        let result = read_entry_capped(&mut archive, "payload", 8);
+        assert!(
+            matches!(&result, Err(IoError::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData),
+            "{result:?}"
+        );
+        drop(archive);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn actual_entry_bytes_stop_at_one_byte_above_limit() {
+        let mut reader = std::io::repeat(b'x').take(64);
+
+        assert!(matches!(
+            read_entry_bytes_capped(&mut reader, "payload", 8),
+            Err(IoError::EntryTooLarge(name)) if name == "payload"
+        ));
+        assert_eq!(reader.limit(), 55);
+        assert_eq!(
+            read_entry_bytes_capped(&b"12345678"[..], "payload", 8).unwrap(),
+            b"12345678"
+        );
     }
 
     #[test]
