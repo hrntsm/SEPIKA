@@ -16,8 +16,9 @@ Source 調査だけで [Issue #671](https://github.com/hrntsm/SEPIKA/issues/671)
 
 ## 参照資料と判断可能範囲
 
-- 親取得の RESP-D 公開「SRC大梁断面算定」の退避 HTML を静的照合した。構造規定欄は QL の分担と sQD/rQD を掲載し、後段の SRC 規準方式とは区別する。これは公開ソフトウェア方式説明の一次発信であり、引用する構造規準・技術基準解説書本体を直接閲覧した証拠ではない。URL・版・頁は製品正本に記載。
-- 添付 Ver.5.13 は PDF67/本文64 §2.5.10(3) の単純梁 Q0 を使う別方式。Source担当の実画像確認を受領したが、Docs担当による画像再視認はしていない。退避HTML SHA256は `B4208D051EF0F556B3F6FC313CEAB4EC9971DAFA16EC93D1199B77CFEF1CC1CE`、添付PDFは `DA18AFED284B37FB12FBE12765E6485E16484CA4DAA23DE7D54119785BA7EF1E`。
+- [SRC梁のQL分担を使う方式説明](https://kke-resp-team.github.io/resp-d-docs/calculation2/04_cross_section_test/16_src_beam_cross_section_test/index.html)は、2026-10-18に公式公開HTMLを開き、構造規定欄のQL分担とsQD/rQDを確認した。後段のSRC規準方式とは区別する。引用する構造規準・技術基準解説書本体を直接閲覧した証拠ではない。
+- 上記の公開HTMLを当時取得して静的照合した退避ファイルのSHA-256は `B4208D051EF0F556B3F6FC313CEAB4EC9971DAFA16EC93D1199B77CFEF1CC1CE` である。当時の照合対象の識別値であり、2026-10-18に取得したHTMLの計算値ではない。
+- [SRC梁のQ0を使う方式説明](https://www.structure.jp/manual/be513.pdf#page=67)も公式配布元で公開を確認した。今回の確認はPDF内の式全文の再照合ではない。QLと単純梁Q0を使う方式の比較は、下記の独立値・コード試験と区別する。
 - 採用は既存の QL/share 方式の正常数値を維持し、実際に必要な参照へゲートを整合するもの。Q0 別方式への変更、新しい近似の承認ではない。RC #600 の符号・方向・端合成、SRC柱、CFT、終局需要 #565、地震重量 policy は対象外。
 - 両端同一断面・同一設計軸力の近似、絶対値合成、規準本体の適用条件は一般安全性の確認に至っていない。欠落時の需要低下は下記 fixture で観測した範囲であり、全SRC・実建物の規準適合や安全側/危険側を一般判定しない。
 

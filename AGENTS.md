@@ -75,3 +75,4 @@ Rustで作成する日本の建築構造計算一貫プログラム。
 - PR は [CONTRIBUTING.md](CONTRIBUTING.md#プルリクエスト) と [PR テンプレート](.github/pull_request_template.md) に従う。
 - Issue とユーザーと合意したゴールを満たす。スコープ外の問題も無視せず、必要なら別 Issue として残す。
 - 変更に対応する文書を更新し、配置は [dev_docs/README.md](dev_docs/README.md#ドキュメント配置ルール正本) を正とする。
+- 文書作成・更新時は [資料と比較の記載ルール](dev_docs/README.md#資料と比較の記載ルール正本) と [製品ドキュメントの執筆規約](dev_docs/docs_authoring.md) を参照する。

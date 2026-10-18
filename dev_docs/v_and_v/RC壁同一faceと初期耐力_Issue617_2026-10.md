@@ -11,7 +11,9 @@
 
 ## 参照資料と確認限界
 
-株式会社ストラクチャーVer.5.13本文95/PDF98の原画像、Union公開講習会2009 PDF4の原画像は親担当で照合済み。前者ローカルPDF SHA-256は `da18afed284b37fb12fbe12765e6485e16484ca4daa23de7d54119785ba7ef1e`、後者は `a29fcad20e8c4373795eb18c02a951fcdb7beaa6ed7b21c897d4a952433dd230`。出典リンクと採用する計算規約は製品文書を参照する。引用規準原典本体、実験・実測Validationは未確認である。
+[壁耐力の方式説明](https://www.structure.jp/manual/be513.pdf#page=98)と[壁脚内力の公開講習会資料](https://www.unions.co.jp/dqs/seminar/files/hold_seminartext.pdf#page=4)は、2026-10-18に公式配布元へのWebアクセスで公開を確認した。今回の確認は各式の全文再照合ではない。同一faceの内力・容量式のVerificationは以下の独立算術・人工入力・実求解で示す。引用規準原典本体、実験・実測Validationは未確認である。
+
+公開講習会資料の当時取得したPDFのSHA-256は `a29fcad20e8c4373795eb18c02a951fcdb7beaa6ed7b21c897d4a952433dd230` である。当時の照合対象の識別値であり、2026-10-18の再取得ファイルの計算値や、新規の画像照合を示すものではない。
 
 ## 独立算術・人工入力・実求解の区別
 
@@ -128,7 +130,7 @@ default testsは既知一件CLI除外後に完走し、関連feature testsも成
 
 2026-10-14、独立Reviewerが基点 `5b7860b8a477c6a97e63a2a5a033d2323520a31c` からレビュー対象head `90f7eff36fba7bec8934c1bb9c8f4e7927b8e70b` までの変更を確認し、Status done・必須指摘なしとした。Issue原本の完了条件10項目、計算仕様・実入口・失敗契約・適用限界を照合した。対象コードSHAは冒頭の `61775a2d0c045caef0bcef6f54952d07da881269` から変更していない。
 
-独立Reviewerは株式会社ストラクチャー本文95/PDF98とUnion PDF4の原画像および両PDFのSHA-256を自身でも照合した。これは引用規準原典全文や実験Validationの確認を意味しない。
+この独立レビューの完了は、引用規準原典全文や実験Validationの確認を意味しない。
 
 | 独立実行の範囲 | 成功数 | TEMPログ |
 | --- | --- | --- |

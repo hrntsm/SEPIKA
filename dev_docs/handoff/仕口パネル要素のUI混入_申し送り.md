@@ -8,7 +8,7 @@
 `crates/squid-n-app/src/app/panels.rs`、`crates/squid-n-app/src/viewer/mod.rs`、
 `docs/preparation/06_仕口パネル.md`、`docs/calc_basis/05_構造解析/02_線形静解析.md`
 
-他社（Super Build/SS7 出力）の ST-Bridge を取り込むと、断面が正しく割り当たっている
+外部ソフトから出力された ST-Bridge を取り込むと、断面が正しく割り当たっている
 純 S 造モデルで「断面が未割当です」の警告が多数出て、ナビゲータでも RC 部材が実在数より
 多く計上される、という報告を受けて調査した。
 
