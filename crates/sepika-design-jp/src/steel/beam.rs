@@ -2,8 +2,7 @@
 //! 鉄骨造梁の許容応力度検定）。
 //!
 //! 軸力（引張/圧縮）+ 二軸曲げ + せん断 + von Mises 型合成応力度の各検定比の
-//! 最大値を検定比とする（柱と同様の複合検定。梁は弱軸曲げ Qz・My も
-//! 検定する点が柱と異なる）。
+//! 最大値を検定比とする。
 //!
 //! 検定比には含まれない参考情報として、大梁の必要横補剛数とたわみ
 //! （長期のみ）も併せて算定する。
@@ -130,24 +129,32 @@ pub(crate) fn check_beam(
     };
 
     let (ay, az) = shear_area_2d(shape, sec, tf, tw);
-    let tau_y = forces.qy.abs() / safe_denom(ay);
-    let tau_z = forces.qz.abs() / safe_denom(az);
+    let (ay, az) = if matches!(
+        sec.shape,
+        Some(sepika_core::section_shape::SectionShape::SteelBox { .. })
+    ) {
+        (ay, az)
+    } else {
+        (safe_denom(ay), safe_denom(az))
+    };
+    let tau_y = forces.qy.abs() / ay;
+    let tau_z = forces.qz.abs() / az;
     let ratio_vy = tau_y / safe_denom(fs_val);
     let ratio_vz = tau_z / safe_denom(fs_val);
+    let tau_sum = tau_y + tau_z;
 
     let mises_ratio = match shape {
         ShapeCategory::H => {
             let sigma_b_prime = sigma_by * (h - 2.0 * tf).max(0.0) / safe_denom(h);
-            let case_y = ((sigma_ax + sigma_b_prime).powi(2) + 3.0 * tau_y.powi(2)).sqrt();
-            let case_z = ((sigma_ax + sigma_by + sigma_bz).powi(2) + 3.0 * tau_z.powi(2)).sqrt();
+            let case_y = ((sigma_ax + sigma_b_prime).powi(2) + 3.0 * tau_sum.powi(2)).sqrt();
+            let case_z = ((sigma_ax + sigma_by + sigma_bz).powi(2) + 3.0 * tau_sum.powi(2)).sqrt();
             case_y.max(case_z) / safe_denom(ft_val)
         }
         ShapeCategory::Pipe => {
             (sigma_ax.powi(2) + 3.0 * (tau_y.powi(2) + tau_z.powi(2))).sqrt() / safe_denom(ft_val)
         }
         _ => {
-            let tau_max = tau_y.max(tau_z);
-            ((sigma_ax + sigma_by + sigma_bz).powi(2) + 3.0 * tau_max.powi(2)).sqrt()
+            ((sigma_ax + sigma_by + sigma_bz).powi(2) + 3.0 * tau_sum.powi(2)).sqrt()
                 / safe_denom(ft_val)
         }
     };
@@ -196,7 +203,11 @@ pub(crate) fn check_beam(
     }
 
     let ratio_bending = ratio_comb.max(ratio_my).max(ratio_mz).max(mises_ratio);
-    let ratio_shear = ratio_vy.max(ratio_vz);
+    let ratio_shear = if shape == ShapeCategory::Pipe {
+        ratio_vy.max(ratio_vz)
+    } else {
+        ratio_vy + ratio_vz
+    };
     let components = vec![
         CheckComponent {
             kind: CheckKind::Bending,
@@ -961,11 +972,7 @@ mod tests {
             .check(&forces, &sec, &mat_v, &ctx)
             .unwrap_checked();
 
-        let t = 12.0_f64;
-        let h = 300.0_f64;
-        let r = 30.0_f64;
-        let corner = std::f64::consts::PI * t * (2.0 * r - t) / 4.0;
-        let ay = 2.0 * (t * (h - 2.0 * r).max(0.0) + corner);
+        let ay = 5760.0;
         let tau_y = 150_000.0_f64 / ay;
         let fs = steel_fs(235.0, LoadTerm::Long);
         let expected = tau_y / fs;
@@ -977,11 +984,15 @@ mod tests {
         );
     }
 
-    /// 形状なし断面の名称推定経路は直角式 Ay=2t(H−2t) を維持する。
     #[test]
-    fn test_beam_check_shear_box_r_zero_falls_back_to_sharp_corner() {
-        let mut sec = rect_section(300.0, 300.0, "BOX-300x300x12");
-        sec.thickness = Some(12.0);
+    fn test_beam_check_shear_explicit_welded_box() {
+        let sec = sepika_core::section_shape::SectionShape::SteelBox {
+            height: 300.0,
+            width: 300.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        }
+        .to_section(sepika_core::ids::SectionId(0), "BOX-300x300x12".into());
         let mat_v = mat("SN400");
         let forces = MemberForcesAt {
             pos: 0.5,

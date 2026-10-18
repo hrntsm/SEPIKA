@@ -23,6 +23,8 @@ pub mod lateral_bracing;
 mod lip_channel;
 pub mod panel_zone;
 mod section;
+#[cfg(test)]
+mod shear_contract_tests;
 
 pub use section::{resolve_lb, steel_fb_h, steel_fb_h_asd2019, steel_h_z_with_loss, steel_i_t};
 
@@ -104,8 +106,7 @@ fn shape_of(sec: &Section) -> (ShapeCategory, f64, f64) {
 }
 
 /// せん断有効断面積 `(Ay, Az)` [mm²]（強軸 Qy・弱軸 Qz。梁・柱で共用の単一定義）。
-/// 断面形状ごとに算定する（角部外半径 r は断面定義時の入力値）。
-/// SteelBox の外角半径は検定入口で既知・有効と確認済みであること。
+/// Box の寸法と外角半径は検定入口で適用可能と確認済みであること。
 fn shear_area_2d(shape: ShapeCategory, sec: &Section, tf: f64, tw: f64) -> (f64, f64) {
     let h = sec.depth;
     let b = sec.width;
@@ -123,19 +124,8 @@ fn shear_area_2d(shape: ShapeCategory, sec: &Section, tf: f64, tw: f64) -> (f64,
                 }
                 _ => 0.0,
             };
-            let (ay, az) = if r > 1e-9 {
-                let corner = (std::f64::consts::PI * t * (2.0 * r - t) / 4.0).max(0.0);
-                (
-                    2.0 * (t * (h - 2.0 * r).max(0.0) + corner),
-                    2.0 * (t * (b - 2.0 * r).max(0.0) + corner),
-                )
-            } else {
-                (
-                    2.0 * t * (h - 2.0 * t).max(0.0),
-                    2.0 * t * (b - 2.0 * t).max(0.0),
-                )
-            };
-            (ay.max(0.0), az.max(0.0))
+            let end = if r == 0.0 { t } else { r };
+            (2.0 * t * (h - 2.0 * end), 2.0 * t * (b - 2.0 * end))
         }
         ShapeCategory::Pipe => {
             let t = tw;
@@ -193,6 +183,14 @@ impl DesignCheck for SteelDesign {
             };
         }
         if matches!(ctx.kind, MemberKind::Girder | MemberKind::Column) {
+            if sec.shape.is_none() && shape_of(sec).0 == ShapeCategory::Box {
+                return CheckOutcome::Skipped {
+                    reason: format!(
+                        "鋼せん断検定: 断面 {} の角形鋼管寸法と外角半径が未確定です。断面形状を入力してください",
+                        sec.name
+                    ),
+                };
+            }
             if let Some(shape @ SectionShape::SteelBox { corner_r, .. }) = sec.shape.as_ref() {
                 if let Err(error) = shape.validate_surface_radius() {
                     return CheckOutcome::Skipped {
@@ -202,10 +200,44 @@ impl DesignCheck for SteelDesign {
                         ),
                     };
                 }
-                if corner_r.is_none() {
+                let Some(radius) = corner_r else {
                     return CheckOutcome::Skipped {
                         reason: format!(
-                            "鋼せん断検定: 断面 {} の角形鋼管外角半径が未知です。半径を入力してください（0は明示した直角）",
+                            "鋼せん断検定: 断面 {} の角形鋼管外角半径が未知です。半径を入力してください（0は溶接箱）",
+                            sec.name
+                        ),
+                    };
+                };
+                let (_, _, thick) = shape_of(sec);
+                let end = if *radius == 0.0 { thick } else { *radius };
+                if ![sec.depth, sec.width, thick]
+                    .iter()
+                    .all(|v| v.is_finite() && *v > 0.0)
+                    || (*radius > 0.0 && *radius < thick)
+                    || sec.depth - 2.0 * end <= 0.0
+                    || sec.width - 2.0 * end <= 0.0
+                    || [
+                        2.0 * thick * (sec.depth - 2.0 * end),
+                        2.0 * thick * (sec.width - 2.0 * end),
+                    ]
+                    .iter()
+                    .any(|area_mm2| !area_mm2.is_finite() || *area_mm2 <= 0.0)
+                {
+                    return CheckOutcome::Skipped {
+                        reason: format!(
+                            "鋼せん断検定: 断面 {} の外角半径または寸法が適用範囲外です。溶接箱は外角半径0、角形鋼管は外角半径が板厚以上、両方向の直線長が正で面積が有限正である必要があります",
+                            sec.name
+                        ),
+                    };
+                }
+                let (ay, az) = shear_area_2d(ShapeCategory::Box, sec, thick, thick);
+                if ![forces.qy / ay, forces.qz / az]
+                    .iter()
+                    .all(|stress_mpa| stress_mpa.is_finite())
+                {
+                    return CheckOutcome::Skipped {
+                        reason: format!(
+                            "鋼せん断検定: 断面 {} のせん断応力度が非有限です。せん断力・断面寸法の桁と単位を確認してください",
                             sec.name
                         ),
                     };
@@ -271,29 +303,23 @@ mod surface_radius_tests {
                 length: 0.0,
                 ..Default::default()
             };
-            for radius in [None, Some(0.0), Some(60.0), Some(150.0)] {
-                let section = supplied_box_section(radius, "BOX半径検証");
+            for (radius, area_mm2) in [
+                (0.0, 9024.0),
+                (12.0, 9024.0),
+                (30.0, 8160.0),
+                (60.0, 6720.0),
+                (149.0, 2448.0),
+            ] {
+                let section = supplied_box_section(Some(radius), "BOX半径検証");
                 let outcome = SteelDesign.check(&forces, &section, &material, &ctx);
-                match radius {
-                    None => match outcome {
-                        CheckOutcome::Skipped { reason } => {
-                            assert!(reason.contains("外角半径が未知"));
-                            assert!(reason.contains("入力してください"));
-                        }
-                        CheckOutcome::Checked(_) => panic!("半径未知で検定済みを返してはならない"),
-                    },
-                    Some(r) => {
-                        let ay = if r == 0.0 {
-                            2.0 * 12.0 * (400.0 - 2.0 * 12.0)
-                        } else {
-                            2.0 * (12.0 * (400.0 - 2.0 * r)
-                                + std::f64::consts::PI * 12.0 * (2.0 * r - 12.0) / 4.0)
-                        };
-                        let expected = forces.qy / ay / steel_fs(235.0, LoadTerm::Long);
-                        assert!((outcome.unwrap_checked().ratio() - expected).abs() < 1e-9);
-                    }
-                }
+                let expected = forces.qy / area_mm2 / steel_fs(235.0, LoadTerm::Long);
+                assert!((outcome.unwrap_checked().ratio() / expected - 1.0).abs() < 1e-10);
             }
+            let section = supplied_box_section(None, "BOX未知半径");
+            assert!(
+                matches!(SteelDesign.check(&forces, &section, &material, &ctx),
+                CheckOutcome::Skipped { reason } if reason.contains("外角半径が未知"))
+            );
         }
     }
 
@@ -318,6 +344,9 @@ mod surface_radius_tests {
                 f64::NAN,
                 f64::INFINITY,
                 f64::NEG_INFINITY,
+                0.001,
+                11.999,
+                150.0,
                 150.1,
                 300.0,
             ] {
@@ -326,12 +355,209 @@ mod surface_radius_tests {
                     CheckOutcome::Skipped { reason } => {
                         assert!(reason.contains("BOX不正半径検証"));
                         assert!(reason.contains("外角半径"));
-                        assert!(reason.contains("不正"));
+                        assert!(reason.contains("不正") || reason.contains("適用範囲外"));
                     }
                     CheckOutcome::Checked(_) => panic!("不正半径で検定済みを返してはならない: {r}"),
                 }
             }
         }
+    }
+
+    #[test]
+    fn box_shear_rejects_unknown_geometry_and_invalid_section_dimensions() {
+        let material = test_support::mat("SN400");
+        let forces = MemberForcesAt {
+            pos: 0.5,
+            n: 0.0,
+            qy: 1.0,
+            qz: 0.0,
+            my: 0.0,
+            mz: 0.0,
+        };
+        for kind in [MemberKind::Girder, MemberKind::Column] {
+            let ctx = DesignCtx {
+                kind,
+                ..Default::default()
+            };
+            let mut section = supplied_box_section(Some(0.0), "BOX寸法検証");
+            section.shape = None;
+            assert!(
+                matches!(SteelDesign.check(&forces, &section, &material, &ctx),
+                CheckOutcome::Skipped { reason } if reason.contains("未確定"))
+            );
+            for invalid in [0.0, -1.0, 24.0, f64::NAN, f64::INFINITY, f64::MAX] {
+                let mut section = supplied_box_section(Some(0.0), "BOX寸法検証");
+                section.width = invalid;
+                assert!(
+                    matches!(SteelDesign.check(&forces, &section, &material, &ctx),
+                    CheckOutcome::Skipped { reason } if reason.contains("寸法"))
+                );
+            }
+            for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+                let mut section = supplied_box_section(Some(0.0), "BOX不正板厚");
+                section.shape = Some(SectionShape::SteelBox {
+                    height: 400.0,
+                    width: 300.0,
+                    thick: invalid,
+                    corner_r: Some(0.0),
+                });
+                assert!(
+                    matches!(SteelDesign.check(&forces, &section, &material, &ctx),
+                    CheckOutcome::Skipped { reason } if reason.contains("寸法"))
+                );
+            }
+            let mut section = supplied_box_section(Some(0.0), "BOX面積下限");
+            section.depth = 4e-199;
+            section.width = 3e-199;
+            section.shape = Some(SectionShape::SteelBox {
+                height: section.depth,
+                width: section.width,
+                thick: 1e-200,
+                corner_r: Some(0.0),
+            });
+            assert!(
+                matches!(SteelDesign.check(&forces, &section, &material, &ctx),
+                CheckOutcome::Skipped { reason } if reason.contains("面積が有限正"))
+            );
+        }
+    }
+
+    #[test]
+    fn box_shear_keeps_small_positive_areas_and_rejects_nonfinite_stress() {
+        let mut material = test_support::mat("相似比較用鋼材");
+        material.fy = Some(235.0);
+        for kind in [MemberKind::Girder, MemberKind::Column] {
+            let ctx = DesignCtx {
+                kind,
+                term: LoadTerm::Long,
+                length: 0.0,
+                ..Default::default()
+            };
+            for scale in [1e-8_f64, 1.0, 1e8] {
+                let section = SectionShape::SteelBox {
+                    height: 400.0 * scale,
+                    width: 300.0 * scale,
+                    thick: 12.0 * scale,
+                    corner_r: Some(30.0 * scale),
+                }
+                .to_section(SectionId(0), "相似Boxせん断".into());
+                let mut forces = MemberForcesAt {
+                    pos: 0.5,
+                    n: 0.0,
+                    qy: 100_000.0,
+                    qz: 0.0,
+                    my: 0.0,
+                    mz: 0.0,
+                };
+                let result = SteelDesign
+                    .check(&forces, &section, &material, &ctx)
+                    .unwrap_checked();
+                let expected =
+                    100_000.0 / (8160.0 * scale.powi(2)) / steel_fs(235.0, LoadTerm::Long);
+                assert!(
+                    (result.ratio() / expected - 1.0).abs() < 1e-10,
+                    "{kind:?} scale={scale}: {} / {expected}",
+                    result.ratio()
+                );
+                if scale == 1e-8 {
+                    for invalid in [f64::MAX, f64::INFINITY, f64::NAN] {
+                        for direction in [0, 1] {
+                            forces.qy = if direction == 0 { invalid } else { 0.0 };
+                            forces.qz = if direction == 1 { invalid } else { 0.0 };
+                            assert!(
+                                matches!(SteelDesign.check(&forces, &section, &material, &ctx),
+                                CheckOutcome::Skipped { reason } if reason.contains("せん断応力度が非有限"))
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn independent_directional_areas_preserve_purpose_axes_scaling_and_rotation() {
+        for root_r in [0.0, 13.0] {
+            let section = SectionShape::SteelH {
+                height: 400.0,
+                width: 200.0,
+                web_thick: 8.0,
+                flange_thick: 13.0,
+                root_r: Some(root_r),
+            }
+            .to_section(SectionId(0), "H".into());
+            assert_eq!((section.as_y, section.as_z), (5200.0, 3200.0));
+            let (ay, az) = shear_area_2d(ShapeCategory::H, &section, 13.0, 8.0);
+            assert_eq!(ay, 2992.0);
+            assert!((az / 3466.6666666666665 - 1.0).abs() < 1e-10);
+            assert!((100_000.0 / ay / 100.0 - 0.3342245989304813).abs() < 1e-10);
+            assert_eq!(100_000.0 / section.as_z / 100.0, 0.3125);
+            for scale in [0.1_f64, 10.0] {
+                let scaled = SectionShape::SteelH {
+                    height: 400.0 * scale,
+                    width: 200.0 * scale,
+                    web_thick: 8.0 * scale,
+                    flange_thick: 13.0 * scale,
+                    root_r: Some(root_r * scale),
+                }
+                .to_section(SectionId(0), "相似H".into());
+                let (scaled_ay, scaled_az) =
+                    shear_area_2d(ShapeCategory::H, &scaled, 13.0 * scale, 8.0 * scale);
+                for (actual, expected) in [
+                    (scaled_ay, ay),
+                    (scaled_az, az),
+                    (scaled.as_y, 5200.0),
+                    (scaled.as_z, 3200.0),
+                ] {
+                    assert!((actual / (expected * scale.powi(2)) - 1.0).abs() < 1e-10);
+                }
+            }
+        }
+        for (radius, expected) in [
+            (0.0, (9024.0, 6624.0)),
+            (12.0, (9024.0, 6624.0)),
+            (30.0, (8160.0, 5760.0)),
+        ] {
+            for scale in [0.1_f64, 1.0, 10.0] {
+                for rotated in [false, true] {
+                    let (height, width) = if rotated {
+                        (300.0, 400.0)
+                    } else {
+                        (400.0, 300.0)
+                    };
+                    let section = SectionShape::SteelBox {
+                        height: height * scale,
+                        width: width * scale,
+                        thick: 12.0 * scale,
+                        corner_r: Some(radius * scale),
+                    }
+                    .to_section(SectionId(0), "BOX".into());
+                    let (ay, az) =
+                        shear_area_2d(ShapeCategory::Box, &section, 12.0 * scale, 12.0 * scale);
+                    let expected = if rotated {
+                        (expected.1, expected.0)
+                    } else {
+                        expected
+                    };
+                    assert!((ay / (expected.0 * scale.powi(2)) - 1.0).abs() < 1e-10);
+                    assert!((az / (expected.1 * scale.powi(2)) - 1.0).abs() < 1e-10);
+                    let stiffness = if rotated {
+                        (9024.0, 6624.0)
+                    } else {
+                        (6624.0, 9024.0)
+                    };
+                    assert!((section.as_y / (stiffness.0 * scale.powi(2)) - 1.0).abs() < 1e-10);
+                    assert!((section.as_z / (stiffness.1 * scale.powi(2)) - 1.0).abs() < 1e-10);
+                }
+            }
+        }
+        let mut section = Section::zero(SectionId(0), "任意断面".into());
+        section.as_y = 123.0;
+        section.as_z = 456.0;
+        assert_eq!(
+            shear_area_2d(ShapeCategory::Other, &section, 0.0, 0.0),
+            (456.0, 123.0)
+        );
     }
 
     #[test]

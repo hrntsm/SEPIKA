@@ -920,6 +920,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unsupported_box_has_no_success_ratio_or_tooltip_value() {
+        let app = crate::app::shear_area_acceptance_tests::unsupported_box();
+        let checks = &app.current_design_results().unwrap().member_checks;
+        let positions = elem_check_positions(checks, ElemId(0));
+        assert!(!positions.is_empty());
+        for position in positions {
+            for filter in [
+                CheckRatioFilter::Max,
+                CheckRatioFilter::Kind(CheckKind::Shear),
+            ] {
+                assert_eq!(ratio_for_filter(&position.outcome, filter), None);
+            }
+        }
+        let (kinds, rows) = build_tooltip_rows(positions);
+        assert!(kinds.is_empty());
+        assert!(rows.iter().all(|row| row.values.is_empty()
+            && matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("適用範囲外"))));
+    }
+
+    #[test]
     fn design602_actual_ratio_drawing_and_tooltip_hide_old_values() {
         let mut app = crate::app::design_input_tests::pure_bending();
         app.ui.view.check_ratio_label_all = true;

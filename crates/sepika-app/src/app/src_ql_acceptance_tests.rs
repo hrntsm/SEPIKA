@@ -104,7 +104,7 @@ fn public_src_actions_check_real_ql_and_valid_empty_gravity_without_q0() {
 #[test]
 fn src_ovika_design_contracts_keep_analysis23_and_require_explicit_recheck() {
     assert_eq!(ANALYSIS_CONTRACT_VERSION, 23);
-    assert_eq!(DESIGN_CONTRACT_VERSION, 14);
+    assert_eq!(DESIGN_CONTRACT_VERSION, 15);
     let mut original = app(false, QdMethod::Qd1);
     original.run_combination(0);
     assert_checked(&original);
@@ -112,9 +112,9 @@ fn src_ovika_design_contracts_keep_analysis23_and_require_explicit_recheck() {
     let original_bundle = original.core.scoped.results.as_ref().unwrap();
     for (name, version) in [
         ("src-missing", None),
-        ("src-old13", Some(13)),
-        ("src-future15", Some(15)),
-        ("src-current14", Some(14)),
+        ("src-old14", Some(14)),
+        ("src-future16", Some(16)),
+        ("src-current15", Some(15)),
     ] {
         let (mut loaded, path) =
             super::result_contract_tests::restore(&original, Some(23), version, name);
@@ -125,7 +125,7 @@ fn src_ovika_design_contracts_keep_analysis23_and_require_explicit_recheck() {
         assert_eq!(bundle.analysis_contract_version, Some(23));
         assert_eq!(bytes(&bundle.combos), bytes(&original_bundle.combos));
         assert_eq!(bundle.member_forces, original_bundle.member_forces);
-        let current = version == Some(14);
+        let current = version == Some(15);
         assert_eq!(loaded.current_design_results().is_some(), current);
         assert_eq!(bundle.has_design_results(), current);
         assert_eq!(
@@ -163,7 +163,7 @@ fn src_ovika_design_contracts_keep_analysis23_and_require_explicit_recheck() {
                 .current_design_results()
                 .unwrap()
                 .design_contract_version,
-            Some(14)
+            Some(15)
         );
         assert_eq!(
             bytes(&reopened.current_design_results().unwrap().member_checks),
@@ -188,13 +188,13 @@ fn src_ovika_design_contracts_keep_analysis23_and_require_explicit_recheck() {
                 .current_design_results()
                 .unwrap()
                 .design_contract_version,
-            Some(14)
+            Some(15)
         );
         assert_eq!(
             recovered.current_static().unwrap().member_forces,
             original.current_static().unwrap().member_forces
         );
-        eprintln!("{name}: analysis23 kept; saved design={version:?}; explicit recheck design14");
+        eprintln!("{name}: analysis23 kept; saved design={version:?}; explicit recheck design15");
         std::fs::remove_file(path).unwrap();
     }
 }

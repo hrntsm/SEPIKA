@@ -20,8 +20,8 @@ pub(crate) fn rect_torsion_j(b: f64, d: f64) -> f64 {
     bs.powi(3) * h / 16.0 * (16.0 / 3.0 - 3.36 * c * (1.0 - c.powi(4) / 12.0))
 }
 
-/// H 形（内蔵鉄骨含む）のウェブせん断断面積（ウェブ全せい×ウェブ厚。
-/// 設計検定側 `sepika-design-jp::steel::shear_area` と同一規約）。
+/// H 形（内蔵鉄骨含む）の剛性用ウェブせん断断面積 [mm²]。
+/// 寸法は mm。検定用のネットウェブ面積とは区別する。
 pub(crate) fn h_web_shear_area(height: f64, web_thick: f64) -> f64 {
     (height * web_thick).max(0.0)
 }

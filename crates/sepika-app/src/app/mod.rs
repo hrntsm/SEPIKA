@@ -2570,6 +2570,8 @@ pub(crate) mod design_input_tests;
 mod member_load_direction_acceptance_tests;
 #[cfg(test)]
 mod result_contract_tests;
+#[cfg(test)]
+pub(crate) mod shear_area_acceptance_tests;
 
 #[cfg(test)]
 pub(crate) mod signed_q0_acceptance_tests;
