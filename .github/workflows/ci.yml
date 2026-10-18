@@ -1,11 +1,19 @@
 name: CI
 
+# main への push では、テスト用依存ビルドキャッシュ（Swatinem/rust-cache、job id=test）の
+# 生成・更新のためにテストジョブを実行する。GitHub Actions のキャッシュは base ブランチから
+# PR へ復元できる一方、PR（merge ref）で保存したキャッシュはその PR からしか復元できない。
+# そのため main 側でキャッシュを作り、新規 PR の初回実行から復元できるようにする。
+# 品質ゲート（テスト実行・静的解析・ビルド確認）は従来どおり PR で実施する。
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
 # 同一 PR への新しい push 時に、進行中の古い実行をキャンセルする。
-# 品質ゲートは PR マージ前のみ。main へのマージ後は docs デプロイ（docs.yml）のみ実行する。
+# 品質ゲートは PR で実施する。main への push ではテストジョブをキャッシュ生成用のビルドに
+# 限定し（テスト実行なし）、docs デプロイ（docs.yml）は別 workflow で実行する。
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -13,6 +21,13 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # main（push）ではキャッシュ生成に必要なビルドまでとし、テストの実行は PR に限定する。
+  # --no-run はテストバイナリの実行だけを止め、依存のコンパイル内容・feature・profile は
+  # PR 実行と同一で、キャッシュの再利用対象は変わらない。
+  # 変数名は rust-cache がキャッシュキー（環境ハッシュ）に含める接頭辞
+  # （CARGO / RUST / CC / CFLAGS / CXX / CMAKE）を避ける。接頭辞があると値が main と PR で
+  # 異なるためキャッシュキーが一致しなくなる。
+  TEST_BUILD_ONLY_ARGS: ${{ github.event_name == 'push' && '--no-run' || '' }}
 
 jobs:
   test:
@@ -22,8 +37,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
+      # main で復元したキャッシュが完全一致なら依存は揃っており、同一キーへの再保存は
+      # できない（キャッシュは上書き不可）ためビルドをスキップする。PR では常に実行する。
       - name: テスト実行
-        run: cargo test --workspace --locked
+        if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo test --workspace --locked $TEST_BUILD_ONLY_ARGS
       # mcp / gui は非デフォルト feature のため --workspace では検証されない。
       # sepika-io の results（Parquet 結果 I/O）も parquet feature 配下にあり、
       # -p 指定なしでは保証されないため合わせる（workspace 解決では mcp 経由で
@@ -35,18 +54,23 @@ jobs:
       # 3 クレートを同一 Cargo 呼び出し（クレート名/機能名形式）にまとめ、
       # 同じ依存グラフの重複構築を避ける。default 構成は上の実行で別に検証する。
       - name: featureテスト実行（MCP/GUI/Parquet）
-        run: cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked
+        if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked $TEST_BUILD_ONLY_ARGS
       # sepika-mcp が sepika-io/parquet を常時有効化しているため、
       # --workspace では feature 統一により sepika-io の default（parquet 無効）構成が
       # 独立には検証されない。Parquet 無効構成と、Arrow / Parquet を切り離した
       # GUI 開発ループ構成をそれぞれ直接保証するため、以下も別に実行する。
       - name: テスト実行（sepika-io の default 構成）
-        run: cargo test -p sepika-io --locked
+        if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo test -p sepika-io --locked $TEST_BUILD_ONLY_ARGS
       - name: ビルド確認（GUI 単体・Parquet なし）
+        if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo check -p sepika-app --features sepika-app/gui --locked
 
   clippy:
     name: Clippy静的解析
+    # 品質ゲートは PR のみ。main への push ではテストジョブのみ実行する。
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,6 +91,7 @@ jobs:
 
   fmt:
     name: フォーマットチェック
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +103,7 @@ jobs:
 
   audit:
     name: 脆弱性確認
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # rustsec/audit-check は警告を Check Run API で書き込むが、権限不足や
     # "Not Found" でジョブ自体が落ちることがある。CLI の cargo audit なら
@@ -101,6 +127,7 @@ jobs:
 
   dependency-check:
     name: 依存性チェック
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
