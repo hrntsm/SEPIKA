@@ -120,7 +120,7 @@ use sepika_core::model::{FloorRegion, Slab, SlabPlate, SlabShape};
 #[cfg(feature = "gui")]
 fn source_story_close_levels_model() -> sepika_core::model::Model {
     sepika_io::stbridge::import_stbridge(
-        r#"<ST_BRIDGE version="2.0.2"><StbModel><StbNodes>
+        r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes>
     <StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/>
     <StbNode id="3" X="0" Y="0" Z="3000.5"/><StbNode id="4" X="0" Y="0" Z="6000"/>
     </StbNodes><StbStories>
@@ -8022,7 +8022,7 @@ fn test_run_combination_errors_on_empty_seismic_case() {
 #[test]
 fn test_import_stbridge_with_loads_keeps_file_cases() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>

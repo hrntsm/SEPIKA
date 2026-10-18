@@ -14,7 +14,7 @@ fn column(
             .unwrap_or_default()
     };
     format!(
-        r#"<ST_BRIDGE version="2.0.2"><StbCommon project_name="test" app_name="test" app_version="1"{common}/><StbModel>
+        r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbCommon project_name="test" app_name="test" app_version="1"{common}/><StbModel>
 <StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/></StbNodes>
 <StbStories><StbStory id="1" name="top" height="3000" kind="GENERAL"{story}><StbNodeIdList><StbNodeId id="2"/></StbNodeIdList></StbStory></StbStories>
 <StbMembers><StbColumns><StbColumn id="1" name="C" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="RC"{member}/></StbColumns></StbMembers>
@@ -507,10 +507,38 @@ fn split_slab_export_starts_at_original_strength_node_and_keeps_omission() {
 }
 
 #[test]
-fn qualified_numeric_section_id_is_rejected_without_silent_strength_binding() {
-    let xml=column(None,Some("Fc30"),None,Some("Fc24")).replace("</StbSections>",r#"<StbSecBeam_RC id="1" name="B" strength_concrete="Fc24"><StbSecFigureBeam_RC><StbSecBeam_RC_Straight width="400" depth="600"/></StbSecFigureBeam_RC></StbSecBeam_RC></StbSections>"#);
+fn qualified_numeric_section_id_keeps_column_strength_separate_from_beam() {
+    let xml = column(None, Some("Fc30"), None, Some("Fc24")).replace(
+        "</StbSections>",
+        r#"<StbSecBeam_RC id="1" name="B" strength_concrete="Fc24"><StbSecFigureBeam_RC><StbSecBeam_RC_Straight width="400" depth="600"/></StbSecFigureBeam_RC></StbSecBeam_RC></StbSections>"#,
+    );
+    let model = import_stbridge(&xml).unwrap();
+    assert_eq!(model.elements.len(), 1);
+    let element = &model.elements[0];
+    assert_eq!(model.element_material(element).unwrap().fc, Some(30.));
+    let input = model
+        .stb_strengths
+        .members
+        .iter()
+        .find(|input| input.target == StrengthTarget::Element(element.id))
+        .unwrap();
+    let resolved = model.resolve_stb_concrete(input).unwrap();
+    assert_eq!(resolved.grade, "Fc30");
+    assert_eq!(resolved.value, 30.);
+    assert_eq!(resolved.source, StrengthSource::Section);
+
+    let missing_column = xml.replace(
+        r#"<StbSecColumn_RC id="1" name="C" strength_concrete="Fc30"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="400" width_Y="400"/></StbSecFigureColumn_RC></StbSecColumn_RC>"#,
+        "",
+    );
+    assert_ne!(missing_column, xml);
+    let error = import_stbridge(&missing_column).unwrap_err().to_string();
+    assert!(error.contains("StbColumn"), "{error}");
+    assert!(error.contains("StbSecColumn_RC"), "{error}");
+    assert!(error.contains("StbSecBeam_RC"), "{error}");
     assert!(
-        matches!(import_stbridge(&xml),Err(StbError::Unmappable(reason)) if reason.contains("系列"))
+        error.contains("要求系列内に断面定義がありません"),
+        "{error}"
     );
 }
 

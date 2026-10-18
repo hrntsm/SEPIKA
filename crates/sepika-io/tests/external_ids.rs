@@ -2,7 +2,7 @@ use sepika_io::stbridge::{import_stbridge, import_stbridge_with_report};
 
 fn document(element: &str) -> String {
     format!(
-        r#"<ST_BRIDGE version="2.0.2"><StbModel><StbNodes><StbNode id="0" X="0" Y="0" Z="0"/><StbNode id="1" X="0" Y="0" Z="3000"/></StbNodes>{element}</StbModel></ST_BRIDGE>"#
+        r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes><StbNode id="0" X="0" Y="0" Z="0"/><StbNode id="1" X="0" Y="0" Z="3000"/></StbNodes>{element}</StbModel></ST_BRIDGE>"#
     )
 }
 
@@ -52,7 +52,14 @@ fn stb_whole_document_rejects_invalid_present_member_reference_and_source_ids() 
                 } else {
                     r#"id="0""#.to_string()
                 };
-                let element = format!(r#"<{tag} {source} {endpoints} {field}="{invalid}"/>"#);
+                let kind = if matches!(tag, "StbSlab" | "StbWall") {
+                    "RC"
+                } else {
+                    "S"
+                };
+                let element = format!(
+                    r#"<{tag} {source} {endpoints} kind_structure="{kind}" {field}="{invalid}"/>"#
+                );
                 assert_rejected(&document(&element), field);
             }
         }
@@ -73,16 +80,56 @@ fn stb_required_definition_and_endpoint_ids_reject_missing_or_invalid_values() {
         ("StbSecColumn_CFT", "id", ""),
         ("StbSecSlab_RC", "id", ""),
         ("StbSecWall_RC", "id", ""),
-        ("StbColumn", "id_node_bottom", r#"id="0" id_node_top="1""#),
-        ("StbColumn", "id_node_top", r#"id="0" id_node_bottom="1""#),
-        ("StbGirder", "id_node_start", r#"id="0" id_node_end="1""#),
-        ("StbGirder", "id_node_end", r#"id="0" id_node_start="1""#),
-        ("StbBrace", "id_node_start", r#"id="0" id_node_end="1""#),
-        ("StbBrace", "id_node_end", r#"id="0" id_node_start="1""#),
-        ("StbBeam", "id_node_start", r#"id="0" id_node_end="1""#),
-        ("StbBeam", "id_node_end", r#"id="0" id_node_start="1""#),
-        ("StbPost", "id_node_bottom", r#"id="0" id_node_top="1""#),
-        ("StbPost", "id_node_top", r#"id="0" id_node_bottom="1""#),
+        (
+            "StbColumn",
+            "id_node_bottom",
+            r#"id="0" id_node_top="1" kind_structure="S""#,
+        ),
+        (
+            "StbColumn",
+            "id_node_top",
+            r#"id="0" id_node_bottom="1" kind_structure="S""#,
+        ),
+        (
+            "StbGirder",
+            "id_node_start",
+            r#"id="0" id_node_end="1" kind_structure="S""#,
+        ),
+        (
+            "StbGirder",
+            "id_node_end",
+            r#"id="0" id_node_start="1" kind_structure="S""#,
+        ),
+        (
+            "StbBrace",
+            "id_node_start",
+            r#"id="0" id_node_end="1" kind_structure="S""#,
+        ),
+        (
+            "StbBrace",
+            "id_node_end",
+            r#"id="0" id_node_start="1" kind_structure="S""#,
+        ),
+        (
+            "StbBeam",
+            "id_node_start",
+            r#"id="0" id_node_end="1" kind_structure="S""#,
+        ),
+        (
+            "StbBeam",
+            "id_node_end",
+            r#"id="0" id_node_start="1" kind_structure="S""#,
+        ),
+        (
+            "StbPost",
+            "id_node_bottom",
+            r#"id="0" id_node_top="1" kind_structure="S""#,
+        ),
+        (
+            "StbPost",
+            "id_node_top",
+            r#"id="0" id_node_bottom="1" kind_structure="S""#,
+        ),
     ] {
         let xml = document(&format!("<{tag} {other}/>"));
         for result in [
@@ -110,18 +157,20 @@ fn stb_boundary_node_reference_tokens_are_not_silently_discarded() {
         for invalid in ["4294967296", "-1", "0.5", "1.0", "abc"] {
             assert_rejected(
                 &document(&format!(
-                    r#"<{tag} id="0"><StbNodeIdOrder>0 {invalid} 1</StbNodeIdOrder></{tag}>"#
+                    r#"<{tag} id="0" kind_structure="RC"><StbNodeIdOrder>0 {invalid} 1</StbNodeIdOrder></{tag}>"#
                 )),
                 "StbNodeIdOrder",
             );
             assert_rejected(
                 &document(&format!(
-                    r#"<{tag} id="0"><StbNodeId id="{invalid}"/></{tag}>"#
+                    r#"<{tag} id="0" kind_structure="RC"><StbNodeId id="{invalid}"/></{tag}>"#
                 )),
                 "id",
             );
         }
-        let xml = document(&format!(r#"<{tag} id="0"><StbNodeId/></{tag}>"#));
+        let xml = document(&format!(
+            r#"<{tag} id="0" kind_structure="RC"><StbNodeId/></{tag}>"#
+        ));
         assert!(import_stbridge(&xml)
             .unwrap_err()
             .to_string()
@@ -139,7 +188,7 @@ fn steel_column_section(id: u32) -> String {
 fn stb_member_source_id_parser_accepts_omission_and_u32_boundaries_with_resolved_section() {
     for source_id in ["", r#"id="0""#, r#"id="4294967295""#] {
         let xml = document(&format!(
-            r#"{}<StbMembers><StbColumns><StbColumn {source_id} id_node_bottom="0" id_node_top="1" id_section="2"/></StbColumns></StbMembers>"#,
+            r#"{}<StbMembers><StbColumns><StbColumn {source_id} id_node_bottom="0" id_node_top="1" id_section="2" kind_structure="S"/></StbColumns></StbMembers>"#,
             steel_column_section(2),
         ));
         for model in [
@@ -159,7 +208,7 @@ fn stb_member_source_id_parser_accepts_omission_and_u32_boundaries_with_resolved
 fn stb_u32_parser_boundary_ids_resolve_to_the_same_section_and_grade_material() {
     for value in [0_u32, u32::MAX] {
         let xml = document(&format!(
-            r#"{}<StbMembers><StbColumns><StbColumn id="{value}" id_node_bottom="{value}" id_node_top="1" id_section="{value}"/></StbColumns></StbMembers>"#,
+            r#"{}<StbMembers><StbColumns><StbColumn id="{value}" id_node_bottom="{value}" id_node_top="1" id_section="{value}" kind_structure="S"/></StbColumns></StbMembers>"#,
             steel_column_section(value),
         ))
         .replace("StbNode id=\"0\"", &format!("StbNode id=\"{value}\""));
@@ -232,12 +281,12 @@ fn stb_post_invalid_or_missing_required_endpoint_never_uses_another_alias() {
     ] {
         for invalid in ["4294967296", "-1", "0.5", "1.0", "abc", "null"] {
             let xml = document(&format!(
-                r#"<StbPost id="0" {field}="{invalid}" {other}="1" id_node_start="0" id_node_end="1"/>"#
+                r#"<StbPost id="0" {field}="{invalid}" {other}="1" id_node_start="0" id_node_end="1" kind_structure="S"/>"#
             ));
             assert_rejected(&xml, field);
         }
         let xml = document(&format!(
-            r#"<StbPost id="0" {other}="1" id_node_start="0" id_node_end="1"/>"#
+            r#"<StbPost id="0" {other}="1" id_node_start="0" id_node_end="1" kind_structure="S"/>"#
         ));
         for result in [
             import_stbridge(&xml).map(|_| ()),
@@ -261,7 +310,9 @@ fn stb_negative_section_reference_is_rejected_for_all_linear_member_types() {
         ("StbBeam", r#"id_node_start="0" id_node_end="1""#),
         ("StbPost", r#"id_node_bottom="0" id_node_top="1""#),
     ] {
-        let xml = document(&format!(r#"<{tag} id="0" {endpoints} id_section="-1"/>"#));
+        let xml = document(&format!(
+            r#"<{tag} id="0" {endpoints} id_section="-1" kind_structure="S"/>"#
+        ));
         assert_rejected(&xml, "id_section");
     }
 }

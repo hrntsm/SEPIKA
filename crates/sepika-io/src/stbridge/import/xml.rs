@@ -6,6 +6,51 @@ use super::super::StbError;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
+pub(super) const STB_NAMESPACE: &[u8] = b"https://www.building-smart.or.jp/dl";
+
+pub(super) fn check_element_namespace(
+    namespace: quick_xml::name::ResolveResult<'_>,
+    name: quick_xml::name::QName<'_>,
+) -> Result<(), StbError> {
+    use quick_xml::name::ResolveResult;
+    let reason = match namespace {
+        ResolveResult::Bound(uri) if uri.as_ref() == STB_NAMESPACE => return Ok(()),
+        ResolveResult::Bound(uri) => format!(
+            "非採用 namespace={:?}",
+            String::from_utf8_lossy(uri.as_ref())
+        ),
+        ResolveResult::Unbound => "namespace がありません".to_owned(),
+        ResolveResult::Unknown(prefix) => {
+            format!("未束縛 prefix={:?}", String::from_utf8_lossy(&prefix))
+        }
+    };
+    Err(StbError::Parse(format!(
+        "要素 {}: {reason}（要求 namespace={}）",
+        String::from_utf8_lossy(name.as_ref()),
+        String::from_utf8_lossy(STB_NAMESPACE)
+    )))
+}
+
+pub(super) fn check_attribute_prefixes(
+    resolver: &quick_xml::name::NamespaceResolver,
+    element: &quick_xml::events::BytesStart<'_>,
+) -> Result<(), StbError> {
+    for attribute in element.attributes() {
+        let attribute = attribute.map_err(|error| StbError::Parse(error.to_string()))?;
+        if let quick_xml::name::ResolveResult::Unknown(prefix) =
+            resolver.resolve_attribute(attribute.key).0
+        {
+            return Err(StbError::Parse(format!(
+                "要素 {} 属性 {}: 未束縛 prefix={:?}",
+                String::from_utf8_lossy(element.name().as_ref()),
+                String::from_utf8_lossy(attribute.key.as_ref()),
+                String::from_utf8_lossy(&prefix)
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// XML 要素 1 個分の属性辞書。参照されたキーを内部で記録する。
 #[derive(Debug, Default)]
 pub(super) struct Attrs {

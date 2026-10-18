@@ -1,5 +1,6 @@
 use super::super::StbError;
-use super::xml::{get_opt_u32, get_u32, Attrs};
+use super::section_key::{member_section, section_key, MemberSource, SectionFamily, SectionKey};
+use super::xml::{get_u32, Attrs};
 use sepika_core::ids::*;
 use sepika_core::model::*;
 
@@ -7,15 +8,13 @@ use sepika_core::model::*;
 pub(super) struct StrengthInputs {
     common: Option<StbCommonStrength>,
     apply_conditions: Vec<StbRebarElement>,
-    frame_section_ids: Vec<(u32, String)>,
     sections: Vec<RawSection>,
     members: Vec<RawMember>,
     current_section: Option<usize>,
     current_member: Option<usize>,
 }
 struct RawSection {
-    tag: String,
-    id: u32,
+    key: SectionKey,
     bound: Option<SectionId>,
     concrete: Option<String>,
     bars: Vec<StbRebarStrength>,
@@ -23,63 +22,26 @@ struct RawSection {
     steel: Vec<StbSteelStrength>,
 }
 struct RawMember {
-    tag: String,
-    section: Option<u32>,
+    source: MemberSource,
+    section: Option<SectionKey>,
     concrete: Option<String>,
     nodes: Vec<u32>,
     is_concrete: bool,
     targets: Vec<StrengthTarget>,
 }
 impl StrengthInputs {
-    pub(super) fn same_section_strength(&self, a: u32, b: u32) -> bool {
-        let source = |id| {
-            self.sections.iter().find(|s| s.id == id).map(|s| {
-                (
-                    s.concrete.clone(),
-                    s.bars.clone(),
-                    s.rebar.clone(),
-                    s.steel
-                        .iter()
-                        .map(|r| {
-                            (
-                                super::super::strength_export::steel_element_key(&r.element)
-                                    .to_owned(),
-                                r.part.clone(),
-                                r.position.clone(),
-                                r.strength.clone(),
-                            )
-                        })
-                        .collect::<Vec<_>>(),
-                )
-            })
+    pub(super) fn same_section_strength(&self, a: SectionKey, b: SectionKey) -> bool {
+        if a.family != b.family {
+            return false;
+        }
+        let source = |key| self.sections.iter().find(|s| s.key == key);
+        let (Some(a), Some(b)) = (source(a), source(b)) else {
+            return false;
         };
-        source(a) == source(b)
+        a.concrete == b.concrete && a.bars == b.bars && a.rebar == b.rebar && a.steel == b.steel
     }
 
     pub(super) fn start(&mut self, tag: &str, a: &Attrs) -> Result<(), StbError> {
-        if matches!(
-            tag,
-            "StbSecColumn_RC"
-                | "StbSecColumn_SRC"
-                | "StbSecColumn_CFT"
-                | "StbSecColumn_S"
-                | "StbSecBeam_RC"
-                | "StbSecBeam_SRC"
-                | "StbSecBeam_S"
-                | "StbSecBrace_S"
-        ) {
-            let id = get_u32(a, "id")?;
-            if self
-                .frame_section_ids
-                .iter()
-                .any(|(other, kind)| *other == id && kind != tag)
-            {
-                return Err(StbError::Unmappable(format!(
-                    "断面系列間で重複するID {id} は現行の断面参照で区別できません ({tag})"
-                )));
-            }
-            self.frame_section_ids.push((id, tag.to_owned()));
-        }
         if tag == "StbCommon" {
             let required = |key| {
                 a.get(key)
@@ -124,8 +86,7 @@ impl StrengthInputs {
                 | "StbSecWall_RC"
         ) {
             self.sections.push(RawSection {
-                tag: tag.into(),
-                id: get_u32(a, "id")?,
+                key: section_key(tag, a)?,
                 bound: None,
                 concrete: a.get("strength_concrete").cloned(),
                 bars: Vec::new(),
@@ -137,7 +98,7 @@ impl StrengthInputs {
             tag,
             "StbColumn" | "StbPost" | "StbGirder" | "StbBeam" | "StbSlab" | "StbWall"
         ) {
-            get_opt_u32(a, "id")?;
+            let (section, source) = member_section(tag, a)?;
             let nodes = match tag {
                 "StbColumn" | "StbPost" => {
                     vec![get_u32(a, "id_node_bottom")?, get_u32(a, "id_node_top")?]
@@ -148,8 +109,8 @@ impl StrengthInputs {
                 _ => Vec::new(),
             };
             self.members.push(RawMember {
-                tag: tag.into(),
-                section: get_opt_u32(a, "id_section")?,
+                source,
+                section,
                 concrete: a.get("strength_concrete").cloned(),
                 nodes,
                 targets: Vec::new(),
@@ -273,13 +234,13 @@ impl StrengthInputs {
     pub(super) fn end(&mut self, tag: &str) {
         if self
             .current_section
-            .is_some_and(|i| self.sections[i].tag == tag)
+            .is_some_and(|i| self.sections[i].key.family.tag() == tag)
         {
             self.current_section = None;
         }
         if self
             .current_member
-            .is_some_and(|i| self.members[i].tag == tag)
+            .is_some_and(|i| self.members[i].source.tag == tag)
         {
             self.current_member = None;
         }
@@ -300,9 +261,9 @@ impl StrengthInputs {
             }
         }
     }
-    pub(super) fn bind_section(&mut self, id: u32, kind: &str, target: SectionId) {
+    pub(super) fn bind_section(&mut self, key: SectionKey, target: SectionId) {
         for source in &mut self.sections {
-            if source.id == id && source.tag.starts_with(kind) {
+            if source.key == key {
                 source.bound = Some(target);
             }
         }
@@ -324,7 +285,7 @@ impl StrengthInputs {
             let section = self
                 .sections
                 .iter()
-                .find(|s| Some(s.id) == input.section && s.tag.starts_with("StbSecSlab"))
+                .find(|s| Some(s.key) == input.section)
                 .and_then(|s| s.concrete.as_deref());
             model.resolve_stb_concrete_at(
                 node,
@@ -369,19 +330,12 @@ impl StrengthInputs {
         }
         for input in self.members {
             let source_section = self.sections.iter().any(|s| {
-                Some(s.id) == input.section
+                Some(s.key) == input.section
                     && s.bound.is_some()
                     && !matches!(
-                        s.tag.as_str(),
-                        "StbSecColumn_S" | "StbSecBeam_S" | "StbSecBrace_S"
+                        s.key.family,
+                        SectionFamily::ColumnS | SectionFamily::BeamS | SectionFamily::BraceS
                     )
-                    && match input.tag.as_str() {
-                        "StbColumn" | "StbPost" => s.tag.starts_with("StbSecColumn"),
-                        "StbGirder" | "StbBeam" => s.tag.starts_with("StbSecBeam"),
-                        "StbSlab" => s.tag.starts_with("StbSecSlab"),
-                        "StbWall" => s.tag.starts_with("StbSecWall"),
-                        _ => false,
-                    }
             });
             if !input.is_concrete && !source_section && input.concrete.is_none() {
                 continue;
@@ -400,8 +354,10 @@ impl StrengthInputs {
             else {
                 continue;
             };
-            let Some(&node) = (if matches!(input.tag.as_str(), "StbColumn" | "StbPost" | "StbWall")
-            {
+            let Some(&node) = (if matches!(
+                input.source.tag.as_str(),
+                "StbColumn" | "StbPost" | "StbWall"
+            ) {
                 nodes.last()
             } else {
                 nodes.first()

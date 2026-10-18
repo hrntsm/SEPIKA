@@ -3,7 +3,7 @@ use sepika_core::model::{MassMethod, Model, SourceStoryKind};
 use sepika_edit::UndoStack;
 
 fn model() -> Model {
-    sepika_io::stbridge::import_stbridge(r#"<ST_BRIDGE version="2.0.2"><StbModel>
+    sepika_io::stbridge::import_stbridge(r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
       <StbNodes>
         <StbNode id="10" guid="11111111-1111-1111-1111-111111111111" X="0" Y="0" Z="-3000"/>
         <StbNode id="40" X="0" Y="0" Z="0"/>
@@ -243,7 +243,7 @@ fn source_required_attributes_and_lower_priority_fc_are_checked_when_selected() 
         "id=\"1\" height=\"0\" kind=\"GENERAL\"",
         "id=\"1\" name=\"F\" height=\"0\"",
     ] {
-        let xml = format!("<ST_BRIDGE version=\"2.0.2\"><StbModel><StbStories><StbStory {attributes}/></StbStories></StbModel></ST_BRIDGE>");
+        let xml = format!("<ST_BRIDGE xmlns=\"https://www.building-smart.or.jp/dl\" version=\"2.0.2\"><StbModel><StbStories><StbStory {attributes}/></StbStories></StbModel></ST_BRIDGE>");
         assert!(sepika_io::stbridge::import_stbridge(&xml).is_err());
     }
 }
@@ -425,7 +425,7 @@ fn native_story_delete_preserves_source_ids_and_restores_uninitialized_tables() 
 fn empty_import_and_last_source_delete_stay_empty_through_edit_prepare_save_and_undo() {
     let envelope = |stories: &str| {
         format!(
-            r#"<ST_BRIDGE version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/></StbNodes><StbStories>{stories}</StbStories></StbModel></ST_BRIDGE>"#
+            r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/></StbNodes><StbStories>{stories}</StbStories></StbModel></ST_BRIDGE>"#
         )
     };
     for initially_empty in [false, true] {

@@ -24,9 +24,12 @@ mod assemble;
 mod material_std;
 mod parser;
 mod rebar;
+mod section_key;
 mod steel;
 mod strength;
 mod xml;
+
+use section_key::{MemberSource, SectionKey};
 
 /// 断面が持つ材料参照（ST-Bridge は材料を断面側に持つ）。
 /// コンクリート・鋼のグレード名。
@@ -37,7 +40,7 @@ enum SecMatRef {
 
 /// 取り込み途中の断面（id 整列・形鋼名解決の前）。
 struct PendingSec {
-    file_id: u32,
+    file_id: SectionKey,
     name: String,
     /// 断面の階（`floor` 属性）。ST-Bridge は同じ符号の断面を階ごとに別定義として
     /// 持つため、符号と併せて断面の同一性キーになる。属性がなければ `None`。
@@ -90,15 +93,14 @@ struct PendingMember {
     kind: PendingMemberKind,
     n_i: u32,
     n_j: u32,
-    section: Option<u32>,
+    section: Option<SectionKey>,
     /// 部材軸まわりの断面回転角 [deg]（ST-Bridge `rotate`）。ref_vector は節点座標が
     /// 揃う構築時に軸と `rotate` から算出する。
     rotate: f64,
     /// 部材端の接合条件 [i, j]（`condition_bottom`/`top`・`condition_start`/`end`）。
     end_cond: [EndCondition; 2],
     source_usage: FrameSectionUse,
-    source_tag: String,
-    source_id: Option<u32>,
+    source: MemberSource,
 }
 
 /// 取り込み途中の二次部材（小梁 `StbBeam`・間柱 `StbPost`。id 正規化前）。
@@ -109,7 +111,8 @@ struct PendingSecondary {
     kind: sepika_core::model::SecondaryMemberKind,
     n_i: u32,
     n_j: u32,
-    section: Option<u32>,
+    section: Option<SectionKey>,
+    source: MemberSource,
     name: String,
 }
 
@@ -142,8 +145,8 @@ struct RawLoadCase {
 /// 取り込み途中のスラブ（節点参照は file id。`StbSlab` + `StbNodeIdOrder`）。
 struct RawSlab {
     strength_index: Option<usize>,
-    /// 断面参照（`id_section`。`StbSecSlab_RC` の file id）。負値/未指定は `None`。
-    section_fid: Option<u32>,
+    section_fid: Option<SectionKey>,
+    source: MemberSource,
     /// 境界節点ループ（`StbNodeIdOrder`。file node id 列）。
     boundary: Vec<u32>,
 }
@@ -151,8 +154,8 @@ struct RawSlab {
 /// 取り込み途中の壁（節点参照は file id。`StbWall` + `StbNodeIdOrder`）。
 struct RawWall {
     strength_index: Option<usize>,
-    /// 断面参照（`id_section`。`StbSecWall_RC` の file id）。負値/未指定は `None`。
-    section_fid: Option<u32>,
+    section_fid: Option<SectionKey>,
+    source: MemberSource,
     /// 境界節点ループ（`StbNodeIdOrder`。file node id 列）。
     boundary: Vec<u32>,
 }
