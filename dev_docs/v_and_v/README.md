@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [用途別せん断面積と二方向検定_Issue417_2026-10.md](用途別せん断面積と二方向検定_Issue417_2026-10.md) | H/Box/Otherの剛性As・検定Ad、二方向比/τsum、CFT規約差、未算定と検定15資格 | 🔶（最終design623・Windows関連lib1558成功/既存ignore1、Clippy/strictDoc/fmt・文書検査/build成功。Q2前App349/core493/GUI831は別snapshot。正式ゲート・物理Validationは別確認） |
 | [SRC梁のQL参照完全性_Issue671_2026-10.md](SRC梁のQL参照完全性_Issue671_2026-10.md) | SRC梁のQL/Q0・分担・位置・QD選択と必要参照、検定版14/解析版23の独立資格 | 🔶（変更後core/design1128成功・App346成功。変更前Sourceと停止前MCP延べ17実行の履歴を分離。MCP専用受入は今回対象外。Windows横断・正式静的/文書検証成功、独立レビュー等の最終ゲート・Validation未確認） |
 | [依存監査とOVIKA保存_Issue690_2026-10.md](依存監査とOVIKA保存_Issue690_2026-10.md) | zip脆弱依存・GUI推移的依存の保守終了とOVIKA安全境界 | 🔶（旧8明示/PPMdなしをmetadata確認。最終App441/feature1276成功・監査/静的/文書成功。中間失敗/中断保持、正式ゲート・#671連携は後続） |
 | [部材荷重方向の計算入口拒否_Issue687_2026-10.md](部材荷重方向の計算入口拒否_Issue687_2026-10.md) | Point/Distributedの方向境界・有効0/相殺/直交、共通計算入口と入力/成果保持 | 🔶（変更前41ケースと先行MCP9call、変更後core等970・App21＋通知追補4・MCP13試験/20call、保存失効を確認。横断初回2失敗後のApp局所344成功・途中失敗保持。横断1720/関連feature1272・IO191とfeature Clippy/strictDoc成功。最終fmt/default Clippy成功、文書/正式ゲート未確認、native/transport/Validation未実施） |
@@ -294,6 +295,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 13a | 大梁必要横補剛箇所数（参考） | sepika-design-jp / sepika-app / sepika-mcp | steel/lateral_bracing.rs・member_design_check.rs・app/tests.rs・tests.rs | [Issue488直接受入](大梁横補剛参考数_Issue488_2026-10.md#直接試験) | 横断 | 🔶（参考式Verification、実配置・性能・Validation未） |
 | 13c | SM520告示Fと範囲外拒否 | sepika-core / design-jp / element / solver / app / mcp | sm520境界・現役caller実入口・result_contract_tests | [Issue629の固定期待値と実入口](SM520告示基準強度と範囲外拒否_Issue629_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、Validation未実施。最終ゲートは[PR #646](https://github.com/hrntsm/SEPIKA/pull/646)） |
 | 13b | 標準鋼材名の厳密解決 | sepika-core / sepika-io | material_grade.rs・standard_material.rs・stbridge/strength_tests.rs | [Issue590の独立表・公開STB入口](標準鋼材名の厳密解決_Issue590_2026-10.md#独立期待値と実入口) | 横断 | 🔶（名称Verification、種類別F全照合・Validation未） |
+| 13d | 用途別せん断面積と二方向検定 | sepika-core / sepika-element / sepika-design-jp / sepika-app | section_shape・steel・frame/beam/construct・shear_area_acceptance_tests | [原5Done・独立期待値・run別証拠](用途別せん断面積と二方向検定_Issue417_2026-10.md)、`surface_radius_tests` / `shear_contract_tests` / `constructed_cantilever_*` | 横断 | 🔶（限定Verification、Validation・正式最終ゲート未確認） |
 | 14 | 保有耐力 | sepika-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
 | 15 | プッシュオーバー | sepika-solver / sepika-job / sepika-app / sepika-mcp | nonlinear/pushover/driver.rs・tests.rs / compute.rs | [Issue433既存増分回帰](弧長法削除と既存増分回帰_Issue433_2026-10.md#既存回帰と観測) | P5 | 🔶（弧長削除Verification、4方向等は未検証） |
 | 15a | 壁単体の確定step応答 | sepika-solver / sepika-app / sepika-job / sepika-mcp | nonlinear/pushover/wall_response.rs・tests.rs, tests/wall_model.rs, ultimate_demand.rs, job/pushover.rs | [Issue443検証](壁の確定ステップ応答_Issue443_2026-10.md)の試験対応表 | — | ✅（Scope内Verification） |
