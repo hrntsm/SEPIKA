@@ -124,7 +124,7 @@ fn prepare_work_model(
         .validate_attached_slabs()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     rebuild_floor_regions(model);
-    let wall_report = rebuild_wall_regions(model);
+    rebuild_wall_regions(model);
     let mut panel_notices = Vec::new();
     {
         let adjacency = sepika_core::adjacency::NodeAdjacency::build(model);
@@ -229,7 +229,7 @@ fn prepare_work_model(
     Ok(PrepareReport {
         panels,
         notices,
-        nodes_renumbered: wall_report.deleted_nodes > 0,
+        nodes_renumbered: false,
     })
 }
 

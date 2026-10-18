@@ -2699,9 +2699,6 @@ fn test_import_without_walls_rebuilds_wall_assignment_regions() {
     assert!(report.warnings[0].contains("Fc指定がありません"));
 }
 
-/// 頂部梁の上に立つパラペット（StbWall）は、どの壁領域にも収まらないが
-/// 下辺が頂部梁に全長覆われているため、取り込み後に取り付く壁版へ自動変換される
-/// （床側 D20 に相当。`wall_region_rebuild::rebuild_wall_regions` 参照）。
 #[test]
 fn test_import_converts_unenclosed_parapet_to_attached_wall_plate() {
     use sepika_core::model::{RegionAnchor, WallPlateShape};
@@ -2731,7 +2728,7 @@ fn test_import_converts_unenclosed_parapet_to_attached_wall_plate() {
     </StbWall>
   </StbMembers>
 </StbModel></ST_BRIDGE>"#;
-    let (m, report) = import_stbridge_with_report(xml).expect("import");
+    let (mut m, report) = import_stbridge_with_report(xml).expect("import");
     assert!(m.validate().is_ok(), "{:?}", m.validate());
     assert_eq!(
         m.wall_regions.len(),
@@ -2767,6 +2764,28 @@ fn test_import_converts_unenclosed_parapet_to_attached_wall_plate() {
         report.warnings,
         vec!["断面未割当の壁版を 1 枚取り込みました。解析要素としては生成しません".to_string()]
     );
+    assert!(m.wall_plate_assignment_region(plate.id).is_none());
+    let plates = m.wall_plates.clone();
+    let assignments = m.wall_assignment_regions.clone();
+    let nodes = m.nodes.clone();
+    for _ in 0..2 {
+        let rebuilt = sepika_core::wall_region_rebuild::rebuild_wall_regions(&mut m);
+        assert_eq!(rebuilt.unassigned_wall_plates, 0);
+        assert_eq!(m.wall_plates, plates);
+        assert_eq!(m.wall_assignment_regions, assignments);
+        assert_eq!(m.nodes, nodes);
+        m.validate().unwrap();
+    }
+    let partial = xml
+        .replace(
+            "</StbNodes>",
+            r#"<StbNode id="6" X="2000" Y="0" Z="3000"/></StbNodes>"#,
+        )
+        .replace(
+            r#"<StbGirder id="3" id_node_start="1" id_node_end="3""#,
+            r#"<StbGirder id="3" id_node_start="1" id_node_end="6""#,
+        );
+    assert!(import_stbridge_with_report(&partial).is_err());
 }
 
 /// 自己終了 <StbSlab/> の後の StbWall の節点ループが、陳腐化したスラブ状態に

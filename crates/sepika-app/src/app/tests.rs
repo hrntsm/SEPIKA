@@ -750,107 +750,78 @@ fn preparation_rebuild_clears_generated_wall_selection_only() {
 
 #[cfg(feature = "gui")]
 #[test]
-fn preparation_wall_rebuild_clears_renumbered_node_selection() {
-    use sepika_core::ids::{
-        ElemId, NodeId, SecondaryMemberId, WallPlateAssignmentRegionId, WallPlateId,
-    };
+fn preparation_wall_rebuild_preserves_assigned_boundary_and_node_selection() {
+    use sepika_core::ids::{ElemId, NodeId, SecondaryMemberId};
     use sepika_core::model::{
-        ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Node, PlateAssignment,
-        SecondaryMember, SecondaryMemberEnds, SecondaryMemberKind, SupportBoundary,
-        SupportMemberId, WallPlate, WallPlateAssignmentRegion, WallPlateShape,
+        PlateAssignment, SecondaryMember, SecondaryMemberAnchor, SecondaryMemberEnds,
+        SecondaryMemberKind, SupportMemberId,
     };
+
+    let mut model = super::steel_wall_notice_tests::steel_wall_model();
+    let plate = model.wall_plates.remove(0);
+    model.wall_regions.clear();
+    model.wall_assignment_regions = Default::default();
+    for case in &mut model.load_cases {
+        case.member.retain(|load| load.elem != ElemId(2));
+    }
+    model.elements.remove(2);
+    model.elements[2].id = ElemId(2);
+    model.unassigned_beams.push(SecondaryMember {
+        id: SecondaryMemberId(0),
+        kind: SecondaryMemberKind::Beam,
+        ends: SecondaryMemberEnds::Supported([
+            SecondaryMemberAnchor {
+                support: SupportMemberId::Primary(ElemId(0)),
+                position: 1.0,
+            },
+            SecondaryMemberAnchor {
+                support: SupportMemberId::Primary(ElemId(1)),
+                position: 1.0,
+            },
+        ]),
+        section: Some(sepika_core::ids::SectionId(1)),
+        ..Default::default()
+    });
+    model.rebuild_assignment_regions().unwrap();
+    assert_eq!(model.wall_assignment_regions.regions.len(), 1);
+    model.wall_assignment_regions.regions[0].assignment = PlateAssignment::Plate(plate.id);
+    model.wall_plates.push(plate.clone());
+    model.validate().unwrap();
+    let nodes = model.nodes.clone();
+    let assignments = model.wall_assignment_regions.clone();
+    let boundary = plate.boundary_nodes(&model).unwrap();
+    assert_eq!(boundary.len(), 4);
+    assert!(assignments.regions[0]
+        .boundary
+        .iter()
+        .any(|edge| { edge.support == SupportMemberId::Secondary(SecondaryMemberId(0)) }));
 
     let mut app = App::default();
-    for (i, coord) in [
-        [0.0, 0.0, 0.0],
-        [4000.0, 0.0, 0.0],
-        [4000.0, 0.0, 1500.0],
-        [0.0, 0.0, 1500.0],
-        [8000.0, 0.0, 0.0],
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        app.core.model.nodes.push(Node {
-            id: NodeId(i as u32),
-            coord,
-            restraint: Default::default(),
-            mass: None,
-            story: None,
-            support_spring: None,
-        });
-    }
-    app.core.model.elements.push(ElementData {
-        id: ElemId(0),
-        kind: ElementKind::Beam,
-        nodes: vec![NodeId(0), NodeId(1)].into(),
-        section: None,
-        local_axis: LocalAxis {
-            ref_vector: [0.0, 0.0, 1.0],
-        },
-        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-        force_regime: ForceRegime::Auto,
-        rigid_zone: Default::default(),
-        plastic_zone: None,
-        spring: None,
-    });
-    for (i, ends) in [
-        [[4000.0, 0.0, 0.0], [4000.0, 0.0, 1500.0]],
-        [[4000.0, 0.0, 1500.0], [0.0, 0.0, 1500.0]],
-        [[0.0, 0.0, 1500.0], [0.0, 0.0, 0.0]],
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        app.core.model.unassigned_posts.push(SecondaryMember {
-            id: SecondaryMemberId(i as u32),
-            gravity_end_shares: None,
-            kind: SecondaryMemberKind::Post,
-            ends: SecondaryMemberEnds::Detached(ends),
-            section: None,
-            name: String::new(),
-        });
-    }
-    app.core
-        .model
-        .wall_assignment_regions
-        .regions
-        .push(WallPlateAssignmentRegion {
-            id: WallPlateAssignmentRegionId(0),
-            boundary: std::iter::once(SupportMemberId::Primary(ElemId(0)))
-                .chain((0..3).map(|i| SupportMemberId::Secondary(SecondaryMemberId(i))))
-                .map(|support| SupportBoundary {
-                    support,
-                    span: [0.0, 1.0],
-                })
-                .collect(),
-            assignment: PlateAssignment::Plate(WallPlateId(0)),
-        });
-    app.core.model.wall_plates.push(WallPlate {
-        id: WallPlateId(0),
-        shape: WallPlateShape::Enclosed,
-        section: None,
-        dl_support: None,
-        self_weight_shares: Vec::new(),
-        opening_area: 0.0,
-        opening_weight: 0.0,
-        openings: Vec::new(),
-        loads: Vec::new(),
-        slit: Default::default(),
-    });
+    app.load_model(model);
     app.select_node(NodeId(2));
-    app.ui.scoped.boundary_node = Some(NodeId(4));
-
-    let report = sepika_core::wall_region_rebuild::rebuild_wall_regions(&mut app.core.model);
-    app.handle_prepared_node_renumbering(report.deleted_nodes > 0);
-
-    assert_eq!(app.core.model.nodes.len(), 3);
-    assert_eq!(
-        app.core.model.node(NodeId(2)).unwrap().coord,
-        [8000.0, 0.0, 0.0]
-    );
-    assert_eq!(app.ui.scoped.selection, GeometrySelection::None);
-    assert_eq!(app.ui.scoped.boundary_node, None);
+    app.ui.scoped.boundary_node = Some(NodeId(3));
+    for _ in 0..2 {
+        app.sync_auto_load_cases_action();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        assert!(app.core.scoped.auto_load_sync_hash.is_some());
+        app.core.model.validate().unwrap();
+        assert_eq!(app.core.model.wall_plates, vec![plate.clone()]);
+        assert_eq!(app.core.model.wall_assignment_regions, assignments);
+        assert!(app.core.model.wall_regions.is_empty());
+        assert_eq!(app.core.model.nodes.len(), nodes.len());
+        for (node, original) in app.core.model.nodes.iter().zip(&nodes) {
+            assert_eq!(node.id, original.id);
+            assert_eq!(node.coord, original.coord);
+        }
+        assert_eq!(plate.boundary_nodes(&app.core.model).unwrap(), boundary);
+        assert_eq!(app.ui.scoped.selection.nodes(), &[NodeId(2)]);
+        assert_eq!(app.ui.scoped.selection.active_node(), Some(NodeId(2)));
+        assert_eq!(app.ui.scoped.boundary_node, Some(NodeId(3)));
+    }
 }
 
 #[cfg(feature = "gui")]

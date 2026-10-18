@@ -14,31 +14,13 @@
 //! （直線）ごとに閉領域が現れるため、候補の全頂点が「同じ構面上にあるか」
 //! （[`WallRegionBoundary::is_same_plane`]）で絞り込んでから、構面内の局所座標 `(s, z)`
 //! で多角形重心・内包を判定する。間柱は毎回入れ直す。
-//!
-//! **どの壁領域にも収まらない壁版の自動変換**: 柱・梁で囲まれた
-//! 壁版（`WallPlateShape::Enclosed`）のうち、**水平な辺（上辺・下辺）がちょうど 1 つ**
-//! 同一レベルの大梁に全長覆われていれば、その辺を取付き線とする取り付く壁版
-//! （`Attached`／`RegionAnchor::Line`）へ変換する（パラペット・腰壁・垂れ壁）。
-//! 判定対象は水平な辺のみで、鉛直な辺（柱沿い）は対象外とする。張り出し量 `extent` は取付き辺からの
-//! 鉛直方向の高さ差で、符号つき（下方向が負）である。`RegionAnchor::FloorRegion`
-//! （自立壁）は自動検出しない。ST-Bridge から自立壁を判別できる情報源がなく、
-//! 手動作成専用とする。
-//!
-//! 変換で境界が取付き線 2 点だけに縮んだぶん、参照が 0 になった節点は削除する
-//! （床側と同じ規約で、このリビルドが縮めた境界の先端節点だけを対象とし、
-//! 他の理由で未使用の既存節点は対象外とする）。
-//! 自由端は取付き辺上にない頂点が 1〜2 点のときに限り変換する。同じ高さでも
-//! 辺から外れた頂点は自由端に数える。変換後の取り付く壁版は解析要素にせず、
-//! 自重の自動分配（取付き線への分布）も行わない。
 
 use crate::geom::polygon::{self, BOUNDARY_TOL_MM};
 use crate::geom::LEVEL_TOL_MM;
 use crate::ids::{NodeId, WallRegionId};
 use crate::model::{LoadTransfer, Model, RegionAnchor, WallPlateShape, WallRegion};
 use crate::region_gen::wall::{scan_wall_region_boundaries, WallRegionBoundary};
-use crate::region_rebuild::{
-    delete_unref_nodes, edge_fully_covered, horizontal_girders, GirderSeg,
-};
+use crate::region_rebuild::{edge_fully_covered, horizontal_girders, GirderSeg};
 
 /// 重心照合で面積が近いとみなす相対許容（新旧の床領域の面積比）。
 /// [`crate::region_rebuild::CENTROID_MATCH_AREA_REL`] と同じ値・同じ意味。
@@ -57,14 +39,10 @@ pub struct WallRegionRebuildReport {
     pub unmatched_old_regions: usize,
     /// 壁領域へ帰属し直した壁版の数。
     pub wall_plates_assigned: usize,
-    /// どの壁領域にも収まらず、取り付く壁版（`Attached`／`Line`）へ変換した数。
-    pub wall_plates_converted_to_attached: usize,
-    /// どの壁領域にも収まらず、変換もできなかった壁版の数（警告対象。削除しない）。
+    /// どの壁領域にも収まらなかった囲まれた壁版の数（警告対象。削除しない）。
     pub unassigned_wall_plates: usize,
     /// 中点がちょうど 1 つの壁領域に厳密内包されなかった間柱（Post）の本数。
     pub unassigned_posts: usize,
-    /// 取り付く壁版への変換で境界が縮み、参照が 0 になり削除した節点の数。
-    pub deleted_nodes: usize,
 }
 
 /// 現状の壁領域で、中点がちょうど 1 領域に厳密内包されない間柱の本数。
@@ -74,11 +52,7 @@ pub fn unassigned_post_count(model: &Model) -> usize {
 
 /// 壁領域を柱・梁が囲む鉛直構面内の閉領域から作り直し、名前を引き継ぎ、
 /// 壁版の帰属を付け替える。
-///
-/// 壁版そのもの（`model.wall_plates`）は畳まない。どの壁領域にも収まらない
-/// 柱・梁で囲まれた壁版は、水平な辺がちょうど 1 つ大梁に全長覆われ自由端が
-/// 1〜2 点なら取り付く壁版へ変換し、それもできなければ帰属なしのまま残す
-/// （警告。落とさない。モジュール doc 参照）。
+/// 割当境界と壁版の仕様を保持し、壁領域に収まらない壁版も削除しない。
 pub fn rebuild_wall_regions(model: &mut Model) -> WallRegionRebuildReport {
     let scan = scan_wall_region_boundaries(model);
     for r in &mut model.wall_regions {
@@ -115,7 +89,6 @@ pub fn rebuild_wall_regions(model: &mut Model) -> WallRegionRebuildReport {
     report.regions = new_regions.len();
     report.unmatched_old_regions = matched_old.iter().filter(|m| !**m).count();
 
-    let beams = horizontal_girders(model);
     let plate_boundaries: Vec<Option<Vec<NodeId>>> = model
         .wall_plates
         .iter()
@@ -140,41 +113,14 @@ pub fn rebuild_wall_regions(model: &mut Model) -> WallRegionRebuildReport {
             report.wall_plates_assigned += 1;
         }
     }
-    let mut converted = Vec::new();
-    let mut discarded_by_conversion: Vec<NodeId> = Vec::new();
-    for (pi, plate) in model.wall_plates.iter().enumerate() {
-        if owner[pi].is_some() {
-            continue;
-        }
-        if !matches!(plate.shape, WallPlateShape::Enclosed) {
-            continue;
-        }
-        let Some(boundary) = &plate_boundaries[pi] else {
-            report.unassigned_wall_plates += 1;
-            continue;
-        };
-        if let Some(attached) = plate
-            .self_weight_shares
-            .is_empty()
-            .then(|| try_convert_wall_attached(model, boundary, &beams))
-            .flatten()
-        {
-            discarded_by_conversion.extend(boundary.iter().copied());
-            converted.push((pi, attached));
-            report.wall_plates_converted_to_attached += 1;
-        } else {
-            report.unassigned_wall_plates += 1;
-        }
-    }
-    for (pi, shape) in converted {
-        let plate_id = model.wall_plates[pi].id;
-        model.wall_plates[pi].shape = shape;
-        for region in &mut model.wall_assignment_regions.regions {
-            if region.assignment == crate::model::PlateAssignment::Plate(plate_id) {
-                region.assignment = crate::model::PlateAssignment::Unset;
-            }
-        }
-    }
+    report.unassigned_wall_plates = model
+        .wall_plates
+        .iter()
+        .enumerate()
+        .filter(|(pi, plate)| {
+            owner[*pi].is_none() && matches!(plate.shape, WallPlateShape::Enclosed)
+        })
+        .count();
     for (pi, ri) in owner.into_iter().enumerate() {
         if let Some(ri) = ri {
             new_regions[ri]
@@ -188,7 +134,6 @@ pub fn rebuild_wall_regions(model: &mut Model) -> WallRegionRebuildReport {
     }
     model.wall_regions = new_regions;
     report.unassigned_posts = assign_posts(model, &scan.boundaries);
-    report.deleted_nodes = delete_unref_nodes(model, &discarded_by_conversion);
 
     report
 }
@@ -642,5 +587,85 @@ mod tests {
             .is_none(),
             "折れた頂点は自由端に数え、変換しない"
         );
+    }
+
+    #[test]
+    fn unassigned_wall_helper_requires_exactly_one_fully_covered_horizontal_beam_edge() {
+        use ElementKind::{Beam, Fiber, MultiSpring};
+        for (segments, expected) in [
+            (vec![(4, 5, Beam)], true),
+            (vec![(4, 5, Fiber)], false),
+            (vec![(4, 5, MultiSpring)], false),
+            (vec![(4, 6, Beam), (6, 5, Beam)], true),
+            (vec![(4, 6, Beam), (6, 5, Fiber)], false),
+            (vec![(4, 6, MultiSpring), (6, 5, Beam)], false),
+            (vec![(4, 6, Beam)], false),
+            (vec![], false),
+            (vec![(4, 5, Beam), (2, 3, Beam)], false),
+            (vec![(7, 8, Beam)], false),
+            (vec![(4, 8, Beam)], false),
+        ] {
+            let mut model = Model::default();
+            for (id, [x, z]) in [
+                [0., 3000.],
+                [4000., 3000.],
+                [4000., 4500.],
+                [0., 4500.],
+                [0., 3000.],
+                [4000., 3000.],
+                [2000., 3000.],
+                [0., 3100.],
+                [4000., 3100.],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                model.nodes.push(node(id as u32, x, 0., z));
+            }
+            for (id, &(a, b, kind)) in segments.iter().enumerate() {
+                let mut element = beam(id as u32, a, b);
+                element.kind = kind;
+                model.elements.push(element);
+            }
+            let shape = wall_attached_shape_from_boundary(
+                &model,
+                &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+            );
+            assert_eq!(shape.is_some(), expected, "{segments:?}");
+            if expected {
+                assert_eq!(
+                    shape,
+                    Some(WallPlateShape::Attached {
+                        anchor: RegionAnchor::Line {
+                            nodes: [NodeId(0), NodeId(1)],
+                            span: [0., 1.],
+                            transfer: LoadTransfer::Anchor,
+                        },
+                        extent: Some([1500., 1500.]),
+                    })
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unassigned_wall_helper_accepts_one_free_vertex_and_keeps_all_node_references() {
+        let mut model = one_bay_wall_model();
+        model.nodes.push(node(4, 2000., 0., 4500.));
+        let nodes = model.nodes.clone();
+        assert_eq!(
+            wall_attached_shape_from_boundary(&model, &[NodeId(3), NodeId(2), NodeId(4)]),
+            Some(WallPlateShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(3), NodeId(2)],
+                    span: [0., 1.],
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: Some([1500., 1500.]),
+            })
+        );
+        let report = rebuild_wall_regions(&mut model);
+        assert_eq!(report.unassigned_wall_plates, 0);
+        assert_eq!(model.nodes, nodes);
     }
 }
