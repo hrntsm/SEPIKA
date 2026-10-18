@@ -7,6 +7,11 @@ ignore = [
     "RUSTSEC-2025-0141", # bincode: unmaintained
     "RUSTSEC-2024-0436", # paste: unmaintained
     "RUSTSEC-2026-0192", # ttf-parser: unmaintained（winit/eframe 経由、修正版なし）
+    # standalone crate は zbus 6 に統合されたが、eframe の最新版でも
+    # accesskit_unix / atspi が zbus 5 系を要求するため、上流の移行待ち。
+    "RUSTSEC-2026-0370", # zvariant: unmaintained
+    "RUSTSEC-2026-0371", # zbus_names: unmaintained
+    "RUSTSEC-2026-0372", # zvariant_derive: unmaintained
     # quick-xml の DoS 脆弱性。直接依存は 0.41 に更新済みだが、
     # wayland-scanner / zbus_xml（eframe 経由の推移的依存）の最新版が
     # まだ quick-xml ^0.39 を要求しているため、上流の更新待ち。
@@ -25,6 +30,7 @@ allow = [
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "Zlib",
+    "bzip2-1.0.6",    # zip の BZip2 対応に必要な libbz2-rs-sys
     "CC0-1.0",
     "BSL-1.0",        # clipboard-win, error-code（Boost License）
     "MPL-2.0",        # option-ext（Mozilla Public License）
