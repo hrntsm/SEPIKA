@@ -898,9 +898,9 @@ fn lip_channel_geometry_old_contracts_expire_and_current_keeps_results() {
 }
 
 #[test]
-fn cft_case2_design12_expires_while_current_analysis_survives_and_design13_can_be_recomputed() {
+fn cft_case2_design12_expires_while_current_analysis_survives_and_design14_can_be_recomputed() {
     assert_eq!(ANALYSIS_CONTRACT_VERSION, 23);
-    assert_eq!(DESIGN_CONTRACT_VERSION, 13);
+    assert_eq!(DESIGN_CONTRACT_VERSION, 14);
     let app = super::tests::cft_long_case2_app(4_000_000.0);
     let original = app.core.scoped.results.as_ref().unwrap();
     assert!(original.has_design_results());
@@ -940,7 +940,7 @@ fn cft_case2_design12_expires_while_current_analysis_survives_and_design13_can_b
         reopened.core.scoped.last_error
     );
     let recalculated = reopened.core.scoped.results.as_ref().unwrap();
-    assert_eq!(recalculated.design_contract_version, Some(13));
+    assert_eq!(recalculated.design_contract_version, Some(14));
     assert!(recalculated.has_design_results());
     assert_eq!(recalculated.member_forces, original.member_forces);
     let rows = reopened.compute_cft_ultimate_checks().unwrap();
