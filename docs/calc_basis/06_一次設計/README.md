@@ -24,7 +24,6 @@
 </div>
 
 本章の断面検定は `sepika_design_jp` にあり、材料強度は `sepika_design_jp::material_strength`（`concrete`・`rebar`・`steel`）が担います。
-突合の全体は[断面検定_参照実装照合](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/断面検定_参照実装照合.md)を参照してください。
 
 ## この章の内容
 

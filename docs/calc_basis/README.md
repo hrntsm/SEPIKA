@@ -86,7 +86,7 @@
 **力学の閉形式**：ティモシェンコ梁剛性、CMQ、Newmark 更新式のような教科書的な力学式を指すため、原典照合ではなく、理論解と一致するかどうかを検証します。
 
 このほか、規準・指針が式を直接与えない実務的取扱い（床荷重の分配、壁エレメント置換、剛床への荷重按分など）は「実務慣用」と明記します。
-製品固有の係数（免震・制振部材のアイソレータ・ダンパー・座屈拘束ブレース等）は各製品の技術資料・大臣認定値（Category B）に依拠します。
+製品固有の係数（免震・制振部材のアイソレータ・ダンパー・座屈拘束ブレース等）はCategory Bとして扱い、対応する製品別の採用値・認定値と適用条件を用います。同じ構造形式という理由だけで別製品へ一般化しません。
 
 ## 単位系
 
@@ -157,7 +157,6 @@
 
 - [設計判断・検証記録（dev_docs/）](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/README.md)：開発者向け文書の配置。出典の分類 A/B の根拠となる[原典照合リスト](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/原典照合リスト.md)は Verification & Validation として `dev_docs/v_and_v/` にあります。
 - [検証記録（dev_docs/v_and_v/）](https://github.com/hrntsm/SEPIKA/blob/main/dev_docs/v_and_v/README.md)：各要素・各設計式の Verification & Validation レポート。
-- 規準・指針が式を直接与えない実務的取扱い（床荷重の分配、壁エレメント置換、剛床への荷重按分など）は、市販の一貫構造計算プログラムとの突合による検証記録を V&V に置いています。
 - 力学の閉形式（ティモシェンコ梁剛性、CMQ、Newmark 更新式など）は、理論解と一致するかどうかの数値 DoD で自己検証し、その記録を V&V に置いています。
 
 </details>
