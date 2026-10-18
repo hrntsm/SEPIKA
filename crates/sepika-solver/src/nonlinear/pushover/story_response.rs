@@ -115,7 +115,10 @@ impl StoryCut {
         let beta = (qu.abs() > self.tolerance_n).then(|| (wall + brace) / qu);
         let diagnostic = |reason: &str| {
             let beta_text = beta.map_or_else(|| "未定義".into(), |v| v.to_string());
-            fail(&format!("{reason}; Qu={qu} N Wall={wall} N Brace={brace} N Frame={frame} N 上層外力={} N 基準外力={} N 支持ばね内力={} N 残差={residual} N 許容差={} N βu={beta_text} [-]", self.external_n, self.reference_n, self.support_n, self.tolerance_n))
+            fail(&format!(
+                "{reason}; Qu={qu} N Wall={wall} N Brace={brace} N Frame={frame} N 上層外力={} N 基準外力={} N 支持ばね内力={} N 残差={residual} N 許容差={} N βu={beta_text} [-]",
+                self.external_n, self.reference_n, self.support_n, self.tolerance_n
+            ))
         };
         if residual.abs() > self.tolerance_n {
             return Err(diagnostic(
@@ -186,37 +189,59 @@ impl PushoverResult {
         let run = self
             .wall_run
             .as_ref()
-            .ok_or("解析runの入力識別情報がありません")?;
-        if point.purpose != purpose
-            || point.selection_reason.trim().is_empty()
-            || point.run_id != run.run_id
-            || Some(&point.input_generation) != run.input_generation.as_ref()
-        {
-            return Err("評価目的・run・入力世代・選定理由が不整合です".into());
+            .ok_or("confirmed_run_missing: member=unresolved 解析runの入力識別情報がありません")?;
+        let point_mismatch = if point.purpose != purpose {
+            Some("confirmed_purpose_mismatch")
+        } else if point.selection_reason.trim().is_empty() {
+            Some("confirmed_selection_reason_missing")
+        } else if point.run_id != run.run_id {
+            Some("confirmed_run_mismatch")
+        } else if Some(&point.input_generation) != run.input_generation.as_ref() {
+            Some("confirmed_generation_mismatch")
+        } else {
+            None
+        };
+        if let Some(cause) = point_mismatch {
+            return Err(format!(
+                "{cause}: member=unresolved 評価目的・run・入力世代・選定理由が不整合です"
+            ));
         }
         let mut records = self
             .confirmed_history
             .as_ref()
-            .ok_or("線材・層切断面の確定履歴がありません。再解析してください")?
+            .ok_or("confirmed_history_missing: member=unresolved 線材・層切断面の確定履歴がありません。再解析してください")?
             .iter()
             .filter(|r| r.step == point.step);
-        let record = records.next().ok_or("採用stepの確定履歴がありません")?;
-        if records.next().is_some()
-            || record.run_id != point.run_id
-            || record.input_generation.as_ref() != Some(&point.input_generation)
-            || record.direction != point.direction
-            || self
-                .capacity_curve
-                .iter()
-                .filter(|p| p.step == point.step)
-                .count()
-                != 1
+        let record = records
+            .next()
+            .ok_or("confirmed_step_missing: member=unresolved 採用stepの確定履歴がありません")?;
+        let record_mismatch = if records.next().is_some() {
+            Some("confirmed_step_duplicate")
+        } else if record.run_id != point.run_id {
+            Some("confirmed_run_mismatch")
+        } else if record.input_generation.as_ref() != Some(&point.input_generation) {
+            Some("confirmed_generation_mismatch")
+        } else if record.direction != point.direction {
+            Some("confirmed_direction_mismatch")
+        } else if self
+            .capacity_curve
+            .iter()
+            .filter(|p| p.step == point.step)
+            .count()
+            != 1
             || point.step as usize >= self.steps.len()
         {
-            return Err("確定履歴のrun・入力世代・方向・stepが不整合です".into());
+            Some("confirmed_step_mismatch")
+        } else {
+            None
+        };
+        if let Some(cause) = record_mismatch {
+            return Err(format!(
+                "{cause}: member=unresolved 確定履歴のrun・入力世代・方向・stepが不整合です"
+            ));
         }
         let mut seen = std::collections::HashSet::new();
-        if record.members.iter().any(|r| {
+        if let Some(member) = record.members.iter().find(|r| {
             [
                 r.m_strong,
                 r.m_weak,
@@ -229,10 +254,16 @@ impl PushoverResult {
             .iter()
             .any(|v| !v.is_finite())
         }) {
-            return Err("確定部材応答が非有限です".into());
+            return Err(format!(
+                "confirmed_member_nonfinite: member={} 確定部材応答が非有限です",
+                member.elem.0
+            ));
         }
-        if record.members.iter().any(|r| !seen.insert(r.elem)) {
-            return Err("確定部材応答が重複しています".into());
+        if let Some(member) = record.members.iter().find(|r| !seen.insert(r.elem)) {
+            return Err(format!(
+                "confirmed_member_duplicate: member={} 確定部材応答が重複しています",
+                member.elem.0
+            ));
         }
         Ok(record)
     }
@@ -432,6 +463,8 @@ mod tests {
     }
     fn result(run_id: &str, dir: SeismicDir, cuts: Vec<Vec<StoryCut>>) -> PushoverResult {
         let run = super::super::wall_response::WallRunIdentity {
+            gravity_terms: Vec::new(),
+            gravity_applied: false,
             run_id: run_id.into(),
             input_generation: Some(vec![42]),
             input_unavailable: None,
@@ -571,11 +604,19 @@ mod tests {
                 4 => invalid.step = 1,
                 _ => invalid.selection_reason.clear(),
             }
-            assert!(
-                po.evaluate_stories(&invalid, EvaluationPurpose::Ds)
-                    .is_err(),
-                "case {kind}"
-            );
+            let error = po
+                .evaluate_stories(&invalid, EvaluationPurpose::Ds)
+                .unwrap_err();
+            let cause = [
+                "confirmed_purpose_mismatch:",
+                "confirmed_run_mismatch:",
+                "confirmed_generation_mismatch:",
+                "confirmed_direction_mismatch:",
+                "confirmed_step_missing:",
+                "confirmed_selection_reason_missing:",
+            ][kind];
+            assert!(error.starts_with(cause), "case {kind}: {error}");
+            assert!(error.contains("member=unresolved"), "{error}");
         }
         for kind in 0..5 {
             let mut invalid = po.clone();
@@ -587,7 +628,17 @@ mod tests {
                 3 => history.push(history[0].clone()),
                 _ => history.clear(),
             }
-            assert!(invalid.evaluate_stories(&p, EvaluationPurpose::Ds).is_err());
+            let error = invalid
+                .evaluate_stories(&p, EvaluationPurpose::Ds)
+                .unwrap_err();
+            let cause = [
+                "confirmed_run_mismatch:",
+                "confirmed_generation_mismatch:",
+                "confirmed_direction_mismatch:",
+                "confirmed_step_duplicate:",
+                "confirmed_step_missing:",
+            ][kind];
+            assert!(error.starts_with(cause), "case {kind}: {error}");
         }
         let mut invalid = po.clone();
         invalid.confirmed_history = None;
@@ -595,6 +646,41 @@ mod tests {
             .evaluate_stories(&p, EvaluationPurpose::Ds)
             .unwrap_err()
             .contains("確定履歴がありません"));
+    }
+    #[test]
+    fn 非有限と重複の確定応答は該当する部材を識別する() {
+        let mut po = result("A", SeismicDir::X, vec![vec![cut(0, 150.0, 90.0)]]);
+        let p = point(&po, EvaluationPurpose::Ds, SeismicDir::X, 0);
+        let member = |id| PushoverMemberResponse {
+            elem: ElemId(id),
+            axial: 0.0,
+            m_strong: 0.0,
+            m_weak: 0.0,
+            shear_strong: 0.0,
+            shear_weak: 0.0,
+            rp: 0.0,
+            horizontal_force: 0.0,
+            wall_shear_signed: None,
+        };
+        let mut invalid = member(17);
+        invalid.axial = f64::NAN;
+        po.confirmed_history.as_mut().unwrap()[0].members = vec![member(3), invalid];
+        let error = po
+            .confirmed_response(&p, EvaluationPurpose::Ds)
+            .unwrap_err();
+        assert!(
+            error.starts_with("confirmed_member_nonfinite: member=17 "),
+            "{error}"
+        );
+        assert!(error.contains("確定部材応答が非有限です"));
+        po.confirmed_history.as_mut().unwrap()[0].members = vec![member(3), member(17), member(17)];
+        let error = po
+            .confirmed_response(&p, EvaluationPurpose::Ds)
+            .unwrap_err();
+        assert!(
+            error.starts_with("confirmed_member_duplicate: member=17 "),
+            "{error}"
+        );
     }
     #[test]
     fn 方向反転xyは符号を保持し比率を変えない() {

@@ -499,9 +499,9 @@ mod tests {
     }
 
     #[test]
-    fn analysis22_missing_future24_and_current23_control_analysis_and_design15_rows() {
-        assert_eq!(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION, 23);
-        assert_eq!(sepika_core::result_contract::DESIGN_CONTRACT_VERSION, 15);
+    fn analysis22_23_missing_future25_and_current24_control_analysis_and_design16_rows() {
+        assert_eq!(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION, 24);
+        assert_eq!(sepika_core::result_contract::DESIGN_CONTRACT_VERSION, 16);
         let model = Model::default();
         for kind in [JobKind::LinearStatic, JobKind::DesignCheck] {
             let dir = test_dir("member-load-direction-contract");
@@ -526,14 +526,15 @@ mod tests {
             drop(store);
             for (version, reason) in [
                 (Some(22), "old_contract"),
+                (Some(23), "old_contract"),
                 (None, "unknown_provenance"),
-                (Some(24), "unsupported_contract"),
-                (Some(23), "current"),
+                (Some(25), "unsupported_contract"),
+                (Some(24), "current"),
             ] {
                 let mut manifest = original.clone();
                 for entry in manifest["entries"].as_array_mut().unwrap() {
                     if kind == JobKind::DesignCheck {
-                        assert_eq!(entry["provenance"]["design_contract_version"], 15);
+                        assert_eq!(entry["provenance"]["design_contract_version"], 16);
                     }
                     let provenance = entry["provenance"].as_object_mut().unwrap();
                     match version {

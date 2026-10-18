@@ -1484,7 +1484,9 @@ mod tests {
     #[test]
     fn rc_wall_619_existing_ds_entry_uses_adopted_run_wall_response_and_reports_inputs() {
         let mut app = App::default();
-        app.load_model(single_wall_619_model(1500.0));
+        app.load_model(crate::app::tests::with_explicit_pushover_gravity(
+            single_wall_619_model(1500.0),
+        ));
         app.core.analysis_cfg.push_steps = 2;
         app.core.analysis_cfg.push_use_max_disp = true;
         app.core.analysis_cfg.push_use_drift_angle = false;

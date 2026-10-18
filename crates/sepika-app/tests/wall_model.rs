@@ -77,6 +77,10 @@ use sepika_core::wall_region_rebuild::rebuild_wall_regions;
 use sepika_section::shape::{RcBeamRebar, RcRectColumnRebar, SectionShape};
 use sepika_solver::statics::analysis::SeismicDir;
 
+#[path = "support/frame_gravity.rs"]
+mod frame_gravity;
+use frame_gravity::select_frame_gravity;
+
 /// 有効数字 4 桁の指数表記（`full_model.rs::sig4` と同じ丸め規則。両ファイルの
 /// スナップショットを比較できるよう合わせている）。
 fn sig4(v: f64) -> String {
@@ -542,6 +546,7 @@ fn nonlinear_opening_wall_refuses_job_without_publishing_partial_results() {
     for time_history in [false, true] {
         let mut app = wall_bay_app();
         app.run_preparation();
+        select_frame_gravity(&mut app.core.model);
         app.run_static_all();
         assert!(
             app.core.scoped.last_error.is_none(),
@@ -1135,6 +1140,7 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
         "準備計算: {:?}",
         app.core.scoped.last_error
     );
+    select_frame_gravity(&mut app.core.model);
     app.run_static_all();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1268,6 +1274,7 @@ fn test_holding_capacity_auto_rank_detects_wall() {
         "準備計算: {:?}",
         app.core.scoped.last_error
     );
+    select_frame_gravity(&mut app.core.model);
     app.run_static_all();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1304,6 +1311,7 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
     use sepika_solver::nonlinear::pushover::wall_response::WallUnavailableReason;
     let mut app = unperforated_wall_bay_app();
     app.run_preparation();
+    select_frame_gravity(&mut app.core.model);
     app.run_static_all();
     app.run_pushover();
     select_holding_points(&mut app);
@@ -1485,6 +1493,7 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
         elem.local_axis.ref_vector = [c * (x - y), c * (x + y), z];
     }
     app.run_preparation();
+    select_frame_gravity(&mut app.core.model);
     app.run_static_all();
     app.run_pushover();
     select_holding_points(&mut app);

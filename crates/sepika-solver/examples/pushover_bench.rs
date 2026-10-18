@@ -20,7 +20,7 @@ use std::time::Instant;
 use sepika_core::dof::DofMap;
 use sepika_core::ids::{LoadCaseId, NodeId, SectionId, StoryId};
 use sepika_core::model::{
-    Constraint, LoadCase, LoadCaseKind, MemberLoad, MemberLoadKind, Model, Story,
+    Constraint, LoadCase, LoadCaseKind, LoadCombination, MemberLoad, MemberLoadKind, Model, Story,
 };
 use sepika_solver::common::constraint::Reducer;
 use sepika_solver::nonlinear::pushover::{
@@ -68,13 +68,22 @@ fn make_frame(nx: usize, ny: usize, nz: usize) -> Model {
             )
         })
         .collect();
-    let load_cases = vec![LoadCase {
-        kind: LoadCaseKind::Dead,
-        id: LoadCaseId(0),
-        name: "長期".into(),
-        nodal: Vec::new(),
-        member,
-    }];
+    let load_cases = vec![
+        LoadCase {
+            kind: LoadCaseKind::Dead,
+            id: LoadCaseId(0),
+            name: "長期".into(),
+            nodal: Vec::new(),
+            member,
+        },
+        LoadCase {
+            kind: LoadCaseKind::Live,
+            id: LoadCaseId(1),
+            name: "P=0".into(),
+            nodal: Vec::new(),
+            member: Vec::new(),
+        },
+    ];
 
     // 階設定: 各階に剛床（隅節点をマスター、残りをスレーブ）と地震用重量を持たせる。
     // 地震用重量は大梁の長期荷重合計（w×スパン長×本数）相当の概算値。
@@ -116,6 +125,11 @@ fn make_frame(nx: usize, ny: usize, nz: usize) -> Model {
         sections: common::column_beam_sections(),
         materials: common::sn400_steel(),
         load_cases,
+        combinations: vec![LoadCombination {
+            name: "G+P".into(),
+            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)],
+        }],
+        ultimate_gravity_combination: Some(0),
         stories,
         constraints,
         ..Default::default()

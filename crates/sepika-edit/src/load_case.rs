@@ -145,18 +145,68 @@ impl EditCommand for AddCombination {
     }
 }
 
-indexed_delete_insert!(
-    /// 荷重組合せを index 指定で削除。逆操作は [`InsertCombination`]（同じ位置への復元）。
-    /// 組合せは他のデータから参照されないため ID 再採番は不要。index が範囲外なら Noop。
-    DeleteCombination,
-    /// 指定インデックスへ荷重組合せを再挿入する（[`DeleteCombination`] の逆操作専用）。
-    InsertCombination,
-    entity = sepika_core::model::LoadCombination,
-    vec = combinations,
-    field = combo,
-    del_label = "荷重組合せ削除",
-    ins_label = "荷重組合せ削除の取り消し",
-);
+/// 保存組合せを削除し、選択参照を同じ組合せへ保つ。選択対象の削除時は未指定へ戻す。
+pub struct DeleteCombination {
+    pub index: usize,
+}
+impl EditCommand for DeleteCombination {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if self.index >= model.combinations.len() {
+            return Box::new(Noop);
+        }
+        let selection = model.ultimate_gravity_combination;
+        let combo = model.combinations.remove(self.index);
+        model.ultimate_gravity_combination = selection.and_then(|index| {
+            if index == self.index {
+                None
+            } else {
+                Some(index - usize::from(index > self.index))
+            }
+        });
+        Box::new(InsertCombination {
+            index: self.index,
+            combo,
+            selection,
+        })
+    }
+    fn label(&self) -> &str {
+        "荷重組合せ削除"
+    }
+}
+
+/// 削除した組合せと重力参照選択を復元する。
+pub struct InsertCombination {
+    pub index: usize,
+    pub combo: sepika_core::model::LoadCombination,
+    selection: Option<usize>,
+}
+impl EditCommand for InsertCombination {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if self.index > model.combinations.len() {
+            return Box::new(Noop);
+        }
+        model.combinations.insert(self.index, self.combo.clone());
+        model.ultimate_gravity_combination = self.selection;
+        Box::new(DeleteCombination { index: self.index })
+    }
+    fn label(&self) -> &str {
+        "荷重組合せ削除の取り消し"
+    }
+}
+
+/// 終局需要・増分初期重力の保存長期組合せを選択する。
+pub struct SetUltimateGravityCombination {
+    pub index: Option<usize>,
+}
+impl EditCommand for SetUltimateGravityCombination {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let index = std::mem::replace(&mut model.ultimate_gravity_combination, self.index);
+        Box::new(Self { index })
+    }
+    fn label(&self) -> &str {
+        "終局重力組合せの選択"
+    }
+}
 
 /// 床板割当領域へ床板を割り当てる。床板を末尾に生成し、領域の状態を
 /// `Plate(生成した床板)` へ変える。領域が無い、または既に版ありのときは Noop。

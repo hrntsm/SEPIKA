@@ -87,6 +87,9 @@ fn portal_frame(rigid: f64, seismic_weight: f64) -> Model {
         }
     };
     Model {
+        load_cases: sepika_core::model::default_load_cases(),
+        combinations: sepika_core::model::default_combinations(),
+        ultimate_gravity_combination: Some(0),
         nodes: vec![
             node(0, [0.0, 0.0, 0.0], Dof6Mask::FIXED, None),
             // ファイバー要素は Z 軸柱の頂部ねじり DOF（Rz）に剛性を持たないため拘束する。

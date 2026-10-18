@@ -3,7 +3,8 @@ use sepika_core::ids::{WallPlateId, WallRegionId};
 use sepika_core::model::{ElementKind, WallPlate, WallPlateShape, WallRegion};
 
 pub(super) fn steel_wall_model() -> sepika_core::model::Model {
-    let mut model = crate::sample::portal_frame();
+    let mut model =
+        crate::app::tests::with_explicit_pushover_gravity(crate::sample::portal_frame());
     let mut bottom = model.elements[2].clone();
     bottom.id = ElemId(3);
     bottom.nodes = [NodeId(0), NodeId(1)].into_iter().collect();

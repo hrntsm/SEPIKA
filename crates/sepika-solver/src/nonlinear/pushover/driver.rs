@@ -131,17 +131,17 @@ pub fn pushover_analysis_recording(
         sepika_core::model::AnalysisKind::Incremental,
         sepika_element::factory::StrengthBasis::MaterialStrength,
     )?;
-    let active_cases: Vec<_> = model
-        .load_cases
-        .iter()
-        .filter(|case| apply_long_term && case.kind.is_long_term())
-        .map(|case| case.id)
-        .collect();
+    let gravity_terms = if apply_long_term {
+        sepika_core::load_combo::ultimate_gravity_terms(model)?
+    } else {
+        Vec::new()
+    };
+    let active_cases: Vec<_> = gravity_terms.iter().map(|(id, _)| *id).collect();
     sepika_element::factory::ensure_rc_beam_reference_loads(model, &active_cases)?;
 
-    let wall_capacities = crate::nonlinear::wall_reference::resolve(
+    let wall_capacities = crate::nonlinear::wall_reference::resolve_with_gravity_terms(
         model,
-        apply_long_term,
+        &gravity_terms,
         StrengthBasis::MaterialStrength,
     )?;
     let mut behaviors: Vec<Box<dyn ElementBehavior>> = Vec::new();
@@ -237,10 +237,10 @@ pub fn pushover_analysis_recording(
 
     let f0: Vec<f64> = if apply_long_term {
         let mut f = vec![0.0; n_active];
-        for lc in model.load_cases.iter().filter(|l| l.kind.is_long_term()) {
-            let flc = crate::common::assemble::assemble_global_f(model, dofmap, lc.id);
+        for (case, factor) in &gravity_terms {
+            let flc = crate::common::assemble::assemble_global_f(model, dofmap, *case);
             for (acc, v) in f.iter_mut().zip(flc) {
-                *acc += v;
+                *acc += factor * v;
             }
         }
         f
@@ -565,12 +565,15 @@ pub fn pushover_analysis_recording(
     } else {
         phase_outcome
     };
+    let mut run = recorded.run;
+    run.gravity_terms = gravity_terms;
+    run.gravity_applied = apply_long_term;
     Ok(PushoverResult {
         wall_capacities,
         rc_wall_shear_method: model.stress_cfg.rc_wall_shear_method,
         steps: recorded.steps,
         wall_history: Some(recorded.wall_history),
-        wall_run: Some(recorded.run),
+        wall_run: Some(run),
         confirmed_history: Some(recorded.confirmed_history),
         ds_evaluation: None,
         capacity_evaluation: None,

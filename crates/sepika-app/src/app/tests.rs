@@ -1,4 +1,117 @@
 use super::*;
+
+pub(crate) fn with_explicit_frame_gravity(
+    mut model: sepika_core::model::Model,
+) -> sepika_core::model::Model {
+    use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination};
+    if model.ultimate_gravity_combination.is_some() {
+        return model;
+    }
+    for kind in [LoadCaseKind::Dead, LoadCaseKind::Live] {
+        if !model.load_cases.iter().any(|case| case.kind == kind) {
+            let id = LoadCaseId(
+                model
+                    .load_cases
+                    .iter()
+                    .map(|case| case.id.0)
+                    .max()
+                    .map_or(0, |id| id + 1),
+            );
+            model.load_cases.push(LoadCase {
+                id,
+                name: if kind == LoadCaseKind::Dead {
+                    "明示G0"
+                } else {
+                    "明示P0"
+                }
+                .into(),
+                kind,
+                nodal: vec![],
+                member: vec![],
+            });
+        }
+    }
+    let existing = model.combinations.iter().position(|combo| {
+        let kinds: Vec<_> = combo
+            .terms
+            .iter()
+            .filter_map(|(id, _)| {
+                model
+                    .load_cases
+                    .iter()
+                    .find(|case| case.id == *id)
+                    .map(|case| case.kind)
+            })
+            .collect();
+        kinds.len() == combo.terms.len()
+            && kinds.contains(&LoadCaseKind::Dead)
+            && kinds.contains(&LoadCaseKind::Live)
+            && kinds.iter().all(|kind| {
+                matches!(
+                    kind,
+                    LoadCaseKind::Dead | LoadCaseKind::Live | LoadCaseKind::Snow
+                )
+            })
+    });
+    let index = existing.unwrap_or_else(|| {
+        model.combinations.push(LoadCombination {
+            name: "保存長期架構G+P".into(),
+            terms: model
+                .load_cases
+                .iter()
+                .filter(|case| matches!(case.kind, LoadCaseKind::Dead | LoadCaseKind::Live))
+                .map(|case| (case.id, 1.0))
+                .collect(),
+        });
+        model.combinations.len() - 1
+    });
+    model.ultimate_gravity_combination = Some(index);
+    model
+}
+
+pub(crate) fn with_explicit_pushover_gravity(
+    mut model: sepika_core::model::Model,
+) -> sepika_core::model::Model {
+    use sepika_core::model::{LoadCase, LoadCaseKind, DL_CASE_NAME};
+    if !model
+        .load_cases
+        .iter()
+        .any(|case| case.name == DL_CASE_NAME)
+    {
+        let id = LoadCaseId(
+            model
+                .load_cases
+                .iter()
+                .map(|case| case.id.0)
+                .max()
+                .map_or(0, |id| id + 1),
+        );
+        model.load_cases.push(LoadCase {
+            id,
+            name: DL_CASE_NAME.into(),
+            kind: LoadCaseKind::Dead,
+            nodal: vec![],
+            member: vec![],
+        });
+    }
+    with_explicit_frame_gravity(model)
+}
+
+fn analyze_frame_gravity(app: &mut App) {
+    let index = app.core.model.ultimate_gravity_combination.unwrap();
+    let terms = app.core.model.combinations[index].terms.clone();
+    for (id, factor) in terms.into_iter().rev() {
+        if factor != 0.0 {
+            app.run_linear_static(id);
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+        }
+    }
+}
+
 #[cfg(feature = "gui")]
 use sepika_core::ids::StoryId;
 use sepika_core::model::MaterialCategory;
@@ -2477,8 +2590,37 @@ fn test_pushover_x_y_slots_and_view_dir() {
     use sepika_solver::statics::analysis::SeismicDir;
 
     let mut app = App::default();
-    app.load_model(crate::sample::portal_frame());
+    app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
     app.generate_stories_action();
+    let selected =
+        &app.core.model.combinations[app.core.model.ultimate_gravity_combination.unwrap()];
+    let mut selected_cases: Vec<_> = selected
+        .terms
+        .iter()
+        .map(|(id, factor)| {
+            assert_eq!(*factor, 1.0);
+            *id
+        })
+        .collect();
+    let mut original_long_term_cases: Vec<_> = app
+        .core
+        .model
+        .load_cases
+        .iter()
+        .filter(|case| case.kind.is_long_term())
+        .map(|case| case.id)
+        .collect();
+    selected_cases.sort();
+    original_long_term_cases.sort();
+    assert_eq!(selected_cases, original_long_term_cases);
+    let dl = app
+        .core
+        .model
+        .load_cases
+        .iter()
+        .find(|case| case.name == sepika_core::model::DL_CASE_NAME)
+        .unwrap();
+    assert!(!dl.nodal.is_empty() || !dl.member.is_empty());
     app.core.analysis_cfg.push_steps = 5;
 
     app.core.analysis_cfg.push_dir = SeismicDir::X;
@@ -2529,7 +2671,7 @@ pub(super) fn wait_for_job(app: &mut App) {
 #[test]
 fn test_async_pushover_job_flow() {
     let mut app = App::default();
-    app.load_model(crate::sample::portal_frame());
+    app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
     app.generate_stories_action();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -2618,7 +2760,7 @@ fn test_async_time_history_job_flow() {
 #[test]
 fn test_start_job_while_running_is_rejected() {
     let mut app = App::default();
-    app.load_model(crate::sample::portal_frame());
+    app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
     app.generate_stories_action();
     app.core.analysis_cfg.push_steps = 10;
 
@@ -3240,7 +3382,7 @@ fn test_current_static_priority() {
 #[test]
 fn test_holding_capacity_flow() {
     let mut app = App::default();
-    app.load_model(crate::sample::portal_frame());
+    app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
 
     // 階が未定義 → Err
     assert!(app.compute_holding_capacity().is_err());
@@ -3290,7 +3432,7 @@ fn test_holding_capacity_rejects_declared_brace_when_undetected() {
     use sepika_design_jp::secondary::holding_capacity::{FrameType, MemberRank};
 
     let mut app = App::default();
-    app.load_model(crate::sample::portal_frame()); // 筋かいのないラーメン
+    app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame())); // 筋かいのないラーメン
     app.generate_stories_action();
     app.run_seismic(SeismicDir::X);
     app.core.analysis_cfg.push_steps = 10;
@@ -3326,7 +3468,7 @@ fn test_holding_capacity_rank_auto_from_width_thickness() {
     use sepika_design_jp::secondary::width_thickness::{s_member_rank_by_kihon, SteelMemberUse};
 
     let mut app = App::default();
-    app.load_model(crate::sample::portal_frame());
+    app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
     app.generate_stories_action();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -3402,7 +3544,7 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
     use sepika_design_jp::secondary::holding_capacity::MemberRank;
 
     let mut app = App::default();
-    app.load_model(crate::sample::portal_frame());
+    app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
     app.generate_stories_action();
     app.run_seismic(SeismicDir::X);
     app.core.analysis_cfg.push_steps = 10;
@@ -3674,7 +3816,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     model.set_member_hysteresis(ElemId(2), sepika_core::model::HysteresisModel::Standard);
 
     let mut app = App::default();
-    app.load_model(model);
+    app.load_model(with_explicit_pushover_gravity(model));
     app.generate_stories_action();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -7429,7 +7571,7 @@ fn test_compute_ultimate_checks_rc_frame() {
                 ..col_shape.to_section(SectionId(0), "C600".into())
             },
             Section {
-                frame_use: Some(sepika_core::model::FrameSectionUse::Column),
+                frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
                 material: Some(MaterialId(0)),
                 rebar_material: Some(MaterialId(1)),
                 shear_rebar_material: Some(MaterialId(1)),
@@ -7486,7 +7628,13 @@ fn test_compute_ultimate_checks_rc_frame() {
     }
 
     let mut app = App::default();
-    app.load_model(model);
+    app.load_model(model.clone());
+    assert!(app
+        .compute_ultimate_checks()
+        .unwrap_err()
+        .contains("gravity_combination_missing"));
+    app.load_model(with_explicit_frame_gravity(model));
+    analyze_frame_gravity(&mut app);
     let checks = app
         .compute_ultimate_checks()
         .expect("RC 矩形部材があれば Ok のはず");
@@ -7593,7 +7741,13 @@ fn test_compute_cft_ultimate_checks() {
     });
 
     let mut app = App::default();
-    app.load_model(model);
+    app.load_model(model.clone());
+    assert!(app
+        .compute_cft_ultimate_checks()
+        .unwrap_err()
+        .contains("gravity_combination_missing"));
+    app.load_model(with_explicit_frame_gravity(model));
+    analyze_frame_gravity(&mut app);
     let checks = app
         .compute_cft_ultimate_checks()
         .expect("CFT 柱があれば Ok のはず");
@@ -9914,7 +10068,13 @@ fn cft_ultimate_app_keeps_axial_result_and_rounded_mu_reason() {
     section.steel_material = Some(MaterialId(0));
     model.sections[0] = section;
     let mut app = App::default();
-    app.load_model(model);
+    app.load_model(model.clone());
+    assert!(app
+        .compute_cft_ultimate_checks()
+        .unwrap_err()
+        .contains("gravity_combination_missing"));
+    app.load_model(with_explicit_frame_gravity(model));
+    analyze_frame_gravity(&mut app);
     let rows = app.compute_cft_ultimate_checks().unwrap();
     assert!(!rows.is_empty());
     for row in rows {
@@ -9957,7 +10117,7 @@ pub(super) fn cft_long_case2_app(n_compression_n: f64) -> App {
         .to_section(SectionId(0), "CFT400長柱Case2".into())
     }];
     model.load_cases.truncate(1);
-    model.load_cases[0].kind = sepika_core::model::LoadCaseKind::Other;
+    model.load_cases[0].kind = sepika_core::model::LoadCaseKind::Dead;
     model.load_cases[0].name = "指定軸力".into();
     model.load_cases[0].member.clear();
     model.load_cases[0].nodal = vec![NodalLoad::manual(
@@ -9966,9 +10126,9 @@ pub(super) fn cft_long_case2_app(n_compression_n: f64) -> App {
     )];
     model.panel_zone = sepika_core::model::PanelZoneMode::None;
     let mut app = App::default();
-    app.load_model(model);
+    app.load_model(with_explicit_frame_gravity(model));
     app.core.analysis_cfg.threads = 1;
-    app.run_linear_static(LoadCaseId(0));
+    analyze_frame_gravity(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",

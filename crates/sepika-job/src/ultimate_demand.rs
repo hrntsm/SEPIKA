@@ -93,6 +93,148 @@ pub fn member_demand_from_pushover(
     )
 }
 
+/// 保存長期termsの同一部材・同一位置6成分から静的ヒンジ需要を作る。
+/// 必要ケース・部材・評価位置・有限値が不完全なら理由付きで拒否する。
+pub fn complete_ultimate_static_demand<F>(
+    model: &sepika_core::model::Model,
+    force_of: F,
+) -> Result<Vec<(ElemId, MemberDemand)>, String>
+where
+    F: FnMut(sepika_core::ids::LoadCaseId) -> Result<Vec<(ElemId, MemberForces)>, String>,
+{
+    let selected_terms = model
+        .ultimate_gravity_combination
+        .and_then(|index| model.combinations.get(index))
+        .map(|combination| {
+            combination
+                .terms
+                .iter()
+                .map(|(case, factor)| format!("case={} coefficient={factor}", case.0))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_else(|| "unresolved".into());
+    complete_static_demand(model, force_of).map_err(|reason: String| {
+        let member = if reason.contains("member=") { "" } else { " member=unresolved" };
+        format!("{reason}; mode=static_hinge purpose=frame_long selected_terms=[{selected_terms}]{member}")
+    })
+}
+
+fn complete_static_demand<F>(
+    model: &sepika_core::model::Model,
+    mut force_of: F,
+) -> Result<Vec<(ElemId, MemberDemand)>, String>
+where
+    F: FnMut(sepika_core::ids::LoadCaseId) -> Result<Vec<(ElemId, MemberForces)>, String>,
+{
+    let terms = sepika_core::load_combo::ultimate_gravity_terms(model)?;
+    let required: Vec<_> = model
+        .elements
+        .iter()
+        .filter(|elem| {
+            matches!(
+                model.element_section(elem).and_then(|s| s.shape.as_ref()),
+                Some(
+                    sepika_core::section_shape::SectionShape::RcBeamRect { .. }
+                        | sepika_core::section_shape::SectionShape::RcColumnRect { .. }
+                        | sepika_core::section_shape::SectionShape::RcColumnCircle { .. }
+                        | sepika_core::section_shape::SectionShape::CftBox { .. }
+                        | sepika_core::section_shape::SectionShape::CftPipe { .. }
+                )
+            )
+        })
+        .map(|elem| elem.id)
+        .collect();
+    let mut combined: Option<Vec<(ElemId, MemberForces)>> = None;
+    for (case, factor) in terms {
+        let mut forces = force_of(case).map_err(|reason| {
+            format!(
+                "gravity_case_missing: case={} factor={} purpose=frame_long: {reason}",
+                case.0, factor
+            )
+        })?;
+        forces.retain(|(id, _)| required.contains(id));
+        let mut seen = std::collections::HashSet::new();
+        for (id, mf) in &forces {
+            if !seen.insert(*id) {
+                return Err(format!(
+                    "gravity_member_duplicate: case={} member={}",
+                    case.0, id.0
+                ));
+            }
+            if mf.at.is_empty()
+                || mf.at.iter().any(|(xi, f)| {
+                    !xi.is_finite() || !(0.0..=1.0).contains(xi) || f.iter().any(|v| !v.is_finite())
+                })
+                || mf.at.windows(2).any(|rows| rows[0].0 >= rows[1].0)
+                || mf.at.first().is_none_or(|r| r.0 != 0.0)
+                || mf.at.last().is_none_or(|r| r.0 != 1.0)
+            {
+                return Err(format!(
+                    "gravity_positions_invalid: case={} member={}",
+                    case.0, id.0
+                ));
+            }
+        }
+        for id in &required {
+            if !seen.contains(id) {
+                return Err(format!(
+                    "gravity_member_missing: case={} member={} purpose=frame_long",
+                    case.0, id.0
+                ));
+            }
+        }
+        if let Some(sum) = &mut combined {
+            if sum.len() != forces.len() {
+                return Err(format!("gravity_grid_mismatch: case={}", case.0));
+            }
+            for (id, mf) in sum {
+                let other = forces
+                    .iter()
+                    .find(|(candidate, _)| candidate == id)
+                    .ok_or_else(|| {
+                        format!("gravity_member_missing: case={} member={}", case.0, id.0)
+                    })?;
+                if mf.at.len() != other.1.at.len()
+                    || mf.at.iter().zip(&other.1.at).any(|(a, b)| a.0 != b.0)
+                {
+                    return Err(format!(
+                        "gravity_grid_mismatch: case={} member={}",
+                        case.0, id.0
+                    ));
+                }
+                for ((_, a), (_, b)) in mf.at.iter_mut().zip(&other.1.at) {
+                    for (value, component) in a.iter_mut().zip(b) {
+                        *value += factor * component;
+                    }
+                }
+            }
+        } else {
+            let mut initial = forces;
+            for (_, mf) in &mut initial {
+                for (_, f) in &mut mf.at {
+                    for v in f {
+                        *v *= factor;
+                    }
+                }
+            }
+            combined = Some(initial);
+        }
+    }
+    let forces = combined.ok_or("gravity_terms_empty: 長期架構用termsがありません")?;
+    if let Some((member, _)) = forces
+        .iter()
+        .find(|(_, mf)| mf.at.iter().any(|(_, f)| f.iter().any(|v| !v.is_finite())))
+    {
+        return Err(format!(
+            "gravity_sum_nonfinite: member={} 重力応力の合成値が非有限です",
+            member.0
+        ));
+    }
+    let ql = q_long_map_from_member_forces(&forces);
+    Ok(member_demand_from_static_forces(&forces, Some(&ql)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,7 +290,7 @@ mod tests {
         }
     }
 
-    fn axial_column(
+    pub(super) fn axial_column(
         force_z: f64,
         reverse_nodes: bool,
         ref_vector: [f64; 3],
@@ -318,3 +460,7 @@ mod wall_availability_tests {
         assert!(member_demand_from_pushover(&[response], None).is_none());
     }
 }
+
+#[cfg(test)]
+#[path = "ultimate565_tests.rs"]
+mod gravity_contract_tests;

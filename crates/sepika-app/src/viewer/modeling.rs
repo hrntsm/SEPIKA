@@ -1324,7 +1324,9 @@ mod tests {
 
     #[test]
     fn wall_modeling_detail_labels_rc_methods_and_keeps_steel_capacity_untagged() {
+        use sepika_core::ids::LoadCaseId;
         use sepika_core::model::RcWallShearMethod::{ArakawaMean, ArakawaMin};
+        use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination, DL_CASE_NAME};
         for method in [ArakawaMin, ArakawaMean] {
             let mut app = App::default();
             app.load_model(crate::app::rc_wall617_tests::fixture::input_model());
@@ -1334,12 +1336,42 @@ mod tests {
             app.core.analysis_cfg.push_use_drift_angle = false;
             app.core.analysis_cfg.push_max_disp = 0.2;
             app.run_preparation();
+            let model = &mut app.core.model;
+            let dl = model
+                .load_cases
+                .iter()
+                .find(|case| case.name == DL_CASE_NAME)
+                .unwrap();
+            assert!(!dl.nodal.is_empty() || !dl.member.is_empty());
+            let live_id =
+                LoadCaseId(model.load_cases.iter().map(|case| case.id.0).max().unwrap() + 1);
+            model.load_cases.push(LoadCase {
+                id: live_id,
+                name: "明示P0".into(),
+                kind: LoadCaseKind::Live,
+                nodal: vec![],
+                member: vec![],
+            });
+            let gravity_terms: Vec<_> = model
+                .load_cases
+                .iter()
+                .filter(|case| matches!(case.kind, LoadCaseKind::Dead | LoadCaseKind::Live))
+                .map(|case| (case.id, 1.0))
+                .collect();
+            model.ultimate_gravity_combination = Some(model.combinations.len());
+            model.combinations.push(LoadCombination {
+                name: "保存長期架構G+P".into(),
+                terms: gravity_terms.clone(),
+            });
             app.run_pushover();
             assert!(
                 app.core.scoped.last_error.is_none(),
                 "{:?}",
                 app.core.scoped.last_error
             );
+            let run = app.displayed_pushover().unwrap().wall_run.as_ref().unwrap();
+            assert!(run.gravity_applied);
+            assert_eq!(run.gravity_terms, gravity_terms);
             let (model, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
             let wall = model
                 .elements

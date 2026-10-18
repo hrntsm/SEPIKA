@@ -232,7 +232,14 @@ pub fn combination_design_state(
         if !factor.is_finite() {
             return Err("荷重組合せ係数が非有限です".into());
         }
-        *coefficients.entry(id.0).or_insert(0.0) += factor;
+        if !cases.iter().any(|c| c.id == *id) {
+            return Err(format!("荷重ケース {} がありません", id.0));
+        }
+        let coefficient = coefficients.entry(id.0).or_insert(0.0);
+        *coefficient += factor;
+        if !coefficient.is_finite() {
+            return Err("荷重組合せ係数の合計が非有限です".into());
+        }
     }
     let mut dead = false;
     let mut live = false;
@@ -300,6 +307,34 @@ pub fn is_gravity_combination(name: &str, model: &crate::model::Model) -> bool {
     matches.next().is_none()
         && combination_design_state(combo, &model.load_cases)
             .is_ok_and(|s| s.duration == LoadDuration::Long && s.action == LoadAction::Gravity)
+}
+
+/// 保存した長期架構用組合せを検証し、ケース別の非ゼロ係数へ正規化する。
+pub fn ultimate_gravity_terms(
+    model: &crate::model::Model,
+) -> Result<Vec<(LoadCaseId, f64)>, String> {
+    let index = model
+        .ultimate_gravity_combination
+        .ok_or("gravity_combination_missing: 長期架構用組合せが未指定です")?;
+    let combo = model
+        .combinations
+        .get(index)
+        .ok_or("gravity_combination_missing: 選択組合せがありません")?;
+    let state = combination_design_state(combo, &model.load_cases)
+        .map_err(|reason| format!("gravity_combination_unsupported: {reason}"))?;
+    if state.duration != LoadDuration::Long
+        || !matches!(state.action, LoadAction::Gravity | LoadAction::Snow)
+    {
+        return Err("gravity_combination_unsupported: 長期架構用G+P（明示した長期Sを含む）を選択してください".into());
+    }
+    let mut terms = std::collections::BTreeMap::new();
+    for (id, factor) in &combo.terms {
+        *terms.entry(*id).or_insert(0.0) += factor;
+    }
+    Ok(terms
+        .into_iter()
+        .filter(|(_, factor)| *factor != 0.0)
+        .collect())
 }
 
 #[cfg(test)]

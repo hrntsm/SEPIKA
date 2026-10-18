@@ -527,7 +527,9 @@ mod tests {
 
     fn portal_app() -> App {
         let mut app = App::default();
-        app.load_model(crate::sample::portal_frame());
+        app.load_model(crate::app::tests::with_explicit_pushover_gravity(
+            crate::sample::portal_frame(),
+        ));
         app.core.analysis_cfg.threads = 1;
         app.core.analysis_cfg.ai_mode = AiMode::Approx;
         app.core.analysis_cfg.push_steps = 10;

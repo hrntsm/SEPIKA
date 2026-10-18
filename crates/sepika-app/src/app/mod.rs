@@ -1721,27 +1721,6 @@ pub fn column_live_load_factors(model: &sepika_core::model::Model) -> Vec<(ElemI
         .collect()
 }
 
-/// 地震用重量に算入する重力ケースを `LoadCaseKind` から選択する。
-///
-/// - `kind == Dead` の全ケースを対象とする（標準構成では「DL」に躯体自重＋
-///   スラブ固定荷重が自動同期される）。ただし「自重(自動)」
-///   （未移行の場合のみ存在）は除外する
-///   （その場合は密度からの自重直接算入と二重計上になるため）。
-/// - `kind == LiveSeismic`（地震用積載）のケースがあれば併せて対象とする。
-///   なければ `kind == Live`（長期用積載）で代用する
-///   （地震用の積載荷重には地震用の値を用いる（令85条）。地震用の値が
-///   個別に定義されていなければ長期用の値をそのまま使う）。ただし
-///   スラブ自動生成の骨組用積載ケース（[`LL_FRAME_CASE_NAME`]）は
-///   **骨組用**の値を持つため、この代用対象から除外する（地震用値が明示的に
-///   0 の用途で骨組用値へフォールバックし地震用重量が過大になるのを防ぐ。
-///   スラブの地震用積載は常に [`LL_SEISMIC_CASE_NAME`] が担う）。
-/// - いずれのケースも `kind` が設定されていない（全ケースが既定値 `Other`）
-///   場合は、後方互換のため先頭ケースのみを返す
-///   （並び順に依存する規約。新規モデルは kind 設定を推奨）。
-fn gravity_cases_for_seismic_weight(model: &sepika_core::model::Model) -> Vec<LoadCaseId> {
-    sepika_job::gravity_case_ids_for_seismic_weight(model)
-}
-
 /// 波形 CSV/テキストの内容を解析する（ヘッドレステスト可能な純粋関数）。
 ///
 /// - `ThDir::X` / `ThDir::Y`: 1 行 1 値（カンマ区切りなら最後の列）を加速度(gal)として

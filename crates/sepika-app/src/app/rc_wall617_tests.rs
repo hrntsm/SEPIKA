@@ -4,7 +4,9 @@ pub(crate) mod fixture;
 
 fn ready() -> App {
     let mut app = App::default();
-    app.load_model(fixture::input_model());
+    app.load_model(crate::app::tests::with_explicit_pushover_gravity(
+        fixture::input_model(),
+    ));
     app.core.analysis_cfg.push_steps = 2;
     app.core.analysis_cfg.push_use_max_disp = true;
     app.core.analysis_cfg.push_use_drift_angle = false;

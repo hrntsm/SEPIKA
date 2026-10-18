@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [終局需要の重力契約_Issue565_2026-10.md](終局需要の重力契約_Issue565_2026-10.md) | 静的G/Pframe terms・確定増分総応答・RC/CFT不足伝播・鮮度、原5Doneの対応 | 🔶（App実RC/CFT・直接collector・物理柱・旧run混在拒否/回復を確認。default合成3468、最終関連feature1287/io195成功、Clippy/Rustdoc/fmt/文書検証成功。手動GUI・正式ゲート・Validation未確認） |
 | [用途別せん断面積と二方向検定_Issue417_2026-10.md](用途別せん断面積と二方向検定_Issue417_2026-10.md) | H/Box/Otherの剛性As・検定Ad、二方向比/τsum、CFT規約差、未算定と検定15資格 | 🔶（最終design623・Windows関連lib1558成功/既存ignore1、Clippy/strictDoc/fmt・文書検査/build成功。Q2前App349/core493/GUI831は別snapshot。正式ゲート・物理Validationは別確認） |
 | [SRC梁のQL参照完全性_Issue671_2026-10.md](SRC梁のQL参照完全性_Issue671_2026-10.md) | SRC梁のQL/Q0・分担・位置・QD選択と必要参照、検定版14/解析版23の独立資格 | 🔶（変更後core/design1128成功・App346成功。変更前Sourceと停止前MCP延べ17実行の履歴を分離。MCP専用受入は今回対象外。Windows横断・正式静的/文書検証成功、独立レビュー等の最終ゲート・Validation未確認） |
 | [依存監査とOVIKA保存_Issue690_2026-10.md](依存監査とOVIKA保存_Issue690_2026-10.md) | zip脆弱依存・GUI推移的依存の保守終了とOVIKA安全境界 | 🔶（旧8明示/PPMdなしをmetadata確認。最終App441/feature1276成功・監査/静的/文書成功。中間失敗/中断保持、正式ゲート・#671連携は後続） |
@@ -348,6 +349,8 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 無開口Qc・面積の是正後の独立算術／直接一括・GUI・公開MCP入口と編集保存失効は[Issue534検証](RC壁ひび割れ耐力_Issue534_2026-10.md)を参照（Scope内Verification成功、実験Validation未実施。最終ゲートは[PR #658](https://github.com/hrntsm/SEPIKA/pull/658)）。Issue503の旧Qc値から今回の成功を推定しない。
 
 #16 壁（TVLEM）は採用しない（[ADR 0013](../adr/0013-adopt-wall-element-model.md)）。耐震壁は壁エレメント置換モデルとして検証する（下表 #29・#30 と[未検証一覧 §3](未検証一覧.md)）。
+
+終局需要の用途・符号・完全性（索引#25の横断入口）は[Issue565記録](終局需要の重力契約_Issue565_2026-10.md)を参照する。App/collector/jobの実測、途中失敗と修正後の成功、独立期待値と耐力式Validation未確認を区別する（🔶）。
 
 各 # の修正履歴・監査結果の詳細は [§レポート目録](#レポート目録) の該当レポートを参照。
 未完了の要約は [未検証一覧.md](未検証一覧.md) を参照。

@@ -38,6 +38,8 @@ pub struct Model {
     pub constraints: Vec<Constraint>,
     pub load_cases: Vec<LoadCase>,
     pub combinations: Vec<LoadCombination>,
+    /// 終局需要と増分初期重力に用いる保存長期組合せの添字。未指定は未検定。
+    pub ultimate_gravity_combination: Option<usize>,
     /// 立体時刻歴応答解析の振動ケース（実行時に upsert。静的荷重ケースとは別）。
     #[serde(default)]
     pub vibration_cases: Vec<VibrationCase>,
@@ -1334,6 +1336,7 @@ impl Model {
             && self.constraints == other.constraints
             && self.load_cases == other.load_cases
             && self.combinations == other.combinations
+            && self.ultimate_gravity_combination == other.ultimate_gravity_combination
             && self.vibration_cases == other.vibration_cases
             && self.lumped_vibration_cases == other.lumped_vibration_cases
             && self.generated_masters == other.generated_masters
