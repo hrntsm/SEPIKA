@@ -121,7 +121,7 @@ Post（間柱）が `StbSecColumn_*`、Brace（ブレース）が `StbSecBrace_*
 | `StbSecRoll-C` | ✅ | ✅ | 溝形鋼（`SteelChannel`） |
 | `StbSecRoll-T` | ✅ | ✅ | T形鋼。独自の `StbSecBuild-T` は読まない |
 | `StbSecFlatBar` | ❌ | ⚠️ | 正式タグの取込接続は未対応。現行出力は独自の `StbSecRoll-FlatBar` で、再読込できない |
-| `StbSecRoundBar` | ❌ | ⚠️ | 正式タグの取込接続は未対応。標準寸法は半径 `R`。現行出力は独自の `StbSecRoll-RoundBar` で、再読込できない |
+| `StbSecRoundBar` | ❌ | ⚠️ | 正式タグの取込接続は未対応。標準寸法は直径 `R`（[公式説明書](https://www.building-smart.or.jp/wp-content/uploads/2022/06/ST-Bridge_XML%E4%BB%95%E6%A7%98%E8%AA%AC%E6%98%8E%E6%9B%B8%EF%BC%88ver.2.0.2%EF%BC%89_20220615.pdf#page=361) §6.20.11、本文349頁）。現行出力は独自の `StbSecRoll-RoundBar` で、再読込できない |
 | `StbSecLipC` | ❌ | ⚠️ | 正式タグの取込接続は未対応。標準の `H` と `A` は別寸法。現行出力は独自の `StbSecRoll-LipC` で、再読込できない |
 | 組立断面（2L・2C・十字）・リップ Z・その他軽量形鋼 | ❌ | ❌ | 必要な形鋼参照を解決できなければ、取り込み全体を拒否する |
 
