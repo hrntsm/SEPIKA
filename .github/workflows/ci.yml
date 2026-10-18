@@ -1,11 +1,14 @@
 name: CI
 
 on:
+  # main への push は、新規 PR が復元するテスト用キャッシュ（rust-cache、job id=test）の
+  # 生成・更新のため。品質ゲート（テスト実行・静的解析）は PR でのみ実施する。
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
 # 同一 PR への新しい push 時に、進行中の古い実行をキャンセルする。
-# 品質ゲートは PR マージ前のみ。main へのマージ後は docs デプロイ（docs.yml）のみ実行する。
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -13,6 +16,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # main では --no-run（テスト実行のみ省略。ビルド内容は PR と同一）。変数名は rust-cache が
+  # キーに含める接頭辞（CARGO / RUST / CC / CFLAGS / CXX / CMAKE）を避ける（main と PR で値が
+  # 異なるとキーが食い違うため）。
+  TEST_BUILD_ONLY_ARGS: ${{ github.event_name == 'push' && '--no-run' || '' }}
 
 jobs:
   test:
@@ -22,31 +29,27 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
+      # 完全一致で復元できた場合、同一キーへは再保存できない（キャッシュは上書き不可）ためスキップする。
       - name: テスト実行
-        run: cargo test --workspace --locked
-      # mcp / gui は非デフォルト feature のため --workspace では検証されない。
-      # sepika-io の results（Parquet 結果 I/O）も parquet feature 配下にあり、
-      # -p 指定なしでは保証されないため合わせる（workspace 解決では mcp 経由で
-      # 有効化されるが、明示指定で io 単体の検証も保証する）。
-      # 過去に rmcp API 追従漏れでコンパイル不能のまま放置された経緯があり
-      # （dev_docs/v_and_v/p8_review.md）、ここで明示的にビルド・テストして再発を防ぐ。
-      # GUI コードのコンパイル漏れ（網羅的 match 等）の検知に加え、gui ゲート内の
-      # ユニットテスト（viewer のカメラ計算等）も実行する（build は test に含まれる）。
-      # 3 クレートを同一 Cargo 呼び出し（クレート名/機能名形式）にまとめ、
-      # 同じ依存グラフの重複構築を避ける。default 構成は上の実行で別に検証する。
+        if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo test --workspace --locked $TEST_BUILD_ONLY_ARGS
+      # MCP / GUI は非デフォルト feature のため --workspace では検証されない。
       - name: featureテスト実行（MCP/GUI/Parquet）
-        run: cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked
-      # sepika-mcp が sepika-io/parquet を常時有効化しているため、
-      # --workspace では feature 統一により sepika-io の default（parquet 無効）構成が
-      # 独立には検証されない。Parquet 無効構成と、Arrow / Parquet を切り離した
-      # GUI 開発ループ構成をそれぞれ直接保証するため、以下も別に実行する。
+        if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked $TEST_BUILD_ONLY_ARGS
+      # feature 統一により --workspace では sepika-io の default（parquet 無効）構成が
+      # 検証されないため、parquet 無効構成と GUI 単体構成を以下で直接検証する。
       - name: テスト実行（sepika-io の default 構成）
-        run: cargo test -p sepika-io --locked
+        if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo test -p sepika-io --locked $TEST_BUILD_ONLY_ARGS
       - name: ビルド確認（GUI 単体・Parquet なし）
+        if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo check -p sepika-app --features sepika-app/gui --locked
 
   clippy:
     name: Clippy静的解析
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,17 +59,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Clippy実行
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # 非デフォルト feature の mcp（bin ターゲット含む）と gui（eframe 経由の
-      # GUI コード）に加え、sepika-io の results（Parquet 結果 I/O）も静的解析の
-      # 対象にする。過去に GUI コードが網羅的 match 漏れで
-      # コンパイル不能のまま放置された経緯があり（mn_view.rs）、ここで明示的に
-      # 検証して再発を防ぐ。3 クレートを同一 Cargo 呼び出し（クレート名/機能名形式）に
-      # まとめ、同じ依存グラフの重複構築を避ける。default 構成は上の実行で別に検証する。
+      # MCP / GUI は非デフォルト feature のため --workspace の Clippy では検証されない。
       - name: Clippy実行（MCP/GUI/Parquet feature）
         run: cargo clippy -p sepika-mcp -p sepika-app -p sepika-io --all-targets --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked -- -D warnings
 
   fmt:
     name: フォーマットチェック
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,10 +77,10 @@ jobs:
 
   audit:
     name: 脆弱性確認
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # rustsec/audit-check は警告を Check Run API で書き込むが、権限不足や
-    # "Not Found" でジョブ自体が落ちることがある。CLI の cargo audit なら
-    # 脆弱性の有無だけで exit code が決まり、警告（unmaintained 等）では落ちない。
+    # rustsec/audit-check は権限不足や "Not Found" でジョブ自体が落ちることがあるため、
+    # 脆弱性の有無のみで exit code が決まる CLI の cargo audit を使う。
     permissions:
       contents: read
     steps:
@@ -92,15 +91,15 @@ jobs:
           tool: cargo-audit
       - name: cargo audit
         run: |
-          # quick-xml の DoS 脆弱性。直接依存は 0.41 に更新済みだが、
-          # wayland-scanner / zbus_xml（eframe 経由の推移的依存）が
-          # まだ quick-xml ^0.39 を要求しているため、上流の更新待ち。
+          # quick-xml の DoS（推移的依存の wayland-scanner / zbus_xml が ^0.39 を要求）は
+          # 上流の更新待ちのため無視する。
           cargo audit \
             --ignore RUSTSEC-2026-0194 \
             --ignore RUSTSEC-2026-0195
 
   dependency-check:
     name: 依存性チェック
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
