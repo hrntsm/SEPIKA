@@ -337,8 +337,13 @@ pub fn sections_table(ui: &mut egui::Ui, app: &mut App) {
                     },
                 );
             });
-            row.col(|ui| {
-                ui.label(table_util::fmt_section_prop(to_cm4(sec.j)));
+            row.col(|ui| match sec.resolved_j() {
+                Ok(j) => {
+                    ui.label(table_util::fmt_section_prop(to_cm4(j)));
+                }
+                Err(reason) => {
+                    ui.label("未算定").on_hover_text(reason);
+                }
             });
             row.col(|ui| {
                 ui.label(format!(

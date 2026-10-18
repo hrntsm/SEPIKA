@@ -36,16 +36,18 @@ fn cantilever(section: Section, load_n: [f64; 6]) -> App {
 }
 
 pub(crate) fn unsupported_box() -> App {
-    cantilever(
-        SectionShape::SteelBox {
-            height: 400.0,
-            width: 300.0,
-            thick: 12.0,
-            corner_r: Some(5.0),
-        }
-        .to_section(SectionId(0), "BOX適用外".into()),
-        [0.0, 0.0, -100_000.0, 0.0, 0.0, 0.0],
-    )
+    const SUPPLIED_J_MM4: f64 = 400_000_000.0;
+    let mut section = SectionShape::SteelBox {
+        height: 400.0,
+        width: 300.0,
+        thick: 12.0,
+        corner_r: Some(5.0),
+    }
+    .input_section(SectionId(0), "BOX適用外".into())
+    .unwrap();
+    section.j = SUPPLIED_J_MM4;
+    section.property_basis.j = PropertyBasis::Supplied;
+    cantilever(section, [0.0, 0.0, -100_000.0, 0.0, 0.0, 0.0])
 }
 
 #[test]

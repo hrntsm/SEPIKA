@@ -472,10 +472,24 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
             SectionId(app.core.model.sections.len() as u32),
             draft.name.clone(),
         );
-        if let Ok(sec) = &sec {
+        let preview = shape.input_section(
+            SectionId(app.core.model.sections.len() as u32),
+            draft.name.clone(),
+        );
+        if let Ok(preview) = &preview {
+            let format_property = |value: f64, basis| {
+                if basis == sepika_core::model::PropertyBasis::PendingShape {
+                    "未算定".into()
+                } else {
+                    format!("{value:.3e}")
+                }
+            };
             ui.label(format!(
-            "算定: A = {:.3e} mm²   Iy = {:.3e} mm⁴   Iz = {:.3e} mm⁴   J = {:.3e} mm⁴",
-            sec.area, sec.iy, sec.iz, sec.j
+                "算定: A = {} mm²   Iy = {} mm⁴   Iz = {} mm⁴   J = {} mm⁴",
+                format_property(preview.area, preview.property_basis.area),
+                format_property(preview.iy, preview.property_basis.iy),
+                format_property(preview.iz, preview.property_basis.iz),
+                preview.resolved_j().map(|j| format!("{j:.3e}")).unwrap_or_else(|_| "未算定".into())
             ));
         }
 

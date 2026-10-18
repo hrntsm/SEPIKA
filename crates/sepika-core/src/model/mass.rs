@@ -1712,12 +1712,15 @@ mod tests {
             (f64::NAN, 400.0),
             (400.0, f64::INFINITY),
         ] {
-            let section = SectionShape::RcBeamRect {
+            let shape = SectionShape::RcBeamRect {
                 b,
                 d,
                 rebar: rebar.clone(),
-            }
-            .to_section(SectionId(0), "invalid-shape".into());
+            };
+            let section = Section {
+                shape: Some(shape),
+                ..Section::zero(SectionId(0), "invalid-shape".into())
+            };
             assert!(SectionMassProperties::try_from_section(
                 &section,
                 Some(&material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0))),

@@ -213,7 +213,14 @@ fn test_beam_new_src_cft_composite_props() {
 
     let cft_beam = BeamElement::new(&make_elem(1), &model);
     let pc = cft_shape
-        .cft_equivalent_props(205000.0, 0.3, 24.0, 23.0)
+        .cft_equivalent_props(
+            205000.0,
+            0.3,
+            205000.0 / 2.6,
+            24.0,
+            23.0,
+            model.sections[1].resolved_j().unwrap(),
+        )
         .unwrap();
     assert!((cft_beam.a - pc.area_ax).abs() < 1e-6);
     assert!((cft_beam.iz - pc.iy).abs() / pc.iy < 1e-12);
@@ -222,20 +229,18 @@ fn test_beam_new_src_cft_composite_props() {
     let mut invalid_cft_material = model.materials[0].clone();
     invalid_cft_material.fc = Some(f64::NAN);
     assert!(super::stiffness_factors::composite_props_with(
-        &cft_shape,
+        &model.sections[1],
         &invalid_cft_material,
         Some(&model.materials[1]),
     )
-    .unwrap()
-    .is_none());
+    .is_err());
     invalid_cft_material.fc = Some(0.0);
     assert!(super::stiffness_factors::composite_props_with(
-        &cft_shape,
+        &model.sections[1],
         &invalid_cft_material,
         Some(&model.materials[1]),
     )
-    .unwrap()
-    .is_none());
+    .is_err());
     invalid_cft_material.fc = Some(36.0);
     invalid_cft_material.young = 0.0;
     assert!(super::stiffness_factors::validate_composite_material(

@@ -141,7 +141,14 @@ fn cft_initial_shear_rigidity_distinguishes_directional_plates_and_published_coe
                 corner_r: Some(radius),
             };
             let props = shape
-                .try_cft_equivalent_props(205_000.0, 0.3, 60.0, 24.0)
+                .try_cft_equivalent_props(
+                    205_000.0,
+                    0.3,
+                    205_000.0 / (2.0 * (1.0 + 0.3)),
+                    60.0,
+                    24.0,
+                    shape.try_calc_j().unwrap(),
+                )
                 .unwrap()
                 .unwrap();
             let expected = if rotated {

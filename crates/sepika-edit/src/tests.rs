@@ -745,7 +745,45 @@ fn radius_edit_updates_only_shape_properties_and_restores_basis() {
         assert_eq!(changed.steel_material, original.steel_material);
         assert_eq!(changed.floor, original.floor);
         assert_eq!(changed.frame_use, original.frame_use);
-        assert!(changed.with_surface_radius(None).is_err());
+        assert!(stack.run(
+            &mut model,
+            Box::new(SetSectionSurfaceRadius {
+                section: SectionId(0),
+                radius_mm: None,
+            })
+        ));
+        let unknown = model.sections[0].clone();
+        assert_eq!(unknown.area, 123.0);
+        assert_eq!(unknown.resolved_area().unwrap(), 123.0);
+        assert_eq!(unknown.property_basis.area, PropertyBasis::Supplied);
+        assert_eq!(unknown.property_basis.iy, PropertyBasis::PendingShape);
+        assert_eq!(unknown.property_basis.iz, PropertyBasis::PendingShape);
+        match unknown.shape.as_ref().unwrap() {
+            SectionShape::SteelH { root_r, .. } => {
+                assert_eq!(*root_r, None);
+                assert_eq!(unknown.property_basis.j, PropertyBasis::Shape);
+                assert_eq!(
+                    unknown.resolved_j().unwrap(),
+                    original.resolved_j().unwrap()
+                );
+            }
+            SectionShape::SteelBox { corner_r, .. } | SectionShape::CftBox { corner_r, .. } => {
+                assert_eq!(*corner_r, None);
+                assert_eq!(unknown.property_basis.j, PropertyBasis::PendingShape);
+                let reason = unknown.resolved_j().unwrap_err();
+                assert!(reason.contains("未算定"), "{reason}");
+                assert!(reason.contains("未知"), "{reason}");
+            }
+            _ => unreachable!(),
+        }
+        let reason = unknown.ensure_properties_resolved().unwrap_err();
+        assert!(reason.contains("未算定"), "{reason}");
+        stack.undo(&mut model);
+        assert_eq!(model.sections[0], changed);
+        stack.redo(&mut model);
+        assert_eq!(model.sections[0], unknown);
+        stack.undo(&mut model);
+        assert_eq!(model.sections[0], changed);
         stack.undo(&mut model);
         assert_eq!(model.sections[0], direct);
         stack.undo(&mut model);

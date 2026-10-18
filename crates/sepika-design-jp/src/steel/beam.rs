@@ -31,7 +31,7 @@ pub(crate) fn check_beam(
     ctx: &DesignCtx,
     f: f64,
     term: LoadTerm,
-) -> CheckResult {
+) -> Result<CheckResult, String> {
     let h = sec.depth;
     let b = sec.width;
     let area = nonzero(sec.area);
@@ -86,10 +86,11 @@ pub(crate) fn check_beam(
                     let (i_t, af) = steel_lateral_buckling_i_af(sec, tf, tw);
                     steel_fb_h(f, term, lb, i_t, h, af, c)
                 }
+                SteelFbBasis::Asd2019 if lb <= 1e-9 => ft_val,
                 SteelFbBasis::Asd2019 => {
                     let iz = sec.iz;
                     let iw = steel_warping_constant(sec, tf);
-                    let j = sec.j;
+                    let j = sec.resolved_j()?;
                     let e = mat.young;
                     let g = mat.shear.unwrap_or(e / (2.0 * (1.0 + mat.poisson)));
                     let p_lambda_b = steel_p_lambda_b(ctx, lb_is_partial);
@@ -221,11 +222,11 @@ pub(crate) fn check_beam(
         },
     ];
 
-    CheckResult {
+    Ok(CheckResult {
         basis,
         detail,
         components,
-    }
+    })
 }
 
 /// 大梁のたわみ S [mm] を求める（たわみの検定、長期のみ）。

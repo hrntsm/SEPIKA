@@ -868,15 +868,11 @@ fn test_model_issues_errors_on_invalid_rc_material() {
     }
 }
 
-/// CFT では Fc とヤング係数が揃っていても、鋼管の板厚が過大で充填部の内法が 0 に
-/// なる形状では等価断面性能を算定できず、鋼管のみへフォールバックする。材料条件が
-/// 原因ではないため、警告の是正文が形状条件にも触れていることを確認する。
 #[test]
 fn test_model_issues_rejects_cft_composite_with_zero_core() {
     use super::precheck::{model_issues, IssueSeverity, IssueTargets};
 
     let mut model = make_cantilever_model();
-    // 板厚 200 で内法（400 − 2×200）が 0 になる CFT 角形断面。
     model.sections[0].shape = Some(sepika_core::section_shape::SectionShape::CftBox {
         corner_r: Some(0.0),
         height: 400.0,

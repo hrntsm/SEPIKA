@@ -23,33 +23,59 @@ impl SectionShape {
                 self.try_calc_area()?,
                 self.try_calc_iy()?,
                 self.try_calc_iz()?,
+                self.try_calc_j()?,
             ))
         })();
         result.map_err(|error: String| format!("断面 {}「{}」: {error}", id.0, name))
     }
 
-    /// 未知のフィレット半径・角Rを保持して入力する。A・Iy・Iz は明示的な未算定区分となる。
+    /// 形状を入力し、算定不能な A・Iy・Iz・J は項目ごとに未算定として保持する。
     /// 不正な寸法はエラー。未算定値を用いる計算は `Section` の解決検証で拒否する。
     pub fn input_section(&self, id: SectionId, name: String) -> Result<Section, String> {
         self.validate_surface_radius()?;
+        self.validate_lip_channel()
+            .map_err(|error| format!("断面 {}「{}」: {error}", id.0, name))?;
         if matches!(
             self,
             Self::SteelH { root_r: None, .. }
                 | Self::SteelBox { corner_r: None, .. }
                 | Self::CftBox { corner_r: None, .. }
         ) {
-            let mut section = self.build_section(id, name, 0.0, 0.0, 0.0);
+            let j = self.try_calc_j();
+            let mut section = self.build_section(id, name, 0.0, 0.0, 0.0, j.clone().unwrap_or(0.0));
             section.property_basis.area = crate::model::PropertyBasis::PendingShape;
             section.property_basis.iy = crate::model::PropertyBasis::PendingShape;
             section.property_basis.iz = crate::model::PropertyBasis::PendingShape;
+            if j.is_err() {
+                section.property_basis.j = crate::model::PropertyBasis::PendingShape;
+            }
             Ok(section)
         } else {
-            self.try_to_section(id, name)
+            let j = self.try_calc_j();
+            let mut section = self.build_section(
+                id,
+                name,
+                self.try_calc_area()?,
+                self.try_calc_iy()?,
+                self.try_calc_iz()?,
+                j.clone().unwrap_or(0.0),
+            );
+            if j.is_err() {
+                section.property_basis.j = crate::model::PropertyBasis::PendingShape;
+            }
+            Ok(section)
         }
     }
 
-    fn build_section(&self, id: SectionId, name: String, area: f64, iy: f64, iz: f64) -> Section {
-        let j = self.calc_j();
+    fn build_section(
+        &self,
+        id: SectionId,
+        name: String,
+        area: f64,
+        iy: f64,
+        iz: f64,
+        j: f64,
+    ) -> Section {
         let (depth, width, as_y, as_z) = match *self {
             SectionShape::SteelH {
                 height,

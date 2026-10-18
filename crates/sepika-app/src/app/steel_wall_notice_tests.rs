@@ -1,6 +1,6 @@
 use super::*;
 use sepika_core::ids::{WallPlateId, WallRegionId};
-use sepika_core::model::{ElementKind, WallPlate, WallPlateShape, WallRegion};
+use sepika_core::model::{ElementKind, PropertyBasis, WallPlate, WallPlateShape, WallRegion};
 
 pub(super) fn steel_wall_model() -> sepika_core::model::Model {
     let mut model =
@@ -14,6 +14,7 @@ pub(super) fn steel_wall_model() -> sepika_core::model::Model {
     section.name = "鋼板壁".into();
     section.frame_use = None;
     section.shape = None;
+    section.property_basis.j = PropertyBasis::Supplied;
     section.thickness = Some(6.0);
     model.sections.push(section);
     let boundary = vec![NodeId(0), NodeId(1), NodeId(3), NodeId(2)];

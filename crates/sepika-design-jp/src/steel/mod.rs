@@ -25,6 +25,8 @@ pub mod panel_zone;
 mod section;
 #[cfg(test)]
 mod shear_contract_tests;
+#[cfg(test)]
+mod torsion_contract_tests;
 
 pub use section::{resolve_lb, steel_fb_h, steel_fb_h_asd2019, steel_h_z_with_loss, steel_i_t};
 
@@ -256,9 +258,14 @@ impl DesignCheck for SteelDesign {
         let cr = match ctx.kind {
             MemberKind::Girder => beam::check_beam(forces, sec, mat, ctx, f, term),
             MemberKind::Column => column::check_column(forces, sec, mat, ctx, f, term),
-            MemberKind::Brace => brace::check_brace(forces, sec, mat, ctx, f, term),
+            MemberKind::Brace => Ok(brace::check_brace(forces, sec, mat, ctx, f, term)),
         };
-        CheckOutcome::Checked(cr)
+        match cr {
+            Ok(result) => CheckOutcome::Checked(result),
+            Err(reason) => CheckOutcome::Skipped {
+                reason: format!("鋼横座屈検定: {reason}"),
+            },
+        }
     }
 }
 

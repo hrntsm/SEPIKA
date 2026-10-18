@@ -565,6 +565,43 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         ));
     }
 
+    let mut cft_groups = std::collections::HashMap::new();
+    for e in &model.elements {
+        if !matches!(
+            e.kind,
+            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+        ) {
+            continue;
+        }
+        let Some(section) = model.element_section(e).filter(|section| section.is_cft()) else {
+            continue;
+        };
+        let key = (
+            section.id,
+            model.element_material(e).map(|material| material.id),
+            model.element_steel_material(e).map(|material| material.id),
+        );
+        cft_groups.entry(key).or_insert_with(Vec::new).push(e);
+    }
+    let mut cft_groups: Vec<_> = cft_groups.into_values().collect();
+    cft_groups.sort_unstable_by_key(|group| group[0].id.0);
+    for group in cft_groups {
+        let first = group[0];
+        let reason = match sepika_element::frame::beam::composite_props_of(model, first) {
+            Ok(Some(_)) => continue,
+            Ok(None) => "CFT の等価断面性能が未算定です".to_string(),
+            Err(reason) => reason,
+        };
+        let section = model.element_section(first).expect("集約済みの断面");
+        issues.push(ModelIssue::members(
+            &format!("CFT 断面「{}」の等価断面性能を算定できません: {reason}", section.name),
+            "ID ",
+            group.iter().map(|element| element.id).collect(),
+            &reason,
+            "鋼管・コンクリート材料、断面寸法とコアねじり算定の理由を確認してください。未算定のまま解析できません。",
+        ));
+    }
+
     for e in &model.elements {
         if matches!(
             e.kind,
@@ -607,8 +644,12 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             model
                 .element_section(e)
                 .and_then(|s| s.shape.as_ref())
-                .and_then(sepika_core::structure_kind::shape_composite_kind)
-                .is_some()
+                .is_some_and(|shape| {
+                    matches!(
+                        shape,
+                        SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
+                    )
+                })
         })
         .filter(|e| model.element_material(e).is_some())
         .filter(|e| {
@@ -625,13 +666,11 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     if !composite_fallback.is_empty() {
         issues.push(
             ModelIssue::members(
-                "材料由来の等価断面性能を算定できない SRC/CFT 断面を使う部材があります",
+                "材料由来の等価断面性能を算定できない SRC 断面を使う部材があります",
                 "ID ",
                 composite_fallback,
                 "等価断面性能を算定できません",
-                "断面タブで主材料のコンクリート Fc とヤング係数を設定してください。\
-                 CFT では鋼管の板厚・外径（充填部の内法が正の値か）も確認してください。\
-                 CFT の既存の鋼管のみ評価について確認してください。",
+                "断面タブで主材料のコンクリート Fc とヤング係数を設定してください。",
             )
             .warn(),
         );

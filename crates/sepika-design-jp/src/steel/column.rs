@@ -24,7 +24,7 @@ pub(crate) fn check_column(
     ctx: &DesignCtx,
     f: f64,
     term: LoadTerm,
-) -> CheckResult {
+) -> Result<CheckResult, String> {
     let h = sec.depth;
     let b = sec.width;
     let area = nonzero(sec.area);
@@ -56,10 +56,11 @@ pub(crate) fn check_column(
                 let i_t = steel_i_t(b, tf, h, tw);
                 steel_fb_h(f, term, ctx.length, i_t, h, af, c)
             }
+            SteelFbBasis::Asd2019 if ctx.length <= 1e-9 => ft_val,
             SteelFbBasis::Asd2019 => {
                 let iz = sec.iz;
                 let iw = steel_warping_constant(sec, tf);
-                let j = sec.j;
+                let j = sec.resolved_j()?;
                 let e = mat.young;
                 let g = mat.shear.unwrap_or(e / (2.0 * (1.0 + mat.poisson)));
                 let p_lambda_b = steel_p_lambda_b(ctx, false);
@@ -164,11 +165,11 @@ fbY={:.4} N/mm², λ={:.3}, 軸曲げ比={:.4}",
         },
     ];
 
-    CheckResult {
+    Ok(CheckResult {
         basis,
         detail,
         components,
-    }
+    })
 }
 #[cfg(test)]
 mod tests {

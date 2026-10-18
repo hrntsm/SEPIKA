@@ -47,6 +47,7 @@ fn fixture(top: f64) -> Model {
     let mut support = model.sections[0].clone();
     support.id = SectionId(1);
     support.shape = None;
+    support.property_basis.j = PropertyBasis::Supplied;
     support.area = 0.0;
     support.width = 0.0;
     support.depth = 0.0;

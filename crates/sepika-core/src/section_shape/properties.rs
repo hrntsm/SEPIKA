@@ -601,11 +601,55 @@ impl SectionShape {
         }
     }
 
-    /// ねじり定数 J `[mm⁴]`。不成立のリップ溝形は panic。
+    /// ねじり定数 J `[mm⁴]`。算定不能なら panic。入力検証には `try_calc_j` を用いる。
     pub fn calc_j(&self) -> f64 {
-        self.validate_lip_channel()
-            .unwrap_or_else(|error| panic!("{error}"));
-        self.rectangular_j()
+        self.try_calc_j().unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// ねじり定数 J `[mm⁴]`。H は慣用薄肉式、Box は明示角Rの適用域内で算定する。
+    /// 不正寸法・Box の未知角R・適用域外・非有限算定値は理由付きエラー。
+    pub fn try_calc_j(&self) -> Result<f64, String> {
+        self.validate_lip_channel()?;
+        self.validate_surface_radius()?;
+        let j = match *self {
+            Self::SteelBox {
+                height,
+                width,
+                thick,
+                corner_r,
+            }
+            | Self::CftBox {
+                height,
+                width,
+                thick,
+                corner_r,
+            } => {
+                let ro = corner_r.ok_or("ねじり定数 J の算定に必要な外角Rが未知です")?;
+                if ro == 0.0 {
+                    self.rectangular_j()
+                } else {
+                    if ro < thick {
+                        return Err("ねじり定数 J は 0 < 外角R < 板厚では適用外です".into());
+                    }
+                    if height.min(width) / thick < 10.0 {
+                        return Err(
+                            "ねじり定数 J の丸角中心線式は min(H, B)/t >= 10 が必要です".into()
+                        );
+                    }
+                    let rm = ro - thick / 2.0;
+                    let am = (width - thick) * (height - thick)
+                        - (4.0 - std::f64::consts::PI) * rm.powi(2);
+                    let pm = 2.0 * (width + height - 2.0 * thick)
+                        + (2.0 * std::f64::consts::PI - 8.0) * rm;
+                    4.0 * thick * am.powi(2) / pm
+                }
+            }
+            _ => self.rectangular_j(),
+        };
+        if !j.is_finite() || j <= 0.0 {
+            return Err("ねじり定数 J の算定値は有限な正値が必要です".into());
+        }
+        Ok(j)
     }
 
     fn rectangular_j(&self) -> f64 {

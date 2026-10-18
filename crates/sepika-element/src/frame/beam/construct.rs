@@ -46,7 +46,9 @@ impl BeamElement {
 
         let axis = geom.local_frame(data.local_axis.ref_vector);
         let sec = get_section(model, data.section);
-        sec.ensure_properties_resolved()?;
+        let section_error =
+            |error| format!("部材 ID {} の断面「{}」: {error}", data.id.0, sec.name);
+        sec.ensure_properties_resolved().map_err(section_error)?;
         if let Some(shape) = &sec.shape {
             shape.validate_src_geometry().map_err(|error| {
                 format!(
@@ -73,7 +75,8 @@ impl BeamElement {
 
         use sepika_core::section_shape::SectionShape;
         if let Some(shape) = sec.shape.as_ref() {
-            super::stiffness_factors::validate_composite_material(shape, &mat, steel_mat)?;
+            super::stiffness_factors::validate_composite_material(shape, &mat, steel_mat)
+                .map_err(section_error)?;
         }
         let (e, g) = match sec.shape.as_ref() {
             Some(
@@ -94,7 +97,13 @@ impl BeamElement {
         let a_stiff = composite.map_or(sec.area, |p| p.area_ax);
         let (sec_iy, sec_iz, j, sec_as_y, sec_as_z) = match &composite {
             Some(p) => (p.iy, p.iz, p.j, p.as_y, p.as_z),
-            None => (sec.iy, sec.iz, sec.j, as_y, as_z),
+            None => (
+                sec.iy,
+                sec.iz,
+                sec.resolved_j().map_err(section_error)?,
+                as_y,
+                as_z,
+            ),
         };
 
         let (iy, iz, as_y, as_z) = (sec_iz, sec_iy, sec_as_z, sec_as_y);

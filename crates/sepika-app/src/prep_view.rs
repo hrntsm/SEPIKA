@@ -11,7 +11,7 @@ use sepika_core::units::to_display::{area_cm2, force_kn, inertia_cm4, length_m, 
 use crate::app::{
     ai_mode_label, load_case_kind_label, member_kind_label, member_rank_label, soil_class_label,
     steel_member_use_label, story_level_kind_label, story_structure_label, zone_source_label, App,
-    CompositeFallbackKind, PreparationResult, RIGID_ZONE_RATIO_WARN,
+    PreparationResult, RIGID_ZONE_RATIO_WARN,
 };
 
 /// 準備計算ビュー内の表示切替。
@@ -724,7 +724,11 @@ fn sections_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                 );
             });
             row.col(|ui| {
-                ui.label(crate::table_util::fmt_section_prop(inertia_cm4(r.j)));
+                ui.label(
+                    r.j.map(|v| crate::table_util::fmt_section_prop(inertia_cm4(v)))
+                        .unwrap_or_else(|| "未算定".into()),
+                )
+                .on_hover_text(r.unavailable_reason.as_deref().unwrap_or(""));
             });
             row.col(|ui| {
                 ui.label(format!(
@@ -877,7 +881,7 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                 ui.label(member_kind_label(r.kind));
             });
             row.col(|ui| {
-                let (text, hover) = match (&r.composite, r.composite_fallback) {
+                let (text, hover) = match (&r.composite, &r.unavailable_reason) {
                     (Some(c), _) => (
                         format!("{}（等価換算）", r.section_name),
                         format!(
@@ -891,15 +895,9 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                             c.as_z * 1e-2
                         ),
                     ),
-                    (None, Some(CompositeFallbackKind::CftSteelOnly)) => (
-                        format!("{}（鋼管のみ）", r.section_name),
-                        "材料由来の等価断面性能を算定できないため、充填コンクリートを\
-                         無視した鋼管のみで剛性を評価しています。主材料の Fc・ヤング係数、\
-                         CFT では鋼管の板厚・外径（充填部の内法が正の値か）を確認してください。\
-                         Fc が 0 以下または非有限値の場合は入力不備として扱われます。\
-                         診断タブにも警告が出ます。"
-                            .to_string(),
-                    ),
+                    (None, Some(reason)) => {
+                        (format!("{}（未算定）", r.section_name), reason.clone())
+                    }
                     (None, None) => (r.section_name.clone(), "等価換算なし".to_string()),
                 };
                 ui.label(text).on_hover_text(hover);
@@ -917,11 +915,15 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                 ui.label(format!("{:.0}", r.section_iy * 1e-4));
             });
             row.col(|ui| {
-                ui.label(format!("{:.0}", r.effective_iy * 1e-4));
+                ui.label(
+                    r.effective_iy
+                        .map(|v| format!("{:.0}", v * 1e-4))
+                        .unwrap_or_else(|| "未算定".into()),
+                );
             });
             row.col(|ui| {
-                if r.section_iy > 0.0 {
-                    ui.label(format!("{:.2} 倍", r.effective_iy / r.section_iy));
+                if let Some(iy) = r.effective_iy.filter(|_| r.section_iy > 0.0) {
+                    ui.label(format!("{:.2} 倍", iy / r.section_iy));
                 } else {
                     ui.colored_label(crate::theme::GRAY_600, "—");
                 }
@@ -935,7 +937,8 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
          強軸曲げの増大率、「壁上下梁」は壁エレメント上下大梁の一律倍率です。\
          「実効 Iy」は等価換算とこれらをすべて適用した強軸曲げ剛性用の値で、\
           フレーム内雑壁（腰壁・垂壁・袖壁）の算入分は含みません。\
-          SRC の材料が不正な場合は準備計算を停止し、理由をエラー表示します。",
+          SRC の材料が不正な場合は準備計算を停止し、理由をエラー表示します。\
+          CFT の剛性を算定できない場合は未算定と理由を表示します。",
     );
 }
 
