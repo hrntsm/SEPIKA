@@ -502,7 +502,7 @@ pub fn beam_distribution_is_ready(entry: &SecondaryBeamLoads, span: f64) -> bool
 fn nearest_beam_dist(model: &Model, p0: [f64; 3], p1: [f64; 3]) -> f64 {
     let mut best = f64::INFINITY;
     for e in &model.elements {
-        if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
+        if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
             continue;
         }
         let (Some(a), Some(b)) = (coord(model, e.nodes[0]), coord(model, e.nodes[1])) else {

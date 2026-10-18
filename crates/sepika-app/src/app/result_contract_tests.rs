@@ -151,6 +151,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-column-self-weight-faces", Some(20), "旧契約"),
         ("old-member-load-direction", Some(22), "旧契約"),
         ("old-gravity-run-provenance", Some(23), "旧契約"),
+        ("old-attached-primary-support-loads", Some(24), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -169,6 +170,12 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
             assert_eq!(loaded.core.scoped.last_static, app.core.scoped.last_static);
             assert!(!bundle.member_checks.is_empty());
             assert!(!loaded.core.scoped.staleness.results_stale);
+            assert!(loaded.require_selected_static_input().is_ok());
+            assert!(loaded.current_design_results().is_some());
+            assert_eq!(
+                crate::summary::build_report_csv(&loaded),
+                crate::summary::build_report_csv(&app)
+            );
         } else {
             assert!(!bundle.has_analysis_results());
             assert!(!bundle.has_design_results());
@@ -189,7 +196,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
 #[test]
 fn ovika_old_analysis_is_unavailable_until_explicit_reanalysis() {
     let app = calculated();
-    for version in [5, 6, 7, 20, 22] {
+    for version in [5, 6, 7, 20, 22, 24] {
         let (mut loaded, path) = restore(
             &app,
             Some(version),
@@ -292,6 +299,7 @@ fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_
         ("design-old-signed-reactions", Some(3)),
         ("design-old-skew-rectangle", Some(4)),
         ("design-old-rc-q0", Some(11)),
+        ("design-old-secondary-load-ownership", Some(16)),
         ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
     ] {
         let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);
@@ -906,9 +914,7 @@ fn lip_channel_geometry_old_contracts_expire_and_current_keeps_results() {
 }
 
 #[test]
-fn cft_case2_design12_expires_while_current_analysis_survives_and_design16_can_be_recomputed() {
-    assert_eq!(ANALYSIS_CONTRACT_VERSION, 24);
-    assert_eq!(DESIGN_CONTRACT_VERSION, 16);
+fn cft_case2_design12_expires_while_current_analysis_survives_and_design_can_be_recomputed() {
     let app = super::tests::cft_long_case2_app(4_000_000.0);
     let original = app.core.scoped.results.as_ref().unwrap();
     assert!(original.has_design_results());
@@ -948,7 +954,10 @@ fn cft_case2_design12_expires_while_current_analysis_survives_and_design16_can_b
         reopened.core.scoped.last_error
     );
     let recalculated = reopened.core.scoped.results.as_ref().unwrap();
-    assert_eq!(recalculated.design_contract_version, Some(16));
+    assert_eq!(
+        recalculated.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
     assert!(recalculated.has_design_results());
     assert_eq!(recalculated.member_forces, original.member_forces);
     let rows = reopened.compute_cft_ultimate_checks().unwrap();

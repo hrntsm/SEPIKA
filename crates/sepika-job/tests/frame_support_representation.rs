@@ -264,3 +264,229 @@ fn 中間アンカーの両端支持二次材と二分割版は全解析表現�
         }
     }
 }
+
+fn attached_floor(split: bool, presplit: bool) -> Model {
+    use sepika_core::ids::*;
+    let mut model = fixture::rectangle(false, [ElementKind::Beam; 4]);
+    model.nodes.truncate(2);
+    model.elements.truncate(1);
+    model.elements[0].local_axis.ref_vector = [0., 0., 1.];
+    let points = if split {
+        vec![[2000., 0., 0.], [2000., 800., 0.], [2000., 1500., 0.]]
+    } else {
+        vec![[2000., 0., 0.], [2000., 1500., 0.]]
+    };
+    for coord in points {
+        let mut node = model.nodes[0].clone();
+        node.id = NodeId(model.nodes.len() as u32);
+        node.coord = coord;
+        model.nodes.push(node);
+    }
+    for nodes in if split {
+        vec![[2, 3], [3, 4]]
+    } else {
+        vec![[2, 3]]
+    } {
+        let mut element = model.elements[0].clone();
+        element.id = ElemId(model.elements.len() as u32);
+        element.nodes = nodes.map(NodeId).into_iter().collect();
+        model.elements.push(element);
+    }
+    model.load_cases = default_load_cases();
+    for (i, span) in if presplit {
+        vec![[0., 0.5], [0.5, 1.]]
+    } else {
+        vec![[0., 1.]]
+    }
+    .into_iter()
+    .enumerate()
+    {
+        model.slabs.push(Slab {
+            id: SlabId(i as u32),
+            shape: SlabShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(0), NodeId(1)],
+                    span,
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: [1500.; 2],
+            },
+            plate: SlabPlate {
+                loads: vec![AreaLoad {
+                    kind: "仕上げ".into(),
+                    value: 0.0025,
+                }],
+                ..Default::default()
+            },
+            tip_loads: vec![SlabTipLoad {
+                case: LoadCaseId(0),
+                intensity: 2.,
+                direction: TipLoadDirection::NegZ,
+            }],
+        });
+    }
+    set_plate_section(&mut model, false);
+    model
+}
+
+fn assert_attached_floor(model: &Model, original: &Slab, divided: bool) {
+    use sepika_core::ids::*;
+    let spans = if divided {
+        vec![[0., 0.5], [0.5, 1.]]
+    } else {
+        vec![[0., 1.]]
+    };
+    assert_eq!(model.slabs.len(), spans.len());
+    let mut total_area = 0.;
+    for (slab, span) in model.slabs.iter().zip(spans) {
+        assert_eq!(
+            slab.shape,
+            SlabShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: [NodeId(0), NodeId(1)],
+                    span,
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: [1500.; 2],
+            }
+        );
+        assert_eq!(slab.plate, original.plate);
+        assert_eq!(slab.tip_loads, original.tip_loads);
+        let area = sepika_core::geom::polygon::area_xy(&slab.boundary_coords(model).unwrap());
+        assert_eq!(area, if divided { 3_000_000. } else { 6_000_000. });
+        total_area += area;
+        let supports = model.attached_slab_supports(slab).unwrap();
+        assert_eq!(supports.len(), 1);
+        assert_eq!(supports[0].elem, ElemId(0));
+        assert_eq!(supports[0].span, span);
+    }
+    assert_eq!(total_area, 6_000_000.);
+}
+
+fn assert_attached_floor_loads(model: &Model) {
+    let dl = model
+        .load_cases
+        .iter()
+        .find(|case| case.name == DL_CASE_NAME)
+        .unwrap();
+    for (source, expected_force) in [(LoadSource::Auto, 62_100.), (LoadSource::SlabTip, 8_000.)] {
+        let nodal: Vec<_> = dl
+            .nodal
+            .iter()
+            .filter(|load| load.source == source)
+            .cloned()
+            .collect();
+        let member: Vec<_> = dl
+            .member
+            .iter()
+            .filter(|load| load.source == source)
+            .cloned()
+            .collect();
+        assert!(member
+            .iter()
+            .all(|load| load.elem == sepika_core::ids::ElemId(0)));
+        let expected = [expected_force, expected_force * 2000., 0., 0.];
+        for (actual, expected) in resultant(model, &nodal, &member).into_iter().zip(expected) {
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "{source:?}: {actual} != {expected}"
+            );
+        }
+    }
+    for (actual, expected) in
+        resultant(model, &dl.nodal, &dl.member)
+            .into_iter()
+            .zip([70_100., 140_200_000., 0., 0.])
+    {
+        assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
+    }
+}
+
+#[test]
+fn 取付き床の全長連結混在支持は分割と統合阻止と独立荷重を保持する() {
+    use ElementKind::*;
+    for (split, kinds) in [
+        (false, vec![Beam]),
+        (false, vec![Fiber]),
+        (false, vec![MultiSpring]),
+        (true, vec![Beam; 2]),
+        (true, vec![Fiber; 2]),
+        (true, vec![MultiSpring; 2]),
+        (true, vec![Beam, Fiber]),
+        (true, vec![Fiber, MultiSpring]),
+        (true, vec![MultiSpring, Beam]),
+    ] {
+        for presplit in [false, true] {
+            let mut model = attached_floor(split, presplit);
+            for (element, kind) in model.elements.iter_mut().skip(1).zip(&kinds) {
+                element.kind = *kind;
+            }
+            let original = model.slabs[0].clone();
+            model.validate().unwrap();
+            let input_slabs = model.slabs.clone();
+            sepika_core::region_rebuild::rebuild_floor_regions(&mut model);
+            assert_attached_floor(&model, &original, true);
+            if presplit {
+                assert_eq!(model.slabs, input_slabs, "既存の版IDと境界を保持する");
+            } else {
+                assert_eq!(model.slabs[0].id, original.id);
+                assert_ne!(model.slabs[1].id, original.id);
+            }
+            let rebuilt = model.slabs.clone();
+            sepika_core::region_rebuild::rebuild_floor_regions(&mut model);
+            assert_eq!(model.slabs, rebuilt, "kinds={kinds:?}, presplit={presplit}");
+            prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
+            model.validate().unwrap();
+            assert_attached_floor(&model, &original, true);
+            assert_eq!(model.slabs, rebuilt);
+            assert_attached_floor_loads(&model);
+            let first = (model.slabs.clone(), model.load_cases.clone());
+            prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
+            assert_eq!((model.slabs.clone(), model.load_cases.clone()), first);
+            assert_attached_floor_loads(&model);
+        }
+    }
+}
+
+#[test]
+fn 取付き床の斜め未到達異レベルとパネルは分割支持にならない() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for end in [[2500., 1500., 0.], [2000., 1000., 0.], [2000., 1500., 100.]] {
+            let mut model = attached_floor(false, false);
+            model.elements[1].kind = kind;
+            if end[2] != 0. {
+                model.nodes[2].coord[2] = end[2];
+            }
+            model.nodes[3].coord = end;
+            let original = model.slabs[0].clone();
+            model.validate().unwrap();
+            prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
+            model.validate().unwrap();
+            assert_attached_floor(&model, &original, false);
+            assert_attached_floor_loads(&model);
+        }
+    }
+    let mut model = attached_floor(false, false);
+    model.elements[1].kind = ElementKind::PanelZone;
+    let original = model.slabs[0].clone();
+    model.validate().unwrap();
+    prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
+    assert_attached_floor(&model, &original, false);
+    assert_attached_floor_loads(&model);
+}
+
+#[test]
+fn 取付き床のbrace用途不整合とwall準備拒否は正式受理対照に数えない() {
+    let mut brace = attached_floor(false, false);
+    brace.elements[1].kind = ElementKind::Brace {
+        tension_only: false,
+    };
+    assert!(brace.validate().is_err());
+    let mut wall = attached_floor(false, false);
+    wall.elements[1].kind = ElementKind::Wall;
+    assert!(prepare_model_for_analysis(&mut wall, &AnalysisSettings::default(), None).is_err());
+}

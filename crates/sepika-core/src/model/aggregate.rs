@@ -1226,11 +1226,6 @@ impl Model {
 
     /// 要素以外（節点荷重・階・床領域・床板・壁領域・壁版・二次部材・拘束）からの
     /// 参照有無。[`Model::node_in_use`]・[`Model::node_in_use_excluding_elem`] の共通部分。
-    ///
-    /// 大半は [`Model::node_referenced_by_regions_or_plates`] へ委譲し、ここでは
-    /// それに含まれない `stories`（利用者の節点削除を防ぐ目的では見る必要があるが、
-    /// `region_rebuild::node_has_structural_ref` は準備計算のたびに
-    /// 埋め直されるため意図的に除外している）だけを追加で見る。
     fn node_referenced_outside_elements(&self, id: NodeId) -> bool {
         self.stories.iter().any(|s| s.node_ids.contains(&id))
             || self.node_referenced_by_regions_or_plates(id)
@@ -1238,15 +1233,7 @@ impl Model {
 
     /// 節点 `id` が床領域・床板・壁領域・壁版・二次部材・拘束・節点荷重の
     /// いずれかから参照されているか。
-    ///
-    /// `Model::node_referenced_outside_elements`（sepika-edit の節点削除ガード）と
-    /// `crate::region_rebuild::node_has_structural_ref`（節点削除判定）が
-    /// この判定を共有する。両者が異なるのは、前者が追加で見る `stories`
-    /// （利用者の節点削除を防ぐ）と、後者が追加で見る節点自身の支点・質量・
-    /// 剛床マスター（`stories`/`axes` は意図的に除外）だけである。
-    ///
-    /// **`NodeId` を持つフィールドを `Model` へ新設したら、まず [`Model::visit_node_ids`]
-    /// を更新し、次に該当フィールドがここでも参照有無を判定できることを確認すること**。
+    /// 要素・階・節点自身の支点や質量は判定対象に含めない。
     pub fn node_referenced_by_regions_or_plates(&self, id: NodeId) -> bool {
         self.stb_strengths
             .members
@@ -2345,14 +2332,7 @@ mod node_reference_tests {
         }
     }
 
-    /// `Model::node_referenced_by_regions_or_plates` が、フィールド追加のたびに
-    /// `visit_node_ids`・`node_referenced_outside_elements`・
-    /// `region_rebuild::node_has_structural_ref` へ手作業で追随する運用（敵対的
-    /// レビューで `wall_regions` の抜けが見つかった原因）を集約先1箇所へ寄せた
-    /// ことを、対象フィールドそれぞれについて固定する。ここに載る全種別が
-    /// 「参照あり」と判定されることを確認すれば、`Model::node_in_use`
-    /// （sepika-edit の削除ガード）と `region_rebuild::node_has_structural_ref`
-    /// （D21 の削除判定）の両方がその種別を保護できることになる。
+    /// 床領域・床板・壁領域・壁版・二次部材・拘束・節点荷重による節点参照を検出する。
     #[test]
     fn test_node_referenced_by_regions_or_plates_covers_every_field_kind() {
         let mut model = Model::default();

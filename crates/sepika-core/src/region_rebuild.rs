@@ -8,7 +8,6 @@
 //! 直交して先端まで届く小梁または実梁の位置で支持部材の間の床板ごとに分割し、
 //! 部材がない隣り合う床板は統合する。
 
-use crate::dof::Dof6Mask;
 use crate::geom::polygon;
 use crate::geom::{LEVEL_TOL_MM, MEMBER_AXIS_TOL_MM};
 use crate::ids::{FloorRegionId, NodeId};
@@ -238,7 +237,7 @@ fn set_attached_span(
 }
 
 /// 取付き線上の位置 `span_pos`・張り出し量 `extent_pos` の境界辺が、小梁または
-/// 実部材（連結した 2 節点 `Beam`）の材軸上にあるか。
+/// 実部材（連結した 2 節点の主架構支持材）の材軸上にあるか。
 fn attachment_boundary_on_member(
     model: &Model,
     nodes: [NodeId; 2],
@@ -326,7 +325,7 @@ fn split_attached_slabs_between_members(model: &mut Model) {
 }
 
 /// 取り付く床板の分割・統合に使う材軸。実部材化していない小梁と、端点一致と
-/// 同一直線で連結した 2 節点 `Beam`（途中節点の分割を 1 本へ束ねる）。
+/// 同一直線で連結した 2 節点の主架構支持材（途中節点の分割を 1 本へ束ねる）。
 fn attachment_split_axes(model: &Model) -> Vec<([f64; 3], [f64; 3])> {
     let mut axes: Vec<([f64; 3], [f64; 3])> = model
         .secondary_beam_axes()
@@ -337,11 +336,11 @@ fn attachment_split_axes(model: &Model) -> Vec<([f64; 3], [f64; 3])> {
     axes
 }
 
-/// 2 節点 `Beam` の材軸を、端点一致と同一直線で連結して束ねる。
+/// 2 節点の主架構支持材の材軸を、端点一致と同一直線で連結して束ねる。
 fn beam_axes(model: &Model) -> Vec<([f64; 3], [f64; 3])> {
     let mut segs: Vec<([f64; 3], [f64; 3])> = Vec::new();
     for e in &model.elements {
-        if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
+        if !e.kind.is_primary_frame_support() || e.nodes.len() != 2 {
             continue;
         }
         let (Some(a), Some(b)) = (
@@ -737,107 +736,6 @@ fn assign_beams(model: &mut Model) -> usize {
     unassigned
 }
 
-/// 節点 `id` が部材・二次部材・床領域・床板・壁領域・壁版・拘束・節点荷重・
-/// 支点（固定・ばね）・質量・剛床マスターのいずれかから参照されているか。
-///
-/// 階の節点一覧（`Story::node_ids`）と通り芯（`AxisGroup`）は含めない
-/// （[`delete_unref_nodes`] の呼び出し側で扱う節点削除の判定にのみ用いるため。
-/// 階の節点一覧は準備計算のたびに階に属する全節点で埋め直されるため、これを
-/// 参照とみなすと削除対象の節点がほぼ必ず「参照あり」になってしまい、この関数
-/// 自体が実質的に無効化される。通り芯も構造計算に用いない表示専用データである）。
-///
-/// 床領域・床板・壁領域・壁版・二次部材・拘束・節点荷重の判定は
-/// [`Model::node_referenced_by_regions_or_plates`] へ委譲する（`Model::node_in_use`
-/// の削除ガードと共有）。
-fn node_has_structural_ref(model: &Model, id: NodeId) -> bool {
-    if model
-        .source_stories
-        .iter()
-        .any(|story| story.node_ids.iter().any(|node| node.node == Some(id)))
-    {
-        return true;
-    }
-    if model.elements.iter().any(|e| e.nodes.contains(&id)) {
-        return true;
-    }
-    if model.node_referenced_by_regions_or_plates(id) {
-        return true;
-    }
-    if let Some(node) = model.nodes.get(id.index()) {
-        if node.restraint != Dof6Mask::FREE || node.mass.is_some() || node.support_spring.is_some()
-        {
-            return true;
-        }
-    }
-    if model.generated_masters.contains(&id) {
-        return true;
-    }
-    false
-}
-
-/// `candidates` に挙がった節点のうち、参照が 0 になったものだけを削除する。
-///
-/// `candidates` 以外の節点は、たとえ現状どこからも参照されていなくても対象外とする
-/// （このリビルドが縮めた境界の先端節点だけを削除し、利用者が別の理由で
-/// 置いた既存の未使用節点まで巻き込まない）。
-pub(crate) fn delete_unref_nodes(model: &mut Model, candidates: &[NodeId]) -> usize {
-    let n = model.nodes.len();
-    if n == 0 {
-        return 0;
-    }
-    let candidate_set: std::collections::HashSet<NodeId> = candidates.iter().copied().collect();
-    let keep: Vec<bool> = (0..n)
-        .map(|i| {
-            let id = NodeId(i as u32);
-            !candidate_set.contains(&id) || node_has_structural_ref(model, id)
-        })
-        .collect();
-    let deleted = keep.iter().filter(|k| !*k).count();
-    if deleted == 0 {
-        return 0;
-    }
-
-    for story in &mut model.stories {
-        story
-            .node_ids
-            .retain(|id| keep.get(id.index()).copied().unwrap_or(false));
-    }
-    model
-        .stb_node_ids
-        .retain(|identity| keep.get(identity.node.index()).copied().unwrap_or(false));
-    for group in &mut model.axes {
-        for axis in &mut group.axes {
-            axis.nodes
-                .retain(|id| keep.get(id.index()).copied().unwrap_or(false));
-        }
-    }
-
-    let mut map: Vec<Option<u32>> = vec![None; n];
-    let mut new_i = 0u32;
-    for i in 0..n {
-        if keep[i] {
-            map[i] = Some(new_i);
-            new_i += 1;
-        }
-    }
-    if let Some(record) = &mut model.seismic_weight_generation {
-        record.retain_node_references(|node| keep.get(node.index()).copied().unwrap_or(false));
-    }
-    model.nodes = model
-        .nodes
-        .drain(..)
-        .enumerate()
-        .filter(|(i, _)| keep[*i])
-        .map(|(_, node)| node)
-        .collect();
-    model.visit_node_ids(|id| {
-        if let Some(new) = map.get(id.0 as usize).and_then(|m| *m) {
-            id.0 = new;
-        }
-    });
-    deleted
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -858,81 +756,6 @@ mod tests {
             story: None,
             support_spring: None,
         }
-    }
-
-    #[test]
-    fn region_node_compaction_discards_tombstones_and_remaps_live_generation_origins() {
-        use crate::dof::Dof6Mask;
-        use crate::ids::StoryId;
-        use crate::model::{Constraint, SeismicWeightGeneration};
-        let constraint = Constraint::rigid_diaphragm(StoryId(1), NodeId(2), vec![NodeId(1)]);
-        let mut model = Model {
-            nodes: (0..3).map(|i| node(i, i as f64, 0.0, 0.0)).collect(),
-            constraints: vec![constraint.clone()],
-            seismic_weight_generation: Some(SeismicWeightGeneration {
-                input_key: vec![1],
-                output_key: vec![2],
-                calculated_weights: vec![],
-                automatic_diaphragms: vec![
-                    constraint,
-                    Constraint::rigid_diaphragm(StoryId(1), NodeId(0), vec![NodeId(1)]),
-                ],
-                automatic_master_restraints: vec![
-                    (NodeId(0), Dof6Mask::FREE),
-                    (NodeId(2), Dof6Mask::FREE),
-                ],
-            }),
-            ..Default::default()
-        };
-        assert_eq!(delete_unref_nodes(&mut model, &[NodeId(0)]), 1);
-        assert_eq!(
-            model.constraints,
-            vec![Constraint::rigid_diaphragm(
-                StoryId(1),
-                NodeId(1),
-                vec![NodeId(0)]
-            )]
-        );
-        let record = model.seismic_weight_generation.as_ref().unwrap();
-        assert_eq!(record.automatic_diaphragms, model.constraints);
-        assert_eq!(
-            record.automatic_master_restraints,
-            vec![(NodeId(1), Dof6Mask::FREE)]
-        );
-        assert_eq!(record.input_key, vec![1]);
-        assert_eq!(record.output_key, vec![2]);
-        assert!(model.is_automatic_seismic_diaphragm(&model.constraints[0]));
-        assert!(model.is_automatic_seismic_master_restraint(NodeId(1)));
-    }
-
-    #[test]
-    fn rebuild_keeps_explicit_source_nodes_and_remaps_external_identities() {
-        let mut model = Model {
-            nodes: (0..3).map(|i| node(i, i as f64, 0.0, 0.0)).collect(),
-            ..Default::default()
-        };
-        model.assign_stb_node_ids().unwrap();
-        model.source_stories.push(crate::model::SourceStory {
-            kind_from_native: false,
-            id: 51,
-            guid: None,
-            name: "原階".into(),
-            height: 0.0,
-            kind: crate::model::SourceStoryKind::General,
-            id_dependence: None,
-            strength_concrete: None,
-            node_ids: vec![crate::model::SourceStoryNode {
-                id: 3,
-                node: Some(NodeId(2)),
-            }],
-        });
-        assert_eq!(delete_unref_nodes(&mut model, &[NodeId(1), NodeId(2)]), 1);
-        assert_eq!(model.source_stories[0].node_ids[0].node, Some(NodeId(1)));
-        assert_eq!(
-            model.stb_node_ids.iter().map(|n| n.id).collect::<Vec<_>>(),
-            vec![1, 3]
-        );
-        assert!(model.validate().is_ok());
     }
 
     fn element_beam(id: u32, i: u32, j: u32) -> ElementData {

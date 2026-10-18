@@ -102,9 +102,7 @@ fn public_src_actions_check_real_ql_and_valid_empty_gravity_without_q0() {
 }
 
 #[test]
-fn src_ovika_design_contracts_keep_analysis24_and_require_explicit_recheck() {
-    assert_eq!(ANALYSIS_CONTRACT_VERSION, 24);
-    assert_eq!(DESIGN_CONTRACT_VERSION, 16);
+fn src_ovika_design_contracts_keep_current_analysis_and_require_explicit_recheck() {
     let mut original = app(false, QdMethod::Qd1);
     original.run_combination(0);
     assert_checked(&original);
@@ -114,19 +112,27 @@ fn src_ovika_design_contracts_keep_analysis24_and_require_explicit_recheck() {
         ("src-missing", None),
         ("src-old14", Some(14)),
         ("src-old15", Some(15)),
-        ("src-future17", Some(17)),
-        ("src-current16", Some(16)),
+        ("src-old16", Some(16)),
+        ("src-future18", Some(18)),
+        ("src-current17", Some(17)),
     ] {
-        let (mut loaded, path) =
-            super::result_contract_tests::restore(&original, Some(24), version, name);
+        let (mut loaded, path) = super::result_contract_tests::restore(
+            &original,
+            Some(ANALYSIS_CONTRACT_VERSION),
+            version,
+            name,
+        );
         assert_eq!(bytes(&loaded.core.model), input);
         assert!(loaded.require_selected_static_input().is_ok());
         assert!(!loaded.core.scoped.staleness.results_stale);
         let bundle = loaded.core.scoped.results.as_ref().unwrap();
-        assert_eq!(bundle.analysis_contract_version, Some(24));
+        assert_eq!(
+            bundle.analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
         assert_eq!(bytes(&bundle.combos), bytes(&original_bundle.combos));
         assert_eq!(bundle.member_forces, original_bundle.member_forces);
-        let current = version == Some(16);
+        let current = version == Some(DESIGN_CONTRACT_VERSION);
         assert_eq!(loaded.current_design_results().is_some(), current);
         assert_eq!(bundle.has_design_results(), current);
         assert_eq!(
@@ -146,7 +152,10 @@ fn src_ovika_design_contracts_keep_analysis24_and_require_explicit_recheck() {
         assert_eq!(bytes(&reopened.core.model), input);
         assert!(reopened.require_selected_static_input().is_ok());
         let saved = reopened.core.scoped.results.as_ref().unwrap();
-        assert_eq!(saved.analysis_contract_version, Some(24));
+        assert_eq!(
+            saved.analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
         assert_eq!(saved.member_forces, original_bundle.member_forces);
         assert_eq!(reopened.current_design_results().is_some(), current);
         assert_eq!(
@@ -164,7 +173,7 @@ fn src_ovika_design_contracts_keep_analysis24_and_require_explicit_recheck() {
                 .current_design_results()
                 .unwrap()
                 .design_contract_version,
-            Some(16)
+            Some(DESIGN_CONTRACT_VERSION)
         );
         assert_eq!(
             bytes(&reopened.current_design_results().unwrap().member_checks),
@@ -182,20 +191,22 @@ fn src_ovika_design_contracts_keep_analysis24_and_require_explicit_recheck() {
                 .current_design_results()
                 .unwrap()
                 .analysis_contract_version,
-            Some(24)
+            Some(ANALYSIS_CONTRACT_VERSION)
         );
         assert_eq!(
             recovered
                 .current_design_results()
                 .unwrap()
                 .design_contract_version,
-            Some(16)
+            Some(DESIGN_CONTRACT_VERSION)
         );
         assert_eq!(
             recovered.current_static().unwrap().member_forces,
             original.current_static().unwrap().member_forces
         );
-        eprintln!("{name}: analysis24 kept; saved design={version:?}; explicit recheck design16");
+        eprintln!(
+            "{name}: analysis{ANALYSIS_CONTRACT_VERSION} kept; saved design={version:?}; explicit recheck design{DESIGN_CONTRACT_VERSION}"
+        );
         std::fs::remove_file(path).unwrap();
     }
 }
