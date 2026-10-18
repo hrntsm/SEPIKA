@@ -9,9 +9,11 @@ use super::rebar::{
     default_beam_rebar, default_circle_column_rebar, default_rect_column_rebar, parse_beam_rebar,
     parse_circle_column_rebar, parse_rect_column_rebar, RebarGrades,
 };
+use super::section_key::{member_section, section_key, SectionFamily, SectionKey};
 use super::steel::steel_shape_from;
 use super::xml::{
-    attrs, get_f64, get_f64_any, get_opt_f64, get_opt_u32, get_u32, push_node_id_tokens, Attrs,
+    attrs, check_attribute_prefixes, check_element_namespace, get_f64, get_f64_any, get_opt_f64,
+    get_u32, push_node_id_tokens, Attrs,
 };
 use super::{
     PendingMember, PendingMemberKind, PendingSec, PendingSecKind, PendingSecondary, RawAxis,
@@ -21,7 +23,7 @@ use sepika_core::model::FrameSectionUse;
 use sepika_core::section_shape::{
     RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar, SectionShape,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// RC 断面の図形（配筋と組み合わせて `SectionShape` を確定する）。
 pub(super) enum RcGeom {
@@ -54,7 +56,7 @@ pub(super) enum CurSec {
     #[default]
     None,
     Steel {
-        file_id: u32,
+        file_id: SectionKey,
         name: String,
         /// 断面の階（`floor` 属性）。符号と併せて断面の同一性キーになる。
         floor: Option<String>,
@@ -62,7 +64,7 @@ pub(super) enum CurSec {
         grade: Option<String>,
     },
     Rc {
-        file_id: u32,
+        file_id: SectionKey,
         name: String,
         /// 断面の階（`floor` 属性）。符号と併せて断面の同一性キーになる。
         floor: Option<String>,
@@ -79,7 +81,7 @@ pub(super) enum CurSec {
         mat: Option<SecMatRef>,
     },
     Cft {
-        file_id: u32,
+        file_id: SectionKey,
         name: String,
         /// 断面の階（`floor` 属性）。符号と併せて断面の同一性キーになる。
         floor: Option<String>,
@@ -88,7 +90,7 @@ pub(super) enum CurSec {
         mat: Option<SecMatRef>,
     },
     Src {
-        file_id: u32,
+        file_id: SectionKey,
         name: String,
         /// 断面の階（`floor` 属性）。符号と併せて断面の同一性キーになる。
         floor: Option<String>,
@@ -105,7 +107,7 @@ pub(super) enum CurSec {
     },
     /// RC スラブ断面（`StbSecSlab_RC`）。子の図形要素から厚さを集める。
     Slab {
-        file_id: u32,
+        file_id: SectionKey,
         thickness: Option<f64>,
         /// 断面の符号（`name` 属性）。
         name: Option<String>,
@@ -116,7 +118,7 @@ pub(super) enum CurSec {
     },
     /// RC 壁断面（`StbSecWall_RC`）。子の図形要素から厚さを集める。
     Wall {
-        file_id: u32,
+        file_id: SectionKey,
         thickness: Option<f64>,
     },
 }
@@ -215,6 +217,7 @@ pub(super) struct StbParser {
     pub(super) raw_stories: Vec<RawStory>,
     pub(super) raw_load_cases: Vec<RawLoadCase>,
     pub(super) pending_secs: Vec<PendingSec>,
+    pub(super) section_definitions: HashSet<SectionKey>,
     pub(super) pending_members: Vec<PendingMember>,
     pub(super) pending_secondaries: Vec<PendingSecondary>,
     /// 形鋼ライブラリ（形鋼名 → 断面形状）。
@@ -222,10 +225,10 @@ pub(super) struct StbParser {
     /// 現在パース中の標準断面要素。
     pub(super) cur: CurSec,
     pub(super) raw_slabs: Vec<RawSlab>,
-    pub(super) slab_secs: HashMap<u32, RawSlabSection>,
+    pub(super) slab_secs: HashMap<SectionKey, RawSlabSection>,
     pub(super) cur_slab: Option<RawSlab>,
     pub(super) raw_walls: Vec<RawWall>,
-    pub(super) wall_sec_thickness: HashMap<u32, f64>,
+    pub(super) wall_sec_thickness: HashMap<SectionKey, f64>,
     pub(super) cur_wall: Option<RawWall>,
     /// `StbNodeIdOrder` を開いた直後（テキストの節点 id 列を受け付ける窓）か。
     pub(super) in_node_id_order: bool,
@@ -239,12 +242,15 @@ pub(super) struct StbParser {
 /// XML 全体を走査し、中間表現を集めた [`StbParser`] を返す（パース段のエントリポイント）。
 pub(super) fn parse(xml: &str) -> Result<StbParser, StbError> {
     use quick_xml::events::Event;
-    use quick_xml::reader::Reader;
+    use quick_xml::reader::NsReader;
 
-    let mut reader = Reader::from_str(xml);
+    let mut reader = NsReader::from_str(xml);
     reader.config_mut().trim_text(true);
 
     let mut p = StbParser::default();
+    let mut depth = 0usize;
+    let mut root_seen = false;
+    let mut extension_depth = None;
     loop {
         let ev = reader
             .read_event()
@@ -254,29 +260,78 @@ pub(super) fn parse(xml: &str) -> Result<StbParser, StbError> {
             Event::Eof => break,
             Event::Start(e) | Event::Empty(e) => {
                 let name = e.name();
-                let tag = String::from_utf8_lossy(name.as_ref()).to_string();
+                let (namespace, local) = reader.resolver().resolve_element(name);
+                check_attribute_prefixes(reader.resolver(), &e)?;
+                let tag = String::from_utf8_lossy(local.as_ref()).to_string();
+                if depth == 0
+                    && !root_seen
+                    && tag != "ST_BRIDGE"
+                    && !matches!(&namespace, quick_xml::name::ResolveResult::Unknown(_))
+                {
+                    return Err(StbError::Version(format!(
+                        "missing ST_BRIDGE version 2.x root: {}",
+                        String::from_utf8_lossy(name.as_ref())
+                    )));
+                }
+                check_element_namespace(namespace, name)?;
                 let a = attrs(&e)?;
+                if depth == 0 {
+                    if root_seen || tag != "ST_BRIDGE" {
+                        return Err(StbError::Parse(format!(
+                            "ルート要素 ST_BRIDGE が必要です: {}",
+                            String::from_utf8_lossy(name.as_ref())
+                        )));
+                    }
+                    root_seen = true;
+                }
+                let is_extension = depth == 1 && tag == "StbExtensions";
+                if extension_depth.is_some() || is_extension {
+                    p.record_attr_usage(&tag, &a);
+                    if !is_empty {
+                        depth += 1;
+                        if is_extension && extension_depth.is_none() {
+                            extension_depth = Some(depth);
+                        }
+                    }
+                    continue;
+                }
+                if depth != 0 && tag == "ST_BRIDGE" {
+                    return Err(StbError::Parse("ST_BRIDGE を入れ子にできません".into()));
+                }
+                p.register_section(&tag, &a)?;
                 p.strengths.start(&tag, &a)?;
                 p.on_start(&tag, &a)?;
+                p.record_attr_usage(&tag, &a);
+                p.container_stack.push(tag.clone());
                 if is_empty {
                     p.strengths.end(&tag);
-                }
-                p.record_attr_usage(&tag, &a);
-                if !is_empty {
-                    p.container_stack.push(tag);
+                    p.on_end(&tag);
+                } else {
+                    depth += 1;
                 }
             }
             Event::End(e) => {
                 let name = e.name();
-                let tag = String::from_utf8_lossy(name.as_ref()).to_string();
-                p.strengths.end(&tag);
-                p.on_end(&tag);
+                let (namespace, local) = reader.resolver().resolve_element(name);
+                check_element_namespace(namespace, name)?;
+                let tag = String::from_utf8_lossy(local.as_ref()).to_string();
+                if let Some(extension_root_depth) = extension_depth {
+                    if depth == extension_root_depth {
+                        extension_depth = None;
+                    }
+                } else {
+                    p.strengths.end(&tag);
+                    p.on_end(&tag);
+                }
+                depth = depth
+                    .checked_sub(1)
+                    .ok_or_else(|| StbError::Parse("開始要素のない終了要素です".into()))?;
             }
-            Event::Text(t) if p.in_node_id_order => {
+            Event::Text(t) if extension_depth.is_none() && p.in_node_id_order => {
                 p.strengths.nodes(&String::from_utf8_lossy(t.as_ref()))?;
                 p.on_node_id_text(&String::from_utf8_lossy(t.as_ref()))?;
             }
-            Event::CData(t) if p.in_node_id_order => {
+            Event::CData(t) if extension_depth.is_none() && p.in_node_id_order => {
                 p.strengths.nodes(&String::from_utf8_lossy(t.as_ref()))?;
                 p.on_node_id_text(&String::from_utf8_lossy(t.as_ref()))?;
             }
@@ -284,15 +339,80 @@ pub(super) fn parse(xml: &str) -> Result<StbParser, StbError> {
         }
     }
 
+    if depth != 0 {
+        return Err(StbError::Parse(
+            "閉じられていない XML 要素があります".into(),
+        ));
+    }
     if !p.version_ok {
         return Err(StbError::Version(
             "missing ST_BRIDGE version 2.x root".into(),
         ));
     }
+    p.validate_section_references()?;
     Ok(p)
 }
 
 impl StbParser {
+    fn register_section(&mut self, tag: &str, a: &Attrs) -> Result<(), StbError> {
+        if SectionFamily::from_tag(tag).is_some() {
+            let key = section_key(tag, a)?;
+            if !self.section_definitions.insert(key) {
+                return Err(StbError::Unmappable(format!(
+                    "同じ具体的断面系列の ID が重複しています: {key}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_section_references(&self) -> Result<(), StbError> {
+        let references = self
+            .pending_members
+            .iter()
+            .map(|member| (member.section, &member.source))
+            .chain(
+                self.pending_secondaries
+                    .iter()
+                    .map(|member| (member.section, &member.source)),
+            )
+            .chain(
+                self.raw_slabs
+                    .iter()
+                    .map(|member| (member.section_fid, &member.source)),
+            )
+            .chain(
+                self.raw_walls
+                    .iter()
+                    .map(|member| (member.section_fid, &member.source)),
+            );
+        for (key, source) in references {
+            let Some(key) = key else { continue };
+            if !self.section_definitions.contains(&key) {
+                let mut other_families: Vec<_> = self
+                    .section_definitions
+                    .iter()
+                    .filter(|other| other.id == key.id)
+                    .map(|other| other.family.tag())
+                    .collect();
+                other_families.sort_unstable();
+                let reason = if other_families.is_empty() {
+                    "断面参照を解決できません: 要求系列内に断面定義がありません".to_owned()
+                } else {
+                    format!(
+                        "断面参照を解決できません: 要求系列内に断面定義がありません（同 ID は他系列にのみ存在: {}）",
+                        other_families.join(", ")
+                    )
+                };
+                return Err(source.error(Some(key.family), &reason));
+            }
+            if !key.family.is_supported() {
+                return Err(source.error(Some(key.family), "断面系列の取り込みは未対応です"));
+            }
+        }
+        Ok(())
+    }
+
     /// 開始・自己終了イベントを、意味のまとまりごとの補助メソッドへ振り分ける。
     fn on_start(&mut self, tag: &str, a: &Attrs) -> Result<(), StbError> {
         if tag != "StbNodeIdOrder" {
@@ -363,7 +483,7 @@ impl StbParser {
                         value => {
                             return Err(StbError::Parse(format!(
                                 "StbStory kind が不正です: {value:?}"
-                            )))
+                            )));
                         }
                     },
                     id_dependence: a
@@ -392,7 +512,7 @@ impl StbParser {
         match tag {
             "StbSecColumn_S" | "StbSecBeam_S" | "StbSecBrace_S" => {
                 self.cur = CurSec::Steel {
-                    file_id: get_u32(a, "id")?,
+                    file_id: section_key(tag, a)?,
                     name: a.get("name").cloned().unwrap_or_default(),
                     floor: floor_of(a),
                     shape_name: None,
@@ -453,7 +573,7 @@ impl StbParser {
                     RcKind::Column
                 };
                 self.cur = CurSec::Rc {
-                    file_id: get_u32(a, "id")?,
+                    file_id: section_key(tag, a)?,
                     name: a.get("name").cloned().unwrap_or_default(),
                     floor: floor_of(a),
                     kind,
@@ -495,7 +615,7 @@ impl StbParser {
             }
             "StbSecColumn_CFT" => {
                 self.cur = CurSec::Cft {
-                    file_id: get_u32(a, "id")?,
+                    file_id: section_key(tag, a)?,
                     name: a.get("name").cloned().unwrap_or_default(),
                     floor: floor_of(a),
                     steel_name: None,
@@ -510,7 +630,7 @@ impl StbParser {
                     RcKind::Column
                 };
                 self.cur = CurSec::Src {
-                    file_id: get_u32(a, "id")?,
+                    file_id: section_key(tag, a)?,
                     name: a.get("name").cloned().unwrap_or_default(),
                     floor: floor_of(a),
                     kind,
@@ -642,7 +762,7 @@ impl StbParser {
             }
             "StbSecSlab_RC" | "StbSecSlabDeck" => {
                 self.cur = CurSec::Slab {
-                    file_id: get_u32(a, "id")?,
+                    file_id: section_key(tag, a)?,
                     thickness: None,
                     name: a.get("name").cloned().filter(|v| !v.is_empty()),
                     floor: a.get("floor").cloned().filter(|v| !v.is_empty()),
@@ -659,7 +779,7 @@ impl StbParser {
             }
             "StbSecWall_RC" => {
                 self.cur = CurSec::Wall {
-                    file_id: get_u32(a, "id")?,
+                    file_id: section_key(tag, a)?,
                     thickness: None,
                 };
             }
@@ -679,27 +799,24 @@ impl StbParser {
             "StbColumn" => {
                 let bot = get_u32(a, "id_node_bottom")?;
                 let top = get_u32(a, "id_node_top")?;
-                let mut member = make_member(a, bot, top, PendingMemberKind::Girder)?;
+                let mut member = make_member(tag, a, bot, top, PendingMemberKind::Girder)?;
                 member.strength_index = self.strengths.current_member_index();
                 member.source_usage = FrameSectionUse::Column;
-                member.source_tag = tag.to_string();
-                member.source_id = get_opt_u32(a, "id")?;
                 self.pending_members.push(member);
             }
             "StbGirder" => {
                 let st = get_u32(a, "id_node_start")?;
                 let en = get_u32(a, "id_node_end")?;
-                let mut member = make_member(a, st, en, PendingMemberKind::Girder)?;
+                let mut member = make_member(tag, a, st, en, PendingMemberKind::Girder)?;
                 member.strength_index = self.strengths.current_member_index();
                 member.source_usage = FrameSectionUse::Girder;
-                member.source_tag = tag.to_string();
-                member.source_id = get_opt_u32(a, "id")?;
                 self.pending_members.push(member);
             }
             "StbBeam" => {
                 let st = get_u32(a, "id_node_start")?;
                 let en = get_u32(a, "id_node_end")?;
                 self.pending_secondaries.push(make_secondary(
+                    tag,
                     a,
                     st,
                     en,
@@ -711,6 +828,7 @@ impl StbParser {
                 let bot = get_u32(a, "id_node_bottom")?;
                 let top = get_u32(a, "id_node_top")?;
                 self.pending_secondaries.push(make_secondary(
+                    tag,
                     a,
                     bot,
                     top,
@@ -725,10 +843,9 @@ impl StbParser {
                     .get("feature_brace")
                     .map(|v| v != "TENSIONANDCOMPRESSION")
                     .unwrap_or(true);
-                let mut member = make_member(a, st, en, PendingMemberKind::Brace { tension_only })?;
+                let mut member =
+                    make_member(tag, a, st, en, PendingMemberKind::Brace { tension_only })?;
                 member.source_usage = FrameSectionUse::Brace;
-                member.source_tag = tag.to_string();
-                member.source_id = get_opt_u32(a, "id")?;
                 self.pending_members.push(member);
             }
             _ => return Ok(false),
@@ -772,17 +889,21 @@ impl StbParser {
         match tag {
             "StbSlab" => {
                 self.cur_wall = None;
+                let (section, source) = member_section(tag, a)?;
                 self.cur_slab = Some(RawSlab {
                     strength_index: self.strengths.current_member_index(),
-                    section_fid: get_opt_u32(a, "id_section")?,
+                    section_fid: section,
+                    source,
                     boundary: Vec::new(),
                 });
             }
             "StbWall" => {
                 self.cur_slab = None;
+                let (section, source) = member_section(tag, a)?;
                 self.cur_wall = Some(RawWall {
                     strength_index: self.strengths.current_member_index(),
-                    section_fid: get_opt_u32(a, "id_section")?,
+                    section_fid: section,
+                    source,
                     boundary: Vec::new(),
                 });
             }
@@ -1140,12 +1261,13 @@ impl StbParser {
 /// 部材（柱・大梁・ブレース）の中間表現を作る（断面・材料参照・回転角・端部条件を
 /// 属性から読む）。
 fn make_member(
+    tag: &str,
     a: &Attrs,
     n_i: u32,
     n_j: u32,
     kind: PendingMemberKind,
 ) -> Result<PendingMember, StbError> {
-    let section = get_opt_u32(a, "id_section")?;
+    let (section, source) = member_section(tag, a)?;
     let rotate = get_f64(a, "rotate").unwrap_or(0.0);
     let end_cond = [
         end_condition_of(a, &["condition_bottom", "condition_start"]),
@@ -1160,21 +1282,21 @@ fn make_member(
         rotate,
         end_cond,
         source_usage: FrameSectionUse::Girder,
-        source_tag: String::new(),
-        source_id: None,
+        source,
     })
 }
 
 /// 二次部材（小梁 `StbBeam`・間柱 `StbPost`）の中間表現を作る
 /// （[`make_member`] の二次部材版。端部接合条件・回転角は解析に使わないため持たない）。
 fn make_secondary(
+    tag: &str,
     a: &Attrs,
     n_i: u32,
     n_j: u32,
     kind: sepika_core::model::SecondaryMemberKind,
     strength_index: Option<usize>,
 ) -> Result<PendingSecondary, StbError> {
-    let section = get_opt_u32(a, "id_section")?;
+    let (section, source) = member_section(tag, a)?;
     Ok(PendingSecondary {
         strength_index,
         kind,
@@ -1182,6 +1304,7 @@ fn make_secondary(
         n_j,
         section,
         name: a.get("name").cloned().unwrap_or_default(),
+        source,
     })
 }
 

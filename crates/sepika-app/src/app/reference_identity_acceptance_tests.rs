@@ -75,6 +75,198 @@ fn existing_app() -> App {
     app
 }
 
+const SERIES_COLUMN: &str = r#"<StbSecColumn_RC id="1" name="C1" strength_concrete="Fc30"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="500" width_Y="500"/></StbSecFigureColumn_RC></StbSecColumn_RC>"#;
+const SERIES_GIRDER: &str = r#"<StbSecBeam_RC id="1" name="G1" strength_concrete="Fc24"><StbSecFigureBeam_RC><StbSecBeam_RC_Straight width="300" depth="600"/></StbSecFigureBeam_RC></StbSecBeam_RC>"#;
+
+fn independent_series_input() -> String {
+    format!(
+        r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+<StbCommon project_name="independent" app_name="fixture" app_version="1"/>
+<StbModel><StbNodes>
+<StbNode id="10" X="0" Y="0" Z="0" kind="ON_GRID"/>
+<StbNode id="20" X="0" Y="0" Z="3000" kind="ON_GRID"/>
+<StbNode id="30" X="6000" Y="0" Z="3000" kind="ON_GRID"/>
+</StbNodes><StbMembers>
+<StbColumns><StbColumn id="1" name="C1" id_node_bottom="10" id_node_top="20" id_section="1" kind_structure="RC"/></StbColumns>
+<StbGirders><StbGirder id="1" name="G1" id_node_start="20" id_node_end="30" id_section="1" kind_structure="RC" isFoundation="false"/></StbGirders>
+</StbMembers><StbSections>{SERIES_COLUMN}{SERIES_GIRDER}</StbSections></StbModel></ST_BRIDGE>"#
+    )
+}
+
+#[test]
+fn qualified_series_import_failures_preserve_app_state_history_and_files() {
+    let source = independent_series_input();
+    let mut cases: Vec<(&str, String, &[&str])> = vec![
+        (
+            "missing-column-family",
+            source.replace(SERIES_COLUMN, ""),
+            &[
+                "StbColumn",
+                "id=Some(1)",
+                "RC",
+                "StbSecColumn_RC",
+                "id_section=Some(\"1\")",
+                "断面参照",
+            ],
+        ),
+        (
+            "wrong-namespace",
+            source.replace("https://www.building-smart.or.jp/dl", "urn:foreign"),
+            &["ST_BRIDGE", "非採用 namespace", "urn:foreign"],
+        ),
+        (
+            "no-namespace",
+            source.replace(" xmlns=\"https://www.building-smart.or.jp/dl\"", ""),
+            &["ST_BRIDGE", "namespace がありません"],
+        ),
+        (
+            "nested-wrong-namespace",
+            source.replace("<StbNodes>", "<StbNodes xmlns=\"urn:foreign\">"),
+            &["StbNodes", "非採用 namespace", "urn:foreign"],
+        ),
+        (
+            "unbound-element-prefix",
+            source.replace("<StbNode ", "<missing:StbNode "),
+            &["missing:StbNode", "未束縛 prefix", "missing"],
+        ),
+        (
+            "unbound-attribute-prefix",
+            source.replacen("id_section=\"1\"", "missing:id_section=\"1\"", 1),
+            &["StbColumn", "missing:id_section", "未束縛 prefix"],
+        ),
+    ];
+    for (label, id) in [("duplicate-1", "1"), ("duplicate-01", "01")] {
+        let duplicate = SERIES_COLUMN.replace("id=\"1\"", &format!("id=\"{id}\""));
+        cases.push((
+            label,
+            source.replace(SERIES_COLUMN, &format!("{SERIES_COLUMN}{duplicate}")),
+            &["StbSecColumn_RC", "1", "重複"],
+        ));
+    }
+    for (label, replacement, details) in [
+        (
+            "missing-kind",
+            "",
+            &[
+                "StbColumn",
+                "id=Some(1)",
+                "id_section=Some(\"1\")",
+                "kind_structure",
+                "ありません",
+            ][..],
+        ),
+        (
+            "invalid-kind",
+            "kind_structure=\"INVALID\"",
+            &[
+                "StbColumn",
+                "id=Some(1)",
+                "id_section=Some(\"1\")",
+                "INVALID",
+                "不正",
+            ][..],
+        ),
+        (
+            "unsupported-kind",
+            "kind_structure=\"UNDEFINED\"",
+            &[
+                "StbColumn",
+                "id=Some(1)",
+                "id_section=Some(\"1\")",
+                "UNDEFINED",
+                "未対応",
+            ][..],
+        ),
+    ] {
+        let mut xml = source.replacen("kind_structure=\"RC\"", replacement, 1);
+        if label == "unsupported-kind" {
+            xml = xml.replace(
+                "</StbSections>",
+                r#"<StbSecUndefined id="1" name="UNDEFINED1"/></StbSections>"#,
+            );
+        }
+        cases.push((label, xml, details));
+    }
+    let mut app = existing_app();
+    let project = path("571-retained-project");
+    sepika_io::ovika::save_ovika(&project, &app.core.model, Default::default()).unwrap();
+    app.core.scoped.project_path = Some(project.clone());
+    let project_bytes = std::fs::read(&project).unwrap();
+    let before = retained(&app);
+    for (label, xml, details) in cases {
+        let file = path(&format!("571-{label}")).with_extension("stb");
+        std::fs::write(&file, &xml).unwrap();
+        app.import_stbridge_from(file.clone());
+        let error = app.core.scoped.last_error.as_ref().unwrap();
+        assert!(error.contains("ST-Bridge読込エラー"), "{label}: {error}");
+        for detail in details {
+            assert!(error.contains(detail), "{label}/{detail}: {error}");
+        }
+        assert_eq!(retained(&app), before, "{label}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), xml);
+        assert_eq!(std::fs::read(&project).unwrap(), project_bytes);
+        std::fs::remove_file(file).unwrap();
+    }
+    app.core.scoped.undo.undo(&mut app.core.model);
+    assert_eq!(app.core.model.nodes[0].coord[0], 0.);
+    app.core.scoped.undo.redo(&mut app.core.model);
+    assert_eq!(bytes(&app.core.model), before.model);
+    app.core.scoped.undo.redo(&mut app.core.model);
+    assert_eq!(app.core.model.nodes[0].coord[0], -200.);
+    std::fs::remove_file(project).unwrap();
+}
+
+#[test]
+fn qualified_series_app_import_binds_column_and_girder_to_their_own_fc() {
+    let source = independent_series_input();
+    let file = path("571-independent-series").with_extension("stb");
+    std::fs::write(&file, &source).unwrap();
+    let mut app = App::default();
+    app.import_stbridge_from(file.clone());
+    assert_eq!(app.core.model.elements.len(), 2);
+    let mut section_ids = Vec::new();
+    for (usage, name, fc) in [
+        (FrameSectionUse::Column, "C1", 30.),
+        (FrameSectionUse::Girder, "G1", 24.),
+    ] {
+        let element = app
+            .core
+            .model
+            .elements
+            .iter()
+            .find(|element| {
+                app.core
+                    .model
+                    .section(element.section.unwrap())
+                    .unwrap()
+                    .frame_use
+                    == Some(usage)
+            })
+            .unwrap();
+        let section = app.core.model.section(element.section.unwrap()).unwrap();
+        assert_eq!(section.name, name);
+        assert_eq!(
+            app.core.model.element_material(element).unwrap().fc,
+            Some(fc)
+        );
+        let strength = app
+            .core
+            .model
+            .stb_strengths
+            .members
+            .iter()
+            .find(|strength| strength.target == StrengthTarget::Element(element.id))
+            .unwrap();
+        let resolved = app.core.model.resolve_stb_concrete(strength).unwrap();
+        assert_eq!(resolved.value, fc);
+        assert_eq!(resolved.source, StrengthSource::Section);
+        section_ids.push(section.id);
+    }
+    assert_ne!(section_ids[0], section_ids[1]);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+    std::fs::remove_file(file).unwrap();
+}
+
 #[test]
 fn standard_stbridge_bad_references_preserve_app_model_history_results_and_generation() {
     let source = include_str!("../../../sepika-io/tests/fixtures/strength_src.stb");

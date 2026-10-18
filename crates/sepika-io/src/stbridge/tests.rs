@@ -265,7 +265,7 @@ fn test_roundtrip_twice_stable() {
 fn test_reject_unsupported_version() {
     for xml in [
         "<foo/>",
-        "<ST_BRIDGE version=\"1.4.0\"><StbModel/></ST_BRIDGE>",
+        "<ST_BRIDGE xmlns=\"https://www.building-smart.or.jp/dl\" version=\"1.4.0\"><StbModel/></ST_BRIDGE>",
     ] {
         assert!(
             matches!(import_stbridge(xml), Err(StbError::Version(_))),
@@ -788,9 +788,51 @@ fn circle_rebar_distinct(count: u32) -> RcCircleColumnRebar {
     }
 }
 
-/// 標準モード: RC 円形柱の配筋が往復で完全に保存される。
+fn assert_rc_rebar_ovika_contract(original: &Model, imported: &Model, name: &str) {
+    assert_eq!(imported.sections[0].shape, original.sections[0].shape);
+    for material_id in [
+        imported.sections[0].rebar_material,
+        imported.sections[0].shear_rebar_material,
+    ] {
+        let material = &imported.materials[material_id.expect("鉄筋材料").index()];
+        assert_eq!(material.name, "SD345");
+        assert_eq!(material.category, MaterialCategory::Rebar);
+        assert_eq!(material.fy, Some(345.0));
+    }
+    for (source, model) in [("original", original), ("imported", imported)] {
+        let path = crate::test_util::test_tmp().join(format!("{name}-{source}.ovika"));
+        crate::ovika::save_ovika(&path, model, crate::ovika::OvikaExtras::default()).unwrap();
+        let saved = crate::ovika::load_ovika(&path).unwrap().model;
+        assert_eq!(saved.sections, model.sections);
+        assert_eq!(saved.materials, model.materials);
+        assert_eq!(saved.elements, model.elements);
+        assert_eq!(saved.stb_strengths, model.stb_strengths);
+    }
+}
+
+/// RC 円形柱の標準配筋出力・独立入力と OVIKA の保存を検証する。
 #[test]
 fn test_standard_roundtrip_rc_circle_column_rebar() {
+    const INPUT: &str = r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="independent_rc_rebar" app_name="fixture" app_version="1">
+    <StbApplyConditionsList><StbColumn_RC_RebarPositionApply set_default="false"/></StbApplyConditionsList>
+  </StbCommon>
+  <StbModel>
+    <StbNodes>
+      <StbNode id="1" X="0" Y="0" Z="0" kind="ON_COLUMN"/>
+      <StbNode id="2" X="0" Y="0" Z="3000" kind="ON_COLUMN"/>
+    </StbNodes>
+    <StbMembers><StbColumns><StbColumn id="1" name="C1" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="RC"/></StbColumns></StbMembers>
+    <StbSections>
+      <StbSecColumn_RC id="1" name="C1" strength_concrete="Fc24">
+        <StbSecFigureColumn_RC><StbSecColumn_RC_Circle D="800"/></StbSecFigureColumn_RC>
+        <StbSecBarArrangementColumn_RC depth_cover_start_X="45">
+          <StbSecBarColumn_RC_CircleSame D_main="D25" strength_main="SD345" D_band="D13" strength_band="SD345" N_main="4" N_band="2" pitch_band="150"/>
+        </StbSecBarArrangementColumn_RC>
+      </StbSecColumn_RC>
+    </StbSections>
+  </StbModel>
+</ST_BRIDGE>"#;
     let mut m = frame_nodes();
     let shape = SectionShape::RcColumnCircle {
         d: 800.0,
@@ -804,7 +846,8 @@ fn test_standard_roundtrip_rc_circle_column_rebar() {
         xml.contains("<StbSecBarColumn_RC_CircleSame "),
         "円形配筋要素: {xml}"
     );
-    let back = import_stbridge(&xml).expect("import");
+    let back = import_stbridge(INPUT).expect("import");
+    assert_rc_rebar_ovika_contract(&m, &back, "rc_circle_column_rebar");
     assert!(back.validate().is_ok(), "{:?}", back.validate());
     assert_eq!(
         back.sections[0].shape,
@@ -827,6 +870,26 @@ fn test_standard_roundtrip_rc_circle_column_rebar() {
 /// 標準モード: RC 矩形梁の配筋が実配筋モデル（上端/下端）へ取り込まれる。
 #[test]
 fn test_standard_roundtrip_rc_beam_rebar() {
+    const INPUT: &str = r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="independent_rc_rebar" app_name="fixture" app_version="1">
+    <StbApplyConditionsList><StbBeam_RC_RebarPositionApply set_default="false"/></StbApplyConditionsList>
+  </StbCommon>
+  <StbModel>
+    <StbNodes>
+      <StbNode id="1" X="0" Y="0" Z="0" kind="ON_COLUMN"/>
+      <StbNode id="2" X="6000" Y="0" Z="0" kind="ON_GIRDER"/>
+    </StbNodes>
+    <StbMembers><StbGirders><StbGirder id="1" name="G1" id_node_start="1" id_node_end="2" id_section="1" kind_structure="RC" isFoundation="false"/></StbGirders></StbMembers>
+    <StbSections>
+      <StbSecBeam_RC id="1" name="G1" strength_concrete="Fc24">
+        <StbSecFigureBeam_RC><StbSecBeam_RC_Straight width="400" depth="700"/></StbSecFigureBeam_RC>
+        <StbSecBarArrangementBeam_RC depth_cover_top="45">
+          <StbSecBarBeam_RC_Same D_main="D25" strength_main="SD345" D_stirrup="D13" strength_stirrup="SD345" N_main_top_1st="4" N_main_bottom_1st="3" N_stirrup="4" pitch_stirrup="150"/>
+        </StbSecBarArrangementBeam_RC>
+      </StbSecBeam_RC>
+    </StbSections>
+  </StbModel>
+</ST_BRIDGE>"#;
     let mut m = frame_nodes();
     let shape = SectionShape::RcBeamRect {
         b: 400.0,
@@ -841,7 +904,8 @@ fn test_standard_roundtrip_rc_beam_rebar() {
         xml.contains("<StbSecBarArrangementBeam_RC "),
         "梁配筋要素が書き出される: {xml}"
     );
-    let back = import_stbridge(&xml).expect("import");
+    let back = import_stbridge(INPUT).expect("import");
+    assert_rc_rebar_ovika_contract(&m, &back, "rc_beam_rebar");
     assert!(back.validate().is_ok(), "{:?}", back.validate());
     assert_eq!(
         back.sections[0].shape,
@@ -864,9 +928,29 @@ fn test_standard_roundtrip_rc_beam_rebar() {
     );
 }
 
-/// 標準モード: 実配筋型の RC 梁（`RcBeamRect`）が上端筋・下端筋の段別本数を保って往復する。
+/// RC 梁の段別本数の標準出力・独立入力と OVIKA の保存を検証する。
 #[test]
 fn test_standard_roundtrip_rc_beam_rect_stages() {
+    const INPUT: &str = r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="independent_rc_rebar" app_name="fixture" app_version="1">
+    <StbApplyConditionsList><StbBeam_RC_RebarPositionApply set_default="false"/></StbApplyConditionsList>
+  </StbCommon>
+  <StbModel>
+    <StbNodes>
+      <StbNode id="1" X="0" Y="0" Z="0" kind="ON_COLUMN"/>
+      <StbNode id="2" X="6000" Y="0" Z="0" kind="ON_GIRDER"/>
+    </StbNodes>
+    <StbMembers><StbGirders><StbGirder id="1" name="G1" id_node_start="1" id_node_end="2" id_section="1" kind_structure="RC" isFoundation="false"/></StbGirders></StbMembers>
+    <StbSections>
+      <StbSecBeam_RC id="1" name="G1" strength_concrete="Fc24">
+        <StbSecFigureBeam_RC><StbSecBeam_RC_Straight width="400" depth="700"/></StbSecFigureBeam_RC>
+        <StbSecBarArrangementBeam_RC depth_cover_top="40">
+          <StbSecBarBeam_RC_Same D_main="D22" strength_main="SD345" D_stirrup="D10" strength_stirrup="SD345" N_main_top_1st="4" N_main_top_2nd="2" N_main_bottom_1st="3" N_stirrup="2" pitch_stirrup="100"/>
+        </StbSecBarArrangementBeam_RC>
+      </StbSecBeam_RC>
+    </StbSections>
+  </StbModel>
+</ST_BRIDGE>"#;
     let mut m = frame_nodes();
     let shape = SectionShape::RcBeamRect {
         b: 400.0,
@@ -891,17 +975,38 @@ fn test_standard_roundtrip_rc_beam_rect_stages() {
     assert!(xml.contains("N_main_top_1st=\"4\""), "{xml}");
     assert!(xml.contains("N_main_top_2nd=\"2\""), "上端筋 2 段目: {xml}");
     assert!(xml.contains("N_main_bottom_1st=\"3\""), "下端筋: {xml}");
-    let back = import_stbridge(&xml).expect("import");
+    let back = import_stbridge(INPUT).expect("import");
+    assert_rc_rebar_ovika_contract(&m, &back, "rc_beam_rect_stages");
     assert!(back.validate().is_ok(), "{:?}", back.validate());
     assert_eq!(
         back.sections[0].shape, m.sections[0].shape,
-        "RC 梁の段別本数が実配筋型で往復する"
+        "RC 梁の段別本数が実配筋型へ取り込まれる"
     );
 }
 
-/// 標準モード: 実配筋型の矩形柱（`RcColumnRect`）が X/Y の段別本数と X/Y 脚数を保って往復する。
+/// 矩形柱の段別本数・方向別脚数の標準出力・独立入力と OVIKA の保存を検証する。
 #[test]
 fn test_standard_roundtrip_rc_column_rect_stages_legs() {
+    const INPUT: &str = r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="independent_rc_rebar" app_name="fixture" app_version="1">
+    <StbApplyConditionsList><StbColumn_RC_RebarPositionApply set_default="false"/></StbApplyConditionsList>
+  </StbCommon>
+  <StbModel>
+    <StbNodes>
+      <StbNode id="1" X="0" Y="0" Z="0" kind="ON_COLUMN"/>
+      <StbNode id="2" X="0" Y="0" Z="3000" kind="ON_COLUMN"/>
+    </StbNodes>
+    <StbMembers><StbColumns><StbColumn id="1" name="C1" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="RC"/></StbColumns></StbMembers>
+    <StbSections>
+      <StbSecColumn_RC id="1" name="C1" strength_concrete="Fc24">
+        <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="600" width_Y="600"/></StbSecFigureColumn_RC>
+        <StbSecBarArrangementColumn_RC depth_cover_start_X="45">
+          <StbSecBarColumn_RC_RectSame D_main="D25" strength_main="SD345" D_band="D13" strength_band="SD345" N_main_X_1st="5" N_main_Y_1st="4" N_main_Y_2nd="3" N_main_total="16" N_band_direction_X="3" N_band_direction_Y="2" pitch_band="100"/>
+        </StbSecBarArrangementColumn_RC>
+      </StbSecColumn_RC>
+    </StbSections>
+  </StbModel>
+</ST_BRIDGE>"#;
     let mut m = frame_nodes();
     let shape = SectionShape::RcColumnRect {
         b: 600.0,
@@ -932,17 +1037,38 @@ fn test_standard_roundtrip_rc_column_rect_stages_legs() {
     assert!(xml.contains("N_main_X_1st=\"5\""), "標準Xの垂直列: {xml}");
     assert!(xml.contains("N_band_direction_X=\"3\""), "X 脚数: {xml}");
     assert!(xml.contains("N_band_direction_Y=\"2\""), "Y 脚数: {xml}");
-    let back = import_stbridge(&xml).expect("import");
+    let back = import_stbridge(INPUT).expect("import");
+    assert_rc_rebar_ovika_contract(&m, &back, "rc_column_rect_stages_legs");
     assert!(back.validate().is_ok(), "{:?}", back.validate());
     assert_eq!(
         back.sections[0].shape, m.sections[0].shape,
-        "矩形柱の段別本数・X/Y 脚数が実配筋型で往復する"
+        "矩形柱の段別本数・X/Y 脚数が実配筋型へ取り込まれる"
     );
 }
 
-/// 標準モード: 実配筋型の円形柱（`RcColumnCircle`）が主筋の全本数を保って往復する。
+/// 円形柱の主筋全本数の標準出力・独立入力と OVIKA の保存を検証する。
 #[test]
 fn test_standard_roundtrip_rc_column_circle_count() {
+    const INPUT: &str = r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="independent_rc_rebar" app_name="fixture" app_version="1">
+    <StbApplyConditionsList><StbColumn_RC_RebarPositionApply set_default="false"/></StbApplyConditionsList>
+  </StbCommon>
+  <StbModel>
+    <StbNodes>
+      <StbNode id="1" X="0" Y="0" Z="0" kind="ON_COLUMN"/>
+      <StbNode id="2" X="0" Y="0" Z="3000" kind="ON_COLUMN"/>
+    </StbNodes>
+    <StbMembers><StbColumns><StbColumn id="1" name="C1" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="RC"/></StbColumns></StbMembers>
+    <StbSections>
+      <StbSecColumn_RC id="1" name="C1" strength_concrete="Fc24">
+        <StbSecFigureColumn_RC><StbSecColumn_RC_Circle D="800"/></StbSecFigureColumn_RC>
+        <StbSecBarArrangementColumn_RC depth_cover_start_X="45">
+          <StbSecBarColumn_RC_CircleSame D_main="D25" strength_main="SD345" D_band="D13" strength_band="SD345" N_main="8" N_band="2" pitch_band="100"/>
+        </StbSecBarArrangementColumn_RC>
+      </StbSecColumn_RC>
+    </StbSections>
+  </StbModel>
+</ST_BRIDGE>"#;
     let mut m = frame_nodes();
     let shape = SectionShape::RcColumnCircle {
         d: 800.0,
@@ -965,11 +1091,12 @@ fn test_standard_roundtrip_rc_column_circle_count() {
         "円形配筋要素: {xml}"
     );
     assert!(xml.contains("N_main=\"8\""), "全本数: {xml}");
-    let back = import_stbridge(&xml).expect("import");
+    let back = import_stbridge(INPUT).expect("import");
+    assert_rc_rebar_ovika_contract(&m, &back, "rc_column_circle_count");
     assert!(back.validate().is_ok(), "{:?}", back.validate());
     assert_eq!(
         back.sections[0].shape, m.sections[0].shape,
-        "円形柱の全本数が実配筋型で往復する"
+        "円形柱の全本数が実配筋型へ取り込まれる"
     );
 }
 
@@ -1104,7 +1231,7 @@ fn test_standard_export_src_column_rect_stages() {
 #[test]
 fn test_import_duplicate_node_id_is_error() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="0" X="1000" Y="0" Z="0"/>
@@ -1122,7 +1249,7 @@ fn test_import_duplicate_node_id_is_error() {
 #[test]
 fn test_import_rc_without_bar_arrangement_uses_default() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbSections>
     <StbSecColumn_RC id="0" name="C"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="500" width_Y="600"/></StbSecFigureColumn_RC></StbSecColumn_RC>
   </StbSections>
@@ -1193,7 +1320,7 @@ fn test_export_rejects_beam_section_with_brace_use() {
 #[test]
 fn test_import_does_not_merge_sections_with_different_materials() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -1205,8 +1332,8 @@ fn test_import_does_not_merge_sections_with_different_materials() {
     <StbSecSteel><StbSecRoll-H name="H1" type="H" A="300" B="150" t1="6.5" t2="9" r="0"/></StbSecSteel>
   </StbSections>
   <StbMembers>
-    <StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0"/>
-    <StbColumn id="1" id_node_bottom="1" id_node_top="2" id_section="1"/>
+    <StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0" kind_structure="S"/>
+    <StbColumn id="1" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="S"/>
   </StbMembers>
 </StbModel></ST_BRIDGE>"#;
     let (model, _) = import_stbridge_with_report(xml).expect("材料が違う断面は統合しない");
@@ -1221,10 +1348,9 @@ fn test_import_does_not_merge_sections_with_different_materials() {
     );
 }
 
-/// 標準モード: 柱・梁で同名の RC 矩形断面は用途別に書き分けられるが、
-/// 取り込みでは同一符号・階の用途競合として fail-loud にする。
+/// 同名の RC 柱・梁断面を書き分け、梁参照を柱系列へ救済しない。
 #[test]
-fn test_standard_roundtrip_shared_rc_rect_rebar() {
+fn test_standard_export_shared_rc_rect_rebar_and_reject_cross_family_reference() {
     let mut m = frame_nodes();
     let column = SectionShape::RcColumnRect {
         b: 500.0,
@@ -1242,8 +1368,34 @@ fn test_standard_roundtrip_shared_rc_rect_rebar() {
     m.elements.push(member(1, false, 1)); // 梁
 
     let xml = export_stbridge(&m).unwrap();
-    let error = import_stbridge(&xml).expect_err("主架構用途の競合は改番せず失敗する");
-    assert!(matches!(error, StbError::Unmappable(message) if message.contains("用途が競合")));
+    assert!(xml.contains("<StbSecColumn_RC "), "{xml}");
+    assert!(xml.contains("<StbSecBeam_RC "), "{xml}");
+    let input = r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
+  <StbNodes><StbNode id="0" X="0" Y="0" Z="0"/><StbNode id="1" X="0" Y="0" Z="3000"/><StbNode id="2" X="6000" Y="0" Z="3000"/></StbNodes>
+  <StbSections>
+    <StbSecColumn_RC id="1" name="RC1"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="500" width_Y="800"/></StbSecFigureColumn_RC></StbSecColumn_RC>
+    <StbSecBeam_RC id="2" name="RC1"><StbSecFigureBeam_RC><StbSecBeam_RC_Straight width="500" depth="800"/></StbSecFigureBeam_RC></StbSecBeam_RC>
+  </StbSections>
+  <StbMembers>
+    <StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="1" kind_structure="RC"/>
+    <StbGirder id="1" id_node_start="1" id_node_end="2" id_section="1" kind_structure="RC"/>
+  </StbMembers>
+</StbModel></ST_BRIDGE>"#;
+    for error in [
+        import_stbridge(input).unwrap_err(),
+        import_stbridge_with_report(input).unwrap_err(),
+    ] {
+        let message = error.to_string();
+        assert!(
+            message.contains("StbGirder id=Some(1)")
+                && message.contains("kind_structure=Some(\"RC\")")
+                && message.contains("要求系列=StbSecBeam_RC")
+                && message.contains("id_section=Some(\"1\")")
+                && message.contains("要求系列内に断面定義がありません")
+                && message.contains("他系列にのみ存在: StbSecColumn_RC"),
+            "{message}"
+        );
+    }
 }
 
 /// せん断補強筋の材料が未割当でも配筋は完全一致で往復する
@@ -1285,11 +1437,30 @@ fn test_standard_roundtrip_rc_rebar_without_shear_material() {
     assert_eq!(back.sections[0].shear_rebar_material, None);
 }
 
-/// 非整数の径・ピッチ・かぶりも桁落ちなく往復する。
+/// 非整数の径・ピッチ・かぶりを標準入力と OVIKA で桁落ちなく保持する。
 #[test]
 fn test_standard_roundtrip_rc_rebar_non_integer() {
+    const INPUT: &str = r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="independent_rc_rebar" app_name="fixture" app_version="1">
+    <StbApplyConditionsList><StbColumn_RC_RebarPositionApply set_default="false"/></StbApplyConditionsList>
+  </StbCommon>
+  <StbModel>
+    <StbNodes>
+      <StbNode id="1" X="0" Y="0" Z="0" kind="ON_COLUMN"/>
+      <StbNode id="2" X="0" Y="0" Z="3000" kind="ON_COLUMN"/>
+    </StbNodes>
+    <StbMembers><StbColumns><StbColumn id="1" name="C1" id_node_bottom="1" id_node_top="2" id_section="1" kind_structure="RC"/></StbColumns></StbMembers>
+    <StbSections>
+      <StbSecColumn_RC id="1" name="C1" strength_concrete="Fc24">
+        <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="450" width_Y="650"/></StbSecFigureColumn_RC>
+        <StbSecBarArrangementColumn_RC depth_cover_start_X="40.5">
+          <StbSecBarColumn_RC_RectSame D_main="12.7" strength_main="SD345" D_band="6.35" strength_band="SD345" N_main_X_1st="4" N_main_Y_1st="6" N_main_total="16" N_band_direction_X="2" N_band_direction_Y="2" pitch_band="133.3"/>
+        </StbSecBarArrangementColumn_RC>
+      </StbSecColumn_RC>
+    </StbSections>
+  </StbModel>
+</ST_BRIDGE>"#;
     let mut m = frame_nodes();
-    // 主筋径は単一 `D_main`・1 段のみ標準往復する（X/Y で径・段数は変えない）。
     let r = RcRectColumnRebar {
         main_dia: 12.7,
         x: vec![6],
@@ -1310,7 +1481,9 @@ fn test_standard_roundtrip_rc_rebar_non_integer() {
     push_section(&mut m, shape.to_section(SectionId(0), "C1".into()));
     m.elements.push(member(0, true, 0));
 
-    let back = import_stbridge(&export_stbridge(&m).unwrap()).expect("import");
+    export_stbridge(&m).expect("export");
+    let back = import_stbridge(INPUT).expect("import");
+    assert_rc_rebar_ovika_contract(&m, &back, "rc_rebar_non_integer");
     assert_eq!(
         back.sections[0].shape,
         Some(SectionShape::RcColumnRect {
@@ -1396,7 +1569,7 @@ fn test_standard_roundtrip_shear_rebar_material_with_control_chars() {
 #[test]
 fn test_import_rc_rebar_third_party_names() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbSections>
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="600" width_Y="600"/></StbSecFigureColumn_RC>
@@ -1424,7 +1597,7 @@ fn test_import_rc_rebar_third_party_names() {
 #[test]
 fn test_import_rc_rebar_layered_counts() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbSections>
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="700" width_Y="700"/></StbSecFigureColumn_RC>
@@ -1449,7 +1622,7 @@ fn test_import_rc_rebar_layered_counts() {
 #[test]
 fn test_import_rc_beam_rebar_stages() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbSections>
     <StbSecBeam_RC id="0" name="G1">
       <StbSecFigureBeam_RC><StbSecBeam_RC_Straight width="400" depth="700"/></StbSecFigureBeam_RC>
@@ -1478,7 +1651,7 @@ fn test_import_rc_beam_rebar_stages() {
 #[test]
 fn test_import_rc_rect_column_hoop_legs() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbSections>
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="800" width_Y="600"/></StbSecFigureColumn_RC>
@@ -1504,7 +1677,7 @@ fn test_import_rc_rect_column_hoop_legs() {
 #[test]
 fn test_import_rc_circle_column_total_count() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbSections>
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Circle D="800"/></StbSecFigureColumn_RC>
@@ -1532,7 +1705,7 @@ fn test_import_rc_circle_column_total_count() {
 #[test]
 fn test_import_rc_kind_preserved() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbSections>
     <StbSecColumn_RC id="0" name="C">
       <StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="600" width_Y="600"/></StbSecFigureColumn_RC>
@@ -1566,7 +1739,7 @@ fn test_import_rc_kind_preserved() {
 #[test]
 fn test_import_rc_circle_beam_unsupported() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbSections>
     <StbSecBeam_RC id="0" name="GB">
       <StbSecFigureBeam_RC><StbSecColumn_RC_Circle D="600"/></StbSecFigureBeam_RC>
@@ -1589,7 +1762,7 @@ fn test_import_rc_circle_beam_unsupported() {
 #[test]
 fn test_import_steel_pipe_library() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -1603,7 +1776,7 @@ fn test_import_steel_pipe_library() {
     </StbSecSteel>
   </StbSections>
   <StbMembers>
-    <StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0"/>
+    <StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0" kind_structure="S"/>
   </StbMembers>
 </StbModel></ST_BRIDGE>"#;
     let (m, report) = import_stbridge_with_report(xml).expect("import");
@@ -1709,7 +1882,7 @@ fn test_standard_export_built_h() {
 #[test]
 fn test_import_symmetric_build_h_is_steel_h() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -1723,7 +1896,7 @@ fn test_import_symmetric_build_h_is_steel_h() {
     </StbSecSteel>
   </StbSections>
   <StbMembers>
-    <StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0"/>
+    <StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0" kind_structure="S"/>
   </StbMembers>
 </StbModel></ST_BRIDGE>"#;
     let m = import_stbridge(xml).expect("import");
@@ -1780,7 +1953,7 @@ fn test_standard_roundtrip_steel_box_distinct_corner_r() {
 #[test]
 fn test_import_box_without_r_attr_is_corner_r_zero() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -1794,7 +1967,7 @@ fn test_import_box_without_r_attr_is_corner_r_zero() {
     </StbSecSteel>
   </StbSections>
   <StbMembers>
-    <StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0"/>
+    <StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0" kind_structure="S"/>
   </StbMembers>
 </StbModel></ST_BRIDGE>"#;
     let m = import_stbridge(xml).expect("import");
@@ -1895,7 +2068,7 @@ fn test_standard_roundtrip_cft_box() {
 #[test]
 fn test_import_cft_separates_concrete_and_steel_materials() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes><StbNode id="0" X="0" Y="0" Z="0"/><StbNode id="1" X="0" Y="0" Z="3000"/></StbNodes>
   <StbSections>
     <StbSecColumn_CFT id="0" name="CFT" strength_concrete="Fc24">
@@ -1903,7 +2076,7 @@ fn test_import_cft_separates_concrete_and_steel_materials() {
     </StbSecColumn_CFT>
     <StbSecSteel><StbSecRoll-BOX name="BOX-400" type="ELSE" A="400" B="400" t="12"/></StbSecSteel>
   </StbSections>
-  <StbMembers><StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0"/></StbMembers>
+  <StbMembers><StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0" kind_structure="CFT"/></StbMembers>
 </StbModel></ST_BRIDGE>"#;
     let model = import_stbridge(xml).expect("import");
     let section = &model.sections[0];
@@ -1924,7 +2097,7 @@ fn test_import_cft_separates_concrete_and_steel_materials() {
 #[test]
 fn test_import_cft_without_strength_keeps_section_unresolved() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbSections>
     <StbSecColumn_CFT id="0" name="CFT" strength_concrete="Fc24">
       <StbSecSteelFigureColumn_CFT><StbSecSteelColumn_CFT_Same shape="BOX-400"/></StbSecSteelFigureColumn_CFT>
@@ -2121,7 +2294,7 @@ fn test_standard_import_steel_library_order_independent() {
 #[test]
 fn test_import_normalizes_noncontiguous_ids() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="11" X="0" Y="0" Z="0"/>
     <StbNode id="12" X="0" Y="0" Z="3000"/>
@@ -2130,7 +2303,7 @@ fn test_import_normalizes_noncontiguous_ids() {
     <StbSecColumn_S id="9" name="C1"><StbSecSteelFigureColumn_S><StbSecSteelColumn_S_Same shape="H1" strength_main="SN400B"/></StbSecSteelFigureColumn_S></StbSecColumn_S>
     <StbSecSteel><StbSecRoll-H name="H1" type="H" A="300" B="150" t1="6.5" t2="9" r="0"/></StbSecSteel>
   </StbSections>
-  <StbMembers><StbColumn id="7" id_node_bottom="11" id_node_top="12" id_section="9"/></StbMembers>
+  <StbMembers><StbColumn id="7" id_node_bottom="11" id_node_top="12" id_section="9" kind_structure="S"/></StbMembers>
 </StbModel></ST_BRIDGE>"#;
     let m = import_stbridge(xml).expect("import");
     assert!(
@@ -2265,7 +2438,7 @@ fn test_standard_writes_section_material() {
 #[test]
 fn test_import_propagates_steel_grade_material_to_member() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -2274,7 +2447,7 @@ fn test_import_propagates_steel_grade_material_to_member() {
     <StbSecColumn_S id="0" name="C"><StbSecSteelFigureColumn_S><StbSecSteelColumn_S_Same shape="H1" strength_main="SN400B"/></StbSecSteelFigureColumn_S></StbSecColumn_S>
     <StbSecSteel><StbSecRoll-H name="H1" type="H" A="300" B="150" t1="6.5" t2="9" r="0"/></StbSecSteel>
   </StbSections>
-  <StbMembers><StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0"/></StbMembers>
+  <StbMembers><StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0" kind_structure="S"/></StbMembers>
 </StbModel></ST_BRIDGE>"#;
     let m = import_stbridge(xml).expect("import");
     assert!(m.validate().is_ok(), "{:?}", m.validate());
@@ -2289,7 +2462,7 @@ fn test_import_propagates_steel_grade_material_to_member() {
 #[test]
 fn test_import_propagates_rc_material_to_member() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -2297,7 +2470,7 @@ fn test_import_propagates_rc_material_to_member() {
   <StbSections>
     <StbSecColumn_RC id="0" name="C" strength_concrete="Fc24"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="500" width_Y="500"/></StbSecFigureColumn_RC></StbSecColumn_RC>
   </StbSections>
-  <StbMembers><StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0"/></StbMembers>
+  <StbMembers><StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0" kind_structure="RC"/></StbMembers>
 </StbModel></ST_BRIDGE>"#;
     let m = import_stbridge(xml).expect("import");
     assert!(m.validate().is_ok(), "{:?}", m.validate());
@@ -2312,7 +2485,7 @@ fn test_import_propagates_rc_material_to_member() {
 #[test]
 fn test_import_report_lists_unsupported_elements() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -2345,7 +2518,7 @@ fn test_import_report_lists_unsupported_elements() {
 #[test]
 fn test_import_report_unknown_elements_are_reported() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -2392,7 +2565,7 @@ fn test_import_report_unknown_elements_are_reported() {
 #[test]
 fn test_import_slab_with_node_order_and_thickness() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="4000" Y="0" Z="0"/>
@@ -2444,7 +2617,7 @@ fn test_import_slab_with_node_order_and_thickness() {
 #[test]
 fn test_import_slab_node_order_cdata_and_self_closing_window() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="4000" Y="0" Z="0"/>
@@ -2500,7 +2673,7 @@ fn test_import_slab_node_order_cdata_and_self_closing_window() {
 #[test]
 fn test_import_wall_with_node_order_and_thickness() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="4000" Y="0" Z="0"/>
@@ -2565,7 +2738,7 @@ fn test_import_wall_with_node_order_and_thickness() {
 #[test]
 fn test_import_without_walls_rebuilds_wall_assignment_regions() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="4000" Y="0" Z="0"/>
@@ -2625,7 +2798,7 @@ fn test_import_converts_unenclosed_parapet_to_attached_wall_plate() {
     use sepika_core::model::{RegionAnchor, WallPlateShape};
 
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -2640,11 +2813,11 @@ fn test_import_converts_unenclosed_parapet_to_attached_wall_plate() {
     <StbSecSteel><StbSecRoll-H name="H1" type="H" A="300" B="150" t1="6.5" t2="9" r="0"/></StbSecSteel>
   </StbSections>
   <StbMembers>
-    <StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0"/>
-    <StbColumn id="1" id_node_bottom="2" id_node_top="3" id_section="0"/>
-    <StbGirder id="2" id_node_start="0" id_node_end="2" id_section="1"/>
-    <StbGirder id="3" id_node_start="1" id_node_end="3" id_section="1"/>
-    <StbWall id="0" name="Parapet">
+    <StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="0" kind_structure="S"/>
+    <StbColumn id="1" id_node_bottom="2" id_node_top="3" id_section="0" kind_structure="S"/>
+    <StbGirder id="2" id_node_start="0" id_node_end="2" id_section="1" kind_structure="S"/>
+    <StbGirder id="3" id_node_start="1" id_node_end="3" id_section="1" kind_structure="S"/>
+    <StbWall id="0" name="Parapet" kind_structure="RC">
       <StbNodeIdOrder>1 3 5 4</StbNodeIdOrder>
     </StbWall>
   </StbMembers>
@@ -2678,12 +2851,12 @@ fn test_import_converts_unenclosed_parapet_to_attached_wall_plate() {
         }
         other => panic!("Line の Attached ではない: {other:?}"),
     }
-    // 帰属なし・照合できなかった旧領域の警告は出ない（自動変換は成功扱いで警告しない。
-    // 床側 D20 と同じ挙動）。断面未割当（本フィクスチャは id_section を持たない）の
-    // 警告だけが残る。
     assert_eq!(
         report.warnings,
-        vec!["断面未割当の壁版を 1 枚取り込みました。解析要素としては生成しません".to_string()]
+        vec![
+            "断面未割当の壁版を 1 枚取り込みました。解析要素としては生成しません".to_string(),
+            "Wall(WallPlateId(0)): 部材・断面・原階・共通のFc指定がありません".to_string(),
+        ]
     );
     assert!(m.wall_plate_assignment_region(plate.id).is_none());
     let plates = m.wall_plates.clone();
@@ -2714,7 +2887,7 @@ fn test_import_converts_unenclosed_parapet_to_attached_wall_plate() {
 #[test]
 fn test_self_closing_slab_does_not_steal_wall_nodes() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="4000" Y="0" Z="0"/>
@@ -2732,7 +2905,7 @@ fn test_self_closing_slab_does_not_steal_wall_nodes() {
     <StbColumn id="1" id_node_bottom="1" id_node_top="2" id_section="66001" kind_structure="S"/>
     <StbGirder id="2" id_node_start="0" id_node_end="1" id_section="66002" kind_structure="S"/>
     <StbGirder id="3" id_node_start="3" id_node_end="2" id_section="66002" kind_structure="S"/>
-    <StbSlab id="0" name="S0" id_section="1"/>
+    <StbSlab id="0" name="S0" id_section="1" kind_structure="RC"/>
     <StbWall id="1" name="W1" kind_structure="RC">
       <StbNodeIdOrder>0 1 2 3</StbNodeIdOrder>
     </StbWall>
@@ -2769,7 +2942,7 @@ fn standard_wall_geometry_input(nodes: &str, order: &[u32], thickness_mm: f64) -
         .collect::<Vec<_>>()
         .join(" ");
     format!(
-        r#"<ST_BRIDGE version="2.0.2"><StbModel><StbNodes>{nodes}</StbNodes>
+        r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes>{nodes}</StbNodes>
 <StbMembers><StbColumns>{columns}</StbColumns><StbGirders>{girders}</StbGirders><StbWalls><StbWall id="1" name="W" id_section="1" kind_structure="RC" kind_layout="ON_GIRDER"><StbNodeIdOrder>{order}</StbNodeIdOrder></StbWall></StbWalls></StbMembers>
 <StbSections><StbSecWall_RC id="1" name="W"><StbSecFigureWall_RC><StbSecWall_RC_Straight t="{thickness_mm}"/></StbSecFigureWall_RC></StbSecWall_RC>
 <StbSecBeam_S id="2" name="G"><StbSecSteelFigureBeam_S><StbSecSteelBeam_S_Straight shape="H1" strength_main="SN400B"/></StbSecSteelFigureBeam_S></StbSecBeam_S>
@@ -3131,7 +3304,7 @@ fn test_import_rejects_unresolved_steel_ref() {
 fn test_import_stbpost_bottom_top() {
     use sepika_core::model::SecondaryMemberKind;
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -3156,12 +3329,12 @@ fn test_import_stbpost_bottom_top() {
 #[test]
 fn test_import_rejects_dangling_section_ref() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
   </StbNodes>
-  <StbMembers><StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="99"/></StbMembers>
+  <StbMembers><StbColumn id="0" id_node_bottom="0" id_node_top="1" id_section="99" kind_structure="S"/></StbMembers>
 </StbModel></ST_BRIDGE>"#;
     for error in [
         import_stbridge(xml).unwrap_err(),
@@ -3175,7 +3348,7 @@ fn test_import_rejects_dangling_section_ref() {
 #[test]
 fn test_import_stbsecbrace_s() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="6000" Y="0" Z="3000"/>
@@ -3184,7 +3357,7 @@ fn test_import_stbsecbrace_s() {
     <StbSecBrace_S id="0" name="BR"><StbSecSteelFigureBrace_S><StbSecSteelBrace_S_Same shape="P1"/></StbSecSteelFigureBrace_S></StbSecBrace_S>
     <StbSecSteel><StbSecPipe name="P1" D="100" t="5"/></StbSecSteel>
   </StbSections>
-  <StbMembers><StbBrace id="0" id_node_start="0" id_node_end="1" id_section="0" tension_only="true"/></StbMembers>
+  <StbMembers><StbBrace id="0" id_node_start="0" id_node_end="1" id_section="0" tension_only="true" kind_structure="S"/></StbMembers>
 </StbModel></ST_BRIDGE>"#;
     let (m, report) = import_stbridge_with_report(xml).expect("import");
     assert!(m.validate().is_ok(), "{:?}", m.validate());
@@ -3231,7 +3404,7 @@ fn test_export_strips_illegal_control_chars() {
 #[test]
 fn test_import_auto_fixes_base_level_supports() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="100"/>
     <StbNode id="1" X="6000" Y="0" Z="100.5"/>
@@ -3281,7 +3454,7 @@ fn test_import_auto_support_excludes_beam_only_base_nodes() {
     // 最下レベル Z=0 に節点 0,1,4。柱 C1(0→2)・C2(1→4... ではなく 1→3)。
     // 地中梁 G1(0→4)・G2(4→1) は水平材で節点 4 に柱はない。
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="6000" Y="0" Z="0"/>
@@ -3344,7 +3517,7 @@ fn test_import_auto_support_excludes_beam_only_base_nodes() {
 fn test_import_stbbeam_as_secondary_member() {
     use sepika_core::model::SecondaryMemberKind;
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="6000" Y="0" Z="0"/>
@@ -3418,10 +3591,10 @@ fn test_import_uses_member_context_without_reinterpreting_rc_purpose_types() {
         };
         let xml = format!(
             r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes><StbNode id="0" X="0" Y="0" Z="0"/><StbNode id="1" X="0" Y="0" Z="3000"/></StbNodes>
   <StbSections>{definition}</StbSections>
-  <StbMembers><Stb{member_tag}s><Stb{member_tag} id="0" {node_attributes} id_section="0"/></Stb{member_tag}s></StbMembers>
+  <StbMembers><Stb{member_tag}s><Stb{member_tag} id="0" {node_attributes} id_section="0" kind_structure="RC"/></Stb{member_tag}s></StbMembers>
 </StbModel></ST_BRIDGE>"#
         );
         if let Some(expected) = expected {
@@ -3431,7 +3604,12 @@ fn test_import_uses_member_context_without_reinterpreting_rc_purpose_types() {
         } else {
             let error = import_stbridge(&xml).unwrap_err().to_string();
             assert!(
-                error.contains("SectionId(0)") && error.contains("RC 柱用断面は柱・間柱専用"),
+                error.contains("StbGirder")
+                    && error.contains("kind_structure=Some(\"RC\")")
+                    && error.contains("要求系列=StbSecBeam_RC")
+                    && error.contains("id_section=Some(\"0\")")
+                    && error.contains("要求系列内に断面定義がありません")
+                    && error.contains("他系列にのみ存在: StbSecColumn_RC"),
                 "{error}"
             );
         }
@@ -3561,11 +3739,33 @@ fn test_export_secondary_post_uses_column_section_map() {
         "二次部材の種別ごとに断面用途を選ぶ: {xml}"
     );
     let back = import_stbridge(&xml).expect("主架構と二次部材で共有した断面を再取り込み");
-    assert_eq!(back.sections.len(), 1, "分割された断面定義を1件へ統合する");
+    assert_eq!(back.sections.len(), 2, "柱系列と梁系列の断面を区別する");
+    let column_section = back.elements[0].section.expect("柱の断面");
+    let post_section = back
+        .posts()
+        .next()
+        .expect("間柱")
+        .section
+        .expect("間柱の断面");
+    let beam_section = back
+        .beams()
+        .next()
+        .expect("小梁")
+        .section
+        .expect("小梁の断面");
+    assert_eq!(post_section, column_section, "柱と間柱は柱系列を共有する");
+    assert_ne!(beam_section, column_section, "小梁は梁系列を参照する");
     assert_eq!(
-        back.sections[0].frame_use,
+        back.sections[column_section.index()].frame_use,
         Some(sepika_core::model::FrameSectionUse::Column)
     );
+    for section_id in [column_section, beam_section] {
+        let section = &back.sections[section_id.index()];
+        assert_eq!(section.shape.as_ref(), Some(&h));
+        let material = &back.materials[section.material.expect("鋼断面の材料").index()];
+        assert_eq!(material.name, "SN400B");
+        assert_eq!(material.category, MaterialCategory::Steel);
+    }
 }
 
 #[test]
@@ -3731,7 +3931,7 @@ fn test_slab_shared_section_does_not_multiply_on_roundtrip() {
 #[test]
 fn test_import_slab_section_and_self_weight() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="4000" Y="0" Z="0"/>
@@ -3793,7 +3993,7 @@ fn test_import_slab_section_and_self_weight() {
 #[test]
 fn test_import_splits_slab_across_assignment_regions() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="4000" Y="0" Z="0"/>
@@ -3859,7 +4059,7 @@ fn test_import_splits_slab_across_assignment_regions() {
 #[test]
 fn test_import_errors_when_slab_area_stays_unassigned() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="4000" Y="0" Z="0"/>
@@ -3903,7 +4103,7 @@ fn test_import_errors_when_slab_area_stays_unassigned() {
 #[test]
 fn test_import_export_parallel_axes() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="10" X="1000" Y="0" Z="0"/>
     <StbNode id="11" X="3500" Y="0" Z="0"/>
@@ -3979,7 +4179,7 @@ fn test_import_export_parallel_axes() {
 #[test]
 fn test_import_non_parallel_axes_as_other() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="1" X="0" Y="0" Z="0"/>
     <StbNode id="2" X="5000" Y="0" Z="0"/>
@@ -4022,7 +4222,7 @@ fn test_import_non_parallel_axes_as_other() {
 #[test]
 fn test_import_keeps_section_floor() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="1" X="0" Y="0" Z="0"/>
     <StbNode id="2" X="0" Y="0" Z="4000"/>
@@ -4057,7 +4257,7 @@ fn test_import_keeps_section_floor() {
 #[test]
 fn test_import_merges_identical_duplicate_sections() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="1" X="0" Y="0" Z="0"/>
     <StbNode id="2" X="5000" Y="0" Z="0"/>
@@ -4080,8 +4280,8 @@ fn test_import_merges_identical_duplicate_sections() {
   </StbSections>
   <StbMembers>
     <StbGirders>
-      <StbGirder id="1" name="G1" id_node_start="1" id_node_end="2" id_section="1"/>
-      <StbGirder id="2" name="G2" id_node_start="2" id_node_end="3" id_section="2"/>
+      <StbGirder id="1" name="G1" id_node_start="1" id_node_end="2" id_section="1" kind_structure="S"/>
+      <StbGirder id="2" name="G2" id_node_start="2" id_node_end="3" id_section="2" kind_structure="S"/>
     </StbGirders>
   </StbMembers>
 </StbModel></ST_BRIDGE>"#;
@@ -4104,7 +4304,7 @@ fn test_import_merges_identical_duplicate_sections() {
 #[test]
 fn test_import_renames_conflicting_duplicate_sections() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="1" X="0" Y="0" Z="0"/>
     <StbNode id="2" X="5000" Y="0" Z="0"/>
@@ -4138,9 +4338,9 @@ fn test_import_renames_conflicting_duplicate_sections() {
 }
 
 #[test]
-fn test_import_fails_on_duplicate_section_frame_use_conflict() {
+fn test_import_renames_same_name_sections_from_different_families() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/></StbNodes>
   <StbSections>
     <StbSecBeam_S id="1" name="共有"><StbSecSteelFigureBeam_S><StbSecSteelBeam_S_Straight shape="H"/></StbSecSteelFigureBeam_S></StbSecBeam_S>
@@ -4148,13 +4348,36 @@ fn test_import_fails_on_duplicate_section_frame_use_conflict() {
     <StbSecSteel><StbSecRoll-H name="H" type="H" A="300" B="150" t1="6.5" t2="9"/></StbSecSteel>
   </StbSections>
   <StbMembers>
-    <StbGirders><StbGirder id="1" id_node_start="1" id_node_end="2" id_section="1"/></StbGirders>
-    <StbColumns><StbColumn id="2" id_node_bottom="1" id_node_top="2" id_section="2"/></StbColumns>
+    <StbGirders><StbGirder id="1" id_node_start="1" id_node_end="2" id_section="1" kind_structure="S"/></StbGirders>
+    <StbColumns><StbColumn id="2" id_node_bottom="1" id_node_top="2" id_section="2" kind_structure="S"/></StbColumns>
   </StbMembers>
 </StbModel></ST_BRIDGE>"#;
-    let error = import_stbridge(xml).expect_err("用途競合は改番せず失敗する");
+    let (model, report) = import_stbridge_with_report(xml).expect("別系列の同名断面を保持する");
+    assert!(model.validate().is_ok(), "{:?}", model.validate());
+    assert_eq!(model.sections.len(), 2);
+    let girder_section = model.elements[0].section.expect("元 ID 1 の梁断面");
+    let column_section = model.elements[1].section.expect("元 ID 2 の柱断面");
+    assert_ne!(girder_section, column_section);
+    assert_eq!(
+        model.sections[girder_section.index()].frame_use,
+        Some(sepika_core::model::FrameSectionUse::Girder)
+    );
+    assert_eq!(
+        model.sections[column_section.index()].frame_use,
+        Some(sepika_core::model::FrameSectionUse::Column)
+    );
+    assert!(model.sections.iter().any(|section| section.name == "共有"));
+    assert!(model
+        .sections
+        .iter()
+        .any(|section| section.name == "共有#2"));
     assert!(
-        matches!(error, super::StbError::Unmappable(message) if message.contains("用途が競合"))
+        report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("共有#2")),
+        "{:?}",
+        report.warnings
     );
 }
 
@@ -4163,7 +4386,7 @@ fn test_import_fails_on_duplicate_section_frame_use_conflict() {
 #[test]
 fn test_import_reports_attribute_dispositions() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="1" guid="abc" X="0" Y="0" Z="0" kind="ON_GIRDER"/>
   </StbNodes>
@@ -4199,7 +4422,7 @@ fn test_import_reports_attribute_dispositions() {
 #[test]
 fn test_import_sorts_stories_by_elevation() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="0" Y="0" Z="3000"/>
@@ -4311,7 +4534,7 @@ fn test_export_skips_plateless_and_attached_orphan_sections() {
 #[test]
 fn test_import_enclosed_frame_with_slab_folds_to_one_region() {
     let xml = r#"<?xml version="1.0"?>
-<ST_BRIDGE version="2.0.2"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="4000" Y="0" Z="0"/>
@@ -4333,10 +4556,10 @@ fn test_import_enclosed_frame_with_slab_folds_to_one_region() {
   </StbSections>
   <StbMembers>
     <StbGirders>
-      <StbGirder id="0" id_node_start="0" id_node_end="1" id_section="0"/>
-      <StbGirder id="1" id_node_start="1" id_node_end="2" id_section="0"/>
-      <StbGirder id="2" id_node_start="2" id_node_end="3" id_section="0"/>
-      <StbGirder id="3" id_node_start="3" id_node_end="0" id_section="0"/>
+      <StbGirder id="0" id_node_start="0" id_node_end="1" id_section="0" kind_structure="S"/>
+      <StbGirder id="1" id_node_start="1" id_node_end="2" id_section="0" kind_structure="S"/>
+      <StbGirder id="2" id_node_start="2" id_node_end="3" id_section="0" kind_structure="S"/>
+      <StbGirder id="3" id_node_start="3" id_node_end="0" id_section="0" kind_structure="S"/>
     </StbGirders>
     <StbSlab id="0" name="S1" id_section="7" kind_structure="RC">
       <StbNodeIdOrder>0 1 2 3</StbNodeIdOrder>

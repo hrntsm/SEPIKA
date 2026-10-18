@@ -4,8 +4,9 @@ use super::super::StbError;
 use super::parser::SrcRebarData;
 use super::parser::{RawSlabSection, StbParser};
 use super::{
-    material_std, ImportReport, PendingMember, PendingMemberKind, PendingSec, PendingSecKind,
-    PendingSecondary, RawAxisGroup, RawLoadCase, RawNode, RawSlab, RawStory, RawWall, SecMatRef,
+    material_std, ImportReport, MemberSource, PendingMember, PendingMemberKind, PendingSec,
+    PendingSecKind, PendingSecondary, RawAxisGroup, RawLoadCase, RawNode, RawSlab, RawStory,
+    RawWall, SecMatRef, SectionKey,
 };
 use sepika_core::ids::{
     ElemId, FloorPlateAssignmentRegionId, LoadCaseId, MaterialId, NodeId, SectionId, SlabId,
@@ -64,6 +65,15 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
     let mut notes: Vec<String> = Vec::new();
 
     let section_uses = section_uses(&pending_members)?;
+    let section_sources: HashMap<SectionKey, MemberSource> = pending_members
+        .iter()
+        .filter_map(|member| member.section.map(|key| (key, member.source.clone())))
+        .chain(
+            pending_secondaries
+                .iter()
+                .filter_map(|member| member.section.map(|key| (key, member.source.clone()))),
+        )
+        .collect();
     let section_index = build_sections(
         &mut model,
         pending_secs,
@@ -71,6 +81,7 @@ pub(super) fn assemble(parsed: StbParser) -> Result<(Model, ImportReport), StbEr
         &mut warnings,
         &mut notes,
         &section_uses,
+        &section_sources,
         &mut strengths,
     )?;
 
@@ -443,17 +454,17 @@ fn build_members(
     model: &mut Model,
     pending_members: Vec<PendingMember>,
     node_index: &HashMap<u32, u32>,
-    section_index: &HashMap<u32, u32>,
+    section_index: &HashMap<SectionKey, u32>,
     strengths: &mut super::strength::StrengthInputs,
 ) -> Result<(), StbError> {
     for m in pending_members {
         let (Some(&ni), Some(&nj)) = (node_index.get(&m.n_i), node_index.get(&m.n_j)) else {
-            return Err(StbError::Unmappable(format!(
-                "部材の節点参照を解決できません: {} -> {}",
-                m.n_i, m.n_j
-            )));
+            return Err(m.source.error(
+                m.section.map(|key| key.family),
+                &format!("部材の節点参照を解決できません: {} -> {}", m.n_i, m.n_j),
+            ));
         };
-        let section = Some(resolve_frame_section(m.section, section_index)?);
+        let section = Some(resolve_frame_section(m.section, &m.source, section_index)?);
         let id = ElemId(model.elements.len() as u32);
         let (kind, end_cond) = match m.kind {
             PendingMemberKind::Girder => (ElementKind::Beam, m.end_cond),
@@ -492,19 +503,19 @@ fn build_secondaries(
     model: &mut Model,
     pending_secondaries: Vec<PendingSecondary>,
     node_index: &HashMap<u32, u32>,
-    section_index: &HashMap<u32, u32>,
+    section_index: &HashMap<SectionKey, u32>,
     strengths: &mut super::strength::StrengthInputs,
 ) -> Result<(usize, usize), StbError> {
     let mut n_beams = 0usize;
     let mut n_posts = 0usize;
     for s in pending_secondaries {
         let (Some(&ni), Some(&nj)) = (node_index.get(&s.n_i), node_index.get(&s.n_j)) else {
-            return Err(StbError::Unmappable(format!(
-                "二次部材の節点参照を解決できません: {} -> {}",
-                s.n_i, s.n_j
-            )));
+            return Err(s.source.error(
+                s.section.map(|key| key.family),
+                &format!("二次部材の節点参照を解決できません: {} -> {}", s.n_i, s.n_j),
+            ));
         };
-        let section = Some(resolve_frame_section(s.section, section_index)?);
+        let section = Some(resolve_frame_section(s.section, &s.source, section_index)?);
         let sm = sepika_core::model::SecondaryMember {
             id: model.alloc_secondary_member_id(),
             gravity_end_shares: None,
@@ -535,13 +546,25 @@ fn build_secondaries(
 }
 
 fn resolve_frame_section(
-    file_id: Option<u32>,
-    section_index: &HashMap<u32, u32>,
+    file_id: Option<SectionKey>,
+    source: &MemberSource,
+    section_index: &HashMap<SectionKey, u32>,
 ) -> Result<SectionId, StbError> {
     file_id
         .and_then(|fid| section_index.get(&fid).copied())
         .map(SectionId)
-        .ok_or_else(|| StbError::Unmappable(format!("部材の断面参照を解決できません: {file_id:?}")))
+        .ok_or_else(|| {
+            let reason = match file_id {
+                Some(key) => format!(
+                    "断面 {key} の定義はありますが内部形状へ変換できないため、部材の断面参照を解決できません"
+                ),
+                None => "部材の断面参照が省略されています".to_string(),
+            };
+            source.error(
+                file_id.map(|key| key.family),
+                &reason,
+            )
+        })
 }
 
 /// 割当領域へ結びつける前のスラブ（境界節点と版仕様）。
@@ -556,23 +579,45 @@ struct PendingSlab {
 fn build_slabs(
     model: &mut Model,
     raw_slabs: Vec<RawSlab>,
-    slab_secs: &HashMap<u32, RawSlabSection>,
+    slab_secs: &HashMap<SectionKey, RawSlabSection>,
     node_index: &HashMap<u32, u32>,
     warnings: &mut Vec<String>,
     strengths: &mut super::strength::StrengthInputs,
 ) -> Result<(Vec<PendingSlab>, usize), StbError> {
-    let mut sec_of_file: HashMap<u32, SectionId> = HashMap::new();
+    let mut sec_of_file: HashMap<SectionKey, SectionId> = HashMap::new();
     let mut slab_section_count = 0usize;
     let mut pending = Vec::new();
     for rs in raw_slabs {
+        let raw_section = rs
+            .section_fid
+            .map(|key| {
+                let raw = slab_secs.get(&key).ok_or_else(|| {
+                    rs.source.error(
+                        Some(key.family),
+                        &format!("断面 {key} の定義はありますが内部形状へ変換できないため、スラブの断面参照を解決できません"),
+                    )
+                })?;
+                if !raw.thickness.is_finite() || raw.thickness <= 0.0 {
+                    return Err(rs.source.error(
+                        Some(key.family),
+                        &format!(
+                            "入力断面 {key}, name={:?}: スラブ厚さが不正です: {}",
+                            raw.name, raw.thickness
+                        ),
+                    ));
+                }
+                Ok((key, raw))
+            })
+            .transpose()?;
         let mut boundary = Vec::with_capacity(rs.boundary.len());
         for fid in &rs.boundary {
             match node_index.get(fid) {
                 Some(&ni) => boundary.push(NodeId(ni)),
                 None => {
-                    return Err(StbError::Unmappable(format!(
-                        "スラブの境界節点参照を解決できません: {fid}"
-                    )));
+                    return Err(rs.source.error(
+                        rs.section_fid.map(|key| key.family),
+                        &format!("スラブの境界節点参照を解決できません: {fid}"),
+                    ));
                 }
             }
         }
@@ -580,26 +625,15 @@ fn build_slabs(
             warnings.push("境界頂点数が不足するスラブをスキップしました".into());
             continue;
         }
-        if let Some(fid) = rs.section_fid {
-            if !slab_secs.contains_key(&fid) {
-                return Err(StbError::Unmappable(format!(
-                    "スラブの断面参照を解決できません: {fid}"
-                )));
-            }
-        }
-        let section = rs.section_fid.and_then(|fid| {
-            let raw = slab_secs.get(&fid)?;
-            if raw.thickness <= 0.0 {
-                return None;
-            }
+        let section = raw_section.map(|(fid, raw)| {
             if let Some(&sid) = sec_of_file.get(&fid) {
-                return Some(sid);
+                return sid;
             }
             let sid = push_slab_section(model, fid, raw);
-            strengths.bind_section(fid, "StbSecSlab", sid);
+            strengths.bind_section(fid, sid);
             sec_of_file.insert(fid, sid);
             slab_section_count += 1;
-            Some(sid)
+            sid
         });
         pending.push(PendingSlab {
             strength_index: rs.strength_index,
@@ -937,14 +971,14 @@ fn edge_covered_by_beam(model: &Model, a: [f64; 2], b: [f64; 2], z: f64) -> bool
 /// （断面の同一性は符号＋階のため）。符号＋階が既存の断面と衝突する場合は
 /// 空いた符号まで連番を送る。コンクリートは `strength_concrete` のグレード名から
 /// 材料を引き当て、無ければ標準材料表から起こして追加する。
-fn push_slab_section(model: &mut Model, file_id: u32, raw: &RawSlabSection) -> SectionId {
+fn push_slab_section(model: &mut Model, file_id: SectionKey, raw: &RawSlabSection) -> SectionId {
     use sepika_core::section_shape::SectionShape;
 
     let base = raw
         .name
         .clone()
         .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| format!("S{file_id}"));
+        .unwrap_or_else(|| format!("S{}", file_id.id));
     let floor = raw.floor.clone();
     let mut name = base.clone();
     let mut n = 2u32;
@@ -998,27 +1032,46 @@ struct PendingWall {
     section: Option<SectionId>,
 }
 
-/// 壁（StbWall）を読み、割当領域へ結びつける前の一覧を返す。断面は厚さごとに 1 件とする。
+/// 壁（StbWall）を読み、割当領域へ結びつける前の一覧を返す。
 fn build_walls(
     model: &mut Model,
     raw_walls: Vec<RawWall>,
-    wall_sec_thickness: &HashMap<u32, f64>,
+    wall_sec_thickness: &HashMap<SectionKey, f64>,
     node_index: &HashMap<u32, u32>,
     warnings: &mut Vec<String>,
     strengths: &mut super::strength::StrengthInputs,
 ) -> Result<Vec<PendingWall>, StbError> {
     let mut no_section_walls = 0u32;
     let mut pending = Vec::new();
-    let mut wall_sections: HashMap<u32, SectionId> = HashMap::new();
+    let mut wall_sections: HashMap<SectionKey, SectionId> = HashMap::new();
     for rw in raw_walls {
+        let raw_section = rw
+            .section_fid
+            .map(|key| {
+                let thickness = wall_sec_thickness.get(&key).copied().ok_or_else(|| {
+                    rw.source.error(
+                        Some(key.family),
+                        &format!("断面 {key} の定義はありますが内部形状へ変換できないため、壁の断面参照を解決できません"),
+                    )
+                })?;
+                if !thickness.is_finite() || thickness <= 0.0 {
+                    return Err(rw.source.error(
+                        Some(key.family),
+                        &format!("入力断面 {key}: 壁厚さが不正です: {thickness}"),
+                    ));
+                }
+                Ok((key, thickness))
+            })
+            .transpose()?;
         let mut boundary: Vec<NodeId> = Vec::with_capacity(rw.boundary.len());
         for fid in &rw.boundary {
             match node_index.get(fid) {
                 Some(&ni) => boundary.push(NodeId(ni)),
                 None => {
-                    return Err(StbError::Unmappable(format!(
-                        "壁の境界節点参照を解決できません: {fid}"
-                    )));
+                    return Err(rw.source.error(
+                        rw.section_fid.map(|key| key.family),
+                        &format!("壁の境界節点参照を解決できません: {fid}"),
+                    ));
                 }
             }
         }
@@ -1026,37 +1079,26 @@ fn build_walls(
             warnings.push("境界頂点数が不足する壁をスキップしました".into());
             continue;
         }
-        if let Some(fid) = rw.section_fid {
-            if !wall_sec_thickness.contains_key(&fid) {
-                return Err(StbError::Unmappable(format!(
-                    "壁の断面参照を解決できません: {fid}"
-                )));
+        let section = raw_section.map(|(key, t)| {
+            let base = format!("Wall t{}", t);
+            if let Some(&sid) = wall_sections.get(&key) {
+                return sid;
             }
-        }
-        let section = rw
-            .section_fid
-            .and_then(|fid| wall_sec_thickness.get(&fid).copied())
-            .filter(|t| *t > 0.0)
-            .map(|t| {
-                let base = format!("Wall t{}", t);
-                if let Some(&sid) = wall_sections.get(&rw.section_fid.unwrap()) {
-                    return sid;
-                }
-                let mut name = base.clone();
-                let mut n = 2u32;
-                while sepika_core::model::section_key_taken(&model.sections, (&name, None), None) {
-                    name = format!("{base}#{n}");
-                    n += 1;
-                }
-                let sid = SectionId(model.sections.len() as u32);
-                model.sections.push(Section {
-                    thickness: Some(t),
-                    ..Section::zero(sid, name.clone())
-                });
-                strengths.bind_section(rw.section_fid.unwrap(), "StbSecWall", sid);
-                wall_sections.insert(rw.section_fid.unwrap(), sid);
-                sid
+            let mut name = base.clone();
+            let mut n = 2u32;
+            while sepika_core::model::section_key_taken(&model.sections, (&name, None), None) {
+                name = format!("{base}#{n}");
+                n += 1;
+            }
+            let sid = SectionId(model.sections.len() as u32);
+            model.sections.push(Section {
+                thickness: Some(t),
+                ..Section::zero(sid, name.clone())
             });
+            strengths.bind_section(key, sid);
+            wall_sections.insert(key, sid);
+            sid
+        });
         if section.is_none() {
             no_section_walls += 1;
         }
@@ -1354,48 +1396,35 @@ fn build_index(ids: impl Iterator<Item = u32>) -> HashMap<u32, u32> {
         .collect()
 }
 
-fn section_uses(members: &[PendingMember]) -> Result<HashMap<u32, FrameSectionUse>, StbError> {
+fn section_uses(
+    members: &[PendingMember],
+) -> Result<HashMap<SectionKey, FrameSectionUse>, StbError> {
     let mut uses = HashMap::new();
-    let mut add = |section: Option<u32>,
-                   usage: FrameSectionUse,
-                   detail: String|
-     -> Result<(), StbError> {
-        let Some(section) = section else {
-            return Ok(());
+    for member in members {
+        let Some(section) = member.section else {
+            continue;
         };
         match uses.get(&section).copied() {
             None => {
-                uses.insert(section, usage);
+                uses.insert(section, member.source_usage);
             }
-            Some(previous) if previous == usage => {}
+            Some(previous) if previous == member.source_usage => {}
             Some(previous) => {
-                return Err(StbError::Unmappable(format!(
-                    "断面 file ID {section} の参照用途が競合: 既存 {previous:?}、{detail} は {usage:?}"
-                )));
+                return Err(member.source.error(
+                    Some(section.family),
+                    &format!(
+                        "断面 {section} の参照用途が競合: 既存 {previous:?}、要求 {:?}",
+                        member.source_usage
+                    ),
+                ));
             }
         }
-        Ok(())
-    };
-    for member in members {
-        add(
-            member.section,
-            member.source_usage,
-            format!("{} id={:?}", member.source_tag, member.source_id),
-        )?;
     }
     Ok(uses)
 }
 
-/// 保留していた断面を id 昇順に整列・連番へ再割当てし、形鋼名を解決して
-/// `model.sections` を構築する。返り値は 元の file id → 再割当て後 index のマップ。
-///
-/// ST-Bridge は断面の一意キーが `guid` で、同じ符号の断面を階ごとに別定義として持つ。
-/// SEPIKA の断面は**符号＋階**が一意キーなので、キーが衝突した定義はここで解決する。
-///
-/// - 断面性能・形状が完全に一致するものは 1 件へ統合し、参照していた file id を
-///   同じ index へ写す（統合件数は `notes` で通知する）
-/// - 一致しないものは符号へ連番を付けて（`b3` → `b3#2`）別断面として残す。
-///   キーを一意にしたうえで定義を 1 件も捨てないための扱いで、`warnings` で通知する
+/// 具体的系列と元 ID を内部断面 ID へ対応づける。
+/// 同一系列・符号・階・断面性能・強度指定の定義は統合し、他の符号衝突は改名する。
 #[allow(clippy::too_many_arguments)]
 fn build_sections(
     model: &mut Model,
@@ -1403,24 +1432,33 @@ fn build_sections(
     steel_lib: &HashMap<String, SectionShape>,
     warnings: &mut Vec<String>,
     notes: &mut Vec<String>,
-    section_uses: &HashMap<u32, FrameSectionUse>,
+    section_uses: &HashMap<SectionKey, FrameSectionUse>,
+    section_sources: &HashMap<SectionKey, MemberSource>,
     strengths: &mut super::strength::StrengthInputs,
-) -> Result<HashMap<u32, u32>, StbError> {
+) -> Result<HashMap<SectionKey, u32>, StbError> {
     pending.sort_by_key(|s| s.file_id);
 
-    let mut index_map: HashMap<u32, u32> = HashMap::new();
-    let mut by_key: HashMap<(String, Option<String>), usize> = HashMap::new();
+    let mut index_map: HashMap<SectionKey, u32> = HashMap::new();
+    let mut by_key: HashMap<(String, Option<String>), (usize, SectionKey)> = HashMap::new();
     let mut merged = 0u32;
     let mut renamed: Vec<String> = Vec::new();
     for ps in pending.into_iter() {
         let file_id = ps.file_id;
         let floor = ps.floor.clone();
+        let source_name = ps.name.clone();
+        let section_error = |reason: &str| {
+            let detail = format!("入力断面 {file_id}, name={source_name:?}: {reason}");
+            section_sources.get(&file_id).map_or_else(
+                || StbError::Unmappable(detail.clone()),
+                |source| source.error(Some(file_id.family), &detail),
+            )
+        };
         let new_id = SectionId(model.sections.len() as u32);
         let section = match ps.kind {
             PendingSecKind::Shape(shape) => {
                 let mut section = shape
                     .input_section(new_id, ps.name)
-                    .map_err(StbError::Unmappable)?;
+                    .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?;
                 section.frame_use = section_uses.get(&file_id).copied();
                 section
             }
@@ -1432,12 +1470,12 @@ fn build_sections(
                     Some(shape) => {
                         let mut section = shape
                             .input_section(new_id, ps.name)
-                            .map_err(StbError::Unmappable)?;
+                            .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?;
                         section.frame_use = section_uses.get(&file_id).copied();
                         section
                     }
                     None => {
-                        return Err(StbError::Unmappable(format!(
+                        return Err(section_error(&format!(
                             "鋼断面 (id={file_id}, name=\"{}\") の形鋼参照「{}」を解決できません",
                             ps.name,
                             shape_name.as_deref().unwrap_or("未指定")
@@ -1469,9 +1507,9 @@ fn build_sections(
                 match cft {
                     Some(shape) => shape
                         .input_section(new_id, ps.name)
-                        .map_err(StbError::Unmappable)?,
+                        .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?,
                     None => {
-                        return Err(StbError::Unmappable(format!(
+                        return Err(section_error(&format!(
                         "CFT 断面 (id={file_id}, name=\"{}\") の充填鋼管参照「{}」を解決できません",
                         ps.name,
                         steel_name.as_deref().unwrap_or("未指定")
@@ -1509,14 +1547,14 @@ fn build_sections(
                         _ => None,
                     });
                 let (sh, sw, sweb, sfl) = steel_dims.ok_or_else(|| {
-                    StbError::Unmappable(format!(
+                    section_error(&format!(
                         "SRC 断面 (id={file_id}, name=\"{}\") の内蔵鉄骨参照「{}」を解決できません",
                         ps.name,
                         steel_name.as_deref().unwrap_or("未指定")
                     ))
                 })?;
                 let steel = (sh, sw, sweb, sfl);
-                match rebar {
+                let shape = match rebar {
                     SrcRebarData::Beam(rebar) => SectionShape::SrcBeamRect {
                         b,
                         d,
@@ -1535,8 +1573,10 @@ fn build_sections(
                         steel_web_thick: steel.2,
                         steel_flange_thick: steel.3,
                     },
-                }
-                .to_section(new_id, ps.name)
+                };
+                shape
+                    .input_section(new_id, ps.name)
+                    .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?
             }
         };
         let mut section = section;
@@ -1557,27 +1597,24 @@ fn build_sections(
             });
 
         let idx = match by_key.get(&(section.name.clone(), section.floor.clone())) {
-            Some(&existing)
-                if matches!(
-                    (model.sections[existing].frame_use, section.frame_use),
-                    (Some(previous), Some(current)) if previous != current
-                ) =>
+            Some(&(existing, previous_key))
+                if previous_key.family == file_id.family
+                    && matches!(
+                        (model.sections[existing].frame_use, section.frame_use),
+                        (Some(previous), Some(current)) if previous != current
+                    ) =>
             {
-                return Err(StbError::Unmappable(format!(
+                return Err(section_error(&format!(
                     "符号＋階が同じ断面定義の用途が競合: {} ({:?} と {:?})",
                     section.display_name(),
                     model.sections[existing].frame_use,
                     section.frame_use
                 )));
             }
-            Some(&existing)
-                if model.sections[existing].properties_eq(&section)
-                    && index_map
-                        .iter()
-                        .find(|(_, index)| **index == existing as u32)
-                        .is_none_or(|(previous, _)| {
-                            strengths.same_section_strength(*previous, file_id)
-                        }) =>
+            Some(&(existing, previous_key))
+                if previous_key.family == file_id.family
+                    && model.sections[existing].properties_eq(&section)
+                    && strengths.same_section_strength(previous_key, file_id) =>
             {
                 if model.sections[existing].frame_use.is_none() {
                     model.sections[existing].frame_use = section.frame_use;
@@ -1593,18 +1630,16 @@ fn build_sections(
                 }
                 section.name = format!("{original}#{n}");
                 renamed.push(format!("{} → {}", original, section.name));
-                push_section(model, &mut by_key, section)
+                push_section(model, &mut by_key, file_id, section)
             }
-            None => push_section(model, &mut by_key, section),
+            None => push_section(model, &mut by_key, file_id, section),
         };
-        strengths.bind_section(file_id, "StbSecColumn", SectionId(idx as u32));
-        strengths.bind_section(file_id, "StbSecBeam", SectionId(idx as u32));
-        strengths.bind_section(file_id, "StbSecBrace", SectionId(idx as u32));
+        strengths.bind_section(file_id, SectionId(idx as u32));
         index_map.insert(file_id, idx as u32);
     }
     if merged > 0 {
         notes.push(format!(
-            "符号＋階と断面性能が同一の断面定義 {merged} 件を既存の断面へ統合しました"
+            "同一系列で符号＋階・断面性能・強度指定が同一の断面定義 {merged} 件を既存の断面へ統合しました"
         ));
     }
     if !renamed.is_empty() {
@@ -1622,7 +1657,7 @@ fn build_sections(
             String::new()
         };
         warnings.push(format!(
-            "符号＋階が重複し断面性能が異なる断面が {} 件あったため、符号に連番を付けて取り込みました: {listed}{tail}",
+            "符号＋階が重複し系列・断面性能・強度指定が異なる断面が {} 件あったため、符号に連番を付けて取り込みました: {listed}{tail}",
             renamed.len()
         ));
     }
@@ -1632,12 +1667,16 @@ fn build_sections(
 /// 断面を末尾へ追加し、`id`（＝配列添字）を確定して符号＋階の索引へ登録する。
 fn push_section(
     model: &mut Model,
-    by_key: &mut HashMap<(String, Option<String>), usize>,
+    by_key: &mut HashMap<(String, Option<String>), (usize, SectionKey)>,
+    source_key: SectionKey,
     mut section: Section,
 ) -> usize {
     let idx = model.sections.len();
     section.id = SectionId(idx as u32);
-    by_key.insert((section.name.clone(), section.floor.clone()), idx);
+    by_key.insert(
+        (section.name.clone(), section.floor.clone()),
+        (idx, source_key),
+    );
     model.sections.push(section);
     idx
 }

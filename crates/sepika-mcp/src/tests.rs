@@ -7,7 +7,7 @@ use sepika_core::model::{
 
 #[test]
 fn source_story_empty_table_mcp_kind_edit_preserves_empty_table_and_undo() {
-    let mut model = sepika_io::stbridge::import_stbridge(r#"<ST_BRIDGE version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/></StbNodes><StbStories><StbStory id="1" name="基部" height="0" kind="GENERAL"/></StbStories></StbModel></ST_BRIDGE>"#).unwrap();
+    let mut model = sepika_io::stbridge::import_stbridge(r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/></StbNodes><StbStories><StbStory id="1" name="基部" height="0" kind="GENERAL"/></StbStories></StbModel></ST_BRIDGE>"#).unwrap();
     model.source_stories.clear();
     let initial = model.clone();
     let directory = std::env::temp_dir().join(format!("sepika-497-empty-{}", std::process::id()));
@@ -29,7 +29,7 @@ fn source_story_empty_table_mcp_kind_edit_preserves_empty_table_and_undo() {
 fn source_story_native_kind_mcp_matches_gui_command_and_preserves_imported_kinds() {
     use sepika_core::ids::StoryId;
     use sepika_core::model::{SourceStoryKind, StoryLevelKind};
-    let xml = r#"<ST_BRIDGE version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/></StbNodes><StbStories><StbStory id="1" name="基部" height="0" kind="GENERAL"/><StbStory id="2" name="上階" height="3000" kind="ROOF"/></StbStories></StbModel></ST_BRIDGE>"#;
+    let xml = r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/></StbNodes><StbStories><StbStory id="1" name="基部" height="0" kind="GENERAL"/><StbStory id="2" name="上階" height="3000" kind="ROOF"/></StbStories></StbModel></ST_BRIDGE>"#;
     for native in [true, false] {
         let mut model = sepika_io::stbridge::import_stbridge(xml).unwrap();
         if native {

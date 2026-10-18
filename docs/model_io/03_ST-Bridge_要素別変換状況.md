@@ -44,6 +44,26 @@ ST-Bridge の ID は `positiveInteger`（1 始まり）で出力します。原�
 
 ## 部材
 
+### 断面参照の系列対応
+
+取り込み時は、部材要素と `kind_structure` から次の具体的な断面系列を選び、同じ系列の数値IDへ結びます。
+柱と間柱、大梁と小梁はそれぞれ系列を共有します。
+
+| 部材要素 | `kind_structure` | 要求する断面系列 |
+|---|---|---|
+| `StbColumn` / `StbPost` | RC / S / SRC / CFT | `StbSecColumn_RC` / `StbSecColumn_S` / `StbSecColumn_SRC` / `StbSecColumn_CFT` |
+| `StbGirder` / `StbBeam` | RC / S / SRC | `StbSecBeam_RC` / `StbSecBeam_S` / `StbSecBeam_SRC` |
+| 上記の柱・間柱・大梁・小梁 | UNDEFINED | `StbSecUndefined`（未対応） |
+| `StbBrace` | S | `StbSecBrace_S` |
+| `StbSlab` | RC / DECK / PRECAST | `StbSecSlab_RC` / `StbSecSlabDeck` / `StbSecSlabPrecast`（PRECASTは未対応） |
+| `StbWall` | RC | `StbSecWall_RC` |
+
+系列の選択と、形状・用途の対応可否は別です。例えばCFTの系列が存在しても、二次部材への使用は下表の用途制限に従います。
+ブレースのRC/SRCは対応系列を創作せず、未対応の構造種別として拒否します。
+UNDEFINEDやPRECASTは、要求系列の定義がなければ参照先欠落、定義があれば未対応として診断します。未対応形状を別系列の同IDへ読み替えません。
+同系列の重複IDは、その形状が未対応でも拒否します。
+名前空間と数値IDの制約、参照不正時の扱いは[断面系列と数値ID](02_ST-Bridge_形式.md#断面系列と数値id)を参照してください。
+
 | ST-Bridge 要素 | 取り込み | 書き出し | 往復・備考 |
 |---|:--:|:--:|---|
 | `StbColumn`（柱） | ✅ | ✅ | `StbSecColumn_*` を参照する。鉛直材として往復し、`rotate`・`condition_bottom`/`_top` を読む。端部の偏心 `offset_*` は対象外 |
@@ -91,7 +111,8 @@ Post（間柱）が `StbSecColumn_*`、Brace（ブレース）が `StbSecBrace_*
 
 柱・梁で共有していた断面は、書き出し時に柱用（`StbSecColumn_*`）と梁用（`StbSecBeam_*`）へ
 分割されます。二次部材は、同じ断面を参照する場合でも、小梁は梁用、間柱は柱用を参照します。
-分割された断面は符号も階も同じで断面性能も一致するため、読み戻すときに 1 件へ統合されます
+取り込みでは、柱用と梁用の別系列の断面は、符号・階・形状が同じでも符号を改名して別々に保持します。
+異なる数値IDの定義を1件へ統合するのは、同一具体系列・同一符号/階で、断面性能・形状・材料・強度と配筋の元指定がすべて一致する場合に限ります。同系列の同数値ID重複は統合せず拒否します
 （[断面の符号と階（取り込み）](./02_ST-Bridge_形式.md#断面の符号と階取り込み)を参照）。
 
 ## 断面 — 鋼（形鋼ライブラリ `StbSecSteel`）
@@ -208,11 +229,11 @@ ST-Bridge 2.0.2 の圧延 H・Box は正の `r` が必須です。
 | `StbSecWall_RC`（厚さ） | ⚠️ | ✅ | 厚さは `StbSecFigureWall_RC` 内の `StbSecWall_RC_Straight` の `t` を読む。標準の強度指定を保持・解決する。書き出しは壁版ごとに1件、符号は `W1` のような自動命名 |
 | `StbSecSlab_S`（鋼スラブ） | ❌ | ❌ | 取り込み時に警告 |
 
-スラブの断面は符号＋階で識別するため、同じ断面を参照する床が何枚あっても断面は 1 件です。
+スラブの入力参照は、RCとDECKを含む具体的な系列と元の数値IDで区別します。同じ断面を参照する複数の床には、その断面の厚さと強度指定を結びます。
 床の自重は面荷重へ焼き込まず、断面の板厚とコンクリート材料から使うたびに算定します
 （[床の断面と自重](../calc_basis/01_荷重/08_床の断面と自重.md)）。
 
-壁の断面は厚さごとに 1 件だけ作り、符号は `Wall t180` のように厚さから決めます。
+壁の入力参照は `StbSecWall_RC` と元の数値IDで解決します。取り込み後の断面符号は `Wall t180` のように厚さから決めますが、同厚であることだけを理由に異なる強度指定を取り違えません。
 壁の材料は、部材・断面・原階・共通の標準 `strength_concrete` とその優先順位から解決します。独自の `id_material` へは接続しません。
 
 <div class="impl-ref">

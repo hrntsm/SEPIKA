@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<ST_BRIDGE version="2.0.0"><StbModel>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.0"><StbModel>
   <StbNodes>
     <StbNode id="0" X="0" Y="0" Z="0"/>
     <StbNode id="1" X="4000" Y="0" Z="0"/>
@@ -21,7 +21,7 @@
   </StbSections>
   <StbMembers>
     <StbGirders>
-      <StbGirder id="0" id_node_start="0" id_node_end="1" id_section="0"/>
+      <StbGirder id="0" id_node_start="0" id_node_end="1" id_section="0" kind_structure="S"/>
     </StbGirders>
     <StbSlab id="0" name="S1" id_section="7" kind_structure="RC">
       <StbNodeIdOrder>0 1 2 3</StbNodeIdOrder>

@@ -321,35 +321,40 @@ fn original_fixture_retains_unresolved_positions_and_analysis_derivative_is_expl
     let supported = sepika_io::stbridge::import_stbridge(&derivative).unwrap();
     assert!(
         supported.stb_rebar_analysis_diagnostics().is_empty(),
-        "{:?}; shape={:?}",
-        supported.stb_rebar_analysis_diagnostics(),
-        supported.sections[25].shape
+        "{:?}",
+        supported.stb_rebar_analysis_diagnostics()
     );
     let mut expected_sections = original_model.sections.clone();
-    let Some(sepika_core::section_shape::SectionShape::RcBeamRect { b, d, rebar }) =
-        &mut expected_sections[25].shape
-    else {
-        panic!("FB1は矩形RC梁");
-    };
-    assert_eq!((*b, *d), (300.0, 1800.0));
-    assert_eq!(
-        (rebar.main_dia, rebar.stirrup.dia, rebar.cover),
-        (25.0, 13.0, 0.0)
-    );
-    // 独立な芯間計算。径・本数・外形を変えず、中心だけで配置を成立させる。
-    let minimum = rebar.main_dia + (1.5 * rebar.main_dia).max(25.0);
-    let spaces = f64::from(rebar.top[0] - 1);
-    assert!((*b - 2.0 * 65.5) / spaces < minimum);
-    assert!((*b - 2.0 * 51.0) / spaces >= minimum);
-    rebar.cover = 51.0 - 13.0 - 25.0 / 2.0;
-    for id in [8, 16, 24] {
-        let Some(sepika_core::section_shape::SectionShape::RcBeamRect { rebar, .. }) =
-            &mut expected_sections[id].shape
+    for (name, floor, dimensions, center_mm) in [
+        ("FB1", None, (300.0, 1800.0), 51.0),
+        ("FGY1", Some("1"), (500.0, 1800.0), 65.5),
+        ("FGX1", Some("1"), (500.0, 1800.0), 65.5),
+        ("B1", None, (400.0, 700.0), 65.5),
+    ] {
+        let mut matches = expected_sections
+            .iter_mut()
+            .filter(|section| section.name == name && section.floor.as_deref() == floor);
+        let section = matches.next().expect("原本の対象断面が存在する");
+        assert!(matches.next().is_none(), "断面 {name}/{floor:?} が一意");
+        let Some(sepika_core::section_shape::SectionShape::RcBeamRect { b, d, rebar }) =
+            &mut section.shape
         else {
-            panic!("残る3断面も矩形RC梁");
+            panic!("{name}は矩形RC梁");
         };
+        assert_eq!((*b, *d), dimensions, "{name}の外形");
+        assert_eq!((rebar.main_dia, rebar.stirrup.dia), (25.0, 13.0));
+        assert_eq!((rebar.stirrup.pitch, rebar.stirrup.legs), (200.0, 2));
+        assert_eq!(rebar.top, [4]);
+        assert_eq!(rebar.bottom, [4]);
         assert_eq!(rebar.cover, 0.0, "原本のApplyなし位置は非適用");
-        rebar.cover = 65.5 - 13.0 - 25.0 / 2.0;
+        if name == "FB1" {
+            // 独立な芯間計算。径・本数・外形を変えず、中心だけで配置を成立させる。
+            let minimum = rebar.main_dia + (1.5 * rebar.main_dia).max(25.0);
+            let spaces = f64::from(rebar.top[0] - 1);
+            assert!((*b - 2.0 * 65.5) / spaces < minimum);
+            assert!((*b - 2.0 * 51.0) / spaces >= minimum);
+        }
+        rebar.cover = center_mm - 13.0 - 25.0 / 2.0;
     }
     assert_eq!(
         expected_sections, supported.sections,
