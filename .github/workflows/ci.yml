@@ -1,7 +1,7 @@
 name: CI
 
 on:
-  # main への push は、新規 PR が復元するテスト用キャッシュ（rust-cache、job id=test）の
+  # main への push は、新規 PR が復元するテスト用キャッシュ（rust-cache、shared-key=test）の
   # 生成・更新のため。品質ゲート（テスト実行・静的解析）は PR でのみ実施する。
   push:
     branches: [main]
@@ -16,36 +16,80 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
-  # main では --no-run（テスト実行のみ省略。ビルド内容は PR と同一）。変数名は rust-cache が
-  # キーに含める接頭辞（CARGO / RUST / CC / CFLAGS / CXX / CMAKE）を避ける（main と PR で値が
-  # 異なるとキーが食い違うため）。
-  TEST_BUILD_ONLY_ARGS: ${{ github.event_name == 'push' && '--no-run' || '' }}
 
 jobs:
-  test:
-    name: テスト
+  # main は品質ゲートではなくキャッシュ生成のみを担うため、1 ジョブで直列に全構成を --no-run で
+  # ビルドして単一のキャッシュへまとめる。PR 側の復元元を 1 つに保つため、構成ごとに
+  # shared-key を分けない。
+  test-cache:
+    name: テスト（キャッシュ生成）
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # shared-key は job id の代わりにキーへ入る。job id を test から変更しても、
+      # 既存の main キャッシュ（v0-rust-test-...）をそのまま復元するため test を指定する。
       - uses: Swatinem/rust-cache@v2
         id: rust-cache
+        with:
+          shared-key: test
       # 完全一致で復元できた場合、同一キーへは再保存できない（キャッシュは上書き不可）ためスキップする。
-      - name: テスト実行
-        if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
-        run: cargo test --workspace --locked $TEST_BUILD_ONLY_ARGS
+      - name: テストビルド
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo test --workspace --locked --no-run
       # MCP / GUI は非デフォルト feature のため --workspace では検証されない。
-      - name: featureテスト実行（MCP/GUI/Parquet）
-        if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
-        run: cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked $TEST_BUILD_ONLY_ARGS
+      - name: featureテストビルド（MCP/GUI/Parquet）
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked --no-run
       # feature 統一により --workspace では sepika-io の default（parquet 無効）構成が
       # 検証されないため、parquet 無効構成と GUI 単体構成を以下で直接検証する。
-      - name: テスト実行（sepika-io の default 構成）
-        if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
-        run: cargo test -p sepika-io --locked $TEST_BUILD_ONLY_ARGS
+      - name: テストビルド（sepika-io の default 構成）
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        run: cargo test -p sepika-io --locked --no-run
       - name: ビルド確認（GUI 単体・Parquet なし）
-        if: github.event_name == 'pull_request' || steps.rust-cache.outputs.cache-hit != 'true'
+        if: steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo check -p sepika-app --features sepika-app/gui --locked
+
+  # PR は 4 構成を独立ジョブで並列実行する。各ジョブは main の同一キャッシュを復元するだけで、
+  # 保存はしない（同一キーへの競合保存を避ける）。
+  test:
+    name: テスト（${{ matrix.name }}）
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: workspace
+            command: cargo test --workspace --locked
+          - name: MCP/GUI/Parquet feature
+            command: cargo test -p sepika-mcp -p sepika-app -p sepika-io --features sepika-mcp/mcp,sepika-app/gui,sepika-io/parquet --locked
+          - name: sepika-io default
+            command: cargo test -p sepika-io --locked
+          - name: GUI 単体 check
+            command: cargo check -p sepika-app --features sepika-app/gui --locked
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          save-if: ${{ github.event_name == 'push' }}
+      - name: ${{ matrix.name }}
+        run: ${{ matrix.command }}
+
+  # ブランチ保護の必須チェック名「テスト」を維持するための集約ジョブ。matrix のいずれかが
+  # 失敗・キャンセルされた場合に失敗する。
+  test-gate:
+    name: テスト
+    needs: test
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 検証結果
+        if: needs.test.result != 'success'
+        run: exit 1
 
   clippy:
     name: Clippy静的解析
