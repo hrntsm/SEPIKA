@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [壁側柱の物理的分担と局所解放_Issue496_2026-10.md](壁側柱の物理的分担と局所解放_Issue496_2026-10.md) | 共通側柱分類・純鋼板独立K/反力/仕事、Beam/Fiber/MS局所釣合い・軸履歴・同step応答 | 🔶（分離候補のrun別Verification。App lib847・full_model37・壁統合18等のrun別成功と途中失敗を区別。最終ゲート・Validation未確認） |
 | [断面JとCFTコアねじり_Issue416_2026-10.md](断面JとCFTコアねじり_Issue416_2026-10.md) | H慣用J・Box中心線式、独立P2参照、本番P1校正144levels、供給Js/実GsとBeam/Fiber・公開solver・OVIKA/結果26/18 | 🔶（数値Verificationと物理Validationを区別。正式Windowsgrid160fresh成功・3形状各3反復を記録。最終統合/公開PRゲートは記録待ち） |
 | [STB断面系列別ID_Issue571_2026-10.md](STB断面系列別ID_Issue571_2026-10.md) | 採用namespace・具体系列・数値IDによる定義/部材/強度結合、内部/OVIKA保持、元5Done | 🔶（初期3段階の失敗を保持し、最終feature1322・IO227・Clippy両構成・fmt・文書検査成功。全18 snapshot/1161入力hash一致。XSD124派生期待外0、full_model差分fresh必須指摘なし。文書修正後の再検査/レビュー・親監査・最終ゲート未確認） |
 | [STB標準入力限定_Issue660_2026-10.md](STB標準入力限定_Issue660_2026-10.md) | 旧独自入力互換の撤去・固定XSD照合・両公開import参照不正・内部/OVIKA保持 | 🔶（IO200・App GUI lib837・Clippy・文書検査成功、独立レビュー必須指摘なし。追加feature回帰1292成功/1失敗、共有fixture補正後App統合3成功、App試験移行後対象6成功。全体再実行・親最終監査・最終ゲート未確認） |
@@ -260,6 +261,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
+| 496 | 壁側柱の物理的分担と局所解放 | sepika-core / sepika-element / sepika-solver / sepika-design-jp / sepika-job / sepika-app | model/wall_side_column.rs、wall/side_column、frame/fiber、tests/wall_system_linear.rs | [原七Doneとrun別結果](壁側柱の物理的分担と局所解放_Issue496_2026-10.md#完了条件と試験の対応) | 横断 | 🔶（限定Verification、full_model3snapshot未受入・最終ゲート・Validation未確認） |
 | 671 | SRC梁のQL参照完全性 | sepika-design-jp / sepika-core / sepika-app | srrc/tests.rs、member_design_check.rs、result_contract.rs、app/src_ql_acceptance_tests.rs | [変更後の直接検証](SRC梁のQL参照完全性_Issue671_2026-10.md#変更後の直接検証)・[Appと保存受入](SRC梁のQL参照完全性_Issue671_2026-10.md#変更後のappと保存受入) | 横断 | 🔶（直接/公開actions/OVIKA資格・Windows横断Verification成功、MCP専用受入は今回対象外、最終ゲート・Validation未確認） |
 | 690 | 依存監査とOVIKA保存 | workspace / sepika-io / sepika-app | Cargo.toml、Cargo.lock、deny.toml、ovika.rs | [実使用APIと維持する境界](依存監査とOVIKA保存_Issue690_2026-10.md#実使用apiと維持する境界)・[実行証拠](依存監査とOVIKA保存_Issue690_2026-10.md#実行証拠) | 横断 | 🔶（最終旧8構成App441/関連feature1276成功・監査/静的/文書成功。中間IO195を区別、正式review/最終CI・#671連携は後続） |
 | 687 | 部材荷重方向の計算入口拒否 | sepika-core / sepika-solver / sepika-job / sepika-app / sepika-mcp | model/load.rs、statics/analysis/tests.rs、job/tests/member_load_direction.rs、member_load_direction_acceptance_tests.rs、mcp/tests/member_load_direction.rs、persist.rs | [直接回帰](部材荷重方向の計算入口拒否_Issue687_2026-10.md#変更後の共通入口と直接回帰)・[App](部材荷重方向の計算入口拒否_Issue687_2026-10.md#変更後のapp公開actionundoovika)・[MCP](部材荷重方向の計算入口拒否_Issue687_2026-10.md#変更後のmcp公開job保存成果) | 横断 | 🔶（方向拒否・正常値・保持/Undo/保存と旧成果失効を確認。構成/追補の重複を独立件数へ足さない。横断1720/feature1272・IO191を記録（記法修正前snapshot）。最終fmt/default Clippy成功、文書/正式ゲート未確認） |
