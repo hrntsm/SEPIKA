@@ -120,24 +120,38 @@ fn fixture() -> App {
                 NodeId(first + 3),
             ]
         } else {
-            let lower = NodeId(model.nodes.len() as u32);
-            let upper = NodeId(lower.0 + 1);
-            let y = if index == 1 { 6000.0 } else { -6000.0 };
-            let mut bottom = model.nodes[1].clone();
-            bottom.id = lower;
-            bottom.coord = [0.0, y, 0.0];
-            let mut top = model.nodes[3].clone();
-            top.id = upper;
-            top.coord = [0.0, y, 3500.0];
-            model.nodes.extend([bottom, top]);
+            let first = model.nodes.len() as u32;
+            for (offset, coord) in [
+                [0.0, -6000.0, 0.0],
+                [6000.0, -6000.0, 0.0],
+                [6000.0, -6000.0, 3500.0],
+                [0.0, -6000.0, 3500.0],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut node = model.nodes[if offset < 2 { 0 } else { 2 }].clone();
+                node.id = NodeId(first + offset as u32);
+                node.coord = coord;
+                model.nodes.push(node);
+            }
             let first_id = model.elements.iter().map(|e| e.id.0).max().unwrap() + 1;
-            for (offset, source, nodes) in [(0, 1, [lower, upper]), (1, 2, [NodeId(2), upper])] {
+            for (offset, source, nodes) in [
+                (0, 0, [NodeId(first), NodeId(first + 3)]),
+                (1, 1, [NodeId(first + 1), NodeId(first + 2)]),
+                (2, 2, [NodeId(first + 3), NodeId(first + 2)]),
+            ] {
                 let mut member = model.elements[source].clone();
                 member.id = sepika_core::ids::ElemId(first_id + offset);
                 member.nodes = nodes.into_iter().collect();
                 model.elements.push(member);
             }
-            [NodeId(0), lower, upper, NodeId(2)]
+            [
+                NodeId(first),
+                NodeId(first + 1),
+                NodeId(first + 2),
+                NodeId(first + 3),
+            ]
         };
         model.add_enclosed_wall_plate_from_nodes(
             &boundary,
@@ -407,13 +421,13 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
     app.core.model.nodes[0].coord[0] -= 1.0;
     app.core.model.elements[0].section = Some(SectionId(5));
     app.run_combination(2);
-    assert!(app
-        .core
-        .scoped
-        .last_error
-        .as_ref()
-        .unwrap()
-        .contains("混合構造は扱えません"));
+    let error = app.core.scoped.last_error.as_ref().unwrap();
+    assert!(
+        error.contains("壁 ID [12]")
+            && error.contains("部材 ID [0]")
+            && error.contains("構造種別が不適合"),
+        "{error}"
+    );
     assert!(app
         .core
         .scoped

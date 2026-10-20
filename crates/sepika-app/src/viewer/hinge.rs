@@ -305,6 +305,7 @@ struct HingeViewKey {
     concentrated: bool,
     /// 自要素が耐震壁の側柱（面内解放）か。
     wall_side_column: bool,
+    elastic_wall_girder: bool,
     /// 材端集中ばねの剛域。それ以外は `None`。
     rigid_zone: Option<RigidZone>,
     section: Option<SectionFingerprint>,
@@ -315,6 +316,7 @@ struct HingeViewKey {
     hysteresis: Option<HysteresisModel>,
     rc_beam_reference: Option<sepika_core::model::RcBeamReference>,
     rc_reference_diagnostic: Option<String>,
+    wall_side_column_diagnostic: Option<String>,
 }
 
 /// 要素の両端節点座標と局所軸の基準ベクトル。
@@ -428,6 +430,12 @@ fn hinge_view_key(
         geometry: element_geometry(model, elem),
         concentrated,
         wall_side_column: wall_side_column_release(elem, model).is_some(),
+        elastic_wall_girder: sepika_element::frame::beam::is_elastic_wall_girder(model, elem),
+        wall_side_column_diagnostic: sepika_element::factory::wall_side_column_input_issue(
+            elem,
+            model,
+            Some(AnalysisKind::Incremental),
+        ),
         rigid_zone: concentrated.then_some(elem.rigid_zone),
         section: section.map(SectionFingerprint::from),
         material: model.element_material(elem).map(MaterialFingerprint::from),
@@ -2284,7 +2292,7 @@ mod tests {
             id: ElemId(id),
             kind: ElementKind::Beam,
             nodes: smallvec::smallvec![nodes[0], nodes[1]],
-            section: Some(SectionId(0)),
+            section: Some(SectionId(if id == 0 || id == 1 { 1 } else { 0 })),
             local_axis: LocalAxis {
                 ref_vector: [0.0, 0.0, 1.0],
             },
@@ -2302,7 +2310,27 @@ mod tests {
             node(NodeId(2), [4000.0, 0.0, 3000.0]),
             node(NodeId(3), [0.0, 0.0, 3000.0]),
         ];
-        // 側柱 [0,3] を先に積み、壁版の左辺の支持部材として使わせる。
+        model.materials[0].category = MaterialCategory::Concrete;
+        model.materials[0].fc = Some(24.0);
+        model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+        let mut girder = model.sections[0].clone();
+        girder.id = SectionId(1);
+        girder.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+        model.sections.push(girder);
+        let mut wall_section = sepika_core::section_shape::SectionShape::RcWall {
+            thickness: 150.0,
+            pwh_ratio: None,
+            pwv_ratio: None,
+            ps: 0.0025,
+        }
+        .to_section(SectionId(2), "W150".into());
+        wall_section.material = Some(MaterialId(0));
+        model.sections.push(wall_section);
+        model.elements = vec![
+            line(0, [NodeId(0), NodeId(1)]),
+            line(1, [NodeId(3), NodeId(2)]),
+            line(4, [NodeId(1), NodeId(2)]),
+        ];
         let column = line(3, [NodeId(0), NodeId(3)]);
         model.elements.push(column.clone());
         model.add_enclosed_wall_plate_from_nodes(
@@ -2312,7 +2340,7 @@ mod tests {
                 self_weight_shares: Vec::new(),
                 id: WallPlateId(0),
                 shape: WallPlateShape::Enclosed,
-                section: Some(SectionId(0)),
+                section: Some(SectionId(2)),
                 opening_area: 0.0,
                 opening_weight: 0.0,
                 openings: Vec::new(),
@@ -2331,8 +2359,7 @@ mod tests {
     }
 
     /// 壁側柱のキーは、生モデルではなく壁展開モデルを参照したときに変わる。
-    /// 側柱判定は鉛直材のレジームを変えずにビューを非線形ヒンジなしへ変えるため、
-    /// レジームだけでは追随できない。
+    /// 壁法線回転の解放条件はフォースレジームとは独立してキーへ反映される。
     #[test]
     fn hinge_view_key_changes_with_wall_side_column_toggle() {
         let (model, column) = wall_side_column_view_model();
@@ -2369,8 +2396,7 @@ mod tests {
     }
 
     /// 壁側柱の解析モデル解決は、生モデルではなく壁展開モデルを参照する。
-    /// 生モデルには壁要素が無いためファイバーと誤判定し、展開モデルでは
-    /// 解析と同じく非線形ヒンジなし（[`AnalysisHingeModel::Other`]）になる。
+    /// 展開モデルの側柱も軸・面外の材料履歴を保持し、ファイバービューを返す。
     #[test]
     fn hinge_view_resolves_wall_side_column_with_expanded_model() {
         let (model, column) = wall_side_column_view_model();
@@ -2389,7 +2415,113 @@ mod tests {
         };
         assert_eq!(view(&model), AnalysisHingeModel::Fiber);
         let expanded = sepika_load::wall_expand::expand_wall_elements(&model).0;
-        assert_eq!(view(&expanded), AnalysisHingeModel::Other);
+        assert_eq!(view(&expanded), AnalysisHingeModel::Fiber);
+    }
+
+    #[test]
+    fn stale_wall_side_column_cache_tracks_regime_rejection_and_return_to_fiber() {
+        let (input, column) = wall_side_column_view_model();
+        let mut model = sepika_load::wall_expand::expand_wall_elements(&input).0;
+        let staleness = Staleness {
+            results_stale: true,
+            last_run: Some(SystemTime::UNIX_EPOCH),
+            ..Default::default()
+        };
+        let generation = (staleness.last_run, staleness.results_stale);
+        let mut cache = None;
+        let mut initial_key = None;
+        for regime in [
+            ForceRegime::Auto,
+            ForceRegime::UniaxialBendingShear,
+            ForceRegime::Auto,
+        ] {
+            let data = model
+                .elements
+                .iter_mut()
+                .find(|element| element.id == column.id)
+                .unwrap();
+            data.force_regime = regime;
+            let data = data.clone();
+            let key = hinge_view_key(&model, &data, 0, &staleness);
+            let expected_reason = sepika_element::factory::wall_side_column_input_issue(
+                &data,
+                &model,
+                Some(AnalysisKind::Incremental),
+            );
+            if let Some(initial) = &initial_key {
+                assert_eq!(key == *initial, regime == ForceRegime::Auto);
+            } else {
+                initial_key = Some(key.clone());
+            }
+            ensure_hinge_view(&model, &mut cache, key, &data, 0.0);
+            let cached = cache.as_ref().unwrap();
+            let view = cached.view.as_ref().unwrap();
+            assert_eq!(cached.key.generation, generation);
+            assert_eq!(view.unavailability_reason, expected_reason);
+            if regime == ForceRegime::Auto {
+                assert_eq!(view.model, AnalysisHingeModel::Fiber);
+                assert!(view.mn_surface.is_some());
+            } else {
+                assert_eq!(view.model, AnalysisHingeModel::Other);
+                assert!(view.mn_surface.is_none());
+                let reason = view.unavailability_reason.as_ref().unwrap();
+                assert!(reason.contains("材端集中ばね") && reason.contains("未定式化"));
+            }
+        }
+    }
+
+    #[test]
+    fn stale_girder_cache_tracks_elastic_wall_role_and_return_to_fiber_or_ms() {
+        for representation in [ElementKind::Fiber, ElementKind::MultiSpring] {
+            let (mut input, _) = wall_side_column_view_model();
+            input.elements[0].kind = representation;
+            let expanded = sepika_load::wall_expand::expand_wall_elements(&input).0;
+            let staleness = Staleness {
+                results_stale: true,
+                last_run: Some(SystemTime::UNIX_EPOCH),
+                ..Default::default()
+            };
+            let generation = (staleness.last_run, staleness.results_stale);
+            let mut cache = None;
+            let mut initial_key = None;
+            for (model, elastic) in [(&input, false), (&expanded, true), (&input, false)] {
+                let data = model
+                    .elements
+                    .iter()
+                    .find(|element| element.id == ElemId(0))
+                    .unwrap();
+                let key = hinge_view_key(model, data, 0, &staleness);
+                if let Some(initial) = &initial_key {
+                    assert_eq!(key == *initial, !elastic);
+                } else {
+                    initial_key = Some(key.clone());
+                }
+                ensure_hinge_view(model, &mut cache, key, data, 0.0);
+                let cached = cache.as_ref().unwrap();
+                let view = cached.view.as_ref().unwrap();
+                assert_eq!(cached.key.generation, generation);
+                if elastic {
+                    assert_eq!(view.model, AnalysisHingeModel::Other);
+                    assert!(view.mn_surface.is_none());
+                    assert!(view
+                        .unavailability_reason
+                        .as_ref()
+                        .unwrap()
+                        .contains("壁上下の剛梁は弾性高剛性部材"));
+                } else {
+                    assert_eq!(
+                        view.model,
+                        if representation == ElementKind::Fiber {
+                            AnalysisHingeModel::Fiber
+                        } else {
+                            AnalysisHingeModel::MultiSpring
+                        }
+                    );
+                    assert!(view.mn_surface.is_some());
+                    assert!(view.unavailability_reason.is_none());
+                }
+            }
+        }
     }
 
     /// ファイバーの N-M 曲面は剛域・塑性化域長・履歴則に依存しないため、

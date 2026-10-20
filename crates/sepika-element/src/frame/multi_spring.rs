@@ -21,6 +21,11 @@ pub(crate) const MS_NW: usize = 2;
 pub(crate) const MS_ND: usize = 5;
 
 impl MultiSpringElement {
+    /// 初期状態に全体座標の壁法線まわりの自由解放を追加する。準静的解析用。
+    pub fn configure_wall_release(&mut self, normal_global: [f64; 3]) -> Result<(), String> {
+        self.inner.configure_wall_release(normal_global)
+    }
+
     pub fn new(
         data: &sepika_core::model::ElementData,
         model: &Model,
@@ -60,7 +65,12 @@ crate::behavior::forward_element_behavior!(MultiSpringElement, inner, {
     tangent_stiffness: forward,
     internal_force: forward,
     update_state: forward,
+    update_state_with_member_loads: forward,
     mass_matrix: forward,
+    try_mass_matrix: forward,
+    owns_frame_member_loads: forward,
+    frame_load_response: forward,
+    state_frame_load_response: forward,
     recover_forces: forward,
     state_member_forces: forward,
     geometric_stiffness: forward,
@@ -224,7 +234,7 @@ mod tests {
                 theta
             ],
         };
-        ms.update_state(&du, false, &ctx);
+        ms.update_state(&du, false, &ctx).unwrap();
         let f = ms.internal_force(&ctx);
         for (i, v) in f.data.iter().enumerate() {
             assert!(v.abs() < 1.0, "MS+φ>0 で客観性違反: dof {i} = {v}");
@@ -241,7 +251,8 @@ mod tests {
             },
             false,
             &ctx,
-        );
+        )
+        .unwrap();
         let f0 = b0.internal_force(&ctx);
         let k = b0.tangent_stiffness(&ctx);
         let kmax = (0..12)
@@ -258,7 +269,8 @@ mod tests {
                 },
                 false,
                 &ctx,
-            );
+            )
+            .unwrap();
             let fp = bp.internal_force(&ctx);
             for i in 0..12 {
                 let fd = (fp.data[i] - f0.data[i]) / h;
@@ -286,7 +298,7 @@ mod tests {
         let du1 = LocalVec {
             data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, theta, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         };
-        elem1.update_state(&du1, false, &ctx);
+        elem1.update_state(&du1, false, &ctx).unwrap();
         let f1 = elem1.internal_force(&ctx);
         let m1 = f1.data[4].abs();
 
@@ -302,7 +314,7 @@ mod tests {
                 0.0, 0.0, 0.0, 0.0, theta, 0.0, u_axial, 0.0, 0.0, 0.0, 0.0, 0.0
             ],
         };
-        elem2.update_state(&du2, false, &ctx);
+        elem2.update_state(&du2, false, &ctx).unwrap();
         let f2 = elem2.internal_force(&ctx);
         let m2 = f2.data[4].abs();
 
@@ -326,18 +338,18 @@ mod tests {
         let du = LocalVec {
             data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         };
-        elem.update_state(&du, true, &ctx);
+        elem.update_state(&du, true, &ctx).unwrap();
         let f_committed = elem.internal_force(&ctx);
 
         let du2 = LocalVec {
             data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         };
-        elem.update_state(&du2, false, &ctx);
+        elem.update_state(&du2, false, &ctx).unwrap();
         elem.revert_state();
         let zero = LocalVec {
             data: smallvec::smallvec![0.0; 12],
         };
-        elem.update_state(&zero, false, &ctx);
+        elem.update_state(&zero, false, &ctx).unwrap();
         let f_reverted = elem.internal_force(&ctx);
         for i in 0..12 {
             approx::assert_relative_eq!(
@@ -362,7 +374,7 @@ mod tests {
         let du = LocalVec {
             data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.02, 0.0, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0],
         };
-        elem.update_state(&du, true, &ctx);
+        elem.update_state(&du, true, &ctx).unwrap();
         let cp = elem.serialize_checkpoint();
 
         let mut elem2 = MultiSpringElement::new(
@@ -375,8 +387,8 @@ mod tests {
         let du2 = LocalVec {
             data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         };
-        elem.update_state(&du2, false, &ctx);
-        elem2.update_state(&du2, false, &ctx);
+        elem.update_state(&du2, false, &ctx).unwrap();
+        elem2.update_state(&du2, false, &ctx).unwrap();
         let f1 = elem.internal_force(&ctx);
         let f2 = elem2.internal_force(&ctx);
         for i in 0..12 {

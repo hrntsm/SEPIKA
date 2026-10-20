@@ -188,6 +188,19 @@ impl DofMap {
     pub fn n_active(&self) -> usize {
         self.n_active
     }
+
+    /// 全節点の拘束自由度も採番した写像を返す。既存の節点・仕口パネルの番号は保つ。
+    pub fn including_restrained_node_dofs(&self) -> Self {
+        let mut full = self.clone();
+        for g in 0..full.n_node_global {
+            if full.active_of[g].is_none() {
+                full.active_of[g] = Some(full.global_of.len() as u32);
+                full.global_of.push(g);
+            }
+        }
+        full.n_active = full.global_of.len();
+        full
+    }
     pub fn active(&self, g: GlobalDof) -> Option<u32> {
         self.active_of.get(g).copied().flatten()
     }
@@ -389,6 +402,22 @@ mod tests {
         assert!(!map.is_node_dof(map.global(gx)));
         assert_eq!(map.panel_dof_ref(map.global(gx)), Some((1, 0)));
         assert_eq!(map.panel_dof_ref(map.global(gy)), Some((1, 1)));
+
+        model.nodes[0].restraint = Dof6Mask::FIXED;
+        let constrained = DofMap::build(&model);
+        let full = constrained.including_restrained_node_dofs();
+        assert_eq!(full.n_active(), 3 * DOF_PER_NODE + PANEL_DOF_PER_NODE);
+        assert_eq!(full.panel_dof(1, 0), constrained.panel_dof(1, 0));
+        for a in 0..constrained.n_active() {
+            assert_eq!(full.global(a as u32), constrained.global(a as u32));
+        }
+        for a in 0..full.n_active() {
+            assert_eq!(full.active(full.global(a as u32)), Some(a as u32));
+        }
+        for g in 0..3 * DOF_PER_NODE {
+            assert_eq!(full.global(full.active(g).unwrap()), g);
+        }
+        assert!(constrained.active(0).is_none());
     }
 
     /// 要素が接続しない節点（二次部材の支持点など）は解析自由度から除外される。

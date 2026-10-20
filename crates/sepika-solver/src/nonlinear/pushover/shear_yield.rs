@@ -6,13 +6,13 @@
 //! - [`effective_clear_span`] — 剛域控除後の内法スパン h0
 //! - [`track_shear_yield`] — 各ステップのせん断降伏を軸力 σ0 を反映して判定
 
-use super::geom::{axial_compression, dot3};
+use super::geom::{axial_compression, dot3, recording_force};
 use super::types::ShearYieldEvent;
 use sepika_core::material_grade::{material_strength_factor_rebar, material_strength_factor_steel};
 use sepika_core::model::{ElementData, Material, Model, RigidZone, Section};
 use sepika_core::rc_capacity::{rc_qsu_simple, RcCapacityInput};
 use sepika_core::section_shape::SectionShape;
-use sepika_element::behavior::{Ctx, ElementBehavior};
+use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse};
 use sepika_element::transform::LocalFrame;
 
 /// せん断降伏耐力 Qy の判定しきい値（部材ごと、局所 y・z 方向、独立）。
@@ -293,6 +293,9 @@ pub(crate) fn effective_clear_span(raw_length: f64, rigid_zone: &RigidZone) -> f
 
 pub(crate) fn compute_shear_yield_thresholds(model: &Model) -> Result<Vec<ShearThreshold>, String> {
     for elem in &model.elements {
+        if sepika_element::frame::beam::is_elastic_wall_girder(model, elem) {
+            continue;
+        }
         if let (
             Some(
                 SectionShape::SrcBeamRect {
@@ -323,6 +326,12 @@ pub(crate) fn compute_shear_yield_thresholds(model: &Model) -> Result<Vec<ShearT
         .elements
         .iter()
         .map(|elem| {
+            if sepika_element::frame::beam::is_elastic_wall_girder(model, elem) {
+                return ShearThreshold {
+                    y: DirThreshold::Static(f64::INFINITY),
+                    z: DirThreshold::Static(f64::INFINITY),
+                };
+            }
             let sec = elem.section.and_then(|sid| model.sections.get(sid.index()));
             let mats = SecMaterials {
                 material: model.element_material(elem),
@@ -345,13 +354,21 @@ pub(crate) fn compute_shear_yield_thresholds(model: &Model) -> Result<Vec<ShearT
 pub(crate) fn track_shear_yield(
     model: &Model,
     behaviors: &[Box<dyn ElementBehavior>],
+    responses: &[Option<LoadedFrameResponse>],
     thresholds: &[ShearThreshold],
     step: u32,
     events: &mut Vec<ShearYieldEvent>,
 ) {
     let ctx = Ctx { model };
-    for (i, (elem, b)) in model.elements.iter().zip(behaviors).enumerate() {
-        if elem.nodes.len() != 2 {
+    for (i, ((elem, b), response)) in model
+        .elements
+        .iter()
+        .zip(behaviors)
+        .zip(responses)
+        .enumerate()
+    {
+        if sepika_element::frame::beam::is_elastic_wall_girder(model, elem) || elem.nodes.len() != 2
+        {
             continue;
         }
         let (Some(pi), Some(pj)) = (
@@ -368,7 +385,7 @@ pub(crate) fn track_shear_yield(
         let ey = frame.rot[1];
         let ez = frame.rot[2];
 
-        let f = b.internal_force(&ctx);
+        let f = recording_force(b.as_ref(), response.as_ref(), &ctx);
         let f_i = [f.data[0], f.data[1], f.data[2]];
         let f_j = [f.data[6], f.data[7], f.data[8]];
         let vy = dot3(f_i, ey).abs().max(dot3(f_j, ey).abs());

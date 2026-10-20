@@ -308,7 +308,7 @@ mod tests {
         let du = LocalVec {
             data: smallvec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         };
-        behavior.update_state(&du, false, &ctx);
+        behavior.update_state(&du, false, &ctx).unwrap();
         behavior.commit_state();
 
         let dir = crate::test_util::test_tmp().join("cp_nonlinear_roundtrip_test");

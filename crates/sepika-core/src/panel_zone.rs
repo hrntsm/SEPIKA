@@ -62,7 +62,7 @@
 
 use crate::geom;
 use crate::ids::{ElemId, NodeId};
-use crate::model::{ElementData, ElementKind, FrameSectionUse, Model, Section};
+use crate::model::{ElementData, FrameSectionUse, Model, Section};
 use crate::section_shape::SectionShape;
 use crate::structure_kind::member_structure_kind;
 
@@ -80,7 +80,7 @@ pub enum MemberOrientation {
 
 /// 線材要素の単位材軸ベクトル（i 端 → j 端）。線材以外・退化長さは `None`。
 pub fn member_unit_axis(model: &Model, elem: &ElementData) -> Option<[f64; 3]> {
-    if !matches!(elem.kind, ElementKind::Beam) || elem.nodes.len() < 2 {
+    if !elem.kind.is_primary_frame_support() || elem.nodes.len() < 2 {
         return None;
     }
     let p0 = model.nodes.get(elem.nodes[0].index())?.coord;
@@ -98,7 +98,7 @@ pub fn is_horizontal_or_vertical_member(model: &Model, elem: &ElementData) -> bo
 
 /// 断面用途から柱・はりを判定する。用途未設定・ブレース・線材以外は `None`。
 pub fn member_orientation(model: &Model, elem: &ElementData) -> Option<MemberOrientation> {
-    if !matches!(elem.kind, ElementKind::Beam) || elem.nodes.len() < 2 {
+    if !elem.kind.is_primary_frame_support() || elem.nodes.len() < 2 {
         return None;
     }
     let section = elem.section.and_then(|id| model.sections.get(id.index()))?;
@@ -743,8 +743,51 @@ pub fn beam_panel_depth(sec: &Section) -> Result<f64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn panel_member_axes_and_orientation_do_not_depend_on_frame_representation() {
+        let mut model = Model {
+            nodes: vec![node(0, [0.0; 3]), node(1, [3000.0, 0.0, 0.0])],
+            ..Default::default()
+        };
+        let mut section = Section::zero(crate::ids::SectionId(0), "G1".into());
+        section.frame_use = Some(FrameSectionUse::Girder);
+        model.sections.push(section);
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let element = ElementData {
+                id: ElemId(0),
+                kind,
+                nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
+                section: Some(crate::ids::SectionId(0)),
+                local_axis: crate::model::LocalAxis {
+                    ref_vector: [0.0, 1.0, 0.0],
+                },
+                end_cond: [crate::model::EndCondition::Fixed; 2],
+                force_regime: crate::model::ForceRegime::Auto,
+                rigid_zone: Default::default(),
+                plastic_zone: None,
+                spring: None,
+            };
+            assert_eq!(member_unit_axis(&model, &element), Some([1.0, 0.0, 0.0]));
+            assert_eq!(
+                member_orientation(&model, &element),
+                Some(MemberOrientation::Beam)
+            );
+            assert!(is_horizontal_or_vertical_member(&model, &element));
+            model.sections[0].frame_use = Some(FrameSectionUse::Column);
+            assert_eq!(
+                member_orientation(&model, &element),
+                Some(MemberOrientation::Column)
+            );
+            model.sections[0].frame_use = Some(FrameSectionUse::Girder);
+        }
+    }
     use crate::ids::SectionId;
-    use crate::model::MaterialCategory;
+    use crate::model::{ElementKind, MaterialCategory};
 
     fn sec(shape: SectionShape, depth: f64, panel_thickness: Option<f64>) -> Section {
         Section {

@@ -22,6 +22,266 @@ use sepika_solver::dynamic::timehistory::{
 const LENGTH_MM: f64 = 3000.0;
 const SRC_MASS_T: f64 = 1.3766168875202032;
 
+#[path = "support/wall_side_column.rs"]
+mod wall_side_column_fixture;
+use wall_side_column_fixture::wall_connection_fixture;
+
+#[test]
+fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
+    use sepika_element::factory::{build_behavior, ensure_wall_side_column_analysis};
+    use sepika_element::frame::panel_offset::{PanelEnd, PanelOffsetMember};
+    use sepika_solver::nonlinear::pushover::{
+        pushover_analysis_recording, PushoverControl, PushoverTarget,
+    };
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = wall_connection_fixture(kind);
+        let index = sepika_core::model::WallSideColumnIndex::build(&model);
+        assert_eq!(index.replacement_bindings(ElemId(0)).unwrap().len(), 1);
+        assert!(ensure_wall_side_column_analysis(&model, None, "線形解析", false, None).is_ok());
+        assert!(ensure_wall_side_column_analysis(
+            &model,
+            Some(AnalysisKind::Incremental),
+            "増分解析",
+            false,
+            None
+        )
+        .is_ok());
+        let pdelta = ensure_wall_side_column_analysis(
+            &model,
+            Some(AnalysisKind::Incremental),
+            "増分解析",
+            true,
+            None,
+        )
+        .unwrap_err();
+        assert!(pdelta.contains("増分解析: 部材 ID 0・壁 ID [4]") && pdelta.contains("P-Δ"));
+        assert!(ensure_wall_side_column_analysis(
+            &model,
+            None,
+            "固有値解析",
+            false,
+            Some(MassOption::Consistent)
+        )
+        .is_ok());
+        for element in &mut model.elements[..2] {
+            element.end_cond = [EndCondition::Fixed, EndCondition::Pinned];
+        }
+        let dofmap = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &dofmap);
+        let actual = pushover_analysis_recording(
+            &model,
+            &dofmap,
+            &reducer,
+            sepika_solver::statics::analysis::SeismicDir::X,
+            1,
+            PushoverTarget::from_max_disp(1.0),
+            PushoverControl::default(),
+            false,
+            true,
+            Default::default(),
+        )
+        .unwrap_err();
+        assert_eq!(actual, pdelta);
+        assemble_global_m(&model, &dofmap, MassOption::Lumped).unwrap();
+        let direct =
+            build_behavior(&model.elements[0], &model).try_mass_matrix(MassOption::Consistent);
+        let gate = ensure_wall_side_column_analysis(
+            &model,
+            None,
+            "固有値解析",
+            false,
+            Some(MassOption::Consistent),
+        );
+        let direct_reason = direct
+            .err()
+            .expect("両端自由ねじりの共通ゲージは慣性を消せない");
+        assert!(direct_reason.contains("慣性"));
+        let wrapped = PanelOffsetMember::new(
+            build_behavior(&model.elements[0], &model),
+            [
+                Some(PanelEnd {
+                    node: NodeId(0),
+                    zeta: 0.5,
+                }),
+                None,
+            ],
+        );
+        assert!(
+            matches!(wrapped.try_mass_matrix(MassOption::Consistent), Err(reason) if reason == direct_reason)
+        );
+        assert!(gate.unwrap_err().ends_with(&direct_reason));
+        let mass = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assemble_global_m(&model, &dofmap, MassOption::Consistent)
+        }));
+        assert!(
+            matches!(mass.unwrap(), Err(SolveError::InvalidInput(reason)) if reason.ends_with(&direct_reason))
+        );
+        for fixed in [false, true] {
+            if fixed {
+                for node in &mut model.nodes {
+                    node.restraint = Dof6Mask::FIXED;
+                }
+            }
+            let dofmap = DofMap::build(&model);
+            let reducer = Reducer::build(&model, &dofmap);
+            assert!(
+                matches!(solve_eigen(&model, &dofmap, &reducer, 0), Err(SolveError::InvalidInput(reason)) if reason.starts_with("固有値解析:") && reason.ends_with(&direct_reason))
+            );
+            let solver = sepika_math::solver::make_solver(
+                sepika_math::solver::SolverBackend::DirectSparseCholesky,
+            );
+            assert!(
+                matches!(sepika_solver::dynamic::eigen::solve_eigen_with_solver(&model, &dofmap, &reducer, 0, solver.as_ref()), Err(SolveError::InvalidInput(reason)) if reason.starts_with("固有値解析:") && reason.ends_with(&direct_reason))
+            );
+            let wave = GroundMotion {
+                dt: 0.01,
+                accel_x: vec![0.0, 0.0],
+                accel_y: None,
+                accel_theta: None,
+            };
+            let result = linear_time_history_analysis(
+                &model,
+                &dofmap,
+                &reducer,
+                &wave,
+                &NewmarkCfg::average_accel(),
+                &Damping::MassProportional {
+                    h: 0.05,
+                    omega: 1.0,
+                },
+                &[],
+                &[],
+                false,
+                None,
+            );
+            assert!(
+                matches!(result, Err(SolveError::InvalidInput(reason)) if reason.starts_with("線形時刻歴解析:") && reason.ends_with(&direct_reason))
+            );
+            let state = sepika_solver::dynamic::timehistory::TimeStepState {
+                step: 0,
+                time: 0.0,
+                disp_red: vec![],
+                vel_red: vec![],
+                accel_red: vec![],
+            };
+            let result = sepika_solver::dynamic::timehistory::linear_time_history_from_state(
+                &model,
+                &dofmap,
+                &reducer,
+                &wave,
+                &NewmarkCfg::average_accel(),
+                &Damping::MassProportional {
+                    h: 0.05,
+                    omega: 1.0,
+                },
+                &state,
+                false,
+                None,
+            );
+            assert!(
+                matches!(result, Err(SolveError::InvalidInput(reason)) if reason.starts_with("線形時刻歴解析:") && reason.ends_with(&direct_reason))
+            );
+        }
+        model.mass_method = MassMethod::LumpedOnly;
+        assert!(ensure_wall_side_column_analysis(
+            &model,
+            None,
+            "固有値解析",
+            false,
+            Some(MassOption::Consistent)
+        )
+        .is_ok());
+        assert!(assemble_global_m(&model, &DofMap::build(&model), MassOption::Consistent).is_ok());
+        model.mass_method = MassMethod::CorrectedLumped;
+        for element in &mut model.elements[..2] {
+            element.end_cond = [EndCondition::Pinned, EndCondition::Fixed];
+        }
+        assert!(build_behavior(&model.elements[0], &model)
+            .try_mass_matrix(MassOption::Consistent)
+            .is_ok());
+        let wrapped = PanelOffsetMember::new(
+            build_behavior(&model.elements[0], &model),
+            [
+                Some(PanelEnd {
+                    node: NodeId(0),
+                    zeta: 0.5,
+                }),
+                None,
+            ],
+        );
+        let checked = wrapped.try_mass_matrix(MassOption::Consistent).unwrap();
+        assert_eq!(checked.n, 14);
+        assert_eq!(
+            checked.data,
+            wrapped.mass_matrix(MassOption::Consistent).data
+        );
+        assert!(ensure_wall_side_column_analysis(
+            &model,
+            None,
+            "固有値解析",
+            false,
+            Some(MassOption::Consistent)
+        )
+        .is_ok());
+        assert!(assemble_global_m(&model, &DofMap::build(&model), MassOption::Consistent).is_ok());
+    }
+}
+
+#[test]
+fn wall_connection_gate_preserves_ordinary_and_pure_steel_options() {
+    use sepika_element::factory::ensure_wall_side_column_analysis;
+    for representation in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut ordinary = wall_connection_fixture(representation);
+        ordinary
+            .elements
+            .retain(|element| element.kind != ElementKind::Wall);
+        ordinary.generated_wall_origins.clear();
+        ordinary.wall_plates.clear();
+        ordinary.wall_regions.clear();
+        ordinary.wall_assignment_regions = Default::default();
+        let mut steel = wall_connection_fixture(representation);
+        for index in 0..2 {
+            let mut section = SectionShape::SteelBox {
+                height: 600.0,
+                width: 600.0,
+                thick: 12.0,
+                corner_r: Some(0.0),
+            }
+            .to_section(SectionId(index as u32), "鋼材".into());
+            section.frame_use = steel.sections[index].frame_use;
+            section.material = Some(MaterialId(2));
+            steel.sections[index] = section;
+        }
+        steel.sections[2].shape = None;
+        steel.sections[2].material = Some(MaterialId(2));
+        steel.sections[2].thickness = Some(6.0);
+        for model in [ordinary, steel] {
+            for kind in [
+                None,
+                Some(AnalysisKind::Incremental),
+                Some(AnalysisKind::TimeHistory),
+            ] {
+                assert!(ensure_wall_side_column_analysis(
+                    &model,
+                    kind,
+                    "実解析",
+                    true,
+                    Some(MassOption::Consistent)
+                )
+                .is_ok());
+            }
+        }
+    }
+}
+
 fn rebar(count: u32) -> RcRectColumnRebar {
     RcRectColumnRebar {
         main_dia: if count == 0 { 0.0 } else { 19.0 },
@@ -296,15 +556,17 @@ fn fiber_gauss_points_tangents_history_and_missing_mesh_do_not_supply_mass() {
         fiber.mass_matrix(MassOption::Lumped),
         fiber.mass_matrix(MassOption::Consistent),
     ];
-    fiber.update_state(
-        &LocalVec {
-            data: smallvec::smallvec![
-                0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0, -0.01
-            ],
-        },
-        true,
-        &ctx,
-    );
+    fiber
+        .update_state(
+            &LocalVec {
+                data: smallvec::smallvec![
+                    0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0, -0.01
+                ],
+            },
+            true,
+            &ctx,
+        )
+        .unwrap();
     for gp in &mut fiber.gauss_points {
         gp.xi = 0.0;
         gp.weight = 100.0;
@@ -961,6 +1223,77 @@ fn lip_channel_geometry_dynamic_results_reject_all_mass_methods_before_early_suc
             )
             .is_ok());
             assert_eq!(format!("{model:?}"), before);
+        }
+    }
+}
+
+#[test]
+fn linear_time_history_with_state_and_analysis_preserve_actual_wall_options_reason() {
+    use sepika_element::factory::ensure_wall_side_column_analysis;
+    use sepika_solver::dynamic::timehistory::linear_time_history_with_state;
+    use sepika_solver::statics::analysis::Analysis;
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = wall_connection_fixture(kind);
+        model.wall_plates[0].dl_support = Some(sepika_core::model::WallDlSupport::LowerBeam);
+        for element in &mut model.elements[..2] {
+            element.end_cond = [EndCondition::Fixed, EndCondition::Pinned];
+        }
+        for node in &mut model.nodes {
+            node.restraint = if node.coord[2] == 0.0 {
+                Dof6Mask::FIXED
+            } else {
+                Dof6Mask(0b111110)
+            };
+            node.mass = Some([1.0; 6]);
+        }
+        let dofmap = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &dofmap);
+        let wave = GroundMotion {
+            dt: 0.01,
+            accel_x: vec![0.0, 0.0],
+            accel_y: None,
+            accel_theta: None,
+        };
+        let damping = Damping::MassProportional { h: 0.0, omega: 1.0 };
+        for use_kg in [false, true] {
+            let expected = ensure_wall_side_column_analysis(
+                &model,
+                None,
+                "線形時刻歴解析",
+                use_kg,
+                Some(MassOption::Consistent),
+            )
+            .unwrap_err();
+            let error = linear_time_history_with_state(
+                &model,
+                &dofmap,
+                &reducer,
+                &wave,
+                &NewmarkCfg::average_accel(),
+                &damping,
+                &[],
+                &[],
+                use_kg,
+                None,
+            )
+            .unwrap_err();
+            assert!(matches!(error, SolveError::InvalidInput(reason) if reason == expected));
+            if !use_kg {
+                let error = Analysis::prepare(&model)
+                    .unwrap()
+                    .time_history(
+                        &wave,
+                        NewmarkCfg::average_accel(),
+                        Damping::MassProportional { h: 0.0, omega: 1.0 },
+                        None,
+                    )
+                    .unwrap_err();
+                assert!(matches!(error, SolveError::InvalidInput(reason) if reason == expected));
+            }
         }
     }
 }

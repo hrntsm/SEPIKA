@@ -13601,3 +13601,61 @@ fn stbridge647_file_menu_renders_notice_before_export_and_closes_without_state_c
         assert_eq!(log_after, log_before);
     }
 }
+
+mod wall_connection_entry_fixture {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../sepika-solver/tests/support/wall_side_column.rs"
+    ));
+}
+
+#[test]
+fn wall_connection_gui_diagnostic_preserves_shared_stop_reason() {
+    use sepika_core::model::ElementKind;
+    for representation in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = wall_connection_entry_fixture::wall_connection_fixture(representation);
+        for node in &mut model.nodes[..2] {
+            node.restraint = sepika_core::dof::Dof6Mask::FIXED;
+        }
+        model
+            .elements
+            .retain(|element| element.kind != ElementKind::Wall);
+        model.generated_wall_origins.clear();
+        let mut app = App::default();
+        app.load_model(model);
+        assert_eq!(app.core.model.nodes.len(), 4);
+        assert_eq!(app.core.model.elements.len(), 4);
+        let mut duplicate = app.core.model.elements[0].clone();
+        duplicate.id = ElemId(4);
+        app.core.model.elements.push(duplicate);
+        let expanded = sepika_load::wall_expand::expand_wall_elements(&app.core.model).0;
+        let expected = sepika_element::factory::ensure_wall_side_column_analysis(
+            &expanded,
+            None,
+            "線形解析",
+            false,
+            None,
+        )
+        .unwrap_err();
+        assert!(expected.contains("同一側縁に側柱候補が重複"));
+        app.run_diagnostics();
+        assert!(
+            app.core
+                .scoped
+                .diagnostics
+                .iter()
+                .any(|issue| issue.message.contains(&expected)),
+            "{expected}: {:?}",
+            app.core.scoped.diagnostics
+        );
+        let error = sepika_solver::statics::analysis::Analysis::prepare(&expanded)
+            .err()
+            .expect("同じ構造判定で停止")
+            .to_string();
+        assert!(error.contains(&expected), "{error}");
+    }
+}

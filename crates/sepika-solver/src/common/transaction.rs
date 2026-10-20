@@ -1,7 +1,7 @@
 use sepika_element::behavior::ElementBehavior;
 use std::any::Any;
 
-/// 全要素の確定状態のスナップショット。
+/// 全要素の trial・確定状態のスナップショット。
 pub struct StateSnapshot {
     pub states: Vec<Box<dyn Any>>,
 }

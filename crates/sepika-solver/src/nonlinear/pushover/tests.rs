@@ -417,6 +417,9 @@ fn test_pushover_support_spring_affects_k_and_f_int() {
 
     let (roof_baseline, base_baseline) = run(None);
     let (roof_spring, base_spring) = run(Some(ks));
+    assert!((base_spring - 16000.).abs() < 1e-6);
+    assert!((kx * roof_spring - 8000.).abs() < 1e-6);
+    assert!((ks * roof_spring - 8000.).abs() < 1e-6);
 
     // 前提: 両ケースで到達する外力（λ=1 時点の base_shear）は等しい
     // （q・λ 刻みはモデル剛性に依存しないため）。
@@ -2316,7 +2319,14 @@ fn test_track_shear_yield_axial_compression_raises_qy_end_to_end() {
     let behaviors_comp: Vec<Box<dyn ElementBehavior>> =
         vec![Box::new(FixedForceBehavior { f: f_comp })];
     let mut events_comp = Vec::new();
-    track_shear_yield(&model, &behaviors_comp, &thresholds, 0, &mut events_comp);
+    track_shear_yield(
+        &model,
+        &behaviors_comp,
+        &[None],
+        &thresholds,
+        0,
+        &mut events_comp,
+    );
     assert!(
         events_comp.is_empty(),
         "compression should raise Qy above the shear demand, suppressing the event"
@@ -2331,7 +2341,14 @@ fn test_track_shear_yield_axial_compression_raises_qy_end_to_end() {
     let behaviors_zero: Vec<Box<dyn ElementBehavior>> =
         vec![Box::new(FixedForceBehavior { f: f_zero })];
     let mut events_zero = Vec::new();
-    track_shear_yield(&model, &behaviors_zero, &thresholds, 0, &mut events_zero);
+    track_shear_yield(
+        &model,
+        &behaviors_zero,
+        &[None],
+        &thresholds,
+        0,
+        &mut events_zero,
+    );
     assert!(
         !events_zero.is_empty(),
         "without axial compression the same Vz demand should still trigger the event"
@@ -3477,7 +3494,7 @@ pub(super) fn wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
     }
 }
 
-fn prepared_wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
+pub(super) fn prepared_wall_story_model_with(lw: f64, seismic_weight: f64) -> Model {
     let mut model = wall_story_model_with(lw, seismic_weight);
     model.stories[0].node_ids = vec![NodeId(0), NodeId(1)];
     for node in &mut model.nodes[..2] {
@@ -3713,15 +3730,12 @@ fn test_pushover_singular_tangent_reports_dof_diagnosis() {
     );
 }
 
-/// 荷重制御フェーズが増分半減でも収束しない場合、結果を「Qu=0 の空の性能曲線」として
-/// 返さず、原因を切り分けた日本語メッセージで停止する（ソルバ内部表現は出さない）。
 #[test]
-fn test_pushover_unconverged_load_control_reports_reason() {
-    // fy を極小にすると最初の増分から釣合いに収束できない（全断面が即降伏する）。
+fn low_yield_strength_with_positive_hardening_reaches_target_in_equilibrium() {
     let model = single_column_model(0.5, 100_000.0);
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
-    let err = pushover_analysis_recording(
+    let result = pushover_analysis_recording(
         &model,
         &dofmap,
         &reducer,
@@ -3733,15 +3747,40 @@ fn test_pushover_unconverged_load_control_reports_reason() {
         false,
         DuctilityMethod::default(),
     )
-    .expect_err("1 ステップも確定しないなら空の結果を返さず停止する");
-    assert!(
-        err.contains("収束しません"),
-        "非収束であることが伝わらない: {err}"
-    );
-    assert!(
-        !err.contains("NotPositiveDefinite") && !err.contains("factor:"),
-        "ソルバ内部表現がそのまま露出している: {err}"
-    );
+    .expect("正の降伏後剛性を持つ低降伏応力柱は目標まで釣り合う");
+    assert!(matches!(
+        result.termination,
+        PushoverTermination::TargetReached
+    ));
+    assert!(result.steps.last().unwrap().top_disp >= 200.0);
+    let history = result
+        .member_history
+        .iter()
+        .find(|h| h.elem == ElemId(0))
+        .unwrap();
+    assert_eq!(history.records.len(), result.steps.len());
+    for (step, member) in result.steps.iter().zip(&history.records) {
+        let applied_shear = 20_000.0 * step.load_factor;
+        assert!((step.base_shear - applied_shear).abs() < 0.01, "{step:?}");
+        let base_moment = f64::from(member.my_i).hypot(f64::from(member.mz_i));
+        let tip_moment = f64::from(member.my_j).hypot(f64::from(member.mz_j));
+        assert!((base_moment - applied_shear.abs() * 3000.0).abs() < 1.0);
+        assert!(tip_moment < 1.0);
+        assert!(member.n.abs() < 0.01);
+    }
+    assert!(result
+        .fiber_states
+        .iter()
+        .flat_map(|(_, sections)| sections)
+        .flat_map(|section| &section.fibers)
+        .any(|fiber| fiber.yield_ratio > 1.0));
+    let curve = &result.capacity_curve;
+    let last = &curve[curve.len() - 1];
+    let previous = &curve[curve.len() - 2];
+    let post_yield_stiffness =
+        (last.base_shear - previous.base_shear) / (last.roof_disp - previous.roof_disp);
+    // 1/k=L³/(3EI)+L²Lp(1/(0.01EI_f)−1/(EI_f))、Lp=50 mm、I_f=8.3125e6 mm⁴。
+    assert!((post_yield_stiffness - 31.835058008936937).abs() < 1.0e-5);
 }
 
 #[test]
@@ -3950,5 +3989,26 @@ fn sm520_src_shear_thresholds_reject_each_out_of_range_plate_without_fy_or_infin
                 }
             }
         }
+    }
+}
+
+#[test]
+fn checked_fiber_and_ms_trial_failures_reach_public_pushover_with_element_and_phase() {
+    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+        let mut model = single_column_model(235.0, 1e140);
+        model.elements[0].kind = kind;
+        let dofmap = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &dofmap);
+        let error =
+            pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 2, 0.0, false).unwrap_err();
+        assert!(error.contains("増分解析・荷重制御"), "{kind:?}: {error}");
+        assert!(
+            error.contains("ElemId(0)") && error.contains("構成則"),
+            "{error}"
+        );
+        assert!(
+            !error.contains("NotPositiveDefinite") && !error.contains("factor:"),
+            "{error}"
+        );
     }
 }

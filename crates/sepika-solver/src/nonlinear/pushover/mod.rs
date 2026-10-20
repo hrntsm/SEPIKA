@@ -17,6 +17,7 @@ mod driver;
 mod ductility;
 mod geom;
 mod hinge;
+mod loads;
 mod mechanism;
 pub(crate) mod member_response;
 mod response;

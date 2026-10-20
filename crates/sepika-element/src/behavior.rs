@@ -14,6 +14,25 @@ pub enum CheckpointError {
     MaterialState(#[from] sepika_material::MaterialStateError),
 }
 
+/// 要素の試行状態を更新できない理由。
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct ElementUpdateError(pub String);
+
+/// 変位増分の次元と有限性を、状態変更前に検証する。
+pub fn validate_trial_increment(du: &LocalVec, n_dof: usize) -> Result<(), ElementUpdateError> {
+    if du.data.len() != n_dof {
+        return Err(ElementUpdateError(format!(
+            "変位増分の長さが自由度数と一致しません: expected={n_dof}, actual={}",
+            du.data.len()
+        )));
+    }
+    if !du.data.iter().all(|v| v.is_finite()) {
+        return Err(ElementUpdateError("変位増分に非有限値があります".into()));
+    }
+    Ok(())
+}
+
 /// [`ElementBehavior::restore_state`] のスナップショット downcast（診断付き）。
 ///
 /// スナップショットは同一実行内の巻き戻し専用。型不一致はプログラムエラーであり、
@@ -36,6 +55,18 @@ pub struct LocalMat {
 
 pub struct LocalVec {
     pub data: SmallVec<[f64; 24]>,
+}
+
+/// 死荷重を含む同一試行状態の応答。力は [N, Nmm]、変位は [mm, rad]。
+pub struct LoadedFrameResponse {
+    /// 全体系の一般化残差。並びは外側要素の global_dofs と一致する。
+    pub nodal_residual: LocalVec,
+    /// 内側物理梁の元節点位置における全体系12成分端力。仕口パネルの追加自由度を含まない。
+    pub physical_frame_end_force_global: [f64; 12],
+    /// 元材料局所軸の可撓フェイス12成分端力。剛域節点荷重を含まない。
+    pub flex_face_force_local: [f64; 12],
+    /// 元節点間の全長座標による荷重込み断面力。
+    pub section: crate::frame::member_load::LoadedFrameSection,
 }
 
 pub struct Ctx<'a> {
@@ -208,20 +239,16 @@ macro_rules! elastic_disp_behavior {
             du: &$crate::behavior::LocalVec,
             commit: bool,
             _ctx: &$crate::behavior::Ctx,
-        ) {
+        ) -> Result<(), $crate::behavior::ElementUpdateError> {
             let n_dof = <Self as $crate::behavior::ElementBehavior>::n_dof(self);
-            assert_eq!(
-                du.data.len(),
-                n_dof,
-                "{}::update_state: 変位増分の長さが自由度数と一致しません",
-                stringify!($ty)
-            );
+            $crate::behavior::validate_trial_increment(du, n_dof)?;
             for i in 0..n_dof {
                 self.trial_disp[i] += du.data[i];
             }
             if commit {
                 self.committed_disp = self.trial_disp;
             }
+            Ok(())
         }
 
         fn commit_state(&mut self) {
@@ -273,11 +300,66 @@ pub trait ElementBehavior: Send + Sync {
     fn global_dofs(&self, dof: &DofMap) -> SmallVec<[usize; 24]>;
     fn tangent_stiffness(&self, ctx: &Ctx) -> LocalMat;
     fn internal_force(&self, ctx: &Ctx) -> LocalVec;
-    fn update_state(&mut self, _du: &LocalVec, _commit: bool, _ctx: &Ctx) {}
+    /// 増分を trial に反映する。失敗時は呼出し前の trial・確定状態を保持する。
+    fn update_state(
+        &mut self,
+        du: &LocalVec,
+        _commit: bool,
+        _ctx: &Ctx,
+    ) -> Result<(), ElementUpdateError> {
+        validate_trial_increment(du, self.n_dof())
+    }
+    /// 絶対強度の部材荷重と変位増分を原子的に反映する。空列は荷重を消去する。
+    /// 失敗時は呼出し前の trial・確定状態を保持する。
+    fn update_state_with_member_loads(
+        &mut self,
+        du: &LocalVec,
+        absolute_loads: &[sepika_core::model::MemberLoad],
+        commit: bool,
+        ctx: &Ctx,
+    ) -> Result<(), ElementUpdateError> {
+        if !absolute_loads.is_empty() {
+            return Err(ElementUpdateError(
+                "部材荷重を含む状態更新は未対応です".into(),
+            ));
+        }
+        self.update_state(du, commit, ctx)
+    }
     /// 質量行列を**全体系**で返す。
     /// 回転不変でない整合質量は `M_global = Rᵀ M_local R` の変換を済ませること。
     /// Beam/Fiber/MS の共通質量特性が未解決なら両形式でpanicする。公開組立は要素ID付きエラーを返す。
     fn mass_matrix(&self, opt: MassOption) -> LocalMat;
+    /// 質量行列を全体系で返す。壁側柱接続の縮約不成立は理由を返す。
+    /// 既定実装は [`Self::mass_matrix`] の失敗契約を引き継ぐ。
+    fn try_mass_matrix(&self, opt: MassOption) -> Result<LocalMat, String> {
+        Ok(self.mass_matrix(opt))
+    }
+    /// 部材死荷重を要素内で扱える場合にtrue。対応応答はSomeまたはエラーを返す。
+    fn owns_frame_member_loads(&self) -> bool {
+        false
+    }
+    /// 絶対強度の死荷重と全体系変位から線形応答を返す。状態を変更しない。
+    /// 非所有要素だけがNoneを返し、所有要素の不正入力・局所解失敗はエラーとする。
+    fn frame_load_response(
+        &self,
+        _u_elem: &[f64],
+        _absolute_loads: &[sepika_core::model::MemberLoad],
+    ) -> Result<Option<LoadedFrameResponse>, String> {
+        if self.owns_frame_member_loads() {
+            Err("部材荷重所有要素に線形応答の実装がありません".into())
+        } else {
+            Ok(None)
+        }
+    }
+    /// 現在の荷重・変位・材料試行状態に対応する応答を、再求解せず返す。
+    /// 非所有要素だけが None を返し、所有要素の未対応・不成立はエラーとする。
+    fn state_frame_load_response(&self) -> Result<Option<LoadedFrameResponse>, String> {
+        if self.owns_frame_member_loads() {
+            Err("部材荷重所有要素の状態応答は未対応です".into())
+        } else {
+            Ok(None)
+        }
+    }
     /// 節点変位から部材内力分布を復元する（線形解析の内力回収）。
     ///
     /// 引数は要素の全体系節点変位で、剛性と内力が線形関係にある要素だけが実装できる。
@@ -348,7 +430,12 @@ macro_rules! forward_element_behavior {
         tangent_stiffness: $m_tangent_stiffness:ident,
         internal_force: $m_internal_force:ident,
         update_state: $m_update_state:ident,
+        update_state_with_member_loads: $m_update_state_with_member_loads:ident,
         mass_matrix: $m_mass_matrix:ident,
+        try_mass_matrix: $m_try_mass_matrix:ident,
+        owns_frame_member_loads: $m_owns_frame_member_loads:ident,
+        frame_load_response: $m_frame_load_response:ident,
+        state_frame_load_response: $m_state_frame_load_response:ident,
         recover_forces: $m_recover_forces:ident,
         state_member_forces: $m_state_member_forces:ident,
         geometric_stiffness: $m_geometric_stiffness:ident,
@@ -410,10 +497,21 @@ macro_rules! forward_element_behavior {
                     du: &$crate::behavior::LocalVec,
                     commit: bool,
                     ctx: &$crate::behavior::Ctx,
-                ) {
+                ) -> Result<(), $crate::behavior::ElementUpdateError> {
                     #[allow(unused_imports)]
                     use $crate::behavior::ElementBehavior as _;
                     self.$inner.update_state(du, commit, ctx)
+                }
+            );
+            $crate::forward_element_behavior!(@opt $m_update_state_with_member_loads
+                fn update_state_with_member_loads(
+                    &mut self,
+                    du: &$crate::behavior::LocalVec,
+                    absolute_loads: &[::sepika_core::model::MemberLoad],
+                    commit: bool,
+                    ctx: &$crate::behavior::Ctx,
+                ) -> Result<(), $crate::behavior::ElementUpdateError> {
+                    self.$inner.update_state_with_member_loads(du, absolute_loads, commit, ctx)
                 }
             );
             $crate::forward_element_behavior!(@opt $m_mass_matrix
@@ -424,6 +522,35 @@ macro_rules! forward_element_behavior {
                     #[allow(unused_imports)]
                     use $crate::behavior::ElementBehavior as _;
                     self.$inner.mass_matrix(opt)
+                }
+            );
+            $crate::forward_element_behavior!(@opt $m_try_mass_matrix
+                fn try_mass_matrix(
+                    &self,
+                    opt: $crate::behavior::MassOption,
+                ) -> Result<$crate::behavior::LocalMat, String> {
+                    #[allow(unused_imports)]
+                    use $crate::behavior::ElementBehavior as _;
+                    self.$inner.try_mass_matrix(opt)
+                }
+            );
+            $crate::forward_element_behavior!(@opt $m_owns_frame_member_loads
+                fn owns_frame_member_loads(&self) -> bool {
+                    self.$inner.owns_frame_member_loads()
+                }
+            );
+            $crate::forward_element_behavior!(@opt $m_frame_load_response
+                fn frame_load_response(
+                    &self,
+                    u_elem: &[f64],
+                    absolute_loads: &[::sepika_core::model::MemberLoad],
+                ) -> Result<Option<$crate::behavior::LoadedFrameResponse>, String> {
+                    self.$inner.frame_load_response(u_elem, absolute_loads)
+                }
+            );
+            $crate::forward_element_behavior!(@opt $m_state_frame_load_response
+                fn state_frame_load_response(&self) -> Result<Option<$crate::behavior::LoadedFrameResponse>, String> {
+                    self.$inner.state_frame_load_response()
                 }
             );
             $crate::forward_element_behavior!(@opt $m_recover_forces

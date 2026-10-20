@@ -1,8 +1,9 @@
 use crate::behavior::{Ctx, DuctilityProbe, ElementBehavior, LocalMat, LocalVec, MassOption};
+use crate::frame::member_load::FrameDeadLoadMap;
 use sepika_core::dof::DofMap;
 use sepika_core::error::RebarGeometryError;
 use sepika_core::ids::NodeId;
-use sepika_core::model::{AnalysisKind, HysteresisModel, SectionMassProperties};
+use sepika_core::model::{AnalysisKind, HysteresisModel, MemberLoad, SectionMassProperties};
 use sepika_core::section_shape::SectionShape;
 use sepika_material::uniaxial::{MenegottoPinto, UniaxialMaterial};
 use sepika_section::fiber::{Fiber, FiberSection};
@@ -461,7 +462,7 @@ fn build_shape_fibers(
 }
 
 /// 材端解放で内部自由度へ分離した要素端回転。
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EndRelease {
     /// 可撓端系ローカル自由度 index（3,4,5 = i 端、9,10,11 = j 端）。
     pub dof: usize,
@@ -495,6 +496,15 @@ fn resolve_end_releases(
     out
 }
 
+/// スナップショットに保存する trial / committed 部材荷重。
+#[derive(Clone, Default)]
+pub struct FiberBeamLoadState {
+    trial_member_loads: Vec<MemberLoad>,
+    committed_member_loads: Vec<MemberLoad>,
+    trial_load_map: Option<FrameDeadLoadMap>,
+    committed_load_map: Option<FrameDeadLoadMap>,
+}
+
 /// スナップショットの型。ヒンジ無しモデルはヒンジ状態が空。
 pub type FiberBeamSnapshot = (
     [f64; 12],
@@ -504,37 +514,29 @@ pub type FiberBeamSnapshot = (
     Vec<f64>,
     Vec<f64>,
     Vec<f64>,
+    Vec<(GaussResponse, GaussResponse)>,
+    Option<crate::wall::side_column::release_connection::ReleaseConnection>,
+    bool,
+    Vec<EndRelease>,
+    FiberBeamLoadState,
 );
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct FiberBeamCheckpoint {
+    trial_member_loads: Vec<MemberLoad>,
+    committed_member_loads: Vec<MemberLoad>,
+    releases: Vec<EndRelease>,
+    wall_connection: Option<crate::wall::side_column::release_connection::ReleaseConnection>,
     trial_disp: [f64; 12],
     committed_disp: [f64; 12],
     gauss_points: Vec<Vec<Vec<u8>>>,
+    responses: Vec<(GaussResponse, GaussResponse)>,
     /// 材端解放の内部自由度（要素端回転）。
     trial_int: Vec<f64>,
     committed_int: Vec<f64>,
-    /// 塑性増分ヒンジ状態（κ4 + θb4 = 8 値。ヒンジ無しモデルは空）。
+    /// 塑性増分ヒンジ状態（η6 + 塑性増分6。ヒンジ無しモデルは空）。
     trial_hinge: Vec<f64>,
     committed_hinge: Vec<f64>,
-}
-
-/// 読み込み互換用。
-#[derive(serde::Deserialize)]
-struct FiberBeamCheckpointV2 {
-    trial_disp: [f64; 12],
-    committed_disp: [f64; 12],
-    gauss_points: Vec<Vec<Vec<u8>>>,
-    trial_int: Vec<f64>,
-    committed_int: Vec<f64>,
-}
-
-/// 読み込み互換用。
-#[derive(serde::Deserialize)]
-struct FiberBeamCheckpointLegacy {
-    trial_disp: [f64; 12],
-    committed_disp: [f64; 12],
-    gauss_points: Vec<Vec<Vec<u8>>>,
 }
 
 /// 塑性増分ヒンジの定義と状態。
@@ -543,24 +545,29 @@ pub struct HingeState {
     /// 塑性化域長 Lp `[mm]`。
     pub lp: f64,
     pub k_el: LocalMat,
-    /// 公称弾性 D 対角 [EA, E·Iy_elem, E·Iz_elem]。
-    d_nom: [f64; 3],
-    /// 端部ファイバー断面の弾性曲げ剛性 [端][軸]（軸 0=κy, 1=κz）。
-    sec_ei: [[f64; 2]; 2],
-    /// ヒンジが有効な端（端条件 Fixed のみ）。
-    active: [bool; 2],
-    /// ヒンジ断面曲率 [i_κy, i_κz, j_κy, j_κz]（トライアル/確定）。
-    pub trial_kappa: [f64; 4],
-    pub committed_kappa: [f64; 4],
-    /// 可撓端回転（梁側）[slot4, slot5, slot10, slot11]（トライアル/確定）。
-    trial_thb: [f64; 4],
-    committed_thb: [f64; 4],
+    /// 初期断面剛性 [端][行][列]。成分順は ε, κy, κz。
+    d0: [[[f64; 3]; 3]; 2],
+    /// 端部断面のひずみ・曲率 [i_ε, i_κy, i_κz, j_ε, j_κy, j_κz]。
+    pub trial_eta: [f64; 6],
+    pub committed_eta: [f64; 6],
+    /// 塑性増分変形 [mm, rad, rad]（i 端、j 端の順）。
+    trial_plastic: [f64; 6],
+    committed_plastic: [f64; 6],
 }
 
-/// ヒンジ自由度のスロット表 [端][軸]（軸 0=κy→ry、1=κz→rz）。
-const HINGE_SLOTS: [[usize; 2]; 2] = [[4, 5], [10, 11]];
-/// ヒンジ回転の向き（i 端 +1・j 端 −1。B 行列の自端回転係数の符号）。
-const HINGE_SIGN: [f64; 2] = [1.0, -1.0];
+mod constitutive;
+
+const HINGE_SLOTS: [usize; 6] = [0, 4, 5, 6, 10, 11];
+const HINGE_SIGN: [f64; 6] = [-1.0, -1.0, -1.0, 1.0, 1.0, 1.0];
+
+/// 積分点の保存応答。材料の再trialを行わず復元する。
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct GaussResponse {
+    stress: Vec<f64>,
+    tangent: Vec<f64>,
+    force: [f64; 3],
+    stiffness: [[f64; 3]; 3],
+}
 
 pub struct GaussPoint {
     pub xi: f64,
@@ -573,6 +580,7 @@ pub struct GaussPoint {
     /// 断面応答のキャッシュ。`trial_stress`/`trial_et` を書き換えた直後に更新すること。
     cached_force: [f64; 3],
     cached_stiff: [[f64; 3]; 3],
+    committed_response: GaussResponse,
 }
 
 impl GaussPoint {
@@ -599,9 +607,32 @@ impl GaussPoint {
             b,
             cached_force: [0.0; 3],
             cached_stiff: [[0.0; 3]; 3],
+            committed_response: GaussResponse {
+                stress: Vec::new(),
+                tangent: Vec::new(),
+                force: [0.0; 3],
+                stiffness: [[0.0; 3]; 3],
+            },
         };
         gp.refresh_response();
+        gp.committed_response = gp.response();
         gp
+    }
+
+    fn response(&self) -> GaussResponse {
+        GaussResponse {
+            stress: self.trial_stress.clone(),
+            tangent: self.trial_et.clone(),
+            force: self.cached_force,
+            stiffness: self.cached_stiff,
+        }
+    }
+
+    fn restore_response(&mut self, response: &GaussResponse) {
+        self.trial_stress.clone_from(&response.stress);
+        self.trial_et.clone_from(&response.tangent);
+        self.cached_force = response.force;
+        self.cached_stiff = response.stiffness;
     }
 
     /// `trial_stress`/`trial_et` を書き換えた直後に呼ぶこと。
@@ -616,6 +647,7 @@ impl GaussPoint {
 
 /// ファイバー梁要素。
 pub struct FiberBeam {
+    element_id: Option<sepika_core::ids::ElemId>,
     /// 節点間長 L `[mm]`。
     pub length: f64,
     /// 材端の剛域長 λi, λj `[mm]`。
@@ -642,8 +674,11 @@ pub struct FiberBeam {
     pub hinge: Option<HingeState>,
     /// 材端解放で分離した要素端回転。空なら全端剛接。
     pub releases: SmallVec<[EndRelease; 6]>,
+    connection_started: bool,
+    member_load_state: FiberBeamLoadState,
+    wall_connection: Option<crate::wall::side_column::release_connection::ReleaseConnection>,
     initial_elastic_stiffness: LocalMat,
-    /// 内部自由度の現在値（`releases` と同順）。
+    /// 内部回転 `[rad]`。壁接続設定時はそのB列、それ以外は `releases` と同順。
     pub trial_int: SmallVec<[f64; 6]>,
     pub committed_int: SmallVec<[f64; 6]>,
     /// 内力を評価する危険断面位置（正規化座標 \[0,1\]）。
@@ -759,11 +794,15 @@ impl FiberBeam {
         let trial_int = SmallVec::from_elem(0.0, releases.len());
 
         Ok(FiberBeam {
+            element_id: Some(data.id),
             length,
             rigid_i,
             rigid_j,
             flex_length,
             releases,
+            connection_started: false,
+            member_load_state: FiberBeamLoadState::default(),
+            wall_connection: None,
             initial_elastic_stiffness,
             committed_int: trial_int.clone(),
             trial_int,
@@ -863,11 +902,15 @@ impl FiberBeam {
             GaussPoint::new(1.0, w_end, sec_b, mats_b, flex_length, phi_y, phi_z),
         ];
         let mut fb = FiberBeam {
+            element_id: None,
             length,
             rigid_i: 0.0,
             rigid_j: 0.0,
             flex_length,
             releases: SmallVec::new(),
+            connection_started: false,
+            member_load_state: FiberBeamLoadState::default(),
+            wall_connection: None,
             initial_elastic_stiffness: LocalMat::zeros(12),
             committed_int: SmallVec::new(),
             trial_int: SmallVec::new(),
@@ -919,21 +962,7 @@ impl FiberBeam {
             k_el.set(9, 3, k_el.get(9, 3) - kt);
         }
         fb.initial_elastic_stiffness = k_el.clone();
-        let sec_ei = std::array::from_fn(|end| {
-            let (_, d) = Self::section_response_from_cache(&fb.gauss_points[end]);
-            [d[1][1], d[2][2]]
-        });
-        fb.hinge = Some(HingeState {
-            lp,
-            k_el,
-            d_nom,
-            sec_ei,
-            active: [true, true],
-            trial_kappa: [0.0; 4],
-            committed_kappa: [0.0; 4],
-            trial_thb: [0.0; 4],
-            committed_thb: [0.0; 4],
-        });
+        fb.hinge = Some(HingeState::new(lp, k_el, &fb.gauss_points));
         fb
     }
 
@@ -966,13 +995,11 @@ impl FiberBeam {
         let lp = clamp_plastic_zone(lp, l);
 
         let sec = data.section.and_then(|sid| model.sections.get(sid.index()));
-        let mat_ref = model.element_material(data);
-        let e = mat_ref.map(|m| m.young).unwrap_or(0.0);
         let width = sec.map(|s| s.width).unwrap_or(0.0);
         let depth = sec.map(|s| s.depth).unwrap_or(0.0);
-        let area = sec.map(|s| s.area).unwrap_or(width * depth);
-        let iy = sec.map(|s| s.iz).unwrap_or(0.0);
-        let iz = sec.map(|s| s.iy).unwrap_or(0.0);
+        let beam = crate::frame::beam::BeamElement::try_new(data, model)
+            .expect("Self::new で公称梁の断面性能を検証済み");
+        fb.torsion_j = beam.j;
 
         let w_end = 2.0 * lp / l;
         let [(sec_a, mats_a), (sec_b, mats_b)] =
@@ -983,17 +1010,7 @@ impl FiberBeam {
             GaussPoint::new(1.0, w_end, sec_b, mats_b, l, fb.phi_y, fb.phi_z),
         ];
 
-        let d_nom = if sec
-            .and_then(|s| s.shape.as_ref())
-            .and_then(sepika_core::structure_kind::shape_composite_kind)
-            == Some(sepika_core::structure_kind::StructureKind::Src)
-        {
-            let beam = crate::frame::beam::BeamElement::try_new(data, model)
-                .expect("Self::new で SRC の等価断面性能を検証済み");
-            [beam.e * beam.a, beam.e * beam.iy, beam.e * beam.iz]
-        } else {
-            [e * area, e * iy, e * iz]
-        };
+        let d_nom = [beam.e * beam.a, beam.e * beam.iy, beam.e * beam.iz];
         let mut k_el = LocalMat::zeros(12);
         for sgn in [-1.0_f64, 1.0] {
             let xi = sgn / 3.0_f64.sqrt();
@@ -1025,26 +1042,13 @@ impl FiberBeam {
             k_el.set(3, 9, k_el.get(3, 9) - kt);
             k_el.set(9, 3, k_el.get(9, 3) - kt);
         }
+        let axial_stiffness = d_nom[0] / fb.length;
+        for (i, j, sign) in [(0, 0, 1.0), (0, 6, -1.0), (6, 0, -1.0), (6, 6, 1.0)] {
+            k_el.set(i, j, sign * axial_stiffness);
+        }
         fb.initial_elastic_stiffness = k_el.clone();
 
-        let sec_ei = std::array::from_fn(|end| {
-            let (_, d) = Self::section_response_from_cache(&fb.gauss_points[end]);
-            [d[1][1], d[2][2]]
-        });
-        let active = std::array::from_fn(|end| {
-            matches!(data.end_cond[end], sepika_core::model::EndCondition::Fixed)
-        });
-        fb.hinge = Some(HingeState {
-            lp,
-            k_el,
-            d_nom,
-            sec_ei,
-            active,
-            trial_kappa: [0.0; 4],
-            committed_kappa: [0.0; 4],
-            trial_thb: [0.0; 4],
-            committed_thb: [0.0; 4],
-        });
+        fb.hinge = Some(HingeState::new(lp, k_el, &fb.gauss_points));
         fb
     }
 
@@ -1053,6 +1057,11 @@ impl FiberBeam {
     }
 
     fn elem_disp(&self, u_flex: &[f64; 12]) -> [f64; 12] {
+        if let Some(connection) = &self.wall_connection {
+            return connection
+                .flexible_displacement(u_flex, &self.trial_int)
+                .unwrap_or_else(|error| self.constitutive_failure(&error.to_string()));
+        }
         let mut u = *u_flex;
         for (k, rel) in self.releases.iter().enumerate() {
             u[rel.dof] = self.trial_int[k];
@@ -1078,6 +1087,7 @@ impl FiberBeam {
                 + b[2][11] * u_elem[11];
             for (i, fiber) in gp.section.fibers.iter().enumerate() {
                 let eps = eps0 - kz * fiber.y + ky * fiber.z;
+                gp.mats[i].revert();
                 let (sigma, et) = gp.mats[i].trial(eps);
                 gp.trial_stress[i] = sigma;
                 gp.trial_et[i] = et;
@@ -1093,7 +1103,9 @@ impl FiberBeam {
             return k;
         }
         if let Some(h) = &self.hinge {
-            return self.hinge_tangent(h);
+            return self
+                .hinge_tangent(h)
+                .unwrap_or_else(|error| self.constitutive_failure(&error));
         }
         let half = l / 2.0;
 
@@ -1182,79 +1194,201 @@ impl FiberBeam {
         f
     }
 
-    fn solve_internal_dofs(&mut self) {
+    fn solve_distributed_internal_dofs(&mut self) -> Result<(), String> {
         /// 内部釣合いの最大反復数（弾性域は 1 回、降伏を跨いでも数回で収まる）。
         const MAX_ITER: usize = 20;
         let u_flex = self.flex_disp();
+        let qf = self.flex_member_load();
         if self.releases.is_empty() {
             let u_elem = self.elem_disp(&u_flex);
-            self.update_trial_state(&u_elem);
-            return;
+            self.update_section_trial(&u_elem);
+            return Ok(());
         }
-        let n = self.releases.len();
+        let indices = self.active_release_indices();
+        let n = indices.len();
         for _ in 0..MAX_ITER {
             let u_elem = self.elem_disp(&u_flex);
-            self.update_trial_state(&u_elem);
+            self.update_section_trial(&u_elem);
             let f_elem = self.elem_internal_force(&u_elem);
 
             let mut r = [0.0_f64; 6];
-            for (k, rel) in self.releases.iter().enumerate() {
-                r[k] = f_elem[rel.dof] + rel.spring * (u_elem[rel.dof] - u_flex[rel.dof]);
+            for (k, &index) in indices.iter().enumerate() {
+                let rel = &self.releases[index];
+                r[k] = f_elem[rel.dof] + rel.spring * (u_elem[rel.dof] - u_flex[rel.dof])
+                    - qf[rel.dof];
             }
-            let scale = [3usize, 4, 5, 9, 10, 11]
+            let k_elem = self.elem_tangent();
+            let force_scale = [3usize, 4, 5, 9, 10, 11]
                 .iter()
-                .map(|&i| f_elem[i].abs())
+                .map(|&i| f_elem[i].abs().max(qf[i].abs()))
                 .fold(1.0_f64, f64::max);
-            if r[..n].iter().all(|v| v.abs() <= 1e-10 * scale) {
-                return;
+            let mut converged = true;
+            for (a, &index) in indices.iter().enumerate() {
+                let release = &self.releases[index];
+                let uncancelled: f64 = (0..12)
+                    .map(|j| (k_elem.get(release.dof, j) * u_elem[j]).abs())
+                    .sum();
+                let scale = force_scale.max(uncancelled);
+                if !r[a].is_finite() || !uncancelled.is_finite() {
+                    return Err("分布断面の外側端部接続残差または尺度が非有限です".into());
+                }
+                converged &= r[a].abs() <= 1e-10 * scale;
+            }
+            let mut kbb = [0.0_f64; 36];
+            for (a, &index) in indices.iter().enumerate() {
+                let ra = &self.releases[index];
+                for (b, &other) in indices.iter().enumerate() {
+                    kbb[a * n + b] = k_elem.get(ra.dof, self.releases[other].dof);
+                }
+                kbb[a * n + a] += ra.spring;
+            }
+            let lu = sepika_math::dense_lu::CheckedDenseLu::factorize(&kbb[..n * n], n)
+                .map_err(|error| format!("分布断面の外側端部接続釣合い: {error}"))?;
+            if converged {
+                return Ok(());
+            }
+            let du = lu
+                .solve(&r[..n], 1)
+                .map_err(|error| format!("分布断面の外側端部接続修正量: {error}"))?;
+            for (a, d) in du[..n].iter().enumerate() {
+                self.trial_int[indices[a]] -= d;
+            }
+        }
+        Err("分布断面の外側端部接続釣合いが20反復で収束しません".into())
+    }
+
+    fn solve_internal_dofs(&mut self) -> Result<(), String> {
+        if self.wall_connection.is_some() {
+            return self.solve_wall_connection();
+        }
+        if self.hinge.is_none() {
+            return self.solve_distributed_internal_dofs();
+        }
+        /// 内部釣合いの最大反復数（弾性域は 1 回、降伏を跨いでも数回で収まる）。
+        const MAX_ITER: usize = 20;
+        let u_flex = self.flex_disp();
+        let qf = self.flex_member_load();
+        if self.releases.is_empty() {
+            let u_elem = self.elem_disp(&u_flex);
+            self.update_trial_state(&u_elem)?;
+            return Ok(());
+        }
+        let indices = self.active_release_indices();
+        let n = indices.len();
+        let initial_u = self.elem_disp(&u_flex);
+        let mut initial_kbb = vec![0.0; n * n];
+        let mut initial_residual = vec![0.0; n];
+        for (a, &index) in indices.iter().enumerate() {
+            let release = &self.releases[index];
+            initial_residual[a] = (0..12)
+                .map(|j| self.initial_elastic_stiffness.get(release.dof, j) * initial_u[j])
+                .sum::<f64>()
+                + release.spring * (initial_u[release.dof] - u_flex[release.dof])
+                - qf[release.dof];
+            for (b, &other) in indices.iter().enumerate() {
+                initial_kbb[a * n + b] = self
+                    .initial_elastic_stiffness
+                    .get(release.dof, self.releases[other].dof);
+            }
+            initial_kbb[a * n + a] += release.spring;
+        }
+        let initial_lu = sepika_math::dense_lu::CheckedDenseLu::factorize(&initial_kbb, n)
+            .map_err(|error| format!("外側端部接続の初期予測: {error}"))?;
+        let predictor = initial_lu
+            .solve(&initial_residual, 1)
+            .map_err(|error| format!("外側端部接続の初期予測: {error}"))?;
+        for (a, &index) in indices.iter().enumerate() {
+            self.trial_int[index] -= predictor[a];
+        }
+        for _ in 0..MAX_ITER {
+            let u_elem = self.elem_disp(&u_flex);
+            self.update_trial_state(&u_elem)?;
+            let f_elem = self.elem_internal_force(&u_elem);
+
+            let mut r = [0.0_f64; 6];
+            for (k, &index) in indices.iter().enumerate() {
+                let rel = &self.releases[index];
+                r[k] = f_elem[rel.dof] + rel.spring * (u_elem[rel.dof] - u_flex[rel.dof])
+                    - qf[rel.dof];
+            }
+            let converged =
+                indices
+                    .iter()
+                    .enumerate()
+                    .try_fold(true, |converged, (k, &index)| {
+                        let rel = &self.releases[index];
+                        let h = self.hinge.as_ref().unwrap();
+                        let uhat = Self::hinge_uhat(h, &u_elem);
+                        let uncancelled: f64 = (0..12)
+                            .map(|j| (h.k_el.get(rel.dof, j) * uhat[j]).abs())
+                            .sum();
+                        let mut scale = 1.0_f64
+                            .max(f_elem[rel.dof].abs())
+                            .max(uncancelled)
+                            .max(qf[rel.dof].abs());
+                        if self.hinge.is_some() && rel.dof % 6 != 3 {
+                            let gp = &self.gauss_points[rel.dof / 6];
+                            let fiber_moment: f64 = gp
+                                .section
+                                .fibers
+                                .iter()
+                                .zip(&gp.trial_stress)
+                                .map(|(fiber, stress)| {
+                                    (stress
+                                        * fiber.area
+                                        * if rel.dof % 6 == 4 { fiber.z } else { fiber.y })
+                                    .abs()
+                                })
+                                .sum();
+                            scale = scale.max(fiber_moment);
+                        }
+                        if !scale.is_finite() || !r[k].is_finite() {
+                            return Err("外側端部接続の残差または尺度が非有限です".to_string());
+                        }
+                        Ok(converged && r[k].abs() <= 1e-10 * scale)
+                    })?;
+            if converged {
+                return Ok(());
             }
 
-            let k_elem = self.elem_tangent();
+            let k_elem = if let Some(h) = &self.hinge {
+                self.hinge_tangent(h)?
+            } else {
+                self.elem_tangent()
+            };
             let mut kbb = [0.0_f64; 36];
-            for (a, ra) in self.releases.iter().enumerate() {
-                for (b, rb) in self.releases.iter().enumerate() {
+            for (a, &index) in indices.iter().enumerate() {
+                let ra = &self.releases[index];
+                for (b, &other) in indices.iter().enumerate() {
+                    let rb = &self.releases[other];
                     kbb[a * n + b] = k_elem.get(ra.dof, rb.dof);
                 }
                 kbb[a * n + a] += ra.spring;
             }
-            let Some(kbb_inv) = crate::linalg::invert_small(&kbb[..n * n], n) else {
-                break;
-            };
-            let mut du = [0.0_f64; 6];
-            for (a, dua) in du[..n].iter_mut().enumerate() {
-                let mut s = 0.0;
-                for (b, rb) in r[..n].iter().enumerate() {
-                    s += kbb_inv[a * n + b] * rb;
-                }
-                *dua = -s;
-            }
-            if du[..n].iter().any(|v| !v.is_finite()) {
-                break;
-            }
+            let lu = sepika_math::dense_lu::CheckedDenseLu::factorize(&kbb[..n * n], n)
+                .map_err(|error| format!("端部接続の外側釣合い: {error}"))?;
+            let du = lu
+                .solve(&r[..n], 1)
+                .map_err(|error| format!("端部接続の外側釣合い: {error}"))?;
             for (k, d) in du[..n].iter().enumerate() {
-                self.trial_int[k] += d;
+                self.trial_int[indices[k]] -= d;
             }
         }
-        let u_elem = self.elem_disp(&u_flex);
-        self.update_trial_state(&u_elem);
+        Err("端部接続の外側釣合いが20反復で収束しません".into())
     }
 
-    fn update_trial_state(&mut self, u_elem: &[f64; 12]) {
+    fn update_trial_state(&mut self, u_elem: &[f64; 12]) -> Result<(), String> {
         if self.hinge.is_some() {
-            self.solve_hinges(u_elem);
+            self.solve_hinges(u_elem)?;
         } else {
             self.update_section_trial(u_elem);
         }
+        Ok(())
     }
 
     fn condense_releases(&self, k_elem: &LocalMat) -> LocalMat {
-        let releases: SmallVec<[(usize, f64); 6]> =
-            self.releases.iter().map(|r| (r.dof, r.spring)).collect();
-        crate::frame::prismatic::condense_end_releases(k_elem, &releases).unwrap_or_else(|| {
-            panic!(
-                "FiberBeam の端部解放剛性を縮約できません: Kbb が特異です（解放条件を確認してください）"
-            )
-        })
+        self.condensed_release_tangent(k_elem)
+            .unwrap_or_else(|error| self.constitutive_failure(&error))
     }
 
     fn section_response_from_cache(gp: &GaussPoint) -> ([f64; 3], [[f64; 3]; 3]) {
@@ -1269,271 +1403,94 @@ impl FiberBeam {
         b[0][0] = -inv_l;
         b[0][6] = inv_l;
         let cz = 1.0 / (1.0 + phi_z);
-        b[1][2] = 6.0 * xi * inv_l2 * cz;
-        b[1][4] = (1.0 - 3.0 * xi + phi_z) * inv_l * cz;
-        b[1][8] = -6.0 * xi * inv_l2 * cz;
-        b[1][10] = -(1.0 + 3.0 * xi + phi_z) * inv_l * cz;
+        b[1][2] = -6.0 * xi * inv_l2 * cz;
+        b[1][4] = -(1.0 - 3.0 * xi + phi_z) * inv_l * cz;
+        b[1][8] = 6.0 * xi * inv_l2 * cz;
+        b[1][10] = (1.0 + 3.0 * xi + phi_z) * inv_l * cz;
         let cy = 1.0 / (1.0 + phi_y);
-        b[2][1] = -6.0 * xi * inv_l2 * cy;
-        b[2][5] = (1.0 - 3.0 * xi + phi_y) * inv_l * cy;
-        b[2][7] = 6.0 * xi * inv_l2 * cy;
-        b[2][11] = -(1.0 + 3.0 * xi + phi_y) * inv_l * cy;
+        b[2][1] = 6.0 * xi * inv_l2 * cy;
+        b[2][5] = -(1.0 - 3.0 * xi + phi_y) * inv_l * cy;
+        b[2][7] = -6.0 * xi * inv_l2 * cy;
+        b[2][11] = (1.0 + 3.0 * xi + phi_y) * inv_l * cy;
         b
     }
+}
 
-    /// ヒンジの有効自由度 (端, 軸) の一覧（軸 0=κy, 1=κz）。
-    fn hinge_dofs(h: &HingeState) -> SmallVec<[(usize, usize); 4]> {
-        let mut dofs = SmallVec::new();
-        for end in 0..2 {
-            if !h.active[end] {
-                continue;
-            }
-            for axis in 0..2 {
-                if h.sec_ei[end][axis] > 0.0 && h.d_nom[1 + axis] > 0.0 {
-                    dofs.push((end, axis));
-                }
-            }
+impl FiberBeam {
+    fn member_load_map(&self, loads: &[MemberLoad]) -> Result<Option<FrameDeadLoadMap>, String> {
+        if loads.is_empty() {
+            return Ok(None);
         }
-        dofs
+        let id = self
+            .element_id
+            .ok_or("物理部材IDがない要素は部材荷重を所有できません")?;
+        if loads.iter().any(|load| load.elem != id) {
+            return Err("荷重の部材IDが要素と一致しません".into());
+        }
+        FrameDeadLoadMap::new(loads, &self.axis, self.length, self.rigid_i, self.rigid_j).map(Some)
     }
 
-    fn hinge_uhat_from(dofs: &[(usize, usize)], thb: &[f64; 4], u_elem: &[f64; 12]) -> [f64; 12] {
-        let mut u = *u_elem;
-        for &(end, axis) in dofs {
-            u[HINGE_SLOTS[end][axis]] = thb[end * 2 + axis];
+    fn try_update_state_with_member_loads(
+        &mut self,
+        du: &LocalVec,
+        absolute_loads: Option<&[MemberLoad]>,
+        commit: bool,
+    ) -> Result<(), crate::behavior::ElementUpdateError> {
+        crate::behavior::validate_trial_increment(du, self.n_dof()).map_err(|error| {
+            crate::behavior::ElementUpdateError(format!(
+                "Fiber/MS 要素 {:?}（節点 {:?}）: {error}",
+                self.element_id, self.nodes
+            ))
+        })?;
+        let replacement = absolute_loads
+            .map(|loads| self.member_load_map(loads))
+            .transpose()
+            .map_err(|error| {
+                crate::behavior::ElementUpdateError(format!(
+                    "Fiber/MS 要素 {:?}（節点 {:?}）の部材荷重: {error}",
+                    self.element_id, self.nodes
+                ))
+            })?;
+        let previous = self.snapshot_state();
+        if let Some(map) = replacement {
+            self.member_load_state.trial_member_loads = absolute_loads.unwrap().to_vec();
+            self.member_load_state.trial_load_map = map;
         }
-        u
-    }
-
-    fn update_hinge_section_trial(&mut self, end: usize, eps0: f64, ky: f64, kz: f64) {
-        let gp = &mut self.gauss_points[end];
-        for (i, fiber) in gp.section.fibers.iter().enumerate() {
-            let eps = eps0 - kz * fiber.y + ky * fiber.z;
-            let (sigma, et) = gp.mats[i].trial(eps);
-            gp.trial_stress[i] = sigma;
-            gp.trial_et[i] = et;
-        }
-        gp.refresh_response();
-    }
-
-    fn solve_hinges(&mut self, u_elem: &[f64; 12]) {
-        const MAX_ITER: usize = 40;
-        let l = self.flex_length;
-        let (lp, d_nom, sec_ei, dofs, mut kappa, mut thb) = {
-            let Some(h) = self.hinge.as_ref() else {
-                return;
-            };
-            (
-                h.lp,
-                h.d_nom,
-                h.sec_ei,
-                Self::hinge_dofs(h),
-                h.trial_kappa,
-                h.trial_thb,
-            )
-        };
-        let n = dofs.len();
-        let eps0 = (u_elem[6] - u_elem[0]) / l;
-        if n == 0 {
-            for end in 0..2 {
-                let (ky, kz) = (kappa[end * 2], kappa[end * 2 + 1]);
-                self.update_hinge_section_trial(end, eps0, ky, kz);
-            }
-            return;
-        }
-        let b_end = [self.gauss_points[0].b, self.gauss_points[1].b];
-
-        for _ in 0..MAX_ITER {
-            let mut m = [[0.0_f64; 2]; 2];
-            let mut dm = [[[0.0_f64; 2]; 2]; 2];
-            for end in 0..2 {
-                let (ky, kz) = (kappa[end * 2], kappa[end * 2 + 1]);
-                self.update_hinge_section_trial(end, eps0, ky, kz);
-                let (force, d) = Self::section_response_from_cache(&self.gauss_points[end]);
-                m[end] = [force[1], force[2]];
-                dm[end] = [[d[1][1], d[1][2]], [d[2][1], d[2][2]]];
-            }
-            for &(end, axis) in dofs.iter() {
-                let gamma = HINGE_SIGN[end]
-                    * lp
-                    * (kappa[end * 2 + axis] - m[end][axis] / sec_ei[end][axis]);
-                thb[end * 2 + axis] = u_elem[HINGE_SLOTS[end][axis]] - gamma;
-            }
-            let uh = Self::hinge_uhat_from(&dofs, &thb, u_elem);
-
-            let mut r = [0.0_f64; 4];
-            let mut scale = 1.0_f64;
-            for (p, &(end, axis)) in dofs.iter().enumerate() {
-                let brow = &b_end[end][1 + axis];
-                let kb: f64 = brow.iter().zip(uh.iter()).map(|(b, u)| b * u).sum();
-                let m_b = d_nom[1 + axis] * kb;
-                r[p] = m_b - m[end][axis];
-                scale = scale.max(m_b.abs()).max(m[end][axis].abs());
-            }
-            if r[..n].iter().all(|v| v.abs() <= 1e-9 * scale) {
-                break;
-            }
-
-            let mut jac = [0.0_f64; 16];
-            for (p, &(ep, ap)) in dofs.iter().enumerate() {
-                let brow = &b_end[ep][1 + ap];
-                for (q, &(eq, aq)) in dofs.iter().enumerate() {
-                    let mut v = 0.0;
-                    for &(epp, app) in dofs.iter() {
-                        if epp != eq {
-                            continue;
-                        }
-                        let g = -HINGE_SIGN[epp]
-                            * lp
-                            * ((if app == aq { 1.0 } else { 0.0 })
-                                - dm[epp][app][aq] / sec_ei[epp][app]);
-                        v += d_nom[1 + ap] * brow[HINGE_SLOTS[epp][app]] * g;
-                    }
-                    if ep == eq {
-                        v -= dm[ep][ap][aq];
-                    }
-                    jac[p * n + q] = v;
-                }
-            }
-            let Some(jinv) = crate::linalg::invert_small(&jac[..n * n], n) else {
-                break;
-            };
-            let mut dk = [0.0_f64; 4];
-            for (p, dkp) in dk.iter_mut().take(n).enumerate() {
-                let mut s = 0.0;
-                for q in 0..n {
-                    s += jinv[p * n + q] * r[q];
-                }
-                *dkp = -s;
-            }
-            if dk[..n].iter().any(|v| !v.is_finite()) {
-                break;
-            }
-            for (p, &(end, axis)) in dofs.iter().enumerate() {
-                kappa[end * 2 + axis] += dk[p];
-            }
-        }
-
-        for end in 0..2 {
-            let (ky, kz) = (kappa[end * 2], kappa[end * 2 + 1]);
-            self.update_hinge_section_trial(end, eps0, ky, kz);
-        }
-        for &(end, axis) in dofs.iter() {
-            let (force, _) = Self::section_response_from_cache(&self.gauss_points[end]);
-            let gamma = HINGE_SIGN[end]
-                * lp
-                * (kappa[end * 2 + axis] - force[1 + axis] / sec_ei[end][axis]);
-            thb[end * 2 + axis] = u_elem[HINGE_SLOTS[end][axis]] - gamma;
-        }
-        let h = self.hinge.as_mut().unwrap();
-        h.trial_kappa = kappa;
-        h.trial_thb = thb;
-    }
-
-    fn hinge_internal_force(h: &HingeState, u_elem: &[f64; 12]) -> [f64; 12] {
-        let dofs = Self::hinge_dofs(h);
-        let uh = Self::hinge_uhat_from(&dofs, &h.trial_thb, u_elem);
-        let mut f = [0.0_f64; 12];
-        for (i, fi) in f.iter_mut().enumerate() {
-            let mut s = 0.0;
-            for (j, &u) in uh.iter().enumerate() {
-                s += h.k_el.get(i, j) * u;
-            }
-            *fi = s;
-        }
-        f
-    }
-
-    fn hinge_tangent(&self, h: &HingeState) -> LocalMat {
-        let dofs = Self::hinge_dofs(h);
-        let n = dofs.len();
-        if n == 0 {
-            return LocalMat {
-                n: 12,
-                data: h.k_el.data.clone(),
-            };
-        }
-        let b_end = [self.gauss_points[0].b, self.gauss_points[1].b];
-        let mut dm = [[[0.0_f64; 2]; 2]; 2];
-        for end in 0..2 {
-            let (_, d) = Self::section_response_from_cache(&self.gauss_points[end]);
-            dm[end] = [[d[1][1], d[1][2]], [d[2][1], d[2][2]]];
-        }
-        let mut g = [0.0_f64; 16];
-        for (p, &(ep, ap)) in dofs.iter().enumerate() {
-            for (q, &(eq, aq)) in dofs.iter().enumerate() {
-                if ep != eq {
-                    continue;
-                }
-                g[p * n + q] = -HINGE_SIGN[ep]
-                    * h.lp
-                    * ((if ap == aq { 1.0 } else { 0.0 }) - dm[ep][ap][aq] / h.sec_ei[ep][ap]);
-            }
-        }
-        let mut jac = [0.0_f64; 16];
-        for (p, &(ep, ap)) in dofs.iter().enumerate() {
-            let brow = &b_end[ep][1 + ap];
-            for q in 0..n {
-                let mut v = 0.0;
-                for (pp, &(epp, app)) in dofs.iter().enumerate() {
-                    v += h.d_nom[1 + ap] * brow[HINGE_SLOTS[epp][app]] * g[pp * n + q];
-                }
-                let (eq, aq) = dofs[q];
-                if ep == eq {
-                    v -= dm[ep][ap][aq];
-                }
-                jac[p * n + q] = v;
-            }
-        }
-        let Some(jinv) = crate::linalg::invert_small(&jac[..n * n], n) else {
-            return LocalMat {
-                n: 12,
-                data: h.k_el.data.clone(),
-            };
-        };
-        let mut fx = [0.0_f64; 48];
-        for q in 0..n {
-            for (pp, &(epp, app)) in dofs.iter().enumerate() {
-                let gv = g[pp * n + q];
-                if gv == 0.0 {
-                    continue;
-                }
-                let slot = HINGE_SLOTS[epp][app];
-                for i in 0..12 {
-                    fx[i * n + q] += h.k_el.get(i, slot) * gv;
-                }
-            }
-        }
-        let mut k = LocalMat {
-            n: 12,
-            data: h.k_el.data.clone(),
-        };
-        for (p, &(ep, ap)) in dofs.iter().enumerate() {
-            let brow = &b_end[ep][1 + ap];
-            for i in 0..12 {
-                let mut c = 0.0;
-                for q in 0..n {
-                    c += fx[i * n + q] * jinv[q * n + p];
-                }
-                if c == 0.0 {
-                    continue;
-                }
-                for j in 0..12 {
-                    let v = c * h.d_nom[1 + ap] * brow[j];
-                    if v != 0.0 {
-                        k.set(i, j, k.get(i, j) - v);
-                    }
-                }
-            }
-        }
+        let du_global: [f64; 12] = std::array::from_fn(|i| du.data[i]);
+        let du_local = self.axis.rotate_to_local(&du_global);
         for i in 0..12 {
-            for j in (i + 1)..12 {
-                let avg = 0.5 * (k.get(i, j) + k.get(j, i));
-                k.set(i, j, avg);
-                k.set(j, i, avg);
-            }
+            self.trial_disp[i] += du_local[i];
         }
-        k
+        if self.flex_length <= 0.0 {
+            return Ok(());
+        }
+        if let Err(error) = self
+            .solve_internal_dofs()
+            .and_then(|()| self.trial_global_force().map(|_| ()))
+            .and_then(|()| self.current_loaded_response().map(|_| ()))
+            .and_then(|()| {
+                let k = match &self.hinge {
+                    Some(h) => self.hinge_tangent(h)?,
+                    None => self.elem_tangent(),
+                };
+                let condensed = self.condensed_release_tangent(&k)?;
+                if condensed.data.iter().any(|v| !v.is_finite()) {
+                    return Err("端部接続接線が非有限です".into());
+                }
+                Ok(())
+            })
+        {
+            self.restore_state(previous.as_ref());
+            return Err(crate::behavior::ElementUpdateError(format!(
+                "Fiber/MS 要素 {:?}（節点 {:?}）の構成則を解けません: {error}",
+                self.element_id, self.nodes
+            )));
+        }
+        self.connection_started = true;
+        if commit {
+            self.commit_state();
+        }
+        Ok(())
     }
 }
 
@@ -1563,23 +1520,26 @@ impl ElementBehavior for FiberBeam {
                 data: SmallVec::from_elem(0.0, 12),
             };
         }
-        let u_flex = self.flex_disp();
-        let u_elem = self.elem_disp(&u_flex);
-        let f_elem = self.elem_internal_force(&u_elem);
-
-        let mut f_flex = f_elem;
-        for rel in &self.releases {
-            f_flex[rel.dof] = rel.spring * (u_flex[rel.dof] - u_elem[rel.dof]);
-        }
-
-        let f_node = crate::frame::rigid_arm::to_node_force(&f_flex, self.rigid_i, self.rigid_j);
-        let f_global = self.axis.rotate_to_global(&f_node);
+        let force = self
+            .trial_global_force()
+            .unwrap_or_else(|error| self.constitutive_failure(&error));
         LocalVec {
-            data: SmallVec::from_slice(&f_global),
+            data: SmallVec::from_slice(&force),
         }
     }
 
     fn state_member_forces(&self, ctx: &Ctx) -> Option<crate::frame::beam::MemberForces> {
+        if let Some(response) = self
+            .state_frame_load_response()
+            .unwrap_or_else(|error| self.constitutive_failure(&error))
+        {
+            return Some(
+                response
+                    .section
+                    .recover(&self.eval_sections)
+                    .unwrap_or_else(|error| self.constitutive_failure(&error)),
+            );
+        }
         let f_global = self.internal_force(ctx);
         let arr: [f64; 12] = std::array::from_fn(|i| f_global.data[i]);
         let f_local = self.axis.rotate_to_local(&arr);
@@ -1590,29 +1550,102 @@ impl ElementBehavior for FiberBeam {
         ))
     }
 
-    fn update_state(&mut self, du: &LocalVec, commit: bool, _ctx: &Ctx) {
-        let du_global: [f64; 12] = std::array::from_fn(|i| du.data[i]);
-        let du_local = self.axis.rotate_to_local(&du_global);
-        for i in 0..12 {
-            self.trial_disp[i] += du_local[i];
+    fn update_state(
+        &mut self,
+        du: &LocalVec,
+        commit: bool,
+        _ctx: &Ctx,
+    ) -> Result<(), crate::behavior::ElementUpdateError> {
+        self.try_update_state_with_member_loads(du, None, commit)
+    }
+
+    fn owns_frame_member_loads(&self) -> bool {
+        self.wall_connection.is_some()
+    }
+
+    fn frame_load_response(
+        &self,
+        _u_elem: &[f64],
+        _absolute_loads: &[MemberLoad],
+    ) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
+        if !self.owns_frame_member_loads() {
+            return Ok(None);
         }
-        if self.flex_length <= 0.0 {
-            return;
+        Err(format!("Fiber/MS 要素 {:?}: 非線形要素の線形荷重応答は未対応です。状態更新後の試行応答を使用してください", self.element_id))
+    }
+
+    fn state_frame_load_response(
+        &self,
+    ) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
+        if !self.owns_frame_member_loads() {
+            return Ok(None);
         }
-        self.solve_internal_dofs();
+        let map = FrameDeadLoadMap::new(
+            &self.member_load_state.trial_member_loads,
+            &self.axis,
+            self.length,
+            self.rigid_i,
+            self.rigid_j,
+        )
+        .map_err(|error| format!("Fiber/MS 要素 {:?}の部材荷重応答: {error}", self.element_id))?;
+        self.current_response_from_map(&map)
+            .map(Some)
+            .map_err(|error| format!("Fiber/MS 要素 {:?}の部材荷重応答: {error}", self.element_id))
+    }
+
+    fn update_state_with_member_loads(
+        &mut self,
+        du: &LocalVec,
+        absolute_loads: &[MemberLoad],
+        commit: bool,
+        _ctx: &Ctx,
+    ) -> Result<(), crate::behavior::ElementUpdateError> {
+        if self.owns_frame_member_loads() {
+            if !self.flex_length.is_finite() || self.flex_length <= 0.0 {
+                return Err(crate::behavior::ElementUpdateError(format!(
+                    "Fiber/MS 要素 {:?}: 可撓長が不正です",
+                    self.element_id
+                )));
+            }
+            FrameDeadLoadMap::new(
+                absolute_loads,
+                &self.axis,
+                self.length,
+                self.rigid_i,
+                self.rigid_j,
+            )
+            .map_err(|error| {
+                crate::behavior::ElementUpdateError(format!(
+                    "Fiber/MS 要素 {:?}の部材荷重: {error}",
+                    self.element_id
+                ))
+            })?;
+        }
+        if !self.owns_frame_member_loads() {
+            if !absolute_loads.is_empty() {
+                return Err(crate::behavior::ElementUpdateError(format!(
+                    "Fiber/MS 要素 {:?}: 壁側柱以外の部材荷重状態更新は未対応です",
+                    self.element_id
+                )));
+            }
+            return self.try_update_state_with_member_loads(du, None, commit);
+        }
+        let previous = self.snapshot_state();
+        let result = self
+            .try_update_state_with_member_loads(du, Some(absolute_loads), false)
+            .and_then(|()| {
+                self.state_frame_load_response()
+                    .map(|_| ())
+                    .map_err(crate::behavior::ElementUpdateError)
+            });
+        if let Err(error) = result {
+            self.restore_state(previous.as_ref());
+            return Err(error);
+        }
         if commit {
-            for gp in &mut self.gauss_points {
-                for mat in &mut gp.mats {
-                    mat.commit();
-                }
-            }
-            self.committed_disp = self.trial_disp;
-            self.committed_int = self.trial_int.clone();
-            if let Some(h) = &mut self.hinge {
-                h.committed_kappa = h.trial_kappa;
-                h.committed_thb = h.trial_thb;
-            }
+            self.commit_state();
         }
+        Ok(())
     }
 
     fn mass_matrix(&self, opt: MassOption) -> LocalMat {
@@ -1633,6 +1666,20 @@ impl ElementBehavior for FiberBeam {
                     self.phi_y,
                     self.phi_z,
                 );
+                if let Some(connection) = &self.wall_connection {
+                    let mass = connection
+                        .initial_consistent_mass(&self.initial_elastic_stiffness, &flex)
+                        .unwrap_or_else(|error| {
+                            panic!("FiberBeam の壁接続質量を縮約できません: {error}")
+                        });
+                    let mass = crate::frame::prismatic::mass_without_end_releases(
+                        &mass,
+                        mass_properties,
+                        self.rigid_i,
+                        self.rigid_j,
+                    );
+                    return self.axis.to_global(&mass);
+                }
                 let releases: SmallVec<[(usize, f64); 6]> =
                     self.releases.iter().map(|r| (r.dof, r.spring)).collect();
                 let mm = crate::frame::prismatic::condense_end_releases_with_mass(
@@ -1671,14 +1718,14 @@ impl ElementBehavior for FiberBeam {
             .collect();
         let (trial_hinge, committed_hinge) = match &self.hinge {
             Some(h) => (
-                h.trial_kappa
+                h.trial_eta
                     .iter()
-                    .chain(h.trial_thb.iter())
+                    .chain(h.trial_plastic.iter())
                     .copied()
                     .collect(),
-                h.committed_kappa
+                h.committed_eta
                     .iter()
-                    .chain(h.committed_thb.iter())
+                    .chain(h.committed_plastic.iter())
                     .copied()
                     .collect(),
             ),
@@ -1692,12 +1739,36 @@ impl ElementBehavior for FiberBeam {
             self.committed_int.to_vec(),
             trial_hinge,
             committed_hinge,
+            self.gauss_points
+                .iter()
+                .map(|gp| (gp.response(), gp.committed_response.clone()))
+                .collect::<Vec<_>>(),
+            self.wall_connection.clone(),
+            self.connection_started,
+            self.releases.to_vec(),
+            self.member_load_state.clone(),
         ))
     }
 
     fn restore_state(&mut self, state: &dyn Any) {
-        let (trial, committed, mats_data, trial_int, committed_int, th, ch) =
-            crate::behavior::downcast_snapshot::<FiberBeamSnapshot>("FiberBeam", state);
+        let (
+            trial,
+            committed,
+            mats_data,
+            trial_int,
+            committed_int,
+            th,
+            ch,
+            responses,
+            wall_connection,
+            connection_started,
+            releases,
+            member_load_state,
+        ) = crate::behavior::downcast_snapshot::<FiberBeamSnapshot>("FiberBeam", state);
+        self.member_load_state = member_load_state.clone();
+        self.wall_connection = wall_connection.clone();
+        self.connection_started = *connection_started;
+        self.releases = SmallVec::from_slice(releases);
         self.trial_disp = *trial;
         self.committed_disp = *committed;
         for (gp, gp_mats) in self.gauss_points.iter_mut().zip(mats_data) {
@@ -1708,12 +1779,16 @@ impl ElementBehavior for FiberBeam {
         self.trial_int = SmallVec::from_slice(trial_int);
         self.committed_int = SmallVec::from_slice(committed_int);
         if let Some(h) = &mut self.hinge {
-            if th.len() == 8 && ch.len() == 8 {
-                h.trial_kappa.copy_from_slice(&th[..4]);
-                h.trial_thb.copy_from_slice(&th[4..]);
-                h.committed_kappa.copy_from_slice(&ch[..4]);
-                h.committed_thb.copy_from_slice(&ch[4..]);
+            if th.len() == 12 && ch.len() == 12 {
+                h.trial_eta.copy_from_slice(&th[..6]);
+                h.trial_plastic.copy_from_slice(&th[6..]);
+                h.committed_eta.copy_from_slice(&ch[..6]);
+                h.committed_plastic.copy_from_slice(&ch[6..]);
             }
+        }
+        for (gp, (trial, committed)) in self.gauss_points.iter_mut().zip(responses) {
+            gp.restore_response(trial);
+            gp.committed_response = committed.clone();
         }
     }
 
@@ -1722,12 +1797,16 @@ impl ElementBehavior for FiberBeam {
             for mat in &mut gp.mats {
                 mat.commit();
             }
+            gp.committed_response = gp.response();
         }
+        self.member_load_state.committed_member_loads =
+            self.member_load_state.trial_member_loads.clone();
+        self.member_load_state.committed_load_map = self.member_load_state.trial_load_map.clone();
         self.committed_disp = self.trial_disp;
         self.committed_int = self.trial_int.clone();
         if let Some(h) = &mut self.hinge {
-            h.committed_kappa = h.trial_kappa;
-            h.committed_thb = h.trial_thb;
+            h.committed_eta = h.trial_eta;
+            h.committed_plastic = h.trial_plastic;
         }
     }
 
@@ -1736,12 +1815,17 @@ impl ElementBehavior for FiberBeam {
             for mat in &mut gp.mats {
                 mat.revert();
             }
+            let response = gp.committed_response.clone();
+            gp.restore_response(&response);
         }
+        self.member_load_state.trial_member_loads =
+            self.member_load_state.committed_member_loads.clone();
+        self.member_load_state.trial_load_map = self.member_load_state.committed_load_map.clone();
         self.trial_disp = self.committed_disp;
         self.trial_int = self.committed_int.clone();
         if let Some(h) = &mut self.hinge {
-            h.trial_kappa = h.committed_kappa;
-            h.trial_thb = h.committed_thb;
+            h.trial_eta = h.committed_eta;
+            h.trial_plastic = h.committed_plastic;
         }
     }
 
@@ -1758,23 +1842,32 @@ impl ElementBehavior for FiberBeam {
             .collect();
         let (trial_hinge, committed_hinge) = match &self.hinge {
             Some(h) => (
-                h.trial_kappa
+                h.trial_eta
                     .iter()
-                    .chain(h.trial_thb.iter())
+                    .chain(h.trial_plastic.iter())
                     .copied()
                     .collect(),
-                h.committed_kappa
+                h.committed_eta
                     .iter()
-                    .chain(h.committed_thb.iter())
+                    .chain(h.committed_plastic.iter())
                     .copied()
                     .collect(),
             ),
             None => (Vec::new(), Vec::new()),
         };
         let cp = FiberBeamCheckpoint {
+            trial_member_loads: self.member_load_state.trial_member_loads.clone(),
+            committed_member_loads: self.member_load_state.committed_member_loads.clone(),
+            releases: self.releases.to_vec(),
+            wall_connection: self.wall_connection.clone(),
             trial_disp: self.trial_disp,
             committed_disp: self.committed_disp,
             gauss_points,
+            responses: self
+                .gauss_points
+                .iter()
+                .map(|gp| (gp.response(), gp.committed_response.clone()))
+                .collect(),
             trial_int: self.trial_int.to_vec(),
             committed_int: self.committed_int.to_vec(),
             trial_hinge,
@@ -1787,58 +1880,95 @@ impl ElementBehavior for FiberBeam {
         &mut self,
         data: &[u8],
     ) -> Result<(), crate::behavior::CheckpointError> {
-        let cp = match bincode::deserialize::<FiberBeamCheckpoint>(data) {
-            Ok(cp) => cp,
-            Err(_) => match bincode::deserialize::<FiberBeamCheckpointV2>(data) {
-                Ok(v2) => FiberBeamCheckpoint {
-                    trial_disp: v2.trial_disp,
-                    committed_disp: v2.committed_disp,
-                    gauss_points: v2.gauss_points,
-                    trial_int: v2.trial_int,
-                    committed_int: v2.committed_int,
-                    trial_hinge: Vec::new(),
-                    committed_hinge: Vec::new(),
-                },
-                Err(_) => {
-                    let legacy: FiberBeamCheckpointLegacy = bincode::deserialize(data)
-                        .map_err(|e| crate::behavior::CheckpointError::Decode(e.to_string()))?;
-                    FiberBeamCheckpoint {
-                        trial_disp: legacy.trial_disp,
-                        committed_disp: legacy.committed_disp,
-                        gauss_points: legacy.gauss_points,
-                        trial_int: vec![0.0; self.releases.len()],
-                        committed_int: vec![0.0; self.releases.len()],
-                        trial_hinge: Vec::new(),
-                        committed_hinge: Vec::new(),
+        let previous = self.snapshot_state();
+        let result =
+            (|| {
+                let cp: FiberBeamCheckpoint = bincode::deserialize(data)
+                    .map_err(|error| crate::behavior::CheckpointError::Decode(error.to_string()))?;
+                if cp.releases.as_slice() != self.releases.as_slice()
+                    || cp.wall_connection != self.wall_connection
+                    || cp.trial_int.len() != self.internal_rotation_count()
+                    || cp.committed_int.len() != self.internal_rotation_count()
+                    || cp.gauss_points.len() != self.gauss_points.len()
+                    || cp.responses.len() != self.gauss_points.len()
+                    || cp.responses.iter().zip(&self.gauss_points).any(
+                        |((trial, committed), gp)| {
+                            [trial, committed].into_iter().any(|response| {
+                                response.stress.len() != gp.mats.len()
+                                    || response.tangent.len() != gp.mats.len()
+                                    || response
+                                        .stress
+                                        .iter()
+                                        .chain(&response.tangent)
+                                        .chain(&response.force)
+                                        .chain(response.stiffness.iter().flatten())
+                                        .any(|value| !value.is_finite())
+                            })
+                        },
+                    )
+                    || cp
+                        .gauss_points
+                        .iter()
+                        .zip(&self.gauss_points)
+                        .any(|(m, gp)| m.len() != gp.mats.len())
+                    || (self.hinge.is_some()
+                        && (cp.trial_hinge.len() != 12 || cp.committed_hinge.len() != 12))
+                    || (self.hinge.is_none()
+                        && (!cp.trial_hinge.is_empty() || !cp.committed_hinge.is_empty()))
+                    || cp
+                        .trial_disp
+                        .iter()
+                        .chain(&cp.committed_disp)
+                        .chain(&cp.trial_int)
+                        .chain(&cp.committed_int)
+                        .chain(&cp.trial_hinge)
+                        .chain(&cp.committed_hinge)
+                        .any(|value| !value.is_finite())
+                {
+                    return Err(crate::behavior::CheckpointError::Decode(
+                        "Fiber/MS状態の寸法が一致しません".into(),
+                    ));
+                }
+                let trial_load_map = self
+                    .member_load_map(&cp.trial_member_loads)
+                    .map_err(crate::behavior::CheckpointError::Decode)?;
+                let committed_load_map = self
+                    .member_load_map(&cp.committed_member_loads)
+                    .map_err(crate::behavior::CheckpointError::Decode)?;
+                self.member_load_state = FiberBeamLoadState {
+                    trial_member_loads: cp.trial_member_loads,
+                    committed_member_loads: cp.committed_member_loads,
+                    trial_load_map,
+                    committed_load_map,
+                };
+                self.trial_disp = cp.trial_disp;
+                self.committed_disp = cp.committed_disp;
+                for (gp, gp_mats) in self.gauss_points.iter_mut().zip(cp.gauss_points) {
+                    for (mat, mat_bytes) in gp.mats.iter_mut().zip(gp_mats) {
+                        mat.deserialize_state(&mat_bytes)?;
                     }
                 }
-            },
-        };
-        self.trial_disp = cp.trial_disp;
-        self.committed_disp = cp.committed_disp;
-        for (gp, gp_mats) in self.gauss_points.iter_mut().zip(cp.gauss_points) {
-            for (mat, mat_bytes) in gp.mats.iter_mut().zip(gp_mats) {
-                mat.deserialize_state(&mat_bytes)?;
-            }
+                self.trial_int = SmallVec::from_slice(&cp.trial_int);
+                self.committed_int = SmallVec::from_slice(&cp.committed_int);
+                if let Some(h) = &mut self.hinge {
+                    h.trial_eta.copy_from_slice(&cp.trial_hinge[..6]);
+                    h.trial_plastic.copy_from_slice(&cp.trial_hinge[6..]);
+                    h.committed_eta.copy_from_slice(&cp.committed_hinge[..6]);
+                    h.committed_plastic
+                        .copy_from_slice(&cp.committed_hinge[6..]);
+                }
+                for (gp, (trial, committed)) in self.gauss_points.iter_mut().zip(cp.responses) {
+                    gp.restore_response(&trial);
+                    gp.committed_response = committed;
+                }
+                Ok(())
+            })();
+        if result.is_err() {
+            self.restore_state(previous.as_ref());
+        } else {
+            self.connection_started = true;
         }
-        if cp.trial_int.len() == self.releases.len() {
-            self.trial_int = SmallVec::from_slice(&cp.trial_int);
-            self.committed_int = SmallVec::from_slice(&cp.committed_int);
-        }
-        if let Some(h) = &mut self.hinge {
-            if cp.trial_hinge.len() == 8 && cp.committed_hinge.len() == 8 {
-                h.trial_kappa.copy_from_slice(&cp.trial_hinge[..4]);
-                h.trial_thb.copy_from_slice(&cp.trial_hinge[4..]);
-                h.committed_kappa.copy_from_slice(&cp.committed_hinge[..4]);
-                h.committed_thb.copy_from_slice(&cp.committed_hinge[4..]);
-            } else {
-                h.trial_kappa = [0.0; 4];
-                h.trial_thb = [0.0; 4];
-                h.committed_kappa = [0.0; 4];
-                h.committed_thb = [0.0; 4];
-            }
-        }
-        Ok(())
+        result
     }
 
     fn ductility_probe(&self) -> Option<DuctilityProbe> {
@@ -1849,9 +1979,8 @@ impl ElementBehavior for FiberBeam {
         let td = self.elem_disp(&self.flex_disp());
         let mut best: Option<(f64, usize, f64, f64, f64)> = None;
         if let Some(h) = &self.hinge {
-            let eps0 = (td[6] - td[0]) / l;
             for gi in 0..self.gauss_points.len().min(2) {
-                let (ky, kz) = (h.trial_kappa[gi * 2], h.trial_kappa[gi * 2 + 1]);
+                let [eps0, ky, kz] = std::array::from_fn(|a| h.trial_eta[gi * 3 + a]);
                 let kappa = (ky * ky + kz * kz).sqrt();
                 if best.is_none_or(|(bk, ..)| kappa > bk) {
                     best = Some((kappa, gi, eps0, ky, kz));
@@ -1907,7 +2036,6 @@ impl ElementBehavior for FiberBeam {
             return None;
         }
         let td = self.elem_disp(&self.flex_disp());
-        let eps0_hinge = (td[6] - td[0]) / l;
         let n_sections = if self.hinge.is_some() {
             self.gauss_points.len().min(2)
         } else {
@@ -1916,7 +2044,11 @@ impl ElementBehavior for FiberBeam {
         let mut out = Vec::with_capacity(n_sections);
         for (gi, gp) in self.gauss_points.iter().take(n_sections).enumerate() {
             let (eps0, ky, kz) = if let Some(h) = &self.hinge {
-                (eps0_hinge, h.trial_kappa[gi * 2], h.trial_kappa[gi * 2 + 1])
+                (
+                    h.trial_eta[gi * 3],
+                    h.trial_eta[gi * 3 + 1],
+                    h.trial_eta[gi * 3 + 2],
+                )
             } else {
                 let b = gp.b;
                 let eps0 = b[0][0] * td[0] + b[0][6] * td[6];
@@ -1950,3 +2082,20 @@ impl ElementBehavior for FiberBeam {
 
 #[cfg(test)]
 mod tests;
+
+mod wall_connection;
+
+#[cfg(test)]
+mod wall_connection_tests;
+
+#[cfg(test)]
+mod wall_mass_tests;
+
+#[cfg(test)]
+mod constitutive_tests;
+
+#[cfg(test)]
+mod member_load_tests;
+
+#[cfg(test)]
+mod independent_plastic_reference;

@@ -1,7 +1,7 @@
 use super::section_geometry::{Primitive, SectionGeometry};
 use crate::transform::LocalFrame;
 use sepika_core::geom::vec3::dot;
-use sepika_core::model::{wall_element_geometry, ElementData, Model};
+use sepika_core::model::{wall_element_geometry, ElementData, Model, WallSideColumnIndex};
 use sepika_core::section_shape::{
     concrete_young_modulus_gamma, material_strip_section_properties, MaterialSectionStrip,
     MaterialStripSectionProperties, SectionShape,
@@ -30,7 +30,19 @@ pub(super) struct WallSection {
 }
 
 impl WallSection {
+    /// モデルへ登録された壁の断面を返す。壁 ID・節点・断面の所有が一致しなければ失敗する。
     pub fn new(data: &ElementData, model: &Model) -> Result<Self, String> {
+        let owner = model
+            .elements
+            .iter()
+            .find(|e| e.id == data.id && e.kind == sepika_core::model::ElementKind::Wall)
+            .ok_or_else(|| format!("壁 ID {} がモデルに登録されていません", data.id.0))?;
+        if owner.nodes != data.nodes || owner.section != data.section {
+            return Err(format!(
+                "壁 ID {} の節点または断面がモデル内の所有と一致しません",
+                data.id.0
+            ));
+        }
         let geometry = wall_element_geometry(data, model).ok_or("壁の幾何が不正です")?;
         let section = model.element_section(data).ok_or("壁の断面が未指定です")?;
         let material = model.element_material(data).ok_or("壁の材料が未指定です")?;
@@ -52,101 +64,105 @@ impl WallSection {
                 shear,
             },
         };
-        if super::misc_wall::wall_is_seismic(data, model) {
-            for (element_index, e) in model.elements.iter().enumerate() {
-                if !super::side_column::is_side_column_member(e.kind) || e.nodes.len() != 2 {
-                    continue;
-                }
-                let Some(side) = (0..2).find(|&side| {
-                    let pair = [geometry.bottom[side], geometry.top[side]];
-                    e.nodes.as_slice() == pair || e.nodes.as_slice() == [pair[1], pair[0]]
-                }) else {
-                    continue;
-                };
-                if result.columns[side].is_some() {
-                    return Err("同じ壁辺に側柱が重複しています".into());
-                }
-                let sec = model.element_section(e).ok_or("側柱の断面が未指定です")?;
-                let shape = sec.shape.as_ref().ok_or("側柱の断面形状が未定義です")?;
-                let mat = model.element_material(e).ok_or("側柱の材料が未指定です")?;
-                let mut materials = vec![Elasticity {
-                    young: mat.young,
-                    shear: mat.shear_modulus(),
-                }];
-                match shape {
-                    SectionShape::RcBeamRect { .. }
-                    | SectionShape::RcColumnRect { .. }
-                    | SectionShape::RcColumnCircle { .. }
-                    | SectionShape::SrcBeamRect { .. }
-                    | SectionShape::SrcColumnRect { .. } => {
-                        let young = mat.young;
-                        materials[0] = Elasticity {
-                            young,
-                            shear: mat
-                                .shear
-                                .filter(|shear| shear.is_finite() && *shear > 0.0)
-                                .unwrap_or_else(|| young / (2.0 * (1.0 + mat.poisson))),
-                        };
-                        if matches!(
-                            shape,
-                            SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
-                        ) {
-                            let steel = model
-                                .element_steel_material(e)
-                                .ok_or("SRC側柱の内蔵鉄骨材料が未指定です")?;
-                            materials.push(Elasticity {
-                                young: steel.young,
-                                shear: steel.shear_modulus(),
-                            });
-                        }
-                    }
-                    SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => {
-                        let fc = mat
-                            .fc
-                            .filter(|f| f.is_finite() && *f > 0.0)
-                            .ok_or("CFT側柱の充填コンクリート強度が未指定・不正です")?;
-                        let gamma_c = sepika_core::units::concrete_unit_weight_kn_m3(
-                            fc,
-                            mat.concrete_class,
-                            sepika_core::units::ConcreteComposition::Plain,
-                        );
-                        let young = concrete_young_modulus_gamma(fc, gamma_c);
+        let index = WallSideColumnIndex::build(model);
+        let bindings = index
+            .wall_replacement_bindings(data.id)
+            .map_err(|issues| format!("壁側柱の物理分類が不正です: {issues:?}"))?;
+        for binding in bindings {
+            let element_index = model
+                .elements
+                .iter()
+                .position(|e| e.id == binding.column)
+                .ok_or("側柱の要素が存在しません")?;
+            let e = &model.elements[element_index];
+            let side = binding.side;
+            let sec = model.element_section(e).ok_or("側柱の断面が未指定です")?;
+            let shape = sec.shape.as_ref().ok_or("側柱の断面形状が未定義です")?;
+            let mat = model.element_material(e).ok_or("側柱の材料が未指定です")?;
+            let mut materials = vec![Elasticity {
+                young: mat.young,
+                shear: mat.shear_modulus(),
+            }];
+            match shape {
+                SectionShape::RcBeamRect { .. }
+                | SectionShape::RcColumnRect { .. }
+                | SectionShape::RcColumnCircle { .. }
+                | SectionShape::SrcBeamRect { .. }
+                | SectionShape::SrcColumnRect { .. } => {
+                    let young = mat.young;
+                    materials[0] = Elasticity {
+                        young,
+                        shear: mat
+                            .shear
+                            .filter(|shear| shear.is_finite() && *shear > 0.0)
+                            .unwrap_or_else(|| young / (2.0 * (1.0 + mat.poisson))),
+                    };
+                    if matches!(
+                        shape,
+                        SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
+                    ) {
+                        let steel = model
+                            .element_steel_material(e)
+                            .ok_or("SRC側柱の内蔵鉄骨材料が未指定です")?;
                         materials.push(Elasticity {
-                            young,
-                            shear: young / 2.4,
+                            young: steel.young,
+                            shear: steel.shear_modulus(),
                         });
                     }
-                    _ => {}
                 }
-                let p0 = model.nodes[e.nodes[0].index()].coord;
-                let p1 = model.nodes[e.nodes[1].index()].coord;
-                let frame = LocalFrame::from_nodes(p0, p1, e.local_axis.ref_vector);
-                let direction = [
-                    dot(frame.rot[1], geometry.ex_bottom),
-                    dot(frame.rot[2], geometry.ex_bottom),
-                ];
-                if (direction[0].hypot(direction[1]) - 1.0).abs() > 1e-10 {
-                    return Err("側柱の材軸と壁下辺が直交していません".into());
+                SectionShape::CftBox { .. } | SectionShape::CftPipe { .. } => {
+                    let steel = model
+                        .element_steel_material(e)
+                        .ok_or("CFT側柱の鋼管材料が未指定です")?;
+                    materials[0] = Elasticity {
+                        young: steel.young,
+                        shear: steel.shear_modulus(),
+                    };
+                    let fc = mat
+                        .fc
+                        .filter(|f| f.is_finite() && *f > 0.0)
+                        .ok_or("CFT側柱の充填コンクリート強度が未指定・不正です")?;
+                    let gamma_c = sepika_core::units::concrete_unit_weight_kn_m3(
+                        fc,
+                        mat.concrete_class,
+                        sepika_core::units::ConcreteComposition::Plain,
+                    );
+                    let young = concrete_young_modulus_gamma(fc, gamma_c);
+                    materials.push(Elasticity {
+                        young,
+                        shear: young / 2.4,
+                    });
                 }
-                let geometry = SectionGeometry::of(shape)?;
-                let extrema: Vec<_> = geometry
-                    .parts
-                    .iter()
-                    .flat_map(|(p, _)| p.breaks(direction))
-                    .collect();
-                let extent = [
-                    extrema.iter().copied().fold(f64::INFINITY, f64::min),
-                    extrema.iter().copied().fold(f64::NEG_INFINITY, f64::max),
-                ];
-                result.columns[side] = Some(ColumnSection {
-                    geometry,
-                    direction,
-                    center: side as f64 * result.length,
-                    materials,
-                    extent,
-                    element_index,
-                });
+                _ => {}
             }
+            let p0 = model.nodes[e.nodes[0].index()].coord;
+            let p1 = model.nodes[e.nodes[1].index()].coord;
+            let frame = LocalFrame::from_nodes(p0, p1, e.local_axis.ref_vector);
+            let direction = [
+                dot(frame.rot[1], geometry.ex_bottom),
+                dot(frame.rot[2], geometry.ex_bottom),
+            ];
+            if (direction[0].hypot(direction[1]) - 1.0).abs() > 1e-10 {
+                return Err("側柱の材軸と壁下辺が直交していません".into());
+            }
+            let geometry = SectionGeometry::of(shape)?;
+            let extrema: Vec<_> = geometry
+                .parts
+                .iter()
+                .flat_map(|(p, _)| p.breaks(direction))
+                .collect();
+            let extent = [
+                extrema.iter().copied().fold(f64::INFINITY, f64::min),
+                extrema.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+            ];
+            result.columns[side] = Some(ColumnSection {
+                geometry,
+                direction,
+                center: side as f64 * result.length,
+                materials,
+                extent,
+                element_index,
+            });
         }
         if ![result.length, result.thickness]
             .iter()

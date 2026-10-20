@@ -375,6 +375,8 @@ impl WallElement {
             material: model.element_section(data).and_then(|s| s.material),
             committed_disp: [0.0; 12],
             trial_disp: [0.0; 12],
+            committed_member_loads: Vec::new(),
+            trial_member_loads: Vec::new(),
             local_stiffness_cache: std::sync::OnceLock::new(),
         };
 
@@ -446,7 +448,7 @@ impl WallElement {
                             .elements
                             .iter()
                             .find(|e| {
-                                e.kind == sepika_core::model::ElementKind::Beam
+                                e.kind.is_primary_frame_support()
                                     && e.nodes.len() >= 2
                                     && ((e.nodes[0] == a && e.nodes[e.nodes.len() - 1] == b)
                                         || (e.nodes[0] == b && e.nodes[e.nodes.len() - 1] == a))
@@ -460,7 +462,7 @@ impl WallElement {
                     let mass_per_area = if is_rc_wall {
                         rc_density * t
                     } else {
-                        section_mass_properties.mass_per_length / 1000.0
+                        section_mass_properties.mass_per_length / lw
                     };
                     (mass_per_area * net_area + opening_weight / sepika_core::units::GRAVITY_MM_S2)
                         .max(0.0)
@@ -1240,7 +1242,14 @@ impl ElementBehavior for WallElement {
         }
     }
 
-    fn update_state(&mut self, du: &LocalVec, commit: bool, ctx: &Ctx) {
+    fn update_state(
+        &mut self,
+        du: &LocalVec,
+        commit: bool,
+        ctx: &Ctx,
+    ) -> Result<(), crate::behavior::ElementUpdateError> {
+        crate::behavior::validate_trial_increment(du, self.n_dof())?;
+        let previous = self.snapshot_state();
         for i in 0..24.min(du.data.len()) {
             self.trial_disp[i] += du.data[i];
         }
@@ -1259,7 +1268,12 @@ impl ElementBehavior for WallElement {
                 let Some(fiber) = self.fiber_column.as_mut() else {
                     break;
                 };
-                fiber.update_state(&dv, false, ctx);
+                if let Err(error) = fiber.update_state(&dv, false, ctx) {
+                    self.restore_state(previous.as_ref());
+                    return Err(crate::behavior::ElementUpdateError(format!(
+                        "WallElement 内部柱: {error}"
+                    )));
+                }
                 self.fiber_u12_trial = u12;
                 if self.qu_shear.iter().any(|q| *q <= 0.0) {
                     break;
@@ -1312,6 +1326,7 @@ impl ElementBehavior for WallElement {
         if commit {
             self.commit_state();
         }
+        Ok(())
     }
 
     fn commit_state(&mut self) {
@@ -1652,6 +1667,7 @@ mod tests {
             spring: None,
         };
         let mut model = model;
+        model.elements.push(data.clone());
         crate::wall::add_surrounding_frame(&mut model, &data);
         let mut model = model;
         explicit_wall_test_rebar(&mut model);
@@ -1666,6 +1682,46 @@ mod tests {
             }
         }
         s
+    }
+
+    #[test]
+    fn failed_internal_fiber_trial_restores_entire_wall_and_allows_retry() {
+        let (model, data) = make_wall_model();
+        let ctx = Ctx { model: &model };
+        let mut wall = WallElement::try_new(&data, &model)
+            .unwrap()
+            .with_fiber_flexure(
+                &data,
+                &model,
+                crate::factory::StrengthBasis::MaterialStrength,
+                sepika_core::model::AnalysisKind::Incremental,
+            )
+            .unwrap();
+        let mut du = LocalVec {
+            data: smallvec::smallvec![0.0;24],
+        };
+        du.data[12] = 0.001;
+        du.data[18] = 0.001;
+        wall.update_state(&du, true, &ctx).unwrap();
+        let committed = wall.serialize_checkpoint();
+        wall.update_state(&du, false, &ctx).unwrap();
+        let trial = wall.serialize_checkpoint();
+        let force = wall.internal_force(&ctx).data;
+        let tangent = wall.tangent_stiffness(&ctx).data;
+        let mut bad = LocalVec {
+            data: smallvec::smallvec![0.0;24],
+        };
+        bad.data[14] = 1e300;
+        bad.data[20] = -1e300;
+        let error = wall.update_state(&bad, true, &ctx).unwrap_err();
+        assert!(error.to_string().contains("WallElement 内部柱"), "{error}");
+        assert_eq!(wall.serialize_checkpoint(), trial);
+        assert_eq!(wall.internal_force(&ctx).data, force);
+        assert_eq!(wall.tangent_stiffness(&ctx).data, tangent);
+        wall.revert_state();
+        assert_eq!(wall.serialize_checkpoint(), committed);
+        wall.update_state(&du, false, &ctx).unwrap();
+        assert_eq!(wall.serialize_checkpoint(), trial);
     }
 
     #[test]
@@ -1691,7 +1747,7 @@ mod tests {
             };
             du.data[12] = target - previous;
             du.data[18] = target - previous;
-            wall.update_state(&du, false, &ctx);
+            wall.update_state(&du, false, &ctx).unwrap();
             wall.commit_state();
             previous = target;
             let force = wall.internal_force(&ctx).data;
@@ -1700,12 +1756,12 @@ mod tests {
             let k = wall.stiffness_24(&ctx);
             let _ = wall.shear_return_map(&k, &wall.trial_disp);
             assert_eq!(state, wall.shear_spring.as_ref().unwrap().serialize_state());
-            wall.update_state(&zero, false, &ctx);
+            wall.update_state(&zero, false, &ctx).unwrap();
             wall.commit_state();
             assert_eq!(state, wall.shear_spring.as_ref().unwrap().serialize_state());
             assert_eq!(force, wall.internal_force(&ctx).data);
             let tangent = wall.tangent_stiffness(&ctx).data;
-            wall.update_state(&du, false, &ctx);
+            wall.update_state(&du, false, &ctx).unwrap();
             wall.revert_state();
             assert_eq!(force, wall.internal_force(&ctx).data);
             assert_eq!(tangent, wall.tangent_stiffness(&ctx).data);
@@ -1715,49 +1771,81 @@ mod tests {
 
     #[test]
     fn test_wall_mass_uses_clear_area_between_surrounding_members() {
-        let (mut model, data) = make_wall_model();
-        let mut section = SectionShape::RcColumnRect {
-            b: 600.0,
-            d: 600.0,
-            rebar: sepika_core::section_shape::RcRectColumnRebar {
-                main_dia: 22.0,
-                x: vec![8],
-                y: vec![8],
-                cover: 50.0,
-                hoop: sepika_core::section_shape::RectColumnHoop {
-                    dia: 10.0,
-                    pitch: 100.0,
-                    legs_x: 2,
-                    legs_y: 2,
+        for (boundary_mm, thickness_mm, expected_mass) in [
+            (600.0, 150.0, 29_376.0 / 9806.65),
+            (400.0, 200.0, 44_928.0 / 9806.65),
+        ] {
+            let (mut model, data) = make_wall_model();
+            if let Some(SectionShape::RcWall { thickness, .. }) = &mut model.sections[0].shape {
+                *thickness = thickness_mm;
+            }
+            let column_id = SectionId(model.sections.len() as u32);
+            let mut section = SectionShape::RcColumnRect {
+                b: boundary_mm,
+                d: boundary_mm,
+                rebar: sepika_core::section_shape::RcRectColumnRebar {
+                    main_dia: 22.0,
+                    x: vec![8],
+                    y: vec![8],
+                    cover: 50.0,
+                    hoop: sepika_core::section_shape::RectColumnHoop {
+                        dia: 10.0,
+                        pitch: 100.0,
+                        legs_x: 2,
+                        legs_y: 2,
+                    },
                 },
-            },
-        }
-        .to_section(SectionId(1), "C600".into());
-        section.material = Some(MaterialId(0));
-        model.sections.push(section);
-        model.elements.clear();
-        for i in 0..4 {
-            let mut beam = data.clone();
-            beam.id = ElemId(i as u32 + 1);
-            beam.kind = ElementKind::Beam;
-            beam.nodes = smallvec::smallvec![data.nodes[i], data.nodes[(i + 1) % 4]];
-            beam.section = Some(SectionId(1));
-            model.elements.push(beam);
-        }
-        for order in [[0, 1, 2, 3], [0, 3, 2, 1], [0, 3, 1, 2], [2, 0, 3, 1]] {
-            let mut reordered = data.clone();
-            reordered.nodes = order.into_iter().map(|i| data.nodes[i]).collect();
-            let wall = WallElement::try_new(&reordered, &model).unwrap();
-            let rc_density =
-                sepika_core::units::to_internal::mass_density_from_unit_weight_kn_m3(24.0);
-            let expected = (4000.0 - 600.0) * (3000.0 - 600.0) * 150.0 * rc_density;
-            let mass = wall.mass_matrix(MassOption::Lumped);
-            for dir in 0..3 {
-                let total: f64 = (0..4).map(|i| mass.get(i * 6 + dir, i * 6 + dir)).sum();
-                assert!(
-                    (total - expected).abs() < 1e-10,
-                    "total={total} expected={expected}"
-                );
+            }
+            .to_section(column_id, "C600".into());
+            section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+            section.material = Some(MaterialId(0));
+            model.sections.push(section);
+            let girder_id = SectionId(model.sections.len() as u32);
+            let mut girder = sepika_core::model::Section::zero(girder_id, "G600".into());
+            girder.depth = boundary_mm;
+            girder.width = boundary_mm;
+            girder.material = Some(MaterialId(0));
+            girder.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+            model.sections.push(girder);
+            model.elements.clear();
+            for i in 0..4 {
+                let mut beam = data.clone();
+                beam.id = ElemId(i as u32 + 1);
+                beam.kind = ElementKind::Beam;
+                beam.nodes = smallvec::smallvec![data.nodes[i], data.nodes[(i + 1) % 4]];
+                beam.section = Some(if i % 2 == 0 { girder_id } else { column_id });
+                model.elements.push(beam);
+            }
+            for kind in [
+                ElementKind::Beam,
+                ElementKind::Fiber,
+                ElementKind::MultiSpring,
+            ] {
+                model.elements.retain(|e| e.kind != ElementKind::Wall);
+                for frame in &mut model.elements {
+                    frame.kind = kind;
+                }
+                for order in [[0, 1, 2, 3], [0, 3, 2, 1], [0, 3, 1, 2], [2, 0, 3, 1]] {
+                    let mut reordered = data.clone();
+                    reordered.nodes = order.into_iter().map(|i| data.nodes[i]).collect();
+                    model.elements.retain(|e| e.kind != ElementKind::Wall);
+                    model.elements.push(reordered.clone());
+                    let wall = WallElement::try_new(&reordered, &model).unwrap();
+                    let expected = expected_mass;
+                    for option in [MassOption::Lumped, MassOption::Consistent] {
+                        let mass = wall.mass_matrix(option);
+                        for dir in 0..3 {
+                            let total: f64 = (0..4)
+                                .flat_map(|i| (0..4).map(move |j| (i, j)))
+                                .map(|(i, j)| mass.get(i * 6 + dir, j * 6 + dir))
+                                .sum();
+                            assert!(
+                                (total - expected).abs() < 1e-10,
+                                "total={total} expected={expected}"
+                            );
+                        }
+                    }
+                }
             }
         }
     }
@@ -1933,7 +2021,8 @@ mod tests {
             },
             false,
             &ctx,
-        );
+        )
+        .unwrap();
         let force = wall.internal_force(&ctx);
         assert!(
             force.data.iter().all(|v| v.abs() < 1e-6),
@@ -2126,7 +2215,9 @@ mod tests {
                 },
             },
         };
-        let mut col_section = col_shape.to_section(SectionId(1), "C600".into());
+        let column_id = SectionId(model.sections.len() as u32);
+        let mut col_section = col_shape.to_section(column_id, "C600".into());
+        col_section.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
         col_section.material = Some(MaterialId(0));
         model.sections.push(col_section);
         let base = model.elements.iter().map(|e| e.id.0).max().unwrap_or(0) + 1;
@@ -2138,7 +2229,7 @@ mod tests {
                 id: ElemId(base + i as u32),
                 kind: ElementKind::Beam,
                 nodes: smallvec::smallvec![a, b],
-                section: Some(SectionId(1)),
+                section: Some(column_id),
                 local_axis: LocalAxis {
                     ref_vector: [1.0, 0.0, 0.0],
                 },
@@ -2166,10 +2257,12 @@ mod tests {
             wall_cols.column.as_y,
             area / kappa
         );
-        model.materials.push(model.materials[0].clone());
-        model.materials[1].id = MaterialId(1);
-        model.materials[1].shear = Some(model.materials[0].shear_modulus() * 2.0);
-        model.sections[1].material = Some(MaterialId(1));
+        let column_material_id = MaterialId(model.materials.len() as u32);
+        let mut column_material = model.materials[0].clone();
+        column_material.id = column_material_id;
+        column_material.shear = Some(model.materials[0].shear_modulus() * 2.0);
+        model.materials.push(column_material);
+        model.sections[column_id.index()].material = Some(column_material_id);
         let stiffer_columns = WallElement::try_new(&data, &model).unwrap();
         assert!(stiffer_columns.column.as_y > wall_cols.column.as_y);
         assert!(stiffer_columns.column.as_y < 2.0 * wall_cols.column.as_y);
@@ -2203,7 +2296,7 @@ mod tests {
         du.data[2 * 6] = 1.0;
         du.data[3 * 6] = 1.0;
         let snap = wall.snapshot_state();
-        wall.update_state(&du, false, &ctx);
+        wall.update_state(&du, false, &ctx).unwrap();
 
         let f = wall.internal_force(&ctx);
         let k = wall.stiffness_24(&ctx);
@@ -2218,7 +2311,7 @@ mod tests {
         assert!(f.data[2 * 6].abs() > 1.0, "壁の復元力が生じていない");
 
         wall.commit_state();
-        wall.update_state(&du, false, &ctx);
+        wall.update_state(&du, false, &ctx).unwrap();
         wall.revert_state();
         let f2 = wall.internal_force(&ctx);
         for i in 0..24 {
@@ -2408,6 +2501,7 @@ mod shear_yield_tests {
             spring: None,
         };
         let mut model = model;
+        model.elements.push(data.clone());
         crate::wall::add_surrounding_frame(&mut model, &data);
         let mut model = model;
         explicit_wall_test_rebar(&mut model);
@@ -2525,7 +2619,7 @@ mod shear_yield_tests {
             };
             du.data[12] = 1.0;
             du.data[18] = 1.0;
-            b.update_state(&du, false, &ctx);
+            b.update_state(&du, false, &ctx).unwrap();
             b.commit_state();
             let f = b.internal_force(&ctx);
             max_q = max_q.max((f.data[0] + f.data[6]).abs());
@@ -2570,7 +2664,7 @@ mod shear_yield_tests {
             };
             du.data[12] = d;
             du.data[18] = d;
-            b.update_state(&du, false, &ctx);
+            b.update_state(&du, false, &ctx).unwrap();
             b.commit_state();
             let f = b.internal_force(&ctx);
             let recorded = b.state_member_forces(&ctx).expect("時刻歴の壁柱断面力");
@@ -2633,7 +2727,7 @@ mod shear_yield_tests {
             };
             du.data[12] = 1.0;
             du.data[18] = 1.0;
-            b.update_state(&du, false, &ctx);
+            b.update_state(&du, false, &ctx).unwrap();
             b.commit_state();
             if step == 100 || step == 200 {
                 let f = b.internal_force(&ctx);
@@ -2698,14 +2792,20 @@ mod capacity_issue_tests {
         };
         let side_sec = side_col_sec.map(|mut cs| {
             cs.id = SectionId(1);
+            cs.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
             cs.material = Some(MaterialId(0));
             cs.rebar_material = Some(MaterialId(0));
             cs.shear_rebar_material = Some(MaterialId(0));
             sections.push(cs);
             SectionId(1)
         });
-        edge(1, 0, 1, None);
-        edge(2, 3, 2, None);
+        let girder_id = SectionId(sections.len() as u32);
+        let mut girder = Section::zero(girder_id, "G600".into());
+        girder.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+        girder.material = Some(MaterialId(0));
+        sections.push(girder);
+        edge(1, 0, 1, Some(girder_id));
+        edge(2, 3, 2, Some(girder_id));
         if let Some(sec) = side_sec {
             edge(3, 0, 3, Some(sec));
             edge(4, 1, 2, Some(sec));
@@ -2794,10 +2894,175 @@ mod capacity_issue_tests {
     }
 
     #[test]
+    fn beam_fiber_ms_share_independent_wall_section_and_both_capacity_limits() {
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let (mut model, wall) = model_with(Some(rc_col(true)), 0.0025);
+            for member in model
+                .elements
+                .iter_mut()
+                .filter(|e| e.kind != ElementKind::Wall)
+            {
+                member.kind = kind;
+            }
+            let section = crate::wall::shear_section::WallSection::new(&wall, &model).unwrap();
+            assert!(section.columns.iter().all(Option::is_some));
+            let properties = section.properties().unwrap();
+            assert!((properties.area_mm2 - 1_400_000.0).abs() < 1e-6);
+            assert!((properties.elastic_centroid_mm - 2000.0).abs() < 1e-8);
+            assert!(
+                (properties.flexural_rigidity_n_mm2 / 81_803_333_333_333_330.0 - 1.0).abs() < 1e-6
+            );
+            // D=4600、d=4300、te=300 mm、主筋10-D22、横筋比0.0025・345 MPa、N=0。
+            let capacity =
+                fixture_directional_capacity(&wall, &model, crate::factory::StrengthBasis::Nominal)
+                    .unwrap();
+            for limit in capacity {
+                assert!(
+                    (limit - 3_027_363.174_700_624).abs() < 1e-6,
+                    "{kind:?}: {capacity:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pure_steel_wall_section_is_plate_only_for_all_three_boundary_representations() {
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let (mut model, wall) = model_with(Some(rc_col(true)), 0.0025);
+            model.materials[0].category = MaterialCategory::Steel;
+            model.materials[0].young = 205000.0;
+            model.materials[0].poisson = 0.3;
+            model.materials[0].fy = Some(235.0);
+            model.sections[0].shape = None;
+            model.sections[0].thickness = Some(9.0);
+            model.sections[1].shape = Some(SectionShape::SteelH {
+                height: 600.0,
+                width: 300.0,
+                web_thick: 12.0,
+                flange_thick: 20.0,
+                root_r: Some(0.0),
+            });
+            for member in model
+                .elements
+                .iter_mut()
+                .filter(|e| e.kind != ElementKind::Wall)
+            {
+                member.kind = kind;
+            }
+            let section = crate::wall::shear_section::WallSection::new(&wall, &model).unwrap();
+            assert!(section.columns.iter().all(Option::is_none));
+            let properties = section.properties().unwrap();
+            assert!((properties.area_mm2 - 36_000.0).abs() < 1e-6);
+            assert!(
+                (properties.flexural_rigidity_n_mm2 / 9_840_000_000_000_000.0 - 1.0).abs() < 1e-6,
+                "actual EI={} Nmm², independent 205000*9*4000³/12=9.84e15 Nmm²",
+                properties.flexural_rigidity_n_mm2
+            );
+            assert_eq!(
+                fixture_directional_capacity(&wall, &model, crate::factory::StrengthBasis::Nominal)
+                    .unwrap(),
+                [WallElement::steel_shear_capacity_of(&wall, &model); 2]
+            );
+        }
+    }
+
+    #[test]
+    fn cft_wall_section_uses_each_explicit_material_and_keeps_capacity_gate() {
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let (mut model, wall) = model_with(Some(rc_col(true)), 0.0025);
+            let steel_id = MaterialId(model.materials.len() as u32);
+            let mut steel = model.materials[0].clone();
+            steel.id = steel_id;
+            steel.category = MaterialCategory::Steel;
+            steel.young = 205000.0;
+            steel.shear = Some(80000.0);
+            steel.fy = Some(235.0);
+            model.materials.push(steel);
+            model.sections[1].shape = Some(SectionShape::CftBox {
+                height: 600.0,
+                width: 600.0,
+                thick: 20.0,
+                corner_r: Some(0.0),
+            });
+            model.sections[1].steel_material = Some(steel_id);
+            for member in model
+                .elements
+                .iter_mut()
+                .filter(|e| e.kind != ElementKind::Wall)
+            {
+                member.kind = kind;
+            }
+            let section = crate::wall::shear_section::WallSection::new(&wall, &model).unwrap();
+            assert!(section.columns.iter().all(Option::is_some));
+            let properties = section.properties().unwrap();
+            assert!((properties.area_mm2 - 1_400_000.0).abs() < 1e-6);
+            // Fc24・23 kN/m3のEc=22668.94590387348 MPa、鋼管600角t20、壁中央3400×200 mm。
+            assert!(
+                (properties.flexural_rigidity_n_mm2 / 1.4947382811333088e+17 - 1.0).abs() < 1e-6
+            );
+            let reason = WallElement::wall_shear_capacity_issue(
+                &wall,
+                &model,
+                crate::factory::StrengthBasis::Nominal,
+            )
+            .unwrap();
+            assert!(reason.contains("CFT") && reason.contains("適用外"));
+            assert!(fixture_capacity(&wall, &model).is_err());
+            model.sections[1].steel_material = None;
+            let error = crate::wall::shear_section::WallSection::new(&wall, &model)
+                .err()
+                .unwrap();
+            assert!(
+                error.contains("MissingSteelMaterial")
+                    && error.contains("0")
+                    && error.contains("3")
+            );
+            model.sections[1].steel_material = Some(MaterialId(0));
+            let error = crate::wall::shear_section::WallSection::new(&wall, &model)
+                .err()
+                .unwrap();
+            assert!(error.contains("InvalidSteelMaterial"));
+        }
+    }
+
+    #[test]
+    fn wall_section_rejects_missing_owner_and_conflicting_wall_geometry() {
+        let (mut model, wall) = model_with(Some(rc_col(true)), 0.0025);
+        model.elements.retain(|e| e.id != wall.id);
+        let error = crate::wall::shear_section::WallSection::new(&wall, &model)
+            .err()
+            .unwrap();
+        assert!(error.contains("壁 ID 0") && error.contains("登録"));
+        model.elements.push(wall.clone());
+        let mut conflict = wall.clone();
+        conflict.nodes.swap(0, 1);
+        let error = crate::wall::shear_section::WallSection::new(&conflict, &model)
+            .err()
+            .unwrap();
+        assert!(error.contains("壁 ID 0") && error.contains("一致"));
+        let mut construction_copy = wall.clone();
+        construction_copy.end_cond = [EndCondition::Pinned; 2];
+        assert!(crate::wall::shear_section::WallSection::new(&construction_copy, &model).is_ok());
+    }
+
+    #[test]
     fn different_column_reinforcement_produces_directional_wall_limits() {
         let (mut model, wall) = model_with(Some(rc_col(true)), 0.0025);
         let mut right = model.sections[1].clone();
-        right.id = SectionId(2);
+        let right_id = SectionId(model.sections.len() as u32);
+        right.id = right_id;
         if let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut right.shape {
             for c in rebar.x.iter_mut() {
                 *c *= 2;
@@ -2812,7 +3077,7 @@ mod capacity_issue_tests {
             .iter_mut()
             .find(|e| e.id == ElemId(4))
             .unwrap()
-            .section = Some(SectionId(2));
+            .section = Some(right_id);
         let qu =
             fixture_directional_capacity(&wall, &model, crate::factory::StrengthBasis::Nominal)
                 .unwrap();
@@ -2848,7 +3113,7 @@ mod capacity_issue_tests {
                     };
                     delta.data[12] = next - displacement;
                     delta.data[18] = next - displacement;
-                    element.update_state(&delta, false, &ctx);
+                    element.update_state(&delta, false, &ctx).unwrap();
                     element.commit_state();
                     displacement = next;
                 }
@@ -2870,7 +3135,7 @@ mod capacity_issue_tests {
             .iter()
             .position(|e| e.id == ElemId(4))
             .unwrap();
-        model.elements[left].section = Some(SectionId(2));
+        model.elements[left].section = Some(right_id);
         model.elements[right].section = Some(SectionId(1));
         let reversed =
             fixture_directional_capacity(&wall, &model, crate::factory::StrengthBasis::Nominal)
@@ -3070,8 +3335,9 @@ mod capacity_issue_tests {
             Some(shape.to_section(SectionId(1), "SRC600".into())),
             0.0025,
         );
+        let steel_id = MaterialId(model.materials.len() as u32);
         model.materials.push(Material {
-            id: MaterialId(1),
+            id: steel_id,
             name: "SN400".into(),
             category: MaterialCategory::Steel,
             young: 205000.0,
@@ -3083,7 +3349,7 @@ mod capacity_issue_tests {
             concrete_class: Default::default(),
             strength_factor: None,
         });
-        model.sections[1].steel_material = Some(MaterialId(1));
+        model.sections[1].steel_material = Some(steel_id);
         let mut model = model;
         explicit_wall_test_rebar(&mut model);
         (model, wall)

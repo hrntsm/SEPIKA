@@ -24,9 +24,11 @@ pub use hinge_view::{
     build_hinge_view, resolves_to_concentrated_spring, AnalysisHingeModel, HingeView,
 };
 pub use input_check::{
-    ensure_nonlinear_input, ensure_nonlinear_input_for_kind, ensure_nonlinear_input_with_basis,
-    ensure_rc_beam_reference_loads, nonlinear_input_issues, nonlinear_input_issues_for_kind,
-    rc_beam_reference_input_issue,
+    elastic_young_input_issue, ensure_nonlinear_input, ensure_nonlinear_input_for_kind,
+    ensure_nonlinear_input_with_basis, ensure_rc_beam_reference_loads,
+    ensure_wall_side_column_analysis, nonlinear_input_issues, nonlinear_input_issues_for_kind,
+    rc_beam_reference_input_issue, wall_side_column_input_issue,
+    wall_side_column_input_issue_with_index, wall_side_column_issue_message,
 };
 pub use regime::{resolve_force_regime, ResolvedRegime};
 pub use sepika_core::model::AnalysisKind;
@@ -47,8 +49,7 @@ use springs::{flexural_alpha_y, is_rc_like_section};
 /// 線材（`Beam` / `Fiber` / `MultiSpring`）は `ForceRegime` に依らず常に弾性
 /// [`crate::frame::beam::BeamElement`] を組む。非線形要素の振り分けは
 /// [`build_nonlinear_behavior`] だけが行う。
-/// 耐震壁の側柱（[`crate::wall::side_column::InPlaneReleasedColumn`]）は
-/// 線形・非線形の双方で用いる。
+/// RC/SRC置換壁の側柱は、壁法線まわりの回転を解放する。
 /// 壁のせん断断面が不正・未対応ならpanicする。呼び出し前に入力診断を行うこと。
 pub fn build_behavior(data: &ElementData, model: &Model) -> Box<dyn ElementBehavior> {
     build_behavior_with_axial_factor(data, model, 1.0)
@@ -71,30 +72,26 @@ pub fn build_behavior_with_axial_factor(
                 | ElementKind::Brace { .. }
         ) || axial_factor == 1.0
     );
+    if let Some(issue) = wall_side_column_input_issue(data, model, None) {
+        panic!("{issue}");
+    }
     match data.kind {
-        ElementKind::Beam => {
+        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
             let mut elem = crate::frame::beam::BeamElement::new(data, model);
             elem.a *= axial_factor;
-            if let Some(axis) = crate::wall::side_column::wall_side_column_release(data, model) {
-                return Box::new(crate::wall::side_column::InPlaneReleasedColumn::new(
+            let inner: Box<dyn ElementBehavior> = if let Some(axis) =
+                crate::wall::side_column::wall_side_column_release(data, model)
+            {
+                Box::new(crate::wall::side_column::InPlaneReleasedColumn::new(
                     elem, axis,
-                ));
-            }
-            if let Some(ends) = crate::frame::panel_offset::resolve(data, model) {
-                return Box::new(crate::frame::panel_offset::PanelOffsetMember::new(
-                    Box::new(elem),
-                    ends,
-                ));
-            }
-            Box::new(elem)
+                ))
+            } else {
+                Box::new(elem)
+            };
+            with_panel_offset(inner, data, model)
         }
         ElementKind::PanelZone => Box::new(crate::springs::panel::PanelZone::new(data, model)),
         ElementKind::Shell => Box::new(crate::shell::ShellElement::new(data, model)),
-        ElementKind::MultiSpring | ElementKind::Fiber => {
-            let mut elem = crate::frame::beam::BeamElement::new(data, model);
-            elem.a *= axial_factor;
-            Box::new(elem)
-        }
         ElementKind::Wall => {
             crate::wall::shear_section::wall_shear_rigidity(data, model)
                 .unwrap_or_else(|reason| panic!("壁 ID {}: {reason}", data.id.0));
@@ -149,6 +146,40 @@ pub fn build_behavior_with_axial_factor(
     }
 }
 
+fn with_panel_offset(
+    inner: Box<dyn ElementBehavior>,
+    data: &ElementData,
+    model: &Model,
+) -> Box<dyn ElementBehavior> {
+    match crate::frame::panel_offset::resolve(data, model) {
+        Some(ends) => Box::new(crate::frame::panel_offset::PanelOffsetMember::new(
+            inner, ends,
+        )),
+        None => inner,
+    }
+}
+
+fn wall_release_normal(data: &ElementData, model: &Model, kind: AnalysisKind) -> Option<[f64; 3]> {
+    let index = sepika_core::model::WallSideColumnIndex::build(model);
+    input_check::wall_side_column_normal_with_index(data, model, Some(kind), &index)
+        .unwrap_or_else(|issue| panic!("{issue}"))
+}
+
+fn build_connected_fiber(
+    data: &ElementData,
+    model: &Model,
+    basis: StrengthBasis,
+    kind: AnalysisKind,
+) -> crate::frame::fiber::FiberBeam {
+    let mut member = build_fiber(data, model, basis, kind);
+    if let Some(normal) = wall_release_normal(data, model, kind) {
+        member
+            .configure_wall_release(normal)
+            .unwrap_or_else(|reason| panic!("部材 ID {} の壁側柱接続: {reason}", data.id.0));
+    }
+    member
+}
+
 /// 部材耐力算定に用いる材料強度の基準。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum StrengthBasis {
@@ -182,6 +213,7 @@ impl StrengthBasis {
 }
 
 /// 非線形解析用の要素生成。`ForceRegime` に基づき非線形要素を構築する。
+/// 壁上下の剛梁は要素表現と `ForceRegime` によらず弾性梁とする。
 /// 線形弾性解析は [`build_behavior`]（弾性 `BeamElement`）を使う。
 /// 部材耐力算定に用いる材料強度の基準は `basis` で指定する。
 /// 時刻歴応答解析は [`StrengthBasis::Nominal`]、
@@ -196,18 +228,20 @@ pub fn build_nonlinear_behavior(
     kind: AnalysisKind,
     wall_capacity: Option<[f64; 2]>,
 ) -> Box<dyn ElementBehavior> {
+    if let Some(issue) = wall_side_column_input_issue(data, model, Some(kind)) {
+        panic!("{issue}");
+    }
+    if crate::frame::beam::is_elastic_wall_girder(model, data) {
+        if let Some(issue) = input_check::member_strength_issue(data, model) {
+            panic!("{issue}");
+        }
+        return build_behavior(data, model);
+    }
     if let Some(issue) = springs::rc_reference_target_issue(data, model) {
         panic!("部材 ID {} のRC梁基準接続: {issue}", data.id.0);
     }
     match data.kind {
         ElementKind::Beam => {
-            if let Some(axis) = crate::wall::side_column::wall_side_column_release(data, model) {
-                let elem = crate::frame::beam::BeamElement::new(data, model);
-                return Box::new(crate::wall::side_column::InPlaneReleasedColumn::new(
-                    elem, axis,
-                ));
-            }
-            let panel = crate::frame::panel_offset::resolve(data, model);
             let inner: Box<dyn ElementBehavior> = match resolve_force_regime(data, model) {
                 ResolvedRegime::ConcentratedSpring => {
                     if matches!(
@@ -250,19 +284,27 @@ pub fn build_nonlinear_behavior(
                     };
                     Box::new(beam)
                 }
-                ResolvedRegime::Fiber => Box::new(build_fiber(data, model, basis, kind)),
+                ResolvedRegime::Fiber => Box::new(build_connected_fiber(data, model, basis, kind)),
             };
-            match panel {
-                Some(ends) => Box::new(crate::frame::panel_offset::PanelOffsetMember::new(
-                    inner, ends,
-                )),
-                None => inner,
-            }
+            with_panel_offset(inner, data, model)
         }
-        ElementKind::Fiber => Box::new(build_fiber(data, model, basis, kind)),
-        ElementKind::MultiSpring => Box::new(crate::frame::multi_spring::MultiSpringElement::new(
-            data, model, basis, kind,
-        )),
+        ElementKind::Fiber => with_panel_offset(
+            Box::new(build_connected_fiber(data, model, basis, kind)),
+            data,
+            model,
+        ),
+        ElementKind::MultiSpring => {
+            let mut member =
+                crate::frame::multi_spring::MultiSpringElement::new(data, model, basis, kind);
+            if let Some(normal) = wall_release_normal(data, model, kind) {
+                member
+                    .configure_wall_release(normal)
+                    .unwrap_or_else(|reason| {
+                        panic!("部材 ID {} の壁側柱接続: {reason}", data.id.0)
+                    });
+            }
+            with_panel_offset(Box::new(member), data, model)
+        }
         ElementKind::Brace { .. } => Box::new(crate::frame::truss::TrussElement::new(data, model)),
         ElementKind::Wall => {
             let rc_wall = crate::wall::misc_wall::is_rc_wall(data, model);

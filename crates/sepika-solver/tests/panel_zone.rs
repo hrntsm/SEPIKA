@@ -311,7 +311,7 @@ fn test_panel_shear_angle_matches_closed_form() {
     let du = LocalVec {
         data: smallvec::smallvec![gamma[0], gamma[1]],
     };
-    panel.update_state(&du, true, &ctx);
+    panel.update_state(&du, true, &ctx).unwrap();
     let m = panel.panel_moments();
 
     // M = K・γ（弾性パネルの定義そのもの。実装が [Tp] 変換を挟んでも成り立つ）。

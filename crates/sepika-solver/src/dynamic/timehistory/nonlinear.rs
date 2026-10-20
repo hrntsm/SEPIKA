@@ -187,7 +187,8 @@ pub fn nonlinear_time_history_analysis(
             u[i] += du_dyn[i];
         }
         let du_free = reducer.expand_u(&du_dyn);
-        apply_du_trial(model, dofmap, &mut behaviors, &du_free);
+        apply_du_trial(model, dofmap, &mut behaviors, &du_free)
+            .map_err(SolveError::InvalidInput)?;
         for b in behaviors.iter_mut() {
             b.commit_state();
         }
@@ -436,7 +437,8 @@ pub fn nonlinear_time_history_analysis(
                 du_total[i] += du_red[i];
             }
 
-            apply_du_trial(model, dofmap, &mut behaviors, du_free);
+            apply_du_trial(model, dofmap, &mut behaviors, du_free)
+                .map_err(SolveError::InvalidInput)?;
         }
 
         if !converged {
@@ -709,7 +711,7 @@ fn newton_static_converge(
         for i in 0..n_indep {
             du_total[i] += du_red_buf[i];
         }
-        apply_du_trial(model, dofmap, behaviors, &du_free);
+        apply_du_trial(model, dofmap, behaviors, &du_free).map_err(SolveError::InvalidInput)?;
     }
     Ok(None)
 }

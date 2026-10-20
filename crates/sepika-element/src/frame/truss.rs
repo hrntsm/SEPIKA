@@ -496,7 +496,7 @@ mod tests {
             ]),
         };
         let ctx = Ctx { model: &model };
-        truss.update_state(&du, true, &ctx);
+        truss.update_state(&du, true, &ctx).unwrap();
         let f = truss.internal_force(&ctx);
         for i in 0..12 {
             assert!(f.data[i].abs() < 1e-6, "f[{i}]={}", f.data[i]);
@@ -516,7 +516,7 @@ mod tests {
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             ]),
         };
-        truss.update_state(&du, true, &ctx);
+        truss.update_state(&du, true, &ctx).unwrap();
         let f = truss.internal_force(&ctx);
         assert!((f.data[6] - ea_l).abs() < 1e-6, "f[6]={}", f.data[6]);
         assert!((f.data[0] + ea_l).abs() < 1e-6, "f[0]={}", f.data[0]);

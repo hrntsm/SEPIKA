@@ -101,7 +101,7 @@ fn push_horizontal(elem: &mut IsolatorElement, ctx: &Ctx, delta: f64) -> LocalVe
         data: smallvec::smallvec![0.0; 12],
     };
     du.data[6] = delta;
-    elem.update_state(&du, true, ctx);
+    elem.update_state(&du, true, ctx).unwrap();
     elem.internal_force(ctx)
 }
 
@@ -129,7 +129,7 @@ fn test_laminated_elastic_stiffness() {
         data: smallvec::smallvec![0.0; 12],
     };
     du.data[8] = 2.0;
-    elem.update_state(&du, true, &ctx);
+    elem.update_state(&du, true, &ctx).unwrap();
     let f = elem.internal_force(&ctx);
     assert!(
         (f.data[8].abs() - 5_000_000.0 * 2.0).abs() < 1.0,
@@ -183,12 +183,12 @@ fn test_commit_revert_roundtrip() {
         data: smallvec::smallvec![0.0; 12],
     };
     du.data[6] = 40.0;
-    elem.update_state(&du, false, &ctx);
+    elem.update_state(&du, false, &ctx).unwrap();
     elem.revert_state();
     let zero = LocalVec {
         data: smallvec::smallvec![0.0; 12],
     };
-    elem.update_state(&zero, false, &ctx);
+    elem.update_state(&zero, false, &ctx).unwrap();
     let f_reverted = elem.internal_force(&ctx);
     for i in 0..12 {
         approx::assert_relative_eq!(
@@ -247,7 +247,7 @@ fn test_checkpoint_roundtrip_restores_hysteresis() {
     let zero = LocalVec {
         data: smallvec::smallvec![0.0; 12],
     };
-    restored.update_state(&zero, false, &ctx);
+    restored.update_state(&zero, false, &ctx).unwrap();
     let f_after = restored.internal_force(&ctx);
     for i in 0..12 {
         approx::assert_relative_eq!(

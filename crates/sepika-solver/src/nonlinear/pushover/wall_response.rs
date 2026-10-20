@@ -588,7 +588,7 @@ mod tests {
         let delta = LocalVec {
             data: gdofs.iter().map(|&a| u[a]).collect(),
         };
-        b[0].update_state(&delta, false, &ctx);
+        b[0].update_state(&delta, false, &ctx).unwrap();
         b[0].commit_state();
         let mut recorder = super::super::step_record::StepRecorder::new(
             &m,
@@ -597,10 +597,12 @@ mod tests {
             super::super::types::DuctilityMethod::default(),
         )
         .unwrap();
-        recorder.record(0.0, &m, &map, &b, &u);
-        b[0].update_state(&delta, false, &ctx);
+        recorder.record(0.0, &m, &map, &b, &u).unwrap();
+        b[0].update_state(&delta, false, &ctx).unwrap();
         b[0].commit_state();
-        recorder.record(1.0, &m, &map, &b, &u.map(|v| 2.0 * v));
+        recorder
+            .record(1.0, &m, &map, &b, &u.map(|v| 2.0 * v))
+            .unwrap();
         let recorded = recorder.finish();
         let first = recorded.wall_history[0].response.as_ref().unwrap();
         let second = recorded.wall_history[1].response.as_ref().unwrap();
@@ -631,6 +633,7 @@ mod tests {
             rebar.x = vec![4];
             rebar.y = vec![3];
         }
+        m.sections[1].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
         let mut strong = m.sections[1].clone();
         strong.id = sepika_core::ids::SectionId(2);
         if let Some(sepika_core::section_shape::SectionShape::RcColumnRect { rebar, .. }) =
@@ -642,6 +645,29 @@ mod tests {
         }
         m.sections.push(strong);
         m.elements[4].section = Some(sepika_core::ids::SectionId(2));
+        let mut girder = m.sections[1].clone();
+        girder.id = sepika_core::ids::SectionId(m.sections.len() as u32);
+        girder.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+        girder.shape = Some(sepika_core::section_shape::SectionShape::RcBeamRect {
+            b: 600.0,
+            d: 600.0,
+            rebar: sepika_core::section_shape::RcBeamRebar {
+                main_dia: 22.0,
+                top: vec![8],
+                bottom: vec![8],
+                cover: 50.0,
+                stirrup: sepika_core::section_shape::BeamStirrup {
+                    dia: 10.0,
+                    pitch: 100.0,
+                    legs: 2,
+                },
+            },
+        });
+        let girder_id = girder.id;
+        m.sections.push(girder);
+        for id in [ElemId(1), ElemId(2)] {
+            m.elements.iter_mut().find(|e| e.id == id).unwrap().section = Some(girder_id);
+        }
         let capacities =
             sepika_element::wall::wall_element::WallElement::directional_shear_capacity_at_reference(
                 &m.elements[0],

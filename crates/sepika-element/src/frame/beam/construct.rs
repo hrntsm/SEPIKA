@@ -266,6 +266,8 @@ impl BeamElement {
             material: sec_material(model, data),
             committed_disp: [0.0; 12],
             trial_disp: [0.0; 12],
+            committed_member_loads: Vec::new(),
+            trial_member_loads: Vec::new(),
             local_stiffness_cache: std::sync::OnceLock::new(),
         })
     }

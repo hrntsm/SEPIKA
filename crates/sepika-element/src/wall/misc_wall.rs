@@ -5,192 +5,13 @@
 
 use sepika_core::ids::NodeId;
 use sepika_core::model::{
-    ElementData, ElementKind, MaterialCategory, Model, RegionAnchor, WallPlate, WallPlateShape,
-    WallSlit,
+    ElementKind, MaterialCategory, Model, RegionAnchor, WallPlate, WallPlateShape, WallSlit,
 };
 use sepika_core::section_shape::SectionShape;
 
-/// RC 造の壁か（断面形状が [`SectionShape::RcWall`]、または材料の区分が
-/// コンクリート）。
-pub fn is_rc_wall(data: &ElementData, model: &Model) -> bool {
-    let sec_is_rc_wall = data
-        .section
-        .and_then(|sid| model.sections.get(sid.index()))
-        .is_some_and(|s| matches!(s.shape, Some(SectionShape::RcWall { .. })));
-    let mat_is_rc = model
-        .element_material(data)
-        .is_some_and(|m| m.category == MaterialCategory::Concrete);
-    sec_is_rc_wall || mat_is_rc
-}
-
-/// 耐震壁の成立判定。
-///
-/// 材種によらず課す条件:
-/// - 上下辺が大梁（水平材）で囲まれていること（[`wall_is_framed`]）
-/// - 耐震スリットが 4 辺のいずれにも無いこと（切れていると面内せん断を周辺の
-///   柱梁へ伝えられない）
-///
-/// RC 壁（[`is_rc_wall`]）にのみ課す条件:
-/// - 壁厚が 120mm 以上であること
-/// - 開口周比 r0=√(開口面積/(l·h)) ≤ 0.4（複数開口モード適用後の面積）。
-///   `l`・`h` は [`crate::wall::wall_element::wall_element_geometry`] の壁長・高さ
-///   （台形壁では上下辺長さの平均を壁長とする）
-///
-/// 壁厚が特定できない（断面未設定の暫定壁）場合は、四周条件さえ満たせば
-/// 成立扱い（true）とする。
-pub fn wall_is_seismic(data: &ElementData, model: &Model) -> bool {
-    let Some(g) = crate::wall::wall_element::wall_element_geometry(data, model) else {
-        return false;
-    };
-    if !wall_is_framed_with(&g, model) {
-        return false;
-    }
-    let attr = model.wall_attrs.iter().find(|w| w.elem == data.id);
-    if attr.is_some_and(|a| a.slit.any()) {
-        return false;
-    }
-    if !is_rc_wall(data, model) {
-        return true;
-    }
-    let Some(t) = wall_thickness(data, model) else {
-        return true;
-    };
-    if t < 120.0 {
-        return false;
-    }
-    let opening_area = attr
-        .map(|a| a.total_opening_area_for(model.multi_opening_mode))
-        .unwrap_or(0.0);
-    if opening_area <= 0.0 {
-        return true;
-    }
-    if g.lw <= 0.0 || g.h <= 0.0 {
-        return true;
-    }
-    let r0 = (opening_area / (g.lw * g.h)).max(0.0).sqrt();
-    r0 <= 0.4
-}
-
-/// 壁の上下辺がともに大梁（水平材）で囲まれているか。
-///
-/// 上下辺のいずれかに大梁がない壁は耐震壁として扱わず、フレーム内雑壁とする。
-/// 左右の鉛直辺（側柱）は要求しない。
-///
-/// 辺と部材の対応は節点の一致で判定する。壁の四隅とは別の節点を使う部材は
-/// 対象外である。
-pub fn wall_is_framed(data: &ElementData, model: &Model) -> bool {
-    let Some(g) = crate::wall::wall_element::wall_element_geometry(data, model) else {
-        return false;
-    };
-    wall_is_framed_with(&g, model)
-}
-
-/// [`crate::wall::wall_element::wall_element_geometry`] 済みの幾何に対する四周判定。
-fn wall_is_framed_with(g: &crate::wall::wall_element::WallElementGeometry, model: &Model) -> bool {
-    has_girder(model, g.bottom[0], g.bottom[1]) && has_girder(model, g.top[0], g.top[1])
-}
-
-/// 耐震壁とその周辺架構（上下の大梁・左右の側柱）で構造種別が食い違う場合に、
-/// 是正内容を示す文を返す。
-///
-/// 判定は材料の区分（[`MaterialCategory`]）による。
-pub fn wall_frame_category_issue(data: &ElementData, model: &Model) -> Option<String> {
-    if !matches!(data.kind, ElementKind::Wall) || !wall_is_seismic(data, model) {
-        return None;
-    }
-    let g = crate::wall::wall_element::wall_element_geometry(data, model)?;
-    let (wall_label, want) = if is_rc_wall(data, model) {
-        ("RC 造", MaterialCategory::Concrete)
-    } else {
-        ("S 造", MaterialCategory::Steel)
-    };
-    let edges = [
-        (g.bottom[0], g.bottom[1]),
-        (g.top[0], g.top[1]),
-        (g.bottom[0], g.top[0]),
-        (g.bottom[1], g.top[1]),
-    ];
-    for e in &model.elements {
-        if !crate::wall::side_column::is_line_member(e.kind) || e.nodes.len() < 2 {
-            continue;
-        }
-        let (n0, n1) = (e.nodes[0], e.nodes[1]);
-        if !edges
-            .iter()
-            .any(|(a, b)| (*a == n0 && *b == n1) || (*a == n1 && *b == n0))
-        {
-            continue;
-        }
-        let Some(mat) = model.element_material(e) else {
-            continue;
-        };
-        let cft_column = want == MaterialCategory::Concrete
-            && edges[2..]
-                .iter()
-                .any(|(a, b)| (*a == n0 && *b == n1) || (*a == n1 && *b == n0))
-            && model
-                .element_section(e)
-                .and_then(|s| s.shape.as_ref())
-                .is_some_and(|s| {
-                    matches!(
-                        s,
-                        SectionShape::CftBox { .. } | SectionShape::CftPipe { .. }
-                    )
-                });
-        if mat.category != want && !cft_column {
-            return Some(format!(
-                "耐震壁 ID {} は{}ですが、周辺架構の部材 ID {} の材料「{}」の区分は{}です。\
-                 耐震壁と周辺架構の構造種別を揃えてください。\
-                 壁エレメントは壁と周辺架構を一体の耐震要素としてモデル化するため、\
-                 混合構造は扱えません。",
-                data.id.0,
-                wall_label,
-                e.id.0,
-                mat.name,
-                mat.category.label()
-            ));
-        }
-    }
-    None
-}
-
-/// 節点 `a`・`b` を両端に持つ大梁（水平材）が存在するか。
-/// 勾配 5% までを水平とみなす。大梁として辺を構成しうるのは線材のみで、
-/// ブレース（軸材）・面要素・バネは除く。
-fn has_girder(model: &Model, a: NodeId, b: NodeId) -> bool {
-    model.elements.iter().any(|e| {
-        if !crate::wall::side_column::is_line_member(e.kind) || e.nodes.len() < 2 {
-            return false;
-        }
-        let (n0, n1) = (e.nodes[0], e.nodes[1]);
-        if !((n0 == a && n1 == b) || (n0 == b && n1 == a)) {
-            return false;
-        }
-        let (Some(p0), Some(p1)) = (model.nodes.get(n0.index()), model.nodes.get(n1.index()))
-        else {
-            return false;
-        };
-        let (dx, dy, dz) = (
-            p1.coord[0] - p0.coord[0],
-            p1.coord[1] - p0.coord[1],
-            p1.coord[2] - p0.coord[2],
-        );
-        let lp = (dx * dx + dy * dy).sqrt();
-        lp > 1e-9 && dz.abs() <= 0.05 * lp
-    })
-}
-
-/// 壁板厚 [mm]（RcWall 形状 → Section.thickness → Section.width の順）。
-fn wall_thickness(data: &ElementData, model: &Model) -> Option<f64> {
-    let sec = data
-        .section
-        .and_then(|sid| model.sections.get(sid.index()))?;
-    let t = match &sec.shape {
-        Some(SectionShape::RcWall { thickness, .. }) => *thickness,
-        _ => sec.thickness.unwrap_or(sec.width),
-    };
-    (t > 0.0).then_some(t)
-}
+pub use sepika_core::model::{
+    is_rc_wall, wall_frame_category_issue, wall_is_framed, wall_is_seismic,
+};
 
 /// フレーム内雑壁 1 枚分の幾何情報（壁ローカル座標: 原点=下辺 a 節点、
 /// x=下辺方向 0..lw、z=鉛直 0..h）。情報源は壁版である。
@@ -512,7 +333,7 @@ mod tests {
     use sepika_core::ids::{ElemId, MaterialId, SectionId};
     use sepika_core::model::MaterialCategory;
     use sepika_core::model::{
-        EndCondition, ForceRegime, LocalAxis, Material, Node, WallAttr, WallOpening,
+        ElementData, EndCondition, ForceRegime, LocalAxis, Material, Node, WallAttr, WallOpening,
     };
 
     fn make_model(thickness: f64) -> (Model, ElementData) {

@@ -19,9 +19,6 @@ fn wall_model(wall_attr: Option<WallAttr>) -> Model {
 /// `wall_model` の寸法可変版（近接開口・包絡開口のテストで、開口周比 r0
 /// を任意の壁面積に対して調整するために用いる）。
 ///
-/// 耐震壁は四周を柱・梁に囲まれた壁を対象とするため、四周に線材を配置する
-/// （`wall_is_seismic` の四周条件）。検定側が集計する側柱の断面諸元は
-/// `MemberInfo` として別途与えるため、ここでは断面を割り当てない。
 fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>) -> Model {
     let mut nodes: Vec<Node> = Vec::new();
     let coords = [[0.0, 0.0, 0.0], [l, 0.0, 0.0], [l, 0.0, h], [0.0, 0.0, h]];
@@ -39,7 +36,7 @@ fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>)
             support_spring: None,
         });
     }
-    let sections = vec![Section {
+    let mut sections = vec![Section {
         frame_use: None,
         id: SectionId(0),
         name: "wall".to_string(),
@@ -67,6 +64,10 @@ fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>)
         steel_material: None,
         property_basis: Default::default(),
     }];
+    let mut girder = Section::zero(SectionId(1), "G".into());
+    girder.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+    girder.material = Some(MaterialId(0));
+    sections.push(girder);
     let materials = vec![
         Material {
             strength_factor: None,
@@ -104,7 +105,7 @@ fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>)
             v.push(NodeId(n1));
             v
         },
-        section: None,
+        section: Some(SectionId(1)),
         local_axis: LocalAxis {
             ref_vector: [0.0, 1.0, 0.0],
         },
@@ -138,8 +139,6 @@ fn wall_model_sized(l: f64, h: f64, thickness: f64, wall_attr: Option<WallAttr>)
         },
         frame_member(1, 0, 1), // 下梁
         frame_member(2, 3, 2), // 上梁
-        frame_member(3, 0, 3), // 左側柱
-        frame_member(4, 1, 2), // 右側柱
     ];
     Model {
         nodes,
@@ -576,7 +575,13 @@ fn wall_with_columns_model() -> Model {
     col_sec.material = Some(MaterialId(0));
     col_sec.rebar_material = Some(MaterialId(1));
     col_sec.shear_rebar_material = Some(MaterialId(1));
-    model.sections.push(col_sec);
+    model.sections[1] = col_sec;
+    for (id, nodes) in [(3, [0, 3]), (4, [1, 2])] {
+        let mut column = model.elements[1].clone();
+        column.id = ElemId(id);
+        column.nodes = nodes.map(NodeId).into_iter().collect();
+        model.elements.push(column);
+    }
     for e in model
         .elements
         .iter_mut()
@@ -589,6 +594,21 @@ fn wall_with_columns_model() -> Model {
     }
     let mut beam_section = model.sections[1].clone();
     beam_section.id = SectionId(2);
+    beam_section.shape = Some(SectionShape::RcBeamRect {
+        b: 600.0,
+        d: 600.0,
+        rebar: sepika_core::section_shape::RcBeamRebar {
+            main_dia: 22.0,
+            top: vec![4],
+            bottom: vec![4],
+            cover: 50.0,
+            stirrup: sepika_core::section_shape::BeamStirrup {
+                dia: 10.0,
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    });
     beam_section.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
     model.sections.push(beam_section);
     for e in &mut model.elements {
@@ -1459,8 +1479,9 @@ fn actual_side_column_missing_inputs_are_not_removed_from_reference_section() {
                 .2;
             assert!(
                 matches!(outcome, CheckOutcome::Skipped { reason }
-                if reason.contains("耐震壁 ID 0") && reason.contains(&format!("側柱 ID {}", column_id.0))
-                && reason.contains(if missing.starts_with("主材") { "コンクリート主材" } else { "断面" })),
+                if (reason.contains("耐震壁 ID 0") || reason.contains("壁 ID [0]"))
+                && (reason.contains(&format!("側柱 ID {}", column_id.0)) || reason.contains(&format!("部材 ID [{}]", column_id.0)))
+                && reason.contains(if missing.starts_with("主材") || missing.starts_with("断面") { "材料" } else { "断面" })),
                 "{missing}: {outcome:?}"
             );
         }
@@ -1634,9 +1655,45 @@ fn status_wall_model() -> (Model, sepika_load::wall_expand::WallExpansionIndex) 
     missing.id = SectionId(4);
     missing.material = None;
     model.sections.push(missing);
-    for section in [0, 3, 4] {
+    for (source, id) in [(1, 5), (2, 6)] {
+        let mut section = model.sections[source].clone();
+        section.id = SectionId(id);
+        section.shape = None;
+        section.material = Some(MaterialId(2));
+        model.sections.push(section);
+    }
+    let frames = model.elements.clone();
+    for (slot, section) in [0, 3, 4].into_iter().enumerate() {
+        let offset = slot as u32 * 4;
+        if slot > 0 {
+            for source in 0..4 {
+                let mut node = model.nodes[source].clone();
+                node.id = NodeId(offset + source as u32);
+                node.coord[0] += slot as f64 * 5000.0;
+                model.nodes.push(node);
+            }
+            for source in &frames {
+                let mut frame = source.clone();
+                frame.id = ElemId(model.elements.len() as u32 + 1);
+                frame.nodes = source
+                    .nodes
+                    .iter()
+                    .map(|node| NodeId(node.0 + offset))
+                    .collect();
+                if slot == 1 {
+                    frame.section = source.section.map(|id| SectionId(id.0 + 4));
+                }
+                model.elements.push(frame);
+            }
+        }
+        let boundary = [
+            NodeId(offset),
+            NodeId(offset + 1),
+            NodeId(offset + 2),
+            NodeId(offset + 3),
+        ];
         model.add_enclosed_wall_plate_from_nodes(
-            &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+            &boundary,
             WallPlate {
                 dl_support: None,
                 self_weight_shares: vec![],
@@ -1650,14 +1707,14 @@ fn status_wall_model() -> (Model, sepika_load::wall_expand::WallExpansionIndex) 
                 slit: Default::default(),
             },
         );
+        model.wall_regions.push(WallRegion {
+            id: WallRegionId(slot as u32),
+            name: format!("壁{slot}"),
+            boundary: boundary.to_vec(),
+            wall_plate_ids: vec![WallPlateId(slot as u32)],
+            posts: vec![],
+        });
     }
-    model.wall_regions.push(WallRegion {
-        id: WallRegionId(0),
-        name: "同節点3壁".into(),
-        boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-        wall_plate_ids: vec![WallPlateId(0), WallPlateId(1), WallPlateId(2)],
-        posts: vec![],
-    });
     let (model, index, _) = sepika_load::wall_expand::expand_wall_elements(&model);
     (model, index)
 }
@@ -1825,9 +1882,22 @@ mod rc_wall617_fixture;
 
 #[test]
 fn reference_skeleton_uses_same_face_total_state_and_keeps_allowable_check_on_missing_side() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        reference_skeleton_for_frame_representation(kind);
+    }
+}
+
+fn reference_skeleton_for_frame_representation(kind: ElementKind) {
     use crate::wall_check::WallCheckKind;
     use sepika_element::frame::beam::MemberForces;
     let mut m = rc_wall617_fixture::expanded_model();
+    for frame in &mut m.elements[..4] {
+        frame.kind = kind;
+    }
     m.stress_cfg.rc_wall_shear_method = sepika_core::model::RcWallShearMethod::ArakawaMin;
     if let Some(SectionShape::RcWall { pwh_ratio, .. }) = &mut m.sections[2].shape {
         *pwh_ratio = Some(0.006);
@@ -1894,6 +1964,12 @@ fn reference_skeleton_uses_same_face_total_state_and_keeps_allowable_check_on_mi
     );
     assert!((check.ratio() - 200_000.0 / 2_848_545.297717935).abs() < 1e-12);
     assert!(check.basis.contains("荒川mean"));
+    let mut tension = forces.clone();
+    tension[0].1.at[0].1[0] = 1.0;
+    tension[1].1.at[0].1[0] = 28_000.0;
+    tension[2].1.at[0].1[0] = -28_000.0;
+    let report = crate::run_member_design_checks(&m, &tension, &[], &Default::default());
+    assert!(report.wall_checks.iter().any(|wall| wall.kind == WallCheckKind::ReferenceSkeleton && matches!(&wall.outcome, CheckOutcome::Skipped { reason } if reason.contains("壁脚faceの圧縮正N/Aが適用範囲外"))));
     forces.pop();
     let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default());
     assert!(report
@@ -1907,6 +1983,24 @@ fn reference_skeleton_uses_same_face_total_state_and_keeps_allowable_check_on_mi
         .iter()
         .any(|w| w.kind == WallCheckKind::AllowableShear
             && matches!(w.outcome, CheckOutcome::Checked(_))));
+    m.sections[0].frame_use = None;
+    let rows: Vec<_> = forces
+        .iter()
+        .map(|(id, force)| (*id, force.at.as_slice()))
+        .collect();
+    let checks = collect_joint_checks(&m, &rows, LoadTerm::Short);
+    for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
+        let outcome = &checks
+            .iter()
+            .find(|(_, current, _)| current == label)
+            .unwrap()
+            .2;
+        let CheckOutcome::Skipped { reason } = outcome else {
+            panic!("{outcome:?}")
+        };
+        assert!(reason.contains("側柱には柱用断面が必要"), "{reason}");
+        assert!(reason.contains("部材 ID [0]"), "{reason}");
+    }
 }
 
 #[test]
@@ -1974,6 +2068,7 @@ fn wall_status_slit_stays_outside_with_or_without_section() {
     source.elements.retain(|e| e.kind != ElementKind::Wall);
     source.wall_attrs.clear();
     source.wall_plates.truncate(1);
+    source.wall_regions.truncate(1);
     source.wall_regions[0].wall_plate_ids.truncate(1);
     source.wall_plates[0].slit.beam_face[0] = true;
     for section in [Some(SectionId(0)), None] {
@@ -2002,6 +2097,7 @@ fn wall_status_slit_stays_outside_with_invalid_thickness_and_plate_or_attr() {
     source.elements.retain(|e| e.kind != ElementKind::Wall);
     source.wall_attrs.clear();
     source.wall_plates.truncate(1);
+    source.wall_regions.truncate(1);
     source.wall_regions[0].wall_plate_ids.truncate(1);
     source.wall_plates[0].slit.beam_face[0] = true;
     for thickness in [180.0, -1.0] {

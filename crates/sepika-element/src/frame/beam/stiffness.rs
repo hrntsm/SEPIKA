@@ -40,9 +40,10 @@ impl BeamElement {
         s(0, 0, e * a / l);
         s(6, 6, e * a / l);
         s(0, 6, -e * a / l);
-        s(3, 3, g * jj / l);
-        s(9, 9, g * jj / l);
-        s(3, 9, -g * jj / l);
+        let torsion = if jj == 0.0 { 0.0 } else { g * jj / l };
+        s(3, 3, torsion);
+        s(9, 9, torsion);
+        s(3, 9, -torsion);
 
         s(1, 1, 12.0 * az);
         s(7, 7, 12.0 * az);

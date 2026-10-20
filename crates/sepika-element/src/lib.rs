@@ -13,7 +13,6 @@
 pub mod behavior;
 pub mod factory;
 pub mod frame;
-pub(crate) mod linalg;
 pub mod shell;
 pub mod springs;
 pub mod transform;

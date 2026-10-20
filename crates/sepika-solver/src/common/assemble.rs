@@ -123,6 +123,14 @@ pub fn assemble_global_m(
     dofmap: &DofMap,
     opt: sepika_element::behavior::MassOption,
 ) -> Result<SparseColMat<usize, f64>, sepika_math::solver::SolveError> {
+    sepika_element::factory::ensure_wall_side_column_analysis(
+        model,
+        None,
+        "質量行列組立",
+        false,
+        Some(opt),
+    )
+    .map_err(sepika_math::solver::SolveError::InvalidInput)?;
     validate_global_mass_inputs(model)?;
     let mut all_triplets = Vec::new();
     if model.mass_method != sepika_core::model::MassMethod::LumpedOnly {
@@ -132,7 +140,12 @@ pub fn assemble_global_m(
             }
             let behavior = build_behavior(elem, model);
             let gdofs = behavior.global_dofs(dofmap);
-            let m_local = behavior.mass_matrix(opt);
+            let m_local = behavior.try_mass_matrix(opt).map_err(|reason| {
+                sepika_math::solver::SolveError::InvalidInput(format!(
+                    "質量行列組立: 要素 ID {}: {reason}",
+                    elem.id.0
+                ))
+            })?;
             let triplets = m_local.to_triplets(&gdofs);
             all_triplets.extend(triplets);
         }

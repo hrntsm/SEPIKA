@@ -9,6 +9,218 @@ use sepika_core::section_shape::SectionShape;
 /// エラーメッセージへ列挙する不備の最大件数（超過分は件数のみを示す）。
 const MAX_LISTED: usize = 5;
 
+/// 実解析名・幾何剛性・要素質量形式に対する壁側柱接続の適用条件を検証する。
+/// `kind=None` は線形構造、`mass=None` は要素質量を使わない解析を表す。
+pub fn ensure_wall_side_column_analysis(
+    model: &Model,
+    kind: Option<sepika_core::model::AnalysisKind>,
+    analysis: &str,
+    use_kg: bool,
+    mass: Option<crate::behavior::MassOption>,
+) -> Result<(), String> {
+    let index = sepika_core::model::WallSideColumnIndex::build(model);
+    let label = match kind {
+        None => "線形解析",
+        Some(sepika_core::model::AnalysisKind::Incremental) => "増分解析",
+        Some(sepika_core::model::AnalysisKind::TimeHistory) => "非線形時刻歴解析",
+    };
+    for data in &model.elements {
+        if let Some(issue) = wall_side_column_input_issue_with_index(data, model, kind, &index) {
+            return Err(issue.replace(&format!("{label}:"), &format!("{analysis}:")));
+        }
+    }
+    for data in model
+        .elements
+        .iter()
+        .filter(|data| data.kind.is_primary_frame_support())
+    {
+        if wall_side_column_normal_with_index(data, model, kind, &index)?.is_none() {
+            continue;
+        }
+        let bindings = index.replacement_bindings(data.id).map_err(|issues| {
+            issues
+                .iter()
+                .map(|issue| wall_side_column_issue_message(issue, kind))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })?;
+        let walls = bindings
+            .iter()
+            .map(|binding| binding.wall.0.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let failure = |reason: &str| {
+            format!(
+                "{analysis}: 部材 ID {}・壁 ID [{walls}] の壁側柱接続: {reason}",
+                data.id.0
+            )
+        };
+        if use_kg {
+            return Err(failure(
+                "壁法線まわりの解放と幾何剛性（P-Δ）の連成は未定式化です。",
+            ));
+        }
+        if matches!(mass, Some(crate::behavior::MassOption::Consistent))
+            && model.mass_method != sepika_core::model::MassMethod::LumpedOnly
+            && !model.uses_damper_total_weight(data)
+        {
+            super::build_behavior(data, model)
+                .try_mass_matrix(crate::behavior::MassOption::Consistent)
+                .map_err(|error| failure(&error))?;
+        }
+    }
+    Ok(())
+}
+
+/// 壁側柱の構造判定・解析適用の停止理由を返す。`None` は線形解析を表す。
+pub fn wall_side_column_input_issue(
+    data: &ElementData,
+    model: &Model,
+    kind: Option<sepika_core::model::AnalysisKind>,
+) -> Option<String> {
+    use sepika_core::model::WallSideColumnIndex;
+    let index = WallSideColumnIndex::build(model);
+    wall_side_column_input_issue_with_index(data, model, kind, &index)
+}
+
+/// 同じ入力モデルで構築した共通分類を再利用して、壁側柱の停止理由を返す。
+pub fn wall_side_column_input_issue_with_index(
+    data: &ElementData,
+    model: &Model,
+    kind: Option<sepika_core::model::AnalysisKind>,
+    index: &sepika_core::model::WallSideColumnIndex,
+) -> Option<String> {
+    wall_side_column_normal_with_index(data, model, kind, index).err()
+}
+
+pub(super) fn wall_side_column_normal_with_index(
+    data: &ElementData,
+    model: &Model,
+    kind: Option<sepika_core::model::AnalysisKind>,
+    index: &sepika_core::model::WallSideColumnIndex,
+) -> Result<Option<[f64; 3]>, String> {
+    let owner_bindings: Vec<_> = index
+        .bindings()
+        .iter()
+        .filter(|binding| binding.column == data.id)
+        .collect();
+    let walls = owner_bindings
+        .iter()
+        .map(|binding| binding.wall.0.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let analysis = match kind {
+        None => "線形解析",
+        Some(sepika_core::model::AnalysisKind::Incremental) => "増分解析",
+        Some(sepika_core::model::AnalysisKind::TimeHistory) => "非線形時刻歴解析",
+    };
+    let failure = |reason: &str| {
+        format!(
+            "{analysis}: 部材 ID {}・壁 ID [{walls}] の壁側柱接続: {reason}",
+            data.id.0
+        )
+    };
+    for binding in &owner_bindings {
+        if data.nodes.as_slice() != binding.edge
+            && data.nodes.as_slice() != [binding.edge[1], binding.edge[0]]
+        {
+            return Err(failure(
+                "構築用部材の端点が、登録された壁側縁の端点と一致しません。",
+            ));
+        }
+    }
+    let owner = model.elements.iter().find(|element| element.id == data.id);
+    if !owner_bindings.is_empty()
+        && !owner.is_some_and(|element| {
+            data.kind.is_primary_frame_support()
+                && element.kind.is_primary_frame_support()
+                && element.section == data.section
+        })
+    {
+        return Err(failure(
+            "構築用部材の断面参照が、登録された側柱の断面・材料・用途の所有と一致しません。",
+        ));
+    }
+    let selected = if data.kind == ElementKind::Wall {
+        index.wall_replacement_bindings(data.id)
+    } else if data.kind.is_primary_frame_support() {
+        index.replacement_bindings(data.id)
+    } else {
+        return Ok(None);
+    };
+    let bindings = selected.map_err(|issues| {
+        issues
+            .iter()
+            .map(|issue| wall_side_column_issue_message(issue, kind))
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    if bindings.is_empty() || data.kind == ElementKind::Wall {
+        return Ok(None);
+    }
+    if kind.is_some()
+        && data.kind == ElementKind::Beam
+        && matches!(
+            super::resolve_force_regime(data, model),
+            super::ResolvedRegime::ConcentratedSpring
+        )
+    {
+        return Err(failure("材端集中ばねと壁法線まわりの解放の連成は未定式化です。ファイバー要素への暗黙置換は行いません。"));
+    }
+    if kind == Some(sepika_core::model::AnalysisKind::TimeHistory) {
+        return Err(failure(
+            "壁法線まわりの非線形解放と従属回転の慣性の連成は未定式化です。",
+        ));
+    }
+    Ok(Some(bindings[0].normal))
+}
+
+/// 共通分類の全関連IDと停止理由を日本語で返す。`None` は線形解析を表す。
+pub fn wall_side_column_issue_message(
+    issue: &sepika_core::model::WallSideColumnIssue,
+    kind: Option<sepika_core::model::AnalysisKind>,
+) -> String {
+    use sepika_core::model::WallSideColumnReason as R;
+    let reason = match issue.reason {
+        R::NotFrameMember => "柱梁の線材ではありません",
+        R::NotTwoNodes => "側柱の節点数は2である必要があります",
+        R::MissingNode => "参照節点がありません",
+        R::NotVertical => "鉛直な側縁ではありません",
+        R::NoMatchingWall => "一致する壁側縁がありません",
+        R::WallNotSeismic => "耐震壁の成立条件を満たしません",
+        R::InvalidWallGeometry => "壁の幾何条件が不正です",
+        R::MissingMaterial => "材料が設定されていません",
+        R::InvalidPrimaryMaterial => "主材料の区分が不適合です",
+        R::MissingSteelMaterial => "内蔵鉄骨・鋼管の材料が設定されていません",
+        R::InvalidSteelMaterial => "内蔵鉄骨・鋼管の材料区分が不適合です",
+        R::ShapeUseMismatch => "断面形状と柱梁用途が一致しません",
+        R::ShapeMaterialMismatch => "断面形状と材料区分が一致しません",
+        R::ColumnUseRequired => "側柱には柱用断面が必要です",
+        R::GirderUseRequired => "壁上下梁には梁用断面が必要です",
+        R::FrameMaterialMismatch => "壁と付帯部材の構造種別が不適合です",
+        R::DuplicateColumns => "同一側縁に側柱候補が重複しています",
+        R::NonParallelWalls => "非平行な壁で共有する側柱の接続は未定式化です",
+        R::InvalidSteelYield => "鋼板の降伏強度が有限正値ではありません",
+    };
+    let ids = |entries: &[sepika_core::ids::ElemId]| {
+        entries
+            .iter()
+            .map(|id| id.0.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let analysis = match kind {
+        None => "線形解析",
+        Some(sepika_core::model::AnalysisKind::Incremental) => "増分解析",
+        Some(sepika_core::model::AnalysisKind::TimeHistory) => "非線形時刻歴解析",
+    };
+    format!(
+        "{analysis}: 壁 ID [{}]・部材 ID [{}] の壁側柱判定: {reason}",
+        ids(&issue.walls),
+        ids(&issue.members)
+    )
+}
+
 /// ファイバー断面に鋼材領域（形鋼・鋼管・内蔵鉄骨・管壁）を持つ形状か。
 fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
     !matches!(
@@ -26,6 +238,8 @@ fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
 /// - 耐震壁（`Wall`）: 面内せん断の終局強度 Qu
 ///   （[`crate::wall::wall_element::WallElement::wall_shear_capacity_issue`]）
 /// - 線材（`Beam` / `Fiber` / `MultiSpring`）: 曲げ・せん断の終局耐力に要する材料強度
+///
+/// 壁上下の剛梁は弾性剛性・形状・質量に必要な入力だけを検査する。
 ///
 /// 弾性としてモデル化することが仕様である要素（`Shell` / `PanelZone` / `NodalSpring`、
 /// および特性を専用の属性で持つ `Isolator` / `Damper` / `Brace`）は対象外。
@@ -47,7 +261,22 @@ fn nonlinear_input_issues_with_basis(
     basis: super::StrengthBasis,
 ) -> Vec<String> {
     let mut issues = Vec::new();
+    let index = sepika_core::model::WallSideColumnIndex::build(model);
     for elem in &model.elements {
+        if let Some(issue) =
+            wall_side_column_input_issue_with_index(elem, model, Some(kind), &index)
+        {
+            if !issues.contains(&issue) {
+                issues.push(issue);
+            }
+            continue;
+        }
+        if crate::frame::beam::is_elastic_wall_girder(model, elem) {
+            if let Some(issue) = member_strength_issue(elem, model) {
+                issues.push(issue);
+            }
+            continue;
+        }
         if let Some(issue) = super::springs::rc_reference_target_issue(elem, model) {
             issues.push(format!("部材 ID {} のRC梁基準接続: {issue}", elem.id.0));
             continue;
@@ -89,6 +318,9 @@ pub fn rc_beam_reference_input_issue(
     kind: sepika_core::model::AnalysisKind,
     basis: super::StrengthBasis,
 ) -> Option<String> {
+    if crate::frame::beam::is_elastic_wall_girder(model, data) {
+        return None;
+    }
     model.member_rc_beam_reference(data.id)?;
     super::springs::rc_reference_target_issue(data, model)
         .or_else(|| member_strength_issue(data, model))
@@ -182,6 +414,7 @@ fn category_mismatch_issue(
 /// - コンクリート系断面（RC/SRC/CFT）なのに材料の Fc が未設定または 0 以下。
 /// - 断面形状未設定の部材で、材料に正の fy も正の Fc もない。
 pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option<String> {
+    let elastic_wall_girder = crate::frame::beam::is_elastic_wall_girder(model, data);
     let Some(sec) = data.section.and_then(|sid| model.sections.get(sid.index())) else {
         return Some(format!(
             "部材 ID {} に断面が設定されていません。\
@@ -242,20 +475,22 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
                     ));
                 }
             }
-            for top_tension in [false, true] {
-                let steel = rebar.bending_steel(*d, top_tension).tension;
-                if let Err(error) = sepika_core::rc_capacity::rc_rebar_ratios(
-                    *b,
-                    *d,
-                    steel.effective_depth_mm,
-                    steel.area_mm2,
-                    sepika_core::rc_capacity::RcAlphaSection::Rectangular,
-                ) {
-                    return Some(format!(
-                        "部材 ID {} の{}引張時の鉄筋比入力が不正です: {error}",
-                        data.id.0,
-                        if top_tension { "上端" } else { "下端" }
-                    ));
+            if !elastic_wall_girder {
+                for top_tension in [false, true] {
+                    let steel = rebar.bending_steel(*d, top_tension).tension;
+                    if let Err(error) = sepika_core::rc_capacity::rc_rebar_ratios(
+                        *b,
+                        *d,
+                        steel.effective_depth_mm,
+                        steel.area_mm2,
+                        sepika_core::rc_capacity::RcAlphaSection::Rectangular,
+                    ) {
+                        return Some(format!(
+                            "部材 ID {} の{}引張時の鉄筋比入力が不正です: {error}",
+                            data.id.0,
+                            if top_tension { "上端" } else { "下端" }
+                        ));
+                    }
                 }
             }
             if super::hinge_view::resolves_to_concentrated_spring(data, model)
@@ -298,6 +533,9 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
                 ));
             }
             Some(_) => {}
+        }
+        if elastic_wall_girder {
+            return elastic_member_input_issue(data, model);
         }
         let has_rebar = sec.and_then(|s| s.shape.as_ref()).is_some_and(|s| {
             s.beam_rebar().is_some()
@@ -382,6 +620,9 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
         }
         return None;
     }
+    if elastic_wall_girder {
+        return elastic_member_input_issue(data, model);
+    }
     if sec.and_then(|s| s.shape.as_ref()).is_some() {
         if !mat.fy.is_some_and(|fy| fy > 0.0) {
             return Some(format!(
@@ -409,6 +650,25 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
             data.id.0, mat.name
         )),
     }
+}
+
+fn elastic_member_input_issue(data: &ElementData, model: &Model) -> Option<String> {
+    let beam = match crate::frame::beam::BeamElement::try_new(data, model) {
+        Ok(beam) => beam,
+        Err(reason) => {
+            return Some(format!(
+                "部材 ID {} の弾性剛性入力が不正です: {reason}",
+                data.id.0
+            ))
+        }
+    };
+    if let Some(reason) = elastic_young_issue(data, beam.e) {
+        return Some(reason);
+    }
+    model
+        .element_mass_properties(data)
+        .err()
+        .map(|reason| format!("部材 ID {} の質量入力が不正です: {reason}", data.id.0))
 }
 
 #[cfg(test)]
@@ -450,4 +710,24 @@ pub fn ensure_rc_beam_reference_loads(
         }
     }
     Ok(())
+}
+
+/// 断面・材料を解決できる弾性梁のEが正の有限値でなければ部材ID付きの理由を返す。
+/// 構築に必要な他の入力不備は既存の入力診断で扱う。
+pub fn elastic_young_input_issue(data: &ElementData, model: &Model) -> Option<String> {
+    model.element_section(data)?;
+    model.element_material(data)?;
+    let beam = crate::frame::beam::BeamElement::try_new(data, model).ok()?;
+    elastic_young_issue(data, beam.e)
+}
+
+fn elastic_young_issue(data: &ElementData, young_n_mm2: f64) -> Option<String> {
+    if !young_n_mm2.is_finite() || young_n_mm2 <= 0.0 {
+        Some(format!(
+            "部材 ID {} の弾性梁のヤング係数 E は正の有限値が必要です",
+            data.id.0
+        ))
+    } else {
+        None
+    }
 }

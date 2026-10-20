@@ -562,10 +562,17 @@ fn nonlinear_opening_wall_refuses_job_without_publishing_partial_results() {
             app.run_pushover();
         }
         let error = app.core.scoped.last_error.as_ref().unwrap();
-        assert!(
-            error.contains("壁 ID 16") && error.contains("開口壁は未対応"),
-            "{error}"
-        );
+        if time_history {
+            assert!(
+                error.contains("壁 ID [16]") && error.contains("従属回転の慣性"),
+                "{error}"
+            );
+        } else {
+            assert!(
+                error.contains("壁 ID 16") && error.contains("開口壁は未対応"),
+                "{error}"
+            );
+        }
         assert_eq!(
             serde_json::to_vec(&app.core.scoped.results).unwrap(),
             before
@@ -1212,7 +1219,13 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
     let step = &po.steps[point.step as usize];
     assert!((capacity_force.reference_n - 0.2 * expected_weight_n).abs() < 1e-6);
     assert!((capacity_force.external_n - step.load_factor * 0.2 * expected_weight_n).abs() < 1e-6);
-    assert!((capacity_force.wall_n - expected_wall_capacity_n).abs() < 1e-6);
+    let response = po
+        .wall_response_at(po.wall_capacities[0].0, point.step)
+        .unwrap();
+
+    assert!((capacity_force.wall_n - response.qdir_n).abs() < 1e-6);
+    assert!(capacity_force.wall_n > 0.0);
+    assert!(capacity_force.wall_n <= expected_wall_capacity_n + 1e-6);
     assert_eq!(capacity_force.brace_n, 0.0);
     assert!(capacity_force.frame_n > 0.0);
     assert!((s.qu - capacity_force.wall_n - capacity_force.frame_n).abs() < 1e-6);

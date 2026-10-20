@@ -45,6 +45,8 @@ pub struct BeamElement {
     pub committed_disp: [f64; 12],
     /// トライアル変位（グローバル系）。
     pub trial_disp: [f64; 12],
+    pub committed_member_loads: Vec<sepika_core::model::MemberLoad>,
+    pub trial_member_loads: Vec<sepika_core::model::MemberLoad>,
     /// [`Self::local_stiffness`] の結果キャッシュ。
     ///
     /// 剛性を決めるフィールドは構築後に変更されない前提のため、初回呼び出しの結果を使い回してよい。

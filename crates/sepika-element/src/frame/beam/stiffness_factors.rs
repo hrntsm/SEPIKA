@@ -296,6 +296,16 @@ pub fn stiffness_breakdown(
     Ok(breakdown_with(model, data, sec, mat.young, is_horizontal))
 }
 
+/// 壁上下の弾性剛梁として、壁剛性倍率が適用される線材かを返す。
+pub fn is_elastic_wall_girder(model: &Model, data: &sepika_core::model::ElementData) -> bool {
+    matches!(
+        data.kind,
+        sepika_core::model::ElementKind::Beam
+            | sepika_core::model::ElementKind::Fiber
+            | sepika_core::model::ElementKind::MultiSpring
+    ) && stiffness_breakdown(model, data).is_ok_and(|b| b.wall_girder > 1.0)
+}
+
 /// SRC/CFT 等価性能。対象外は `Ok(None)`、材料や断面性能の不正は理由付きエラー。
 pub fn composite_props_of(
     model: &Model,

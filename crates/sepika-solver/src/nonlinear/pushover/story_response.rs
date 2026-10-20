@@ -325,13 +325,7 @@ pub(super) fn record_cuts(
 ) -> Vec<StoryCut> {
     let d = usize::from(dir == SeismicDir::Y);
     let ctx = Ctx { model };
-    let walls: Vec<_> = model
-        .elements
-        .iter()
-        .filter(|e| matches!(e.kind, ElementKind::Wall))
-        .filter_map(|e| sepika_core::model::wall_element_geometry(e, model))
-        .filter(|g| g.ex_bottom[d].abs() > 1e-6)
-        .collect();
+    let index = sepika_core::model::WallSideColumnIndex::build(model);
     model
         .layers()
         .iter()
@@ -381,19 +375,29 @@ pub(super) fn record_cuts(
                     ));
                     continue;
                 }
-                let side_column = nodes.len() == 2
-                    && (nodes[0].coord[0] - nodes[1].coord[0]).abs() < 1e-6
-                    && (nodes[0].coord[1] - nodes[1].coord[1]).abs() < 1e-6
-                    && walls.iter().any(|w| {
-                        let wall_nodes = [w.bottom[0], w.bottom[1], w.top[0], w.top[1]]
-                            .map(|n| &model.nodes[n.index()]);
-                        [0, 1].into_iter().any(|k| {
-                            (nodes[0].coord[0] - wall_nodes[k].coord[0]).abs() < 1e-6
-                                && (nodes[0].coord[1] - wall_nodes[k].coord[1]).abs() < 1e-6
-                                && z > wall_nodes[k].coord[2]
-                                && z < wall_nodes[k + 2].coord[2]
-                        })
-                    });
+                let side_column = match index.replacement_bindings(elem.id) {
+                    Ok(bindings) => bindings.iter().any(|binding| {
+                        model
+                            .element(binding.wall)
+                            .and_then(|wall| sepika_core::model::wall_element_geometry(wall, model))
+                            .is_some_and(|g| g.ex_bottom[d].abs() > 1e-6)
+                    }),
+                    Err(issues) => {
+                        cut.unavailable = Some(
+                            issues
+                                .iter()
+                                .map(|issue| {
+                                    sepika_element::factory::wall_side_column_issue_message(
+                                        issue,
+                                        Some(sepika_core::model::AnalysisKind::Incremental),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        );
+                        continue;
+                    }
+                };
                 let group = if (matches!(elem.kind, ElementKind::Wall)
                     && sepika_core::model::wall_element_geometry(elem, model)
                         .is_some_and(|g| g.ex_bottom[d].abs() > 1e-6))
@@ -405,23 +409,62 @@ pub(super) fn record_cuts(
                 } else {
                     ForceGroup::Frame
                 };
-                let force_n = nodes
-                    .iter()
-                    .filter(|n| n.coord[2] > z)
-                    .map(|n| {
-                        global_dofs
-                            .iter()
-                            .position(|g| {
-                                Some(*g) == dofmap.active(n.id.index() * 6 + d).map(|a| a as usize)
-                            })
-                            .and_then(|k| f.data.get(k))
-                            .copied()
-                    })
-                    .collect::<Option<Vec<_>>>()
-                    .map(|v| v.iter().sum());
-                let Some(force_n) = force_n else {
-                    cut.unavailable = Some("切断要素の内力自由度順が節点と一致しません".into());
-                    continue;
+                let response = if b.owns_frame_member_loads() {
+                    match b.state_frame_load_response() {
+                        Ok(Some(response)) => Some(response),
+                        Ok(None) => {
+                            cut.unavailable = Some("壁側柱の確定応答が欠落しています".into());
+                            continue;
+                        }
+                        Err(reason) => {
+                            cut.unavailable = Some(reason);
+                            continue;
+                        }
+                    }
+                } else {
+                    None
+                };
+                let force_n = if let Some(response) = response {
+                    let pi = nodes[0].coord;
+                    let pj = nodes[1].coord;
+                    let xi = (z - pi[2]) / (pj[2] - pi[2]);
+                    let section = match response.section.at(xi) {
+                        Ok(section) => section,
+                        Err(reason) => {
+                            cut.unavailable = Some(reason);
+                            continue;
+                        }
+                    };
+                    let frame = sepika_element::transform::LocalFrame::from_nodes(
+                        pi,
+                        pj,
+                        elem.local_axis.ref_vector,
+                    );
+                    (pj[2] - pi[2]).signum()
+                        * (section[0] * frame.rot[0][d]
+                            - section[1] * frame.rot[1][d]
+                            - section[2] * frame.rot[2][d])
+                } else {
+                    let force_n = nodes
+                        .iter()
+                        .filter(|n| n.coord[2] > z)
+                        .map(|n| {
+                            global_dofs
+                                .iter()
+                                .position(|g| {
+                                    Some(*g)
+                                        == dofmap.active(n.id.index() * 6 + d).map(|a| a as usize)
+                                })
+                                .and_then(|k| f.data.get(k))
+                                .copied()
+                        })
+                        .collect::<Option<Vec<_>>>()
+                        .map(|v| v.iter().sum());
+                    let Some(force_n) = force_n else {
+                        cut.unavailable = Some("切断要素の内力自由度順が節点と一致しません".into());
+                        continue;
+                    };
+                    force_n
                 };
                 cut.forces.push(CutForce {
                     elem: elem.id,
@@ -781,7 +824,7 @@ mod tests {
             recorder.reference_external[map.active(6).unwrap() as usize] = 100_000.0;
             recorder.reference_external[map.active(12).unwrap() as usize] = 50_000.0;
             recorder.constant_external = vec![0.0; map.n_active()];
-            recorder.record(1.0, &m, &map, &behaviors, &disp);
+            recorder.record(1.0, &m, &map, &behaviors, &disp).unwrap();
             let recorded = recorder.finish();
             let cuts = &recorded.confirmed_history[0].cuts;
             assert_eq!(cuts[0].reference_n, 150_000.0);
@@ -796,16 +839,12 @@ mod tests {
     fn 開口を持つ隣接壁の共有側柱を壁系へ一度だけ計上する() {
         use sepika_core::ids::NodeId;
         let mut m = super::super::tests::wall_story_model_with(4000.0, 100_000.0);
+        m.sections[1].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
         m.elements.retain(|e| [0, 3, 4].contains(&e.id.0));
         for n in &mut m.nodes {
             n.restraint = sepika_core::dof::Dof6Mask::FREE;
         }
-        for (source, id, x) in [
-            (1, 4, 8000.0),
-            (2, 5, 8000.0),
-            (0, 6, 12000.0),
-            (3, 7, 12000.0),
-        ] {
+        for (source, id, x) in [(1, 4, 8000.0), (2, 5, 8000.0), (0, 6, 0.0), (3, 7, 0.0)] {
             let mut n = m.nodes[source].clone();
             n.id = NodeId(id);
             n.coord[0] = x;
@@ -823,6 +862,18 @@ mod tests {
         column.id = ElemId(7);
         column.nodes = smallvec::smallvec![NodeId(6), NodeId(7)];
         m.elements.push(column);
+        let mut girder_section = m.sections[1].clone();
+        girder_section.id = sepika_core::ids::SectionId(2);
+        girder_section.shape = None;
+        girder_section.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+        m.sections.push(girder_section);
+        for (id, pair) in [(8, [0, 1]), (9, [3, 2]), (10, [1, 4]), (11, [2, 5])] {
+            let mut girder = m.elements[1].clone();
+            girder.id = ElemId(id);
+            girder.section = Some(sepika_core::ids::SectionId(2));
+            girder.nodes = pair.map(NodeId).into_iter().collect();
+            m.elements.push(girder);
+        }
         // 開口低減後の実内力を指定する。低減係数を切断力へ再適用しない。
         m.wall_attrs.push(sepika_core::model::WallAttr {
             elem: ElemId(5),
@@ -836,51 +887,88 @@ mod tests {
             }],
             finish_intensity: 0.0,
         });
-        let totals = [40.0, 5.0, 10.0, 30.0, 5.0, 60.0];
-        for dir in [SeismicDir::X, SeismicDir::Y] {
+        let totals = [40.0, 5.0, 10.0, 30.0, 5.0, 60.0, 0.0, 0.0, 0.0, 0.0];
+        for (kind, steel) in [
+            (ElementKind::Beam, false),
+            (ElementKind::Fiber, false),
+            (ElementKind::MultiSpring, false),
+            (ElementKind::Beam, true),
+            (ElementKind::Fiber, true),
+            (ElementKind::MultiSpring, true),
+        ] {
             let mut m = m.clone();
-            if dir == SeismicDir::Y {
-                for n in &mut m.nodes {
-                    n.coord.swap(0, 1);
-                }
+            for frame in m
+                .elements
+                .iter_mut()
+                .filter(|e| e.kind.is_primary_frame_support())
+            {
+                frame.kind = kind;
             }
-            for sign in [1.0, -1.0] {
-                let d = usize::from(dir == SeismicDir::Y);
-                let behaviors: Vec<Box<dyn ElementBehavior>> = m
-                    .elements
-                    .iter()
-                    .zip(totals)
-                    .map(|(e, q)| {
-                        let mut forces = vec![0.0; e.nodes.len() * 6];
-                        let upper = e
-                            .nodes
-                            .iter()
-                            .filter(|n| m.nodes[n.index()].coord[2] > 1500.0)
-                            .count();
-                        for (k, n) in e.nodes.iter().enumerate() {
-                            forces[k * 6 + d] = sign * q / upper as f64
-                                * if m.nodes[n.index()].coord[2] > 1500.0 {
-                                    1.0
-                                } else {
-                                    -1.0
-                                };
-                        }
-                        Box::new(Prescribed {
-                            nodes: e.nodes.to_vec(),
-                            forces,
-                        }) as Box<dyn ElementBehavior>
-                    })
-                    .collect();
-                let mut c = record_cuts(&m, &sepika_core::dof::DofMap::build(&m), &behaviors, dir)
+            if steel {
+                m.materials[0].category = sepika_core::model::MaterialCategory::Steel;
+                m.materials[0].fy = Some(235.0);
+                m.sections[0].shape = None;
+                m.sections[0].thickness = Some(9.0);
+                m.sections[1].shape = None;
+            }
+            for dir in [SeismicDir::X, SeismicDir::Y] {
+                let mut m = m.clone();
+                if dir == SeismicDir::Y {
+                    for n in &mut m.nodes {
+                        n.coord.swap(0, 1);
+                    }
+                }
+                for sign in [1.0, -1.0] {
+                    let d = usize::from(dir == SeismicDir::Y);
+                    let behaviors: Vec<Box<dyn ElementBehavior>> = m
+                        .elements
+                        .iter()
+                        .zip(totals)
+                        .map(|(e, q)| {
+                            let mut forces = vec![0.0; e.nodes.len() * 6];
+                            let upper = e
+                                .nodes
+                                .iter()
+                                .filter(|n| m.nodes[n.index()].coord[2] > 1500.0)
+                                .count();
+                            for (k, n) in e.nodes.iter().enumerate() {
+                                forces[k * 6 + d] = sign * q / upper.max(1) as f64
+                                    * if m.nodes[n.index()].coord[2] > 1500.0 {
+                                        1.0
+                                    } else {
+                                        -1.0
+                                    };
+                            }
+                            Box::new(Prescribed {
+                                nodes: e.nodes.to_vec(),
+                                forces,
+                            }) as Box<dyn ElementBehavior>
+                        })
+                        .collect();
+                    let mut c =
+                        record_cuts(&m, &sepika_core::dof::DofMap::build(&m), &behaviors, dir)
+                            .remove(0);
+                    c.external_n = sign * 150.0;
+                    c.reference_n = sign * 150.0;
+                    c.tolerance_n = 1e-6;
+                    let v = c.evaluate().unwrap();
+                    assert_eq!(v.wall_n, sign * if steel { 70.0 } else { 90.0 });
+                    assert_eq!(v.frame_n, sign * if steel { 80.0 } else { 60.0 });
+                    assert_eq!(v.beta_u, if steel { 70.0 / 150.0 } else { 0.6 });
+                    assert_eq!(c.forces.iter().filter(|f| f.elem == ElemId(4)).count(), 1);
+                    let mut invalid = m.clone();
+                    invalid.sections[1].frame_use = None;
+                    let cut = record_cuts(
+                        &invalid,
+                        &sepika_core::dof::DofMap::build(&invalid),
+                        &behaviors,
+                        dir,
+                    )
                     .remove(0);
-                c.external_n = sign * 150.0;
-                c.reference_n = sign * 150.0;
-                c.tolerance_n = 1e-6;
-                let v = c.evaluate().unwrap();
-                assert_eq!(v.wall_n, sign * 90.0);
-                assert_eq!(v.frame_n, sign * 60.0);
-                assert_eq!(v.beta_u, 0.6);
-                assert_eq!(c.forces.iter().filter(|f| f.elem == ElemId(4)).count(), 1);
+                    let reason = cut.unavailable.unwrap();
+                    assert!(reason.contains("側柱には柱用断面が必要"), "{reason}");
+                    assert!(reason.contains("増分解析"), "{reason}");
+                }
             }
         }
     }

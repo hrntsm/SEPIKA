@@ -167,6 +167,17 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     }
     let unresolved_start = issues.len();
     for elem in &model.elements {
+        if elem.kind.is_primary_frame_support() {
+            if let Some(reason) = sepika_element::factory::elastic_young_input_issue(elem, model) {
+                issues.push(ModelIssue {
+                    severity: IssueSeverity::Error,
+                    message: reason.clone(),
+                    short: reason,
+                    targets: IssueTargets::Members(vec![elem.id]),
+                });
+                continue;
+            }
+        }
         if let Some(section) = model.element_section(elem) {
             if let Err(reason) = section.ensure_properties_resolved() {
                 issues.push(ModelIssue::members(
@@ -676,6 +687,15 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         );
     }
 
+    if let Err(reason) = sepika_element::factory::ensure_wall_side_column_analysis(
+        model,
+        None,
+        "線形解析",
+        false,
+        None,
+    ) {
+        issues.push(ModelIssue::model(reason));
+    }
     let side_edges = sepika_element::wall::side_column::SideColumnEdges::build(model);
     let undefined_side_shapes = model
         .elements

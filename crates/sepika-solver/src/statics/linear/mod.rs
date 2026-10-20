@@ -1,6 +1,10 @@
-use crate::common::assemble::{add_support_spring_diag, assemble_global_f, support_spring_terms};
+use crate::common::assemble::{add_support_spring_diag, support_spring_terms};
 use crate::common::constraint::Reducer;
 use crate::common::csc_cache::CscCache;
+use crate::common::linear_load::{
+    assemble_linear_rhs, element_error, legacy_member_force, loaded_response, validate_entries,
+    PhysicalLoadLedger,
+};
 use sepika_core::dof::DofMap;
 use sepika_core::ids::{ElemId, LoadCaseId};
 use sepika_core::model::{
@@ -83,7 +87,7 @@ impl StaticStiffness {
                     .tangent_stiffness(&Ctx { model })
                     .to_triplets(&gdofs),
             );
-            behaviors.push((behavior, gdofs));
+            behaviors.push((elem.id, behavior, gdofs));
         }
         add_support_spring_diag(model, dofmap, &mut triplets);
         let k_free = assemble_csc(dofmap.n_active(), triplets);
@@ -169,6 +173,8 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
 /// 不存在の荷重ケース ID は、拘束状態・解析経路に関係なく ID を含む `SolveError::InvalidInput` を返す。
 /// 全ケースの不正な部材荷重方向は、強度・拘束状態によらず `SolveError::InvalidInput` を返す。
 pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, SolveError> {
+    sepika_element::factory::ensure_wall_side_column_analysis(model, None, "線形解析", false, None)
+        .map_err(SolveError::InvalidInput)?;
     model
         .validate_member_load_directions()
         .map_err(SolveError::InvalidInput)?;
@@ -189,16 +195,23 @@ pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, S
         .iter()
         .find(|c| c.id == lc)
         .ok_or_else(|| SolveError::InvalidInput(format!("荷重ケース {} が存在しません", lc.0)))?;
+    for elem in model
+        .elements
+        .iter()
+        .filter(|elem| elem.kind.is_primary_frame_support())
+    {
+        if let Some(reason) = sepika_element::factory::elastic_young_input_issue(elem, model) {
+            return Err(SolveError::InvalidInput(reason));
+        }
+    }
     sepika_math::parallelism::apply_to_faer();
     let dofmap = DofMap::build(model);
     let reducer = Reducer::build(model, &dofmap);
-    let f_free = assemble_global_f(model, &dofmap, lc);
     solve_static_case(
         model,
         &dofmap,
         &reducer,
         load_case,
-        &f_free,
         None,
         TENSION_ONLY_MAX_ITER,
     )
@@ -209,39 +222,45 @@ pub(crate) fn solve_static_case(
     dofmap: &DofMap,
     reducer: &Reducer,
     load_case: &LoadCase,
-    f_free: &[f64],
     fixed: Option<(&dyn LinearSolver, &[crate::statics::BehaviorEntry])>,
     max_iter: usize,
 ) -> Result<StaticOnce, SolveError> {
-    if reducer.n_indep == 0 {
-        return Ok(StaticOnce {
-            disp: vec![[0.0; 6]; model.nodes.len()],
-            member_forces: Vec::new(),
-            panel_moments: Vec::new(),
-        });
-    }
-    if model.stress_cfg.tension_only_iteration && has_tension_only_brace(model) {
-        return solve_tension_only_iterative(model, dofmap, reducer, load_case, f_free, max_iter);
+    let physical = PhysicalLoadLedger::new(model, load_case)?;
+    if reducer.n_indep > 0
+        && model.stress_cfg.tension_only_iteration
+        && has_tension_only_brace(model)
+    {
+        return solve_tension_only_iterative(
+            model, dofmap, reducer, load_case, &physical, max_iter,
+        );
     }
     let owned;
     let (solver, behaviors) = match fixed {
         Some(fixed) => fixed,
         None => {
-            owned = StaticStiffness::build(model, dofmap, reducer, load_case.kind)?;
+            owned = StaticStiffness::build(model, dofmap, reducer, physical.source.kind)?;
             (owned.solver.as_ref(), owned.behaviors.as_slice())
         }
     };
-    let u_indep = solver.solve(&reducer.reduce_f(f_free))?;
-    let u_free = reducer.expand_u(&u_indep);
-    recover_static(
-        model,
-        dofmap,
-        &u_free,
-        &load_case.member,
-        behaviors
-            .iter()
-            .map(|(behavior, gdofs)| (behavior.as_ref(), gdofs)),
-    )
+    let entries: Vec<_> = behaviors
+        .iter()
+        .map(|(id, behavior, gdofs)| (*id, behavior.as_ref(), gdofs.as_slice()))
+        .collect();
+    validate_entries(model, dofmap, &entries)?;
+    if reducer.n_indep == 0 && !entries.iter().any(|(_, b, _)| b.owns_frame_member_loads()) {
+        return Ok(StaticOnce {
+            disp: vec![[0.0; 6]; model.nodes.len()],
+            member_forces: vec![],
+            panel_moments: vec![],
+        });
+    }
+    let rhs = assemble_linear_rhs(model, dofmap, &physical, &entries)?;
+    let u_free = if reducer.n_indep == 0 {
+        vec![0.0; dofmap.n_active()]
+    } else {
+        reducer.expand_u(&solver.solve(&reducer.reduce_f(&rhs))?)
+    };
+    recover_static(model, dofmap, &u_free, &physical, &entries).map(|(result, _)| result)
 }
 
 /// 引張専用ブレースの active-set 反復の最大回数。
@@ -274,7 +293,7 @@ fn solve_tension_only_iterative(
     dofmap: &DofMap,
     reducer: &Reducer,
     load_case: &LoadCase,
-    f_free: &[f64],
+    physical: &PhysicalLoadLedger<'_>,
     max_iter: usize,
 ) -> Result<StaticOnce, SolveError> {
     let mut braces: Vec<ToBrace> = Vec::new();
@@ -305,7 +324,6 @@ fn solve_tension_only_iterative(
 
     let n_active = dofmap.n_active();
     let assembly = BraceIterAssembly::build(model, dofmap, &braces, load_case.kind);
-    let f_red = reducer.reduce_f(f_free);
     let mut k_free_cache = CscCache::new();
     let mut k_red_cache = CscCache::new();
     let mut solver = make_solver(SolverBackend::DirectSparseCholesky);
@@ -314,6 +332,19 @@ fn solve_tension_only_iterative(
 
     for _ in 0..max_iter {
         let active_used = active.clone();
+        let entries: Vec<_> = assembly
+            .gdofs
+            .iter()
+            .enumerate()
+            .map(|(i, gdofs)| {
+                (
+                    model.elements[i].id,
+                    assembly.behavior_for(i, &active_used),
+                    gdofs.as_slice(),
+                )
+            })
+            .collect();
+        let f_red = reducer.reduce_f(&assemble_linear_rhs(model, dofmap, physical, &entries)?);
         let triplets = assembly.triplets(&active_used);
         let k_free = k_free_cache.assemble(n_active, &triplets);
         let k_red = reducer.reduce_k_cached(&k_free, &mut k_red_cache);
@@ -342,17 +373,8 @@ fn solve_tension_only_iterative(
             .collect();
 
         if new_active == active_used {
-            return recover_static(
-                model,
-                dofmap,
-                &u_free,
-                &load_case.member,
-                assembly
-                    .gdofs
-                    .iter()
-                    .enumerate()
-                    .map(|(i, gdofs)| (assembly.behavior_for(i, &active_used), gdofs)),
-            );
+            return recover_static(model, dofmap, &u_free, physical, &entries)
+                .map(|(result, _)| result);
         }
         active = new_active;
     }
@@ -471,36 +493,85 @@ impl BraceIterAssembly {
     }
 }
 
-fn recover_static<'a>(
+fn recover_static(
     model: &Model,
     dofmap: &DofMap,
     u_free: &[f64],
-    member_loads: &[MemberLoad],
-    behaviors: impl Iterator<Item = (&'a dyn ElementBehavior, &'a smallvec::SmallVec<[usize; 24]>)>,
-) -> Result<StaticOnce, SolveError> {
-    let member_loads_by_elem = group_member_loads_by_elem(member_loads);
+    physical: &PhysicalLoadLedger<'_>,
+    entries: &[(ElemId, &dyn ElementBehavior, &[usize])],
+) -> Result<(StaticOnce, Vec<[f64; 6]>), SolveError> {
+    validate_entries(model, dofmap, entries)?;
+    let full = dofmap.including_restrained_node_dofs();
+    let mut reactions: Vec<_> = physical
+        .nodal
+        .iter()
+        .map(|values| values.map(|v| -v))
+        .collect();
     let mut member_forces = Vec::new();
     let mut panel_moments = Vec::new();
-    for (elem, (behavior, gdofs)) in model.elements.iter().zip(behaviors) {
+    for (elem, &(_, behavior, gdofs)) in model.elements.iter().zip(entries) {
         let u_elem = crate::common::elem_loop::gather_u_elem(gdofs, u_free);
-        if let Some(mut forces) = behavior.recover_forces(&u_elem) {
-            let loads = member_loads_by_elem
-                .get(&elem.id)
-                .map(Vec::as_slice)
-                .unwrap_or(&[]);
-            superpose_member_loads(model, elem, loads, &mut forces);
+        let loads = physical.member_loads(elem.id);
+        if behavior.owns_frame_member_loads() {
+            let response = loaded_response(elem, behavior, &u_elem, loads)?;
+            let positions = behavior
+                .recover_forces(&u_elem)
+                .ok_or_else(|| element_error(elem.id, "部材内力の評価位置がありません"))?
+                .at
+                .iter()
+                .map(|(xi, _)| *xi)
+                .collect::<Vec<_>>();
+            let forces = response
+                .section
+                .recover(&positions)
+                .map_err(|reason| element_error(elem.id, reason))?;
             member_forces.push((elem.id, forces));
+            for (i, node) in elem.nodes.iter().enumerate() {
+                for d in 0..6 {
+                    reactions[node.index()][d] +=
+                        response.physical_frame_end_force_global[i * 6 + d];
+                }
+            }
+        } else {
+            if let Some(mut forces) = behavior.recover_forces(&u_elem) {
+                superpose_member_loads(model, elem, loads, &mut forces);
+                member_forces.push((elem.id, forces));
+            }
+            let k = behavior.tangent_stiffness(&Ctx { model });
+            let physical_gdofs = behavior.global_dofs(&full);
+            for (i, &a) in physical_gdofs.iter().enumerate() {
+                if a == usize::MAX {
+                    continue;
+                }
+                let g = full.global(a as u32);
+                if full.is_node_dof(g) {
+                    reactions[g / 6][g % 6] += u_elem
+                        .iter()
+                        .enumerate()
+                        .map(|(j, u)| k.get(i, j) * u)
+                        .sum::<f64>();
+                }
+            }
+            let equivalent = legacy_member_force(model, elem, loads);
+            for (i, node) in elem.nodes.iter().take(2).enumerate() {
+                for d in 0..6 {
+                    reactions[node.index()][d] -= equivalent[i * 6 + d];
+                }
+            }
         }
         if let (Some(&node), Some(m)) = (elem.nodes.first(), behavior.panel_moments_from(&u_elem)) {
             panel_moments.push((node, m));
         }
     }
     ensure_line_member_forces(model, &member_forces)?;
-    Ok(StaticOnce {
-        disp: dofmap.expand_to_nodes(u_free, model.nodes.len()),
-        member_forces,
-        panel_moments,
-    })
+    Ok((
+        StaticOnce {
+            disp: dofmap.expand_to_nodes(u_free, model.nodes.len()),
+            member_forces,
+            panel_moments,
+        },
+        reactions,
+    ))
 }
 
 /// 内力回収の欠落検出（線材）。
@@ -551,24 +622,9 @@ pub(crate) fn ensure_line_member_forces(
     )))
 }
 
-/// 部材荷重を要素 ID でグルーピングする（内力回収の重ね合わせ用）。
-/// 呼び出し側で1回だけ本関数を呼んでグルーピングし、
-/// [`superpose_member_loads`] へ要素分の荷重だけを渡す。
-/// 各要素内の荷重順序は `member_loads` 内の元の出現順のまま保たれる。
-pub(crate) fn group_member_loads_by_elem(
-    member_loads: &[MemberLoad],
-) -> HashMap<ElemId, Vec<MemberLoad>> {
-    let mut by_elem: HashMap<ElemId, Vec<MemberLoad>> = HashMap::new();
-    for ml in member_loads {
-        by_elem.entry(ml.elem).or_default().push(ml.clone());
-    }
-    by_elem
-}
-
 /// 部材荷重の固定端内力を、`K·u` 由来の回復内力へ各断面で重ね合わせる。
 /// 線形重ね合わせ: 実内力 = （等価節点力に対する応答 K·u）＋（両端固定梁のスパン内力）。
-/// `loads` は当該要素に作用する部材荷重のみ（[`group_member_loads_by_elem`] で
-/// 事前にグルーピングした結果から呼び出し側が取り出して渡す）。
+/// `loads` は当該要素に作用する部材荷重のみを、元の出現順で与える。
 pub(crate) fn superpose_member_loads(
     model: &Model,
     elem: &sepika_core::model::ElementData,

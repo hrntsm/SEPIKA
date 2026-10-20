@@ -6,6 +6,7 @@
 //! - [`member_end_forces_at_face`] — 材端力を局所座標・剛域フェイス位置へ変換
 
 use sepika_core::model::{ElementData, Model};
+use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse, LocalVec};
 use sepika_element::transform::LocalFrame;
 
 pub(crate) use sepika_core::geom::vec3::dot as dot3;
@@ -63,4 +64,37 @@ pub(crate) fn member_end_forces_at_face(
     Some(sepika_element::frame::rigid_arm::to_flex_force(
         &local, li, lj,
     ))
+}
+
+/// 増分解析の記録用に同一試行状態の荷重応答を取得する。所有要素の欠落・不正応答はエラー。
+pub(crate) fn member_recording_responses(
+    model: &Model,
+    behaviors: &[Box<dyn ElementBehavior>],
+) -> Result<Vec<Option<LoadedFrameResponse>>, String> {
+    crate::common::member_recording::member_recording_responses(model, behaviors, "増分解析")
+}
+
+pub(crate) fn recording_force(
+    behavior: &dyn ElementBehavior,
+    response: Option<&LoadedFrameResponse>,
+    ctx: &Ctx,
+) -> LocalVec {
+    match response {
+        Some(response) => LocalVec {
+            data: response.physical_frame_end_force_global.as_slice().into(),
+        },
+        None => behavior.internal_force(ctx),
+    }
+}
+
+pub(crate) fn recording_face_force(
+    model: &Model,
+    elem: &ElementData,
+    force: &[f64],
+    response: Option<&LoadedFrameResponse>,
+) -> Option<[f64; 12]> {
+    match response {
+        Some(response) => Some(response.flex_face_force_local),
+        None => member_end_forces_at_face(model, elem, force),
+    }
 }

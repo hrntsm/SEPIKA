@@ -558,7 +558,7 @@ fn test_shell_trial_displacement_tracking() {
     };
     du.data[2 * 6] = 1.0;
     du.data[3 * 6] = 1.0;
-    shell.update_state(&du, false, &ctx);
+    shell.update_state(&du, false, &ctx).unwrap();
 
     // commit 前でも内力へ反映され、接線剛性·u と厳密に一致する
     let f = shell.internal_force(&ctx);
@@ -584,7 +584,7 @@ fn test_shell_trial_displacement_tracking() {
     for n in 0..4 {
         du_rigid.data[n * 6] = 1.0;
     }
-    shell.update_state(&du_rigid, false, &ctx);
+    shell.update_state(&du_rigid, false, &ctx).unwrap();
     let f_rigid = shell.internal_force(&ctx);
     assert!(
         f_rigid.data.iter().all(|v| v.abs() < 1e-6),
