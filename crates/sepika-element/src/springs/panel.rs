@@ -347,7 +347,13 @@ impl ElementBehavior for PanelZone {
         f
     }
 
-    fn update_state(&mut self, du: &LocalVec, commit: bool, _ctx: &Ctx) {
+    fn update_state(
+        &mut self,
+        du: &LocalVec,
+        commit: bool,
+        _ctx: &Ctx,
+    ) -> Result<(), crate::behavior::ElementUpdateError> {
+        crate::behavior::validate_trial_increment(du, self.n_dof())?;
         for i in 0..2 {
             if let Some(&d) = du.data.get(i) {
                 self.trial_disp[i] += d;
@@ -369,6 +375,7 @@ impl ElementBehavior for PanelZone {
         if commit {
             self.commit_state();
         }
+        Ok(())
     }
 
     fn commit_state(&mut self) {
@@ -851,7 +858,7 @@ mod tests {
             data: SmallVec::from_elem(0.0, 2),
         };
         du.data[0] = 1.0e-4;
-        pz.update_state(&du, false, &ctx);
+        pz.update_state(&du, false, &ctx).unwrap();
 
         let f = pz.internal_force(&ctx);
         assert!((f.data[0] - k * 1.0e-4).abs() / (k * 1.0e-4) < 1e-12);
@@ -892,7 +899,7 @@ mod tests {
             data: SmallVec::from_elem(0.0, pz.n_dof()),
         };
         du.data[0] = gamma_y * 0.5;
-        pz.update_state(&du, true, &ctx);
+        pz.update_state(&du, true, &ctx).unwrap();
         let k = pz.tangent_stiffness(&ctx);
         assert!((k.get(0, 0) - pz.g * pz.ve).abs() / (pz.g * pz.ve) < 1e-9);
 
@@ -900,7 +907,7 @@ mod tests {
             data: SmallVec::from_elem(0.0, pz.n_dof()),
         };
         du2.data[0] = gamma_y * 2.0;
-        pz.update_state(&du2, false, &ctx);
+        pz.update_state(&du2, false, &ctx).unwrap();
         let k2 = pz.tangent_stiffness(&ctx);
         let k_expected = PANEL_HARDENING * pz.g * pz.ve;
         assert!(
@@ -957,7 +964,7 @@ mod tests {
             data: SmallVec::from_elem(0.0, pz.n_dof()),
         };
         du.data[2 + 6 + 2] = -1.0;
-        pz.update_state(&du, true, &ctx);
+        pz.update_state(&du, true, &ctx).unwrap();
 
         let n = pz.axial_ratio();
         assert!(n > 0.0, "圧縮軸力で n > 0 になるはず: n={n}");
@@ -981,7 +988,7 @@ mod tests {
             data: SmallVec::from_elem(0.0, pz.n_dof()),
         };
         du.data[2 + 6 + 2] = 1.0;
-        pz.update_state(&du, true, &ctx);
+        pz.update_state(&du, true, &ctx).unwrap();
         assert_eq!(pz.axial_ratio(), 0.0);
         assert!((pz.yield_moment() - pz.pmy0).abs() / pz.pmy0 < 1e-12);
     }

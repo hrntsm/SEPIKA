@@ -1517,6 +1517,20 @@ fn steel_portal_holding_capacity_and_imported_rc_ultimate_checks() {
     app.run_pushover();
     assert_no_error(&app, "増分解析");
     let selected_step = select_holding_points(&mut app);
+    let po = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .pushover
+        .as_ref()
+        .unwrap();
+    assert_eq!(po.capacity_curve.last().unwrap().step, selected_step);
+    println!(
+        "holding terminal step={selected_step}, termination={:?}",
+        po.termination
+    );
 
     let (holding, ranks) = app
         .compute_holding_capacity()
@@ -1619,6 +1633,15 @@ fn pushover_reaches_ultimate_state() {
         push.qu
     );
 
+    assert_eq!(
+        push.termination,
+        sepika_solver::nonlinear::pushover::PushoverTermination::TargetReached
+    );
+    let run = push.wall_run.as_ref().unwrap();
+    assert!(run.gravity_applied);
+    assert!(!run.gravity_terms.is_empty());
+    assert_eq!(push.steps[0].load_factor, 0.0);
+    println!("PO termination={:?}, terminal_step={}, gravity_applied={}, gravity_terms={:?}, gravity_load_factor={}", push.termination, push.capacity_curve.last().unwrap().step, run.gravity_applied, run.gravity_terms, push.steps[0].load_factor);
     insta::assert_snapshot!(
         "four_story_steel_portal_pushover",
         format!(
@@ -1801,6 +1824,18 @@ fn time_history_nonlinear_runs() {
         .time_history
         .as_ref()
         .expect("時刻歴の結果");
+    assert_eq!(
+        th.non_converged_steps, 0,
+        "既存鋼門型の全時刻ステップが収束する"
+    );
+    assert!(th.applied_long_term);
+    println!(
+        "TH non_converged_steps={}, gravity_applied={}, frames={}, peak_ux={:.16e}",
+        th.non_converged_steps,
+        th.applied_long_term,
+        th.time.len(),
+        th.peak_disp.iter().map(|d| d[0].abs()).fold(0.0, f64::max)
+    );
     insta::assert_snapshot!(
         "steel_portal_nonlinear_time_history",
         format!(

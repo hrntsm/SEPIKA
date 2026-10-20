@@ -33,6 +33,8 @@ fn make_test_beam() -> crate::frame::beam::BeamElement {
         material: None,
         committed_disp: [0.0; 12],
         trial_disp: [0.0; 12],
+        committed_member_loads: Vec::new(),
+        trial_member_loads: Vec::new(),
         local_stiffness_cache: std::sync::OnceLock::new(),
     }
 }
@@ -69,7 +71,7 @@ fn test_internal_force_no_double_count() {
     let du = LocalVec {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, -0.001],
     };
-    elem.update_state(&du, true, &ctx);
+    elem.update_state(&du, true, &ctx).unwrap();
     let k = elem.tangent_stiffness(&ctx);
     let f = elem.internal_force(&ctx);
     let mut k_u = [0.0; 12];
@@ -97,7 +99,7 @@ fn test_dof_only_rz() {
     let du = LocalVec {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     };
-    elem.update_state(&du, true, &ctx);
+    elem.update_state(&du, true, &ctx).unwrap();
     let f = elem.internal_force(&ctx);
     assert!(f.data[3].abs() < 1.0, "rx_i should not have spring moment");
     assert!(f.data[4].abs() < 1.0, "ry_i should not have spring moment");
@@ -146,7 +148,7 @@ fn test_spring_yield() {
 
     let k_elastic = elem.tangent_stiffness(&ctx);
 
-    elem.update_state(&du_large, true, &ctx);
+    elem.update_state(&du_large, true, &ctx).unwrap();
     let k_yielded = elem.tangent_stiffness(&ctx);
 
     let k55_elastic = k_elastic.get(5, 5);
@@ -169,7 +171,7 @@ fn test_commit_revert() {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     };
 
-    elem.update_state(&du, false, &ctx);
+    elem.update_state(&du, false, &ctx).unwrap();
     let g1 = elem.trial_rot_i;
     assert!(g1 > 0.0 && g1 < 0.001, "γ は節点回転の一部: {g1}");
     assert_relative_eq!(elem.trial_rot_i + elem.trial_thb_i, 0.001, epsilon = 1e-9);
@@ -178,7 +180,7 @@ fn test_commit_revert() {
     assert_relative_eq!(elem.trial_rot_i, 0.0, epsilon = 1e-12);
     assert_relative_eq!(elem.rot_i, 0.0, epsilon = 1e-12);
 
-    elem.update_state(&du, false, &ctx);
+    elem.update_state(&du, false, &ctx).unwrap();
     elem.commit_state();
     assert_relative_eq!(elem.trial_rot_i, g1, epsilon = 1e-12);
     assert_relative_eq!(elem.rot_i, g1, epsilon = 1e-12);
@@ -186,7 +188,7 @@ fn test_commit_revert() {
     let du2 = LocalVec {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, 0.002, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     };
-    elem.update_state(&du2, false, &ctx);
+    elem.update_state(&du2, false, &ctx).unwrap();
     assert_relative_eq!(elem.trial_rot_i + elem.trial_thb_i, 0.003, epsilon = 1e-9);
     assert!(elem.trial_rot_i > g1, "節点回転の増加でばね変形も増える");
     elem.revert_state();
@@ -204,7 +206,7 @@ fn test_snapshot_restore() {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     };
 
-    elem.update_state(&du, true, &ctx);
+    elem.update_state(&du, true, &ctx).unwrap();
     let g1 = elem.rot_i;
     assert!(g1 > 0.0, "コミット済みばね変形が非零");
     let snap = elem.snapshot_state();
@@ -212,7 +214,7 @@ fn test_snapshot_restore() {
     let du2 = LocalVec {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, 0.002, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     };
-    elem.update_state(&du2, false, &ctx);
+    elem.update_state(&du2, false, &ctx).unwrap();
     assert!(elem.trial_rot_i > g1, "トライアルばね変形が進む");
 
     elem.restore_state(&*snap);
@@ -253,7 +255,8 @@ fn test_consistent_mass_uses_initial_end_spring_stiffness_after_yield() {
         },
         false,
         &ctx,
-    );
+    )
+    .unwrap();
     assert!(elem.spring_i.probe(elem.trial_rot_i).1 < 1.0e12);
     let after = elem.mass_matrix(MassOption::Consistent);
     assert_eq!(before.data, after.data);
@@ -328,7 +331,7 @@ fn test_concentrated_spring_checkpoint_roundtrip() {
     let du = LocalVec {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, -0.0005],
     };
-    elem.update_state(&du, true, &ctx);
+    elem.update_state(&du, true, &ctx).unwrap();
 
     let snap_before = elem.snapshot_state();
     let checkpoint = elem.serialize_checkpoint();
@@ -380,14 +383,14 @@ fn test_mn_interaction_reduces_spring_yield() {
     let du = LocalVec {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0],
     };
-    elem.update_state(&du, false, &ctx);
+    elem.update_state(&du, false, &ctx).unwrap();
     assert_relative_eq!(spring_fy(&*elem.spring_i), 0.5 * my0, max_relative = 1e-9);
     assert_relative_eq!(spring_fy(&*elem.spring_j), 0.5 * my0, max_relative = 1e-9);
 
     let du_t = LocalVec {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0],
     };
-    elem.update_state(&du_t, false, &ctx);
+    elem.update_state(&du_t, false, &ctx).unwrap();
     assert_relative_eq!(spring_fy(&*elem.spring_i), my0, max_relative = 1e-9);
 
     let elastic_t = make_test_beam();
@@ -395,7 +398,7 @@ fn test_mn_interaction_reduces_spring_yield() {
     let spring_tj = Box::new(Bilinear::new(1.0e12, my0, 0.01));
     let mut elem_t = ConcentratedSpringBeam::new_one_component(elastic_t, spring_ti, spring_tj)
         .with_mn_interaction(my0, n_allow);
-    elem_t.update_state(&du_t, false, &ctx);
+    elem_t.update_state(&du_t, false, &ctx).unwrap();
     assert_relative_eq!(spring_fy(&*elem_t.spring_i), 0.5 * my0, max_relative = 1e-9);
 }
 
@@ -412,7 +415,7 @@ fn test_mn_interaction_disabled_keeps_yield() {
     let du = LocalVec {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0],
     };
-    elem.update_state(&du, false, &ctx);
+    elem.update_state(&du, false, &ctx).unwrap();
     assert_relative_eq!(spring_fy(&*elem.spring_i), my0, max_relative = 1e-12);
 }
 
@@ -431,7 +434,7 @@ fn test_mn_interaction_floor_at_high_axial() {
     let du = LocalVec {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -3.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     };
-    elem.update_state(&du, false, &ctx);
+    elem.update_state(&du, false, &ctx).unwrap();
     assert_relative_eq!(spring_fy(&*elem.spring_i), 0.02 * my0, max_relative = 1e-9);
 }
 
@@ -450,7 +453,7 @@ fn test_mn_interaction_yield_moment_in_response() {
     let du = LocalVec {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.1, 0.0, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0],
     };
-    elem.update_state(&du, false, &ctx);
+    elem.update_state(&du, false, &ctx).unwrap();
     let (m, _) = elem.spring_i.clone_box().trial(0.1);
     assert_relative_eq!(m, 0.5 * my0, max_relative = 1e-6);
 }
@@ -573,7 +576,7 @@ fn test_state_member_forces_matches_internal_force() {
     let du = LocalVec {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, -0.001],
     };
-    elem.update_state(&du, true, &ctx);
+    elem.update_state(&du, true, &ctx).unwrap();
 
     let mf = elem
         .state_member_forces(&ctx)
@@ -624,13 +627,13 @@ fn explicit_total_reference_subtracts_elastic_rotation_without_penalty() {
     let du = |theta| LocalVec {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, theta, 0.0, 0.0, 0.0, 0.0, 0.0, theta],
     };
-    element.update_state(&du(0.0001), true, &ctx);
+    element.update_state(&du(0.0001), true, &ctx).unwrap();
     assert!(element
         .end_spring_rotations()
         .unwrap()
         .iter()
         .all(|r| r.abs() < 1e-15));
-    element.update_state(&du(0.0039), true, &ctx);
+    element.update_state(&du(0.0039), true, &ctx).unwrap();
     assert_relative_eq!(
         element.internal_force(&ctx).data[5],
         1e6,
@@ -645,7 +648,7 @@ fn explicit_total_reference_subtracts_elastic_rotation_without_penalty() {
     );
     let saved = element.serialize_checkpoint();
     let snapshot = element.snapshot_state();
-    element.update_state(&du(0.08), false, &ctx);
+    element.update_state(&du(0.08), false, &ctx).unwrap();
     assert!(element
         .tangent_stiffness(&ctx)
         .data
@@ -657,13 +660,13 @@ fn explicit_total_reference_subtracts_elastic_rotation_without_penalty() {
         0.003,
         epsilon = 1e-12
     );
-    element.update_state(&du(0.08), true, &ctx);
+    element.update_state(&du(0.08), true, &ctx).unwrap();
     assert!(element
         .tangent_stiffness(&ctx)
         .data
         .iter()
         .all(|v| v.is_finite()));
-    element.update_state(&du(-0.1), true, &ctx);
+    element.update_state(&du(-0.1), true, &ctx).unwrap();
     assert!(element
         .internal_force(&ctx)
         .data
@@ -694,7 +697,7 @@ fn explicit_total_reference_subtracts_elastic_rotation_without_penalty() {
         .with_total_rotation_reference(1e9);
     element.elastic.committed_disp = [0.0; 12];
     element.elastic.trial_disp = [0.0; 12];
-    element.update_state(&du(0.001), true, &ctx);
+    element.update_state(&du(0.001), true, &ctx).unwrap();
     assert!(element
         .end_spring_rotations()
         .unwrap()
@@ -731,13 +734,13 @@ fn explicit_total_reference_preserves_takeda_unloading_values() {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, theta, 0.0, 0.0, 0.0, 0.0, 0.0, theta],
     };
     // 2Ryまで載荷した武田型の除荷勾配 Ku=S*(Rmax/Ry)^(-.4)。
-    element.update_state(&du(0.008), true, &ctx);
+    element.update_state(&du(0.008), true, &ctx).unwrap();
     assert_relative_eq!(
         element.internal_force(&ctx).data[5],
         1_033_333.333_333_333_3,
         max_relative = 1e-10
     );
-    element.update_state(&du(-0.0001), true, &ctx);
+    element.update_state(&du(-0.0001), true, &ctx).unwrap();
     assert_relative_eq!(
         element.internal_force(&ctx).data[5],
         957_547.505_007_813_4,

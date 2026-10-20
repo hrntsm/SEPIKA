@@ -6,11 +6,14 @@
 //! - [`record_member_step`] — ヒンジ詳細図用に 1 確定ステップ分の部材端応答
 //!   （軸力・剛域フェイスの局所曲げ・弦からの材端回転）を全部材について記録する
 
-use super::geom::{axial_compression, axial_force_signed, dot3, member_end_forces_at_face};
+use super::geom::{
+    axial_compression, axial_force_signed, dot3, member_recording_responses, recording_face_force,
+    recording_force,
+};
 use super::types::{MemberStepState, PushoverMemberResponse};
 use sepika_core::dof::DofMap;
 use sepika_core::model::{ElementData, Model};
-use sepika_element::behavior::{Ctx, ElementBehavior, LocalVec};
+use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse, LocalVec};
 use sepika_element::transform::LocalFrame;
 
 /// 部材の変形角 R [rad]を節点変位から算定する。
@@ -71,13 +74,15 @@ pub(crate) fn record_member_step(
     dofmap: &DofMap,
     behaviors: &[Box<dyn ElementBehavior>],
     total_disp: &[f64],
+    responses: &[Option<LoadedFrameResponse>],
 ) -> Vec<MemberStepState> {
     let ctx = Ctx { model };
     model
         .elements
         .iter()
         .zip(behaviors)
-        .map(|(elem, b)| {
+        .zip(responses)
+        .map(|((elem, b), response)| {
             if elem.nodes.len() != 2 {
                 return MemberStepState::default();
             }
@@ -100,15 +105,16 @@ pub(crate) fn record_member_step(
             let ey = frame.rot[1];
             let ez = frame.rot[2];
 
-            let f = b.internal_force(&ctx);
-            let (my_i, mz_i, my_j, mz_j) = match member_end_forces_at_face(model, elem, &f.data) {
-                Some(fl) => (fl[4], fl[5], fl[10], fl[11]),
-                None => {
-                    let m_i = [f.data[3], f.data[4], f.data[5]];
-                    let m_j = [f.data[9], f.data[10], f.data[11]];
-                    (dot3(m_i, ey), dot3(m_i, ez), dot3(m_j, ey), dot3(m_j, ez))
-                }
-            };
+            let f = recording_force(b.as_ref(), response.as_ref(), &ctx);
+            let (my_i, mz_i, my_j, mz_j) =
+                match recording_face_force(model, elem, &f.data, response.as_ref()) {
+                    Some(fl) => (fl[4], fl[5], fl[10], fl[11]),
+                    None => {
+                        let m_i = [f.data[3], f.data[4], f.data[5]];
+                        let m_j = [f.data[9], f.data[10], f.data[11]];
+                        (dot3(m_i, ey), dot3(m_i, ez), dot3(m_j, ey), dot3(m_j, ez))
+                    }
+                };
             let f_i = [f.data[0], f.data[1], f.data[2]];
             let f_j = [f.data[6], f.data[7], f.data[8]];
             let n = axial_force_signed(f_i, f_j, ex);
@@ -156,6 +162,20 @@ pub(crate) fn compute_member_response(
     behaviors: &[Box<dyn ElementBehavior>],
     total_disp: &[f64],
     dir: crate::statics::analysis::SeismicDir,
+) -> Result<Vec<PushoverMemberResponse>, String> {
+    let responses = member_recording_responses(model, behaviors)?;
+    Ok(compute_member_response_with_responses(
+        model, dofmap, behaviors, total_disp, dir, &responses,
+    ))
+}
+
+pub(crate) fn compute_member_response_with_responses(
+    model: &Model,
+    dofmap: &DofMap,
+    behaviors: &[Box<dyn ElementBehavior>],
+    total_disp: &[f64],
+    dir: crate::statics::analysis::SeismicDir,
+    responses: &[Option<LoadedFrameResponse>],
 ) -> Vec<PushoverMemberResponse> {
     let dir_idx = match dir {
         crate::statics::analysis::SeismicDir::X => 0usize,
@@ -163,7 +183,7 @@ pub(crate) fn compute_member_response(
     };
     let ctx = Ctx { model };
     let mut out = Vec::with_capacity(model.elements.len());
-    for (elem, b) in model.elements.iter().zip(behaviors) {
+    for ((elem, b), response) in model.elements.iter().zip(behaviors).zip(responses) {
         if elem.nodes.len() < 2 {
             continue;
         }
@@ -181,11 +201,12 @@ pub(crate) fn compute_member_response(
         let ey = frame.rot[1];
         let ez = frame.rot[2];
 
-        let f = b.internal_force(&ctx);
+        let f = recording_force(b.as_ref(), response.as_ref(), &ctx);
         let f_i = [f.data[0], f.data[1], f.data[2]];
         let f_j = [f.data[6], f.data[7], f.data[8]];
 
-        let (m_strong, m_weak) = match member_end_forces_at_face(model, elem, &f.data) {
+        let (m_strong, m_weak) = match recording_face_force(model, elem, &f.data, response.as_ref())
+        {
             Some(fl) => (fl[5].abs().max(fl[11].abs()), fl[4].abs().max(fl[10].abs())),
             None => {
                 let m_i = [f.data[3], f.data[4], f.data[5]];

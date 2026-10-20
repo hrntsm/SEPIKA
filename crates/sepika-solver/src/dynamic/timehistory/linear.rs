@@ -74,6 +74,7 @@ pub fn linear_time_history_with_state(
     use_kg: bool,
     record_every: Option<usize>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
+    validate_wall_connection(model, use_kg)?;
     crate::common::assemble::validate_global_mass_inputs(model)?;
     sepika_math::parallelism::apply_to_faer();
 
@@ -144,6 +145,7 @@ pub fn linear_time_history_from_state(
     use_kg: bool,
     record_every: Option<usize>,
 ) -> Result<(ResponseResult, TimeStepState), SolveError> {
+    validate_wall_connection(model, use_kg)?;
     crate::common::assemble::validate_global_mass_inputs(model)?;
     sepika_math::parallelism::apply_to_faer();
 
@@ -207,6 +209,7 @@ impl LinearSetup {
         dt: f64,
         use_kg: bool,
     ) -> Result<Self, SolveError> {
+        validate_wall_connection(model, use_kg)?;
         if use_kg {
             return Err(SolveError::InvalidInput(
                 "線形時刻歴応答解析の幾何剛性（P-Δ、use_kg）は未対応です。\
@@ -247,6 +250,17 @@ impl LinearSetup {
             solver,
         })
     }
+}
+
+fn validate_wall_connection(model: &Model, use_kg: bool) -> Result<(), SolveError> {
+    sepika_element::factory::ensure_wall_side_column_analysis(
+        model,
+        None,
+        "線形時刻歴解析",
+        use_kg,
+        Some(MassOption::Consistent),
+    )
+    .map_err(SolveError::InvalidInput)
 }
 
 /// 時刻歴ステップを `start_step` から `wave` の終端まで進める内部関数。

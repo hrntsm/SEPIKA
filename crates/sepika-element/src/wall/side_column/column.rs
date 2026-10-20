@@ -3,10 +3,9 @@
 //! 静的縮約による剛性計算と `ElementBehavior` 実装、および解放曲げ面を表す
 //! `ReleaseAxis`。
 
-use crate::behavior::{Ctx, ElementBehavior, LocalMat, LocalVec, MassOption};
+use super::release_connection::ReleaseConnection;
+use crate::behavior::{Ctx, LocalMat, LocalVec, MassOption};
 use crate::frame::beam::BeamElement;
-use crate::transform::LocalFrame;
-use smallvec::SmallVec;
 
 /// 解放する局所曲げ面（回転自由度）。
 ///
@@ -36,58 +35,63 @@ impl InPlaneReleasedColumn {
         }
     }
 
-    /// 壁法線を回転軸とする両端回転を内部自由度として静縮約する。
-    fn released_local_stiffness(&self) -> LocalMat {
-        let [ny, nz] = match self.release_axis {
+    fn try_release_connection(&self) -> Result<ReleaseConnection, String> {
+        let normal = match self.release_axis {
             ReleaseAxis::LocalY => [1.0, 0.0],
             ReleaseAxis::LocalZ => [0.0, 1.0],
             ReleaseAxis::LocalDirection(n) => n,
         };
-        let frame = LocalFrame {
-            rot: [[1.0, 0.0, 0.0], [0.0, ny, nz], [0.0, -nz, ny]],
-        };
-        let inverse = LocalFrame {
-            rot: std::array::from_fn(|i| std::array::from_fn(|j| frame.rot[j][i])),
-        };
-        let k = inverse.to_global(&self.inner.local_stiffness());
-        let condensed = crate::frame::prismatic::condense_end_releases(&k, &[(4, 0.0), (10, 0.0)])
-            .unwrap_or_else(|| {
-                panic!(
-                    "壁柱の端部解放剛性を縮約できません: Kbb が特異です（解放条件を確認してください）"
-                )
-            });
-        frame.to_global(&condensed)
+        let mut connection = ReleaseConnection::new(
+            normal,
+            self.inner.end_cond,
+            self.inner.torsion_release,
+            self.inner.j > 0.0 && self.inner.g > 0.0,
+        )
+        .map_err(|error| format!("壁柱の端部接続が不正です: {error}"))?;
+        let raw = self.inner.local_stiffness_flex_raw();
+        let tangent = std::array::from_fn(|i| std::array::from_fn(|j| raw.get(i, j)));
+        connection
+            .fix_isolated_torsion_gauge(&tangent)
+            .map_err(|error| format!("壁柱の端部接続が不正です: {error}"))?;
+        Ok(connection)
     }
 
-    fn released_local_mass(&self, opt: MassOption) -> LocalMat {
-        let [ny, nz] = match self.release_axis {
-            ReleaseAxis::LocalY => [1.0, 0.0],
-            ReleaseAxis::LocalZ => [0.0, 1.0],
-            ReleaseAxis::LocalDirection(n) => n,
+    fn released_local_stiffness(&self) -> LocalMat {
+        let (stiffness, _) = self
+            .try_release_connection()
+            .unwrap_or_else(|error| panic!("{error}"))
+            .initial_linear_mapping(&self.inner.local_stiffness_flex_raw())
+            .unwrap_or_else(|error| panic!("壁柱の端部解放剛性を縮約できません: {error}"));
+        let (li, lj) = self.inner.rigid_lengths();
+        crate::frame::rigid_arm::transform_stiffness(&stiffness, li, lj)
+    }
+
+    fn released_local_mass(&self) -> Result<LocalMat, String> {
+        if let Some(error) = &self.inner.mass_properties_error {
+            return Err(format!("質量特性を解決できません: {error}"));
+        }
+        let properties = self.inner.mass_properties;
+        let (li, lj) = self.inner.rigid_lengths();
+        let length = self.inner.length - li - lj;
+        let phi_y = if self.inner.g > 0.0 && self.inner.as_z > 0.0 {
+            12.0 * self.inner.e * self.inner.iy / (self.inner.g * self.inner.as_z * length.powi(2))
+        } else {
+            0.0
         };
-        let frame = LocalFrame {
-            rot: [[1.0, 0.0, 0.0], [0.0, ny, nz], [0.0, -nz, ny]],
+        let phi_z = if self.inner.g > 0.0 && self.inner.as_y > 0.0 {
+            12.0 * self.inner.e * self.inner.iz / (self.inner.g * self.inner.as_y * length.powi(2))
+        } else {
+            0.0
         };
-        let inverse = LocalFrame {
-            rot: std::array::from_fn(|i| std::array::from_fn(|j| frame.rot[j][i])),
-        };
-        let mass = self.inner.axis.to_local(&self.inner.mass_matrix(opt));
-        let mass = inverse.to_global(&mass);
-        let stiffness = inverse.to_global(&self.inner.local_stiffness());
-        let condensed = crate::frame::prismatic::condense_end_releases_with_mass(
-            &stiffness,
-            &mass,
-            self.inner.mass_properties,
-            0.0,
-            0.0,
-            &[(4, 0.0), (10, 0.0)],
-        )
-        .unwrap_or_else(|| {
-            panic!(
-                "壁柱の端部解放質量を縮約できません: Kbb が特異です（解放条件を確認してください）"
-            )
-        });
-        frame.to_global(&condensed)
+        let raw_mass =
+            crate::frame::prismatic::consistent_mass_timoshenko(properties, length, phi_z, phi_y);
+        let mass = self
+            .try_release_connection()?
+            .initial_consistent_mass(&self.inner.local_stiffness_flex_raw(), &raw_mass)
+            .map_err(|error| format!("壁柱の端部解放質量を縮約できません: {error}"))?;
+        Ok(crate::frame::prismatic::mass_without_end_releases(
+            &mass, properties, li, lj,
+        ))
     }
 
     /// 縮約後の局所剛性を用いた断面力の復元。
@@ -119,47 +123,86 @@ crate::behavior::forward_element_behavior!(InPlaneReleasedColumn, inner, {
     global_dofs: forward,
     tangent_stiffness: custom,
     internal_force: custom,
-    update_state: forward,
+    update_state: custom,
+    update_state_with_member_loads: custom,
     mass_matrix: custom,
+    try_mass_matrix: custom,
+    owns_frame_member_loads: custom,
+    frame_load_response: custom,
+    state_frame_load_response: custom,
     recover_forces: custom,
     state_member_forces: custom,
     geometric_stiffness: forward,
-    snapshot_state: forward,
-    restore_state: forward,
-    commit_state: forward,
-    revert_state: forward,
-    serialize_checkpoint: forward,
-    deserialize_checkpoint: forward,
+    snapshot_state: custom,
+    restore_state: custom,
+    commit_state: custom,
+    revert_state: custom,
+    serialize_checkpoint: custom,
+    deserialize_checkpoint: custom,
     panel_moments_from: forward,
     ductility_probe: forward,
     fiber_section_states: forward,
     end_spring_rotations: forward,
     set_time_step: forward,
 }, custom {
+    fn owns_frame_member_loads(&self) -> bool { true }
+    fn snapshot_state(&self) -> Box<dyn std::any::Any> { Box::new(self.inner.elastic_load_state()) }
+    fn restore_state(&mut self, state: &dyn std::any::Any) {
+        self.inner.restore_elastic_load_state(crate::behavior::downcast_snapshot::<crate::frame::beam::state::ElasticLoadState>("InPlaneReleasedColumn", state).clone());
+    }
+    fn commit_state(&mut self) {
+        self.inner.committed_disp = self.inner.trial_disp;
+        self.inner.committed_member_loads = self.inner.trial_member_loads.clone();
+    }
+    fn revert_state(&mut self) {
+        self.inner.trial_disp = self.inner.committed_disp;
+        self.inner.trial_member_loads = self.inner.committed_member_loads.clone();
+    }
+
+    fn frame_load_response(&self, u_elem: &[f64], loads: &[sepika_core::model::MemberLoad]) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
+        self.inner.loaded_response(u_elem, loads, Some(self.try_release_connection()?)).map(Some)
+    }
+
+    fn update_state(&mut self, du: &LocalVec, commit: bool, ctx: &Ctx) -> Result<(), crate::behavior::ElementUpdateError> {
+        self.update_state_with_member_loads(du, &self.inner.trial_member_loads.clone(), commit, ctx)
+    }
+
+    fn update_state_with_member_loads(&mut self, du: &LocalVec, loads: &[sepika_core::model::MemberLoad], commit: bool, _ctx: &Ctx) -> Result<(), crate::behavior::ElementUpdateError> {
+        let connection = self.try_release_connection().map_err(|error| crate::behavior::ElementUpdateError(format!("部材 {:?}: {error}", self.inner.id)))?;
+        self.inner.update_loaded_state(du, loads, commit, Some(connection))
+    }
+
+    fn state_frame_load_response(&self) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
+        let connection = self.try_release_connection().map_err(|error| format!("部材 {:?}: {error}", self.inner.id))?;
+        self.inner.current_loaded_response(Some(connection)).map(Some)
+    }
+
+    fn serialize_checkpoint(&self) -> Vec<u8> {
+        self.inner.serialize_loaded_checkpoint(Some(self.try_release_connection().unwrap_or_else(|error| panic!("{error}"))))
+    }
+
+    fn deserialize_checkpoint(&mut self, data: &[u8]) -> Result<(), crate::behavior::CheckpointError> {
+        let connection = self.try_release_connection().map_err(|error| crate::behavior::CheckpointError::Decode(format!("部材 {:?}: {error}", self.inner.id)))?;
+        self.inner.restore_loaded_checkpoint(data, Some(connection))
+    }
+
     fn tangent_stiffness(&self, _ctx: &Ctx) -> LocalMat {
         self.inner.axis.to_global(&self.released_local_stiffness())
     }
 
     fn mass_matrix(&self, opt: MassOption) -> LocalMat {
+        self.try_mass_matrix(opt).unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    fn try_mass_matrix(&self, opt: MassOption) -> Result<LocalMat, String> {
         match opt {
-            MassOption::Lumped => self.inner.mass_matrix(opt),
-            MassOption::Consistent => self.inner.axis.to_global(&self.released_local_mass(opt)),
+            MassOption::Lumped => self.inner.try_mass_matrix(opt),
+            MassOption::Consistent => Ok(self.inner.axis.to_global(&self.released_local_mass()?)),
         }
     }
 
     fn internal_force(&self, _ctx: &Ctx) -> LocalVec {
-        let k = self.inner.axis.to_global(&self.released_local_stiffness());
-        let mut f = LocalVec {
-            data: SmallVec::from_elem(0.0, 12),
-        };
-        for i in 0..12 {
-            let mut s = 0.0;
-            for j in 0..12 {
-                s += k.get(i, j) * self.inner.trial_disp[j];
-            }
-            f.data[i] = s;
-        }
-        f
+        self.state_frame_load_response().unwrap_or_else(|error| panic!("{error}")).expect("壁側柱の荷重応答").nodal_residual
     }
 
     fn recover_forces(&self, u_elem: &[f64]) -> Option<crate::frame::beam::MemberForces> {
@@ -171,8 +214,7 @@ crate::behavior::forward_element_behavior!(InPlaneReleasedColumn, inner, {
         Some(self.recover_forces_released(&arr))
     }
 
-    /// 蓄積した trial 変位から復元する。
     fn state_member_forces(&self, _ctx: &Ctx) -> Option<crate::frame::beam::MemberForces> {
-        Some(self.recover_forces_released(&self.inner.trial_disp))
+        Some(self.state_frame_load_response().unwrap_or_else(|error| panic!("{error}")).expect("壁側柱の荷重応答").section.recover(&self.inner.eval_sections).unwrap_or_else(|error| panic!("{error}")))
     }
 });

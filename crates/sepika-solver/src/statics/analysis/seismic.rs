@@ -250,12 +250,7 @@ impl Analysis<'_> {
     pub fn seismic_static_with(&self, cfg: SeismicCfg) -> Result<StaticOnce, SolveError> {
         let lc = self.build_seismic_load_case(cfg)?;
 
-        if self.n_indep == 0 {
-            return Ok(self.zero_result());
-        }
-
-        let f_free = self.assemble_f_free_from_nodal(&lc.nodal);
-        self.solve_and_recover(&lc, &f_free)
+        self.solve_and_recover(&lc)
     }
 
     /// 地震荷重ケース構築に用いる設計用固有周期 T `[s]` を算定する。
@@ -326,12 +321,7 @@ impl Analysis<'_> {
     ) -> Result<StaticOnce, SolveError> {
         let lc = self.build_seismic_load_case_with_period(cfg, t)?;
 
-        if self.n_indep == 0 {
-            return Ok(self.zero_result());
-        }
-
-        let f_free = self.assemble_f_free_from_nodal(&lc.nodal);
-        self.solve_and_recover(&lc, &f_free)
+        self.solve_and_recover(&lc)
     }
 }
 

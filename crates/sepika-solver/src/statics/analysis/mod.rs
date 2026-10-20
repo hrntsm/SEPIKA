@@ -3,7 +3,7 @@
 //! 基準剛性の分解を固有値・周期と共有し、静的解析はケース種別・応力設定を採用する。
 //! 地震荷重の生成は `seismic`、設定型は `config`、入力検証は [`precheck`] が受け持つ。
 
-use crate::common::assemble::{assemble_global_f, assemble_global_k};
+use crate::common::assemble::assemble_global_k;
 use crate::common::constraint::Reducer;
 use crate::dynamic::damping::Damping;
 use crate::dynamic::eigen::{self, ModalResult};
@@ -12,7 +12,6 @@ use crate::statics::linear::{
     has_tension_only_brace, solve_static_case, uses_long_axial_stiffness, StaticOnce,
     StaticStiffness, TENSION_ONLY_MAX_ITER,
 };
-use std::collections::HashMap;
 
 pub type StaticResult = StaticOnce;
 use sepika_core::dof::DofMap;
@@ -33,21 +32,7 @@ pub use seismic::{
     seismic_distribution_for_model, steel_height_ratio, validate_basement_ground,
 };
 
-/// `model.load_cases` 全件の自由 DOF 荷重ベクトルを1回ずつ計算してマップに詰める
-/// （[`Analysis::f_free_cache`] の構築。`prepare` から使う）。
-fn build_f_free_cache(model: &Model, dofmap: &DofMap) -> HashMap<LoadCaseId, Vec<f64>> {
-    model
-        .load_cases
-        .iter()
-        .map(|lc| (lc.id, assemble_global_f(model, dofmap, lc.id)))
-        .collect()
-}
-
-/// `model.elements` 全件の `(ElementBehavior, global_dofs)` を1回だけ構築する
-/// （[`Analysis::behavior_cache`] の構築。`prepare` から使う）。
-/// 静解析経路（[`build_behavior`]）は常に弾性要素を返す
-/// （履歴状態を持たない）ため、`&self` から複数回・複数スレッドで参照しても
-/// 安全（[`ElementBehavior`] の `Send + Sync` supertrait 経由）。
+/// `model.elements` と同順の構築時 ID・弾性応答要素・自由度対応を返す。
 fn build_behavior_cache(model: &Model, dofmap: &DofMap) -> Vec<crate::statics::BehaviorEntry> {
     model
         .elements
@@ -55,7 +40,7 @@ fn build_behavior_cache(model: &Model, dofmap: &DofMap) -> Vec<crate::statics::B
         .map(|elem| {
             let behavior = build_behavior(elem, model);
             let gdofs = behavior.global_dofs(dofmap);
-            (behavior, gdofs)
+            (elem.id, behavior, gdofs)
         })
         .collect()
 }
@@ -70,14 +55,7 @@ pub struct Analysis<'m> {
     /// ため、同一 `Analysis` 上で X・Y 両方向の地震荷重を構築しても固有値解析は
     /// 1 回で済む（`build_seismic_load_case`）。
     semi_precise_t: std::sync::OnceLock<f64>,
-    /// `Model::load_cases` 各ケースの自由 DOF 荷重ベクトル（`assemble_global_f`）の
-    /// メモ化。`&self` のみで参照する
-    /// （書き込みは `prepare` 構築時のみ）ため、`run_batch` の rayon
-    /// 並列からも安全に共有できる。
-    f_free_cache: HashMap<LoadCaseId, Vec<f64>>,
-    /// `model.elements` 各要素の `(ElementBehavior, global_dofs)` のメモ化
-    /// （[`build_behavior_cache`]）。`f_free_cache` と同様、書き込みは構築時のみで
-    /// `run_batch` の rayon 並列からも安全に共有できる（`ElementBehavior: Send + Sync`）。
+    /// `model.elements` と同順の構築時 ID・弾性応答要素・自由度対応。
     behavior_cache: Vec<crate::statics::BehaviorEntry>,
     long_stiffness: std::sync::OnceLock<Result<StaticStiffness, SolveError>>,
 }
@@ -90,22 +68,6 @@ impl<'m> Analysis<'m> {
         sepika_math::parallelism::apply_to_faer();
         precheck::precheck_model(model)?;
         let dofmap = DofMap::build(model);
-        let n_active = dofmap.n_active();
-
-        if n_active == 0 {
-            return Ok(Self {
-                model,
-                dofmap,
-                reducer: Reducer::empty(),
-                solver: make_solver(SolverBackend::DirectSparseCholesky),
-                n_indep: 0,
-                semi_precise_t: std::sync::OnceLock::new(),
-                f_free_cache: HashMap::new(),
-                behavior_cache: Vec::new(),
-                long_stiffness: std::sync::OnceLock::new(),
-            });
-        }
-
         let k_free = assemble_global_k(model, &dofmap);
         let reducer = Reducer::build(model, &dofmap);
         let n_indep = reducer.n_indep;
@@ -121,7 +83,6 @@ impl<'m> Analysis<'m> {
             })?;
         }
 
-        let f_free_cache = build_f_free_cache(model, &dofmap);
         let behavior_cache = build_behavior_cache(model, &dofmap);
 
         Ok(Self {
@@ -131,13 +92,11 @@ impl<'m> Analysis<'m> {
             solver,
             n_indep,
             semi_precise_t: std::sync::OnceLock::new(),
-            f_free_cache,
             behavior_cache,
             long_stiffness: std::sync::OnceLock::new(),
         })
     }
 
-    /// 全自由度ゼロの結果（有効自由度なしのモデル用）。
     fn zero_result(&self) -> StaticOnce {
         StaticOnce {
             disp: vec![[0.0; 6]; self.model.nodes.len()],
@@ -146,14 +105,18 @@ impl<'m> Analysis<'m> {
         }
     }
 
-    fn solve_and_recover(
-        &self,
-        load_case: &LoadCase,
-        f_free: &[f64],
-    ) -> Result<StaticOnce, SolveError> {
+    fn solve_and_recover(&self, load_case: &LoadCase) -> Result<StaticOnce, SolveError> {
+        if self.n_indep == 0
+            && !self
+                .behavior_cache
+                .iter()
+                .any(|(_, b, _)| b.owns_frame_member_loads())
+        {
+            return Ok(self.zero_result());
+        }
         let iterative =
             self.model.stress_cfg.tension_only_iteration && has_tension_only_brace(self.model);
-        let fixed = if iterative || self.n_indep == 0 {
+        let fixed = if iterative {
             None
         } else if uses_long_axial_stiffness(self.model, load_case.kind) {
             let stiffness = self.long_stiffness.get_or_init(|| {
@@ -169,7 +132,6 @@ impl<'m> Analysis<'m> {
             &self.dofmap,
             &self.reducer,
             load_case,
-            f_free,
             fixed,
             TENSION_ONLY_MAX_ITER,
         )
@@ -185,10 +147,7 @@ impl<'m> Analysis<'m> {
             .ok_or_else(|| {
                 SolveError::InvalidInput(format!("荷重ケース {} が存在しません", lc.0))
             })?;
-        if self.n_indep == 0 {
-            return Ok(self.zero_result());
-        }
-        self.solve_and_recover(load_case, &self.f_free_cache[&lc])
+        self.solve_and_recover(load_case)
     }
 
     /// 準備済みの基準剛性の分解を再利用し、指定数の固有モードを返す。
@@ -264,23 +223,6 @@ impl<'m> Analysis<'m> {
             false,
             record_every,
         )
-    }
-
-    /// LoadCase の節点荷重リストから自由 DOF 空間の荷重ベクトルを組み立てる
-    /// （地震荷重・風荷重など静的荷重ケースの共通処理）。
-    fn assemble_f_free_from_nodal(&self, nodal: &[sepika_core::model::NodalLoad]) -> Vec<f64> {
-        let n_active = self.dofmap.n_active();
-        let mut f_free = vec![0.0; n_active];
-        for nodal_load in nodal {
-            let ni = nodal_load.node.index();
-            for d in 0..sepika_core::dof::DOF_PER_NODE {
-                let g = ni * sepika_core::dof::DOF_PER_NODE + d;
-                if let Some(active) = self.dofmap.active(g) {
-                    f_free[active as usize] += nodal_load.values[d];
-                }
-            }
-        }
-        f_free
     }
 }
 

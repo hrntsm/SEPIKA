@@ -30,7 +30,7 @@ pub struct PanelEnd {
 ///
 /// どちらの端もパネルへ接合しない場合は `None`。
 pub fn resolve(data: &ElementData, model: &Model) -> Option<[Option<PanelEnd>; 2]> {
-    if !matches!(data.kind, ElementKind::Beam) || data.nodes.len() < 2 {
+    if !data.kind.is_primary_frame_support() || data.nodes.len() < 2 {
         return None;
     }
     if !is_horizontal_or_vertical_member(model, data) {
@@ -144,7 +144,12 @@ crate::behavior::forward_element_behavior!(PanelOffsetMember, inner, {
     tangent_stiffness: custom,
     internal_force: custom,
     update_state: custom,
+    update_state_with_member_loads: custom,
     mass_matrix: custom,
+    try_mass_matrix: custom,
+    owns_frame_member_loads: forward,
+    frame_load_response: custom,
+    state_frame_load_response: custom,
     recover_forces: custom,
     state_member_forces: forward,
     geometric_stiffness: custom,
@@ -160,6 +165,63 @@ crate::behavior::forward_element_behavior!(PanelOffsetMember, inner, {
     end_spring_rotations: forward,
     set_time_step: forward,
 }, custom {
+    fn frame_load_response(&self, u_elem: &[f64], loads: &[sepika_core::model::MemberLoad]) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
+        if u_elem.len() != self.n_dof() || u_elem.iter().any(|v| !v.is_finite()) {
+            return Err("仕口パネル接続部材の荷重応答変位が不正です".into());
+        }
+        let Some(mut response) = self.inner.frame_load_response(&self.to_inner(u_elem), loads)? else {
+            return if self.owns_frame_member_loads() {
+                Err("部材荷重所有要素が応答を返しませんでした".into())
+            } else { Ok(None) };
+        };
+        if response.nodal_residual.data.len() != 12 {
+            return Err("仕口パネル接続部材の内側荷重応答は12自由度が必要です".into());
+        }
+        response.nodal_residual.data.resize(self.n_dof(), 0.0);
+        for (r, c, z) in self.coupling() {
+            response.nodal_residual.data[c] += z * response.nodal_residual.data[r];
+        }
+        if response.nodal_residual.data.iter().any(|v| !v.is_finite()) {
+            return Err("仕口パネル接続部材の荷重応答が非有限です".into());
+        }
+        Ok(Some(response))
+    }
+
+    fn state_frame_load_response(&self) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
+        let Some(mut response) = self.inner.state_frame_load_response()? else {
+            return if self.owns_frame_member_loads() {
+                Err("部材荷重所有要素が状態応答を返しませんでした".into())
+            } else { Ok(None) };
+        };
+        if response.nodal_residual.data.len() != 12 {
+            return Err("仕口パネル接続部材の内側荷重応答は12自由度が必要です".into());
+        }
+        response.nodal_residual.data.resize(self.n_dof(), 0.0);
+        for (r, c, z) in self.coupling() {
+            response.nodal_residual.data[c] += z * response.nodal_residual.data[r];
+        }
+        if response.nodal_residual.data.iter().any(|v| !v.is_finite()) {
+            return Err("仕口パネル接続部材の荷重応答が非有限です".into());
+        }
+        Ok(Some(response))
+    }
+
+    fn update_state_with_member_loads(&mut self, du: &LocalVec, loads: &[sepika_core::model::MemberLoad], commit: bool, ctx: &Ctx) -> Result<(), crate::behavior::ElementUpdateError> {
+        crate::behavior::validate_trial_increment(du, self.n_dof())?;
+        let du_inner = LocalVec { data: SmallVec::from_slice(&self.to_inner(&du.data)) };
+        let previous = self.snapshot_state();
+        let result = self.inner.update_state_with_member_loads(&du_inner, loads, false, ctx)
+            .and_then(|()| self.state_frame_load_response().map(|_| ()).map_err(crate::behavior::ElementUpdateError));
+        if let Err(error) = result {
+            self.restore_state(previous.as_ref());
+            return Err(error);
+        }
+        if commit {
+            self.commit_state();
+        }
+        Ok(())
+    }
+
     fn n_dof(&self) -> usize {
         12 + self.n_panel_dof()
     }
@@ -181,7 +243,11 @@ crate::behavior::forward_element_behavior!(PanelOffsetMember, inner, {
     }
 
     fn mass_matrix(&self, opt: MassOption) -> LocalMat {
-        self.transform_matrix(&self.inner.mass_matrix(opt))
+        self.try_mass_matrix(opt).unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    fn try_mass_matrix(&self, opt: MassOption) -> Result<LocalMat, String> {
+        Ok(self.transform_matrix(&self.inner.try_mass_matrix(opt)?))
     }
 
     fn internal_force(&self, ctx: &Ctx) -> LocalVec {
@@ -198,12 +264,23 @@ crate::behavior::forward_element_behavior!(PanelOffsetMember, inner, {
         f
     }
 
-    fn update_state(&mut self, du: &LocalVec, commit: bool, ctx: &Ctx) {
+    fn update_state(&mut self, du: &LocalVec, commit: bool, ctx: &Ctx) -> Result<(), crate::behavior::ElementUpdateError> {
+        crate::behavior::validate_trial_increment(du, self.n_dof())?;
         let inner = self.to_inner(&du.data);
         let du_inner = LocalVec {
             data: SmallVec::from_slice(&inner),
         };
-        self.inner.update_state(&du_inner, commit, ctx);
+        let previous = self.snapshot_state();
+        let result = self.inner.update_state(&du_inner, false, ctx)
+            .and_then(|()| self.state_frame_load_response().map(|_| ()).map_err(crate::behavior::ElementUpdateError));
+        if let Err(error) = result {
+            self.restore_state(previous.as_ref());
+            return Err(error);
+        }
+        if commit {
+            self.commit_state();
+        }
+        Ok(())
     }
 
     fn recover_forces(&self, u_elem: &[f64]) -> Option<crate::frame::beam::MemberForces> {
@@ -216,7 +293,7 @@ mod tests {
     use super::*;
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::{ElemId, MaterialId, SectionId};
-    use sepika_core::model::MaterialCategory;
+    use sepika_core::model::{ElementKind, MaterialCategory};
     use sepika_core::model::{
         EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material, Node, RigidZone, Section,
     };
@@ -457,7 +534,7 @@ mod tests {
             data: SmallVec::from_elem(0.0, wrapped.n_dof()),
         };
         du.data[11] = 1.0e-4;
-        wrapped.update_state(&du, true, &ctx);
+        wrapped.update_state(&du, true, &ctx).unwrap();
 
         let f = wrapped.internal_force(&ctx);
         assert!((f.data[12] - ZETA_BEAM * f.data[3]).abs() <= 1e-6 * f.data[3].abs().max(1.0));

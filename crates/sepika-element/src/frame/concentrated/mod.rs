@@ -413,11 +413,17 @@ impl ElementBehavior for ConcentratedSpringBeam {
         Some([self.rot_i, self.rot_j])
     }
 
-    fn update_state(&mut self, du: &LocalVec, commit: bool, _ctx: &Ctx) {
+    fn update_state(
+        &mut self,
+        du: &LocalVec,
+        commit: bool,
+        _ctx: &Ctx,
+    ) -> Result<(), crate::behavior::ElementUpdateError> {
+        crate::behavior::validate_trial_increment(du, self.n_dof())?;
         let du_global: [f64; 12] = std::array::from_fn(|i| du.data[i]);
         let du_local = self.elastic.axis.rotate_to_local(&du_global);
         self.apply_mn_interaction(Some(&du_local));
-        self.elastic.update_state(du, commit, _ctx);
+        self.elastic.update_state(du, commit, _ctx)?;
         self.solve_internal_equilibrium();
         if commit {
             self.spring_i.commit();
@@ -427,6 +433,7 @@ impl ElementBehavior for ConcentratedSpringBeam {
             self.thb_i = self.trial_thb_i;
             self.thb_j = self.trial_thb_j;
         }
+        Ok(())
     }
 
     fn mass_matrix(&self, opt: MassOption) -> LocalMat {

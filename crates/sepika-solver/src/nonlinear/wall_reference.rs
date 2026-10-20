@@ -342,8 +342,23 @@ mod tests {
             close(actual[0].1[0], expected[0].1[0]);
             close(actual[0].1[1], expected[0].1[1]);
         }
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let mut model = original.clone();
+            for frame in &mut model.elements[..4] {
+                frame.kind = kind;
+            }
+            let before = serde_json::to_vec(&model).unwrap();
+            let actual = resolve(&model, true, StrengthBasis::Nominal).unwrap();
+            close(actual[0].1[0], expected[0].1[0]);
+            close(actual[0].1[1], expected[0].1[1]);
+            assert_eq!(serde_json::to_vec(&model).unwrap(), before);
+        }
         let mut bad = original.clone();
-        bad.elements[1].kind = ElementKind::Fiber;
+        bad.elements[1].end_cond = [sepika_core::model::EndCondition::Pinned; 2];
         assert!(resolve(&bad, true, StrengthBasis::Nominal)
             .unwrap_err()
             .contains("側柱 ID 1"));

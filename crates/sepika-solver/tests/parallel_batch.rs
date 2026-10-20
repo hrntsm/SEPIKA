@@ -9,7 +9,8 @@ use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
 use sepika_core::model::{
     ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LoadCase,
-    LoadCombination, LocalAxis, Material, MaterialCategory, Model, NodalLoad, Node, Section,
+    LoadCombination, LocalAxis, Material, MaterialCategory, MemberLoad, MemberLoadKind, Model,
+    NodalLoad, Node, Section,
 };
 use sepika_math::parallelism::{set_parallelism, Parallelism};
 use sepika_solver::statics::analysis::Analysis;
@@ -255,4 +256,91 @@ fn public_static_nonconvergence_is_case_local_and_combinations_propagate_failure
     let batch = analysis.linear_static_with_combinations(&[LoadCaseId(0), LoadCaseId(1)], &[combo]);
     assert!(batch.combos[0].is_err());
     assert!(batch.cases[1].is_ok());
+}
+
+#[test]
+fn loaded_frame_and_legacy_brace_cases_remain_independent_in_parallel() {
+    use sepika_core::model::LoadCaseKind;
+    use sepika_solver::statics::linear::linear_static_once;
+    set_parallelism(Parallelism::Threads(2));
+    for frame_kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for iterative in [false, true] {
+            for fixed in [false, true] {
+                let mut model = static595_fixture::scalar_model(frame_kind);
+                let mut brace = model.elements[0].clone();
+                brace.id = ElemId(1);
+                brace.kind = ElementKind::Brace { tension_only: true };
+                let mut section = model.sections[0].clone();
+                section.id = SectionId(1);
+                section.frame_use = Some(FrameSectionUse::Brace);
+                brace.section = Some(section.id);
+                model.elements.push(brace);
+                model.sections.push(section);
+                model.stress_cfg.tension_only_iteration = iterative;
+                model.stress_cfg.no_long_axial_column = true;
+                model.stress_cfg.no_long_axial_brace = true;
+                if fixed {
+                    model.nodes[1].restraint = Dof6Mask::FIXED;
+                }
+                model.load_cases.clear();
+                for (id, kind, sign) in [
+                    (0, LoadCaseKind::Dead, 1.0),
+                    (1, LoadCaseKind::Seismic, -1.0),
+                ] {
+                    model.load_cases.push(LoadCase {
+                        id: LoadCaseId(id),
+                        name: format!("loaded-{id}"),
+                        kind,
+                        nodal: vec![NodalLoad::manual(
+                            NodeId(1),
+                            [0.0, 0.0, sign * 1000.0, 0.0, 0.0, 0.0],
+                        )],
+                        member: vec![
+                            MemberLoad::manual(
+                                ElemId(0),
+                                [0.0, 0.0, sign],
+                                MemberLoadKind::Point { a: 500.0, p: 600.0 },
+                            ),
+                            MemberLoad::manual(
+                                ElemId(1),
+                                [0.0, 0.0, sign],
+                                MemberLoadKind::Point { a: 500.0, p: 200.0 },
+                            ),
+                        ],
+                    });
+                }
+                let analysis = Analysis::prepare(&model).unwrap();
+                let expected: Vec<_> = model
+                    .load_cases
+                    .iter()
+                    .map(|case| linear_static_once(&model, case.id).unwrap())
+                    .collect();
+                if !fixed {
+                    assert!((expected[0].disp[1][2] - 1400.0 / 200000.4).abs() < 1e-12);
+                }
+                for ids in [
+                    [LoadCaseId(0), LoadCaseId(1), LoadCaseId(0)],
+                    [LoadCaseId(1), LoadCaseId(0), LoadCaseId(1)],
+                ] {
+                    for (id, result) in ids.into_iter().zip(analysis.linear_static_batch(&ids)) {
+                        let actual = result.unwrap();
+                        let expected = &expected[id.index()];
+                        assert_eq!(actual.disp, expected.disp);
+                        assert_eq!(actual.panel_moments, expected.panel_moments);
+                        assert_eq!(actual.member_forces.len(), expected.member_forces.len());
+                        for (actual, expected) in
+                            actual.member_forces.iter().zip(&expected.member_forces)
+                        {
+                            assert_eq!(actual.0, expected.0);
+                            assert_eq!(actual.1.at, expected.1.at);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -242,6 +242,140 @@ fn ss_beam(l: f64, member: Vec<MemberLoad>) -> Model {
     }
 }
 
+fn owned_udl_model() -> Model {
+    let mut model = ss_beam(
+        1000.0,
+        vec![MemberLoad::manual(
+            ElemId(0),
+            [0.0, 1.0, 0.0],
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 1000.0,
+                w1: 2.0,
+                w2: 2.0,
+            },
+        )],
+    );
+    for node in &mut model.nodes {
+        node.restraint = Dof6Mask::FIXED;
+    }
+    model
+}
+
+#[test]
+fn linear_rhs_rejects_missing_or_reordered_behaviors() {
+    let mut model = owned_udl_model();
+    let mut second = model.elements[0].clone();
+    second.id = ElemId(1);
+    model.elements.push(second);
+    let map = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &map);
+    let mut stiffness =
+        StaticStiffness::build(&model, &map, &reducer, model.load_cases[0].kind).unwrap();
+    let entries: Vec<_> = stiffness
+        .behaviors
+        .iter()
+        .map(|(id, b, g)| (*id, b.as_ref(), g.as_slice()))
+        .collect();
+    let ledger = PhysicalLoadLedger::new(&model, &model.load_cases[0]).unwrap();
+    assert!(assemble_linear_rhs(&model, &map, &ledger, &entries[..1]).is_err());
+    assert!(assemble_linear_rhs(&model, &map, &ledger, &[entries[1], entries[0]]).is_err());
+    stiffness.behaviors.swap(0, 1);
+    assert!(solve_static_case(
+        &model,
+        &map,
+        &reducer,
+        &model.load_cases[0],
+        Some((stiffness.solver.as_ref(), &stiffness.behaviors)),
+        TENSION_ONLY_MAX_ITER
+    )
+    .is_err());
+}
+
+#[test]
+fn wall_normal_release_retains_loaded_support_balance_without_end_moments() {
+    let model = owned_udl_model();
+    let map = DofMap::build(&model);
+    let elem = &model.elements[0];
+    let beam = sepika_element::frame::beam::BeamElement::new(elem, &model);
+    let behavior = sepika_element::wall::side_column::InPlaneReleasedColumn::new(
+        beam,
+        sepika_element::wall::side_column::ReleaseAxis::LocalY,
+    );
+    let gdofs = behavior.global_dofs(&map);
+    let ledger = PhysicalLoadLedger::new(&model, &model.load_cases[0]).unwrap();
+    let entries = [(elem.id, &behavior as &dyn ElementBehavior, gdofs.as_slice())];
+    assert!(assemble_linear_rhs(&model, &map, &ledger, &entries)
+        .unwrap()
+        .is_empty());
+    let (result, reactions) = recover_static(&model, &map, &[], &ledger, &entries).unwrap();
+    for reaction in &reactions {
+        assert!((reaction[1] + 1000.0).abs() < 1e-8);
+        assert!(reaction[5].abs() < 1e-7);
+    }
+    assert!((value_at(&result.member_forces[0].1, 0.5, 4).abs() - 250000.0).abs() < 1e-6);
+}
+
+#[test]
+fn wall_physical_balance_preserves_normalized_node_order() {
+    let mut model = owned_udl_model();
+    model.load_cases[0].member.clear();
+    let first = model.nodes[0].clone();
+    model.nodes = [
+        [0.0, 0.0, 0.0],
+        [4000.0, 0.0, 0.0],
+        [4000.0, 0.0, 3000.0],
+        [0.0, 0.0, 3000.0],
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, coord)| Node {
+        id: NodeId(i as u32),
+        coord,
+        restraint: Dof6Mask::FREE,
+        ..first.clone()
+    })
+    .collect();
+    model.elements[0].kind = ElementKind::Wall;
+    model.sections[0].frame_use = None;
+    model.sections[0].thickness = Some(10.0);
+    model.materials[0].fy = Some(345.0);
+    let map = DofMap::build(&Model {
+        elements: vec![ElementData {
+            nodes: smallvec::smallvec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+            ..model.elements[0].clone()
+        }],
+        ..model.clone()
+    });
+    let mut u = vec![0.0; map.n_active()];
+    u[map.active(2 * 6).unwrap() as usize] = 0.3;
+    u[map.active(3 * 6 + 2).unwrap() as usize] = -0.2;
+    let mut expected: Option<Vec<f64>> = None;
+    for nodes in [[0, 1, 2, 3], [1, 2, 3, 0], [3, 2, 1, 0]] {
+        model.elements[0].nodes = nodes.into_iter().map(NodeId).collect();
+        let behavior =
+            sepika_element::wall::wall_element::WallElement::try_new(&model.elements[0], &model)
+                .unwrap();
+        let gdofs = behavior.global_dofs(&map);
+        let ledger = PhysicalLoadLedger::new(&model, &model.load_cases[0]).unwrap();
+        let (_, reactions) = recover_static(
+            &model,
+            &map,
+            &u,
+            &ledger,
+            &[(ElemId(0), &behavior, gdofs.as_slice())],
+        )
+        .unwrap();
+        if let Some(expected) = &expected {
+            for (actual, expected) in reactions.iter().flatten().zip(expected) {
+                assert!((actual - expected).abs() < 1e-6);
+            }
+        } else {
+            expected = Some(reactions.into_iter().flatten().collect::<Vec<_>>());
+        }
+    }
+}
+
 fn value_at(mf: &sepika_element::frame::beam::MemberForces, xi: f64, comp: usize) -> f64 {
     mf.at
         .iter()
@@ -2106,16 +2240,8 @@ fn active_set_requires_unchanged_set_and_reports_case_and_limit() {
         model.load_cases[0].nodal[0].values[2] = force;
         let dofmap = DofMap::build(&model);
         let reducer = Reducer::build(&model, &dofmap);
-        let f_free = assemble_global_f(&model, &dofmap, LoadCaseId(1));
-        let result = solve_static_case(
-            &model,
-            &dofmap,
-            &reducer,
-            &model.load_cases[0],
-            &f_free,
-            None,
-            limit,
-        );
+        let result =
+            solve_static_case(&model, &dofmap, &reducer, &model.load_cases[0], None, limit);
         if success {
             let result = result.unwrap();
             if force != 0.0 {
@@ -2191,4 +2317,25 @@ fn lip_channel_geometry_public_linear_result_rejects_beam_fiber_ms_without_panic
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("; "));
+}
+
+#[test]
+fn invalid_young_modulus_reaches_both_public_static_entries_as_same_reason() {
+    let mut model = ss_beam(1000.0, vec![]);
+    model.materials[0].young = 0.0;
+    let direct = linear_static_once(&model, model.load_cases[0].id)
+        .unwrap_err()
+        .to_string();
+    let cached = match crate::statics::analysis::Analysis::prepare(&model) {
+        Ok(_) => panic!("不正剛性は解析前に拒否する"),
+        Err(error) => error.to_string(),
+    };
+    assert!(
+        direct.contains("部材 ID 0") && direct.contains("ヤング係数 E は正の有限値が必要"),
+        "{direct}"
+    );
+    assert!(
+        cached.contains("ヤング係数 E は正の有限値が必要"),
+        "{cached}"
+    );
 }

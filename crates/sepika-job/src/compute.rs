@@ -196,6 +196,19 @@ pub fn compute_time_history(
         .map_err(JobError::InvalidInput)?;
     let wave = effective_time_history_wave(&cfg, wave);
     let model = expand_walls(model);
+    sepika_element::factory::ensure_wall_side_column_analysis(
+        &model,
+        cfg.th_nonlinear
+            .then_some(sepika_core::model::AnalysisKind::TimeHistory),
+        if cfg.th_nonlinear {
+            "非線形時刻歴解析"
+        } else {
+            "線形時刻歴解析"
+        },
+        false,
+        Some(sepika_element::behavior::MassOption::Consistent),
+    )
+    .map_err(JobError::InvalidInput)?;
     let analysis = Analysis::prepare(&model).map_err(|e| JobError::Prepare(e.to_string()))?;
     let damping = match cfg.th_damping_model {
         ThDampingModel::StiffnessProportional => {

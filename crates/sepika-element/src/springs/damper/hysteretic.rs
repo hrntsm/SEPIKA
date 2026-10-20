@@ -88,7 +88,13 @@ impl ElementBehavior for HystereticDamperElement {
         f
     }
 
-    fn update_state(&mut self, du: &LocalVec, commit: bool, _ctx: &Ctx) {
+    fn update_state(
+        &mut self,
+        du: &LocalVec,
+        commit: bool,
+        _ctx: &Ctx,
+    ) -> Result<(), crate::behavior::ElementUpdateError> {
+        crate::behavior::validate_trial_increment(du, self.n_dof())?;
         let du_global: [f64; 12] = std::array::from_fn(|i| du.data[i]);
         let du_local = self.axis.rotate_to_local(&du_global);
         let delong = du_local[6] - du_local[0];
@@ -99,6 +105,7 @@ impl ElementBehavior for HystereticDamperElement {
             self.mat.commit();
             self.committed_elong = self.trial_elong;
         }
+        Ok(())
     }
 
     fn mass_matrix(&self, _opt: MassOption) -> LocalMat {
@@ -201,7 +208,7 @@ mod tests {
         };
         du.data[6] = elong - prev;
         let ctx = Ctx { model };
-        d.update_state(&du, true, &ctx);
+        d.update_state(&du, true, &ctx).unwrap();
     }
 
     #[test]

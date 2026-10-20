@@ -58,7 +58,7 @@ fn n_tj(xi: f64, l: f64) -> f64 {
 }
 
 fn gauss_dist<F: Fn(f64) -> f64>(a: f64, b: f64, w1: f64, w2: f64, f: F) -> f64 {
-    if (b - a).abs() < 1e-12 {
+    if b == a {
         return 0.0;
     }
     const G: [f64; 3] = [-0.7745966692414834, 0.0, 0.7745966692414834];
@@ -68,11 +68,324 @@ fn gauss_dist<F: Fn(f64) -> f64>(a: f64, b: f64, w1: f64, w2: f64, f: F) -> f64 
     let mut s = 0.0;
     for k in 0..3 {
         let x = mid + half * G[k];
-        let t = (x - a) / (b - a);
-        let w = w1 + (w2 - w1) * t;
+        let t = 0.5 * (1.0 + G[k]);
+        let w = w1 * (1.0 - t) + w2 * t;
         s += W[k] * w * f(x);
     }
     s * half
+}
+
+/// 元の全長荷重と、可撓端・剛域節点の局所12自由度荷重 [N, N·mm] を保持する。
+#[derive(Clone, Debug)]
+pub struct FrameDeadLoadMap {
+    loads: Vec<MemberLoad>,
+    frame: LocalFrame,
+    length_mm: f64,
+    li_mm: f64,
+    lj_mm: f64,
+    flex_load: [f64; 12],
+    rigid_node_load: [f64; 12],
+}
+
+impl FrameDeadLoadMap {
+    /// 解決済み剛域長 [mm] と全長座標の荷重を受け取る。フェイス上の集中荷重は可撓側に属する。
+    /// 非有限値、不正な長さ・荷重区間・方向、非有限な計算結果はエラーを返す。
+    pub fn new(
+        loads: &[MemberLoad],
+        frame: &LocalFrame,
+        length_mm: f64,
+        li_mm: f64,
+        lj_mm: f64,
+    ) -> Result<Self, String> {
+        if ![length_mm, li_mm, lj_mm].iter().all(|v| v.is_finite())
+            || length_mm <= 0.0
+            || li_mm < 0.0
+            || lj_mm < 0.0
+            || length_mm - li_mm - lj_mm <= 0.0
+            || !frame.rot.iter().flatten().all(|v| v.is_finite())
+        {
+            return Err("部材荷重の全長・解決済み剛域長・局所座標系が不正です".into());
+        }
+        let mut map = Self {
+            loads: loads.to_vec(),
+            frame: *frame,
+            length_mm,
+            li_mm,
+            lj_mm,
+            flex_load: [0.0; 12],
+            rigid_node_load: [0.0; 12],
+        };
+        let face_j = length_mm - lj_mm;
+        let flex_length = face_j - li_mm;
+        for load in loads {
+            load.validate_direction()
+                .map_err(|reason| format!("部材 {:?}: {reason}", load.elem))?;
+            let valid = match load.kind {
+                MemberLoadKind::Point { a, p } => {
+                    a.is_finite() && p.is_finite() && a >= 0.0 && a <= length_mm
+                }
+                MemberLoadKind::Distributed { a, b, w1, w2 } => {
+                    [a, b, w1, w2].iter().all(|v| v.is_finite())
+                        && a >= 0.0
+                        && b <= length_mm
+                        && b > a
+                }
+            };
+            if !valid {
+                return Err(format!(
+                    "部材 {:?}: 部材荷重の位置・区間・強度が不正です",
+                    load.elem
+                ));
+            }
+            for (axis, comp) in resolve(load, frame).into_iter().enumerate() {
+                let Some(comp) = comp else { continue };
+                match comp {
+                    Comp::Point { a, p } => {
+                        if a < li_mm {
+                            add_rigid_load(&mut map.rigid_node_load, axis, comp, 0, 0.0);
+                        } else if a > face_j {
+                            add_rigid_load(&mut map.rigid_node_load, axis, comp, 6, length_mm);
+                        } else {
+                            add_flex_load(
+                                &mut map.flex_load,
+                                axis,
+                                &Comp::Point { a: a - li_mm, p },
+                                flex_length,
+                            );
+                        }
+                    }
+                    Comp::Dist { a, b, w1, w2 } => {
+                        for (lo, hi, rigid_end) in [
+                            (0.0, li_mm, Some((0, 0.0))),
+                            (li_mm, face_j, None),
+                            (face_j, length_mm, Some((6, length_mm))),
+                        ] {
+                            let start = a.max(lo);
+                            let end = b.min(hi);
+                            if start >= end {
+                                continue;
+                            }
+                            let intensity = |x| w1 * ((b - x) / (b - a)) + w2 * ((x - a) / (b - a));
+                            let (w1, w2) = (intensity(start), intensity(end));
+                            if let Some((base, origin)) = rigid_end {
+                                add_rigid_load(
+                                    &mut map.rigid_node_load,
+                                    axis,
+                                    Comp::Dist {
+                                        a: start,
+                                        b: end,
+                                        w1,
+                                        w2,
+                                    },
+                                    base,
+                                    origin,
+                                );
+                            } else {
+                                add_flex_load(
+                                    &mut map.flex_load,
+                                    axis,
+                                    &Comp::Dist {
+                                        a: start - li_mm,
+                                        b: end - li_mm,
+                                        w1,
+                                        w2,
+                                    },
+                                    flex_length,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !map
+            .flex_load
+            .iter()
+            .chain(&map.rigid_node_load)
+            .all(|v| v.is_finite())
+        {
+            return Err("部材荷重の可撓端・剛域節点荷重が非有限です".into());
+        }
+        Ok(map)
+    }
+
+    /// 可撓端局所12自由度の等価荷重 [N, N·mm]。
+    pub fn flex_load(&self) -> &[f64; 12] {
+        &self.flex_load
+    }
+
+    /// 剛域の実荷重を節点へ移した局所12自由度荷重 [N, N·mm]。
+    pub fn rigid_node_load(&self) -> &[f64; 12] {
+        &self.rigid_node_load
+    }
+
+    /// 分割前の全長座標の荷重。
+    pub fn loads(&self) -> &[MemberLoad] {
+        &self.loads
+    }
+
+    /// 入力荷重の投影に使用した初期局所座標系。
+    pub fn frame(&self) -> &LocalFrame {
+        &self.frame
+    }
+
+    /// 節点間の全長 [mm]。
+    pub fn length_mm(&self) -> f64 {
+        self.length_mm
+    }
+
+    /// 解決済み剛域長 (i端, j端) [mm]。
+    pub fn rigid_lengths_mm(&self) -> (f64, f64) {
+        (self.li_mm, self.lj_mm)
+    }
+}
+
+/// 全長座標の実荷重と元節点端力から断面力 [N, Nmm] を回復する。
+#[derive(Clone, Debug)]
+pub struct LoadedFrameSection {
+    map: FrameDeadLoadMap,
+    node_force_local: [f64; 12],
+}
+
+impl LoadedFrameSection {
+    pub(crate) fn new(map: FrameDeadLoadMap, node_force_local: [f64; 12]) -> Self {
+        Self {
+            map,
+            node_force_local,
+        }
+    }
+
+    /// 部材荷重の元節点における等価並進力を全体系 [N] で返す。
+    pub fn applied_nodal_forces_global(&self) -> [[f64; 3]; 2] {
+        let (li, lj) = self.map.rigid_lengths_mm();
+        let flex = crate::frame::rigid_arm::to_node_force(self.map.flex_load(), li, lj);
+        let local = std::array::from_fn(|i| flex[i] + self.map.rigid_node_load()[i]);
+        let global = self.map.frame().rotate_to_global(&local);
+        std::array::from_fn(|end| std::array::from_fn(|d| global[end * 6 + d]))
+    }
+
+    /// 水平切断面の上側へ作用する部材荷重の全体並進合力 [N]。切断位置の集中荷重は断面力の左極限に合わせる。
+    pub fn applied_force_above_elevation(
+        &self,
+        z_i: f64,
+        z_j: f64,
+        z: f64,
+    ) -> Result<[f64; 3], String> {
+        if ![z_i, z_j, z].iter().all(|value| value.is_finite()) {
+            return Err("部材荷重の切断高さが非有限です".into());
+        }
+        let dz = z_j - z_i;
+        let x = if dz == 0.0 {
+            0.0
+        } else {
+            (z - z_i) / dz * self.map.length_mm
+        };
+        let mut force = [0.0; 3];
+        for load in &self.map.loads {
+            let magnitude = match load.kind {
+                MemberLoadKind::Point { a, p } => {
+                    if (dz > 0.0 && a >= x) || (dz < 0.0 && a < x) || (dz == 0.0 && z_i > z) {
+                        p
+                    } else {
+                        0.0
+                    }
+                }
+                MemberLoadKind::Distributed { a, b, w1, w2 } => {
+                    let (lo, hi) = if dz > 0.0 {
+                        (a.max(x).min(b), b)
+                    } else if dz < 0.0 {
+                        (a, b.min(x).max(a))
+                    } else if z_i > z {
+                        (a, b)
+                    } else {
+                        (a, a)
+                    };
+                    comp_resultant(&Comp::Dist { a, b, w1, w2 }, lo, hi)
+                }
+            };
+            let norm = sepika_core::geom::vec3::norm(load.dir);
+            for (d, value) in force.iter_mut().enumerate() {
+                *value += magnitude * load.dir[d] / norm;
+            }
+        }
+        if force.iter().any(|value| !value.is_finite()) {
+            return Err("壁側柱の切断片荷重が非有限です".into());
+        }
+        Ok(force)
+    }
+
+    /// i端からの全長比xi∈[0,1]における[N,Qy,Qz,Mx,My,Mz]。集中荷重位置では左極限を返す。
+    pub fn at(&self, xi: f64) -> Result<[f64; 6], String> {
+        if !xi.is_finite() || !(0.0..=1.0).contains(&xi) {
+            return Err("部材断面位置は有限の全長比0以上1以下が必要です".into());
+        }
+        let x = xi * self.map.length_mm;
+        let mut force = [0.0; 3];
+        let mut moment = [0.0; 3];
+        for load in &self.map.loads {
+            for (axis, comp) in resolve(load, &self.map.frame).into_iter().enumerate() {
+                match comp {
+                    Some(Comp::Point { a, p }) if a < x => {
+                        force[axis] += p;
+                        moment[axis] += p * (x - a);
+                    }
+                    Some(Comp::Dist { a, b, w1, w2 }) if a < x => {
+                        let end = b.min(x);
+                        let end_w = w1 * ((b - end) / (b - a)) + w2 * ((end - a) / (b - a));
+                        force[axis] += gauss_dist(a, end, w1, end_w, |_| 1.0);
+                        moment[axis] += gauss_dist(a, end, w1, end_w, |s| x - s);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let g = &self.node_force_local;
+        let result = [
+            -g[0] - force[0],
+            g[1] + force[1],
+            g[2] + force[2],
+            -g[3],
+            -g[4] - g[2] * x - moment[2],
+            -g[5] + g[1] * x + moment[1],
+        ];
+        if result.iter().any(|v| !v.is_finite()) {
+            return Err("荷重込み断面力が非有限です".into());
+        }
+        Ok(result)
+    }
+
+    /// 指定された全長比の順で荷重込み断面力を返す。
+    pub fn recover(&self, positions: &[f64]) -> Result<crate::frame::beam::MemberForces, String> {
+        let at = positions
+            .iter()
+            .map(|&xi| self.at(xi).map(|force| (xi, force)))
+            .collect::<Result<_, _>>()?;
+        Ok(crate::frame::beam::MemberForces { at })
+    }
+}
+
+fn add_flex_load(q: &mut [f64; 12], axis: usize, comp: &Comp, length: f64) {
+    if axis == 0 {
+        add_axial_consistent(q, comp, length);
+    } else {
+        add_bending_consistent(q, comp, length, axis);
+    }
+}
+
+fn add_rigid_load(q: &mut [f64; 12], axis: usize, comp: Comp, base: usize, origin: f64) {
+    let (force, moment) = match comp {
+        Comp::Point { a, p } => (p, (a - origin) * p),
+        Comp::Dist { a, b, w1, w2 } => (
+            gauss_dist(a, b, w1, w2, |_| 1.0),
+            gauss_dist(a, b, w1, w2, |x| x - origin),
+        ),
+    };
+    q[base + axis] += force;
+    match axis {
+        1 => q[base + 5] += moment,
+        2 => q[base + 4] -= moment,
+        _ => {}
+    }
 }
 
 /// スパン荷重を材端へ配る方式。
@@ -302,6 +615,397 @@ mod tests {
     use super::*;
     use sepika_core::ids::ElemId;
     use sepika_core::model::{MemberLoad, MemberLoadKind};
+
+    fn canonical_frame() -> LocalFrame {
+        LocalFrame {
+            rot: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        }
+    }
+
+    fn map_load(kind: MemberLoadKind, direction: [f64; 3]) -> FrameDeadLoadMap {
+        FrameDeadLoadMap::new(
+            &[MemberLoad::manual(ElemId(0), direction, kind)],
+            &canonical_frame(),
+            1000.0,
+            200.0,
+            100.0,
+        )
+        .unwrap()
+    }
+
+    fn assert_components(actual: &[f64; 12], entries: &[(usize, f64)]) {
+        let mut expected = [0.0; 12];
+        for &(index, value) in entries {
+            expected[index] = value;
+        }
+        for (i, (&actual, &expected)) in actual.iter().zip(&expected).enumerate() {
+            assert!(
+                (actual - expected).abs() <= 1e-8 * expected.abs().max(1.0),
+                "component {i}: {actual} != {expected}"
+            );
+        }
+    }
+
+    fn mapped_node_load(map: &FrameDeadLoadMap) -> [f64; 12] {
+        let (li, lj) = map.rigid_lengths_mm();
+        let mut node = crate::frame::rigid_arm::to_node_force(map.flex_load(), li, lj);
+        for (value, rigid) in node.iter_mut().zip(map.rigid_node_load()) {
+            *value += rigid;
+        }
+        node
+    }
+
+    #[test]
+    fn dead_load_rigid_point_has_no_flex_load_and_preserves_force_arm() {
+        let map = map_load(
+            MemberLoadKind::Point {
+                a: 100.0,
+                p: 1000.0,
+            },
+            [0.0, 1.0, 0.0],
+        );
+        assert_components(map.flex_load(), &[]);
+        assert_components(map.rigid_node_load(), &[(1, 1000.0), (5, 100000.0)]);
+        let d = crate::frame::rigid_arm::to_flex_force(map.rigid_node_load(), 200.0, 100.0);
+        assert_components(&d, &[(1, 1000.0), (5, -100000.0)]);
+        assert_eq!(
+            crate::frame::rigid_arm::to_node_force(&d, 200.0, 100.0),
+            *map.rigid_node_load()
+        );
+    }
+
+    #[test]
+    fn dead_load_flex_midpoint_uses_flex_length_hermite() {
+        let map = map_load(
+            MemberLoadKind::Point {
+                a: 550.0,
+                p: 1000.0,
+            },
+            [0.0, 1.0, 0.0],
+        );
+        assert_components(
+            map.flex_load(),
+            &[(1, 500.0), (5, 87500.0), (7, 500.0), (11, -87500.0)],
+        );
+        assert_components(map.rigid_node_load(), &[]);
+        let node = mapped_node_load(&map);
+        assert!((node[1] + node[7] - 1000.0).abs() < 1e-9);
+        assert!((node[5] + node[11] + 1000.0 * node[7] - 550000.0).abs() < 1e-8);
+    }
+
+    #[test]
+    fn dead_load_points_at_nodes_and_faces_belong_to_exactly_one_region() {
+        for (a, flex, rigid) in [
+            (0.0, vec![], vec![(1, 1000.0)]),
+            (200.0, vec![(1, 1000.0)], vec![]),
+            (900.0, vec![(7, 1000.0)], vec![]),
+            (1000.0, vec![], vec![(7, 1000.0)]),
+        ] {
+            let map = map_load(MemberLoadKind::Point { a, p: 1000.0 }, [0.0, 1.0, 0.0]);
+            assert_components(map.flex_load(), &flex);
+            assert_components(map.rigid_node_load(), &rigid);
+            let node = mapped_node_load(&map);
+            assert!((node[1] + node[7] - 1000.0).abs() < 1e-9);
+            assert!((node[5] + node[11] + 1000.0 * node[7] - a * 1000.0).abs() < 1e-8);
+        }
+        for a in [200.0 - 1e-10, 900.0 + 1e-10] {
+            let map = map_load(MemberLoadKind::Point { a, p: 1000.0 }, [0.0, 1.0, 0.0]);
+            assert_components(map.flex_load(), &[]);
+            assert!((map.rigid_node_load()[1] + map.rigid_node_load()[7] - 1000.0).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn dead_load_full_udl_preserves_rigid_flex_resultants_moments_and_virtual_work() {
+        let map = map_load(
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 1000.0,
+                w1: 2.0,
+                w2: 2.0,
+            },
+            [0.0, 1.0, 0.0],
+        );
+        assert_components(
+            map.flex_load(),
+            &[
+                (1, 700.0),
+                (5, 245000.0 / 3.0),
+                (7, 700.0),
+                (11, -245000.0 / 3.0),
+            ],
+        );
+        assert_components(
+            map.rigid_node_load(),
+            &[(1, 400.0), (5, 40000.0), (7, 200.0), (11, -10000.0)],
+        );
+        assert_components(
+            &crate::frame::rigid_arm::to_flex_force(map.rigid_node_load(), 200.0, 100.0),
+            &[(1, 400.0), (5, -40000.0), (7, 200.0), (11, 10000.0)],
+        );
+        let node = mapped_node_load(&map);
+        assert!((node[1] + node[7] - 2000.0).abs() < 1e-9);
+        assert!((node[5] + node[11] + 1000.0 * node[7] - 1000000.0).abs() < 1e-8);
+        let mut u_node = [0.0; 12];
+        u_node[1] = 3.0 / 7.0;
+        u_node[5] = 1.0 / 350.0;
+        u_node[7] = 90.0 / 7.0;
+        u_node[11] = 1.0 / 35.0;
+        let u_flex = crate::frame::rigid_arm::to_flex_disp(&u_node, 200.0, 100.0);
+        let work: f64 = map
+            .flex_load()
+            .iter()
+            .zip(u_flex)
+            .map(|(q, u)| q * u)
+            .sum::<f64>()
+            + map
+                .rigid_node_load()
+                .iter()
+                .zip(u_node)
+                .map(|(q, u)| q * u)
+                .sum::<f64>();
+        // 可撓の仮想変位1+2t+3t²+4t³と両剛域の線形変位を実荷重に対して積分。
+        assert!((work - 57200.0 / 7.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn dead_load_partial_trapezoid_reevaluates_strength_at_cut_face() {
+        let map = map_load(
+            MemberLoadKind::Distributed {
+                a: 100.0,
+                b: 500.0,
+                w1: 1.0,
+                w2: 5.0,
+            },
+            [0.0, 1.0, 0.0],
+        );
+        assert_components(map.rigid_node_load(), &[(1, 150.0), (5, 70000.0 / 3.0)]);
+        assert_components(
+            map.flex_load(),
+            &[
+                (1, 297645.0 / 343.0),
+                (5, 4356000.0 / 49.0),
+                (7, 62505.0 / 343.0),
+                (11, -1786500.0 / 49.0),
+            ],
+        );
+        let node = mapped_node_load(&map);
+        assert!((node[1] + node[7] - 1200.0).abs() < 1e-9);
+        assert!((node[5] + node[11] + 1000.0 * node[7] - 1240000.0 / 3.0).abs() < 1e-8);
+    }
+
+    #[test]
+    fn dead_load_axial_udl_splits_both_rigid_ends_without_moments() {
+        for sign in [-1.0, 1.0] {
+            let map = map_load(
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: 1000.0,
+                    w1: 2.0 * sign,
+                    w2: 2.0 * sign,
+                },
+                [1.0, 0.0, 0.0],
+            );
+            assert_components(map.flex_load(), &[(0, 700.0 * sign), (6, 700.0 * sign)]);
+            assert_components(
+                map.rigid_node_load(),
+                &[(0, 400.0 * sign), (6, 200.0 * sign)],
+            );
+            let unrestrained =
+                FrameDeadLoadMap::new(map.loads(), map.frame(), 1000.0, 0.0, 0.0).unwrap();
+            assert_components(
+                unrestrained.flex_load(),
+                &[(0, 1000.0 * sign), (6, 1000.0 * sign)],
+            );
+        }
+    }
+
+    #[test]
+    fn dead_load_rotation_reversal_and_sign_preserve_physical_nodal_load() {
+        let kinds = [
+            MemberLoadKind::Point {
+                a: 100.0,
+                p: 1000.0,
+            },
+            MemberLoadKind::Point {
+                a: 550.0,
+                p: 1000.0,
+            },
+            MemberLoadKind::Distributed {
+                a: 100.0,
+                b: 500.0,
+                w1: 1.0,
+                w2: 5.0,
+            },
+        ];
+        let rotated = LocalFrame {
+            rot: [[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+        };
+        let reversed = LocalFrame {
+            rot: [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]],
+        };
+        for kind in kinds {
+            let original = map_load(kind.clone(), [0.0, 1.0, 0.0]);
+            let negative = map_load(kind.clone(), [0.0, -1.0, 0.0]);
+            let z_plane = map_load(kind.clone(), [0.0, 0.0, 1.0]);
+            let rot = FrameDeadLoadMap::new(
+                &[MemberLoad::manual(
+                    ElemId(0),
+                    [-1.0, 0.0, 0.0],
+                    kind.clone(),
+                )],
+                &rotated,
+                1000.0,
+                200.0,
+                100.0,
+            )
+            .unwrap();
+            let reversed_kind = match kind {
+                MemberLoadKind::Point { a, p } => MemberLoadKind::Point { a: 1000.0 - a, p },
+                MemberLoadKind::Distributed { a, b, w1, w2 } => MemberLoadKind::Distributed {
+                    a: 1000.0 - b,
+                    b: 1000.0 - a,
+                    w1: w2,
+                    w2: w1,
+                },
+            };
+            let rev = FrameDeadLoadMap::new(
+                &[MemberLoad::manual(
+                    ElemId(0),
+                    [0.0, 1.0, 0.0],
+                    reversed_kind,
+                )],
+                &reversed,
+                1000.0,
+                100.0,
+                200.0,
+            )
+            .unwrap();
+            for (actual, expected) in [
+                (negative.flex_load(), original.flex_load()),
+                (negative.rigid_node_load(), original.rigid_node_load()),
+            ] {
+                for (a, e) in actual.iter().zip(expected) {
+                    assert!((a + e).abs() < 1e-8);
+                }
+            }
+            assert_components(
+                rot.flex_load(),
+                &original
+                    .flex_load()
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .collect::<Vec<_>>(),
+            );
+            assert_components(
+                rot.rigid_node_load(),
+                &original
+                    .rigid_node_load()
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .collect::<Vec<_>>(),
+            );
+            let node = mapped_node_load(&original);
+            let global_rot = rotated.rotate_to_global(&mapped_node_load(&rot));
+            let global_rev = reversed.rotate_to_global(&mapped_node_load(&rev));
+            let node_z = mapped_node_load(&z_plane);
+            for base in [0, 6] {
+                assert!((global_rot[base] + node[base + 1]).abs() < 1e-8);
+                assert!((global_rot[base + 5] - node[base + 5]).abs() < 1e-8);
+                for axis in 0..6 {
+                    assert!((global_rev[base + axis] - node[6 - base + axis]).abs() < 1e-8);
+                }
+                assert!((node_z[base + 2] - node[base + 1]).abs() < 1e-8);
+                assert!((node_z[base + 4] + node[base + 5]).abs() < 1e-8);
+            }
+        }
+    }
+
+    #[test]
+    fn dead_load_map_retains_original_input_and_rejects_invalid_geometry_or_loads() {
+        let frame = canonical_frame();
+        let loads = [MemberLoad::manual(
+            ElemId(0),
+            [0.0, 1.0, 0.0],
+            MemberLoadKind::Point {
+                a: 200.0,
+                p: 1000.0,
+            },
+        )];
+        let map = FrameDeadLoadMap::new(&loads, &frame, 1000.0, 200.0, 100.0).unwrap();
+        assert_eq!(map.loads(), &loads);
+        assert_eq!(map.frame().rot, frame.rot);
+        assert_eq!(map.length_mm(), 1000.0);
+        assert_eq!(map.rigid_lengths_mm(), (200.0, 100.0));
+        for (length, li, lj) in [
+            (0.0, 0.0, 0.0),
+            (1000.0, -1.0, 0.0),
+            (1000.0, 600.0, 400.0),
+            (f64::NAN, 0.0, 0.0),
+        ] {
+            assert!(FrameDeadLoadMap::new(&loads, &frame, length, li, lj).is_err());
+        }
+        for kind in [
+            MemberLoadKind::Point { a: -1.0, p: 1.0 },
+            MemberLoadKind::Point { a: 1001.0, p: 1.0 },
+            MemberLoadKind::Point {
+                a: 100.0,
+                p: f64::INFINITY,
+            },
+            MemberLoadKind::Distributed {
+                a: 100.0,
+                b: 100.0,
+                w1: 1.0,
+                w2: 1.0,
+            },
+        ] {
+            let load = MemberLoad::manual(ElemId(0), [0.0, 1.0, 0.0], kind);
+            assert!(FrameDeadLoadMap::new(&[load], &frame, 1000.0, 200.0, 100.0).is_err());
+        }
+        let invalid_direction = MemberLoad::manual(ElemId(0), [0.0; 3], loads[0].kind.clone());
+        assert!(FrameDeadLoadMap::new(&[invalid_direction], &frame, 1000.0, 200.0, 100.0).is_err());
+        let empty = FrameDeadLoadMap::new(&[], &frame, 1000.0, 200.0, 100.0).unwrap();
+        assert_components(empty.flex_load(), &[]);
+        assert_components(empty.rigid_node_load(), &[]);
+    }
+
+    #[test]
+    fn dead_load_short_distributed_interval_is_not_dropped() {
+        let map = FrameDeadLoadMap::new(
+            &[MemberLoad::manual(
+                ElemId(0),
+                [1.0, 0.0, 0.0],
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: 1e-13,
+                    w1: 1e16,
+                    w2: 1e16,
+                },
+            )],
+            &canonical_frame(),
+            1000.0,
+            200.0,
+            100.0,
+        )
+        .unwrap();
+        assert_components(map.rigid_node_load(), &[(0, 1000.0)]);
+        let (a, b) = (100.0, 100.0 + 1e-13);
+        let map = map_load(
+            MemberLoadKind::Distributed {
+                a,
+                b,
+                w1: 1e13,
+                w2: 3e13,
+            },
+            [0.0, 1.0, 0.0],
+        );
+        let resultant = (b - a) * 2e13;
+        let centroid = a + (b - a) * 7.0 / 12.0;
+        assert!((map.rigid_node_load()[1] - resultant).abs() < 1e-12);
+        assert!((map.rigid_node_load()[5] - resultant * centroid).abs() < 1e-10);
+    }
 
     #[test]
     fn signed_static_transfer_preserves_independent_reaction_fixtures_and_adapter() {

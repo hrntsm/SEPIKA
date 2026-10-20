@@ -5,6 +5,8 @@
 
 mod column;
 mod detect;
+pub mod local_equilibrium;
+pub mod release_connection;
 
 pub use column::{InPlaneReleasedColumn, ReleaseAxis};
 pub use detect::{
@@ -59,6 +61,8 @@ mod tests {
             material: None,
             committed_disp: [0.0; 12],
             trial_disp: [0.0; 12],
+            committed_member_loads: Vec::new(),
+            trial_member_loads: Vec::new(),
             local_stiffness_cache: std::sync::OnceLock::new(),
         };
         InPlaneReleasedColumn::new(inner, release_axis)
@@ -263,6 +267,17 @@ mod tests {
         let mut model = make_bare_wall_model();
         let wall = model.elements[0].clone();
         crate::wall::add_surrounding_frame(&mut model, &wall);
+        let column_id = SectionId(model.sections.len() as u32);
+        let mut column = sepika_core::model::Section::zero(column_id, "C600".into());
+        column.frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+        column.material = Some(MaterialId(0));
+        model.sections.push(column);
+        for (id, nodes) in [(3, [0, 3]), (4, [1, 2])] {
+            let mut data = make_column_data(nodes);
+            data.id = ElemId(id);
+            data.section = Some(column_id);
+            model.elements.push(data);
+        }
         model
     }
 
@@ -281,7 +296,10 @@ mod tests {
                 make_node(2, [4000.0, 0.0, 3000.0]),
                 make_node(3, [0.0, 0.0, 3000.0]),
             ],
-            sections: vec![wall_shape.to_section(SectionId(0), "W150".into())],
+            sections: vec![sepika_core::model::Section {
+                material: Some(MaterialId(0)),
+                ..wall_shape.to_section(SectionId(0), "W150".into())
+            }],
             materials: vec![Material {
                 strength_factor: None,
                 concrete_class: Default::default(),
@@ -334,8 +352,8 @@ mod tests {
     #[test]
     fn test_wall_side_column_release_left_edge_is_some() {
         let model = make_wall_model();
-        let data = make_column_data([0, 3]);
-        assert!(wall_side_column_release(&data, &model).is_some());
+        let data = model.elements.iter().find(|e| e.id == ElemId(3)).unwrap();
+        assert!(wall_side_column_release(data, &model).is_some());
     }
 
     /// 壁と無関係な柱（節点が壁の節点と一致しない）→ None
@@ -370,12 +388,81 @@ mod tests {
             .push(make_node(5, [100_000.0, 100_000.0, 3000.0]));
         let idx = SideColumnEdges::build(&model);
         for nodes in [[0u32, 3], [1, 2], [0, 2], [4, 5]] {
-            let data = make_column_data(nodes);
+            let mut data = make_column_data(nodes);
+            if let Some(owner) = model
+                .elements
+                .iter()
+                .find(|e| e.nodes.as_slice() == data.nodes.as_slice())
+            {
+                data = owner.clone();
+            }
             assert_eq!(
                 idx.release_axis(&data, &model),
                 wall_side_column_release(&data, &model),
                 "節点対 {:?} で走査版と不一致",
                 nodes
+            );
+        }
+    }
+
+    #[test]
+    fn all_three_member_kinds_share_detection_and_index_selection() {
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let mut model = make_wall_model();
+            for member in model.elements.iter_mut().filter(|e| e.id != ElemId(0)) {
+                member.kind = kind;
+            }
+            let index = SideColumnEdges::build(&model);
+            for id in [ElemId(3), ElemId(4)] {
+                let member = model.elements.iter().find(|e| e.id == id).unwrap();
+                assert_eq!(
+                    wall_side_column_release(member, &model),
+                    Some(ReleaseAxis::LocalDirection([0.0, 1.0]))
+                );
+                assert_eq!(
+                    index.release_axis(member, &model),
+                    wall_side_column_release(member, &model)
+                );
+                assert_eq!(
+                    index
+                        .classification()
+                        .replacement_bindings(id)
+                        .unwrap()
+                        .len(),
+                    1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pure_steel_boundary_columns_are_not_released() {
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let mut model = make_wall_model();
+            model.materials[0].category = MaterialCategory::Steel;
+            model.materials[0].fy = Some(235.0);
+            model.sections[0].shape = None;
+            model.sections[0].thickness = Some(9.0);
+            for member in model.elements.iter_mut().filter(|e| e.id != ElemId(0)) {
+                member.kind = kind;
+            }
+            let index = SideColumnEdges::build(&model);
+            let member = model.elements.iter().find(|e| e.id == ElemId(3)).unwrap();
+            assert!(wall_side_column_release(member, &model).is_none());
+            assert!(index.release_axis(member, &model).is_none());
+            let classified = index.classification().classify(member, &model);
+            assert!(classified.issues.is_empty());
+            assert_eq!(
+                classified.bindings[0].role,
+                sepika_core::model::WallSideColumnRole::SteelPlateBoundary
             );
         }
     }

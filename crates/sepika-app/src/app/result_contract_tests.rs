@@ -152,6 +152,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-member-load-direction", Some(22), "旧契約"),
         ("old-gravity-run-provenance", Some(23), "旧契約"),
         ("old-attached-primary-support-loads", Some(24), "旧契約"),
+        ("old-before-wall-side-column-contract", Some(26), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -196,7 +197,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
 #[test]
 fn ovika_old_analysis_is_unavailable_until_explicit_reanalysis() {
     let app = calculated();
-    for version in [5, 6, 7, 20, 22, 24] {
+    for version in [5, 6, 7, 20, 22, 24, 26] {
         let (mut loaded, path) = restore(
             &app,
             Some(version),
@@ -300,6 +301,7 @@ fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_
         ("design-old-skew-rectangle", Some(4)),
         ("design-old-rc-q0", Some(11)),
         ("design-old-secondary-load-ownership", Some(16)),
+        ("design-old-before-wall-side-column-contract", Some(18)),
         ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
     ] {
         let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);
@@ -452,7 +454,17 @@ fn old_analysis_is_excluded_before_partial_success_or_failure_without_restamping
     app.core.analysis_cfg.push_steps = 2;
     app.generate_stories_action();
     app.run_seismic(SeismicDir::X);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
     app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
     super::tests::select_holding_points(&mut app);
     use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
     app.adopt_holding_evaluation(EvaluationPurpose::Ds).unwrap();

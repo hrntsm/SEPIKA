@@ -178,7 +178,13 @@ impl ElementBehavior for MaxwellDamperElement {
         f
     }
 
-    fn update_state(&mut self, du: &LocalVec, commit: bool, _ctx: &Ctx) {
+    fn update_state(
+        &mut self,
+        du: &LocalVec,
+        commit: bool,
+        _ctx: &Ctx,
+    ) -> Result<(), crate::behavior::ElementUpdateError> {
+        crate::behavior::validate_trial_increment(du, self.n_dof())?;
         let du_global: [f64; 12] = std::array::from_fn(|i| du.data[i]);
         let du_local = self.axis.rotate_to_local(&du_global);
         let delong = du_local[6] - du_local[0];
@@ -191,6 +197,7 @@ impl ElementBehavior for MaxwellDamperElement {
         } else {
             self.trial_elong = self.committed_elong + delong;
         }
+        Ok(())
     }
 
     fn mass_matrix(&self, _opt: MassOption) -> LocalMat {
@@ -333,7 +340,7 @@ mod tests {
 
         for _ in 0..4 {
             let pre = d.clone();
-            d.update_state(&du, true, &ctx);
+            d.update_state(&du, true, &ctx).unwrap();
             let elong = d.committed_elong;
             let expected = pre.axial_force(elong);
             assert!(
@@ -416,7 +423,7 @@ mod tests {
         du.data[6] = 1.0;
         let model = Model::default();
         let ctx = Ctx { model: &model };
-        d.update_state(&du, false, &ctx);
+        d.update_state(&du, false, &ctx).unwrap();
         assert!((d.trial_elong - 1.0).abs() < 1e-9);
         let f = d.internal_force(&ctx);
         let n = d.axial_force(1.0);

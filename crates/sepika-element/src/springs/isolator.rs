@@ -315,7 +315,13 @@ impl ElementBehavior for IsolatorElement {
         })
     }
 
-    fn update_state(&mut self, du: &LocalVec, commit: bool, _ctx: &Ctx) {
+    fn update_state(
+        &mut self,
+        du: &LocalVec,
+        commit: bool,
+        _ctx: &Ctx,
+    ) -> Result<(), crate::behavior::ElementUpdateError> {
+        crate::behavior::validate_trial_increment(du, self.n_dof())?;
         let du_global: [f64; 12] = std::array::from_fn(|i| du.data[i]);
         let du_local = self.axis.rotate_to_local(&du_global);
         for i in 0..12 {
@@ -388,6 +394,7 @@ impl ElementBehavior for IsolatorElement {
         if commit {
             self.committed_disp = self.trial_disp;
         }
+        Ok(())
     }
 
     fn mass_matrix(&self, _opt: MassOption) -> LocalMat {

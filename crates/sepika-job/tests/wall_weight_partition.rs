@@ -8,6 +8,325 @@ use sepika_load::story_gen::{
     generate_stories, generate_stories_with_opts, generate_stories_with_synced_self_weight,
 };
 
+#[path = "../../../test_fixtures/rc_wall617.rs"]
+mod rc_wall617;
+
+const WALL_SYSTEM_KINDS: [ElementKind; 3] = [
+    ElementKind::Beam,
+    ElementKind::Fiber,
+    ElementKind::MultiSpring,
+];
+
+fn wall_system_mass_fixture(kind: ElementKind, steel: bool, generated: bool) -> Model {
+    let mut model = if generated {
+        rc_wall617::input_model()
+    } else {
+        rc_wall617::expanded_model()
+    };
+    model.materials[0].young = if steel { 205_000.0 } else { 30_000.0 };
+    model.materials[0].shear = Some(if steel { 80_000.0 } else { 12_500.0 });
+    if steel {
+        model.materials[0].category = MaterialCategory::Steel;
+        model.materials[0].density = 7.85e-9;
+        model.materials[0].fc = None;
+        model.materials[0].fy = Some(235.0);
+    }
+    for section in &mut model.sections {
+        let mut shape = section.shape.clone().unwrap();
+        match &mut shape {
+            SectionShape::RcColumnRect { b, d, .. } | SectionShape::RcBeamRect { b, d, .. } => {
+                *b = 400.0;
+                *d = 400.0;
+            }
+            SectionShape::RcWall { thickness, .. } => *thickness = 200.0,
+            _ => unreachable!(),
+        }
+        if steel {
+            shape = SectionShape::SteelFlatBar {
+                width: 400.0,
+                thick: 400.0,
+            };
+        }
+        let mut resized = shape.to_section(section.id, section.name.clone());
+        resized.frame_use = section.frame_use;
+        resized.material = section.material;
+        if !steel {
+            resized.rebar_material = section.rebar_material;
+            resized.shear_rebar_material = section.shear_rebar_material;
+        } else if section.id == SectionId(2) {
+            resized.shape = None;
+            resized.thickness = Some(10.0);
+            resized.width = 10.0;
+            resized.depth = 0.0;
+            resized.area = 0.0;
+            resized.iy = 0.0;
+            resized.iz = 0.0;
+            resized.j = 0.0;
+            resized.as_y = 0.0;
+            resized.as_z = 0.0;
+            resized.property_basis = Default::default();
+        }
+        *section = resized;
+    }
+    for element in &mut model.elements {
+        if element.id.0 < 2 {
+            element.kind = kind;
+        }
+        element.rigid_zone = RigidZone {
+            source_i: ZoneSource::Manual,
+            source_j: ZoneSource::Manual,
+            face_i: Some(200.0),
+            face_j: Some(200.0),
+            ..Default::default()
+        };
+    }
+    for node in &mut model.nodes {
+        node.mass = None;
+    }
+    for story in &mut model.stories {
+        story.seismic_weight = None;
+        story.weight_override = None;
+    }
+    model.load_cases.clear();
+    model.combinations.clear();
+    model
+}
+
+fn local_translation_mass(matrix: &sepika_element::behavior::LocalMat, direction: usize) -> f64 {
+    let slots: Vec<_> = (0..matrix.n / 6).map(|node| node * 6 + direction).collect();
+    slots
+        .iter()
+        .flat_map(|&i| slots.iter().map(move |&j| (i, j)))
+        .map(|(i, j)| matrix.get(i, j))
+        .sum()
+}
+
+fn wall_mass_close(actual_t: f64, expected_t: f64) {
+    assert!(
+        actual_t.is_finite() && (actual_t - expected_t).abs() < 1e-10,
+        "actual={actual_t:.16e} t expected={expected_t:.16e} t"
+    );
+}
+
+#[test]
+fn direct_wall_factory_keeps_clear_plate_mass_for_three_boundary_representations() {
+    use sepika_element::behavior::MassOption;
+    for steel in [false, true] {
+        for kind in WALL_SYSTEM_KINDS {
+            for all_boundaries in [false, true] {
+                for width_mm in if steel {
+                    vec![4000.0, 8000.0]
+                } else {
+                    vec![4000.0]
+                } {
+                    let mut model = wall_system_mass_fixture(kind, steel, false);
+                    model.nodes[1].coord[0] = width_mm;
+                    model.nodes[3].coord[0] = width_mm;
+                    let (expected_plate_t, expected_matrix_t) = if !steel {
+                        (4.5813810016672365, 10.06337536263658)
+                    } else if width_mm == 4000.0 {
+                        (0.73476, 18.31876)
+                    } else {
+                        (1.55116, 29.18316)
+                    };
+                    if all_boundaries {
+                        for element in &mut model.elements[..4] {
+                            element.kind = kind;
+                        }
+                    }
+                    for option in [MassOption::Lumped, MassOption::Consistent] {
+                        let mut totals_t = [0.0; 3];
+                        for element in &model.elements {
+                            let behavior = sepika_element::factory::build_behavior(element, &model);
+                            let matrix = behavior.try_mass_matrix(option).unwrap();
+                            for (direction, total_t) in totals_t.iter_mut().enumerate() {
+                                let mass_t = local_translation_mass(&matrix, direction);
+                                if element.kind == ElementKind::Wall {
+                                    wall_mass_close(mass_t, expected_plate_t);
+                                }
+                                *total_t += mass_t;
+                            }
+                        }
+                        for total_t in totals_t {
+                            wall_mass_close(total_t, expected_matrix_t);
+                        }
+                    }
+                    let map =
+                        sepika_core::dof::DofMap::build(&model).including_restrained_node_dofs();
+                    let error = sepika_solver::common::assemble::assemble_global_m(
+                        &model,
+                        &map,
+                        MassOption::Lumped,
+                    )
+                    .unwrap_err()
+                    .to_string();
+                    assert!(
+                        error.contains("解析壁要素 4") && error.contains("物理壁版IDが未定義"),
+                        "{error}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn prepared_wall_system_mass_separates_plate_matrix_and_base_correction_owners() {
+    use sepika_core::dof::{Dof, DofMap};
+    use sepika_element::behavior::MassOption;
+    for steel in [false, true] {
+        let expected_plate_t = if steel { 0.942 } else { 4.5813810016672365 };
+        let expected_matrix_t = if steel { 18.526 } else { 10.06337536263658 };
+        let expected_physical_t = if steel { 18.526 } else { 10.376632183263398 };
+        let expected_extra_t = if steel { 0.0 } else { 0.3132568206268196 };
+        for kind in WALL_SYSTEM_KINDS {
+            for method in [MassMethod::CorrectedLumped, MassMethod::LumpedOnly] {
+                let mut model = wall_system_mass_fixture(kind, steel, true);
+                let settings = sepika_job::settings::AnalysisSettings {
+                    mass_method: method,
+                    ..Default::default()
+                };
+                sepika_job::prepare::prepare_model_for_analysis(&mut model, &settings, None)
+                    .unwrap();
+                model.validate_wall_weight_generation().unwrap();
+                assert_eq!(model.mass_method, method);
+                let mut node_totals_t = [0.0; 3];
+                for node in &model.nodes {
+                    let mass = node.mass.unwrap_or([0.0; 6]);
+                    if !model.generated_masters.contains(&node.id) {
+                        assert!(node.mass.is_none());
+                        continue;
+                    }
+                    let base = node.coord[2] == 0.0;
+                    let expected_t = match method {
+                        MassMethod::CorrectedLumped => {
+                            if base {
+                                expected_extra_t
+                            } else {
+                                0.0
+                            }
+                        }
+                        MassMethod::LumpedOnly => {
+                            expected_matrix_t / 2.0 + if base { expected_extra_t } else { 0.0 }
+                        }
+                    };
+                    wall_mass_close(mass[0], expected_t);
+                    wall_mass_close(mass[1], expected_t);
+                    wall_mass_close(mass[2], 0.0);
+                    if base {
+                        assert!(node.restraint.is_fixed(Dof::Ux));
+                        assert!(node.restraint.is_fixed(Dof::Uy));
+                        let active = DofMap::build(&model);
+                        assert!(active.active(node.id.index() * 6).is_none());
+                    }
+                    for direction in 0..3 {
+                        node_totals_t[direction] += mass[direction];
+                    }
+                }
+                let expected_node_t = if method == MassMethod::CorrectedLumped {
+                    expected_extra_t
+                } else {
+                    expected_physical_t
+                };
+                wall_mass_close(node_totals_t[0], expected_node_t);
+                wall_mass_close(node_totals_t[1], expected_node_t);
+                let (expanded, index, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+                let walls: Vec<_> = expanded
+                    .elements
+                    .iter()
+                    .filter(|e| index.plate_of(e.id) == Some(WallPlateId(0)))
+                    .collect();
+                assert_eq!(walls.len(), 1);
+                assert_eq!(
+                    expanded.generated_wall_origins.get(&walls[0].id),
+                    Some(&WallPlateId(0))
+                );
+                let weight = expanded.wall_weight(&expanded.wall_plates[0]).unwrap();
+                wall_mass_close(weight.totals.matrix_n / GRAVITY_MM_S2, expected_plate_t);
+                wall_mass_close(weight.totals.physical_n / GRAVITY_MM_S2, expected_plate_t);
+                let full = DofMap::build(&expanded).including_restrained_node_dofs();
+                for option in [MassOption::Lumped, MassOption::Consistent] {
+                    let wall_matrix = sepika_element::factory::build_behavior(walls[0], &expanded)
+                        .try_mass_matrix(option)
+                        .unwrap();
+                    for direction in 0..3 {
+                        wall_mass_close(
+                            local_translation_mass(&wall_matrix, direction),
+                            expected_plate_t,
+                        );
+                    }
+                    let matrix = sepika_solver::common::assemble::assemble_global_m(
+                        &expanded, &full, option,
+                    )
+                    .unwrap()
+                    .to_dense();
+                    for direction in 0..3 {
+                        let slots: Vec<_> = (0..expanded.nodes.len())
+                            .map(|node| full.active(node * 6 + direction).unwrap() as usize)
+                            .collect();
+                        let total_t: f64 = slots
+                            .iter()
+                            .flat_map(|&i| slots.iter().map(move |&j| (i, j)))
+                            .map(|(i, j)| matrix[(i, j)])
+                            .sum();
+                        let expected_t = if direction < 2 {
+                            expected_physical_t
+                        } else if method == MassMethod::CorrectedLumped {
+                            expected_matrix_t
+                        } else {
+                            0.0
+                        };
+                        wall_mass_close(total_t, expected_t);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn wall_mass_rejects_inertial_torsion_gauge_and_nonlinear_time_history() {
+    use sepika_element::behavior::MassOption;
+    for kind in WALL_SYSTEM_KINDS {
+        let mut model = wall_system_mass_fixture(kind, false, true);
+        sepika_job::prepare::prepare_model_for_analysis(&mut model, &Default::default(), None)
+            .unwrap();
+        let (mut expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&model);
+        for element in &mut expanded.elements[..2] {
+            element.end_cond = [EndCondition::Pinned; 2];
+        }
+        let full = sepika_core::dof::DofMap::build(&expanded).including_restrained_node_dofs();
+        let error = sepika_solver::common::assemble::assemble_global_m(
+            &expanded,
+            &full,
+            MassOption::Consistent,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("質量行列組立")
+                && error.contains("部材 ID 0")
+                && error.contains("壁 ID")
+                && error.contains("共通ねじり回転は慣性を持つ"),
+            "{error}"
+        );
+        let error = sepika_element::factory::ensure_wall_side_column_analysis(
+            &expanded,
+            Some(AnalysisKind::TimeHistory),
+            "非線形時刻歴解析",
+            false,
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("非線形時刻歴解析")
+                && error.contains("部材 ID 0")
+                && error.contains("従属回転の慣性の連成は未定式化"),
+            "{error}"
+        );
+    }
+}
+
 fn fixture(top: f64) -> Model {
     let mut model = Model::default();
     for (i, coord) in [

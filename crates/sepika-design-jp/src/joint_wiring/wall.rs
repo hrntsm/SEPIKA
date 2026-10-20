@@ -64,6 +64,7 @@ fn check_walls_selected(
     out: &mut Vec<(NodeId, String, CheckOutcome)>,
 ) -> HashMap<ElemId, WallShearReference> {
     let mut skeletons = HashMap::new();
+    let side_column_index = sepika_core::model::WallSideColumnIndex::build(model);
     for (eid, forces) in member_forces {
         let Some(elem) = model.element(*eid) else {
             continue;
@@ -188,6 +189,29 @@ fn check_walls_selected(
         if !sepika_element::wall::misc_wall::is_rc_wall(elem, model) {
             continue;
         }
+        let bindings = match side_column_index.wall_replacement_bindings(elem.id) {
+            Ok(bindings) => bindings,
+            Err(issues) => {
+                for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
+                    out.push((
+                        elem.nodes[0],
+                        label.into(),
+                        CheckOutcome::Skipped {
+                            reason: issues
+                                .iter()
+                                .map(|issue| {
+                                    sepika_element::factory::wall_side_column_issue_message(
+                                        issue, None,
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        },
+                    ));
+                }
+                continue;
+            }
+        };
         let sigma_wh = match wall_rebar_strength(wall_shear_mat, "横筋") {
             Ok(strength) => Some(strength),
             Err(msg) => {
@@ -219,7 +243,6 @@ fn check_walls_selected(
         if term != LoadTerm::Long && (!ps.is_finite() || ps < 0.0) {
             allowable_issue = Some("直交最小筋比 ps が有限の非負値ではありません".into());
         }
-        let wall_nodes = &elem.nodes;
         let mut side_columns = Vec::new();
         let mut sum_col_depth = 0.0;
         let mut nonlinear_issue = (mat.concrete_class != sepika_core::units::ConcreteClass::Normal)
@@ -237,12 +260,7 @@ fn check_walls_selected(
         let mut col_main_area_max = 0.0_f64;
         let mut dc_max = 0.0_f64;
         for m in members {
-            if !m.is_column() {
-                continue;
-            }
-            let n0 = m.elem.nodes[0];
-            let n1 = m.elem.nodes[1];
-            if !(wall_nodes.contains(&n0) && wall_nodes.contains(&n1)) {
+            if !bindings.iter().any(|binding| binding.column == m.elem.id) {
                 continue;
             }
             if matches!(
@@ -319,16 +337,10 @@ fn check_walls_selected(
         let mut reference_column_depth = 0.0;
         if let Some(geometry) = &wall_geometry {
             for (side, column_dimensions) in column_geometry.iter_mut().enumerate() {
-                let edge = [geometry.bottom[side], geometry.top[side]];
-                let columns: Vec<_> = model
-                    .elements
+                let columns: Vec<_> = bindings
                     .iter()
-                    .filter(|column| {
-                        sepika_element::wall::side_column::is_line_member(column.kind)
-                            && column.nodes.len() == 2
-                            && column.nodes.contains(&edge[0])
-                            && column.nodes.contains(&edge[1])
-                    })
+                    .filter(|binding| binding.side == side)
+                    .filter_map(|binding| model.element(binding.column))
                     .collect();
                 if columns.len() > 1 {
                     nonlinear_issue = Some("同じ壁辺に複数の側柱がある参考骨格は未対応です".into());

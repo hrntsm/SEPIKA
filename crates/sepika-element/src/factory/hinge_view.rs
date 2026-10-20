@@ -77,16 +77,23 @@ pub fn build_hinge_view(
     n_alpha: usize,
     n_beta: usize,
 ) -> Result<HingeView, RebarGeometryError> {
+    if let Some(reason) = super::wall_side_column_input_issue(data, model, Some(kind)) {
+        let mut view = HingeView::none(AnalysisHingeModel::Other);
+        view.unavailability_reason = Some(reason);
+        return Ok(view);
+    }
+    if crate::frame::beam::is_elastic_wall_girder(model, data) {
+        let mut view = HingeView::none(AnalysisHingeModel::Other);
+        view.unavailability_reason =
+            Some("壁上下の剛梁は弾性高剛性部材です。材料降伏は評価しません。".into());
+        return Ok(view);
+    }
     if let Some(reason) = super::springs::rc_reference_target_issue(data, model) {
         let model_kind = match data.kind {
             ElementKind::Beam if resolves_to_concentrated_spring(data, model) => {
                 AnalysisHingeModel::ConcentratedSpring
             }
-            ElementKind::Beam
-                if crate::wall::side_column::wall_side_column_release(data, model).is_none() =>
-            {
-                AnalysisHingeModel::Fiber
-            }
+            ElementKind::Beam => AnalysisHingeModel::Fiber,
             ElementKind::Fiber => AnalysisHingeModel::Fiber,
             ElementKind::MultiSpring => AnalysisHingeModel::MultiSpring,
             _ => AnalysisHingeModel::Other,
@@ -115,6 +122,8 @@ pub fn build_hinge_view(
 /// 壁側柱の面内解放がある場合と、ファイバー／MS に解決される場合は `false`。
 pub fn resolves_to_concentrated_spring(data: &ElementData, model: &Model) -> bool {
     data.kind == ElementKind::Beam
+        && !crate::frame::beam::is_elastic_wall_girder(model, data)
+        && super::wall_side_column_input_issue(data, model, None).is_none()
         && crate::wall::side_column::wall_side_column_release(data, model).is_none()
         && matches!(
             resolve_force_regime(data, model),
@@ -123,7 +132,6 @@ pub fn resolves_to_concentrated_spring(data: &ElementData, model: &Model) -> boo
 }
 
 /// `Beam` はフォースレジームで材端集中ばね／ファイバーに分岐する。
-/// 壁側柱の面内解放は非線形ヒンジを持たないため `Other`。
 #[allow(clippy::too_many_arguments)]
 fn beam_view(
     data: &ElementData,
@@ -171,9 +179,6 @@ fn beam_view(
             mn_linear: mn,
             mn_surface: None,
         });
-    }
-    if crate::wall::side_column::wall_side_column_release(data, model).is_some() {
-        return Ok(HingeView::none(AnalysisHingeModel::Other));
     }
     fiber_view(data, model, basis, kind, n_alpha, n_beta)
 }
@@ -951,62 +956,8 @@ mod tests {
     /// `sepika-load` に依存できないため、ここでは展開後相当のモデルを直接組み立てる。
     /// 生モデル（壁要素なし）との分類差は `sepika-app` の回帰テストで固定する。
     fn wall_side_column_model() -> (Model, ElementData) {
-        let node = |id: NodeId, coord: [f64; 3]| Node {
-            id,
-            coord,
-            restraint: Dof6Mask::FREE,
-            mass: None,
-            story: None,
-            support_spring: None,
-        };
-        let mut model = Model {
-            nodes: vec![
-                node(NodeId(0), [0.0, 0.0, 0.0]),
-                node(NodeId(1), [4000.0, 0.0, 0.0]),
-                node(NodeId(2), [4000.0, 0.0, 3000.0]),
-                node(NodeId(3), [0.0, 0.0, 3000.0]),
-            ],
-            sections: vec![SectionShape::RcWall {
-                thickness: 150.0,
-                pwh_ratio: None,
-                pwv_ratio: None,
-                ps: 0.0025,
-            }
-            .to_section(SectionId(0), "W150".into())],
-            materials: vec![Material {
-                strength_factor: None,
-                concrete_class: Default::default(),
-                id: MaterialId(0),
-                name: "FC24".into(),
-                category: MaterialCategory::Concrete,
-                young: 23000.0,
-                poisson: 0.2,
-                density: 2.4e-9,
-                shear: None,
-                fc: Some(24.0),
-                fy: None,
-            }],
-            ..Default::default()
-        };
-        let wall = ElementData {
-            id: ElemId(0),
-            kind: ElementKind::Wall,
-            nodes: smallvec::smallvec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: [0.0, 1.0, 0.0],
-            },
-            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            plastic_zone: None,
-            spring: None,
-        };
-        model.elements.push(wall.clone());
-        crate::wall::add_surrounding_frame(&mut model, &wall);
-        let mut column = elem(ElementKind::Beam, [NodeId(0), NodeId(3)]);
-        column.id = ElemId(9);
-        model.elements.push(column.clone());
+        let model = crate::factory::tests::wall_side_column_factory_model();
+        let column = model.elements[3].clone();
         (model, column)
     }
 

@@ -254,6 +254,8 @@ fn make_test_beam_element(as_val: f64) -> crate::frame::beam::BeamElement {
         material: None,
         committed_disp: [0.0; 12],
         trial_disp: [0.0; 12],
+        committed_member_loads: Vec::new(),
+        trial_member_loads: Vec::new(),
         local_stiffness_cache: std::sync::OnceLock::new(),
     }
 }
@@ -960,21 +962,30 @@ fn fiberはkbb特異時に端部解放質量を明示的に失敗させる() {
 }
 
 #[test]
-fn fiberはkbb特異時に剛性をkaaへフォールバックする() {
+fn fiberは残差ゼロでもkbb特異な試行と縮約を拒否する() {
     let mut model = build_test_model(Some(78846.15));
     model.materials[0].young = 0.0;
     model.elements[0].end_cond = [EndCondition::Pinned, EndCondition::Fixed];
-    let fiber = FiberBeam::new(
+    let mut fiber = FiberBeam::new(
         &model.elements[0],
         &model,
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
-    let k = fiber.condense_releases(&LocalMat::zeros(12));
-    assert!(k.data.iter().all(|v| v.is_finite()));
+    let ctx = Ctx { model: &model };
+    let before = fiber.serialize_checkpoint();
+    let zero = LocalVec {
+        data: smallvec::smallvec![0.0;12],
+    };
+    let error = fiber.update_state(&zero, false, &ctx).unwrap_err();
+    assert!(error.to_string().contains("特異"), "{error}");
+    assert_eq!(fiber.serialize_checkpoint(), before);
+    assert!(fiber
+        .condensed_release_tangent(&LocalMat::zeros(12))
+        .is_err());
 }
 
-fn build_test_model(shear_mod: Option<f64>) -> Model {
+pub(super) fn build_test_model(shear_mod: Option<f64>) -> Model {
     Model {
         nodes: vec![
             Node {
@@ -1234,10 +1245,10 @@ fn test_global_rotation_vertical_column() {
         data: SmallVec::from_elem(0.0, 12),
     };
     let mut fx = make_oriented_fiber([0.0, 0.0, 0.0], [l, 0.0, 0.0], [0.0, 1.0, 0.0]);
-    fx.update_state(&zero_du, false, &ctx);
+    fx.update_state(&zero_du, false, &ctx).unwrap();
     let kx = fx.tangent_stiffness(&ctx);
     let mut fz = make_oriented_fiber([0.0, 0.0, 0.0], [0.0, 0.0, l], [1.0, 0.0, 0.0]);
-    fz.update_state(&zero_du, false, &ctx);
+    fz.update_state(&zero_du, false, &ctx).unwrap();
     let kz = fz.tangent_stiffness(&ctx);
 
     assert_relative_eq!(kz.get(2, 2), kx.get(0, 0), epsilon = 1.0);
@@ -1301,7 +1312,7 @@ fn test_elastic_stiffness_matches_beam() {
     let du = LocalVec {
         data: SmallVec::from_slice(&u),
     };
-    fiber.update_state(&du, true, &ctx);
+    fiber.update_state(&du, true, &ctx).unwrap();
 
     let k_fiber = fiber.tangent_stiffness(&ctx);
     let k_beam = beam.local_stiffness_raw();
@@ -1335,7 +1346,7 @@ fn test_elastic_stiffness_symmetric() {
     let du = LocalVec {
         data: SmallVec::from_slice(&u),
     };
-    fiber.update_state(&du, true, &ctx);
+    fiber.update_state(&du, true, &ctx).unwrap();
 
     let k = fiber.tangent_stiffness(&ctx);
     for i in 0..12 {
@@ -1381,26 +1392,28 @@ fn test_elastic_force_matches_hand_calc() {
 
     let eps0 = 0.001;
     let mut axial = new_fiber();
-    axial.update_state(
-        &LocalVec {
-            data: SmallVec::from_slice(&[
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                eps0 * 3000.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-            ]),
-        },
-        true,
-        &ctx,
-    );
+    axial
+        .update_state(
+            &LocalVec {
+                data: SmallVec::from_slice(&[
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    eps0 * 3000.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                ]),
+            },
+            true,
+            &ctx,
+        )
+        .unwrap();
     let f = axial.internal_force(&ctx);
     let expected_n = eps0 * 205000.0 * a_disc;
     assert_relative_eq!(f.data[0], -expected_n, epsilon = 1.0);
@@ -1408,26 +1421,28 @@ fn test_elastic_force_matches_hand_calc() {
 
     let ky = 1e-6;
     let mut bending = new_fiber();
-    bending.update_state(
-        &LocalVec {
-            data: SmallVec::from_slice(&[
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                ky * 3000.0 / 2.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                -ky * 3000.0 / 2.0,
-                0.0,
-            ]),
-        },
-        true,
-        &ctx,
-    );
+    bending
+        .update_state(
+            &LocalVec {
+                data: SmallVec::from_slice(&[
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    ky * 3000.0 / 2.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -ky * 3000.0 / 2.0,
+                    0.0,
+                ]),
+            },
+            true,
+            &ctx,
+        )
+        .unwrap();
     let f = bending.internal_force(&ctx);
     let expected_my = ky * 205000.0 * iy_disc;
     assert_relative_eq!(f.data[4], expected_my, epsilon = 1.0);
@@ -1435,26 +1450,28 @@ fn test_elastic_force_matches_hand_calc() {
 
     let eps0_combined = 0.0005;
     let mut combined = new_fiber();
-    combined.update_state(
-        &LocalVec {
-            data: SmallVec::from_slice(&[
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                ky * 3000.0 / 2.0,
-                0.0,
-                eps0_combined * 3000.0,
-                0.0,
-                0.0,
-                0.0,
-                -ky * 3000.0 / 2.0,
-                0.0,
-            ]),
-        },
-        true,
-        &ctx,
-    );
+    combined
+        .update_state(
+            &LocalVec {
+                data: SmallVec::from_slice(&[
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    ky * 3000.0 / 2.0,
+                    0.0,
+                    eps0_combined * 3000.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -ky * 3000.0 / 2.0,
+                    0.0,
+                ]),
+            },
+            true,
+            &ctx,
+        )
+        .unwrap();
     let f = combined.internal_force(&ctx);
     assert_relative_eq!(f.data[0], -eps0_combined * 205000.0 * a_disc, epsilon = 1.0);
     assert_relative_eq!(f.data[4], expected_my, epsilon = 1.0);
@@ -1579,7 +1596,7 @@ fn test_yield_progression() {
                 0.0,
             ]),
         };
-        fiber.update_state(&du, true, &ctx);
+        fiber.update_state(&du, true, &ctx).unwrap();
 
         let my = fiber.internal_force(&ctx).data[4];
         let elastic_pred = ky * 205000.0 * iy_disc;
@@ -1610,14 +1627,14 @@ fn test_commit_revert() {
         data: SmallVec::from_slice(&[0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
     };
 
-    fiber.update_state(&du, false, &ctx);
+    fiber.update_state(&du, false, &ctx).unwrap();
     assert_relative_eq!(fiber.trial_disp[4], 0.001, epsilon = 1e-12);
     assert_relative_eq!(fiber.committed_disp[4], 0.0, epsilon = 1e-12);
     fiber.revert_state();
     assert_relative_eq!(fiber.trial_disp[4], 0.0, epsilon = 1e-12);
     assert_relative_eq!(fiber.committed_disp[4], 0.0, epsilon = 1e-12);
 
-    fiber.update_state(&du, false, &ctx);
+    fiber.update_state(&du, false, &ctx).unwrap();
     fiber.commit_state();
     assert_relative_eq!(fiber.trial_disp[4], 0.001, epsilon = 1e-12);
     assert_relative_eq!(fiber.committed_disp[4], 0.001, epsilon = 1e-12);
@@ -1625,7 +1642,7 @@ fn test_commit_revert() {
     let du2 = LocalVec {
         data: SmallVec::from_slice(&[0.0, 0.0, 0.0, 0.0, 0.002, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
     };
-    fiber.update_state(&du2, false, &ctx);
+    fiber.update_state(&du2, false, &ctx).unwrap();
     assert_relative_eq!(fiber.trial_disp[4], 0.003, epsilon = 1e-12);
     fiber.revert_state();
     assert_relative_eq!(fiber.trial_disp[4], 0.001, epsilon = 1e-12);
@@ -1642,13 +1659,13 @@ fn test_snapshot_restore() {
     let du = LocalVec {
         data: SmallVec::from_slice(&[0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
     };
-    fiber.update_state(&du, true, &ctx);
+    fiber.update_state(&du, true, &ctx).unwrap();
     let snap = fiber.snapshot_state();
 
     let du2 = LocalVec {
         data: SmallVec::from_slice(&[0.0, 0.0, 0.0, 0.0, 0.002, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
     };
-    fiber.update_state(&du2, false, &ctx);
+    fiber.update_state(&du2, false, &ctx).unwrap();
     assert_relative_eq!(fiber.trial_disp[4], 0.003, epsilon = 1e-12);
 
     fiber.restore_state(&*snap);
@@ -1692,7 +1709,7 @@ fn test_torsional_stiffness_and_internal_force() {
     let zero_du = LocalVec {
         data: SmallVec::from_elem(0.0, 12),
     };
-    fiber.update_state(&zero_du, false, &ctx);
+    fiber.update_state(&zero_du, false, &ctx).unwrap();
 
     let k = fiber.tangent_stiffness(&ctx);
     assert!(
@@ -1727,7 +1744,7 @@ fn test_torsional_stiffness_and_internal_force() {
             0.0, 0.0, 0.0, theta_i, 0.0, 0.0, 0.0, 0.0, 0.0, theta_j, 0.0, 0.0,
         ],
     };
-    fiber.update_state(&du, true, &ctx);
+    fiber.update_state(&du, true, &ctx).unwrap();
     let f = fiber.internal_force(&ctx);
 
     let expected_mx_i = expected_kt * (theta_i - theta_j);
@@ -1807,7 +1824,7 @@ fn fiberの純ねじり行列は質量極二次モーメントを使う() {
     let zero_du = LocalVec {
         data: SmallVec::from_elem(0.0, 12),
     };
-    fiber.update_state(&zero_du, false, &ctx);
+    fiber.update_state(&zero_du, false, &ctx).unwrap();
     let stiffness = fiber.tangent_stiffness(&ctx);
     let mass = fiber.mass_matrix(crate::behavior::MassOption::Consistent);
     let expected = 3.0 * g * j / (density * (iy + iz) * length.powi(2));
@@ -1907,7 +1924,7 @@ fn test_vertical_column_rz_nonsingular() {
     let zero_du = LocalVec {
         data: SmallVec::from_elem(0.0, 12),
     };
-    fiber.update_state(&zero_du, false, &ctx);
+    fiber.update_state(&zero_du, false, &ctx).unwrap();
 
     let k = fiber.tangent_stiffness(&ctx);
     let k55 = k.get(5, 5);
@@ -1964,7 +1981,7 @@ fn test_fiber_rigid_rotation_produces_no_force() {
             theta,
         ]),
     };
-    fiber.update_state(&du, false, &ctx);
+    fiber.update_state(&du, false, &ctx).unwrap();
     let f = fiber.internal_force(&ctx);
     for (i, v) in f.data.iter().enumerate() {
         assert!(
@@ -2000,7 +2017,7 @@ fn test_fiber_initial_lateral_stiffness_matches_timoshenko_theory() {
     let zero = LocalVec {
         data: SmallVec::from_elem(0.0, 12),
     };
-    fiber.update_state(&zero, false, &ctx);
+    fiber.update_state(&zero, false, &ctx).unwrap();
     let k = fiber.tangent_stiffness(&ctx);
 
     let a = k.get(7, 7);
@@ -2060,7 +2077,7 @@ fn test_fiber_elastic_stiffness_matches_timoshenko_beam_element() {
     let zero = LocalVec {
         data: SmallVec::from_elem(0.0, 12),
     };
-    fiber.update_state(&zero, false, &ctx);
+    fiber.update_state(&zero, false, &ctx).unwrap();
     let k_fb = fiber.tangent_stiffness(&ctx);
 
     let mut be = make_test_beam_element(as_y_elem);
@@ -2143,7 +2160,7 @@ fn test_plastic_zone_phi_positive_timoshenko_behavior() {
             theta,
         ]),
     };
-    fb.update_state(&du, false, &ctx);
+    fb.update_state(&du, false, &ctx).unwrap();
     let f = fb.internal_force(&ctx);
     for (i, v) in f.data.iter().enumerate() {
         assert!(v.abs() < 1.0, "塑性化域+φ>0 で客観性違反: dof {i} = {v}");
@@ -2160,7 +2177,8 @@ fn test_plastic_zone_phi_positive_timoshenko_behavior() {
         },
         false,
         &ctx,
-    );
+    )
+    .unwrap();
     let f0 = b0.internal_force(&ctx);
     let k = b0.tangent_stiffness(&ctx);
     let kmax = (0..12)
@@ -2177,7 +2195,8 @@ fn test_plastic_zone_phi_positive_timoshenko_behavior() {
             },
             false,
             &ctx,
-        );
+        )
+        .unwrap();
         let fp = bp.internal_force(&ctx);
         for i in 0..12 {
             let fd = (fp.data[i] - f0.data[i]) / h;
@@ -2193,7 +2212,7 @@ fn test_plastic_zone_phi_positive_timoshenko_behavior() {
     let zero = LocalVec {
         data: SmallVec::from_elem(0.0, 12),
     };
-    fb2.update_state(&zero, false, &ctx);
+    fb2.update_state(&zero, false, &ctx).unwrap();
     let k2 = fb2.tangent_stiffness(&ctx);
     let a = k2.get(7, 7);
     let b = k2.get(7, 11);
@@ -2235,7 +2254,8 @@ fn test_fiber_tangent_consistent_with_internal_force() {
         },
         false,
         &ctx,
-    );
+    )
+    .unwrap();
     let f0 = b0.internal_force(&ctx);
     let k = b0.tangent_stiffness(&ctx);
     let kmax = (0..12)
@@ -2258,7 +2278,8 @@ fn test_fiber_tangent_consistent_with_internal_force() {
             },
             false,
             &ctx,
-        );
+        )
+        .unwrap();
         let fp = bp.internal_force(&ctx);
         for i in 0..12 {
             let fd = (fp.data[i] - f0.data[i]) / h;
@@ -2284,7 +2305,7 @@ fn test_fiber_beam_checkpoint_roundtrip() {
             0.0, 0.0, 0.0, 0.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0, -0.0005, 0.0,
         ]),
     };
-    fiber.update_state(&du, true, &ctx);
+    fiber.update_state(&du, true, &ctx).unwrap();
 
     let snap_before = fiber.snapshot_state();
     let checkpoint = fiber.serialize_checkpoint();
@@ -2378,7 +2399,7 @@ fn test_plastic_zone_yield_reduces_stiffness() {
     let du = LocalVec {
         data: SmallVec::from_slice(&[0.0, 0.0, 0.0, 0.0, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
     };
-    fb.update_state(&du, false, &ctx);
+    fb.update_state(&du, false, &ctx).unwrap();
     let k1 = fb.tangent_stiffness(&ctx);
     assert!(
         k1.get(4, 4) < 0.9 * k0.get(4, 4),
@@ -2397,7 +2418,7 @@ fn test_plastic_zone_checkpoint_roundtrip() {
     let du = LocalVec {
         data: SmallVec::from_slice(&[0.0, 0.0, 0.0, 0.0, 0.02, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
     };
-    fb.update_state(&du, true, &ctx);
+    fb.update_state(&du, true, &ctx).unwrap();
     let cp = fb.serialize_checkpoint();
 
     let mut fb2 = make_plastic_zone_fiber(300.0, Some(235.0));
@@ -2405,8 +2426,8 @@ fn test_plastic_zone_checkpoint_roundtrip() {
     let du2 = LocalVec {
         data: SmallVec::from_slice(&[0.0, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
     };
-    fb.update_state(&du2, false, &ctx);
-    fb2.update_state(&du2, false, &ctx);
+    fb.update_state(&du2, false, &ctx).unwrap();
+    fb2.update_state(&du2, false, &ctx).unwrap();
     let f1 = fb.internal_force(&ctx);
     let f2 = fb2.internal_force(&ctx);
     for i in 0..12 {
@@ -2417,7 +2438,7 @@ fn test_plastic_zone_checkpoint_roundtrip() {
 /// RC 断面（矩形柱＋配筋）のファイバー柱は、コンクリート格子に加えて主筋が
 /// 点ファイバーとして分離配置される。
 /// RC 断面（矩形柱＋配筋、500 角・Fc30）のファイバー柱モデル。
-fn rc_fiber_model() -> Model {
+pub(super) fn rc_fiber_model() -> Model {
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
 
     let shape = SectionShape::RcColumnRect {
@@ -2737,7 +2758,7 @@ fn test_rc_plastic_zone_fiber_tangent_stays_positive_in_elastic_range() {
 
     let h = fb.hinge.as_ref().expect("塑性化域ヒンジが構築されていない");
     let d0 = fb.gauss_points[0].cached_stiff;
-    assert_relative_eq!(h.sec_ei[0][1], d0[2][2], max_relative = 1e-12);
+    assert_relative_eq!(h.d0[0][2][2], d0[2][2], max_relative = 1e-12);
     let nominal_eiz = 25000.0 * model.sections[0].iy;
     assert!(
         d0[2][2] > 0.5 * nominal_eiz && d0[2][2] < 2.0 * nominal_eiz,
@@ -2746,10 +2767,28 @@ fn test_rc_plastic_zone_fiber_tangent_stays_positive_in_elastic_range() {
         nominal_eiz
     );
 
+    let eps_axial = (25000.0 * model.sections[0].area * 0.2 / 3000.0) / d0[0][0];
+    let end_moment_nmm = 6.0 * nominal_eiz * 0.2 / 3000.0_f64.powi(2);
+    let original_max_concrete_strain = fb.gauss_points[0]
+        .section
+        .fibers
+        .iter()
+        .filter(|fiber| fiber.material == 0)
+        .map(|fiber| {
+            eps_axial
+                + end_moment_nmm / d0[1][1] * fiber.z.abs()
+                + end_moment_nmm / d0[2][2] * fiber.y.abs()
+        })
+        .fold(0.0_f64, f64::max);
+    assert!(original_max_concrete_strain > 2.0 / 25000.0);
+    assert!(original_max_concrete_strain * 0.1 < 2.0 / 25000.0);
     let du = LocalVec {
-        data: SmallVec::from_slice(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.2, 0.2, 0.0, 0.0, 0.0]),
+        data: SmallVec::from_slice(&[
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.02, 0.02, 0.02, 0.0, 0.0, 0.0,
+        ]),
     };
-    fb.update_state(&du, false, &ctx);
+    fb.update_state(&du, false, &ctx).unwrap();
+    assert!(fb.ductility_probe().unwrap().max_tension_strain < 2.0 / 25000.0);
     let k = fb.tangent_stiffness(&ctx);
     for i in 0..12 {
         assert!(
@@ -2818,7 +2857,7 @@ fn 剛域ありの弾性剛性は軸以外が弾性梁と厳密一致する() {
         AnalysisKind::Incremental,
     );
     assert_relative_eq!(fiber.flex_length, l_flex, max_relative = 1e-12);
-    fiber.update_state(&zero, false, &ctx);
+    fiber.update_state(&zero, false, &ctx).unwrap();
     let k_fb = fiber.tangent_stiffness(&ctx);
 
     let mut be = make_test_beam_element(as_y_elem);
@@ -2882,7 +2921,8 @@ fn 剛域は片持ち先端の曲げ剛性を増大させる() {
             },
             false,
             &ctx,
-        );
+        )
+        .unwrap();
         let k = fb.tangent_stiffness(&ctx);
         let (a, b, c) = (k.get(7, 7), k.get(7, 11), k.get(11, 11));
         (a * c - b * b) / c
@@ -2928,7 +2968,7 @@ fn 剛域ありでも剛体回転で内力が生じない() {
             theta,
         ]),
     };
-    fiber.update_state(&du, false, &ctx);
+    fiber.update_state(&du, false, &ctx).unwrap();
     let f = fiber.internal_force(&ctx);
     for (i, v) in f.data.iter().enumerate() {
         assert!(
@@ -2961,7 +3001,8 @@ fn 剛域ありでも接線剛性が内力の勾配と一致する() {
         },
         false,
         &ctx,
-    );
+    )
+    .unwrap();
     let f0 = b0.internal_force(&ctx);
     let k = b0.tangent_stiffness(&ctx);
     let kmax = (0..12)
@@ -2984,7 +3025,8 @@ fn 剛域ありでも接線剛性が内力の勾配と一致する() {
             },
             false,
             &ctx,
-        );
+        )
+        .unwrap();
         let fp = bp.internal_force(&ctx);
         for i in 0..12 {
             let fd = (fp.data[i] - f0.data[i]) / h;
@@ -3042,7 +3084,7 @@ fn 可撓長が残らない剛域は無視される() {
 }
 
 /// 指定した端条件のテストモデル（節点間長 3000mm、500 角・せん断断面付き）。
-fn build_release_model(end_cond: [EndCondition; 2]) -> Model {
+pub(super) fn build_release_model(end_cond: [EndCondition; 2]) -> Model {
     let mut model = build_test_model(Some(78846.15));
     set_square500_shear_section(&mut model);
     model.elements[0].end_cond = end_cond;
@@ -3064,7 +3106,8 @@ fn elastic_fiber(model: &Model) -> FiberBeam {
         },
         false,
         &ctx,
-    );
+    )
+    .unwrap();
     fb
 }
 
@@ -3153,7 +3196,7 @@ fn 材端ピンでは当該端の曲げモーメントがゼロになる() {
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
-    fb_p.update_state(&du(1.0), false, &ctx_p);
+    fb_p.update_state(&du(1.0), false, &ctx_p).unwrap();
     let f_p = fb_p.internal_force(&ctx_p);
 
     let ctx_f = Ctx { model: &fixed };
@@ -3163,7 +3206,7 @@ fn 材端ピンでは当該端の曲げモーメントがゼロになる() {
         StrengthBasis::Nominal,
         AnalysisKind::Incremental,
     );
-    fb_f.update_state(&du(1.0), false, &ctx_f);
+    fb_f.update_state(&du(1.0), false, &ctx_f).unwrap();
     let f_f = fb_f.internal_force(&ctx_f);
 
     assert!(
@@ -3257,7 +3300,8 @@ fn 材端解放ありでも接線剛性が内力の勾配と一致する() {
         },
         false,
         &ctx,
-    );
+    )
+    .unwrap();
     let f0 = b0.internal_force(&ctx);
     let k = b0.tangent_stiffness(&ctx);
     let kmax = (0..12)
@@ -3280,7 +3324,8 @@ fn 材端解放ありでも接線剛性が内力の勾配と一致する() {
             },
             false,
             &ctx,
-        );
+        )
+        .unwrap();
         let fp = bp.internal_force(&ctx);
         for i in 0..12 {
             let fd = (fp.data[i] - f0.data[i]) / h;
@@ -3324,7 +3369,7 @@ fn 材端解放ありでも剛体回転で内力が生じない() {
             theta,
         ]),
     };
-    fiber.update_state(&du, false, &ctx);
+    fiber.update_state(&du, false, &ctx).unwrap();
     let f = fiber.internal_force(&ctx);
     for (i, v) in f.data.iter().enumerate() {
         assert!(
@@ -3355,7 +3400,7 @@ fn 降伏後もピン端のモーメント解放が保たれる() {
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0,
             ]),
         };
-        fb.update_state(&du, true, &ctx);
+        fb.update_state(&du, true, &ctx).unwrap();
     }
     let f = fb.internal_force(&ctx);
     let m_fixed = f.data[11].abs().max(1.0);
@@ -3429,7 +3474,8 @@ fn 材端解放の内部自由度がチェックポイントで往復する() {
         },
         true,
         &ctx,
-    );
+    )
+    .unwrap();
     assert!(
         fb.trial_int.iter().any(|v| v.abs() > 1e-12),
         "内部自由度が動いていない"
@@ -3466,7 +3512,7 @@ fn test_state_member_forces_uses_fiber_state_not_tangent() {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, big, 0.0, 0.0, 0.0, 0.0, 0.0, -big],
     };
     let mut elem = make_steel_fiber_with_fy(Some(235.0));
-    elem.update_state(&du, true, &ctx);
+    elem.update_state(&du, true, &ctx).unwrap();
 
     let mf = elem
         .state_member_forces(&ctx)
@@ -3513,7 +3559,7 @@ fn test_state_member_forces_field_is_continuous() {
     };
     let mut elem = make_steel_fiber_with_fy(Some(235.0));
     elem.eval_sections = vec![0.0, 0.25, 0.5, 0.75, 1.0];
-    elem.update_state(&du, true, &ctx);
+    elem.update_state(&du, true, &ctx).unwrap();
 
     let mf = elem.state_member_forces(&ctx).unwrap();
     let l = elem.length;
@@ -3741,9 +3787,11 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
     );
     for fiber in [&plastic, &multi.inner] {
         let h = fiber.hinge.as_ref().unwrap();
-        for (actual, expected) in h.d_nom.into_iter().zip(expected_d) {
-            assert_relative_eq!(actual, expected, max_relative = 1e-12);
-        }
+        assert_relative_eq!(
+            h.k_el.get(4, 4),
+            expected_d[1] * (4.0 + fiber.phi_z) / (fiber.flex_length * (1.0 + fiber.phi_z)),
+            max_relative = 1e-12
+        );
         assert_relative_eq!(
             h.k_el.get(0, 0),
             expected_d[0] / fiber.flex_length,

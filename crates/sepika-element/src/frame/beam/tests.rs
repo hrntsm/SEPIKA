@@ -32,6 +32,8 @@ fn make_test_beam() -> BeamElement {
         material: None,
         committed_disp: [0.0; 12],
         trial_disp: [0.0; 12],
+        committed_member_loads: Vec::new(),
+        trial_member_loads: Vec::new(),
         local_stiffness_cache: std::sync::OnceLock::new(),
     }
 }
@@ -42,7 +44,6 @@ fn make_test_beam() -> BeamElement {
 /// 節点数が可変の要素（3 節点シェル等）が入ると長さが変わりうるため、
 /// 走査範囲は `n_dof` に追従させたうえで不一致は落とす規約にしている。
 #[test]
-#[should_panic(expected = "変位増分の長さが自由度数と一致しません")]
 fn update_state_rejects_mismatched_du_length() {
     use crate::behavior::{Ctx, ElementBehavior, LocalVec};
     use sepika_core::model::Model;
@@ -53,7 +54,11 @@ fn update_state_rejects_mismatched_du_length() {
     let du = LocalVec {
         data: smallvec::SmallVec::from_elem(0.0, 6),
     };
-    elem.update_state(&du, false, &ctx);
+    assert!(elem
+        .update_state(&du, false, &ctx)
+        .unwrap_err()
+        .to_string()
+        .contains("変位増分の長さが自由度数と一致しません"));
 }
 
 #[test]
@@ -2742,7 +2747,7 @@ fn test_beam_trial_displacement_tracking() {
     };
     du.data[6] = 1.0;
     let snap = beam.snapshot_state();
-    beam.update_state(&du, false, &ctx);
+    beam.update_state(&du, false, &ctx).unwrap();
 
     let f = beam.internal_force(&ctx);
     let ea_over_l = beam.e * beam.a / beam.length;
@@ -2756,7 +2761,7 @@ fn test_beam_trial_displacement_tracking() {
     beam.commit_state();
     assert!((beam.committed_disp[6] - 1.0).abs() < 1e-15);
 
-    beam.update_state(&du, false, &ctx);
+    beam.update_state(&du, false, &ctx).unwrap();
     assert!((beam.trial_disp[6] - 2.0).abs() < 1e-15);
     beam.revert_state();
     assert!((beam.trial_disp[6] - 1.0).abs() < 1e-15);
@@ -3202,7 +3207,8 @@ fn test_pinned_ends_without_torsion_keep_finite_stiffness() {
 }
 
 #[test]
-fn beamはkbb特異時に剛性をkaaへフォールバックする() {
+#[should_panic(expected = "端部解放剛性を縮約できません")]
+fn beamはkbb特異時に明示失敗する() {
     let mut beam = make_test_beam();
     beam.e = 0.0;
     beam.end_cond = [EndCondition::Pinned, EndCondition::Fixed];
@@ -3539,4 +3545,23 @@ fn test_auto_rigid_zone_wall_consideration_can_be_disabled() {
         "face_i={}",
         zone.face_i_or_zero()
     );
+}
+
+#[test]
+fn euler極限の零ねじりは有限軸曲げ剛性を保つ() {
+    let mut beam = make_test_beam();
+    beam.g = f64::INFINITY;
+    for ends in [[EndCondition::Fixed; 2], [EndCondition::Pinned; 2]] {
+        beam.end_cond = ends;
+        beam.local_stiffness_cache.take();
+        let k = beam.local_stiffness();
+        assert!(k.data.iter().all(|x| x.is_finite()));
+        assert_eq!(k.get(3, 3), 0.0);
+        approx::assert_relative_eq!(k.get(0, 0), beam.e * beam.a / beam.length);
+        if ends == [EndCondition::Fixed; 2] {
+            approx::assert_relative_eq!(k.get(1, 1), 12.0 * beam.e * beam.iz / beam.length.powi(3));
+        } else {
+            assert!(k.get(1, 1).abs() < 1e-5);
+        }
+    }
 }

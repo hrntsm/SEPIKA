@@ -11,6 +11,7 @@ type ForcesAt<'a> = &'a [(f64, [f64; 6])];
 /// 共通壁軸はxが下→上、yが下辺a→b、z=x×yで、Qはy成分、Mはz成分。
 #[derive(Clone, Copy, Debug)]
 pub struct WallFaceForces {
+    /// 合成項絶対値和の32·f64::EPSILON以下の相殺残差は0とする。
     pub compression_n: f64,
     pub shear_n: f64,
     pub moment_nmm: f64,
@@ -57,7 +58,7 @@ impl StaticWallFace {
             .elements
             .iter()
             .filter(|e| {
-                e.kind == ElementKind::Beam
+                e.kind.is_primary_frame_support()
                     && e.nodes.len() == 2
                     && g.bottom.iter().all(|n| e.nodes.contains(n))
             })
@@ -87,21 +88,26 @@ impl StaticWallFace {
         let mut axes = [[[0.0; 3]; 3]; 2];
         let mut dimensions = [None; 2];
         let mut first_shape = None;
+        let index = sepika_core::model::WallSideColumnIndex::build(model);
+        let bindings = index.wall_replacement_bindings(wall.id).map_err(|issues| {
+            issues
+                .iter()
+                .map(|issue| crate::factory::wall_side_column_issue_message(issue, None))
+                .collect::<Vec<_>>()
+                .join("; ")
+        })?;
         for side in 0..2 {
             let edge = [g.bottom[side], g.top[side]];
-            let matches: Vec<_> = model
-                .elements
+            let matches: Vec<_> = bindings
                 .iter()
-                .filter(|e| {
-                    e.kind.is_primary_frame_support()
-                        && e.nodes.len() == 2
-                        && edge.iter().all(|n| e.nodes.contains(n))
-                })
+                .filter(|binding| binding.side == side)
                 .collect();
             if matches.len() != 1 {
                 return Err(fail("必要な両側柱を一意に解決できません"));
             }
-            let col = matches[0];
+            let col = model
+                .element(matches[0].column)
+                .ok_or_else(|| fail("側柱の部材参照が不足しています"))?;
             let col_fail = |reason: &str| fail(&format!("側柱 ID {}: {reason}", col.id.0));
             for support in model.elements.iter().filter(|e| {
                 e.kind.is_primary_frame_support()
@@ -136,11 +142,8 @@ impl StaticWallFace {
                     return Err(col_fail("接続材のface平面・方向を同定できません"));
                 }
             }
-            if col.kind != ElementKind::Beam
-                || col.end_cond != [EndCondition::Fixed; 2]
-                || super::side_column::wall_side_column_release(col, model).is_none()
-            {
-                return Err(col_fail("既存の両端面内解放Beam経路以外は未対応です"));
+            if col.end_cond != [EndCondition::Fixed; 2] {
+                return Err(col_fail("元端条件が両端固定の面内解放経路以外は未対応です"));
             }
             let shared = model
                 .elements
@@ -278,6 +281,7 @@ impl StaticWallFace {
         };
         let central = row(self.wall, 0.0)?;
         let mut compression_n = -central[0];
+        let mut compression_scale_n = central[0].abs();
         let mut moment_nmm = central[5] + central[1] * self.face_mm;
         for side in 0..2 {
             let f = row(self.columns[side], self.column_positions[side])?;
@@ -295,10 +299,15 @@ impl StaticWallFace {
                 ));
             }
             compression_n -= f[0];
+            compression_scale_n += f[0].abs();
             moment_nmm -= self.arms_mm[side] * f[0];
         }
-        if !compression_n.is_finite() || !moment_nmm.is_finite() {
+        if !compression_n.is_finite() || !compression_scale_n.is_finite() || !moment_nmm.is_finite()
+        {
             return Err(format!("壁 ID {}: 合成内力が非有限です", self.wall.0));
+        }
+        if compression_n.abs() <= 32.0 * f64::EPSILON * compression_scale_n {
+            compression_n = 0.0;
         }
         Ok(WallFaceForces {
             compression_n,
@@ -377,6 +386,53 @@ mod tests {
             assert_eq!(qu[0], qu[1]);
         }
     }
+    #[test]
+    fn axial_cancellation_uses_relative_machine_precision_and_preserves_real_and_single_tiny_forces(
+    ) {
+        let model = fixture::expanded_model();
+        for sign in [-1.0, 1.0] {
+            let mut input = rows();
+            input[0].1[0].1[0] = sign * 2.918165709075992e-11;
+            input[1].1[0].1[0] = sign * 28014.16136156989;
+            input[2].1[0].1[0] = -sign * 28014.161361569866;
+            assert_eq!(recover(&model, &input).unwrap().compression_n, 0.0);
+            input[0].1[0].1[0] = sign;
+            input[1].1[0].1[0] = 28000.0;
+            input[2].1[0].1[0] = -28000.0;
+            assert_eq!(recover(&model, &input).unwrap().compression_n, -sign);
+            input[0].1[0].1[0] = sign * 1e-12;
+            input[1].1[0].1[0] = 0.0;
+            input[2].1[0].1[0] = 0.0;
+            assert_eq!(
+                recover(&model, &input).unwrap().compression_n,
+                -sign * 1e-12
+            );
+        }
+    }
+
+    #[test]
+    fn frame_representations_preserve_common_face_and_reject_invalid_bindings() {
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            let mut model = fixture::expanded_model();
+            for frame in &mut model.elements[..4] {
+                frame.kind = kind;
+            }
+            let state = recover(&model, &rows()).unwrap();
+            assert_eq!(state.compression_n, 1_200_000.0);
+            assert_eq!(state.shear_n, 200_000.0);
+            assert_eq!(state.moment_nmm, -1.29e9);
+            assert_eq!(state.physical_area_mm2, 1_332_000.0);
+            assert_eq!(state.depth_mm, 4600.0);
+            model.sections[0].frame_use = None;
+            let error = recover(&model, &rows()).unwrap_err();
+            assert!(error.contains("側柱には柱用断面が必要"), "{error}");
+        }
+    }
+
     #[test]
     fn rotation_end_order_and_sign_changes_preserve_physical_state() {
         for rotation in [false, true] {

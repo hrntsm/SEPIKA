@@ -136,7 +136,7 @@ fn actual_gj(model: &Model) -> [f64; 2] {
             data: smallvec::SmallVec::from_elem(0.0, 12),
         };
         displacement.data[9] = theta;
-        element.update_state(&displacement, false, &ctx);
+        element.update_state(&displacement, false, &ctx).unwrap();
         let force = element.internal_force(&ctx);
         relative(force.data[9], torque_n_mm, 1.0e-8);
         relative(force.data[3], -torque_n_mm, 1.0e-8);

@@ -27,8 +27,33 @@ fn ledger(app: &App) -> Vec<u8> {
     serde_json::to_vec(&(&r.statics, &r.combos)).unwrap()
 }
 
+fn reject_wall_time_history_without_mutating_recorded_runs(app: &mut App) {
+    let before = bincode::serialize(&app.core.scoped.results).unwrap();
+    let cases = bincode::serialize(&app.core.model.vibration_cases).unwrap();
+    let view = app.core.scoped.view_vibration_case;
+    app.run_time_history_sample();
+    let reason = app.core.scoped.last_error.as_deref().unwrap();
+    for expected in [
+        "非線形時刻歴解析",
+        "部材 ID 0",
+        "壁 ID [4]",
+        "従属回転の慣性の連成は未定式化",
+    ] {
+        assert!(reason.contains(expected), "{reason}");
+    }
+    assert_eq!(
+        bincode::serialize(&app.core.scoped.results).unwrap(),
+        before
+    );
+    assert_eq!(
+        bincode::serialize(&app.core.model.vibration_cases).unwrap(),
+        cases
+    );
+    assert_eq!(app.core.scoped.view_vibration_case, view);
+}
+
 #[test]
-fn pushover_and_time_history_preserve_static_ledger_and_store_run_capacity() {
+fn pushover_preserves_static_ledger_and_wall_time_history_gate_keeps_recorded_capacity() {
     let mut app = ready();
     app.run_linear_static(LoadCaseId(0));
     assert!(
@@ -52,31 +77,24 @@ fn pushover_and_time_history_preserve_static_ledger_and_store_run_capacity() {
         .all(|q| q.is_finite() && *q > 0.0));
     let capacities = po.wall_capacities.clone();
     assert_eq!(po.wall_history.as_ref().unwrap().len(), po.steps.len());
-    app.run_time_history_sample();
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
-    );
+    reject_wall_time_history_without_mutating_recorded_runs(&mut app);
     assert_eq!(ledger(&app), before);
-    let th = app
-        .core
-        .scoped
-        .results
-        .as_ref()
-        .unwrap()
-        .time_history
-        .as_ref()
-        .unwrap();
-    assert!(th.nonlinear && th.applied_long_term);
-    assert_eq!(th.wall_capacities, capacities);
+    assert_eq!(
+        app.displayed_pushover().unwrap().wall_capacities,
+        capacities
+    );
 }
 
 #[cfg(feature = "gui")]
 #[test]
-fn time_history_case_keeps_own_capacity_and_input_across_save_and_model_changes() {
+fn rejected_wall_time_history_keeps_adopted_pushover_capacity_and_input_across_save_and_model_changes(
+) {
+    use super::result_validity::ResultInputKey;
     use crate::viewer::ModelingAnalysis;
     let mut app = ready();
+    app.run_linear_static(LoadCaseId(0));
+    assert!(app.core.scoped.last_error.is_none());
+    let static_ledger = ledger(&app);
     let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&app.core.model);
     let wall = expanded
         .elements
@@ -86,38 +104,34 @@ fn time_history_case_keeps_own_capacity_and_input_across_save_and_model_changes(
     assert!(app
         .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
         .is_err());
-    app.core.scoped.wave_library_selection = Some("caseA".into());
-    app.run_time_history_sample();
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
-    );
-    let a = app.core.scoped.view_vibration_case.unwrap();
-    let qa = app
-        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
-        .unwrap();
-    app.core.model.materials[2].fy = Some(345.0);
-    app.core.scoped.wave_library_selection = Some("caseB".into());
-    app.run_time_history_sample();
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
-    );
-    let b = app.core.scoped.view_vibration_case.unwrap();
-    assert_ne!(a, b);
-    let qb = app
-        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
-        .unwrap();
-    assert!(qb[0] > qa[0]);
-    app.core.scoped.view_vibration_case = Some(a);
-    assert!(app
-        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
-        .is_err());
-    app.core.scoped.view_vibration_case = Some(b);
-    let path =
-        std::env::temp_dir().join(format!("sepika617-th-cases-{}.ovika", std::process::id()));
+    let key = ResultInputKey::Pushover(SeismicDir::X);
+    let mut capacities = vec![];
+    for (name, fy) in [("caseA", 295.0), ("caseB", 345.0)] {
+        app.core.model.materials[2].fy = Some(fy);
+        app.core.scoped.wave_library_selection = Some(name.into());
+        assert!(app.require_result_input(key.clone()).is_err());
+        app.run_pushover();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        capacities.push(
+            app.adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+                .unwrap(),
+        );
+        reject_wall_time_history_without_mutating_recorded_runs(&mut app);
+        assert!(app
+            .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
+            .is_err());
+        assert!(app.require_result_input(key.clone()).is_ok());
+        assert_eq!(ledger(&app), static_ledger);
+    }
+    assert!(capacities[1][0] > capacities[0][0]);
+    let path = std::env::temp_dir().join(format!(
+        "sepika617-wall-th-gate-{}.ovika",
+        std::process::id()
+    ));
     app.save_project_to(path.clone());
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -134,25 +148,30 @@ fn time_history_case_keeps_own_capacity_and_input_across_save_and_model_changes(
     );
     assert_eq!(
         loaded
-            .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
+            .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
             .unwrap(),
-        qb
+        capacities[1]
     );
-    loaded.core.scoped.view_vibration_case = Some(a);
     assert!(loaded
         .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
         .is_err());
-    let r = loaded
+    assert!(loaded
         .core
         .scoped
         .results
         .as_ref()
         .unwrap()
-        .time_histories
-        .iter()
-        .find(|(id, _)| *id == a)
-        .unwrap();
-    assert_eq!(r.1.wall_capacities[0].1, qa);
+        .statics
+        .is_empty());
+    loaded.core.model.materials[2].fy = Some(390.0);
+    assert!(loaded.require_result_input(key).is_err());
+    assert!(loaded
+        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+        .is_err());
+    assert_eq!(
+        loaded.displayed_pushover().unwrap().wall_capacities[0].1,
+        capacities[1]
+    );
 }
 
 #[test]
@@ -481,23 +500,12 @@ fn wall_method_default_runs_save_undo_and_reject_old_results_and_jobs() {
         ArakawaMin
     );
     assert_ne!(mean, min);
-    app.run_time_history_sample();
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
+    reject_wall_time_history_without_mutating_recorded_runs(&mut app);
+    assert_eq!(
+        app.displayed_pushover().unwrap().rc_wall_shear_method,
+        ArakawaMin
     );
-    let th = app
-        .core
-        .scoped
-        .results
-        .as_ref()
-        .unwrap()
-        .time_history
-        .as_ref()
-        .unwrap();
-    assert_eq!(th.rc_wall_shear_method, ArakawaMin);
-    assert_eq!(th.wall_capacities, min);
+    assert_eq!(app.displayed_pushover().unwrap().wall_capacities, min);
     let path = std::env::temp_dir().join(format!("sepika572-method-{}.ovika", std::process::id()));
     app.save_project_to(path.clone());
     assert!(

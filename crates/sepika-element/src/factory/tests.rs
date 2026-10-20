@@ -83,6 +83,327 @@ fn make_diaphragm_model() -> Model {
     model
 }
 
+fn elastic_wall_girder_model() -> Model {
+    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
+    let mut model = make_diaphragm_model();
+    let mut node = model.nodes[2].clone();
+    node.id = NodeId(3);
+    node.coord = [5000.0, 0.0, 3000.0];
+    model.nodes.push(node);
+    model.materials[0].category = MaterialCategory::Concrete;
+    model.materials[0].fc = Some(24.0);
+    model.materials[0].fy = None;
+    model.materials[0].density = 2.4e-9;
+    let mut section = SectionShape::RcBeamRect {
+        b: 300.0,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: 22.0,
+            top: vec![4],
+            bottom: vec![4],
+            cover: 40.0,
+            stirrup: BeamStirrup {
+                dia: 10.0,
+                pitch: 200.0,
+                legs: 2,
+            },
+        },
+    }
+    .to_section(SectionId(0), "G1".into());
+    section.frame_use = Some(FrameSectionUse::Girder);
+    section.material = Some(MaterialId(0));
+    model.sections[0] = section;
+    let mut wall_section = SectionShape::RcWall {
+        thickness: 150.0,
+        pwh_ratio: None,
+        pwv_ratio: None,
+        ps: 0.0025,
+    }
+    .to_section(SectionId(2), "W1".into());
+    wall_section.material = Some(MaterialId(0));
+    model.sections.push(wall_section);
+    let girder = ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Beam,
+        nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed; 2],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    };
+    let mut top = girder.clone();
+    top.id = ElemId(1);
+    top.nodes = smallvec::smallvec![NodeId(2), NodeId(3)];
+    let mut wall = girder.clone();
+    wall.id = ElemId(2);
+    wall.kind = ElementKind::Wall;
+    wall.nodes = smallvec::smallvec![NodeId(0), NodeId(1), NodeId(3), NodeId(2)];
+    wall.section = Some(SectionId(2));
+    model.elements = vec![girder, top, wall];
+    model
+}
+
+#[test]
+fn wall_girder_role_keeps_elastic_stiffness_force_mass_and_hinge_contract() {
+    use crate::behavior::{Ctx, LocalVec, MassOption};
+    use crate::frame::beam::{is_elastic_wall_girder, BeamElement};
+    let mut model = elastic_wall_girder_model();
+    let mut bare_model = model.clone();
+    bare_model.elements.retain(|e| e.kind != ElementKind::Wall);
+    let bare = BeamElement::new(&model.elements[0], &bare_model);
+    for element_kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for regime in [
+            ForceRegime::Auto,
+            ForceRegime::UniaxialBendingShear,
+            ForceRegime::AxialBendingInteract,
+        ] {
+            model.elements[0].kind = element_kind;
+            model.elements[0].force_regime = regime;
+            model.set_member_rc_beam_reference(
+                ElemId(0),
+                Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+            );
+            let data = &model.elements[0];
+            assert!(is_elastic_wall_girder(&model, data));
+            assert!(input_check::member_strength_issue(data, &model).is_none());
+            assert!(rc_beam_reference_input_issue(
+                data,
+                &model,
+                AnalysisKind::Incremental,
+                StrengthBasis::Nominal
+            )
+            .is_none());
+            assert!(!nonlinear_input_issues(&model)
+                .iter()
+                .any(|issue| issue.contains("部材 ID 0")));
+            let beam = BeamElement::new(data, &model);
+            assert_eq!(beam.mass_properties, bare.mass_properties);
+            let baseline_mass = [
+                beam.mass_matrix(MassOption::Lumped),
+                beam.mass_matrix(MassOption::Consistent),
+            ];
+            assert_eq!(beam.a, 100.0 * bare.a);
+            assert_eq!(beam.iy, 100.0 * bare.iy);
+            assert_eq!(beam.iz, 100.0 * bare.iz);
+            for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+                let ctx = Ctx { model: &model };
+                let mut behavior = build_nonlinear_behavior(
+                    data,
+                    &model,
+                    StrengthBasis::MaterialStrength,
+                    kind,
+                    None,
+                );
+                assert_eq!(
+                    behavior.tangent_stiffness(&ctx).data,
+                    beam.tangent_stiffness(&ctx).data
+                );
+                for (option, expected) in [MassOption::Lumped, MassOption::Consistent]
+                    .into_iter()
+                    .zip(&baseline_mass)
+                {
+                    assert_eq!(behavior.mass_matrix(option).data, expected.data);
+                }
+                let mut increment = LocalVec {
+                    data: smallvec::smallvec![0.0; 12],
+                };
+                increment.data[6] = 50.0;
+                behavior.update_state(&increment, true, &ctx).unwrap();
+                let expected_axial_force = 100.0 * 20000.0 * (300.0 * 600.0) / 5000.0 * 50.0;
+                assert!(
+                    (behavior.internal_force(&ctx).data[6] - expected_axial_force).abs() < 1e-6
+                );
+                assert_eq!(
+                    behavior.tangent_stiffness(&ctx).data,
+                    beam.tangent_stiffness(&ctx).data
+                );
+                assert!(behavior.fiber_section_states().is_none());
+                assert!(behavior.ductility_probe().is_none());
+                assert!(behavior.end_spring_rotations().is_none());
+                let view = build_hinge_view(
+                    data,
+                    &model,
+                    StrengthBasis::MaterialStrength,
+                    kind,
+                    0.0,
+                    8,
+                    24,
+                )
+                .unwrap();
+                assert_eq!(view.model, AnalysisHingeModel::Other);
+                assert!(view
+                    .unavailability_reason
+                    .unwrap()
+                    .contains("材料降伏は評価しません"));
+                assert!(
+                    view.backbone.is_none()
+                        && view.mn_surface.is_none()
+                        && view.mn_linear.is_none()
+                );
+                assert!(!resolves_to_concentrated_spring(data, &model));
+            }
+        }
+    }
+}
+
+#[test]
+fn wall_girder_diagnostic_keeps_common_geometry_and_mass_requirements() {
+    let mut model = elastic_wall_girder_model();
+    assert!(input_check::member_strength_issue(&model.elements[0], &model).is_none());
+    model.materials[0].fc = None;
+    assert!(
+        input_check::member_strength_issue(&model.elements[0], &model)
+            .unwrap()
+            .contains("Fc")
+    );
+    model.materials[0].fc = Some(24.0);
+    if let Some(sepika_core::section_shape::SectionShape::RcBeamRect { rebar, .. }) =
+        &mut model.sections[0].shape
+    {
+        rebar.cover = 400.0;
+    }
+    assert!(input_check::member_strength_issue(&model.elements[0], &model).is_some());
+    let mut model = elastic_wall_girder_model();
+    model.elements.retain(|e| e.kind != ElementKind::Wall);
+    assert!(
+        input_check::member_strength_issue(&model.elements[0], &model)
+            .unwrap()
+            .contains("主筋")
+    );
+}
+
+fn assert_wall_girder_factory_rejection(model: &Model) -> String {
+    let data = &model.elements[0];
+    assert!(crate::frame::beam::is_elastic_wall_girder(model, data));
+    let expected = input_check::member_strength_issue(data, model).expect("共通入力不備を診断する");
+    assert!(expected.contains("部材 ID 0"));
+    assert!(nonlinear_input_issues(model).contains(&expected));
+    for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+        let panic = std::panic::catch_unwind(|| {
+            build_nonlinear_behavior(data, model, StrengthBasis::Nominal, kind, None);
+        })
+        .expect_err("直接生成でも同じ入力不備を拒否する");
+        let actual = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap();
+        assert_eq!(actual, expected);
+    }
+    expected
+}
+
+#[test]
+fn elastic_wall_girder_requires_positive_finite_actual_young_for_every_section() {
+    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+    let column_shape = SectionShape::RcColumnRect {
+        b: 400.0,
+        d: 600.0,
+        rebar: RcRectColumnRebar {
+            main_dia: 22.0,
+            x: vec![4],
+            y: vec![3],
+            cover: 40.0,
+            hoop: RectColumnHoop {
+                dia: 10.0,
+                pitch: 100.0,
+                legs_x: 2,
+                legs_y: 2,
+            },
+        },
+    };
+    for shape in [
+        None,
+        Some(SectionShape::SteelFlatBar {
+            width: 300.0,
+            thick: 20.0,
+        }),
+        Some(column_shape),
+    ] {
+        let mut model = elastic_wall_girder_model();
+        if let Some(shape) = shape {
+            model.sections[0] = shape.to_section(SectionId(0), "G1".into());
+        } else {
+            model.sections[0].shape = None;
+            model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
+        }
+        let mut material = model.materials[0].clone();
+        material.id = MaterialId(1);
+        if !model.sections[0]
+            .shape
+            .as_ref()
+            .is_some_and(SectionShape::is_concrete_like)
+        {
+            material.category = MaterialCategory::Steel;
+            material.fc = None;
+        }
+        model.materials.push(material);
+        model.sections[0].material = Some(MaterialId(1));
+        model.sections[0].frame_use = Some(FrameSectionUse::Girder);
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            model.elements[0].kind = kind;
+            model.materials[1].young = 20000.0;
+            assert!(
+                input_check::member_strength_issue(&model.elements[0], &model).is_none(),
+                "{:?}",
+                input_check::member_strength_issue(&model.elements[0], &model)
+            );
+            build_nonlinear_behavior(
+                &model.elements[0],
+                &model,
+                StrengthBasis::Nominal,
+                AnalysisKind::Incremental,
+                None,
+            );
+            for young in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+                model.materials[1].young = young;
+                assert!(assert_wall_girder_factory_rejection(&model).contains("ヤング係数 E"));
+            }
+        }
+    }
+}
+
+#[test]
+fn elastic_wall_girder_factory_rejects_common_geometry_category_and_mass_errors() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for invalid in 0..3 {
+            let mut model = elastic_wall_girder_model();
+            model.elements[0].kind = kind;
+            match invalid {
+                0 => {
+                    if let Some(sepika_core::section_shape::SectionShape::RcBeamRect {
+                        rebar,
+                        ..
+                    }) = &mut model.sections[0].shape
+                    {
+                        rebar.cover = 400.0;
+                    }
+                }
+                1 => model.materials[0].category = MaterialCategory::Rebar,
+                _ => model.materials[0].density = f64::NAN,
+            }
+            assert_wall_girder_factory_rejection(&model);
+        }
+    }
+}
+
 /// フォースレジームの解決: 明示指定はそのまま、Auto はトポロジ
 /// （剛床所属 × 鉛直材か）から判定する。
 #[test]
@@ -463,6 +784,7 @@ fn test_build_behavior_wall_opening_reduces_shear_stiffness() {
         s
     };
 
+    model.elements.push(wall.clone());
     let b_no = build_behavior(&wall, &model);
     let ctx = crate::behavior::Ctx { model: &model };
     let k_no = b_no.tangent_stiffness(&ctx);
@@ -1171,7 +1493,7 @@ fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_histo
     let du = crate::behavior::LocalVec {
         data: smallvec::smallvec![0.0, 0.0, 0.0, 0.0, 0.0, -0.001, 0.0, 0.0, 0.0, 0.0, 0.0, 0.001],
     };
-    behavior.update_state(&du, true, &ctx);
+    behavior.update_state(&du, true, &ctx).unwrap();
     let before = behavior.snapshot_state();
     let state = before.downcast_ref::<Snapshot>().unwrap();
     let k = behavior.tangent_stiffness(&ctx);
@@ -1187,7 +1509,7 @@ fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_histo
     let zero = crate::behavior::LocalVec {
         data: smallvec::smallvec![0.0;12],
     };
-    behavior.update_state(&zero, false, &ctx);
+    behavior.update_state(&zero, false, &ctx).unwrap();
     behavior.commit_state();
     let after = behavior.snapshot_state();
     let after = after.downcast_ref::<Snapshot>().unwrap();
@@ -1201,7 +1523,487 @@ fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_histo
     }
     assert_eq!(k.data, behavior.tangent_stiffness(&ctx).data);
     assert_eq!(f.data, behavior.internal_force(&ctx).data);
-    behavior.update_state(&du, false, &ctx);
+    behavior.update_state(&du, false, &ctx).unwrap();
     behavior.revert_state();
     assert_eq!(f.data, behavior.internal_force(&ctx).data);
+}
+
+pub(super) fn wall_side_column_factory_model() -> Model {
+    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+    let mut model = elastic_wall_girder_model();
+    let mut rebar = model.materials[0].clone();
+    rebar.id = MaterialId(1);
+    rebar.category = MaterialCategory::Rebar;
+    rebar.name = "SD345".into();
+    rebar.young = 200_000.0;
+    rebar.fy = Some(345.0);
+    rebar.fc = None;
+    model.materials.push(rebar);
+    let mut section = SectionShape::RcColumnRect {
+        b: 600.0,
+        d: 600.0,
+        rebar: RcRectColumnRebar {
+            main_dia: 22.0,
+            x: vec![4],
+            y: vec![4],
+            cover: 40.0,
+            hoop: RectColumnHoop {
+                dia: 10.0,
+                pitch: 100.0,
+                legs_x: 2,
+                legs_y: 2,
+            },
+        },
+    }
+    .to_section(SectionId(1), "C1".into());
+    section.frame_use = Some(FrameSectionUse::Column);
+    section.material = Some(MaterialId(0));
+    section.rebar_material = Some(MaterialId(1));
+    section.shear_rebar_material = Some(MaterialId(1));
+    model.sections[1] = section;
+    let mut column = model.elements[0].clone();
+    column.id = ElemId(3);
+    column.section = Some(SectionId(1));
+    column.nodes = smallvec::smallvec![NodeId(0), NodeId(2)];
+    column.local_axis.ref_vector = [1.0, 0.0, 0.0];
+    model.elements.push(column.clone());
+    column.id = ElemId(4);
+    column.nodes = smallvec::smallvec![NodeId(1), NodeId(3)];
+    model.elements.push(column);
+    model
+}
+
+#[test]
+fn direct_side_column_factories_reject_conflicting_endpoint_and_section_ownership() {
+    let model = wall_side_column_factory_model();
+    for representation in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for conflict in 0..4 {
+            let mut data = model.elements[3].clone();
+            data.kind = representation;
+            match conflict {
+                0 => data.nodes = smallvec::smallvec![NodeId(1), NodeId(3)],
+                1 => data.section = Some(SectionId(0)),
+                2 => data.section = None,
+                _ => data.nodes = model.elements[0].nodes.clone(),
+            }
+            for analysis in [
+                None,
+                Some(AnalysisKind::Incremental),
+                Some(AnalysisKind::TimeHistory),
+            ] {
+                let reason =
+                    wall_side_column_input_issue(&data, &model, analysis).expect("物理所有の矛盾");
+                assert!(reason.contains("部材 ID 3") && reason.contains("壁 ID [2]"));
+                assert!(reason.contains(if conflict == 0 || conflict == 3 {
+                    "端点"
+                } else {
+                    "断面参照"
+                }));
+                let panic = std::panic::catch_unwind(|| match analysis {
+                    None => build_behavior(&data, &model),
+                    Some(kind) => {
+                        build_nonlinear_behavior(&data, &model, StrengthBasis::Nominal, kind, None)
+                    }
+                })
+                .err()
+                .expect("直接生成も同じ理由で拒否");
+                assert_eq!(panic.downcast_ref::<String>(), Some(&reason));
+                if let Some(kind) = analysis {
+                    let view =
+                        build_hinge_view(&data, &model, StrengthBasis::Nominal, kind, 0.0, 4, 8)
+                            .unwrap();
+                    assert_eq!(view.model, AnalysisHingeModel::Other);
+                    assert_eq!(view.unavailability_reason, Some(reason));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn steel_plate_boundary_clones_preserve_registered_section_ownership_without_rc_release() {
+    use sepika_core::section_shape::SectionShape;
+    let mut model = wall_side_column_factory_model();
+    model.materials[1].category = MaterialCategory::Steel;
+    for (index, usage) in [(0, FrameSectionUse::Girder), (1, FrameSectionUse::Column)] {
+        let mut section = SectionShape::SteelBox {
+            height: 600.0,
+            width: 600.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        }
+        .to_section(SectionId(index), "S".into());
+        section.frame_use = Some(usage);
+        section.material = Some(MaterialId(1));
+        model.sections[index as usize] = section;
+    }
+    model.sections[2].shape = None;
+    model.sections[2].material = Some(MaterialId(1));
+    model.sections[2].thickness = Some(9.0);
+    let mut alternative = model.sections[1].clone();
+    alternative.id = SectionId(3);
+    alternative.material = Some(MaterialId(0));
+    model.sections.push(alternative);
+    for representation in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut data = model.elements[3].clone();
+        data.kind = representation;
+        for kind in [
+            None,
+            Some(AnalysisKind::Incremental),
+            Some(AnalysisKind::TimeHistory),
+        ] {
+            assert!(wall_side_column_input_issue(&data, &model, kind).is_none());
+            assert!(crate::wall::side_column::wall_side_column_release(&data, &model).is_none());
+            let valid = match kind {
+                None => build_behavior(&data, &model),
+                Some(analysis) => {
+                    build_nonlinear_behavior(&data, &model, StrengthBasis::Nominal, analysis, None)
+                }
+            };
+            assert_eq!(valid.n_dof(), 12);
+            assert!(!valid.owns_frame_member_loads());
+            let mut conflicting = data.clone();
+            conflicting.section = Some(SectionId(3));
+            let reason = wall_side_column_input_issue(&conflicting, &model, kind).unwrap();
+            assert!(reason.contains("断面参照"));
+            let panic = std::panic::catch_unwind(|| match kind {
+                None => build_behavior(&conflicting, &model),
+                Some(analysis) => build_nonlinear_behavior(
+                    &conflicting,
+                    &model,
+                    StrengthBasis::Nominal,
+                    analysis,
+                    None,
+                ),
+            })
+            .err()
+            .unwrap();
+            assert_eq!(panic.downcast_ref::<String>(), Some(&reason));
+        }
+    }
+}
+
+#[test]
+fn steel_plate_wall_factory_rejects_boundary_column_with_girder_section_use() {
+    let mut model = wall_side_column_factory_model();
+    model.materials[1].category = MaterialCategory::Steel;
+    for index in [0, 1] {
+        let mut section = sepika_core::section_shape::SectionShape::SteelBox {
+            height: 600.0,
+            width: 600.0,
+            thick: 12.0,
+            corner_r: Some(0.0),
+        }
+        .to_section(SectionId(index), "S".into());
+        section.frame_use = Some(FrameSectionUse::Girder);
+        section.material = Some(MaterialId(1));
+        model.sections[index as usize] = section;
+    }
+    model.sections[2].shape = None;
+    model.sections[2].material = Some(MaterialId(1));
+    model.sections[2].thickness = Some(9.0);
+    let wall = model
+        .elements
+        .iter()
+        .find(|elem| elem.kind == ElementKind::Wall)
+        .unwrap();
+    for kind in [
+        None,
+        Some(AnalysisKind::Incremental),
+        Some(AnalysisKind::TimeHistory),
+    ] {
+        let reason = wall_side_column_input_issue(wall, &model, kind).unwrap();
+        assert!(reason.contains("側柱には柱用断面が必要"), "{reason}");
+        let panic = std::panic::catch_unwind(|| match kind {
+            None => build_behavior(wall, &model),
+            Some(kind) => {
+                build_nonlinear_behavior(wall, &model, StrengthBasis::Nominal, kind, None)
+            }
+        })
+        .err()
+        .unwrap();
+        assert_eq!(panic.downcast_ref::<String>(), Some(&reason));
+    }
+}
+
+#[test]
+fn side_column_construction_clones_allow_representation_reverse_ends_and_original_end_conditions() {
+    use crate::behavior::Ctx;
+    let model = wall_side_column_factory_model();
+    let ctx = Ctx { model: &model };
+    for representation in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for reverse in [false, true] {
+            for condition in [
+                EndCondition::Fixed,
+                EndCondition::Pinned,
+                EndCondition::SemiRigid { k_theta: 1e8 },
+            ] {
+                for regime in [ForceRegime::Auto, ForceRegime::AxialBendingInteract] {
+                    let mut data = model.elements[3].clone();
+                    data.kind = representation;
+                    if reverse {
+                        data.nodes.reverse();
+                    }
+                    data.end_cond[0] = condition;
+                    data.force_regime = regime;
+                    for analysis in [None, Some(AnalysisKind::Incremental)] {
+                        assert!(wall_side_column_input_issue(&data, &model, analysis).is_none());
+                        let member = match analysis {
+                            None => build_behavior(&data, &model),
+                            Some(kind) => build_nonlinear_behavior(
+                                &data,
+                                &model,
+                                StrengthBasis::Nominal,
+                                kind,
+                                None,
+                            ),
+                        };
+                        let matrix = member.tangent_stiffness(&ctx);
+                        assert_eq!(member.n_dof(), 12);
+                        for i in 0..12 {
+                            for j in 0..12 {
+                                assert!(matrix.get(i, j).is_finite());
+                            }
+                        }
+                        if analysis.is_some() {
+                            assert!(member.fiber_section_states().is_some());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn wall_side_column_factories_preserve_initial_stiffness_release_and_axial_history() {
+    use crate::behavior::{Ctx, LocalVec};
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = wall_side_column_factory_model();
+        model.elements[3].kind = kind;
+        let data = &model.elements[3];
+        let ctx = Ctx { model: &model };
+        assert!(
+            wall_side_column_input_issue(data, &model, Some(AnalysisKind::Incremental)).is_none()
+        );
+        let mut linear = build_behavior(data, &model);
+        let mut nonlinear = build_nonlinear_behavior(
+            data,
+            &model,
+            StrengthBasis::Nominal,
+            AnalysisKind::Incremental,
+            None,
+        );
+        let k = linear.tangent_stiffness(&ctx);
+        let kn = nonlinear.tangent_stiffness(&ctx);
+        for i in 0..12 {
+            for j in 0..12 {
+                approx::assert_relative_eq!(
+                    k.get(i, j),
+                    kn.get(i, j),
+                    epsilon = 1e-4,
+                    max_relative = 1e-8
+                );
+            }
+        }
+        let mut u = vec![0.0; 12];
+        u[6] = 1.0;
+        linear
+            .update_state(
+                &LocalVec {
+                    data: u.clone().into(),
+                },
+                false,
+                &ctx,
+            )
+            .unwrap();
+        nonlinear
+            .update_state(&LocalVec { data: u.into() }, false, &ctx)
+            .unwrap();
+        assert!(linear
+            .internal_force(&ctx)
+            .data
+            .iter()
+            .all(|f| f.abs() < 1e-3));
+        assert!(nonlinear
+            .internal_force(&ctx)
+            .data
+            .iter()
+            .all(|f| f.abs() < 1e-3));
+        let view = build_hinge_view(
+            data,
+            &model,
+            StrengthBasis::Nominal,
+            AnalysisKind::Incremental,
+            0.0,
+            4,
+            8,
+        )
+        .unwrap();
+        assert_eq!(
+            view.model,
+            if kind == ElementKind::MultiSpring {
+                AnalysisHingeModel::MultiSpring
+            } else {
+                AnalysisHingeModel::Fiber
+            }
+        );
+        for sign in [-1.0, 1.0] {
+            let mut member = build_nonlinear_behavior(
+                data,
+                &model,
+                StrengthBasis::Nominal,
+                AnalysisKind::Incremental,
+                None,
+            );
+            let mut previous = 0.0;
+            let mut peak = 0.0;
+            for delta in [
+                sign * 0.05,
+                sign * 2.0,
+                sign * 10.0,
+                sign * 8.0,
+                sign * 10.0,
+            ] {
+                let mut du = vec![0.0; 12];
+                du[8] = delta - previous;
+                member
+                    .update_state(&LocalVec { data: du.into() }, true, &ctx)
+                    .unwrap();
+                let force = member.internal_force(&ctx).data[8];
+                assert!(force.is_finite());
+                if delta.abs() == 10.0 {
+                    peak = force;
+                }
+                previous = delta;
+            }
+            assert!(peak.abs() > 1.0);
+            assert!(!member.fiber_section_states().expect("材料履歴").is_empty());
+            let elastic = k.get(8, 8) * previous;
+            assert!(
+                (peak - elastic).abs() > elastic.abs() * 0.1,
+                "弾性置換ではない {kind:?} {sign}: {peak} vs {elastic}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wall_side_column_rejections_agree_on_analysis_ids_and_reasons() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = wall_side_column_factory_model();
+        model.elements[3].kind = kind;
+        for analysis in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+            model.elements[3].force_regime = ForceRegime::UniaxialBendingShear;
+            if kind != ElementKind::Beam && analysis == AnalysisKind::Incremental {
+                continue;
+            }
+            let data = &model.elements[3];
+            let issue =
+                wall_side_column_input_issue(data, &model, Some(analysis)).expect("未定式化");
+            assert!(issue.contains("部材 ID 3") && issue.contains("壁 ID [2]"));
+            assert!(nonlinear_input_issues_for_kind(&model, analysis).contains(&issue));
+            let view = build_hinge_view(data, &model, StrengthBasis::Nominal, analysis, 0.0, 4, 8)
+                .unwrap();
+            assert_eq!(view.model, AnalysisHingeModel::Other);
+            assert_eq!(view.unavailability_reason, Some(issue.clone()));
+            let panic = std::panic::catch_unwind(|| {
+                build_nonlinear_behavior(data, &model, StrengthBasis::Nominal, analysis, None)
+            })
+            .err()
+            .expect("直接factory拒否");
+            assert_eq!(panic.downcast_ref::<String>(), Some(&issue));
+        }
+        model.elements[3].force_regime = ForceRegime::Auto;
+        model.sections[1].material = None;
+        let data = &model.elements[3];
+        let issue = wall_side_column_input_issue(data, &model, None).unwrap();
+        assert!(issue.contains("材料が設定されていません"));
+        let panic = std::panic::catch_unwind(|| build_behavior(data, &model))
+            .err()
+            .unwrap();
+        assert_eq!(panic.downcast_ref::<String>(), Some(&issue));
+    }
+}
+
+#[test]
+fn wall_side_column_panel_offsets_have_one_owner_for_three_representations() {
+    use crate::behavior::Ctx;
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = wall_side_column_factory_model();
+        model.elements[3].kind = kind;
+        let mut panel = model.elements[3].clone();
+        panel.id = ElemId(5);
+        panel.kind = ElementKind::PanelZone;
+        panel.nodes = smallvec::smallvec![NodeId(0)];
+        model.elements.push(panel);
+        let data = &model.elements[3];
+        let ctx = Ctx { model: &model };
+        let no_panel = {
+            let mut bare = model.clone();
+            bare.elements.pop();
+            build_behavior(data, &bare).tangent_stiffness(&Ctx { model: &bare })
+        };
+        for nonlinear in [false, true] {
+            let member = if nonlinear {
+                build_nonlinear_behavior(
+                    data,
+                    &model,
+                    StrengthBasis::Nominal,
+                    AnalysisKind::Incremental,
+                    None,
+                )
+            } else {
+                build_behavior(data, &model)
+            };
+            assert_eq!(member.n_dof(), 14);
+            let k = member.tangent_stiffness(&ctx);
+            for i in 0..12 {
+                for j in 0..12 {
+                    approx::assert_relative_eq!(
+                        k.get(i, j),
+                        no_panel.get(i, j),
+                        epsilon = 1e-4,
+                        max_relative = 1e-8
+                    );
+                }
+                approx::assert_relative_eq!(
+                    k.get(i, 12),
+                    0.5 * k.get(i, 3),
+                    epsilon = 1e-4,
+                    max_relative = 1e-8
+                );
+                approx::assert_relative_eq!(
+                    k.get(i, 13),
+                    0.5 * k.get(i, 4),
+                    epsilon = 1e-4,
+                    max_relative = 1e-8
+                );
+            }
+        }
+    }
 }

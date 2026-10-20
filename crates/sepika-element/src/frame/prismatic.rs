@@ -3,8 +3,8 @@
 //! いずれも要素局所系（節点自由度 12）で返す。全体系への回転は呼び出し側の責務とする。
 
 use crate::behavior::LocalMat;
-use crate::linalg::invert_small;
 use sepika_core::model::SectionMassProperties;
+use sepika_math::dense_lu::CheckedDenseLu;
 
 /// 材端解放を静縮約した局所剛性 12×12。
 ///
@@ -16,7 +16,7 @@ use sepika_core::model::SectionMassProperties;
 ///
 /// `releases` は最大 6 個。
 ///
-/// 縮約行列 Kbb が特異な場合は剛性側を Kaa へフォールバックする。
+/// 非駆動・非連成の両端共通ねじり回転を除き、縮約不能・非有限なら `None`。
 pub(crate) fn condense_end_releases(
     k_elem: &LocalMat,
     releases: &[(usize, f64)],
@@ -34,8 +34,7 @@ pub(crate) fn condense_end_releases(
 
 /// 端部解放を質量へ反映した局所質量を返す。
 ///
-/// 剛性の縮約では `Kbb` が特異な場合に `Kaa` を返す。質量の縮約では
-/// `None` とし、解放なし質量へのフォールバックは行わない。
+/// `Kbb` が特異または非有限の場合は `None`。内部回転の慣性ゲージは除去しない。
 pub(crate) fn condense_end_releases_with_mass(
     k_elem: &LocalMat,
     m_elem: &LocalMat,
@@ -72,6 +71,12 @@ fn condense_expanded(
     releases: &[(usize, f64)],
 ) -> Option<(Option<LocalMat>, LocalMat)> {
     const NA: usize = 12;
+
+    if ((m_elem.is_none() || !releases.is_empty()) && k_elem.data.iter().any(|v| !v.is_finite()))
+        || releases.iter().any(|&(_, k)| !k.is_finite())
+    {
+        return None;
+    }
 
     if releases.is_empty() {
         let k = LocalMat {
@@ -153,61 +158,45 @@ fn condense_expanded(
         k[ir * n + r] -= ks;
     }
 
-    let mut kaa = [0.0_f64; NA * NA];
-    let mut kab = [0.0_f64; NA * 6];
-    let mut kba = [0.0_f64; 6 * NA];
-    let mut kbb = [0.0_f64; 36];
-
-    for i in 0..NA {
-        for j in 0..NA {
-            kaa[i * NA + j] = k[i * n + j];
-        }
-        for j in 0..nb {
-            kab[i * nb + j] = k[i * n + (NA + j)];
-            kba[j * NA + i] = k[(NA + j) * n + i];
-        }
-    }
-    for i in 0..nb {
-        for j in 0..nb {
-            kbb[i * nb + j] = k[(NA + i) * n + (NA + j)];
-        }
-    }
-
-    let mut kstar = LocalMat::zeros(NA);
-    let Some(kbb_inv) = invert_small(&kbb[..nb * nb], nb) else {
-        for i in 0..NA {
-            for j in 0..NA {
-                kstar.set(i, j, kaa[i * NA + j]);
-            }
-        }
-        return Some((None, kstar));
+    let gauge = if m_elem.is_none() {
+        free_common_torsion_gauge(k_elem, releases)
+    } else {
+        None
     };
-    let mut kab_kbbinv = [0.0_f64; NA * 6];
-    for i in 0..NA {
-        for j in 0..nb {
-            for l in 0..nb {
-                kab_kbbinv[i * nb + j] += kab[i * nb + l] * kbb_inv[l * nb + j];
-            }
+    let active: Vec<_> = (0..nb).filter(|index| Some(*index) != gauge).collect();
+    let nf = active.len();
+    let mut kbb = vec![0.0; nf * nf];
+    let mut kba = vec![0.0; nf * NA];
+    for (i, &a) in active.iter().enumerate() {
+        for (j, &b) in active.iter().enumerate() {
+            kbb[i * nf + j] = k[(NA + a) * n + NA + b];
         }
         for j in 0..NA {
-            let mut s = kaa[i * NA + j];
-            for l in 0..nb {
-                s -= kab_kbbinv[i * nb + l] * kba[l * NA + j];
+            kba[i * NA + j] = k[(NA + a) * n + j];
+        }
+    }
+    let lu = CheckedDenseLu::factorize(&kbb, nf).ok()?;
+    let solution = lu.solve(&kba, NA).ok()?;
+    let mut kstar = LocalMat::zeros(NA);
+    for i in 0..NA {
+        for j in 0..NA {
+            let mut value = k[i * n + j];
+            for (a, &index) in active.iter().enumerate() {
+                value -= k[i * n + NA + index] * solution[a * NA + j];
             }
-            kstar.set(i, j, s);
+            if !value.is_finite() {
+                return None;
+            }
+            kstar.set(i, j, value);
         }
     }
     let mut r = [[0.0_f64; NA]; 18];
     for i in 0..NA {
         r[i][i] = 1.0;
     }
-    for i in 0..nb {
+    for (a, &index) in active.iter().enumerate() {
         for j in 0..NA {
-            let mut s = 0.0;
-            for l in 0..nb {
-                s -= kbb_inv[i * nb + l] * kba[l * NA + j];
-            }
-            r[NA + i][j] = s;
+            r[NA + index][j] = -solution[a * NA + j];
         }
     }
     let mut mstar = LocalMat::zeros(NA);
@@ -223,6 +212,30 @@ fn condense_expanded(
         }
     }
     Some((Some(mstar), kstar))
+}
+
+fn free_common_torsion_gauge(k: &LocalMat, releases: &[(usize, f64)]) -> Option<usize> {
+    let i = releases
+        .iter()
+        .position(|&(dof, ks)| dof == 3 && ks == 0.0)?;
+    let j = releases
+        .iter()
+        .position(|&(dof, ks)| dof == 9 && ks == 0.0)?;
+    let t = k.get(3, 3);
+    if t <= 0.0 || !t.is_finite() || k.get(9, 9) != t || k.get(3, 9) != -t || k.get(9, 3) != -t {
+        return None;
+    }
+    for dof in (0..12).filter(|&dof| dof != 3 && dof != 9) {
+        if k.get(3, dof) != 0.0
+            || k.get(9, dof) != 0.0
+            || k.get(dof, 3) != 0.0
+            || k.get(dof, 9) != 0.0
+        {
+            return None;
+        }
+    }
+    // 両端共通回転は外部から駆動されず、差回転だけがエネルギーを持つ。
+    Some(i.max(j))
 }
 
 /// 軸力 `n_axial` による幾何剛性を局所 12×12 で返す。
@@ -417,8 +430,8 @@ fn add_bending_mass(
     for index in [1, 3] {
         n_v[index] *= rotation_sign;
     }
-    for value in &mut n_theta {
-        *value *= rotation_sign;
+    for index in [0, 2] {
+        n_theta[index] *= rotation_sign;
     }
     for a in 0..4 {
         for b in 0..4 {
@@ -457,6 +470,30 @@ fn timoshenko_shape_functions(s: f64, l: f64, phi: f64) -> ([f64; 4], [f64; 4]) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn consistent_mass_rigid_rotation_matches_integrated_translational_and_rotary_energy() {
+        let properties = SectionMassProperties {
+            mass_per_length: 2.0,
+            rotary_inertia_y_per_length: 3.0,
+            rotary_inertia_z_per_length: 5.0,
+        };
+        for (translation, rotation, sign, rotary) in [(1, 5, 1.0, 5.0), (2, 4, -1.0, 3.0)] {
+            let mass = consistent_mass_timoshenko(properties, 10.0, 0.3, 0.7);
+            let mut velocity = [0.0; 12];
+            velocity[translation + 6] = 10.0;
+            velocity[rotation] = sign;
+            velocity[rotation + 6] = sign;
+            let twice_kinetic_energy: f64 = (0..12)
+                .map(|i| {
+                    (0..12)
+                        .map(|j| velocity[i] * mass.get(i, j) * velocity[j])
+                        .sum::<f64>()
+                })
+                .sum();
+            let expected = 2.0 * 1000.0 / 3.0 + rotary * 10.0;
+            assert!((twice_kinetic_energy - expected).abs() < 1e-10);
+        }
+    }
     use super::*;
 
     /// 対称な要素剛性を与えたとき、縮約結果も対称であること。
@@ -555,11 +592,11 @@ mod tests {
     }
 
     #[test]
-    fn kbb特異時は剛性をkaaへフォールバックし質量の縮約に失敗する() {
+    fn kbb特異時は剛性と質量の縮約に失敗する() {
         let k = LocalMat::zeros(12);
         let m = LocalMat::zeros(12);
         let releases = [(5, 0.0)];
-        assert!(condense_end_releases(&k, &releases).is_some());
+        assert!(condense_end_releases(&k, &releases).is_none());
         assert!(condense_end_releases_with_mass(
             &k,
             &m,
@@ -569,6 +606,71 @@ mod tests {
             &releases,
         )
         .is_none());
+    }
+
+    #[test]
+    fn 非駆動共通ねじりだけを除き実ばねと他の特異性は保持する() {
+        let k = sample_k();
+        let releases = [(3, 0.0), (4, 0.0), (5, 0.0), (9, 0.0), (10, 0.0), (11, 0.0)];
+        let pinned = condense_end_releases(&k, &releases).unwrap();
+        for i in 0..12 {
+            for j in 0..12 {
+                let expected = match (i, j) {
+                    (0, 0) | (6, 6) => 2e6,
+                    (0, 6) | (6, 0) => -2e6,
+                    _ => 0.0,
+                };
+                assert!((pinned.get(i, j) - expected).abs() < 1e-6);
+            }
+        }
+        assert!(condense_end_releases_with_mass(
+            &k,
+            &consistent_mass(12.5, 3000.0, 2.0),
+            SectionMassProperties::default(),
+            0.0,
+            0.0,
+            &releases,
+        )
+        .is_none());
+        let torsion_only = condense_end_releases(&k, &[(9, 0.0), (3, 0.0)]).unwrap();
+        for i in 0..12 {
+            for j in 0..12 {
+                let expected = if [3, 9].contains(&i) || [3, 9].contains(&j) {
+                    0.0
+                } else {
+                    k.get(i, j)
+                };
+                assert!((torsion_only.get(i, j) - expected).abs() < 1e-6);
+            }
+        }
+        let mut singular = k.clone();
+        for j in 0..12 {
+            singular.set(4, j, 0.0);
+            singular.set(j, 4, 0.0);
+        }
+        assert!(condense_end_releases(&singular, &releases).is_none());
+        let mut coupled = k.clone();
+        coupled.set(3, 0, 1e-30);
+        assert!(condense_end_releases(&coupled, &releases).is_none());
+        let mut finite_spring = releases;
+        finite_spring[0].1 = 1e-2;
+        finite_spring[3].1 = 1e-2;
+        let actual = condense_end_releases(&k, &finite_spring).unwrap();
+        let expected = 1.0 / (2.0 / 1e-2 + 1.0 / 5e9);
+        assert!((actual.get(3, 3) / expected - 1.0).abs() < 1e-3);
+        let mut invalid = k;
+        invalid.set(0, 0, f64::NAN);
+        assert!(condense_end_releases(&invalid, &[]).is_none());
+        assert!(condense_end_releases(&invalid, &releases).is_none());
+        assert!(condense_end_releases_with_mass(
+            &invalid,
+            &consistent_mass(12.5, 3000.0, 2.0),
+            SectionMassProperties::default(),
+            0.0,
+            0.0,
+            &[],
+        )
+        .is_some());
     }
 
     /// 軸力ゼロなら幾何剛性はゼロ行列。可撓長が実質ゼロでもゼロ行列。
@@ -799,13 +901,11 @@ mod tests {
                     properties.rotary_inertia_y_per_length,
                 ),
             ] {
-                let (mut nv, mut ntheta) = reference_timoshenko_shapes(s, l, phi);
+                let (mut nv, slope) = reference_timoshenko_shapes(s, l, phi);
                 for index in [1, 3] {
                     nv[index] *= sign;
                 }
-                for value in &mut ntheta {
-                    *value *= sign;
-                }
+                let ntheta = [sign * slope[0], slope[1], sign * slope[2], slope[3]];
                 for a in 0..4 {
                     for b in 0..4 {
                         expected[indices[a]][indices[b]] +=

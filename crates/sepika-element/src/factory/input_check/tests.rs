@@ -833,13 +833,15 @@ fn actual_rc_factory_connects_additional_angle_and_publishes_both_backbones() {
     local[5] = 0.005927325831114165;
     local[11] = local[5];
     let global = elastic.axis.rotate_to_global(&local);
-    behavior.update_state(
-        &LocalVec {
-            data: global.into_iter().collect(),
-        },
-        true,
-        &ctx,
-    );
+    behavior
+        .update_state(
+            &LocalVec {
+                data: global.into_iter().collect(),
+            },
+            true,
+            &ctx,
+        )
+        .unwrap();
     let force_global: [f64; 12] = std::array::from_fn(|i| behavior.internal_force(&ctx).data[i]);
     let force_local = elastic.axis.rotate_to_local(&force_global);
     assert!((force_local[5] - 301806000.0).abs() < 0.1);

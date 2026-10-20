@@ -9,6 +9,7 @@
 //! （増分の刻み・収束判定・終了目標の判定・フェーズ間の引き継ぎ）だけを持つ。
 
 use super::diagnosis::{nonconvergence_detail, tangent_singular_diagnosis};
+use super::loads::{prepare_gravity, scaled_member_table, PhysicalPushoverLoads};
 use super::mechanism::determine_mechanism;
 use super::member_response::compute_member_response;
 use super::response::{get_roof_dof, story_heights};
@@ -19,7 +20,8 @@ use super::types::{
 };
 use crate::common::constraint::Reducer;
 use crate::common::csc_cache::CscCache;
-use crate::common::elem_loop::apply_du_trial;
+use crate::common::elem_loop::apply_du_trial_with_member_loads;
+use crate::common::load_fraction::LoadFractionState;
 use crate::common::newton::{l2_norm, STATIC_NEWTON};
 use crate::common::tangent::{add_support_spring_f_int, assemble_k_cached, compute_f_int};
 use crate::common::transaction::StateSnapshot;
@@ -28,7 +30,7 @@ use crate::statics::analysis::{
     SeismicDir,
 };
 use sepika_core::dof::DofMap;
-use sepika_core::model::Model;
+use sepika_core::model::{MemberLoad, Model};
 use sepika_element::behavior::ElementBehavior;
 use sepika_element::factory::{build_nonlinear_behavior, StrengthBasis};
 use sepika_math::solver::{make_solver, LinearSolver, SolverBackend};
@@ -112,6 +114,13 @@ pub fn pushover_analysis_recording(
     use_kg: bool,
     ductility_method: DuctilityMethod,
 ) -> Result<PushoverResult, String> {
+    sepika_element::factory::ensure_wall_side_column_analysis(
+        model,
+        Some(sepika_core::model::AnalysisKind::Incremental),
+        "増分解析",
+        use_kg,
+        None,
+    )?;
     model.validate_member_load_directions()?;
     model
         .validate_rc_section_usage()
@@ -175,8 +184,21 @@ pub fn pushover_analysis_recording(
         t,
     )
     .map_err(|e| e.to_string())?;
+    let physical_loads = PhysicalPushoverLoads::new(model, &gravity_terms, load_case)?;
+    let gravity_case = physical_loads.gravity_case();
+    let has_gravity = !gravity_case.nodal.is_empty() || !gravity_case.member.is_empty();
+    let (f0, gravity_member_loads) = prepare_gravity(model, dofmap, &behaviors, &gravity_case)?;
+    let empty_loads = vec![Vec::new(); behaviors.len()];
+    apply_du_trial_with_member_loads(
+        model,
+        dofmap,
+        &mut behaviors,
+        &vec![0.0; n_active],
+        &empty_loads,
+    )
+    .map_err(|e| format!("増分解析・初期無荷重状態: {e}"))?;
     let mut q = vec![0.0; n_active];
-    for load in &load_case.nodal {
+    for load in &physical_loads.reference.nodal {
         for (d, value) in load.values.iter().enumerate() {
             let g = load.node.index() * 6 + d;
             if let Some(a) = dofmap.active(g) {
@@ -207,6 +229,7 @@ pub fn pushover_analysis_recording(
     let mut target_reached = false;
     let mut lambda = 0.0;
     let mut phase_outcome = PushoverTermination::Unknown;
+    let mut element_failure: Option<String> = None;
 
     let sum_h: f64 = heights.iter().sum();
     let mut roof_bound = f64::INFINITY;
@@ -235,73 +258,21 @@ pub fn pushover_analysis_recording(
 
     let mut last_roof = 0.0_f64;
 
-    let f0: Vec<f64> = if apply_long_term {
-        let mut f = vec![0.0; n_active];
-        for (case, factor) in &gravity_terms {
-            let flc = crate::common::assemble::assemble_global_f(model, dofmap, *case);
-            for (acc, v) in f.iter_mut().zip(flc) {
-                *acc += factor * v;
-            }
-        }
-        f
-    } else {
-        vec![0.0; n_active]
-    };
     recorder.reference_external = q.clone();
     recorder.constant_external = f0.clone();
-    if f0.iter().any(|v| v.abs() > 0.0) {
-        let n_grav = 5usize;
-        let mut applied = 0.0_f64;
-        for gstep in 0..n_grav {
-            let mut mu_target = (gstep + 1) as f64 / n_grav as f64;
-            let mut step_ok = false;
-            for _attempt in 0..5 {
-                let snap = StateSnapshot::capture(&behaviors);
-                let f_ext: Vec<f64> = f0.iter().map(|&v| v * mu_target).collect();
-                match newton_converge(
-                    model,
-                    dofmap,
-                    reducer,
-                    &mut behaviors,
-                    &f_ext,
-                    use_kg,
-                    n_active,
-                    &total_disp,
-                    &mut st,
-                ) {
-                    Some(step_du_free) => {
-                        for b in behaviors.iter_mut() {
-                            b.commit_state();
-                        }
-                        for (&du, td) in step_du_free.iter().zip(total_disp.iter_mut()) {
-                            *td += du;
-                        }
-                        applied = mu_target;
-                        step_ok = true;
-                        break;
-                    }
-                    None => {
-                        snap.restore(&mut behaviors);
-                        mu_target = applied + (mu_target - applied) * 0.5;
-                    }
-                }
-            }
-            if !step_ok {
-                let detail = current_failure_detail(
-                    model,
-                    dofmap,
-                    reducer,
-                    &behaviors,
-                    use_kg,
-                    &mut st,
-                    "長期荷重の初期載荷における接線剛性",
-                );
-                return Err(format!(
-                    "長期荷重の初期載荷が収束しません（長期荷重に対して構造が不安定な可能性）。{detail}"
-                ));
-            }
-        }
-        let rec = recorder.record(0.0, model, dofmap, &behaviors, &total_disp);
+    if has_gravity {
+        apply_initial_load(
+            model,
+            dofmap,
+            reducer,
+            &mut behaviors,
+            &f0,
+            &gravity_member_loads,
+            use_kg,
+            &mut total_disp,
+            &mut st,
+        )?;
+        let rec = recorder.record(0.0, model, dofmap, &behaviors, &total_disp)?;
         last_roof = rec.roof;
     }
 
@@ -334,20 +305,24 @@ pub fn pushover_analysis_recording(
                 reducer,
                 &mut behaviors,
                 &f_ext,
+                &gravity_member_loads,
+                &format!("増分解析・荷重制御 λ={current_lambda}"),
                 use_kg,
                 n_active,
                 &total_disp,
                 &mut st,
             );
 
-            if let Some(step_du_free) = converged {
+            if let Ok(Some(step_du_free)) = converged {
+                element_failure = None;
                 for b in behaviors.iter_mut() {
                     b.commit_state();
                 }
                 for (&du, td) in step_du_free.iter().zip(total_disp.iter_mut()) {
                     *td += du;
                 }
-                let rec = recorder.record(current_lambda, model, dofmap, &behaviors, &total_disp);
+                let rec =
+                    recorder.record(current_lambda, model, dofmap, &behaviors, &total_disp)?;
                 let roof = rec.roof;
                 let drift_angle_now = rec.drift_angle;
                 if adaptive {
@@ -365,11 +340,17 @@ pub fn pushover_analysis_recording(
                 }
                 break;
             } else {
+                if let Err(error) = converged {
+                    element_failure = Some(error);
+                }
                 snap.restore(&mut behaviors);
                 current_lambda = prev_lambda + (current_lambda - prev_lambda) * 0.5;
             }
         }
         if !step_ok {
+            if let Some(error) = element_failure.take() {
+                return Err(format!("増分解析・荷重制御: {error}"));
+            }
             phase_outcome = PushoverTermination::NonConvergence {
                 phase: "荷重制御".into(),
                 load_factor: lambda,
@@ -411,7 +392,21 @@ pub fn pushover_analysis_recording(
                     let mut converged = false;
                     let mut step_du_free = vec![0.0; n_active];
 
-                    for _iter in STATIC_NEWTON.iters() {
+                    if let Err(error) = apply_du_trial_with_member_loads(
+                        model,
+                        dofmap,
+                        &mut behaviors,
+                        &vec![0.0; n_active],
+                        &gravity_member_loads,
+                    ) {
+                        snap.restore(&mut behaviors);
+                        element_failure = Some(format!(
+                            "増分解析・変位制御 attempt={} 初期荷重 λ={lambda}: {error}",
+                            attempt + 1
+                        ));
+                        continue;
+                    }
+                    for iter in STATIC_NEWTON.iters() {
                         let k_free = assemble_k_cached(
                             model,
                             dofmap,
@@ -473,17 +468,31 @@ pub fn pushover_analysis_recording(
                         for (acc, &d) in step_du_free.iter_mut().zip(st.du_free.iter()) {
                             *acc += d;
                         }
-                        apply_du_trial(model, dofmap, &mut behaviors, &st.du_free);
+                        if let Err(error) = apply_du_trial_with_member_loads(
+                            model,
+                            dofmap,
+                            &mut behaviors,
+                            &st.du_free,
+                            &gravity_member_loads,
+                        ) {
+                            element_failure = Some(format!(
+                                "増分解析・変位制御 attempt={} Newton={iter} λ={lambda}: {error}",
+                                attempt + 1
+                            ));
+                            break;
+                        }
                     }
 
                     if converged {
+                        element_failure = None;
                         for b in behaviors.iter_mut() {
                             b.commit_state();
                         }
                         for (&du, td) in step_du_free.iter().zip(total_disp.iter_mut()) {
                             *td += du;
                         }
-                        let rec = recorder.record(lambda, model, dofmap, &behaviors, &total_disp);
+                        let rec =
+                            recorder.record(lambda, model, dofmap, &behaviors, &total_disp)?;
                         let roof = rec.roof;
                         let drift_angle_now = rec.drift_angle;
                         step_ok = true;
@@ -497,6 +506,9 @@ pub fn pushover_analysis_recording(
                     }
                 }
                 if !step_ok {
+                    if let Some(error) = element_failure.take() {
+                        return Err(format!("増分解析・変位制御: {error}"));
+                    }
                     phase_outcome = PushoverTermination::NonConvergence {
                         phase: "変位制御".into(),
                         load_factor: lambda,
@@ -528,7 +540,7 @@ pub fn pushover_analysis_recording(
 
     let mechanism = determine_mechanism(recorder.hinges(), model, dir);
     let qu = recorder.qu();
-    let member_response = compute_member_response(model, dofmap, &behaviors, &total_disp, dir);
+    let member_response = compute_member_response(model, dofmap, &behaviors, &total_disp, dir)?;
     let detail_elems: std::collections::HashSet<sepika_core::ids::ElemId> = recorder
         .hinges()
         .iter()
@@ -609,11 +621,79 @@ fn current_failure_detail(
     nonconvergence_detail(model, dofmap, reducer, &k_red, factorizable, phase)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn apply_initial_load(
+    model: &Model,
+    dofmap: &DofMap,
+    reducer: &Reducer,
+    behaviors: &mut [Box<dyn ElementBehavior>],
+    f0: &[f64],
+    gravity_member_loads: &[Vec<MemberLoad>],
+    use_kg: bool,
+    total_disp: &mut [f64],
+    st: &mut SolverState,
+) -> Result<(), String> {
+    let n_active = total_disp.len();
+    let mut state = LoadFractionState::new(5);
+    let mut element_failure = None;
+    while let Some(mu_target) = state.next_target() {
+        let snap = StateSnapshot::capture(behaviors);
+        let f_ext: Vec<f64> = f0.iter().map(|&v| v * mu_target).collect();
+        let absolute_loads = scaled_member_table(gravity_member_loads, mu_target);
+        match newton_converge(
+            model,
+            dofmap,
+            reducer,
+            behaviors,
+            &f_ext,
+            &absolute_loads,
+            &format!("増分解析・重力初期載荷 μ={mu_target}"),
+            use_kg,
+            n_active,
+            total_disp,
+            st,
+        ) {
+            Ok(Some(step_du_free)) => {
+                element_failure = None;
+                for behavior in behaviors.iter_mut() {
+                    behavior.commit_state();
+                }
+                for (&du, td) in step_du_free.iter().zip(total_disp.iter_mut()) {
+                    *td += du;
+                }
+                state.record_success(mu_target);
+            }
+            result => {
+                if let Err(error) = result {
+                    element_failure = Some(error);
+                }
+                snap.restore(behaviors);
+                if !state.record_failure() {
+                    if let Some(error) = element_failure.take() {
+                        return Err(format!("長期荷重の初期載荷が収束しません: {error}"));
+                    }
+                    let detail = current_failure_detail(
+                        model,
+                        dofmap,
+                        reducer,
+                        behaviors,
+                        use_kg,
+                        st,
+                        "長期荷重の初期載荷における接線剛性",
+                    );
+                    return Err(format!("長期荷重の初期載荷が収束しません（長期荷重に対して構造が不安定な可能性）。{detail}"));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// 固定外力 `f_ext` に対する Newton 反復。
 ///
 /// 収束判定は力の相対ノルム r < tol·max(|f_ext|, 1)（規約は [`STATIC_NEWTON`]）。
 /// 収束したらステップ内の全 Newton 修正量の累積を `Some` で返し、
-/// 収束しなければ `None`。接線剛性の分解・求解の失敗も `None` として返す。
+/// 収束しなければ `Ok(None)`。要素の更新失敗は原因を含む `Err` を返す。
 #[allow(clippy::too_many_arguments)]
 fn newton_converge(
     model: &Model,
@@ -621,13 +701,17 @@ fn newton_converge(
     reducer: &Reducer,
     behaviors: &mut [Box<dyn ElementBehavior>],
     f_ext: &[f64],
+    absolute_loads: &[Vec<MemberLoad>],
+    phase: &str,
     use_kg: bool,
     n_active: usize,
     total_disp_base: &[f64],
     st: &mut SolverState,
-) -> Option<Vec<f64>> {
+) -> Result<Option<Vec<f64>>, String> {
     let mut step_du_free = vec![0.0; n_active];
-    for _iter in STATIC_NEWTON.iters() {
+    apply_du_trial_with_member_loads(model, dofmap, behaviors, &step_du_free, absolute_loads)
+        .map_err(|e| format!("{phase}・初期荷重更新: {e}"))?;
+    for iter in STATIC_NEWTON.iters() {
         let k_free = assemble_k_cached(model, dofmap, behaviors, use_kg, &mut st.k_free_cache);
         let k_red = reducer.reduce_k_cached(&k_free, &mut st.k_red_cache);
         let mut f_int = compute_f_int(model, dofmap, behaviors);
@@ -643,21 +727,22 @@ fn newton_converge(
         let r_norm = l2_norm(&st.r_red);
         let f_norm = l2_norm(&st.f_ext_red);
         if STATIC_NEWTON.converged(r_norm, f_norm.max(1.0)) {
-            return Some(step_du_free);
+            return Ok(Some(step_du_free));
         }
         if st.solver.factorize(&k_red).is_err() {
-            return None;
+            return Ok(None);
         }
         if st.solver.solve_into(&st.r_red, &mut st.du_red).is_err() {
-            return None;
+            return Ok(None);
         }
         reducer.expand_u_into(&st.du_red, &mut st.du_free);
         for (acc, &d) in step_du_free.iter_mut().zip(st.du_free.iter()) {
             *acc += d;
         }
-        apply_du_trial(model, dofmap, behaviors, &st.du_free);
+        apply_du_trial_with_member_loads(model, dofmap, behaviors, &st.du_free, absolute_loads)
+            .map_err(|e| format!("{phase}・Newton={iter}: {e}"))?;
     }
-    None
+    Ok(None)
 }
 
 /// 初期接線剛性で K·δu = q を 1 回解き、荷重係数 λ あたりの頂部変位の弾性勾配

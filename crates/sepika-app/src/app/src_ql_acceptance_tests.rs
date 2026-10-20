@@ -113,8 +113,10 @@ fn src_ovika_design_contracts_keep_current_analysis_and_require_explicit_recheck
         ("src-old14", Some(14)),
         ("src-old15", Some(15)),
         ("src-old16", Some(16)),
-        ("src-future18", Some(18)),
-        ("src-current17", Some(17)),
+        ("src-old17", Some(17)),
+        ("src-old18", Some(18)),
+        ("src-current19", Some(19)),
+        ("src-future20", Some(20)),
     ] {
         let (mut loaded, path) = super::result_contract_tests::restore(
             &original,

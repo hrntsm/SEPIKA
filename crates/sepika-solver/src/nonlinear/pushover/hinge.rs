@@ -4,7 +4,7 @@
 //! - [`compute_hinge_thresholds`] — 全部材の閾値を算定
 //! - [`track_hinges`] — 各ステップのヒンジ発生・レベルを判定し記録
 
-use super::geom::member_end_forces_at_face;
+use super::geom::{recording_face_force, recording_force};
 use super::types::{HingeEvent, HingeLevel};
 use sepika_core::flexural_strength::{
     member_flexural_yield_moment, section_elastic_modulus, FlexuralStrengthFactors,
@@ -13,7 +13,7 @@ use sepika_core::material_grade::{material_strength_factor_rebar, material_stren
 use sepika_core::model::{ElementData, Model};
 use sepika_core::section_shape::SectionShape;
 use sepika_core::structure_kind::StructureKind;
-use sepika_element::behavior::{Ctx, ElementBehavior};
+use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse};
 
 /// 部材塑性率の終局ヒンジ判定値（既定値 4.0）。この値以上のヒンジを Ultimate と分類する。
 const ULTIMATE_DUCTILITY: f64 = 4.0;
@@ -29,6 +29,9 @@ pub(crate) struct HingeThreshold {
 
 /// 部材の曲げヒンジ閾値を算定する。
 fn member_moment_thresholds(elem: &ElementData, model: &Model) -> HingeThreshold {
+    if sepika_element::frame::beam::is_elastic_wall_girder(model, elem) {
+        return HingeThreshold { mc: 0.0, my: 0.0 };
+    }
     let Some(sec) = elem.section.and_then(|sid| model.sections.get(sid.index())) else {
         return HingeThreshold { mc: 0.0, my: 0.0 };
     };
@@ -80,15 +83,25 @@ pub(crate) fn compute_hinge_thresholds(model: &Model) -> Vec<HingeThreshold> {
 pub(crate) fn track_hinges(
     model: &Model,
     behaviors: &[Box<dyn ElementBehavior>],
+    responses: &[Option<LoadedFrameResponse>],
     thresholds: &[HingeThreshold],
     ductility: &[f64],
     step: u32,
     hinges: &mut Vec<HingeEvent>,
 ) {
     let ctx = Ctx { model };
-    for (i, (elem, b)) in model.elements.iter().zip(behaviors).enumerate() {
-        let f = b.internal_force(&ctx);
-        let Some(fl) = member_end_forces_at_face(model, elem, &f.data) else {
+    for (i, ((elem, b), response)) in model
+        .elements
+        .iter()
+        .zip(behaviors)
+        .zip(responses)
+        .enumerate()
+    {
+        if sepika_element::frame::beam::is_elastic_wall_girder(model, elem) {
+            continue;
+        }
+        let f = recording_force(b.as_ref(), response.as_ref(), &ctx);
+        let Some(fl) = recording_face_force(model, elem, &f.data, response.as_ref()) else {
             continue;
         };
         let m_i = fl[4].abs().max(fl[5].abs());
