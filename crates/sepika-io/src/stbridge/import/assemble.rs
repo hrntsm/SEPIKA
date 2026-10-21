@@ -1741,13 +1741,8 @@ fn resolve_sec_material(model: &Model, r: &SecMatRef) -> Option<MaterialId> {
     }
 }
 
-/// 鉄筋・鉄骨のグレード名から材料を引き、無ければ作る（取り込みの境界）。
-///
-/// ST-Bridge は鉄筋・内蔵鉄骨の材質を**グレード名**で持つのに対し、内部モデルは
-/// 材料テーブルへの参照で持つ。名前が一致する材料があればそれを使い、無ければ
-/// グレード名から基準強度を推定して 1 行作る。推定に用いる規則
-/// （[`sepika_core::material_grade::rebar_grade_f_value`] ほか）はここでしか
-/// 使わず、内部の強度解決は作られた材料の `fy` だけを見る。
+/// 鉄筋・内蔵鋼材・CFT鋼管の名前が一致する既存材料を再利用する。
+/// 未登録の既知グレードには標準物性を与え、未知グレードの強度・密度は補完しない。
 fn find_or_create_bar_material(
     model: &mut Model,
     grade: &str,
@@ -1761,9 +1756,10 @@ fn find_or_create_bar_material(
     if let Some(m) = model.materials.iter().find(|m| m.name == grade) {
         return Some(m.id);
     }
+    let standard = material_std::resolve_grade(grade);
     let fy = match category {
         MaterialCategory::Rebar => sepika_core::standard_material::rebar_grade_strength(grade),
-        _ => material_std::resolve_grade(grade).and_then(|m| m.fy),
+        _ => standard.as_ref().and_then(|m| m.fy),
     };
     if fy.is_none() {
         notes.push(format!(
@@ -1778,9 +1774,21 @@ fn find_or_create_bar_material(
         id,
         name: grade.to_string(),
         category,
-        young: preset.as_ref().map(|p| p.young).unwrap_or(205_000.0),
-        poisson: preset.as_ref().map(|p| p.poisson).unwrap_or(0.3),
-        density: preset.as_ref().map(|p| p.density).unwrap_or(0.0),
+        young: standard
+            .as_ref()
+            .map(|m| m.young)
+            .or_else(|| preset.as_ref().map(|p| p.young))
+            .unwrap_or(205_000.0),
+        poisson: standard
+            .as_ref()
+            .map(|m| m.poisson)
+            .or_else(|| preset.as_ref().map(|p| p.poisson))
+            .unwrap_or(0.3),
+        density: standard
+            .as_ref()
+            .map(|m| m.density)
+            .or_else(|| preset.as_ref().map(|p| p.density))
+            .unwrap_or(0.0),
         shear: None,
         fc: None,
         fy: fy.or_else(|| preset.as_ref().and_then(|p| p.fy)),
