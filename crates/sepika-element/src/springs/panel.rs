@@ -1148,4 +1148,171 @@ mod tests {
             assert_eq!(panel.k_panel, 0.0);
         }
     }
+
+    fn panel_724_reference_scales() -> (f64, f64, f64) {
+        let volume_mm3 = 379.0 * 583.0 * 13.0;
+        let kappa = 1.0 / (2.0 / 3.0 + 33_600.0 / 4_927.0) + 1.0 / (1.0 + 4_927.0 / 50_400.0);
+        let stiffness_nmm = 205_000.0 / 2.6 * volume_mm3;
+        let moment_nmm = volume_mm3 * 235.0 / (kappa * 3.0_f64.sqrt());
+        (stiffness_nmm, moment_nmm, moment_nmm / stiffness_nmm)
+    }
+
+    fn panel_724_increment(gamma_rad: f64, axial_ratio: f64) -> LocalVec {
+        let mut increment = LocalVec {
+            data: SmallVec::from_elem(0.0, 14),
+        };
+        increment.data[0] = gamma_rad;
+        increment.data[10] = -axial_ratio * 235.0 * 3_000.0 / 205_000.0;
+        increment
+    }
+
+    #[test]
+    fn panel_724_constant_compression_cycle_matches_independent_vertices_and_work() {
+        let (model, data) = cross_joint_model();
+        let ctx = Ctx { model: &model };
+        let mut panel = PanelZone::new_nonlinear(&data, &model);
+        let (stiffness, moment, gamma) = panel_724_reference_scales();
+        panel
+            .update_state(&panel_724_increment(0.0, 0.6), true, &ctx)
+            .unwrap();
+        assert!((panel.axial_ratio() - 0.6).abs() < 1e-12);
+        assert!((panel.yield_moment() / moment - 0.8).abs() < 1e-12);
+        let vertices = [
+            (0.4, 0.4, Some(1.0)),
+            (0.8, 0.8, None),
+            (1.6, 0.808, Some(0.01)),
+            (0.8, 0.008, Some(1.0)),
+            (0.0, -0.792, None),
+            (-0.8, -0.8, Some(0.01)),
+            (-1.6, -0.808, Some(0.01)),
+            (-0.8, -0.008, Some(1.0)),
+            (0.0, 0.792, None),
+            (0.8, 0.8, Some(0.01)),
+            (1.6, 0.808, Some(0.01)),
+        ];
+        let (mut previous_x, mut previous_m, mut loop_work) = (0.0, 0.0, 0.0);
+        for (index, (x, expected_m, expected_k)) in vertices.into_iter().enumerate() {
+            panel
+                .update_state(
+                    &panel_724_increment((x - previous_x) * gamma, 0.0),
+                    false,
+                    &ctx,
+                )
+                .unwrap();
+            let actual_m = panel.internal_force(&ctx).data[0] / moment;
+            assert!(
+                (actual_m - expected_m).abs() < 1e-12,
+                "vertex {index}: {actual_m}"
+            );
+            if let Some(expected_k) = expected_k {
+                assert!(
+                    (panel.tangent_stiffness(&ctx).get(0, 0) / stiffness - expected_k).abs()
+                        < 1e-12
+                );
+            }
+            if index >= 3 {
+                loop_work += 0.5 * (previous_m + actual_m) * (x - previous_x);
+            }
+            panel.commit_state();
+            assert!((panel.panel_moments()[0] / moment - expected_m).abs() < 1e-12);
+            (previous_x, previous_m) = (x, actual_m);
+        }
+        // 閉ループ面積は 4(1-b)My(γmax-γy)、b=0.01、My=0.8M0。
+        assert!((loop_work - 2.5344).abs() < 1e-12);
+        println!("panel724 constant-n: K={stiffness}, M0={moment}, gamma0={gamma}, normalized_loop_work={loop_work}");
+    }
+
+    #[test]
+    fn panel_724_changed_axial_yield_retains_committed_plastic_rotation() {
+        let (model, data) = cross_joint_model();
+        let ctx = Ctx { model: &model };
+        let mut panel = PanelZone::new_nonlinear(&data, &model);
+        let (stiffness, moment, gamma) = panel_724_reference_scales();
+        panel
+            .update_state(&panel_724_increment(1.6 * gamma, 0.6), true, &ctx)
+            .unwrap();
+        for (delta_gamma, delta_n, expected_m, expected_k) in [
+            (0.0, 0.2, 0.61, 0.01),
+            (0.0, -0.2, 0.61, 1.0),
+            (-0.8, 0.0, -0.19, 1.0),
+            (0.8, 0.0, 0.61, 1.0),
+        ] {
+            panel
+                .update_state(
+                    &panel_724_increment(delta_gamma * gamma, delta_n),
+                    false,
+                    &ctx,
+                )
+                .unwrap();
+            assert!((panel.panel_moments()[0] / moment - expected_m).abs() < 1e-12);
+            assert!(
+                (panel.tangent_stiffness(&ctx).get(0, 0) / stiffness - expected_k).abs() < 1e-12
+            );
+            panel.commit_state();
+        }
+    }
+
+    #[test]
+    fn panel_724_snapshot_and_checkpoint_restore_axial_yield_and_plastic_history() {
+        let (model, data) = cross_joint_model();
+        let ctx = Ctx { model: &model };
+        let (_, moment, gamma) = panel_724_reference_scales();
+        let mut panel = PanelZone::new_nonlinear(&data, &model);
+        panel
+            .update_state(&panel_724_increment(1.6 * gamma, 0.6), true, &ctx)
+            .unwrap();
+        let snapshot = panel.snapshot_state();
+        let checkpoint = panel.serialize_checkpoint();
+        for use_checkpoint in [false, true] {
+            panel
+                .update_state(&panel_724_increment(-3.2 * gamma, 0.2), true, &ctx)
+                .unwrap();
+            if use_checkpoint {
+                panel.deserialize_checkpoint(&checkpoint).unwrap();
+            } else {
+                panel.restore_state(snapshot.as_ref());
+            }
+            assert_eq!(panel.serialize_checkpoint(), checkpoint);
+            assert!((panel.axial_ratio() - 0.6).abs() < 1e-12);
+            assert!((panel.yield_moment() / moment - 0.8).abs() < 1e-12);
+            assert!((panel.panel_moments()[0] / moment - 0.808).abs() < 1e-12);
+            panel
+                .update_state(&panel_724_increment(-0.8 * gamma, 0.0), false, &ctx)
+                .unwrap();
+            assert!((panel.panel_moments()[0] / moment - 0.008).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn panel_724_elastic_column_axial_force_matches_with_rigid_arms_and_reversed_ends() {
+        use crate::frame::beam::BeamElement;
+
+        for reversed in [false, true] {
+            for rigid_arm_mm in [0.0, 300.0] {
+                let (mut model, data) = cross_joint_model();
+                model.elements[2].rigid_zone.panel_offset_j = rigid_arm_mm;
+                if reversed {
+                    model.elements[2].nodes.reverse();
+                    model.elements[2].rigid_zone.panel_offset_j = 0.0;
+                    model.elements[2].rigid_zone.panel_offset_i = rigid_arm_mm;
+                }
+                let ctx = Ctx { model: &model };
+                let mut panel = PanelZone::new_nonlinear(&data, &model);
+                let column = BeamElement::new(&model.elements[2], &model);
+                let mut increment = panel_724_increment(0.0, 0.6);
+                if reversed {
+                    increment.data.swap(4, 10);
+                }
+                panel.update_state(&increment, false, &ctx).unwrap();
+                let mut displacements = [0.0; 12];
+                displacements.copy_from_slice(&increment.data[2..]);
+                let response = column.recover_forces(&displacements);
+                let expected_axial_n = -3_083_670.0;
+                for (_, force) in response.at {
+                    assert!((force[0] - expected_axial_n).abs() < 1e-6);
+                }
+                assert!((panel.axial_ratio() - 0.6).abs() < 1e-12);
+            }
+        }
+    }
 }
