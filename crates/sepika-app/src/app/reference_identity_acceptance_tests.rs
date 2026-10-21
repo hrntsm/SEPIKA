@@ -75,6 +75,140 @@ fn existing_app() -> App {
     app
 }
 
+const BUILT_BOX_INPUT: &str =
+    include_str!("../../../sepika-io/tests/fixtures/built_box_standard.stb");
+
+#[test]
+fn built_box_equal_thickness_import_replaces_model_only_after_success() {
+    for t2 in ["9", "9.0"] {
+        let mut app = existing_app();
+        let source = BUILT_BOX_INPUT.replace("t2=\"9\"", &format!("t2=\"{t2}\""));
+        let file = path(&format!("742-equal-{t2}")).with_extension("stb");
+        std::fs::write(&file, &source).unwrap();
+
+        app.import_stbridge_from(file.clone());
+
+        assert_eq!(app.core.model.elements.len(), 1);
+        assert_eq!(app.core.model.sections.len(), 1);
+        let section = &app.core.model.sections[0];
+        assert_eq!(section.name, "G1");
+        assert_eq!(
+            section.shape,
+            Some(sepika_core::section_shape::SectionShape::SteelBox {
+                height: 300.,
+                width: 200.,
+                thick: 9.,
+                corner_r: Some(0.),
+            })
+        );
+        assert!(app.core.scoped.results.is_none());
+        assert!(app.core.scoped.preparation.is_none());
+        assert!(app.core.scoped.project_path.is_none());
+        assert!(!app.core.scoped.undo.can_undo());
+        assert!(!app.core.scoped.undo.can_redo());
+        assert!(!app
+            .core
+            .log
+            .entries
+            .iter()
+            .any(|entry| entry.message.contains("ST-Bridge読込エラー")));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+        std::fs::remove_file(file).unwrap();
+    }
+}
+
+#[cfg(feature = "gui")]
+fn assert_built_box_error_is_displayed(app: &mut App, error: &str) {
+    assert!(app.ui.view.bottom_dock_open);
+    assert_eq!(app.ui.view.bottom_tab, BottomTab::Log);
+    let output = egui::Context::default().run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(2400., 800.),
+            )),
+            ..Default::default()
+        },
+        |ui| app.status_bar(ui),
+    );
+    let expected = format!("⚠ {}", error.replace('\n', " "));
+    assert!(output.shapes.iter().any(|shape| {
+        matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == expected)
+    }));
+}
+
+#[test]
+fn built_box_rejected_import_preserves_model_results_history_and_files_with_diagnostic() {
+    let mut app = existing_app();
+    let project = path("742-retained-project");
+    sepika_io::ovika::save_ovika(&project, &app.core.model, Default::default()).unwrap();
+    app.core.scoped.project_path = Some(project.clone());
+    let project_bytes = std::fs::read(&project).unwrap();
+    let before = retained(&app);
+
+    for (label, replacement, details) in [
+        (
+            "unequal-6",
+            "t2=\"6\"",
+            &["t1", "9", "t2", "6", "未対応"][..],
+        ),
+        (
+            "unequal-12",
+            "t2=\"12\"",
+            &["t1", "9", "t2", "12", "未対応"][..],
+        ),
+        ("missing", "", &["t2", "欠落"][..]),
+        ("zero", "t2=\"0\"", &["t2", "0", "正値"][..]),
+        ("negative", "t2=\"-1\"", &["t2", "-1", "正値"][..]),
+        ("nonnumeric", "t2=\"bad\"", &["t2", "bad", "数値"][..]),
+        ("nan", "t2=\"NaN\"", &["t2", "NaN", "有限"][..]),
+        ("infinite", "t2=\"INF\"", &["t2", "INF", "有限"][..]),
+        ("inner-height", "t2=\"151\"", &["t2", "151", "内法"][..]),
+    ] {
+        let source = BUILT_BOX_INPUT.replace("t2=\"9\"", replacement);
+        let file = path(&format!("742-rejected-{label}")).with_extension("stb");
+        std::fs::write(&file, &source).unwrap();
+        #[cfg(feature = "gui")]
+        {
+            app.ui.view.bottom_dock_open = false;
+            app.ui.view.bottom_tab = BottomTab::Model;
+        }
+
+        app.import_stbridge_from(file.clone());
+
+        let error = app.core.scoped.last_error.clone().unwrap();
+        for detail in [
+            "ST-Bridge読込エラー",
+            "StbSecBuild-BOX",
+            "BOX1",
+            "StbSecBeam_S",
+            "20",
+            "G1",
+        ]
+        .into_iter()
+        .chain(details.iter().copied())
+        {
+            assert!(error.contains(detail), "{label}/{detail}: {error}");
+        }
+        let entry = app.core.log.entries.last().unwrap();
+        assert_eq!(entry.level, LogLevel::Error);
+        assert_eq!(entry.message, error);
+        #[cfg(feature = "gui")]
+        assert_built_box_error_is_displayed(&mut app, &error);
+        assert_eq!(retained(&app), before, "{label}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+        assert_eq!(std::fs::read(&project).unwrap(), project_bytes);
+        std::fs::remove_file(file).unwrap();
+    }
+    app.core.scoped.undo.undo(&mut app.core.model);
+    assert_eq!(app.core.model.nodes[0].coord[0], 0.);
+    app.core.scoped.undo.redo(&mut app.core.model);
+    assert_eq!(bytes(&app.core.model), before.model);
+    app.core.scoped.undo.redo(&mut app.core.model);
+    assert_eq!(app.core.model.nodes[0].coord[0], -200.);
+    std::fs::remove_file(project).unwrap();
+}
+
 const SERIES_COLUMN: &str = r#"<StbSecColumn_RC id="1" name="C1" strength_concrete="Fc30"><StbSecFigureColumn_RC><StbSecColumn_RC_Rect width_X="500" width_Y="500"/></StbSecFigureColumn_RC></StbSecColumn_RC>"#;
 const SERIES_GIRDER: &str = r#"<StbSecBeam_RC id="1" name="G1" strength_concrete="Fc24"><StbSecFigureBeam_RC><StbSecBeam_RC_Straight width="300" depth="600"/></StbSecFigureBeam_RC></StbSecBeam_RC>"#;
 

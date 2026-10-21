@@ -1429,7 +1429,7 @@ fn section_uses(
 fn build_sections(
     model: &mut Model,
     mut pending: Vec<PendingSec>,
-    steel_lib: &HashMap<String, SectionShape>,
+    steel_lib: &HashMap<String, Result<SectionShape, String>>,
     warnings: &mut Vec<String>,
     notes: &mut Vec<String>,
     section_uses: &HashMap<SectionKey, FrameSectionUse>,
@@ -1453,6 +1453,15 @@ fn build_sections(
                 |source| source.error(Some(file_id.family), &detail),
             )
         };
+        let resolve_steel = |name: Option<&str>| {
+            name.and_then(|name| steel_lib.get(name).map(|entry| (name, entry)))
+                .map(|(name, entry)| {
+                    entry
+                        .clone()
+                        .map_err(|reason| section_error(&format!("形鋼「{name}」: {reason}")))
+                })
+                .transpose()
+        };
         let new_id = SectionId(model.sections.len() as u32);
         let section = match ps.kind {
             PendingSecKind::Shape(shape) => {
@@ -1462,48 +1471,40 @@ fn build_sections(
                 section.frame_use = section_uses.get(&file_id).copied();
                 section
             }
-            PendingSecKind::SteelRef(shape_name) => {
-                match shape_name
-                    .as_deref()
-                    .and_then(|nm| steel_lib.get(nm).cloned())
-                {
-                    Some(shape) => {
-                        let mut section = shape
-                            .input_section(new_id, ps.name)
-                            .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?;
-                        section.frame_use = section_uses.get(&file_id).copied();
-                        section
-                    }
-                    None => {
-                        return Err(section_error(&format!(
-                            "鋼断面 (id={file_id}, name=\"{}\") の形鋼参照「{}」を解決できません",
-                            ps.name,
-                            shape_name.as_deref().unwrap_or("未指定")
-                        )))
-                    }
+            PendingSecKind::SteelRef(shape_name) => match resolve_steel(shape_name.as_deref())? {
+                Some(shape) => {
+                    let mut section = shape
+                        .input_section(new_id, ps.name)
+                        .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?;
+                    section.frame_use = section_uses.get(&file_id).copied();
+                    section
                 }
-            }
+                None => {
+                    return Err(section_error(&format!(
+                        "鋼断面 (id={file_id}, name=\"{}\") の形鋼参照「{}」を解決できません",
+                        ps.name,
+                        shape_name.as_deref().unwrap_or("未指定")
+                    )))
+                }
+            },
             PendingSecKind::CftRef(steel_name) => {
-                let cft = steel_name
-                    .as_deref()
-                    .and_then(|nm| steel_lib.get(nm).cloned())
-                    .and_then(|s| match s {
-                        SectionShape::SteelBox {
-                            height,
-                            width,
-                            thick,
-                            corner_r,
-                        } => Some(SectionShape::CftBox {
-                            height,
-                            width,
-                            thick,
-                            corner_r,
-                        }),
-                        SectionShape::SteelPipe { outer_dia, thick } => {
-                            Some(SectionShape::CftPipe { outer_dia, thick })
-                        }
-                        _ => None,
-                    });
+                let cft = resolve_steel(steel_name.as_deref())?.and_then(|s| match s {
+                    SectionShape::SteelBox {
+                        height,
+                        width,
+                        thick,
+                        corner_r,
+                    } => Some(SectionShape::CftBox {
+                        height,
+                        width,
+                        thick,
+                        corner_r,
+                    }),
+                    SectionShape::SteelPipe { outer_dia, thick } => {
+                        Some(SectionShape::CftPipe { outer_dia, thick })
+                    }
+                    _ => None,
+                });
                 match cft {
                     Some(shape) => shape
                         .input_section(new_id, ps.name)
@@ -1523,29 +1524,26 @@ fn build_sections(
                 rebar,
                 steel_name,
             } => {
-                let steel_dims = steel_name
-                    .as_deref()
-                    .and_then(|nm| steel_lib.get(nm).cloned())
-                    .and_then(|s| match s {
-                        SectionShape::SteelH {
-                            height,
-                            width,
-                            web_thick,
-                            flange_thick,
-                            ..
-                        } => Some((height, width, web_thick, flange_thick)),
-                        SectionShape::SteelBuiltH {
-                            height,
-                            upper_width,
-                            upper_thick,
-                            lower_width,
-                            lower_thick,
-                            web_thick,
-                        } if upper_width == lower_width && upper_thick == lower_thick => {
-                            Some((height, upper_width, web_thick, upper_thick))
-                        }
-                        _ => None,
-                    });
+                let steel_dims = resolve_steel(steel_name.as_deref())?.and_then(|s| match s {
+                    SectionShape::SteelH {
+                        height,
+                        width,
+                        web_thick,
+                        flange_thick,
+                        ..
+                    } => Some((height, width, web_thick, flange_thick)),
+                    SectionShape::SteelBuiltH {
+                        height,
+                        upper_width,
+                        upper_thick,
+                        lower_width,
+                        lower_thick,
+                        web_thick,
+                    } if upper_width == lower_width && upper_thick == lower_thick => {
+                        Some((height, upper_width, web_thick, upper_thick))
+                    }
+                    _ => None,
+                });
                 let (sh, sw, sweb, sfl) = steel_dims.ok_or_else(|| {
                     section_error(&format!(
                         "SRC 断面 (id={file_id}, name=\"{}\") の内蔵鉄骨参照「{}」を解決できません",
