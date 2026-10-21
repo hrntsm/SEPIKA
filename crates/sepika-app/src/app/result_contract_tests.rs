@@ -929,6 +929,23 @@ fn lip_channel_geometry_old_contracts_expire_and_current_keeps_results() {
 }
 
 #[test]
+fn shear_modulus_gate_expires_analysis29_and_keeps_current_results() {
+    let app = calculated();
+    for (version, keep) in [(29, false), (ANALYSIS_CONTRACT_VERSION, true)] {
+        let (loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("shear712-contract-{version}"),
+        );
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(results.has_analysis_results(), keep);
+        assert_eq!(results.has_design_results(), keep);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
 fn cft_case2_design12_expires_while_current_analysis_survives_and_design_can_be_recomputed() {
     let app = super::tests::cft_long_case2_app(4_000_000.0);
     let original = app.core.scoped.results.as_ref().unwrap();

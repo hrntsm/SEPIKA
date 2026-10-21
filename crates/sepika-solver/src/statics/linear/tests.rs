@@ -2339,3 +2339,56 @@ fn invalid_young_modulus_reaches_both_public_static_entries_as_same_reason() {
         "{cached}"
     );
 }
+
+#[test]
+fn invalid_beam_shear_modulus_is_rejected_by_public_static_entries_and_constructor() {
+    use sepika_element::frame::beam::BeamElement;
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for (shear, poisson) in [
+            (Some(f64::NAN), 0.3),
+            (Some(f64::INFINITY), 0.3),
+            (Some(f64::NEG_INFINITY), 0.3),
+            (Some(-1.0), 0.3),
+            (Some(0.0), 0.3),
+            (None, -1.0),
+            (None, -2.0),
+            (None, f64::NAN),
+            (None, f64::INFINITY),
+        ] {
+            let mut model = ss_beam(1000.0, vec![]);
+            model.elements[0].kind = kind;
+            model.materials[0].shear = shear;
+            model.materials[0].poisson = poisson;
+            let error = match BeamElement::try_new(&model.elements[0], &model) {
+                Ok(_) => panic!("{kind:?}: G={shear:?}, nu={poisson} が受理された"),
+                Err(error) => error,
+            };
+            assert!(
+                error.contains("部材 ID 0") && error.contains("せん断弾性係数 G"),
+                "{error}"
+            );
+            let direct = linear_static_once(&model, model.load_cases[0].id)
+                .unwrap_err()
+                .to_string();
+            let prepared = match crate::statics::analysis::Analysis::prepare(&model) {
+                Ok(_) => panic!("不正Gは解析前に拒否する"),
+                Err(error) => error.to_string(),
+            };
+            assert!(direct.contains(&error), "{direct}");
+            assert!(prepared.contains(&error), "{prepared}");
+        }
+        for (shear, poisson) in [(None, 0.3), (Some(80000.0), -1.0)] {
+            let mut model = ss_beam(1000.0, vec![]);
+            model.elements[0].kind = kind;
+            model.materials[0].shear = shear;
+            model.materials[0].poisson = poisson;
+            assert!(BeamElement::try_new(&model.elements[0], &model).is_ok());
+            assert!(linear_static_once(&model, model.load_cases[0].id).is_ok());
+            assert!(crate::statics::analysis::Analysis::prepare(&model).is_ok());
+        }
+    }
+}

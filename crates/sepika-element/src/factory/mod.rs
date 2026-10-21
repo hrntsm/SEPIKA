@@ -24,7 +24,7 @@ pub use hinge_view::{
     build_hinge_view, resolves_to_concentrated_spring, AnalysisHingeModel, HingeView,
 };
 pub use input_check::{
-    elastic_young_input_issue, ensure_nonlinear_input, ensure_nonlinear_input_for_kind,
+    elastic_stiffness_input_issue, ensure_nonlinear_input, ensure_nonlinear_input_for_kind,
     ensure_nonlinear_input_with_basis, ensure_rc_beam_reference_loads,
     ensure_wall_side_column_analysis, nonlinear_input_issues, nonlinear_input_issues_for_kind,
     rc_beam_reference_input_issue, wall_side_column_input_issue,

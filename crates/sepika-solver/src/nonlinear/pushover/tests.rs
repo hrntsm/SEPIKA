@@ -99,7 +99,7 @@ fn single_column_model(fy: f64, seismic_weight: f64) -> Model {
             young: 205000.0,
             poisson: 0.3,
             density: 0.0,
-            shear: Some(0.0),
+            shear: None,
             fc: None,
             fy: Some(fy),
         }],
@@ -562,7 +562,7 @@ pub(super) fn two_story_model() -> Model {
         young: 205000.0,
         poisson: 0.3,
         density: 0.0,
-        shear: Some(0.0),
+        shear: None,
         fc: None,
         fy: Some(235.0),
     };
@@ -816,7 +816,7 @@ fn test_compute_static_indeterminacy_indeterminate_portal() {
             young: 205000.0,
             poisson: 0.3,
             density: 0.0,
-            shear: Some(0.0),
+            shear: None,
             fc: None,
             fy: Some(235.0),
         }],
@@ -1069,7 +1069,7 @@ fn portal_frame_model(fy: f64, seismic_weight: f64) -> Model {
             young: 205000.0,
             poisson: 0.3,
             density: 0.0,
-            shear: Some(0.0),
+            shear: None,
             fc: None,
             fy: Some(fy),
         }],
@@ -3712,9 +3712,8 @@ fn test_pushover_wall_flexural_yield_softens() {
 /// ではなく**どの節点のどの自由度に剛性がないか**を示す日本語診断で停止する。
 #[test]
 fn test_pushover_singular_tangent_reports_dof_diagnosis() {
-    // 単柱モデルの頂部ねじり拘束（rz）を外すと、ファイバ柱はねじり剛性
-    // （断面 J は正だが材料の G=0）を持たないため rz の剛性が 0 になり特異化する。
     let mut model = single_column_model(235.0, 100_000.0);
+    model.sections[0].j = 0.0;
     model.nodes[1].restraint = Dof6Mask::FREE;
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
@@ -3779,8 +3778,9 @@ fn low_yield_strength_with_positive_hardening_reaches_target_in_equilibrium() {
     let previous = &curve[curve.len() - 2];
     let post_yield_stiffness =
         (last.base_shear - previous.base_shear) / (last.roof_disp - previous.roof_disp);
-    // 1/k=L³/(3EI)+L²Lp(1/(0.01EI_f)−1/(EI_f))、Lp=50 mm、I_f=8.3125e6 mm⁴。
-    assert!((post_yield_stiffness - 31.835058008936937).abs() < 1.0e-5);
+    // 1/k=L³/(3EI)+L/(GA_s)+L²Lp(1/(0.01EI_f)−1/(EI_f))、Lp=50、I_f=8.3125e6。
+    let expected = 1.0 / (1.0 / 31.835058008936937 + 3000.0 / ((205000.0 / 2.6) * (10000.0 / 1.2)));
+    assert!((post_yield_stiffness - expected).abs() < 1.0e-5);
 }
 
 #[test]
@@ -3995,7 +3995,7 @@ fn sm520_src_shear_thresholds_reject_each_out_of_range_plate_without_fy_or_infin
 #[test]
 fn checked_fiber_and_ms_trial_failures_reach_public_pushover_with_element_and_phase() {
     for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let mut model = single_column_model(235.0, 1e140);
+        let mut model = single_column_model(235.0, 1e300);
         model.elements[0].kind = kind;
         let dofmap = DofMap::build(&model);
         let reducer = Reducer::build(&model, &dofmap);
@@ -4010,5 +4010,39 @@ fn checked_fiber_and_ms_trial_failures_reach_public_pushover_with_element_and_ph
             !error.contains("NotPositiveDefinite") && !error.contains("factor:"),
             "{error}"
         );
+    }
+}
+
+#[test]
+fn invalid_shear_modulus_is_a_public_pushover_input_error_before_factory_construction() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for (shear, poisson) in [
+            (Some(f64::NAN), 0.3),
+            (Some(f64::INFINITY), 0.3),
+            (Some(-1.0), 0.3),
+            (Some(0.0), 0.3),
+            (None, -1.0),
+            (None, -2.0),
+        ] {
+            let mut model = single_column_model(235.0, 100_000.0);
+            model.elements[0].kind = kind;
+            model.materials[0].shear = shear;
+            model.materials[0].poisson = poisson;
+            let dofmap = DofMap::build(&model);
+            let reducer = Reducer::build(&model, &dofmap);
+            let expected =
+                match sepika_element::frame::beam::BeamElement::try_new(&model.elements[0], &model)
+                {
+                    Ok(_) => panic!("不正Gが受理された"),
+                    Err(error) => error,
+                };
+            let error = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 2, 0.0, false)
+                .unwrap_err();
+            assert!(error.contains(&expected), "{error}");
+        }
     }
 }

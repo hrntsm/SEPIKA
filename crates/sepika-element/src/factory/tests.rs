@@ -377,6 +377,57 @@ fn elastic_wall_girder_requires_positive_finite_actual_young_for_every_section()
 }
 
 #[test]
+fn elastic_wall_girders_reject_invalid_adopted_shear_modulus() {
+    use crate::frame::beam::BeamElement;
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = elastic_wall_girder_model();
+        for data in &mut model.elements[..2] {
+            data.kind = kind;
+        }
+        for (shear, poisson) in [
+            (Some(f64::NAN), 0.3),
+            (Some(f64::INFINITY), 0.3),
+            (Some(-1.0), 0.3),
+            (Some(0.0), 0.3),
+            (None, -1.0),
+            (None, -2.0),
+        ] {
+            model.materials[0].shear = shear;
+            model.materials[0].poisson = poisson;
+            for data in &model.elements[..2] {
+                let expected = match BeamElement::try_new(data, &model) {
+                    Ok(_) => panic!("壁上下梁G={shear:?}/nu={poisson}が受理された"),
+                    Err(error) => error,
+                };
+                assert!(expected.contains(&format!("部材 ID {}", data.id.0)));
+                assert_eq!(
+                    input_check::member_strength_issue(data, &model),
+                    Some(expected.clone())
+                );
+                assert!(nonlinear_input_issues(&model).contains(&expected));
+            }
+            assert_wall_girder_factory_rejection(&model);
+        }
+        model.materials[0].shear = Some(80000.0);
+        for data in &model.elements[..2] {
+            assert!(input_check::member_strength_issue(data, &model).is_none());
+            assert!(BeamElement::try_new(data, &model).is_ok());
+            build_nonlinear_behavior(
+                data,
+                &model,
+                StrengthBasis::Nominal,
+                AnalysisKind::Incremental,
+                None,
+            );
+        }
+    }
+}
+
+#[test]
 fn elastic_wall_girder_factory_rejects_common_geometry_category_and_mass_errors() {
     for kind in [
         ElementKind::Beam,

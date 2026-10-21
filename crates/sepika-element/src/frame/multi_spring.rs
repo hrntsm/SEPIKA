@@ -165,7 +165,7 @@ mod tests {
                 young: 205000.0,
                 poisson: 0.3,
                 density: 0.0,
-                shear: Some(0.0),
+                shear: None,
                 fc,
                 fy,
             }],
