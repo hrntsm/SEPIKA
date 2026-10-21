@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [増分部材履歴の有限記録_Issue732_2026-10.md](増分部材履歴の有限記録_Issue732_2026-10.md) | 増分部材履歴の単精度変換と記録不能時の失敗 | 🔶（最新main公開再現、solver全377・App保存契約default16/GUI17成功。原条件の先行Errを区別。最終ゲート・Validation未） |
 | [明示仕口パネル採用G_Issue728_2026-10.md](明示仕口パネル採用G_Issue728_2026-10.md) | 明示パネルの採用G・GVe入力拒否と既存自動生成・通常梁拒否の区別 | 🔶（正常対照付き公開入口Verification、core559/element502/job81・solver全371・GUI契約16・Clippy/文書検証成功。途中失敗を区別。最終ゲート・Validation未） |
 | [部材荷重微小区間_Issue713_2026-10.md](部材荷重微小区間_Issue713_2026-10.md) | ブレース静定分配・切断荷重・固定端断面力の非零微小幅 | 🔶（公開入口の変更前不一致、荷重込み断面・剛域の追加不一致と修正後element502/solver全369・GUI契約15・Clippy成功（小反力/相殺厳密検査を含む）。文書検査/mdBook成功。最終ゲート・Validation未） |
 | [弾性梁採用G_Issue712_2026-10.md](弾性梁採用G_Issue712_2026-10.md) | 採用Gの直接生成・公開静/動解析、SRC/CFT既存拒否との区別 | 🔶（element497・修正後solver368成功。独立レビューの動解析panicは6入口追補で回復、最後の試験変更後focused1・design3・Clippy/文書検証成功。先行App default13/GUI14を区別。最終ゲート・Validation未） |
@@ -317,6 +318,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 15 | プッシュオーバー | sepika-solver / sepika-job / sepika-app / sepika-mcp | nonlinear/pushover/driver.rs・tests.rs / compute.rs | [Issue433既存増分回帰](弧長法削除と既存増分回帰_Issue433_2026-10.md#既存回帰と観測) | P5 | 🔶（弧長削除Verification、4方向等は未検証） |
 | 15a | 壁単体の確定step応答 | sepika-solver / sepika-app / sepika-job / sepika-mcp | nonlinear/pushover/wall_response.rs・tests.rs, tests/wall_model.rs, ultimate_demand.rs, job/pushover.rs | [Issue443検証](壁の確定ステップ応答_Issue443_2026-10.md)の試験対応表 | — | ✅（Scope内Verification） |
 | 15b | 目的別確定層力 | sepika-solver / sepika-app / sepika-mcp | story_response.rs・result_validity.rs・job/pushover.rs | [Issue442検証](目的別確定層力_Issue442_2026-10.md) | — | ✅（Scope内Verification） |
+| 15c | 増分部材履歴の有限記録 | sepika-solver / sepika-app | nonlinear/pushover/member_response.rs・step_record.rs・tests.rs / result_contract_tests.rs | [Issue732の公開再現と境界](増分部材履歴の有限記録_Issue732_2026-10.md) | 横断 | 🔶（境界・公開Err・正常履歴と既存記録保持・解析32失効/33保持のVerification。最終ゲート・Validation未） |
 | 16 | 壁（TVLEM） | sepika-element | — | — | P5.5 | 対象外 |
 | 17 | 時刻歴 | sepika-solver | timehistory.rs | — | P6 | ❌ |
 | 17b | 時刻歴の入力・応答時間軸 | sepika-solver / sepika-job / sepika-app / sepika-mcp / sepika-io | dynamic/timehistory・lumped_mass、sample_wave.rs、checkpoint.rs | [Issue610の独立fixtureと実入口](時刻歴時間軸_Issue610_2026-10.md#修正後の実入口と観測) | 横断 | 🔶（焦点Verification成功、手動GUI／Validation未） |
