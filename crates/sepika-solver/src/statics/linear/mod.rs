@@ -210,7 +210,14 @@ pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, S
         .iter()
         .filter(|elem| elem.kind.is_primary_frame_support())
     {
-        if let Some(reason) = sepika_element::factory::elastic_young_input_issue(elem, model) {
+        if matches!(
+            elem.kind,
+            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+        ) {
+            sepika_element::frame::beam::composite_props_of(model, elem)
+                .map_err(SolveError::InvalidInput)?;
+        }
+        if let Some(reason) = sepika_element::factory::elastic_stiffness_input_issue(elem, model) {
             return Err(SolveError::InvalidInput(reason));
         }
     }

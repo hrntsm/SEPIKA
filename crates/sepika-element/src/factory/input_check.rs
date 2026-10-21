@@ -441,6 +441,21 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
     if let Some(msg) = category_mismatch_issue(data, sec, mat) {
         return Some(msg);
     }
+    let shear_material = if sec.is_some_and(|section| section.is_cft()) {
+        model.element_steel_material(data)
+    } else {
+        Some(mat)
+    };
+    if let Some(material) =
+        shear_material.filter(|material| material.young.is_finite() && material.young > 0.0)
+    {
+        let g = material.shear_modulus();
+        if !g.is_finite() || g <= 0.0 {
+            if let Err(reason) = crate::frame::beam::BeamElement::try_new(data, model) {
+                return Some(reason);
+            }
+        }
+    }
     let stiffness = match crate::frame::beam::stiffness_breakdown(model, data) {
         Ok(stiffness) => stiffness,
         Err(error) => {
@@ -659,17 +674,14 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
 }
 
 fn elastic_member_input_issue(data: &ElementData, model: &Model) -> Option<String> {
-    let beam = match crate::frame::beam::BeamElement::try_new(data, model) {
-        Ok(beam) => beam,
-        Err(reason) => {
-            return Some(format!(
-                "部材 ID {} の弾性剛性入力が不正です: {reason}",
-                data.id.0
-            ))
-        }
-    };
-    if let Some(reason) = elastic_young_issue(data, beam.e) {
+    if let Some(reason) = elastic_stiffness_input_issue(data, model) {
         return Some(reason);
+    }
+    if let Err(reason) = crate::frame::beam::BeamElement::try_new(data, model) {
+        return Some(format!(
+            "部材 ID {} の弾性剛性入力が不正です: {reason}",
+            data.id.0
+        ));
     }
     model
         .element_mass_properties(data)
@@ -718,13 +730,38 @@ pub fn ensure_rc_beam_reference_loads(
     Ok(())
 }
 
-/// 断面・材料を解決できる弾性梁のEが正の有限値でなければ部材ID付きの理由を返す。
-/// 構築に必要な他の入力不備は既存の入力診断で扱う。
-pub fn elastic_young_input_issue(data: &ElementData, model: &Model) -> Option<String> {
-    model.element_section(data)?;
-    model.element_material(data)?;
-    let beam = crate::frame::beam::BeamElement::try_new(data, model).ok()?;
-    elastic_young_issue(data, beam.e)
+/// 線材の E と弾性梁の採用 G が正の有限値でなければ部材 ID 付きの理由を返す。
+/// SRC/CFT の構築不備と他の入力不備は既存の断面・材料診断で扱う。
+pub fn elastic_stiffness_input_issue(data: &ElementData, model: &Model) -> Option<String> {
+    let section = model.element_section(data)?;
+    let material = model.element_material(data)?;
+    match crate::frame::beam::BeamElement::try_new(data, model) {
+        Ok(beam) => elastic_young_issue(data, beam.e),
+        Err(error) => {
+            let composite = matches!(
+                section.shape,
+                Some(
+                    SectionShape::SrcBeamRect { .. }
+                        | SectionShape::SrcColumnRect { .. }
+                        | SectionShape::CftBox { .. }
+                        | SectionShape::CftPipe { .. }
+                )
+            );
+            if composite {
+                // 材料別・部材群別の既存診断を先取りしない。
+                return None;
+            }
+            if let Some(reason) = elastic_young_issue(data, material.young) {
+                return Some(reason);
+            }
+            let g = material.shear_modulus();
+            (matches!(
+                data.kind,
+                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+            ) && (!g.is_finite() || g <= 0.0))
+                .then_some(error)
+        }
+    }
 }
 
 fn elastic_young_issue(data: &ElementData, young_n_mm2: f64) -> Option<String> {

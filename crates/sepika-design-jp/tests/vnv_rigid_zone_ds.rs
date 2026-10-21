@@ -117,7 +117,7 @@ fn portal_frame(rigid: f64, seismic_weight: f64) -> Model {
             young: 205000.0,
             poisson: 0.3,
             density: 0.0,
-            shear: Some(0.0),
+            shear: None,
             fc: None,
             fy: Some(235.0),
         }],

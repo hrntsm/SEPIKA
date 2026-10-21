@@ -318,6 +318,102 @@ fn steel_h_section() -> Section {
     .to_section(SectionId(0), "H400".into())
 }
 
+#[test]
+fn adopted_shear_modulus_is_checked_for_regular_rc_src_and_cft_beams() {
+    use crate::frame::beam::BeamElement;
+    let mut cft = SectionShape::CftBox {
+        width: 400.0,
+        height: 400.0,
+        thick: 16.0,
+        corner_r: Some(0.0),
+    }
+    .to_section(SectionId(0), "CFT".into());
+    cft.steel_material = Some(MaterialId(2));
+    let mut failures = Vec::new();
+    for (section, material, adopted) in [
+        (steel_h_section(), steel_material(), 0),
+        (rc_section(), concrete_material(), 0),
+        (src_section(), concrete_material(), 0),
+        (cft, concrete_material(), 2),
+    ] {
+        let baseline = beam_model(section, material);
+        assert!(BeamElement::try_new(&baseline.elements[0], &baseline).is_ok());
+        for (shear, poisson) in [
+            (Some(f64::NAN), 0.3),
+            (Some(f64::INFINITY), 0.3),
+            (Some(f64::NEG_INFINITY), 0.3),
+            (Some(-1.0), 0.3),
+            (Some(0.0), 0.3),
+            (None, -1.0),
+            (None, -2.0),
+            (None, f64::NAN),
+            (None, f64::INFINITY),
+        ] {
+            let mut invalid = baseline.clone();
+            invalid.materials[adopted].shear = shear;
+            invalid.materials[adopted].poisson = poisson;
+            match BeamElement::try_new(&invalid.elements[0], &invalid) {
+                Ok(_) => failures.push(format!(
+                    "{} のG={shear:?}/nu={poisson}が受理された",
+                    invalid.sections[0].name
+                )),
+                Err(error) => {
+                    assert!(error.contains("部材 ID 0"), "{error}");
+                    if matches!(
+                        invalid.sections[0].shape,
+                        Some(
+                            SectionShape::SrcBeamRect { .. }
+                                | SectionShape::SrcColumnRect { .. }
+                                | SectionShape::CftBox { .. }
+                                | SectionShape::CftPipe { .. }
+                        )
+                    ) {
+                        assert!(
+                            elastic_stiffness_input_issue(&invalid.elements[0], &invalid).is_none()
+                        );
+                        let composite_error =
+                            crate::frame::beam::composite_props_of(&invalid, &invalid.elements[0])
+                                .unwrap_err();
+                        assert_eq!(composite_error, error);
+                    } else {
+                        assert_eq!(
+                            elastic_stiffness_input_issue(&invalid.elements[0], &invalid),
+                            Some(error.clone())
+                        );
+                    }
+                    let fiber_error = match crate::frame::fiber::FiberBeam::try_new(
+                        &invalid.elements[0],
+                        &invalid,
+                        crate::factory::StrengthBasis::Nominal,
+                        sepika_core::model::AnalysisKind::Incremental,
+                    ) {
+                        Ok(_) => panic!("不正Gのファイバー梁が受理された"),
+                        Err(error) => error,
+                    };
+                    assert_eq!(fiber_error, error);
+                    for kind in [
+                        sepika_core::model::AnalysisKind::Incremental,
+                        sepika_core::model::AnalysisKind::TimeHistory,
+                    ] {
+                        assert!(ensure_nonlinear_input_for_kind(&invalid, kind)
+                            .unwrap_err()
+                            .contains(&error));
+                    }
+                }
+            }
+        }
+        let mut explicit = baseline.clone();
+        explicit.materials[adopted].shear = Some(80000.0);
+        let beam = BeamElement::try_new(&explicit.elements[0], &explicit).unwrap();
+        assert_eq!(beam.g, 80000.0);
+        if adopted == 2 {
+            explicit.materials[0].shear = Some(f64::NAN);
+            assert!(BeamElement::try_new(&explicit.elements[0], &explicit).is_ok());
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("; "));
+}
+
 /// 鋼材断面形状なのに fy 未設定の部材はエラーとする。
 /// ファイバー断面は降伏進展を追うことが目的のため、弾性で代替すると
 /// 鋼材がいくら応力が上がっても降伏せず耐力を過大評価する（危険側）。

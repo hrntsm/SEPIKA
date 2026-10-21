@@ -34,10 +34,10 @@ pub(crate) fn eval_sections_of(
 
 impl BeamElement {
     pub fn new(data: &sepika_core::model::ElementData, model: &Model) -> Self {
-        Self::try_new(data, model)
-            .unwrap_or_else(|error| panic!("質量特性を解決できません: {error}"))
+        Self::try_new(data, model).unwrap_or_else(|error| panic!("弾性梁を構築できません: {error}"))
     }
 
+    /// 採用する材料の G [N/mm²] が正の有限値でなければ、部材 ID 付きのエラーを返す。
     pub fn try_new(data: &sepika_core::model::ElementData, model: &Model) -> Result<Self, String> {
         let geom = crate::transform::EndGeometry::of_element(data, model);
         let [n0, n1] = geom.nodes;
@@ -94,6 +94,12 @@ impl BeamElement {
             _ => (mat.young, mat.shear_modulus()),
         };
         let composite = super::stiffness_factors::composite_props_of(model, data)?;
+        if !g.is_finite() || g <= 0.0 {
+            return Err(format!(
+                "部材 ID {} の弾性梁のせん断弾性係数 G は正の有限値が必要です",
+                data.id.0
+            ));
+        }
         let a_stiff = composite.map_or(sec.area, |p| p.area_ax);
         let (sec_iy, sec_iz, j, sec_as_y, sec_as_z) = match &composite {
             Some(p) => (p.iy, p.iz, p.j, p.as_y, p.as_z),

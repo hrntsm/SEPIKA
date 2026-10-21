@@ -1124,7 +1124,7 @@ fn make_oriented_fiber(p0: [f64; 3], p1: [f64; 3], ref_vec: [f64; 3]) -> FiberBe
             young: 205000.0,
             poisson: 0.3,
             density: 0.0,
-            shear: Some(0.0),
+            shear: None,
             fc: None,
             fy: Some(1e20),
         }],
@@ -1204,7 +1204,7 @@ fn make_steel_fiber_with_fy(fy: Option<f64>) -> FiberBeam {
             young: 205000.0,
             poisson: 0.3,
             density: 0.0,
-            shear: Some(0.0),
+            shear: None,
             fc: None,
             fy,
         }],
@@ -1299,11 +1299,11 @@ fn 任意方向材の整合質量は独立な座標変換と一致する() {
 
 #[test]
 fn test_elastic_stiffness_matches_beam() {
-    let mut fiber = make_test_fiber_beam(Some(0.0));
-    let beam = make_test_beam_element(1e30);
+    let mut fiber = make_test_fiber_beam(None);
+    let beam = make_test_beam_element(20000.0 / 1.2);
 
     let ctx = Ctx {
-        model: &build_test_model(Some(0.0)),
+        model: &build_test_model(None),
     };
 
     let u = [
@@ -1335,9 +1335,9 @@ fn test_elastic_stiffness_matches_beam() {
 
 #[test]
 fn test_elastic_stiffness_symmetric() {
-    let mut fiber = make_test_fiber_beam(Some(0.0));
+    let mut fiber = make_test_fiber_beam(None);
     let ctx = Ctx {
-        model: &build_test_model(Some(0.0)),
+        model: &build_test_model(None),
     };
 
     let u = [
@@ -1365,7 +1365,7 @@ fn test_elastic_stiffness_symmetric() {
 /// 軸と曲げを同時に与えても互いに連成しないこと（断面格子の図心・対称性）。
 #[test]
 fn test_elastic_force_matches_hand_calc() {
-    let model = build_test_model(Some(0.0));
+    let model = build_test_model(None);
     let ctx = Ctx { model: &model };
     let new_fiber = || {
         FiberBeam::new(
@@ -1544,7 +1544,7 @@ fn test_yield_progression() {
                 young: 205000.0,
                 poisson: 0.3,
                 density: 0.0,
-                shear: Some(0.0),
+                shear: None,
                 fc: None,
                 fy: Some(235.0),
             }],
@@ -1618,9 +1618,9 @@ fn test_yield_progression() {
 
 #[test]
 fn test_commit_revert() {
-    let mut fiber = make_test_fiber_beam(Some(0.0));
+    let mut fiber = make_test_fiber_beam(None);
     let ctx = Ctx {
-        model: &build_test_model(Some(0.0)),
+        model: &build_test_model(None),
     };
 
     let du = LocalVec {
@@ -1651,9 +1651,9 @@ fn test_commit_revert() {
 
 #[test]
 fn test_snapshot_restore() {
-    let mut fiber = make_test_fiber_beam(Some(0.0));
+    let mut fiber = make_test_fiber_beam(None);
     let ctx = Ctx {
-        model: &build_test_model(Some(0.0)),
+        model: &build_test_model(None),
     };
 
     let du = LocalVec {
@@ -1675,7 +1675,7 @@ fn test_snapshot_restore() {
 
 #[test]
 fn test_geometric_stiffness() {
-    let fiber = make_test_fiber_beam(Some(0.0));
+    let fiber = make_test_fiber_beam(None);
     let n = 100000.0;
     let kg = fiber.geometric_stiffness(n);
     let l = fiber.length;
@@ -1688,7 +1688,7 @@ fn test_geometric_stiffness() {
 
 #[test]
 fn test_different_gp_have_independent_mats() {
-    let fiber = make_test_fiber_beam(Some(0.0));
+    let fiber = make_test_fiber_beam(None);
     let gp0_ptr = &fiber.gauss_points[0].mats[0] as *const _;
     let gp1_ptr = &fiber.gauss_points[1].mats[0] as *const _;
     assert_ne!(gp0_ptr, gp1_ptr, "GP mats must be independent instances");
@@ -2296,9 +2296,9 @@ fn test_fiber_tangent_consistent_with_internal_force() {
 
 #[test]
 fn test_fiber_beam_checkpoint_roundtrip() {
-    let mut fiber = make_test_fiber_beam(Some(0.0));
+    let mut fiber = make_test_fiber_beam(None);
     let ctx = Ctx {
-        model: &build_test_model(Some(0.0)),
+        model: &build_test_model(None),
     };
     let du = LocalVec {
         data: SmallVec::from_slice(&[
@@ -2310,7 +2310,7 @@ fn test_fiber_beam_checkpoint_roundtrip() {
     let snap_before = fiber.snapshot_state();
     let checkpoint = fiber.serialize_checkpoint();
 
-    let mut restored = make_test_fiber_beam(Some(0.0));
+    let mut restored = make_test_fiber_beam(None);
     restored.deserialize_checkpoint(&checkpoint).unwrap();
     let snap_after = restored.snapshot_state();
 
@@ -2323,7 +2323,7 @@ fn test_fiber_beam_checkpoint_roundtrip() {
 }
 /// plastic_zone 付きのテストモデルから塑性化域考慮 FiberBeam を生成する。
 fn make_plastic_zone_fiber(lp: f64, fy: Option<f64>) -> FiberBeam {
-    let mut model = build_test_model(Some(0.0));
+    let mut model = build_test_model(None);
     model.elements[0].plastic_zone = Some(lp);
     model.materials[0].fy = fy;
     FiberBeam::with_plastic_zone(
@@ -2339,7 +2339,7 @@ fn make_plastic_zone_fiber(lp: f64, fy: Option<f64>) -> FiberBeam {
 /// 全長ファイバー積分モデル（`FiberBeam`）に近いこと。
 #[test]
 fn test_plastic_zone_elastic_stiffness_matches_full_fiber_and_axial() {
-    let model = build_test_model(Some(0.0));
+    let model = build_test_model(None);
     let ctx = Ctx { model: &model };
     let full = FiberBeam::new(
         &model.elements[0],
@@ -2363,26 +2363,20 @@ fn test_plastic_zone_elastic_stiffness_matches_full_fiber_and_axial() {
 
 /// 塑性増分ヒンジモデルの弾性剛性 `k_el` にも断面→要素座標系のクロス変換
 /// （elem EIz←sec.iy）が効いていることの回帰テスト。
-/// B マトリクスの (uy,rz)=Mz 面と (uz,ry)=My 面の係数は大きさが同一のため、
-/// せん断剛性なし（G=0、φ=0）のモデルでは
-/// k_el(1,1)/k_el(2,2) = EIz_elem/EIy_elem = sec.iy/sec.iz（強軸/弱軸）が
-/// 厳密に成り立つ。断面値から独立に期待比を定めるため、
-/// グリッド回転とクロス変換が同時に欠落しても検出できる。
 #[test]
 fn test_plastic_zone_k_el_strong_axis_in_mz_plane() {
-    let model = build_test_model(Some(0.0));
     let pz = make_plastic_zone_fiber(300.0, Some(1e20));
     let k_el = &pz
         .hinge
         .as_ref()
         .expect("plastic zone model has hinge")
         .k_el;
-    let sec = &model.sections[0];
     let ratio = k_el.get(1, 1) / k_el.get(2, 2);
-    let expected = sec.iy / sec.iz;
+    // E/G=2.6、A_s=20000/1.2、L=3000よりφ強=26/1875、φ弱=13/3750。
+    let expected = 4.0 * (1.0 + 13.0 / 3750.0) / (1.0 + 26.0 / 1875.0);
     assert!(
         (ratio - expected).abs() / expected < 1e-12,
-        "k_el(1,1)/k_el(2,2)={} expected sec.iy/sec.iz={}",
+        "k_el(1,1)/k_el(2,2)={} expected Timoshenko ratio={}",
         ratio,
         expected
     );
@@ -2392,7 +2386,7 @@ fn test_plastic_zone_k_el_strong_axis_in_mz_plane() {
 #[test]
 fn test_plastic_zone_yield_reduces_stiffness() {
     let mut fb = make_plastic_zone_fiber(300.0, Some(235.0));
-    let model = build_test_model(Some(0.0));
+    let model = build_test_model(None);
     let ctx = Ctx { model: &model };
     let k0 = fb.tangent_stiffness(&ctx);
 
@@ -2413,7 +2407,7 @@ fn test_plastic_zone_yield_reduces_stiffness() {
 #[test]
 fn test_plastic_zone_checkpoint_roundtrip() {
     let mut fb = make_plastic_zone_fiber(300.0, Some(235.0));
-    let model = build_test_model(Some(0.0));
+    let model = build_test_model(None);
     let ctx = Ctx { model: &model };
     let du = LocalVec {
         data: SmallVec::from_slice(&[0.0, 0.0, 0.0, 0.0, 0.02, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
@@ -2505,7 +2499,7 @@ pub(super) fn rc_fiber_model() -> Model {
                 young: 25000.0,
                 poisson: 0.2,
                 density: 2.4e-9,
-                shear: Some(0.0),
+                shear: None,
                 fc: Some(30.0),
                 fy: None,
             },

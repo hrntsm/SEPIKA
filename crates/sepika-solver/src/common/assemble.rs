@@ -67,7 +67,7 @@ pub fn add_support_spring_diag(model: &Model, dofmap: &DofMap, triplets: &mut Ve
     }
 }
 
-/// 全ケースの部材荷重方向・断面適用条件と、線材・壁の質量入力を生成前に対象ID付きで検証する。
+/// 部材荷重方向・断面適用条件・質量入力と、弾性梁の E/G を生成前に対象 ID 付きで検証する。
 pub(crate) fn validate_global_mass_inputs(
     model: &Model,
 ) -> Result<(), sepika_math::solver::SolveError> {
@@ -109,6 +109,18 @@ pub(crate) fn validate_global_mass_inputs(
                     ))
                 })?;
             }
+        }
+    }
+    for elem in model.elements.iter().filter(|elem| {
+        matches!(
+            elem.kind,
+            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+        )
+    }) {
+        sepika_element::frame::beam::composite_props_of(model, elem)
+            .map_err(sepika_math::solver::SolveError::InvalidInput)?;
+        if let Some(reason) = sepika_element::factory::elastic_stiffness_input_issue(elem, model) {
+            return Err(sepika_math::solver::SolveError::InvalidInput(reason));
         }
     }
     Ok(())

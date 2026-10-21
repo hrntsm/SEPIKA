@@ -886,6 +886,11 @@ fn 生成記録の部分欠落と重複と余分な要素は全公開solverで�
 
 fn separated_dampers() -> Model {
     let mut result = model(ElementKind::Beam, true);
+    let mut zero_mass_section =
+        sepika_core::model::Section::zero(SectionId(1), "零重量線材".into());
+    zero_mass_section.material = Some(MaterialId(0));
+    zero_mass_section.frame_use = Some(FrameSectionUse::Girder);
+    result.sections.push(zero_mass_section);
     for (id, coord) in [
         (3, [0.0, 4000.0, 3000.0]),
         (4, [4000.0, 4000.0, 3000.0]),
@@ -902,7 +907,7 @@ fn separated_dampers() -> Model {
         result.elements.push(ElementData {
             id: ElemId(id),
             nodes: nodes.into_iter().collect(),
-            section: if id == 1 { Some(SectionId(0)) } else { None },
+            section: Some(SectionId(if id == 1 { 0 } else { 1 })),
             ..result.elements[0].clone()
         });
     }
