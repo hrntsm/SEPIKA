@@ -425,6 +425,7 @@ impl ElementBehavior for PanelZone {
         if let Some(col) = self.column.as_mut() {
             col.trial = col.committed;
         }
+        self.apply_axial_interaction();
         if let Some(sp) = self.springs.as_mut() {
             sp[0].revert();
             sp[1].revert();
@@ -1146,6 +1147,126 @@ mod tests {
                 .is_some_and(|reason| reason.contains("接合部 ID 0")
                     && reason.contains("参照柱が存在しません")));
             assert_eq!(panel.k_panel, 0.0);
+        }
+    }
+
+    #[test]
+    fn panel_751_revert_restores_committed_moment_after_axial_trial() {
+        let (model, data) = cross_joint_model();
+        let ctx = Ctx { model: &model };
+        let (_, moment, gamma) = panel_724_reference_scales();
+        let mut panel = PanelZone::new_nonlinear(&data, &model);
+        panel
+            .update_state(&panel_724_increment(1.6 * gamma, 0.6), true, &ctx)
+            .unwrap();
+        assert!((panel.panel_moments()[0] / moment - 0.808).abs() < 1e-12);
+        panel
+            .update_state(&panel_724_increment(0.0, 0.2), false, &ctx)
+            .unwrap();
+        assert!((panel.panel_moments()[0] / moment - 0.61).abs() < 1e-12);
+        panel.revert_state();
+        assert!((panel.axial_ratio() - 0.6).abs() < 1e-12);
+        assert!((panel.yield_moment() / moment - 0.8).abs() < 1e-12);
+        assert!((panel.panel_moments()[0] / moment - 0.808).abs() < 1e-12);
+    }
+
+    fn assert_panel_751_same_state(actual: &PanelZone, expected: &PanelZone, ctx: &Ctx) {
+        assert_eq!(
+            actual.serialize_checkpoint(),
+            expected.serialize_checkpoint()
+        );
+        assert_eq!(actual.axial_ratio(), expected.axial_ratio());
+        assert_eq!(actual.yield_moment(), expected.yield_moment());
+        assert_eq!(actual.panel_moments(), expected.panel_moments());
+        assert_eq!(
+            actual.internal_force(ctx).data,
+            expected.internal_force(ctx).data
+        );
+        let actual_k = actual.tangent_stiffness(ctx);
+        let expected_k = expected.tangent_stiffness(ctx);
+        for i in 0..actual.n_dof() {
+            for j in 0..actual.n_dof() {
+                assert_eq!(actual_k.get(i, j), expected_k.get(i, j));
+            }
+        }
+    }
+
+    #[test]
+    fn panel_751_revert_and_retry_match_control_in_both_directions() {
+        let (model, data) = cross_joint_model();
+        let ctx = Ctx { model: &model };
+        let (_, moment, gamma) = panel_724_reference_scales();
+        for directions in [
+            [1.0, 0.0],
+            [-1.0, 0.0],
+            [0.0, 1.0],
+            [0.0, -1.0],
+            [1.0, -1.0],
+        ] {
+            let mut panel = PanelZone::new_nonlinear(&data, &model);
+            let mut control = PanelZone::new_nonlinear(&data, &model);
+            let mut initial = panel_724_increment(directions[0] * 1.6 * gamma, 0.6);
+            initial.data[1] = directions[1] * 1.6 * gamma;
+            panel.update_state(&initial, true, &ctx).unwrap();
+            control.update_state(&initial, true, &ctx).unwrap();
+            for (i, direction) in directions.into_iter().enumerate() {
+                assert!((panel.panel_moments()[i] / moment - direction * 0.808).abs() < 1e-12);
+            }
+            for delta_n in [0.2, -0.3] {
+                panel
+                    .update_state(&panel_724_increment(-3.2 * gamma, delta_n), false, &ctx)
+                    .unwrap();
+                panel.revert_state();
+                assert_panel_751_same_state(&panel, &control, &ctx);
+                panel.revert_state();
+                assert_panel_751_same_state(&panel, &control, &ctx);
+            }
+            for (delta_gamma, delta_n) in [(-0.8, 0.0), (-3.2, 0.2), (0.4, -0.3)] {
+                let mut retry = panel_724_increment(delta_gamma * gamma, delta_n);
+                retry.data[1] = -delta_gamma * gamma;
+                panel.update_state(&retry, false, &ctx).unwrap();
+                control.update_state(&retry, false, &ctx).unwrap();
+                assert_panel_751_same_state(&panel, &control, &ctx);
+                panel.revert_state();
+                control.revert_state();
+                assert_panel_751_same_state(&panel, &control, &ctx);
+            }
+        }
+    }
+
+    #[test]
+    fn panel_751_restored_uncommitted_snapshot_and_checkpoint_can_revert() {
+        let (model, data) = cross_joint_model();
+        let ctx = Ctx { model: &model };
+        let (_, _, gamma) = panel_724_reference_scales();
+        let mut panel = PanelZone::new_nonlinear(&data, &model);
+        let mut control = PanelZone::new_nonlinear(&data, &model);
+        let initial = panel_724_increment(1.6 * gamma, 0.6);
+        panel.update_state(&initial, true, &ctx).unwrap();
+        control.update_state(&initial, true, &ctx).unwrap();
+        panel
+            .update_state(&panel_724_increment(-0.8 * gamma, 0.2), false, &ctx)
+            .unwrap();
+        let snapshot = panel.snapshot_state();
+        let checkpoint = panel.serialize_checkpoint();
+        for use_checkpoint in [false, true] {
+            panel
+                .update_state(&panel_724_increment(-3.2 * gamma, -0.3), true, &ctx)
+                .unwrap();
+            if use_checkpoint {
+                panel.deserialize_checkpoint(&checkpoint).unwrap();
+            } else {
+                panel.restore_state(snapshot.as_ref());
+            }
+            assert_eq!(panel.serialize_checkpoint(), checkpoint);
+            assert!((panel.axial_ratio() - 0.8).abs() < 1e-12);
+            panel.revert_state();
+            assert_panel_751_same_state(&panel, &control, &ctx);
+            let retry = panel_724_increment(-0.8 * gamma, 0.0);
+            panel.update_state(&retry, false, &ctx).unwrap();
+            control.update_state(&retry, false, &ctx).unwrap();
+            assert_panel_751_same_state(&panel, &control, &ctx);
+            control.revert_state();
         }
     }
 
