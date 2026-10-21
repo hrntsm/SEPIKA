@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbModel>
+    <StbNodes>
+      <StbNode id="11" X="0" Y="0" Z="0"/>
+      <StbNode id="37" X="6000" Y="0" Z="0"/>
+    </StbNodes>
+    <StbMembers><StbGirders>
+      <StbGirder id="5" name="G1" id_node_start="11" id_node_end="37" id_section="20" kind_structure="S"/>
+    </StbGirders></StbMembers>
+    <StbSections>
+      <StbSecBeam_S id="20" name="G1" floor="2F">
+        <StbSecSteelFigureBeam_S><StbSecSteelBeam_S_Straight shape="BOX1" strength_main="SN400B"/></StbSecSteelFigureBeam_S>
+      </StbSecBeam_S>
+      <StbSecSteel>
+        <StbSecBuild-BOX name="BOX1" A="300" B="200" t1="9" t2="9"/>
+      </StbSecSteel>
+    </StbSections>
+  </StbModel>
+</ST_BRIDGE>
