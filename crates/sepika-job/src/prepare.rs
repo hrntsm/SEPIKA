@@ -125,6 +125,7 @@ fn prepare_work_model(
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     rebuild_floor_regions(model);
     rebuild_wall_regions(model);
+    let mut panel_notices = Vec::new();
     {
         let adjacency = sepika_core::adjacency::NodeAdjacency::build(model);
         for node in &model.nodes {
@@ -141,8 +142,11 @@ fn prepare_work_model(
                 node.id,
                 adjacency.elements_at(model, node.id),
             ) {
+                Err(sepika_core::panel_zone::PanelJointError::BeamInapplicable(reason)) => {
+                    panel_notices.push(format!("{reason}。パネルせん断変形をモデル化できません"));
+                }
                 Err(reason) => {
-                    return Err(JobError::InvalidInput(reason));
+                    return Err(JobError::InvalidInput(reason.to_string()));
                 }
                 Ok(Some(_)) => {}
                 Ok(None) => {}
@@ -155,6 +159,7 @@ fn prepare_work_model(
     apply_auto_load_cases(model, &gravity.cases);
     apply_tip_loads(model, tip_loads);
     let mut notices = gravity.notices;
+    notices.extend(panel_notices);
     let mut weights_valid = true;
     if (!model.stories.is_empty() || initialize_stories)
         && !crate::weight_preparation::weights_are_current(model, settings.mass_method)
@@ -346,7 +351,8 @@ mod tests {
         model.sections[0].material = None;
         let reason =
             sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
-                .unwrap_err();
+                .unwrap_err()
+                .to_string();
         assert!(reason.contains("接合部 ID 0"));
         assert!(reason.contains("柱 ID 0"));
         assert_eq!(
@@ -891,11 +897,15 @@ mod tests {
             }
             let expected =
                 sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
-                    .unwrap_err();
-            let error = prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
-                .err()
-                .unwrap();
-            assert!(error.to_string().contains(&expected));
+                    .unwrap_err()
+                    .to_string();
+            let report =
+                prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
+            assert!(report.panels.is_empty());
+            assert!(report
+                .notices
+                .iter()
+                .any(|reason| reason.contains(&expected)));
             if !manual {
                 model.sections[1].shape = Some(SectionShape::SteelH {
                     height: 600.0,
@@ -920,16 +930,16 @@ mod tests {
                 let mut other = beam(2, 3, 0);
                 other.section = Some(SectionId(2));
                 model.elements.push(other);
-                let reason =
+                let report =
                     prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
-                        .err()
-                        .unwrap()
-                        .to_string();
-                assert!(
-                    reason.contains("db=480 mm")
+                        .unwrap();
+                assert!(report.panels.is_empty());
+                assert!(report
+                    .notices
+                    .iter()
+                    .any(|reason| reason.contains("db=480 mm")
                         && reason.contains("上位置差=50 mm")
-                        && reason.contains("下位置差=-50 mm")
-                );
+                        && reason.contains("下位置差=-50 mm")));
             }
         }
     }

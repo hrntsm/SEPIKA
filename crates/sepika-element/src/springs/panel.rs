@@ -102,7 +102,9 @@ struct ResolvedPanel {
 
 /// 接合部節点 `node` に取り付く柱・梁からパネル諸元を解決する。
 fn resolve(model: &Model, node: NodeId) -> Result<Option<ResolvedPanel>, String> {
-    let Some(joint) = resolve_explicit_panel_joint(model, node, &model.elements)? else {
+    let Some(joint) = resolve_explicit_panel_joint(model, node, &model.elements)
+        .map_err(|reason| reason.to_string())?
+    else {
         return Ok(None);
     };
     if joint.has_filled_column {
@@ -1104,7 +1106,9 @@ mod tests {
         lower.material = None;
         model.sections.push(lower);
         model.elements[2].section = Some(SectionId(2));
-        let reason = resolve_panel_joint(&model, NodeId(0), &model.elements).unwrap_err();
+        let reason = resolve_panel_joint(&model, NodeId(0), &model.elements)
+            .unwrap_err()
+            .to_string();
         for mut panel in [
             PanelZone::new(&data, &model),
             PanelZone::new_nonlinear(&data, &model),

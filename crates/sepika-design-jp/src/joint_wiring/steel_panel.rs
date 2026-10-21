@@ -57,7 +57,13 @@ pub(super) fn check_s_panel(
             Ok(Some(joint)) => joint,
             Ok(None) => continue,
             Err(reason) => {
-                out.push((nid, label, CheckOutcome::Skipped { reason }));
+                out.push((
+                    nid,
+                    label,
+                    CheckOutcome::Skipped {
+                        reason: reason.to_string(),
+                    },
+                ));
                 continue;
             }
         };

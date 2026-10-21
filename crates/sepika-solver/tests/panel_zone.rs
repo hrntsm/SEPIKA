@@ -403,7 +403,8 @@ fn panel_504_standard_solver_rejects_unsupported_manual_panel_with_reason() {
         thick: 20.0,
     });
     let expected = sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
     let error = sepika_solver::statics::analysis::Analysis::prepare(&model)
         .err()
         .expect("未対応の手動パネルを剛性算定成功と扱わない");
@@ -433,7 +434,8 @@ fn panel_505_public_solver_rejects_old_or_manual_staggered_panel() {
     other.nodes = smallvec::smallvec![far.id, NodeId(0)];
     model.elements.push(other);
     let reason = sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
     assert!(reason.contains("上位置差=50 mm"));
     for mode in [
         sepika_core::model::PanelZoneMode::Model,
@@ -464,7 +466,8 @@ fn panel_585_public_linear_and_nonlinear_reject_invalid_lower_with_joint_reason(
     model.elements.push(upper);
     model.sections[1].shape = None;
     let reason = sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
     assert!(reason.contains("接合部 ID 0"));
     assert!(reason.contains("柱 ID 1"));
     let linear = sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(1))

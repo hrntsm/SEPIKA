@@ -472,6 +472,33 @@ fn 取付き床の斜め未到達異レベルとパネルは分割支持にな�
     }
     let mut model = attached_floor(false, false);
     model.elements[1].kind = ElementKind::PanelZone;
+    for (coord, column) in [([2000., -1000., 0.], false), ([2000., 0., -1000.], true)] {
+        let mut far = model.nodes[0].clone();
+        far.id = sepika_core::ids::NodeId(model.nodes.len() as u32);
+        far.coord = coord;
+        let mut member = model.elements[0].clone();
+        member.id = sepika_core::ids::ElemId(model.elements.len() as u32);
+        member.nodes = if column {
+            [far.id, sepika_core::ids::NodeId(2)]
+        } else {
+            [sepika_core::ids::NodeId(2), far.id]
+        }
+        .into_iter()
+        .collect();
+        member.section = Some(sepika_core::ids::SectionId(u32::from(column)));
+        if column {
+            member.local_axis.ref_vector = [1., 0., 0.];
+        }
+        model.nodes.push(far);
+        model.elements.push(member);
+    }
+    assert!(sepika_core::panel_zone::resolve_explicit_panel_joint(
+        &model,
+        sepika_core::ids::NodeId(2),
+        &model.elements
+    )
+    .unwrap()
+    .is_some());
     let original = model.slabs[0].clone();
     model.validate().unwrap();
     prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();

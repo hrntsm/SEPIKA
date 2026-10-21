@@ -2352,7 +2352,8 @@ fn panel_504_check_uses_shape_depth_and_reports_unsupported_beams() {
         thick: 20.0,
     });
     let expected = sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
     let checks = collect_joint_checks_with_long(
         &model,
         &forces,

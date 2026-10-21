@@ -552,6 +552,23 @@ pub fn panel_joint_planes<'a>(
     planes
 }
 
+/// 仕口パネルの入力不備と、既存式で扱えない梁形状・配置を区別する。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PanelJointError {
+    InvalidInput(String),
+    BeamInapplicable(String),
+}
+
+impl std::fmt::Display for PanelJointError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidInput(reason) | Self::BeamInapplicable(reason) => f.write_str(reason),
+        }
+    }
+}
+
+impl std::error::Error for PanelJointError {}
+
 /// 節点 `node` に仕口パネルを設けられるか判定し、諸元を解決する。
 ///
 /// `members` は当該節点へ接続する要素（隣接マップを持つ呼び出し側はそれを渡し、
@@ -565,7 +582,7 @@ pub fn resolve_panel_joint<'a>(
     model: &Model,
     node: NodeId,
     members: impl IntoIterator<Item = &'a ElementData>,
-) -> Result<Option<PanelJoint>, String> {
+) -> Result<Option<PanelJoint>, PanelJointError> {
     resolve_panel_joint_impl(model, node, members, false)
 }
 
@@ -574,7 +591,7 @@ pub fn resolve_explicit_panel_joint<'a>(
     model: &Model,
     node: NodeId,
     members: impl IntoIterator<Item = &'a ElementData>,
-) -> Result<Option<PanelJoint>, String> {
+) -> Result<Option<PanelJoint>, PanelJointError> {
     resolve_panel_joint_impl(model, node, members, true)
 }
 
@@ -583,7 +600,7 @@ fn resolve_panel_joint_impl<'a>(
     node: NodeId,
     members: impl IntoIterator<Item = &'a ElementData>,
     explicit_panel: bool,
-) -> Result<Option<PanelJoint>, String> {
+) -> Result<Option<PanelJoint>, PanelJointError> {
     let mut columns: Vec<&ElementData> = Vec::new();
     let mut beams: Vec<&ElementData> = Vec::new();
     let mut unidentified: Vec<&ElementData> = Vec::new();
@@ -612,15 +629,17 @@ fn resolve_panel_joint_impl<'a>(
             .iter()
             .all(|e| member_structure_kind(model, e).is_steel_like())
     {
-        return Err(format!(
+        return Err(PanelJointError::InvalidInput(format!(
             "接合部 ID {} のパネル未算定: 明示パネルの参照柱が存在しません",
             node.0
-        ));
+        )));
     }
     if beams.is_empty() {
         return Ok(None);
     }
-    let invalid_column = |reason: String| format!("接合部 ID {} のパネル未算定: {reason}", node.0);
+    let invalid_column = |reason: String| {
+        PanelJointError::InvalidInput(format!("接合部 ID {} のパネル未算定: {reason}", node.0))
+    };
     unidentified.sort_by_key(|e| e.id);
     if !unidentified.is_empty() {
         return Err(invalid_column(format!(
@@ -706,6 +725,48 @@ fn resolve_panel_joint_impl<'a>(
         return Ok(None);
     }
 
+    if !is_horizontal_or_vertical_member(model, selected) {
+        return Err(invalid_column(format!(
+            "柱 ID {}: 斜め柱のパネル式は未対応",
+            selected.id.0
+        )));
+    }
+    let geometry = PanelGeometry::from_column(selected_section).ok_or_else(|| {
+        invalid_column(format!(
+            "柱 ID {}: 断面形状が未定義またはパネル諸元に未対応",
+            selected.id.0
+        ))
+    })?;
+    let dimensions = match geometry.kind {
+        PanelShapeKind::H { bc, tf } => vec![geometry.dc, geometry.tp, bc, tf],
+        PanelShapeKind::Box { bc } => vec![geometry.dc, geometry.tp, bc],
+        PanelShapeKind::Pipe => vec![geometry.dc, geometry.tp],
+    };
+    if dimensions.iter().any(|v| !v.is_finite() || *v <= 0.0)
+        || selected_section
+            .panel_thickness
+            .is_some_and(|v| !v.is_finite() || v <= 0.0)
+    {
+        return Err(invalid_column(format!(
+            "柱 ID {}: パネル寸法・板厚・有効体積Veは有限の正値が必要です",
+            selected.id.0
+        )));
+    }
+
+    let selected_material = model.element_material(selected).unwrap();
+    let axial_stiffness =
+        selected_material.young * selected_section.area / model.member_length(selected);
+    if !selected_section.area.is_finite()
+        || selected_section.area <= 0.0
+        || !axial_stiffness.is_finite()
+        || axial_stiffness <= 0.0
+    {
+        return Err(invalid_column(format!(
+            "柱 ID {}: 断面積Aと軸剛性E・A/Lは有限の正値が必要です",
+            selected.id.0
+        )));
+    }
+
     let section_of = |e: &ElementData| e.section.and_then(|sid| model.sections.get(sid.index()));
     beams.sort_by_key(|e| e.id);
     let mut db = 0.0_f64;
@@ -748,64 +809,29 @@ fn resolve_panel_joint_impl<'a>(
         }
     }
     if !reasons.is_empty() {
-        return Err(format!(
+        let reason = format!(
             "接合部 ID {} のパネル未算定: {}",
             node.0,
             reasons.join(" / ")
-        ));
+        );
+        return Err(PanelJointError::BeamInapplicable(reason));
     }
 
+    let ve = geometry.effective_volume(db);
+    if !ve.is_finite() || ve <= 0.0 {
+        return Err(invalid_column(format!(
+            "柱 ID {}: 有効体積Veは有限の正値が必要です",
+            selected.id.0
+        )));
+    }
     for plane in panel_joint_planes(model, node, beams.iter().copied()) {
-        plane.standard_applicability(node)?;
+        plane
+            .standard_applicability(node)
+            .map_err(PanelJointError::BeamInapplicable)?;
     }
 
     let geometry_of = |e: &&ElementData| section_of(e).and_then(PanelGeometry::from_column);
     let has_filled_column = columns.iter().filter_map(geometry_of).any(|g| g.filled);
-
-    if !is_horizontal_or_vertical_member(model, selected) {
-        return Err(invalid_column(format!(
-            "柱 ID {}: 斜め柱のパネル式は未対応",
-            selected.id.0
-        )));
-    }
-    let geometry = PanelGeometry::from_column(selected_section).ok_or_else(|| {
-        invalid_column(format!(
-            "柱 ID {}: 断面形状が未定義またはパネル諸元に未対応",
-            selected.id.0
-        ))
-    })?;
-    let dimensions = match geometry.kind {
-        PanelShapeKind::H { bc, tf } => vec![geometry.dc, geometry.tp, bc, tf],
-        PanelShapeKind::Box { bc } => vec![geometry.dc, geometry.tp, bc],
-        PanelShapeKind::Pipe => vec![geometry.dc, geometry.tp],
-    };
-    let ve = geometry.effective_volume(db);
-    if dimensions.iter().any(|v| !v.is_finite() || *v <= 0.0)
-        || selected_section
-            .panel_thickness
-            .is_some_and(|v| !v.is_finite() || v <= 0.0)
-        || !ve.is_finite()
-        || ve <= 0.0
-    {
-        return Err(invalid_column(format!(
-            "柱 ID {}: パネル寸法・板厚・有効体積Veは有限の正値が必要です",
-            selected.id.0
-        )));
-    }
-
-    let selected_material = model.element_material(selected).unwrap();
-    let axial_stiffness =
-        selected_material.young * selected_section.area / model.member_length(selected);
-    if !selected_section.area.is_finite()
-        || selected_section.area <= 0.0
-        || !axial_stiffness.is_finite()
-        || axial_stiffness <= 0.0
-    {
-        return Err(invalid_column(format!(
-            "柱 ID {}: 断面積Aと軸剛性E・A/Lは有限の正値が必要です",
-            selected.id.0
-        )));
-    }
     Ok(Some(PanelJoint {
         geometry,
         db,
@@ -1421,6 +1447,62 @@ mod tests {
     }
 
     #[test]
+    fn beam_inapplicability_cannot_hide_invalid_selected_column() {
+        for beam_condition in 0..4 {
+            let mut m = two_column_joint();
+            match beam_condition {
+                0 => m.sections[0].shape = None,
+                1 => {
+                    m.sections[0].shape = Some(SectionShape::SteelPipe {
+                        outer_dia: 600.0,
+                        thick: 20.0,
+                    })
+                }
+                2 => {
+                    if let Some(SectionShape::SteelH { height, .. }) = &mut m.sections[0].shape {
+                        *height = f64::NAN;
+                    }
+                }
+                3 => {
+                    m.nodes.push(node(4, [-6000.0, 0.0, 3000.0]));
+                    let mut smaller = m.sections[0].clone();
+                    smaller.id = SectionId(3);
+                    if let Some(SectionShape::SteelH { height, .. }) = &mut smaller.shape {
+                        *height = 500.0;
+                    }
+                    m.sections.push(smaller);
+                    m.elements.push(member(3, 4, 0, 3));
+                }
+                _ => unreachable!(),
+            }
+            assert!(matches!(
+                resolve_panel_joint(&m, NodeId(0), &m.elements),
+                Err(PanelJointError::BeamInapplicable(_))
+            ));
+            assert!(matches!(
+                resolve_explicit_panel_joint(&m, NodeId(0), &m.elements),
+                Err(PanelJointError::BeamInapplicable(_))
+            ));
+            for column_condition in 0..5 {
+                let mut invalid = m.clone();
+                match column_condition {
+                    0 => invalid.elements[1].section = None,
+                    1 => invalid.sections[1].panel_thickness = Some(0.0),
+                    2 => invalid.sections[1].area = 0.0,
+                    3 => invalid.materials[0].young = f64::NAN,
+                    4 => invalid.sections[1].shape = None,
+                    _ => unreachable!(),
+                }
+                let error =
+                    resolve_panel_joint(&invalid, NodeId(0), &invalid.elements).unwrap_err();
+                assert!(matches!(error, PanelJointError::InvalidInput(_)));
+                assert!(error.to_string().contains("接合部 ID 0"));
+                assert!(error.to_string().contains("ID 1"));
+            }
+        }
+    }
+
+    #[test]
     fn only_physically_absent_lower_column_allows_upper_column() {
         for remaining in [ElemId(1), ElemId(2)] {
             let mut m = two_column_joint();
@@ -1482,7 +1564,9 @@ mod tests {
                 }
                 _ => unreachable!(),
             }
-            let reason = resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err();
+            let reason = resolve_panel_joint(&m, NodeId(0), &m.elements)
+                .unwrap_err()
+                .to_string();
             assert!(reason.contains("接合部 ID 0"), "{invalid}: {reason}");
             assert!(reason.contains("ID 1"), "{invalid}: {reason}");
             assert!(reason.contains(':'), "{invalid}: {reason}");
@@ -1491,7 +1575,9 @@ mod tests {
                 e.nodes.reverse();
             }
             assert_eq!(
-                resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err(),
+                resolve_panel_joint(&m, NodeId(0), &m.elements)
+                    .unwrap_err()
+                    .to_string(),
                 reason
             );
         }
@@ -1513,7 +1599,9 @@ mod tests {
                 5 => m.elements[1].nodes = smallvec::smallvec![NodeId(0)],
                 _ => unreachable!(),
             }
-            let reason = resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err();
+            let reason = resolve_panel_joint(&m, NodeId(0), &m.elements)
+                .unwrap_err()
+                .to_string();
             assert!(reason.contains("接合部 ID 0"), "{invalid}: {reason}");
             assert!(reason.contains("柱 ID"), "{invalid}: {reason}");
             m.elements.reverse();
@@ -1521,7 +1609,9 @@ mod tests {
                 e.nodes.reverse();
             }
             assert_eq!(
-                resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err(),
+                resolve_panel_joint(&m, NodeId(0), &m.elements)
+                    .unwrap_err()
+                    .to_string(),
                 reason
             );
         }
@@ -1759,7 +1849,9 @@ mod tests {
             });
             m.sections.push(unsupported);
             m.elements.push(member(2, 0, 3, 2));
-            let reason = resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err();
+            let reason = resolve_panel_joint(&m, NodeId(0), &m.elements)
+                .unwrap_err()
+                .to_string();
             assert!(reason.contains("接合部 ID 0"));
             assert!(reason.contains("梁 ID 2 (BOX-"));
             assert!(reason.contains(axis));
@@ -1768,7 +1860,9 @@ mod tests {
                 e.nodes.reverse();
             }
             assert_eq!(
-                resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err(),
+                resolve_panel_joint(&m, NodeId(0), &m.elements)
+                    .unwrap_err()
+                    .to_string(),
                 reason
             );
         }
@@ -1904,7 +1998,9 @@ mod tests {
         }
         m.sections.push(small);
         m.elements[2].section = Some(SectionId(2));
-        let reason = resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err();
+        let reason = resolve_panel_joint(&m, NodeId(0), &m.elements)
+            .unwrap_err()
+            .to_string();
         assert!(reason.contains("上位置差=50 mm"));
         assert!(reason.contains("下位置差=-50 mm"));
         let planes = panel_joint_planes(&m, NodeId(0), &m.elements);
@@ -1919,7 +2015,9 @@ mod tests {
         }
         assert_eq!(panel_joint_planes(&m, NodeId(0), &m.elements), planes);
         assert_eq!(
-            resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err(),
+            resolve_panel_joint(&m, NodeId(0), &m.elements)
+                .unwrap_err()
+                .to_string(),
             reason
         );
         m.nodes[3].coord = [1e12, 1e12 + 6000.0, 1e12 + 3000.0];
@@ -1935,7 +2033,9 @@ mod tests {
             .is_some());
         for reference in [[0.0, 1.0, 0.0], [0.0, 1.0, 1.0], [1.0, 0.0, 0.0]] {
             m.elements[0].local_axis.ref_vector = reference;
-            let reason = resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err();
+            let reason = resolve_panel_joint(&m, NodeId(0), &m.elements)
+                .unwrap_err()
+                .to_string();
             assert!(reason.contains("横倒し・斜め断面回転"));
             assert_eq!(
                 panel_joint_planes(&m, NodeId(0), &m.elements)[0]
@@ -1945,7 +2045,9 @@ mod tests {
             );
             m.elements[0].nodes.reverse();
             assert_eq!(
-                resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err(),
+                resolve_panel_joint(&m, NodeId(0), &m.elements)
+                    .unwrap_err()
+                    .to_string(),
                 reason
             );
         }
@@ -1958,6 +2060,7 @@ mod tests {
             m.nodes[1].coord = far;
             assert!(resolve_panel_joint(&m, NodeId(0), &m.elements)
                 .unwrap_err()
+                .to_string()
                 .contains("勾配梁・鉛直Girder"));
             assert_eq!(
                 panel_joint_planes(&m, NodeId(0), &m.elements)[0]
@@ -2013,7 +2116,9 @@ mod tests {
         );
         m.nodes.push(node(3, [-6000.0, 0.0, 3000.0]));
         m.elements.push(member(2, 3, 0, 0));
-        let reason = resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err();
+        let reason = resolve_panel_joint(&m, NodeId(0), &m.elements)
+            .unwrap_err()
+            .to_string();
         assert!(reason.contains("上位置差=-5 mm"));
         assert!(reason.contains("下位置差=-5 mm"));
     }

@@ -238,6 +238,7 @@ impl App {
                 if let Err(reason) =
                     sepika_core::panel_zone::resolve_panel_joint(model, node.id, members)
                 {
+                    let reason = reason.to_string();
                     if allow_recorded_skips && saved.joint_checks.iter().any(|check| {
                         check.node == node.id && check.label.starts_with("パネルゾーン(S)")
                             && matches!(&check.outcome, CheckOutcome::Skipped { reason: recorded } if recorded == &reason)
