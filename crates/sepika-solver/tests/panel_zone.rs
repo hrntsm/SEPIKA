@@ -595,3 +595,264 @@ fn panel_585_explicit_panel_without_column_is_not_a_successful_rigid_panel() {
             .is_none()
     );
 }
+
+#[test]
+fn panel_728_public_entry_matrix() {
+    for (label, shear, poisson) in [
+        ("derived_normal", None, 0.3),
+        ("explicit_normal", Some(80_000.0), 0.3),
+        (
+            "explicit_overrides_invalid_poisson",
+            Some(80_000.0),
+            f64::NAN,
+        ),
+        ("nan", Some(f64::NAN), 0.3),
+        ("positive_infinity", Some(f64::INFINITY), 0.3),
+        ("negative_infinity", Some(f64::NEG_INFINITY), 0.3),
+        ("negative", Some(-1.0), 0.3),
+        ("zero", Some(0.0), 0.3),
+        ("derived_nan", None, f64::NAN),
+        ("derived_infinite", None, -1.0),
+        ("derived_negative", None, -2.0),
+        ("derived_zero", None, f64::INFINITY),
+        ("finite_g_overflow_stiffness", Some(f64::MAX), 0.3),
+        ("finite_g_underflow_stiffness", Some(1.0e-200), 0.3),
+    ] {
+        let mut model = l_frame(true);
+        model.materials[0].fy = Some(235.0);
+        model.stories = [(0.0, vec![NodeId(2)]), (3000.0, vec![NodeId(0), NodeId(1)])]
+            .into_iter()
+            .enumerate()
+            .map(|(i, (elevation, node_ids))| sepika_core::model::Story {
+                wall_weights: vec![],
+                level_kind: Default::default(),
+                structure: Default::default(),
+                id: sepika_core::ids::StoryId(i as u32),
+                name: format!("{i}F"),
+                elevation,
+                node_ids,
+                seismic_weight: Some(10_000.0),
+                weight_override: None,
+                dynamic_mass: None,
+                standard_floor_load: None,
+                column_finish_area_weight: 0.0,
+                fireproof: Default::default(),
+            })
+            .collect();
+        let mut column_material = model.materials[0].clone();
+        column_material.id = MaterialId(1);
+        column_material.shear = shear;
+        column_material.poisson = poisson;
+        model.materials.push(column_material);
+        model.sections[1].material = Some(MaterialId(1));
+        if label == "finite_g_underflow_stiffness" {
+            model.sections[1].panel_thickness = Some(1.0e-200);
+        }
+        let mut auto = model.clone();
+        let generated = sepika_element::springs::panel_gen::apply_auto_panel_zones(&mut auto);
+        let validated = model.validate();
+        let prepared = sepika_solver::statics::analysis::Analysis::prepare(&model);
+        let linear = sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(1));
+        let dof = DofMap::build(&model);
+        let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dof);
+        let nonlinear = sepika_solver::nonlinear::pushover::pushover_analysis_recording(
+            &model,
+            &dof,
+            &reducer,
+            sepika_solver::statics::analysis::SeismicDir::X,
+            1,
+            sepika_solver::nonlinear::pushover::PushoverTarget::from_max_disp(10.0),
+            Default::default(),
+            false,
+            false,
+            Default::default(),
+        );
+        let data = model
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::PanelZone)
+            .unwrap();
+        let panels = [
+            sepika_element::springs::panel::PanelZone::new(data, &model),
+            sepika_element::springs::panel::PanelZone::new_nonlinear(data, &model),
+        ];
+        println!("{label}: auto={:?}; validate={:?}; prepare={:?}; linear={:?}; nonlinear={:?}; panel={:?}",
+            generated.as_ref().map(|_| "ok").map_err(|e| e.to_string()),
+            validated.as_ref().map(|_| "ok").map_err(|e| e.to_string()),
+            prepared.as_ref().map(|_| "ok").map_err(|e| e.to_string()),
+            linear.as_ref().map(|_| "ok").map_err(|e| e.to_string()),
+            nonlinear.as_ref().map(|_| "ok").map_err(|e| e.to_string()),
+            panels.iter().map(|p| (&p.resolution_error, p.g, p.k_panel)).collect::<Vec<_>>()
+        );
+        let valid = matches!(
+            label,
+            "derived_normal" | "explicit_normal" | "explicit_overrides_invalid_poisson"
+        );
+        if valid {
+            assert!(generated.is_ok(), "{label}");
+            assert!(validated.is_ok(), "{label}");
+            assert!(prepared.is_ok(), "{label}");
+            assert!(linear.is_ok(), "{label}");
+            assert!(nonlinear.is_ok(), "{label}");
+            for panel in panels {
+                assert!(panel.resolution_error.is_none(), "{label}");
+                assert!(panel.g.is_finite() && panel.g > 0.0, "{label}");
+                assert!(panel.k_panel.is_finite() && panel.k_panel > 0.0, "{label}");
+                if shear.is_some() {
+                    assert_eq!(panel.g, 80_000.0);
+                }
+            }
+        } else {
+            let automatic = generated.unwrap_err();
+            assert!(
+                automatic.contains("接合部 ID 0") && automatic.contains("柱 ID 1"),
+                "{label}: {automatic}"
+            );
+            let reason = format!(
+                "接合部 ID 0 のパネル未算定: 柱 ID 1: {}は有限の正値が必要です",
+                if label.starts_with("finite_g_") {
+                    "せん断剛性 G・Ve"
+                } else {
+                    "せん断弾性係数 G"
+                }
+            );
+            for error in [
+                validated.err().map(|e| e.to_string()),
+                prepared.err().map(|e| e.to_string()),
+                linear.err().map(|e| e.to_string()),
+                nonlinear.err(),
+            ] {
+                assert!(
+                    error.as_ref().is_some_and(|e| e.contains(&reason)),
+                    "{label}: {error:?}"
+                );
+            }
+            for mut panel in panels {
+                assert_eq!(
+                    panel.resolution_error.as_deref(),
+                    Some(reason.as_str()),
+                    "{label}"
+                );
+                assert_eq!(panel.k_panel, 0.0, "{label}");
+                use sepika_element::behavior::{Ctx, ElementBehavior, LocalVec};
+                let increment = LocalVec {
+                    data: smallvec::SmallVec::from_elem(0.0, panel.n_dof()),
+                };
+                assert_eq!(
+                    panel
+                        .update_state(&increment, false, &Ctx { model: &model })
+                        .unwrap_err()
+                        .0,
+                    reason
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn panel_728_public_dynamic_entries() {
+    use sepika_solver::dynamic::damping::Damping;
+    use sepika_solver::dynamic::timehistory::{
+        linear_time_history_analysis, GroundMotion, NewmarkCfg,
+    };
+    for (label, g) in [
+        ("normal", 80_000.0),
+        ("nan", f64::NAN),
+        ("overflow", f64::MAX),
+        ("underflow", 1e-200),
+    ] {
+        let mut model = l_frame(true);
+        model.materials[0].density = 7.85e-9;
+        model.materials[0].shear = Some(80_000.0);
+        let dof = DofMap::build(&model);
+        let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dof);
+        let stiffness = sepika_solver::common::assemble::assemble_global_k(&model, &dof);
+        let mut solver = sepika_math::solver::make_solver(
+            sepika_math::solver::SolverBackend::DirectSparseCholesky,
+        );
+        solver.factorize(&reducer.reduce_k(&stiffness)).unwrap();
+        model.materials[0].shear = Some(g);
+        if label == "underflow" {
+            model.sections[1].panel_thickness = Some(1e-200);
+        }
+        let dof = DofMap::build(&model);
+        let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dof);
+        let eigen = sepika_solver::dynamic::eigen::solve_eigen(&model, &dof, &reducer, 1);
+        let eigen_with_solver = sepika_solver::dynamic::eigen::solve_eigen_with_solver(
+            &model,
+            &dof,
+            &reducer,
+            1,
+            solver.as_ref(),
+        );
+        let wave = GroundMotion {
+            dt: 0.01,
+            accel_x: vec![0.0, 1.0, 0.0],
+            accel_y: None,
+            accel_theta: None,
+        };
+        let history = linear_time_history_analysis(
+            &model,
+            &dof,
+            &reducer,
+            &wave,
+            &NewmarkCfg::average_accel(),
+            &Damping::MassProportional { h: 0.0, omega: 1.0 },
+            &[],
+            &[],
+            false,
+            None,
+        );
+        let state = sepika_solver::dynamic::timehistory::TimeStepState {
+            step: 0,
+            time: 0.0,
+            disp_red: vec![0.0; reducer.n_indep],
+            vel_red: vec![0.0; reducer.n_indep],
+            accel_red: vec![0.0; reducer.n_indep],
+        };
+        let resumed = sepika_solver::dynamic::timehistory::linear_time_history_from_state(
+            &model,
+            &dof,
+            &reducer,
+            &wave,
+            &NewmarkCfg::average_accel(),
+            &Damping::MassProportional { h: 0.0, omega: 1.0 },
+            &state,
+            false,
+            None,
+        );
+        println!(
+            "{label}: eigen_with_solver={:?}; resumed={:?}",
+            eigen_with_solver
+                .as_ref()
+                .map(|_| "ok")
+                .map_err(|e| e.to_string()),
+            resumed.as_ref().map(|_| "ok").map_err(|e| e.to_string())
+        );
+        println!(
+            "{label}: eigen={:?}; linear_time_history={:?}",
+            eigen.as_ref().map(|_| "ok").map_err(|e| e.to_string()),
+            history.as_ref().map(|_| "ok").map_err(|e| e.to_string())
+        );
+        if label == "normal" {
+            assert!(eigen.is_ok());
+            assert!(history.is_ok());
+            assert!(eigen_with_solver.is_ok());
+            assert!(resumed.is_ok());
+        } else {
+            let reason = format!(
+                "接合部 ID 0 のパネル未算定: 柱 ID 1: {}は有限の正値が必要です",
+                if label == "nan" {
+                    "せん断弾性係数 G"
+                } else {
+                    "せん断剛性 G・Ve"
+                }
+            );
+            assert!(eigen.unwrap_err().to_string().contains(&reason));
+            assert!(history.err().unwrap().to_string().contains(&reason));
+            assert!(eigen_with_solver.unwrap_err().to_string().contains(&reason));
+            assert!(resumed.err().unwrap().to_string().contains(&reason));
+        }
+    }
+}
