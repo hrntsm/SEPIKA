@@ -329,11 +329,9 @@ impl LoadedFrameSection {
                         force[axis] += p;
                         moment[axis] += p * (x - a);
                     }
-                    Some(Comp::Dist { a, b, w1, w2 }) if a < x => {
-                        let end = b.min(x);
-                        let end_w = w1 * ((b - end) / (b - a)) + w2 * ((end - a) / (b - a));
-                        force[axis] += gauss_dist(a, end, w1, end_w, |_| 1.0);
-                        moment[axis] += gauss_dist(a, end, w1, end_w, |s| x - s);
+                    Some(comp @ Comp::Dist { a, .. }) if a < x => {
+                        force[axis] += comp_resultant(&comp, 0.0, x);
+                        moment[axis] += comp_moment(&comp, 0.0, x, x);
                     }
                     _ => {}
                 }
@@ -375,9 +373,9 @@ fn add_flex_load(q: &mut [f64; 12], axis: usize, comp: &Comp, length: f64) {
 fn add_rigid_load(q: &mut [f64; 12], axis: usize, comp: Comp, base: usize, origin: f64) {
     let (force, moment) = match comp {
         Comp::Point { a, p } => (p, (a - origin) * p),
-        Comp::Dist { a, b, w1, w2 } => (
-            gauss_dist(a, b, w1, w2, |_| 1.0),
-            gauss_dist(a, b, w1, w2, |x| x - origin),
+        Comp::Dist { a, b, .. } => (
+            comp_resultant(&comp, a, b),
+            -comp_moment(&comp, a, b, origin),
         ),
     };
     q[base + axis] += force;
@@ -467,21 +465,22 @@ fn add_bending_consistent(q: &mut [f64; 12], comp: &Comp, l: f64, plane: usize) 
 /// 曲げ面成分を材端モーメント無しで両端へ配る。
 fn add_bending_static(q: &mut [f64; 12], comp: &Comp, l: f64, plane: usize) {
     let (iv, jv) = if plane == 1 { (1usize, 7usize) } else { (2, 8) };
-    let (r, r_j) = match *comp {
+    let (r_i, r_j) = match *comp {
         Comp::Point { a, p } => {
             let xi = (a / l).clamp(0.0, 1.0);
-            (p, p * xi)
+            (p * (1.0 - xi), p * xi)
         }
-        Comp::Dist { a, b, w1, w2 } => {
+        Comp::Dist { a, b, .. } => {
             if b <= a {
                 return;
             }
-            let r = integ2(a, b, w1, w2, a, b, |_s| 1.0);
-            let first_moment = integ2(a, b, w1, w2, a, b, |s| s);
-            (r, first_moment / l)
+            (
+                comp_moment(comp, a, b, l) / l,
+                -comp_moment(comp, a, b, 0.0) / l,
+            )
         }
     };
-    q[iv] += r - r_j;
+    q[iv] += r_i;
     q[jv] += r_j;
 }
 
@@ -503,7 +502,9 @@ fn comp_resultant(comp: &Comp, lo: f64, hi: f64) -> f64 {
             if h <= l {
                 return 0.0;
             }
-            integ2(a, b, w1, w2, l, h, |_s| 1.0)
+            let wl = w1 * ((b - l) / (b - a)) + w2 * ((l - a) / (b - a));
+            let wh = w1 * ((b - h) / (b - a)) + w2 * ((h - a) / (b - a));
+            (h - l) * (wl * 0.5 + wh * 0.5)
         }
     }
 }
@@ -526,28 +527,17 @@ fn comp_moment(comp: &Comp, lo: f64, hi: f64, xref: f64) -> f64 {
             if h <= l {
                 return 0.0;
             }
-            integ2(a, b, w1, w2, l, h, |s| xref - s)
+            let wl = w1 * ((b - l) / (b - a)) + w2 * ((l - a) / (b - a));
+            let wh = w1 * ((b - h) / (b - a)) + w2 * ((h - a) / (b - a));
+            let width = h - l;
+            let resultant = width * (wl * 0.5 + wh * 0.5);
+            if (xref - l).abs() <= (xref - h).abs() {
+                (xref - l) * resultant - width * (width * (wl / 6.0 + wh / 3.0))
+            } else {
+                (xref - h) * resultant + width * (width * (wl / 3.0 + wh / 6.0))
+            }
         }
     }
-}
-
-fn integ2<F: Fn(f64) -> f64>(a: f64, b: f64, w1: f64, w2: f64, l: f64, h: f64, f: F) -> f64 {
-    const G: [f64; 2] = [-0.5773502691896257, 0.5773502691896257];
-    let mid = 0.5 * (l + h);
-    let half = 0.5 * (h - l);
-    let denom = b - a;
-    let mut s_sum = 0.0;
-    for &g in &G {
-        let s = mid + half * g;
-        let t = if denom.abs() < 1e-12 {
-            0.0
-        } else {
-            (s - a) / denom
-        };
-        let w = w1 + (w2 - w1) * t;
-        s_sum += w * f(s);
-    }
-    s_sum * half
 }
 
 /// 断面 xi（i 端からの正規化位置 0..1）における固定端内力を
@@ -1055,6 +1045,177 @@ mod tests {
 
     fn horiz_frame() -> LocalFrame {
         LocalFrame::from_nodes([0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+    }
+
+    fn assert_relative(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() <= 2e-14 * expected.abs(),
+            "actual={actual:e}, expected={expected:e}"
+        );
+    }
+
+    #[test]
+    fn short_static_distribution_preserves_independent_resultant_and_first_moment() {
+        for (width, scale) in [(1e-13, 1e16), (2_f64.powi(-43), 2_f64.powi(43))] {
+            for (wi, wj, resultant, first_moment) in [
+                (1.0, 3.0, 2.0, 7.0 / 6.0),
+                (3.0, 1.0, 2.0, 5.0 / 6.0),
+                (-1.0, -3.0, -2.0, -7.0 / 6.0),
+                (1.0, -1.0, 0.0, -1.0 / 6.0),
+            ] {
+                let loads = [MemberLoad::manual(
+                    ElemId(0),
+                    [0.0, 1.0, 0.0],
+                    MemberLoadKind::Distributed {
+                        a: 0.0,
+                        b: width,
+                        w1: wi * scale,
+                        w2: wj * scale,
+                    },
+                )];
+                let q = consistent_load_local(
+                    &loads,
+                    &canonical_frame(),
+                    1.0,
+                    SpanLoadTransfer::StaticallyEquivalent,
+                );
+                assert_relative(q[1] + q[7], resultant * width * scale);
+                assert_relative(q[7], first_moment * width * width * scale);
+                assert_eq!([q[5], q[11]], [0.0; 2]);
+            }
+        }
+    }
+
+    #[test]
+    fn short_cut_distribution_preserves_section_force_and_moment_near_both_ends() {
+        let width = 2_f64.powi(-43);
+        let scale = 1.0 / width;
+        for a in [0.0, 1.0 - width] {
+            for sign in [1.0, -1.0] {
+                let loads = [MemberLoad::manual(
+                    ElemId(0),
+                    [0.0, sign, 0.0],
+                    MemberLoadKind::Distributed {
+                        a,
+                        b: a + width,
+                        w1: scale,
+                        w2: 3.0 * scale,
+                    },
+                )];
+                let section = LoadedFrameSection::new(
+                    FrameDeadLoadMap::new(&loads, &canonical_frame(), 1.0, 0.0, 0.0).unwrap(),
+                    [0.0; 12],
+                );
+                let cut = a + width / 2.0;
+                let cut_force = section.at(cut).unwrap();
+                assert_relative(cut_force[1], sign * 0.75);
+                assert_relative(cut_force[5], sign * width / 6.0);
+                let left = section
+                    .applied_force_above_elevation(1.0, 0.0, 1.0 - cut)
+                    .unwrap();
+                assert_relative(left[1], sign * 0.75);
+                let right = section
+                    .applied_force_above_elevation(0.0, 1.0, cut)
+                    .unwrap();
+                assert_relative(right[1], sign * 1.25);
+                let q = consistent_load_local(
+                    &loads,
+                    &canonical_frame(),
+                    1.0,
+                    SpanLoadTransfer::Consistent,
+                );
+                let f = fixed_internal_local(
+                    &loads,
+                    &canonical_frame(),
+                    1.0,
+                    cut,
+                    SpanLoadTransfer::Consistent,
+                );
+                assert_relative(f[1] + q[1], sign * 0.75);
+                if a == 0.0 {
+                    assert_relative(f[5] - q[5] + q[1] * cut, sign * width / 6.0);
+                } else {
+                    assert_relative(-q[11] - q[7] * (1.0 - cut) - f[5], -sign * width / 3.0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn zero_width_distribution_has_no_nodal_or_section_load() {
+        let frame = canonical_frame();
+        let loads = [MemberLoad::manual(
+            ElemId(0),
+            [1.0, 1.0, 1.0],
+            MemberLoadKind::Distributed {
+                a: 0.5,
+                b: 0.5,
+                w1: 1e16,
+                w2: 3e16,
+            },
+        )];
+        for transfer in [
+            SpanLoadTransfer::Consistent,
+            SpanLoadTransfer::StaticallyEquivalent,
+        ] {
+            assert_eq!(
+                consistent_load_local(&loads, &frame, 1.0, transfer),
+                [0.0; 12]
+            );
+            for xi in [0.0, 0.5, 1.0] {
+                assert_eq!(
+                    fixed_internal_local(&loads, &frame, 1.0, xi, transfer),
+                    [0.0; 6]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn short_rigid_distribution_preserves_nodal_force_and_moment_at_both_ends() {
+        let width = 2_f64.powi(-43);
+        for (a, base, moment) in [
+            (0.0, 0, width * 7.0 / 6.0),
+            (1.0 - width, 6, -width * 5.0 / 6.0),
+        ] {
+            let load = MemberLoad::manual(
+                ElemId(0),
+                [0.0, 1.0, 0.0],
+                MemberLoadKind::Distributed {
+                    a,
+                    b: a + width,
+                    w1: 1.0 / width,
+                    w2: 3.0 / width,
+                },
+            );
+            let map = FrameDeadLoadMap::new(&[load], &canonical_frame(), 1.0, 0.25, 0.25).unwrap();
+            assert_relative(map.rigid_node_load()[base + 1], 2.0);
+            assert_relative(map.rigid_node_load()[base + 5], moment);
+            assert_eq!(*map.flex_load(), [0.0; 12]);
+        }
+    }
+
+    #[test]
+    fn short_static_distribution_preserves_small_reaction_near_j_end() {
+        let width = 2_f64.powi(-43);
+        let load = MemberLoad::manual(
+            ElemId(0),
+            [0.0, 1.0, 0.0],
+            MemberLoadKind::Distributed {
+                a: 1.0 - width,
+                b: 1.0,
+                w1: 1.0 / width,
+                w2: 3.0 / width,
+            },
+        );
+        let q = consistent_load_local(
+            &[load],
+            &canonical_frame(),
+            1.0,
+            SpanLoadTransfer::StaticallyEquivalent,
+        );
+        assert_relative(q[1], width * 5.0 / 6.0);
+        assert_relative(q[7], 2.0 - width * 5.0 / 6.0);
     }
 
     #[test]

@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [部材荷重微小区間_Issue713_2026-10.md](部材荷重微小区間_Issue713_2026-10.md) | ブレース静定分配・切断荷重・固定端断面力の非零微小幅 | 🔶（公開入口の変更前不一致、荷重込み断面・剛域の追加不一致と修正後element502/solver全369・GUI契約15・Clippy成功（小反力/相殺厳密検査を含む）。文書検査/mdBook成功。最終ゲート・Validation未） |
 | [弾性梁採用G_Issue712_2026-10.md](弾性梁採用G_Issue712_2026-10.md) | 採用Gの直接生成・公開静/動解析、SRC/CFT既存拒否との区別 | 🔶（element497・修正後solver368成功。独立レビューの動解析panicは6入口追補で回復、最後の試験変更後focused1・design3・Clippy/文書検証成功。先行App default13/GUI14を区別。最終ゲート・Validation未） |
 | [仕口パネル参照柱_Issue585_2026-10.md](仕口パネル参照柱_Issue585_2026-10.md) | 共通解決・生成・解析・検定の参照柱、旧計算契約の失効 | 🔶（直接・関連回帰Verification成功、原典/手動GUI/Validation・最終headゲート未） |
 | [壁側柱の物理的分担と局所解放_Issue496_2026-10.md](壁側柱の物理的分担と局所解放_Issue496_2026-10.md) | 共通側柱分類・純鋼板独立K/反力/仕事、Beam/Fiber/MS局所釣合い・軸履歴・同step応答 | 🔶（分離候補のrun別Verification。App lib847・full_model37・壁統合18等のrun別成功と途中失敗を区別。最終ゲート・Validation未確認） |
@@ -276,6 +277,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 28a | 鉛直Column支持の小梁自重 | sepika-core / sepika-edit / sepika-load | face_distance.rs, tests/column_support_faces.rs | [Issue423の独立値・公開入口・全5Done](鉛直柱支持小梁の自重フェース_Issue423_2026-10.md) | 横断 | 🔶（公開8試験/MassEquiv節点加算/旧20保存回帰Verification、Validation未実施） |
 | 1d | 質点系先行成果鮮度 | sepika-app | app/actions/lumped_mass.rs | [Issue612検証](質点系先行成果鮮度_Issue612_2026-10.md)：実成果存在・入力一致、限定片持柱独立 K/T、拒否/失敗/取消保持 | P1/P2 | 🔶（自動入口 Verification、手動 GUI 未） |
 | 1 | ティモシェンコ梁 | sepika-element | beam.rs | `test_phi_zero_converges_to_bernoulli`（Bernoulli 極限。軸 EA/L・ねじり GJ/L を含む 12×12 成分。テスト再編により旧 `test_beam_axial_stiffness`・`test_beam_torsion_stiffness` を統合）, `test_torsion_not_stiffened_by_rigid_zone`（剛域ありでもねじりは GJ/L のまま） | P1 | ✅ |
+| 713 | 部材荷重の微小区間 | sepika-element / sepika-solver | frame/member_load.rs・common/linear_load.rs・statics/linear | [独立期待値と公開入口](部材荷重微小区間_Issue713_2026-10.md#独立期待値と公開入口) | 横断 | 🔶（限定Verification、後続ゲート・Validation未） |
 | 1e | 弾性梁の採用G入力検証 | sepika-element / sepika-solver | frame/beam/construct.rs, factory/input_check.rs, statics/linear/tests.rs | [Issue712の公開入口と正常対照](弾性梁採用G_Issue712_2026-10.md) | 横断 | 🔶 |
 | 1b | SRC解析用弾性係数比 | sepika-core / sepika-element / sepika-solver / sepika-app / sepika-design-jp | section_shape/composite.rs, frame/beam/stiffness_factors.rs, app/preparation.rs | `src_analysis_ratio_matches_independent_rectangular_h_section` / `src_loaded_and_edited_materials_never_use_provisional_analysis_properties` / `src_invalid_ec_and_poisson_are_analysis_errors` / `allowable_bending_ratio_boundaries_are_separate_from_analysis_ratio` | 横断 | 🔶（原本全式/実験未） |
 | 1c | H/BoxのJ・CFTコアねじり | sepika-core / sepika-element / sepika-solver / sepika-io / sepika-app / sepika-mcp | section_shape/core_torsion、tests/cft_torsion_contract.rs、frame/beam/torsion_contract_tests.rs、tests/torsion_contract.rs、tests/cft_torsion_roundtrip.rs | [元6Doneと数値・実入口の証拠](断面JとCFTコアねじり_Issue416_2026-10.md) | 横断 | 🔶（独立数値Verification、正式grid成功・最終ゲート記録待ち・物理Validation未） |
