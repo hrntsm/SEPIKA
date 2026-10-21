@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [STB_CFT鋼管標準密度_Issue741_2026-10.md](STB_CFT鋼管標準密度_Issue741_2026-10.md) | 既知標準鋼材のCFT単独・通常鋼混在の密度と独立面積質量 | 🔶（変更前両公開入口の密度0/質量Err再現、修正後core/IO822成功・共有helper物性4成功・App GUI関連6成功・Clippy/fmt/文書検証成功。Validation・最終ゲート未確認） |
 | [弾性梁の有限入力演算_Issue736_2026-10.md](弾性梁の有限入力演算_Issue736_2026-10.md) | 有限極大Gによる可撓部剛性・端部縮約の診断 | 🔶（最新main公開再現・正常対照と既存GVe拒否を区別、レビューの壁側柱先行質量panic修正後element504/solver380・Clippy成功、先行App契約default17/GUI18を区別。最終ゲート・Validation未） |
 | [増分部材履歴の有限記録_Issue732_2026-10.md](増分部材履歴の有限記録_Issue732_2026-10.md) | 増分部材履歴の単精度変換と記録不能時の失敗 | 🔶（最新main公開再現、solver全377・App保存契約default16/GUI17成功。原条件の先行Errを区別。最終ゲート・Validation未） |
 | [明示仕口パネル採用G_Issue728_2026-10.md](明示仕口パネル採用G_Issue728_2026-10.md) | 明示パネルの採用G・GVe入力拒否と既存自動生成・通常梁拒否の区別 | 🔶（正常対照付き公開入口Verification、core559/element502/job81・solver全371・GUI契約16・Clippy/文書検証成功。途中失敗を区別。最終ゲート・Validation未） |
@@ -331,6 +332,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 21 | 参考骨格算定（M–φ→M–θ） | sepika-skeleton | tests.rs | `test_rc_skeleton_*`, `shear_*`, `explicit_pullout_*`, `positive_reference_composition_*`, `rc_builder_rejects_*` | P4 / #436 | 🔶（単位・拒否契約検証済み） |
 | 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 🔶 |
 | 23 | ST-Bridge 入出力 | sepika-io | stbridge/mod.rs、tests/stbridge_brace_content.rs | [Issue625直接入口と正常対照](未割当線材のSTB出力拒否_Issue625_2026-10.md#独立期待値と直接入口)、 [Issue647実描画・既存入口](STB書出の開発中表示_Issue647_2026-10.md#直接検証と観測)、 `test_roundtrip_*`、`source_story`（[原階所属](原階所属_Issue497_2026-10.md)）、[Issue550全文XSD・意味照合](鋼ブレースXML文字子_Issue550_2026-10.md#独立fixtureと公開入口) | P8 | 🔶（鋼ブレース文字子の限定Verificationは✅） |
+| 23c | STB CFT鋼管の標準密度 | sepika-io / sepika-core | stbridge/import/assemble.rs、tests/stbridge_cft_steel_density.rs | [Issue741の公開入口と独立面積期待値](STB_CFT鋼管標準密度_Issue741_2026-10.md#独立期待値と公開入口) | 横断 | 🔶（公開入口・独立面積質量のVerification成功、Validation・最終ゲート未確認） |
 | 23a | STB標準入力限定 | sepika-io / sepika-app | stbridge/import、tests/stbridge_standard_input.rs、tests/stbridge_standard_rebar.rs、reference_identity_acceptance_tests.rs | [Issue660の独立入力と観測契約](STB標準入力限定_Issue660_2026-10.md#独立入力と観測契約) | 横断 | 🔶（両入口直接10・IO200・App lib837・文書検査成功。追加feature回帰1失敗後、App試験移行対象6成功。全体再実行・親最終監査・最終ゲート未確認） |
 | 23b | STB断面系列別ID | sepika-io / sepika-app | stbridge/import、tests/stbridge_namespace.rs、tests/stbridge_section_series.rs、tests/stbridge_section_reference_boundaries.rs、reference_identity_acceptance_tests.rs | [Issue571の独立入力と予定観測](STB断面系列別ID_Issue571_2026-10.md#独立入力と予定観測) | 横断 | 🔶（series12・boundary6・namespace9・App自動9・IO227・最終feature1322成功。文書修正後の再検査/レビュー・最終ゲート未確認） |
 | 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*`、`source_story_*`（[原階所属](原階所属_Issue497_2026-10.md)。MCP `model_edit` は原階所属・壁版・床板・床領域を配線。他コマンドは未 → [未検証一覧 §6](未検証一覧.md)） | P3/P8 | ✅ |
