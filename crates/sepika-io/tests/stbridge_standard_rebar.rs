@@ -143,6 +143,23 @@ fn standard_rc_src_rebar_and_grade_priority_reach_both_public_imports() {
                             .fy,
                         Some(295.)
                     );
+                    for material in [
+                        model.element_rebar_material(&model.elements[0]).unwrap(),
+                        model
+                            .element_shear_rebar_material(&model.elements[0])
+                            .unwrap(),
+                    ] {
+                        assert_eq!(material.young, 205_000.0);
+                        assert_eq!(material.poisson, 0.3);
+                        assert_eq!(material.density, 7.85e-9);
+                    }
+                    if family.ends_with("SRC") {
+                        let steel = model.element_steel_material(&model.elements[0]).unwrap();
+                        assert_eq!(steel.fy, Some(325.0));
+                        assert_eq!(steel.young, 205_000.0);
+                        assert_eq!(steel.poisson, 0.3);
+                        assert_eq!(steel.density, 7.85e-9);
+                    }
                     assert_eq!(
                         cover(&model),
                         if apply.is_none() {
