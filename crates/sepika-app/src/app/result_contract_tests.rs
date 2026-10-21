@@ -153,6 +153,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-gravity-run-provenance", Some(23), "旧契約"),
         ("old-attached-primary-support-loads", Some(24), "旧契約"),
         ("old-before-wall-side-column-contract", Some(26), "旧契約"),
+        ("old-unconverged-time-history", Some(27), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {

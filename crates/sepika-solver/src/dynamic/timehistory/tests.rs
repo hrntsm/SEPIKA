@@ -1117,9 +1117,7 @@ fn test_nonlinear_time_history_cumulative_vs_noncumulative() {
     );
 }
 
-/// 反復上限が足りない場合でも**打ち切らず参考値として続行**し、不収束ステップ数を
-/// 数えて全ステップを解き切ること。打ち切るのは発散した場合だけである。
-/// （十分な反復回数での収束は `test_nonlinear_time_history_sdof_plastic` で確認する。）
+/// 有限な試行応答でも未収束時は停止する。
 #[test]
 fn test_nonlinear_time_history_convergence() {
     let model = fiber_column_model(100.0);
@@ -1150,7 +1148,6 @@ fn test_nonlinear_time_history_convergence() {
         dt,
     };
 
-    // 反復回数 1 で同じ問題を解く（収束しないが、打ち切らず参考値として続行する）。
     let model2 = fiber_column_model(100.0);
     let result2 = nonlinear_time_history_analysis(
         &model2,
@@ -1165,20 +1162,13 @@ fn test_nonlinear_time_history_convergence() {
         NonlinearThCfg::new(1, 1e-6),
     );
 
-    let result2 = result2.expect("不収束でも Err にせず完走するはず");
-    assert!(
-        result2.non_converged_steps > 0,
-        "反復上限 1 回では不収束ステップが数えられるはず"
-    );
-    assert_eq!(
-        result2.time.len(),
-        wave.accel_x.len(),
-        "不収束でも全ステップ解く"
-    );
-    assert!(
-        result2.peak_disp.iter().flatten().all(|v| v.is_finite()),
-        "参考値として返す応答は有限値であること"
-    );
+    let error = result2
+        .expect_err("有限な未収束応答を確定してはいけない")
+        .to_string();
+    assert!(error.contains("step 1"), "{error}");
+    assert!(error.contains("時刻 0.001 s"), "{error}");
+    assert!(error.contains("反復上限 1 回"), "{error}");
+    assert!(!error.contains("非有限"), "{error}");
 }
 
 /// 制振（マクスウェル）ダンパーが自由振動の応答を低減する（制振要素、Maxwell モデル）。
