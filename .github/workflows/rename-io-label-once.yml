@@ -1,0 +1,28 @@
+# 既存のIssueへの付与を維持したまま、分野ラベルの名前を一度だけ変更する。
+name: 入出力ラベルへの名称統一（一時）
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/rename-io-label-once.yml
+
+permissions:
+  issues: write
+
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ST-Bridgeから入出力へ名称変更
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.updateLabel({
+              ...context.repo,
+              name: "ST-Bridge",
+              new_name: "入出力",
+              color: "DDEBD1",
+              description: "ファイル入出力と形式間のデータ交換（ST-Bridge・IFC・OVIKAなど）"
+            });
+            core.info("ラベル名 ST-Bridge → 入出力 を変更しました");
