@@ -499,9 +499,8 @@ mod tests {
     }
 
     #[test]
-    fn analysis22_23_24_25_missing_future27_and_current26_control_analysis_and_design18_rows() {
-        assert_eq!(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION, 26);
-        assert_eq!(sepika_core::result_contract::DESIGN_CONTRACT_VERSION, 18);
+    fn old_missing_future_and_current_contracts_control_analysis_and_design_rows() {
+        use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
         let model = Model::default();
         for kind in [JobKind::LinearStatic, JobKind::DesignCheck] {
             let dir = test_dir("member-load-direction-contract");
@@ -524,27 +523,42 @@ mod tests {
                 .map(|entry| (entry.path.clone(), std::fs::read(&entry.path).unwrap()))
                 .collect();
             drop(store);
-            let mut cases = vec![
-                (Some(22), Some(18), "old_contract"),
-                (Some(23), Some(18), "old_contract"),
-                (Some(24), Some(18), "old_contract"),
-                (Some(25), Some(18), "old_contract"),
-                (None, Some(18), "unknown_provenance"),
-                (Some(27), Some(18), "unsupported_contract"),
-                (Some(26), Some(18), "current"),
-            ];
+            let mut cases: Vec<_> = (22..=26)
+                .map(|version| (Some(version), Some(DESIGN_CONTRACT_VERSION), "old_contract"))
+                .collect();
+            cases.extend([
+                (None, Some(DESIGN_CONTRACT_VERSION), "unknown_provenance"),
+                (
+                    Some(ANALYSIS_CONTRACT_VERSION + 1),
+                    Some(DESIGN_CONTRACT_VERSION),
+                    "unsupported_contract",
+                ),
+                (
+                    Some(ANALYSIS_CONTRACT_VERSION),
+                    Some(DESIGN_CONTRACT_VERSION),
+                    "current",
+                ),
+            ]);
             if kind == JobKind::DesignCheck {
                 cases.extend([
-                    (Some(26), Some(17), "old_contract"),
-                    (Some(26), Some(19), "unsupported_contract"),
-                    (Some(26), None, "unknown_provenance"),
+                    (Some(ANALYSIS_CONTRACT_VERSION), Some(17), "old_contract"),
+                    (Some(ANALYSIS_CONTRACT_VERSION), Some(18), "old_contract"),
+                    (
+                        Some(ANALYSIS_CONTRACT_VERSION),
+                        Some(DESIGN_CONTRACT_VERSION + 1),
+                        "unsupported_contract",
+                    ),
+                    (Some(ANALYSIS_CONTRACT_VERSION), None, "unknown_provenance"),
                 ]);
             }
             for (version, design_version, reason) in cases {
                 let mut manifest = original.clone();
                 for entry in manifest["entries"].as_array_mut().unwrap() {
                     if kind == JobKind::DesignCheck {
-                        assert_eq!(entry["provenance"]["design_contract_version"], 18);
+                        assert_eq!(
+                            entry["provenance"]["design_contract_version"],
+                            DESIGN_CONTRACT_VERSION
+                        );
                     }
                     let provenance = entry["provenance"].as_object_mut().unwrap();
                     if kind == JobKind::DesignCheck {
