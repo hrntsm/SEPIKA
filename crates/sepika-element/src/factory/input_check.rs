@@ -64,6 +64,9 @@ pub fn ensure_wall_side_column_analysis(
             && model.mass_method != sepika_core::model::MassMethod::LumpedOnly
             && !model.uses_damper_total_weight(data)
         {
+            if let Some(reason) = elastic_stiffness_input_issue(data, model) {
+                return Err(failure(&reason));
+            }
             super::build_behavior(data, model)
                 .try_mass_matrix(crate::behavior::MassOption::Consistent)
                 .map_err(|error| failure(&error))?;
@@ -454,6 +457,8 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
             if let Err(reason) = crate::frame::beam::BeamElement::try_new(data, model) {
                 return Some(reason);
             }
+        } else if let Some(reason) = elastic_stiffness_input_issue(data, model) {
+            return Some(reason);
         }
     }
     let stiffness = match crate::frame::beam::stiffness_breakdown(model, data) {
@@ -730,13 +735,20 @@ pub fn ensure_rc_beam_reference_loads(
     Ok(())
 }
 
-/// 線材の E と弾性梁の採用 G が正の有限値でなければ部材 ID 付きの理由を返す。
+/// 線材の E・採用 G、弾性梁の剛性・端部縮約が不正なら部材 ID 付きの理由を返す。
 /// SRC/CFT の構築不備と他の入力不備は既存の断面・材料診断で扱う。
 pub fn elastic_stiffness_input_issue(data: &ElementData, model: &Model) -> Option<String> {
     let section = model.element_section(data)?;
     let material = model.element_material(data)?;
-    match crate::frame::beam::BeamElement::try_new(data, model) {
-        Ok(beam) => elastic_young_issue(data, beam.e),
+    match crate::frame::beam::BeamElement::resolve_properties(data, model) {
+        Ok(beam) => elastic_young_issue(data, beam.e).or_else(|| {
+            matches!(
+                data.kind,
+                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+            )
+            .then(|| beam.validate_stiffness().err())
+            .flatten()
+        }),
         Err(error) => {
             let composite = matches!(
                 section.shape,

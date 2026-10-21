@@ -980,6 +980,23 @@ fn member_history_gate_expires_analysis32_and_keeps_current_results() {
 }
 
 #[test]
+fn beam_stiffness_gate_expires_analysis33_and_keeps_current_results() {
+    let app = calculated();
+    for (version, keep) in [(33, false), (ANALYSIS_CONTRACT_VERSION, true)] {
+        let (loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("beam736-contract-{version}"),
+        );
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(results.has_analysis_results(), keep);
+        assert_eq!(results.has_design_results(), keep);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
 fn panel_g_gate_expires_analysis31_and_keeps_current_results() {
     let app = calculated();
     for (version, keep) in [(31, false), (ANALYSIS_CONTRACT_VERSION, true)] {

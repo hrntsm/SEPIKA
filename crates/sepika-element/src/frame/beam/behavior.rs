@@ -28,16 +28,19 @@ impl ElementBehavior for BeamElement {
     crate::behavior::elastic_disp_behavior!(BeamElement, 12);
 
     fn mass_matrix(&self, opt: MassOption) -> LocalMat {
-        let mass_properties = self
-            .mass_properties_error
-            .as_ref()
-            .map_or(self.mass_properties, |error| {
-                panic!("質量特性を解決できません: {error}")
-            });
+        self.try_mass_matrix(opt)
+            .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    fn try_mass_matrix(&self, opt: MassOption) -> Result<LocalMat, String> {
+        if let Some(error) = &self.mass_properties_error {
+            return Err(format!("質量特性を解決できません: {error}"));
+        }
+        let mass_properties = self.mass_properties;
         match opt {
-            MassOption::Lumped => {
-                crate::frame::prismatic::lumped_mass(mass_properties.total_mass(self.length))
-            }
+            MassOption::Lumped => Ok(crate::frame::prismatic::lumped_mass(
+                mass_properties.total_mass(self.length),
+            )),
             MassOption::Consistent => {
                 let (li, lj) = self.rigid_lengths();
                 let flex_length = self.length - li - lj;
@@ -57,7 +60,7 @@ impl ElementBehavior for BeamElement {
                     phi_z,
                     phi_y,
                 );
-                let k_flex = self.local_stiffness_flex_raw();
+                let k_flex = self.checked_stiffness_flex_raw()?;
                 let releases = self.end_releases();
                 let mm = crate::frame::prismatic::condense_end_releases_with_mass(
                     &k_flex,
@@ -67,12 +70,11 @@ impl ElementBehavior for BeamElement {
                     lj,
                     &releases,
                 )
-                .unwrap_or_else(|| {
-                    panic!(
-                        "BeamElement の端部解放質量を縮約できません: Kbb が特異です（解放条件を確認してください）"
-                    )
-                });
-                self.axis.to_global(&mm)
+                .ok_or_else(|| format!(
+                    "部材 ID {} の弾性梁 (E={}, G={}, J={}, L={}) の BeamElement の端部解放質量を縮約できません: Kbb が特異または縮約演算が非有限です（解放条件を確認してください）",
+                    self.id.0, self.e, self.g, self.j, self.length
+                ))?;
+                Ok(self.axis.to_global(&mm))
             }
         }
     }
