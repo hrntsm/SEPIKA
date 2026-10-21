@@ -343,105 +343,120 @@ mod tests {
             name: "617同一バッチ".into(),
             terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(20), 1.0)],
         });
-        let before = serde_json::to_vec(&model).unwrap();
-        for combination in [false, true] {
-            let params = JobParams {
-                load_case: (!combination).then_some(20),
-                load_combination: combination.then_some(0),
-                ..Default::default()
-            };
-            let JobOutcome::DesignCheck {
-                summary,
-                member_force_rows,
-                ..
-            } = compute_design_check_job(&model, &params).unwrap()
-            else {
-                panic!()
-            };
-            let (work, _) = model_prepared_for_analysis(&model, &params).unwrap();
-            let terms = if combination {
-                work.combinations[0].terms.clone()
-            } else {
-                vec![(LoadCaseId(20), 1.0)]
-            };
-            let solved: Vec<_> = terms
-                .iter()
-                .map(|(id, factor)| {
-                    (
-                        sepika_job::compute::compute_linear_static(work.clone(), *id).unwrap(),
-                        *factor,
-                    )
-                })
-                .collect();
-            let references: Vec<_> = solved.iter().map(|(r, f)| (r, *f)).collect();
-            let direct = sepika_solver::statics::linear::superpose_static(&references);
-            assert_eq!(
-                serde_json::to_value(member_force_rows).unwrap(),
-                serde_json::to_value(flatten_member_force_rows(&direct.member_forces)).unwrap()
-            );
-            let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&work);
-            let wall = expanded
-                .elements
-                .iter()
-                .find(|e| e.kind == sepika_core::model::ElementKind::Wall)
-                .unwrap();
-            let batch: Vec<_> = direct
-                .member_forces
-                .iter()
-                .map(|(id, f)| (*id, f.at.as_slice()))
-                .collect();
-            let face = sepika_element::wall::static_face::StaticWallFace::new(wall, &expanded)
-                .unwrap()
-                .recover(&batch)
-                .unwrap();
-            assert_eq!(face.physical_area_mm2, 1_332_000.0);
-            assert!((face.shear_n.abs() - 100_000.0).abs() < 1e-6);
-            let checks: Vec<WallCheck> =
-                serde_json::from_value(summary["wall_checks"].clone()).unwrap();
-            let reference = checks
-                .iter()
-                .find(|w| w.kind == WallCheckKind::ReferenceSkeleton)
-                .unwrap();
-            assert!(reference.case.contains(if combination {
-                "combo:0:617"
-            } else {
-                "case:20"
-            }));
-            let CheckOutcome::Checked(check) = &reference.outcome else {
-                panic!("{:?}", reference)
-            };
-            let detail = &check.components[0].detail;
-            for expected in [
-                format!("Nface={:.1} kN", face.compression_n / 1000.0),
-                format!("Mface={:.1} kNm", face.moment_nmm / 1e6),
-                format!("Qface={:.1} kN", face.shear_n / 1000.0),
-            ] {
-                assert!(detail.contains(&expected), "{detail}");
+        let mut baseline: [Option<[f64; 6]>; 2] = [None, None];
+        for kind in [
+            sepika_core::model::ElementKind::Beam,
+            sepika_core::model::ElementKind::Fiber,
+            sepika_core::model::ElementKind::MultiSpring,
+        ] {
+            model.elements[0].kind = kind;
+            let before = serde_json::to_vec(&model).unwrap();
+            for combination in [false, true] {
+                let params = JobParams {
+                    load_case: (!combination).then_some(20),
+                    load_combination: combination.then_some(0),
+                    ..Default::default()
+                };
+                let JobOutcome::DesignCheck {
+                    summary,
+                    member_force_rows,
+                    ..
+                } = compute_design_check_job(&model, &params).unwrap()
+                else {
+                    panic!()
+                };
+                let (work, _) = model_prepared_for_analysis(&model, &params).unwrap();
+                let terms = if combination {
+                    work.combinations[0].terms.clone()
+                } else {
+                    vec![(LoadCaseId(20), 1.0)]
+                };
+                let solved: Vec<_> = terms
+                    .iter()
+                    .map(|(id, factor)| {
+                        (
+                            sepika_job::compute::compute_linear_static(work.clone(), *id).unwrap(),
+                            *factor,
+                        )
+                    })
+                    .collect();
+                let references: Vec<_> = solved.iter().map(|(r, f)| (r, *f)).collect();
+                let direct = sepika_solver::statics::linear::superpose_static(&references);
+                assert_eq!(
+                    serde_json::to_value(member_force_rows).unwrap(),
+                    serde_json::to_value(flatten_member_force_rows(&direct.member_forces)).unwrap()
+                );
+                let (expanded, _, _) = sepika_load::wall_expand::expand_wall_elements(&work);
+                let wall = expanded
+                    .elements
+                    .iter()
+                    .find(|e| e.kind == sepika_core::model::ElementKind::Wall)
+                    .unwrap();
+                let batch: Vec<_> = direct
+                    .member_forces
+                    .iter()
+                    .map(|(id, f)| (*id, f.at.as_slice()))
+                    .collect();
+                let face = sepika_element::wall::static_face::StaticWallFace::new(wall, &expanded)
+                    .unwrap()
+                    .recover(&batch)
+                    .unwrap();
+                assert_eq!(face.physical_area_mm2, 1_332_000.0);
+                assert!((face.shear_n.abs() - 100_000.0).abs() < 1e-6);
+                let checks: Vec<WallCheck> =
+                    serde_json::from_value(summary["wall_checks"].clone()).unwrap();
+                let reference = checks
+                    .iter()
+                    .find(|w| w.kind == WallCheckKind::ReferenceSkeleton)
+                    .unwrap();
+                assert!(reference.case.contains(if combination {
+                    "combo:0:617"
+                } else {
+                    "case:20"
+                }));
+                let CheckOutcome::Checked(check) = &reference.outcome else {
+                    panic!("{:?}", reference)
+                };
+                let detail = &check.components[0].detail;
+                for expected in [
+                    format!("Nface={:.1} kN", face.compression_n / 1000.0),
+                    format!("Mface={:.1} kNm", face.moment_nmm / 1e6),
+                    format!("Qface={:.1} kN", face.shear_n / 1000.0),
+                ] {
+                    assert!(detail.contains(&expected), "{detail}");
+                }
+                let skeleton = reference.reference_skeleton.as_ref().unwrap();
+                let (crack_displacement_mm, crack_force_n) = skeleton.displacement_points[1];
+                let observed = [
+                    face.compression_n,
+                    face.shear_n,
+                    face.moment_nmm,
+                    face.physical_area_mm2,
+                    face.depth_mm,
+                    crack_force_n / crack_displacement_mm,
+                ];
+                assert!(observed.iter().all(|value| value.is_finite()));
+                if let Some(expected) = baseline[usize::from(combination)] {
+                    for (actual, expected) in observed.into_iter().zip(expected) {
+                        assert!(
+                            (actual - expected).abs() <= 1e-8 * expected.abs().max(1.0),
+                            "{kind:?} combination={combination}: {actual} != {expected}"
+                        );
+                    }
+                } else {
+                    baseline[usize::from(combination)] = Some(observed);
+                }
             }
+            assert_eq!(serde_json::to_vec(&model).unwrap(), before);
+            assert!(compute_design_check_job(
+                &model,
+                &JobParams {
+                    load_case: Some(999),
+                    ..Default::default()
+                }
+            )
+            .is_err());
         }
-        assert_eq!(serde_json::to_vec(&model).unwrap(), before);
-        assert!(compute_design_check_job(
-            &model,
-            &JobParams {
-                load_case: Some(999),
-                ..Default::default()
-            }
-        )
-        .is_err());
-        model.elements[0].kind = sepika_core::model::ElementKind::Fiber;
-        let JobOutcome::DesignCheck { summary, .. } = compute_design_check_job(
-            &model,
-            &JobParams {
-                load_case: Some(20),
-                ..Default::default()
-            },
-        )
-        .unwrap() else {
-            panic!()
-        };
-        let checks: Vec<WallCheck> =
-            serde_json::from_value(summary["wall_checks"].clone()).unwrap();
-        assert!(checks.iter().any(|w| w.kind == WallCheckKind::ReferenceSkeleton && matches!(&w.outcome, CheckOutcome::Skipped {reason} if reason.contains("側柱 ID 0"))));
     }
     #[test]
     fn wall_output_assembly_keeps_independent_status_keys_counts_and_null_max() {
