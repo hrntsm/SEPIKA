@@ -380,6 +380,19 @@ impl App {
         let metrics =
             crate::summary::compute_story_metrics_with(&self.core.model, &st.disp, view_dir, &ctx);
 
+        let fes: Vec<f64> = metrics
+            .iter()
+            .map(|m| m.fes.clone())
+            .collect::<Result<_, _>>()?;
+        let rs: Vec<f64> = metrics
+            .iter()
+            .map(|m| m.rs.clone())
+            .collect::<Result<_, _>>()?;
+        let re: Vec<f64> = metrics
+            .iter()
+            .map(|m| m.re.clone())
+            .collect::<Result<_, _>>()?;
+
         if sepika_load::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
             let generation = po
                 .wall_run
@@ -964,9 +977,6 @@ impl App {
             .collect::<Result<Vec<_>, String>>()?;
         self.core.scoped.ds_beta_u_by_story = beta_u_by_story;
         let heights: Vec<f64> = metrics.iter().map(|m| m.height).collect();
-        let rs: Vec<f64> = metrics.iter().map(|m| m.rs).collect();
-        let re: Vec<f64> = metrics.iter().map(|m| m.re).collect();
-        let fes: Vec<f64> = metrics.iter().map(|m| m.fes).collect();
 
         let capacity_curve = capacity_po
             .capacity_curve
@@ -1498,6 +1508,7 @@ mod tests {
             app.core.scoped.last_error
         );
         app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
         app.run_pushover();
         assert!(
             app.core.scoped.last_error.is_none(),

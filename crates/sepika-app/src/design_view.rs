@@ -581,26 +581,43 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                     }
                 });
                 row.col(|ui| {
-                    let txt = format!("{:.3}", m.rs);
-                    if m.rs_ok {
+                    let txt = crate::summary::metric_value_text(&m.rs);
+                    if m.rs_ok == Some(true) {
                         ui.colored_label(crate::theme::GOOD_GREEN, txt);
                     } else {
-                        ui.colored_label(crate::theme::ERROR_RED, format!("{} NG", txt));
+                        ui.colored_label(
+                            crate::theme::ERROR_RED,
+                            format!("{} {}", txt, crate::summary::metric_verdict_text(m.rs_ok)),
+                        )
+                        .on_hover_text(&txt);
                     }
                 });
                 row.col(|ui| {
-                    let txt = format!("{:.3}", m.re);
-                    if m.re_ok {
+                    let txt = crate::summary::metric_value_text(&m.re);
+                    if m.re_ok == Some(true) {
                         ui.colored_label(crate::theme::GOOD_GREEN, txt);
                     } else {
-                        ui.colored_label(crate::theme::ERROR_RED, format!("{} NG", txt));
+                        ui.colored_label(
+                            crate::theme::ERROR_RED,
+                            format!("{} {}", txt, crate::summary::metric_verdict_text(m.re_ok)),
+                        )
+                        .on_hover_text(&txt);
                     }
                 });
                 row.col(|ui| {
-                    ui.label(format!("{:.3}", m.fes));
+                    let text = crate::summary::metric_value_text(&m.fes);
+                    ui.label(&text).on_hover_text(text);
                 });
             },
         );
+        for metric in &metrics {
+            if let Err(reason) = &metric.fes {
+                ui.colored_label(
+                    crate::theme::ERROR_RED,
+                    format!("必要保有水平耐力・合否は算定不能: {reason}"),
+                );
+            }
+        }
     } else {
         ui.colored_label(
             crate::theme::GRAY_600,

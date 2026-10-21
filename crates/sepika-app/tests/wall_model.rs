@@ -1162,6 +1162,7 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
         app.core.scoped.last_error
     );
     app.run_pushover();
+    app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1302,6 +1303,7 @@ fn test_holding_capacity_auto_rank_detects_wall() {
         app.core.scoped.last_error
     );
     app.run_pushover();
+    app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1328,6 +1330,7 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
     select_frame_gravity(&mut app.core.model);
     app.run_static_all();
     app.run_pushover();
+    app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1510,6 +1513,7 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
     select_frame_gravity(&mut app.core.model);
     app.run_static_all();
     app.run_pushover();
+    app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),

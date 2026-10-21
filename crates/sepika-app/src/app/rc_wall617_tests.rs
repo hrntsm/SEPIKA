@@ -385,6 +385,7 @@ fn holding_capacity_requires_same_run_wall_capacity_and_current_input() {
         app.core.model.sections[1] = beam;
         app.run_preparation();
         app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
         app.run_pushover();
         assert!(
             app.core.scoped.last_error.is_none(),

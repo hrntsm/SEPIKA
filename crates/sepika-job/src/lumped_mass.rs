@@ -131,7 +131,6 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
     for (i, layer) in layers.iter().enumerate() {
         let mut cols = column_stiffnesses_from_analysis(inp.model, layer.top, res_x, res_y);
         append_misc_wall_stiffnesses(inp.model, layer.top, &mut cols);
-        let cor = center_of_rigidity(&cols);
         let dm = layer.dynamic_mass.ok_or_else(|| {
             JobError::InvalidInput(format!(
                 "階 {} の動的質量が未算定です。準備計算で階を生成してください",
@@ -139,11 +138,15 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
             ))
         })?;
         let com = dm.center_xy_mm;
-        let kr = eccentricity(&cols, com, cor).kr;
         // 質量 0・J 0 以下はそれぞれ `layer_mass`・`layer_inertia` が弾く。
         // 質量を先に判定し、J も 0 になる質量 0 の階を J の誤診断にしない。
         let mass = layer_mass(layer)?;
         let j = layer_inertia(layer)?;
+        let cor = center_of_rigidity(&cols)
+            .map_err(|reason| JobError::InvalidInput(format!("階 {}: {reason}", layer.name)))?;
+        let kr = eccentricity(&cols, com, cor)
+            .map_err(|reason| JobError::InvalidInput(format!("階 {}: {reason}", layer.name)))?
+            .kr;
         let (kxi, kyi) = match inp.source {
             LumpedStiffnessSource::ColumnKi => {
                 let sx: f64 = cols.iter().map(|c| c.dx).sum();
@@ -851,5 +854,24 @@ mod tests {
         assert!((d_master - 10.0).abs() < 1e-12, "master δ={d_master}");
         // u_x(0,0) = 10 - 0.002*(0-5000) = 20
         assert!((d_origin - 20.0).abs() < 1e-12, "origin δ={d_origin}");
+    }
+    #[test]
+    fn spatial_propagates_unavailable_rigidity_center_with_layer_reason() {
+        let model = two_story_column_model();
+        let mut x = static_with_column_qz(3, &[(0, f64::INFINITY), (1, 40.0)]);
+        let mut y = static_with_column_qy(3, &[(0, 80.0), (1, 30.0)]);
+        x.disp[1][0] = 1.0;
+        x.disp[2][0] = 2.0;
+        y.disp[1][1] = 1.0;
+        y.disp[2][1] = 2.0;
+        let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
+        inp.source = LumpedStiffnessSource::ColumnKi;
+        inp.res_x = Some(&x);
+        inp.res_y = Some(&y);
+        let error = build_lumped_mass(inp).unwrap_err().to_string();
+        assert!(
+            error.contains("階") && error.contains("剛心") && error.contains("集計できません"),
+            "{error}"
+        );
     }
 }
