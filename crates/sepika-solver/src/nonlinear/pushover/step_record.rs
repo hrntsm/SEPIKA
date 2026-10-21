@@ -117,6 +117,8 @@ impl<'a> StepRecorder<'a> {
         total_disp: &[f64],
     ) -> Result<RecordedStep, String> {
         let responses = super::geom::member_recording_responses(model, behaviors)?;
+        let member_step = record_member_step(model, dofmap, behaviors, total_disp, &responses)
+            .map_err(|error| format!("増分解析・部材履歴 step={}: {error}", self.step_no))?;
         let owner_cut_loads = model
             .layers()
             .iter()
@@ -203,9 +205,7 @@ impl<'a> StepRecorder<'a> {
             self.step_no,
             &mut self.shear_yields,
         );
-        self.member_history_steps.push(record_member_step(
-            model, dofmap, behaviors, total_disp, &responses,
-        ));
+        self.member_history_steps.push(member_step);
         self.wall_history
             .extend(super::wall_response::record_wall_step(
                 model,
@@ -302,6 +302,47 @@ mod tests {
     use super::*;
     use sepika_core::ids::ElemId;
     use sepika_core::model::{MemberLoad, MemberLoadKind};
+
+    #[test]
+    fn unrecordable_member_step_preserves_preceding_confirmed_history() {
+        let model = super::super::tests::single_column_model(235.0, 80_000.0);
+        let map = DofMap::build(&model);
+        let heights = super::super::response::story_heights(&model);
+        let mut recorder =
+            StepRecorder::new(&model, SeismicDir::X, &heights, DuctilityMethod::default()).unwrap();
+        let behaviors: Vec<_> = model
+            .elements
+            .iter()
+            .map(|elem| sepika_element::factory::build_behavior(elem, &model))
+            .collect();
+        let mut disp = vec![0.0; map.n_active()];
+        recorder
+            .record(0.0, &model, &map, &behaviors, &disp)
+            .unwrap();
+        disp[map.active(6).unwrap() as usize] = 1e45;
+        let error = recorder
+            .record(1.0, &model, &map, &behaviors, &disp)
+            .err()
+            .unwrap();
+        for expected in [
+            "step=1",
+            "ElemId(0)",
+            "rz_i=",
+            "f32 変換で有限範囲を超えました",
+        ] {
+            assert!(error.contains(expected), "{error}");
+        }
+        assert_eq!(recorder.step_no, 1);
+        let records = recorder.finish();
+        assert_eq!(records.steps.len(), 1);
+        assert_eq!(records.capacity_curve.len(), 1);
+        assert_eq!(records.member_history_steps.len(), 1);
+        assert_eq!(records.confirmed_history.len(), 1);
+        assert!(records.hinges.is_empty());
+        assert!(records.shear_yields.is_empty());
+        assert!(records.wall_history.is_empty());
+        assert_eq!(records.member_history_steps[0][0].rz_i, 0.0);
+    }
 
     #[test]
     fn loaded_wall_owner_and_ordinary_girder_keep_legacy_capacity_and_same_step_cut_partition() {
