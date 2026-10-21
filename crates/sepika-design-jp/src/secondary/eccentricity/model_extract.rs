@@ -13,30 +13,54 @@ use sepika_element::transform::LocalFrame;
 use super::core::{center_of_rigidity, d_value, eccentricity, ColumnStiffness, Eccentricity};
 use super::misc_wall::append_misc_wall_stiffnesses;
 
-/// 重心（質量中心）[Xg, Yg]。当該層の節点質量（並進成分）で重み付けする。
-///
-/// 質量未定義の節点は質量 0（剛心の重み付けには寄与しない）。全質量 0 なら幾何重心。
-pub fn center_of_mass(model: &Model, story: StoryId) -> [f64; 2] {
+/// 節点の並進質量で重み付けした平面重心 `[mm]` を返す。全質量 0 なら幾何重心。
+/// 節点なし・不正な質量や位置・集計又は除算不能は Err。未設定の質量は 0 と扱う。
+pub fn center_of_mass(model: &Model, story: StoryId) -> Result<[f64; 2], String> {
     let nodes: Vec<&sepika_core::model::Node> = model
         .nodes
         .iter()
         .filter(|n| n.story == Some(story))
         .collect();
     if nodes.is_empty() {
-        return [0.0, 0.0];
+        return Err(format!("Re: 階{}の重心に必要な節点がありません", story.0));
     }
     let mass = |n: &sepika_core::model::Node| n.mass.map(|m| m[0]).unwrap_or(0.0);
-    let total: f64 = nodes.iter().map(|n| mass(n)).sum();
-    if total > 0.0 {
-        let xg = nodes.iter().map(|n| mass(n) * n.coord[0]).sum::<f64>() / total;
-        let yg = nodes.iter().map(|n| mass(n) * n.coord[1]).sum::<f64>() / total;
-        [xg, yg]
-    } else {
-        let n = nodes.len() as f64;
-        let xg = nodes.iter().map(|n| n.coord[0]).sum::<f64>() / n;
-        let yg = nodes.iter().map(|n| n.coord[1]).sum::<f64>() / n;
-        [xg, yg]
+    for node in &nodes {
+        if !mass(node).is_finite()
+            || mass(node) < 0.0
+            || node.coord[..2].iter().any(|value| !value.is_finite())
+        {
+            return Err(format!(
+                "Re: 階{}の節点{}の質量又は位置が不正です",
+                story.0, node.id.0
+            ));
+        }
     }
+    let total: f64 = nodes.iter().map(|n| mass(n)).sum();
+    let (sum_x, sum_y, denominator) = if total > 0.0 {
+        (
+            nodes.iter().map(|n| mass(n) * n.coord[0]).sum::<f64>(),
+            nodes.iter().map(|n| mass(n) * n.coord[1]).sum::<f64>(),
+            total,
+        )
+    } else {
+        (
+            nodes.iter().map(|n| n.coord[0]).sum::<f64>(),
+            nodes.iter().map(|n| n.coord[1]).sum::<f64>(),
+            nodes.len() as f64,
+        )
+    };
+    if [total, sum_x, sum_y].iter().any(|value| !value.is_finite()) {
+        return Err(format!(
+            "Re: 階{}の質量又は重心の位置一次モーメントを集計できません",
+            story.0
+        ));
+    }
+    let center = [sum_x / denominator, sum_y / denominator];
+    if center.iter().any(|value| !value.is_finite()) {
+        return Err(format!("Re: 階{}の質量重心座標を算定できません", story.0));
+    }
+    Ok(center)
 }
 
 /// 当該層の各柱について方向別水平剛性（D値）と平面位置を算定して返す。
@@ -159,21 +183,21 @@ pub struct StoryCenters {
 }
 
 /// 当該層の剛心・重心を算定して返す。
-pub fn story_centers(model: &Model, story: StoryId) -> StoryCenters {
+pub fn story_centers(model: &Model, story: StoryId) -> Result<StoryCenters, String> {
     let cols = column_stiffnesses(model, story);
-    let com = center_of_mass(model, story);
-    let cor = center_of_rigidity(&cols);
-    StoryCenters {
+    let com = center_of_mass(model, story)?;
+    let cor = center_of_rigidity(&cols).map_err(|reason| format!("階{}: {reason}", story.0))?;
+    Ok(StoryCenters {
         center_of_mass: com,
         center_of_rigidity: cor,
-    }
+    })
 }
 
 /// 当該層の偏心率を算定して返す。
-pub fn story_eccentricity(model: &Model, story: StoryId) -> Eccentricity {
+pub fn story_eccentricity(model: &Model, story: StoryId) -> Result<Eccentricity, String> {
     let mut cols = column_stiffnesses(model, story);
     append_misc_wall_stiffnesses(model, story, &mut cols);
-    let cor = center_of_rigidity(&cols);
-    let com = center_of_mass(model, story);
-    eccentricity(&cols, com, cor)
+    let cor = center_of_rigidity(&cols).map_err(|reason| format!("階{}: {reason}", story.0))?;
+    let com = center_of_mass(model, story)?;
+    eccentricity(&cols, com, cor).map_err(|reason| format!("階{}: {reason}", story.0))
 }

@@ -3366,6 +3366,7 @@ fn test_holding_capacity_flow() {
     );
 
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3406,6 +3407,7 @@ fn test_holding_capacity_rejects_declared_brace_when_undetected() {
     app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame())); // 筋かいのないラーメン
     app.generate_stories_action();
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
     select_holding_points(&mut app);
@@ -3448,6 +3450,7 @@ fn test_holding_capacity_rank_auto_from_width_thickness() {
     );
 
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3520,6 +3523,7 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
     app.load_model(model);
     app.generate_stories_action();
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
     select_holding_points(&mut app);
@@ -3535,6 +3539,7 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
         sec.property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     }
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     app.run_pushover();
     select_holding_points(&mut app);
     app.core.design_rank_auto = true;
@@ -3796,6 +3801,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     );
 
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3908,6 +3914,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     rebar.hoop.pitch += 50.0;
     assert!(app.compute_holding_capacity().is_err());
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     assert!(app.compute_holding_capacity().is_err());
     app.run_pushover();
     select_holding_points(&mut app);
@@ -13673,4 +13680,227 @@ fn wall_connection_gui_diagnostic_preserves_shared_stop_reason() {
             .to_string();
         assert!(error.contains(&expected), "{error}");
     }
+}
+
+fn fes_718_ready_app() -> App {
+    let mut app = App::default();
+    app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
+    app.generate_stories_action();
+    app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
+    assert!(app.core.scoped.last_error.is_none());
+    app.core.analysis_cfg.push_steps = 10;
+    app.run_pushover();
+    select_holding_points(&mut app);
+    assert!(app.core.scoped.last_error.is_none());
+    app
+}
+
+#[test]
+fn fes_718_success_then_unavailable_never_keeps_capacity_source_or_verdict() {
+    let mut app = fes_718_ready_app();
+    let normal = app.compute_holding_capacity().expect("有効な方向別結果");
+    assert_eq!(normal.0.stories[0].rs, 1.0);
+    assert_eq!(normal.0.stories[0].re, 0.0);
+    assert_eq!(normal.0.stories[0].fes, 1.0);
+    assert!(normal.0.stories[0].qun > 0.0);
+    assert!(app.core.scoped.holding_capacity_source.is_some());
+
+    for (_, result) in &mut app.core.scoped.results.as_mut().unwrap().statics {
+        result.disp.fill([0.0; 6]);
+    }
+    let reason = app.compute_holding_capacity().err().expect("全層ゼロ変位");
+    assert!(reason.contains("Rs 算定不能"), "{reason}");
+    assert!(reason.contains("X"), "{reason}");
+    assert!(app.core.scoped.holding_capacity_source.is_none());
+    let csv = crate::summary::build_report_csv(&app);
+    assert!(csv.contains("Rs 算定不能"));
+    assert!(csv.contains("判定なし"));
+    assert!(csv.contains("必要保有水平耐力・合否,算定不能"));
+    assert!(app.compute_holding_capacity().is_err());
+    assert!(app.core.scoped.holding_capacity_source.is_none());
+}
+
+#[test]
+fn fes_718_missing_direction_and_zero_radius_stop_required_capacity() {
+    let mut app = fes_718_ready_app();
+    app.compute_holding_capacity().expect("有効な方向別結果");
+    let y = app
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .statics
+        .iter_mut()
+        .find(|(key, _)| *key == StaticCaseKey::Seismic(SeismicDir::Y))
+        .unwrap();
+    for (_, forces) in &mut y.1.member_forces {
+        for (_, force) in &mut forces.at {
+            force.fill(0.0);
+        }
+    }
+    let reason = app.compute_holding_capacity().err().unwrap();
+    assert!(reason.contains("Re 算定不能"), "{reason}");
+    assert!(app.core.scoped.holding_capacity_source.is_none());
+    app.core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .statics
+        .retain(|(key, _)| *key != StaticCaseKey::Seismic(SeismicDir::Y));
+    let reason = app.compute_holding_capacity().err().unwrap();
+    assert!(reason.contains("X/Y 方向"), "{reason}");
+    assert!(crate::summary::build_report_csv(&app).contains("X/Y 方向"));
+}
+
+#[test]
+fn fes_718_ovika_preserves_current_versions_and_rejects_legacy_analysis_or_design() {
+    use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
+    let mut app = fes_718_ready_app();
+    let normal_count = app.core.scoped.results.as_ref().unwrap().statics.len();
+    for (_, result) in &mut app.core.scoped.results.as_mut().unwrap().statics {
+        result.disp.fill([0.0; 6]);
+    }
+    let path = test_tmp().join("fes_718_unavailable.ovika");
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    let results = reopened.core.scoped.results.as_ref().unwrap();
+    assert_eq!(
+        results.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    assert_eq!(results.statics.len(), normal_count);
+    assert!(crate::summary::build_report_csv(&reopened).contains("Rs 算定不能"));
+    assert!(reopened.compute_holding_capacity().is_err());
+
+    let mut original = fes_718_ready_app();
+    original.run_design_check();
+    assert!(original.core.scoped.last_error.is_none());
+    assert!(!original
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .is_empty());
+    original.save_project_to(path.clone());
+    reopened.open_project_from(path.clone());
+    let current = reopened.core.scoped.results.as_ref().unwrap();
+    assert_eq!(
+        current.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    assert_eq!(
+        current.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    assert_eq!(current.statics.len(), normal_count);
+    assert!(!reopened
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .is_empty());
+    original
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .design_contract_version = Some(20);
+    let save_legacy = |source: &App| {
+        let bytes = rmp_serde::to_vec_named(&SavedResults {
+            bundle: source.core.scoped.results.as_ref().unwrap().clone(),
+            last_static: source.core.scoped.last_static,
+            view_vibration_case: None,
+            view_lumped_vibration_case: None,
+            last_run: None,
+        })
+        .unwrap();
+        sepika_io::ovika::save_ovika(
+            &path,
+            &source.core.model,
+            sepika_io::ovika::OvikaExtras {
+                results: Some(&bytes),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    };
+    save_legacy(&original);
+    reopened.open_project_from(path.clone());
+    let results = reopened.core.scoped.results.as_ref().unwrap();
+    assert_eq!(results.statics.len(), normal_count);
+    assert!(results.member_checks.is_empty());
+    assert_eq!(
+        results.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    assert!(reopened
+        .core
+        .scoped
+        .result_contract_notice
+        .as_deref()
+        .unwrap()
+        .contains("旧契約"));
+    let legacy = original.core.scoped.results.as_mut().unwrap();
+    legacy.analysis_contract_version = Some(34);
+    legacy.design_contract_version = Some(DESIGN_CONTRACT_VERSION);
+    save_legacy(&original);
+    reopened.open_project_from(path.clone());
+    let results = reopened.core.scoped.results.as_ref().unwrap();
+    assert!(results.statics.is_empty());
+    assert!(results.member_checks.is_empty());
+    let reason = reopened
+        .core
+        .scoped
+        .result_contract_notice
+        .as_deref()
+        .unwrap();
+    assert!(reason.contains("解析") && reason.contains("旧契約") && reason.contains("保存版=34"));
+    assert!(!crate::summary::build_report_csv(&reopened).contains("[層指標(二次設計)]"));
+    assert!(reopened.compute_holding_capacity().is_err());
+}
+
+#[test]
+#[cfg(feature = "gui")]
+fn fes_718_gui_draws_target_reason_without_normal_verdict() {
+    let mut app = fes_718_ready_app();
+    app.compute_holding_capacity().expect("有効な方向別結果");
+    for (_, result) in &mut app.core.scoped.results.as_mut().unwrap().statics {
+        result.disp.fill([0.0; 6]);
+    }
+    let context = egui::Context::default();
+    let output = context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(4000.0, 16000.0),
+            )),
+            ..Default::default()
+        },
+        |ui| crate::design_view::design_table(ui, &mut app),
+    );
+    let text = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("Rs 算定不能"), "{text}");
+    assert!(text.contains("判定なし"), "{text}");
+    assert!(text.contains("必要保有水平耐力・合否は算定不能"), "{text}");
+    assert!(!text.contains("算定不能 NG"));
+    assert!(!text.contains("Qun[kN]"), "{text}");
+    assert!(app.core.scoped.holding_capacity_source.is_none());
 }

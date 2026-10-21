@@ -1457,18 +1457,23 @@ fn story_metrics_computed_for_every_layer() {
             m.drift
         );
         assert!(
-            m.rs > 0.0 && m.rs.is_finite(),
+            *m.rs.as_ref().unwrap() > 0.0 && m.rs.as_ref().unwrap().is_finite(),
             "層 {} の剛性率が異常: {}",
             m.name,
-            m.rs
+            m.rs.as_ref().unwrap()
         );
         assert!(
-            m.re >= 0.0 && m.re.is_finite(),
+            *m.re.as_ref().unwrap() >= 0.0 && m.re.as_ref().unwrap().is_finite(),
             "層 {} の偏心率が異常: {}",
             m.name,
-            m.re
+            m.re.as_ref().unwrap()
         );
-        assert!(m.fes >= 1.0, "層 {} の Fes が 1.0 未満: {}", m.name, m.fes);
+        assert!(
+            *m.fes.as_ref().unwrap() >= 1.0,
+            "層 {} の Fes が 1.0 未満: {:?}",
+            m.name,
+            m.fes
+        );
     }
 }
 
@@ -2734,8 +2739,14 @@ fn snapshot_key_scalars() {
             &format!("metrics[{}].drift_angle", m.name),
             sig4(m.drift_angle),
         );
-        line(&format!("metrics[{}].Rs", m.name), sig4(m.rs));
-        line(&format!("metrics[{}].Re", m.name), sig4(m.re));
+        line(
+            &format!("metrics[{}].Rs", m.name),
+            sig4(*m.rs.as_ref().unwrap()),
+        );
+        line(
+            &format!("metrics[{}].Re", m.name),
+            sig4(*m.re.as_ref().unwrap()),
+        );
     }
 
     app.run_pushover();
@@ -2973,6 +2984,7 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     assert_no_error(&app, "整合GLの地震静的");
     app.run_pushover();
     assert_no_error(&app, "整合GLの増分解析");
+    app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
     let qud = app.compute_holding_capacity().unwrap().0.stories[0].qud;
     assert!((qud - 217_750.0).abs() < 1e-8);
@@ -3071,6 +3083,7 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     app.core.analysis_cfg.push_apply_long_term = false;
     app.run_pushover();
     assert_no_error(&app, "GL跨ぎ混合構造の増分解析");
+    app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
 
     assert!((app.compute_holding_capacity().unwrap().0.stories[0].qud - 215_250.0).abs() < 1e-7);

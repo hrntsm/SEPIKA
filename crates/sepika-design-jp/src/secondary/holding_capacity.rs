@@ -31,63 +31,91 @@ pub fn check_story_drift(story_height: f64, interstory_drift: f64) -> bool {
     angle <= 1.0 / 200.0
 }
 
-/// 全層の剛性率 Rs_i を計算する。`Ks_i = h_i / δ_i`、`Rs_i = Ks_i / mean(Ks)`。
-/// δ=0 の層は平均から除外し、Rs には有限層の最大 Rs 以上（最低 1.0）を与える。
-pub fn stiffness_ratios(story_heights: &[f64], story_drifts: &[f64]) -> Vec<f64> {
-    let ks: Vec<Option<f64>> = story_heights
+/// 下層から上層の階高・重心位置の層間変位 `[mm]` から剛性率を返す。
+/// 同数の有限な正値が必要。空入力・ゼロ変位・演算不能は Err。
+pub fn stiffness_ratios(story_heights: &[f64], story_drifts: &[f64]) -> Result<Vec<f64>, String> {
+    if story_heights.is_empty() || story_heights.len() != story_drifts.len() {
+        return Err("Rs: 階高と層間変位の層数が不一致又は空です".into());
+    }
+    let ks = story_heights
         .iter()
         .zip(story_drifts)
-        .map(|(h, d)| if *d == 0.0 { None } else { Some(h / d) })
-        .collect();
-    if ks.is_empty() {
-        return vec![];
+        .enumerate()
+        .map(|(i, (&h, &d))| {
+            if !h.is_finite() || h <= 0.0 {
+                return Err(format!(
+                    "Rs: 下から{}層の階高が正の有限値ではありません",
+                    i + 1
+                ));
+            }
+            if !d.is_finite() || d <= 0.0 {
+                return Err(format!(
+                    "Rs: 下から{}層の層間変位が正の有限値ではありません",
+                    i + 1
+                ));
+            }
+            let k = h / d;
+            if !k.is_finite() || k <= 0.0 {
+                return Err(format!("Rs: 下から{}層の相対剛性を算定できません", i + 1));
+            }
+            Ok(k)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let mean = ks.iter().sum::<f64>() / ks.len() as f64;
+    if !mean.is_finite() || mean <= 0.0 {
+        return Err("Rs: 全層の相対剛性の平均を算定できません".into());
     }
-    let finite: Vec<f64> = ks.iter().filter_map(|k| *k).collect();
-    if finite.is_empty() {
-        return vec![1.0; ks.len()];
-    }
-    let mean = finite.iter().sum::<f64>() / finite.len() as f64;
-    if mean == 0.0 {
-        return vec![1.0; ks.len()];
-    }
-    let rs_rigid = finite.iter().map(|k| k / mean).fold(1.0_f64, f64::max);
-    ks.iter()
-        .map(|k| match k {
-            Some(k) => k / mean,
-            None => rs_rigid,
+    ks.into_iter()
+        .enumerate()
+        .map(|(i, k)| {
+            let rs = k / mean;
+            if !rs.is_finite() || rs <= 0.0 {
+                Err(format!("Rs: 下から{}層の剛性率を算定できません", i + 1))
+            } else {
+                Ok(rs)
+            }
         })
         .collect()
 }
 
-/// 偏心距離 e を弾力半径 r で割った偏心率。
-pub fn eccentricity_ratio(e: f64, r: f64) -> f64 {
-    if r == 0.0 {
-        return 0.0;
+/// 偏心距離 e `[mm]` と正の弾力半径 r `[mm]` から偏心率を返す。
+/// 非有限値・非正の半径・演算不能は Err。距離の符号は絶対値として扱う。
+pub fn eccentricity_ratio(e: f64, r: f64) -> Result<f64, String> {
+    if !e.is_finite() || !r.is_finite() || r <= 0.0 {
+        return Err("Re: 偏心距離が非有限又は弾力半径が正の有限値ではありません".into());
     }
-    (e / r).abs()
+    let re = (e / r).abs();
+    if !re.is_finite() {
+        return Err("Re: 偏心距離と弾力半径から偏心率を算定できません".into());
+    }
+    Ok(re)
 }
 
-/// 剛性率 Rs から Fs を算定する（告示1792）。
-pub fn fs(rs: f64) -> f64 {
-    if rs >= 0.6 {
+/// 有限な非負の剛性率 Rs から Fs を返す。不正値は Err。
+pub fn fs(rs: f64) -> Result<f64, String> {
+    if !rs.is_finite() || rs < 0.0 {
+        return Err("Fs: 剛性率が非負の有限値ではありません".into());
+    }
+    Ok(if rs >= 0.6 { 1.0 } else { 2.0 - rs / 0.6 })
+}
+
+/// 有限な非負の偏心率 Re から Fe を返す。不正値は Err。
+pub fn fe(re: f64) -> Result<f64, String> {
+    if !re.is_finite() || re < 0.0 {
+        return Err("Fe: 偏心率が非負の有限値ではありません".into());
+    }
+    Ok(if re <= 0.15 {
         1.0
+    } else if re >= 0.30 {
+        1.5
     } else {
-        2.0 - rs / 0.6
-    }
+        1.0 + (re - 0.15) / 0.30
+    })
 }
 
-/// 偏心率 Re から Fe を算定する（告示1792）。
-pub fn fe(re: f64) -> f64 {
-    if re <= 0.15 {
-        1.0
-    } else {
-        (1.0 + 0.5 * (re - 0.15) / 0.15).min(1.5)
-    }
-}
-
-/// 形状係数 Fes = Fs · Fe。
-pub fn fes(rs: f64, re: f64) -> f64 {
-    fs(rs) * fe(re)
+/// 有限な非負の Rs・Re から形状係数 Fes を返す。不正値は Err。
+pub fn fes(rs: f64, re: f64) -> Result<f64, String> {
+    Ok(fs(rs)? * fe(re)?)
 }
 
 /// 架構種別。
@@ -143,38 +171,32 @@ pub fn check_holding_capacity(
     re_by_story: &[f64],
     story_heights: &[f64],
     member_ranks: Vec<(ElemId, MemberRank)>,
-) -> HoldingCapacityResult {
-    let last_point = pushover.capacity_curve.last();
+) -> Result<HoldingCapacityResult, String> {
+    let last_point = pushover
+        .capacity_curve
+        .last()
+        .ok_or("保有耐力: 性能曲線がありません")?;
     let n = qud_by_story.len();
-
-    let stories: Vec<StoryCheck> = (0..n)
-        .map(|i| {
-            let story = StoryId(i as u32);
-            let qu = pushover
-                .capacity_curve
-                .iter()
-                .filter_map(|p| p.story_shear.get(i).copied())
-                .fold(0.0_f64, f64::max);
-            let drift = last_point
-                .and_then(|p| p.story_drift.get(i))
-                .copied()
-                .unwrap_or(0.0);
-            let height = *story_heights.get(i).unwrap_or(&1.0);
-            let drift_angle = if height == 0.0 { 0.0 } else { drift / height };
-
-            let qud = *qud_by_story.get(i).unwrap_or(&0.0);
-            let ds = *ds_by_story.get(i).unwrap_or(&0.0);
-            let f = *fes_by_story.get(i).unwrap_or(&1.0);
-            let rs = *rs_by_story.get(i).unwrap_or(&0.0);
-            let re = *re_by_story.get(i).unwrap_or(&0.0);
-            story_check(story, qu, drift_angle, qud, ds, f, rs, re)
-        })
-        .collect();
-
-    HoldingCapacityResult {
-        stories,
-        member_ranks,
+    let mut qu = vec![0.0_f64; n];
+    for point in &pushover.capacity_curve {
+        if point.story_shear.len() != n || point.story_shear.iter().any(|q| !q.is_finite()) {
+            return Err("保有耐力: 性能曲線の層せん断力が欠損又は不正です".into());
+        }
+        for (peak, &q) in qu.iter_mut().zip(&point.story_shear) {
+            *peak = peak.max(q);
+        }
     }
+    check_holding_capacity_at_state(
+        &qu,
+        &last_point.story_drift,
+        qud_by_story,
+        ds_by_story,
+        fes_by_story,
+        rs_by_story,
+        re_by_story,
+        story_heights,
+        member_ranks,
+    )
 }
 
 /// 明示採用した同一状態の層力 `[N]`・層間変位 `[mm]` で判定する。
@@ -200,6 +222,20 @@ pub fn check_holding_capacity_at_state(
         || heights_mm.iter().any(|h| *h <= 0.0)
     {
         return Err("選定状態の層力・変形・階高・設計入力が欠損又は不正です".into());
+    }
+    for i in 0..n {
+        self::fes(rs[i], re[i]).map_err(|reason| format!("下から{}層: {reason}", i + 1))?;
+        if fes[i] < 1.0 {
+            return Err(format!("下から{}層: Fesが1未満です", i + 1));
+        }
+        if !(ds[i] * fes[i] * qud_n[i]).is_finite()
+            || !(story_drifts_mm[i] / heights_mm[i]).is_finite()
+        {
+            return Err(format!(
+                "下から{}層: 必要耐力又は層間変形角を算定できません",
+                i + 1
+            ));
+        }
     }
     let stories = (0..n)
         .map(|i| {
@@ -281,7 +317,7 @@ mod tests {
     fn test_stiffness_ratios_example() {
         let heights = vec![1.0, 1.0, 1.0];
         let drifts = vec![1.0 / 200.0, 1.0 / 150.0, 1.0 / 250.0];
-        let rs = stiffness_ratios(&heights, &drifts);
+        let rs = stiffness_ratios(&heights, &drifts).unwrap();
         assert_eq!(rs.len(), 3);
         for (r, expected) in rs.iter().zip([1.0, 0.75, 1.25].iter()) {
             assert!((r - expected).abs() < 1e-9);
@@ -289,25 +325,29 @@ mod tests {
     }
 
     #[test]
-    fn test_stiffness_ratios_empty() {
-        assert!(stiffness_ratios(&[], &[]).is_empty());
-    }
-
-    #[test]
-    fn test_stiffness_ratios_zero_drift() {
-        let rs = stiffness_ratios(&[1.0], &[0.0]);
-        assert_eq!(rs, vec![1.0]);
-    }
-
-    #[test]
-    fn test_stiffness_ratios_zero_drift_story_is_not_penalized() {
-        // δ=0 の層（剛体的な層）は最も剛であり、Rs=0（最も柔）と逆転してはならない。
-        // Ks = [300, ∞, 150] → 有限層 mean=225、Rs=[4/3, max(4/3,1), 2/3]。
-        let rs = stiffness_ratios(&[3.0, 3.0, 3.0], &[0.01, 0.0, 0.02]);
-        assert!((rs[0] - 300.0 / 225.0).abs() < 1e-9, "rs={:?}", rs);
-        assert!((rs[2] - 150.0 / 225.0).abs() < 1e-9, "rs={:?}", rs);
-        // 剛な層は有限層の最大 Rs 以上（Fs=1.0 側）で、0.6 を下回らない。
-        assert!(rs[1] >= rs[0], "rs={:?}", rs);
+    fn stiffness_ratios_reject_missing_nonfinite_nonpositive_and_undefined_inputs() {
+        for (heights, drifts) in [
+            (vec![], vec![]),
+            (vec![3.0], vec![]),
+            (vec![3.0], vec![0.0]),
+            (vec![3.0, 3.0], vec![0.01, 0.0]),
+            (vec![0.0], vec![1.0]),
+            (vec![-3.0], vec![1.0]),
+            (vec![3.0], vec![-1.0]),
+            (vec![f64::NAN], vec![1.0]),
+            (vec![3.0], vec![f64::INFINITY]),
+            (vec![f64::MAX], vec![f64::MIN_POSITIVE]),
+            (vec![f64::MAX; 2], vec![1.0; 2]),
+        ] {
+            assert!(
+                stiffness_ratios(&heights, &drifts).is_err(),
+                "{heights:?} {drifts:?}"
+            );
+        }
+        assert_eq!(
+            stiffness_ratios(&[3.0, 3.0], &[0.01, 0.01]).unwrap(),
+            vec![1.0, 1.0]
+        );
     }
 
     #[test]
@@ -318,43 +358,111 @@ mod tests {
 
     #[test]
     fn test_eccentricity_ratio_basic() {
-        assert!((eccentricity_ratio(1.5, 3.0) - 0.5).abs() < 1e-9);
-        assert_eq!(eccentricity_ratio(1.5, 0.0), 0.0);
+        assert!((eccentricity_ratio(1.5, 3.0).unwrap() - 0.5).abs() < 1e-9);
+        assert!(eccentricity_ratio(1.5, 0.0).is_err());
+        assert_eq!(eccentricity_ratio(0.0, 3.0).unwrap(), 0.0);
     }
 
     #[test]
     fn test_fs_ge_06() {
-        assert!((fs(0.6) - 1.0).abs() < 1e-9);
-        assert!((fs(1.0) - 1.0).abs() < 1e-9);
+        assert!((fs(0.6).unwrap() - 1.0).abs() < 1e-9);
+        assert!((fs(1.0).unwrap() - 1.0).abs() < 1e-9);
     }
 
     #[test]
     fn test_fs_lt_06() {
-        assert!((fs(0.3) - 1.5).abs() < 1e-9);
-        assert!((fs(0.0) - 2.0).abs() < 1e-9);
+        assert!((fs(0.3).unwrap() - 1.5).abs() < 1e-9);
+        assert!((fs(0.0).unwrap() - 2.0).abs() < 1e-9);
     }
 
     #[test]
     fn test_fe_le_015() {
-        assert!((fe(0.15) - 1.0).abs() < 1e-9);
-        assert!((fe(0.0) - 1.0).abs() < 1e-9);
+        assert!((fe(0.15).unwrap() - 1.0).abs() < 1e-9);
+        assert!((fe(0.0).unwrap() - 1.0).abs() < 1e-9);
     }
 
     #[test]
     fn test_fe_gt_015() {
-        assert!((fe(0.30) - 1.5).abs() < 1e-9);
-        assert!((fe(0.45) - 1.5).abs() < 1e-9);
+        assert!((fe(0.30).unwrap() - 1.5).abs() < 1e-9);
+        assert!((fe(0.45).unwrap() - 1.5).abs() < 1e-9);
     }
 
     #[test]
     fn test_fes_default() {
-        let f = fes(0.8, 0.1);
+        let f = fes(0.8, 0.1).unwrap();
         assert!((f - 1.0).abs() < 1e-9);
     }
 
     #[test]
     fn test_fes_example() {
-        assert!((fes(0.3, 0.30) - 2.25).abs() < 1e-9);
+        assert!((fes(0.3, 0.30).unwrap() - 2.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fes718_normal_values_and_invalid_inputs() {
+        for (re, expected) in [(0.15, 1.0), (0.225, 1.25), (0.30, 1.5)] {
+            assert!((fe(re).unwrap() - expected).abs() < 1e-12);
+        }
+        for (rs, expected) in [(0.60, 1.0), (0.30, 1.5), (0.15, 1.75)] {
+            assert!((fs(rs).unwrap() - expected).abs() < 1e-12);
+        }
+        assert!((fes(0.15, 0.225).unwrap() - 2.1875).abs() < 1e-12);
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0] {
+            assert!(fe(invalid).is_err());
+            assert!(fs(invalid).is_err());
+            assert!(fes(invalid, 0.0).is_err());
+            assert!(fes(1.0, invalid).is_err());
+            assert!(eccentricity_ratio(0.0, invalid).is_err());
+        }
+        assert!(eccentricity_ratio(f64::NAN, 1.0).is_err());
+        assert!(eccentricity_ratio(f64::INFINITY, 1.0).is_err());
+        assert!(eccentricity_ratio(f64::MAX, f64::MIN_POSITIVE).is_err());
+    }
+
+    #[test]
+    fn fes718_holding_capacity_rejects_invalid_fes_and_overflow() {
+        let run = |f: f64, rs: f64, re: f64, qud: f64| {
+            check_holding_capacity_at_state(
+                &[100.0],
+                &[1.0],
+                &[qud],
+                &[0.3],
+                &[f],
+                &[rs],
+                &[re],
+                &[3000.0],
+                vec![],
+            )
+        };
+        for invalid in [f64::NAN, f64::INFINITY, -1.0, 0.0] {
+            assert!(run(invalid, 1.0, 0.0, 100.0).is_err());
+        }
+        assert!(run(1.0, f64::NAN, 0.0, 100.0).is_err());
+        assert!(run(1.0, 1.0, f64::NAN, 100.0).is_err());
+        assert!(run(f64::MAX, 1.0, 0.0, f64::MAX).is_err());
+        let pushover = pushover_with_qu(vec![100.0], vec![1.0]);
+        assert!(check_holding_capacity(
+            &pushover,
+            &[100.0],
+            &[0.3],
+            &[],
+            &[1.0],
+            &[0.0],
+            &[3000.0],
+            vec![]
+        )
+        .is_err());
+        assert!(check_holding_capacity(
+            &pushover,
+            &[100.0],
+            &[0.3],
+            &[f64::NAN],
+            &[1.0],
+            &[0.0],
+            &[3000.0],
+            vec![]
+        )
+        .is_err());
     }
 
     /// 告示1792 の Ds 値: 架構種別 × 部材ランクの全組合せ。
@@ -476,7 +584,8 @@ mod tests {
             &[0.0],
             &[3000.0],
             vec![],
-        );
+        )
+        .unwrap();
         // Qu はピーク 150（最終点 120 ではない）。
         assert!(
             (result.stories[0].qu - 150.0).abs() < 1e-9,
@@ -497,7 +606,8 @@ mod tests {
         let rs = vec![1.0, 0.75];
         let re = vec![0.05, 0.10];
         let heights = vec![3000.0, 3000.0];
-        let result = check_holding_capacity(&pushover, &qud, &ds, &fes, &rs, &re, &heights, vec![]);
+        let result =
+            check_holding_capacity(&pushover, &qud, &ds, &fes, &rs, &re, &heights, vec![]).unwrap();
         assert_eq!(result.stories.len(), 2);
         assert!(result.stories[0].ok); // Qu=100 ≥ Qun=24
         assert!(result.stories[1].ok); // Qu=200 ≥ Qun=63
@@ -520,7 +630,8 @@ mod tests {
         let rs = vec![1.0, 1.0];
         let re = vec![0.0, 0.0];
         let heights = vec![3000.0, 3000.0];
-        let result = check_holding_capacity(&pushover, &qud, &ds, &fes, &rs, &re, &heights, vec![]);
+        let result =
+            check_holding_capacity(&pushover, &qud, &ds, &fes, &rs, &re, &heights, vec![]).unwrap();
         assert!(!result.stories[0].ok); // Qu=20 < Qun=24
         assert!(!result.stories[1].ok); // Qu=50 < Qun=63
     }
@@ -536,7 +647,8 @@ mod tests {
         let rs = vec![1.0];
         let re = vec![0.0];
         let heights = vec![3000.0];
-        let result = check_holding_capacity(&pushover, &qud, &ds, &fes, &rs, &re, &heights, vec![]);
+        let result =
+            check_holding_capacity(&pushover, &qud, &ds, &fes, &rs, &re, &heights, vec![]).unwrap();
         assert!((result.stories[0].qun - 50.0).abs() < 1e-9);
         assert!(result.stories[0].ok, "Qu=Qun は ok（≥）であるべき");
     }
@@ -580,7 +692,8 @@ mod tests {
             &[0.0],
             &[3000.0],
             ranks,
-        );
+        )
+        .unwrap();
         assert_eq!(result.member_ranks.len(), 2);
         assert_eq!(result.member_ranks[1].1, MemberRank::FC);
     }

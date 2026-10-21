@@ -259,6 +259,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [p3_review.md](p3_review.md) | P3 最小 UI | 🔶 |
 | [p4_review.md](p4_review.md) | P4 材料断面 | ✅ |
 | [p7_review.md](p7_review.md) | P7 二次設計 | 🔶 |
+| [Fes 算定不能の伝播](Fes算定不能の伝播_Issue718_2026-10.md) | Issue718・通常式/実集計/算定不能の自動 GUI・CSV・保存・再計算 | 🔶 |
 | [p8_review.md](p8_review.md) | P8 操作連携 | 🔶 |
 | [pending_items.md](pending_items.md) | P9 仕上げ | 🔶 |
 
@@ -319,6 +320,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 13b | 標準鋼材名の厳密解決 | sepika-core / sepika-io | material_grade.rs・standard_material.rs・stbridge/strength_tests.rs | [Issue590の独立表・公開STB入口](標準鋼材名の厳密解決_Issue590_2026-10.md#独立期待値と実入口) | 横断 | 🔶（名称Verification、種類別F全照合・Validation未） |
 | 13d | 用途別せん断面積と二方向検定 | sepika-core / sepika-element / sepika-design-jp / sepika-app | section_shape・steel・frame/beam/construct・shear_area_acceptance_tests | [原5Done・独立期待値・run別証拠](用途別せん断面積と二方向検定_Issue417_2026-10.md)、`surface_radius_tests` / `shear_contract_tests` / `constructed_cantilever_*` | 横断 | 🔶（限定Verification、Validation・正式最終ゲート未確認） |
 | 14 | 保有耐力 | sepika-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
+| 718 | Fes 算定不能の伝播 | sepika-design-jp / sepika-app / sepika-job | secondary/holding_capacity・stiffness_ratio・eccentricity、summary、actions/design/holding、lumped_mass | [独立期待値と直接入口](Fes算定不能の伝播_Issue718_2026-10.md#独立期待値と直接入口) | 横断 | 🔶（Scope 内の自動 Verification 成功、手動 GUI・原典/Validation・最終ゲートは未確認） |
 | 15 | プッシュオーバー | sepika-solver / sepika-job / sepika-app / sepika-mcp | nonlinear/pushover/driver.rs・tests.rs / compute.rs | [Issue433既存増分回帰](弧長法削除と既存増分回帰_Issue433_2026-10.md#既存回帰と観測) | P5 | 🔶（弧長削除Verification、4方向等は未検証） |
 | 15a | 壁単体の確定step応答 | sepika-solver / sepika-app / sepika-job / sepika-mcp | nonlinear/pushover/wall_response.rs・tests.rs, tests/wall_model.rs, ultimate_demand.rs, job/pushover.rs | [Issue443検証](壁の確定ステップ応答_Issue443_2026-10.md)の試験対応表 | — | ✅（Scope内Verification） |
 | 15b | 目的別確定層力 | sepika-solver / sepika-app / sepika-mcp | story_response.rs・result_validity.rs・job/pushover.rs | [Issue442検証](目的別確定層力_Issue442_2026-10.md) | — | ✅（Scope内Verification） |
@@ -380,6 +382,8 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 各 # の修正履歴・監査結果の詳細は [§レポート目録](#レポート目録) の該当レポートを参照。
 未完了の要約は [未検証一覧.md](未検証一覧.md) を参照。
+
+[Fes 算定不能の伝播（Issue718）](Fes算定不能の伝播_Issue718_2026-10.md) は、通常式の独立期待値・実集計と算定不能の自動 GUI・CSV・実保存/再読込み・再計算の Verification を記録する（🔶、手動 GUI・原典/Validation・最終ゲートは未確認）。
 
 ## 1 次参照: 手計算／理論解
 
