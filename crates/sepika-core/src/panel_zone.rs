@@ -586,13 +586,32 @@ pub fn resolve_panel_joint<'a>(
     resolve_panel_joint_impl(model, node, members, false)
 }
 
-/// 明示パネルの参照柱を要求して解決する。柱不在は接合部 ID 付きエラー、既存の材種対象外は `Ok(None)`。
+/// 明示パネルの参照柱を要求して解決し、モデル化対象の採用 G [N/mm²] と G・Ve [N·mm/rad] に正の有限値を要求する。
+/// 入力不備は接合部・採用柱 ID 付きエラー、既存の材種対象外は `Ok(None)`。
 pub fn resolve_explicit_panel_joint<'a>(
     model: &Model,
     node: NodeId,
     members: impl IntoIterator<Item = &'a ElementData>,
 ) -> Result<Option<PanelJoint>, PanelJointError> {
-    resolve_panel_joint_impl(model, node, members, true)
+    let joint = resolve_panel_joint_impl(model, node, members, true)?;
+    if let Some(joint) = joint.as_ref().filter(|joint| !joint.has_filled_column) {
+        let column = &model.elements[joint.column.index()];
+        let g_n_mm2 = model.element_material(column).unwrap().shear_modulus();
+        let invalid = |quantity: &str| {
+            PanelJointError::InvalidInput(format!(
+                "接合部 ID {} のパネル未算定: 柱 ID {}: {quantity}は有限の正値が必要です",
+                node.0, joint.column.0
+            ))
+        };
+        if !g_n_mm2.is_finite() || g_n_mm2 <= 0.0 {
+            return Err(invalid("せん断弾性係数 G"));
+        }
+        let stiffness_n_mm = g_n_mm2 * joint.ve;
+        if !stiffness_n_mm.is_finite() || stiffness_n_mm <= 0.0 {
+            return Err(invalid("せん断剛性 G・Ve"));
+        }
+    }
+    Ok(joint)
 }
 
 fn resolve_panel_joint_impl<'a>(
@@ -1318,6 +1337,29 @@ mod tests {
             elements: vec![member(0, 0, 1, 0), member(1, 2, 0, 1)],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn explicit_panel_g_validation_does_not_change_design_or_filled_column_targets() {
+        let mut model = joint_model(h_beam(), 600.0, h_col());
+        model.materials[0].shear = Some(f64::NAN);
+        assert!(resolve_panel_joint(&model, NodeId(0), &model.elements)
+            .unwrap()
+            .is_some());
+        assert!(matches!(
+            resolve_explicit_panel_joint(&model, NodeId(0), &model.elements),
+            Err(PanelJointError::InvalidInput(_))
+        ));
+        model.sections[1].shape = Some(SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 16.0,
+            corner_r: Some(0.0),
+        });
+        let joint = resolve_explicit_panel_joint(&model, NodeId(0), &model.elements)
+            .unwrap()
+            .unwrap();
+        assert!(joint.has_filled_column);
     }
 
     /// 柱・はりがすべて S なら対象になる。

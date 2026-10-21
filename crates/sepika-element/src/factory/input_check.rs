@@ -284,7 +284,7 @@ fn nonlinear_input_issues_with_basis(
         }
         let issue = match elem.kind {
             ElementKind::PanelZone => elem.nodes.first().and_then(|node| {
-                sepika_core::panel_zone::resolve_panel_joint(model, *node, &model.elements)
+                sepika_core::panel_zone::resolve_explicit_panel_joint(model, *node, &model.elements)
                     .err()
                     .map(|reason| reason.to_string())
             }),

@@ -179,7 +179,7 @@ pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, S
         .filter(|e| e.kind == ElementKind::PanelZone)
     {
         if let Some(node) = panel.nodes.first() {
-            sepika_core::panel_zone::resolve_panel_joint(model, *node, &model.elements)
+            sepika_core::panel_zone::resolve_explicit_panel_joint(model, *node, &model.elements)
                 .map_err(|reason| SolveError::InvalidInput(reason.to_string()))?;
         }
     }

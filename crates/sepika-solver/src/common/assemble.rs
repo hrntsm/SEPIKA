@@ -67,7 +67,7 @@ pub fn add_support_spring_diag(model: &Model, dofmap: &DofMap, triplets: &mut Ve
     }
 }
 
-/// 部材荷重方向・断面適用条件・質量入力と、弾性梁の E/G を生成前に対象 ID 付きで検証する。
+/// 部材荷重方向・断面適用条件・質量入力・明示パネル剛性・弾性梁の E/G を生成前に対象 ID 付きで検証する。
 pub(crate) fn validate_global_mass_inputs(
     model: &Model,
 ) -> Result<(), sepika_math::solver::SolveError> {
@@ -109,6 +109,18 @@ pub(crate) fn validate_global_mass_inputs(
                     ))
                 })?;
             }
+        }
+    }
+    for panel in model
+        .elements
+        .iter()
+        .filter(|e| e.kind == ElementKind::PanelZone)
+    {
+        if let Some(node) = panel.nodes.first() {
+            sepika_core::panel_zone::resolve_explicit_panel_joint(model, *node, &model.elements)
+                .map_err(|reason| {
+                    sepika_math::solver::SolveError::InvalidInput(reason.to_string())
+                })?;
         }
     }
     for elem in model.elements.iter().filter(|elem| {

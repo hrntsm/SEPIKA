@@ -749,7 +749,7 @@ impl Model {
         for elem in &self.elements {
             if elem.kind == ElementKind::PanelZone {
                 if let Some(&node) = elem.nodes.first() {
-                    crate::panel_zone::resolve_panel_joint(self, node, &self.elements)
+                    crate::panel_zone::resolve_explicit_panel_joint(self, node, &self.elements)
                         .map_err(|reason| CoreError::InvalidInput(reason.to_string()))?;
                 }
             }

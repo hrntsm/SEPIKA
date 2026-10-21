@@ -289,8 +289,7 @@ mod tests {
     };
     use sepika_core::section_shape::SectionShape;
 
-    #[test]
-    fn panel_585_invalid_lower_column_stops_public_preparation() {
+    fn steel_panel_model() -> Model {
         use sepika_core::ids::MaterialId;
         use sepika_core::model::{FrameSectionUse, Material, MaterialCategory, PanelZoneMode};
         let mut model = Model {
@@ -348,6 +347,12 @@ mod tests {
             element.section = Some(SectionId(i as u32));
             model.elements.push(element);
         }
+        model
+    }
+
+    #[test]
+    fn panel_585_invalid_lower_column_stops_public_preparation() {
+        let mut model = steel_panel_model();
         model.sections[0].material = None;
         let reason =
             sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
@@ -374,6 +379,61 @@ mod tests {
             .err()
             .unwrap();
         assert!(error.to_string().contains(&reason), "{error}");
+    }
+
+    #[test]
+    fn panel_728_public_preparation_rejects_invalid_adopted_g_only_when_modeling_panels() {
+        use sepika_core::model::PanelZoneMode;
+        for (label, shear, poisson, valid) in [
+            ("derived_normal", None, 0.3, true),
+            ("explicit_normal", Some(80_000.0), 0.3, true),
+            ("explicit_override", Some(80_000.0), f64::NAN, true),
+            ("nan", Some(f64::NAN), 0.3, false),
+            ("positive_infinity", Some(f64::INFINITY), 0.3, false),
+            ("negative_infinity", Some(f64::NEG_INFINITY), 0.3, false),
+            ("negative", Some(-1.0), 0.3, false),
+            ("zero", Some(0.0), 0.3, false),
+            ("derived_nan", None, f64::NAN, false),
+            ("derived_infinite", None, -1.0, false),
+            ("derived_negative", None, -2.0, false),
+            ("derived_zero", None, f64::INFINITY, false),
+            ("finite_g_overflow_stiffness", Some(f64::MAX), 0.3, false),
+        ] {
+            for mode in [PanelZoneMode::Model, PanelZoneMode::None] {
+                let mut model = steel_panel_model();
+                let panels = apply_rigid_zones_and_panels(&mut model).unwrap();
+                assert_eq!(panels.len(), 1);
+                model.materials[0].shear = shear;
+                model.materials[0].poisson = poisson;
+                model.panel_zone = mode;
+                let result =
+                    prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None);
+                println!(
+                    "{label}/{mode:?}: {:?}",
+                    result
+                        .as_ref()
+                        .map(|r| r.panels.len())
+                        .map_err(|e| e.to_string())
+                );
+                if mode == PanelZoneMode::None {
+                    assert!(result.unwrap().panels.is_empty(), "{label}");
+                    assert!(!model
+                        .elements
+                        .iter()
+                        .any(|e| e.kind == ElementKind::PanelZone));
+                } else if valid {
+                    assert_eq!(result.unwrap().panels.len(), 1, "{label}");
+                } else {
+                    let error = result.err().unwrap().to_string();
+                    assert!(
+                        error.contains("接合部 ID 0")
+                            && error.contains("柱 ID 0")
+                            && error.contains("せん断剛性"),
+                        "{label}: {error}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
