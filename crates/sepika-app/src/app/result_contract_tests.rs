@@ -154,6 +154,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-attached-primary-support-loads", Some(24), "旧契約"),
         ("old-before-wall-side-column-contract", Some(26), "旧契約"),
         ("old-unconverged-time-history", Some(27), "旧契約"),
+        ("old-panel-reference-column", Some(28), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -198,7 +199,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
 #[test]
 fn ovika_old_analysis_is_unavailable_until_explicit_reanalysis() {
     let app = calculated();
-    for version in [5, 6, 7, 20, 22, 24, 26] {
+    for version in [5, 6, 7, 20, 22, 24, 26, 28] {
         let (mut loaded, path) = restore(
             &app,
             Some(version),
@@ -303,6 +304,7 @@ fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_
         ("design-old-rc-q0", Some(11)),
         ("design-old-secondary-load-ownership", Some(16)),
         ("design-old-before-wall-side-column-contract", Some(18)),
+        ("design-old-panel-reference-column", Some(19)),
         ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
     ] {
         let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);

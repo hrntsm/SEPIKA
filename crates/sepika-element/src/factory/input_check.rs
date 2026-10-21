@@ -241,7 +241,8 @@ fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
 ///
 /// 壁上下の剛梁は弾性剛性・形状・質量に必要な入力だけを検査する。
 ///
-/// 弾性としてモデル化することが仕様である要素（`Shell` / `PanelZone` / `NodalSpring`、
+/// 仕口パネルは採用柱の解決に失敗した場合も診断する。
+/// 弾性としてモデル化することが仕様である要素（`Shell` / `NodalSpring`、
 /// および特性を専用の属性で持つ `Isolator` / `Damper` / `Brace`）は対象外。
 pub fn nonlinear_input_issues(model: &Model) -> Vec<String> {
     nonlinear_input_issues_for_kind(model, sepika_core::model::AnalysisKind::Incremental)
@@ -282,6 +283,11 @@ fn nonlinear_input_issues_with_basis(
             continue;
         }
         let issue = match elem.kind {
+            ElementKind::PanelZone => elem.nodes.first().and_then(|node| {
+                sepika_core::panel_zone::resolve_panel_joint(model, *node, &model.elements)
+                    .err()
+                    .map(|reason| reason.to_string())
+            }),
             ElementKind::Wall => crate::wall::wall_element::WallElement::wall_shear_capacity_issue(
                 elem, model, basis,
             )

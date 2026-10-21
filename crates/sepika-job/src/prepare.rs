@@ -30,7 +30,7 @@ pub struct PrepareReport {
 /// いずれも冪等で、呼び出し順にも依存しない。
 pub fn apply_rigid_zones_and_panels(
     model: &mut Model,
-) -> Vec<sepika_element::springs::panel_gen::GeneratedPanel> {
+) -> Result<Vec<sepika_element::springs::panel_gen::GeneratedPanel>, String> {
     let rule = sepika_element::frame::beam::RigidZoneRule {
         consider_walls: model.stress_cfg.rigid_zone_consider_walls,
     };
@@ -142,15 +142,18 @@ fn prepare_work_model(
                 node.id,
                 adjacency.elements_at(model, node.id),
             ) {
+                Err(sepika_core::panel_zone::PanelJointError::BeamInapplicable(reason)) => {
+                    panel_notices.push(format!("{reason}。パネルせん断変形をモデル化できません"));
+                }
                 Err(reason) => {
-                    panel_notices.push(format!("{reason}。パネルせん断変形をモデル化できません"))
+                    return Err(JobError::InvalidInput(reason.to_string()));
                 }
                 Ok(Some(_)) => {}
                 Ok(None) => {}
             }
         }
     }
-    let panels = apply_rigid_zones_and_panels(model);
+    let panels = apply_rigid_zones_and_panels(model).map_err(JobError::InvalidInput)?;
     let gravity = compute_gravity_auto_load_cases(model)?;
     let tip_loads = compute_tip_loads(model)?;
     apply_auto_load_cases(model, &gravity.cases);
@@ -285,6 +288,93 @@ mod tests {
         SlabPlate,
     };
     use sepika_core::section_shape::SectionShape;
+
+    #[test]
+    fn panel_585_invalid_lower_column_stops_public_preparation() {
+        use sepika_core::ids::MaterialId;
+        use sepika_core::model::{FrameSectionUse, Material, MaterialCategory, PanelZoneMode};
+        let mut model = Model {
+            panel_zone: PanelZoneMode::Model,
+            ..Default::default()
+        };
+        for (i, coord) in [
+            [0.0, 0.0, 3000.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 6000.0],
+            [6000.0, 0.0, 3000.0],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut n = node(i as u32, 0.0, 0.0);
+            n.coord = coord;
+            model.nodes.push(n);
+        }
+        model.materials.push(Material {
+            id: MaterialId(0),
+            name: "SN400B".into(),
+            category: MaterialCategory::Steel,
+            young: 205_000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            shear: None,
+            fc: None,
+            fy: Some(235.0),
+            strength_factor: None,
+            concrete_class: Default::default(),
+        });
+        let shape = SectionShape::SteelH {
+            height: 400.0,
+            width: 400.0,
+            web_thick: 13.0,
+            flange_thick: 21.0,
+            root_r: Some(0.0),
+        };
+        for (i, usage) in [
+            FrameSectionUse::Column,
+            FrameSectionUse::Column,
+            FrameSectionUse::Girder,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut section = shape.to_section(SectionId(i as u32), format!("S{i}"));
+            section.frame_use = Some(usage);
+            section.material = Some(MaterialId(0));
+            model.sections.push(section);
+        }
+        for (i, nodes) in [[1, 0], [0, 2], [0, 3]].into_iter().enumerate() {
+            let mut element = beam(i as u32, nodes[0], nodes[1]);
+            element.section = Some(SectionId(i as u32));
+            model.elements.push(element);
+        }
+        model.sections[0].material = None;
+        let reason =
+            sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
+                .unwrap_err()
+                .to_string();
+        assert!(reason.contains("接合部 ID 0"));
+        assert!(reason.contains("柱 ID 0"));
+        assert_eq!(
+            apply_rigid_zones_and_panels(&mut model.clone()).unwrap_err(),
+            reason
+        );
+        for initialize in [false, true] {
+            let error = prepare_model(
+                &mut model.clone(),
+                &AnalysisSettings::default(),
+                None,
+                initialize,
+            )
+            .err()
+            .unwrap();
+            assert!(error.to_string().contains(&reason), "{error}");
+        }
+        let error = prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains(&reason), "{error}");
+    }
 
     #[test]
     fn lip_channel_geometry_stops_prepare_before_mutating_input() {
@@ -705,8 +795,8 @@ mod tests {
 
         let mut without_wall = base_frame();
 
-        apply_rigid_zones_and_panels(&mut with_wall);
-        apply_rigid_zones_and_panels(&mut without_wall);
+        apply_rigid_zones_and_panels(&mut with_wall).unwrap();
+        apply_rigid_zones_and_panels(&mut without_wall).unwrap();
 
         // 壁の側柱（elem 0、Y=0 面）は、壁を考慮すると剛域長が変わる。
         let with_wall_col0 = with_wall.elements[0].rigid_zone;
@@ -807,7 +897,8 @@ mod tests {
             }
             let expected =
                 sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
-                    .unwrap_err();
+                    .unwrap_err()
+                    .to_string();
             let report =
                 prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
             assert!(report.panels.is_empty());

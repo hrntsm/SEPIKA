@@ -2327,6 +2327,42 @@ fn test_model_issues_errors_cft_shell_and_wall_references() {
         model.sections[0].shape = Some(cft_shape());
         model.sections[0].frame_use = Some(FrameSectionUse::Column);
         model.materials[0].fc = Some(24.0);
+        if kind == ElementKind::PanelZone {
+            let mut far = model.nodes[0].clone();
+            far.id = NodeId(2);
+            far.coord = [0.0, 0.0, -1000.0];
+            model.nodes.push(far);
+            for usage in [FrameSectionUse::Column, FrameSectionUse::Girder] {
+                let id = SectionId(model.sections.len() as u32);
+                let mut section = sepika_core::section_shape::SectionShape::SteelH {
+                    height: 400.0,
+                    width: 200.0,
+                    web_thick: 8.0,
+                    flange_thick: 13.0,
+                    root_r: Some(0.0),
+                }
+                .to_section(id, "パネル参照部材".into());
+                section.frame_use = Some(usage);
+                section.material = Some(MaterialId(0));
+                model.sections.push(section);
+                let mut member = model.elements[0].clone();
+                member.id = ElemId(model.elements.len() as u32);
+                member.kind = ElementKind::Beam;
+                member.section = Some(id);
+                if usage == FrameSectionUse::Column {
+                    member.nodes = smallvec::smallvec![NodeId(2), NodeId(0)];
+                    member.local_axis.ref_vector = [1.0, 0.0, 0.0];
+                }
+                model.elements.push(member);
+            }
+            assert!(sepika_core::panel_zone::resolve_explicit_panel_joint(
+                &model,
+                NodeId(0),
+                &model.elements
+            )
+            .unwrap()
+            .is_some());
+        }
         if kind == ElementKind::Damper {
             model.load_cfg = Some(sepika_core::model::LoadCfg {
                 dampers: vec![sepika_core::model::DamperSpec {

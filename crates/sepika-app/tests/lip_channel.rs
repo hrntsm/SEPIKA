@@ -4,6 +4,7 @@ use sepika_design_jp::{CheckOutcome, DesignCheck, DesignCtx, MemberForcesAt, Ste
 
 fn lip_model() -> Model {
     let mut model = sample::portal_frame();
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
     for sec in &mut model.sections {
         let shape = SectionShape::SteelLipChannel {
             height: 150.0,

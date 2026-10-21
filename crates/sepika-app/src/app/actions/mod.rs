@@ -243,11 +243,12 @@ impl App {
     /// 解析前に剛域を自動算定してモデルへ反映する（解析前に1回適用する）。`sepika_element::frame::beam::apply_auto_rigid_zones`
     /// は `ZoneSource::Auto` の端のみ更新し `Manual` 端を保護するため、
     /// 各解析エントリの先頭で毎回呼んでも冪等で安全。
-    fn apply_rigid_zones_for_analysis(&mut self) {
+    fn apply_rigid_zones_for_analysis(&mut self) -> Result<(), String> {
         // 剛域・仕口パネルの算定規則は MCP サーバと共有する
         // （`sepika_job::prepare`。前処理が食い違うと同じモデルでも剛性が変わる）。
         self.core.scoped.generated_panels =
-            sepika_job::prepare::apply_rigid_zones_and_panels(&mut self.core.model);
+            sepika_job::prepare::apply_rigid_zones_and_panels(&mut self.core.model)?;
+        Ok(())
     }
 
     /// `analysis_cfg.threads` を並列度設定（プロセスグローバル）へ反映する。

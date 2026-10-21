@@ -3515,7 +3515,9 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
     use sepika_design_jp::secondary::holding_capacity::MemberRank;
 
     let mut app = App::default();
-    app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
+    let mut model = with_explicit_pushover_gravity(crate::sample::portal_frame());
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    app.load_model(model);
     app.generate_stories_action();
     app.run_seismic(SeismicDir::X);
     app.core.analysis_cfg.push_steps = 10;
@@ -3537,11 +3539,8 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
     select_holding_points(&mut app);
     app.core.design_rank_auto = true;
     app.core.design_rank = MemberRank::FB;
-    assert!(app
-        .compute_holding_capacity()
-        .err()
-        .unwrap()
-        .contains("確定評価データが不足"));
+    let reason = app.compute_holding_capacity().err().unwrap();
+    assert!(reason.contains("確定評価データが不足"), "{reason}");
 
     // 自動判定 OFF では全層が選択値の明示運用のため、フォールバック記録は空。
     app.core.design_rank_auto = false;
@@ -6758,19 +6757,31 @@ fn known_ai_failure_is_cleared_even_when_gravity_computation_fails() {
                 ..Default::default()
             },
         );
+        for element in app
+            .core
+            .model
+            .elements
+            .iter_mut()
+            .filter(|e| e.kind.is_primary_frame_support() && e.section.is_none())
+        {
+            element.section = Some(sepika_core::ids::SectionId(1));
+        }
         assert!(sepika_job::auto_loads::compute_gravity_auto_load_cases(&app.core.model).is_err());
         if preparation_only {
             app.run_preparation();
         } else {
             app.sync_auto_load_cases_action();
         }
-        assert!(app
-            .core
-            .scoped
-            .last_error
-            .as_deref()
-            .unwrap()
-            .contains("短辺方向"));
+        assert!(
+            app.core
+                .scoped
+                .last_error
+                .as_deref()
+                .unwrap()
+                .contains("短辺方向"),
+            "{:?}",
+            app.core.scoped.last_error
+        );
         for id in [ex, ey] {
             let case = &app.core.model.load_cases[id.index()];
             assert!(case
@@ -11706,6 +11717,7 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
         steel_flange_thick: 12.0,
     };
     let mut model = crate::sample::portal_frame();
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
     model.sections[0] = sepika_core::model::Section {
         material: Some(MaterialId(1)),
         steel_material: Some(MaterialId(0)),
@@ -11866,13 +11878,16 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
     app.load_model(model);
     app.run_preparation();
     assert!(app.core.scoped.preparation.is_none());
-    assert!(app
-        .core
-        .scoped
-        .last_error
-        .as_ref()
-        .unwrap()
-        .contains("未割当"));
+    assert!(
+        app.core
+            .scoped
+            .last_error
+            .as_ref()
+            .unwrap()
+            .contains("未割当"),
+        "{:?}",
+        app.core.scoped.last_error
+    );
 }
 
 mod seismic_freshness_fixture {

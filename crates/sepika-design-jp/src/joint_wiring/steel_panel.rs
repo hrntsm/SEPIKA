@@ -16,17 +16,6 @@ pub(super) fn check_s_panel(
     panel_moment: Option<[f64; 2]>,
     out: &mut Vec<(NodeId, String, CheckOutcome)>,
 ) {
-    if model
-        .elements
-        .iter()
-        .filter(|e| {
-            e.nodes.iter().take(2).any(|n| *n == nid)
-                && sepika_core::panel_zone::member_orientation(model, e).is_some()
-        })
-        .any(|e| !sepika_core::structure_kind::member_structure_kind(model, e).is_steel_like())
-    {
-        return;
-    }
     let project =
         |member: &MemberInfo<'_>, values: &[f64; 6], start: usize, direction: [f64; 3]| {
             let coords = member
@@ -56,7 +45,7 @@ pub(super) fn check_s_panel(
         let members = model.elements.iter().filter(|e| {
             e.nodes.contains(&nid)
                 && (sepika_core::panel_zone::member_orientation(model, e)
-                    == Some(sepika_core::panel_zone::MemberOrientation::Column)
+                    != Some(sepika_core::panel_zone::MemberOrientation::Beam)
                     || plane.beams.iter().any(|p| p.element == e.id))
         });
         let label = if planes.len() == 1 {
@@ -68,10 +57,27 @@ pub(super) fn check_s_panel(
             Ok(Some(joint)) => joint,
             Ok(None) => continue,
             Err(reason) => {
-                out.push((nid, label, CheckOutcome::Skipped { reason }));
+                out.push((
+                    nid,
+                    label,
+                    CheckOutcome::Skipped {
+                        reason: reason.to_string(),
+                    },
+                ));
                 continue;
             }
         };
+        if model
+            .elements
+            .iter()
+            .filter(|e| {
+                e.nodes.iter().take(2).any(|n| *n == nid)
+                    && sepika_core::panel_zone::member_orientation(model, e).is_some()
+            })
+            .any(|e| !sepika_core::structure_kind::member_structure_kind(model, e).is_steel_like())
+        {
+            return;
+        }
         if let Err(reason) = plane.standard_applicability(nid) {
             out.push((nid, label, CheckOutcome::Skipped { reason }));
             continue;
@@ -135,9 +141,29 @@ pub(super) fn check_s_panel(
             ));
             continue;
         }
-        let fy = crate::steel::steel_f_value_prefix(&col.mat.name, 40.0)
-            .or(col.mat.fy)
-            .unwrap_or(235.0);
+        let fy = if joint.geometry.filled {
+            let Some(fy) = col
+                .steel_mat
+                .and_then(|mat| sepika_core::material_grade::cft_steel_f_value(mat, 40.0))
+            else {
+                out.push((
+                    nid,
+                    label,
+                    CheckOutcome::Skipped {
+                        reason: format!(
+                            "接合部 ID {}: 採用柱 ID {} の鋼管専用材料・基準強度Fが未解決",
+                            nid.0, joint.column.0
+                        ),
+                    },
+                ));
+                continue;
+            };
+            fy
+        } else {
+            crate::steel::steel_f_value_prefix(&col.mat.name, 40.0)
+                .or(col.mat.fy)
+                .unwrap_or(235.0)
+        };
         let n_axial = col
             .end_forces(nid)
             .map(|f| (-f[0]).max(0.0) / (fy * col.sec.area.max(1e-9)))

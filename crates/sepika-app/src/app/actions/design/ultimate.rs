@@ -7,7 +7,7 @@ impl App {
     ) -> Result<Vec<sepika_design_jp::ultimate::UltimateCheck>, String> {
         use sepika_core::section_shape::SectionShape;
 
-        self.apply_rigid_zones_for_analysis();
+        self.apply_rigid_zones_for_analysis()?;
 
         let demand = self.ultimate_demand_by_elem()?;
 
@@ -210,7 +210,7 @@ impl App {
     pub fn compute_cft_ultimate_checks(
         &mut self,
     ) -> Result<Vec<sepika_design_jp::ultimate::CftUltimateCheck>, String> {
-        self.apply_rigid_zones_for_analysis();
+        self.apply_rigid_zones_for_analysis()?;
         let axial: Vec<(ElemId, f64)> = self
             .ultimate_demand_by_elem()?
             .into_iter()

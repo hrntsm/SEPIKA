@@ -39,7 +39,7 @@ use sepika_core::model::{
 };
 use sepika_core::panel_zone::{
     is_horizontal_or_vertical_member, member_orientation, panel_half_extent, resolve_panel_joint,
-    PanelHalfExtent,
+    PanelHalfExtent, PanelJointError,
 };
 
 /// 1 つの接合部に生成するパネルの諸元。
@@ -103,19 +103,29 @@ fn panel_at(
     model: &Model,
     adjacency: &NodeAdjacency,
     node: NodeId,
-) -> Option<(GeneratedPanel, Vec<NodeId>)> {
-    let joint = resolve_panel_joint(model, node, adjacency.elements_at(model, node)).ok()??;
+) -> Result<Option<(GeneratedPanel, Vec<NodeId>)>, String> {
+    let joint = match resolve_panel_joint(model, node, adjacency.elements_at(model, node)) {
+        Ok(joint) => joint,
+        Err(PanelJointError::BeamInapplicable(_)) => return Ok(None),
+        Err(reason) => return Err(reason.to_string()),
+    };
+    let Some(joint) = joint else {
+        return Ok(None);
+    };
     if joint.has_filled_column {
-        return None;
+        return Ok(None);
     }
-    let column = model.elements.get(joint.column.index())?;
+    let column = &model.elements[joint.column.index()];
     let shear_modulus = model
         .element_material(column)
         .map(|m| m.shear_modulus())
         .unwrap_or(0.0);
     let k_panel = shear_modulus * joint.ve;
     if k_panel <= 0.0 || !k_panel.is_finite() {
-        return None;
+        return Err(format!(
+            "接合部 ID {} のパネル未算定: 柱 ID {} のせん断剛性は有限の正値が必要です",
+            node.0, joint.column.0
+        ));
     }
 
     let connected: Vec<NodeId> = adjacency
@@ -126,7 +136,7 @@ fn panel_at(
         })
         .collect();
 
-    Some((
+    Ok(Some((
         GeneratedPanel {
             node,
             dc: joint.geometry.dc,
@@ -136,7 +146,7 @@ fn panel_at(
             k_panel,
         },
         connected,
-    ))
+    )))
 }
 
 /// 要素 `e` の端点に `node` が現れるなら、その反対端の節点を返す。
@@ -197,15 +207,21 @@ fn apply_panel_offsets(model: &mut Model, adjacency: &NodeAdjacency, panels: &[G
 /// `Model::panel_zone` が [`PanelZoneMode::None`] のときは既存のパネルを取り除く
 /// だけで、新しいパネルは生成しない。
 ///
-/// 戻り値は生成したパネルの諸元（節点 index の昇順）。
-pub fn apply_auto_panel_zones(model: &mut Model) -> Vec<GeneratedPanel> {
+/// 戻り値は生成したパネルの諸元（節点 index の昇順）。採用柱の解決失敗は接合部 ID と理由付きエラー。
+pub fn apply_auto_panel_zones(model: &mut Model) -> Result<Vec<GeneratedPanel>, String> {
+    if model.panel_zone == PanelZoneMode::Model {
+        let adjacency = NodeAdjacency::build(model);
+        for node in &model.nodes {
+            panel_at(model, &adjacency, node.id)?;
+        }
+    }
     remove_existing_panels(model);
     if model.panel_zone != PanelZoneMode::Model {
         for e in &mut model.elements {
             e.rigid_zone.panel_offset_i = 0.0;
             e.rigid_zone.panel_offset_j = 0.0;
         }
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let adjacency = NodeAdjacency::build(model);
 
@@ -213,7 +229,7 @@ pub fn apply_auto_panel_zones(model: &mut Model) -> Vec<GeneratedPanel> {
     let mut new_elements = Vec::new();
     let node_ids: Vec<NodeId> = model.nodes.iter().map(|n| n.id).collect();
     for node in node_ids {
-        let Some((panel, connected)) = panel_at(model, &adjacency, node) else {
+        let Some((panel, connected)) = panel_at(model, &adjacency, node)? else {
             continue;
         };
         let mut nodes: smallvec::SmallVec<[NodeId; 8]> = smallvec::smallvec![node];
@@ -241,7 +257,7 @@ pub fn apply_auto_panel_zones(model: &mut Model) -> Vec<GeneratedPanel> {
     }
 
     apply_panel_offsets(model, &adjacency, &generated);
-    generated
+    Ok(generated)
 }
 
 #[cfg(test)]
@@ -384,7 +400,7 @@ mod tests {
     #[test]
     fn test_generates_panel_at_steel_joint() {
         let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
-        let panels = apply_auto_panel_zones(&mut model);
+        let panels = apply_auto_panel_zones(&mut model).unwrap();
 
         assert_eq!(panels.len(), 1);
         assert_eq!(panels[0].node, NodeId(0));
@@ -408,9 +424,9 @@ mod tests {
     #[test]
     fn test_is_idempotent() {
         let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
-        apply_auto_panel_zones(&mut model);
+        apply_auto_panel_zones(&mut model).unwrap();
         let first = model.elements.clone();
-        apply_auto_panel_zones(&mut model);
+        apply_auto_panel_zones(&mut model).unwrap();
         assert_eq!(model.elements.len(), first.len());
         for (a, b) in model.elements.iter().zip(first.iter()) {
             assert_eq!(a.id, b.id);
@@ -424,11 +440,11 @@ mod tests {
     #[test]
     fn test_disabled_mode_removes_panels() {
         let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
-        apply_auto_panel_zones(&mut model);
+        apply_auto_panel_zones(&mut model).unwrap();
         assert_eq!(model.elements.len(), 3);
 
         model.panel_zone = PanelZoneMode::None;
-        let panels = apply_auto_panel_zones(&mut model);
+        let panels = apply_auto_panel_zones(&mut model).unwrap();
         assert!(panels.is_empty());
         assert_eq!(model.elements.len(), 2);
         assert!(!model
@@ -443,21 +459,25 @@ mod tests {
     #[test]
     fn test_regeneration_keeps_id_references_consistent() {
         let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
-        apply_auto_panel_zones(&mut model);
+        apply_auto_panel_zones(&mut model).unwrap();
         assert_eq!(model.elements.len(), 3, "梁・柱・パネル");
 
-        let mut added = member(3, 1, 2, 0);
+        let mut far = model.nodes[1].clone();
+        far.id = NodeId(3);
+        far.coord[1] = 4000.0;
+        model.nodes.push(far);
+        let mut added = member(3, 1, 3, 0);
         added.id = ElemId(3);
         model.elements.push(added);
         model.girder_groups = vec![vec![ElemId(3)]];
 
-        apply_auto_panel_zones(&mut model);
+        apply_auto_panel_zones(&mut model).unwrap();
         model.validate().expect("配列添字 == ElemId が保たれる");
 
         let added_idx = model
             .elements
             .iter()
-            .position(|e| e.nodes.as_slice() == [NodeId(1), NodeId(2)])
+            .position(|e| e.nodes.as_slice() == [NodeId(1), NodeId(3)])
             .expect("追加した部材");
         assert_eq!(model.elements[added_idx].id.index(), added_idx);
         assert_eq!(model.girder_groups[0][0], model.elements[added_idx].id);
@@ -489,7 +509,8 @@ mod tests {
     fn test_rc_column_gets_no_panel() {
         let rc = rc_shape(700.0, 700.0);
         let mut model = l_frame(rc);
-        let panels = apply_auto_panel_zones(&mut model);
+        model.sections[1].material = Some(MaterialId(1));
+        let panels = apply_auto_panel_zones(&mut model).unwrap();
         assert!(panels.is_empty(), "RC 柱は対象外");
         assert_eq!(model.elements.len(), 2);
     }
@@ -512,7 +533,7 @@ mod tests {
             },
         ] {
             let mut model = l_frame(shape);
-            let panels = apply_auto_panel_zones(&mut model);
+            let panels = apply_auto_panel_zones(&mut model).unwrap();
             assert!(panels.is_empty(), "CFT 柱はモデル化の対象外");
             assert_eq!(model.elements.len(), 2, "パネル要素は生成されない");
 
@@ -538,7 +559,7 @@ mod tests {
             },
         ] {
             let mut model = l_frame(shape);
-            let panels = apply_auto_panel_zones(&mut model);
+            let panels = apply_auto_panel_zones(&mut model).unwrap();
             assert_eq!(panels.len(), 1, "S 造の鋼管柱はモデル化の対象");
         }
     }
@@ -553,7 +574,7 @@ mod tests {
             700.0,
         );
         model.sections[0].material = Some(MaterialId(1));
-        let panels = apply_auto_panel_zones(&mut model);
+        let panels = apply_auto_panel_zones(&mut model).unwrap();
         assert!(panels.is_empty(), "RC 梁の接合部は対象外");
         assert_eq!(model.elements.len(), 2, "パネル要素は生成されない");
     }
@@ -575,7 +596,7 @@ mod tests {
             .push(section_with_mat(2, rc_shape(400.0, 700.0), 700.0, 1));
         model.elements.push(member(2, 0, 3, 2));
 
-        let panels = apply_auto_panel_zones(&mut model);
+        let panels = apply_auto_panel_zones(&mut model).unwrap();
         assert!(panels.is_empty(), "RC 梁が 1 本でも混じれば対象外");
     }
 
@@ -584,7 +605,7 @@ mod tests {
     #[test]
     fn test_offsets_are_written_into_rigid_zones() {
         let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
-        apply_auto_panel_zones(&mut model);
+        apply_auto_panel_zones(&mut model).unwrap();
 
         let beam = &model.elements[0].rigid_zone;
         assert!((beam.panel_offset_i - 200.0).abs() < 1e-9);
@@ -616,7 +637,7 @@ mod tests {
         model.sections.push(brace_section);
         model.elements.push(member(2, 0, 3, 2));
 
-        apply_auto_panel_zones(&mut model);
+        apply_auto_panel_zones(&mut model).unwrap();
 
         let diagonal = model
             .elements
@@ -645,7 +666,7 @@ mod tests {
         model.elements[1].rigid_zone.length_j = 10.0;
         model.elements[1].rigid_zone.source_j = sepika_core::model::ZoneSource::Manual;
 
-        apply_auto_panel_zones(&mut model);
+        apply_auto_panel_zones(&mut model).unwrap();
         let beam = &model.elements[0].rigid_zone;
         assert_eq!(beam.length_i, 500.0, "手動指定はそのまま残る");
         assert!((beam.panel_offset_i - 200.0).abs() < 1e-9);
@@ -667,7 +688,7 @@ mod tests {
     #[test]
     fn test_offsets_survive_rigid_zone_recomputation() {
         let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
-        apply_auto_panel_zones(&mut model);
+        apply_auto_panel_zones(&mut model).unwrap();
         let before: Vec<_> = model
             .elements
             .iter()
@@ -692,13 +713,13 @@ mod tests {
     #[test]
     fn test_offset_write_is_idempotent() {
         let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
-        apply_auto_panel_zones(&mut model);
+        apply_auto_panel_zones(&mut model).unwrap();
         let first: Vec<_> = model
             .elements
             .iter()
             .map(|e| (e.rigid_zone.panel_offset_i, e.rigid_zone.panel_offset_j))
             .collect();
-        apply_auto_panel_zones(&mut model);
+        apply_auto_panel_zones(&mut model).unwrap();
         let second: Vec<_> = model
             .elements
             .iter()
@@ -708,7 +729,7 @@ mod tests {
         assert!(first.iter().any(|(i, j)| *i > 0.0 || *j > 0.0));
 
         model.panel_zone = PanelZoneMode::None;
-        apply_auto_panel_zones(&mut model);
+        apply_auto_panel_zones(&mut model).unwrap();
         assert!(
             model
                 .elements
@@ -718,10 +739,8 @@ mod tests {
         );
     }
 
-    /// 柱が複数取り付く接合部では、実効体積 Ve が最小になる柱の諸元を採る。
-    /// 要素の並び順を入れ替えても結果が変わらないことを併せて確認する。
     #[test]
-    fn test_smallest_ve_column_is_used() {
+    fn lower_column_is_used_regardless_of_element_order() {
         let thin = h_shape(400.0, 400.0, 9.0, 21.0);
         let thick = h_shape(400.0, 400.0, 22.0, 21.0);
 
@@ -752,13 +771,13 @@ mod tests {
 
         let mut a = build(true);
         let mut b = build(false);
-        let pa = apply_auto_panel_zones(&mut a);
-        let pb = apply_auto_panel_zones(&mut b);
+        let pa = apply_auto_panel_zones(&mut a).unwrap();
+        let pb = apply_auto_panel_zones(&mut b).unwrap();
         assert_eq!(pa.len(), 1);
         assert_eq!(pb.len(), 1);
         assert!(
-            (pa[0].tp - 9.0).abs() < 1e-9,
-            "Ve 最小（ウェブ薄）の柱を採る: tp={}",
+            (pa[0].tp - 22.0).abs() < 1e-9,
+            "下側の柱を採る: tp={}",
             pa[0].tp
         );
         assert_eq!(pa[0], pb[0], "要素の並び順に依存しない");
@@ -770,7 +789,7 @@ mod tests {
         let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
         model.elements.remove(0);
         model.elements[0].id = ElemId(0);
-        let panels = apply_auto_panel_zones(&mut model);
+        let panels = apply_auto_panel_zones(&mut model).unwrap();
         assert!(panels.is_empty());
     }
     #[test]
@@ -778,7 +797,7 @@ mod tests {
         let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
         model.sections[0].depth = 650.0;
         model.sections[0].shape = Some(h_shape(600.0, 200.0, 11.0, 20.0));
-        let panels = apply_auto_panel_zones(&mut model);
+        let panels = apply_auto_panel_zones(&mut model).unwrap();
         assert_eq!(panels[0].db, 580.0);
         assert_eq!(panels[0].ve, 2_857_660.0);
         let data = model.elements.last().unwrap().clone();
@@ -790,11 +809,13 @@ mod tests {
             outer_dia: 600.0,
             thick: 20.0,
         });
-        let reason = resolve_panel_joint(&model, NodeId(0), &model.elements).unwrap_err();
+        let reason = resolve_panel_joint(&model, NodeId(0), &model.elements)
+            .unwrap_err()
+            .to_string();
         let manual = crate::springs::panel::PanelZone::new(&data, &model);
         assert_eq!(manual.resolution_error, Some(reason.clone()));
         assert!(model.validate().unwrap_err().to_string().contains(&reason));
-        assert!(apply_auto_panel_zones(&mut model).is_empty());
+        assert!(apply_auto_panel_zones(&mut model).unwrap().is_empty());
     }
     #[test]
     fn panel_504_built_h_beam_generates_575_mm_depth() {
@@ -808,7 +829,7 @@ mod tests {
             lower_thick: 30.0,
             web_thick: 12.0,
         });
-        let panels = apply_auto_panel_zones(&mut model);
+        let panels = apply_auto_panel_zones(&mut model).unwrap();
         assert_eq!(panels[0].db, 575.0);
         assert_eq!(panels[0].ve, 2_833_025.0);
         let manual = crate::springs::panel::PanelZone::new(model.elements.last().unwrap(), &model);
@@ -817,9 +838,9 @@ mod tests {
         assert!((manual.k_panel - 223_373_125_000.0).abs() < 1.0);
     }
     #[test]
-    fn panel_505_old_panel_is_rejected_and_regeneration_removes_offsets() {
+    fn panel_505_old_panel_is_rejected_and_regeneration_removes_unsupported_panel() {
         let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
-        apply_auto_panel_zones(&mut model);
+        apply_auto_panel_zones(&mut model).unwrap();
         let old = model.elements.last().unwrap().clone();
         let mut other = model.sections[0].clone();
         other.id = SectionId(2);
@@ -831,7 +852,9 @@ mod tests {
         model.nodes.push(far);
         let id = model.elements.len() as u32;
         model.elements.push(member(id, 3, 0, 2));
-        let reason = resolve_panel_joint(&model, NodeId(0), &model.elements).unwrap_err();
+        let reason = resolve_panel_joint(&model, NodeId(0), &model.elements)
+            .unwrap_err()
+            .to_string();
         assert!(reason.contains("上位置差=50 mm"));
         assert!(model.validate().unwrap_err().to_string().contains(&reason));
         for panel in [
@@ -840,7 +863,7 @@ mod tests {
         ] {
             assert_eq!(panel.resolution_error, Some(reason.clone()));
         }
-        assert!(apply_auto_panel_zones(&mut model).is_empty());
+        assert!(apply_auto_panel_zones(&mut model).unwrap().is_empty());
         assert!(!model
             .elements
             .iter()
@@ -850,5 +873,64 @@ mod tests {
             .iter()
             .all(|e| e.rigid_zone.panel_offset_i == 0.0 && e.rigid_zone.panel_offset_j == 0.0));
         model.validate().unwrap();
+    }
+    #[test]
+    fn invalid_lower_column_fails_public_generation_without_changing_existing_panels() {
+        let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
+        let mut upper_node = model.nodes[2].clone();
+        upper_node.id = NodeId(3);
+        upper_node.coord[2] = 6000.0;
+        model.nodes.push(upper_node);
+        let mut upper_section = model.sections[1].clone();
+        upper_section.id = SectionId(2);
+        model.sections.push(upper_section);
+        model.elements.push(member(2, 0, 3, 2));
+        apply_auto_panel_zones(&mut model).unwrap();
+        for missing_section in [false, true] {
+            let mut invalid = model.clone();
+            if missing_section {
+                invalid.elements[1].section = None;
+            } else {
+                invalid.sections[1].material = None;
+            }
+            let before = format!("{invalid:?}");
+            let reason = apply_auto_panel_zones(&mut invalid).unwrap_err();
+            assert!(reason.contains("接合部 ID 0"), "{reason}");
+            assert!(reason.contains("ID 1"), "{reason}");
+            assert_eq!(format!("{invalid:?}"), before);
+        }
+    }
+    #[test]
+    fn beam_inapplicability_is_omitted_but_never_hides_invalid_lower_column() {
+        for shape in [
+            None,
+            Some(h_shape(0.0, 200.0, 11.0, 20.0)),
+            Some(SectionShape::SteelPipe {
+                outer_dia: 600.0,
+                thick: 20.0,
+            }),
+        ] {
+            let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
+            let mut upper_node = model.nodes[2].clone();
+            upper_node.id = NodeId(3);
+            upper_node.coord[2] = 6000.0;
+            model.nodes.push(upper_node);
+            let mut upper_section = model.sections[1].clone();
+            upper_section.id = SectionId(2);
+            model.sections.push(upper_section);
+            model.elements.push(member(2, 0, 3, 2));
+            model.sections[0].shape = shape;
+            assert!(apply_auto_panel_zones(&mut model).unwrap().is_empty());
+            assert!(!model
+                .elements
+                .iter()
+                .any(|e| e.kind == ElementKind::PanelZone));
+            model.sections[1].material = None;
+            let reason = apply_auto_panel_zones(&mut model).unwrap_err();
+            assert!(
+                reason.contains("接合部 ID 0") && reason.contains("柱 ID 1"),
+                "{reason}"
+            );
+        }
     }
 }

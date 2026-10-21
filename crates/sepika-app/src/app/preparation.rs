@@ -428,6 +428,7 @@ impl App {
         let previous_error = self.core.scoped.last_error.take();
         self.sync_auto_load_cases_action();
         if self.core.scoped.last_error.is_some() {
+            self.run_diagnostics();
             return;
         }
         self.core.scoped.last_error = previous_error;

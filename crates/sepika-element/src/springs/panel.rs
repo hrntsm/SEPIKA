@@ -15,7 +15,7 @@ use crate::behavior::{Ctx, ElementBehavior, LocalMat, LocalVec, MassOption};
 use sepika_core::dof::DofMap;
 use sepika_core::ids::NodeId;
 use sepika_core::model::{ElementData, Model};
-use sepika_core::panel_zone::{resolve_panel_joint, PanelGeometry};
+use sepika_core::panel_zone::{resolve_explicit_panel_joint, PanelGeometry};
 use sepika_material::uniaxial::{Bilinear, UniaxialMaterial};
 use smallvec::SmallVec;
 
@@ -101,28 +101,43 @@ struct ResolvedPanel {
 }
 
 /// 接合部節点 `node` に取り付く柱・梁からパネル諸元を解決する。
-fn resolve(model: &Model, node: NodeId) -> Option<ResolvedPanel> {
-    let joint = resolve_panel_joint(model, node, &model.elements).ok()??;
+fn resolve(model: &Model, node: NodeId) -> Result<Option<ResolvedPanel>, String> {
+    let Some(joint) = resolve_explicit_panel_joint(model, node, &model.elements)
+        .map_err(|reason| reason.to_string())?
+    else {
+        return Ok(None);
+    };
     if joint.has_filled_column {
-        return None;
+        return Ok(None);
     }
-    let col_elem = model.elements.get(joint.column.index())?;
-    let mat = model.element_material(col_elem)?;
-    let sec = col_elem
-        .section
-        .and_then(|sid| model.sections.get(sid.index()))?;
+    let col_elem = &model.elements[joint.column.index()];
+    let invalid = |reason: &str| {
+        format!(
+            "接合部 ID {} のパネル未算定: 柱 ID {}: {reason}",
+            node.0, joint.column.0
+        )
+    };
+    let mat = model
+        .element_material(col_elem)
+        .ok_or_else(|| invalid("材料未設定または参照不明"))?;
+    let sec = model
+        .element_section(col_elem)
+        .ok_or_else(|| invalid("断面未設定または参照不明"))?;
 
     let fy = sepika_core::material_grade::steel_f_value_prefix(&mat.name, 40.0)
         .or(mat.fy)
         .unwrap_or(235.0);
 
-    Some(ResolvedPanel {
+    let g = mat.shear_modulus();
+    let column = column_axial(model, col_elem, mat, sec, fy)
+        .ok_or_else(|| invalid("軸力追従に必要な柱節点・材軸・軸剛性・断面積を解決できません"))?;
+    Ok(Some(ResolvedPanel {
         geom: joint.geometry,
         db: joint.db,
-        g: mat.shear_modulus(),
+        g,
         fy,
-        column: column_axial(model, col_elem, mat, sec, fy),
-    })
+        column: Some(column),
+    }))
 }
 
 /// 軸力比 `n` の追従に使う柱の情報を組み立てる（材軸が退化する柱は `None`）。
@@ -140,14 +155,23 @@ fn column_axial(
     let p1 = model.nodes.get(col.nodes[1].index())?.coord;
     let d = sepika_core::geom::vec3::sub(p1, p0);
     let length = sepika_core::geom::vec3::norm(d);
-    if length < 1e-12 {
+    let ea_over_l = mat.young * sec.area / length.max(1.0);
+    let n_ref = fy * sec.area;
+    if !length.is_finite()
+        || length < 1e-12
+        || !sec.area.is_finite()
+        || sec.area <= 0.0
+        || !ea_over_l.is_finite()
+        || ea_over_l <= 0.0
+        || !n_ref.is_finite()
+    {
         return None;
     }
     Some(ColumnAxial {
         nodes: [col.nodes[0], col.nodes[1]],
-        ea_over_l: mat.young * sec.area / length.max(1.0),
+        ea_over_l,
         axis: [d[0] / length, d[1] / length, d[2] / length],
-        n_ref: (fy * sec.area).max(1.0),
+        n_ref: n_ref.max(1.0),
         committed: [0.0; 12],
         trial: [0.0; 12],
     })
@@ -166,8 +190,10 @@ impl PanelZone {
 
     fn build(data: &ElementData, model: &Model, nonlinear: bool) -> Self {
         let node = data.nodes.first().copied().unwrap_or(NodeId(0));
-        let resolution_error = resolve_panel_joint(model, node, &model.elements).err();
-        let resolved = resolve(model, node);
+        let (resolved, resolution_error) = match resolve(model, node) {
+            Ok(resolved) => (resolved, None),
+            Err(reason) => (None, Some(reason)),
+        };
 
         let (dc, tp, db, ve, kappa, g, fy, column) = match &resolved {
             Some(r) => (
@@ -184,7 +210,9 @@ impl PanelZone {
         };
 
         let k_elastic = g * ve;
-        let k_panel = if k_elastic.is_finite() && k_elastic > 0.0 {
+        let k_panel = if resolution_error.is_some() {
+            0.0
+        } else if k_elastic.is_finite() && k_elastic > 0.0 {
             k_elastic
         } else {
             PANEL_RIGID_STIFFNESS
@@ -353,6 +381,9 @@ impl ElementBehavior for PanelZone {
         commit: bool,
         _ctx: &Ctx,
     ) -> Result<(), crate::behavior::ElementUpdateError> {
+        if let Some(reason) = &self.resolution_error {
+            return Err(crate::behavior::ElementUpdateError(reason.clone()));
+        }
         crate::behavior::validate_trial_increment(du, self.n_dof())?;
         for i in 0..2 {
             if let Some(&d) = du.data.get(i) {
@@ -562,6 +593,7 @@ mod tests {
     use sepika_core::model::{
         ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material, Node, Section,
     };
+    use sepika_core::panel_zone::resolve_panel_joint;
     use sepika_core::section_shape::SectionShape;
 
     /// 整合条件 pqc·db = pqb·dc は、節点のモーメント釣り合い
@@ -993,15 +1025,127 @@ mod tests {
         assert!((pz.yield_moment() - pz.pmy0).abs() / pz.pmy0 < 1e-12);
     }
 
-    /// 諸元を解決できない接合部（柱が RC など）は剛パネルへ倒し、
-    /// 追加自由度が零剛性になって全体剛性行列が特異になるのを防ぐ。
     #[test]
-    fn test_unresolvable_panel_falls_back_to_rigid() {
+    fn invalid_selected_column_is_not_a_rigid_panel() {
         let (mut model, data) = cross_joint_model();
         model.sections[1].shape = None;
         let pz = PanelZone::new(&data, &model);
-        assert_eq!(pz.k_panel, PANEL_RIGID_STIFFNESS);
-        let k = pz.tangent_stiffness(&Ctx { model: &model });
-        assert!(k.get(0, 0) > 0.0 && k.get(1, 1) > 0.0);
+        assert_eq!(pz.k_panel, 0.0);
+        assert!(pz
+            .resolution_error
+            .as_ref()
+            .unwrap()
+            .contains("接合部 ID 0"));
+    }
+    #[test]
+    fn lower_column_supplies_geometry_material_and_nonlinear_axis_after_reordering() {
+        for reverse in [false, true] {
+            let (mut model, data) = cross_joint_model();
+            let mut upper_section = model.sections[1].clone();
+            upper_section.id = SectionId(2);
+            upper_section.shape = Some(SectionShape::SteelH {
+                height: 300.0,
+                width: 300.0,
+                web_thick: 9.0,
+                flange_thick: 16.0,
+                root_r: Some(0.0),
+            });
+            upper_section.material = Some(MaterialId(1));
+            model.sections.push(upper_section);
+            model.elements[3].section = Some(SectionId(2));
+            let mut upper_material = model.materials[0].clone();
+            upper_material.id = MaterialId(1);
+            upper_material.name = "SN490B".into();
+            upper_material.young = 150_000.0;
+            model.materials.push(upper_material);
+            if reverse {
+                for element in &mut model.elements {
+                    element.nodes.reverse();
+                }
+                model.elements.reverse();
+                for (i, element) in model.elements.iter_mut().enumerate() {
+                    element.id = ElemId(i as u32);
+                }
+            }
+            for p in [
+                PanelZone::new(&data, &model),
+                PanelZone::new_nonlinear(&data, &model),
+            ] {
+                assert_eq!(p.resolution_error, None);
+                assert_eq!(p.dc, 379.0);
+                assert_eq!(p.tp, 13.0);
+                assert_eq!(p.fy, 235.0);
+                assert_eq!(p.g, 205_000.0 / 2.6);
+                if let Some(col) = p.column {
+                    assert_eq!(
+                        col.nodes,
+                        if reverse {
+                            [NodeId(0), NodeId(3)]
+                        } else {
+                            [NodeId(3), NodeId(0)]
+                        }
+                    );
+                    assert_eq!(
+                        col.axis,
+                        if reverse {
+                            [0.0, 0.0, -1.0]
+                        } else {
+                            [0.0, 0.0, 1.0]
+                        }
+                    );
+                    assert_eq!(col.n_ref, 235.0 * 21_870.0);
+                }
+            }
+        }
+    }
+    #[test]
+    fn invalid_lower_column_rejects_direct_linear_and_nonlinear_state_updates() {
+        let (mut model, data) = cross_joint_model();
+        let mut lower = model.sections[1].clone();
+        lower.id = SectionId(2);
+        lower.material = None;
+        model.sections.push(lower);
+        model.elements[2].section = Some(SectionId(2));
+        let reason = resolve_panel_joint(&model, NodeId(0), &model.elements)
+            .unwrap_err()
+            .to_string();
+        for mut panel in [
+            PanelZone::new(&data, &model),
+            PanelZone::new_nonlinear(&data, &model),
+        ] {
+            assert_eq!(panel.resolution_error, Some(reason.clone()));
+            assert_eq!(panel.k_panel, 0.0);
+            let increment = LocalVec {
+                data: smallvec::smallvec![0.0, 0.0],
+            };
+            assert_eq!(
+                panel
+                    .update_state(&increment, false, &Ctx { model: &model })
+                    .unwrap_err()
+                    .to_string(),
+                reason
+            );
+        }
+    }
+    #[test]
+    fn standalone_explicit_panel_without_column_retains_joint_error() {
+        let (mut model, data) = cross_joint_model();
+        model.elements.retain(|e| {
+            model.sections[e.section.unwrap().index()].frame_use != Some(FrameSectionUse::Column)
+        });
+        for (i, element) in model.elements.iter_mut().enumerate() {
+            element.id = ElemId(i as u32);
+        }
+        for panel in [
+            PanelZone::new(&data, &model),
+            PanelZone::new_nonlinear(&data, &model),
+        ] {
+            assert!(panel
+                .resolution_error
+                .as_ref()
+                .is_some_and(|reason| reason.contains("接合部 ID 0")
+                    && reason.contains("参照柱が存在しません")));
+            assert_eq!(panel.k_panel, 0.0);
+        }
     }
 }

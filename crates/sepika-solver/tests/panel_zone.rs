@@ -206,7 +206,8 @@ fn l_frame_with(with_panel: bool, rigid_joint: bool) -> Model {
         ..Default::default()
     };
     if with_panel {
-        let panels = sepika_element::springs::panel_gen::apply_auto_panel_zones(&mut model);
+        let panels =
+            sepika_element::springs::panel_gen::apply_auto_panel_zones(&mut model).unwrap();
         assert_eq!(panels.len(), 1, "接合部にパネルが 1 つ生成される");
     }
     model
@@ -402,7 +403,8 @@ fn panel_504_standard_solver_rejects_unsupported_manual_panel_with_reason() {
         thick: 20.0,
     });
     let expected = sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
     let error = sepika_solver::statics::analysis::Analysis::prepare(&model)
         .err()
         .expect("未対応の手動パネルを剛性算定成功と扱わない");
@@ -432,7 +434,8 @@ fn panel_505_public_solver_rejects_old_or_manual_staggered_panel() {
     other.nodes = smallvec::smallvec![far.id, NodeId(0)];
     model.elements.push(other);
     let reason = sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
     assert!(reason.contains("上位置差=50 mm"));
     for mode in [
         sepika_core::model::PanelZoneMode::Model,
@@ -444,4 +447,151 @@ fn panel_505_public_solver_rejects_old_or_manual_staggered_panel() {
             .expect("旧/手動パネルは解析不可");
         assert!(error.to_string().contains(&reason));
     }
+}
+
+#[test]
+fn panel_585_public_linear_and_nonlinear_reject_invalid_lower_with_joint_reason() {
+    let mut model = l_frame(true);
+    let mut upper = model.elements[1].clone();
+    upper.id = ElemId(model.elements.len() as u32);
+    let mut upper_node = model.nodes[2].clone();
+    upper_node.id = NodeId(3);
+    upper_node.coord[2] = 6000.0;
+    model.nodes.push(upper_node);
+    let mut upper_section = model.sections[1].clone();
+    upper_section.id = SectionId(2);
+    model.sections.push(upper_section);
+    upper.nodes = smallvec::smallvec![NodeId(0), NodeId(3)];
+    upper.section = Some(SectionId(2));
+    model.elements.push(upper);
+    model.sections[1].shape = None;
+    let reason = sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
+        .unwrap_err()
+        .to_string();
+    assert!(reason.contains("接合部 ID 0"));
+    assert!(reason.contains("柱 ID 1"));
+    let linear = sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(1))
+        .err()
+        .unwrap();
+    assert!(linear.to_string().contains(&reason), "{linear}");
+    let dof = DofMap::build(&model);
+    let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dof);
+    let nonlinear = sepika_solver::nonlinear::pushover::pushover_analysis(
+        &model,
+        &dof,
+        &reducer,
+        sepika_solver::statics::analysis::SeismicDir::X,
+        1,
+        10.0,
+        false,
+    )
+    .err()
+    .unwrap();
+    assert!(nonlinear.contains(&reason), "{nonlinear}");
+}
+
+#[test]
+fn panel_585_public_inputs_reject_invalid_adopted_column_area_and_axial_stiffness() {
+    for (area, young) in [
+        (0.0, 205_000.0),
+        (-1.0, 205_000.0),
+        (f64::NAN, 205_000.0),
+        (f64::INFINITY, 205_000.0),
+        (21_870.0, 0.0),
+        (21_870.0, f64::INFINITY),
+    ] {
+        let mut model = l_frame(true);
+        model.sections[1].area = area;
+        model.materials[0].young = young;
+        model.materials[0].shear = Some(80_000.0);
+        let linear = sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(1))
+            .expect_err("不正な採用柱A/軸剛性は解析入力エラー")
+            .to_string();
+        assert!(
+            linear.contains("接合部 ID 0") && linear.contains("柱 ID 1"),
+            "{linear}"
+        );
+        let error = model.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("接合部 ID 0") && error.contains("柱 ID 1"),
+            "{error}"
+        );
+        let dof = DofMap::build(&model);
+        let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dof);
+        let nonlinear = sepika_solver::nonlinear::pushover::pushover_analysis(
+            &model,
+            &dof,
+            &reducer,
+            sepika_solver::statics::analysis::SeismicDir::X,
+            1,
+            10.0,
+            false,
+        )
+        .err()
+        .unwrap();
+        assert!(
+            nonlinear.contains("接合部 ID 0") && nonlinear.contains("柱 ID 1"),
+            "{nonlinear}"
+        );
+    }
+}
+
+#[test]
+fn panel_585_explicit_panel_without_column_is_not_a_successful_rigid_panel() {
+    let mut model = l_frame(true);
+    model.elements.remove(1);
+    for (i, element) in model.elements.iter_mut().enumerate() {
+        element.id = ElemId(i as u32);
+    }
+    let reason = model
+        .validate()
+        .expect_err("明示パネルの参照柱が必要")
+        .to_string();
+    assert!(
+        reason.contains("接合部 ID 0") && reason.contains("柱"),
+        "{reason}"
+    );
+    let linear = sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(1))
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        linear.contains("接合部 ID 0") && linear.contains("柱"),
+        "{linear}"
+    );
+    let dof = DofMap::build(&model);
+    let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dof);
+    let nonlinear = sepika_solver::nonlinear::pushover::pushover_analysis(
+        &model,
+        &dof,
+        &reducer,
+        sepika_solver::statics::analysis::SeismicDir::X,
+        1,
+        10.0,
+        false,
+    )
+    .err()
+    .unwrap();
+    assert!(
+        nonlinear.contains("接合部 ID 0") && nonlinear.contains("柱"),
+        "{nonlinear}"
+    );
+    let data = model
+        .elements
+        .iter()
+        .find(|e| e.kind == ElementKind::PanelZone)
+        .unwrap();
+    for panel in [
+        sepika_element::springs::panel::PanelZone::new(data, &model),
+        sepika_element::springs::panel::PanelZone::new_nonlinear(data, &model),
+    ] {
+        assert!(panel.resolution_error.is_some());
+        assert_eq!(panel.k_panel, 0.0);
+    }
+    model.elements.retain(|e| e.kind != ElementKind::PanelZone);
+    assert!(
+        sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
+            .unwrap()
+            .is_none()
+    );
 }

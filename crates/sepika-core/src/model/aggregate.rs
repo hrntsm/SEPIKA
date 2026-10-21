@@ -750,7 +750,7 @@ impl Model {
             if elem.kind == ElementKind::PanelZone {
                 if let Some(&node) = elem.nodes.first() {
                     crate::panel_zone::resolve_panel_joint(self, node, &self.elements)
-                        .map_err(CoreError::InvalidInput)?;
+                        .map_err(|reason| CoreError::InvalidInput(reason.to_string()))?;
                 }
             }
         }

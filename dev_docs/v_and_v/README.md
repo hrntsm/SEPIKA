@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [仕口パネル参照柱_Issue585_2026-10.md](仕口パネル参照柱_Issue585_2026-10.md) | 共通解決・生成・解析・検定の参照柱、旧計算契約の失効 | 🔶（直接・関連回帰Verification成功、原典/手動GUI/Validation・最終headゲート未） |
 | [壁側柱の物理的分担と局所解放_Issue496_2026-10.md](壁側柱の物理的分担と局所解放_Issue496_2026-10.md) | 共通側柱分類・純鋼板独立K/反力/仕事、Beam/Fiber/MS局所釣合い・軸履歴・同step応答 | 🔶（分離候補のrun別Verification。App lib847・full_model37・壁統合18等のrun別成功と途中失敗を区別。最終ゲート・Validation未確認） |
 | [断面JとCFTコアねじり_Issue416_2026-10.md](断面JとCFTコアねじり_Issue416_2026-10.md) | H慣用J・Box中心線式、独立P2参照、本番P1校正144levels、供給Js/実GsとBeam/Fiber・公開solver・OVIKA/結果26/18 | 🔶（数値Verificationと物理Validationを区別。正式Windowsgrid160fresh成功・3形状各3反復を記録。最終統合/公開PRゲートは記録待ち） |
 | [STB断面系列別ID_Issue571_2026-10.md](STB断面系列別ID_Issue571_2026-10.md) | 採用namespace・具体系列・数値IDによる定義/部材/強度結合、内部/OVIKA保持、元5Done | 🔶（初期3段階の失敗を保持し、最終feature1322・IO227・Clippy両構成・fmt・文書検査成功。全18 snapshot/1161入力hash一致。XSD124派生期待外0、full_model差分fresh必須指摘なし。文書修正後の再検査/レビュー・親監査・最終ゲート未確認） |
@@ -288,6 +289,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 7a | 仕口パネル（せん断変形角の追加自由度） | sepika-solver | tests/panel_zone.rs | `test_panel_shear_angle_matches_closed_form`（M=K·γ）, `test_panel_dof_equilibrium_residual_is_zero`（釣合い残差がゼロ）。定式化と残課題は [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | P1 | ✅ |
 | 7b | 梁パネル寸法と未算定伝播 | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-solver | panel_zone.rs / springs/panel_gen.rs / joint_wiring/steel_panel.rs / prepare.rs | [Issue504独立期待値・実入口](梁パネル寸法_Issue504_2026-10.md) | 横断 | 🔶（位置/形式は#7c、最終head全CI・実験未） |
 | 7c | フランジ位置の標準形式ゲート | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-solver / sepika-app / sepika-mcp | panel_zone.rs / joint_wiring / prepare.rs / viewer / design_check.rs / summary.rs | [Issue505独立期待値・状態](フランジ位置の標準形式ゲート_Issue505_2026-10.md) | 横断 | 🔶（#455実入力・正式段違い式・公開全構成CI・Validation未） |
+| 7d | 仕口パネルの参照柱 | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-app | panel_zone.rs / springs/panel.rs / springs/panel_gen.rs / joint_wiring / prepare.rs / result_contract_tests.rs | [Issue585受入と確認状態](仕口パネル参照柱_Issue585_2026-10.md) | 横断 | 🔶（直接・関連回帰Verification成功、原典/手動GUI/Validation・最終headゲート未） |
 | 8 | 線形静的解析 | sepika-solver | linear.rs | `test_*`（座標変換回帰 `test_beam_to_global_transverse_uses_correct_inertia` 含む） | P2 | ✅ |
 | 9 | 固有値解析 | sepika-solver | eigen.rs | `test_1dof_period` | P2 | ✅ |
 | 10 | 地震力標準式・適用診断 | sepika-load / sepika-solver / sepika-app / sepika-mcp | ai.rs / statics/analysis/seismic.rs / app/tests.rs / design/holding.rs / nonlinear/pushover/driver.rs / server.rs | [Issue486の独立期待値・入口対応表](地震力標準式と適用診断_Issue486_2026-10.md) | P2 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |
