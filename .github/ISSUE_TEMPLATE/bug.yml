@@ -1,4 +1,5 @@
 name: 不具合修正（Bug / Fix）
+labels: ["不具合"]
 description: 不具合の現象・期待する挙動・影響と修正の完了条件を整理する
 body:
   - type: markdown
