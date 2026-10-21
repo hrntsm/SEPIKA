@@ -30,7 +30,7 @@ pub struct PrepareReport {
 /// いずれも冪等で、呼び出し順にも依存しない。
 pub fn apply_rigid_zones_and_panels(
     model: &mut Model,
-) -> Vec<sepika_element::springs::panel_gen::GeneratedPanel> {
+) -> Result<Vec<sepika_element::springs::panel_gen::GeneratedPanel>, String> {
     let rule = sepika_element::frame::beam::RigidZoneRule {
         consider_walls: model.stress_cfg.rigid_zone_consider_walls,
     };
@@ -125,7 +125,6 @@ fn prepare_work_model(
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     rebuild_floor_regions(model);
     rebuild_wall_regions(model);
-    let mut panel_notices = Vec::new();
     {
         let adjacency = sepika_core::adjacency::NodeAdjacency::build(model);
         for node in &model.nodes {
@@ -143,20 +142,19 @@ fn prepare_work_model(
                 adjacency.elements_at(model, node.id),
             ) {
                 Err(reason) => {
-                    panel_notices.push(format!("{reason}。パネルせん断変形をモデル化できません"))
+                    return Err(JobError::InvalidInput(reason));
                 }
                 Ok(Some(_)) => {}
                 Ok(None) => {}
             }
         }
     }
-    let panels = apply_rigid_zones_and_panels(model);
+    let panels = apply_rigid_zones_and_panels(model).map_err(JobError::InvalidInput)?;
     let gravity = compute_gravity_auto_load_cases(model)?;
     let tip_loads = compute_tip_loads(model)?;
     apply_auto_load_cases(model, &gravity.cases);
     apply_tip_loads(model, tip_loads);
     let mut notices = gravity.notices;
-    notices.extend(panel_notices);
     let mut weights_valid = true;
     if (!model.stories.is_empty() || initialize_stories)
         && !crate::weight_preparation::weights_are_current(model, settings.mass_method)
@@ -285,6 +283,92 @@ mod tests {
         SlabPlate,
     };
     use sepika_core::section_shape::SectionShape;
+
+    #[test]
+    fn panel_585_invalid_lower_column_stops_public_preparation() {
+        use sepika_core::ids::MaterialId;
+        use sepika_core::model::{FrameSectionUse, Material, MaterialCategory, PanelZoneMode};
+        let mut model = Model {
+            panel_zone: PanelZoneMode::Model,
+            ..Default::default()
+        };
+        for (i, coord) in [
+            [0.0, 0.0, 3000.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 6000.0],
+            [6000.0, 0.0, 3000.0],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut n = node(i as u32, 0.0, 0.0);
+            n.coord = coord;
+            model.nodes.push(n);
+        }
+        model.materials.push(Material {
+            id: MaterialId(0),
+            name: "SN400B".into(),
+            category: MaterialCategory::Steel,
+            young: 205_000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            shear: None,
+            fc: None,
+            fy: Some(235.0),
+            strength_factor: None,
+            concrete_class: Default::default(),
+        });
+        let shape = SectionShape::SteelH {
+            height: 400.0,
+            width: 400.0,
+            web_thick: 13.0,
+            flange_thick: 21.0,
+            root_r: Some(0.0),
+        };
+        for (i, usage) in [
+            FrameSectionUse::Column,
+            FrameSectionUse::Column,
+            FrameSectionUse::Girder,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut section = shape.to_section(SectionId(i as u32), format!("S{i}"));
+            section.frame_use = Some(usage);
+            section.material = Some(MaterialId(0));
+            model.sections.push(section);
+        }
+        for (i, nodes) in [[1, 0], [0, 2], [0, 3]].into_iter().enumerate() {
+            let mut element = beam(i as u32, nodes[0], nodes[1]);
+            element.section = Some(SectionId(i as u32));
+            model.elements.push(element);
+        }
+        model.sections[0].material = None;
+        let reason =
+            sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
+                .unwrap_err();
+        assert!(reason.contains("接合部 ID 0"));
+        assert!(reason.contains("柱 ID 0"));
+        assert_eq!(
+            apply_rigid_zones_and_panels(&mut model.clone()).unwrap_err(),
+            reason
+        );
+        for initialize in [false, true] {
+            let error = prepare_model(
+                &mut model.clone(),
+                &AnalysisSettings::default(),
+                None,
+                initialize,
+            )
+            .err()
+            .unwrap();
+            assert!(error.to_string().contains(&reason), "{error}");
+        }
+        let error = prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains(&reason), "{error}");
+    }
 
     #[test]
     fn lip_channel_geometry_stops_prepare_before_mutating_input() {
@@ -705,8 +789,8 @@ mod tests {
 
         let mut without_wall = base_frame();
 
-        apply_rigid_zones_and_panels(&mut with_wall);
-        apply_rigid_zones_and_panels(&mut without_wall);
+        apply_rigid_zones_and_panels(&mut with_wall).unwrap();
+        apply_rigid_zones_and_panels(&mut without_wall).unwrap();
 
         // 壁の側柱（elem 0、Y=0 面）は、壁を考慮すると剛域長が変わる。
         let with_wall_col0 = with_wall.elements[0].rigid_zone;
@@ -808,13 +892,10 @@ mod tests {
             let expected =
                 sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
                     .unwrap_err();
-            let report =
-                prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None).unwrap();
-            assert!(report.panels.is_empty());
-            assert!(report
-                .notices
-                .iter()
-                .any(|reason| reason.contains(&expected)));
+            let error = prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
+                .err()
+                .unwrap();
+            assert!(error.to_string().contains(&expected));
             if !manual {
                 model.sections[1].shape = Some(SectionShape::SteelH {
                     height: 600.0,
@@ -839,16 +920,16 @@ mod tests {
                 let mut other = beam(2, 3, 0);
                 other.section = Some(SectionId(2));
                 model.elements.push(other);
-                let report =
+                let reason =
                     prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None)
-                        .unwrap();
-                assert!(report.panels.is_empty());
-                assert!(report
-                    .notices
-                    .iter()
-                    .any(|reason| reason.contains("db=480 mm")
+                        .err()
+                        .unwrap()
+                        .to_string();
+                assert!(
+                    reason.contains("db=480 mm")
                         && reason.contains("上位置差=50 mm")
-                        && reason.contains("下位置差=-50 mm")));
+                        && reason.contains("下位置差=-50 mm")
+                );
             }
         }
     }

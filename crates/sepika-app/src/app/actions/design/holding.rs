@@ -225,7 +225,7 @@ impl App {
         self.core.scoped.ds_beta_u_unavailable = false;
         self.core.scoped.ds_rank_fallback_stories.clear();
         self.core.scoped.ds_wall_details.clear();
-        self.apply_rigid_zones_for_analysis();
+        self.apply_rigid_zones_for_analysis()?;
         for elem in &self.core.model.elements {
             if !matches!(
                 elem.kind,

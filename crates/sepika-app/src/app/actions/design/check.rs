@@ -67,7 +67,10 @@ impl App {
         if let Some(bundle) = self.core.scoped.results.as_mut() {
             bundle.clear_design_results();
         }
-        self.apply_rigid_zones_for_analysis();
+        if let Err(reason) = self.apply_rigid_zones_for_analysis() {
+            self.report_error(reason);
+            return;
+        }
         let has_frame_forces = self
             .core
             .scoped

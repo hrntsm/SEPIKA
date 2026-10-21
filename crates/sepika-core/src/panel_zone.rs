@@ -30,16 +30,15 @@
 //!
 //! - 用途が柱の部材が 1 本以上・用途が梁の部材が 1 本以上取り付く
 //! - 取り付く部材がすべて S/CFT 系（`StructureKind::is_steel_like`）
-//! - 諸元を解決できる柱が 1 本以上あり、実効体積 `Ve` が正
+//! - 採用柱の諸元を解決でき、実効体積 `Ve` が有限の正値
 //!
 //! 斜材（ブレース等）は資料が接合位置と係数 ζ を定めておらずパネル自由度と
 //! 連成しないため、種別判定の対象にもしない。
 //!
 //! # 柱が複数取り付く場合
 //!
-//! 実効体積 `Ve` が最小になる柱の諸元を採る。要素の並び順に依存せず決定的で、
-//! かつ剛性・耐力とも安全側になる。`Ve` は `db` に比例するため、柱の選択は
-//! `db` の値によらない。
+//! 接合部から他端への座標で下側の柱を優先し、下側が存在しない場合だけ上側を採る。
+//! 採用側を一意に特定できない場合や採用柱の情報が不正な場合は理由付きエラーとする。
 //!
 //! # 柱断面ごとの扱い
 //!
@@ -559,7 +558,7 @@ pub fn panel_joint_planes<'a>(
 /// 持たない側は全要素を渡してよい）。
 ///
 /// 判定規則はモジュール冒頭「対象とする接合部」のとおりで、モデル化と断面検定の
-/// 双方がこの関数を通る。不正・未対応梁は接合部/梁ID付きエラー、候補外は `Ok(None)`。
+/// 双方がこの関数を通る。採用柱・梁の不正や柱の識別不能は接合部/部材ID付きエラー、候補外は `Ok(None)`。
 /// モデル化はさらに [`PanelJoint::has_filled_column`] が
 /// `false` であることを要求する。
 pub fn resolve_panel_joint<'a>(
@@ -567,22 +566,137 @@ pub fn resolve_panel_joint<'a>(
     node: NodeId,
     members: impl IntoIterator<Item = &'a ElementData>,
 ) -> Result<Option<PanelJoint>, String> {
+    resolve_panel_joint_impl(model, node, members, false)
+}
+
+/// 明示パネルの参照柱を要求して解決する。柱不在は接合部 ID 付きエラー、既存の材種対象外は `Ok(None)`。
+pub fn resolve_explicit_panel_joint<'a>(
+    model: &Model,
+    node: NodeId,
+    members: impl IntoIterator<Item = &'a ElementData>,
+) -> Result<Option<PanelJoint>, String> {
+    resolve_panel_joint_impl(model, node, members, true)
+}
+
+fn resolve_panel_joint_impl<'a>(
+    model: &Model,
+    node: NodeId,
+    members: impl IntoIterator<Item = &'a ElementData>,
+    explicit_panel: bool,
+) -> Result<Option<PanelJoint>, String> {
     let mut columns: Vec<&ElementData> = Vec::new();
     let mut beams: Vec<&ElementData> = Vec::new();
+    let mut unidentified: Vec<&ElementData> = Vec::new();
     for e in members {
-        if !e.nodes.iter().take(2).any(|n| *n == node) {
+        if !e.kind.is_primary_frame_support() || !e.nodes.iter().take(2).any(|n| *n == node) {
             continue;
         }
-        match member_orientation(model, e) {
-            Some(MemberOrientation::Column) if is_horizontal_or_vertical_member(model, e) => {
-                columns.push(e)
-            }
-            Some(MemberOrientation::Beam) => beams.push(e),
-            _ => {}
+        match e
+            .section
+            .and_then(|sid| model.sections.get(sid.index()))
+            .and_then(|s| s.frame_use)
+        {
+            Some(FrameSectionUse::Column) => columns.push(e),
+            Some(FrameSectionUse::Girder) => beams.push(e),
+            Some(FrameSectionUse::Brace) => {}
+            None => unidentified.push(e),
         }
     }
-    if columns.is_empty() || beams.is_empty() {
+    if columns.is_empty()
+        && unidentified.is_empty()
+        && (explicit_panel
+            || model.elements.iter().any(|e| {
+                e.kind == crate::model::ElementKind::PanelZone && e.nodes.first() == Some(&node)
+            }))
+        && beams
+            .iter()
+            .all(|e| member_structure_kind(model, e).is_steel_like())
+    {
+        return Err(format!(
+            "接合部 ID {} のパネル未算定: 明示パネルの参照柱が存在しません",
+            node.0
+        ));
+    }
+    if beams.is_empty() {
         return Ok(None);
+    }
+    let invalid_column = |reason: String| format!("接合部 ID {} のパネル未算定: {reason}", node.0);
+    unidentified.sort_by_key(|e| e.id);
+    if !unidentified.is_empty() {
+        return Err(invalid_column(format!(
+            "部材 ID {}: 断面未設定・参照不明または用途未設定のため柱の存在を確定できません",
+            unidentified
+                .iter()
+                .map(|e| e.id.0.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    if columns.is_empty() {
+        return Ok(None);
+    }
+    columns.sort_by_key(|e| e.id);
+    let mut lower = Vec::new();
+    let mut upper = Vec::new();
+    for column in &columns {
+        let far = column
+            .nodes
+            .iter()
+            .take(2)
+            .find(|id| **id != node)
+            .and_then(|id| model.nodes.get(id.index()));
+        let center = model.nodes.get(node.index());
+        let Some((far, center)) = far.zip(center) else {
+            return Err(invalid_column(format!(
+                "柱 ID {}: 接続節点を解決できません",
+                column.id.0
+            )));
+        };
+        let Some(axis) =
+            member_unit_axis(model, column).filter(|axis| axis.iter().all(|v| v.is_finite()))
+        else {
+            return Err(invalid_column(format!(
+                "柱 ID {}: 有限の非零材軸が必要です",
+                column.id.0
+            )));
+        };
+        let dz = far.coord[2] - center.coord[2];
+        if !dz.is_finite() || dz == 0.0 || axis[2] == 0.0 {
+            return Err(invalid_column(format!(
+                "柱 ID {}: 接合部に対する上下を特定できません",
+                column.id.0
+            )));
+        }
+        if dz < 0.0 {
+            lower.push(*column);
+        } else {
+            upper.push(*column);
+        }
+    }
+    let (side, candidates) = if lower.is_empty() {
+        ("上側", upper)
+    } else {
+        ("下側", lower)
+    };
+    if candidates.len() != 1 {
+        return Err(invalid_column(format!(
+            "{side}柱を一意に特定できません: 柱 ID {}",
+            candidates
+                .iter()
+                .map(|e| e.id.0.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    let selected = candidates[0];
+    let selected_section = model.element_section(selected).ok_or_else(|| {
+        invalid_column(format!("柱 ID {}: 断面未設定または参照不明", selected.id.0))
+    })?;
+    if model.element_material(selected).is_none() {
+        return Err(invalid_column(format!(
+            "柱 ID {}: 材料未設定または参照不明",
+            selected.id.0
+        )));
     }
     if columns
         .iter()
@@ -648,23 +762,55 @@ pub fn resolve_panel_joint<'a>(
     let geometry_of = |e: &&ElementData| section_of(e).and_then(PanelGeometry::from_column);
     let has_filled_column = columns.iter().filter_map(geometry_of).any(|g| g.filled);
 
-    let selected = columns
-        .iter()
-        .filter_map(|e| {
-            let geometry = geometry_of(e)?;
-            let ve = geometry.effective_volume(db);
-            (ve > 0.0).then_some((e.id, geometry, ve))
-        })
-        .min_by(|a, b| a.2.total_cmp(&b.2));
-    let Some((column, geometry, ve)) = selected else {
-        return Ok(None);
+    if !is_horizontal_or_vertical_member(model, selected) {
+        return Err(invalid_column(format!(
+            "柱 ID {}: 斜め柱のパネル式は未対応",
+            selected.id.0
+        )));
+    }
+    let geometry = PanelGeometry::from_column(selected_section).ok_or_else(|| {
+        invalid_column(format!(
+            "柱 ID {}: 断面形状が未定義またはパネル諸元に未対応",
+            selected.id.0
+        ))
+    })?;
+    let dimensions = match geometry.kind {
+        PanelShapeKind::H { bc, tf } => vec![geometry.dc, geometry.tp, bc, tf],
+        PanelShapeKind::Box { bc } => vec![geometry.dc, geometry.tp, bc],
+        PanelShapeKind::Pipe => vec![geometry.dc, geometry.tp],
     };
+    let ve = geometry.effective_volume(db);
+    if dimensions.iter().any(|v| !v.is_finite() || *v <= 0.0)
+        || selected_section
+            .panel_thickness
+            .is_some_and(|v| !v.is_finite() || v <= 0.0)
+        || !ve.is_finite()
+        || ve <= 0.0
+    {
+        return Err(invalid_column(format!(
+            "柱 ID {}: パネル寸法・板厚・有効体積Veは有限の正値が必要です",
+            selected.id.0
+        )));
+    }
 
+    let selected_material = model.element_material(selected).unwrap();
+    let axial_stiffness =
+        selected_material.young * selected_section.area / model.member_length(selected);
+    if !selected_section.area.is_finite()
+        || selected_section.area <= 0.0
+        || !axial_stiffness.is_finite()
+        || axial_stiffness <= 0.0
+    {
+        return Err(invalid_column(format!(
+            "柱 ID {}: 断面積Aと軸剛性E・A/Lは有限の正値が必要です",
+            selected.id.0
+        )));
+    }
     Ok(Some(PanelJoint {
         geometry,
         db,
         ve,
-        column,
+        column: selected.id,
         has_filled_column,
     }))
 }
@@ -786,7 +932,7 @@ mod tests {
             model.sections[0].frame_use = Some(FrameSectionUse::Girder);
         }
     }
-    use crate::ids::SectionId;
+    use crate::ids::{MaterialId, SectionId};
     use crate::model::{ElementKind, MaterialCategory};
 
     fn sec(shape: SectionShape, depth: f64, panel_thickness: Option<f64>) -> Section {
@@ -1212,9 +1358,8 @@ mod tests {
             .is_none());
     }
 
-    /// 柱が複数あれば Ve が最小の柱を採り、要素の並び順に依存しない。
     #[test]
-    fn test_smallest_ve_column_is_selected() {
+    fn lower_column_is_selected_independently_of_volume_order_and_ends() {
         let thin = SectionShape::SteelH {
             root_r: Some(0.0),
             height: 400.0,
@@ -1222,12 +1367,18 @@ mod tests {
             web_thick: 9.0,
             flange_thick: 21.0,
         };
-        let build = |upper_first: bool| {
+        let build = |upper_first: bool, web_thick: f64| {
             let mut m = joint_model(h_beam(), 600.0, h_col());
             m.nodes.push(node(3, [0.0, 0.0, 6000.0]));
             let mut thin_sec = sec(thin.clone(), 400.0, None);
             thin_sec.id = SectionId(2);
             thin_sec.frame_use = Some(FrameSectionUse::Column);
+            if let Some(SectionShape::SteelH {
+                web_thick: value, ..
+            }) = &mut thin_sec.shape
+            {
+                *value = web_thick;
+            }
             m.sections.push(thin_sec);
             let upper = member(2, 0, 3, 2);
             if upper_first {
@@ -1237,17 +1388,183 @@ mod tests {
             }
             m
         };
-        let a = build(true);
-        let b = build(false);
-        let ja = resolve_panel_joint(&a, NodeId(0), &a.elements)
+        for web_thick in [9.0, 13.0, 20.0] {
+            for upper_first in [false, true] {
+                let mut m = build(upper_first, web_thick);
+                let joint = resolve_panel_joint(&m, NodeId(0), &m.elements)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(joint.column, ElemId(1));
+                assert_eq!(joint.geometry.tp, 13.0);
+                assert_eq!(joint.ve, 2_872_441.0);
+                m.elements.reverse();
+                for e in &mut m.elements {
+                    e.nodes.reverse();
+                }
+                assert_eq!(
+                    resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap(),
+                    Some(joint)
+                );
+            }
+        }
+    }
+
+    fn two_column_joint() -> Model {
+        let mut m = joint_model(h_beam(), 600.0, h_col());
+        m.nodes.push(node(3, [0.0, 0.0, 6000.0]));
+        let mut upper = m.sections[1].clone();
+        upper.id = SectionId(2);
+        upper.panel_thickness = Some(9.0);
+        m.sections.push(upper);
+        m.elements.push(member(2, 0, 3, 2));
+        m
+    }
+
+    #[test]
+    fn only_physically_absent_lower_column_allows_upper_column() {
+        for remaining in [ElemId(1), ElemId(2)] {
+            let mut m = two_column_joint();
+            m.elements
+                .retain(|e| e.id == ElemId(0) || e.id == remaining);
+            let joint = resolve_panel_joint(&m, NodeId(0), &m.elements)
+                .unwrap()
+                .unwrap();
+            assert_eq!(joint.column, remaining);
+            assert_eq!(
+                joint.geometry.tp,
+                if remaining == ElemId(1) { 13.0 } else { 9.0 }
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_lower_column_never_falls_back_to_valid_upper_column() {
+        for invalid in 0..14 {
+            let mut m = two_column_joint();
+            match invalid {
+                0 => m.elements[1].section = None,
+                1 => m.elements[1].section = Some(SectionId(99)),
+                2 => m.sections[1].frame_use = None,
+                3 => m.sections[1].material = None,
+                4 => m.sections[1].material = Some(MaterialId(99)),
+                5 => m.sections[1].shape = None,
+                6 => m.sections[1].panel_thickness = Some(f64::NAN),
+                7 => m.sections[1].panel_thickness = Some(0.0),
+                8 => m.sections[1].panel_thickness = Some(f64::INFINITY),
+                9 => {
+                    m.sections[1].shape = Some(SectionShape::SteelBuiltH {
+                        height: 400.0,
+                        upper_width: 400.0,
+                        upper_thick: 21.0,
+                        lower_width: 400.0,
+                        lower_thick: 21.0,
+                        web_thick: 13.0,
+                    })
+                }
+                10 => m.nodes[2].coord = [3000.0, 0.0, 0.0],
+                11 => {
+                    m.sections[1].shape = Some(SectionShape::SteelH {
+                        height: 400.0,
+                        width: 400.0,
+                        web_thick: f64::NAN,
+                        flange_thick: 21.0,
+                        root_r: None,
+                    })
+                }
+                12 | 13 => {
+                    m.sections[1].shape = Some(SectionShape::SteelH {
+                        height: if invalid == 12 { 21.0 } else { 20.0 },
+                        width: 400.0,
+                        web_thick: 13.0,
+                        flange_thick: 21.0,
+                        root_r: None,
+                    })
+                }
+                _ => unreachable!(),
+            }
+            let reason = resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err();
+            assert!(reason.contains("接合部 ID 0"), "{invalid}: {reason}");
+            assert!(reason.contains("ID 1"), "{invalid}: {reason}");
+            assert!(reason.contains(':'), "{invalid}: {reason}");
+            m.elements.reverse();
+            for e in &mut m.elements {
+                e.nodes.reverse();
+            }
+            assert_eq!(
+                resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err(),
+                reason
+            );
+        }
+    }
+
+    #[test]
+    fn ambiguous_or_unresolved_column_connection_reports_joint_and_reason() {
+        for invalid in 0..6 {
+            let mut m = two_column_joint();
+            match invalid {
+                0 => m.elements.push(member(3, 0, 2, 1)),
+                1 => {
+                    m.elements.retain(|e| e.id != ElemId(1));
+                    m.elements.push(member(3, 0, 3, 2));
+                }
+                2 => m.nodes[2].coord = [1000.0, 0.0, 3000.0],
+                3 => m.elements[1].nodes[0] = NodeId(99),
+                4 => m.nodes[2].coord[2] = f64::NAN,
+                5 => m.elements[1].nodes = smallvec::smallvec![NodeId(0)],
+                _ => unreachable!(),
+            }
+            let reason = resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err();
+            assert!(reason.contains("接合部 ID 0"), "{invalid}: {reason}");
+            assert!(reason.contains("柱 ID"), "{invalid}: {reason}");
+            m.elements.reverse();
+            for e in &mut m.elements {
+                e.nodes.reverse();
+            }
+            assert_eq!(
+                resolve_panel_joint(&m, NodeId(0), &m.elements).unwrap_err(),
+                reason
+            );
+        }
+    }
+
+    #[test]
+    fn legal_model_permutation_keeps_physical_lower_column() {
+        let mut m = two_column_joint();
+        let before = resolve_panel_joint(&m, NodeId(0), &m.elements)
             .unwrap()
-            .expect("接合部");
-        let jb = resolve_panel_joint(&b, NodeId(0), &b.elements)
+            .unwrap();
+        m.nodes.reverse();
+        for (i, n) in m.nodes.iter_mut().enumerate() {
+            n.id = NodeId(i as u32);
+        }
+        m.sections.reverse();
+        for (i, section) in m.sections.iter_mut().enumerate() {
+            section.id = SectionId(i as u32);
+        }
+        m.materials.reverse();
+        for (i, material) in m.materials.iter_mut().enumerate() {
+            material.id = MaterialId(i as u32);
+        }
+        for section in &mut m.sections {
+            section.material = section.material.map(|id| MaterialId(1 - id.0));
+        }
+        m.elements.rotate_left(1);
+        for (i, e) in m.elements.iter_mut().enumerate() {
+            e.id = ElemId(i as u32);
+            e.section = e.section.map(|id| SectionId(2 - id.0));
+            for n in &mut e.nodes {
+                *n = NodeId(3 - n.0);
+            }
+            e.nodes.reverse();
+        }
+        let after = resolve_panel_joint(&m, NodeId(3), &m.elements)
             .unwrap()
-            .expect("接合部");
-        assert!((ja.geometry.tp - 9.0).abs() < 1e-9, "Ve 最小の柱を採る");
-        assert_eq!(ja.ve, jb.ve, "要素の並び順に依存しない");
-        assert_eq!(ja.column, jb.column);
+            .unwrap();
+        assert_eq!(after.column, ElemId(0));
+        assert_eq!(after.geometry, before.geometry);
+        assert_eq!(after.ve, before.ve);
+        assert_eq!(after.db, before.db);
+        assert_eq!(m.elements[0].nodes.as_slice(), &[NodeId(3), NodeId(1)]);
     }
 
     /// CFT 柱の接合部は解決できるが、モデル化からは除外する目印が立つ。

@@ -2753,3 +2753,272 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
         ));
     }
 }
+
+#[test]
+fn panel_585_invalid_lower_column_is_not_filtered_before_resolution() {
+    let h = SectionShape::SteelH {
+        height: 400.0,
+        width: 400.0,
+        web_thick: 13.0,
+        flange_thick: 21.0,
+        root_r: Some(0.0),
+    };
+    let mut base = cross_joint_model(h.clone(), h);
+    base.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    for section in &mut base.sections {
+        section.material = Some(MaterialId(2));
+    }
+    let mut lower = base.sections[0].clone();
+    lower.id = SectionId(2);
+    base.sections.push(lower);
+    base.elements[0].section = Some(SectionId(2));
+    let zero = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+    let forces: Vec<_> = (0..4).map(|i| (ElemId(i), zero.as_slice())).collect();
+    for missing_section in [false, true] {
+        let mut model = base.clone();
+        if missing_section {
+            model.elements[0].section = None;
+        } else {
+            model.sections[2].material = None;
+        }
+        let checks = collect_joint_checks_with_long(
+            &model,
+            &forces,
+            None,
+            &[(NodeId(0), [0.0, 1.0e8])],
+            LoadTerm::Short,
+        );
+        let panels: Vec<_> = checks
+            .iter()
+            .filter(|(node, label, _)| *node == NodeId(0) && label.starts_with("パネルゾーン(S)"))
+            .collect();
+        assert_eq!(panels.len(), 1);
+        assert!(matches!(&panels[0].2, CheckOutcome::Skipped { reason }
+            if reason.contains("接合部 ID 0") && reason.contains("ID 0")));
+    }
+}
+
+#[test]
+fn panel_585_lower_joint_end_axial_force_survives_legal_element_reordering() {
+    let h = |tw| SectionShape::SteelH {
+        height: 400.0,
+        width: 400.0,
+        web_thick: tw,
+        flange_thick: 21.0,
+        root_r: Some(0.0),
+    };
+    let mut base = cross_joint_model(h(22.0), h(13.0));
+    base.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    for section in &mut base.sections {
+        section.material = Some(MaterialId(2));
+    }
+    let mut upper = base.sections[0].clone();
+    upper.id = SectionId(2);
+    upper.shape = Some(h(9.0));
+    upper.area = 1_000.0;
+    base.sections.push(upper);
+    base.elements[1].section = Some(SectionId(2));
+    let lower = [
+        (0.0, [-1.0e6, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        (1.0, [-2.0e6, 0.0, 0.0, 0.0, 0.0, 0.0]),
+    ];
+    let other = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+    let forces = vec![
+        (ElemId(0), lower.as_slice()),
+        (ElemId(1), other.as_slice()),
+        (ElemId(2), other.as_slice()),
+        (ElemId(3), other.as_slice()),
+    ];
+    let check = |model: &Model, forces: &[(ElemId, ForcesAt<'_>)]| {
+        collect_joint_checks_with_long(
+            model,
+            forces,
+            None,
+            &[(NodeId(0), [0.0, 1.0e8])],
+            LoadTerm::Short,
+        )
+        .into_iter()
+        .find(|(node, label, _)| *node == NodeId(0) && label == "パネルゾーン(S)")
+        .unwrap()
+        .2
+        .unwrap_checked()
+    };
+    let expected = check(&base, &forces);
+    let mut reordered = base.clone();
+    reordered.elements.reverse();
+    for (i, e) in reordered.elements.iter_mut().enumerate() {
+        e.id = ElemId(i as u32);
+        e.nodes.reverse();
+    }
+    let reversed_lower = [(0.0, lower[1].1), (1.0, lower[0].1)];
+    let remapped = vec![
+        (ElemId(3), reversed_lower.as_slice()),
+        (ElemId(2), other.as_slice()),
+        (ElemId(1), other.as_slice()),
+        (ElemId(0), other.as_slice()),
+    ];
+    assert_eq!(check(&reordered, &remapped).ratio(), expected.ratio());
+    let zero = vec![
+        (ElemId(0), other.as_slice()),
+        (ElemId(1), other.as_slice()),
+        (ElemId(2), other.as_slice()),
+        (ElemId(3), other.as_slice()),
+    ];
+    assert!(expected.ratio() > check(&base, &zero).ratio());
+}
+
+#[test]
+fn panel_585_cft_follows_lower_steel_material_without_redefining_whole_member_axial_area() {
+    let cft = SectionShape::CftBox {
+        height: 400.0,
+        width: 400.0,
+        thick: 16.0,
+        corner_r: Some(0.0),
+    };
+    let h = SectionShape::SteelH {
+        height: 600.0,
+        width: 200.0,
+        web_thick: 11.0,
+        flange_thick: 20.0,
+        root_r: Some(0.0),
+    };
+    let mut model = cross_joint_model(cft, h);
+    model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    model.sections[1].material = Some(MaterialId(2));
+    let mut upper = model.sections[0].clone();
+    upper.id = SectionId(2);
+    model.sections.push(upper);
+    model.elements[1].section = Some(SectionId(2));
+    let mut lower_steel = model.materials[2].clone();
+    lower_steel.id = MaterialId(3);
+    lower_steel.name = "SN490B".into();
+    lower_steel.fy = Some(325.0);
+    model.materials.push(lower_steel);
+    model.sections[0].steel_material = Some(MaterialId(3));
+    let zero = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+    let forces: Vec<_> = (0..4).map(|i| (ElemId(i), zero.as_slice())).collect();
+    let check = |model: &Model| {
+        collect_joint_checks_with_long(
+            model,
+            &forces,
+            None,
+            &[(NodeId(0), [0.0, 1.0e8])],
+            LoadTerm::Short,
+        )
+        .into_iter()
+        .find(|(node, label, _)| *node == NodeId(0) && label == "パネルゾーン(S)")
+        .unwrap()
+        .2
+    };
+    let expected = check(&model).unwrap_checked().ratio();
+    model.sections[2].steel_material = None;
+    assert_eq!(check(&model).unwrap_checked().ratio(), expected);
+    model.sections[0].steel_material = Some(MaterialId(2));
+    assert!(check(&model).unwrap_checked().ratio() > expected);
+    model.sections[0].steel_material = None;
+    assert!(matches!(check(&model),CheckOutcome::Skipped { reason }
+        if reason.contains("接合部 ID 0")&&reason.contains("採用柱 ID 0")&&reason.contains("鋼管専用材料")));
+}
+
+#[test]
+fn panel_585_orthogonal_nonsteel_beam_keeps_joint_wide_gate_and_invalid_lower_diagnostic() {
+    use sepika_core::model::FrameSectionUse;
+    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar};
+    let h = SectionShape::SteelH {
+        height: 400.0,
+        width: 400.0,
+        web_thick: 13.0,
+        flange_thick: 21.0,
+        root_r: Some(0.0),
+    };
+    let rebar = RcBeamRebar {
+        main_dia: 25.0,
+        top: vec![4],
+        bottom: vec![4],
+        cover: 40.0,
+        stirrup: BeamStirrup {
+            dia: 10.0,
+            pitch: 100.0,
+            legs: 2,
+        },
+    };
+    for shape in [
+        SectionShape::RcBeamRect {
+            b: 400.0,
+            d: 600.0,
+            rebar: rebar.clone(),
+        },
+        SectionShape::SrcBeamRect {
+            b: 400.0,
+            d: 600.0,
+            rebar,
+            steel_height: 400.0,
+            steel_width: 200.0,
+            steel_web_thick: 9.0,
+            steel_flange_thick: 16.0,
+        },
+    ] {
+        let mut model = cross_joint_model(h.clone(), h.clone());
+        model.sections[0].frame_use = Some(FrameSectionUse::Column);
+        for section in &mut model.sections {
+            section.material = Some(MaterialId(2));
+        }
+        let mut far = model.nodes[4].clone();
+        far.id = NodeId(5);
+        far.coord = [0.0, 6000.0, 3000.0];
+        model.nodes.push(far);
+        let mut section = shape.to_section(SectionId(2), "Y梁".into());
+        section.frame_use = Some(FrameSectionUse::Girder);
+        section.material = Some(MaterialId(0));
+        section.rebar_material = Some(MaterialId(1));
+        section.shear_rebar_material = Some(MaterialId(1));
+        section.steel_material = Some(MaterialId(2));
+        model.sections.push(section);
+        let mut beam = model.elements[3].clone();
+        beam.id = ElemId(4);
+        beam.nodes = smallvec::smallvec![NodeId(0), NodeId(5)];
+        beam.section = Some(SectionId(2));
+        model.elements.push(beam);
+        let zero = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+        let forces: Vec<_> = (0..5).map(|id| (ElemId(id), zero.as_slice())).collect();
+        for moments in [vec![], vec![(NodeId(0), [0.0, 1.0e8])]] {
+            let checks =
+                collect_joint_checks_with_long(&model, &forces, None, &moments, LoadTerm::Short);
+            assert!(
+                !checks
+                    .iter()
+                    .any(|(node, label, _)| *node == NodeId(0)
+                        && label.starts_with("パネルゾーン(S)")),
+                "{checks:?}"
+            );
+            for missing_section in [false, true] {
+                let mut invalid = model.clone();
+                let mut lower = invalid.sections[0].clone();
+                lower.id = SectionId(3);
+                lower.material = None;
+                invalid.sections.push(lower);
+                invalid.elements[0].section = if missing_section {
+                    None
+                } else {
+                    Some(SectionId(3))
+                };
+                let checks = collect_joint_checks_with_long(
+                    &invalid,
+                    &forces,
+                    None,
+                    &moments,
+                    LoadTerm::Short,
+                );
+                assert!(
+                    checks
+                        .iter()
+                        .any(|(node, label, outcome)| *node == NodeId(0)
+                            && label.starts_with("パネルゾーン(S)")
+                            && matches!(outcome,CheckOutcome::Skipped { reason }
+                        if reason.contains("接合部 ID 0")&&reason.contains("ID 0"))),
+                    "{checks:?}"
+                );
+            }
+        }
+    }
+}
