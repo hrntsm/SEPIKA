@@ -22,7 +22,7 @@ use crate::common::newton::{l2_norm, NewtonCriteria, STATIC_NEWTON};
 use crate::common::tangent::{
     add_support_spring_f_int, assemble_k, assemble_k_cached_ref, compute_f_int,
 };
-use crate::common::transaction::{revert_all, StateSnapshot};
+use crate::common::transaction::StateSnapshot;
 use crate::dynamic::damping::{Damping, DampingAccumulation};
 use sepika_core::dof::DofMap;
 use sepika_core::model::Model;
@@ -74,7 +74,7 @@ impl Default for NonlinearThCfg {
 ///
 /// 各時刻ステップで Newton 反復により内力（非線形復元力）と慣性力・減衰力・
 /// 地震外力の動的釣合いを満たす解を求める。収束時は要素状態を commit、
-/// 不収束時は Step 開始時の状態へ rollback する。
+/// 未収束・非有限応答時は時刻ステップ開始状態へ復元し、時刻・ステップ・理由付きエラーで停止する。
 /// `cfg.apply_long_term` が真の場合、時刻歴開始前に長期荷重を静的載荷し
 /// （プッシュオーバーの長期載荷フェーズと同じ考え方）、その変位・応力状態を初期条件とする。
 /// `initial_disp`/`initial_vel` は「長期解からの増分」としての動的初期条件で、
@@ -127,7 +127,6 @@ pub fn nonlinear_time_history_analysis(
     for b in behaviors.iter_mut() {
         b.set_time_step(dt);
     }
-    let mut non_converged_steps = 0usize;
     let mut peak_force_scale = 0.0_f64;
     let mut mu_hist: Vec<Vec<f64>> = vec![Vec::new(); model.elements.len()];
 
@@ -318,6 +317,7 @@ pub fn nonlinear_time_history_analysis(
 
     for n in 0..n_steps {
         let t_next = (n + 1) as f64 * dt;
+        let step_snapshot = StateSnapshot::capture(&behaviors);
 
         infl.force_at_into(wave, n + 1, &mut p_free_buf);
         reducer.reduce_f_into(&p_free_buf, &mut p_dyn_red_buf);
@@ -398,6 +398,22 @@ pub fn nonlinear_time_history_analysis(
             let scale = crate::common::newton::dynamic_force_scale(p_dyn_red, m_a_red, c_v_red);
             peak_force_scale = peak_force_scale.max(scale);
             let ref_norm = crate::common::newton::dynamic_reference_norm(scale, peak_force_scale);
+            if !r_norm.is_finite()
+                || !ref_norm.is_finite()
+                || !du_total
+                    .iter()
+                    .chain(&v_trial)
+                    .chain(&a_trial)
+                    .all(|v| v.is_finite())
+            {
+                return Err(rollback_failed_step(
+                    &mut behaviors,
+                    &step_snapshot,
+                    n + 1,
+                    t_next,
+                    "応答または釣合い残差に非有限値があります",
+                ));
+            }
             if cfg.newton.converged(r_norm, ref_norm) {
                 converged = true;
                 break;
@@ -423,10 +439,26 @@ pub fn nonlinear_time_history_analysis(
             };
             let k_eff =
                 k_eff_cache.combine_ref(n_indep, &[(1.0, k_t_red), (c2, c_cur), (c1, &m_red)]);
+            k_eff_solver.factorize(k_eff).map_err(|e| {
+                rollback_failed_step(
+                    &mut behaviors,
+                    &step_snapshot,
+                    n + 1,
+                    t_next,
+                    &format!("接線剛性の分解失敗: {e:?}"),
+                )
+            })?;
             k_eff_solver
-                .factorize(k_eff)
-                .map_err(|e| SolveError::Backend(format!("factor: {:?}", e)))?;
-            k_eff_solver.solve_into(r_red, &mut du_red_buf)?;
+                .solve_into(r_red, &mut du_red_buf)
+                .map_err(|e| {
+                    rollback_failed_step(
+                        &mut behaviors,
+                        &step_snapshot,
+                        n + 1,
+                        t_next,
+                        &e.to_string(),
+                    )
+                })?;
             let du_red = &du_red_buf;
             reducer.expand_u_into(du_red, &mut du_free_buf);
             let du_free = &du_free_buf;
@@ -437,19 +469,38 @@ pub fn nonlinear_time_history_analysis(
                 du_total[i] += du_red[i];
             }
 
-            apply_du_trial(model, dofmap, &mut behaviors, du_free)
-                .map_err(SolveError::InvalidInput)?;
+            if let Err(reason) = apply_du_trial(model, dofmap, &mut behaviors, du_free) {
+                return Err(rollback_failed_step(
+                    &mut behaviors,
+                    &step_snapshot,
+                    n + 1,
+                    t_next,
+                    &reason,
+                ));
+            }
         }
 
         if !converged {
-            if !du_total.iter().all(|x| x.is_finite()) {
-                revert_all(&mut behaviors);
-                return Err(SolveError::Backend(format!(
-                    "nonlinear time history: step {} で応答が発散しました（変位が有限値ではありません）。                     時間刻み dt を小さくするか、減衰・復元力特性の設定を見直してください",
-                    n
-                )));
-            }
-            non_converged_steps += 1;
+            let finite = du_total
+                .iter()
+                .chain(&v_trial)
+                .chain(&a_trial)
+                .all(|v| v.is_finite());
+            let reason = if finite {
+                format!(
+                    "全体釣合いが反復上限 {} 回までに収束しません",
+                    cfg.newton.max_iter
+                )
+            } else {
+                "応答に非有限値があり、全体釣合いが収束しません".to_owned()
+            };
+            return Err(rollback_failed_step(
+                &mut behaviors,
+                &step_snapshot,
+                n + 1,
+                t_next,
+                &reason,
+            ));
         }
 
         {
@@ -525,7 +576,7 @@ pub fn nonlinear_time_history_analysis(
     Ok(ResponseResult {
         wall_capacities,
         rc_wall_shear_method: model.stress_cfg.rc_wall_shear_method,
-        non_converged_steps,
+        non_converged_steps: 0,
         time,
         peak_disp,
         story_drift_angle,
@@ -536,6 +587,23 @@ pub fn nonlinear_time_history_analysis(
         applied_long_term: cfg.apply_long_term,
     })
 }
+
+fn rollback_failed_step(
+    behaviors: &mut [Box<dyn ElementBehavior>],
+    step_snapshot: &StateSnapshot,
+    step: usize,
+    time_s: f64,
+    reason: &str,
+) -> SolveError {
+    step_snapshot.restore(behaviors);
+    SolveError::Backend(format!(
+        "非線形時刻歴・step {step}・時刻 {time_s} s: {reason}"
+    ))
+}
+
+#[cfg(test)]
+#[path = "tests/rollback.rs"]
+mod rollback_tests;
 
 /// 長期漸増載荷の載荷率（0〜1）を追跡する状態機械。
 ///

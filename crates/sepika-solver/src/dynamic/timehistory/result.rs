@@ -31,11 +31,8 @@ pub struct ResponseResult {
     /// 読込時は false で補う。
     #[serde(default)]
     pub applied_long_term: bool,
-    /// Newton 反復が上限内に収束しなかった時刻ステップ数（非線形時刻歴のみ）。
-    ///
-    /// 0 でない場合、そのステップは残差の収束を確認できないまま確定しており、
-    /// 応答値の信頼性が下がっているため、表示側は利用者へ注記すること。
-    ///
+    /// Newton 反復が上限内に収束しなかった時刻ステップ数。
+    /// 骨組非線形解析は未収束時にエラーとなり、成功結果では 0。
     /// 読込時は 0 で補う。
     #[serde(default)]
     pub non_converged_steps: usize,
