@@ -263,6 +263,59 @@ fn owned_udl_model() -> Model {
 }
 
 #[test]
+fn short_brace_distribution_public_static_paths_preserve_force_and_first_moment() {
+    use crate::statics::analysis::Analysis;
+    for (wi, wj, resultant, first_moment) in [
+        (1e16, 3e16, 2000.0, 7.0 / 6.0 * 1e-10),
+        (3e16, 1e16, 2000.0, 5.0 / 6.0 * 1e-10),
+        (-1e16, -3e16, -2000.0, -7.0 / 6.0 * 1e-10),
+        (1e16, -1e16, 0.0, -1.0 / 6.0 * 1e-10),
+    ] {
+        let mut model = ss_beam(
+            1.0,
+            vec![MemberLoad::manual(
+                ElemId(0),
+                [0.0, 1.0, 0.0],
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: 1e-13,
+                    w1: wi,
+                    w2: wj,
+                },
+            )],
+        );
+        model.elements[0].kind = ElementKind::Brace {
+            tension_only: false,
+        };
+        model.sections[0].frame_use = Some(FrameSectionUse::Brace);
+        for node in &mut model.nodes {
+            node.restraint = Dof6Mask(0b111101);
+            node.support_spring = Some([0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
+        }
+        let analysis = Analysis::prepare(&model).unwrap();
+        for result in [
+            linear_static_once(&model, LoadCaseId(1)).unwrap(),
+            analysis.linear_static(LoadCaseId(1)).unwrap(),
+        ] {
+            let [ri, rj] = [result.disp[0][1], result.disp[1][1]];
+            assert!(
+                (ri + rj - resultant).abs() < 1e-10,
+                "{ri:e} + {rj:e} != {resultant:e}"
+            );
+            assert!(
+                (rj / first_moment - 1.0).abs() < 2e-14,
+                "{rj:e} != {first_moment:e}"
+            );
+            for (_, forces) in result.member_forces {
+                for (_, force) in forces.at {
+                    assert_eq!(force, [0.0; 6]);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn linear_rhs_rejects_missing_or_reordered_behaviors() {
     let mut model = owned_udl_model();
     let mut second = model.elements[0].clone();
