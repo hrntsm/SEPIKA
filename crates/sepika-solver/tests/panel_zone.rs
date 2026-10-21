@@ -856,3 +856,189 @@ fn panel_728_public_dynamic_entries() {
         }
     }
 }
+
+#[test]
+fn beam_736_public_dynamic_entries() {
+    use sepika_solver::dynamic::damping::Damping;
+    use sepika_solver::dynamic::timehistory::{
+        linear_time_history_analysis, GroundMotion, NewmarkCfg,
+    };
+    for with_panel in [false, true] {
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
+        ] {
+            for g in [80_000.0, f64::MAX] {
+                let mut model = l_frame(with_panel);
+                model.elements[0].kind = kind;
+                model.materials[0].density = 7.85e-9;
+                model.materials[0].shear = Some(80_000.0);
+                let dof = DofMap::build(&model);
+                let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dof);
+                let stiffness = sepika_solver::common::assemble::assemble_global_k(&model, &dof);
+                let mut solver = sepika_math::solver::make_solver(
+                    sepika_math::solver::SolverBackend::DirectSparseCholesky,
+                );
+                solver.factorize(&reducer.reduce_k(&stiffness)).unwrap();
+                model.materials[0].shear = Some(g);
+                let eigen = sepika_solver::dynamic::eigen::solve_eigen(&model, &dof, &reducer, 1);
+                let eigen_with_solver = sepika_solver::dynamic::eigen::solve_eigen_with_solver(
+                    &model,
+                    &dof,
+                    &reducer,
+                    1,
+                    solver.as_ref(),
+                );
+                let wave = GroundMotion {
+                    dt: 0.01,
+                    accel_x: vec![0.0, 1.0, 0.0],
+                    accel_y: None,
+                    accel_theta: None,
+                };
+                let damping = Damping::MassProportional { h: 0.0, omega: 1.0 };
+                let history = linear_time_history_analysis(
+                    &model,
+                    &dof,
+                    &reducer,
+                    &wave,
+                    &NewmarkCfg::average_accel(),
+                    &damping,
+                    &[],
+                    &[],
+                    false,
+                    None,
+                );
+                let state = sepika_solver::dynamic::timehistory::TimeStepState {
+                    step: 0,
+                    time: 0.0,
+                    disp_red: vec![0.0; reducer.n_indep],
+                    vel_red: vec![0.0; reducer.n_indep],
+                    accel_red: vec![0.0; reducer.n_indep],
+                };
+                let resumed = sepika_solver::dynamic::timehistory::linear_time_history_from_state(
+                    &model,
+                    &dof,
+                    &reducer,
+                    &wave,
+                    &NewmarkCfg::average_accel(),
+                    &damping,
+                    &state,
+                    false,
+                    None,
+                );
+                let linear =
+                    sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(1));
+                let mass = sepika_solver::common::assemble::assemble_global_m(
+                    &model,
+                    &dof,
+                    sepika_element::behavior::MassOption::Consistent,
+                );
+                let results = [
+                    eigen.map(|_| ()),
+                    eigen_with_solver.map(|_| ()),
+                    history.map(|_| ()),
+                    resumed.map(|_| ()),
+                    linear.map(|_| ()),
+                    mass.map(|_| ()),
+                ];
+                for (entry, result) in [
+                    "eigen",
+                    "eigen_with_solver",
+                    "history",
+                    "resumed",
+                    "linear",
+                    "mass",
+                ]
+                .into_iter()
+                .zip(results)
+                {
+                    println!("panel={with_panel}, kind={kind:?}, G={g:e}, {entry}: {result:?}");
+                    if g == 80_000.0 {
+                        result.unwrap();
+                    } else {
+                        let error = result.unwrap_err().to_string();
+                        let reason = if with_panel {
+                            "接合部 ID 0 のパネル未算定: 柱 ID 1: せん断剛性 G・Ve"
+                        } else {
+                            "部材 ID 0 の弾性梁"
+                        };
+                        assert!(error.contains(reason), "{entry}: {error}");
+                        if !with_panel {
+                            assert!(
+                                error.contains("GJ/L") && error.contains("非有限"),
+                                "{error}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn beam_736_preparation_and_nonlinear_entries_return_stiffness_diagnostics() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for g in [80_000.0, f64::MAX] {
+            let mut model = l_frame(false);
+            model.elements[0].kind = kind;
+            model.materials[0].fy = Some(235.0);
+            model.materials[0].shear = Some(g);
+            model.stories = [(0.0, vec![NodeId(2)]), (3000.0, vec![NodeId(0), NodeId(1)])]
+                .into_iter()
+                .enumerate()
+                .map(|(i, (elevation, node_ids))| sepika_core::model::Story {
+                    wall_weights: vec![],
+                    level_kind: Default::default(),
+                    structure: Default::default(),
+                    id: sepika_core::ids::StoryId(i as u32),
+                    name: format!("{i}F"),
+                    elevation,
+                    node_ids,
+                    seismic_weight: Some(10_000.0),
+                    weight_override: None,
+                    dynamic_mass: None,
+                    standard_floor_load: None,
+                    column_finish_area_weight: 0.0,
+                    fireproof: Default::default(),
+                })
+                .collect();
+            let prepared = sepika_solver::statics::analysis::Analysis::prepare(&model)
+                .map(|_| ())
+                .map_err(|e| e.to_string());
+            let dof = DofMap::build(&model);
+            let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dof);
+            let nonlinear = sepika_solver::nonlinear::pushover::pushover_analysis_recording(
+                &model,
+                &dof,
+                &reducer,
+                sepika_solver::statics::analysis::SeismicDir::X,
+                1,
+                sepika_solver::nonlinear::pushover::PushoverTarget::from_max_disp(10.0),
+                Default::default(),
+                false,
+                false,
+                Default::default(),
+            )
+            .map(|_| ());
+            for (entry, result) in [("prepare", prepared), ("pushover", nonlinear)] {
+                if g == 80_000.0 {
+                    result.unwrap_or_else(|e| panic!("{kind:?} {entry}: {e}"));
+                } else {
+                    let error = result.unwrap_err();
+                    assert!(
+                        error.contains("部材 ID 0")
+                            && error.contains("GJ/L")
+                            && error.contains("非有限"),
+                        "{kind:?} {entry}: {error}"
+                    );
+                }
+            }
+        }
+    }
+}

@@ -37,8 +37,24 @@ impl BeamElement {
         Self::try_new(data, model).unwrap_or_else(|error| panic!("弾性梁を構築できません: {error}"))
     }
 
-    /// 採用する材料の G [N/mm²] が正の有限値でなければ、部材 ID 付きのエラーを返す。
+    /// 採用 G [N/mm²] が不正、または弾性梁の可撓部剛性が非有限なら、部材 ID 付きのエラーを返す。
     pub fn try_new(data: &sepika_core::model::ElementData, model: &Model) -> Result<Self, String> {
+        let beam = Self::resolve_properties(data, model)?;
+        if matches!(
+            data.kind,
+            sepika_core::model::ElementKind::Beam
+                | sepika_core::model::ElementKind::Fiber
+                | sepika_core::model::ElementKind::MultiSpring
+        ) {
+            beam.checked_stiffness_flex_raw()?;
+        }
+        Ok(beam)
+    }
+
+    pub(crate) fn resolve_properties(
+        data: &sepika_core::model::ElementData,
+        model: &Model,
+    ) -> Result<Self, String> {
         let geom = crate::transform::EndGeometry::of_element(data, model);
         let [n0, n1] = geom.nodes;
         let [p0, p1] = geom.coords;
@@ -249,7 +265,7 @@ impl BeamElement {
             Err(error) => (Default::default(), Some(error)),
         };
 
-        Ok(Self {
+        let beam = Self {
             id: data.id,
             e,
             g,
@@ -275,6 +291,7 @@ impl BeamElement {
             committed_member_loads: Vec::new(),
             trial_member_loads: Vec::new(),
             local_stiffness_cache: std::sync::OnceLock::new(),
-        })
+        };
+        Ok(beam)
     }
 }

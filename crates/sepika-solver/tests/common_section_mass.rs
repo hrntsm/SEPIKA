@@ -1297,3 +1297,60 @@ fn linear_time_history_with_state_and_analysis_preserve_actual_wall_options_reas
         }
     }
 }
+
+#[test]
+fn beam_736_wall_column_mass_gate_returns_finite_input_stiffness_diagnostics() {
+    use sepika_solver::dynamic::eigen::solve_eigen_with_solver;
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for g in [80_000.0, f64::MAX] {
+            let mut model = wall_connection_fixture(kind);
+            for node in &mut model.nodes {
+                node.restraint = Dof6Mask::FIXED;
+            }
+            model.materials[0].shear = Some(g);
+            let dofmap = DofMap::build(&model);
+            let reducer = Reducer::build(&model, &dofmap);
+            let solver = sepika_math::solver::make_solver(
+                sepika_math::solver::SolverBackend::DirectSparseCholesky,
+            );
+            let eigen = solve_eigen(&model, &dofmap, &reducer, 0).map(|_| ());
+            let eigen_with_solver =
+                solve_eigen_with_solver(&model, &dofmap, &reducer, 0, solver.as_ref()).map(|_| ());
+            let mass = assemble_global_m(&model, &dofmap, MassOption::Consistent).map(|_| ());
+            for (entry, result) in [
+                ("eigen", eigen),
+                ("eigen_with_solver", eigen_with_solver),
+                ("mass", mass),
+            ] {
+                println!("{kind:?}, G={g:e}, {entry}: {result:?}");
+                if g == 80_000.0 {
+                    result.unwrap();
+                } else {
+                    let error = result.unwrap_err().to_string();
+                    assert!(
+                        error.contains("部材 ID 0・壁 ID [4]")
+                            && error.contains("GJ/L")
+                            && error.contains("非有限"),
+                        "{entry}: {error}"
+                    );
+                }
+            }
+            let pdelta = sepika_element::factory::ensure_wall_side_column_analysis(
+                &model,
+                None,
+                "固有値解析",
+                true,
+                Some(MassOption::Consistent),
+            )
+            .unwrap_err();
+            assert!(
+                pdelta.contains("部材 ID 0・壁 ID [4]") && pdelta.contains("P-Δ"),
+                "{pdelta}"
+            );
+        }
+    }
+}

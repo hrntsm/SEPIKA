@@ -1284,3 +1284,65 @@ fn rc_reference_backbone_diagnostics_follow_the_actual_strength_basis() {
         .unwrap();
     assert!((backbone[2][1] - nominal[2][1] * 0.8).abs() < 1e-6);
 }
+
+#[test]
+fn finite_extreme_g_rejects_computed_beam_stiffness_without_a_material_upper_limit() {
+    use crate::behavior::{ElementBehavior, MassOption};
+    use crate::frame::beam::BeamElement;
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = beam_model(steel_h_section(), steel_material());
+        model.elements[0].kind = kind;
+        for end_cond in [
+            [EndCondition::Fixed; 2],
+            [EndCondition::Pinned, EndCondition::Fixed],
+            [
+                EndCondition::SemiRigid { k_theta: 1.0e9 },
+                EndCondition::Fixed,
+            ],
+        ] {
+            model.elements[0].end_cond = end_cond;
+            model.materials[0].shear = Some(80_000.0);
+            let mut beam = BeamElement::try_new(&model.elements[0], &model).unwrap();
+            assert!(beam.try_mass_matrix(MassOption::Consistent).is_ok());
+            assert!(elastic_stiffness_input_issue(&model.elements[0], &model).is_none());
+            model.materials[0].shear = Some(f64::MAX);
+            let reason = BeamElement::try_new(&model.elements[0], &model)
+                .err()
+                .unwrap();
+            assert!(
+                reason.contains("部材 ID 0")
+                    && reason.contains("GJ/L")
+                    && reason.contains("非有限"),
+                "{reason}"
+            );
+            assert_eq!(
+                elastic_stiffness_input_issue(&model.elements[0], &model),
+                Some(reason.clone())
+            );
+            for analysis in [
+                sepika_core::model::AnalysisKind::Incremental,
+                sepika_core::model::AnalysisKind::TimeHistory,
+            ] {
+                assert!(ensure_nonlinear_input_for_kind(&model, analysis)
+                    .unwrap_err()
+                    .contains(&reason));
+            }
+            beam.g = f64::MAX;
+            assert_eq!(
+                beam.try_mass_matrix(MassOption::Consistent).err().unwrap(),
+                reason
+            );
+        }
+        model.sections[0].shape = None;
+        model.sections[0].j = 0.0;
+        model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
+        model.elements[0].end_cond = [EndCondition::Fixed; 2];
+        let beam = BeamElement::try_new(&model.elements[0], &model).unwrap();
+        assert_eq!(beam.g, f64::MAX);
+        assert!(beam.local_stiffness().data.iter().all(|v| v.is_finite()));
+    }
+}
