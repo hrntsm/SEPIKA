@@ -1042,3 +1042,81 @@ fn beam_736_preparation_and_nonlinear_entries_return_stiffness_diagnostics() {
         }
     }
 }
+
+#[test]
+fn panel_753_public_nonlinear_time_history_propagates_axial_limit() {
+    use sepika_core::dof::Dof;
+    use sepika_solver::dynamic::damping::{Damping, DampingAccumulation};
+    use sepika_solver::dynamic::timehistory::{
+        nonlinear_time_history_analysis, GroundMotion, NewmarkCfg, NonlinearThCfg,
+    };
+    for (n, accepted, moving) in [
+        (0.0, true, false),
+        (0.6, true, false),
+        (0.9999, true, false),
+        (1.0, false, false),
+        (1.1, false, false),
+        (0.6, false, true),
+    ] {
+        let mut model = l_frame(true);
+        model.materials[0].fy = Some(235.0);
+        model.materials[0].density = 7.85e-9;
+        let dof = DofMap::build(&model);
+        let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dof);
+        assert_eq!(reducer.n_indep, dof.n_active());
+        let mut displacement = vec![0.0; dof.n_active()];
+        displacement[dof.active(Dof::Uz as usize).unwrap() as usize] =
+            -n * 235.0 * 3000.0 / 205000.0;
+        let mut velocity = vec![0.0; dof.n_active()];
+        if moving {
+            velocity[dof.active(Dof::Uz as usize).unwrap() as usize] = -1_000_000.0;
+        }
+        let result = nonlinear_time_history_analysis(
+            &model,
+            &dof,
+            &reducer,
+            &GroundMotion {
+                dt: 0.01,
+                accel_x: vec![0.0; if moving { 2 } else { 1 }],
+                accel_y: None,
+                accel_theta: None,
+            },
+            &NewmarkCfg::average_accel(),
+            &Damping::MassProportional { h: 0.0, omega: 1.0 },
+            DampingAccumulation::NonCumulative,
+            &displacement,
+            &velocity,
+            NonlinearThCfg {
+                apply_long_term: false,
+                ..Default::default()
+            },
+        );
+        println!(
+            "panel753 public dynamic: n={n}, moving={moving}, result={:?}",
+            result.as_ref().map(|_| "ok").map_err(|e| e.to_string())
+        );
+        assert_eq!(result.is_ok(), accepted);
+        if accepted {
+            let response = result.unwrap();
+            assert!(response.nonlinear);
+            assert_eq!(response.time, vec![0.0]);
+            assert!(
+                (response.recording.unwrap().node_disp[0][0][2] + n * 235.0 * 3000.0 / 205000.0)
+                    .abs()
+                    < 1e-12
+            );
+        } else {
+            let error = result.unwrap_err().to_string();
+            if moving {
+                assert!(
+                    error.contains("step 1") && error.contains("時刻 0.01 s"),
+                    "{error}"
+                );
+            }
+            assert!(
+                error.contains("接合部 ID 0") && error.contains("軸耐力到達・超過"),
+                "{error}"
+            );
+        }
+    }
+}

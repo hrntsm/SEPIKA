@@ -1225,3 +1225,20 @@ fn sm520_old_335_and_out_of_range_success_expire_without_save_or_display_reauthe
         }
     }
 }
+
+#[test]
+fn panel_753_yield_gate_expires_analysis35_and_keeps_current_results() {
+    let app = calculated();
+    for (version, keep) in [(35, false), (ANALYSIS_CONTRACT_VERSION, true)] {
+        let (loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("panel753-contract-{version}"),
+        );
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(results.has_analysis_results(), keep);
+        assert_eq!(results.has_design_results(), keep);
+        std::fs::remove_file(path).unwrap();
+    }
+}

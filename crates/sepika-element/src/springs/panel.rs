@@ -45,14 +45,18 @@ struct ColumnAxial {
 }
 
 impl ColumnAxial {
-    /// 現在の軸力比 `n`（圧縮を正、引張は 0、1.0 でクランプ）。
-    fn axial_ratio(&self) -> f64 {
+    /// 柱の弾性軸力を基準軸耐力で除した比（圧縮正、引張負）。
+    fn compression_ratio(&self) -> f64 {
         let mut d = 0.0;
         for k in 0..3 {
             d += (self.trial[6 + k] - self.trial[k]) * self.axis[k];
         }
         let n = self.ea_over_l * d;
-        ((-n).max(0.0) / self.n_ref).clamp(0.0, 1.0)
+        -n / self.n_ref
+    }
+
+    fn axial_ratio(&self) -> f64 {
+        self.compression_ratio().clamp(0.0, 1.0)
     }
 }
 
@@ -327,7 +331,7 @@ impl PanelZone {
         if self.springs.is_none() || self.column.is_none() {
             return;
         }
-        let pmy = self.yield_moment().max(0.02 * self.pmy0);
+        let pmy = self.yield_moment();
         if let Some(sp) = self.springs.as_mut() {
             sp[0].set_yield(pmy);
             sp[1].set_yield(pmy);
@@ -385,18 +389,35 @@ impl ElementBehavior for PanelZone {
             return Err(crate::behavior::ElementUpdateError(reason.clone()));
         }
         crate::behavior::validate_trial_increment(du, self.n_dof())?;
-        for i in 0..2 {
-            if let Some(&d) = du.data.get(i) {
-                self.trial_disp[i] += d;
-            }
+        let mut trial_disp = self.trial_disp;
+        for (i, displacement) in trial_disp.iter_mut().enumerate() {
+            *displacement += du.data[i];
         }
-        if let Some(col) = self.column.as_mut() {
+        let mut column = self.column.clone();
+        if let Some(col) = column.as_mut() {
             for i in 0..12 {
-                if let Some(&d) = du.data.get(2 + i) {
-                    col.trial[i] += d;
+                col.trial[i] += du.data[2 + i];
+            }
+            if self.springs.is_some() {
+                let n = col.compression_ratio();
+                let clamped_n = col.axial_ratio();
+                let pmy = self.pmy0 * (1.0 - clamped_n * clamped_n).max(0.0).sqrt();
+                if !n.is_finite() || !pmy.is_finite() || pmy < 1e-9 {
+                    return Err(crate::behavior::ElementUpdateError(format!(
+                        "接合部 ID {} のパネル未対応: 軸力比 n={n} の降伏モーメント pMy={pmy} N·mm は有限かつ 1e-9 N·mm 以上である必要があります（軸耐力到達・超過を含む）",
+                        self.node.0
+                    )));
                 }
             }
         }
+        if !trial_disp.iter().all(|value| value.is_finite()) {
+            return Err(crate::behavior::ElementUpdateError(format!(
+                "接合部 ID {} のパネル変形角が非有限です",
+                self.node.0
+            )));
+        }
+        self.trial_disp = trial_disp;
+        self.column = column;
         self.apply_axial_interaction();
         let gp = self.to_panel_frame(self.trial_disp);
         if let Some(sp) = self.springs.as_mut() {
@@ -1434,6 +1455,144 @@ mod tests {
                 }
                 assert!((panel.axial_ratio() - 0.6).abs() < 1e-12);
             }
+        }
+    }
+    #[test]
+    fn panel_753_high_compression_matches_public_yield_without_floor() {
+        let (model, data) = cross_joint_model();
+        let ctx = Ctx { model: &model };
+        let (_, moment, gamma) = panel_724_reference_scales();
+        for (n, expected_yield, expected_response) in [
+            (0.9997, 0.0244930602416276, 0.0252481296392114),
+            (0.9998, 0.0199989999749987, 0.0207990099752487),
+            (0.9999, 0.0141417820659208, 0.0150003642452616),
+        ] {
+            let mut panel = PanelZone::new_nonlinear(&data, &model);
+            panel
+                .update_state(&panel_724_increment(0.1 * gamma, n), false, &ctx)
+                .unwrap();
+            let published = panel.yield_moment() / moment;
+            for spring in panel.springs.as_ref().unwrap() {
+                assert!((spring.reference_stress() / moment - expected_yield).abs() < 1e-11);
+            }
+            let response = panel.panel_moments()[0] / moment;
+            println!("panel753 corrected: n={n}, published={published}, response={response}");
+            assert!((published - expected_yield).abs() < 1e-11);
+            assert!((response - expected_response).abs() < 1e-11);
+        }
+    }
+
+    #[test]
+    fn panel_753_rejects_axial_limit_without_changing_committed_or_trial_state() {
+        let (model, data) = cross_joint_model();
+        let ctx = Ctx { model: &model };
+        let (_, _, gamma) = panel_724_reference_scales();
+        for commit in [false, true] {
+            for n in [1.0, 1.1] {
+                let mut panel = PanelZone::new_nonlinear(&data, &model);
+                panel
+                    .update_state(&panel_724_increment(0.1 * gamma, 0.9999), true, &ctx)
+                    .unwrap();
+                panel
+                    .update_state(&panel_724_increment(-0.01 * gamma, 0.0), false, &ctx)
+                    .unwrap();
+                let before = panel.serialize_checkpoint();
+                let moments = panel.panel_moments();
+                let error = panel
+                    .update_state(&panel_724_increment(-0.1 * gamma, n - 0.9999), commit, &ctx)
+                    .unwrap_err()
+                    .to_string();
+                assert!(
+                    error.contains("接合部 ID 0") && error.contains("軸耐力到達・超過"),
+                    "{error}"
+                );
+                assert_eq!(panel.serialize_checkpoint(), before);
+                assert_eq!(panel.panel_moments(), moments);
+                panel.revert_state();
+                assert!((panel.panel_moments()[0] / panel.pmy0 - 0.0150003642452616).abs() < 1e-11);
+            }
+        }
+    }
+
+    #[test]
+    fn panel_753_material_setting_boundary_is_inclusive_without_residual_floor() {
+        let (model, data) = cross_joint_model();
+        let ctx = Ctx { model: &model };
+        for (moment, accepted) in [
+            (1e-9, true),
+            (f64::from_bits(1e-9_f64.to_bits() - 1), false),
+            (f64::INFINITY, false),
+        ] {
+            let mut panel = PanelZone::new_nonlinear(&data, &model);
+            panel.pmy0 = moment;
+            let before = panel.serialize_checkpoint();
+            let result = panel.update_state(&panel_724_increment(0.0, 0.0), true, &ctx);
+            assert_eq!(result.is_ok(), accepted);
+            if accepted {
+                assert_eq!(panel.yield_moment(), 1e-9);
+                for spring in panel.springs.as_ref().unwrap() {
+                    assert_eq!(spring.reference_stress(), 1e-9);
+                }
+            } else {
+                assert!(result.unwrap_err().to_string().contains("1e-9 N·mm"));
+                assert_eq!(panel.serialize_checkpoint(), before);
+            }
+        }
+    }
+
+    #[test]
+    fn panel_753_high_compression_cycle_restores_and_retries_in_both_directions() {
+        let (model, data) = cross_joint_model();
+        let ctx = Ctx { model: &model };
+        let (stiffness, moment, gamma) = panel_724_reference_scales();
+        for sign in [-1.0, 1.0] {
+            let mut panel = PanelZone::new_nonlinear(&data, &model);
+            panel
+                .update_state(&panel_724_increment(sign * 0.1 * gamma, 0.9999), true, &ctx)
+                .unwrap();
+            assert!((panel.panel_moments()[0] / moment - sign * 0.0150003642452616).abs() < 1e-11);
+            assert!((panel.tangent_stiffness(&ctx).get(0, 0) / stiffness - 0.01).abs() < 1e-12);
+            let committed = panel.serialize_checkpoint();
+            panel
+                .update_state(&panel_724_increment(-sign * 0.01 * gamma, 0.0), false, &ctx)
+                .unwrap();
+            assert!((panel.panel_moments()[0] / moment - sign * 0.0050003642452616).abs() < 1e-11);
+            let snapshot = panel.snapshot_state();
+            let checkpoint = panel.serialize_checkpoint();
+            for use_checkpoint in [false, true] {
+                panel
+                    .update_state(&panel_724_increment(-sign * 0.19 * gamma, 0.0), true, &ctx)
+                    .unwrap();
+                assert!(
+                    (panel.panel_moments()[0] / moment + sign * 0.0150003642452616).abs() < 1e-11
+                );
+                if use_checkpoint {
+                    panel.deserialize_checkpoint(&checkpoint).unwrap();
+                } else {
+                    panel.restore_state(snapshot.as_ref());
+                }
+                assert_eq!(panel.serialize_checkpoint(), checkpoint);
+                panel.revert_state();
+                assert_eq!(panel.serialize_checkpoint(), committed);
+                panel
+                    .update_state(&panel_724_increment(-sign * 0.01 * gamma, 0.0), false, &ctx)
+                    .unwrap();
+                assert_eq!(panel.serialize_checkpoint(), checkpoint);
+            }
+        }
+    }
+
+    #[test]
+    fn panel_753_nonfinite_axial_arithmetic_is_rejected_atomically() {
+        let (model, data) = cross_joint_model();
+        let ctx = Ctx { model: &model };
+        for displacement in [f64::MAX, -f64::MAX] {
+            let mut panel = PanelZone::new_nonlinear(&data, &model);
+            let before = panel.serialize_checkpoint();
+            let mut increment = panel_724_increment(0.0, 0.0);
+            increment.data[10] = displacement;
+            assert!(panel.update_state(&increment, false, &ctx).is_err());
+            assert_eq!(panel.serialize_checkpoint(), before);
         }
     }
 }

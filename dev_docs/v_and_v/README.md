@@ -104,7 +104,8 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
-| [仕口パネルrevert復元_Issue751_2026-10.md](仕口パネルrevert復元_Issue751_2026-10.md) | 軸力依存降伏値を含む確定状態への直接revertと再試行 | 🔶（直接Verification3・element511成功。関連検証は同レポート、連成接線・高n下限・Validationは別範囲） |
+| [仕口パネル高軸力降伏域_Issue753_2026-10.md](仕口パネル高軸力降伏域_Issue753_2026-10.md) | 高軸力の公開降伏値・実材料閾値と適用域、旧解析成果の利用制限 | 🔶（旧下限・直接5・element516・solver14・App保存契約のVerification。途中試行伝播/先行失敗は同記録、Validation/最終ゲート未） |
+| [仕口パネルrevert復元_Issue751_2026-10.md](仕口パネルrevert復元_Issue751_2026-10.md) | 軸力依存降伏値を含む確定状態への直接revertと再試行 | 🔶（直接Verification3・element511成功。関連検証は同レポート、連成接線・Validationは別範囲、高nは#7h） |
 | [仕口パネル軸力と履歴_Issue724_2026-10.md](仕口パネル軸力と履歴_Issue724_2026-10.md) | 試行変位による軸力推定・耐力更新・連成接線・履歴と失敗復元 | 🔶（独立Verification4・element508/solver380・Clippy成功。赤再現2件は#751/#752、高n下限は算術のみで#753へ分離。原典§6・Validation・最終ゲート未確認） |
 | [STB組立BOX暫定拒否_Issue742_2026-10.md](STB組立BOX暫定拒否_Issue742_2026-10.md) | 参照組立BOXの入力境界と同厚性能保持、GUI読込失敗時の状態保持 | 🔶（変更前40観測の誤受理を再現、IO240成功・Clippy/文書検証成功。GUI default/gui各focused2・既存module11/GUI all-target Clippy成功。Validation・最終ゲート未確認） |
 | [STB_CFT鋼管標準密度_Issue741_2026-10.md](STB_CFT鋼管標準密度_Issue741_2026-10.md) | 既知標準鋼材のCFT単独・通常鋼混在の密度と独立面積質量 | 🔶（変更前両公開入口の密度0/質量Err再現、修正後core/IO822成功・共有helper物性4成功・App GUI関連6成功・Clippy/fmt/文書検証成功。Validation・最終ゲート未確認） |
@@ -304,8 +305,9 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 7c | フランジ位置の標準形式ゲート | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-solver / sepika-app / sepika-mcp | panel_zone.rs / joint_wiring / prepare.rs / viewer / design_check.rs / summary.rs | [Issue505独立期待値・状態](フランジ位置の標準形式ゲート_Issue505_2026-10.md) | 横断 | 🔶（#455実入力・正式段違い式・公開全構成CI・Validation未） |
 | 7d | 仕口パネルの参照柱 | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-app | panel_zone.rs / springs/panel.rs / springs/panel_gen.rs / joint_wiring / prepare.rs / result_contract_tests.rs | [Issue585受入と確認状態](仕口パネル参照柱_Issue585_2026-10.md) | 横断 | 🔶（直接・関連回帰Verification成功、原典/手動GUI/Validation・最終headゲート未） |
 | 7e | 明示仕口パネルの採用G入力検証 | sepika-core / sepika-element / sepika-solver / sepika-job / sepika-app | panel_zone.rs / springs/panel.rs / tests/panel_zone.rs / prepare.rs / result_contract_tests.rs | [Issue728の公開入口と正常対照](明示仕口パネル採用G_Issue728_2026-10.md) | 横断 | 🔶（限定Verification、後続ゲート・Validation未） |
+| 7h | 仕口パネルの高軸力降伏域 | sepika-element / sepika-solver / sepika-app / sepika-mcp | springs/panel.rs / nonlinear / result_contract_tests.rs | [Issue753の独立期待値と実応答](仕口パネル高軸力降伏域_Issue753_2026-10.md) | 横断 | 🔶（適用域・履歴・途中solver試行の拒否・旧35失効のVerification。Validation・最終ゲート未） |
 | 7g | 仕口パネルの直接revert | sepika-element | springs/panel.rs | [Issue751の復元・再試行契約](仕口パネルrevert復元_Issue751_2026-10.md#直接verification) | 要素 | 🔶（直接Verification成功、実験Validation・最終ゲート未確認） |
-| 7f | 仕口パネルの軸力更新と非線形履歴 | sepika-element / sepika-material | springs/panel.rs / uniaxial/bilinear.rs | [Issue724の状態対応と独立照合](仕口パネル軸力と履歴_Issue724_2026-10.md) | 要素 | 🔶（独立Verification4成功。直接revertは#7gで修正・検証、#752/#753・原典§6・Validation未確認） |
+| 7f | 仕口パネルの軸力更新と非線形履歴 | sepika-element / sepika-material | springs/panel.rs / uniaxial/bilinear.rs | [Issue724の状態対応と独立照合](仕口パネル軸力と履歴_Issue724_2026-10.md) | 要素 | 🔶（独立Verification4成功。直接revertは#7gで修正・検証、#752・原典§6・Validation未確認、高nは#7h） |
 | 8 | 線形静的解析 | sepika-solver | linear.rs | `test_*`（座標変換回帰 `test_beam_to_global_transverse_uses_correct_inertia` 含む） | P2 | ✅ |
 | 9 | 固有値解析 | sepika-solver | eigen.rs | `test_1dof_period` | P2 | ✅ |
 | 10 | 地震力標準式・適用診断 | sepika-load / sepika-solver / sepika-app / sepika-mcp | ai.rs / statics/analysis/seismic.rs / app/tests.rs / design/holding.rs / nonlinear/pushover/driver.rs / server.rs | [Issue486の独立期待値・入口対応表](地震力標準式と適用診断_Issue486_2026-10.md) | P2 | 🔶（標準式Verification、精算/PH/地域適用等は未対応） |
