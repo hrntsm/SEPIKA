@@ -104,7 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
-| [仕口パネル柱2軸_Issue757_2026-10.md](仕口パネル柱2軸_Issue757_2026-10.md) | 柱2主軸と仕事共役な座標・部材接続・方向別成果 | 🔶（不正参照方向修正後core605/要素527/solver385・保存2、関連Clippy・文書検査成功。修正前App472/GUI保存21を区別。H弱純せん断のValidation・最終headゲート未確認） |
+| [仕口パネル柱2軸_Issue757_2026-10.md](仕口パネル柱2軸_Issue757_2026-10.md) | 柱2主軸と仕事共役な座標・部材接続・方向別成果 | 🔶（CIのjob診断期待を追随しjob159・workspace3851＋doc2成功/4 ignored、関連Clippy・文書検査成功。不正ref修正後の直接証拠と先行GUIを区別。Validation・最終headゲート未確認） |
 | [仕口パネル高軸力降伏域_Issue753_2026-10.md](仕口パネル高軸力降伏域_Issue753_2026-10.md) | 高軸力の公開降伏値・実材料閾値と適用域、旧解析成果の利用制限 | 🔶（旧下限・直接5・element516・solver14・App保存契約のVerification。途中試行伝播/先行失敗は同記録、Validation/最終ゲート未） |
 | [仕口パネルrevert復元_Issue751_2026-10.md](仕口パネルrevert復元_Issue751_2026-10.md) | 軸力依存降伏値を含む確定状態への直接revertと再試行 | 🔶（直接Verification3・element511成功。関連検証は同レポート、連成接線・Validationは別範囲、高nは#7h） |
 | [仕口パネル軸力と履歴_Issue724_2026-10.md](仕口パネル軸力と履歴_Issue724_2026-10.md) | 試行変位による軸力推定・耐力更新・連成接線・履歴と失敗復元 | 🔶（独立Verification4・element508/solver380・Clippy成功。赤再現2件は#751/#752、高n下限は算術のみで#753へ分離。原典§6・Validation・最終ゲート未確認） |
@@ -303,7 +303,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 7 | パネルゾーンのフェイスモーメント | sepika-element | panel.rs | `test_face_moments_reference_case1`（pQc=851.135kN 等）, `test_face_moments_reference_case2_t_joint`（ト型） | P1 | ✅ |
 | 7a | 仕口パネル（せん断変形角の追加自由度） | sepika-solver | tests/panel_zone.rs | `test_panel_shear_angle_matches_closed_form`（M=K·γ）, `test_panel_dof_equilibrium_residual_is_zero`（釣合い残差がゼロ）。定式化と残課題は [仕口パネル_定式化と検証_2026-07.md](仕口パネル_定式化と検証_2026-07.md) | P1 | ✅ |
 | 7b | 梁パネル寸法と未算定伝播 | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-solver | panel_zone.rs / springs/panel_gen.rs / joint_wiring/steel_panel.rs / prepare.rs | [Issue504独立期待値・実入口](梁パネル寸法_Issue504_2026-10.md) | 横断 | 🔶（位置/形式は#7c、最終head全CI・実験未） |
-| 7i | 仕口パネルの柱2軸と座標 | sepika-core / sepika-element / sepika-solver / sepika-app | panel_zone.rs / springs/panel.rs / frame/panel_offset.rs / result_contract_tests.rs | [Issue757の実諸元・公開解析・保存と制約](仕口パネル柱2軸_Issue757_2026-10.md) | 横断 | 🔶（方向別諸元/F・3次元接続・公開釣合い/仕事・不正参照方向拒否/有限fallback・保存失効のVerification成功。Validation・最終headゲート未確認） |
+| 7i | 仕口パネルの柱2軸と座標 | sepika-core / sepika-element / sepika-solver / sepika-job / sepika-app | panel_zone.rs / springs/panel.rs / frame/panel_offset.rs / prepare.rs / result_contract_tests.rs | [Issue757の実諸元・公開解析・保存と制約](仕口パネル柱2軸_Issue757_2026-10.md) | 横断 | 🔶（方向別諸元/F・3次元接続・公開釣合い/仕事・不正参照方向拒否/有限fallback・保存失効・job診断のVerification、workspace成功。Validation・最終headゲート未確認） |
 | 7c | フランジ位置の標準形式ゲート | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-solver / sepika-app / sepika-mcp | panel_zone.rs / joint_wiring / prepare.rs / viewer / design_check.rs / summary.rs | [Issue505独立期待値・状態](フランジ位置の標準形式ゲート_Issue505_2026-10.md) | 横断 | 🔶（#455実入力・正式段違い式・公開全構成CI・Validation未） |
 | 7d | 仕口パネルの参照柱 | sepika-core / sepika-element / sepika-design-jp / sepika-job / sepika-app | panel_zone.rs / springs/panel.rs / springs/panel_gen.rs / joint_wiring / prepare.rs / result_contract_tests.rs | [Issue585受入と確認状態](仕口パネル参照柱_Issue585_2026-10.md) | 横断 | 🔶（直接・関連回帰Verification成功、原典/手動GUI/Validation・最終headゲート未） |
 | 7e | 明示仕口パネルの採用G入力検証 | sepika-core / sepika-element / sepika-solver / sepika-job / sepika-app | panel_zone.rs / springs/panel.rs / tests/panel_zone.rs / prepare.rs / result_contract_tests.rs | [Issue728の公開入口と正常対照](明示仕口パネル採用G_Issue728_2026-10.md) | 横断 | 🔶（限定Verification、後続ゲート・Validation未） |
