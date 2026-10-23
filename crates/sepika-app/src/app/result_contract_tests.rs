@@ -1146,6 +1146,15 @@ fn sm520_old_335_and_out_of_range_success_expire_without_save_or_display_reauthe
     use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
     for t in [80.0, 100.001] {
         let mut app = sm520_app(t, Some(335.0));
+        let old_success = CheckOutcome::Checked(CheckResult {
+            basis: "旧SM520成功335".into(),
+            detail: String::new(),
+            components: vec![CheckComponent {
+                kind: CheckKind::Axial,
+                ratio: 0.5,
+                detail: "F=335".into(),
+            }],
+        });
         for position in app
             .core
             .scoped
@@ -1156,15 +1165,10 @@ fn sm520_old_335_and_out_of_range_success_expire_without_save_or_display_reauthe
             .iter_mut()
             .flat_map(|m| &mut m.positions)
         {
-            position.outcome = CheckOutcome::Checked(CheckResult {
-                basis: "旧SM520成功335".into(),
-                detail: String::new(),
-                components: vec![CheckComponent {
-                    kind: CheckKind::Axial,
-                    ratio: 0.5,
-                    detail: "F=335".into(),
-                }],
-            });
+            position.outcome = old_success.clone();
+        }
+        for joint in &mut app.core.scoped.results.as_mut().unwrap().joint_checks {
+            joint.outcome = old_success.clone();
         }
         for (analysis, design, keeps_analysis) in
             [(14, 5, false), (ANALYSIS_CONTRACT_VERSION, 5, true)]
@@ -1269,6 +1273,248 @@ fn panel_757_calculated() -> App {
         .any(|(_, m)| m.iter().any(|x| x.abs() > 1.0)));
     assert!(bundle.has_design_results());
     app
+}
+
+fn assert_panel_758_both_axes(app: &App) {
+    let checks = &app.current_design_results().unwrap().joint_checks;
+    for node in [NodeId(2), NodeId(3)] {
+        for axis in ["強軸", "弱軸"] {
+            let label = format!("パネルゾーン(S) {axis}");
+            let matching: Vec<_> = checks
+                .iter()
+                .filter(|check| check.node == node && check.label == label)
+                .collect();
+            assert_eq!(matching.len(), 1, "節点 {} {axis}", node.0);
+            let sepika_design_jp::CheckOutcome::Checked(result) = &matching[0].outcome else {
+                panic!("節点 {} {axis}: {:?}", node.0, matching[0].outcome);
+            };
+            assert!(result.ratio().is_finite() && result.ratio() > 0.0);
+            assert_eq!(result.components.len(), 1);
+            assert!(matches!(
+                result.components[0].kind,
+                sepika_design_jp::CheckKind::Shear
+            ));
+        }
+    }
+    assert_eq!(checks.len(), 4);
+    let csv = crate::summary::build_report_csv(app);
+    assert!(csv.contains("パネルゾーン(S) 強軸"));
+    assert!(csv.contains("パネルゾーン(S) 弱軸"));
+}
+
+#[test]
+fn panel_758_design21_expires_checks_and_display_but_keeps_analysis37_until_recheck() {
+    let app = panel_757_calculated();
+    assert_panel_758_both_axes(&app);
+    let original = app.core.scoped.results.as_ref().unwrap();
+    let expected_checks = rmp_serde::to_vec_named(&original.joint_checks).unwrap();
+    let (mut loaded, path) = restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(21),
+        "panel758-design21",
+    );
+    for pass in 0..2 {
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(
+            results.analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
+        assert_eq!(results.panel_moments, original.panel_moments);
+        assert_eq!(results.member_forces, original.member_forces);
+        assert_eq!(results.statics[0].1.disp, original.statics[0].1.disp);
+        assert!(!results.has_design_results());
+        assert!(results.design_source.is_none());
+        assert!(!results
+            .input_records
+            .iter()
+            .any(|(key, _)| *key == ResultInputKey::Design));
+        assert!(loaded.require_selected_static_input().is_ok());
+        assert!(loaded.current_design_results().is_none());
+        assert!(!loaded.core.scoped.staleness.results_stale);
+        let csv = crate::summary::build_report_csv(&loaded);
+        if pass == 0 {
+            assert!(loaded.core.scoped.staleness.design_stale);
+            assert!(
+                csv.contains("旧契約")
+                    && csv.contains("保存版=21")
+                    && csv.contains(&format!("現行版={DESIGN_CONTRACT_VERSION}"))
+            );
+        }
+        assert!(!csv.contains("パネルゾーン(S) 強軸"));
+        assert!(!csv.contains("パネルゾーン(S) 弱軸"));
+        loaded.select_displayed_result(app.core.scoped.last_static.unwrap());
+        loaded.core.scoped.staleness.mark_fresh();
+        assert!(loaded.current_design_results().is_none());
+        loaded.save_project_to(path.clone());
+        assert!(loaded.core.scoped.last_error.is_none());
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        assert!(reopened.core.scoped.last_error.is_none());
+        assert_eq!(
+            reopened
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .design_contract_version,
+            None
+        );
+        loaded = reopened;
+    }
+    loaded.run_design_check();
+    assert!(loaded.core.scoped.last_error.is_none());
+    assert_panel_758_both_axes(&loaded);
+    let results = loaded.core.scoped.results.as_ref().unwrap();
+    assert_eq!(
+        results.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    assert_eq!(results.panel_moments, original.panel_moments);
+    assert_eq!(
+        rmp_serde::to_vec_named(&results.joint_checks).unwrap(),
+        expected_checks
+    );
+    assert!(loaded.core.scoped.result_contract_notice.is_none());
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn panel_758_design22_save_open_display_and_recheck_preserve_both_principal_axes() {
+    let mut app = panel_757_calculated();
+    assert_panel_758_both_axes(&app);
+    let original = app.core.scoped.results.as_ref().unwrap().clone();
+    let expected_checks = rmp_serde::to_vec_named(&original.joint_checks).unwrap();
+    let expected_csv = crate::summary::build_report_csv(&app);
+    let path =
+        std::env::temp_dir().join(format!("sepika-758-current-{}.ovika", std::process::id()));
+    for _ in 0..2 {
+        app.save_project_to(path.clone());
+        assert!(app.core.scoped.last_error.is_none());
+        let mut loaded = App::default();
+        loaded.open_project_from(path.clone());
+        assert!(loaded.core.scoped.last_error.is_none());
+        loaded.select_displayed_result(app.core.scoped.last_static.unwrap());
+        assert_panel_758_both_axes(&loaded);
+        assert!(!loaded.core.scoped.staleness.results_stale);
+        assert!(!loaded.core.scoped.staleness.design_stale);
+        let results = loaded.current_design_results().unwrap();
+        assert_eq!(
+            results.analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
+        assert_eq!(
+            results.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        assert_eq!(results.panel_moments, original.panel_moments);
+        assert_eq!(results.member_forces, original.member_forces);
+        assert_eq!(
+            rmp_serde::to_vec_named(&results.joint_checks).unwrap(),
+            expected_checks
+        );
+        assert_eq!(crate::summary::build_report_csv(&loaded), expected_csv);
+        loaded.run_design_check();
+        assert!(loaded.core.scoped.last_error.is_none());
+        assert_panel_758_both_axes(&loaded);
+        assert_eq!(
+            rmp_serde::to_vec_named(&loaded.current_design_results().unwrap().joint_checks)
+                .unwrap(),
+            expected_checks
+        );
+        app = loaded;
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn panel_758_rotated_column_retains_distinct_invalid_plane_reasons_across_current_save_open() {
+    use sepika_core::{dof::Dof6Mask, ids::SectionId, section_shape::SectionShape};
+    use sepika_design_jp::CheckOutcome;
+    let mut model = crate::sample::portal_frame();
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    let (sin, cos) = 0.37_f64.sin_cos();
+    for column in &mut model.elements[..2] {
+        column.local_axis.ref_vector = [cos, sin, 0.0];
+    }
+    for (id, height) in [(2, 500.0), (3, 600.0)] {
+        let mut section = SectionShape::SteelH {
+            height,
+            width: 200.0,
+            web_thick: 8.0,
+            flange_thick: 13.0,
+            root_r: Some(0.0),
+        }
+        .to_section(SectionId(id), format!("H{height}"));
+        section.material = model.sections[1].material;
+        section.frame_use = model.sections[1].frame_use;
+        model.sections.push(section);
+    }
+    for (coord, section) in [
+        ([-6000.0, 0.0, 3500.0], 2),
+        ([0.0, 6000.0, 3500.0], 1),
+        ([0.0, -6000.0, 3500.0], 3),
+        ([6000.0, 6000.0, 3500.0], 1),
+    ] {
+        let mut node = model.nodes[2].clone();
+        node.id = NodeId(model.nodes.len() as u32);
+        node.coord = coord;
+        node.restraint = Dof6Mask::FIXED;
+        let mut beam = model.elements[2].clone();
+        beam.id = ElemId(model.elements.len() as u32);
+        beam.nodes = smallvec::smallvec![NodeId(2), node.id];
+        beam.section = Some(SectionId(section));
+        model.nodes.push(node);
+        model.elements.push(beam);
+    }
+    let mut app = App::default();
+    app.load_model(model);
+    app.core.analysis_cfg.threads = 1;
+    app.run_linear_static(LoadCaseId(0));
+    assert!(app.core.scoped.last_error.is_none());
+    let original = app.current_design_results().unwrap().clone();
+    let rejected: Vec<_> = original
+        .joint_checks
+        .iter()
+        .filter(|c| c.node == NodeId(2))
+        .collect();
+    for axis in ["強軸", "弱軸"] {
+        assert!(rejected.iter().any(|c| c.label == format!("パネルゾーン(S) {axis}")
+            && matches!(&c.outcome, CheckOutcome::Skipped { reason } if reason.contains("段違い"))));
+    }
+    for other_depth in ["db=487 mm", "db=587 mm"] {
+        assert!(
+            rejected
+                .iter()
+                .any(|c| matches!(&c.outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("db=387 mm") && reason.contains(other_depth))),
+            "{other_depth}"
+        );
+    }
+    let path = std::env::temp_dir().join(format!(
+        "sepika-758-multiple-gates-{}.ovika",
+        std::process::id()
+    ));
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    assert!(loaded.core.scoped.last_error.is_none());
+    assert!(!loaded.core.scoped.staleness.results_stale);
+    assert!(!loaded.core.scoped.staleness.design_stale);
+    let restored = loaded.current_design_results().unwrap();
+    assert_eq!(restored.member_forces, original.member_forces);
+    assert_eq!(restored.statics[0].1.disp, original.statics[0].1.disp);
+    assert_eq!(
+        rmp_serde::to_vec_named(&restored.joint_checks).unwrap(),
+        rmp_serde::to_vec_named(&original.joint_checks).unwrap()
+    );
+    assert_eq!(
+        crate::summary::build_report_csv(&loaded),
+        crate::summary::build_report_csv(&app)
+    );
+    std::fs::remove_file(path).unwrap();
 }
 
 #[test]
