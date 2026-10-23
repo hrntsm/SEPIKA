@@ -38,6 +38,31 @@ fn calculated() -> App {
     app
 }
 
+#[test]
+fn 旧解析契約39の成果は読込時に失効し再計算で現行版になる() {
+    let app = calculated();
+    let (mut loaded, path) = restore(&app, Some(39), Some(25), "772-analysis39");
+    let stale = loaded.core.scoped.results.as_ref().unwrap();
+    assert!(!stale.has_analysis_results());
+    assert!(!stale.has_design_results());
+    assert!(loaded.core.scoped.staleness.results_stale);
+    assert!(loaded.core.scoped.last_static.is_none());
+    loaded.run_linear_static(LoadCaseId(0));
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    let fresh = loaded.core.scoped.results.as_ref().unwrap();
+    assert!(fresh.has_analysis_results());
+    assert_eq!(
+        fresh.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    assert_eq!(fresh.design_contract_version, Some(DESIGN_CONTRACT_VERSION));
+    std::fs::remove_file(path).unwrap();
+}
+
 struct ContractFixture<'a>(&'a SavedResults);
 impl serde::Serialize for ContractFixture<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -653,7 +678,7 @@ fn empty_bundle_is_not_an_unknown_result_and_direct_floor_design_survives_stale_
     }
 }
 
-fn direct_secondary_beam_app() -> App {
+pub(super) fn direct_secondary_beam_app() -> App {
     let mut model = super::tests::make_floor_secondary_beam_test_model();
     let material_id = sepika_core::ids::MaterialId(model.materials.len() as u32);
     let mut concrete = crate::sample::portal_frame().materials[0].clone();

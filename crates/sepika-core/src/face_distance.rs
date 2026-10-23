@@ -25,16 +25,6 @@ fn section_frame(axis: [f64; 3], reference: [f64; 3]) -> Result<[[f64; 3]; 2], S
     if used_fallback {
         return Err("断面方向を材軸直交面へ投影できません".into());
     }
-    let rejected = vec3::sub(reference, vec3::scale(axis, vec3::dot(reference, axis)));
-    let norm = vec3::norm(rejected);
-    if norm.is_finite() && norm > 1e-12 {
-        let y = vec3::scale(rejected, 1.0 / norm);
-        let z = vec3::cross(axis, y);
-        return Ok([y, z]);
-    }
-    if norm.is_finite() {
-        return Err("断面方向を材軸直交面へ投影できません".into());
-    }
     Ok([common_y, common_z])
 }
 
@@ -614,6 +604,43 @@ mod tests {
                 Ok(300.0)
             );
         }
+    }
+
+    #[test]
+    fn 壁支持面は共通直交基底と同じ断面姿勢を使う() {
+        let mut model = Model {
+            nodes: vec![node(0, [0.0; 3]), node(1, [1.0, 9.0, 0.0])],
+            elements: vec![elem(0, ElementKind::Beam, 0, 1, 0)],
+            sections: vec![section(0, 600.0)],
+            ..Default::default()
+        };
+        model.sections[0].width = 400.0;
+        model.sections[0].shape = Some(crate::section_shape::SectionShape::SteelFlatBar {
+            width: 400.0,
+            thick: 600.0,
+        });
+        let support = SupportMemberId::Primary(ElemId(0));
+        let reference = [11043152.607484655, 99388373.4673619, 1e-5];
+        let common = vec3::local_frame_axes_with_fallback(
+            [0.0; 3],
+            axis_direction([0.0; 3], [1.0, 9.0, 0.0]).unwrap(),
+            reference,
+        )
+        .unwrap();
+        assert!(!common.1);
+        for scaled in [reference, reference.map(|value| value * 2.0)] {
+            model.elements[0].local_axis.ref_vector = scaled;
+            assert_eq!(
+                wall_support_face(&model, support, [0.0, 0.0, 1.0]),
+                Ok(300.0)
+            );
+        }
+        model.nodes[1].coord = [-1.0, -9.0, 0.0];
+        model.elements[0].local_axis.ref_vector = reference;
+        assert_eq!(
+            wall_support_face(&model, support, [0.0, 0.0, 1.0]),
+            Ok(300.0)
+        );
     }
 
     #[test]

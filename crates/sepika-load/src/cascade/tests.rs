@@ -245,6 +245,73 @@ fn 有限同方向参照は小梁の自重区間と主架構への公開荷重�
 }
 
 #[test]
+fn 丸め差を含む参照でも支持面と自重荷重は直交断面に一致する() {
+    let mut model = face_model(4000.0, [400.0; 2]);
+    model.sections[0].area = 400.0 * 400.0;
+    let x = 9.0 / 82.0_f64.sqrt();
+    let y = -1.0 / 82.0_f64.sqrt();
+    let offset = [4000.0 * x, 4000.0 * y, 0.0];
+    model.nodes[0].coord = [0.0, 0.0, 0.0];
+    model.nodes[1].coord = [1000.0, 9000.0, 0.0];
+    model.nodes[2].coord = offset;
+    model.nodes[3].coord = [offset[0] + 1000.0, offset[1] + 9000.0, 0.0];
+    for support in &mut model.elements {
+        support.local_axis.ref_vector = [11043152.607484655, 99388373.4673619, 1e-5];
+    }
+    let member = &model.unassigned_beams[0];
+    let expected_interval = [200.0, 3800.0];
+    let interval =
+        sepika_core::face_distance::secondary_self_weight_interval(&model, member).unwrap();
+    for end in 0..2 {
+        assert!((interval[end] - expected_interval[end]).abs() < 1e-9);
+    }
+    for (basis, expected_intensity) in [
+        (
+            SelfWeightBasis::Design,
+            DESIGN_UNIT_WEIGHT_N_PER_MM3 * 400.0 * 400.0,
+        ),
+        (
+            SelfWeightBasis::MassEquiv,
+            DENSITY * 400.0 * 400.0 * sepika_core::units::GRAVITY_MM_S2,
+        ),
+    ] {
+        let transfer = solve_with_basis(&model, |_| 0.0, true, basis).unwrap();
+        let member = &transfer.members[&SecondaryMemberId(10)];
+        let MemberLoadKind::Distributed { a, b, w1, w2 } = member.member_loads[0] else {
+            panic!("小梁自重が等分布荷重になっていません")
+        };
+        assert!((a - expected_interval[0]).abs() < 1e-9);
+        assert!((b - expected_interval[1]).abs() < 1e-9);
+        assert!(
+            (w1 - expected_intensity).abs() < 1e-12,
+            "{basis:?}: {w1} != {expected_intensity}"
+        );
+        assert!(
+            (w2 - expected_intensity).abs() < 1e-12,
+            "{basis:?}: {w2} != {expected_intensity}"
+        );
+        assert!((member.reactions.iter().sum::<f64>() - expected_intensity * 3600.0).abs() < 1e-8);
+        let (nodal, primary) = transfer.primary_loads(&model);
+        assert!(nodal.is_empty());
+        assert_eq!(primary.len(), 2);
+        assert!(
+            (primary.iter().map(|load| load.cmq.q_i).sum::<f64>() - expected_intensity * 3600.0)
+                .abs()
+                < 1e-8
+        );
+        if basis == SelfWeightBasis::Design {
+            let extremes = crate::floor::simple_beam_extremes(
+                &member.member_loads,
+                member.span,
+                205_000.0,
+                1.0e8,
+            );
+            assert!((extremes.m_max - expected_intensity * 1_980_000.0).abs() < 1e-6);
+        }
+    }
+}
+
+#[test]
 fn secondary_fireproof_support_reactions_design_loads_and_mass() {
     use sepika_core::model::{FireproofKind, FrameSectionUse};
     use sepika_core::section_shape::SectionShape;
