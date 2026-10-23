@@ -19,6 +19,7 @@ fn axis_direction(a: [f64; 3], b: [f64; 3]) -> Result<[f64; 3], String> {
 }
 
 fn section_frame(axis: [f64; 3], reference: [f64; 3]) -> Result<[[f64; 3]; 2], String> {
+    vec3::local_frame_axes([0.0; 3], axis, reference).map_err(|reason| reason.to_string())?;
     let rejected = vec3::sub(reference, vec3::scale(axis, vec3::dot(reference, axis)));
     let norm = vec3::norm(rejected);
     if !norm.is_finite() || norm <= 1e-12 {

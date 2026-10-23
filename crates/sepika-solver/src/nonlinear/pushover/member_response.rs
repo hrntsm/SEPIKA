@@ -7,14 +7,13 @@
 //!   （軸力・剛域フェイスの局所曲げ・弦からの材端回転）を全部材について記録する
 
 use super::geom::{
-    axial_compression, axial_force_signed, dot3, member_recording_responses, recording_face_force,
-    recording_force,
+    axial_compression, axial_force_signed, dot3, member_local_frame, member_recording_responses,
+    recording_face_force, recording_force,
 };
 use super::types::{MemberStepState, PushoverMemberResponse};
 use sepika_core::dof::DofMap;
 use sepika_core::model::{ElementData, Model};
 use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse, LocalVec};
-use sepika_element::transform::LocalFrame;
 
 /// 部材の変形角 R [rad]を節点変位から算定する。
 ///
@@ -101,7 +100,8 @@ pub(crate) fn record_member_step(
             if length <= 0.0 {
                 return Ok(MemberStepState::default());
             }
-            let frame = LocalFrame::from_nodes(pi.coord, pj.coord, elem.local_axis.ref_vector);
+            let frame = member_local_frame(elem, pi.coord, pj.coord)
+                .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", elem.id.0));
             let ex = frame.rot[0];
             let ey = frame.rot[1];
             let ez = frame.rot[2];
@@ -213,7 +213,8 @@ pub(crate) fn compute_member_response_with_responses(
         ) else {
             continue;
         };
-        let frame = LocalFrame::from_nodes(pi.coord, pj.coord, elem.local_axis.ref_vector);
+        let frame = member_local_frame(elem, pi.coord, pj.coord)
+            .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", elem.id.0));
         let ex = frame.rot[0];
         let ey = frame.rot[1];
         let ez = frame.rot[2];

@@ -110,6 +110,39 @@ pub struct LocalAxis {
     pub ref_vector: [f64; 3],
 }
 
+impl Model {
+    /// 断面参照方向を使う二節点要素の局所基底を検証する。失敗は部材 ID と理由を返す。
+    /// 零長の節点ばねは単位回転、零長の免震支承は仮想鉛直軸を用いる。
+    pub fn validate_local_frames(&self) -> Result<(), String> {
+        for element in &self.elements {
+            if matches!(
+                element.kind,
+                ElementKind::PanelZone | ElementKind::Shell | ElementKind::Wall
+            ) || element.nodes.len() != 2
+            {
+                continue;
+            }
+            let (Some(i), Some(j)) = (
+                self.nodes.get(element.nodes[0].index()),
+                self.nodes.get(element.nodes[1].index()),
+            ) else {
+                continue;
+            };
+            let (p_i, mut p_j) = (i.coord, j.coord);
+            if crate::geom::vec3::dist(p_i, p_j) < 1e-9 {
+                match element.kind {
+                    ElementKind::NodalSpring => continue,
+                    ElementKind::Isolator => p_j = [p_i[0], p_i[1], p_i[2] + 1.0],
+                    _ => {}
+                }
+            }
+            crate::geom::vec3::local_frame_axes(p_i, p_j, element.local_axis.ref_vector)
+                .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", element.id.0))?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum EndCondition {
     Fixed,

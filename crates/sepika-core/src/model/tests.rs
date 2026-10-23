@@ -2260,6 +2260,71 @@ fn frame_node_guard_keeps_four_node_area_elements_and_distinct_zero_length_sprin
     }
 }
 
+#[test]
+fn local_frame_guard_distinguishes_zero_length_members_from_spring_and_isolator() {
+    let mut model = Model {
+        nodes: (0..2)
+            .map(|id| Node {
+                id: NodeId(id),
+                coord: [0.0; 3],
+                restraint: Dof6Mask::FREE,
+                mass: None,
+                story: None,
+                support_spring: None,
+            })
+            .collect(),
+        ..Default::default()
+    };
+    model.elements.push(ElementData {
+        id: ElemId(12),
+        kind: ElementKind::Beam,
+        nodes: [NodeId(0), NodeId(1)].into_iter().collect(),
+        section: None,
+        local_axis: LocalAxis {
+            ref_vector: [1.0, 0.0, 0.0],
+        },
+        end_cond: [EndCondition::Fixed; 2],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    });
+    let error = model.validate_local_frames().unwrap_err();
+    assert!(
+        error.contains("部材 ID 12") && error.contains("零長"),
+        "{error}"
+    );
+    model.elements[0].kind = ElementKind::NodalSpring;
+    model.validate_local_frames().unwrap();
+    model.elements[0].kind = ElementKind::Isolator;
+    model.validate_local_frames().unwrap();
+    model.elements[0].local_axis.ref_vector[0] = f64::NAN;
+    let error = model.validate_local_frames().unwrap_err();
+    assert!(
+        error.contains("部材 ID 12") && error.contains("非有限"),
+        "{error}"
+    );
+    for length_mm in [0.5e-9, 1e-9, 2e-9] {
+        model.nodes[1].coord = [length_mm, 0.0, 0.0];
+        model.elements[0].kind = ElementKind::NodalSpring;
+        if length_mm < 1e-9 {
+            model.validate_local_frames().unwrap();
+        } else {
+            let error = model.validate_local_frames().unwrap_err();
+            assert!(
+                error.contains("部材 ID 12") && error.contains("非有限"),
+                "{error}"
+            );
+        }
+        model.elements[0].kind = ElementKind::Isolator;
+        let error = model.validate_local_frames().unwrap_err();
+        assert!(
+            error.contains("部材 ID 12") && error.contains("非有限"),
+            "{error}"
+        );
+    }
+}
+
 mod rc_section_reference_resolution {
     use super::*;
     use crate::section_shape::*;

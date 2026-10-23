@@ -59,7 +59,7 @@ fn public_src_actions_check_real_ql_and_valid_empty_gravity_without_q0() {
                 &app.core.model.combinations[0].terms,
             );
             assert_eq!(terms, vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)]);
-            let q0 = sepika_job::simple_beam_q0_by_terms(&app.core.model, &terms);
+            let q0 = sepika_job::simple_beam_q0_by_terms(&app.core.model, &terms).unwrap();
             if empty {
                 assert!(q0.is_empty());
             } else {

@@ -64,6 +64,7 @@ pub fn ensure_wall_side_column_analysis(
             && model.mass_method != sepika_core::model::MassMethod::LumpedOnly
             && !model.uses_damper_total_weight(data)
         {
+            model.validate_local_frames()?;
             if let Some(reason) = elastic_stiffness_input_issue(data, model) {
                 return Err(failure(&reason));
             }

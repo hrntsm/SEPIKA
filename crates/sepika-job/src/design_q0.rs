@@ -156,24 +156,32 @@ where
 
 /// 選択重力termsのQD1専用Q0 `[N]`。RC 梁は端別の係数付き合成後に最大絶対値を採る。
 /// 空terms・参照不明ケースはRC結果なし。有効な無荷重・相殺・Qy直交は0を返す。
-pub fn simple_beam_q0_by_terms(model: &Model, terms: &[(LoadCaseId, f64)]) -> HashMap<ElemId, f64> {
+/// 算定対象の RC 梁で局所基底を解決できなければ、部材 ID と理由を含む `Err` を返す。
+pub fn simple_beam_q0_by_terms(
+    model: &Model,
+    terms: &[(LoadCaseId, f64)],
+) -> Result<HashMap<ElemId, f64>, String> {
     let mut map = HashMap::new();
     for (id, factor) in terms {
         for (elem, q) in other_beam_q0_by_elem(model, *id) {
             *map.entry(elem).or_insert(0.0) += q * factor;
         }
     }
-    map.extend(rc_beam_q0_by_terms(model, terms));
-    map
+    map.extend(rc_beam_q0_by_terms(model, terms)?);
+    Ok(map)
 }
 
 /// 1 荷重ケースの部材荷重から、単純梁支持の端部せん断 Q0 `[N]` を算定する。
 /// RC 梁は符号付き local Qy 端反力の最大絶対値とし、入力不足の部材は返さない。
 /// その他の部材は荷重の絶対値と材軸直交成分から算定する。
-pub fn simple_beam_q0_by_elem(model: &Model, lc: LoadCaseId) -> HashMap<ElemId, f64> {
+/// 算定対象の RC 梁で局所基底を解決できなければ、部材 ID と理由を含む `Err` を返す。
+pub fn simple_beam_q0_by_elem(
+    model: &Model,
+    lc: LoadCaseId,
+) -> Result<HashMap<ElemId, f64>, String> {
     let mut map = other_beam_q0_by_elem(model, lc);
-    map.extend(rc_beam_q0_by_terms(model, &[(lc, 1.0)]));
-    map
+    map.extend(rc_beam_q0_by_terms(model, &[(lc, 1.0)])?);
+    Ok(map)
 }
 
 fn is_rc_beam(model: &Model, elem: &sepika_core::model::ElementData) -> bool {
@@ -187,68 +195,77 @@ fn is_rc_beam(model: &Model, elem: &sepika_core::model::ElementData) -> bool {
 fn rc_beam_geometry(
     model: &Model,
     elem: &sepika_core::model::ElementData,
-) -> Option<(f64, [f64; 3])> {
+) -> Result<Option<(f64, [f64; 3])>, String> {
     use sepika_core::geom::vec3;
-    model.element_material(elem)?;
+    if model.element_material(elem).is_none() {
+        return Ok(None);
+    }
     if elem.nodes.len() != 2 {
-        return None;
+        return Ok(None);
     }
-    let ni = model.nodes.get(elem.nodes[0].index())?;
-    let nj = model.nodes.get(elem.nodes[1].index())?;
-    if !ni
-        .coord
-        .iter()
-        .chain(&nj.coord)
-        .chain(&elem.local_axis.ref_vector)
-        .all(|v| v.is_finite())
-    {
-        return None;
-    }
+    let Some(ni) = model.nodes.get(elem.nodes[0].index()) else {
+        return Ok(None);
+    };
+    let Some(nj) = model.nodes.get(elem.nodes[1].index()) else {
+        return Ok(None);
+    };
     let length_mm = vec3::dist(ni.coord, nj.coord);
+    if ni.coord.iter().chain(&nj.coord).any(|v| !v.is_finite()) || length_mm == 0.0 {
+        return sepika_element::transform::LocalFrame::from_nodes(
+            ni.coord,
+            nj.coord,
+            elem.local_axis.ref_vector,
+        )
+        .map(|_| None)
+        .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0));
+    }
     if !length_mm.is_finite() || length_mm <= 1e-9 {
-        return None;
+        return Ok(None);
     }
     let frame = sepika_element::transform::LocalFrame::from_nodes(
         ni.coord,
         nj.coord,
         elem.local_axis.ref_vector,
-    );
-    frame
-        .rot
-        .iter()
-        .flatten()
-        .all(|v| v.is_finite())
-        .then_some((length_mm, frame.rot[1]))
+    )
+    .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0))?;
+    Ok(Some((length_mm, frame.rot[1])))
 }
 
-fn rc_beam_q0_by_terms(model: &Model, terms: &[(LoadCaseId, f64)]) -> HashMap<ElemId, f64> {
+fn rc_beam_q0_by_terms(
+    model: &Model,
+    terms: &[(LoadCaseId, f64)],
+) -> Result<HashMap<ElemId, f64>, String> {
     use sepika_core::geom::vec3;
 
-    let mut reactions: HashMap<ElemId, Option<(f64, f64)>> = model
-        .elements
-        .iter()
-        .filter(|elem| is_rc_beam(model, elem))
-        .map(|elem| (elem.id, rc_beam_geometry(model, elem).map(|_| (0.0, 0.0))))
-        .collect();
     if terms.is_empty() {
-        return HashMap::new();
+        return Ok(HashMap::new());
+    }
+    for (id, factor) in terms {
+        if !factor.is_finite() || !model.load_cases.iter().any(|case| case.id == *id) {
+            return Ok(HashMap::new());
+        }
+    }
+    let mut reactions: HashMap<ElemId, Option<(f64, f64)>> = HashMap::new();
+    for elem in model.elements.iter().filter(|elem| is_rc_beam(model, elem)) {
+        reactions.insert(elem.id, rc_beam_geometry(model, elem)?.map(|_| (0.0, 0.0)));
     }
     for (id, factor) in terms {
         let Some(case) = model.load_cases.iter().find(|case| case.id == *id) else {
-            return HashMap::new();
+            return Ok(HashMap::new());
         };
         if !factor.is_finite() {
-            return HashMap::new();
+            return Ok(HashMap::new());
         }
         for load in &case.member {
             let Some(elem) = model.element(load.elem) else {
-                return HashMap::new();
+                return Ok(HashMap::new());
             };
             let Some(acc) = reactions.get_mut(&elem.id) else {
                 continue;
             };
+            let geometry = rc_beam_geometry(model, elem)?;
             let contribution = (|| {
-                let (length_mm, ey) = rc_beam_geometry(model, elem)?;
+                let (length_mm, ey) = geometry?;
                 if !load.dir.iter().all(|v| v.is_finite()) {
                     return None;
                 }
@@ -294,10 +311,10 @@ fn rc_beam_q0_by_terms(model: &Model, terms: &[(LoadCaseId, f64)]) -> HashMap<El
             });
         }
     }
-    reactions
+    Ok(reactions
         .into_iter()
         .filter_map(|(id, reactions)| reactions.map(|(ri, rj)| (id, ri.abs().max(rj.abs()))))
-        .collect()
+        .collect())
 }
 
 fn other_beam_q0_by_elem(model: &Model, lc: LoadCaseId) -> HashMap<ElemId, f64> {
@@ -368,7 +385,8 @@ fn other_beam_q0_by_elem(model: &Model, lc: LoadCaseId) -> HashMap<ElemId, f64> 
 }
 
 /// 検定用G+PのQD1専用Q0 `[N]`。RC 梁は端別合成後に最大絶対値、他はケース別Q0の和。
-pub fn simple_beam_q0_by_gravity_cases(model: &Model) -> HashMap<ElemId, f64> {
+/// 算定対象の RC 梁で局所基底を解決できなければ、部材 ID と理由を含む `Err` を返す。
+pub fn simple_beam_q0_by_gravity_cases(model: &Model) -> Result<HashMap<ElemId, f64>, String> {
     let terms: Vec<_> = gravity_case_ids_for_design(model)
         .into_iter()
         .map(|id| (id, 1.0))
@@ -678,11 +696,11 @@ mod q0_contract_tests {
         })
         .collect();
         assert_eq!(
-            simple_beam_q0_by_gravity_cases(&model)[&ElemId(0)],
+            simple_beam_q0_by_gravity_cases(&model).unwrap()[&ElemId(0)],
             120_000.0
         );
         assert_eq!(
-            simple_beam_q0_by_terms(&model, &[(LoadCaseId(0), 1.0), (LoadCaseId(2), 1.0)])
+            simple_beam_q0_by_terms(&model, &[(LoadCaseId(0), 1.0), (LoadCaseId(2), 1.0)]).unwrap()
                 [&ElemId(0)],
             108_000.0
         );
@@ -694,7 +712,8 @@ mod q0_contract_tests {
                     (LoadCaseId(1), 1.0),
                     (LoadCaseId(3), 0.35)
                 ]
-            )[&ElemId(0)],
+            )
+            .unwrap()[&ElemId(0)],
             134_000.0
         );
         let fem = |_| {

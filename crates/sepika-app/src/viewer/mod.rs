@@ -890,12 +890,15 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
                 let p_i = app.core.model.nodes[n0].coord;
                 let p_j = app.core.model.nodes[n1].coord;
                 if member_len3(p_i, p_j) > 1e-9 {
-                    let poly3 =
+                    if let Some(beam) =
                         BeamDeflection::new(p_i, p_j, d[n0], d[n1], elem.local_axis.ref_vector)
-                            .polyline(deform_scale_actual, DEFORM_CURVE_SEGMENTS);
-                    let screen: Vec<egui::Pos2> = poly3.iter().map(|&p| proj.project(p)).collect();
-                    painter.add(egui::Shape::line(screen, line_stroke));
-                    continue;
+                    {
+                        let poly3 = beam.polyline(deform_scale_actual, DEFORM_CURVE_SEGMENTS);
+                        let screen: Vec<egui::Pos2> =
+                            poly3.iter().map(|&p| proj.project(p)).collect();
+                        painter.add(egui::Shape::line(screen, line_stroke));
+                        continue;
+                    }
                 }
             }
 

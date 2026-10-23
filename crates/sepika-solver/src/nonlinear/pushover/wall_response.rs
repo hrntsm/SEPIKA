@@ -328,6 +328,7 @@ pub(crate) fn record_wall_step(
                         g.top_center,
                         g.ex_bottom,
                     )
+                    .expect("検証済み壁幾何の仮想柱局所基底")
                     .rot,
                     column_axis: std::array::from_fn(|d| {
                         (g.top_center[d] - g.bottom_center[d]) / g.h

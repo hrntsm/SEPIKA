@@ -131,6 +131,42 @@ fn test_story_eccentricity_symmetric_zero() {
     );
 }
 
+#[test]
+fn story_centers_and_eccentricity_ignore_unused_girder_reference() {
+    let (mut model, story) = build_symmetric_frame(None);
+    let expected_centers = story_centers(&model, story).unwrap();
+    let expected_eccentricity = story_eccentricity(&model, story).unwrap();
+    model.elements[4].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    assert_eq!(story_centers(&model, story).unwrap(), expected_centers);
+    assert_eq!(
+        story_eccentricity(&model, story).unwrap(),
+        expected_eccentricity
+    );
+}
+
+#[test]
+fn d_value_rejects_only_selected_column_with_member_id_and_reason() {
+    let (mut model, story) = build_symmetric_frame(None);
+    model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    for error in [
+        story_centers(&model, story).unwrap_err(),
+        story_eccentricity(&model, story).unwrap_err(),
+    ] {
+        assert!(
+            error.contains("部材 ID 0") && error.contains("非有限"),
+            "{error}"
+        );
+    }
+
+    model.nodes[4].coord = [3000.0, 3000.0, 3000.0];
+    model.elements[0].local_axis.ref_vector = [1e308, 1e308, 1e308 - 1e292];
+    let error = story_centers(&model, story).unwrap_err();
+    assert!(
+        error.contains("部材 ID 0") && error.contains("単位直交基底"),
+        "{error}"
+    );
+}
+
 /// テスト2: 右側柱 iy を 3 倍 → 剛心 x ≈ 4500、偏心距離 ex ≈ 1500。
 /// 軸整合フレーム（柱軸=Z・ref=[0,1,0]）では、クロス変換後 I_globalY = sec.iy
 /// なので Dy ∝ iy。梁は全柱で対称なので a 補正は全柱一致 → Dy 比 = iy 比。
@@ -156,7 +192,7 @@ fn test_story_eccentricity_empty_story() {
     let (model, _s0) = build_symmetric_frame(None);
     // S1 は存在しない（stories は S0 のみ）→ column_stiffnesses は空を返す。
     let s1 = StoryId(1);
-    let cols = column_stiffnesses(&model, s1);
+    let cols = column_stiffnesses(&model, s1).unwrap();
     assert!(cols.is_empty(), "S1 に柱がないはず、got {} 本", cols.len());
     let cor = center_of_rigidity(&cols).unwrap();
     assert_eq!(cor, [0.0, 0.0], "空時の剛心は [0,0]");
@@ -308,7 +344,7 @@ fn test_column_stiffnesses_merges_split_column() {
     use sepika_core::model::Node;
 
     let (mut model, s0) = build_symmetric_frame(None);
-    let before = column_stiffnesses(&model, s0);
+    let before = column_stiffnesses(&model, s0).unwrap();
     assert_eq!(before.len(), 4);
     let d0 = before
         .iter()
@@ -343,7 +379,7 @@ fn test_column_stiffnesses_merges_split_column() {
     bot_seg.nodes.push(NodeId(8));
     model.elements.push(bot_seg);
 
-    let after = column_stiffnesses(&model, s0);
+    let after = column_stiffnesses(&model, s0).unwrap();
     assert_eq!(after.len(), 4, "分割柱は 1 本のまま");
     let d1 = after
         .iter()

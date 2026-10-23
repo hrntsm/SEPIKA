@@ -1044,7 +1044,7 @@ mod tests {
     }
 
     fn horiz_frame() -> LocalFrame {
-        LocalFrame::from_nodes([0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+        LocalFrame::from_nodes([0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 0.0, 1.0]).unwrap()
     }
 
     fn assert_relative(actual: f64, expected: f64) {

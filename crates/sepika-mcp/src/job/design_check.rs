@@ -141,7 +141,8 @@ pub(crate) fn compute_design_check_job(
     } else {
         None
     };
-    let q0_by_elem = sepika_job::simple_beam_q0_by_terms(model, &gravity_terms);
+    let q0_by_elem = sepika_job::simple_beam_q0_by_terms(model, &gravity_terms)
+        .map_err(JobError::InvalidInput)?;
     let check_forces = result.member_forces.clone();
     let member_force_rows = flatten_member_force_rows(&check_forces);
 

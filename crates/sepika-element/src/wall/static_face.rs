@@ -196,7 +196,8 @@ impl StaticWallFace {
                 model.nodes[col.nodes[0].index()].coord,
                 model.nodes[col.nodes[1].index()].coord,
                 col.local_axis.ref_vector,
-            );
+            )
+            .map_err(col_fail)?;
             if dot(frame.rot[1], g.ex_bottom)
                 .abs()
                 .max(dot(frame.rot[2], g.ex_bottom).abs())

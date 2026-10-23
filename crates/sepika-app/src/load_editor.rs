@@ -1123,7 +1123,8 @@ mod tests {
             assert_eq!(load.extent, MemberLoadExtent::FullLengthUniform);
             assert_eq!(load.dir, [0.0, 0.0, -1.0]);
             let length_mm = model.member_length(&model.elements[0]);
-            let frame = LocalFrame::from_nodes(model.nodes[0].coord, coord, [0.0, 0.0, 1.0]);
+            let frame =
+                LocalFrame::from_nodes(model.nodes[0].coord, coord, [0.0, 0.0, 1.0]).unwrap();
             let q = frame.rotate_to_global(&consistent_load_local(
                 std::slice::from_ref(load),
                 &frame,

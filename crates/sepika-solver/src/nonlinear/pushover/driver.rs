@@ -122,6 +122,7 @@ pub fn pushover_analysis_recording(
         None,
     )?;
     model.validate_member_load_directions()?;
+    model.validate_local_frames()?;
     model
         .validate_rc_section_usage()
         .map_err(|e| e.to_string())?;

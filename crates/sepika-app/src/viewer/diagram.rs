@@ -455,7 +455,9 @@ fn draw_component(
                 ),
             )
         };
-        let ey = diagram_offset_dir(p_i, p_j, ref_vec, component.plane());
+        let Some(ey) = diagram_offset_dir(p_i, p_j, ref_vec, component.plane()) else {
+            continue;
+        };
         let ey = match frame_normal {
             Some(n) => in_plane_offset_dir(ey, p_i, p_j, n),
             None => ey,
@@ -465,7 +467,7 @@ fn draw_component(
                 let n0 = elem.nodes[0].index();
                 let n1 = elem.nodes[1].index();
                 disp.and_then(|d| {
-                    (n0 < d.len() && n1 < d.len()).then(|| {
+                    if n0 < d.len() && n1 < d.len() {
                         BeamDeflection::new(
                             app.core.model.nodes[n0].coord,
                             app.core.model.nodes[n1].coord,
@@ -473,7 +475,9 @@ fn draw_component(
                             d[n1],
                             ref_vec,
                         )
-                    })
+                    } else {
+                        None
+                    }
                 })
             } else {
                 None

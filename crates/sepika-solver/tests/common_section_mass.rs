@@ -27,6 +27,55 @@ mod wall_side_column_fixture;
 use wall_side_column_fixture::wall_connection_fixture;
 
 #[test]
+fn mass_assembly_rejects_invalid_wall_side_column_frame_before_building_behavior() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = wall_connection_fixture(kind);
+        model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+        let dofmap = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &dofmap);
+        let solver = sepika_math::solver::make_solver(
+            sepika_math::solver::SolverBackend::DirectSparseCholesky,
+        );
+        let errors = [
+            assemble_global_m(&model, &dofmap, MassOption::Consistent)
+                .map(|_| ())
+                .unwrap_err(),
+            solve_eigen(&model, &dofmap, &reducer, 0)
+                .map(|_| ())
+                .unwrap_err(),
+            sepika_solver::dynamic::eigen::solve_eigen_with_solver(
+                &model,
+                &dofmap,
+                &reducer,
+                0,
+                solver.as_ref(),
+            )
+            .map(|_| ())
+            .unwrap_err(),
+        ];
+        for error in errors {
+            assert!(
+                matches!(error, SolveError::InvalidInput(reason) if reason.contains("部材 ID 0") && reason.contains("断面参照方向")),
+                "{kind:?}"
+            );
+        }
+        let error = sepika_element::factory::ensure_wall_side_column_analysis(
+            &model,
+            None,
+            "質量行列組立",
+            false,
+            Some(MassOption::Consistent),
+        )
+        .unwrap_err();
+        assert!(error.contains("部材 ID 0") && error.contains("断面参照方向"));
+    }
+}
+
+#[test]
 fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
     use sepika_element::factory::{build_behavior, ensure_wall_side_column_analysis};
     use sepika_element::frame::panel_offset::{PanelEnd, PanelOffsetMember};

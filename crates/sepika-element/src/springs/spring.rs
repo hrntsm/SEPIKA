@@ -53,6 +53,7 @@ impl NodalSpringElement {
             }
         } else {
             LocalFrame::from_nodes(p0, p1, data.local_axis.ref_vector)
+                .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", data.id.0))
         };
 
         let k = data.spring.unwrap_or([0.0; 6]);

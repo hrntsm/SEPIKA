@@ -159,6 +159,9 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         )));
         return issues;
     }
+    if let Err(error) = model.validate_local_frames() {
+        issues.push(ModelIssue::model(error));
+    }
 
     if model.nodes.is_empty() {
         issues.push(ModelIssue::model(
