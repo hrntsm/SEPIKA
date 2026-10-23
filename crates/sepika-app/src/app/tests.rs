@@ -5035,6 +5035,86 @@ pub(super) fn make_floor_secondary_beam_test_model() -> sepika_core::model::Mode
     model
 }
 
+#[test]
+fn 丸め差を含む支持参照でも直接小梁検定は直交断面と同じ需要になる() {
+    let mut model = super::result_contract_tests::direct_secondary_beam_app()
+        .core
+        .model;
+    let ex = [0.25, 2.25];
+    let ey = [-9.0 / 82.0_f64.sqrt(), 1.0 / 82.0_f64.sqrt()];
+    for node in &mut model.nodes {
+        let [x, y, z] = node.coord;
+        node.coord = [x * ex[0] + y * ey[0], x * ex[1] + y * ey[1], z];
+    }
+    for element in &mut model.elements {
+        element.local_axis.ref_vector = [0.0, 0.0, 1.0];
+    }
+    let run = |model: sepika_core::model::Model| {
+        let mut app = App {
+            core: AppCore {
+                model,
+                ..Default::default()
+            },
+            ..App::default()
+        };
+        app.run_design_check();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let result = app.current_design_results().unwrap();
+        assert_eq!((result.beam_checks.len(), result.slab_checks.len()), (1, 2));
+        let beam = &result.beam_checks[0].2;
+        assert!(!beam.unchecked);
+        assert!(beam.m_max > 0.0 && beam.q_max > 0.0);
+        beam.clone()
+    };
+    let expected = run(model.clone());
+    for support in &mut model.elements {
+        support.local_axis.ref_vector = [11043152.607484655, 99388373.4673619, 1e-5];
+    }
+    let actual = run(model.clone());
+    assert_eq!(actual, expected);
+    let mut app = App {
+        core: AppCore {
+            model,
+            ..Default::default()
+        },
+        ..App::default()
+    };
+    app.run_design_check();
+    assert!(app.core.scoped.last_error.is_none());
+    let (mut loaded, path) =
+        super::result_contract_tests::restore(&app, None, Some(25), "772-direct25");
+    assert!(loaded.current_design_results().is_none());
+    assert!(loaded
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .beam_checks
+        .is_empty());
+    loaded.run_design_check();
+    assert!(loaded.core.scoped.last_error.is_none());
+    assert_eq!(
+        loaded.current_design_results().unwrap().beam_checks.len(),
+        1
+    );
+    assert_eq!(
+        loaded
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .design_contract_version,
+        Some(sepika_core::result_contract::DESIGN_CONTRACT_VERSION)
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
 /// 二次部材（小梁）1 本が `Slab::beams` なしで床設計の対象になる。
 #[test]
 fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
