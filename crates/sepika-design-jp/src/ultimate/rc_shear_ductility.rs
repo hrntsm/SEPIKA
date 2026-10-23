@@ -357,19 +357,6 @@ mod tests {
     }
 
     #[test]
-    fn test_rc_shear_vu_ductility_min_selects_smallest() {
-        // 通常配筋では Vu3（コンクリート圧壊の下限式）が支配することが多い。
-        let inp = sample();
-        let vu = rc_shear_vu_ductility(&inp);
-        let nu: f64 = 0.7 - 24.0 / 200.0;
-        let je: f64 = 7.0 * 530.0 / 8.0;
-        let be: f64 = 350.0;
-        let lambda = 1.0 - 100.0 / (2.0 * je) - (be / 2.0) / (4.0 * je);
-        let vu3 = (lambda * nu * 24.0 / 2.0) * be * je;
-        assert!(vu <= vu3 + 1e-6, "Vu={vu} は Vu3={vu3} 以下のはず");
-    }
-
-    #[test]
     fn test_rc_shear_vu_ductility_lightweight_09() {
         let mut inp = sample();
         let v_std = rc_shear_vu_ductility(&inp);

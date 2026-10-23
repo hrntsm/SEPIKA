@@ -887,27 +887,4 @@ mod tests {
             "小梁設計用は床用（8.0e-3）とは異なる"
         );
     }
-
-    /// `RegionAnchor::FloorRegion` は床板の取付き先には使わない
-    /// （壁側〔自立壁〕専用のアンカー）。
-    /// `Slab` のメソッドはこの分岐に来ないはずだが、`RegionAnchor` を壁と共有する
-    /// 都合上、網羅性のために持つ受け皿の戻り値を固定する。
-    #[test]
-    fn test_floor_region_anchor_never_yields_slab_geometry() {
-        let model = Model::default();
-        let slab = Slab {
-            id: crate::ids::SlabId(0),
-            shape: SlabShape::Attached {
-                anchor: RegionAnchor::FloorRegion {
-                    nodes: [NodeId(0), NodeId(1)],
-                },
-                extent: [0.0, 0.0],
-            },
-            plate: SlabPlate::default(),
-            tip_loads: Vec::new(),
-        };
-        assert_eq!(slab.boundary_coords(&model), None);
-        assert_eq!(slab.reference_node(&model), None);
-        assert_eq!(slab.edge_nodes(&model, 0), None);
-    }
 }

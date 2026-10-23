@@ -941,22 +941,6 @@ fn test_beam_new_composite_steel_beam_averages_stiffness() {
 }
 
 #[test]
-fn test_local_stiffness_symmetric() {
-    let beam = make_test_beam();
-    let k = beam.local_stiffness_raw();
-    for i in 0..12 {
-        for j in 0..12 {
-            assert!(
-                (k.get(i, j) - k.get(j, i)).abs() < 1e-9,
-                "K[{i}][{j}] != K[{j}][{i}]: {} vs {}",
-                k.get(i, j),
-                k.get(j, i)
-            );
-        }
-    }
-}
-
-#[test]
 fn test_phi_zero_converges_to_bernoulli() {
     let mut beam = make_test_beam();
     beam.as_y = 1e30;

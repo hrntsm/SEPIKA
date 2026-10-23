@@ -105,6 +105,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | レポート | 対象 | 状態 |
 |---|---|---|
 | [支持材フェースと共通直交基底_Issue772_2026-10.md](支持材フェースと共通直交基底_Issue772_2026-10.md) | 補完なし共通直交姿勢と支持面・区間・荷重・需要、解析40・検定26 | 🔶（公開赤、共有targetの別試験集合観測、専用targetのcore585・荷重/App焦点・旧OVIKA成果失効を区別。GUI全構成・Validation・最終headゲートは記録を参照） |
+| [ctutils推移依存監査_Issue775_2026-10.md](ctutils推移依存監査_Issue775_2026-10.md) | ZIP 経由の ctutils 修正済み解決、既存監査ポリシー、OVIKA 回帰 | 🔶（最小ロック差分・監査成功・IO default/parquet 240/251 件成功。最終 PR ゲートは記録を参照） |
 | [支持材フェースの有限参照方向_Issue769_2026-10.md](支持材フェースの有限参照方向_Issue769_2026-10.md) | 有限極大参照方向の支持面・小梁自重作用区間・荷重／検定需要、解析39・検定25 | 🔶（現main公開支持面の赤再現と修正後の支持面・荷重・直接検定・保存失効、先行core/load全件・App GUI880件と後続平行丸め境界core584・App契約29件のVerification。途中失敗、最終全件・Validation・最終ゲートは記録を参照） |
 | [共通局所座標の参照方向_Issue762_2026-10.md](共通局所座標の参照方向_Issue762_2026-10.md) | 一般線材の断面参照方向、公開計算入口、解析38・検定24 | 🔶（変更前再現、対象RC Q0 8件・限定helper後App GUI lib880件、旧直接検定23の実OVIKA失効、未参照梁の保持と実使用部材の拒否をVerification。先行878件・880件と途中失敗、#769の未対応、Validation・最終ゲートは記録を参照） |
 | [鋼材F選択と入力停止_Issue601_2026-10.md](鋼材F選択と入力停止_Issue601_2026-10.md) | 通常鋼材・鋼小梁・S/CFTの材料/実厚/Fと不備停止・検定23 | 🔶（変更前再現と材料/パネルdesign674・core対象49・Clippy成功。App全479成功/既存1ignore、直接4成功。MCP feature144成功。GUI971成功/既存1ignoreはいずれも形状不足追補前。追補後design675/App4/MCP1とClippy成功。文書検査/build/fmt成功。Validation・最終ゲートは未確認） |
@@ -279,6 +280,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
+| 775 | ctutils 推移依存監査 | Cargo.lock / sepika-io | zip、ctutils、OVIKA | [監査と実行証拠](ctutils推移依存監査_Issue775_2026-10.md#実行証拠) | 横断 | 🔶（0.4.5 の最小解決、監査・IO default/parquet 成功。独立レビュー・最終 CI は記録を参照） |
 | 496 | 壁側柱の物理的分担と局所解放 | sepika-core / sepika-element / sepika-solver / sepika-design-jp / sepika-job / sepika-app | model/wall_side_column.rs、wall/side_column、frame/fiber、tests/wall_system_linear.rs | [原七Doneとrun別結果](壁側柱の物理的分担と局所解放_Issue496_2026-10.md#完了条件と試験の対応) | 横断 | 🔶（限定Verification、full_model3snapshot未受入・最終ゲート・Validation未確認） |
 | 671 | SRC梁のQL参照完全性 | sepika-design-jp / sepika-core / sepika-app | srrc/tests.rs、member_design_check.rs、result_contract.rs、app/src_ql_acceptance_tests.rs | [変更後の直接検証](SRC梁のQL参照完全性_Issue671_2026-10.md#変更後の直接検証)・[Appと保存受入](SRC梁のQL参照完全性_Issue671_2026-10.md#変更後のappと保存受入) | 横断 | 🔶（直接/公開actions/OVIKA資格・Windows横断Verification成功、MCP専用受入は今回対象外、最終ゲート・Validation未確認） |
 | 690 | 依存監査とOVIKA保存 | workspace / sepika-io / sepika-app | Cargo.toml、Cargo.lock、deny.toml、ovika.rs | [実使用APIと維持する境界](依存監査とOVIKA保存_Issue690_2026-10.md#実使用apiと維持する境界)・[実行証拠](依存監査とOVIKA保存_Issue690_2026-10.md#実行証拠) | 横断 | 🔶（最終旧8構成App441/関連feature1276成功・監査/静的/文書成功。中間IO195を区別、正式review/最終CI・#671連携は後続） |

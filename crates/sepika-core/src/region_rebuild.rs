@@ -917,30 +917,12 @@ mod tests {
         let first_regions = model.floor_regions.clone();
         let first_slabs = model.slabs.clone();
         let first_nodes = model.nodes.len();
+        assert_eq!(model.beams().count(), 1, "小梁は未割当と床領域で重複しない");
         rebuild_floor_regions(&mut model);
         assert_eq!(model.floor_regions, first_regions);
         assert_eq!(model.slabs, first_slabs);
         assert_eq!(model.nodes.len(), first_nodes);
-    }
-
-    #[test]
-    fn test_rebuild_preserves_secondary_beams_across_runs() {
-        let mut model = two_piece_square();
-        rebuild_floor_regions(&mut model);
-        assert_eq!(model.beams().count(), 1);
-        let first = model
-            .floor_regions
-            .iter()
-            .flat_map(|r| r.secondary_beams.clone())
-            .collect::<Vec<_>>();
-        rebuild_floor_regions(&mut model);
-        assert_eq!(model.beams().count(), 1);
-        let second = model
-            .floor_regions
-            .iter()
-            .flat_map(|r| r.secondary_beams.clone())
-            .collect::<Vec<_>>();
-        assert_eq!(first, second);
+        assert_eq!(model.beams().count(), 1, "再実行でも小梁は重複しない");
     }
 
     #[test]
@@ -1009,94 +991,57 @@ mod tests {
         assert!(report.unassigned_slabs == 0);
     }
 
-    /// 取り付く床板は、直交して先端まで届く小梁の位置で支持部材の間の床板ごとに分割される。
+    /// 取り付く床板は、直交して先端まで届く小梁の位置で支持部材の間の床板ごとに
+    /// 分割される。未割当小梁・実梁・途中節点で 2 要素に分かれた実梁のいずれでも、
+    /// 連結した全長で同じ分割になる。
     #[test]
-    fn test_cantilever_splits_at_perpendicular_beams() {
-        let mut model = cantilever_rect();
-        model.nodes.push(node(4, 2000.0, 0.0, 0.0));
-        model.nodes.push(node(5, 2000.0, 1500.0, 0.0));
-        model.unassigned_beams.push(beam_of(&model, 0, 4, 5));
-        rebuild_floor_regions(&mut model);
-        assert_eq!(model.slabs.len(), 2);
-        for (i, expected) in [[0.0, 0.5], [0.5, 1.0]].iter().enumerate() {
-            match &model.slabs[i].shape {
-                SlabShape::Attached {
-                    anchor: RegionAnchor::Line { span, .. },
-                    extent,
-                } => {
-                    assert!((span[0] - expected[0]).abs() < 1e-9, "{span:?}");
-                    assert!((span[1] - expected[1]).abs() < 1e-9, "{span:?}");
-                    assert!((extent[0] - 1500.0).abs() < 1e-6, "{extent:?}");
-                    assert!((extent[1] - 1500.0).abs() < 1e-6, "{extent:?}");
+    fn test_cantilever_splits_at_perpendicular_unassigned_real_and_spliced_beams() {
+        fn assert_split(mut model: Model, label: &str) {
+            rebuild_floor_regions(&mut model);
+            assert_eq!(
+                model.slabs.len(),
+                2,
+                "{label}: 支持部材の間の床板 2 枚へ分割"
+            );
+            for (i, expected) in [[0.0, 0.5], [0.5, 1.0]].iter().enumerate() {
+                match &model.slabs[i].shape {
+                    SlabShape::Attached {
+                        anchor: RegionAnchor::Line { span, .. },
+                        extent,
+                    } => {
+                        assert!((span[0] - expected[0]).abs() < 1e-9, "{label}: {span:?}");
+                        assert!((span[1] - expected[1]).abs() < 1e-9, "{label}: {span:?}");
+                        assert!((extent[0] - 1500.0).abs() < 1e-6, "{label}: {extent:?}");
+                        assert!((extent[1] - 1500.0).abs() < 1e-6, "{label}: {extent:?}");
+                    }
+                    other => panic!("{label}: Attached ではない: {other:?}"),
                 }
-                other => panic!("Attached ではない: {other:?}"),
             }
+            rebuild_floor_regions(&mut model);
+            assert_eq!(model.slabs.len(), 2, "{label}: 冪等");
         }
 
-        rebuild_floor_regions(&mut model);
-        assert_eq!(model.slabs.len(), 2, "冪等");
-    }
+        let mut perpendicular = cantilever_rect();
+        perpendicular.nodes.push(node(4, 2000.0, 0.0, 0.0));
+        perpendicular.nodes.push(node(5, 2000.0, 1500.0, 0.0));
+        perpendicular
+            .unassigned_beams
+            .push(beam_of(&perpendicular, 0, 4, 5));
+        assert_split(perpendicular, "未割当小梁");
 
-    /// 床板の内部を通る実梁（取付き線から先端まで届く）でも支持部材の間の床板ごとに分割される。
-    #[test]
-    fn test_cantilever_splits_at_real_beam() {
-        let mut model = cantilever_rect();
-        model.nodes.push(node(4, 2000.0, 0.0, 0.0));
-        model.nodes.push(node(5, 2000.0, 1500.0, 0.0));
-        model.elements.push(element_beam(1, 4, 5));
-        rebuild_floor_regions(&mut model);
-        assert_eq!(
-            model.slabs.len(),
-            2,
-            "実梁の位置で支持部材の間の床板 2 枚へ分割"
-        );
-        for (i, expected) in [[0.0, 0.5], [0.5, 1.0]].iter().enumerate() {
-            match &model.slabs[i].shape {
-                SlabShape::Attached {
-                    anchor: RegionAnchor::Line { span, .. },
-                    extent,
-                } => {
-                    assert!((span[0] - expected[0]).abs() < 1e-9, "{span:?}");
-                    assert!((span[1] - expected[1]).abs() < 1e-9, "{span:?}");
-                    assert!((extent[0] - 1500.0).abs() < 1e-6, "{extent:?}");
-                    assert!((extent[1] - 1500.0).abs() < 1e-6, "{extent:?}");
-                }
-                other => panic!("Attached ではない: {other:?}"),
-            }
-        }
+        let mut real = cantilever_rect();
+        real.nodes.push(node(4, 2000.0, 0.0, 0.0));
+        real.nodes.push(node(5, 2000.0, 1500.0, 0.0));
+        real.elements.push(element_beam(1, 4, 5));
+        assert_split(real, "実梁");
 
-        rebuild_floor_regions(&mut model);
-        assert_eq!(model.slabs.len(), 2, "冪等");
-    }
-
-    /// 実梁が途中節点で 2 要素に分かれていても、連結した全長で支持部材の間の床板ごとに分割される。
-    #[test]
-    fn test_cantilever_splits_at_spliced_real_beam() {
-        let mut model = cantilever_rect();
-        model.nodes.push(node(4, 2000.0, 0.0, 0.0));
-        model.nodes.push(node(5, 2000.0, 800.0, 0.0));
-        model.nodes.push(node(6, 2000.0, 1500.0, 0.0));
-        model.elements.push(element_beam(1, 4, 5));
-        model.elements.push(element_beam(2, 5, 6));
-        rebuild_floor_regions(&mut model);
-        assert_eq!(model.slabs.len(), 2, "2 要素の実梁でも分割");
-        for (i, expected) in [[0.0, 0.5], [0.5, 1.0]].iter().enumerate() {
-            match &model.slabs[i].shape {
-                SlabShape::Attached {
-                    anchor: RegionAnchor::Line { span, .. },
-                    extent,
-                } => {
-                    assert!((span[0] - expected[0]).abs() < 1e-9, "{span:?}");
-                    assert!((span[1] - expected[1]).abs() < 1e-9, "{span:?}");
-                    assert!((extent[0] - 1500.0).abs() < 1e-6, "{extent:?}");
-                    assert!((extent[1] - 1500.0).abs() < 1e-6, "{extent:?}");
-                }
-                other => panic!("Attached ではない: {other:?}"),
-            }
-        }
-
-        rebuild_floor_regions(&mut model);
-        assert_eq!(model.slabs.len(), 2, "冪等");
+        let mut spliced = cantilever_rect();
+        spliced.nodes.push(node(4, 2000.0, 0.0, 0.0));
+        spliced.nodes.push(node(5, 2000.0, 800.0, 0.0));
+        spliced.nodes.push(node(6, 2000.0, 1500.0, 0.0));
+        spliced.elements.push(element_beam(1, 4, 5));
+        spliced.elements.push(element_beam(2, 5, 6));
+        assert_split(spliced, "2 要素の実梁");
     }
 
     /// 小梁を消すと、同じ版仕様の隣り合う床板は 1 枚に統合される。

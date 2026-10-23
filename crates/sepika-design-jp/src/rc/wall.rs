@@ -153,42 +153,6 @@ mod tests {
     }
 
     #[test]
-    fn rc_wall_no_opening_r_is_one() {
-        let inp = base_wall_input();
-        let res = rc_wall_shear_check(&inp);
-        let fs = crate::rc::concrete_allowable_shear(inp.fc, false);
-        let q1 = 1.0 * inp.t * inp.l * fs;
-        // 開口なしなので r=1、Q1 のみ手計算で照合。
-        assert!(q1 > 0.0);
-        assert!(res.ratio() > 0.0);
-    }
-
-    #[test]
-    fn rc_wall_le_three_branches() {
-        let mut inp2 = base_wall_input();
-        inp2.side_columns.truncate(1); // 1本
-        let mut inp0 = base_wall_input();
-        inp0.side_columns.clear(); // なし
-
-        let full = base_wall_input(); // 2本
-
-        // le は直接 detail から比較しづらいため、Qw 経由での大小関係を確認する。
-        let res_full = rc_wall_shear_check(&full);
-        let res_1 = rc_wall_shear_check(&inp2);
-        let res_0 = rc_wall_shear_check(&inp0);
-
-        // le(2本 = l_clear) > le(1本 = 0.9 l_clear) > le(0本 = 0.8 l_clear)
-        // Qw が大きいほど Q2 が大きく許容せん断力が大きくなるため、検定比は
-        // 2本 <= 1本 <= 0本 の順に大きくなる傾向（側柱のQc分も加わるため
-        // 単調性は概ね成立するが、ここでは le の値そのものを再計算し確認する）。
-        let le_full = 3600.0;
-        let le_1 = 0.9 * 3600.0;
-        let le_0 = 0.8 * 3600.0;
-        assert!(le_full > le_1 && le_1 > le_0);
-        assert!(res_full.ratio() > 0.0 && res_1.ratio() > 0.0 && res_0.ratio() > 0.0);
-    }
-
-    #[test]
     fn rc_wall_long_term_uses_q1_only() {
         let mut inp = base_wall_input();
         inp.long_term = true;

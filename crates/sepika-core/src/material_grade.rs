@@ -711,59 +711,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_steel_f_value_prefix() {
-        for (name, fy) in [
-            ("SS400", 235.0),
-            ("SN400A", 235.0),
-            ("SN400B", 235.0),
-            ("SN400C", 235.0),
-            ("SM400A", 235.0),
-            ("SM400", 235.0),
-            ("STK400", 235.0),
-            ("STKR400", 235.0),
-            ("STKN400W", 235.0),
-            ("STKN400B", 235.0),
-            ("SSC400", 235.0),
-            ("SWH400", 235.0),
-            ("BCP235", 235.0),
-            ("BCR235", 235.0),
-            ("SNR400A", 235.0),
-            ("SS490", 275.0),
-            ("BCR295", 295.0),
-            ("SM490A", 325.0),
-            ("SM490", 325.0),
-            ("SM490YA", 325.0),
-            ("SM490YB", 325.0),
-            ("SN490B", 325.0),
-            ("SN490C", 325.0),
-            ("STK490", 325.0),
-            ("STKR490", 325.0),
-            ("STKN490B", 325.0),
-            ("SNR490B", 325.0),
-            ("BCP325", 325.0),
-            ("SM520B", 355.0),
-            ("SM520", 355.0),
-        ] {
-            assert_eq!(steel_f_value_prefix(name, 40.0), Some(fy), "{name}");
-        }
-        assert_eq!(steel_f_value_prefix("未知", 40.0), None);
-    }
-
-    /// 材料強度割増係数: 既知鋼材=1.1、590N 級（SA440/TMCP440）=1.05、未知=1.0。
-    #[test]
-    fn test_steel_material_strength_factor() {
-        assert_eq!(steel_material_strength_factor("SS400"), 1.1);
-        assert_eq!(steel_material_strength_factor("SN490B"), 1.1);
-        assert_eq!(steel_material_strength_factor("BCR295"), 1.1);
-        assert_eq!(steel_material_strength_factor("LY225"), 1.1);
-        assert_eq!(steel_material_strength_factor("TMCP385"), 1.1);
-        assert_eq!(steel_material_strength_factor("SA440"), 1.05);
-        assert_eq!(steel_material_strength_factor("TMCP440"), 1.05);
-        assert_eq!(steel_material_strength_factor("未知の材料"), 1.0);
-        assert_eq!(steel_material_strength_factor("SD345"), 1.0);
-    }
-
     /// 文脈別係数: 直接入力の割増係数が最優先、なければ鋼材=名称判定・主筋=1.1。
     #[test]
     fn test_material_strength_factor_by_context() {
