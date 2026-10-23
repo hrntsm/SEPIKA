@@ -1242,3 +1242,152 @@ fn panel_753_yield_gate_expires_analysis35_and_keeps_current_results() {
         std::fs::remove_file(path).unwrap();
     }
 }
+
+fn panel_757_calculated() -> App {
+    let mut model = crate::sample::portal_frame();
+    let (sin, cos) = 0.37_f64.sin_cos();
+    for element in &mut model.elements {
+        if element.section == Some(sepika_core::ids::SectionId(0)) {
+            element.local_axis.ref_vector = [cos, sin, 0.0];
+        }
+    }
+    let mut app = App::default();
+    app.load_model(model);
+    app.core.analysis_cfg.threads = 1;
+    app.run_preparation();
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let bundle = app.core.scoped.results.as_ref().unwrap();
+    assert!(!bundle.panel_moments.is_empty());
+    assert!(bundle
+        .panel_moments
+        .iter()
+        .any(|(_, m)| m.iter().any(|x| x.abs() > 1.0)));
+    assert!(bundle.has_design_results());
+    app
+}
+
+#[test]
+fn panel_757_rotated_panel_results_expire_analysis36_and_survive_current_roundtrip() {
+    let app = panel_757_calculated();
+    let original = app.core.scoped.results.as_ref().unwrap();
+    for (version, keep) in [(36, false), (ANALYSIS_CONTRACT_VERSION, true)] {
+        let (mut loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("panel757-contract-{version}"),
+        );
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(results.has_analysis_results(), keep);
+        assert_eq!(results.has_design_results(), keep);
+        assert_eq!(loaded.core.scoped.staleness.results_stale, !keep);
+        assert_eq!(loaded.core.scoped.staleness.design_stale, !keep);
+        if keep {
+            assert_eq!(results.panel_moments, original.panel_moments);
+            assert_eq!(results.statics[0].1.disp, original.statics[0].1.disp);
+        } else {
+            assert!(results.panel_moments.is_empty());
+            assert!(loaded.core.scoped.last_static.is_none());
+            assert!(loaded.core.scoped.staleness.last_run.is_none());
+        }
+        loaded.select_displayed_result(app.core.scoped.last_static.unwrap());
+        loaded.save_project_to(path.clone());
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        assert!(reopened.core.scoped.last_error.is_none());
+        assert_eq!(
+            reopened
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .is_some_and(|r| r.has_analysis_results()),
+            keep
+        );
+        if keep {
+            assert_eq!(
+                reopened.core.scoped.results.as_ref().unwrap().panel_moments,
+                original.panel_moments
+            );
+        }
+        reopened.run_linear_static(LoadCaseId(0));
+        assert!(
+            reopened.core.scoped.last_error.is_none(),
+            "{:?}",
+            reopened.core.scoped.last_error
+        );
+        let recalculated = reopened.core.scoped.results.as_ref().unwrap();
+        assert_eq!(
+            recalculated.analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
+        assert_eq!(
+            recalculated.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        assert_eq!(recalculated.panel_moments, original.panel_moments);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn panel_757_preparation_roundtrip_preserves_both_axes_and_old_scalar_requires_repreparation() {
+    let app = panel_757_calculated();
+    let prep = app.core.scoped.preparation.as_ref().unwrap();
+    assert!(!prep.panels.is_empty());
+    for legacy in [false, true] {
+        let mut value = serde_json::to_value(prep).unwrap();
+        if legacy {
+            for panel in value["panels"].as_array_mut().unwrap() {
+                for field in ["dc", "db", "tp", "ve", "k_panel"] {
+                    panel[field] = panel[field][0].clone();
+                }
+            }
+        }
+        let bytes = rmp_serde::to_vec_named(&value).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "sepika-757-prep-{}-{legacy}.ovika",
+            std::process::id()
+        ));
+        sepika_io::ovika::save_ovika(
+            &path,
+            &app.core.model,
+            sepika_io::ovika::OvikaExtras {
+                preparation: Some(&bytes),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut loaded = App::default();
+        loaded.open_project_from(path.clone());
+        assert!(loaded.core.scoped.last_error.is_none());
+        assert_eq!(loaded.core.scoped.staleness.preparation_stale, legacy);
+        if legacy {
+            assert!(loaded.core.scoped.preparation.is_none());
+            assert!(loaded
+                .core
+                .scoped
+                .last_notice
+                .as_ref()
+                .is_some_and(|n| n.contains("準備計算の結果") && n.contains("再実行")));
+            loaded.run_preparation();
+            assert!(loaded.core.scoped.last_error.is_none());
+        }
+        let restored = loaded.core.scoped.preparation.as_ref().unwrap();
+        assert_eq!(restored.panels.len(), prep.panels.len());
+        for (actual, expected) in restored.panels.iter().zip(&prep.panels) {
+            assert_eq!(actual.node, expected.node);
+            assert_eq!(actual.dc, expected.dc);
+            assert_eq!(actual.db, expected.db);
+            assert_eq!(actual.tp, expected.tp);
+            assert_eq!(actual.ve, expected.ve);
+            assert_eq!(actual.k_panel, expected.k_panel);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+}

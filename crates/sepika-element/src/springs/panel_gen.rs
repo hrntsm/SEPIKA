@@ -38,25 +38,25 @@ use sepika_core::model::{
     ElementData, ElementKind, EndCondition, ForceRegime, LocalAxis, Model, PanelZoneMode,
 };
 use sepika_core::panel_zone::{
-    is_horizontal_or_vertical_member, member_orientation, panel_half_extent, resolve_panel_joint,
-    PanelHalfExtent, PanelJointError,
+    is_horizontal_or_vertical_member, member_orientation, panel_half_extent,
+    resolve_panel_analysis_joint, PanelHalfExtent, PanelJointError,
 };
 
-/// 1 つの接合部に生成するパネルの諸元。
+/// 1 つの接合部に生成するパネルの諸元。方向別の値は `[強軸, 弱軸]` の順。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GeneratedPanel {
     /// 接合部の節点。
     pub node: NodeId,
-    /// 柱せい方向のパネル寸法 `dc` `[mm]`。
-    pub dc: f64,
+    /// 方向別パネル寸法 `dc` [mm]。H 形の弱軸はフランジ幅。
+    pub dc: [f64; 2],
     /// 梁フランジ板厚中心間距離 `db` `[mm]`。
-    pub db: f64,
-    /// パネル板厚 `tp` `[mm]`。
-    pub tp: f64,
+    pub db: [f64; 2],
+    /// 抵抗板 1 枚あたりの有効厚 `tp` [mm]。
+    pub tp: [f64; 2],
     /// 実効体積 `Ve` `[mm³]`。
-    pub ve: f64,
-    /// パネルせん断剛性 `Kxp = Kyp = G・Ve` [N·mm/rad]。
-    pub k_panel: f64,
+    pub ve: [f64; 2],
+    /// 柱の強軸・弱軸に対応するせん断剛性 `G・Ve` [N·mm/rad]。
+    pub k_panel: [f64; 2],
 }
 
 /// モデルから既存の仕口パネル要素をすべて取り除き、残った要素の ID を連番へ
@@ -97,14 +97,14 @@ fn remove_existing_panels(model: &mut Model) {
 
 /// 節点 `node` にパネルを設けるべきか判定し、設ける場合は諸元と接続節点を返す。
 ///
-/// 判定は [`resolve_panel_joint`] に委ね、本関数はモデル化固有の追加条件
-/// （CFT を含まない・せん断弾性係数が正）とパネルせん断剛性の算定を担う。
+/// 適用条件・方向別諸元は [`resolve_panel_analysis_joint`] に委ね、剛性と接続節点を返す。
 fn panel_at(
     model: &Model,
     adjacency: &NodeAdjacency,
     node: NodeId,
 ) -> Result<Option<(GeneratedPanel, Vec<NodeId>)>, String> {
-    let joint = match resolve_panel_joint(model, node, adjacency.elements_at(model, node)) {
+    let joint = match resolve_panel_analysis_joint(model, node, adjacency.elements_at(model, node))
+    {
         Ok(joint) => joint,
         Err(PanelJointError::BeamInapplicable(_)) => return Ok(None),
         Err(reason) => return Err(reason.to_string()),
@@ -112,21 +112,7 @@ fn panel_at(
     let Some(joint) = joint else {
         return Ok(None);
     };
-    if joint.has_filled_column {
-        return Ok(None);
-    }
-    let column = &model.elements[joint.column.index()];
-    let shear_modulus = model
-        .element_material(column)
-        .map(|m| m.shear_modulus())
-        .unwrap_or(0.0);
-    let k_panel = shear_modulus * joint.ve;
-    if k_panel <= 0.0 || !k_panel.is_finite() {
-        return Err(format!(
-            "接合部 ID {} のパネル未算定: 柱 ID {} のせん断剛性は有限の正値が必要です",
-            node.0, joint.column.0
-        ));
-    }
+    let k_panel = joint.panels.map(|panel| joint.g * panel.ve);
 
     let connected: Vec<NodeId> = adjacency
         .elements_at(model, node)
@@ -139,10 +125,10 @@ fn panel_at(
     Ok(Some((
         GeneratedPanel {
             node,
-            dc: joint.geometry.dc,
-            db: joint.db,
-            tp: joint.geometry.tp,
-            ve: joint.ve,
+            dc: joint.panels.map(|panel| panel.geometry.dc),
+            db: [joint.db; 2],
+            tp: joint.panels.map(|panel| panel.geometry.tp),
+            ve: joint.panels.map(|panel| panel.ve),
             k_panel,
         },
         connected,
@@ -267,6 +253,7 @@ mod tests {
     use sepika_core::ids::{MaterialId, SectionId};
     use sepika_core::model::MaterialCategory;
     use sepika_core::model::{FrameSectionUse, Material, Node, Section};
+    use sepika_core::panel_zone::resolve_panel_joint;
     use sepika_core::panel_zone::PanelGeometry;
     use sepika_core::section_shape::SectionShape;
 
@@ -317,7 +304,12 @@ mod tests {
             strength_factor: None,
             concrete_class: Default::default(),
             id: MaterialId(id),
-            name: String::new(),
+            name: if category == MaterialCategory::Steel {
+                "SN400B"
+            } else {
+                "Fc24"
+            }
+            .into(),
             category,
             young: 205_000.0,
             poisson: 0.3,
@@ -404,10 +396,10 @@ mod tests {
 
         assert_eq!(panels.len(), 1);
         assert_eq!(panels[0].node, NodeId(0));
-        assert!((panels[0].dc - (400.0 - 21.0)).abs() < 1e-9);
-        assert!((panels[0].db - (600.0 - 17.0)).abs() < 1e-9);
-        assert!((panels[0].tp - 13.0).abs() < 1e-9);
-        assert!(panels[0].k_panel > 0.0);
+        assert!((panels[0].dc[0] - (400.0 - 21.0)).abs() < 1e-9);
+        assert!((panels[0].db[0] - (600.0 - 17.0)).abs() < 1e-9);
+        assert!((panels[0].tp[0] - 13.0).abs() < 1e-9);
+        assert!(panels[0].k_panel[0] > 0.0);
 
         let panel_elems: Vec<_> = model
             .elements
@@ -776,9 +768,9 @@ mod tests {
         assert_eq!(pa.len(), 1);
         assert_eq!(pb.len(), 1);
         assert!(
-            (pa[0].tp - 22.0).abs() < 1e-9,
+            (pa[0].tp[0] - 22.0).abs() < 1e-9,
             "下側の柱を採る: tp={}",
-            pa[0].tp
+            pa[0].tp[0]
         );
         assert_eq!(pa[0], pb[0], "要素の並び順に依存しない");
     }
@@ -798,13 +790,13 @@ mod tests {
         model.sections[0].depth = 650.0;
         model.sections[0].shape = Some(h_shape(600.0, 200.0, 11.0, 20.0));
         let panels = apply_auto_panel_zones(&mut model).unwrap();
-        assert_eq!(panels[0].db, 580.0);
-        assert_eq!(panels[0].ve, 2_857_660.0);
+        assert_eq!(panels[0].db[0], 580.0);
+        assert_eq!(panels[0].ve[0], 2_857_660.0);
         let data = model.elements.last().unwrap().clone();
         let manual = crate::springs::panel::PanelZone::new(&data, &model);
-        assert_eq!(manual.db, 580.0);
-        assert_eq!(manual.ve, 2_857_660.0);
-        assert!((manual.k_panel - 225_315_500_000.0).abs() < 1.0);
+        assert_eq!(manual.db[0], 580.0);
+        assert_eq!(manual.ve[0], 2_857_660.0);
+        assert!((manual.k_panel[0] - 225_315_500_000.0).abs() < 1.0);
         model.sections[0].shape = Some(SectionShape::SteelPipe {
             outer_dia: 600.0,
             thick: 20.0,
@@ -830,12 +822,12 @@ mod tests {
             web_thick: 12.0,
         });
         let panels = apply_auto_panel_zones(&mut model).unwrap();
-        assert_eq!(panels[0].db, 575.0);
-        assert_eq!(panels[0].ve, 2_833_025.0);
+        assert_eq!(panels[0].db[0], 575.0);
+        assert_eq!(panels[0].ve[0], 2_833_025.0);
         let manual = crate::springs::panel::PanelZone::new(model.elements.last().unwrap(), &model);
-        assert_eq!(manual.db, 575.0);
-        assert_eq!(manual.ve, 2_833_025.0);
-        assert!((manual.k_panel - 223_373_125_000.0).abs() < 1.0);
+        assert_eq!(manual.db[0], 575.0);
+        assert_eq!(manual.ve[0], 2_833_025.0);
+        assert!((manual.k_panel[0] - 223_373_125_000.0).abs() < 1.0);
     }
     #[test]
     fn panel_505_old_panel_is_rejected_and_regeneration_removes_unsupported_panel() {
@@ -900,6 +892,60 @@ mod tests {
             assert_eq!(format!("{invalid:?}"), before);
         }
     }
+
+    #[test]
+    fn panel_757_invalid_column_reference_rejects_generation_without_mutation() {
+        use sepika_core::ids::LoadCaseId;
+        use sepika_core::model::{LoadCase, LoadCaseKind, MemberLoad, MemberLoadKind};
+
+        let mut model = l_frame(h_shape(400.0, 400.0, 13.0, 21.0));
+        apply_auto_panel_zones(&mut model).unwrap();
+        assert!(model.elements.iter().any(|element| {
+            element.rigid_zone.panel_offset_i > 0.0 || element.rigid_zone.panel_offset_j > 0.0
+        }));
+        let mut far = model.nodes[1].clone();
+        far.id = NodeId(3);
+        far.coord[1] = 4_000.0;
+        model.nodes.push(far);
+        model.elements.push(member(3, 1, 3, 0));
+        model.girder_groups = vec![vec![ElemId(3)]];
+        model.set_member_hysteresis(ElemId(3), sepika_core::model::HysteresisModel::Standard);
+        model.load_cases.push(LoadCase {
+            id: LoadCaseId(0),
+            name: "追加部材の参照".into(),
+            kind: LoadCaseKind::Dead,
+            nodal: Vec::new(),
+            member: vec![MemberLoad::manual(
+                ElemId(3),
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Point {
+                    a: 1_000.0,
+                    p: 100.0,
+                },
+            )],
+        });
+        let nan = f64::from_bits(0x7ff8_0000_0000_0757);
+        let mut references = Vec::new();
+        for value in [nan, f64::INFINITY, f64::NEG_INFINITY] {
+            for component in 0..3 {
+                let mut reference = [1.0, 0.0, 0.0];
+                reference[component] = value;
+                references.push(reference);
+            }
+        }
+        references.extend([[f64::MAX, 0.0, 0.0], [0.0, f64::MAX, 0.0]]);
+        for reference in references {
+            let mut invalid = model.clone();
+            invalid.elements[1].local_axis.ref_vector = reference;
+            let before = bincode::serialize(&invalid).unwrap();
+            let reason = apply_auto_panel_zones(&mut invalid).unwrap_err();
+            assert!(reason.contains("接合部 ID 0"), "{reason}");
+            assert!(reason.contains("柱 ID 1"), "{reason}");
+            assert!(reason.contains("参照方向"), "{reason}");
+            assert_eq!(bincode::serialize(&invalid).unwrap(), before);
+        }
+    }
+
     #[test]
     fn beam_inapplicability_is_omitted_but_never_hides_invalid_lower_column() {
         for shape in [

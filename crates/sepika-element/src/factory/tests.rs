@@ -1998,7 +1998,7 @@ fn wall_side_column_rejections_agree_on_analysis_ids_and_reasons() {
 }
 
 #[test]
-fn wall_side_column_panel_offsets_have_one_owner_for_three_representations() {
+fn wall_side_columns_do_not_connect_out_of_scope_rc_panel_for_three_representations() {
     use crate::behavior::Ctx;
     for kind in [
         ElementKind::Beam,
@@ -2031,7 +2031,7 @@ fn wall_side_column_panel_offsets_have_one_owner_for_three_representations() {
             } else {
                 build_behavior(data, &model)
             };
-            assert_eq!(member.n_dof(), 14);
+            assert_eq!(member.n_dof(), 12);
             let k = member.tangent_stiffness(&ctx);
             for i in 0..12 {
                 for j in 0..12 {
@@ -2042,18 +2042,124 @@ fn wall_side_column_panel_offsets_have_one_owner_for_three_representations() {
                         max_relative = 1e-8
                     );
                 }
-                approx::assert_relative_eq!(
-                    k.get(i, 12),
-                    0.5 * k.get(i, 3),
-                    epsilon = 1e-4,
-                    max_relative = 1e-8
-                );
-                approx::assert_relative_eq!(
-                    k.get(i, 13),
-                    0.5 * k.get(i, 4),
-                    epsilon = 1e-4,
-                    max_relative = 1e-8
-                );
+            }
+        }
+    }
+}
+
+#[test]
+fn panel_757_valid_steel_joint_couples_each_factory_representation_once() {
+    use crate::behavior::Ctx;
+    use sepika_core::section_shape::SectionShape;
+
+    let mut model = make_diaphragm_model();
+    model.nodes[1].coord = [6_000.0, 0.0, 3_000.0];
+    model.materials[0].name = "SN400B".into();
+    model.materials[0].young = 205_000.0;
+    model.materials[0].fy = Some(235.0);
+    for (index, usage, height, width, web_thick, flange_thick) in [
+        (0, FrameSectionUse::Girder, 600.0, 200.0, 11.0, 17.0),
+        (1, FrameSectionUse::Column, 400.0, 300.0, 13.0, 21.0),
+    ] {
+        let mut section = SectionShape::SteelH {
+            height,
+            width,
+            web_thick,
+            flange_thick,
+            root_r: Some(0.0),
+        }
+        .to_section(SectionId(index), "S".into());
+        section.frame_use = Some(usage);
+        section.material = Some(MaterialId(0));
+        model.sections[index as usize] = section;
+    }
+    let column = ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Beam,
+        nodes: smallvec::smallvec![NodeId(0), NodeId(2)],
+        section: Some(SectionId(1)),
+        local_axis: LocalAxis {
+            ref_vector: [0.6, 0.8, 0.0],
+        },
+        end_cond: [EndCondition::Fixed; 2],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        plastic_zone: None,
+        spring: None,
+    };
+    let mut girder = column.clone();
+    girder.id = ElemId(1);
+    girder.nodes = smallvec::smallvec![NodeId(2), NodeId(1)];
+    girder.section = Some(SectionId(0));
+    girder.local_axis.ref_vector = [0.0, 0.0, 1.0];
+    let mut panel = column.clone();
+    panel.id = ElemId(2);
+    panel.kind = ElementKind::PanelZone;
+    panel.nodes = smallvec::smallvec![NodeId(2)];
+    panel.section = None;
+    model.elements = vec![column, girder, panel];
+    for representation in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        model.elements[0].kind = representation;
+        let mut bare = model.clone();
+        bare.elements.pop();
+        for nonlinear in [false, true] {
+            let build = |model: &Model| {
+                let data = &model.elements[0];
+                if nonlinear {
+                    build_nonlinear_behavior(
+                        data,
+                        model,
+                        StrengthBasis::Nominal,
+                        AnalysisKind::Incremental,
+                        None,
+                    )
+                } else {
+                    build_behavior(data, model)
+                }
+            };
+            let inner = build(&bare);
+            let wrapped = build(&model);
+            assert_eq!(inner.n_dof(), 12);
+            assert_eq!(wrapped.n_dof(), 14);
+            let expected = inner.tangent_stiffness(&Ctx { model: &bare });
+            let actual = wrapped.tangent_stiffness(&Ctx { model: &model });
+            for i in 0..12 {
+                for j in 0..12 {
+                    approx::assert_relative_eq!(
+                        actual.get(i, j),
+                        expected.get(i, j),
+                        epsilon = 1e-4,
+                        max_relative = 1e-8
+                    );
+                }
+                for axis in 0..2 {
+                    approx::assert_relative_eq!(
+                        actual.get(i, 12 + axis),
+                        0.5 * expected.get(i, 9 + axis),
+                        epsilon = 1e-4,
+                        max_relative = 1e-8
+                    );
+                    approx::assert_relative_eq!(
+                        actual.get(12 + axis, i),
+                        0.5 * expected.get(9 + axis, i),
+                        epsilon = 1e-4,
+                        max_relative = 1e-8
+                    );
+                }
+            }
+            for i in 0..2 {
+                for j in 0..2 {
+                    approx::assert_relative_eq!(
+                        actual.get(12 + i, 12 + j),
+                        0.25 * expected.get(9 + i, 9 + j),
+                        epsilon = 1e-4,
+                        max_relative = 1e-8
+                    );
+                }
             }
         }
     }

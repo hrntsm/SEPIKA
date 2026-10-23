@@ -9273,11 +9273,13 @@ fn test_preparation_generates_panel_zones() {
     assert!(prep.panel_modeling_enabled);
     assert_eq!(prep.panels.len(), n_panels, "一覧と生成数が一致する");
     for p in &prep.panels {
-        assert!(
-            p.dc > 0.0 && p.db > 0.0 && p.tp > 0.0,
-            "諸元が解決されている"
-        );
-        assert!(p.k_panel > 0.0, "せん断剛性 Kxp = G・Ve が正");
+        for direction in 0..2 {
+            assert!(
+                p.dc[direction] > 0.0 && p.db[direction] > 0.0 && p.tp[direction] > 0.0,
+                "両方向の諸元が解決されている"
+            );
+            assert!(p.k_panel[direction] > 0.0, "各方向のせん断剛性 G・Ve が正");
+        }
     }
     // パネル節点には γX・γY の 2 自由度が増える。
     let dofmap = sepika_core::dof::DofMap::build(&app.core.model);
@@ -9479,11 +9481,11 @@ fn test_load_model_resets_model_derived_state() {
         .generated_panels
         .push(sepika_element::springs::panel_gen::GeneratedPanel {
             node: NodeId(0),
-            dc: 300.0,
-            db: 400.0,
-            tp: 12.0,
-            ve: 1.0e6,
-            k_panel: 1.0e9,
+            dc: [300.0; 2],
+            db: [400.0; 2],
+            tp: [12.0; 2],
+            ve: [1.0e6; 2],
+            k_panel: [1.0e9; 2],
         });
     #[cfg(feature = "gui")]
     {

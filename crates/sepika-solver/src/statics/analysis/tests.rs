@@ -2328,6 +2328,7 @@ fn test_model_issues_errors_cft_shell_and_wall_references() {
         model.sections[0].frame_use = Some(FrameSectionUse::Column);
         model.materials[0].fc = Some(24.0);
         if kind == ElementKind::PanelZone {
+            model.materials[0].fy = Some(235.0);
             let mut far = model.nodes[0].clone();
             far.id = NodeId(2);
             far.coord = [0.0, 0.0, -1000.0];
