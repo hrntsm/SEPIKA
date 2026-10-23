@@ -200,6 +200,51 @@ fn rcとs小梁の支持幅400は内法3600に元の線荷重を載せる() {
 }
 
 #[test]
+fn 有限同方向参照は小梁の自重区間と主架構への公開荷重を保つ() {
+    let mut model = face_model(4000.0, [400.0; 2]);
+    model.sections[0].area = 400.0 * 400.0;
+    let key = SecondaryMemberId(10);
+    for reference in [[0.0, 1.0, 0.0], [0.0, 1e308, 0.0]] {
+        for support in &mut model.elements {
+            support.local_axis.ref_vector = reference;
+        }
+        assert_eq!(
+            sepika_core::face_distance::secondary_self_weight_interval(
+                &model,
+                &model.unassigned_beams[0]
+            ),
+            Ok([200.0, 3800.0])
+        );
+        for (basis, w) in [
+            (SelfWeightBasis::Design, 78.5e-6 * 400.0 * 400.0),
+            (
+                SelfWeightBasis::MassEquiv,
+                7.85e-9 * 400.0 * 400.0 * sepika_core::units::GRAVITY_MM_S2,
+            ),
+        ] {
+            let transfer = solve_with_basis(&model, |_| 0.0, true, basis).unwrap();
+            let member = &transfer.members[&key];
+            assert_eq!(member.member_loads.len(), 1);
+            let MemberLoadKind::Distributed { a, b, w1, w2 } = member.member_loads[0] else {
+                panic!("小梁自重が等分布荷重になっていません")
+            };
+            assert_eq!([a, b], [200.0, 3800.0]);
+            assert!((w1 - w).abs() < 1e-12, "{basis:?}: {w1} != {w}");
+            assert!((w2 - w).abs() < 1e-12, "{basis:?}: {w2} != {w}");
+            for reaction in member.reactions {
+                assert!((reaction - w * 1800.0).abs() < 1e-9);
+            }
+            let (nodal, primary) = transfer.primary_loads(&model);
+            assert!(nodal.is_empty());
+            assert_eq!(primary.len(), 2);
+            assert!(
+                (primary.iter().map(|load| load.cmq.q_i).sum::<f64>() - w * 3600.0).abs() < 1e-9
+            );
+        }
+    }
+}
+
+#[test]
 fn secondary_fireproof_support_reactions_design_loads_and_mass() {
     use sepika_core::model::{FireproofKind, FrameSectionUse};
     use sepika_core::section_shape::SectionShape;
