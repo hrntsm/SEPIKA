@@ -305,6 +305,7 @@ fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_
         ("design-old-secondary-load-ownership", Some(16)),
         ("design-old-before-wall-side-column-contract", Some(18)),
         ("design-old-panel-reference-column", Some(19)),
+        ("design-old-steel-f-selection", Some(22)),
         ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
     ] {
         let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);
@@ -1099,19 +1100,27 @@ fn sm520_app(thickness: f64, fy: Option<f64>) -> App {
 }
 #[test]
 fn sm520_gui_recheck_save_read_report_and_holding_keep_out_of_range_reasons() {
-    use sepika_design_jp::CheckOutcome;
     for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
-        let mut app = sm520_app(100.001, fy);
+        let mut app = sm520_app(80.0, fy);
+        for section in &mut app.core.model.sections {
+            if let Some(sepika_core::section_shape::SectionShape::SteelH { flange_thick, .. }) =
+                section.shape.as_mut()
+            {
+                *flange_thick = 100.001;
+            }
+        }
         for _ in 0..2 {
             app.run_design_check();
-            let checks = &app.core.scoped.results.as_ref().unwrap().member_checks;
-            assert!(!checks.is_empty());
-            assert!(checks.iter().flat_map(|m| &m.positions).all(|p| matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))));
-            let report = crate::summary::build_report_csv(&app);
+            let reason = app.core.scoped.last_error.as_deref().unwrap();
             assert!(
-                report.contains("適用範囲") && report.contains("検定不能"),
-                "{report}"
+                reason.contains("部材 0") && reason.contains("適用範囲"),
+                "{reason}"
             );
+            let result = app.core.scoped.results.as_ref().unwrap();
+            assert!(!result.has_design_results());
+            assert!(result.design_contract_version.is_none());
+            assert!(app.current_design_results().is_none());
+            assert!(!crate::summary::build_report_csv(&app).contains("全適合"));
         }
         for auto in [false, true] {
             app.core.design_rank_auto = auto;
@@ -1133,18 +1142,24 @@ fn sm520_gui_recheck_save_read_report_and_holding_keep_out_of_range_reasons() {
         app.save_project_to(path.clone());
         let mut loaded = App::default();
         loaded.open_project_from(path.clone());
-        assert!(crate::summary::build_report_csv(&loaded).contains("適用範囲"));
+        assert!(loaded.current_design_results().is_none());
+        assert!(!crate::summary::build_report_csv(&loaded).contains("全適合"));
         loaded.select_displayed_result(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0))));
-        assert!(crate::summary::build_report_csv(&loaded).contains("適用範囲"));
+        assert!(!crate::summary::build_report_csv(&loaded).contains("全適合"));
         loaded.run_linear_static(LoadCaseId(0));
-        assert!(loaded.core.scoped.results.as_ref().unwrap().member_checks.iter().flat_map(|m| &m.positions).all(|p| matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))));
+        let reason = loaded.core.scoped.last_error.as_deref().unwrap();
+        assert!(
+            reason.contains("部材 0") && reason.contains("適用範囲"),
+            "{reason}"
+        );
+        assert!(loaded.current_design_results().is_none());
         std::fs::remove_file(path).unwrap();
     }
 }
 #[test]
-fn sm520_old_335_and_out_of_range_success_expire_without_save_or_display_reauthentication() {
+fn sm520_old_335_success_expires_without_save_or_display_reauthentication() {
     use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
-    for t in [80.0, 100.001] {
+    for t in [80.0] {
         let mut app = sm520_app(t, Some(335.0));
         let old_success = CheckOutcome::Checked(CheckResult {
             basis: "旧SM520成功335".into(),
@@ -1222,9 +1237,6 @@ fn sm520_old_335_and_out_of_range_success_expire_without_save_or_display_reauthe
                 Some(DESIGN_CONTRACT_VERSION)
             );
             assert!(bundle.has_design_results());
-            if t > 100.0 {
-                assert!(bundle.member_checks.iter().flat_map(|m| &m.positions).all(|p| matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))));
-            }
             std::fs::remove_file(path).unwrap();
         }
     }
@@ -1381,7 +1393,7 @@ fn panel_758_design21_expires_checks_and_display_but_keeps_analysis37_until_rech
 }
 
 #[test]
-fn panel_758_design22_save_open_display_and_recheck_preserve_both_principal_axes() {
+fn panel_758_current_design_save_open_display_and_recheck_preserve_both_principal_axes() {
     let mut app = panel_757_calculated();
     assert_panel_758_both_axes(&app);
     let original = app.core.scoped.results.as_ref().unwrap().clone();
@@ -1634,6 +1646,149 @@ fn panel_757_preparation_roundtrip_preserves_both_axes_and_old_scalar_requires_r
             assert_eq!(actual.ve, expected.ve);
             assert_eq!(actual.k_panel, expected.k_panel);
         }
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn steel601_old_design22_preserves_analysis37_and_requires_explicit_recheck() {
+    let mut model = crate::sample::portal_frame();
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    model.materials[0].name = "SS400".into();
+    model.materials[0].fy = Some(235.0);
+    for section in &mut model.sections {
+        let mut actual = sepika_core::section_shape::SectionShape::SteelH {
+            height: section.depth,
+            width: section.width,
+            web_thick: 10.0,
+            flange_thick: 50.0,
+            root_r: Some(0.0),
+        }
+        .to_section(section.id, section.name.clone());
+        actual.material = section.material;
+        actual.frame_use = section.frame_use;
+        *section = actual;
+    }
+    let mut app = App::default();
+    app.load_model(crate::app::tests::with_explicit_pushover_gravity(model));
+    app.core.analysis_cfg.threads = 1;
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let original = app
+        .current_design_results()
+        .expect("表Fで算定した検定")
+        .clone();
+    let checks = rmp_serde::to_vec_named(&original.member_checks).unwrap();
+    assert!(!original.member_checks.is_empty());
+    assert_eq!(original.analysis_contract_version, Some(37));
+    assert_eq!(original.design_contract_version, Some(23));
+    let (mut loaded, path) = restore(&app, Some(37), Some(22), "steel601-old-design22");
+    let result = loaded.core.scoped.results.as_ref().unwrap();
+    assert_eq!(result.member_forces, original.member_forces);
+    assert_eq!(result.statics[0].1.disp, original.statics[0].1.disp);
+    assert!(!result.has_design_results());
+    assert!(loaded.current_design_results().is_none());
+    loaded.select_displayed_result(app.core.scoped.last_static.unwrap());
+    loaded.core.scoped.staleness.mark_fresh();
+    assert!(loaded.current_design_results().is_none());
+    assert!(!crate::summary::build_report_csv(&loaded).contains("全適合"));
+    loaded.save_project_to(path.clone());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(reopened.core.scoped.last_error.is_none());
+    assert!(reopened.current_design_results().is_none());
+    assert_eq!(
+        reopened.core.scoped.results.as_ref().unwrap().member_forces,
+        original.member_forces
+    );
+    reopened.run_design_check();
+    assert!(
+        reopened.core.scoped.last_error.is_none(),
+        "{:?}",
+        reopened.core.scoped.last_error
+    );
+    let current = reopened.current_design_results().unwrap();
+    assert_eq!(current.design_contract_version, Some(23));
+    assert_eq!(
+        rmp_serde::to_vec_named(&current.member_checks).unwrap(),
+        checks
+    );
+    reopened.save_project_to(path.clone());
+    let mut current_loaded = App::default();
+    current_loaded.open_project_from(path.clone());
+    let current = current_loaded.current_design_results().unwrap();
+    assert_eq!(current.analysis_contract_version, Some(37));
+    assert_eq!(current.design_contract_version, Some(23));
+    assert_eq!(current.member_forces, original.member_forces);
+    assert_eq!(
+        rmp_serde::to_vec_named(&current.member_checks).unwrap(),
+        checks
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn steel601_failed_recheck_clears_old_design_and_keeps_valid_analysis() {
+    let app = calculated();
+    for (name, thickness_mm) in [
+        ("missing-thickness", None),
+        ("invalid-thickness", Some(-1.0)),
+        ("out-of-range", Some(101.0)),
+    ] {
+        let (mut loaded, path) = restore(&app, Some(37), Some(23), &format!("steel601-{name}"));
+        let original = loaded.current_design_results().unwrap().clone();
+        loaded.core.model.materials[0].name = "SS400".into();
+        loaded.core.model.sections[0].shape = None;
+        loaded.core.model.sections[0].thickness = thickness_mm;
+        loaded.run_design_check();
+        let reason = loaded.core.scoped.last_error.as_deref().unwrap();
+        assert!(reason.contains("部材 0"), "{reason}");
+        assert!(
+            reason.contains(if thickness_mm == Some(101.0) {
+                "適用範囲"
+            } else {
+                "板厚"
+            }),
+            "{reason}"
+        );
+        let result = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(result.member_forces, original.member_forces);
+        assert!(!result.has_design_results());
+        assert_eq!(result.design_contract_version, None);
+        assert!(result.design_source.is_none());
+        loaded.core.scoped.staleness.mark_fresh();
+        assert!(loaded.current_design_results().is_none());
+        assert!(!crate::summary::build_report_csv(&loaded).contains("全適合"));
+        loaded.save_project_to(path.clone());
+        assert!(
+            loaded.core.scoped.last_error.is_none(),
+            "{name}: {:?}",
+            loaded.core.scoped.last_error
+        );
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        assert!(reopened.core.scoped.last_error.is_none());
+        if let Some(result) = reopened.core.scoped.results.as_ref() {
+            assert!(result.member_checks.is_empty());
+            assert!(result.wall_checks.is_empty());
+            assert!(result.beam_checks.is_empty());
+            assert!(result.slab_checks.is_empty());
+            assert!(result.joint_checks.iter().all(|check| {
+                check.label.starts_with("パネルゾーン(S)")
+                    && matches!(
+                        check.outcome,
+                        sepika_design_jp::CheckOutcome::Skipped { .. }
+                    )
+            }));
+            assert!(result.design_contract_version.is_none());
+        }
+        assert!(reopened.core.scoped.staleness.design_stale);
+        assert!(reopened.current_design_results().is_none());
+        assert!(!crate::summary::build_report_csv(&reopened).contains("全適合"));
         std::fs::remove_file(path).unwrap();
     }
 }

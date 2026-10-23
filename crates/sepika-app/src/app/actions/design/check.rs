@@ -63,9 +63,21 @@ impl App {
         {
             return;
         }
+        let frame_design_requested = self.core.scoped.last_static.is_some()
+            || self.core.scoped.results.as_ref().is_some_and(|r| {
+                !r.member_forces.is_empty()
+                    || !r.panel_moments.is_empty()
+                    || !r.joint_checks.is_empty()
+            });
         self.core.scoped.staleness.design_stale = true;
         if let Some(bundle) = self.core.scoped.results.as_mut() {
             bundle.clear_design_results();
+        }
+        if frame_design_requested {
+            if let Err(reason) = sepika_design_jp::validate_model_steel_inputs(&self.core.model) {
+                self.report_error(reason);
+                return;
+            }
         }
         if let Err(reason) = self.apply_rigid_zones_for_analysis() {
             self.report_error(reason);
@@ -203,24 +215,35 @@ impl App {
             }),
             None => None,
         };
-        let mut report = sepika_design_jp::run_member_design_checks(
-            design_model,
-            &results.member_forces,
-            &results.panel_moments,
-            &sepika_design_jp::MemberDesignCheckOptions {
-                term: self.core.design_term,
-                wall_index: wall_index.as_ref(),
-                wall_case: &wall_case,
-                wall_load_terms: wall_load_terms.as_deref(),
-                rc_damage_control: self.core.analysis_cfg.rc_damage_control,
-                bond_method: self.core.analysis_cfg.bond_method,
-                qd_method: self.core.analysis_cfg.qd_method,
-                long_member_forces,
-                q_simple_by_elem: Some(&q0_by_elem),
-                girder_group_overrides: Some(&group_overrides),
-                steel_fb_basis: sepika_design_jp::SteelFbBasis::default(),
-            },
-        );
+        let frame_report = if frame_design_requested {
+            sepika_design_jp::run_member_design_checks(
+                design_model,
+                &results.member_forces,
+                &results.panel_moments,
+                &sepika_design_jp::MemberDesignCheckOptions {
+                    term: self.core.design_term,
+                    wall_index: wall_index.as_ref(),
+                    wall_case: &wall_case,
+                    wall_load_terms: wall_load_terms.as_deref(),
+                    rc_damage_control: self.core.analysis_cfg.rc_damage_control,
+                    bond_method: self.core.analysis_cfg.bond_method,
+                    qd_method: self.core.analysis_cfg.qd_method,
+                    long_member_forces,
+                    q_simple_by_elem: Some(&q0_by_elem),
+                    girder_group_overrides: Some(&group_overrides),
+                    steel_fb_basis: sepika_design_jp::SteelFbBasis::default(),
+                },
+            )
+        } else {
+            Ok(sepika_design_jp::MemberDesignCheckReport::default())
+        };
+        let mut report = match frame_report {
+            Ok(report) => report,
+            Err(reason) => {
+                self.report_error(reason);
+                return;
+            }
+        };
         if let Some(reason) = &load_error {
             report.skip_for_load_state(reason);
         }
@@ -233,7 +256,13 @@ impl App {
                 outcome,
             })
             .collect();
-        let (beam_checks, slab_checks) = self.floor_design_checks();
+        let (beam_checks, slab_checks) = match self.floor_design_checks() {
+            Ok(checks) => checks,
+            Err(reason) => {
+                self.report_error(reason);
+                return;
+            }
+        };
 
         let member_checks = group_member_checks(report.member_checks);
 
@@ -257,15 +286,18 @@ impl App {
     ///   （床板分配の辺荷重・自重・架け側から渡された集中荷重）を単純梁または片持ち梁と
     ///   して検定する。
     /// - 実部材化された小梁（支持間に実 Beam がある）は全体 FEM で検定するため対象外。
-    /// - 断面未割当・鋼以外の材料・分配荷重が無い・期待床板の欠落・カバー不足の二次部材は表に「未」として残す。
+    /// - 鋼小梁の材料・必要板厚・Fの不備はエラーを返す。対象外の二次部材や分配荷重不足は「未」とする。
     /// - スラブ: 矩形スラブの短辺を設計スパンとし、一方向版として設計曲げモーメントと
     ///   必要鉄筋量を算定する（鋼小梁・SD295 鉄筋の既定値を用いる）。
     pub(crate) fn floor_design_checks(
         &self,
-    ) -> (Vec<crate::app::BeamCheck>, Vec<crate::app::SlabCheck>) {
+    ) -> Result<(Vec<crate::app::BeamCheck>, Vec<crate::app::SlabCheck>), String> {
         use sepika_core::model::LoadPurpose;
         use sepika_design_jp::floor as fd;
 
+        for beam in self.core.model.beams() {
+            fd::secondary_beam_steel_e_and_ft(&self.core.model, beam)?;
+        }
         let mut beam_checks = Vec::new();
         let mut slab_checks = Vec::new();
 
@@ -313,9 +345,9 @@ impl App {
             }
         }
 
-        self.design_secondary_beam_checks(&mut beam_checks);
+        self.design_secondary_beam_checks(&mut beam_checks)?;
 
-        (beam_checks, slab_checks)
+        Ok((beam_checks, slab_checks))
     }
 
     /// 領域内小梁および未割当の片持ち小梁を、二次部材の反力の逐次伝達
@@ -329,7 +361,7 @@ impl App {
     /// 手順であって、面荷重強度は用途ごとに違う。小梁検定は小梁用（`LoadPurpose::Beam`。
     /// 固定＋小梁用積載）、荷重同期は固定荷重ケースと積載荷重ケースへ分けて解く。
     ///
-    /// 断面未割当・鋼以外の材料・分配が足りないものは表に「未」として残す。
+    /// 鋼小梁の入力不備はエラーを返し、対象外の二次部材や分配不足は表に「未」として残す。
     /// 所属先がない小梁のうち、片持ち小梁以外は検定の対象にしない（表に「未」として
     /// 残す。片持ち小梁は取付き線の支持辺として荷重を受けるため検定する）。
     ///
@@ -343,7 +375,10 @@ impl App {
     ///   ため前提が成り立たない（`Model::floor_region_on_single_diaphragm`）。
     ///
     /// 表から消すと検定されていないことに気づけないため、行は残す。
-    fn design_secondary_beam_checks(&self, beam_checks: &mut Vec<crate::app::BeamCheck>) {
+    fn design_secondary_beam_checks(
+        &self,
+        beam_checks: &mut Vec<crate::app::BeamCheck>,
+    ) -> Result<(), String> {
         use sepika_core::model::{LoadPurpose, SecondaryMemberKind};
         use sepika_design_jp::floor as fd;
         use sepika_load::floor::{cantilever_extremes, simple_beam_extremes};
@@ -352,7 +387,7 @@ impl App {
             |s: &sepika_core::model::Slab| self.core.model.slab_intensity(s, LoadPurpose::Beam);
         let transfer = match sepika_load::cascade::solve(&self.core.model, w_of, true) {
             Ok(transfer) => transfer,
-            Err(_) => return,
+            Err(_) => return Ok(()),
         };
 
         for sm in self.core.model.posts() {
@@ -392,11 +427,8 @@ impl App {
                 continue;
             }
 
-            let Some(sid) = sm.section else {
-                beam_checks.push((slab_id, target, fd::beam_unchecked(span)));
-                continue;
-            };
-            let Some(sec) = self.core.model.sections.get(sid.index()) else {
+            let Some((sec, e, ft)) = fd::secondary_beam_steel_e_and_ft(&self.core.model, sm)?
+            else {
                 beam_checks.push((slab_id, target, fd::beam_unchecked(span)));
                 continue;
             };
@@ -404,11 +436,6 @@ impl App {
                 sec.iy / (sec.depth / 2.0)
             } else {
                 0.0
-            };
-            let mat = self.core.model.secondary_material(sm);
-            let Some((e, ft)) = fd::beam_steel_e_and_ft(mat) else {
-                beam_checks.push((slab_id, target, fd::beam_unchecked(span)));
-                continue;
             };
 
             let Some(entry) = entry.filter(|e| e.distribution_ready) else {
@@ -437,5 +464,6 @@ impl App {
             );
             beam_checks.push((slab_id, target, r));
         }
+        Ok(())
     }
 }

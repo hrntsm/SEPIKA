@@ -246,13 +246,10 @@ impl DesignCheck for SteelDesign {
                 }
             }
         }
-        let t = plate_thickness(sec);
-        if let Some(reason) = sepika_core::material_grade::steel_f_value_issue(&mat.name, t) {
-            return CheckOutcome::Skipped { reason };
-        }
-        let f = steel_f_value_prefix(&mat.name, t)
-            .or(mat.fy)
-            .unwrap_or(235.0);
+        let f = match crate::material_strength::section_steel_f(sec, Some(mat)) {
+            Ok(f) => f,
+            Err(reason) => return CheckOutcome::Skipped { reason },
+        };
         let term = ctx.term;
 
         let cr = match ctx.kind {

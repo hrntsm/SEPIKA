@@ -80,7 +80,8 @@ mod tests {
 
     #[test]
     fn test_brace_tension_ok() {
-        let sec = rect_section(100.0, 100.0, "L-100x100x10");
+        let mut sec = rect_section(100.0, 100.0, "L-100x100x10");
+        sec.thickness = Some(10.0);
         let mat_v = mat("SN400");
         let forces = MemberForcesAt {
             pos: 0.5,
@@ -107,7 +108,8 @@ mod tests {
     #[test]
     fn test_brace_compression_slender_fails() {
         // 細長比が大きい（断面が小さく部材長が長い）圧縮ブレースは fc が下がり NG になる。
-        let sec = rect_section(20.0, 20.0, "L-20x20x3");
+        let mut sec = rect_section(20.0, 20.0, "L-20x20x3");
+        sec.thickness = Some(3.0);
         let mat_v = mat("SN400");
         let forces = MemberForcesAt {
             pos: 0.5,
@@ -137,7 +139,8 @@ mod tests {
     #[test]
     fn test_brace_compression_stocky_passes() {
         // 太く短いブレースは座屈の影響が小さく OK になりやすい。
-        let sec = rect_section(300.0, 300.0, "BOX-300x300x16");
+        let mut sec = rect_section(300.0, 300.0, "BOX-300x300x16");
+        sec.thickness = Some(16.0);
         let mat_v = mat("SN400");
         let forces = MemberForcesAt {
             pos: 0.5,

@@ -4686,7 +4686,7 @@ fn test_floor_design_checks_slab() {
         ..App::default()
     };
 
-    let (_beams, slabs) = app.floor_design_checks();
+    let (_beams, slabs) = app.floor_design_checks().unwrap();
     assert_eq!(slabs.len(), 1, "矩形スラブが1件設計される");
     let (_sid, sr) = &slabs[0];
     assert!((sr.span - 4000.0).abs() < 1e-6, "短辺スパン");
@@ -4725,7 +4725,7 @@ fn issue561_floor_design_checks_skip_skew_and_preserve_rotated_rectangle() {
                     0.,
                 ];
             }
-            let (_, checks) = app.floor_design_checks();
+            let (_, checks) = app.floor_design_checks().unwrap();
             if polygon {
                 assert!(checks.is_empty());
             } else {
@@ -4819,7 +4819,7 @@ fn test_floor_design_skips_materialized_beam() {
         ..App::default()
     };
 
-    let (beams, _slabs) = app.floor_design_checks();
+    let (beams, _slabs) = app.floor_design_checks().unwrap();
     assert!(
         beams.is_empty(),
         "実部材化された小梁は床設計の対象外（全体 FEM で検定）"
@@ -4987,7 +4987,7 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
         ..App::default()
     };
 
-    let (beams, _slabs) = app.floor_design_checks();
+    let (beams, _slabs) = app.floor_design_checks().unwrap();
     assert_eq!(beams.len(), 1, "二次部材小梁が1件設計される");
     let (_sid, target, jr) = &beams[0];
     assert!(matches!(
@@ -5002,6 +5002,58 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
         jr.w
     );
     assert!(jr.m_max > 0.0);
+
+    for (name, thickness_mm, fy, expected_f) in [
+        ("SS400", 40.0, Some(235.0), 235.0),
+        ("SS400", 40.001, Some(235.0), 215.0),
+        ("SS400", 50.0, Some(235.0), 215.0),
+        ("SS400", 50.0, None, 215.0),
+        ("直接入力鋼材", 50.0, Some(310.0), 310.0),
+    ] {
+        let mut check_app = App::default();
+        check_app.core.model = app.core.model.clone();
+        let section_id = SectionId(check_app.core.model.sections.len() as u32);
+        let mut secondary_section = check_app.core.model.sections[0].clone();
+        secondary_section.id = section_id;
+        let material_id = sepika_core::ids::MaterialId(check_app.core.model.materials.len() as u32);
+        let mut secondary_material =
+            check_app.core.model.materials[secondary_section.material.unwrap().index()].clone();
+        secondary_material.id = material_id;
+        secondary_section.material = Some(material_id);
+        check_app.core.model.materials.push(secondary_material);
+        check_app.core.model.sections.push(secondary_section);
+        check_app.core.model.floor_regions[0].secondary_beams[0].section = Some(section_id);
+        let slab_section_id = SectionId(check_app.core.model.sections.len() as u32);
+        let mut slab_section =
+            sepika_core::section_shape::SectionShape::RcSlab { thickness: 100.0 }
+                .to_section(slab_section_id, "床検定用スラブ".into());
+        slab_section.material = Some(material_id);
+        check_app.core.model.sections.push(slab_section);
+        for slab in &mut check_app.core.model.slabs {
+            slab.plate.section = Some(slab_section_id);
+        }
+        let section = &mut check_app.core.model.sections[section_id.index()];
+        section.shape = Some(sepika_core::section_shape::SectionShape::SteelH {
+            height: 400.0,
+            width: 200.0,
+            web_thick: 8.0,
+            flange_thick: thickness_mm,
+            root_r: Some(0.0),
+        });
+        let steel = &mut check_app.core.model.materials[material_id.index()];
+        steel.name = name.into();
+        steel.fy = fy;
+        check_app.run_design_check();
+        assert!(
+            check_app.core.scoped.last_error.is_none(),
+            "{name}: {:?}",
+            check_app.core.scoped.last_error
+        );
+        let checked = &check_app.current_design_results().unwrap().beam_checks[0].2;
+        assert!(!checked.unchecked);
+        assert!((checked.sigma_allow - expected_f / 1.5).abs() < 1e-10);
+        assert!((checked.bending_ratio - checked.sigma / (expected_f / 1.5)).abs() < 1e-10);
+    }
 
     let material = sepika_core::ids::MaterialId(app.core.model.materials.len() as u32);
     let mut steel = app.core.model.materials.last().unwrap().clone();
@@ -5198,7 +5250,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
         ..App::default()
     };
 
-    let (beams, slabs) = app.floor_design_checks();
+    let (beams, slabs) = app.floor_design_checks().unwrap();
 
     // 小梁検定: 固定 DL 5.0 + 小梁用 2.5 = 7.5e-3 N/mm²。45° 分配の共有辺（4000 スパン）は
     // w_equiv = 1500 × 面荷重 なので 11.25。床用（8.0e-3 → 12.0）ではない。
@@ -5242,7 +5294,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
     let id = app.core.model.load_cases.last().unwrap().id;
     app.core.scoped.last_static = Some(StaticKey::Case(StaticCaseKey::User(id)));
     app.core.design_term = LoadTerm::Short;
-    let (short_beams, short_slabs) = app.floor_design_checks();
+    let (short_beams, short_slabs) = app.floor_design_checks().unwrap();
     assert_eq!(short_beams[0].2.m_max, beams[0].2.m_max);
     assert_eq!(short_beams[0].2.ratio, beams[0].2.ratio);
     assert_eq!(short_slabs[0].1.moment, slabs[0].1.moment);
@@ -5368,7 +5420,7 @@ fn test_floor_design_checks_cantilever_beam() {
         ..App::default()
     };
 
-    let (beams, _slabs) = app.floor_design_checks();
+    let (beams, _slabs) = app.floor_design_checks().unwrap();
     assert_eq!(beams.len(), 1, "片持ち小梁が1件設計される");
     let (_sid, _target, jr) = &beams[0];
     let simple = 11.85 * 4000.0_f64.powi(2) / 8.0;
@@ -5391,14 +5443,14 @@ fn test_floor_design_checks_cantilever_beam() {
         },
         ..App::default()
     };
-    let (beams2, _) = app2.floor_design_checks();
+    let (beams2, _) = app2.floor_design_checks().unwrap();
     assert_eq!(beams2.len(), 1);
     assert!(beams2[0].2.unchecked, "未割当の非片持ち小梁は検定しない");
 }
 
-/// 断面未割当の二次部材小梁は表から消さず判定「未」になる。
+/// 断面未割当の二次部材小梁は対象を示す入力エラーになる。
 #[test]
-fn test_floor_design_checks_secondary_beam_without_section_is_unchecked() {
+fn test_floor_design_checks_secondary_beam_without_section_is_input_error() {
     use sepika_core::model::{SecondaryMember, SecondaryMemberKind};
 
     let mut model = make_square_slab_test_model();
@@ -5464,10 +5516,11 @@ fn test_floor_design_checks_secondary_beam_without_section_is_unchecked() {
         },
         ..App::default()
     };
-    let (beams, _) = app.floor_design_checks();
-    assert_eq!(beams.len(), 1);
-    assert!(beams[0].2.unchecked, "断面なしは未検定");
-    assert!(!beams[0].2.ok);
+    let error = app.floor_design_checks().unwrap_err();
+    assert!(
+        error.contains("小梁 0") && error.contains("断面"),
+        "{error}"
+    );
 }
 
 /// 二次部材小梁は、平面が重なる上下階のスラブのうち**同じレベル**のスラブで検定される。
@@ -5612,7 +5665,7 @@ fn test_floor_design_checks_secondary_beam_uses_same_level_slab() {
         ..App::default()
     };
 
-    let (beams, _slabs) = app.floor_design_checks();
+    let (beams, _slabs) = app.floor_design_checks().unwrap();
     assert_eq!(beams.len(), 1, "二次部材小梁が1件設計される");
     let (sid, _target, jr) = &beams[0];
     assert_eq!(*sid, Some(SlabId(1)), "上階床領域の代表床板で検定される");
@@ -5749,7 +5802,7 @@ fn test_floor_design_checks_secondary_beam_on_shared_edge_averages_width() {
         ..App::default()
     };
 
-    let (beams, _slabs) = app.floor_design_checks();
+    let (beams, _slabs) = app.floor_design_checks().unwrap();
     assert_eq!(beams.len(), 1, "境界辺の小梁が1件設計される");
     // 2000 幅 + 4000 幅の 2 枚。三角/台形分配の重ね合わせ（8.75 N/mm）。
     assert!(
@@ -5846,7 +5899,7 @@ fn test_floor_design_checks_secondary_beam_on_slab_edge() {
         ..App::default()
     };
 
-    let (beams, _slabs) = app.floor_design_checks();
+    let (beams, _slabs) = app.floor_design_checks().unwrap();
     assert_eq!(beams.len(), 1, "床板境界上の二次部材小梁が1件設計される");
 }
 
@@ -5904,7 +5957,7 @@ fn test_slab_design_span_respects_one_way() {
         },
         ..App::default()
     };
-    let (_j, slabs_x) = app_x.floor_design_checks();
+    let (_j, slabs_x) = app_x.floor_design_checks().unwrap();
     assert!(
         (slabs_x[0].1.span - 6000.0).abs() < 1e-6,
         "X一方向は長辺6000で設計"
@@ -5918,7 +5971,7 @@ fn test_slab_design_span_respects_one_way() {
         },
         ..App::default()
     };
-    let (_j, slabs_y) = app_y.floor_design_checks();
+    let (_j, slabs_y) = app_y.floor_design_checks().unwrap();
     assert!(
         (slabs_y[0].1.span - 3000.0).abs() < 1e-6,
         "Y一方向は短辺3000で設計"
@@ -5932,7 +5985,7 @@ fn test_slab_design_span_respects_one_way() {
         },
         ..App::default()
     };
-    let (_j, slabs_n) = app_n.floor_design_checks();
+    let (_j, slabs_n) = app_n.floor_design_checks().unwrap();
     assert!(
         (slabs_n[0].1.span - 3000.0).abs() < 1e-6,
         "両方向は短辺3000で設計"
@@ -5946,7 +5999,7 @@ fn test_slab_design_span_respects_one_way() {
         },
         ..App::default()
     };
-    let (_j, slabs) = app.floor_design_checks();
+    let (_j, slabs) = app.floor_design_checks().unwrap();
     assert!((slabs[0].1.span - 4000.0).abs() < 1e-6);
     assert_eq!(short_model.slabs[0].one_way(), Some(OneWayDir::Short));
 
@@ -5960,7 +6013,7 @@ fn test_slab_design_span_respects_one_way() {
         },
         ..App::default()
     };
-    let (_j, slabs) = app.floor_design_checks();
+    let (_j, slabs) = app.floor_design_checks().unwrap();
     assert!((slabs[0].1.span - 3500.0).abs() < 1e-6);
     assert_eq!(short_model.slabs[0].one_way(), Some(OneWayDir::Short));
 
@@ -6026,7 +6079,7 @@ fn test_attached_cantilever_slab_check_coef_2() {
         },
         ..App::default()
     };
-    let (_j, slabs) = app.floor_design_checks();
+    let (_j, slabs) = app.floor_design_checks().unwrap();
     let enclosed = slabs
         .iter()
         .find(|(id, _)| *id == SlabId(0))
@@ -6100,7 +6153,7 @@ fn test_attached_trapezoid_slab_check_survives_none_dimensions() {
         },
         ..App::default()
     };
-    let (_j, slabs) = app.floor_design_checks();
+    let (_j, slabs) = app.floor_design_checks().unwrap();
     assert_eq!(slabs.len(), 1, "slab_dimensions が None でも検定する");
     let w = app
         .core
@@ -6147,7 +6200,7 @@ fn test_attached_point_slab_check_coef_2() {
         },
         ..App::default()
     };
-    let (_j, slabs) = app.floor_design_checks();
+    let (_j, slabs) = app.floor_design_checks().unwrap();
     assert_eq!(slabs.len(), 1);
     let w = app
         .core
@@ -12675,11 +12728,16 @@ mod steel_slab_density_fixture {
 
 #[test]
 fn high_density_steel_gui_preparation_sync_rejects_and_undo_recovers() {
-    for (model, material) in [
+    for (mut model, material) in [
         (high_density_steel_fixture::steel_frame(), 0),
         (steel_slab_density_fixture::one_cubic_metre(true), 1),
         (steel_slab_density_fixture::one_cubic_metre(false), 1),
     ] {
+        if material == 1 {
+            for section in &mut model.sections[..2] {
+                section.thickness = Some(15.0);
+            }
+        }
         let mut app = App::default();
         app.load_model(model);
         app.run_preparation();
@@ -13905,4 +13963,194 @@ fn fes_718_gui_draws_target_reason_without_normal_verdict() {
     assert!(!text.contains("算定不能 NG"));
     assert!(!text.contains("Qun[kN]"), "{text}");
     assert!(app.core.scoped.holding_capacity_source.is_none());
+}
+
+#[test]
+fn steel601_secondary_input_failure_clears_design_results() {
+    use sepika_core::ids::{MaterialId, SecondaryMemberId};
+    use sepika_core::model::{
+        SecondaryMember, SecondaryMemberAnchor, SecondaryMemberEnds, SupportMemberId,
+    };
+    let mut model = make_square_slab_test_model();
+    model.slabs.clear();
+    model.floor_regions[0].slab_ids.clear();
+    set_floor_test_self_weight_geometry(&mut model);
+    let sid = SectionId(model.sections.len() as u32);
+    let mut section = model.sections[0].clone();
+    section.id = sid;
+    model.sections.push(section);
+    model.unassigned_beams.push(SecondaryMember {
+        id: SecondaryMemberId(601),
+        name: "入力検査用小梁".into(),
+        section: Some(sid),
+        ends: SecondaryMemberEnds::Cantilever {
+            support: SecondaryMemberAnchor {
+                support: SupportMemberId::Primary(ElemId(0)),
+                position: 0.5,
+            },
+            free_end_vector: [0.0, 1000.0],
+        },
+        ..Default::default()
+    });
+    let material = MaterialId(model.materials.len() as u32);
+    let mut steel = model.materials[0].clone();
+    steel.id = material;
+    model.materials.push(steel);
+    model.sections[sid.index()].material = Some(material);
+    let mut app = App::default();
+    for case in [
+        "unassigned",
+        "missing-reference",
+        "non-steel",
+        "direct-missing-fy",
+        "direct-zero-fy",
+        "direct-negative-fy",
+        "direct-nan-fy",
+        "direct-infinite-fy",
+        "known-missing-thickness",
+        "known-invalid-thickness",
+        "known-out-of-range",
+    ] {
+        app.core.model = model.clone();
+        app.core.scoped.last_error = None;
+        app.run_design_check();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{case}: {:?}",
+            app.core.scoped.last_error
+        );
+        assert_eq!(
+            app.core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .design_contract_version,
+            Some(sepika_core::result_contract::DESIGN_CONTRACT_VERSION)
+        );
+        let section = &mut app.core.model.sections[sid.index()];
+        let steel = &mut app.core.model.materials[material.index()];
+        match case {
+            "unassigned" => section.material = None,
+            "missing-reference" => section.material = Some(MaterialId(999)),
+            "non-steel" => steel.category = sepika_core::model::MaterialCategory::Concrete,
+            "direct-missing-fy" => steel.fy = None,
+            "direct-zero-fy" => steel.fy = Some(0.0),
+            "direct-negative-fy" => steel.fy = Some(-1.0),
+            "direct-infinite-fy" => steel.fy = Some(f64::INFINITY),
+            "direct-nan-fy" => steel.fy = Some(f64::NAN),
+            "known-missing-thickness" => {
+                steel.name = "SS400".into();
+                section.shape = None;
+                section.thickness = None;
+            }
+            "known-invalid-thickness" => {
+                steel.name = "SS400".into();
+                section.shape = None;
+                section.thickness = Some(-1.0);
+            }
+            "known-out-of-range" => {
+                steel.name = "SS400".into();
+                section.shape = None;
+                section.thickness = Some(101.0);
+            }
+            _ => unreachable!(),
+        }
+        app.run_design_check();
+        let error = app.core.scoped.last_error.as_deref().unwrap();
+        assert!(error.contains("601"), "{case}: {error}");
+        let reason = match case {
+            "direct-missing-fy" | "direct-zero-fy" | "direct-negative-fy" | "direct-nan-fy"
+            | "direct-infinite-fy" => "fy",
+            "known-missing-thickness" | "known-invalid-thickness" => "板厚",
+            "known-out-of-range" => "適用範囲",
+            _ => "鋼材",
+        };
+        assert!(error.contains(reason), "{case}: {error}");
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert!(
+            bundle.member_checks.is_empty()
+                && bundle.beam_checks.is_empty()
+                && bundle.slab_checks.is_empty(),
+            "{case}"
+        );
+        assert_eq!(bundle.design_contract_version, None, "{case}");
+        assert!(app.core.scoped.staleness.design_stale, "{case}");
+        assert!(app.current_design_results().is_none(), "{case}");
+        app.core.scoped.staleness.mark_fresh();
+        assert!(app.current_design_results().is_none(), "{case}");
+        assert!(
+            !crate::summary::build_report_csv(&app).contains("全適合"),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn steel601_holding_brace_rank_uses_direct_f_and_rejects_missing_required_thickness() {
+    use sepika_core::ids::MaterialId;
+    use sepika_core::model::{ElementKind, FrameSectionUse};
+    use sepika_core::section_shape::SectionShape;
+    use sepika_design_jp::secondary::holding_capacity::MemberRank;
+    let mut model = with_explicit_pushover_gravity(crate::sample::portal_frame());
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    let mid = MaterialId(model.materials.len() as u32);
+    let mut direct = model.materials[0].clone();
+    direct.id = mid;
+    direct.name = "直接指定筋かい".into();
+    direct.fy = Some(400.0);
+    model.materials.push(direct);
+    let sid = SectionId(model.sections.len() as u32);
+    let mut section = SectionShape::SteelBox {
+        height: 310.0,
+        width: 310.0,
+        thick: 10.0,
+        corner_r: Some(0.0),
+    }
+    .to_section(sid, "筋かい".into());
+    section.material = Some(mid);
+    section.frame_use = Some(FrameSectionUse::Brace);
+    model.sections.push(section);
+    let mut brace = model.elements[0].clone();
+    brace.id = ElemId(model.elements.len() as u32);
+    brace.kind = ElementKind::Brace {
+        tension_only: false,
+    };
+    brace.nodes = smallvec::smallvec![NodeId(0), NodeId(3)];
+    brace.section = Some(sid);
+    let brace_id = brace.id;
+    model.elements.push(brace);
+    let mut app = App::default();
+    app.load_model(model);
+    app.generate_stories_action();
+    app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
+    app.core.analysis_cfg.push_steps = 10;
+    app.run_pushover();
+    select_holding_points(&mut app);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.core.design_rank_auto = true;
+    let (result, _) = app.compute_holding_capacity().unwrap();
+    // 細長比は約57、400の種別境界890/√400=44.5を超える。
+    assert_eq!(
+        result
+            .member_ranks
+            .iter()
+            .find(|(id, _)| *id == brace_id)
+            .unwrap()
+            .1,
+        MemberRank::FC
+    );
+    app.core.model.materials[mid.index()].name = "SS400".into();
+    app.core.model.sections[sid.index()].shape = None;
+    app.core.model.sections[sid.index()].thickness = None;
+    let error = app.compute_holding_capacity().err().expect("拒否される");
+    assert!(
+        error.contains(&format!("ElemId({})", brace_id.0)) && error.contains("板厚"),
+        "{error}"
+    );
 }

@@ -216,7 +216,6 @@ impl App {
             check_holding_capacity_at_state, MemberRank,
         };
         use sepika_design_jp::secondary::member_rank::worst_rank;
-        use sepika_design_jp::steel_f_value_prefix;
         use sepika_solver::nonlinear::pushover::story_response::{EvaluationPurpose, ForceGroup};
         use sepika_solver::nonlinear::pushover::MechanismType;
 
@@ -254,6 +253,15 @@ impl App {
             } else {
                 None
             };
+            let is_steel_brace = elem_is_steel(elem, &self.core.model)
+                && (matches!(elem.kind, sepika_core::model::ElementKind::Brace { .. })
+                    || sepika_design_jp::MemberKind::of_element(elem, &self.core.model)
+                        == sepika_design_jp::MemberKind::Brace);
+            if is_steel_brace {
+                sepika_design_jp::material_strength::section_steel_f(sec, material)
+                    .map_err(|reason| format!("部材 {:?}・断面 {:?}: {reason}", elem.id, sec.id))?;
+                continue;
+            }
             if let Some(reason) = material.and_then(|m| {
                 sepika_core::material_grade::steel_f_value_issue(
                     &m.name,
@@ -622,11 +630,11 @@ impl App {
                     if radius <= 0.0 {
                         continue;
                     }
-                    let f_value = steel_f_value_prefix(
-                        &mat.name,
-                        sepika_design_jp::material_strength::plate_thickness(sec),
-                    )
-                    .unwrap_or(235.0);
+                    let f_value =
+                        sepika_design_jp::material_strength::section_steel_f(sec, Some(mat))
+                            .map_err(|reason| {
+                                format!("部材 {:?}・断面 {:?}: {reason}", elem.id, sec.id)
+                            })?;
                     steel_brace_type(len / radius, f_value)
                 } else if elem_steel {
                     let Some(shape) = sec.shape.as_ref() else {

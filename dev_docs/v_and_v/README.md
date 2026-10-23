@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [鋼材F選択と入力停止_Issue601_2026-10.md](鋼材F選択と入力停止_Issue601_2026-10.md) | 通常鋼材・鋼小梁・S/CFTの材料/実厚/Fと不備停止・検定23 | 🔶（変更前再現と材料/パネルdesign674・core対象49・Clippy成功。App全479成功/既存1ignore、直接4成功。MCP feature144成功。GUI971成功/既存1ignoreはいずれも形状不足追補前。追補後design675/App4/MCP1とClippy成功。文書検査/build/fmt成功。Validation・最終ゲートは未確認） |
 | [仕口パネル検定2軸集約_Issue758_2026-10.md](仕口パネル検定2軸集約_Issue758_2026-10.md) | S/CFT検定の符号付き主軸集約・参加構面の高さ・検定成果失効 | 🔶（極小nz修正後の直接11/design665・App保存3、先行App全475・関連ClippyのVerification。非鉛直MSなしの未対応域、原典適合・Validation・最終ゲートを区別） |
 | [仕口パネル柱2軸_Issue757_2026-10.md](仕口パネル柱2軸_Issue757_2026-10.md) | 柱2主軸と仕事共役な座標・部材接続・方向別成果 | 🔶（CIのjob診断期待を追随しjob159・workspace3851＋doc2成功/4 ignored、関連Clippy・文書検査成功。不正ref修正後の直接証拠と先行GUIを区別。Validation・最終headゲート未確認） |
 | [仕口パネル高軸力降伏域_Issue753_2026-10.md](仕口パネル高軸力降伏域_Issue753_2026-10.md) | 高軸力の公開降伏値・実材料閾値と適用域、旧解析成果の利用制限 | 🔶（旧下限・直接5・element516・solver14・App保存契約のVerification。途中試行伝播/先行失敗は同記録、Validation/最終ゲート未） |
@@ -327,6 +328,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 13 | 許容応力度設計 | sepika-design-jp | allowable_stress.rs | `test_beam_check_bending_rect_section_hand_calc` 他 | P3 | ✅ |
 | 13a | 大梁必要横補剛箇所数（参考） | sepika-design-jp / sepika-app / sepika-mcp | steel/lateral_bracing.rs・member_design_check.rs・app/tests.rs・tests.rs | [Issue488直接受入](大梁横補剛参考数_Issue488_2026-10.md#直接試験) | 横断 | 🔶（参考式Verification、実配置・性能・Validation未） |
 | 13c | SM520告示Fと範囲外拒否 | sepika-core / design-jp / element / solver / app / mcp | sm520境界・現役caller実入口・result_contract_tests | [Issue629の固定期待値と実入口](SM520告示基準強度と範囲外拒否_Issue629_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、Validation未実施。最終ゲートは[PR #646](https://github.com/hrntsm/SEPIKA/pull/646)） |
+| 13e | 鋼材F選択と入力停止 | sepika-core / sepika-design-jp / sepika-app / sepika-mcp | material_grade.rs・material_strength/steel.rs・floor.rs・joint_wiring/steel_panel.rs・actions/design/check.rs | [Issue601の独立期待値と実入口](鋼材F選択と入力停止_Issue601_2026-10.md) | 横断 | 🔶（材料/パネルVerification成功、App全479成功・直接/保存4成功、MCP feature144成功、GUI971成功は形状不足追補前、追補後design675/App4/MCP1成功、Validation未実施） |
 | 13b | 標準鋼材名の厳密解決 | sepika-core / sepika-io | material_grade.rs・standard_material.rs・stbridge/strength_tests.rs | [Issue590の独立表・公開STB入口](標準鋼材名の厳密解決_Issue590_2026-10.md#独立期待値と実入口) | 横断 | 🔶（名称Verification、種類別F全照合・Validation未） |
 | 13d | 用途別せん断面積と二方向検定 | sepika-core / sepika-element / sepika-design-jp / sepika-app | section_shape・steel・frame/beam/construct・shear_area_acceptance_tests | [原5Done・独立期待値・run別証拠](用途別せん断面積と二方向検定_Issue417_2026-10.md)、`surface_radius_tests` / `shear_contract_tests` / `constructed_cantilever_*` | 横断 | 🔶（限定Verification、Validation・正式最終ゲート未確認） |
 | 14 | 保有耐力 | sepika-design-jp | holding_capacity.rs | `test_*` | P7 | 🔶 |
