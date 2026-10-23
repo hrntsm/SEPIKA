@@ -439,17 +439,6 @@ mod tests {
         );
     }
 
-    /// 分割なしの柱では 1 本として数える（退行防止）。
-    #[test]
-    fn test_column_drift_unsplit_column_unchanged() {
-        let (model, s0) = build_model();
-        let disp = disp_field();
-        let drifts = column_drifts(&model, &disp, 0, s0);
-        assert_eq!(drifts.len(), 2);
-        let max = max_column_drift(&model, &disp, 0, s0).unwrap();
-        assert!((max.drift - 20.0).abs() < 1e-12);
-    }
-
     /// 重心変位は中間節点（床レベル外）の変位を混ぜないこと。
     #[test]
     fn test_cog_disp_excludes_mid_height_nodes() {

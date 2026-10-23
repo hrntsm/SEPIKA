@@ -532,90 +532,42 @@ mod tests {
         }
     }
 
-    /// X 方向（見出し角 0°）の壁面。床の格子と同じ形の骨組が壁でも同様に検出できる。
+    /// X・Y・斜め（見出し角 0°, 90°, 30°）の壁面。床の格子と同じ形の骨組が
+    /// 壁でも同様に検出でき、90° は `canonical_direction` の dx=0 境界を含む。
     #[test]
-    fn test_x_direction_plane() {
-        let mut model = Model::default();
-        let mut next_id = 0u32;
-        add_plane_frame(
-            &mut model,
-            &mut next_id,
-            PlaneFrameSpec {
-                origin: [0.0, 0.0],
-                heading_deg: 0.0,
-                bay: 4000.0,
-                story_h: 3000.0,
-                n_bay: 2,
-                n_story: 2,
-            },
-        );
-        let scan = scan_wall_region_boundaries(&model);
-        assert_eq!(scan.unclosed, 0, "半辺の後続は一意に定まるはず");
-        assert_eq!(scan.boundaries.len(), 4, "2×2 の壁構面は 4 面");
-        for b in &scan.boundaries {
-            assert!(
-                (b.area(&model) - 4000.0 * 3000.0).abs() < 1.0,
-                "面積 {}",
-                b.area(&model)
+    fn test_plane_detection_covers_axis_aligned_and_oblique_headings() {
+        for heading_deg in [0.0, 90.0, 30.0] {
+            let mut model = Model::default();
+            let mut next_id = 0u32;
+            add_plane_frame(
+                &mut model,
+                &mut next_id,
+                PlaneFrameSpec {
+                    origin: [0.0, 0.0],
+                    heading_deg,
+                    bay: 4000.0,
+                    story_h: 3000.0,
+                    n_bay: 2,
+                    n_story: 2,
+                },
             );
-        }
-    }
-
-    /// Y 方向（見出し角 90°）の壁面。`canonical_direction` の境界ケース（dx=0）を含む。
-    #[test]
-    fn test_y_direction_plane() {
-        let mut model = Model::default();
-        let mut next_id = 0u32;
-        add_plane_frame(
-            &mut model,
-            &mut next_id,
-            PlaneFrameSpec {
-                origin: [0.0, 0.0],
-                heading_deg: 90.0,
-                bay: 4000.0,
-                story_h: 3000.0,
-                n_bay: 2,
-                n_story: 2,
-            },
-        );
-        let scan = scan_wall_region_boundaries(&model);
-        assert_eq!(scan.unclosed, 0, "半辺の後続は一意に定まるはず");
-        assert_eq!(scan.boundaries.len(), 4, "2×2 の壁構面は 4 面");
-        for b in &scan.boundaries {
-            assert!(
-                (b.area(&model) - 4000.0 * 3000.0).abs() < 1.0,
-                "面積 {}",
-                b.area(&model)
+            let scan = scan_wall_region_boundaries(&model);
+            assert_eq!(
+                scan.unclosed, 0,
+                "heading={heading_deg}: 半辺の後続は一意に定まるはず"
             );
-        }
-    }
-
-    /// 斜め構面（見出し角 30°）。直交グリッドでない構面も同じロジックで検出できる。
-    #[test]
-    fn test_oblique_plane() {
-        let mut model = Model::default();
-        let mut next_id = 0u32;
-        add_plane_frame(
-            &mut model,
-            &mut next_id,
-            PlaneFrameSpec {
-                origin: [0.0, 0.0],
-                heading_deg: 30.0,
-                bay: 4000.0,
-                story_h: 3000.0,
-                n_bay: 2,
-                n_story: 2,
-            },
-        );
-        let scan = scan_wall_region_boundaries(&model);
-        assert_eq!(scan.unclosed, 0, "半辺の後続は一意に定まるはず");
-        assert_eq!(scan.boundaries.len(), 4, "2×2 の壁構面は 4 面（斜め）");
-        for b in &scan.boundaries {
-            assert!(
-                (b.area(&model) - 4000.0 * 3000.0).abs() < 1.0,
-                "面積 {}",
-                b.area(&model)
+            assert_eq!(
+                scan.boundaries.len(),
+                4,
+                "heading={heading_deg}: 2×2 の壁構面は 4 面"
             );
+            for b in &scan.boundaries {
+                assert!(
+                    (b.area(&model) - 4000.0 * 3000.0).abs() < 1.0,
+                    "heading={heading_deg}: 面積 {}",
+                    b.area(&model)
+                );
+            }
         }
     }
 

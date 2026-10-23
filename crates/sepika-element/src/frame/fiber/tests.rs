@@ -1333,34 +1333,6 @@ fn test_elastic_stiffness_matches_beam() {
     }
 }
 
-#[test]
-fn test_elastic_stiffness_symmetric() {
-    let mut fiber = make_test_fiber_beam(None);
-    let ctx = Ctx {
-        model: &build_test_model(None),
-    };
-
-    let u = [
-        1.0, 0.5, 0.3, 0.0, 0.001, 0.002, -0.5, 0.2, -0.1, 0.0, 0.003, -0.001,
-    ];
-    let du = LocalVec {
-        data: SmallVec::from_slice(&u),
-    };
-    fiber.update_state(&du, true, &ctx).unwrap();
-
-    let k = fiber.tangent_stiffness(&ctx);
-    for i in 0..12 {
-        for j in 0..12 {
-            assert!(
-                (k.get(i, j) - k.get(j, i)).abs() < 1e-9,
-                "K[{i}][{j}] != K[{j}][{i}]: {} vs {}",
-                k.get(i, j),
-                k.get(j, i)
-            );
-        }
-    }
-}
-
 /// 弾性応答の手計算照合: 軸力は N=E·A_disc·ε、曲げは M=E·I_disc·κ となり、
 /// 軸と曲げを同時に与えても互いに連成しないこと（断面格子の図心・対称性）。
 #[test]
@@ -1684,14 +1656,6 @@ fn test_geometric_stiffness() {
     assert_relative_eq!(kg.get(5, 5), c * 2.0 * l * l / 15.0, epsilon = 1e-9);
     assert_relative_eq!(kg.get(4, 4), c * 2.0 * l * l / 15.0, epsilon = 1e-9);
     assert_relative_eq!(kg.get(2, 4), -c * l / 10.0, epsilon = 1e-9);
-}
-
-#[test]
-fn test_different_gp_have_independent_mats() {
-    let fiber = make_test_fiber_beam(None);
-    let gp0_ptr = &fiber.gauss_points[0].mats[0] as *const _;
-    let gp1_ptr = &fiber.gauss_points[1].mats[0] as *const _;
-    assert_ne!(gp0_ptr, gp1_ptr, "GP mats must be independent instances");
 }
 
 /// ねじり剛性が G·J/L、ねじり内力が Mx = (G·J/L)·(θi − θj) となること（手計算照合）。

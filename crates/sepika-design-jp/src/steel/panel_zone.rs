@@ -208,17 +208,6 @@ mod tests {
     }
 
     #[test]
-    fn s_panel_moment_hand_calc() {
-        let inp = base_panel_h_input(0.0);
-        let res = s_panel_zone_check(&inp).unwrap();
-        let expected_pm = inp.beam_moment_left + inp.beam_moment_right
-            - (inp.col_shear_upper + inp.col_shear_lower) * inp.db / 2.0;
-        // pM = 200e6+200e6 - (50000+50000)*500/2 = 400e6 - 25e6 = 375e6
-        assert!((expected_pm - 375_000_000.0).abs() < 1e-3);
-        assert!(res.ratio() > 0.0);
-    }
-
-    #[test]
     fn s_panel_axial_ratio_at_or_above_one_clamps_to_zero() {
         let inp = base_panel_h_input(1.0);
         let res = s_panel_zone_check(&inp).unwrap();

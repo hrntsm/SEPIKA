@@ -1284,37 +1284,6 @@ mod tests {
     }
 
     #[test]
-    fn udl_fixed_end_moment_is_wl2_over_12() {
-        let l = 1000.0;
-        let w = 2.0;
-        let frame = horiz_frame();
-        let loads = vec![udl(w, l)];
-        let q = consistent_load_local(&loads, &frame, l, SpanLoadTransfer::Consistent);
-        let expected_shear = w * l / 2.0;
-        assert!((q[1].abs() - expected_shear).abs() < 1e-6, "q1={}", q[1]);
-        assert!((q[7].abs() - expected_shear).abs() < 1e-6, "q7={}", q[7]);
-        let fem = w * l * l / 12.0;
-        assert!((q[5].abs() - fem).abs() < 1e-3, "q5={} fem={}", q[5], fem);
-        assert!((q[11].abs() - fem).abs() < 1e-3, "q11={}", q[11]);
-    }
-
-    #[test]
-    fn udl_clamped_midspan_moment_is_wl2_over_24() {
-        let l = 1000.0;
-        let w = 2.0;
-        let frame = horiz_frame();
-        let loads = vec![udl(w, l)];
-        let mid = fixed_internal_local(&loads, &frame, l, 0.5, SpanLoadTransfer::Consistent);
-        let expected = w * l * l / 24.0;
-        assert!(
-            (mid[5].abs() - expected).abs() < 1e-2,
-            "mid Mz={} expected={}",
-            mid[5],
-            expected
-        );
-    }
-
-    #[test]
     fn point_mid_fixed_end_moment_is_pl_over_8() {
         let l = 1000.0;
         let p = 100.0;

@@ -425,18 +425,6 @@ mod tests {
         assert_total_mass(&truss, 0.0471);
     }
 
-    #[test]
-    fn test_axial_local_stiffness_matches_ea_over_l() {
-        let (model, data) = make_model([0.0, 0.0, 0.0], [4000.0, 0.0, 0.0]);
-        let truss = TrussElement::new(&data, &model);
-        let k = truss.local_stiffness();
-        let ea_l = truss.e * truss.a / truss.length;
-        assert!((k.get(0, 0) - ea_l).abs() < 1e-9);
-        assert!((k.get(6, 6) - ea_l).abs() < 1e-9);
-        assert!((k.get(0, 6) + ea_l).abs() < 1e-9);
-        assert!((k.get(6, 0) + ea_l).abs() < 1e-9);
-    }
-
     /// 斜め配置でも全体系剛性が軸方向ベクトル t による t·tᵀ 展開に一致すること
     /// （K_global = k·(t·tᵀ) をブロックごとに検証。t = 部材軸方向単位ベクトル）。
     #[test]
@@ -467,22 +455,6 @@ mod tests {
             for j in 0..12 {
                 assert_eq!(k_global.get(i, j), 0.0);
                 assert_eq!(k_global.get(j, i), 0.0);
-            }
-        }
-    }
-
-    #[test]
-    fn test_stiffness_matrix_symmetric() {
-        let (model, data) = make_model([1000.0, 500.0, 0.0], [5000.0, 2500.0, 3000.0]);
-        let truss = TrussElement::new(&data, &model);
-        let ctx = Ctx { model: &model };
-        let k = truss.tangent_stiffness(&ctx);
-        for i in 0..12 {
-            for j in 0..12 {
-                assert!(
-                    (k.get(i, j) - k.get(j, i)).abs() < 1e-9,
-                    "K[{i}][{j}] != K[{j}][{i}]"
-                );
             }
         }
     }

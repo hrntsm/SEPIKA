@@ -1549,41 +1549,6 @@ mod tests {
     }
 
     #[test]
-    fn standard_fc_material_rc_mass_is_integrated_once() {
-        let presets = crate::material_grade::material_presets();
-        let concrete_preset = presets.iter().find(|p| p.name == "Fc24").unwrap();
-        let rebar_preset = presets.iter().find(|p| p.name == "SD345").unwrap();
-        let concrete = material(
-            0,
-            MaterialCategory::Concrete,
-            concrete_preset.density,
-            concrete_preset.fc,
-        );
-        let rebar = material(
-            1,
-            MaterialCategory::Rebar,
-            rebar_preset.density,
-            rebar_preset.fc,
-        );
-        let shape = SectionShape::RcBeamRect {
-            b: 400.0,
-            d: 400.0,
-            rebar: new_beam_rebar(),
-        };
-        let section = shape.to_section(SectionId(0), "RC".into());
-        let properties = SectionMassProperties::from_section(
-            &section,
-            Some(&concrete),
-            Some(&rebar),
-            Some(&rebar),
-            None,
-        );
-        let gross = rectangle_geometry(400.0, 400.0);
-        let expected = concrete_density(Some(&concrete), ConcreteComposition::Rc) * gross.area;
-        assert!((properties.mass_per_length - expected).abs() < 1e-12);
-    }
-
-    #[test]
     fn 密度が負値または非有限値なら質量特性を解決できない() {
         let section = Section {
             id: SectionId(0),

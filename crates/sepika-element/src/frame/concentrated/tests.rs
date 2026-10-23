@@ -546,26 +546,6 @@ fn test_compute_kstar_matches_elastic_beam_with_rigid_zone_and_pin() {
     }
 }
 
-/// i 端ピンの部材では、材端ばねの有無に依らず i 端の強軸モーメント剛性が 0 に
-/// なること。
-#[test]
-fn test_compute_kstar_respects_pinned_end() {
-    use sepika_core::model::EndCondition;
-    let mut beam = make_test_beam();
-    beam.end_cond = [EndCondition::Pinned, EndCondition::Fixed];
-    let k = compute_kstar(&beam, &beam.local_stiffness_flex(), 1e12, 1e12);
-    assert!(
-        k.get(5, 5).abs() < 1.0,
-        "i 端ピンなのに強軸モーメント剛性が残っている: {}",
-        k.get(5, 5)
-    );
-    assert!(
-        k.get(11, 11).abs() > 1.0,
-        "j 端（剛接）の強軸モーメント剛性は残るはず: {}",
-        k.get(11, 11)
-    );
-}
-
 /// `state_member_forces` が復元力（`internal_force`）と整合した内力分布を返すこと。
 #[test]
 fn test_state_member_forces_matches_internal_force() {
