@@ -156,6 +156,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-unconverged-time-history", Some(27), "旧契約"),
         ("old-panel-reference-column", Some(28), "旧契約"),
         ("old-local-frame-reference", Some(37), "旧契約"),
+        ("old-face-direction-reference", Some(38), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -200,7 +201,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
 #[test]
 fn ovika_old_analysis_is_unavailable_until_explicit_reanalysis() {
     let app = calculated();
-    for version in [5, 6, 7, 20, 22, 24, 26, 28, 37] {
+    for version in [5, 6, 7, 20, 22, 24, 26, 28, 37, 38] {
         let (mut loaded, path) = restore(
             &app,
             Some(version),
@@ -308,6 +309,7 @@ fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_
         ("design-old-panel-reference-column", Some(19)),
         ("design-old-steel-f-selection", Some(22)),
         ("design-old-local-frame", Some(23)),
+        ("design-old-face-direction", Some(24)),
         ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
     ] {
         let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);
@@ -674,7 +676,7 @@ fn direct_secondary_beam_app() -> App {
 }
 
 #[test]
-fn ovika_old_direct_secondary_beam_design23_requires_explicit_recheck() {
+fn ovika_old_direct_secondary_beam_design_requires_explicit_recheck() {
     let mut app = direct_secondary_beam_app();
     app.run_design_check();
     assert!(
@@ -695,47 +697,54 @@ fn ovika_old_direct_secondary_beam_design23_requires_explicit_recheck() {
     );
     let original_model = rmp_serde::to_vec_named(&app.core.model).unwrap();
 
-    let (mut loaded, path) = restore(&app, None, Some(23), "old-direct-secondary-design23");
-    assert_eq!(
-        rmp_serde::to_vec_named(&loaded.core.model).unwrap(),
-        original_model
-    );
-    let old = loaded.core.scoped.results.as_ref().unwrap();
-    assert_eq!(old.analysis_contract_version, None);
-    assert_eq!(old.design_source, None);
-    assert!(old.beam_checks.is_empty() && old.slab_checks.is_empty());
-    assert!(loaded.current_design_results().is_none());
-    assert!(loaded.require_design_input().is_err());
-    assert!(loaded.core.scoped.staleness.design_stale);
-    assert!(loaded
-        .core
-        .scoped
-        .result_contract_notice
-        .as_ref()
-        .is_some_and(|notice| notice.contains("旧契約")));
+    for version in [23, 24] {
+        let (mut loaded, path) = restore(
+            &app,
+            None,
+            Some(version),
+            &format!("old-direct-secondary-design{version}"),
+        );
+        assert_eq!(
+            rmp_serde::to_vec_named(&loaded.core.model).unwrap(),
+            original_model
+        );
+        let old = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(old.analysis_contract_version, None);
+        assert_eq!(old.design_source, None);
+        assert!(old.beam_checks.is_empty() && old.slab_checks.is_empty());
+        assert!(loaded.current_design_results().is_none());
+        assert!(loaded.require_design_input().is_err());
+        assert!(loaded.core.scoped.staleness.design_stale);
+        assert!(loaded
+            .core
+            .scoped
+            .result_contract_notice
+            .as_ref()
+            .is_some_and(|notice| notice.contains("旧契約")));
 
-    loaded.run_design_check();
-    assert!(
-        loaded.core.scoped.last_error.is_none(),
-        "{:?}",
-        loaded.core.scoped.last_error
-    );
-    let current = loaded.current_design_results().expect("明示再検定");
-    assert_eq!(
-        (current.beam_checks.len(), current.slab_checks.len()),
-        (1, 2)
-    );
-    assert_eq!(current.analysis_contract_version, None);
-    assert_eq!(current.design_source, None);
-    assert_eq!(
-        current.design_contract_version,
-        Some(DESIGN_CONTRACT_VERSION)
-    );
-    std::fs::remove_file(path).unwrap();
+        loaded.run_design_check();
+        assert!(
+            loaded.core.scoped.last_error.is_none(),
+            "{:?}",
+            loaded.core.scoped.last_error
+        );
+        let current = loaded.current_design_results().expect("明示再検定");
+        assert_eq!(
+            (current.beam_checks.len(), current.slab_checks.len()),
+            (1, 2)
+        );
+        assert_eq!(current.analysis_contract_version, None);
+        assert_eq!(current.design_source, None);
+        assert_eq!(
+            current.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 }
 
 #[test]
-fn direct_secondary_beam_design_rejects_unresolved_large_reference_without_partial_results() {
+fn direct_secondary_beam_design_preserves_demand_for_large_finite_reference() {
     let mut app = direct_secondary_beam_app();
     let primary = &app.core.model.elements[0];
     let start = app.core.model.nodes[primary.nodes[0].index()].coord;
@@ -752,19 +761,32 @@ fn direct_secondary_beam_design_rejects_unresolved_large_reference_without_parti
     let unit = app.current_design_results().expect("単位Y参照の直接検定");
     assert_eq!((unit.beam_checks.len(), unit.slab_checks.len()), (1, 2));
     let unit_beam = unit.beam_checks[0].2.clone();
+    assert!(!unit_beam.unchecked);
+    assert!(unit_beam.m_max > 0.0 && unit_beam.q_max > 0.0);
 
     app.core.model.elements[0].local_axis.ref_vector = [0.0, 1.0e308, 0.0];
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let large = app.current_design_results().expect("極大Y参照の直接検定");
+    assert_eq!((large.beam_checks.len(), large.slab_checks.len()), (1, 2));
+    assert_eq!(large.beam_checks[0].2, unit_beam);
+
+    app.core.model.elements[0].local_axis.ref_vector = [f64::NAN, 1.0, 0.0];
     app.run_design_check();
     let error = app
         .core
         .scoped
         .last_error
         .as_deref()
-        .expect("支持面の解決失敗");
+        .expect("必要支持材の非有限参照");
     assert!(
         error.contains("二次部材 0")
             && error.contains("支持材 Primary(ElemId(0))")
-            && error.contains("投影できません"),
+            && error.contains("非有限"),
         "{error}"
     );
     assert!(app.current_design_results().is_none());
