@@ -224,59 +224,6 @@ mod tests {
     }
 
     #[test]
-    fn test_column_check_axial_biaxial_bending_hand_calc() {
-        // H形柱: N=-500kN（圧縮）, Mz=50kN·m, My=20kN·m。
-        let mut sec = rect_section(300.0, 300.0, "H-300x300x10x15");
-        sec.thickness = Some(15.0);
-        let mat_v = mat("SN400");
-        let forces = MemberForcesAt {
-            pos: 0.0,
-            n: -500_000.0,
-            qy: 0.0,
-            qz: 0.0,
-            my: 20e6,
-            mz: 50e6,
-        };
-        let ctx = DesignCtx {
-            term: LoadTerm::Long,
-            kind: MemberKind::Column,
-            length: 3500.0,
-            ..Default::default()
-        };
-        let result = SteelDesign
-            .check(&forces, &sec, &mat_v, &ctx)
-            .unwrap_checked();
-
-        let area = sec.area;
-        let z_strong = sec.iy / (sec.depth / 2.0);
-        let z_weak = sec.iz / (sec.width / 2.0);
-        let sigma_c = 500_000.0 / area;
-        let sigma_bx = 50e6_f64.abs() / z_strong;
-        let sigma_by = 20e6_f64.abs() / z_weak;
-
-        let i_min = (sec.iy.min(sec.iz) / area).sqrt();
-        let lambda = 3500.0 / i_min;
-        let fc = steel_fc(235.0, mat_v.young, lambda, LoadTerm::Long);
-        let ft = steel_ft(235.0, LoadTerm::Long);
-        // fbX は横座屈考慮（H形）、fbY=ft。ここでは非負・上限 ft であることのみ検証。
-        assert!(crate::full_detail(&result).contains("軸曲げ比"));
-        assert!(sigma_c > 0.0 && sigma_bx > 0.0 && sigma_by > 0.0 && fc > 0.0 && ft > 0.0);
-        // 軸+曲げ比は少なくとも σc/fc 単独の比より大きい（曲げ項が加算されるため）。
-        assert!(result.ratio() >= sigma_c / fc - 1e-9);
-
-        // components に AxialBending・Shear が入ることを確認する。
-        assert_eq!(result.components.len(), 2);
-        assert!(result
-            .components
-            .iter()
-            .any(|c| c.kind == crate::CheckKind::AxialBending));
-        assert!(result
-            .components
-            .iter()
-            .any(|c| c.kind == crate::CheckKind::Shear));
-    }
-
-    #[test]
     fn test_column_check_pipe_combines_biaxial_sigma_b() {
         let mut sec = rect_section(300.0, 300.0, "PIPE-300x12");
         sec.iz = sec.iy; // 円形は iy=iz

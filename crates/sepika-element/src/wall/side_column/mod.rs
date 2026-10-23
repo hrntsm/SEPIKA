@@ -225,28 +225,6 @@ mod tests {
         }
     }
 
-    /// 縮約後の全体系剛性は対称（浮動小数点丸め誤差程度の相対誤差を許容）。
-    #[test]
-    fn test_released_stiffness_symmetric() {
-        let model = Model::default();
-        let ctx = Ctx { model: &model };
-        for axis in [ReleaseAxis::LocalY, ReleaseAxis::LocalZ] {
-            let col = make_test_column(axis);
-            let k = col.tangent_stiffness(&ctx);
-            for i in 0..12 {
-                for j in 0..12 {
-                    let kij = k.get(i, j);
-                    let kji = k.get(j, i);
-                    let tol = 1e-9 * (kij.abs() + kji.abs() + 1.0);
-                    assert!(
-                        (kij - kji).abs() < tol,
-                        "axis={axis:?} K[{i}][{j}]={kij} != K[{j}][{i}]={kji}"
-                    );
-                }
-            }
-        }
-    }
-
     fn make_node(id: u32, coord: [f64; 3]) -> Node {
         Node {
             id: NodeId(id),

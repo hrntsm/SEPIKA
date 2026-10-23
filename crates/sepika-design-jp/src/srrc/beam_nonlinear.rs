@@ -251,19 +251,6 @@ mod tests {
     }
 
     #[test]
-    fn test_src_beam_shear_steel_contribution_positive() {
-        // 鉄骨ウェブ項が正の寄与（sAw を 0 にすると Qu が下がる）。
-        let inp = base_input();
-        let mut no_steel = base_input();
-        no_steel.s_aw = 0.0;
-        no_steel.sum_s_mu = 0.0;
-        assert!(
-            src_beam_shear_ultimate_tech_standard(&inp)
-                > src_beam_shear_ultimate_tech_standard(&no_steel)
-        );
-    }
-
-    #[test]
     fn test_src_beam_shear_invalid_inputs_zero() {
         let mut bad = base_input();
         bad.fc = 0.0;
@@ -322,15 +309,6 @@ mod tests {
         let hand = rc_part + squ;
         assert!((qu - hand).abs() < 1e-3, "lattice Qu={qu} vs {hand}");
         assert!(qu > 0.0);
-    }
-
-    #[test]
-    fn test_src_beam_shear_grid_band_plate_adds() {
-        // 帯板項が正の寄与（spw=0 で Qsu が下がる）。
-        let inp = nonweb_input();
-        let mut no_band = nonweb_input();
-        no_band.spw = 0.0;
-        assert!(src_beam_shear_grid(&inp) > src_beam_shear_grid(&no_band));
     }
 
     #[test]

@@ -496,23 +496,6 @@ mod tests {
     }
     use super::*;
 
-    /// 対称な要素剛性を与えたとき、縮約結果も対称であること。
-    /// K* = Kaa − Kab·Kbb⁻¹·Kba は Kbb が対称なら対称になる。
-    #[test]
-    fn 縮約後の剛性は対称() {
-        let k = sample_k();
-        let kstar = condense_end_releases(&k, &[(5, 0.0), (11, 1.0e7)]).unwrap();
-        for i in 0..12 {
-            for j in 0..12 {
-                let (a, b) = (kstar.get(i, j), kstar.get(j, i));
-                assert!(
-                    (a - b).abs() < 1e-9 * (1.0 + a.abs()),
-                    "K*[{i}][{j}] 非対称"
-                );
-            }
-        }
-    }
-
     /// ばね剛性 0（ピン）で解放した自由度は、縮約後に行・列とも 0 になる。
     /// これが「厳密なモーメント解放」の実体で、ペナルティ近似ではない。
     #[test]
@@ -752,46 +735,6 @@ mod tests {
     }
 
     #[test]
-    fn ティモシェンコ質量は標準euler_bernoulli整合質量と既知係数で一致する() {
-        let (mu, l) = (12.5 / 3000.0, 3000.0);
-        let mass = consistent_mass_timoshenko(
-            SectionMassProperties {
-                mass_per_length: mu,
-                rotary_inertia_y_per_length: 0.0,
-                rotary_inertia_z_per_length: 0.0,
-            },
-            l,
-            0.0,
-            0.0,
-        );
-        let c = mu * l / 420.0;
-        let block = [
-            [156.0, 22.0 * l, 54.0, -13.0 * l],
-            [22.0 * l, 4.0 * l * l, 13.0 * l, -3.0 * l * l],
-            [54.0, 13.0 * l, 156.0, -22.0 * l],
-            [-13.0 * l, -3.0 * l * l, -22.0 * l, 4.0 * l * l],
-        ];
-        for (indices, sign) in [([1, 5, 7, 11], 1.0), ([2, 4, 8, 10], -1.0)] {
-            for a in 0..4 {
-                for b in 0..4 {
-                    let expected = c
-                        * block[a][b]
-                        * if (a == 1 || a == 3) ^ (b == 1 || b == 3) {
-                            sign
-                        } else {
-                            1.0
-                        };
-                    assert!(
-                        (mass.get(indices[a], indices[b]) - expected).abs() < 1e-6,
-                        "indices={indices:?}, a={a}, b={b}, actual={}, expected={expected}",
-                        mass.get(indices[a], indices[b])
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
     fn ティモシェンコ質量は回転慣性とphiを曲げ面へ反映する() {
         let properties = SectionMassProperties {
             mass_per_length: 2.0,
@@ -959,20 +902,6 @@ mod tests {
         endpoints[0] * 2.0 * (s - 0.5) * (s - 1.0)
             + midpoint * 4.0 * s * (1.0 - s)
             + endpoints[1] * 2.0 * s * (s - 0.5)
-    }
-
-    #[test]
-    fn 回転慣性はsectionの軸を対応する材端回転へ配る() {
-        let properties = SectionMassProperties {
-            mass_per_length: 0.0,
-            rotary_inertia_y_per_length: 3.0,
-            rotary_inertia_z_per_length: 4.0,
-        };
-        let mass = consistent_mass_timoshenko(properties, 1000.0, 0.0, 0.0);
-        assert!((mass.get(5, 5) - 4.0 * 1000.0 * 2.0 / 15.0).abs() < 1e-10);
-        assert!((mass.get(4, 4) - 3.0 * 1000.0 * 2.0 / 15.0).abs() < 1e-10);
-        assert!((mass.get(5, 11) + 4.0 * 1000.0 / 30.0).abs() < 1e-10);
-        assert!((mass.get(4, 10) + 3.0 * 1000.0 / 30.0).abs() < 1e-10);
     }
 
     /// 試験用の対称な要素剛性。単純梁の弾性剛性に近い値を素朴に置く

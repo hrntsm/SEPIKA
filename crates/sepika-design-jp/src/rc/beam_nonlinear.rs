@@ -230,15 +230,6 @@ mod tests {
         .is_err());
     }
 
-    /// 曲げひび割れモーメント Mc = 0.56·√Fc·Ze の配線 smoke。
-    #[test]
-    fn test_rc_beam_crack_moment_smoke() {
-        let ze = 300.0 * 600.0_f64.powi(2) / 6.0;
-        let mc = rc_beam_crack_moment(24.0, ze);
-        assert!((mc - 0.56 * 24.0_f64.sqrt() * ze).abs() < 1e-6, "Mc={mc}");
-        assert!(mc > 0.0);
-    }
-
     #[test]
     fn test_rc_beam_shear_crack_matches_handcalc() {
         let qc = rc_beam_shear_crack(24.0, 1.5, 300.0, 500.0);
@@ -276,8 +267,13 @@ mod tests {
         let b = rc_beam_bending(&inp);
         // My = 0.9·at·σy·d の手計算一致（d = 有効せい）。
         assert!((b.my - 0.9 * 1935.0 * 345.0 * 540.0).abs() < 1e-3);
-        // ひび割れ < 降伏（健全な折れ点順序）。
-        assert!(b.mc > 0.0 && b.mc < b.my, "Mc={} My={}", b.mc, b.my);
+        // ひび割れ < 降伏（健全な折れ点順序）。Mc は 0.56·√Fc·Ze。
+        assert!(
+            (b.mc - 0.56 * 24.0_f64.sqrt() * inp.ze).abs() < 1e-6,
+            "Mc={}",
+            b.mc
+        );
+        assert!(b.mc < b.my, "Mc={} My={}", b.mc, b.my);
         // αy は 0〜1 の妥当値。
         assert!(b.alpha_y > 0.0 && b.alpha_y < 1.0, "αy={}", b.alpha_y);
     }

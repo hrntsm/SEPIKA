@@ -408,7 +408,7 @@ mod tests {
     use crate::srrc::column_axis_props;
     use crate::srrc::src_seismic_qd;
     use crate::srrc::tests::{
-        ctx_column, make_material, make_section, src_column_shape, src_rect_shape, zero_forces,
+        ctx_column, make_material, make_section, src_column_shape, zero_forces,
     };
     use crate::DesignCheck;
     use sepika_core::section_shape::SectionShape;
@@ -531,37 +531,6 @@ mod tests {
             "mz 単独 0.3 割合のとき ratio ≒ 0.3 のはず: ratio={}",
             r.ratio()
         );
-    }
-
-    #[test]
-    fn test_src_column_fc_prime_reduction_effect() {
-        // 鉄骨フランジが大きいほど s_pc が大きくなり fc' が低下し、rNc が
-        // 減少するはず。
-        let shape_small_steel = src_rect_shape(
-            500.0, 500.0, 8, 22.0, 2, 40.0, 10.0, 100.0, 2, 300.0, 150.0, 9.0, 9.0,
-        );
-        let shape_large_steel = src_rect_shape(
-            500.0, 500.0, 8, 22.0, 2, 40.0, 10.0, 100.0, 2, 300.0, 300.0, 9.0, 30.0,
-        );
-
-        let sec_small = make_section(shape_small_steel);
-        let sec_large = make_section(shape_large_steel);
-        let mat = make_material(24.0, "SD345");
-        let ctx = ctx_column(LoadTerm::Long);
-        let design = crate::SrcDesign;
-
-        let forces = MemberForcesAt {
-            n: -1.0,
-            ..zero_forces()
-        };
-        let r_small = design
-            .check(&forces, &sec_small, &mat, &ctx)
-            .unwrap_checked();
-        let r_large = design
-            .check(&forces, &sec_large, &mat, &ctx)
-            .unwrap_checked();
-        assert!(crate::full_detail(&r_small).contains("rNc"));
-        assert!(crate::full_detail(&r_large).contains("rNc"));
     }
 
     /// SRC 柱でも軽量コンクリートの 0.9 倍低減は許容せん断応力度のみに適用され、

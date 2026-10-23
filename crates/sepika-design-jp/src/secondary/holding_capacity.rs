@@ -323,37 +323,24 @@ mod tests {
     }
 
     #[test]
-    fn test_fs_ge_06() {
+    fn test_fs_branch_and_cap() {
         assert!((fs(0.6) - 1.0).abs() < 1e-9);
         assert!((fs(1.0) - 1.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_fs_lt_06() {
         assert!((fs(0.3) - 1.5).abs() < 1e-9);
         assert!((fs(0.0) - 2.0).abs() < 1e-9);
     }
 
     #[test]
-    fn test_fe_le_015() {
+    fn test_fe_branch_and_cap() {
         assert!((fe(0.15) - 1.0).abs() < 1e-9);
         assert!((fe(0.0) - 1.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_fe_gt_015() {
         assert!((fe(0.30) - 1.5).abs() < 1e-9);
         assert!((fe(0.45) - 1.5).abs() < 1e-9);
     }
 
     #[test]
-    fn test_fes_default() {
-        let f = fes(0.8, 0.1);
-        assert!((f - 1.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_fes_example() {
+    fn test_fes_product_and_cap() {
+        assert!((fes(0.8, 0.1) - 1.0).abs() < 1e-9);
         assert!((fes(0.3, 0.30) - 2.25).abs() < 1e-9);
     }
 

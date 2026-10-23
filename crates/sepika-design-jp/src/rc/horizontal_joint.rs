@@ -446,53 +446,6 @@ mod tests {
         }
     }
 
-    /// 属性が登録された RC梁は 2 端部 × (使用限界・終局限界) = 4 行返し、
-    /// 使用限界の τxy は手計算（Q・Sy/(b・I)）と一致する。
-    #[test]
-    fn collect_pca_checks_returns_four_rows_and_service_matches_hand_calc() {
-        let model = pca_beam_model(rc_beam_rect_shape(), Some(default_pca_attr()));
-        let forces: Vec<(f64, [f64; 6])> = vec![
-            (0.0, [0.0, 200_000.0, 0.0, 0.0, 0.0, -100.0e6]),
-            (0.5, [0.0, 0.0, 0.0, 0.0, 0.0, 50.0e6]),
-            (1.0, [0.0, 200_000.0, 0.0, 0.0, 0.0, 80.0e6]),
-        ];
-        let member_forces = vec![(ElemId(0), forces.as_slice())];
-
-        let results: Vec<_> = collect_pca_checks(&model, &member_forces, false)
-            .into_iter()
-            .map(|(id, pos, outcome)| (id, pos, outcome.unwrap_checked()))
-            .collect();
-        assert_eq!(results.len(), 4, "2端部×(使用限界・終局限界)=4行のはず");
-
-        let service_rows: Vec<&(ElemId, f64, CheckResult)> = results
-            .iter()
-            .filter(|(_, _, cr)| cr.basis.contains("使用限界"))
-            .collect();
-        assert_eq!(service_rows.len(), 2);
-
-        // 手計算（pca_service_hand_calc と同一の断面・接合面位置・Q）:
-        // Sy = 400×150×(700-150)/2 = 16.5e6 mm³、I = 400×700³/12。
-        let s_y = 400.0 * 150.0 * (700.0 - 150.0) / 2.0;
-        let i = 400.0 * 700.0_f64.powi(3) / 12.0;
-        let expected_tau_xy = 200_000.0 * s_y / (400.0 * i);
-        let expected_tau_u = 0.5 * 0.6 * 0.008 * 345.0;
-        let expected_ratio = expected_tau_xy / expected_tau_u;
-        for (_, _, cr) in &service_rows {
-            assert!(
-                (cr.ratio() - expected_ratio).abs() < 1e-6,
-                "ratio={} expected={}",
-                cr.ratio(),
-                expected_ratio
-            );
-        }
-
-        let ultimate_rows: Vec<&(ElemId, f64, CheckResult)> = results
-            .iter()
-            .filter(|(_, _, cr)| cr.basis.contains("終局限界"))
-            .collect();
-        assert_eq!(ultimate_rows.len(), 2);
-    }
-
     /// 属性が登録された新型 `RcBeamRect` 梁も 4 行を返し、使用限界は手計算に一致する。
     /// 終局限界（短期）は上端筋 6-D22 の引張力 ΔT = at・σy で算定される。
     #[test]
@@ -510,13 +463,16 @@ mod tests {
             .collect();
         assert_eq!(results.len(), 4, "2端部×(使用限界・終局限界)=4行のはず");
 
+        let service_rows: Vec<&(ElemId, f64, CheckResult)> = results
+            .iter()
+            .filter(|(_, _, cr)| cr.basis.contains("使用限界"))
+            .collect();
+        assert_eq!(service_rows.len(), 2);
+
         let s_y = 400.0 * 150.0 * (700.0 - 150.0) / 2.0;
         let i = 400.0 * 700.0_f64.powi(3) / 12.0;
         let expected_service = 200_000.0 * s_y / (400.0 * i) / (0.5 * 0.6 * 0.008 * 345.0);
-        for (_, _, cr) in results
-            .iter()
-            .filter(|(_, _, cr)| cr.basis.contains("使用限界"))
-        {
+        for (_, _, cr) in &service_rows {
             assert!(
                 (cr.ratio() - expected_service).abs() < 1e-6,
                 "ratio={} expected={}",

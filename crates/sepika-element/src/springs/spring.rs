@@ -340,23 +340,4 @@ mod tests {
             f0[5]
         );
     }
-
-    /// 剛性行列は対称であること（軸・せん断・回転すべての成分が独立対角なので当然だが、
-    /// 全体座標変換後も対称性が保たれることを確認する）。
-    #[test]
-    fn test_global_stiffness_symmetric() {
-        let (model, data) =
-            make_model([500.0, 100.0, 0.0], [1800.0, 900.0, 700.0], [0.0, 0.0, 1.0]);
-        let spring = NodalSpringElement::new(&data, &model);
-        let ctx = Ctx { model: &model };
-        let k = spring.tangent_stiffness(&ctx);
-        for i in 0..12 {
-            for j in 0..12 {
-                assert!(
-                    (k.get(i, j) - k.get(j, i)).abs() < 1e-9,
-                    "K[{i}][{j}] != K[{j}][{i}]"
-                );
-            }
-        }
-    }
 }

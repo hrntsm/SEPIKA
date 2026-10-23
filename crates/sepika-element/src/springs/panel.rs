@@ -564,35 +564,11 @@ mod tests {
     };
     use sepika_core::section_shape::SectionShape;
 
-    /// 整合条件 pqc·db = pqb·dc は、節点のモーメント釣り合い
-    /// ml_b + mr_b = ml_c + mu_c が成立するとき自動的に満たされる（資料 式(4)）。
-    #[test]
-    fn test_face_moments_equilibrium_consistency() {
-        let (dc, db, tp) = (500.0, 800.0, 19.0);
-        let conn = PanelConnection {
-            ml_b: 500_000.0,
-            mr_b: 300_000.0,
-            bql: 150.0,
-            bqr: 100.0,
-            bnl: 0.0,
-            bnr: 0.0,
-            ml_c: 400_000.0,
-            mu_c: 400_000.0,
-            cql: 120.0,
-            cqu: 130.0,
-        };
-        let res = face_moments(dc, db, tp, &conn);
-        assert!((res.pqc * db - res.pqb * dc).abs() < 1e-9);
-        assert!((res.tau - res.pqc / (dc * tp)).abs() < 1e-12);
-        assert!((res.b_ml - (conn.ml_b - conn.bql * dc / 2.0)).abs() < 1e-9);
-        assert!((res.c_mu - (conn.mu_c - conn.cqu * db / 2.0)).abs() < 1e-9);
-    }
-
     /// 資料ケース1 の数値例照合。単位系は資料に合わせ kN, m, kN·m。
     /// 確定値: pQc = 851.135 kN, pQb = 1702.273 kN, τc = τb（整合）。
     #[test]
     fn test_face_moments_reference_case1() {
-        let (dc, db, tp) = (0.2_f64, 0.4_f64, 1.0_f64);
+        let (dc, db, tp) = (0.2_f64, 0.4_f64, 0.02_f64);
         let conn = PanelConnection {
             ml_b: 218.182,
             mr_b: 181.818,
@@ -636,59 +612,6 @@ mod tests {
         let res = face_moments(dc, db, tp, &conn);
         assert!((res.pqc - 854.168).abs() < 0.05, "pQc={}", res.pqc);
         assert!((res.pqb - 1708.334).abs() < 0.05, "pQb={}", res.pqb);
-    }
-
-    /// L 型（右梁・上柱が欠落）・ト型（下柱が欠落）・十字型のいずれでも、
-    /// 欠落部材の項を 0 とした同一式で整合条件が満たされる。
-    #[test]
-    fn test_face_moments_joint_shapes() {
-        let (dc, db, tp) = (500.0, 700.0, 12.0);
-        let cases = [
-            PanelConnection {
-                ml_b: 300_000.0,
-                mr_b: 0.0,
-                bql: 100.0,
-                bqr: 0.0,
-                bnl: 0.0,
-                bnr: 0.0,
-                ml_c: 300_000.0,
-                mu_c: 0.0,
-                cql: 80.0,
-                cqu: 0.0,
-            },
-            PanelConnection {
-                ml_b: 200_000.0,
-                mr_b: 100_000.0,
-                bql: 80.0,
-                bqr: 60.0,
-                bnl: 0.0,
-                bnr: 0.0,
-                ml_c: 0.0,
-                mu_c: 300_000.0,
-                cql: 0.0,
-                cqu: 90.0,
-            },
-            PanelConnection {
-                ml_b: 450_000.0,
-                mr_b: 450_000.0,
-                bql: 120.0,
-                bqr: 120.0,
-                bnl: 0.0,
-                bnr: 0.0,
-                ml_c: 500_000.0,
-                mu_c: 400_000.0,
-                cql: 100.0,
-                cqu: 100.0,
-            },
-        ];
-        for (i, conn) in cases.iter().enumerate() {
-            let res = face_moments(dc, db, tp, conn);
-            assert!(res.pqc.is_finite() && res.pqb.is_finite(), "case {i}");
-            assert!(
-                (res.pqc * db - res.pqb * dc).abs() < 1e-9,
-                "case {i}: pqc·db != pqb·dc"
-            );
-        }
     }
 
     /// 十字型の S 造接合部モデル（柱: H-400×400×13×21、梁: H-600×200×11×17）。

@@ -2040,18 +2040,10 @@ mod tests {
     }
 
     #[test]
-    fn test_wall_element_rigid_rotation_horizontal_axis_zero_force() {
-        assert_rigid_rotation_zero_force(0, false);
-    }
-
-    #[test]
-    fn test_wall_element_rigid_rotation_normal_axis_zero_force() {
-        assert_rigid_rotation_zero_force(1, false);
-    }
-
-    #[test]
-    fn test_wall_element_rigid_rotation_vertical_axis_zero_force() {
-        assert_rigid_rotation_zero_force(2, false);
+    fn test_wall_element_rigid_rotations_zero_force() {
+        for axis in 0..3 {
+            assert_rigid_rotation_zero_force(axis, false);
+        }
     }
 
     #[test]

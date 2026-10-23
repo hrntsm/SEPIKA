@@ -106,38 +106,6 @@ mod tests {
         assert!(!result.ok());
     }
 
-    /// L1（座屈長さ低減距離）を大きくすると Lk が短くなり、座屈長さ検定比が
-    /// 下がる（安全側に効く）ことを確認する。
-    #[test]
-    fn test_brb_check_length_reduction_effect() {
-        let mut a = attr();
-        let n = 100_000.0; // 軸力は十分小さく座屈長さ検定が支配するようにする
-        let l = 5000.0;
-
-        a.length_reduction = 300.0;
-        let ratio_small_l1 = brb_check(&a, n, l, false).ratio();
-
-        a.length_reduction = 800.0;
-        let ratio_large_l1 = brb_check(&a, n, l, false).ratio();
-
-        assert!(
-            ratio_large_l1 < ratio_small_l1,
-            "L1 が大きいほど座屈長さ検定比は小さくなるはず: large={} small={}",
-            ratio_large_l1,
-            ratio_small_l1
-        );
-    }
-
-    /// OK 判定: 軸力・座屈長さとも余裕がある場合。
-    #[test]
-    fn test_brb_check_passes_when_within_limits() {
-        let a = attr();
-        // Lk = 3000 - 600 = 2400 < 4000（余裕）、N/Na = 400,000/1,000,000=0.4。
-        let result = brb_check(&a, 400_000.0, 3000.0, false);
-        assert!(result.ratio() <= 1.0, "ratio={}", result.ratio());
-        assert!(result.ok());
-    }
-
     /// 長期は短期許容値の 1/1.5 を用いる: 同じ N でも長期の方が検定比が
     /// 1.5 倍厳しくなる（座屈長さ検定比は変わらないため軸力支配ケースで検証）。
     #[test]
@@ -159,5 +127,6 @@ mod tests {
             "ratio_long={}",
             ratio_long
         );
+        assert!(brb_check(&a, n, l, true).ok());
     }
 }

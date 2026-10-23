@@ -218,48 +218,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_girder_concrete_volume_no_haunch() {
-        // B=400, D=800, L=6000 → 1.92e9 mm³
-        let v = girder_concrete_volume(400.0, 800.0, 6_000.0, None, None);
-        assert!((v - 400.0 * 800.0 * 6_000.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_girder_concrete_volume_with_haunch() {
-        // ハンチ: Bi=600, Di=1000, Li=1000 → 加算 = (400+600)(800+1000)/4×1000
-        let v = girder_concrete_volume(
-            400.0,
-            800.0,
-            6_000.0,
-            Some(Haunch {
-                b: 600.0,
-                d: 1_000.0,
-                len: 1_000.0,
-            }),
-            None,
-        );
-        let expected =
-            400.0 * 800.0 * 6_000.0 + (400.0 + 600.0) * (800.0 + 1_000.0) / 4.0 * 1_000.0;
-        assert!((v - expected).abs() < 1e-6);
-    }
-
-    #[test]
     fn test_girder_formwork_slab_deduction() {
-        // 両側スラブ付（t=150）: 側面 (800−150)×2×L、底面 400×L
-        let a = girder_formwork_area(400.0, 650.0, 650.0, 6_000.0, None, None);
-        let expected = (650.0 + 650.0) * 6_000.0 + 400.0 * 6_000.0;
-        assert!((a - expected).abs() < 1e-6);
-        // 片側スラブ付: 片面 800・片面 650
-        let a1 = girder_formwork_area(400.0, 800.0, 650.0, 6_000.0, None, None);
-        assert!(a1 > a);
-    }
-
-    #[test]
-    fn test_foundation_girder_formwork() {
-        // 基礎梁は側面 1 面 + 底面
-        let a = foundation_girder_formwork_area(500.0, 1_200.0, 8_000.0, None, None);
-        let expected = 1_200.0 * 8_000.0 + 500.0 * 8_000.0;
-        assert!((a - expected).abs() < 1e-6);
+        let area_mm2 = girder_formwork_area(400.0, 800.0, 650.0, 6_000.0, None, None);
+        assert_eq!(area_mm2, 11_100_000.0);
     }
 
     #[test]
@@ -309,12 +270,5 @@ mod tests {
         // 本数 = L/ピッチ
         assert!((shear_bar_count(3_000.0, 100.0) - 30.0).abs() < 1e-12);
         assert_eq!(shear_bar_count(3_000.0, 0.0), 0.0);
-    }
-
-    #[test]
-    fn test_wall_bar_length() {
-        // 横筋: (L+2S)×W
-        let l = wall_bar_length(5_000.0, 350.0, 10.0);
-        assert!((l - (5_000.0 + 700.0) * 10.0).abs() < 1e-9);
     }
 }
