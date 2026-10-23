@@ -384,20 +384,27 @@ mod tests {
     #[test]
     fn panel_728_public_preparation_rejects_invalid_adopted_g_only_when_modeling_panels() {
         use sepika_core::model::PanelZoneMode;
-        for (label, shear, poisson, valid) in [
-            ("derived_normal", None, 0.3, true),
-            ("explicit_normal", Some(80_000.0), 0.3, true),
-            ("explicit_override", Some(80_000.0), f64::NAN, true),
-            ("nan", Some(f64::NAN), 0.3, false),
-            ("positive_infinity", Some(f64::INFINITY), 0.3, false),
-            ("negative_infinity", Some(f64::NEG_INFINITY), 0.3, false),
-            ("negative", Some(-1.0), 0.3, false),
-            ("zero", Some(0.0), 0.3, false),
-            ("derived_nan", None, f64::NAN, false),
-            ("derived_infinite", None, -1.0, false),
-            ("derived_negative", None, -2.0, false),
-            ("derived_zero", None, f64::INFINITY, false),
-            ("finite_g_overflow_stiffness", Some(f64::MAX), 0.3, false),
+        let invalid_g = Some("せん断弾性係数 G は有限の正値が必要です");
+        let overflow_gve = Some("強軸のせん断剛性 G・Ve は有限の正値が必要です");
+        for (label, shear, poisson, expected_reason) in [
+            ("derived_normal", None, 0.3, None),
+            ("explicit_normal", Some(80_000.0), 0.3, None),
+            ("explicit_override", Some(80_000.0), f64::NAN, None),
+            ("nan", Some(f64::NAN), 0.3, invalid_g),
+            ("positive_infinity", Some(f64::INFINITY), 0.3, invalid_g),
+            ("negative_infinity", Some(f64::NEG_INFINITY), 0.3, invalid_g),
+            ("negative", Some(-1.0), 0.3, invalid_g),
+            ("zero", Some(0.0), 0.3, invalid_g),
+            ("derived_nan", None, f64::NAN, invalid_g),
+            ("derived_infinite", None, -1.0, invalid_g),
+            ("derived_negative", None, -2.0, invalid_g),
+            ("derived_zero", None, f64::INFINITY, invalid_g),
+            (
+                "finite_g_overflow_stiffness",
+                Some(f64::MAX),
+                0.3,
+                overflow_gve,
+            ),
         ] {
             for mode in [PanelZoneMode::Model, PanelZoneMode::None] {
                 let mut model = steel_panel_model();
@@ -421,16 +428,16 @@ mod tests {
                         .elements
                         .iter()
                         .any(|e| e.kind == ElementKind::PanelZone));
-                } else if valid {
-                    assert_eq!(result.unwrap().panels.len(), 1, "{label}");
-                } else {
+                } else if let Some(expected_reason) = expected_reason {
                     let error = result.err().unwrap().to_string();
                     assert!(
                         error.contains("接合部 ID 0")
                             && error.contains("柱 ID 0")
-                            && error.contains("せん断剛性"),
+                            && error.contains(expected_reason),
                         "{label}: {error}"
                     );
+                } else {
+                    assert_eq!(result.unwrap().panels.len(), 1, "{label}");
                 }
             }
         }
