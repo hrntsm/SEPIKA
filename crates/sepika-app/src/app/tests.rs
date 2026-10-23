@@ -13028,11 +13028,11 @@ fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_reta
         current.core.scoped.last_error
     );
     let gated = current.core.scoped.results.as_ref().unwrap();
-    assert!(gated.joint_checks.iter().any(
-        |c| matches!(&c.outcome, CheckOutcome::Skipped { reason } if reason.contains("段違い"))
-    ));
     assert!(gated.joint_checks.iter().any(|c| c.node == NodeId(2)
-        && c.label.contains("[0.000, 1.000, 0.000]")
+        && c.label == "パネルゾーン(S) 強軸"
+        && matches!(&c.outcome, CheckOutcome::Skipped { reason } if reason.contains("段違い"))));
+    assert!(gated.joint_checks.iter().any(|c| c.node == NodeId(2)
+        && c.label == "パネルゾーン(S) 弱軸"
         && matches!(c.outcome, CheckOutcome::Checked(_))));
     save(&path, &current.core.model, gated.clone());
     reopened.open_project_from(path.clone());
