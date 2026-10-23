@@ -803,6 +803,73 @@ fn panel_analysis_joint(
     }))
 }
 
+/// 接合部の参照柱を物理下側優先で一意に選択する。上下・材軸・候補数の不備はエラー。
+/// `columns` は接合部に接続する柱用途の部材を渡す。
+pub fn select_panel_column<'a>(
+    model: &Model,
+    node: NodeId,
+    columns: &[&'a ElementData],
+) -> Result<&'a ElementData, PanelJointError> {
+    let invalid_column = |reason: String| {
+        PanelJointError::InvalidInput(format!("接合部 ID {} のパネル未算定: {reason}", node.0))
+    };
+    let mut columns = columns.to_vec();
+    columns.sort_by_key(|e| e.id);
+    let mut lower = Vec::new();
+    let mut upper = Vec::new();
+    for column in &columns {
+        let far = column
+            .nodes
+            .iter()
+            .take(2)
+            .find(|id| **id != node)
+            .and_then(|id| model.nodes.get(id.index()));
+        let center = model.nodes.get(node.index());
+        let Some((far, center)) = far.zip(center) else {
+            return Err(invalid_column(format!(
+                "柱 ID {}: 接続節点を解決できません",
+                column.id.0
+            )));
+        };
+        let Some(axis) =
+            member_unit_axis(model, column).filter(|axis| axis.iter().all(|v| v.is_finite()))
+        else {
+            return Err(invalid_column(format!(
+                "柱 ID {}: 有限の非零材軸が必要です",
+                column.id.0
+            )));
+        };
+        let dz = far.coord[2] - center.coord[2];
+        if !dz.is_finite() || dz == 0.0 || axis[2] == 0.0 {
+            return Err(invalid_column(format!(
+                "柱 ID {}: 接合部に対する上下を特定できません",
+                column.id.0
+            )));
+        }
+        if dz < 0.0 {
+            lower.push(*column);
+        } else {
+            upper.push(*column);
+        }
+    }
+    let (side, candidates) = if lower.is_empty() {
+        ("上側", upper)
+    } else {
+        ("下側", lower)
+    };
+    if candidates.len() != 1 {
+        return Err(invalid_column(format!(
+            "{side}柱を一意に特定できません: 柱 ID {}",
+            candidates
+                .iter()
+                .map(|e| e.id.0.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    Ok(candidates[0])
+}
+
 fn resolve_panel_joint_impl<'a>(
     model: &Model,
     node: NodeId,
@@ -862,60 +929,7 @@ fn resolve_panel_joint_impl<'a>(
     if columns.is_empty() {
         return Ok(None);
     }
-    columns.sort_by_key(|e| e.id);
-    let mut lower = Vec::new();
-    let mut upper = Vec::new();
-    for column in &columns {
-        let far = column
-            .nodes
-            .iter()
-            .take(2)
-            .find(|id| **id != node)
-            .and_then(|id| model.nodes.get(id.index()));
-        let center = model.nodes.get(node.index());
-        let Some((far, center)) = far.zip(center) else {
-            return Err(invalid_column(format!(
-                "柱 ID {}: 接続節点を解決できません",
-                column.id.0
-            )));
-        };
-        let Some(axis) =
-            member_unit_axis(model, column).filter(|axis| axis.iter().all(|v| v.is_finite()))
-        else {
-            return Err(invalid_column(format!(
-                "柱 ID {}: 有限の非零材軸が必要です",
-                column.id.0
-            )));
-        };
-        let dz = far.coord[2] - center.coord[2];
-        if !dz.is_finite() || dz == 0.0 || axis[2] == 0.0 {
-            return Err(invalid_column(format!(
-                "柱 ID {}: 接合部に対する上下を特定できません",
-                column.id.0
-            )));
-        }
-        if dz < 0.0 {
-            lower.push(*column);
-        } else {
-            upper.push(*column);
-        }
-    }
-    let (side, candidates) = if lower.is_empty() {
-        ("上側", upper)
-    } else {
-        ("下側", lower)
-    };
-    if candidates.len() != 1 {
-        return Err(invalid_column(format!(
-            "{side}柱を一意に特定できません: 柱 ID {}",
-            candidates
-                .iter()
-                .map(|e| e.id.0.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )));
-    }
-    let selected = candidates[0];
+    let selected = select_panel_column(model, node, &columns)?;
     let selected_section = model.element_section(selected).ok_or_else(|| {
         invalid_column(format!("柱 ID {}: 断面未設定または参照不明", selected.id.0))
     })?;

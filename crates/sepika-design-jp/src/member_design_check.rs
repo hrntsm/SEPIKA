@@ -114,17 +114,66 @@ impl MemberDesignCheckReport {
     }
 }
 
+pub(crate) fn is_steel_input_target(
+    sec: Option<&sepika_core::model::Section>,
+    mat: Option<&sepika_core::model::Material>,
+) -> bool {
+    use sepika_core::model::MaterialCategory;
+    use sepika_core::structure_kind::{shape_default_kind, StructureKind};
+    let shape = sec.and_then(|s| s.shape.as_ref());
+    if shape
+        .and_then(sepika_core::structure_kind::shape_composite_kind)
+        .is_some()
+    {
+        return false;
+    }
+    shape.is_some_and(|s| shape_default_kind(s) == StructureKind::S)
+        || mat.is_some_and(|m| m.category == MaterialCategory::Steel)
+        || shape.is_none() && mat.is_none()
+}
+
+/// 通常鋼線材・鋼小梁・S/CFTパネルの材料・実板厚・Fを検証する。
+/// 入力不備は対象IDと理由を付けて返す。幾何未対応や検定荷重不足の判定は含めない。
+pub fn validate_model_steel_inputs(model: &Model) -> Result<(), String> {
+    use sepika_core::model::ElementKind;
+    for elem in &model.elements {
+        if !matches!(
+            elem.kind,
+            ElementKind::Beam
+                | ElementKind::Fiber
+                | ElementKind::MultiSpring
+                | ElementKind::Brace { .. }
+        ) {
+            continue;
+        }
+        let sec = model.element_section(elem);
+        let mat = model.element_material(elem);
+        if !is_steel_input_target(sec, mat) {
+            continue;
+        }
+        let sec =
+            sec.ok_or_else(|| format!("部材 {}: 断面が未割当または参照先が不明です", elem.id.0))?;
+        crate::material_strength::section_steel_f(sec, mat)
+            .map_err(|reason| format!("部材 {}: {reason}", elem.id.0))?;
+    }
+    for beam in model.beams() {
+        crate::floor::secondary_beam_steel_e_and_ft(model, beam)?;
+    }
+    crate::joint_wiring::validate_steel_panel_inputs(model)
+}
+
 /// 部材内力に対する許容応力度検定を一括実行する。
 ///
 /// 部材ループ（DesignCtx 組み立て → 危険断面位置での検定）のほか、
 /// PCa 水平接合面検定と節点単位検定も含む。床の小梁・スラブ設計は
-/// 呼び出し側（`sepika-app`）の責務とする。
+/// 呼び出し側（`sepika-app`）の責務とする。鋼材入力不備は対象ID付きエラー。
 pub fn run_member_design_checks(
     model: &Model,
     member_forces: &[(ElemId, MemberForces)],
     panel_moments: &[(NodeId, [f64; 2])],
     options: &MemberDesignCheckOptions<'_>,
-) -> MemberDesignCheckReport {
+) -> Result<MemberDesignCheckReport, String> {
+    validate_model_steel_inputs(model)?;
     let mut elem_by_id: HashMap<ElemId, &sepika_core::model::ElementData> =
         HashMap::with_capacity(model.elements.len());
     for e in &model.elements {
@@ -429,10 +478,10 @@ pub fn run_member_design_checks(
         options.wall_case,
         options.wall_load_terms,
     );
-    MemberDesignCheckReport {
+    Ok(MemberDesignCheckReport {
         member_checks,
         lateral_bracing_references,
         joint_checks,
         wall_checks,
-    }
+    })
 }

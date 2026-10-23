@@ -187,3 +187,5 @@ pub fn collect_wall_design_checks(
         load_terms,
     )
 }
+
+pub(crate) use steel_panel::validate_steel_panel_inputs;

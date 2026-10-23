@@ -3690,7 +3690,8 @@ fn standard_rebar507_query_reports_preserved_source_and_unsupported_analysis() {
         )],
         &[],
         &Default::default(),
-    );
+    )
+    .unwrap();
     assert!(matches!(
         &checks.member_checks[0].2,
         sepika_design_jp::CheckOutcome::Skipped { reason } if reason.contains("位置別配筋")
@@ -3785,7 +3786,8 @@ fn standard_rebar507_joint_public_entries_gate_consumed_sections_and_preserve_no
             &forces,
             &[],
             &Default::default(),
-        );
+        )
+        .unwrap();
         for checks in [direct(&unsupported), aggregate.joint_checks] {
             assert_eq!(checks.len(), 2);
             assert!(checks.iter().all(|(_, _, result)| matches!(result, CheckOutcome::Skipped { reason: message } if message.contains(reason))));
@@ -3896,7 +3898,8 @@ fn standard_rebar507_src_panel_and_pca_public_entries_reject_consumed_unresolved
         )],
         &[],
         &Default::default(),
-    );
+    )
+    .unwrap();
     assert!(aggregate
         .member_checks
         .iter()

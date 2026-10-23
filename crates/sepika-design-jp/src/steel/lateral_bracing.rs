@@ -663,7 +663,8 @@ mod tests {
             },
         )];
         let report =
-            run_member_design_checks(&m, &forces, &[], &MemberDesignCheckOptions::default());
+            run_member_design_checks(&m, &forces, &[], &MemberDesignCheckOptions::default())
+                .unwrap();
         assert_eq!(
             report.lateral_bracing_references,
             vec![(ElemId(0), resolve_lateral_bracing_reference(&m, ElemId(0)))]
@@ -685,7 +686,8 @@ mod tests {
             .collect();
         m.elements[4].end_cond[1] = EndCondition::Pinned;
         let unavailable_report =
-            run_member_design_checks(&m, &forces, &[], &MemberDesignCheckOptions::default());
+            run_member_design_checks(&m, &forces, &[], &MemberDesignCheckOptions::default())
+                .unwrap();
         for ((_, _, outcome), ratios) in unavailable_report.member_checks.iter().zip(checked) {
             let CheckOutcome::Checked(result) = outcome else {
                 panic!("{outcome:?}")

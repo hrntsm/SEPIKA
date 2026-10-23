@@ -367,3 +367,93 @@ fn column_correction(
     }
     Ok(total)
 }
+
+pub(crate) fn validate_steel_panel_inputs(model: &Model) -> Result<(), String> {
+    use sepika_core::panel_zone::{member_orientation, MemberOrientation};
+    use sepika_core::structure_kind::member_structure_kind;
+    for node in &model.nodes {
+        let attached = model
+            .elements
+            .iter()
+            .filter(|e| {
+                e.nodes.iter().take(2).any(|id| *id == node.id)
+                    && member_orientation(model, e).is_some()
+            })
+            .collect::<Vec<_>>();
+        if !attached
+            .iter()
+            .any(|e| member_orientation(model, e) == Some(MemberOrientation::Beam))
+            || attached
+                .iter()
+                .any(|e| !member_structure_kind(model, e).is_steel_like())
+        {
+            continue;
+        }
+        let columns = attached
+            .iter()
+            .copied()
+            .filter(|e| member_orientation(model, e) == Some(MemberOrientation::Column))
+            .collect::<Vec<_>>();
+        if columns.is_empty() {
+            continue;
+        }
+        let Ok(column) = sepika_core::panel_zone::select_panel_column(model, node.id, &columns)
+        else {
+            continue;
+        };
+        let Some(sec) = model.element_section(column) else {
+            continue;
+        };
+        let thicknesses = match sec.shape.as_ref() {
+            Some(SectionShape::SteelH {
+                web_thick,
+                flange_thick,
+                ..
+            }) => vec![*web_thick, *flange_thick],
+            Some(
+                SectionShape::SteelBox { thick, .. }
+                | SectionShape::SteelPipe { thick, .. }
+                | SectionShape::CftBox { thick, .. }
+                | SectionShape::CftPipe { thick, .. },
+            ) => vec![*thick],
+            None => {
+                return Err(format!(
+                    "接合部 {} 採用柱 {}: パネル計算に必要な断面形状が未設定です",
+                    node.id.0, column.id.0
+                ));
+            }
+            Some(_) => continue,
+        };
+        let material = if matches!(
+            sec.shape,
+            Some(SectionShape::CftBox { .. } | SectionShape::CftPipe { .. })
+        ) {
+            model.element_steel_material(column)
+        } else {
+            model.element_material(column)
+        };
+        crate::material_strength::section_steel_f(sec, material)
+            .map_err(|reason| format!("接合部 {} 採用柱 {}: {reason}", node.id.0, column.id.0))?;
+        if sec
+            .panel_thickness
+            .is_some_and(|t| !t.is_finite() || t <= 0.0)
+        {
+            return Err(format!(
+                "接合部 {} 採用柱 {}: パネル有効板厚は正の有限値 [mm] が必要です",
+                node.id.0, column.id.0
+            ));
+        }
+        for thickness in thicknesses {
+            if !thickness.is_finite() || thickness <= 0.0 {
+                return Err(format!(
+                    "接合部 {} 採用柱 {}: 抵抗板の実板厚は正の有限値 [mm] が必要です",
+                    node.id.0, column.id.0
+                ));
+            }
+            sepika_core::material_grade::resolve_steel_f(material, Some(thickness)).map_err(
+                |reason| format!("接合部 {} 採用柱 {}: {reason}", node.id.0, column.id.0),
+            )?;
+        }
+    }
+    Ok(())
+}

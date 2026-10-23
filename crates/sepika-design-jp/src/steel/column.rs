@@ -369,7 +369,8 @@ mod tests {
 
     #[test]
     fn test_column_length_zero_ignores_buckling() {
-        let sec = rect_section(300.0, 300.0, "一般断面");
+        let mut sec = rect_section(300.0, 300.0, "一般断面");
+        sec.thickness = Some(20.0);
         let mat_v = mat("SN400");
         let forces = MemberForcesAt {
             pos: 0.0,
@@ -404,7 +405,8 @@ mod tests {
     /// fc（λ に応じて単調減少）を介して確認する。
     #[test]
     fn test_column_lambda_both_axes_none_matches_legacy_i_min() {
-        let sec = rect_section(300.0, 200.0, "H-300x200x8x12");
+        let mut sec = rect_section(300.0, 200.0, "H-300x200x8x12");
+        sec.thickness = Some(12.0);
         let mat_v = mat("SN400");
         let forces = MemberForcesAt {
             pos: 0.0,
@@ -442,7 +444,8 @@ mod tests {
     /// を十分小さくして弱軸が支配しやすい断面とする。
     #[test]
     fn test_column_lk_z_only_governs_weak_axis_slenderness() {
-        let sec = rect_section(100.0, 300.0, "H-300x100x8x12");
+        let mut sec = rect_section(100.0, 300.0, "H-300x100x8x12");
+        sec.thickness = Some(12.0);
         let mat_v = mat("SN400");
         let forces = MemberForcesAt {
             pos: 0.0,

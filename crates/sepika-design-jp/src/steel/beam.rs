@@ -617,7 +617,8 @@ mod tests {
     /// 検定比=0.1197（相対 1e-9）。
     #[test]
     fn test_beam_check_bending_rect_section_hand_calc() {
-        let sec = rect_section(200.0, 400.0, "矩形200x400");
+        let mut sec = rect_section(200.0, 400.0, "矩形200x400");
+        sec.thickness = Some(20.0);
         let mat_v = mat("SN400");
         let forces = MemberForcesAt {
             pos: 0.5,

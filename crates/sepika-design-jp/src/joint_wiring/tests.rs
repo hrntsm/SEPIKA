@@ -1369,7 +1369,8 @@ fn gui_mcp_common_dispatch_and_direct_entry_report_identical_missing_material() 
             term: LoadTerm::Short,
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
     for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
         let direct = &direct.iter().find(|(_, l, _)| l == label).unwrap().2;
         let kind = if label.ends_with("せん断非線形") {
@@ -1658,7 +1659,13 @@ fn status_wall_model() -> (Model, sepika_load::wall_expand::WallExpansionIndex) 
     for (source, id) in [(1, 5), (2, 6)] {
         let mut section = model.sections[source].clone();
         section.id = SectionId(id);
-        section.shape = None;
+        section.shape = Some(SectionShape::SteelH {
+            height: 600.0,
+            width: 300.0,
+            web_thick: 10.0,
+            flange_thick: 20.0,
+            root_r: Some(0.0),
+        });
         section.material = Some(MaterialId(2));
         model.sections.push(section);
     }
@@ -1734,6 +1741,7 @@ fn reference_method_identifies_rc_success_and_missing_inputs_but_not_steel_or_sr
                 "純鋼板" => {
                     model.sections[0].shape = None;
                     model.materials[0].category = MaterialCategory::Steel;
+                    model.materials[0].fy = Some(235.0);
                 }
                 "SRC" => model.sections[0].steel_material = Some(MaterialId(1)),
                 _ => (),
@@ -1758,7 +1766,8 @@ fn reference_method_identifies_rc_success_and_missing_inputs_but_not_steel_or_sr
                     },
                 ),
             ];
-            let report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+            let report =
+                crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
             let reference = report
                 .wall_checks
                 .iter()
@@ -1793,7 +1802,12 @@ fn reference_method_identifies_rc_success_and_missing_inputs_but_not_steel_or_sr
 fn wall_status_candidates_keep_plate_case_kind_and_independent_counts() {
     use crate::wall_check::{WallCheckKind, WallCheckSummary, WallSkipKind};
     use sepika_element::frame::beam::MemberForces;
-    let (model, index) = status_wall_model();
+    let (mut model, index) = status_wall_model();
+    for section in &mut model.sections {
+        if section.material == Some(MaterialId(2)) {
+            section.thickness = Some(20.0);
+        }
+    }
     // Q=N=M=0 の独立入力では、正のRC耐力に対する許容検定比は厳密に0。
     let forces: Vec<_> = model
         .elements
@@ -1817,7 +1831,8 @@ fn wall_status_candidates_keep_plate_case_kind_and_independent_counts() {
             term: LoadTerm::Short,
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
     assert!(report
         .joint_checks
         .iter()
@@ -1925,7 +1940,7 @@ fn reference_skeleton_for_frame_representation(kind: ElementKind) {
             },
         ),
     ];
-    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default());
+    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default()).unwrap();
     let reference = report
         .wall_checks
         .iter()
@@ -1949,7 +1964,7 @@ fn reference_skeleton_for_frame_representation(kind: ElementKind) {
         Some(sepika_core::model::RcWallShearMethod::ArakawaMin)
     );
     m.stress_cfg.rc_wall_shear_method = sepika_core::model::RcWallShearMethod::ArakawaMean;
-    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default());
+    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default()).unwrap();
     let reference = report
         .wall_checks
         .iter()
@@ -1968,10 +1983,10 @@ fn reference_skeleton_for_frame_representation(kind: ElementKind) {
     tension[0].1.at[0].1[0] = 1.0;
     tension[1].1.at[0].1[0] = 28_000.0;
     tension[2].1.at[0].1[0] = -28_000.0;
-    let report = crate::run_member_design_checks(&m, &tension, &[], &Default::default());
+    let report = crate::run_member_design_checks(&m, &tension, &[], &Default::default()).unwrap();
     assert!(report.wall_checks.iter().any(|wall| wall.kind == WallCheckKind::ReferenceSkeleton && matches!(&wall.outcome, CheckOutcome::Skipped { reason } if reason.contains("壁脚faceの圧縮正N/Aが適用範囲外"))));
     forces.pop();
-    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default());
+    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default()).unwrap();
     assert!(report
         .wall_checks
         .iter()
@@ -2545,7 +2560,8 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
             wall_case: "case:0",
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
     let reference = report
         .wall_checks
         .iter()
@@ -2572,7 +2588,8 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
                 *d = 800.0;
             }
         }
-        let report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+        let report =
+            crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
         let skeleton = report
             .wall_checks
             .iter()
@@ -2582,7 +2599,7 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
         assert!((skeleton.displacement_points[1].1 - 2_016_000.0).abs() < 1e-6);
     }
     let mut valid_report =
-        crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+        crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
     assert!(valid_report
         .wall_checks
         .iter()
@@ -2597,7 +2614,8 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
         height: 200.0,
         offset: None,
     });
-    let mut report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+    let mut report =
+        crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
     let reference = report
         .wall_checks
         .iter()
@@ -2623,7 +2641,8 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
         Some(f64::INFINITY),
     ] {
         model.materials[0].fc = bad_fc;
-        let report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+        let report =
+            crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
         assert!(report
             .wall_checks
             .iter()
@@ -2637,7 +2656,8 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
         if let Some(SectionShape::RcWall { thickness, .. }) = &mut model.sections[2].shape {
             *thickness = bad_t;
         }
-        let report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+        let report =
+            crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
         assert!(report
             .wall_checks
             .iter()
@@ -3445,4 +3465,110 @@ fn panel_758_tiny_vertical_component_keeps_geometry_participation_and_exact_ms()
             element.local_axis.ref_vector = [r[1], -r[0], r[2]];
         }
     }
+}
+
+#[test]
+fn panel_601_cft_material_errors_stop_public_batch_using_selected_lower_column() {
+    let mut model = panel_758_model(45.0);
+    model.sections[0].shape = Some(SectionShape::CftBox {
+        height: 400.0,
+        width: 300.0,
+        thick: 50.0,
+        corner_r: Some(0.0),
+    });
+    model.sections[0].material = Some(MaterialId(0));
+    let mut tube_material = model.materials[2].clone();
+    tube_material.id = MaterialId(3);
+    model.materials.push(tube_material);
+    model.sections[0].steel_material = Some(MaterialId(3));
+    let mut upper = model.sections[0].clone();
+    upper.id = SectionId(2);
+    upper.steel_material = None;
+    model.sections.push(upper);
+    model.elements[1].section = Some(SectionId(2));
+    assert!(crate::validate_model_steel_inputs(&model).is_ok());
+    for case in 0..9 {
+        let mut invalid = model.clone();
+        match case {
+            0 => invalid.sections[0].steel_material = None,
+            1 => invalid.sections[0].steel_material = Some(MaterialId(99)),
+            2 => invalid.sections[0].steel_material = Some(MaterialId(0)),
+            3 => {
+                invalid.materials[3].fy = {
+                    invalid.materials[3].name = "直接鋼材".into();
+                    None
+                }
+            }
+            4..=6 => {
+                if let Some(SectionShape::CftBox { thick, .. }) = &mut invalid.sections[0].shape {
+                    *thick = [0.0, f64::NAN, 101.0][case - 4];
+                }
+            }
+            7 => {
+                if let Some(SectionShape::CftBox { height, .. }) = &mut invalid.sections[0].shape {
+                    *height = 0.0;
+                }
+            }
+            8 => invalid.sections[0].panel_thickness = Some(0.0),
+            _ => unreachable!(),
+        }
+        let error =
+            crate::run_member_design_checks(&invalid, &[], &[], &Default::default()).unwrap_err();
+        assert!(error.contains("接合部 0 採用柱 0"), "case={case}: {error}");
+    }
+    model.sections[0].steel_material = None;
+    model.elements.reverse();
+    for element in &mut model.elements {
+        element.nodes.reverse();
+    }
+    assert!(crate::validate_model_steel_inputs(&model)
+        .unwrap_err()
+        .contains("採用柱 0"));
+}
+
+#[test]
+fn panel_601_missing_selected_steel_column_shape_stops_public_batch() {
+    let mut model = panel_758_model(0.0);
+    let mut upper = model.sections[0].clone();
+    upper.id = SectionId(2);
+    model.sections.push(upper);
+    model.elements[1].section = Some(SectionId(2));
+    model.sections[0].shape = None;
+    model.sections[0].thickness = Some(50.0);
+    model.materials[2].name = "直接鋼材".into();
+    model.materials[2].fy = Some(310.0);
+
+    assert!(crate::material_strength::section_steel_f(
+        &model.sections[0],
+        model.element_material(&model.elements[0]),
+    )
+    .is_ok());
+    let error = crate::run_member_design_checks(&model, &[], &[], &Default::default()).unwrap_err();
+    assert!(error.contains("接合部 0 採用柱 0"), "{error}");
+    assert!(error.contains("形状"), "{error}");
+}
+
+#[test]
+fn panel_601_each_axis_uses_its_product_thickness_with_reinforcement() {
+    let mut model = panel_758_model(0.0);
+    model.materials[2].name = "SS400".into();
+    model.materials[2].fy = Some(999.0);
+    if let Some(SectionShape::SteelH {
+        web_thick,
+        flange_thick,
+        ..
+    }) = &mut model.sections[0].shape
+    {
+        *web_thick = 40.0;
+        *flange_thick = 50.0;
+    }
+    model.sections[0].panel_thickness = Some(80.0);
+    let first = panel_758_checks(&model, &[[0.0; 6]; 4], Some([100e6, 200e6]));
+    model.materials[2].name = "直接鋼材".into();
+    model.materials[2].fy = Some(235.0);
+    let direct = panel_758_checks(&model, &[[0.0; 6]; 4], Some([100e6, 200e6]));
+    let ratio =
+        |checks: &[CheckOutcome], axis: usize| checks[axis].clone().unwrap_checked().ratio();
+    assert!((ratio(&first, 0) - ratio(&direct, 0)).abs() < 1e-12);
+    assert!((ratio(&first, 1) / ratio(&direct, 1) - 235.0 / 215.0).abs() < 1e-12);
 }

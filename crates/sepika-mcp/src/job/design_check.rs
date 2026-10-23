@@ -24,6 +24,7 @@ pub(crate) fn compute_design_check_job(
             "load_caseとload_combinationは同時指定できません".into(),
         ));
     }
+    sepika_design_jp::validate_model_steel_inputs(model).map_err(JobError::InvalidInput)?;
     let (work, notices) = model_prepared_for_analysis(model, params)?;
     let (lc_id, terms, source, state) = if let Some(index) = params.load_combination {
         let combo = work.combinations.get(index).ok_or_else(|| {
@@ -168,7 +169,8 @@ pub(crate) fn compute_design_check_job(
             girder_group_overrides: None,
             steel_fb_basis: SteelFbBasis::default(),
         },
-    );
+    )
+    .map_err(JobError::InvalidInput)?;
 
     if let Some(reason) = &load_error {
         report.skip_for_load_state(reason);
@@ -288,6 +290,104 @@ mod tests {
     use sepika_core::ids::{ElemId, NodeId, WallPlateId};
     use sepika_design_jp::wall_check::{WallCheck, WallCheckKind, WallSkipKind};
     use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
+
+    #[test]
+    fn steel601_mcp_rejects_invalid_assigned_steel_with_target_before_preparation() {
+        use sepika_core::ids::{MaterialId, SectionId};
+        use sepika_core::model::{Material, MaterialCategory};
+        use sepika_core::section_shape::SectionShape;
+        let model = fixture::input_model();
+        assert!(matches!(
+            compute_design_check_job(
+                &model,
+                &JobParams {
+                    load_case: Some(0),
+                    ..Default::default()
+                }
+            )
+            .unwrap(),
+            JobOutcome::DesignCheck { .. }
+        ));
+        for case in [
+            "unassigned",
+            "missing-reference",
+            "non-steel",
+            "direct-missing-fy",
+            "direct-zero-fy",
+            "direct-negative-fy",
+            "direct-nan-fy",
+            "direct-infinite-fy",
+            "known-missing-thickness",
+            "known-invalid-thickness",
+            "known-out-of-range",
+        ] {
+            let mut work = model.clone();
+            let material = MaterialId(work.materials.len() as u32);
+            work.materials.push(Material {
+                id: material,
+                name: "直接入力鋼材".into(),
+                category: MaterialCategory::Steel,
+                young: 205000.0,
+                poisson: 0.3,
+                density: 7.85e-9,
+                shear: None,
+                fc: None,
+                fy: Some(235.0),
+                strength_factor: None,
+                concrete_class: Default::default(),
+            });
+            let section = SectionId(work.sections.len() as u32);
+            let mut steel_section = SectionShape::SteelH {
+                height: 400.0,
+                width: 200.0,
+                web_thick: 8.0,
+                flange_thick: 13.0,
+                root_r: Some(0.0),
+            }
+            .to_section(section, "入力検査鋼梁".into());
+            steel_section.material = Some(material);
+            work.sections.push(steel_section);
+            let target = work.elements[0].id;
+            work.elements[0].section = Some(section);
+            let sec = &mut work.sections[section.index()];
+            let steel = &mut work.materials[material.index()];
+            match case {
+                "unassigned" => sec.material = None,
+                "missing-reference" => sec.material = Some(MaterialId(999)),
+                "non-steel" => steel.category = MaterialCategory::Concrete,
+                "direct-missing-fy" => steel.fy = None,
+                "direct-zero-fy" => steel.fy = Some(0.0),
+                "direct-negative-fy" => steel.fy = Some(-1.0),
+                "direct-nan-fy" => steel.fy = Some(f64::NAN),
+                "direct-infinite-fy" => steel.fy = Some(f64::INFINITY),
+                "known-missing-thickness" | "known-invalid-thickness" | "known-out-of-range" => {
+                    steel.name = "SS400".into();
+                    sec.shape = None;
+                    sec.thickness = match case {
+                        "known-missing-thickness" => None,
+                        "known-invalid-thickness" => Some(-1.0),
+                        _ => Some(101.0),
+                    };
+                }
+                _ => unreachable!(),
+            }
+            let error = compute_design_check_job(&work, &JobParams::default())
+                .err()
+                .expect(case)
+                .to_string();
+            let expected = match case {
+                "direct-missing-fy" | "direct-zero-fy" | "direct-negative-fy" | "direct-nan-fy"
+                | "direct-infinite-fy" => "fy",
+                "known-missing-thickness" | "known-invalid-thickness" => "板厚",
+                "known-out-of-range" => "適用範囲",
+                _ => "鋼材",
+            };
+            assert!(
+                error.contains(&format!("部材 {}", target.0)) && error.contains(expected),
+                "{case}: {error}"
+            );
+        }
+    }
 
     #[test]
     fn mcp_design_crack_points_match_independent_fixture_in_json() {
