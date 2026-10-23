@@ -105,7 +105,7 @@ fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
             [
                 Some(PanelEnd {
                     node: NodeId(0),
-                    zeta: 0.5,
+                    rotation: [[0.5, 0.0], [0.0, 0.5], [0.0, 0.0]],
                 }),
                 None,
             ],
@@ -208,7 +208,7 @@ fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
             [
                 Some(PanelEnd {
                     node: NodeId(0),
-                    zeta: 0.5,
+                    rotation: [[0.5, 0.0], [0.0, 0.5], [0.0, 0.0]],
                 }),
                 None,
             ],
@@ -907,7 +907,7 @@ fn beam_delegates_share_both_mass_forms_and_reject_the_same_resolver_failure() {
                 [
                     Some(PanelEnd {
                         node: NodeId(0),
-                        zeta: -0.5,
+                        rotation: [[-0.5, 0.0], [0.0, -0.5], [0.0, 0.0]],
                     }),
                     None,
                 ],

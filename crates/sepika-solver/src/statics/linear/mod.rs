@@ -110,8 +110,8 @@ impl StaticStiffness {
 pub struct StaticOnce {
     pub disp: Vec<[f64; 6]>,
     pub member_forces: Vec<(sepika_core::ids::ElemId, MemberForces)>,
-    /// 仕口パネルのせん断モーメント `{MSX, MSY}` [N·mm]（基準座標系）を接合部の
-    /// 節点ごとに保持する。パネルをモデル化していない場合は空。
+    /// 全体 X・Y 軸まわりの仕口パネルせん断モーメント `[MSX, MSY]` [N·mm] を節点ごとに保持する。
+    /// パネルをモデル化していない場合は空。
     #[serde(default)]
     pub panel_moments: Vec<(sepika_core::ids::NodeId, [f64; 2])>,
 }

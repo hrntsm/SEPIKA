@@ -64,6 +64,7 @@ pub fn s_panel_zone_check(inp: &SPanelInput) -> Result<CheckResult, String> {
     let kappa = inp.geometry.kappa();
     let shape_label = match inp.geometry.kind {
         PanelShapeKind::H { .. } => "H形",
+        PanelShapeKind::HWeak => "H形(弱軸)",
         PanelShapeKind::Box { .. } => "角形",
         PanelShapeKind::Pipe => "円形",
     };

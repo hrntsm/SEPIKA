@@ -1,13 +1,10 @@
 //! 仕口パネル（柱梁接合部パネル）要素。
 //!
-//! 部材座標系 X'-Z' 平面内と Y'-Z' 平面内のせん断モーメント `{mxp, myp}` と
-//! せん断変形角 `{γ'x, γ'y}` を持つ。
+//! 柱の強軸・弱軸に対応するせん断ばねを持つ。
+//! 変形を柱の曲げ回転軸へ写し、応力は同じ変換の転置で全体座標へ戻す。
 //!
-//! ```text
-//! {mxp, myp} = [[Kyp, 0], [0, Kxp]] {γ'x, γ'y},   Kyp = Kxp = G・V
-//! ```
-//!
-//! `{γX, γY}` は節点の標準 6 自由度とは別枠の追加自由度で、
+//! `{γX, γY}` は全体系 X/Y 基底を柱直交面へ投影する前の係数で、
+//! 節点の標準 6 自由度とは別枠の追加自由度である。
 //! グローバル自由度空間の末尾へ払い出される。本要素はその 2 自由度に対して
 //! のみ剛性を与える。
 
@@ -15,7 +12,7 @@ use crate::behavior::{Ctx, ElementBehavior, LocalMat, LocalVec, MassOption};
 use sepika_core::dof::DofMap;
 use sepika_core::ids::NodeId;
 use sepika_core::model::{ElementData, Model};
-use sepika_core::panel_zone::{resolve_explicit_panel_joint, PanelGeometry};
+use sepika_core::panel_zone::{resolve_explicit_panel_analysis_joint, PanelGeometry};
 use sepika_material::uniaxial::{Bilinear, UniaxialMaterial};
 use smallvec::SmallVec;
 
@@ -38,82 +35,81 @@ struct ColumnAxial {
     ea_over_l: f64,
     /// 全体系での柱の単位軸ベクトル。
     axis: [f64; 3],
-    /// 軸力比の分母 `Fy・A` [N]。
-    n_ref: f64,
+    /// 各方向の軸力比の分母 [N]。既存の 1 N 下限を適用する。
+    n_ref: [f64; 2],
     committed: [f64; 12],
     trial: [f64; 12],
 }
 
 impl ColumnAxial {
     /// 柱の弾性軸力を基準軸耐力で除した比（圧縮正、引張負）。
-    fn compression_ratio(&self) -> f64 {
+    fn compression_ratio(&self) -> [f64; 2] {
         let mut d = 0.0;
         for k in 0..3 {
             d += (self.trial[6 + k] - self.trial[k]) * self.axis[k];
         }
         let n = self.ea_over_l * d;
-        -n / self.n_ref
+        self.n_ref.map(|reference| -n / reference)
     }
 
-    fn axial_ratio(&self) -> f64 {
-        self.compression_ratio().clamp(0.0, 1.0)
+    fn axial_ratio(&self) -> [f64; 2] {
+        self.compression_ratio().map(|ratio| ratio.clamp(0.0, 1.0))
     }
 }
 
-/// 仕口パネル要素。
+/// 仕口パネル要素。方向別の諸元・応答は `[強軸, 弱軸]` の順。
 pub struct PanelZone {
     /// 接合部の節点（追加自由度 `γX`・`γY` の持ち主）。
     pub node: NodeId,
     /// 諸元未算定の理由。剛パネルへの数値的代用を算定成功と扱わない。
     pub resolution_error: Option<String>,
-    /// 柱せい方向のパネル寸法 `dc` `[mm]`。
-    pub dc: f64,
+    /// 方向別パネル寸法 `dc` [mm]。H 形の弱軸はフランジ幅。
+    pub dc: [f64; 2],
     /// 梁フランジ板厚中心間距離 `db` `[mm]`。
-    pub db: f64,
-    /// パネル板厚 `tp` `[mm]`。
-    pub tp: f64,
+    pub db: [f64; 2],
+    /// 抵抗板 1 枚あたりの有効厚 `tp` [mm]。
+    pub tp: [f64; 2],
     /// パネルの実効体積 `Ve` `[mm³]`。
-    pub ve: f64,
+    pub ve: [f64; 2],
     /// パネルの形状係数 κ。
-    pub kappa: f64,
+    pub kappa: [f64; 2],
     /// せん断弾性係数 `G` [N/mm²]。
     pub g: f64,
     /// パネルの基準強度 `F` [N/mm²]。
-    pub fy: f64,
-    /// パネルせん断剛性 `Kxp = Kyp = G・Ve` [N·mm/rad]。
-    pub k_panel: f64,
-    /// パネル部材座標系の回転角 θ `[rad]`（基準座標系 X-Y 平面内）。
-    pub theta: f64,
+    pub fy: [f64; 2],
+    /// 柱の強軸・弱軸に対応するせん断剛性 `G・Ve` [N·mm/rad]。
+    pub k_panel: [f64; 2],
+    /// 柱の強軸・弱軸の順に並ぶ、全体座標系での曲げ回転軸。
+    pub axes: [[f64; 3]; 2],
     /// 軸力比 `n = 0` における降伏モーメント `pMy0 = (Ve/κ)・Fy/√3` [N·mm]。
-    pub pmy0: f64,
-    /// 弾塑性ばね（`[γ'x, γ'y]` の 2 成分）。`None` は弾性（線形解析）。
+    pub pmy0: [f64; 2],
+    /// 柱の強軸・弱軸に対応する弾塑性ばね。`None` は弾性（線形解析）。
     springs: Option<[Box<dyn UniaxialMaterial>; 2]>,
     /// 軸力比 `n` の追従に用いる柱。`None` は `n = 0` 固定。
     column: Option<ColumnAxial>,
-    /// 確定・トライアルのせん断変形角 `{γX, γY}`（基準座標系）。
+    /// 確定・トライアルの投影前係数 `{γX, γY}`。
     committed_disp: [f64; 2],
     trial_disp: [f64; 2],
 }
 
 /// パネルに取り付く柱・梁から解決した諸元。
 struct ResolvedPanel {
-    geom: PanelGeometry,
+    geom: [PanelGeometry; 2],
     db: f64,
+    ve: [f64; 2],
     g: f64,
-    fy: f64,
+    fy: [f64; 2],
+    axes: [[f64; 3]; 2],
     column: Option<ColumnAxial>,
 }
 
 /// 接合部節点 `node` に取り付く柱・梁からパネル諸元を解決する。
 fn resolve(model: &Model, node: NodeId) -> Result<Option<ResolvedPanel>, String> {
-    let Some(joint) = resolve_explicit_panel_joint(model, node, &model.elements)
+    let Some(joint) = resolve_explicit_panel_analysis_joint(model, node, &model.elements)
         .map_err(|reason| reason.to_string())?
     else {
         return Ok(None);
     };
-    if joint.has_filled_column {
-        return Ok(None);
-    }
     let col_elem = &model.elements[joint.column.index()];
     let invalid = |reason: &str| {
         format!(
@@ -128,18 +124,17 @@ fn resolve(model: &Model, node: NodeId) -> Result<Option<ResolvedPanel>, String>
         .element_section(col_elem)
         .ok_or_else(|| invalid("断面未設定または参照不明"))?;
 
-    let fy = sepika_core::material_grade::steel_f_value_prefix(&mat.name, 40.0)
-        .or(mat.fy)
-        .unwrap_or(235.0);
-
-    let g = mat.shear_modulus();
+    let fy = joint.panels.map(|panel| panel.fy);
+    let g = joint.g;
     let column = column_axial(model, col_elem, mat, sec, fy)
         .ok_or_else(|| invalid("軸力追従に必要な柱節点・材軸・軸剛性・断面積を解決できません"))?;
     Ok(Some(ResolvedPanel {
-        geom: joint.geometry,
+        geom: joint.panels.map(|panel| panel.geometry),
         db: joint.db,
+        ve: joint.panels.map(|panel| panel.ve),
         g,
         fy,
+        axes: joint.moment_axes,
         column: Some(column),
     }))
 }
@@ -150,7 +145,7 @@ fn column_axial(
     col: &ElementData,
     mat: &sepika_core::model::Material,
     sec: &sepika_core::model::Section,
-    fy: f64,
+    fy: [f64; 2],
 ) -> Option<ColumnAxial> {
     if col.nodes.len() < 2 {
         return None;
@@ -160,14 +155,14 @@ fn column_axial(
     let d = sepika_core::geom::vec3::sub(p1, p0);
     let length = sepika_core::geom::vec3::norm(d);
     let ea_over_l = mat.young * sec.area / length.max(1.0);
-    let n_ref = fy * sec.area;
+    let n_ref = fy.map(|strength| strength * sec.area);
     if !length.is_finite()
         || length < 1e-12
         || !sec.area.is_finite()
         || sec.area <= 0.0
         || !ea_over_l.is_finite()
         || ea_over_l <= 0.0
-        || !n_ref.is_finite()
+        || n_ref.iter().any(|reference| !reference.is_finite())
     {
         return None;
     }
@@ -175,7 +170,7 @@ fn column_axial(
         nodes: [col.nodes[0], col.nodes[1]],
         ea_over_l,
         axis: [d[0] / length, d[1] / length, d[2] / length],
-        n_ref: n_ref.max(1.0),
+        n_ref: n_ref.map(|reference| reference.max(1.0)),
         committed: [0.0; 12],
         trial: [0.0; 12],
     })
@@ -201,37 +196,40 @@ impl PanelZone {
 
         let (dc, tp, db, ve, kappa, g, fy, column) = match &resolved {
             Some(r) => (
-                r.geom.dc,
-                r.geom.tp,
-                r.db,
-                r.geom.effective_volume(r.db),
-                r.geom.kappa(),
+                r.geom.map(|geometry| geometry.dc),
+                r.geom.map(|geometry| geometry.tp),
+                [r.db; 2],
+                r.ve,
+                r.geom.map(|geometry| geometry.kappa()),
                 r.g,
                 r.fy,
                 r.column.clone(),
             ),
-            None => (0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 235.0, None),
+            None => (
+                [0.0; 2], [0.0; 2], [0.0; 2], [0.0; 2], [1.0; 2], 0.0, [0.0; 2], None,
+            ),
         };
-
-        let k_elastic = g * ve;
-        let k_panel = if resolution_error.is_some() {
-            0.0
-        } else if k_elastic.is_finite() && k_elastic > 0.0 {
-            k_elastic
-        } else {
-            PANEL_RIGID_STIFFNESS
-        };
-        let pmy0 = if kappa > 0.0 {
-            (ve / kappa) * fy / 3.0_f64.sqrt()
-        } else {
-            0.0
-        };
-
-        let springs = (nonlinear && pmy0 > 0.0).then(|| {
-            let mk = || -> Box<dyn UniaxialMaterial> {
-                Box::new(Bilinear::new(k_panel, pmy0, PANEL_HARDENING))
-            };
-            [mk(), mk()]
+        let k_panel = ve.map(|volume| {
+            let stiffness = g * volume;
+            if resolution_error.is_some() {
+                0.0
+            } else if stiffness.is_finite() && stiffness > 0.0 {
+                stiffness
+            } else {
+                PANEL_RIGID_STIFFNESS
+            }
+        });
+        let pmy0 = std::array::from_fn(|i| {
+            if kappa[i] > 0.0 {
+                (ve[i] / kappa[i]) * fy[i] / 3.0_f64.sqrt()
+            } else {
+                0.0
+            }
+        });
+        let springs = (nonlinear && pmy0.iter().all(|moment| *moment > 0.0)).then(|| {
+            std::array::from_fn(|i| -> Box<dyn UniaxialMaterial> {
+                Box::new(Bilinear::new(k_panel[i], pmy0[i], PANEL_HARDENING))
+            })
         });
 
         Self {
@@ -245,7 +243,11 @@ impl PanelZone {
             g,
             fy,
             k_panel,
-            theta: 0.0,
+            axes: resolved
+                .as_ref()
+                .map_or([[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], |resolved| {
+                    resolved.axes
+                }),
             pmy0,
             springs,
             column: if nonlinear { column } else { None },
@@ -254,35 +256,16 @@ impl PanelZone {
         }
     }
 
-    /// 座標変換 `[Tp] = [[cosθ, sinθ], [-sinθ, cosθ]]`。
-    fn tp_matrix(&self) -> [[f64; 2]; 2] {
-        let (s, c) = self.theta.sin_cos();
-        [[c, s], [-s, c]]
-    }
-
-    /// 節点のせん断変形角 `{γX, γY}` からパネル部材座標系の `{γ'x, γ'y}` を返す。
-    /// `{γ'} = [[-1, 0], [0, 1]] [Tp] {γ}`。
     fn to_panel_frame(&self, gamma: [f64; 2]) -> [f64; 2] {
-        let t = self.tp_matrix();
-        let r0 = t[0][0] * gamma[0] + t[0][1] * gamma[1];
-        let r1 = t[1][0] * gamma[0] + t[1][1] * gamma[1];
-        [-r0, r1]
+        self.axes
+            .map(|axis| axis[0] * gamma[0] + axis[1] * gamma[1])
     }
 
-    /// パネル部材座標系のモーメント `{mxp, myp}` を節点の `{MSX, MSY}` へ戻す。
-    /// `{MS} = [Tp]ᵀ [[-1, 0], [0, 1]] {m}`。
-    fn to_node_frame(&self, m: [f64; 2]) -> [f64; 2] {
-        let t = self.tp_matrix();
-        let s = [-m[0], m[1]];
-        [
-            t[0][0] * s[0] + t[1][0] * s[1],
-            t[0][1] * s[0] + t[1][1] * s[1],
-        ]
+    fn to_node_frame(&self, moment: [f64; 2]) -> [f64; 2] {
+        std::array::from_fn(|i| self.axes[0][i] * moment[0] + self.axes[1][i] * moment[1])
     }
 
-    /// せん断変形角 `{γX, γY}` に対する、パネル部材座標系の接線剛性
-    /// `[Kyp, Kxp]`（`{γ'x, γ'y}` 各成分）とモーメント `{mxp, myp}` を返す。
-    /// 状態は書き換えない（`probe`）。
+    /// 全体せん断変形角に対する柱の強軸・弱軸の接線剛性とモーメント。状態は書き換えない。
     fn response_at(&self, gamma: [f64; 2]) -> ([f64; 2], [f64; 2]) {
         let gp = self.to_panel_frame(gamma);
         match &self.springs {
@@ -292,8 +275,8 @@ impl PanelZone {
                 ([k0, k1], [m0, m1])
             }
             None => (
-                [self.k_panel, self.k_panel],
-                [self.k_panel * gp[0], self.k_panel * gp[1]],
+                self.k_panel,
+                std::array::from_fn(|i| self.k_panel[i] * gp[i]),
             ),
         }
     }
@@ -303,27 +286,29 @@ impl PanelZone {
         self.response_at(self.trial_disp)
     }
 
-    /// 節点座標系のパネルせん断モーメント `{MSX, MSY}` [N·mm]。
+    /// 全体 X/Y 軸まわりのパネルせん断モーメント `{MSX, MSY}` [N·mm]。
     pub fn panel_moments(&self) -> [f64; 2] {
         let (_, m) = self.panel_response();
         self.to_node_frame(m)
     }
 
-    /// 与えられたせん断変形角に対する節点座標系のパネルせん断モーメント。
+    /// 投影前の全体系基底係数に対する、全体 X/Y 軸まわりのせん断モーメント [N·mm]。
     pub fn panel_moments_at(&self, gamma: [f64; 2]) -> [f64; 2] {
         let (_, m) = self.response_at(gamma);
         self.to_node_frame(m)
     }
 
-    /// 現在の軸力比 `n`（追従対象の柱がなければ 0）。
-    pub fn axial_ratio(&self) -> f64 {
-        self.column.as_ref().map_or(0.0, ColumnAxial::axial_ratio)
+    /// 各方向の `F・A` に対する軸力比 `[強軸, 弱軸]`。追従対象の柱がなければ両成分 0。
+    pub fn axial_ratio(&self) -> [f64; 2] {
+        self.column
+            .as_ref()
+            .map_or([0.0; 2], ColumnAxial::axial_ratio)
     }
 
-    /// 現在の軸力比における降伏モーメント `pMy = pMy0・√(1−n²)` [N·mm]。
-    pub fn yield_moment(&self) -> f64 {
+    /// 現在の軸力比における降伏モーメント `pMy = pMy0・√(1−n²)` [N·mm]。順序は `[強軸, 弱軸]`。
+    pub fn yield_moment(&self) -> [f64; 2] {
         let n = self.axial_ratio();
-        self.pmy0 * (1.0 - n * n).max(0.0).sqrt()
+        std::array::from_fn(|i| self.pmy0[i] * (1.0 - n[i] * n[i]).max(0.0).sqrt())
     }
 
     /// 軸力比の変化を弾塑性ばねの降伏値へ反映する。
@@ -333,8 +318,8 @@ impl PanelZone {
         }
         let pmy = self.yield_moment();
         if let Some(sp) = self.springs.as_mut() {
-            sp[0].set_yield(pmy);
-            sp[1].set_yield(pmy);
+            sp[0].set_yield(pmy[0]);
+            sp[1].set_yield(pmy[1]);
         }
     }
 }
@@ -355,7 +340,7 @@ impl ElementBehavior for PanelZone {
 
     fn tangent_stiffness(&self, _ctx: &Ctx) -> LocalMat {
         let (k_panel_frame, _) = self.panel_response();
-        let t = self.tp_matrix();
+        let t = self.axes;
         let mut k = LocalMat::zeros(self.n_dof());
         for i in 0..2 {
             for j in 0..2 {
@@ -401,10 +386,16 @@ impl ElementBehavior for PanelZone {
             if self.springs.is_some() {
                 let n = col.compression_ratio();
                 let clamped_n = col.axial_ratio();
-                let pmy = self.pmy0 * (1.0 - clamped_n * clamped_n).max(0.0).sqrt();
-                if !n.is_finite() || !pmy.is_finite() || pmy < 1e-9 {
+                let pmy: [f64; 2] = std::array::from_fn(|i| {
+                    self.pmy0[i] * (1.0 - clamped_n[i] * clamped_n[i]).max(0.0).sqrt()
+                });
+                if n.iter().any(|ratio| !ratio.is_finite())
+                    || pmy
+                        .iter()
+                        .any(|moment| !moment.is_finite() || *moment < 1e-9)
+                {
                     return Err(crate::behavior::ElementUpdateError(format!(
-                        "接合部 ID {} のパネル未対応: 軸力比 n={n} の降伏モーメント pMy={pmy} N·mm は有限かつ 1e-9 N·mm 以上である必要があります（軸耐力到達・超過を含む）",
+                        "接合部 ID {} のパネル未対応: 軸力比 n={n:?} の降伏モーメント pMy={pmy:?} N·mm は有限かつ 1e-9 N·mm 以上である必要があります（軸耐力到達・超過を含む）",
                         self.node.0
                     )));
                 }
@@ -416,10 +407,16 @@ impl ElementBehavior for PanelZone {
                 self.node.0
             )));
         }
+        let gp = self.to_panel_frame(trial_disp);
+        if !gp.iter().all(|value| value.is_finite()) {
+            return Err(crate::behavior::ElementUpdateError(format!(
+                "接合部 ID {} の柱主軸パネル変形角が非有限です",
+                self.node.0
+            )));
+        }
         self.trial_disp = trial_disp;
         self.column = column;
         self.apply_axial_interaction();
-        let gp = self.to_panel_frame(self.trial_disp);
         if let Some(sp) = self.springs.as_mut() {
             sp[0].trial(gp[0]);
             sp[1].trial(gp[1]);
@@ -615,7 +612,7 @@ mod tests {
     use sepika_core::model::{
         ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Material, Node, Section,
     };
-    use sepika_core::panel_zone::resolve_panel_joint;
+    use sepika_core::panel_zone::{panel_column_moment_axes, resolve_panel_joint};
     use sepika_core::section_shape::SectionShape;
 
     /// 整合条件 pqc·db = pqb·dc は、節点のモーメント釣り合い
@@ -880,13 +877,25 @@ mod tests {
     fn test_resolve_takes_dc_from_column_and_db_from_beam() {
         let (model, data) = cross_joint_model();
         let pz = PanelZone::new(&data, &model);
-        assert!((pz.dc - (400.0 - 21.0)).abs() < 1e-9, "dc は柱: {}", pz.dc);
-        assert!((pz.db - (600.0 - 17.0)).abs() < 1e-9, "db は梁: {}", pz.db);
-        assert!((pz.tp - 13.0).abs() < 1e-9, "tp は柱ウェブ厚: {}", pz.tp);
-        assert!((pz.ve - pz.dc * pz.db * pz.tp).abs() / pz.ve < 1e-12);
+        assert!(
+            (pz.dc[0] - (400.0 - 21.0)).abs() < 1e-9,
+            "dc は柱: {}",
+            pz.dc[0]
+        );
+        assert!(
+            (pz.db[0] - (600.0 - 17.0)).abs() < 1e-9,
+            "db は梁: {}",
+            pz.db[0]
+        );
+        assert!(
+            (pz.tp[0] - 13.0).abs() < 1e-9,
+            "tp は柱ウェブ厚: {}",
+            pz.tp[0]
+        );
+        assert!((pz.ve[0] - pz.dc[0] * pz.db[0] * pz.tp[0]).abs() / pz.ve[0] < 1e-12);
     }
 
-    /// 弾性パネルの剛性は Kxp = Kyp = G·Ve で、自由度は 2 個。
+    /// 各方向の弾性剛性は G·Ve で、自由度は 2 個。
     #[test]
     fn test_elastic_stiffness_is_g_times_ve() {
         let (model, data) = cross_joint_model();
@@ -894,10 +903,14 @@ mod tests {
         assert_eq!(pz.n_dof(), 2, "弾性パネルは 2 自由度");
 
         let k = pz.tangent_stiffness(&Ctx { model: &model });
-        let expected = pz.g * pz.ve;
+        let expected = pz.g * pz.ve[0];
         assert!((k.get(0, 0) - expected).abs() / expected < 1e-12);
-        assert!((k.get(1, 1) - expected).abs() / expected < 1e-12);
-        assert!(k.get(0, 1).abs() < 1e-6, "θ=0 では非対角は 0");
+        let weak_expected = pz.g * pz.ve[1];
+        assert!((k.get(1, 1) - weak_expected).abs() / weak_expected < 1e-12);
+        assert!(
+            k.get(0, 1).abs() < 1e-6,
+            "柱主軸と全体軸が一致すると非対角は 0"
+        );
     }
 
     /// 内力は M = K·γ（弾性）。トライアル変位に追従する。
@@ -906,7 +919,7 @@ mod tests {
         let (model, data) = cross_joint_model();
         let ctx = Ctx { model: &model };
         let mut pz = PanelZone::new(&data, &model);
-        let k = pz.g * pz.ve;
+        let k = pz.g * pz.ve[0];
 
         let mut du = LocalVec {
             data: SmallVec::from_elem(0.0, 2),
@@ -920,20 +933,334 @@ mod tests {
         assert!((pz.panel_moments()[0] - f.data[0]).abs() < 1e-6);
     }
 
-    /// Kxp = Kyp のとき、節点座標系のパネル剛性は θ に依らず diag(K, K) になる
-    /// （資料 (2.10.1-2)(2.10.1-3) の [Tp] が直交変換であるため）。
     #[test]
-    fn test_stiffness_is_invariant_to_theta() {
-        let (model, data) = cross_joint_model();
+    fn panel_757_constructor_connects_actual_two_axis_geometry_and_response() {
+        let (mut model, data) = cross_joint_model();
+        for column in &mut model.elements[2..] {
+            column.local_axis.ref_vector = [0.6, 0.8, 0.0];
+        }
         let ctx = Ctx { model: &model };
-        let mut pz = PanelZone::new(&data, &model);
-        pz.theta = 0.37;
-        let k = pz.tangent_stiffness(&ctx);
-        let expected = pz.g * pz.ve;
-        assert!((k.get(0, 0) - expected).abs() / expected < 1e-12);
-        assert!((k.get(1, 1) - expected).abs() / expected < 1e-12);
-        assert!(k.get(0, 1).abs() / expected < 1e-12);
-        assert!(k.get(1, 0).abs() / expected < 1e-12);
+        let mut panel = PanelZone::new(&data, &model);
+        assert_eq!(panel.resolution_error, None);
+        assert_eq!(panel.dc, [379.0, 400.0]);
+        assert_eq!(panel.db, [583.0; 2]);
+        assert_eq!(panel.tp, [13.0, 21.0]);
+        assert_eq!(panel.ve, [2_872_441.0, 9_794_400.0]);
+        assert_eq!(panel.fy, [235.0; 2]);
+        assert_eq!(panel.kappa[1], 1.5);
+        for (actual, expected) in panel
+            .k_panel
+            .into_iter()
+            .zip([226_480_925_000.0, 772_250_769_230.769_2])
+        {
+            assert!((actual / expected - 1.0).abs() < 1e-12);
+        }
+        for (actual, expected) in panel
+            .pmy0
+            .into_iter()
+            .zip([373_111_832.498_692_4, 885_918_584.659_636_4])
+        {
+            assert!((actual / expected - 1.0).abs() < 1e-12);
+        }
+        let increment = LocalVec {
+            data: smallvec::smallvec![0.0001, -0.0002],
+        };
+        panel.update_state(&increment, false, &ctx).unwrap();
+        let expected_matrix = [
+            [422_958_068_923.076_9, 261_969_525_230.769_17],
+            [261_969_525_230.769_17, 575_773_625_307.692_3],
+        ];
+        let tangent = panel.tangent_stiffness(&ctx);
+        for (i, row) in expected_matrix.iter().enumerate() {
+            for (j, expected) in row.iter().enumerate() {
+                assert!((tangent.get(i, j) / expected - 1.0).abs() < 1e-12);
+            }
+        }
+        let moments = panel.panel_moments();
+        for (actual, expected) in moments
+            .into_iter()
+            .zip([-10_098_098.153_846_145, -88_957_772.538_461_54])
+        {
+            assert!((actual / expected - 1.0).abs() < 1e-12);
+        }
+        let work = increment.data[0] * moments[0] + increment.data[1] * moments[1];
+        assert!((work / 16_781.744_692_307_693 - 1.0).abs() < 1e-12);
+        let generated = crate::springs::panel_gen::apply_auto_panel_zones(&mut model).unwrap();
+        let generated = generated
+            .iter()
+            .find(|generated| generated.node == NodeId(0))
+            .unwrap();
+        assert_eq!(generated.dc, panel.dc);
+        assert_eq!(generated.db, panel.db);
+        assert_eq!(generated.tp, panel.tp);
+        assert_eq!(generated.ve, panel.ve);
+        assert_eq!(generated.k_panel, panel.k_panel);
+    }
+
+    #[test]
+    fn panel_757_product_thickness_strength_controls_each_axial_ratio_and_rejection() {
+        let (mut model, data) = cross_joint_model();
+        if let Some(SectionShape::SteelH {
+            web_thick,
+            flange_thick,
+            ..
+        }) = &mut model.sections[1].shape
+        {
+            *web_thick = 39.0;
+            *flange_thick = 41.0;
+        }
+        model.sections[1].panel_thickness = Some(100.0);
+        let ctx = Ctx { model: &model };
+        let mut panel = PanelZone::new_nonlinear(&data, &model);
+        assert_eq!(panel.resolution_error, None);
+        assert_eq!(panel.tp, [100.0; 2]);
+        assert_eq!(panel.fy, [235.0, 215.0]);
+        assert_eq!(
+            panel.column.as_ref().unwrap().n_ref,
+            [5_139_450.0, 4_702_050.0]
+        );
+        for (actual, expected) in panel
+            .pmy0
+            .into_iter()
+            .zip([2_504_891_676.354_933, 3_859_625_039.550_594_3])
+        {
+            assert!((actual / expected - 1.0).abs() < 1e-12);
+        }
+        panel
+            .update_state(&panel_724_increment(0.0, 0.5), true, &ctx)
+            .unwrap();
+        for (actual, expected) in panel
+            .axial_ratio()
+            .into_iter()
+            .zip([0.5, 0.5465116279069767])
+        {
+            assert!((actual - expected).abs() < 1e-12);
+        }
+        for (actual, expected) in panel
+            .yield_moment()
+            .into_iter()
+            .zip([2_169_299_825.451_56, 3_232_248_838.055_497])
+        {
+            assert!((actual / expected - 1.0).abs() < 1e-12);
+        }
+        let before = panel.serialize_checkpoint();
+        let mut increment = panel_724_increment(0.0, 0.0);
+        increment.data[10] = -107.5 * 3_000.0 / 205_000.0;
+        for commit in [false, true] {
+            assert!(panel.update_state(&increment, commit, &ctx).is_err());
+            assert_eq!(panel.serialize_checkpoint(), before);
+        }
+    }
+
+    fn panel_757_directional_fixture(nonlinear: bool) -> (Model, PanelZone) {
+        let (mut model, data) = cross_joint_model();
+        for column in &mut model.elements[2..] {
+            column.local_axis.ref_vector = [0.6, 0.8, 0.0];
+        }
+        let mut panel = PanelZone::build(&data, &model, nonlinear);
+        panel.k_panel = [1_000.0, 4_000.0];
+        panel.pmy0 = [10.0, 20.0];
+        if nonlinear {
+            panel.springs = Some(std::array::from_fn(|i| -> Box<dyn UniaxialMaterial> {
+                Box::new(Bilinear::new(
+                    panel.k_panel[i],
+                    panel.pmy0[i],
+                    PANEL_HARDENING,
+                ))
+            }));
+        }
+        (model, panel)
+    }
+
+    #[test]
+    fn panel_757_directional_stiffness_and_global_moments_are_work_conjugate() {
+        let (model, mut panel) = panel_757_directional_fixture(false);
+        let ctx = Ctx { model: &model };
+        assert_eq!(panel.axes, [[-0.8, 0.6, 0.0], [0.6, 0.8, 0.0]]);
+        let increment = LocalVec {
+            data: smallvec::smallvec![0.001, 0.002],
+        };
+        panel.update_state(&increment, false, &ctx).unwrap();
+        let stiffness = panel.tangent_stiffness(&ctx);
+        for (i, expected_row) in [[2_080.0, 1_440.0], [1_440.0, 2_920.0]].iter().enumerate() {
+            for (j, expected) in expected_row.iter().enumerate() {
+                assert!((stiffness.get(i, j) - expected).abs() < 1e-10);
+            }
+        }
+        let moments = panel.panel_moments();
+        for (actual, expected) in moments.into_iter().zip([4.96, 7.28]) {
+            assert!((actual - expected).abs() < 1e-12);
+        }
+        assert_eq!(panel.internal_force(&ctx).data.as_slice(), &moments);
+        assert_eq!(panel.panel_moments_from(&increment.data), Some(moments));
+        let work = increment.data[0] * moments[0] + increment.data[1] * moments[1];
+        assert!((work - 0.01952).abs() < 1e-14);
+    }
+
+    fn panel_757_increment(normalized_rotation: f64, axial_ratio: f64) -> LocalVec {
+        let mut increment = panel_724_increment(-0.011 * normalized_rotation, axial_ratio);
+        increment.data[1] = 0.002 * normalized_rotation;
+        increment
+    }
+
+    #[test]
+    fn panel_757_two_axis_cycle_matches_independent_vertices_and_work() {
+        let (model, mut panel) = panel_757_directional_fixture(true);
+        let ctx = Ctx { model: &model };
+        panel
+            .update_state(&panel_757_increment(0.0, 0.6), true, &ctx)
+            .unwrap();
+        for (actual, expected) in panel.yield_moment().into_iter().zip([8.0, 16.0]) {
+            assert!((actual - expected).abs() < 1e-12);
+        }
+        let vertices = [
+            (0.4, 0.4, Some(1.0)),
+            (0.8, 0.8, None),
+            (1.6, 0.808, Some(0.01)),
+            (0.8, 0.008, Some(1.0)),
+            (0.0, -0.792, None),
+            (-0.8, -0.8, Some(0.01)),
+            (-1.6, -0.808, Some(0.01)),
+            (-0.8, -0.008, Some(1.0)),
+            (0.0, 0.792, None),
+            (0.8, 0.8, Some(0.01)),
+            (1.6, 0.808, Some(0.01)),
+        ];
+        let mut previous_rotation = 0.0;
+        let mut previous_moment = [0.0; 2];
+        let mut work = 0.0;
+        for (index, (rotation, expected, tangent_ratio)) in vertices.into_iter().enumerate() {
+            let increment = panel_757_increment(rotation - previous_rotation, 0.0);
+            panel.update_state(&increment, false, &ctx).unwrap();
+            let moment = panel.panel_moments();
+            assert!((moment[0] + 20.0 * expected).abs() < 1e-12);
+            assert!((moment[1] + 10.0 * expected).abs() < 1e-12);
+            if let Some(ratio) = tangent_ratio {
+                let tangent = panel.tangent_stiffness(&ctx);
+                for (i, row) in [[2_080.0, 1_440.0], [1_440.0, 2_920.0]].iter().enumerate() {
+                    for (j, expected) in row.iter().enumerate() {
+                        assert!((tangent.get(i, j) - ratio * expected).abs() < 1e-10);
+                    }
+                }
+            }
+            if index >= 3 {
+                work += 0.5
+                    * ((previous_moment[0] + moment[0]) * increment.data[0]
+                        + (previous_moment[1] + moment[1]) * increment.data[1]);
+            }
+            panel.commit_state();
+            previous_rotation = rotation;
+            previous_moment = moment;
+        }
+        assert!((work - 0.50688).abs() < 1e-12);
+    }
+
+    #[test]
+    fn panel_757_directional_history_restores_uncommitted_state_and_retries() {
+        let (model, mut panel) = panel_757_directional_fixture(true);
+        let (_, mut control) = panel_757_directional_fixture(true);
+        let ctx = Ctx { model: &model };
+        let initial = panel_757_increment(1.6, 0.6);
+        panel.update_state(&initial, true, &ctx).unwrap();
+        control.update_state(&initial, true, &ctx).unwrap();
+        let trial = panel_757_increment(-0.8, 0.2);
+        panel.update_state(&trial, false, &ctx).unwrap();
+        let snapshot = panel.snapshot_state();
+        let checkpoint = panel.serialize_checkpoint();
+        let trial_moments = panel.panel_moments();
+        let trial_yield = panel.yield_moment();
+        for use_checkpoint in [false, true] {
+            panel
+                .update_state(&panel_757_increment(-3.2, -0.3), true, &ctx)
+                .unwrap();
+            if use_checkpoint {
+                panel.deserialize_checkpoint(&checkpoint).unwrap();
+            } else {
+                panel.restore_state(snapshot.as_ref());
+            }
+            assert_eq!(panel.serialize_checkpoint(), checkpoint);
+            assert_eq!(panel.panel_moments(), trial_moments);
+            assert_eq!(panel.yield_moment(), trial_yield);
+            panel.revert_state();
+            assert_panel_751_same_state(&panel, &control, &ctx);
+            panel.revert_state();
+            assert_panel_751_same_state(&panel, &control, &ctx);
+            panel.update_state(&trial, false, &ctx).unwrap();
+            assert_eq!(panel.serialize_checkpoint(), checkpoint);
+        }
+    }
+
+    #[test]
+    fn panel_757_each_direction_rejects_invalid_yield_without_mutation() {
+        let (model, _) = panel_757_directional_fixture(true);
+        let ctx = Ctx { model: &model };
+        for axis in 0..2 {
+            for moment in [f64::from_bits(1e-9_f64.to_bits() - 1), f64::INFINITY] {
+                for commit in [false, true] {
+                    let (_, mut panel) = panel_757_directional_fixture(true);
+                    panel
+                        .update_state(&panel_757_increment(1.6, 0.6), true, &ctx)
+                        .unwrap();
+                    panel
+                        .update_state(&panel_757_increment(-0.8, 0.0), false, &ctx)
+                        .unwrap();
+                    panel.pmy0[axis] = moment;
+                    let before = panel.serialize_checkpoint();
+                    let moments = panel.panel_moments();
+                    let tangent = panel.tangent_stiffness(&ctx);
+                    assert!(panel
+                        .update_state(&panel_757_increment(0.1, 0.0), commit, &ctx)
+                        .is_err());
+                    assert_eq!(panel.serialize_checkpoint(), before);
+                    assert_eq!(panel.panel_moments(), moments);
+                    let after_tangent = panel.tangent_stiffness(&ctx);
+                    for i in 0..panel.n_dof() {
+                        for j in 0..panel.n_dof() {
+                            assert_eq!(after_tangent.get(i, j), tangent.get(i, j));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn panel_757_nonfinite_principal_rotation_is_rejected_atomically() {
+        let (model, mut panel) = panel_757_directional_fixture(false);
+        let ctx = Ctx { model: &model };
+        let before = panel.serialize_checkpoint();
+        let increment = LocalVec {
+            data: smallvec::smallvec![f64::MAX, f64::MAX],
+        };
+        let error = panel.update_state(&increment, true, &ctx).unwrap_err();
+        assert!(error.to_string().contains("柱主軸パネル変形角が非有限"));
+        assert_eq!(panel.serialize_checkpoint(), before);
+    }
+
+    #[test]
+    fn panel_757_constructor_axes_match_member_frame_including_fallback() {
+        let (mut model, data) = cross_joint_model();
+        for coordinates in [
+            ([0.0, 0.0, 0.0], [0.0, 0.0, 3_000.0]),
+            ([1.0, -2.0, 3.0], [101.0, 198.0, 3_003.0]),
+        ] {
+            model.nodes[3].coord = coordinates.0;
+            model.nodes[0].coord = coordinates.1;
+            for reference in [[0.6, 0.8, 0.0], [0.0, 0.0, 1.0], [100.0, 200.0, 3_000.0]] {
+                model.elements[2].local_axis.ref_vector = reference;
+                let column = &model.elements[2];
+                let axes = panel_column_moment_axes(&model, column).unwrap();
+                let frame = crate::transform::LocalFrame::from_nodes(
+                    coordinates.0,
+                    coordinates.1,
+                    reference,
+                );
+                assert_eq!(axes, [frame.rot[2], frame.rot[1]]);
+                if coordinates.0 == [0.0, 0.0, 0.0] {
+                    assert_eq!(PanelZone::new(&data, &model).axes, axes);
+                }
+            }
+        }
     }
 
     /// 弾塑性パネル: 降伏点は pMy0 = (Ve/κ)·Fy/√3。降伏後の接線剛性は
@@ -944,10 +1271,10 @@ mod tests {
         let ctx = Ctx { model: &model };
         let mut pz = PanelZone::new_nonlinear(&data, &model);
 
-        let expected_pmy0 = (pz.ve / pz.kappa) * pz.fy / 3.0_f64.sqrt();
-        assert!((pz.pmy0 - expected_pmy0).abs() / expected_pmy0 < 1e-12);
+        let expected_pmy0 = (pz.ve[0] / pz.kappa[0]) * pz.fy[0] / 3.0_f64.sqrt();
+        assert!((pz.pmy0[0] - expected_pmy0).abs() / expected_pmy0 < 1e-12);
 
-        let gamma_y = pz.pmy0 / (pz.g * pz.ve);
+        let gamma_y = pz.pmy0[0] / (pz.g * pz.ve[0]);
 
         let mut du = LocalVec {
             data: SmallVec::from_elem(0.0, pz.n_dof()),
@@ -955,7 +1282,7 @@ mod tests {
         du.data[0] = gamma_y * 0.5;
         pz.update_state(&du, true, &ctx).unwrap();
         let k = pz.tangent_stiffness(&ctx);
-        assert!((k.get(0, 0) - pz.g * pz.ve).abs() / (pz.g * pz.ve) < 1e-9);
+        assert!((k.get(0, 0) - pz.g * pz.ve[0]).abs() / (pz.g * pz.ve[0]) < 1e-9);
 
         let mut du2 = LocalVec {
             data: SmallVec::from_elem(0.0, pz.n_dof()),
@@ -963,7 +1290,7 @@ mod tests {
         du2.data[0] = gamma_y * 2.0;
         pz.update_state(&du2, false, &ctx).unwrap();
         let k2 = pz.tangent_stiffness(&ctx);
-        let k_expected = PANEL_HARDENING * pz.g * pz.ve;
+        let k_expected = PANEL_HARDENING * pz.g * pz.ve[0];
         assert!(
             (k2.get(0, 0) - k_expected).abs() / k_expected < 1e-9,
             "降伏後の接線剛性 {} は {} のはず",
@@ -972,10 +1299,10 @@ mod tests {
         );
         let m = pz.panel_moments()[0];
         assert!(
-            m > pz.pmy0 && m < 1.05 * pz.pmy0,
+            m > pz.pmy0[0] && m < 1.05 * pz.pmy0[0],
             "M={} pMy0={}",
             m,
-            pz.pmy0
+            pz.pmy0[0]
         );
     }
 
@@ -1010,7 +1337,7 @@ mod tests {
         let ctx = Ctx { model: &model };
         let mut pz = PanelZone::new_nonlinear(&data, &model);
         assert!(
-            (pz.yield_moment() - pz.pmy0).abs() / pz.pmy0 < 1e-12,
+            (pz.yield_moment()[0] - pz.pmy0[0]).abs() / pz.pmy0[0] < 1e-12,
             "初期 n=0"
         );
 
@@ -1020,16 +1347,16 @@ mod tests {
         du.data[2 + 6 + 2] = -1.0;
         pz.update_state(&du, true, &ctx).unwrap();
 
-        let n = pz.axial_ratio();
+        let n = pz.axial_ratio()[0];
         assert!(n > 0.0, "圧縮軸力で n > 0 になるはず: n={n}");
-        let expected = pz.pmy0 * (1.0 - n * n).sqrt();
+        let expected = pz.pmy0[0] * (1.0 - n * n).sqrt();
         assert!(
-            (pz.yield_moment() - expected).abs() / pz.pmy0 < 1e-12,
+            (pz.yield_moment()[0] - expected).abs() / pz.pmy0[0] < 1e-12,
             "pMy={} 期待={}",
-            pz.yield_moment(),
+            pz.yield_moment()[0],
             expected
         );
-        assert!(pz.yield_moment() < pz.pmy0, "軸力で降伏耐力が下がる");
+        assert!(pz.yield_moment()[0] < pz.pmy0[0], "軸力で降伏耐力が下がる");
     }
 
     /// 引張軸力では降伏耐力を低減しない（検定側と同じ規約）。
@@ -1043,8 +1370,8 @@ mod tests {
         };
         du.data[2 + 6 + 2] = 1.0;
         pz.update_state(&du, true, &ctx).unwrap();
-        assert_eq!(pz.axial_ratio(), 0.0);
-        assert!((pz.yield_moment() - pz.pmy0).abs() / pz.pmy0 < 1e-12);
+        assert_eq!(pz.axial_ratio()[0], 0.0);
+        assert!((pz.yield_moment()[0] - pz.pmy0[0]).abs() / pz.pmy0[0] < 1e-12);
     }
 
     #[test]
@@ -1052,7 +1379,7 @@ mod tests {
         let (mut model, data) = cross_joint_model();
         model.sections[1].shape = None;
         let pz = PanelZone::new(&data, &model);
-        assert_eq!(pz.k_panel, 0.0);
+        assert_eq!(pz.k_panel, [0.0; 2]);
         assert!(pz
             .resolution_error
             .as_ref()
@@ -1094,9 +1421,9 @@ mod tests {
                 PanelZone::new_nonlinear(&data, &model),
             ] {
                 assert_eq!(p.resolution_error, None);
-                assert_eq!(p.dc, 379.0);
-                assert_eq!(p.tp, 13.0);
-                assert_eq!(p.fy, 235.0);
+                assert_eq!(p.dc[0], 379.0);
+                assert_eq!(p.tp[0], 13.0);
+                assert_eq!(p.fy[0], 235.0);
                 assert_eq!(p.g, 205_000.0 / 2.6);
                 if let Some(col) = p.column {
                     assert_eq!(
@@ -1115,7 +1442,7 @@ mod tests {
                             [0.0, 0.0, 1.0]
                         }
                     );
-                    assert_eq!(col.n_ref, 235.0 * 21_870.0);
+                    assert_eq!(col.n_ref, [235.0 * 21_870.0; 2]);
                 }
             }
         }
@@ -1136,7 +1463,7 @@ mod tests {
             PanelZone::new_nonlinear(&data, &model),
         ] {
             assert_eq!(panel.resolution_error, Some(reason.clone()));
-            assert_eq!(panel.k_panel, 0.0);
+            assert_eq!(panel.k_panel, [0.0; 2]);
             let increment = LocalVec {
                 data: smallvec::smallvec![0.0, 0.0],
             };
@@ -1167,7 +1494,7 @@ mod tests {
                 .as_ref()
                 .is_some_and(|reason| reason.contains("接合部 ID 0")
                     && reason.contains("参照柱が存在しません")));
-            assert_eq!(panel.k_panel, 0.0);
+            assert_eq!(panel.k_panel, [0.0; 2]);
         }
     }
 
@@ -1186,8 +1513,8 @@ mod tests {
             .unwrap();
         assert!((panel.panel_moments()[0] / moment - 0.61).abs() < 1e-12);
         panel.revert_state();
-        assert!((panel.axial_ratio() - 0.6).abs() < 1e-12);
-        assert!((panel.yield_moment() / moment - 0.8).abs() < 1e-12);
+        assert!((panel.axial_ratio()[0] - 0.6).abs() < 1e-12);
+        assert!((panel.yield_moment()[0] / moment - 0.8).abs() < 1e-12);
         assert!((panel.panel_moments()[0] / moment - 0.808).abs() < 1e-12);
     }
 
@@ -1217,6 +1544,9 @@ mod tests {
         let (model, data) = cross_joint_model();
         let ctx = Ctx { model: &model };
         let (_, moment, gamma) = panel_724_reference_scales();
+        let weak_moment = 9_794_400.0 * 235.0 / (1.5 * 3.0_f64.sqrt());
+        let weak_gamma = 235.0 / (1.5 * 3.0_f64.sqrt() * (205_000.0 / 2.6));
+        let moments = [moment, weak_moment];
         for directions in [
             [1.0, 0.0],
             [-1.0, 0.0],
@@ -1227,11 +1557,11 @@ mod tests {
             let mut panel = PanelZone::new_nonlinear(&data, &model);
             let mut control = PanelZone::new_nonlinear(&data, &model);
             let mut initial = panel_724_increment(directions[0] * 1.6 * gamma, 0.6);
-            initial.data[1] = directions[1] * 1.6 * gamma;
+            initial.data[1] = directions[1] * 1.6 * weak_gamma;
             panel.update_state(&initial, true, &ctx).unwrap();
             control.update_state(&initial, true, &ctx).unwrap();
             for (i, direction) in directions.into_iter().enumerate() {
-                assert!((panel.panel_moments()[i] / moment - direction * 0.808).abs() < 1e-12);
+                assert!((panel.panel_moments()[i] / moments[i] - direction * 0.808).abs() < 1e-12);
             }
             for delta_n in [0.2, -0.3] {
                 panel
@@ -1244,7 +1574,7 @@ mod tests {
             }
             for (delta_gamma, delta_n) in [(-0.8, 0.0), (-3.2, 0.2), (0.4, -0.3)] {
                 let mut retry = panel_724_increment(delta_gamma * gamma, delta_n);
-                retry.data[1] = -delta_gamma * gamma;
+                retry.data[1] = -delta_gamma * weak_gamma;
                 panel.update_state(&retry, false, &ctx).unwrap();
                 control.update_state(&retry, false, &ctx).unwrap();
                 assert_panel_751_same_state(&panel, &control, &ctx);
@@ -1280,7 +1610,7 @@ mod tests {
                 panel.restore_state(snapshot.as_ref());
             }
             assert_eq!(panel.serialize_checkpoint(), checkpoint);
-            assert!((panel.axial_ratio() - 0.8).abs() < 1e-12);
+            assert!((panel.axial_ratio()[0] - 0.8).abs() < 1e-12);
             panel.revert_state();
             assert_panel_751_same_state(&panel, &control, &ctx);
             let retry = panel_724_increment(-0.8 * gamma, 0.0);
@@ -1317,8 +1647,8 @@ mod tests {
         panel
             .update_state(&panel_724_increment(0.0, 0.6), true, &ctx)
             .unwrap();
-        assert!((panel.axial_ratio() - 0.6).abs() < 1e-12);
-        assert!((panel.yield_moment() / moment - 0.8).abs() < 1e-12);
+        assert!((panel.axial_ratio()[0] - 0.6).abs() < 1e-12);
+        assert!((panel.yield_moment()[0] / moment - 0.8).abs() < 1e-12);
         let vertices = [
             (0.4, 0.4, Some(1.0)),
             (0.8, 0.8, None),
@@ -1415,8 +1745,8 @@ mod tests {
                 panel.restore_state(snapshot.as_ref());
             }
             assert_eq!(panel.serialize_checkpoint(), checkpoint);
-            assert!((panel.axial_ratio() - 0.6).abs() < 1e-12);
-            assert!((panel.yield_moment() / moment - 0.8).abs() < 1e-12);
+            assert!((panel.axial_ratio()[0] - 0.6).abs() < 1e-12);
+            assert!((panel.yield_moment()[0] / moment - 0.8).abs() < 1e-12);
             assert!((panel.panel_moments()[0] / moment - 0.808).abs() < 1e-12);
             panel
                 .update_state(&panel_724_increment(-0.8 * gamma, 0.0), false, &ctx)
@@ -1453,7 +1783,7 @@ mod tests {
                 for (_, force) in response.at {
                     assert!((force[0] - expected_axial_n).abs() < 1e-6);
                 }
-                assert!((panel.axial_ratio() - 0.6).abs() < 1e-12);
+                assert!((panel.axial_ratio()[0] - 0.6).abs() < 1e-12);
             }
         }
     }
@@ -1471,9 +1801,16 @@ mod tests {
             panel
                 .update_state(&panel_724_increment(0.1 * gamma, n), false, &ctx)
                 .unwrap();
-            let published = panel.yield_moment() / moment;
-            for spring in panel.springs.as_ref().unwrap() {
-                assert!((spring.reference_stress() / moment - expected_yield).abs() < 1e-11);
+            let published = panel.yield_moment()[0] / moment;
+            let reference_moments = [moment, 9_794_400.0 * 235.0 / (1.5 * 3.0_f64.sqrt())];
+            for (spring, reference) in panel
+                .springs
+                .as_ref()
+                .unwrap()
+                .iter()
+                .zip(reference_moments)
+            {
+                assert!((spring.reference_stress() / reference - expected_yield).abs() < 1e-11);
             }
             let response = panel.panel_moments()[0] / moment;
             println!("panel753 corrected: n={n}, published={published}, response={response}");
@@ -1509,7 +1846,9 @@ mod tests {
                 assert_eq!(panel.serialize_checkpoint(), before);
                 assert_eq!(panel.panel_moments(), moments);
                 panel.revert_state();
-                assert!((panel.panel_moments()[0] / panel.pmy0 - 0.0150003642452616).abs() < 1e-11);
+                assert!(
+                    (panel.panel_moments()[0] / panel.pmy0[0] - 0.0150003642452616).abs() < 1e-11
+                );
             }
         }
     }
@@ -1524,12 +1863,12 @@ mod tests {
             (f64::INFINITY, false),
         ] {
             let mut panel = PanelZone::new_nonlinear(&data, &model);
-            panel.pmy0 = moment;
+            panel.pmy0 = [moment; 2];
             let before = panel.serialize_checkpoint();
             let result = panel.update_state(&panel_724_increment(0.0, 0.0), true, &ctx);
             assert_eq!(result.is_ok(), accepted);
             if accepted {
-                assert_eq!(panel.yield_moment(), 1e-9);
+                assert_eq!(panel.yield_moment()[0], 1e-9);
                 for spring in panel.springs.as_ref().unwrap() {
                     assert_eq!(spring.reference_stress(), 1e-9);
                 }

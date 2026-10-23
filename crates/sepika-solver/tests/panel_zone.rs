@@ -18,7 +18,6 @@ use sepika_core::model::{
     ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LoadCase, LocalAxis,
     Material, MaterialCategory, Model, NodalLoad, Node, RigidZone, Section,
 };
-use sepika_core::panel_zone::{beam_panel_depth, PanelGeometry};
 use sepika_core::section_shape::SectionShape;
 
 const COL_H: f64 = 400.0;
@@ -213,15 +212,243 @@ fn l_frame_with(with_panel: bool, rigid_joint: bool) -> Model {
     model
 }
 
-/// パネルの実効体積 Ve と せん断剛性 G·Ve。
-fn panel_stiffness(model: &Model) -> (f64, f64) {
-    let col = &model.sections[1];
-    let beam = &model.sections[0];
-    let geom = PanelGeometry::from_column(col).expect("H 形柱");
-    let db = beam_panel_depth(beam).unwrap();
-    let ve = geom.effective_volume(db);
+/// 柱の強軸・弱軸の実効体積 Ve とせん断剛性 G·Ve。
+fn panel_stiffness(model: &Model) -> ([f64; 2], [f64; 2]) {
+    let db = BEAM_H - BEAM_TF;
+    let ve = [(COL_H - COL_TF) * db * COL_TW, 2.0 * COL_B * db * COL_TF];
     let mat = &model.materials[0];
-    (ve, mat.shear_modulus() * ve)
+    (ve, ve.map(|volume| mat.shear_modulus() * volume))
+}
+
+fn panel_757_space_frame(column_rotation: f64, building_rotation: f64) -> Model {
+    let mut model = l_frame(false);
+    model.girder_torsion = sepika_core::model::GirderTorsionMode::Keep;
+    model.materials[0].shear = Some(80_000.0);
+    model.nodes[0].restraint = Dof6Mask::FREE;
+    model.nodes[1].restraint = Dof6Mask::FREE;
+    model
+        .nodes
+        .push(node(3, [0.0, 4500.0, 3000.0], Dof6Mask::FREE));
+    let mut other_beam = model.elements[0].clone();
+    other_beam.id = ElemId(2);
+    other_beam.nodes = smallvec::smallvec![NodeId(0), NodeId(3)];
+    model.elements.push(other_beam);
+    let shape = SectionShape::SteelH {
+        height: 500.0,
+        width: 300.0,
+        web_thick: 12.0,
+        flange_thick: 24.0,
+        root_r: Some(0.0),
+    };
+    let mut column = shape.to_section(SectionId(1), "H-500x300x12x24".into());
+    column.frame_use = Some(FrameSectionUse::Column);
+    column.material = Some(MaterialId(0));
+    model.sections[1] = column;
+    let (sin, cos) = column_rotation.sin_cos();
+    model.elements[1].local_axis.ref_vector = [cos, sin, 0.0];
+    let (sin, cos) = building_rotation.sin_cos();
+    let rotate = |v: [f64; 3]| [cos * v[0] - sin * v[1], sin * v[0] + cos * v[1], v[2]];
+    for node in &mut model.nodes {
+        node.coord = rotate(node.coord);
+    }
+    for element in &mut model.elements {
+        element.local_axis.ref_vector = rotate(element.local_axis.ref_vector);
+    }
+    model.load_cases = vec![
+        LoadCase {
+            id: LoadCaseId(1),
+            name: "二方向同時".into(),
+            kind: Default::default(),
+            nodal: vec![
+                NodalLoad::manual(NodeId(1), [0.0, 0.0, -50_000.0, 0.0, 0.0, 0.0]),
+                NodalLoad::manual(NodeId(3), [0.0, 0.0, -30_000.0, 0.0, 0.0, 0.0]),
+            ],
+            member: Vec::new(),
+        },
+        LoadCase {
+            id: LoadCaseId(2),
+            name: "X梁単独".into(),
+            kind: Default::default(),
+            nodal: vec![NodalLoad::manual(
+                NodeId(1),
+                [0.0, 0.0, -50_000.0, 0.0, 0.0, 0.0],
+            )],
+            member: Vec::new(),
+        },
+        LoadCase {
+            id: LoadCaseId(3),
+            name: "Y梁単独".into(),
+            kind: Default::default(),
+            nodal: vec![NodalLoad::manual(
+                NodeId(3),
+                [0.0, 0.0, -30_000.0, 0.0, 0.0, 0.0],
+            )],
+            member: Vec::new(),
+        },
+    ];
+    let panels = sepika_element::springs::panel_gen::apply_auto_panel_zones(&mut model).unwrap();
+    assert_eq!(panels.len(), 1);
+    assert_eq!(panels[0].dc, [476.0, 300.0]);
+    assert_eq!(panels[0].db, [583.0; 2]);
+    assert_eq!(panels[0].tp, [12.0, 24.0]);
+    assert_eq!(panels[0].ve, [3_330_096.0, 8_395_200.0]);
+    assert_eq!(panels[0].k_panel, [266_407_680_000.0, 671_616_000_000.0]);
+    model
+}
+
+fn panel_757_rigid_comparison(model: &Model) -> Model {
+    let mut rigid = model.clone();
+    rigid.elements.retain(|e| e.kind != ElementKind::PanelZone);
+    rigid.panel_zone = sepika_core::model::PanelZoneMode::None;
+    rigid
+}
+
+#[test]
+fn panel_757_public_solver_rejects_invalid_column_reference_directions() {
+    let model = panel_757_space_frame(0.0, 0.0);
+    for reference in [
+        [f64::NAN, 0.0, 0.0],
+        [f64::INFINITY, 0.0, 0.0],
+        [0.0, 0.0, f64::NEG_INFINITY],
+        [1e308, 0.0, 0.0],
+    ] {
+        let mut invalid = model.clone();
+        invalid.elements[1].local_axis.ref_vector = reference;
+        let prepared = sepika_solver::statics::analysis::Analysis::prepare(&invalid).map(|_| ());
+        let direct =
+            sepika_solver::statics::linear::linear_static_once(&invalid, LoadCaseId(1)).map(|_| ());
+        for (entry, result) in [("prepare", prepared), ("linear_static_once", direct)] {
+            let error = result.unwrap_err().to_string();
+            for expected in ["接合部 ID 0", "柱 ID 1", "参照方向", "有限", "単位直交"]
+            {
+                assert!(error.contains(expected), "{entry}, {reference:?}: {error}");
+            }
+        }
+    }
+}
+
+#[test]
+fn panel_757_public_solver_preserves_finite_zero_and_parallel_reference_fallbacks() {
+    let model = panel_757_space_frame(0.0, 0.0);
+    let expected =
+        sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(1)).unwrap();
+    for reference in [[0.0; 3], [0.0, 0.0, 1.0], [0.0, 0.0, -2.0]] {
+        let mut fallback = model.clone();
+        fallback.elements[1].local_axis.ref_vector = reference;
+        let direct =
+            sepika_solver::statics::linear::linear_static_once(&fallback, LoadCaseId(1)).unwrap();
+        let prepared = sepika_solver::statics::analysis::Analysis::prepare(&fallback)
+            .unwrap()
+            .linear_static(LoadCaseId(1))
+            .unwrap();
+        for actual in [direct, prepared] {
+            assert_eq!(actual.panel_moments, expected.panel_moments);
+            assert_eq!(actual.disp, expected.disp);
+        }
+    }
+}
+
+#[test]
+fn panel_757_public_solver_column_axes_match_load_equilibrium_and_independent_work() {
+    // 静定系の MS=(PyLy,-PxLx)、追加荷重仕事=ms²/Ks+mw²/Kw の独立値。
+    for (angle, expected_work_n_mm) in [
+        (0.0, 364_964.140_673_422),
+        (std::f64::consts::FRAC_PI_2, 202_415.335_774_103_85),
+        (0.37, 405_554.238_011_519_1),
+    ] {
+        let model = panel_757_space_frame(angle, 0.0);
+        let response =
+            sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(1)).unwrap();
+        let facade = sepika_solver::statics::analysis::Analysis::prepare(&model)
+            .unwrap()
+            .linear_static(LoadCaseId(1))
+            .unwrap();
+        assert_eq!(response.panel_moments.len(), 1);
+        assert_eq!(response.panel_moments[0].0, NodeId(0));
+        for (actual, expected) in response.panel_moments[0]
+            .1
+            .into_iter()
+            .zip([135_000_000.0, -300_000_000.0])
+        {
+            assert!(
+                (actual - expected).abs() < 1e-9 * expected.abs(),
+                "angle={angle}, moment={actual}, expected={expected}"
+            );
+        }
+        for (actual, expected) in facade.panel_moments[0]
+            .1
+            .into_iter()
+            .zip(response.panel_moments[0].1)
+        {
+            assert!((actual - expected).abs() < 1e-9 * expected.abs());
+        }
+        for (actual, expected) in facade
+            .disp
+            .iter()
+            .flatten()
+            .zip(response.disp.iter().flatten())
+        {
+            assert!((actual - expected).abs() < 1e-9 * expected.abs().max(1.0));
+        }
+        let rigid = panel_757_rigid_comparison(&model);
+        let rigid_response =
+            sepika_solver::statics::linear::linear_static_once(&rigid, LoadCaseId(1)).unwrap();
+        let extra_work_n_mm = -50_000.0 * (response.disp[1][2] - rigid_response.disp[1][2])
+            - 30_000.0 * (response.disp[3][2] - rigid_response.disp[3][2]);
+        assert!(
+            (extra_work_n_mm - expected_work_n_mm).abs() < 1e-8 * expected_work_n_mm,
+            "angle={angle}, work={extra_work_n_mm}, expected={expected_work_n_mm}"
+        );
+    }
+}
+
+#[test]
+fn panel_757_public_solver_whole_rotation_and_simultaneous_loading_preserve_response() {
+    let model = panel_757_space_frame(0.37, 0.0);
+    let rotated = panel_757_space_frame(0.37, 0.61);
+    let analysis = sepika_solver::statics::analysis::Analysis::prepare(&model).unwrap();
+    let together = analysis.linear_static(LoadCaseId(1)).unwrap();
+    let x = analysis.linear_static(LoadCaseId(2)).unwrap();
+    let y = analysis.linear_static(LoadCaseId(3)).unwrap();
+    let separate = sepika_solver::statics::linear::superpose_static(&[(&x, 1.0), (&y, 1.0)]);
+    let rotated_response = sepika_solver::statics::analysis::Analysis::prepare(&rotated)
+        .unwrap()
+        .linear_static(LoadCaseId(1))
+        .unwrap();
+    let (sin, cos) = 0.61_f64.sin_cos();
+    for (node, (before, after)) in together.disp.iter().zip(&rotated_response.disp).enumerate() {
+        for start in [0, 3] {
+            let expected = [
+                cos * before[start] - sin * before[start + 1],
+                sin * before[start] + cos * before[start + 1],
+                before[start + 2],
+            ];
+            for (actual, expected) in after[start..start + 3].iter().zip(expected) {
+                assert!(
+                    (actual - expected).abs() < 1e-8 * expected.abs().max(1.0),
+                    "node={node}"
+                );
+            }
+        }
+        for (actual, expected) in before.iter().zip(separate.disp[node]) {
+            assert!((actual - expected).abs() < 1e-9 * expected.abs().max(1.0));
+        }
+    }
+    let [mx, my] = together.panel_moments[0].1;
+    for (actual, expected) in rotated_response.panel_moments[0]
+        .1
+        .into_iter()
+        .zip([cos * mx - sin * my, sin * mx + cos * my])
+    {
+        assert!((actual - expected).abs() < 1e-9 * expected.abs().max(1.0));
+    }
+    for (actual, expected) in together.panel_moments[0]
+        .1
+        .into_iter()
+        .zip(separate.panel_moments[0].1)
+    {
+        assert!((actual - expected).abs() < 1e-9 * expected.abs().max(1.0));
+    }
 }
 
 /// 1: パネルを設けないモデルでは追加自由度が 1 つも払い出されず、
@@ -285,7 +512,7 @@ fn spmv(k: &faer::sparse::SparseColMat<usize, f64>, u: &[f64]) -> Vec<f64> {
 fn test_panel_shear_angle_matches_closed_form() {
     let model = l_frame(true);
     let (ve, k_panel) = panel_stiffness(&model);
-    assert!(ve > 0.0 && k_panel > 0.0);
+    assert!(ve.iter().all(|v| *v > 0.0) && k_panel.iter().all(|k| *k > 0.0));
 
     let dofmap = DofMap::build(&model);
     let u = solve_free(&model, &dofmap);
@@ -294,7 +521,7 @@ fn test_panel_shear_angle_matches_closed_form() {
     let gy = dofmap.panel_dof(0, 1).expect("γY") as usize;
     let gamma = [u[gx], u[gy]];
 
-    // 面内（X-Z 面）に載荷しているため、γY（X'-Z' 面のせん断変形角）が生じる。
+    // X-Z 面の載荷では全体 Y 軸まわりのせん断変形 γY が生じる。
     assert!(
         gamma[1].abs() > 1e-12,
         "パネルがせん断変形しているはず: γ={gamma:?}"
@@ -315,9 +542,9 @@ fn test_panel_shear_angle_matches_closed_form() {
     panel.update_state(&du, true, &ctx).unwrap();
     let m = panel.panel_moments();
 
-    // M = K・γ（弾性パネルの定義そのもの。実装が [Tp] 変換を挟んでも成り立つ）。
+    // 柱主軸と全体軸が揃うため、各成分で M = K・γ が成り立つ。
     for (i, (&mi, &gi)) in m.iter().zip(gamma.iter()).enumerate() {
-        let expected = k_panel * gi;
+        let expected = k_panel[i] * gi;
         assert!(
             (mi - expected).abs() <= 1e-9 * expected.abs().max(1.0),
             "成分 {i}: M={mi} は K·γ={expected} と一致すべき"
@@ -586,7 +813,7 @@ fn panel_585_explicit_panel_without_column_is_not_a_successful_rigid_panel() {
         sepika_element::springs::panel::PanelZone::new_nonlinear(data, &model),
     ] {
         assert!(panel.resolution_error.is_some());
-        assert_eq!(panel.k_panel, 0.0);
+        assert_eq!(panel.k_panel, [0.0; 2]);
     }
     model.elements.retain(|e| e.kind != ElementKind::PanelZone);
     assert!(
@@ -697,7 +924,10 @@ fn panel_728_public_entry_matrix() {
             for panel in panels {
                 assert!(panel.resolution_error.is_none(), "{label}");
                 assert!(panel.g.is_finite() && panel.g > 0.0, "{label}");
-                assert!(panel.k_panel.is_finite() && panel.k_panel > 0.0, "{label}");
+                assert!(
+                    panel.k_panel.iter().all(|k| k.is_finite() && *k > 0.0),
+                    "{label}"
+                );
                 if shear.is_some() {
                     assert_eq!(panel.g, 80_000.0);
                 }
@@ -709,9 +939,9 @@ fn panel_728_public_entry_matrix() {
                 "{label}: {automatic}"
             );
             let reason = format!(
-                "接合部 ID 0 のパネル未算定: 柱 ID 1: {}は有限の正値が必要です",
+                "接合部 ID 0 のパネル未算定: 柱 ID 1: {} は有限の正値が必要です",
                 if label.starts_with("finite_g_") {
-                    "せん断剛性 G・Ve"
+                    "強軸のせん断剛性 G・Ve"
                 } else {
                     "せん断弾性係数 G"
                 }
@@ -733,7 +963,7 @@ fn panel_728_public_entry_matrix() {
                     Some(reason.as_str()),
                     "{label}"
                 );
-                assert_eq!(panel.k_panel, 0.0, "{label}");
+                assert_eq!(panel.k_panel, [0.0; 2], "{label}");
                 use sepika_element::behavior::{Ctx, ElementBehavior, LocalVec};
                 let increment = LocalVec {
                     data: smallvec::SmallVec::from_elem(0.0, panel.n_dof()),
@@ -842,11 +1072,11 @@ fn panel_728_public_dynamic_entries() {
             assert!(resumed.is_ok());
         } else {
             let reason = format!(
-                "接合部 ID 0 のパネル未算定: 柱 ID 1: {}は有限の正値が必要です",
+                "接合部 ID 0 のパネル未算定: 柱 ID 1: {} は有限の正値が必要です",
                 if label == "nan" {
                     "せん断弾性係数 G"
                 } else {
-                    "せん断剛性 G・Ve"
+                    "強軸のせん断剛性 G・Ve"
                 }
             );
             assert!(eigen.unwrap_err().to_string().contains(&reason));
@@ -959,7 +1189,7 @@ fn beam_736_public_dynamic_entries() {
                     } else {
                         let error = result.unwrap_err().to_string();
                         let reason = if with_panel {
-                            "接合部 ID 0 のパネル未算定: 柱 ID 1: せん断剛性 G・Ve"
+                            "接合部 ID 0 のパネル未算定: 柱 ID 1: 強軸のせん断剛性 G・Ve"
                         } else {
                             "部材 ID 0 の弾性梁"
                         };

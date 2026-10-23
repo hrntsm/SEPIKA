@@ -478,8 +478,7 @@ fn torsion_section(ui: &mut egui::Ui, prep: &PreparationResult) {
 /// 仕口パネル（柱梁接合部パネル）。
 ///
 /// S 造（CFT を除く）の柱梁接合節点に生成したパネルの寸法とせん断剛性を一覧する。
-/// パネルを設けた節点はせん断変形角 γX・γY の 2 自由度を追加で持ち、取り付く部材は
-/// パネル寸法分だけ離れた位置（柱フェース・梁フェース）で接合する。
+/// 柱の強軸・弱軸の順に、生成された仕口パネルの諸元を表示する。
 fn panel_zone_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     if !prep.panel_modeling_enabled {
         ui.colored_label(
@@ -493,10 +492,10 @@ fn panel_zone_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     ui.label(format!("仕口パネル: {} 箇所", prep.panels.len()));
     ui.colored_label(
         crate::theme::GRAY_600,
-        "せん断剛性は Kxp = Kyp = G・Ve です。実効体積 Ve は H 形柱で dc・db・tp、\
-         角形・円形鋼管柱で 2・dc・db・tp とし、断面検定の降伏モーメント \
-         pMy = (Ve/κ)・√(1−n²)・Fy/√3 と同じ体積を用います。板厚 tp は柱断面形状から\
-         算出し、断面に「パネル板厚」が入力されていればそちらを優先します。\
+        "柱の強軸・弱軸に対応する2方向の諸元を表示します。\
+         各方向のせん断剛性は G・Ve です。\
+         H 形柱の弱軸側はフランジ2枚の純せん断モデルで、曲げによる耐力低下を\
+         含めず、耐力を過大評価する可能性があります。\
          RC・SRC・CFT の接合部はモデル化の対象外で、従来どおり剛域で有限寸法を評価します\
          （CFT の断面算定は従来どおり行います）。",
     );
@@ -517,32 +516,37 @@ fn panel_zone_section(ui: &mut egui::Ui, prep: &PreparationResult) {
         "prep_panels",
         &[
             Col::id_named("節点"),
+            Col::label("方向"),
             Col::num("dc [mm]"),
             Col::num("db [mm]"),
             Col::num("tp [mm]"),
             Col::num("Ve [mm³]"),
-            Col::num("Kxp=Kyp [kN·m/rad]"),
+            Col::num("K [kN·m/rad]"),
         ],
-        rows.len(),
+        rows.len() * 2,
         |row| {
-            let r = &rows[row.index()];
+            let r = &rows[row.index() / 2];
+            let direction = row.index() % 2;
             row.col(|ui| {
                 ui.label(format!("{}", r.node.0));
             });
             row.col(|ui| {
-                ui.label(format!("{:.1}", r.dc));
+                ui.label(["柱強軸", "柱弱軸"][direction]);
             });
             row.col(|ui| {
-                ui.label(format!("{:.1}", r.db));
+                ui.label(format!("{:.1}", r.dc[direction]));
             });
             row.col(|ui| {
-                ui.label(format!("{:.1}", r.tp));
+                ui.label(format!("{:.1}", r.db[direction]));
             });
             row.col(|ui| {
-                ui.label(format!("{:.3e}", r.ve));
+                ui.label(format!("{:.1}", r.tp[direction]));
             });
             row.col(|ui| {
-                ui.label(format!("{:.3e}", moment_kn_m(r.k_panel)));
+                ui.label(format!("{:.3e}", r.ve[direction]));
+            });
+            row.col(|ui| {
+                ui.label(format!("{:.3e}", moment_kn_m(r.k_panel[direction])));
             });
         },
     );

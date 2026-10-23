@@ -8,6 +8,7 @@
 //!
 //! - [`steel_f_value`] — 鋼材の基準強度 F（完全一致、板厚区分対応）
 //! - [`steel_f_value_prefix`] — 同（対応する種別記号付き名称。`SN490B` → `SN490` 等）
+//! - [`resolve_steel_f`] — 割当鋼材と製品実板厚からの基準強度解決
 //! - [`rebar_f_value`] — 鉄筋の基準強度（`SD345` → 345 等）
 //! - [`rebar_grade_f_value`] — 同（高強度鉄筋の製品名を含む。`KH785` → 785 等）
 //! - [`rebar_yield_strength`] / [`shear_rebar_yield_strength`] — 配筋の材質からの σy・σwy 解決
@@ -16,7 +17,7 @@
 //! - [`parse_concrete_fc`] — コンクリート `FcXX` 名称の解釈
 //! - [`material_presets`] — UI に提示する標準材料プリセット一覧
 
-use crate::model::MaterialCategory;
+use crate::model::{Material, MaterialCategory};
 use crate::section_shape::{concrete_young_modulus_gamma, E_STEEL};
 use crate::units::{
     concrete_unit_weight_kn_m3, to_internal::mass_density_from_unit_weight_kn_m3, ConcreteClass,
@@ -107,6 +108,61 @@ pub fn steel_f_value_issue(name: &str, thickness: f64) -> Option<String> {
     (steel_grade_base(name) == Some("SM520")
         && (!thickness.is_finite() || thickness <= 0.0 || thickness > 100.0))
         .then(|| format!("鋼材「{}」の板厚 {thickness} mm は SM520 系列の基準強度 F の適用範囲（0 < t ≤ 100 mm）外です。明示 fy や既定強度では補完できません", name.trim()))
+}
+
+/// 割当鋼材と製品板厚 `[mm]` から F `[N/mm²]` を求める。既知材種は表、未知名は正有限の fy を用いる。
+/// 材料不備・既知材種の必要板厚欠落や表の適用範囲外は理由付きエラー。
+pub fn resolve_steel_f(mat: Option<&Material>, thickness_mm: Option<f64>) -> Result<f64, String> {
+    let mat = mat.ok_or("鋼材が未割当、または参照先が不明です")?;
+    if mat.category != MaterialCategory::Steel {
+        return Err(format!("材料「{}」は鋼材ではありません", mat.name));
+    }
+    let Some(grade) = steel_grade_base(&mat.name) else {
+        return mat
+            .fy
+            .filter(|fy| fy.is_finite() && *fy > 0.0)
+            .ok_or_else(|| {
+                format!(
+                    "直接入力鋼材「{}」の基準強度 fy は正の有限値で入力してください",
+                    mat.name
+                )
+            });
+    };
+    let thickness_mm = thickness_mm.filter(|t| t.is_finite() && *t > 0.0).ok_or_else(|| {
+        format!("鋼材「{}」の基準強度 F に必要な実板厚が未入力または不正です。正の有限値 [mm] を入力してください", mat.name)
+    })?;
+    if let Some(reason) = steel_f_value_issue(&mat.name, thickness_mm) {
+        return Err(reason);
+    }
+    if thickness_mm > 100.0
+        && matches!(
+            grade,
+            "SS400"
+                | "SM400"
+                | "SN400"
+                | "STK400"
+                | "STKN400"
+                | "STKR400"
+                | "SNR400"
+                | "SSC400"
+                | "SWH400"
+                | "SS490"
+                | "SM490"
+                | "SN490"
+                | "STK490"
+                | "STKN490"
+                | "STKR490"
+                | "SNR490"
+        )
+    {
+        return Err(format!("鋼材「{}」の実板厚 {thickness_mm} mm は基準強度 F の適用範囲（0 < t ≤ 100 mm）外です。明示 fy や既定強度では補完できません", mat.name));
+    }
+    steel_f_value(grade, thickness_mm).ok_or_else(|| {
+        format!(
+            "鋼材「{}」の実板厚 {thickness_mm} mm に対する基準強度 F が未定義です",
+            mat.name
+        )
+    })
 }
 
 /// CFT 鋼管材料の F [N/mm²] を材料名と板厚 `[mm]` から解決し、未知名は明示 fy を用いる。
@@ -941,6 +997,76 @@ mod tests {
             assert_eq!(p.category, MaterialCategory::Concrete);
             assert!((p.density - rho_rc).abs() < 1e-18, "{name}");
         }
+    }
+}
+
+#[cfg(test)]
+mod steel_f_resolution_tests {
+    use super::*;
+
+    fn steel(name: &str, fy: Option<f64>) -> Material {
+        Material {
+            id: crate::ids::MaterialId(0),
+            name: name.into(),
+            category: MaterialCategory::Steel,
+            young: 205_000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            shear: None,
+            fc: None,
+            fy,
+            concrete_class: Default::default(),
+            strength_factor: None,
+        }
+    }
+
+    #[test]
+    fn known_steel_uses_the_product_thickness_table_independently_of_explicit_fy() {
+        for fy in [None, Some(235.0), Some(999.0)] {
+            let material = steel("SS400", fy);
+            for (thickness, expected) in [(40.0, 235.0), (40.001, 215.0), (50.0, 215.0)] {
+                assert_eq!(
+                    resolve_steel_f(Some(&material), Some(thickness)),
+                    Ok(expected)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn direct_steel_uses_positive_finite_fy_without_a_thickness_bucket() {
+        let material = steel("直接入力", Some(287.0));
+        assert_eq!(resolve_steel_f(Some(&material), None), Ok(287.0));
+        assert_eq!(resolve_steel_f(Some(&material), Some(150.0)), Ok(287.0));
+        for fy in [
+            None,
+            Some(0.0),
+            Some(-1.0),
+            Some(f64::NAN),
+            Some(f64::INFINITY),
+        ] {
+            assert!(resolve_steel_f(Some(&steel("直接入力", fy)), None).is_err());
+        }
+    }
+
+    #[test]
+    fn missing_material_or_known_grade_thickness_cannot_be_replaced_by_fy_or_defaults() {
+        assert!(resolve_steel_f(None, Some(20.0)).is_err());
+        let mut material = steel("SS400", Some(999.0));
+        for thickness in [
+            None,
+            Some(0.0),
+            Some(-1.0),
+            Some(f64::NAN),
+            Some(f64::INFINITY),
+            Some(100.001),
+        ] {
+            assert!(resolve_steel_f(Some(&material), thickness).is_err());
+        }
+        material.name = "SM520B".into();
+        assert!(resolve_steel_f(Some(&material), Some(100.001)).is_err());
+        material.category = MaterialCategory::Concrete;
+        assert!(resolve_steel_f(Some(&material), Some(20.0)).is_err());
     }
 }
 

@@ -10,7 +10,7 @@
 //!
 //! パネルの諸元は次の 2 箇所で必要になる。
 //!
-//! - **モデル化**（`sepika_element::springs::panel`）— せん断剛性 `Kxp = Kyp = G・Ve`
+//! - **モデル化**（`sepika_element::springs::panel`）— 各柱主軸方向のせん断剛性 `G・Ve`
 //! - **断面検定**（`sepika_design_jp::steel::panel_zone`）— 降伏モーメント
 //!   `pMy = (Ve/κ)・√(1−n²)・Fy/√3`
 //!
@@ -21,7 +21,7 @@
 //!
 //! 1. [`Section::panel_thickness`] が入力されていればその値（ダイアフラム補強・
 //!    ダブラープレートによる増厚の明示指定）
-//! 2. 未入力なら柱の断面形状から算出する（H 形＝ウェブ厚、角形・円形＝板厚）
+//! 2. 未入力なら柱の断面形状から算出する（H 強方向＝ウェブ厚、弱方向＝フランジ厚、鋼管＝壁厚）
 //!
 //! # 対象とする接合部
 //!
@@ -85,6 +85,51 @@ pub fn member_unit_axis(model: &Model, elem: &ElementData) -> Option<[f64; 3]> {
     let p0 = model.nodes.get(elem.nodes[0].index())?.coord;
     let p1 = model.nodes.get(elem.nodes[1].index())?.coord;
     geom::vec3::unit_from(p0, p1)
+}
+
+/// 採用柱の強軸・弱軸の順で、曲げ回転軸の全体座標単位ベクトルを返す。
+/// 柱の i→j 材軸と有限の断面参照ベクトルを用い、零・平行な参照方向は全体 X/Y 軸で補う。
+/// 非有限の参照方向、または単位直交な座標軸を解決できない場合は `None`。
+pub fn panel_column_moment_axes(model: &Model, column: &ElementData) -> Option<[[f64; 3]; 2]> {
+    use geom::vec3;
+
+    let ex = member_unit_axis(model, column)?;
+    let reference = column.local_axis.ref_vector;
+    if ex
+        .iter()
+        .chain(reference.iter())
+        .any(|value| !value.is_finite())
+    {
+        return None;
+    }
+    let reject_ex = |vector| vec3::sub(vector, vec3::scale(ex, vec3::dot(vector, ex)));
+    let mut ey = reject_ex(reference);
+    let ey_length = vec3::norm(ey);
+    if !ey_length.is_finite() {
+        return None;
+    }
+    if ey_length > 1e-12 {
+        ey = ey.map(|value| value / ey_length);
+    } else {
+        let alternative = reject_ex(if ex[0].abs() < 0.9 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        });
+        let alternative_length = vec3::norm(alternative);
+        ey = if alternative_length > 1e-12 {
+            alternative.map(|value| value / alternative_length)
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+    }
+    let axes = [vec3::cross(ex, ey), ey];
+    let is_unit = |axis| (vec3::dot(axis, axis) - 1.0).abs() <= 1e-12;
+    ([ex, axes[0], axes[1]].into_iter().all(is_unit)
+        && vec3::dot(ex, axes[0]).abs() <= 1e-12
+        && vec3::dot(ex, axes[1]).abs() <= 1e-12
+        && vec3::dot(axes[0], axes[1]).abs() <= 1e-12)
+        .then_some(axes)
 }
 
 /// 既存の仕口パネル式を適用できる水平・鉛直材かを判定する。
@@ -181,6 +226,8 @@ pub fn panel_half_extent<'a>(
 pub enum PanelShapeKind {
     /// H 形鋼柱。`bc`: フランジ幅、`tf`: フランジ厚。パネルはウェブ 1 枚。
     H { bc: f64, tf: f64 },
+    /// H 形鋼柱の弱軸方向。フランジ 2 枚がせん断を負担する。
+    HWeak,
     /// 角形鋼管柱（CFT 角形を含む）。`bc`: 柱幅。パネルはウェブ 2 枚。
     Box { bc: f64 },
     /// 円形鋼管柱（CFT 円形を含む）。パネルは円筒。
@@ -191,9 +238,9 @@ pub enum PanelShapeKind {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PanelGeometry {
     pub kind: PanelShapeKind,
-    /// 柱せい方向のパネル寸法 `dc` `[mm]`（H 形・角形は板厚中心間、円形は径 − 板厚）。
+    /// パネル幅 `dc` `[mm]`。H 強方向・角形は板厚中心間、H 弱方向はフランジ幅、円形は径 − 壁厚。
     pub dc: f64,
-    /// パネル板厚 `tp` `[mm]`。
+    /// 抵抗板 1 枚あたりの有効板厚 `tp` `[mm]`。
     pub tp: f64,
     /// 充填コンクリートを持つ柱（CFT）か。
     ///
@@ -203,12 +250,45 @@ pub struct PanelGeometry {
 }
 
 impl PanelGeometry {
-    /// 柱の断面からパネル諸元を解決する。対象外の断面（RC・SRC・組立 H 形・
-    /// 形状未定義）は `None`。
-    ///
-    /// `tp` は [`Section::panel_thickness`] が正値で入力されていればそちらを
-    /// 優先し、未入力なら断面形状から算出する（モジュール冒頭「パネル板厚 `tp`
-    /// の解決順」）。
+    /// 柱の強軸・弱軸の順にパネル諸元を返す。板厚指定は各抵抗板 1 枚に適用する。
+    /// 対象外の断面は `None`。
+    pub fn from_column_axes(sec: &Section) -> Option<[Self; 2]> {
+        let strong = Self::from_column(sec)?;
+        let weak = match sec.shape.as_ref()? {
+            SectionShape::SteelH {
+                width,
+                flange_thick,
+                ..
+            } => Self {
+                kind: PanelShapeKind::HWeak,
+                dc: *width,
+                tp: sec.panel_thickness.unwrap_or(*flange_thick),
+                filled: false,
+            },
+            SectionShape::SteelBox {
+                height,
+                width,
+                thick,
+                ..
+            }
+            | SectionShape::CftBox {
+                height,
+                width,
+                thick,
+                ..
+            } => Self {
+                kind: PanelShapeKind::Box { bc: *height },
+                dc: width - thick,
+                ..strong
+            },
+            SectionShape::SteelPipe { .. } | SectionShape::CftPipe { .. } => strong,
+            _ => return None,
+        };
+        Some([strong, weak])
+    }
+
+    /// 柱せい方向のパネル諸元を解決する。RC・SRC・組立 H 形・形状未定義は `None`。
+    /// `tp` は正値の明示指定を優先し、未指定時は抵抗板の実板厚 `[mm]` を用いる。
     pub fn from_column(sec: &Section) -> Option<Self> {
         let (kind, dc, tp, filled) = match sec.shape {
             Some(SectionShape::SteelH {
@@ -268,17 +348,14 @@ impl PanelGeometry {
         })
     }
 
-    /// パネルの形状係数 κ（鋼構造接合部設計指針）。
-    ///
-    /// - H 形: `κ = 1/(2/3 + 4・bc・tf/(dc・tp)) + 1/(1 + dc・tp/(6・bc・tf))`
-    /// - 角形: `κ = 1/(2/3 + 2・bc/dc) + 1/(1 + dc/(3・bc))`
-    /// - 円形: `κ = 4/π`
+    /// パネルのせん断形状係数 κ（無次元）。
     pub fn kappa(&self) -> f64 {
         match self.kind {
             PanelShapeKind::H { bc, tf } => {
                 1.0 / (2.0 / 3.0 + (4.0 * bc * tf) / (self.dc * self.tp))
                     + 1.0 / (1.0 + (self.dc * self.tp) / (6.0 * bc * tf))
             }
+            PanelShapeKind::HWeak => 1.5,
             PanelShapeKind::Box { bc } => {
                 1.0 / (2.0 / 3.0 + 2.0 * bc / self.dc) + 1.0 / (1.0 + self.dc / (3.0 * bc))
             }
@@ -286,22 +363,39 @@ impl PanelGeometry {
         }
     }
 
-    /// パネルの実効体積 `Ve` `[mm³]`（`db` は梁フランジ板厚中心間距離）。
-    ///
-    /// - H 形: `Ve = dc・db・tp`（ウェブ 1 枚）
-    /// - 角形・円形: `Ve = 2・dc・db・tp`（ウェブ 2 枚相当）
-    ///
-    /// せん断剛性 `Kxp = Kyp = G・Ve` と降伏モーメント
-    /// `pMy = (Ve/κ)・√(1−n²)・Fy/√3` の双方がこの体積を用いる。
-    /// 資料の 6 面体体積 `V = Bx・By・Dz` に対し、H 形柱ではウェブ厚方向の寸法を
-    /// `By = tp` と対応させたものであり、中実断面ではなく板厚分の実効体積となる。
+    /// パネルの実効体積 `Ve` `[mm³]`。`db` は梁フランジ板厚中心間距離 `[mm]`。
     pub fn effective_volume(&self, db: f64) -> f64 {
         let base = self.dc * db * self.tp;
         match self.kind {
             PanelShapeKind::H { .. } => base,
-            PanelShapeKind::Box { .. } | PanelShapeKind::Pipe => 2.0 * base,
+            PanelShapeKind::HWeak | PanelShapeKind::Box { .. } | PanelShapeKind::Pipe => 2.0 * base,
         }
     }
+}
+
+/// 解析に用いる柱の一方向のパネル諸元。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PanelAnalysisDirection {
+    pub geometry: PanelGeometry,
+    /// 実効体積 `[mm³]`。
+    pub ve: f64,
+    /// 基準強度の表を参照する抵抗板 1 枚の実板厚 `[mm]`。
+    pub product_thickness_mm: f64,
+    /// 抵抗板の基準強度 `[N/mm²]`。
+    pub fy: f64,
+}
+
+/// 解析用の方向別諸元。方向配列は柱の強軸・弱軸の順。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PanelAnalysisJoint {
+    pub column: ElemId,
+    /// 接合部に共通の最大梁フランジ板厚中心間距離 `[mm]`。
+    pub db: f64,
+    pub panels: [PanelAnalysisDirection; 2],
+    /// 強軸・弱軸の全体座標曲げ回転軸。
+    pub moment_axes: [[f64; 3]; 2],
+    /// せん断弾性係数 `[N/mm²]`。
+    pub g: f64,
 }
 
 /// 仕口パネルを設ける接合部の諸元。
@@ -586,7 +680,7 @@ pub fn resolve_panel_joint<'a>(
     resolve_panel_joint_impl(model, node, members, false)
 }
 
-/// 明示パネルの参照柱を要求して解決し、モデル化対象の採用 G [N/mm²] と G・Ve [N·mm/rad] に正の有限値を要求する。
+/// 明示パネルの参照柱を要求し、解析対象の両方向の寸法・材料・剛性・基準降伏耐力を検証する。
 /// 入力不備は接合部・採用柱 ID 付きエラー、既存の材種対象外は `Ok(None)`。
 pub fn resolve_explicit_panel_joint<'a>(
     model: &Model,
@@ -594,24 +688,119 @@ pub fn resolve_explicit_panel_joint<'a>(
     members: impl IntoIterator<Item = &'a ElementData>,
 ) -> Result<Option<PanelJoint>, PanelJointError> {
     let joint = resolve_panel_joint_impl(model, node, members, true)?;
-    if let Some(joint) = joint.as_ref().filter(|joint| !joint.has_filled_column) {
-        let column = &model.elements[joint.column.index()];
-        let g_n_mm2 = model.element_material(column).unwrap().shear_modulus();
-        let invalid = |quantity: &str| {
-            PanelJointError::InvalidInput(format!(
-                "接合部 ID {} のパネル未算定: 柱 ID {}: {quantity}は有限の正値が必要です",
-                node.0, joint.column.0
-            ))
-        };
-        if !g_n_mm2.is_finite() || g_n_mm2 <= 0.0 {
-            return Err(invalid("せん断弾性係数 G"));
-        }
-        let stiffness_n_mm = g_n_mm2 * joint.ve;
-        if !stiffness_n_mm.is_finite() || stiffness_n_mm <= 0.0 {
-            return Err(invalid("せん断剛性 G・Ve"));
-        }
+    if let Some(joint) = &joint {
+        panel_analysis_joint(model, node, joint)?;
     }
     Ok(joint)
+}
+
+/// 自動生成する S 造仕口パネルの強軸・弱軸諸元を解決する。CFT を含む接合部は `None`。
+/// 採用柱・標準梁形式・両方向の材料と剛性の不備は理由付きエラー。
+pub fn resolve_panel_analysis_joint<'a>(
+    model: &Model,
+    node: NodeId,
+    members: impl IntoIterator<Item = &'a ElementData>,
+) -> Result<Option<PanelAnalysisJoint>, PanelJointError> {
+    resolve_panel_joint_impl(model, node, members, false)?
+        .map(|joint| panel_analysis_joint(model, node, &joint))
+        .transpose()
+        .map(Option::flatten)
+}
+
+/// 明示 S 造仕口パネルの強軸・弱軸諸元を解決する。CFT を含む接合部は `None`。
+/// 参照柱がない場合も理由付きエラー。
+pub fn resolve_explicit_panel_analysis_joint<'a>(
+    model: &Model,
+    node: NodeId,
+    members: impl IntoIterator<Item = &'a ElementData>,
+) -> Result<Option<PanelAnalysisJoint>, PanelJointError> {
+    resolve_panel_joint_impl(model, node, members, true)?
+        .map(|joint| panel_analysis_joint(model, node, &joint))
+        .transpose()
+        .map(Option::flatten)
+}
+
+fn panel_analysis_joint(
+    model: &Model,
+    node: NodeId,
+    joint: &PanelJoint,
+) -> Result<Option<PanelAnalysisJoint>, PanelJointError> {
+    if joint.has_filled_column {
+        return Ok(None);
+    }
+    let invalid = |reason: String| {
+        PanelJointError::InvalidInput(format!(
+            "接合部 ID {} のパネル未算定: 柱 ID {}: {reason}",
+            node.0, joint.column.0
+        ))
+    };
+    let column = &model.elements[joint.column.index()];
+    let section = model.element_section(column).unwrap();
+    let material = model.element_material(column).unwrap();
+    let geometries = PanelGeometry::from_column_axes(section)
+        .ok_or_else(|| invalid("強軸・弱軸のパネル諸元に未対応です".into()))?;
+    let product_thicknesses = match section.shape.as_ref().unwrap() {
+        SectionShape::SteelH {
+            web_thick,
+            flange_thick,
+            ..
+        } => [*web_thick, *flange_thick],
+        SectionShape::SteelBox { thick, .. } | SectionShape::SteelPipe { thick, .. } => [*thick; 2],
+        _ => return Err(invalid("抵抗板の実板厚を解決できません".into())),
+    };
+    let g = material.shear_modulus();
+    if !g.is_finite() || g <= 0.0 {
+        return Err(invalid("せん断弾性係数 G は有限の正値が必要です".into()));
+    }
+    let resolve_direction = |index: usize| {
+        let geometry = geometries[index];
+        let label = if index == 0 { "強軸" } else { "弱軸" };
+        let product_thickness_mm = product_thicknesses[index];
+        let ve = geometry.effective_volume(joint.db);
+        let kappa = geometry.kappa();
+        if [geometry.dc, geometry.tp, product_thickness_mm, ve, kappa]
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+        {
+            return Err(invalid(format!(
+                "{label}のパネル寸法・実板厚・実効体積 Ve・形状係数 κ は有限の正値が必要です"
+            )));
+        }
+        let stiffness_n_mm = g * ve;
+        if !stiffness_n_mm.is_finite() || stiffness_n_mm <= 0.0 {
+            return Err(invalid(format!(
+                "{label}のせん断剛性 G・Ve は有限の正値が必要です"
+            )));
+        }
+        let fy = crate::material_grade::resolve_steel_f(Some(material), Some(product_thickness_mm))
+            .map_err(|reason| invalid(format!("{label}: {reason}")))?;
+        let reference_yield_n_mm = ve / kappa * fy / 3.0_f64.sqrt();
+        if !reference_yield_n_mm.is_finite() || reference_yield_n_mm < 1e-9 {
+            return Err(invalid(format!(
+                "{label}の基準降伏耐力は有限かつ 1×10⁻⁹ N·mm 以上が必要です"
+            )));
+        }
+        Ok(PanelAnalysisDirection {
+            geometry,
+            ve,
+            product_thickness_mm,
+            fy,
+        })
+    };
+    let panels = [resolve_direction(0)?, resolve_direction(1)?];
+    let moment_axes = panel_column_moment_axes(model, column).ok_or_else(|| {
+        invalid(format!(
+            "断面参照方向 {:?} から有限な単位直交の曲げ回転軸を解決できません",
+            column.local_axis.ref_vector
+        ))
+    })?;
+    Ok(Some(PanelAnalysisJoint {
+        column: joint.column,
+        db: joint.db,
+        panels,
+        moment_axes,
+        g,
+    }))
 }
 
 fn resolve_panel_joint_impl<'a>(
@@ -759,7 +948,7 @@ fn resolve_panel_joint_impl<'a>(
     let dimensions = match geometry.kind {
         PanelShapeKind::H { bc, tf } => vec![geometry.dc, geometry.tp, bc, tf],
         PanelShapeKind::Box { bc } => vec![geometry.dc, geometry.tp, bc],
-        PanelShapeKind::Pipe => vec![geometry.dc, geometry.tp],
+        PanelShapeKind::HWeak | PanelShapeKind::Pipe => vec![geometry.dc, geometry.tp],
     };
     if dimensions.iter().any(|v| !v.is_finite() || *v <= 0.0)
         || selected_section
@@ -934,6 +1123,145 @@ pub fn beam_panel_depth(sec: &Section) -> Result<f64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn column_panel_moment_axes_follow_section_depth_and_width() {
+        let model = Model {
+            nodes: vec![node(0, [0.0; 3]), node(1, [0.0, 0.0, 3000.0])],
+            ..Default::default()
+        };
+        let mut column = member(0, 0, 1, 1);
+        for (reference, expected) in [
+            ([2.0, 0.0, 7.0], [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]),
+            ([0.0, 3.0, 11.0], [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),
+        ] {
+            column.local_axis.ref_vector = reference;
+            assert_eq!(panel_column_moment_axes(&model, &column), Some(expected));
+        }
+    }
+
+    #[test]
+    fn reversing_column_ends_reverses_only_the_strong_moment_axis() {
+        let model = Model {
+            nodes: vec![node(0, [0.0; 3]), node(1, [0.0, 0.0, 3000.0])],
+            ..Default::default()
+        };
+        let mut column = member(0, 0, 1, 1);
+        column.local_axis.ref_vector = [1.0, 0.0, 0.0];
+        assert_eq!(
+            panel_column_moment_axes(&model, &column),
+            Some([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
+        );
+        column.nodes.reverse();
+        assert_eq!(
+            panel_column_moment_axes(&model, &column),
+            Some([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0]])
+        );
+    }
+
+    #[test]
+    fn column_panel_moment_axes_rotate_with_the_whole_model() {
+        let mut model = Model {
+            nodes: vec![
+                node(0, [100.0, 200.0, 0.0]),
+                node(1, [100.0, 200.0, 3000.0]),
+            ],
+            ..Default::default()
+        };
+        let mut column = member(0, 0, 1, 1);
+        column.local_axis.ref_vector = [1.0, 0.0, 0.0];
+        assert_eq!(
+            panel_column_moment_axes(&model, &column),
+            Some([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
+        );
+        model.nodes[0].coord = [-100.0, 200.0, 0.0];
+        model.nodes[1].coord = [-100.0, 200.0, 3000.0];
+        column.local_axis.ref_vector = [0.6, 0.8, 0.0];
+        let axes = panel_column_moment_axes(&model, &column).unwrap();
+        let expected = [[-0.8, 0.6, 0.0], [0.6, 0.8, 0.0]];
+        for (actual, expected) in axes
+            .into_iter()
+            .flatten()
+            .zip(expected.into_iter().flatten())
+        {
+            assert!((actual - expected).abs() < 1e-12);
+        }
+        model.nodes[0].coord = [100.0, 160.0, 120.0];
+        model.nodes[1].coord = [100.0, -1640.0, 2520.0];
+        column.local_axis.ref_vector = [1.0, 0.0, 0.0];
+        let axes = panel_column_moment_axes(&model, &column).unwrap();
+        let expected = [[0.0, 0.8, 0.6], [1.0, 0.0, 0.0]];
+        for (actual, expected) in axes
+            .into_iter()
+            .flatten()
+            .zip(expected.into_iter().flatten())
+        {
+            assert!((actual - expected).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn column_panel_moment_axes_use_frame_reference_fallbacks() {
+        for (endpoint, reference, expected) in [
+            (
+                [0.0, 0.0, 3000.0],
+                [0.0, 0.0, 1.0],
+                [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]],
+            ),
+            (
+                [3000.0, 0.0, 0.0],
+                [0.0; 3],
+                [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0]],
+            ),
+            (
+                [0.0, 0.0, 3000.0],
+                [0.0, 0.0, 1e308],
+                [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]],
+            ),
+        ] {
+            let model = Model {
+                nodes: vec![node(0, [0.0; 3]), node(1, endpoint)],
+                ..Default::default()
+            };
+            let mut column = member(0, 0, 1, 1);
+            column.local_axis.ref_vector = reference;
+            assert_eq!(panel_column_moment_axes(&model, &column), Some(expected));
+        }
+    }
+
+    #[test]
+    fn column_panel_moment_axes_reject_unresolved_or_degenerate_axes() {
+        let mut model = Model {
+            nodes: vec![node(0, [0.0; 3]), node(1, [0.0; 3])],
+            ..Default::default()
+        };
+        let column = member(0, 0, 1, 1);
+        assert_eq!(panel_column_moment_axes(&model, &column), None);
+        model.nodes[1].coord = [0.0, 0.0, f64::INFINITY];
+        assert_eq!(panel_column_moment_axes(&model, &column), None);
+        model.nodes.pop();
+        assert_eq!(panel_column_moment_axes(&model, &column), None);
+    }
+
+    #[test]
+    fn column_panel_moment_axes_reject_nonfinite_or_overflowing_reference_directions() {
+        let model = Model {
+            nodes: vec![node(0, [0.0; 3]), node(1, [0.0, 0.0, 3000.0])],
+            ..Default::default()
+        };
+        let mut column = member(0, 0, 1, 1);
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for component in 0..3 {
+                column.local_axis.ref_vector = [0.0; 3];
+                column.local_axis.ref_vector[component] = invalid;
+                assert_eq!(panel_column_moment_axes(&model, &column), None);
+            }
+        }
+        for reference in [[1e308, 0.0, 0.0], [0.0, 1e308, 0.0], [1e308, 1e308, 0.0]] {
+            column.local_axis.ref_vector = reference;
+            assert_eq!(panel_column_moment_axes(&model, &column), None);
+        }
+    }
 
     #[test]
     fn panel_member_axes_and_orientation_do_not_depend_on_frame_representation() {
@@ -1293,7 +1621,11 @@ mod tests {
             strength_factor: None,
             concrete_class: Default::default(),
             id: crate::ids::MaterialId(id),
-            name: String::new(),
+            name: if category == MaterialCategory::Steel {
+                "SS400".into()
+            } else {
+                String::new()
+            },
             category,
             young: 205_000.0,
             poisson: 0.3,
@@ -1360,6 +1692,228 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(joint.has_filled_column);
+    }
+
+    #[test]
+    fn analysis_h_panels_use_one_web_and_two_flanges_with_their_product_strengths() {
+        let mut model = joint_model(
+            h_beam(),
+            600.0,
+            SectionShape::SteelH {
+                height: 400.0,
+                width: 200.0,
+                web_thick: 12.0,
+                flange_thick: 50.0,
+                root_r: Some(0.0),
+            },
+        );
+        model.materials[0].fy = Some(999.0);
+        let joint = resolve_panel_analysis_joint(&model, NodeId(0), &model.elements)
+            .unwrap()
+            .unwrap();
+        assert_eq!(joint.column, ElemId(1));
+        assert_eq!(joint.db, 583.0);
+        assert_eq!(joint.panels.map(|panel| panel.geometry.dc), [350.0, 200.0]);
+        assert_eq!(joint.panels.map(|panel| panel.geometry.tp), [12.0, 50.0]);
+        assert_eq!(
+            joint.panels.map(|panel| panel.ve),
+            [2_448_600.0, 11_660_000.0]
+        );
+        assert_eq!(joint.panels.map(|panel| panel.fy), [235.0, 215.0]);
+        assert_eq!(joint.panels[1].geometry.kappa(), 1.5);
+        assert_eq!(joint.panels[1].geometry.kind, PanelShapeKind::HWeak);
+        model.sections[1].panel_thickness = Some(8.0);
+        let reinforced = resolve_explicit_panel_analysis_joint(&model, NodeId(0), &model.elements)
+            .unwrap()
+            .unwrap();
+        assert_eq!(reinforced.panels.map(|panel| panel.geometry.tp), [8.0, 8.0]);
+        assert_eq!(
+            reinforced.panels.map(|panel| panel.ve),
+            [1_632_400.0, 1_865_600.0]
+        );
+        assert_eq!(
+            reinforced.panels.map(|panel| panel.product_thickness_mm),
+            [12.0, 50.0]
+        );
+        assert_eq!(reinforced.panels.map(|panel| panel.fy), [235.0, 215.0]);
+    }
+
+    #[test]
+    fn analysis_box_panels_exchange_height_and_width_and_pipe_panels_are_identical() {
+        let mut model = joint_model(
+            h_beam(),
+            600.0,
+            SectionShape::SteelBox {
+                height: 500.0,
+                width: 300.0,
+                thick: 20.0,
+                corner_r: Some(0.0),
+            },
+        );
+        let joint = resolve_panel_analysis_joint(&model, NodeId(0), &model.elements)
+            .unwrap()
+            .unwrap();
+        assert_eq!(joint.panels.map(|panel| panel.geometry.dc), [480.0, 280.0]);
+        assert_eq!(
+            joint.panels.map(|panel| panel.geometry.kind),
+            [
+                PanelShapeKind::Box { bc: 300.0 },
+                PanelShapeKind::Box { bc: 500.0 },
+            ]
+        );
+        assert_eq!(
+            joint.panels.map(|panel| panel.ve),
+            [11_193_600.0, 6_529_600.0]
+        );
+        model.sections[1].shape = Some(SectionShape::SteelPipe {
+            outer_dia: 400.0,
+            thick: 20.0,
+        });
+        let pipe = resolve_panel_analysis_joint(&model, NodeId(0), &model.elements)
+            .unwrap()
+            .unwrap();
+        assert_eq!(pipe.panels[0], pipe.panels[1]);
+        assert_eq!(pipe.panels[0].ve, 8_861_600.0);
+    }
+
+    #[test]
+    fn analysis_keeps_the_common_maximum_beam_depth_for_both_column_axes() {
+        let mut model = joint_model(
+            h_beam(),
+            600.0,
+            SectionShape::SteelH {
+                height: 400.0,
+                width: 400.0,
+                web_thick: 12.0,
+                flange_thick: 20.0,
+                root_r: Some(0.0),
+            },
+        );
+        model.nodes.push(node(3, [0.0, 6000.0, 3000.0]));
+        let mut orthogonal_section = model.sections[0].clone();
+        orthogonal_section.id = SectionId(2);
+        orthogonal_section.shape = Some(SectionShape::SteelH {
+            height: 800.0,
+            width: 200.0,
+            web_thick: 12.0,
+            flange_thick: 20.0,
+            root_r: Some(0.0),
+        });
+        model.sections.push(orthogonal_section);
+        model.elements.push(member(2, 0, 3, 2));
+        let joint = resolve_panel_analysis_joint(&model, NodeId(0), &model.elements)
+            .unwrap()
+            .unwrap();
+        assert_eq!(joint.db, 780.0);
+        assert_eq!(joint.panels[0].ve, 3_556_800.0);
+        assert_eq!(joint.panels[1].ve, 12_480_000.0);
+    }
+
+    #[test]
+    fn analysis_resolvers_and_explicit_validation_reject_invalid_weak_panels() {
+        let mut model = joint_model(h_beam(), 600.0, h_col());
+        model.sections[1].panel_thickness = Some(16.0);
+        model.sections[1].shape = Some(SectionShape::SteelH {
+            height: 400.0,
+            width: 200.0,
+            web_thick: 12.0,
+            flange_thick: 125.0,
+            root_r: Some(0.0),
+        });
+        assert!(resolve_panel_joint(&model, NodeId(0), &model.elements).is_ok());
+        for result in [
+            resolve_panel_analysis_joint(&model, NodeId(0), &model.elements),
+            resolve_explicit_panel_analysis_joint(&model, NodeId(0), &model.elements),
+        ] {
+            let reason = result.unwrap_err().to_string();
+            assert!(reason.contains("弱軸"));
+            assert!(reason.contains("125"));
+            assert!(reason.contains("適用範囲"));
+        }
+        assert!(resolve_explicit_panel_joint(&model, NodeId(0), &model.elements).is_err());
+        model.sections[1].shape = Some(SectionShape::SteelBox {
+            height: 500.0,
+            width: 10.0,
+            thick: 20.0,
+            corner_r: Some(0.0),
+        });
+        let reason = resolve_panel_analysis_joint(&model, NodeId(0), &model.elements)
+            .unwrap_err()
+            .to_string();
+        assert!(reason.contains("弱軸"));
+        assert!(reason.contains("パネル寸法"));
+    }
+
+    #[test]
+    fn analysis_resolvers_report_the_joint_column_and_invalid_reference_direction() {
+        let mut model = joint_model(h_beam(), 600.0, h_col());
+        for reference in [
+            [f64::NAN, 0.0, 0.0],
+            [0.0, f64::INFINITY, 0.0],
+            [0.0, 0.0, f64::NEG_INFINITY],
+            [1e308, 0.0, 0.0],
+        ] {
+            model.elements[1].local_axis.ref_vector = reference;
+            for result in [
+                resolve_panel_analysis_joint(&model, NodeId(0), &model.elements),
+                resolve_explicit_panel_analysis_joint(&model, NodeId(0), &model.elements),
+            ] {
+                let reason = result.unwrap_err().to_string();
+                for expected in ["接合部 ID 0", "柱 ID 1", "参照方向", "有限", "単位直交"]
+                {
+                    assert!(reason.contains(expected), "{reason}");
+                }
+            }
+            let reason = resolve_explicit_panel_joint(&model, NodeId(0), &model.elements)
+                .unwrap_err()
+                .to_string();
+            assert!(reason.contains("参照方向"));
+        }
+    }
+
+    #[test]
+    fn analysis_rejects_weak_stiffness_overflow_before_returning_a_joint() {
+        let mut model = joint_model(h_beam(), 600.0, h_col());
+        model.materials[0].shear = Some(1e6);
+        model.sections[1].shape = Some(SectionShape::SteelH {
+            height: 3e150,
+            width: 1e150,
+            web_thick: 1e-150,
+            flange_thick: 1e150,
+            root_r: Some(0.0),
+        });
+        let reason = resolve_panel_analysis_joint(&model, NodeId(0), &model.elements)
+            .unwrap_err()
+            .to_string();
+        assert!(reason.contains("弱軸"));
+        assert!(reason.contains("G・Ve"));
+        assert!(resolve_explicit_panel_joint(&model, NodeId(0), &model.elements).is_err());
+    }
+
+    #[test]
+    fn filled_and_mixed_joints_remain_outside_the_analysis_panel_scope() {
+        let mut model = joint_model(h_beam(), 600.0, h_col());
+        model.sections[1].shape = Some(SectionShape::CftBox {
+            height: 400.0,
+            width: 400.0,
+            thick: 16.0,
+            corner_r: Some(0.0),
+        });
+        model.materials[0].name = "直接入力".into();
+        assert_eq!(
+            resolve_panel_analysis_joint(&model, NodeId(0), &model.elements).unwrap(),
+            None
+        );
+        assert_eq!(
+            resolve_explicit_panel_analysis_joint(&model, NodeId(0), &model.elements).unwrap(),
+            None
+        );
+        model.sections[1].shape = Some(h_col());
+        model.sections[0].material = Some(MaterialId(1));
+        assert_eq!(
+            resolve_panel_analysis_joint(&model, NodeId(0), &model.elements).unwrap(),
+            None
+        );
     }
 
     /// 柱・はりがすべて S なら対象になる。
