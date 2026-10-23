@@ -159,6 +159,9 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         )));
         return issues;
     }
+    if let Err(error) = model.validate_local_frames() {
+        issues.push(ModelIssue::model(error));
+    }
 
     if model.nodes.is_empty() {
         issues.push(ModelIssue::model(
@@ -168,7 +171,9 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     let unresolved_start = issues.len();
     for elem in &model.elements {
         if elem.kind.is_primary_frame_support() {
-            if let Some(reason) = sepika_element::factory::elastic_young_input_issue(elem, model) {
+            if let Some(reason) =
+                sepika_element::factory::elastic_stiffness_input_issue(elem, model)
+            {
                 issues.push(ModelIssue {
                     severity: IssueSeverity::Error,
                     message: reason.clone(),

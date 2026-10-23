@@ -5,11 +5,36 @@
 //! - [`axial_force_signed`] — 材端力から部材の軸方向力を圧縮正の符号付きで算定
 //! - [`member_end_forces_at_face`] — 材端力を局所座標・剛域フェイス位置へ変換
 
-use sepika_core::model::{ElementData, Model};
+use sepika_core::model::{ElementData, ElementKind, Model};
 use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse, LocalVec};
 use sepika_element::transform::LocalFrame;
 
 pub(crate) use sepika_core::geom::vec3::dot as dot3;
+
+pub(crate) fn member_local_frame(
+    elem: &ElementData,
+    p_i: [f64; 3],
+    p_j: [f64; 3],
+) -> Result<LocalFrame, &'static str> {
+    if sepika_core::geom::vec3::dist(p_i, p_j) < 1e-9 {
+        match elem.kind {
+            ElementKind::NodalSpring => {
+                return Ok(LocalFrame {
+                    rot: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                });
+            }
+            ElementKind::Isolator => {
+                return LocalFrame::from_nodes(
+                    p_i,
+                    [p_i[0], p_i[1], p_i[2] + 1.0],
+                    elem.local_axis.ref_vector,
+                );
+            }
+            _ => {}
+        }
+    }
+    LocalFrame::from_nodes(p_i, p_j, elem.local_axis.ref_vector)
+}
 
 /// 部材の軸方向圧縮力 N_compress [N]を算定する。
 ///
@@ -46,7 +71,8 @@ pub(crate) fn member_end_forces_at_face(
     }
     let pi = model.nodes.get(elem.nodes[0].index())?;
     let pj = model.nodes.get(elem.nodes[1].index())?;
-    let frame = LocalFrame::from_nodes(pi.coord, pj.coord, elem.local_axis.ref_vector);
+    let frame = member_local_frame(elem, pi.coord, pj.coord)
+        .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", elem.id.0));
     let mut g = [0.0_f64; 12];
     g.copy_from_slice(&f_global[..12]);
     let local = frame.rotate_to_local(&g);

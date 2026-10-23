@@ -13,7 +13,8 @@ pub enum Dof {
 pub const DOF_PER_NODE: usize = 6;
 
 /// 仕口パネルが設けられた節点が追加で持つ自由度の数。
-/// せん断変形角 `γX`・`γY` の 2 個。グローバル自由度空間の末尾へ払い出す。
+/// 柱材軸の直交面へ投影した全体 X/Y 基底で表すせん断変形角 `γX`・`γY` の 2 個。
+/// 鉛直柱では全体 Rx/Ry 方向に一致し、グローバル自由度空間の末尾へ払い出す。
 pub const PANEL_DOF_PER_NODE: usize = 2;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]

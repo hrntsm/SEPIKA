@@ -93,14 +93,17 @@ fn close(actual: f64, expected: f64) {
 
 fn all_helpers(model: &Model, expected: f64) {
     close(
-        simple_beam_q0_by_elem(model, LoadCaseId(0))[&ElemId(0)],
+        simple_beam_q0_by_elem(model, LoadCaseId(0)).unwrap()[&ElemId(0)],
         expected,
     );
     close(
-        simple_beam_q0_by_terms(model, &[(LoadCaseId(0), 1.0)])[&ElemId(0)],
+        simple_beam_q0_by_terms(model, &[(LoadCaseId(0), 1.0)]).unwrap()[&ElemId(0)],
         expected,
     );
-    close(simple_beam_q0_by_gravity_cases(model)[&ElemId(0)], expected);
+    close(
+        simple_beam_q0_by_gravity_cases(model).unwrap()[&ElemId(0)],
+        expected,
+    );
 }
 
 #[test]
@@ -108,13 +111,18 @@ fn rc_q0_envelopes_after_signed_end_superposition_for_all_public_helpers() {
     let mut model = model();
     model.load_cases[0].member = vec![point(1500.0, 1000.0)];
     model.load_cases[1].member = vec![point(4500.0, 1000.0)];
-    close(simple_beam_q0_by_gravity_cases(&model)[&ElemId(0)], 1000.0);
     close(
-        simple_beam_q0_by_terms(&model, &[(LoadCaseId(0), 1.0), (LoadCaseId(1), 0.5)])[&ElemId(0)],
+        simple_beam_q0_by_gravity_cases(&model).unwrap()[&ElemId(0)],
+        1000.0,
+    );
+    close(
+        simple_beam_q0_by_terms(&model, &[(LoadCaseId(0), 1.0), (LoadCaseId(1), 0.5)]).unwrap()
+            [&ElemId(0)],
         875.0,
     );
     close(
-        simple_beam_q0_by_terms(&model, &[(LoadCaseId(1), 0.5), (LoadCaseId(0), 1.0)])[&ElemId(0)],
+        simple_beam_q0_by_terms(&model, &[(LoadCaseId(1), 0.5), (LoadCaseId(0), 1.0)]).unwrap()
+            [&ElemId(0)],
         875.0,
     );
     let live = model.load_cases[1].member.pop().unwrap();
@@ -201,30 +209,121 @@ fn rc_q0_missing_input_never_returns_partial_or_old_values() {
                 }
             }
         }
+        if matches!(invalid, 5 | 6 | 9) {
+            for error in [
+                simple_beam_q0_by_elem(&model, LoadCaseId(0)).unwrap_err(),
+                simple_beam_q0_by_gravity_cases(&model).unwrap_err(),
+                simple_beam_q0_by_terms(&model, &[(LoadCaseId(1), 1.0), (LoadCaseId(0), 1.0)])
+                    .unwrap_err(),
+            ] {
+                assert!(error.contains("部材 ID 0"), "{invalid}: {error}");
+            }
+            continue;
+        }
         assert!(
-            !simple_beam_q0_by_elem(&model, LoadCaseId(0)).contains_key(&ElemId(0)),
+            !simple_beam_q0_by_elem(&model, LoadCaseId(0))
+                .unwrap()
+                .contains_key(&ElemId(0)),
             "{invalid}"
         );
         assert!(
-            !simple_beam_q0_by_gravity_cases(&model).contains_key(&ElemId(0)),
+            !simple_beam_q0_by_gravity_cases(&model)
+                .unwrap()
+                .contains_key(&ElemId(0)),
             "{invalid}"
         );
         assert!(
             !simple_beam_q0_by_terms(&model, &[(LoadCaseId(1), 1.0), (LoadCaseId(0), 1.0)])
+                .unwrap()
                 .contains_key(&ElemId(0)),
             "{invalid}"
         );
         model = valid.clone();
-        close(simple_beam_q0_by_gravity_cases(&model)[&ElemId(0)], 1000.0);
+        close(
+            simple_beam_q0_by_gravity_cases(&model).unwrap()[&ElemId(0)],
+            1000.0,
+        );
     }
     for terms in [
         vec![],
         vec![(LoadCaseId(99), 1.0)],
         vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), f64::NAN)],
     ] {
-        assert!(!simple_beam_q0_by_terms(&valid, &terms).contains_key(&ElemId(0)));
+        assert!(!simple_beam_q0_by_terms(&valid, &terms)
+            .unwrap()
+            .contains_key(&ElemId(0)));
     }
-    assert!(simple_beam_q0_by_elem(&valid, LoadCaseId(99)).is_empty());
+    assert!(simple_beam_q0_by_elem(&valid, LoadCaseId(99))
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn q0_public_helpers_reject_nonfinite_local_reference_before_returning_any_demand() {
+    let mut valid = model();
+    valid.load_cases[0].member = vec![point(1500.0, 1000.0)];
+    for component in 0..3 {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut invalid = valid.clone();
+            invalid.elements[0].local_axis.ref_vector[component] = value;
+            for result in [
+                simple_beam_q0_by_elem(&invalid, LoadCaseId(0)),
+                simple_beam_q0_by_gravity_cases(&invalid),
+                simple_beam_q0_by_terms(&invalid, &[(LoadCaseId(0), 1.0)]),
+            ] {
+                let error = result.unwrap_err();
+                assert!(error.contains("部材 ID 0"), "{error}");
+                assert!(error.contains("非有限"), "{error}");
+            }
+        }
+    }
+    all_helpers(&valid, 750.0);
+}
+
+#[test]
+fn q0_only_requires_local_frames_for_rc_beams_with_resolvable_terms() {
+    let mut model = model();
+    model.load_cases[0].member = vec![point(1500.0, 1000.0)];
+    model.elements.push(ElementData {
+        id: ElemId(1),
+        section: None,
+        local_axis: LocalAxis {
+            ref_vector: [f64::NAN, 0.0, 0.0],
+        },
+        ..model.elements[0].clone()
+    });
+    all_helpers(&model, 750.0);
+
+    model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    assert!(simple_beam_q0_by_terms(&model, &[]).unwrap().is_empty());
+    assert!(simple_beam_q0_by_elem(&model, LoadCaseId(99))
+        .unwrap()
+        .is_empty());
+    model.load_cases[0].member.clear();
+    let error = simple_beam_q0_by_elem(&model, LoadCaseId(0)).unwrap_err();
+    assert!(error.contains("部材 ID 0") && error.contains("非有限"));
+
+    model.sections[0].shape = None;
+    model.load_cases[0].member = vec![point(1500.0, 1000.0)];
+    all_helpers(&model, 750.0);
+}
+
+#[test]
+fn q0_rejects_finite_unresolvable_rc_frame_and_preserves_large_valid_rotation() {
+    let mut model = model();
+    model.load_cases[0].member = vec![point(1500.0, 1000.0)];
+    model.elements[0].local_axis.ref_vector = [0.0, 0.0, 1e308];
+    all_helpers(&model, 750.0);
+
+    model.nodes[1].coord = [3000.0; 3];
+    model.elements[0].local_axis.ref_vector = [1e308, 1e308, 1e308 - 1e292];
+    for error in [
+        simple_beam_q0_by_elem(&model, LoadCaseId(0)).unwrap_err(),
+        simple_beam_q0_by_terms(&model, &[(LoadCaseId(0), 1.0)]).unwrap_err(),
+        simple_beam_q0_by_gravity_cases(&model).unwrap_err(),
+    ] {
+        assert!(error.contains("部材 ID 0") && error.contains("単位直交基底"));
+    }
 }
 
 #[test]
@@ -247,15 +346,22 @@ fn non_rc_values_and_map_presence_keep_existing_behavior() {
     model.sections[0].shape = None;
     model.load_cases[0].member = vec![point(1500.0, 1000.0)];
     model.load_cases[1].member = vec![point(4500.0, 1000.0)];
-    close(simple_beam_q0_by_gravity_cases(&model)[&ElemId(0)], 1500.0);
+    close(
+        simple_beam_q0_by_gravity_cases(&model).unwrap()[&ElemId(0)],
+        1500.0,
+    );
     model.load_cases[0].member = vec![point(1500.0, 1000.0), point(1500.0, -1000.0)];
     close(
-        simple_beam_q0_by_elem(&model, LoadCaseId(0))[&ElemId(0)],
+        simple_beam_q0_by_elem(&model, LoadCaseId(0)).unwrap()[&ElemId(0)],
         1500.0,
     );
     model.load_cases[0].member[0].dir = [1.0, 0.0, 0.0];
     model.load_cases[0].member.pop();
-    assert!(simple_beam_q0_by_elem(&model, LoadCaseId(0)).is_empty());
+    assert!(simple_beam_q0_by_elem(&model, LoadCaseId(0))
+        .unwrap()
+        .is_empty());
     model.load_cases[0].member.clear();
-    assert!(simple_beam_q0_by_elem(&model, LoadCaseId(0)).is_empty());
+    assert!(simple_beam_q0_by_elem(&model, LoadCaseId(0))
+        .unwrap()
+        .is_empty());
 }

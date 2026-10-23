@@ -219,6 +219,7 @@ fn sum_beam_my_at_node(
 
 /// 柱のメカニズム ΣMy。戻り値は `(強軸=qy 用, 弱軸=qz 用)`。
 /// `n_*` は引張正。
+/// `model` は `Model::validate_local_frames` 済みを前提とする。
 #[allow(clippy::too_many_arguments)]
 pub fn compute_column_mechanism_sum_my(
     model: &Model,
@@ -245,7 +246,8 @@ pub fn compute_column_mechanism_sum_my(
     ) else {
         return None;
     };
-    let frame = LocalFrame::from_nodes(p_i, p_j, column.local_axis.ref_vector);
+    let frame = LocalFrame::from_nodes(p_i, p_j, column.local_axis.ref_vector)
+        .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", column.id.0));
     let ey = frame.rot[1];
     let ez = frame.rot[2];
     let load_strong = horizontal_unit(ey)?;

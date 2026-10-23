@@ -32,7 +32,8 @@ fn member_properties(hardening: f64, length: f64, g: f64, shear_area: f64) -> Fi
     let mut result = FiberBeam::from_raw_parts(
         [NodeId(0), NodeId(1)],
         length,
-        crate::transform::LocalFrame::from_nodes([0.0; 3], [1000.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        crate::transform::LocalFrame::from_nodes([0.0; 3], [1000.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+            .unwrap(),
         SectionMassProperties::default(),
         200000.0,
         g,

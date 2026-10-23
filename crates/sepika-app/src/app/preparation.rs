@@ -215,16 +215,16 @@ pub struct PrepTorsionSkipRow {
 pub struct PrepPanelRow {
     /// 接合部の節点。
     pub node: NodeId,
-    /// 柱せい方向のパネル寸法 dc `[mm]`。
-    pub dc: f64,
-    /// 梁フランジ板厚中心間距離 db `[mm]`。
-    pub db: f64,
-    /// パネル板厚 tp `[mm]`。
-    pub tp: f64,
-    /// 実効体積 Ve `[mm³]`。
-    pub ve: f64,
-    /// パネルせん断剛性 Kxp = Kyp = G・Ve [N·mm/rad]。
-    pub k_panel: f64,
+    /// 方向別パネル寸法 dc `[mm]`。要素順は柱の強軸・弱軸。
+    pub dc: [f64; 2],
+    /// 梁フランジ板厚中心間距離 db `[mm]`。要素順は柱の強軸・弱軸。
+    pub db: [f64; 2],
+    /// せん断抵抗板1枚あたりの有効厚 tp `[mm]`。要素順は柱の強軸・弱軸。
+    pub tp: [f64; 2],
+    /// 実効体積 Ve `[mm³]`。要素順は柱の強軸・弱軸。
+    pub ve: [f64; 2],
+    /// パネルせん断剛性 G・Ve [N·mm/rad]。要素順は柱の強軸・弱軸。
+    pub k_panel: [f64; 2],
 }
 
 /// 剛域の算定結果 1 部材分。
@@ -428,6 +428,7 @@ impl App {
         let previous_error = self.core.scoped.last_error.take();
         self.sync_auto_load_cases_action();
         if self.core.scoped.last_error.is_some() {
+            self.run_diagnostics();
             return;
         }
         self.core.scoped.last_error = previous_error;

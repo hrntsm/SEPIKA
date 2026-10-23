@@ -41,8 +41,8 @@ pub use cft::CftDesign;
 pub use girder_group::girder_group_overrides;
 pub use material_strength::{steel_f_value, steel_f_value_prefix};
 pub use member_design_check::{
-    run_member_design_checks, GirderGroupContextOverride, MemberDesignCheckOptions,
-    MemberDesignCheckReport,
+    run_member_design_checks, validate_model_steel_inputs, GirderGroupContextOverride,
+    MemberDesignCheckOptions, MemberDesignCheckReport,
 };
 pub use rc::RcDesign;
 pub use srrc::SrcDesign;

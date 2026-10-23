@@ -1162,6 +1162,7 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
         app.core.scoped.last_error
     );
     app.run_pushover();
+    app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1209,8 +1210,8 @@ fn snapshot_wall_ds_group_and_holding_capacity() {
         sepika_core::model::RcWallShearMethod::ArakawaMean
     );
     assert_eq!(po.wall_capacities.len(), 1);
-    // t=150、D=4300、左右300角/6-D22、A=735000、N=35745.859859942386、λ=1の独立算術値。
-    let expected_wall_capacity_n = 1_717_735.845549596;
+    // t=150、D=4300、左右300角/6-D22、A=735000、λ=1。静的参照で観測したN=35747.50110771164を用いた独立荒川mean算術値。
+    let expected_wall_capacity_n = 1_717_735.984_149_153;
     for capacity_n in po.wall_capacities[0].1 {
         assert!((capacity_n - expected_wall_capacity_n).abs() < 1e-6);
     }
@@ -1302,6 +1303,7 @@ fn test_holding_capacity_auto_rank_detects_wall() {
         app.core.scoped.last_error
     );
     app.run_pushover();
+    app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1328,6 +1330,7 @@ fn wall_committed_results_reach_csv_save_schema_and_reject_unrecorded_design_inp
     select_frame_gravity(&mut app.core.model);
     app.run_static_all();
     app.run_pushover();
+    app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -1510,6 +1513,7 @@ fn diagonal_wall_design_consumes_distinct_local_and_load_direction_shear() {
     select_frame_gravity(&mut app.core.model);
     app.run_static_all();
     app.run_pushover();
+    app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
     assert!(
         app.core.scoped.last_error.is_none(),

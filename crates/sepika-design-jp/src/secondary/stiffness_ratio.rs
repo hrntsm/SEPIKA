@@ -89,46 +89,73 @@ pub fn max_column_drift(
 /// 剛床の並進＋回転を仮定すると質量重み付き平均変位は重心位置の変位に一致する
 /// （u_i = u_g + θ×(r_i − r_g) の質量加重平均は u_g）。質量未定義の節点は重み 0、
 /// 層の全質量が 0 の場合は単純平均で代用する。
-pub fn cog_horizontal_disp(model: &Model, disp: &[[f64; 6]], dir: usize, story: StoryId) -> f64 {
+pub fn cog_horizontal_disp(
+    model: &Model,
+    disp: &[[f64; 6]],
+    dir: usize,
+    story: StoryId,
+) -> Result<f64, String> {
+    if dir > 1 || !model.stories.iter().any(|s| s.id == story) {
+        return Err(format!("Rs: 階{}又は加力方向{}が不正です", story.0, dir));
+    }
     let nodes: Vec<&Node> = model
         .nodes
         .iter()
         .filter(|n| n.story == Some(story) && model.on_diaphragm_level(story, n.coord[2]))
         .collect();
     if nodes.is_empty() {
-        return 0.0;
+        return Err(format!("Rs: 階{}の床レベルに節点がありません", story.0));
     }
-    let mass = |n: &Node| n.mass.map(|m| m[0]).unwrap_or(0.0);
-    let total: f64 = nodes.iter().map(|n| mass(n)).sum();
-    let get = |n: &Node| disp.get(n.id.index()).map(|u| u[dir]).unwrap_or(0.0);
-    if total > 0.0 {
-        nodes.iter().map(|n| mass(n) * get(n)).sum::<f64>() / total
+    let mut total_mass = 0.0;
+    let mut weighted_disp = 0.0;
+    let mut sum_disp = 0.0;
+    for node in &nodes {
+        let mass = node.mass.map(|m| m[0]).unwrap_or(0.0);
+        let u = disp
+            .get(node.id.index())
+            .ok_or_else(|| format!("Rs: 階{}の節点{}の変位がありません", story.0, node.id.0))?[dir];
+        if !mass.is_finite() || mass < 0.0 || !u.is_finite() {
+            return Err(format!(
+                "Rs: 階{}の節点{}の質量又は変位が不正です",
+                story.0, node.id.0
+            ));
+        }
+        total_mass += mass;
+        weighted_disp += mass * u;
+        sum_disp += u;
+    }
+    let result = if total_mass > 0.0 {
+        weighted_disp / total_mass
     } else {
-        nodes.iter().map(|n| get(n)).sum::<f64>() / nodes.len() as f64
+        sum_disp / nodes.len() as f64
+    };
+    if !total_mass.is_finite() || !weighted_disp.is_finite() || !result.is_finite() {
+        return Err(format!("Rs: 階{}の重心位置変位を算定できません", story.0));
     }
+    Ok(result)
 }
 
-/// 全層の「重心位置の層間変位」δg `[mm]`（下層→上層順）。
-/// `iδg = 上端の階の重心位置変位 − 下端の階の重心位置変位`。
-///
-/// 最下層の下端は基部の階であり、その**実変位**を用いる。基部を変位 0 と
-/// 決め打ちしないのは、支点ばね（`Node::support_spring`）で支持された基礎が
-/// 水平に動くモデルで最下層の δg を過大に見積もるためである。
-/// 剛性率 Rs の算出（`crate::secondary::holding_capacity::stiffness_ratios`）に
-/// この δg を渡す。
-pub fn cog_story_drifts(model: &Model, disp: &[[f64; 6]], dir: usize) -> Vec<f64> {
-    let disp_g: Vec<f64> = model
-        .stories
-        .iter()
-        .map(|s| cog_horizontal_disp(model, disp, dir, s.id))
-        .collect();
+/// 全層の重心位置の層間変位 `[mm]` を下層から上層の順で返す。
+/// dir は 0=X・1=Y。階対応・必要節点変位の欠損、不正値・演算不能は Err。
+pub fn cog_story_drifts(model: &Model, disp: &[[f64; 6]], dir: usize) -> Result<Vec<f64>, String> {
+    if dir > 1 || model.layers().is_empty() {
+        return Err("Rs: 層又は水平加力方向がありません".into());
+    }
     model
         .layers()
         .iter()
-        .map(|l| {
-            let top = disp_g.get(l.top.index()).copied().unwrap_or(0.0);
-            let bottom = disp_g.get(l.bottom.index()).copied().unwrap_or(0.0);
-            (top - bottom).abs()
+        .map(|layer| {
+            let top = cog_horizontal_disp(model, disp, dir, layer.top)?;
+            let bottom = cog_horizontal_disp(model, disp, dir, layer.bottom)?;
+            let drift = (top - bottom).abs();
+            if !drift.is_finite() {
+                Err(format!(
+                    "Rs: 上端階{}の層間変位を算定できません",
+                    layer.top.0
+                ))
+            } else {
+                Ok(drift)
+            }
         })
         .collect()
 }
@@ -268,9 +295,9 @@ mod tests {
         let (model, s0) = build_model();
         let disp = disp_field();
         // δg = (2·10 + 1·20 + 1·15) / 4 = 13.75（斜め柱の節点も質量として重心には寄与）
-        let dg = cog_horizontal_disp(&model, &disp, 0, s0);
+        let dg = cog_horizontal_disp(&model, &disp, 0, s0).unwrap();
         assert!((dg - 13.75).abs() < 1e-12, "δg={dg}");
-        let drifts = cog_story_drifts(&model, &disp, 0);
+        let drifts = cog_story_drifts(&model, &disp, 0).unwrap();
         assert_eq!(drifts.len(), 1);
         assert!((drifts[0] - 13.75).abs() < 1e-12);
     }
@@ -282,8 +309,23 @@ mod tests {
             n.mass = None;
         }
         let disp = disp_field();
-        let dg = cog_horizontal_disp(&model, &disp, 0, s0);
+        let dg = cog_horizontal_disp(&model, &disp, 0, s0).unwrap();
         assert!((dg - 15.0).abs() < 1e-12, "単純平均 (10+20+15)/3, got {dg}");
+    }
+
+    #[test]
+    fn fes718_cog_drift_rejects_missing_nonfinite_and_invalid_direction() {
+        let (mut model, story) = build_model();
+        let mut disp = disp_field();
+        assert!(cog_story_drifts(&model, &disp[..5], 0).is_err());
+        assert!(cog_story_drifts(&model, &disp, 2).is_err());
+        assert!(cog_horizontal_disp(&model, &disp, 0, StoryId(99)).is_err());
+        disp[3][0] = f64::NAN;
+        assert!(cog_story_drifts(&model, &disp, 0).is_err());
+        disp[3][0] = f64::INFINITY;
+        assert!(cog_story_drifts(&model, &disp, 0).is_err());
+        model.nodes.retain(|node| node.story != Some(story));
+        assert!(cog_story_drifts(&model, &disp, 0).is_err());
     }
 
     /// 中間節点（z=2000）で 2 分割された 1 本柱（z=0, 2000, 4000）。
@@ -405,7 +447,7 @@ mod tests {
         disp[0][0] = 0.0;
         disp[1][0] = 100.0; // 中間: 床レベル外なので除外
         disp[2][0] = 10.0; // 上端床
-        let dg = cog_horizontal_disp(&model, &disp, 0, top);
+        let dg = cog_horizontal_disp(&model, &disp, 0, top).unwrap();
         assert!(
             (dg - 10.0).abs() < 1e-12,
             "床レベル節点のみの平均 10、got {dg}"

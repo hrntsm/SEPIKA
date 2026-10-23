@@ -15,12 +15,12 @@ pub(super) fn diagram_offset_dir(
     p_j: [f64; 3],
     ref_vector: [f64; 3],
     plane: DiagramPlane,
-) -> [f64; 3] {
-    let frame = sepika_element::transform::LocalFrame::from_nodes(p_i, p_j, ref_vector);
-    match plane {
+) -> Option<[f64; 3]> {
+    let frame = sepika_element::transform::LocalFrame::from_nodes(p_i, p_j, ref_vector).ok()?;
+    Some(match plane {
         DiagramPlane::Ey => frame.rot[1],
         DiagramPlane::Ez => frame.rot[2],
-    }
+    })
 }
 
 /// 応力図の張り出し方向を構面内へ倒す（2D 構面表示）。
@@ -869,6 +869,17 @@ pub(super) fn draw_axis_gadget(painter: &egui::Painter, cam: &CameraState) {
 mod tests {
     use super::*;
     use sepika_core::model::ElementKind;
+
+    #[test]
+    fn 不正な参照方向の応力図オフセットは生成しない() {
+        assert!(diagram_offset_dir(
+            [0.0, 0.0, 0.0],
+            [1000.0, 0.0, 0.0],
+            [f64::INFINITY, 0.0, 0.0],
+            DiagramPlane::Ey,
+        )
+        .is_none());
+    }
 
     use sepika_core::ids::{NodeId, SlabId};
     use sepika_core::model::{LoadTransfer, Node, RegionAnchor, Slab, SlabPlate, SlabShape};

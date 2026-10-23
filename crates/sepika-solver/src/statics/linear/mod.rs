@@ -110,8 +110,8 @@ impl StaticStiffness {
 pub struct StaticOnce {
     pub disp: Vec<[f64; 6]>,
     pub member_forces: Vec<(sepika_core::ids::ElemId, MemberForces)>,
-    /// 仕口パネルのせん断モーメント `{MSX, MSY}` [N·mm]（基準座標系）を接合部の
-    /// 節点ごとに保持する。パネルをモデル化していない場合は空。
+    /// 全体 X・Y 軸まわりの仕口パネルせん断モーメント `[MSX, MSY]` [N·mm] を節点ごとに保持する。
+    /// パネルをモデル化していない場合は空。
     #[serde(default)]
     pub panel_moments: Vec<(sepika_core::ids::NodeId, [f64; 2])>,
 }
@@ -173,6 +173,16 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> StaticOnce {
 /// 不存在の荷重ケース ID は、拘束状態・解析経路に関係なく ID を含む `SolveError::InvalidInput` を返す。
 /// 全ケースの不正な部材荷重方向は、強度・拘束状態によらず `SolveError::InvalidInput` を返す。
 pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, SolveError> {
+    for panel in model
+        .elements
+        .iter()
+        .filter(|e| e.kind == ElementKind::PanelZone)
+    {
+        if let Some(node) = panel.nodes.first() {
+            sepika_core::panel_zone::resolve_explicit_panel_joint(model, *node, &model.elements)
+                .map_err(|reason| SolveError::InvalidInput(reason.to_string()))?;
+        }
+    }
     sepika_element::factory::ensure_wall_side_column_analysis(model, None, "線形解析", false, None)
         .map_err(SolveError::InvalidInput)?;
     model
@@ -200,7 +210,14 @@ pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, S
         .iter()
         .filter(|elem| elem.kind.is_primary_frame_support())
     {
-        if let Some(reason) = sepika_element::factory::elastic_young_input_issue(elem, model) {
+        if matches!(
+            elem.kind,
+            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+        ) {
+            sepika_element::frame::beam::composite_props_of(model, elem)
+                .map_err(SolveError::InvalidInput)?;
+        }
+        if let Some(reason) = sepika_element::factory::elastic_stiffness_input_issue(elem, model) {
             return Err(SolveError::InvalidInput(reason));
         }
     }

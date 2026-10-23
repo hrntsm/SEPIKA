@@ -31,7 +31,7 @@ fn base_story(node_ids: Vec<NodeId>) -> Story {
 /// 1層・鉛直ファイバ柱の片持ちプッシュオーバー（最小統合テスト）。
 /// 配線済み非線形要素（FiberBeam）＋座標変換＋NR 反復＋降伏追跡が
 /// エンドツーエンドで動作することを検証する。
-fn single_column_model(fy: f64, seismic_weight: f64) -> Model {
+pub(super) fn single_column_model(fy: f64, seismic_weight: f64) -> Model {
     Model {
         load_cases: sepika_core::model::default_load_cases(),
         combinations: sepika_core::model::default_combinations(),
@@ -99,7 +99,7 @@ fn single_column_model(fy: f64, seismic_weight: f64) -> Model {
             young: 205000.0,
             poisson: 0.3,
             density: 0.0,
-            shear: Some(0.0),
+            shear: None,
             fc: None,
             fy: Some(fy),
         }],
@@ -396,6 +396,55 @@ fn spring_column_model(kx: f64, support_kx: Option<f64>, seismic_weight: f64) ->
     }
 }
 
+#[test]
+fn pushover_member_frame_uses_spring_and_isolator_axes_at_short_length_boundary() {
+    let mut model = spring_column_model(1000.0, None, 100_000.0);
+    for length_mm in [0.0, 0.5e-9, 1e-9, 2e-9] {
+        let p_i = model.nodes[0].coord;
+        let p_j = [length_mm, 0.0, 0.0];
+        model.nodes[1].coord = p_j;
+        let spring = super::geom::member_local_frame(&model.elements[0], p_i, p_j).unwrap();
+        if length_mm < 1e-9 {
+            assert_eq!(
+                spring.rot,
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+            );
+        } else {
+            assert_eq!(spring.rot[0], [1.0, 0.0, 0.0]);
+        }
+        model.elements[0].kind = ElementKind::Isolator;
+        let isolator = super::geom::member_local_frame(&model.elements[0], p_i, p_j).unwrap();
+        assert_eq!(
+            isolator.rot[0],
+            if length_mm < 1e-9 {
+                [0.0, 0.0, 1.0]
+            } else {
+                [1.0, 0.0, 0.0]
+            }
+        );
+        model.elements[0].kind = ElementKind::NodalSpring;
+    }
+}
+
+#[test]
+fn pushover_accepts_short_nodal_spring_without_using_its_reference_direction() {
+    let baseline = spring_column_model(1000.0, None, 100_000.0);
+    let mut short = baseline.clone();
+    short.nodes[1].coord = [0.5e-9, 0.0, 0.0];
+    short.elements[0].local_axis.ref_vector[0] = f64::NAN;
+    let run = |model: &Model| {
+        let dofmap = DofMap::build(model);
+        let reducer = Reducer::build(model, &dofmap);
+        pushover_analysis(model, &dofmap, &reducer, SeismicDir::X, 4, 0.0, false).unwrap()
+    };
+    let expected = run(&baseline);
+    let actual = run(&short);
+    let expected_last = expected.capacity_curve.last().unwrap();
+    let actual_last = actual.capacity_curve.last().unwrap();
+    assert_eq!(actual_last.base_shear, expected_last.base_shear);
+    assert_eq!(actual_last.roof_disp, expected_last.roof_disp);
+}
+
 /// 支点ばね（`Node::support_spring`）が非線形経路（プッシュオーバー）の
 /// 全体剛性 K・内力 f_int の両方に反映され、静的 Newton 法が正しい
 /// 合成剛性 `kx+ks` の変位へ収束することを検証する。
@@ -562,7 +611,7 @@ pub(super) fn two_story_model() -> Model {
         young: 205000.0,
         poisson: 0.3,
         density: 0.0,
-        shear: Some(0.0),
+        shear: None,
         fc: None,
         fy: Some(235.0),
     };
@@ -816,7 +865,7 @@ fn test_compute_static_indeterminacy_indeterminate_portal() {
             young: 205000.0,
             poisson: 0.3,
             density: 0.0,
-            shear: Some(0.0),
+            shear: None,
             fc: None,
             fy: Some(235.0),
         }],
@@ -1069,7 +1118,7 @@ fn portal_frame_model(fy: f64, seismic_weight: f64) -> Model {
             young: 205000.0,
             poisson: 0.3,
             density: 0.0,
-            shear: Some(0.0),
+            shear: None,
             fc: None,
             fy: Some(fy),
         }],
@@ -3712,9 +3761,8 @@ fn test_pushover_wall_flexural_yield_softens() {
 /// ではなく**どの節点のどの自由度に剛性がないか**を示す日本語診断で停止する。
 #[test]
 fn test_pushover_singular_tangent_reports_dof_diagnosis() {
-    // 単柱モデルの頂部ねじり拘束（rz）を外すと、ファイバ柱はねじり剛性
-    // （断面 J は正だが材料の G=0）を持たないため rz の剛性が 0 になり特異化する。
     let mut model = single_column_model(235.0, 100_000.0);
+    model.sections[0].j = 0.0;
     model.nodes[1].restraint = Dof6Mask::FREE;
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
@@ -3779,8 +3827,9 @@ fn low_yield_strength_with_positive_hardening_reaches_target_in_equilibrium() {
     let previous = &curve[curve.len() - 2];
     let post_yield_stiffness =
         (last.base_shear - previous.base_shear) / (last.roof_disp - previous.roof_disp);
-    // 1/k=L³/(3EI)+L²Lp(1/(0.01EI_f)−1/(EI_f))、Lp=50 mm、I_f=8.3125e6 mm⁴。
-    assert!((post_yield_stiffness - 31.835058008936937).abs() < 1.0e-5);
+    // 1/k=L³/(3EI)+L/(GA_s)+L²Lp(1/(0.01EI_f)−1/(EI_f))、Lp=50、I_f=8.3125e6。
+    let expected = 1.0 / (1.0 / 31.835058008936937 + 3000.0 / ((205000.0 / 2.6) * (10000.0 / 1.2)));
+    assert!((post_yield_stiffness - expected).abs() < 1.0e-5);
 }
 
 #[test]
@@ -3995,7 +4044,7 @@ fn sm520_src_shear_thresholds_reject_each_out_of_range_plate_without_fy_or_infin
 #[test]
 fn checked_fiber_and_ms_trial_failures_reach_public_pushover_with_element_and_phase() {
     for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let mut model = single_column_model(235.0, 1e140);
+        let mut model = single_column_model(235.0, 1e300);
         model.elements[0].kind = kind;
         let dofmap = DofMap::build(&model);
         let reducer = Reducer::build(&model, &dofmap);
@@ -4010,5 +4059,126 @@ fn checked_fiber_and_ms_trial_failures_reach_public_pushover_with_element_and_ph
             !error.contains("NotPositiveDefinite") && !error.contains("factor:"),
             "{error}"
         );
+    }
+}
+
+#[test]
+fn public_pushover_rejects_finite_f64_responses_that_overflow_member_history() {
+    for (kind, weight) in [
+        (ElementKind::Fiber, 1e139),
+        (ElementKind::MultiSpring, 1e140),
+    ] {
+        let mut model = single_column_model(235.0, weight);
+        model.elements[0].kind = kind;
+        let dofmap = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &dofmap);
+        let error =
+            pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 2, 0.0, false).unwrap_err();
+        println!("kind={kind:?} weight={weight:e} status=Err {error}");
+        for expected in [
+            "増分解析・部材履歴",
+            "step=0",
+            "ElemId(0)",
+            "f32 変換で有限範囲を超えました",
+        ] {
+            assert!(error.contains(expected), "{kind:?}: {error}");
+        }
+        assert!(
+            [
+                "n",
+                "my_i",
+                "mz_i",
+                "my_j",
+                "mz_j",
+                "ry_i",
+                "rz_i",
+                "ry_j",
+                "rz_j",
+                "spring_rz_i",
+                "spring_rz_j",
+            ]
+            .iter()
+            .any(|component| error.contains(&format!("の {component}="))),
+            "{kind:?}: {error}"
+        );
+    }
+}
+
+#[test]
+fn public_pushover_preserves_finite_member_history_and_step_alignment() {
+    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+        let mut model = single_column_model(235.0, 80_000.0);
+        model.elements[0].kind = kind;
+        let dofmap = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &dofmap);
+        let result =
+            pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 2, 0.0, false).unwrap();
+        println!(
+            "kind={kind:?} weight=80000 status=Ok termination={:?} history={:?}",
+            result.termination, result.member_history
+        );
+        assert_eq!(
+            result.termination,
+            PushoverTermination::LambdaCap { lambda: 1.0 }
+        );
+        assert_eq!(result.steps.len(), 2);
+        assert_eq!(result.member_history.len(), 1);
+        let history = &result.member_history[0];
+        assert_eq!(history.elem, ElemId(0));
+        assert_eq!(history.records.len(), result.steps.len());
+        for (record, step) in history.records.iter().zip(&result.steps) {
+            assert!([
+                record.n,
+                record.my_i,
+                record.mz_i,
+                record.my_j,
+                record.mz_j,
+                record.ry_i,
+                record.rz_i,
+                record.ry_j,
+                record.rz_j,
+                record.spring_rz_i,
+                record.spring_rz_j
+            ]
+            .iter()
+            .all(|v| v.is_finite()));
+            assert!((f64::from(record.mz_i) + step.base_shear * 3000.0).abs() < 10.0);
+            assert_eq!(record.rz_i, (-step.top_disp / 3000.0) as f32);
+            assert_eq!([record.spring_rz_i, record.spring_rz_j], [0.0, 0.0]);
+        }
+    }
+}
+
+#[test]
+fn invalid_shear_modulus_is_a_public_pushover_input_error_before_factory_construction() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for (shear, poisson) in [
+            (Some(f64::NAN), 0.3),
+            (Some(f64::INFINITY), 0.3),
+            (Some(-1.0), 0.3),
+            (Some(0.0), 0.3),
+            (None, -1.0),
+            (None, -2.0),
+        ] {
+            let mut model = single_column_model(235.0, 100_000.0);
+            model.elements[0].kind = kind;
+            model.materials[0].shear = shear;
+            model.materials[0].poisson = poisson;
+            let dofmap = DofMap::build(&model);
+            let reducer = Reducer::build(&model, &dofmap);
+            let expected =
+                match sepika_element::frame::beam::BeamElement::try_new(&model.elements[0], &model)
+                {
+                    Ok(_) => panic!("不正Gが受理された"),
+                    Err(error) => error,
+                };
+            let error = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 2, 0.0, false)
+                .unwrap_err();
+            assert!(error.contains(&expected), "{error}");
+        }
     }
 }

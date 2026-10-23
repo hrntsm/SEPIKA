@@ -263,6 +263,59 @@ fn owned_udl_model() -> Model {
 }
 
 #[test]
+fn short_brace_distribution_public_static_paths_preserve_force_and_first_moment() {
+    use crate::statics::analysis::Analysis;
+    for (wi, wj, resultant, first_moment) in [
+        (1e16, 3e16, 2000.0, 7.0 / 6.0 * 1e-10),
+        (3e16, 1e16, 2000.0, 5.0 / 6.0 * 1e-10),
+        (-1e16, -3e16, -2000.0, -7.0 / 6.0 * 1e-10),
+        (1e16, -1e16, 0.0, -1.0 / 6.0 * 1e-10),
+    ] {
+        let mut model = ss_beam(
+            1.0,
+            vec![MemberLoad::manual(
+                ElemId(0),
+                [0.0, 1.0, 0.0],
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: 1e-13,
+                    w1: wi,
+                    w2: wj,
+                },
+            )],
+        );
+        model.elements[0].kind = ElementKind::Brace {
+            tension_only: false,
+        };
+        model.sections[0].frame_use = Some(FrameSectionUse::Brace);
+        for node in &mut model.nodes {
+            node.restraint = Dof6Mask(0b111101);
+            node.support_spring = Some([0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
+        }
+        let analysis = Analysis::prepare(&model).unwrap();
+        for result in [
+            linear_static_once(&model, LoadCaseId(1)).unwrap(),
+            analysis.linear_static(LoadCaseId(1)).unwrap(),
+        ] {
+            let [ri, rj] = [result.disp[0][1], result.disp[1][1]];
+            assert!(
+                (ri + rj - resultant).abs() < 1e-10,
+                "{ri:e} + {rj:e} != {resultant:e}"
+            );
+            assert!(
+                (rj / first_moment - 1.0).abs() < 2e-14,
+                "{rj:e} != {first_moment:e}"
+            );
+            for (_, forces) in result.member_forces {
+                for (_, force) in forces.at {
+                    assert_eq!(force, [0.0; 6]);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn linear_rhs_rejects_missing_or_reordered_behaviors() {
     let mut model = owned_udl_model();
     let mut second = model.elements[0].clone();
@@ -2338,4 +2391,57 @@ fn invalid_young_modulus_reaches_both_public_static_entries_as_same_reason() {
         cached.contains("ヤング係数 E は正の有限値が必要"),
         "{cached}"
     );
+}
+
+#[test]
+fn invalid_beam_shear_modulus_is_rejected_by_public_static_entries_and_constructor() {
+    use sepika_element::frame::beam::BeamElement;
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for (shear, poisson) in [
+            (Some(f64::NAN), 0.3),
+            (Some(f64::INFINITY), 0.3),
+            (Some(f64::NEG_INFINITY), 0.3),
+            (Some(-1.0), 0.3),
+            (Some(0.0), 0.3),
+            (None, -1.0),
+            (None, -2.0),
+            (None, f64::NAN),
+            (None, f64::INFINITY),
+        ] {
+            let mut model = ss_beam(1000.0, vec![]);
+            model.elements[0].kind = kind;
+            model.materials[0].shear = shear;
+            model.materials[0].poisson = poisson;
+            let error = match BeamElement::try_new(&model.elements[0], &model) {
+                Ok(_) => panic!("{kind:?}: G={shear:?}, nu={poisson} が受理された"),
+                Err(error) => error,
+            };
+            assert!(
+                error.contains("部材 ID 0") && error.contains("せん断弾性係数 G"),
+                "{error}"
+            );
+            let direct = linear_static_once(&model, model.load_cases[0].id)
+                .unwrap_err()
+                .to_string();
+            let prepared = match crate::statics::analysis::Analysis::prepare(&model) {
+                Ok(_) => panic!("不正Gは解析前に拒否する"),
+                Err(error) => error.to_string(),
+            };
+            assert!(direct.contains(&error), "{direct}");
+            assert!(prepared.contains(&error), "{prepared}");
+        }
+        for (shear, poisson) in [(None, 0.3), (Some(80000.0), -1.0)] {
+            let mut model = ss_beam(1000.0, vec![]);
+            model.elements[0].kind = kind;
+            model.materials[0].shear = shear;
+            model.materials[0].poisson = poisson;
+            assert!(BeamElement::try_new(&model.elements[0], &model).is_ok());
+            assert!(linear_static_once(&model, model.load_cases[0].id).is_ok());
+            assert!(crate::statics::analysis::Analysis::prepare(&model).is_ok());
+        }
+    }
 }

@@ -89,6 +89,11 @@ Squid-n の重要な設計判断の正本。用語の意味はルートの [CONT
 
 | [0065](0065-elastic-wall-top-bottom-girders.md) | accepted | 壁上下の剛梁を連続した壁板の弾性高剛性部材として扱う |
 
+| [0067](0067-nonlinear-timehistory-unconverged-rollback.md) | accepted | 骨組の非線形時刻歴の全体未収束は時刻開始状態へ復元して停止する |
+
+| [0068](0068-panel-reference-column-lower-first.md) | accepted | 仕口パネルの参照柱を物理的な下側優先で統一する |
+| [0069](0069-panel-column-axes-and-h-weak-shear.md) | accepted | 仕口パネルを柱2主軸へ接続し、H形弱軸はフランジ2枚の純せん断モデルとする |
+
 ## 規約
 
 - ADR にするのは「後から覆すコストが高い」「背景を知らないと意外に見える」「実際のトレードオフがあった」の 3 条件をすべて満たす**現在有効な判断**だけ。単なる実装手順・容易に変えられる選択・未実装の計画・自明な判断は書かない。

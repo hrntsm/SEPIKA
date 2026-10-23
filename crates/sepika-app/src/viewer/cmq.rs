@@ -330,8 +330,8 @@ pub(super) fn draw_cmq_diagram(
             let p_i = coords3[g.n0];
             let p_j = coords3[g.n1];
             let l = member_len3(p_i, p_j);
-            axes.iter().map(move |&plane| {
-                let axis_dir = diagram_offset_dir(p_i, p_j, g.ref_vec, plane);
+            axes.iter().filter_map(move |&plane| {
+                let axis_dir = diagram_offset_dir(p_i, p_j, g.ref_vec, plane)?;
                 let offset_dir = match frame_normal {
                     Some(n) => in_plane_offset_dir(axis_dir, p_i, p_j, n),
                     None => axis_dir,
@@ -341,13 +341,13 @@ pub(super) fn draw_cmq_diagram(
                     .iter()
                     .map(|(kind, dir)| project_load(kind.clone(), *dir, axis_dir))
                     .collect();
-                CmqTrace {
+                Some(CmqTrace {
                     group: g,
                     l,
                     offset_dir,
                     loads,
                     plane,
-                }
+                })
             })
         })
         .collect();

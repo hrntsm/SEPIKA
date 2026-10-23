@@ -34,7 +34,7 @@ impl EndGeometry {
     }
 
     /// i 端から j 端へ向かう局所座標系。
-    pub(crate) fn local_frame(&self, ref_vec: [f64; 3]) -> LocalFrame {
+    pub(crate) fn local_frame(&self, ref_vec: [f64; 3]) -> Result<LocalFrame, &'static str> {
         LocalFrame::from_nodes(self.coords[0], self.coords[1], ref_vec)
     }
 }
@@ -45,38 +45,14 @@ pub struct LocalFrame {
 }
 
 impl LocalFrame {
-    pub fn from_nodes(p_i: [f64; 3], p_j: [f64; 3], ref_vec: [f64; 3]) -> Self {
-        use sepika_core::geom::vec3;
-
-        let d = vec3::sub(p_j, p_i);
-        let l = vec3::norm(d);
-        let l = if l < 1e-12 { 1.0 } else { l };
-
-        let ex = vec3::scale(d, 1.0 / l);
-
-        let reject_ex = |v: [f64; 3]| vec3::sub(v, vec3::scale(ex, vec3::dot(v, ex)));
-
-        let mut ey = reject_ex(ref_vec);
-        let eyl = vec3::norm(ey);
-        if eyl > 1e-12 {
-            ey = [ey[0] / eyl, ey[1] / eyl, ey[2] / eyl];
-        } else {
-            let alt = reject_ex(if ex[0].abs() < 0.9 {
-                [1.0, 0.0, 0.0]
-            } else {
-                [0.0, 1.0, 0.0]
-            });
-            let altl = vec3::norm(alt);
-            ey = if altl > 1e-12 {
-                [alt[0] / altl, alt[1] / altl, alt[2] / altl]
-            } else {
-                [0.0, 1.0, 0.0]
-            };
-        }
-
-        let ez = vec3::cross(ex, ey);
-
-        Self { rot: [ex, ey, ez] }
+    /// 局所 x は i→j、局所 y は断面参照方向の直交成分、局所 z は右手系とする。
+    /// 有限な零・平行参照方向は全体 X/Y で補い、非有限・基底不能は理由付きエラーを返す。
+    pub fn from_nodes(
+        p_i: [f64; 3],
+        p_j: [f64; 3],
+        ref_vec: [f64; 3],
+    ) -> Result<Self, &'static str> {
+        sepika_core::geom::vec3::local_frame_axes(p_i, p_j, ref_vec).map(|rot| Self { rot })
     }
 
     fn make_r12(&self) -> Vec<f64> {
@@ -200,5 +176,43 @@ impl LocalFrame {
             *fi = s;
         }
         Some(f_local)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LocalFrame;
+
+    #[test]
+    fn local_frame_rotates_member_load_and_force_components_with_reversed_and_rotated_axes() {
+        let i = [0.0; 3];
+        let j = [0.0, 0.0, 3000.0];
+        let frame = LocalFrame::from_nodes(i, j, [1.0, 0.0, 0.0]).unwrap();
+        let mut global = [0.0; 12];
+        global[0..3].copy_from_slice(&[2.0, 3.0, 5.0]);
+        global[6..9].copy_from_slice(&[-7.0, 11.0, 13.0]);
+        let local = frame.rotate_to_local(&global);
+        assert_eq!(&local[0..3], &[5.0, 2.0, 3.0]);
+        assert_eq!(&local[6..9], &[13.0, -7.0, 11.0]);
+        assert_eq!(frame.rotate_to_global(&local), global);
+
+        let reversed = LocalFrame::from_nodes(j, i, [1.0, 0.0, 0.0]).unwrap();
+        assert_eq!(&reversed.rotate_to_local(&global)[0..3], &[-5.0, 2.0, -3.0]);
+        let rotated = LocalFrame::from_nodes(i, j, [0.0, 1.0, 0.0]).unwrap();
+        assert_eq!(&rotated.rotate_to_local(&global)[0..3], &[5.0, 3.0, -2.0]);
+    }
+
+    #[test]
+    fn local_frame_rejects_invalid_reference_before_load_or_force_rotation() {
+        for component in 0..3 {
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut reference = [1.0, 0.0, 0.0];
+                reference[component] = value;
+                assert_eq!(
+                    LocalFrame::from_nodes([0.0; 3], [0.0, 0.0, 3000.0], reference).unwrap_err(),
+                    "断面参照方向に非有限値があります"
+                );
+            }
+        }
     }
 }

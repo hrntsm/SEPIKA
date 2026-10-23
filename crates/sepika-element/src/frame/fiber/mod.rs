@@ -781,7 +781,8 @@ impl FiberBeam {
             n0.coord,
             n1.coord,
             data.local_axis.ref_vector,
-        );
+        )
+        .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", data.id.0))?;
 
         let releases = resolve_end_releases(
             &data.end_cond,

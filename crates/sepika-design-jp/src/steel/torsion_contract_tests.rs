@@ -98,6 +98,7 @@ fn asd2019_h_skips_unresolved_j_with_its_reason() {
             section.property_basis.j = basis;
             section.j = cache_mm4;
             if remove_shape {
+                section.thickness = Some(13.0);
                 section.shape = None;
             }
             match SteelDesign.check(

@@ -7,14 +7,13 @@
 //!   （軸力・剛域フェイスの局所曲げ・弦からの材端回転）を全部材について記録する
 
 use super::geom::{
-    axial_compression, axial_force_signed, dot3, member_recording_responses, recording_face_force,
-    recording_force,
+    axial_compression, axial_force_signed, dot3, member_local_frame, member_recording_responses,
+    recording_face_force, recording_force,
 };
 use super::types::{MemberStepState, PushoverMemberResponse};
 use sepika_core::dof::DofMap;
 use sepika_core::model::{ElementData, Model};
 use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse, LocalVec};
-use sepika_element::transform::LocalFrame;
 
 /// 部材の変形角 R [rad]を節点変位から算定する。
 ///
@@ -69,13 +68,14 @@ pub(crate) fn horizontal_force_in_dir(f: &LocalVec, n_nodes: usize, dir_idx: usi
 
 /// ヒンジ詳細図用: 1 確定ステップ分の部材端応答（[`MemberStepState`]）を全部材に
 /// ついて算定する（`model.elements` と同じ並び。2 節点の線材以外はゼロ埋め）。
+/// f32 変換後に非有限となる成分は、部材・成分・理由を含むエラーを返す。
 pub(crate) fn record_member_step(
     model: &Model,
     dofmap: &DofMap,
     behaviors: &[Box<dyn ElementBehavior>],
     total_disp: &[f64],
     responses: &[Option<LoadedFrameResponse>],
-) -> Vec<MemberStepState> {
+) -> Result<Vec<MemberStepState>, String> {
     let ctx = Ctx { model };
     model
         .elements
@@ -84,12 +84,12 @@ pub(crate) fn record_member_step(
         .zip(responses)
         .map(|((elem, b), response)| {
             if elem.nodes.len() != 2 {
-                return MemberStepState::default();
+                return Ok(MemberStepState::default());
             }
             let ni = elem.nodes[0].index();
             let nj = elem.nodes[1].index();
             let (Some(pi), Some(pj)) = (model.nodes.get(ni), model.nodes.get(nj)) else {
-                return MemberStepState::default();
+                return Ok(MemberStepState::default());
             };
             let dx = [
                 pj.coord[0] - pi.coord[0],
@@ -98,9 +98,10 @@ pub(crate) fn record_member_step(
             ];
             let length = (dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2]).sqrt();
             if length <= 0.0 {
-                return MemberStepState::default();
+                return Ok(MemberStepState::default());
             }
-            let frame = LocalFrame::from_nodes(pi.coord, pj.coord, elem.local_axis.ref_vector);
+            let frame = member_local_frame(elem, pi.coord, pj.coord)
+                .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", elem.id.0));
             let ex = frame.rot[0];
             let ey = frame.rot[1];
             let ez = frame.rot[2];
@@ -137,22 +138,38 @@ pub(crate) fn record_member_step(
             let ry_j = dot3(r_j, ey) + chord_w;
             let rz_j = dot3(r_j, ez) - chord_v;
             let end_spring = b.end_spring_rotations();
+            let record = |value, component| {
+                finite_history_value(value).map_err(|reason| {
+                    format!("部材 {:?} の {component}={value:e}: {reason}", elem.id)
+                })
+            };
 
-            MemberStepState {
-                n: n as f32,
-                my_i: my_i as f32,
-                mz_i: mz_i as f32,
-                my_j: my_j as f32,
-                mz_j: mz_j as f32,
-                ry_i: ry_i as f32,
-                rz_i: rz_i as f32,
-                ry_j: ry_j as f32,
-                rz_j: rz_j as f32,
-                spring_rz_i: end_spring.map_or(0.0, |g| g[0] as f32),
-                spring_rz_j: end_spring.map_or(0.0, |g| g[1] as f32),
-            }
+            Ok(MemberStepState {
+                n: record(n, "n")?,
+                my_i: record(my_i, "my_i")?,
+                mz_i: record(mz_i, "mz_i")?,
+                my_j: record(my_j, "my_j")?,
+                mz_j: record(mz_j, "mz_j")?,
+                ry_i: record(ry_i, "ry_i")?,
+                rz_i: record(rz_i, "rz_i")?,
+                ry_j: record(ry_j, "ry_j")?,
+                rz_j: record(rz_j, "rz_j")?,
+                spring_rz_i: record(end_spring.map_or(0.0, |g| g[0]), "spring_rz_i")?,
+                spring_rz_j: record(end_spring.map_or(0.0, |g| g[1]), "spring_rz_j")?,
+            })
         })
         .collect()
+}
+
+fn finite_history_value(value: f64) -> Result<f32, &'static str> {
+    let recorded = value as f32;
+    if recorded.is_finite() {
+        Ok(recorded)
+    } else if value.is_finite() {
+        Err("f32 変換で有限範囲を超えました")
+    } else {
+        Err("記録元が非有限値です")
+    }
 }
 
 /// 最終確定ステップの部材別応答（[`PushoverMemberResponse`]）を算定する。
@@ -196,7 +213,8 @@ pub(crate) fn compute_member_response_with_responses(
         ) else {
             continue;
         };
-        let frame = LocalFrame::from_nodes(pi.coord, pj.coord, elem.local_axis.ref_vector);
+        let frame = member_local_frame(elem, pi.coord, pj.coord)
+            .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", elem.id.0));
         let ex = frame.rot[0];
         let ey = frame.rot[1];
         let ez = frame.rot[2];
@@ -236,4 +254,161 @@ pub(crate) fn compute_member_response_with_responses(
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sepika_core::dof::Dof6Mask;
+    use sepika_element::behavior::{LocalMat, MassOption};
+
+    #[test]
+    fn history_conversion_preserves_finite_rounding_at_both_f32_limits() {
+        let max = f64::from(f32::MAX);
+        let overflow = max + 2.0_f64.powi(103);
+        for sign in [1.0, -1.0] {
+            for (value, expected) in [
+                (0.0, 0.0),
+                (1.0 + 2.0_f64.powi(-24), 1.0),
+                (f64::from(f32::from_bits(1)), f32::from_bits(1)),
+                (2.0_f64.powi(-151), 0.0),
+                (max, f32::MAX),
+                (max.next_up(), f32::MAX),
+                (overflow.next_down(), f32::MAX),
+            ] {
+                assert_eq!(
+                    finite_history_value(sign * value).unwrap().to_bits(),
+                    (sign as f32 * expected).to_bits(),
+                    "{sign} * {value:e}"
+                );
+            }
+            for value in [overflow, overflow.next_up(), f64::MAX] {
+                assert_eq!(
+                    finite_history_value(sign * value),
+                    Err("f32 変換で有限範囲を超えました")
+                );
+            }
+        }
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(finite_history_value(value), Err("記録元が非有限値です"));
+        }
+    }
+
+    struct Response {
+        forces: [f64; 12],
+        spring: [f64; 2],
+    }
+
+    impl ElementBehavior for Response {
+        fn n_dof(&self) -> usize {
+            12
+        }
+        fn global_dofs(&self, map: &DofMap) -> smallvec::SmallVec<[usize; 24]> {
+            sepika_element::behavior::node_global_dofs(
+                &[sepika_core::ids::NodeId(0), sepika_core::ids::NodeId(1)],
+                map,
+            )
+        }
+        fn tangent_stiffness(&self, _: &Ctx) -> LocalMat {
+            LocalMat::zeros(12)
+        }
+        fn internal_force(&self, _: &Ctx) -> LocalVec {
+            LocalVec {
+                data: self.forces.as_slice().into(),
+            }
+        }
+        fn mass_matrix(&self, _: MassOption) -> LocalMat {
+            LocalMat::zeros(12)
+        }
+        fn end_spring_rotations(&self) -> Option<[f64; 2]> {
+            Some(self.spring)
+        }
+    }
+
+    fn record(values: [f64; 11]) -> Result<MemberStepState, String> {
+        let mut model = super::super::tests::single_column_model(235.0, 80_000.0);
+        model.nodes[1].coord = [3000.0, 0.0, 0.0];
+        for node in &mut model.nodes {
+            node.restraint = Dof6Mask::FREE;
+        }
+        model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+        let map = DofMap::build(&model);
+        let mut disp = vec![0.0; map.n_active()];
+        for (global, value) in [
+            (4, values[5]),
+            (5, values[6]),
+            (10, values[7]),
+            (11, values[8]),
+        ] {
+            disp[map.active(global).unwrap() as usize] = value;
+        }
+        let behaviors: Vec<Box<dyn ElementBehavior>> = vec![Box::new(Response {
+            forces: [
+                values[0], 0.0, 0.0, 0.0, values[1], values[2], -values[0], 0.0, 0.0, 0.0,
+                values[3], values[4],
+            ],
+            spring: [values[9], values[10]],
+        })];
+        record_member_step(&model, &map, &behaviors, &disp, &[None]).map(|r| r[0])
+    }
+
+    #[test]
+    fn member_record_retains_all_signed_force_and_rotation_components() {
+        let r = record([
+            1.25, -2.5, 3.75, -4.5, 5.25, -0.125, 0.25, -0.375, 0.5, -0.625, 0.75,
+        ])
+        .unwrap();
+        assert_eq!(
+            [
+                r.n,
+                r.my_i,
+                r.mz_i,
+                r.my_j,
+                r.mz_j,
+                r.ry_i,
+                r.rz_i,
+                r.ry_j,
+                r.rz_j,
+                r.spring_rz_i,
+                r.spring_rz_j
+            ],
+            [1.25, -2.5, 3.75, -4.5, 5.25, -0.125, 0.25, -0.375, 0.5, -0.625, 0.75]
+        );
+    }
+
+    #[test]
+    fn member_record_rejects_each_overflowing_component_with_element_and_reason() {
+        for (index, name) in [
+            "n",
+            "my_i",
+            "mz_i",
+            "my_j",
+            "mz_j",
+            "ry_i",
+            "rz_i",
+            "ry_j",
+            "rz_j",
+            "spring_rz_i",
+            "spring_rz_j",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for value in [1e40, -1e40] {
+                let mut values = [0.0; 11];
+                values[index] = value;
+                let error = record(values).unwrap_err();
+                assert!(error.contains("ElemId(0)"), "{error}");
+                assert!(error.contains(&format!("の {name}=")), "{error}");
+                assert!(error.contains("f32 変換で有限範囲を超えました"), "{error}");
+            }
+        }
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut values = [0.0; 11];
+            values[10] = value;
+            let error = record(values).unwrap_err();
+            assert!(error.contains("ElemId(0) の spring_rz_j="), "{error}");
+            assert!(error.contains("記録元が非有限値です"), "{error}");
+        }
+    }
 }

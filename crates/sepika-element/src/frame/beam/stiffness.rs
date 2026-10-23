@@ -97,6 +97,55 @@ impl BeamElement {
         })
     }
 
+    fn stiffness_input_context(&self) -> String {
+        format!(
+            "部材 ID {} の弾性梁 (E={}, G={}, A={}, Iy={}, Iz={}, J={}, Asy={}, Asz={}, L={})",
+            self.id.0,
+            self.e,
+            self.g,
+            self.a,
+            self.iy,
+            self.iz,
+            self.j,
+            self.as_y,
+            self.as_z,
+            self.length
+        )
+    }
+
+    pub(crate) fn checked_stiffness_flex_raw(&self) -> Result<LocalMat, String> {
+        let raw = self.local_stiffness_flex_raw();
+        if let Some((index, value)) = raw.data.iter().enumerate().find(|(_, v)| !v.is_finite()) {
+            let operation = match (index / 12, index % 12) {
+                (3 | 9, 3 | 9) => "ねじり剛性 GJ/L",
+                (0 | 6, 0 | 6) => "軸剛性 EA/L",
+                _ => "曲げ・せん断剛性 EI・せん断変形",
+            };
+            return Err(format!(
+                "{} の可撓部{operation}の演算結果 K[{}, {}]={value} が非有限です",
+                self.stiffness_input_context(),
+                index / 12,
+                index % 12
+            ));
+        }
+        Ok(raw)
+    }
+
+    pub(crate) fn validate_stiffness(&self) -> Result<(), String> {
+        let raw = self.checked_stiffness_flex_raw()?;
+        let condensed = crate::frame::prismatic::condense_end_releases(&raw, &self.end_releases())
+            .ok_or_else(|| format!("{} の端部解放剛性を縮約できません: Kbb が特異または縮約演算が非有限です（解放条件を確認してください）", self.stiffness_input_context()))?;
+        let (li, lj) = self.rigid_lengths();
+        let stiffness = self.apply_rigid_zone_transform(&condensed, li, lj);
+        if stiffness.data.iter().any(|v| !v.is_finite()) {
+            return Err(format!(
+                "{} の剛域変換 (li={li}, lj={lj}) の演算結果が非有限です",
+                self.stiffness_input_context()
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn end_releases(&self) -> SmallVec<[(usize, f64); 6]> {
         const ROT_DOFS: [(usize, usize); 6] = [(3, 0), (4, 0), (5, 0), (9, 1), (10, 1), (11, 1)];
 

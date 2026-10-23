@@ -33,11 +33,11 @@ fn test_center_of_rigidity_and_eccentricity_known_values() {
             dy: 300.0,
         },
     ];
-    let cr = center_of_rigidity(&cols);
+    let cr = center_of_rigidity(&cols).unwrap();
     assert!((cr[0] - 4500.0).abs() < 1e-9, "Xs got {}", cr[0]);
 
     // 上の剛心に重心 Xg=3000 → ex = 1500
-    let ecc = eccentricity(&cols, [3000.0, 0.0], cr);
+    let ecc = eccentricity(&cols, [3000.0, 0.0], cr).unwrap();
     assert!((ecc.ex - 1500.0).abs() < 1e-9, "ex got {}", ecc.ex);
 }
 
@@ -68,14 +68,14 @@ fn test_eccentricity_hand_calc() {
             dy: 300.0,
         },
     ];
-    let cr = center_of_rigidity(&cols);
+    let cr = center_of_rigidity(&cols).unwrap();
     // Xs = (100·0+100·0+300·6000+300·6000)/(100+100+300+300) = 3,600,000/800 = 4500
     assert!((cr[0] - 4500.0).abs() < 1e-9, "Xs {}", cr[0]);
     // Ys = (Σ Dx·y)/ΣDx = 100·(0+6000+0+6000)/400 = 3000
     assert!((cr[1] - 3000.0).abs() < 1e-9, "Ys {}", cr[1]);
 
     // 重心は幾何中央 (3000, 3000) とする → ex = 1500, ey = 0
-    let ecc = eccentricity(&cols, [3000.0, 3000.0], cr);
+    let ecc = eccentricity(&cols, [3000.0, 3000.0], cr).unwrap();
     assert!((ecc.ex - 1500.0).abs() < 1e-9);
     assert!(ecc.ey.abs() < 1e-9);
 
@@ -90,10 +90,14 @@ fn test_eccentricity_hand_calc() {
     let rex = (9.0e9_f64 / 400.0).sqrt();
     assert!((ecc.rex - rex).abs() < 1e-6);
     // Rex = ey/rex = 0（ey=0）, Rey = ex/rey
-    assert!(ecc.re_x.abs() < 1e-12);
+    assert!(ecc.re_x.as_ref().unwrap().abs() < 1e-12);
     let sum_dy = 800.0;
     let rey = (9.0e9_f64 / sum_dy).sqrt();
-    assert!((ecc.re_y - 1500.0 / rey).abs() < 1e-9, "Rey {}", ecc.re_y);
+    assert!(
+        (ecc.re_y.as_ref().unwrap() - 1500.0 / rey).abs() < 1e-9,
+        "Rey {}",
+        ecc.re_y.as_ref().unwrap()
+    );
 }
 
 // ===== モデル自動算定テスト =====
@@ -102,11 +106,19 @@ fn test_eccentricity_hand_calc() {
 #[test]
 fn test_story_eccentricity_symmetric_zero() {
     let (model, s0) = build_symmetric_frame(None);
-    let ecc = story_eccentricity(&model, s0);
-    assert!(ecc.re_x.abs() < 1e-6, "re_x={} (should be ~0)", ecc.re_x);
-    assert!(ecc.re_y.abs() < 1e-6, "re_y={} (should be ~0)", ecc.re_y);
+    let ecc = story_eccentricity(&model, s0).unwrap();
+    assert!(
+        ecc.re_x.as_ref().unwrap().abs() < 1e-6,
+        "re_x={} (should be ~0)",
+        ecc.re_x.as_ref().unwrap()
+    );
+    assert!(
+        ecc.re_y.as_ref().unwrap().abs() < 1e-6,
+        "re_y={} (should be ~0)",
+        ecc.re_y.as_ref().unwrap()
+    );
     // 剛心確認
-    let sc = story_centers(&model, s0);
+    let sc = story_centers(&model, s0).unwrap();
     assert!(
         (sc.center_of_rigidity[0] - 3000.0).abs() < 1.0,
         "Xs={}",
@@ -119,6 +131,42 @@ fn test_story_eccentricity_symmetric_zero() {
     );
 }
 
+#[test]
+fn story_centers_and_eccentricity_ignore_unused_girder_reference() {
+    let (mut model, story) = build_symmetric_frame(None);
+    let expected_centers = story_centers(&model, story).unwrap();
+    let expected_eccentricity = story_eccentricity(&model, story).unwrap();
+    model.elements[4].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    assert_eq!(story_centers(&model, story).unwrap(), expected_centers);
+    assert_eq!(
+        story_eccentricity(&model, story).unwrap(),
+        expected_eccentricity
+    );
+}
+
+#[test]
+fn d_value_rejects_only_selected_column_with_member_id_and_reason() {
+    let (mut model, story) = build_symmetric_frame(None);
+    model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    for error in [
+        story_centers(&model, story).unwrap_err(),
+        story_eccentricity(&model, story).unwrap_err(),
+    ] {
+        assert!(
+            error.contains("部材 ID 0") && error.contains("非有限"),
+            "{error}"
+        );
+    }
+
+    model.nodes[4].coord = [3000.0, 3000.0, 3000.0];
+    model.elements[0].local_axis.ref_vector = [1e308, 1e308, 1e308 - 1e292];
+    let error = story_centers(&model, story).unwrap_err();
+    assert!(
+        error.contains("部材 ID 0") && error.contains("単位直交基底"),
+        "{error}"
+    );
+}
+
 /// テスト2: 右側柱 iy を 3 倍 → 剛心 x ≈ 4500、偏心距離 ex ≈ 1500。
 /// 軸整合フレーム（柱軸=Z・ref=[0,1,0]）では、クロス変換後 I_globalY = sec.iy
 /// なので Dy ∝ iy。梁は全柱で対称なので a 補正は全柱一致 → Dy 比 = iy 比。
@@ -126,10 +174,10 @@ fn test_story_eccentricity_symmetric_zero() {
 #[test]
 fn test_story_eccentricity_biased_rigidity() {
     let (model, s0) = build_symmetric_frame(Some(3.0e6));
-    let sc = story_centers(&model, s0);
+    let sc = story_centers(&model, s0).unwrap();
     let xs = sc.center_of_rigidity[0];
     assert!((xs - 4500.0).abs() < 1.0, "Xs={} (expected ≈4500)", xs);
-    let ecc = story_eccentricity(&model, s0);
+    let ecc = story_eccentricity(&model, s0).unwrap();
     // 重心 x = 3000（等質量 4 点の中央）→ ex = |3000 - 4500| = 1500
     assert!(
         (ecc.ex - 1500.0).abs() < 1.0,
@@ -144,9 +192,9 @@ fn test_story_eccentricity_empty_story() {
     let (model, _s0) = build_symmetric_frame(None);
     // S1 は存在しない（stories は S0 のみ）→ column_stiffnesses は空を返す。
     let s1 = StoryId(1);
-    let cols = column_stiffnesses(&model, s1);
+    let cols = column_stiffnesses(&model, s1).unwrap();
     assert!(cols.is_empty(), "S1 に柱がないはず、got {} 本", cols.len());
-    let cor = center_of_rigidity(&cols);
+    let cor = center_of_rigidity(&cols).unwrap();
     assert_eq!(cor, [0.0, 0.0], "空時の剛心は [0,0]");
 }
 
@@ -277,7 +325,7 @@ fn test_append_misc_wall_stiffnesses() {
     assert_eq!(wall.pos, [6000.0, 3000.0]);
 
     // 剛心が壁側（x=6000）へ寄ることの確認。
-    let cor = center_of_rigidity(&cols);
+    let cor = center_of_rigidity(&cols).unwrap();
     assert!(cor[0] > 3000.0, "Xs={} は壁側へ寄る", cor[0]);
 
     // n 未指定なら追加されない。
@@ -296,7 +344,7 @@ fn test_column_stiffnesses_merges_split_column() {
     use sepika_core::model::Node;
 
     let (mut model, s0) = build_symmetric_frame(None);
-    let before = column_stiffnesses(&model, s0);
+    let before = column_stiffnesses(&model, s0).unwrap();
     assert_eq!(before.len(), 4);
     let d0 = before
         .iter()
@@ -331,7 +379,7 @@ fn test_column_stiffnesses_merges_split_column() {
     bot_seg.nodes.push(NodeId(8));
     model.elements.push(bot_seg);
 
-    let after = column_stiffnesses(&model, s0);
+    let after = column_stiffnesses(&model, s0).unwrap();
     assert_eq!(after.len(), 4, "分割柱は 1 本のまま");
     let d1 = after
         .iter()
@@ -349,4 +397,51 @@ fn test_column_stiffnesses_merges_split_column() {
         d0.dy,
         d1.dy
     );
+}
+
+#[test]
+fn fes718_zero_radius_is_unavailable_even_with_zero_eccentric_distance() {
+    let ecc = eccentricity(&[], [0.0; 2], [0.0; 2]).unwrap();
+    assert!(ecc.re_x.is_err());
+    assert!(ecc.re_y.is_err());
+    let one = [ColumnStiffness {
+        pos: [0.0; 2],
+        dx: 100.0,
+        dy: 100.0,
+    }];
+    let ecc = eccentricity(&one, [0.0; 2], [0.0; 2]).unwrap();
+    assert!(ecc.re_x.is_err());
+    assert!(ecc.re_y.is_err());
+}
+
+#[test]
+fn fes718_mass_center_preserves_zero_mass_geometry_and_rejects_invalid_inputs() {
+    let (mut model, story) = build_symmetric_frame(None);
+    for node in &mut model.nodes {
+        node.mass = None;
+    }
+    assert_eq!(center_of_mass(&model, story).unwrap(), [3000.0, 3000.0]);
+    for invalid in [f64::NAN, f64::INFINITY, -1.0] {
+        model.nodes[4].mass = Some([invalid; 6]);
+        assert!(center_of_mass(&model, story).is_err());
+    }
+    model.nodes[4].mass = None;
+    for node in &mut model.nodes {
+        node.coord[0] = f64::MAX;
+    }
+    assert!(center_of_mass(&model, story).is_err());
+}
+
+#[test]
+fn fes718_rigidity_sum_overflow_cannot_generate_normal_re() {
+    let cols: Vec<_> = [0.0, 0.5, 0.0, 0.5]
+        .into_iter()
+        .map(|x| ColumnStiffness {
+            pos: [x, 0.0],
+            dx: 1.0,
+            dy: 1e308,
+        })
+        .collect();
+    assert!(center_of_rigidity(&cols).is_err());
+    assert!(eccentricity(&cols, [0.25, 7e152], [0.0; 2]).is_err());
 }

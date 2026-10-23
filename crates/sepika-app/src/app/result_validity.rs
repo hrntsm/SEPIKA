@@ -238,6 +238,7 @@ impl App {
                 if let Err(reason) =
                     sepika_core::panel_zone::resolve_panel_joint(model, node.id, members)
                 {
+                    let reason = reason.to_string();
                     if allow_recorded_skips && saved.joint_checks.iter().any(|check| {
                         check.node == node.id && check.label.starts_with("パネルゾーン(S)")
                             && matches!(&check.outcome, CheckOutcome::Skipped { reason: recorded } if recorded == &reason)
@@ -756,6 +757,7 @@ mod tests {
         app.core.analysis_cfg.push_steps = 3;
         app.generate_stories_action();
         app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
         assert!(app.compute_holding_capacity().is_ok());
@@ -794,6 +796,7 @@ mod tests {
         assert!(app.core.scoped.ds_rank_fallback_stories.is_empty());
         app.core.model.materials[0].fy = Some(235.0);
         app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
         assert!(app.compute_holding_capacity().is_ok());
@@ -1046,6 +1049,7 @@ mod tests {
         let reason = app.compute_holding_capacity().err().expect("拒否される");
         assert!(reason.contains("入力識別情報がありません"));
         app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
         let bytes = rmp_serde::to_vec(app.core.scoped.results.as_ref().unwrap()).unwrap();
@@ -1080,6 +1084,7 @@ mod tests {
         let mut app = ready();
         app.core.model.stories[1].weight_override = Some(100_000.0);
         app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
         let baseline = app.compute_holding_capacity().unwrap().0.stories[0].qud;
@@ -1190,7 +1195,36 @@ mod tests {
                 weight: Some(100_000.0),
                 ci_override: None,
             });
+        let mut middle = app.core.model.nodes[basement_node.index()].clone();
+        middle.id = NodeId(app.core.model.nodes.len() as u32);
+        middle.coord[0] = 6000.0;
+        let middle_id = middle.id;
+        app.core.model.nodes.push(middle);
+        app.core.model.stories[1].node_ids.push(middle_id);
+        if let Some(sepika_core::model::Constraint::RigidDiaphragm { slaves, .. }) =
+            app.core.model.constraints.last_mut()
+        {
+            slaves.push(middle_id);
+        }
+        app.core.model.elements[1].nodes[0] = middle_id;
+        app.core.model.elements[0].nodes[0] = basement_node;
+        let mut base = app.core.model.nodes[0].clone();
+        base.id = NodeId(app.core.model.nodes.len() as u32);
+        base.coord[1] += 6000.0;
+        let other_base = base.id;
+        app.core.model.nodes.push(base);
+        for (bottom, top) in [
+            (NodeId(0), basement_node),
+            (other_base, other),
+            (NodeId(1), middle_id),
+        ] {
+            let mut column = app.core.model.elements[0].clone();
+            column.id = ElemId(app.core.model.elements.len() as u32);
+            column.nodes = [bottom, top].into_iter().collect();
+            app.core.model.elements.push(column);
+        }
         app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
         assert!(
             app.core.scoped.last_error.is_none(),
             "{:?}",
@@ -1225,6 +1259,7 @@ mod purpose_tests {
         app.core.analysis_cfg.push_use_drift_angle = false;
         app.generate_stories_action();
         app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
         app.run_pushover();
         assert!(
             app.core.scoped.last_error.is_none(),
@@ -1808,12 +1843,14 @@ mod purpose_tests {
             member: vec![],
         });
         app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
         app.adopt_holding_evaluation(EvaluationPurpose::Ds).unwrap();
         app.core.analysis_cfg.c0 = 0.3;
         app.core.analysis_cfg.push_max_disp = 2.0;
         app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
         app.run_pushover();
         super::super::tests::select_holding_points(&mut app);
         app.adopt_holding_evaluation(EvaluationPurpose::HoldingCapacity)

@@ -7,6 +7,7 @@ use sepika_element::frame::member_load::SpanLoadTransfer;
 use sepika_element::transform::LocalFrame;
 use sepika_math::sparse::{assemble_csc, Triplet};
 
+/// `model` は `Model::validate_local_frames` 済みを前提とする。
 pub fn assemble_global_k(model: &Model, dofmap: &DofMap) -> SparseColMat<usize, f64> {
     let ctx = sepika_element::behavior::Ctx { model };
     let mut all_triplets = Vec::new();
@@ -67,9 +68,16 @@ pub fn add_support_spring_diag(model: &Model, dofmap: &DofMap, triplets: &mut Ve
     }
 }
 
-/// 全ケースの部材荷重方向・断面適用条件と、線材・壁の質量入力を生成前に対象ID付きで検証する。
+/// 部材荷重方向・断面適用条件・質量入力・明示パネル剛性・弾性梁の E/G を生成前に対象 ID 付きで検証する。
 pub(crate) fn validate_global_mass_inputs(
     model: &Model,
+) -> Result<(), sepika_math::solver::SolveError> {
+    validate_mass_inputs(model, true)
+}
+
+fn validate_mass_inputs(
+    model: &Model,
+    uses_element_frames: bool,
 ) -> Result<(), sepika_math::solver::SolveError> {
     model
         .validate_member_load_directions()
@@ -89,6 +97,11 @@ pub(crate) fn validate_global_mass_inputs(
     model
         .validate_wall_weight_generation()
         .map_err(sepika_math::solver::SolveError::InvalidInput)?;
+    if uses_element_frames {
+        model
+            .validate_local_frames()
+            .map_err(sepika_math::solver::SolveError::InvalidInput)?;
+    }
     if model.mass_method != sepika_core::model::MassMethod::LumpedOnly {
         for elem in &model.elements {
             if model.uses_damper_total_weight(elem) {
@@ -111,6 +124,30 @@ pub(crate) fn validate_global_mass_inputs(
             }
         }
     }
+    for panel in model
+        .elements
+        .iter()
+        .filter(|e| e.kind == ElementKind::PanelZone)
+    {
+        if let Some(node) = panel.nodes.first() {
+            sepika_core::panel_zone::resolve_explicit_panel_joint(model, *node, &model.elements)
+                .map_err(|reason| {
+                    sepika_math::solver::SolveError::InvalidInput(reason.to_string())
+                })?;
+        }
+    }
+    for elem in model.elements.iter().filter(|elem| {
+        matches!(
+            elem.kind,
+            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+        )
+    }) {
+        sepika_element::frame::beam::composite_props_of(model, elem)
+            .map_err(sepika_math::solver::SolveError::InvalidInput)?;
+        if let Some(reason) = sepika_element::factory::elastic_stiffness_input_issue(elem, model) {
+            return Err(sepika_math::solver::SolveError::InvalidInput(reason));
+        }
+    }
     Ok(())
 }
 
@@ -131,7 +168,10 @@ pub fn assemble_global_m(
         Some(opt),
     )
     .map_err(sepika_math::solver::SolveError::InvalidInput)?;
-    validate_global_mass_inputs(model)?;
+    validate_mass_inputs(
+        model,
+        model.mass_method != sepika_core::model::MassMethod::LumpedOnly,
+    )?;
     let mut all_triplets = Vec::new();
     if model.mass_method != sepika_core::model::MassMethod::LumpedOnly {
         for elem in &model.elements {
@@ -172,6 +212,7 @@ pub fn assemble_global_m(
     Ok(assemble_csc(dofmap.n_active(), all_triplets))
 }
 
+/// `model` は `Model::validate_local_frames` 済みを前提とする。
 pub fn assemble_global_f(model: &Model, dofmap: &DofMap, lc: LoadCaseId) -> Vec<f64> {
     let n_active = dofmap.n_active();
     let mut f = vec![0.0; n_active];
@@ -228,7 +269,8 @@ pub(crate) fn member_load_frame(model: &Model, elem: &ElementData) -> Option<(Lo
         return None;
     }
     Some((
-        LocalFrame::from_nodes(p_i, p_j, elem.local_axis.ref_vector),
+        LocalFrame::from_nodes(p_i, p_j, elem.local_axis.ref_vector)
+            .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", elem.id.0)),
         length,
     ))
 }

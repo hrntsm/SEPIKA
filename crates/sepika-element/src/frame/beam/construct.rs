@@ -34,17 +34,35 @@ pub(crate) fn eval_sections_of(
 
 impl BeamElement {
     pub fn new(data: &sepika_core::model::ElementData, model: &Model) -> Self {
-        Self::try_new(data, model)
-            .unwrap_or_else(|error| panic!("質量特性を解決できません: {error}"))
+        Self::try_new(data, model).unwrap_or_else(|error| panic!("弾性梁を構築できません: {error}"))
     }
 
+    /// 採用 G [N/mm²] が不正、または弾性梁の可撓部剛性が非有限なら、部材 ID 付きのエラーを返す。
     pub fn try_new(data: &sepika_core::model::ElementData, model: &Model) -> Result<Self, String> {
+        let beam = Self::resolve_properties(data, model)?;
+        if matches!(
+            data.kind,
+            sepika_core::model::ElementKind::Beam
+                | sepika_core::model::ElementKind::Fiber
+                | sepika_core::model::ElementKind::MultiSpring
+        ) {
+            beam.checked_stiffness_flex_raw()?;
+        }
+        Ok(beam)
+    }
+
+    pub(crate) fn resolve_properties(
+        data: &sepika_core::model::ElementData,
+        model: &Model,
+    ) -> Result<Self, String> {
         let geom = crate::transform::EndGeometry::of_element(data, model);
         let [n0, n1] = geom.nodes;
         let [p0, p1] = geom.coords;
         let len = geom.length;
 
-        let axis = geom.local_frame(data.local_axis.ref_vector);
+        let axis = geom
+            .local_frame(data.local_axis.ref_vector)
+            .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", data.id.0))?;
         let sec = get_section(model, data.section);
         let section_error =
             |error| format!("部材 ID {} の断面「{}」: {error}", data.id.0, sec.name);
@@ -94,6 +112,12 @@ impl BeamElement {
             _ => (mat.young, mat.shear_modulus()),
         };
         let composite = super::stiffness_factors::composite_props_of(model, data)?;
+        if !g.is_finite() || g <= 0.0 {
+            return Err(format!(
+                "部材 ID {} の弾性梁のせん断弾性係数 G は正の有限値が必要です",
+                data.id.0
+            ));
+        }
         let a_stiff = composite.map_or(sec.area, |p| p.area_ax);
         let (sec_iy, sec_iz, j, sec_as_y, sec_as_z) = match &composite {
             Some(p) => (p.iy, p.iz, p.j, p.as_y, p.as_z),
@@ -243,7 +267,7 @@ impl BeamElement {
             Err(error) => (Default::default(), Some(error)),
         };
 
-        Ok(Self {
+        let beam = Self {
             id: data.id,
             e,
             g,
@@ -269,6 +293,7 @@ impl BeamElement {
             committed_member_loads: Vec::new(),
             trial_member_loads: Vec::new(),
             local_stiffness_cache: std::sync::OnceLock::new(),
-        })
+        };
+        Ok(beam)
     }
 }

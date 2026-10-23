@@ -485,7 +485,7 @@ mod tests {
                 floor: None,
                 frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
                 panel_thickness: None,
-                thickness: None,
+                thickness: Some(10.0),
                 shape: None,
                 material: Some(MaterialId(0)),
                 rebar_material: None,
@@ -1650,7 +1650,7 @@ mod tests {
     }
     include!("server_lifecycle_tests.rs");
     #[tokio::test]
-    async fn sm520_design_job_keeps_out_of_range_summary_after_force_retrieval_and_recalculation() {
+    async fn sm520_design_job_rejects_out_of_range_and_keeps_independent_forces() {
         for name in ["SM520", "SM520B", "SM520C"] {
             for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
                 let mut model = cantilever_with_load_case();
@@ -1671,16 +1671,14 @@ mod tests {
                         .await
                         .unwrap();
                     let status = wait_for_terminal(&server, &extract_job_id(&job)).await;
-                    let summary = done_summary(&status);
-                    assert!(summary["n_checks"].as_u64().unwrap() > 0);
-                    assert_eq!(summary["n_checks"], summary["n_skipped"]);
-                    assert_eq!(summary["all_checked_and_ok"], false);
-                    assert_eq!(summary["all_members_checked_and_ok"], false);
-                    assert!(summary["member_skipped"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .all(|row| row["reason"].as_str().unwrap().contains("適用範囲")));
+                    let JobStatus::Failed { error, kind } = status else {
+                        panic!("範囲外鋼材が正常完了しました: {status:?}")
+                    };
+                    assert_eq!(kind, "invalid_input");
+                    assert!(
+                        error.contains("部材 0") && error.contains("適用範囲"),
+                        "{error}"
+                    );
                     let forces = server
                         .result_get(Parameters(ResultGetArgs {
                             case: 1,
@@ -1703,7 +1701,14 @@ mod tests {
                     .await
                     .unwrap();
                 let status = wait_for_terminal(&reopened, &extract_job_id(&job)).await;
-                assert_eq!(done_summary(&status)["all_members_checked_and_ok"], false);
+                let JobStatus::Failed { error, kind } = status else {
+                    panic!("再読込後に範囲外鋼材が正常完了しました: {status:?}")
+                };
+                assert_eq!(kind, "invalid_input");
+                assert!(
+                    error.contains("部材 0") && error.contains("適用範囲"),
+                    "{error}"
+                );
             }
         }
     }

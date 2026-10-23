@@ -243,6 +243,7 @@ pub struct MemberHistory {
 /// 1 確定ステップの部材端応答（ヒンジ詳細図の応答経路の 1 点。格納量を抑えるため
 /// f32）。曲げは危険断面＝剛域フェイス位置の局所成分、回転は弦（変形後の材端を
 /// 結ぶ直線）からの材端回転で、M-θ 曲線・N-M 相関図の応答経路の描画に用いる。
+/// 各成分は有限値で、f32 変換後に非有限となる応答は解析エラーとする。
 #[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct MemberStepState {
     /// 軸力 `[N]`（圧縮正、引張は負値）。

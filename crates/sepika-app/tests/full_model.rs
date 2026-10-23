@@ -1457,18 +1457,23 @@ fn story_metrics_computed_for_every_layer() {
             m.drift
         );
         assert!(
-            m.rs > 0.0 && m.rs.is_finite(),
+            *m.rs.as_ref().unwrap() > 0.0 && m.rs.as_ref().unwrap().is_finite(),
             "層 {} の剛性率が異常: {}",
             m.name,
-            m.rs
+            m.rs.as_ref().unwrap()
         );
         assert!(
-            m.re >= 0.0 && m.re.is_finite(),
+            *m.re.as_ref().unwrap() >= 0.0 && m.re.as_ref().unwrap().is_finite(),
             "層 {} の偏心率が異常: {}",
             m.name,
-            m.re
+            m.re.as_ref().unwrap()
         );
-        assert!(m.fes >= 1.0, "層 {} の Fes が 1.0 未満: {}", m.name, m.fes);
+        assert!(
+            *m.fes.as_ref().unwrap() >= 1.0,
+            "層 {} の Fes が 1.0 未満: {:?}",
+            m.name,
+            m.fes
+        );
     }
 }
 
@@ -2478,6 +2483,7 @@ fn wall_regions_survive_save_reopen_reprepare() {
 }
 
 fn assert_panel_505_fixture_geometry_and_states(app: &App) {
+    use sepika_core::{model::FrameSectionUse, section_shape::SectionShape};
     use sepika_design_jp::CheckOutcome;
     let model = &app.core.model;
     let source_id = |node| {
@@ -2488,8 +2494,8 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
             .unwrap()
             .id
     };
-    // model.stbの鋼接合42節点のうち、X面でH500/tf16とH700/tf19が相対する12節点。
     let staggered = [14, 17, 20, 23, 26, 29, 32, 35, 38, 41, 45, 49];
+    let unequal_ms_depth = [15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 46, 50];
     let standard = [
         13, 15, 16, 18, 19, 21, 22, 24, 25, 27, 28, 30, 31, 33, 34, 36, 37, 39, 40, 42, 43, 44, 46,
         47, 48, 50, 51, 52, 53, 54,
@@ -2515,23 +2521,101 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
         .collect();
     assert_eq!(checks.len(), 42 * 2);
     let mut skipped = Vec::new();
+    let mut ms_depth_skipped = Vec::new();
     for id in standard.into_iter().chain(staggered) {
         let pair: Vec<_> = checks.iter().filter(|c| source_id(c.node) == id).collect();
         assert_eq!(pair.len(), 2, "STB節点{id}");
-        let x = pair
-            .iter()
-            .find(|c| c.label.contains("[1.000, 0.000, 0.000]"))
-            .unwrap();
-        let y = pair
-            .iter()
-            .find(|c| c.label.contains("[0.000, 1.000, 0.000]"))
-            .unwrap();
-        assert!(
-            matches!(y.outcome, CheckOutcome::Checked(_)),
-            "STB節点{id}直交Y面"
+        let node = model.node(pair[0].node).unwrap();
+        let mut flange_distances = [Vec::new(), Vec::new()];
+        for member in model.elements.iter().filter(|e| e.nodes.contains(&node.id)) {
+            let Some(section) = model.element_section(member) else {
+                continue;
+            };
+            if section.frame_use == Some(FrameSectionUse::Column) {
+                assert_eq!(member.local_axis.ref_vector, [1.0, 0.0, 0.0]);
+                let ends = member
+                    .nodes
+                    .iter()
+                    .map(|n| model.node(*n).unwrap().coord)
+                    .collect::<Vec<_>>();
+                assert_eq!(ends[0][0..2], ends[1][0..2]);
+            } else if section.frame_use == Some(FrameSectionUse::Girder) {
+                let a = model.node(member.nodes[0]).unwrap().coord;
+                let b = model.node(member.nodes[1]).unwrap().coord;
+                assert_eq!(a[2], b[2]);
+                let direction = if a[1] == b[1] {
+                    0
+                } else {
+                    assert_eq!(a[0], b[0]);
+                    1
+                };
+                let Some(SectionShape::SteelH {
+                    height,
+                    flange_thick,
+                    ..
+                }) = section.shape
+                else {
+                    panic!("STB節点{id}の鋼梁断面");
+                };
+                assert!(matches!(
+                    (height, flange_thick),
+                    (500.0, 16.0) | (700.0, 19.0)
+                ));
+                flange_distances[direction].push(height - flange_thick);
+            }
+        }
+        for distances in &mut flange_distances {
+            distances.sort_by(f64::total_cmp);
+            distances.dedup();
+        }
+        assert_eq!(flange_distances[1], [484.0], "STB節点{id} Y面");
+        assert_eq!(
+            flange_distances[0],
+            if staggered.contains(&id) {
+                vec![484.0, 681.0]
+            } else if unequal_ms_depth.contains(&id) {
+                vec![681.0]
+            } else {
+                vec![484.0]
+            },
+            "STB節点{id} X面"
         );
+        assert_eq!(
+            app.core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .panel_moments
+                .iter()
+                .any(|(n, _)| *n == node.id),
+            !staggered.contains(&id)
+        );
+        let strong = pair
+            .iter()
+            .find(|c| c.label == "パネルゾーン(S) 強軸")
+            .unwrap();
+        let weak = pair
+            .iter()
+            .find(|c| c.label == "パネルゾーン(S) 弱軸")
+            .unwrap();
+        if unequal_ms_depth.contains(&id) {
+            assert!(
+                matches!(&weak.outcome, CheckOutcome::Skipped { reason }
+                if reason.contains("解析MS応答の共通db=681 mm") && reason.contains("柱弱軸") && reason.contains("db=484 mm") && reason.contains("不整合")),
+                "STB節点{id}: {:?}",
+                weak.outcome
+            );
+            ms_depth_skipped.push(id);
+        } else {
+            assert!(
+                matches!(weak.outcome, CheckOutcome::Checked(_)),
+                "STB節点{id}弱軸: {:?}",
+                weak.outcome
+            );
+        }
         if staggered.contains(&id) {
-            let CheckOutcome::Skipped { reason } = &x.outcome else {
+            let CheckOutcome::Skipped { reason } = &strong.outcome else {
                 panic!("STB節点{id}段違いX面");
             };
             assert!(
@@ -2545,17 +2629,19 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
             skipped.push(id);
         } else {
             assert!(
-                matches!(x.outcome, CheckOutcome::Checked(_)),
+                matches!(strong.outcome, CheckOutcome::Checked(_)),
                 "STB節点{id}標準X面"
             );
         }
     }
     skipped.sort_unstable();
     assert_eq!(skipped, staggered);
+    ms_depth_skipped.sort_unstable();
+    assert_eq!(ms_depth_skipped, unequal_ms_depth);
 }
 
 #[test]
-fn panel_505_real_fixture_retains_standard_joints_and_skips_only_staggered_planes() {
+fn panel_758_real_fixture_keeps_two_axes_and_distinguishes_staggered_and_ms_depth_mismatch() {
     let mut app = prepared();
     app.run_linear_static(
         app.core
@@ -2734,8 +2820,14 @@ fn snapshot_key_scalars() {
             &format!("metrics[{}].drift_angle", m.name),
             sig4(m.drift_angle),
         );
-        line(&format!("metrics[{}].Rs", m.name), sig4(m.rs));
-        line(&format!("metrics[{}].Re", m.name), sig4(m.re));
+        line(
+            &format!("metrics[{}].Rs", m.name),
+            sig4(*m.rs.as_ref().unwrap()),
+        );
+        line(
+            &format!("metrics[{}].Re", m.name),
+            sig4(*m.re.as_ref().unwrap()),
+        );
     }
 
     app.run_pushover();
@@ -2973,6 +3065,7 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     assert_no_error(&app, "整合GLの地震静的");
     app.run_pushover();
     assert_no_error(&app, "整合GLの増分解析");
+    app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
     let qud = app.compute_holding_capacity().unwrap().0.stories[0].qud;
     assert!((qud - 217_750.0).abs() < 1e-8);
@@ -3071,6 +3164,7 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     app.core.analysis_cfg.push_apply_long_term = false;
     app.run_pushover();
     assert_no_error(&app, "GL跨ぎ混合構造の増分解析");
+    app.run_seismic(SeismicDir::Y);
     select_holding_points(&mut app);
 
     assert!((app.compute_holding_capacity().unwrap().0.stories[0].qud - 215_250.0).abs() < 1e-7);

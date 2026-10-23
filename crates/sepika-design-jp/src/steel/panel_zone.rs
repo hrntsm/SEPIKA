@@ -2,8 +2,7 @@
 //! 鋼構造接合部設計指針のパネルゾーン部分に準拠）。
 //!
 //! 数値入力を受け取る純関数として実装する。パネルの寸法・形状係数 κ・
-//! 実効体積 `Ve` は仕口パネルのモデル化と同一の値
-//! （[`sepika_core::panel_zone::PanelGeometry`] を唯一の出所とする）。
+//! 実効体積 `Ve` は柱主軸ごとの諸元と、検証済みの梁フランジ間距離から求める。
 
 use crate::{CheckComponent, CheckKind, CheckResult};
 use sepika_core::panel_zone::{
@@ -31,15 +30,8 @@ pub struct SPanelInput {
     pub col_shear_upper: f64,
     /// 下柱せん断力 `[N]`。
     pub col_shear_lower: f64,
-    /// 設計用パネルモーメント `pM` [N·mm] を直接与える場合の値。
-    ///
-    /// 仕口パネルをモデル化した接合部では、解析が出力するパネルせん断モーメント
-    /// `{MSX, MSY}` を検討面へ投影した値を与える。節点まわりのモーメント
-    /// 釣り合いが解析上厳密に満たされた値であり、梁端モーメント・柱せん断から
-    /// 手で組み立てる近似（`beam_moment_*` / `col_shear_*`）を経ない。
-    ///
-    /// `None` のときは
-    /// `pM = bML + bMR − (cQU + cQL)・db/2` で組み立てる。
+    /// 柱の対象主軸の設計用モーメント `pM` `[N·mm]`。指定時は材端力を再加算しない。
+    /// 未指定時は `bML + bMR − (cQU + cQL) db/2` で組み立てる。
     pub design_moment: Option<f64>,
 }
 
@@ -64,6 +56,7 @@ pub fn s_panel_zone_check(inp: &SPanelInput) -> Result<CheckResult, String> {
     let kappa = inp.geometry.kappa();
     let shape_label = match inp.geometry.kind {
         PanelShapeKind::H { .. } => "H形",
+        PanelShapeKind::HWeak => "H形(弱軸)",
         PanelShapeKind::Box { .. } => "角形",
         PanelShapeKind::Pipe => "円形",
     };

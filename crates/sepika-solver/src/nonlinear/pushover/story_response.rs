@@ -439,7 +439,8 @@ pub(super) fn record_cuts(
                         pi,
                         pj,
                         elem.local_axis.ref_vector,
-                    );
+                    )
+                    .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", elem.id.0));
                     (pj[2] - pi[2]).signum()
                         * (section[0] * frame.rot[0][d]
                             - section[1] * frame.rot[1][d]

@@ -326,7 +326,9 @@ pub(super) fn draw_section_solids(
         if sepika_core::geom::vec3::dot(d, d) < 1e-6 {
             return true;
         }
-        let frame = LocalFrame::from_nodes(p_i, p_j, ref_vector);
+        let Ok(frame) = LocalFrame::from_nodes(p_i, p_j, ref_vector) else {
+            return false;
+        };
         let ey = frame.rot[1];
         let ez = frame.rot[2];
         let ring = |p: [f64; 3]| -> Vec<[f32; 3]> {

@@ -1074,7 +1074,8 @@ mod rc_gravity_contract_tests {
                         q_simple_by_elem: (method != QdMethod::Qd2).then_some(&q0),
                         ..Default::default()
                     },
-                );
+                )
+                .unwrap();
                 assert!(!report.member_checks.is_empty());
                 for (_, _, outcome) in report.member_checks {
                     if expected_checked {
@@ -1095,7 +1096,8 @@ mod rc_gravity_contract_tests {
                     qd_method: method,
                     ..Default::default()
                 },
-            );
+            )
+            .unwrap();
             assert!(!ordinary.member_checks.is_empty());
             assert!(ordinary
                 .member_checks

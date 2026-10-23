@@ -48,9 +48,9 @@ pub fn collect_joint_checks(
 ///
 /// `panel_moments` には、仕口パネルをモデル化した接合部で解析が出力した
 /// せん断モーメント `{MSX, MSY}` [N·mm] を節点ごとに渡す。該当する節点の
-/// S 造パネルゾーン検定は、検討面の成分を設計用パネルモーメント
-/// `pM` に用いる。空スライス、または該当節点が含まれない場合は、
-/// 梁端モーメント・柱せん断から `pM` を組み立てる。**検定の実施自体はパネルのモデル化の有無に依らない**。
+/// S/CFT 造仕口パネル検定は、柱2主軸へ仕事共役な逆変換で復元する。
+/// 応答がない節点では鉛直柱の材端力を符号付きで集約する。非鉛直柱の材端力組立は未算定。
+/// 標準形式と方向別のフランジ高さ・dbが不整合な軸は理由付き未算定。
 pub fn collect_joint_checks_with_long(
     model: &Model,
     member_forces: &[(ElemId, ForcesAt<'_>)],
@@ -187,3 +187,5 @@ pub fn collect_wall_design_checks(
         load_terms,
     )
 }
+
+pub(crate) use steel_panel::validate_steel_panel_inputs;

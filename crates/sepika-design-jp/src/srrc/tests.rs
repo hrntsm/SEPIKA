@@ -1317,7 +1317,8 @@ fn src_beam_public_runner_rejects_requested_gravity_gaps_without_reviving_result
                     long_member_forces: Some(long),
                     ..Default::default()
                 },
-            );
+            )
+            .unwrap();
             assert_eq!(report.member_checks.len(), 3);
             for (_, _, outcome) in &report.member_checks {
                 if checked {
@@ -1339,7 +1340,8 @@ fn src_beam_public_runner_rejects_requested_gravity_gaps_without_reviving_result
                 long_member_forces: Some(&complete),
                 ..Default::default()
             },
-        );
+        )
+        .unwrap();
         let with_q0 = run_member_design_checks(
             &model,
             &short,
@@ -1351,7 +1353,8 @@ fn src_beam_public_runner_rejects_requested_gravity_gaps_without_reviving_result
                 q_simple_by_elem: Some(&q0),
                 ..Default::default()
             },
-        );
+        )
+        .unwrap();
         for (without, with) in without_q0.member_checks.iter().zip(&with_q0.member_checks) {
             let (CheckOutcome::Checked(a), CheckOutcome::Checked(b)) = (&without.2, &with.2) else {
                 panic!("正常参照は検定可能");
@@ -1379,7 +1382,8 @@ fn src_beam_public_runner_rejects_requested_gravity_gaps_without_reviving_result
                     long_member_forces: Some(long),
                     ..Default::default()
                 },
-            );
+            )
+            .unwrap();
             assert_eq!(
                 report
                     .member_checks

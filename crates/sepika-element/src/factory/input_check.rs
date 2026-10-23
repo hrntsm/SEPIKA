@@ -64,6 +64,10 @@ pub fn ensure_wall_side_column_analysis(
             && model.mass_method != sepika_core::model::MassMethod::LumpedOnly
             && !model.uses_damper_total_weight(data)
         {
+            model.validate_local_frames()?;
+            if let Some(reason) = elastic_stiffness_input_issue(data, model) {
+                return Err(failure(&reason));
+            }
             super::build_behavior(data, model)
                 .try_mass_matrix(crate::behavior::MassOption::Consistent)
                 .map_err(|error| failure(&error))?;
@@ -241,7 +245,8 @@ fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
 ///
 /// 壁上下の剛梁は弾性剛性・形状・質量に必要な入力だけを検査する。
 ///
-/// 弾性としてモデル化することが仕様である要素（`Shell` / `PanelZone` / `NodalSpring`、
+/// 仕口パネルは採用柱の解決に失敗した場合も診断する。
+/// 弾性としてモデル化することが仕様である要素（`Shell` / `NodalSpring`、
 /// および特性を専用の属性で持つ `Isolator` / `Damper` / `Brace`）は対象外。
 pub fn nonlinear_input_issues(model: &Model) -> Vec<String> {
     nonlinear_input_issues_for_kind(model, sepika_core::model::AnalysisKind::Incremental)
@@ -282,6 +287,11 @@ fn nonlinear_input_issues_with_basis(
             continue;
         }
         let issue = match elem.kind {
+            ElementKind::PanelZone => elem.nodes.first().and_then(|node| {
+                sepika_core::panel_zone::resolve_explicit_panel_joint(model, *node, &model.elements)
+                    .err()
+                    .map(|reason| reason.to_string())
+            }),
             ElementKind::Wall => crate::wall::wall_element::WallElement::wall_shear_capacity_issue(
                 elem, model, basis,
             )
@@ -434,6 +444,23 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
     };
     if let Some(msg) = category_mismatch_issue(data, sec, mat) {
         return Some(msg);
+    }
+    let shear_material = if sec.is_some_and(|section| section.is_cft()) {
+        model.element_steel_material(data)
+    } else {
+        Some(mat)
+    };
+    if let Some(material) =
+        shear_material.filter(|material| material.young.is_finite() && material.young > 0.0)
+    {
+        let g = material.shear_modulus();
+        if !g.is_finite() || g <= 0.0 {
+            if let Err(reason) = crate::frame::beam::BeamElement::try_new(data, model) {
+                return Some(reason);
+            }
+        } else if let Some(reason) = elastic_stiffness_input_issue(data, model) {
+            return Some(reason);
+        }
     }
     let stiffness = match crate::frame::beam::stiffness_breakdown(model, data) {
         Ok(stiffness) => stiffness,
@@ -653,17 +680,14 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
 }
 
 fn elastic_member_input_issue(data: &ElementData, model: &Model) -> Option<String> {
-    let beam = match crate::frame::beam::BeamElement::try_new(data, model) {
-        Ok(beam) => beam,
-        Err(reason) => {
-            return Some(format!(
-                "部材 ID {} の弾性剛性入力が不正です: {reason}",
-                data.id.0
-            ))
-        }
-    };
-    if let Some(reason) = elastic_young_issue(data, beam.e) {
+    if let Some(reason) = elastic_stiffness_input_issue(data, model) {
         return Some(reason);
+    }
+    if let Err(reason) = crate::frame::beam::BeamElement::try_new(data, model) {
+        return Some(format!(
+            "部材 ID {} の弾性剛性入力が不正です: {reason}",
+            data.id.0
+        ));
     }
     model
         .element_mass_properties(data)
@@ -712,13 +736,45 @@ pub fn ensure_rc_beam_reference_loads(
     Ok(())
 }
 
-/// 断面・材料を解決できる弾性梁のEが正の有限値でなければ部材ID付きの理由を返す。
-/// 構築に必要な他の入力不備は既存の入力診断で扱う。
-pub fn elastic_young_input_issue(data: &ElementData, model: &Model) -> Option<String> {
-    model.element_section(data)?;
-    model.element_material(data)?;
-    let beam = crate::frame::beam::BeamElement::try_new(data, model).ok()?;
-    elastic_young_issue(data, beam.e)
+/// 線材の E・採用 G、弾性梁の剛性・端部縮約が不正なら部材 ID 付きの理由を返す。
+/// SRC/CFT の構築不備と他の入力不備は既存の断面・材料診断で扱う。
+pub fn elastic_stiffness_input_issue(data: &ElementData, model: &Model) -> Option<String> {
+    let section = model.element_section(data)?;
+    let material = model.element_material(data)?;
+    match crate::frame::beam::BeamElement::resolve_properties(data, model) {
+        Ok(beam) => elastic_young_issue(data, beam.e).or_else(|| {
+            matches!(
+                data.kind,
+                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+            )
+            .then(|| beam.validate_stiffness().err())
+            .flatten()
+        }),
+        Err(error) => {
+            let composite = matches!(
+                section.shape,
+                Some(
+                    SectionShape::SrcBeamRect { .. }
+                        | SectionShape::SrcColumnRect { .. }
+                        | SectionShape::CftBox { .. }
+                        | SectionShape::CftPipe { .. }
+                )
+            );
+            if composite {
+                // 材料別・部材群別の既存診断を先取りしない。
+                return None;
+            }
+            if let Some(reason) = elastic_young_issue(data, material.young) {
+                return Some(reason);
+            }
+            let g = material.shear_modulus();
+            (matches!(
+                data.kind,
+                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+            ) && (!g.is_finite() || g <= 0.0))
+                .then_some(error)
+        }
+    }
 }
 
 fn elastic_young_issue(data: &ElementData, young_n_mm2: f64) -> Option<String> {

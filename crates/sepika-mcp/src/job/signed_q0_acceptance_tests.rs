@@ -64,7 +64,7 @@ fn signed_q0_mcp_nonstandard_live_factor_is_reasoned_unchecked_and_steel_needs_n
     steel.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
     model.sections[0] = steel;
     model.materials[0].category = sepika_core::model::MaterialCategory::Steel;
-    model.materials[0].name = "SS400".into();
+    model.materials[0].name = "Q0検証用直接鋼材".into();
     model.materials[0].young = 205000.0;
     model.materials[0].density = 7.85e-9;
     model.materials[0].fy = Some(235.0);

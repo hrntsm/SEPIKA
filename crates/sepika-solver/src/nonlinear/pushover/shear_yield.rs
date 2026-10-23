@@ -6,6 +6,7 @@
 //! - [`effective_clear_span`] — 剛域控除後の内法スパン h0
 //! - [`track_shear_yield`] — 各ステップのせん断降伏を軸力 σ0 を反映して判定
 
+use super::geom::member_local_frame;
 use super::geom::{axial_compression, dot3, recording_force};
 use super::types::ShearYieldEvent;
 use sepika_core::material_grade::{material_strength_factor_rebar, material_strength_factor_steel};
@@ -13,7 +14,6 @@ use sepika_core::model::{ElementData, Material, Model, RigidZone, Section};
 use sepika_core::rc_capacity::{rc_qsu_simple, RcCapacityInput};
 use sepika_core::section_shape::SectionShape;
 use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse};
-use sepika_element::transform::LocalFrame;
 
 /// せん断降伏耐力 Qy の判定しきい値（部材ごと、局所 y・z 方向、独立）。
 pub(crate) struct ShearThreshold {
@@ -380,7 +380,8 @@ pub(crate) fn track_shear_yield(
         if elem_length(model, elem).is_none() {
             continue;
         }
-        let frame = LocalFrame::from_nodes(pi.coord, pj.coord, elem.local_axis.ref_vector);
+        let frame = member_local_frame(elem, pi.coord, pj.coord)
+            .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", elem.id.0));
         let ex = frame.rot[0];
         let ey = frame.rot[1];
         let ez = frame.rot[2];

@@ -3549,3 +3549,18 @@ fn euler極限の零ねじりは有限軸曲げ剛性を保つ() {
         }
     }
 }
+
+#[test]
+fn consistent_mass_reports_singular_end_release_as_a_result_error() {
+    use crate::behavior::{ElementBehavior, MassOption};
+    let mut beam = make_test_beam();
+    beam.e = 0.0;
+    beam.end_cond = [EndCondition::Pinned, EndCondition::Fixed];
+    let error = beam.try_mass_matrix(MassOption::Consistent).err().unwrap();
+    assert!(
+        error.contains("部材 ID 0")
+            && error.contains("端部解放質量")
+            && error.contains("Kbb が特異"),
+        "{error}"
+    );
+}

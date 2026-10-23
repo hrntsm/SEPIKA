@@ -216,7 +216,6 @@ impl App {
             check_holding_capacity_at_state, MemberRank,
         };
         use sepika_design_jp::secondary::member_rank::worst_rank;
-        use sepika_design_jp::steel_f_value_prefix;
         use sepika_solver::nonlinear::pushover::story_response::{EvaluationPurpose, ForceGroup};
         use sepika_solver::nonlinear::pushover::MechanismType;
 
@@ -225,7 +224,7 @@ impl App {
         self.core.scoped.ds_beta_u_unavailable = false;
         self.core.scoped.ds_rank_fallback_stories.clear();
         self.core.scoped.ds_wall_details.clear();
-        self.apply_rigid_zones_for_analysis();
+        self.apply_rigid_zones_for_analysis()?;
         for elem in &self.core.model.elements {
             if !matches!(
                 elem.kind,
@@ -254,6 +253,15 @@ impl App {
             } else {
                 None
             };
+            let is_steel_brace = elem_is_steel(elem, &self.core.model)
+                && (matches!(elem.kind, sepika_core::model::ElementKind::Brace { .. })
+                    || sepika_design_jp::MemberKind::of_element(elem, &self.core.model)
+                        == sepika_design_jp::MemberKind::Brace);
+            if is_steel_brace {
+                sepika_design_jp::material_strength::section_steel_f(sec, material)
+                    .map_err(|reason| format!("部材 {:?}・断面 {:?}: {reason}", elem.id, sec.id))?;
+                continue;
+            }
             if let Some(reason) = material.and_then(|m| {
                 sepika_core::material_grade::steel_f_value_issue(
                     &m.name,
@@ -379,6 +387,19 @@ impl App {
 
         let metrics =
             crate::summary::compute_story_metrics_with(&self.core.model, &st.disp, view_dir, &ctx);
+
+        let fes: Vec<f64> = metrics
+            .iter()
+            .map(|m| m.fes.clone())
+            .collect::<Result<_, _>>()?;
+        let rs: Vec<f64> = metrics
+            .iter()
+            .map(|m| m.rs.clone())
+            .collect::<Result<_, _>>()?;
+        let re: Vec<f64> = metrics
+            .iter()
+            .map(|m| m.re.clone())
+            .collect::<Result<_, _>>()?;
 
         if sepika_load::wall_expand::model_has_wall_plates_to_expand(&self.core.model) {
             let generation = po
@@ -609,11 +630,11 @@ impl App {
                     if radius <= 0.0 {
                         continue;
                     }
-                    let f_value = steel_f_value_prefix(
-                        &mat.name,
-                        sepika_design_jp::material_strength::plate_thickness(sec),
-                    )
-                    .unwrap_or(235.0);
+                    let f_value =
+                        sepika_design_jp::material_strength::section_steel_f(sec, Some(mat))
+                            .map_err(|reason| {
+                                format!("部材 {:?}・断面 {:?}: {reason}", elem.id, sec.id)
+                            })?;
                     steel_brace_type(len / radius, f_value)
                 } else if elem_steel {
                     let Some(shape) = sec.shape.as_ref() else {
@@ -964,9 +985,6 @@ impl App {
             .collect::<Result<Vec<_>, String>>()?;
         self.core.scoped.ds_beta_u_by_story = beta_u_by_story;
         let heights: Vec<f64> = metrics.iter().map(|m| m.height).collect();
-        let rs: Vec<f64> = metrics.iter().map(|m| m.rs).collect();
-        let re: Vec<f64> = metrics.iter().map(|m| m.re).collect();
-        let fes: Vec<f64> = metrics.iter().map(|m| m.fes).collect();
 
         let capacity_curve = capacity_po
             .capacity_curve
@@ -1498,6 +1516,7 @@ mod tests {
             app.core.scoped.last_error
         );
         app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
         app.run_pushover();
         assert!(
             app.core.scoped.last_error.is_none(),

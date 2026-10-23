@@ -703,7 +703,8 @@ fn side_column_section_is_parallel(
         first.coord,
         second.coord,
         column.local_axis.ref_vector,
-    );
+    )
+    .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", column.id.0));
     let parallel = |a, b| (dot(a, b).abs() - 1.0).abs() <= 1e-9;
     dot(wall.ex_bottom, height_direction).abs() <= 1e-9
         && parallel(frame.rot[0], height_direction)

@@ -247,7 +247,18 @@ fn cft_material_failure_groups_all_members_and_recovers_on_the_next_call() {
     assert!(issue.short.contains("Gs"), "{}", issue.short);
     let error = prepare_error(&model);
     assert!(error.contains("Gs"), "{error}");
+    let direct_error =
+        match sepika_element::frame::beam::BeamElement::try_new(&model.elements[0], &model) {
+            Ok(_) => panic!("不正な鋼管Gは受理されない"),
+            Err(error) => error,
+        };
+    let once_error = sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(0))
+        .unwrap_err()
+        .to_string();
+    assert!(once_error.contains(&direct_error), "{once_error}");
+    assert!(error.contains(&direct_error), "{error}");
     model.materials[0].shear = Some(61_000.0);
+    assert!(sepika_solver::statics::linear::linear_static_once(&model, LoadCaseId(0)).is_ok());
     assert!(!model_issues(&model)
         .iter()
         .any(|issue| issue.message.contains("等価断面性能を算定できません")));

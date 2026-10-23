@@ -1,6 +1,6 @@
 //! 仕口パネルへ接合する部材の適合。
 //!
-//! 節点の回転自由度へ `ζ・γ` を加える変換 `T = [I | C]` を内側の要素へ被せる。
+//! 全体系基底の係数 `γ` を柱直交面へ投影し、節点回転へ加える変換を部材へ被せる。
 //! 水平材は `ζ = −0.5`、鉛直材は `ζ = +0.5`。水平材と鉛直材のみを対象とする。
 
 use crate::behavior::{Ctx, ElementBehavior, LocalMat, LocalVec, MassOption};
@@ -8,7 +8,8 @@ use sepika_core::dof::DofMap;
 use sepika_core::ids::NodeId;
 use sepika_core::model::{ElementData, ElementKind, Model};
 use sepika_core::panel_zone::{
-    is_horizontal_or_vertical_member, member_orientation, MemberOrientation,
+    is_horizontal_or_vertical_member, member_orientation, resolve_explicit_panel_analysis_joint,
+    MemberOrientation,
 };
 use smallvec::SmallVec;
 
@@ -22,11 +23,11 @@ const ZETA_COLUMN: f64 = 0.5;
 pub struct PanelEnd {
     /// パネルが設けられた節点（追加自由度 `γX`・`γY` の持ち主）。
     pub node: NodeId,
-    /// 接合面で決まる係数 ζ（はり `−0.5`・柱 `+0.5`）。
-    pub zeta: f64,
+    /// 追加自由度を全体座標の回転へ写す行列。梁は柱直交面への投影の `−0.5` 倍、柱は `+0.5` 倍。
+    pub rotation: [[f64; 2]; 3],
 }
 
-/// 部材 `data` の各端が仕口パネルへ接合するかを調べ、接合面の係数 ζ を返す。
+/// 各端の仕口パネルへの接続を調べ、採用柱の直交面への投影を含む回転変換を返す。
 ///
 /// どちらの端もパネルへ接合しない場合は `None`。
 pub fn resolve(data: &ElementData, model: &Model) -> Option<[Option<PanelEnd>; 2]> {
@@ -41,23 +42,25 @@ pub fn resolve(data: &ElementData, model: &Model) -> Option<[Option<PanelEnd>; 2
         MemberOrientation::Beam => ZETA_BEAM,
     };
 
-    let is_panel_node = |nid: NodeId| {
-        model
-            .elements
-            .iter()
-            .any(|e| matches!(e.kind, ElementKind::PanelZone) && e.nodes.first() == Some(&nid))
+    let panel_end = |nid: NodeId| {
+        if !model.elements.iter().any(|element| {
+            matches!(element.kind, ElementKind::PanelZone) && element.nodes.first() == Some(&nid)
+        }) {
+            return None;
+        }
+        let joint = resolve_explicit_panel_analysis_joint(model, nid, &model.elements).ok()??;
+        let axes = joint.moment_axes;
+        let rotation = std::array::from_fn(|row| {
+            std::array::from_fn(|col| {
+                zeta * (axes[0][row] * axes[0][col] + axes[1][row] * axes[1][col])
+            })
+        });
+        Some(PanelEnd {
+            node: nid,
+            rotation,
+        })
     };
-
-    let ends = [
-        is_panel_node(data.nodes[0]).then(|| PanelEnd {
-            node: data.nodes[0],
-            zeta,
-        }),
-        is_panel_node(data.nodes[1]).then(|| PanelEnd {
-            node: data.nodes[1],
-            zeta,
-        }),
-    ];
+    let ends = [panel_end(data.nodes[0]), panel_end(data.nodes[1])];
     if ends[0].is_none() && ends[1].is_none() {
         return None;
     }
@@ -67,6 +70,7 @@ pub fn resolve(data: &ElementData, model: &Model) -> Option<[Option<PanelEnd>; 2
 /// 仕口パネルへ接合する部材。
 ///
 /// 自由度の並びは `[内側の 12 自由度, (γX, γY)_i?, (γX, γY)_j?]`。
+/// `γ` は全体系 X/Y 基底を柱直交面へ投影する前の係数で、鉛直柱以外では全体回転 X/Y と異なる。
 pub struct PanelOffsetMember {
     inner: Box<dyn ElementBehavior>,
     ends: [Option<PanelEnd>; 2],
@@ -85,14 +89,20 @@ impl PanelOffsetMember {
     }
 
     /// `C`（12 × パネル自由度数）の非零成分を `(内側自由度, パネル自由度, 係数)` で列挙する。
-    fn coupling(&self) -> SmallVec<[(usize, usize, f64); 4]> {
+    fn coupling(&self) -> SmallVec<[(usize, usize, f64); 12]> {
         let mut out = SmallVec::new();
         let mut col = 12;
         for (side, end) in self.ends.iter().enumerate() {
             let Some(end) = end else { continue };
             let rot0 = if side == 0 { 3 } else { 9 };
-            out.push((rot0, col, end.zeta));
-            out.push((rot0 + 1, col + 1, end.zeta));
+            for row in 0..3 {
+                for axis in 0..2 {
+                    let coefficient = end.rotation[row][axis];
+                    if coefficient != 0.0 {
+                        out.push((rot0 + row, col + axis, coefficient));
+                    }
+                }
+            }
             col += 2;
         }
         out
@@ -347,7 +357,11 @@ mod tests {
                 SectionId(0)
             }),
             local_axis: LocalAxis {
-                ref_vector: [0.0, 1.0, 0.0],
+                ref_vector: if n0 == 2 || n1 == 2 {
+                    [0.0, 1.0, 0.0]
+                } else {
+                    [0.0, 0.0, 1.0]
+                },
             },
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
@@ -416,12 +430,18 @@ mod tests {
     fn test_resolve_assigns_zeta_by_member_direction() {
         let model = model_with_panel(200.0);
         let beam_ends = resolve(&model.elements[0], &model).expect("梁の i 端がパネル");
-        assert_eq!(beam_ends[0].map(|e| e.zeta), Some(ZETA_BEAM));
+        assert_eq!(
+            beam_ends[0].map(|e| e.rotation),
+            Some([[-0.5, 0.0], [0.0, -0.5], [0.0, 0.0]])
+        );
         assert!(beam_ends[1].is_none(), "j 端（節点 1）にパネルはない");
 
         let col_ends = resolve(&model.elements[1], &model).expect("柱の j 端がパネル");
         assert!(col_ends[0].is_none(), "i 端（節点 2）にパネルはない");
-        assert_eq!(col_ends[1].map(|e| e.zeta), Some(ZETA_COLUMN));
+        assert_eq!(
+            col_ends[1].map(|e| e.rotation),
+            Some([[0.5, 0.0], [0.0, 0.5], [0.0, 0.0]])
+        );
     }
 
     /// `resolve` は危険断面位置（`face_i`/`face_j`）を一切参照しない。
@@ -438,8 +458,8 @@ mod tests {
         }
         let moved_ends = resolve(&moved.elements[0], &moved).expect("梁");
         assert_eq!(
-            ends[0].map(|e| e.zeta),
-            moved_ends[0].map(|e| e.zeta),
+            ends[0].map(|e| e.rotation),
+            moved_ends[0].map(|e| e.rotation),
             "危険断面位置を動かしても接合面の ζ は変わらない"
         );
         assert!(moved_ends[1].is_none());
@@ -539,5 +559,263 @@ mod tests {
         let f = wrapped.internal_force(&ctx);
         assert!((f.data[12] - ZETA_BEAM * f.data[3]).abs() <= 1e-6 * f.data[3].abs().max(1.0));
         assert!((f.data[13] - ZETA_BEAM * f.data[4]).abs() <= 1e-6 * f.data[4].abs().max(1.0));
+    }
+
+    #[test]
+    fn panel_757_sloped_column_connections_project_into_the_same_physical_plane() {
+        let normals = [
+            [0.6, 0.0, 0.8],
+            [0.6 * 0.99_f64.sqrt(), 0.8 * 0.99_f64.sqrt(), 0.1],
+            [0.6 * 0.19_f64.sqrt(), 0.8 * 0.19_f64.sqrt(), 0.9],
+        ];
+        for normal in normals {
+            let mut model = model_with_panel(200.0);
+            model.nodes[2].coord = [
+                -3_000.0 * normal[0],
+                -3_000.0 * normal[1],
+                3_000.0 - 3_000.0 * normal[2],
+            ];
+            model.materials[0].density = 7.85e-9;
+            let ctx = Ctx { model: &model };
+            for (member_index, end_index, zeta) in [(0, 0, -0.5), (1, 1, 0.5)] {
+                let data = &model.elements[member_index];
+                let ends = resolve(data, &model).expect("既存の柱傾斜適用域");
+                let rotation = ends[end_index].unwrap().rotation;
+                for row in 0..3 {
+                    for col in 0..2 {
+                        let expected = zeta
+                            * ((if row == col { 1.0 } else { 0.0 }) - normal[row] * normal[col]);
+                        assert!((rotation[row][col] - expected).abs() < 1e-14);
+                    }
+                }
+                for axis in 0..2 {
+                    let axial_rotation: f64 =
+                        (0..3).map(|row| normal[row] * rotation[row][axis]).sum();
+                    assert!(axial_rotation.abs() < 1e-14);
+                }
+                if normal == [0.6, 0.0, 0.8] {
+                    assert!((rotation[0][0] / zeta - 0.64).abs() < 1e-14);
+                    assert!((rotation[2][0] / zeta + 0.48).abs() < 1e-14);
+                }
+                let mut control = crate::frame::beam::BeamElement::new(data, &model);
+                let inner = crate::frame::beam::BeamElement::new(data, &model);
+                let mut wrapped = PanelOffsetMember::new(Box::new(inner), ends);
+                let increment = LocalVec {
+                    data: smallvec::smallvec![
+                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.001, -0.002
+                    ],
+                };
+                let axial_input = normal[0] * 0.001 - normal[1] * 0.002;
+                let mut expected_inner = [0.0; 12];
+                let first_rotation = 6 * end_index + 3;
+                for row in 0..3 {
+                    let input = [0.001, -0.002, 0.0][row];
+                    expected_inner[first_rotation + row] =
+                        zeta * (input - normal[row] * axial_input);
+                }
+                control
+                    .update_state(
+                        &LocalVec {
+                            data: SmallVec::from_slice(&expected_inner),
+                        },
+                        false,
+                        &ctx,
+                    )
+                    .unwrap();
+                wrapped.update_state(&increment, false, &ctx).unwrap();
+                let force = wrapped.internal_force(&ctx);
+                let control_force = control.internal_force(&ctx);
+                for (actual, expected) in force.data[..12].iter().zip(control_force.data.iter()) {
+                    assert!((actual - expected).abs() < 1e-10 * expected.abs().max(1.0));
+                }
+                let work: f64 = force
+                    .data
+                    .iter()
+                    .zip(increment.data.iter())
+                    .map(|(force, displacement)| force * displacement)
+                    .sum();
+                let inner_work: f64 = control_force
+                    .data
+                    .iter()
+                    .zip(expected_inner.iter())
+                    .map(|(force, displacement)| force * displacement)
+                    .sum();
+                assert!((work - inner_work).abs() < 1e-10 * inner_work.abs().max(1.0));
+                let actual_sections = wrapped.recover_forces(&increment.data).unwrap();
+                let expected_sections = control.recover_forces(&expected_inner);
+                let local_stiffness = control.local_stiffness();
+                let input_scale = increment
+                    .data
+                    .iter()
+                    .map(|value| value.abs())
+                    .fold(0.0, f64::max);
+                let force_roundoff: [f64; 12] = std::array::from_fn(|row| {
+                    64.0 * f64::EPSILON
+                        * input_scale
+                        * (0..12)
+                            .map(|col| local_stiffness.get(row, col).abs())
+                            .sum::<f64>()
+                });
+                for ((actual_x, actual), (expected_x, expected)) in
+                    actual_sections.at.iter().zip(expected_sections.at.iter())
+                {
+                    assert_eq!(actual_x, expected_x);
+                    let first = if *actual_x < 0.5 { 0 } else { 6 };
+                    let section_roundoff = [
+                        force_roundoff[first],
+                        force_roundoff[first + 1],
+                        force_roundoff[first + 2],
+                        force_roundoff[first + 3],
+                        force_roundoff[first + 4] + control.length * force_roundoff[first + 2],
+                        force_roundoff[first + 5] + control.length * force_roundoff[first + 1],
+                    ];
+                    for (component, (actual, expected)) in
+                        actual.iter().zip(expected.iter()).enumerate()
+                    {
+                        assert!((actual - expected).abs() <= 1e-10 * expected.abs() + section_roundoff[component],
+                            "normal={normal:?} member={member_index} xi={actual_x} component={component} actual={actual} expected={expected}");
+                    }
+                }
+                let matrices = [
+                    (
+                        wrapped.tangent_stiffness(&ctx),
+                        control.tangent_stiffness(&ctx),
+                    ),
+                    (
+                        wrapped.geometric_stiffness(200.0),
+                        control.geometric_stiffness(200.0),
+                    ),
+                    (
+                        wrapped.mass_matrix(MassOption::Consistent),
+                        control.mass_matrix(MassOption::Consistent),
+                    ),
+                    (
+                        wrapped.mass_matrix(MassOption::Lumped),
+                        control.mass_matrix(MassOption::Lumped),
+                    ),
+                ];
+                for (actual, expected) in matrices {
+                    let mut energy = 0.0;
+                    let mut inner_energy = 0.0;
+                    for i in 0..wrapped.n_dof() {
+                        for j in 0..wrapped.n_dof() {
+                            energy += increment.data[i] * actual.get(i, j) * increment.data[j];
+                        }
+                    }
+                    for i in 0..12 {
+                        for j in 0..12 {
+                            inner_energy +=
+                                expected_inner[i] * expected.get(i, j) * expected_inner[j];
+                        }
+                    }
+                    assert!((energy - inner_energy).abs() < 1e-10 * inner_energy.abs().max(1.0));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn panel_757_loaded_residual_and_state_use_the_same_sloped_projection() {
+        use crate::wall::side_column::{InPlaneReleasedColumn, ReleaseAxis};
+        use sepika_core::model::{MemberLoad, MemberLoadKind};
+
+        let mut model = model_with_panel(200.0);
+        model.nodes[2].coord = [-1_800.0, 0.0, 600.0];
+        let data = &model.elements[1];
+        let ctx = Ctx { model: &model };
+        let make_inner = || {
+            InPlaneReleasedColumn::new(
+                crate::frame::beam::BeamElement::new(data, &model),
+                ReleaseAxis::LocalY,
+            )
+        };
+        let mut control = make_inner();
+        let ends = resolve(data, &model).unwrap();
+        let mut wrapped = PanelOffsetMember::new(Box::new(make_inner()), ends);
+        let displacement = LocalVec {
+            data: smallvec::smallvec![
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.001, -0.002
+            ],
+        };
+        let mut inner_displacement = [0.0; 12];
+        inner_displacement[9] = 0.00032;
+        inner_displacement[10] = -0.001;
+        inner_displacement[11] = -0.00024;
+        let loads = [MemberLoad::manual(
+            data.id,
+            [0.0, 1.0, -1.0],
+            MemberLoadKind::Point {
+                a: 1_000.0,
+                p: 10_000.0,
+            },
+        )];
+        let expected_query = control
+            .frame_load_response(&inner_displacement, &loads)
+            .unwrap()
+            .unwrap();
+        let query = wrapped
+            .frame_load_response(&displacement.data, &loads)
+            .unwrap()
+            .unwrap();
+        let expected_generalized = [
+            0.32 * expected_query.nodal_residual.data[9]
+                - 0.24 * expected_query.nodal_residual.data[11],
+            0.5 * expected_query.nodal_residual.data[10],
+        ];
+        for (actual, expected) in query.nodal_residual.data[12..]
+            .iter()
+            .zip(expected_generalized)
+        {
+            assert!((actual - expected).abs() < 1e-10 * expected.abs().max(1.0));
+        }
+        let work = displacement.data[12] * query.nodal_residual.data[12]
+            + displacement.data[13] * query.nodal_residual.data[13];
+        let expected_work: f64 = inner_displacement
+            .iter()
+            .zip(expected_query.nodal_residual.data.iter())
+            .map(|(displacement, force)| displacement * force)
+            .sum();
+        assert!((work - expected_work).abs() < 1e-10 * expected_work.abs().max(1.0));
+        control
+            .update_state_with_member_loads(
+                &LocalVec {
+                    data: SmallVec::from_slice(&inner_displacement),
+                },
+                &loads,
+                true,
+                &ctx,
+            )
+            .unwrap();
+        wrapped
+            .update_state_with_member_loads(&displacement, &loads, true, &ctx)
+            .unwrap();
+        let state = wrapped.state_frame_load_response().unwrap().unwrap();
+        let expected_state = control.state_frame_load_response().unwrap().unwrap();
+        for (actual, expected) in state.nodal_residual.data[..12]
+            .iter()
+            .zip(expected_state.nodal_residual.data.iter())
+        {
+            assert!((actual - expected).abs() < 1e-10 * expected.abs().max(1.0));
+        }
+        for (actual, expected) in state
+            .nodal_residual
+            .data
+            .iter()
+            .zip(query.nodal_residual.data.iter())
+        {
+            assert!((actual - expected).abs() < 1e-10 * expected.abs().max(1.0));
+        }
+        let checkpoint = wrapped.serialize_checkpoint();
+        for commit in [false, true] {
+            let mut invalid_loads = loads.clone();
+            invalid_loads[0].kind = MemberLoadKind::Point {
+                a: 1_000.0,
+                p: f64::NAN,
+            };
+            assert!(wrapped
+                .update_state_with_member_loads(&displacement, &invalid_loads, commit, &ctx)
+                .is_err());
+            assert_eq!(wrapped.serialize_checkpoint(), checkpoint);
+        }
     }
 }

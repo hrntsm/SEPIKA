@@ -363,7 +363,8 @@ impl WallElement {
             mass_properties_error: (!rc_mass_properties_valid)
                 .then(|| "RC壁の整合質量には正の Fc が必要です".to_string()),
             nodes: [ids_b0, ids_ta],
-            axis: LocalFrame::from_nodes(bc, tc, ex_bot),
+            axis: LocalFrame::from_nodes(bc, tc, ex_bot)
+                .expect("壁幾何から検証済みの仮想柱局所基底"),
             rigid: Default::default(),
             end_cond: [
                 sepika_core::model::EndCondition::Fixed,

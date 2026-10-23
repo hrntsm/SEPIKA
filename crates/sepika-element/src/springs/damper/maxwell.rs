@@ -45,7 +45,9 @@ impl MaxwellDamperElement {
     pub fn new(data: &ElementData, model: &Model) -> Self {
         let geom = crate::transform::EndGeometry::of_element(data, model);
         let [n0, n1] = geom.nodes;
-        let axis = geom.local_frame(data.local_axis.ref_vector);
+        let axis = geom
+            .local_frame(data.local_axis.ref_vector)
+            .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", data.id.0));
         let props = model.damper_props(data.id).unwrap_or_default();
         Self {
             nodes: [n0, n1],
@@ -284,7 +286,8 @@ mod tests {
     fn damper(kd: f64, c0: f64, alpha: f64, dt: f64) -> MaxwellDamperElement {
         MaxwellDamperElement {
             nodes: [NodeId(0), NodeId(1)],
-            axis: LocalFrame::from_nodes([0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            axis: LocalFrame::from_nodes([0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+                .unwrap(),
             kd,
             c0,
             alpha,

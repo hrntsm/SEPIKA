@@ -153,6 +153,10 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-gravity-run-provenance", Some(23), "旧契約"),
         ("old-attached-primary-support-loads", Some(24), "旧契約"),
         ("old-before-wall-side-column-contract", Some(26), "旧契約"),
+        ("old-unconverged-time-history", Some(27), "旧契約"),
+        ("old-panel-reference-column", Some(28), "旧契約"),
+        ("old-local-frame-reference", Some(37), "旧契約"),
+        ("old-face-direction-reference", Some(38), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -197,7 +201,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
 #[test]
 fn ovika_old_analysis_is_unavailable_until_explicit_reanalysis() {
     let app = calculated();
-    for version in [5, 6, 7, 20, 22, 24, 26] {
+    for version in [5, 6, 7, 20, 22, 24, 26, 28, 37, 38] {
         let (mut loaded, path) = restore(
             &app,
             Some(version),
@@ -302,6 +306,10 @@ fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_
         ("design-old-rc-q0", Some(11)),
         ("design-old-secondary-load-ownership", Some(16)),
         ("design-old-before-wall-side-column-contract", Some(18)),
+        ("design-old-panel-reference-column", Some(19)),
+        ("design-old-steel-f-selection", Some(22)),
+        ("design-old-local-frame", Some(23)),
+        ("design-old-face-direction", Some(24)),
         ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
     ] {
         let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);
@@ -645,6 +653,273 @@ fn empty_bundle_is_not_an_unknown_result_and_direct_floor_design_survives_stale_
     }
 }
 
+fn direct_secondary_beam_app() -> App {
+    let mut model = super::tests::make_floor_secondary_beam_test_model();
+    let material_id = sepika_core::ids::MaterialId(model.materials.len() as u32);
+    let mut concrete = crate::sample::portal_frame().materials[0].clone();
+    concrete.id = material_id;
+    concrete.category = sepika_core::model::MaterialCategory::Concrete;
+    concrete.fc = Some(24.0);
+    concrete.density = 2.4e-9;
+    model.materials.push(concrete);
+    let section_id = SectionId(model.sections.len() as u32);
+    let mut slab_section = sepika_core::section_shape::SectionShape::RcSlab { thickness: 100.0 }
+        .to_section(section_id, "床検定用スラブ".into());
+    slab_section.material = Some(material_id);
+    model.sections.push(slab_section);
+    for slab in &mut model.slabs {
+        slab.plate.section = Some(section_id);
+    }
+    let mut app = App::default();
+    app.load_model(model);
+    app
+}
+
+#[test]
+fn ovika_old_direct_secondary_beam_design_requires_explicit_recheck() {
+    let mut app = direct_secondary_beam_app();
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let original = app.current_design_results().expect("直接小梁検定");
+    assert_eq!(
+        (original.beam_checks.len(), original.slab_checks.len()),
+        (1, 2)
+    );
+    assert_eq!(original.analysis_contract_version, None);
+    assert_eq!(original.design_source, None);
+    assert_eq!(
+        original.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    let original_model = rmp_serde::to_vec_named(&app.core.model).unwrap();
+
+    for version in [23, 24] {
+        let (mut loaded, path) = restore(
+            &app,
+            None,
+            Some(version),
+            &format!("old-direct-secondary-design{version}"),
+        );
+        assert_eq!(
+            rmp_serde::to_vec_named(&loaded.core.model).unwrap(),
+            original_model
+        );
+        let old = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(old.analysis_contract_version, None);
+        assert_eq!(old.design_source, None);
+        assert!(old.beam_checks.is_empty() && old.slab_checks.is_empty());
+        assert!(loaded.current_design_results().is_none());
+        assert!(loaded.require_design_input().is_err());
+        assert!(loaded.core.scoped.staleness.design_stale);
+        assert!(loaded
+            .core
+            .scoped
+            .result_contract_notice
+            .as_ref()
+            .is_some_and(|notice| notice.contains("旧契約")));
+
+        loaded.run_design_check();
+        assert!(
+            loaded.core.scoped.last_error.is_none(),
+            "{:?}",
+            loaded.core.scoped.last_error
+        );
+        let current = loaded.current_design_results().expect("明示再検定");
+        assert_eq!(
+            (current.beam_checks.len(), current.slab_checks.len()),
+            (1, 2)
+        );
+        assert_eq!(current.analysis_contract_version, None);
+        assert_eq!(current.design_source, None);
+        assert_eq!(
+            current.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn direct_secondary_beam_design_preserves_demand_for_large_finite_reference() {
+    let mut app = direct_secondary_beam_app();
+    let primary = &app.core.model.elements[0];
+    let start = app.core.model.nodes[primary.nodes[0].index()].coord;
+    let end = app.core.model.nodes[primary.nodes[1].index()].coord;
+    assert_eq!(start, [0.0, 0.0, 0.0]);
+    assert_eq!(end, [4000.0, 0.0, 0.0]);
+    app.core.model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let unit = app.current_design_results().expect("単位Y参照の直接検定");
+    assert_eq!((unit.beam_checks.len(), unit.slab_checks.len()), (1, 2));
+    let unit_beam = unit.beam_checks[0].2.clone();
+    assert!(!unit_beam.unchecked);
+    assert!(unit_beam.m_max > 0.0 && unit_beam.q_max > 0.0);
+
+    app.core.model.elements[0].local_axis.ref_vector = [0.0, 1.0e308, 0.0];
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let large = app.current_design_results().expect("極大Y参照の直接検定");
+    assert_eq!((large.beam_checks.len(), large.slab_checks.len()), (1, 2));
+    assert_eq!(large.beam_checks[0].2, unit_beam);
+
+    app.core.model.elements[0].local_axis.ref_vector = [f64::NAN, 1.0, 0.0];
+    app.run_design_check();
+    let error = app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .expect("必要支持材の非有限参照");
+    assert!(
+        error.contains("二次部材 0")
+            && error.contains("支持材 Primary(ElemId(0))")
+            && error.contains("非有限"),
+        "{error}"
+    );
+    assert!(app.current_design_results().is_none());
+    let failed = app.core.scoped.results.as_ref().unwrap();
+    assert!(failed.beam_checks.is_empty() && failed.slab_checks.is_empty());
+
+    app.core.model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    app.core.scoped.last_error = None;
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let recovered = app
+        .current_design_results()
+        .expect("参照方向復旧後の直接検定");
+    assert_eq!(
+        (recovered.beam_checks.len(), recovered.slab_checks.len()),
+        (1, 2)
+    );
+    assert_eq!(recovered.beam_checks[0].2, unit_beam);
+}
+
+#[test]
+fn direct_secondary_beam_design_ignores_unused_primary_local_reference() {
+    let mut app = direct_secondary_beam_app();
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let expected = app.current_design_results().expect("直接小梁検定");
+    assert_eq!(
+        (expected.beam_checks.len(), expected.slab_checks.len()),
+        (1, 2)
+    );
+    let expected_beam = expected.beam_checks[0].2.clone();
+
+    let mut a = app.core.model.nodes[0].clone();
+    a.id = NodeId(6);
+    a.coord = [10000.0, 0.0, 0.0];
+    let mut b = app.core.model.nodes[1].clone();
+    b.id = NodeId(7);
+    b.coord = [14000.0, 0.0, 0.0];
+    app.core.model.nodes.extend([a, b]);
+    let mut unused = app.core.model.elements[0].clone();
+    unused.id = ElemId(4);
+    unused.nodes = [NodeId(6), NodeId(7)].into_iter().collect();
+    unused.local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    app.core.model.elements.push(unused);
+    app.core
+        .model
+        .validate_reference_ids()
+        .expect("独立一次梁の参照整合");
+
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let current = app
+        .current_design_results()
+        .expect("独立梁追加後の直接小梁検定");
+    assert_eq!(
+        (current.beam_checks.len(), current.slab_checks.len()),
+        (1, 2)
+    );
+    assert_eq!(current.beam_checks[0].2, expected_beam);
+}
+
+#[test]
+fn direct_secondary_beam_design_rejects_used_finite_unresolvable_local_frame() {
+    let mut app = direct_secondary_beam_app();
+    let rotation = std::f64::consts::FRAC_1_SQRT_2;
+    for node in &mut app.core.model.nodes {
+        let [x, y, z] = node.coord;
+        node.coord = [(x - y) * rotation, (x + y) * rotation, z];
+    }
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let baseline = app.current_design_results().expect("回転後の直接小梁検定");
+    assert_eq!(
+        (baseline.beam_checks.len(), baseline.slab_checks.len()),
+        (1, 2)
+    );
+
+    let original = app.core.model.elements[0].local_axis.ref_vector;
+    let reference: [f64; 3] = [1e100, 1e100 + 2e84, 0.0];
+    assert!(reference.iter().all(|value| value.is_finite()));
+    let support = &app.core.model.elements[0];
+    let i = app.core.model.nodes[support.nodes[0].index()].coord;
+    let j = app.core.model.nodes[support.nodes[1].index()].coord;
+    assert!(sepika_core::geom::vec3::local_frame_axes(i, j, reference).is_err());
+    app.core.model.elements[0].local_axis.ref_vector = reference;
+    app.run_design_check();
+    let error = app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .expect("必要支持材の基底不能");
+    assert!(
+        error.contains("二次部材 0")
+            && error.contains("支持材 Primary(ElemId(0))")
+            && error.contains("単位直交基底"),
+        "{error}"
+    );
+    assert!(app.current_design_results().is_none());
+    let failed = app.core.scoped.results.as_ref().unwrap();
+    assert!(failed.beam_checks.is_empty() && failed.slab_checks.is_empty());
+
+    app.core.model.elements[0].local_axis.ref_vector = original;
+    app.core.scoped.last_error = None;
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let recovered = app.current_design_results().expect("支持材参照復旧");
+    assert_eq!(
+        (recovered.beam_checks.len(), recovered.slab_checks.len()),
+        (1, 2)
+    );
+}
+
 #[cfg(feature = "gui")]
 #[test]
 fn gui_reports_old_contract_and_explicit_recheck_button_recovers_without_reanalysis() {
@@ -926,6 +1201,91 @@ fn lip_channel_geometry_old_contracts_expire_and_current_keeps_results() {
 }
 
 #[test]
+fn shear_modulus_gate_expires_analysis29_and_keeps_current_results() {
+    let app = calculated();
+    for (version, keep) in [(29, false), (ANALYSIS_CONTRACT_VERSION, true)] {
+        let (loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("shear712-contract-{version}"),
+        );
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(results.has_analysis_results(), keep);
+        assert_eq!(results.has_design_results(), keep);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn member_load_gate_expires_analysis30_and_keeps_current_results() {
+    let app = calculated();
+    for (version, keep) in [(30, false), (ANALYSIS_CONTRACT_VERSION, true)] {
+        let (loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("member-load713-contract-{version}"),
+        );
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(results.has_analysis_results(), keep);
+        assert_eq!(results.has_design_results(), keep);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn member_history_gate_expires_analysis32_and_keeps_current_results() {
+    let app = calculated();
+    for (version, keep) in [(32, false), (ANALYSIS_CONTRACT_VERSION, true)] {
+        let (loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("member-history732-contract-{version}"),
+        );
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(results.has_analysis_results(), keep);
+        assert_eq!(results.has_design_results(), keep);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn beam_stiffness_gate_expires_analysis33_and_keeps_current_results() {
+    let app = calculated();
+    for (version, keep) in [(33, false), (ANALYSIS_CONTRACT_VERSION, true)] {
+        let (loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("beam736-contract-{version}"),
+        );
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(results.has_analysis_results(), keep);
+        assert_eq!(results.has_design_results(), keep);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn panel_g_gate_expires_analysis31_and_keeps_current_results() {
+    let app = calculated();
+    for (version, keep) in [(31, false), (ANALYSIS_CONTRACT_VERSION, true)] {
+        let (loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("panel728-contract-{version}"),
+        );
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(results.has_analysis_results(), keep);
+        assert_eq!(results.has_design_results(), keep);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
 fn cft_case2_design12_expires_while_current_analysis_survives_and_design_can_be_recomputed() {
     let app = super::tests::cft_long_case2_app(4_000_000.0);
     let original = app.core.scoped.results.as_ref().unwrap();
@@ -1011,19 +1371,27 @@ fn sm520_app(thickness: f64, fy: Option<f64>) -> App {
 }
 #[test]
 fn sm520_gui_recheck_save_read_report_and_holding_keep_out_of_range_reasons() {
-    use sepika_design_jp::CheckOutcome;
     for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
-        let mut app = sm520_app(100.001, fy);
+        let mut app = sm520_app(80.0, fy);
+        for section in &mut app.core.model.sections {
+            if let Some(sepika_core::section_shape::SectionShape::SteelH { flange_thick, .. }) =
+                section.shape.as_mut()
+            {
+                *flange_thick = 100.001;
+            }
+        }
         for _ in 0..2 {
             app.run_design_check();
-            let checks = &app.core.scoped.results.as_ref().unwrap().member_checks;
-            assert!(!checks.is_empty());
-            assert!(checks.iter().flat_map(|m| &m.positions).all(|p| matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))));
-            let report = crate::summary::build_report_csv(&app);
+            let reason = app.core.scoped.last_error.as_deref().unwrap();
             assert!(
-                report.contains("適用範囲") && report.contains("検定不能"),
-                "{report}"
+                reason.contains("部材 0") && reason.contains("適用範囲"),
+                "{reason}"
             );
+            let result = app.core.scoped.results.as_ref().unwrap();
+            assert!(!result.has_design_results());
+            assert!(result.design_contract_version.is_none());
+            assert!(app.current_design_results().is_none());
+            assert!(!crate::summary::build_report_csv(&app).contains("全適合"));
         }
         for auto in [false, true] {
             app.core.design_rank_auto = auto;
@@ -1045,19 +1413,34 @@ fn sm520_gui_recheck_save_read_report_and_holding_keep_out_of_range_reasons() {
         app.save_project_to(path.clone());
         let mut loaded = App::default();
         loaded.open_project_from(path.clone());
-        assert!(crate::summary::build_report_csv(&loaded).contains("適用範囲"));
+        assert!(loaded.current_design_results().is_none());
+        assert!(!crate::summary::build_report_csv(&loaded).contains("全適合"));
         loaded.select_displayed_result(StaticKey::Case(StaticCaseKey::User(LoadCaseId(0))));
-        assert!(crate::summary::build_report_csv(&loaded).contains("適用範囲"));
+        assert!(!crate::summary::build_report_csv(&loaded).contains("全適合"));
         loaded.run_linear_static(LoadCaseId(0));
-        assert!(loaded.core.scoped.results.as_ref().unwrap().member_checks.iter().flat_map(|m| &m.positions).all(|p| matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))));
+        let reason = loaded.core.scoped.last_error.as_deref().unwrap();
+        assert!(
+            reason.contains("部材 0") && reason.contains("適用範囲"),
+            "{reason}"
+        );
+        assert!(loaded.current_design_results().is_none());
         std::fs::remove_file(path).unwrap();
     }
 }
 #[test]
-fn sm520_old_335_and_out_of_range_success_expire_without_save_or_display_reauthentication() {
+fn sm520_old_335_success_expires_without_save_or_display_reauthentication() {
     use sepika_design_jp::{CheckComponent, CheckKind, CheckOutcome, CheckResult};
-    for t in [80.0, 100.001] {
+    for t in [80.0] {
         let mut app = sm520_app(t, Some(335.0));
+        let old_success = CheckOutcome::Checked(CheckResult {
+            basis: "旧SM520成功335".into(),
+            detail: String::new(),
+            components: vec![CheckComponent {
+                kind: CheckKind::Axial,
+                ratio: 0.5,
+                detail: "F=335".into(),
+            }],
+        });
         for position in app
             .core
             .scoped
@@ -1068,15 +1451,10 @@ fn sm520_old_335_and_out_of_range_success_expire_without_save_or_display_reauthe
             .iter_mut()
             .flat_map(|m| &mut m.positions)
         {
-            position.outcome = CheckOutcome::Checked(CheckResult {
-                basis: "旧SM520成功335".into(),
-                detail: String::new(),
-                components: vec![CheckComponent {
-                    kind: CheckKind::Axial,
-                    ratio: 0.5,
-                    detail: "F=335".into(),
-                }],
-            });
+            position.outcome = old_success.clone();
+        }
+        for joint in &mut app.core.scoped.results.as_mut().unwrap().joint_checks {
+            joint.outcome = old_success.clone();
         }
         for (analysis, design, keeps_analysis) in
             [(14, 5, false), (ANALYSIS_CONTRACT_VERSION, 5, true)]
@@ -1130,10 +1508,583 @@ fn sm520_old_335_and_out_of_range_success_expire_without_save_or_display_reauthe
                 Some(DESIGN_CONTRACT_VERSION)
             );
             assert!(bundle.has_design_results());
-            if t > 100.0 {
-                assert!(bundle.member_checks.iter().flat_map(|m| &m.positions).all(|p| matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))));
-            }
             std::fs::remove_file(path).unwrap();
         }
+    }
+}
+
+#[test]
+fn panel_753_yield_gate_expires_analysis35_and_keeps_current_results() {
+    let app = calculated();
+    for (version, keep) in [(35, false), (ANALYSIS_CONTRACT_VERSION, true)] {
+        let (loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("panel753-contract-{version}"),
+        );
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(results.has_analysis_results(), keep);
+        assert_eq!(results.has_design_results(), keep);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+fn panel_757_calculated() -> App {
+    let mut model = crate::sample::portal_frame();
+    let (sin, cos) = 0.37_f64.sin_cos();
+    for element in &mut model.elements {
+        if element.section == Some(sepika_core::ids::SectionId(0)) {
+            element.local_axis.ref_vector = [cos, sin, 0.0];
+        }
+    }
+    let mut app = App::default();
+    app.load_model(model);
+    app.core.analysis_cfg.threads = 1;
+    app.run_preparation();
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let bundle = app.core.scoped.results.as_ref().unwrap();
+    assert!(!bundle.panel_moments.is_empty());
+    assert!(bundle
+        .panel_moments
+        .iter()
+        .any(|(_, m)| m.iter().any(|x| x.abs() > 1.0)));
+    assert!(bundle.has_design_results());
+    app
+}
+
+fn assert_panel_758_both_axes(app: &App) {
+    let checks = &app.current_design_results().unwrap().joint_checks;
+    for node in [NodeId(2), NodeId(3)] {
+        for axis in ["強軸", "弱軸"] {
+            let label = format!("パネルゾーン(S) {axis}");
+            let matching: Vec<_> = checks
+                .iter()
+                .filter(|check| check.node == node && check.label == label)
+                .collect();
+            assert_eq!(matching.len(), 1, "節点 {} {axis}", node.0);
+            let sepika_design_jp::CheckOutcome::Checked(result) = &matching[0].outcome else {
+                panic!("節点 {} {axis}: {:?}", node.0, matching[0].outcome);
+            };
+            assert!(result.ratio().is_finite() && result.ratio() > 0.0);
+            assert_eq!(result.components.len(), 1);
+            assert!(matches!(
+                result.components[0].kind,
+                sepika_design_jp::CheckKind::Shear
+            ));
+        }
+    }
+    assert_eq!(checks.len(), 4);
+    let csv = crate::summary::build_report_csv(app);
+    assert!(csv.contains("パネルゾーン(S) 強軸"));
+    assert!(csv.contains("パネルゾーン(S) 弱軸"));
+}
+
+#[test]
+fn panel_758_design21_expires_checks_and_display_but_keeps_current_analysis_until_recheck() {
+    let app = panel_757_calculated();
+    assert_panel_758_both_axes(&app);
+    let original = app.core.scoped.results.as_ref().unwrap();
+    let expected_checks = rmp_serde::to_vec_named(&original.joint_checks).unwrap();
+    let (mut loaded, path) = restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(21),
+        "panel758-design21",
+    );
+    for pass in 0..2 {
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(
+            results.analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
+        assert_eq!(results.panel_moments, original.panel_moments);
+        assert_eq!(results.member_forces, original.member_forces);
+        assert_eq!(results.statics[0].1.disp, original.statics[0].1.disp);
+        assert!(!results.has_design_results());
+        assert!(results.design_source.is_none());
+        assert!(!results
+            .input_records
+            .iter()
+            .any(|(key, _)| *key == ResultInputKey::Design));
+        assert!(loaded.require_selected_static_input().is_ok());
+        assert!(loaded.current_design_results().is_none());
+        assert!(!loaded.core.scoped.staleness.results_stale);
+        let csv = crate::summary::build_report_csv(&loaded);
+        if pass == 0 {
+            assert!(loaded.core.scoped.staleness.design_stale);
+            assert!(
+                csv.contains("旧契約")
+                    && csv.contains("保存版=21")
+                    && csv.contains(&format!("現行版={DESIGN_CONTRACT_VERSION}"))
+            );
+        }
+        assert!(!csv.contains("パネルゾーン(S) 強軸"));
+        assert!(!csv.contains("パネルゾーン(S) 弱軸"));
+        loaded.select_displayed_result(app.core.scoped.last_static.unwrap());
+        loaded.core.scoped.staleness.mark_fresh();
+        assert!(loaded.current_design_results().is_none());
+        loaded.save_project_to(path.clone());
+        assert!(loaded.core.scoped.last_error.is_none());
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        assert!(reopened.core.scoped.last_error.is_none());
+        assert_eq!(
+            reopened
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .design_contract_version,
+            None
+        );
+        loaded = reopened;
+    }
+    loaded.run_design_check();
+    assert!(loaded.core.scoped.last_error.is_none());
+    assert_panel_758_both_axes(&loaded);
+    let results = loaded.core.scoped.results.as_ref().unwrap();
+    assert_eq!(
+        results.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    assert_eq!(results.panel_moments, original.panel_moments);
+    assert_eq!(
+        rmp_serde::to_vec_named(&results.joint_checks).unwrap(),
+        expected_checks
+    );
+    assert!(loaded.core.scoped.result_contract_notice.is_none());
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn panel_758_current_design_save_open_display_and_recheck_preserve_both_principal_axes() {
+    let mut app = panel_757_calculated();
+    assert_panel_758_both_axes(&app);
+    let original = app.core.scoped.results.as_ref().unwrap().clone();
+    let expected_checks = rmp_serde::to_vec_named(&original.joint_checks).unwrap();
+    let expected_csv = crate::summary::build_report_csv(&app);
+    let path =
+        std::env::temp_dir().join(format!("sepika-758-current-{}.ovika", std::process::id()));
+    for _ in 0..2 {
+        app.save_project_to(path.clone());
+        assert!(app.core.scoped.last_error.is_none());
+        let mut loaded = App::default();
+        loaded.open_project_from(path.clone());
+        assert!(loaded.core.scoped.last_error.is_none());
+        loaded.select_displayed_result(app.core.scoped.last_static.unwrap());
+        assert_panel_758_both_axes(&loaded);
+        assert!(!loaded.core.scoped.staleness.results_stale);
+        assert!(!loaded.core.scoped.staleness.design_stale);
+        let results = loaded.current_design_results().unwrap();
+        assert_eq!(
+            results.analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
+        assert_eq!(
+            results.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        assert_eq!(results.panel_moments, original.panel_moments);
+        assert_eq!(results.member_forces, original.member_forces);
+        assert_eq!(
+            rmp_serde::to_vec_named(&results.joint_checks).unwrap(),
+            expected_checks
+        );
+        assert_eq!(crate::summary::build_report_csv(&loaded), expected_csv);
+        loaded.run_design_check();
+        assert!(loaded.core.scoped.last_error.is_none());
+        assert_panel_758_both_axes(&loaded);
+        assert_eq!(
+            rmp_serde::to_vec_named(&loaded.current_design_results().unwrap().joint_checks)
+                .unwrap(),
+            expected_checks
+        );
+        app = loaded;
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn panel_758_rotated_column_retains_distinct_invalid_plane_reasons_across_current_save_open() {
+    use sepika_core::{dof::Dof6Mask, ids::SectionId, section_shape::SectionShape};
+    use sepika_design_jp::CheckOutcome;
+    let mut model = crate::sample::portal_frame();
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    let (sin, cos) = 0.37_f64.sin_cos();
+    for column in &mut model.elements[..2] {
+        column.local_axis.ref_vector = [cos, sin, 0.0];
+    }
+    for (id, height) in [(2, 500.0), (3, 600.0)] {
+        let mut section = SectionShape::SteelH {
+            height,
+            width: 200.0,
+            web_thick: 8.0,
+            flange_thick: 13.0,
+            root_r: Some(0.0),
+        }
+        .to_section(SectionId(id), format!("H{height}"));
+        section.material = model.sections[1].material;
+        section.frame_use = model.sections[1].frame_use;
+        model.sections.push(section);
+    }
+    for (coord, section) in [
+        ([-6000.0, 0.0, 3500.0], 2),
+        ([0.0, 6000.0, 3500.0], 1),
+        ([0.0, -6000.0, 3500.0], 3),
+        ([6000.0, 6000.0, 3500.0], 1),
+    ] {
+        let mut node = model.nodes[2].clone();
+        node.id = NodeId(model.nodes.len() as u32);
+        node.coord = coord;
+        node.restraint = Dof6Mask::FIXED;
+        let mut beam = model.elements[2].clone();
+        beam.id = ElemId(model.elements.len() as u32);
+        beam.nodes = smallvec::smallvec![NodeId(2), node.id];
+        beam.section = Some(SectionId(section));
+        model.nodes.push(node);
+        model.elements.push(beam);
+    }
+    let mut app = App::default();
+    app.load_model(model);
+    app.core.analysis_cfg.threads = 1;
+    app.run_linear_static(LoadCaseId(0));
+    assert!(app.core.scoped.last_error.is_none());
+    let original = app.current_design_results().unwrap().clone();
+    let rejected: Vec<_> = original
+        .joint_checks
+        .iter()
+        .filter(|c| c.node == NodeId(2))
+        .collect();
+    for axis in ["強軸", "弱軸"] {
+        assert!(rejected.iter().any(|c| c.label == format!("パネルゾーン(S) {axis}")
+            && matches!(&c.outcome, CheckOutcome::Skipped { reason } if reason.contains("段違い"))));
+    }
+    for other_depth in ["db=487 mm", "db=587 mm"] {
+        assert!(
+            rejected
+                .iter()
+                .any(|c| matches!(&c.outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("db=387 mm") && reason.contains(other_depth))),
+            "{other_depth}"
+        );
+    }
+    let path = std::env::temp_dir().join(format!(
+        "sepika-758-multiple-gates-{}.ovika",
+        std::process::id()
+    ));
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    assert!(loaded.core.scoped.last_error.is_none());
+    assert!(!loaded.core.scoped.staleness.results_stale);
+    assert!(!loaded.core.scoped.staleness.design_stale);
+    let restored = loaded.current_design_results().unwrap();
+    assert_eq!(restored.member_forces, original.member_forces);
+    assert_eq!(restored.statics[0].1.disp, original.statics[0].1.disp);
+    assert_eq!(
+        rmp_serde::to_vec_named(&restored.joint_checks).unwrap(),
+        rmp_serde::to_vec_named(&original.joint_checks).unwrap()
+    );
+    assert_eq!(
+        crate::summary::build_report_csv(&loaded),
+        crate::summary::build_report_csv(&app)
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn panel_757_rotated_panel_results_expire_analysis36_and_survive_current_roundtrip() {
+    let app = panel_757_calculated();
+    let original = app.core.scoped.results.as_ref().unwrap();
+    for (version, keep) in [(36, false), (ANALYSIS_CONTRACT_VERSION, true)] {
+        let (mut loaded, path) = restore(
+            &app,
+            Some(version),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("panel757-contract-{version}"),
+        );
+        let results = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(results.has_analysis_results(), keep);
+        assert_eq!(results.has_design_results(), keep);
+        assert_eq!(loaded.core.scoped.staleness.results_stale, !keep);
+        assert_eq!(loaded.core.scoped.staleness.design_stale, !keep);
+        if keep {
+            assert_eq!(results.panel_moments, original.panel_moments);
+            assert_eq!(results.statics[0].1.disp, original.statics[0].1.disp);
+        } else {
+            assert!(results.panel_moments.is_empty());
+            assert!(loaded.core.scoped.last_static.is_none());
+            assert!(loaded.core.scoped.staleness.last_run.is_none());
+        }
+        loaded.select_displayed_result(app.core.scoped.last_static.unwrap());
+        loaded.save_project_to(path.clone());
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        assert!(reopened.core.scoped.last_error.is_none());
+        assert_eq!(
+            reopened
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .is_some_and(|r| r.has_analysis_results()),
+            keep
+        );
+        if keep {
+            assert_eq!(
+                reopened.core.scoped.results.as_ref().unwrap().panel_moments,
+                original.panel_moments
+            );
+        }
+        reopened.run_linear_static(LoadCaseId(0));
+        assert!(
+            reopened.core.scoped.last_error.is_none(),
+            "{:?}",
+            reopened.core.scoped.last_error
+        );
+        let recalculated = reopened.core.scoped.results.as_ref().unwrap();
+        assert_eq!(
+            recalculated.analysis_contract_version,
+            Some(ANALYSIS_CONTRACT_VERSION)
+        );
+        assert_eq!(
+            recalculated.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+        assert_eq!(recalculated.panel_moments, original.panel_moments);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn panel_757_preparation_roundtrip_preserves_both_axes_and_old_scalar_requires_repreparation() {
+    let app = panel_757_calculated();
+    let prep = app.core.scoped.preparation.as_ref().unwrap();
+    assert!(!prep.panels.is_empty());
+    for legacy in [false, true] {
+        let mut value = serde_json::to_value(prep).unwrap();
+        if legacy {
+            for panel in value["panels"].as_array_mut().unwrap() {
+                for field in ["dc", "db", "tp", "ve", "k_panel"] {
+                    panel[field] = panel[field][0].clone();
+                }
+            }
+        }
+        let bytes = rmp_serde::to_vec_named(&value).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "sepika-757-prep-{}-{legacy}.ovika",
+            std::process::id()
+        ));
+        sepika_io::ovika::save_ovika(
+            &path,
+            &app.core.model,
+            sepika_io::ovika::OvikaExtras {
+                preparation: Some(&bytes),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut loaded = App::default();
+        loaded.open_project_from(path.clone());
+        assert!(loaded.core.scoped.last_error.is_none());
+        assert_eq!(loaded.core.scoped.staleness.preparation_stale, legacy);
+        if legacy {
+            assert!(loaded.core.scoped.preparation.is_none());
+            assert!(loaded
+                .core
+                .scoped
+                .last_notice
+                .as_ref()
+                .is_some_and(|n| n.contains("準備計算の結果") && n.contains("再実行")));
+            loaded.run_preparation();
+            assert!(loaded.core.scoped.last_error.is_none());
+        }
+        let restored = loaded.core.scoped.preparation.as_ref().unwrap();
+        assert_eq!(restored.panels.len(), prep.panels.len());
+        for (actual, expected) in restored.panels.iter().zip(&prep.panels) {
+            assert_eq!(actual.node, expected.node);
+            assert_eq!(actual.dc, expected.dc);
+            assert_eq!(actual.db, expected.db);
+            assert_eq!(actual.tp, expected.tp);
+            assert_eq!(actual.ve, expected.ve);
+            assert_eq!(actual.k_panel, expected.k_panel);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn steel601_old_design22_preserves_current_analysis_and_requires_explicit_recheck() {
+    let mut model = crate::sample::portal_frame();
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    model.materials[0].name = "SS400".into();
+    model.materials[0].fy = Some(235.0);
+    for section in &mut model.sections {
+        let mut actual = sepika_core::section_shape::SectionShape::SteelH {
+            height: section.depth,
+            width: section.width,
+            web_thick: 10.0,
+            flange_thick: 50.0,
+            root_r: Some(0.0),
+        }
+        .to_section(section.id, section.name.clone());
+        actual.material = section.material;
+        actual.frame_use = section.frame_use;
+        *section = actual;
+    }
+    let mut app = App::default();
+    app.load_model(crate::app::tests::with_explicit_pushover_gravity(model));
+    app.core.analysis_cfg.threads = 1;
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let original = app
+        .current_design_results()
+        .expect("表Fで算定した検定")
+        .clone();
+    let checks = rmp_serde::to_vec_named(&original.member_checks).unwrap();
+    assert!(!original.member_checks.is_empty());
+    assert_eq!(
+        original.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    assert_eq!(
+        original.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    let (mut loaded, path) = restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(22),
+        "steel601-old-design22",
+    );
+    let result = loaded.core.scoped.results.as_ref().unwrap();
+    assert_eq!(result.member_forces, original.member_forces);
+    assert_eq!(result.statics[0].1.disp, original.statics[0].1.disp);
+    assert!(!result.has_design_results());
+    assert!(loaded.current_design_results().is_none());
+    loaded.select_displayed_result(app.core.scoped.last_static.unwrap());
+    loaded.core.scoped.staleness.mark_fresh();
+    assert!(loaded.current_design_results().is_none());
+    assert!(!crate::summary::build_report_csv(&loaded).contains("全適合"));
+    loaded.save_project_to(path.clone());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(reopened.core.scoped.last_error.is_none());
+    assert!(reopened.current_design_results().is_none());
+    assert_eq!(
+        reopened.core.scoped.results.as_ref().unwrap().member_forces,
+        original.member_forces
+    );
+    reopened.run_design_check();
+    assert!(
+        reopened.core.scoped.last_error.is_none(),
+        "{:?}",
+        reopened.core.scoped.last_error
+    );
+    let current = reopened.current_design_results().unwrap();
+    assert_eq!(
+        current.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    assert_eq!(
+        rmp_serde::to_vec_named(&current.member_checks).unwrap(),
+        checks
+    );
+    reopened.save_project_to(path.clone());
+    let mut current_loaded = App::default();
+    current_loaded.open_project_from(path.clone());
+    let current = current_loaded.current_design_results().unwrap();
+    assert_eq!(
+        current.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    assert_eq!(
+        current.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    assert_eq!(current.member_forces, original.member_forces);
+    assert_eq!(
+        rmp_serde::to_vec_named(&current.member_checks).unwrap(),
+        checks
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn steel601_failed_recheck_clears_old_design_and_keeps_valid_analysis() {
+    let app = calculated();
+    for (name, thickness_mm) in [
+        ("missing-thickness", None),
+        ("invalid-thickness", Some(-1.0)),
+        ("out-of-range", Some(101.0)),
+    ] {
+        let (mut loaded, path) = restore(
+            &app,
+            Some(ANALYSIS_CONTRACT_VERSION),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("steel601-{name}"),
+        );
+        let original = loaded.current_design_results().unwrap().clone();
+        loaded.core.model.materials[0].name = "SS400".into();
+        loaded.core.model.sections[0].shape = None;
+        loaded.core.model.sections[0].thickness = thickness_mm;
+        loaded.run_design_check();
+        let reason = loaded.core.scoped.last_error.as_deref().unwrap();
+        assert!(reason.contains("部材 0"), "{reason}");
+        assert!(
+            reason.contains(if thickness_mm == Some(101.0) {
+                "適用範囲"
+            } else {
+                "板厚"
+            }),
+            "{reason}"
+        );
+        let result = loaded.core.scoped.results.as_ref().unwrap();
+        assert_eq!(result.member_forces, original.member_forces);
+        assert!(!result.has_design_results());
+        assert_eq!(result.design_contract_version, None);
+        assert!(result.design_source.is_none());
+        loaded.core.scoped.staleness.mark_fresh();
+        assert!(loaded.current_design_results().is_none());
+        assert!(!crate::summary::build_report_csv(&loaded).contains("全適合"));
+        loaded.save_project_to(path.clone());
+        assert!(
+            loaded.core.scoped.last_error.is_none(),
+            "{name}: {:?}",
+            loaded.core.scoped.last_error
+        );
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        assert!(reopened.core.scoped.last_error.is_none());
+        if let Some(result) = reopened.core.scoped.results.as_ref() {
+            assert!(result.member_checks.is_empty());
+            assert!(result.wall_checks.is_empty());
+            assert!(result.beam_checks.is_empty());
+            assert!(result.slab_checks.is_empty());
+            assert!(result.joint_checks.iter().all(|check| {
+                check.label.starts_with("パネルゾーン(S)")
+                    && matches!(
+                        check.outcome,
+                        sepika_design_jp::CheckOutcome::Skipped { .. }
+                    )
+            }));
+            assert!(result.design_contract_version.is_none());
+        }
+        assert!(reopened.core.scoped.staleness.design_stale);
+        assert!(reopened.current_design_results().is_none());
+        assert!(!crate::summary::build_report_csv(&reopened).contains("全適合"));
+        std::fs::remove_file(path).unwrap();
     }
 }

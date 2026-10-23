@@ -112,6 +112,53 @@ fn assembled_translation_mass(model: &Model, dof: Dof) -> f64 {
 }
 
 #[test]
+fn nodal_only_mass_ignores_unused_member_reference_but_consistent_mass_rejects_it() {
+    let mut model = model(ElementKind::Beam, false);
+    model.nodes[1].mass = Some([2.0, 2.0, 2.0, 0.0, 0.0, 0.0]);
+    model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    model.mass_method = MassMethod::LumpedOnly;
+    let dofmap = DofMap::build(&model);
+    let mass = assemble_global_m(&model, &dofmap, MassOption::Consistent)
+        .unwrap()
+        .to_dense();
+    let ux = dofmap.active(6 + Dof::Ux as usize).unwrap() as usize;
+    assert_eq!(mass[(ux, ux)], 2.0);
+
+    let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dofmap);
+    let error = sepika_solver::dynamic::eigen::solve_eigen(&model, &dofmap, &reducer, 0)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("部材 ID 0") && error.contains("非有限"),
+        "{error}"
+    );
+    let solver =
+        sepika_math::solver::make_solver(sepika_math::solver::SolverBackend::DirectSparseCholesky);
+    let error = sepika_solver::dynamic::eigen::solve_eigen_with_solver(
+        &model,
+        &dofmap,
+        &reducer,
+        0,
+        solver.as_ref(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        error.contains("部材 ID 0") && error.contains("非有限"),
+        "{error}"
+    );
+
+    model.mass_method = MassMethod::CorrectedLumped;
+    let error = assemble_global_m(&model, &dofmap, MassOption::Consistent)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("部材 ID 0") && error.contains("非有限"),
+        "{error}"
+    );
+}
+
+#[test]
 fn ダンパー総重量は全体質量行列へ一度だけ計上し両方式で一致する() {
     for kind in [
         ElementKind::Damper,
@@ -886,6 +933,15 @@ fn 生成記録の部分欠落と重複と余分な要素は全公開solverで�
 
 fn separated_dampers() -> Model {
     let mut result = model(ElementKind::Beam, true);
+    let mut zero_mass_material = result.materials[0].clone();
+    zero_mass_material.id = MaterialId(1);
+    zero_mass_material.density = 0.0;
+    result.materials.push(zero_mass_material);
+    let mut zero_mass_section = result.sections[0].clone();
+    zero_mass_section.id = SectionId(1);
+    zero_mass_section.name = "零重量線材".into();
+    zero_mass_section.material = Some(MaterialId(1));
+    result.sections.push(zero_mass_section);
     for (id, coord) in [
         (3, [0.0, 4000.0, 3000.0]),
         (4, [4000.0, 4000.0, 3000.0]),
@@ -902,7 +958,7 @@ fn separated_dampers() -> Model {
         result.elements.push(ElementData {
             id: ElemId(id),
             nodes: nodes.into_iter().collect(),
-            section: if id == 1 { Some(SectionId(0)) } else { None },
+            section: Some(SectionId(if id == 1 { 0 } else { 1 })),
             ..result.elements[0].clone()
         });
     }

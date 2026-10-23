@@ -3366,6 +3366,7 @@ fn test_holding_capacity_flow() {
     );
 
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3406,6 +3407,7 @@ fn test_holding_capacity_rejects_declared_brace_when_undetected() {
     app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame())); // 筋かいのないラーメン
     app.generate_stories_action();
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
     select_holding_points(&mut app);
@@ -3448,6 +3450,7 @@ fn test_holding_capacity_rank_auto_from_width_thickness() {
     );
 
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3515,9 +3518,12 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
     use sepika_design_jp::secondary::holding_capacity::MemberRank;
 
     let mut app = App::default();
-    app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
+    let mut model = with_explicit_pushover_gravity(crate::sample::portal_frame());
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    app.load_model(model);
     app.generate_stories_action();
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     app.core.analysis_cfg.push_steps = 10;
     app.run_pushover();
     select_holding_points(&mut app);
@@ -3533,15 +3539,13 @@ fn test_holding_capacity_rank_auto_rejects_missing_rank() {
         sec.property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     }
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     app.run_pushover();
     select_holding_points(&mut app);
     app.core.design_rank_auto = true;
     app.core.design_rank = MemberRank::FB;
-    assert!(app
-        .compute_holding_capacity()
-        .err()
-        .unwrap()
-        .contains("確定評価データが不足"));
+    let reason = app.compute_holding_capacity().err().unwrap();
+    assert!(reason.contains("確定評価データが不足"), "{reason}");
 
     // 自動判定 OFF では全層が選択値の明示運用のため、フォールバック記録は空。
     app.core.design_rank_auto = false;
@@ -3797,6 +3801,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     );
 
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     assert!(
         app.core.scoped.last_error.is_none(),
         "{:?}",
@@ -3909,6 +3914,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     rebar.hoop.pitch += 50.0;
     assert!(app.compute_holding_capacity().is_err());
     app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
     assert!(app.compute_holding_capacity().is_err());
     app.run_pushover();
     select_holding_points(&mut app);
@@ -4680,12 +4686,67 @@ fn test_floor_design_checks_slab() {
         ..App::default()
     };
 
-    let (_beams, slabs) = app.floor_design_checks();
+    let (_beams, slabs) = app.floor_design_checks().unwrap();
     assert_eq!(slabs.len(), 1, "矩形スラブが1件設計される");
     let (_sid, sr) = &slabs[0];
     assert!((sr.span - 4000.0).abs() < 1e-6, "短辺スパン");
     assert!(sr.moment > 0.0 && sr.as_req_per_m > 0.0);
     assert!((sr.effective_depth - 120.0).abs() < 1e-6, "d=t-かぶり");
+}
+
+#[test]
+fn slab_only_design_does_not_require_unused_primary_local_axis() {
+    let mut model = make_square_slab_test_model();
+    set_floor_test_self_weight_geometry(&mut model);
+    let concrete = sepika_core::ids::MaterialId(model.materials.len() as u32);
+    model.materials.push(sepika_core::model::Material {
+        id: concrete,
+        name: "床板検定用コンクリート".into(),
+        category: sepika_core::model::MaterialCategory::Concrete,
+        young: 22000.0,
+        poisson: 0.2,
+        density: 2.4e-9,
+        shear: None,
+        fc: Some(24.0),
+        fy: None,
+        concrete_class: Default::default(),
+        strength_factor: None,
+    });
+    let slab_section = sepika_core::ids::SectionId(model.sections.len() as u32);
+    let mut slab_shape = sepika_core::section_shape::SectionShape::RcSlab { thickness: 150.0 }
+        .to_section(slab_section, "S15".into());
+    slab_shape.material = Some(concrete);
+    model.sections.push(slab_shape);
+    model.slabs[0].plate.section = Some(slab_section);
+    let mut app = App {
+        core: AppCore {
+            model,
+            ..Default::default()
+        },
+        ..App::default()
+    };
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let original = app.current_design_results().unwrap();
+    assert_eq!(original.slab_checks.len(), 1);
+    let initial_moment = original.slab_checks[0].1.moment;
+
+    app.core.model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    app.core.model.slabs[0].plate.loads[0].value *= 2.0;
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let direct = app.current_design_results().unwrap();
+    assert!(direct.beam_checks.is_empty());
+    assert_eq!(direct.slab_checks.len(), 1);
+    assert!(direct.slab_checks[0].1.moment > initial_moment);
 }
 
 #[test]
@@ -4719,7 +4780,7 @@ fn issue561_floor_design_checks_skip_skew_and_preserve_rotated_rectangle() {
                     0.,
                 ];
             }
-            let (_, checks) = app.floor_design_checks();
+            let (_, checks) = app.floor_design_checks().unwrap();
             if polygon {
                 assert!(checks.is_empty());
             } else {
@@ -4813,7 +4874,7 @@ fn test_floor_design_skips_materialized_beam() {
         ..App::default()
     };
 
-    let (beams, _slabs) = app.floor_design_checks();
+    let (beams, _slabs) = app.floor_design_checks().unwrap();
     assert!(
         beams.is_empty(),
         "実部材化された小梁は床設計の対象外（全体 FEM で検定）"
@@ -4895,9 +4956,7 @@ fn set_floor_test_self_weight_geometry(model: &mut sepika_core::model::Model) {
     }
 }
 
-/// 二次部材（小梁）1 本が `Slab::beams` なしで床設計の対象になる。
-#[test]
-fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
+pub(super) fn make_floor_secondary_beam_test_model() -> sepika_core::model::Model {
     use sepika_core::ids::SectionId;
     use sepika_core::model::{SecondaryMember, SecondaryMemberKind, Section, SlabUsage};
 
@@ -4973,6 +5032,15 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
     model.floor_regions[0].slab_ids = vec![first, second];
     set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
+    model
+}
+
+/// 二次部材（小梁）1 本が `Slab::beams` なしで床設計の対象になる。
+#[test]
+fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
+    use sepika_core::ids::SectionId;
+
+    let model = make_floor_secondary_beam_test_model();
     let mut app = App {
         core: AppCore {
             model,
@@ -4981,7 +5049,7 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
         ..App::default()
     };
 
-    let (beams, _slabs) = app.floor_design_checks();
+    let (beams, _slabs) = app.floor_design_checks().unwrap();
     assert_eq!(beams.len(), 1, "二次部材小梁が1件設計される");
     let (_sid, target, jr) = &beams[0];
     assert!(matches!(
@@ -4996,6 +5064,58 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
         jr.w
     );
     assert!(jr.m_max > 0.0);
+
+    for (name, thickness_mm, fy, expected_f) in [
+        ("SS400", 40.0, Some(235.0), 235.0),
+        ("SS400", 40.001, Some(235.0), 215.0),
+        ("SS400", 50.0, Some(235.0), 215.0),
+        ("SS400", 50.0, None, 215.0),
+        ("直接入力鋼材", 50.0, Some(310.0), 310.0),
+    ] {
+        let mut check_app = App::default();
+        check_app.core.model = app.core.model.clone();
+        let section_id = SectionId(check_app.core.model.sections.len() as u32);
+        let mut secondary_section = check_app.core.model.sections[0].clone();
+        secondary_section.id = section_id;
+        let material_id = sepika_core::ids::MaterialId(check_app.core.model.materials.len() as u32);
+        let mut secondary_material =
+            check_app.core.model.materials[secondary_section.material.unwrap().index()].clone();
+        secondary_material.id = material_id;
+        secondary_section.material = Some(material_id);
+        check_app.core.model.materials.push(secondary_material);
+        check_app.core.model.sections.push(secondary_section);
+        check_app.core.model.floor_regions[0].secondary_beams[0].section = Some(section_id);
+        let slab_section_id = SectionId(check_app.core.model.sections.len() as u32);
+        let mut slab_section =
+            sepika_core::section_shape::SectionShape::RcSlab { thickness: 100.0 }
+                .to_section(slab_section_id, "床検定用スラブ".into());
+        slab_section.material = Some(material_id);
+        check_app.core.model.sections.push(slab_section);
+        for slab in &mut check_app.core.model.slabs {
+            slab.plate.section = Some(slab_section_id);
+        }
+        let section = &mut check_app.core.model.sections[section_id.index()];
+        section.shape = Some(sepika_core::section_shape::SectionShape::SteelH {
+            height: 400.0,
+            width: 200.0,
+            web_thick: 8.0,
+            flange_thick: thickness_mm,
+            root_r: Some(0.0),
+        });
+        let steel = &mut check_app.core.model.materials[material_id.index()];
+        steel.name = name.into();
+        steel.fy = fy;
+        check_app.run_design_check();
+        assert!(
+            check_app.core.scoped.last_error.is_none(),
+            "{name}: {:?}",
+            check_app.core.scoped.last_error
+        );
+        let checked = &check_app.current_design_results().unwrap().beam_checks[0].2;
+        assert!(!checked.unchecked);
+        assert!((checked.sigma_allow - expected_f / 1.5).abs() < 1e-10);
+        assert!((checked.bending_ratio - checked.sigma / (expected_f / 1.5)).abs() < 1e-10);
+    }
 
     let material = sepika_core::ids::MaterialId(app.core.model.materials.len() as u32);
     let mut steel = app.core.model.materials.last().unwrap().clone();
@@ -5015,6 +5135,30 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
     let bundle = app.core.scoped.results.as_ref().unwrap();
     assert_eq!(bundle.beam_checks.len(), 1);
     assert_eq!(bundle.slab_checks.len(), 2);
+    let original_ref = app.core.model.elements[0].local_axis.ref_vector;
+    app.core.model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    app.run_design_check();
+    let error = app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .expect("小梁支持材の局所軸エラー");
+    assert!(
+        error.contains("二次部材 0")
+            && error.contains("支持材 Primary(ElemId(0))")
+            && error.contains("非有限"),
+        "{error}"
+    );
+    assert!(app.current_design_results().is_none());
+    let failed = app.core.scoped.results.as_ref().unwrap();
+    assert!(failed.beam_checks.is_empty() && failed.slab_checks.is_empty());
+    app.core.model.elements[0].local_axis.ref_vector = original_ref;
+    app.core.scoped.last_error = None;
+    app.run_design_check();
+    assert!(app.core.scoped.last_error.is_none());
+    let direct = app.current_design_results().unwrap();
+    assert_eq!((direct.beam_checks.len(), direct.slab_checks.len()), (1, 2));
     for stale in [true, false] {
         app.core.scoped.staleness.results_stale = stale;
         app.core.design_term = LoadTerm::Short; // 直接床板・小梁は実効長期のまま。
@@ -5192,7 +5336,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
         ..App::default()
     };
 
-    let (beams, slabs) = app.floor_design_checks();
+    let (beams, slabs) = app.floor_design_checks().unwrap();
 
     // 小梁検定: 固定 DL 5.0 + 小梁用 2.5 = 7.5e-3 N/mm²。45° 分配の共有辺（4000 スパン）は
     // w_equiv = 1500 × 面荷重 なので 11.25。床用（8.0e-3 → 12.0）ではない。
@@ -5236,7 +5380,7 @@ fn test_floor_design_checks_beam_uses_beam_live_load() {
     let id = app.core.model.load_cases.last().unwrap().id;
     app.core.scoped.last_static = Some(StaticKey::Case(StaticCaseKey::User(id)));
     app.core.design_term = LoadTerm::Short;
-    let (short_beams, short_slabs) = app.floor_design_checks();
+    let (short_beams, short_slabs) = app.floor_design_checks().unwrap();
     assert_eq!(short_beams[0].2.m_max, beams[0].2.m_max);
     assert_eq!(short_beams[0].2.ratio, beams[0].2.ratio);
     assert_eq!(short_slabs[0].1.moment, slabs[0].1.moment);
@@ -5362,7 +5506,7 @@ fn test_floor_design_checks_cantilever_beam() {
         ..App::default()
     };
 
-    let (beams, _slabs) = app.floor_design_checks();
+    let (beams, _slabs) = app.floor_design_checks().unwrap();
     assert_eq!(beams.len(), 1, "片持ち小梁が1件設計される");
     let (_sid, _target, jr) = &beams[0];
     let simple = 11.85 * 4000.0_f64.powi(2) / 8.0;
@@ -5385,14 +5529,14 @@ fn test_floor_design_checks_cantilever_beam() {
         },
         ..App::default()
     };
-    let (beams2, _) = app2.floor_design_checks();
+    let (beams2, _) = app2.floor_design_checks().unwrap();
     assert_eq!(beams2.len(), 1);
     assert!(beams2[0].2.unchecked, "未割当の非片持ち小梁は検定しない");
 }
 
-/// 断面未割当の二次部材小梁は表から消さず判定「未」になる。
+/// 断面未割当の二次部材小梁は対象を示す入力エラーになる。
 #[test]
-fn test_floor_design_checks_secondary_beam_without_section_is_unchecked() {
+fn test_floor_design_checks_secondary_beam_without_section_is_input_error() {
     use sepika_core::model::{SecondaryMember, SecondaryMemberKind};
 
     let mut model = make_square_slab_test_model();
@@ -5458,10 +5602,11 @@ fn test_floor_design_checks_secondary_beam_without_section_is_unchecked() {
         },
         ..App::default()
     };
-    let (beams, _) = app.floor_design_checks();
-    assert_eq!(beams.len(), 1);
-    assert!(beams[0].2.unchecked, "断面なしは未検定");
-    assert!(!beams[0].2.ok);
+    let error = app.floor_design_checks().unwrap_err();
+    assert!(
+        error.contains("小梁 0") && error.contains("断面"),
+        "{error}"
+    );
 }
 
 /// 二次部材小梁は、平面が重なる上下階のスラブのうち**同じレベル**のスラブで検定される。
@@ -5606,7 +5751,7 @@ fn test_floor_design_checks_secondary_beam_uses_same_level_slab() {
         ..App::default()
     };
 
-    let (beams, _slabs) = app.floor_design_checks();
+    let (beams, _slabs) = app.floor_design_checks().unwrap();
     assert_eq!(beams.len(), 1, "二次部材小梁が1件設計される");
     let (sid, _target, jr) = &beams[0];
     assert_eq!(*sid, Some(SlabId(1)), "上階床領域の代表床板で検定される");
@@ -5743,7 +5888,7 @@ fn test_floor_design_checks_secondary_beam_on_shared_edge_averages_width() {
         ..App::default()
     };
 
-    let (beams, _slabs) = app.floor_design_checks();
+    let (beams, _slabs) = app.floor_design_checks().unwrap();
     assert_eq!(beams.len(), 1, "境界辺の小梁が1件設計される");
     // 2000 幅 + 4000 幅の 2 枚。三角/台形分配の重ね合わせ（8.75 N/mm）。
     assert!(
@@ -5840,7 +5985,7 @@ fn test_floor_design_checks_secondary_beam_on_slab_edge() {
         ..App::default()
     };
 
-    let (beams, _slabs) = app.floor_design_checks();
+    let (beams, _slabs) = app.floor_design_checks().unwrap();
     assert_eq!(beams.len(), 1, "床板境界上の二次部材小梁が1件設計される");
 }
 
@@ -5898,7 +6043,7 @@ fn test_slab_design_span_respects_one_way() {
         },
         ..App::default()
     };
-    let (_j, slabs_x) = app_x.floor_design_checks();
+    let (_j, slabs_x) = app_x.floor_design_checks().unwrap();
     assert!(
         (slabs_x[0].1.span - 6000.0).abs() < 1e-6,
         "X一方向は長辺6000で設計"
@@ -5912,7 +6057,7 @@ fn test_slab_design_span_respects_one_way() {
         },
         ..App::default()
     };
-    let (_j, slabs_y) = app_y.floor_design_checks();
+    let (_j, slabs_y) = app_y.floor_design_checks().unwrap();
     assert!(
         (slabs_y[0].1.span - 3000.0).abs() < 1e-6,
         "Y一方向は短辺3000で設計"
@@ -5926,7 +6071,7 @@ fn test_slab_design_span_respects_one_way() {
         },
         ..App::default()
     };
-    let (_j, slabs_n) = app_n.floor_design_checks();
+    let (_j, slabs_n) = app_n.floor_design_checks().unwrap();
     assert!(
         (slabs_n[0].1.span - 3000.0).abs() < 1e-6,
         "両方向は短辺3000で設計"
@@ -5940,7 +6085,7 @@ fn test_slab_design_span_respects_one_way() {
         },
         ..App::default()
     };
-    let (_j, slabs) = app.floor_design_checks();
+    let (_j, slabs) = app.floor_design_checks().unwrap();
     assert!((slabs[0].1.span - 4000.0).abs() < 1e-6);
     assert_eq!(short_model.slabs[0].one_way(), Some(OneWayDir::Short));
 
@@ -5954,7 +6099,7 @@ fn test_slab_design_span_respects_one_way() {
         },
         ..App::default()
     };
-    let (_j, slabs) = app.floor_design_checks();
+    let (_j, slabs) = app.floor_design_checks().unwrap();
     assert!((slabs[0].1.span - 3500.0).abs() < 1e-6);
     assert_eq!(short_model.slabs[0].one_way(), Some(OneWayDir::Short));
 
@@ -6020,7 +6165,7 @@ fn test_attached_cantilever_slab_check_coef_2() {
         },
         ..App::default()
     };
-    let (_j, slabs) = app.floor_design_checks();
+    let (_j, slabs) = app.floor_design_checks().unwrap();
     let enclosed = slabs
         .iter()
         .find(|(id, _)| *id == SlabId(0))
@@ -6094,7 +6239,7 @@ fn test_attached_trapezoid_slab_check_survives_none_dimensions() {
         },
         ..App::default()
     };
-    let (_j, slabs) = app.floor_design_checks();
+    let (_j, slabs) = app.floor_design_checks().unwrap();
     assert_eq!(slabs.len(), 1, "slab_dimensions が None でも検定する");
     let w = app
         .core
@@ -6141,7 +6286,7 @@ fn test_attached_point_slab_check_coef_2() {
         },
         ..App::default()
     };
-    let (_j, slabs) = app.floor_design_checks();
+    let (_j, slabs) = app.floor_design_checks().unwrap();
     assert_eq!(slabs.len(), 1);
     let w = app
         .core
@@ -6427,6 +6572,72 @@ fn test_run_preparation_is_idempotent() {
         !app.core.scoped.staleness.results_stale,
         "差分がなければ解析結果を stale にしないはず"
     );
+}
+
+#[test]
+fn invalid_local_reference_rejects_preparation_without_adopting_partial_model() {
+    let mut app = App::default();
+    app.load_model(crate::sample::portal_frame());
+    let elem_id = app.core.model.elements[0].id;
+    app.core.model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    let nodes = app.core.model.nodes.clone();
+    let stories = app.core.model.stories.clone();
+    let cases = app.core.model.load_cases.clone();
+    let undo_label = app.core.scoped.undo.undo_label().map(str::to_owned);
+
+    app.run_preparation();
+
+    let error = app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .expect("部材と理由付きの準備失敗");
+    assert!(error.contains(&elem_id.0.to_string()), "{error}");
+    assert!(error.contains("非有限"), "{error}");
+    assert!(app.core.scoped.preparation.is_none());
+    assert!(app.core.scoped.auto_load_sync_hash.is_none());
+    assert_eq!(app.core.model.nodes, nodes);
+    assert_eq!(app.core.model.stories, stories);
+    assert_eq!(app.core.model.load_cases, cases);
+    assert_eq!(app.core.scoped.undo.undo_label(), undo_label.as_deref());
+}
+
+#[test]
+fn invalid_local_reference_invalidates_previous_static_result() {
+    let mut app = App::default();
+    app.load_model(crate::sample::portal_frame());
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert!(app.core.scoped.results.as_ref().is_some_and(|bundle| {
+        bundle
+            .statics
+            .iter()
+            .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(0)))
+    }));
+
+    let elem_id = app.core.model.elements[0].id;
+    app.core.model.elements[0].local_axis.ref_vector = [f64::INFINITY, 0.0, 0.0];
+    app.run_linear_static(LoadCaseId(0));
+
+    let error = app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .expect("部材と理由付きの解析失敗");
+    assert!(error.contains(&elem_id.0.to_string()), "{error}");
+    assert!(error.contains("非有限"), "{error}");
+    assert!(app.core.scoped.results.as_ref().is_none_or(|bundle| {
+        bundle
+            .statics
+            .iter()
+            .all(|(key, _)| *key != StaticCaseKey::User(LoadCaseId(0)))
+    }));
 }
 
 /// 階を生成できないモデル（節点なし）でも準備計算は中断せず、階の生成エラーを
@@ -6758,19 +6969,31 @@ fn known_ai_failure_is_cleared_even_when_gravity_computation_fails() {
                 ..Default::default()
             },
         );
+        for element in app
+            .core
+            .model
+            .elements
+            .iter_mut()
+            .filter(|e| e.kind.is_primary_frame_support() && e.section.is_none())
+        {
+            element.section = Some(sepika_core::ids::SectionId(1));
+        }
         assert!(sepika_job::auto_loads::compute_gravity_auto_load_cases(&app.core.model).is_err());
         if preparation_only {
             app.run_preparation();
         } else {
             app.sync_auto_load_cases_action();
         }
-        assert!(app
-            .core
-            .scoped
-            .last_error
-            .as_deref()
-            .unwrap()
-            .contains("短辺方向"));
+        assert!(
+            app.core
+                .scoped
+                .last_error
+                .as_deref()
+                .unwrap()
+                .contains("短辺方向"),
+            "{:?}",
+            app.core.scoped.last_error
+        );
         for id in [ex, ey] {
             let case = &app.core.model.load_cases[id.index()];
             assert!(case
@@ -9255,11 +9478,13 @@ fn test_preparation_generates_panel_zones() {
     assert!(prep.panel_modeling_enabled);
     assert_eq!(prep.panels.len(), n_panels, "一覧と生成数が一致する");
     for p in &prep.panels {
-        assert!(
-            p.dc > 0.0 && p.db > 0.0 && p.tp > 0.0,
-            "諸元が解決されている"
-        );
-        assert!(p.k_panel > 0.0, "せん断剛性 Kxp = G・Ve が正");
+        for direction in 0..2 {
+            assert!(
+                p.dc[direction] > 0.0 && p.db[direction] > 0.0 && p.tp[direction] > 0.0,
+                "両方向の諸元が解決されている"
+            );
+            assert!(p.k_panel[direction] > 0.0, "各方向のせん断剛性 G・Ve が正");
+        }
     }
     // パネル節点には γX・γY の 2 自由度が増える。
     let dofmap = sepika_core::dof::DofMap::build(&app.core.model);
@@ -9461,11 +9686,11 @@ fn test_load_model_resets_model_derived_state() {
         .generated_panels
         .push(sepika_element::springs::panel_gen::GeneratedPanel {
             node: NodeId(0),
-            dc: 300.0,
-            db: 400.0,
-            tp: 12.0,
-            ve: 1.0e6,
-            k_panel: 1.0e9,
+            dc: [300.0; 2],
+            db: [400.0; 2],
+            tp: [12.0; 2],
+            ve: [1.0e6; 2],
+            k_panel: [1.0e9; 2],
         });
     #[cfg(feature = "gui")]
     {
@@ -11593,6 +11818,7 @@ fn gui_node_paste_rejects_attached_slab_geometry_atomically() {
     let revision = app.core.scoped.undo.revision();
     let mut invalid = app.core.model.clone();
     invalid.nodes[3].coord = invalid.nodes[2].coord;
+    invalid.nodes[3].coord[2] += 1000.0;
     let expected = invalid.validate_attached_slabs().unwrap_err().to_string();
     let issues = sepika_solver::statics::analysis::precheck::model_issues(&invalid);
     assert!(issues.iter().any(|issue| issue.message == expected));
@@ -11604,7 +11830,10 @@ fn gui_node_paste_rejects_attached_slab_geometry_atomically() {
     )
     .err()
     .expect("不正床板を拒否");
-    assert!(error.to_string().contains(&expected));
+    assert!(
+        error.to_string().contains(&expected),
+        "actual: {error}; expected: {expected}"
+    );
     assert_eq!(format!("{invalid:?}"), before);
     let mut adapter = NodeGridAdapter {
         model: &mut app.core.model,
@@ -11616,6 +11845,7 @@ fn gui_node_paste_rejects_attached_slab_geometry_atomically() {
             (2, 1, "100".into()),
             (3, 0, "0".into()),
             (3, 1, "100".into()),
+            (3, 2, "4500".into()),
         ],
         0,
     );
@@ -11706,6 +11936,7 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
         steel_flange_thick: 12.0,
     };
     let mut model = crate::sample::portal_frame();
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
     model.sections[0] = sepika_core::model::Section {
         material: Some(MaterialId(1)),
         steel_material: Some(MaterialId(0)),
@@ -11866,13 +12097,16 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
     app.load_model(model);
     app.run_preparation();
     assert!(app.core.scoped.preparation.is_none());
-    assert!(app
-        .core
-        .scoped
-        .last_error
-        .as_ref()
-        .unwrap()
-        .contains("未割当"));
+    assert!(
+        app.core
+            .scoped
+            .last_error
+            .as_ref()
+            .unwrap()
+            .contains("未割当"),
+        "{:?}",
+        app.core.scoped.last_error
+    );
 }
 
 mod seismic_freshness_fixture {
@@ -12651,11 +12885,16 @@ mod steel_slab_density_fixture {
 
 #[test]
 fn high_density_steel_gui_preparation_sync_rejects_and_undo_recovers() {
-    for (model, material) in [
+    for (mut model, material) in [
         (high_density_steel_fixture::steel_frame(), 0),
         (steel_slab_density_fixture::one_cubic_metre(true), 1),
         (steel_slab_density_fixture::one_cubic_metre(false), 1),
     ] {
+        if material == 1 {
+            for section in &mut model.sections[..2] {
+                section.thickness = Some(15.0);
+            }
+        }
         let mut app = App::default();
         app.load_model(model);
         app.run_preparation();
@@ -13004,11 +13243,11 @@ fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_reta
         current.core.scoped.last_error
     );
     let gated = current.core.scoped.results.as_ref().unwrap();
-    assert!(gated.joint_checks.iter().any(
-        |c| matches!(&c.outcome, CheckOutcome::Skipped { reason } if reason.contains("段違い"))
-    ));
     assert!(gated.joint_checks.iter().any(|c| c.node == NodeId(2)
-        && c.label.contains("[0.000, 1.000, 0.000]")
+        && c.label == "パネルゾーン(S) 強軸"
+        && matches!(&c.outcome, CheckOutcome::Skipped { reason } if reason.contains("段違い"))));
+    assert!(gated.joint_checks.iter().any(|c| c.node == NodeId(2)
+        && c.label == "パネルゾーン(S) 弱軸"
         && matches!(c.outcome, CheckOutcome::Checked(_))));
     save(&path, &current.core.model, gated.clone());
     reopened.open_project_from(path.clone());
@@ -13658,4 +13897,417 @@ fn wall_connection_gui_diagnostic_preserves_shared_stop_reason() {
             .to_string();
         assert!(error.contains(&expected), "{error}");
     }
+}
+
+fn fes_718_ready_app() -> App {
+    let mut app = App::default();
+    app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));
+    app.generate_stories_action();
+    app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
+    assert!(app.core.scoped.last_error.is_none());
+    app.core.analysis_cfg.push_steps = 10;
+    app.run_pushover();
+    select_holding_points(&mut app);
+    assert!(app.core.scoped.last_error.is_none());
+    app
+}
+
+#[test]
+fn fes_718_success_then_unavailable_never_keeps_capacity_source_or_verdict() {
+    let mut app = fes_718_ready_app();
+    let normal = app.compute_holding_capacity().expect("有効な方向別結果");
+    assert_eq!(normal.0.stories[0].rs, 1.0);
+    assert_eq!(normal.0.stories[0].re, 0.0);
+    assert_eq!(normal.0.stories[0].fes, 1.0);
+    assert!(normal.0.stories[0].qun > 0.0);
+    assert!(app.core.scoped.holding_capacity_source.is_some());
+
+    for (_, result) in &mut app.core.scoped.results.as_mut().unwrap().statics {
+        result.disp.fill([0.0; 6]);
+    }
+    let reason = app.compute_holding_capacity().err().expect("全層ゼロ変位");
+    assert!(reason.contains("Rs 算定不能"), "{reason}");
+    assert!(reason.contains("X"), "{reason}");
+    assert!(app.core.scoped.holding_capacity_source.is_none());
+    let csv = crate::summary::build_report_csv(&app);
+    assert!(csv.contains("Rs 算定不能"));
+    assert!(csv.contains("判定なし"));
+    assert!(csv.contains("必要保有水平耐力・合否,算定不能"));
+    assert!(app.compute_holding_capacity().is_err());
+    assert!(app.core.scoped.holding_capacity_source.is_none());
+}
+
+#[test]
+fn fes_718_missing_direction_and_zero_radius_stop_required_capacity() {
+    let mut app = fes_718_ready_app();
+    app.compute_holding_capacity().expect("有効な方向別結果");
+    let y = app
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .statics
+        .iter_mut()
+        .find(|(key, _)| *key == StaticCaseKey::Seismic(SeismicDir::Y))
+        .unwrap();
+    for (_, forces) in &mut y.1.member_forces {
+        for (_, force) in &mut forces.at {
+            force.fill(0.0);
+        }
+    }
+    let reason = app.compute_holding_capacity().err().unwrap();
+    assert!(reason.contains("Re 算定不能"), "{reason}");
+    assert!(app.core.scoped.holding_capacity_source.is_none());
+    app.core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .statics
+        .retain(|(key, _)| *key != StaticCaseKey::Seismic(SeismicDir::Y));
+    let reason = app.compute_holding_capacity().err().unwrap();
+    assert!(reason.contains("X/Y 方向"), "{reason}");
+    assert!(crate::summary::build_report_csv(&app).contains("X/Y 方向"));
+}
+
+#[test]
+fn fes_718_ovika_preserves_current_versions_and_rejects_legacy_analysis_or_design() {
+    use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
+    let mut app = fes_718_ready_app();
+    let normal_count = app.core.scoped.results.as_ref().unwrap().statics.len();
+    for (_, result) in &mut app.core.scoped.results.as_mut().unwrap().statics {
+        result.disp.fill([0.0; 6]);
+    }
+    let path = test_tmp().join("fes_718_unavailable.ovika");
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    let results = reopened.core.scoped.results.as_ref().unwrap();
+    assert_eq!(
+        results.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    assert_eq!(results.statics.len(), normal_count);
+    assert!(crate::summary::build_report_csv(&reopened).contains("Rs 算定不能"));
+    assert!(reopened.compute_holding_capacity().is_err());
+
+    let mut original = fes_718_ready_app();
+    original.run_design_check();
+    assert!(original.core.scoped.last_error.is_none());
+    assert!(!original
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .is_empty());
+    original.save_project_to(path.clone());
+    reopened.open_project_from(path.clone());
+    let current = reopened.core.scoped.results.as_ref().unwrap();
+    assert_eq!(
+        current.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    assert_eq!(
+        current.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    assert_eq!(current.statics.len(), normal_count);
+    assert!(!reopened
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .is_empty());
+    original
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .design_contract_version = Some(20);
+    let save_legacy = |source: &App| {
+        let bytes = rmp_serde::to_vec_named(&SavedResults {
+            bundle: source.core.scoped.results.as_ref().unwrap().clone(),
+            last_static: source.core.scoped.last_static,
+            view_vibration_case: None,
+            view_lumped_vibration_case: None,
+            last_run: None,
+        })
+        .unwrap();
+        sepika_io::ovika::save_ovika(
+            &path,
+            &source.core.model,
+            sepika_io::ovika::OvikaExtras {
+                results: Some(&bytes),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    };
+    save_legacy(&original);
+    reopened.open_project_from(path.clone());
+    let results = reopened.core.scoped.results.as_ref().unwrap();
+    assert_eq!(results.statics.len(), normal_count);
+    assert!(results.member_checks.is_empty());
+    assert_eq!(
+        results.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    assert!(reopened
+        .core
+        .scoped
+        .result_contract_notice
+        .as_deref()
+        .unwrap()
+        .contains("旧契約"));
+    let legacy = original.core.scoped.results.as_mut().unwrap();
+    legacy.analysis_contract_version = Some(34);
+    legacy.design_contract_version = Some(DESIGN_CONTRACT_VERSION);
+    save_legacy(&original);
+    reopened.open_project_from(path.clone());
+    let results = reopened.core.scoped.results.as_ref().unwrap();
+    assert!(results.statics.is_empty());
+    assert!(results.member_checks.is_empty());
+    let reason = reopened
+        .core
+        .scoped
+        .result_contract_notice
+        .as_deref()
+        .unwrap();
+    assert!(reason.contains("解析") && reason.contains("旧契約") && reason.contains("保存版=34"));
+    assert!(!crate::summary::build_report_csv(&reopened).contains("[層指標(二次設計)]"));
+    assert!(reopened.compute_holding_capacity().is_err());
+}
+
+#[test]
+#[cfg(feature = "gui")]
+fn fes_718_gui_draws_target_reason_without_normal_verdict() {
+    let mut app = fes_718_ready_app();
+    app.compute_holding_capacity().expect("有効な方向別結果");
+    for (_, result) in &mut app.core.scoped.results.as_mut().unwrap().statics {
+        result.disp.fill([0.0; 6]);
+    }
+    let context = egui::Context::default();
+    let output = context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(4000.0, 16000.0),
+            )),
+            ..Default::default()
+        },
+        |ui| crate::design_view::design_table(ui, &mut app),
+    );
+    let text = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("Rs 算定不能"), "{text}");
+    assert!(text.contains("判定なし"), "{text}");
+    assert!(text.contains("必要保有水平耐力・合否は算定不能"), "{text}");
+    assert!(!text.contains("算定不能 NG"));
+    assert!(!text.contains("Qun[kN]"), "{text}");
+    assert!(app.core.scoped.holding_capacity_source.is_none());
+}
+
+#[test]
+fn steel601_secondary_input_failure_clears_design_results() {
+    use sepika_core::ids::{MaterialId, SecondaryMemberId};
+    use sepika_core::model::{
+        SecondaryMember, SecondaryMemberAnchor, SecondaryMemberEnds, SupportMemberId,
+    };
+    let mut model = make_square_slab_test_model();
+    model.slabs.clear();
+    model.floor_regions[0].slab_ids.clear();
+    set_floor_test_self_weight_geometry(&mut model);
+    let sid = SectionId(model.sections.len() as u32);
+    let mut section = model.sections[0].clone();
+    section.id = sid;
+    model.sections.push(section);
+    model.unassigned_beams.push(SecondaryMember {
+        id: SecondaryMemberId(601),
+        name: "入力検査用小梁".into(),
+        section: Some(sid),
+        ends: SecondaryMemberEnds::Cantilever {
+            support: SecondaryMemberAnchor {
+                support: SupportMemberId::Primary(ElemId(0)),
+                position: 0.5,
+            },
+            free_end_vector: [0.0, 1000.0],
+        },
+        ..Default::default()
+    });
+    let material = MaterialId(model.materials.len() as u32);
+    let mut steel = model.materials[0].clone();
+    steel.id = material;
+    model.materials.push(steel);
+    model.sections[sid.index()].material = Some(material);
+    let mut app = App::default();
+    for case in [
+        "unassigned",
+        "missing-reference",
+        "non-steel",
+        "direct-missing-fy",
+        "direct-zero-fy",
+        "direct-negative-fy",
+        "direct-nan-fy",
+        "direct-infinite-fy",
+        "known-missing-thickness",
+        "known-invalid-thickness",
+        "known-out-of-range",
+    ] {
+        app.core.model = model.clone();
+        app.core.scoped.last_error = None;
+        app.run_design_check();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{case}: {:?}",
+            app.core.scoped.last_error
+        );
+        assert_eq!(
+            app.core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .design_contract_version,
+            Some(sepika_core::result_contract::DESIGN_CONTRACT_VERSION)
+        );
+        let section = &mut app.core.model.sections[sid.index()];
+        let steel = &mut app.core.model.materials[material.index()];
+        match case {
+            "unassigned" => section.material = None,
+            "missing-reference" => section.material = Some(MaterialId(999)),
+            "non-steel" => steel.category = sepika_core::model::MaterialCategory::Concrete,
+            "direct-missing-fy" => steel.fy = None,
+            "direct-zero-fy" => steel.fy = Some(0.0),
+            "direct-negative-fy" => steel.fy = Some(-1.0),
+            "direct-infinite-fy" => steel.fy = Some(f64::INFINITY),
+            "direct-nan-fy" => steel.fy = Some(f64::NAN),
+            "known-missing-thickness" => {
+                steel.name = "SS400".into();
+                section.shape = None;
+                section.thickness = None;
+            }
+            "known-invalid-thickness" => {
+                steel.name = "SS400".into();
+                section.shape = None;
+                section.thickness = Some(-1.0);
+            }
+            "known-out-of-range" => {
+                steel.name = "SS400".into();
+                section.shape = None;
+                section.thickness = Some(101.0);
+            }
+            _ => unreachable!(),
+        }
+        app.run_design_check();
+        let error = app.core.scoped.last_error.as_deref().unwrap();
+        assert!(error.contains("601"), "{case}: {error}");
+        let reason = match case {
+            "direct-missing-fy" | "direct-zero-fy" | "direct-negative-fy" | "direct-nan-fy"
+            | "direct-infinite-fy" => "fy",
+            "known-missing-thickness" | "known-invalid-thickness" => "板厚",
+            "known-out-of-range" => "適用範囲",
+            _ => "鋼材",
+        };
+        assert!(error.contains(reason), "{case}: {error}");
+        let bundle = app.core.scoped.results.as_ref().unwrap();
+        assert!(
+            bundle.member_checks.is_empty()
+                && bundle.beam_checks.is_empty()
+                && bundle.slab_checks.is_empty(),
+            "{case}"
+        );
+        assert_eq!(bundle.design_contract_version, None, "{case}");
+        assert!(app.core.scoped.staleness.design_stale, "{case}");
+        assert!(app.current_design_results().is_none(), "{case}");
+        app.core.scoped.staleness.mark_fresh();
+        assert!(app.current_design_results().is_none(), "{case}");
+        assert!(
+            !crate::summary::build_report_csv(&app).contains("全適合"),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn steel601_holding_brace_rank_uses_direct_f_and_rejects_missing_required_thickness() {
+    use sepika_core::ids::MaterialId;
+    use sepika_core::model::{ElementKind, FrameSectionUse};
+    use sepika_core::section_shape::SectionShape;
+    use sepika_design_jp::secondary::holding_capacity::MemberRank;
+    let mut model = with_explicit_pushover_gravity(crate::sample::portal_frame());
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    let mid = MaterialId(model.materials.len() as u32);
+    let mut direct = model.materials[0].clone();
+    direct.id = mid;
+    direct.name = "直接指定筋かい".into();
+    direct.fy = Some(400.0);
+    model.materials.push(direct);
+    let sid = SectionId(model.sections.len() as u32);
+    let mut section = SectionShape::SteelBox {
+        height: 310.0,
+        width: 310.0,
+        thick: 10.0,
+        corner_r: Some(0.0),
+    }
+    .to_section(sid, "筋かい".into());
+    section.material = Some(mid);
+    section.frame_use = Some(FrameSectionUse::Brace);
+    model.sections.push(section);
+    let mut brace = model.elements[0].clone();
+    brace.id = ElemId(model.elements.len() as u32);
+    brace.kind = ElementKind::Brace {
+        tension_only: false,
+    };
+    brace.nodes = smallvec::smallvec![NodeId(0), NodeId(3)];
+    brace.section = Some(sid);
+    let brace_id = brace.id;
+    model.elements.push(brace);
+    let mut app = App::default();
+    app.load_model(model);
+    app.generate_stories_action();
+    app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
+    app.core.analysis_cfg.push_steps = 10;
+    app.run_pushover();
+    select_holding_points(&mut app);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.core.design_rank_auto = true;
+    let (result, _) = app.compute_holding_capacity().unwrap();
+    // 細長比は約57、400の種別境界890/√400=44.5を超える。
+    assert_eq!(
+        result
+            .member_ranks
+            .iter()
+            .find(|(id, _)| *id == brace_id)
+            .unwrap()
+            .1,
+        MemberRank::FC
+    );
+    app.core.model.materials[mid.index()].name = "SS400".into();
+    app.core.model.sections[sid.index()].shape = None;
+    app.core.model.sections[sid.index()].thickness = None;
+    let error = app.compute_holding_capacity().err().expect("拒否される");
+    assert!(
+        error.contains(&format!("ElemId({})", brace_id.0)) && error.contains("板厚"),
+        "{error}"
+    );
 }

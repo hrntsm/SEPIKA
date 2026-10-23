@@ -1429,7 +1429,7 @@ fn section_uses(
 fn build_sections(
     model: &mut Model,
     mut pending: Vec<PendingSec>,
-    steel_lib: &HashMap<String, SectionShape>,
+    steel_lib: &HashMap<String, Result<SectionShape, String>>,
     warnings: &mut Vec<String>,
     notes: &mut Vec<String>,
     section_uses: &HashMap<SectionKey, FrameSectionUse>,
@@ -1453,6 +1453,15 @@ fn build_sections(
                 |source| source.error(Some(file_id.family), &detail),
             )
         };
+        let resolve_steel = |name: Option<&str>| {
+            name.and_then(|name| steel_lib.get(name).map(|entry| (name, entry)))
+                .map(|(name, entry)| {
+                    entry
+                        .clone()
+                        .map_err(|reason| section_error(&format!("形鋼「{name}」: {reason}")))
+                })
+                .transpose()
+        };
         let new_id = SectionId(model.sections.len() as u32);
         let section = match ps.kind {
             PendingSecKind::Shape(shape) => {
@@ -1462,48 +1471,40 @@ fn build_sections(
                 section.frame_use = section_uses.get(&file_id).copied();
                 section
             }
-            PendingSecKind::SteelRef(shape_name) => {
-                match shape_name
-                    .as_deref()
-                    .and_then(|nm| steel_lib.get(nm).cloned())
-                {
-                    Some(shape) => {
-                        let mut section = shape
-                            .input_section(new_id, ps.name)
-                            .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?;
-                        section.frame_use = section_uses.get(&file_id).copied();
-                        section
-                    }
-                    None => {
-                        return Err(section_error(&format!(
-                            "鋼断面 (id={file_id}, name=\"{}\") の形鋼参照「{}」を解決できません",
-                            ps.name,
-                            shape_name.as_deref().unwrap_or("未指定")
-                        )))
-                    }
+            PendingSecKind::SteelRef(shape_name) => match resolve_steel(shape_name.as_deref())? {
+                Some(shape) => {
+                    let mut section = shape
+                        .input_section(new_id, ps.name)
+                        .map_err(|error| section_error(&format!("形状 {shape:?}: {error}")))?;
+                    section.frame_use = section_uses.get(&file_id).copied();
+                    section
                 }
-            }
+                None => {
+                    return Err(section_error(&format!(
+                        "鋼断面 (id={file_id}, name=\"{}\") の形鋼参照「{}」を解決できません",
+                        ps.name,
+                        shape_name.as_deref().unwrap_or("未指定")
+                    )))
+                }
+            },
             PendingSecKind::CftRef(steel_name) => {
-                let cft = steel_name
-                    .as_deref()
-                    .and_then(|nm| steel_lib.get(nm).cloned())
-                    .and_then(|s| match s {
-                        SectionShape::SteelBox {
-                            height,
-                            width,
-                            thick,
-                            corner_r,
-                        } => Some(SectionShape::CftBox {
-                            height,
-                            width,
-                            thick,
-                            corner_r,
-                        }),
-                        SectionShape::SteelPipe { outer_dia, thick } => {
-                            Some(SectionShape::CftPipe { outer_dia, thick })
-                        }
-                        _ => None,
-                    });
+                let cft = resolve_steel(steel_name.as_deref())?.and_then(|s| match s {
+                    SectionShape::SteelBox {
+                        height,
+                        width,
+                        thick,
+                        corner_r,
+                    } => Some(SectionShape::CftBox {
+                        height,
+                        width,
+                        thick,
+                        corner_r,
+                    }),
+                    SectionShape::SteelPipe { outer_dia, thick } => {
+                        Some(SectionShape::CftPipe { outer_dia, thick })
+                    }
+                    _ => None,
+                });
                 match cft {
                     Some(shape) => shape
                         .input_section(new_id, ps.name)
@@ -1523,29 +1524,26 @@ fn build_sections(
                 rebar,
                 steel_name,
             } => {
-                let steel_dims = steel_name
-                    .as_deref()
-                    .and_then(|nm| steel_lib.get(nm).cloned())
-                    .and_then(|s| match s {
-                        SectionShape::SteelH {
-                            height,
-                            width,
-                            web_thick,
-                            flange_thick,
-                            ..
-                        } => Some((height, width, web_thick, flange_thick)),
-                        SectionShape::SteelBuiltH {
-                            height,
-                            upper_width,
-                            upper_thick,
-                            lower_width,
-                            lower_thick,
-                            web_thick,
-                        } if upper_width == lower_width && upper_thick == lower_thick => {
-                            Some((height, upper_width, web_thick, upper_thick))
-                        }
-                        _ => None,
-                    });
+                let steel_dims = resolve_steel(steel_name.as_deref())?.and_then(|s| match s {
+                    SectionShape::SteelH {
+                        height,
+                        width,
+                        web_thick,
+                        flange_thick,
+                        ..
+                    } => Some((height, width, web_thick, flange_thick)),
+                    SectionShape::SteelBuiltH {
+                        height,
+                        upper_width,
+                        upper_thick,
+                        lower_width,
+                        lower_thick,
+                        web_thick,
+                    } if upper_width == lower_width && upper_thick == lower_thick => {
+                        Some((height, upper_width, web_thick, upper_thick))
+                    }
+                    _ => None,
+                });
                 let (sh, sw, sweb, sfl) = steel_dims.ok_or_else(|| {
                     section_error(&format!(
                         "SRC 断面 (id={file_id}, name=\"{}\") の内蔵鉄骨参照「{}」を解決できません",
@@ -1741,13 +1739,8 @@ fn resolve_sec_material(model: &Model, r: &SecMatRef) -> Option<MaterialId> {
     }
 }
 
-/// 鉄筋・鉄骨のグレード名から材料を引き、無ければ作る（取り込みの境界）。
-///
-/// ST-Bridge は鉄筋・内蔵鉄骨の材質を**グレード名**で持つのに対し、内部モデルは
-/// 材料テーブルへの参照で持つ。名前が一致する材料があればそれを使い、無ければ
-/// グレード名から基準強度を推定して 1 行作る。推定に用いる規則
-/// （[`sepika_core::material_grade::rebar_grade_f_value`] ほか）はここでしか
-/// 使わず、内部の強度解決は作られた材料の `fy` だけを見る。
+/// 鉄筋・内蔵鋼材・CFT鋼管の名前が一致する既存材料を再利用する。
+/// 未登録の既知グレードには標準物性を与え、未知グレードの強度・密度は補完しない。
 fn find_or_create_bar_material(
     model: &mut Model,
     grade: &str,
@@ -1761,9 +1754,10 @@ fn find_or_create_bar_material(
     if let Some(m) = model.materials.iter().find(|m| m.name == grade) {
         return Some(m.id);
     }
+    let standard = material_std::resolve_grade(grade);
     let fy = match category {
         MaterialCategory::Rebar => sepika_core::standard_material::rebar_grade_strength(grade),
-        _ => material_std::resolve_grade(grade).and_then(|m| m.fy),
+        _ => standard.as_ref().and_then(|m| m.fy),
     };
     if fy.is_none() {
         notes.push(format!(
@@ -1778,9 +1772,21 @@ fn find_or_create_bar_material(
         id,
         name: grade.to_string(),
         category,
-        young: preset.as_ref().map(|p| p.young).unwrap_or(205_000.0),
-        poisson: preset.as_ref().map(|p| p.poisson).unwrap_or(0.3),
-        density: preset.as_ref().map(|p| p.density).unwrap_or(0.0),
+        young: standard
+            .as_ref()
+            .map(|m| m.young)
+            .or_else(|| preset.as_ref().map(|p| p.young))
+            .unwrap_or(205_000.0),
+        poisson: standard
+            .as_ref()
+            .map(|m| m.poisson)
+            .or_else(|| preset.as_ref().map(|p| p.poisson))
+            .unwrap_or(0.3),
+        density: standard
+            .as_ref()
+            .map(|m| m.density)
+            .or_else(|| preset.as_ref().map(|p| p.density))
+            .unwrap_or(0.0),
         shear: None,
         fc: None,
         fy: fy.or_else(|| preset.as_ref().and_then(|p| p.fy)),

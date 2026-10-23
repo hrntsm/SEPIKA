@@ -19,14 +19,23 @@ fn axis_direction(a: [f64; 3], b: [f64; 3]) -> Result<[f64; 3], String> {
 }
 
 fn section_frame(axis: [f64; 3], reference: [f64; 3]) -> Result<[[f64; 3]; 2], String> {
-    let rejected = vec3::sub(reference, vec3::scale(axis, vec3::dot(reference, axis)));
-    let norm = vec3::norm(rejected);
-    if !norm.is_finite() || norm <= 1e-12 {
+    let ([_, common_y, common_z], used_fallback) =
+        vec3::local_frame_axes_with_fallback([0.0; 3], axis, reference)
+            .map_err(|reason| reason.to_string())?;
+    if used_fallback {
         return Err("断面方向を材軸直交面へ投影できません".into());
     }
-    let y = vec3::scale(rejected, 1.0 / norm);
-    let z = vec3::cross(axis, y);
-    Ok([y, z])
+    let rejected = vec3::sub(reference, vec3::scale(axis, vec3::dot(reference, axis)));
+    let norm = vec3::norm(rejected);
+    if norm.is_finite() && norm > 1e-12 {
+        let y = vec3::scale(rejected, 1.0 / norm);
+        let z = vec3::cross(axis, y);
+        return Ok([y, z]);
+    }
+    if norm.is_finite() {
+        return Err("断面方向を材軸直交面へ投影できません".into());
+    }
+    Ok([common_y, common_z])
 }
 
 fn section_geometry(sec: &Section) -> Result<SectionGeometry, String> {
@@ -441,6 +450,14 @@ mod tests {
             girder_self_weight_interval(&model, &model.elements[0]).unwrap(),
             [300.0, 5700.0]
         );
+        let mut large_reference = model.clone();
+        for column in &mut large_reference.elements[1..3] {
+            column.local_axis.ref_vector = [1e308, 0.0, 0.0];
+        }
+        assert_eq!(
+            girder_self_weight_interval(&large_reference, &large_reference.elements[0]),
+            Ok([300.0, 5700.0])
+        );
         for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
             let mut mixed = model.clone();
             mixed.elements[0].kind = kind;
@@ -574,6 +591,127 @@ mod tests {
         let rolled =
             beam_projected_face(&s, [1.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.0, 1.0, 0.0]).unwrap();
         assert!((rolled - 450.0 / 2.0_f64.sqrt()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn 壁支持面は有限な同方向参照の大きさで変わらない() {
+        let mut model = Model {
+            nodes: vec![node(0, [0.0, 0.0, 0.0]), node(1, [4000.0, 0.0, 0.0])],
+            elements: vec![elem(0, ElementKind::Beam, 0, 1, 0)],
+            sections: vec![section(0, 600.0)],
+            ..Default::default()
+        };
+        model.sections[0].width = 400.0;
+        model.sections[0].shape = Some(crate::section_shape::SectionShape::SteelFlatBar {
+            width: 400.0,
+            thick: 600.0,
+        });
+        let support = SupportMemberId::Primary(ElemId(0));
+        for reference in [[0.0, 1.0, 0.0], [0.0, 1e308, 0.0]] {
+            model.elements[0].local_axis.ref_vector = reference;
+            assert_eq!(
+                wall_support_face(&model, support, [0.0, 1.0, 0.0]),
+                Ok(300.0)
+            );
+        }
+    }
+
+    #[test]
+    fn 壁支持面は平行参照の丸めを断面方向として採用しない() {
+        let mut model = Model {
+            nodes: vec![node(0, [0.0, 0.0, 0.0]), node(1, [1.0, 3.0, 5.0])],
+            elements: vec![elem(0, ElementKind::Beam, 0, 1, 0)],
+            sections: vec![section(0, 600.0)],
+            ..Default::default()
+        };
+        model.sections[0].width = 400.0;
+        model.sections[0].shape = Some(crate::section_shape::SectionShape::SteelFlatBar {
+            width: 400.0,
+            thick: 600.0,
+        });
+        for (end, reference) in [
+            ([1.0, 3.0, 7.0], [1e6, 3e6, 7e6]),
+            ([1.0, 3.0, 7.0], [1e8, 3e8, 7e8]),
+            ([1.0, 3.0, 7.0], [1e306, 3e306, 7e306]),
+            (
+                [1.0, 1.0, 6.0],
+                [
+                    1.6666666666666666e307,
+                    1.6666666666666666e307,
+                    9.999999999999998e307,
+                ],
+            ),
+            ([1.0, 3.0, 5.0], [2e307, 6e307, 1e308]),
+        ] {
+            model.nodes[1].coord = end;
+            model.elements[0].local_axis.ref_vector = reference;
+            let error =
+                wall_support_face(&model, SupportMemberId::Primary(ElemId(0)), [1.0, 0.0, 0.0])
+                    .unwrap_err();
+            assert!(
+                matches!(
+                    error.as_str(),
+                    "断面方向を材軸直交面へ投影できません"
+                        | "断面参照方向から単位直交基底を解決できません"
+                ),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn 断面基底は回転と材端反転と微小直交成分を保つ() {
+        let d = std::f64::consts::FRAC_1_SQRT_2;
+        for (axis, reference, expected_y, expected_z) in [
+            (
+                [1.0, 0.0, 0.0],
+                [0.0, 1e308, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ),
+            (
+                [-1.0, 0.0, 0.0],
+                [0.0, 1e308, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, -1.0],
+            ),
+            (
+                [d, d, 0.0],
+                [-d * 1e308, d * 1e308, 0.0],
+                [-d, d, 0.0],
+                [0.0, 0.0, 1.0],
+            ),
+        ] {
+            let [y, z] = section_frame(axis, reference).unwrap();
+            for k in 0..3 {
+                assert!((y[k] - expected_y[k]).abs() < 1e-12);
+                assert!((z[k] - expected_z[k]).abs() < 1e-12);
+            }
+        }
+        let [y, z] = section_frame([1.0, 0.0, 0.0], [1e308, 1.1e-12, 2.3e-12]).unwrap();
+        let length = (1.1_f64.powi(2) + 2.3_f64.powi(2)).sqrt();
+        assert!((y[1] - 1.1 / length).abs() < 1e-12);
+        assert!((y[2] - 2.3 / length).abs() < 1e-12);
+        assert!((z[1] + 2.3 / length).abs() < 1e-12);
+    }
+
+    #[test]
+    fn 断面基底は零平行非有限と解決不能を理由付きで拒否する() {
+        for reference in [[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1e-20, 0.0]] {
+            assert!(section_frame([1.0, 0.0, 0.0], reference)
+                .unwrap_err()
+                .contains("投影できません"));
+        }
+        assert!(section_frame([1.0, 0.0, 0.0], [f64::NAN, 1.0, 0.0])
+            .unwrap_err()
+            .contains("非有限"));
+        let d = std::f64::consts::FRAC_1_SQRT_2;
+        assert!(section_frame([d, d, 0.0], [d * 1e308, d * 1e308, 0.0])
+            .unwrap_err()
+            .contains("投影できません"));
+        assert!(section_frame([d, d, 0.0], [1e100, 1e100 + 2e84, 0.0])
+            .unwrap_err()
+            .contains("単位直交基底"));
     }
 
     /// 柱（せい 600）が取り付く端のフェース距離は柱せいの半分、直交材がない端は 0。

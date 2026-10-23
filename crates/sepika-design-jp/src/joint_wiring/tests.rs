@@ -1369,7 +1369,8 @@ fn gui_mcp_common_dispatch_and_direct_entry_report_identical_missing_material() 
             term: LoadTerm::Short,
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
     for label in ["耐震壁(RC)", "耐震壁(RC)せん断非線形"] {
         let direct = &direct.iter().find(|(_, l, _)| l == label).unwrap().2;
         let kind = if label.ends_with("せん断非線形") {
@@ -1658,7 +1659,13 @@ fn status_wall_model() -> (Model, sepika_load::wall_expand::WallExpansionIndex) 
     for (source, id) in [(1, 5), (2, 6)] {
         let mut section = model.sections[source].clone();
         section.id = SectionId(id);
-        section.shape = None;
+        section.shape = Some(SectionShape::SteelH {
+            height: 600.0,
+            width: 300.0,
+            web_thick: 10.0,
+            flange_thick: 20.0,
+            root_r: Some(0.0),
+        });
         section.material = Some(MaterialId(2));
         model.sections.push(section);
     }
@@ -1734,6 +1741,7 @@ fn reference_method_identifies_rc_success_and_missing_inputs_but_not_steel_or_sr
                 "純鋼板" => {
                     model.sections[0].shape = None;
                     model.materials[0].category = MaterialCategory::Steel;
+                    model.materials[0].fy = Some(235.0);
                 }
                 "SRC" => model.sections[0].steel_material = Some(MaterialId(1)),
                 _ => (),
@@ -1758,7 +1766,8 @@ fn reference_method_identifies_rc_success_and_missing_inputs_but_not_steel_or_sr
                     },
                 ),
             ];
-            let report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+            let report =
+                crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
             let reference = report
                 .wall_checks
                 .iter()
@@ -1793,7 +1802,12 @@ fn reference_method_identifies_rc_success_and_missing_inputs_but_not_steel_or_sr
 fn wall_status_candidates_keep_plate_case_kind_and_independent_counts() {
     use crate::wall_check::{WallCheckKind, WallCheckSummary, WallSkipKind};
     use sepika_element::frame::beam::MemberForces;
-    let (model, index) = status_wall_model();
+    let (mut model, index) = status_wall_model();
+    for section in &mut model.sections {
+        if section.material == Some(MaterialId(2)) {
+            section.thickness = Some(20.0);
+        }
+    }
     // Q=N=M=0 の独立入力では、正のRC耐力に対する許容検定比は厳密に0。
     let forces: Vec<_> = model
         .elements
@@ -1817,7 +1831,8 @@ fn wall_status_candidates_keep_plate_case_kind_and_independent_counts() {
             term: LoadTerm::Short,
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
     assert!(report
         .joint_checks
         .iter()
@@ -1925,7 +1940,7 @@ fn reference_skeleton_for_frame_representation(kind: ElementKind) {
             },
         ),
     ];
-    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default());
+    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default()).unwrap();
     let reference = report
         .wall_checks
         .iter()
@@ -1949,7 +1964,7 @@ fn reference_skeleton_for_frame_representation(kind: ElementKind) {
         Some(sepika_core::model::RcWallShearMethod::ArakawaMin)
     );
     m.stress_cfg.rc_wall_shear_method = sepika_core::model::RcWallShearMethod::ArakawaMean;
-    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default());
+    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default()).unwrap();
     let reference = report
         .wall_checks
         .iter()
@@ -1968,10 +1983,10 @@ fn reference_skeleton_for_frame_representation(kind: ElementKind) {
     tension[0].1.at[0].1[0] = 1.0;
     tension[1].1.at[0].1[0] = 28_000.0;
     tension[2].1.at[0].1[0] = -28_000.0;
-    let report = crate::run_member_design_checks(&m, &tension, &[], &Default::default());
+    let report = crate::run_member_design_checks(&m, &tension, &[], &Default::default()).unwrap();
     assert!(report.wall_checks.iter().any(|wall| wall.kind == WallCheckKind::ReferenceSkeleton && matches!(&wall.outcome, CheckOutcome::Skipped { reason } if reason.contains("壁脚faceの圧縮正N/Aが適用範囲外"))));
     forces.pop();
-    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default());
+    let report = crate::run_member_design_checks(&m, &forces, &[], &Default::default()).unwrap();
     assert!(report
         .wall_checks
         .iter()
@@ -2312,11 +2327,11 @@ fn panel_504_check_uses_shape_depth_and_reports_unsupported_beams() {
     assert!(checks
         .iter()
         .any(|(node, label, outcome)| *node == NodeId(0)
-            && label == "パネルゾーン(S)"
+            && label == "パネルゾーン(S) 強軸"
             && matches!(outcome, CheckOutcome::Checked(_))));
     let result = checks
         .iter()
-        .find(|(node, label, _)| *node == NodeId(0) && label == "パネルゾーン(S)")
+        .find(|(node, label, _)| *node == NodeId(0) && label == "パネルゾーン(S) 強軸")
         .unwrap()
         .2
         .clone()
@@ -2340,7 +2355,7 @@ fn panel_504_check_uses_shape_depth_and_reports_unsupported_beams() {
     );
     let built = built_checks
         .iter()
-        .find(|(node, label, _)| *node == NodeId(0) && label == "パネルゾーン(S)")
+        .find(|(node, label, _)| *node == NodeId(0) && label == "パネルゾーン(S) 強軸")
         .unwrap()
         .2
         .clone()
@@ -2352,7 +2367,8 @@ fn panel_504_check_uses_shape_depth_and_reports_unsupported_beams() {
         thick: 20.0,
     });
     let expected = sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
     let checks = collect_joint_checks_with_long(
         &model,
         &forces,
@@ -2363,115 +2379,8 @@ fn panel_504_check_uses_shape_depth_and_reports_unsupported_beams() {
     assert!(checks
         .iter()
         .any(|(node, label, outcome)| *node == NodeId(0)
-            && label == "パネルゾーン(S)"
+            && label.starts_with("パネルゾーン(S)")
             && matches!(outcome,CheckOutcome::Skipped { reason } if *reason == expected)));
-}
-
-#[test]
-fn panel_505_plane_demands_and_skips_survive_order_ends_and_direct_moments() {
-    let h = |height| SectionShape::SteelH {
-        height,
-        width: 400.0,
-        web_thick: 13.0,
-        flange_thick: 20.0,
-        root_r: Some(0.0),
-    };
-    let mut model = cross_joint_model(h(400.0), h(600.0));
-    model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
-    for sec in &mut model.sections {
-        sec.material = Some(MaterialId(2));
-    }
-    for e in &mut model.elements {
-        if e.section == Some(SectionId(1)) {
-            e.local_axis.ref_vector = [0.0, 0.0, 1.0];
-        }
-    }
-    let mut ynode = model.nodes[4].clone();
-    ynode.id = NodeId(5);
-    ynode.coord = [0.0, 6000.0, 3000.0];
-    model.nodes.push(ynode);
-    let mut ybeam = model.elements[3].clone();
-    ybeam.id = ElemId(4);
-    ybeam.nodes = smallvec::smallvec![NodeId(0), NodeId(5)];
-    model.elements.push(ybeam);
-    let column = [
-        (0.0, [0.0, 50_000.0, 30_000.0, 0.0, 0.0, 0.0]),
-        (1.0, [0.0, 50_000.0, 30_000.0, 0.0, 0.0, 0.0]),
-    ];
-    let beam_x = [
-        (0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 200_000_000.0]),
-        (1.0, [0.0, 0.0, 0.0, 0.0, 0.0, 200_000_000.0]),
-    ];
-    let beam_y = [
-        (0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 100_000_000.0]),
-        (1.0, [0.0, 0.0, 0.0, 0.0, 0.0, 100_000_000.0]),
-    ];
-    let forces = vec![
-        (ElemId(0), column.as_slice()),
-        (ElemId(1), column.as_slice()),
-        (ElemId(2), beam_x.as_slice()),
-        (ElemId(3), beam_x.as_slice()),
-        (ElemId(4), beam_y.as_slice()),
-    ];
-    for missing in [ElemId(1), ElemId(3)] {
-        let incomplete: Vec<_> = forces
-            .iter()
-            .copied()
-            .filter(|(id, _)| *id != missing)
-            .collect();
-        let checks = collect_joint_checks(&model, &incomplete, LoadTerm::Short);
-        assert!(checks.iter().any(|(_,label,o)| label.contains("[1.000, 0.000, 0.000]") && matches!(o,CheckOutcome::Skipped{reason} if reason.contains("検定用応力が未取得"))));
-    }
-    let assembled = collect_joint_checks(&model, &forces, LoadTerm::Short);
-    let panels: Vec<_> = assembled
-        .iter()
-        .filter(|(_, label, _)| label.starts_with("パネルゾーン(S)"))
-        .collect();
-    assert_eq!(panels.len(), 2);
-    assert!(panels[0].2.clone().unwrap_checked().components[0]
-        .detail
-        .contains("pM=371000000.0"));
-    assert!(panels[1].2.clone().unwrap_checked().components[0]
-        .detail
-        .contains("pM=82600000.0"));
-    for sign in [-1.0, 1.0] {
-        let moments = [(NodeId(0), [-82_600_000.0 * sign, 371_000_000.0 * sign])];
-        let checks =
-            collect_joint_checks_with_long(&model, &forces, None, &moments, LoadTerm::Short);
-        let result: Vec<_> = checks
-            .iter()
-            .filter(|(_, label, _)| label.starts_with("パネルゾーン(S)"))
-            .collect();
-        for k in 0..2 {
-            assert!(
-                (result[k].2.clone().unwrap_checked().ratio()
-                    - panels[k].2.clone().unwrap_checked().ratio())
-                .abs()
-                    < 1e-12
-            );
-        }
-    }
-    let mut small = model.sections[1].clone();
-    small.id = SectionId(2);
-    small.shape = Some(h(500.0));
-    model.sections.push(small);
-    model.elements[3].section = Some(SectionId(2));
-    for direct in [vec![], vec![(NodeId(0), [1e9, -2e9])]] {
-        let checks =
-            collect_joint_checks_with_long(&model, &forces, None, &direct, LoadTerm::Short);
-        assert!(checks.iter().any(|(_,label,o)|label.contains("[1.000, 0.000, 0.000]") && matches!(o,CheckOutcome::Skipped{reason} if reason.contains("db=580 mm") && reason.contains("db=480 mm") && reason.contains("上位置差=50"))));
-        assert!(checks
-            .iter()
-            .any(|(_, label, o)| label.contains("[0.000, 1.000, 0.000]")
-                && matches!(o, CheckOutcome::Checked(_))));
-        model.elements.reverse();
-        for e in &mut model.elements {
-            e.nodes.reverse();
-        }
-        let reversed =
-            collect_joint_checks_with_long(&model, &forces, None, &direct, LoadTerm::Short);
-        assert_eq!(format!("{checks:?}"), format!("{reversed:?}"));
-    }
 }
 
 #[test]
@@ -2651,7 +2560,8 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
             wall_case: "case:0",
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
     let reference = report
         .wall_checks
         .iter()
@@ -2678,7 +2588,8 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
                 *d = 800.0;
             }
         }
-        let report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+        let report =
+            crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
         let skeleton = report
             .wall_checks
             .iter()
@@ -2688,7 +2599,7 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
         assert!((skeleton.displacement_points[1].1 - 2_016_000.0).abs() < 1e-6);
     }
     let mut valid_report =
-        crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+        crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
     assert!(valid_report
         .wall_checks
         .iter()
@@ -2703,7 +2614,8 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
         height: 200.0,
         offset: None,
     });
-    let mut report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+    let mut report =
+        crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
     let reference = report
         .wall_checks
         .iter()
@@ -2729,7 +2641,8 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
         Some(f64::INFINITY),
     ] {
         model.materials[0].fc = bad_fc;
-        let report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+        let report =
+            crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
         assert!(report
             .wall_checks
             .iter()
@@ -2743,7 +2656,8 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
         if let Some(SectionShape::RcWall { thickness, .. }) = &mut model.sections[2].shape {
             *thickness = bad_t;
         }
-        let report = crate::run_member_design_checks(&model, &forces, &[], &Default::default());
+        let report =
+            crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();
         assert!(report
             .wall_checks
             .iter()
@@ -2752,4 +2666,909 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
             |w| matches!(&w.outcome, CheckOutcome::Skipped { reason } if reason.contains("不正"))
         ));
     }
+}
+
+#[test]
+fn panel_585_invalid_lower_column_is_not_filtered_before_resolution() {
+    let h = SectionShape::SteelH {
+        height: 400.0,
+        width: 400.0,
+        web_thick: 13.0,
+        flange_thick: 21.0,
+        root_r: Some(0.0),
+    };
+    let mut base = cross_joint_model(h.clone(), h);
+    base.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    for section in &mut base.sections {
+        section.material = Some(MaterialId(2));
+    }
+    let mut lower = base.sections[0].clone();
+    lower.id = SectionId(2);
+    base.sections.push(lower);
+    base.elements[0].section = Some(SectionId(2));
+    let zero = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+    let forces: Vec<_> = (0..4).map(|i| (ElemId(i), zero.as_slice())).collect();
+    for missing_section in [false, true] {
+        let mut model = base.clone();
+        if missing_section {
+            model.elements[0].section = None;
+        } else {
+            model.sections[2].material = None;
+        }
+        let checks = collect_joint_checks_with_long(
+            &model,
+            &forces,
+            None,
+            &[(NodeId(0), [0.0, 1.0e8])],
+            LoadTerm::Short,
+        );
+        let panels: Vec<_> = checks
+            .iter()
+            .filter(|(node, label, _)| *node == NodeId(0) && label.starts_with("パネルゾーン(S)"))
+            .collect();
+        assert_eq!(panels.len(), 1);
+        assert!(matches!(&panels[0].2, CheckOutcome::Skipped { reason }
+            if reason.contains("接合部 ID 0") && reason.contains("ID 0")));
+    }
+}
+
+#[test]
+fn panel_585_lower_joint_end_axial_force_survives_legal_element_reordering() {
+    let h = |tw| SectionShape::SteelH {
+        height: 400.0,
+        width: 400.0,
+        web_thick: tw,
+        flange_thick: 21.0,
+        root_r: Some(0.0),
+    };
+    let mut base = cross_joint_model(h(22.0), h(13.0));
+    base.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    for section in &mut base.sections {
+        section.material = Some(MaterialId(2));
+    }
+    let mut upper = base.sections[0].clone();
+    upper.id = SectionId(2);
+    upper.shape = Some(h(9.0));
+    upper.area = 1_000.0;
+    base.sections.push(upper);
+    base.elements[1].section = Some(SectionId(2));
+    let lower = [
+        (0.0, [-1.0e6, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        (1.0, [-2.0e6, 0.0, 0.0, 0.0, 0.0, 0.0]),
+    ];
+    let other = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+    let forces = vec![
+        (ElemId(0), lower.as_slice()),
+        (ElemId(1), other.as_slice()),
+        (ElemId(2), other.as_slice()),
+        (ElemId(3), other.as_slice()),
+    ];
+    let check = |model: &Model, forces: &[(ElemId, ForcesAt<'_>)]| {
+        collect_joint_checks_with_long(
+            model,
+            forces,
+            None,
+            &[(NodeId(0), [0.0, 1.0e8])],
+            LoadTerm::Short,
+        )
+        .into_iter()
+        .find(|(node, label, _)| *node == NodeId(0) && label == "パネルゾーン(S) 強軸")
+        .unwrap()
+        .2
+        .unwrap_checked()
+    };
+    let expected = check(&base, &forces);
+    let mut reordered = base.clone();
+    reordered.elements.reverse();
+    for (i, e) in reordered.elements.iter_mut().enumerate() {
+        e.id = ElemId(i as u32);
+        e.nodes.reverse();
+    }
+    let reversed_lower = [(0.0, lower[1].1), (1.0, lower[0].1)];
+    let remapped = vec![
+        (ElemId(3), reversed_lower.as_slice()),
+        (ElemId(2), other.as_slice()),
+        (ElemId(1), other.as_slice()),
+        (ElemId(0), other.as_slice()),
+    ];
+    assert_eq!(check(&reordered, &remapped).ratio(), expected.ratio());
+    let zero = vec![
+        (ElemId(0), other.as_slice()),
+        (ElemId(1), other.as_slice()),
+        (ElemId(2), other.as_slice()),
+        (ElemId(3), other.as_slice()),
+    ];
+    assert!(expected.ratio() > check(&base, &zero).ratio());
+}
+
+#[test]
+fn panel_585_cft_follows_lower_steel_material_without_redefining_whole_member_axial_area() {
+    let cft = SectionShape::CftBox {
+        height: 400.0,
+        width: 400.0,
+        thick: 16.0,
+        corner_r: Some(0.0),
+    };
+    let h = SectionShape::SteelH {
+        height: 600.0,
+        width: 200.0,
+        web_thick: 11.0,
+        flange_thick: 20.0,
+        root_r: Some(0.0),
+    };
+    let mut model = cross_joint_model(cft, h);
+    model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    model.sections[1].material = Some(MaterialId(2));
+    let mut upper = model.sections[0].clone();
+    upper.id = SectionId(2);
+    model.sections.push(upper);
+    model.elements[1].section = Some(SectionId(2));
+    let mut lower_steel = model.materials[2].clone();
+    lower_steel.id = MaterialId(3);
+    lower_steel.name = "SN490B".into();
+    lower_steel.fy = Some(325.0);
+    model.materials.push(lower_steel);
+    model.sections[0].steel_material = Some(MaterialId(3));
+    let zero = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+    let forces: Vec<_> = (0..4).map(|i| (ElemId(i), zero.as_slice())).collect();
+    let check = |model: &Model| {
+        collect_joint_checks_with_long(
+            model,
+            &forces,
+            None,
+            &[(NodeId(0), [0.0, 1.0e8])],
+            LoadTerm::Short,
+        )
+        .into_iter()
+        .find(|(node, label, _)| *node == NodeId(0) && label == "パネルゾーン(S) 強軸")
+        .unwrap()
+        .2
+    };
+    let expected = check(&model).unwrap_checked().ratio();
+    model.sections[2].steel_material = None;
+    assert_eq!(check(&model).unwrap_checked().ratio(), expected);
+    model.sections[0].steel_material = Some(MaterialId(2));
+    assert!(check(&model).unwrap_checked().ratio() > expected);
+    model.sections[0].steel_material = None;
+    assert!(matches!(check(&model),CheckOutcome::Skipped { reason }
+        if reason.contains("接合部 ID 0")&&reason.contains("採用柱 ID 0")&&reason.contains("鋼管専用材料")));
+}
+
+#[test]
+fn panel_585_orthogonal_nonsteel_beam_keeps_joint_wide_gate_and_invalid_lower_diagnostic() {
+    use sepika_core::model::FrameSectionUse;
+    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar};
+    let h = SectionShape::SteelH {
+        height: 400.0,
+        width: 400.0,
+        web_thick: 13.0,
+        flange_thick: 21.0,
+        root_r: Some(0.0),
+    };
+    let rebar = RcBeamRebar {
+        main_dia: 25.0,
+        top: vec![4],
+        bottom: vec![4],
+        cover: 40.0,
+        stirrup: BeamStirrup {
+            dia: 10.0,
+            pitch: 100.0,
+            legs: 2,
+        },
+    };
+    for shape in [
+        SectionShape::RcBeamRect {
+            b: 400.0,
+            d: 600.0,
+            rebar: rebar.clone(),
+        },
+        SectionShape::SrcBeamRect {
+            b: 400.0,
+            d: 600.0,
+            rebar,
+            steel_height: 400.0,
+            steel_width: 200.0,
+            steel_web_thick: 9.0,
+            steel_flange_thick: 16.0,
+        },
+    ] {
+        let mut model = cross_joint_model(h.clone(), h.clone());
+        model.sections[0].frame_use = Some(FrameSectionUse::Column);
+        for section in &mut model.sections {
+            section.material = Some(MaterialId(2));
+        }
+        let mut far = model.nodes[4].clone();
+        far.id = NodeId(5);
+        far.coord = [0.0, 6000.0, 3000.0];
+        model.nodes.push(far);
+        let mut section = shape.to_section(SectionId(2), "Y梁".into());
+        section.frame_use = Some(FrameSectionUse::Girder);
+        section.material = Some(MaterialId(0));
+        section.rebar_material = Some(MaterialId(1));
+        section.shear_rebar_material = Some(MaterialId(1));
+        section.steel_material = Some(MaterialId(2));
+        model.sections.push(section);
+        let mut beam = model.elements[3].clone();
+        beam.id = ElemId(4);
+        beam.nodes = smallvec::smallvec![NodeId(0), NodeId(5)];
+        beam.section = Some(SectionId(2));
+        model.elements.push(beam);
+        let zero = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+        let forces: Vec<_> = (0..5).map(|id| (ElemId(id), zero.as_slice())).collect();
+        for moments in [vec![], vec![(NodeId(0), [0.0, 1.0e8])]] {
+            let checks =
+                collect_joint_checks_with_long(&model, &forces, None, &moments, LoadTerm::Short);
+            assert!(
+                !checks
+                    .iter()
+                    .any(|(node, label, _)| *node == NodeId(0)
+                        && label.starts_with("パネルゾーン(S)")),
+                "{checks:?}"
+            );
+            for missing_section in [false, true] {
+                let mut invalid = model.clone();
+                let mut lower = invalid.sections[0].clone();
+                lower.id = SectionId(3);
+                lower.material = None;
+                invalid.sections.push(lower);
+                invalid.elements[0].section = if missing_section {
+                    None
+                } else {
+                    Some(SectionId(3))
+                };
+                let checks = collect_joint_checks_with_long(
+                    &invalid,
+                    &forces,
+                    None,
+                    &moments,
+                    LoadTerm::Short,
+                );
+                assert!(
+                    checks
+                        .iter()
+                        .any(|(node, label, outcome)| *node == NodeId(0)
+                            && label.starts_with("パネルゾーン(S)")
+                            && matches!(outcome,CheckOutcome::Skipped { reason }
+                        if reason.contains("接合部 ID 0")&&reason.contains("ID 0"))),
+                    "{checks:?}"
+                );
+            }
+        }
+    }
+}
+
+fn panel_758_model(angle_deg: f64) -> Model {
+    let h = |height, width, web_thick, flange_thick| SectionShape::SteelH {
+        height,
+        width,
+        web_thick,
+        flange_thick,
+        root_r: Some(0.0),
+    };
+    let mut model = cross_joint_model(h(400.0, 300.0, 12.0, 45.0), h(600.0, 200.0, 11.0, 20.0));
+    model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Column);
+    for sec in &mut model.sections {
+        sec.material = Some(MaterialId(2));
+    }
+    let angle = angle_deg.to_radians();
+    for e in &mut model.elements[..2] {
+        e.local_axis.ref_vector = [angle.cos(), angle.sin(), 0.0];
+    }
+    model
+}
+
+fn panel_758_checks(
+    model: &Model,
+    local_forces: &[[f64; 6]],
+    direct: Option<[f64; 2]>,
+) -> Vec<CheckOutcome> {
+    let rows = local_forces
+        .iter()
+        .map(|f| [(0.0, *f), (1.0, *f)])
+        .collect::<Vec<_>>();
+    let forces = rows
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (ElemId(i as u32), r.as_slice()))
+        .collect::<Vec<_>>();
+    let moments = direct.map(|m| vec![(NodeId(0), m)]).unwrap_or_default();
+    collect_joint_checks_with_long(model, &forces, None, &moments, LoadTerm::Short)
+        .into_iter()
+        .filter(|(node, label, _)| *node == NodeId(0) && label.starts_with("パネルゾーン(S)"))
+        .map(|(_, _, outcome)| outcome)
+        .collect()
+}
+
+fn panel_758_assert_demands(checks: &[CheckOutcome], expected: [f64; 2]) {
+    assert_eq!(checks.len(), 2, "{checks:?}");
+    for (check, moment) in checks.iter().zip(expected) {
+        let check = check.clone().unwrap_checked();
+        let actual = check.components[0]
+            .detail
+            .split("pM=")
+            .nth(1)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        assert!(
+            (actual - moment).abs() <= 0.051,
+            "{check:?}, expected={moment}"
+        );
+    }
+}
+
+#[test]
+fn panel_758_column_rotation_uses_two_real_panels_and_actual_plate_strengths() {
+    let forces = [
+        [0.0; 6],
+        [0.0; 6],
+        [0.0, 0.0, 0.0, 0.0, 0.0, -200e6],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 100e6],
+    ];
+    for (angle, expected, ratios) in [
+        (0.0, [300e6, 0.0], [0.9172608089887081, 0.0]),
+        (
+            45.0,
+            [212132034.35596424; 2],
+            [0.6486013381525739, 0.16369217741133238],
+        ),
+    ] {
+        let model = panel_758_model(angle);
+        for direct in [None, Some([0.0, 300e6])] {
+            let checks = panel_758_checks(&model, &forces, direct);
+            panel_758_assert_demands(&checks, expected);
+            for (result, ratio) in checks.iter().zip(ratios) {
+                assert!((result.clone().unwrap_checked().ratio() - ratio).abs() < 1e-12);
+            }
+            println!("PANEL758 angle={angle}, direct={direct:?}, checks={checks:?}");
+        }
+    }
+}
+
+#[test]
+fn panel_758_signed_addition_cancellation_and_column_shear_are_counted_once() {
+    let mut model = panel_758_model(45.0);
+    let mut node = model.nodes[4].clone();
+    node.id = NodeId(5);
+    node.coord = [0.0, 6000.0, 3000.0];
+    model.nodes.push(node);
+    let mut beam = model.elements[3].clone();
+    beam.id = ElemId(4);
+    beam.nodes = smallvec::smallvec![NodeId(0), NodeId(5)];
+    model.elements.push(beam);
+    let mut forces = vec![[0.0, 50e3, 30e3, 0.0, 0.0, 0.0]; 2];
+    forces.extend([
+        [0.0, 0.0, 0.0, 0.0, 0.0, -200e6],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 100e6],
+        [0.0, 0.0, 0.0, 0.0, 0.0, -100e6],
+    ]);
+    let expected = [170421356.23730952, 265442712.47461903];
+    let checks = panel_758_checks(&model, &forces, None);
+    panel_758_assert_demands(&checks, expected);
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    panel_758_assert_demands(
+        &panel_758_checks(
+            &model,
+            &forces,
+            Some([
+                (-expected[0] + expected[1]) * c,
+                (expected[0] + expected[1]) * c,
+            ]),
+        ),
+        expected,
+    );
+    for f in &mut forces {
+        for value in f {
+            *value = -*value;
+        }
+    }
+    panel_758_assert_demands(
+        &panel_758_checks(&model, &forces, None),
+        expected.map(|m| -m),
+    );
+    forces[0] = [0.0; 6];
+    forces[1] = [0.0; 6];
+    forces[2][5] = -100e6;
+    forces[3][5] = 100e6;
+    forces[4][5] = -200e6;
+    panel_758_assert_demands(
+        &panel_758_checks(&model, &forces, None),
+        [0.0, 282842712.47461903],
+    );
+    forces[2][5] = 100e6;
+    forces[3][5] = 100e6;
+    forces[4][5] = 0.0;
+    panel_758_assert_demands(&panel_758_checks(&model, &forces, None), [0.0, 0.0]);
+}
+
+#[test]
+fn panel_758_building_z_rotation_preserves_both_paths_and_does_not_mutate_model() {
+    let mut model = panel_758_model(45.0);
+    let forces = [
+        [0.0; 6],
+        [0.0; 6],
+        [0.0, 0.0, 0.0, 0.0, 0.0, -200e6],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 100e6],
+    ];
+    let expected = panel_758_checks(&model, &forces, None);
+    let (s, c) = 30.0_f64.to_radians().sin_cos();
+    let rotate = |v: [f64; 3]| [c * v[0] - s * v[1], s * v[0] + c * v[1], v[2]];
+    for node in &mut model.nodes {
+        node.coord = rotate(node.coord);
+    }
+    for element in &mut model.elements {
+        element.local_axis.ref_vector = rotate(element.local_axis.ref_vector);
+    }
+    let before = format!("{model:?}");
+    for direct in [None, Some([-150e6, 259807621.1353316])] {
+        let checks = panel_758_checks(&model, &forces, direct);
+        for (actual, expected) in checks.iter().zip(&expected) {
+            assert!(
+                (actual.clone().unwrap_checked().ratio()
+                    - expected.clone().unwrap_checked().ratio())
+                .abs()
+                    < 1e-12
+            );
+        }
+    }
+    assert_eq!(format!("{model:?}"), before);
+}
+
+#[test]
+fn panel_758_different_depths_are_independent_only_on_separate_column_axes() {
+    let mut model = panel_758_model(0.0);
+    let mut section = model.sections[1].clone();
+    section.id = SectionId(2);
+    if let Some(SectionShape::SteelH { height, .. }) = &mut section.shape {
+        *height = 500.0;
+    }
+    model.sections.push(section);
+    let mut node = model.nodes[4].clone();
+    node.id = NodeId(5);
+    node.coord = [0.0, 6000.0, 3000.0];
+    model.nodes.push(node);
+    let mut beam = model.elements[3].clone();
+    beam.id = ElemId(4);
+    beam.section = Some(SectionId(2));
+    beam.nodes = smallvec::smallvec![NodeId(0), NodeId(5)];
+    model.elements.push(beam);
+    let forces = [[0.0; 6]; 5];
+    assert!(panel_758_checks(&model, &forces, None)
+        .iter()
+        .all(|o| matches!(o, CheckOutcome::Checked(_))));
+    let direct = panel_758_checks(&model, &forces, Some([0.0, 0.0]));
+    assert!(matches!(direct[0], CheckOutcome::Checked(_)));
+    assert!(
+        matches!(&direct[1],CheckOutcome::Skipped{reason} if reason.contains("共通db=580")&&reason.contains("db=480"))
+    );
+    for e in &mut model.elements[..2] {
+        e.local_axis.ref_vector = [1.0, 1.0, 0.0];
+    }
+    for direct in [None, Some([0.0, 0.0])] {
+        assert!(panel_758_checks(&model,&forces,direct).iter().all(|o|matches!(o,CheckOutcome::Skipped{reason} if reason.contains("構面間のフランジ位置が不一致"))));
+    }
+    model.elements[3].section = Some(SectionId(2));
+    assert!(panel_758_checks(&model, &forces, Some([0.0, 0.0]))
+        .iter()
+        .all(|o| matches!(o,CheckOutcome::Skipped{reason} if reason.contains("上位置差=50"))));
+    let original_reason =
+        sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
+            .unwrap_err()
+            .to_string();
+    assert!(panel_758_checks(&model, &forces, Some([0.0, 0.0]))
+        .iter()
+        .all(|o| matches!(o,CheckOutcome::Skipped{reason} if *reason==original_reason)));
+}
+
+#[test]
+fn panel_758_inclined_ms_inverse_preserves_existing_geometric_domain() {
+    let forces = [[0.0; 6]; 4];
+    for nz in [1.0_f64, 0.8, 0.1] {
+        let mut model = panel_758_model(0.0);
+        let nx = (1.0 - nz * nz).sqrt();
+        model.nodes[1].coord = [-3000.0 * nx, 0.0, 3000.0 - 3000.0 * nz];
+        model.nodes[2].coord = [3000.0 * nx, 0.0, 3000.0 + 3000.0 * nz];
+        panel_758_assert_demands(
+            &panel_758_checks(&model, &forces, Some([200e6 * nz, 100e6])),
+            [100e6, 200e6],
+        );
+        if nz != 1.0 {
+            assert!(panel_758_checks(&model, &forces, None)
+                .iter()
+                .all(|o| matches!(o,CheckOutcome::Skipped{reason} if reason.contains("非鉛直柱"))));
+        }
+    }
+}
+
+#[test]
+fn panel_758_missing_and_nonfinite_inputs_never_become_zero_demand() {
+    let model = panel_758_model(45.0);
+    let mut forces = [[0.0; 6]; 4];
+    forces[2][5] = f64::NAN;
+    assert!(panel_758_checks(&model, &forces, None)
+        .iter()
+        .all(|o| matches!(o,CheckOutcome::Skipped{reason} if reason.contains("有限"))));
+    for moment in [[f64::NAN, 0.0], [0.0, f64::INFINITY]] {
+        assert!(panel_758_checks(&model, &[[0.0; 6]; 4], Some(moment))
+            .iter()
+            .all(|o| matches!(o,CheckOutcome::Skipped{reason} if reason.contains("有限"))));
+    }
+    let zero = [(0.0, [0.0; 6]), (1.0, [0.0; 6])];
+    for missing in [0, 1, 2, 3] {
+        let forces = (0..4)
+            .filter(|i| *i != missing)
+            .map(|i| (ElemId(i), zero.as_slice()))
+            .collect::<Vec<_>>();
+        let checks = collect_joint_checks(&model, &forces, LoadTerm::Short);
+        assert!(checks.iter().filter(|(_,label,_)|label.starts_with("パネルゾーン(S)")).all(|(_,_,o)|matches!(o,CheckOutcome::Skipped{reason} if reason.contains("検定用応力が未取得"))));
+    }
+}
+
+#[test]
+fn panel_758_legal_end_reversal_and_duplicate_force_rows_preserve_checks() {
+    let mut model = panel_758_model(45.0);
+    let forces = [
+        [0.0, 50e3, 30e3, 0.0, 0.0, 0.0],
+        [0.0, 50e3, 30e3, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 0.0, 0.0, -200e6],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 100e6],
+    ];
+    let expected = panel_758_checks(&model, &forces, None);
+    for e in &mut model.elements {
+        e.nodes.reverse();
+    }
+    let reversed = forces.map(|f| [f[0], -f[1], f[2], f[3], -f[4], f[5]]);
+    let checks = panel_758_checks(&model, &reversed, None);
+    for (actual, expected) in checks.iter().zip(&expected) {
+        assert!(
+            (actual.clone().unwrap_checked().ratio() - expected.clone().unwrap_checked().ratio())
+                .abs()
+                < 1e-12
+        );
+    }
+    let rows = reversed
+        .iter()
+        .map(|f| [(0.0, *f), (1.0, *f)])
+        .collect::<Vec<_>>();
+    let mut inputs = rows
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (ElemId(i as u32), r.as_slice()))
+        .collect::<Vec<_>>();
+    inputs.extend(inputs.clone());
+    let duplicated = collect_joint_checks(&model, &inputs, LoadTerm::Short)
+        .into_iter()
+        .filter(|(_, l, _)| l.starts_with("パネルゾーン(S)"))
+        .map(|(_, _, o)| o)
+        .collect::<Vec<_>>();
+    assert_eq!(format!("{checks:?}"), format!("{duplicated:?}"));
+}
+
+#[test]
+fn panel_758_rectangular_tubes_cft_and_reinforcement_keep_physical_plate_properties() {
+    let mut model = panel_758_model(45.0);
+    let forces = [[0.0; 6]; 4];
+    for filled in [false, true] {
+        model.sections[0].shape = Some(if filled {
+            SectionShape::CftBox {
+                height: 400.0,
+                width: 300.0,
+                thick: 16.0,
+                corner_r: Some(0.0),
+            }
+        } else {
+            SectionShape::SteelBox {
+                height: 400.0,
+                width: 300.0,
+                thick: 16.0,
+                corner_r: Some(0.0),
+            }
+        });
+        model.sections[0].steel_material = filled.then_some(MaterialId(2));
+        let checks = panel_758_checks(&model, &forces, Some([100e6, 200e6]));
+        for (check, volume) in checks.iter().zip([7127040.0, 5271040.0]) {
+            assert!(check.clone().unwrap_checked().components[0]
+                .detail
+                .contains(&format!("Ve={volume:.1} mm3")));
+        }
+    }
+    model = panel_758_model(45.0);
+    model.sections[0].panel_thickness = Some(20.0);
+    let checks = panel_758_checks(&model, &forces, Some([0.0, 300e6]));
+    assert!((checks[1].clone().unwrap_checked().ratio() - 0.368_307_399_175_497_9).abs() < 1e-12);
+    model.materials[2].name = "直接材料".into();
+    model.materials[2].fy = None;
+    assert!(panel_758_checks(&model, &forces, Some([0.0, 300e6]))
+        .iter()
+        .all(|o| matches!(o,CheckOutcome::Skipped{reason} if reason.contains("基準強度 fy"))));
+}
+
+#[test]
+fn panel_758_nonvertical_upper_column_is_not_dropped_from_member_force_assembly() {
+    let mut model = panel_758_model(0.0);
+    model.nodes[2].coord = [3000.0, 0.0, 4500.0];
+    let checks = panel_758_checks(&model, &[[0.0; 6]; 4], None);
+    assert!(checks
+        .iter()
+        .all(|o| matches!(o,CheckOutcome::Skipped{reason} if reason.contains("非鉛直柱"))));
+    assert!(panel_758_checks(&model, &[[0.0; 6]; 4], Some([0.0, 300e6]))
+        .iter()
+        .all(|o| matches!(o, CheckOutcome::Checked(_))));
+}
+
+#[test]
+fn panel_758_all_source_plane_errors_are_preserved_without_virtual_checks() {
+    let mut model = panel_758_model(45.0);
+    let mut short = model.sections[1].clone();
+    short.id = SectionId(2);
+    if let Some(SectionShape::SteelH { height, .. }) = &mut short.shape {
+        *height = 500.0;
+    }
+    model.sections.push(short);
+    let mut pipe = model.sections[1].clone();
+    pipe.id = SectionId(3);
+    pipe.shape = Some(SectionShape::SteelPipe {
+        outer_dia: 600.0,
+        thick: 20.0,
+    });
+    model.sections.push(pipe);
+    for (coord, section) in [
+        ([0.0, 6000.0, 3000.0], 1),
+        ([0.0, -6000.0, 3000.0], 2),
+        ([6000.0, 6000.0, 3000.0], 3),
+    ] {
+        let mut node = model.nodes[4].clone();
+        node.id = NodeId(model.nodes.len() as u32);
+        node.coord = coord;
+        let mut beam = model.elements[3].clone();
+        beam.id = ElemId(model.elements.len() as u32);
+        beam.section = Some(SectionId(section));
+        beam.nodes = smallvec::smallvec![NodeId(0), node.id];
+        model.nodes.push(node);
+        model.elements.push(beam);
+    }
+    let reasons = sepika_core::panel_zone::panel_joint_planes(&model, NodeId(0), &model.elements)
+        .iter()
+        .filter_map(|plane| {
+            let members = model.elements.iter().filter(|e| {
+                e.nodes.contains(&NodeId(0))
+                    && (e.section == Some(SectionId(0))
+                        || plane.beams.iter().any(|b| b.element == e.id))
+            });
+            sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), members)
+                .err()
+                .map(|e| e.to_string())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(reasons.len(), 2);
+    for direct in [None, Some([0.0, 0.0])] {
+        let checks = panel_758_checks(&model, &[[0.0; 6]; 7], direct);
+        assert!(checks
+            .iter()
+            .all(|o| matches!(o, CheckOutcome::Skipped { .. })));
+        for original in &reasons {
+            assert!(
+                checks
+                    .iter()
+                    .any(|o| matches!(o,CheckOutcome::Skipped{reason} if reason==original)),
+                "{checks:?}"
+            );
+        }
+    }
+    model.elements[3].section = Some(SectionId(2));
+    let checks = panel_758_checks(&model, &[[0.0; 6]; 7], None);
+    assert!(checks
+        .iter()
+        .all(|o| matches!(o, CheckOutcome::Skipped { .. })));
+    assert_eq!(checks.len(), 3);
+}
+
+#[test]
+fn panel_758_tiny_vertical_component_keeps_geometry_participation_and_exact_ms() {
+    let mut model = panel_758_model(0.0);
+    for node in &mut model.nodes {
+        node.coord[2] -= 3000.0;
+    }
+    let nz = 1e-13_f64;
+    model.nodes[1].coord = [-3000.0, 0.0, -3000.0 * nz];
+    model.nodes[2].coord = [3000.0, 0.0, 3000.0 * nz];
+    let mut section = model.sections[1].clone();
+    section.id = SectionId(2);
+    if let Some(SectionShape::SteelH { height, .. }) = &mut section.shape {
+        *height = 500.0;
+    }
+    model.sections.push(section);
+    let mut node = model.nodes[4].clone();
+    node.id = NodeId(5);
+    node.coord = [0.0, 6000.0, 0.0];
+    model.nodes.push(node);
+    let mut beam = model.elements[3].clone();
+    beam.id = ElemId(4);
+    beam.section = Some(SectionId(2));
+    beam.nodes = smallvec::smallvec![NodeId(0), NodeId(5)];
+    model.elements.push(beam);
+    let force = [[0.0; 6]; 5];
+    for (reference, ms_y) in [
+        ([1.0, 0.0, 0.0], 200e6),
+        ([1.0, 1.0, 0.0], 200e6 + nz * 100e6),
+    ] {
+        for column in model
+            .elements
+            .iter_mut()
+            .filter(|e| e.section == Some(SectionId(0)))
+        {
+            column.local_axis.ref_vector = reference;
+        }
+        model
+            .elements
+            .iter_mut()
+            .find(|e| e.id == ElemId(4))
+            .unwrap()
+            .section = Some(SectionId(2));
+        let moment = Some([-nz * 100e6, ms_y]);
+        for reverse in [false, true] {
+            if reverse {
+                model.elements.reverse();
+            }
+            let checks = panel_758_checks(&model, &force, moment);
+            println!("TINY_NZ nz={nz}, reference={reference:?}, reverse={reverse}, differing_heights=true, checks={checks:?}");
+            assert!(matches!(&checks[0],CheckOutcome::Skipped{reason} if
+                (reason.contains("共通db=580")&&reason.contains("db=480"))||reason.contains("構面間のフランジ位置が不一致")));
+            assert!(matches!(&checks[1], CheckOutcome::Checked(_)));
+        }
+        model
+            .elements
+            .iter_mut()
+            .find(|e| e.id == ElemId(4))
+            .unwrap()
+            .section = Some(SectionId(1));
+        let checks = panel_758_checks(&model, &force, moment);
+        println!(
+            "TINY_NZ nz={nz}, reference={reference:?}, differing_heights=false, checks={checks:?}"
+        );
+        panel_758_assert_demands(&checks, [100e6, 200e6]);
+        for (outcome, ratio) in checks
+            .iter()
+            .zip([0.305_753_602_996_236, 0.154_330_464_899_659_4])
+        {
+            assert!((outcome.clone().unwrap_checked().ratio() - ratio).abs() < 1e-12);
+        }
+        model
+            .elements
+            .iter_mut()
+            .find(|e| e.id == ElemId(4))
+            .unwrap()
+            .section = Some(SectionId(2));
+        for node in &mut model.nodes {
+            node.coord = [-node.coord[1], node.coord[0], node.coord[2]];
+        }
+        for element in &mut model.elements {
+            let r = element.local_axis.ref_vector;
+            element.local_axis.ref_vector = [-r[1], r[0], r[2]];
+        }
+        let reordered_planes =
+            sepika_core::panel_zone::panel_joint_planes(&model, NodeId(0), &model.elements);
+        assert_eq!(reordered_planes[0].beams[0].element, ElemId(4));
+        let checks = panel_758_checks(&model, &force, Some([-ms_y, -nz * 100e6]));
+        println!("TINY_NZ nz={nz}, reference={reference:?}, first_plane_changed=true, differing_heights=true, checks={checks:?}");
+        assert!(matches!(&checks[0],CheckOutcome::Skipped{reason} if
+            (reason.contains("共通db=580")&&reason.contains("db=480"))||reason.contains("構面間のフランジ位置が不一致")));
+        assert!(matches!(&checks[1], CheckOutcome::Checked(_)));
+        for node in &mut model.nodes {
+            node.coord = [node.coord[1], -node.coord[0], node.coord[2]];
+        }
+        for element in &mut model.elements {
+            let r = element.local_axis.ref_vector;
+            element.local_axis.ref_vector = [r[1], -r[0], r[2]];
+        }
+    }
+}
+
+#[test]
+fn panel_601_cft_material_errors_stop_public_batch_using_selected_lower_column() {
+    let mut model = panel_758_model(45.0);
+    model.sections[0].shape = Some(SectionShape::CftBox {
+        height: 400.0,
+        width: 300.0,
+        thick: 50.0,
+        corner_r: Some(0.0),
+    });
+    model.sections[0].material = Some(MaterialId(0));
+    let mut tube_material = model.materials[2].clone();
+    tube_material.id = MaterialId(3);
+    model.materials.push(tube_material);
+    model.sections[0].steel_material = Some(MaterialId(3));
+    let mut upper = model.sections[0].clone();
+    upper.id = SectionId(2);
+    upper.steel_material = None;
+    model.sections.push(upper);
+    model.elements[1].section = Some(SectionId(2));
+    assert!(crate::validate_model_steel_inputs(&model).is_ok());
+    for case in 0..9 {
+        let mut invalid = model.clone();
+        match case {
+            0 => invalid.sections[0].steel_material = None,
+            1 => invalid.sections[0].steel_material = Some(MaterialId(99)),
+            2 => invalid.sections[0].steel_material = Some(MaterialId(0)),
+            3 => {
+                invalid.materials[3].fy = {
+                    invalid.materials[3].name = "直接鋼材".into();
+                    None
+                }
+            }
+            4..=6 => {
+                if let Some(SectionShape::CftBox { thick, .. }) = &mut invalid.sections[0].shape {
+                    *thick = [0.0, f64::NAN, 101.0][case - 4];
+                }
+            }
+            7 => {
+                if let Some(SectionShape::CftBox { height, .. }) = &mut invalid.sections[0].shape {
+                    *height = 0.0;
+                }
+            }
+            8 => invalid.sections[0].panel_thickness = Some(0.0),
+            _ => unreachable!(),
+        }
+        let error =
+            crate::run_member_design_checks(&invalid, &[], &[], &Default::default()).unwrap_err();
+        assert!(error.contains("接合部 0 採用柱 0"), "case={case}: {error}");
+    }
+    model.sections[0].steel_material = None;
+    model.elements.reverse();
+    for element in &mut model.elements {
+        element.nodes.reverse();
+    }
+    assert!(crate::validate_model_steel_inputs(&model)
+        .unwrap_err()
+        .contains("採用柱 0"));
+}
+
+#[test]
+fn panel_601_missing_selected_steel_column_shape_stops_public_batch() {
+    let mut model = panel_758_model(0.0);
+    let mut upper = model.sections[0].clone();
+    upper.id = SectionId(2);
+    model.sections.push(upper);
+    model.elements[1].section = Some(SectionId(2));
+    model.sections[0].shape = None;
+    model.sections[0].thickness = Some(50.0);
+    model.materials[2].name = "直接鋼材".into();
+    model.materials[2].fy = Some(310.0);
+
+    assert!(crate::material_strength::section_steel_f(
+        &model.sections[0],
+        model.element_material(&model.elements[0]),
+    )
+    .is_ok());
+    let error = crate::run_member_design_checks(&model, &[], &[], &Default::default()).unwrap_err();
+    assert!(error.contains("接合部 0 採用柱 0"), "{error}");
+    assert!(error.contains("形状"), "{error}");
+}
+
+#[test]
+fn panel_601_each_axis_uses_its_product_thickness_with_reinforcement() {
+    let mut model = panel_758_model(0.0);
+    model.materials[2].name = "SS400".into();
+    model.materials[2].fy = Some(999.0);
+    if let Some(SectionShape::SteelH {
+        web_thick,
+        flange_thick,
+        ..
+    }) = &mut model.sections[0].shape
+    {
+        *web_thick = 40.0;
+        *flange_thick = 50.0;
+    }
+    model.sections[0].panel_thickness = Some(80.0);
+    let first = panel_758_checks(&model, &[[0.0; 6]; 4], Some([100e6, 200e6]));
+    model.materials[2].name = "直接鋼材".into();
+    model.materials[2].fy = Some(235.0);
+    let direct = panel_758_checks(&model, &[[0.0; 6]; 4], Some([100e6, 200e6]));
+    let ratio =
+        |checks: &[CheckOutcome], axis: usize| checks[axis].clone().unwrap_checked().ratio();
+    assert!((ratio(&first, 0) - ratio(&direct, 0)).abs() < 1e-12);
+    assert!((ratio(&first, 1) / ratio(&direct, 1) - 235.0 / 215.0).abs() < 1e-12);
 }

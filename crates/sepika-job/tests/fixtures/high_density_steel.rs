@@ -6,6 +6,7 @@ mod seismic {
 pub fn steel_frame() -> sepika_core::model::Model {
     use sepika_core::model::{MaterialCategory, PropertyBasis};
     let mut model = seismic::two_storeys();
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
     model.materials[0].category = MaterialCategory::Steel;
     model.materials[0].name = "SN400B".into();
     model.materials[0].density = 7.85e-9;

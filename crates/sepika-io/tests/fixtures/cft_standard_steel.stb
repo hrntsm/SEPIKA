@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2">
+  <StbCommon project_name="issue683 independent input" app_name="investigation" app_version="1"/>
+  <StbModel>
+    <StbNodes>
+      <StbNode id="11" X="0" Y="0" Z="0" kind="ON_GRID"/>
+      <StbNode id="37" X="0" Y="0" Z="3000" kind="ON_GRID"/>
+      <StbNode id="41" X="0" Y="3000" Z="3000" kind="ON_GRID"/>
+      <StbNode id="59" X="6000" Y="3000" Z="3000" kind="ON_GRID"/>
+    </StbNodes>
+    <StbMembers><StbColumns>
+      <StbColumn id="5" name="CFT1" id_node_bottom="11" id_node_top="37"
+        id_section="20" kind_structure="CFT"/>
+    </StbColumns></StbMembers>
+    <StbSections>
+      <StbSecColumn_CFT id="20" name="CFT1" strength_concrete="Fc36">
+        <StbSecSteelFigureColumn_CFT>
+          <StbSecSteelColumn_CFT_Same shape="BOX1" strength="SN400B"/>
+        </StbSecSteelFigureColumn_CFT>
+      </StbSecColumn_CFT>
+      <StbSecSteel>
+        <StbSecBuild-BOX name="BOX1" A="300" B="200" t1="9" t2="9"/>
+      </StbSecSteel>
+    </StbSections>
+  </StbModel>
+</ST_BRIDGE>

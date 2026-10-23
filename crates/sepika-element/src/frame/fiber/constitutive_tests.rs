@@ -27,7 +27,8 @@ fn bilinear_member_at(y_offset: f64, z_offset: f64) -> FiberBeam {
     FiberBeam::from_raw_parts(
         [NodeId(0), NodeId(1)],
         3000.0,
-        crate::transform::LocalFrame::from_nodes([0.0; 3], [3000.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        crate::transform::LocalFrame::from_nodes([0.0; 3], [3000.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+            .unwrap(),
         SectionMassProperties::default(),
         200000.0,
         0.0,
@@ -431,7 +432,8 @@ fn small_member(material: Box<dyn UniaxialMaterial>, e: f64, torsion: bool) -> F
     FiberBeam::from_raw_parts(
         [NodeId(0), NodeId(1)],
         8.0,
-        crate::transform::LocalFrame::from_nodes([0.0; 3], [8.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        crate::transform::LocalFrame::from_nodes([0.0; 3], [8.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+            .unwrap(),
         SectionMassProperties::default(),
         e,
         if torsion { 1e9 } else { 0.0 },
@@ -558,7 +560,8 @@ fn original_rc_factory_combined_point_two_mm_trial_reaches_material_equilibrium(
         model.nodes[0].coord,
         model.nodes[1].coord,
         model.elements[0].local_axis.ref_vector,
-    );
+    )
+    .unwrap();
     let local_force = axis.rotate_to_local(&std::array::from_fn(|i| force.data[i]));
     let mut max_residual_n = 0.0_f64;
     let mut max_residual_nmm = 0.0_f64;

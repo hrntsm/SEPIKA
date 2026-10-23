@@ -27,6 +27,55 @@ mod wall_side_column_fixture;
 use wall_side_column_fixture::wall_connection_fixture;
 
 #[test]
+fn mass_assembly_rejects_invalid_wall_side_column_frame_before_building_behavior() {
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        let mut model = wall_connection_fixture(kind);
+        model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+        let dofmap = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &dofmap);
+        let solver = sepika_math::solver::make_solver(
+            sepika_math::solver::SolverBackend::DirectSparseCholesky,
+        );
+        let errors = [
+            assemble_global_m(&model, &dofmap, MassOption::Consistent)
+                .map(|_| ())
+                .unwrap_err(),
+            solve_eigen(&model, &dofmap, &reducer, 0)
+                .map(|_| ())
+                .unwrap_err(),
+            sepika_solver::dynamic::eigen::solve_eigen_with_solver(
+                &model,
+                &dofmap,
+                &reducer,
+                0,
+                solver.as_ref(),
+            )
+            .map(|_| ())
+            .unwrap_err(),
+        ];
+        for error in errors {
+            assert!(
+                matches!(error, SolveError::InvalidInput(reason) if reason.contains("部材 ID 0") && reason.contains("断面参照方向")),
+                "{kind:?}"
+            );
+        }
+        let error = sepika_element::factory::ensure_wall_side_column_analysis(
+            &model,
+            None,
+            "質量行列組立",
+            false,
+            Some(MassOption::Consistent),
+        )
+        .unwrap_err();
+        assert!(error.contains("部材 ID 0") && error.contains("断面参照方向"));
+    }
+}
+
+#[test]
 fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
     use sepika_element::factory::{build_behavior, ensure_wall_side_column_analysis};
     use sepika_element::frame::panel_offset::{PanelEnd, PanelOffsetMember};
@@ -105,7 +154,7 @@ fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
             [
                 Some(PanelEnd {
                     node: NodeId(0),
-                    zeta: 0.5,
+                    rotation: [[0.5, 0.0], [0.0, 0.5], [0.0, 0.0]],
                 }),
                 None,
             ],
@@ -208,7 +257,7 @@ fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
             [
                 Some(PanelEnd {
                     node: NodeId(0),
-                    zeta: 0.5,
+                    rotation: [[0.5, 0.0], [0.0, 0.5], [0.0, 0.0]],
                 }),
                 None,
             ],
@@ -907,7 +956,7 @@ fn beam_delegates_share_both_mass_forms_and_reject_the_same_resolver_failure() {
                 [
                     Some(PanelEnd {
                         node: NodeId(0),
-                        zeta: -0.5,
+                        rotation: [[-0.5, 0.0], [0.0, -0.5], [0.0, 0.0]],
                     }),
                     None,
                 ],
@@ -1294,6 +1343,63 @@ fn linear_time_history_with_state_and_analysis_preserve_actual_wall_options_reas
                     .unwrap_err();
                 assert!(matches!(error, SolveError::InvalidInput(reason) if reason == expected));
             }
+        }
+    }
+}
+
+#[test]
+fn beam_736_wall_column_mass_gate_returns_finite_input_stiffness_diagnostics() {
+    use sepika_solver::dynamic::eigen::solve_eigen_with_solver;
+    for kind in [
+        ElementKind::Beam,
+        ElementKind::Fiber,
+        ElementKind::MultiSpring,
+    ] {
+        for g in [80_000.0, f64::MAX] {
+            let mut model = wall_connection_fixture(kind);
+            for node in &mut model.nodes {
+                node.restraint = Dof6Mask::FIXED;
+            }
+            model.materials[0].shear = Some(g);
+            let dofmap = DofMap::build(&model);
+            let reducer = Reducer::build(&model, &dofmap);
+            let solver = sepika_math::solver::make_solver(
+                sepika_math::solver::SolverBackend::DirectSparseCholesky,
+            );
+            let eigen = solve_eigen(&model, &dofmap, &reducer, 0).map(|_| ());
+            let eigen_with_solver =
+                solve_eigen_with_solver(&model, &dofmap, &reducer, 0, solver.as_ref()).map(|_| ());
+            let mass = assemble_global_m(&model, &dofmap, MassOption::Consistent).map(|_| ());
+            for (entry, result) in [
+                ("eigen", eigen),
+                ("eigen_with_solver", eigen_with_solver),
+                ("mass", mass),
+            ] {
+                println!("{kind:?}, G={g:e}, {entry}: {result:?}");
+                if g == 80_000.0 {
+                    result.unwrap();
+                } else {
+                    let error = result.unwrap_err().to_string();
+                    assert!(
+                        error.contains("部材 ID 0・壁 ID [4]")
+                            && error.contains("GJ/L")
+                            && error.contains("非有限"),
+                        "{entry}: {error}"
+                    );
+                }
+            }
+            let pdelta = sepika_element::factory::ensure_wall_side_column_analysis(
+                &model,
+                None,
+                "固有値解析",
+                true,
+                Some(MassOption::Consistent),
+            )
+            .unwrap_err();
+            assert!(
+                pdelta.contains("部材 ID 0・壁 ID [4]") && pdelta.contains("P-Δ"),
+                "{pdelta}"
+            );
         }
     }
 }

@@ -1,4 +1,5 @@
 name: 調査・仕様確定（Investigation / Specification）
+labels: ["調査"]
 description: 実装前の調査・規準照合・仕様確定・設計検討の目的と確認事項を整理する
 body:
   - type: markdown

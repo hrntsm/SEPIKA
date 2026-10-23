@@ -50,17 +50,17 @@ fn station_force_global(
     p1: [f64; 3],
     ref_vec: [f64; 3],
     local: [f64; 6],
-) -> [f64; 3] {
-    let frame = LocalFrame::from_nodes(p0, p1, ref_vec);
+) -> Result<[f64; 3], &'static str> {
+    let frame = LocalFrame::from_nodes(p0, p1, ref_vec)?;
     let ex = frame.rot[0];
     let ey = frame.rot[1];
     let ez = frame.rot[2];
     let (n, qy, qz) = (local[0], local[1], local[2]);
-    [
+    Ok([
         n * ex[0] + qy * ey[0] + qz * ez[0],
         n * ex[1] + qy * ey[1] + qz * ez[1],
         n * ex[2] + qy * ey[2] + qz * ez[2],
-    ]
+    ])
 }
 
 /// 地震時応力解析結果から柱の方向別水平剛性 `ki = Qi/δi` を算定する（精算層）。
@@ -70,17 +70,20 @@ fn station_force_global(
 /// - `res_x` / `res_y`: X / Y 方向加力時の弾性応力解析結果
 /// - `kX` は X 加力時の（せん断力 Qx, 層間変位 δx）から、`kY` は Y 加力時から。
 ///   δ がほぼ 0 の柱は剛性 0 とする。
+///
+/// 実際に内力変換する柱の局所基底を解決できなければ、部材 ID と理由を返す。
 pub fn column_stiffnesses_from_analysis(
     model: &Model,
     story: StoryId,
     res_x: &StaticOnce,
     res_y: &StaticOnce,
-) -> Vec<ColumnStiffness> {
+) -> Result<Vec<ColumnStiffness>, String> {
     use std::collections::HashMap;
     let fx: HashMap<_, _> = res_x.member_forces.iter().map(|(id, f)| (*id, f)).collect();
     let fy: HashMap<_, _> = res_y.member_forces.iter().map(|(id, f)| (*id, f)).collect();
 
     let mut out = Vec::new();
+    let mut invalid = None;
     for_each_story_column(model, story, |elem, top, bot| {
         let p0 = model.nodes[elem.nodes[0].index()].coord;
         let p1 = model.nodes[elem.nodes[1].index()].coord;
@@ -90,44 +93,44 @@ pub fn column_stiffnesses_from_analysis(
             &sepika_element::frame::beam::MemberForces,
         >,
                     dir: usize|
-         -> f64 {
+         -> Result<f64, String> {
             let (Some(ut), Some(ub)) = (res.disp.get(top.id.index()), res.disp.get(bot.id.index()))
             else {
-                return 0.0;
+                return Ok(0.0);
             };
             let delta = (ut[dir] - ub[dir]).abs();
             if delta < 1e-9 {
-                return 0.0;
+                return Ok(0.0);
             }
             let Some(mf) = forces.get(&elem.id) else {
-                return 0.0;
+                return Ok(0.0);
             };
             let Some(&(_, local)) = mf.at.first() else {
-                return 0.0;
+                return Ok(0.0);
             };
-            let g = station_force_global(p0, p1, elem.local_axis.ref_vector, local);
-            g[dir].abs() / delta
+            let g = station_force_global(p0, p1, elem.local_axis.ref_vector, local)
+                .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0))?;
+            Ok(g[dir].abs() / delta)
         };
-        out.push(ColumnStiffness {
-            pos: [top.coord[0], top.coord[1]],
-            dx: k_of(res_x, &fx, 0),
-            dy: k_of(res_y, &fy, 1),
-        });
+        match k_of(res_x, &fx, 0).and_then(|dx| k_of(res_y, &fy, 1).map(|dy| (dx, dy))) {
+            Ok((dx, dy)) => out.push(ColumnStiffness {
+                pos: [top.coord[0], top.coord[1]],
+                dx,
+                dy,
+            }),
+            Err(reason) => invalid = Some(reason),
+        }
     });
-    out
+    invalid.map_or(Ok(out), Err)
 }
 
-/// 長期応力解析の柱軸力から重心を算定する。各階の重心は、鉛直荷重を支持する柱の
-/// 長期荷重による軸力 N およびその部材の平面座標から `gx = Σ(Ni·xi)/ΣNi` として
-/// 算定する。
-///
-/// 軸力は圧縮分を重みに用いる（引張柱は鉛直荷重を「支持」しないため重み 0）。
-/// ΣNi ≤ 0（柱なし・全柱引張）の場合は `None`（呼び出し側で質量重心へフォールバック）。
+/// 柱の圧縮軸力を重みにした平面重心 `[mm]` を返す。
+/// 柱なし・全柱引張では Ok(None)。必要内力・位置の欠損や不正、集計・除算不能は Err。
 pub fn center_of_gravity_from_axial(
     model: &Model,
     story: StoryId,
     long_term: &StaticOnce,
-) -> Option<[f64; 2]> {
+) -> Result<Option<[f64; 2]>, String> {
     use std::collections::HashMap;
     let forces: HashMap<_, _> = long_term
         .member_forces
@@ -137,47 +140,123 @@ pub fn center_of_gravity_from_axial(
     let mut sum_n = 0.0;
     let mut sum_nx = 0.0;
     let mut sum_ny = 0.0;
+    let mut invalid = None;
     for_each_story_column(model, story, |elem, top, _bot| {
-        let Some(mf) = forces.get(&elem.id) else {
+        let local = forces.get(&elem.id).and_then(|force| force.at.first());
+        let Some(&(_, local)) = local else {
+            invalid = Some(format!(
+                "Re: 階{}の柱{}の長期軸力がありません",
+                story.0, elem.id.0
+            ));
             return;
         };
-        let Some(&(_, local)) = mf.at.first() else {
+        if !local[0].is_finite() || top.coord[..2].iter().any(|value| !value.is_finite()) {
+            invalid = Some(format!(
+                "Re: 階{}の柱{}の長期軸力又は位置が不正です",
+                story.0, elem.id.0
+            ));
             return;
-        };
+        }
         let ni = (-local[0]).max(0.0);
         sum_n += ni;
         sum_nx += ni * top.coord[0];
         sum_ny += ni * top.coord[1];
     });
+    if let Some(reason) = invalid {
+        return Err(reason);
+    }
+    if [sum_n, sum_nx, sum_ny]
+        .iter()
+        .any(|value| !value.is_finite())
+    {
+        return Err(format!(
+            "Re: 階{}の長期軸力の合計又は位置一次モーメントを算定できません",
+            story.0
+        ));
+    }
     if sum_n > 0.0 {
-        Some([sum_nx / sum_n, sum_ny / sum_n])
+        let center = [sum_nx / sum_n, sum_ny / sum_n];
+        if center.iter().any(|value| !value.is_finite()) {
+            return Err(format!(
+                "Re: 階{}の長期軸力による重心座標を算定できません",
+                story.0
+            ));
+        }
+        Ok(Some(center))
     } else {
-        None
+        Ok(None)
     }
 }
 
 /// 応力解析結果に基づく当該層の偏心率（精算ルート）。
 ///
 /// - 剛心: `column_stiffnesses_from_analysis`（ki = Qi/δi）
-/// - 重心: `center_of_gravity_from_axial`（長期軸力。`long_term` がない/算定不能なら
-///   質量重心 `center_of_mass` にフォールバック）
+/// - 重心: 長期結果が未指定又は圧縮軸力の合計が非正なら質量重心を用いる。
 ///
-/// 偏心率は常に弾性解析結果から算定するため（令82条の6 の運用に基づく実務的
-/// 取扱い）、`res_x`/`res_y` には弾性解析の結果を渡すこと。
+/// `res_x`/`res_y` には弾性解析結果が必要。階や柱の変位・内力が欠損又は不正なら Err。
 pub fn story_eccentricity_from_analysis(
     model: &Model,
     story: StoryId,
     res_x: &StaticOnce,
     res_y: &StaticOnce,
     long_term: Option<&StaticOnce>,
-) -> Eccentricity {
-    let mut cols = column_stiffnesses_from_analysis(model, story, res_x, res_y);
+) -> Result<Eccentricity, String> {
+    if !model.stories.iter().any(|item| item.id == story) {
+        return Err(format!("Re: 上端階{}に対応する層がありません", story.0));
+    }
+    let mut invalid = None;
+    for_each_story_column(model, story, |elem, top, bottom| {
+        for (direction, result) in [(0, res_x), (1, res_y)] {
+            let valid_disp = result
+                .disp
+                .get(top.id.index())
+                .zip(result.disp.get(bottom.id.index()))
+                .is_some_and(|(ut, ub)| {
+                    ut[direction].is_finite()
+                        && ub[direction].is_finite()
+                        && (ut[direction] - ub[direction]).abs().is_finite()
+                });
+            let valid_force = result
+                .member_forces
+                .iter()
+                .find(|(id, _)| *id == elem.id)
+                .and_then(|(_, force)| force.at.first())
+                .is_some_and(|(_, force)| force[..3].iter().all(|value| value.is_finite()));
+            if !valid_disp || !valid_force {
+                invalid = Some(format!(
+                    "Re: 階{}・{}方向の柱{}の変位又は内力が欠損・不正です",
+                    story.0,
+                    if direction == 0 { "X" } else { "Y" },
+                    elem.id.0
+                ));
+            }
+        }
+    });
+    if let Some(reason) = invalid {
+        return Err(reason);
+    }
+    let mut cols = column_stiffnesses_from_analysis(model, story, res_x, res_y)?;
     append_misc_wall_stiffnesses(model, story, &mut cols);
-    let cor = center_of_rigidity(&cols);
-    let com = long_term
-        .and_then(|lt| center_of_gravity_from_axial(model, story, lt))
-        .unwrap_or_else(|| center_of_mass(model, story));
-    eccentricity(&cols, com, cor)
+    let cor = center_of_rigidity(&cols).map_err(|reason| format!("階{}: {reason}", story.0))?;
+    let com = match long_term
+        .map(|lt| center_of_gravity_from_axial(model, story, lt))
+        .transpose()?
+        .flatten()
+    {
+        Some(center) => center,
+        None => center_of_mass(model, story)?,
+    };
+    if cols.iter().any(|column| {
+        column.pos.iter().any(|p| !p.is_finite())
+            || !column.dx.is_finite()
+            || !column.dy.is_finite()
+    }) {
+        return Err(format!(
+            "Re: 階{}の柱水平剛性又は位置を算定できません",
+            story.0
+        ));
+    }
+    eccentricity(&cols, com, cor).map_err(|reason| format!("階{}: {reason}", story.0))
 }
 
 #[cfg(test)]
@@ -232,14 +311,51 @@ mod tests {
                 [0.0, 3000.0, 0.0],
             ],
         );
-        let cols = column_stiffnesses_from_analysis(&model, s0, &res_x, &res_y);
+        let cols = column_stiffnesses_from_analysis(&model, s0, &res_x, &res_y).unwrap();
         assert_eq!(cols.len(), 4);
         for c in &cols {
             assert!((c.dx - 100.0).abs() < 1e-9, "kX={}", c.dx);
         }
-        let cor = center_of_rigidity(&cols);
+        let cor = center_of_rigidity(&cols).unwrap();
         assert!((cor[0] - 4500.0).abs() < 1e-9, "Xs={}", cor[0]);
         assert!((cor[1] - 3000.0).abs() < 1e-9, "Ys={}", cor[1]);
+    }
+
+    #[test]
+    fn analyzed_eccentricity_ignores_unused_girder_reference() {
+        let (mut model, story) = build_symmetric_frame(None);
+        let res_x = fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]);
+        let res_y = fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]);
+        let expected =
+            story_eccentricity_from_analysis(&model, story, &res_x, &res_y, None).unwrap();
+        model.elements[4].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+        assert_eq!(
+            story_eccentricity_from_analysis(&model, story, &res_x, &res_y, None).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn analyzed_eccentricity_rejects_consumed_column_reference() {
+        let (mut model, story) = build_symmetric_frame(None);
+        let res_x = fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]);
+        let res_y = fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]);
+        model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+        let error =
+            story_eccentricity_from_analysis(&model, story, &res_x, &res_y, None).unwrap_err();
+        assert!(
+            error.contains("部材 ID 0") && error.contains("非有限"),
+            "{error}"
+        );
+
+        model.nodes[4].coord = [3000.0, 3000.0, 3000.0];
+        model.elements[0].local_axis.ref_vector = [1e308, 1e308, 1e308 - 1e292];
+        let error =
+            story_eccentricity_from_analysis(&model, story, &res_x, &res_y, None).unwrap_err();
+        assert!(
+            error.contains("部材 ID 0") && error.contains("単位直交基底"),
+            "{error}"
+        );
     }
 
     /// 長期軸力による重心: 全柱等圧縮 → 幾何中央 (3000, 3000)。
@@ -249,7 +365,9 @@ mod tests {
         let (model, s0) = build_symmetric_frame(None);
         // 圧縮は n 負（引張正の符号規約）
         let uniform = fabricate_static([0.0, 0.0], [[-200.0, 0.0, 0.0]; 4]);
-        let g = center_of_gravity_from_axial(&model, s0, &uniform).unwrap();
+        let g = center_of_gravity_from_axial(&model, s0, &uniform)
+            .unwrap()
+            .unwrap();
         assert!((g[0] - 3000.0).abs() < 1e-9 && (g[1] - 3000.0).abs() < 1e-9);
 
         let biased = fabricate_static(
@@ -261,12 +379,16 @@ mod tests {
                 [-300.0, 0.0, 0.0],
             ],
         );
-        let g = center_of_gravity_from_axial(&model, s0, &biased).unwrap();
+        let g = center_of_gravity_from_axial(&model, s0, &biased)
+            .unwrap()
+            .unwrap();
         assert!((g[0] - 4500.0).abs() < 1e-9, "gx={}", g[0]);
 
         // 全柱引張 → None（質量重心へフォールバックさせる）
         let tension = fabricate_static([0.0, 0.0], [[200.0, 0.0, 0.0]; 4]);
-        assert!(center_of_gravity_from_axial(&model, s0, &tension).is_none());
+        assert!(center_of_gravity_from_axial(&model, s0, &tension)
+            .unwrap()
+            .is_none());
     }
 
     /// 精算ルートの統合: 剛心 Xs=4500・重心 gx=3000 → ex=1500, Rey=ex/rey。
@@ -284,7 +406,8 @@ mod tests {
             ],
         );
         let long_term = fabricate_static([0.0, 0.0], [[-200.0, 0.0, 0.0]; 4]);
-        let ecc = story_eccentricity_from_analysis(&model, s0, &res_x, &res_y, Some(&long_term));
+        let ecc =
+            story_eccentricity_from_analysis(&model, s0, &res_x, &res_y, Some(&long_term)).unwrap();
         assert!((ecc.ex - 1500.0).abs() < 1e-9, "ex={}", ecc.ex);
         assert!(ecc.ey.abs() < 1e-9, "ey={}", ecc.ey);
         // KR = ΣkX·ȳ² + ΣkY·x̄²
@@ -298,7 +421,11 @@ mod tests {
             ecc.kr
         );
         let rey = (kr_expect / 800.0_f64).sqrt();
-        assert!((ecc.re_y - 1500.0 / rey).abs() < 1e-9, "Rey={}", ecc.re_y);
+        assert!(
+            (ecc.re_y.as_ref().unwrap() - 1500.0 / rey).abs() < 1e-9,
+            "Rey={}",
+            ecc.re_y.as_ref().unwrap()
+        );
     }
 
     /// 中間節点で分割された柱は 1 本として数えること。
@@ -426,8 +553,124 @@ mod tests {
             )],
             panel_moments: Vec::new(),
         };
-        let cols = column_stiffnesses_from_analysis(&model, top, &res_x, &res_y);
+        let cols = column_stiffnesses_from_analysis(&model, top, &res_x, &res_y).unwrap();
         assert_eq!(cols.len(), 1, "分割柱は 1 本と数える");
         assert!((cols[0].dx - 100.0).abs() < 1e-9);
+    }
+    #[test]
+    fn fes718_analysis_rejects_missing_force_displacement_story_and_nonfinite() {
+        let (model, story) = build_symmetric_frame(None);
+        let x = fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]);
+        let y = fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]);
+        assert!(story_eccentricity_from_analysis(&model, StoryId(99), &x, &y, None).is_err());
+        let mut missing = x.clone();
+        missing.disp.pop();
+        assert!(story_eccentricity_from_analysis(&model, story, &missing, &y, None).is_err());
+        let mut missing = x.clone();
+        missing.member_forces.pop();
+        assert!(story_eccentricity_from_analysis(&model, story, &missing, &y, None).is_err());
+        let mut invalid = x.clone();
+        invalid.disp[4][0] = f64::NAN;
+        assert!(story_eccentricity_from_analysis(&model, story, &invalid, &y, None).is_err());
+        invalid = x.clone();
+        invalid.member_forces[0].1.at[0].1[2] = f64::INFINITY;
+        assert!(story_eccentricity_from_analysis(&model, story, &invalid, &y, None).is_err());
+    }
+    #[test]
+    fn fes718_review_rejects_missing_or_nonfinite_long_term_axial_force() {
+        let (model, story) = build_symmetric_frame(None);
+        let x = fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]);
+        let y = fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]);
+        let long_term = fabricate_static([0.0, 0.0], [[-200.0, 0.0, 0.0]; 4]);
+        let mut missing = long_term.clone();
+        missing.member_forces.pop();
+        let mut rejected =
+            vec![story_eccentricity_from_analysis(&model, story, &x, &y, Some(&missing)).is_err()];
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut result = long_term.clone();
+            result.member_forces[0].1.at[0].1[0] = invalid;
+            rejected.push(
+                story_eccentricity_from_analysis(&model, story, &x, &y, Some(&result)).is_err(),
+            );
+        }
+        assert_eq!(rejected, vec![true; 4]);
+    }
+
+    #[test]
+    fn fes718_review_rejects_nonfinite_displacement_difference() {
+        let (model, story) = build_symmetric_frame(None);
+        let mut x = fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]);
+        let y = fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]);
+        x.disp[4][0] = f64::MAX;
+        x.disp[0][0] = -f64::MAX;
+        assert!(story_eccentricity_from_analysis(&model, story, &x, &y, None).is_err());
+    }
+
+    #[test]
+    fn fes718_review_preserves_mass_center_without_long_term_or_with_all_tension() {
+        let (model, story) = build_symmetric_frame(None);
+        let x = fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]);
+        let y = fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]);
+        let tension = fabricate_static([0.0, 0.0], [[200.0, 0.0, 0.0]; 4]);
+        for long_term in [None, Some(&tension)] {
+            let result =
+                story_eccentricity_from_analysis(&model, story, &x, &y, long_term).unwrap();
+            assert_eq!(result.ex, 0.0);
+            assert_eq!(result.ey, 0.0);
+            assert_eq!(result.re_x.unwrap(), 0.0);
+            assert_eq!(result.re_y.unwrap(), 0.0);
+        }
+    }
+    #[test]
+    fn fes718_axial_sum_overflow_cannot_generate_finite_re_or_fes() {
+        let (mut model, story) = build_symmetric_frame(None);
+        for (i, node) in model.nodes.iter_mut().enumerate() {
+            node.coord[0] = if i % 2 == 0 { 0.0 } else { 0.5 };
+            node.coord[1] = if i % 4 < 2 { 0.0 } else { 0.5 };
+        }
+        let x = fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]);
+        let y = fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]);
+        let long_term = fabricate_static([0.0, 0.0], [[-1e308, 0.0, 0.0]; 4]);
+        let result = story_eccentricity_from_analysis(&model, story, &x, &y, Some(&long_term));
+        assert!(result.is_err(), "{result:?}");
+        assert!(center_of_gravity_from_axial(&model, story, &long_term).is_err());
+    }
+    #[test]
+    fn fes718_mass_sum_overflow_is_unavailable_in_both_mass_center_fallbacks() {
+        let (mut model, story) = build_symmetric_frame(None);
+        for (i, node) in model.nodes.iter_mut().enumerate() {
+            node.coord[0] = if i % 2 == 0 { 0.0 } else { 0.5 };
+            node.coord[1] = if i % 4 < 2 { 0.0 } else { 0.5 };
+            if node.story == Some(story) {
+                node.mass = Some([1e308; 6]);
+            }
+        }
+        let x = fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]);
+        let y = fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]);
+        let tension = fabricate_static([0.0, 0.0], [[200.0, 0.0, 0.0]; 4]);
+        let rejected: Vec<_> = [None, Some(&tension)]
+            .into_iter()
+            .map(|long_term| {
+                story_eccentricity_from_analysis(&model, story, &x, &y, long_term).is_err()
+            })
+            .collect();
+        assert_eq!(rejected, vec![true; 2]);
+    }
+    #[test]
+    fn fes718_rigidity_overflow_stops_story_before_recomputing_e_over_r() {
+        let (mut model, story) = build_symmetric_frame(None);
+        for (i, node) in model.nodes.iter_mut().enumerate() {
+            node.coord[0] = if i % 2 == 0 { 0.0 } else { 0.5 };
+            node.coord[1] = 0.0;
+        }
+        let mut mass_node = model.nodes[4].clone();
+        mass_node.id = sepika_core::ids::NodeId(8);
+        mass_node.coord = [0.25, 1.4e153, 3000.0];
+        mass_node.mass = Some([4.0; 6]);
+        model.nodes.push(mass_node);
+        let x = fabricate_static([1.0, 0.0], [[0.0, 0.0, 1.0]; 4]);
+        let y = fabricate_static([0.0, 1.0], [[0.0, 1e308, 0.0]; 4]);
+        let result = story_eccentricity_from_analysis(&model, story, &x, &y, None);
+        assert!(result.is_err(), "{result:?}");
     }
 }

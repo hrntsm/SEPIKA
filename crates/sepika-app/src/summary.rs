@@ -2,7 +2,6 @@
 
 use sepika_core::model::Model;
 use sepika_core::units::to_display::{force_kn, length_m};
-use sepika_design_jp::secondary::eccentricity::story_eccentricity;
 use sepika_design_jp::secondary::eccentricity_analysis::story_eccentricity_from_analysis;
 use sepika_design_jp::secondary::holding_capacity::{eccentricity_ratio, fes, stiffness_ratios};
 use sepika_design_jp::secondary::stiffness_ratio::{cog_story_drifts, max_column_drift};
@@ -26,21 +25,20 @@ pub struct StoryMetric {
     pub drift_limit_denom: f64,
     /// 1/drift_limit_denom 以下か（令82条の2）
     pub drift_ok: bool,
-    /// 剛性率 Rs
-    pub rs: f64,
-    /// Rs ≥ 0.6 か（令82条の6）
-    pub rs_ok: bool,
-    /// 偏心率 Re（加力方向）
-    pub re: f64,
-    /// Re ≤ 0.15 か（令82条の6）
-    pub re_ok: bool,
-    /// 形状係数 Fes = Fs·Fe
-    pub fes: f64,
+    /// 剛性率 Rs。算定不能時は対象と理由。
+    pub rs: Result<f64, String>,
+    /// Rs ≥ 0.6 か（令82条の6）。算定不能時は `None`。
+    pub rs_ok: Option<bool>,
+    /// 偏心率 Re（加力方向）。算定不能時は対象と理由。
+    pub re: Result<f64, String>,
+    /// Re ≤ 0.15 か（令82条の6）。算定不能時は `None`。
+    pub re_ok: Option<bool>,
+    /// 形状係数 Fes = Fs·Fe。Rs 又は Re が算定不能なら同じ理由を返す。
+    pub fes: Result<f64, String>,
 }
 
 /// 層指標算定の追加入力（偏心率の精算・重心の長期軸力算定用）。
-/// ない項目は `None` のままでよく、その場合は略算（D値法・質量重心）へ
-/// フォールバックする。
+/// X/Y のいずれかがない場合は偏心率と Fes を算定できない。
 #[derive(Default, Clone, Copy)]
 pub struct StoryMetricsCtx<'a> {
     /// X 方向加力の弾性応力解析結果（剛心の精算 ki=Qi/δi 用）
@@ -78,25 +76,9 @@ pub fn metrics_ctx_from_results<'a>(
     }
 }
 
-/// 静的解析の変位から層指標を計算する（略算フォールバック版）。
-/// `disp` は節点変位（`model.nodes` と同順）。階が未定義なら空を返す。
-pub fn compute_story_metrics(
-    model: &Model,
-    disp: &[[f64; 6]],
-    dir: SeismicDir,
-) -> Vec<StoryMetric> {
-    compute_story_metrics_with(model, disp, dir, &StoryMetricsCtx::default())
-}
-
-/// 静的解析の変位から層指標を計算する（構造力学・弾性応力解析）。
-///
-/// - **層間変形角**: その階の柱の層間変形角の**最大値**（斜め柱除外。
-///   `story_metrics::max_column_drift`）。柱が拾えない層は
-///   階平均変位差にフォールバックする。
-/// - **剛性率 Rs**: 重心位置の層間変位 δg（質量重み付き平均変位の差。
-///   `story_metrics::cog_story_drifts`）から `Rs = rs/r̄s`。
-/// - **偏心率 Re**: `ctx` に X/Y 加力の解析結果があれば精算
-///   （剛心 ki=Qi/δi・重心=長期軸力）、なければ D値法（略算）。
+/// 階ごとの層間変形角 `[rad]`・Rs・Re・Fes を返す。階が未定義なら空となる。
+/// Rs は対応方向、Re は X/Y 双方の有効な地震静的結果が必要。
+/// Rs・Re・Fes の算定不能時は対象と理由を返し、対応する判定は `None` となる。
 pub fn compute_story_metrics_with(
     model: &Model,
     disp: &[[f64; 6]],
@@ -139,7 +121,7 @@ pub fn compute_story_metrics_with(
     let mut heights = Vec::with_capacity(layers.len());
     let mut drifts = Vec::with_capacity(layers.len());
     for l in &layers {
-        heights.push(l.height.max(1e-9));
+        heights.push(l.height);
         let drift = match max_column_drift(model, metric_disp, d, l.top) {
             Some(cd) => cd.drift,
             None => {
@@ -152,7 +134,19 @@ pub fn compute_story_metrics_with(
     }
 
     let cog_drifts = cog_story_drifts(model, metric_disp, d);
-    let rs_all = stiffness_ratios(&heights, &cog_drifts);
+    let rs_all = if match dir {
+        SeismicDir::X => ctx.seismic_x,
+        SeismicDir::Y => ctx.seismic_y,
+    }
+    .is_none()
+    {
+        Err(format!(
+            "対応する {:?} 方向の地震静的解析結果がありません",
+            dir
+        ))
+    } else {
+        cog_drifts.and_then(|drifts| stiffness_ratios(&heights, &drifts))
+    };
 
     let denom = if model.stress_cfg.drift_limit_denom > 0.0 {
         model.stress_cfg.drift_limit_denom
@@ -164,19 +158,37 @@ pub fn compute_story_metrics_with(
         .iter()
         .map(|l| {
             let i = l.index;
-            let ecc = match (ctx.seismic_x, ctx.seismic_y) {
+            let re = match (ctx.seismic_x, ctx.seismic_y) {
                 (Some(rx), Some(ry)) => {
-                    story_eccentricity_from_analysis(model, l.top, rx, ry, ctx.long_term)
+                    story_eccentricity_from_analysis(model, l.top, rx, ry, ctx.long_term).and_then(
+                        |ecc| {
+                            let (e_dist, radius) = match dir {
+                                SeismicDir::X => (ecc.ey, ecc.rex),
+                                SeismicDir::Y => (ecc.ex, ecc.rey),
+                            };
+                            eccentricity_ratio(e_dist, radius)
+                        },
+                    )
                 }
-                _ => story_eccentricity(model, l.top),
-            };
-            let (e_dist, radius) = match dir {
-                SeismicDir::X => (ecc.ey, ecc.rex),
-                SeismicDir::Y => (ecc.ex, ecc.rey),
-            };
-            let re = eccentricity_ratio(e_dist, radius);
-            let rs = rs_all.get(i).copied().unwrap_or(1.0);
-            let angle = drifts[i] / heights[i];
+                _ => Err("偏心率に必要な X/Y 方向の地震静的解析結果がありません".into()),
+            }
+            .map_err(|reason| format!("{} {:?}: Re 算定不能: {reason}", l.name, dir));
+            let rs = rs_all
+                .as_ref()
+                .map_err(Clone::clone)
+                .and_then(|values| {
+                    values
+                        .get(i)
+                        .copied()
+                        .ok_or_else(|| "対応する層の剛性率がありません".into())
+                })
+                .map_err(|reason| format!("{} {:?}: Rs 算定不能: {reason}", l.name, dir));
+            let fes = rs
+                .clone()
+                .and_then(|rs| re.clone().and_then(|re| fes(rs, re)));
+            let rs_ok = rs.as_ref().ok().map(|rs| *rs >= 0.6);
+            let re_ok = re.as_ref().ok().map(|re| *re <= 0.15);
+            let angle = drifts[i] / heights[i].max(1e-9);
             StoryMetric {
                 name: l.name.clone(),
                 height: heights[i],
@@ -185,13 +197,28 @@ pub fn compute_story_metrics_with(
                 drift_limit_denom: denom,
                 drift_ok: angle <= 1.0 / denom,
                 rs,
-                rs_ok: rs >= 0.6,
+                rs_ok,
                 re,
-                re_ok: re <= 0.15,
-                fes: fes(rs, re),
+                re_ok,
+                fes,
             }
         })
         .collect()
+}
+
+pub(crate) fn metric_value_text(value: &Result<f64, String>) -> String {
+    match value {
+        Ok(value) => format!("{value:.3}"),
+        Err(reason) => format!("算定不能: {}", reason.replace(',', ";").replace('\n', " ")),
+    }
+}
+
+pub(crate) fn metric_verdict_text(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "OK",
+        Some(false) => "NG",
+        None => "判定なし",
+    }
 }
 
 /// 解析・検定結果を CSV テキストにまとめる（レポートタブの出力）。
@@ -301,7 +328,7 @@ pub fn build_report_csv(app: &App) -> String {
             ));
             for m in &metrics {
                 out.push_str(&format!(
-                    "{},{:.0},{:.3},1/{:.0},{},{:.3},{},{:.3},{},{:.3}\n",
+                    "{},{:.0},{:.3},1/{:.0},{},{},{},{},{},{}\n",
                     m.name,
                     m.height,
                     m.drift,
@@ -311,12 +338,20 @@ pub fn build_report_csv(app: &App) -> String {
                         f64::INFINITY
                     },
                     if m.drift_ok { "OK" } else { "NG" },
-                    m.rs,
-                    if m.rs_ok { "OK" } else { "NG" },
-                    m.re,
-                    if m.re_ok { "OK" } else { "NG" },
-                    m.fes
+                    metric_value_text(&m.rs),
+                    metric_verdict_text(m.rs_ok),
+                    metric_value_text(&m.re),
+                    metric_verdict_text(m.re_ok),
+                    metric_value_text(&m.fes)
                 ));
+            }
+            for m in &metrics {
+                if let Err(reason) = &m.fes {
+                    out.push_str(&format!(
+                        "必要保有水平耐力・合否,算定不能,{}\n",
+                        reason.replace(',', ";").replace('\n', " ")
+                    ));
+                }
             }
         }
     }
@@ -1306,6 +1341,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fes_718_missing_height_displacement_and_direction_are_unavailable() {
+        let mut app = App::default();
+        app.load_model(crate::sample::portal_frame());
+        app.generate_stories_action();
+        app.run_seismic(SeismicDir::X);
+        app.run_seismic(SeismicDir::Y);
+        assert!(app.core.scoped.last_error.is_none());
+        let results = app.core.scoped.results.as_ref().unwrap();
+        let ctx = metrics_ctx_from_results(&app.core.model, Some(results));
+        let disp = &ctx.seismic_x.unwrap().disp;
+        let normal = compute_story_metrics_with(&app.core.model, disp, SeismicDir::X, &ctx);
+        assert_eq!(normal[0].rs, Ok(1.0));
+        assert_eq!(normal[0].re, Ok(0.0));
+        assert_eq!(normal[0].fes, Ok(1.0));
+        let absent = compute_story_metrics_with(
+            &app.core.model,
+            disp,
+            SeismicDir::X,
+            &StoryMetricsCtx::default(),
+        );
+        assert!(absent[0].re.as_ref().unwrap_err().contains("X/Y 方向"));
+        assert_eq!(absent[0].re_ok, None);
+        assert!(absent[0].fes.is_err());
+
+        let mut missing = ctx.seismic_x.unwrap().clone();
+        missing.disp.truncate(1);
+        let missing_ctx = StoryMetricsCtx {
+            seismic_x: Some(&missing),
+            ..ctx
+        };
+        let invalid =
+            compute_story_metrics_with(&app.core.model, &missing.disp, SeismicDir::X, &missing_ctx);
+        assert!(invalid[0].rs.is_err());
+        assert!(invalid[0].re.is_err());
+        assert_eq!(invalid[0].rs_ok, None);
+        assert_eq!(invalid[0].re_ok, None);
+        assert!(invalid[0].fes.is_err());
+
+        let mut model = app.core.model.clone();
+        model.stories[1].elevation = f64::NAN;
+        let invalid = compute_story_metrics_with(&model, disp, SeismicDir::X, &ctx);
+        assert!(invalid[0].rs.is_err());
+        assert!(invalid[0].fes.is_err());
+    }
+
+    #[test]
     fn test_report_and_metrics_from_sample_flow() {
         let mut app = App::default();
         app.load_model(crate::sample::portal_frame());
@@ -1328,10 +1409,11 @@ mod tests {
             .last()
             .unwrap()
             .1;
-        let metrics = compute_story_metrics(&app.core.model, &st.disp, SeismicDir::X);
+        let ctx = metrics_ctx_from_results(&app.core.model, app.core.scoped.results.as_ref());
+        let metrics = compute_story_metrics_with(&app.core.model, &st.disp, SeismicDir::X, &ctx);
         assert_eq!(metrics.len(), 1);
         assert!(metrics[0].drift > 0.0);
-        assert!(metrics[0].rs > 0.0);
+        assert!(*metrics[0].rs.as_ref().unwrap() > 0.0);
 
         // レポート
         let csv = build_report_csv(&app);
@@ -1433,7 +1515,8 @@ mod tests {
             .last()
             .unwrap()
             .1;
-        let metrics = compute_story_metrics(&app.core.model, &st.disp, SeismicDir::X);
+        let ctx = metrics_ctx_from_results(&app.core.model, app.core.scoped.results.as_ref());
+        let metrics = compute_story_metrics_with(&app.core.model, &st.disp, SeismicDir::X, &ctx);
         assert_eq!(metrics[0].drift_limit_denom, 120.0);
         assert_eq!(metrics[0].drift_ok, metrics[0].drift_angle <= 1.0 / 120.0);
         let csv = build_report_csv(&app);

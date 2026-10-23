@@ -120,8 +120,8 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
     };
 
     let layers = inp.model.layers();
-    let qx = story_shears(inp.model, res_x, SeismicDir::X);
-    let qy = story_shears(inp.model, res_y, SeismicDir::Y);
+    let qx = story_shears(inp.model, res_x, SeismicDir::X)?;
+    let qy = story_shears(inp.model, res_y, SeismicDir::Y)?;
     if qx.len() != layers.len() || qy.len() != layers.len() {
         return Err(JobError::Solve("層剛性の層数がモデルと一致しません".into()));
     }
@@ -129,9 +129,9 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
     let mut stories = Vec::with_capacity(layers.len());
     let mut spatial = Vec::with_capacity(layers.len());
     for (i, layer) in layers.iter().enumerate() {
-        let mut cols = column_stiffnesses_from_analysis(inp.model, layer.top, res_x, res_y);
+        let mut cols = column_stiffnesses_from_analysis(inp.model, layer.top, res_x, res_y)
+            .map_err(JobError::InvalidInput)?;
         append_misc_wall_stiffnesses(inp.model, layer.top, &mut cols);
-        let cor = center_of_rigidity(&cols);
         let dm = layer.dynamic_mass.ok_or_else(|| {
             JobError::InvalidInput(format!(
                 "階 {} の動的質量が未算定です。準備計算で階を生成してください",
@@ -139,11 +139,15 @@ fn build_spatial(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
             ))
         })?;
         let com = dm.center_xy_mm;
-        let kr = eccentricity(&cols, com, cor).kr;
         // 質量 0・J 0 以下はそれぞれ `layer_mass`・`layer_inertia` が弾く。
         // 質量を先に判定し、J も 0 になる質量 0 の階を J の誤診断にしない。
         let mass = layer_mass(layer)?;
         let j = layer_inertia(layer)?;
+        let cor = center_of_rigidity(&cols)
+            .map_err(|reason| JobError::InvalidInput(format!("階 {}: {reason}", layer.name)))?;
+        let kr = eccentricity(&cols, com, cor)
+            .map_err(|reason| JobError::InvalidInput(format!("階 {}: {reason}", layer.name)))?
+            .kr;
         let (kxi, kyi) = match inp.source {
             LumpedStiffnessSource::ColumnKi => {
                 let sx: f64 = cols.iter().map(|c| c.dx).sum();
@@ -291,7 +295,7 @@ fn story_stiffness(
     match source {
         LumpedStiffnessSource::StoryQd => {
             let drifts = story_drifts(model, res, dir);
-            let shears = story_shears(model, res, dir);
+            let shears = story_shears(model, res, dir)?;
             if drifts.len() != shears.len() {
                 return Err(JobError::Solve(
                     "層せん断と層間変位の層数が一致しません".into(),
@@ -308,7 +312,8 @@ fn story_stiffness(
         }
         LumpedStiffnessSource::ColumnKi => {
             for layer in &layers {
-                let cols = column_stiffnesses_from_analysis(model, layer.top, res, res);
+                let cols = column_stiffnesses_from_analysis(model, layer.top, res, res)
+                    .map_err(JobError::InvalidInput)?;
                 let sum: f64 = cols
                     .iter()
                     .map(|c| match dir {
@@ -351,7 +356,7 @@ fn story_drifts(model: &Model, res: &StaticOnce, dir: SeismicDir) -> Vec<f64> {
 }
 
 /// 当該層の柱せん断の合計（層せん断）。再累積しない。
-fn story_shears(model: &Model, res: &StaticOnce, dir: SeismicDir) -> Vec<f64> {
+fn story_shears(model: &Model, res: &StaticOnce, dir: SeismicDir) -> JobResult<Vec<f64>> {
     let dir_idx = match dir {
         SeismicDir::X => 0,
         SeismicDir::Y => 1,
@@ -373,7 +378,10 @@ fn story_shears(model: &Model, res: &StaticOnce, dir: SeismicDir) -> Vec<f64> {
             };
             let p0 = model.nodes[elem.nodes[0].index()].coord;
             let p1 = model.nodes[elem.nodes[1].index()].coord;
-            let frame = LocalFrame::from_nodes(p0, p1, elem.local_axis.ref_vector);
+            let frame =
+                LocalFrame::from_nodes(p0, p1, elem.local_axis.ref_vector).map_err(|reason| {
+                    JobError::InvalidInput(format!("部材 ID {} の局所座標: {reason}", elem.id.0))
+                })?;
             let (n_ax, qy, qz) = (local[0], local[1], local[2]);
             let g = [
                 n_ax * frame.rot[0][0] + qy * frame.rot[1][0] + qz * frame.rot[2][0],
@@ -383,7 +391,7 @@ fn story_shears(model: &Model, res: &StaticOnce, dir: SeismicDir) -> Vec<f64> {
             shear[layer.index] += g[dir_idx];
         }
     }
-    shear
+    Ok(shear)
 }
 
 /// 剛床の代表節点変位を平面点 `xy` へ写した層間。
@@ -617,7 +625,7 @@ mod tests {
         let model = two_story_column_model();
         // 下層 Q=100、上層 Q=40。再累積すると下層が 140 になる。
         let res = static_with_column_qz(3, &[(0, 100.0), (1, 40.0)]);
-        let q = story_shears(&model, &res, SeismicDir::X);
+        let q = story_shears(&model, &res, SeismicDir::X).unwrap();
         assert_eq!(q.len(), 2);
         assert!((q[0].abs() - 100.0).abs() < 1e-9, "下層 Q={}", q[0]);
         assert!((q[1].abs() - 40.0).abs() < 1e-9, "上層 Q={}", q[1]);
@@ -839,6 +847,67 @@ mod tests {
     }
 
     #[test]
+    fn spatial_lumped_mass_ignores_detached_beam_reference() {
+        use sepika_core::ids::{ElemId, NodeId};
+        let mut model = two_story_column_model();
+        for (id, x) in [(3, 10000.0), (4, 13000.0)] {
+            let mut node = model.nodes[0].clone();
+            node.id = NodeId(id);
+            node.coord = [x, 0.0, 0.0];
+            node.story = None;
+            node.mass = None;
+            model.nodes.push(node);
+        }
+        let mut beam = model.elements[0].clone();
+        beam.id = ElemId(2);
+        beam.nodes = [NodeId(3), NodeId(4)].into_iter().collect();
+        beam.section = None;
+        beam.local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+        model.elements.push(beam);
+
+        let mut res_x = static_with_column_qz(5, &[(0, 100.0), (1, 40.0)]);
+        let mut res_y = static_with_column_qy(5, &[(0, 80.0), (1, 30.0)]);
+        res_x.disp[1][0] = 1.0;
+        res_x.disp[2][0] = 2.0;
+        res_y.disp[1][1] = 1.0;
+        res_y.disp[2][1] = 2.0;
+        let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
+        inp.source = LumpedStiffnessSource::ColumnKi;
+        inp.res_x = Some(&res_x);
+        inp.res_y = Some(&res_y);
+        let result = build_lumped_mass(inp).unwrap();
+        assert_eq!(result.spatial.len(), 2);
+
+        model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+        for source in [
+            LumpedStiffnessSource::ColumnKi,
+            LumpedStiffnessSource::StoryQd,
+        ] {
+            let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
+            inp.source = source;
+            inp.res_x = Some(&res_x);
+            inp.res_y = Some(&res_y);
+            let error = build_lumped_mass(inp).unwrap_err().to_string();
+            assert!(
+                error.contains("部材 ID 0") && error.contains("非有限"),
+                "{error}"
+            );
+        }
+
+        model.nodes[1].coord = [3000.0, 3000.0, 3000.0];
+        model.elements[0].local_axis.ref_vector = [1e308, 1e308, 1e308 - 1e292];
+        let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
+        inp.source = LumpedStiffnessSource::ColumnKi;
+        inp.res_x = Some(&res_x);
+        inp.res_y = Some(&res_y);
+        let error = build_lumped_mass(inp).unwrap_err().to_string();
+        assert!(
+            error.contains("部材 ID 0") && error.contains("単位直交基底"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn story_drift_at_uses_same_plan_point_on_both_floors() {
         let mut model = two_story_column_model();
         // 上階マスターを Y 方向へずらす（セットバック）。
@@ -851,5 +920,24 @@ mod tests {
         assert!((d_master - 10.0).abs() < 1e-12, "master δ={d_master}");
         // u_x(0,0) = 10 - 0.002*(0-5000) = 20
         assert!((d_origin - 20.0).abs() < 1e-12, "origin δ={d_origin}");
+    }
+    #[test]
+    fn spatial_propagates_unavailable_rigidity_center_with_layer_reason() {
+        let model = two_story_column_model();
+        let mut x = static_with_column_qz(3, &[(0, f64::INFINITY), (1, 40.0)]);
+        let mut y = static_with_column_qy(3, &[(0, 80.0), (1, 30.0)]);
+        x.disp[1][0] = 1.0;
+        x.disp[2][0] = 2.0;
+        y.disp[1][1] = 1.0;
+        y.disp[2][1] = 2.0;
+        let mut inp = input(&model, StickDim::Spatial, SeismicDir::X, false);
+        inp.source = LumpedStiffnessSource::ColumnKi;
+        inp.res_x = Some(&x);
+        inp.res_y = Some(&y);
+        let error = build_lumped_mass(inp).unwrap_err().to_string();
+        assert!(
+            error.contains("階") && error.contains("剛心") && error.contains("集計できません"),
+            "{error}"
+        );
     }
 }

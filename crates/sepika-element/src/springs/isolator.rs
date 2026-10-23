@@ -150,7 +150,8 @@ impl IsolatorElement {
             LocalFrame::from_nodes(p0, [p0[0], p0[1], p0[2] + 1.0], data.local_axis.ref_vector)
         } else {
             LocalFrame::from_nodes(p0, p1, data.local_axis.ref_vector)
-        };
+        }
+        .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", data.id.0));
 
         let props = model
             .isolator_attrs

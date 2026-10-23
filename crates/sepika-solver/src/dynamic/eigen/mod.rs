@@ -89,6 +89,7 @@ pub fn solve_eigen_with_solver(
         Some(MassOption::Consistent),
     )
     .map_err(SolveError::InvalidInput)?;
+    crate::common::assemble::validate_global_mass_inputs(model)?;
     let m_free = assemble_global_m(model, dofmap, MassOption::Consistent)?;
     let m_red = reducer.reduce_k(&m_free);
     let n = m_red.nrows();

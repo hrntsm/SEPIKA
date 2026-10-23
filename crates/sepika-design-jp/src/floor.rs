@@ -193,8 +193,6 @@ pub fn design_slab_oneway(
 
 /// 鋼小梁の既定ヤング係数 [N/mm²]（材料未設定時）。
 pub const STEEL_YOUNG: f64 = 205_000.0;
-/// 鋼小梁の既定 F 値 [N/mm²]（材料未設定・`fy` 未設定時）。
-pub const STEEL_F_DEFAULT: f64 = 235.0;
 /// たわみ制限の既定分母（δ/L ≤ 1/250）。
 pub const DEFLECTION_LIMIT_DENOM: f64 = 250.0;
 /// スラブ設計の既定かぶり `[mm]`（圧縮縁〜鉄筋重心）。
@@ -205,22 +203,43 @@ pub const SLAB_J_RATIO: f64 = 7.0 / 8.0;
 pub const REBAR_FT_LONG_SD295: f64 = 195.0;
 
 /// 小梁略算に使うヤング係数 E [N/mm²] と長期許容曲げ応力度 [N/mm²]。
-///
-/// 本経路の曲げ検定は鋼の断面係数 Z と長期 `ft = F/1.5` を前提とする。
-/// - 材料なし: 既定鋼（`STEEL_YOUNG`・`STEEL_F_DEFAULT`）
-/// - 鋼材: 材料の `young` と `fy`（無ければ `STEEL_F_DEFAULT`）から `ft`
-/// - コンクリート・鉄筋: `None`（RC 小梁の許容曲げはこの略算では扱わない → 表は「未」）
-pub fn beam_steel_e_and_ft(mat: Option<&sepika_core::model::Material>) -> Option<(f64, f64)> {
-    use sepika_core::model::MaterialCategory;
-    match mat {
-        None => Some((STEEL_YOUNG, STEEL_F_DEFAULT / 1.5)),
-        Some(m) if m.category == MaterialCategory::Steel => {
-            let e = if m.young > 0.0 { m.young } else { STEEL_YOUNG };
-            let f = m.fy.filter(|v| *v > 0.0).unwrap_or(STEEL_F_DEFAULT);
-            Some((e, f / 1.5))
-        }
-        Some(_) => None,
+/// 長期 `ft = F/1.5` を用い、材料・必要実板厚・強度の不備は理由付きエラー。
+pub fn beam_steel_e_and_ft(
+    sec: &sepika_core::model::Section,
+    mat: Option<&sepika_core::model::Material>,
+) -> Result<(f64, f64), String> {
+    let f = crate::material_strength::section_steel_f(sec, mat)?;
+    let m = mat.ok_or("小梁の鋼材が未割当です")?;
+    let e = if m.young > 0.0 { m.young } else { STEEL_YOUNG };
+    Ok((e, f / 1.5))
+}
+
+/// 鋼小梁の断面、E、長期 ft [N/mm²] を返す。略算対象外は `None`、入力不備は部材ID付きエラー。
+pub fn secondary_beam_steel_e_and_ft<'a>(
+    model: &'a sepika_core::model::Model,
+    member: &sepika_core::model::SecondaryMember,
+) -> Result<Option<(&'a sepika_core::model::Section, f64, f64)>, String> {
+    use sepika_core::model::SecondaryMemberKind;
+    if member.kind != SecondaryMemberKind::Beam || model.secondary_member_materialized(member) {
+        return Ok(None);
     }
+    let sec = member
+        .section
+        .and_then(|id| model.section(id))
+        .ok_or_else(|| format!("小梁 {}: 断面が未割当または参照先が不明です", member.id.0))?;
+    if sec.shape.as_ref().is_some_and(|shape| {
+        sepika_core::structure_kind::shape_default_kind(shape)
+            != sepika_core::structure_kind::StructureKind::S
+    }) {
+        return Ok(None);
+    }
+    let mat = model.secondary_material(member);
+    if !crate::member_design_check::is_steel_input_target(Some(sec), mat) {
+        return Ok(None);
+    }
+    let (e, ft) = beam_steel_e_and_ft(sec, mat)
+        .map_err(|reason| format!("小梁 {}: {reason}", member.id.0))?;
+    Ok(Some((sec, e, ft)))
 }
 
 #[cfg(test)]

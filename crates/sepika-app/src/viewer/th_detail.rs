@@ -113,14 +113,14 @@ pub(super) fn zero_length_local_frame(
     kind: &ElementKind,
     p_i: [f64; 3],
     ref_vector: [f64; 3],
-) -> LocalFrame {
+) -> Option<LocalFrame> {
     match kind {
         ElementKind::Isolator => {
-            LocalFrame::from_nodes(p_i, [p_i[0], p_i[1], p_i[2] + 1.0], ref_vector)
+            LocalFrame::from_nodes(p_i, [p_i[0], p_i[1], p_i[2] + 1.0], ref_vector).ok()
         }
-        _ => LocalFrame {
+        _ => Some(LocalFrame {
             rot: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-        },
+        }),
     }
 }
 
@@ -133,10 +133,10 @@ pub(super) fn zero_length_relative_disp(
     d_i: [f64; 6],
     d_j: [f64; 6],
     component: AxialComponent,
-) -> f64 {
-    let frame = zero_length_local_frame(kind, p_i, ref_vector);
+) -> Option<f64> {
+    let frame = zero_length_local_frame(kind, p_i, ref_vector)?;
     let du = [d_j[0] - d_i[0], d_j[1] - d_i[1], d_j[2] - d_i[2]];
-    dot3(du, frame.rot[component.axis_index()])
+    Some(dot3(du, frame.rot[component.axis_index()]))
 }
 
 /// 軸力系要素の N-δ ループで表示する成分（中-2）。
@@ -203,12 +203,12 @@ pub(super) fn beam_end_rotations(
     ref_vector: [f64; 3],
     d_i: [f64; 6],
     d_j: [f64; 6],
-) -> (f64, f64, f64, f64) {
+) -> Option<(f64, f64, f64, f64)> {
     let length = member_len3(p_i, p_j);
     if length < 1e-9 {
-        return (0.0, 0.0, 0.0, 0.0);
+        return Some((0.0, 0.0, 0.0, 0.0));
     }
-    let frame = LocalFrame::from_nodes(p_i, p_j, ref_vector);
+    let frame = LocalFrame::from_nodes(p_i, p_j, ref_vector).ok()?;
     let ey = frame.rot[1];
     let ez = frame.rot[2];
     let u_i = [d_i[0], d_i[1], d_i[2]];
@@ -221,7 +221,7 @@ pub(super) fn beam_end_rotations(
     let rz_i = dot3(r_i, ez) - chord_v;
     let ry_j = dot3(r_j, ey) + chord_w;
     let rz_j = dot3(r_j, ez) - chord_v;
-    (ry_i, rz_i, ry_j, rz_j)
+    Some((ry_i, rz_i, ry_j, rz_j))
 }
 
 /// 当該要素の内力が 1 フレームでも記録されているか（要素種別によっては
@@ -497,7 +497,7 @@ fn axial_point(
     let d_i = *disp_frame.get(n0)?;
     let d_j = *disp_frame.get(n1)?;
     let delta = if member_len3(p_i, p_j) < 1e-9 {
-        zero_length_relative_disp(elem_kind, p_i, ref_vector, d_i, d_j, component)
+        zero_length_relative_disp(elem_kind, p_i, ref_vector, d_i, d_j, component)?
     } else {
         axial_relative_disp(p_i, p_j, d_i, d_j)
     };
@@ -599,7 +599,7 @@ fn flexural_points(
     let disp_frame = rec.node_disp.get(f)?;
     let d_i = *disp_frame.get(n0)?;
     let d_j = *disp_frame.get(n1)?;
-    let (ry_i, rz_i, ry_j, rz_j) = beam_end_rotations(p_i, p_j, ref_vector, d_i, d_j);
+    let (ry_i, rz_i, ry_j, rz_j) = beam_end_rotations(p_i, p_j, ref_vector, d_i, d_j)?;
     let (theta_i, theta_j) = if axis_z { (rz_i, rz_j) } else { (ry_i, ry_j) };
     Some(([theta_i, moment_kn_m(mi)], [theta_j, moment_kn_m(mj)]))
 }
@@ -726,7 +726,17 @@ fn draw_peak_check(
             })
         })
         .flatten();
-    let q0_by_elem = wire_qd.then(|| sepika_job::simple_beam_q0_by_gravity_cases(&app.core.model));
+    let q0_by_elem = if wire_qd {
+        match sepika_job::simple_beam_q0_by_gravity_cases(&app.core.model) {
+            Ok(q0) => Some(q0),
+            Err(reason) => {
+                ui.colored_label(theme::PARETO_RED, reason);
+                return;
+            }
+        }
+    } else {
+        None
+    };
     let seismic_qd = long_mf.and_then(|list| {
         list.iter()
             .find(|(id, _)| *id == elem.id)
@@ -941,7 +951,7 @@ mod tests {
         let p_i = [0.0, 0.0, 0.0];
         let p_j = [1000.0, 0.0, 0.0];
         let d = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
-        let (ry_i, rz_i, ry_j, rz_j) = beam_end_rotations(p_i, p_j, [0.0, 1.0, 0.0], d, d);
+        let (ry_i, rz_i, ry_j, rz_j) = beam_end_rotations(p_i, p_j, [0.0, 1.0, 0.0], d, d).unwrap();
         assert!(ry_i.abs() < 1e-9);
         assert!(rz_i.abs() < 1e-9);
         assert!(ry_j.abs() < 1e-9);
@@ -960,7 +970,7 @@ mod tests {
         let chord = 10.0 / 1000.0;
         let d_i = [0.0, 0.0, 0.0, 0.0, 0.0, chord];
         let d_j = [0.0, 10.0, 0.0, 0.0, 0.0, chord];
-        let (_, rz_i, _, rz_j) = beam_end_rotations(p_i, p_j, [0.0, 1.0, 0.0], d_i, d_j);
+        let (_, rz_i, _, rz_j) = beam_end_rotations(p_i, p_j, [0.0, 1.0, 0.0], d_i, d_j).unwrap();
         assert!(rz_i.abs() < 1e-9, "rz_i={rz_i}");
         assert!(rz_j.abs() < 1e-9, "rz_j={rz_j}");
     }
@@ -972,7 +982,7 @@ mod tests {
         let p_j = [1000.0, 0.0, 0.0];
         let d_i = [0.0; 6];
         let d_j = [0.0, 0.0, 0.0, 0.0, 0.0, 0.02];
-        let (_, rz_i, _, rz_j) = beam_end_rotations(p_i, p_j, [0.0, 1.0, 0.0], d_i, d_j);
+        let (_, rz_i, _, rz_j) = beam_end_rotations(p_i, p_j, [0.0, 1.0, 0.0], d_i, d_j).unwrap();
         assert!(rz_i.abs() < 1e-9);
         assert!((rz_j - 0.02).abs() < 1e-9);
     }
@@ -1097,7 +1107,8 @@ mod tests {
     #[test]
     fn zero_length_local_frame_isolator_axis_is_vertical() {
         let frame =
-            zero_length_local_frame(&ElementKind::Isolator, [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+            zero_length_local_frame(&ElementKind::Isolator, [0.0, 0.0, 0.0], [1.0, 0.0, 0.0])
+                .unwrap();
         assert!(
             (frame.rot[0][2] - 1.0).abs() < 1e-9,
             "局所xは全体Z: {:?}",
@@ -1109,11 +1120,34 @@ mod tests {
     #[test]
     fn zero_length_local_frame_nodal_spring_is_identity() {
         let frame =
-            zero_length_local_frame(&ElementKind::NodalSpring, [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+            zero_length_local_frame(&ElementKind::NodalSpring, [0.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+                .unwrap();
         assert_eq!(
             frame.rot,
             [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
         );
+    }
+
+    #[test]
+    fn 不正な参照方向の免震履歴軸は生成しない() {
+        assert!(zero_length_local_frame(
+            &ElementKind::Isolator,
+            [0.0, 0.0, 0.0],
+            [f64::NAN, 0.0, 0.0],
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn 不正な参照方向の梁端回転は生成しない() {
+        assert!(beam_end_rotations(
+            [0.0, 0.0, 0.0],
+            [1000.0, 0.0, 0.0],
+            [f64::NAN, 0.0, 0.0],
+            [0.0; 6],
+            [0.0; 6],
+        )
+        .is_none());
     }
 
     /// 免震支承の零長要素で、水平方向（局所y）の相対変位が ShearY 成分として
@@ -1132,7 +1166,8 @@ mod tests {
             d_i,
             d_j,
             AxialComponent::ShearY,
-        );
+        )
+        .unwrap();
         let axial = zero_length_relative_disp(
             &ElementKind::Isolator,
             p_i,
@@ -1140,7 +1175,8 @@ mod tests {
             d_i,
             d_j,
             AxialComponent::Axial,
-        );
+        )
+        .unwrap();
         assert!((shear_y - 5.0).abs() < 1e-9, "shear_y={shear_y}");
         assert!((axial - 2.0).abs() < 1e-9, "axial={axial}");
     }
