@@ -19,8 +19,12 @@ fn axis_direction(a: [f64; 3], b: [f64; 3]) -> Result<[f64; 3], String> {
 }
 
 fn section_frame(axis: [f64; 3], reference: [f64; 3]) -> Result<[[f64; 3]; 2], String> {
-    let [_, common_y, common_z] =
-        vec3::local_frame_axes([0.0; 3], axis, reference).map_err(|reason| reason.to_string())?;
+    let ([_, common_y, common_z], used_fallback) =
+        vec3::local_frame_axes_with_fallback([0.0; 3], axis, reference)
+            .map_err(|reason| reason.to_string())?;
+    if used_fallback {
+        return Err("断面方向を材軸直交面へ投影できません".into());
+    }
     let rejected = vec3::sub(reference, vec3::scale(axis, vec3::dot(reference, axis)));
     let norm = vec3::norm(rejected);
     if norm.is_finite() && norm > 1e-12 {
@@ -29,13 +33,6 @@ fn section_frame(axis: [f64; 3], reference: [f64; 3]) -> Result<[[f64; 3]; 2], S
         return Ok([y, z]);
     }
     if norm.is_finite() {
-        return Err("断面方向を材軸直交面へ投影できません".into());
-    }
-    let reference_max = reference
-        .iter()
-        .fold(0.0_f64, |max, value| max.max(value.abs()));
-    let scaled = reference.map(|value| value / reference_max);
-    if vec3::cross(axis, scaled) == [0.0; 3] {
         return Err("断面方向を材軸直交面へ投影できません".into());
     }
     Ok([common_y, common_z])
@@ -615,6 +612,49 @@ mod tests {
             assert_eq!(
                 wall_support_face(&model, support, [0.0, 1.0, 0.0]),
                 Ok(300.0)
+            );
+        }
+    }
+
+    #[test]
+    fn 壁支持面は平行参照の丸めを断面方向として採用しない() {
+        let mut model = Model {
+            nodes: vec![node(0, [0.0, 0.0, 0.0]), node(1, [1.0, 3.0, 5.0])],
+            elements: vec![elem(0, ElementKind::Beam, 0, 1, 0)],
+            sections: vec![section(0, 600.0)],
+            ..Default::default()
+        };
+        model.sections[0].width = 400.0;
+        model.sections[0].shape = Some(crate::section_shape::SectionShape::SteelFlatBar {
+            width: 400.0,
+            thick: 600.0,
+        });
+        for (end, reference) in [
+            ([1.0, 3.0, 7.0], [1e6, 3e6, 7e6]),
+            ([1.0, 3.0, 7.0], [1e8, 3e8, 7e8]),
+            ([1.0, 3.0, 7.0], [1e306, 3e306, 7e306]),
+            (
+                [1.0, 1.0, 6.0],
+                [
+                    1.6666666666666666e307,
+                    1.6666666666666666e307,
+                    9.999999999999998e307,
+                ],
+            ),
+            ([1.0, 3.0, 5.0], [2e307, 6e307, 1e308]),
+        ] {
+            model.nodes[1].coord = end;
+            model.elements[0].local_axis.ref_vector = reference;
+            let error =
+                wall_support_face(&model, SupportMemberId::Primary(ElemId(0)), [1.0, 0.0, 0.0])
+                    .unwrap_err();
+            assert!(
+                matches!(
+                    error.as_str(),
+                    "断面方向を材軸直交面へ投影できません"
+                        | "断面参照方向から単位直交基底を解決できません"
+                ),
+                "{error}"
             );
         }
     }

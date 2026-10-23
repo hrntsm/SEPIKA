@@ -79,6 +79,14 @@ pub fn local_frame_axes(
     p_j: [f64; 3],
     reference: [f64; 3],
 ) -> Result<[[f64; 3]; 3], &'static str> {
+    local_frame_axes_with_fallback(p_i, p_j, reference).map(|(axes, _)| axes)
+}
+
+pub(crate) fn local_frame_axes_with_fallback(
+    p_i: [f64; 3],
+    p_j: [f64; 3],
+    reference: [f64; 3],
+) -> Result<([[f64; 3]; 3], bool), &'static str> {
     if reference.iter().any(|value| !value.is_finite()) {
         return Err("断面参照方向に非有限値があります");
     }
@@ -110,7 +118,9 @@ pub fn local_frame_axes(
     let reference_scaled = reference.map(|value| value / reference_scale);
     let mut ey = reject_ex(reference_scaled);
     let mut ey_length = norm(ey);
-    if cross(d_scaled, reference_scaled) == [0.0; 3] || ey_length <= 1e-12 / reference_scale {
+    let used_fallback =
+        cross(d_scaled, reference_scaled) == [0.0; 3] || ey_length <= 1e-12 / reference_scale;
+    if used_fallback {
         ey = reject_ex(if ex[0].abs() < 0.9 {
             [1.0, 0.0, 0.0]
         } else {
@@ -132,7 +142,7 @@ pub fn local_frame_axes(
     {
         return Err("断面参照方向から単位直交基底を解決できません");
     }
-    Ok(axes)
+    Ok((axes, used_fallback))
 }
 
 #[cfg(test)]
