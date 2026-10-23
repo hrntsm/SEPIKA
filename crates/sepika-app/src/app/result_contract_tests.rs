@@ -155,6 +155,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-before-wall-side-column-contract", Some(26), "旧契約"),
         ("old-unconverged-time-history", Some(27), "旧契約"),
         ("old-panel-reference-column", Some(28), "旧契約"),
+        ("old-local-frame-reference", Some(37), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -199,7 +200,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
 #[test]
 fn ovika_old_analysis_is_unavailable_until_explicit_reanalysis() {
     let app = calculated();
-    for version in [5, 6, 7, 20, 22, 24, 26, 28] {
+    for version in [5, 6, 7, 20, 22, 24, 26, 28, 37] {
         let (mut loaded, path) = restore(
             &app,
             Some(version),
@@ -306,6 +307,7 @@ fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_
         ("design-old-before-wall-side-column-contract", Some(18)),
         ("design-old-panel-reference-column", Some(19)),
         ("design-old-steel-f-selection", Some(22)),
+        ("design-old-local-frame", Some(23)),
         ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
     ] {
         let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);
@@ -647,6 +649,253 @@ fn empty_bundle_is_not_an_unknown_result_and_direct_floor_design_survives_stale_
         );
         std::fs::remove_file(path).unwrap();
     }
+}
+
+fn direct_secondary_beam_app() -> App {
+    let mut model = super::tests::make_floor_secondary_beam_test_model();
+    let material_id = sepika_core::ids::MaterialId(model.materials.len() as u32);
+    let mut concrete = crate::sample::portal_frame().materials[0].clone();
+    concrete.id = material_id;
+    concrete.category = sepika_core::model::MaterialCategory::Concrete;
+    concrete.fc = Some(24.0);
+    concrete.density = 2.4e-9;
+    model.materials.push(concrete);
+    let section_id = SectionId(model.sections.len() as u32);
+    let mut slab_section = sepika_core::section_shape::SectionShape::RcSlab { thickness: 100.0 }
+        .to_section(section_id, "床検定用スラブ".into());
+    slab_section.material = Some(material_id);
+    model.sections.push(slab_section);
+    for slab in &mut model.slabs {
+        slab.plate.section = Some(section_id);
+    }
+    let mut app = App::default();
+    app.load_model(model);
+    app
+}
+
+#[test]
+fn ovika_old_direct_secondary_beam_design23_requires_explicit_recheck() {
+    let mut app = direct_secondary_beam_app();
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let original = app.current_design_results().expect("直接小梁検定");
+    assert_eq!(
+        (original.beam_checks.len(), original.slab_checks.len()),
+        (1, 2)
+    );
+    assert_eq!(original.analysis_contract_version, None);
+    assert_eq!(original.design_source, None);
+    assert_eq!(
+        original.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    let original_model = rmp_serde::to_vec_named(&app.core.model).unwrap();
+
+    let (mut loaded, path) = restore(&app, None, Some(23), "old-direct-secondary-design23");
+    assert_eq!(
+        rmp_serde::to_vec_named(&loaded.core.model).unwrap(),
+        original_model
+    );
+    let old = loaded.core.scoped.results.as_ref().unwrap();
+    assert_eq!(old.analysis_contract_version, None);
+    assert_eq!(old.design_source, None);
+    assert!(old.beam_checks.is_empty() && old.slab_checks.is_empty());
+    assert!(loaded.current_design_results().is_none());
+    assert!(loaded.require_design_input().is_err());
+    assert!(loaded.core.scoped.staleness.design_stale);
+    assert!(loaded
+        .core
+        .scoped
+        .result_contract_notice
+        .as_ref()
+        .is_some_and(|notice| notice.contains("旧契約")));
+
+    loaded.run_design_check();
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    let current = loaded.current_design_results().expect("明示再検定");
+    assert_eq!(
+        (current.beam_checks.len(), current.slab_checks.len()),
+        (1, 2)
+    );
+    assert_eq!(current.analysis_contract_version, None);
+    assert_eq!(current.design_source, None);
+    assert_eq!(
+        current.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn direct_secondary_beam_design_rejects_unresolved_large_reference_without_partial_results() {
+    let mut app = direct_secondary_beam_app();
+    let primary = &app.core.model.elements[0];
+    let start = app.core.model.nodes[primary.nodes[0].index()].coord;
+    let end = app.core.model.nodes[primary.nodes[1].index()].coord;
+    assert_eq!(start, [0.0, 0.0, 0.0]);
+    assert_eq!(end, [4000.0, 0.0, 0.0]);
+    app.core.model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let unit = app.current_design_results().expect("単位Y参照の直接検定");
+    assert_eq!((unit.beam_checks.len(), unit.slab_checks.len()), (1, 2));
+    let unit_beam = unit.beam_checks[0].2.clone();
+
+    app.core.model.elements[0].local_axis.ref_vector = [0.0, 1.0e308, 0.0];
+    app.run_design_check();
+    let error = app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .expect("支持面の解決失敗");
+    assert!(
+        error.contains("二次部材 0")
+            && error.contains("支持材 Primary(ElemId(0))")
+            && error.contains("投影できません"),
+        "{error}"
+    );
+    assert!(app.current_design_results().is_none());
+    let failed = app.core.scoped.results.as_ref().unwrap();
+    assert!(failed.beam_checks.is_empty() && failed.slab_checks.is_empty());
+
+    app.core.model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    app.core.scoped.last_error = None;
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let recovered = app
+        .current_design_results()
+        .expect("参照方向復旧後の直接検定");
+    assert_eq!(
+        (recovered.beam_checks.len(), recovered.slab_checks.len()),
+        (1, 2)
+    );
+    assert_eq!(recovered.beam_checks[0].2, unit_beam);
+}
+
+#[test]
+fn direct_secondary_beam_design_ignores_unused_primary_local_reference() {
+    let mut app = direct_secondary_beam_app();
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let expected = app.current_design_results().expect("直接小梁検定");
+    assert_eq!(
+        (expected.beam_checks.len(), expected.slab_checks.len()),
+        (1, 2)
+    );
+    let expected_beam = expected.beam_checks[0].2.clone();
+
+    let mut a = app.core.model.nodes[0].clone();
+    a.id = NodeId(6);
+    a.coord = [10000.0, 0.0, 0.0];
+    let mut b = app.core.model.nodes[1].clone();
+    b.id = NodeId(7);
+    b.coord = [14000.0, 0.0, 0.0];
+    app.core.model.nodes.extend([a, b]);
+    let mut unused = app.core.model.elements[0].clone();
+    unused.id = ElemId(4);
+    unused.nodes = [NodeId(6), NodeId(7)].into_iter().collect();
+    unused.local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    app.core.model.elements.push(unused);
+    app.core
+        .model
+        .validate_reference_ids()
+        .expect("独立一次梁の参照整合");
+
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let current = app
+        .current_design_results()
+        .expect("独立梁追加後の直接小梁検定");
+    assert_eq!(
+        (current.beam_checks.len(), current.slab_checks.len()),
+        (1, 2)
+    );
+    assert_eq!(current.beam_checks[0].2, expected_beam);
+}
+
+#[test]
+fn direct_secondary_beam_design_rejects_used_finite_unresolvable_local_frame() {
+    let mut app = direct_secondary_beam_app();
+    let rotation = std::f64::consts::FRAC_1_SQRT_2;
+    for node in &mut app.core.model.nodes {
+        let [x, y, z] = node.coord;
+        node.coord = [(x - y) * rotation, (x + y) * rotation, z];
+    }
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let baseline = app.current_design_results().expect("回転後の直接小梁検定");
+    assert_eq!(
+        (baseline.beam_checks.len(), baseline.slab_checks.len()),
+        (1, 2)
+    );
+
+    let original = app.core.model.elements[0].local_axis.ref_vector;
+    let reference: [f64; 3] = [1e100, 1e100 + 2e84, 0.0];
+    assert!(reference.iter().all(|value| value.is_finite()));
+    let support = &app.core.model.elements[0];
+    let i = app.core.model.nodes[support.nodes[0].index()].coord;
+    let j = app.core.model.nodes[support.nodes[1].index()].coord;
+    assert!(sepika_core::geom::vec3::local_frame_axes(i, j, reference).is_err());
+    app.core.model.elements[0].local_axis.ref_vector = reference;
+    app.run_design_check();
+    let error = app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .expect("必要支持材の基底不能");
+    assert!(
+        error.contains("二次部材 0")
+            && error.contains("支持材 Primary(ElemId(0))")
+            && error.contains("単位直交基底"),
+        "{error}"
+    );
+    assert!(app.current_design_results().is_none());
+    let failed = app.core.scoped.results.as_ref().unwrap();
+    assert!(failed.beam_checks.is_empty() && failed.slab_checks.is_empty());
+
+    app.core.model.elements[0].local_axis.ref_vector = original;
+    app.core.scoped.last_error = None;
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let recovered = app.current_design_results().expect("支持材参照復旧");
+    assert_eq!(
+        (recovered.beam_checks.len(), recovered.slab_checks.len()),
+        (1, 2)
+    );
 }
 
 #[cfg(feature = "gui")]
@@ -1315,7 +1564,7 @@ fn assert_panel_758_both_axes(app: &App) {
 }
 
 #[test]
-fn panel_758_design21_expires_checks_and_display_but_keeps_analysis37_until_recheck() {
+fn panel_758_design21_expires_checks_and_display_but_keeps_current_analysis_until_recheck() {
     let app = panel_757_calculated();
     assert_panel_758_both_axes(&app);
     let original = app.core.scoped.results.as_ref().unwrap();
@@ -1651,7 +1900,7 @@ fn panel_757_preparation_roundtrip_preserves_both_axes_and_old_scalar_requires_r
 }
 
 #[test]
-fn steel601_old_design22_preserves_analysis37_and_requires_explicit_recheck() {
+fn steel601_old_design22_preserves_current_analysis_and_requires_explicit_recheck() {
     let mut model = crate::sample::portal_frame();
     model.panel_zone = sepika_core::model::PanelZoneMode::None;
     model.materials[0].name = "SS400".into();
@@ -1684,9 +1933,20 @@ fn steel601_old_design22_preserves_analysis37_and_requires_explicit_recheck() {
         .clone();
     let checks = rmp_serde::to_vec_named(&original.member_checks).unwrap();
     assert!(!original.member_checks.is_empty());
-    assert_eq!(original.analysis_contract_version, Some(37));
-    assert_eq!(original.design_contract_version, Some(23));
-    let (mut loaded, path) = restore(&app, Some(37), Some(22), "steel601-old-design22");
+    assert_eq!(
+        original.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    assert_eq!(
+        original.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
+    let (mut loaded, path) = restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(22),
+        "steel601-old-design22",
+    );
     let result = loaded.core.scoped.results.as_ref().unwrap();
     assert_eq!(result.member_forces, original.member_forces);
     assert_eq!(result.statics[0].1.disp, original.statics[0].1.disp);
@@ -1712,7 +1972,10 @@ fn steel601_old_design22_preserves_analysis37_and_requires_explicit_recheck() {
         reopened.core.scoped.last_error
     );
     let current = reopened.current_design_results().unwrap();
-    assert_eq!(current.design_contract_version, Some(23));
+    assert_eq!(
+        current.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
     assert_eq!(
         rmp_serde::to_vec_named(&current.member_checks).unwrap(),
         checks
@@ -1721,8 +1984,14 @@ fn steel601_old_design22_preserves_analysis37_and_requires_explicit_recheck() {
     let mut current_loaded = App::default();
     current_loaded.open_project_from(path.clone());
     let current = current_loaded.current_design_results().unwrap();
-    assert_eq!(current.analysis_contract_version, Some(37));
-    assert_eq!(current.design_contract_version, Some(23));
+    assert_eq!(
+        current.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    assert_eq!(
+        current.design_contract_version,
+        Some(DESIGN_CONTRACT_VERSION)
+    );
     assert_eq!(current.member_forces, original.member_forces);
     assert_eq!(
         rmp_serde::to_vec_named(&current.member_checks).unwrap(),
@@ -1739,7 +2008,12 @@ fn steel601_failed_recheck_clears_old_design_and_keeps_valid_analysis() {
         ("invalid-thickness", Some(-1.0)),
         ("out-of-range", Some(101.0)),
     ] {
-        let (mut loaded, path) = restore(&app, Some(37), Some(23), &format!("steel601-{name}"));
+        let (mut loaded, path) = restore(
+            &app,
+            Some(ANALYSIS_CONTRACT_VERSION),
+            Some(DESIGN_CONTRACT_VERSION),
+            &format!("steel601-{name}"),
+        );
         let original = loaded.current_design_results().unwrap().clone();
         loaded.core.model.materials[0].name = "SS400".into();
         loaded.core.model.sections[0].shape = None;

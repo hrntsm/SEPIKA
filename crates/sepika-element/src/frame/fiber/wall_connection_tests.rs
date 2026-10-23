@@ -170,7 +170,8 @@ fn elastic_arbitrary_normals_original_connections_rigid_arms_and_local_axes_matc
                         [0.0; 3],
                         [0.0, 0.0, 3000.0],
                         [0.6, 0.8, 0.0],
-                    );
+                    )
+                    .unwrap();
                 }
                 let normal_global = std::array::from_fn(|i| {
                     fiber.axis.rot[1][i] * normal[0] + fiber.axis.rot[2][i] * normal[1]

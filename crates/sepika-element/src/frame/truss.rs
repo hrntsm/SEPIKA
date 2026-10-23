@@ -37,7 +37,9 @@ impl TrussElement {
         let [n0, n1] = geom.nodes;
         let len = geom.length;
 
-        let axis = geom.local_frame(data.local_axis.ref_vector);
+        let axis = geom
+            .local_frame(data.local_axis.ref_vector)
+            .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", data.id.0))?;
         let sec = get_section(model, data.section);
         let mat = get_material(model, sec_material(model, data));
         let a = sec.resolved_area()?;

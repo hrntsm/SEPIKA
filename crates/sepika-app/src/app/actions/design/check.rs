@@ -74,6 +74,12 @@ impl App {
             bundle.clear_design_results();
         }
         if frame_design_requested {
+            if let Err(reason) = self.core.model.validate_local_frames() {
+                self.report_error(reason);
+                return;
+            }
+        }
+        if frame_design_requested {
             if let Err(reason) = sepika_design_jp::validate_model_steel_inputs(&self.core.model) {
                 self.report_error(reason);
                 return;
@@ -186,7 +192,13 @@ impl App {
         let group_overrides =
             sepika_design_jp::girder_group_overrides(&self.core.model, &results.member_forces);
         let q0_by_elem = if long_member_forces.is_some() {
-            sepika_job::simple_beam_q0_by_terms(&self.core.model, &gravity_terms)
+            match sepika_job::simple_beam_q0_by_terms(&self.core.model, &gravity_terms) {
+                Ok(q0) => q0,
+                Err(reason) => {
+                    self.report_error(reason);
+                    return;
+                }
+            }
         } else {
             Default::default()
         };
@@ -387,6 +399,9 @@ impl App {
             |s: &sepika_core::model::Slab| self.core.model.slab_intensity(s, LoadPurpose::Beam);
         let transfer = match sepika_load::cascade::solve(&self.core.model, w_of, true) {
             Ok(transfer) => transfer,
+            Err(sepika_load::floor::FloorDistributionError::SelfWeight(reason)) => {
+                return Err(format!("床板・小梁検定: {reason}"));
+            }
             Err(_) => return Ok(()),
         };
 

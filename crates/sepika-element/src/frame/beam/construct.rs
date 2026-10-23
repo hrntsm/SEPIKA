@@ -60,7 +60,9 @@ impl BeamElement {
         let [p0, p1] = geom.coords;
         let len = geom.length;
 
-        let axis = geom.local_frame(data.local_axis.ref_vector);
+        let axis = geom
+            .local_frame(data.local_axis.ref_vector)
+            .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", data.id.0))?;
         let sec = get_section(model, data.section);
         let section_error =
             |error| format!("部材 ID {} の断面「{}」: {error}", data.id.0, sec.name);

@@ -139,6 +139,10 @@ impl App {
     }
 
     pub(super) fn sync_prepared_model(&mut self, initialize_stories: bool) {
+        if let Err(reason) = self.core.model.validate_local_frames() {
+            self.report_error(reason);
+            return;
+        }
         #[cfg(feature = "gui")]
         self.clear_generated_member_selection();
         let mut assignment_candidate = self.core.model.clone();

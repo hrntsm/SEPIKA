@@ -324,7 +324,8 @@ fn project(
         model.nodes[member.elem.nodes[0].index()].coord,
         model.nodes[member.elem.nodes[1].index()].coord,
         member.elem.local_axis.ref_vector,
-    );
+    )
+    .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", member.elem.id.0))?;
     let result = (0..3)
         .map(|k| values[start + k] * dot(frame.rot[k], direction))
         .sum::<f64>();

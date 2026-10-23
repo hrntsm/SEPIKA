@@ -173,6 +173,7 @@ pub fn run_member_design_checks(
     panel_moments: &[(NodeId, [f64; 2])],
     options: &MemberDesignCheckOptions<'_>,
 ) -> Result<MemberDesignCheckReport, String> {
+    model.validate_local_frames()?;
     validate_model_steel_inputs(model)?;
     let mut elem_by_id: HashMap<ElemId, &sepika_core::model::ElementData> =
         HashMap::with_capacity(model.elements.len());

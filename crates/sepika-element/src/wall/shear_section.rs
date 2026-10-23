@@ -137,7 +137,8 @@ impl WallSection {
             }
             let p0 = model.nodes[e.nodes[0].index()].coord;
             let p1 = model.nodes[e.nodes[1].index()].coord;
-            let frame = LocalFrame::from_nodes(p0, p1, e.local_axis.ref_vector);
+            let frame = LocalFrame::from_nodes(p0, p1, e.local_axis.ref_vector)
+                .map_err(|reason| format!("側柱 ID {} の局所座標: {reason}", e.id.0))?;
             let direction = [
                 dot(frame.rot[1], geometry.ex_bottom),
                 dot(frame.rot[2], geometry.ex_bottom),

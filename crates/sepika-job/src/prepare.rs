@@ -83,6 +83,9 @@ pub fn prepare_model(
         .validate_frame_node_counts()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     model
+        .validate_local_frames()
+        .map_err(JobError::InvalidInput)?;
+    model
         .validate_lip_channels()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     let rebar_errors = model.stb_rebar_analysis_diagnostics();
@@ -551,6 +554,102 @@ mod tests {
             rigid_zone: Default::default(),
             plastic_zone: None,
             spring: None,
+        }
+    }
+
+    #[test]
+    fn invalid_local_reference_stops_public_preparation_and_static_analysis_without_mutation() {
+        let mut model = Model {
+            nodes: vec![node(0, 0.0, 0.0), node(1, 0.0, 0.0)],
+            ..Default::default()
+        };
+        model.nodes[1].coord[2] = 3000.0;
+        model.nodes[0].restraint = sepika_core::dof::Dof6Mask::FIXED;
+        model.elements.push(beam(0, 0, 1));
+        let steel = steel_panel_model();
+        model.materials = steel.materials;
+        model.sections = steel.sections;
+        model.elements[0].section = Some(SectionId(0));
+        model.load_cases = sepika_core::model::default_load_cases();
+        for component in 0..3 {
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut candidate = model.clone();
+                candidate.elements[0].local_axis.ref_vector[component] = value;
+                let before = format!("{candidate:?}");
+                let error =
+                    prepare_model_for_analysis(&mut candidate, &AnalysisSettings::default(), None)
+                        .err()
+                        .unwrap()
+                        .to_string();
+                assert!(
+                    error.contains("部材 ID 0") && error.contains("非有限"),
+                    "{error}"
+                );
+                assert_eq!(format!("{candidate:?}"), before);
+                let direct = sepika_solver::statics::analysis::Analysis::prepare(&candidate)
+                    .err()
+                    .unwrap()
+                    .to_string();
+                assert!(
+                    direct.contains("部材 ID 0") && direct.contains("非有限"),
+                    "{direct}"
+                );
+                let static_result = crate::compute::compute_linear_static(
+                    candidate,
+                    sepika_core::ids::LoadCaseId(0),
+                )
+                .err()
+                .unwrap()
+                .to_string();
+                assert!(
+                    static_result.contains("部材 ID 0") && static_result.contains("非有限"),
+                    "{static_result}"
+                );
+            }
+        }
+        let mut finite_unresolvable = model.clone();
+        finite_unresolvable.nodes[1].coord = [1.0; 3];
+        finite_unresolvable.elements[0].local_axis.ref_vector = [1e308, 1e308, 1e308 - 1e292];
+        let before = format!("{finite_unresolvable:?}");
+        let error = prepare_model_for_analysis(
+            &mut finite_unresolvable,
+            &AnalysisSettings::default(),
+            None,
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(
+            error.contains("部材 ID 0") && error.contains("単位直交基底"),
+            "{error}"
+        );
+        assert_eq!(format!("{finite_unresolvable:?}"), before);
+        let direct = sepika_solver::statics::analysis::Analysis::prepare(&finite_unresolvable)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            direct.contains("部材 ID 0") && direct.contains("単位直交基底"),
+            "{direct}"
+        );
+        let static_result = crate::compute::compute_linear_static(
+            finite_unresolvable,
+            sepika_core::ids::LoadCaseId(0),
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(
+            static_result.contains("部材 ID 0") && static_result.contains("単位直交基底"),
+            "{static_result}"
+        );
+        for reference in [[0.0; 3], [0.0, 0.0, 1.0], [1e308, 0.0, 0.0]] {
+            let mut candidate = model.clone();
+            candidate.elements[0].local_axis.ref_vector = reference;
+            prepare_model_for_analysis(&mut candidate, &AnalysisSettings::default(), None).unwrap();
+            sepika_solver::statics::analysis::Analysis::prepare(&candidate).unwrap();
+            crate::compute::compute_linear_static(candidate, sepika_core::ids::LoadCaseId(0))
+                .unwrap();
         }
     }
 

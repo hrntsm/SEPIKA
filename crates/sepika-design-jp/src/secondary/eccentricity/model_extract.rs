@@ -71,7 +71,8 @@ pub fn center_of_mass(model: &Model, story: StoryId) -> Result<[f64; 2], String>
 ///
 /// `story` には**層の上端の階**（[`sepika_core::model::Layer::top`]）を渡すこと。
 /// 層の柱はその上端の床に取り付くためである。
-pub fn column_stiffnesses(model: &Model, story: StoryId) -> Vec<ColumnStiffness> {
+/// 実際に採用する柱の局所基底を解決できなければ、部材 ID と理由を返す。
+pub fn column_stiffnesses(model: &Model, story: StoryId) -> Result<Vec<ColumnStiffness>, String> {
     let first_story = story.index() == 1;
 
     let mut result = Vec::new();
@@ -105,7 +106,8 @@ pub fn column_stiffnesses(model: &Model, story: StoryId) -> Vec<ColumnStiffness>
         }
 
         let ref_vec = elem.local_axis.ref_vector;
-        let frame = LocalFrame::from_nodes(p0, p1, ref_vec);
+        let frame = LocalFrame::from_nodes(p0, p1, ref_vec)
+            .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0))?;
         let ey = frame.rot[1];
         let ez = frame.rot[2];
 
@@ -172,7 +174,7 @@ pub fn column_stiffnesses(model: &Model, story: StoryId) -> Vec<ColumnStiffness>
             dy: dy_val,
         });
     }
-    result
+    Ok(result)
 }
 
 /// 剛心・重心をまとめた構造体。
@@ -184,7 +186,7 @@ pub struct StoryCenters {
 
 /// 当該層の剛心・重心を算定して返す。
 pub fn story_centers(model: &Model, story: StoryId) -> Result<StoryCenters, String> {
-    let cols = column_stiffnesses(model, story);
+    let cols = column_stiffnesses(model, story)?;
     let com = center_of_mass(model, story)?;
     let cor = center_of_rigidity(&cols).map_err(|reason| format!("階{}: {reason}", story.0))?;
     Ok(StoryCenters {
@@ -195,7 +197,7 @@ pub fn story_centers(model: &Model, story: StoryId) -> Result<StoryCenters, Stri
 
 /// 当該層の偏心率を算定して返す。
 pub fn story_eccentricity(model: &Model, story: StoryId) -> Result<Eccentricity, String> {
-    let mut cols = column_stiffnesses(model, story);
+    let mut cols = column_stiffnesses(model, story)?;
     append_misc_wall_stiffnesses(model, story, &mut cols);
     let cor = center_of_rigidity(&cols).map_err(|reason| format!("階{}: {reason}", story.0))?;
     let com = center_of_mass(model, story)?;

@@ -112,6 +112,53 @@ fn assembled_translation_mass(model: &Model, dof: Dof) -> f64 {
 }
 
 #[test]
+fn nodal_only_mass_ignores_unused_member_reference_but_consistent_mass_rejects_it() {
+    let mut model = model(ElementKind::Beam, false);
+    model.nodes[1].mass = Some([2.0, 2.0, 2.0, 0.0, 0.0, 0.0]);
+    model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    model.mass_method = MassMethod::LumpedOnly;
+    let dofmap = DofMap::build(&model);
+    let mass = assemble_global_m(&model, &dofmap, MassOption::Consistent)
+        .unwrap()
+        .to_dense();
+    let ux = dofmap.active(6 + Dof::Ux as usize).unwrap() as usize;
+    assert_eq!(mass[(ux, ux)], 2.0);
+
+    let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dofmap);
+    let error = sepika_solver::dynamic::eigen::solve_eigen(&model, &dofmap, &reducer, 0)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("部材 ID 0") && error.contains("非有限"),
+        "{error}"
+    );
+    let solver =
+        sepika_math::solver::make_solver(sepika_math::solver::SolverBackend::DirectSparseCholesky);
+    let error = sepika_solver::dynamic::eigen::solve_eigen_with_solver(
+        &model,
+        &dofmap,
+        &reducer,
+        0,
+        solver.as_ref(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        error.contains("部材 ID 0") && error.contains("非有限"),
+        "{error}"
+    );
+
+    model.mass_method = MassMethod::CorrectedLumped;
+    let error = assemble_global_m(&model, &dofmap, MassOption::Consistent)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("部材 ID 0") && error.contains("非有限"),
+        "{error}"
+    );
+}
+
+#[test]
 fn ダンパー総重量は全体質量行列へ一度だけ計上し両方式で一致する() {
     for kind in [
         ElementKind::Damper,

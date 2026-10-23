@@ -36,7 +36,8 @@ fn release_axis_for_normal(
     p1: [f64; 3],
     normal: [f64; 3],
 ) -> ReleaseAxis {
-    let axis = LocalFrame::from_nodes(p0, p1, data.local_axis.ref_vector);
+    let axis = LocalFrame::from_nodes(p0, p1, data.local_axis.ref_vector)
+        .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", data.id.0));
     let ny = dot(axis.rot[1], normal);
     let nz = dot(axis.rot[2], normal);
     let norm = ny.hypot(nz);

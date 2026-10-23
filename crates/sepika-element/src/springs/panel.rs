@@ -1254,7 +1254,8 @@ mod tests {
                     coordinates.0,
                     coordinates.1,
                     reference,
-                );
+                )
+                .unwrap();
                 assert_eq!(axes, [frame.rot[2], frame.rot[1]]);
                 if coordinates.0 == [0.0, 0.0, 0.0] {
                     assert_eq!(PanelZone::new(&data, &model).axes, axes);

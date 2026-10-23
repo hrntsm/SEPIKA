@@ -4695,6 +4695,61 @@ fn test_floor_design_checks_slab() {
 }
 
 #[test]
+fn slab_only_design_does_not_require_unused_primary_local_axis() {
+    let mut model = make_square_slab_test_model();
+    set_floor_test_self_weight_geometry(&mut model);
+    let concrete = sepika_core::ids::MaterialId(model.materials.len() as u32);
+    model.materials.push(sepika_core::model::Material {
+        id: concrete,
+        name: "床板検定用コンクリート".into(),
+        category: sepika_core::model::MaterialCategory::Concrete,
+        young: 22000.0,
+        poisson: 0.2,
+        density: 2.4e-9,
+        shear: None,
+        fc: Some(24.0),
+        fy: None,
+        concrete_class: Default::default(),
+        strength_factor: None,
+    });
+    let slab_section = sepika_core::ids::SectionId(model.sections.len() as u32);
+    let mut slab_shape = sepika_core::section_shape::SectionShape::RcSlab { thickness: 150.0 }
+        .to_section(slab_section, "S15".into());
+    slab_shape.material = Some(concrete);
+    model.sections.push(slab_shape);
+    model.slabs[0].plate.section = Some(slab_section);
+    let mut app = App {
+        core: AppCore {
+            model,
+            ..Default::default()
+        },
+        ..App::default()
+    };
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let original = app.current_design_results().unwrap();
+    assert_eq!(original.slab_checks.len(), 1);
+    let initial_moment = original.slab_checks[0].1.moment;
+
+    app.core.model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    app.core.model.slabs[0].plate.loads[0].value *= 2.0;
+    app.run_design_check();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let direct = app.current_design_results().unwrap();
+    assert!(direct.beam_checks.is_empty());
+    assert_eq!(direct.slab_checks.len(), 1);
+    assert!(direct.slab_checks[0].1.moment > initial_moment);
+}
+
+#[test]
 fn issue561_floor_design_checks_skip_skew_and_preserve_rotated_rectangle() {
     let mut model = make_square_slab_test_model();
     let section_id = sepika_core::ids::SectionId(model.sections.len() as u32);
@@ -4901,9 +4956,7 @@ fn set_floor_test_self_weight_geometry(model: &mut sepika_core::model::Model) {
     }
 }
 
-/// 二次部材（小梁）1 本が `Slab::beams` なしで床設計の対象になる。
-#[test]
-fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
+pub(super) fn make_floor_secondary_beam_test_model() -> sepika_core::model::Model {
     use sepika_core::ids::SectionId;
     use sepika_core::model::{SecondaryMember, SecondaryMemberKind, Section, SlabUsage};
 
@@ -4979,6 +5032,15 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
     model.floor_regions[0].slab_ids = vec![first, second];
     set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
+    model
+}
+
+/// 二次部材（小梁）1 本が `Slab::beams` なしで床設計の対象になる。
+#[test]
+fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
+    use sepika_core::ids::SectionId;
+
+    let model = make_floor_secondary_beam_test_model();
     let mut app = App {
         core: AppCore {
             model,
@@ -5073,6 +5135,30 @@ fn test_floor_design_checks_secondary_member_beam_high_density_steel() {
     let bundle = app.core.scoped.results.as_ref().unwrap();
     assert_eq!(bundle.beam_checks.len(), 1);
     assert_eq!(bundle.slab_checks.len(), 2);
+    let original_ref = app.core.model.elements[0].local_axis.ref_vector;
+    app.core.model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    app.run_design_check();
+    let error = app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .expect("小梁支持材の局所軸エラー");
+    assert!(
+        error.contains("二次部材 0")
+            && error.contains("支持材 Primary(ElemId(0))")
+            && error.contains("非有限"),
+        "{error}"
+    );
+    assert!(app.current_design_results().is_none());
+    let failed = app.core.scoped.results.as_ref().unwrap();
+    assert!(failed.beam_checks.is_empty() && failed.slab_checks.is_empty());
+    app.core.model.elements[0].local_axis.ref_vector = original_ref;
+    app.core.scoped.last_error = None;
+    app.run_design_check();
+    assert!(app.core.scoped.last_error.is_none());
+    let direct = app.current_design_results().unwrap();
+    assert_eq!((direct.beam_checks.len(), direct.slab_checks.len()), (1, 2));
     for stale in [true, false] {
         app.core.scoped.staleness.results_stale = stale;
         app.core.design_term = LoadTerm::Short; // 直接床板・小梁は実効長期のまま。
@@ -6486,6 +6572,72 @@ fn test_run_preparation_is_idempotent() {
         !app.core.scoped.staleness.results_stale,
         "差分がなければ解析結果を stale にしないはず"
     );
+}
+
+#[test]
+fn invalid_local_reference_rejects_preparation_without_adopting_partial_model() {
+    let mut app = App::default();
+    app.load_model(crate::sample::portal_frame());
+    let elem_id = app.core.model.elements[0].id;
+    app.core.model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+    let nodes = app.core.model.nodes.clone();
+    let stories = app.core.model.stories.clone();
+    let cases = app.core.model.load_cases.clone();
+    let undo_label = app.core.scoped.undo.undo_label().map(str::to_owned);
+
+    app.run_preparation();
+
+    let error = app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .expect("部材と理由付きの準備失敗");
+    assert!(error.contains(&elem_id.0.to_string()), "{error}");
+    assert!(error.contains("非有限"), "{error}");
+    assert!(app.core.scoped.preparation.is_none());
+    assert!(app.core.scoped.auto_load_sync_hash.is_none());
+    assert_eq!(app.core.model.nodes, nodes);
+    assert_eq!(app.core.model.stories, stories);
+    assert_eq!(app.core.model.load_cases, cases);
+    assert_eq!(app.core.scoped.undo.undo_label(), undo_label.as_deref());
+}
+
+#[test]
+fn invalid_local_reference_invalidates_previous_static_result() {
+    let mut app = App::default();
+    app.load_model(crate::sample::portal_frame());
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert!(app.core.scoped.results.as_ref().is_some_and(|bundle| {
+        bundle
+            .statics
+            .iter()
+            .any(|(key, _)| *key == StaticCaseKey::User(LoadCaseId(0)))
+    }));
+
+    let elem_id = app.core.model.elements[0].id;
+    app.core.model.elements[0].local_axis.ref_vector = [f64::INFINITY, 0.0, 0.0];
+    app.run_linear_static(LoadCaseId(0));
+
+    let error = app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .expect("部材と理由付きの解析失敗");
+    assert!(error.contains(&elem_id.0.to_string()), "{error}");
+    assert!(error.contains("非有限"), "{error}");
+    assert!(app.core.scoped.results.as_ref().is_none_or(|bundle| {
+        bundle
+            .statics
+            .iter()
+            .all(|(key, _)| *key != StaticCaseKey::User(LoadCaseId(0)))
+    }));
 }
 
 /// 階を生成できないモデル（節点なし）でも準備計算は中断せず、階の生成エラーを
@@ -11666,6 +11818,7 @@ fn gui_node_paste_rejects_attached_slab_geometry_atomically() {
     let revision = app.core.scoped.undo.revision();
     let mut invalid = app.core.model.clone();
     invalid.nodes[3].coord = invalid.nodes[2].coord;
+    invalid.nodes[3].coord[2] += 1000.0;
     let expected = invalid.validate_attached_slabs().unwrap_err().to_string();
     let issues = sepika_solver::statics::analysis::precheck::model_issues(&invalid);
     assert!(issues.iter().any(|issue| issue.message == expected));
@@ -11677,7 +11830,10 @@ fn gui_node_paste_rejects_attached_slab_geometry_atomically() {
     )
     .err()
     .expect("不正床板を拒否");
-    assert!(error.to_string().contains(&expected));
+    assert!(
+        error.to_string().contains(&expected),
+        "actual: {error}; expected: {expected}"
+    );
     assert_eq!(format!("{invalid:?}"), before);
     let mut adapter = NodeGridAdapter {
         model: &mut app.core.model,
@@ -11689,6 +11845,7 @@ fn gui_node_paste_rejects_attached_slab_geometry_atomically() {
             (2, 1, "100".into()),
             (3, 0, "0".into()),
             (3, 1, "100".into()),
+            (3, 2, "4500".into()),
         ],
         0,
     );

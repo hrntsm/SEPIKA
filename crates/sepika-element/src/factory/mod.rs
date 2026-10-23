@@ -51,12 +51,14 @@ use springs::{flexural_alpha_y, is_rc_like_section};
 /// [`build_nonlinear_behavior`] だけが行う。
 /// RC/SRC置換壁の側柱は、壁法線まわりの回転を解放する。
 /// 壁のせん断断面が不正・未対応ならpanicする。呼び出し前に入力診断を行うこと。
+/// `model` は `Model::validate_local_frames` 済みを前提とする。
 pub fn build_behavior(data: &ElementData, model: &Model) -> Box<dyn ElementBehavior> {
     build_behavior_with_axial_factor(data, model, 1.0)
 }
 
 /// Beam・Fiber・MultiSpring・Brace の軸剛性だけに正の有限な係数を乗じる。他種別の係数は1に限る。
 /// 形状・質量・曲げ・せん断剛性は保持する。
+/// `model` は `Model::validate_local_frames` 済みを前提とする。
 pub fn build_behavior_with_axial_factor(
     data: &ElementData,
     model: &Model,
@@ -221,6 +223,7 @@ impl StrengthBasis {
 /// RC矩形梁の集中ばね入力が不正・不足なら診断文付きでpanicする。
 /// RC耐震壁の `wall_capacity` には事前解決した局所正負の順のQu `[N]` の有限正値を渡す。
 /// RC耐震壁で値が欠落・不正の場合は、壁IDを含む診断文付きでpanicする。
+/// `model` は `Model::validate_local_frames` 済みを前提とする。
 pub fn build_nonlinear_behavior(
     data: &ElementData,
     model: &Model,

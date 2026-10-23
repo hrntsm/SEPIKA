@@ -50,17 +50,17 @@ fn station_force_global(
     p1: [f64; 3],
     ref_vec: [f64; 3],
     local: [f64; 6],
-) -> [f64; 3] {
-    let frame = LocalFrame::from_nodes(p0, p1, ref_vec);
+) -> Result<[f64; 3], &'static str> {
+    let frame = LocalFrame::from_nodes(p0, p1, ref_vec)?;
     let ex = frame.rot[0];
     let ey = frame.rot[1];
     let ez = frame.rot[2];
     let (n, qy, qz) = (local[0], local[1], local[2]);
-    [
+    Ok([
         n * ex[0] + qy * ey[0] + qz * ez[0],
         n * ex[1] + qy * ey[1] + qz * ez[1],
         n * ex[2] + qy * ey[2] + qz * ez[2],
-    ]
+    ])
 }
 
 /// 地震時応力解析結果から柱の方向別水平剛性 `ki = Qi/δi` を算定する（精算層）。
@@ -70,17 +70,20 @@ fn station_force_global(
 /// - `res_x` / `res_y`: X / Y 方向加力時の弾性応力解析結果
 /// - `kX` は X 加力時の（せん断力 Qx, 層間変位 δx）から、`kY` は Y 加力時から。
 ///   δ がほぼ 0 の柱は剛性 0 とする。
+///
+/// 実際に内力変換する柱の局所基底を解決できなければ、部材 ID と理由を返す。
 pub fn column_stiffnesses_from_analysis(
     model: &Model,
     story: StoryId,
     res_x: &StaticOnce,
     res_y: &StaticOnce,
-) -> Vec<ColumnStiffness> {
+) -> Result<Vec<ColumnStiffness>, String> {
     use std::collections::HashMap;
     let fx: HashMap<_, _> = res_x.member_forces.iter().map(|(id, f)| (*id, f)).collect();
     let fy: HashMap<_, _> = res_y.member_forces.iter().map(|(id, f)| (*id, f)).collect();
 
     let mut out = Vec::new();
+    let mut invalid = None;
     for_each_story_column(model, story, |elem, top, bot| {
         let p0 = model.nodes[elem.nodes[0].index()].coord;
         let p1 = model.nodes[elem.nodes[1].index()].coord;
@@ -90,31 +93,35 @@ pub fn column_stiffnesses_from_analysis(
             &sepika_element::frame::beam::MemberForces,
         >,
                     dir: usize|
-         -> f64 {
+         -> Result<f64, String> {
             let (Some(ut), Some(ub)) = (res.disp.get(top.id.index()), res.disp.get(bot.id.index()))
             else {
-                return 0.0;
+                return Ok(0.0);
             };
             let delta = (ut[dir] - ub[dir]).abs();
             if delta < 1e-9 {
-                return 0.0;
+                return Ok(0.0);
             }
             let Some(mf) = forces.get(&elem.id) else {
-                return 0.0;
+                return Ok(0.0);
             };
             let Some(&(_, local)) = mf.at.first() else {
-                return 0.0;
+                return Ok(0.0);
             };
-            let g = station_force_global(p0, p1, elem.local_axis.ref_vector, local);
-            g[dir].abs() / delta
+            let g = station_force_global(p0, p1, elem.local_axis.ref_vector, local)
+                .map_err(|reason| format!("部材 ID {} の局所座標: {reason}", elem.id.0))?;
+            Ok(g[dir].abs() / delta)
         };
-        out.push(ColumnStiffness {
-            pos: [top.coord[0], top.coord[1]],
-            dx: k_of(res_x, &fx, 0),
-            dy: k_of(res_y, &fy, 1),
-        });
+        match k_of(res_x, &fx, 0).and_then(|dx| k_of(res_y, &fy, 1).map(|dy| (dx, dy))) {
+            Ok((dx, dy)) => out.push(ColumnStiffness {
+                pos: [top.coord[0], top.coord[1]],
+                dx,
+                dy,
+            }),
+            Err(reason) => invalid = Some(reason),
+        }
     });
-    out
+    invalid.map_or(Ok(out), Err)
 }
 
 /// 柱の圧縮軸力を重みにした平面重心 `[mm]` を返す。
@@ -228,7 +235,7 @@ pub fn story_eccentricity_from_analysis(
     if let Some(reason) = invalid {
         return Err(reason);
     }
-    let mut cols = column_stiffnesses_from_analysis(model, story, res_x, res_y);
+    let mut cols = column_stiffnesses_from_analysis(model, story, res_x, res_y)?;
     append_misc_wall_stiffnesses(model, story, &mut cols);
     let cor = center_of_rigidity(&cols).map_err(|reason| format!("階{}: {reason}", story.0))?;
     let com = match long_term
@@ -304,7 +311,7 @@ mod tests {
                 [0.0, 3000.0, 0.0],
             ],
         );
-        let cols = column_stiffnesses_from_analysis(&model, s0, &res_x, &res_y);
+        let cols = column_stiffnesses_from_analysis(&model, s0, &res_x, &res_y).unwrap();
         assert_eq!(cols.len(), 4);
         for c in &cols {
             assert!((c.dx - 100.0).abs() < 1e-9, "kX={}", c.dx);
@@ -312,6 +319,43 @@ mod tests {
         let cor = center_of_rigidity(&cols).unwrap();
         assert!((cor[0] - 4500.0).abs() < 1e-9, "Xs={}", cor[0]);
         assert!((cor[1] - 3000.0).abs() < 1e-9, "Ys={}", cor[1]);
+    }
+
+    #[test]
+    fn analyzed_eccentricity_ignores_unused_girder_reference() {
+        let (mut model, story) = build_symmetric_frame(None);
+        let res_x = fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]);
+        let res_y = fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]);
+        let expected =
+            story_eccentricity_from_analysis(&model, story, &res_x, &res_y, None).unwrap();
+        model.elements[4].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+        assert_eq!(
+            story_eccentricity_from_analysis(&model, story, &res_x, &res_y, None).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn analyzed_eccentricity_rejects_consumed_column_reference() {
+        let (mut model, story) = build_symmetric_frame(None);
+        let res_x = fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]);
+        let res_y = fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]);
+        model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
+        let error =
+            story_eccentricity_from_analysis(&model, story, &res_x, &res_y, None).unwrap_err();
+        assert!(
+            error.contains("部材 ID 0") && error.contains("非有限"),
+            "{error}"
+        );
+
+        model.nodes[4].coord = [3000.0, 3000.0, 3000.0];
+        model.elements[0].local_axis.ref_vector = [1e308, 1e308, 1e308 - 1e292];
+        let error =
+            story_eccentricity_from_analysis(&model, story, &res_x, &res_y, None).unwrap_err();
+        assert!(
+            error.contains("部材 ID 0") && error.contains("単位直交基底"),
+            "{error}"
+        );
     }
 
     /// 長期軸力による重心: 全柱等圧縮 → 幾何中央 (3000, 3000)。
@@ -509,7 +553,7 @@ mod tests {
             )],
             panel_moments: Vec::new(),
         };
-        let cols = column_stiffnesses_from_analysis(&model, top, &res_x, &res_y);
+        let cols = column_stiffnesses_from_analysis(&model, top, &res_x, &res_y).unwrap();
         assert_eq!(cols.len(), 1, "分割柱は 1 本と数える");
         assert!((cols[0].dx - 100.0).abs() < 1e-9);
     }

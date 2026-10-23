@@ -104,7 +104,8 @@ fn horizontal_unit(v: [f64; 3]) -> Option<[f64; 2]> {
 /// または投影が縮退する場合は `None`。
 fn member_horizontal_axis(model: &Model, elem: &ElementData, axis: usize) -> Option<[f64; 2]> {
     let (p0, p1) = node_coords(model, elem)?;
-    let frame = LocalFrame::from_nodes(p0, p1, elem.local_axis.ref_vector);
+    let frame = LocalFrame::from_nodes(p0, p1, elem.local_axis.ref_vector)
+        .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", elem.id.0));
     horizontal_unit(frame.rot[axis])
 }
 
@@ -312,6 +313,7 @@ fn g_ratio_axis_at(
 ///
 /// `index` は事前に `NodeAdjacency::build(model)` で一度だけ構築し、
 /// 全部材ぶんのループで使い回すこと。
+/// `model` は `Model::validate_local_frames` 済みを前提とする。
 pub fn steel_column_k_axes_with_index(
     model: &Model,
     index: &NodeAdjacency,
@@ -325,7 +327,8 @@ pub fn steel_column_k_axes_with_index(
     if crate::MemberKind::try_of_element(elem, model).ok()? != crate::MemberKind::Column {
         return None;
     }
-    let frame = LocalFrame::from_nodes(p0, p1, elem.local_axis.ref_vector);
+    let frame = LocalFrame::from_nodes(p0, p1, elem.local_axis.ref_vector)
+        .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", elem.id.0));
     let d_y = horizontal_unit(frame.rot[1]);
     let d_z = horizontal_unit(frame.rot[2]);
 

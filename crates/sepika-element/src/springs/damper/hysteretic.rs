@@ -28,7 +28,9 @@ impl HystereticDamperElement {
     pub fn new(data: &ElementData, model: &Model) -> Self {
         let geom = crate::transform::EndGeometry::of_element(data, model);
         let [n0, n1] = geom.nodes;
-        let axis = geom.local_frame(data.local_axis.ref_vector);
+        let axis = geom
+            .local_frame(data.local_axis.ref_vector)
+            .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", data.id.0));
         let props = model.damper_props(data.id).unwrap_or_default();
         let k1 = props.kd.max(1e-9);
         let qy = props.qy.max(1e-9);
@@ -193,7 +195,8 @@ mod tests {
     fn hyst_damper(k1: f64, qy: f64, k2ratio: f64) -> HystereticDamperElement {
         HystereticDamperElement {
             nodes: [NodeId(0), NodeId(1)],
-            axis: LocalFrame::from_nodes([0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            axis: LocalFrame::from_nodes([0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+                .unwrap(),
             mat: sepika_material::Bilinear::new(k1, qy, k2ratio),
             committed_elong: 0.0,
             trial_elong: 0.0,

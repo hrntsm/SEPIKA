@@ -44,22 +44,22 @@ impl BeamDeflection {
         d_i: [f64; 6],
         d_j: [f64; 6],
         ref_vector: [f64; 3],
-    ) -> Self {
+    ) -> Option<Self> {
         let l = member_len3(p_i, p_j);
-        let frame = sepika_element::transform::LocalFrame::from_nodes(p_i, p_j, ref_vector);
+        let frame = sepika_element::transform::LocalFrame::from_nodes(p_i, p_j, ref_vector).ok()?;
         let g = [
             d_i[0], d_i[1], d_i[2], d_i[3], d_i[4], d_i[5], d_j[0], d_j[1], d_j[2], d_j[3], d_j[4],
             d_j[5],
         ];
         let u = frame.rotate_to_local(&g);
-        Self {
+        Some(Self {
             frame,
             l,
             p_i,
             p_j,
             ui: [u[0], u[1], u[2], u[4], u[5]],
             uj: [u[6], u[7], u[8], u[10], u[11]],
-        }
+        })
     }
 
     /// 材軸パラメータ ξ での「未変形材軸上の点へ加えるグローバル並進変位」（無倍率）。
@@ -169,14 +169,16 @@ fn interpolate_unreferenced_disp(
             let s = &segments[si];
             let (da, db) = (disp[s.a], disp[s.b]);
             let interp: [f64; 6] = if s.beam && use_beam_hermite {
-                let hermite = BeamDeflection::new(
+                let Some(hermite) = BeamDeflection::new(
                     model.nodes[s.a].coord,
                     model.nodes[s.b].coord,
                     da,
                     db,
                     s.ref_vec,
-                )
-                .disp_at(t);
+                ) else {
+                    continue;
+                };
+                let hermite = hermite.disp_at(t);
                 std::array::from_fn(|k| match k {
                     0..=2 => hermite[k],
                     _ => da[k] * (1.0 - t) + db[k] * t,
@@ -471,7 +473,9 @@ fn beam_deflection_scale_limit(
             continue;
         }
         let (d_i, d_j) = (disp[a], disp[b]);
-        let bd = BeamDeflection::new(p_i, p_j, d_i, d_j, elem.local_axis.ref_vector);
+        let Some(bd) = BeamDeflection::new(p_i, p_j, d_i, d_j, elem.local_axis.ref_vector) else {
+            continue;
+        };
         let mut max_dev = 0.0_f64;
         for k in 1..SAMPLES {
             let xi = k as f64 / SAMPLES as f64;
@@ -696,6 +700,7 @@ mod tests {
             d_j,
             [0.0, 0.0, 1.0],
         )
+        .unwrap()
         .polyline(1.0, 12);
         let curve_disp = [poly[6][0] - 3000.0, poly[6][1] - 0.0, poly[6][2] - 0.0];
         for k in 0..3 {
@@ -776,7 +781,9 @@ mod tests {
         let d_i = [0.0, 1.0, 0.0, 0.0, 0.0, 0.001];
         let d_j = [2.0, 3.0, 0.0, 0.0, 0.0, -0.002];
         let scale = 2.0;
-        let poly = BeamDeflection::new(p_i, p_j, d_i, d_j, [0.0, 0.0, 1.0]).polyline(scale, 12);
+        let poly = BeamDeflection::new(p_i, p_j, d_i, d_j, [0.0, 0.0, 1.0])
+            .unwrap()
+            .polyline(scale, 12);
         assert_eq!(poly.len(), 13);
         // i 端 = p_i + scale·d_i(並進)
         for k in 0..3 {
@@ -794,6 +801,18 @@ mod tests {
     }
 
     #[test]
+    fn 不正な参照方向の梁曲線は生成しない() {
+        assert!(BeamDeflection::new(
+            [0.0, 0.0, 0.0],
+            [1000.0, 0.0, 0.0],
+            [0.0; 6],
+            [0.0; 6],
+            [f64::NAN, 0.0, 0.0],
+        )
+        .is_none());
+    }
+
+    #[test]
     fn 端部回転で中央がたわむ() {
         // 水平梁（i→j が +X）、ref=+Y とすると局所系は全体系と一致
         // （ex=+X, ey=+Y, ez=+Z）。両端の並進を 0、i 端に正・j 端に負の
@@ -803,7 +822,9 @@ mod tests {
         let p_j = [1000.0, 0.0, 0.0];
         let d_i = [0.0, 0.0, 0.0, 0.0, 0.0, 0.01];
         let d_j = [0.0, 0.0, 0.0, 0.0, 0.0, -0.01];
-        let poly = BeamDeflection::new(p_i, p_j, d_i, d_j, [0.0, 1.0, 0.0]).polyline(1.0, 12);
+        let poly = BeamDeflection::new(p_i, p_j, d_i, d_j, [0.0, 1.0, 0.0])
+            .unwrap()
+            .polyline(1.0, 12);
         let mid = poly[6];
         // 中央の材軸位置は x=500、たわみは局所 y=+Y 方向へ非ゼロ
         assert!((mid[0] - 500.0).abs() < 1e-6, "中央 x={}", mid[0]);
@@ -826,7 +847,7 @@ mod tests {
         let d_i = [0.0, 0.0, 0.0, 0.0, 0.0, 0.01];
         let d_j = [0.0, 0.0, 0.0, 0.0, 0.0, -0.01];
         let scale = 2.0;
-        let bd = BeamDeflection::new(p_i, p_j, d_i, d_j, [0.0, 0.0, 1.0]);
+        let bd = BeamDeflection::new(p_i, p_j, d_i, d_j, [0.0, 0.0, 1.0]).unwrap();
         let a = bd.point_at(0.0, scale);
         let b = bd.point_at(1.0, scale);
         for k in 0..3 {
