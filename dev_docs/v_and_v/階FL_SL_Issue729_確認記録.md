@@ -62,3 +62,22 @@ RC の固定柱 1 本＋片持ち梁 1 本の L 形架構で、自動剛床を�
 - 原階所属解除後に取込時 Node.story が明示所属として復活しないよう、原階参照を持つ階では原階一覧を正本とした。解除・SL 編集・再準備・正順 Undo/Redo と旧階重量消失を検証する。
 - 質点表示の構造座標は SL から取り、計算用 FL 間高さを積み上げない。平面位置整列の有無とも同じ SL を使う。
 - 階構造入力の前検査を共用し、不成立は停止する。階以外の既存重量生成エラーが独立重力解析まで一律停止する変更は取り消した。
+
+
+## CI 追加監査と App integration の統合確認
+
+CI が検出した `story_application_lifecycle` の上階削除後の再生成期待は、階が 1 個だけでも生成できる旧契約に依存していた。
+再生成と正順 Undo/Redo の完全復元は、明示 FL=0／1750／3500 mm・ΔSL=0 の 3 階から中間階を削除し、有効な 2 階を残す fixture で維持した。
+最上階の削除で上下階対を失う場合は、生成停止、FL／ΔSL と節点座標の保持、旧重量生成記録の失効、失効と階削除を正順に Undo して完全復元することを独立して確認した。
+
+同時に App integration 全 14 バイナリを検索・確認した。`wall_post_model` の既知 1 層（0／3000 mm）と手動 `perf_probe` の指定階数・3500 mm 階高も、fixture 側で FL 列と ΔSL=0 を明示した。製品本体の推測・補完は追加していない。
+
+- `cargo test -p sepika-app --features gui --test story_application_lifecycle --test source_story --test wall_post_model --test lip_channel --test full_model --test slab_physical_mass --test rc_section_purpose --test wall_model --locked --no-fail-fast`: 93 件成功。
+- `cargo test -p sepika-app --features gui --test attached_slab_import --test beam_contact_quantity --test circular_post_quantity --test load_state_report --test wall_check_status --test perf_probe --locked --no-fail-fast`: 10 件成功、手動性能診断 1 件 ignored（コンパイル確認のみ）。
+
+全体では 103 件成功・0 件失敗・1 件 ignored。ログは `sepika729-app-lifecycle-related.log` と `sepika729-app-other-integration.log`。
+共有 target に残っていた旧 main の型成果物によるローカル初回コンパイル失敗は、関連 package 成果物の clean と現ソースの再ビルド後に解消した。
+
+- `cargo test -p sepika-app --test story_application_lifecycle --locked`: default 構成でも 3 件成功（`sepika729-lifecycle-default.log`）。
+- `cargo clippy -p sepika-app --features gui --test story_application_lifecycle --test perf_probe --locked --message-format short -- -D warnings` と、同設定の `--test wall_post_model`: 成功。
+- `cargo fmt --all --check`、`git diff --check`: 成功。
