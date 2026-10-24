@@ -415,6 +415,8 @@ mod tests {
                                 section: Some(SectionId(0)),
                                 ..Default::default()
                             },
+                            reference_story: None,
+                            vertical_eccentricity_mm: None,
                             tip_loads: Vec::new(),
                         });
                     } else {
@@ -745,6 +747,8 @@ mod tests {
                 extent: [1000.0, -1000.0],
             },
             plate: SlabPlate::default(),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: vec![],
         });
         let expected = model.validate_attached_slabs().unwrap_err().to_string();
@@ -1483,6 +1487,8 @@ mod tests {
                 extent: [1000.0, 2000.0],
             },
             plate: SlabPlate::default(),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: vec![SlabTipLoad {
                 case: LoadCaseId(3),
                 intensity: 2.0,

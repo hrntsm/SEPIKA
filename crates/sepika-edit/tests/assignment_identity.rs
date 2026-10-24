@@ -255,9 +255,9 @@ fn frame_edit(wall: bool, operation: usize) -> Box<dyn EditCommand> {
 }
 
 #[test]
-fn 主架構追加削除と非平面節点移動は旧版荷重を診断し一undoとredoで全入力を復元する() {
+fn 支持関係を失う主架構編集は旧版荷重を診断し一undoとredoで全入力を復元する() {
     for wall in [false, true] {
-        for operation in 0..3 {
+        for operation in (0..3).filter(|operation| wall || *operation != 1) {
             let mut model = fixture::with_plate(wall);
             model.assign_stb_node_ids().unwrap();
             let before = model.clone();
@@ -308,7 +308,7 @@ fn 主架構節点の直接編集も既存境界衝突を原子的に拒否す�
 #[test]
 fn 確認できない入口は支持境界変更の版荷重消失を拒否しredo履歴も保持する() {
     for wall in [false, true] {
-        for operation in 0..3 {
+        for operation in (0..3).filter(|operation| wall || *operation != 1) {
             let mut model = fixture::with_plate(wall);
             model.assign_stb_node_ids().unwrap();
             let before = model.clone();
@@ -561,4 +561,27 @@ fn コマンド拒否redoはstb復元ラッパー越しに理由を伝え候補�
     assert_eq!(undo.redo_label(), Some("再実行"));
     assert!(undo.last_error().unwrap().contains("候補編集を拒否"));
     assert!(undo.id_changes().is_empty());
+}
+
+#[test]
+fn 床支持節点のz移動は確認なしに版入力支持id区間を保持しundo_redoできる() {
+    let mut model = fixture::with_plate(false);
+    let before = model.clone();
+    let mut undo = UndoStack::new();
+    assert!(
+        preview_plate_assignment_loss(&model, frame_edit(false, 1).as_ref())
+            .unwrap()
+            .is_empty()
+    );
+    assert!(undo.run_preserving_plate_assignments(&mut model, frame_edit(false, 1)));
+    assert_eq!(model.slabs, before.slabs);
+    assert_eq!(
+        model.floor_assignment_regions,
+        before.floor_assignment_regions
+    );
+    let after = model.clone();
+    undo.undo(&mut model);
+    fixture::assert_inputs_eq(&model, &before);
+    undo.redo(&mut model);
+    fixture::assert_inputs_eq(&model, &after);
 }

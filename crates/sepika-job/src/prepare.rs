@@ -132,6 +132,11 @@ fn prepare_work_model(
     model
         .validate_attached_slabs()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
+    sepika_load::floor::validate_one_way_directions(model)
+        .map_err(|e| JobError::InvalidInput(e.to_string()))?;
+    model
+        .validate_slab_placements()
+        .map_err(crate::error::JobError::InvalidInput)?;
     rebuild_floor_regions(model);
     rebuild_wall_regions(model);
     let mut panel_notices = Vec::new();
@@ -758,6 +763,22 @@ mod tests {
                 plate,
             )
             .expect("右半分");
+        model.stories.push(sepika_core::model::Story::new(
+            sepika_core::ids::StoryId(0),
+            "基準階".into(),
+            Some(0.),
+            Some(0.),
+        ));
+        model.stories.push(sepika_core::model::Story::new(
+            sepika_core::ids::StoryId(1),
+            "上階".into(),
+            Some(3000.),
+            Some(0.),
+        ));
+        for slab in &mut model.slabs {
+            slab.reference_story = Some(sepika_core::ids::StoryId(0));
+            slab.vertical_eccentricity_mm = Some(0.);
+        }
         assert_eq!(model.slabs.len(), 2);
         let _ = prepare_model_for_analysis(&mut model, &AnalysisSettings::default(), None);
         assert_eq!(model.slabs.len(), 2, "床板は畳まずそのまま残る");

@@ -706,6 +706,8 @@ fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
             section: Some(SectionId(1)),
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: vec![],
     });
     assert!(

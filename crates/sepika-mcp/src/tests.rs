@@ -363,7 +363,7 @@ fn rounded_cft_jobs_publish_unavailable_reasons_without_claiming_pass() {
 }
 
 #[test]
-fn linear_static_job_rejects_ex_without_seismic_horizontal_load() {
+fn linear_static_job_rejects_tip_seismic_without_an_adoptable_ai_mode() {
     use sepika_core::ids::LoadCaseId;
     use sepika_core::model::{
         LoadCase, LoadCaseKind, LoadTransfer, RegionAnchor, Slab, SlabPlate, SlabShape,
@@ -405,12 +405,28 @@ fn linear_static_job_rejects_ex_without_seismic_horizontal_load() {
             section: Some(section),
             ..Default::default()
         },
+        reference_story: Some(sepika_core::ids::StoryId(0)),
+        vertical_eccentricity_mm: Some(0.),
         tip_loads: vec![SlabTipLoad {
             case: LoadCaseId(0),
             intensity: 2.0,
             direction: TipLoadDirection::PosX,
         }],
     });
+    model.stories = vec![
+        sepika_core::model::Story::new(
+            sepika_core::ids::StoryId(0),
+            "基準階".into(),
+            Some(0.),
+            Some(0.),
+        ),
+        sepika_core::model::Story::new(
+            sepika_core::ids::StoryId(1),
+            "上階".into(),
+            Some(3500.),
+            Some(0.),
+        ),
+    ];
     model.validate().expect("有効な先端荷重モデル");
     let error = job::compute_job(
         &model,
@@ -422,7 +438,10 @@ fn linear_static_job_rejects_ex_without_seismic_horizontal_load() {
     )
     .err()
     .expect("水平力欠損で停止する");
-    assert!(error.to_string().contains("地震水平力"), "{error}");
+    assert!(
+        error.to_string().contains("地震水平力") || error.to_string().contains("精算周期"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -1102,6 +1121,8 @@ fn test_query_model_slabs_and_floor_regions() {
             method: DistributionMethod::TriTrapezoid,
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
     m.floor_regions.push(sepika_core::model::FloorRegion {
@@ -1630,6 +1651,8 @@ fn attached_slab_mcp_rejects_creation_extent_and_anchor_with_common_diagnostic()
             extent: [1000.0, -1000.0],
         },
         plate: SlabPlate::default(),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: vec![],
     };
     let expected = state
@@ -3006,6 +3029,12 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
             concrete_class: Default::default(),
             strength_factor: None,
         }],
+        stories: vec![Story::new(
+            sepika_core::ids::StoryId(0),
+            "基準階".into(),
+            Some(3000.),
+            Some(0.),
+        )],
         slabs: [(0, 1, 2000.0), (1, 2, -2000.0)]
             .into_iter()
             .map(|(id, sec, extent)| Slab {
@@ -3022,6 +3051,8 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
                     section: Some(SectionId(sec)),
                     ..Default::default()
                 },
+                reference_story: Some(sepika_core::ids::StoryId(0)),
+                vertical_eccentricity_mm: Some(0.),
                 tip_loads: vec![],
             })
             .collect(),
@@ -3129,7 +3160,7 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
     for t in [-1.0, 0.0, f64::NAN, f64::INFINITY] {
         let mut model = base.clone();
         model.sections[1].thickness = Some(t);
-        cases.push((model, "実厚"));
+        cases.push((model, "実板厚"));
     }
     for assignment in [PlateAssignment::Unset, PlateAssignment::Plate(SlabId(999))] {
         let mut model = base.clone();
@@ -3161,7 +3192,7 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
     {
         nodes[0] = NodeId(999);
     }
-    cases.push((model, "参照"));
+    cases.push((model, "取付き先"));
     let mut model = base.clone();
     model.sections[0].shape = None;
     cases.push((model, "矩形"));

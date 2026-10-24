@@ -409,6 +409,7 @@ fn test_girder_formwork_slab_deduction() {
                 one_way: None,
             },
         );
+        set_test_slab_placements(&mut model);
     }
 
     let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
@@ -538,6 +539,7 @@ fn test_slab_quantity() {
             one_way: None,
         },
     );
+    set_test_slab_placements(&mut model);
 
     let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
     let slab = q
@@ -853,8 +855,11 @@ fn test_formwork_plateless_no_deduction_attached_deducts() {
             section: Some(SectionId(2)),
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
+    set_test_slab_placements(&mut attached);
     let form_att = girder_formwork(&attached);
     assert!(
         form_att < form_empty - 1e-6,
@@ -1361,6 +1366,7 @@ fn contact_slab(model: &mut Model, span: [f64; 2], side: f64, t: f64, top: f64) 
             ..Default::default()
         },
     );
+    set_test_slab_placements(model);
 }
 
 fn contact_formwork(model: &Model) -> f64 {
@@ -1440,7 +1446,7 @@ fn beam_contact_rejects_unknown_invalid_and_unsupported_inputs() {
         let mut model = base.clone();
         model.sections[1].thickness = Some(t);
         let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
-        assert!(reason.contains("実厚"), "{reason}");
+        assert!(reason.contains("実板厚"), "{reason}");
     }
     for assignment in [PlateAssignment::Unset, PlateAssignment::Plate(SlabId(999))] {
         let mut model = base.clone();
@@ -1464,7 +1470,7 @@ fn beam_contact_rejects_unknown_invalid_and_unsupported_inputs() {
     assert!(
         try_compute_quantity_takeoff(&model, &QuantityCfg::default())
             .unwrap_err()
-            .contains("支持材")
+            .contains("支持")
     );
     let mut model = base.clone();
     model.nodes[1].coord[2] += 100.0;
@@ -1498,6 +1504,7 @@ fn beam_contact_rejects_unknown_invalid_and_unsupported_inputs() {
             ..Default::default()
         },
     );
+    set_test_slab_placements(&mut model);
     assert!(
         try_compute_quantity_takeoff(&model, &QuantityCfg::default())
             .unwrap_err()
@@ -1574,6 +1581,9 @@ fn beam_contact_nonconstant_height_within_tolerance_is_unavailable() {
         for node in &mut model.nodes[2..] {
             node.coord[2] = 4000.0;
         }
+        for slab in &mut model.slabs {
+            slab.vertical_eccentricity_mm = Some(4000.);
+        }
         let first = contact_formwork(&model);
         let expected = if difference == 0.5 {
             9.00000003125
@@ -1587,11 +1597,7 @@ fn beam_contact_nonconstant_height_within_tolerance_is_unavailable() {
     let mut model = contact_model();
     contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3000.0);
     model.nodes[4].coord[2] += 0.5;
-    assert!(
-        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
-            .unwrap_err()
-            .contains("傾斜床")
-    );
+    assert!((contact_formwork(&model) - 8.1).abs() < 1e-9);
 }
 
 #[test]
@@ -1674,6 +1680,7 @@ fn beam_contact_nonconvex_slab_side_occupancy_is_local_to_contact_interval() {
                 ..Default::default()
             },
         );
+        set_test_slab_placements(&mut model);
         for _ in 0..2 {
             assert!((contact_formwork(&model) - expected).abs() <= 1e-9);
             model.elements[0].nodes.reverse();
@@ -1708,9 +1715,12 @@ fn beam_contact_three_node_primary_is_unavailable_without_negative_quantity() {
                 section: Some(SectionId(1)),
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: vec![],
         });
     }
+    set_test_slab_placements(&mut model);
     assert!(model.validate().is_err());
     for _ in 0..2 {
         let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
@@ -1817,11 +1827,7 @@ fn beam_contact_uses_shared_mm_tolerance_and_ignores_unrelated_slope() {
     assert!((contact_formwork(&model) - 9.0).abs() <= 1e-9);
     model.nodes[2].coord[2] = 3000.0;
     model.nodes[3].coord[2] = 3000.0;
-    assert!(
-        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
-            .unwrap_err()
-            .contains("傾斜床")
-    );
+    assert!((contact_formwork(&model) - 9.).abs() < 1e-9);
 }
 
 #[test]
@@ -2767,4 +2773,69 @@ fn automatic_wall_quantity_requires_the_immediate_floor_input() {
         .unwrap();
     assert!((wall.concrete_m3 - 2.7).abs() < 1e-12);
     assert!((wall.formwork_m2 - 36.0).abs() < 1e-12);
+}
+
+fn set_test_slab_placements(model: &mut Model) {
+    use sepika_core::{ids::StoryId, model::Story};
+    if model.stories.is_empty() {
+        model
+            .stories
+            .push(Story::new(StoryId(0), "基準階".into(), Some(0.), Some(0.)));
+    }
+    let levels: Vec<_> = model
+        .slabs
+        .iter()
+        .map(|s| {
+            s.boundary_coords(model)
+                .and_then(|c| c.first().map(|p| p[2]))
+                .unwrap_or(0.)
+        })
+        .collect();
+    for (slab, z) in model.slabs.iter_mut().zip(levels) {
+        if slab.reference_story.is_none() {
+            slab.reference_story = Some(StoryId(0));
+            slab.vertical_eccentricity_mm = Some(z);
+        }
+    }
+}
+
+#[test]
+fn 床の実配置変更は型枠接触へ反映し支持z変更は床面積体積を変えない() {
+    let mut model = contact_model();
+    contact_slab(&mut model, [0., 6000.], 1., 150., 3000.);
+    assert!((contact_formwork(&model) - 8.1).abs() < 1e-9);
+    model.slabs[0].vertical_eccentricity_mm = Some(3100.);
+    assert!((contact_formwork(&model) - 8.7).abs() < 1e-9);
+    model.stories[0].elevation = Some(200.);
+    assert!((contact_formwork(&model) - 9.).abs() < 1e-9);
+    model.stories[0].elevation = Some(0.);
+    model.sections[1].thickness = Some(200.);
+    assert!((contact_formwork(&model) - 8.4).abs() < 1e-9);
+    let before = try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|i| i.slab == Some(SlabId(0)))
+        .unwrap();
+    assert!((before.formwork_m2 - 12.).abs() < 1e-9);
+    assert!((before.concrete_m3 - 2.4).abs() < 1e-9);
+    model.nodes[3].coord[2] = 6000.;
+    model.rebuild_assignment_regions().unwrap();
+    let after = try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|i| i.slab == Some(SlabId(0)))
+        .unwrap();
+    assert_eq!(
+        (after.formwork_m2, after.concrete_m3),
+        (before.formwork_m2, before.concrete_m3)
+    );
+    assert!((contact_formwork(&model) - 8.4).abs() < 1e-9);
+    model.slabs[0].vertical_eccentricity_mm = None;
+    let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+    assert!(
+        reason.contains("床板 0") && reason.contains("鉛直偏心"),
+        "{reason}"
+    );
 }

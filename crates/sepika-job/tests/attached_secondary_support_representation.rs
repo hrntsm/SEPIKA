@@ -112,6 +112,12 @@ fn parallel_beam_model(kind: ElementKind) -> Model {
         section: Some(SectionId(0)),
         ..Default::default()
     });
+    model
+        .stories
+        .push(Story::new(StoryId(0), "基準階".into(), Some(0.), Some(0.)));
+    model
+        .stories
+        .push(Story::new(StoryId(1), "上階".into(), Some(3000.), Some(0.)));
     model.rebuild_assignment_regions().unwrap();
     model.slabs.push(Slab {
         id: SlabId(0),
@@ -122,6 +128,8 @@ fn parallel_beam_model(kind: ElementKind) -> Model {
             one_way: Some(OneWayDir::Y),
             ..Default::default()
         },
+        reference_story: Some(StoryId(0)),
+        vertical_eccentricity_mm: Some(0.),
         tip_loads: vec![],
     });
     assert_eq!(model.floor_assignment_regions.regions.len(), 2);

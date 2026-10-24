@@ -108,6 +108,8 @@ fn test_beam_has_attached_slab_t_shape_and_plateless() {
             section: Some(SectionId(1)),
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     }]);
     assert!(
@@ -151,12 +153,16 @@ fn test_beam_has_attached_slab_survives_beam_subdivided_region() {
             id: SlabId(0),
             shape: SlabShape::Enclosed,
             plate: plate.clone(),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         },
         Slab {
             id: SlabId(1),
             shape: SlabShape::Enclosed,
             plate,
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         },
     ];

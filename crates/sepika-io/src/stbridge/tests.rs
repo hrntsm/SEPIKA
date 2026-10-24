@@ -4531,6 +4531,8 @@ fn test_export_skips_plateless_and_attached_orphan_sections() {
             section: Some(SectionId(0)),
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
     assign_roundtrip_boundary_sections(&mut m);

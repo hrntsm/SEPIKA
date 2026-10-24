@@ -307,7 +307,7 @@ fn validate_enclosed_supports(model: &Model, slab: &Slab) -> Result<(), FloorDis
     for i in 0..intervals.len() {
         let end = intervals[i].1;
         let start = intervals[(i + 1) % intervals.len()].0;
-        if (0..3).any(|k| (end[k] - start[k]).abs() > tolerance) {
+        if (0..2).any(|k| (end[k] - start[k]).abs() > tolerance) {
             return Err(invalid(
                 "支持辺が閉じていない（開口・自由辺・支持欠落は未対応）".into(),
             ));
@@ -384,7 +384,7 @@ fn resolve_edges_to_span(
         let supports = model
             .attached_slab_supports(slab)
             .map_err(|e| FloorDistributionError::InvalidAttachedSlab(e.to_string()))?;
-        let boundary = slab.boundary_coords(model).expect("検証済み取付き線");
+        let boundary = boundary_coords(model, slab).expect("検証済み取付き線");
         let attach_length = sepika_core::geom::vec3::dist(boundary[0], boundary[1]);
         return Ok(loads
             .into_iter()
@@ -402,6 +402,10 @@ fn resolve_edges_to_span(
                         let length =
                             model.member_length(elem) * (support.span[1] - support.span[0]).abs();
                         let intensity = w * attach_length * support.fraction / length;
+                        let (a, b) =
+                            model.support_member_axis(SupportMemberId::Primary(support.elem))?;
+                        let projection =
+                            (b[0] - a[0]).hypot(b[1] - a[1]) / sepika_core::geom::vec3::dist(a, b);
                         Some(BeamLoad {
                             elem: support.elem,
                             target: LoadTarget::Span {
@@ -409,7 +413,7 @@ fn resolve_edges_to_span(
                                 t: support.span,
                             },
                             shape: LoadShape::Uniform { w: intensity },
-                            cmq: fem::fem_uniform(intensity, length),
+                            cmq: fem::fem_uniform(intensity * projection, length),
                         })
                     })
                     .collect::<Vec<_>>()
@@ -436,6 +440,31 @@ fn resolve_edges_to_span(
                 bl.elem = sepika_core::ids::ElemId(u32::MAX);
                 return bl;
             };
+            if let Some((a, b)) = model.support_member_axis(boundary.support) {
+                let actual_length = sepika_core::geom::vec3::dist(a, b)
+                    * (boundary.span[1] - boundary.span[0]).abs();
+                let plan_length =
+                    (b[0] - a[0]).hypot(b[1] - a[1]) * (boundary.span[1] - boundary.span[0]).abs();
+                if actual_length > 0.0 && plan_length > 0.0 {
+                    let stretch = actual_length / plan_length;
+                    bl.shape = match bl.shape {
+                        LoadShape::Uniform { w } => LoadShape::Uniform { w: w / stretch },
+                        LoadShape::Linear { w_i, w_j } => LoadShape::Linear {
+                            w_i: w_i / stretch,
+                            w_j: w_j / stretch,
+                        },
+                        LoadShape::Triangle { w0 } => LoadShape::Triangle { w0: w0 / stretch },
+                        LoadShape::Trapezoid { w0, a, b } => LoadShape::Trapezoid {
+                            w0: w0 / stretch,
+                            a: a * stretch,
+                            b: b * stretch,
+                        },
+                        LoadShape::Point { p, x } => LoadShape::Point { p, x: x * stretch },
+                    };
+                    bl.cmq.q_i /= stretch;
+                    bl.cmq.q_j /= stretch;
+                }
+            }
             match boundary.support {
                 SupportMemberId::Secondary(member) => {
                     bl.target = LoadTarget::Secondary {

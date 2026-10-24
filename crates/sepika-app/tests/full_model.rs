@@ -168,13 +168,20 @@ fn rounded_fixture_properties_and_weight_are_independently_integrated() {
     }
     assert!(!references.is_empty());
     let mut model = app.core.model.clone();
+    model.retain_slabs(|_| false);
+    model.retain_wall_plates(|_| false);
     let secondaries: Vec<_> = model
         .beams()
         .chain(model.posts())
         .map(|member| member.id)
         .collect();
     for member in secondaries.into_iter().rev() {
-        sepika_edit::DeleteSecondaryMember { member }.apply(&mut model);
+        let inverse = sepika_edit::DeleteSecondaryMember { member }.apply(&mut model);
+        assert!(
+            inverse.rejection().is_none(),
+            "delete secondary {member:?}: {:?}",
+            inverse.rejection()
+        );
     }
     let removed: Vec<_> = model
         .elements
@@ -182,9 +189,17 @@ fn rounded_fixture_properties_and_weight_are_independently_integrated() {
         .filter(|e| !e.section.is_some_and(|id| references.contains_key(&id)))
         .map(|e| e.id)
         .collect();
+    model.floor_assignment_regions = Default::default();
+    model.wall_assignment_regions = Default::default();
     for id in removed.into_iter().rev() {
-        sepika_edit::DeleteMember { id }.apply(&mut model);
+        let inverse = sepika_edit::DeleteMember { id }.apply_candidate(&mut model);
+        assert!(
+            inverse.rejection().is_none(),
+            "delete member {id:?}: {:?}",
+            inverse.rejection()
+        );
     }
+    model.rebuild_assignment_regions().unwrap();
     assert!(model.wall_plates.is_empty());
     assert!(model.generated_wall_origins.is_empty());
     assert!(model.stb_strengths.members.iter().all(|input| !matches!(
@@ -412,6 +427,7 @@ fn imported() -> App {
     }
     clear_error(&mut app);
     declare_analysis_story_levels(&mut app.core.model);
+    declare_analysis_slab_placements(&mut app.core.model);
     app
 }
 
@@ -2217,6 +2233,7 @@ fn stbridge_roundtrip_is_reanalyzable() {
     );
 
     declare_analysis_story_levels(&mut reimported.core.model);
+    declare_analysis_slab_placements(&mut reimported.core.model);
     reimported.run_preparation();
     assert_eq!(
         reimported.core.model.floor_regions.len(),
@@ -3219,4 +3236,28 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     assert!(app.core.scoped.last_error.as_ref().unwrap().contains("GL"));
     app.run_pushover();
     assert!(app.core.scoped.last_error.as_ref().unwrap().contains("GL"));
+}
+
+fn declare_analysis_slab_placements(model: &mut sepika_core::model::Model) {
+    let inputs: Vec<_> = model
+        .slabs
+        .iter()
+        .map(|slab| {
+            let z = slab.boundary_coords(model).unwrap()[0][2];
+            let story = model
+                .stories
+                .iter()
+                .min_by(|a, b| {
+                    (a.fl_mm().unwrap() - z)
+                        .abs()
+                        .total_cmp(&(b.fl_mm().unwrap() - z).abs())
+                })
+                .unwrap();
+            (story.id, z - story.fl_mm().unwrap())
+        })
+        .collect();
+    for (slab, (story, eccentricity)) in model.slabs.iter_mut().zip(inputs) {
+        slab.reference_story = Some(story);
+        slab.vertical_eccentricity_mm = Some(eccentricity);
+    }
 }

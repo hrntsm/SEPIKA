@@ -2590,3 +2590,6 @@ mod src_ql_acceptance_tests;
 
 #[cfg(all(test, feature = "gui"))]
 mod beam_placement_tests;
+
+#[cfg(all(test, feature = "gui"))]
+mod slab_placement_tests;

@@ -1329,6 +1329,8 @@ fn test_validate_duplicate_floor_assignment_region_boundary() {
         id: SlabId(1),
         shape: SlabShape::Enclosed,
         plate: SlabPlate::default(),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
     assert!(
@@ -1428,6 +1430,8 @@ fn test_validate_checks_anchor_span_bounds() {
             extent: [1000.0, 1000.0],
         },
         plate: SlabPlate::default(),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     };
     model.slabs = vec![mk([0.0, 1.0])];

@@ -164,6 +164,10 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         )));
         return issues;
     }
+    if let Err(error) = model.validate_slab_placements() {
+        issues.push(ModelIssue::model(error));
+    }
+
     if let Err(error) = model.validate_local_frames() {
         issues.push(ModelIssue::model(error));
     }
@@ -1526,6 +1530,8 @@ mod attached_slab_diagnostic_tests {
                     extent: [1000.0; 2],
                 },
                 plate: SlabPlate::default(),
+                reference_story: None,
+                vertical_eccentricity_mm: None,
                 tip_loads: vec![],
             }],
             ..Default::default()

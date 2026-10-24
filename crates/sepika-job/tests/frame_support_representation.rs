@@ -60,7 +60,21 @@ fn set_plate_section(model: &mut Model, wall: bool) {
             plate.section = Some(plate_id);
         }
     } else {
+        model.stories.push(Story::new(
+            sepika_core::ids::StoryId(0),
+            "基準階".into(),
+            Some(0.),
+            Some(0.),
+        ));
+        model.stories.push(sepika_core::model::Story::new(
+            sepika_core::ids::StoryId(1),
+            "上階".into(),
+            Some(3000.),
+            Some(0.),
+        ));
         for slab in &mut model.slabs {
+            slab.reference_story = Some(sepika_core::ids::StoryId(0));
+            slab.vertical_eccentricity_mm = Some(0.);
             slab.plate.section = Some(plate_id);
         }
     }
@@ -318,6 +332,8 @@ fn attached_floor(split: bool, presplit: bool) -> Model {
                 }],
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: vec![SlabTipLoad {
                 case: LoadCaseId(0),
                 intensity: 2.,

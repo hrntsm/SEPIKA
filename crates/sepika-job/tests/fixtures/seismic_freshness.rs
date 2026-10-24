@@ -191,6 +191,8 @@ pub fn two_storeys() -> Model {
                 method: DistributionMethod::TriTrapezoid,
                 one_way: None,
             },
+            reference_story: Some(sepika_core::ids::StoryId(id as u32 + 1)),
+            vertical_eccentricity_mm: Some(0.0),
             tip_loads: Vec::new(),
         });
     }

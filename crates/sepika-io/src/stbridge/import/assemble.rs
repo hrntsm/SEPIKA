@@ -799,6 +799,8 @@ fn assign_imported_slabs(
             id: slab_id,
             shape,
             plate,
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
     }
@@ -835,6 +837,8 @@ fn assign_imported_slabs(
             id: slab_id,
             shape: SlabShape::Enclosed,
             plate,
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
         model

@@ -9,7 +9,24 @@
 use sepika_core::model::{Model, Slab};
 
 pub(crate) fn boundary_coords(model: &Model, slab: &Slab) -> Option<Vec<[f64; 3]>> {
-    slab.boundary_coords(model)
+    let mut coords = match slab.shape {
+        sepika_core::model::SlabShape::Enclosed => {
+            let region = model.slab_assignment_region(slab.id)?;
+            model
+                .support_boundary_segments(&region.boundary)?
+                .into_iter()
+                .map(|(a, _)| a)
+                .collect()
+        }
+        _ => slab.boundary_coords(model)?,
+    };
+    if !coords.iter().flatten().all(|v| v.is_finite()) {
+        return None;
+    }
+    for coord in &mut coords {
+        coord[2] = 0.0;
+    }
+    Some(coords)
 }
 
 /// 2 点間の距離 [mm]。算定の情報源は `sepika-core` に置く。
@@ -18,7 +35,7 @@ pub(crate) use sepika_core::geom::vec3::dist as dist3;
 /// 矩形の寸法 `[mm]` を辺 0→1、0→3 の順で返す。閉合・直交・面積の相対許容は 1e-6。
 /// 寸法を採用できない境界は `None`。水平性・単純性・支持参照の検査は呼出し側が行う。
 pub fn slab_dimensions(model: &Model, slab: &Slab) -> Option<(f64, f64)> {
-    slab_dimensions_of(&slab.boundary_coords(model)?)
+    slab_dimensions_of(&boundary_coords(model, slab)?)
 }
 
 /// [`slab_dimensions`] の座標列版（境界座標が手元にある場合はこちらを使う）。

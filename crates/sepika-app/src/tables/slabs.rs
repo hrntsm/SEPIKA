@@ -186,6 +186,7 @@ fn one_way_label(o: Option<OneWayDir>) -> &'static str {
 }
 
 pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
+    slab_placements(ui, app);
     if let Some(reason) = app.core.scoped.undo.last_error() {
         ui.colored_label(crate::theme::ERROR_RED, reason);
     }
@@ -814,6 +815,98 @@ pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
     attached_section(ui, app);
 }
 
+fn slab_placements(ui: &mut egui::Ui, app: &mut App) {
+    let mut pending = Vec::new();
+    egui::CollapsingHeader::new("床板の鉛直配置（FL基準・上面）").show(ui, |ui| {
+        ui.label(
+            "基準階のFLから床上面までをmmで入力します。上向き＋、0はFL一致です。空欄は未入力です。",
+        );
+        for slab in &app.core.model.slabs {
+            ui.push_id(("slab_placement", slab.id), |ui| {
+                let mut reference_story = slab.reference_story;
+                let mut eccentricity = slab.vertical_eccentricity_mm;
+                ui.horizontal(|ui| {
+                    ui.label(format!("床板 ID {}", slab.id.0));
+                    let label = reference_story
+                        .and_then(|id| app.core.model.stories.iter().find(|s| s.id == id))
+                        .map(|s| s.name.as_str())
+                        .unwrap_or("未設定・参照切れ");
+                    egui::ComboBox::from_id_salt("story")
+                        .selected_text(label)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut reference_story, None, "未設定");
+                            for story in &app.core.model.stories {
+                                ui.selectable_value(
+                                    &mut reference_story,
+                                    Some(story.id),
+                                    &story.name,
+                                );
+                            }
+                        });
+                    let id = ui.id().with("eccentricity_text");
+                    let stored = ui.data(|d| d.get_temp::<(Option<f64>, String)>(id));
+                    let mut text = stored
+                        .filter(|(value, _)| *value == eccentricity)
+                        .map(|(_, text)| text)
+                        .unwrap_or_else(|| eccentricity.map(|v| v.to_string()).unwrap_or_default());
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut text)
+                            .desired_width(100.0)
+                            .hint_text("未入力"),
+                    );
+                    let parsed = if text.trim().is_empty() {
+                        Some(None)
+                    } else {
+                        text.trim()
+                            .parse::<f64>()
+                            .ok()
+                            .filter(|v| v.is_finite())
+                            .map(Some)
+                    };
+                    if parsed.is_none() {
+                        ui.colored_label(crate::theme::ERROR_RED, "有限な数値を入力してください");
+                    }
+                    if response.lost_focus() {
+                        if let Some(value) = parsed {
+                            eccentricity = value;
+                        }
+                    }
+                    if ui.button("0を指定").clicked() {
+                        eccentricity = Some(0.0);
+                    }
+                    if ui.button("未入力").clicked() {
+                        eccentricity = None;
+                    }
+                    ui.data_mut(|d| d.insert_temp(id, (slab.vertical_eccentricity_mm, text)));
+                });
+                if reference_story != slab.reference_story
+                    || eccentricity != slab.vertical_eccentricity_mm
+                {
+                    pending.push(sepika_edit::SetSlabPlacement {
+                        id: slab.id,
+                        reference_story,
+                        vertical_eccentricity_mm: eccentricity,
+                    });
+                }
+                match app.core.model.resolved_slab_placement(slab.id) {
+                    Ok(p) => {
+                        ui.label(format!(
+                            "上面Z {:.1} / 下面Z {:.1} / 実厚 {:.1} mm",
+                            p.top_z_mm, p.bottom_z_mm, p.thickness_mm
+                        ));
+                    }
+                    Err(reason) => {
+                        ui.colored_label(crate::theme::ERROR_RED, reason);
+                    }
+                }
+            });
+        }
+    });
+    for command in pending {
+        app.apply_model_edit(Box::new(command));
+    }
+}
+
 fn tip_direction_label(direction: sepika_core::model::TipLoadDirection) -> &'static str {
     use sepika_core::model::TipLoadDirection::*;
     match direction {
@@ -1091,6 +1184,8 @@ fn attached_creation_candidate(
             extent: extent?,
         },
         plate: sepika_core::model::SlabPlate::default(),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: vec![],
     })
 }
@@ -1535,6 +1630,8 @@ mod tip_load_tests {
             id: SlabId(0),
             shape: shape.clone(),
             plate: SlabPlate::default(),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         };
         let visible = |app: &App| {

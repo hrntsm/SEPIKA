@@ -691,6 +691,8 @@ fn test_cantilever_conservation() {
             }],
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     };
     let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
@@ -756,6 +758,8 @@ fn test_cantilever_with_side_beam_loads_attachment_only() {
             }],
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     };
     let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
@@ -816,6 +820,8 @@ fn test_cantilever_ignores_load_transfer_direction() {
                 }],
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         };
         let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
@@ -878,6 +884,8 @@ fn test_cantilever_with_real_beam_edge_loads_attachment_only() {
             }],
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     };
     let loads = distribute_slab_w(&model, &slab, slab.plate.finish_intensity()).unwrap();
@@ -959,6 +967,8 @@ fn test_cantilever_real_beam_inside_slab_after_rebuild() {
                 }],
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
 
@@ -1034,6 +1044,8 @@ fn test_cantilever_support_edges_do_not_receive_load() {
             }],
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     };
     let mk_secondary_beam = || SecondaryMember {
@@ -1229,6 +1241,8 @@ fn test_midspan_beam_edge_loads_resolve_from_support_boundary() {
                 method: DistributionMethod::TriTrapezoid,
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
         model
@@ -1388,6 +1402,8 @@ fn issue645_boundary_fixture_preserves_load_resultant_and_xy_first_moments() {
                 one_way: direction,
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         };
         let coords = pts.map(|(x, y)| [x, y, 0.]);

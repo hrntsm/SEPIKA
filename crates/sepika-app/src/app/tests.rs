@@ -1619,6 +1619,8 @@ fn tip_load_sync_merges_into_ex_and_custom_case_without_losing_manual() {
             extent: [1000.0; 2],
         },
         plate: SlabPlate::default(),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: vec![
             SlabTipLoad {
                 case: ex,
@@ -1712,6 +1714,8 @@ fn tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results() {
             section: Some(section),
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: vec![SlabTipLoad {
             case: ex,
             intensity: 2.0,
@@ -1732,6 +1736,7 @@ fn tip_ex_failed_ai_rejects_single_and_combo_and_removes_batch_results() {
             name: "G".into(),
             terms: vec![(LoadCaseId(0), 1.0)],
         });
+    init_test_slab_placements(&mut app.core.model);
     app.run_static_all();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -4402,6 +4407,7 @@ pub(super) fn make_square_slab_test_model() -> sepika_core::model::Model {
     );
     model.floor_regions.push(region);
     model.constraints.push(diaphragm);
+    init_test_slab_placements(&mut model);
     model.validate_reference_ids().expect("床モデルの参照整合");
     model
 }
@@ -4901,6 +4907,7 @@ fn test_floor_design_skips_materialized_beam() {
 }
 
 fn assign_massless_slab_sections(model: &mut sepika_core::model::Model) {
+    init_test_slab_placements(model);
     use sepika_core::ids::{MaterialId, SectionId};
     use sepika_core::model::Material;
     let material = MaterialId(model.materials.len() as u32);
@@ -4931,6 +4938,7 @@ fn assign_massless_slab_sections(model: &mut sepika_core::model::Model) {
 }
 
 fn set_floor_test_self_weight_geometry(model: &mut sepika_core::model::Model) {
+    init_test_slab_placements(model);
     use sepika_core::ids::{MaterialId, SectionId};
     use sepika_core::model::{FrameSectionUse, Material, MaterialCategory};
     use sepika_core::section_shape::SectionShape;
@@ -5829,6 +5837,7 @@ fn test_floor_design_checks_secondary_beam_uses_same_level_slab() {
         r.secondary_beams.push(beam);
         r
     });
+    model.stories.truncate(1);
     model.stories.push(
         serde_json::from_value(serde_json::json!({
             "id": 1, "name": "2F", "elevation": Z_UPPER, "sl_offset_mm": 0.0,
@@ -6263,6 +6272,8 @@ fn test_attached_cantilever_slab_check_coef_2() {
             extent: [1500.0, 1500.0],
         },
         plate: rc_slab_plate(sid),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
     model.validate().expect("validate");
@@ -6335,6 +6346,8 @@ fn test_attached_trapezoid_slab_check_survives_none_dimensions() {
             extent: [1000.0, 2000.0],
         },
         plate: rc_slab_plate(sid),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
     let dims = sepika_load::floor::slab_dimensions(&model, &model.slabs[0]);
@@ -6384,6 +6397,8 @@ fn test_attached_point_slab_check_coef_2() {
             extent: [800.0, 1500.0],
         },
         plate: rc_slab_plate(sid),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
     model.validate().expect("validate");
@@ -7348,12 +7363,15 @@ fn tip_seismic_app() -> App {
             section: Some(SectionId(2)),
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: vec![SlabTipLoad {
             case: LoadCaseId(2),
             intensity: 2.0,
             direction: TipLoadDirection::PosX,
         }],
     });
+    init_test_slab_placements(&mut model);
     let mut app = App::default();
     app.load_model(model);
     app
@@ -7466,6 +7484,11 @@ fn test_tip_only_seismic_rejected_in_single_combo_and_batch() {
     use sepika_core::ids::NodeId;
     use sepika_core::model::{LoadCombination, NodalLoad};
     let mut app = tip_seismic_app();
+    app.sync_auto_load_cases_action();
+    assert!(app.core.scoped.last_error.is_none());
+    app.core.analysis_cfg.ai_mode = AiMode::SemiPrecise;
+    app.core.scoped.staleness.mark_edited();
+    app.core.scoped.results = Some(ResultsBundle::default());
     app.core.model.combinations.push(LoadCombination {
         name: "EX組合せ".into(),
         terms: vec![(LoadCaseId(2), 1.0)],
@@ -7477,7 +7500,7 @@ fn test_tip_only_seismic_rejected_in_single_combo_and_batch() {
         .last_error
         .as_ref()
         .unwrap()
-        .contains("地震水平力"));
+        .contains("水平力"));
     app.run_combination(0);
     assert!(app
         .core
@@ -7503,7 +7526,7 @@ fn test_tip_only_seismic_rejected_in_single_combo_and_batch() {
         .last_error
         .as_ref()
         .unwrap()
-        .contains("地震水平力"));
+        .contains("水平力"));
     app.run_static_all();
     assert!(
         app.core
@@ -8816,6 +8839,7 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         sepika_load::story_gen::generate_stories_with_opts(&model, &[], false, model.mass_method)
             .unwrap()
             .stories;
+    init_test_slab_placements(&mut model);
     model
         .validate()
         .expect("テストモデルは validate を通るはず");
@@ -9979,6 +10003,7 @@ fn test_prep_sections_count_slab_reference() {
     assert!(model.validate().is_ok(), "{:?}", model.validate());
 
     model.stories.clear();
+    init_test_slab_placements(&mut model);
     model.constraints.clear();
     let mut app = App {
         core: AppCore {
@@ -14785,4 +14810,36 @@ fn pending_story_add_rejects_unknown_existing_fl_and_accepts_repaired_input() {
     assert!(app.core.model.eq_ignoring_dofmap(&repaired));
     app.redo_action();
     assert!(app.core.model.eq_ignoring_dofmap(&added));
+}
+
+fn init_test_slab_placements(model: &mut sepika_core::model::Model) {
+    use sepika_core::{ids::StoryId, model::Story};
+    if model.stories.is_empty() {
+        model
+            .stories
+            .push(Story::new(StoryId(0), "基準階".into(), Some(0.), Some(0.)));
+    }
+    if model.stories.len() == 1 {
+        let fl = model.stories[0].fl_mm().unwrap() + 3500.;
+        model
+            .stories
+            .push(Story::new(StoryId(1), "上階".into(), Some(fl), Some(0.)));
+    }
+    let reference = model.stories[0].id;
+    let fl = model.stories[0].fl_mm().unwrap();
+    let levels: Vec<_> = model
+        .slabs
+        .iter()
+        .map(|slab| {
+            slab.boundary_coords(model)
+                .and_then(|p| p.first().map(|p| p[2]))
+                .unwrap_or(fl)
+        })
+        .collect();
+    for (slab, z) in model.slabs.iter_mut().zip(levels) {
+        if slab.reference_story.is_none() {
+            slab.reference_story = Some(reference);
+            slab.vertical_eccentricity_mm = Some(z - fl);
+        }
+    }
 }

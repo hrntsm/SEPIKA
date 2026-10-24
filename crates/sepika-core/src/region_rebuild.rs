@@ -98,6 +98,15 @@ pub fn rebuild_floor_regions(model: &mut Model) -> FloorRegionRebuildReport {
         let Some((cxy, z, _)) = coords_centroid_area(&coords) else {
             continue;
         };
+        let previous_owner = old_regions.iter().find(|r| r.slab_ids.contains(&slab.id));
+        if let Some(ri) = new_regions.iter().position(|r| {
+            previous_owner.is_some_and(|old| old.boundary == r.boundary)
+                && region_contains(model, r, cxy)
+        }) {
+            owner[si] = Some(ri);
+            report.slabs_assigned += 1;
+            continue;
+        }
         if let Some((ri, _)) = new_regions
             .iter()
             .enumerate()
@@ -138,6 +147,8 @@ pub fn rebuild_floor_regions(model: &mut Model) -> FloorRegionRebuildReport {
 fn merge_attached_slabs(model: &mut Model) {
     struct Group {
         nodes: [NodeId; 2],
+        reference_story: Option<crate::ids::StoryId>,
+        vertical_eccentricity_mm: Option<f64>,
         plate: crate::model::SlabPlate,
         tip_loads: Vec<crate::model::SlabTipLoad>,
         members: Vec<(usize, [f64; 2], [f64; 2])>,
@@ -156,13 +167,18 @@ fn merge_attached_slabs(model: &mut Model) {
         else {
             continue;
         };
-        match groups
-            .iter_mut()
-            .find(|g| g.nodes == *nodes && g.plate == slab.plate && g.tip_loads == slab.tip_loads)
-        {
+        match groups.iter_mut().find(|g| {
+            g.nodes == *nodes
+                && g.plate == slab.plate
+                && g.tip_loads == slab.tip_loads
+                && g.reference_story == slab.reference_story
+                && g.vertical_eccentricity_mm == slab.vertical_eccentricity_mm
+        }) {
             Some(g) => g.members.push((i, *span, *extent)),
             None => groups.push(Group {
                 nodes: *nodes,
+                reference_story: slab.reference_story,
+                vertical_eccentricity_mm: slab.vertical_eccentricity_mm,
                 plate: slab.plate.clone(),
                 tip_loads: slab.tip_loads.clone(),
                 members: vec![(i, *span, *extent)],
@@ -307,6 +323,8 @@ fn split_attached_slabs_between_members(model: &mut Model) {
             si += 1;
             continue;
         };
+        let reference_story = model.slabs[si].reference_story;
+        let vertical_eccentricity_mm = model.slabs[si].vertical_eccentricity_mm;
         let plate = model.slabs[si].plate.clone();
         let tip_loads = model.slabs[si].tip_loads.clone();
         let (first, rest) = split.split_first().expect("2 枚以上");
@@ -317,6 +335,8 @@ fn split_attached_slabs_between_members(model: &mut Model) {
                 id,
                 shape: shape.clone(),
                 plate: plate.clone(),
+                reference_story,
+                vertical_eccentricity_mm,
                 tip_loads: tip_loads.clone(),
             });
         }
@@ -882,6 +902,8 @@ mod tests {
                 extent: [1500.0, 1500.0],
             },
             plate: plate(Some(sid), Vec::new()),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
         model
@@ -1178,6 +1200,8 @@ mod tests {
                 extent: [1500.0, 1500.0],
             },
             plate: plate(Some(sid), Vec::new()),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
         rebuild_floor_regions(&mut model);
@@ -1204,6 +1228,8 @@ mod tests {
                         extent,
                     },
                     plate: plate(Some(sid), Vec::new()),
+                    reference_story: None,
+                    vertical_eccentricity_mm: None,
                     tip_loads: Vec::new(),
                 });
             }
@@ -1357,6 +1383,8 @@ mod tests {
             id: SlabId(0),
             shape: SlabShape::Enclosed,
             plate: plate(Some(sid), Vec::new()),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
         let report = rebuild_floor_regions(&mut model);
@@ -1380,6 +1408,8 @@ mod tests {
             id: SlabId(0),
             shape: SlabShape::Enclosed,
             plate: plate(Some(sid), Vec::new()),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
         let report = rebuild_floor_regions(&mut model);

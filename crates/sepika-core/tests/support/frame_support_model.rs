@@ -115,6 +115,8 @@ pub fn with_plate(wall: bool, kinds: [ElementKind; 4]) -> Model {
                 loads,
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: vec![],
         });
         model.floor_assignment_regions.regions[0].assignment = PlateAssignment::Plate(SlabId(0));

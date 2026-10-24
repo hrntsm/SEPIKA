@@ -18,6 +18,8 @@ async fn actual_model_edit_body_rejects_overflow_without_mutation_and_normal_edi
                 id: SlabId(0),
                 shape: SlabShape::Enclosed,
                 plate: Default::default(),
+                reference_story: None,
+                vertical_eccentricity_mm: None,
                 tip_loads: vec![],
             });
             model

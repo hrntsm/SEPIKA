@@ -161,6 +161,8 @@ fn slab_model(assigned: bool) -> Model {
             id: SlabId(0),
             shape: SlabShape::Enclosed,
             plate: Default::default(),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: vec![],
         });
         model

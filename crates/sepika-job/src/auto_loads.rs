@@ -52,7 +52,7 @@ pub fn compute_tip_loads(
                 slab.id.0
             )));
         };
-        let length = sepika_core::geom::vec3::dist(coords[0], coords[1]);
+        let length = (coords[1][0] - coords[0][0]).hypot(coords[1][1] - coords[0][1]);
         let tip_length = length.hypot(extent[1] - extent[0]);
         if length <= 0.0 || !length.is_finite() || !tip_length.is_finite() {
             return Err(crate::error::JobError::InvalidInput(format!(
@@ -360,10 +360,13 @@ fn compute_gravity_auto_load_cases_impl(
     model
         .validate_attached_slabs()
         .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
-    sepika_load::story_gen::validate_cft_steel_materials(model)
-        .map_err(crate::error::JobError::InvalidInput)?;
     sepika_load::floor::validate_one_way_directions(model)
         .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
+    model
+        .validate_slab_placements()
+        .map_err(crate::error::JobError::InvalidInput)?;
+    sepika_load::story_gen::validate_cft_steel_materials(model)
+        .map_err(crate::error::JobError::InvalidInput)?;
     let beam_map = beam_elem_map(model);
     let mut dl_beam_loads = compute_dl_beam_loads_checked(model)
         .map_err(|e| crate::error::JobError::InvalidInput(e.to_string()))?;
@@ -719,7 +722,23 @@ mod tests {
             .to_section(section_id, "自重除外床板".into());
         section.material = Some(material_id);
         model.sections.push(section);
+        if model.stories.is_empty() {
+            model.stories.push(sepika_core::model::Story::new(
+                sepika_core::ids::StoryId(0),
+                "基準階".into(),
+                Some(0.),
+                Some(0.),
+            ));
+            model.stories.push(sepika_core::model::Story::new(
+                sepika_core::ids::StoryId(1),
+                "上階".into(),
+                Some(3000.),
+                Some(0.),
+            ));
+        }
         for slab in &mut model.slabs {
+            slab.reference_story = Some(sepika_core::ids::StoryId(0));
+            slab.vertical_eccentricity_mm = Some(0.);
             slab.plate.section = Some(section_id);
         }
     }
@@ -924,6 +943,8 @@ mod tests {
                 }],
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: vec![SlabTipLoad {
                 case: LoadCaseId(0),
                 intensity: 2.0,
@@ -2203,6 +2224,8 @@ mod attached_anchor_tests {
                     extent: [1000.0, 2000.0],
                 },
                 plate: SlabPlate::default(),
+                reference_story: None,
+                vertical_eccentricity_mm: None,
                 tip_loads: vec![],
             };
             let loads = sepika_load::floor::distribute_slab_resolved(&model, &slab, 0.003).unwrap();
@@ -2255,6 +2278,8 @@ mod attached_anchor_tests {
                             extent,
                         },
                         plate: SlabPlate::default(),
+                        reference_story: None,
+                        vertical_eccentricity_mm: None,
                         tip_loads: vec![],
                     };
                     let loads =
@@ -2335,6 +2360,8 @@ mod attached_anchor_tests {
                             extent: [1000.0, 2000.0],
                         },
                         plate: SlabPlate::default(),
+                        reference_story: None,
+                        vertical_eccentricity_mm: None,
                         tip_loads: vec![],
                     };
                     let loads =
@@ -2384,6 +2411,8 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         }];
 
@@ -2442,6 +2471,8 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         }];
 
@@ -2504,6 +2535,8 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         }];
 
@@ -2564,6 +2597,8 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         }];
 
@@ -2625,6 +2660,8 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         }];
 
@@ -2696,6 +2733,8 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         }];
 
@@ -2756,6 +2795,8 @@ mod attached_anchor_tests {
                 }],
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         }];
 
