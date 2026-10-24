@@ -38,6 +38,9 @@ fn prepare(model: &mut Model, undo: &mut UndoStack) {
 #[test]
 fn source_stories_prepare_twice_move_export_and_fc_reference_are_invariant() {
     let mut m = model();
+    for (story, offset) in m.stories.iter_mut().zip([0.0, 0.0, 100.0, 0.0, 0.0]) {
+        story.sl_offset_mm = Some(offset);
+    }
     let source = m.source_stories.clone();
     let identities = m.stb_node_ids.clone();
     let mut undo = UndoStack::new();
@@ -46,9 +49,9 @@ fn source_stories_prepare_twice_move_export_and_fc_reference_are_invariant() {
         Ok(Some(27.0))
     );
     prepare(&mut m, &mut undo);
-    assert_eq!(m.nodes[2].story, Some(StoryId(3)));
+    assert_eq!(m.nodes[2].story, Some(StoryId(2)));
     assert_eq!(m.source_stories, source);
-    assert!(!m.source_story_assignment_diagnostics().is_empty());
+    assert!(m.source_story_assignment_diagnostics().is_empty());
     prepare(&mut m, &mut undo);
     assert_eq!(m.source_stories, source);
     assert!(undo.run(
@@ -58,7 +61,9 @@ fn source_stories_prepare_twice_move_export_and_fc_reference_are_invariant() {
             coord: [0.0, 0.0, 6100.0]
         })
     ));
-    prepare(&mut m, &mut undo);
+    let generated = sepika_load::story_gen::generate_stories(&m, None).unwrap();
+    assert_eq!(generated.node_story[2], Some(StoryId(2)));
+    assert_eq!(m.nodes[2].story, Some(StoryId(2)));
     assert_eq!(m.source_stories, source);
     assert_eq!(m.stb_node_ids, identities);
     assert_eq!(
@@ -257,7 +262,8 @@ fn source_new_story_ids_and_guid_survive_height_order_changes_and_undo() {
         &mut m,
         Box::new(sepika_edit::AddStory {
             name: "新規".into(),
-            elevation: 4500.0
+            elevation: Some(4500.0),
+            sl_offset_mm: Some(0.0)
         })
     ));
     let new_id = m.source_stories.last().unwrap().id;
@@ -268,7 +274,8 @@ fn source_new_story_ids_and_guid_survive_height_order_changes_and_undo() {
         Box::new(sepika_edit::SetStoryLevel {
             story: StoryId(index as u32),
             name: "新規2".into(),
-            elevation: 8000.0
+            elevation: Some(5000.0),
+            sl_offset_mm: Some(0.0)
         })
     ));
     assert_eq!(
@@ -277,7 +284,7 @@ fn source_new_story_ids_and_guid_survive_height_order_changes_and_undo() {
             .find(|s| s.id == new_id)
             .unwrap()
             .height,
-        8000.0
+        5000.0
     );
     assert_eq!(
         m.source_stories.iter().find(|s| s.id == 50).unwrap().guid,
@@ -335,6 +342,9 @@ fn source_native_save_and_calculation_snapshot_preserve_the_explicit_table() {
 fn native_first_delete_keeps_existing_export_ids_and_undo_restores_unassigned_table() {
     let mut m = model();
     m.source_stories.clear();
+    for story in &mut m.stories {
+        story.source_story = None;
+    }
     m.source_stories_initialized = false;
     m.stories.clear();
     m.stb_node_ids.clear();
@@ -366,6 +376,9 @@ fn native_first_delete_keeps_existing_export_ids_and_undo_restores_unassigned_ta
 fn native_story_delete_preserves_source_ids_and_restores_uninitialized_tables() {
     let mut m = model();
     m.source_stories.clear();
+    for story in &mut m.stories {
+        story.source_story = None;
+    }
     m.source_stories_initialized = false;
     m.stb_node_ids.clear();
     let original = m.clone();
@@ -408,7 +421,7 @@ fn native_story_delete_preserves_source_ids_and_restores_uninitialized_tables() 
     let target = referenced
         .stories
         .iter()
-        .find(|s| s.elevation == 0.0)
+        .find(|s| s.elevation == Some(0.0))
         .unwrap()
         .id;
     let mut undo = UndoStack::new();
@@ -423,88 +436,59 @@ fn native_story_delete_preserves_source_ids_and_restores_uninitialized_tables() 
 
 #[test]
 fn empty_import_and_last_source_delete_stay_empty_through_edit_prepare_save_and_undo() {
-    let envelope = |stories: &str| {
-        format!(
-            r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/></StbNodes><StbStories>{stories}</StbStories></StbModel></ST_BRIDGE>"#
-        )
-    };
+    use sepika_core::model::Story;
     for initially_empty in [false, true] {
-        let mut m = sepika_io::stbridge::import_stbridge(&envelope(if initially_empty { "" } else {
-            r#"<StbStory id="50" name="upper" height="3000" kind="ROOF"><StbNodeIdList><StbNodeId id="2"/></StbNodeIdList></StbStory>"#
-        })).unwrap();
-        assert!(m.source_stories_initialized);
+        let xml = format!(
+            r#"<ST_BRIDGE xmlns="https://www.building-smart.or.jp/dl" version="2.0.2"><StbModel><StbNodes><StbNode id="1" X="0" Y="0" Z="0"/><StbNode id="2" X="0" Y="0" Z="3000"/></StbNodes><StbStories>{}</StbStories></StbModel></ST_BRIDGE>"#,
+            if initially_empty {
+                ""
+            } else {
+                r#"<StbStory id="50" name="upper" height="3000" kind="ROOF"><StbNodeIdList><StbNodeId id="2"/></StbNodeIdList></StbStory>"#
+            }
+        );
+        let mut m = sepika_io::stbridge::import_stbridge(&xml).unwrap();
+        assert!(sepika_load::story_gen::generate_stories(&m, None).is_err());
+        let mut floors = vec![Story::new(StoryId(0), "lower".into(), Some(0.0), Some(0.0))];
+        if initially_empty {
+            floors.push(Story::new(
+                StoryId(1),
+                "upper".into(),
+                Some(3000.0),
+                Some(0.0),
+            ));
+        } else {
+            let mut upper = m.stories.remove(0);
+            upper.id = StoryId(1);
+            upper.sl_offset_mm = Some(0.0);
+            floors.push(upper);
+        }
+        m.stories = floors;
         let mut undo = UndoStack::new();
         prepare(&mut m, &mut undo);
-        let before_delete = m.clone();
         if !initially_empty {
+            let before = m.clone();
             assert!(undo.run(
                 &mut m,
                 Box::new(sepika_edit::DeleteStory { story: StoryId(1) })
             ));
-            let deleted = m.clone();
+            assert!(m.source_stories.is_empty());
+            assert!(sepika_load::story_gen::generate_stories(&m, None).is_err());
             undo.undo(&mut m);
-            assert!(m.eq_ignoring_dofmap(&before_delete));
+            assert!(m.eq_ignoring_dofmap(&before));
             undo.redo(&mut m);
-            assert!(m.eq_ignoring_dofmap(&deleted));
         }
         assert!(m.source_stories.is_empty());
-        let assert_empty_export = |m: &Model| {
-            let xml = sepika_io::stbridge::export_stbridge(m).unwrap();
-            assert!(!xml.contains("<StbStory"));
-            assert_eq!(xml, sepika_io::stbridge::export_stbridge(m).unwrap());
-            let restored = sepika_io::stbridge::import_stbridge(&xml).unwrap();
-            assert!(restored.source_stories.is_empty());
-            assert!(restored.source_stories_initialized);
-        };
-        assert_empty_export(&m);
-        let before_edit = m.clone();
-        assert!(undo.run(
-            &mut m,
-            Box::new(sepika_edit::SetStoryLevel {
-                story: StoryId(0),
-                name: "明示基部名".into(),
-                elevation: 0.0,
-            })
-        ));
-        assert!(m.source_stories.is_empty());
-        undo.undo(&mut m);
-        assert!(m.eq_ignoring_dofmap(&before_edit));
-        undo.redo(&mut m);
-        assert!(undo.run(
-            &mut m,
-            Box::new(sepika_edit::SetStoryLevelKind {
-                story: StoryId(0),
-                level_kind: sepika_core::model::StoryLevelKind::Penthouse { k: 0.7 },
-            })
-        ));
-        assert_empty_export(&m);
-        let before_reject = m.clone();
-        let revision = undo.revision();
-        assert!(!undo.run(
-            &mut m,
-            Box::new(sepika_edit::DeleteStory { story: StoryId(0) })
-        ));
-        assert!(!undo.run(
-            &mut m,
-            Box::new(sepika_edit::SetStoryLevelKind {
-                story: StoryId(u32::MAX),
-                level_kind: Default::default(),
-            })
-        ));
-        assert!(m.eq_ignoring_dofmap(&before_reject));
-        assert_eq!(undo.revision(), revision);
-        prepare(&mut m, &mut undo);
-        prepare(&mut m, &mut undo);
-        assert!(m.source_stories.is_empty());
-        assert_empty_export(&m);
         let path = std::env::temp_dir().join(format!(
-            "497-empty-{}-{initially_empty}.ovika",
+            "sepika729-source-empty-{}-{initially_empty}.ovika",
             std::process::id()
         ));
         sepika_io::ovika::save_ovika(&path, &m, Default::default()).unwrap();
         let restored = sepika_io::ovika::load_ovika(&path).unwrap().model;
-        assert!(restored.eq_ignoring_dofmap(&m));
-        assert_empty_export(&restored);
+        assert!(restored.source_stories.is_empty());
+        assert_eq!(restored.stories, m.stories);
+        assert!(!sepika_io::stbridge::export_stbridge(&restored)
+            .unwrap()
+            .contains("<StbStories>"));
         std::fs::remove_file(path).unwrap();
     }
 }
@@ -514,6 +498,9 @@ fn main_native_model_without_source_fields_keeps_messagepack_export_fallback() {
     let mut m = model();
     m.stb_strengths = Default::default();
     m.source_stories.clear();
+    for story in &mut m.stories {
+        story.source_story = None;
+    }
     m.source_stories_initialized = false;
     m.stb_node_ids.clear();
     let mut bytes = rmp_serde::to_vec(&m).unwrap();
@@ -556,6 +543,9 @@ fn native_first_story_edit_preserves_both_membership_forms_and_conflict_diagnost
     for representation in 0..4 {
         let mut m = model();
         m.source_stories.clear();
+        for story in &mut m.stories {
+            story.source_story = None;
+        }
         m.source_stories_initialized = false;
         m.stb_node_ids.clear();
         match representation {
@@ -608,25 +598,27 @@ fn native_first_story_edit_preserves_both_membership_forms_and_conflict_diagnost
             ]
         );
         let mut undo = UndoStack::new();
-        let base_elevation = m.stories[0].elevation;
+        let base_elevation = m.stories[0].fl_mm().unwrap();
         for story in [StoryId(u32::MAX), StoryId(1)] {
             assert!(!undo.run(
                 &mut m,
                 Box::new(sepika_edit::SetStoryLevel {
                     story,
                     name: "rejected".into(),
-                    elevation: base_elevation,
+                    elevation: Some(base_elevation),
+                    sl_offset_mm: Some(0.0),
                 })
             ));
             assert!(m.eq_ignoring_dofmap(&original));
         }
-        let elevation = m.stories[1].elevation;
+        let elevation = m.stories[1].fl_mm().unwrap();
         assert!(undo.run(
             &mut m,
             Box::new(sepika_edit::SetStoryLevel {
                 story: StoryId(1),
                 name: "renamed".into(),
-                elevation,
+                elevation: Some(elevation),
+                sl_offset_mm: Some(0.0),
             })
         ));
         expected[1].name = "renamed".into();

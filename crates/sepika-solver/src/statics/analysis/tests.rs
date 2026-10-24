@@ -1040,11 +1040,16 @@ fn test_model_issues_warns_story_without_diaphragm() {
     use sepika_core::model::Story;
 
     let mut model = make_cantilever_model();
+    model
+        .stories
+        .push(Story::new(StoryId(0), "1F".into(), Some(0.0), Some(0.0)));
     model.stories.push(Story {
         wall_weights: Vec::new(),
-        id: StoryId(0),
+        id: StoryId(1),
         name: "2F".into(),
-        elevation: 3000.0,
+        elevation: Some(3000.0),
+        sl_offset_mm: Some(0.0),
+        source_story: None,
         node_ids: vec![NodeId(1)],
         seismic_weight: None,
         weight_override: None,
@@ -1082,7 +1087,9 @@ fn test_model_issues_errors_on_duplicate_story_names() {
         wall_weights: Vec::new(),
         id: StoryId(id),
         name: name.into(),
-        elevation,
+        elevation: Some(elevation),
+        sl_offset_mm: Some(0.0),
+        source_story: None,
         node_ids: Vec::new(),
         seismic_weight: None,
         weight_override: None,
@@ -1148,7 +1155,9 @@ fn make_two_story_diaphragm_model(
                 wall_weights: Vec::new(),
                 id: StoryId(0),
                 name: "1F".into(),
-                elevation: 0.0,
+                elevation: Some(0.0),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: vec![NodeId(0)],
                 seismic_weight: Some(500.0),
                 weight_override: None,
@@ -1163,7 +1172,9 @@ fn make_two_story_diaphragm_model(
                 wall_weights: Vec::new(),
                 id: StoryId(1),
                 name: "2F".into(),
-                elevation: 3000.0,
+                elevation: Some(3000.0),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: vec![NodeId(1)],
                 seismic_weight,
                 weight_override: None,
@@ -1518,7 +1529,9 @@ fn make_story_ratio_model(structures: &[StoryStructure]) -> Model {
         wall_weights: Vec::new(),
         id: StoryId(0),
         name: "F1".to_string(),
-        elevation: 0.0,
+        elevation: Some(0.0),
+        sl_offset_mm: Some(0.0),
+        source_story: None,
         node_ids: vec![NodeId(0)],
         seismic_weight: None,
         weight_override: None,
@@ -1544,7 +1557,9 @@ fn make_story_ratio_model(structures: &[StoryStructure]) -> Model {
             wall_weights: Vec::new(),
             id: StoryId((i + 1) as u32),
             name: format!("F{}", i + 2),
-            elevation: elev,
+            elevation: Some(elev),
+            sl_offset_mm: Some(0.0),
+            source_story: None,
             node_ids: vec![nid],
             seismic_weight: Some(1000.0),
             weight_override: None,
@@ -1591,7 +1606,9 @@ fn test_ground_elevation_from_basement_and_fallback() {
         wall_weights: Vec::new(),
         id: StoryId(id),
         name: format!("S{id}"),
-        elevation: z,
+        elevation: Some(z),
+        sl_offset_mm: Some(0.0),
+        source_story: None,
         node_ids: Vec::new(),
         seismic_weight: None,
         weight_override: None,
@@ -1659,7 +1676,9 @@ fn make_diaphragm_model(diaphragms: Vec<(NodeId, Option<f64>, Option<f64>)>) -> 
             wall_weights: Vec::new(),
             id: StoryId(0),
             name: "F1".into(),
-            elevation: 1000.0,
+            elevation: Some(1000.0),
+            sl_offset_mm: Some(0.0),
+            source_story: None,
             node_ids: Vec::new(),
             seismic_weight: Some(400.0),
             weight_override: None,
@@ -3428,7 +3447,7 @@ fn seismic_standard_entry_rejects_invalid_inputs_and_unsupported_routes() {
         .contains("未検証"));
     for elevation in [0.0, -1.0, f64::NAN] {
         let mut model = original.clone();
-        model.stories[1].elevation = elevation;
+        model.stories[1].elevation = Some(elevation);
         assert!(seismic_distribution_for_model(&model, cfg, 0.5).is_err());
     }
 }
@@ -3457,7 +3476,7 @@ fn seismic_two_layer_contract_model() -> Model {
     let mut top = model.stories[1].clone();
     top.id = StoryId(2);
     top.name = "3F".into();
-    top.elevation = 6000.0;
+    top.elevation = Some(6000.0);
     top.node_ids = vec![NodeId(2)];
     model.stories.push(top);
     let mut node = model.nodes[1].clone();
@@ -3573,14 +3592,14 @@ fn seismic_common_ground_rejects_conflicting_depths_and_preserves_hand_values() 
     model.stories.truncate(1);
     model.constraints.clear();
     model.nodes[0].coord[2] = -9000.0;
-    model.stories[0].elevation = -9000.0;
+    model.stories[0].elevation = Some(-9000.0);
     let template = seismic_two_layer_contract_model();
     for (i, elevation) in [-6000.0, -3000.0, 6000.0, 12000.0].into_iter().enumerate() {
         let id = (i + 1) as u32;
         let mut story = template.stories[1].clone();
         story.id = StoryId(id);
         story.name = format!("floor{id}");
-        story.elevation = elevation;
+        story.elevation = Some(elevation);
         story.node_ids = vec![NodeId(id)];
         if i < 2 {
             story.level_kind = StoryLevelKind::Basement {
@@ -3624,7 +3643,7 @@ fn seismic_common_ground_rejects_conflicting_depths_and_preserves_hand_values() 
         .to_string();
     assert!(error.contains("GL"), "{error}");
     for story in &mut model.stories {
-        story.elevation += 1e12;
+        story.elevation = story.elevation.map(|fl| fl + 1e12);
     }
     model.stories[1].level_kind = StoryLevelKind::Basement { depth_mm: 6000.002 };
     assert!(seismic_distribution_for_model(&model, cfg, 0.24)
@@ -3645,7 +3664,7 @@ fn mixed_steel_period_excludes_below_ground_height_and_matches_hand_load() {
         .into_iter()
         .enumerate()
     {
-        model.stories[i].elevation = elevation;
+        model.stories[i].elevation = Some(elevation);
         model.nodes[i].coord[2] = elevation;
         model.stories[i].seismic_weight = Some(100_000.0);
         if i == 1 || i == 2 {
@@ -3667,7 +3686,7 @@ fn mixed_steel_period_excludes_below_ground_height_and_matches_hand_load() {
     assert!((load.nodal.iter().map(|l| l.values[0]).sum::<f64>() - 57_250.0).abs() < 1e-8);
     let qud = seismic_distribution_for_model(&model, SeismicCfg { c0: 1.0, ..cfg }, t).unwrap();
     assert!((qud.qi[0] - 215_250.0).abs() < 1e-8);
-    model.stories[2].elevation = 0.0;
+    model.stories[2].elevation = Some(0.0);
     model.stories[2].level_kind = StoryLevelKind::Basement { depth_mm: 0.0 };
     assert_eq!(steel_height_ratio(&model), 0.5);
     model.stories[4].structure = StoryStructure::S;
@@ -3677,7 +3696,7 @@ fn mixed_steel_period_excludes_below_ground_height_and_matches_hand_load() {
     assert_eq!(steel_height_ratio(&model), 0.0);
     let mut ph = model.stories[4].clone();
     ph.id = StoryId(5);
-    ph.elevation = 40_000.0;
+    ph.elevation = Some(40_000.0);
     ph.structure = StoryStructure::S;
     ph.level_kind = StoryLevelKind::Penthouse { k: 1.0 };
     model.stories.push(ph);

@@ -382,6 +382,14 @@ impl Model {
             }
         }
         for story in &self.stories {
+            if let Some(source) = story.source_story {
+                if !self.source_stories.iter().any(|s| s.id == source) {
+                    return Err(CoreError::DanglingRef(format!(
+                        "Story {} -> SourceStory {source}",
+                        story.id.0
+                    )));
+                }
+            }
             for (index, &node) in story.node_ids.iter().enumerate() {
                 check_node(&format!("Story {}.node_ids[{index}]", story.id.0), node)?;
             }
@@ -409,6 +417,10 @@ impl Model {
                     &format!("SeismicWeightGeneration.automatic_diaphragms[{index}]"),
                     constraint,
                 )?;
+            }
+            for &(node, story) in &record.automatic_node_stories {
+                check_node("自動所属の節点", node)?;
+                check_story("自動所属の階", story)?;
             }
             for (index, &(node, _)) in record.automatic_master_restraints.iter().enumerate() {
                 check_node(
@@ -755,13 +767,10 @@ impl Model {
             }
         }
 
-        for pair in self.stories.windows(2) {
-            if pair[1].elevation < pair[0].elevation {
-                return Err(CoreError::DanglingRef(format!(
-                    "Story {} ({}) の標高 {} が直下の Story {} ({}) の標高 {} より低い（階は標高の昇順に並べる）",
-                    pair[1].id.0, pair[1].name, pair[1].elevation,
-                    pair[0].id.0, pair[0].name, pair[0].elevation,
-                )));
+        if !self.stories.is_empty() {
+            let errors = self.story_level_input_diagnostics();
+            if !errors.is_empty() {
+                return Err(CoreError::InvalidInput(errors.join("\n")));
             }
         }
         {
@@ -1487,6 +1496,9 @@ impl Model {
             }
         }
         if let Some(record) = &mut self.seismic_weight_generation {
+            for (node, _) in &mut record.automatic_node_stories {
+                f(node);
+            }
             for (master, _) in &mut record.automatic_master_restraints {
                 f(master);
             }
@@ -1505,6 +1517,9 @@ impl Model {
     /// 必要になる。参照箇所を呼び出し側へ散らさないよう、走査はここに集約する。
     pub fn visit_story_ids(&mut self, mut f: impl FnMut(&mut StoryId)) {
         if let Some(record) = &mut self.seismic_weight_generation {
+            for (_, story) in &mut record.automatic_node_stories {
+                f(story);
+            }
             for (story, _) in &mut record.calculated_weights {
                 f(story);
             }
@@ -2494,6 +2509,8 @@ pub struct SeismicWeightGeneration {
     pub calculated_weights: Vec<(StoryId, f64)>,
     #[serde(default)]
     pub automatic_diaphragms: Vec<Constraint>,
+    /// 自動所属の反映記録。変更された明示所属と区別する。
+    pub automatic_node_stories: Vec<(NodeId, StoryId)>,
     #[serde(default)]
     pub automatic_master_restraints: Vec<(NodeId, crate::dof::Dof6Mask)>,
 }
@@ -2501,6 +2518,7 @@ pub struct SeismicWeightGeneration {
 impl SeismicWeightGeneration {
     /// 削除された節点を含む生成由来を除外し、再採番後の別節点との誤照合を防ぐ。
     pub fn retain_node_references(&mut self, mut keep: impl FnMut(NodeId) -> bool) {
+        self.automatic_node_stories.retain(|(node, _)| keep(*node));
         self.automatic_diaphragms
             .retain(|constraint| match constraint {
                 Constraint::RigidDiaphragm { master, slaves, .. }
@@ -2582,7 +2600,9 @@ impl Model {
                     .copied()
                     .filter(|id| {
                         self.nodes.get(id.index()).is_some_and(|node| {
-                            (node.coord[2] - s.elevation).abs() <= DIAPHRAGM_LEVEL_TOL_MM
+                            s.sl_mm().is_some_and(|sl| {
+                                (node.coord[2] - sl).abs() <= DIAPHRAGM_LEVEL_TOL_MM
+                            })
                         })
                     })
                     .collect();

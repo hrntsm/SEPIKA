@@ -29,10 +29,44 @@ fn optional_strength_field(ui: &mut egui::Ui, label: &str, value: &mut Option<St
     changed
 }
 
-fn story_table_columns() -> [Col<'static>; 8] {
+fn story_level_field(ui: &mut egui::Ui, id: egui::Id, value: &mut Option<f64>) -> bool {
+    let mut text = ui
+        .data(|d| d.get_temp::<String>(id))
+        .unwrap_or_else(|| value.map(|v| v.to_string()).unwrap_or_default());
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .id(id)
+            .hint_text("未設定")
+            .desired_width(ui.available_width()),
+    );
+    if response.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text.clone()));
+    }
+    if response.lost_focus() {
+        ui.data_mut(|d| d.remove::<String>(id));
+        let parsed = if text.trim().is_empty() {
+            Some(None)
+        } else {
+            text.trim().parse::<f64>().ok().map(Some)
+        };
+        if let Some(parsed) = parsed {
+            if *value != parsed {
+                *value = parsed;
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn story_table_columns() -> [Col<'static>; 12] {
     [
         Col::label("階名"),
-        Col::num("レベル [mm]"),
+        Col::num("FL [mm]"),
+        Col::num("ΔSL [mm]"),
+        Col::num("SL [mm]"),
+        Col::num("FL間 [mm]"),
+        Col::num("SL間 [mm]"),
         Col::num("節点数"),
         Col::label("構造"),
         Col::wide_num("標準床 [kN/m²]").hover("DL / 床 / 小梁 / 大梁 / 地震の順"),
@@ -53,6 +87,9 @@ impl App {
     /// [`App::static_panel`] ほか各解析パネル。
     pub(crate) fn preparation_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("① 準備計算");
+        for diagnostic in self.core.model.story_level_diagnostics() {
+            ui.colored_label(crate::theme::WARN_TEXT, diagnostic);
+        }
         ui.separator();
 
         let running = self.core.scoped.job.is_some();
@@ -333,7 +370,7 @@ impl App {
             });
     }
 
-    /// 階の追加フォーム。階名と階レベルだけを与えて階を作る（所属節点・重量は
+    /// 階名・FL・ΔSL を明示して階を追加する（所属節点・重量は
     /// 準備計算が埋める）。既定の階レベルは最上階の 1 つ上を階高 3500mm で見込む。
     fn story_add_row(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
@@ -343,31 +380,36 @@ impl App {
                     .desired_width(60.0)
                     .hint_text("3F"),
             );
-            ui.label("レベル[mm]:");
+            ui.label("FL [mm]:");
             ui.add(
                 egui::DragValue::new(&mut self.ui.scoped.new_story_draft.1)
                     .speed(50.0)
                     .range(-1.0e6..=1.0e6),
             );
+            ui.label("ΔSL [mm]:");
+            ui.add(egui::DragValue::new(&mut self.ui.scoped.new_story_draft.2).speed(10.0));
             let name = self.ui.scoped.new_story_draft.0.trim().to_string();
             let can_add = !name.is_empty();
             if ui
                 .add_enabled(can_add, egui::Button::new("➕ 階を追加"))
                 .on_hover_text(
-                    "階名とレベルだけを定義します。所属節点・剛床・地震用重量は\
+                    "階名・FL・ΔSL を定義します。所属節点・剛床・地震用重量は\
                      次の準備計算で算定されます。",
                 )
                 .on_disabled_hover_text("階名を入力してください")
                 .clicked()
             {
                 let elevation = self.ui.scoped.new_story_draft.1;
-                self.core.scoped.undo.run(
-                    &mut self.core.model,
-                    Box::new(sepika_edit::AddStory { name, elevation }),
-                );
-                self.core.scoped.staleness.mark_edited();
-                self.ui.scoped.new_story_draft.0.clear();
-                self.ui.scoped.new_story_draft.1 = elevation + 3500.0;
+                if self.apply_model_edit(Box::new(sepika_edit::AddStory {
+                    name,
+                    elevation: Some(elevation),
+                    sl_offset_mm: Some(self.ui.scoped.new_story_draft.2),
+                })) {
+                    self.ui.scoped.new_story_draft.0.clear();
+                    self.ui.scoped.new_story_draft.1 = elevation + 3500.0;
+                } else if let Some(reason) = self.core.scoped.undo.last_error().map(str::to_owned) {
+                    self.report_error(reason);
+                }
             }
         });
         ui.separator();
@@ -620,14 +662,13 @@ impl App {
                 if self.core.model.stories.is_empty() {
                     ui.colored_label(
                         crate::theme::GRAY_600,
-                        "未定義です。上の「階を追加」で定義するか、準備計算を実行すると\
-                         節点の標高から生成されます。",
+                        "未定義です。上の「階を追加」で上下階の FL・ΔSL を入力してください。",
                     );
                     return;
                 }
                 ui.colored_label(
                     crate::theme::GRAY_600,
-                    "階名・レベル・重量・種別は利用者が決めます。節点数・構造種別は\
+                    "階名・FL・ΔSL・重量・種別は利用者が決めます。節点数・構造種別は\
                      準備計算が算定します（構造種別は柱・梁の断面から判定）。",
                 );
 
@@ -637,7 +678,7 @@ impl App {
                 let story_rows: Vec<(
                     sepika_core::ids::StoryId,
                     String,
-                    f64,
+                    Option<f64>,
                     usize,
                     Option<f64>,
                     Option<f64>,
@@ -670,7 +711,8 @@ impl App {
                 let mut pending_name_elev: Option<(
                     sepika_core::ids::StoryId,
                     String,
-                    f64,
+                    Option<f64>,
+                    Option<f64>,
                 )> = None;
 
                 crate::table_util::standard_table(
@@ -690,6 +732,7 @@ impl App {
                             level_kind,
                         ) = &story_rows[row.index()];
                         let story = *story;
+                        let current = self.core.model.stories[story.index()].clone();
                         let is_base = story.index() == 0;
 
                         row.col(|ui| {
@@ -706,38 +749,31 @@ impl App {
                             } else if resp.lost_focus() {
                                 let trimmed = buf.trim().to_string();
                                 if !trimmed.is_empty() && trimmed != *name {
-                                    pending_name_elev = Some((story, trimmed, *elevation));
+                                    pending_name_elev = Some((story, trimmed, *elevation, current.sl_offset_mm));
                                 }
                                 ui.data_mut(|d| d.remove::<String>(cell_id));
                             }
                         });
                         row.col(|ui| {
-                            if is_base {
-                                ui.label(format!("{elevation:.0}")).on_hover_text(
-                                    "基部（柱脚・基礎梁のレベル）。構造の最下端そのものなので変更できません",
-                                );
-                                return;
-                            }
-                            let cell_id = egui::Id::new(("story_elevation", story.0));
-                            let mut v = ui
-                                .data(|d| d.get_temp::<f64>(cell_id))
-                                .unwrap_or(*elevation);
-                            let resp = crate::table_util::cell_drag_value(
-                                ui,
-                                true,
-                                egui::DragValue::new(&mut v)
-                                    .speed(50.0)
-                                    .range(-1.0e6..=1.0e6),
-                            );
-                            if resp.has_focus() || resp.dragged() {
-                                ui.data_mut(|d| d.insert_temp(cell_id, v));
-                            } else if resp.drag_stopped() || resp.lost_focus() {
-                                if (v - *elevation).abs() > 1e-6 {
-                                    pending_name_elev = Some((story, name.clone(), v));
-                                }
-                                ui.data_mut(|d| d.remove::<f64>(cell_id));
+                            let mut value = *elevation;
+                            if story_level_field(ui, egui::Id::new(("story_fl", story.0)), &mut value) {
+                                pending_name_elev = Some((story, name.clone(), value, current.sl_offset_mm));
                             }
                         });
+                        row.col(|ui| {
+                            let mut value = current.sl_offset_mm;
+                            if story_level_field(ui, egui::Id::new(("story_delta_sl", story.0)), &mut value) {
+                                pending_name_elev = Some((story, name.clone(), current.elevation, value));
+                            }
+                        });
+                        row.col(|ui| { ui.label(current.sl_mm().map(|v| format!("{v:.0}")).unwrap_or_else(|| "未設定".into())); });
+                        for structural in [false, true] {
+                            row.col(|ui| {
+                                let lower = story.index().checked_sub(1).and_then(|i| self.core.model.stories.get(i));
+                                let height = lower.and_then(|lower| if structural { Some(current.sl_mm()? - lower.sl_mm()?) } else { Some(current.fl_mm()? - lower.fl_mm()?) });
+                                ui.label(height.map(|v| format!("{v:.0}")).unwrap_or_else(|| "—".into()));
+                            });
+                        }
                         row.col(|ui| {
                             ui.label(format!("{n_nodes}"));
                         });
@@ -965,11 +1001,12 @@ impl App {
                     self.ui.scoped.pending_story_cmds
                         .push_back(Box::new(sepika_edit::SetStoryWeight { story, weight }));
                 }
-                if let Some((story, name, elevation)) = pending_name_elev {
+                if let Some((story, name, elevation, sl_offset_mm)) = pending_name_elev {
                     self.ui.scoped.pending_story_cmds.push_back(Box::new(sepika_edit::SetStoryLevel {
                         story,
                         name,
                         elevation,
+                        sl_offset_mm,
                     }));
                 }
                 if let Some(story) = pending_delete {
@@ -997,7 +1034,11 @@ mod tests {
             headers,
             [
                 "階名",
-                "レベル [mm]",
+                "FL [mm]",
+                "ΔSL [mm]",
+                "SL [mm]",
+                "FL間 [mm]",
+                "SL間 [mm]",
                 "節点数",
                 "構造",
                 "標準床 [kN/m²]",

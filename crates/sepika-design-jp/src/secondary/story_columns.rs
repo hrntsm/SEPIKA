@@ -3,7 +3,6 @@
 //! 層間変位・偏心率など、当該層の柱を数える処理の判定ロジックの単一情報源。
 
 use sepika_core::ids::{ElemId, NodeId, StoryId};
-use sepika_core::model::DIAPHRAGM_LEVEL_TOL_MM;
 use sepika_core::model::{ElementKind, FrameSectionUse, Model};
 use std::collections::{HashMap, HashSet};
 
@@ -16,17 +15,10 @@ pub struct StoryColumn {
     pub bottom: NodeId,
 }
 
-/// 層の下端。床レベルの階 ID、または基部標高（階が 1 つだけの略式モデル用）。
-#[derive(Clone, Copy, Debug)]
-enum BottomLevel {
-    Story(StoryId),
-    Elevation(f64),
-}
-
 /// `story`（層の上端階）に属する柱の一覧を返す。
 ///
-/// 上端階の床レベル上の節点から鉛直材を下へ辿り、下端階の床レベル（または基部標高）
-/// に達した連なりを 1 本の柱とする。下端に達しない連なりは対象外。
+/// 上端階 SL の節点から下端階 SL に達した柱の連なりを返す。
+/// 上下階情報が未確定、または下端に達しない連なりは対象外。
 pub fn story_columns(model: &Model, story: StoryId) -> Vec<StoryColumn> {
     let Some((_, bottom)) = layer_bounds(model, story) else {
         return Vec::new();
@@ -44,22 +36,16 @@ pub fn story_columns(model: &Model, story: StoryId) -> Vec<StoryColumn> {
     out
 }
 
-/// 層の上端階と下端（床レベルまたは基部標高）を返す。
-fn layer_bounds(model: &Model, top_story: StoryId) -> Option<(StoryId, BottomLevel)> {
-    if let Some(layer) = model.layers().into_iter().find(|l| l.top == top_story) {
-        return Some((top_story, BottomLevel::Story(layer.bottom)));
-    }
-    if model.stories.iter().any(|s| s.id == top_story) && model.layers().is_empty() {
-        return Some((top_story, BottomLevel::Elevation(model.base_elevation())));
-    }
-    None
+fn layer_bounds(model: &Model, top_story: StoryId) -> Option<(StoryId, StoryId)> {
+    model
+        .layers()
+        .into_iter()
+        .find(|layer| layer.top == top_story)
+        .map(|layer| (top_story, layer.bottom))
 }
 
-fn on_bottom_level(model: &Model, bottom: BottomLevel, z: f64) -> bool {
-    match bottom {
-        BottomLevel::Story(s) => model.on_diaphragm_level(s, z),
-        BottomLevel::Elevation(e) => (z - e).abs() <= DIAPHRAGM_LEVEL_TOL_MM,
-    }
+fn on_bottom_level(model: &Model, bottom: StoryId, z: f64) -> bool {
+    model.on_diaphragm_level(bottom, z)
 }
 
 /// 鉛直 2 節点 Beam の隣接リスト（節点 → (隣接節点, 部材 ID)）。
@@ -88,7 +74,7 @@ fn trace_column_down(
     model: &Model,
     adj: &HashMap<NodeId, Vec<(NodeId, ElemId)>>,
     top: NodeId,
-    bottom: BottomLevel,
+    bottom: StoryId,
 ) -> Option<StoryColumn> {
     let mut current = top;
     let mut top_elem = None;
@@ -201,7 +187,9 @@ mod tests {
                     wall_weights: Vec::new(),
                     id: base,
                     name: "1F".to_string(),
-                    elevation: 0.0,
+                    elevation: Some(0.0),
+                    sl_offset_mm: Some(0.0),
+                    source_story: None,
                     node_ids: vec![NodeId(0)],
                     seismic_weight: None,
                     weight_override: None,
@@ -216,7 +204,9 @@ mod tests {
                     wall_weights: Vec::new(),
                     id: top_story,
                     name: "2F".to_string(),
-                    elevation: 4000.0,
+                    elevation: Some(4000.0),
+                    sl_offset_mm: Some(0.0),
+                    source_story: None,
                     node_ids: vec![NodeId(2)],
                     seismic_weight: None,
                     weight_override: None,
@@ -253,5 +243,29 @@ mod tests {
         assert_eq!(cols.len(), 1, "傾斜していても柱用途の連なりを数える");
         assert_eq!(cols[0].top, NodeId(2));
         assert_eq!(cols[0].bottom, NodeId(0));
+    }
+    #[test]
+    fn missing_middle_fl_never_extends_the_upper_story_to_structure_bottom() {
+        let (mut model, _) = build_split_column_model();
+        model.stories = [0.0, 2000.0, 4000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                Story::new(
+                    StoryId(i as u32),
+                    format!("{}F", i + 1),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect();
+        assert_eq!(story_columns(&model, StoryId(2))[0].bottom, NodeId(1));
+        model.stories[1].elevation = None;
+        assert!(story_columns(&model, StoryId(2)).is_empty());
+        model.stories[1].elevation = Some(2000.0);
+        model.stories[1].sl_offset_mm = None;
+        assert!(story_columns(&model, StoryId(2)).is_empty());
+        model.stories.truncate(1);
+        assert!(story_columns(&model, StoryId(0)).is_empty());
     }
 }

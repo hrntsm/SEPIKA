@@ -2345,7 +2345,9 @@ fn make_story(id: u32, weight: Option<f64>) -> sepika_core::model::Story {
         structure: Default::default(),
         id: StoryId(id),
         name: format!("{}F", id + 1),
-        elevation: id as f64 * 3000.0,
+        elevation: Some(id as f64 * 3000.0),
+        sl_offset_mm: Some(0.0),
+        source_story: None,
         node_ids: vec![],
         seismic_weight: weight,
         weight_override: None,
@@ -2466,6 +2468,7 @@ fn test_apply_prepared_model_roundtrip_with_generated_masters_and_records() {
         input_key: vec![1],
         output_key: vec![2],
         calculated_weights: vec![(StoryId(0), 1000.0)],
+        automatic_node_stories: Vec::new(),
         automatic_diaphragms: vec![constraint.clone()],
         automatic_master_restraints: vec![(NodeId(2), rep_restraint)],
     };
@@ -2479,7 +2482,9 @@ fn test_apply_prepared_model_roundtrip_with_generated_masters_and_records() {
         structure: Default::default(),
         id: StoryId(0),
         name: "1F".into(),
-        elevation: 3000.0,
+        elevation: Some(3000.0),
+        sl_offset_mm: Some(0.0),
+        source_story: None,
         node_ids: vec![NodeId(0), NodeId(1)],
         seismic_weight: Some(1000.0),
         weight_override: None,
@@ -2504,7 +2509,7 @@ fn test_apply_prepared_model_roundtrip_with_generated_masters_and_records() {
     assert_eq!(model.stories.len(), 1);
     assert_eq!(model.constraints.len(), 1);
     assert_eq!(model.seismic_weight_generation, Some(generation.clone()));
-    assert!(model.validate().is_ok());
+    assert!(model.validate_reference_ids().is_ok());
 
     stack.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&before));
@@ -2512,7 +2517,7 @@ fn test_apply_prepared_model_roundtrip_with_generated_masters_and_records() {
     assert!(model.damper_mass_generation.is_none());
     assert!(model.seismic_weight_generation.is_none());
     assert!(model.stories.is_empty());
-    assert!(model.validate().is_ok());
+    assert!(model.validate_reference_ids().is_ok());
 
     stack.redo(&mut model);
     assert!(model.eq_ignoring_dofmap(&applied));
@@ -4541,7 +4546,9 @@ fn story_edit_model(zs: &[f64], levels: &[(&str, f64)]) -> Model {
                 wall_weights: Vec::new(),
                 id: StoryId(i as u32),
                 name: name.into(),
-                elevation,
+                elevation: Some(elevation),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: Vec::new(),
                 seismic_weight: None,
                 weight_override: None,
@@ -4588,7 +4595,8 @@ fn 階共通柱仕上げの編集と階操作は設定を保持してundoでき�
         &mut model,
         Box::new(AddStory {
             name: "中間階".into(),
-            elevation: 1500.0,
+            elevation: Some(1500.0),
+            sl_offset_mm: Some(0.0),
         }),
     );
     assert_eq!(model.stories[1].column_finish_area_weight, 0.0);
@@ -4600,10 +4608,11 @@ fn 階共通柱仕上げの編集と階操作は設定を保持してundoでき�
         Box::new(SetStoryLevel {
             story: StoryId(1),
             name: "2F".into(),
-            elevation: 6500.0,
+            elevation: Some(3500.0),
+            sl_offset_mm: Some(0.0),
         }),
     );
-    assert_eq!(model.stories[2].column_finish_area_weight, 0.002);
+    assert_eq!(model.stories[1].column_finish_area_weight, 0.002);
     undo.undo(&mut model);
     assert!(model.eq_ignoring_dofmap(&configured));
     undo.run(&mut model, Box::new(DeleteStory { story: StoryId(1) }));
@@ -4656,7 +4665,8 @@ fn story_fireproof_edit_undo_and_story_insertion() {
         &mut model,
         Box::new(AddStory {
             name: "中間階".into(),
-            elevation: 1500.0,
+            elevation: Some(1500.0),
+            sl_offset_mm: Some(0.0),
         }),
     );
     assert_eq!(model.stories[1].fireproof, StoryFireproof::default());
@@ -4685,7 +4695,8 @@ fn test_add_story_inserts_in_elevation_order_and_renumbers() {
         &mut model,
         Box::new(AddStory {
             name: "2F".into(),
-            elevation: 7500.0,
+            elevation: Some(7500.0),
+            sl_offset_mm: Some(0.0),
         }),
     );
 
@@ -4761,83 +4772,101 @@ fn test_delete_story_keeps_nodes_and_drops_its_diaphragm() {
     assert_eq!(model.constraints.len(), 3);
 }
 
-/// 階レベルの変更で並び順が入れ替わる場合も、標高昇順と ID＝配列位置を保つ。
 #[test]
-fn test_set_story_level_resorts_and_renumbers() {
+fn reversed_fl_edit_is_rejected_without_changing_floor_ids_or_references() {
     let mut model = story_edit_model(
         &[0.0, 4000.0, 7500.0],
         &[("1F", 0.0), ("2F", 4000.0), ("3F", 7500.0)],
     );
     model.nodes[1].story = Some(StoryId(1));
     model.nodes[2].story = Some(StoryId(2));
+    let original = model.clone();
     let mut undo = UndoStack::new();
-
-    // 2F のレベルを 3F より上へ動かす（入力ミスの是正など）。
-    undo.run(
+    assert!(!undo.run(
         &mut model,
         Box::new(SetStoryLevel {
             story: StoryId(1),
             name: "RF".into(),
-            elevation: 9000.0,
-        }),
-    );
-
-    let names: Vec<&str> = model.stories.iter().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, vec!["1F", "3F", "RF"], "標高昇順へ並べ替わる");
-    assert!(model
-        .stories
-        .iter()
-        .enumerate()
-        .all(|(i, s)| s.id.index() == i));
-    assert_eq!(
-        model.nodes[1].story,
-        Some(StoryId(2)),
-        "旧 2F の節点は新 ID を指す"
-    );
-    assert_eq!(
-        model.nodes[2].story,
-        Some(StoryId(1)),
-        "旧 3F の節点も追随する"
-    );
-    assert!(model.validate().is_ok());
-
-    undo.undo(&mut model);
-    let names: Vec<&str> = model.stories.iter().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, vec!["1F", "2F", "3F"]);
-    assert_eq!(model.nodes[1].story, Some(StoryId(1)));
+            elevation: Some(9000.0),
+            sl_offset_mm: Some(0.0)
+        })
+    ));
+    assert!(undo.last_error().unwrap().contains("FL"));
+    assert!(model.eq_ignoring_dofmap(&original));
+    assert!(!undo.can_undo());
 }
 
-/// 基部の階（`StoryId(0)`）は標高を変えられず、削除もできない。
-/// 階の列の先頭が基部であることは `Model::layers` が依拠する不変条件であり、
-/// これが崩れると最下層が層の一覧から静かに落ちる。
 #[test]
-fn test_base_story_level_and_deletion_are_guarded() {
+fn lowest_fl_is_editable_without_moving_structure_nodes() {
     let mut model = story_edit_model(
         &[0.0, 4000.0, 7500.0],
         &[("1F", 0.0), ("2F", 4000.0), ("3F", 7500.0)],
     );
+    let coordinates: Vec<_> = model.nodes.iter().map(|n| n.coord).collect();
     let mut undo = UndoStack::new();
-
-    // 標高は据え置かれるが、階名の変更は通る。
-    undo.run(
+    assert!(undo.run(
         &mut model,
         Box::new(SetStoryLevel {
             story: StoryId(0),
-            name: "GL".into(),
-            elevation: 2000.0,
-        }),
+            name: "最下階".into(),
+            elevation: Some(2000.0),
+            sl_offset_mm: Some(-500.0)
+        })
+    ));
+    assert_eq!(model.stories[0].fl_mm(), Some(2000.0));
+    assert_eq!(model.stories[0].sl_mm(), Some(1500.0));
+    assert_eq!(model.layers()[0].height, 2000.0);
+    assert_eq!(
+        model.nodes.iter().map(|n| n.coord).collect::<Vec<_>>(),
+        coordinates
     );
-    assert_eq!(model.stories[0].elevation, 0.0, "基部の標高は変わらない");
-    assert_eq!(model.stories[0].name, "GL", "階名は変えられる");
-    assert_eq!(model.layer_count(), 2, "層は 2 つのまま");
+    assert!(!undo.run(&mut model, Box::new(DeleteStory { story: StoryId(0) })));
+    undo.undo(&mut model);
+    assert_eq!(model.stories[0].fl_mm(), Some(0.0));
+    undo.redo(&mut model);
+    assert_eq!(model.stories[0].fl_mm(), Some(2000.0));
+}
 
-    // 削除は Noop。
-    assert!(
-        !undo.run(&mut model, Box::new(DeleteStory { story: StoryId(0) })),
-        "基部の階は削除できない"
+#[test]
+fn nonfinite_or_reversed_sl_edits_are_atomic_and_missing_levels_can_be_repaired() {
+    let mut model = story_edit_model(
+        &[0.0, 3000.0, 6000.0],
+        &[("1F", 500.0), ("2F", 3500.0), ("3F", 7000.0)],
     );
-    assert_eq!(model.stories.len(), 3);
-    assert_eq!(model.stories[0].elevation, model.base_elevation());
+    let mut undo = UndoStack::new();
+    for (fl, offset) in [
+        (Some(f64::NAN), Some(0.0)),
+        (Some(f64::INFINITY), Some(0.0)),
+        (Some(3500.0), Some(f64::NAN)),
+        (Some(3500.0), Some(f64::INFINITY)),
+        (Some(3500.0), Some(5000.0)),
+        (Some(f64::MAX), Some(f64::MAX)),
+    ] {
+        let original = model.clone();
+        assert!(!undo.run(
+            &mut model,
+            Box::new(SetStoryLevel {
+                story: StoryId(1),
+                name: "2F".into(),
+                elevation: fl,
+                sl_offset_mm: offset
+            })
+        ));
+        assert!(model.eq_ignoring_dofmap(&original));
+    }
+    model.stories[0].elevation = None;
+    model.stories[2].sl_offset_mm = None;
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetStoryLevel {
+            story: StoryId(0),
+            name: "1F".into(),
+            elevation: Some(500.0),
+            sl_offset_mm: Some(-500.0)
+        })
+    ));
+    assert_eq!(model.stories[0].sl_mm(), Some(0.0));
+    assert!(model.stories[2].sl_mm().is_none());
 }
 
 /// 適用待ちコマンドがモデルの変更（階の削除など）の後に残っても、index が
@@ -4857,7 +4886,8 @@ fn test_stale_story_commands_are_noop() {
     let stale_level = Box::new(SetStoryLevel {
         story: StoryId(3),
         name: "RF".into(),
-        elevation: 9000.0,
+        elevation: Some(9000.0),
+        sl_offset_mm: Some(0.0),
     });
     let stale_delete = Box::new(DeleteStory { story: StoryId(3) });
 
@@ -4882,8 +4912,11 @@ fn test_stale_story_commands_are_noop() {
 
 /// 階への複製で使う、準備計算相当の所属階の割り当て（標高で階へ結び付ける）。
 fn assign_node_stories(model: &mut Model) {
-    let stories: Vec<(sepika_core::ids::StoryId, f64)> =
-        model.stories.iter().map(|s| (s.id, s.elevation)).collect();
+    let stories: Vec<(sepika_core::ids::StoryId, f64)> = model
+        .stories
+        .iter()
+        .map(|s| (s.id, s.sl_mm().unwrap()))
+        .collect();
     for n in &mut model.nodes {
         n.story = stories
             .iter()
@@ -7542,7 +7575,7 @@ fn test_copy_story_keeps_sectionless_enclosed_slab() {
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     assign_node_stories(&mut model);
-    let src_z = model.stories[1].elevation;
+    let src_z = model.stories[1].sl_mm().unwrap();
     let src = model
         .slabs
         .iter()
@@ -7552,7 +7585,7 @@ fn test_copy_story_keeps_sectionless_enclosed_slab() {
         })
         .expect("2F の床板");
     model.slabs[src].plate.section = None;
-    let to_z = model.stories[2].elevation;
+    let to_z = model.stories[2].sl_mm().unwrap();
     let doomed: Vec<sepika_core::ids::SlabId> = model
         .slabs
         .iter()
@@ -7606,7 +7639,7 @@ fn test_copy_story_rejects_cft_slab_section_and_reports_it() {
 
     let mut model = frame_model(&FrameSpec::default()).unwrap();
     assign_node_stories(&mut model);
-    let src_z = model.stories[1].elevation;
+    let src_z = model.stories[1].sl_mm().unwrap();
     let src = model
         .slabs
         .iter()
@@ -7617,7 +7650,7 @@ fn test_copy_story_rejects_cft_slab_section_and_reports_it() {
         .expect("2F の床板");
     let cft = push_cft_section(&mut model);
     model.slabs[src].plate.section = Some(cft);
-    let to_z = model.stories[2].elevation;
+    let to_z = model.stories[2].sl_mm().unwrap();
     let doomed: Vec<_> = model
         .slabs
         .iter()
@@ -9159,6 +9192,7 @@ fn issue635_copy_to_6000mm_keeps_exact_endpoints_and_skips_point_and_interval_ov
     use sepika_core::model::{MemberLoad, MemberLoadKind};
     let mut model = frame_model(&FrameSpec {
         story_heights: vec![7000.0, 6000.0],
+        sl_offsets_mm: vec![Some(0.0); 3],
         ..Default::default()
     })
     .unwrap();
@@ -9904,4 +9938,95 @@ mod rc_section_purpose {
             );
         }
     }
+}
+
+#[test]
+fn adding_a_floor_requires_known_existing_fl_without_reordering_partial_input() {
+    let mut model = story_edit_model(
+        &[0.0, 3000.0, 6000.0],
+        &[("A", 0.0), ("B", 3000.0), ("C", 6000.0)],
+    );
+    model.nodes[1].story = Some(StoryId(1));
+    let mut slave = model.nodes[1].clone();
+    slave.id = NodeId(3);
+    slave.coord[0] = 100.0;
+    model.nodes.push(slave);
+    model
+        .constraints
+        .push(sepika_core::model::Constraint::rigid_diaphragm(
+            StoryId(1),
+            NodeId(1),
+            vec![NodeId(3)],
+        ));
+    model.initialize_source_stories().unwrap();
+    let complete = model.clone();
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetStoryLevel {
+            story: StoryId(1),
+            name: "B".into(),
+            elevation: None,
+            sl_offset_mm: Some(0.0)
+        })
+    ));
+    let partial = model.clone();
+    let revision = undo.revision();
+    assert!(!undo.run(
+        &mut model,
+        Box::new(AddStory {
+            name: "D".into(),
+            elevation: Some(9000.0),
+            sl_offset_mm: Some(0.0)
+        })
+    ));
+    let error = undo.last_error().unwrap();
+    assert!(error.contains("階 1") && error.contains("FL"), "{error}");
+    assert_eq!(undo.revision(), revision);
+    assert!(model.eq_ignoring_dofmap(&partial));
+    model.validate_reference_ids().unwrap();
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&complete));
+    undo.redo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&partial));
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetStoryLevel {
+            story: StoryId(1),
+            name: "B".into(),
+            elevation: Some(3000.0),
+            sl_offset_mm: Some(0.0)
+        })
+    ));
+    assert!(model.eq_ignoring_dofmap(&complete));
+    assert!(undo.run(
+        &mut model,
+        Box::new(AddStory {
+            name: "D".into(),
+            elevation: Some(9000.0),
+            sl_offset_mm: Some(0.0)
+        })
+    ));
+    assert_eq!(
+        model
+            .stories
+            .iter()
+            .map(|s| (s.id, s.name.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (StoryId(0), "A"),
+            (StoryId(1), "B"),
+            (StoryId(2), "C"),
+            (StoryId(3), "D")
+        ]
+    );
+    assert_eq!(model.source_stories[..3], complete.source_stories);
+    assert_eq!(model.nodes, complete.nodes);
+    assert_eq!(model.constraints, complete.constraints);
+    model.validate_reference_ids().unwrap();
+    let added = model.clone();
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&complete));
+    undo.redo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&added));
 }

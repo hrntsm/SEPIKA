@@ -163,7 +163,9 @@ pub fn expanded_model() -> Model {
         model.stories.push(Story {
             id: StoryId(i),
             name: format!("{}F", i + 1),
-            elevation: f64::from(i) * 3000.0,
+            elevation: Some(f64::from(i) * 3000.0),
+            sl_offset_mm: Some(0.0),
+            source_story: None,
             node_ids: vec![NodeId(i * 2), NodeId(i * 2 + 1)],
             seismic_weight: Some(1_000_000.0),
             weight_override: Some(1_000_000.0),

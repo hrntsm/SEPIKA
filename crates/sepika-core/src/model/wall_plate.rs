@@ -534,35 +534,78 @@ impl Model {
     /// - 下端より上に階レベルが無い（最上階の壁）。パラペットのように最上階で上へ
     ///   伸ばす壁は、上端を決める階が無いので絶対寸法で指定する
     pub fn wall_plate_extent(&self, plate: &WallPlate) -> Option<[f64; 2]> {
-        let WallPlateShape::Attached { anchor, extent } = &plate.shape else {
-            return None;
-        };
-        if let Some(e) = extent {
-            return Some(*e);
-        }
-        let RegionAnchor::FloorRegion { nodes } = anchor else {
-            return None;
-        };
-        let a = self.nodes.get(nodes[0].index())?.coord[2];
-        let b = self.nodes.get(nodes[1].index())?.coord[2];
-        let h = self.story_height_above((a + b) / 2.0)?;
-        Some([h, h])
+        self.try_wall_plate_extent(plate).ok()
     }
 
-    /// レベル `z` `[mm]` から**直上の階レベル**までの高さ `[mm]`。
-    ///
-    /// 階レベルは床レベル列（[`Story::elevation`]）なので、`z` より上にある最も低い
-    /// 階レベルとの差がその位置の階高になる。`z` と同じレベルの階は、床そのもので
-    /// あって「上」ではないため対象にしない（[`crate::model::DIAPHRAGM_LEVEL_TOL_MM`]
-    /// の許容差で同一とみなす）。直上に階が無ければ `None`。
+    /// 壁版の立ち上がり高さ [mm]。必要な階・取付き節点が未解決の場合は原因を返す。
+    pub fn try_wall_plate_extent(&self, plate: &WallPlate) -> Result<[f64; 2], String> {
+        let WallPlateShape::Attached { anchor, extent } = &plate.shape else {
+            return Err("取り付く壁版ではありません".into());
+        };
+        if let Some(e) = extent {
+            return Ok(*e);
+        }
+        let RegionAnchor::FloorRegion { nodes } = anchor else {
+            return Err("階高による高さには床領域の取付き先が必要です".into());
+        };
+        let z = |id: NodeId| {
+            self.nodes
+                .get(id.index())
+                .filter(|node| node.id == id)
+                .map(|node| node.coord[2])
+                .ok_or_else(|| format!("取付き節点 {} が存在しません", id.0))
+        };
+        let h = self.try_story_height_above(z(nodes[0])? / 2.0 + z(nodes[1])? / 2.0)?;
+        Ok([h, h])
+    }
+
+    /// 標高 z [mm] から直上の SL までの高さ [mm]。必要な階が未解決なら None。
     pub fn story_height_above(&self, z: f64) -> Option<f64> {
-        let tol = crate::model::DIAPHRAGM_LEVEL_TOL_MM;
-        self.stories
-            .iter()
-            .map(|s| s.elevation)
-            .filter(|e| *e > z + tol)
-            .fold(None::<f64>, |acc, e| Some(acc.map_or(e, |a: f64| a.min(e))))
-            .map(|e| e - z)
+        self.try_story_height_above(z).ok()
+    }
+
+    /// 直上 SL までの高さ [mm]。階順に必要な FL・ΔSL を検査し、不足・不正は階 ID 付きで返す。
+    pub fn try_story_height_above(&self, z: f64) -> Result<f64, String> {
+        let threshold = z + crate::model::DIAPHRAGM_LEVEL_TOL_MM;
+        if !z.is_finite() || !threshold.is_finite() {
+            return Err("壁の下端標高は有限値が必要です".into());
+        }
+        let diagnostics = self.story_level_input_diagnostics();
+        if !diagnostics.is_empty() {
+            return Err(diagnostics.join("; "));
+        }
+        for story in &self.stories {
+            if story.elevation.is_none() {
+                return Err(format!(
+                    "階 {} ({}): FL が未設定です",
+                    story.id.0, story.name
+                ));
+            }
+            if story.sl_offset_mm.is_none() {
+                return Err(format!(
+                    "階 {} ({}): ΔSL が未設定です",
+                    story.id.0, story.name
+                ));
+            }
+            let sl = story.sl_mm().ok_or_else(|| {
+                format!(
+                    "階 {} ({}): SL が有限値ではありません",
+                    story.id.0, story.name
+                )
+            })?;
+            if sl > threshold {
+                let height = sl - z;
+                return if height.is_finite() {
+                    Ok(height)
+                } else {
+                    Err(format!(
+                        "階 {} ({}): SL と壁下端の差が有限値ではありません",
+                        story.id.0, story.name
+                    ))
+                };
+            }
+        }
+        Err("壁の下端より上の SL が未定義です".into())
     }
 
     /// 壁版の自重 `[N]`。躯体（開口控除後の正味面積 × 板厚 × 主材料の設計単位体積重量）
@@ -1174,7 +1217,9 @@ mod tests {
                 wall_weights: Vec::new(),
                 id: StoryId(i as u32),
                 name: format!("{i}F"),
-                elevation: z,
+                elevation: Some(z),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: vec![],
                 seismic_weight: None,
                 weight_override: None,
@@ -1209,6 +1254,66 @@ mod tests {
         m.stories.truncate(1);
         assert_eq!(m.wall_plate_extent(&p), None);
         assert_eq!(m.wall_plate_self_weight(&p, &m), None);
+    }
+
+    #[test]
+    fn automatic_wall_height_never_skips_an_unresolved_floor() {
+        let mut m = model_with_nodes(&[[0.0, 0.0, 0.0], [4000.0, 0.0, 0.0]]);
+        m.stories = [0.0, 3000.0, 6000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                Story::new(
+                    crate::ids::StoryId(i as u32),
+                    format!("{i}F"),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect();
+        let p = WallPlate {
+            id: WallPlateId(0),
+            shape: WallPlateShape::Attached {
+                anchor: RegionAnchor::FloorRegion {
+                    nodes: [NodeId(0), NodeId(1)],
+                },
+                extent: None,
+            },
+            section: None,
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: vec![],
+            loads: vec![],
+            slit: Default::default(),
+            self_weight_shares: vec![],
+            dl_support: None,
+        };
+        for field in ["FL", "ΔSL"] {
+            let mut incomplete = m.clone();
+            if field == "FL" {
+                incomplete.stories[1].elevation = None;
+            } else {
+                incomplete.stories[1].sl_offset_mm = None;
+            }
+            let before = incomplete.clone();
+            assert_eq!(incomplete.story_height_above(0.0), None);
+            let error = incomplete.try_wall_plate_extent(&p).unwrap_err();
+            assert!(error.contains("階 1") && error.contains(field), "{error}");
+            assert_eq!(incomplete.wall_plate_extent(&p), None);
+            assert_eq!(p.boundary_coords(&incomplete), None);
+            assert_eq!(incomplete.wall_plate_self_weight(&p, &incomplete), None);
+            assert!(incomplete.eq_ignoring_dofmap(&before));
+            let mut explicit = p.clone();
+            if let WallPlateShape::Attached { extent, .. } = &mut explicit.shape {
+                *extent = Some([1000.0; 2]);
+            }
+            assert_eq!(incomplete.wall_plate_extent(&explicit), Some([1000.0; 2]));
+        }
+        assert_eq!(m.story_height_above(0.0), Some(3000.0));
+        assert_eq!(m.wall_plate_extent(&p), Some([3000.0; 2]));
+        m.stories[2].sl_offset_mm = None;
+        assert_eq!(m.story_height_above(0.0), Some(3000.0));
+        assert_eq!(m.story_height_above(3000.0), None);
     }
 
     #[test]

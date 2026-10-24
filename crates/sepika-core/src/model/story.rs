@@ -1,34 +1,8 @@
-//! 階・層関連の型。
-//!
-//! **階（[`Story`]）は床であり、層（[`Layer`]）は隣り合う 2 つの床の間である。**
-//! [`Model::stories`] は基部の床から屋根の床までの床レベル列で、
-//! **先頭は必ず基部**（`stories[0].elevation == ` [`Model::base_elevation`]）。
-//! これを不変条件とし、階生成（`sepika_load::story_gen`）が必ず成立させる。
-//! したがって層の数は階の数より 1 つ少ない。
-//!
-//! 法規上の「i 階」（層間変形角・層せん断力・剛性率・偏心率が対象とする範囲）は
-//! 層のことであり、[`Model::layers`] が唯一の情報源である。層を数える処理は
-//! [`Model::stories`] を直接走査してはならない（1 つ多く数えてしまう）。
-//!
-//! 層と床の対応は実務の慣行に合わせる（[`Layer`] 参照）。層の名前は**下端床**、
-//! 重量・所属節点・階種別は**上端床**から採る。層 i の重量 Wi が上端床の重量なのは、
-//! `Q1 = C1·(W1+W2+…)` が成り立つためである（基部の重量は地盤が直接受けるので
-//! 最下層のせん断力に寄与しない）。
-//!
-//! **階と剛床も別の概念である。** 階が剛床を持たないことも、1 つの階が複数の
-//! 剛床を持つこと（段差床）もある。そのため剛床は階の一部としてではなく、拘束
-//! （[`Constraint::RigidDiaphragm`]）として単一の情報源に保持する。
-//! 階から剛床を引くときは [`Model::diaphragms_of`] を使う。
-//!
-//! - [`DiaphragmRef`] — 階に属する剛床の参照ビュー。
-//! - [`StoryStructure`] — 階の主要構造種別。
-//! - [`StoryLevelKind`] — 層の種別（一般／PH／地下）。
-//! - [`Story`] — 階（床）の定義。
-//! - [`Layer`] — 層（階と階の間）。[`Model::layers`] が組み立てる導出値。
+//! 階は FL と ΔSL を入力として保持し、SL と隣接階の高さを導出する。
 
 use super::*;
 
-/// 剛床のレベル許容差 `[mm]`。剛床のスレーブ節点は「階のレベルからこの範囲内に
+/// 剛床のレベル許容差 `[mm]`。剛床のスレーブ節点は「階の SL からこの範囲内に
 /// ある節点」とする（[`Model::on_diaphragm_level`]）。
 ///
 /// 階への帰属（[`crate::model::Model::story_at`]）が**区間**であるのに対し、剛床への
@@ -37,19 +11,8 @@ use super::*;
 /// 節点だけであり、中間節点を含めると存在しない水平剛性が生じるためである。
 pub const DIAPHRAGM_LEVEL_TOL_MM: f64 = 1.0;
 
-/// 階名が与えられていないときの既定の階名（**床基準**）。
-///
-/// 階は床そのものである（[`Story::elevation`] はその階が代表する床のレベル）ため、
-/// 階名も床の呼び名に合わせる。下から `index` 番目（0 始まり）の階は
-/// `index == 0` が基部の床であり、`1F`・`2F` … と付ける。
-///
-/// 最上階も `RF` とはせず数字で通す。モデルの最上レベルが本当に屋根なのかは
-/// モデルからは決められず（塔屋の床であることも、あとで上へ階を足すこともある）、
-/// 確定していないものを屋根と名乗らせないためである。屋根であれば利用者が
-/// `RF` へ付け替える。
-///
-/// ST-Bridge の `StbStory` も床基準（`1F` の `height` が GL）であるため、
-/// 取り込んだモデルとアプリ内で作ったモデルで階名の意味が一致する。
+/// 下から 0 始まりの `index` に対して 1F・2F… の既定階名を返す。
+/// 最上階も自動で RF とはしない。
 pub fn default_story_name(index: usize) -> String {
     format!("{}F", index + 1)
 }
@@ -246,27 +209,18 @@ impl StoryFireproof {
     }
 }
 
-/// 階（床）の定義。法規上の「層」は [`Layer`] である。
-///
-/// フィールドは**誰が決めるか**で 2 系統に分かれる。
-///
-/// - **利用者が決める**: [`Self::name`]・[`Self::elevation`]・[`Self::level_kind`]・
-///   [`Self::weight_override`]・[`Self::column_finish_area_weight`]・[`Self::fireproof`]。
-///   新規作成時の入力、または ST-Bridge の `StbStory` から入り、準備計算では書き換えない。
-///   STB 元属性と明示所属は [`Model::source_stories`] に独立して保存する。
-/// - **準備計算が埋める**: [`Self::node_ids`]・[`Self::seismic_weight`]・
-///   [`Self::structure`]。節点と部材が確定してはじめて決まる派生値であり、階生成のたびに算定し直す。
-///
-/// [`Model::stories`] は [`Self::elevation`] の**昇順**に並び、**先頭は基部の床**
-/// （[`Model::base_elevation`] と同レベル）である。階への帰属区間が直下階のレベルで決まる。
+/// 階の入力と準備計算で得られる所属・重量。FL・ΔSL の単位は mm。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Story {
     pub id: StoryId,
-    /// 階名（`2F`・`PH1` など）。利用者が決める自由文字列で、階の識別に用いる。
+    /// 階名（`2F`・`PH1` など）。表示用の自由文字列。識別子は `id`。
     pub name: String,
-    /// 階のレベル `[mm]`。**その階が代表する床のレベル**であり、階への帰属区間の
-    /// 上端でもある（[`crate::model::Model::story_at`]）。
-    pub elevation: f64,
+    /// FL（床上端の基準標高）[mm]。`None` は未入力。
+    pub elevation: Option<f64>,
+    /// SL − FL [mm]。上向きを正とし、`None` は未入力。
+    pub sl_offset_mm: Option<f64>,
+    /// 取込元の原階 ID。現在の FL・SL の編集では元属性を変更しない。
+    pub source_story: Option<u32>,
     /// この階に属する節点（準備計算が [`crate::model::Model::story_at`] で埋める）。
     pub node_ids: Vec<NodeId>,
     /// 設計に用いる地震用重量 `[N]`。準備計算の階生成が自動算定値を書き込むが、
@@ -331,9 +285,15 @@ pub struct Layer {
     pub top: StoryId,
     /// 層の高さ（階高）`[mm]`。
     pub height: f64,
-    /// 下端床の標高 `[mm]`。
+    /// 上下階の SL 間高さ [mm]。
+    pub structural_height_mm: f64,
+    /// 下端階 SL [mm]。
+    pub bottom_sl_mm: f64,
+    /// 上端階 SL [mm]。
+    pub top_sl_mm: f64,
+    /// 下端階の FL `[mm]`。
     pub bottom_elevation: f64,
-    /// 上端床の標高 `[mm]`。
+    /// 上端階の FL `[mm]`。
     pub top_elevation: f64,
     /// 層の種別（一般/PH/地下）。
     pub level_kind: StoryLevelKind,
@@ -347,7 +307,226 @@ pub struct Layer {
     pub dynamic_mass: Option<StoryDynamicMass>,
 }
 
+impl Story {
+    /// 階 ID・名称・FL・ΔSL [mm] を保持する未算定の階を作る。
+    pub fn new(
+        id: StoryId,
+        name: String,
+        elevation: Option<f64>,
+        sl_offset_mm: Option<f64>,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            elevation,
+            sl_offset_mm,
+            source_story: None,
+            node_ids: Vec::new(),
+            seismic_weight: None,
+            weight_override: None,
+            structure: Default::default(),
+            level_kind: Default::default(),
+            dynamic_mass: None,
+            standard_floor_load: None,
+            column_finish_area_weight: 0.0,
+            fireproof: Default::default(),
+            wall_weights: Vec::new(),
+        }
+    }
+
+    /// FL [mm] を返す。未入力・非有限値は `None`。
+    pub fn fl_mm(&self) -> Option<f64> {
+        self.elevation.filter(|v| v.is_finite())
+    }
+
+    /// SL [mm] を返す。FL・ΔSL の不足または非有限な導出値は `None`。
+    pub fn sl_mm(&self) -> Option<f64> {
+        let sl = self.fl_mm()? + self.sl_offset_mm.filter(|v| v.is_finite())?;
+        sl.is_finite().then_some(sl)
+    }
+}
+
 impl Model {
+    /// 階 ID・FL・ΔSL・SL と上下階差の不足・不正を階別に返す。
+    pub fn story_level_diagnostics(&self) -> Vec<String> {
+        self.story_level_errors(true)
+    }
+
+    /// 未入力を許容し、入力済み FL・ΔSL・SL・階順と参照の不正を返す。
+    pub fn story_level_input_diagnostics(&self) -> Vec<String> {
+        self.story_level_errors(false)
+    }
+
+    fn story_level_errors(&self, require_complete: bool) -> Vec<String> {
+        let mut errors = Vec::new();
+        if require_complete && self.stories.len() < 2 {
+            errors.push("階情報: 最下層を構成する上下階の FL・ΔSL を入力してください".into());
+        }
+        for (i, story) in self.stories.iter().enumerate() {
+            let owner = format!("階 {} ({})", story.id.0, story.name);
+            if story.id.index() != i {
+                errors.push(format!("{owner}: 階IDと配列位置が不整合"));
+            }
+            if (require_complete || story.elevation.is_some()) && story.fl_mm().is_none() {
+                errors.push(format!("{owner}: FL が未設定または有限値ではありません"));
+            }
+            if (require_complete || story.sl_offset_mm.is_some())
+                && story.sl_offset_mm.is_none_or(|v| !v.is_finite())
+            {
+                errors.push(format!("{owner}: ΔSL が未設定または有限値ではありません"));
+            }
+            if story.fl_mm().is_some()
+                && story.sl_offset_mm.is_some_and(f64::is_finite)
+                && story.sl_mm().is_none()
+            {
+                errors.push(format!("{owner}: SL の導出結果が有限値ではありません"));
+            }
+            if let Some(id) = story.source_story {
+                if !self.source_stories.iter().any(|s| s.id == id) {
+                    errors.push(format!("{owner}: 原階 {id} が存在しません"));
+                }
+            }
+            if i > 0 {
+                let lower = &self.stories[i - 1];
+                for (field, bottom, top) in [
+                    ("FL", lower.fl_mm(), story.fl_mm()),
+                    ("SL", lower.sl_mm(), story.sl_mm()),
+                ] {
+                    if let (Some(bottom), Some(top)) = (bottom, top) {
+                        let height = top - bottom;
+                        if !height.is_finite() || height <= 0.0 {
+                            errors.push(format!(
+                                "{owner}: 直下階 {} との {field} 間高さは有限な正値が必要です",
+                                lower.id.0
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        errors
+    }
+
+    /// 階依存の生成に必要な入力・SL 所属区間・利用者剛床を検査する。
+    /// 重量・材料・荷重の完成度とは独立し、既存の座標・拘束は変更しない。
+    pub fn validate_story_structure_inputs(&self) -> Result<(), String> {
+        let errors: Vec<_> = self
+            .story_level_diagnostics()
+            .into_iter()
+            .chain(self.source_story_diagnostics())
+            .collect();
+        if !errors.is_empty() {
+            return Err(errors.join("; "));
+        }
+        if self.base_elevation() > self.stories[0].sl_mm().unwrap() {
+            return Err(format!(
+                "階 {}: SL が構造最下端より低く、所属区間が成立しません",
+                self.stories[0].id.0
+            ));
+        }
+        let spans = self.story_spans();
+        let structural = crate::dof::structural_nodes(self);
+        let owner = |node: &Node| {
+            self.explicit_story_of_node(node.id)
+                .or_else(|| self.story_at(&spans, node.coord[2]))
+        };
+        for node in self
+            .nodes
+            .iter()
+            .filter(|node| !self.generated_masters.contains(&node.id))
+        {
+            match owner(node) {
+                Some(story)
+                    if self
+                        .stories
+                        .get(story.index())
+                        .is_none_or(|s| s.id != story) =>
+                {
+                    return Err(format!("節点 {}: 階 {} が存在しません", node.id.0, story.0))
+                }
+                None if structural.get(node.id.index()).copied().unwrap_or(false) => {
+                    return Err(format!(
+                        "節点 {}: SL 区間内の所属階を解決できません",
+                        node.id.0
+                    ))
+                }
+                _ => {}
+            }
+        }
+        for constraint in self
+            .constraints
+            .iter()
+            .filter(|c| !self.is_automatic_seismic_diaphragm(c))
+        {
+            if let Constraint::RigidDiaphragm {
+                story,
+                master,
+                slaves,
+                ..
+            } = constraint
+            {
+                let Some(level) = self.stories.get(story.index()).filter(|s| s.id == *story) else {
+                    return Err(format!("剛床: 階 {} が存在しません", story.0));
+                };
+                if self.node(*master).is_none() {
+                    return Err(format!(
+                        "階 {} の剛床マスター {} が存在しません",
+                        story.0, master.0
+                    ));
+                }
+                if slaves.is_empty()
+                    || slaves.iter().any(|id| {
+                        self.node(*id).is_none_or(|node| {
+                            owner(node) != Some(*story)
+                                || !self.on_diaphragm_level(*story, node.coord[2])
+                        })
+                    })
+                {
+                    return Err(format!(
+                        "階 {} ({}) の利用者剛床に SL 面上の所属節点が不足しています",
+                        story.0, level.name
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 保存された明示所属を返す。自動生成時の所属値は除外する。
+    pub fn explicit_story_of_node(&self, node: NodeId) -> Option<StoryId> {
+        if let Some(story) = self.stories.iter().find(|story| {
+            story.source_story.is_some_and(|source| {
+                self.source_stories
+                    .iter()
+                    .any(|s| s.id == source && s.node_ids.iter().any(|n| n.node == Some(node)))
+            })
+        }) {
+            return Some(story.id);
+        }
+        let story = self
+            .node(node)?
+            .story
+            .filter(|id| {
+                self.stories
+                    .get(id.index())
+                    .is_none_or(|story| story.source_story.is_none())
+            })
+            .or_else(|| {
+                self.stories
+                    .iter()
+                    .find(|s| s.source_story.is_none() && s.node_ids.contains(&node))
+                    .map(|s| s.id)
+            })?;
+        if self
+            .seismic_weight_generation
+            .as_ref()
+            .is_some_and(|record| record.automatic_node_stories.contains(&(node, story)))
+        {
+            return None;
+        }
+        Some(story)
+    }
+
     pub fn is_rc_src_column(&self, elem: &ElementData) -> bool {
         elem.kind.is_weight_frame()
             && self.element_section(elem).is_some_and(|sec| {
@@ -360,12 +539,11 @@ impl Model {
             })
     }
 
-    /// 層（[`Layer`]）の一覧を下から順に返す。**層を数える処理の唯一の入口**。
-    ///
-    /// 階が床レベル列であるという不変条件（モジュールドキュメント参照）から、
-    /// 層は隣り合う階の対そのものであり、層数は `stories.len() - 1` である。
-    /// 階が 1 つ以下のモデルでは空を返す。
+    /// 入力済みの隣接階対から層を返す。階情報が不成立なら空。
     pub fn layers(&self) -> Vec<Layer> {
+        if !self.story_level_diagnostics().is_empty() {
+            return Vec::new();
+        }
         self.stories
             .windows(2)
             .enumerate()
@@ -376,9 +554,12 @@ impl Model {
                     name: bottom.name.clone(),
                     bottom: bottom.id,
                     top: top.id,
-                    height: top.elevation - bottom.elevation,
-                    bottom_elevation: bottom.elevation,
-                    top_elevation: top.elevation,
+                    height: top.fl_mm().unwrap() - bottom.fl_mm().unwrap(),
+                    structural_height_mm: top.sl_mm().unwrap() - bottom.sl_mm().unwrap(),
+                    bottom_elevation: bottom.fl_mm().unwrap(),
+                    bottom_sl_mm: bottom.sl_mm().unwrap(),
+                    top_elevation: top.fl_mm().unwrap(),
+                    top_sl_mm: top.sl_mm().unwrap(),
                     level_kind: top.level_kind,
                     weight: top.seismic_weight,
                     node_ids: top.node_ids.clone(),
@@ -396,17 +577,7 @@ impl Model {
         self.stories.len().saturating_sub(1)
     }
 
-    /// 建物の基部レベル `[mm]`（`elevation` の基準 0）。**幾何としての基部**。
-    ///
-    /// 全構造節点（`generated_masters` ＝階生成が作る剛床代表節点を除く）の最小 Z
-    /// 座標を基部とする。剛床代表節点は慣性力重心に置かれる仮想節点であり、実際の
-    /// 構造高さには寄与しないため除外する。節点がない場合は 0 を返す。
-    ///
-    /// 不変条件が成立していれば `stories[0].elevation` と一致する。にもかかわらず
-    /// 節点から求めるのは、**階生成が不変条件を成立させる側**だからである。階生成は
-    /// まだ床基準になっていない階列（あるいは階が 1 つもないモデル）から床レベル列を
-    /// 組み立てるため、そのブートストラップには階に依らない基部が要る。
-    /// 帰属区間（[`Self::story_spans`]）は不変条件を前提とするのでこれを呼ばない。
+    /// 構造節点（生成代表節点を除く）の最小 Z [mm]。節点なしは 0。
     pub fn base_elevation(&self) -> f64 {
         let excluded: std::collections::HashSet<NodeId> =
             self.generated_masters.iter().copied().collect();
@@ -423,38 +594,22 @@ impl Model {
         }
     }
 
-    /// 各階への帰属区間 `(下端, 上端]` `[mm]`（[`Self::stories`] と同順・同長）。
-    ///
-    /// 下端は直下階のレベル、上端は当該階のレベルである。**下端は含まず上端を含む**
-    /// ため、床レベルちょうどの節点はその階に属し、中間高さの節点は直上の階に属する。
-    ///
-    /// **最下階（基部の床）だけは下端を含む点区間** `[基部, 基部]` とする。
-    /// 不変条件により最下階の標高は基部レベルそのものであり、`(下端, 上端]` の規則を
-    /// そのまま当てはめると空区間になって柱脚・基礎梁の節点がどの階にも属さなくなる
-    /// ためである。
-    ///
-    /// 区間の算出はここに集約する。
-    ///
-    /// 最下階の下端は `stories[0].elevation` と [`Self::base_elevation`] の**小さい方**
-    /// とする。不変条件が成立していれば両者は一致するので通常は前者そのものだが、
-    /// 不変条件がまだ成立していないモデル（階生成を通していない旧形式のファイル、
-    /// 基部の階を持たない取り込みデータ）では基部側が下端になり、基部〜最下階の
-    /// 節点が最下階へ収まる。これがないと、そうしたモデルで最下階の伏図が空になり、
-    /// 節点が丸ごとどの階にも属さなくなる。
+    /// SL を境界とする所属区間 (下端, 上端] [mm]。最下階のみ構造最下端を含む。
+    /// 階情報の不足・逆転時は空。
     pub fn story_spans(&self) -> Vec<(f64, f64)> {
-        let first_bottom = self
-            .stories
-            .first()
-            .map(|s| s.elevation.min(self.base_elevation()));
+        if !self.story_level_diagnostics().is_empty() {
+            return Vec::new();
+        }
         self.stories
             .iter()
             .enumerate()
             .map(|(i, s)| {
-                let bottom = match i {
-                    0 => first_bottom.unwrap_or(s.elevation),
-                    _ => self.stories[i - 1].elevation,
+                let bottom = if i == 0 {
+                    self.base_elevation()
+                } else {
+                    self.stories[i - 1].sl_mm().unwrap()
                 };
-                (bottom, s.elevation)
+                (bottom, s.sl_mm().unwrap())
             })
             .collect()
     }
@@ -485,7 +640,10 @@ impl Model {
         let spans = self.story_spans();
         self.nodes
             .iter()
-            .map(|n| self.story_at(&spans, n.coord[2]))
+            .map(|n| {
+                self.explicit_story_of_node(n.id)
+                    .or_else(|| self.story_at(&spans, n.coord[2]))
+            })
             .collect()
     }
 
@@ -496,7 +654,8 @@ impl Model {
     pub fn on_diaphragm_level(&self, story: StoryId, z: f64) -> bool {
         self.stories
             .get(story.index())
-            .is_some_and(|s| (z - s.elevation).abs() <= DIAPHRAGM_LEVEL_TOL_MM)
+            .and_then(Story::sl_mm)
+            .is_some_and(|sl| (z - sl).abs() <= DIAPHRAGM_LEVEL_TOL_MM)
     }
 
     /// 階 `story` に属する剛床（[`Constraint::RigidDiaphragm`]）を定義順に返す。
@@ -530,5 +689,112 @@ impl Model {
             }
             _ => false,
         })
+    }
+}
+
+#[cfg(test)]
+mod level_tests {
+    use super::*;
+    use crate::frame_gen::{frame_model, FrameSpec};
+
+    fn model() -> Model {
+        frame_model(&FrameSpec {
+            base_elevation: 3500.0,
+            story_heights: vec![3500.0],
+            sl_offsets_mm: vec![Some(-500.0), Some(-600.0)],
+            with_slabs: false,
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn fl_and_sl_have_distinct_heights_and_structure_coordinates() {
+        let mut m = model();
+        assert_eq!(m.stories[0].sl_mm(), Some(3000.0));
+        assert_eq!(m.stories[1].sl_mm(), Some(6400.0));
+        let layer = &m.layers()[0];
+        assert_eq!((layer.bottom, layer.top), (StoryId(0), StoryId(1)));
+        assert_eq!((layer.height, layer.structural_height_mm), (3500.0, 3400.0));
+        assert_eq!(
+            (layer.bottom_elevation, layer.top_elevation),
+            (3500.0, 7000.0)
+        );
+        assert_eq!((layer.bottom_sl_mm, layer.top_sl_mm), (3000.0, 6400.0));
+        assert_eq!(m.base_elevation(), 3000.0);
+        assert!(m
+            .nodes
+            .iter()
+            .all(|n| [3000.0, 6400.0].contains(&n.coord[2])));
+        assert!(m
+            .nodes
+            .iter()
+            .filter(|n| n.coord[2] == 3000.0)
+            .all(|n| n.restraint != crate::dof::Dof6Mask::FREE));
+        let coordinates: Vec<_> = m.nodes.iter().map(|n| n.coord).collect();
+        m.stories[1].sl_offset_mm = Some(200.0);
+        assert_eq!(m.layers()[0].height, 3500.0);
+        assert_eq!(m.layers()[0].structural_height_mm, 4200.0);
+        m.stories[1].elevation = Some(7500.0);
+        assert_eq!(m.layers()[0].height, 4000.0);
+        assert_eq!(
+            m.nodes.iter().map(|n| n.coord).collect::<Vec<_>>(),
+            coordinates
+        );
+    }
+
+    #[test]
+    fn signed_offsets_and_sl_membership_use_the_same_floor_id() {
+        let mut m = model();
+        for offset in [-500.0, 0.0, 500.0] {
+            m.stories[1].sl_offset_mm = Some(offset);
+            let sl = 7000.0 + offset;
+            assert_eq!(m.stories[1].sl_mm(), Some(sl));
+            assert_eq!(m.story_at(&m.story_spans(), sl), Some(StoryId(1)));
+            assert!(m.on_diaphragm_level(StoryId(1), sl));
+            assert!(!m.on_diaphragm_level(StoryId(1), sl - 100.0));
+        }
+    }
+
+    #[test]
+    fn incomplete_nonfinite_overflow_or_reversed_levels_never_supply_layers() {
+        let base = model();
+        let invalid: [fn(&mut Model); 11] = [
+            |m| m.stories[0].elevation = None,
+            |m| m.stories[1].sl_offset_mm = None,
+            |m| m.stories[1].elevation = Some(f64::NAN),
+            |m| m.stories[1].sl_offset_mm = Some(f64::INFINITY),
+            |m| m.stories[1].elevation = Some(3500.0),
+            |m| m.stories[1].elevation = Some(1000.0),
+            |m| m.stories[1].sl_offset_mm = Some(-5000.0),
+            |m| {
+                m.stories[1].elevation = Some(f64::MAX);
+                m.stories[1].sl_offset_mm = Some(f64::MAX);
+            },
+            |m| {
+                m.stories[0].elevation = Some(-f64::MAX);
+                m.stories[0].sl_offset_mm = Some(0.0);
+                m.stories[1].elevation = Some(f64::MAX);
+                m.stories[1].sl_offset_mm = Some(0.0);
+            },
+            |m| m.stories[1].id = StoryId(8),
+            |m| m.stories[1].source_story = Some(999),
+        ];
+        for corrupt in invalid {
+            let mut m = base.clone();
+            corrupt(&mut m);
+            assert!(!m.story_level_diagnostics().is_empty());
+            assert!(m.layers().is_empty());
+            assert!(m.story_spans().is_empty());
+        }
+    }
+
+    #[test]
+    fn frame_input_never_fills_missing_offsets() {
+        let mut spec = FrameSpec::default();
+        spec.sl_offsets_mm[1] = None;
+        assert!(frame_model(&spec).unwrap_err().contains("階 1"));
+        spec.sl_offsets_mm.clear();
+        assert!(frame_model(&spec).unwrap_err().contains("ΔSL"));
     }
 }

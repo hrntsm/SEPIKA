@@ -46,7 +46,21 @@ fn wall_weight() -> f64 {
 }
 
 fn wall_post_model() -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: [0.0, 3000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                sepika_core::model::Story::new(
+                    sepika_core::ids::StoryId(i as u32),
+                    format!("{}F", i + 1),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
 
     // 節点: 柱脚 4（固定）・柱頭 4（自由）・間柱の上下端 2（要素非接続）。
     let plan = [[0.0, 0.0], [4000.0, 0.0], [4000.0, 3000.0], [0.0, 3000.0]];

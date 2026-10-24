@@ -67,8 +67,8 @@ pub fn prepare_model_for_analysis(
     prepare_model(model, settings, design_period, false)
 }
 
-/// 明示準備では階未定義時に床レベルを初期化し、解析直前では既存階を保持する。
-/// 地震力算定不能は旧 Auto EX/EY を両方除去し、独立した重力解析を許す。
+/// 階に依存する準備では FL・ΔSL の明示入力を要求し、不足・所属不成立時は停止する。
+/// 階を持たない低水準の重力解析は `initialize_stories = false` で利用できる。
 /// 全ケースの部材荷重方向が不正なら、モデルを変更せずエラーを返す。
 pub fn prepare_model(
     model: &mut Model,
@@ -91,6 +91,12 @@ pub fn prepare_model(
     let rebar_errors = model.stb_rebar_analysis_diagnostics();
     if !rebar_errors.is_empty() {
         return Err(JobError::InvalidInput(rebar_errors.join("; ")));
+    }
+    if initialize_stories || !model.stories.is_empty() {
+        if let Err(error) = model.validate_story_structure_inputs() {
+            invalidate_design_weights(model);
+            return Err(JobError::InvalidInput(error));
+        }
     }
     let mut work = model.clone();
     let _ = work.anchorize_secondary_members();
@@ -261,6 +267,7 @@ fn invalidate_generated_weights(model: &mut Model) {
             input_key: Vec::new(),
             output_key: Vec::new(),
             calculated_weights: Vec::new(),
+            automatic_node_stories: Vec::new(),
             automatic_diaphragms: Vec::new(),
             automatic_master_restraints: Vec::new(),
         }
@@ -297,6 +304,18 @@ mod tests {
         use sepika_core::model::{FrameSectionUse, Material, MaterialCategory, PanelZoneMode};
         let mut model = Model {
             panel_zone: PanelZoneMode::Model,
+            stories: [0.0, 3000.0, 6000.0]
+                .into_iter()
+                .enumerate()
+                .map(|(i, fl)| {
+                    sepika_core::model::Story::new(
+                        sepika_core::ids::StoryId(i as u32),
+                        format!("{}F", i + 1),
+                        Some(fl),
+                        Some(0.0),
+                    )
+                })
+                .collect(),
             ..Default::default()
         };
         for (i, coord) in [
@@ -515,6 +534,7 @@ mod tests {
                         input_key: vec![1, 2],
                         output_key: vec![3, 4],
                         calculated_weights: vec![(sepika_core::ids::StoryId(0), 1234.0)],
+                        automatic_node_stories: Vec::new(),
                         automatic_diaphragms: vec![],
                         automatic_master_restraints: vec![(NodeId(2), Default::default())],
                     });

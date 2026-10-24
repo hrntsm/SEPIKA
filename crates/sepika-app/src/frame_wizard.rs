@@ -205,7 +205,11 @@ fn spans_section(
 /// 階高と階名の入力欄。
 fn stories_section(ui: &mut egui::Ui, w: &mut FrameWizardState) {
     ui.group(|ui| {
-        ui.strong("階");
+        ui.strong("階（階高は FL 間高さ）");
+        ui.horizontal(|ui| {
+            ui.label("最下階 FL [mm]");
+            ui.add(egui::DragValue::new(&mut w.spec.base_elevation).speed(50.0));
+        });
         ui.horizontal(|ui| {
             ui.label("等階高一括入力:");
             ui.add(egui::DragValue::new(&mut w.bulk_story.0).range(1..=60));
@@ -223,17 +227,20 @@ fn stories_section(ui: &mut egui::Ui, w: &mut FrameWizardState) {
         });
         let n = w.spec.story_heights.len();
         w.spec.story_names.resize(n + 1, String::new());
+        w.spec.sl_offsets_mm.resize(n + 1, None);
         egui::ScrollArea::vertical()
             .id_salt("wiz_stories_scroll")
             .max_height(STORY_ROWS_MAX_HEIGHT)
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 egui::Grid::new("wiz_stories")
-                    .num_columns(3)
+                    .num_columns(5)
                     .show(ui, |ui| {
                         ui.label("階");
                         ui.label("階高 [mm]");
                         ui.label("階名");
+                        ui.label("ΔSL [mm]");
+                        ui.label("SL [mm]");
                         ui.end_row();
                         for fi in (0..=n).rev() {
                             ui.label(format!("{}", fi + 1));
@@ -247,7 +254,7 @@ fn stories_section(ui: &mut egui::Ui, w: &mut FrameWizardState) {
                                 }
                                 None => {
                                     ui.label("—").on_hover_text(
-                                        "基部（柱脚・基礎梁のレベル）。階高は上の階が持ちます",
+                                        "最下階。FL は表上部、ΔSL はこの行で指定し、支持節点は SL に配置します",
                                     );
                                 }
                             }
@@ -256,6 +263,21 @@ fn stories_section(ui: &mut egui::Ui, w: &mut FrameWizardState) {
                                 egui::TextEdit::singleline(&mut w.spec.story_names[fi])
                                     .hint_text(hint)
                                     .desired_width(80.0),
+                            );
+                            let mut present = w.spec.sl_offsets_mm[fi].is_some();
+                            ui.horizontal(|ui| {
+                                if ui.checkbox(&mut present, "入力").changed() {
+                                    w.spec.sl_offsets_mm[fi] = present.then_some(0.0);
+                                }
+                                if let Some(offset) = &mut w.spec.sl_offsets_mm[fi] {
+                                    ui.add(egui::DragValue::new(offset).speed(10.0));
+                                }
+                            });
+                            let sl =
+                                w.spec.sl_offsets_mm[fi].map(|offset| w.spec.levels()[fi] + offset);
+                            ui.label(
+                                sl.map(|sl| format!("{sl:.0}"))
+                                    .unwrap_or_else(|| "未設定".into()),
                             );
                             ui.end_row();
                         }

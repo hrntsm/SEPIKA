@@ -106,6 +106,18 @@ mod tests {
     fn three_story_column_model() -> Model {
         let mut model = Model::default();
         let zs = [0.0, 3000.0, 6000.0, 9000.0];
+        model.stories = zs
+            .iter()
+            .enumerate()
+            .map(|(i, &fl)| {
+                sepika_core::model::Story::new(
+                    sepika_core::ids::StoryId(i as u32),
+                    format!("{}F", i + 1),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect();
         for (i, z) in zs.iter().enumerate() {
             model.nodes.push(Node {
                 id: NodeId(i as u32),

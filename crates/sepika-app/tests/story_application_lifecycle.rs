@@ -1,7 +1,7 @@
 use sepika_app::app::App;
 use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::StoryId;
-use sepika_core::model::{Constraint, MassMethod, Model};
+use sepika_core::model::{Constraint, MassMethod, Model, Story};
 use sepika_edit::{ApplyPreparedModel, DeleteStory, UndoStack};
 use sepika_job::weight_preparation::{apply_generated_weights, weights_are_current};
 
@@ -31,14 +31,20 @@ fn assert_restored(model: &Model, expected: &Model, label: &str) {
 #[test]
 fn app_generation_story_reduction_and_ordered_undo_redo_restore_complete_models() {
     let mut app = App::default();
-    app.load_model(sepika_app::sample::portal_frame());
+    let mut model = sepika_app::sample::portal_frame();
+    model.stories[1].id = StoryId(2);
+    model.stories.insert(
+        1,
+        Story::new(StoryId(1), "中間FL".into(), Some(1750.0), Some(0.0)),
+    );
+    app.load_model(model);
     let initial = app.core.model.clone();
     app.generate_stories_action();
     assert!(app.core.scoped.last_error.is_none());
     assert_eq!(app.core.scoped.undo.undo_label(), Some("準備計算の採用"));
-    assert_eq!(app.core.model.stories.len(), 2);
+    assert_eq!(app.core.model.stories.len(), 3);
     let record = app.core.model.seismic_weight_generation.as_ref().unwrap();
-    assert_eq!(record.calculated_weights.len(), 2);
+    assert_eq!(record.calculated_weights.len(), 3);
     assert_eq!(record.automatic_diaphragms.len(), 2);
     assert_eq!(record.automatic_master_restraints.len(), 2);
     assert!(weights_are_current(
@@ -58,22 +64,30 @@ fn app_generation_story_reduction_and_ordered_undo_redo_restore_complete_models(
         Box::new(DeleteStory { story: StoryId(1) })
     ));
     let deleted = app.core.model.clone();
-    assert_eq!(deleted.stories.len(), 1);
+    assert_eq!(deleted.stories.len(), 2);
     assert!(!weights_are_current(&deleted, deleted.mass_method));
     assert_ovika_roundtrip(&deleted, "app-deleted");
     app.generate_stories_action();
     assert!(app.core.scoped.last_error.is_none());
-    assert_eq!(app.core.model.stories.len(), 1);
+    assert_eq!(app.core.model.stories.len(), 2);
     let record = app.core.model.seismic_weight_generation.as_ref().unwrap();
-    assert_eq!(record.calculated_weights.len(), 1);
-    assert_eq!(record.calculated_weights[0].0, StoryId(0));
+    assert_eq!(record.calculated_weights.len(), 2);
+    assert_eq!(
+        record
+            .calculated_weights
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
+        vec![StoryId(0), StoryId(1)]
+    );
+    assert_eq!(record.automatic_diaphragms.len(), 2);
     assert!(record
         .automatic_diaphragms
         .iter()
         .all(|constraint| matches!(
             constraint,
             Constraint::RigidDiaphragm {
-                story: StoryId(0),
+                story: StoryId(0 | 1),
                 ..
             }
         )));
@@ -92,6 +106,69 @@ fn app_generation_story_reduction_and_ordered_undo_redo_restore_complete_models(
     assert_restored(&app.core.model, &deleted, "app-redo-deletion");
     app.core.scoped.undo.redo(&mut app.core.model);
     assert_restored(&app.core.model, &reduced, "app-redo-regeneration");
+}
+
+#[test]
+fn deletion_of_the_only_upper_floor_stops_generation_and_undo_restores_complete_input() {
+    let mut app = App::default();
+    app.load_model(sepika_app::sample::portal_frame());
+    app.generate_stories_action();
+    assert!(app.core.scoped.last_error.is_none());
+    let generated = app.core.model.clone();
+    assert!(app.core.scoped.undo.run(
+        &mut app.core.model,
+        Box::new(DeleteStory { story: StoryId(1) })
+    ));
+    let deleted = app.core.model.clone();
+    let revision = app.core.scoped.undo.revision();
+    app.generate_stories_action();
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_deref()
+        .unwrap()
+        .contains("上下階"));
+    assert_eq!(app.core.scoped.undo.revision(), revision + 1);
+    assert_eq!(app.core.model.stories.len(), 1);
+    assert_eq!(
+        app.core.model.stories[0].elevation,
+        deleted.stories[0].elevation
+    );
+    assert_eq!(
+        app.core.model.stories[0].sl_offset_mm,
+        deleted.stories[0].sl_offset_mm
+    );
+    assert_eq!(
+        app.core
+            .model
+            .nodes
+            .iter()
+            .map(|n| (n.id, n.coord))
+            .collect::<Vec<_>>(),
+        deleted
+            .nodes
+            .iter()
+            .map(|n| (n.id, n.coord))
+            .collect::<Vec<_>>()
+    );
+    assert!(app
+        .core
+        .model
+        .seismic_weight_generation
+        .as_ref()
+        .unwrap()
+        .calculated_weights
+        .is_empty());
+    assert_ovika_roundtrip(&app.core.model, "incomplete-generation-rejected");
+    assert!(!weights_are_current(
+        &app.core.model,
+        app.core.model.mass_method
+    ));
+    app.core.scoped.undo.undo(&mut app.core.model);
+    assert_restored(&app.core.model, &deleted, "incomplete-invalidation-undo");
+    app.core.scoped.undo.undo(&mut app.core.model);
+    assert_restored(&app.core.model, &generated, "incomplete-deletion-undo");
 }
 
 #[test]

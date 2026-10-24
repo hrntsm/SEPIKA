@@ -493,7 +493,10 @@ fn copy_one(
     ) else {
         return;
     };
-    let dz = dst_story.elevation - src_story.elevation;
+    let (Some(dst_sl), Some(src_sl)) = (dst_story.sl_mm(), src_story.sl_mm()) else {
+        return;
+    };
+    let dz = dst_sl - src_sl;
 
     let created_slabs = if cmd.targets.slabs {
         copy_slabs(model, ctx, cmd, to, dz, &dst_story.name, report)

@@ -380,7 +380,7 @@ mod tests {
         for node in &mut m.nodes[2..4] {
             node.coord[2] = 6000.0;
         }
-        m.stories[1].elevation = 6000.0;
+        m.stories[1].elevation = Some(6000.0);
         let mut steel = m.materials[1].clone();
         steel.id = MaterialId(3);
         steel.category = MaterialCategory::Steel;

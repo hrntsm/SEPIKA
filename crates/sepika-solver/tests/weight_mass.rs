@@ -20,6 +20,18 @@ fn model(kind: ElementKind, damper: bool) -> Model {
     section.material = Some(MaterialId(0));
     section.frame_use = Some(FrameSectionUse::Girder);
     Model {
+        stories: [0.0, 3000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                sepika_core::model::Story::new(
+                    sepika_core::ids::StoryId(i as u32),
+                    format!("{}F", i + 1),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect(),
         nodes: [[0.0, 0.0, 0.0], [0.0, 0.0, 3000.0], [4000.0, 0.0, 3000.0]]
             .into_iter()
             .enumerate()
@@ -290,10 +302,10 @@ fn ダンパー帰属階に床面節点が無ければ両方式とも生成と�
         let mut model = model(ElementKind::Beam, true);
         let initial = generate_stories_with_opts(&model, &[], true, method).unwrap();
         apply_stories(&mut model, initial, method);
-        model.stories[1].elevation = 4000.0;
+        model.stories[1].elevation = Some(4000.0);
         assert!(generate_stories_with_opts(&model, &[], false, method)
             .unwrap_err()
-            .contains("床面代表質点へ配置できません"));
+            .contains("剛床"));
         for synced in [false, true] {
             let (nodal, member) = sepika_load::self_weight::self_weight_case_content(
                 &model,
@@ -312,7 +324,7 @@ fn ダンパー帰属階に床面節点が無ければ両方式とも生成と�
             } else {
                 generate_stories_with_opts(&model, &[], true, method)
             };
-            assert!(result.unwrap_err().contains("床面代表質点へ配置できません"));
+            assert!(result.unwrap_err().contains("剛床"));
         }
         let dofmap = DofMap::build(&model);
         let error = assemble_global_m(&model, &dofmap, MassOption::Consistent).unwrap_err();
@@ -451,7 +463,7 @@ fn 生成したダンパー質量の欠落と不足と未反映は全公開solve
                         }
                     }
                     6 => corrupted.load_cfg.as_mut().unwrap().dampers[0].total_weight *= 2.0,
-                    7 => corrupted.stories[1].elevation = 4000.0,
+                    7 => corrupted.stories[1].elevation = Some(4000.0),
                     8 => corrupted.load_cfg.as_mut().unwrap().dampers[0].total_weight = 0.0,
                     9 => corrupted.load_cfg.as_mut().unwrap().dampers.clear(),
                     _ => corrupted.load_cfg = None,

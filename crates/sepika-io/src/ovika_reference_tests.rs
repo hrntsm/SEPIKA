@@ -233,7 +233,9 @@ fn reference_model() -> Model {
     model.stories.push(Story {
         id: StoryId(0),
         name: "階".into(),
-        elevation: 0.,
+        elevation: Some(0.),
+        sl_offset_mm: Some(0.0),
+        source_story: None,
         node_ids: vec![],
         seismic_weight: None,
         weight_override: None,

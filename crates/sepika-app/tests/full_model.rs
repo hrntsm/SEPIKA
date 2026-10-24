@@ -13,6 +13,7 @@
 //!
 //! 4 層＋PH の S 造（一部 RC）。節点 166・解析要素 115（柱 40・大梁 75）・
 //! 二次部材 56（小梁）・床領域 26（大梁1床領域単位）・階 5（Z=200/4700/8700/12700/16500）。
+//! FL と SL を一致させた階入力を解析用 fixture として明示する。実建物の ΔSL を推測した検証とはしない。
 //! 荷重は ST-Bridge に含まれないため、取り込み時に標準荷重ケース
 //! （DL・LL(架構用)・LL(地震用)・EX・EY）が自動生成される。支点情報も
 //! 含まれないため、最下レベルの柱脚 12 箇所がピン支点として自動設定される。
@@ -383,6 +384,21 @@ fn original_fixture_retains_unresolved_positions_and_analysis_derivative_is_expl
 /// `import_stbridge_from`。ステータスバーで見落とされないようにするための仕様）。
 /// そのため「注意（先頭が ⚠️）以外のエラーが出ていないこと」を確認したうえで
 /// クリアする。
+fn declare_analysis_story_levels(model: &mut sepika_core::model::Model) {
+    let input = [
+        (200.0, 0.0),
+        (4700.0, 0.0),
+        (8700.0, 0.0),
+        (12700.0, 0.0),
+        (16500.0, 0.0),
+    ];
+    assert_eq!(model.stories.len(), input.len());
+    for (story, (fl, offset)) in model.stories.iter_mut().zip(input) {
+        assert_eq!(story.fl_mm(), Some(fl));
+        story.sl_offset_mm = Some(offset);
+    }
+}
+
 fn imported() -> App {
     let mut app = App::default();
     // 解析結果の完全再現性を確保する（スナップショット比較の前提）。
@@ -395,6 +411,7 @@ fn imported() -> App {
         );
     }
     clear_error(&mut app);
+    declare_analysis_story_levels(&mut app.core.model);
     app
 }
 
@@ -433,6 +450,18 @@ fn four_story_steel_portal() -> sepika_core::model::Model {
     use sepika_core::ids::{ElemId, NodeId};
     let base = sepika_app::sample::portal_frame();
     let mut model = base.clone();
+    model.stories = [0.0, 3500.0, 7000.0, 10500.0, 14000.0]
+        .into_iter()
+        .enumerate()
+        .map(|(i, fl)| {
+            sepika_core::model::Story::new(
+                sepika_core::ids::StoryId(i as u32),
+                format!("{}F", i + 1),
+                Some(fl),
+                Some(0.0),
+            )
+        })
+        .collect();
     model.nodes.clear();
     model.elements.clear();
     model.load_cases[0].member.clear();
@@ -2187,6 +2216,7 @@ fn stbridge_roundtrip_is_reanalyzable() {
         "STB 再取り込みで小片 82 に戻らない"
     );
 
+    declare_analysis_story_levels(&mut reimported.core.model);
     reimported.run_preparation();
     assert_eq!(
         reimported.core.model.floor_regions.len(),
@@ -3031,6 +3061,9 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     // 原階を初期化する前に独立fixtureの床標高を設定する。
     let mut model = four_story_steel_portal();
     let elevations = [-9000.0, -6000.0, -3000.0, 6000.0, 12000.0];
+    for (story, fl) in model.stories.iter_mut().zip(elevations) {
+        story.elevation = Some(fl);
+    }
     for node in &mut model.nodes {
         node.coord[2] = elevations[node.id.index() / 2];
     }
@@ -3076,7 +3109,8 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
             Box::new(sepika_edit::SetStoryLevel {
                 story: sepika_core::ids::StoryId(i as u32),
                 name,
-                elevation,
+                elevation: Some(elevation),
+                sl_offset_mm: Some(0.0),
             })
         ));
         for node in app.core.model.stories[i].node_ids.clone() {

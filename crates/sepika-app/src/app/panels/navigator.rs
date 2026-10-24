@@ -81,9 +81,11 @@ impl App {
                 } else {
                     for s in self.core.model.stories.iter().rev() {
                         ui.label(format!(
-                            "{}  Z={:.0}mm  W={:.1}kN",
+                            "{}  SL={}mm  W={:.1}kN",
                             s.name,
-                            s.elevation,
+                            s.sl_mm()
+                                .map(|v| format!("{v:.0}"))
+                                .unwrap_or_else(|| "未設定".into()),
                             force_kn(s.seismic_weight.unwrap_or(0.0))
                         ));
                     }

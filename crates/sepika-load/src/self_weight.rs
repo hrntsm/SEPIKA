@@ -256,6 +256,18 @@ mod tests {
         cross.area = 0.0;
         cross.depth = 900.0;
         let mut model = Model {
+            stories: [0.0, 3000.0]
+                .into_iter()
+                .enumerate()
+                .map(|(i, fl)| {
+                    sepika_core::model::Story::new(
+                        sepika_core::ids::StoryId(i as u32),
+                        format!("{}F", i + 1),
+                        Some(fl),
+                        Some(0.0),
+                    )
+                })
+                .collect(),
             nodes: vec![
                 simple_node(0, [0.0, 0.0, 3000.0]),
                 simple_node(1, [6000.0, 0.0, 3000.0]),
@@ -358,6 +370,18 @@ mod tests {
     #[test]
     fn test_self_weight_case_totals() {
         let mut model = Model {
+            stories: [0.0, 3000.0]
+                .into_iter()
+                .enumerate()
+                .map(|(i, fl)| {
+                    sepika_core::model::Story::new(
+                        sepika_core::ids::StoryId(i as u32),
+                        format!("{}F", i + 1),
+                        Some(fl),
+                        Some(0.0),
+                    )
+                })
+                .collect(),
             nodes: vec![
                 simple_node(0, [0.0, 0.0, 0.0]),
                 simple_node(1, [0.0, 0.0, 3000.0]),
@@ -445,6 +469,18 @@ mod tests {
     #[test]
     fn test_self_weight_matches_story_gen_totals() {
         let model = Model {
+            stories: [0.0, 3000.0]
+                .into_iter()
+                .enumerate()
+                .map(|(i, fl)| {
+                    sepika_core::model::Story::new(
+                        sepika_core::ids::StoryId(i as u32),
+                        format!("{}F", i + 1),
+                        Some(fl),
+                        Some(0.0),
+                    )
+                })
+                .collect(),
             nodes: vec![
                 simple_node(0, [0.0, 0.0, 0.0]),
                 simple_node(1, [0.0, 0.0, 3500.0]),
@@ -549,6 +585,18 @@ mod tests {
             elements.push(e);
         }
         Model {
+            stories: [0.0, 3000.0]
+                .into_iter()
+                .enumerate()
+                .map(|(i, fl)| {
+                    sepika_core::model::Story::new(
+                        sepika_core::ids::StoryId(i as u32),
+                        format!("{}F", i + 1),
+                        Some(fl),
+                        Some(0.0),
+                    )
+                })
+                .collect(),
             nodes: vec![
                 simple_node(0, [0.0, 0.0, 0.0]),
                 simple_node(1, [0.0, 0.0, 3000.0]),
@@ -681,6 +729,18 @@ mod tests {
         section.material = Some(MaterialId(0));
         section.steel_material = Some(MaterialId(1));
         Model {
+            stories: [0.0, 3000.0]
+                .into_iter()
+                .enumerate()
+                .map(|(i, fl)| {
+                    sepika_core::model::Story::new(
+                        sepika_core::ids::StoryId(i as u32),
+                        format!("{}F", i + 1),
+                        Some(fl),
+                        Some(0.0),
+                    )
+                })
+                .collect(),
             nodes: vec![
                 simple_node(0, [0.0, 0.0, 0.0]),
                 simple_node(1, [0.0, 0.0, 3000.0]),
@@ -971,6 +1031,18 @@ mod tests {
             elements.push(e);
         }
         Model {
+            stories: [0.0, 3000.0]
+                .into_iter()
+                .enumerate()
+                .map(|(i, fl)| {
+                    sepika_core::model::Story::new(
+                        sepika_core::ids::StoryId(i as u32),
+                        format!("{}F", i + 1),
+                        Some(fl),
+                        Some(0.0),
+                    )
+                })
+                .collect(),
             nodes: vec![
                 simple_node(0, [0.0, 0.0, 0.0]),
                 simple_node(1, [0.0, 0.0, 3000.0]),

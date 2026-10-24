@@ -11,9 +11,9 @@ pub struct StoryGenResult {
     pub wall_weight_generation: sepika_core::model::WallWeightGenerationMode,
     /// 階 ID と自動算定重量 `[N]`。手入力採用値とは独立。
     pub calculated_weights: Vec<(StoryId, f64)>,
-    /// 下から順の階（基部レベルは含まない）。
+    /// 入力と同順・同じ ID の階。
     pub stories: Vec<Story>,
-    /// 各節点の所属階（`model.nodes` と同順。基部レベルは None）。
+    /// 各節点の所属階（`model.nodes` と同順）。
     /// 長さは `model.nodes.len()`（新規に生成される代表節点は含まない。
     /// 代表節点の所属階は `rep_nodes` 側の `story` フィールドが正）。
     pub node_story: Vec<Option<StoryId>>,
@@ -28,35 +28,9 @@ pub struct StoryGenResult {
     pub damper_mass_generation: sepika_core::model::DamperMassGeneration,
 }
 
-/// 階へ節点・剛床・地震用重量を割り付ける（複数の重力荷重ケースを地震用重量に
-/// 算入する版）。
-///
-/// **階レベルの正は [`Model::stories`] の `elevation`**（利用者が定義する）であり、
-/// 本関数はそれを書き換えない。階が 1 つも定義されていないモデルに限り、節点の
-/// Z 座標をクラスタリングして階レベルを初期化する。階名・階種別・地震用重量の
-/// 手入力も既存の階定義からそのまま引き継ぐ。
-///
-/// ただし**基部レベルの階（基部の床）が無ければ先頭に補う**。階が床レベル列であり
-/// その先頭が基部であることは [`Model::layers`] が依拠する不変条件であり、
-/// それを成立させるのは本関数の責務である。
-///
-/// - **階への帰属は区間**（直下階のレベル超〜当該階のレベル以下）。中間高さの
-///   節点も区間に入る階へ属し、その重量は階の地震用重量へ算入される。
-///   最下階（基部の床）だけは下端を含む点区間で、柱脚・基礎梁の節点が属する
-/// - **剛床のスレーブは床面のみ**（階のレベル ±[`DIAPHRAGM_LEVEL_TOL_MM`]）。
-///   床面に節点がない階は剛床を持たない
-/// - 代表節点の拘束は `master_restraint` がスレーブの可動性から決める
-/// - 前回生成した剛床代表節点（`model.generated_masters`）は構造節点の
-///   クラスタリング対象から除外する（再生成時に過去の代表節点を混ぜない）
-/// - 各階の剛床代表節点は、その階の全構造節点の慣性力重心（重量重み付き重心）に
-///   新規生成する（既存の `generated_masters` があれば座標・拘束・所属階を更新して再利用）
-/// - `gravity_lcs` に指定した各ケースの鉛直下向き荷重を地震重量に算入する
-///   （自重は材料密度から常に算入）。重複 ID は 1 回だけ処理する
-///   （固定荷重＋地震用積載荷重など複数ケースの合算に対応する下準備）。
-///
-/// 自重が「DL」ケースへ自動同期されるモデル（標準構成）では、密度からの
-/// 自重直接算入と二重計上になるため [`generate_stories_with_synced_self_weight`] を
-/// 使うこと。
+/// 明示入力済みの階へ節点・剛床・地震用重量を割り付ける。
+/// FL・ΔSL 不足、階順・所属・剛床不成立はエラー。階定義と既存節点座標を保持する。
+/// 自重同期済み DL は [`generate_stories_with_synced_self_weight`] を使う。
 pub fn generate_stories_multi(
     model: &Model,
     gravity_lcs: &[LoadCaseId],
@@ -189,53 +163,44 @@ fn generate_stories_impl(
 
     let structural = sepika_core::dof::structural_nodes(model);
 
-    let base = model.base_elevation();
-    let mut story_levels: Vec<f64> = if model.stories.is_empty() {
-        let mut zs: Vec<f64> = struct_nodes.iter().map(|n| n.coord[2]).collect();
-        zs.sort_by(|a, b| a.total_cmp(b));
-        let mut levels: Vec<f64> = Vec::new();
-        for z in zs {
-            match levels.last() {
-                Some(&last) if (z - last).abs() <= LEVEL_TOL_MM => {}
-                _ => levels.push(z),
-            }
-        }
-        if levels.len() < 2 {
-            return Err(
-                "階が定義されておらず、節点の標高(Z)も 1 レベルしかありません。\
-                 階を定義するか、2 レベル以上の節点を作成してください。"
-                    .into(),
-            );
-        }
-        levels
-    } else {
-        model.stories.iter().map(|s| s.elevation).collect()
-    };
-    if story_levels
-        .first()
-        .is_none_or(|&z| z > base + LEVEL_TOL_MM)
-    {
-        story_levels.insert(0, base);
+    model.validate_story_structure_inputs()?;
+    let level_errors = model.story_level_diagnostics();
+    if !level_errors.is_empty() {
+        return Err(level_errors.join("\n"));
     }
-
-    let spans: Vec<(f64, f64)> = story_levels
-        .iter()
-        .enumerate()
-        .map(|(i, &top)| {
-            let bottom = if i == 0 { top } else { story_levels[i - 1] };
-            (bottom, top)
-        })
-        .collect();
+    let story_levels: Vec<f64> = model.stories.iter().map(|s| s.sl_mm().unwrap()).collect();
+    if model.base_elevation() > story_levels[0] {
+        return Err(format!(
+            "階 {}: SL が構造最下端より低く、所属区間が成立しません",
+            model.stories[0].id.0
+        ));
+    }
+    let spans = model.story_spans();
 
     let mut nodes_by_story: Vec<Vec<NodeId>> = vec![Vec::new(); story_levels.len()];
     for n in &struct_nodes {
         let z = n.coord[2];
-        let hit = spans
-            .iter()
-            .enumerate()
-            .position(|(i, &(b, t))| if i == 0 { z >= b } else { z > b } && z <= t);
+        let hit = if let Some(explicit) = model.explicit_story_of_node(n.id) {
+            if explicit.index() >= story_levels.len() {
+                return Err(format!("節点 {}: 階 {} が存在しません", n.id.0, explicit.0));
+            }
+            Some(explicit.index())
+        } else {
+            spans.iter().enumerate().position(|(i, &(b, t))| {
+                if i == 0 {
+                    z >= b && z <= t
+                } else {
+                    z > b && z <= t
+                }
+            })
+        };
         if let Some(i) = hit {
             nodes_by_story[i].push(n.id);
+        } else if structural.get(n.id.index()).copied().unwrap_or(false) {
+            return Err(format!(
+                "節点 {}: SL 区間内の所属階を解決できません",
+                n.id.0
+            ));
         }
     }
 
@@ -329,28 +294,6 @@ fn generate_stories_impl(
 
     let self_weight_items = if mode == SelfWeightMode::GravityCasesOnly {
         Vec::new()
-    } else if model.stories.is_empty() && model.elements.iter().any(|e| model.is_rc_src_column(e)) {
-        let mut initialized = model.clone();
-        initialized.stories = story_levels
-            .iter()
-            .enumerate()
-            .map(|(i, &elevation)| Story {
-                wall_weights: Vec::new(),
-                id: StoryId(i as u32),
-                name: sepika_core::model::default_story_name(i),
-                elevation,
-                node_ids: Vec::new(),
-                seismic_weight: None,
-                weight_override: None,
-                structure: Default::default(),
-                level_kind: Default::default(),
-                dynamic_mass: None,
-                standard_floor_load: None,
-                column_finish_area_weight: 0.0,
-                fireproof: Default::default(),
-            })
-            .collect();
-        enumerate_self_weight(&initialized, &load_cfg)?
     } else {
         enumerate_self_weight(model, &load_cfg)?
     };
@@ -638,16 +581,7 @@ fn generate_stories_impl(
         let story_id = StoryId(si as u32);
         let node_ids: Vec<NodeId> = std::mem::take(&mut nodes_by_story[si]);
 
-        let prev = model
-            .stories
-            .iter()
-            .find(|s| s.elevation == elev)
-            .or_else(|| {
-                model
-                    .stories
-                    .iter()
-                    .find(|s| (s.elevation - elev).abs() <= LEVEL_TOL_MM)
-            });
+        let prev = model.stories.get(si);
         let name = prev
             .map(|s| s.name.clone())
             .unwrap_or_else(|| sepika_core::model::default_story_name(si));
@@ -777,12 +711,13 @@ fn generate_stories_impl(
         } else {
             existing
                 .iter()
-                .map(|diaphragm| {
+                .filter_map(|diaphragm| {
                     let automatic = model.constraints.iter().any(|constraint| {
                         matches!(constraint, Constraint::RigidDiaphragm { master, .. } if *master == diaphragm.master)
                             && model.is_automatic_seismic_diaphragm(constraint)
                     });
-                    (
+                    if automatic && slaves.is_empty() { return None; }
+                    Some((
                         Some(*diaphragm),
                         if automatic {
                             slaves.clone()
@@ -790,7 +725,7 @@ fn generate_stories_impl(
                             diaphragm.slaves.to_vec()
                         },
                         automatic,
-                    )
+                    ))
                 })
                 .collect()
         };
@@ -984,7 +919,9 @@ fn generate_stories_impl(
             wall_weights: wall.clone(),
             id: story_id,
             name,
-            elevation: elev,
+            elevation: prev.and_then(|s| s.elevation),
+            sl_offset_mm: prev.and_then(|s| s.sl_offset_mm),
+            source_story: prev.and_then(|s| s.source_story),
             node_ids,
             seismic_weight: Some(weight_override.unwrap_or(weight)),
             weight_override,

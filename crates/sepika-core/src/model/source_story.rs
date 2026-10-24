@@ -63,52 +63,65 @@ impl Model {
             return Ok(());
         }
         self.assign_stb_node_ids()?;
-        self.source_stories = self
-            .stories
-            .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                let mut members: Vec<_> = s
-                    .node_ids
-                    .iter()
-                    .copied()
-                    .chain(
-                        self.nodes
+        self.source_stories =
+            self.stories
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.fl_mm().is_some())
+                .map(|(i, s)| {
+                    let mut members: Vec<_> =
+                        s.node_ids
                             .iter()
-                            .filter(|n| n.story == Some(s.id))
-                            .map(|n| n.id),
-                    )
-                    .filter(|n| !self.generated_masters.contains(n))
-                    .collect();
-                members.sort_unstable_by_key(|n| n.0);
-                members.dedup();
-                SourceStory {
-                    id: i as u32 + 1,
-                    guid: None,
-                    name: s.name.clone(),
-                    height: s.elevation,
-                    kind: match s.level_kind {
-                        super::StoryLevelKind::Normal => SourceStoryKind::General,
-                        super::StoryLevelKind::Basement { .. } => SourceStoryKind::Basement,
-                        super::StoryLevelKind::Penthouse { .. } => SourceStoryKind::Penthouse,
-                    },
-                    kind_from_native: true,
-                    id_dependence: None,
-                    strength_concrete: None,
-                    node_ids: members
-                        .iter()
-                        .filter_map(|n| {
-                            self.stb_node_ids.iter().find(|id| id.node == *n).map(|id| {
-                                SourceStoryNode {
-                                    id: id.id,
-                                    node: Some(*n),
-                                }
+                            .copied()
+                            .chain(
+                                self.nodes
+                                    .iter()
+                                    .filter(|n| n.story == Some(s.id))
+                                    .map(|n| n.id),
+                            )
+                            .filter(|n| {
+                                !self.generated_masters.contains(n)
+                                    && !self.seismic_weight_generation.as_ref().is_some_and(
+                                        |record| {
+                                            record.automatic_node_stories.contains(&(*n, s.id))
+                                        },
+                                    )
                             })
-                        })
-                        .collect(),
-                }
-            })
-            .collect();
+                            .collect();
+                    members.sort_unstable_by_key(|n| n.0);
+                    members.dedup();
+                    SourceStory {
+                        id: i as u32 + 1,
+                        guid: None,
+                        name: s.name.clone(),
+                        height: s.fl_mm().unwrap(),
+                        kind: match s.level_kind {
+                            super::StoryLevelKind::Normal => SourceStoryKind::General,
+                            super::StoryLevelKind::Basement { .. } => SourceStoryKind::Basement,
+                            super::StoryLevelKind::Penthouse { .. } => SourceStoryKind::Penthouse,
+                        },
+                        kind_from_native: true,
+                        id_dependence: None,
+                        strength_concrete: None,
+                        node_ids: members
+                            .iter()
+                            .filter_map(|n| {
+                                self.stb_node_ids.iter().find(|id| id.node == *n).map(|id| {
+                                    SourceStoryNode {
+                                        id: id.id,
+                                        node: Some(*n),
+                                    }
+                                })
+                            })
+                            .collect(),
+                    }
+                })
+                .collect();
+        for story in &mut self.stories {
+            if story.fl_mm().is_some() {
+                story.source_story = Some(story.id.0 + 1);
+            }
+        }
         self.source_stories_initialized = true;
         Ok(())
     }
@@ -132,7 +145,9 @@ impl Model {
             let inferred = node
                 .story
                 .and_then(|id| self.stories.iter().find(|s| s.id == id));
-            if sources.len() != 1 || !inferred.is_some_and(|s| s.elevation == sources[0].height) {
+            if sources.len() != 1
+                || !inferred.is_some_and(|s| s.source_story == Some(sources[0].id))
+            {
                 result.push(format!(
                     "節点 {}: 明示原階 {:?} / 解析用推定 {}",
                     node.id.0,

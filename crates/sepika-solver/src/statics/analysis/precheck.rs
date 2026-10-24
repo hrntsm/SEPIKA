@@ -128,7 +128,12 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     let source_issues = model
         .source_story_diagnostics()
         .into_iter()
-        .chain(model.stb_strength_diagnostics());
+        .chain(model.stb_strength_diagnostics())
+        .chain(if model.stories.is_empty() {
+            Vec::new()
+        } else {
+            model.story_level_diagnostics()
+        });
     use sepika_core::model::ElementKind;
 
     let mut issues: Vec<_> = source_issues.into_iter().map(ModelIssue::model).collect();

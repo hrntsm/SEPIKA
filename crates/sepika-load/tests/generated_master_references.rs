@@ -5,6 +5,18 @@ use sepika_load::story_gen::{
 };
 fn baseline() -> Model {
     Model {
+        stories: [0.0, 3000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                Story::new(
+                    sepika_core::ids::StoryId(i as u32),
+                    format!("{}F", i + 1),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect(),
         nodes: (0..3)
             .map(|id| Node {
                 id: NodeId(id),

@@ -119,13 +119,16 @@ pub fn append_misc_wall_stiffnesses(
     let sum_ky: f64 = cols.iter().map(|c| c.dy).sum();
 
     let idx = story.index();
-    let Some(elev) = model.stories.get(idx).map(|s| s.elevation) else {
+    let Some(elev) = model.stories.get(idx).and_then(|s| s.sl_mm()) else {
         return;
     };
     let below = if idx == 0 {
         f64::NEG_INFINITY
     } else {
-        model.stories[idx - 1].elevation
+        match model.stories[idx - 1].sl_mm() {
+            Some(sl) => sl,
+            None => return,
+        }
     };
 
     for plate in &model.wall_plates {

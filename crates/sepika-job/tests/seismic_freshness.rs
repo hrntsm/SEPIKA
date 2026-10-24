@@ -454,7 +454,7 @@ fn added_and_inserted_storeys_reserve_existing_masters_and_keep_independent_resu
         let mut story = model.stories[2].clone();
         story.id = StoryId(3);
         story.name = "追加階".into();
-        story.elevation = elevation;
+        story.elevation = Some(elevation);
         story.node_ids.clear();
         story.seismic_weight = None;
         story.dynamic_mass = None;
@@ -495,7 +495,7 @@ fn added_and_inserted_storeys_reserve_existing_masters_and_keep_independent_resu
                 .find(|c| matches!(c, Constraint::RigidDiaphragm { master, .. } if *master == id))
                 .unwrap();
             if let Constraint::RigidDiaphragm { story, .. } = diaphragm {
-                assert_eq!(model.stories[story.index()].elevation, coord[2]);
+                assert_eq!(model.stories[story.index()].sl_mm(), Some(coord[2]));
             }
         }
         assert!(model.constraints.iter().any(|c| matches!(c, Constraint::RigidDiaphragm {master, weight:Some(weight), ci_override:None, ..} if *master==upper && *weight==100100.0)));

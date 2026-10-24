@@ -3,7 +3,21 @@ use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, SlabId
 use sepika_core::model::*;
 
 pub fn two_storeys() -> Model {
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: [0.0, 12500.0, 25000.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                Story::new(
+                    sepika_core::ids::StoryId(i as u32),
+                    format!("{}F", i + 1),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
     for (id, coord) in [
         [0.0, 0.0, 0.0],
         [6000.0, 0.0, 0.0],

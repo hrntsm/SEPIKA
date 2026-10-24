@@ -1542,9 +1542,11 @@ mod tests {
         model.floor_regions.push(region);
         model.stories.push(Story {
             wall_weights: Vec::new(),
-            id: StoryId(1),
+            id: StoryId(0),
             name: "基部".into(),
-            elevation: 0.0,
+            elevation: Some(0.0),
+            sl_offset_mm: Some(0.0),
+            source_story: None,
             node_ids: Vec::new(),
             seismic_weight: None,
             weight_override: None,
@@ -1557,9 +1559,11 @@ mod tests {
         });
         model.stories.push(Story {
             wall_weights: Vec::new(),
-            id: StoryId(0),
+            id: StoryId(1),
             name: "1F".into(),
-            elevation: 3000.0,
+            elevation: Some(3000.0),
+            sl_offset_mm: Some(0.0),
+            source_story: None,
             node_ids: Vec::new(),
             seismic_weight: None,
             weight_override: None,
@@ -2107,7 +2111,9 @@ mod tests {
             wall_weights: Vec::new(),
             id: StoryId(0),
             name: "1F".into(),
-            elevation: 0.0,
+            elevation: Some(0.0),
+            sl_offset_mm: Some(0.0),
+            source_story: None,
             node_ids: vec![],
             seismic_weight: Some(1.0e6),
             weight_override: None,

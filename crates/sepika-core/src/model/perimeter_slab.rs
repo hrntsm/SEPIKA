@@ -90,7 +90,7 @@ fn column_dimension(
         .layers()
         .into_iter()
         .find(|layer| layer.top == story)
-        .map(|layer| layer.bottom_elevation)
+        .map(|layer| layer.bottom_sl_mm)
         .ok_or(PerimeterSlabError::MissingColumn {
             beam: beam.id,
             node,
@@ -226,11 +226,9 @@ pub fn perimeter_slabs(model: &Model) -> Result<Vec<PerimeterSlab>, PerimeterSla
         if (a[2] - b[2]).abs() > 1.0 {
             continue;
         }
-        let Some(story) = model
-            .stories
-            .iter()
-            .find(|s| (s.elevation - a[2]).abs() <= 1.0 && s.standard_floor_load.is_some())
-        else {
+        let Some(story) = model.stories.iter().find(|s| {
+            s.sl_mm().is_some_and(|sl| (sl - a[2]).abs() <= 1.0) && s.standard_floor_load.is_some()
+        }) else {
             continue;
         };
         let edges: Vec<_> = model
@@ -394,9 +392,11 @@ mod tests {
             0,
             Story {
                 wall_weights: Vec::new(),
-                id: StoryId(1),
+                id: StoryId(0),
                 name: "基部".into(),
-                elevation: 0.0,
+                elevation: Some(0.0),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: Vec::new(),
                 seismic_weight: None,
                 weight_override: None,
@@ -410,9 +410,11 @@ mod tests {
         );
         model.stories.push(Story {
             wall_weights: Vec::new(),
-            id: StoryId(2),
+            id: StoryId(1),
             name: "1F".into(),
-            elevation: 3000.0,
+            elevation: Some(3000.0),
+            sl_offset_mm: Some(0.0),
+            source_story: None,
             node_ids: Vec::new(),
             seismic_weight: None,
             weight_override: None,
@@ -499,7 +501,9 @@ mod tests {
                     wall_weights: Vec::new(),
                     id: StoryId(0),
                     name: "1F".into(),
-                    elevation: -3000.0,
+                    elevation: Some(-3000.0),
+                    sl_offset_mm: Some(0.0),
+                    source_story: None,
                     node_ids: Vec::new(),
                     seismic_weight: None,
                     weight_override: None,
@@ -514,7 +518,9 @@ mod tests {
                     wall_weights: Vec::new(),
                     id: StoryId(1),
                     name: "2F".into(),
-                    elevation: 0.0,
+                    elevation: Some(0.0),
+                    sl_offset_mm: Some(0.0),
+                    source_story: None,
                     node_ids: Vec::new(),
                     seismic_weight: None,
                     weight_override: None,
@@ -629,7 +635,9 @@ mod tests {
                 wall_weights: Vec::new(),
                 id: StoryId(0),
                 name: "1F".into(),
-                elevation: 0.0,
+                elevation: Some(0.0),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: Vec::new(),
                 seismic_weight: None,
                 weight_override: None,
@@ -644,7 +652,9 @@ mod tests {
                 wall_weights: Vec::new(),
                 id: StoryId(1),
                 name: "2F".into(),
-                elevation: 3000.0,
+                elevation: Some(3000.0),
+                sl_offset_mm: Some(0.0),
+                source_story: None,
                 node_ids: Vec::new(),
                 seismic_weight: None,
                 weight_override: None,

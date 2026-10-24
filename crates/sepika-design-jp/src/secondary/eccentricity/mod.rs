@@ -120,14 +120,16 @@ pub(crate) mod test_support {
         };
 
         // 層
-        let s0 = StoryId(0);
+        let s0 = StoryId(1);
         let story = Story {
             wall_weights: Vec::new(),
             level_kind: Default::default(),
             structure: Default::default(),
             id: s0,
             name: "1F".to_string(),
-            elevation: 3000.0,
+            elevation: Some(3000.0),
+            sl_offset_mm: Some(0.0),
+            source_story: None,
             node_ids: vec![],
             seismic_weight: None,
             weight_override: None,
@@ -259,7 +261,10 @@ pub(crate) mod test_support {
             elements,
             sections,
             materials: vec![mat],
-            stories: vec![story],
+            stories: vec![
+                Story::new(StoryId(0), "下端FL".into(), Some(0.0), Some(0.0)),
+                story,
+            ],
             ..Default::default()
         };
         (model, s0)

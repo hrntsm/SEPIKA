@@ -352,7 +352,9 @@ fn secondary_fireproof_support_reactions_design_loads_and_mass() {
             wall_weights: Vec::new(),
             id: sepika_core::ids::StoryId(0),
             name: "1F".into(),
-            elevation: 0.0,
+            elevation: Some(0.0),
+            sl_offset_mm: Some(0.0),
+            source_story: None,
             node_ids: vec![],
             seismic_weight: None,
             weight_override: None,
@@ -363,6 +365,12 @@ fn secondary_fireproof_support_reactions_design_loads_and_mass() {
             column_finish_area_weight: 0.0,
             fireproof: Default::default(),
         }];
+        model.stories.push(sepika_core::model::Story::new(
+            sepika_core::ids::StoryId(1),
+            "2F".into(),
+            Some(3000.0),
+            Some(0.0),
+        ));
         let baseline = model.clone();
         let base_transfer = solve(&baseline, |_| 0.0, true).unwrap();
         let base_mass =
@@ -695,6 +703,18 @@ fn rounded_secondary_supplied_area_mass_reaches_stories_and_unknown_is_error() {
         },
     ] {
         let mut model = face_model(4000.0, [400.0; 2]);
+        model.stories = [-3000.0, 0.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, fl)| {
+                sepika_core::model::Story::new(
+                    sepika_core::ids::StoryId(i as u32),
+                    format!("{}F", i + 1),
+                    Some(fl),
+                    Some(0.0),
+                )
+            })
+            .collect();
         model.nodes.push(node(4, -1000.0, 0.0, -3000.0));
         model.elements.push(element_beam(2, 4, 0));
         model.elements[2].local_axis.ref_vector = [1.0, 0.0, 0.0];

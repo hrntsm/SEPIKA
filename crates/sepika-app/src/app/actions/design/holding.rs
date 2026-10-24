@@ -1318,7 +1318,7 @@ mod tests {
                 node.coord[2] = clear_height_mm + 400.0;
             }
         }
-        model.stories[1].elevation = clear_height_mm + 400.0;
+        model.stories[1].elevation = Some(clear_height_mm + 400.0);
         let column_rebar = match model.sections[0].shape.clone().unwrap() {
             SectionShape::RcColumnRect { rebar, .. } => rebar,
             _ => unreachable!(),

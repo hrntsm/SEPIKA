@@ -676,10 +676,18 @@ impl InternalReference {
 
     fn model(self, mut model: Model, absent: Option<u32>) -> Model {
         use sepika_core::dof::{Dof, Dof6Mask};
+        model.stories.clear();
+        model.constraints.clear();
+        model.seismic_weight_generation = None;
+        for node in &mut model.nodes {
+            node.story = None;
+        }
         model.stories.push(Story {
             id: StoryId(0),
             name: "基部".into(),
-            elevation: 0.,
+            elevation: Some(0.),
+            sl_offset_mm: Some(0.0),
+            source_story: None,
             node_ids: vec![],
             seismic_weight: None,
             weight_override: None,
@@ -698,6 +706,7 @@ impl InternalReference {
             input_key: vec![],
             output_key: vec![],
             calculated_weights: vec![],
+            automatic_node_stories: Vec::new(),
             automatic_diaphragms: vec![],
             automatic_master_restraints: vec![],
         };
@@ -867,7 +876,7 @@ fn internal_reference_app_entries_accept_existing_targets_and_preserve_rejected_
         let next_absent = if reference.target_kind() == "Story" {
             1
         } else {
-            4
+            existing_app().core.model.nodes.len() as u32
         };
         for absent in [next_absent, u32::MAX] {
             let invalid = reference.model(crate::sample::portal_frame(), Some(absent));
@@ -902,7 +911,12 @@ fn internal_reference_app_entries_accept_existing_targets_and_preserve_rejected_
             app.core.scoped.pushover_view_dir = SeismicDir::Y;
             let before_save = retained(&app);
             app.save_project_to_opts(output.clone(), Some(false));
-            let error = app.core.scoped.last_error.as_ref().unwrap();
+            let error = app
+                .core
+                .scoped
+                .last_error
+                .as_ref()
+                .unwrap_or_else(|| panic!("{reference:?}/{absent}: 参照切れの保存を拒否する"));
             assert!(
                 error.contains(&format!("-> {} {absent}", reference.target_kind())),
                 "{reference:?}: {error}"

@@ -10,48 +10,48 @@ fn baseline() -> Model {
     section.frame_use = Some(FrameSectionUse::Girder);
     let mut m = Model {
         nodes: (0..3)
-        .map(|i| Node {
-            id: NodeId(i),
-            coord: [3000. * i as f64, 0., 0.],
-            restraint: if i != 1 {
-                Dof6Mask::FIXED
-            } else {
-                Dof6Mask::FREE
-            },
-            mass: None,
-            story: None,
-            support_spring: None,
-        })
-        .collect(),
+            .map(|i| Node {
+                id: NodeId(i),
+                coord: [3000. * i as f64, 0., 0.],
+                restraint: if i != 1 {
+                    Dof6Mask::FIXED
+                } else {
+                    Dof6Mask::FREE
+                },
+                mass: None,
+                story: None,
+                support_spring: None,
+            })
+            .collect(),
         elements: vec![ElementData {
-        id: ElemId(0),
-        kind: ElementKind::Beam,
-        nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
-        section: Some(SectionId(0)),
-        local_axis: LocalAxis {
-            ref_vector: [0., 0., 1.],
-        },
-        end_cond: [EndCondition::Fixed; 2],
-        force_regime: ForceRegime::Auto,
-        rigid_zone: Default::default(),
-        plastic_zone: None,
-        spring: None,
-    }],
+            id: ElemId(0),
+            kind: ElementKind::Beam,
+            nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
+            section: Some(SectionId(0)),
+            local_axis: LocalAxis {
+                ref_vector: [0., 0., 1.],
+            },
+            end_cond: [EndCondition::Fixed; 2],
+            force_regime: ForceRegime::Auto,
+            rigid_zone: Default::default(),
+            plastic_zone: None,
+            spring: None,
+        }],
         sections: vec![section],
         materials: vec![Material {
-        id: MaterialId(0),
-        name: "SN400B".into(),
-        category: MaterialCategory::Steel,
-        young: 205000.,
-        poisson: 0.3,
-        density: 7.85e-9,
-        shear: None,
-        fc: None,
-        fy: Some(235.),
-        strength_factor: None,
-        concrete_class: Default::default(),
-    }],
-        stories: vec![serde_json::from_value(serde_json::json!({"id":0,"name":"base","elevation":0.,"node_ids":[],"seismic_weight":null})).unwrap()],
+            id: MaterialId(0),
+            name: "SN400B".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.,
+            poisson: 0.3,
+            density: 7.85e-9,
+            shear: None,
+            fc: None,
+            fy: Some(235.),
+            strength_factor: None,
+            concrete_class: Default::default(),
+        }],
+        stories: Vec::new(),
         load_cases: default_load_cases(),
         ..Default::default()
     };

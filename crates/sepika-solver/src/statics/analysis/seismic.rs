@@ -74,12 +74,12 @@ pub fn building_height_mm(model: &Model) -> f64 {
         .layers()
         .iter()
         .filter(|l| matches!(l.level_kind, StoryLevelKind::Normal))
-        .map(|l| l.top_elevation)
+        .filter_map(|l| model.stories[l.top.index()].fl_mm())
         .fold(f64::NEG_INFINITY, f64::max);
     let top = if top_normal.is_finite() {
         top_normal
     } else {
-        model.stories.last().map(|s| s.elevation).unwrap_or(gl)
+        model.stories.last().and_then(|s| s.fl_mm()).unwrap_or(gl)
     };
     (top - gl).max(0.0)
 }
@@ -363,15 +363,9 @@ pub fn seismic_distribution_for_model(
     if mode == AiMode::SemiPrecise {
         return Err(SolveError::InvalidInput("固有値周期を用いる地震力は未対応です。告示1793号第2ただし書の初期剛性・地盤/杭の変形を除く条件と採用Rt下限の適用証拠を保存・検証できません。略算を選択してください。".into()));
     }
-    if model.stories.iter().any(|s| !s.elevation.is_finite())
-        || model
-            .stories
-            .windows(2)
-            .any(|s| s[0].elevation >= s[1].elevation)
-    {
-        return Err(SolveError::InvalidInput(
-            "階レベルは有限値かつ下から上へ厳密な昇順で定義してください。".into(),
-        ));
+    let errors = model.story_level_diagnostics();
+    if !errors.is_empty() {
+        return Err(SolveError::InvalidInput(errors.join("; ")));
     }
     if model
         .stories

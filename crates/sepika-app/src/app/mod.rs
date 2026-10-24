@@ -1231,7 +1231,7 @@ pub struct UiModelScoped {
     pub member_place_first: Option<sepika_core::model::SecondaryMemberAnchor>,
     /// 階の追加フォームの入力 `(階名, 階レベル [mm])`。
     #[cfg(feature = "gui")]
-    pub new_story_draft: (String, f64),
+    pub new_story_draft: (String, f64, f64),
     /// 階への複製ダイアログ（`① 準備計算 > 階の定義 > ⧉`）の入力状態。
     /// 差し替え前のモデルの階を指したままにすると別の階へ配ってしまうため、
     /// モデル差し替えでは選択ごと閉じる。
@@ -1344,7 +1344,7 @@ impl Default for UiModelScoped {
             #[cfg(feature = "gui")]
             member_place_first: None,
             #[cfg(feature = "gui")]
-            new_story_draft: (String::new(), 0.0),
+            new_story_draft: (String::new(), 0.0, 0.0),
             #[cfg(feature = "gui")]
             story_copy: crate::story_copy_view::StoryCopyState::default(),
             #[cfg(feature = "gui")]

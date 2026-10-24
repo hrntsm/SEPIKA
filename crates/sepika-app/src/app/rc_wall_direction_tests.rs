@@ -579,6 +579,7 @@ fn explicitly_nonseismic_rc_wall_keeps_elastic_mode_without_directional_inputs()
 
 fn quantity_fixture() -> Model {
     let mut model = fixture();
+    model.stories = super::tests::explicit_story_inputs(&[0.0, 3600.0]);
     for node in &mut model.nodes {
         if node.coord[0] > 0.0 {
             node.coord[0] = 4600.0;
