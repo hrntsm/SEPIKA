@@ -97,3 +97,23 @@ CI の逐次停止による後続 integration の確認漏れを収束させる�
 
 `cargo clippy -p sepika-load --test generated_master_references -p sepika-solver --test common_section_mass --locked --message-format short -- -D warnings` は成功。
 `cargo fmt --all --check` と `git diff --check` も成功。GUI／MCP／Parquet 構成に影響する製品ソース変更はなく、既成功の feature 検証は無条件に繰り返していない。
+
+
+## 未設定の直上階を飛ばす壁高さ導出の是正
+
+独立レビューで、自立壁の階高解決が `filter_map` で未設定階を取り除き、さらに上の SL を直上階として使う経路を確認した。
+`try_story_height_above`／`try_wall_plate_extent` は階順に必要な FL・ΔSL を解決し、不足を階 ID・項目名付きで返す。既存 Option API は解決失敗を None とする。
+数量入口は高さが階に依存する壁だけ診断付きの解決を要求し、未解決の高さからコンクリート・型枠の正常数量を返さない。明示寸法・階高不要の数量と入力モデルは維持する。
+直上 SL が確定した後の未使用階の欠落は、その壁高さには必要としない。
+
+横断確認では、計算で階値を除外する別の `filter_map` は地震用建物高さにあったが、走査する `Model::layers` は完全性検査済みであり、未設定階を圧縮する経路ではない。
+壁重量の階帯は完全性検査後の同長 SL 列を使う。外周スラブの SL 判定は同一面の一致判定で、未設定階から別の高さを借用しない。
+ネイティブ原階の FL フィルターは未解決属性を原階へ複写しない保存上の扱いで、計算用高さの補完ではない。グリッド・構造ビューは未解決 SL を描かず、入力一覧は未設定を示す。
+
+- core 回帰: 中間階 ΔSL=None／FL=None、階 ID・不足項目診断、境界・自重未解決、入力不変、明示寸法保持、完成後の直上高さ 3000 mm、さらに上の未使用階の欠落。
+- quantity 回帰: 同じ中間階欠落を壁 ID 付き Err とし、明示高さ 1000 mm は 0.9 m³／12 m²、完成した自動高さは 2.7 m³／36 m²。階不要の部材数量は継続できる。
+- `cargo test -p sepika-core -p sepika-design-jp -p sepika-load -p sepika-job --lib --locked --no-fail-fast`: 582／646／276／84 件成功。
+- `cargo test -p sepika-app --features gui --test beam_contact_quantity --test circular_post_quantity --test wall_post_model --test wall_model --locked --no-fail-fast`: 29 件成功。
+- 関連 4 クレート `cargo clippy --all-targets --locked -- -D warnings`: 成功。fmt／diff check、check-docs、mdbook build 成功。
+
+ログは TEMP の `sepika729-wall-height-*.log`。
