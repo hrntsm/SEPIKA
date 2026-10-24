@@ -959,6 +959,36 @@ fn label_factor(ui: &mut egui::Ui, factor: f64) {
 
 /// 荷重ケースの集計。
 fn loads_section(ui: &mut egui::Ui, prep: &PreparationResult) {
+    if !prep.girder_self_weights.is_empty() {
+        ui.label("矩形RC/SRC大梁の自重内訳（仕上げ・付加重量・嵩上げを除く）");
+        crate::table_util::standard_table(
+            ui,
+            "prep_girder_self_weights",
+            &[
+                Col::num("部材ID"),
+                Col::num("梁本体 [kN]"),
+                Col::num("床板重複控除 [kN]"),
+                Col::num("控除後 [kN]"),
+            ],
+            prep.girder_self_weights.len(),
+            |row| {
+                let w = &prep.girder_self_weights[row.index()];
+                row.col(|ui| {
+                    ui.label(w.element.0.to_string());
+                });
+                for n in [
+                    w.body_weight_n,
+                    w.slab_overlap_weight_n,
+                    w.body_weight_n - w.slab_overlap_weight_n,
+                ] {
+                    row.col(|ui| {
+                        ui.label(format!("{:.2}", force_kn(n)));
+                    });
+                }
+            },
+        );
+        ui.add_space(4.0);
+    }
     if prep.load_cases.is_empty() {
         ui.colored_label(crate::theme::GRAY_600, "荷重ケースがありません");
         return;

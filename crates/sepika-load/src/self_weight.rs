@@ -9,6 +9,9 @@ use sepika_core::model::{LoadCfg, MemberLoad, MemberLoadKind, Model, NodalLoad};
 
 use crate::story_gen::{enumerate_self_weight, SelfWeightItem};
 
+mod girder_overlap;
+pub use girder_overlap::{girder_self_weight_breakdown, GirderSelfWeightBreakdown};
+
 /// 旧スキーマの自重自動生成荷重ケース名（現行は自重を「DL」ケースへ統合して
 /// 同期する。読込時の移行 `Model::migrate_legacy_auto_load_cases` が参照する）。
 pub const SELF_WEIGHT_AUTO_LOAD_CASE_NAME: &str = "自重(自動)";

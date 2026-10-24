@@ -75,6 +75,8 @@ pub struct PreparationResult {
     pub panel_modeling_enabled: bool,
     /// 荷重ケースの集計（`model.load_cases` と同順）。
     pub load_cases: Vec<PrepLoadCaseRow>,
+    /// 矩形RC/SRC大梁の梁本体・床板実重複控除 [N]。仕上げ・付加重量・嵩上げは含まない。
+    pub girder_self_weights: Vec<sepika_load::self_weight::GirderSelfWeightBreakdown>,
     /// モデル整合性チェックのエラー件数。
     pub diag_errors: usize,
     /// モデル整合性チェックの警告件数。
@@ -90,8 +92,7 @@ pub struct PreparationResult {
 impl PreparationResult {
     /// 解析を進めてよい状態か（整合性チェックにエラーがないか）。
     ///
-    /// 未設定の割当領域は警告であり、解析の可否には影響しない
-    /// （[`Self::has_unset_regions`] で確認する）。
+    /// 必要な床板割当が未設定なら準備結果を生成しない。残る未設定は警告として扱う。
     pub fn is_ready(&self) -> bool {
         self.diag_errors == 0
     }
@@ -453,6 +454,19 @@ impl App {
         let (member_stiffness, member_stiffness_candidates) = self.build_prep_member_stiffness()?;
         let torsion_skipped = self.build_prep_torsion_skipped(&member_stiffness);
         Ok(PreparationResult {
+            girder_self_weights: self
+                .core
+                .model
+                .elements
+                .iter()
+                .filter(|e| !self.core.model.uses_damper_total_weight(e))
+                .map(|e| {
+                    sepika_load::self_weight::girder_self_weight_breakdown(&self.core.model, e)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect(),
             computed_at: SystemTime::now(),
             summary: self.build_prep_summary(),
             stories: self.build_prep_stories(),

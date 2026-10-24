@@ -155,10 +155,7 @@ pub(crate) enum SelfWeightItem {
 ///   床上面から床上面まで（＝節点間距離。フェイス控除しない）、鋼材（S 梁・柱）は
 ///   節点間距離（RC/SRC 大梁は柱面間距離、
 ///   RC/SRC 柱は床上面から床上面、S 梁・柱は節点間距離）。
-///   §1.9: RC/SRC 梁の断面積は梁上部のスラブ厚分 b·t を控除する
-///   （w_c = γ·b(D−t)+…。スラブ重量は構造芯間の面積で別途計上されるため、
-///   控除しないと梁幅×スラブ厚の体積が二重計上になる）。スラブが定義されて
-///   いないモデル（純フレーム等）では控除しない。
+///   矩形RC/SRC大梁は、支持する囲まれた床板との実重複を設計重量から控除する。
 ///   §柱の長さ: コンクリート柱（2 節点の鉛直 Beam/Fiber/MultiSpring）で下端へ別の柱
 ///   （同じく 2 節点の鉛直 Beam/Fiber/MultiSpring）が接続しない場合、下端節点に取り付く
 ///   非鉛直 Beam/Fiber/MultiSpring の最大せい [mm] に相当する重量を
@@ -212,9 +209,16 @@ pub(crate) fn enumerate_self_weight(
             continue;
         }
         let coating_per_length = crate::fireproof::primary_line_weight(model, elem)?;
+        let girder_weight = crate::self_weight::girder_self_weight_breakdown(model, elem)?;
 
         let (Some(sec), Some(mat)) = (model.element_section(elem), model.element_material(elem))
         else {
+            if elem.kind.is_weight_frame() || matches!(elem.kind, ElementKind::Brace { .. }) {
+                return Err(format!(
+                    "線材 {}: 自重の断面または材料が未割当または参照切れです",
+                    elem.id.0
+                ));
+            }
             continue;
         };
         sec.resolved_area()?;
@@ -306,15 +310,6 @@ pub(crate) fn enumerate_self_weight(
                 } else {
                     1.0
                 };
-                let self_weight_area = if is_concrete
-                    && !is_vertical
-                    && model.slab_thickness > 0.0
-                    && !model.floor_regions.is_empty()
-                {
-                    (sec.area - sec.width * model.slab_thickness.min(sec.depth)).max(0.0)
-                } else {
-                    sec.area
-                };
                 let core_area = sec
                     .shape
                     .as_ref()
@@ -382,11 +377,16 @@ pub(crate) fn enumerate_self_weight(
                 )?;
                 let design_per_length = steel_mat.map_or(mat.design_unit_weight_n_per_mm3(), |m| {
                     m.design_unit_weight_n_per_mm3()
-                }) * self_weight_area
+                }) * sec.area
                     * factor
                     + mat.cft_core_design_unit_weight_n_per_mm3() * core_area
                     + extras_per_length;
-                let load = design_per_length * eff_len;
+                let load = if let Some(weight) = girder_weight {
+                    weight.body_weight_n - weight.slab_overlap_weight_n
+                        + extras_per_length * eff_len
+                } else {
+                    design_per_length * eff_len
+                };
                 let matrix_mass_per_length = analysis_mass_per_length(model, elem)?;
                 let matrix_mass_equiv = matrix_mass_per_length * len * GRAVITY_MM_S2;
                 let factored_mass_per_length = if is_cft {

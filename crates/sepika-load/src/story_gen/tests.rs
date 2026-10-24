@@ -2255,13 +2255,13 @@ fn test_static_reactions_asymmetric_distributed_hand_calc() {
 
 #[test]
 fn test_member_load_reaction_distribution_end_to_end() {
-    // 自重を持たない(section/material 未設定)部材に非対称な三角形分布荷重を与え、
-    // 剛床代表節点の重心が naive な 1/2-1/2 配分(x=2000)ではなく
-    // 静定反力配分による偏った位置(x≈2666.67)になることを確認する（§1.4）。
     let mut model = Model {
         stories: explicit_stories(&[0.0, 3000.0]),
+        sections: two_story_model().sections,
+        materials: two_story_model().materials,
         ..Default::default()
     };
+    model.materials[0].density = 0.;
     let coords = [
         [0.0, 0.0, 0.0],
         [4000.0, 0.0, 0.0],
@@ -2286,7 +2286,7 @@ fn test_member_load_reaction_distribution_end_to_end() {
         id: ElemId(0),
         kind: ElementKind::Beam,
         nodes: [NodeId(2), NodeId(3)].into_iter().collect(),
-        section: None,
+        section: Some(SectionId(0)),
         local_axis: LocalAxis {
             ref_vector: [0.0, 0.0, 1.0],
         },
@@ -5524,20 +5524,20 @@ fn test_generate_story_structure_uses_material_without_shapes() {
 /// 断面も材料も未割当の部材は種別を判定できないため集計から除く。
 /// 対象部材が 1 本もない階は既定の RC になる（略算周期 α で S を算入しない安全側）。
 #[test]
-fn test_generate_story_structure_defaults_to_rc_without_section_and_material() {
-    use sepika_core::model::StoryStructure;
-    let mut model = two_story_model();
-    for e in &mut model.elements {
-        e.section = None;
+fn test_generate_story_rejects_missing_section_or_material() {
+    for missing_section in [false, true] {
+        let mut model = two_story_model();
+        if missing_section {
+            model.elements[0].section = None;
+        } else {
+            model.sections[0].material = None;
+        }
+        let error = generate_stories(&model, Some(LoadCaseId(0))).unwrap_err();
+        assert!(
+            error.contains("線材 0") && error.contains("断面"),
+            "{error}"
+        );
     }
-    for s in &mut model.sections {
-        s.material = None;
-    }
-    let gen = generate_stories(&model, Some(LoadCaseId(0))).unwrap();
-    assert!(gen
-        .stories
-        .iter()
-        .all(|s| s.structure == StoryStructure::Rc));
 }
 
 /// 階の再生成では、利用者が決める欄（階名・階レベル・階種別・地震用重量の手入力）を
@@ -5947,7 +5947,7 @@ fn signed_static_reactions_keep_couple_and_existing_range_adapter() {
 fn signed_story_reactions_preserve_synced_negative_mass_diagnostic_and_direction_filter() {
     let mut model = two_story_model();
     model.elements.retain(|e| e.id == ElemId(4));
-    model.elements[0].section = None;
+    model.materials[0].density = 0.;
     model.load_cases[0].nodal.clear();
     model.load_cases[0].member = vec![MemberLoad::manual(
         ElemId(4),

@@ -4,8 +4,40 @@ use sepika_core::model::*;
 use sepika_job::{prepare::prepare_model, weight_preparation::*, AnalysisSettings};
 
 #[test]
+fn old_calculation_contract_and_unversioned_weight_keys_force_regeneration() {
+    let settings = AnalysisSettings::default();
+    let mut base = fixture::two_storeys_with_weightless_steel_girders();
+    prepare_model(&mut base, &settings, None, true).unwrap();
+    let current = base
+        .seismic_weight_generation
+        .as_ref()
+        .unwrap()
+        .input_key
+        .clone();
+    let mut previous = current.clone();
+    previous[..4].copy_from_slice(
+        &(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION - 1).to_le_bytes(),
+    );
+    for legacy in [current[4..].to_vec(), previous] {
+        let mut model = base.clone();
+        model.stories[1].seismic_weight = Some(999.);
+        let output = weight_output_key(&model);
+        let record = model.seismic_weight_generation.as_mut().unwrap();
+        record.input_key = legacy;
+        record.output_key = output;
+        assert!(!weights_are_current(&model, settings.mass_method));
+        prepare_model(&mut model, &settings, None, false).unwrap();
+        assert!(weights_are_current(&model, settings.mass_method));
+        assert_eq!(
+            model.stories[1].seismic_weight,
+            base.stories[1].seismic_weight
+        );
+    }
+}
+
+#[test]
 fn common_preparation_matches_independent_two_storeys_and_preserves_user_settings() {
-    let mut model = fixture::two_storeys();
+    let mut model = fixture::two_storeys_with_weightless_steel_girders();
     let settings = AnalysisSettings::default();
     prepare_model(&mut model, &settings, None, true).unwrap();
     assert!(weights_are_current(&model, settings.mass_method));
@@ -64,7 +96,7 @@ fn common_preparation_matches_independent_two_storeys_and_preserves_user_setting
 
 #[test]
 fn input_key_excludes_generated_outputs_and_retains_manual_mass_and_section_floor() {
-    let mut model = fixture::two_storeys();
+    let mut model = fixture::two_storeys_with_weightless_steel_girders();
     let settings = AnalysisSettings::default();
     prepare_model(&mut model, &settings, None, true).unwrap();
     let key = weight_input_key(&model, settings.mass_method);
@@ -86,7 +118,7 @@ fn input_key_excludes_generated_outputs_and_retains_manual_mass_and_section_floo
 
 #[test]
 fn user_diaphragm_mass_and_coefficient_survive_weight_refresh() {
-    let mut model = fixture::two_storeys();
+    let mut model = fixture::two_storeys_with_weightless_steel_girders();
     let settings = AnalysisSettings::default();
     prepare_model(&mut model, &settings, None, true).unwrap();
     let master = model.generated_masters[0];
@@ -119,7 +151,7 @@ fn user_diaphragm_mass_and_coefficient_survive_weight_refresh() {
 #[test]
 fn invalid_seismic_weights_clear_both_auto_directions_without_rejecting_independent_dl() {
     for invalid in [-1.0, 0.0, f64::NAN, f64::INFINITY] {
-        let mut model = fixture::two_storeys();
+        let mut model = fixture::two_storeys_with_weightless_steel_girders();
         let settings = AnalysisSettings::default();
         prepare_model(&mut model, &settings, None, true).unwrap();
         let ex = model
@@ -159,7 +191,7 @@ fn invalid_seismic_weights_clear_both_auto_directions_without_rejecting_independ
 
 #[test]
 fn multiple_diaphragms_with_ambiguous_ownership_reject_both_directions() {
-    let mut model = fixture::two_storeys();
+    let mut model = fixture::two_storeys_with_weightless_steel_girders();
     let settings = AnalysisSettings::default();
     prepare_model(&mut model, &settings, None, true).unwrap();
     let mut duplicate = model
@@ -215,7 +247,7 @@ fn multiple_diaphragms_with_ambiguous_ownership_reject_both_directions() {
 
 #[test]
 fn legacy_saved_automatic_floor_includes_added_geometry_and_keeps_stable_generation() {
-    let mut model = fixture::two_storeys();
+    let mut model = fixture::two_storeys_with_weightless_steel_girders();
     let settings = AnalysisSettings::default();
     prepare_model(&mut model, &settings, None, true).unwrap();
     model.seismic_weight_generation = None;
@@ -241,7 +273,7 @@ fn legacy_saved_automatic_floor_includes_added_geometry_and_keeps_stable_generat
 #[test]
 fn generated_master_restraints_follow_released_structure_and_preserve_user_edits() {
     use sepika_core::dof::{Dof, Dof6Mask};
-    let mut model = fixture::two_storeys();
+    let mut model = fixture::two_storeys_with_weightless_steel_girders();
     let settings = AnalysisSettings::default();
     for node in &mut model.nodes[2..6] {
         node.restraint.set_fixed(Dof::Uy);
@@ -296,7 +328,7 @@ fn edited_generated_diaphragm_weight_and_ci_survive_density_refresh() {
     use sepika_core::dof::{Dof, Dof6Mask};
 
     for ci in [Some(0.3), None] {
-        let mut model = fixture::two_storeys();
+        let mut model = fixture::two_storeys_with_weightless_steel_girders();
         for node in &mut model.nodes[2..6] {
             node.restraint.set_fixed(Dof::Uy);
         }
@@ -397,7 +429,7 @@ fn added_and_inserted_storeys_reserve_existing_masters_and_keep_independent_resu
     use sepika_core::ids::{ElemId, NodeId, StoryId};
     use std::collections::HashSet;
     for inserted in [false, true] {
-        let mut model = fixture::two_storeys();
+        let mut model = fixture::two_storeys_with_weightless_steel_girders();
         let settings = AnalysisSettings {
             soil: sepika_load::ai::SoilClass::III,
             ..Default::default()

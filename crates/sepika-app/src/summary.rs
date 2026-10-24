@@ -989,6 +989,18 @@ pub fn build_preparation_csv(app: &App) -> String {
         }
     }
 
+    if !p.girder_self_weights.is_empty() {
+        out.push_str("\n[矩形RC/SRC大梁自重（仕上げ・付加重量・嵩上げを除く）]\n部材ID,梁本体[kN],床板重複控除[kN],控除後[kN]\n");
+        for w in &p.girder_self_weights {
+            out.push_str(&format!(
+                "{},{:.2},{:.2},{:.2}\n",
+                w.element.0,
+                kn(w.body_weight_n),
+                kn(w.slab_overlap_weight_n),
+                kn(w.body_weight_n - w.slab_overlap_weight_n)
+            ));
+        }
+    }
     if !p.load_cases.is_empty() {
         out.push_str(
             "\n[荷重集計]\n荷重ケース,種別,節点荷重数,部材荷重数,ΣFx[kN],ΣFy[kN],ΣFz[kN]\n",

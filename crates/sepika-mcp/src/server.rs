@@ -1447,7 +1447,7 @@ mod tests {
     async fn mixed_structure_basement_mcp_standard_load_matches_above_ground_period() {
         let dir = test_store_dir("mixed_above_gl");
         let mut model = pushover_model();
-        let rc = seismic_freshness_fixture::two_storeys();
+        let rc = seismic_freshness_fixture::two_storeys_with_weightless_steel_girders();
         let mut concrete = rc.materials[0].clone();
         concrete.id = sepika_core::ids::MaterialId(1);
         model.materials.push(concrete);
@@ -1538,7 +1538,7 @@ mod tests {
     async fn public_mcp_ex_uses_edited_density_finish_and_seismic_live_without_prepare_button() {
         use sepika_core::model::{AreaLoad, SlabUsage};
         let dir = test_store_dir("seismic_freshness_439");
-        let mut model = seismic_freshness_fixture::two_storeys();
+        let mut model = seismic_freshness_fixture::two_storeys_with_weightless_steel_girders();
         sepika_job::prepare::prepare_model(&mut model, &Default::default(), None, true).unwrap();
         let ex = model
             .load_cases

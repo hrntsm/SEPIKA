@@ -2,7 +2,7 @@ use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, SlabId};
 use sepika_core::model::*;
 
-pub fn two_storeys() -> Model {
+pub fn two_storeys_with_weightless_steel_girders() -> Model {
     let mut model = Model {
         stories: [0.0, 12500.0, 25000.0]
             .into_iter()
@@ -71,9 +71,13 @@ pub fn two_storeys() -> Model {
         concrete_class: Default::default(),
         strength_factor: None,
     });
-    use sepika_core::section_shape::{
-        BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
-    };
+    let mut steel = model.materials[2].clone();
+    steel.id = MaterialId(3);
+    steel.name = "S大梁自重0".into();
+    steel.category = MaterialCategory::Steel;
+    steel.density = 0.0;
+    model.materials.push(steel);
+    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
     let mut section = SectionShape::RcColumnRect {
         b: 300.0,
         d: 300.0,
@@ -96,25 +100,15 @@ pub fn two_storeys() -> Model {
     section.shear_rebar_material = Some(MaterialId(2));
     section.frame_use = Some(FrameSectionUse::Column);
     model.sections.push(section);
-    let mut section = SectionShape::RcBeamRect {
-        b: 300.0,
-        d: 400.0,
-        rebar: RcBeamRebar {
-            main_dia: 22.0,
-            top: vec![3],
-            bottom: vec![3],
-            cover: 40.0,
-            stirrup: BeamStirrup {
-                dia: 10.0,
-                pitch: 100.0,
-                legs: 2,
-            },
-        },
+    let mut section = SectionShape::SteelH {
+        height: 400.0,
+        width: 300.0,
+        web_thick: 10.0,
+        flange_thick: 15.0,
+        root_r: Some(0.0),
     }
-    .to_section(SectionId(1), "RC梁".into());
-    section.material = Some(MaterialId(0));
-    section.rebar_material = Some(MaterialId(2));
-    section.shear_rebar_material = Some(MaterialId(2));
+    .to_section(SectionId(1), "S大梁自重0".into());
+    section.material = Some(MaterialId(3));
     section.frame_use = Some(FrameSectionUse::Girder);
     model.sections.push(section);
     let mut slab_section = sepika_core::section_shape::SectionShape::RcSlab { thickness: 100.0 }
@@ -159,7 +153,7 @@ pub fn two_storeys() -> Model {
         nodal: [2, 3, 4, 5]
             .into_iter()
             .map(|id| {
-                let frame_volume = if id < 4 { 2934000000.0 } else { 1809000000.0 };
+                let frame_volume = if id < 4 { 2250000000.0 } else { 1125000000.0 };
                 let self_weight =
                     (frame_volume + 1200000000.0) * 2.4e-9 * sepika_core::units::GRAVITY_MM_S2;
                 NodalLoad::manual(
@@ -202,7 +196,7 @@ pub fn two_storeys() -> Model {
 pub fn expected_weights(density: f64, finish: f64, seismic_live: f64) -> [f64; 2] {
     let gamma = (density - 2.4e-9) * sepika_core::units::GRAVITY_MM_S2;
     [
-        100000.0 + 2934000000.0 * gamma + 12000000.0 * (finish + seismic_live),
-        100000.0 + 1809000000.0 * gamma + 12000000.0 * (finish + seismic_live),
+        100000.0 + 2250000000.0 * gamma + 12000000.0 * (finish + seismic_live),
+        100000.0 + 1125000000.0 * gamma + 12000000.0 * (finish + seismic_live),
     ]
 }

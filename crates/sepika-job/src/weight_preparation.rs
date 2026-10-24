@@ -90,7 +90,12 @@ pub fn weight_input_key(model: &Model, mass_method: sepika_core::model::MassMeth
     {
         member.name.clear();
     }
-    bincode::serialize(&(input, manual_master_settings)).expect("重量依存入力の直列化")
+    bincode::serialize(&(
+        sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION,
+        input,
+        manual_master_settings,
+    ))
+    .expect("重量依存入力の直列化")
 }
 
 /// 現在保持している派生重量・質量の内容を識別する。

@@ -5,7 +5,10 @@ mod seismic {
 
 pub fn steel_frame() -> sepika_core::model::Model {
     use sepika_core::model::{MaterialCategory, PropertyBasis};
-    let mut model = seismic::two_storeys();
+    let mut model = seismic::two_storeys_with_weightless_steel_girders();
+    model.sections[1].material = Some(sepika_core::ids::MaterialId(0));
+    model.sections[1].area = 120000.0;
+    model.materials.truncate(3);
     model.panel_zone = sepika_core::model::PanelZoneMode::None;
     model.materials[0].category = MaterialCategory::Steel;
     model.materials[0].name = "SN400B".into();
