@@ -126,7 +126,6 @@ fn analyze_frame_gravity(app: &mut App) {
     }
 }
 
-#[cfg(feature = "gui")]
 use sepika_core::ids::StoryId;
 use sepika_core::model::MaterialCategory;
 use sepika_core::model::{FloorRegion, Slab, SlabPlate, SlabShape};
