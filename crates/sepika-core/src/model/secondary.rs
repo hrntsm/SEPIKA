@@ -185,8 +185,7 @@ impl Model {
         })
     }
 
-    /// 実部材化していない二次部材小梁の材軸を集める（両端に実 `Beam` 要素がある小梁は
-    /// 実部材として扱うため除く）。
+    /// 実部材化していない二次部材小梁の基準材軸を集める。
     pub fn secondary_beam_axes(&self) -> Vec<SecondaryBeamAxis> {
         let mut out = Vec::new();
         for sm in self.beams() {
@@ -290,27 +289,40 @@ impl Model {
         (len > 1e-9).then_some((p0, p1, len))
     }
 
-    /// 二次部材が実部材化済みか。両端座標に一致する節点を結ぶ 2 節点 `Beam` 要素の
-    /// 有無で判定する。
+    /// 基準端点が許容差内で一致する2節点 `Beam` と、断面・用途・解決主材料が一致するとき実部材化済み。
+    /// 小梁は鉛直偏心も一致を要し、未指定と明示0を区別する。材端の順序は問わない。
     pub fn secondary_member_materialized(&self, sm: &SecondaryMember) -> bool {
+        let Some(section) = sm.section.and_then(|id| self.section(id)) else {
+            return false;
+        };
+        let expected_use = match sm.kind {
+            SecondaryMemberKind::Beam => FrameSectionUse::Girder,
+            SecondaryMemberKind::Post => FrameSectionUse::Column,
+        };
+        if section.frame_use != Some(expected_use) {
+            return false;
+        }
+        let Some(material) = self.secondary_material(sm) else {
+            return false;
+        };
         let Some((a, b)) = self.secondary_member_end_points(sm) else {
             return false;
         };
-        let tol = crate::geom::MEMBER_AXIS_TOL_MM;
-        let find = |p: [f64; 3]| {
-            self.nodes
-                .iter()
-                .find(|n| crate::geom::vec3::dist(n.coord, p) <= tol)
-                .map(|n| n.id)
-        };
-        let (Some(na), Some(nb)) = (find(a), find(b)) else {
-            return false;
-        };
         self.elements.iter().any(|e| {
-            e.kind == ElementKind::Beam
-                && e.nodes.len() == 2
-                && ((e.nodes[0] == na && e.nodes[1] == nb)
-                    || (e.nodes[0] == nb && e.nodes[1] == na))
+            if e.kind != ElementKind::Beam
+                || e.nodes.len() != 2
+                || e.section != Some(section.id)
+                || self.element_material(e).map(|m| m.id) != Some(material.id)
+                || (sm.kind == SecondaryMemberKind::Beam
+                    && sm.vertical_eccentricity != e.vertical_eccentricity)
+            {
+                return false;
+            }
+            let (Some(p), Some(q)) = (self.node(e.nodes[0]), self.node(e.nodes[1])) else {
+                return false;
+            };
+            (points_equal(a, p.coord) && points_equal(b, q.coord))
+                || (points_equal(a, q.coord) && points_equal(b, p.coord))
         })
     }
 

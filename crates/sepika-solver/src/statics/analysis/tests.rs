@@ -2256,13 +2256,12 @@ fn test_model_issues_warns_unassigned_beam() {
         "片持ち小梁は所属なしのエラーにしない"
     );
 
-    // 実部材化済み（両端節点を結ぶ実 Beam がある）小梁も所属なしのエラーにしない。
     let (a, b) = (NodeId(n), NodeId(n + 1));
     model.elements.push(sepika_core::model::ElementData {
         id: ElemId(model.elements.len() as u32),
         kind: sepika_core::model::ElementKind::Beam,
         nodes: [a, b].into_iter().collect(),
-        section: None,
+        section: Some(SectionId(0)),
         local_axis: sepika_core::model::LocalAxis {
             ref_vector: [0.0, 0.0, 1.0],
         },
@@ -2284,6 +2283,12 @@ fn test_model_issues_warns_unassigned_beam() {
             .any(|i| i.message.contains("どの床領域にも所属しない小梁")),
         "実部材化済みの小梁は所属なしのエラーにしない"
     );
+    model.elements.last_mut().unwrap().vertical_eccentricity = Some(-300.0);
+    let issues = model_issues(&model);
+    assert!(issues
+        .iter()
+        .any(|issue| issue.severity == IssueSeverity::Error
+            && issue.message.contains("どの床領域にも所属しない小梁")));
 }
 
 /// 二次部材（小梁・間柱）に CFT 断面が割り当てられていると、解析前チェックでエラーにする。
