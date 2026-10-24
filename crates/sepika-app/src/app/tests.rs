@@ -4842,7 +4842,6 @@ fn test_floor_design_skips_materialized_beam() {
         panel_thickness: None,
         thickness: None,
         shape: None,
-        // 床の小梁設計は断面性能のみを使うため、材料は割り当てない。
         material: None,
         rebar_material: None,
         shear_rebar_material: None,
@@ -4890,6 +4889,7 @@ fn test_floor_design_skips_materialized_beam() {
         plastic_zone: None,
         spring: None,
     });
+    set_floor_test_self_weight_geometry(&mut model);
     model.validate().expect("validate");
     let app = App {
         core: AppCore {
@@ -14841,5 +14841,59 @@ fn init_test_slab_placements(model: &mut sepika_core::model::Model) {
             slab.reference_story = Some(reference);
             slab.vertical_eccentricity_mm = Some(z - fl);
         }
+    }
+}
+
+#[path = "../../../sepika-core/tests/support/secondary_materialization_model.rs"]
+mod secondary_materialization_fixture;
+
+#[test]
+fn independent_eccentric_beam_remains_in_floor_design_targets() {
+    for (eccentricity, expected_count) in [(Some(-300.), 1), (None, 1), (Some(0.), 0)] {
+        let mut app = App::default();
+        app.core.model = secondary_materialization_fixture::model();
+        app.core.model.elements[0].vertical_eccentricity = eccentricity;
+        let (beams, _) = app.floor_design_checks().unwrap();
+        assert_eq!(beams.len(), expected_count, "{eccentricity:?}");
+        if expected_count == 1 {
+            assert!(beams[0].2.unchecked);
+        }
+    }
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn independent_eccentric_beam_is_visible_in_secondary_list() {
+    for (eccentricity, visible) in [(Some(-300.), true), (None, true), (Some(0.), false)] {
+        let mut app = App::default();
+        app.core.model = secondary_materialization_fixture::model();
+        app.core.model.elements[0].vertical_eccentricity = eccentricity;
+        let context = egui::Context::default();
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(2000., 2000.),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                crate::tables::secondary::secondary_member_list(
+                    &mut app,
+                    ui,
+                    sepika_core::model::SecondaryMemberKind::Beam,
+                )
+            },
+        );
+        let text = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(text.contains("SM0"), visible, "{eccentricity:?}: {text}");
     }
 }

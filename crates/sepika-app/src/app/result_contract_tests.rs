@@ -242,6 +242,7 @@ fn ovika_missing_old_exact_future_contracts_preserve_model_and_only_exact_result
         ("old-panel-reference-column", Some(28), "旧契約"),
         ("old-local-frame-reference", Some(37), "旧契約"),
         ("old-face-direction-reference", Some(38), "旧契約"),
+        ("old-secondary-materialization", Some(44), "旧契約"),
         ("exact", Some(ANALYSIS_CONTRACT_VERSION), ""),
         ("future", Some(ANALYSIS_CONTRACT_VERSION + 1), "未来版"),
     ] {
@@ -395,6 +396,7 @@ fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_
         ("design-old-steel-f-selection", Some(22)),
         ("design-old-local-frame", Some(23)),
         ("design-old-face-direction", Some(24)),
+        ("design-old-secondary-materialization", Some(27)),
         ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
     ] {
         let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);

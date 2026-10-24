@@ -1189,6 +1189,7 @@ fn floating_beam_without_load_is_not_reported() {
 #[test]
 fn materialized_beam_is_skipped() {
     let mut m = base_model();
+    m.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
     m.nodes.push(node(0, 0.0, 0.0, 0.0));
     m.nodes.push(node(1, 4000.0, 0.0, 0.0));
     m.elements.push(element_beam(0, 0, 1));

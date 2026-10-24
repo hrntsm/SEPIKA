@@ -183,7 +183,7 @@ fn end_support_of(sm: &SecondaryMember) -> [EndSupport; 2] {
 
 /// 逐次伝達の対象となる二次部材の材軸を集める。
 ///
-/// 実部材化済み（両端を持つ実 `Beam` がある）・退化（長さ 0）・材軸が引けないものは
+/// 実部材化済み・退化（長さ 0）・材軸が引けないものは
 /// 対象外（解析要素として直接扱われる、または荷重を持てない）。
 fn axes(model: &Model) -> Vec<Axis> {
     let mut out: Vec<Axis> = model
