@@ -2685,3 +2685,78 @@ fn invalid_lip_channel_is_rejected_for_primary_and_unreferenced_sections() {
         assert!(error.contains("H/B/C/t"), "{error}");
     }
 }
+
+#[test]
+fn automatic_wall_quantity_requires_the_immediate_floor_input() {
+    use sepika_core::ids::{StoryId, WallPlateId};
+    use sepika_core::model::{RegionAnchor, Story, WallPlate, WallPlateShape};
+    let mut model = rc_portal_model();
+    model.stories = [0.0, 3000.0, 6000.0]
+        .into_iter()
+        .enumerate()
+        .map(|(i, fl)| Story::new(StoryId(i as u32), format!("{i}F"), Some(fl), Some(0.0)))
+        .collect();
+    model.sections.push(
+        SectionShape::RcWall {
+            thickness: 150.0,
+            pwh_ratio: None,
+            pwv_ratio: None,
+            ps: 0.0,
+        }
+        .to_section(SectionId(2), "W15".into()),
+    );
+    model.wall_plates.push(WallPlate {
+        id: WallPlateId(0),
+        shape: WallPlateShape::Attached {
+            anchor: RegionAnchor::FloorRegion {
+                nodes: [NodeId(0), NodeId(1)],
+            },
+            extent: None,
+        },
+        section: Some(SectionId(2)),
+        opening_area: 0.0,
+        opening_weight: 0.0,
+        openings: vec![],
+        loads: vec![],
+        slit: Default::default(),
+        self_weight_shares: vec![],
+        dl_support: None,
+    });
+    for field in ["FL", "ΔSL"] {
+        let mut incomplete = model.clone();
+        if field == "FL" {
+            incomplete.stories[1].elevation = None;
+        } else {
+            incomplete.stories[1].sl_offset_mm = None;
+        }
+        let before = incomplete.clone();
+        let error = try_compute_quantity_takeoff(&incomplete, &QuantityCfg::default()).unwrap_err();
+        assert!(
+            error.contains("壁版 0") && error.contains("階 1") && error.contains(field),
+            "{error}"
+        );
+        assert!(incomplete.eq_ignoring_dofmap(&before));
+        if let WallPlateShape::Attached { extent, .. } = &mut incomplete.wall_plates[0].shape {
+            *extent = Some([1000.0; 2]);
+        }
+        let quantities =
+            try_compute_quantity_takeoff(&incomplete, &QuantityCfg::default()).unwrap();
+        let wall = quantities
+            .items
+            .iter()
+            .find(|item| item.wall_plate == Some(WallPlateId(0)))
+            .unwrap();
+        assert!((wall.concrete_m3 - 0.9).abs() < 1e-12);
+        assert!((wall.formwork_m2 - 12.0).abs() < 1e-12);
+        incomplete.wall_plates.clear();
+        assert!(try_compute_quantity_takeoff(&incomplete, &QuantityCfg::default()).is_ok());
+    }
+    let quantities = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+    let wall = quantities
+        .items
+        .iter()
+        .find(|item| item.wall_plate == Some(WallPlateId(0)))
+        .unwrap();
+    assert!((wall.concrete_m3 - 2.7).abs() < 1e-12);
+    assert!((wall.formwork_m2 - 36.0).abs() < 1e-12);
+}

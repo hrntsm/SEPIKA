@@ -708,6 +708,13 @@ pub fn try_compute_quantity_takeoff(
     model
         .validate_secondary_section_usage()
         .map_err(|e| e.to_string())?;
+    for plate in &model.wall_plates {
+        if matches!(plate.shape, WallPlateShape::Attached { extent: None, .. }) {
+            model
+                .try_wall_plate_extent(plate)
+                .map_err(|reason| format!("壁版 {}: {reason}", plate.id.0))?;
+        }
+    }
     validate_circular_rc_posts(model)?;
     let secondary = resolve_secondary_quantities(model)?;
     model.validate_lip_channels().map_err(|e| e.to_string())?;
