@@ -317,20 +317,38 @@ fn add_contact(
             "支持材 {support:?}: 梁の断面幅・せい [mm] は有限かつ正である必要があります"
         ));
     }
-    if !((width_mm + 2.0 * d) * (end - start)).is_finite()
-        || [a[2] - d, b[2] - d].iter().any(|z| !z.is_finite())
-    {
+    if !((width_mm + 2.0 * d) * (end - start)).is_finite() {
         return Err(format!(
             "支持材 {support:?}: 梁の型枠面積・下端高さが有限範囲を超えています"
         ));
     }
-    let sloped = a[2] != b[2];
-    let beam_z = if sloped {
-        let tops = s.map(|s| a[2] + (b[2] - a[2]) * (s / len));
-        [tops[0].min(tops[1]) - d, tops[0].max(tops[1])]
+    let placement = model.beam_placement(support)?;
+    let [actual_a, actual_b] = placement.actual_ends;
+    let sloped = actual_a[2] != actual_b[2];
+    if !sloped && (placement.axes[1][0] != 0.0 || placement.axes[1][1] != 0.0) {
+        return Err(format!(
+            "支持材 {support:?}: 断面せい方向が鉛直でない梁の接触型枠は未対応です"
+        ));
+    }
+    let half_depth_z_mm = if sloped {
+        (d / (2.0 * placement.axes[1][2].abs())).min(width_mm / (2.0 * placement.axes[2][2].abs()))
     } else {
-        [a[2] - d, a[2]]
+        d / 2.0
     };
+    let beam_z = if sloped {
+        let centers = s.map(|s| actual_a[2] + (actual_b[2] - actual_a[2]) * (s / len));
+        [
+            centers[0].min(centers[1]) - half_depth_z_mm,
+            centers[0].max(centers[1]) + half_depth_z_mm,
+        ]
+    } else {
+        [actual_a[2] - half_depth_z_mm, actual_a[2] + half_depth_z_mm]
+    };
+    if beam_z.iter().any(|z| !z.is_finite()) {
+        return Err(format!(
+            "支持材 {support:?}: 梁の上下端高さが有限範囲を超えています"
+        ));
+    }
     let z = [slab_z[0].max(beam_z[0]), slab_z[1].min(beam_z[1])];
     if s[1] <= s[0] || z[1] <= z[0] {
         return Ok(());
