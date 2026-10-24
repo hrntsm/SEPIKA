@@ -138,49 +138,77 @@ pub fn girder_self_weight_breakdown(
                 continue;
             }
             let side = usize::from((edge.span[1] - edge.span[0]) * winding < 0.0);
-            sides[side].entry(id).or_default().push([lo, hi]);
+            sides[side]
+                .entry(id)
+                .or_default()
+                .push([lo.max(interval[0]), hi.min(interval[1])]);
         }
     }
+    let mut cuts = interval.to_vec();
     for side in &mut sides {
-        if side.len() > 1 {
-            let mut ids: Vec<_> = side.keys().map(|id| id.0).collect();
-            ids.sort_unstable();
-            return Err(fail(&format!("同じ側の床板候補 {ids:?} が矛盾しています")));
-        }
-        for (id, spans) in side {
+        for spans in side.values_mut() {
             spans.sort_by(|a, b| a[0].total_cmp(&b[0]));
-            let mut reach = interval[0];
-            for [lo, hi] in spans {
-                if *lo > reach {
-                    break;
+            let mut merged: Vec<[f64; 2]> = Vec::new();
+            for span in spans.iter().copied() {
+                match merged.last_mut() {
+                    Some(previous) if span[0] <= previous[1] => {
+                        previous[1] = previous[1].max(span[1])
+                    }
+                    _ => merged.push(span),
                 }
-                reach = reach.max(*hi);
             }
-            if reach < interval[1] {
-                return Err(fail(&format!(
-                    "床板 {} の支持区間が自重算定区間全長を覆いません",
-                    id.0
-                )));
+            for span in &merged {
+                cuts.extend_from_slice(span);
             }
+            *spans = merged;
         }
     }
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup();
     let occupied = sides.iter().filter(|s| !s.is_empty()).count();
     if occupied > 0 && beam.axes[2][2].abs() > 1e-12 {
         return Err(fail("幅方向が水平でない矩形断面の実重複控除は未対応です"));
     }
     let mut overlap_volume_mm3 = 0.0;
-    for side in sides.iter().filter(|s| !s.is_empty()) {
-        let slab = model.resolved_slab_placement(*side.keys().next().unwrap())?;
-        overlap_volume_mm3 += b / occupied as f64
-            * plan_ratio
-            * overlap_integral(
-                &beam,
-                b,
-                d,
-                len,
-                interval,
-                [slab.bottom_z_mm, slab.top_z_mm],
-            )?;
+    for span in cuts.windows(2) {
+        let mut active = [None, None];
+        for (side_index, side) in sides.iter().enumerate() {
+            let mut ids: Vec<_> = side
+                .iter()
+                .filter(|(_, spans)| spans.iter().any(|s| s[0] < span[1] && span[0] < s[1]))
+                .map(|(id, _)| *id)
+                .collect();
+            ids.sort_unstable_by_key(|id| id.0);
+            match ids.as_slice() {
+                [] if side.is_empty() => {}
+                [] => {
+                    return Err(fail(&format!(
+                    "側 {side_index} の床板群の支持区間が自重算定区間全長を覆いません（{}〜{} mm）",
+                    span[0], span[1]
+                )))
+                }
+                [id] => active[side_index] = Some(*id),
+                _ => {
+                    return Err(fail(&format!(
+                        "同じ側の床板候補 {ids:?} が区間 {}〜{} mmで矛盾しています",
+                        span[0], span[1]
+                    )))
+                }
+            }
+        }
+        for id in active.into_iter().flatten() {
+            let slab = model.resolved_slab_placement(id)?;
+            overlap_volume_mm3 += b / occupied as f64
+                * plan_ratio
+                * overlap_integral(
+                    &beam,
+                    b,
+                    d,
+                    len,
+                    [span[0], span[1]],
+                    [slab.bottom_z_mm, slab.top_z_mm],
+                )?;
+        }
     }
     let body_volume_mm3 = b * d * (interval[1] - interval[0]);
     if ![body_volume_mm3, overlap_volume_mm3]

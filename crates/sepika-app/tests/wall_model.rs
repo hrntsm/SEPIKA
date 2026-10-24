@@ -23,6 +23,7 @@
 //! height=900・Column 伝達）。柱脚 4 節点は固定支点。荷重は ST-Bridge を経由しないため
 //! `App::run_preparation` の自動同期（`sync_auto_load_cases_action`）が
 //! DL・LL・EX・EY を生成する。
+//! 床板を持たない壁専用架構であり、水平な割当領域は版なしと明示する。
 //!
 //! **柱脚どうしの梁（基礎大梁）を持つ。** 2026-08 に新設した当初は柱頭側の梁のみで、
 //! `region_gen::wall::scan_wall_region_boundaries` が境界を 1 つも検出できなかった
@@ -524,6 +525,10 @@ fn wall_bay_model() -> Model {
             section.rebar_material = Some(MaterialId(3));
             section.shear_rebar_material = Some(MaterialId(4));
         }
+    }
+    model.rebuild_floor_assignment_regions();
+    for region in &mut model.floor_assignment_regions.regions {
+        region.assignment = sepika_core::model::PlateAssignment::NoPlate;
     }
     model
 }

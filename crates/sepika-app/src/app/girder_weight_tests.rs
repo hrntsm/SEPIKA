@@ -108,6 +108,152 @@ fn slab(model: &mut Model, side: usize, thickness: f64, top: f64) {
     slab.vertical_eccentricity_mm = Some(top);
 }
 
+fn strip_cross_edge(model: &mut Model, position: f64) -> SupportBoundary {
+    let p = [6000. * position, 0., 2650.];
+    let q = [6000. * position, 2000., 2650.];
+    for element in &model.elements {
+        let a = model.nodes[element.nodes[0].index()].coord;
+        let b = model.nodes[element.nodes[1].index()].coord;
+        let span = if a == p && b == q {
+            Some([0., 1.])
+        } else if a == q && b == p {
+            Some([1., 0.])
+        } else {
+            None
+        };
+        if let Some(span) = span {
+            return SupportBoundary {
+                support: SupportMemberId::Primary(element.id),
+                span,
+            };
+        }
+    }
+    let nodes = [p, q].map(|point| {
+        if let Some(node) = model.nodes.iter().find(|node| node.coord == point) {
+            return node.id;
+        }
+        let mut node = model.nodes[0].clone();
+        node.id = NodeId(model.nodes.len() as u32);
+        node.coord = point;
+        let id = node.id;
+        model.nodes.push(node);
+        id
+    });
+    let mut element = model.elements[1].clone();
+    element.id = ElemId(model.elements.len() as u32);
+    element.nodes = nodes.into_iter().collect();
+    let id = element.id;
+    model.elements.push(element);
+    SupportBoundary {
+        support: SupportMemberId::Primary(id),
+        span: [0., 1.],
+    }
+}
+
+fn slab_strip(model: &mut Model, span: [f64; 2], thickness: f64) {
+    let section = SectionId(model.sections.len() as u32);
+    let mut data = SectionShape::RcSlab { thickness }.to_section(section, "分割床".into());
+    data.material = Some(MaterialId(1));
+    model.sections.push(data);
+    let right = strip_cross_edge(model, span[1]);
+    let mut left = strip_cross_edge(model, span[0]);
+    left.span.reverse();
+    let id = sepika_core::ids::SlabId(model.slabs.len() as u32);
+    model.slabs.push(Slab {
+        id,
+        shape: SlabShape::Enclosed,
+        plate: SlabPlate {
+            section: Some(section),
+            ..Default::default()
+        },
+        reference_story: Some(StoryId(1)),
+        vertical_eccentricity_mm: Some(0.),
+        tip_loads: Vec::new(),
+    });
+    let region = sepika_core::ids::FloorPlateAssignmentRegionId(
+        model
+            .floor_assignment_regions
+            .regions
+            .iter()
+            .map(|r| r.id.0)
+            .max()
+            .unwrap_or(0)
+            + 1,
+    );
+    model
+        .floor_assignment_regions
+        .regions
+        .push(FloorPlateAssignmentRegion {
+            id: region,
+            assignment: PlateAssignment::Plate(id),
+            boundary: vec![
+                SupportBoundary {
+                    support: SupportMemberId::Primary(ElemId(0)),
+                    span,
+                },
+                right,
+                SupportBoundary {
+                    support: SupportMemberId::Primary(ElemId(2)),
+                    span: [1. - span[1], 1. - span[0]],
+                },
+                left,
+            ],
+        });
+}
+
+#[test]
+fn girder_overlap_continuous_slab_groups_use_each_interval_and_reject_gaps_and_overlaps() {
+    for (thicknesses, expected, paired_expected) in [
+        ([150., 150., 150.], 31680., 31680.),
+        ([100., 150., 300.], 30240., 30960.),
+    ] {
+        let mut model = model();
+        model.floor_assignment_regions.regions.remove(0);
+        for (span, thickness) in [[0., 0.25], [0.25, 0.75], [0.75, 1.]]
+            .into_iter()
+            .zip(thicknesses)
+        {
+            slab_strip(&mut model, span, thickness);
+        }
+        model.validate().unwrap();
+        assert!((weight(&model) - expected).abs() < 1e-6);
+        assert!((dl_weight(&model) - expected).abs() < 1e-6);
+        slab(&mut model, 1, 150., 0.);
+        assert!((weight(&model) - paired_expected).abs() < 1e-6);
+        assert!((dl_weight(&model) - paired_expected).abs() < 1e-6);
+    }
+    for (spans, reason) in [
+        (
+            vec![[0., 0.25], [0.3, 0.75], [0.75, 1.]],
+            "全長を覆いません",
+        ),
+        (vec![[0., 0.3], [0.25, 0.75], [0.75, 1.]], "矛盾"),
+        (vec![[0., 0.5]], "全長を覆いません"),
+    ] {
+        let mut model = model();
+        model.floor_assignment_regions.regions.remove(0);
+        let no_plate_gap = spans.len() == 3 && reason == "全長を覆いません";
+        for span in spans {
+            slab_strip(&mut model, span, 150.);
+        }
+        if no_plate_gap {
+            slab_strip(&mut model, [0.25, 0.3], 150.);
+            model.slabs.pop();
+            model
+                .floor_assignment_regions
+                .regions
+                .last_mut()
+                .unwrap()
+                .assignment = PlateAssignment::NoPlate;
+        }
+        let error = self_weight_case_content(&model, &LoadCfg::default()).unwrap_err();
+        assert!(
+            error.contains("大梁 0") && error.contains(reason),
+            "{error}"
+        );
+    }
+}
+
 fn weight(model: &Model) -> f64 {
     let w = girder_self_weight_breakdown(model, &model.elements[0])
         .unwrap()

@@ -8823,30 +8823,6 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
             })
         };
     }
-    let mut steel = model.materials[0].clone();
-    steel.id = MaterialId(2);
-    steel.name = "SN400B".into();
-    steel.category = MaterialCategory::Steel;
-    steel.young = 205000.;
-    steel.density = 7.85e-9;
-    steel.fc = None;
-    steel.fy = Some(235.);
-    model.materials.push(steel);
-    let mut girder = sepika_core::section_shape::SectionShape::SteelBox {
-        height: 600.,
-        width: 400.,
-        thick: 20.,
-        corner_r: Some(0.),
-    }
-    .to_section(SectionId(3), "S大梁（床板を小梁で分割）".into());
-    girder.material = Some(MaterialId(2));
-    girder.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
-    model.sections.push(girder);
-    for element in &mut model.elements {
-        if element.section == Some(SectionId(2)) {
-            element.section = Some(SectionId(3));
-        }
-    }
     model.rebuild_floor_assignment_regions();
     let first = model
         .assign_enclosed_slab_to_matching_region(
