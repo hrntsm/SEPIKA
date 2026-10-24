@@ -81,3 +81,19 @@ CI が検出した `story_application_lifecycle` の上階削除後の再生成�
 - `cargo test -p sepika-app --test story_application_lifecycle --locked`: default 構成でも 3 件成功（`sepika729-lifecycle-default.log`）。
 - `cargo clippy -p sepika-app --features gui --test story_application_lifecycle --test perf_probe --locked --message-format short -- -D warnings` と、同設定の `--test wall_post_model`: 成功。
 - `cargo fmt --all --check`、`git diff --check`: 成功。
+
+
+## default workspace 全体の追加確認
+
+CI の逐次停止による後続 integration の確認漏れを収束させるため、`cargo test --workspace --locked --no-fail-fast` をローカルで全実行した。
+初回は unit／integration／doc tests の計 101 群を完走し、3894 件成功・2 件失敗・4 件 ignored。失敗は次の明示階不足 fixture だけだった。
+
+- `sepika-load/tests/generated_master_references.rs`: 非アクティブ生成代表節点の再利用と入力不変性を確かめる 0／3000 mm モデルに、FL／ΔSL 入力がなかった。
+- `sepika-solver/tests/common_section_mass.rs`: SRC の物理重量と設計 DL の使い分けを確かめる生成経路に、0／3000 mm の明示階入力がなかった。
+
+両 fixture に FL=0／3000 mm・ΔSL=0 を明示した。再利用・不変性・独立重量期待値の assert と製品本体は変更していない。
+再実行した同じ workspace コマンドは exit 0、101 群・3896 件成功・0 件失敗・4 件 ignored。両対象も成功し、`sepika-job/tests/slab_physical_mass.rs` を含む後続群と doc tests まで確認した。
+ログは TEMP の `sepika729-workspace-default.log` と `sepika729-workspace-default2.log`。
+
+`cargo clippy -p sepika-load --test generated_master_references -p sepika-solver --test common_section_mass --locked --message-format short -- -D warnings` は成功。
+`cargo fmt --all --check` と `git diff --check` も成功。GUI／MCP／Parquet 構成に影響する製品ソース変更はなく、既成功の feature 検証は無条件に繰り返していない。
