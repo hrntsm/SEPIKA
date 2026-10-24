@@ -585,3 +585,297 @@ fn 床支持節点のz移動は確認なしに版入力支持id区間を保持�
     undo.redo(&mut model);
     fixture::assert_inputs_eq(&model, &after);
 }
+
+fn colliding_old_boundaries(wall: bool) -> sepika_core::model::Model {
+    use sepika_core::model::{PlateAssignment, SupportMemberId};
+    let mut model = fixture::with_plate_metadata(wall);
+    model.visit_elem_ids(|id| id.0 += 1);
+    let mut removed = model.elements[0].clone();
+    removed.id = ElemId(0);
+    removed.nodes = [NodeId(0), NodeId(2)].into_iter().collect();
+    model.elements.insert(0, removed);
+    if wall {
+        let mut old = model.wall_assignment_regions.regions[0].clone();
+        old.id = WallPlateAssignmentRegionId(90);
+        old.boundary
+            .iter_mut()
+            .find(|e| e.support == SupportMemberId::Primary(ElemId(1)))
+            .unwrap()
+            .support = SupportMemberId::Primary(ElemId(0));
+        old.assignment = PlateAssignment::Plate(WallPlateId(1));
+        model.wall_assignment_regions.regions.push(old);
+        let mut plate = model.wall_plates[0].clone();
+        plate.id = WallPlateId(1);
+        plate.loads[0].value = 0.0037;
+        model.wall_plates.push(plate);
+    } else {
+        let mut old = model.floor_assignment_regions.regions[0].clone();
+        old.id = FloorPlateAssignmentRegionId(90);
+        old.boundary
+            .iter_mut()
+            .find(|e| e.support == SupportMemberId::Primary(ElemId(1)))
+            .unwrap()
+            .support = SupportMemberId::Primary(ElemId(0));
+        old.assignment = PlateAssignment::Plate(SlabId(1));
+        model.floor_assignment_regions.regions.push(old);
+        let mut plate = model.slabs[0].clone();
+        plate.id = SlabId(1);
+        plate.plate.loads[0].value = 0.0037;
+        model.slabs.push(plate);
+    }
+    model.assign_stb_node_ids().unwrap();
+    model
+}
+
+#[test]
+fn 削除旧境界と後続支持の再採番が衝突しても失う版だけ確認し残存版を保持する() {
+    for wall in [false, true] {
+        let mut model = colliding_old_boundaries(wall);
+        model.validate_assignment_region_identity().unwrap();
+        let before = model.clone();
+        let mut naive = model.clone();
+        naive.elements.remove(0);
+        naive.visit_elem_ids(|id| {
+            if id.0 > 0 {
+                id.0 -= 1;
+            }
+        });
+        assert!(naive
+            .validate_assignment_region_identity()
+            .unwrap_err()
+            .contains("境界キー"));
+        let command = || Box::new(DeleteMember { id: ElemId(0) });
+        let loss = preview_plate_assignment_loss(&model, command().as_ref()).unwrap();
+        assert_eq!(
+            (loss.slabs.len(), loss.wall_plates.len()),
+            if wall { (0, 1) } else { (1, 0) }
+        );
+        assert!(loss.description().contains("0.0037"));
+        assert!(!loss.description().contains("0.0025"));
+        fixture::assert_inputs_eq(&model, &before);
+        let mut undo = UndoStack::new();
+        assert!(!undo.run_preserving_plate_assignments(&mut model, command()));
+        assert_eq!(undo.revision(), 0);
+        fixture::assert_inputs_eq(&model, &before);
+        assert!(undo.run(&mut model, command()), "{:?}", undo.last_error());
+        let expected = fixture::with_plate_metadata(wall);
+        assert_eq!(
+            model.floor_assignment_regions,
+            expected.floor_assignment_regions
+        );
+        assert_eq!(
+            model.wall_assignment_regions,
+            expected.wall_assignment_regions
+        );
+        assert_eq!(model.slabs, expected.slabs);
+        assert_eq!(model.wall_plates, expected.wall_plates);
+        let after = model.clone();
+        undo.undo(&mut model);
+        fixture::assert_inputs_eq(&model, &before);
+        undo.redo(&mut model);
+        fixture::assert_inputs_eq(&model, &after);
+        let mut direct = before.clone();
+        let inverse = command().apply(&mut direct);
+        assert!(inverse.rejection().is_none());
+        fixture::assert_inputs_eq(&direct, &after);
+        inverse.apply(&mut direct);
+        fixture::assert_inputs_eq(&direct, &before);
+    }
+}
+
+#[test]
+fn 削除部材に依存する二次材は旧座標で支持未解決にし後続支持は同じ実体を保持する() {
+    use sepika_core::model::{SecondaryMemberAnchor, SecondaryMemberEnds, SupportMemberId};
+    for wall in [false, true] {
+        for assigned in [false, true] {
+            let mut model = fixture::rectangle(wall);
+            let direct = fixture::divider(wall);
+            let mut dependent = direct.clone();
+            dependent.id = SecondaryMemberId(1);
+            dependent.ends = SecondaryMemberEnds::Supported([
+                SecondaryMemberAnchor {
+                    support: SupportMemberId::Secondary(direct.id),
+                    position: 0.5,
+                },
+                SecondaryMemberAnchor {
+                    support: SupportMemberId::Primary(ElemId(1)),
+                    position: 0.5,
+                },
+            ]);
+            let mut unaffected = direct.clone();
+            unaffected.id = SecondaryMemberId(2);
+            unaffected.ends = SecondaryMemberEnds::Supported([
+                SecondaryMemberAnchor {
+                    support: SupportMemberId::Primary(ElemId(1)),
+                    position: 0.5,
+                },
+                SecondaryMemberAnchor {
+                    support: SupportMemberId::Primary(ElemId(3)),
+                    position: 0.5,
+                },
+            ]);
+            let mut lost_cantilever = direct.clone();
+            lost_cantilever.id = SecondaryMemberId(3);
+            lost_cantilever.ends = SecondaryMemberEnds::Cantilever {
+                support: SecondaryMemberAnchor {
+                    support: SupportMemberId::Secondary(dependent.id),
+                    position: 0.5,
+                },
+                free_end_vector: [0., 100.],
+            };
+            let mut kept_cantilever = lost_cantilever.clone();
+            kept_cantilever.id = SecondaryMemberId(4);
+            kept_cantilever.ends = SecondaryMemberEnds::Cantilever {
+                support: SecondaryMemberAnchor {
+                    support: SupportMemberId::Primary(ElemId(1)),
+                    position: 0.5,
+                },
+                free_end_vector: [0., 100.],
+            };
+            let members = vec![
+                direct,
+                dependent,
+                unaffected,
+                lost_cantilever,
+                kept_cantilever,
+            ];
+            if assigned {
+                if wall {
+                    model.wall_regions[0].posts = members;
+                } else {
+                    model.floor_regions[0].secondary_beams = members;
+                }
+            } else if wall {
+                model.unassigned_posts = members;
+            } else {
+                model.unassigned_beams = members;
+            }
+            model.next_secondary_member_id = 5;
+            let axes: Vec<_> = (0..5)
+                .map(|id| {
+                    model
+                        .secondary_member_end_points(
+                            model.secondary_member(SecondaryMemberId(id)).unwrap(),
+                        )
+                        .unwrap()
+                })
+                .collect();
+            let before = model.clone();
+            assert!(
+                preview_plate_assignment_loss(&model, &DeleteMember { id: ElemId(0) })
+                    .unwrap()
+                    .is_empty()
+            );
+            let mut undo = UndoStack::new();
+            assert!(
+                undo.run_preserving_plate_assignments(
+                    &mut model,
+                    Box::new(DeleteMember { id: ElemId(0) })
+                ),
+                "{:?}",
+                undo.last_error()
+            );
+            for (id, (a, b)) in axes.iter().copied().enumerate() {
+                let member = model
+                    .secondary_member(SecondaryMemberId(id as u32))
+                    .unwrap();
+                assert_eq!(model.secondary_member_end_points(member), Some((a, b)));
+                if id < 2 || id == 3 {
+                    assert_eq!(member.ends, SecondaryMemberEnds::Detached([a, b]));
+                } else {
+                    assert_eq!(
+                        member
+                            .ends
+                            .anchors()
+                            .iter()
+                            .map(|a| a.support)
+                            .collect::<Vec<_>>(),
+                        if id == 2 {
+                            vec![
+                                SupportMemberId::Primary(ElemId(0)),
+                                SupportMemberId::Primary(ElemId(2)),
+                            ]
+                        } else {
+                            vec![SupportMemberId::Primary(ElemId(0))]
+                        }
+                    );
+                }
+            }
+            let after = model.clone();
+            undo.undo(&mut model);
+            fixture::assert_inputs_eq(&model, &before);
+            undo.redo(&mut model);
+            fixture::assert_inputs_eq(&model, &after);
+        }
+    }
+}
+
+#[test]
+fn 支持を失う二次材の旧座標が解決できない部材削除は入力と履歴を保持して拒否する() {
+    for wall in [false, true] {
+        let mut model = fixture::rectangle(wall);
+        let mut member = fixture::divider(wall);
+        if let sepika_core::model::SecondaryMemberEnds::Supported(anchors) = &mut member.ends {
+            anchors[1].support = sepika_core::model::SupportMemberId::Primary(ElemId(99));
+        }
+        if wall {
+            model.unassigned_posts.push(member);
+        } else {
+            model.unassigned_beams.push(member);
+        }
+        let before = model.clone();
+        assert!(
+            preview_plate_assignment_loss(&model, &DeleteMember { id: ElemId(0) })
+                .unwrap_err()
+                .contains("端点座標")
+        );
+        let inverse = DeleteMember { id: ElemId(0) }.apply(&mut model);
+        assert!(inverse.rejection().unwrap().contains("端点座標"));
+        fixture::assert_inputs_eq(&model, &before);
+        let mut undo = UndoStack::new();
+        assert!(!undo.run(&mut model, Box::new(DeleteMember { id: ElemId(0) })));
+        assert_eq!(undo.revision(), 0);
+        fixture::assert_inputs_eq(&model, &before);
+    }
+}
+
+#[test]
+fn 傾斜床で削除主架構に直接接しない旧境界も支持喪失二次材から再生成しない() {
+    use sepika_core::model::{SecondaryMemberAnchor, SecondaryMemberEnds, SupportMemberId};
+    let mut model = fixture::rectangle(false);
+    let divider = fixture::divider(false);
+    let mut dependent = divider.clone();
+    dependent.id = SecondaryMemberId(1);
+    dependent.ends = SecondaryMemberEnds::Supported([
+        SecondaryMemberAnchor {
+            support: SupportMemberId::Secondary(divider.id),
+            position: 0.5,
+        },
+        SecondaryMemberAnchor {
+            support: SupportMemberId::Primary(ElemId(3)),
+            position: 0.5,
+        },
+    ]);
+    model.floor_regions[0].secondary_beams = vec![divider, dependent];
+    assert!(model.rebuild_floor_assignment_regions().rejection.is_none());
+    assert_eq!(model.floor_assignment_regions.regions.len(), 3);
+    assert!(model.floor_assignment_regions.regions.iter().any(|r| r
+        .boundary
+        .iter()
+        .all(|edge| edge.support != SupportMemberId::Primary(ElemId(0)))));
+    model.nodes[2].coord[2] = 1000.;
+    model.nodes[3].coord[2] = 1000.;
+    let before = model.clone();
+    let mut undo = UndoStack::new();
+    assert!(
+        undo.run(&mut model, Box::new(DeleteMember { id: ElemId(0) })),
+        "{:?}",
+        undo.last_error()
+    );
+    assert!(model.floor_assignment_regions.regions.is_empty());
+    let after = model.clone();
+    undo.undo(&mut model);
+    fixture::assert_inputs_eq(&model, &before);
+    undo.redo(&mut model);
+    fixture::assert_inputs_eq(&model, &after);
+}

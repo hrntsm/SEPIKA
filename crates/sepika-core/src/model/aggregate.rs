@@ -1645,7 +1645,7 @@ impl Model {
     }
 
     /// モデル内の全ての `ElemId` 参照（要素自身の ID・部材荷重・側テーブル属性・
-    /// 一本部材指定）へ `f` を適用する（[`Model::visit_node_ids`] と同じ規約）。
+    /// 一本部材指定・二次部材の主架構アンカー）へ `f` を適用する（[`Model::visit_node_ids`] と同じ規約）。
     pub fn visit_elem_ids(&mut self, mut f: impl FnMut(&mut ElemId)) {
         for input in &mut self.stb_strengths.members {
             if let StrengthTarget::Element(id) = &mut input.target {
@@ -1662,6 +1662,28 @@ impl Model {
         }
         self.floor_assignment_regions.visit_primary_supports(&mut f);
         self.wall_assignment_regions.visit_primary_supports(&mut f);
+        for member in self
+            .unassigned_beams
+            .iter_mut()
+            .chain(self.unassigned_posts.iter_mut())
+            .chain(
+                self.floor_regions
+                    .iter_mut()
+                    .flat_map(|r| &mut r.secondary_beams),
+            )
+            .chain(self.wall_regions.iter_mut().flat_map(|r| &mut r.posts))
+        {
+            let anchors = match &mut member.ends {
+                SecondaryMemberEnds::Supported(anchors) => anchors.as_mut_slice(),
+                SecondaryMemberEnds::Cantilever { support, .. } => std::slice::from_mut(support),
+                SecondaryMemberEnds::Detached(_) => &mut [],
+            };
+            for anchor in anchors {
+                if let SupportMemberId::Primary(id) = &mut anchor.support {
+                    f(id);
+                }
+            }
+        }
         self.shift_elem_attr_refs(&mut f);
     }
 

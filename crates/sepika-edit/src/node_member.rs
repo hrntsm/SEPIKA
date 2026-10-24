@@ -3,8 +3,8 @@
 use super::*;
 use sepika_core::ids::*;
 use sepika_core::model::{
-    FloorPlateAssignmentRegions, FloorRegion, Slab, WallPlate, WallPlateAssignmentRegions,
-    WallRegion,
+    FloorPlateAssignmentRegions, FloorRegion, SecondaryMember, SecondaryMemberEnds, Slab,
+    SupportMemberId, WallPlate, WallPlateAssignmentRegions, WallRegion,
 };
 
 /// 位相（節点座標・部材）を変えるコマンドが割当領域を再構築したときの undo 用
@@ -19,6 +19,8 @@ struct AssignmentTopology {
     wall_assignment_regions: WallPlateAssignmentRegions,
     slabs: Vec<Slab>,
     wall_plates: Vec<WallPlate>,
+    unassigned_beams: Vec<SecondaryMember>,
+    unassigned_posts: Vec<SecondaryMember>,
 }
 
 impl AssignmentTopology {
@@ -31,6 +33,8 @@ impl AssignmentTopology {
             wall_assignment_regions: model.wall_assignment_regions.clone(),
             slabs: model.slabs.clone(),
             wall_plates: model.wall_plates.clone(),
+            unassigned_beams: model.unassigned_beams.clone(),
+            unassigned_posts: model.unassigned_posts.clone(),
         }
     }
 
@@ -42,6 +46,8 @@ impl AssignmentTopology {
         model.wall_assignment_regions = self.wall_assignment_regions;
         model.slabs = self.slabs;
         model.wall_plates = self.wall_plates;
+        model.unassigned_beams = self.unassigned_beams;
+        model.unassigned_posts = self.unassigned_posts;
     }
 }
 
@@ -784,6 +790,46 @@ pub struct DeleteMember {
     pub id: ElemId,
 }
 
+fn detached_secondary_ends(
+    model: &Model,
+    deleted: ElemId,
+) -> Result<Vec<(SecondaryMemberId, SecondaryMemberEnds)>, String> {
+    let mut lost_supports = std::collections::HashSet::from([SupportMemberId::Primary(deleted)]);
+    loop {
+        let before = lost_supports.len();
+        for member in model.beams().chain(model.posts()) {
+            if member
+                .ends
+                .anchors()
+                .iter()
+                .any(|a| lost_supports.contains(&a.support))
+            {
+                lost_supports.insert(SupportMemberId::Secondary(member.id));
+            }
+        }
+        if lost_supports.len() == before {
+            break;
+        }
+    }
+    model
+        .beams()
+        .chain(model.posts())
+        .filter(|member| lost_supports.contains(&SupportMemberId::Secondary(member.id)))
+        .map(|member| {
+            let (a, b) = model
+                .secondary_member_end_points(member)
+                .filter(|(a, b)| a.iter().chain(b).all(|v| v.is_finite()))
+                .ok_or_else(|| {
+                    format!(
+                        "部材 {} の削除で支持を失う二次部材 {} の端点座標を解決できません",
+                        deleted.0, member.id.0
+                    )
+                })?;
+            Ok((member.id, SecondaryMemberEnds::Detached([a, b])))
+        })
+        .collect()
+}
+
 impl EditCommand for DeleteMember {
     fn changes_assignment_boundaries(&self) -> bool {
         true
@@ -810,7 +856,19 @@ impl EditCommand for DeleteMember {
         if idx >= model.elements.len() || model.elements[idx].id != self.id {
             return Box::new(Noop);
         }
+        let detached = match detached_secondary_ends(model, self.id) {
+            Ok(detached) => detached,
+            Err(reason) => return Box::new(RejectedEdit(reason)),
+        };
         let snapshot = AssignmentTopology::capture(model);
+        let mut lost_supports =
+            std::collections::HashSet::from([SupportMemberId::Primary(self.id)]);
+        for (id, ends) in detached {
+            lost_supports.insert(SupportMemberId::Secondary(id));
+            if let Some(member) = crate::secondary::find_secondary_mut(model, id) {
+                member.ends = ends;
+            }
+        }
         let mut removed_loads = Vec::new();
         for (lci, lc) in model.load_cases.iter_mut().enumerate() {
             let mut li = 0;
@@ -839,6 +897,18 @@ impl EditCommand for DeleteMember {
             .stb_strengths
             .members
             .retain(|m| m.target != sepika_core::model::StrengthTarget::Element(self.id));
+        model.floor_assignment_regions.regions.retain(|region| {
+            !region
+                .boundary
+                .iter()
+                .any(|edge| lost_supports.contains(&edge.support))
+        });
+        model.wall_assignment_regions.regions.retain(|region| {
+            !region
+                .boundary
+                .iter()
+                .any(|edge| lost_supports.contains(&edge.support))
+        });
         let removed = model.elements.remove(idx);
         shift_elem_ids(model, |id| {
             if id.0 > self.id.0 {
