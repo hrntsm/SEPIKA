@@ -722,6 +722,25 @@ mod tests {
             .to_section(section_id, "自重除外床板".into());
         section.material = Some(material_id);
         model.sections.push(section);
+        for section in &mut model.sections {
+            if section.material.is_none() {
+                section.material = Some(material_id);
+            }
+        }
+        let frame_id = SectionId(model.sections.len() as u32);
+        let mut frame = sepika_core::section_shape::SectionShape::SteelFlatBar {
+            width: 200.,
+            thick: 400.,
+        }
+        .to_section(frame_id, "自重除外支持梁".into());
+        frame.material = Some(material_id);
+        frame.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+        model.sections.push(frame);
+        for element in &mut model.elements {
+            if element.kind.is_weight_frame() && element.section.is_none() {
+                element.section = Some(frame_id);
+            }
+        }
         if model.stories.is_empty() {
             model.stories.push(sepika_core::model::Story::new(
                 sepika_core::ids::StoryId(0),

@@ -2592,4 +2592,7 @@ mod src_ql_acceptance_tests;
 mod beam_placement_tests;
 
 #[cfg(all(test, feature = "gui"))]
+mod girder_weight_tests;
+
+#[cfg(all(test, feature = "gui"))]
 mod slab_placement_tests;

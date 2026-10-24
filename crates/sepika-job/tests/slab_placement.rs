@@ -56,6 +56,29 @@ fn 床平面荷重の実材長換算は傾斜梁の三次元等価節点力と�
 #[test]
 fn 新入力の配置不備は古い有効配置から自動荷重を再生成しない() {
     let mut model = frame_model(&FrameSpec::default()).unwrap();
+    let mut material = model.materials[0].clone();
+    material.id = MaterialId(model.materials.len() as u32);
+    material.name = "自重0の鋼材".into();
+    material.category = MaterialCategory::Steel;
+    material.young = 205000.;
+    material.density = 0.;
+    material.fc = None;
+    material.fy = Some(235.);
+    let mut section = sepika_core::section_shape::SectionShape::SteelFlatBar {
+        width: 200.,
+        thick: 400.,
+    }
+    .to_section(
+        SectionId(model.sections.len() as u32),
+        "自重0の支持梁".into(),
+    );
+    section.material = Some(material.id);
+    section.frame_use = Some(FrameSectionUse::Girder);
+    for element in &mut model.elements {
+        element.section = Some(section.id);
+    }
+    model.materials.push(material);
+    model.sections.push(section);
     sepika_job::auto_loads::compute_gravity_auto_load_cases(&model).unwrap();
     model.slabs[0].vertical_eccentricity_mm = None;
     let reason = sepika_job::auto_loads::compute_gravity_auto_load_cases(&model)

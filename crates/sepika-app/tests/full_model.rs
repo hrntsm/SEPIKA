@@ -14,6 +14,7 @@
 //! 4 層＋PH の S 造（一部 RC）。節点 166・解析要素 115（柱 40・大梁 75）・
 //! 二次部材 56（小梁）・床領域 26（大梁1床領域単位）・階 5（Z=200/4700/8700/12700/16500）。
 //! FL と SL を一致させた階入力を解析用 fixture として明示する。実建物の ΔSL を推測した検証とはしない。
+//! 梁の節点材軸からの一律鉛直差も、この解析用 fixture では0 mmと明示する。
 //! 荷重は ST-Bridge に含まれないため、取り込み時に標準荷重ケース
 //! （DL・LL(架構用)・LL(地震用)・EX・EY）が自動生成される。支点情報も
 //! 含まれないため、最下レベルの柱脚 12 箇所がピン支点として自動設定される。
@@ -335,6 +336,15 @@ fn original_fixture_retains_unresolved_positions_and_analysis_derivative_is_expl
         .any(|m| m.contains("主筋中心位置")));
     let derivative = std::fs::read_to_string(analysis_fixture_path()).unwrap();
     let supported = sepika_io::stbridge::import_stbridge(&derivative).unwrap();
+    for model in [&original_model, &supported] {
+        assert!(model
+            .elements
+            .iter()
+            .all(|element| element.vertical_eccentricity.is_none()));
+        assert!(model
+            .beams()
+            .all(|beam| beam.vertical_eccentricity.is_none()));
+    }
     assert!(
         supported.stb_rebar_analysis_diagnostics().is_empty(),
         "{:?}",
@@ -414,6 +424,32 @@ fn declare_analysis_story_levels(model: &mut sepika_core::model::Model) {
     }
 }
 
+/// 解析用fixtureの梁材軸は節点・支持アンカーから鉛直差0 mmとする。
+fn declare_analysis_beam_placements(model: &mut sepika_core::model::Model) {
+    let girder_sections: std::collections::HashSet<_> = model
+        .sections
+        .iter()
+        .filter(|section| section.frame_use == Some(sepika_core::model::FrameSectionUse::Girder))
+        .map(|section| section.id)
+        .collect();
+    for element in &mut model.elements {
+        if element
+            .section
+            .is_some_and(|id| girder_sections.contains(&id))
+        {
+            element.vertical_eccentricity = Some(0.0);
+        }
+    }
+    for beam in model
+        .floor_regions
+        .iter_mut()
+        .flat_map(|region| region.secondary_beams.iter_mut())
+        .chain(model.unassigned_beams.iter_mut())
+    {
+        beam.vertical_eccentricity = Some(0.0);
+    }
+}
+
 fn imported() -> App {
     let mut app = App::default();
     // 解析結果の完全再現性を確保する（スナップショット比較の前提）。
@@ -427,6 +463,7 @@ fn imported() -> App {
     }
     clear_error(&mut app);
     declare_analysis_story_levels(&mut app.core.model);
+    declare_analysis_beam_placements(&mut app.core.model);
     declare_analysis_slab_placements(&mut app.core.model);
     app
 }
@@ -440,6 +477,60 @@ fn prepared() -> App {
     app
 }
 
+#[test]
+fn imported_slab_group_overlap_matches_independent_prismatic_volumes() {
+    let app = imported();
+    let model = &app.core.model;
+    let element = model.element(sepika_core::ids::ElemId(41)).unwrap();
+    let gamma = model
+        .element_material(element)
+        .unwrap()
+        .design_unit_weight_n_per_mm3();
+    let weight = sepika_load::self_weight::girder_self_weight_breakdown(model, element)
+        .unwrap()
+        .unwrap();
+    assert!((weight.body_weight_n - 7_560_000_000. * gamma).abs() < 1e-6);
+    assert!((weight.slab_overlap_weight_n - 630_000_000. * gamma).abs() < 1e-6);
+    assert_eq!(model.slab_thickness, 0.0);
+    let references = [
+        (40, 3650.),
+        (41, 8400.),
+        (48, 3650.),
+        (49, 8400.),
+        (56, 3650.),
+        (57, 8400.),
+        (66, 3650.),
+        (67, 8400.),
+        (76, 6100.),
+        (77, 6100.),
+        (78, 6100.),
+        (91, 6000.),
+        (92, 6000.),
+        (93, 6000.),
+        (103, 6000.),
+        (104, 6000.),
+        (105, 6000.),
+    ];
+    let mut deduction_n = 0.0;
+    for (id, length_mm) in references {
+        let element = model.element(sepika_core::ids::ElemId(id)).unwrap();
+        let adopted_gamma = model
+            .element_material(element)
+            .unwrap()
+            .design_unit_weight_n_per_mm3();
+        assert!((adopted_gamma - 24e-6).abs() < 1e-18);
+        let weight = sepika_load::self_weight::girder_self_weight_breakdown(model, element)
+            .unwrap()
+            .unwrap();
+        let expected_n = 500. * 150. * length_mm * 24e-6;
+        assert!(
+            (weight.slab_overlap_weight_n - expected_n).abs() < 1e-6,
+            "{id}"
+        );
+        deduction_n += weight.slab_overlap_weight_n;
+    }
+    assert!((deduction_n - 184500.).abs() < 1e-6);
+}
 /// 準備計算＋静的解析（全荷重ケース・全組合せ）＋固有値解析まで済ませた `App`。
 fn analyzed() -> App {
     let mut app = prepared();
@@ -2232,7 +2323,19 @@ fn stbridge_roundtrip_is_reanalyzable() {
         "STB 再取り込みで小片 82 に戻らない"
     );
 
+    assert!(reimported
+        .core
+        .model
+        .elements
+        .iter()
+        .all(|element| element.vertical_eccentricity.is_none()));
+    assert!(reimported
+        .core
+        .model
+        .beams()
+        .all(|beam| beam.vertical_eccentricity.is_none()));
     declare_analysis_story_levels(&mut reimported.core.model);
+    declare_analysis_beam_placements(&mut reimported.core.model);
     declare_analysis_slab_placements(&mut reimported.core.model);
     reimported.run_preparation();
     assert_eq!(

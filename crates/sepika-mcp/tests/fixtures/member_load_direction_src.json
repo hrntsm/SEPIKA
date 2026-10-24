@@ -53,6 +53,7 @@
         "Fixed"
       ],
       "force_regime": "Auto",
+      "vertical_eccentricity": 0.0,
       "rigid_zone": {
         "length_i": 0.0,
         "length_j": 0.0,

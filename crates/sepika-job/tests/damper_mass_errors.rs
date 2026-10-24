@@ -171,6 +171,33 @@ fn separated_model(method: MassMethod) -> Model {
         elem: ElemId(1),
         total_weight: 19613.3,
     });
+    model.materials.push(sepika_core::model::Material {
+        id: sepika_core::ids::MaterialId(0),
+        name: "自重0の鋼材".into(),
+        category: sepika_core::model::MaterialCategory::Steel,
+        young: 205000.,
+        poisson: 0.3,
+        density: 0.,
+        shear: None,
+        fc: None,
+        fy: Some(235.),
+        concrete_class: Default::default(),
+        strength_factor: None,
+    });
+    let mut section = sepika_core::section_shape::SectionShape::SteelFlatBar {
+        width: 200.,
+        thick: 400.,
+    }
+    .to_section(
+        sepika_core::ids::SectionId(0),
+        "総重量指定前の自重0梁".into(),
+    );
+    section.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+    section.material = Some(sepika_core::ids::MaterialId(0));
+    model.sections.push(section);
+    for element in &mut model.elements {
+        element.section = Some(sepika_core::ids::SectionId(0));
+    }
     let generated = generate_stories_with_opts(&model, &[], true, method).unwrap();
     for (node, story) in model.nodes.iter_mut().zip(generated.node_story) {
         node.story = story;

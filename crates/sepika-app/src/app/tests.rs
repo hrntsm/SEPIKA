@@ -948,6 +948,7 @@ fn test_request_analysis_waits_for_unset_region_confirmation() {
         });
     }
     app.core.model = model;
+    set_floor_test_self_weight_geometry(&mut app.core.model);
     app.request_analysis(crate::app::PendingAnalysis::StaticAll);
     assert!(
         app.core.scoped.pending_unset_analysis.is_some(),
@@ -4485,6 +4486,7 @@ fn ゼロ重量指定追加で重量が同じでも階生成記録を更新す�
     app.core.model.elements.truncate(1);
     app.core.model.nodes[2].coord[2] = -3000.0;
     app.core.model.stories = explicit_story_inputs(&[-3000.0, 0.0]);
+    set_floor_test_self_weight_geometry(&mut app.core.model);
     app.generate_stories_action();
     assert!(app
         .core
@@ -12278,7 +12280,7 @@ mod seismic_freshness_fixture {
 fn edited_density_finish_and_seismic_live_refresh_real_ex_without_preparation_button() {
     use sepika_core::model::{AreaLoad, SlabUsage};
     let mut app = App::default();
-    app.load_model(seismic_freshness_fixture::two_storeys());
+    app.load_model(seismic_freshness_fixture::two_storeys_with_weightless_steel_girders());
     app.run_preparation();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -12359,7 +12361,7 @@ fn edited_density_finish_and_seismic_live_refresh_real_ex_without_preparation_bu
 #[test]
 fn freshness_preparation_undo_and_saved_output_tampering_are_detected() {
     let mut app = App::default();
-    app.load_model(seismic_freshness_fixture::two_storeys());
+    app.load_model(seismic_freshness_fixture::two_storeys_with_weightless_steel_girders());
     app.run_preparation();
     let before = app.core.model.clone();
     app.core.model.materials[0].density = 2.6e-9;
@@ -12390,7 +12392,7 @@ fn freshness_preparation_undo_and_saved_output_tampering_are_detected() {
 #[test]
 fn rejected_prepared_model_never_leaves_old_auto_seismic_loads_usable() {
     let mut app = App::default();
-    app.load_model(seismic_freshness_fixture::two_storeys());
+    app.load_model(seismic_freshness_fixture::two_storeys_with_weightless_steel_girders());
     app.run_preparation();
     app.run_seismic(SeismicDir::X);
     assert!(app.core.scoped.last_error.is_none());
@@ -12818,7 +12820,7 @@ fn public_story_insertion_keeps_automatic_weight_origin_and_manual_edits_through
     use sepika_core::model::Constraint;
     use sepika_edit::UndoStack;
     for manual_weight in [None, Some(100100.0)] {
-        let mut model = seismic_freshness_fixture::two_storeys();
+        let mut model = seismic_freshness_fixture::two_storeys_with_weightless_steel_girders();
         let settings = sepika_job::AnalysisSettings::default();
         sepika_job::prepare::prepare_model(&mut model, &settings, None, true).unwrap();
         let upper = model.generated_masters[2];
@@ -12839,7 +12841,17 @@ fn public_story_insertion_keeps_automatic_weight_origin_and_manual_edits_through
             node.story = None;
             model.nodes.push(node);
         }
+        let mut steel = model.materials[3].clone();
+        steel.id = sepika_core::ids::MaterialId(model.materials.len() as u32);
+        steel.name = "追加階のS大梁".into();
+        steel.density = 7.85e-9;
+        let mut section = model.sections[1].clone();
+        section.id = sepika_core::ids::SectionId(model.sections.len() as u32);
+        section.material = Some(steel.id);
+        model.materials.push(steel);
         let mut beam = model.elements[5].clone();
+        beam.section = Some(section.id);
+        model.sections.push(section);
         beam.id = ElemId(model.elements.len() as u32);
         beam.nodes = [NodeId(first), NodeId(first + 1)].into_iter().collect();
         model.elements.push(beam);
@@ -12890,7 +12902,7 @@ fn public_story_insertion_keeps_automatic_weight_origin_and_manual_edits_through
                 result.notices
             );
         }
-        let expected_upper_n = 103548.04597;
+        let expected_upper_n = 102206.49625;
         assert!((model.stories[3].seismic_weight.unwrap() - expected_upper_n).abs() < 1e-8);
         let diaphragm = model.diaphragms_of(StoryId(3)).next().unwrap();
         assert_eq!(diaphragm.master, upper);
@@ -12949,7 +12961,7 @@ fn public_node_deletion_and_undo_remap_automatic_master_and_slave_snapshots() {
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::NodeId;
     use sepika_core::model::{Constraint, Node};
-    let mut model = seismic_freshness_fixture::two_storeys();
+    let mut model = seismic_freshness_fixture::two_storeys_with_weightless_steel_girders();
     let settings = sepika_job::AnalysisSettings::default();
     sepika_job::prepare::prepare_model(&mut model, &settings, None, true).unwrap();
     model.visit_node_ids(|node| node.0 += 1);
@@ -13761,6 +13773,9 @@ fn standard_rebar507_import_notice_reports_center_priority_without_refusing_prep
     assert!(app.core.model.stb_strength_diagnostics().is_empty());
     app.core.scoped.last_error = None;
     app.core.model.stories = explicit_story_inputs(&[0.0, 3000.0]);
+    for element in &mut app.core.model.elements {
+        element.vertical_eccentricity = Some(0.0);
+    }
     app.run_preparation();
     assert!(
         app.core.scoped.last_error.is_none(),

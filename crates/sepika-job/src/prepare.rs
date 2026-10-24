@@ -723,6 +723,17 @@ mod tests {
             strength_factor: None,
         });
         model.sections[0].material = Some(sepika_core::ids::MaterialId(0));
+        let mut frame = SectionShape::SteelFlatBar {
+            width: 200.,
+            thick: 400.,
+        }
+        .to_section(SectionId(1), "自重除外支持梁".into());
+        frame.material = Some(sepika_core::ids::MaterialId(0));
+        frame.frame_use = Some(sepika_core::model::FrameSectionUse::Girder);
+        model.sections.push(frame);
+        for element in &mut model.elements {
+            element.section = Some(SectionId(1));
+        }
         model
             .unassigned_beams
             .push(sepika_core::model::SecondaryMember {
