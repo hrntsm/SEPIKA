@@ -104,6 +104,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [大梁床板実重複控除_Issue616_確認記録.md](大梁床板実重複控除_Issue616_確認記録.md) | 矩形RC/SRC大梁と床板の実重複・左右幅配分・DL/地震重量・実準備入口・編集保存失効 | 🔶（独立算術と自動入口のVerification。実測Validation・手動GUI・CIは未確認） |
 | [梁鉛直偏心_Issue726_確認記録.md](梁鉛直偏心_Issue726_確認記録.md) | 節点材軸基準の一律偏心・有限実配置・GUI/保存/Undo | 🔶（直接Verification、最終横断検証・レビュー・CIは記録参照） |
 | [階FL_SL_Issue729_確認記録.md](階FL_SL_Issue729_確認記録.md) | FL／SL・用途別階高と明示入力、GUI編集・保存・Undo・元STB属性 | 🔶（階情報の直接Verification。#490の算定と個別偏心は対象外、最終レビュー・CIは未確認） |
 | [梁要素の局所軸と保存性能_Issue760_2026-10.md](梁要素の局所軸と保存性能_Issue760_2026-10.md) | 梁文書の回転軸・変位/せん断方向・保存性能の添字、独立座標図と既存片持ち試験 | ✅（文書是正範囲のVerification。一般形状の精度・物理Validationを保証しない。最終ゲートは後続） |
@@ -289,6 +290,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | # | 対象 | クレート | ソースファイル | テスト関数 | 旧フェーズ | 状態 |
 |---|------|----------|---------------|-----------|---------|------|
+| 616 | 大梁自重の床板実重複控除 | sepika-load / sepika-job / sepika-app | self_weight/girder_overlap.rs・app/girder_weight_tests.rs・weight_preparation.rs | [独立値と実入口](大梁床板実重複控除_Issue616_確認記録.md#独立期待値と実入口) | 横断 | 🔶（数値Verification、Validation未） |
 | 775 | ctutils 推移依存監査 | Cargo.lock / sepika-io | zip、ctutils、OVIKA | [監査と実行証拠](ctutils推移依存監査_Issue775_2026-10.md#実行証拠) | 横断 | 🔶（0.4.5 の最小解決、監査・IO default/parquet 成功。独立レビュー・最終 CI は記録を参照） |
 | 496 | 壁側柱の物理的分担と局所解放 | sepika-core / sepika-element / sepika-solver / sepika-design-jp / sepika-job / sepika-app | model/wall_side_column.rs、wall/side_column、frame/fiber、tests/wall_system_linear.rs | [原七Doneとrun別結果](壁側柱の物理的分担と局所解放_Issue496_2026-10.md#完了条件と試験の対応) | 横断 | 🔶（限定Verification、full_model3snapshot未受入・最終ゲート・Validation未確認） |
 | 671 | SRC梁のQL参照完全性 | sepika-design-jp / sepika-core / sepika-app | srrc/tests.rs、member_design_check.rs、result_contract.rs、app/src_ql_acceptance_tests.rs | [変更後の直接検証](SRC梁のQL参照完全性_Issue671_2026-10.md#変更後の直接検証)・[Appと保存受入](SRC梁のQL参照完全性_Issue671_2026-10.md#変更後のappと保存受入) | 横断 | 🔶（直接/公開actions/OVIKA資格・Windows横断Verification成功、MCP専用受入は今回対象外、最終ゲート・Validation未確認） |
