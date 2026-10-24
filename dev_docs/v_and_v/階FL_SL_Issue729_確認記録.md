@@ -25,6 +25,7 @@
 最終実行結果（2026-10-24）:
 
 - 横断 `cargo test` の `--lib --features sepika-app/gui --locked --no-fail-fast`: core 581、edit 208、IO 177（ignored 1）、job 84、load 276、solver 319 件成功。App／design は旧 fixture の不足階・不在 ID 期待を是正して個別再実行した。
+- PR 最終監査で、GUI に限定していた StoryId import を default でも使うテスト helper が参照する不備を修正。`cargo check -p sepika-app --tests --locked`（GUI なし）成功、追加のコンパイル不備なし。ログ `sepika729-app-default-check.log`。
 - `cargo test -p sepika-design-jp --lib --locked`: 645 件成功。
 - `cargo test -p sepika-app -p sepika-mcp --features sepika-app/gui --lib --locked --no-fail-fast`: App は 899 件成功。MCP の不足階／原階参照の fixture 2 件を是正し、mcp feature を含めて再実行した。
 - `cargo test -p sepika-mcp --features mcp --lib --locked`: 共通 pushover fixture の矛盾した所属 ID も修正し、131 件成功。
