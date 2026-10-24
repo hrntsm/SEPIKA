@@ -413,7 +413,7 @@ impl App {
     }
 
     /// 解析前に既存階の重量・自動荷重・準備表示を現在入力へ同期する。
-    /// 階未定義の初期化は明示準備で行う。
+    /// 階を必要とする項目は FL・ΔSL の明示入力を要求する。
     pub(crate) fn ensure_preparation(&mut self) {
         self.refresh_preparation();
     }
