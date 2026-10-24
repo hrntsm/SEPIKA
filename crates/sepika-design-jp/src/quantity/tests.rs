@@ -1208,11 +1208,14 @@ fn circular_rc_post_common_entry_uses_diameter_and_actual_length() {
 #[test]
 fn circular_rc_post_materialized_is_counted_once_in_both_directions() {
     for (start, end) in [(0, 1), (1, 0)] {
-        let mut model = circular_rc_post_model([0.0, 0.0, 3000.0]);
-        model.elements.push(line_elem(0, start, end, 0));
-        let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
-        assert_circular_post_quantity(&q);
-        assert_eq!(q.items[0].elem, Some(ElemId(0)));
+        for offset in [None, Some(0.0), Some(-300.0)] {
+            let mut model = circular_rc_post_model([0.0, 0.0, 3000.0]);
+            model.unassigned_posts[0].vertical_eccentricity = offset;
+            model.elements.push(line_elem(0, start, end, 0));
+            let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+            assert_circular_post_quantity(&q);
+            assert_eq!(q.items[0].elem, Some(ElemId(0)));
+        }
     }
 }
 
@@ -1894,6 +1897,173 @@ fn beam_contact_non_nodal_secondary_is_counted_and_materialized_is_counted_once(
         .unwrap();
     assert!((beam.concrete_m3 - 1.08).abs() < 1e-12);
     assert!((beam.formwork_m2 - 8.7).abs() < 1e-12);
+}
+
+#[test]
+fn secondary_beam_materialization_distinguishes_vertical_eccentricity_and_unspecified() {
+    for (primary_offset, secondary_offset, expected_count, expected_concrete, expected_formwork) in [
+        (Some(-300.0), Some(-300.0), 1, 1.08, 9.0),
+        (Some(-300.0), Some(0.0), 2, 2.16, 18.0),
+        (Some(0.0), Some(0.0), 1, 1.08, 9.0),
+        (None, Some(0.0), 2, 2.16, 18.0),
+        (Some(0.0), None, 2, 2.16, 18.0),
+        (None, None, 1, 1.08, 9.0),
+    ] {
+        for reverse_primary in [false, true] {
+            for reverse_secondary in [false, true] {
+                let mut model = contact_model();
+                model.elements[0].vertical_eccentricity = primary_offset;
+                if reverse_primary {
+                    model.elements[0].nodes.reverse();
+                }
+                let mut positions = [0.0, 1.0];
+                if reverse_secondary {
+                    positions.reverse();
+                }
+                model.unassigned_beams.push(SecondaryMember {
+                    id: SecondaryMemberId(792),
+                    kind: SecondaryMemberKind::Beam,
+                    ends: sepika_core::model::SecondaryMemberEnds::Supported(positions.map(
+                        |position| sepika_core::model::SecondaryMemberAnchor {
+                            support: sepika_core::model::SupportMemberId::Primary(ElemId(0)),
+                            position,
+                        },
+                    )),
+                    section: Some(SectionId(0)),
+                    vertical_eccentricity: secondary_offset,
+                    ..Default::default()
+                });
+                let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+                assert_eq!(q.items.len(), expected_count);
+                assert_eq!(
+                    q.items
+                        .iter()
+                        .filter(|i| i.secondary == Some(SecondaryMemberId(792)))
+                        .count(),
+                    expected_count - 1
+                );
+                assert!((q.totals().concrete_m3 - expected_concrete).abs() < 1e-12);
+                assert!((q.totals().formwork_m2 - expected_formwork).abs() < 1e-12);
+                if primary_offset.is_none() || secondary_offset.is_none() {
+                    contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
+                    let error =
+                        try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+                    assert!(error.contains("鉛直偏心が未指定"), "{error}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn secondary_beam_different_eccentricity_retains_contact_deduction_and_totals() {
+    for reverse in [false, true] {
+        let mut model = contact_model();
+        contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
+        let original = try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap()
+            .totals();
+        let mut positions = [0.0, 1.0];
+        if reverse {
+            positions.reverse();
+        }
+        model.unassigned_beams.push(SecondaryMember {
+            id: SecondaryMemberId(792),
+            kind: SecondaryMemberKind::Beam,
+            ends: sepika_core::model::SecondaryMemberEnds::Supported(positions.map(|position| {
+                sepika_core::model::SecondaryMemberAnchor {
+                    support: sepika_core::model::SupportMemberId::Primary(ElemId(0)),
+                    position,
+                }
+            })),
+            section: Some(SectionId(0)),
+            vertical_eccentricity: Some(0.0),
+            ..Default::default()
+        });
+        let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+        let secondary = q
+            .items
+            .iter()
+            .find(|i| i.secondary == Some(SecondaryMemberId(792)))
+            .unwrap();
+        assert!((secondary.concrete_m3 - 1.08).abs() < 1e-12);
+        assert!((secondary.formwork_m2 - 8.55).abs() < 1e-12);
+        assert!((contact_formwork(&model) - 8.55).abs() < 1e-12);
+        let totals = q.totals();
+        assert_eq!(totals.member_count, 3);
+        assert!((totals.concrete_m3 - 3.06).abs() < 1e-12);
+        assert!((totals.formwork_m2 - 23.1).abs() < 1e-12);
+        assert_eq!(totals.rebar_t, original.rebar_t);
+        assert_eq!(totals.steel_t, 0.0);
+        assert_eq!(totals.rebar_joints, original.rebar_joints);
+    }
+}
+
+#[test]
+fn secondary_beam_materialization_filters_other_eccentricities_before_ambiguity() {
+    let mut model = contact_model();
+    model.elements.push(ElementData {
+        id: ElemId(1),
+        vertical_eccentricity: Some(0.0),
+        ..model.elements[0].clone()
+    });
+    for (id, offset) in [(792, -300.0), (793, 0.0)] {
+        model.unassigned_beams.push(SecondaryMember {
+            id: SecondaryMemberId(id),
+            kind: SecondaryMemberKind::Beam,
+            ends: sepika_core::model::SecondaryMemberEnds::Detached([
+                [0.0, 0.0, 3000.0],
+                [6000.0, 0.0, 3000.0],
+            ]),
+            section: Some(SectionId(0)),
+            vertical_eccentricity: Some(offset),
+            ..Default::default()
+        });
+    }
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+    assert_eq!(q.items.len(), 2);
+    assert!(q.items.iter().all(|i| i.secondary.is_none()));
+    assert!((q.totals().concrete_m3 - 2.16).abs() < 1e-12);
+    assert!((q.totals().formwork_m2 - 18.0).abs() < 1e-12);
+    model.unassigned_beams[1].vertical_eccentricity = Some(-300.0);
+    assert!(
+        try_compute_quantity_takeoff(&model, &QuantityCfg::default())
+            .unwrap_err()
+            .contains("複数の二次部材")
+    );
+}
+
+#[test]
+fn secondary_steel_beam_different_eccentricity_preserves_independent_weight() {
+    let mut model = contact_model();
+    model.materials = vec![steel_material(0)];
+    model.sections[0].shape = None;
+    model.sections[0].area = 10000.0;
+    model.sections[0].rebar_material = None;
+    model.sections[0].shear_rebar_material = None;
+    model.unassigned_beams.push(SecondaryMember {
+        id: SecondaryMemberId(792),
+        kind: SecondaryMemberKind::Beam,
+        ends: sepika_core::model::SecondaryMemberEnds::Detached([
+            [0.0, 0.0, 3000.0],
+            [6000.0, 0.0, 3000.0],
+        ]),
+        section: Some(SectionId(0)),
+        vertical_eccentricity: Some(0.0),
+        ..Default::default()
+    });
+    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+    assert_eq!(q.items.len(), 2);
+    for item in &q.items {
+        assert_eq!(item.steel.as_ref().unwrap().length_m, 6.0);
+        assert!((item.steel_weight_t() - 0.471).abs() < 1e-12);
+    }
+    let totals = q.totals();
+    assert!((totals.steel_t - 0.942).abs() < 1e-12);
+    assert_eq!(totals.concrete_m3, 0.0);
+    assert_eq!(totals.formwork_m2, 0.0);
+    assert_eq!(totals.rebar_t, 0.0);
+    assert_eq!(totals.rebar_joints, 0.0);
 }
 
 #[test]

@@ -635,6 +635,11 @@ fn resolve_secondary_quantities(
                 if e.kind != ElementKind::Beam || e.nodes.len() != 2 {
                     return None;
                 }
+                if sm.kind == SecondaryMemberKind::Beam
+                    && sm.vertical_eccentricity != e.vertical_eccentricity
+                {
+                    return None;
+                }
                 let (p, q) = (model.node(e.nodes[0])?.coord, model.node(e.nodes[1])?.coord);
                 if equal(a, p) && equal(b, q) {
                     Some((e, false))
