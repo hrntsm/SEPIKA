@@ -9939,3 +9939,94 @@ mod rc_section_purpose {
         }
     }
 }
+
+#[test]
+fn adding_a_floor_requires_known_existing_fl_without_reordering_partial_input() {
+    let mut model = story_edit_model(
+        &[0.0, 3000.0, 6000.0],
+        &[("A", 0.0), ("B", 3000.0), ("C", 6000.0)],
+    );
+    model.nodes[1].story = Some(StoryId(1));
+    let mut slave = model.nodes[1].clone();
+    slave.id = NodeId(3);
+    slave.coord[0] = 100.0;
+    model.nodes.push(slave);
+    model
+        .constraints
+        .push(sepika_core::model::Constraint::rigid_diaphragm(
+            StoryId(1),
+            NodeId(1),
+            vec![NodeId(3)],
+        ));
+    model.initialize_source_stories().unwrap();
+    let complete = model.clone();
+    let mut undo = UndoStack::new();
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetStoryLevel {
+            story: StoryId(1),
+            name: "B".into(),
+            elevation: None,
+            sl_offset_mm: Some(0.0)
+        })
+    ));
+    let partial = model.clone();
+    let revision = undo.revision();
+    assert!(!undo.run(
+        &mut model,
+        Box::new(AddStory {
+            name: "D".into(),
+            elevation: Some(9000.0),
+            sl_offset_mm: Some(0.0)
+        })
+    ));
+    let error = undo.last_error().unwrap();
+    assert!(error.contains("階 1") && error.contains("FL"), "{error}");
+    assert_eq!(undo.revision(), revision);
+    assert!(model.eq_ignoring_dofmap(&partial));
+    model.validate_reference_ids().unwrap();
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&complete));
+    undo.redo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&partial));
+    assert!(undo.run(
+        &mut model,
+        Box::new(SetStoryLevel {
+            story: StoryId(1),
+            name: "B".into(),
+            elevation: Some(3000.0),
+            sl_offset_mm: Some(0.0)
+        })
+    ));
+    assert!(model.eq_ignoring_dofmap(&complete));
+    assert!(undo.run(
+        &mut model,
+        Box::new(AddStory {
+            name: "D".into(),
+            elevation: Some(9000.0),
+            sl_offset_mm: Some(0.0)
+        })
+    ));
+    assert_eq!(
+        model
+            .stories
+            .iter()
+            .map(|s| (s.id, s.name.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (StoryId(0), "A"),
+            (StoryId(1), "B"),
+            (StoryId(2), "C"),
+            (StoryId(3), "D")
+        ]
+    );
+    assert_eq!(model.source_stories[..3], complete.source_stories);
+    assert_eq!(model.nodes, complete.nodes);
+    assert_eq!(model.constraints, complete.constraints);
+    model.validate_reference_ids().unwrap();
+    let added = model.clone();
+    undo.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&complete));
+    undo.redo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&added));
+}

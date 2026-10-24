@@ -14694,3 +14694,67 @@ fn fl_sl_source_membership_removal_recomputes_automatic_owner_and_undo_redo() {
     assert_eq!(model.nodes[1].story, Some(StoryId(2)));
     assert!(model.source_stories[1].node_ids.is_empty());
 }
+
+#[cfg(feature = "gui")]
+#[test]
+fn pending_story_add_rejects_unknown_existing_fl_and_accepts_repaired_input() {
+    let mut app = App::default();
+    let mut model = crate::sample::portal_frame();
+    model.stories = explicit_story_inputs(&[0.0, 3000.0, 6000.0]);
+    for (story, name) in model.stories.iter_mut().zip(["A", "B", "C"]) {
+        story.name = name.into();
+    }
+    model.stories[1].elevation = None;
+    assert!(app.load_model(model));
+    let partial = app.core.model.clone();
+    let revision = app.core.scoped.undo.revision();
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::AddStory {
+            name: "D".into(),
+            elevation: Some(9000.0),
+            sl_offset_mm: Some(0.0),
+        }));
+    app.apply_pending_story_command();
+    let error = app.core.scoped.last_error.as_deref().unwrap();
+    assert!(error.contains("階 1") && error.contains("FL"), "{error}");
+    assert!(app.core.model.eq_ignoring_dofmap(&partial));
+    assert_eq!(app.core.scoped.undo.revision(), revision);
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::SetStoryLevel {
+            story: StoryId(1),
+            name: "B".into(),
+            elevation: Some(3000.0),
+            sl_offset_mm: Some(0.0),
+        }));
+    app.apply_pending_story_command();
+    assert_eq!(app.core.model.stories[1].fl_mm(), Some(3000.0));
+    let repaired = app.core.model.clone();
+    app.ui
+        .scoped
+        .pending_story_cmds
+        .push_back(Box::new(sepika_edit::AddStory {
+            name: "D".into(),
+            elevation: Some(9000.0),
+            sl_offset_mm: Some(0.0),
+        }));
+    app.apply_pending_story_command();
+    assert_eq!(
+        app.core
+            .model
+            .stories
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["A", "B", "C", "D"]
+    );
+    app.core.model.validate_reference_ids().unwrap();
+    let added = app.core.model.clone();
+    app.undo_action();
+    assert!(app.core.model.eq_ignoring_dofmap(&repaired));
+    app.redo_action();
+    assert!(app.core.model.eq_ignoring_dofmap(&added));
+}

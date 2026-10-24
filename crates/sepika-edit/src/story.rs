@@ -193,9 +193,9 @@ fn resort_and_renumber(model: &mut Model) {
     let mut order: Vec<usize> = (0..model.stories.len()).collect();
     order.sort_by(|&a, &b| {
         model.stories[a]
-            .elevation
-            .partial_cmp(&model.stories[b].elevation)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .fl_mm()
+            .expect("FL は階追加前に検査済み")
+            .total_cmp(&model.stories[b].fl_mm().expect("FL は階追加前に検査済み"))
     });
     let mut remap = vec![StoryId(0); model.stories.len()];
     for (new_idx, &old_idx) in order.iter().enumerate() {
@@ -288,6 +288,7 @@ impl EditCommand for SetStoryLevel {
 
 /// 階を追加する。標高の昇順を保つ位置へ挿入し、以降の階の ID を繰り上げる。
 ///
+/// 既存階の FL が未設定・不正で位置を確定できない場合は、モデルを変更せず拒否する。
 /// 所属節点・地震用重量は空のまま追加する（準備計算が埋める）。
 pub struct AddStory {
     pub name: String,
@@ -307,6 +308,16 @@ impl EditCommand for AddStory {
             || self.sl_offset_mm.is_some_and(|v| !v.is_finite())
         {
             return Box::new(crate::RejectedEdit("FL・ΔSL は有限値が必要です".into()));
+        }
+        if let Some(story) = model.stories.iter().find(|story| story.fl_mm().is_none()) {
+            return Box::new(crate::RejectedEdit(format!(
+                "階 {} ({}): FL が未設定または有限値ではないため、階追加位置を確定できません",
+                story.id.0, story.name
+            )));
+        }
+        let diagnostics = model.story_level_input_diagnostics();
+        if !diagnostics.is_empty() {
+            return Box::new(crate::RejectedEdit(diagnostics.join("; ")));
         }
         if let Err(reason) = model.initialize_source_stories() {
             return Box::new(crate::RejectedEdit(reason));
