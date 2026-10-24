@@ -253,6 +253,32 @@ pub fn tile_block(block: &[Vec<String>], sel_rows: usize, sel_cols: usize) -> Ve
         .collect()
 }
 
+/// 展開前後の矩形がセル数上限以内の場合だけタイル展開する。
+pub fn checked_tile_block(
+    block: &[Vec<String>],
+    sel_rows: usize,
+    sel_cols: usize,
+) -> Result<Vec<Vec<String>>, String> {
+    let br = block.len();
+    let bc = block.iter().map(Vec::len).max().unwrap_or(0);
+    let tiles = br > 0
+        && bc > 0
+        && sel_rows.is_multiple_of(br)
+        && sel_cols.is_multiple_of(bc)
+        && (sel_rows / br > 1 || sel_cols / bc > 1);
+    let cells = if tiles {
+        sel_rows.saturating_mul(sel_cols)
+    } else {
+        br.saturating_mul(bc)
+    };
+    if br.saturating_mul(bc) > MAX_PASTE_CELLS || cells > MAX_PASTE_CELLS {
+        return Err(format!(
+            "ペースト矩形が大きすぎます（上限 {MAX_PASTE_CELLS} セル）"
+        ));
+    }
+    Ok(tile_block(block, sel_rows, sel_cols))
+}
+
 /// テーブルアダプタ。汎用グリッドレイヤとテーブルの境界で、
 /// ドメイン知識（セルの型・行追加の可否と方法）はすべてこちら側に置く。
 /// 第 2 弾以降のテーブル展開は「アダプタ実装の追加」だけで済む。
@@ -270,18 +296,25 @@ pub trait GridAdapter {
         (row + 1).to_string()
     }
 
-    /// ペースト・編集確定の 1 セル分の検証。Err はセル単位の不正理由。
-    /// [`plan_paste`]がこれを全セルに適用する
+    /// 空セルを含む貼り付け先の編集可否。読取専用セルは Err を返す。
+    fn validate_target(&self, row: usize, col: usize) -> Result<(), String> {
+        if col >= self.cols() || (row >= self.rows() && !self.can_append_rows()) {
+            Err("貼り付け先が編集可能範囲外です".into())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// ペースト・編集確定の空でないセル値の検証。Err はセル単位の不正理由。
     fn validate_cell(&self, row: usize, col: usize, text: &str) -> Result<(), String>;
 
-    /// 検証済みセル群の適用。sepika-edit の複合コマンド 1 個に落とす。
-    /// append_rows > 0 なら先に行を追加する（追加行の貼り付け対象外の列は
-    /// アダプタの既定値）。呼び出し規約:
-    /// - 通常のペースト: cells 全部 + append_rows = はみ出し行数（自動追加。）
-    /// - 行追加非対応テーブル: widget が cells を row < rows() にフィルタして渡し、
-    ///   append_rows = 0（はみ出し分は切り捨て）
-    /// - 新規行プレースホルダでの編集確定: cells = その 1 セル、append_rows = 1
-    fn apply_block(&mut self, cells: &[(usize, usize, String)], append_rows: usize);
+    /// セル群を再検証して一括適用し、不正ならモデル・履歴を変更しない。
+    /// 追加行の対象外の列は既定値とする。Ok(false) は変更なしを表す。
+    fn apply_block(
+        &mut self,
+        cells: &[(usize, usize, String)],
+        append_rows: usize,
+    ) -> Result<bool, String>;
 
     /// 選択範囲クリア（Delete）。クリアの意味（0 埋め・既定値・禁止）は
     /// アダプタが決める。cells は選択が跨ぐ**実データ行**のセルのみ
@@ -306,6 +339,30 @@ pub trait GridAdapter {
     fn delete_rows(&mut self, rows: &[usize]);
 }
 
+/// 空セルを含む矩形全体の編集可否・行追加条件・セル数上限を検証する。
+pub fn validate_paste_rect(
+    adapter: &dyn GridAdapter,
+    anchor: CellRef,
+    rows: usize,
+    cols: usize,
+) -> Result<(), String> {
+    let end_row = anchor.row.checked_add(rows).ok_or("行範囲の上限超過")?;
+    let end_col = anchor.col.checked_add(cols).ok_or("列範囲の上限超過")?;
+    if rows.saturating_mul(cols) > MAX_PASTE_CELLS
+        || end_col > adapter.cols()
+        || anchor.row > adapter.rows()
+        || (!adapter.can_append_rows() && end_row > adapter.rows())
+    {
+        return Err("貼り付け先の範囲・行追加条件またはセル数上限に違反しています".into());
+    }
+    for row in anchor.row..end_row {
+        for col in anchor.col..end_col {
+            adapter.validate_target(row, col)?;
+        }
+    }
+    Ok(())
+}
+
 /// 編集確定の結果。widget がログ・フラッシュ表示に変換する
 #[derive(Debug, PartialEq, Eq)]
 pub enum CommitOutcome {
@@ -328,8 +385,11 @@ pub fn commit_cell_text(adapter: &mut dyn GridAdapter, cell: CellRef, raw: &str)
         return CommitOutcome::Rejected(reason);
     }
     let appended = cell.row >= adapter.rows();
-    adapter.apply_block(&[(cell.row, cell.col, t.to_string())], appended as usize);
-    CommitOutcome::Applied { appended }
+    match adapter.apply_block(&[(cell.row, cell.col, t.to_string())], appended as usize) {
+        Ok(true) => CommitOutcome::Applied { appended },
+        Ok(false) => CommitOutcome::NoChange,
+        Err(reason) => CommitOutcome::Rejected(reason),
+    }
 }
 
 /// ペーストブロックのセル数上限（行数×最大列数。）。
@@ -341,7 +401,7 @@ pub const MAX_PASTE_CELLS: usize = 100_000;
 #[derive(Debug)]
 pub struct PastePlan {
     /// 適用するセル（行, データ列, セル文字列）。行は表の末尾を超えることがある。
-    /// 値の型変換はアダプタが適用時に行う（検証済みなので失敗しない）
+    /// アダプタは適用時にも値と適用条件を検証する。
     pub set: Vec<(usize, usize, String)>,
     /// 表の末尾を超える行数（自動追加の対象。）
     pub extra_rows: usize,
@@ -358,10 +418,9 @@ pub struct PastePlan {
 /// （all-or-nothing。）。検証を全部通ってから初めて適用する、という順序を
 /// 変えないこと。
 ///
-/// - 空セルは「変更なし」マーカーとして扱い、不正には数えない
-/// - セル値の検証はアダプタの `validate_cell` へ委譲する（引数 `validate`）。
-///   行ヘッダ列は座標系に存在しないため、不正カテゴリは「列はみ出し」と
-///   「validate の Err（値パース失敗等）」の 2 つだけになる
+/// - 空セルは値を変更しないが、短い行の不足セルも矩形範囲に含める。
+/// - 値の検証は `validate` へ委譲する。編集可否・行追加条件は別途
+///   [`validate_paste_rect`] で検証する。
 /// - ブロックが [`MAX_PASTE_CELLS`] を超える場合は全体拒否
 pub fn plan_paste(
     block: &[Vec<String>],
@@ -378,25 +437,36 @@ pub fn plan_paste(
             "ペーストブロックが大きすぎます（{block_rows}行×{block_cols}列 = {cells} セル。上限 {MAX_PASTE_CELLS} セル）"
         )]);
     }
+    if anchor
+        .col
+        .checked_add(block_cols)
+        .is_none_or(|end| end > cols)
+    {
+        let overflow_col = cols.saturating_sub(anchor.col);
+        let overflow_row = block
+            .iter()
+            .position(|line| line.len() > overflow_col)
+            .unwrap_or(0);
+        return Err(vec![format!(
+            "ブロック{}行{}列目: 貼り付け先が表の列範囲外",
+            overflow_row + 1,
+            overflow_col + 1
+        )]);
+    }
+    if anchor.row.checked_add(block_rows).is_none() {
+        return Err(vec!["貼り付け先の行範囲の上限超過".into()]);
+    }
     let mut errors = Vec::new();
     let mut set = Vec::new();
     let mut skipped_empty = 0usize;
     let mut max_row = 0usize;
     for (i, line) in block.iter().enumerate() {
-        for (j, text) in line.iter().enumerate() {
+        for j in 0..block_cols {
+            let text = line.get(j).map(String::as_str).unwrap_or_default();
             let (r, c) = (anchor.row + i, anchor.col + j);
             let t = text.trim();
             if t.is_empty() {
                 skipped_empty += 1;
-                continue;
-            }
-            if c >= cols {
-                errors.push(format!(
-                    "ブロック{}行{}列目「{}」: 貼り付け先が表の列範囲外",
-                    i + 1,
-                    j + 1,
-                    t
-                ));
                 continue;
             }
             match validate(r, c, t) {

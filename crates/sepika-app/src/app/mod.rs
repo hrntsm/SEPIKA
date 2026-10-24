@@ -1933,6 +1933,8 @@ pub use result_validity::HoldingCapacitySource;
 use result_validity::ResultInputKey;
 mod actions;
 pub mod node_grid;
+#[cfg(test)]
+mod node_grid_tests;
 mod preparation;
 
 pub use preparation::*;

@@ -153,6 +153,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [質点系先行成果鮮度_Issue612_2026-10.md](質点系先行成果鮮度_Issue612_2026-10.md) | GUI 実依存の存在・入力一致、限定片持柱の独立 K/T、状態保持 | 🔶（自動入口 Verification、手動 GUI・freshレビュー・最終head CI は後続） |
 | [リップ溝形の幾何成立条件_Issue544_2026-10.md](リップ溝形の幾何成立条件_Issue544_2026-10.md) | 5矩形境界・独立総性能/質量・生成/保存/編集/GUI/MCP・両質量方式の公開動的Result入口 | 🔶（Windows直接Verification成功、自動App/egui・実MCP・公開solver成功、修正後freshレビュー修正必須なし、手動GUI・実製品Validation・最終docs commit/CIは後続） |
 | [主架構線材の2節点入力_Issue562_2026-10.md](主架構線材の2節点入力_Issue562_2026-10.md) | 対象4kindの共通節点数・編集/I/O/数量/共有準備/solver/GUI/MCP入口と状態不変 | 🔶（Windows入口・自動App/egui・MCP Verification成功、手動GUI未実施、最終headレビュー・全CIは後続） |
+| [節点TSV一括拒否_Issue615_2026-10.md](節点TSV一括拒否_Issue615_2026-10.md) | 節点TSVの有限値・矩形全体・展開上限・適用時再検査と拒否時状態保持 | 🔶（SEPIKA Pasteイベント経路のVerification。実Excel/OSクリップボードは未実施・必須対象外、最終ゲートは後続） |
 | [節点材料の直接有限入力_Issue546_2026-10.md](節点材料の直接有限入力_Issue546_2026-10.md) | 節点・材料直接追加／単一失焦／有限判定と履歴・強度元指定保持 | 🔶（直接egui Verification、review修正後edit202件、既存値修正Undo含む追加eguiは新head CI後続） |
 | [矩形床の直交分類_Issue561_2026-10.md](矩形床の直交分類_Issue561_2026-10.md) | 閉合/直交/面積、斜め床真面積・支持辺対応、App適用・OVIKA11/5、#645 Windows境界入力・荷重位置一次 | 🔶（直接幾何Verification、#645の保存入力と実評価を追補。実験Validation・freshレビュー・最終head全CIは後続） |
 | [固定距離部材荷重の支間内検証_Issue635_2026-10.md](固定距離部材荷重の支間内検証_Issue635_2026-10.md) | 固定位置・区間の共通拒否／追加更新／座標・コピー／正しいhashの不正OVIKA／GUI・MCP | 🔶（入力境界Verification、freshレビュー・最終head全CIは後続） |
@@ -387,6 +388,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 36 | 静的設定の公開経路一致 | sepika-solver / sepika-element / sepika-job / sepika-app / sepika-mcp | statics/linear、statics/analysis、factory、compute、actions/linear_static、tests | [Issue595の直接入口と回帰](静的設定採用_Issue595_2026-10.md#直接入口と回帰) | 横断 | 🔶（Verification、Validation・最終headゲート未） |
 | 600 | RC梁Q0の符号付き端反力合成 | sepika-job / sepika-design-jp / sepika-app / sepika-mcp | design_q0.rs・rc/beam.rs・th_detail.rs | [Issue600の受入対応](RC梁Q0の符号付き端反力合成_Issue600_2026-10.md#接続保存受入の対応) | 横断 | 🔶（直接/追加受入・保存・関連構成Verification成功、手動GUI/Validation・最終ゲート未確認） |
 | 633 | 符号付き単純梁反力 | sepika-load / sepika-element / sepika-app | floor/fem.rs・story_gen/reactions.rs・frame/member_load.rs・viewer/cmq.rs | [Issue633の独立値・公開入口](符号付き単純梁反力_Issue633_2026-10.md#独立verification) | 横断 | 🔶（直接Verification、原本／Validation・最終CIは後続） |
+| 615 | 節点TSVの一括拒否と状態保持 | sepika-app | app/node_grid.rs・grid/core.rs・grid/widget.rs・tables/nodes.rs | [実入口と期待値](節点TSV一括拒否_Issue615_2026-10.md#独立期待値と実入口) | 自動egui／編集 | 🔶（SEPIKA側Verification、外部Excel/OS手操作未実施） |
 | 546 | 節点・材料直接入力の有限判定 | sepika-app / sepika-edit | tables/nodes.rs・tables/materials.rs・section_material/material.rs | [直接入力matrix](節点材料の直接有限入力_Issue546_2026-10.md#独立期待値と実入口) | GUI／編集 | 🔶（直接Verification、最終head CI後続） |
 | 475 | 未変形座標による編集入力 | sepika-app | app/coordinate_edit_tests.rs・app/panels/draw_tools.rs・load_editor.rs | [独立期待値と実入口](未変形編集入力_Issue475_2026-10.md#独立期待値と実入口) | GUI／編集 | 🔶（自動Verification成功、手動GUI未実施。最終ゲートは[PR #661](https://github.com/hrntsm/SEPIKA/pull/661)） |
 | 500 | CMQ の M 成分の塗り分割 | sepika-app | viewer/cmq.rs・viewer/diagram.rs | [独立期待値と実入口](CMQのM成分塗り分割_Issue500_2026-10.md#独立期待値と実入口) | GUI／表示 | 🔶（Scope内Verification成功、手動GUI未実施。最終ゲートは[PR #662](https://github.com/hrntsm/SEPIKA/pull/662)） |

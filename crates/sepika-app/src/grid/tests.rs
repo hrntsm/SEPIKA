@@ -358,6 +358,36 @@ fn test_plan_paste_validate_receives_target_coords() {
     assert_eq!(seen.into_inner(), vec![(3, 1), (3, 2)]);
 }
 
+#[test]
+fn checked_tiles_reject_limits_before_allocation_and_accept_boundary() {
+    let one = block(&[&["7"]]);
+    assert!(checked_tile_block(&one, MAX_PASTE_CELLS + 1, 1).is_err());
+    assert!(checked_tile_block(&one, usize::MAX, 2).is_err());
+    assert!(checked_tile_block(&[vec!["".into(); MAX_PASTE_CELLS + 1]], 1, 1).is_err());
+    assert_eq!(
+        checked_tile_block(&one, MAX_PASTE_CELLS, 1).unwrap().len(),
+        MAX_PASTE_CELLS
+    );
+    assert_eq!(
+        checked_tile_block(&block(&[&["1", "2"]]), MAX_PASTE_CELLS + 1, 3).unwrap(),
+        block(&[&["1", "2"]])
+    );
+}
+
+#[test]
+fn paste_rect_includes_blank_and_missing_cells_and_keeps_intentional_blank_rows() {
+    for source in ["1\t\t\t", "1\n\t\t\t", "\t\t\t"] {
+        assert!(plan_paste(&parse_tsv(source), cell(0, 0), 1, 3, validate_f64).is_err());
+    }
+    assert_eq!(parse_tsv("1\r\n\r\n"), block(&[&["1"]]));
+    assert_eq!(parse_tsv("1\r\n\t\r\n"), block(&[&["1"], &["", ""]]));
+    assert_eq!(parse_tsv("1\n \n"), block(&[&["1"], &[" "]]));
+    let plan = plan_paste(&parse_tsv("1\t2\n3"), cell(0, 0), 2, 3, validate_f64).unwrap();
+    assert_eq!(plan.skipped_empty, 1);
+    assert_eq!(plan.set.len(), 3);
+    assert!(plan_paste(&block(&[&["1"]]), cell(usize::MAX, 0), 1, 3, validate_f64).is_err());
+}
+
 // ---- rect_to_tsv ----
 
 #[test]

@@ -77,18 +77,49 @@ impl GridAdapter for NodeGridAdapter<'_> {
             .unwrap_or_default()
     }
 
-    fn validate_cell(&self, _row: usize, _col: usize, text: &str) -> Result<(), String> {
-        text.parse::<f64>()
-            .map(|_| ())
-            .map_err(|_| "数値として解釈できません".to_string())
+    fn validate_cell(&self, row: usize, col: usize, text: &str) -> Result<(), String> {
+        self.validate_target(row, col)?;
+        match text.parse::<f64>() {
+            Ok(value) if value.is_finite() => Ok(()),
+            _ => Err(format!("節点ID {row}: 有限の数値を入力してください")),
+        }
     }
 
-    fn apply_block(&mut self, cells: &[(usize, usize, String)], append_rows: usize) {
+    fn apply_block(
+        &mut self,
+        cells: &[(usize, usize, String)],
+        append_rows: usize,
+    ) -> Result<bool, String> {
         let n0 = self.model.nodes.len();
+        let end = n0.checked_add(append_rows).ok_or("追加行数の上限超過")?;
+        let required = cells
+            .iter()
+            .map(|(r, _, _)| r.saturating_add(1))
+            .max()
+            .unwrap_or(0)
+            .saturating_sub(n0);
+        if cells.len() > crate::grid::MAX_PASTE_CELLS
+            || append_rows > crate::grid::MAX_PASTE_CELLS
+            || append_rows != required
+            || end > u32::MAX as usize
+        {
+            return Err("追加行条件またはセル数上限に違反しています".into());
+        }
+        if cells.is_empty() {
+            return Ok(false);
+        }
         let parsed: Vec<(usize, usize, f64)> = cells
             .iter()
-            .filter_map(|(r, c, t)| t.parse::<f64>().ok().map(|v| (*r, *c, v)))
-            .collect();
+            .map(|(r, c, t)| {
+                self.validate_cell(*r, *c, t)?;
+                if *r >= end {
+                    return Err(format!("節点ID {r}: 追加行の範囲外"));
+                }
+                let value = t.parse::<f64>().map_err(|_| "数値として解釈できません")?;
+                Ok((*r, *c, value))
+            })
+            .collect::<Result<_, String>>()?;
+        let revision = self.undo.revision();
         let existing: Vec<_> = parsed.iter().filter(|(r, _, _)| *r < n0).copied().collect();
         let updates = self.coord_updates(&existing);
         let mut added = vec![[0.0f64; 3]; append_rows];
@@ -111,6 +142,10 @@ impl GridAdapter for NodeGridAdapter<'_> {
             }));
         }
         self.run_all(children, "節点座標の貼り付け");
+        if let Some(reason) = self.undo.last_error() {
+            return Err(reason.to_owned());
+        }
+        Ok(self.undo.revision() != revision)
     }
 
     fn clear_cells(&mut self, cells: &[(usize, usize)]) -> usize {
