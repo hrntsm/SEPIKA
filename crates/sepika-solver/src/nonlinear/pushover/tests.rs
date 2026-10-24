@@ -4044,7 +4044,7 @@ fn sm520_src_shear_thresholds_reject_each_out_of_range_plate_without_fy_or_infin
 #[test]
 fn checked_fiber_and_ms_trial_failures_reach_public_pushover_with_element_and_phase() {
     for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let mut model = single_column_model(235.0, 1e300);
+        let mut model = single_column_model(235.0, 1e307);
         model.elements[0].kind = kind;
         let dofmap = DofMap::build(&model);
         let reducer = Reducer::build(&model, &dofmap);

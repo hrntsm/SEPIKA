@@ -302,15 +302,32 @@ fn nonlinear_input_issues_with_basis(
                 )
             }),
             ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
-                member_strength_issue(elem, model).or_else(|| {
-                    super::springs::rc_reference_issue(
-                        elem,
-                        model,
-                        super::springs::resolve_member_hysteresis(elem, model, kind),
-                        basis,
-                    )
-                    .map(|issue| format!("部材 ID {} のRC梁基準接続: {issue}", elem.id.0))
-                })
+                member_strength_issue(elem, model)
+                    .or_else(|| {
+                        super::springs::rc_reference_issue(
+                            elem,
+                            model,
+                            super::springs::resolve_member_hysteresis(elem, model, kind),
+                            basis,
+                        )
+                        .map(|issue| format!("部材 ID {} のRC梁基準接続: {issue}", elem.id.0))
+                    })
+                    .or_else(|| {
+                        let fiber = elem.kind != ElementKind::Beam
+                            || matches!(
+                                super::resolve_force_regime(elem, model),
+                                super::ResolvedRegime::Fiber
+                            );
+                        if !fiber {
+                            return None;
+                        }
+                        crate::frame::fiber::FiberBeam::try_new(elem, model, basis, kind)
+                            .and_then(|beam| beam.validate_initial_section_stiffness())
+                            .err()
+                            .map(|reason| {
+                                format!("部材 ID {} のファイバー初期断面: {reason}", elem.id.0)
+                            })
+                    })
             }
             _ => None,
         };

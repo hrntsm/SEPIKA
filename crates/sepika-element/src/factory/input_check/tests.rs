@@ -141,8 +141,15 @@ fn test_valid_inputs_produce_no_issues() {
     // 鋼材部材（形状未設定）＋ 正の fy
     let mut sec = rc_section();
     sec.shape = None;
+    sec.width = 400.0;
+    sec.depth = 600.0;
+    sec.property_basis = Default::default();
     let model = beam_model(sec, steel_material());
-    assert!(nonlinear_input_issues(&model).is_empty());
+    assert!(
+        nonlinear_input_issues(&model).is_empty(),
+        "{:?}",
+        nonlinear_input_issues(&model)
+    );
     assert!(ensure_nonlinear_input(&model).is_ok());
 
     // RC 断面 ＋ 正の Fc

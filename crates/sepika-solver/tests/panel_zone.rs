@@ -1280,16 +1280,19 @@ fn panel_753_public_nonlinear_time_history_propagates_axial_limit() {
     use sepika_solver::dynamic::timehistory::{
         nonlinear_time_history_analysis, GroundMotion, NewmarkCfg, NonlinearThCfg,
     };
-    for (n, accepted, moving, scale) in [
-        (0.0, true, false, 1.0),
-        (0.6, true, false, 1.0),
-        (0.9999, true, false, 1.0),
-        (1.0, false, false, 1.0),
-        (1.1, false, false, 1.0),
-        (0.6, false, true, 1.0),
-        (0.5, true, false, 0.0001),
-        (1.0, false, false, 0.0001),
-        (1.1, false, false, 0.0001),
+    for (n, accepted, moving, scale, singular) in [
+        (0.0, true, false, 1.0, false),
+        (0.6, true, false, 1.0, false),
+        (0.9999, true, false, 1.0, false),
+        (1.0, false, false, 1.0, false),
+        (1.1, false, false, 1.0, false),
+        (0.6, false, true, 1.0, false),
+        (0.5, true, false, 0.0001, false),
+        (1.0, false, false, 0.0001, false),
+        (1.1, false, false, 0.0001, false),
+        (0.5, true, false, 0.001, false),
+        (0.5, true, false, 0.00001, false),
+        (0.5, false, false, 0.0001, true),
     ] {
         let mut model = l_frame(true);
         if scale != 1.0 {
@@ -1320,12 +1323,20 @@ fn panel_753_public_nonlinear_time_history_propagates_axial_limit() {
                 section.j *= scale.powi(4);
             }
             for member in &mut model.elements {
-                member.force_regime = ForceRegime::UniaxialBendingShear;
                 member.rigid_zone.length_i *= scale;
                 member.rigid_zone.length_j *= scale;
                 member.rigid_zone.face_i = member.rigid_zone.face_i.map(|v| v * scale);
                 member.rigid_zone.face_j = member.rigid_zone.face_j.map(|v| v * scale);
             }
+        }
+        if singular {
+            model.panel_zone = sepika_core::model::PanelZoneMode::None;
+            model
+                .elements
+                .retain(|element| element.kind != ElementKind::PanelZone);
+            model.sections[0].shape = None;
+            model.sections[0].depth = 0.0;
+            model.sections[0].width = 0.0;
         }
         model.materials[0].fy = Some(235.0);
         model.materials[0].density = 7.85e-9;
@@ -1376,6 +1387,13 @@ fn panel_753_public_nonlinear_time_history_propagates_axial_limit() {
             );
         } else {
             let error = result.unwrap_err().to_string();
+            if singular {
+                assert!(
+                    error.contains("部材 ID 0") && error.contains("初期断面剛性"),
+                    "{error}"
+                );
+                continue;
+            }
             if moving {
                 assert!(
                     error.contains("step 1") && error.contains("時刻 0.01 s"),
