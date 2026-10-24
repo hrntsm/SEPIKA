@@ -90,6 +90,7 @@ fn rc_purpose_rejects_inverse_primary_and_secondary_uses_before_public_analysis(
                     ends: SecondaryMemberEnds::Detached([[0.0; 3], [1000.0, 0.0, 0.0]]),
                     section: Some(SectionId(0)),
                     name: "逆用途".into(),
+                    vertical_eccentricity: Some(0.0),
                     gravity_end_shares: None,
                 };
                 match wrong_kind {
@@ -123,6 +124,7 @@ fn rc_purpose_rejects_inverse_primary_and_secondary_uses_before_public_analysis(
                     end_cond: [EndCondition::Fixed; 2],
                     force_regime: ForceRegime::Auto,
                     rigid_zone: Default::default(),
+                    vertical_eccentricity: Some(0.0),
                     plastic_zone: None,
                     spring: None,
                 });

@@ -2374,6 +2374,7 @@ mod node_reference_tests {
         let mut region = FloorRegion::new(FloorRegionId(0), vec![NodeId(1)]);
         region.secondary_beams.push(SecondaryMember {
             id: SecondaryMemberId(0),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Detached([[0.0; 3]; 2]),
@@ -2446,6 +2447,7 @@ mod node_reference_tests {
         // 8: 二次部材（未割当小梁）。節点ではなく支持部材アンカーを参照する。
         model.unassigned_beams.push(SecondaryMember {
             id: SecondaryMemberId(1),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Detached([[0.0; 3]; 2]),

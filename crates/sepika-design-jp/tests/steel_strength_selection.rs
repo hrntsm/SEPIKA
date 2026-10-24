@@ -250,6 +250,7 @@ fn primary_model() -> sepika_core::model::Model {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         }],

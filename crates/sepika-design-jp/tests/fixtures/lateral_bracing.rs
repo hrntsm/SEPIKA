@@ -55,6 +55,7 @@ fn element(id: u32, i: u32, j: u32, section: u32) -> ElementData {
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     }

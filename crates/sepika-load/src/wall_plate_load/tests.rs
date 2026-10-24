@@ -33,6 +33,7 @@ fn beam(id: u32, a: u32, b: u32) -> ElementData {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     }
@@ -118,6 +119,7 @@ fn split_by_post() -> Model {
     let mut m = bay();
     // 割当領域を間柱で分割するため、間柱を安定 ID ＋取付き位置で持たせる。
     m.unassigned_posts.push(SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: Some([0.5, 0.5]),
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Post,
@@ -525,6 +527,7 @@ fn 柱に並走する間柱は柱の荷重を奪わない() {
     let mut m = split_by_post();
     // 左の柱（節点 0-3）と同じ材軸に、柱へアンカーした間柱を 1 本足す（重複モデル化）。
     m.wall_regions[0].posts.push(SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(1),
         kind: SecondaryMemberKind::Post,
@@ -584,6 +587,7 @@ fn midspan_post_bay() -> Model {
     // 間柱端の節点（4, 5）を除き、間柱が梁中間にだけ載る状態にする。
     m.nodes.retain(|n| n.id.0 < 4);
     m.unassigned_posts.push(SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: Some([0.5, 0.5]),
         id: SecondaryMemberId(0),
         kind: SecondaryMemberKind::Post,

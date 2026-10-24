@@ -116,7 +116,7 @@ pub(super) fn section_outline(sec: &Section) -> Option<Vec<[f64; 2]>> {
     let Some(shape) = &sec.shape else {
         return (sec.depth > 0.0 && sec.width > 0.0).then(|| rect_outline(sec.depth, sec.width));
     };
-    let outline = match shape {
+    let mut outline = match shape {
         SectionShape::SteelH {
             height,
             width,
@@ -255,6 +255,27 @@ pub(super) fn section_outline(sec: &Section) -> Option<Vec<[f64; 2]>> {
         SectionShape::CftBox { height, width, .. } => rect_outline(*height, *width),
         SectionShape::RcWall { .. } | SectionShape::RcSlab { .. } => return None,
     };
+    if matches!(
+        shape,
+        SectionShape::SteelAngle { .. }
+            | SectionShape::SteelChannel { .. }
+            | SectionShape::SteelTee { .. }
+            | SectionShape::SteelBuiltH { .. }
+            | SectionShape::SteelLipChannel { .. }
+    ) {
+        let geometry =
+            sepika_core::section_shape::face_geometry::SectionGeometry::of(shape).ok()?;
+        for (dimension, direction) in [(0, [1.0, 0.0]), (1, [0.0, 1.0])] {
+            let actual_min = geometry.projected_range(direction).ok()?[0];
+            let outline_min = outline
+                .iter()
+                .map(|p| p[dimension])
+                .fold(f64::INFINITY, f64::min);
+            for p in &mut outline {
+                p[dimension] += actual_min - outline_min;
+            }
+        }
+    }
     Some(outline)
 }
 
@@ -309,6 +330,7 @@ pub(super) fn draw_section_solids(
     proj: &Projector,
     show_secondary: bool,
     frame_filter: super::FrameFilter,
+    actual_placement: bool,
 ) -> usize {
     let mut prims: Vec<(f32, SolidPrim)> = Vec::new();
     let mut skipped = 0usize;
@@ -405,19 +427,49 @@ pub(super) fn draw_section_solids(
             continue;
         };
         let base = base_color(sec.shape.as_ref());
-        if !extrude(
-            coords[n0],
-            coords[n1],
-            elem.local_axis.ref_vector,
-            sec,
-            base,
-        ) {
+        let ends = if actual_placement {
+            let Some(ends) = super::primary_shape_ends(model, elem) else {
+                skipped += 1;
+                continue;
+            };
+            ends
+        } else {
+            [coords[n0], coords[n1]]
+        };
+        if !extrude(ends[0], ends[1], elem.local_axis.ref_vector, sec, base) {
             skipped += 1;
         }
     }
 
     if show_secondary {
         for sm in model.beams().chain(model.posts()) {
+            if actual_placement {
+                if !super::secondary_shape_visible(model, sm, frame_filter) {
+                    continue;
+                }
+                let Some([a, b]) = super::secondary_shape_ends(model, sm) else {
+                    skipped += 1;
+                    continue;
+                };
+                let Some(sec) = sm.section.and_then(|sid| model.section(sid)) else {
+                    skipped += 1;
+                    continue;
+                };
+                if !extrude(
+                    a,
+                    b,
+                    if sm.kind == sepika_core::model::SecondaryMemberKind::Beam {
+                        [0.0, 0.0, 1.0]
+                    } else {
+                        [1.0, 0.0, 0.0]
+                    },
+                    sec,
+                    theme::BEST_YELLOW,
+                ) {
+                    skipped += 1;
+                }
+                continue;
+            }
             let Some([n0, n1]) = super::secondary_end_node_indices(model, sm) else {
                 continue;
             };

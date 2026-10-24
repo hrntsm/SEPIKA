@@ -54,6 +54,7 @@ fn fiber_elem(id: u32, i: u32, j: u32, section: u32, rigid: f64) -> ElementData 
             face_j: Some(rigid),
             ..Default::default()
         },
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     }

@@ -38,6 +38,7 @@ fn seeded_model(n_nodes: u32, n_elems: u32) -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -76,6 +77,7 @@ fn square_with_region() -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -334,6 +336,7 @@ fn test_delete_node_middle_renumbers_and_roundtrips() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -393,6 +396,7 @@ fn test_delete_node_in_use_is_noop() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -471,6 +475,7 @@ fn test_delete_member_undo_preserves_member_load_order() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -539,6 +544,7 @@ fn test_add_delete_member_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -867,6 +873,7 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -887,6 +894,7 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
         .unassigned_beams
         .push(sepika_core::model::SecondaryMember {
             id: sepika_core::ids::SecondaryMemberId(0),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             kind: sepika_core::model::SecondaryMemberKind::Beam,
             ends: sepika_core::model::SecondaryMemberEnds::Detached([[0.0; 3], [1.0, 0.0, 0.0]]),
@@ -943,6 +951,7 @@ fn test_edit_rc_slab_section_shape_with_shell_reference() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -986,6 +995,7 @@ fn test_edit_rc_wall_section_shape_with_wall_reference() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -1037,6 +1047,7 @@ fn test_edit_section_shape_rejects_cft_for_non_target_element_reference() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -1094,6 +1105,7 @@ fn test_duplicate_section_for_member_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -1193,6 +1205,7 @@ fn test_duplicate_section_no_section_noop() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -1228,6 +1241,7 @@ fn two_member_model() -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -1402,6 +1416,7 @@ fn test_delete_section_referenced_by_beam() {
         vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
     );
     region.secondary_beams = vec![SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -1727,6 +1742,7 @@ fn test_commands_reject_dangling_references() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2270,6 +2286,7 @@ fn test_delete_slab_middle_renumbers_and_roundtrips() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -2592,6 +2609,7 @@ fn test_delete_leftover_generated_master_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -3233,6 +3251,7 @@ fn test_set_member_hysteresis_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -3351,6 +3370,7 @@ fn test_add_damper_creates_element_and_attr_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -3442,6 +3462,7 @@ fn test_add_isolator_creates_element_and_attr_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -3499,6 +3520,7 @@ fn test_add_isolator_id_mismatch_is_noop() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -3676,6 +3698,7 @@ fn test_remove_support_isolator_noop_when_not_support_isolator() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -4143,6 +4166,7 @@ fn test_composite_delete_nodes_descending_roundtrip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -4184,6 +4208,7 @@ fn test_composite_delete_nodes_descending_roundtrip() {
 
 fn sample_secondary(n0: u32, n1: u32) -> sepika_core::model::SecondaryMember {
     sepika_core::model::SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(n0),
         kind: sepika_core::model::SecondaryMemberKind::Beam,
@@ -5655,6 +5680,7 @@ fn test_copy_story_distinguishes_brace_from_girder() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -5907,6 +5933,7 @@ fn make_sm(
     kind: sepika_core::model::SecondaryMemberKind,
 ) -> sepika_core::model::SecondaryMember {
     sepika_core::model::SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(id),
         kind,
@@ -6495,6 +6522,7 @@ fn add_member_rejects_horizontal_cft_but_allows_column_and_unassigned() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -6781,6 +6809,7 @@ fn test_copy_story_secondary_creates_unassigned_beam() {
     model
         .unassigned_beams
         .push(sepika_core::model::SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: sepika_core::model::SecondaryMemberKind::Beam,
@@ -6829,6 +6858,7 @@ fn test_copy_story_rejects_secondary_cft() {
         .collect();
     let cft = push_cft_section(&mut model);
     model.unassigned_beams.push(SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -7005,6 +7035,7 @@ fn test_copy_story_counts_midspan_secondary_as_skipped() {
     model
         .unassigned_beams
         .push(sepika_core::model::SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: sepika_core::model::SecondaryMemberKind::Beam,
@@ -7052,6 +7083,7 @@ fn test_copy_story_slab_copy_does_not_touch_floor_regions() {
         .map(|n| n.id)
         .collect();
     let beam = sepika_core::model::SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: sepika_core::model::SecondaryMemberKind::Beam,
@@ -7139,6 +7171,7 @@ fn test_add_attached_slab_roundtrip() {
         end_cond: [sepika_core::model::EndCondition::Fixed; 2],
         force_regime: sepika_core::model::ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -7226,6 +7259,7 @@ fn test_add_attached_slab_sectionless_extent_1000_roundtrip() {
         end_cond: [sepika_core::model::EndCondition::Fixed; 2],
         force_regime: sepika_core::model::ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -8132,6 +8166,7 @@ fn 間柱端部負担率を設定し取り消せる() {
         .unassigned_posts
         .push(sepika_core::model::SecondaryMember {
             id: sepika_core::ids::SecondaryMemberId(0),
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             kind: sepika_core::model::SecondaryMemberKind::Post,
             ends: sepika_core::model::SecondaryMemberEnds::Detached([
@@ -8295,6 +8330,7 @@ fn attached_slab_rejection_preserves_model_and_undo_redo_history() {
         end_cond: [EndCondition::Fixed; 2],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });

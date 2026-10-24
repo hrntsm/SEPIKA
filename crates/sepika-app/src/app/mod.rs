@@ -2587,3 +2587,6 @@ mod nonnodal_quantity_acceptance_tests;
 
 #[cfg(test)]
 mod src_ql_acceptance_tests;
+
+#[cfg(all(test, feature = "gui"))]
+mod beam_placement_tests;

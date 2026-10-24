@@ -438,6 +438,7 @@ mod tests {
                         ends: SecondaryMemberEnds::Detached([[0.0; 3], [1000.0, 0.0, 0.0]]),
                         section: Some(SectionId(0)),
                         name: "逆用途".into(),
+                        vertical_eccentricity: Some(0.0),
                         gravity_end_shares: None,
                     };
                     match (wrong_kind, mode <= 2) {
@@ -525,6 +526,7 @@ mod tests {
                         ends: SecondaryMemberEnds::Detached([[0.0; 3], [1000.0, 0.0, 0.0]]),
                         section: Some(id),
                         name: "逆用途".into(),
+                        vertical_eccentricity: Some(0.0),
                         gravity_end_shares: None,
                     };
                     match (wrong_kind, assigned) {
@@ -619,6 +621,7 @@ mod tests {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -693,6 +696,7 @@ mod tests {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -813,6 +817,7 @@ mod tests {
                 end_cond: [EndCondition::Fixed; 2],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
+                vertical_eccentricity: Some(0.0),
                 plastic_zone: None,
                 spring: None,
             });
@@ -974,6 +979,7 @@ mod tests {
             .unassigned_posts
             .push(sepika_core::model::SecondaryMember {
                 id: sepika_core::ids::SecondaryMemberId(0),
+                vertical_eccentricity: Some(0.0),
                 gravity_end_shares: Some([0.75, 0.25]),
                 kind: sepika_core::model::SecondaryMemberKind::Post,
                 ends: sepika_core::model::SecondaryMemberEnds::Detached([
@@ -1006,6 +1012,7 @@ mod tests {
             end_cond: [EndCondition::Pinned, EndCondition::Pinned],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -1461,6 +1468,7 @@ mod tests {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });

@@ -45,12 +45,16 @@ pub struct SecondaryMember {
     pub section: Option<SectionId>,
     /// 表示名。
     pub name: String,
+    /// 基準材軸からの一律鉛直偏心 [mm]。+Z が正、None は未指定。
+    #[serde(default)]
+    pub vertical_eccentricity: Option<f64>,
 }
 
 impl Default for SecondaryMember {
     fn default() -> Self {
         Self {
             id: SecondaryMemberId(0),
+            vertical_eccentricity: None,
             gravity_end_shares: None,
             kind: SecondaryMemberKind::Beam,
             ends: SecondaryMemberEnds::Detached([[0.0; 3]; 2]),
@@ -785,6 +789,7 @@ mod tests {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         }
@@ -807,6 +812,7 @@ mod tests {
 
     fn secondary_beam(id: u32, coords: [[f64; 3]; 2]) -> SecondaryMember {
         SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: SecondaryMemberId(id),
             kind: SecondaryMemberKind::Beam,
@@ -883,6 +889,7 @@ mod tests {
     fn 支持のない端は生座標のまま残す() {
         let mut model = two_girder_model();
         model.unassigned_posts.push(SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: SecondaryMemberId(0),
             kind: SecondaryMemberKind::Post,

@@ -181,6 +181,7 @@ fn test_beam_new_src_cft_composite_props() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -481,6 +482,7 @@ fn test_beam_new_slab_cooperation_width_amplifies_iy() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -625,6 +627,7 @@ fn test_beam_new_slab_cooperation_width_survives_beam_subdivided_region() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -727,6 +730,7 @@ fn rc_beam_for_slab_factor(plate: Option<sepika_core::model::SlabPlate>) -> (Mod
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -906,6 +910,7 @@ fn test_beam_new_composite_steel_beam_averages_stiffness() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -1209,6 +1214,7 @@ fn test_apply_auto_rigid_zones_and_manual_protection() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: sepika_core::model::ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -1337,6 +1343,7 @@ fn test_eval_sections_from_face_distance() {
                 face_j: Some(250.0),
                 ..Default::default()
             },
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         }],
@@ -1528,6 +1535,7 @@ fn test_auto_rigid_zone_wall_does_not_affect_orthogonal_search() {
                 end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                 force_regime: sepika_core::model::ForceRegime::Auto,
                 rigid_zone: Default::default(),
+                vertical_eccentricity: Some(0.0),
                 plastic_zone: None,
                 spring: None,
             },
@@ -1542,6 +1550,7 @@ fn test_auto_rigid_zone_wall_does_not_affect_orthogonal_search() {
                 end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                 force_regime: sepika_core::model::ForceRegime::Auto,
                 rigid_zone: Default::default(),
+                vertical_eccentricity: Some(0.0),
                 plastic_zone: None,
                 spring: None,
             },
@@ -1556,6 +1565,7 @@ fn test_auto_rigid_zone_wall_does_not_affect_orthogonal_search() {
                 end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                 force_regime: sepika_core::model::ForceRegime::Auto,
                 rigid_zone: Default::default(),
+                vertical_eccentricity: Some(0.0),
                 plastic_zone: None,
                 spring: None,
             },
@@ -1645,6 +1655,7 @@ fn test_beam_new_wall_girder_bottom_edge_scales_stiffness() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -1669,6 +1680,7 @@ fn test_beam_new_wall_girder_bottom_edge_scales_stiffness() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -1683,6 +1695,7 @@ fn test_beam_new_wall_girder_bottom_edge_scales_stiffness() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -1789,6 +1802,7 @@ fn test_beam_new_wall_girder_factor_not_applied_to_partial_shared_or_vertical() 
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -1803,6 +1817,7 @@ fn test_beam_new_wall_girder_factor_not_applied_to_partial_shared_or_vertical() 
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -1817,6 +1832,7 @@ fn test_beam_new_wall_girder_factor_not_applied_to_partial_shared_or_vertical() 
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -1919,6 +1935,7 @@ fn test_beam_new_misc_wall_wing_augments_column_inplane_stiffness() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -1933,6 +1950,7 @@ fn test_beam_new_misc_wall_wing_augments_column_inplane_stiffness() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2087,6 +2105,7 @@ fn test_beam_new_misc_wall_strip_augments_girder_iy_without_100x() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2101,6 +2120,7 @@ fn test_beam_new_misc_wall_strip_augments_girder_iy_without_100x() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2277,6 +2297,7 @@ fn test_column_face_slit_drops_wing_wall_but_keeps_girder_strip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2291,6 +2312,7 @@ fn test_column_face_slit_drops_wing_wall_but_keeps_girder_strip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2305,6 +2327,7 @@ fn test_column_face_slit_drops_wing_wall_but_keeps_girder_strip() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2513,6 +2536,7 @@ fn test_beam_new_seismic_wall_no_misc_wall_augmentation() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2527,6 +2551,7 @@ fn test_beam_new_seismic_wall_no_misc_wall_augmentation() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2541,6 +2566,7 @@ fn test_beam_new_seismic_wall_no_misc_wall_augmentation() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2555,6 +2581,7 @@ fn test_beam_new_seismic_wall_no_misc_wall_augmentation() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2669,6 +2696,7 @@ fn test_vertical_bending_stiffness_uses_section_strong_axis() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2901,6 +2929,7 @@ fn test_misc_wall_wing_eccentricity_is_independent_of_wall_node_order() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2915,6 +2944,7 @@ fn test_misc_wall_wing_eccentricity_is_independent_of_wall_node_order() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -2998,6 +3028,7 @@ fn torsion_test_model(split_x: bool) -> Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -3123,6 +3154,7 @@ fn test_column_torsion_release_skipped_at_collinear_column_node() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -3272,6 +3304,7 @@ fn t_joint_model(
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: sepika_core::model::ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -3406,6 +3439,7 @@ fn portal_with_wing_wall(col_depth: f64, beam_depth: f64, wall_thickness: f64) -
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: sepika_core::model::ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -3434,6 +3468,7 @@ fn portal_with_wing_wall(col_depth: f64, beam_depth: f64, wall_thickness: f64) -
                 end_cond: [EndCondition::Fixed, EndCondition::Fixed],
                 force_regime: sepika_core::model::ForceRegime::Auto,
                 rigid_zone: Default::default(),
+                vertical_eccentricity: Some(0.0),
                 plastic_zone: None,
                 spring: None,
             },

@@ -142,6 +142,7 @@ fn build_grid_model(nx: usize, ny: usize, n_stories: usize, with_slabs: bool) ->
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });

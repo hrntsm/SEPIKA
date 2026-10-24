@@ -340,6 +340,9 @@ pub struct ElementData {
     /// `None` は他要素種別、またはバネ定数未指定（剛性ゼロ扱い）。
     #[serde(default)]
     pub spring: Option<[f64; 6]>,
+    /// 基準材軸からの一律鉛直偏心 [mm]。+Z が正、None は未指定。
+    #[serde(default)]
+    pub vertical_eccentricity: Option<f64>,
 }
 
 impl ElementData {

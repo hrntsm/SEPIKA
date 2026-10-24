@@ -103,6 +103,7 @@ fn two_story_model() -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -265,6 +266,7 @@ fn test_base_master_ignores_non_structural_slaves() {
         model.nodes[free_id.index()].coord,
     ]);
     model.unassigned_beams.push(SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(0),
         kind: SecondaryMemberKind::Beam,
@@ -536,6 +538,7 @@ fn two_columns_with_dl_model() -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -689,6 +692,7 @@ fn rc_base_column_with_base_beam_model() -> Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -703,6 +707,7 @@ fn rc_base_column_with_base_beam_model() -> Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -1163,6 +1168,7 @@ fn rc_beam_with_slab_model() -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -1337,6 +1343,7 @@ fn cft_column_model() -> Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -1786,6 +1793,7 @@ fn secondary_beam_model() -> Model {
         model.nodes[2].coord,
     ]);
     model.unassigned_beams.push(SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(1),
         kind: SecondaryMemberKind::Beam,
@@ -1903,11 +1911,13 @@ fn test_secondary_beam_steel_weight_factor_applies_to_design_and_mass() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
     }
     model.unassigned_beams.push(SecondaryMember {
+        vertical_eccentricity: Some(0.0),
         gravity_end_shares: None,
         id: sepika_core::ids::SecondaryMemberId(1),
         kind: SecondaryMemberKind::Beam,
@@ -2054,12 +2064,14 @@ fn secondary_beam_on_girder_midspan_model(with_beam: bool) -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
     }
     if with_beam {
         model.unassigned_beams.push(SecondaryMember {
+            vertical_eccentricity: Some(0.0),
             gravity_end_shares: None,
             id: sepika_core::ids::SecondaryMemberId(0),
             kind: SecondaryMemberKind::Beam,
@@ -2184,6 +2196,7 @@ fn single_beam_model(
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone,
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -2280,6 +2293,7 @@ fn test_member_load_reaction_distribution_end_to_end() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -2448,6 +2462,7 @@ fn test_face_reduction_applies_to_horizontal_concrete_beam() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -2463,6 +2478,7 @@ fn test_face_reduction_applies_to_horizontal_concrete_beam() {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -2646,6 +2662,7 @@ fn wall_model() -> Model {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -2823,6 +2840,7 @@ fn test_wall_self_weight_uses_clear_dimensions_of_boundary_members() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: Default::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     };
@@ -3357,6 +3375,7 @@ fn single_column_with_attached_wall(transfer: LoadTransfer) -> (Model, f64) {
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
+            vertical_eccentricity: Some(0.0),
             plastic_zone: None,
             spring: None,
         });
@@ -4417,6 +4436,7 @@ fn test_finish_area_weight_beam_perimeter_three_side() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -4539,6 +4559,7 @@ fn test_base_column_without_lower_column_adds_max_beam_depth() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -4553,6 +4574,7 @@ fn test_base_column_without_lower_column_adds_max_beam_depth() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -4709,6 +4731,7 @@ fn test_base_column_with_lower_brace_still_adds_max_beam_depth() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -4724,6 +4747,7 @@ fn test_base_column_with_lower_brace_still_adds_max_beam_depth() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -4742,6 +4766,7 @@ fn test_base_column_with_lower_brace_still_adds_max_beam_depth() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -4908,6 +4933,7 @@ fn test_base_column_with_lower_three_node_vertical_beam_still_adds_max_beam_dept
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -4923,6 +4949,7 @@ fn test_base_column_with_lower_three_node_vertical_beam_still_adds_max_beam_dept
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -4939,6 +4966,7 @@ fn test_base_column_with_lower_three_node_vertical_beam_still_adds_max_beam_dept
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -5090,6 +5118,7 @@ fn test_base_column_with_lower_column_does_not_add_beam_depth() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -5105,6 +5134,7 @@ fn test_base_column_with_lower_column_does_not_add_beam_depth() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -5120,6 +5150,7 @@ fn test_base_column_with_lower_column_does_not_add_beam_depth() {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -5261,6 +5292,7 @@ fn k_brace_model(rule: KBraceWeightRule) -> Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -5273,6 +5305,7 @@ fn k_brace_model(rule: KBraceWeightRule) -> Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -5287,6 +5320,7 @@ fn k_brace_model(rule: KBraceWeightRule) -> Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });
@@ -5301,6 +5335,7 @@ fn k_brace_model(rule: KBraceWeightRule) -> Model {
         end_cond: [EndCondition::Fixed, EndCondition::Fixed],
         force_regime: ForceRegime::Auto,
         rigid_zone: RigidZone::default(),
+        vertical_eccentricity: Some(0.0),
         plastic_zone: None,
         spring: None,
     });

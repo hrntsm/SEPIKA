@@ -44,6 +44,7 @@ fn member_model(place: usize, sections: Vec<Section>, reference: Option<u32>) ->
                 end_cond: [EndCondition::Fixed; 2],
                 force_regime: ForceRegime::Auto,
                 rigid_zone: Default::default(),
+                vertical_eccentricity: Some(0.0),
                 plastic_zone: None,
                 spring: None,
             });

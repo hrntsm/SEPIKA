@@ -1,6 +1,92 @@
 use crate::app::App;
 use crate::theme;
 
+fn primary_shape_ends(
+    model: &sepika_core::Model,
+    elem: &sepika_core::model::ElementData,
+) -> Option<[[f64; 3]; 2]> {
+    use sepika_core::model::{FrameSectionUse, SupportMemberId};
+    if elem.kind.is_primary_frame_support()
+        && model
+            .element_section(elem)
+            .is_some_and(|s| s.frame_use == Some(FrameSectionUse::Girder))
+    {
+        Some(
+            model
+                .beam_placement(SupportMemberId::Primary(elem.id))
+                .ok()?
+                .actual_ends,
+        )
+    } else {
+        Some([
+            model.node(*elem.nodes.first()?)?.coord,
+            model.node(*elem.nodes.get(1)?)?.coord,
+        ])
+    }
+}
+
+fn secondary_shape_ends(
+    model: &sepika_core::Model,
+    sm: &sepika_core::model::SecondaryMember,
+) -> Option<[[f64; 3]; 2]> {
+    use sepika_core::model::{SecondaryMemberKind, SupportMemberId};
+    if sm.kind == SecondaryMemberKind::Beam {
+        Some(
+            model
+                .beam_placement(SupportMemberId::Secondary(sm.id))
+                .ok()?
+                .actual_ends,
+        )
+    } else {
+        let (a, b) = model.secondary_member_end_points(sm)?;
+        Some([a, b])
+    }
+}
+
+fn secondary_shape_visible(
+    model: &sepika_core::Model,
+    sm: &sepika_core::model::SecondaryMember,
+    filter: FrameFilter,
+) -> bool {
+    filter.elem_on.is_none()
+        || sm.ends.anchors().iter().all(|a| match a.support {
+            sepika_core::model::SupportMemberId::Primary(id) => filter.shows(id),
+            sepika_core::model::SupportMemberId::Secondary(id) => model
+                .support_member_nodes(sepika_core::model::SupportMemberId::Secondary(id))
+                .is_some_and(|nodes| nodes.into_iter().all(|n| filter.shows_node(n.index()))),
+        })
+}
+
+fn displayed_support_axis(
+    model: &sepika_core::Model,
+    support: sepika_core::model::SupportMemberId,
+    actual: bool,
+) -> Option<[[f64; 3]; 2]> {
+    use sepika_core::model::SupportMemberId;
+    if actual {
+        match support {
+            SupportMemberId::Primary(id) => primary_shape_ends(model, model.element(id)?),
+            SupportMemberId::Secondary(id) => {
+                secondary_shape_ends(model, model.secondary_member(id)?)
+            }
+        }
+    } else {
+        let (a, b) = model.support_member_axis(support)?;
+        Some([a, b])
+    }
+}
+
+fn displayed_anchor_point(
+    model: &sepika_core::Model,
+    anchor: sepika_core::model::SecondaryMemberAnchor,
+    actual: bool,
+) -> Option<[f64; 3]> {
+    let [a, b] = displayed_support_axis(model, anchor.support, actual)?;
+    Some(std::array::from_fn(|i| {
+        a[i] + (b[i] - a[i]) * anchor.position
+    }))
+}
+
 mod viewcube;
 use sepika_core::dof::{Dof, Dof6Mask};
 
@@ -791,6 +877,7 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
             &proj,
             show_secondary,
             filter,
+            mode == ViewMode::Shape,
         );
     }
 
@@ -902,7 +989,13 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
                 }
             }
 
-            painter.line_segment([pts[n0], pts[n1]], line_stroke);
+            if mode == ViewMode::Shape {
+                if let Some(ends) = primary_shape_ends(&app.core.model, elem) {
+                    painter.line_segment(ends.map(|p| proj.project(p)), line_stroke);
+                }
+            } else {
+                painter.line_segment([pts[n0], pts[n1]], line_stroke);
+            }
         }
 
         if show_secondary {
@@ -912,6 +1005,14 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
                 egui::Stroke::new(1.5_f32, theme::SECONDARY_AMBER)
             };
             for sm in app.core.model.beams().chain(app.core.model.posts()) {
+                if mode == ViewMode::Shape {
+                    if secondary_shape_visible(&app.core.model, sm, filter) {
+                        if let Some(ends) = secondary_shape_ends(&app.core.model, sm) {
+                            painter.line_segment(ends.map(|p| proj.project(p)), secondary_stroke);
+                        }
+                    }
+                    continue;
+                }
                 let Some([n0, n1]) = secondary_end_node_indices(&app.core.model, sm) else {
                     continue;
                 };
@@ -983,8 +1084,13 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         if cube_hover.is_none() {
             if let Some(hover_pos) = response.hover_pos() {
                 const HOVER_PICK_THRESHOLD: f32 = 8.0;
-                if let Some((id, d)) = pick_nearest_member(&display_model, &pts, hover_pos, filter)
-                {
+                if let Some((id, d)) = pick_nearest_member(
+                    &display_model,
+                    &pts,
+                    hover_pos,
+                    filter,
+                    (mode == ViewMode::Shape).then_some(&proj),
+                ) {
                     if d <= HOVER_PICK_THRESHOLD {
                         modeling::show_modeling_tooltip(ui, app, &display_model, id);
                     }
@@ -1003,9 +1109,13 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
                     if let Some(node) = app.core.model.nodes.get(idx) {
                         check_ratio::show_node_check_tooltip(ui, app, node.id);
                     }
-                } else if let Some((id, d)) =
-                    pick_nearest_member(&display_model, &pts, hover_pos, filter)
-                {
+                } else if let Some((id, d)) = pick_nearest_member(
+                    &display_model,
+                    &pts,
+                    hover_pos,
+                    filter,
+                    (mode == ViewMode::Shape).then_some(&proj),
+                ) {
                     if d <= HOVER_PICK_THRESHOLD {
                         check_ratio::show_check_tooltip(ui, app, id);
                     }
@@ -1018,8 +1128,13 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
         if cube_hover.is_none() {
             if let Some(hover_pos) = response.hover_pos() {
                 const HOVER_PICK_THRESHOLD: f32 = 8.0;
-                if let Some((id, d)) = pick_nearest_member(&display_model, &pts, hover_pos, filter)
-                {
+                if let Some((id, d)) = pick_nearest_member(
+                    &display_model,
+                    &pts,
+                    hover_pos,
+                    filter,
+                    (mode == ViewMode::Shape).then_some(&proj),
+                ) {
                     if d <= HOVER_PICK_THRESHOLD {
                         hinge::show_hinge_tooltip(ui, app, id);
                     }
@@ -1088,7 +1203,13 @@ pub fn viewer_panel(ui: &mut egui::Ui, app: &mut App) {
                 let n0 = elem.nodes[0].index();
                 let n1 = elem.nodes[1].index();
                 if n0 < pts.len() && n1 < pts.len() {
-                    painter.line_segment([pts[n0], pts[n1]], stroke);
+                    if mode == ViewMode::Shape {
+                        if let Some(ends) = primary_shape_ends(&app.core.model, elem) {
+                            painter.line_segment(ends.map(|p| proj.project(p)), stroke);
+                        }
+                    } else {
+                        painter.line_segment([pts[n0], pts[n1]], stroke);
+                    }
                 }
             }
         }
@@ -1416,6 +1537,119 @@ mod frame_filter_tests {
         let dir = [1.0, 0.0, 0.0];
         let out = scene::in_plane_offset_dir(dir, p_i, p_j, [0.0, 0.0, 1.0]);
         assert_eq!(out, dir);
+    }
+}
+
+#[cfg(test)]
+mod beam_placement_tests {
+    use super::*;
+    use sepika_core::ids::{ElemId, SecondaryMemberId, SectionId};
+    use sepika_core::model::{
+        SecondaryMember, SecondaryMemberAnchor, SecondaryMemberEnds, SecondaryMemberKind,
+        SupportMemberId,
+    };
+
+    #[test]
+    fn actual_shape_pick_and_nonnodal_secondary_share_placement() {
+        let mut model = crate::sample::portal_frame();
+        model.elements[2].vertical_eccentricity = Some(500.0);
+        let actual = primary_shape_ends(&model, &model.elements[2]).unwrap();
+        assert_eq!(actual, [[0.0, 0.0, 4000.0], [6000.0, 0.0, 4000.0]]);
+        let cam = CameraState::default();
+        let projector = Projector::new([3000.0, 0.0, 3500.0], &cam, 0.1, [400.0, 300.0]);
+        let pts = model
+            .nodes
+            .iter()
+            .map(|n| projector.project(n.coord))
+            .collect::<Vec<_>>();
+        let midpoint = projector.project([3000.0, 0.0, 4000.0]);
+        let picked = pick::pick_nearest_member(
+            &model,
+            &pts,
+            midpoint,
+            FrameFilter::default(),
+            Some(&projector),
+        )
+        .unwrap();
+        assert_eq!(picked.0, ElemId(2));
+        assert!(picked.1 < 1e-4);
+        assert!(
+            pick::pick_nearest_member(&model, &pts, midpoint, FrameFilter::default(), None)
+                .unwrap()
+                .1
+                > 10.0
+        );
+        let sm = SecondaryMember {
+            id: SecondaryMemberId(0),
+            kind: SecondaryMemberKind::Beam,
+            ends: SecondaryMemberEnds::Supported([0.25, 0.75].map(|position| {
+                SecondaryMemberAnchor {
+                    support: SupportMemberId::Primary(ElemId(2)),
+                    position,
+                }
+            })),
+            section: Some(SectionId(1)),
+            name: "B1".into(),
+            gravity_end_shares: None,
+            vertical_eccentricity: Some(-100.0),
+        };
+        assert!(secondary_end_node_indices(&model, &sm).is_none());
+        model.unassigned_beams.push(sm.clone());
+        assert_eq!(
+            secondary_shape_ends(&model, &sm).unwrap(),
+            [[1500.0, 0.0, 3400.0], [4500.0, 0.0, 3400.0]]
+        );
+        for (support, actual_point, expected_n) in [
+            (
+                SupportMemberId::Primary(ElemId(2)),
+                [3000.0, 0.0, 4000.0],
+                [3000.0, 0.0, 3500.0],
+            ),
+            (
+                SupportMemberId::Secondary(SecondaryMemberId(0)),
+                [3000.0, 0.0, 3400.0],
+                [3000.0, 0.0, 3500.0],
+            ),
+        ] {
+            let picked = pick::pick_support_anchor(
+                &model,
+                &projector,
+                projector.project(actual_point),
+                SecondaryMemberKind::Beam,
+                12.0,
+                true,
+            )
+            .unwrap();
+            assert_eq!(picked.support, support);
+            assert!((picked.position - 0.5).abs() < 1e-6);
+            let saved_n = model.anchor_point(picked).unwrap();
+            assert!(sepika_core::geom::vec3::dist(saved_n, expected_n) < 1e-3);
+            let marker = displayed_anchor_point(&model, picked, true).unwrap();
+            assert!(sepika_core::geom::vec3::dist(marker, actual_point) < 1e-3);
+            assert_eq!(
+                displayed_anchor_point(&model, picked, false).unwrap(),
+                saved_n
+            );
+        }
+        let analytical = pick::pick_support_anchor(
+            &model,
+            &projector,
+            projector.project([3000.0, 0.0, 3500.0]),
+            SecondaryMemberKind::Beam,
+            12.0,
+            false,
+        )
+        .unwrap();
+        assert_eq!(analytical.support, SupportMemberId::Primary(ElemId(2)));
+        assert!(pick::pick_support_anchor(
+            &model,
+            &projector,
+            projector.project([3000.0, 0.0, 4000.0]),
+            SecondaryMemberKind::Beam,
+            12.0,
+            false
+        )
+        .is_none());
     }
 }
 

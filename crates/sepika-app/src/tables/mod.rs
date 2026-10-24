@@ -1,4 +1,5 @@
 pub mod axes;
+mod beam_placement;
 #[cfg(test)]
 mod direct_input_tests;
 mod finite_input;
