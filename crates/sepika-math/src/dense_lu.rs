@@ -56,7 +56,7 @@ impl CheckedDenseLu {
         })
     }
 
-    /// 行優先の `n×nrhs` 右辺を解き、同じ配置で返す。後退誤差も検査する。
+    /// 行優先の `n×nrhs` 右辺を解き、同じ配置で返す。各右辺の無限大ノルム後退誤差も検査する。
     pub fn solve(&self, rhs: &[f64], nrhs: usize) -> Result<Vec<f64>, DenseSolveError> {
         let n = self.n;
         if n.checked_mul(nrhs) != Some(rhs.len()) {
@@ -80,26 +80,36 @@ impl CheckedDenseLu {
                 out[i * nrhs + j] = value;
             }
         }
-        for i in 0..n {
-            for j in 0..nrhs {
-                let mut residual = -rhs[i * nrhs + j];
-                let mut scale = rhs[i * nrhs + j].abs();
-                for k in 0..n {
-                    let product = self.matrix[i * n + k] * out[k * nrhs + j];
-                    residual += product;
-                    scale += product.abs();
-                }
-                if !residual.is_finite() || !scale.is_finite() {
+        let matrix_norm = self
+            .matrix
+            .chunks(n)
+            .map(|row| row.iter().map(|v| v.abs()).sum::<f64>())
+            .fold(0.0, f64::max);
+        for j in 0..nrhs {
+            let solution_norm = (0..n).map(|i| out[i * nrhs + j].abs()).fold(0.0, f64::max);
+            let rhs_norm = (0..n).map(|i| rhs[i * nrhs + j].abs()).fold(0.0, f64::max);
+            let mut residual_norm = 0.0_f64;
+            for i in 0..n {
+                let residual = (0..n)
+                    .map(|k| self.matrix[i * n + k] * out[k * nrhs + j])
+                    .sum::<f64>()
+                    - rhs[i * nrhs + j];
+                if !residual.is_finite() {
                     return Err(DenseSolveError::NonFinite);
                 }
-                let error = if scale == 0.0 {
-                    residual.abs()
-                } else {
-                    residual.abs() / scale
-                };
-                if error > 256.0 * n as f64 * f64::EPSILON {
-                    return Err(DenseSolveError::Residual { error });
-                }
+                residual_norm = residual_norm.max(residual.abs());
+            }
+            let scale = matrix_norm * solution_norm + rhs_norm;
+            if !scale.is_finite() {
+                return Err(DenseSolveError::NonFinite);
+            }
+            let error = if scale == 0.0 {
+                residual_norm
+            } else {
+                residual_norm / scale
+            };
+            if error > 256.0 * n as f64 * f64::EPSILON {
+                return Err(DenseSolveError::Residual { error });
             }
         }
         Ok(out)
@@ -118,6 +128,26 @@ mod tests {
             assert!((x - y).abs() < 1e-12);
         }
         assert_eq!(lu.solve(&[0.0, 3.0], 1).unwrap(), vec![1.0, 0.0]);
+    }
+
+    #[test]
+    fn near_diagonal_coupling_roundoff_passes_normwise_backward_error() {
+        let matrix = [
+            0.9999999999999998,
+            -4.738223166455929e-17,
+            -2.7193640200162708e-17,
+            -4.738223166455929e-17,
+            0.9999999999999999,
+            0.0,
+            -2.719364020016271e-17,
+            0.0,
+            1.0,
+        ];
+        let lu = CheckedDenseLu::factorize(&matrix, 3).unwrap();
+        let actual = lu.solve(&matrix, 3).unwrap();
+        for (i, value) in actual.iter().enumerate() {
+            assert!((value - f64::from(i / 3 == i % 3)).abs() < 1e-14);
+        }
     }
 
     #[test]

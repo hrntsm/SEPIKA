@@ -416,7 +416,7 @@ fn build_shape_fibers(
 
     let rebar_fy = yield_.rebar.or(yield_.main);
     let steel_fy = yield_.steel;
-    let target = (max_dimension(shape) / 16.0).max(1.0);
+    let target = max_dimension(shape) / 16.0;
     let ring = AnnulusRes {
         n_theta: 24,
         n_r_thin: 2,

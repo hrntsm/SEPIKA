@@ -34,6 +34,26 @@ impl FiberBeam {
         )
     }
 
+    fn initial_section_lu(d: &[[f64; 3]; 3]) -> Result<([f64; 3], CheckedDenseLu), String> {
+        let scales: [f64; 3] = std::array::from_fn(|a| d[a][a].abs().sqrt());
+        if scales.iter().any(|s| !s.is_finite() || *s == 0.0) {
+            return Err("断面剛性の尺度が非正または非有限です".into());
+        }
+        let initial: Vec<f64> = (0..9)
+            .map(|i| d[i / 3][i % 3] / scales[i / 3] / scales[i % 3])
+            .collect();
+        let lu = CheckedDenseLu::factorize(&initial, 3).map_err(|error| error.to_string())?;
+        Ok((scales, lu))
+    }
+
+    pub(crate) fn validate_initial_section_stiffness(&self) -> Result<(), String> {
+        for (end, point) in self.gauss_points.iter().enumerate() {
+            Self::initial_section_lu(&point.cached_stiff)
+                .map_err(|reason| format!("内側端{end}の初期断面剛性: {reason}"))?;
+        }
+        Ok(())
+    }
+
     fn update_hinge_section_trial(&mut self, end: usize, eta: &[f64]) {
         let gp = &mut self.gauss_points[end];
         for (i, fiber) in gp.section.fibers.iter().enumerate() {
@@ -72,24 +92,27 @@ impl FiberBeam {
         };
         for end in 0..2 {
             let gp = &self.gauss_points[end];
-            let initial: Vec<f64> = h.d0[end].iter().flatten().copied().collect();
-            let lu = CheckedDenseLu::factorize(&initial, 3)
+            let (scales, lu) = Self::initial_section_lu(&h.d0[end])
                 .map_err(|error| format!("内側端{end}の初期断面剛性: {error}"))?;
+            let force: [f64; 3] = std::array::from_fn(|a| gp.cached_force[a] / scales[a]);
             let elastic = lu
-                .solve(&gp.cached_force, 1)
+                .solve(&force, 1)
                 .map_err(|error| format!("内側端{end}の弾性変形控除: {error}"))?;
-            let tangent: Vec<f64> = gp.cached_stiff.iter().flatten().copied().collect();
+            let tangent: Vec<f64> = (0..9)
+                .map(|i| gp.cached_stiff[i / 3][i % 3] / scales[i / 3] / scales[i % 3])
+                .collect();
             let elastic_derivative = lu
                 .solve(&tangent, 3)
                 .map_err(|error| format!("内側端{end}の断面接線: {error}"))?;
             for a in 0..3 {
                 let row = end * 3 + a;
                 result.force[row] = gp.cached_force[a];
-                result.plastic[row] = h.lp * (eta[row] - elastic[a]);
+                result.plastic[row] = h.lp * (eta[row] - elastic[a] / scales[a]);
                 for b in 0..3 {
                     let col = end * 3 + b;
-                    result.plastic_derivative[row * 6 + col] =
-                        h.lp * (f64::from(a == b) - elastic_derivative[a * 3 + b]);
+                    result.plastic_derivative[row * 6 + col] = h.lp
+                        * (f64::from(a == b)
+                            - elastic_derivative[a * 3 + b] * scales[b] / scales[a]);
                     result.jacobian[row * 6 + col] = gp.cached_stiff[a][b];
                 }
             }
@@ -131,17 +154,13 @@ impl FiberBeam {
             if !section_scale.is_finite() || !demand_scale.is_finite() {
                 return Err("内側断面釣合いの残差尺度が非有限です".into());
             }
-            let scale = 1.0
-                + result.force[a]
-                    .abs()
-                    .max(demand.abs())
-                    .max(section_scale)
-                    .max(demand_scale)
-                    .max(qf[HINGE_SLOTS[a]].abs());
+            let scale = result.force[a]
+                .abs()
+                .max(demand.abs())
+                .max(section_scale)
+                .max(demand_scale)
+                .max(qf[HINGE_SLOTS[a]].abs());
             result.scales[a] = scale;
-            result.normalized_residual = result
-                .normalized_residual
-                .max(result.residual[a].abs() / scale);
             for b in 0..6 {
                 for c in 0..6 {
                     result.jacobian[a * 6 + b] += HINGE_SIGN[a]
@@ -150,6 +169,21 @@ impl FiberBeam {
                         * result.plastic_derivative[c * 6 + b];
                 }
             }
+        }
+        let stiffness_scales = self.hinge_scales();
+        let force_scale = (0..6)
+            .map(|a| result.scales[a] / stiffness_scales[a])
+            .fold(0.0, f64::max);
+        for (a, stiffness_scale) in stiffness_scales.into_iter().enumerate() {
+            let scale = if force_scale == 0.0 {
+                1.0
+            } else {
+                stiffness_scale * force_scale
+            };
+            result.scales[a] = scale;
+            result.normalized_residual = result
+                .normalized_residual
+                .max(result.residual[a].abs() / scale);
         }
         if result
             .force

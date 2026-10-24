@@ -9,13 +9,17 @@ pub(super) fn bilinear_member() -> FiberBeam {
 }
 
 fn bilinear_member_at(y_offset: f64, z_offset: f64) -> FiberBeam {
+    similar_bilinear_member(1.0, y_offset, z_offset)
+}
+
+fn similar_bilinear_member(scale: f64, y_offset: f64, z_offset: f64) -> FiberBeam {
     let sections = std::array::from_fn(|_| {
         let fibers = [(-10.0, -20.0), (10.0, -20.0), (-10.0, 20.0), (10.0, 20.0)]
             .into_iter()
             .map(|(y, z)| Fiber {
-                y: y + y_offset,
-                z: z + z_offset,
-                area: 250.0,
+                y: (y + y_offset) * scale,
+                z: (z + z_offset) * scale,
+                area: 250.0 * scale.powi(2),
                 material: 2,
             })
             .collect();
@@ -26,19 +30,23 @@ fn bilinear_member_at(y_offset: f64, z_offset: f64) -> FiberBeam {
     });
     FiberBeam::from_raw_parts(
         [NodeId(0), NodeId(1)],
-        3000.0,
-        crate::transform::LocalFrame::from_nodes([0.0; 3], [3000.0, 0.0, 0.0], [0.0, 1.0, 0.0])
-            .unwrap(),
+        3000.0 * scale,
+        crate::transform::LocalFrame::from_nodes(
+            [0.0; 3],
+            [3000.0 * scale, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        )
+        .unwrap(),
         SectionMassProperties::default(),
         200000.0,
         0.0,
-        1000.0,
-        400000.0,
-        100000.0,
+        1000.0 * scale.powi(2),
+        400000.0 * scale.powi(4),
+        100000.0 * scale.powi(4),
         0.0,
         0.0,
         0.0,
-        300.0,
+        300.0 * scale,
         sections,
     )
 }
@@ -759,4 +767,111 @@ fn distributed_zero_release_residual_with_singular_tangent_is_error_and_restores
     previous[6] = 0.1;
     axial(&mut member, 0.2, &mut previous, false, &ctx);
     assert_eq!(member.serialize_checkpoint(), trial);
+}
+
+#[test]
+fn similar_sections_retain_independent_coupled_elastic_solution_and_failed_trial_state() {
+    let model = Model::default();
+    let ctx = Ctx { model: &model };
+    for scale in [1.0, 1e-4, 1e-8, 1e4] {
+        let mut member = similar_bilinear_member(scale, 3.0, 7.0);
+        let mut previous = [0.0; 12];
+        assert_relative_eq!(
+            axial(&mut member, 1.5 * scale, &mut previous, true, &ctx),
+            100000.0 * scale.powi(2),
+            max_relative = 1e-9
+        );
+        let h = member.hinge.as_ref().unwrap();
+        for end in 0..2 {
+            for (a, expected) in [0.00060625, -8.75e-6 / scale, 15e-6 / scale]
+                .into_iter()
+                .enumerate()
+            {
+                assert_relative_eq!(h.trial_eta[end * 3 + a], expected, max_relative = 1e-9);
+            }
+        }
+        assert_relative_eq!(
+            member.tangent_stiffness(&ctx).get(6, 6),
+            200000.0 * 1000.0 / 3000.0 * scale,
+            max_relative = 1e-9
+        );
+        let before = member.serialize_checkpoint();
+        for invalid in [0.0, f64::NAN] {
+            member.hinge.as_mut().unwrap().d0[0] = [[invalid; 3]; 3];
+            let error = member
+                .update_state(
+                    &LocalVec {
+                        data: smallvec::smallvec![0.0; 12],
+                    },
+                    false,
+                    &ctx,
+                )
+                .unwrap_err();
+            assert!(error.to_string().contains("初期断面剛性"), "{error}");
+            assert!(error.to_string().contains("NodeId(0)"), "{error}");
+            assert_eq!(member.serialize_checkpoint(), before);
+        }
+    }
+}
+
+#[test]
+fn similar_h_shape_fibers_match_independent_midpoint_area_and_biaxial_inertia() {
+    use sepika_core::section_shape::SectionShape;
+    for scale in [1.0_f64, 1e-4, 1e-8, 1e4] {
+        let mut model = super::tests::build_test_model(Some(80000.0));
+        model.nodes[1].coord[0] *= scale;
+        let section = &mut model.sections[0];
+        section.shape = Some(SectionShape::SteelH {
+            height: 256.0 * scale,
+            width: 128.0 * scale,
+            web_thick: 16.0 * scale,
+            flange_thick: 16.0 * scale,
+            root_r: Some(0.0),
+        });
+        section.width = 128.0 * scale;
+        section.depth = 256.0 * scale;
+        section.area = 7680.0 * scale.powi(2);
+        section.iy *= scale.powi(4);
+        section.iz *= scale.powi(4);
+        let beam = FiberBeam::try_new(
+            &model.elements[0],
+            &model,
+            StrengthBasis::Nominal,
+            AnalysisKind::TimeHistory,
+        )
+        .unwrap();
+        for point in &beam.gauss_points {
+            // 各矩形の中点則：I_disc = I_exact − Σ A_cell·寸法_cell²/12。
+            let expected = [7680.0, 5505024.0, 73891840.0];
+            for (a, reference) in expected.into_iter().enumerate() {
+                let power = if a == 0 { 2 } else { 4 };
+                assert_relative_eq!(
+                    point.cached_stiff[a][a] / (205000.0 * scale.powi(power)),
+                    reference,
+                    max_relative = 1e-12
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn similar_members_biaxial_elastic_moments_match_independent_pure_bending_solution() {
+    let model = Model::default();
+    let ctx = Ctx { model: &model };
+    for scale in [1.0_f64, 1e-4, 1e-8, 1e4] {
+        let mut member = similar_bilinear_member(scale, 0.0, 0.0);
+        let mut u = [0.0; 12];
+        u[4] = 1e-5;
+        u[10] = -1e-5;
+        u[5] = 2e-5;
+        u[11] = -2e-5;
+        set_displacement(&mut member, u, &mut [0.0; 12], false, &ctx);
+        let force = member.internal_force(&ctx);
+        for (slot, inertia, rotation) in [(4, 400000.0, 1e-5), (5, 100000.0, 2e-5)] {
+            let expected = 2.0 * 200000.0 * inertia / 3000.0 * rotation * scale.powi(3);
+            assert_relative_eq!(force.data[slot], expected, max_relative = 1e-9);
+            assert_relative_eq!(force.data[slot + 6], -expected, max_relative = 1e-9);
+        }
+    }
 }
