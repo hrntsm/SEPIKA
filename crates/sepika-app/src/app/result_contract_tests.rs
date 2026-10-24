@@ -63,6 +63,36 @@ fn 旧解析契約39の成果は読込時に失効し再計算で現行版にな
     std::fs::remove_file(path).unwrap();
 }
 
+#[test]
+fn panel_761_旧解析契約40の成果は読込時に失効し再計算で現行版になる() {
+    let app = panel_757_calculated();
+    let (mut loaded, path) = restore(
+        &app,
+        Some(40),
+        Some(DESIGN_CONTRACT_VERSION),
+        "761-analysis40",
+    );
+    let stale = loaded.core.scoped.results.as_ref().unwrap();
+    assert!(!stale.has_analysis_results());
+    assert!(!stale.has_design_results());
+    assert!(loaded.core.scoped.staleness.results_stale);
+    assert!(loaded.core.scoped.last_static.is_none());
+    loaded.run_linear_static(LoadCaseId(0));
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    let fresh = loaded.core.scoped.results.as_ref().unwrap();
+    assert!(fresh.has_analysis_results());
+    assert_eq!(
+        fresh.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    assert_eq!(fresh.design_contract_version, Some(DESIGN_CONTRACT_VERSION));
+    std::fs::remove_file(path).unwrap();
+}
+
 struct ContractFixture<'a>(&'a SavedResults);
 impl serde::Serialize for ContractFixture<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

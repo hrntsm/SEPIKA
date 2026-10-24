@@ -35,7 +35,7 @@ struct ColumnAxial {
     ea_over_l: f64,
     /// 全体系での柱の単位軸ベクトル。
     axis: [f64; 3],
-    /// 各方向の軸力比の分母 [N]。既存の 1 N 下限を適用する。
+    /// 各方向の基準軸耐力 F・A [N]。
     n_ref: [f64; 2],
     committed: [f64; 12],
     trial: [f64; 12],
@@ -126,8 +126,7 @@ fn resolve(model: &Model, node: NodeId) -> Result<Option<ResolvedPanel>, String>
 
     let fy = joint.panels.map(|panel| panel.fy);
     let g = joint.g;
-    let column = column_axial(model, col_elem, mat, sec, fy)
-        .ok_or_else(|| invalid("軸力追従に必要な柱節点・材軸・軸剛性・断面積を解決できません"))?;
+    let column = column_axial(model, col_elem, mat, sec, fy).map_err(|reason| invalid(&reason))?;
     Ok(Some(ResolvedPanel {
         geom: joint.panels.map(|panel| panel.geometry),
         db: joint.db,
@@ -139,38 +138,66 @@ fn resolve(model: &Model, node: NodeId) -> Result<Option<ResolvedPanel>, String>
     }))
 }
 
-/// 軸力比 `n` の追従に使う柱の情報を組み立てる（材軸が退化する柱は `None`）。
+/// 正の有限値の柱諸元から軸力追従情報を解決し、算定不能の理由を返す。
 fn column_axial(
     model: &Model,
     col: &ElementData,
     mat: &sepika_core::model::Material,
     sec: &sepika_core::model::Section,
     fy: [f64; 2],
-) -> Option<ColumnAxial> {
+) -> Result<ColumnAxial, String> {
     if col.nodes.len() < 2 {
-        return None;
+        return Err("柱の両端節点が必要です".into());
     }
-    let p0 = model.nodes.get(col.nodes[0].index())?.coord;
-    let p1 = model.nodes.get(col.nodes[1].index())?.coord;
-    let d = sepika_core::geom::vec3::sub(p1, p0);
-    let length = sepika_core::geom::vec3::norm(d);
-    let ea_over_l = mat.young * sec.area / length.max(1.0);
-    let n_ref = fy.map(|strength| strength * sec.area);
-    if !length.is_finite()
-        || length < 1e-12
-        || !sec.area.is_finite()
-        || sec.area <= 0.0
-        || !ea_over_l.is_finite()
-        || ea_over_l <= 0.0
-        || n_ref.iter().any(|reference| !reference.is_finite())
-    {
-        return None;
+    let coordinate = |node: NodeId| {
+        model
+            .nodes
+            .get(node.index())
+            .map(|node| node.coord)
+            .ok_or_else(|| format!("柱節点 ID {} を参照できません", node.0))
+    };
+    let d = sepika_core::geom::vec3::sub(coordinate(col.nodes[1])?, coordinate(col.nodes[0])?);
+    let length_mm = sepika_core::geom::vec3::norm(d);
+    for (name, value) in [
+        ("柱長 L [mm]", length_mm),
+        ("断面積 A [mm²]", sec.area),
+        ("ヤング係数 E [N/mm²]", mat.young),
+    ] {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(format!("{name}={value} は正の有限値である必要があります"));
+        }
     }
-    Some(ColumnAxial {
+    let ea_over_l = mat.young * sec.area / length_mm;
+    if !ea_over_l.is_finite() || ea_over_l <= 0.0 {
+        return Err(format!(
+            "軸剛性 EA/L={ea_over_l} N/mm は正の有限値である必要があります"
+        ));
+    }
+    let mut n_ref = [0.0; 2];
+    for (i, direction) in ["強軸", "弱軸"].into_iter().enumerate() {
+        if !fy[i].is_finite() || fy[i] <= 0.0 {
+            return Err(format!(
+                "{direction}の基準強度 F={} N/mm² は正の有限値である必要があります",
+                fy[i]
+            ));
+        }
+        n_ref[i] = fy[i] * sec.area;
+        if !n_ref[i].is_finite() || n_ref[i] <= 0.0 {
+            return Err(format!(
+                "{direction}の基準軸耐力 F・A={} N は正の有限値である必要があります",
+                n_ref[i]
+            ));
+        }
+    }
+    let axis = d.map(|component| component / length_mm);
+    if axis.iter().any(|value| !value.is_finite()) {
+        return Err("柱の単位軸ベクトルが非有限です".into());
+    }
+    Ok(ColumnAxial {
         nodes: [col.nodes[0], col.nodes[1]],
         ea_over_l,
-        axis: [d[0] / length, d[1] / length, d[2] / length],
-        n_ref: n_ref.map(|reference| reference.max(1.0)),
+        axis,
+        n_ref,
         committed: [0.0; 12],
         trial: [0.0; 12],
     })
@@ -1855,6 +1882,205 @@ mod tests {
             let mut increment = panel_724_increment(0.0, 0.0);
             increment.data[10] = displacement;
             assert!(panel.update_state(&increment, false, &ctx).is_err());
+            assert_eq!(panel.serialize_checkpoint(), before);
+        }
+    }
+
+    fn panel_761_model(length_mm: f64, area_mm2: f64) -> (Model, ElementData) {
+        let (mut model, data) = cross_joint_model();
+        for node in &mut model.nodes {
+            node.coord = [
+                node.coord[0] * length_mm / 3000.0,
+                0.0,
+                (node.coord[2] - 3000.0) * length_mm / 3000.0,
+            ];
+        }
+        let scale = (area_mm2 / 21_870.0).sqrt();
+        for section in &mut model.sections {
+            if let Some(SectionShape::SteelH {
+                height,
+                width,
+                web_thick,
+                flange_thick,
+                ..
+            }) = &mut section.shape
+            {
+                *height *= scale;
+                *width *= scale;
+                *web_thick *= scale;
+                *flange_thick *= scale;
+            }
+            section.depth *= scale;
+            section.width *= scale;
+            section.area *= scale * scale;
+            section.as_y *= scale * scale;
+            section.as_z *= scale * scale;
+            section.iy *= scale.powi(4);
+            section.iz *= scale.powi(4);
+            section.j *= scale.powi(4);
+        }
+        model.sections[1].area = area_mm2;
+        model.materials[0].name = "direct".into();
+        model.materials[0].young = 200_000.0;
+        model.materials[0].fy = Some(200.0);
+        (model, data)
+    }
+
+    #[test]
+    fn panel_761_actual_dimensions_control_public_axial_ratio() {
+        let mut observations = vec![];
+        for (length, area, shortening) in [
+            (0.5, 0.001, 0.00025),
+            (0.5, 100.0, 0.00025),
+            (3000.0, 0.001, 1.5),
+            (3000.0, 100.0, 1.5),
+            (3000.0, 36_000.0, 1.5),
+        ] {
+            let (model, data) = panel_761_model(length, area);
+            let mut panel = PanelZone::new_nonlinear(&data, &model);
+            assert_eq!(panel.resolution_error, None);
+            let mut increment = LocalVec {
+                data: SmallVec::from_elem(0.0, 14),
+            };
+            increment.data[10] = -shortening;
+            panel
+                .update_state(&increment, true, &Ctx { model: &model })
+                .unwrap();
+            println!(
+                "L={length}, A={area}: n={:?}, reduction={:?}",
+                panel.axial_ratio(),
+                std::array::from_fn::<_, 2, _>(|i| panel.yield_moment()[i] / panel.pmy0[i])
+            );
+            observations.push((panel.axial_ratio(), panel.yield_moment()[0] / panel.pmy0[0]));
+        }
+        for (ratios, reduction) in observations {
+            assert!((ratios[0] - 0.5).abs() < 1e-12);
+            assert!((ratios[1] - 0.5).abs() < 1e-12);
+            assert!((reduction - 0.8660254037844386).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn panel_761_scaled_history_rejects_high_axial_force_and_restores() {
+        let (model, data) = panel_761_model(0.5, 0.001);
+        let ctx = Ctx { model: &model };
+        let mut panel = PanelZone::new_nonlinear(&data, &model);
+        let mut control = PanelZone::new_nonlinear(&data, &model);
+        let increment = |gamma: f64, shortening: f64| {
+            let mut du = LocalVec {
+                data: SmallVec::from_elem(0.0, 14),
+            };
+            du.data[0] = gamma;
+            du.data[10] = -shortening;
+            du
+        };
+        let initial = increment(0.01, 0.00025);
+        panel.update_state(&initial, true, &ctx).unwrap();
+        control.update_state(&initial, true, &ctx).unwrap();
+        let committed = panel.serialize_checkpoint();
+        panel
+            .update_state(&increment(-0.003, 0.00005), false, &ctx)
+            .unwrap();
+        let checkpoint = panel.serialize_checkpoint();
+        let snapshot = panel.snapshot_state();
+        for commit in [false, true] {
+            let reason = panel
+                .update_state(&increment(0.001, 0.0003), commit, &ctx)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                reason.contains("接合部 ID 0") && reason.contains("軸耐力到達"),
+                "{reason}"
+            );
+            assert_eq!(panel.serialize_checkpoint(), checkpoint);
+        }
+        for use_checkpoint in [false, true] {
+            panel
+                .update_state(&increment(-0.01, -0.0001), true, &ctx)
+                .unwrap();
+            if use_checkpoint {
+                panel.deserialize_checkpoint(&checkpoint).unwrap();
+            } else {
+                panel.restore_state(snapshot.as_ref());
+            }
+            assert_eq!(panel.serialize_checkpoint(), checkpoint);
+            panel.revert_state();
+            assert_eq!(panel.serialize_checkpoint(), committed);
+            let retry = increment(-0.003, 0.00005);
+            panel.update_state(&retry, false, &ctx).unwrap();
+            control.update_state(&retry, false, &ctx).unwrap();
+            assert_panel_751_same_state(&panel, &control, &ctx);
+            control.revert_state();
+        }
+    }
+
+    #[test]
+    fn panel_761_invalid_axial_inputs_and_arithmetic_have_reasons() {
+        for (area, young, strength, expected) in [
+            (0.0, 200000.0, 200.0, "断面積"),
+            (-1.0, 200000.0, 200.0, "断面積"),
+            (f64::NAN, 200000.0, 200.0, "断面積"),
+            (1.0, 0.0, 200.0, "ヤング係数"),
+            (1.0, f64::INFINITY, 200.0, "ヤング係数"),
+            (1.0, 200000.0, -1.0, "強軸の基準強度"),
+            (1.0, 200000.0, f64::NAN, "強軸の基準強度"),
+            (1e304, 200000.0, 200.0, "軸剛性 EA/L"),
+            (1e-320, 1e-100, 200.0, "軸剛性 EA/L"),
+            (1e-200, 200000.0, 1e-200, "強軸の基準軸耐力"),
+            (1e200, 1.0, 1e200, "強軸の基準軸耐力"),
+        ] {
+            let (mut model, _) = panel_761_model(0.5, 0.001);
+            model.sections[1].area = area;
+            model.materials[0].young = young;
+            let error = column_axial(
+                &model,
+                &model.elements[2],
+                &model.materials[0],
+                &model.sections[1],
+                [strength; 2],
+            )
+            .unwrap_err();
+            assert!(error.contains(expected), "{error}");
+        }
+        let (mut model, data) = panel_761_model(0.5, 0.001);
+        model.sections[1].area = f64::MIN_POSITIVE;
+        for mut panel in [
+            PanelZone::new(&data, &model),
+            PanelZone::new_nonlinear(&data, &model),
+        ] {
+            assert_eq!(panel.resolution_error, None);
+            panel
+                .update_state(
+                    &LocalVec {
+                        data: SmallVec::from_elem(0.0, panel.n_dof()),
+                    },
+                    false,
+                    &Ctx { model: &model },
+                )
+                .unwrap();
+        }
+        model.sections[1].area = 1e304;
+        for mut panel in [
+            PanelZone::new(&data, &model),
+            PanelZone::new_nonlinear(&data, &model),
+        ] {
+            let reason = panel.resolution_error.as_ref().unwrap();
+            assert!(
+                reason.contains("接合部 ID 0")
+                    && reason.contains("柱 ID 2")
+                    && reason.contains("軸剛性"),
+                "{reason}"
+            );
+            let before = panel.serialize_checkpoint();
+            assert!(panel
+                .update_state(
+                    &LocalVec {
+                        data: SmallVec::from_elem(0.0, panel.n_dof())
+                    },
+                    false,
+                    &Ctx { model: &model }
+                )
+                .is_err());
             assert_eq!(panel.serialize_checkpoint(), before);
         }
     }

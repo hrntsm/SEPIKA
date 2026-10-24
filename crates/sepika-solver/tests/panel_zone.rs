@@ -1280,15 +1280,53 @@ fn panel_753_public_nonlinear_time_history_propagates_axial_limit() {
     use sepika_solver::dynamic::timehistory::{
         nonlinear_time_history_analysis, GroundMotion, NewmarkCfg, NonlinearThCfg,
     };
-    for (n, accepted, moving) in [
-        (0.0, true, false),
-        (0.6, true, false),
-        (0.9999, true, false),
-        (1.0, false, false),
-        (1.1, false, false),
-        (0.6, false, true),
+    for (n, accepted, moving, scale) in [
+        (0.0, true, false, 1.0),
+        (0.6, true, false, 1.0),
+        (0.9999, true, false, 1.0),
+        (1.0, false, false, 1.0),
+        (1.1, false, false, 1.0),
+        (0.6, false, true, 1.0),
+        (0.5, true, false, 0.0001),
+        (1.0, false, false, 0.0001),
+        (1.1, false, false, 0.0001),
     ] {
         let mut model = l_frame(true);
+        if scale != 1.0 {
+            for node in &mut model.nodes {
+                node.coord = node.coord.map(|v| v * scale);
+            }
+            for section in &mut model.sections {
+                if let Some(SectionShape::SteelH {
+                    height,
+                    width,
+                    web_thick,
+                    flange_thick,
+                    ..
+                }) = &mut section.shape
+                {
+                    *height *= scale;
+                    *width *= scale;
+                    *web_thick *= scale;
+                    *flange_thick *= scale;
+                }
+                section.depth *= scale;
+                section.width *= scale;
+                section.area *= scale * scale;
+                section.as_y *= scale * scale;
+                section.as_z *= scale * scale;
+                section.iy *= scale.powi(4);
+                section.iz *= scale.powi(4);
+                section.j *= scale.powi(4);
+            }
+            for member in &mut model.elements {
+                member.force_regime = ForceRegime::UniaxialBendingShear;
+                member.rigid_zone.length_i *= scale;
+                member.rigid_zone.length_j *= scale;
+                member.rigid_zone.face_i = member.rigid_zone.face_i.map(|v| v * scale);
+                member.rigid_zone.face_j = member.rigid_zone.face_j.map(|v| v * scale);
+            }
+        }
         model.materials[0].fy = Some(235.0);
         model.materials[0].density = 7.85e-9;
         let dof = DofMap::build(&model);
@@ -1296,7 +1334,7 @@ fn panel_753_public_nonlinear_time_history_propagates_axial_limit() {
         assert_eq!(reducer.n_indep, dof.n_active());
         let mut displacement = vec![0.0; dof.n_active()];
         displacement[dof.active(Dof::Uz as usize).unwrap() as usize] =
-            -n * 235.0 * 3000.0 / 205000.0;
+            -n * 235.0 * 3000.0 * scale / 205000.0;
         let mut velocity = vec![0.0; dof.n_active()];
         if moving {
             velocity[dof.active(Dof::Uz as usize).unwrap() as usize] = -1_000_000.0;
@@ -1322,7 +1360,7 @@ fn panel_753_public_nonlinear_time_history_propagates_axial_limit() {
             },
         );
         println!(
-            "panel753 public dynamic: n={n}, moving={moving}, result={:?}",
+            "panel753 public dynamic: n={n}, moving={moving}, scale={scale}, result={:?}",
             result.as_ref().map(|_| "ok").map_err(|e| e.to_string())
         );
         assert_eq!(result.is_ok(), accepted);
@@ -1331,7 +1369,8 @@ fn panel_753_public_nonlinear_time_history_propagates_axial_limit() {
             assert!(response.nonlinear);
             assert_eq!(response.time, vec![0.0]);
             assert!(
-                (response.recording.unwrap().node_disp[0][0][2] + n * 235.0 * 3000.0 / 205000.0)
+                (response.recording.unwrap().node_disp[0][0][2]
+                    + n * 235.0 * 3000.0 * scale / 205000.0)
                     .abs()
                     < 1e-12
             );
