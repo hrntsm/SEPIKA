@@ -166,7 +166,10 @@ fn 節点グリッドの非平面貼付は旧版荷重を診断して未更新�
             undo: &mut app.core.scoped.undo,
             edited: false,
         };
-        adapter.apply_block(&[(1, if wall { 1 } else { 2 }, "1000".into())], 0);
+        let rejected = adapter
+            .apply_block(&[(1, if wall { 1 } else { 2 }, "1000".into())], 0)
+            .unwrap_err();
+        assert!(rejected.contains("未更新"));
         assert!(!adapter.edited);
         let reason = app.core.scoped.undo.last_error().unwrap();
         assert!(reason.contains("0.0025"));

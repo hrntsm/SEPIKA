@@ -4,8 +4,8 @@
 //! スプレッドシート様式のグリッドウィジェット。
 //! テーブルごとの差は [`GridAdapter`] に隔離し、本モジュールはテーブル固有の知識を持たない。
 
-use super::{parse_tsv, plan_paste, rect_to_tsv, tile_block};
-use super::{CellRef, GridAdapter, GridState, PastePlan, SelRect, MAX_PASTE_CELLS};
+use super::{checked_tile_block, parse_tsv, plan_paste, rect_to_tsv, validate_paste_rect};
+use super::{CellRef, GridAdapter, GridState, PastePlan, SelRect};
 use crate::theme;
 
 /// 失敗フラッシュの表示時間（モーションは控えめ・短く）
@@ -224,16 +224,21 @@ impl GridWidget {
         };
         let orig_rows = block.len();
         let orig_cols = block.iter().map(Vec::len).max().unwrap_or(0);
-        if orig_rows.saturating_mul(orig_cols) > MAX_PASTE_CELLS {
-            self.push_err(format!(
-                "貼り付けを全体拒否: ブロックが大きすぎます（{orig_rows}×{orig_cols} > 上限 {MAX_PASTE_CELLS} セル）"
-            ));
+        let (sel_rows, sel_cols) = (rect.r1 - rect.r0 + 1, rect.c1 - rect.c0 + 1);
+        let block = match checked_tile_block(&block, sel_rows, sel_cols) {
+            Ok(block) => block,
+            Err(reason) => {
+                self.push_err(format!("貼り付けを全体拒否: {reason}"));
+                self.start_flash(rect, now, theme::ERROR_RED);
+                return;
+            }
+        };
+        let tiled_cols = block.iter().map(Vec::len).max().unwrap_or(0);
+        if let Err(reason) = validate_paste_rect(adapter, anchor, block.len(), tiled_cols) {
+            self.push_err(format!("貼り付けを全体拒否: {reason}"));
             self.start_flash(rect, now, theme::ERROR_RED);
             return;
         }
-        let (sel_rows, sel_cols) = (rect.r1 - rect.r0 + 1, rect.c1 - rect.c0 + 1);
-        let block = tile_block(&block, sel_rows, sel_cols);
-        let tiled_cols = block.iter().map(Vec::len).max().unwrap_or(0);
         let tiled = block.len() != orig_rows || tiled_cols != orig_cols;
         let mismatch = !tiled
             && (sel_rows, sel_cols) != (orig_rows, orig_cols)
@@ -280,39 +285,29 @@ impl GridWidget {
         }
     }
 
-    /// ペースト計画の適用。行追加対応テーブルでははみ出し行を自動追加し、
-    /// 非対応テーブルでははみ出し分を確認なしで切り捨ててログに通知する。
-    /// 適用結果は 1 行でログに報告し、貼り付けブロックの矩形を
-    /// 選択状態にする
+    /// 矩形を再検証し、全セルを1つの編集として適用する。
     fn apply_plan(&mut self, adapter: &mut dyn GridAdapter, plan: PastePlan) {
-        let (applied, dropped, extra_rows);
-        if adapter.can_append_rows() {
-            applied = plan.set.len();
-            dropped = 0;
-            extra_rows = plan.extra_rows;
-            adapter.apply_block(&plan.set, plan.extra_rows);
-        } else {
-            let rows = adapter.rows();
-            let kept: Vec<_> = plan
-                .set
-                .iter()
-                .filter(|(r, _, _)| *r < rows)
-                .cloned()
-                .collect();
-            applied = kept.len();
-            dropped = plan.set.len() - kept.len();
-            extra_rows = 0;
-            adapter.apply_block(&kept, 0);
+        if let Err(reason) =
+            validate_paste_rect(adapter, plan.anchor, plan.block_rows, plan.block_cols)
+        {
+            self.push_err(format!("貼り付けを全体拒否: {reason}"));
+            return;
         }
+        let extra_rows = plan.extra_rows;
+        let applied = match adapter.apply_block(&plan.set, extra_rows) {
+            Ok(true) => plan.set.len(),
+            Ok(false) => 0,
+            Err(reason) => {
+                self.push_err(format!("貼り付けを全体拒否: {reason}"));
+                return;
+            }
+        };
         let mut msg = format!("貼り付け: {applied} セル適用");
         if plan.skipped_empty > 0 {
             msg += &format!("、空セル {} 個は既存値維持", plan.skipped_empty);
         }
         if extra_rows > 0 {
             msg += &format!("、{extra_rows} 行を追加");
-        }
-        if dropped > 0 {
-            msg += &format!("、はみ出し {dropped} セルを切り捨て");
         }
         self.push_log(msg);
         self.sync_rows(adapter);
@@ -980,8 +975,143 @@ impl GridWidget {
 mod tests {
     use super::*;
     use crate::app::node_grid::NodeGridAdapter;
+    use crate::grid::MAX_PASTE_CELLS;
     use sepika_core::model::Model;
     use sepika_edit::UndoStack;
+
+    struct Restricted<'a> {
+        node: NodeGridAdapter<'a>,
+        append: bool,
+        readonly: Option<CellRef>,
+    }
+
+    impl GridAdapter for Restricted<'_> {
+        fn rows(&self) -> usize {
+            self.node.rows()
+        }
+        fn cols(&self) -> usize {
+            self.node.cols()
+        }
+        fn cell_text(&self, r: usize, c: usize) -> String {
+            self.node.cell_text(r, c)
+        }
+        fn validate_target(&self, r: usize, c: usize) -> Result<(), String> {
+            if self.readonly == Some(CellRef { row: r, col: c }) {
+                return Err("読取専用".into());
+            }
+            self.node.validate_target(r, c)
+        }
+        fn validate_cell(&self, r: usize, c: usize, t: &str) -> Result<(), String> {
+            self.node.validate_cell(r, c, t)
+        }
+        fn apply_block(
+            &mut self,
+            cells: &[(usize, usize, String)],
+            append: usize,
+        ) -> Result<bool, String> {
+            self.node.apply_block(cells, append)
+        }
+        fn clear_cells(&mut self, cells: &[(usize, usize)]) -> usize {
+            self.node.clear_cells(cells)
+        }
+        fn can_append_rows(&self) -> bool {
+            self.append
+        }
+        fn can_delete_rows(&self) -> bool {
+            false
+        }
+        fn validate_row_deletion(&self, _r: usize) -> Result<(), String> {
+            Err("削除不可".into())
+        }
+        fn delete_rows(&mut self, _rows: &[usize]) {
+            panic!("削除不可")
+        }
+    }
+
+    #[test]
+    fn rejected_paste_rectangles_and_stale_plans_do_not_edit_or_touch_history() {
+        let mut model = Model::default();
+        let mut undo = UndoStack::new();
+        let mut node = NodeGridAdapter {
+            model: &mut model,
+            undo: &mut undo,
+            edited: false,
+        };
+        node.apply_block(&[(0, 0, "1".into())], 1).unwrap();
+        node.apply_block(&[(1, 0, "2".into())], 1).unwrap();
+        node.undo.undo(node.model);
+        node.edited = false;
+        let original = rmp_serde::to_vec_named(node.model).unwrap();
+        let revision = node.undo.revision();
+        let mut adapter = Restricted {
+            node,
+            append: false,
+            readonly: None,
+        };
+        let mut widget = GridWidget::new();
+        widget.grid = GridState::new(2, 3);
+        widget.grid.click(CellRef { row: 0, col: 0 }, false);
+        for text in ["4\n ", "4\n\t", "4\t\t\t", "4\tNaN", "4\n \n5"] {
+            widget.do_paste(&mut adapter, text, 0.0);
+            assert_eq!(
+                rmp_serde::to_vec_named(adapter.node.model).unwrap(),
+                original
+            );
+            assert_eq!(adapter.node.undo.revision(), revision);
+            assert!(!adapter.node.edited);
+        }
+        adapter.append = true;
+        adapter.readonly = Some(CellRef { row: 0, col: 1 });
+        widget.do_paste(&mut adapter, "4\t ", 0.0);
+        let plan = plan_paste(
+            &parse_tsv("4\t "),
+            CellRef { row: 0, col: 0 },
+            1,
+            3,
+            |_, _, _| Ok(()),
+        )
+        .unwrap();
+        widget.apply_plan(&mut adapter, plan);
+        adapter.readonly = None;
+        let plan = plan_paste(
+            &parse_tsv("4\tNaN"),
+            CellRef { row: 0, col: 0 },
+            1,
+            3,
+            |_, _, _| Ok(()),
+        )
+        .unwrap();
+        widget.apply_plan(&mut adapter, plan);
+        let plan = plan_paste(
+            &parse_tsv("4\n "),
+            CellRef { row: 0, col: 0 },
+            1,
+            3,
+            |_, _, _| Ok(()),
+        )
+        .unwrap();
+        adapter.append = false;
+        widget.apply_plan(&mut adapter, plan);
+        widget.grid = GridState::new(MAX_PASTE_CELLS + 1, 3);
+        widget.grid.click(CellRef { row: 0, col: 0 }, false);
+        widget.grid.click(
+            CellRef {
+                row: MAX_PASTE_CELLS,
+                col: 0,
+            },
+            true,
+        );
+        widget.do_paste(&mut adapter, "4", 0.0);
+        assert_eq!(
+            rmp_serde::to_vec_named(adapter.node.model).unwrap(),
+            original
+        );
+        assert_eq!(adapter.node.undo.revision(), revision);
+        assert!(!adapter.node.edited);
+        assert!(adapter.node.undo.can_undo());
+        assert!(adapter.node.undo.can_redo());
+        assert!(widget.take_log().iter().filter(|(_, err)| *err).count() >= 10);
+    }
 
     fn header_pos(row: usize) -> egui::Pos2 {
         egui::pos2(40.0, 40.0 + row as f32 * 30.0)
