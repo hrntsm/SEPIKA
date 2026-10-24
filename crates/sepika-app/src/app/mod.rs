@@ -2545,6 +2545,8 @@ mod coordinate_edit_tests;
 #[cfg(test)]
 mod assignment_identity_tests;
 
+#[cfg(all(test, feature = "gui"))]
+mod cft_material_tests;
 #[cfg(test)]
 pub(crate) mod design_input_tests;
 #[cfg(test)]

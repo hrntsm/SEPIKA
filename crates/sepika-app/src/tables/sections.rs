@@ -5,10 +5,14 @@
 //! 直すのは断面作成パネル（[`crate::section_editor`]）が担う。
 //!
 //! 材料は断面が持つため、割り当てはこの表で行う。主材料に加えて、RC・SRC 断面では
-//! 主筋・せん断補強筋・内蔵鉄骨の材料も個別に指定できる。断面形状から使わないと
+//! 主筋・せん断補強筋・内蔵鉄骨、CFT 断面では鋼管の材料も個別に指定できる。断面形状から使わないと
 //! わかる欄（鋼断面の主筋など）は淡色の「—」にして選べないようにしている。
 //!
 //! 断面性能は cm 系で表示する（内部は mm 系で保持。準備計算の断面性能表と同じ表記）。
+
+#[cfg(test)]
+#[path = "cft_material_tests.rs"]
+mod cft_material_tests;
 
 use crate::app::App;
 use sepika_core::ids::{MaterialId, SectionId};
@@ -40,7 +44,10 @@ fn role_applies(shape: Option<&SectionShape>, role: SectionMaterialRole) -> bool
         ),
         SectionMaterialRole::Steel => matches!(
             shape,
-            SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
+            SectionShape::SrcBeamRect { .. }
+                | SectionShape::SrcColumnRect { .. }
+                | SectionShape::CftBox { .. }
+                | SectionShape::CftPipe { .. }
         ),
     }
 }
@@ -177,6 +184,12 @@ fn material_cell(
             pending.push((sec.id, role, None));
         }
         for mat in &model.materials {
+            if sec.is_cft()
+                && role == SectionMaterialRole::Steel
+                && mat.category != sepika_core::model::MaterialCategory::Steel
+            {
+                continue;
+            }
             if ui
                 .selectable_label(current == Some(mat.id), &mat.name)
                 .clicked()
@@ -225,7 +238,7 @@ pub fn sections_table(ui: &mut egui::Ui, app: &mut App) {
             Col::name("材料"),
             Col::name("主筋"),
             Col::name("せん断補強筋"),
-            Col::name("内蔵鉄骨"),
+            Col::name("内蔵鉄骨・鋼管"),
             Col::num("部材数"),
             Col::wide_num("D×B [mm]"),
             Col::num("A [cm²]"),
