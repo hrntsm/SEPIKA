@@ -44,6 +44,7 @@ impl EditCommand for SetElementSection {
 /// どれを変更するかは [`SectionMaterialRole`] で指定する。
 ///
 /// 実在しない材料を指定した場合は何もしない（`Noop`。crate::refs の規約）。
+/// CFT の鋼管に鋼材以外を指定した場合は拒否する。`None` は割当解除。
 pub struct SetSectionMaterial {
     pub section: sepika_core::ids::SectionId,
     pub role: SectionMaterialRole,
@@ -59,7 +60,7 @@ pub enum SectionMaterialRole {
     Rebar,
     /// せん断補強筋。
     ShearRebar,
-    /// SRC 断面の内蔵鉄骨。
+    /// SRC 断面の内蔵鉄骨、または CFT 断面の鋼管。
     Steel,
 }
 
@@ -85,6 +86,16 @@ impl EditCommand for SetSectionMaterial {
         }
         if !crate::refs::material_ref_ok(model, self.material) {
             return Box::new(Noop);
+        }
+        if model.sections[idx].is_cft()
+            && self.role == SectionMaterialRole::Steel
+            && self.material.is_some_and(|id| {
+                model.materials[id.index()].category != sepika_core::model::MaterialCategory::Steel
+            })
+        {
+            return Box::new(crate::RejectedEdit(
+                "CFT の鋼管材料には鋼材を指定してください".into(),
+            ));
         }
         let main_steel = self.role == SectionMaterialRole::Main
             && model.sections[idx]
