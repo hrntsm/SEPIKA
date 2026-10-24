@@ -406,6 +406,8 @@ impl EditCommand for AddAttachedSlab {
                 extent: self.extent,
             },
             plate: self.plate.clone(),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         };
         if let Err(error) = model.validate_attached_slab(&slab) {
@@ -1167,6 +1169,74 @@ impl EditCommand for SetWallPlateAttrs {
 pub struct SetSlabUsage {
     pub id: SlabId,
     pub usage: Option<sepika_core::model::SlabUsage>,
+}
+
+/// 床板の基準階とFLからの上面偏心 [mm] を変更する。未入力は保持し、不正値は拒否する。
+pub struct SetSlabPlacement {
+    pub id: SlabId,
+    pub reference_story: Option<sepika_core::ids::StoryId>,
+    pub vertical_eccentricity_mm: Option<f64>,
+}
+
+impl EditCommand for SetSlabPlacement {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        if self
+            .vertical_eccentricity_mm
+            .is_some_and(|v| !v.is_finite())
+            || self
+                .reference_story
+                .is_some_and(|id| !model.stories.iter().any(|s| s.id == id))
+        {
+            return Box::new(RejectedEdit(format!(
+                "床板 {}: 基準階または鉛直偏心が不正です",
+                self.id.0
+            )));
+        }
+        let Some(slab) = model.slabs.iter_mut().find(|s| s.id == self.id) else {
+            return Box::new(Noop);
+        };
+        if slab.reference_story == self.reference_story
+            && slab.vertical_eccentricity_mm == self.vertical_eccentricity_mm
+        {
+            return Box::new(Noop);
+        }
+        let inverse = RestoreSlabPlacement {
+            id: self.id,
+            reference_story: slab.reference_story,
+            vertical_eccentricity_mm: slab.vertical_eccentricity_mm,
+        };
+        slab.reference_story = self.reference_story;
+        slab.vertical_eccentricity_mm = self.vertical_eccentricity_mm;
+        Box::new(inverse)
+    }
+    fn label(&self) -> &str {
+        "床板鉛直配置変更"
+    }
+}
+
+struct RestoreSlabPlacement {
+    id: SlabId,
+    reference_story: Option<sepika_core::ids::StoryId>,
+    vertical_eccentricity_mm: Option<f64>,
+}
+
+impl EditCommand for RestoreSlabPlacement {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let Some(slab) = model.slabs.iter_mut().find(|s| s.id == self.id) else {
+            return Box::new(Noop);
+        };
+        Box::new(Self {
+            id: self.id,
+            reference_story: std::mem::replace(&mut slab.reference_story, self.reference_story),
+            vertical_eccentricity_mm: std::mem::replace(
+                &mut slab.vertical_eccentricity_mm,
+                self.vertical_eccentricity_mm,
+            ),
+        })
+    }
+    fn label(&self) -> &str {
+        "床板鉛直配置の復元"
+    }
 }
 
 impl EditCommand for SetSlabUsage {

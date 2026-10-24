@@ -114,6 +114,10 @@ pub struct Slab {
     pub id: SlabId,
     pub shape: SlabShape,
     pub plate: SlabPlate,
+    /// 床上面の基準階。未入力は未解決。
+    pub reference_story: Option<StoryId>,
+    /// 階FLから床上面への鉛直差 [mm]。上向き正、未入力と0を区別する。
+    pub vertical_eccentricity_mm: Option<f64>,
     #[serde(default)]
     pub tip_loads: Vec<SlabTipLoad>,
 }
@@ -148,8 +152,7 @@ impl Slab {
         }
     }
 
-    /// 境界多角形の座標列 `[mm]`。取り付く床板は取付き先と張り出し量から算出する。
-    /// 囲まれた床板は割当領域の支持部材材軸から解決する。引けない場合は `None`。
+    /// 荷重伝達用の支持境界座標 [mm]。床上面とは区別し、支持参照を解決できなければ `None`。
     pub fn boundary_coords(&self, model: &Model) -> Option<Vec<[f64; 3]>> {
         match self.shape {
             SlabShape::Enclosed => {
@@ -162,13 +165,8 @@ impl Slab {
         }
     }
 
-    /// 境界多角形の座標列 `[mm]` を、節点座標の引き方を差し替えて求める。
-    ///
-    /// [`Slab::boundary_coords`] はモデルの節点座標をそのまま使うが、変形図・
-    /// モード形・時刻歴は**変形後の節点座標**で描く必要がある。形状の組み立て方
-    /// （取付き線の内挿・左向き法線への張り出し）は同じなので、座標の引き方だけを
-    /// 差し替えられるようにして実装を 1 つに保つ。
-    /// 線取付きの重なる端点はモデル座標で整理し、表示座標でも同じ頂点順・対応を保つ。
+    /// 支持節点座標を差し替えた支持境界 [mm]。床上面の表示には `surface_coords_with` を使う。
+    /// 線取付きの重複端点は未変形時の頂点対応を保つ。支持参照を引けなければ `None`。
     pub fn boundary_coords_with(
         &self,
         model: &Model,
@@ -267,7 +265,7 @@ impl Slab {
         }
     }
 
-    /// 床板のレベル Z `[mm]`（境界座標の Z の平均）。境界が引けなければ `None`。
+    /// 支持境界の平均Z [mm]。床上面Zとは区別し、境界を引けなければ `None`。
     pub fn level(&self, model: &Model) -> Option<f64> {
         let coords = self.boundary_coords(model)?;
         if coords.is_empty() {
@@ -476,6 +474,8 @@ impl Model {
             id: slab_id,
             shape: SlabShape::Enclosed,
             plate,
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
         let region_id = FloorPlateAssignmentRegionId(self.floor_assignment_regions.next_free_id());
@@ -522,6 +522,8 @@ impl Model {
             id: slab_id,
             shape: SlabShape::Enclosed,
             plate,
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
         self.floor_assignment_regions
@@ -877,6 +879,8 @@ mod tests {
                 method: DistributionMethod::default(),
                 one_way: None,
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         };
         assert!((model.slab_intensity(&slab, LoadPurpose::Floor) - 8.0e-3).abs() < 1e-12);

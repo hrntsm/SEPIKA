@@ -2302,6 +2302,8 @@ fn test_delete_slab_middle_renumbers_and_roundtrips() {
                 method: DistributionMethod::TributaryArea,
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
     }
@@ -7297,6 +7299,8 @@ fn test_set_attached_extent_and_anchor_noop() {
         id: SlabId(0),
         shape: SlabShape::Enclosed,
         plate: SlabPlate::default(),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
     model
@@ -7423,6 +7427,8 @@ fn test_set_slab_section_sets_and_clears_section() {
         id: SlabId(0),
         shape: SlabShape::Enclosed,
         plate: SlabPlate::default(),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
     assert!(model.slabs[0].plate.section.is_none());
@@ -7462,6 +7468,8 @@ fn test_plate_section_commands_reject_cft() {
         id: SlabId(0),
         shape: SlabShape::Enclosed,
         plate: SlabPlate::default(),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
     model.wall_plates.push(WallPlate {

@@ -259,6 +259,8 @@ fn reference_model() -> Model {
         id: SlabId(0),
         shape: SlabShape::Enclosed,
         plate: SlabPlate::default(),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: vec![],
     });
     model.wall_plates.push(WallPlate {

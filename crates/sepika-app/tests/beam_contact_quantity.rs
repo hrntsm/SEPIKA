@@ -69,6 +69,12 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
             concrete_class: Default::default(),
             strength_factor: None,
         }],
+        stories: vec![Story::new(
+            sepika_core::ids::StoryId(0),
+            "基準階".into(),
+            Some(3000.),
+            Some(0.),
+        )],
         slabs: [(0, 1, 2000.0), (1, 2, -2000.0)]
             .into_iter()
             .map(|(id, sec, extent)| Slab {
@@ -85,6 +91,8 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
                     section: Some(SectionId(sec)),
                     ..Default::default()
                 },
+                reference_story: Some(sepika_core::ids::StoryId(0)),
+                vertical_eccentricity_mm: Some(0.),
                 tip_loads: vec![],
             })
             .collect(),
@@ -222,7 +230,7 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
     for t in [-1.0, 0.0, f64::NAN, f64::INFINITY] {
         let mut model = base.clone();
         model.sections[1].thickness = Some(t);
-        cases.push((model, "実厚"));
+        cases.push((model, "実板厚"));
     }
     for assignment in [PlateAssignment::Unset, PlateAssignment::Plate(SlabId(999))] {
         let mut model = base.clone();
@@ -254,7 +262,7 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
     {
         nodes[0] = NodeId(999);
     }
-    cases.push((model, "参照"));
+    cases.push((model, "取付き先"));
     let mut model = base.clone();
     model.sections[0].shape = None;
     cases.push((model, "矩形"));

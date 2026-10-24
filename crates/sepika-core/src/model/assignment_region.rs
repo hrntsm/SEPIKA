@@ -1179,6 +1179,70 @@ impl Model {
             boundaries.append(&mut level_boundaries);
             unclosed += level_unclosed;
         }
+        for region in &self.floor_assignment_regions.regions {
+            let Some(segments) = self.support_boundary_segments(&region.boundary) else {
+                continue;
+            };
+            let Some(first) = segments.first() else {
+                continue;
+            };
+            if segments.iter().all(|(a, b)| {
+                (a[2] - first.0[2]).abs() <= crate::geom::LEVEL_TOL_MM
+                    && (b[2] - first.0[2]).abs() <= crate::geom::LEVEL_TOL_MM
+            }) {
+                continue;
+            }
+            let tol = crate::geom::MEMBER_AXIS_TOL_MM;
+            if !segments.iter().enumerate().all(|(i, (_, b))| {
+                let a = segments[(i + 1) % segments.len()].0;
+                (a[0] - b[0]).abs() <= tol && (a[1] - b[1]).abs() <= tol
+            }) {
+                continue;
+            }
+            let mut projected: Vec<_> = region
+                .boundary
+                .iter()
+                .zip(&segments)
+                .map(|(edge, (a, b))| SupportMemberSegment {
+                    support: edge.support,
+                    axis_span: edge.span,
+                    start: [a[0], a[1]],
+                    end: [b[0], b[1]],
+                })
+                .collect();
+            let mut selected: HashSet<_> = region.boundary.iter().map(|e| e.support).collect();
+            loop {
+                let mut added = false;
+                for member in self.beams() {
+                    let support = SupportMemberId::Secondary(member.id);
+                    let SecondaryMemberEnds::Supported(anchors) = member.ends else {
+                        continue;
+                    };
+                    if selected.contains(&support)
+                        || !anchors.iter().all(|a| selected.contains(&a.support))
+                    {
+                        continue;
+                    }
+                    let Some((a, b)) = self.support_member_axis(support) else {
+                        continue;
+                    };
+                    projected.push(SupportMemberSegment {
+                        support,
+                        axis_span: [0.0, 1.0],
+                        start: [a[0], a[1]],
+                        end: [b[0], b[1]],
+                    });
+                    selected.insert(support);
+                    added = true;
+                }
+                if !added {
+                    break;
+                }
+            }
+            // 支持節点のZ変更は、明示済み床領域のXY支持関係を解除する根拠にならない。
+            let (mut preserved, _) = scan_bounded_regions(projected.iter());
+            boundaries.append(&mut preserved);
+        }
         dedup_boundaries(&mut boundaries);
         self.floor_assignment_regions
             .replace_boundaries(boundaries, unclosed)
@@ -1731,6 +1795,8 @@ mod tests {
             id: SlabId(0),
             shape: crate::model::SlabShape::Enclosed,
             plate: crate::model::SlabPlate::default(),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
         regions.regions[1].assignment = PlateAssignment::Plate(SlabId(0));
@@ -2253,6 +2319,8 @@ mod tests {
                 extent: [1000.0, 1000.0],
             },
             plate: crate::model::SlabPlate::default(),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         };
         let mut model = square_model_with_beam();

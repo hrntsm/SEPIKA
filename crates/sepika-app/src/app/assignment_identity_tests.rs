@@ -111,7 +111,10 @@ fn guiは境界衝突の拒否理由と未更新を表示し確認待ちにも�
 fn 主架構一覧削除と節点移動は確認前とキャンセルで未更新とし確認後の一undoで荷重を戻す() {
     use sepika_core::ids::{ElemId, NodeId};
     for wall in [false, true] {
-        for move_node in [false, true] {
+        for move_node in [false, true]
+            .into_iter()
+            .filter(|move_node| wall || !move_node)
+        {
             let mut app = App::default();
             app.core.model = fixture::with_plate(wall);
             app.core.model.assign_stb_node_ids().unwrap();
@@ -156,40 +159,39 @@ fn 主架構一覧削除と節点移動は確認前とキャンセルで未更�
 #[test]
 fn 節点グリッドの非平面貼付は旧版荷重を診断して未更新としguiにも理由を表示する() {
     use crate::grid::GridAdapter;
-    for wall in [false, true] {
-        let mut app = App::default();
-        app.core.model = fixture::with_plate(wall);
-        app.core.model.assign_stb_node_ids().unwrap();
-        let before = app.core.model.clone();
-        let mut adapter = node_grid::NodeGridAdapter {
-            model: &mut app.core.model,
-            undo: &mut app.core.scoped.undo,
-            edited: false,
-        };
-        let rejected = adapter
-            .apply_block(&[(1, if wall { 1 } else { 2 }, "1000".into())], 0)
-            .unwrap_err();
-        assert!(rejected.contains("未更新"));
-        assert!(!adapter.edited);
-        let reason = app.core.scoped.undo.last_error().unwrap();
-        assert!(reason.contains("0.0025"));
-        assert!(reason.contains("未更新"));
-        assert!(reason.contains("1 Undo"));
-        fixture::assert_inputs_eq(&app.core.model, &before);
-        assert_eq!(app.core.scoped.undo.revision(), 0);
-        assert!(!app.core.scoped.undo.can_undo());
-        let _ = egui::Context::default().run_ui(Default::default(), |ui| {
-            crate::tables::nodes::nodes_table(ui, &mut app);
-        });
-        assert!(app
-            .core
-            .scoped
-            .last_error
-            .as_ref()
-            .unwrap()
-            .contains("0.0025"));
-        fixture::assert_inputs_eq(&app.core.model, &before);
-    }
+    let wall = true;
+    let mut app = App::default();
+    app.core.model = fixture::with_plate(wall);
+    app.core.model.assign_stb_node_ids().unwrap();
+    let before = app.core.model.clone();
+    let mut adapter = node_grid::NodeGridAdapter {
+        model: &mut app.core.model,
+        undo: &mut app.core.scoped.undo,
+        edited: false,
+    };
+    let rejected = adapter
+        .apply_block(&[(1, if wall { 1 } else { 2 }, "1000".into())], 0)
+        .unwrap_err();
+    assert!(rejected.contains("未更新"));
+    assert!(!adapter.edited);
+    let reason = app.core.scoped.undo.last_error().unwrap();
+    assert!(reason.contains("0.0025"));
+    assert!(reason.contains("未更新"));
+    assert!(reason.contains("1 Undo"));
+    fixture::assert_inputs_eq(&app.core.model, &before);
+    assert_eq!(app.core.scoped.undo.revision(), 0);
+    assert!(!app.core.scoped.undo.can_undo());
+    let _ = egui::Context::default().run_ui(Default::default(), |ui| {
+        crate::tables::nodes::nodes_table(ui, &mut app);
+    });
+    assert!(app
+        .core
+        .scoped
+        .last_error
+        .as_ref()
+        .unwrap()
+        .contains("0.0025"));
+    fixture::assert_inputs_eq(&app.core.model, &before);
 }
 
 #[test]
@@ -328,4 +330,29 @@ fn gui_noop_redoはモデル履歴と選択を更新しない() {
     assert_eq!(app.ui.scoped.selection.nodes(), &[NodeId(1)]);
     assert!(app.core.scoped.undo.last_error().is_none());
     assert!(app.core.scoped.last_error.is_none());
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn 床支持節点zのグリッド編集は版入力と支持idを維持し確認なしでundoできる() {
+    use crate::grid::GridAdapter;
+    let mut app = App::default();
+    app.core.model = fixture::with_plate(false);
+    app.core.model.assign_stb_node_ids().unwrap();
+    let before = app.core.model.clone();
+    let mut adapter = node_grid::NodeGridAdapter {
+        model: &mut app.core.model,
+        undo: &mut app.core.scoped.undo,
+        edited: false,
+    };
+    assert!(adapter.apply_block(&[(1, 2, "1000".into())], 0).unwrap());
+    assert!(adapter.edited);
+    assert_eq!(app.core.model.slabs, before.slabs);
+    assert_eq!(
+        app.core.model.floor_assignment_regions,
+        before.floor_assignment_regions
+    );
+    assert!(app.core.scoped.pending_plate_loss_edit.is_none());
+    app.undo_action();
+    fixture::assert_inputs_eq(&app.core.model, &before);
 }

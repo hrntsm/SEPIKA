@@ -244,6 +244,8 @@ impl EditCommand for AssignSlabToFloorPlateRegion {
                 id: new_id,
                 shape: sepika_core::model::SlabShape::Enclosed,
                 plate: self.plate.clone(),
+                reference_story: None,
+                vertical_eccentricity_mm: None,
                 tip_loads: Vec::new(),
             }),
             region_refs: Vec::new(),

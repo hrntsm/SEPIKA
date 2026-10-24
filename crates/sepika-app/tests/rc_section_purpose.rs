@@ -448,6 +448,15 @@ fn plate_model(wall: bool, numeric: bool) -> Model {
     if wall {
         model.wall_plates[0].self_weight_shares = vec![1.0, 0.0, 0.0, 0.0];
     }
+    if !wall {
+        use sepika_core::{ids::StoryId, model::Story};
+        model.stories = vec![
+            Story::new(StoryId(0), "基準階".into(), Some(0.), Some(0.)),
+            Story::new(StoryId(1), "上階".into(), Some(3000.), Some(0.)),
+        ];
+        model.slabs[0].reference_story = Some(StoryId(1));
+        model.slabs[0].vertical_eccentricity_mm = Some(0.);
+    }
     model.validate().unwrap();
     model
 }

@@ -158,6 +158,7 @@ pub struct RestoreStoryDefs {
     pub stories: Vec<Story>,
     /// 復元後の各節点の所属階（`model.nodes` と同順）。
     pub node_story: Vec<Option<StoryId>>,
+    pub slab_story: Vec<Option<StoryId>>,
     /// 復元後の拘束（剛床の `story` 参照を含む）。
     pub constraints: Vec<sepika_core::model::Constraint>,
 }
@@ -171,6 +172,7 @@ pub(crate) fn snapshot(model: &Model) -> RestoreStoryDefs {
         stb_node_ids: model.stb_node_ids.clone(),
         stories: model.stories.clone(),
         node_story: model.nodes.iter().map(|n| n.story).collect(),
+        slab_story: model.slabs.iter().map(|s| s.reference_story).collect(),
         constraints: model.constraints.clone(),
     }
 }
@@ -423,6 +425,11 @@ impl EditCommand for DeleteStory {
             )
         });
         let removed = self.story;
+        for slab in &mut model.slabs {
+            if slab.reference_story == Some(removed) {
+                slab.reference_story = None;
+            }
+        }
         if let Some(record) = &mut model.seismic_weight_generation {
             record
                 .automatic_node_stories
@@ -476,6 +483,9 @@ impl EditCommand for RestoreStoryDefs {
         model.stb_node_ids = self.stb_node_ids.clone();
         for (node, story) in model.nodes.iter_mut().zip(self.node_story.iter()) {
             node.story = *story;
+        }
+        for (slab, story) in model.slabs.iter_mut().zip(&self.slab_story) {
+            slab.reference_story = *story;
         }
         model.constraints = self.constraints.clone();
         Box::new(redo)

@@ -150,7 +150,7 @@ fn slab_fill_triangles(
 ) -> Option<Vec<[usize; 3]>> {
     use sepika_core::geom::polygon;
     model.validate_attached_slab_geometry(slab).ok()?;
-    let boundary = slab.boundary_coords(model)?;
+    let boundary = slab.surface_coords(model)?;
     if !boundary.iter().flatten().all(|v| v.is_finite()) {
         return None;
     }
@@ -257,7 +257,7 @@ pub(super) fn draw_slabs(
             continue;
         }
         let Some(coords) =
-            slab.boundary_coords_with(&app.core.model, |n| coords3.get(n.index()).copied())
+            slab.surface_coords_with(&app.core.model, |n| coords3.get(n.index()).copied())
         else {
             continue;
         };
@@ -673,7 +673,7 @@ pub(super) fn draw_mode_rest_ghost(
             if !slab_visible_on_frame(&app.core.model, slab, filter) {
                 continue;
             }
-            let Some(coords) = slab.boundary_coords(&app.core.model) else {
+            let Some(coords) = slab.surface_coords(&app.core.model) else {
                 continue;
             };
             let triangles = slab_fill_triangles(&app.core.model, slab);
@@ -888,6 +888,43 @@ mod tests {
     use sepika_core::ids::{NodeId, SlabId};
     use sepika_core::model::{LoadTransfer, Node, RegionAnchor, Slab, SlabPlate, SlabShape};
 
+    fn resolve_test_placements(app: &mut App) {
+        use sepika_core::{
+            ids::{SectionId, StoryId},
+            model::Story,
+            section_shape::SectionShape,
+        };
+        if app.core.model.stories.is_empty() {
+            app.core.model.stories.push(Story::new(
+                StoryId(0),
+                "基準階".into(),
+                Some(0.),
+                Some(0.),
+            ));
+        }
+        let sid = SectionId(app.core.model.sections.len() as u32);
+        app.core
+            .model
+            .sections
+            .push(SectionShape::RcSlab { thickness: 150. }.to_section(sid, "S15".into()));
+        let levels: Vec<_> = app
+            .core
+            .model
+            .slabs
+            .iter()
+            .map(|slab| {
+                slab.boundary_coords(&app.core.model)
+                    .and_then(|c| c.first().map(|p| p[2]))
+                    .unwrap_or(0.)
+            })
+            .collect();
+        for (slab, z) in app.core.model.slabs.iter_mut().zip(levels) {
+            slab.reference_story = Some(StoryId(0));
+            slab.vertical_eccentricity_mm = Some(z);
+            slab.plate.section = Some(sid);
+        }
+    }
+
     fn slab_app(points: &[[f64; 3]], attached_extent: Option<[f64; 2]>) -> App {
         let mut app = App::default();
         app.core.model.nodes = points
@@ -914,6 +951,8 @@ mod tests {
                     extent,
                 },
                 plate: SlabPlate::default(),
+                reference_story: None,
+                vertical_eccentricity_mm: None,
                 tip_loads: Vec::new(),
             });
         } else {
@@ -922,6 +961,7 @@ mod tests {
                 .model
                 .add_enclosed_slab_from_nodes(&nodes, SlabPlate::default());
         }
+        resolve_test_placements(&mut app);
         app
     }
 
@@ -1037,6 +1077,8 @@ mod tests {
                 extent: [1000.0; 2],
             },
             plate: SlabPlate::default(),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
         let mut attached = enclosed_plate();
@@ -1087,6 +1129,10 @@ mod tests {
             wall_plate_ids: vec![id],
             posts: Vec::new(),
         });
+        resolve_test_placements(&mut app);
+        for (i, section) in app.core.model.sections.iter_mut().enumerate() {
+            section.id = sepika_core::ids::SectionId(i as u32);
+        }
         app
     }
 
@@ -1285,7 +1331,7 @@ mod tests {
     }
 
     #[test]
-    fn mode_rest_invalid_slabs_and_sign_reversing_wall_keep_outlines_without_fill() {
+    fn unresolved_slab_is_not_drawn_and_sign_reversing_wall_keeps_outline() {
         let mut app = slab_app(
             &[
                 [0.0, 0.0, 3000.0],
@@ -1297,7 +1343,6 @@ mod tests {
         );
         let shapes = paint_mode_ghost(&app, 1.0, true, FrameFilter::default());
         assert!(filled_plate_points(&shapes, 55).is_empty());
-        assert!(!shapes.is_empty());
         let mut attached = mode_plate_fixture();
         if let sepika_core::model::WallPlateShape::Attached { extent, .. } =
             &mut attached.core.model.wall_plates[0].shape
@@ -1350,6 +1395,7 @@ mod tests {
                 source: AxisSource::Manual,
             }],
         });
+        app.core.model.stories.clear();
         for (id, elevation) in [(0, 0.0), (1, 3000.0)] {
             app.core.model.stories.push(
                 serde_json::from_value(serde_json::json!({
@@ -1493,9 +1539,13 @@ mod tests {
             );
             let shapes = paint_slabs(&app, &model_coords(&app), [1.0, 0.0, 0.0, 0.0]);
             let meshes = slab_meshes(&shapes);
-            assert!(shapes.len() > meshes.len());
+            if area > 0. {
+                assert!(shapes.len() > meshes.len());
+            }
             if area == 0.0 {
                 assert!(meshes.is_empty());
+                assert!(shapes.is_empty());
+                continue;
             } else {
                 assert_eq!(meshes.len(), 1);
                 assert_eq!(meshes[0].vertices.len(), vertices);
@@ -1567,7 +1617,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_slab_boundaries_keep_their_original_finite_edges_without_fill() {
+    fn invalid_slab_boundaries_have_no_resolved_surface_to_draw() {
         for points in [
             vec![
                 [0.0, 0.0, 0.0],
@@ -1592,27 +1642,8 @@ mod tests {
             let app = slab_app(&points, None);
             let shapes = paint_slabs(&app, &points, [1.0, 0.0, 0.0, 0.0]);
             assert!(slab_meshes(&shapes).is_empty());
-            let segments: Vec<_> = shapes
-                .iter()
-                .filter_map(|s| match &s.shape {
-                    egui::Shape::LineSegment { points, .. } => Some(points),
-                    _ => None,
-                })
-                .collect();
-            assert!(!segments.is_empty());
-            let xy: Vec<_> = points.iter().map(|p| [p[0], p[1]]).collect();
-            for segment in segments {
-                assert!(xy.iter().enumerate().any(|(i, &a)| {
-                    let b = xy[(i + 1) % xy.len()];
-                    segment.iter().all(|p| {
-                        sepika_core::geom::polygon::point_segment_dist(
-                            [f64::from(p.x) * 10.0, -f64::from(p.y) * 10.0],
-                            a,
-                            b,
-                        ) < 0.01
-                    })
-                }));
-            }
+            assert!(shapes.is_empty());
+            assert!(app.core.model.resolved_slab_placement(SlabId(0)).is_err());
         }
     }
 
@@ -1724,7 +1755,9 @@ mod tests {
             coords[1][0] = bad;
             let shapes = paint_slabs(&app, &coords, [1.0, 0.0, 0.0, 0.0]);
             assert!(slab_meshes(&shapes).is_empty());
-            assert!(!shapes.is_empty());
+            if !bad.is_finite() {
+                assert!(shapes.is_empty());
+            }
             for s in &shapes {
                 assert!(s.shape.visual_bounding_rect().is_finite());
                 if let egui::Shape::LineSegment { points, .. } = &s.shape {

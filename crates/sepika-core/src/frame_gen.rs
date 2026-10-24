@@ -663,6 +663,8 @@ pub fn generate_frame(spec: &FrameSpec) -> Result<FrameGenResult, String> {
                     slabs.push(Slab {
                         id: slab_id,
                         shape: SlabShape::Enclosed,
+                        reference_story: Some(StoryId(iz as u32)),
+                        vertical_eccentricity_mm: Some(0.0),
                         tip_loads: Vec::new(),
                         plate: SlabPlate {
                             section: Some(sec_id),

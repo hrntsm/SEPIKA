@@ -2964,6 +2964,8 @@ mod tests {
                         section: Some(SectionId(1)),
                         ..Default::default()
                     },
+                    reference_story: None,
+                    vertical_eccentricity_mm: None,
                     tip_loads: vec![],
                 });
                 "スラブ"

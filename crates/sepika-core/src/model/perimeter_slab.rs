@@ -462,6 +462,8 @@ mod tests {
                 extent: [1000.0, -1000.0],
             },
             plate: SlabPlate::default(),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
         assert!(perimeter_slabs(&model).unwrap().is_empty());

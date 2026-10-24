@@ -293,6 +293,8 @@ mod tests {
                 extent,
             },
             plate: SlabPlate::default(),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         }
     }

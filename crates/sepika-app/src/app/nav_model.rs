@@ -308,6 +308,8 @@ mod tests {
                 method: sepika_core::model::DistributionMethod::OneWay,
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         }
     }

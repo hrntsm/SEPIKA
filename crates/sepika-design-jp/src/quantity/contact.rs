@@ -43,13 +43,12 @@ impl Contacts {
                     if !matches!(slab.shape, SlabShape::Enclosed) {
                         return Err(format!("床板 {id:?}: 割当領域と床板形状が一致しません"));
                     }
-                    let t = thickness(model, slab)?;
-                    let pts = model
-                        .assignment_region_boundary_coords(&region.boundary)
-                        .ok_or_else(|| format!("床板 {id:?}: 支持材の参照が不明です"))?;
+                    let placement = model.resolved_slab_placement(id)?;
+                    let pts = placement.top_boundary;
                     let winding =
                         validate_polygon(&pts).map_err(|e| format!("床板 {id:?}: {e}"))?;
-                    let (slab_z, horizontal) = contact_height(&pts, t);
+                    let slab_z = [placement.bottom_z_mm, placement.top_z_mm];
+                    let horizontal = true;
                     for (i, edge) in region.boundary.iter().enumerate() {
                         if edge
                             .span
@@ -63,12 +62,11 @@ impl Contacts {
                         })?;
                         let at =
                             |t: f64| std::array::from_fn::<_, 3, _>(|k| a[k] + (b[k] - a[k]) * t);
-                        if sepika_core::geom::vec3::dist(at(edge.span[0]), pts[i])
-                            > MEMBER_AXIS_TOL_MM
-                            || sepika_core::geom::vec3::dist(
-                                at(edge.span[1]),
-                                pts[(i + 1) % pts.len()],
-                            ) > MEMBER_AXIS_TOL_MM
+                        let distance_xy =
+                            |p: [f64; 3], q: [f64; 3]| (p[0] - q[0]).hypot(p[1] - q[1]);
+                        if distance_xy(at(edge.span[0]), pts[i]) > MEMBER_AXIS_TOL_MM
+                            || distance_xy(at(edge.span[1]), pts[(i + 1) % pts.len()])
+                                > MEMBER_AXIS_TOL_MM
                         {
                             return Err(format!("床板 {id:?}: 支持境界が閉じていません"));
                         }
@@ -101,12 +99,11 @@ impl Contacts {
                     return Err(format!("床板 {:?}: 取付き材軸区間が不正です", slab.id));
                 }
             }
-            let t = thickness(model, slab)?;
-            let pts = slab
-                .boundary_coords(model)
-                .ok_or_else(|| format!("床板 {:?}: 取付き先の参照が不明です", slab.id))?;
+            let placement = model.resolved_slab_placement(slab.id)?;
+            let pts = placement.top_boundary;
             validate_polygon(&pts).map_err(|e| format!("床板 {:?}: {e}", slab.id))?;
-            let (slab_z, horizontal) = contact_height(&pts, t);
+            let slab_z = [placement.bottom_z_mm, placement.top_z_mm];
+            let horizontal = true;
             let supports = model
                 .elements
                 .iter()
@@ -211,24 +208,6 @@ fn local_contact_spans(
             occupied.then_some(([cut[0], cut[1]], side))
         })
         .collect()
-}
-
-fn thickness(model: &Model, slab: &sepika_core::model::Slab) -> Result<f64, String> {
-    let sec = model
-        .slab_section(slab)
-        .ok_or_else(|| format!("床板 {:?}: 断面の参照が未設定または不明です", slab.id))?;
-    let t = sec
-        .thickness
-        .ok_or_else(|| format!("床板 {:?}: 実厚が未設定です", slab.id))?;
-    if !t.is_finite() || t <= 0.0 {
-        return Err(format!(
-            "床板 {:?}: 実厚 [mm] は有限かつ正である必要があります",
-            slab.id
-        ));
-    }
-    model
-        .slab_plate_thickness(slab)
-        .ok_or_else(|| format!("床板 {:?}: 実厚を解決できません", slab.id))
 }
 
 fn support_section(model: &Model, support: SupportMemberId) -> Result<Option<&Section>, String> {
@@ -426,12 +405,6 @@ fn add_contact(
     }
     out.entry(support).or_default()[side].push(Rect { s, z });
     Ok(())
-}
-
-fn contact_height(pts: &[[f64; 3]], t: f64) -> ([f64; 2], bool) {
-    let low = pts.iter().map(|p| p[2]).fold(f64::INFINITY, f64::min);
-    let high = pts.iter().map(|p| p[2]).fold(f64::NEG_INFINITY, f64::max);
-    ([low - t, high], high == low)
 }
 
 fn validate_polygon(pts: &[[f64; 3]]) -> Result<f64, String> {

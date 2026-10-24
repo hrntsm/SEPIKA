@@ -1034,6 +1034,8 @@ fn copy_slabs(
             Some(id) => id,
             None => model.add_enclosed_slab_from_nodes(&boundary, plate),
         };
+        model.slabs[id.index()].reference_story = sl.reference_story.map(|_| to);
+        model.slabs[id.index()].vertical_eccentricity_mm = sl.vertical_eccentricity_mm;
         created.push(id);
         report.slabs_created += 1;
     }

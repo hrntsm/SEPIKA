@@ -120,6 +120,51 @@ pub fn scan_region_boundaries(model: &Model) -> RegionBoundaryScan {
         scan.boundaries.extend(boundaries);
         scan.unclosed += unclosed;
     }
+    for region in &model.floor_regions {
+        let Some(coords) = region.boundary_coords(model) else {
+            continue;
+        };
+        let Some(first) = coords.first() else {
+            continue;
+        };
+        if coords
+            .iter()
+            .all(|p| (p[2] - first[2]).abs() <= LEVEL_TOL_MM)
+        {
+            continue;
+        }
+        let xy: Vec<_> = coords.iter().map(|p| [p[0], p[1]]).collect();
+        if polygon::triangulate_simple(&xy).is_err() {
+            continue;
+        }
+        let edges = region
+            .boundary
+            .iter()
+            .enumerate()
+            .map(|(i, &a)| {
+                let b = region.boundary[(i + 1) % region.boundary.len()];
+                model
+                    .elements
+                    .iter()
+                    .find(|e| {
+                        e.kind.is_primary_frame_support()
+                            && e.nodes.len() == 2
+                            && ((e.nodes[0] == a && e.nodes[1] == b)
+                                || (e.nodes[0] == b && e.nodes[1] == a))
+                    })
+                    .map(|e| e.id)
+            })
+            .collect::<Option<Vec<_>>>();
+        let Some(edges) = edges else {
+            continue;
+        };
+        // 節点Zの移動だけでは、既存床領域の平面境界と明示支持を消さない。
+        scan.boundaries.push(RegionBoundary {
+            level: coords.iter().map(|p| p[2]).sum::<f64>() / coords.len() as f64,
+            boundary: region.boundary.clone(),
+            edges,
+        });
+    }
     scan
 }
 

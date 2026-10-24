@@ -1356,6 +1356,8 @@ fn attached_slab_load_ignores_side_beam() {
             }],
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
 
@@ -1462,6 +1464,8 @@ fn midspan_beam_floor_conserves_total_through_cascade() {
                 method: DistributionMethod::TriTrapezoid,
                 ..Default::default()
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
         m.floor_assignment_regions

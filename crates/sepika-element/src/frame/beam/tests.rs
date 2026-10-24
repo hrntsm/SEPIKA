@@ -465,6 +465,8 @@ fn test_beam_new_slab_cooperation_width_amplifies_iy() {
                 method: DistributionMethod::TriTrapezoid,
                 one_way: None,
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         }],
         slab_thickness: 150.0,
@@ -597,6 +599,8 @@ fn test_beam_new_slab_cooperation_width_survives_beam_subdivided_region() {
                     method: DistributionMethod::TriTrapezoid,
                     one_way: None,
                 },
+                reference_story: None,
+                vertical_eccentricity_mm: None,
                 tip_loads: Vec::new(),
             },
             Slab {
@@ -609,6 +613,8 @@ fn test_beam_new_slab_cooperation_width_survives_beam_subdivided_region() {
                     method: DistributionMethod::TriTrapezoid,
                     one_way: None,
                 },
+                reference_story: None,
+                vertical_eccentricity_mm: None,
                 tip_loads: Vec::new(),
             },
         ],
@@ -681,6 +687,8 @@ fn rc_beam_for_slab_factor(plate: Option<sepika_core::model::SlabPlate>) -> (Mod
             id: SlabId(0),
             shape: SlabShape::Enclosed,
             plate,
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         }],
         None => vec![],
@@ -781,6 +789,8 @@ fn test_slab_stiffness_factor_only_for_enclosed_plated_slabs() {
             section: Some(sepika_core::ids::SectionId(1)),
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     }];
     let b_attached = stiffness_breakdown(&m_attached, &e).unwrap();
@@ -894,6 +904,8 @@ fn test_beam_new_composite_steel_beam_averages_stiffness() {
                 method: DistributionMethod::TriTrapezoid,
                 one_way: None,
             },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         }],
         slab_thickness: 150.0,

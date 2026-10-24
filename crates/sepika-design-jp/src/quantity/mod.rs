@@ -1821,12 +1821,13 @@ fn wall_plate_quantity(ctx: &Ctx, plate: &WallPlate) -> Option<MemberQuantity> {
 /// 床（一般・片持ち・出隅・入隅）の数量。
 fn slab_quantity(ctx: &Ctx, slab: &Slab) -> Option<MemberQuantity> {
     let model = ctx.model;
-    let pts: Vec<[f64; 3]> = slab.boundary_coords(model)?;
+    let placement = model.resolved_slab_placement(slab.id).ok()?;
+    let pts = placement.top_boundary;
     if pts.len() < 3 {
         return None;
     }
     let area = polygon_area_3d(&pts);
-    let t = model.slab_plate_thickness(slab).unwrap_or(0.0);
+    let t = placement.thickness_mm;
     let category = if slab.is_attached() {
         MemberCategory::CantileverSlab
     } else {

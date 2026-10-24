@@ -503,6 +503,14 @@ impl Model {
             }
         }
         for slab in &self.slabs {
+            if let Some(story) = slab.reference_story {
+                if !self.stories.iter().any(|s| s.id == story) {
+                    return Err(CoreError::DanglingRef(format!(
+                        "床板 {} -> 基準階 {}",
+                        slab.id.0, story.0
+                    )));
+                }
+            }
             for nid in slab_node_refs(self, slab) {
                 if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
                     return Err(CoreError::DanglingRef(format!(
@@ -1516,6 +1524,11 @@ impl Model {
     /// 階の追加・削除では「ID＝配列位置」の不変条件を保つために ID の繰り上げが
     /// 必要になる。参照箇所を呼び出し側へ散らさないよう、走査はここに集約する。
     pub fn visit_story_ids(&mut self, mut f: impl FnMut(&mut StoryId)) {
+        for slab in &mut self.slabs {
+            if let Some(story) = &mut slab.reference_story {
+                f(story);
+            }
+        }
         if let Some(record) = &mut self.seismic_weight_generation {
             for (_, story) in &mut record.automatic_node_stories {
                 f(story);
@@ -2389,6 +2402,8 @@ mod node_reference_tests {
             id: SlabId(0),
             shape: SlabShape::Enclosed,
             plate: SlabPlate::default(),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
         model.slabs.push(Slab {
@@ -2402,6 +2417,8 @@ mod node_reference_tests {
                 extent: [0.0, 0.0],
             },
             plate: SlabPlate::default(),
+            reference_story: None,
+            vertical_eccentricity_mm: None,
             tip_loads: Vec::new(),
         });
 

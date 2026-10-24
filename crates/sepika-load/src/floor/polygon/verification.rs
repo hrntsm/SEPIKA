@@ -684,6 +684,11 @@ fn enclosed_geometry_errors_precede_rectangle_and_zero_load_dispatch() {
                 node.coord = *coord;
             }
             for w in [0., 0.003] {
+                if unsupported {
+                    assert!(distribute_slab_w(&model, &slab, w).is_ok());
+                    assert!(distribute_slab_resolved(&model, &slab, w).is_ok());
+                    continue;
+                }
                 assert_eq!(
                     distribute_slab_w(&model, &slab, w).unwrap_err(),
                     FloorDistributionError::Polygon(direct.clone())

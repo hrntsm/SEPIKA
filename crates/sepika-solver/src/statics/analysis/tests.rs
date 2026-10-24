@@ -980,6 +980,20 @@ fn test_model_issues_rejects_slab_without_section() {
     region.slab_ids.push(slab_id);
     model.floor_regions.push(region);
 
+    model.stories.push(sepika_core::model::Story::new(
+        sepika_core::ids::StoryId(0),
+        "基準階".into(),
+        Some(0.),
+        Some(0.),
+    ));
+    model.stories.push(sepika_core::model::Story::new(
+        sepika_core::ids::StoryId(1),
+        "上階".into(),
+        Some(3000.),
+        Some(0.),
+    ));
+    model.slabs[0].reference_story = Some(sepika_core::ids::StoryId(0));
+    model.slabs[0].vertical_eccentricity_mm = Some(0.);
     // 断面が未割当。
     let msgs: Vec<String> = model_issues(&model)
         .into_iter()
@@ -1025,6 +1039,7 @@ fn test_model_issues_rejects_slab_without_section() {
     model.sections[sid.index()].material = Some(mid);
     let msgs: Vec<String> = model_issues(&model)
         .into_iter()
+        .filter(|i| i.severity == super::precheck::IssueSeverity::Error)
         .map(|i| i.message)
         .collect();
     assert!(!msgs.iter().any(|m| m.contains("床")), "{msgs:?}");
@@ -2471,6 +2486,8 @@ fn test_model_issues_errors_on_unreferenced_invalid_cft_section() {
             section: Some(SectionId(1)),
             ..Default::default()
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
 
@@ -2702,6 +2719,8 @@ fn test_model_issues_warns_partial_beam_on_attached_edge() {
             extent: [1500.0, 1500.0],
         },
         plate: SlabPlate::default(),
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
 
@@ -2775,6 +2794,8 @@ fn test_model_issues_warns_floating_plate() {
             method: DistributionMethod::TriTrapezoid,
             one_way: None,
         },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
         tip_loads: Vec::new(),
     });
     model
@@ -2801,6 +2822,20 @@ fn test_model_issues_warns_floating_plate() {
         ])
     );
 
+    model.stories.push(sepika_core::model::Story::new(
+        sepika_core::ids::StoryId(0),
+        "基準階".into(),
+        Some(0.),
+        Some(0.),
+    ));
+    model.stories.push(sepika_core::model::Story::new(
+        sepika_core::ids::StoryId(1),
+        "上階".into(),
+        Some(3000.),
+        Some(0.),
+    ));
+    model.slabs[0].reference_story = Some(sepika_core::ids::StoryId(0));
+    model.slabs[0].vertical_eccentricity_mm = Some(0.);
     let issues = model_issues(&model);
     let warning = issues
         .iter()
