@@ -37,7 +37,19 @@ fn build_grid_model(nx: usize, ny: usize, n_stories: usize, with_slabs: bool) ->
     let bay = 6000.0_f64; // mm
     let story_h = 3500.0_f64; // mm
 
-    let mut model = Model::default();
+    let mut model = Model {
+        stories: (0..=n_stories)
+            .map(|level| {
+                sepika_core::model::Story::new(
+                    sepika_core::ids::StoryId(level as u32),
+                    format!("{}F", level + 1),
+                    Some(level as f64 * story_h),
+                    Some(0.0),
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
 
     let node_id = |level: usize, i: usize, j: usize| -> u32 { ((level * ny + j) * nx + i) as u32 };
 
