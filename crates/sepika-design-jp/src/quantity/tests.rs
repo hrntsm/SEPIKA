@@ -1335,7 +1335,10 @@ fn contact_model() -> Model {
     section.frame_use = Some(FrameSectionUse::Girder);
     Model {
         nodes: vec![node(0, 0.0, 0.0, 3000.0), node(1, 6000.0, 0.0, 3000.0)],
-        elements: vec![line_elem(0, 0, 1, 0)],
+        elements: vec![ElementData {
+            vertical_eccentricity: Some(-300.0),
+            ..line_elem(0, 0, 1, 0)
+        }],
         sections: vec![section],
         materials: vec![rc_material(0), rebar_material(1)],
         ..Default::default()
@@ -1367,6 +1370,23 @@ fn contact_slab(model: &mut Model, span: [f64; 2], side: f64, t: f64, top: f64) 
         },
     );
     set_test_slab_placements(model);
+}
+
+fn contact_secondary_ends(model: &mut Model) -> sepika_core::model::SecondaryMemberEnds {
+    use sepika_core::model::{SecondaryMemberAnchor, SecondaryMemberEnds, SupportMemberId};
+    let n = model.nodes.len() as u32;
+    model.nodes.push(node(n, -1500.0, 0.0, 3000.0));
+    model.nodes.push(node(n + 1, 7500.0, 0.0, 3000.0));
+    let id = model.elements.len() as u32;
+    let mut support = line_elem(id, n, n + 1, 0);
+    support.section = None;
+    model.elements.push(support);
+    SecondaryMemberEnds::Supported(
+        [1.0 / 6.0, 5.0 / 6.0].map(|position| SecondaryMemberAnchor {
+            support: SupportMemberId::Primary(ElemId(id)),
+            position,
+        }),
+    )
 }
 
 fn contact_formwork(model: &Model) -> f64 {
@@ -1484,7 +1504,7 @@ fn beam_contact_rejects_unknown_invalid_and_unsupported_inputs() {
     assert!(
         try_compute_quantity_takeoff(&model, &QuantityCfg::default())
             .unwrap_err()
-            .contains("矩形")
+            .contains("実断面形状が未指定")
     );
     let mut model = contact_model();
     let sec = SectionId(1);
@@ -1515,7 +1535,7 @@ fn beam_contact_rejects_unknown_invalid_and_unsupported_inputs() {
 #[test]
 fn beam_contact_direct_support_span_secondary_and_vertical_union() {
     use sepika_core::ids::SecondaryMemberId;
-    use sepika_core::model::{SecondaryMemberEnds, SupportMemberId};
+    use sepika_core::model::SupportMemberId;
     let mut model = contact_model();
     contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
     model.floor_assignment_regions.regions[0].boundary[0].support =
@@ -1531,13 +1551,14 @@ fn beam_contact_direct_support_span_secondary_and_vertical_union() {
     assert!((contact_formwork(&model) - 7.8).abs() <= 1e-9);
     let mut model = contact_model();
     model.elements.clear();
+    let secondary_ends = contact_secondary_ends(&mut model);
     model.unassigned_beams.push(SecondaryMember {
         id: SecondaryMemberId(451),
         kind: SecondaryMemberKind::Beam,
-        ends: SecondaryMemberEnds::Detached([[0.0, 0.0, 3000.0], [6000.0, 0.0, 3000.0]]),
+        ends: secondary_ends,
         section: Some(SectionId(0)),
         name: "二次小梁451".into(),
-        vertical_eccentricity: Some(0.0),
+        vertical_eccentricity: Some(-300.0),
         gravity_end_shares: None,
     });
     contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
@@ -1758,7 +1779,7 @@ fn beam_contact_unknown_beam_section_is_unavailable() {
                     ]),
                     section: Some(SectionId(999)),
                     name: "断面不明451".into(),
-                    vertical_eccentricity: Some(0.0),
+                    vertical_eccentricity: Some(-300.0),
                     gravity_end_shares: None,
                 });
         } else {
@@ -1833,15 +1854,18 @@ fn beam_contact_uses_shared_mm_tolerance_and_ignores_unrelated_slope() {
 #[test]
 fn beam_contact_non_nodal_secondary_is_counted_and_materialized_is_counted_once() {
     use sepika_core::ids::SecondaryMemberId;
-    use sepika_core::model::SecondaryMemberEnds;
     let mut model = contact_model();
+    let secondary_ends = sepika_core::model::SecondaryMemberEnds::Detached([
+        [0.0, 0.0, 3000.0],
+        [6000.0, 0.0, 3000.0],
+    ]);
     model.unassigned_beams.push(SecondaryMember {
         id: SecondaryMemberId(451),
         kind: SecondaryMemberKind::Beam,
-        ends: SecondaryMemberEnds::Detached([[0.0, 0.0, 3000.0], [6000.0, 0.0, 3000.0]]),
+        ends: secondary_ends,
         section: Some(SectionId(0)),
         name: "二次小梁451".into(),
-        vertical_eccentricity: Some(0.0),
+        vertical_eccentricity: Some(-300.0),
         gravity_end_shares: None,
     });
     contact_slab(&mut model, [0.0, 3000.0], 1.0, 150.0, 3000.0);
@@ -1851,13 +1875,14 @@ fn beam_contact_non_nodal_secondary_is_counted_and_materialized_is_counted_once(
     let mut model = contact_model();
     model.elements.clear();
     model.nodes.clear();
+    let secondary_ends = contact_secondary_ends(&mut model);
     model.unassigned_beams.push(SecondaryMember {
         id: SecondaryMemberId(451),
         kind: SecondaryMemberKind::Beam,
-        ends: SecondaryMemberEnds::Detached([[0.0, 0.0, 3000.0], [6000.0, 0.0, 3000.0]]),
+        ends: secondary_ends,
         section: Some(SectionId(0)),
         name: "二次小梁451".into(),
-        vertical_eccentricity: Some(0.0),
+        vertical_eccentricity: Some(-300.0),
         gravity_end_shares: None,
     });
     contact_slab(&mut model, [1000.0, 3000.0], 1.0, 150.0, 3000.0);
@@ -2603,7 +2628,7 @@ fn materialized_secondary_contact_reversal_uses_same_union_as_primary() {
             ends: sepika_core::model::SecondaryMemberEnds::Detached(ends),
             section: Some(SectionId(0)),
             name: "contact557".into(),
-            vertical_eccentricity: Some(0.0),
+            vertical_eccentricity: Some(-300.0),
             gravity_end_shares: None,
         });
         assert!((contact_formwork(&model) - before).abs() < 1e-12);
@@ -2838,4 +2863,195 @@ fn 床の実配置変更は型枠接触へ反映し支持z変更は床面積体�
         reason.contains("床板 0") && reason.contains("鉛直偏心"),
         "{reason}"
     );
+}
+
+#[test]
+fn 梁の実材軸と床の独立した鉛直偏心から接触上下端を求める() {
+    for src in [false, true] {
+        for secondary in [false, true] {
+            let mut model = contact_model();
+            if src {
+                model.sections[0] = with_rc_materials(
+                    SectionShape::SrcBeamRect {
+                        b: 300.0,
+                        d: 600.0,
+                        rebar: rc_beam_rebar(),
+                        steel_height: 400.0,
+                        steel_width: 200.0,
+                        steel_web_thick: 10.0,
+                        steel_flange_thick: 20.0,
+                    }
+                    .to_section(SectionId(0), "SRC梁".into()),
+                );
+                model.sections[0].steel_material = Some(MaterialId(2));
+                model.materials.push(steel_material(2));
+            }
+            if secondary {
+                model.elements.clear();
+                let ends = contact_secondary_ends(&mut model);
+                model.unassigned_beams.push(SecondaryMember {
+                    id: SecondaryMemberId(789),
+                    kind: SecondaryMemberKind::Beam,
+                    ends,
+                    section: Some(SectionId(0)),
+                    name: "小梁789".into(),
+                    vertical_eccentricity: Some(0.0),
+                    gravity_end_shares: None,
+                });
+            }
+            contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3400.0);
+            let nodes = model.nodes.clone();
+            let supports = format!("{:?}", model.floor_assignment_regions);
+            let beam_ends = model.unassigned_beams.first().map(|m| m.ends);
+            for (offset, upper_expected, lower_expected) in
+                [(0.0, 8.7, 8.4), (100.0, 8.1, 9.0), (-100.0, 9.0, 8.1)]
+            {
+                if secondary {
+                    model.unassigned_beams[0].vertical_eccentricity = Some(offset);
+                } else {
+                    model.elements[0].vertical_eccentricity = Some(offset);
+                }
+                for (floor_top, expected) in [(3400.0, upper_expected), (2800.0, lower_expected)] {
+                    model.slabs[0].vertical_eccentricity_mm = Some(floor_top);
+                    let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+                    let beam = q
+                        .items
+                        .iter()
+                        .find(|i| {
+                            if secondary {
+                                i.secondary == Some(SecondaryMemberId(789))
+                            } else {
+                                i.elem == Some(ElemId(0))
+                            }
+                        })
+                        .unwrap();
+                    assert!(
+                        (beam.formwork_m2 - expected).abs() < 1e-9,
+                        "src={src}, secondary={secondary}, offset={offset}, floor={floor_top}: {}",
+                        beam.formwork_m2
+                    );
+                }
+            }
+            if secondary {
+                model.unassigned_beams[0].vertical_eccentricity = Some(0.0);
+            } else {
+                model.elements[0].vertical_eccentricity = Some(0.0);
+            }
+            model.slabs[0].vertical_eccentricity_mm = Some(3400.0);
+            match model.sections[0].shape.as_mut().unwrap() {
+                SectionShape::RcBeamRect { d, .. } | SectionShape::SrcBeamRect { d, .. } => {
+                    *d = 800.0
+                }
+                _ => unreachable!(),
+            }
+            let q = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap();
+            let beam = q
+                .items
+                .iter()
+                .find(|i| {
+                    if secondary {
+                        i.secondary == Some(SecondaryMemberId(789))
+                    } else {
+                        i.elem == Some(ElemId(0))
+                    }
+                })
+                .unwrap();
+            assert!((beam.formwork_m2 - 10.5).abs() < 1e-9);
+            assert_eq!(model.nodes, nodes);
+            assert_eq!(format!("{:?}", model.floor_assignment_regions), supports);
+            assert_eq!(model.unassigned_beams.first().map(|m| m.ends), beam_ends);
+        }
+    }
+}
+
+#[test]
+fn 梁実配置の未解決理由と未対応断面姿勢を数量に残す() {
+    for secondary in [false, true] {
+        let mut model = contact_model();
+        if secondary {
+            model.elements.clear();
+            let ends = contact_secondary_ends(&mut model);
+            model.unassigned_beams.push(SecondaryMember {
+                id: SecondaryMemberId(789),
+                kind: SecondaryMemberKind::Beam,
+                ends,
+                section: Some(SectionId(0)),
+                name: "小梁789".into(),
+                vertical_eccentricity: Some(0.0),
+                gravity_end_shares: None,
+            });
+        }
+        contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3000.0);
+        for (offset, expected) in [(None, "未指定"), (Some(f64::NAN), "非有限")] {
+            if secondary {
+                model.unassigned_beams[0].vertical_eccentricity = offset;
+            } else {
+                model.elements[0].vertical_eccentricity = offset;
+            }
+            let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+            assert!(
+                reason.contains(if secondary {
+                    "小梁 ID 789"
+                } else {
+                    "大梁 ID 0"
+                }) && reason.contains("実配置")
+                    && reason.contains(expected),
+                "{reason}"
+            );
+        }
+    }
+    let mut detached = contact_model();
+    detached.elements.clear();
+    detached.unassigned_beams.push(SecondaryMember {
+        id: SecondaryMemberId(789),
+        kind: SecondaryMemberKind::Beam,
+        ends: sepika_core::model::SecondaryMemberEnds::Detached([
+            [0.0, 0.0, 3000.0],
+            [6000.0, 0.0, 3000.0],
+        ]),
+        section: Some(SectionId(0)),
+        name: "未解決小梁789".into(),
+        vertical_eccentricity: Some(0.0),
+        gravity_end_shares: None,
+    });
+    contact_slab(&mut detached, [1000.0, 3000.0], 1.0, 150.0, 3000.0);
+    let reason = try_compute_quantity_takeoff(&detached, &QuantityCfg::default()).unwrap_err();
+    assert!(
+        reason.contains("小梁 ID 789") && reason.contains("支持アンカー"),
+        "{reason}"
+    );
+    let mut model = contact_model();
+    contact_slab(&mut model, [0.0, 6000.0], 1.0, 150.0, 3000.0);
+    model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+    assert!(
+        reason.contains("Primary(ElemId(0))") && reason.contains("断面せい方向が鉛直でない"),
+        "{reason}"
+    );
+    let mut foundation = rc_portal_model();
+    foundation.elements[3].vertical_eccentricity = Some(100.0);
+    contact_slab(&mut foundation, [0.0, 6000.0], 1.0, 150.0, 0.0);
+    let reason = try_compute_quantity_takeoff(&foundation, &QuantityCfg::default()).unwrap_err();
+    assert!(reason.contains("基礎梁"), "{reason}");
+}
+
+#[test]
+fn 傾斜した回転矩形梁の実側面に床が接すると未算定にする() {
+    let mut model = contact_model();
+    model.nodes[0].coord[2] = 0.0;
+    model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    model.sections[0] = with_rc_materials(
+        SectionShape::RcBeamRect {
+            b: 800.0,
+            d: 200.0,
+            rebar: rc_beam_rebar(),
+        }
+        .to_section(SectionId(0), "回転梁".into()),
+    );
+    contact_slab(&mut model, [5700.0, 6000.0], 1.0, 150.0, 3000.0);
+    for _ in 0..2 {
+        let reason = try_compute_quantity_takeoff(&model, &QuantityCfg::default()).unwrap_err();
+        assert!(reason.contains("傾斜梁"), "{reason}");
+        model.elements[0].nodes.reverse();
+    }
 }

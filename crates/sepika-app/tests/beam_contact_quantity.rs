@@ -51,7 +51,7 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
             rigid_zone: RigidZone::default(),
-            vertical_eccentricity: Some(0.0),
+            vertical_eccentricity: Some(-300.0),
             plastic_zone: None,
             spring: None,
         }],
@@ -102,6 +102,13 @@ fn beam_contact_fixture() -> sepika_core::model::Model {
 
 #[test]
 fn beam_contact_quantity_csv_preserves_union_and_diagnostics() {
+    for (model, expected_m2) in beam_contact_placement_fixtures() {
+        let csv = sepika_app::summary::build_quantity_csv(&model);
+        assert!(
+            csv.contains(&format!("\"G451\",1.080,{expected_m2:.2},")),
+            "{csv}"
+        );
+    }
     for model in beam_contact_narrow_fixtures() {
         let csv = sepika_app::summary::build_quantity_csv(&model);
         assert!(csv.contains("\"G451\",1.080,8.10,"), "{csv}");
@@ -146,6 +153,13 @@ fn beam_contact_quantity_gui_renders_union_and_unavailable_reason() {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+    for (model, expected_m2) in beam_contact_placement_fixtures() {
+        let text = panel_text(model);
+        assert!(
+            text.contains("G451") && text.contains(&format!("{expected_m2:.2}")),
+            "{text}"
+        );
     }
     for model in beam_contact_narrow_fixtures() {
         let text = panel_text(model);
@@ -263,15 +277,47 @@ fn beam_contact_invalid_cases() -> Vec<(sepika_core::model::Model, &'static str)
         nodes[0] = NodeId(999);
     }
     cases.push((model, "取付き先"));
+    for (offset, reason) in [
+        (None, "大梁 ID 0 の実配置: 鉛直偏心が未指定です"),
+        (Some(f64::NAN), "大梁 ID 0 の実配置: 鉛直偏心が非有限です"),
+    ] {
+        let mut model = base.clone();
+        model.elements[0].vertical_eccentricity = offset;
+        cases.push((model, reason));
+    }
+    let mut model = base.clone();
+    model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    cases.push((
+        model,
+        "支持材 Primary(ElemId(0)): 断面せい方向が鉛直でない梁の接触型枠は未対応です",
+    ));
     let mut model = base.clone();
     model.sections[0].shape = None;
-    cases.push((model, "矩形"));
+    cases.push((model, "大梁 ID 0 の実配置: 実断面形状が未指定です"));
     let mut model = base.clone();
     if let SlabShape::Attached { extent, .. } = &mut model.slabs[0].shape {
         *extent = [2000.0, -2000.0];
     }
     cases.push((model, "自己交差"));
     cases
+}
+
+fn beam_contact_placement_fixtures() -> Vec<(sepika_core::model::Model, f64)> {
+    [
+        (0.0, 400.0, 8.7),
+        (100.0, 400.0, 8.1),
+        (-100.0, 400.0, 9.0),
+        (0.0, 350.0, 8.4),
+    ]
+    .into_iter()
+    .map(|(beam_offset_mm, slab_offset_mm, expected_m2)| {
+        let mut model = beam_contact_fixture();
+        model.slabs.truncate(1);
+        model.elements[0].vertical_eccentricity = Some(beam_offset_mm);
+        model.slabs[0].vertical_eccentricity_mm = Some(slab_offset_mm);
+        (model, expected_m2)
+    })
+    .collect()
 }
 
 fn beam_contact_narrow_fixtures() -> Vec<sepika_core::model::Model> {
